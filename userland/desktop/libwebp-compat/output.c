@@ -33,10 +33,8 @@
 
 static int output_multiply(unsigned value, unsigned factor);
 static unsigned output_clip(int total);
-static unsigned output_chroma(const uint8_t *plane, ptrdiff_t stride, unsigned plane_width, unsigned plane_height,
-	unsigned x, unsigned y, int fancy);
-static void output_store(const struct webpc_layout *layout, uint8_t *pixel, unsigned red, unsigned green, unsigned blue,
-	unsigned alpha);
+static unsigned output_chroma(const uint8_t *plane, ptrdiff_t stride, unsigned plane_width, unsigned plane_height, unsigned x, unsigned y, int fancy);
+static void output_store(const struct webpc_layout *layout, uint8_t *pixel, unsigned red, unsigned green, unsigned blue, unsigned alpha);
 
 /*
  * Converts one pixel's Y', Cb (u) and Cr (v), each 0..255, to rgb[0..2]
@@ -189,8 +187,13 @@ webpc_output_from_argb(
 			argb = in_row[x];
 
 			/* Stores the pixel in the layout. */
-			output_store(layout, out_row + (size_t)x * layout->bytes, (argb >> 16) & 0xffU, (argb >> 8) & 0xffU,
-				argb & 0xffU, argb >> 24);
+			output_store(
+				layout,
+				out_row + (size_t)x * layout->bytes,
+				(argb >> 16) & 0xffU,
+				(argb >> 8) & 0xffU,
+				argb & 0xffU,
+				argb >> 24);
 		}
 	}
 }
@@ -287,6 +290,8 @@ output_chroma(
 		else
 			side_column = plane_width - 1U;
 	}
+
+	/* The same for the row. */
 	if (side_row >= plane_height) {
 		if (row == 0U)
 			side_row = 0U;
@@ -301,7 +306,7 @@ output_chroma(
 	vertical = side_row_pointer[column];
 	diagonal = side_row_pointer[side_column];
 
-	/* Reports the 9-3-3-1 weighted mean, rounded. */
+	/* Succeeded: the 9-3-3-1 weighted mean, rounded. */
 	return (9U * near_sample + 3U * horizontal + 3U * vertical + diagonal + 8U) >> 4;
 }
 

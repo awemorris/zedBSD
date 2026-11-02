@@ -82,6 +82,7 @@ webpc_asr(
 {
 	uint32_t magnitude;
 	uint32_t ceiling;
+	uint32_t round_up;
 	int32_t quotient;
 
 	/* A value that is not negative shifts as it is. */
@@ -95,7 +96,14 @@ webpc_asr(
 	 * without overflow as -(ceiling - 1) - 1.
 	 */
 	magnitude = (uint32_t)0 - (uint32_t)value;
-	ceiling = (magnitude >> shift) + ((magnitude & (((uint32_t)1 << shift) - 1U)) != 0U ? 1U : 0U);
+
+	/* Any bit shifted out below the point rounds the quotient up by one. */
+	round_up = 0U;
+	if ((magnitude & (((uint32_t)1 << shift) - 1U)) != 0U)
+		round_up = 1U;
+	ceiling = (magnitude >> shift) + round_up;
+
+	/* Succeeded: the floor of the negative value. */
 	quotient = -(int32_t)(ceiling - 1U) - 1;
 	return quotient;
 }
@@ -116,5 +124,7 @@ webpc_wrap16(
 		wrapped = (int32_t)low - 0x10000;
 	else
 		wrapped = (int32_t)low;
+
+	/* Succeeded: the wrapped value. */
 	return wrapped;
 }

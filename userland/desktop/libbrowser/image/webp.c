@@ -36,6 +36,7 @@ img_decode_webp(
 	int width;
 	int height;
 	int known;
+	int little_endian;
 	int status;
 
 	/* The size from the headers. */
@@ -56,7 +57,8 @@ img_decode_webp(
 	 */
 	pixels = (unsigned char *)bitmap->pixels;
 	size = (size_t)width * (size_t)height * 4U;
-	if (webp_little_endian())
+	little_endian = webp_little_endian();
+	if (little_endian)
 		decoded = WebPDecodeBGRAInto(bytes, length, pixels, size, width * 4);
 	else
 		decoded = WebPDecodeARGBInto(bytes, length, pixels, size, width * 4);

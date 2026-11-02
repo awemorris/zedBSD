@@ -43,22 +43,15 @@ static const unsigned decode_mode_bytes[MODE_LAST] = { 3, 4, 3, 4, 4, 2, 2, 4, 4
 static VP8StatusCode decode_status(int error);
 static int decode_layout(WEBP_CSP_MODE mode, struct webpc_layout *layout);
 static VP8StatusCode decode_headers(const uint8_t *data, size_t size, struct webpc_container *container);
-static VP8StatusCode decode_prepare(WebPDecBuffer *buffer, const WebPDecoderOptions *options, int lossless,
-	unsigned width, unsigned height);
+static VP8StatusCode decode_prepare(WebPDecBuffer *buffer, const WebPDecoderOptions *options, int lossless, unsigned width, unsigned height);
 static VP8StatusCode decode_allocate(WebPDecBuffer *buffer);
 static VP8StatusCode decode_check(const WebPDecBuffer *buffer);
-static VP8StatusCode decode_into(const uint8_t *data, size_t size, const WebPDecoderOptions *options,
-	WebPDecBuffer *buffer);
-static VP8StatusCode decode_lossy(const struct webpc_container *container, const WebPDecoderOptions *options,
-	WebPDecBuffer *buffer);
-static VP8StatusCode decode_lossless(const struct webpc_container *container, const WebPDecoderOptions *options,
-	WebPDecBuffer *buffer);
-static void decode_copy_plane(const uint8_t *source, ptrdiff_t source_stride, uint8_t *dst, int dst_stride,
-	unsigned width, unsigned height, int flip);
-static uint8_t *decode_simple(WEBP_CSP_MODE mode, const uint8_t *data, size_t size, int *width, int *height,
-	WebPDecBuffer *kept);
-static uint8_t *decode_rgb_into(WEBP_CSP_MODE mode, const uint8_t *data, size_t size, uint8_t *output,
-	size_t output_size, int stride);
+static VP8StatusCode decode_into(const uint8_t *data, size_t size, const WebPDecoderOptions *options, WebPDecBuffer *buffer);
+static VP8StatusCode decode_lossy(const struct webpc_container *container, const WebPDecoderOptions *options, WebPDecBuffer *buffer);
+static VP8StatusCode decode_lossless(const struct webpc_container *container, const WebPDecoderOptions *options, WebPDecBuffer *buffer);
+static void decode_copy_plane(const uint8_t *source, ptrdiff_t source_stride, uint8_t *dst, int dst_stride, unsigned width, unsigned height, int flip);
+static uint8_t *decode_simple(WEBP_CSP_MODE mode, const uint8_t *data, size_t size, int *width, int *height, WebPDecBuffer *kept);
+static uint8_t *decode_rgb_into(WEBP_CSP_MODE mode, const uint8_t *data, size_t size, uint8_t *output, size_t output_size, int stride);
 
 /*
  * Allocates size bytes as the library allocates its outputs.
@@ -227,7 +220,10 @@ WebPDecodeYUV(
 	uint8_t *luma;
 
 	/* Every output pointer is needed. */
-	if (u == NULL || v == NULL || stride == NULL || uv_stride == NULL)
+	if (u == NULL ||
+	    v == NULL ||
+	    stride == NULL ||
+	    uv_stride == NULL)
 		return NULL;
 
 	/* The shared simple decoding as planes, keeping where the planes are. */
@@ -353,9 +349,11 @@ WebPDecodeYUVInto(
 	WebPDecBuffer buffer;
 	VP8StatusCode status;
 
-	/* The planes, described as external memory of MODE_YUV. */
+	/* Refuses a missing luma plane. */
 	if (luma == NULL)
 		return NULL;
+
+	/* Describes the planes as external memory of MODE_YUV. */
 	memset(&buffer, 0, sizeof(buffer));
 	buffer.colorspace = MODE_YUV;
 	buffer.is_external_memory = 1;
@@ -386,8 +384,11 @@ WebPInitDecBufferInternal(
 	WebPDecBuffer *buffer,
 	int version)
 {
-	/* Another major version's structures, or no buffer. */
-	if (WEBP_ABI_IS_INCOMPATIBLE(version, WEBP_DECODER_ABI_VERSION))
+	int incompatible;
+
+	/* Refuses another major version's structures, or no buffer. */
+	incompatible = WEBP_ABI_IS_INCOMPATIBLE(version, WEBP_DECODER_ABI_VERSION);
+	if (incompatible)
 		return 0;
 	if (buffer == NULL)
 		return 0;
@@ -425,10 +426,13 @@ WebPGetFeaturesInternal(
 	int version)
 {
 	struct webpc_container container;
+	VP8StatusCode status;
+	int incompatible;
 	int error;
 
-	/* Another major version, or nothing to fill or read. */
-	if (WEBP_ABI_IS_INCOMPATIBLE(version, WEBP_DECODER_ABI_VERSION))
+	/* Refuses another major version, or nothing to fill or read. */
+	incompatible = WEBP_ABI_IS_INCOMPATIBLE(version, WEBP_DECODER_ABI_VERSION);
+	if (incompatible)
 		return VP8_STATUS_INVALID_PARAM;
 	if (features == NULL)
 		return VP8_STATUS_INVALID_PARAM;
@@ -438,8 +442,10 @@ WebPGetFeaturesInternal(
 	/* The container read as far as the data goes. */
 	memset(features, 0, sizeof(*features));
 	error = webpc_riff_parse(data, data_size, 0, &container);
-	if (error != 0)
-		return decode_status(error);
+	if (error != 0) {
+		status = decode_status(error);
+		return status;
+	}
 
 	/* Succeeded: what the headers say. */
 	features->width = (int)container.width;
@@ -458,10 +464,12 @@ WebPInitDecoderConfigInternal(
 	WebPDecoderConfig *config,
 	int version)
 {
+	int incompatible;
 	int ok;
 
-	/* Another major version, or no configuration. */
-	if (WEBP_ABI_IS_INCOMPATIBLE(version, WEBP_DECODER_ABI_VERSION))
+	/* Refuses another major version, or no configuration. */
+	incompatible = WEBP_ABI_IS_INCOMPATIBLE(version, WEBP_DECODER_ABI_VERSION);
+	if (incompatible)
 		return 0;
 	if (config == NULL)
 		return 0;
@@ -579,11 +587,14 @@ decode_layout(
 		layout->alpha = 0;
 		break;
 	default:
+		/* Not one of the supported RGB colour spaces. */
 		return 1;
 	}
 
 	/* The premultiplied spaces multiply the colour by alpha. */
-	if (mode == MODE_rgbA || mode == MODE_bgrA || mode == MODE_Argb)
+	if (mode == MODE_rgbA ||
+	    mode == MODE_bgrA ||
+	    mode == MODE_Argb)
 		layout->premultiply = 1;
 
 	/* Succeeded: the layout is filled. */
@@ -607,16 +618,19 @@ decode_headers(
 	struct webpc_vp8_header vp8_header;
 	struct webpc_vp8l_header vp8l_header;
 	struct webpc_bool first;
+	VP8StatusCode status;
 	int error;
 
-	/* No data at all. */
+	/* Refuses no data at all. */
 	if (data == NULL)
 		return VP8_STATUS_INVALID_PARAM;
 
-	/* The whole container. */
+	/* Parses the whole container. */
 	error = webpc_riff_parse(data, size, 1, container);
-	if (error != 0)
-		return decode_status(error);
+	if (error != 0) {
+		status = decode_status(error);
+		return status;
+	}
 
 	/* An animation is not decoded. */
 	if (container->has_animation)
@@ -625,18 +639,28 @@ decode_headers(
 	/* The lossless header. */
 	if (container->format == WEBPC_FORMAT_LOSSLESS) {
 		error = webpc_vp8l_read_header(container->bitstream, container->bitstream_size, &vp8l_header);
-		if (error != 0)
-			return decode_status(error);
+		if (error != 0) {
+			status = decode_status(error);
+			return status;
+		}
+
+		/* Succeeded: the lossless image can be decoded. */
 		return VP8_STATUS_OK;
 	}
 
-	/* The lossy frame header, read through to the first macroblock. */
+	/* Reads the frame tag of the lossy header. */
 	error = webpc_vp8_read_tag(container->bitstream, container->bitstream_size, &vp8_header);
-	if (error != 0)
-		return decode_status(error);
+	if (error != 0) {
+		status = decode_status(error);
+		return status;
+	}
+
+	/* Reads the rest of the frame header, through to the first macroblock. */
 	error = webpc_vp8_read_header(container->bitstream, container->bitstream_size, &vp8_header, &first);
-	if (error != 0)
-		return decode_status(error);
+	if (error != 0) {
+		status = decode_status(error);
+		return status;
+	}
 
 	/* Succeeded: the image can be decoded. */
 	return VP8_STATUS_OK;
@@ -657,23 +681,31 @@ decode_prepare(
 {
 	WEBP_CSP_MODE mode;
 	VP8StatusCode status;
+	int rgb_mode;
 
-	/* A colour space out of range. */
+	/* Refuses a colour space out of range. */
 	mode = buffer->colorspace;
 	if ((int)mode < (int)MODE_RGB || (int)mode >= (int)MODE_LAST)
 		return VP8_STATUS_INVALID_PARAM;
 
-	/* The colour spaces and options this library does not provide. */
-	if (mode == MODE_RGBA_4444 || mode == MODE_RGB_565 || mode == MODE_rgbA_4444)
+	/* Refuses the colour spaces and options this library does not provide. */
+	if (mode == MODE_RGBA_4444 ||
+	    mode == MODE_RGB_565 ||
+	    mode == MODE_rgbA_4444)
 		return VP8_STATUS_UNSUPPORTED_FEATURE;
-	if (lossless && !WebPIsRGBMode(mode))
+	rgb_mode = WebPIsRGBMode(mode);
+	if (lossless && !rgb_mode)
 		return VP8_STATUS_UNSUPPORTED_FEATURE;
-	if (options != NULL && (options->use_cropping || options->use_scaling))
+	if (options != NULL &&
+	    (options->use_cropping ||
+	     options->use_scaling))
 		return VP8_STATUS_UNSUPPORTED_FEATURE;
 
-	/* The size, then the library's memory when it is the library's and not there yet. */
+	/* Records the image's size in the buffer. */
 	buffer->width = (int)width;
 	buffer->height = (int)height;
+
+	/* Allocates the library's memory when the buffer is the library's and has none yet. */
 	if (buffer->is_external_memory <= 0 && buffer->private_memory == NULL) {
 		status = decode_allocate(buffer);
 		if (status != VP8_STATUS_OK)
@@ -706,6 +738,7 @@ decode_allocate(
 	uint64_t a_size;
 	uint8_t *memory;
 	int uv_stride;
+	int rgb_mode;
 
 	/* A row too wide for an int stride. */
 	row_bytes = (uint64_t)buffer->width * decode_mode_bytes[buffer->colorspace];
@@ -717,7 +750,8 @@ decode_allocate(
 	uv_stride = (buffer->width + 1) / 2;
 	uv_size = 0;
 	a_size = 0;
-	if (!WebPIsRGBMode(buffer->colorspace))
+	rgb_mode = WebPIsRGBMode(buffer->colorspace);
+	if (!rgb_mode)
 		uv_size = (uint64_t)uv_stride * (uint64_t)((buffer->height + 1) / 2);
 	if (buffer->colorspace == MODE_YUVA)
 		a_size = (uint64_t)buffer->width * (uint64_t)buffer->height;
@@ -731,7 +765,7 @@ decode_allocate(
 	buffer->private_memory = memory;
 
 	/* RGB: one stride of width pixels. */
-	if (WebPIsRGBMode(buffer->colorspace)) {
+	if (rgb_mode) {
 		buffer->u.RGBA.rgba = memory;
 		buffer->u.RGBA.stride = (int)row_bytes;
 		buffer->u.RGBA.size = (size_t)size;
@@ -748,9 +782,13 @@ decode_allocate(
 	buffer->u.YUVA.v = memory + size + uv_size;
 	buffer->u.YUVA.v_stride = uv_stride;
 	buffer->u.YUVA.v_size = (size_t)uv_size;
-	if (buffer->colorspace == MODE_YUVA)
+	buffer->u.YUVA.a_stride = 0;
+	if (buffer->colorspace == MODE_YUVA) {
 		buffer->u.YUVA.a = memory + size + 2U * uv_size;
-	buffer->u.YUVA.a_stride = buffer->colorspace == MODE_YUVA ? buffer->width : 0;
+		buffer->u.YUVA.a_stride = buffer->width;
+	}
+
+	/* The alpha plane's size, 0 when there is none. */
 	buffer->u.YUVA.a_size = (size_t)a_size;
 
 	/* Succeeded: the planes are laid out. */
@@ -776,18 +814,25 @@ decode_check(
 	uint64_t uv_width;
 	uint64_t uv_height;
 	uint64_t row;
+	int rgb_mode;
 
+	/* The image's size in the buffer. */
 	width = (uint64_t)buffer->width;
 	height = (uint64_t)buffer->height;
+	rgb_mode = WebPIsRGBMode(buffer->colorspace);
 
 	/* RGB: the stride and the size against the rows. */
-	if (WebPIsRGBMode(buffer->colorspace)) {
+	if (rgb_mode) {
 		rgb = &buffer->u.RGBA;
 		row = width * decode_mode_bytes[buffer->colorspace];
-		if (rgb->rgba == NULL || rgb->stride < 0 || (uint64_t)rgb->stride < row)
+		if (rgb->rgba == NULL ||
+		    rgb->stride < 0 ||
+		    (uint64_t)rgb->stride < row)
 			return VP8_STATUS_INVALID_PARAM;
 		if ((uint64_t)rgb->stride * (height - 1U) + row > (uint64_t)rgb->size)
 			return VP8_STATUS_INVALID_PARAM;
+
+		/* Succeeded: the RGB memory holds the image. */
 		return VP8_STATUS_OK;
 	}
 
@@ -795,11 +840,16 @@ decode_check(
 	planes = &buffer->u.YUVA;
 	uv_width = (width + 1U) / 2U;
 	uv_height = (height + 1U) / 2U;
-	if (planes->y == NULL || planes->u == NULL || planes->v == NULL)
+	if (planes->y == NULL ||
+	    planes->u == NULL ||
+	    planes->v == NULL)
 		return VP8_STATUS_INVALID_PARAM;
-	if (planes->y_stride < 0 || planes->u_stride < 0 || planes->v_stride < 0)
+	if (planes->y_stride < 0 ||
+	    planes->u_stride < 0 ||
+	    planes->v_stride < 0)
 		return VP8_STATUS_INVALID_PARAM;
-	if ((uint64_t)planes->y_stride < width || (uint64_t)planes->u_stride < uv_width ||
+	if ((uint64_t)planes->y_stride < width ||
+	    (uint64_t)planes->u_stride < uv_width ||
 	    (uint64_t)planes->v_stride < uv_width)
 		return VP8_STATUS_INVALID_PARAM;
 	if ((uint64_t)planes->y_stride * (height - 1U) + width > (uint64_t)planes->y_size)
@@ -811,7 +861,9 @@ decode_check(
 
 	/* YUVA: the alpha plane too. */
 	if (buffer->colorspace == MODE_YUVA) {
-		if (planes->a == NULL || planes->a_stride < 0 || (uint64_t)planes->a_stride < width)
+		if (planes->a == NULL ||
+		    planes->a_stride < 0 ||
+		    (uint64_t)planes->a_stride < width)
 			return VP8_STATUS_INVALID_PARAM;
 		if ((uint64_t)planes->a_stride * (height - 1U) + width > (uint64_t)planes->a_size)
 			return VP8_STATUS_INVALID_PARAM;
@@ -837,7 +889,7 @@ decode_into(
 	VP8StatusCode status;
 	int lossless;
 
-	/* The headers. */
+	/* Reads the headers. */
 	status = decode_headers(data, size, &container);
 	if (status != VP8_STATUS_OK)
 		return status;
@@ -878,6 +930,7 @@ decode_lossy(
 	struct webpc_layout layout;
 	const WebPYUVABuffer *planes;
 	const WebPRGBABuffer *rgb;
+	VP8StatusCode status;
 	uint8_t *alpha;
 	uint8_t *first_row;
 	ptrdiff_t row_step;
@@ -887,9 +940,10 @@ decode_lossy(
 	int bypass;
 	int fancy;
 	int flip;
+	int rgb_mode;
 	int error;
 
-	/* The options. */
+	/* Reads the options. */
 	bypass = 0;
 	fancy = 1;
 	flip = 0;
@@ -902,8 +956,12 @@ decode_lossy(
 
 	/* The frame. */
 	error = webpc_vp8_decode(container->bitstream, container->bitstream_size, bypass, &picture);
-	if (error != 0)
-		return decode_status(error);
+	if (error != 0) {
+		status = decode_status(error);
+		return status;
+	}
+
+	/* The decoded picture's size. */
 	width = picture.width;
 	height = picture.height;
 
@@ -915,16 +973,23 @@ decode_lossy(
 			webpc_vp8_picture_release(&picture);
 			return VP8_STATUS_OUT_OF_MEMORY;
 		}
+
+		/* Decodes the alpha chunk into the plane. */
 		error = webpc_alpha_decode(container->alpha, container->alpha_size, width, height, alpha);
 		if (error != 0) {
 			free(alpha);
 			webpc_vp8_picture_release(&picture);
-			return error == ENOMEM ? VP8_STATUS_OUT_OF_MEMORY : VP8_STATUS_BITSTREAM_ERROR;
+
+			/* An allocation failure keeps its status; any other failure is a broken file. */
+			if (error == ENOMEM)
+				return VP8_STATUS_OUT_OF_MEMORY;
+			return VP8_STATUS_BITSTREAM_ERROR;
 		}
 	}
 
 	/* RGB: the conversion, rows bottom to top with flip. */
-	if (WebPIsRGBMode(buffer->colorspace)) {
+	rgb_mode = WebPIsRGBMode(buffer->colorspace);
+	if (rgb_mode) {
 		view.y = picture.y;
 		view.u = picture.u;
 		view.v = picture.v;
@@ -940,15 +1005,31 @@ decode_lossy(
 			first_row = rgb->rgba + (ptrdiff_t)(height - 1U) * rgb->stride;
 			row_step = -(ptrdiff_t)rgb->stride;
 		}
+
+		/* Converts the planes to the layout's pixels. */
 		webpc_output_from_yuv(&view, alpha, (ptrdiff_t)width, fancy, &layout, first_row, row_step);
 	} else {
 		/* YUV: the planes as decoded, and for YUVA the alpha or 255. */
 		planes = &buffer->u.YUVA;
 		decode_copy_plane(picture.y, picture.y_stride, planes->y, planes->y_stride, width, height, flip);
-		decode_copy_plane(picture.u, picture.uv_stride, planes->u, planes->u_stride, (width + 1U) / 2U,
-			(height + 1U) / 2U, flip);
-		decode_copy_plane(picture.v, picture.uv_stride, planes->v, planes->v_stride, (width + 1U) / 2U,
-			(height + 1U) / 2U, flip);
+		decode_copy_plane(
+			picture.u,
+			picture.uv_stride,
+			planes->u,
+			planes->u_stride,
+			(width + 1U) / 2U,
+			(height + 1U) / 2U,
+			flip);
+		decode_copy_plane(
+			picture.v,
+			picture.uv_stride,
+			planes->v,
+			planes->v_stride,
+			(width + 1U) / 2U,
+			(height + 1U) / 2U,
+			flip);
+
+		/* The alpha plane: the decoded alpha, or opaque 255 when the image has none. */
 		if (buffer->colorspace == MODE_YUVA && alpha != NULL)
 			decode_copy_plane(alpha, (ptrdiff_t)width, planes->a, planes->a_stride, width, height, flip);
 		if (buffer->colorspace == MODE_YUVA && alpha == NULL) {
@@ -977,12 +1058,15 @@ decode_lossless(
 	ptrdiff_t row_step;
 	unsigned width;
 	unsigned height;
+	VP8StatusCode status;
 	int error;
 
-	/* The ARGB pixels. */
+	/* Decodes the ARGB pixels. */
 	error = webpc_vp8l_decode(container->bitstream, container->bitstream_size, &pixels, &width, &height);
-	if (error != 0)
-		return decode_status(error);
+	if (error != 0) {
+		status = decode_status(error);
+		return status;
+	}
 
 	/* The rows of the layout, bottom to top with flip. */
 	(void)decode_layout(buffer->colorspace, &layout);
@@ -993,6 +1077,8 @@ decode_lossless(
 		first_row = rgb->rgba + (ptrdiff_t)(height - 1U) * rgb->stride;
 		row_step = -(ptrdiff_t)rgb->stride;
 	}
+
+	/* Writes the pixels in the layout's byte order. */
 	webpc_output_from_argb(pixels, width, height, &layout, first_row, row_step);
 
 	/* Succeeded: the ARGB copy is done with. */
@@ -1014,9 +1100,11 @@ decode_copy_plane(
 	unsigned row;
 	unsigned target;
 
-	/* Each row to its place. */
+	/* Copies each row to its place. */
 	for (row = 0; row < height; row++) {
-		target = flip ? height - 1U - row : row;
+		target = row;
+		if (flip)
+			target = height - 1U - row;
 		memcpy(dst + (ptrdiff_t)target * dst_stride, source + (ptrdiff_t)row * source_stride, width);
 	}
 }
@@ -1042,9 +1130,10 @@ decode_simple(
 	VP8StatusCode status;
 	int info_width;
 	int info_height;
+	int rgb_mode;
 	int known;
 
-	/* The size first. */
+	/* Reads the size first. */
 	memset(&buffer, 0, sizeof(buffer));
 	buffer.colorspace = mode;
 	known = WebPGetInfo(data, size, &info_width, &info_height);
@@ -1060,11 +1149,16 @@ decode_simple(
 	if (status != VP8_STATUS_OK)
 		return NULL;
 
-	/* Succeeded: the pixels (one allocation, freed with WebPFree). */
+	/* Hands the caller the buffer's description when it asked for one. */
 	if (kept != NULL)
 		*kept = buffer;
-	if (WebPIsRGBMode(mode))
+
+	/* An RGB buffer's pixels are the first plane of the buffer. */
+	rgb_mode = WebPIsRGBMode(mode);
+	if (rgb_mode)
 		return buffer.u.RGBA.rgba;
+
+	/* Succeeded: the pixels (one allocation, freed with WebPFree). */
 	return buffer.u.YUVA.y;
 }
 
@@ -1081,9 +1175,11 @@ decode_rgb_into(
 	WebPDecBuffer buffer;
 	VP8StatusCode status;
 
-	/* The caller's buffer. */
+	/* Refuses a missing caller's buffer. */
 	if (output == NULL)
 		return NULL;
+
+	/* Describes the caller's buffer as external memory. */
 	memset(&buffer, 0, sizeof(buffer));
 	buffer.colorspace = mode;
 	buffer.is_external_memory = 1;

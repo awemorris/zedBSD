@@ -69,7 +69,7 @@ webpc_lbits_read(
 	/* Drops the bits that were read, and notes any that were past the end. */
 	lbits_consume(reader, bits);
 
-	/* The bits read, the first one in bit 0. */
+	/* Succeeded: the bits read, the first one in bit 0. */
 	return result;
 }
 
@@ -93,7 +93,7 @@ webpc_lbits_peek(
 	mask = (uint32_t)((1UL << bits) - 1UL);
 	result = (uint32_t)(reader->value & mask);
 
-	/* The bits that follow, not consumed. */
+	/* Succeeded: the bits that follow, not consumed. */
 	return result;
 }
 
@@ -139,7 +139,9 @@ lbits_refill(
 	 * the value stays zero above its count, which is what makes a bit past
 	 * the end read as 0.
 	 */
-	while (reader->count < bits && reader->count + 8U <= LBITS_VALUE_BITS && reader->next < reader->size) {
+	while (reader->count < bits &&
+	       reader->count + 8U <= LBITS_VALUE_BITS &&
+	       reader->next < reader->size) {
 		byte = (uint64_t)reader->data[reader->next];
 		reader->value |= byte << reader->count;
 		reader->count += 8U;

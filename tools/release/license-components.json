@@ -77,6 +77,21 @@
    "note": ""
   },
   {
+   "id": "libwebp-values",
+   "name": "WebP decoding constants (libwebp's default YUV to RGB conversion)",
+   "when": "program:libwebp-compat",
+   "license": "BSD-3-Clause",
+   "upstream": "libwebp (Google)",
+   "version": "1.5.0",
+   "notices": [
+    "/usr/share/licenses/libwebp-compat/libwebp-COPYING"
+   ],
+   "paths": [
+    "userland/desktop/libwebp-compat/output.c"
+   ],
+   "note": "Values only; libwebp-compat holds no libwebp code."
+  },
+  {
    "id": "keiland-fonts",
    "name": "Desktop fonts (Mahora, JetBrains Mono, Droid Sans Fallback)",
    "when": "program:wayland",

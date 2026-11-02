@@ -91,10 +91,13 @@ webpc_vp8_filter_params(
 	 * filtered.
 	 */
 	if (header->segmentation.enabled != 0) {
+		/* A segment number the frame cannot have leaves the macroblock unfiltered. */
 		if (segment >= WEBPC_VP8_SEGMENTS) {
 			filter_params_fill(0, sharpness, params);
 			return;
 		}
+
+		/* An absolute segment replaces the level; a relative one adjusts it. */
 		if (header->segmentation.absolute != 0)
 			level = header->segmentation.filter_level[segment];
 		else
@@ -111,6 +114,8 @@ webpc_vp8_filter_params(
 	 */
 	if (header->filter.deltas_enabled != 0) {
 		level = filter_add(level, header->filter.ref_delta[0]);
+
+		/* A macroblock predicted subblock by subblock adds the mode delta too. */
 		if (b_pred != 0)
 			level = filter_add(level, header->filter.mode_delta[0]);
 	}
@@ -471,6 +476,8 @@ filter_interior_passes(
 	/* The three neighbour differences before the edge. */
 	for (index = 0; index < 3; index++) {
 		difference = filter_absolute(pixels[index] - pixels[index + 1]);
+
+		/* A step above the interior limit is a real edge. */
 		if (difference > interior)
 			return 0;
 	}
@@ -478,6 +485,8 @@ filter_interior_passes(
 	/* The three neighbour differences after the edge. */
 	for (index = 4; index < 7; index++) {
 		difference = filter_absolute(pixels[index] - pixels[index + 1]);
+
+		/* A step above the interior limit is a real edge. */
 		if (difference > interior)
 			return 0;
 	}
@@ -572,7 +581,7 @@ filter_adjust_common(
 	segment[-across] = (uint8_t)webpc_clamp255(p0 + amount_p);
 	segment[0] = (uint8_t)webpc_clamp255(q0 - amount_q);
 
-	/* Reports how far q0 moved. */
+	/* Succeeded: how far q0 moved. */
 	return amount_q;
 }
 
@@ -644,6 +653,8 @@ filter_params_fill(
 			interior = webpc_asr(interior, 2);
 		else
 			interior = webpc_asr(interior, 1);
+
+		/* The limit is held at most 9 less the sharpness. */
 		cap = 9 - sharpness;
 		if (interior > cap)
 			interior = cap;
@@ -702,7 +713,11 @@ filter_macroblock_simple(
 	if (filter_inner != 0) {
 		/* The edges at 4, 8 and 12 rows from the top. */
 		for (offset = 4; offset < 16; offset += 4) {
-			webpc_vp8_filter_simple_edge(y + offset * y_stride, y_stride, 1, 16,
+			webpc_vp8_filter_simple_edge(
+				y + offset * y_stride,
+				y_stride,
+				1,
+				16,
 				params->sub_limit);
 		}
 	}
@@ -737,9 +752,17 @@ filter_macroblock_normal(
 	if (filter_inner != 0) {
 		/* The luma edges at 4, 8 and 12 pixels from the left. */
 		for (offset = 4; offset < 16; offset += 4) {
-			webpc_vp8_filter_sub_edge(y + offset, 1, y_stride, 16, params->sub_limit,
-				params->interior, params->hev);
+			webpc_vp8_filter_sub_edge(
+				y + offset,
+				1,
+				y_stride,
+				16,
+				params->sub_limit,
+				params->interior,
+				params->hev);
 		}
+
+		/* The middle vertical edge of each chroma plane. */
 		webpc_vp8_filter_sub_edge(u + 4, 1, uv_stride, 8, params->sub_limit, params->interior, params->hev);
 		webpc_vp8_filter_sub_edge(v + 4, 1, uv_stride, 8, params->sub_limit, params->interior, params->hev);
 	}
@@ -755,12 +778,32 @@ filter_macroblock_normal(
 	if (filter_inner != 0) {
 		/* The luma edges at 4, 8 and 12 rows from the top. */
 		for (offset = 4; offset < 16; offset += 4) {
-			webpc_vp8_filter_sub_edge(y + offset * y_stride, y_stride, 1, 16, params->sub_limit,
-				params->interior, params->hev);
+			webpc_vp8_filter_sub_edge(
+				y + offset * y_stride,
+				y_stride,
+				1,
+				16,
+				params->sub_limit,
+				params->interior,
+				params->hev);
 		}
-		webpc_vp8_filter_sub_edge(u + 4 * uv_stride, uv_stride, 1, 8, params->sub_limit, params->interior,
+
+		/* The middle horizontal edge of each chroma plane. */
+		webpc_vp8_filter_sub_edge(
+			u + 4 * uv_stride,
+			uv_stride,
+			1,
+			8,
+			params->sub_limit,
+			params->interior,
 			params->hev);
-		webpc_vp8_filter_sub_edge(v + 4 * uv_stride, uv_stride, 1, 8, params->sub_limit, params->interior,
+		webpc_vp8_filter_sub_edge(
+			v + 4 * uv_stride,
+			uv_stride,
+			1,
+			8,
+			params->sub_limit,
+			params->interior,
 			params->hev);
 	}
 }

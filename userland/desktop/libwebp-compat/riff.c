@@ -163,6 +163,7 @@ webpc_riff_parse(
 
 	/* Step 8: the canvas of an extended file is the bitstream's size. */
 	if (out->extended != 0) {
+		/* The canvas must be exactly as wide and as high as the bitstream's image. */
 		if (out->width != width)
 			return EINVAL;
 		if (out->height != height)
@@ -255,6 +256,7 @@ parse_riff_header(
 
 	/* Data meant to be the whole file must hold it; longer data is cut where the file ends. */
 	if (whole_size > (uint64_t)state->size) {
+		/* Refuses a file cut short when the data was meant to be all of it. */
 		if (state->complete != 0)
 			return ENOBUFS;
 	} else {
@@ -334,6 +336,8 @@ parse_vp8x(
 	out->extended = 1;
 	out->width = canvas_width;
 	out->height = canvas_height;
+
+	/* The flag byte says whether the file has alpha and whether it is an animation. */
 	if ((chunk[CHUNK_HEADER_SIZE] & WEBPC_VP8X_ALPHA) != 0U)
 		out->has_alpha = 1;
 	if ((chunk[CHUNK_HEADER_SIZE] & WEBPC_VP8X_ANIMATION) != 0U)
@@ -466,8 +470,11 @@ parse_bitstream_chunk(
 		 */
 		*chunk_size = left;
 		out->format = WEBPC_FORMAT_LOSSY;
+
+		/* Enough bytes for a lossless header, starting with the signature. */
 		if (left >= VP8L_HEADER_SIZE) {
 			if (chunk[0] == VP8L_SIGNATURE) {
+				/* A version number of 0 makes it a lossless stream. */
 				if ((chunk[4] >> 5) == 0U)
 					out->format = WEBPC_FORMAT_LOSSLESS;
 			}
@@ -501,6 +508,8 @@ parse_bitstream_chunk(
 	/* The bitstream starts after the chunk's header. */
 	*chunk_size = (size_t)payload_size;
 	state->pos += CHUNK_HEADER_SIZE;
+
+	/* The chunk's FourCC tells the format. */
 	if (is_vp8l)
 		out->format = WEBPC_FORMAT_LOSSLESS;
 	else
@@ -648,7 +657,7 @@ soften(
 	const struct riff_state *state,
 	struct webpc_container *out)
 {
-	/* Only a cut-short file, read for its features, is not a failure. */
+	/* Only a cut-short file, read for its features, is not a failure; every other failure is passed on. */
 	if (error != ENOBUFS)
 		return error;
 	if (state->complete != 0)

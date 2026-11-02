@@ -277,6 +277,7 @@ OMNIGRAMMATON_LICENSES = \
 	Apache-2.0.txt=userland/desktop/fonts/Apache-2.0.txt \
 	WHATWG-entities.txt=userland/base/licenses/browser/WHATWG-entities \
 	Unicode-License-V3.txt=userland/base/licenses/browser/Unicode-License-V3 \
+	libwebp-COPYING.txt=userland/base/licenses/libwebp-compat/libwebp-COPYING \
 	OpenSSL-LICENSE.txt=$(BROWSER_WIN32_OPENSSL)/work/src/openssl-$(OPENSSL_RELEASE)/LICENSE.txt \
 	MinGW-w64-runtime.txt=$(WIN32_MINGW_LICENSES)/COPYING.MinGW-w64-runtime.txt \
 	winpthreads.txt=$(WIN32_MINGW_LICENSES)/COPYING.winpthreads.txt \

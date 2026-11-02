@@ -8,7 +8,7 @@
 - 出典: RFC 9649（WebP）、RFC 6386（VP8）。試験の期待の値は libwebp（BSD）の出力と照らす（libwebp は試験の道具としてだけ host で使い、tree に取り込まない）。
 - 進め方: 標準廉価実装手順（docs/agent/spec-module-delegation.md）。Opus が設計（module の分け方・header・試験の道具）、Sonnet が実装。設計は [design.md](design.md)。
 - 置き場所: `userland/desktop/libwebp-compat/`（内部の接頭辞 `webpc_`）、header `include/libc/compat/webp/types.h`・`decode.h`。
-- 基点（header と試験の道具を凍結した commit）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。実装の Phase は `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` で header が変わっていないことを確かめる。
+- 基点（header と試験の道具を凍結した commit）: `a6859dc06468c8cd17532d7bc74d46509df3bcd0`（p022 の規約の見直しの後、2026-11-02 18:38。それまでは p001 の `aa2426a5763975c358cf667aff3e17bfb841b7e2`）。以後の変更は `BASE=a6859dc06468c8cd17532d7bc74d46509df3bcd0 sh plan/ws344/tests/check-skeleton.sh` で header と道具が変わっていないことを確かめる。
 
 ## ユーザーの決定
 
@@ -41,7 +41,7 @@
 | ws344-p019 | interface（decode.c、compare・mutate・fuzz）— Opus を推す | cleared（2026-11-02 16:35 Q1、main で compare 364 PASS）。実装済み・試験 PASS（P2 q1969-i01、2026-11-02 16:20。compare 364 + conformance 214、mutate、fuzz 600 s） | p002, p008, p017, p018 |
 | ws344-p020 | platform（Windows の static、config、QEMU の guest の driver）— Opus を推す | cleared（2026-11-02 17:29 Q1、3ef6f4efac で merge。Windows（Wine）と zedBSD の QEMU の guest で 578 file が libwebp と一致は P2 の結果）。実装済み・試験 PASS（P2 q1976-i01、2026-11-02 17:27。QEMU guest 578・Wine 578 file 一致、arm64・riscv64 build） | p019 |
 | ws344-p021 | libbrowser への組み込み（img_sniff・img_decode・Accept、BUG-405）— Opus を推す | cleared（2026-11-02 17:56 Q1、main で host-image 358 PASS・libbrowser.so warning 0。about.google の画像が host と Wine で描けた画面は P2 の結果）。実装済み・試験 PASS（P2 q1979-i01、2026-11-02 17:47。about.google の画像が host・Wine で出た、BUG-405） | p020 |
-| ws344-p022 | 規約の全文の見直し（conformance-reviewer） | in-progress（2026-11-02 17:56 P2 q1982-i01） | p021 |
+| ws344-p022 | 規約の全文の見直し（conformance-reviewer） | 実装済み・試験 PASS（P2 q1982-i01、2026-11-02 18:38。規約の見直しと持ち越し、新しい BASE a6859dc064） | p021 |
 
 最初に並べて起動できる Phase（依存が p001 だけ）: p002、p003、p006、p009、p010、p014、p015、p016、p018。
 

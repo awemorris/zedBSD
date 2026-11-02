@@ -119,9 +119,12 @@ webpc_prefix_build(
 		if (length == 0U)
 			continue;
 
+		/* Counts the symbol under its length and remembers it as the last one present. */
 		length_count[length]++;
 		present++;
 		single_symbol = symbol;
+
+		/* Tracks the longest code length. */
 		if (length > longest)
 			longest = length;
 	}
@@ -178,10 +181,14 @@ webpc_prefix_build(
 	 */
 	for (symbol = 0; symbol < count; symbol++) {
 		length = lengths[symbol];
+
+		/* An absent symbol has no code to turn around. */
 		if (length == 0U) {
 			reversed[symbol] = 0;
 			continue;
 		}
+
+		/* Takes the symbol's next code of its length, bits turned around. */
 		reversed[symbol] = (uint16_t)prefix_reverse(next_code[length], length);
 		next_code[length]++;
 	}
@@ -199,8 +206,12 @@ webpc_prefix_build(
 	memset(deepest, 0, sizeof(deepest));
 	for (symbol = 0; symbol < count; symbol++) {
 		length = lengths[symbol];
+
+		/* A code that fits the first level has no second-level table. */
 		if (length <= root_bits)
 			continue;
+
+		/* Notes the code's length under its first-level entry when it is the longest there. */
 		index = reversed[symbol] & (root_size - 1U);
 		if (length > deepest[index])
 			deepest[index] = (uint8_t)length;
@@ -213,8 +224,12 @@ webpc_prefix_build(
 	total = root_size;
 	for (index = 0; index < root_size; index++) {
 		sub_offset[index] = 0;
+
+		/* An entry with no long code needs no second-level table. */
 		if (deepest[index] == 0U)
 			continue;
+
+		/* Places the entry's second-level table at the end of the table so far. */
 		sub_offset[index] = (unsigned)total;
 		total += (size_t)1 << (deepest[index] - root_bits);
 	}
@@ -231,8 +246,11 @@ webpc_prefix_build(
 
 	/* Links each first-level entry that has a second-level table to it. */
 	for (index = 0; index < root_size; index++) {
+		/* An entry with no long code has no second-level table to link to. */
 		if (deepest[index] == 0U)
 			continue;
+
+		/* The first-level entry becomes a link to its second-level table. */
 		table[index].kind = 1;
 		table[index].value = (uint16_t)sub_offset[index];
 		table[index].bits = (uint8_t)(deepest[index] - root_bits);
@@ -241,6 +259,8 @@ webpc_prefix_build(
 	/* Writes each symbol into every entry its code selects. */
 	for (symbol = 0; symbol < count; symbol++) {
 		length = lengths[symbol];
+
+		/* An absent symbol is written nowhere. */
 		if (length == 0U)
 			continue;
 
@@ -253,6 +273,7 @@ webpc_prefix_build(
 				entry->value = (uint16_t)symbol;
 				entry->bits = (uint8_t)length;
 			}
+
 			continue;
 		}
 
@@ -295,7 +316,7 @@ webpc_prefix_read(
 	const struct webpc_prefix_entry *entry;
 	uint32_t bits;
 
-	/* A code of one symbol reads no bits. */
+	/* A code of one symbol reads no bits, so its symbol is the answer. */
 	if (code->root_bits == 0U)
 		return code->single;
 
@@ -307,6 +328,8 @@ webpc_prefix_read(
 	/* A symbol in the first level uses as many bits as its code is long. */
 	if (entry->kind == 0U) {
 		webpc_lbits_skip(reader, entry->bits);
+
+		/* Succeeded: the first-level entry's symbol. */
 		return entry->value;
 	}
 
@@ -318,6 +341,8 @@ webpc_prefix_read(
 
 	/* The symbol of the second level uses the rest of its code. */
 	webpc_lbits_skip(reader, entry->bits);
+
+	/* Succeeded: the second-level entry's symbol. */
 	return entry->value;
 }
 
@@ -339,7 +364,7 @@ prefix_reverse(
 		code >>= 1;
 	}
 
-	/* The code with its bits in the order the stream gives them. */
+	/* Succeeded: the code with its bits in the order the stream gives them. */
 	return result;
 }
 

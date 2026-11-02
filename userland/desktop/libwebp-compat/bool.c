@@ -139,9 +139,13 @@ webpc_bool_read(
 		decoder->range <<= 1;
 		decoder->shifts++;
 		decoder->bit_count++;
+
+		/* Eight shifts have used up a byte, so the next byte enters the window. */
 		if (decoder->bit_count == 8) {
 			decoder->bit_count = 0;
 			decoder->value |= bool_byte_at(decoder, decoder->next);
+
+			/* The read position stops at the end of the data. */
 			if (decoder->next < decoder->size) {
 				decoder->next++;
 			}
@@ -248,16 +252,22 @@ webpc_bool_tree(
 	for (steps = 0U; steps < BOOL_TREE_STEPS_MAX; steps++) {
 		branch = webpc_bool_read(decoder, probs[node >> 1]);
 		entry = tree[node + (unsigned)branch];
+
+		/* A leaf ends the walk. */
 		if (entry <= 0) {
 			break;
 		}
+
+		/* A positive entry is the next node of the walk. */
 		node = (unsigned)entry;
 	}
 
-	/* The leaf's value (0 when the walk was cut off before a leaf). */
+	/* A walk cut off before a leaf has no value and reads as 0. */
 	if (entry > 0) {
 		return 0;
 	}
+
+	/* Succeeded: the leaf's value. */
 	return -entry;
 }
 
