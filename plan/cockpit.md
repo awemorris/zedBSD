@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS324](ws324/ws.md) p007 | RTX 2070 の Vulkan Video | p005（nvrtx の H.265 decode）cleared。H.265 の絵を ffmpeg と一致させる実機の debug（q1922） | p007 の後、今日は終了（encode は次に再開） |
+| P1 | [WS324](ws324/ws.md) | RTX 2070 の Vulkan Video | 返却（11:17）。p007 cleared: H.265 decode が HEVC_v1 の範囲内 131 本中 130 本で正しい、Video Player の GPU の道で H.264・H.265 を再生。今日の作業は終わり | 次の指示で encode（p008a）から再開 |
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（09:46）。p006 cleared: H.265 の decode（HEVC_v1 128 本一致）と Video Player の GPU の道での H.264・H.265 の再生。今日の作業は終わり | 次の指示で encode（p008）から再開 |
 | P3 | [BUG-410](bugs/BUG-410.md) | libc | atexit の object ごとの後始末（__cxa_atexit・__cxa_finalize、q1931）。BUG-409（ld.so の NODELETE）は fixed | — |
 | P4 | [WS319](ws319/ws.md) | i915（5330）の Vulkan Video | H.265 decode の実装と Video Player の H.264 の確かめ（q1926） | — |

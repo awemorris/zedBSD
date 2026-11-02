@@ -2,7 +2,7 @@
 
 # ws324-p007 H.265 decode の実機の debug（RTX 2070、NVDEC の HEVC）
 
-Status: in-progress（2026-11-02 11:15 P1、q1922-i01: 受け入れの項目を全部流した。HEVC_v1 の 147 本のうち能力の中の 131 本で 130 本が正しい、1 本（WPP_D）は原因を書いた DIFFER。cleared の判定は Q1）
+Status: cleared（2026-11-02 11:17 Q1）。前: in-progress（2026-11-02 11:15 P1、q1922-i01: 受け入れの項目を全部流した。HEVC_v1 の 147 本のうち能力の中の 131 本で 130 本が正しい、1 本（WPP_D）は原因を書いた DIFFER。cleared の判定は Q1）
 
 - WS: [WS324](../ws.md)。設計: [design.md](../design.md) §3.2・§8.4・§8.6・§12 R4・§13・§14.3。前の Phase: [p005](../phase005/phase.md)（§6.4・§6.5 の観測と残り）。
 - 基点: main `71dbb8425`（p005 と P2 の vkvideo-probe の H.265 を含む）。worktree `/home/awe/zedBSD-worktrees/p1-ws324`、branch `agent/p1-ws324`。

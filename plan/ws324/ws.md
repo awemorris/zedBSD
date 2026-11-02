@@ -43,7 +43,7 @@
 | p006a | H.265 の解析の設計（標準廉価実装手順）と header の配置（段 2） | Q324-1（p002 は要らない: host の Vulkan の header で試験） |
 | p006b〜h | （上の Phase の表へ移した、2026-11-02 p006a 段 2。Q-B の A） | — |
 | p006i | vkvideo-probe の H.265（前の案の p006e）— P2 が ws322-p006 で作る（2026-11-02 07:22 Q1、WS322 と共有の probe） | p006h、p002 |
-| [p007](phase007/phase.md) | H.265 decode の実機の debug | p005、p006i、実機 — in-progress（P1 q1922-i01、2026-11-02 11:15: 受け入れを全部流した。RTX で HEVC_v1 の能力の中の 131 本のうち 130 本が正しい（127 本が ffmpeg と全 frame 一致、SAODBLK_A・B は適合の md5、VPSSPSPPS_A は絵ごとの参照）、WPP_D は原因を書いた DIFFER、能力の外 16 本は probe が断る。driver の直し 3 つ（transform skip の大きさ、scaling list の向き、filter の buffer の大きさ）、H.264 の非退行 PASS、Video Player の GPU の道で H.264・H.265 1080p30 を再生（shown 470・469）。判定は Q1） |
+| [p007](phase007/phase.md) | H.265 decode の実機の debug | p005、p006i、実機 — cleared（2026-11-02 11:17 Q1 が受け入れ、main で hevc 160・nvdec 88 PASS。HEVC_v1 の範囲内 131 本のうち 130 本が正しい（WPP_D だけ未解決）、Video Player の GPU の道で H.264・H.265 1080p30 を再生）。前: in-progress（P1 q1922-i01、2026-11-02 11:15: 受け入れを全部流した。RTX で HEVC_v1 の能力の中の 131 本のうち 130 本が正しい（127 本が ffmpeg と全 frame 一致、SAODBLK_A・B は適合の md5、VPSSPSPPS_A は絵ごとの参照）、WPP_D は原因を書いた DIFFER、能力の外 16 本は probe が断る。driver の直し 3 つ（transform skip の大きさ、scaling list の向き、filter の buffer の大きさ）、H.264 の非退行 PASS、Video Player の GPU の道で H.264・H.265 1080p30 を再生（shown 470・469）。判定は Q1） |
 | p008a | libvulkan の encode の転送（queue と H.264、命令の番号、video の query pool、capset の bit 3） | p003、Q324-3 |
 | p008b | libvulkan の encode の転送（H.265、capset の bit 4） | p008a |
 | p009b | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode、時間の上限） | p009a、Q324-4 |
