@@ -3,7 +3,7 @@
 # WS345 ブラウザの thread の分け方: JavaScript を窓の event の処理と別の thread に、通信（connect を含む）を独立した thread に
 
 - Master: [plan/master.md](../master.md)（2026-11-02 14:03 作成）。Primary Milestone: MG006。
-- Status: incomplete（P8 が p001 の設計）
+- Status: incomplete（2026-11-02 P8 q1959-i01: p001 の設計 [design.md](design.md)。実装の Phase p002〜p012 は planned）
 - 目標: ブラウザ（libbrowser と browser の shell、zedBSD・Windows・Linux の Keiland）で、JavaScript の実行と通信がどれだけ長くかかっても、窓の event の処理（入力・再描画・resize・title bar の操作）が止まらない形にする。JavaScript は窓の event の thread と別の名前付きの thread で動かす。通信は同期の呼び出し（connect・TLS の handshake・read・write）のままでよく、それを独立した名前付きの thread で行う。
 - 置き場所: userland/desktop/libbrowser/、userland/desktop/browser/（shell）、Windows の OmniGrammaton の build（WS334）。
 
@@ -11,15 +11,47 @@
 
 - （2026-11-02 14:03）ユーザーから、ブラウザで JavaScript の処理の間に GUI の event の処理が止まるので、JavaScript を別の thread で動かして窓の event の処理を止めないようにする、通信も connect() が同期なら同期のままでよいが、通信は独立した別の thread にする、という趣旨の指示を受けた。
 - 全体の方針（Keiland、2026-10-28・29）: 待つ処理は数を明示した名前付きの thread で同期に行う。数の無い pool や場当たりの直しにしない。
+- （2026-11-02、Q1 経由）ユーザーから、libbrowser は自分で thread を作らない、thread の作成は shell の側で実装し、libbrowser は shell が登録する関数の表（名前付きの thread の開始・join、libbrowser に要る待ち・起こし・lock の最小の組）を出す、どの thread が幾つあり、名前と何を走らせるかは libbrowser が決める、という趣旨の決定を受けた（下の Q1 の判断の「pthread を libbrowser の中で使う」部分を置き換える）。
+- （2026-11-02、Q1 経由）ユーザーから、次の趣旨の決定を受けた。
+  1. 窓の event の thread は libbrowser の仕事を一切しない（XHR・fetch・script・layout をしない）。窓の event を受けて渡すだけ。
+  2. 通信は全部、専用の thread で行う（同期の XHR も。それは呼んだ script の thread を止め、窓の thread は止めない）。
+  3. script は専用の thread で動き、iframe ごとに上の文書と別の script の thread を持つ。
+  4. style sheet と CSS（cascade、computed style・描画の属性の更新）は専用の「描画の属性の更新」の thread で行う。
+  5. 描画（paint・GPU の submit）は、できるなら shell が作る thread で、event の処理と別に行う。
+  6. thread の作成は上の決定のとおり shell の側で、登録した関数の表を通す。
+
+## Q1 の判断
+
+- （2026-11-02）ユーザーの「thread の作りを libbrowser の中に置けるか」の問いに対し、Q1 が、page（script）と通信の thread は libbrowser が持って libbrowser の口の後ろで始め、zedBSD・Windows・Linux の shell が一つの実装を共有し、各 shell は窓の event の thread だけを持って thread-safe な口（入力を積む、確定した frame・状態の変化を今の wake で受ける）で libbrowser と話す形にする、と決めた。thread の道具を libbrowser の中の pthread にする部分は、上のユーザーの決定（shell が登録する表）で置き換わった。
+
+## P8 の技術の判断（p001、Q1 が覆してよい）
+
+- 通信は今の非同期の loader（`browser-net` 1 本、`browser-resolve` 1 本、view ごと）を保ち、窓・script の thread に残った同期の socket の道（同期の XHR、先取りに無い parser の script、iframe の script、sheet の待ち）を loader に移す。blocking の connect の thread の pool にはしない（理由は [design.md](design.md) §3.1、判断の点 J1）。
+- libmedia の中の lock は pthread のまま、engine の thread の作成だけ shell の表を通す（J3）。1 つの view の frame は top を含め 64 まで（J4）。
+- 長い script の頁に「応答しない頁」の問いを出すかは製品の判断として Q1 に返す（J2）。今の案は出さない。navigation と閉じるは打ち切り（termination）で効く。
+
+## 計測（p001、host、2026-11-02）
+
+今の 1 本の loop の窓の event の最長の遅れ（[design.md](design.md) §1.3、[tests/stall-probe.sh](tests/stall-probe.sh)）: idle 55〜67 ms、timer の script 3 s で 2997 ms、mousedown の listener 1 s で 995 ms、同期の XHR の connect の掛かりで 40 s を超えてまだ止まる、read の掛かりで 30029 ms、`document.write` の `<script src>` の connect の掛かりで 41 s を超えてまだ止まる、`<img>`・`fetch()`（loader）は 56.6 ms で止まらない、6000 個の box の頁の resize で 492 ms、3000 × 3000 の PNG で 1463 ms。QEMU・実機・Windows は未実施。
 
 ## Phase
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| ws345-p001 | 調べと設計: 今の thread と event loop（zedBSD・Windows・Linux の shell、libbrowser の page・view・script・fetch・loader・net/tls）、どこで止まるか（JS、connect・DNS・TLS・read の同期の呼び出し）の計測、thread の表（名前・数・持つ物・渡し方）、DOM・layout と JS の排他、event の受け渡し、取り消し、試験の道 | in-progress（2026-11-02 14:03 P8 q1959-i01） | — |
-| ws345-p002〜 | 実装（p001 が Phase に分ける） | planning | p001 |
-| ws345-pNNN | 規約の全文の見直し（AGENTS §2） | planning | 実装 |
+| [ws345-p001](phase001/phase.md) | 調べと設計: 今の thread と event loop、止まる所の計測、thread の表（名前・数・持つ物・渡し方）、DOM・layout と JS の持ち主、event の受け渡し、取り消し、試験の道 | in-progress（2026-11-02 14:03 P8 q1959-i01） | — |
+| [ws345-p002](phase002/phase.md) | shell が登録する thread の表（`struct browser_threads`、`browser_threads_set`）と libbrowser の base の包み。libbrowser の pthread を全部替え、shell（kl_thread）・試験（POSIX）の実装、libmedia の engine の thread の作成 | planned | p001 |
+| [ws345-p003](phase003/phase.md) | 通信を全部 loader に: loader の client（要求した thread ごとの完了と起こし、どの thread からでも取り消し）、同期の XHR・漏れた parser の script・iframe の script・sheet の待ちを client の待ちに | planned | p002 |
+| [ws345-p004](phase004/phase.md) | VM の打ち切り（agent ごとの atomic の flag、loop の印・関数の入口・長い native で見る、catch・finally を走らせない終わり） | planned | p001 |
+| [ws345-p005](phase005/phase.md) | view の front と top の script の thread（`BROWSER_THREADING_OWN`）: mailbox・入力の合わせ方と順・snapshot・callback を窓の thread で・navigation と destroy の打ち切りと join・process に一つの可変の static の追い出し・CPU の確定した frame | planned | p002、p003、p004 |
+| [ws345-p006](phase006/phase.md) | 描画の口（D5）: 確定した frame の箱と frame の item、`browser_view_render`・`_render_pixels`・`_presented`、renderer と glyph の face を描画の thread に、描画の機会と rAF、確定の後の木を書かない | planned | p005 |
+| [ws345-p007](phase007/phase.md) | shell（zedBSD・Linux の Keiland、Windows）: 窓の thread は event だけ、shell の描画の thread、resize と modal loop、drag の画像・文字入力・touch・mail の新しい口 | planned | p006 |
+| [ws345-p008](phase008/phase.md) | style の thread（D4）: DOM の同期の貸し、request の種類、古くない時は貸さない、style・layout から JS を呼ぶ所を後で出す event に、style の thread の loader の client | planned | p005 |
+| [ws345-p009](phase009/phase.md) | iframe ごとの script の thread（段 A: 一つの agent の lock と heap のまま）: frame ごとの task の queue、入力の routing、frame の上限、GC の stack の底の切り替え | planned | p006、p008 |
+| [ws345-p010](phase010/phase.md) | origin ごとの agent（段 B）: cross-origin の iframe を別の heap で並べて走らせる、遠くの WindowProxy、heap を越える postMessage、location・frames・parent、agent ごとの打ち切り | planned | p009 |
+| [ws345-p011](phase011/phase.md) | 受け入れと回帰: 窓の event の遅れの上限（script の loop・connect の掛かり・document.write・resize・decode の間）、ThreadSanitizer、host の試験・js・test262 の部分集合・段 1・cross-build、zedBSD の QEMU、Windows の Wine、Linux の Keiland | planned | p007、p010 |
+| [ws345-p012](phase012/phase.md) | 規約の全文の見直し（AGENTS §2） | planned | p011 |
 
 ## Resume point
 
 - 2026-11-02 14:03 Q1: 作成。P8 が p001（設計）に着手。設計の後に実装の Phase を立てる。
+- 2026-11-02 P8（q1959-i01）: p001 の設計と計測、p002〜p012 の phase.md。次は Q1 が p002 の Queue を立てる（p004 は p002 と並べてよい）。
