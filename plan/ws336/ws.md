@@ -49,7 +49,7 @@
 | [p011](phase011/phase.md) | ssh-config | cleared（2026-11-02 11:21 Q1、main で test-config PASS）。実装済み・試験 PASS（2026-11-02 11:20 Sonnet q1934。run-unit config 1321693 checks・all PASS、壊す確かめ 325 通り中 311 が FAIL・6 は compile で弾かれ・8 は同値） | p006 | p003 経由 |
 | [p012](phase012/phase.md) | ssh-privsep（frame） | cleared（2026-11-01 06:22 Q1、main e8b028959。ssh-privsep（monitor との frame と同期の呼び出し）実装、run-unit privsep 947 checks PASS（Q1 再実行で確認）。mon_call を呼ぶ process は SIGPIPE を無視する前提（p016・p017 で守る）） | p002 | — |
 | [p013](phase013/phase.md) | ssh-sftp（Q3 の A: sftp-server のため） | cleared（2026-11-01 06:09 Q1、main 8872d89fe。ssh-sftp（SFTP v3）実装、run-unit sftp 1836 checks PASS（Q1 再実行で確認）、ASan・UBSan、c89。READ の長さは parser が 64 KiB に切る（担当の判断、phase.md の結果）） | p002 | — |
-| [p014](phase014/phase.md) | ssh-keygen の program | in-progress（Sonnet q1935） | p006 | p003 経由 |
+| [p014](phase014/phase.md) | ssh-keygen の program | 実装済み・試験 PASS（2026-11-02 11:24 Sonnet q1935。keygen-host 377 checks、run-unit all・check-skeleton PASS、壊す確かめ 80 通り中 71 が FAIL・8 は同値か試験で作れない・1 は適用不能） | p006 | p003 経由 |
 | [p015](phase015/phase.md) | ssh の program・host の相互運用 A（Opus） | planned | p006・p008・p009・p010・p011 | p003 経由 |
 | [p016](phase016/phase.md) | sshd の monitor と login の確かめ（Opus） | planned | p009・p011・p012・p014 | p003 経由 |
 | [p017](phase017/phase.md) | sshd の pre-auth と session の process（Opus） | planned | p008・p010・p016 | p003 経由 |
