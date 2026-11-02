@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-03 01:45（Q1。WS074 p263 を立て、Q1 が直に開発）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
+最終更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
 
 ## 担当（P1〜P8）
 
@@ -27,7 +27,8 @@
 
 ### WS074 p263 実際の site の UAT
 
-- 2026-11-03 01:45: p263 を立てた（q2000、Q1 が直に開発）。ユーザーの指摘を待つ。
+- 2026-11-03 01:45: p263 を立てた（q2000、Q1 が直に開発）。
+- 2026-11-03 02:17: U1（amazon.co.jp が真っ白）を host で直した。原因は AWS WAF の確認の頁で document.scripts・FileReader が無く token が取れない、その後の Akamai の確認で同期の XHR の POST ができない。直して host で top が出る（build/review/q2000-amazon-after.png）。Windows の zip は build 済み、実機の確かめはユーザーの UAT。残り: 描画まで約 4 分（JS の速さ）、script の誤り 2 件。
 
 ### WS291 GPU の描画の速さ
 
