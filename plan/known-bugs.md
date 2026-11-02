@@ -446,7 +446,7 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-406](bugs/BUG-406.md) | ブラウザ: 戻る button で数秒待たされる（cache で表示し、再取得は cache できない頁だけ） | fixed（2026-11-02 P8 q1924-i01、戻る・進むの cache（最大 3 頁、no-store と media の頁は取り直す）。host と live で確かめた、本物の Windows は未実施） |
 | [BUG-407](bugs/BUG-407.md) | ブラウザ: Google の検索の button（Google 検索・I'm Feeling Lucky・AI モード）が反応しない | fixed（2026-11-02 P8 q1924-i01、pointer-events・for await・script の top-level の遷移ほか。host と live の google.com で確かめた、本物の Windows は未実施。結果の頁は Google の JS の確認で reCAPTCHA になる＝別件） |
 | [BUG-409](bugs/BUG-409.md) | ld.so が DF_1_NODELETE を守らず dlclose で unload する | fixed（2026-11-02 P3 q1930-i01、DT_FLAGS_1 の DF_1_NODELETE と dlopen の RTLD_NODELETE で object を exit まで残す。QEMU amd64 で rtld-nodelete・rtld-many・TLS の試験が PASS、実機は未実施） |
-| [BUG-410](bugs/BUG-410.md) | libc の atexit が登録した object を覚えず、dlclose した library の関数を exit で呼ぶ | open（2026-11-02 10:41 Q1 が起票、P3） |
+| [BUG-410](bugs/BUG-410.md) | libc の atexit が登録した object を覚えず、dlclose した library の関数を exit で呼ぶ | fixed（2026-11-02 11:03 P3 q1931、fbeea4f29 を main に merge） |
 | [BUG-408](bugs/BUG-408.md) | ブラウザ: Google の検索の結果の頁が JavaScript の確認（BotGuard）を通らず reCAPTCHA の頁になる | open（2026-11-02 10:40 P8 が起票、Q1 の指示、q1924 では直さない） |
 | [BUG-411](bugs/BUG-411.md) | ブラウザの JavaScript の engine が重い頁で遅い（property の線形の探し、layout） | open（2026-11-02 10:47 Q1 が起票、P8 の待ち） |
 | [BUG-412](bugs/BUG-412.md) | Pi 5 の desktop で click が効かない（1 秒以上押してから離すと click になる） | open（2026-11-02 11:02 Q1 が起票、ユーザーの Pi 5 の UAT、P3） |
