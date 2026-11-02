@@ -422,7 +422,7 @@ ifneq ($(filter y,$(CONFIG_DRIVER_USB_CDC_NCM) $(CONFIG_DRIVER_USB_CDC_ECM)),)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-notification.c
 endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid.c src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid.c src/drivers/usb/usb-hid-ring.c src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c
 endif
 # The HID report parser, the pen and touch state machines and the HID input glue
 # (ws143-p005) serve every HID transport (USB, I2C-HID) and the test injector

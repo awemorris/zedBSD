@@ -237,6 +237,13 @@ struct drv_usb_urb {
 	 * the transfer ended.
 	 */
 	struct drv_usb_urb_trace trace;
+	/*
+	 * What the controller's driver reported of the last submission
+	 * (drv_usb_urb_hcd_note), cleared by the submitter before the
+	 * controller has the transfer, written by the controller's driver when
+	 * it takes the event, read by the owner after the transfer ended.
+	 */
+	struct drv_usb_urb_hcd_result hcd_result;
 };
 
 struct usb_driver_entry {
@@ -1017,6 +1024,39 @@ drv_usb_urb_trace_read(
 {
 	/* The times as the submission, the controller and the completion left them. */
 	*trace = u->trace;
+}
+
+/*
+ * Notes the controller's completion code and the bytes left of a transfer.
+ */
+void
+drv_usb_urb_hcd_note(
+	struct drv_usb_urb *u,
+	unsigned code,
+	size_t residual)
+{
+	/* Nothing to note on. */
+	if (u == NULL)
+		return;
+
+	/* The controller's words, and when they came for a transfer that asked. */
+	u->hcd_result.code = code;
+	u->hcd_result.residual = residual;
+	u->hcd_result.noted = 1U;
+	if (u->hcd_result.submitted_ns != 0U)
+		u->hcd_result.event_ns = drv_usb_trace_now_ns();
+}
+
+/*
+ * Copies what the host controller reported of a transfer's last submission.
+ */
+void
+drv_usb_urb_hcd_result(
+	const struct drv_usb_urb *u,
+	struct drv_usb_urb_hcd_result *result)
+{
+	/* The report as the submission and the controller's driver left it. */
+	*result = u->hcd_result;
 }
 
 /*
@@ -2632,6 +2672,11 @@ drv_usb_urb_submit(
 	tracing = drv_usb_trace_enabled(~(uint64_t)0);
 	if (tracing)
 		urb->trace.submitted_ns = drv_usb_trace_now_ns();
+
+	/* The controller's report starts empty; a transfer that asked for the times notes this one. */
+	kern_memset(&urb->hcd_result, 0, sizeof(urb->hcd_result));
+	if ((urb->flags & DRV_USB_URB_HCD_TIMES) != 0U)
+		urb->hcd_result.submitted_ns = drv_usb_trace_now_ns();
 	error = device->bus->hcd->ops->urb_enqueue(device->bus->hcd, urb);
 
 	/*
