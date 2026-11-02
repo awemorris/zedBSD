@@ -34,6 +34,10 @@
  * --async fetches the page and its images without blocking, through the
  * view's loader, and waits for them; without it they are read at once.
  *
+ * --follow=N carries out up to N navigations the page's scripts ask for
+ * (a location set, a reload, a form's submit) as the window does, each
+ * page settled in turn; without it the first page is the one used.
+ *
  * Since ws074-p057 the engine is libbrowser.so and the program uses it
  * through <browser/browser.h> only: the headless modes through a view, the
  * script modes (--js, --dump=ast, --dump=code) through the library's
@@ -108,6 +112,7 @@ struct main_options {
 	unsigned parse;
 	double settle_budget;
 	int async;
+	unsigned follow;
 };
 
 /*
@@ -120,6 +125,7 @@ struct main_page {
 	struct browser_view *view;
 	int failed;
 	int output_failed;
+	unsigned started;
 };
 
 /*
@@ -392,6 +398,8 @@ main_open(
 {
 	struct browser_callbacks callbacks;
 	struct browser_view_options view_options;
+	unsigned followed;
+	unsigned started;
 	int error;
 
 	/* Every headless mode needs a page. */
@@ -438,6 +446,15 @@ main_open(
 
 	/* The page settled: fetched, its timers run, and laid out with its images when the mode needs that. */
 	error = browser_view_settle(page->view, options->settle_budget, flags);
+
+	/* With --follow, the navigations the scripts asked for, each page settled in turn. */
+	for (followed = 0; error == 0 && followed < options->follow; followed++) {
+		started = page->started;
+		browser_view_process(page->view);
+		if (page->started == started)
+			break;
+		error = browser_view_settle(page->view, options->settle_budget, flags);
+	}
 	if (error != 0) {
 		if (!page->failed)
 			fprintf(stderr, "browser: cannot run %s: %s\n", options->shell.start, wb_os_error_text(error));
@@ -464,12 +481,16 @@ main_loaded(
 	UNUSED_PARAMETER(view);
 	UNUSED_PARAMETER(url);
 
+	/* A load that starts is counted (--follow sees whether a navigation was carried out). */
+	page = context;
+	if (state == BROWSER_LOAD_STARTED)
+		page->started++;
+
 	/* Only a failure is said. */
 	if (state != BROWSER_LOAD_FAILED)
 		return;
 
 	/* The line, by the location the command line gave. */
-	page = context;
 	fprintf(stderr, "browser: cannot load %s: %s", page->options->shell.start, wb_os_error_text(error));
 	if (reason[0] != '\0')
 		fprintf(stderr, " (TLS: %s)", reason);
@@ -738,6 +759,17 @@ main_parse(
 			continue;
 		}
 
+		/* How many navigations of the page's scripts a headless mode carries out. */
+		value = main_value(argv[index], "--follow=");
+		if (value != NULL) {
+			if (value[0] < '0' || value[0] > '9' || value[1] != '\0') {
+				fprintf(stderr, "browser: --follow takes 0 to 9\n");
+				return EINVAL;
+			}
+			options->follow = (unsigned)(value[0] - '0');
+			continue;
+		}
+
 		/* The virtual clock budget for headless page tasks. */
 		value = main_value(argv[index], "--settle-ms=");
 		if (value != NULL) {
@@ -944,5 +976,5 @@ main_usage(
 		"       browser --js [--strict] FILE.js\n"
 		"       browser --dump=code [--strict] FILE.js\n"
 		"       browser --version | --help\n"
-		"       headless page modes: [--settle-ms=0..60000] (default 5000)\n");
+		"       headless page modes: [--settle-ms=0..60000] (default 5000) [--follow=0..9] (default 0)\n");
 }

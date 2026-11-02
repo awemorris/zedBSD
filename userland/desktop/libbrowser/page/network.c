@@ -19,6 +19,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 
 /* The loader's client of the calling thread when it is not the loader's own (page_set_thread_client): NULL on the thread that made the loader. */
 static _Thread_local struct net_loader_client *network_thread_client;
@@ -100,14 +101,43 @@ page_fetch_response_now(
 	int kind,
 	struct net_response *response)
 {
+	/* A GET without headers or a body of its own. */
+	return page_send_response_now(page, location, kind, NULL, response);
+}
+
+/*
+ * Makes a request of an http or https location (absolute) with the method,
+ * headers and body of send (NULL: a plain GET) and waits for it, filling a
+ * response as page_fetch_response_now does.  A page without a loader sends
+ * it at once from this thread; a location the loader does not take is read
+ * only for a plain GET (ENOTSUP otherwise).  Returns 0 or an errno value.
+ */
+int
+page_send_response_now(
+	struct page *page,
+	const char *location,
+	int kind,
+	const struct net_send *send,
+	struct net_response *response)
+{
 	struct net_request *request;
 	struct net_loader_client *client;
+	int plain;
 	int remote;
 	int error;
 
-	/* Without the loader, or a location it does not take: read at once. */
+	/* Without the loader, or a location it does not take: at once. */
 	remote = net_loader_takes(location);
+	plain = send == NULL || send->method == NULL || strcmp(send->method, "GET") == 0;
+	if (page->loader == NULL && remote && !plain) {
+		error = net_http_fetch_send(page_cookies(page), location, send, response);
+		return error;
+	}
 	if (page->loader == NULL || !remote) {
+		if (!plain) {
+			net_response_init(response);
+			return ENOTSUP;
+		}
 		error = page_fetch_response(page_cookies(page), location, location, response);
 		return error;
 	}
@@ -115,7 +145,7 @@ page_fetch_response_now(
 	/* The request of the calling thread's client, waited for. */
 	net_response_init(response);
 	client = page_client(page);
-	error = net_loader_client_start_waited(client, location, kind, NULL, &request);
+	error = net_loader_client_start_waited(client, location, kind, send, &request);
 	if (error != 0)
 		return error;
 	error = net_request_wait(request);

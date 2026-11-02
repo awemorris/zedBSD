@@ -1494,6 +1494,137 @@ prelude_sync_get(
 	return status;
 }
 
+/* What a synchronous request's done callback copied: its error, status, final URL, header lines and body. */
+struct prelude_sync_result {
+	int error;
+	int status;
+	int copy_error;
+	struct wb_buffer url;
+	struct wb_buffer headers;
+	struct wb_buffer body;
+};
+
+/* A synchronous request ended: its response is copied before the host's buffers go. */
+static void
+prelude_sync_done(
+	void *context,
+	int error,
+	int status,
+	const char *url,
+	const char *headers,
+	const unsigned char *bytes,
+	size_t length)
+{
+	struct prelude_sync_result *got;
+
+	got = context;
+	got->error = error;
+	got->status = status;
+	if (error != 0)
+		return;
+	got->copy_error = wb_buffer_append_string(&got->url, url == NULL ? "" : url);
+	if (got->copy_error == 0)
+		got->copy_error = wb_buffer_append_string(&got->headers, headers == NULL ? "" : headers);
+	if (got->copy_error == 0 && length != 0U)
+		got->copy_error = wb_buffer_append(&got->body, bytes, length);
+}
+
+/*
+ * syncSend(method, url, headers, body): a blocking request with its method,
+ * header lines and body (undefined: none) as [status, url, headerLines,
+ * text], or null when no response came.
+ */
+static int
+prelude_sync_send(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct prelude_sync_result got;
+	struct bind_request request;
+	struct bind_window *window;
+	struct wb_buffer method;
+	struct wb_buffer href;
+	struct wb_buffer headers;
+	struct wb_buffer body;
+	struct vm_string *strings[3];
+	vm_value parts[4];
+	int has_method;
+	int has_href;
+	int has_headers;
+	int has_body;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	*result = VM_VALUE_NULL;
+	memset(&got, 0, sizeof(got));
+	wb_buffer_init(&got.url);
+	wb_buffer_init(&got.headers);
+	wb_buffer_init(&got.body);
+	wb_buffer_init(&method);
+	wb_buffer_init(&href);
+	wb_buffer_init(&headers);
+	wb_buffer_init(&body);
+
+	/* The arguments as UTF-8. */
+	status = prelude_utf8_argument(args, count, 0, &method, &has_method);
+	if (status == 0)
+		status = prelude_utf8_argument(args, count, 1, &href, &has_href);
+	if (status == 0)
+		status = prelude_utf8_argument(args, count, 2, &headers, &has_headers);
+	if (status == 0)
+		status = prelude_utf8_argument(args, count, 3, &body, &has_body);
+	if (status == 0 && (!has_href || window->host.request_sync == NULL || window->detached))
+		status = ENOSYS;
+
+	/* The request, waited for; done copies the response into got. */
+	if (status == 0) {
+		memset(&request, 0, sizeof(request));
+		request.method = has_method ? wb_buffer_string(&method) : "GET";
+		request.href = wb_buffer_string(&href);
+		request.headers = has_headers ? wb_buffer_string(&headers) : NULL;
+		request.body = has_body ? (const unsigned char *)(body.data == NULL ? "" : wb_buffer_string(&body)) : NULL;
+		request.body_length = body.length;
+		got.error = ENOSYS;
+		status = window->host.request_sync(window->host.context, &request, prelude_sync_done, &got);
+		if (status == 0)
+			status = got.error != 0 ? got.error : got.copy_error;
+		if (getenv("BROWSER_NET_DUMP") != NULL)
+			fprintf(stderr, "sync request: %s %.200s (body %lu) -> error %d status %d bytes %lu\n", request.method, request.href,
+			    (unsigned long)body.length, status, got.status, (unsigned long)got.body.length);
+	}
+
+	/* The response as [status, url, headerLines, text]. */
+	if (status == 0) {
+		strings[0] = vm_string_from_utf8(realm->heap, got.url.data == NULL ? "" : wb_buffer_string(&got.url), got.url.length);
+		strings[1] = vm_string_from_utf8(realm->heap, got.headers.data == NULL ? "" : wb_buffer_string(&got.headers), got.headers.length);
+		strings[2] = vm_string_from_utf8(realm->heap, got.body.data == NULL ? "" : (const char *)got.body.data, got.body.length);
+		if (strings[0] == NULL || strings[1] == NULL || strings[2] == NULL) {
+			status = ENOMEM;
+		} else {
+			parts[0] = vm_value_int32(got.status);
+			parts[1] = vm_value_cell(strings[0]);
+			parts[2] = vm_value_cell(strings[1]);
+			parts[3] = vm_value_cell(strings[2]);
+			status = js_builtin_array(realm, parts, 4, result);
+		}
+	} else if (status != ENOMEM) {
+		/* No response: null, which the script reports as a network error. */
+		status = 0;
+	}
+	wb_buffer_release(&got.url);
+	wb_buffer_release(&got.headers);
+	wb_buffer_release(&got.body);
+	wb_buffer_release(&method);
+	wb_buffer_release(&href);
+	wb_buffer_release(&headers);
+	wb_buffer_release(&body);
+	return status;
+}
+
 /*
  * Follows a hyperlink a script clicked (an a or area element, or SVG's a).
  *
@@ -1774,6 +1905,11 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "syncGet", 1, prelude_sync_get, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "syncGet", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status != 0)
+		return status;
+	status = js_builtin_function(realm, "syncSend", 4, prelude_sync_send, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "syncSend", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status != 0)
 		return status;
 	return prelude_run(window, prelude_net_source, sizeof(prelude_net_source) - 1U, vm_value_cell(natives));

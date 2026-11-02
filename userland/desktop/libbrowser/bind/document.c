@@ -14,6 +14,8 @@
 #include "html/html.h"
 
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int document_this(struct vm_realm *realm, vm_value this_value, struct dom_document **document);
@@ -1467,6 +1469,8 @@ document_cookie_set(
 	status = vm_string_to_utf8(value, &text);
 	if (status == 0)
 		status = window->host.cookie_set(window->host.context, wb_buffer_string(&text), text.length);
+	if (getenv("BROWSER_NET_DUMP") != NULL)
+		fprintf(stderr, "cookie set: %.300s -> %d\n", text.data == NULL ? "" : wb_buffer_string(&text), status);
 	wb_buffer_release(&text);
 	if (status != 0)
 		return status;

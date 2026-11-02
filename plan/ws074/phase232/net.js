@@ -2,7 +2,8 @@
 // Request, Response, Blob, File, FileReader, FormData, TextEncoder, TextDecoder, XMLHttpRequest, sendBeacon.
 // bind/prelude.c runs this over three natives: send(method, url, headerLines, body, callback) starts a request
 // (the page's loader; callback(error, status, url, headerLines, bodyText) is called on the page's event loop),
-// cancel(id) drops it, syncGet(url) is a blocking GET for a synchronous XMLHttpRequest.
+// cancel(id) drops it, syncGet(url) is a blocking GET and syncSend(method, url, headers, body) a blocking request of any
+// method for a synchronous XMLHttpRequest.
 // bind/prelude-net.inc is made from this file by plan/ws074/phase230/make-prelude.py.
 (function (native, g) {
   'use strict';
@@ -707,6 +708,13 @@
       this._sent = true;
       fire(this, 'loadstart');
       if (!this._async) {
+        // A web resource is requested with its method, headers and body, and its status and headers are reported.
+        if (native.syncSend && /^https?:/i.test(new URL(this._url, g.location.href).href)) {
+          got = native.syncSend(this._method, this._url, headerLines(headers), b.text);
+          if (got === null) { this._finish(1); throw new DOMException("Failed to execute 'send' on 'XMLHttpRequest': Failed to load '" + this._url + "'.", 'NetworkError'); }
+          this._finish(0, got[0], got[1], got[2], got[3]);
+          return;
+        }
         if (this._method !== 'GET') throw new DOMException("Failed to execute 'send' on 'XMLHttpRequest': Failed to load '" + this._url + "'.", 'NetworkError');
         got = native.syncGet(this._url);
         if (got === null) { this._finish(1); throw new DOMException("Failed to execute 'send' on 'XMLHttpRequest': Failed to load '" + this._url + "'.", 'NetworkError'); }

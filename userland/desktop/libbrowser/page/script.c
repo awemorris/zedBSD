@@ -129,6 +129,7 @@ static int script_scan_value(const unsigned char *bytes, size_t start, size_t en
 static int script_scan_type_runs(const struct wb_buffer *type);
 static int script_scan_add(const char *base, const struct wb_buffer *src, struct wb_vector *locations);
 static int script_fetch_sync(void *context, const char *href, struct wb_buffer *bytes, struct wb_buffer *final_url);
+static int script_request_sync(void *context, const struct bind_request *request, bind_request_done done, void *done_context);
 static void script_fetch_arrived(void *context, struct net_request *request);
 static void script_fetch_remove(struct page_fetch_request *entry);
 static void script_fetch_unlink(struct page_fetch_request *entry);
@@ -456,6 +457,7 @@ page_start_scripts(
 	host.request = script_request;
 	host.request_cancel = script_request_cancel;
 	host.fetch_sync = script_fetch_sync;
+	host.request_sync = script_request_sync;
 	host.element_at = page_element_at;
 	host.child_element_at = page_child_element_at;
 	host.document_write = script_document_write;
@@ -533,6 +535,58 @@ script_fetch_sync(
 	if (page->base == NULL)
 		return EINVAL;
 	return page_fetch_now(page, href, NET_FETCH_SCRIPT_API, bytes, final_url);
+}
+
+/*
+ * Makes a script's request and waits for it (a synchronous XMLHttpRequest):
+ * the method, headers and body go with it, done is called before this
+ * returns, with the response or the error.  A local or data resource is
+ * read only for a GET.
+ */
+static int
+script_request_sync(
+	void *context,
+	const struct bind_request *request,
+	bind_request_done done,
+	void *done_context)
+{
+	struct page *page;
+	struct net_response response;
+	struct net_send send;
+	struct wb_buffer location;
+	int error;
+
+	/* The location, resolved against this page. */
+	page = context;
+	if (page->base == NULL)
+		return EINVAL;
+	wb_buffer_init(&location);
+	error = page_resolve_location(page->base, request->href, &location);
+	if (error != 0) {
+		wb_buffer_release(&location);
+		return error;
+	}
+
+	/* The request with its method, headers and body, waited for. */
+	send.method = request->method;
+	send.headers = request->headers;
+	send.body = request->body;
+	send.body_length = request->body_length;
+	net_response_init(&response);
+	error = page_send_response_now(page, wb_buffer_string(&location), NET_FETCH_SCRIPT_API, &send, &response);
+	wb_buffer_release(&location);
+
+	/* The binding copies what it keeps before the response goes. */
+	if (error == 0) {
+		done(done_context, 0, response.status, wb_buffer_string(&response.url), wb_buffer_string(&response.headers),
+		    response.body.data, response.body.length);
+	} else {
+		done(done_context, error, 0, NULL, "", NULL, 0);
+	}
+	net_response_release(&response);
+
+	/* Succeeded: done has been called. */
+	return 0;
 }
 
 /* Starts a script's request, resolved against this page; a web resource goes through the page's loader. */

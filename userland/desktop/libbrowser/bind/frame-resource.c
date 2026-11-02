@@ -269,6 +269,7 @@ bind_frame_install(
 			host.request = parent->host.request;
 			host.request_cancel = parent->host.request_cancel;
 			host.fetch_sync = parent->host.fetch_sync;
+			host.request_sync = parent->host.request_sync;
 		}
 
 		/* Its frames of other agents are reached as the parent's are. */

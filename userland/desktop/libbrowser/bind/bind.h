@@ -336,6 +336,8 @@ struct bind_host {
 	int (*request)(void *context, const struct bind_request *request, bind_request_done done, void *done_context, void **handle);
 	void (*request_cancel)(void *context, void *handle);
 	int (*fetch_sync)(void *context, const char *href, struct wb_buffer *bytes, struct wb_buffer *final_url);
+	/* Makes a request and waits for it: done is called once before it returns (may be NULL: no synchronous requests). */
+	int (*request_sync)(void *context, const struct bind_request *request, bind_request_done done, void *done_context);
 	struct dom_node *(*element_at)(void *context, double x, double y);
 	/* The same for a frame's document: the top element of that window's own layout (NULL when it has none). */
 	struct dom_node *(*child_element_at)(void *context, struct bind_window *window, double x, double y);
