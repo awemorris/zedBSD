@@ -307,6 +307,7 @@ int page_focus_at(struct page *page, int x, int y);
 int page_focus_move(struct page *page, int backward);
 int page_focus_field(struct page *page, const char *token);
 int page_window_focus(struct page *page, int focused);
+int page_page_transition(struct page *page, const char *type, int persisted);
 int page_activate_focused(struct page *page, struct wb_buffer *href, int *found);
 int page_click_control(struct page *page, int x, int y, struct wb_buffer *href, int *found);
 int page_focus_pressable(struct page *page);

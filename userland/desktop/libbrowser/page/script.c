@@ -1335,6 +1335,37 @@ page_fire_load_resume(
 	return 0;
 }
 
+/*
+ * Fires the page's pageshow or pagehide for the pages the view keeps for
+ * the history (persisted when it is shown again from them or put in
+ * them), then the microtasks its listeners queued.
+ */
+int
+page_page_transition(
+	struct page *page,
+	const char *type,
+	int persisted)
+{
+	int error;
+
+	/* A page without a window has no listeners. */
+	if (page->window == NULL)
+		return 0;
+
+	/* The event. */
+	error = bind_fire_page_transition(page->window, type, persisted);
+	if (error != 0)
+		return error;
+
+	/* The microtasks it queued. */
+	error = bind_checkpoint(page->window);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the event has run. */
+	return 0;
+}
+
 /* The document is complete: load, then pageshow, last of the loading's events. */
 static int
 page_fire_load_events(
@@ -1350,8 +1381,8 @@ page_fire_load_events(
 	if (error != 0)
 		return error;
 
-	/* The document is shown: pageshow. */
-	error = bind_fire_event(page->window, NULL, "pageshow", BIND_EVENT_DOCUMENT, &canceled);
+	/* The document is shown, not from the kept pages: pageshow. */
+	error = bind_fire_page_transition(page->window, "pageshow", 0);
 	if (error != 0)
 		return error;
 

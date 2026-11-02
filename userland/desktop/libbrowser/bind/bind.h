@@ -379,6 +379,7 @@ int bind_run_timers(struct bind_window *window);
 
 /* Events (event.c). */
 int bind_fire_event(struct bind_window *window, struct dom_node *target, const char *type, unsigned flags, int *canceled);
+int bind_fire_page_transition(struct bind_window *window, const char *type, int persisted);
 int bind_fire_mouse_event(struct bind_window *window, struct dom_node *target, const char *type, const struct bind_mouse *mouse, int *canceled);
 
 /* The events of the keyboard, the wheel and the focus (input.c). */

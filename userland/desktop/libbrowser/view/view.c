@@ -100,10 +100,11 @@
 #define VIEW_SCROLL_TOP		0
 #define VIEW_SCROLL_BOTTOM	1
 
-/* How a page is reached: a new step of the history, or a step already in it. */
+/* How a page is reached: a new step of the history, a step already in it, or a new page in place of the step shown (location.replace). */
 enum view_step {
 	VIEW_STEP_NEW,
-	VIEW_STEP_KEEP
+	VIEW_STEP_KEEP,
+	VIEW_STEP_REPLACE
 };
 
 /* The keys with a default action, by what the action is. */
@@ -2378,9 +2379,13 @@ view_show_page(
 		return ENOMEM;
 	}
 
+	/* A replacing step with nothing to replace is a new one. */
+	if (step == VIEW_STEP_REPLACE && (view->history_count == 0 || history_index >= view->history_count))
+		step = VIEW_STEP_NEW;
+
 	/* Reserves the new history entry while every old page and forward step is still owned. */
 	history_copy = NULL;
-	if (step == VIEW_STEP_NEW) {
+	if (step == VIEW_STEP_NEW || step == VIEW_STEP_REPLACE) {
 		history_copy = strdup(path);
 		if (history_copy == NULL) {
 			free(copy);
@@ -2399,8 +2404,15 @@ view_show_page(
 	/* The new page has the focus of the view's program as the view has it (it has no focused element to tell yet). */
 	(void)page_window_focus(page, view->has_focus);
 
-	/* The new page replaces the old one (kept for Back and Forward, unless it is the same step loaded again), from its top, with its own clock. */
-	if (view->page != NULL && view->history_count != 0 && !(step == VIEW_STEP_KEEP && history_index == view->history_index))
+	/*
+	 * The new page replaces the old one (kept for Back and Forward, unless it
+	 * is the same step loaded again or the step it replaces), from its top,
+	 * with its own clock.
+	 */
+	if (view->page != NULL &&
+	    view->history_count != 0 &&
+	    !(step == VIEW_STEP_KEEP && history_index == view->history_index) &&
+	    !(step == VIEW_STEP_REPLACE && history_index == view->history_index))
 		view_keep(view, view->page, view->history_index);
 	else
 		page_destroy(view->page);
@@ -2438,6 +2450,15 @@ view_show_page(
 		view->history[view->history_count] = history_copy;
 		view->history_index = view->history_count;
 		view->history_count++;
+	} else if (step == VIEW_STEP_REPLACE) {
+		/* The replaced step takes the new location; the steps after it stay, and so does a page kept for another step. */
+		for (index = view->kept_count; index > 0; index--) {
+			if (view->kept[index - 1U].index == history_index)
+				view_kept_remove(view, index - 1U, 1);
+		}
+		free(view->history[history_index]);
+		view->history[history_index] = history_copy;
+		view->history_index = history_index;
 	} else {
 		/* Publishes the destination only after its page has replaced the old one. */
 		view->history_index = history_index;
@@ -2656,6 +2677,9 @@ view_keep(
 		return;
 	}
 
+	/* The page hears that it is put away for the history (a failure leaves it kept all the same). */
+	(void)page_page_transition(page, "pagehide", 1);
+
 	/* Room, made by letting the oldest go, and a page kept before for the same step goes too. */
 	for (slot = view->kept_count; slot > 0; slot--) {
 		if (view->kept[slot - 1U].index == index)
@@ -2747,6 +2771,9 @@ view_restore(
 	if (view->callbacks.committed != NULL)
 		view->callbacks.committed(view->callbacks.context, view);
 	view_redraw(view);
+
+	/* The page hears that it is shown again from the pages kept for the history. */
+	(void)page_page_transition(view->page, "pageshow", 1);
 
 	/* Succeeded: the page is shown again. */
 	return 0;
@@ -3580,24 +3607,48 @@ view_click(
 
 /*
  * Carries out the navigation to another document a top-level page's
- * scripts asked for, as a link the program may allow or deny (it goes to
- * a new step of the history, a replacing one too).
+ * scripts asked for, as a link the program may allow or deny: a new step
+ * of the history, or one in place of the step shown (location.replace,
+ * and a navigation before the load event ends).
  */
 static void
 view_script_navigation(
 	struct browser_view *view)
 {
+	enum browser_policy policy;
+	struct wb_buffer path;
 	char *location;
 	int replace;
+	int error;
 
 	/* The request, if any. */
 	location = bind_take_navigation(view->page->window, &replace);
 	if (location == NULL)
 		return;
 
-	/* Followed like a link, which the program hears of. */
-	view_follow_link(view, location);
+	/* A new step is followed like a link, which the program hears of. */
+	if (!replace) {
+		view_follow_link(view, location);
+		free(location);
+		return;
+	}
+
+	/* A replacing one too, the caller deciding. */
+	policy = BROWSER_POLICY_ALLOW;
+	if (view->callbacks.link != NULL)
+		policy = view->callbacks.link(view->callbacks.context, view, location);
+	if (policy != BROWSER_POLICY_ALLOW) {
+		free(location);
+		return;
+	}
+
+	/* Its page, resolved against the page shown, in place of the step shown. */
+	wb_buffer_init(&path);
+	error = page_resolve_location(view->path, location, &path);
 	free(location);
+	if (error == 0)
+		(void)view_navigate(view, wb_buffer_string(&path), VIEW_STEP_REPLACE, view->history_index);
+	wb_buffer_release(&path);
 }
 
 /* Follows a link a click or Enter opened, when the link callback allows it (a load that fails goes to the load callback). */
