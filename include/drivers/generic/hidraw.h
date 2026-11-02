@@ -57,7 +57,8 @@ struct drv_hidraw_description {
 /*
  * What drv_hidraw_describe() reads from a report descriptor: the top
  * collection's usage page and usage, whether the reports are numbered,
- * and the bytes of the input and the output reports.
+ * the bytes of the input and the output reports, and whether every top
+ * collection is of a vendor-defined usage page (0xFF00 to 0xFFFF).
  */
 struct drv_hidraw_layout {
 	uint16_t usage_page;
@@ -65,6 +66,7 @@ struct drv_hidraw_layout {
 	int numbered;
 	uint32_t input_size;
 	uint32_t output_size;
+	int vendor_only;
 };
 
 int drv_hidraw_register(const struct drv_hidraw_description *description, const struct drv_hidraw_ops *ops, void *context, struct drv_hidraw **result);

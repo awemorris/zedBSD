@@ -28,13 +28,18 @@
 #define HIDRAW_ITEM_COLLECTION		0xa0U
 #define HIDRAW_ITEM_END_COLLECTION	0xc0U
 
+/* The vendor-defined usage pages (HID Usage Tables 1.4, section 3). */
+#define HIDRAW_USAGE_PAGE_VENDOR_FIRST	0xff00U
+#define HIDRAW_USAGE_PAGE_VENDOR_LAST	0xffffU
+
 /*
  * Reads what a raw device needs from its report descriptor: the usage
  * page and the usage of the first top collection, whether the device
- * numbers its reports (a Report ID item anywhere), and the bytes of the
+ * numbers its reports (a Report ID item anywhere), the bytes of the
  * input and of the output reports (the sums of Report Size times Report
  * Count over the Input and the Output items; for a device that numbers its
- * reports, the sums of all of them, which bound each one).  Returns 0,
+ * reports, the sums of all of them, which bound each one), and whether
+ * every top collection is of a vendor-defined usage page.  Returns 0,
  * ENOENT when there is no collection, or EINVAL for a descriptor whose
  * items run past its end.
  */
@@ -49,6 +54,7 @@ drv_hidraw_describe(
 	uint32_t data;
 	uint32_t page;
 	uint32_t local_usage;
+	uint32_t collection_page;
 	uint32_t report_size;
 	uint32_t report_count;
 	size_t offset;
@@ -57,6 +63,7 @@ drv_hidraw_describe(
 	unsigned depth;
 	unsigned found;
 	unsigned extended;
+	unsigned vendor_only;
 	uint8_t prefix;
 	uint8_t item;
 
@@ -68,6 +75,7 @@ drv_hidraw_describe(
 	layout->numbered = 0;
 	layout->input_size = 0U;
 	layout->output_size = 0U;
+	layout->vendor_only = 0;
 	input_bits = 0U;
 	output_bits = 0U;
 	page = 0U;
@@ -77,6 +85,7 @@ drv_hidraw_describe(
 	extended = 0U;
 	depth = 0U;
 	found = 0U;
+	vendor_only = 1U;
 
 	/* Walks the items. */
 	offset = 0U;
@@ -136,12 +145,19 @@ drv_hidraw_describe(
 			local_usage = 0U;
 			break;
 		case HIDRAW_ITEM_COLLECTION:
+			/* A top collection's page: the Usage Page, or a Usage of four bytes' own. */
+			collection_page = page;
+			if (extended)
+				collection_page = local_usage >> 16U;
+
+			/* Every top collection says whether the device is a vendor's alone. */
+			if (depth == 0U && (collection_page < HIDRAW_USAGE_PAGE_VENDOR_FIRST || collection_page > HIDRAW_USAGE_PAGE_VENDOR_LAST))
+				vendor_only = 0U;
+
 			/* The first collection at the top is the device's. */
 			if (depth == 0U && !found) {
-				layout->usage_page = (uint16_t)page;
+				layout->usage_page = (uint16_t)collection_page;
 				layout->usage = (uint16_t)local_usage;
-				if (extended)
-					layout->usage_page = (uint16_t)(local_usage >> 16U);
 				found = 1U;
 			}
 
@@ -172,6 +188,7 @@ drv_hidraw_describe(
 		output_bits = HIDRAW_REPORT_MAX;
 	layout->input_size = (uint32_t)input_bits;
 	layout->output_size = (uint32_t)output_bits;
+	layout->vendor_only = (int)vendor_only;
 
 	/* Succeeded: the device's layout. */
 	return 0;
