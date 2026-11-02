@@ -26,7 +26,7 @@
 
 /* The most tokens (literals, copies and cache indices) of one test image, and the most pixels. */
 #define TEST_TOKENS_MAX		8192U
-#define TEST_PIXELS_MAX		8192U
+#define TEST_PIXELS_MAX		16384U
 
 /* The most groups of one test image. */
 #define TEST_GROUPS_MAX		8U
@@ -1497,6 +1497,7 @@ test_meta(void)
 	static const uint32_t blocks_a[6] = { 0, 3, 3, 3, 0, 0 };
 	static const uint32_t blocks_b[2] = { 1, 0 };
 	static const uint32_t blocks_c[16] = { 2, 0, 1, 2, 1, 1, 0, 2, 2, 1, 0, 0, 1, 2, 0, 1 };
+	static const uint32_t blocks_d[6] = { 1, 0, 2, 0, 2, 1 };
 	struct test_image image;
 	unsigned seed;
 
@@ -1530,6 +1531,33 @@ test_meta(void)
 	image.cache_bits = 0;
 	for (seed = 0; seed < 20U; seed++) {
 		image.token_count = gen_tokens(10, 5, 0, 4U);
+		check_image(&image);
+	}
+
+	/* 13 by 13 pixels in blocks of 4: 4 by 4 blocks, the last of each row and column one pixel wide. */
+	image.width = 13;
+	image.height = 13;
+	image.prefix_bits = 2;
+	image.blocks = blocks_c;
+	image.cache_bits = 0;
+	for (seed = 0; seed < 10U; seed++) {
+		image.token_count = gen_tokens(13, 13, 0, 4U);
+		check_image(&image);
+	}
+
+	/* 17 by 9 pixels in blocks of 8: 3 by 2 blocks with a one-pixel edge, then 9 by 17 with 2 by 3. */
+	image.width = 17;
+	image.height = 9;
+	image.prefix_bits = 3;
+	image.blocks = blocks_d;
+	for (seed = 0; seed < 10U; seed++) {
+		image.token_count = gen_tokens(17, 9, 0, 4U);
+		check_image(&image);
+	}
+	image.width = 9;
+	image.height = 17;
+	for (seed = 0; seed < 10U; seed++) {
+		image.token_count = gen_tokens(9, 17, 0, 4U);
 		check_image(&image);
 	}
 
@@ -1623,20 +1651,51 @@ test_cache_bits_errors(void)
 static void
 test_size_errors(void)
 {
-	uint8_t bytes[16];
+	struct test_image image;
 	uint32_t pixels[4];
+	size_t size;
+	unsigned index;
 	int error;
 
-	/* No bytes are needed: the size is judged first. */
-	memset(bytes, 0, sizeof(bytes));
-	error = decode_stream(bytes, sizeof(bytes), 0, 1, 1, TEST_LIMIT, pixels, NULL);
+	/* A valid 1 by 1 image: it decodes at its own size, and a size outside the range is judged first. */
+	memset(&image, 0, sizeof(image));
+	image.width = 1;
+	image.height = 1;
+	image.role = 1;
+	image.tokens = tokens;
+	image.token_count = 1;
+	tokens[0].kind = TOKEN_LITERAL;
+	tokens[0].argb = 0x12345678U;
+	check_image(&image);
+	size = lbitwriter_size(&stream);
+	error = decode_stream(stream.bytes, size, 0, 1, 1, TEST_LIMIT, pixels, NULL);
 	CHECK(error == EINVAL);
-	error = decode_stream(bytes, sizeof(bytes), 1, 0, 1, TEST_LIMIT, pixels, NULL);
+	error = decode_stream(stream.bytes, size, 1, 0, 1, TEST_LIMIT, pixels, NULL);
 	CHECK(error == EINVAL);
-	error = decode_stream(bytes, sizeof(bytes), WEBPC_VP8L_SIDE_MAX + 1U, 1, 1, TEST_LIMIT, pixels, NULL);
+	error = decode_stream(stream.bytes, size, WEBPC_VP8L_SIDE_MAX + 1U, 1, 1, TEST_LIMIT, pixels, NULL);
 	CHECK(error == EINVAL);
-	error = decode_stream(bytes, sizeof(bytes), 1, WEBPC_VP8L_SIDE_MAX + 1U, 1, TEST_LIMIT, pixels, NULL);
+	error = decode_stream(stream.bytes, size, 1, WEBPC_VP8L_SIDE_MAX + 1U, 1, TEST_LIMIT, pixels, NULL);
 	CHECK(error == EINVAL);
+
+	/* The largest widths and heights are valid: 16384 by 1 and 1 by 16384, a literal and copies of 4096 and 4095. */
+	tokens[1].kind = TOKEN_COPY;
+	tokens[1].length = 4096;
+	tokens[1].dcode = 121;
+	tokens[2].kind = TOKEN_COPY;
+	tokens[2].length = 4096;
+	tokens[2].dcode = 121;
+	tokens[3].kind = TOKEN_COPY;
+	tokens[3].length = 4096;
+	tokens[3].dcode = 121;
+	tokens[4].kind = TOKEN_COPY;
+	tokens[4].length = 4095;
+	tokens[4].dcode = 121;
+	image.token_count = 5;
+	for (index = 0; index < 2U; index++) {
+		image.width = index == 0U ? WEBPC_VP8L_SIDE_MAX : 1U;
+		image.height = index == 0U ? 1U : WEBPC_VP8L_SIDE_MAX;
+		check_image(&image);
+	}
 }
 
 /*
@@ -1688,7 +1747,7 @@ min_limit(
 static void
 test_limit(void)
 {
-	static const uint32_t blocks[4] = { 0, 3, 3, 0 };
+	static const uint32_t blocks[4] = { 0, 7, 7, 0 };
 	struct test_image image;
 	size_t limit_cheap;
 	size_t limit_large;
@@ -1697,7 +1756,7 @@ test_limit(void)
 	uint32_t pixels[256];
 	int error;
 
-	/* A 16 by 16 image in blocks of 8, groups 0 and 3 used (1 and 2 unused), 20 colours so the codes have tables. */
+	/* A 16 by 16 image in blocks of 8, groups 0 and 7 used (1 to 6 unused), 16 colours so the codes have tables. */
 	memset(&image, 0, sizeof(image));
 	image.width = 16;
 	image.height = 16;
@@ -1727,7 +1786,11 @@ test_limit(void)
 	CHECK(error == ENOMEM);
 	free(bytes_cheap);
 
-	/* Unused groups with as many symbols as a 16-colour group needs: the limit that is enough does not grow. */
+	/*
+	 * Unused groups whose codes are large (one alone fits the limit, the six
+	 * together do not): the limit that is enough does not grow, so they are
+	 * neither counted against the kept tables nor added up in the scratch pool.
+	 */
 	image.unused_symbols = 16;
 	lbitwriter_init(&stream);
 	build_image(&stream, &image, expected_pixels, NULL);

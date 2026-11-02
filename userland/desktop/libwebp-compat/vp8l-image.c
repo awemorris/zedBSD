@@ -19,7 +19,7 @@
 #define IMAGE_SYMBOL_COPY_FIRST		WEBPC_VP8L_LITERALS
 #define IMAGE_SYMBOL_CACHE_FIRST	(WEBPC_VP8L_LITERALS + WEBPC_VP8L_LENGTH_CODES)
 
-/* The widest prefix code of a length or distance value that has extra bits to read: codes 0 to 3 have none. */
+/* The highest prefix code of a length or distance that is a value by itself: codes 0 to 3 have no extra bits. */
 #define IMAGE_PREFIX_CODE_LITERAL_MAX	3U
 
 /* The bits of the entropy image's prefix_bits field, and the least value it adds to (RFC 9649 3.7.2.2.1). */
