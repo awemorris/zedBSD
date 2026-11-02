@@ -3,7 +3,7 @@
 # WS345 ブラウザの thread の分け方: JavaScript を窓の event の処理と別の thread に、通信（connect を含む）を独立した thread に
 
 - Master: [plan/master.md](../master.md)（2026-11-02 14:03 作成）。Primary Milestone: MG006。
-- Status: incomplete（2026-11-02 P8: p001・p002 cleared、設計 [design.md](design.md)。p003〜p014 は planned）
+- Status: incomplete（2026-11-02 P8: p001〜p003 cleared、設計 [design.md](design.md)。p004〜p014 は planned・in-progress）
 - 目標: ブラウザ（libbrowser と browser の shell、zedBSD・Windows・Linux の Keiland）で、JavaScript の実行と通信がどれだけ長くかかっても、窓の event の処理（入力・再描画・resize・title bar の操作）が止まらない形にする。JavaScript は窓の event の thread と別の名前付きの thread で動かす。通信は同期の呼び出し（connect・TLS の handshake・read・write）のままでよく、それを独立した名前付きの thread で行う。
 - 置き場所: userland/desktop/libbrowser/、userland/desktop/browser/（shell）、Windows の OmniGrammaton の build（WS334）。
 
@@ -49,7 +49,7 @@
 | --- | --- | --- | --- |
 | [ws345-p001](phase001/phase.md) | 調べと設計: 今の thread と event loop、止まる所の計測、thread の表（名前・数・持つ物・渡し方）、DOM・layout と JS の持ち主、event の受け渡し、取り消し、試験の道 | cleared（2026-11-02 14:46 Q1、87feb4707 を main に merge 1ec103957）。cleared（2026-11-02 P8 q1959-i01。[design.md](design.md)、design-reviewer の指摘 19 件の反映は §12） | — |
 | [ws345-p002](phase002/phase.md) | shell が登録する thread の表（`struct browser_threads`、`browser_threads_set`）と libbrowser の base の包み。libbrowser の pthread を全部替え、shell（kl_thread）・試験（POSIX）の実装、libmedia の engine の thread の作成 | cleared（2026-11-02 15:59 Q1、4a4b68de0 を main に merge 743b46df5、main で host-build warning 0・cross-build PASS）。cleared（2026-11-02 P8 q1968-i01: libbrowser の thread・lock・condition を全部 shell の表で、段 1・tsan・cross-build・Wine の回帰。[phase.md](phase002/phase.md) の結果） | p001 |
-| [ws345-p003](phase003/phase.md) | 通信を全部 loader に: loader の client（要求した thread ごとの完了と起こし、どの thread からでも取り消し）、同期の XHR・漏れた parser の script・iframe の script・sheet の待ちを client の待ちに | in-progress（2026-11-02 15:59 P8 q1972） | p002 |
+| [ws345-p003](phase003/phase.md) | 通信を全部 loader に: loader の client（要求した thread ごとの完了と起こし、どの thread からでも取り消し）、同期の XHR・漏れた parser の script・iframe の script・sheet の待ちを client の待ちに | cleared（2026-11-02 P8 q1972-i01: loader の client・waited の request・abort と epoch、頁の待つ取得を全部 loader に。[phase.md](phase003/phase.md) の結果） | p002 |
 | [ws345-p004](phase004/phase.md) | VM の打ち切り（agent ごとの atomic の flag、loop の印・関数の入口・長い native で見る、catch・finally を走らせない終わり） | in-progress（2026-11-02 15:59 P5 q1973） | p001 |
 | [ws345-p005](phase005/phase.md) | view の front と top の script の thread（`BROWSER_THREADING_OWN`）: mailbox・入力の合わせ方と順・snapshot・callback を窓の thread で・navigation と destroy の打ち切りと join・process に一つの可変の static の追い出し・CPU の確定した frame | planned | p002、p003、p004 |
 | [ws345-p006](phase006/phase.md) | 描画の口（D5）: 確定した frame の箱と frame の item、`browser_view_render`・`_render_pixels`・`_presented`、renderer と glyph の face を描画の thread に、描画の機会と rAF、確定の後の木を書かない | planned | p005 |
@@ -67,3 +67,4 @@
 - 2026-11-02 14:03 Q1: 作成。P8 が p001（設計）に着手。設計の後に実装の Phase を立てる。
 - 2026-11-02 P8（q1959-i01）: p001 の設計と計測、design-reviewer の反映、p002〜p013 の phase.md。次は Q1 が p002 の Queue を立てる（p004・p013 は p002 と並べてよい）。J2・J6・J7 は Q1 の答え待ち（実装の p005・p009・p006 の前に）。
 - 2026-11-02 P8（q1968-i01）: p002 cleared（thread の表）。次は p003（通信を loader に）・p004（打ち切り）・p013（libkeiland の resize の口）が並べて始められる。
+- 2026-11-02 P8（q1972-i01）: p003 cleared（通信を loader の client に）。p005 は p004（P5）の merge の後。

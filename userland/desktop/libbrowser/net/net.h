@@ -127,9 +127,10 @@ struct net_http_framing {
 	int done;
 };
 
-/* A request of the asynchronous loader, and the loader. */
+/* A request of the asynchronous loader, the loader, and a client of it (the requests of one thread). */
 struct net_loader;
 struct net_request;
+struct net_loader_client;
 
 /* An instance's cookie jar (cookie.c) and the storage queue it keeps its persistent cookies in (storage/queue.h). */
 struct net_cookie_jar;
@@ -219,6 +220,23 @@ int net_loader_dispatch_until(struct net_loader *loader, uint64_t deadline);
 /* Called from a media engine's thread too: sets a mark and wakes the network thread, nothing more. */
 void net_loader_ring(struct net_loader *loader);
 int net_loader_takes(const char *location);
+/* The loader's clients: one per thread that makes requests (the loader's own for the thread that made it). */
+struct net_loader_client *net_loader_own_client(struct net_loader *loader);
+int net_loader_client_open(struct net_loader *loader, net_loader_notify notify, void *context, struct net_loader_client **client);
+void net_loader_client_close(struct net_loader_client *client);
+int net_loader_client_send(struct net_loader_client *client, const char *url, int kind, const struct net_send *send, net_request_done done, void *context, struct net_request **request);
+int net_loader_client_start_waited(struct net_loader_client *client, const char *url, int kind, const struct net_send *send, struct net_request **request);
+size_t net_loader_client_pending(const struct net_loader_client *client);
+void net_loader_client_wait(struct net_loader_client *client, int timeout);
+int net_loader_client_dispatch_until(struct net_loader_client *client, uint64_t deadline);
+void net_loader_client_set_epoch(struct net_loader_client *client, uint64_t epoch);
+/* Any thread may abort: a request, or a client's requests made before an epoch. */
+void net_loader_client_abort_before(struct net_loader_client *client, uint64_t epoch);
+void net_request_abort(struct net_request *request);
+/* A waited request: its client's thread waits for it, reads it, and lets it go. */
+int net_request_wait(struct net_request *request);
+void net_request_release(struct net_request *request);
+void net_request_take_response(struct net_request *request, struct net_response *response);
 
 /* Cookies (cookie.c): an instance's jar over its storage queue; a NULL jar keeps and sends nothing. */
 int net_cookie_jar_open(struct wb_storage_queue *queue, struct net_cookie_jar **jar);

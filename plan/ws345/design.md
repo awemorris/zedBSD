@@ -318,12 +318,12 @@ for (;;) {
 
 ## 7. 通信（D2）
 
-- 全ての http・https は loader（`browser-net`・`browser-resolve`）を通る。`BROWSER_THREADING_OWN` の view では `http.c` の同期の道（`net_http_fetch`）を使わない（`BROWSER_FETCH_AT_ONCE` の headless だけに残す）。
+- 全ての http・https は loader（`browser-net`・`browser-resolve`）を通る（p003 で実装: `page_fetch_now`・`page_fetch_response_now`、loader の client と waited の request、abort と epoch）。`BROWSER_THREADING_OWN` の view では `http.c` の同期の道（`net_http_fetch`）を使わない（`BROWSER_FETCH_AT_ONCE` の headless だけに残す）。
 - loader の **client**: loader を使う thread（各 frame の script の thread。style の thread は使わない、§4.3）ごとに一つ。client は page でなく呼んだ thread（その frame の context）から選ぶ（今 iframe は top の `struct page` とその loader を共有し、`page/frame-load.c` は `window->host.context` を使う。同期の待ちを page の client にすると、iframe の同期の XHR の完了を top の thread が dispatch するのを待って、agent の lock で互いに待つ）。request はその client に属し、完了は client の list に積まれ、client の notify がその thread の mailbox を起こす。callback は要求した thread で、`net_loader_dispatch(client)` から走る。取り消しはどの thread からでもできる（client の lock、net の thread の control の waker）。
 - 今 page の code が窓の thread で同期に取っていた物を loader に移す:
   - 同期の XHR（`script_fetch_sync`）: loader の request を作り、script の thread がその request 自身の condition で完了か取り消しを待つ（dispatch する者を要らない: net の thread が request の終わりを request に書いて signal し、待つ thread が結果を取る）。仕様のとおり script を止める。窓は止めない。
   - 先取りに無い parser の `<script src>`（`script_fetch_file`）・iframe の `<script src>`（`frame-load.c`）: 同じく loader で待つ（parser は止まる、仕様のとおり）。
-  - `page_wait_sheets`: 今の 10 ms ずつの待ちを client の condition の待ちに。
+  - `page_wait_sheets`: 今も loader の condition（`net_loader_wait`）を 10 ms ずつ待ち、その間に届いた sheet の callback を dispatch する形で、socket には触れない。p003 では変えない（2026-11-02 P8 の判断。per-frame の client にするのは p009）。
   - fonts・sheets・images・media の「loader が無い時は今すぐ読む」の道は、`file:`・`data:` だけに残る。
 - 取り消しの寿命: 他の thread からの取り消しは request に印を付けて net の thread の waker を鳴らすだけで、request を放すのは持ち主の thread（完了の callback を走らせる代わりに捨てる）。callback が走っている間の取り消しは、その callback の後に効く。navigation・閉じる時の取り消しは頁の epoch（navigation の通し番号）で範囲を決め、新しい navigation 自身の取得（新しい epoch）は取り消さない。
 - page の物の分け方（p009）: 今 page に一つの `fetches`・`scripts`・timer（親が子の timer を `bind/timer.c` の `timer_run_children` で回す）を frame ごとに分ける。

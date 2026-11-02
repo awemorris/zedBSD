@@ -18,6 +18,117 @@
 #include "storage/instance.h"
 
 #include <errno.h>
+#include <stdio.h>
+
+/*
+ * Fetches a resource a page needs at once (a parser-blocking script the
+ * scan did not find, a synchronous XMLHttpRequest, a frame's script): an
+ * http or https one through the page's loader, which does the network on
+ * its own thread while this thread waits for the request (the waiting
+ * thread never touches a socket), anything else, or any resource of a
+ * page without a loader, read as page_fetch reads it.  href is resolved
+ * against the page's base; bytes receives the body and final_url (which
+ * may be NULL) the URL after the redirects.  Returns 0 or an errno value.
+ */
+int
+page_fetch_now(
+	struct page *page,
+	const char *href,
+	int kind,
+	struct wb_buffer *bytes,
+	struct wb_buffer *final_url)
+{
+	struct net_response response;
+	struct wb_buffer location;
+	int remote;
+	int error;
+
+	/* A page with no base resolves nothing. */
+	if (page->base == NULL)
+		return EINVAL;
+
+	/* The location, and whether the loader takes it. */
+	wb_buffer_init(&location);
+	error = page_resolve_location(page->base, href, &location);
+	if (error != 0) {
+		wb_buffer_release(&location);
+		return error;
+	}
+	remote = net_loader_takes(wb_buffer_string(&location));
+
+	/* Without the loader, or a local or data resource: read at once. */
+	if (page->loader == NULL || !remote) {
+		wb_buffer_release(&location);
+		error = page_fetch(page_cookies(page), page->base, href, bytes, final_url);
+		return error;
+	}
+
+	/* Through the loader, waited for. */
+	error = page_fetch_response_now(page, wb_buffer_string(&location), kind, &response);
+	wb_buffer_release(&location);
+	if (error != 0)
+		return error;
+
+	/* The body and the final URL, then the response goes. */
+	error = wb_buffer_append(bytes, response.body.data, response.body.length);
+	if (error == 0 && final_url != NULL) {
+		wb_buffer_clear(final_url);
+		error = wb_buffer_append(final_url, response.url.data, response.url.length);
+	}
+	net_response_release(&response);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the bytes are there. */
+	return 0;
+}
+
+/*
+ * Fetches an http or https location (absolute) through a page's loader and
+ * waits for it, filling a response as page_fetch_response does (on failure
+ * the response is empty but for the reason of a TLS failure).  A page
+ * without a loader, or a location the loader does not take, is read by
+ * page_fetch_response.  Returns 0 or an errno value.
+ */
+int
+page_fetch_response_now(
+	struct page *page,
+	const char *location,
+	int kind,
+	struct net_response *response)
+{
+	struct net_request *request;
+	struct net_loader_client *client;
+	int remote;
+	int error;
+
+	/* Without the loader, or a location it does not take: read at once. */
+	remote = net_loader_takes(location);
+	if (page->loader == NULL || !remote) {
+		error = page_fetch_response(page_cookies(page), location, location, response);
+		return error;
+	}
+
+	/* The request of the page's thread's client, waited for. */
+	net_response_init(response);
+	client = net_loader_own_client(page->loader);
+	error = net_loader_client_start_waited(client, location, kind, NULL, &request);
+	if (error != 0)
+		return error;
+	error = net_request_wait(request);
+
+	/* Its response (or only the reason of its failure), then the request goes. */
+	if (error == 0)
+		net_request_take_response(request, response);
+	else
+		snprintf(response->reason, sizeof(response->reason), "%s", net_request_reason(request));
+	net_request_release(request);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the response is the caller's. */
+	return 0;
+}
 
 /*
  * Gives a page the loader its http and https images are fetched with
@@ -47,8 +158,8 @@ page_set_instance(
 
 /*
  * Reports the instance a page uses: the one its view gave, or, for a page
- * made without a view, the default instance of the calling thread (made
- * now when it is the thread's first; NULL without memory).
+ * made without a view, the process's default instance (made now when it
+ * is the first; NULL without memory).
  */
 struct browser_instance *
 page_instance(
