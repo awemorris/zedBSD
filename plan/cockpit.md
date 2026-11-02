@@ -11,7 +11,7 @@
 | P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p020（Windows・6 つの config・QEMU、578 file が libwebp と一致）cleared。p021（libbrowser への組み込み、BUG-405、q1979）に 17:29 着手 | — |
 | P3 | [BUG-416](bugs/BUG-416.md) | USB・xHCI | usb-net の 64 byte の倍数の frame が届かない（q1978、17:09）。BUG-412 の直しの候補は agent/p3-bug412 に未 merge・Pi 5 は記録の状態のまま | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
-| P5 | [WS345](ws345/ws.md) | ブラウザ | p004（VM の打ち切り、q1973）に 15:59 着手 | — |
+| P5 | [WS345](ws345/ws.md) | ブラウザ | p004（JavaScript の打ち切り）cleared。p005（thread-safe な front と script の thread、q1980）に 17:33 着手 | — |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p018（sshd の listener、相互運用 143 項目）cleared。p019（sftp-server、q1975）に 16:35 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | [BUG-414](bugs/BUG-414.md)・[BUG-415](bugs/BUG-415.md) | ブラウザ | WS345 p003（通信を全部 loader に）cleared。p005 は P5 の p004 待ちなので、その間に Reflect と pagehide（q1977、16:47） | — |
