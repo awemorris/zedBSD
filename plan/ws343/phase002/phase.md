@@ -3,7 +3,7 @@
 # ws343-p002 libcrypto-compat に passkey が使う OpenSSL の関数を足し、passkey-fido2・fidoctl を link の差し替えだけで OpenSSL から外す
 
 - 親: [ws.md](../ws.md)。Queue: q1990-i01（P2、worktree `/home/awe/zedBSD-worktrees/p2-ws343`、branch `agent/p2-ws343`、基点 main ca8c38f06e、作業の途中で main 8e12d77f2b（P6 の ws336-p021）を早送りで、bba4a9ef4e（P1 の WS335 p034）を merge bf0fa13238 で取り込んだ。p034 の cryc-aes.c の二乗の buffer の消去と自分の逆の暗号は自動の merge で両方残った）。
-- Status: in-progress（2026-11-02 21:35 P2。実装と host・build の確かめは済み、残りは「残り」の節）
+- Status: in-progress（2026-11-02 22:18 P2。実装と host・build の確かめは全部 PASS。cleared は Q1、QEMU・実機の実行は未実施）
 
 ## 目的と範囲
 
@@ -61,6 +61,7 @@
 | `make ZEDBSD_CONFIG=plan/ws343/tests/config-amd64-compat.mk BUILD=build/ws343-p002 build/ws343-p002/bin/fidoctl build/ws343-p002/bin/passkey-fido2` | rc 0、warning 0、OpenSSL は stage も build もされない、check-dynamic-elf PASS、NEEDED は 2 つとも libcrypto-compat.so と libc.so |
 | 同じく aarch64（config-rpi4 から OpenSSL・curl・OpenSSH・Python を外した config、BUILD=build/ws343-p002a） | rc 0、warning 0 |
 | `sh plan/ws335/tests/check-exports.sh build/ws343-p002/dynamic/libcrypto-compat.so` | PASS（public 78、cryc_ 190） |
+| merge bf0fa13238 の後に `run-unit.sh all` と `run-unit.sh --win32 all` | 両方 PASS（posix 59 本、Wine 59 本、FAIL 0）。上の試験も merge の後に全部流し直して PASS |
 
 ## 未実施
 
@@ -69,6 +70,5 @@
 
 ## 残り
 
-- run-unit.sh all・`--win32 all` の結果（流している）。
 - OpenSSL と違う所（header に書いた）: EVP_PKEY_verify は strict DER でない・r か s が 0・負・32 byte を越える署名を -1（OpenSSL は後の 3 つを 0）、HMAC の md NULL を断る、EVP_PKEY_fromdata は既にある *ppkey と知らない parameter を断る、AES-CBC は padding off だけ。crypto-openssl.c の答えはどれも同じ（host の比較）。
 - crypto-openssl.c と crypto.h の comment は「OpenSSL の libcrypto」のまま（変えない指示）。Guardrail の例外（WS172）の扱いは Q1。
