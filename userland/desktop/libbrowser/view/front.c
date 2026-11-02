@@ -179,6 +179,13 @@ struct view_front {
 	uint64_t serial;
 };
 
+/*
+ * The front whose script thread the calling thread is (NULL on every other
+ * thread): set by the script thread itself when it starts, so that it
+ * knows itself without reading the handle the program's thread stores.
+ */
+static _Thread_local struct view_front *front_current;
+
 static void front_run(void *argument);
 static void front_loop(struct view_front *front);
 static void front_execute(struct view_front *front, struct front_item *item);
@@ -353,7 +360,6 @@ view_front_window(
 	const struct browser_view *view)
 {
 	struct view_front *front;
-	int current;
 
 	/* A view of the caller's thread has no front. */
 	front = view_front_of(view);
@@ -361,8 +367,7 @@ view_front_window(
 		return 0;
 
 	/* The script thread runs the view itself. */
-	current = wb_thread_is_current(&front->thread);
-	if (current)
+	if (front_current == front)
 		return 0;
 
 	/* The program's call. */
@@ -1006,8 +1011,9 @@ front_run(
 	struct browser_view *view;
 	int error;
 
-	/* The view, of this thread. */
+	/* The view, of this thread, which knows itself as the front's. */
 	front = argument;
+	front_current = front;
 	options = front->options;
 	options.threading = BROWSER_THREADING_CALLER;
 	options.stack_base = __builtin_frame_address(0);
