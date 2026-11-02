@@ -19,7 +19,11 @@
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | ws319-p001 | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | planning | WS318 completed |
+| [ws319-p002](phase002/phase.md) | H.264 の Video Player の GPU の道（VP_GPU_PRESENT）を 5330 で確かめて直す | cleared（2026-11-02 P4、Q1 の受け入れ待ち） | WS083 |
+| [ws319-p003](phase003/phase.md) | H.265 decode: HCP の long format を Vulkan Video として（設計・実装・host 試験） | cleared（2026-11-02 P4、Q1 の受け入れ待ち） | WS322 p005・p006 |
+| [ws319-p004](phase004/phase.md) | 5330 の実機: HEVC_v1 の stream ごとの表、Video Player の H.265 の GPU の道 1080p30/60 | cleared（2026-11-02 P4、Q1 の受け入れ待ち） | p003 |
 
 ## Resume point
 
 - 2026-10-30 Q1: 作成。WS318 の completed の後。
+- 2026-11-02 P4（q1926-i01）: p002 cleared（H.264 の GPU の道）、p003・p004 cleared（H.265 decode、HCP の long format、HEVC_v1 の Main 131 本が正しい）。残り: 1080p60 の late、H.264 encode・H.265 encode は未着手。試験は `plan/ws319/tests/`（run-5330-video.sh、make-clips.sh、probe-table.py、hcp/、hevc-slice/、gpu-hold/）。
