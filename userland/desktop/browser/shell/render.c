@@ -77,6 +77,9 @@ static int render_ask_ack(struct shell_render *render, uint32_t serial);
 static void render_requeue(struct shell_render *render, uint32_t serial);
 static void render_tell(struct shell_render *render);
 static int render_frame_fit(struct shell_cpu_frame *frame, uint32_t width, uint32_t height);
+static void render_take_overlay(struct shell_render *render);
+static int render_overlay_fit(struct shell_overlay *overlay, uint32_t width, uint32_t height);
+static void render_overlay_blit(const struct shell_overlay *overlay, struct shell_cpu_frame *frame);
 
 /*
  * Makes the drawing thread's lock and condition (before the view, whose
@@ -246,6 +249,72 @@ shell_render_ack(
 }
 
 /*
+ * Gives the drawing thread a picture to copy over the middle of every
+ * frame from now on (pixels NULL or a size 0: none), on the window's
+ * thread; it is copied, and the window is drawn again with it.  Memory
+ * that runs out leaves the picture as it was (a line says so).
+ */
+void
+shell_render_overlay(
+	struct shell_render *render,
+	const uint32_t *pixels,
+	uint32_t width,
+	uint32_t height)
+{
+	int error;
+
+	/* None is a size 0. */
+	if (pixels == NULL || width == 0U || height == 0U) {
+		width = 0U;
+		height = 0U;
+	}
+
+	/* The picture, copied under the lock, and the drawing thread told. */
+	kl_mutex_lock(&render->lock);
+
+	error = render_overlay_fit(&render->overlay, width, height);
+	if (error == 0) {
+		if (width != 0U)
+			memcpy(render->overlay.pixels, pixels, (size_t)width * (size_t)height * sizeof(uint32_t));
+		render->overlay_changed = 1;
+		kl_cond_broadcast(&render->changed);
+	}
+
+	kl_mutex_unlock(&render->lock);
+
+	/* Memory that ran out. */
+	if (error != 0) {
+		printf("ZBROWSER ERROR overlay error=%d\n", error);
+		fflush(stdout);
+	}
+}
+
+/*
+ * Places a picture copied over a frame of a size: in its middle, cut to
+ * the frame (the part of the picture left of and above the frame's edge
+ * when it is larger).  A frame without room gets a place of size 0.
+ */
+void
+shell_render_place_overlay(
+	const struct shell_overlay *overlay,
+	uint32_t width,
+	uint32_t height,
+	struct kl_rect *place)
+{
+	/* The picture's size, cut to the frame. */
+	place->width = (int)overlay->width;
+	place->height = (int)overlay->height;
+	if (place->width > (int)width)
+		place->width = (int)width;
+	if (place->height > (int)height)
+		place->height = (int)height;
+
+	/* In the middle. */
+	place->x = ((int)width - place->width) / 2;
+	place->y = ((int)height - place->height) / 2;
+}
+
+/*
  * Takes the CPU's frame the window's thread shows, on the window's
  * thread: the frame drawn last when a new one was drawn (*fresh 1; the
  * frame shown before goes back to the drawing thread), else the one taken
@@ -373,6 +442,10 @@ shell_render_close(
 	for (index = 0U; index < SHELL_CPU_FRAMES; index++)
 		free(render->frames[index].pixels);
 
+	/* The pictures copied over the frames. */
+	free(render->overlay.pixels);
+	free(render->drawn_overlay.pixels);
+
 	/* The condition and the lock, and nothing is held any more. */
 	kl_cond_destroy(&render->changed);
 	kl_mutex_destroy(&render->lock);
@@ -447,7 +520,7 @@ render_wait(
 		if (render->stop)
 			break;
 		due = 0;
-		if (render->committed || render->sized || retry)
+		if (render->committed || render->sized || render->overlay_changed || retry)
 			due = 1;
 		if (!render->has_commit)
 			due = 0;
@@ -470,6 +543,9 @@ render_wait(
 	render->configure = 0;
 
 	kl_mutex_unlock(&render->lock);
+
+	/* The picture over the frames, as it is now. */
+	render_take_overlay(render);
 }
 
 /*
@@ -524,7 +600,7 @@ render_gpu(
 		return 0;
 
 	/* The frame. */
-	result = shell_present_frame(present, render->view, &serial);
+	result = shell_present_frame(present, render->view, &render->drawn_overlay, &serial);
 
 	/* The compositor gave no image back in time: once more (the stop is looked at between). */
 	if (result == VK_TIMEOUT || result == VK_NOT_READY) {
@@ -604,6 +680,9 @@ render_cpu(
 		fprintf(stderr, "browser: cannot draw a frame: %s\n", strerror(error));
 		return 1;
 	}
+
+	/* The picture over it (the question's card), when there is one. */
+	render_overlay_blit(&render->drawn_overlay, frame);
 
 	/* The frame becomes the one drawn last; the one it replaces, not shown, is drawn into next. */
 	kl_mutex_lock(&render->lock);
@@ -739,4 +818,86 @@ render_frame_fit(
 
 	/* Succeeded: the frame is the size. */
 	return 0;
+}
+
+/* Takes the window's picture over the frames into the drawing thread's own copy, when it changed. */
+static void
+render_take_overlay(
+	struct shell_render *render)
+{
+	struct shell_overlay *mine;
+	int error;
+
+	/* The window's picture, copied under the lock. */
+	mine = &render->drawn_overlay;
+	kl_mutex_lock(&render->lock);
+
+	error = 0;
+	if (render->overlay_changed) {
+		error = render_overlay_fit(mine, render->overlay.width, render->overlay.height);
+		if (error == 0 && mine->width != 0U)
+			memcpy(mine->pixels, render->overlay.pixels, (size_t)mine->width * (size_t)mine->height * sizeof(uint32_t));
+		render->overlay_changed = 0;
+	}
+
+	kl_mutex_unlock(&render->lock);
+
+	/* Memory that ran out leaves no picture. */
+	if (error != 0)
+		mine->width = 0U;
+}
+
+/* Makes a picture's memory hold a size (0: none, the memory kept); 0, or ENOMEM. */
+static int
+render_overlay_fit(
+	struct shell_overlay *overlay,
+	uint32_t width,
+	uint32_t height)
+{
+	uint32_t *pixels;
+	size_t count;
+
+	/* None. */
+	overlay->width = 0U;
+	overlay->height = 0U;
+	if (width == 0U || height == 0U)
+		return 0;
+
+	/* Memory for more words when it holds too few (a size too large to count is refused). */
+	if ((size_t)width > SIZE_MAX / (size_t)height / sizeof(uint32_t))
+		return ENOMEM;
+	count = (size_t)width * (size_t)height;
+	if (count > overlay->capacity) {
+		pixels = realloc(overlay->pixels, count * sizeof(uint32_t));
+		if (pixels == NULL)
+			return ENOMEM;
+		overlay->pixels = pixels;
+		overlay->capacity = count;
+	}
+
+	/* Succeeded: the memory holds the size. */
+	overlay->width = width;
+	overlay->height = height;
+	return 0;
+}
+
+/* Copies the picture over a CPU's frame, in its middle. */
+static void
+render_overlay_blit(
+	const struct shell_overlay *overlay,
+	struct shell_cpu_frame *frame)
+{
+	struct kl_rect place;
+	int row;
+
+	/* No picture, or no room. */
+	if (overlay->width == 0U)
+		return;
+	shell_render_place_overlay(overlay, frame->width, frame->height, &place);
+
+	/* Each row of the picture that fits. */
+	for (row = 0; row < place.height; row++) {
+		memcpy(frame->pixels + (size_t)(place.y + row) * frame->width + (size_t)place.x,
+		    overlay->pixels + (size_t)row * overlay->width, (size_t)place.width * sizeof(uint32_t));
+	}
 }

@@ -1,0 +1,8 @@
+# The browser's texts that reach kl_tr through a variable (tools/i18n/tr.py reads this with the source).
+# The question about a page that does not respond (browser/shell/prompt.c prompt_english, drawn with kl_tr): its title, its
+# explanation ({1} the page's name, {2} the seconds its script has run), its buttons, and the page's name when it has none.
+msg	This page isn't responding
+msg	A script on {1} has been running for {2} seconds. You can wait for it or stop it.
+msg	Wait
+msg	Stop script
+msg	this page

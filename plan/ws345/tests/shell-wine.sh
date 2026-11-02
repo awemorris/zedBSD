@@ -12,7 +12,13 @@
 #     shell/latency.c) has no wait over 100 ms (the second start's, with the size loop that holds the window's
 #     thread in the system, is written to the summary, not judged).
 # Cases: busy (busy.html, a 30 s loop, the GPU), xhr (hung-xhr.html, a synchronous XMLHttpRequest to 192.0.2.1),
-# busy-cpu (busy.html with --no-gpu).  The screenshots and the logs are in OUT; the review copies in
+# busy-cpu (busy.html with --no-gpu).
+# ws345-p014, the question about a page that does not respond (cases prompt and prompt-cpu, --no-gpu): spin.html's
+# timer script runs 15 s:
+#  E. the question shows 8 to 13 s after "spin start" (PROMPT shown);
+#  F. its Stop script clicked (the button's place from the PROMPT shown line, under the title bar): PROMPT stop
+#     error=0, new "tick" lines in the 3 s after and no "spin end" (the page runs its timers again);
+#  and D (the waits are judged as in the main mode).  SHELL_WINE_CASES (default all) names the cases run.  The screenshots and the logs are in OUT; the review copies in
 # build/review/ws345-p007/.  Each Wine command runs under flock /tmp/zedbsd-wine.lock.  Last line: shell-wine: PASS
 # or shell-wine: FAIL.
 #
@@ -62,7 +68,7 @@ zip=$(ls "$build"/OmniGrammaton-*-win64.zip | head -1)
 mkdir -p "$out/extracted"
 unzip -q "$zip" -d "$out/extracted" || { echo "shell-wine: cannot extract $zip"; echo "shell-wine: FAIL"; exit 1; }
 dist=$out/extracted/OmniGrammaton
-cp plan/ws345/tests/pages/busy.html plan/ws345/tests/pages/hung-xhr.html "$dist/"
+cp plan/ws345/tests/pages/busy.html plan/ws345/tests/pages/hung-xhr.html plan/ws345/tests/pages/spin.html "$dist/"
 
 # The prefix, made once.
 if [ ! -f "$prefix/system.reg" ]; then
@@ -163,6 +169,41 @@ fi
 sleep 1
 import -window root "$out/4-location.png"
 fi
+if [ "$mode" = prompt ]; then
+# E. The question 10 s into the script.
+xdotool mousemove $((X + 100)) $((Y + 500))
+begin=$(date +%s)
+if more '^ZBROWSER PROMPT shown ' 0 16; then
+	echo "shown $(($(date +%s) - begin)) $(tr -d '\r' < "$out/first.out" | grep '^ZBROWSER PROMPT shown ' | tail -1)" >> "$out/steps.txt"
+else
+	echo "shown missing" >> "$out/steps.txt"
+fi
+sleep 1
+import -window root "$out/5-asked.png"
+# F. Stop script, at its place under the title bar (the window's height less the content's).
+height=$(tr -d '\r' < "$out/first.out" | grep -m1 '^ZBROWSER READY' | sed -n 's/.* height=\([0-9]*\).*/\1/p')
+top=$((HEIGHT - ${height:-$HEIGHT}))
+set -- $(tr -d '\r' < "$out/first.out" | grep '^ZBROWSER PROMPT shown ' | tail -1 | sed -n 's/.* stop=\([0-9]*\),\([0-9]*\),\([0-9]*\),\([0-9]*\).*/\1 \2 \3 \4/p')
+if [ -n "${1:-}" ]; then
+	sx=$((X + $1 + $3 / 2))
+	sy=$((Y + top + $2 + $4 / 2))
+	ticks=$(lines 'CONSOLE level=0 tick ')
+	xdotool mousemove $((sx - 3)) "$sy"
+	sleep 0.3
+	xdotool mousemove "$sx" "$sy"
+	sleep 0.3
+	xdotool click 1
+	if more '^ZBROWSER PROMPT stop task=[0-9]* error=0' 0 5; then
+		sleep 3
+		echo "stop ok at $sx,$sy ticks $ticks $(lines 'CONSOLE level=0 tick ') ends $(lines 'CONSOLE level=0 spin end')" >> "$out/steps.txt"
+	else
+		echo "stop missing at $sx,$sy" >> "$out/steps.txt"
+	fi
+else
+	echo "stop no button" >> "$out/steps.txt"
+fi
+import -window root "$out/6-stopped.png"
+fi
 # D. Ctrl+Q.
 xdotool key ctrl+q
 for second in $(seq 20); do
@@ -225,9 +266,60 @@ run_case() {
 	fi
 }
 
-run_case busy busy.html 'busy start' 'busy end'
-run_case xhr hung-xhr.html 'xhr start' 'xhr end'
-run_case busy-cpu busy.html 'busy start' 'busy end' --no-gpu
+# One case of the question: run_prompt NAME [OPTION].
+run_prompt() {
+	name=$1
+	shift
+	mkdir -p "$out/$name"
+	WINEPREFIX=$prefix VK_ICD_FILENAMES=$lvp timeout 600 flock "$lock" xvfb-run -a -s "-screen 0 1280x800x24" \
+	    sh "$out/case.sh" "$dist" "$out/$name" prompt 'spin start' 'spin end' "$@" spin.html > "$out/$name/xvfb.log" 2>&1
+	tr -d '\r' < "$out/$name/first.out" > "$out/$name/first.txt" 2> /dev/null
+	for picture in "$out/$name"/*.png; do
+		[ -f "$picture" ] && cp "$picture" "$review/$name-$(basename "$picture")"
+	done
+	steps=$out/$name/steps.txt
+	line=$(grep '^shown ' "$steps" 2> /dev/null)
+	took=$(echo "$line" | sed -n 's/^shown \([0-9]*\) .*/\1/p')
+	if [ -n "$took" ] && [ "$took" -ge 8 ] && [ "$took" -le 13 ]; then
+		result PASS "$name" shown "$(echo "$line" | cut -c1-160)"
+	else
+		result FAIL "$name" shown "'$line' $(cat "$out/$name/notes.txt" 2> /dev/null | tr '\n' ';')"
+	fi
+	line=$(grep '^stop ' "$steps" 2> /dev/null)
+	before=$(echo "$line" | sed -n 's/.* ticks \([0-9]*\) .*/\1/p')
+	after=$(echo "$line" | sed -n 's/.* ticks [0-9]* \([0-9]*\) .*/\1/p')
+	ends=$(echo "$line" | sed -n 's/.* ends \([0-9]*\).*/\1/p')
+	if [ -n "$after" ] && [ "$after" -gt "$before" ] && [ "$ends" = 0 ] 2> /dev/null; then
+		result PASS "$name" stop "$line ($(grep -m1 '^ZBROWSER PROMPT stop ' "$out/$name/first.txt"))"
+	else
+		result FAIL "$name" stop "'$line'"
+	fi
+	latency=$(grep '^ZBROWSER LATENCY ' "$out/$name/first.txt" | tail -1)
+	over=$(echo "$latency" | sed -n 's/.* over_100ms=\([0-9]*\).*/\1/p')
+	samples=$(echo "$latency" | sed -n 's/.* samples=\([0-9]*\).*/\1/p')
+	if [ "$over" = 0 ] && [ "${samples:-0}" -gt 100 ] 2> /dev/null; then
+		result PASS "$name" latency "$latency"
+	else
+		result FAIL "$name" latency "'$latency'"
+	fi
+	if grep -q '^ZBROWSER ERROR' "$out/$name/first.txt"; then
+		result FAIL "$name" errors "$(grep -m1 '^ZBROWSER ERROR' "$out/$name/first.txt")"
+	else
+		result PASS "$name" errors "no ZBROWSER ERROR line"
+	fi
+}
+
+cases=${SHELL_WINE_CASES:-busy xhr busy-cpu prompt prompt-cpu}
+for each in $cases; do
+	case $each in
+	busy) run_case busy busy.html 'busy start' 'busy end' ;;
+	xhr) run_case xhr hung-xhr.html 'xhr start' 'xhr end' ;;
+	busy-cpu) run_case busy-cpu busy.html 'busy start' 'busy end' --no-gpu ;;
+	prompt) run_prompt prompt ;;
+	prompt-cpu) run_prompt prompt-cpu --no-gpu ;;
+	*) result FAIL "$each" case "no such case" ;;
+	esac
+done
 sync
 echo "shell-wine: $passed passed, $failed failed ($out)"
 if [ $status -eq 0 ]; then

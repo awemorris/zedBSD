@@ -15,5 +15,7 @@ KEILAND_BROWSER_SOURCES := $(KEILAND_BROWSER_DIR)/main.c \
 	$(KEILAND_BROWSER_DIR)/shell/threads.c \
 	$(KEILAND_BROWSER_DIR)/shell/render.c \
 	$(KEILAND_BROWSER_DIR)/shell/latency.c \
+	$(KEILAND_BROWSER_DIR)/shell/prompt.c \
+	$(KEILAND_BROWSER_DIR)/shell/unresponsive.c \
 	userland/desktop/libbrowser/base/os-error.c \
 	userland/desktop/picture/png-write.c

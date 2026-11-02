@@ -20,6 +20,7 @@
 
 #include "shell/shell.h"
 #include "shell/touch.h"
+#include "shell/unresponsive.h"
 
 #include <keiland/keiland.h>
 
@@ -151,6 +152,10 @@ struct shell_window {
 	/* Whether the desktop's appearance (light or dark) changed since it was last taken. */
 	int themed;
 
+	/* Whether the desktop's language changed since it was last taken, and the one it changed to ("en", "ja", ...). */
+	int languaged;
+	char language[KL_TR_NAME_MAX + 1U];
+
 	/* The modifiers held (SHELL_MOD_*), and the pointer's place in the window. */
 	uint32_t modifiers;
 	int pointer_x;
@@ -219,8 +224,28 @@ struct shell_present {
 	VkFence fence;
 	int in_flight;
 
+	/* Whether the swapchain's images take copies (the question's card, copied over the page), and the card's host memory. */
+	int copy;
+	VkBuffer overlay;
+	VkDeviceMemory overlay_memory;
+	void *overlay_mapped;
+	VkDeviceSize overlay_size;
+
 	/* The Vulkan call that failed last, for the error line. */
 	const char *operation;
+};
+
+/*
+ * A picture copied over the page's frame in its middle (the question
+ * about a page that does not respond, prompt.c): 0xAARRGGBB words, width
+ * by height, packed rows (width 0: none), and how many words the memory
+ * holds.
+ */
+struct shell_overlay {
+	uint32_t *pixels;
+	uint32_t width;
+	uint32_t height;
+	size_t capacity;
 };
 
 /*
@@ -276,6 +301,11 @@ struct shell_cpu_frame {
  *   it drew last (ready, new for the window when fresh), and the one the
  *   window shows (front, the window's own).
  *
+ * - overlay and overlay_changed: the picture the window's thread gives to
+ *   copy over every frame (shell_render_overlay; width 0: none), and
+ *   whether it changed since the drawing thread took it; the drawing
+ *   thread copies it into drawn_overlay, its own, before it draws.
+ *
  * told is set (atomically) when the drawing thread woke the window's
  * thread and cleared by the window's thread before it reads the state, so
  * that a run of frames wakes it once.
@@ -311,7 +341,47 @@ struct shell_render {
 	unsigned ready;
 	unsigned front;
 	int fresh;
+	struct shell_overlay overlay;
+	int overlay_changed;
+	struct shell_overlay drawn_overlay;
 	int told;
+};
+
+/*
+ * The question about a page that does not respond (prompt.c), all the
+ * window's thread's: the rule of when (unresponsive.c), the widgets' input
+ * and the text it is drawn with (ui NULL: never asked), whether the card
+ * shows and for which task, how long it had run then in seconds, the
+ * page's name and the card's words, the card's memory (pixel_count words)
+ * and its size and place in the window (whose size it was laid out in),
+ * the lines of its explanation, its buttons in the card, and whether they
+ * still move (drawn again soon).
+ */
+struct shell_prompt {
+	struct shell_unresponsive rule;
+	struct kl_ui *ui;
+	struct kl_text text;
+	int text_open;
+	int shown;
+	uint32_t task;
+	uint32_t seconds;
+	char name[128];
+	char title[256];
+	char body[1024];
+	char wait_label[64];
+	char stop_label[64];
+	uint32_t *pixels;
+	size_t pixel_count;
+	int width;
+	int height;
+	int x;
+	int y;
+	uint32_t window_width;
+	uint32_t window_height;
+	int lines;
+	struct kl_rect wait;
+	struct kl_rect stop;
+	int moving;
 };
 
 /*
@@ -439,7 +509,7 @@ void shell_cpu_close(struct shell_cpu *cpu);
 /* The presenter (present.c). */
 VkResult shell_present_open(struct shell_present *present, struct shell_window *window, struct browser_view *view);
 VkResult shell_present_resize(struct shell_present *present, struct browser_view *view, uint32_t width, uint32_t height);
-VkResult shell_present_frame(struct shell_present *present, struct browser_view *view, uint64_t *serial);
+VkResult shell_present_frame(struct shell_present *present, struct browser_view *view, const struct shell_overlay *overlay, uint64_t *serial);
 void shell_present_close(struct shell_present *present, struct browser_view *view);
 
 /* The drawing thread (render.c). */
@@ -451,8 +521,20 @@ void shell_render_resize(struct shell_render *render, uint32_t width, uint32_t h
 void shell_render_ack(struct shell_render *render);
 const struct shell_cpu_frame *shell_render_cpu_frame(struct shell_render *render, int *fresh);
 int shell_render_status(struct shell_render *render, unsigned long *shown, uint32_t *width, uint32_t *height);
+void shell_render_overlay(struct shell_render *render, const uint32_t *pixels, uint32_t width, uint32_t height);
+void shell_render_place_overlay(const struct shell_overlay *overlay, uint32_t width, uint32_t height, struct kl_rect *place);
 void shell_render_stop(struct shell_render *render, struct shell_window *window);
 void shell_render_close(struct shell_render *render);
+
+/* The question about a page that does not respond (prompt.c). */
+void shell_prompt_open(struct shell_prompt *prompt, const struct browser_fonts *fonts, const char *language);
+int shell_prompt_round(struct shell_prompt *prompt, struct browser_view *view, struct shell_render *render, uint64_t now_ms);
+int shell_prompt_input(struct shell_prompt *prompt, struct browser_view *view, struct shell_render *render, const struct shell_event *event,
+    uint64_t now_ms);
+void shell_prompt_resize(struct shell_prompt *prompt, struct shell_render *render, uint32_t width, uint32_t height, uint64_t now_ms);
+void shell_prompt_redraw(struct shell_prompt *prompt, struct shell_render *render, uint64_t now_ms);
+void shell_prompt_language(struct shell_prompt *prompt, struct shell_render *render, const char *language);
+void shell_prompt_close(struct shell_prompt *prompt);
 
 /* The diagnostic clock of the window's thread (latency.c). */
 int shell_latency_start(struct shell_latency *latency, struct kl_app *app);

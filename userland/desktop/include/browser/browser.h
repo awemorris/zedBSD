@@ -457,6 +457,24 @@ void browser_view_presented(struct browser_view *view, uint64_t serial);
 int browser_view_request_image(struct browser_view *view, float x, float y);
 
 /*
+ * A page that does not respond (the program's question "this page isn't
+ * responding: wait or stop"): browser_view_script_busy reports, from any
+ * thread and reading only, whether a task of the page's scripts runs now
+ * (a script, a timer's callback, an event's listeners, the page's round
+ * with its loads; the iframes' too): 1 with its number in *task and how
+ * long it has run, in milliseconds, or 0 (both 0) between tasks and in a
+ * view of the caller's thread.  browser_view_stop_script, on the program's
+ * thread, ends the task of that number: its scripts stop where they are
+ * (no catch nor finally runs, and what it queued is dropped), what it
+ * waits for (a synchronous XMLHttpRequest) is woken, and the page stays:
+ * its next events and timers run.  It reports 0, ESRCH when that task does
+ * not run any more (another may: it is left alone), or ENOTSUP in a view
+ * of the caller's thread.
+ */
+int browser_view_script_busy(const struct browser_view *view, uint32_t *task, uint32_t *milliseconds);
+int browser_view_stop_script(struct browser_view *view, uint32_t task);
+
+/*
  * Commits text as browser_view_commit_text does, for the text input's
  * session the program saw (browser_view_text_session): when the page's
  * session has changed meanwhile (the focus moved), the text is dropped, so

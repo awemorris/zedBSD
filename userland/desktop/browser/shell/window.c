@@ -51,6 +51,7 @@ static void window_push_motion(struct shell_window *window);
 static void window_pad_push(struct shell_window *window, unsigned type, const struct kl_window_event *input);
 static void window_touch_push(struct shell_window *window, unsigned type, const struct kl_window_event *input);
 static uint32_t window_modifiers(unsigned modifiers);
+static void window_language(struct shell_window *window, const char *language);
 
 /*
  * Connects to the compositor: the application the window will be made on
@@ -121,6 +122,8 @@ shell_window_open(
 			window_event(window, &event.input);
 		if (event.kind == KL_APP_THEME)
 			window->themed = 1;
+		if (event.kind == KL_APP_LANGUAGE)
+			window_language(window, event.language);
 	}
 
 	/* Succeeded: the window can be drawn into. */
@@ -168,6 +171,10 @@ shell_window_dispatch(
 		/* The desktop's appearance changed: the main loop gives the view its scheme. */
 		if (event.kind == KL_APP_THEME)
 			window->themed = 1;
+
+		/* The desktop's language changed: the main loop words the shell's question in it. */
+		if (event.kind == KL_APP_LANGUAGE)
+			window_language(window, event.language);
 
 		/* The diagnostic clock's tick, timed as it is taken. */
 		if (event.kind == KL_APP_POST &&
@@ -262,6 +269,17 @@ shell_clock(void)
 {
 	/* libkeiland's clock, in milliseconds. */
 	return kl_clock_us() / 1000U;
+}
+
+/* Notes the desktop's language changed to one, for the main loop (the last change told is the language now). */
+static void
+window_language(
+	struct shell_window *window,
+	const char *language)
+{
+	/* The language's name and the mark. */
+	(void)snprintf(window->language, sizeof(window->language), "%s", language);
+	window->languaged = 1;
 }
 
 /* Turns one input of the window into the shell's. */
