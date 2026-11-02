@@ -198,6 +198,9 @@ sslc_record_header(
 				if (header_length != 1U)
 					return EPROTO;
 				minimum = 1;
+			} else if (header_type != SSLC_CT_APPLICATION_DATA) {
+				/* Any other outer type on a protected TLS 1.3 direction is unexpected, whatever its length (5). */
+				return EPROTO;
 			}
 		}
 	}

@@ -566,7 +566,8 @@ test_header(void)
 		for (value = 0; value < 256U; value++) {
 			make_header(header, value, 0x0303U, 100U);
 			result = sslc_record_header(&dirs[kind], header, 0, &type, &length);
-			if (kind == 1U && value == 20U) {
+			if (kind == 1U && value >= 20U && value <= 22U) {
+				/* A protected TLS 1.3 direction takes application_data only (and a 1-byte change_cipher_spec). */
 				CHECK(result == EPROTO);
 			} else if (value >= 20U && value <= 23U) {
 				CHECK(result == 0);
@@ -581,7 +582,7 @@ test_header(void)
 	/* The version, when none is demanded: 0x0301 to 0x0303 only. */
 	for (kind = 0; kind < 4U; kind++) {
 		for (version = 0; version < 0x10000U; version += (version < 0x400U ? 1U : 0x101U)) {
-			make_header(header, 22, version, 100U);
+			make_header(header, 23, version, 100U);
 			result = sslc_record_header(&dirs[kind], header, 0, &type, &length);
 			if (version >= 0x0301U && version <= 0x0303U)
 				CHECK(result == 0);
@@ -593,7 +594,7 @@ test_header(void)
 	/* The version, when 0x0303 is demanded: that one only. */
 	for (kind = 0; kind < 4U; kind++) {
 		for (version = 0x0300U; version <= 0x0305U; version++) {
-			make_header(header, 22, version, 100U);
+			make_header(header, 23, version, 100U);
 			result = sslc_record_header(&dirs[kind], header, 0x0303U, &type, &length);
 			if (version == 0x0303U)
 				CHECK(result == 0);
@@ -662,9 +663,13 @@ test_header(void)
 		CHECK(sslc_record_header(&dirs[1], header, 0x0303U, &type, &length) == EPROTO);
 	}
 
-	/* On TLS 1.3 any other type below the protected minimum is short. */
-	make_header(header, 22, 0x0303U, 16);
+	/* On TLS 1.3 application_data below the protected minimum is short; another type is unexpected whatever its length. */
+	make_header(header, 23, 0x0303U, 16);
 	CHECK(sslc_record_header(&dirs[1], header, 0x0303U, &type, &length) == EBADMSG);
+	make_header(header, 22, 0x0303U, 16);
+	CHECK(sslc_record_header(&dirs[1], header, 0x0303U, &type, &length) == EPROTO);
+	make_header(header, 21, 0x0303U, 2);
+	CHECK(sslc_record_header(&dirs[1], header, 0x0303U, &type, &length) == EPROTO);
 
 	/* On TLS 1.2 a change_cipher_spec record follows the protected minimum (it is the last plaintext one, before keys). */
 	make_header(header, 20, 0x0303U, 1);

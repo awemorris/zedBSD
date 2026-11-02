@@ -997,7 +997,7 @@ sslc_conn_header_failure(
 	if (length == 0U)
 		return sslc_conn_fail(conn, EPROTO, SSL_R_BAD_LENGTH, SSLC_ALERT_DECODE_ERROR);
 
-	/* Anything else the module refused (a change_cipher_spec record that is not one byte long). */
+	/* Anything else the module refused (a change_cipher_spec record that is not one byte long, or another type than application_data on a protected TLS 1.3 direction). */
 	return sslc_conn_fail(conn, EPROTO, SSL_R_UNEXPECTED_MESSAGE, SSLC_ALERT_UNEXPECTED_MESSAGE);
 }
 
