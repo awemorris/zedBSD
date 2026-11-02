@@ -237,8 +237,14 @@ bind_window_create(
 	struct bind_window *made;
 	int error;
 
-	/* A collectible window's requests end when it is retired (bind_window_detach), before it can be collected. */
+	/*
+	 * Collectible hosts cannot leave asynchronous callbacks in the embedder:
+	 * one that makes requests must cancel them, which the window does as it
+	 * is retired (bind_window_detach), before it can be collected.
+	 */
 	*window = NULL;
+	if (realm->managed && host->request != NULL && host->request_cancel == NULL)
+		return ENOTSUP;
 
 	/* A managed realm and document belong to exactly one live window. */
 	if (realm->managed && realm->host != NULL)
