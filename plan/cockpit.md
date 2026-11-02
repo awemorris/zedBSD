@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) p007 | RTX 2070 の Vulkan Video | p005（nvrtx の H.265 decode）cleared。H.265 の絵を ffmpeg と一致させる実機の debug（q1922） | p007 の後、今日は終了（encode は次に再開） |
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（09:46）。p006 cleared: H.265 の decode（HEVC_v1 128 本一致）と Video Player の GPU の道での H.264・H.265 の再生。今日の作業は終わり | 次の指示で encode（p008）から再開 |
-| P3 | — | Pi 5 の作業 | 返却（10:17）。WS321 p001〜p003 cleared: Pi 5 の H.265 decode（HEVC_v1 128 本一致）と Video Player の GPU の道の再生（1080p30 600・遅れ 0）。driver は Pi 5 で既定 on | 次を待つ |
+| P3 | [BUG-409](bugs/BUG-409.md) | ld.so | dlclose が DF_1_NODELETE を守らない件（q1930） | — |
 | P4 | [WS319](ws319/ws.md) | i915（5330）の Vulkan Video | H.265 decode の実装と Video Player の H.264 の確かめ（q1926） | — |
 | P5 | — | Windows 版ブラウザ | 返却（08:12）。BUG-400（storage-test の時々の FAIL、試験の側）fixed。以後ブラウザは P8 | 次を待つ |
 | P6 | [WS335](ws335/ws.md) p029 | libssl-compat・libcrypto-compat | TLS の handshake の本体（q1928、Opus） | p030〜 |

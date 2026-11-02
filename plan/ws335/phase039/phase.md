@@ -2,7 +2,7 @@
 
 # ws335-p039: zedBSD の libcrypto-compat.so（build の規則と package・image の登録、TLS は無し）
 
-Status: 実装済み・試験 PASS（2026-11-02 10:20 Sonnet 5.5 q1925-i01。cleared は Q1）。前: in-progress（2026-11-02 09:40）、planned（2026-11-01 p001 が作成。起動は Q1。依存: p023、p024）
+Status: cleared（2026-11-02 10:21 Q1）。前: 実装済み・試験 PASS（2026-11-02 10:20 Sonnet 5.5 q1925-i01。cleared は Q1）。前: in-progress（2026-11-02 09:40）、planned（2026-11-01 p001 が作成。起動は Q1。依存: p023、p024）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。共有の `platform/common/userland-dynamic.mk` を変えるので、merge の衝突は Q1 が解く。
 
 - 目的: [WS336](../../ws336/ws.md)（自前の ssh・sshd）の zedBSD の側の Phase が、TLS の全部（p025〜p032）と統合（p033）を待たずに `/lib/libcrypto-compat.so` へ link できるようにする（2026-11-01 Q1 の決め、P5 の案 B）。
