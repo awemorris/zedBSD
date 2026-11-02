@@ -117,7 +117,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-413 · q1942 · WS345 · KL_VERSION 108（106 は BUG-396 の reload、107 は BUG-404 の題の帯の進み具合）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-414 · q1943 · WS345 · KL_VERSION 108（106 は BUG-396 の reload、107 は BUG-404 の題の帯の進み具合）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
