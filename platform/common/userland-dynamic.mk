@@ -58,6 +58,19 @@ $(DYNAMIC_DIR)/libcrypto-compat.so: $(DYNAMIC_CRYPTO_COMPAT_OBJS) $(DYNAMIC_DIR)
 	$(PYTHON) tools/build/check-dynamic-elf.py --machine $(DYNAMIC_ELF_MACHINE) --role shared-library \
  --needed libc.so --soname libcrypto-compat.so $@
 
+# libssl-compat: the TLS client of the browser, over libcrypto-compat (whose cryc_ names it calls) and the C
+# library.  It stays mapped once loaded (-z nodelete), as libcrypto-compat does.
+DYNAMIC_SSL_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libssl-compat)
+
+$(DYNAMIC_DIR)/libssl-compat.so: $(DYNAMIC_SSL_COMPAT_OBJS) $(DYNAMIC_DIR)/libcrypto-compat.so $(DYNAMIC_DIR)/libc.so \
+	userland/base/libssl-compat/exports.map tools/build/check-dynamic-elf.py
+	$(LD) $(DYNAMIC_LINK_LDFLAGS) -shared -soname libssl-compat.so --hash-style=both -Bsymbolic-functions \
+ -z defs -z now -z relro -z separate-code -z nodelete -z stack-size=0x100000 \
+ --version-script=userland/base/libssl-compat/exports.map \
+ $(DYNAMIC_SSL_COMPAT_OBJS) -L$(DYNAMIC_DIR) -l:libcrypto-compat.so -l:libc.so -o $@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine $(DYNAMIC_ELF_MACHINE) --role shared-library \
+ --needed libcrypto-compat.so --needed libc.so --soname libssl-compat.so $@
+
 # libpng-compat (ws071-p010): libpng's simplified API of the desktop programs, over libz-compat.
 DYNAMIC_PNG_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libpng-compat)
 
