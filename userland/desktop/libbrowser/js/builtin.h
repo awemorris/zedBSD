@@ -44,6 +44,8 @@ int js_builtin_install_bigint(struct vm_realm *realm);
 int js_builtin_install_typed(struct vm_realm *realm);
 int js_typed_bytes(vm_value value, unsigned char **bytes, size_t *length);
 int js_typed_random_fill(vm_value value);
+void js_typed_detach(vm_value value);
+int js_typed_detached(vm_value value);
 int js_builtin_install_iterator(struct vm_realm *realm);
 int js_builtin_install_collection(struct vm_realm *realm);
 int js_builtin_install_uri(struct vm_realm *realm);

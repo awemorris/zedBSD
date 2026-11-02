@@ -58,6 +58,8 @@ struct typed_buffer {
 	struct vm_cell cell;
 	size_t length;
 	unsigned char *data;
+	/* Transferred to another agent: it has no bytes (its views keep the ones they had, which nothing reads anew). */
+	int detached;
 };
 
 /* A typed array's view of a buffer. */
@@ -369,6 +371,33 @@ typed_buffer_of(
 	return (struct typed_buffer *)vm_value_as_cell(object->internal);
 }
 
+/* Detaches an ArrayBuffer transferred with a message (nothing for another value): its byteLength is 0 from now on. */
+void
+js_typed_detach(
+	vm_value value)
+{
+	struct typed_buffer *buffer;
+
+	/* The length only: its views still point at the bytes, which stay until the buffer goes. */
+	buffer = typed_buffer_of(value);
+	if (buffer == NULL)
+		return;
+	buffer->length = 0;
+	buffer->detached = 1;
+}
+
+/* Tells whether an ArrayBuffer was detached. */
+int
+js_typed_detached(
+	vm_value value)
+{
+	struct typed_buffer *buffer;
+
+	/* Only a buffer can be. */
+	buffer = typed_buffer_of(value);
+	return buffer != NULL && buffer->detached;
+}
+
 /* Reports the bytes of an ArrayBuffer, a typed array or a DataView (for the host's own users). */
 int
 js_typed_bytes(
@@ -575,6 +604,7 @@ typed_make_buffer(
 	if (buffer == NULL)
 		return ENOMEM;
 	buffer->length = length;
+	buffer->detached = 0;
 	buffer->data = calloc(length == 0 ? 1U : length, 1U);
 	if (buffer->data == NULL)
 		return ENOMEM;

@@ -56,6 +56,7 @@ static int frame_load_inline(void *context, struct dom_element *script);
 static int frame_load_xml_scripts(struct bind_window *window);
 static int frame_load_events(struct frame_load *load, struct bind_window *window);
 static void frame_ring(struct page *page, void *runner);
+static int frame_load_remote(struct frame_load *load);
 static int frame_threads_walk(struct page *page, struct bind_window *window, int resume);
 
 /*
@@ -90,6 +91,8 @@ page_set_frame_calls(
 	if (page->window != NULL) {
 		page->window->host.frame_attach = calls != NULL ? page_frame_attach : NULL;
 		page->window->host.frame_detach = calls != NULL ? page_frame_detach : NULL;
+		page->window->host.remote = calls != NULL ? calls->remote : NULL;
+		page->window->host.remote_context = context;
 	}
 }
 
@@ -133,11 +136,14 @@ page_frame_detach(
 {
 	struct page *page;
 
-	/* Only a thread the page's calls gave. */
+	/* Only what the page's calls gave: the frame of another agent it shows, then its thread. */
 	page = context;
-	if (page->frame_calls == NULL || element->frame_thread == NULL)
+	if (page->frame_calls == NULL)
 		return;
-	page->frame_calls->detach(page->frame_calls_context, element);
+	if (element->frame_remote != NULL && page->frame_calls->remote_close != NULL)
+		page->frame_calls->remote_close(page->frame_calls_context, element);
+	if (element->frame_thread != NULL)
+		page->frame_calls->detach(page->frame_calls_context, element);
 }
 
 /* Ends the threads of a page's iframes, nested ones too, as the page is put away for going back (it keeps its documents). */
@@ -191,6 +197,12 @@ frame_threads_walk(
 		element = NULL;
 		if (walk->type == DOM_ELEMENT && dom_element_is(walk, DOM_NS_HTML, DOM_TAG_IFRAME))
 			element = (struct dom_element *)walk;
+		if (element != NULL && !resume && element->frame_remote != NULL && page->frame_calls->remote_close != NULL) {
+			/* A frame of another agent is not kept: the iframe loads its source again when the page is shown again. */
+			page->frame_calls->remote_close(page->frame_calls_context, element);
+			element->child_load_seen = 0;
+			element->child_navigation = NULL;
+		}
 		if (element != NULL && !resume && element->frame_thread != NULL)
 			page->frame_calls->detach(page->frame_calls_context, element);
 		if (element != NULL && resume && element->frame_thread == NULL && element->child_context != NULL) {
@@ -863,6 +875,18 @@ frame_load_activate(
 			return 0;
 	}
 
+	/* A document of another origin, where the embedder gives such frames agents of their own, goes to one; one of this agent ends the frame of another the iframe shows. */
+	if (load->element->tag == DOM_TAG_IFRAME && load->page->frame_calls != NULL && load->page->frame_calls->remote_load != NULL) {
+		parent = load->element->node.document->view;
+		if (!load->blank && !load->srcdoc && parent != NULL && !parent->detached && !bind_frame_sandboxed(load->element) &&
+		    bind_frame_foreign(parent, wb_buffer_string(&load->response.url), load->response.url.length))
+			return frame_load_remote(load);
+		if (load->element->frame_remote != NULL) {
+			load->page->frame_calls->remote_close(load->page->frame_calls_context, load->element);
+			load->element->frame_proxy = NULL;
+		}
+	}
+
 	/* Protect a not-yet-published Document and the executing realm across every VM allocation. */
 	roots[0] = NULL;
 	roots[1] = NULL;
@@ -989,6 +1013,161 @@ release_roots:
 
 	/* Succeeded: only an actual supported current resource could produce a load event. */
 	return 0;
+}
+
+/*
+ * Shows a response of another agent's origin in the frame of another
+ * agent the iframe has (or a new one): the document it shows now is left
+ * (pagehide, unload) and its window retired, and the embedder loads the
+ * response on the frame's own thread; the iframe's load event and the
+ * page's wait for it come when that document loaded (page_remote_loaded).
+ */
+static int
+frame_load_remote(
+	struct frame_load *load)
+{
+	struct page_remote_response response;
+	struct bind_window *parent;
+	struct bind_window *leaving;
+	struct vm_realm *realm;
+	int canceled;
+	int current;
+	int error;
+
+	/* The document shown now, left for good. */
+	parent = load->element->node.document->view;
+	realm = (struct vm_realm *)load->element->child_context;
+	leaving = realm != NULL ? realm->host : NULL;
+	if (leaving != NULL && leaving->document->resource_url != NULL) {
+		bind_window_set_unloading(leaving);
+		error = bind_fire_page_transition(leaving, "pagehide", 0);
+		if (error != 0)
+			return error;
+		current = frame_load_current(load);
+		if (!current)
+			return 0;
+		error = bind_fire_event(leaving, NULL, "unload", BIND_EVENT_DOCUMENT, &canceled);
+		if (error != 0)
+			return error;
+		current = frame_load_current(load);
+		if (!current)
+			return 0;
+	}
+	bind_frame_retire(parent, load->element);
+
+	/* The response, to the frame's thread. */
+	response.url = wb_buffer_string(&load->response.url);
+	response.mime = wb_buffer_string(&load->response.content_type);
+	response.mime_length = load->response.content_type.length;
+	response.body = load->response.body.data;
+	response.length = load->response.body.length;
+	error = load->page->frame_calls->remote_load(load->page->frame_calls_context, load->page, load->element, &response);
+	if (error != 0) {
+		bind_console(parent, BIND_CONSOLE_ERROR, "A frame of another origin could not be shown: no thread could run it (too many frames, or the system refused one)");
+		return error == ENOMEM ? ENOMEM : 0;
+	}
+	load->element->child_loaded_epoch = load->element->child_epoch;
+
+	/* Succeeded: the frame loads on its thread; the parent sees it through its proxy. */
+	return page_record_visited(load->page, &load->response.url);
+}
+
+/*
+ * Gives the number of the frame item of an iframe that shows a frame of
+ * another agent (0 for another), told the size the page lays it out at
+ * (a layout tree's frame_remote; on the page's thread or the style
+ * thread).
+ */
+uint64_t
+page_frame_remote(
+	void *context,
+	const struct dom_element *element,
+	layout_unit width,
+	layout_unit height,
+	float zoom)
+{
+	struct page *page;
+
+	UNUSED_PARAMETER(zoom);
+
+	/* Only the frames the page's calls gave. */
+	page = context;
+	if (element->frame_remote == NULL || page->frame_calls == NULL || page->frame_calls->remote_frame == NULL)
+		return 0;
+	return page->frame_calls->remote_frame(page->frame_calls_context, element, (int)layout_to_px(width), (int)layout_to_px(height));
+}
+
+/* A frame of another agent the page shows started to load a document: the window's load waits for it (the page's tasks held). */
+void
+page_remote_loading(
+	struct page *page)
+{
+	/* One more. */
+	page->remote_loads++;
+}
+
+/*
+ * A frame of another agent the page shows loaded its document (fire), or
+ * ended before it did: the iframe's load event fires, and the window's
+ * load once nothing else is waited for (on the page's own thread; a
+ * frame's thread wakes it).  The page's tasks are held.
+ */
+int
+page_remote_loaded(
+	struct page *page,
+	struct dom_element *element,
+	int fire)
+{
+	struct bind_window *parent;
+	int canceled;
+	int error;
+
+	/* One less; a frame that ended (inside the removal of its iframe, say) leaves the rest to the page's own thread's next round. */
+	if (page->remote_loads != 0)
+		page->remote_loads--;
+	if (!fire) {
+		frame_ring(page, NULL);
+		return 0;
+	}
+
+	/* The iframe's load. */
+	parent = element->node.document->view;
+	if (parent != NULL && !parent->detached) {
+		error = bind_fire_event(parent, &element->node, "load", 0, &canceled);
+		if (error != 0)
+			return error;
+	}
+
+	/* The window's, on the page's own thread. */
+	if (bind_thread_runner() != NULL) {
+		frame_ring(page, NULL);
+		return 0;
+	}
+	return page_fire_load_resume(page);
+}
+
+/*
+ * Points an iframe that shows a frame of another agent at a URL (its
+ * document's script, a window that may navigate it): the page loads it as
+ * a script's navigation of a frame, at its next checkpoint, into a frame of
+ * another agent or of its own as its origin says.  The page's tasks are held.
+ */
+int
+page_remote_navigate(
+	struct page *page,
+	struct dom_element *element,
+	const char *url)
+{
+	struct vm_string *string;
+
+	/* The location is a string of the heap, which the element keeps alive. */
+	string = vm_string_from_utf8(page->heap, url, strlen(url));
+	if (string == NULL)
+		return ENOMEM;
+	element->child_navigation = string;
+
+	/* Started at the next checkpoint (this one, unless one runs). */
+	return page_frames_checkpoint(page);
 }
 
 /* Selects HTML or strictly parses the full XML input before publishing any native graph. */
@@ -1452,6 +1631,7 @@ frame_load_events(
 /* Gives each loaded child its iframe's content size for its viewport, from the page's last layout. */
 static void
 frame_size_walk(
+	struct page *page,
 	const struct layout_box *box)
 {
 	const struct dom_element *element;
@@ -1461,6 +1641,9 @@ frame_size_walk(
 	for (; box != NULL; box = box->next) {
 		if (box->node != NULL && box->node->type == DOM_ELEMENT) {
 			element = (const struct dom_element *)box->node;
+			if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_IFRAME && element->frame_remote != NULL && page->frame_calls != NULL &&
+			    page->frame_calls->remote_frame != NULL)
+				(void)page->frame_calls->remote_frame(page->frame_calls_context, element, (int)layout_to_px(box->width), (int)layout_to_px(box->height));
 			if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_IFRAME && element->child_context != NULL) {
 				child = (const struct vm_realm *)element->child_context;
 				window = child->host;
@@ -1468,7 +1651,7 @@ frame_size_walk(
 					bind_window_set_viewport(window, (int)(layout_to_px(box->width) / (box->style.zoom_eff > 0.0f ? box->style.zoom_eff : 1.0f)), (int)(layout_to_px(box->height) / (box->style.zoom_eff > 0.0f ? box->style.zoom_eff : 1.0f)));
 			}
 		}
-		frame_size_walk(box->first_child);
+		frame_size_walk(page, box->first_child);
 	}
 }
 
@@ -1477,7 +1660,7 @@ page_frames_size(
 	struct page *page)
 {
 	if (page->laid_out && page->layout.root != NULL)
-		frame_size_walk(page->layout.root);
+		frame_size_walk(page, page->layout.root);
 }
 
 /* Finds the entry the page keeps for an iframe (NULL when it has none). */
@@ -1569,6 +1752,7 @@ frame_tree(
 	}
 	tree->image_variant = page_image_variant;
 	tree->frame_paint = page_frame_paint;
+	tree->frame_remote = page_frame_remote;
 	*out = tree;
 	return 0;
 }

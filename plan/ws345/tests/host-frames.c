@@ -32,7 +32,31 @@
  *   (i) going to another page ends the iframes' threads of the page left,
  *       going back gives them threads again and their timers go on;
  *   (j) where the program's threads cannot start the iframe's, the iframe
- *       has no window and the page goes on.
+ *       has no window and the page goes on;
+ *   (k) an iframe of another origin (the server's second port) runs in an
+ *       agent of its own: while its timer runs for ever, the page's own
+ *       interval goes on, on another thread, and the window's calls stay
+ *       under 20 ms;
+ *   (l) an iframe of the page's origin stays in the page's agent (its
+ *       document reached at once);
+ *   (m) postMessage both ways between agents: the values (Array, plain
+ *       object, Map, Set, Date, RegExp, -0, an ArrayBuffer transferred and
+ *       detached on the sender's side) arrive equal, the source and origin
+ *       are the sender's, a MessagePort in the transfer list is a
+ *       DataCloneError;
+ *   (n) frames.length, parent, top, closed and the SecurityError of the
+ *       document across agents, both ways;
+ *   (o) setting an iframe's location across agents navigates it, a frame's
+ *       top.location navigates the page, and a navigation back to the
+ *       page's origin puts the frame in the page's agent again;
+ *   (p) the page with a frame of another agent is drawn (CPU and GPU) as a
+ *       view of the caller's draws it, the frame's own scene in its frame
+ *       item, and its later change is drawn without the page committing;
+ *   (q) a press and a key over the frame of another agent go to that
+ *       frame's document, not the page's;
+ *   (r) the frame of another agent ends when its iframe leaves the
+ *       document and when its page is kept for going back (and loads again
+ *       when the page is shown again).
  *
  *   host-frames      (run from the repository's root; prints one line per check and a summary)
  *
@@ -47,6 +71,10 @@
 #include "userland/tests/browser-threads/threads-posix.h"
 #include "view/front.h"
 #include "view/frames.h"
+#include "view/remote.h"
+
+#include <dlfcn.h>
+#include <vulkan/vulkan.h>
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -97,6 +125,7 @@ static int test_refuse;
 static struct browser_threads test_table;
 static const struct browser_threads *test_posix;
 static unsigned short test_port;
+static unsigned short test_port_other;
 
 static long long test_now(void);
 static void test_sleep_ms(int ms);
@@ -124,6 +153,17 @@ static void test_promise(void);
 static void test_xhr(void);
 static void test_kept(void);
 static void test_refused(void);
+static const char *test_url(unsigned short port, const char *name);
+static size_t test_remotes(struct browser_view *view);
+static void test_cross_loop(void);
+static void test_cross_same(void);
+static void test_cross_post(void);
+static void test_cross_relatives(void);
+static void test_cross_navigate(void);
+static void test_cross_pixels(void);
+static void test_cross_input(void);
+static void test_cross_end(void);
+static int test_gpu_render(struct browser_view *view, int own, uint32_t *pixels);
 
 /* Runs every check and prints the summary. */
 int
@@ -144,7 +184,10 @@ main(
 		return 2;
 	}
 
-	/* The pages' directory and the server. */
+	/* lavapipe stays loaded to the end (ThreadSanitizer stops when a library its suppressions name is unloaded). */
+	(void)dlopen("libvulkan_lvp.so", RTLD_NOW | RTLD_NODELETE);
+
+	/* The pages' directory and the server, on two ports (two origins). */
 	setenv("XDG_DATA_HOME", "build/tmp/host-frames-data", 1);
 	mkdir("build/tmp", 0755);
 	mkdir(TEST_PAGES, 0755);
@@ -152,8 +195,14 @@ main(
 	if (listener < 0)
 		return 2;
 	pthread_create(&thread, NULL, test_serve, (void *)(long)listener);
+	listener = test_listen(&test_port_other);
+	if (listener < 0)
+		return 2;
+	pthread_create(&thread, NULL, test_serve, (void *)(long)listener);
 
-	/* The checks. */
+	/* The checks (HOST_FRAMES_CROSS_ONLY: only those of the frames of other agents). */
+	if (getenv("HOST_FRAMES_CROSS_ONLY") != NULL)
+		goto cross;
 	test_thread_of_timer();
 	test_same_both("(b) same-origin access", "same.html",
 	    "<!DOCTYPE html><title>t</title><script>function f(x) { return x * 3; }"
@@ -173,6 +222,17 @@ main(
 	test_xhr();
 	test_kept();
 	test_refused();
+cross:
+	{
+		test_cross_loop();
+		test_cross_same();
+		test_cross_post();
+		test_cross_relatives();
+		test_cross_navigate();
+		test_cross_pixels();
+		test_cross_input();
+		test_cross_end();
+	}
 
 	/* The summary. */
 	printf("host-frames: %u checks, %u failed\n", test_checks, test_failures);
@@ -954,4 +1014,533 @@ test_refused(void)
 	test_check(title != NULL && strcmp(title, "window none") == 0 && test_frames(view) == 0U, "(j) an iframe whose thread cannot start has no window",
 	    "\"%s\"", title == NULL ? "" : title);
 	browser_view_destroy(view);
+}
+
+/* The test server's URL of a page on a port (a static buffer of its own per call, up to 16). */
+static const char *
+test_url(
+	unsigned short port,
+	const char *name)
+{
+	static char urls[16][256];
+	static unsigned used;
+	char *url;
+
+	url = urls[used++ % 16U];
+	snprintf(url, 256, "http://127.0.0.1:%u/p/%s", (unsigned)port, name);
+	return url;
+}
+
+/* How many frames of other agents a view of its own threads has now. */
+static size_t
+test_remotes(
+	struct browser_view *view)
+{
+	return view_remotes_count(view_frames_remotes(view_front_frames(view_front_of(view))));
+}
+
+/* (k): an iframe of another origin loops for ever while the page's own interval goes on. */
+static void
+test_cross_loop(void)
+{
+	char page[1024];
+	struct browser_view *view;
+	unsigned first;
+	unsigned index;
+	pid_t top;
+	pid_t frame;
+	double frame_before;
+	double frame_spent;
+	double longest;
+	char *after;
+	int ticks;
+	int error;
+
+	pthread_mutex_lock(&test_lock);
+	first = test_thread_count;
+	test_console_length = 0;
+	test_console[0] = '\0';
+	pthread_mutex_unlock(&test_lock);
+	(void)test_page("xloop.html", "<!DOCTYPE html><title>loop</title><script>setTimeout(function () { console.log('xloop begins'); for (;;) {} }, 200);</script>");
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>xtop</title><script>var n = 0; setInterval(function () { n++; console.log('xtick ' + n); }, 50);</script>"
+	    "<iframe src='%s'></iframe>", test_url(test_port_other, "xloop.html"));
+	(void)test_page("xtop.html", page);
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(k) view", "no view (%d)", error);
+		return;
+	}
+	(void)browser_view_load(view, test_url(test_port, "xtop.html"));
+	(void)test_pump(view, 5000, NULL, "xloop begins");
+
+	/* The loop's thread: the last browser-script started (the page's own first, the iframe's own of the page's agent, then the frame's). */
+	top = 0;
+	frame = 0;
+	pthread_mutex_lock(&test_lock);
+	for (index = first; index < test_thread_count; index++) {
+		if (strcmp(test_threads[index].name, "browser-script") != 0)
+			continue;
+		if (top == 0)
+			top = test_threads[index].tid;
+		frame = test_threads[index].tid;
+	}
+	pthread_mutex_unlock(&test_lock);
+	frame_before = test_cpu_ms(frame);
+	longest = test_pump(view, 1000, NULL, NULL);
+	frame_spent = test_cpu_ms(frame) - frame_before;
+	ticks = 0;
+	pthread_mutex_lock(&test_lock);
+	after = strstr(test_console, "xloop begins\n");
+	while (after != NULL && (after = strstr(after + 1, "xtick ")) != NULL)
+		ticks++;
+	pthread_mutex_unlock(&test_lock);
+	test_check(test_has_line("xloop begins") && test_remotes(view) == 1U && frame != top && frame_spent >= 700.0,
+	    "(k) the iframe of another origin loops on a thread of its own", "%zu frames of other agents, its thread %.0f ms of 1000", test_remotes(view), frame_spent);
+	test_check(ticks >= 12, "(k) the page's script runs on during the other agent's loop", "%d ticks of the page's 50 ms interval in 1000 ms", ticks);
+	test_check(longest <= TEST_WINDOW_MAX_MS, "(k) window calls during the other agent's loop", "longest %.2f ms", longest);
+	browser_view_destroy(view);
+}
+
+/* (l): an iframe of the page's own origin stays in its agent. */
+static void
+test_cross_same(void)
+{
+	char page[1024];
+	struct browser_view *view;
+	const char *title;
+	int error;
+
+	(void)test_page("same-kid.html", "<!DOCTYPE html><title>same kid</title><body>kid");
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>same</title><script>window.onload = function () {"
+	    " document.title = 'reach ' + frames[0].document.title + ' ' + document.querySelector('iframe').contentDocument.body.textContent; };</script>"
+	    "<iframe src='%s'></iframe>", test_url(test_port, "same-kid.html"));
+	(void)test_page("same-top.html", page);
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(l) view", "no view (%d)", error);
+		return;
+	}
+	(void)browser_view_load(view, test_url(test_port, "same-top.html"));
+	(void)test_pump(view, 5000, "reach same kid kid", NULL);
+	title = browser_view_title(view);
+	test_check(title != NULL && strcmp(title, "reach same kid kid") == 0 && test_remotes(view) == 0U, "(l) an iframe of the page's origin stays in its agent",
+	    "\"%s\", %zu frames of other agents", title == NULL ? "" : title, test_remotes(view));
+	browser_view_destroy(view);
+}
+
+/* (m): postMessage both ways between agents. */
+static void
+test_cross_post(void)
+{
+	char page[4096];
+	char kid[4096];
+	char expected[256];
+	struct browser_view *view;
+	const char *title;
+	int error;
+
+	snprintf(kid, sizeof(kid), "<!DOCTYPE html><title>kid</title><script>onmessage = function (e) { var v = e.data, ok;"
+	    " ok = Array.isArray(v.a) && v.a[1] === 'two' && v.a[2].x === null && v.m instanceof Map && v.m.get('k')[1] === 2 &&"
+	    " v.d instanceof Date && v.d.getTime() === 5 && v.b instanceof ArrayBuffer && v.b.byteLength === 8 && new Uint8Array(v.b)[0] === 7 &&"
+	    " v.s instanceof Set && v.s.has(3) && v.r instanceof RegExp && v.r.source === 'a+' && v.r.flags === 'g' && Object.is(v.n, -0) && v.c === v.a &&"
+	    " e.origin === 'http://127.0.0.1:%u' && e.source === parent && e.isTrusted;"
+	    " parent.postMessage({ ok: ok ? 'ok' : 'bad', back: new Map([[1, [true]]]) }, 'http://127.0.0.1:%u'); };</script>",
+	    (unsigned)test_port, (unsigned)test_port);
+	(void)test_page("post-kid.html", kid);
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>post</title><script>var sent = -1, dce = 'none';"
+	    " onmessage = function (e) { document.title = 'pm ' + e.data.ok + ' ' + (e.data.back.get(1)[0] === true) + ' ' + (e.source === frames[0]) + ' ' +"
+	    " (e.origin === 'http://127.0.0.1:%u') + ' ' + sent + ' ' + dce; };"
+	    " window.onload = function () { var b = new ArrayBuffer(8), a = [1, 'two', { x: null }]; new Uint8Array(b)[0] = 7;"
+	    " try { frames[0].postMessage(1, '*', [new MessageChannel().port1]); } catch (e) { dce = e.name; }"
+	    " frames[0].postMessage({ a: a, c: a, m: new Map([['k', [1, 2]]]), d: new Date(5), b: b, s: new Set([3]), r: /a+/g, n: -0 }, '*', [b]);"
+	    " sent = b.byteLength; };</script><iframe src='%s'></iframe>", (unsigned)test_port_other, test_url(test_port_other, "post-kid.html"));
+	(void)test_page("post-top.html", page);
+	snprintf(expected, sizeof(expected), "pm ok true true true 0 DataCloneError");
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(m) view", "no view (%d)", error);
+		return;
+	}
+	(void)browser_view_load(view, test_url(test_port, "post-top.html"));
+	(void)test_pump(view, 5000, expected, NULL);
+	title = browser_view_title(view);
+	test_check(title != NULL && strcmp(title, expected) == 0 && test_remotes(view) == 1U, "(m) postMessage both ways between agents",
+	    "\"%s\"", title == NULL ? "" : title);
+	browser_view_destroy(view);
+}
+
+/* (n): the relatives across agents and the SecurityError, both ways. */
+static void
+test_cross_relatives(void)
+{
+	char page[4096];
+	char kid[4096];
+	struct browser_view *view;
+	const char *title;
+	const char *expected;
+	int error;
+
+	snprintf(kid, sizeof(kid), "<!DOCTYPE html><title>kid</title><iframe srcdoc='x'></iframe><script>onload = function () { var d = 'none';"
+	    " try { parent.document; } catch (e) { d = e.name; }"
+	    " parent.postMessage([parent === top, parent.length, window.length, top.closed, d, window.frameElement === null].join(','), '*'); };</script>");
+	(void)test_page("rel-kid.html", kid);
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>rel</title><script>"
+	    " onmessage = function (e) { var w = frames[0], d = 'none';"
+	    " try { w.document; } catch (x) { d = x.name; }"
+	    " document.title = e.data + '|' + [frames.length, w.parent === window, w.top === window, w.window === w, w.frames === w, w.length, w.closed, d,"
+	    " document.querySelector('iframe').contentDocument === null].join(','); };</script><iframe src='%s'></iframe>",
+	    test_url(test_port_other, "rel-kid.html"));
+	(void)test_page("rel-top.html", page);
+	expected = "true,1,1,false,SecurityError,true|1,true,true,true,true,1,false,SecurityError,true";
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(n) view", "no view (%d)", error);
+		return;
+	}
+	(void)browser_view_load(view, test_url(test_port, "rel-top.html"));
+	(void)test_pump(view, 5000, expected, NULL);
+	title = browser_view_title(view);
+	test_check(title != NULL && strcmp(title, expected) == 0, "(n) frames, parent, top, closed and SecurityError across agents", "\"%s\"",
+	    title == NULL ? "" : title);
+	browser_view_destroy(view);
+}
+
+/* (o): navigations across agents, and back into the page's agent. */
+static void
+test_cross_navigate(void)
+{
+	char page[4096];
+	struct browser_view *view;
+	const char *title;
+	int error;
+
+	/* The page sets the frame's location: the frame's next document tells it. */
+	(void)test_page("nav-first.html", "<!DOCTYPE html><title>first</title><script>onload = function () { parent.postMessage('first', '*'); };</script>");
+	(void)test_page("nav-second.html", "<!DOCTYPE html><title>second</title><script>onload = function () { parent.postMessage('second', '*'); };</script>");
+	(void)test_page("nav-home.html", "<!DOCTYPE html><title>home kid</title><body>home");
+	(void)test_page("nav-landed.html", "<!DOCTYPE html><title>landed</title><p>landed");
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>nav</title><script>var seen = [];"
+	    " onmessage = function (e) { seen.push(e.data); if (e.data === 'first') frames[0].location = '%s';"
+	    " if (e.data === 'second') { frames[0].location.href = '%s'; setTimeout(function check() {"
+	    " try { document.title = 'back ' + frames[0].document.title + ' ' + seen.join(' '); } catch (x) { setTimeout(check, 20); } }, 20); } };</script>"
+	    "<iframe src='%s'></iframe>", test_url(test_port_other, "nav-second.html"), test_url(test_port, "nav-home.html"), test_url(test_port_other, "nav-first.html"));
+	(void)test_page("nav-top.html", page);
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(o) view", "no view (%d)", error);
+		return;
+	}
+	(void)browser_view_load(view, test_url(test_port, "nav-top.html"));
+	(void)test_pump(view, 8000, "back home kid first second", NULL);
+	title = browser_view_title(view);
+	test_check(title != NULL && strcmp(title, "back home kid first second") == 0 && test_remotes(view) == 0U,
+	    "(o) the page navigates the frame of another agent, and back into its own agent", "\"%s\", %zu frames of other agents", title == NULL ? "" : title,
+	    test_remotes(view));
+
+	/* The frame sets its top's location: the page goes. */
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>kid</title><script>onload = function () { top.location = '%s'; };</script>",
+	    test_url(test_port, "nav-landed.html"));
+	(void)test_page("nav-up-kid.html", page);
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>up</title><iframe src='%s'></iframe>", test_url(test_port_other, "nav-up-kid.html"));
+	(void)test_page("nav-up.html", page);
+	(void)browser_view_load(view, test_url(test_port, "nav-up.html"));
+	(void)test_pump(view, 8000, "landed", NULL);
+	title = browser_view_title(view);
+	test_check(title != NULL && strcmp(title, "landed") == 0 && test_remotes(view) == 0U, "(o) the frame of another agent navigates its top",
+	    "\"%s\", %zu frames of other agents", title == NULL ? "" : title, test_remotes(view));
+	browser_view_destroy(view);
+}
+
+/* (p): the frame item drawn as a view of the caller's draws the page, CPU and GPU, and a change of the frame alone. */
+static void
+test_cross_pixels(void)
+{
+	static uint32_t expected[800U * 600U];
+	static uint32_t drawn[800U * 600U];
+	static uint32_t gpu_expected[800U * 600U];
+	static uint32_t gpu_drawn[800U * 600U];
+	char page[4096];
+	struct browser_view *caller;
+	struct browser_view *own;
+	struct view_commit *commit;
+	uint64_t serial;
+	uint64_t later;
+	long long start;
+	size_t differ;
+	size_t index;
+	int blue;
+	int caller_gpu;
+	int own_gpu;
+	int same;
+	int error;
+
+	(void)test_page("pix-kid.html", "<!DOCTYPE html><title>kid</title><style>body { margin: 4px; background: #fed; font: 16px sans-serif }"
+	    " div { width: 60px; height: 20px; background: #c33 }</style><div id='d'></div><p>Frame text"
+	    "<script>onmessage = function () { document.getElementById('d').style.background = '#33c'; };</script>");
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>pix</title><style>body { background: #eef } iframe { width: 300px; height: 120px; border: 3px solid #333 }</style>"
+	    "<script>addEventListener('keydown', function () { frames[0].postMessage('blue', '*'); });</script>"
+	    "<h1>Page</h1><iframe src='%s'></iframe><p>after the frame", test_url(test_port_other, "pix-kid.html"));
+	(void)test_page("pix-top.html", page);
+	error = test_view(BROWSER_THREADING_CALLER, &caller);
+	if (error == 0)
+		error = test_view(BROWSER_THREADING_OWN, &own);
+	if (error != 0) {
+		test_check(0, "(p) views", "none (%d)", error);
+		return;
+	}
+	(void)browser_view_load(caller, test_url(test_port, "pix-top.html"));
+	(void)browser_view_settle(caller, 5000.0, BROWSER_SETTLE_LAYOUT);
+	error = browser_view_draw_pixels(caller, expected, 800U, 600U, 800U * sizeof(uint32_t));
+	caller_gpu = test_gpu_render(caller, 0, gpu_expected);
+	(void)browser_view_load(own, test_url(test_port, "pix-top.html"));
+
+	/* The CPU's picture of the latest committed frame with the frame's scene, until it is the caller's. */
+	same = 0;
+	differ = 0;
+	start = test_now();
+	while (!same && test_now() - start < 8000000000LL) {
+		browser_view_process(own);
+		memset(drawn, 0, sizeof(drawn));
+		if (browser_view_render_pixels(own, drawn, 800U, 600U, 800U * sizeof(uint32_t)) == 0) {
+			differ = 0;
+			for (index = 0; index < 800U * 600U; index++)
+				differ += drawn[index] != expected[index];
+			same = differ == 0;
+		}
+		if (!same)
+			test_sleep_ms(20);
+	}
+	test_check(error == 0 && same && test_remotes(own) == 1U, "(p) the CPU draws the frame item as the caller's view draws the page", "%zu pixels differ, %zu frames of other agents",
+	    differ, test_remotes(own));
+	own_gpu = test_gpu_render(own, 1, gpu_drawn);
+	if (caller_gpu == 77 || own_gpu == 77) {
+		printf("SKIP (p) GPU: no Vulkan device\n");
+	} else {
+		differ = 0;
+		for (index = 0; index < 800U * 600U; index++)
+			differ += gpu_drawn[index] != gpu_expected[index];
+		test_check(caller_gpu == 0 && own_gpu == 0 && differ == 0, "(p) the GPU draws the frame item as the caller's view draws the page",
+		    "caller %d, own %d, %zu pixels differ", caller_gpu, own_gpu, differ);
+	}
+
+	/* The frame alone changes (a key of the page's posts it a message): its new scene is drawn in the same committed frame of the page. */
+	commit = view_front_commit(own);
+	serial = commit != NULL ? commit->serial : 0;
+	if (commit != NULL)
+		view_commit_release(commit);
+	(void)browser_view_key(own, "b", "KeyB", "b", 1, 0, 0);
+	(void)browser_view_key(own, "b", "KeyB", "b", 0, 0, 0);
+	blue = 0;
+	start = test_now();
+	while (!blue && test_now() - start < 5000000000LL) {
+		browser_view_process(own);
+		if (browser_view_render_pixels(own, drawn, 800U, 600U, 800U * sizeof(uint32_t)) == 0) {
+			for (index = 0; index < 800U * 600U && !blue; index++)
+				blue = (drawn[index] & 0xffffffU) == 0x3333ccU;
+		}
+		if (!blue)
+			test_sleep_ms(20);
+	}
+	commit = view_front_commit(own);
+	later = commit != NULL ? commit->serial : 0;
+	if (commit != NULL)
+		view_commit_release(commit);
+	test_check(blue && later == serial, "(p) the frame's own change is drawn in the page's committed frame", "%s, the page's commit %llu then %llu",
+	    blue ? "drawn" : "not drawn", (unsigned long long)serial, (unsigned long long)later);
+	browser_view_destroy(own);
+	browser_view_destroy(caller);
+}
+
+/* (q): a press and a key over the frame of another agent go to its document. */
+static void
+test_cross_input(void)
+{
+	char page[4096];
+	char kid[2048];
+	struct browser_view *view;
+	const char *title;
+	int error;
+
+	snprintf(kid, sizeof(kid), "<!DOCTYPE html><title>kid</title><style>body { margin: 0; background: #ccf }</style><script>var got = [];"
+	    " addEventListener('mousedown', function (e) { got.push('down ' + e.clientX + ' ' + e.clientY); });"
+	    " addEventListener('click', function () { got.push('click'); });"
+	    " addEventListener('keydown', function (e) { got.push('key ' + e.key); parent.postMessage(got.join(','), '*'); });</script>");
+	(void)test_page("in-kid.html", kid);
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>in</title><style>body { margin: 0 } iframe { vertical-align: top; margin: 50px 0 0 100px; width: 200px;"
+	    " height: 100px; border: 0 }</style><script>var mine = 0; addEventListener('mousedown', function () { mine++; });"
+	    " onmessage = function (e) { document.title = e.data + ' page ' + mine; };</script><iframe src='%s'></iframe>", test_url(test_port_other, "in-kid.html"));
+	(void)test_page("in-top.html", page);
+	test_console_length = 0;
+	test_console[0] = '\0';
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(q) view", "no view (%d)", error);
+		return;
+	}
+	(void)browser_view_load(view, test_url(test_port, "in-top.html"));
+	{
+		long long begin = test_now();
+		uint32_t pixel = 0;
+		static uint32_t pixels[800U * 600U];
+
+		/* Until the frame's scene is drawn (its committed rectangle is there). */
+		while (test_now() - begin < 8000000000LL) {
+			browser_view_process(view);
+			if (browser_view_render_pixels(view, pixels, 800U, 600U, 800U * sizeof(uint32_t)) == 0) {
+				pixel = pixels[60U * 800U + 110U];
+				if ((pixel & 0xffffffU) == 0xccccffU)
+					break;
+			}
+			test_sleep_ms(20);
+		}
+	}
+	(void)browser_view_pointer_button(view, 130.0f, 70.0f, 0, 1, 0);
+	(void)browser_view_pointer_button(view, 130.0f, 70.0f, 0, 0, 0);
+	(void)browser_view_key(view, "a", "KeyA", "a", 1, 0, 0);
+	(void)browser_view_key(view, "a", "KeyA", "a", 0, 0, 0);
+	(void)test_pump(view, 5000, "down 30 20,click,key a page 0", NULL);
+	title = browser_view_title(view);
+	test_check(title != NULL && strcmp(title, "down 30 20,click,key a page 0") == 0, "(q) a press and a key over the frame of another agent are its document's",
+	    "\"%s\"", title == NULL ? "" : title);
+	browser_view_destroy(view);
+}
+
+/* (r): the frame of another agent ends with its iframe, and with its page kept for going back. */
+static void
+test_cross_end(void)
+{
+	char page[2048];
+	struct browser_view *view;
+	const char *title;
+	size_t shown;
+	size_t removed;
+	size_t left;
+	size_t back;
+	long long begin;
+	int error;
+
+	(void)test_page("end-kid.html", "<!DOCTYPE html><title>kid</title><script>setInterval(function () { console.log('end kid'); }, 100);</script>");
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>end</title><script>document.addEventListener('keydown', function () {"
+	    " document.querySelector('iframe').remove(); document.title = 'removed'; });</script><iframe src='%s'></iframe>",
+	    test_url(test_port_other, "end-kid.html"));
+	(void)test_page("end-top.html", page);
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>keep</title><iframe src='%s'></iframe>", test_url(test_port_other, "end-kid.html"));
+	(void)test_page("keep-top.html", page);
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(r) view", "no view (%d)", error);
+		return;
+	}
+	test_console_length = 0;
+	test_console[0] = '\0';
+	(void)browser_view_load(view, test_url(test_port, "end-top.html"));
+	(void)test_pump(view, 5000, NULL, "end kid");
+	shown = test_remotes(view);
+	(void)browser_view_key(view, "x", "KeyX", "x", 1, 0, 0);
+	(void)test_pump(view, 3000, "removed", NULL);
+	begin = test_now();
+	while (test_now() - begin < 1000000000LL && test_remotes(view) != 0U) {
+		browser_view_process(view);
+		test_sleep_ms(2);
+	}
+	removed = test_remotes(view);
+	title = browser_view_title(view);
+	test_check(shown == 1U && removed == 0U && title != NULL && strcmp(title, "removed") == 0, "(r) the frame of another agent ends with its iframe",
+	    "%zu then %zu frames of other agents", shown, removed);
+
+	/* Kept for going back: none while away, one again once back. */
+	(void)browser_view_load(view, test_url(test_port, "keep-top.html"));
+	(void)test_pump(view, 5000, "keep", NULL);
+	begin = test_now();
+	while (test_now() - begin < 3000000000LL && test_remotes(view) != 1U) {
+		browser_view_process(view);
+		test_sleep_ms(2);
+	}
+	shown = test_remotes(view);
+	(void)browser_view_load(view, test_url(test_port, "same-kid.html"));
+	(void)test_pump(view, 5000, "same kid", NULL);
+	(void)test_pump(view, 200, NULL, NULL);
+	left = test_remotes(view);
+	(void)browser_view_go(view, -1);
+	(void)test_pump(view, 5000, "keep", NULL);
+	begin = test_now();
+	while (test_now() - begin < 3000000000LL && test_remotes(view) != 1U) {
+		browser_view_process(view);
+		test_sleep_ms(2);
+	}
+	back = test_remotes(view);
+	test_check(shown == 1U && left == 0U && back == 1U, "(r) a kept page's frame of another agent ends, and loads again when shown", "%zu, away %zu, back %zu",
+	    shown, left, back);
+	browser_view_destroy(view);
+}
+
+/*
+ * Draws a view on an offscreen image of 800 x 600 and reads it back: a
+ * view of the caller's with browser_view_draw, a view of its own threads
+ * with browser_view_render into a command buffer of the test's.  Reports
+ * 0, 77 without a Vulkan device, or another error.
+ */
+static int
+test_gpu_render(
+	struct browser_view *view,
+	int own,
+	uint32_t *pixels)
+{
+	struct browser_offscreen *offscreen;
+	struct browser_gpu_failure failure;
+	struct browser_target target;
+	struct browser_gpu gpu;
+	VkCommandPoolCreateInfo pool_info;
+	VkCommandBufferAllocateInfo buffer_info;
+	VkCommandBufferBeginInfo begin;
+	VkSubmitInfo submit;
+	VkCommandPool pool;
+	VkCommandBuffer commands;
+	VkQueue queue;
+	uint64_t serial;
+	int error;
+
+	error = browser_offscreen_create(800U, 600U, &offscreen, &failure);
+	if (error != 0)
+		return 77;
+	browser_offscreen_target(offscreen, &gpu, &target);
+	browser_view_set_gpu(view, &gpu);
+	if (!own) {
+		error = browser_view_draw(view, &target, VK_NULL_HANDLE, VK_NULL_HANDLE);
+	} else {
+		memset(&pool_info, 0, sizeof(pool_info));
+		pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		pool_info.queueFamilyIndex = gpu.queue_family;
+		error = vkCreateCommandPool(gpu.device, &pool_info, NULL, &pool) == VK_SUCCESS ? 0 : EIO;
+		if (error == 0) {
+			memset(&buffer_info, 0, sizeof(buffer_info));
+			buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+			buffer_info.commandPool = pool;
+			buffer_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+			buffer_info.commandBufferCount = 1U;
+			error = vkAllocateCommandBuffers(gpu.device, &buffer_info, &commands) == VK_SUCCESS ? 0 : EIO;
+			if (error == 0) {
+				memset(&begin, 0, sizeof(begin));
+				begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+				(void)vkBeginCommandBuffer(commands, &begin);
+				error = browser_view_render(view, &target, commands, &serial);
+				(void)vkEndCommandBuffer(commands);
+				if (error == 0) {
+					memset(&submit, 0, sizeof(submit));
+					submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+					submit.commandBufferCount = 1U;
+					submit.pCommandBuffers = &commands;
+					vkGetDeviceQueue(gpu.device, gpu.queue_family, 0U, &queue);
+					error = vkQueueSubmit(queue, 1U, &submit, VK_NULL_HANDLE) == VK_SUCCESS ? 0 : EIO;
+					(void)vkQueueWaitIdle(queue);
+				}
+			}
+			vkDestroyCommandPool(gpu.device, pool, NULL);
+		}
+	}
+	if (error == 0)
+		error = browser_offscreen_read(offscreen, pixels, 800U * sizeof(uint32_t), &failure);
+	browser_view_set_gpu(view, NULL);
+	browser_offscreen_destroy(offscreen);
+	return error;
 }

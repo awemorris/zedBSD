@@ -238,6 +238,57 @@ typedef void (*bind_request_done)(void *context, int error, int status, const ch
  * browser.h and does not expose these private records.
  */
 struct bind_window;
+
+/*
+ * A message's value written out of its heap (bind/remote.c), for a window
+ * of another agent: a list of plain items (undefined, null, booleans,
+ * numbers and strings), which that window's heap reads back.
+ */
+enum bind_tape_type {
+	BIND_TAPE_UNDEFINED,
+	BIND_TAPE_NULL,
+	BIND_TAPE_FALSE,
+	BIND_TAPE_TRUE,
+	BIND_TAPE_NUMBER,
+	BIND_TAPE_STRING
+};
+struct bind_tape_item {
+	int type;
+	double number;
+	uint16_t *units;
+	size_t length;
+};
+struct bind_tape {
+	struct wb_vector items;
+};
+
+/* What a window of another agent is to the caller (struct bind_remote_calls). */
+#define BIND_REMOTE_CHILD	0
+#define BIND_REMOTE_PARENT	1
+#define BIND_REMOTE_TOP		2
+
+/* What a caller asks of a window of another agent (bind_remote_calls's info). */
+#define BIND_REMOTE_CLOSED	0
+#define BIND_REMOTE_LENGTH	1
+
+/*
+ * How a window reaches windows of other agents, the embedder's: a frame
+ * of an iframe of its document (BIND_REMOTE_CHILD, by the frame's number,
+ * which frame gives for an element), or, for the top-level window of such
+ * a frame, its parent and its top (BIND_REMOTE_PARENT, _TOP; frame 0).
+ * post takes a message's tape (it is the callee's then, released on either
+ * outcome) with the origin it may go to ("*", "/" or one) and the
+ * sender's; navigate points the window at a URL (resolved already); info
+ * tells whether it is closed or how many frames it has.  The calls are
+ * made on the caller's thread with its agent held.
+ */
+struct bind_remote_calls {
+	int (*post)(void *context, struct bind_window *from, int kind, uint64_t frame, struct bind_tape *tape, const char *target_origin, const char *origin);
+	int (*navigate)(void *context, struct bind_window *from, int kind, uint64_t frame, const char *url, int replace);
+	int (*info)(void *context, int kind, uint64_t frame, int what);
+	uint64_t (*frame)(void *context, const struct dom_element *element);
+};
+
 struct bind_host {
 	void *context;
 	void (*console)(void *context, int level, const char *text, size_t length);
@@ -321,6 +372,9 @@ struct bind_host {
 	 */
 	int (*frame_attach)(void *context, struct dom_element *element);
 	void (*frame_detach)(void *context, struct dom_element *element);
+	/* How the window reaches windows of other agents (NULL: none are), with its context. */
+	const struct bind_remote_calls *remote;
+	void *remote_context;
 };
 
 /*
@@ -354,6 +408,16 @@ struct bind_key {
 };
 
 struct bind_window;
+
+/* Windows of other agents (remote.c). */
+void bind_tape_init(struct bind_tape *tape);
+void bind_tape_release(struct bind_tape *tape);
+void bind_window_set_remote(struct bind_window *window, const struct bind_remote_calls *calls, void *context, int framed, int parent_is_top);
+int bind_remote_deliver(struct bind_window *window, const struct bind_tape *tape, const char *origin, const char *target_origin, int source_kind,
+    struct dom_element *source_element);
+int bind_frame_foreign(struct bind_window *parent, const char *url, size_t length);
+int bind_window_request_navigation(struct bind_window *window, const char *url, int replace);
+void bind_frame_retire(struct bind_window *parent, struct dom_element *element);
 
 /* The window (window.c). */
 int bind_window_create(struct vm_realm *realm, struct dom_document *document, const struct bind_host *host, struct bind_window **window);

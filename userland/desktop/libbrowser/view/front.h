@@ -140,6 +140,7 @@ void view_front_lend_counts(const struct browser_view *view, uint64_t *lends, ui
 
 /* The agent the view's pages run their tasks in, and the threads of their iframes (front.c). */
 struct vm_agent *view_front_agent(struct view_front *front);
+void view_front_wake_drawing(struct view_front *front);
 struct view_frames *view_front_frames(struct view_front *front);
 
 /* The view's side (view.c): the front a view runs under, its loader and its state. */

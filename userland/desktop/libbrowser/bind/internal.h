@@ -294,6 +294,20 @@ struct bind_window {
 	struct vm_cell *window_wrapper;
 	/* The prelude's function that gives the one window proxy an <iframe> element has (it follows the element's current document) (NULL until the prelude sets it). */
 	struct vm_cell *frame_proxy_maker;
+	/*
+	 * Windows of other agents (remote.c): the functions of the remote
+	 * prelude (the proxy maker, the message's writer and reader; NULL until
+	 * it runs), and for the top-level window of a frame of another agent
+	 * (framed) the proxies of its parent and top (the same one when its
+	 * parent is the top: parent_is_top).
+	 */
+	struct vm_cell *remote_maker;
+	struct vm_cell *remote_write;
+	struct vm_cell *remote_read;
+	int remote_framed;
+	int remote_parent_is_top;
+	struct vm_cell *remote_parent;
+	struct vm_cell *remote_top;
 };
 
 /* One traced inline source owns its C model and original DOM Text until its final GC release. */
@@ -517,6 +531,9 @@ int bind_frame_scripts_allowed(struct dom_element *element);
 int bind_window_view(struct bind_window *viewer, struct bind_window *target, vm_value *result);
 int bind_window_reachable(struct bind_window *viewer, struct bind_window *target);
 int bind_frame_install(struct bind_window *parent, struct dom_element *element, struct dom_document *document, struct bind_window **window);
+int bind_remote_child(struct bind_window *viewer, struct dom_element *element, vm_value *result);
+int bind_remote_relative(struct bind_window *window, int kind, vm_value *result);
+void bind_remote_trace(struct vm_heap *heap, struct bind_window *window);
 int bind_run_inline_script(struct bind_window *window, struct dom_element *script);
 int bind_reflection_base(struct dom_document *document, struct net_url *base);
 int bind_reflect_url_get(struct vm_realm *realm, vm_value receiver, int tag, const char *name, vm_value *result);

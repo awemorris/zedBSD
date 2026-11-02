@@ -454,10 +454,13 @@ struct layout_transition {
 struct layout_tree;
 struct paint_frame;
 typedef int (*layout_frame_paint)(void *context, const struct dom_element *element, layout_unit width, layout_unit height, float zoom, struct paint_frame **out);
+typedef uint64_t (*layout_frame_remote)(void *context, const struct dom_element *element, layout_unit width, layout_unit height, float zoom);
 
 struct layout_tree {
 	/* Gives the painted document an <iframe> shows in a viewport of a size (a reference the caller releases; NULL for none), for the painting. */
 	layout_frame_paint frame_paint;
+	/* Gives the number of the frame an <iframe> shows when its document commits apart (0: none), told the viewport's size, for the painting. */
+	layout_frame_remote frame_remote;
 	struct wb_arena arena;
 	struct layout_box *root;
 	struct text_system *text;

@@ -39,7 +39,13 @@ struct scene_image {
 	struct img_bitmap *copy;
 };
 
+/* The deepest frames committed apart inside one another a drawing resolves. */
+#define SCENE_FRAME_DEPTH	8
+
 static int scene_images(struct paint_scene *scene);
+static int scene_resolve(const struct paint_list *list, paint_frame_lookup lookup, void *context, struct paint_drawing *drawing,
+    const int *faces, layout_unit dx, layout_unit dy, unsigned depth);
+static int scene_face(struct paint_drawing *drawing, const struct paint_scene *scene, int face);
 static struct scene_image *scene_slot(struct scene_image *table, size_t capacity, const struct img_bitmap *bitmap);
 
 /*
@@ -213,4 +219,217 @@ scene_slot(
 
 	/* Succeeded: the slot. */
 	return &table[slot];
+}
+
+/* Starts a drawing that resolves nothing (its scene's own list is drawn). */
+void
+paint_drawing_init(
+	struct paint_drawing *drawing)
+{
+	/* Nothing held. */
+	memset(drawing, 0, sizeof(*drawing));
+	paint_list_init(&drawing->list);
+	wb_vector_init(&drawing->held, sizeof(struct paint_scene *));
+}
+
+/*
+ * Resolves the frame items of a scene for one drawing: when it has any,
+ * the drawing's list is the scene's with each frame item replaced by the
+ * latest scene of its frame (lookup), its canvas under it when its
+ * document gave one, its items moved to the item's box less the frame's
+ * scroll, inside the item's clip; a frame without a scene yet shows
+ * nothing.  The drawing holds the frames' scenes.  Reports 0, or ENOMEM
+ * (the drawing is then left resolving nothing).
+ */
+int
+paint_frames_resolve(
+	const struct paint_scene *scene,
+	paint_frame_lookup lookup,
+	void *context,
+	struct paint_drawing *drawing)
+{
+	const struct paint_item *item;
+	int faces[TEXT_FACES];
+	size_t index;
+	int face;
+	int error;
+
+	/* The scene's faces are the drawing's first. */
+	for (face = 0; face < TEXT_FACES; face++) {
+		drawing->faces[face] = scene->faces[face];
+		faces[face] = face;
+	}
+
+	/* A scene without frame items is drawn as it is. */
+	for (index = 0; index < scene->list.items.count; index++) {
+		item = wb_vector_at(&scene->list.items, index);
+		if (item->kind == PAINT_FRAME)
+			break;
+	}
+	if (index == scene->list.items.count || lookup == NULL)
+		return 0;
+
+	/* The list, its canvas the scene's, with the frames' items in place of theirs. */
+	drawing->resolved = 1;
+	drawing->list.canvas_color = scene->list.canvas_color;
+	drawing->list.canvas_set = scene->list.canvas_set;
+	drawing->list.width = scene->list.width;
+	drawing->list.height = scene->list.height;
+	error = scene_resolve(&scene->list, lookup, context, drawing, faces, 0, 0, 0);
+	if (error != 0) {
+		paint_drawing_release(drawing);
+		paint_drawing_init(drawing);
+		for (face = 0; face < TEXT_FACES; face++)
+			drawing->faces[face] = scene->faces[face];
+		return error;
+	}
+
+	/* Succeeded: the drawing's list shows the frames too. */
+	return 0;
+}
+
+/* The list a drawing draws: its own when it resolved frames, else the scene's. */
+const struct paint_list *
+paint_drawing_list(
+	const struct paint_scene *scene,
+	const struct paint_drawing *drawing)
+{
+	/* The resolved one, or the scene's. */
+	if (drawing->resolved)
+		return &drawing->list;
+	return &scene->list;
+}
+
+/* Lets go of what a drawing holds (its list's items and the frames' scenes). */
+void
+paint_drawing_release(
+	struct paint_drawing *drawing)
+{
+	struct paint_scene **held;
+	size_t index;
+
+	/* The scenes, then the items (they point into the scenes). */
+	for (index = 0; index < drawing->held.count; index++) {
+		held = wb_vector_at(&drawing->held, index);
+		paint_scene_release(*held);
+	}
+	wb_vector_release(&drawing->held);
+	wb_vector_release(&drawing->list.items);
+	wb_arena_release(&drawing->list.arena);
+	wb_vector_release(&drawing->list.frames);
+	memset(drawing, 0, sizeof(*drawing));
+}
+
+/*
+ * Copies a list's items into the drawing's, moved by dx and dy, with its
+ * faces as faces maps them, each frame item replaced by its frame's scene
+ * (no deeper than SCENE_FRAME_DEPTH).
+ */
+static int
+scene_resolve(
+	const struct paint_list *list,
+	paint_frame_lookup lookup,
+	void *context,
+	struct paint_drawing *drawing,
+	const int *faces,
+	layout_unit dx,
+	layout_unit dy,
+	unsigned depth)
+{
+	const struct paint_item *source;
+	struct paint_scene *frame;
+	struct paint_item item;
+	layout_unit scroll_x;
+	layout_unit scroll_y;
+	int inner[TEXT_FACES];
+	size_t index;
+	int face;
+	int error;
+
+	for (index = 0; index < list->items.count; index++) {
+		source = wb_vector_at(&list->items, index);
+		item = *source;
+		item.x += dx;
+		item.y += dy;
+
+		/* An item of the list itself (a text run's face as the drawing has it). */
+		if (item.kind != PAINT_FRAME) {
+			if (item.kind == PAINT_TEXT && item.font.face >= 0 && item.font.face < TEXT_FACES)
+				item.font.face = faces[item.font.face];
+			error = wb_vector_push(&drawing->list.items, &item);
+			if (error != 0)
+				return error;
+			continue;
+		}
+
+		/* A frame: its latest scene, held by the drawing (none yet, or too deep, shows nothing). */
+		if (depth >= SCENE_FRAME_DEPTH)
+			continue;
+		scroll_x = 0;
+		scroll_y = 0;
+		frame = lookup(context, item.frame, &scroll_x, &scroll_y);
+		if (frame == NULL)
+			continue;
+		error = wb_vector_push(&drawing->held, &frame);
+		if (error != 0) {
+			paint_scene_release(frame);
+			return error;
+		}
+
+		/* Its canvas, then its items, its web faces taken into the drawing's. */
+		if (frame->list.canvas_set) {
+			memset(&item, 0, sizeof(item));
+			item.kind = PAINT_RECT;
+			item.x = source->x + dx;
+			item.y = source->y + dy;
+			item.width = source->width;
+			item.height = source->height;
+			item.color = frame->list.canvas_color;
+			error = wb_vector_push(&drawing->list.items, &item);
+			if (error != 0)
+				return error;
+		}
+		for (face = 0; face < TEXT_FACES; face++)
+			inner[face] = scene_face(drawing, frame, face);
+		error = scene_resolve(&frame->list, lookup, context, drawing, inner, source->x + dx - scroll_x, source->y + dy - scroll_y, depth + 1U);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the items are copied. */
+	return 0;
+}
+
+/*
+ * Gives the drawing's face for a face of a frame's scene: a base face is
+ * the same; a web face is the drawing's that has the same font file, or
+ * a free web face of the drawing it is put in, or the sans face when none
+ * is free.
+ */
+static int
+scene_face(
+	struct paint_drawing *drawing,
+	const struct paint_scene *scene,
+	int face)
+{
+	int slot;
+
+	/* The base faces are the view's in every scene. */
+	if (face < TEXT_FACE_WEB || scene->faces[face] == NULL)
+		return face;
+
+	/* The same file, or a free face. */
+	for (slot = TEXT_FACE_WEB; slot < TEXT_FACES; slot++) {
+		if (drawing->faces[slot] == scene->faces[face])
+			return slot;
+	}
+	for (slot = TEXT_FACE_WEB; slot < TEXT_FACES; slot++) {
+		if (drawing->faces[slot] == NULL) {
+			drawing->faces[slot] = scene->faces[face];
+			return slot;
+		}
+	}
+
+	/* None free. */
+	return TEXT_FACE_SANS;
 }

@@ -52,6 +52,12 @@ void view_frames_leave(struct view_frames *frames);
 /* Wakes out of their waited requests the frames' threads (from any thread, as the view navigates or ends). */
 void view_frames_abort_waited(struct view_frames *frames);
 
+/* The frames of other agents (remote.c), the room for one more frame, a runner's wake, and the page's own thread's delivery of what they ask. */
+struct view_remotes *view_frames_remotes(struct view_frames *frames);
+int view_frames_room(struct view_frames *frames);
+void view_frames_ring(struct view_frames *frames, void *runner);
+void view_frames_deliver(struct view_frames *frames);
+
 /* How many iframes have a thread now (from any thread). */
 size_t view_frames_count(struct view_frames *frames);
 
