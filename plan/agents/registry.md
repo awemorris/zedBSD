@@ -63,4 +63,5 @@
 | Sonnet | phase-runner-low | ws335 p022 (q1927-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p022` / `agent/s-ws335-p022` | in-progress（2026-11-02 10:10 起動） | — |
 | P6 | phase-runner-high | ws335 p029 (q1928-i01) | `/home/awe/zedBSD-worktrees/p6-ws335d` / `agent/p6-ws335d` | in-progress（2026-11-02 10:10 起動） | — |
 | P7 | phase-runner-high | ws335 p038 (q1929-i01) | `/home/awe/zedBSD-worktrees/p7-ws335e` / `agent/p7-ws335e` | in-progress（2026-11-02 10:10 起動） | — |
-| P3 | phase-runner-high | BUG-409 (q1930-i01) | `/home/awe/zedBSD-worktrees/p3-bug409` / `agent/p3-bug409` | in-progress（2026-11-02 10:21 起動） | — |
+| P3 | phase-runner-high | BUG-409 (q1930-i01) | `/home/awe/zedBSD-worktrees/p3-bug409` / `agent/p3-bug409` | 返却（2026-11-02 10:41、fixed） | 708fb3d9c（2026-11-02 10:41 に main へ merge） |
+| P3 | phase-runner-high | BUG-410 (q1931-i01) | `/home/awe/zedBSD-worktrees/p3-bug410` / `agent/p3-bug410` | in-progress（2026-11-02 10:41 起動） | — |

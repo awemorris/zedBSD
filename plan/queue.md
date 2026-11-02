@@ -667,4 +667,5 @@
 | q1927 / q1927-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws335-p022` | [ws335 p022](ws335/phase022/phase.md) | 2026-11-02 10:10 Q1 | in-progress |
 | q1928 / q1928-i01 | P6（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p6-ws335d` | [ws335 p029](ws335/phase029/phase.md) | 2026-11-02 10:10 Q1 | in-progress |
 | q1929 / q1929-i01 | P7（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p7-ws335e` | [ws335 p038](ws335/phase038/phase.md) | 2026-11-02 10:10 Q1 | in-progress |
-| q1930 / q1930-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-bug409`・branch `agent/p3-bug409`） | [BUG-409](bugs/BUG-409.md) ld.so の DF_1_NODELETE | 2026-11-02 10:21 Q1 | in-progress |
+| q1930 / q1930-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-bug409`・branch `agent/p3-bug409`） | [BUG-409](bugs/BUG-409.md) ld.so の DF_1_NODELETE | 2026-11-02 10:21 Q1 | cleared（2026-11-02 10:41、708fb3d9c を main に merge、main で ld.so・libc.so warning 0） |
+| q1931 / q1931-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-bug410`・branch `agent/p3-bug410`） | [BUG-410](bugs/BUG-410.md) atexit と __cxa_finalize | 2026-11-02 10:41 Q1 | in-progress |
