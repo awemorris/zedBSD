@@ -73,3 +73,9 @@
 
 - p005 の _Thread_local で zedBSD amd64 の libbrowser.so が __tls_get_addr の未定義で link できなくなった（host と arm64 は通っていた）。Q1 が libvulkan と同じ形（amd64 は -mtls-dialect=gnu2 の TLS descriptor、riscv64 は -z undefs と provider の一覧）を libbrowser に当てて直した。amd64・riscv64 の libbrowser.so は warning 0。以後の Phase は zedBSD の amd64・arm64・riscv64 の libbrowser.so の build も確かめる。
 - p005 の design.md の案（§6.1 の仮の CPU の絵と費用、§9 の agent・abort_waited・pagehide の 1 秒）は P8 が p006 で design.md に入れる。
+
+## Q1 の判断（2026-11-02 20:23、p006 の merge）
+
+- p006 の手順 6（iframe を別に layout して自分の frame として commit する）は p009 に移す。stage A では iframe の document は top の script の thread で動き、子の list は親の list に写されるので、commit は既に変わらず自足している。frame の item は iframe が自分の thread から commit する時に要る。
+- 「1 つ先まで」の抑えは置かない（未描画の commit は新しい commit で置き換わり、script の thread は描画を待たない。present が止まれば rAF も止まる）。
+- cross-build の FAIL（libbrowser.a の WebPDecodeBGRAInto・WebPGetInfo が allowed の表に無い）は p006 のせいでなく、cross-build.sh の archive の一覧に libwebp-compat.a が無かったため。Q1 が直した。

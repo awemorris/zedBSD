@@ -200,7 +200,6 @@ BUG-418 · q1988 · WS346 · KL_VERSION 110（106 は BUG-396 の reload、107 �
 | [WS341](ws341/ws.md) | MG006 | 仮想 GPU の driver の枠組み（user の program が作る scanout だけの /dev/gpuN、他の GPU が描き、Vulkan Video で H.264・H.265 に encode して USB・network の遠隔の display・RDP へ）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
 | [WS342](ws342/ws.md) | MG006 | Windows 版の libvulkan（userland/desktop/libvulkan-win32、vulkan-1.dll への橋渡し、handle の共有）と Keiland の Windows の backend の compositor（userland/desktop/libkeiland-backend-win32、DWM の上）（2026-11-02 ユーザー） | planning | 着手しない（議論の後） |
 | [WS343](ws343/ws.md) | MG005 | base の TLS と ssh を自前に（CI の config から OpenSSH・OpenSSL・curl・libcurl を外し、base に自前の ssh・sshd・libssl.so・libcrypto.so、fetch の https、ca-certificates は packages に残す）（2026-11-02 ユーザー） | planning | WS335 completed・WS336 の後 |
-| [WS344](ws344/ws.md) | MG006 | libwebp-compat（自前の WebP の decoder、libwebp と互換の API、libbrowser の画像、BUG-405）（2026-11-02 ユーザー） | incomplete | p001 の設計を merge、Sonnet が実装の Phase を順に（2026-11-02） |
 | [WS345](ws345/ws.md) | MG006 | ブラウザの thread の分け方: JavaScript を窓の event と別の thread に、通信を独立した thread に（2026-11-02 ユーザー） | incomplete | P8 が p001 の設計（q1959） |
 | [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
 | [WS339](ws339/ws.md) | MG004 | x86 の PC の UEFI の起動の画面の解像度を monitor（EDID）に合わせる、標準の設定の video=640x480 を外す（2026-11-01 ユーザー） | planning | p001（担当の割当はユーザーの指示で） |
