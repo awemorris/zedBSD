@@ -178,6 +178,8 @@ grep -qx 'TERM=xterm-test' "$work/pty.txt" || fail "pty: TERM $(cat "$work/pty.t
 [ "Y=$(grep -E '^/dev/pts/' "$work/pty.txt")" = "$(grep '^Y=' "$work/pty.txt")" ] || fail "pty: SSH_TTY $(cat "$work/pty.txt")"
 grep -qx '0 1 2 ' "$work/pty.txt" || fail "pty: descriptors $(cat "$work/pty.txt")"
 grep -q 'no login record' "$work/log" || fail "pty: the record's refusal is not logged"
+grep -q 'login record of /dev/pts/[0-9]* refused: not a process of the session' "$work/log" ||
+    fail "pty: the monitor was not asked for the record"
 base_config > "$work/login.config"
 start_driver login
 run_ssh login -o IdentityFile="$work/client_key" -o LogLevel=ERROR -tt 127.0.0.1 > "$work/login.out" 2> "$work/login.err" < /dev/null
@@ -189,6 +191,29 @@ grep -q '^login-shell ' "$work/login.txt" || fail "login: $(cat "$work/login.txt
 grep -Eq '^/dev/pts/[0-9]+$' "$work/login.txt" || fail "login: no terminal $(cat "$work/login.txt")"
 grep -qx 'TERM=xterm-test' "$work/login.txt" || fail "login: TERM $(cat "$work/login.txt")"
 echo "ok pty"
+
+# Input the child reads late: the client's EOF closes its input only after everything kept was written.
+base_config > "$work/slow.config"
+start_driver slow
+head -c 1000000 "$work/big.bin" > "$work/slow.in"
+run_ssh slow -o IdentityFile="$work/client_key" -o LogLevel=ERROR 127.0.0.1 'sleep 2; cat' < "$work/slow.in" > "$work/slow.out" 2> "$work/slow.err"
+rc=$?
+end_driver slow
+[ "$rc" = 0 ] || fail "slow: exit status $rc"
+cmp -s "$work/slow.in" "$work/slow.out" || fail "slow: the data differs"
+echo "ok slow"
+
+# Output after the shell has ended (a process it left holds the streams): the channel ends after that output.
+base_config > "$work/late.config"
+start_driver late
+run_ssh late -o IdentityFile="$work/client_key" -o LogLevel=ERROR 127.0.0.1 '(sleep 1; echo late-out; echo late-err >&2) & exit 0' \
+    > "$work/late.out" 2> "$work/late.err"
+rc=$?
+end_driver late
+[ "$rc" = 0 ] || fail "late: exit status $rc"
+[ "$(cat "$work/late.out")" = late-out ] || fail "late: stdout $(cat "$work/late.out")"
+grep -qx late-err "$work/late.err" || fail "late: stderr $(cat "$work/late.err")"
+echo "ok late"
 
 # The descriptors of a command without a terminal: only its three streams (no monitor socket, no connection).
 base_config > "$work/descriptors.config"
@@ -247,15 +272,33 @@ end_driver tries
 grep -q 'Too many authentication failures' "$work/tries.err" || fail "tries: $(cat "$work/tries.err")"
 grep -q 'too many authentication failures' "$work/log" || fail "tries: not in the log"
 grep -q 'refused request' "$work/log" && fail "tries: the monitor saw a request over the limit"
+
+# MaxAuthTries 2, a key that is refused, then the right one: "none" is not an attempt, so the login is granted.
+{ base_config; echo "MaxAuthTries 2"; } > "$work/edge.config"
+start_driver edge
+run_ssh edge -o IdentityFile="$work/other_key1" -o IdentityFile="$work/client_key" -o LogLevel=ERROR 127.0.0.1 'echo edge' \
+    > "$work/edge.out" 2> "$work/edge.err"
+rc=$?
+end_driver edge
+[ "$rc" = 0 ] || fail "edge: exit status $rc $(cat "$work/edge.err")"
+[ "$(cat "$work/edge.out")" = edge ] || fail "edge: $(cat "$work/edge.out")"
 echo "ok tries"
 
 # The cases of the library's client: requests on a closing channel, the order of the channel's end, a change of user
 # or service, refused and repeated requests, a signal.
-for case in closing user-change service requests signal max-sessions; do
+for case in closing user-change service service-change service-request early requests signal max-sessions window \
+    limit-key limit-password limit-off; do
 	base_config > "$work/raw-$case.config"
-	[ "$case" = max-sessions ] && echo "MaxSessions 1" >> "$work/raw-$case.config"
+	key="$work/client_key"
+	case "$case" in
+	max-sessions) echo "MaxSessions 1" >> "$work/raw-$case.config" ;;
+	limit-key) echo "MaxAuthTries 1" >> "$work/raw-$case.config"; key="$work/other_key1" ;;
+	limit-password) sed -i 's/^PasswordAuthentication no$/PasswordAuthentication yes/' "$work/raw-$case.config"
+		echo "MaxAuthTries 1" >> "$work/raw-$case.config" ;;
+	limit-off) echo "MaxAuthTries 1" >> "$work/raw-$case.config" ;;
+	esac
 	start_driver "raw-$case"
-	timeout 90 "$work/sshd-pair-client" "$port" "$user" "$work/client_key" "$case" > "$work/raw-$case.out" 2>&1
+	timeout 90 "$work/sshd-pair-client" "$port" "$user" "$key" "$case" > "$work/raw-$case.out" 2>&1
 	rc=$?
 	end_driver "raw-$case"
 	[ "$rc" = 0 ] || fail "raw $case: $(cat "$work/raw-$case.out")"

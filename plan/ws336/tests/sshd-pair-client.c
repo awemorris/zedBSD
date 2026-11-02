@@ -52,7 +52,7 @@ struct client {
 static int client_accept_host(void *context, const uint8_t *blob, size_t size);
 static int client_next(struct client *client);
 static int client_send(struct client *client);
-static int client_connect(struct client *client, unsigned port);
+static int client_connect(struct client *client, unsigned port, const char *service_name);
 static int client_login(struct client *client);
 static int client_open(struct client *client, struct ssh_channel **channel);
 static int client_wait(struct client *client, unsigned type, struct ssh_channel *channel);
@@ -62,6 +62,10 @@ static int case_service(struct client *client);
 static int case_requests(struct client *client);
 static int case_signal(struct client *client);
 static int case_max_sessions(struct client *client);
+static int case_service_change(struct client *client);
+static int case_early(struct client *client);
+static int case_limit(struct client *client, int password);
+static int case_window(struct client *client);
 static int fail(const char *name, const char *what);
 
 /* Takes any host key: the test's known_hosts is not this client's concern. */
@@ -152,7 +156,8 @@ client_send(
 static int
 client_connect(
 	struct client *client,
-	unsigned port)
+	unsigned port,
+	const char *service_name)
 {
 	struct sockaddr_in address;
 	struct ssh_transport_ops ops;
@@ -176,7 +181,7 @@ client_connect(
 	ssh_buf_init(&client->out, SSH_PACKET_LIMIT, 1);
 
 	/* The service request, answered once the exchange is done. */
-	ssh_auth_put_service_request(SSH_SERVICE_USERAUTH, &client->out);
+	ssh_auth_put_service_request(service_name, &client->out);
 	status = client_send(client);
 	if (status != 0)
 		return status;
@@ -184,6 +189,8 @@ client_connect(
 	if (status != 0)
 		return status;
 	if (client->payload.data[0] != SSH_MSG_SERVICE_ACCEPT)
+		return EPROTO;
+	if (strcmp(service_name, SSH_SERVICE_USERAUTH) != 0)
 		return EPROTO;
 	status = ssh_auth_parse_service(client->payload.data, client->payload.size, service);
 	if (status != 0 || strcmp(service, SSH_SERVICE_USERAUTH) != 0)
@@ -583,6 +590,15 @@ case_max_sessions(
 	status = ssh_channel_parse_end(&client->channels, client->payload.data, client->payload.size, &other);
 	if (status != 0 || other != second)
 		return fail("max-sessions", "the close was not the second channel's");
+
+	/* A request on the channel the server closed is failed (it would otherwise be taken). */
+	ssh_channel_put_env(second, "LANG", "C", &client->out);
+	client->out.data[1U + 4U + 4U + 3U] = 1;
+	status = client_send(client);
+	if (status == 0)
+		status = client_next(client);
+	if (status != 0 || client->payload.data[0] != SSH_MSG_CHANNEL_FAILURE)
+		return fail("max-sessions", "a request on the closed channel was not failed");
 	ssh_channel_put_close(second, &client->out);
 	status = client_send(client);
 	(void)ssh_channel_closed(&client->channels, second);
@@ -590,6 +606,171 @@ case_max_sessions(
 		status = client_wait(client, SSH_MSG_CHANNEL_CLOSE, first);
 	if (status != 0)
 		return fail("max-sessions", "the first channel did not end");
+	return 0;
+}
+
+/* The service changes between two requests: the server disconnects (protocol error). */
+static int
+case_service_change(
+	struct client *client)
+{
+	int status;
+
+	ssh_auth_put_none(client->user, &client->out);
+	status = client_send(client);
+	if (status == 0)
+		status = client_next(client);
+	if (status != 0 || client->payload.data[0] != SSH_MSG_USERAUTH_FAILURE)
+		return fail("service-change", "none was not failed");
+	ssh_buf_put_u8(&client->out, SSH_MSG_USERAUTH_REQUEST);
+	ssh_buf_put_cstring(&client->out, client->user);
+	ssh_buf_put_cstring(&client->out, "ssh-other");
+	ssh_buf_put_cstring(&client->out, "none");
+	status = client_send(client);
+	if (status == 0)
+		status = client_next(client);
+	if (status != ECONNABORTED || client->transport.reason_code != SSH_DISCONNECT_PROTOCOL_ERROR)
+		return fail("service-change", "no disconnect");
+	return 0;
+}
+
+/* A channel open before the login: the server disconnects (protocol error). */
+static int
+case_early(
+	struct client *client)
+{
+	struct ssh_channel *channel;
+	int status;
+
+	status = ssh_channel_open_session(&client->channels, &client->out, &channel);
+	if (status == 0)
+		status = client_send(client);
+	if (status == 0)
+		status = client_next(client);
+	if (status != ECONNABORTED || client->transport.reason_code != SSH_DISCONNECT_PROTOCOL_ERROR)
+		return fail("early", "no disconnect");
+	return 0;
+}
+
+/*
+ * With MaxAuthTries 1: one refused attempt (a signed key that is not
+ * authorized, or a password) is answered with FAILURE, the next ends the
+ * connection with SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE.
+ */
+static int
+case_limit(
+	struct client *client,
+	int password)
+{
+	int round;
+	int status;
+
+	for (round = 0; round < 2; round++) {
+		if (password)
+			ssh_auth_put_password(client->user, "wrong", &client->out);
+		else
+			(void)ssh_auth_put_publickey_signed(client->user, &client->key, client->transport.session_id, &client->out);
+		status = client_send(client);
+		if (status == 0)
+			status = client_next(client);
+		if (round == 0 && (status != 0 || client->payload.data[0] != SSH_MSG_USERAUTH_FAILURE))
+			return fail("limit", "the first attempt was not failed");
+	}
+	if (status != ECONNABORTED || client->transport.reason_code != SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE)
+		return fail("limit", "no disconnect 14");
+	return 0;
+}
+
+/*
+ * The window: a command writes 2200000 bytes; without window adjustments
+ * the server sends exactly SSH_CHANNEL_WINDOW bytes (the window it was
+ * given) and waits; after the adjustment the rest comes, every byte.
+ */
+static int
+case_window(
+	struct client *client)
+{
+	struct ssh_channel *channel;
+	struct ssh_channel *other;
+	struct pollfd waiting;
+	const uint8_t *data;
+	size_t size;
+	size_t received;
+	size_t index;
+	uint32_t extended;
+	int status;
+
+	status = client_login(client);
+	if (status == 0)
+		status = client_open(client, &channel);
+	if (status != 0)
+		return fail("window", "login or open");
+	ssh_channel_put_exec(channel, (const uint8_t *)"head -c 2200000 /dev/zero", 25, &client->out);
+	status = client_send(client);
+	if (status != 0)
+		return fail("window", "exec");
+
+	/* Takes data without giving the window back, until nothing comes for two seconds. */
+	received = 0;
+	for (;;) {
+		waiting.fd = client->socket;
+		waiting.events = POLLIN;
+		waiting.revents = 0;
+		ssh_buf_reset(&client->payload);
+		status = ssh_transport_next(&client->transport, &client->payload);
+		if (status == EAGAIN) {
+			uint8_t chunk[16384];
+			ssize_t got;
+
+			if (poll(&waiting, 1, 2000) <= 0)
+				break;
+			got = read(client->socket, chunk, sizeof(chunk));
+			if (got <= 0)
+				return fail("window", "closed");
+			(void)ssh_transport_input(&client->transport, chunk, (size_t)got);
+			continue;
+		}
+		if (status != 0)
+			return fail("window", "transport");
+		if (client->payload.data[0] != SSH_MSG_CHANNEL_DATA)
+			continue;
+		status = ssh_channel_parse_data(&client->channels, client->payload.data, client->payload.size, &other, &data, &size, &extended);
+		if (status != 0)
+			return fail("window", "data beyond the window");
+		for (index = 0; index < size; index++) {
+			if (data[index] != 0)
+				return fail("window", "a byte differs");
+		}
+		received += size;
+	}
+	if (received != SSH_CHANNEL_WINDOW) {
+		fprintf(stderr, "received %lu\n", (unsigned long)received);
+		return fail("window", "not exactly the window");
+	}
+
+	/* Gives the window back and takes the rest. */
+	ssh_channel_consumed(channel, received, &client->out);
+	status = client_send(client);
+	for (;;) {
+		status = client_next(client);
+		if (status != 0)
+			return fail("window", "the rest did not come");
+		if (client->payload.data[0] == SSH_MSG_CHANNEL_CLOSE)
+			break;
+		if (client->payload.data[0] != SSH_MSG_CHANNEL_DATA)
+			continue;
+		status = ssh_channel_parse_data(&client->channels, client->payload.data, client->payload.size, &other, &data, &size, &extended);
+		if (status != 0)
+			return fail("window", "data");
+		received += size;
+		ssh_channel_consumed(channel, size, &client->out);
+		if (client->out.size > 0)
+			(void)client_send(client);
+	}
+	if (received != 2200000U) {
+		fprintf(stderr, "received %lu\n", (unsigned long)received);
+		return fail("window", "bytes are missing");
+	}
 	return 0;
 }
 
@@ -628,7 +809,23 @@ main(
 	(void)close(descriptor);
 	if (got <= 0 || ssh_key_parse_private(text, (size_t)got, &client.key) != 0)
 		return 2;
-	status = client_connect(&client, (unsigned)atoi(argv[1]));
+	if (strcmp(argv[4], "service-request") == 0) {
+		/* A service other than ssh-userauth: disconnected with SERVICE_NOT_AVAILABLE. */
+		status = client_connect(&client, (unsigned)atoi(argv[1]), "ssh-other");
+		if (status == ECONNABORTED && client.transport.reason_code == SSH_DISCONNECT_SERVICE_NOT_AVAILABLE)
+			status = 0;
+		else
+			status = fail(argv[4], "no disconnect");
+		if (status == 0)
+			printf("ok %s\n", argv[4]);
+		ssh_transport_free(&client.transport);
+		ssh_buf_free(&client.payload);
+		ssh_buf_free(&client.out);
+		ssh_key_clear(&client.key);
+		(void)close(client.socket);
+		return status;
+	}
+	status = client_connect(&client, (unsigned)atoi(argv[1]), SSH_SERVICE_USERAUTH);
 	if (status != 0) {
 		printf("FAIL %s: connect %d\n", argv[4], status);
 		return 1;
@@ -645,6 +842,18 @@ main(
 		status = case_signal(&client);
 	else if (strcmp(argv[4], "max-sessions") == 0)
 		status = case_max_sessions(&client);
+	else if (strcmp(argv[4], "service-change") == 0)
+		status = case_service_change(&client);
+	else if (strcmp(argv[4], "early") == 0)
+		status = case_early(&client);
+	else if (strcmp(argv[4], "limit-key") == 0)
+		status = case_limit(&client, 0);
+	else if (strcmp(argv[4], "limit-password") == 0)
+		status = case_limit(&client, 1);
+	else if (strcmp(argv[4], "limit-off") == 0)
+		status = case_limit(&client, 1);
+	else if (strcmp(argv[4], "window") == 0)
+		status = case_window(&client);
 	else
 		status = fail(argv[4], "no such case");
 	if (status == 0)
