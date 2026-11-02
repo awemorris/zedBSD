@@ -18,12 +18,6 @@
 #define SSLC_HS_RANDOM_SIZE		32U
 #define SSLC_HS_SESSION_ID_SIZE		32U
 
-/* The size of an uncompressed secp256r1 public key (SEC 1 2.3.3: 0x04, x and y). */
-#define SSLC_HS_P256_POINT		65U
-
-/* The size of the (EC)DHE shared secret of both groups (RFC 8446 7.4.1 and 7.4.2). */
-#define SSLC_HS_SHARED_SIZE		32U
-
 /* The size of the downgrade marks at the end of a ServerHello random (RFC 8446 4.1.3). */
 #define SSLC_HS_DOWNGRADE_SIZE		8U
 
@@ -35,12 +29,16 @@
 
 /*
  * The groups of the ClientHello's supported_groups, in preference order:
- * x25519, whose share is sent first, then secp256r1, which a server may
- * ask for with a HelloRetryRequest.  Constant.
+ * x25519, whose share is sent first, then secp256r1 and secp384r1, which
+ * a server may ask for with a HelloRetryRequest or choose in a TLS 1.2
+ * ServerKeyExchange.  secp384r1 is offered also because a TLS 1.2 server
+ * uses an ECDSA certificate only on a curve the client lists (RFC 8422
+ * 5.1).  Constant.
  */
-static const uint16_t sslc_hs_offered_groups[2] = {
+static const uint16_t sslc_hs_offered_groups[3] = {
 	SSLC_GROUP_X25519,
-	SSLC_GROUP_SECP256R1
+	SSLC_GROUP_SECP256R1,
+	SSLC_GROUP_SECP384R1
 };
 
 /*
@@ -93,8 +91,8 @@ static int sslc_hs_check_hello13(struct sslc_hs *hs, const struct sslc_server_he
 /* Takes a HelloRetryRequest and sends the second ClientHello. */
 static int sslc_hs_retry(struct sslc_hs *hs, const struct sslc_server_hello *hello, const struct sslc_suite *suite, const uint8_t *message, size_t size, struct sslc_hs_actions *actions);
 
-/* Makes the secp256r1 key pair (once); returns 0, ENOMEM or EIO. */
-static int sslc_hs_make_p256(struct sslc_hs *hs);
+/* Makes the key pair of group (secp256r1 or secp384r1, once); returns 0, EPROTO, ENOMEM or EIO. */
+static int sslc_hs_make_ec(struct sslc_hs *hs, uint16_t group);
 
 /* Returns 1 when the ClientHello offered suite id, else 0. */
 static int sslc_hs_offered_suite(const struct sslc_hs *hs, uint16_t id);
@@ -114,7 +112,7 @@ static unsigned sslc_hs_verdict_alert(enum cryc_verify_code code);
 /*
  * Starts a handshake: makes the x25519 key pair and the random values with
  * config->random and builds the ClientHello (the offered suites of the
- * versions; groups x25519 then secp256r1; schemes ecdsa_secp256r1_sha256,
+ * versions; groups x25519, secp256r1, secp384r1; schemes ecdsa_secp256r1_sha256,
  * ecdsa_secp384r1_sha384, rsa_pss_rsae_sha256, rsa_pss_rsae_sha384,
  * rsa_pss_rsae_sha512, rsa_pkcs1_sha256, rsa_pkcs1_sha384,
  * rsa_pkcs1_sha512; one x25519 share).
@@ -399,7 +397,7 @@ sslc_hs_free(
 	for (index = 0; index < hs->peer_count && index < CRYC_CHAIN_MAX_PEER; index++)
 		free(hs->peer_der[index]);
 
-	/* The secp256r1 curve, when one was made. */
+	/* The curve of the elliptic-curve key pair, when one was made. */
 	free(hs->ec);
 
 	/* Every secret and every pointer goes; the state refuses further use. */
@@ -632,11 +630,14 @@ sslc_hs_certificate(
 
 /*
  * Computes the (EC)DHE shared secret with the server's share of group
- * (x25519 or secp256r1) into shared (32 bytes).
+ * (x25519, secp256r1 or secp384r1) into shared (SSLC_HS_SHARED_MAX bytes
+ * of room) and its size into *shared_size.
  *
  * An x25519 share must be 32 bytes and give a result that is not all
- * zeros (RFC 8446 7.4.2); a secp256r1 share must be an uncompressed point
- * on the curve (cryc_ecc_ecdh validates it).  shared is wiped on an error.
+ * zeros (RFC 8446 7.4.2); a secp256r1 or secp384r1 share must be an
+ * uncompressed point on the curve of our key pair (cryc_ecc_ecdh
+ * validates it), and the secret is its x coordinate (32 or 48 bytes, RFC
+ * 8446 7.4.2, RFC 8422 5.10).  shared is wiped on an error.
  */
 int
 sslc_hs_shared_secret(
@@ -644,14 +645,17 @@ sslc_hs_shared_secret(
 	uint16_t group,
 	const uint8_t *share,
 	size_t share_size,
-	uint8_t *shared)
+	uint8_t *shared,
+	size_t *shared_size)
 {
 	int error;
+
+	*shared_size = 0;
 
 	/* x25519: a u-coordinate of 32 bytes, and a result that is not all zeros. */
 	if (group == SSLC_GROUP_X25519) {
 		if (share == NULL || share_size != CRYC_X25519_SIZE) {
-			cryc_wipe(shared, SSLC_HS_SHARED_SIZE);
+			cryc_wipe(shared, SSLC_HS_SHARED_MAX);
 			hs->alert = SSLC_ALERT_ILLEGAL_PARAMETER;
 			return EPROTO;
 		}
@@ -659,39 +663,42 @@ sslc_hs_shared_secret(
 		/* The product with our private key (EINVAL: the all-zero result of a small-order point). */
 		error = cryc_x25519(shared, hs->x25519_private, share);
 		if (error != 0) {
-			cryc_wipe(shared, SSLC_HS_SHARED_SIZE);
+			cryc_wipe(shared, SSLC_HS_SHARED_MAX);
 			hs->alert = SSLC_ALERT_ILLEGAL_PARAMETER;
 			return EPROTO;
 		}
 
 		/* Succeeded: shared holds the x25519 secret. */
+		*shared_size = CRYC_X25519_SIZE;
 		return 0;
 	}
 
-	/* secp256r1: only with a key pair of our own, and a share that validates. */
-	if (group == SSLC_GROUP_SECP256R1) {
-		if (!hs->has_p256 ||
+	/* secp256r1 and secp384r1: only with a key pair of our own of that group, and a share that validates. */
+	if (group == SSLC_GROUP_SECP256R1 || group == SSLC_GROUP_SECP384R1) {
+		if (!hs->has_ec ||
 		    hs->ec == NULL ||
+		    hs->ec_group != group ||
 		    share == NULL) {
-			cryc_wipe(shared, SSLC_HS_SHARED_SIZE);
+			cryc_wipe(shared, SSLC_HS_SHARED_MAX);
 			hs->alert = SSLC_ALERT_ILLEGAL_PARAMETER;
 			return EPROTO;
 		}
 
 		/* The x coordinate of the product (cryc_ecc_ecdh validates the point and wipes on an error). */
-		error = cryc_ecc_ecdh(hs->ec, hs->p256_private, share, share_size, shared);
+		error = cryc_ecc_ecdh(hs->ec, hs->ec_private, share, share_size, shared);
 		if (error != 0) {
-			cryc_wipe(shared, SSLC_HS_SHARED_SIZE);
+			cryc_wipe(shared, SSLC_HS_SHARED_MAX);
 			hs->alert = SSLC_ALERT_ILLEGAL_PARAMETER;
 			return EPROTO;
 		}
 
-		/* Succeeded: shared holds the secp256r1 secret. */
+		/* Succeeded: shared holds the secret, the curve's size. */
+		*shared_size = hs->ec->size;
 		return 0;
 	}
 
 	/* Any other group was never offered. */
-	cryc_wipe(shared, SSLC_HS_SHARED_SIZE);
+	cryc_wipe(shared, SSLC_HS_SHARED_MAX);
 	hs->alert = SSLC_ALERT_ILLEGAL_PARAMETER;
 	return EPROTO;
 }
@@ -721,7 +728,7 @@ sslc_hs_wipe_secrets(
 {
 	/* The key pairs, the key schedule, the master secret. */
 	cryc_wipe(hs->x25519_private, sizeof(hs->x25519_private));
-	cryc_wipe(hs->p256_private, sizeof(hs->p256_private));
+	cryc_wipe(hs->ec_private, sizeof(hs->ec_private));
 	sslc_tls13_clear(&hs->schedule);
 	cryc_wipe(hs->master, sizeof(hs->master));
 }
@@ -1104,19 +1111,20 @@ sslc_hs_retry(
 
 	/*
 	 * The share of the group asked for replaces the shares sent (4.1.2).
-	 * The only offered group without a share is secp256r1, whose key pair
-	 * is made now; the x25519 key will not be used again.
+	 * The offered groups without a share are secp256r1 and secp384r1;
+	 * the key pair of the one asked for is made now, and the x25519 key
+	 * will not be used again.
 	 */
-	if ((hello->seen & SSLC_SEEN_KEY_SHARE) != 0U && hello->share_group == SSLC_GROUP_SECP256R1) {
-		error = sslc_hs_make_p256(hs);
+	if ((hello->seen & SSLC_SEEN_KEY_SHARE) != 0U) {
+		error = sslc_hs_make_ec(hs, hello->share_group);
 		if (error != 0) {
-			hs->alert = 0;
+			hs->alert = error == EPROTO ? SSLC_ALERT_ILLEGAL_PARAMETER : 0;
 			return error;
 		}
 		cryc_wipe(hs->x25519_private, sizeof(hs->x25519_private));
-		hs->hello.shares[0].group = SSLC_GROUP_SECP256R1;
-		hs->hello.shares[0].key = hs->p256_public;
-		hs->hello.shares[0].key_size = SSLC_HS_P256_POINT;
+		hs->hello.shares[0].group = hello->share_group;
+		hs->hello.shares[0].key = hs->ec_public;
+		hs->hello.shares[0].key_size = hs->ec_public_size;
 		hs->hello.share_count = 1;
 	}
 
@@ -1144,36 +1152,46 @@ sslc_hs_retry(
 	return 0;
 }
 
-/* Makes the secp256r1 key pair (once). */
+/* Makes the key pair of group (once per handshake). */
 static int
-sslc_hs_make_p256(
-	struct sslc_hs *hs)
+sslc_hs_make_ec(
+	struct sslc_hs *hs,
+	uint16_t group)
 {
+	enum cryc_curve_id curve;
 	int error;
 
-	/* Made once per handshake. */
-	if (hs->has_p256)
-		return 0;
+	/* The curve of the group; one key pair per handshake. */
+	if (group == SSLC_GROUP_SECP256R1)
+		curve = CRYC_CURVE_P256;
+	else if (group == SSLC_GROUP_SECP384R1)
+		curve = CRYC_CURVE_P384;
+	else
+		return EPROTO;
+	if (hs->has_ec)
+		return hs->ec_group == group ? 0 : EPROTO;
 
 	/* The curve, on the heap (it is about 4 KiB). */
 	if (hs->ec == NULL) {
 		hs->ec = malloc(sizeof(*hs->ec));
 		if (hs->ec == NULL)
 			return ENOMEM;
-
-		/* Prepared for arithmetic. */
-		error = cryc_ecp_init(hs->ec, CRYC_CURVE_P256);
-		if (error != 0)
-			return error;
 	}
 
+	/* Prepared for arithmetic. */
+	error = cryc_ecp_init(hs->ec, curve);
+	if (error != 0)
+		return error;
+
 	/* The key pair from the configuration's random source. */
-	error = cryc_ecc_keygen(hs->ec, hs->p256_private, hs->p256_public, hs->config->random, hs->config->random_context);
+	error = cryc_ecc_keygen(hs->ec, hs->ec_private, hs->ec_public, hs->config->random, hs->config->random_context);
 	if (error != 0)
 		return EIO;
 
-	/* Succeeded: has_p256 tells the shared secret and the second ClientHello that the pair exists. */
-	hs->has_p256 = 1;
+	/* Succeeded: has_ec tells the shared secret and the second ClientHello that the pair exists. */
+	hs->ec_group = group;
+	hs->ec_public_size = 1U + 2U * hs->ec->size;
+	hs->has_ec = 1;
 	return 0;
 }
 

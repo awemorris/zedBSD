@@ -2,7 +2,7 @@
 
 # ws335-p040: secp384r1 の group（supported_groups で申し出る、TLS 1.2 の ServerKeyExchange の P-384 の ECDHE、TLS 1.3 の HRR の後の P-384 の key share、共有の秘密の大きさ 48）
 
-Status: planned（2026-11-02 P1 が q1971-i01（p033）の中で、Q1 の判断 B に従って作成。依存: p033。p034 の前）
+Status: 実装済み・試験 PASS（2026-11-02 18:30 P1 q1981-i01。cleared は Q1）。前: in-progress（2026-11-02 17:43 P1）、planned（2026-11-02 P1 が q1971-i01（p033）の中で、Q1 の判断 B に従って作成。依存: p033。p034 の前）
 Parent: [WS335](../ws.md)。担当: Opus（phase-runner-high を推す。handshake の状態と鍵の大きさに触れる）。
 
 ## 0. なぜ
@@ -54,4 +54,34 @@ check-skeleton の BASE はこの Phase の後に Q1 が移す。
 
 ## 6. 結果
 
-（未着手）
+2026-11-02（host の `date`、17:45〜18:30）P1（Opus、q1981-i01）。worktree `/home/awe/zedBSD-worktrees/p1-ws335`（main d6a73d451d から）。§3 の header の変更は Q1 が承認済み（ws.md「Q1 の判断（2026-11-02 17:43、p040 の header の変更）」）。
+
+変えた物:
+
+- `sslc-hs.c`: 申し出る group を x25519・secp256r1・secp384r1 に。`sslc_hs_make_p256` を `sslc_hs_make_ec(hs, group)` に（P-256 か P-384 の曲線を init して鍵の対を作る。1 handshake に 1 つ、別の group の 2 回目は EPROTO）。HRR は「offered で share の無い group」（secp256r1 か secp384r1）の鍵の対を作り、その share（65 か 97 byte）だけを送る。`sslc_hs_shared_secret` は group の鍵の対（`ec_group` が一致する事）で計算し、大きさを `*shared_size`（32 か 48）で返す。`SSLC_HS_P256_POINT`・`SSLC_HS_SHARED_SIZE` を除いた。
+- `sslc-hs12.c`: ServerKeyExchange の secp384r1 の点は 97 byte の uncompressed（他の大きさは illegal_parameter）、`sslc_hs12_make_ec`、ClientKeyExchange は `ec_public`、premaster の大きさは shared_size。`SSLC_HS12_MESSAGE_MAX` は P-384 の点の分。
+- `sslc-hs13.c`: shared の場所は `SSLC_HS_SHARED_MAX`、`sslc_tls13_handshake` に shared_size。
+- header（承認済み）: `sslc-hs.h`（`struct sslc_hs` の `ec_group`・`ec_private[CRYC_ECP_MAX_BYTES]`・`ec_public[CRYC_ECP_MAX_POINT]`・`ec_public_size`・`has_ec`、`SSLC_HS_SHARED_MAX`、`sslc_hs_shared_secret` の `size_t *shared_size` と comment、sslc_hs_start の group の文）、`sslc-keysched.h`（shared_size の comment に 48）。`sslc-keysched.c` は comment だけ。
+- 試験の道具: `tlspeer.h`（`config.group` に secp384r1、`p384_private`（SHA-384("tlspeer p384")）、P-384 の share と ECDH、ZERO_SHARE の 97 byte）。
+- 試験: `test-hs13.c`（ClientHello の期待の supported_groups に 0x0018、CAVP KAS ECC CDH [P-384] COUNT 0 で 48 byte の共有の秘密、P-384 の鍵で P-256 の share を断る、P-384 の不正な点、HRR で secp384r1 の通しの handshake（97 byte の share、2 回目の ClientHello の byte 一致、peer の 48 byte の秘密、鍵の一致、乱数の 4 回目が 48 byte）、送らない group は 0x0019 に）、`test-hs12.c`（3 group × 3 suite × 2 曲線 × 2 client = 36 件、P-384 の点の大きさ 65・96・98 と P-256 に 97 を断る、送らない group は 0x0019）、`test-tlspeer.c`（範囲外の group を 0x0019 に）、`test-api-ssl.c`（P-384 の handshake を 1.3 で 2 件・1.2 で 1 件）、`run-interop.sh`（p033 の known limit 8 件を「繋がらなければならない」に戻し、host の group に P-384（HRR）、全部の system に「1.3 hrr secp384r1」「1.2 secp384r1」「1.2 ECDSA P-384 leaf」）。`run-sites.sh` の `ecc384.badssl.com` は p033 から期待の PASS の一覧にある。
+
+試験（各 command に timeout。最後の行）:
+
+| command | 結果 |
+| --- | --- |
+| `WS335_VECTORS=… sh plan/ws335/tests/run-unit.sh all` | test と ct の 57 本が PASS、`run-unit: PASS`（test-hs13 18663・test-hs12 17959・test-tlspeer 35583・test-api-ssl 5201 checks） |
+| `WS335_VECTORS=… sh plan/ws335/tests/run-unit.sh --win32 all` | test と ct の 57 本が PASS（win32）、`run-unit: PASS`（test-hs13 18663・test-hs12 17959・test-tlspeer 35583・test-api-ssl 5576 checks） |
+| `sh plan/ws335/tests/run-ct.sh all` | `run-ct: PASS`（ct-ecc は P-256 と P-384 の ECDH を前から含む） |
+| `sh plan/ws335/tests/run-interop.sh` | `run-interop: PASS (139 cases, 0 of them known limits)`（1.3・1.2 × suite × {x25519, P-256, P-384} × 4 鍵、1.2 × ECDSA P-384 の leaf の全部、署名 scheme、記録・非 blocking・close の各件） |
+| `sh plan/ws335/tests/run-interop.sh --win32` | `run-interop: PASS (47 cases, 0 of them known limits)`（x86_64・aarch64 の .a と .exe が warning 0、Wine の cert.pem と Disallowed の件を含む） |
+| `sh plan/ws335/tests/run-limbo.sh` | `limbo-api: PASS (294562 checks)` / `run-limbo: PASS`（p033 と同じ件数、TLS 1.2 の handshake の group の変更の影響なし） |
+| `sh plan/ws335/tests/run-sites.sh` | `run-sites: 28 PASS, 1 FAIL, 0 SKIP`（`ecc384.badssl.com` が PASS に変わった。残る FAIL は `sha384.badssl.com` の証明書の期限切れ、site の側） |
+| `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=build/p040 build/p040/dynamic/libssl-compat.so` | rc 0、warning 0、check-dynamic-elf 通過。`check-exports.sh` は `public 22, defined 22, cryc_ calls 47` / `PASS` |
+| `BASE=4eae22020 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: FAIL`。FAILED は凍結の差の 1 つだけ: `userland/base/libssl-compat/sslc-hs.h`（36 行）と `userland/base/libssl-compat/sslc-keysched.h`（3 行）、どちらも §3 の承認済みの変更。他の check（単独の compile・層・名前）は通った。BASE は Q1 が移す |
+| わざと壊す（写しから戻し cmp と `git diff --quiet` で確かめた） | (m1) 1.2 の secp384r1 の点の大きさの確かめを外す → test-hs12 FAIL（9 checks）。(m2) secp384r1 の共有の秘密の大きさを 32 にする → test-hs13 FAIL（10）・test-hs12 FAIL（108、peer との鍵の不一致） |
+
+未実施: zedBSD の QEMU の guest（run-guest.sh、今回の依頼に無い。group の変更は host・Wine で確かめた）、実の Windows の機械、aarch64 の zedBSD の .so の build（amd64 だけ）。
+
+p035 へ: 凍結の header のうち承認の範囲の外の comment に「x25519 と secp256r1」の記述が残る: `sslc-tls.h` の file の comment（Groups: x25519 and secp256r1 for key exchange）、`sslc-msg.h:35`（key share の数の comment）。design.md の D8 の文（phase040 §4 の案、Q1 が採用）。
+
+消してほしい path（worktree の中）: `build/p040`、`build/tmp/p040-*`、`build/tmp/ws335-*`（この Phase の run）、`build/amd64/sysroot`（make が作った）。
