@@ -83,6 +83,12 @@ struct paint_gpu_image {
 	uint64_t serial;
 	uint32_t x;
 	uint32_t y;
+	/* For a part of an image larger than the atlas: its first texel, its size in the atlas and the image's texels to one of it (0 for a whole image). */
+	uint32_t crop_x;
+	uint32_t crop_y;
+	uint32_t crop_width;
+	uint32_t crop_height;
+	uint32_t step;
 };
 
 /*
@@ -111,6 +117,8 @@ static int gpu_stage_text(struct paint_gpu *gpu, const struct paint_item *item, 
 static int gpu_stage_image(struct paint_gpu *gpu, const struct paint_item *item, layout_unit scroll_y, VkExtent2D extent, const struct paint_clip *clip);
 static int gpu_place(struct paint_gpu *gpu, const struct text_glyph *glyph, uint32_t *x, uint32_t *y);
 static int gpu_place_image(struct paint_gpu *gpu, const struct img_bitmap *image, uint32_t *x, uint32_t *y);
+static int gpu_place_part(struct paint_gpu *gpu, const struct img_bitmap *image, const struct paint_gpu_image *part, uint32_t *x, uint32_t *y);
+static int gpu_stage_part(struct paint_gpu *gpu, const struct paint_item *item, VkExtent2D extent, struct gpu_instance *instance, uint32_t *x, uint32_t *y);
 static int gpu_shelf(struct paint_gpu *gpu, uint32_t width, uint32_t height, uint32_t *x, uint32_t *y);
 static struct paint_gpu_slot *gpu_slot(struct paint_gpu *gpu, const uint8_t *bitmap);
 static int gpu_slots_grow(struct paint_gpu *gpu);
@@ -1508,8 +1516,12 @@ gpu_stage_image(
 	if (instance.rect[3] <= 0.0f || instance.rect[1] >= (float)extent.height)
 		return 0;
 
-	/* Its pixels in the atlas; an image the atlas cannot take is left out of this frame. */
-	placed = gpu_place_image(gpu, item->image, &atlas_x, &atlas_y);
+	/* Its pixels in the atlas; an image larger than the atlas puts there only the part the cut shows. */
+	if (item->image->width > (int)PAINT_GPU_ATLAS_SIZE || item->image->height > (int)PAINT_GPU_ATLAS_SIZE) {
+		placed = gpu_stage_part(gpu, item, extent, &instance, &atlas_x, &atlas_y);
+	} else {
+		placed = gpu_place_image(gpu, item->image, &atlas_x, &atlas_y);
+	}
 	if (!placed)
 		return 0;
 	instance.atlas[0] = (float)atlas_x;
@@ -1524,6 +1536,137 @@ gpu_stage_image(
 
 	/* Succeeded: the image is staged. */
 	return 0;
+}
+
+/*
+ * Places the part of an image larger than the atlas that an instance's
+ * cut rectangle shows (every step-th texel when even that is larger), and
+ * moves the instance's origin, scale and texel count to that part, so that
+ * the shader finds the same texels in it.  0 when it does not fit.
+ */
+static int
+gpu_stage_part(
+	struct paint_gpu *gpu,
+	const struct paint_item *item,
+	VkExtent2D extent,
+	struct gpu_instance *instance,
+	uint32_t *x,
+	uint32_t *y)
+{
+	struct paint_gpu_image part;
+	float top;
+	float bottom;
+	float first_x;
+	float first_y;
+	float last_x;
+	float last_y;
+	uint32_t width;
+	uint32_t height;
+
+	/* No scale, no texels. */
+	if (instance->source[2] <= 0.0f || instance->source[3] <= 0.0f)
+		return 0;
+
+	/* The texels under the first and the last pixel the cut shows (within the target), as the shader finds them. */
+	top = instance->rect[1] < 0.0f ? 0.0f : instance->rect[1];
+	bottom = instance->rect[3] > (float)extent.height ? (float)extent.height : instance->rect[3];
+	first_x = floorf((instance->rect[0] + 0.5f - instance->source[0]) * instance->source[2]);
+	first_y = floorf((top + 0.5f - instance->source[1]) * instance->source[3]);
+	last_x = floorf((instance->rect[2] - 0.5f - instance->source[0]) * instance->source[2]);
+	last_y = floorf((bottom - 0.5f - instance->source[1]) * instance->source[3]);
+	if (first_x < 0.0f)
+		first_x = 0.0f;
+	if (first_y < 0.0f)
+		first_y = 0.0f;
+	if (last_x > (float)(item->image->width - 1))
+		last_x = (float)(item->image->width - 1);
+	if (last_y > (float)(item->image->height - 1))
+		last_y = (float)(item->image->height - 1);
+	if (last_x < first_x || last_y < first_y)
+		return 0;
+
+	/* The part, taking every step-th texel when it is still larger than the atlas. */
+	width = (uint32_t)(last_x - first_x) + 1U;
+	height = (uint32_t)(last_y - first_y) + 1U;
+	memset(&part, 0, sizeof(part));
+	part.serial = item->image->serial;
+	part.crop_x = (uint32_t)first_x;
+	part.crop_y = (uint32_t)first_y;
+	part.step = 1U;
+	while (width > part.step * PAINT_GPU_ATLAS_SIZE || height > part.step * PAINT_GPU_ATLAS_SIZE)
+		part.step++;
+	part.crop_width = (width + part.step - 1U) / part.step;
+	part.crop_height = (height + part.step - 1U) / part.step;
+	if (!gpu_place_part(gpu, item->image, &part, x, y))
+		return 0;
+
+	/* The instance reads the part: its origin moved by the part's first texel, its scale and count in the part's texels. */
+	instance->source[0] += first_x / instance->source[2];
+	instance->source[1] += first_y / instance->source[3];
+	instance->source[2] /= (float)part.step;
+	instance->source[3] /= (float)part.step;
+	instance->texels[0] = (float)part.crop_width;
+	instance->texels[1] = (float)part.crop_height;
+	return 1;
+}
+
+/*
+ * Finds the place in the atlas of a part of an image (a part placed before
+ * in this round is where it was put), copying its texels there the first
+ * time; 0 when it does not fit.
+ */
+static int
+gpu_place_part(
+	struct paint_gpu *gpu,
+	const struct img_bitmap *image,
+	const struct paint_gpu_image *part,
+	uint32_t *x,
+	uint32_t *y)
+{
+	struct paint_gpu_image *known;
+	struct paint_gpu_image place;
+	const uint32_t *row_pixels;
+	uint32_t *out;
+	uint32_t row;
+	uint32_t column;
+	size_t index;
+	int placed;
+	int error;
+
+	/* The same part placed before. */
+	for (index = 0; index < gpu->images.count; index++) {
+		known = wb_vector_at(&gpu->images, index);
+		if (known->serial == part->serial && known->step == part->step && known->crop_x == part->crop_x &&
+		    known->crop_y == part->crop_y && known->crop_width == part->crop_width && known->crop_height == part->crop_height) {
+			*x = known->x;
+			*y = known->y;
+			return 1;
+		}
+	}
+
+	/* Room on the shelves. */
+	placed = gpu_shelf(gpu, part->crop_width, part->crop_height, x, y);
+	if (!placed)
+		return 0;
+
+	/* Its texels, every step-th of the image's from its first. */
+	for (row = 0U; row < part->crop_height; row++) {
+		row_pixels = image->pixels + (size_t)(part->crop_y + row * part->step) * (size_t)image->width;
+		out = (uint32_t *)(void *)(gpu->atlas_map + (size_t)(*y + row) * gpu->atlas_pitch + (size_t)*x * 4U);
+		for (column = 0U; column < part->crop_width; column++)
+			out[column] = row_pixels[part->crop_x + column * part->step];
+	}
+
+	/* Records the place. */
+	place = *part;
+	place.x = *x;
+	place.y = *y;
+	error = wb_vector_push(&gpu->images, &place);
+	if (error != 0)
+		return 0;
+
+	/* Succeeded: the part is in the atlas. */
+	return 1;
 }
 
 /*
@@ -1550,7 +1693,7 @@ gpu_place_image(
 	/* An image placed before is where it was put. */
 	for (index = 0; index < gpu->images.count; index++) {
 		known = wb_vector_at(&gpu->images, index);
-		if (known->serial == image->serial) {
+		if (known->serial == image->serial && known->step == 0U) {
 			*x = known->x;
 			*y = known->y;
 			return 1;
@@ -1564,6 +1707,7 @@ gpu_place_image(
 		return 0;
 
 	/* Room on the shelves. */
+	memset(&place, 0, sizeof(place));
 	placed = gpu_shelf(gpu, width, height, &place.x, &place.y);
 	if (!placed)
 		return 0;
@@ -1572,7 +1716,7 @@ gpu_place_image(
 	for (row = 0U; row < height; row++)
 		memcpy(gpu->atlas_map + (size_t)(place.y + row) * gpu->atlas_pitch + (size_t)place.x * 4U, image->pixels + (size_t)row * width, (size_t)width * 4U);
 
-	/* Records the place. */
+	/* Records the place (a whole image: step 0). */
 	place.serial = image->serial;
 	error = wb_vector_push(&gpu->images, &place);
 	if (error != 0)
