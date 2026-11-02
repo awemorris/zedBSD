@@ -47,6 +47,9 @@
 
 ## Q1 の判断
 
+- （2026-11-02 13:31、design.md §11-5）libwebp-test-data と libvpx の vp80-00-comprehensive の key frame を追加の試験の画像として取得してよい。tree に入れず共有の `build/sources/` に置き、SHA-256 を記録して照合する。期待の値は libwebp 1.5.0 の出力と照らす（試験の道具の扱いは他の試験の画像と同じ）。取得と組み込みは p017・p019 の担当が行う。
+- （2026-11-02 13:31）共有の sysroot（amd64・arm64・riscv64）を Q1 が作り直した。新しい compat/webp の header が入ったので、以後の Phase は target-build.sh の複写を使わなくてよい。
+
 - （2026-11-02 Q1、design.md §11 への答え）
   1. libwebp 1.5.0 の source を参照してよいのは、RFC が決めていない interface の振る舞い（状態・誤りの規則、API の約束、buffer の検査、bit 一致の出力に要る fancy upsampling の YUV → RGB の規則）だけ。block ごとに「Procedure referenced: libwebp 1.5.0 <file> (BSD-3-Clause)」「Values referenced: …」と書く。codec の算術（VP8・VP8L・ALPH）は RFC 9649・6386 から。code・構造は写さない。表の値を libwebp から取ったら（output.c の YUV → RGB の定数）、libwebp の BSD の表示を license の監査に足す（p022）。
   2. 共有の sysroot は BASE の commit の merge の直後に Q1 が作り直す。Q1 が知らせるまで target-build.sh の複写を使う。
