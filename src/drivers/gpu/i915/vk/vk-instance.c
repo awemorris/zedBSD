@@ -63,6 +63,8 @@ static int i915_instance_video_queue_token;
 static int i915_instance_create(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int i915_instance_enumerate_physical_devices(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int i915_instance_properties(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int i915_instance_properties2(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static VkPhysicalDeviceProperties *i915_instance_describe(struct i915_render_session *session, struct i915_wire_reader *reader);
 static void i915_instance_limits(VkPhysicalDeviceLimits *limits);
 static int i915_instance_features(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int i915_instance_memory_properties(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -123,6 +125,10 @@ drv_i915_render_instance_dispatch(
 	case GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES:
 		/* vkGetPhysicalDeviceProperties */
 		error = i915_instance_properties(session, reader, reply);
+		break;
+	case GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2:
+		/* vkGetPhysicalDeviceProperties2 with the device's identity (the export of memory names it) */
+		error = i915_instance_properties2(session, reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_QUEUE_FAMILY_PROPERTIES:
 		/* vkGetPhysicalDeviceQueueFamilyProperties */
@@ -281,9 +287,6 @@ i915_instance_properties(
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
-	static const char name[] = "zedBSD i915 (Gen12 Xe)";
-	static const char name_gen9[] = "zedBSD i915 (Gen9)";
-	static const char name_gen11[] = "zedBSD i915 (Gen11)";
 	VkPhysicalDeviceProperties *properties;
 
 	/* Skips the physical device and the present word. */
@@ -292,10 +295,106 @@ i915_instance_properties(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Takes the zeroed record from the arena; it is too large for the stack. */
-	properties = i915_vkc_array(reader, &session->arena, 1U, sizeof(*properties));
+	/* The record. */
+	properties = i915_instance_describe(session, reader);
 	if (properties == NULL)
 		return ENOMEM;
+
+	/* Replies the present word and the record. */
+	drv_i915_wire_reply_u64(reply, 1U);
+	i915_vkc_enc_VkPhysicalDeviceProperties(reply, properties);
+
+	/* Succeeded: the properties are reported. */
+	return 0;
+}
+
+/*
+ * vkGetPhysicalDeviceProperties2 as libvulkan asks it when memory is
+ * exported: [physical][present][PROPERTIES_2][link][ID_PROPERTIES][end] ->
+ * [present] the two headers, the device and driver UUIDs, the LUID, the
+ * node mask, whether the LUID is valid, then the properties.  Another
+ * chain is refused.  The UUIDs name this executor and the PCI product, so
+ * two contexts of the same device agree.
+ */
+static int
+i915_instance_properties2(
+	struct i915_render_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	static const uint8_t driver_uuid[VK_UUID_SIZE] = {
+		'z', 'e', 'd', 'B', 'S', 'D', '-', 'i', '9', '1', '5', '-', 'v', 'k', '0', '1'
+	};
+	uint8_t device_uuid[VK_UUID_SIZE] = {
+		'z', 'e', 'd', 'B', 'S', 'D', '-', 'i', '9', '1', '5', '-', 0, 0, 0, 0
+	};
+	static const uint8_t luid[VK_LUID_SIZE] = { 0 };
+	VkPhysicalDeviceProperties *properties;
+	uint64_t present;
+	uint64_t chained;
+	uint64_t last;
+	uint32_t outer;
+	uint32_t inner;
+
+	/* The physical device, then the two headers of the output chain. */
+	(void)drv_i915_wire_read_u64(reader);
+	present = drv_i915_wire_read_u64(reader);
+	outer = drv_i915_wire_read_u32(reader);
+	chained = drv_i915_wire_read_u64(reader);
+	inner = drv_i915_wire_read_u32(reader);
+	last = drv_i915_wire_read_u64(reader);
+	if (reader->error != 0 || present != 1U)
+		return EINVAL;
+	if (outer != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 || chained != 1U ||
+	    inner != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES || last != 0U) {
+		reader->error = 1;
+		return ENOTSUP;
+	}
+
+	/* The record, and the PCI product in the device's UUID. */
+	properties = i915_instance_describe(session, reader);
+	if (properties == NULL)
+		return ENOMEM;
+	device_uuid[12] = (uint8_t)properties->deviceID;
+	device_uuid[13] = (uint8_t)(properties->deviceID >> 8);
+	device_uuid[14] = (uint8_t)properties->vendorID;
+	device_uuid[15] = (uint8_t)(properties->vendorID >> 8);
+
+	/* The headers, the identifiers and the properties. */
+	drv_i915_wire_reply_u64(reply, 1U);
+	drv_i915_wire_reply_u32(reply, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
+	drv_i915_wire_reply_u64(reply, 1U);
+	drv_i915_wire_reply_u32(reply, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES);
+	drv_i915_wire_reply_u64(reply, 0U);
+	drv_i915_wire_reply_u64(reply, VK_UUID_SIZE);
+	i915_vkc_reply_bytes(reply, device_uuid, VK_UUID_SIZE);
+	drv_i915_wire_reply_u64(reply, VK_UUID_SIZE);
+	i915_vkc_reply_bytes(reply, driver_uuid, VK_UUID_SIZE);
+	drv_i915_wire_reply_u64(reply, VK_LUID_SIZE);
+	i915_vkc_reply_bytes(reply, luid, VK_LUID_SIZE);
+	drv_i915_wire_reply_u32(reply, 0U);
+	drv_i915_wire_reply_u32(reply, VK_FALSE);
+	i915_vkc_enc_VkPhysicalDeviceProperties(reply, properties);
+
+	/* Succeeded: the identity is reported. */
+	return 0;
+}
+
+/* The device's properties in a zeroed record from the command's arena (too large for the stack); NULL when it is full. */
+static VkPhysicalDeviceProperties *
+i915_instance_describe(
+	struct i915_render_session *session,
+	struct i915_wire_reader *reader)
+{
+	static const char name[] = "zedBSD i915 (Gen12 Xe)";
+	static const char name_gen9[] = "zedBSD i915 (Gen9)";
+	static const char name_gen11[] = "zedBSD i915 (Gen11)";
+	VkPhysicalDeviceProperties *properties;
+
+	/* Takes the zeroed record from the arena. */
+	properties = i915_vkc_array(reader, &session->arena, 1U, sizeof(*properties));
+	if (properties == NULL)
+		return NULL;
 
 	/* Names the device; the library requires a native Vulkan 1.1. */
 	properties->apiVersion = VK_MAKE_VERSION(1, 1, 0);
@@ -320,12 +419,8 @@ i915_instance_properties(
 	/* Fills the limits. */
 	i915_instance_limits(&properties->limits);
 
-	/* Replies the present word and the record. */
-	drv_i915_wire_reply_u64(reply, 1U);
-	i915_vkc_enc_VkPhysicalDeviceProperties(reply, properties);
-
-	/* Succeeded: the properties are reported. */
-	return 0;
+	/* Succeeded: the record is filled. */
+	return properties;
 }
 
 /*

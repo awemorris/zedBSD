@@ -264,6 +264,13 @@ struct i915_gfx_view {
 	 */
 	uint32_t channel_select;
 	uint32_t swizzle_set;
+
+	/*
+	 * The plane of an NV12 image the view shows in its own format: 1 the
+	 * Y plane (VK_IMAGE_ASPECT_PLANE_0_BIT), 2 the CbCr plane
+	 * (VK_IMAGE_ASPECT_PLANE_1_BIT), 0 for any other view.
+	 */
+	uint32_t plane;
 };
 
 /*

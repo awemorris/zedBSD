@@ -874,9 +874,9 @@ i915_video_format_properties(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* The profiles must all be H.264 decode; usages include picture readback. */
+	/* The profiles must all be ones the decoder takes; usages include picture readback and sampling. */
 	result = 0;
-	video_usage = I915_VIDEO_USAGE_DECODE_DST | I915_VIDEO_USAGE_DECODE_DPB | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	video_usage = I915_VIDEO_USAGE_DECODE_DST | I915_VIDEO_USAGE_DECODE_DPB | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 	if (!chain.has_profile_list || chain.profile_count == 0U) {
 		result = I915_VIDEO_ERROR_OPERATION;
 	} else if (!chain.profiles_supported) {
@@ -891,7 +891,11 @@ i915_video_format_properties(
 		return 0;
 	}
 
-	/* Replies the one format: NV12, identity swizzle, 2D, optimal (Tile Y), decode output, reference and readback. */
+	/*
+	 * Replies the one format: NV12, identity swizzle, planes viewable in
+	 * their own formats, 2D, optimal (Tile Y), decode output, reference,
+	 * readback and sampling.
+	 */
 	drv_i915_wire_reply_u32(reply, 0U);
 	drv_i915_wire_reply_u64(reply, 1U);
 	drv_i915_wire_reply_u32(reply, 1U);
@@ -903,7 +907,7 @@ i915_video_format_properties(
 	drv_i915_wire_reply_u32(reply, 0U);
 	drv_i915_wire_reply_u32(reply, 0U);
 	drv_i915_wire_reply_u32(reply, 0U);
-	drv_i915_wire_reply_u32(reply, 0U);
+	drv_i915_wire_reply_u32(reply, VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT);
 	drv_i915_wire_reply_u32(reply, VK_IMAGE_TYPE_2D);
 	drv_i915_wire_reply_u32(reply, VK_IMAGE_TILING_OPTIMAL);
 	drv_i915_wire_reply_u32(reply, video_usage);

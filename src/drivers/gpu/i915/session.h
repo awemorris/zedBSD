@@ -18,6 +18,7 @@
 #define DRIVERS_GPU_I915_SESSION_H
 
 #include <uapi/gpu.h>
+#include <uapi/gpu-allocation.h>
 #include <uapi/gpu-job.h>
 #include <stdint.h>
 
@@ -32,7 +33,8 @@ struct i915_render_session;
 /*
  * What every node offers: storage with CPU copies and mappings, native
  * streams, queued completion, supervised jobs, the capset and blobs, and
- * sharing between the opens of the node.  A node with a panel adds the
+ * sharing between the opens of the node, of images and of whole
+ * allocations (an exported Vulkan memory, such as a decoded picture).  A node with a panel adds the
  * display and its events when the display operations are bound.
  */
 #define I915_CAPABILITIES	(GPU_CAP_RESOURCE | \
@@ -44,7 +46,8 @@ struct i915_render_session;
 				 GPU_CAP_CAPSET | \
 				 GPU_CAP_BLOB | \
 				 GPU_CAP_MAPPING | \
-				 GPU_CAP_SHARE)
+				 GPU_CAP_SHARE | \
+				 GPU_CAP_ALLOCATION_SHARE)
 
 /*
  * Submission timelines.

@@ -331,6 +331,7 @@ struct i915_image_range {
 	uint32_t channel_select;
 	uint32_t swizzle_set;
 	int render_target;
+	uint32_t plane;
 };
 
 static int i915_image_surface_write(uint32_t *rss, const struct i915_gfx_image *image, const struct i915_image_range *range, uint32_t mocs, unsigned graphics_ver);
@@ -2569,12 +2570,56 @@ i915_image_surface_write(
 	uint32_t lod;
 	uint32_t tile;
 	uint32_t samples;
+	uint32_t width;
+	uint32_t height;
 	int error;
 
 	/* Refuses an image with no storage. */
 	va = drv_i915_gfx_memory_va(image->memory, image->offset);
 	if (va == 0U)
 		return EINVAL;
+
+	/*
+	 * An NV12 picture is sampled one plane at a time, each a Y-tiled 2D
+	 * surface of the view's format at the picture's pitch: the Y plane at
+	 * the image's start, the CbCr plane (half the extent) at its row.
+	 */
+	if (image->planar != 0U) {
+		if (range->plane == 0U || range->render_target != 0)
+			return EINVAL;
+		error = i915_surface_format(range->format, &format);
+		if (error != 0)
+			return EINVAL;
+		width = image->width;
+		height = image->height;
+		rows = image->chroma_rows;
+		if (range->plane == 2U) {
+			va += image->chroma_offset;
+			width = (width + 1U) / 2U;
+			height = (height + 1U) / 2U;
+			rows = (uint32_t)((image->bytes - image->chroma_offset) / image->pitch);
+		}
+		rows = (rows + 3U) & ~3U;
+		unorm = GEN12_RSS_UNORM_PATH;
+		if (graphics_ver == GEN9_GRAPHICS_VER)
+			unorm = 0U;
+		kern_memset(rss, 0, GEN12_RENDER_SURFACE_STATE_DWORDS * 4U);
+		rss[0] = (GEN12_SURFTYPE_2D << 29) |
+		    (format << 18) |
+		    (GEN12_SURFACE_ALIGN_4 << 16) |
+		    (GEN12_SURFACE_ALIGN_4 << 14) |
+		    (GEN12_TILEMODE_YMAJOR << 12);
+		rss[1] = unorm | (mocs << 24) | ((rows / 4U) & GEN12_RSS_QPITCH_MASK);
+		rss[2] = (width - 1U) | ((height - 1U) << 16);
+		rss[3] = image->pitch - 1U;
+		rss[5] = 1U << GEN12_RSS_MIP_TAIL_START_SHIFT;
+		rss[7] = (4U << 25) | (5U << 22) | (6U << 19) | (7U << 16);
+		if (range->swizzle_set != 0U)
+			rss[7] = range->channel_select;
+		rss[8] = (uint32_t)va;
+		rss[9] = (uint32_t)(va >> 32);
+		return 0;
+	}
 
 	/*
 	 * Refuses a format the surface state cannot name.  A depth image is
@@ -2829,6 +2874,7 @@ i915_state_write_surfaces(
 		range.channel_select = view->channel_select;
 		range.swizzle_set = view->swizzle_set;
 		range.render_target = 0;
+		range.plane = view->plane;
 		error = i915_image_surface_write(&surface[rss / 4U], view->image, &range, mocs, graphics_ver);
 		if (error != 0)
 			return error;

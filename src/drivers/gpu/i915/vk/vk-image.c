@@ -267,6 +267,10 @@ drv_i915_gfx_create_image_view(
 		    (i915_gfx_channel(info.components.b, 6U) << 19) |
 		    (i915_gfx_channel(info.components.a, 7U) << 16);
 		view->swizzle_set = 1U;
+		if (image->planar != 0U && info.subresourceRange.aspectMask == VK_IMAGE_ASPECT_PLANE_0_BIT)
+			view->plane = 1U;
+		else if (image->planar != 0U && info.subresourceRange.aspectMask == VK_IMAGE_ASPECT_PLANE_1_BIT)
+			view->plane = 2U;
 	}
 
 	/* Publishes the view and answers; a failed view is reported there. */
@@ -849,6 +853,10 @@ drv_i915_gfx_view_format(
 	uint32_t view_bytes;
 	int depth;
 
+	/* A plane of an NV12 image is viewed in the view's own format. */
+	if (view->plane != 0U)
+		return view->format;
+
 	/* The image's own format, or no other given. */
 	if (view->format == view->image->format || view->format == VK_FORMAT_UNDEFINED)
 		return view->image->format;
@@ -970,12 +978,12 @@ i915_gfx_video_image_supported(
 	if (!session->vk->video)
 		return 0;
 
-	/* One 2D picture of one sample in Y tiles, without create flags. */
+	/* One 2D picture of one sample in Y tiles, whose planes may be viewed in their own formats. */
 	if (info->imageType != VK_IMAGE_TYPE_2D || info->tiling != VK_IMAGE_TILING_OPTIMAL)
 		return 0;
 	if (info->mipLevels != 1U || info->arrayLayers != 1U || info->samples != VK_SAMPLE_COUNT_1_BIT)
 		return 0;
-	if (info->flags != 0U)
+	if ((info->flags & ~(uint32_t)(VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT)) != 0U)
 		return 0;
 
 	/* Not empty, and not larger than the decoder decodes. */
@@ -984,8 +992,9 @@ i915_gfx_video_image_supported(
 	if (info->extent.width > I915_GFX_VIDEO_MAX_EXTENT || info->extent.height > I915_GFX_VIDEO_MAX_EXTENT)
 		return 0;
 
-	/* Used for decode pictures and standard readback; uploads and sampling remain unsupported. */
-	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	/* Used for decode pictures, readback, and sampling through plane views; uploads remain unsupported. */
+	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+	    VK_IMAGE_USAGE_SAMPLED_BIT;
 	if (info->usage == 0U || (info->usage & ~video_usage) != 0U)
 		return 0;
 
