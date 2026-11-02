@@ -32,4 +32,4 @@
 - 2026-10-30 Q1: 作成。
 - 2026-11-02 08:32 Q1: ユーザーの指示で P3（q1923）が p001〜p003 を続けて行う。
 
-- 2026-11-02 10:17 Q1: P3 の p001〜p003 を受け入れて main に merge（fa5992dd0）。Pi 5 で HEVC_v1 128 本一致・15 本は理由付きで断る・3 本（SAODBLK_A/B、VPSSPSPPS_A）は参照の誤りの見込みで未解決。Video Player の GPU の道で H.265 1080p30・60 を再生。CONFIG_DRIVER_BCM2712_VIDEO を Pi 5 で既定 y にした（p003 が通ったため）。main で rpi5 の vmunix warning 0、hevc-slice の host 試験 PASS、menuconfig の host 試験 PASS。
+- 2026-11-02 10:17 Q1: P3 の p001〜p003 を受け入れて main に merge（fa5992dd0）。Pi 5 で HEVC_v1 128 本一致・15 本は理由付きで断る・3 本（SAODBLK_A/B、VPSSPSPPS_A）は参照の誤りの見込みで未解決。Video Player の GPU の道で H.265 1080p30・60 を再生。CONFIG_DRIVER_BCM2712_VIDEO を Pi 5 で既定 y にした（p003 が通ったため）。main で rpi5 の vmunix warning 0、hevc-slice の host 試験 PASS、menuconfig の host 試験 PASS。- 2026-11-02 10:42 Q1: SAODBLK_A/B は ffmpeg が誤った参照（RTX の NVDEC の 500 枚の I420 の md5 が適合の zip の md5 と一致、ffmpeg はどちらとも違う。WS324 P1）。この板の SAODBLK の不一致も、vkvideo-probe --raw と I420 の md5 で zip の md5 と照らし直す（次の再開の時）。
