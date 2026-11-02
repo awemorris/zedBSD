@@ -118,6 +118,10 @@ int view_front_compose(struct browser_view *view, const char *preedit, int begin
 int view_front_commit_text(struct browser_view *view, int checked, uint64_t session, const char *text, uint32_t delete_before, uint32_t delete_after);
 int view_front_request_image(struct browser_view *view, float x, float y);
 
+/* The task the view's pages run and how long, from any thread; ending it by its number, from the program's (front.c). */
+int view_front_script_busy(const struct browser_view *view, uint32_t *task, uint32_t *milliseconds);
+int view_front_stop_script(struct browser_view *view, uint32_t task);
+
 /* The program's getters, from the published state (front.c). */
 const struct view_snapshot *view_front_snapshot(const struct browser_view *view);
 int view_front_text_context(const struct browser_view *view, char *text, size_t size, size_t *cursor, int *purpose, unsigned *hints);

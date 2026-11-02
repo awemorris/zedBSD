@@ -2801,6 +2801,52 @@ browser_view_render_pixels(
 }
 
 /*
+ * Reports whether a task of the page's scripts runs now, from any thread:
+ * 1 with its number and how long it has run in a view of its own threads,
+ * else 0 (and 0 always in a view of the caller's, whose tasks run in the
+ * program's calls).
+ */
+int
+browser_view_script_busy(
+	const struct browser_view *view,
+	uint32_t *task,
+	uint32_t *milliseconds)
+{
+	int busy;
+
+	/* Nothing runs on threads of a view of the caller's thread. */
+	*task = 0U;
+	*milliseconds = 0U;
+	if (view->front == NULL)
+		return 0;
+
+	/* The task of the view's agent. */
+	busy = view_front_script_busy(view, task, milliseconds);
+	return busy;
+}
+
+/*
+ * Ends the running task of the page's scripts of a number, from the
+ * program's thread; the page stays.  Reports 0, ESRCH when that task does
+ * not run any more, or ENOTSUP in a view of the caller's thread.
+ */
+int
+browser_view_stop_script(
+	struct browser_view *view,
+	uint32_t task)
+{
+	int error;
+
+	/* A view of the caller's thread runs its tasks in the program's own calls. */
+	if (view->front == NULL)
+		return ENOTSUP;
+
+	/* The front asks the agent. */
+	error = view_front_stop_script(view, task);
+	return error;
+}
+
+/*
  * Asks for the image at a place of the view: a view of its own threads
  * queues the request and answers with the image callback later; a view of
  * the caller's thread answers before this returns.

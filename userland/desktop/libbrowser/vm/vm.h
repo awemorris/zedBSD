@@ -112,9 +112,14 @@ typedef int (*vm_lender)(void *context, vm_lend_work work, void *argument);
  * running thread when a task begins and ends, so that a request never
  * outlives its task; VM_AGENT_DEADLINE while a deadline is set), and the
  * deadline of the running task on the monotonic clock in nanoseconds, 0
- * for none (the running thread's alone), and the lender its heaps are lent
+ * for none (the running thread's alone), the lender its heaps are lent
  * through (NULL: the work runs on the calling thread; set before the first
- * task).  It must outlive the heaps that use it.
+ * task), and the running task's number with the moment it began (since: the
+ * monotonic clock's milliseconds, cut to 32 bits, in the high half and the
+ * number in the low half, 0 between tasks; written by the running thread,
+ * read by any through __atomic, one word so that a reader never pairs a
+ * number with another task's moment).  It must outlive the heaps that use
+ * it.
  */
 struct vm_agent {
 	uint32_t task;
@@ -124,6 +129,7 @@ struct vm_agent {
 	uint64_t deadline_ns;
 	vm_lender lend;
 	void *lend_context;
+	uint64_t since;
 };
 
 /* What terminate holds while the running task has a deadline and nobody asked it to end: no task has this number. */
@@ -649,6 +655,7 @@ void vm_agent_init(struct vm_agent *agent);
 uint32_t vm_agent_task_begin(struct vm_agent *agent);
 void vm_agent_task_end(struct vm_agent *agent);
 uint32_t vm_agent_task_current(struct vm_agent *agent);
+int vm_agent_task_since(struct vm_agent *agent, uint32_t *task, uint32_t *milliseconds);
 void vm_agent_request_termination(struct vm_agent *agent, uint32_t task);
 void vm_agent_set_deadline(struct vm_agent *agent, uint32_t milliseconds);
 void vm_agent_clear_deadline(struct vm_agent *agent);

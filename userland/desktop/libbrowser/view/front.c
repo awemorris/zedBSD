@@ -804,6 +804,65 @@ view_front_request_image(
 	return 0;
 }
 
+/*
+ * Reports whether a task of the view's pages runs now (1) or not (0), from
+ * any thread: its number and how long it has run, in milliseconds (the
+ * page's top and its iframes' threads take turns in one agent, so this is
+ * whichever holds it).
+ */
+int
+view_front_script_busy(
+	const struct browser_view *view,
+	uint32_t *task,
+	uint32_t *milliseconds)
+{
+	struct view_front *front;
+	int busy;
+
+	/* The agent's word. */
+	front = view_front_of(view);
+	busy = vm_agent_task_since(&front->agent, task, milliseconds);
+	return busy;
+}
+
+/*
+ * Ends the task of the view's pages of a number, from the program's
+ * thread, as a navigation ends the page's (front_navigation) but leaving
+ * the page: the task leaves at the engine's next look, and what it waits
+ * for (a synchronous XMLHttpRequest, a parser's script) is woken.  Reports
+ * 0, or ESRCH when that task does not run any more (it ended, or another
+ * began).  A wait the next task began in the moment between the two looks
+ * at the number may be woken too: it fails as a network error would.
+ */
+int
+view_front_stop_script(
+	struct browser_view *view,
+	uint32_t task)
+{
+	struct view_front *front;
+	struct net_loader *loader;
+	uint32_t running;
+
+	/* Only the task that runs now. */
+	front = view_front_of(view);
+	running = vm_agent_task_current(&front->agent);
+	if (task == 0U || running != task)
+		return ESRCH;
+	vm_agent_request_termination(&front->agent, task);
+
+	/* Its waits, woken while it still runs (the loader lives as long as the view). */
+	running = vm_agent_task_current(&front->agent);
+	if (running == task) {
+		loader = view_loader(view);
+		if (loader != NULL)
+			net_loader_client_abort_waited(net_loader_own_client(loader));
+		view_frames_abort_waited(front->frames);
+	}
+
+	/* Succeeded: the task is asked to end. */
+	return 0;
+}
+
 /* Reports the state the program's getters read (the one browser_view_process brought up last). */
 const struct view_snapshot *
 view_front_snapshot(

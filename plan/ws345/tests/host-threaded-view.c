@@ -58,6 +58,17 @@
  *       callback, with the window's thread processing while the new page's
  *       load handler spins before its state is published, reads the new
  *       location and title;
+ *   (r) a page that does not respond: browser_view_script_busy reports
+ *       no task longer than 200 ms on a page of short timers, and the task
+ *       of a timer's script that spins with how long it has run;
+ *       browser_view_stop_script of an older number stops nothing, of the
+ *       task's number ends it within 300 ms with neither its end nor a
+ *       finally run, and the page stays (its timers run again, its title
+ *       and location are the same); the same for a synchronous
+ *       XMLHttpRequest that waits for a connect that never comes (woken)
+ *       and for an iframe's script that spins on its own thread (the
+ *       iframe's and the page's timers run again); a view of the caller's
+ *       thread reports no task and refuses the stop (ENOTSUP);
  *   and, in both modes, a link to a page whose style sheet comes slowly
  *   (as host-navigation-wait): the window's calls stay short, the page
  *   shown stays the first until the new one is ready, and the new one is
@@ -158,6 +169,10 @@ static void test_lend_heap(void);
 static void test_bench_both(void);
 static int test_empty_work(void *argument);
 static void test_lend_round_trip(void);
+static void test_unresponsive(void);
+static int test_unresponsive_case(struct browser_view *view, const char *name, const char *path, const char *started, const char *after);
+static int test_console_wait(struct browser_view *view, const char *text, size_t from, int ms);
+static unsigned test_console_count(const char *text, size_t from);
 
 /* Runs every check and prints the summary. */
 int
@@ -166,6 +181,7 @@ main(
 {
 	struct sockaddr_in address;
 	pthread_t thread;
+	const char *only;
 	int listener;
 	int filler;
 	int index;
@@ -195,7 +211,13 @@ main(
 	}
 	pthread_create(&thread, NULL, test_serve, (void *)(long)listener);
 
-	/* The checks. */
+	/* The checks (HOST_THREADED_VIEW_ONLY=r: only (r), the one most often run alone). */
+	only = getenv("HOST_THREADED_VIEW_ONLY");
+	if (only != NULL && strcmp(only, "r") == 0) {
+		test_unresponsive();
+		printf("host-threaded-view: %u checks, %u failed\n", test_checks, test_failures);
+		return test_failures != 0;
+	}
 	test_window_latency();
 	test_order_merge_bound();
 	test_destroy_navigate();
@@ -211,6 +233,7 @@ main(
 	test_lend_round_trip();
 	test_bench_both();
 	test_committed_state();
+	test_unresponsive();
 	test_check(vm_borrower_slips() == 0, "(p) no borrower thread entered a script or collected", "%lu times", vm_borrower_slips());
 
 	/* The summary. */
@@ -1484,4 +1507,207 @@ test_committed_state(void)
 	    strcmp(test_committed_title, "Second") == 0, "(q) the committed callback reads the new page's state",
 	    "%u callbacks, url \"%s\", title \"%s\"", test_committed - before, test_committed_url, test_committed_title);
 	browser_view_destroy(view);
+}
+
+/* (r): a task that does not end, seen and stopped from the window's thread; the page stays. */
+static void
+test_unresponsive(void)
+{
+	struct browser_view *view;
+	char page[1024];
+	const char *path;
+	uint32_t task;
+	uint32_t ms;
+	uint32_t longest;
+	long long end;
+	int busy;
+	int error;
+
+	/* A view of the caller's thread: no task is seen, and the stop is refused. */
+	error = test_view(BROWSER_THREADING_CALLER, &view);
+	if (error != 0) {
+		test_check(0, "(r) view", "no view (%d)", error);
+		return;
+	}
+	busy = browser_view_script_busy(view, &task, &ms);
+	error = browser_view_stop_script(view, 1U);
+	test_check(busy == 0 && task == 0U && ms == 0U && error == ENOTSUP, "(r) a view of the caller's thread: no task, no stop",
+	    "busy %d task %u ms %u, stop %d", busy, (unsigned)task, (unsigned)ms, error);
+	browser_view_destroy(view);
+
+	/* A page of short timers: no task runs long. */
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(r) view", "no view (%d)", error);
+		return;
+	}
+	test_console_length = 0;
+	test_console[0] = '\0';
+	path = test_page("ticks.html", "<!DOCTYPE html><title>ticks</title><p>ticks<script>"
+	    "var ticks = 0; setInterval(function () { ticks++; console.log('tick ' + ticks); }, 50);</script>");
+	(void)browser_view_load(view, path);
+	(void)test_console_wait(view, "tick 3", 0U, 3000);
+	longest = 0U;
+	end = test_now() + 600000000LL;
+	while (test_now() < end) {
+		browser_view_process(view);
+		busy = browser_view_script_busy(view, &task, &ms);
+		if (busy && ms > longest)
+			longest = ms;
+		test_sleep_ms(1);
+	}
+	test_check(longest < 200U, "(r) a page of short timers runs no task long", "longest %u ms", (unsigned)longest);
+
+	/* A timer's script that spins: seen, an older number stops nothing, its own ends it. */
+	path = test_page("spin-stop.html", "<!DOCTYPE html><title>spin</title><p>spin<script>"
+	    "var ticks = 0; setInterval(function () { ticks++; console.log('tick ' + ticks); }, 100);"
+	    "setTimeout(function () { try { console.log('spin start'); var t = Date.now(); while (Date.now() - t < 60000) {} "
+	    "console.log('spin end'); } finally { console.log('spin finally'); } }, 300);</script>");
+	(void)test_unresponsive_case(view, "a timer's spin", path, "spin start", "spin end");
+
+	/* A synchronous XMLHttpRequest whose connect never comes: woken and ended. */
+	snprintf(page, sizeof(page), "<!DOCTYPE html><title>spin</title><p>xhr<script>"
+	    "var ticks = 0; setInterval(function () { ticks++; console.log('tick ' + ticks); }, 100);"
+	    "setTimeout(function () { console.log('xhr start'); var x = new XMLHttpRequest(); "
+	    "x.open('GET', 'http://127.0.0.1:%u/never', false); try { x.send(); } catch (e) { console.log('xhr caught'); } "
+	    "console.log('xhr end'); }, 300);</script>", (unsigned)test_port_hang);
+	path = test_page("spin-xhr.html", page);
+	(void)test_unresponsive_case(view, "a synchronous XMLHttpRequest", path, "xhr start", "xhr ");
+
+	/* An iframe's script that spins on its thread. */
+	(void)test_page("spin-child.html", "<!DOCTYPE html><title>child</title><p>child<script>"
+	    "setInterval(function () { console.log('child tick'); }, 100);"
+	    "setTimeout(function () { console.log('child start'); for (;;) {} }, 300);</script>");
+	path = test_page("spin-parent.html", "<!DOCTYPE html><title>spin</title><p>parent<script>"
+	    "var ticks = 0; setInterval(function () { ticks++; console.log('tick ' + ticks); }, 100);</script>"
+	    "<iframe src='spin-child.html'></iframe>");
+	error = test_unresponsive_case(view, "an iframe's spin", path, "child start", "child end");
+	if (error == 0) {
+		end = test_console_length;
+		(void)test_console_wait(view, "child tick", (size_t)end, 1500);
+		test_check(test_console_count("child tick", (size_t)end) > 0U, "(r) an iframe's spin: the iframe's timers run again",
+		    "%u child ticks after the stop", test_console_count("child tick", (size_t)end));
+	}
+	browser_view_destroy(view);
+}
+
+/*
+ * One page of (r) whose task does not end (it writes started, and after
+ * nothing of the task should run once stopped): the task seen with how
+ * long it ran, an older number refused, the task stopped, and the page's
+ * ticks after it.  Returns 0 once the task was stopped.
+ */
+static int
+test_unresponsive_case(
+	struct browser_view *view,
+	const char *name,
+	const char *path,
+	const char *started,
+	const char *after)
+{
+	const char *url;
+	char before[512];
+	uint32_t task;
+	uint32_t now;
+	uint32_t ms;
+	size_t mark;
+	size_t stopped;
+	long long start;
+	long long took;
+	int busy;
+	int error;
+
+	/* The page, until its task starts, and a second and a half of it. */
+	test_console_length = 0;
+	test_console[0] = '\0';
+	(void)browser_view_load(view, path);
+	if (!test_console_wait(view, started, 0U, 5000)) {
+		test_check(0, "(r) the task started", "%s: no \"%s\"", name, started);
+		return 1;
+	}
+	mark = test_console_length;
+	test_wait(view, 1500, NULL);
+	busy = browser_view_script_busy(view, &task, &ms);
+	test_check(busy == 1 && task != 0U && ms >= 1400U && ms < 3000U, "(r) the task is seen with how long it ran",
+	    "%s: busy %d task %u ms %u", name, busy, (unsigned)task, (unsigned)ms);
+	url = browser_view_url(view);
+	snprintf(before, sizeof(before), "%s", url != NULL ? url : "");
+
+	/* An older number stops nothing. */
+	error = browser_view_stop_script(view, task - 1U);
+	test_wait(view, 400, NULL);
+	busy = browser_view_script_busy(view, &now, &ms);
+	test_check(error == ESRCH && busy == 1 && now == task && ms >= 1800U, "(r) an older task's number stops nothing",
+	    "%s: stop %d, then busy %d task %u ms %u", name, error, busy, (unsigned)now, (unsigned)ms);
+
+	/* The task's own number ends it soon. */
+	start = test_now();
+	error = browser_view_stop_script(view, task);
+	for (;;) {
+		busy = browser_view_script_busy(view, &now, &ms);
+		if (!busy || now != task)
+			break;
+		if (test_now() - start > 2000000000LL)
+			break;
+		test_sleep_ms(1);
+	}
+	took = test_now() - start;
+	test_check(error == 0 && (!busy || now != task) && took <= 300000000LL, "(r) the stop ends the task",
+	    "%s: stop %d, ended after %.1f ms", name, error, (double)took / 1e6);
+	if (busy && now == task)
+		return 1;
+
+	/* The page stays: its ticks again, nothing more of the task, the same page. */
+	stopped = test_console_length;
+	(void)test_console_wait(view, "tick", stopped, 1500);
+	test_wait(view, 300, NULL);
+	url = browser_view_url(view);
+	error = browser_view_stop_script(view, task);
+	test_check(test_console_count("tick", stopped) > 0U && test_console_count(after, mark) == 0U &&
+	    test_console_count("finally", mark) == 0U && url != NULL && strcmp(url, before) == 0 && error == ESRCH,
+	    "(r) the page stays and its timers run again", "%s: %u ticks after the stop, %u \"%s\" lines, url %s, the stop again %d",
+	    name, test_console_count("tick", stopped), test_console_count(after, mark), after, url != NULL ? url : "(none)", error);
+	return 0;
+}
+
+/* The window's loop until the console from an offset has a text, at most ms; nonzero once it has. */
+static int
+test_console_wait(
+	struct browser_view *view,
+	const char *text,
+	size_t from,
+	int ms)
+{
+	long long end;
+
+	end = test_now() + (long long)ms * 1000000LL;
+	for (;;) {
+		browser_view_process(view);
+		if (strstr(test_console + from, text) != NULL)
+			return 1;
+		if (test_now() >= end)
+			return 0;
+		test_sleep_ms(2);
+	}
+}
+
+/* How many lines of the console from an offset have a text. */
+static unsigned
+test_console_count(
+	const char *text,
+	size_t from)
+{
+	const char *at;
+	unsigned count;
+
+	count = 0U;
+	at = test_console + from;
+	for (;;) {
+		at = strstr(at, text);
+		if (at == NULL)
+			break;
+		count++;
+		at += strlen(text);
+	}
+	return count;
 }

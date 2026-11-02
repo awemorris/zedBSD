@@ -686,6 +686,7 @@ uint32_t
 vm_agent_task_begin(
 	struct vm_agent *agent)
 {
+	uint64_t since;
 	uint32_t task;
 
 	/* The next number; 0 means no task and the deadline's mark is no task's, so the count skips them when it wraps. */
@@ -694,6 +695,10 @@ vm_agent_task_begin(
 		task = 1U;
 	agent->task_last = task;
 	agent->deadline_ns = 0;
+
+	/* When it began, with its number, for the threads that ask how long it runs (vm_agent_task_since). */
+	since = ((uint64_t)(uint32_t)(wb_os_monotonic_ns() / 1000000U) << 32) | (uint64_t)task;
+	__atomic_store_n(&agent->since, since, __ATOMIC_RELEASE);
 
 	/*
 	 * The old request goes before the new number is seen: a thread that
@@ -717,6 +722,7 @@ vm_agent_task_end(
 	struct vm_agent *agent)
 {
 	/* No task runs, and nothing is asked of one (a late request names a task that is gone). */
+	__atomic_store_n(&agent->since, 0U, __ATOMIC_RELEASE);
 	__atomic_store_n(&agent->task, 0U, __ATOMIC_RELEASE);
 	__atomic_store_n(&agent->terminate, 0U, __ATOMIC_RELAXED);
 	agent->deadline_ns = 0;
@@ -738,6 +744,36 @@ vm_agent_task_current(
 
 	/* Succeeded: the task that runs now, or 0. */
 	return task;
+}
+
+/*
+ * Reports whether the agent's thread runs a task (1) or not (0), from any
+ * thread: *task the running task's number (what
+ * vm_agent_request_termination takes) and *milliseconds how long it has
+ * run, both 0 between tasks.
+ */
+int
+vm_agent_task_since(
+	struct vm_agent *agent,
+	uint32_t *task,
+	uint32_t *milliseconds)
+{
+	uint64_t since;
+	uint32_t now;
+
+	/* The number and the moment, as one word. */
+	since = __atomic_load_n(&agent->since, __ATOMIC_ACQUIRE);
+	*task = (uint32_t)since;
+	*milliseconds = 0U;
+	if (since == 0U)
+		return 0;
+
+	/* How long, on the clock cut as the moment was (the difference survives the cut). */
+	now = (uint32_t)(wb_os_monotonic_ns() / 1000000U);
+	*milliseconds = now - (uint32_t)(since >> 32);
+
+	/* Succeeded: a task runs. */
+	return 1;
 }
 
 /*
