@@ -679,4 +679,4 @@
 | q1939 / q1939-i01 | P2（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p2-ws344` | [ws344 p001](ws344/ws.md) WebP の decoder の設計 | 2026-11-02 11:31 ユーザーの決定 | in-progress |
 | q1940 / q1940-i01 | P5（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p5-ws336` | [ws336 p015](ws336/phase015/phase.md) ssh の program と host の相互運用 A | 2026-11-02 11:37 Q1 | in-progress |
 | q1941 / q1941-i01 | P8（phase-runner-high）、worktree `/home/awe/zedBSD-worktrees/p8-uat3` | [BUG-411](bugs/BUG-411.md) JS の engine の速さ、ほか location.replace・pagehide/pageshow・about.google の script の誤り | 2026-11-02 11:38 Q1 | in-progress |
-| q1942 / q1942-i01 | P1（phase-runner-high）、worktree `/home/awe/zedBSD-worktrees/p1-bug413` | [BUG-413](bugs/BUG-413.md) Settings の IPv6 | 2026-11-02 11:42 ユーザーの UAT | in-progress |
+| q1942 / q1942-i01 | P1（phase-runner-high）、worktree `/home/awe/zedBSD-worktrees/p1-bug413` | [BUG-413](bugs/BUG-413.md) Settings の IPv6 | 2026-11-02 11:42 ユーザーの UAT | cleared（2026-11-02 12:20、28ad1130b を main に merge b5ca3a37a、main で host-inet6 PASS・Linux Keiland の build warning 0） |
