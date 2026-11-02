@@ -39,7 +39,7 @@
 | ws344-p017 | VP8 の decoder（vp8.c、run-fixtures lossy）— Opus を推す | cleared（2026-11-02 15:22 Q1、main で run-fixtures lossy 352・lossless 174・alpha 54 PASS）。実装済み・試験 PASS（P2 q1966-i01、2026-11-02 15:10。lossy 352 + conformance 342 checks） | p002, p011〜p016 |
 | ws344-p018 | 出力の変換（output.c） | cleared（2026-11-02 14:30 Q1、main で test-output 536115 PASS）。実装済み・試験 PASS（Sonnet q1963-i01、2026-11-02 14:28、cleared は Q1 が決める） | p001 |
 | ws344-p019 | interface（decode.c、compare・mutate・fuzz）— Opus を推す | cleared（2026-11-02 16:35 Q1、main で compare 364 PASS）。実装済み・試験 PASS（P2 q1969-i01、2026-11-02 16:20。compare 364 + conformance 214、mutate、fuzz 600 s） | p002, p008, p017, p018 |
-| ws344-p020 | platform（Windows の static、config、QEMU の guest の driver）— Opus を推す | in-progress（2026-11-02 16:35 P2 q1976-i01） | p019 |
+| ws344-p020 | platform（Windows の static、config、QEMU の guest の driver）— Opus を推す | 実装済み・試験 PASS（P2 q1976-i01、2026-11-02 17:27。QEMU guest 578・Wine 578 file 一致、arm64・riscv64 build） | p019 |
 | ws344-p021 | libbrowser への組み込み（img_sniff・img_decode・Accept、BUG-405）— Opus を推す | planned | p020 |
 | ws344-p022 | 規約の全文の見直し（conformance-reviewer） | planned | p021 |
 

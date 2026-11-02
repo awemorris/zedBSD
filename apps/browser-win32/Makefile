@@ -12,7 +12,7 @@
 # What it builds so far: the files of the operating-system layers (libbrowser's base/os-*, its storage,
 # libmedia's media-os, libkeiland's Windows files), compiled with the Windows compiler and its warnings;
 # the static libraries: libbrowser.a (all of libbrowser, with its Windows layer), libmedia.a (all of
-# libmedia and its container reader, with media-os-win32.c), libkeiland.a (its Windows files so far), libtruetype and the png, jpeg, gif and z compat libraries
+# libmedia and its container reader, with media-os-win32.c), libkeiland.a (its Windows files so far), libtruetype and the png, jpeg, gif, webp and z compat libraries
 # (from the same source lists as the zedBSD build); the Vulkan headers and the import library of the
 # Vulkan loader, and OpenSSL (libssl.a and libcrypto.a, cross-built by plan/ws334/tests/openssl-windows.sh
 # from the release the zedBSD package uses; libbrowser's net/tls.c uses it through net/tls-static.c).
@@ -303,12 +303,14 @@ include userland/desktop/libtruetype/sources.mk
 include userland/desktop/libpng-compat/sources.mk
 include userland/desktop/libjpeg-compat/sources.mk
 include userland/desktop/libgif-compat/sources.mk
+include userland/desktop/libwebp-compat/sources.mk
 include userland/base/libz-compat/sources.mk
-WIN32_COMPAT_LIBRARIES := truetype png-compat jpeg-compat gif-compat z-compat
+WIN32_COMPAT_LIBRARIES := truetype png-compat jpeg-compat gif-compat webp-compat z-compat
 WIN32_SOURCES_truetype := $(LIBTRUETYPE_SOURCES)
 WIN32_SOURCES_png-compat := $(LIBPNG_COMPAT_SOURCES)
 WIN32_SOURCES_jpeg-compat := $(LIBJPEG_COMPAT_SOURCES)
 WIN32_SOURCES_gif-compat := $(LIBGIF_COMPAT_SOURCES)
+WIN32_SOURCES_webp-compat := $(LIBWEBP_COMPAT_SOURCES)
 WIN32_SOURCES_z-compat := $(LIBZ_COMPAT_SOURCES)
 WIN32_COMPAT_SOURCES := $(foreach library,$(WIN32_COMPAT_LIBRARIES),$(WIN32_SOURCES_$(library)))
 WIN32_COMPAT_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(WIN32_COMPAT_SOURCES))
