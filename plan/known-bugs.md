@@ -449,5 +449,5 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-410](bugs/BUG-410.md) | libc の atexit が登録した object を覚えず、dlclose した library の関数を exit で呼ぶ | fixed（2026-11-02 11:03 P3 q1931、fbeea4f29 を main に merge） |
 | [BUG-408](bugs/BUG-408.md) | ブラウザ: Google の検索の結果の頁が JavaScript の確認（BotGuard）を通らず reCAPTCHA の頁になる | open（2026-11-02 10:40 P8 が起票、Q1 の指示、q1924 では直さない） |
 | [BUG-411](bugs/BUG-411.md) | ブラウザの JavaScript の engine が重い頁で遅い（property の線形の探し、layout） | open（2026-11-02 10:47 Q1 が起票、P8 の待ち） |
-| [BUG-412](bugs/BUG-412.md) | Pi 5 の desktop で click が効かない（1 秒以上押してから離すと click になる） | open（2026-11-02 11:02 Q1 が起票、ユーザーの Pi 5 の UAT、P3） |
+| [BUG-412](bugs/BUG-412.md) | Pi 5 の desktop で click が効かない（1 秒以上押してから離すと click になる） | open・再現せず（2026-11-02 11:02 Q1 が起票、ユーザーの Pi 5 の UAT。13:13 P3 q1936-i01: 注入と実の mouse、kernel 8f91a0d・8e5e20cec のどれでも 38〜67 ms の click が効いた。原因は未特定、[ticket](bugs/BUG-412.md)） |
 | [BUG-413](bugs/BUG-413.md) | Settings の Ethernet の IPv6 が「Not available on zedBSD yet」の固定の文 | fixed（2026-11-02 P1 q1942-i01、backend が ifconfig・route -6 と同じ口で IPv6 の address と router を読み、kl_system_network_v1 version 35 の link_inet6・link_router6 で Settings へ。無い時は「None」。QEMU amd64 で確かめた、実機は未実施） |
