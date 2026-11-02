@@ -453,3 +453,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-413](bugs/BUG-413.md) | Settings の Ethernet の IPv6 が「Not available on zedBSD yet」の固定の文 | fixed（2026-11-02 P1 q1942-i01、backend が ifconfig・route -6 と同じ口で IPv6 の address と router を読み、kl_system_network_v1 version 35 の link_inet6・link_router6 で Settings へ。無い時は「None」。QEMU amd64 で確かめた、実機は未実施） |
 | [BUG-414](bugs/BUG-414.md) | ブラウザ: JavaScript の `Reflect` の global が無い | open（2026-11-02 13:52 Q1 が起票、P8） |
 | [BUG-415](bugs/BUG-415.md) | ブラウザ: 保たない頁を離れる時に pagehide（persisted false）が出ない | open（2026-11-02 13:52 Q1 が起票、P8） |
+| [BUG-416](bugs/BUG-416.md) | usb-net で長さが 64 byte の倍数の frame が届かない（xHCI の 0 長の packet の Short Packet） | open（2026-11-02 17:09 Q1 が起票、P1 の報告、P3） |
