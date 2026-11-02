@@ -47,7 +47,7 @@ static const struct wl_message titlebar_manager_requests[] = {
 
 /* Describes the global that gives windows their titlebar's presentation. */
 const struct wl_interface kl_titlebar_manager_v1_interface = {
-	"kl_titlebar_manager_v1", 6, 2, titlebar_manager_requests,
+	"kl_titlebar_manager_v1", 7, 2, titlebar_manager_requests,
 	0, NULL
 };
 
@@ -94,7 +94,7 @@ static const struct wl_message titlebar_events[] = {
 
 /* Describes one window's titlebar presentation. */
 const struct wl_interface kl_titlebar_v1_interface = {
-	"kl_titlebar_v1", 6, 17, titlebar_requests,
+	"kl_titlebar_v1", 7, 17, titlebar_requests,
 	8, titlebar_events
 };
 
