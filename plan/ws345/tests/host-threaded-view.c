@@ -72,6 +72,7 @@
 #include "view/style.h"
 
 #include <arpa/inet.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -159,6 +160,13 @@ main(
 	int listener;
 	int filler;
 	int index;
+
+	/*
+	 * lavapipe stays loaded to the end: ThreadSanitizer stops the process
+	 * when a library its suppressions name is unloaded (the GPU checks load
+	 * and unload it).
+	 */
+	(void)dlopen("libvulkan_lvp.so", RTLD_NOW | RTLD_NODELETE);
 
 	/* The pages' directory, the server and the listener whose connects never complete. */
 	setenv("XDG_DATA_HOME", "build/tmp/host-threaded-view-data", 1);
@@ -1105,6 +1113,7 @@ test_dom_pages(void)
 	char path[1024];
 	char root[256];
 	unsigned index;
+	long long start;
 	size_t lines;
 	size_t at;
 	int error;
@@ -1136,13 +1145,16 @@ test_dom_pages(void)
 		test_console_length = 0;
 		test_console[0] = '\0';
 		(void)browser_view_load(own, path);
-		test_settle_console(own, 800, 10000);
-		browser_view_destroy(own);
-
-		/* The same lines. */
 		lines = 0;
 		for (at = 0; caller_console[at] != '\0'; at++)
 			lines += caller_console[at] == '\n';
+		start = test_now();
+		while (test_console_length < strlen(caller_console) && test_now() - start < 30000000000LL)
+			test_wait(own, 20, NULL);
+		test_settle_console(own, 300, 2000);
+		browser_view_destroy(own);
+
+		/* The same lines. */
 		test_check(lines != 0 && strcmp(caller_console, test_console) == 0, "(l) the style thread's styles and boxes are the caller's view's",
 		    "%s: %zu lines%s", names[index], lines, strcmp(caller_console, test_console) == 0 ? "" : ", the consoles differ");
 		if (strcmp(caller_console, test_console) != 0)
