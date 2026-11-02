@@ -2,7 +2,7 @@
 
 # ws335-p022: 公開の X509（d2i_X509 ほか）と内部の store の生成
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p020、p021）
+Status: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1927-i01。cleared は Q1。依存: p020、p021）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -60,4 +60,59 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02（host の `date` は 10:49 JST）Sonnet 5.5、Queue q1927-i01。worktree s-ws335-p022（main a6a0be590）。
+
+作った物: `userland/base/libcrypto-compat/api-x509.c`（骨格の ENOSYS を置き換え）、`plan/ws335/tests/unit/test-api-x509.c`。header・試験の道具・他の module・Makefile は変えていない（`WS335_VECTORS=/home/awe/zedBSD-claude1/build/sources/tls-vectors`）。
+
+実行した command と最後の行:
+
+| command | 最後の行 |
+| --- | --- |
+| `sh plan/ws335/tests/run-unit.sh api-x509`（ASan・UBSan・LeakSanitizer） | `test-api-x509: PASS (507799 checks)` / `run-unit: PASS` |
+| `sh plan/ws335/tests/run-unit.sh --win32 api-x509`（x86_64・Wine） | `test-api-x509: PASS (507796 checks) (win32)` / `run-unit: PASS`（3 件の差は 64 bit の long でだけ流す check） |
+| `sh plan/ws335/tests/run-unit.sh all`（posix、他の run-unit と重ねずに流した） | 53 行が PASS、最後の行 `run-unit: PASS`（test-api-x509 507799 を含む） |
+| `BASE=4eae22020 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: PASS` |
+| `git diff --check` | 出力なし |
+
+run-ct は流していない（この module は秘密を扱わない: 証明書・host 名・address だけ。ct-api-x509 も作っていない）。
+
+試験の内容:
+
+- 証明書は derwriter.h で RFC 5280 4.1・4.2.1.6 から組み立てる（署名は placeholder。この module は署名を見ない）。自己発行の証明書は store に入れれば自分が trust anchor になる（cryc-chain.h）ので、署名器なしで「公開の呼び出し → 検証の verdict → X509_V_ の code と文」までを通す。
+- 判定の期待値: verdict 23 個と X509_V_ の code（OpenSSL の x509_vfy.h の数値を手で並べた）、文 26 個（x509_txt.c の文）、-2000..2000 の全ての未知の code が汎用の文、LONG_MAX・LONG_MIN、下位 32 bit だけが既知の 64 bit の値（cut されない）。誤りの code は library を 23 bit 左に詰める layout から手で計算した値（0x058c0102 など）。
+- d2i_X509: 基本（*in の進み、複写、parse した field）、out の約束（NULL の *out・既存の *out の置き換え・失敗で *out を free して NULL・別の参照が残る場合）、誤り（長さ 0・負・LONG_MIN、in が NULL、*in が NULL、1〜size-1 の全ての切れ方、先頭 octet の 256 通り、SEQUENCE だが証明書でない物、40 回積んで 16 件で打ち切り）、後ろの余分な bytes と 2 枚続き、長さの形（短・1 octet・2 octet・3 octet）、外側の長さが 0xffffff ちょうどの証明書（16 MiB）と 0x1000000（4 octet 長）、全 octet × 4 通りの変更（1048 通り: 461 拒否・587 受理）、乱数 3000。全ての入力は大きさちょうどの heap の buffer（ASan が読み過ぎを見る）。
+- cryc_x509_from_der: 受理、NULL・0・0x1000005・0x7fffffff・余分な 1 octet・切れ。最大の大きさ（0xffffff + 5）の証明書の受理と、1 octet 多い入力の拒否（大きさの検査と parse の誤りの区別）。
+- 参照数: X509 と X509_STORE を 2 参照にして最初の free で残り、2 回目で解放。NULL の free。
+- X509_STORE_add_cert: NULL 引数、複写（entry の DER は別の buffer）、同じ物の重複（同じ object と別 object の同じ bytes）は成功して増えない、追加の順、caller の X509_free の後も store の複写が残る、4096 枚（上限）の次の 1 枚は 0 と UNSUPPORTED、上限での重複は成功、4 thread × 100 枚＋共有 50 枚の同時の追加で 450 枚・参照数が戻る。parse できない bytes になった object は INTERNAL_ERROR で断る（作れる経路が他に無い防御）。
+- X509_VERIFY_PARAM_set1_host: 小文字化・末尾の dot・長さ指定（先頭 n 文字だけ・0 は C 文字列）・label 63/64・名前 253/254・末尾の dot つき 254・255・NUL を含む・255 文字で NUL が無い buffer（ちょうどの heap で読み過ぎを見る）・空と NULL は host を消す・不正な名前 17 通りは変えない。
+- X509_VERIFY_PARAM_set1_ip_asc: IPv4 8 通り・IPv6 29 通り（完全形・大文字・:: の各位置・IPv4 を含む形）の期待 octet を RFC 4291 2.2 から手計算、拒否 130 通り超（先頭 0・桁・dot の位置・:::・:: 2 回・8 group と ::・zone・括弧・prefix・G などの文字）。別の作りの参照 reader（colon で先に分ける）と、乱数・変異の 40 万の text で受理と octet が一致（受理 80107・拒否 319893・差 0）。
+- 公開の呼び出しの連携: 自己署名の server が store に無ければ 18（"self-signed certificate"）、追加して 0、host 名の不一致 62・大文字小文字・末尾 dot・親の名前、address の不一致 64、IPv6 の別表記の一致、拒否された設定は前の設定のまま。
+- 外の corpus: ca-certificates の 121 枚を d2i_X509 で読み store に入れる（parser の直読みと field が一致）、x509-limbo の証明書 39936 枚（受理 39923・拒否 13）が parser の判定と全て一致。
+
+わざと壊す確かめ（`build/tmp/p022-mut/` の中、api-x509.c の複写だけを壊す。1 つの mutant ごとに build して全試験を流す。1 件ごとに CPU 400 秒・file 64 MB・150 秒・RSS 6 GB の上限、並列 4）:
+
+- 初回 767 通り（定数の ±1・比較と算術の演算子・文字定数・条件の否定・文の削除・return の 0 と 1・verdict の対応表と文の表の各行・define）。結果: 試験の失敗 528・sanitizer の中断 177・timeout（無限 loop）2・build の誤り 12・見逃し 48。
+- 見逃しのうち試験で塞いだ物: 失敗した d2i が *out を free しない（長さ 0 と、証明書でない SEQUENCE の 2 経路）、has_host が 1 でない値、大文字 G を 16 進の数字として受ける、parse できない object の add_cert（INTERNAL_ERROR の経路）。再実行で全て FAIL。
+- build の誤り 12（for の条件の行や unbrace の本体の削除）は、文を `;` に、for の条件を `0`・`1` に替えた 17 通りに作り直し、全て FAIL か timeout。
+- 最終: 784 通り（767＋作り直し 17）のうち build できない 12 を除く 772 通りで、試験の失敗か sanitizer か timeout で検出 732、見逃し 40。見逃し 40 の内訳: メモリ不足の経路 14（store・certificate・add_cert の calloc・malloc・mutex 作成の失敗: ASan 下で失敗させられない）、等価または他と重なる防御 26（calloc の個数 1→2・配列の大きさ +1・sizeof の添字・return 1→2・has_dot 等の flag 1→2・hex_value の ':'（colon は token に入らない）・v4 の桁数 >3 と値 >255 の重なり・field_count の >= と >・v4 の bytes の memset が呼び側 memset と重なる・v6 の out の memset が呼び側 memset と重なる・digit_count の初期化の削除（初期化されない値を ASan・UBSan が見ない））。
+
+自分で決めた点（header が黙っている所）:
+
+- 失敗は常に 1 件だけ誤りを積む: 引数の NULL は X509 の library の PASSED_NULL_PARAMETER、引数の不正は PASSED_INVALID_ARGUMENT（長さ ≤ 0・host 名・address の text）、メモリ不足は MALLOC_FAILURE、store が 4096 枚は UNSUPPORTED、parse できない証明書は ASN1 の WRONG_TAG、先頭が SEQUENCE でないと d2i は WRONG_TAG、SEQUENCE の長さが入力に収まらないと HEADER_TOO_LONG。成功は何も積まない。set1_host・set1_ip_asc の失敗も 1 件積む（header は積むと書いていないが、他の公開関数と揃えた）。
+- cryc_verify_code_to_x509: 部分集合に専用の code が無い verdict（NO_PEER_CERTIFICATE・MALFORMED・WORK_EXCEEDED、表に無い値）は X509_V_ERR_UNSPECIFIED。UNABLE_TO_GET_ISSUER は 20（local issuer）、header の一覧にある 2 は使わない。**1 つの verdict が 2 つの X509_V_ に当たる物は 1 つに決めた**: KEY_USAGE（中間の keyCertSign 無しと leaf の digitalSignature 無し）は 32 (KEYUSAGE_NO_CERTSIGN)、NAME_CONSTRAINT_VIOLATION（permitted の外と excluded の中）は 47 (PERMITTED_VIOLATION)。区別を伝えるには cryc_verify_result に深さと種別が要る（p035 の header の見直しか p032 で扱うか、Q1 の判断。39 と 48 は文だけ持つ）。
+- X509_verify_cert_error_string: header の 26 個の code の文は x509_txt.c の文（data）。それ以外は "unknown certificate verification error"。long をそのまま比べる（OpenSSL の `(int)` への切り詰めはしない）。
+- d2i_X509 は DER を厳格に読む（cryc-der.h と同じ: BER の不定長は断る）。SEQUENCE の外側の長さを読んで、その大きさちょうどを cryc_x509_from_der に渡す。*in は成功の時だけ進む。*out は成功で既存を X509_free してから置き換え、失敗で（引数の誤りでも）X509_free して NULL にする。
+- cryc_x509_from_der は 0xffffff + 5 を超える大きさを parse の前に断る（DER の長さの上限と 5 octet の header）。複写は呼び側の bytes に依らない。
+- X509_VERIFY_PARAM_set1_host: 空の名前と NULL は host を消す（OpenSSL の文書。header は NULL だけ書いている）。長さが 0 の時は C 文字列で、255 文字までしか読まない（長い名前は不正）。名前の中の NUL は不正。set1_host は address を、set1_ip_asc は host を消す（1 つの identity だけ照合、cryc_verify_params の約束）。NULL の host は address を消さない。失敗は何も変えない。IP の text を set1_host に渡しても host 名として扱う（cryc_name_host_normalize が許す形。照合は dNSName にだけ当たり、iPAddress には当たらない）。
+- IPv4: 先頭の 0 を拒む（"01.2.3.4" は 8 進と読まれうる曖昧さを避ける）。IPv6: "::" は 1 つ以上の group を表す（8 group と "::" は不正）、group は 1〜4 桁、末尾の IPv4 は 2 group、zone・括弧・prefix は不正。
+- store の複写の所有: X509_STORE_add_cert は DER を複写する（cryc_store_add_der）ので、caller の X509_free の後も使える。X509 は参照数 1 で作り、`X509_up_ref` は公開しない（header に無い）。
+- 内部の補助は static の x509_fail・d2i_forget・hex_value・ip_parse_v4・ip_parse_v6、表は verdict_codes・code_texts。
+
+phase.md と header の食い違い: 無し（check-skeleton の BASE は Q1 の指定どおり 4eae22020。phase.md の例の b7dfd3952 のままだと header 以外の道具の変更で FAIL する）。
+
+未実施・できなかった事:
+
+- メモリ不足の経路（store・certificate・add_cert の MALLOC_FAILURE、mutex 作成の失敗）の試験: ASan 下では malloc を失敗させられない。読んで確かめた。
+- run-ct（秘密を扱わない）、aarch64 の Windows（check-skeleton の build だけ）、実機・QEMU。
+- X509_V_ の区別（32 と 39、47 と 48）を呼び側に渡す口（header の変更が要る、上の判断の点）。
+

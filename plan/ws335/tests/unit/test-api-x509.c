@@ -891,6 +891,38 @@ test_d2i_errors(void)
 		free(input);
 	}
 
+	/* A length that is not positive, and a SEQUENCE that is not a certificate, with *out holding a certificate: it is freed and cleared (the leak check of the run sees a missing free). */
+	input = exact_copy(der, size);
+	cursor = input;
+	held = d2i_X509(NULL, &cursor, (long)size);
+	CHECK(held != NULL);
+	cursor = input;
+	result = d2i_X509(&held, &cursor, 0L);
+	CHECK(result == NULL);
+	CHECK(held == NULL);
+	CHECK(one_error(CODE_INVALID_ARGUMENT));
+	cursor = input;
+	held = d2i_X509(NULL, &cursor, (long)size);
+	CHECK(held != NULL);
+	pair[0] = 0x30;
+	pair[1] = 0x00;
+	none = pair;
+	result = d2i_X509(&held, &none, 2L);
+	CHECK(result == NULL);
+	CHECK(held == NULL);
+	CHECK(none == pair);
+	CHECK(one_error(CODE_WRONG_TAG));
+	cursor = input;
+	held = d2i_X509(NULL, &cursor, (long)size);
+	CHECK(held != NULL);
+	pair[0] = 0x31;
+	none = pair;
+	result = d2i_X509(&held, &none, 2L);
+	CHECK(result == NULL);
+	CHECK(held == NULL);
+	CHECK(one_error(CODE_WRONG_TAG));
+	free(input);
+
 	/* A missing input pointer, and a pointer to NULL: a null-parameter error; *out freed and cleared. */
 	held = NULL;
 	result = d2i_X509(&held, NULL, 10L);
@@ -1365,6 +1397,15 @@ test_store(void)
 	CHECK_BYTES(store->store.entries[1]->der, second_der, second_size);
 	CHECK_BYTES(store->store.entries[0]->der, first_der, first_size);
 
+	/* A certificate object whose bytes no longer parse (it cannot come from the calls here; the store refuses it as an internal fault) is refused with that error and the store is unchanged. */
+	again = make_cert(first_der, first_size);
+	CHECK(again != NULL);
+	again->der[0] = 0x00;
+	CHECK(X509_STORE_add_cert(store, again) == 0);
+	CHECK(one_error(0x058c0103UL));
+	CHECK(store->store.count == 2U);
+	X509_free(again);
+
 	/* The store keeps its copy after the caller frees the certificate. */
 	X509_free(first);
 	CHECK_BYTES(store->store.entries[0]->der, first_der, first_size);
@@ -1439,8 +1480,8 @@ host_is(
 	const X509_VERIFY_PARAM *param,
 	const char *expected)
 {
-	/* Set, with exactly the expected text, ended with a NUL, and no address. */
-	if (!param->params.has_host)
+	/* Set (the flag is exactly 1), with exactly the expected text, ended with a NUL, and no address. */
+	if (param->params.has_host != 1)
 		return 0;
 	if (strlen(param->params.host) != strlen(expected))
 		return 0;
@@ -1697,7 +1738,8 @@ test_ip_invalid(void)
 		"1:2:3:4:5:6:7:8::", "::1:2:3:4:5:6:7:8", "::00001", "::01.2.3.4", "::1.2.3.04", "::256.1.1.1", "1:2:3:4:5:1.2.3.4", "1:2:3:4:5:6:7:1.2.3.4", ":1.2.3.4", "::.1.2.3", "1:::2", "1:2:::", "::-1", "::0x1",
 		"1:2:3:4:5:6:7:8%1", "fe80::1%", "1.2.3.4::1", "::1.2.3.4.", "::ffff:1.2.3.4:", "::ffff::1.2.3.4",
 		"1:2:3:4:5:6:1.2.3.4:", "1:2:3:4:5:6:1.2.3.4.5", "1:2:3:4:5:6:1.2.3", "1:2:3:4:5:6:1.2.3.256",
-		"::ffff:1.2.3.4.5.6", "::ffff:a.b.c.d", "z", "1,2,3,4", "1;2", "::1\n", "1.2.3.4\n", "\t1.2.3.4"
+		"::ffff:1.2.3.4.5.6", "::ffff:a.b.c.d", "z", "1,2,3,4", "1;2", "::1\n", "1.2.3.4\n", "\t1.2.3.4",
+		"G::1", "::G", "::fG", "Z::", "::1:G", "::g1", "G.2.3.4", "1:2:3:4:5:6:1.2.3.G"
 	};
 	X509_VERIFY_PARAM param;
 	size_t index;
@@ -1893,7 +1935,7 @@ reference_v6(
 static void
 test_ip_differential(void)
 {
-	static const char alphabet[] = "0123456789abcdefABCDEF:.:.:1.9fF0 %[]/g-";
+	static const char alphabet[] = "0123456789abcdefABCDEF:.:.:1.9fF0 %[]/g-G";
 	static const char *const seeds[] = {
 		"::", "::1", "2001:db8::1", "1:2:3:4:5:6:7:8", "::ffff:1.2.3.4", "1:2:3:4:5:6:1.2.3.4", "64:ff9b::192.0.2.33",
 		"192.168.1.10", "255.255.255.255", "1::", "fe80::1:2", "1:2:3:4:5:6:7::", "::2:3:4:5:6:7:8", "0.0.0.0"
