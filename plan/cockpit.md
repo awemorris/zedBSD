@@ -10,7 +10,7 @@
 | P1 | [WS324](ws324/ws.md) p007 | RTX 2070 の Vulkan Video | p005（nvrtx の H.265 decode）cleared。H.265 の絵を ffmpeg と一致させる実機の debug（q1922） | p007 の後、今日は終了（encode は次に再開） |
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（09:46）。p006 cleared: H.265 の decode（HEVC_v1 128 本一致）と Video Player の GPU の道での H.264・H.265 の再生。今日の作業は終わり | 次の指示で encode（p008）から再開 |
 | P3 | [WS321](ws321/ws.md) | Pi 5 の H.265 decode（Vulkan Video） | 実装して Video Player の GPU の道で再生まで（q1923） | — |
-| P4 | — | Bug の修正 | 返却（08:12）。BUG-397（ストアで固まる）・BUG-399（検索の欄の幅）fixed。以後ブラウザは P8 | 次を待つ |
+| P4 | [WS319](ws319/ws.md) | i915（5330）の Vulkan Video | H.265 decode の実装と Video Player の H.264 の確かめ（q1926） | — |
 | P5 | — | Windows 版ブラウザ | 返却（08:12）。BUG-400（storage-test の時々の FAIL、試験の側）fixed。以後ブラウザは P8 | 次を待つ |
 | P6 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | 返却（03:59）。p037（試験の TLS server tlspeer）cleared | p024・p029（handshake）の候補 |
 | P7 | — | — | 返却（07:50）。BUG-398 fixed（Google の app の一覧が 15 個の icon で描ける、host と Wine）。以後ブラウザは P8 | 次を待つ |

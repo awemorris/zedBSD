@@ -59,3 +59,4 @@
 | P3 | phase-runner-high | ws321 p001〜p003 (q1923-i01) | `/home/awe/zedBSD-worktrees/p3-ws321` / `agent/p3-ws321` | in-progress（2026-11-02 08:32 起動、Pi 5） | — |
 | P8 | phase-runner-high | BUG-402〜407 (q1924-i01) | `/home/awe/zedBSD-worktrees/p8-uat2` / `agent/p8-uat2` | in-progress（2026-11-02 08:37 起動） | 60998cbd5 |
 | Sonnet | phase-runner-low | ws335 p039 (q1925-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p039` / `agent/s-ws335-p039` | in-progress（2026-11-02 09:40 起動） | — |
+| P4 | phase-runner-high | ws319 H.265 decode (q1926-i01) | `/home/awe/zedBSD-worktrees/p4-ws319` / `agent/p4-ws319` | in-progress（2026-11-02 10:07 起動、5330） | — |
