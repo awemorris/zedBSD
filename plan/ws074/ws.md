@@ -13,6 +13,8 @@ Owner: Q1（プロジェクト全体）。2026-10-30 ユーザー「Codexは解�
 自走（2026-10-30）: ユーザーから、P8 が Interop 2025 で Chromium が PASS する項目の 100% をゴールに自走する、という趣旨の指示を受けた。P8 が返却したら Q1 は同じ目標で起動し直す（q1727 から、attempt を重ねる）。
 Queue: [ws074-q20261019-55](queue.md)（2026-10-18、Codex単独で開始。2026-10-30 Codex の解約で止まった。2026-10-30 ユーザー「WS328に関しては、WS074を止めてWS328を先に実装する、です。」で WS328 の後に再開）→ 2026-10-30 13:4x ユーザー「P8でWS074（libbrowserの改善）を実行してください。」で [q1708](../queue.md)（P8、phase-runner-low、p260）として再開。ユーザーが100%までの自走を指示。[契約](autonomy.md)。
 
+Event ws074-p263-start-20261103: 2026-11-03 ユーザーから、Interop 2025 の Phase とは別に実際の Web サイトでの UAT の指摘に対処する Phase を立て、サブエージェントを使わず Q1 が直に開発する、という趣旨の指示を受けた。[p263](phase263/phase.md)・[q2000](../queue.md)。
+
 Event ws074-p260-start-20261027: ユーザー「WPT Interop 2025で、chromeが成功している項目に限り、100%を目指しましょう。」により [p260](phase260/phase.md) を立てた。分母は同じ runner で Chromium が PASS する ID。WPT を全体の checkout に直し（sparse で harness 1,072/static 1,536 に欠けていた）、Chromium の adapter と比較の道具を足した。基準の測定は実行中。
 
 Event ws074-cloud-setup-20261027: ユーザーの指示で、Claude Code on the web の container に host の build と Chromium（Chrome for Testing 153 の headless shell）との描画の比較を立てた。手順・結果・制限は「[クラウド環境での構築と Chromium との比較](#クラウド環境での構築と-chromium-との比較2026-10-27)」。ライブのサイトとの比較は network の方針で未達。
@@ -775,6 +777,7 @@ p009 → p018 → p027 → p028 → p029 → p047 → p031 → p032 → p033 →
 | [ws074-p260](phase260/phase.md) | Interop 2025 の Chromium が通る試験を全部通す（2026-10-27 ユーザー） | in-progress / Queue なし（web のセッション） | クラウド環境の構築、chrome-run.js・interop2025-chrome-gap.py |
 | [ws074-p261](phase261/phase.md) | History と Navigation API（同じ文書の中）、p260 の一部 | in-progress | p260 の gap の測定 |
 | [ws074-p262](phase262/phase.md) | 縦書きの writing-mode を logical の座標で layout する、p260 の一部 | in-progress | p260 の gap の測定 |
+| [ws074-p263](phase263/phase.md) | 実際の Web サイトでの UAT の指摘への対処（2026-11-03 ユーザー、p260 とは別） | in-progress / [q2000](../queue.md)（Q1 が直に開発） | — |
 
 2026-10-13 / q1000-terminal-and-p179-addition: p178 の1領域試行は、参照の背景画像が欠ける全画面差のため uncleared。固定 WPT と host build warning0、Acid3 score100/100・差302056/480000、Acid2差1865/120000 の証拠は[p178](phase178/phase.md)と[q1000履歴](../history/queue-q1000.md)。原因の切り分けと修正を[p179](phase179/phase.md)として追加し、verified 出力後に p178 を再試行する。p100/WS074 の受け入れは未達。メインの共有 Queue/Project/GitHub への投影は未実施。
 

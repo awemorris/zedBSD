@@ -737,3 +737,11 @@
 | q1940 / q1940-i01 | P5（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p5-ws336` | [ws336 p015](ws336/phase015/phase.md) ssh の program と host の相互運用 A | 2026-11-02 11:37 Q1 | cleared（2026-11-02 13:46、00a9f4ccc を main に merge e266f3292、main で run-unit all・interop-host PASS） |
 | q1941 / q1941-i01 | P8（phase-runner-high）、worktree `/home/awe/zedBSD-worktrees/p8-uat3` | [BUG-411](bugs/BUG-411.md) JS の engine の速さ、ほか location.replace・pagehide/pageshow・about.google の script の誤り | 2026-11-02 11:38 Q1 | uncleared（2026-11-02 13:52、e58b58424 を main に merge e7b682544、main で host-build warning 0・cross-build PASS。store.google.com の最長の呼び出しは約 40 秒→約 10 秒で、2 秒の目標は未達（残りは layout の繰り返し）。location.replace・pagehide/pageshow・about.google の誤りは直した） |
 | q1942 / q1942-i01 | P1（phase-runner-high）、worktree `/home/awe/zedBSD-worktrees/p1-bug413` | [BUG-413](bugs/BUG-413.md) Settings の IPv6 | 2026-11-02 11:42 ユーザーの UAT | cleared（2026-11-02 12:20、28ad1130b を main に merge b5ca3a37a、main で host-inet6 PASS・Linux Keiland の build warning 0） |
+
+## 2026-11-03: WS074 の実際の site の UAT（q2000）
+
+承認: 2026-11-03 01:44 ユーザーから、WS074 の libbrowser について、Interop 2025 の Phase とは別に実際の Web サイトでの UAT の指摘に対処する Phase を立て、サブエージェントを使わず Q1 が直に開発する、という趣旨の指示を受けた。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q2000 / q2000-i01 | Q1（直に開発、main の checkout `/home/awe/zedBSD-claude1`） | [ws074-p263](ws074/phase263/phase.md) 実際の Web サイトでの UAT の指摘への対処 | libbrowser と browser の shell。HAL・toolchain・compositor は範囲の外 | in-progress |

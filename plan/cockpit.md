@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-02 06:50（Q1。origin/main を merge・push、wave511 の firmware を push）。前の更新: 2026-11-02 02:23（Q1。BUG-394 を merge）
+最終更新: 2026-11-03 01:45（Q1。WS074 p263 を立て、Q1 が直に開発）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
 
 ## 担当（P1〜P8）
 
@@ -15,6 +15,7 @@
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
+| Q1 | [WS074](ws074/ws.md) p263 | Web ブラウザ（libbrowser） | 実際の Web サイトでの UAT の指摘への対処（q2000、サブエージェントなし） | ユーザーの指摘ごとに直す |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
@@ -23,6 +24,10 @@
 ## WS ごとの進捗
 
 （2026-11-01 10:29 クリア。これより後の進捗をここに書く。各 WS の状態は [master.md](master.md) と各 ws.md）
+
+### WS074 p263 実際の site の UAT
+
+- 2026-11-03 01:45: p263 を立てた（q2000、Q1 が直に開発）。ユーザーの指摘を待つ。
 
 ### WS291 GPU の描画の速さ
 

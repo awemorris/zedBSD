@@ -29,6 +29,7 @@
 | P5 | q1995 `p5-ws345` | [WS345](ws345/ws.md) p010（origin ごとの agent、iframe の frame の item）。stage B の中心を commit（a6479c00c）、回帰は途中 |
 | P8 | q1996 `p8-ws345` | [WS345](ws345/ws.md) p014（応答しない頁の確かめ）。libbrowser・shell の側は main に（cbcdf4977）、QEMU・tsan・cross-build の結果待ち |
 | P6 | q1999 `p6-ws336` | [WS336](ws336/ws.md) p024（OpenSSH からの入れ替えの用意。config/ci は変えず WS343 に差分を渡す）。sshd の log を OpenSSH の形に直した |
+| Q1 | q2000 | [WS074](ws074/ws.md) [p263](ws074/phase263/phase.md)（実際の Web サイトでの UAT の指摘への対処、2026-11-03 ユーザーの指示で Q1 が直に開発、サブエージェントは使わない） |
 | P2・P3・P4 | — | 待機 |
 
 - BUG-412（Pi 5 の click）: 直しは main に。Pi 5 は main の普段の kernel。ユーザーの click の確かめで閉じる。Pi 5 の /boot/boot0 に試験の残り（*.aatold・*.q1967old・*.q1997old・cmdline.txt.ring・/bin/wayland.q1955old）を確かめの後に消す。
@@ -105,7 +106,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-418 · q2000 · WS346 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯の進み具合、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-418 · q2001 · WS346 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯の進み具合、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
