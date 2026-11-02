@@ -27,7 +27,7 @@
 
 /*
  * The longest (EC)DHE shared secret sslc_tls13_handshake accepts.  The
- * groups in use give 32 bytes (x25519, secp256r1); 128 leaves room for
+ * groups in use give 32 or 48 bytes (x25519, secp256r1; secp384r1); 128 leaves room for
  * every larger group and hybrid without letting a caller hash an
  * unbounded buffer.
  */

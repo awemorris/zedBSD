@@ -13,9 +13,6 @@
 
 #include "sslc-hs.h"
 
-/* The size of the (EC)DHE shared secret of both groups (RFC 8446 7.4.1 and 7.4.2). */
-#define SSLC_HS13_SHARED_SIZE		32U
-
 /* The bytes of spaces that start the content a CertificateVerify signs (RFC 8446 4.4.3). */
 #define SSLC_HS13_CV_PAD		64U
 
@@ -82,19 +79,20 @@ sslc_hs13_server_hello(
 	const struct sslc_server_hello *hello,
 	struct sslc_hs_actions *actions)
 {
-	uint8_t shared[SSLC_HS13_SHARED_SIZE];
+	uint8_t shared[SSLC_HS_SHARED_MAX];
 	uint8_t digest[CRYC_HASH_MAX_SIZE];
 	size_t digest_size;
+	size_t shared_size;
 	int error;
 
 	/* The (EC)DHE shared secret with the server's share (an invalid share is illegal_parameter). */
-	error = sslc_hs_shared_secret(hs, hello->share_group, hello->share_key, hello->share_size, shared);
+	error = sslc_hs_shared_secret(hs, hello->share_group, hello->share_key, hello->share_size, shared, &shared_size);
 	if (error != 0)
 		return error;
 
 	/* The private keys have done their work. */
 	cryc_wipe(hs->x25519_private, sizeof(hs->x25519_private));
-	cryc_wipe(hs->p256_private, sizeof(hs->p256_private));
+	cryc_wipe(hs->ec_private, sizeof(hs->ec_private));
 
 	/* The schedule from the Early Secret (no PSK) to the Handshake Secret over ClientHello..ServerHello. */
 	error = sslc_tls13_start(&hs->schedule, hs->suite->hash);
@@ -111,7 +109,7 @@ sslc_hs13_server_hello(
 	}
 
 	/* The Handshake Secret and the two handshake traffic secrets; the shared secret is spent. */
-	error = sslc_tls13_handshake(&hs->schedule, shared, sizeof(shared), digest);
+	error = sslc_tls13_handshake(&hs->schedule, shared, shared_size, digest);
 	cryc_wipe(shared, sizeof(shared));
 	if (error != 0)
 		return sslc_hs13_fail(hs, 0, error);

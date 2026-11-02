@@ -116,8 +116,8 @@
  * Random draws (config->random), in this order, so that a test with a
  * fixed source is deterministic: the client random (32 bytes), the session
  * id (32 bytes, only when TLS 1.3 is offered), the x25519 private key (32
- * bytes); later, when needed, the secp256r1 key generation's draws
- * (cryc_ecc_keygen).
+ * bytes); later, when needed, the secp256r1 or secp384r1 key generation's
+ * draws (cryc_ecc_keygen).
  *
  * Secrets (private keys, shared secrets, schedules) are wiped as soon as
  * they are no longer needed and by sslc_hs_free.
@@ -225,9 +225,11 @@ enum sslc_hs_state {
  * config is borrowed.  state the state.  version and suite once the
  * ServerHello is read.  hello is the ClientHello as sent (its arrays point
  * into suites, groups, schemes and the share keys below).  The key pairs:
- * x25519 always (its share is sent first); secp256r1 made only when a
- * HelloRetryRequest or a TLS 1.2 ServerKeyExchange asks for it (ec points
- * to a malloc'd struct cryc_ecp then).  transcript and schedule (TLS 1.3)
+ * x25519 always (its share is sent first); one of secp256r1 and
+ * secp384r1 (ec_group) made only when a HelloRetryRequest or a TLS 1.2
+ * ServerKeyExchange asks for it (has_ec; ec points to a malloc'd struct
+ * cryc_ecp of its curve then, ec_private is ec->size bytes and ec_public
+ * the uncompressed point of ec_public_size bytes).  transcript and schedule (TLS 1.3)
  * or master (TLS 1.2).  The peer's certificates are copied (peer_der,
  * malloc'd each) and parsed (peer); verify is the validation's result and
  * verify_code its verdict (CRYC_VERIFY_OK until a chain is seen without
@@ -250,9 +252,11 @@ struct sslc_hs {
 	uint8_t x25519_private[CRYC_X25519_SIZE];
 	uint8_t x25519_public[CRYC_X25519_SIZE];
 	struct cryc_ecp *ec;
-	uint8_t p256_private[32];
-	uint8_t p256_public[65];
-	int has_p256;
+	uint16_t ec_group;
+	uint8_t ec_private[CRYC_ECP_MAX_BYTES];
+	uint8_t ec_public[CRYC_ECP_MAX_POINT];
+	size_t ec_public_size;
+	int has_ec;
 	struct sslc_transcript transcript;
 	struct sslc_tls13_schedule schedule;
 	uint8_t server_random[32];
@@ -277,7 +281,7 @@ struct sslc_hs {
 /*
  * Starts a handshake: makes the x25519 key pair and the random values
  * with config->random and builds the ClientHello (the offered suites of
- * the versions; groups x25519 then secp256r1; schemes
+ * the versions; groups x25519, secp256r1, then secp384r1; schemes
  * ecdsa_secp256r1_sha256, ecdsa_secp384r1_sha384, rsa_pss_rsae_sha256,
  * rsa_pss_rsae_sha384, rsa_pss_rsae_sha512, rsa_pkcs1_sha256,
  * rsa_pkcs1_sha384, rsa_pkcs1_sha512; one x25519 share).
@@ -350,11 +354,19 @@ int sslc_hs_queue_action(struct sslc_hs_actions *actions, enum sslc_hs_action_ki
 int sslc_hs_certificate(struct sslc_hs *hs, int tls13, const uint8_t *body, size_t size);
 
 /*
- * Computes the (EC)DHE shared secret with the server's share of group
- * (x25519 or secp256r1) into shared (32 bytes).  Returns 0, or EPROTO
- * with hs->alert illegal_parameter for a bad share.
+ * The largest (EC)DHE shared secret: secp384r1's x coordinate (RFC 8446
+ * 7.4.2; RFC 8422 5.10).  x25519 and secp256r1 give 32 bytes.
  */
-int sslc_hs_shared_secret(struct sslc_hs *hs, uint16_t group, const uint8_t *share, size_t share_size, uint8_t *shared);
+#define SSLC_HS_SHARED_MAX	48U
+
+/*
+ * Computes the (EC)DHE shared secret with the server's share of group
+ * (x25519, secp256r1 or secp384r1) into shared (room for
+ * SSLC_HS_SHARED_MAX bytes) and its size into *shared_size (32, or 48 for
+ * secp384r1).  Returns 0, or EPROTO with hs->alert illegal_parameter for
+ * a bad share or a group without a key pair of ours.
+ */
+int sslc_hs_shared_secret(struct sslc_hs *hs, uint16_t group, const uint8_t *share, size_t share_size, uint8_t *shared, size_t *shared_size);
 
 /* TLS 1.3 after its ServerHello: the handshake secrets and keys (sslc-hs13.c).  Returns 0 or an error with hs->alert. */
 int sslc_hs13_server_hello(struct sslc_hs *hs, const struct sslc_server_hello *hello, struct sslc_hs_actions *actions);

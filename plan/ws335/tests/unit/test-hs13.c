@@ -74,6 +74,18 @@ static const char p256_public_y[] = "28af61281fd35e2fa7002523acc85a429cb06ee6648
 static const char p256_shared[] = "46fc62106420ff012e54a434fbdd2d25ccc5852060561e68040dd7778997bd7b";
 
 /*
+ * One secp384r1 case, the same fields.
+ * Values referenced: NIST CAVP KAS_ECC_CDH_PrimitiveTest.txt (CAVS 14.1,
+ * ecccdhtestvectors.zip), section [P-384], COUNT = 0.
+ */
+static const char p384_peer_x[] = "a7c76b970c3b5fe8b05d2838ae04ab47697b9eaf52e764592efda27fe7513272734466b400091adbf2d68c58e0c50066";
+static const char p384_peer_y[] = "ac68f19f2e1cb879aed43a9969b91a0839c4c38a49749b661efedf243451915ed0905a32b060992b468c64766fc8437a";
+static const char p384_private[] = "3cc3122a68f0d95027ad38c067916ba0eb8c38894d22e1b15618b6818a661774ad463b205da88cf699ab4d43c9cf98a1";
+static const char p384_public_x[] = "9803807f2f6d2fd966cdd0290bd410c0190352fbec7ff6247de1302df86f25d34fe4a97bef60cff548355c015dbb3e5f";
+static const char p384_public_y[] = "ba26ca69ec2f5b5d9dad20cc9da711383a9dbe34ea3fa5a2af75b46502629ad54dd8b7d73a8abb06a3a3be47d650cc99";
+static const char p384_shared[] = "5f9d29dc5e31a163060356213669c8ce132e22f57c9a04f40ba7fcead493b457e5621e766c40a2e3d4d6a04b25e533f1";
+
+/*
  * The code points the ClientHello is expected to carry, in its order.
  * Values referenced: RFC 8446 sections 4.2 and 4.2.7, Appendix B.4; RFC
  * 5289 section 3; RFC 7905 section 2; RFC 5746 section 3.3; RFC 8422
@@ -538,7 +550,7 @@ check_connected(
 
 	/* The handshake's secrets are gone; the application secrets stay for KeyUpdate. */
 	CHECK(all_zero(run->hs.x25519_private, sizeof(run->hs.x25519_private)));
-	CHECK(all_zero(run->hs.p256_private, sizeof(run->hs.p256_private)));
+	CHECK(all_zero(run->hs.ec_private, sizeof(run->hs.ec_private)));
 	CHECK(all_zero(run->hs.schedule.secret, sizeof(run->hs.schedule.secret)));
 	CHECK(all_zero(run->hs.schedule.client_handshake, sizeof(run->hs.schedule.client_handshake)));
 	CHECK(all_zero(run->hs.schedule.server_handshake, sizeof(run->hs.schedule.server_handshake)));
@@ -607,10 +619,11 @@ expected_hello(
 		tlspeer_end(&writer);
 	}
 	tlspeer_put_int(&writer, 0x000a, 2);
+	tlspeer_put_int(&writer, 8, 2);
 	tlspeer_put_int(&writer, 6, 2);
-	tlspeer_put_int(&writer, 4, 2);
 	tlspeer_put_int(&writer, 0x001d, 2);
 	tlspeer_put_int(&writer, 0x0017, 2);
+	tlspeer_put_int(&writer, 0x0018, 2);
 	if (offer12) {
 		tlspeer_put_int(&writer, 0x000b, 2);
 		tlspeer_put_int(&writer, 2, 2);
@@ -1167,7 +1180,7 @@ test_handshakes(void)
 	run = handshake(&config, &pki256, SSLC_TLS12, "server.test");
 	check_connected(run, "SCSRWSWRD");
 	CHECK(run->hs.retried == 1);
-	CHECK(run->hs.has_p256 == 1);
+	CHECK(run->hs.has_ec == 1);
 	CHECK(run->hello_count == 2U);
 	CHECK(run->peer->retries == 1U);
 
@@ -1181,16 +1194,45 @@ test_handshakes(void)
 	CHECK(second.shares[0].group == 0x0017);
 	CHECK(second.shares[0].key_size == 65U);
 	CHECK(second.shares[0].key[0] == 0x04);
-	CHECK_BYTES(second.shares[0].key, run->hs.p256_public, 65);
+	CHECK_BYTES(second.shares[0].key, run->hs.ec_public, 65);
 	CHECK(second.has_cookie == 0);
 	size = expected_hello(expected, sizeof(expected), first.random, first.session_id, 32, 1, 1, "server.test",
-	    0x0017, run->hs.p256_public, 65, NULL, 0);
+	    0x0017, run->hs.ec_public, 65, NULL, 0);
 	CHECK(run->hello_size[1] == size);
 	CHECK_BYTES(run->hellos[1], expected, size);
 
 	/* The secp256r1 key came from the fourth draw on (after random, session id and x25519). */
 	CHECK(run->stream.calls >= 4U);
 	CHECK(run->stream.sizes[3] == 32U);
+	run_free(run);
+
+	/* A HelloRetryRequest for secp384r1: a 97-byte share alone, a 48-byte shared secret, the same keys as the peer. */
+	peer13(&config, &pki256);
+	config.group = SSLC_GROUP_SECP384R1;
+	config.hello_retry = 1;
+	run = handshake(&config, &pki256, SSLC_TLS12, "server.test");
+	check_connected(run, "SCSRWSWRD");
+	CHECK(run->hs.retried == 1);
+	CHECK(run->hs.has_ec == 1);
+	CHECK(run->hs.ec_group == SSLC_GROUP_SECP384R1);
+	CHECK(run->hs.ec_public_size == 97U);
+	CHECK(run->peer->shared_size == 48U);
+	CHECK(tlspeer_parse_client_hello(run->hellos[0], run->hello_size[0], &first) == 0);
+	CHECK(tlspeer_parse_client_hello(run->hellos[1], run->hello_size[1], &second) == 0);
+	CHECK(second.share_count == 1U);
+	CHECK(second.shares[0].group == 0x0018);
+	CHECK(second.shares[0].key_size == 97U);
+	CHECK(second.shares[0].key[0] == 0x04);
+	CHECK_BYTES(second.shares[0].key, run->hs.ec_public, 97);
+	size = expected_hello(expected, sizeof(expected), first.random, first.session_id, 32, 1, 1, "server.test",
+	    0x0018, run->hs.ec_public, 97, NULL, 0);
+	CHECK(run->hello_size[1] == size);
+	CHECK_BYTES(run->hellos[1], expected, size);
+	CHECK(all_zero(run->hs.ec_private, sizeof(run->hs.ec_private)));
+
+	/* The secp384r1 key came from the fourth draw on, 48 bytes. */
+	CHECK(run->stream.calls >= 4U);
+	CHECK(run->stream.sizes[3] == 48U);
 	run_free(run);
 
 	/* A HelloRetryRequest with a group and a cookie, with the server's compatibility record. */
@@ -1209,7 +1251,7 @@ test_handshakes(void)
 	CHECK_BYTES(second.cookie, cookie, sizeof(cookie));
 	CHECK(tlspeer_parse_client_hello(run->hellos[0], run->hello_size[0], &first) == 0);
 	size = expected_hello(expected, sizeof(expected), first.random, first.session_id, 32, 1, 1, "server.test",
-	    0x0017, run->hs.p256_public, 65, cookie, sizeof(cookie));
+	    0x0017, run->hs.ec_public, 65, cookie, sizeof(cookie));
 	CHECK(run->hello_size[1] == size);
 	CHECK_BYTES(run->hellos[1], expected, size);
 	run_free(run);
@@ -1224,7 +1266,7 @@ test_handshakes(void)
 	config.options = TLSPEER_OPT_RETRY_NO_GROUP;
 	run = handshake(&config, &pki256, SSLC_TLS12, "server.test");
 	check_connected(run, "SCSRWSWRD");
-	CHECK(run->hs.has_p256 == 0);
+	CHECK(run->hs.has_ec == 0);
 	CHECK(tlspeer_parse_client_hello(run->hellos[1], run->hello_size[1], &second) == 0);
 	CHECK(second.share_count == 1U);
 	CHECK(second.shares[0].group == 0x001d);
@@ -1685,6 +1727,8 @@ test_server_hello(void)
 	check_sh(SSLC_TLS12, SSLC_TLS13, &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 	spec.group = 0x0018;
 	check_sh(SSLC_TLS12, SSLC_TLS13, &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
+	spec.group = 0x0019;
+	check_sh(SSLC_TLS12, SSLC_TLS13, &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 
 	/* An x25519 share of the wrong length, and the zero point. */
 	sh_default(&spec, model);
@@ -1760,9 +1804,9 @@ test_retry(void)
 	model = run_new(SSLC_TLS12, SSLC_TLS13, &pki256, "server.test");
 	CHECK(go(model) == 0);
 
-	/* A group never offered, the group already shared, nothing to change. */
+	/* A group never offered (secp521r1), the group already shared, nothing to change. */
 	sh_default(&spec, model);
-	sh_retry(&spec, 0x0018);
+	sh_retry(&spec, 0x0019);
 	check_sh(SSLC_TLS12, SSLC_TLS13, &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 	sh_retry(&spec, 0x001d);
 	check_sh(SSLC_TLS12, SSLC_TLS13, &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
@@ -2241,70 +2285,111 @@ static void
 test_shared_secret(void)
 {
 	uint8_t share[CRYC_ECP_MAX_POINT];
-	uint8_t shared[32];
-	uint8_t expected[32];
-	uint8_t point[65];
+	uint8_t shared[SSLC_HS_SHARED_MAX];
+	uint8_t expected[SSLC_HS_SHARED_MAX];
+	uint8_t point[CRYC_ECP_MAX_POINT];
+	uint8_t point384[CRYC_ECP_MAX_POINT];
 	struct run *run;
+	size_t shared_size;
 
-	/* x25519: Alice's key with Bob's share gives K. */
+	/* x25519: Alice's key with Bob's share gives K (32 bytes). */
 	run = run_new(SSLC_TLS12, SSLC_TLS13, &pki256, "server.test");
 	CHECK(go(run) == 0);
 	CHECK(hex_decode(x25519_alice, run->hs.x25519_private, 32) == 32U);
 	CHECK(hex_decode(x25519_bob_public, share, 32) == 32U);
 	CHECK(hex_decode(x25519_shared, expected, 32) == 32U);
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_X25519, share, 32, shared) == 0);
+	shared_size = 99;
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_X25519, share, 32, shared, &shared_size) == 0);
+	CHECK(shared_size == 32U);
 	CHECK_BYTES(shared, expected, 32);
 
-	/* x25519: a wrong length, a missing share, the zero point (shared wiped). */
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_X25519, share, 31, shared) == EPROTO);
+	/* x25519: a wrong length, a missing share, the zero point (shared wiped, size 0). */
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_X25519, share, 31, shared, &shared_size) == EPROTO);
 	CHECK(run->hs.alert == SSLC_ALERT_ILLEGAL_PARAMETER);
-	CHECK(all_zero(shared, 32));
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_X25519, NULL, 32, shared) == EPROTO);
+	CHECK(all_zero(shared, sizeof(shared)));
+	CHECK(shared_size == 0U);
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_X25519, NULL, 32, shared, &shared_size) == EPROTO);
 	memset(share, 0, 32);
-	memset(shared, 0xee, 32);
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_X25519, share, 32, shared) == EPROTO);
-	CHECK(all_zero(shared, 32));
+	memset(shared, 0xee, sizeof(shared));
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_X25519, share, 32, shared, &shared_size) == EPROTO);
+	CHECK(all_zero(shared, sizeof(shared)));
 
-	/* secp256r1 without a key pair of our own, and a group never offered. */
+	/* secp256r1 and secp384r1 without a key pair of our own, and a group never offered. */
 	CHECK(hex_decode(p256_peer_x, point + 1, 32) == 32U);
 	CHECK(hex_decode(p256_peer_y, point + 33, 32) == 32U);
 	point[0] = 0x04;
+	CHECK(hex_decode(p384_peer_x, point384 + 1, 48) == 48U);
+	CHECK(hex_decode(p384_peer_y, point384 + 49, 48) == 48U);
+	point384[0] = 0x04;
 	run->hs.alert = 0;
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 65, shared) == EPROTO);
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 65, shared, &shared_size) == EPROTO);
 	CHECK(run->hs.alert == SSLC_ALERT_ILLEGAL_PARAMETER);
 	run->hs.alert = 0;
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP384R1, point, 65, shared) == EPROTO);
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP384R1, point384, 97, shared, &shared_size) == EPROTO);
 	CHECK(run->hs.alert == SSLC_ALERT_ILLEGAL_PARAMETER);
 	run->hs.alert = 0;
-	CHECK(sslc_hs_shared_secret(&run->hs, 0x0100, point, 65, shared) == EPROTO);
+	CHECK(sslc_hs_shared_secret(&run->hs, 0x0019, point384, 97, shared, &shared_size) == EPROTO);
+	CHECK(run->hs.alert == SSLC_ALERT_ILLEGAL_PARAMETER);
+	run->hs.alert = 0;
+	CHECK(sslc_hs_shared_secret(&run->hs, 0x0100, point, 65, shared, &shared_size) == EPROTO);
 	CHECK(run->hs.alert == SSLC_ALERT_ILLEGAL_PARAMETER);
 
-	/* secp256r1 with the CAVP key: dIUT with QCAVS gives ZIUT. */
+	/* secp256r1 with the CAVP key: dIUT with QCAVS gives ZIUT (32 bytes). */
 	run->hs.ec = malloc(sizeof(*run->hs.ec));
 	CHECK(run->hs.ec != NULL);
 	CHECK(cryc_ecp_init(run->hs.ec, CRYC_CURVE_P256) == 0);
-	CHECK(hex_decode(p256_private, run->hs.p256_private, 32) == 32U);
-	run->hs.p256_public[0] = 0x04;
-	CHECK(hex_decode(p256_public_x, run->hs.p256_public + 1, 32) == 32U);
-	CHECK(hex_decode(p256_public_y, run->hs.p256_public + 33, 32) == 32U);
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 65, shared) == EPROTO);
-	run->hs.has_p256 = 1;
+	CHECK(hex_decode(p256_private, run->hs.ec_private, 32) == 32U);
+	run->hs.ec_public[0] = 0x04;
+	CHECK(hex_decode(p256_public_x, run->hs.ec_public + 1, 32) == 32U);
+	CHECK(hex_decode(p256_public_y, run->hs.ec_public + 33, 32) == 32U);
+	run->hs.ec_public_size = 65;
+	run->hs.ec_group = SSLC_GROUP_SECP256R1;
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 65, shared, &shared_size) == EPROTO);
+	run->hs.has_ec = 1;
 	CHECK(hex_decode(p256_shared, expected, 32) == 32U);
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 65, shared) == 0);
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 65, shared, &shared_size) == 0);
+	CHECK(shared_size == 32U);
 	CHECK_BYTES(shared, expected, 32);
+
+	/* A key pair of one group does not answer a share of the other. */
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP384R1, point384, 97, shared, &shared_size) == EPROTO);
+	CHECK(all_zero(shared, sizeof(shared)));
 
 	/* secp256r1: off the curve, compressed, cut short, infinity. */
 	point[64] ^= 1U;
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 65, shared) == EPROTO);
-	CHECK(all_zero(shared, 32));
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 65, shared, &shared_size) == EPROTO);
+	CHECK(all_zero(shared, sizeof(shared)));
 	point[64] ^= 1U;
 	point[0] = 0x02;
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 33, shared) == EPROTO);
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 33, shared, &shared_size) == EPROTO);
 	point[0] = 0x04;
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 64, shared) == EPROTO);
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, NULL, 65, shared) == EPROTO);
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 64, shared, &shared_size) == EPROTO);
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, NULL, 65, shared, &shared_size) == EPROTO);
 	point[0] = 0x00;
-	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 1, shared) == EPROTO);
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 1, shared, &shared_size) == EPROTO);
+
+	/* secp384r1 with the CAVP key: dIUT with QCAVS gives ZIUT (48 bytes). */
+	CHECK(cryc_ecp_init(run->hs.ec, CRYC_CURVE_P384) == 0);
+	CHECK(hex_decode(p384_private, run->hs.ec_private, 48) == 48U);
+	run->hs.ec_public[0] = 0x04;
+	CHECK(hex_decode(p384_public_x, run->hs.ec_public + 1, 48) == 48U);
+	CHECK(hex_decode(p384_public_y, run->hs.ec_public + 49, 48) == 48U);
+	run->hs.ec_public_size = 97;
+	run->hs.ec_group = SSLC_GROUP_SECP384R1;
+	CHECK(hex_decode(p384_shared, expected, 48) == 48U);
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP384R1, point384, 97, shared, &shared_size) == 0);
+	CHECK(shared_size == 48U);
+	CHECK_BYTES(shared, expected, 48);
+
+	/* secp384r1: off the curve, a secp256r1-sized point, the other group. */
+	point384[96] ^= 1U;
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP384R1, point384, 97, shared, &shared_size) == EPROTO);
+	CHECK(all_zero(shared, sizeof(shared)));
+	CHECK(shared_size == 0U);
+	point384[96] ^= 1U;
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP384R1, point384, 65, shared, &shared_size) == EPROTO);
+	point[0] = 0x04;
+	CHECK(sslc_hs_shared_secret(&run->hs, SSLC_GROUP_SECP256R1, point, 65, shared, &shared_size) == EPROTO);
 	run_free(run);
 }
 

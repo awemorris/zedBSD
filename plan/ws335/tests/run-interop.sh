@@ -411,6 +411,7 @@ group_text() {
 	case "$1" in
 	29) echo "X25519" ;;
 	23) echo "ECDH, prime256v1" ;;
+	24) echo "ECDH, secp384r1" ;;
 	esac
 }
 
@@ -421,22 +422,19 @@ if [ "$system" = win32 ] || [ "$system" = guest ]; then
 else
 	keys="p256 p384 rsa2048 rsa4096"
 	suites13_run=$suites13
-	groups_run="X25519 P-256"
+	groups_run="X25519 P-256 P-384"
 fi
 
 # 3a. Version x suite x group x key; the server prints its suite names the IANA way for both versions.
-# TLS 1.2 with an ECDSA P-384 leaf is a known limit for now: RFC 8422 5.1 lets a TLS 1.2 server use only an ECDSA
-# certificate on a curve the client lists in supported_groups, and the client lists x25519 and secp256r1 only; the
-# server must refuse it for no shared cipher (the client sees handshake_failure, reason 1040).
+# TLS 1.2 with an ECDSA P-384 leaf needs secp384r1 in the client's supported_groups (RFC 8422 5.1: a TLS 1.2 server
+# uses an ECDSA certificate only on a curve the client lists).
 for key in $keys; do
 	for group in $groups_run; do
-		if [ "$group" = P-256 ]; then
-			retry=hrr
-			code=23
-		else
-			retry=nohrr
-			code=29
-		fi
+		case $group in
+		P-256) retry=hrr; code=23 ;;
+		P-384) retry=hrr; code=24 ;;
+		*) retry=nohrr; code=29 ;;
+		esac
 		for suite in $suites13_run; do
 			interop "1.3 $suite $group $key" $key "-tls1_3 -ciphersuites $suite -groups $group" "-s 200" \
 			    v13 "suite=$suite" "group=$code" $retry "scheme=$(scheme_of $key)"
@@ -444,13 +442,6 @@ for key in $keys; do
 		set -- $(suites12_of $key)
 		[ "$system" = posix ] || set -- "$2"
 		for suite in "$@"; do
-			if [ "$key" = p384 ]; then
-				case_limit=yes
-				interop "1.2 $suite $group $key" $key "-tls1_2 -cipher $suite -groups $group" "-x reason=1040" \
-				    fail no-shared-cipher
-				case_limit=
-				continue
-			fi
 			interop "1.2 $suite $group $key" $key "-tls1_2 -cipher $suite -groups $group" "-s 200" \
 			    v12 "suite=$suite" "group=$code"
 		done
@@ -471,9 +462,7 @@ if [ "$system" = posix ]; then
 	done
 	for scheme in ecdsa_secp256r1_sha256 ecdsa_secp384r1_sha384; do
 		interop "1.2 $scheme p256" p256 "-tls1_2 -sigalgs $scheme" "" v12 "scheme=$scheme"
-		case_limit=yes
-		interop "1.2 $scheme p384" p384 "-tls1_2 -sigalgs $scheme" "-x reason=1040" fail no-shared-cipher
-		case_limit=
+		interop "1.2 $scheme p384" p384 "-tls1_2 -sigalgs $scheme" "" v12 "scheme=$scheme"
 	done
 fi
 
@@ -484,13 +473,17 @@ for key in $keys; do
 	interop "1.3 small reads $key" $key "-tls1_3" "-s 12000 -r 999 -P" v13
 	interop "1.3 non-blocking $key" $key "-tls1_3 -max_send_frag 512" "-n -s 12000 -r 999" v13
 	interop "1.3 non-blocking hrr $key" $key "-tls1_3 -groups P-256" "-n" v13 hrr
-	[ "$key" = p384 ] && continue
 	interop "1.2 fragments of 512 $key" $key "-tls1_2 -max_send_frag 512" "-s 12000 -r 300 -P" v12
 	# 5003, not 5000: in the zedBSD guest a 5000-byte line ends in an Ethernet frame of 704 bytes, a multiple of the
 	# USB adapter's 64-byte packets, which the guest's USB network does not get across (its frames that need a
 	# zero-length packet are lost: BUG-416, a driver fault, not one of these libraries).
 	interop "1.2 non-blocking $key" $key "-tls1_2 -groups P-256" "-n -s 5003 -r 777 -P" v12 group=23
 done
+# secp384r1 on every system: after a HelloRetryRequest in TLS 1.3, in the ServerKeyExchange of TLS 1.2, and the
+# ECDSA P-384 leaf of TLS 1.2 (the server's own choice of group).
+interop "1.3 hrr secp384r1 p256" p256 "-tls1_3 -groups P-384" "-n" v13 hrr group=24
+interop "1.2 secp384r1 rsa2048" rsa2048 "-tls1_2 -groups P-384" "" v12 group=24
+interop "1.2 ECDSA P-384 leaf" p384 "-tls1_2" "" v12
 interop "client pinned to 1.2" p256 "" "-v 1.2" v12
 interop "client pinned to 1.3" p256 "" "-v 1.3" v13
 interop "1.3 by X509_VERIFY_PARAM" rsa2048 "-tls1_3" "-p" v13

@@ -1275,7 +1275,7 @@ handshake_case(
 	rig_close(rig);
 }
 
-/* Handshakes: TLS 1.3 and 1.2, the suites, both groups, a retry, both curves of certificate. */
+/* Handshakes: TLS 1.3 and 1.2, the suites, the three groups, a retry, both curves of certificate. */
 static void
 test_handshake(void)
 {
@@ -1285,11 +1285,14 @@ test_handshake(void)
 	handshake_case(SSLC_TLS13, SSLC_SUITE_CHACHA20_POLY1305_SHA256, SSLC_GROUP_X25519, &pki384, 0);
 	handshake_case(SSLC_TLS13, SSLC_SUITE_AES_128_GCM_SHA256, SSLC_GROUP_SECP256R1, &pki256, 1);
 	handshake_case(SSLC_TLS13, SSLC_SUITE_AES_256_GCM_SHA384, SSLC_GROUP_SECP256R1, &pki384, 1);
+	handshake_case(SSLC_TLS13, SSLC_SUITE_AES_256_GCM_SHA384, SSLC_GROUP_SECP384R1, &pki384, 1);
+	handshake_case(SSLC_TLS13, SSLC_SUITE_CHACHA20_POLY1305_SHA256, SSLC_GROUP_SECP384R1, &pki256, 1);
 
-	/* TLS 1.2 with ECDHE: GCM and ChaCha20-Poly1305, both groups, both curves. */
+	/* TLS 1.2 with ECDHE: GCM and ChaCha20-Poly1305, the three groups, both curves. */
 	handshake_case(SSLC_TLS12, SSLC_SUITE_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, SSLC_GROUP_X25519, &pki256, 0);
 	handshake_case(SSLC_TLS12, SSLC_SUITE_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, SSLC_GROUP_SECP256R1, &pki256, 0);
 	handshake_case(SSLC_TLS12, SSLC_SUITE_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, SSLC_GROUP_X25519, &pki384, 0);
+	handshake_case(SSLC_TLS12, SSLC_SUITE_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, SSLC_GROUP_SECP384R1, &pki384, 0);
 }
 
 /* The verification results: untrusted, name mismatch, address mismatch, expired, not yet valid, no verification. */
