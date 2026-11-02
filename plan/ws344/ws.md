@@ -33,8 +33,8 @@
 | ws344-p011 | VP8 の frame header（vp8-header.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8_header 45344 PASS）。実装済み・試験 PASS（Sonnet q1951-i01、2026-11-02。cleared は Q1） | p009, p010 |
 | ws344-p012 | VP8 の macroblock header（vp8-modes.c） | cleared（2026-11-02 13:46 Q1、main で test-vp8_modes 627570 PASS）。実装済み・試験 PASS（Sonnet q1952-i01、2026-11-02。cleared は Q1） | p009, p010 |
 | ws344-p013 | VP8 の係数（vp8-tokens.c） | cleared（2026-11-02 13:58 Q1、main で test-vp8_tokens 336179 PASS）。実装済み・試験 PASS（Sonnet 担当、2026-11-02） | p009, p010 |
-| ws344-p014 | VP8 の逆変換（vp8-idct.c） | 実装済み・試験 PASS（Sonnet q1958-i01、2026-11-02。cleared は Q1） | p001 |
-| ws344-p015 | VP8 の intra 予測（vp8-predict.c） | planned | p001 |
+| ws344-p014 | VP8 の逆変換（vp8-idct.c） | cleared（2026-11-02 14:07 Q1、main で test-vp8_idct PASS）。実装済み・試験 PASS（Sonnet q1958-i01、2026-11-02。cleared は Q1） | p001 |
+| ws344-p015 | VP8 の intra 予測（vp8-predict.c） | in-progress（2026-11-02 14:07 Sonnet q1960-i01） | p001 |
 | ws344-p016 | VP8 の loop filter（vp8-filter.c） | planned | p001 |
 | ws344-p017 | VP8 の decoder（vp8.c、run-fixtures lossy）— Opus を推す | planned | p002, p011〜p016 |
 | ws344-p018 | 出力の変換（output.c） | planned | p001 |
@@ -46,6 +46,8 @@
 最初に並べて起動できる Phase（依存が p001 だけ）: p002、p003、p006、p009、p010、p014、p015、p016、p018。
 
 ## Q1 の判断
+
+- （2026-11-02 14:07、p014 の報告）vp8-idct.c の WHT の最初の段は RFC 6386 14.3・20.8 のとおり 16 bit に包む（header の comment の「int32_t のまま」は誤り。凍結の header なので p022 で直す）。普通の encoder の出力では違いは出ない。p017 で fixture が libwebp と一致するかを確かめる。
 
 - （2026-11-02 13:58、p013 の報告）vp8-tokens.c の `coded` の bit は header と phase.md のとおり context の値 t（block が最初の位置を越えたか）にした。RFC 6386 20.16 の `eob_mask |= (c > 1) << i` とは、位置 0 から始まり token が 1 つだけの block で違う。p017（VP8 の decoder の統合）で、この bit の使い方（IDCT の DC だけの近道など）が fixture で libwebp と一致するかを必ず確かめる。
 
