@@ -33,3 +33,14 @@ style・CSS・layout・display list の組み立てを `browser-style` の threa
 ## 受け入れ
 
 - 上の試験が通る。BUG-411 の bench が遅くならない（2% 以内）。
+
+## 引き継ぎ（2026-11-02 18:29、P5 の p004・p005 から。main で確かめてから使う）
+
+1. VM の agent は view ごと。task の番号・止める要求・期限は `struct vm_agent`（vm.h）にあり、view/front.c の front が持つ。頁の heap は `view_make_page` で加わる（`vm_heap_set_agent`）。貸しの間の「回収を止める深さ」は `struct vm_heap`（vm/internal.h、vm/heap.c の `vm_heap_alloc`・`vm_heap_collect`）に置く。
+2. script の thread の loop は view/front.c の `front_loop`。箱の 1 件ずつを task として走らせ、次に `browser_view_process` を task として、次に `front_publish` → `view_fill_snapshot`。fill は `browser_view_document_height` と `scroll_range`（`view_update` で layout）、`front_paint`（`browser_view_draw_pixels` で描く）を呼ぶ。これらが style の thread への要求になる主な呼び手。
+3. p005 が足した `_Thread_local` の一時の状態は、計算を走らせる thread で設定されるので、style・layout が `browser-style` に移ると script の thread が設定した値は見えない。要求に載せて運ぶ: bind/computed.c の `computed_pseudo`・`computed_pseudo_name`・`computed_zoom`、css/cascade.c の `cascade_animation_suppressed`、layout/position.c の `position_remember`、page/svg.c の `svg_view_*`。
+4. script の thread は front.c の `front_current`（thread ごとの印）で自分を知る。style の thread にも同じ物が要る。thread をまたぐ呼び出しは base/thread.h の `wb_mutex`・`wb_cond`。新しい thread は `wb_thread_start(name, stack, run, arg, &thread)`（名前は 15 byte まで、"browser-style"）。
+5. 試験: plan/ws345/tests/host-threaded-view.{c,sh} は engine の object を link するので、貸しの数などの内部の口を試験から読める。plan/ws345/tests/raster-cost.c は絵の費用の基準（6000 box・800×600 で描くのに 16.6 ms、大きさの変更の後の layout と描画で 318 ms）。
+6. bug411 の bench の基準（c7d3d9f1bb、3 回の中央）: big-object-reads 1037、compile-many-names 13、computed-after-change 35、grow-with-lookups 69 ms。p005 の後 1038・13・36・71 ms。
+7. P8 の p006 と view/view.c（描画の道）・view/front.c（`front_paint`・`render_pixels`）・paint/ が重なる。p008 は view/・page/・css/・layout/・bind/ を触る。p006 の merge の後に始める（Q1）。
+8. この Queue には zedBSD の amd64・arm64（config-rpi5）・riscv64（config-visionfive2-keiland）の libbrowser.so の build（warning 0）も入る。
