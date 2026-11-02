@@ -203,16 +203,24 @@ end_driver slow
 cmp -s "$work/slow.in" "$work/slow.out" || fail "slow: the data differs"
 echo "ok slow"
 
-# Output after the shell has ended (a process it left holds the streams): the channel ends after that output.
-base_config > "$work/late.config"
-start_driver late
-run_ssh late -o IdentityFile="$work/client_key" -o LogLevel=ERROR 127.0.0.1 '(sleep 1; echo late-out; echo late-err >&2) & exit 0' \
-    > "$work/late.out" 2> "$work/late.err"
-rc=$?
-end_driver late
-[ "$rc" = 0 ] || fail "late: exit status $rc"
-[ "$(cat "$work/late.out")" = late-out ] || fail "late: stdout $(cat "$work/late.out")"
-grep -qx late-err "$work/late.err" || fail "late: stderr $(cat "$work/late.err")"
+# Output after the shell has ended (processes it left hold the streams): the channel ends after the output of both
+# streams, whichever ends last (the standard output in the first run, the error output in the second).
+for late in out err; do
+	if [ "$late" = out ]; then
+		command='(sleep 2; echo late-out) 2>/dev/null & (sleep 1; echo late-err >&2) >/dev/null & exit 0'
+	else
+		command='(sleep 1; echo late-out) 2>/dev/null & (sleep 2; echo late-err >&2) >/dev/null & exit 0'
+	fi
+	base_config > "$work/late-$late.config"
+	start_driver "late-$late"
+	run_ssh "late-$late" -o IdentityFile="$work/client_key" -o LogLevel=ERROR 127.0.0.1 "$command" \
+	    > "$work/late-$late.out" 2> "$work/late-$late.err"
+	rc=$?
+	end_driver "late-$late"
+	[ "$rc" = 0 ] || fail "late $late: exit status $rc"
+	[ "$(cat "$work/late-$late.out")" = late-out ] || fail "late $late: stdout $(cat "$work/late-$late.out")"
+	grep -qx late-err "$work/late-$late.err" || fail "late $late: stderr $(cat "$work/late-$late.err")"
+done
 echo "ok late"
 
 # The descriptors of a command without a terminal: only its three streams (no monitor socket, no connection).

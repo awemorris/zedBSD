@@ -682,9 +682,10 @@ case_limit(
 }
 
 /*
- * The window: a command writes 2200000 bytes; without window adjustments
- * the server sends exactly SSH_CHANNEL_WINDOW bytes (the window it was
- * given) and waits; after the adjustment the rest comes, every byte.
+ * The window: a command writes 2200000 bytes; with a window of
+ * SSH_CHANNEL_WINDOW + 1000 and no adjustment after it, the server sends
+ * exactly that many bytes and waits; after the adjustment the rest
+ * comes, every byte.
  */
 static int
 case_window(
@@ -705,8 +706,15 @@ case_window(
 		status = client_open(client, &channel);
 	if (status != 0)
 		return fail("window", "login or open");
-	ssh_channel_put_exec(channel, (const uint8_t *)"head -c 2200000 /dev/zero", 25, &client->out);
+	/* A window 1000 bytes larger than the one announced, so its end does not fall on a read's size. */
+	ssh_buf_put_u8(&client->out, SSH_MSG_CHANNEL_WINDOW_ADJUST);
+	ssh_buf_put_u32(&client->out, channel->remote_id);
+	ssh_buf_put_u32(&client->out, 1000);
 	status = client_send(client);
+	channel->local_window += 1000U;
+	ssh_channel_put_exec(channel, (const uint8_t *)"head -c 2200000 /dev/zero", 25, &client->out);
+	if (status == 0)
+		status = client_send(client);
 	if (status != 0)
 		return fail("window", "exec");
 
@@ -743,7 +751,7 @@ case_window(
 		}
 		received += size;
 	}
-	if (received != SSH_CHANNEL_WINDOW) {
+	if (received != SSH_CHANNEL_WINDOW + 1000U) {
 		fprintf(stderr, "received %lu\n", (unsigned long)received);
 		return fail("window", "not exactly the window");
 	}
