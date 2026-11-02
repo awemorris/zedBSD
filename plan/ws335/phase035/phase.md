@@ -11,7 +11,7 @@ Parent: [WS335](../ws.md)。担当: conformance-reviewer（他に作業が無い
 
 ## 結果（2026-11-02 P1、q1992-i01）
 
-branch `agent/p1-ws335` の commit（WIP）: fca6a1927d・03b24e56e4・b6a201152c（振る舞いの直し）、dd060fa482（header の comment・design.md・run-unit の timeout）、2734d8dd80（library の規約）、fff1ae430e（試験の規約）、9fffbb39ac（main a212b29ea9 の merge、WS343 p002 を含む）、最後の commit（P2 の file と試験の道具の規約、evp.h・err.h・rand.h の comment、design.md §5。SHA は Q1 への報告）。
+branch `agent/p1-ws335` の commit（WIP）: fca6a1927d・03b24e56e4・b6a201152c（振る舞いの直し）、dd060fa482（header の comment・design.md・run-unit の timeout）、2734d8dd80（library の規約）、fff1ae430e（試験の規約）、9fffbb39ac（main a212b29ea9 の merge、WS343 p002 を含む）、7b745e7e79（P2 の file と試験の道具の規約、evp.h・err.h・rand.h の comment、design.md §5、この記録）。
 
 ### 振る舞いの直し
 
@@ -43,7 +43,7 @@ branch `agent/p1-ws335` の commit（WIP）: fca6a1927d・03b24e56e4・b6a201152
 - worktree の `build/ws335-vectors` が無くなっていた（P1 は消していない）。共有の写しを使った。
 - `run-unit.sh all`（posix、試験の規約の後・merge の前）: 57 本 PASS、`run-unit: PASS`。
 - 件数の照合: HEAD（2734d8dd80、試験の規約の前）を `build/tmp/p035-base/` に `git archive` で写して同じ 36 本を流し、規約の後と全部同じ件数（例 test-msg 936799、test-name 255575、test-sigver 492861、test-api-x509 507799、test-buf 1559755、test-conn 164467）。P2 の試験は helper TP が前後で同じ件数を確かめた（test-aes 28516・test-api-evp 190769・test-api-pkey 40701・test-api-passkey 24754）。ct-* は helper TC が valgrind で前後同じ件数。limbo-api・tls-client・malloc-fault・crypto-smoke は helper TD が新旧の出力の一致を確かめた（limbo-api 9792 件 294559 checks、tls-client の 13 通りの option と s_server、crypto-smoke 47 checks）。
-- 最後の tree（merge と P2 の file の規約の後）の `run-unit.sh all`（posix）: 結果は下の「引き継ぎ」に書く。
+- 最後の tree（7b745e7e79、merge と P2 の file の規約の後）の `run-unit.sh all`（posix）: 59 本 PASS（WS343 の test-api-passkey 24754・ct-api-passkey 23 を含む）、`run-unit: PASS`。前の 57 本の件数は merge の前と全部同じ。
 
 ## 引き継ぎ（2026-11-02 23:59 P1 ラップアップ）
 
