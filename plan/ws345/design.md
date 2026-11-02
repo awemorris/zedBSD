@@ -282,6 +282,7 @@ int browser_threads_set(const struct browser_threads *threads);
 
 ### 6.1 確定した frame
 
+- p005 の暫定（p006 で替える）: `_OWN` の view では script の thread が描画の更新の後に CPU の renderer で view の大きさの絵を描き、参照の数を持つ絵を確定として置く。`browser_view_render_pixels` はどの thread からもその最新を写す。重い頁ほど script の thread の時間を使う（host の計測: 6000 個の box の頁で描くだけ 16.6 ms、resize の後の layout と描画で 318 ms。bug411 の頁で 0.83 ms と 8.1 ms。[phase005](phase005/phase.md) の結果）。p006 で下の display list の確定と描画の thread の renderer にする。
 - 描画の更新（§6.2）の終わりに、style の thread がその browsing context の **確定した frame** を作る: display list、その item が指す layout の木（今の `paint_frame` と同じく木ごと持つ）、画像の pixel と font の bytes への参照、大きさ、scroll、canvas の色、通し番号。作った後は誰も書かない。参照の数は atomic。
 - 確定した frame が指す物は全部 frame の中に持つ: item が指す `box->style.filters` などの配列は確定の arena に深く写す。font は今 `text_font.face`（page の face の表の番号）で指すので、確定に「face の表の写し」（番号 → 共有の変えない font の bytes の参照）を入れ、描画の thread はそれで自分の face を引く。
 - 今 iframe は親の layout が子の文書を中で layout する（`page/frame-load.c` の `page_frame_paint`、親が `page_frames_generation` を読む）。p006 で子を子の frame の更新として別に layout し確定する形に変え、親は子の枠の大きさだけを決める（段 B で親の thread が子の heap を読まないため）。
@@ -342,10 +343,10 @@ for (;;) {
 
 ## 9. 取り消し・打ち切り・閉じ方
 
-- **打ち切り（termination）**: agent ごとの atomic の値で、終わらせる task の通し番号を書く（0 は無し）。task を始める thread は agent の task の通し番号を一つ進めて置き、VM は見る所でこの二つを比べ、同じ時だけ抜ける。窓の thread は「今走っている task の番号」を読んでそれを書くので、次の task（段 A では別の frame の task）に落ちない。値を 0 に戻すのは、その task を抜けた thread。
+- **打ち切り（termination）**: agent ごとの atomic の値で、終わらせる task の通し番号を書く（0 は無し）。task の番号と打ち切りの要求は heap ではなく `struct vm_agent`（`vm/vm.h`）にあり、view の front が持って、view の頁の heap が共有する（段 B では agent ごと。`vm_heap_task_*`・`vm_heap_request_termination` は heap の agent への包み）。task を始める thread は agent の task の通し番号を一つ進めて置き、VM は見る所でこの二つを比べ、同じ時だけ抜ける。窓の thread は「今走っている task の番号」を読んでそれを書くので、次の task（段 A では別の frame の task）に落ちない。値を 0 に戻すのは、その task を抜けた thread。
 - 見る所: VM は loop の印（`VM_OP_LOOP_HINT`）・関数の入口・長い native（sort・正規表現の match・JSON など）で見て、番号が合えば catch も finally も走らない終わり（今の `VM_THROWN` と別の status）で task を抜ける。microtask も捨てる。
-- 書く時: 窓の thread が navigation（`_load`・`_follow`・`_go`・reload）か `_destroy` を積んだ時に、top の agent の script が task の中なら、積むと同時にその task の番号を書く（古い頁は消えるので、その頁の script を待つ理由が無い）。iframe を外す・iframe の navigation は、その frame の task の番号に限って書く（段 A では一つの agent なので、その frame の thread が走っている時だけ）。
-- 打ち切りと unload: 頁の script が始めた navigation（task の中、打ち切りなし）では、今のとおり `pagehide`・`unload` を出す。利用者の navigation・閉じるで走っている task を打ち切った時は、その後に `pagehide`・`unload` を出し、その handler も時間の上限（1 s、上限で同じ打ち切り）の中で走らせる。`beforeunload` の確かめの dialog は出さない（今も無い）。
+- 書く時: 窓の thread が navigation（`_load`・`_follow`・`_go`・reload）か `_destroy` を積んだ時に、top の agent の script が task の中なら、積むと同時にその task の番号を書く（古い頁は消えるので、その頁の script を待つ理由が無い）。同時に `net_loader_client_abort_waited`（`net/loader.c`）で、script の thread が待つ request（同期の XHR・parser の script・最初の頁）を起こしてから積む。iframe を外す・iframe の navigation は、その frame の task の番号に限って書く（段 A では一つの agent なので、その frame の thread が走っている時だけ）。
+- 打ち切りと unload: 頁の script が始めた navigation（task の中、打ち切りなし）では、今のとおり `pagehide`・`unload` を出す。利用者の navigation・閉じるで走っている task を打ち切った時は、その後に `pagehide`・`unload` を出し、その handler も時間の上限（1 s、上限で同じ打ち切り）の中で走らせる。この 1 s は agent の deadline（`vm_agent_set_deadline`、`VM_AGENT_DEADLINE` の印で VM の poll が遅い道へ行き時計を読む）で、上限を過ぎた頁は保たない。`beforeunload` の確かめの dialog は出さない（今も無い）。
 - 戻る・進むの保った頁（`view_keep`、`VIEW_KEPT_MAX` = 3、各々の heap）: 保つ時に、その頁の iframe の script の thread を終えて join し（top の thread は次の頁を走らせる）、頁は thread を持たない。戻す時に iframe の thread を作り直す。作れなければ戻さずに読み込み直す。打ち切られた頁は保たない。
 - `_stop` は読み込みを止める（loader の request を取り消す）が script は打ち切らない（どの browser も同じ）。
 - **応答しない頁の問い**（ユーザーの決定、J2 の答え、ws345-p014）: script の thread は今の task の番号と始めた時刻を atomic に publish する（front の snapshot の一部、窓の thread は読むだけ）。shell の窓の thread は自分の timer でそれを見て、同じ task が 10 s 走り続けたら「このページは応答していません」の問い（待つ／止める）を出す。「止める」は `browser_view_stop_script`（新、front の口）で、その task の番号を打ち切りに書く（上の打ち切り）。「待つ」は問いを閉じ、同じ task がさらに 10 s 走ったらまた出す。task が終われば問いは自分で消える。
