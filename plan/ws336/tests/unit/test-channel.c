@@ -352,6 +352,24 @@ test_open_session_and_reply(void)
 	CHECK_EQ(ssh_channel_open_reply(&channels, input.data, input.size, &channel, &reason), EPROTO);
 	CHECK_EQ(channels.channel[2].state, SSH_CHANNEL_OPENING);
 
+	/*
+	 * The number just past the table is refused as well, whatever the
+	 * field after the table holds: the no-more-sessions flag set (1, the
+	 * value of a waiting slot's state), then the value of an open one.
+	 */
+	channels.no_more_sessions = 1;
+	wire_reset(&input);
+	wire_u8(&input, 91);
+	wire_u32(&input, SSH_CHANNEL_MAX);
+	wire_u32(&input, 8);
+	wire_u32(&input, 1);
+	wire_u32(&input, 1);
+	CHECK_EQ(ssh_channel_open_reply(&channels, input.data, input.size, &channel, &reason), EPROTO);
+	CHECK_EQ(channels.no_more_sessions, 1);
+	channels.no_more_sessions = SSH_CHANNEL_OPEN;
+	CHECK(ssh_channel_find(&channels, SSH_CHANNEL_MAX) == NULL);
+	channels.no_more_sessions = 0;
+
 	wire_reset(&input);
 	wire_u8(&input, 92);
 	wire_u32(&input, 2);

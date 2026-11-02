@@ -1850,14 +1850,14 @@ test_password_requests(void)
 	/* The request bytes the monitor was handed are not where the password is kept: they stay the caller's. */
 	CHECK(request.data[request.size - 2] == 'w');
 
-	/* A failed password for a name with a line end and an escape is logged with '?' for them. */
+	/* A failed password for a name with a line end, escapes, DEL and a byte pair outside ASCII is logged with '?' for each byte. */
 	fresh(&monitor, &base_config);
 	(void)sign_h(&monitor, session_h, sizeof(session_h));
-	build_password(&request, "zz\r\nforged\033]0;x\007", "pw", 2);
+	build_password(&request, "zz\r\nforged\033]0;x\007\177\303\251", "pw", 2);
 	status = call(&monitor, SSH_MON_PASSWORD_LOGIN, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(result, EACCES);
-	CHECK(strcmp(log_last, "Failed password for zz??forged?]0;x?") == 0);
+	CHECK(strcmp(log_last, "Failed password for zz??forged?]0;x????") == 0);
 	sshd_monitor_clear(&monitor);
 
 	/* PasswordAuthentication off: refused without crypt. */
