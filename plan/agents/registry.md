@@ -76,10 +76,12 @@
 | Sonnet | phase-runner-low | ws344 p012 (q1952-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p012` / `agent/s-ws344-p012` | 返却（2026-11-02 13:46、cleared） | 17414580f（2026-11-02 13:46 に main へ merge） |
 | Sonnet | phase-runner-low | ws344 p013 (q1954-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p013` / `agent/s-ws344-p013` | in-progress（2026-11-02 13:46 起動） | — |
 | Sonnet | phase-runner-low | ws344 p003 (q1947-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p003` / `agent/s-ws344-p003` | 返却（2026-11-02 13:36、cleared） | 2098ad02d（2026-11-02 13:36 に main へ merge） |
-| Sonnet | phase-runner-low | ws344 p004 (q1950-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p004` / `agent/s-ws344-p004` | in-progress（2026-11-02 13:36 起動） | — |
+| Sonnet | phase-runner-low | ws344 p004 (q1950-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p004` / `agent/s-ws344-p004` | 返却（2026-11-02 13:55、cleared） | 614bf75dd（2026-11-02 13:55 に main へ merge） |
+| Sonnet | phase-runner-low | ws344 p005 (q1957-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p005` / `agent/s-ws344-p005` | in-progress（2026-11-02 13:55 起動） | — |
 | Sonnet | phase-runner-low | ws344 p009 (q1948-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p009` / `agent/s-ws344-p009` | 返却（2026-11-02 13:29、cleared） | c4dd16ad0（2026-11-02 13:29 に main へ merge） |
 | Sonnet | phase-runner-low | ws344 p010 (q1949-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p010` / `agent/s-ws344-p010` | 返却（2026-11-02 13:37、cleared） | 2c8e3429a（2026-11-02 13:37 に main へ merge） |
-| Sonnet | phase-runner-low | ws344 p011 (q1951-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p011` / `agent/s-ws344-p011` | in-progress（2026-11-02 13:37 起動） | — |
+| Sonnet | phase-runner-low | ws344 p011 (q1951-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p011` / `agent/s-ws344-p011` | 返却（2026-11-02 13:55、cleared） | d014edfd5（2026-11-02 13:55 に main へ merge） |
+| Sonnet | phase-runner-low | ws344 p006 (q1956-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p006` / `agent/s-ws344-p006` | in-progress（2026-11-02 13:55 起動） | — |
 | Sonnet | phase-runner-low | ws335 p030 (q1937-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p030` / `agent/s-ws335-p030` | 返却（2026-11-02 12:21、cleared） | 37f9fa0dd（2026-11-02 12:21 に main へ merge） |
 | Sonnet | phase-runner-low | ws335 p031 (q1943-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p031` / `agent/s-ws335-p031` | 返却（2026-11-02 13:41、cleared） | 9336ee6f5（2026-11-02 13:41 に main へ merge） |
 | Sonnet | phase-runner-low | ws335 p032 (q1953-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p032` / `agent/s-ws335-p032` | in-progress（2026-11-02 13:41 起動） | — |

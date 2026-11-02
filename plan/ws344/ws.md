@@ -23,14 +23,14 @@
 | ws344-p001 | 設計（標準廉価実装手順 §4）: module・header・骨格・試験の道具・実装の Phase の表、試験の画像（cwebp で作る 364 file） | cleared（2026-11-02 13:25 Q1、BASE aa2426a57 を main に merge。main で sysroot を作り直して libwebp-compat.so を build）。実施済み・道具の確かめ PASS（P2 q1939、2026-11-02、BASE aa2426a576、Q1 の受け入れ待ち） | — |
 | ws344-p002 | container（riff.c、test-riff） | cleared（2026-11-02 13:39 Q1、main で test-riff 42324・run-unit all PASS）。実装済み・試験 PASS（Sonnet q1946-i01、2026-11-02、test-riff 42324 checks、Q1 の受け入れ待ち） | p001 |
 | ws344-p003 | VP8L の bit reader と prefix code（lbits.c・prefix.c） | cleared（2026-11-02 13:36 Q1、main で test-lbits・test-prefix PASS）。実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p001 |
-| ws344-p004 | VP8L の code の読み（vp8l-codes.c） | 実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p003 |
-| ws344-p005 | VP8L の entropy-coded image（vp8l-image.c） | planned | p004 |
-| ws344-p006 | VP8L の逆変換（vp8l-transform.c） | planned | p001 |
+| ws344-p004 | VP8L の code の読み（vp8l-codes.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8l_codes 95925 PASS）。実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p003 |
+| ws344-p005 | VP8L の entropy-coded image（vp8l-image.c） | in-progress（2026-11-02 13:55 Sonnet q1957-i01） | p004 |
+| ws344-p006 | VP8L の逆変換（vp8l-transform.c） | in-progress（2026-11-02 13:55 Sonnet q1956-i01） | p001 |
 | ws344-p007 | VP8L の decoder（vp8l.c、run-fixtures lossless） | planned | p002, p005, p006 |
 | ws344-p008 | ALPH（alpha.c、run-fixtures alpha） | planned | p002, p007 |
 | ws344-p009 | bool decoder（bool.c） | cleared（2026-11-02 13:29 Q1、main で test-bool 8376 PASS）。実装済み・試験 PASS（Sonnet q1948-i01、2026-11-02。cleared は Q1） | p001 |
 | ws344-p010 | VP8 の表（vp8-tables.c、RFC の text と照合） | cleared（2026-11-02 13:37 Q1、main で test-vp8_tables 37674 PASS）。実装済み・試験 PASS（Sonnet q1949-i01、2026-11-02。cleared は Q1） | p001 |
-| ws344-p011 | VP8 の frame header（vp8-header.c） | 実装済み・試験 PASS（Sonnet q1951-i01、2026-11-02。cleared は Q1） | p009, p010 |
+| ws344-p011 | VP8 の frame header（vp8-header.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8_header 45344 PASS）。実装済み・試験 PASS（Sonnet q1951-i01、2026-11-02。cleared は Q1） | p009, p010 |
 | ws344-p012 | VP8 の macroblock header（vp8-modes.c） | cleared（2026-11-02 13:46 Q1、main で test-vp8_modes 627570 PASS）。実装済み・試験 PASS（Sonnet q1952-i01、2026-11-02。cleared は Q1） | p009, p010 |
 | ws344-p013 | VP8 の係数（vp8-tokens.c） | in-progress（2026-11-02 13:46 Sonnet q1954-i01） | p009, p010 |
 | ws344-p014 | VP8 の逆変換（vp8-idct.c） | planned | p001 |
