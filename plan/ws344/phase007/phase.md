@@ -2,7 +2,7 @@
 
 # ws344-p007 VP8L の decoder（vp8l.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet q1962-i01、2026-11-02。cleared は Q1）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p002, p005, p006（fixture-check は riff.c を使う）。
 - 目的: header、transform の読み、ARGB 画像、逆変換を逆順で。ALPH の header の無い stream。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -68,4 +68,21 @@ git diff --check
 
 ## 結果
 
-（未着手）
+- 日付: 2026-11-02（Sonnet 5.5、q1962-i01）。作った物: `userland/desktop/libwebp-compat/vp8l.c`、`plan/ws344/tests/unit/test-vp8l.c`。header・道具は変えていない。
+- 実行した command と最後の行（PATH=/usr/bin:$PATH）:
+  - `sh plan/ws344/tests/run-unit.sh vp8l` → `test-vp8l: PASS (9490 checks)` / `run-unit: PASS`
+  - `sh plan/ws344/tests/run-unit.sh all` → 全 15 test PASS、`run-unit: PASS`
+  - `sh plan/ws344/tests/make-fixtures.sh`（133 images、fixtures.sha256 と一致）→ `sh plan/ws344/tests/run-fixtures.sh lossless` → `run-fixtures: PASS (lossless, 174 checks)`
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`
+  - `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`
+  - `git diff --check` 問題なし。
+- 試験の内容: header（手で組んだ byte、version 1〜7、signature、5 byte 未満）、lbitwriter と平坦な prefix code（全 channel 値を 8 bit の符号）で組んだ stream、test 側の順変換（predictor mode 0〜13、color、subtract green、indexing）から元の画像が戻ること、indexing の色数 1・2・3・4・5・16・17・256 と幅（端数）、表の差分の和（手の計算）と表の外の index が 0x00000000、transform の組合せ（indexing の後の predictor は縮んだ幅、4 つ全部を 3 通りの順）、同じ type 2 回は EINVAL、全ての途中切れが成功しない（ASan の leak 検査）、乱数と変異の stream、decode()（header + stream）。
+- わざと壊す確かめ（27 通り: 版の判定、height・alpha の shift、signature、5 byte の判定、width_bits の境 3 か所、差分の和、表の wrap、逆変換の順序、重複の判定、size_bits の基点、幅の縮小、表の padding、14 bit の上限 2 か所、色数 +1、subresolution の高さ、subtract green の数、transform の幅、ENOBUFS の判定 2 か所、stream の始点と大きさ 2 か所、role）: 最初は 3 つの見逃し（width・height の上限の `>=`、present bit の ENOBUFS）があり、試験を足して全て FAIL になった。元に戻したことは `cmp` で確かめた。
+- 自分で決めた点（header が黙っている所）:
+  - decode_stream の width・height が 1〜16384 の外、または pixels が NULL は EINVAL。read_header は 5 byte 未満が ENOBUFS で、それ以上で data か header が NULL なら EINVAL。
+  - decode() は pixels・width・height が NULL なら EINVAL。header の後で width * height * 4 byte を先に確保（見出しだけで大きな画像を言う stream は、確保は遅延で commit されず、続く decode が ENOBUFS で返し解放する）。失敗時 width・height は書かない。
+  - transform の record は読む前に数に入れ、失敗の時に data を呼び元が必ず解放する。
+  - 色 table の buffer は 256 entry を常に確保し、色数の後を 0 で埋める。decode_image の limit は全部 WEBPC_VP8L_TABLE_ENTRIES_MAX。
+  - transform の読みの途中で lbits が尽きたら（present bit、size_bits、色数の後）その場で ENOBUFS。
+- 仕様と phase.md・header の食い違い: 見つからなかった。
+- 未実施: 実機・QEMU の試験は無い（host の単体試験と fixture のみ）。mutate.sh・fuzz は割り当て外のため未実施。

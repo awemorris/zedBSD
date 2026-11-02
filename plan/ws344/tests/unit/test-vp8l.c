@@ -1103,6 +1103,15 @@ test_random_streams(void)
 	CHECK(webpc_vp8l_decode_stream(bytes, 4U, 16385U, 3U, decoded) == EINVAL);
 	CHECK(webpc_vp8l_decode_stream(bytes, 4U, 3U, 16385U, decoded) == EINVAL);
 	CHECK(webpc_vp8l_decode_stream(bytes, 4U, 3U, 3U, NULL) == EINVAL);
+
+	/*
+	 * The largest sides are allowed (an empty stream then runs out before
+	 * any pixel is written), and a stream with no bits at all is ENOBUFS,
+	 * not EINVAL, whatever the size.
+	 */
+	CHECK(webpc_vp8l_decode_stream(NULL, 0U, 16384U, 1U, decoded) == ENOBUFS);
+	CHECK(webpc_vp8l_decode_stream(NULL, 0U, 1U, 16384U, decoded) == ENOBUFS);
+	CHECK(webpc_vp8l_decode_stream(NULL, 0U, 3U, 3U, decoded) == ENOBUFS);
 }
 
 /* The whole-stream call: the header and the image, the errors of both, and nothing left on failure. */
