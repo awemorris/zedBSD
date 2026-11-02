@@ -1294,8 +1294,15 @@ uint32_t css_engine_container_lookups(const struct css_engine *engine);
 int css_engine_computed_contained(const struct css_engine *engine);
 void css_engine_container_use(const struct css_engine *engine, size_t index, const struct dom_element **container, float *width, float *height);
 void css_engine_forget_styles(struct css_engine *engine);
-/* How many styles the engine computed and how many it gave from the ones it kept, since it was made. */
-void css_engine_counts(const struct css_engine *engine, uint64_t *computed, uint64_t *hits);
+/* What a change of an element's attribute (kind DOM_CHANGE_ATTRIBUTE, the name given) or state (DOM_CHANGE_STATE) can restyle: CSS_RESTYLE_*. */
+#define CSS_RESTYLE_NONE	DOM_RESTYLE_NONE
+#define CSS_RESTYLE_SUBTREE	DOM_RESTYLE_SUBTREE
+#define CSS_RESTYLE_SIBLINGS	DOM_RESTYLE_SIBLINGS
+#define CSS_RESTYLE_ALL		DOM_RESTYLE_ALL
+unsigned css_engine_change_scope(struct css_engine *engine, struct dom_element *element, int kind, const struct vm_string *attribute);
+void css_engine_invalidate(struct css_engine *engine, struct dom_element *element, unsigned scope);
+/* How many styles the engine computed, how many it gave from the ones it kept and how many it dropped, since it was made. */
+void css_engine_counts(const struct css_engine *engine, uint64_t *computed, uint64_t *hits, uint64_t *dropped);
 void css_engine_set_view_transition(struct css_engine *engine, int active, const struct vm_string *const *types, int count);
 int css_engine_compute(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style);
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);

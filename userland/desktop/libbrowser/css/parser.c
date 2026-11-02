@@ -4035,8 +4035,8 @@ parser_keep_font_faces(
 }
 
 /*
- * Keeps in the sheet the identifier tokens that may name a data-*
- * attribute.  Every such name of a selector or of attr() is one of them;
+ * Keeps in the sheet the identifier tokens that may name a data-*, aria-*,
+ * role or tabindex attribute.  Every such name of a selector or of attr() is one of them;
  * an identifier with the same text elsewhere only makes the list longer.
  */
 static int
@@ -4079,28 +4079,59 @@ parser_keep_data_names(
 	return 0;
 }
 
-/* Tells whether a token is an identifier that begins as a data-* attribute's name (ASCII, any case). */
+/*
+ * Tells whether a token is an identifier that begins as the name of an
+ * attribute that no style reads unless a sheet names it: data-* and aria-*
+ * (ASCII, any case), or role or tabindex.
+ */
 static int
 parser_data_name(
 	const struct css_token *token)
 {
-	static const char prefix[] = "data-";
+	static const char *const prefixes[] = { "data-", "aria-" };
+	static const char *const words[] = { "role", "tabindex" };
+	size_t which;
 	size_t index;
+	size_t length;
 	uint16_t unit;
+	int same;
 
-	/* An identifier longer than the prefix. */
+	/* Only an identifier. */
 	if (token->type != CSS_TOKEN_IDENT)
 		return 0;
-	if (token->length <= sizeof(prefix) - 1U)
-		return 0;
 
-	/* Each character of the prefix, folded to lower case. */
-	for (index = 0; index < sizeof(prefix) - 1U; index++) {
-		unit = token->text[index];
-		if (unit >= 'A' && unit <= 'Z')
-			unit = (uint16_t)(unit - 'A' + 'a');
-		if (unit != (uint16_t)prefix[index])
-			return 0;
+	/* An identifier longer than one of the prefixes, with each character of the prefix folded to lower case. */
+	for (which = 0; which < sizeof(prefixes) / sizeof(prefixes[0]); which++) {
+		length = strlen(prefixes[which]);
+		if (token->length <= length)
+			continue;
+		same = 1;
+		for (index = 0; index < length; index++) {
+			unit = token->text[index];
+			if (unit >= 'A' && unit <= 'Z')
+				unit = (uint16_t)(unit - 'A' + 'a');
+			if (unit != (uint16_t)prefixes[which][index])
+				same = 0;
+		}
+		if (same)
+			return 1;
 	}
-	return 1;
+
+	/* One of the words, folded the same way. */
+	for (which = 0; which < sizeof(words) / sizeof(words[0]); which++) {
+		length = strlen(words[which]);
+		if (token->length != length)
+			continue;
+		same = 1;
+		for (index = 0; index < length; index++) {
+			unit = token->text[index];
+			if (unit >= 'A' && unit <= 'Z')
+				unit = (uint16_t)(unit - 'A' + 'a');
+			if (unit != (uint16_t)words[which][index])
+				same = 0;
+		}
+		if (same)
+			return 1;
+	}
+	return 0;
 }

@@ -537,6 +537,9 @@ struct dom_document {
 	uint32_t change_full_style;
 	uint32_t change_full_layout;
 	uint32_t change_count;
+	/* Tells what a change of an element's attribute (the name given) or state (kind) can restyle; NULL: everything below it (DOM_RESTYLE_*). */
+	unsigned (*change_scope)(void *context, struct dom_element *element, int kind, const struct vm_string *attribute);
+	void *change_scope_context;
 	int (*attribute_styled)(void *context, const struct vm_string *name);
 	void *attribute_styled_context;
 	uint32_t compose_session;
@@ -616,6 +619,15 @@ enum dom_change_kind {
 	/* The adopted sheets or the rules of a sheet changed: the style engine is made again. */
 	DOM_CHANGE_SHEETS
 };
+
+/*
+ * What a change of an element's attribute or state can restyle (the answer of a document's change_scope hook, which the
+ * style engine gives): nothing, the element and its descendants, its following siblings and theirs, or every element.
+ */
+#define DOM_RESTYLE_NONE	0x0U
+#define DOM_RESTYLE_SUBTREE	0x1U
+#define DOM_RESTYLE_SIBLINGS	0x2U
+#define DOM_RESTYLE_ALL		0x4U
 
 /* Called by dom_changes_take_style for a node with style bits: returns 0 to go on, or another value to stop (which is returned). */
 typedef int (*dom_change_visit)(void *context, struct dom_node *node, unsigned bits);

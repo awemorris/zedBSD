@@ -49,7 +49,10 @@ static void change_clear_subtree(struct dom_node *root);
  * child is the node that came in or went out for DOM_CHANGE_CHILDREN (NULL
  * when it is not known), attribute the changed attribute's name for
  * DOM_CHANGE_ATTRIBUTE (it may be NULL).  A node outside the document's
- * tree only grows the generation.
+ * tree only grows the generation.  What a change of an attribute or a state
+ * restyles is the document's change_scope hook's answer (the style engine
+ * knows which attributes and states its selectors look at), and everything
+ * below the element without one.
  */
 void
 dom_note_change(
@@ -61,6 +64,7 @@ dom_note_change(
 	struct dom_document *document;
 	struct dom_node *anchor;
 	struct dom_node *parent;
+	unsigned scope;
 	unsigned bits;
 	int connected;
 
@@ -68,7 +72,6 @@ dom_note_change(
 	document = node->document;
 	if (kind != DOM_CHANGE_RESOURCE)
 		document->generation++;
-	(void)attribute;
 
 	/* A change that reaches the whole document. */
 	if (kind == DOM_CHANGE_DOCUMENT) {
@@ -157,8 +160,19 @@ dom_note_change(
 
 	case DOM_CHANGE_ATTRIBUTE:
 	case DOM_CHANGE_STATE:
-		/* Selectors look at attributes and states of the element, its ancestors and its preceding siblings. */
-		bits = DOM_CHANGED_STYLE_SUBTREE | DOM_CHANGED_STYLE_SIBLINGS | DOM_CHANGED_LAYOUT;
+		/* Selectors look at attributes and states of the element, its ancestors and its preceding siblings: what they can restyle, unless the engine says. */
+		scope = DOM_RESTYLE_SUBTREE | DOM_RESTYLE_SIBLINGS;
+		if (document->change_scope != NULL && node->type == DOM_ELEMENT)
+			scope = document->change_scope(document->change_scope_context, (struct dom_element *)node, (int)kind, attribute);
+		bits = DOM_CHANGED_LAYOUT;
+		if ((scope & DOM_RESTYLE_ALL) != 0U) {
+			document->change_full_style = 1;
+		} else {
+			if ((scope & DOM_RESTYLE_SUBTREE) != 0U)
+				bits |= DOM_CHANGED_STYLE_SUBTREE;
+			if ((scope & DOM_RESTYLE_SIBLINGS) != 0U)
+				bits |= DOM_CHANGED_STYLE_SIBLINGS;
+		}
 		change_mark(node, bits);
 		break;
 

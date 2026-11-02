@@ -1519,13 +1519,15 @@ page_cache_fold(
 {
 	uint64_t computed;
 	uint64_t hits;
+	uint64_t dropped;
 
 	/* Without an engine there is nothing to add. */
 	if (page->css == NULL)
 		return;
-	css_engine_counts(page->css, &computed, &hits);
+	css_engine_counts(page->css, &computed, &hits, &dropped);
 	page->cache.styles += computed;
 	page->cache.style_hits += hits;
+	page->cache.invalidated += dropped;
 }
 
 /* Tells on standard error what the cache did for the page, in one line, when BROWSER_LAYOUT_CACHE_STATS is 1. */

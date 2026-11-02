@@ -60,6 +60,14 @@ struct cascade_scope_memo {
 	int result;
 };
 
+/* What the selectors of an engine's sheets look at, which decides what a change of an attribute or a state can restyle. */
+#define CASCADE_FEATURE_HAS		0x1U
+#define CASCADE_FEATURE_SIBLING		0x2U
+#define CASCADE_FEATURE_NTH_OF		0x4U
+
+/* How deep a subtree is searched to drop its styles before every kept style is dropped instead. */
+#define CASCADE_DROP_DEPTH		2000U
+
 /* The precedence of a declaration by its origin and importance (higher wins). */
 #define RANK_USER_AGENT		0
 #define RANK_AUTHOR		1
@@ -160,6 +168,10 @@ struct css_engine {
 	/* How many styles were computed and how many were given from the kept ones (css_engine_counts). */
 	uint64_t stat_computed;
 	uint64_t stat_hits;
+	uint64_t stat_dropped;
+	/* What the selectors of the sheets look at (CASCADE_FEATURE_*), found when first asked (features_valid) and again after a sheet is added. */
+	unsigned features;
+	int features_valid;
 	css_container_lookup container_lookup;
 	void *container_context;
 	struct dom_element *current;
@@ -355,6 +367,11 @@ static struct cascade_cached *cascade_style_slot(struct css_engine *engine, cons
 static void cascade_style_keep(struct css_engine *engine, struct dom_element *element, const struct css_style *style, int contained);
 static int cascade_style_grow(struct css_engine *engine);
 static void cascade_style_forget(struct css_engine *engine);
+static size_t cascade_style_home(const struct css_engine *engine, const struct dom_element *element);
+static void cascade_style_drop(struct css_engine *engine, const struct dom_element *element);
+static int cascade_drop_tree(struct css_engine *engine, const struct dom_node *node, unsigned depth);
+static void cascade_features_selector(const struct css_selector *selector, unsigned *features);
+static unsigned cascade_features(struct css_engine *engine);
 static struct dom_element *cascade_parent_element(struct dom_element *element);
 static struct dom_element *cascade_selector_parent(const struct css_engine *engine, struct dom_element *element);
 static struct dom_node *cascade_tree_scope(const struct dom_element *element);
@@ -550,6 +567,7 @@ css_engine_add_sheet_origin(
 	memset(&entry, 0, sizeof(entry));
 	entry.sheet = sheet;
 	entry.owned = sheet;
+	engine->features_valid = 0;
 	error = wb_vector_push(&engine->sheets, &entry);
 	if (error != 0) {
 		css_sheet_destroy(sheet);
@@ -590,6 +608,7 @@ css_engine_add_parsed(
 	}
 
 	/* Appends it. */
+	engine->features_valid = 0;
 	error = wb_vector_push(&engine->sheets, &entry);
 	if (error != 0)
 		return error;
@@ -627,9 +646,9 @@ css_engine_sheet_count(
 
 /*
  * Tells whether a sheet of the engine may name an attribute: one of its
- * identifiers that may name a data-* attribute has the name's text (ASCII
- * letters in any case).  Only data-* names are kept, so it answers 0 for
- * another name; the caller asks only about data-* attributes.
+ * identifiers that may name a data-*, aria-*, role or tabindex attribute
+ * has the name's text (ASCII letters in any case).  Only such names are
+ * kept, so it answers 0 for another name; the caller asks only about them.
  */
 int
 css_engine_names_attribute(
@@ -868,18 +887,20 @@ css_engine_forget_styles(
 }
 
 /*
- * Tells how many styles the engine computed and how many it gave from the
- * ones it kept, since it was made.
+ * Tells how many styles the engine computed, how many it gave from the
+ * ones it kept and how many it dropped (css_engine_invalidate), since it was made.
  */
 void
 css_engine_counts(
 	const struct css_engine *engine,
 	uint64_t *computed,
-	uint64_t *hits)
+	uint64_t *hits,
+	uint64_t *dropped)
 {
-	/* The two counts. */
+	/* The three counts. */
 	*computed = engine->stat_computed;
 	*hits = engine->stat_hits;
+	*dropped = engine->stat_dropped;
 }
 
 /*
@@ -4410,6 +4431,302 @@ cascade_class_grow(
 	return 0;
 }
 
+/* Finds the slot of the style table an element's probe starts at. */
+static size_t
+cascade_style_home(
+	const struct css_engine *engine,
+	const struct dom_element *element)
+{
+	uintptr_t key;
+
+	key = (uintptr_t)element;
+	return (size_t)((key >> 4) * 0x9e3779b97f4a7c15ULL >> 20) & (engine->style_capacity - 1U);
+}
+
+/*
+ * Drops the style the engine kept for an element (nothing happens when it
+ * kept none).  The probes of the elements after it that went past its slot
+ * are closed up, so that none of them is lost.
+ */
+static void
+cascade_style_drop(
+	struct css_engine *engine,
+	const struct dom_element *element)
+{
+	struct cascade_cached *table;
+	size_t mask;
+	size_t hole;
+	size_t next;
+	size_t home;
+	int between;
+
+	/* An engine that kept nothing has nothing to drop. */
+	if (engine->style_capacity == 0 || engine->style_count == 0)
+		return;
+	table = engine->style_table;
+	mask = engine->style_capacity - 1U;
+
+	/* The slot that holds it, if any. */
+	hole = cascade_style_home(engine, element);
+	for (;;) {
+		if (table[hole].element == NULL)
+			return;
+		if (table[hole].element == element)
+			break;
+		hole = (hole + 1U) & mask;
+	}
+
+	/* Its copy goes. */
+	free(table[hole].style);
+	table[hole].style = NULL;
+	table[hole].element = NULL;
+	engine->style_count--;
+	engine->stat_dropped++;
+
+	/* Each element that follows in the run moves back into the hole when its probe passed it. */
+	next = hole;
+	for (;;) {
+		next = (next + 1U) & mask;
+		if (table[next].element == NULL)
+			break;
+		home = cascade_style_home(engine, table[next].element);
+		if (hole <= next)
+			between = hole < home && home <= next;
+		else
+			between = hole < home || home <= next;
+		if (between)
+			continue;
+		table[hole] = table[next];
+		table[next].element = NULL;
+		table[next].style = NULL;
+		hole = next;
+	}
+}
+
+/*
+ * Drops the styles kept for a node and for every element below it (the
+ * children, and the trees of the shadow roots below them); returns 1 when
+ * the tree is too deep to search, which the caller meets by dropping
+ * everything.
+ */
+static int
+cascade_drop_tree(
+	struct css_engine *engine,
+	const struct dom_node *node,
+	unsigned depth)
+{
+	const struct dom_node *child;
+	const struct dom_element *element;
+
+	/* Too deep: the caller drops every style. */
+	if (depth > CASCADE_DROP_DEPTH)
+		return 1;
+
+	/* The element's own. */
+	if (node->type == DOM_ELEMENT) {
+		element = (const struct dom_element *)node;
+		cascade_style_drop(engine, element);
+
+		/* The tree of its shadow root. */
+		if (element->shadow_root != NULL) {
+			for (child = element->shadow_root->first_child; child != NULL; child = child->next) {
+				if (cascade_drop_tree(engine, child, depth + 1U) != 0)
+					return 1;
+			}
+		}
+	}
+
+	/* The children. */
+	for (child = node->first_child; child != NULL; child = child->next) {
+		if (cascade_drop_tree(engine, child, depth + 1U) != 0)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * Drops the styles the engine kept for an element and, as the scope says,
+ * for what its change can reach: with CSS_RESTYLE_SUBTREE its descendants
+ * (the trees of its shadow roots too), with CSS_RESTYLE_SIBLINGS its
+ * following siblings and theirs, with CSS_RESTYLE_ALL every style.  The
+ * styles dropped are computed again when asked for; the others are given as
+ * before.
+ */
+void
+css_engine_invalidate(
+	struct css_engine *engine,
+	struct dom_element *element,
+	unsigned scope)
+{
+	const struct dom_node *sibling;
+	int too_deep;
+
+	/* Every style. */
+	if ((scope & CSS_RESTYLE_ALL) != 0U) {
+		engine->stat_dropped += engine->style_count;
+		cascade_style_forget(engine);
+		return;
+	}
+
+	/* The element itself, and below it when the scope says. */
+	too_deep = 0;
+	if ((scope & CSS_RESTYLE_SUBTREE) != 0U)
+		too_deep = cascade_drop_tree(engine, &element->node, 0U);
+	else if (scope == CSS_RESTYLE_NONE)
+		return;
+	else
+		cascade_style_drop(engine, element);
+
+	/* The following siblings, each with what is below it. */
+	if (!too_deep && (scope & CSS_RESTYLE_SIBLINGS) != 0U) {
+		for (sibling = element->node.next; sibling != NULL && !too_deep; sibling = sibling->next)
+			too_deep = cascade_drop_tree(engine, sibling, 0U);
+	}
+
+	/* A tree too deep to search: every style is dropped instead. */
+	if (too_deep) {
+		engine->stat_dropped += engine->style_count;
+		cascade_style_forget(engine);
+	}
+}
+
+/* Adds to the features what a selector (and the selectors it holds) looks at. */
+static void
+cascade_features_selector(
+	const struct css_selector *selector,
+	unsigned *features)
+{
+	const struct css_compound *compound;
+	const struct css_simple *simple;
+	size_t index;
+	size_t at;
+	size_t argument;
+
+	/* Each compound, with the combinator that joins it to the one before. */
+	for (index = 0; index < selector->count; index++) {
+		compound = &selector->compounds[index];
+		if (compound->combinator == CSS_COMBINATOR_NEXT || compound->combinator == CSS_COMBINATOR_SUBSEQUENT)
+			*features |= CASCADE_FEATURE_SIBLING;
+
+		/* Each simple selector of it. */
+		for (at = 0; at < compound->count; at++) {
+			simple = &compound->simples[at];
+			if (simple->kind == CSS_SIMPLE_PSEUDO_CLASS) {
+				switch (simple->pseudo) {
+				case CSS_PSEUDO_HAS:
+					*features |= CASCADE_FEATURE_HAS;
+					break;
+				case CSS_PSEUDO_NTH_CHILD:
+				case CSS_PSEUDO_NTH_LAST_CHILD:
+				case CSS_PSEUDO_NTH_OF_TYPE:
+				case CSS_PSEUDO_NTH_LAST_OF_TYPE:
+					/* An "of S" counts the siblings that match S, before and after the element. */
+					if (simple->argument_count != 0)
+						*features |= CASCADE_FEATURE_NTH_OF;
+					break;
+				default:
+					break;
+				}
+			}
+
+			/* The selectors it holds (:is, :not, :has, :nth-child(of S), ::slotted). */
+			for (argument = 0; argument < simple->argument_count; argument++)
+				cascade_features_selector(&simple->arguments[argument], features);
+		}
+	}
+}
+
+/* Tells what the selectors of the engine's sheets (and the @scope roots and limits among them) look at, once for the sheets it has. */
+static unsigned
+cascade_features(
+	struct css_engine *engine)
+{
+	const struct cascade_sheet *entry;
+	const struct css_rule *rule;
+	const struct css_scope *scope;
+	unsigned features;
+	size_t sheet;
+	size_t index;
+	size_t at;
+
+	/* Found already for these sheets. */
+	if (engine->features_valid)
+		return engine->features;
+
+	/* Every selector of every rule. */
+	features = 0U;
+	for (sheet = 0; sheet < engine->sheets.count; sheet++) {
+		entry = wb_vector_at(&engine->sheets, sheet);
+		for (index = 0; index < entry->sheet->rule_count; index++) {
+			rule = &entry->sheet->rules[index];
+			for (at = 0; at < rule->selector_count; at++)
+				cascade_features_selector(&rule->selectors[at], &features);
+			for (scope = rule->scope; scope != NULL; scope = scope->parent) {
+				for (at = 0; at < scope->root_count; at++)
+					cascade_features_selector(&scope->roots[at], &features);
+				for (at = 0; at < scope->limit_count; at++)
+					cascade_features_selector(&scope->limits[at], &features);
+			}
+		}
+	}
+
+	/* Kept for as long as the sheets stay. */
+	engine->features = features;
+	engine->features_valid = 1;
+	return features;
+}
+
+/*
+ * Tells what a change of an element's attribute (kind DOM_CHANGE_ATTRIBUTE,
+ * the name given; NULL is any) or state (DOM_CHANGE_STATE) can restyle
+ * under the engine's sheets.  An answer errs on the wide side: the element
+ * and what is below it unless nothing can see the change, its following
+ * siblings too when a selector joins siblings, every element when a
+ * selector looks at what is below an element (:has) or counts siblings by a
+ * selector (:nth-child(of S)).  An attribute that styles nothing the
+ * sheets do not name (an aria-* attribute, role, tabindex) restyles
+ * nothing.
+ */
+unsigned
+css_engine_change_scope(
+	struct css_engine *engine,
+	struct dom_element *element,
+	int kind,
+	const struct vm_string *attribute)
+{
+	static const char aria[] = "aria-";
+	unsigned features;
+	unsigned scope;
+	size_t index;
+	int quiet;
+
+	/* Selectors that look below an element or count by a selector can be changed by anything. */
+	UNUSED_PARAMETER(element);
+	features = cascade_features(engine);
+	if ((features & (CASCADE_FEATURE_HAS | CASCADE_FEATURE_NTH_OF)) != 0U)
+		return CSS_RESTYLE_ALL;
+
+	/* An attribute no style reads unless a selector or attr() names it (a state is looked at by the user agent's own sheet: :link, :popover-open). */
+	if (kind != DOM_CHANGE_STATE && attribute != NULL) {
+		quiet = vm_string_equal_ascii(attribute, "role") || vm_string_equal_ascii(attribute, "tabindex");
+		if (!quiet && attribute->length > sizeof(aria) - 1U) {
+			quiet = 1;
+			for (index = 0; index < sizeof(aria) - 1U; index++) {
+				if (vm_string_at(attribute, index) != (uint16_t)aria[index])
+					quiet = 0;
+			}
+		}
+		if (quiet && !css_engine_names_attribute(engine, attribute))
+			return CSS_RESTYLE_NONE;
+	}
+
+	/* The element and what is below it, and the siblings after it when a selector joins them. */
+	scope = CSS_RESTYLE_SUBTREE;
+	if ((features & CASCADE_FEATURE_SIBLING) != 0U)
+		scope |= CSS_RESTYLE_SIBLINGS;
+	return scope;
+}
+
 /* Finds the style table's slot of an element: the one holding it, or the empty one where it goes. */
 static struct cascade_cached *
 cascade_style_slot(
@@ -4417,12 +4734,10 @@ cascade_style_slot(
 	const struct dom_element *element)
 {
 	struct cascade_cached *slot;
-	uintptr_t key;
 	size_t index;
 
 	/* Probes linearly from the element's address. */
-	key = (uintptr_t)element;
-	index = (size_t)((key >> 4) * 0x9e3779b97f4a7c15ULL >> 20) & (engine->style_capacity - 1U);
+	index = cascade_style_home(engine, element);
 	for (;;) {
 		slot = &engine->style_table[index];
 		if (slot->element == NULL || slot->element == element)

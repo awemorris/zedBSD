@@ -59,6 +59,8 @@ static void test_kinds(void);
 static void test_shadow(void);
 static void test_visit(void);
 static void test_limit(void);
+static void test_scope_hook(void);
+static unsigned scope_hook(void *context, struct dom_element *element, int kind, const struct vm_string *attribute);
 
 int
 main(
@@ -86,6 +88,7 @@ main(
 	test_shadow();
 	test_visit();
 	test_limit();
+	test_scope_hook();
 
 	printf("change: %d/%d passed\n", checks - failures, checks);
 	vm_heap_destroy(heap);
@@ -537,4 +540,65 @@ test_limit(void)
 	check(document->change_full_style == 1U && document->change_full_layout == 1U, "past the limit everything is asked for");
 	settle();
 	check(document->change_count == 0U && document->change_full_style == 0U, "settle starts counting again");
+}
+
+/* A hook that answers by the attribute's name: aria-label restyles nothing, data-all everything, class the element and its siblings. */
+static unsigned
+scope_hook(
+	void *context,
+	struct dom_element *element,
+	int kind,
+	const struct vm_string *attribute)
+{
+	(void)context;
+	(void)element;
+	if (kind == DOM_CHANGE_STATE)
+		return DOM_RESTYLE_SUBTREE;
+	if (attribute != NULL && vm_string_equal_ascii(attribute, "aria-label"))
+		return DOM_RESTYLE_NONE;
+	if (attribute != NULL && vm_string_equal_ascii(attribute, "data-all"))
+		return DOM_RESTYLE_ALL;
+	if (attribute != NULL && vm_string_equal_ascii(attribute, "class"))
+		return DOM_RESTYLE_SUBTREE | DOM_RESTYLE_SIBLINGS;
+	return DOM_RESTYLE_SUBTREE;
+}
+
+/* The document's change_scope hook decides which style bits a change of an attribute or a state leaves. */
+static void
+test_scope_hook(void)
+{
+	settle();
+	document->change_scope = scope_hook;
+	document->change_scope_context = NULL;
+
+	/* Nothing to restyle: the layout bit only, no summary flag. */
+	set_attribute(span, "aria-label", "x");
+	check((span->node.change & DOM_CHANGED_STYLE_BITS) == 0U, "hook none: no style bits");
+	check((span->node.change & DOM_CHANGED_LAYOUT) != 0U, "hook none: layout bit");
+	check((document->node.change & DOM_CHANGED_STYLE_BELOW) == 0U, "hook none: no style below bits");
+	check(document->change_full_style == 0U, "hook none: no full style");
+	settle();
+
+	/* Every element: the full style flag, and the layout bit. */
+	set_attribute(span, "data-all", "x");
+	check(document->change_full_style == 1U, "hook all: full style flag");
+	check((span->node.change & DOM_CHANGED_STYLE_BITS) == 0U && (span->node.change & DOM_CHANGED_LAYOUT) != 0U, "hook all: layout bit only");
+	settle();
+
+	/* The element and its siblings. */
+	set_attribute(span, "class", "x");
+	check((span->node.change & (DOM_CHANGED_STYLE_SUBTREE | DOM_CHANGED_STYLE_SIBLINGS)) == (DOM_CHANGED_STYLE_SUBTREE | DOM_CHANGED_STYLE_SIBLINGS),
+	    "hook siblings: both style bits");
+	settle();
+
+	/* The element's subtree only. */
+	set_attribute(span, "title", "x");
+	check((span->node.change & DOM_CHANGED_STYLE_SUBTREE) != 0U && (span->node.change & DOM_CHANGED_STYLE_SIBLINGS) == 0U, "hook subtree: subtree bit only");
+	settle();
+
+	/* A state goes through the hook too. */
+	dom_note_change(&span->node, DOM_CHANGE_STATE, NULL, NULL);
+	check((span->node.change & DOM_CHANGED_STYLE_SUBTREE) != 0U && (span->node.change & DOM_CHANGED_STYLE_SIBLINGS) == 0U, "hook state: subtree bit only");
+	settle();
+	document->change_scope = NULL;
 }
