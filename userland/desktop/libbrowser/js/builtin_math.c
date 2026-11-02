@@ -34,12 +34,13 @@ struct math_entry {
 };
 
 /*
- * The state of Math.random, shared by every realm of the program.
+ * The state of Math.random, shared by every realm of a thread (each thread
+ * has its own, so that the script threads of two views do not race on it).
  *
  * It is seeded on the first call from the time and an address, and only
  * ever moves forward; zero in both words means not seeded yet.
  */
-static uint64_t math_random_state[2];
+static _Thread_local uint64_t math_random_state[2];
 
 static int math_apply_unary(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int math_round(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);

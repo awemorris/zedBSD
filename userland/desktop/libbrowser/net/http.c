@@ -60,6 +60,7 @@ http_dump(
 	const struct net_response *response)
 {
 	static unsigned counter;
+	unsigned number;
 	char path[512];
 	const char *directory;
 	FILE *file;
@@ -67,7 +68,8 @@ http_dump(
 	directory = getenv("BROWSER_NET_DUMP");
 	if (directory == NULL || directory[0] == '\0')
 		return;
-	snprintf(path, sizeof(path), "%s/%04u.bin", directory, counter++);
+	number = __atomic_fetch_add(&counter, 1U, __ATOMIC_RELAXED);
+	snprintf(path, sizeof(path), "%s/%04u.bin", directory, number);
 	file = fopen(path, "wb");
 	if (file != NULL) {
 		fwrite(response->body.data, 1U, response->body.length, file);
@@ -81,8 +83,8 @@ http_dump(
 				"Accept-Language: ja,en-US;q=0.9,en;q=0.8\r\n" \
 				"Accept-Encoding: identity\r\n"
 
-/* The kind of the blocking fetches that follow (NET_FETCH_*); the browser is single-threaded. */
-static int http_fetch_kind = NET_FETCH_DOCUMENT;
+/* The kind of the blocking fetches that follow (NET_FETCH_*); each thread has its own, for the fetches it makes. */
+static _Thread_local int http_fetch_kind = NET_FETCH_DOCUMENT;
 
 /* Sets what the blocking fetches that follow are for, so the Accept header follows. */
 void

@@ -19,8 +19,8 @@
 
 /*
  * The serial the next bitmap made gets.  It only increases (from 1, so 0
- * is no bitmap), for the life of the program; bitmaps are made on the
- * browser's main thread only.
+ * is no bitmap), for the life of the program; any thread takes one with
+ * an atomic increment.
  */
 static uint64_t img_next_serial = 1;
 
@@ -142,8 +142,7 @@ img_bitmap_create(
 	/* Succeeded: the bitmap is transparent, with a serial no other bitmap has. */
 	bitmap->width = width;
 	bitmap->height = height;
-	bitmap->serial = img_next_serial;
-	img_next_serial++;
+	bitmap->serial = __atomic_fetch_add(&img_next_serial, 1U, __ATOMIC_RELAXED);
 	return 0;
 }
 
@@ -156,6 +155,5 @@ img_bitmap_renew(
 	struct img_bitmap *bitmap)
 {
 	/* A serial no other bitmap has. */
-	bitmap->serial = img_next_serial;
-	img_next_serial++;
+	bitmap->serial = __atomic_fetch_add(&img_next_serial, 1U, __ATOMIC_RELAXED);
 }

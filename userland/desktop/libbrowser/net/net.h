@@ -232,6 +232,7 @@ int net_loader_client_dispatch_until(struct net_loader_client *client, uint64_t 
 void net_loader_client_set_epoch(struct net_loader_client *client, uint64_t epoch);
 /* Any thread may abort: a request, or a client's requests made before an epoch. */
 void net_loader_client_abort_before(struct net_loader_client *client, uint64_t epoch);
+void net_loader_client_abort_waited(struct net_loader_client *client);
 void net_request_abort(struct net_request *request);
 /* A waited request: its client's thread waits for it, reads it, and lets it go. */
 int net_request_wait(struct net_request *request);

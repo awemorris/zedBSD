@@ -20,6 +20,7 @@
 
 #include "vm/internal.h"
 #include "base/os-system.h"
+#include "base/os-time.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -89,6 +90,8 @@ vm_heap_create(
 	/* Starts with no cells, the smallest threshold and empty root lists. */
 	created->threshold = HEAP_MIN_THRESHOLD;
 	created->limit = limit;
+	vm_agent_init(&created->own_agent);
+	created->agent = &created->own_agent;
 	created->lowest = (uintptr_t)-1;
 	created->highest = 0;
 	wb_vector_init(&created->roots, sizeof(struct vm_cell **));
@@ -526,83 +529,228 @@ vm_heap_stats(
 }
 
 /*
- * Begins a task of the heap's thread: gives it the next number (never 0)
- * and forgets any request to end an earlier task.  Returns the number,
- * which vm_heap_task_current reports to the other threads until
- * vm_heap_task_end.
+ * Makes an agent with no task, no request and no deadline.
+ */
+void
+vm_agent_init(
+	struct vm_agent *agent)
+{
+	/* Nothing runs, nothing is asked. */
+	memset(agent, 0, sizeof(*agent));
+}
+
+/*
+ * Begins a task of the agent's thread: gives it the next number (never 0
+ * nor VM_AGENT_DEADLINE) and forgets any request to end an earlier task.
+ * Returns the number, which vm_agent_task_current reports to the other
+ * threads until vm_agent_task_end.
  */
 uint32_t
-vm_heap_task_begin(
-	struct vm_heap *heap)
+vm_agent_task_begin(
+	struct vm_agent *agent)
 {
 	uint32_t task;
 
-	/* The next number; 0 means no task, so the count skips it when it wraps. */
-	task = heap->task_last + 1U;
-	if (task == 0U)
+	/* The next number; 0 means no task and the deadline's mark is no task's, so the count skips them when it wraps. */
+	task = agent->task_last + 1U;
+	if (task == 0U || task == VM_AGENT_DEADLINE)
 		task = 1U;
-	heap->task_last = task;
+	agent->task_last = task;
+	agent->deadline_ns = 0;
 
 	/*
 	 * The old request goes before the new number is seen: a thread that
 	 * reads the new number (acquire) and asks for it stores after this
 	 * clearing, so its request stays.
 	 */
-	__atomic_store_n(&heap->terminate, 0U, __ATOMIC_RELAXED);
-	__atomic_store_n(&heap->task, task, __ATOMIC_RELEASE);
+	__atomic_store_n(&agent->terminate, 0U, __ATOMIC_RELAXED);
+	__atomic_store_n(&agent->task, task, __ATOMIC_RELEASE);
 
 	/* Succeeded: the task runs under its number. */
 	return task;
 }
 
 /*
- * Ends the heap's thread's task: no task runs until the next
- * vm_heap_task_begin, and a request to end the task is put back to none.
+ * Ends the agent's thread's task: no task runs until the next
+ * vm_agent_task_begin, and a request to end it or its deadline is put
+ * back to none.
  */
 void
-vm_heap_task_end(
-	struct vm_heap *heap)
+vm_agent_task_end(
+	struct vm_agent *agent)
 {
 	/* No task runs, and nothing is asked of one (a late request names a task that is gone). */
-	__atomic_store_n(&heap->task, 0U, __ATOMIC_RELEASE);
-	__atomic_store_n(&heap->terminate, 0U, __ATOMIC_RELAXED);
+	__atomic_store_n(&agent->task, 0U, __ATOMIC_RELEASE);
+	__atomic_store_n(&agent->terminate, 0U, __ATOMIC_RELAXED);
+	agent->deadline_ns = 0;
 }
 
 /*
- * Reports the number of the task the heap's thread runs, 0 between tasks.
- * Any thread may call it; the number is what vm_heap_request_termination
- * takes.
+ * Reports the number of the task the agent's thread runs, 0 between
+ * tasks.  Any thread may call it; the number is what
+ * vm_agent_request_termination takes.
  */
 uint32_t
-vm_heap_task_current(
-	struct vm_heap *heap)
+vm_agent_task_current(
+	struct vm_agent *agent)
 {
 	uint32_t task;
 
-	/* The number the heap's thread published. */
-	task = __atomic_load_n(&heap->task, __ATOMIC_ACQUIRE);
+	/* The number the agent's thread published. */
+	task = __atomic_load_n(&agent->task, __ATOMIC_ACQUIRE);
 
 	/* Succeeded: the task that runs now, or 0. */
 	return task;
 }
 
 /*
- * Asks the heap's task numbered task to end, from any thread.  The task
+ * Asks the agent's task numbered task to end, from any thread.  The task
  * leaves with VM_TERMINATED at the engine's next look; a number that is
  * not the running task's (it ended, or another began) ends nothing, and 0
  * asks nothing.
  */
 void
+vm_agent_request_termination(
+	struct vm_agent *agent,
+	uint32_t task)
+{
+	/* No task is no request. */
+	if (task == 0U || task == VM_AGENT_DEADLINE)
+		return;
+
+	/* The request, which the agent's thread reads at its next look. */
+	__atomic_store_n(&agent->terminate, task, __ATOMIC_RELAXED);
+}
+
+/*
+ * Gives the running task of the agent's thread a deadline so many
+ * milliseconds from now (an unload handler's time): the engine's looks then
+ * read the clock, and the task leaves with VM_TERMINATED at it.  For the
+ * agent's thread, inside a task; the task's end clears it.
+ */
+void
+vm_agent_set_deadline(
+	struct vm_agent *agent,
+	uint32_t milliseconds)
+{
+	uint32_t expected;
+
+	/* The moment, and the mark that sends the engine's looks to it (unless a request is there already). */
+	agent->deadline_ns = wb_os_monotonic_ns() + (uint64_t)milliseconds * 1000000U;
+	expected = 0U;
+	(void)__atomic_compare_exchange_n(&agent->terminate, &expected, VM_AGENT_DEADLINE, 0, __ATOMIC_RELAXED,
+	    __ATOMIC_RELAXED);
+}
+
+/*
+ * Takes the deadline of the running task away (its handler ended in time).
+ * For the agent's thread.
+ */
+void
+vm_agent_clear_deadline(
+	struct vm_agent *agent)
+{
+	uint32_t expected;
+
+	/* No deadline, and the mark goes unless a request replaced it. */
+	agent->deadline_ns = 0;
+	expected = VM_AGENT_DEADLINE;
+	(void)__atomic_compare_exchange_n(&agent->terminate, &expected, 0U, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+}
+
+/*
+ * Reports whether the running task's deadline has come (1) or not, or there
+ * is none (0).  For the agent's thread.
+ */
+int
+vm_agent_deadline_passed(
+	struct vm_agent *agent)
+{
+	uint64_t now;
+
+	/* No deadline never passes. */
+	if (agent->deadline_ns == 0U)
+		return 0;
+
+	/* The clock against it. */
+	now = wb_os_monotonic_ns();
+	if (now < agent->deadline_ns)
+		return 0;
+
+	/* The deadline has come. */
+	return 1;
+}
+
+/*
+ * Has the heap's tasks run in an agent its user shares among heaps (the
+ * pages of a view), or in its own again (NULL).  The agent must outlive
+ * the heap's use of it.
+ */
+void
+vm_heap_set_agent(
+	struct vm_heap *heap,
+	struct vm_agent *agent)
+{
+	/* The shared agent, or the heap's own. */
+	heap->agent = &heap->own_agent;
+	if (agent != NULL)
+		heap->agent = agent;
+}
+
+/* Reports the agent the heap's tasks run in. */
+struct vm_agent *
+vm_heap_agent(
+	struct vm_heap *heap)
+{
+	/* The agent in use. */
+	return heap->agent;
+}
+
+/* Begins a task in the heap's agent (vm_agent_task_begin). */
+uint32_t
+vm_heap_task_begin(
+	struct vm_heap *heap)
+{
+	uint32_t task;
+
+	/* The agent's next task. */
+	task = vm_agent_task_begin(heap->agent);
+
+	/* Succeeded: its number. */
+	return task;
+}
+
+/* Ends the task of the heap's agent (vm_agent_task_end). */
+void
+vm_heap_task_end(
+	struct vm_heap *heap)
+{
+	/* The agent's task ends. */
+	vm_agent_task_end(heap->agent);
+}
+
+/* Reports the task the heap's agent runs, from any thread (vm_agent_task_current). */
+uint32_t
+vm_heap_task_current(
+	struct vm_heap *heap)
+{
+	uint32_t task;
+
+	/* The agent's number. */
+	task = vm_agent_task_current(heap->agent);
+
+	/* Succeeded: the task, or 0. */
+	return task;
+}
+
+/* Asks the task of the heap's agent to end, from any thread (vm_agent_request_termination). */
+void
 vm_heap_request_termination(
 	struct vm_heap *heap,
 	uint32_t task)
 {
-	/* No task is no request. */
-	if (task == 0U)
-		return;
-
-	/* The request, which the heap's thread reads at its next look. */
-	__atomic_store_n(&heap->terminate, task, __ATOMIC_RELAXED);
+	/* The agent's request. */
+	vm_agent_request_termination(heap->agent, task);
 }
 
 /*
