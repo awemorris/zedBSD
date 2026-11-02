@@ -320,7 +320,8 @@ struct shell_render {
  * the application (SHELL_POST_TICK) every few milliseconds, when the last
  * was taken, and the window's thread times how long each waited to be
  * taken; the longest and how many waited long are said in one line when
- * the window closes.  thread and app are set before the thread starts;
+ * the window closes, and each wait over 100 ms as it is taken.  thread,
+ * app and started_us are set before the thread starts;
  * stop, waiting and sent_us are atomic; the counts are the window's.
  */
 struct shell_latency {
@@ -329,6 +330,7 @@ struct shell_latency {
 	int stop;
 	int waiting;
 	uint64_t sent_us;
+	uint64_t started_us;
 	uint64_t longest_us;
 	unsigned long samples;
 	unsigned long over_20ms;

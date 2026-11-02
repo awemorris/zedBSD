@@ -14,8 +14,11 @@
  * the window's thread times how long each waited from its post to its
  * taking (what an input of the compositor would wait).  When the window
  * closes one line says how many were timed, the longest wait, and how
- * many waited more than 20 and more than 100 milliseconds:
+ * many waited more than 20 and more than 100 milliseconds; each wait over
+ * 100 milliseconds has a line of its own as it is taken (with the seconds
+ * since the clock started):
  *
+ *   ZBROWSER LATENCY long waited_ms=X at_s=S
  *   ZBROWSER LATENCY samples=N longest_ms=X over_20ms=A over_100ms=B
  */
 
@@ -57,8 +60,9 @@ shell_latency_start(
 	if (asked == NULL || asked[0] == '\0')
 		return 0;
 
-	/* The clock's thread. */
+	/* The clock's thread, from now. */
 	latency->app = app;
+	latency->started_us = kl_clock_us();
 	memset(&options, 0, sizeof(options));
 	options.name = LATENCY_THREAD_NAME;
 	options.run = latency_run;
@@ -99,8 +103,12 @@ shell_latency_take(
 		latency->longest_us = waited;
 	if (waited > LATENCY_LONG_US)
 		latency->over_20ms++;
-	if (waited > LATENCY_LONGER_US)
+	if (waited > LATENCY_LONGER_US) {
 		latency->over_100ms++;
+		printf("ZBROWSER LATENCY long waited_ms=%.1f at_s=%.1f\n", (double)waited / 1000.0,
+		    (double)(now - latency->started_us) / 1e6);
+		fflush(stdout);
+	}
 
 	/* The clock may post the next tick. */
 	__atomic_store_n(&latency->waiting, 0, __ATOMIC_RELEASE);

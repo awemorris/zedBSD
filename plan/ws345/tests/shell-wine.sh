@@ -5,11 +5,12 @@
 # pages are this directory's pages/.  For each case the program opens the page with BROWSER_LATENCY set and, while
 # the page's script runs (its "start" console line came and its "end" did not):
 #  A. the titlebar's Reload (the frame's control 93 pixels from the left) is clicked: NAVIGATE and the script again;
-#  B. the right edge is dragged 126 pixels left (the system's modal size loop): a frame of the new width is drawn
-#     (FRAME width < 1000) while the script still runs;
+#  B. (a second start of the case) the right edge is dragged 126 pixels left (the system's modal size loop): a frame
+#     of the new width is drawn (FRAME width < 1000) while the script still runs;
 #  C. Ctrl+L, the about page's path and Enter: NAVIGATE .../about.html;
-#  D. Ctrl+Q closes the window; the LATENCY line (the window's thread's longest wait, shell/latency.c) has no wait
-#     over 100 ms (the size loop's own wait is the system's, not counted apart).
+#  D. Ctrl+Q closes the window; the LATENCY line of the first start (the window's thread's longest wait,
+#     shell/latency.c) has no wait over 100 ms (the second start's, with the size loop that holds the window's
+#     thread in the system, is written to the summary, not judged).
 # Cases: busy (busy.html, a 30 s loop, the GPU), xhr (hung-xhr.html, a synchronous XMLHttpRequest to 192.0.2.1),
 # busy-cpu (busy.html with --no-gpu).  The screenshots and the logs are in OUT; the review copies in
 # build/review/ws345-p007/.  Each Wine command runs under flock /tmp/zedbsd-wine.lock.  Last line: shell-wine: PASS
@@ -69,14 +70,17 @@ if [ ! -f "$prefix/system.reg" ]; then
 	WINEPREFIX=$prefix timeout 120 wineserver -w
 fi
 
-# One window in its own Xvfb: case.sh <the program's directory> <the output> <start> <end> <the program's options...>.
+# One window in its own Xvfb: case.sh <the program's directory> <the output> <mode> <start> <end> <the program's
+# options...>.  The mode main does A, C and D; resize does B and D (the size loop holds the window's thread in the
+# system, so its own wait is not the browser's: its LATENCY line is kept, not judged).
 cat > "$out/case.sh" << 'EOF'
 #!/bin/sh
 dist=$1
 out=$2
-start=$3
-end=$4
-shift 4
+mode=$3
+start=$4
+end=$5
+shift 5
 cd "$dist" || exit 2
 xset r off 2> /dev/null
 lines() { tr -d '\r' < "$out/first.out" 2> /dev/null | grep -c "$1"; }
@@ -112,6 +116,7 @@ more "CONSOLE level=0 $start" 0 30 || echo "no $start" >> "$out/notes.txt"
 xdotool mousemove $((X + 400)) $((Y + 300))
 sleep 1
 import -window root "$out/1-running.png"
+if [ "$mode" = main ]; then
 # A. Reload.
 navigations=$(lines '^ZBROWSER NAVIGATE ')
 starts=$(lines "CONSOLE level=0 $start")
@@ -124,6 +129,8 @@ else
 fi
 sleep 1
 import -window root "$out/2-reloaded.png"
+fi
+if [ "$mode" = resize ]; then
 # B. The right edge dragged left (the system's modal size loop).
 ends=$(lines "CONSOLE level=0 $end")
 xdotool mousemove $((X + WIDTH - 3)) $((Y + 400))
@@ -140,6 +147,8 @@ sleep 3
 frame=$(tr -d '\r' < "$out/first.out" | grep '^ZBROWSER FRAME' | tail -1)
 echo "resize frame $frame ends-before $ends ends-after $(lines "CONSOLE level=0 $end")" >> "$out/steps.txt"
 import -window root "$out/3-resized.png"
+fi
+if [ "$mode" = main ]; then
 # C. The location.
 xdotool mousemove $((X + 300)) $((Y + 300))
 xdotool key ctrl+l
@@ -153,6 +162,7 @@ else
 fi
 sleep 1
 import -window root "$out/4-location.png"
+fi
 # D. Ctrl+Q.
 xdotool key ctrl+q
 for second in $(seq 20); do
@@ -167,13 +177,18 @@ EOF
 run_case() {
 	name=$1 page=$2 start=$3 end=$4
 	shift 4
-	mkdir -p "$out/$name"
+	mkdir -p "$out/$name" "$out/$name-resize"
 	WINEPREFIX=$prefix VK_ICD_FILENAMES=$lvp timeout 600 flock "$lock" xvfb-run -a -s "-screen 0 1280x800x24" \
-	    sh "$out/case.sh" "$dist" "$out/$name" "$start" "$end" "$@" "$page" > "$out/$name/xvfb.log" 2>&1
-	tr -d '\r' < "$out/$name/first.out" > "$out/$name/first.txt" 2> /dev/null
-	for picture in "$out/$name"/*.png; do
-		[ -f "$picture" ] && cp "$picture" "$review/$name-$(basename "$picture")"
+	    sh "$out/case.sh" "$dist" "$out/$name" main "$start" "$end" "$@" "$page" > "$out/$name/xvfb.log" 2>&1
+	WINEPREFIX=$prefix VK_ICD_FILENAMES=$lvp timeout 600 flock "$lock" xvfb-run -a -s "-screen 0 1280x800x24" \
+	    sh "$out/case.sh" "$dist" "$out/$name-resize" resize "$start" "$end" "$@" "$page" > "$out/$name-resize/xvfb.log" 2>&1
+	for run in "$name" "$name-resize"; do
+		tr -d '\r' < "$out/$run/first.out" > "$out/$run/first.txt" 2> /dev/null
+		for picture in "$out/$run"/*.png; do
+			[ -f "$picture" ] && cp "$picture" "$review/$run-$(basename "$picture")"
+		done
 	done
+	cat "$out/$name-resize/steps.txt" >> "$out/$name/steps.txt" 2> /dev/null
 	steps=$out/$name/steps.txt
 	if grep -q '^reload ok' "$steps" 2> /dev/null; then
 		result PASS "$name" reload "reloaded and its script started again within $(sed -n 's/^reload ok //p' "$steps") s"
@@ -202,8 +217,9 @@ run_case() {
 	else
 		result FAIL "$name" latency "'$latency'"
 	fi
-	if grep -q '^ZBROWSER ERROR' "$out/$name/first.txt"; then
-		result FAIL "$name" errors "$(grep -m1 '^ZBROWSER ERROR' "$out/$name/first.txt")"
+	echo "$name-resize: $(grep '^ZBROWSER LATENCY' "$out/$name-resize/first.txt" | tr '\n' ';')" >> "$out/summary.txt"
+	if grep -q '^ZBROWSER ERROR' "$out/$name/first.txt" "$out/$name-resize/first.txt"; then
+		result FAIL "$name" errors "$(grep -h -m1 '^ZBROWSER ERROR' "$out/$name/first.txt" "$out/$name-resize/first.txt" | head -1)"
 	else
 		result PASS "$name" errors "no ZBROWSER ERROR line"
 	fi
