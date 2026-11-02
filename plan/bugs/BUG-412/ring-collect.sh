@@ -23,4 +23,6 @@ done
 chmod 600 "$OUT"/*
 sync
 echo "fetched $OUT ($(wc -c < "$OUT/ring.bin") bytes of ring)"
-python3 -I plan/bugs/BUG-412/ring-decode.py "$OUT" "$@"
+PY=/usr/bin/python3
+[ -x "$PY" ] || PY=python3
+"$PY" -I plan/bugs/BUG-412/ring-decode.py "$OUT" "$@"
