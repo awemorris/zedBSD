@@ -9,7 +9,12 @@
  * The window mode of browser: a view (<browser/browser.h>) shown in a compositor
  * window, recording its drawing into the frames of the window's swapchain
  * on the shell's Vulkan device.  The view holds the page, its history, its
- * scroll, its timers, the network and the renderer; the shell holds the
+ * scroll, its timers, the network and the renderer, and runs them on
+ * threads of its own (BROWSER_THREADING_OWN): the window's thread here
+ * only hands the view the window's input and commands and reads the state
+ * it published, so that no script, layout or fetch keeps the window from
+ * taking its events.  The shell's drawing thread (render.c) draws the
+ * frames the view commits, with the GPU or the CPU.  The shell holds the
  * window, the compositor's titlebar (back, forward, reload and the location,
  * whose URL can be edited) and the presenter (the swapchain), and
  * turns the window's input into the view's input (ws074-p056): the
@@ -43,7 +48,7 @@
 /* The longest data directory the shell keeps. */
 #define SHELL_DIRECTORY_MAX	4096U
 
-/* How long a frame the window cannot take yet waits before it is drawn again, in milliseconds. */
+/* How long a frame the window cannot take yet waits before it is shown again, in milliseconds. */
 #define SHELL_RETRY_MS		8
 
 /* The longest location typed into the URL's field that is opened (a longer one is cut). */
@@ -81,9 +86,14 @@
 /*
  * What the window mode holds while it runs: the view, the window with its
  * titlebar and presenter (the Vulkan one, or with use_cpu the CPU one,
- * cpu), the size frames are drawn at (width and height), whether the view
- * must be drawn again, and whether the window is up (the view's first page
- * is loaded before it).
+ * cpu), the size frames are drawn at (width and height), and whether the
+ * window is up (the view's first page is asked for before it).
+ *
+ * The drawing thread (render.c) draws the view's committed frames:
+ * frames_seen is how many of its presents the window's thread has
+ * written a FRAME line for, and cpu_waiting says the CPU's frame taken
+ * last has not been shown yet (the window could not take it).  latency is
+ * the diagnostic clock of the window's thread (latency.c).
  *
  * The fingers (touch.c, ws081-p006): their gestures and scroller (without
  * them fingers do nothing), in how many milliseconds they want the next
@@ -93,18 +103,22 @@
  * The sign-in codes of mail (mail.c, WS169 p005).
  *
  * A left press that may drag a picture out of the window (ws189-p003):
- * whether one is held, and where it went down.
+ * whether one is held, and where it went down; drag_asked says the view
+ * was asked for the image there and the press is still held (its answer,
+ * the image callback, starts the drag).
  *
  * text_session is the view's text input's session when the window's text
  * input was last asked for (browser_view_text_session, ws177-p019).
  *
  * load_failure is the reason the view gave for the last load that failed
  * (empty when it gave none), which the page that says why the start page
- * did not open shows (BUG-320).  failure_page is that page's data: URL
- * (NULL when the start page opened), owned until the view is gone, and
- * failure_location the start page it stands for (the options' string):
- * while the page is shown the titlebar shows that location, and reload
- * tries it again.
+ * did not open shows (BUG-320).  start is the start page (the options'
+ * string) and started says a page was shown: a load that fails before
+ * opens that page.  failure_page is that page's data: URL as the view
+ * keeps it (NULL until it is shown), owned until the view is gone, while
+ * failure_wanted says it was asked for and is not shown yet, and
+ * failure_location the start page it stands for: while the page is shown
+ * the titlebar shows that location, and reload tries it again.
  *
  * instance is the engine's instance the view belongs to, which keeps the
  * cookies and localStorage in the user's data directory (shell_instance;
@@ -114,7 +128,7 @@
  * the titlebar shows from the click on, before its page is shown, while
  * its box fills as the load goes on (browser_view_load_progress).
  *
- * The view's wake runs on the library's network thread: wake_app is the
+ * The view's wake runs on the view's threads: wake_app is the
  * application it posts to (NULL until the window is up; written and read
  * with atomic operations), and wake_missed is set when a wake could not
  * be posted (the main loop then runs the view without waiting).
@@ -129,8 +143,11 @@ struct shell_state {
 	int use_cpu;
 	uint32_t width;
 	uint32_t height;
-	int dirty;
 	int ready;
+	struct shell_render render;
+	unsigned long frames_seen;
+	int cpu_waiting;
+	struct shell_latency latency;
 	struct shell_touch touch;
 	int touch_due;
 	unsigned long page_number;
@@ -138,10 +155,14 @@ struct shell_state {
 	int drag_armed;
 	int drag_press_x;
 	int drag_press_y;
+	int drag_asked;
 	uint64_t text_session;
 	char load_failure[SHELL_FAILURE_MAX];
 	char loading[SHELL_LOCATION_MAX + 1U];
+	const char *start;
+	int started;
 	char *failure_page;
+	int failure_wanted;
 	const char *failure_location;
 	struct kl_app *wake_app;
 	int wake_missed;
@@ -162,7 +183,8 @@ static void shell_show_state(struct shell_state *state);
 static void shell_show_titlebar(struct shell_state *state);
 static void shell_input(struct shell_state *state, const struct shell_event *event);
 static void shell_button(struct shell_state *state, const struct shell_event *event);
-static int shell_drag_image(struct shell_state *state);
+static void shell_image(void *context, struct browser_view *view, int error, struct browser_image *image);
+static void shell_drag_image(struct shell_state *state, const struct browser_image *image);
 static void shell_key(struct shell_state *state, const struct shell_event *event);
 static int shell_text(struct shell_state *state, const struct shell_event *event);
 static void shell_text_input(struct shell_state *state);
@@ -176,12 +198,16 @@ static int shell_instance(struct kl_app *app, struct browser_instance **instance
 static int shell_surface_open(struct shell_state *state, const struct shell_options *options);
 static int shell_window_up(struct shell_state *state, const struct shell_options *options, unsigned present);
 static int shell_surface_resize(struct shell_state *state);
+static void shell_resize_live(void *data, uint32_t width, uint32_t height);
 static int shell_path_is_absolute(const char *typed);
-static int shell_frame(struct shell_state *state);
+static int shell_render_up(struct shell_state *state);
+static int shell_frames(struct shell_state *state);
+static int shell_cpu_frame(struct shell_state *state);
+static void shell_frame_line(struct shell_state *state, uint32_t width, uint32_t height);
 static void shell_release(struct shell_state *state);
 static int shell_resize_view(struct shell_state *state);
 static void shell_color_scheme(struct shell_state *state);
-static void shell_redraw(void *context, struct browser_view *view);
+static const char *shell_string(const char *string);
 static void shell_title(void *context, struct browser_view *view, const char *title);
 static void shell_committed(void *context, struct browser_view *view);
 static void shell_load(void *context, struct browser_view *view, enum browser_load_state state, const char *url, int error, const char *reason);
@@ -189,6 +215,7 @@ static enum browser_policy shell_link(void *context, struct browser_view *view, 
 static void shell_console(void *context, struct browser_view *view, int level, const char *text, size_t length);
 static void shell_wake(void *context);
 static void shell_script_error(void *context, struct browser_view *view, int error);
+static void shell_field(void *context, struct browser_view *view, int error, const float *caret);
 static void shell_touch_round(struct shell_state *state);
 static void shell_touch_pointer(struct shell_state *state, const struct shell_touch_pointer *made);
 static int shell_open_failure(struct shell_state *state, const char *location, int failure);
@@ -212,9 +239,10 @@ shell_run(
 	struct browser_view_options view_options;
 	struct shell_event event;
 	struct shell_titlebar_event titlebar_event;
+	uint64_t serial;
+	uint64_t shown_serial;
 	int changed;
 	int timeout;
-	int network;
 	int mail_due;
 	int missed;
 	int retry;
@@ -228,6 +256,7 @@ shell_run(
 		fprintf(stderr, "browser: a page to open is needed (a file or a file: URL)\n");
 		return 2;
 	}
+	state.start = options->start;
 
 	/* The connection to the compositor: its application names the program's data directory. */
 	status = shell_window_connect(&state.window, options->display);
@@ -244,15 +273,25 @@ shell_run(
 		return 1;
 	}
 
-	/* The view, which tells the shell what happens to it. */
+	/* The drawing thread's lock, which the view's frame_wake takes. */
+	error = shell_render_init(&state.render);
+	if (error != 0) {
+		fprintf(stderr, "browser: cannot start drawing: %s\n", wb_os_error_text(error));
+		(void)browser_instance_destroy(state.instance);
+		shell_window_close(&state.window);
+		return 1;
+	}
+
+	/* The view, on threads of its own, which tells the shell what happens to it. */
 	memset(&callbacks, 0, sizeof(callbacks));
-	callbacks.redraw = shell_redraw;
 	callbacks.title = shell_title;
 	callbacks.committed = shell_committed;
 	callbacks.load = shell_load;
 	callbacks.link = shell_link;
 	callbacks.console = shell_console;
 	callbacks.script_error = shell_script_error;
+	callbacks.image = shell_image;
+	callbacks.field = shell_field;
 	callbacks.context = &state;
 	memset(&view_options, 0, sizeof(view_options));
 	view_options.version = BROWSER_API_VERSION;
@@ -264,9 +303,13 @@ shell_run(
 	view_options.wake = shell_wake;
 	view_options.wake_context = &state;
 	view_options.instance = state.instance;
+	view_options.threading = BROWSER_THREADING_OWN;
+	view_options.frame_wake = shell_render_frame_wake;
+	view_options.frame_wake_context = &state.render;
 	error = browser_view_create(&view_options, &state.view);
 	if (error != 0) {
 		fprintf(stderr, "browser: cannot start the network: %s\n", wb_os_error_text(error));
+		shell_render_close(&state.render);
 		(void)browser_instance_destroy(state.instance);
 		shell_window_close(&state.window);
 		return 1;
@@ -283,7 +326,7 @@ shell_run(
 		fflush(stdout);
 	}
 
-	/* The start page, read before the window opens; one that cannot be read leaves a page that says why, so the window still opens (BUG-320). */
+	/* The start page, asked for before the window opens; one that cannot be opened leaves a page that says why, so the window still opens (BUG-320). */
 	error = browser_view_load(state.view, options->start);
 	if (error != 0) {
 		error = shell_open_failure(&state, options->start, error);
@@ -294,31 +337,46 @@ shell_run(
 		}
 	}
 
-	/* The window with the page's title, and the presenter that shows the page in it (the GPU's, or the CPU's). */
+	/* The window, and the presenter that shows the page in it (the GPU's, or the CPU's). */
 	status = shell_surface_open(&state, options);
 	if (status != 0) {
 		shell_release(&state);
 		return 1;
 	}
 
-	/* The page at the window's size. */
+	/* The page at the window's size, and the drawing thread that draws it. */
 	status = shell_resize_view(&state);
+	if (status == 0)
+		status = shell_render_up(&state);
 	if (status != 0) {
 		shell_release(&state);
 		return 1;
 	}
 
-	/* The line the tests wait for, and the titlebar's state. */
+	/* The diagnostic clock of the window's thread, when asked for. */
+	error = shell_latency_start(&state.latency, state.window.app);
+	if (error != 0) {
+		printf("ZBROWSER ERROR latency error=%d\n", error);
+		fflush(stdout);
+	}
+	if (state.latency.thread != NULL)
+		state.window.latency = &state.latency;
+
+	/* The line the tests wait for, and the titlebar's state (the page's own once one is shown; the view tells of a later one). */
 	printf("ZBROWSER READY width=%u height=%u document=%.0f\n", (unsigned)state.width,
 	    (unsigned)state.height, browser_view_document_height(state.view));
 	fflush(stdout);
 	state.ready = 1;
-	shell_show_state(&state);
+	if (state.started) {
+		shell_show_state(&state);
+	} else {
+		shell_show_titlebar(&state);
+	}
 
-	/* Draws, then waits for the compositor, until the window closes. */
-	state.dirty = 1;
+	/* Takes the window's events and hands them to the view, until the window closes. */
+	shown_serial = 0;
 	while (!state.window.closed) {
-		/* A new size replaces the swapchain and lays the page out again. */
+		/* A new size for the drawing thread, and the page laid out again at it. */
 		if (state.window.resized) {
 			state.window.resized = 0;
 			status = shell_surface_resize(&state);
@@ -329,35 +387,25 @@ shell_run(
 			status = shell_resize_view(&state);
 			if (status != 0)
 				break;
-			state.dirty = 1;
 		}
 
-		/* The desktop's appearance changed: the page in the new scheme, and the window drawn again. */
+		/* The desktop's appearance changed: the page in the new scheme. */
 		if (state.window.themed) {
 			state.window.themed = 0;
 			shell_color_scheme(&state);
-			state.dirty = 1;
 		}
 
-		/* Draws the page when it changed (a frame the window cannot take yet is drawn again soon). */
+		/* The frames the drawing thread drew: shown (the CPU's way) and told (FRAME); a frame the window cannot take yet is shown again soon. */
+		status = shell_frames(&state);
+		if (status == 1)
+			break;
 		retry = 0;
-		if (state.dirty) {
-			status = shell_frame(&state);
-			if (status == 2) {
-				retry = 1;
-			} else if (status != 0) {
-				break;
-			} else {
-				state.dirty = 0;
-			}
-		}
+		if (status == 2)
+			retry = 1;
 
-		/* Waits for the compositor, the view's wake, the view's next timer or the end of a code's offer (a held key's repeat waits less, within the dispatch). */
+		/* Waits for the compositor, the view's and the drawing thread's wakes, the fingers or the end of a code's offer (a held key's repeat waits less, within the dispatch). */
 		timeout = -1;
-		network = browser_view_timeout(state.view);
-		if (network >= 0 && (timeout < 0 || network < timeout))
-			timeout = network;
-		if (state.touch_due >= 0 && (timeout < 0 || state.touch_due < timeout))
+		if (state.touch_due >= 0)
 			timeout = state.touch_due;
 		mail_due = shell_mail_timeout(&state.mail, shell_clock());
 		if (mail_due >= 0 && (timeout < 0 || mail_due < timeout))
@@ -379,7 +427,7 @@ shell_run(
 			break;
 		}
 
-		/* Carries out the inputs that arrived. */
+		/* Hands the view the inputs that arrived. */
 		for (;;) {
 			taken = shell_window_take(&state.window, &event);
 			if (!taken)
@@ -403,9 +451,16 @@ shell_run(
 		if (changed)
 			shell_show_state(&state);
 
-		/* The view's work: the network, the page's timers, and the layout they changed; then how far a load has come, in the location's box. */
+		/* What the view published since: its state, and its callbacks; then how far a load has come, in the location's box. */
 		browser_view_process(state.view);
 		shell_titlebar_progress(&state.titlebar, browser_view_load_progress(state.view));
+
+		/* The window's text input follows the page's state: on while the page's focus takes an input method's text. */
+		serial = browser_view_snapshot_serial(state.view);
+		if (serial != shown_serial) {
+			shown_serial = serial;
+			shell_text_input(&state);
+		}
 	}
 
 	/* Closes everything. */
@@ -465,9 +520,9 @@ shell_show_state(
 	const char *title;
 	const char *url;
 
-	/* The window's title: the page's, or its location. */
-	title = browser_view_title(state->view);
-	url = browser_view_url(state->view);
+	/* The window's title: the page's, or its location (nothing before the view published its first state). */
+	title = shell_string(browser_view_title(state->view));
+	url = shell_string(browser_view_url(state->view));
 	shell_window_title(&state->window, title);
 
 	/* The line the tests read. */
@@ -491,7 +546,7 @@ shell_show_titlebar(
 
 	/* The titlebar shows the start page that did not open in the place of the page that says why, and a load under way's location in the place of the page's. */
 	shown = shell_failure_shown(state);
-	url = browser_view_url(state->view);
+	url = shell_string(browser_view_url(state->view));
 	if (shown)
 		url = state->failure_location;
 	if (state->loading[0] != '\0')
@@ -516,7 +571,6 @@ shell_input(
 	uint32_t modifiers;
 	int distance_x;
 	int distance_y;
-	int dragged;
 	int error;
 
 	/* The modifiers held, as the view names them. */
@@ -529,16 +583,16 @@ shell_input(
 		shell_button(state, event);
 		break;
 	case SHELL_EVENT_MOTION:
-		/* A left press on an image moved far enough drags the image out of the window (ws189-p003). */
+		/* A left press moved far enough asks for the image under it, which is dragged out of the window when there is one (ws189-p003). */
 		distance_x = abs(event->x - state->drag_press_x);
 		distance_y = abs(event->y - state->drag_press_y);
 		if (state->drag_armed &&
 		    (distance_x > SHELL_DRAG_DISTANCE ||
 		     distance_y > SHELL_DRAG_DISTANCE)) {
 			state->drag_armed = 0;
-			dragged = shell_drag_image(state);
-			if (dragged)
-				break;
+			error = browser_view_request_image(state->view, (float)state->drag_press_x, (float)state->drag_press_y);
+			if (error == 0)
+				state->drag_asked = 1;
 		}
 
 		/* The pointer's move, the page's. */
@@ -597,8 +651,9 @@ shell_button(
 	int button;
 	int error;
 
-	/* A left press may become a drag of the image under it; any release ends that. */
+	/* A left press may become a drag of the image under it; any release ends that, and a drag asked for that has not started. */
 	state->drag_armed = 0;
+	state->drag_asked = 0;
 	if (event->pressed && event->button == SHELL_BUTTON_LEFT) {
 		state->drag_armed = 1;
 		state->drag_press_x = event->x;
@@ -653,16 +708,16 @@ shell_text(
 {
 	int error;
 
-	/* Each kind to its call. */
+	/* Each kind to its call; what is committed is for the field the window's text input was asked for (another field's text is dropped). */
 	switch (event->type) {
 	case SHELL_EVENT_TEXT_COMMIT:
-		error = browser_view_commit_text(state->view, event->text, 0U, 0U);
+		error = browser_view_commit_text_in(state->view, state->text_session, event->text, 0U, 0U);
 		break;
 	case SHELL_EVENT_TEXT_PREEDIT:
 		error = browser_view_compose(state->view, event->text, event->begin, event->end);
 		break;
 	default:
-		error = browser_view_commit_text(state->view, "", event->before, event->after);
+		error = browser_view_commit_text_in(state->view, state->text_session, "", event->before, event->after);
 		break;
 	}
 
@@ -676,8 +731,8 @@ shell_text(
 
 /*
  * Asks for the window's text input while the page's focused element takes
- * an input method's text, and tells where its caret is (after each frame,
- * where the caret was just drawn).
+ * an input method's text, and tells where its caret is (each time the view
+ * published a new state).
  */
 static void
 shell_text_input(
@@ -923,66 +978,140 @@ shell_follow_typed(
 }
 
 /*
- * Draws the view into the window; a swapchain out of date is replaced and
- * the frame drawn again.  Returns 0 once the frame is shown, 1 on failure,
- * or 2 when the window cannot take the frame yet (the CPU presenter's
- * memory is still with the compositor: the caller draws again soon).
+ * Starts the drawing thread at the window's size: with the presenter's GPU,
+ * whose Wayland configures of a new size it acknowledges itself before the
+ * first frame of the size (and on Windows hears every size of a resize's
+ * modal loop), or with the CPU.  Returns 0, or 1 after saying why not.
  */
 static int
-shell_frame(
+shell_render_up(
 	struct shell_state *state)
 {
-	VkResult result;
+	struct shell_present *present;
 	int error;
 
-	/* The page laid out as it is now, before a frame begins; one that cannot be laid out is reported and not drawn. */
-	error = browser_view_prepare(state->view);
+	/* The size to draw at. */
+	shell_render_resize(&state->render, state->width, state->height, 0, 0U);
+
+	/* The GPU's frames are presented by the drawing thread: the window leaves a new size's configure to it. */
+	present = NULL;
+	if (!state->use_cpu) {
+		present = &state->present;
+		error = kl_window_set_configure_deferred(state->window.kui, 1);
+		if (error != 0 && error != ENOTSUP) {
+			printf("ZBROWSER ERROR configure-deferred error=%d\n", error);
+			fflush(stdout);
+		}
+	}
+
+	/* The sizes of a resize the window's thread is held in (Windows' modal loop). */
+	kl_window_on_resize(state->window.kui, shell_resize_live, state);
+
+	/* The thread, whose acknowledgements the window carries out. */
+	state->window.render = &state->render;
+	error = shell_render_start(&state->render, state->view, state->window.kui, present, shell_wake, state);
 	if (error != 0) {
-		printf("ZBROWSER ERROR layout error=%s\n", wb_os_error_text(error));
-		fflush(stdout);
+		state->window.render = NULL;
+		fprintf(stderr, "browser: cannot start drawing: %s\n", wb_os_error_text(error));
+		return 1;
+	}
+
+	/* Succeeded: the page is drawn from now on. */
+	return 0;
+}
+
+/*
+ * Carries out what the drawing thread did since: the CPU's frame drawn
+ * last, shown in the window, and the GPU's frames presented, told in FRAME
+ * lines.  Returns 0, 1 when the drawing failed (the window closes), or 2
+ * when a frame waits for the window to take it (the caller tries again
+ * soon).
+ */
+static int
+shell_frames(
+	struct shell_state *state)
+{
+	unsigned long shown;
+	uint32_t width;
+	uint32_t height;
+	int failed;
+	int status;
+
+	/* How the drawing goes. */
+	failed = shell_render_status(&state->render, &shown, &width, &height);
+	if (failed)
+		return 1;
+
+	/* The CPU's frame, shown here (libkeiland's shared memory is the window's thread's). */
+	if (state->use_cpu) {
+		status = shell_cpu_frame(state);
+		if (status != 0)
+			return status;
 		return 0;
 	}
 
-	/* The CPU presenter draws the page into its memory and shows that. */
-	if (state->use_cpu) {
-		error = shell_cpu_frame(&state->cpu, &state->window, state->view);
-		if (error == EAGAIN)
-			return 2;
-		if (error != 0) {
-			fprintf(stderr, "browser: cannot draw a frame: %s\n", wb_os_error_text(error));
-			return 1;
-		}
-	} else {
-		/* The frame, which the view records into the window's image. */
-		result = shell_present_frame(&state->present, state->view);
-
-		/* A swapchain that no longer fits the window is replaced, and the frame drawn once more. */
-		if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-			result = shell_present_resize(&state->present, state->view, state->window.width, state->window.height);
-			if (result == VK_SUCCESS) {
-				state->width = state->present.extent.width;
-				state->height = state->present.extent.height;
-				result = shell_present_frame(&state->present, state->view);
-			}
-		}
-
-		/* Says what failed. */
-		if (result != VK_SUCCESS) {
-			fprintf(stderr, "browser: cannot draw a frame: %s failed (%d)\n", state->present.operation, (int)result);
-			return 1;
-		}
+	/* The GPU's frames, presented by the drawing thread: the line the tests read, for the last. */
+	if (shown != state->frames_seen) {
+		state->frames_seen = shown;
+		shell_frame_line(state, width, height);
 	}
 
-	/* The window's text input follows the frame: on while the page's focus takes an input method's text. */
-	shell_text_input(state);
-
-	/* The line the tests read. */
-	printf("ZBROWSER FRAME scroll=%.0f width=%u height=%u\n", browser_view_scroll_y(state->view),
-	    (unsigned)state->width, (unsigned)state->height);
-	fflush(stdout);
-
-	/* Succeeded: the frame is shown. */
+	/* Succeeded: the window shows what was drawn. */
 	return 0;
+}
+
+/*
+ * Shows the CPU's frame the drawing thread drew last, unless it is of an
+ * old size.  Returns 0, 1 on failure, or 2 when the window cannot take the
+ * frame yet (the compositor still holds the memory).
+ */
+static int
+shell_cpu_frame(
+	struct shell_state *state)
+{
+	const struct shell_cpu_frame *frame;
+	int dropped;
+	int fresh;
+	int error;
+
+	/* The frame drawn last, or the one that waits still. */
+	frame = shell_render_cpu_frame(&state->render, &fresh);
+	if (fresh)
+		state->cpu_waiting = 1;
+	if (!state->cpu_waiting)
+		return 0;
+
+	/* Shown; an old size's is dropped (the drawing thread draws the new size). */
+	error = shell_cpu_show(&state->cpu, &state->window, frame, &dropped);
+	if (error == EAGAIN)
+		return 2;
+	state->cpu_waiting = 0;
+	if (error != 0) {
+		fprintf(stderr, "browser: cannot draw a frame: %s\n", wb_os_error_text(error));
+		return 1;
+	}
+	if (dropped)
+		return 0;
+
+	/* The page's animation frames run on the present, and the line the tests read. */
+	browser_view_presented(state->view, 0);
+	shell_frame_line(state, frame->width, frame->height);
+
+	/* Succeeded: the frame is in the window. */
+	return 0;
+}
+
+/* Writes the FRAME line the tests read, for a frame shown at a size. */
+static void
+shell_frame_line(
+	struct shell_state *state,
+	uint32_t width,
+	uint32_t height)
+{
+	/* The scroll the view published, and the frame's size. */
+	printf("ZBROWSER FRAME scroll=%.0f width=%u height=%u\n", browser_view_scroll_y(state->view),
+	    (unsigned)width, (unsigned)height);
+	fflush(stdout);
 }
 
 /*
@@ -1057,11 +1186,17 @@ shell_window_up(
 	const struct shell_options *options,
 	unsigned present)
 {
+	const char *title;
 	int status;
 	int error;
 
-	/* The window, with the page's title. */
-	status = shell_window_open(&state->window, options->width, options->height, browser_view_title(state->view), present);
+	/* The page's title, or the program's name before the page has one. */
+	title = shell_string(browser_view_title(state->view));
+	if (title[0] == '\0')
+		title = SHELL_PRODUCT_NAME;
+
+	/* The window, with the title. */
+	status = shell_window_open(&state->window, options->width, options->height, title, present);
 	if (status != 0) {
 		fprintf(stderr, "browser: cannot open a window: %s\n", wb_os_error_text(errno));
 		return 1;
@@ -1078,15 +1213,21 @@ shell_window_up(
 	return 0;
 }
 
-/* Makes the presenter fit the window's new size; says why on failure. Returns 0, or 1. */
+/*
+ * Gives the drawing thread the window's new size: the CPU's frames at the
+ * size libkeiland shows, or the swapchain at the window's with the
+ * configure that waits for the first frame of it (Wayland).  Says why on
+ * failure.  Returns 0, or 1.
+ */
 static int
 shell_surface_resize(
 	struct shell_state *state)
 {
-	VkResult result;
+	struct kl_window_configure configure;
+	int taken;
 	int error;
 
-	/* The CPU presenter's memory at the new size. */
+	/* The CPU's frames at the new size, shown by this thread. */
 	if (state->use_cpu) {
 		error = shell_cpu_resize(&state->cpu, &state->window);
 		if (error != 0) {
@@ -1095,20 +1236,50 @@ shell_surface_resize(
 		}
 		state->width = state->cpu.width;
 		state->height = state->cpu.height;
+		shell_render_resize(&state->render, state->width, state->height, 0, 0U);
 		return 0;
 	}
 
-	/* The swapchain at the new size. */
-	result = shell_present_resize(&state->present, state->view, state->window.width, state->window.height);
-	if (result != VK_SUCCESS) {
-		fprintf(stderr, "browser: cannot resize: %s failed (%d)\n", state->present.operation, (int)result);
-		return 1;
-	}
-	state->width = state->present.extent.width;
-	state->height = state->present.extent.height;
+	/* The configure of the new size, which the drawing thread acknowledges (none on a system without configures). */
+	memset(&configure, 0, sizeof(configure));
+	taken = 0;
+	error = kl_window_configure_take(state->window.kui, &configure);
+	if (error == 0)
+		taken = 1;
+
+	/* The swapchain at the window's size, made by the drawing thread. */
+	state->width = state->window.width;
+	state->height = state->window.height;
+	shell_render_resize(&state->render, state->width, state->height, taken, configure.serial);
 
 	/* Succeeded: the next frame is shown at the new size. */
 	return 0;
+}
+
+/*
+ * The window's size during a resize that holds the window's thread
+ * (Windows' modal loop, kl_window_on_resize), on the window's thread: the
+ * page laid out at it and drawn at it by the drawing thread (the GPU's
+ * way; the CPU's frames are shown by the window's thread, after the loop).
+ */
+static void
+shell_resize_live(
+	void *data,
+	uint32_t width,
+	uint32_t height)
+{
+	struct shell_state *state;
+
+	/* The view lays the page out at the size (a command queued for its thread). */
+	state = data;
+	(void)browser_view_resize(state->view, width, height);
+
+	/* The drawing thread draws at it. */
+	if (state->use_cpu)
+		return;
+	state->width = width;
+	state->height = height;
+	shell_render_resize(&state->render, width, height, 0, 0U);
 }
 
 /*
@@ -1168,11 +1339,25 @@ shell_instance(
 	return 0;
 }
 
-/* Releases the presenter, the titlebar, the view and its instance, and the window, in that order. */
+/*
+ * Releases everything, in this order: the diagnostic clock, the drawing
+ * thread (stopped while the window's events are still taken), the
+ * presenter whose surface is the window's, the titlebar, the window
+ * itself, the view and its instance, and the application (once no thread
+ * of the view posts to it).
+ */
 static void
 shell_release(
 	struct shell_state *state)
 {
+	/* The diagnostic clock, which says what it measured. */
+	shell_latency_stop(&state->latency);
+	state->window.latency = NULL;
+
+	/* The drawing thread, stopped before what it draws with goes. */
+	shell_render_stop(&state->render, &state->window);
+	state->window.render = NULL;
+
 	/* The presenter before the window whose surface it draws. */
 	shell_present_close(&state->present, state->view);
 	shell_cpu_close(&state->cpu);
@@ -1184,37 +1369,30 @@ shell_release(
 	if (state->window.app != NULL)
 		shell_mail_close(&state->mail, &state->titlebar);
 
-	/* The view, with its page, its history and its network (whose thread posts to the application), and the fingers that moved it. */
-	browser_view_destroy(state->view);
+	/* The window goes from the screen first; the application stays while the view's threads may post to it. */
+	shell_window_drop(&state->window);
+
+	/* The view, with its page, its history, its threads and its network, and the fingers that moved it. */
+	if (state->view != NULL)
+		browser_view_destroy(state->view);
 	state->view = NULL;
 	shell_touch_close(&state->touch);
+
+	/* What the drawing thread kept, once the view that woke it is gone. */
+	shell_render_close(&state->render);
 
 	/* The instance once its view is gone, which writes what is left to save. */
 	if (state->instance != NULL)
 		(void)browser_instance_destroy(state->instance);
 	state->instance = NULL;
 
-	/* The window, once nothing posts to its application. */
+	/* The application, once nothing posts to it. */
 	if (state->window.app != NULL)
 		shell_window_close(&state->window);
 
 	/* The URL of the page that said why the start page did not open, which no view shows any more. */
 	free(state->failure_page);
 	state->failure_page = NULL;
-}
-
-/* The view's callback: its content changed and is drawn in the next frame. */
-static void
-shell_redraw(
-	void *context,
-	struct browser_view *view)
-{
-	struct shell_state *state;
-
-	/* The next frame. */
-	UNUSED_PARAMETER(view);
-	state = context;
-	state->dirty = 1;
 }
 
 /* The view's callback: a script changed the title, which the window shows. */
@@ -1230,7 +1408,7 @@ shell_title(
 	UNUSED_PARAMETER(view);
 	state = context;
 	if (state->ready)
-		shell_window_title(&state->window, title);
+		shell_window_title(&state->window, shell_string(title));
 }
 
 /* The view's callback: a page became the one shown (the first page is shown once the window is up). */
@@ -1241,9 +1419,19 @@ shell_committed(
 {
 	struct shell_state *state;
 
-	/* The title, the NAVIGATE line and the titlebar (with the page's location: no load is under way now). */
+	/* A page is shown: a later failure is the page's, not the start's. */
 	UNUSED_PARAMETER(view);
 	state = context;
+	state->started = 1;
+
+	/* The page that says why the start page did not open, shown: its location as the view keeps it tells later that it is shown. */
+	if (state->failure_wanted) {
+		state->failure_wanted = 0;
+		free(state->failure_page);
+		state->failure_page = strdup(shell_string(browser_view_url(state->view)));
+	}
+
+	/* The title, the NAVIGATE line and the titlebar (with the page's location: no load is under way now). */
 	state->loading[0] = '\0';
 	if (state->ready)
 		shell_show_state(state);
@@ -1263,6 +1451,7 @@ shell_load(
 	const char *reason)
 {
 	struct shell_state *shell;
+	int failed;
 
 	/* The line the tests read. */
 	UNUSED_PARAMETER(view);
@@ -1278,6 +1467,15 @@ shell_load(
 	/* The reason of a failure, kept for the page that says why the start page did not open (cut to what fits). */
 	if (state == BROWSER_LOAD_FAILED)
 		snprintf(shell->load_failure, sizeof(shell->load_failure), "%s", reason);
+
+	/* The start page failed before any page was shown: the page that says why, once (BUG-320). */
+	if (state == BROWSER_LOAD_FAILED && !shell->started && shell->failure_location == NULL) {
+		failed = shell_open_failure(shell, shell->start, error);
+		if (failed != 0) {
+			printf("ZBROWSER ERROR failure-page error=%s\n", wb_os_error_text(failed));
+			fflush(stdout);
+		}
+	}
 
 	/* The titlebar shows the location of a load as it starts, and the page's again when it stops or fails. */
 	shell->loading[0] = '\0';
@@ -1321,9 +1519,10 @@ shell_console(
 }
 
 /*
- * The view's wake, on the library's network thread: posts an event to the
- * application, which ends the main loop's wait (the loop runs the view
- * after each dispatch).  Before the window is up, or when the post fails,
+ * The view's wake, on the view's threads, and the drawing thread's: posts
+ * an event to the application, which ends the main loop's wait (the loop
+ * takes what the view published and what the drawing thread drew after
+ * each dispatch).  Before the window is up, or when the post fails,
  * the main loop is told to run the view without waiting.
  */
 static void
@@ -1360,6 +1559,36 @@ shell_script_error(
 	UNUSED_PARAMETER(view);
 	printf("ZBROWSER ERROR script error=%s\n", wb_os_error_text(error));
 	fflush(stdout);
+}
+
+/* The view's callback: the answer about the page's field for one-time codes, which mail asked for. */
+static void
+shell_field(
+	void *context,
+	struct browser_view *view,
+	int error,
+	const float *caret)
+{
+	struct shell_state *state;
+
+	/* The code typed into the field, or put on the clipboard; the titlebar shows the state again. */
+	UNUSED_PARAMETER(caret);
+	state = context;
+	shell_mail_field(&state->mail, view, &state->titlebar, error);
+	shell_show_state(state);
+}
+
+/* Reports a string the view published, or "" before it published one. */
+static const char *
+shell_string(
+	const char *string)
+{
+	/* Nothing published yet. */
+	if (string == NULL)
+		return "";
+
+	/* Succeeded: the string. */
+	return string;
 }
 
 /*
@@ -1450,18 +1679,47 @@ shell_touch_pointer(
 }
 
 /*
- * Drags the image under the press out of the window (ws189-p003): its
- * picture ("image/png", at most SHELL_DRAG_SIDE on its longer side) and the
- * URL of its source as text, as a copy, with the picture under the
- * pointer.  The drag starts first and its PNG is filled in after.  Returns
- * 1 when the drag started, 0 when there is no image there (the motion is
- * the page's then).
+ * The view's callback, on the window's thread: the answer to the request
+ * for the image under a left press moved far enough (ws189-p003).  While
+ * the press is still held, an image there is dragged out of the window;
+ * no image (or a press let go meanwhile) leaves the motion the page's.
  */
-static int
-shell_drag_image(
-	struct shell_state *state)
+static void
+shell_image(
+	void *context,
+	struct browser_view *view,
+	int error,
+	struct browser_image *image)
 {
-	struct browser_image image;
+	struct shell_state *state;
+
+	/* Only the answer to a press still held. */
+	UNUSED_PARAMETER(view);
+	state = context;
+	if (!state->drag_asked)
+		return;
+	state->drag_asked = 0;
+
+	/* No image there. */
+	if (error != 0 || image == NULL)
+		return;
+
+	/* The drag, with the image lent for the call. */
+	shell_drag_image(state, image);
+}
+
+/*
+ * Drags an image out of the window (ws189-p003): its picture
+ * ("image/png", at most SHELL_DRAG_SIDE on its longer side) and the URL of
+ * its source as text, as a copy, with the picture under the pointer, from
+ * the last press.  The drag starts first and its PNG is filled in after.
+ * The image stays the caller's.
+ */
+static void
+shell_drag_image(
+	struct shell_state *state,
+	const struct browser_image *image)
+{
 	struct kl_drag_data data[3];
 	struct kl_drag_icon icon;
 	unsigned char *png;
@@ -1470,46 +1728,43 @@ shell_drag_image(
 	size_t size;
 	int fitted_width;
 	int fitted_height;
+	uint32_t serial;
 	int error;
-
-	/* The image at the press. */
-	error = browser_view_image_at(state->view, (float)state->drag_press_x, (float)state->drag_press_y, &image);
-	if (error != 0)
-		return 0;
 
 	/* The picture, filled in later, and the source's URL as both text types when it has one. */
 	data[0].type = "image/png";
 	data[0].data = NULL;
 	data[0].length = 0;
 	count = 1;
-	if (image.url[0] != '\0') {
+	if (image->url != NULL && image->url[0] != '\0') {
 		data[1].type = "text/plain;charset=utf-8";
-		data[1].data = image.url;
-		data[1].length = strlen(image.url);
+		data[1].data = image->url;
+		data[1].length = strlen(image->url);
 		data[2].type = "text/plain";
-		data[2].data = image.url;
-		data[2].length = strlen(image.url);
+		data[2].data = image->url;
+		data[2].length = strlen(image->url);
 		count = 3;
 	}
 
 	/* The drag from the press, a copy, the picture under the pointer at its middle. */
-	icon.pixels = image.pixels;
-	icon.width = image.width;
-	icon.height = image.height;
-	icon.hot_x = image.width / 2;
-	icon.hot_y = image.height / 2;
-	error = kl_window_start_drag_icon(state->window.kui, data, count, KL_DND_COPY, kl_window_press_serial(state->window.kui), &icon);
+	icon.pixels = image->pixels;
+	icon.width = image->width;
+	icon.height = image->height;
+	icon.hot_x = image->width / 2;
+	icon.hot_y = image->height / 2;
+	serial = kl_window_press_serial(state->window.kui);
+	error = kl_window_start_drag_icon(state->window.kui, data, count, KL_DND_COPY, serial, &icon);
 	if (error != 0) {
 		printf("ZBROWSER DND drag failed errno=%d\n", error);
 		fflush(stdout);
-		browser_view_image_release(&image);
-		return 0;
+		return;
 	}
 
 	/* The PNG, shrunk, filled in. */
 	png = NULL;
 	size = 0;
-	error = kl_picture_fit(image.pixels, image.width, image.height, (size_t)image.width, SHELL_DRAG_SIDE, &fitted, &fitted_width, &fitted_height);
+	error = kl_picture_fit(image->pixels, image->width, image->height, (size_t)image->width, SHELL_DRAG_SIDE, &fitted, &fitted_width,
+	    &fitted_height);
 	if (error == 0) {
 		error = kl_picture_png(fitted, fitted_width, fitted_height, (size_t)fitted_width, &png, &size);
 		free(fitted);
@@ -1520,19 +1775,17 @@ shell_drag_image(
 		error = kl_window_drag_fill(state->window.kui, "image/png", png, size);
 	free(png);
 
-	/* The log line the tests read. */
-	printf("ZBROWSER DND drag image size=%dx%d bytes=%lu url=%s errno=%d\n", image.width, image.height, (unsigned long)size, image.url, error);
+	/* The log line the tests read; the drag goes on. */
+	printf("ZBROWSER DND drag image size=%dx%d bytes=%lu url=%s errno=%d\n", image->width, image->height, (unsigned long)size,
+	    shell_string(image->url), error);
 	fflush(stdout);
-	browser_view_image_release(&image);
-
-	/* Succeeded: the drag goes on. */
-	return 1;
 }
 
 /*
- * Shows a page that says why the start page did not open (BUG-320): the
- * location, the error with the view's reason, and a link that tries the
- * location again.  Returns 0 when the page is shown.
+ * Asks the view for a page that says why the start page did not open
+ * (BUG-320): the location, the error with the view's reason, and a link
+ * that tries the location again.  The page is known as shown when the
+ * view commits it (shell_committed).  Returns 0 when it was asked for.
  */
 static int
 shell_open_failure(
@@ -1542,7 +1795,6 @@ shell_open_failure(
 {
 	struct shell_text page;
 	char reason[SHELL_FAILURE_MAX + 128U];
-	const char *shown;
 	int error;
 
 	/* The error in words, with what the view said beyond its number (for example, the certificate's). */
@@ -1560,7 +1812,7 @@ shell_open_failure(
 		return error;
 	}
 
-	/* The page shown in the start page's place. */
+	/* The page asked for in the start page's place. */
 	error = browser_view_load(state->view, page.bytes);
 	if (error != 0) {
 		free(page.bytes);
@@ -1570,16 +1822,9 @@ shell_open_failure(
 	/* The URL built is the view's now. */
 	free(page.bytes);
 
-	/* The page's location as the view keeps it, which tells later that the page is shown. */
-	shown = browser_view_url(state->view);
-	if (shown == NULL)
-		return ENOENT;
-
-	/* A copy of it, and the start page it stands for, which the titlebar and the reload use. */
-	state->failure_page = strdup(shown);
-	if (state->failure_page == NULL)
-		return ENOMEM;
+	/* The start page it stands for, which the titlebar and the reload use; the page is waited for. */
 	state->failure_location = location;
+	state->failure_wanted = 1;
 
 	/* Succeeded: the window opens on the page that says why. */
 	return 0;

@@ -632,6 +632,7 @@ extern const struct vm_cell_type vm_promise_job_type;
 int vm_heap_create(struct vm_heap **heap, size_t limit);
 void vm_heap_destroy(struct vm_heap *heap);
 void vm_heap_set_stack_base(struct vm_heap *heap, const void *base);
+const void *vm_heap_stack_base(const struct vm_heap *heap);
 void *vm_heap_alloc(struct vm_heap *heap, const struct vm_cell_type *type, size_t size);
 void vm_heap_collect(struct vm_heap *heap);
 void vm_heap_mark(struct vm_heap *heap, struct vm_cell *cell);

@@ -28,6 +28,7 @@
  */
 
 #include "view/front.h"
+#include "view/frames.h"
 #include "view/style.h"
 #include "base/base.h"
 #include "base/thread.h"
@@ -111,9 +112,17 @@ struct front_item {
 /*
  * One notification for the program's callbacks, which browser_view_process
  * calls on the program's thread: its kind and arguments, with the strings
- * and the image it owns (until it is told).
+ * and the image it owns (until it is told).  held says the notification
+ * tells of a state the script thread has not published yet (a page
+ * committed, a load, a title): it waits, with every notification after
+ * it, until the next publish, so that the program's getters read that
+ * state when its callback runs.  browser_view_process marks a note it put
+ * back into the queue FRONT_NOTE_MOVED in its own copy.
  */
+#define FRONT_NOTE_MOVED	2
+
 struct front_note {
+	int held;
 	int kind;
 	int state;
 	int error;
@@ -143,9 +152,11 @@ struct front_note {
  * last committed frame), serial (the number of the last state), the
  * number of the last committed frame, the agent's running side and the
  * style thread the agent lends its heaps to (style, made and ended by the
- * script thread).  The program's thread's alone: shown (the state its
- * getters read, replaced in browser_view_process) and the copy of the
- * options and callbacks.
+ * script thread) and the threads of the page's iframes (frames, made
+ * before the view and ended after it, by the script thread; the agent is
+ * held through them for every task).  The program's thread's alone: shown
+ * (the state its getters read, replaced in browser_view_process) and the
+ * copy of the options and callbacks.
  */
 struct view_front {
 	struct browser_view *view;
@@ -174,6 +185,7 @@ struct view_front {
 	uint64_t serial;
 	uint64_t commit_serial;
 	struct view_style *style;
+	struct view_frames *frames;
 };
 
 /*
@@ -860,10 +872,12 @@ view_front_process(
 	char line[96];
 	size_t lost;
 	size_t index;
+	size_t told;
+	int pushed;
 	int copied;
 	int error;
 
-	/* The notifications, the lines dropped, and a copy of the newest state. */
+	/* The notifications up to the first one whose state is not published yet (it and those after it wait), the lines dropped, and a copy of the newest state. */
 	front = view_front_of(view);
 	memset(&next, 0, sizeof(next));
 	copied = 0;
@@ -872,6 +886,20 @@ view_front_process(
 
 	notes = front->notes;
 	wb_vector_init(&front->notes, sizeof(struct front_note));
+	told = notes.count;
+	for (index = 0; index < notes.count; index++) {
+		note = wb_vector_at(&notes, index);
+		if (note->held && told == notes.count)
+			told = index;
+
+		/* A waiting one goes back to the queue, in order, and is marked moved here (one that cannot is told now). */
+		if (index >= told) {
+			pushed = wb_vector_push(&front->notes, note);
+			note->held = 0;
+			if (pushed == 0)
+				note->held = FRONT_NOTE_MOVED;
+		}
+	}
 	lost = front->console_dropped;
 	front->console_dropped = 0;
 	front->redraw_noted = 0;
@@ -891,9 +919,11 @@ view_front_process(
 		front_snapshot_free(&next);
 	}
 
-	/* Each notification, told and let go. */
+	/* Each notification that may be told, told and let go (the waiting ones are the queue's again). */
 	for (index = 0; index < notes.count; index++) {
 		note = wb_vector_at(&notes, index);
+		if (note->held == FRONT_NOTE_MOVED)
+			continue;
 		front_tell(front, note);
 		front_note_free(note);
 	}
@@ -1020,6 +1050,15 @@ view_front_lend_counts(
 	view_style_counts(front->style, lends, waited_ns);
 }
 
+/* Reports the threads of a front's iframes (NULL before the script thread made them and after it ended them). */
+struct view_frames *
+view_front_frames(
+	struct view_front *front)
+{
+	/* The script thread's. */
+	return front->frames;
+}
+
 /* Reports the agent a front's pages run their tasks in. */
 struct vm_agent *
 view_front_agent(
@@ -1048,10 +1087,12 @@ front_run(
 	front = argument;
 	front_current = front;
 
-	/* The style thread, which the agent lends the pages' heaps to for their style, layout and display lists. */
+	/* The style thread, which the agent lends the pages' heaps to for their style, layout and display lists, and the iframes' threads. */
 	error = view_style_start(front_enter, front, &front->style);
 	if (error == 0)
 		vm_agent_set_lender(&front->agent, view_style_lend, front->style);
+	if (error == 0)
+		error = view_frames_create(&front->agent, front_ring, front_enter, front, &front->frames);
 
 	/* The view, of this thread. */
 	options = front->options;
@@ -1064,12 +1105,16 @@ front_run(
 	options.frame_wake = NULL;
 	options.frame_wake_context = NULL;
 	view = NULL;
-	if (error == 0)
-		error = browser_view_create(&options, &view);
 	if (error == 0) {
-		view_attach_front(view, front);
-		front->view = view;
-		front_publish(front);
+		view_frames_enter(front->frames);
+		error = browser_view_create(&options, &view);
+		if (error == 0) {
+			view_attach_front(view, front);
+			front->view = view;
+			view_frames_set_view(front->frames, view);
+			front_publish(front);
+		}
+		view_frames_leave(front->frames);
 	}
 
 	/* The program's thread hears how it went. */
@@ -1081,17 +1126,23 @@ front_run(
 
 	wb_mutex_unlock(&front->lock);
 
-	/* A view that could not be made ends here, with its style thread. */
+	/* A view that could not be made ends here, with its frames and its style thread. */
 	if (error != 0) {
+		view_frames_destroy(front->frames);
+		front->frames = NULL;
 		vm_agent_set_lender(&front->agent, NULL, NULL);
 		view_style_stop(front->style);
 		front->style = NULL;
 		return;
 	}
 
-	/* The view runs until its end, then goes, then the style thread that served its pages. */
+	/* The view runs until its end, then goes (its iframes' threads with its pages), then the style thread that served its pages. */
 	front_loop(front);
+	view_frames_enter(front->frames);
 	browser_view_destroy(view);
+	view_frames_leave(front->frames);
+	view_frames_destroy(front->frames);
+	front->frames = NULL;
 	vm_agent_set_lender(&front->agent, NULL, NULL);
 	view_style_stop(front->style);
 	front->style = NULL;
@@ -1108,8 +1159,9 @@ front_enter(
 
 /*
  * The script thread's loop: waits for an entry, the loader's news or the
- * view's next timer, runs the entries that came (each a task), the view's
- * round (a task), and publishes, until the view's end.
+ * view's next timer, takes the agent from the iframes' threads, runs the
+ * entries that came (each a task), the view's round (a task), publishes,
+ * and gives the agent back, until the view's end.
  */
 static void
 front_loop(
@@ -1122,10 +1174,14 @@ front_loop(
 	int timeout;
 	int ending;
 
+	/* The first wait's bound (the page's timers are the agent's). */
+	view_frames_enter(front->frames);
+	timeout = browser_view_timeout(front->view);
+	view_frames_leave(front->frames);
+
 	/* Round after round. */
 	for (;;) {
 		/* The wait: for an entry, news or the end, at most until the next timer. */
-		timeout = browser_view_timeout(front->view);
 		wb_mutex_lock(&front->lock);
 
 		if (front->items.count == 0 && !front->rung && !front->ending && !front->opportunity) {
@@ -1145,6 +1201,7 @@ front_loop(
 		wb_mutex_unlock(&front->lock);
 
 		/* Each entry in order, as a task, unless the view is ending. */
+		view_frames_enter(front->frames);
 		for (index = 0; index < taken.count; index++) {
 			item = wb_vector_at(&taken, index);
 			ending = __atomic_load_n(&front->ending, __ATOMIC_ACQUIRE);
@@ -1159,8 +1216,10 @@ front_loop(
 
 		/* The end. */
 		ending = __atomic_load_n(&front->ending, __ATOMIC_ACQUIRE);
-		if (ending)
+		if (ending) {
+			view_frames_leave(front->frames);
 			break;
+		}
 
 		/* A present came: the page's animation frames are due in the round. */
 		if (opportunity)
@@ -1171,8 +1230,10 @@ front_loop(
 		browser_view_process(front->view);
 		vm_agent_task_end(&front->agent);
 
-		/* What the program sees. */
+		/* What the program sees, the next wait's bound, and the agent for the iframes' threads. */
 		front_publish(front);
+		timeout = browser_view_timeout(front->view);
+		view_frames_leave(front->frames);
 	}
 }
 
@@ -1311,6 +1372,8 @@ front_publish(
 {
 	struct view_snapshot next;
 	struct view_snapshot old;
+	struct front_note *note;
+	size_t index;
 	int changed;
 	int painted;
 	int wake;
@@ -1342,6 +1405,12 @@ front_publish(
 		next.serial = front->serial;
 		old = front->published;
 		front->published = next;
+	}
+
+	/* The notifications of the state now published may be told. */
+	for (index = 0; index < front->notes.count; index++) {
+		note = wb_vector_at(&front->notes, index);
+		note->held = 0;
 	}
 	wake = 0;
 	if (!front->wake_owed && (changed || front->notes.count != 0 || front->console_dropped != 0)) {
@@ -1501,10 +1570,11 @@ front_navigation(
 	task = vm_agent_task_current(&front->agent);
 	vm_agent_request_termination(&front->agent, task);
 
-	/* The requests the script thread waits for (the loader lives as long as the view). */
+	/* The requests the script thread and the iframes' threads wait for (the loader lives as long as the view). */
 	loader = view_loader(front->view);
 	if (loader != NULL)
 		net_loader_client_abort_waited(net_loader_own_client(loader));
+	view_frames_abort_waited(front->frames);
 }
 
 /*
@@ -1518,6 +1588,13 @@ front_note(
 	struct front_note *note)
 {
 	int error;
+
+	/* A page committed, a load and a title wait for the state they tell of to be published. */
+	note->held = 0;
+	if (note->kind == FRONT_NOTE_COMMITTED ||
+	    note->kind == FRONT_NOTE_LOAD ||
+	    note->kind == FRONT_NOTE_TITLE)
+		note->held = 1;
 
 	/* The queue. */
 	error = 0;

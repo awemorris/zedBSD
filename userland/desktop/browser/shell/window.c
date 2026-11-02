@@ -8,10 +8,10 @@
 /*
  * The window of browser: a window of libkeiland's application (WS131
  * p025, kl_app; its own xdg-shell toplevel and seat before), whose surface
- * the presenter draws on with its own Vulkan (KL_PRESENT_NONE).  The
+ * the drawing thread draws on with its own Vulkan (KL_PRESENT_NONE).  The
  * application waits for the compositor; the view's wake, called from the
- * library's network thread, posts an event to the application
- * (kl_app_post), which ends the wait.
+ * view's threads, and the drawing thread's post an event to the
+ * application (kl_app_post), which ends the wait.
  *
  * The application queues the window's input; this file turns it into the
  * shell_event values the main loop reads: the pointer's moves (the last of
@@ -168,6 +168,12 @@ shell_window_dispatch(
 		/* The desktop's appearance changed: the main loop gives the view its scheme. */
 		if (event.kind == KL_APP_THEME)
 			window->themed = 1;
+
+		/* The diagnostic clock's tick, timed as it is taken. */
+		if (event.kind == KL_APP_POST &&
+		    event.code == SHELL_POST_TICK &&
+		    window->latency != NULL)
+			shell_latency_take(window->latency);
 	}
 
 	/* Succeeded: the events so far have run. */
@@ -328,6 +334,10 @@ window_event(
 		/* The URLs a later start of the program handed over, for the main loop (a full queue drops them). */
 		if (input->code == SHELL_POST_OPEN)
 			window_open(window, input);
+
+		/* The drawing thread's configure, acknowledged at once (it waits to present the first frame of its size). */
+		if (input->code == SHELL_POST_ACK && window->render != NULL)
+			shell_render_ack(window->render);
 		break;
 	case KL_WINDOW_ACTION:
 	case KL_WINDOW_CONTROL_DONE:

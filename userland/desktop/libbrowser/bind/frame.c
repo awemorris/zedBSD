@@ -21,6 +21,9 @@
 /* Bounds synchronous recursive retirement through nested child Documents. */
 #define FRAME_MAX_DEPTH 64U
 
+/* The calling thread's runner (bind_set_thread_runner): NULL on a page's own thread. */
+static _Thread_local void *frame_runner;
+
 static int frame_src_get(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 static int frame_src_set(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 static int frame_svg_document(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
@@ -433,6 +436,60 @@ bind_frames_release(
 	return;
 }
 
+/* Sets the calling thread's runner: the embedder's thread of an iframe sets its own, a page's own thread none. */
+void
+bind_set_thread_runner(
+	void *runner)
+{
+	/* This thread's. */
+	frame_runner = runner;
+}
+
+/* Reports the calling thread's runner (NULL: a page's own thread). */
+void *
+bind_thread_runner(void)
+{
+	/* This thread's. */
+	return frame_runner;
+}
+
+/*
+ * Reports the runner an element's browsing context runs on: the element's
+ * own thread, or else that of the window of the element's document (NULL
+ * for the page's own thread).
+ */
+void *
+bind_element_runner(
+	const struct dom_element *element)
+{
+	const struct bind_window *window;
+	unsigned depth;
+
+	/* Up through the frames until one has a thread. */
+	for (depth = 0; element != NULL && depth <= FRAME_MAX_DEPTH; depth++) {
+		if (element->frame_thread != NULL)
+			return element->frame_thread;
+		window = element->node.document->view;
+		if (window == NULL)
+			return NULL;
+		element = window->frame;
+	}
+
+	/* The page's own thread. */
+	return NULL;
+}
+
+/* Reports the runner a window's tasks run on (NULL for the page's own thread). */
+void *
+bind_window_runner(
+	const struct bind_window *window)
+{
+	/* A top-level or retired window runs on the page's thread. */
+	if (window->frame == NULL)
+		return NULL;
+	return bind_element_runner(window->frame);
+}
+
 /*
  * Reports the connected child window of an embedding element (an HTML iframe
  * or object), or NULL when the node holds none.
@@ -792,6 +849,10 @@ frame_context(
 		return 0;
 	}
 
+	/* An iframe the embedder gave no thread has no browsing context. */
+	if (element->frame_refused)
+		return 0;
+
 	/* Publishes only a complete initial context, propagating allocation failures. */
 	status = frame_create(realm, parent, element, window);
 	if (status != 0)
@@ -817,6 +878,15 @@ frame_create(
 	if (parent->context_depth >= FRAME_MAX_DEPTH) {
 		status = vm_throw_range_error(caller, "Maximum frame nesting depth exceeded.");
 		return status;
+	}
+
+	/* The context's thread first, where the embedder gives frames threads; one it refuses leaves the iframe without a context. */
+	if (parent->host.frame_attach != NULL && element->frame_thread == NULL) {
+		status = parent->host.frame_attach(parent->host.context, element);
+		if (status != 0) {
+			element->frame_refused = 1;
+			return 0;
+		}
 	}
 
 	/* Register the slot before allocating any part of the initial tree. */
@@ -998,6 +1068,12 @@ frame_remove_subtree(
 			element->child_attribute = NULL;
 			element->child_navigation = NULL;
 			element->frame_proxy = NULL;
+			element->frame_refused = 0;
+
+			/* Its thread ends first (the embedder's), then its context. */
+			owner = element->node.document->view;
+			if (element->frame_thread != NULL && owner != NULL && owner->host.frame_detach != NULL)
+				owner->host.frame_detach(owner->host.context, element);
 
 			/* Only published child contexts participate in synchronous retirement. */
 			if (element->child_context != NULL) {

@@ -597,16 +597,16 @@ $(BUILD)/bin/mediastorage: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine $(DYNAMIC_ELF_MACHINE) --role application \
  --needed libwayland-client.so --needed libkeiland.so --needed libc.so $@
 
-# The security key tool (ws161-p004): libpasskey's sources, OpenSSL's libcrypto (the package's staged headers and
-# library; the Guardrail's exception until the release, WS172 p005) and the C library.
+# The security key tool (ws161-p004): libpasskey's sources, libcrypto-compat and the C library.  libpasskey's
+# crypto-openssl.c is written for OpenSSL's libcrypto; libcrypto-compat's directory of OpenSSL's header names leads
+# its <openssl/...> includes to <compat/crypto/...>.
 DYNAMIC_FIDOCTL_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,fidoctl)
-DYNAMIC_FIDOCTL_SSL := $(ZEDBSD_EXT_openssl_STAGEDIR)/usr
+DYNAMIC_FIDOCTL_SSL := userland/base/libcrypto-compat/openssl-names
 
-$(DYNAMIC_FIDOCTL_OBJS): DYNAMIC_CPPFLAGS += -I$(DYNAMIC_FIDOCTL_SSL)/include
-$(DYNAMIC_FIDOCTL_OBJS): $(ZEDBSD_OPENSSL_STAGED)
+$(DYNAMIC_FIDOCTL_OBJS): DYNAMIC_CPPFLAGS += -I$(DYNAMIC_FIDOCTL_SSL)
 
 $(BUILD)/bin/fidoctl: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
-	$(DYNAMIC_FIDOCTL_OBJS) $(ZEDBSD_OPENSSL_LIBCRYPTO) \
+	$(DYNAMIC_FIDOCTL_OBJS) $(DYNAMIC_DIR)/libcrypto-compat.so \
 	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_LINK_CFLAGS) -nostdlib -pie -Wl,--no-relax \
@@ -614,26 +614,25 @@ $(BUILD)/bin/fidoctl: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
  $(DYNAMIC_SYSROOT)/usr/lib/crt1.o $(DYNAMIC_FIDOCTL_OBJS) \
- -L$(DYNAMIC_DIR) -L$(DYNAMIC_FIDOCTL_SSL)/lib -Wl,-rpath-link,$(DYNAMIC_DIR) \
- -l:libcrypto.so -l:libc.so -o $@
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
+ -l:libcrypto-compat.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine $(DYNAMIC_ELF_MACHINE) --role application \
- --needed libcrypto.so --needed libc.so $@
+ --needed libcrypto-compat.so --needed libc.so $@
 
-# passkey's security key style (ws172-p003): libpasskey's sources, OpenSSL's libcrypto (as fidoctl's) and the C
+# passkey's security key style (ws172-p003): libpasskey's sources, libcrypto-compat (as fidoctl's) and the C
 # library (crypt() for the password of a registration).
 DYNAMIC_PASSKEY_FIDO2_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,passkey-fido2)
 
 # The objects other programs share (login, su, sudo, passwd, passkey, account-admin, sshd) include no OpenSSL
-# header, so building them does not wait for OpenSSL or see its headers.
+# header, so they do not see the directory of OpenSSL's header names.
 DYNAMIC_PASSKEY_FIDO2_SHARED_OBJS := $(addprefix $(DYNAMIC_DIR)/obj/userland/base/,login/verify.o common/account.o \
 	passkey/record.o passkey/request.o)
 DYNAMIC_PASSKEY_FIDO2_SSL_OBJS := $(filter-out $(DYNAMIC_PASSKEY_FIDO2_SHARED_OBJS),$(DYNAMIC_PASSKEY_FIDO2_OBJS))
 
-$(DYNAMIC_PASSKEY_FIDO2_SSL_OBJS): DYNAMIC_CPPFLAGS += -I$(DYNAMIC_FIDOCTL_SSL)/include
-$(DYNAMIC_PASSKEY_FIDO2_SSL_OBJS): $(ZEDBSD_OPENSSL_STAGED)
+$(DYNAMIC_PASSKEY_FIDO2_SSL_OBJS): DYNAMIC_CPPFLAGS += -I$(DYNAMIC_FIDOCTL_SSL)
 
 $(BUILD)/bin/passkey-fido2: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
-	$(DYNAMIC_PASSKEY_FIDO2_OBJS) $(ZEDBSD_OPENSSL_LIBCRYPTO) \
+	$(DYNAMIC_PASSKEY_FIDO2_OBJS) $(DYNAMIC_DIR)/libcrypto-compat.so \
 	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_LINK_CFLAGS) -nostdlib -pie -Wl,--no-relax \
@@ -641,10 +640,10 @@ $(BUILD)/bin/passkey-fido2: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so \
  $(DYNAMIC_SYSROOT)/usr/lib/crt1.o $(DYNAMIC_PASSKEY_FIDO2_OBJS) \
- -L$(DYNAMIC_DIR) -L$(DYNAMIC_FIDOCTL_SSL)/lib -Wl,-rpath-link,$(DYNAMIC_DIR) \
- -l:libcrypto.so -l:libc.so -o $@
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
+ -l:libcrypto-compat.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine $(DYNAMIC_ELF_MACHINE) --role application \
- --needed libcrypto.so --needed libc.so $@
+ --needed libcrypto-compat.so --needed libc.so $@
 
 # zedBSD's own SSH programs (userland/base/ssh): their sources, libcrypto-compat and the C library (sshd's password
 # check takes crypt from it).  $(1) is the program.

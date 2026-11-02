@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>hung xhr</title>
+<style>
+body { margin: 0; background: #f4eadb; color: #3b2a14; font-family: sans-serif; font-size: 20px; }
+h1 { margin: 0; padding: 24px; background: #8a5a20; color: #ffffff; font-size: 28px; }
+p { margin: 16px 24px; }
+</style>
+</head>
+<body>
+<h1>A page whose script waits on a synchronous XMLHttpRequest</h1>
+<p>A second after the load, a script opens a synchronous request to 192.0.2.1 (TEST-NET-1, which never
+answers) and waits for it. The window must stay alive meanwhile.</p>
+<script>
+setTimeout(function () {
+	var request = new XMLHttpRequest();
+	console.log("xhr start");
+	try {
+		request.open("GET", "http://192.0.2.1/never", false);
+		request.send();
+	} catch (error) {
+		console.log("xhr error " + error.name);
+	}
+	console.log("xhr end");
+}, 1000);
+</script>
+</body>
+</html>
