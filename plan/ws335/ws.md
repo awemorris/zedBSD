@@ -108,3 +108,8 @@
 ## Q1 の判断（2026-11-02 18:41、p040 の merge）
 
 - check-skeleton の BASE を ddc678f690（p040 の終わり）に移す。p035 に回す header の comment: sslc-tls.h の file の comment と sslc-msg.h:35 の「group は x25519 と secp256r1 だけ」、design.md の D8 の本文。
+
+## Q1 の判断（2026-11-02、p034 の問い。P1 が 20:25 に記録）
+
+- Windows の Disallowed の印（D24）は、DER の全体でなく tbsCertificate の SHA-256 にする（案 A。DER が parse できない時は全体の SHA-256）。ECDSA の署名は (r, n − s) に書き換えても有効なので、DER の全体の印では、盗まれた中間を Disallowed に入れても、署名を書き換えた写しが通ってしまうため。凍結の header cryc-chain.h の 2 つの comment（struct cryc_store と cryc_store_add_distrusted）の変更を承認する。design.md の D24 の文の直しは p035 で。
+- 各 fuzz の target を 1 時間、11 個を並べて流す事は、ユーザーの承認を Q1 が伝えた（2026-11-02）。

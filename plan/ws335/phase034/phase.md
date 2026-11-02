@@ -44,7 +44,7 @@ Parent: [WS335](../ws.md)。担当: Opus（敵対的な review。実装の担当
 | 8 | TLS 1.2 だけの client が ServerHello の前の CCS を捨てていた（RFC 5246 7.1） | 低 | 直した: 1.3 を申し出た時だけ捨てる（sslc-hs.c） | test-hs13 に 1 件（修正前 FAIL） |
 | 9 | client の Finished の stack の写し（hs13・hs12）、再組み立ての buffer（free の前）を消していない | 低 | 直した | run-unit |
 | 10 | CCS が分割された handshake message の間に来る（RFC 8446 5.1）| — | 見送り: 既に unexpected_message で断っている（sslc-conn.c:855）。試験を足した（test-conn の manual_server で Certificate を 2 つの record に割り間に CCS） | test-conn |
-| 11 | Disallowed の印が DER 全体の SHA-256 なので、ECDSA の (r, n−s) で DER を変えると盗まれた中間が通る | 高 | **Q1 の判断待ち**（案 A: tbsCertificate の SHA-256。D24 と cryc-chain.h の comment の変更） | — |
+| 11 | Disallowed の印が DER 全体の SHA-256 なので、ECDSA の (r, n−s) で DER を変えると盗まれた中間が通る | 高 | 直した（Q1 が案 A を承認）: 印は tbsCertificate の SHA-256（parse できない DER は全体の SHA-256）、照合は候補の tbsCertificate と DER の両方の SHA-256（cryc-chain.c）。cryc-chain.h の 2 つの comment を承認の範囲で直した。D24 の文は p035 | test-chain の malleate()（署名を (r, n − s) に書き直した中間）: 修正前は印を通り抜けて FAIL（test-chain.c の REJECTED の確かめ）、後は REJECTED。印の無い時は正しい鎖として通る事も確かめる |
 | 12 | 信頼の起点の知らない critical の拡張を断らない | 中 | 見送り: Q1 の判断（p038）で p035 に予定済み | — |
 | 13 | cookie を HRR でない ServerHello に、知っている拡張を EE に置いた時の alert が unsupported_extension（RFC 8446 4.2 は illegal_parameter） | 低 | 見送り: p028 の Q1 の判断で p035 に予定済み（header の comment も） | — |
 | 14 | 保護された 1.3 の向きで短い別の型の record が bad_record_mac（長ければ unexpected_message） | 低 | 見送り（p035 へ）: sslc-record.h の約束と test-record が今の振る舞いを定める。直すなら header の comment の変更 | — |

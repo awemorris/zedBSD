@@ -942,6 +942,111 @@ test_store_basics(void)
 	pool_used = mark;
 }
 
+/*
+ * The order n of P-256 and of P-384, big-endian.
+ * Values referenced: FIPS 186-5 / SP 800-186 3.2.1.3 and 3.2.1.4.
+ */
+static const char p256_order_hex[] = "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551";
+static const char p384_order_hex[] = "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973";
+
+/*
+ * Makes from an ECDSA-signed certificate the same certificate with the
+ * other valid signature (r, n - s), re-encoded: the tbsCertificate and
+ * the algorithm are the same bytes, the DER differs.  curve is the
+ * issuer key's.  Returns the new certificate, parsed, or NULL.
+ */
+static struct built *
+malleate(
+	const struct built *original,
+	enum cryc_curve_id curve)
+{
+	unsigned char order[CRYC_ECP_MAX_BYTES];
+	unsigned char s_value[CRYC_ECP_MAX_BYTES];
+	unsigned char flipped[CRYC_ECP_MAX_BYTES];
+	unsigned char sig_bytes[160];
+	unsigned char bits_bytes[200];
+	unsigned char body_bytes[CERT_ROOM];
+	struct der_writer sig;
+	struct der_writer bits;
+	struct der_writer body;
+	struct der_writer outer;
+	struct cryc_der reader;
+	struct cryc_der inner;
+	struct cryc_der_element element;
+	struct cryc_der_element tbs;
+	struct cryc_der_element alg;
+	struct cryc_der_element bit_string;
+	struct cryc_der_element r_element;
+	struct cryc_der_element s_element;
+	const uint8_t *signature;
+	const uint8_t *r_bytes;
+	const uint8_t *s_bytes;
+	size_t signature_size;
+	size_t r_size;
+	size_t s_size;
+	size_t size;
+	size_t index;
+	unsigned unused;
+	unsigned borrow;
+	unsigned difference;
+	struct built *made;
+
+	/* The three parts of the outer SEQUENCE. */
+	size = curve == CRYC_CURVE_P384 ? 48U : 32U;
+	CHECK(hex_decode(curve == CRYC_CURVE_P384 ? p384_order_hex : p256_order_hex, order, size) == size);
+	cryc_der_init(&reader, original->der, original->size);
+	if (cryc_der_expect(&reader, CRYC_DER_SEQUENCE, &element) != 0 || cryc_der_enter(&element, &inner) != 0)
+		return NULL;
+	if (cryc_der_next(&inner, &tbs) != 0 || cryc_der_next(&inner, &alg) != 0 || cryc_der_next(&inner, &bit_string) != 0)
+		return NULL;
+	if (cryc_der_bit_string(&bit_string, &signature, &signature_size, &unused) != 0)
+		return NULL;
+
+	/* r and s of the Ecdsa-Sig-Value, and n - s (s < n, so no borrow out). */
+	cryc_der_init(&reader, signature, signature_size);
+	if (cryc_der_expect(&reader, CRYC_DER_SEQUENCE, &element) != 0 || cryc_der_enter(&element, &inner) != 0)
+		return NULL;
+	if (cryc_der_next(&inner, &r_element) != 0 || cryc_der_next(&inner, &s_element) != 0)
+		return NULL;
+	if (cryc_der_integer(&r_element, &r_bytes, &r_size) != 0 || cryc_der_integer(&s_element, &s_bytes, &s_size) != 0)
+		return NULL;
+	if (s_size > size)
+		return NULL;
+	memset(s_value, 0, sizeof(s_value));
+	memcpy(s_value + size - s_size, s_bytes, s_size);
+	borrow = 0;
+	for (index = size; index-- > 0U;) {
+		difference = (unsigned)order[index] - (unsigned)s_value[index] - borrow;
+		flipped[index] = (unsigned char)difference;
+		borrow = (difference >> 8) & 1U;
+	}
+
+	/* The new signature, BIT STRING, and certificate. */
+	for (index = 0; index + 1U < size && flipped[index] == 0U; index++)
+		;
+	der_init(&sig, sig_bytes, sizeof(sig_bytes));
+	der_unsigned(&sig, r_bytes, r_size);
+	der_unsigned(&sig, flipped + index, size - index);
+	der_init(&bits, bits_bytes, sizeof(bits_bytes));
+	bits_bytes[0] = 0;
+	bits.used = 1;
+	der_put(&bits, 0x30U, sig.data, sig.used);
+	der_init(&body, body_bytes, sizeof(body_bytes));
+	der_raw(&body, tbs.encoding, tbs.encoding_size);
+	der_raw(&body, alg.encoding, alg.encoding_size);
+	der_put(&body, 0x03U, bits.data, bits.used);
+	CHECK(pool_used < CERT_POOL);
+	made = &pool[pool_used++];
+	der_init(&outer, made->der, sizeof(made->der));
+	der_wrap(&outer, 0x30U, &body);
+	if (sig.error || bits.error || body.error || outer.error)
+		return NULL;
+	made->size = outer.used;
+	if (cryc_x509_parse(&made->cert, made->der, made->size) != 0)
+		return NULL;
+	return made;
+}
+
 /* The distrusted marks: kept by SHA-256 only, no duplicates, errors, not in the entries. */
 static void
 test_store_distrusted(void)
@@ -965,11 +1070,11 @@ test_store_distrusted(void)
 	CHECK(cryc_store_add_distrusted(&store, first->der, 0) == EINVAL);
 	CHECK(store.distrusted_count == 0U);
 
-	/* A certificate is marked by its digest; the entries are not touched. */
+	/* A certificate that parses is marked by the digest of its tbsCertificate; the entries are not touched. */
 	CHECK(cryc_store_add_distrusted(&store, first->der, first->size) == 0);
 	CHECK(store.distrusted_count == 1U);
 	CHECK(store.count == 0U);
-	error = cryc_hash_digest(CRYC_HASH_SHA256, first->der, first->size, digest);
+	error = cryc_hash_digest(CRYC_HASH_SHA256, first->cert.tbs, first->cert.tbs_size, digest);
 	CHECK(error == 0);
 	CHECK_BYTES(store.distrusted[0], digest, CRYC_SHA256_SIZE);
 
@@ -3090,6 +3195,7 @@ test_verify_distrusted(void)
 	struct built *inter_b;
 	struct built *root_again;
 	struct built *expired_leaf;
+	struct built *malleated;
 	struct spec spec;
 	unsigned char garbage[8];
 	unsigned index;
@@ -3115,7 +3221,26 @@ test_verify_distrusted(void)
 	CHECK(cryc_store_add_distrusted(&chain.store, chain.inter->der, chain.inter->size) == 0);
 	run(&chain.store, chain.list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_REJECTED, 1);
+
+	/* The same intermediate with its other valid ECDSA signature (r, n - s): another DER, the same tbsCertificate, still rejected. */
+	malleated = malleate(chain.inter, chain.root->cert.key.curve);
+	CHECK(malleated != NULL);
+	if (malleated != NULL) {
+		CHECK(malleated->size != chain.inter->size || memcmp(malleated->der, chain.inter->der, chain.inter->size) != 0);
+		list[0] = chain.leaf;
+		list[1] = malleated;
+		run(&chain.store, list, 2, &params, &result);
+		EXPECT(result, CRYC_VERIFY_REJECTED, 1);
+	}
 	cryc_store_free(&chain.store);
+
+	/* Without the mark the re-encoded intermediate is a valid link (the signature verifies). */
+	if (malleated != NULL) {
+		store_with(&chain.store, &chain.root, 1);
+		run(&chain.store, list, 2, &params, &result);
+		EXPECT(result, CRYC_VERIFY_OK, 0);
+		cryc_store_free(&chain.store);
+	}
 
 	/* A mark on the anchor in the store: depth 2. */
 	store_with(&chain.store, &chain.root, 1);
