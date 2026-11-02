@@ -1,5 +1,6 @@
 # The fixtures of libwebp-compat: one per line, NAME TOOL SOURCE [ARGS...].  make-fixtures.sh reads it.
-# TOOL cwebp: cwebp ARGS SOURCE.pam; enc: fixture-encoder SOURCE.pam with key=value ARGS (libwebp's own API);
+# TOOL cwebp: cwebp ARGS SOURCE.pam; enc: fixture-encoder SOURCE.pam with key=value ARGS (libwebp's own API; the
+# lines with partitions also set method=1, as libwebp's encoder writes one partition at method 3 and above);
 # img2webp: img2webp ARGS with SOURCE a comma-separated list of sources (an animation); craft: craft.py ARGS on
 # the fixture SOURCE.  Sources are gen-sources.py's KIND-WxH names.  Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 lossy-gradient-1x1 cwebp gradient-1x1 -q 75
@@ -105,17 +106,17 @@ lossy-preset-photo-text-100x75 cwebp text-100x75 -preset photo
 lossy-preset-drawing-text-100x75 cwebp text-100x75 -preset drawing
 lossy-preset-icon-text-100x75 cwebp text-100x75 -preset icon
 lossy-preset-text-text-100x75 cwebp text-100x75 -preset text
-lossy-part1-photo-31x33 enc photo-31x33 partitions=1 q=60
-lossy-part1-photo-256x256 enc photo-256x256 partitions=1 q=60
-lossy-part1-photo-333x211 enc photo-333x211 partitions=1 q=60
-lossy-part2-photo-31x33 enc photo-31x33 partitions=2 q=60
-lossy-part2-photo-256x256 enc photo-256x256 partitions=2 q=60
-lossy-part2-photo-333x211 enc photo-333x211 partitions=2 q=60
-lossy-part3-photo-31x33 enc photo-31x33 partitions=3 q=60
-lossy-part3-photo-256x256 enc photo-256x256 partitions=3 q=60
-lossy-part3-photo-333x211 enc photo-333x211 partitions=3 q=60
-lossy-part3-noise-100x75 enc noise-100x75 partitions=3 q=90
-lossy-part3-filter0-photo-64x48 enc photo-64x48 partitions=3 filter_type=0 filter_strength=60 segments=2
+lossy-part1-photo-31x33 enc photo-31x33 partitions=1 method=1 q=60
+lossy-part1-photo-256x256 enc photo-256x256 partitions=1 method=1 q=60
+lossy-part1-photo-333x211 enc photo-333x211 partitions=1 method=1 q=60
+lossy-part2-photo-31x33 enc photo-31x33 partitions=2 method=1 q=60
+lossy-part2-photo-256x256 enc photo-256x256 partitions=2 method=1 q=60
+lossy-part2-photo-333x211 enc photo-333x211 partitions=2 method=1 q=60
+lossy-part3-photo-31x33 enc photo-31x33 partitions=3 method=1 q=60
+lossy-part3-photo-256x256 enc photo-256x256 partitions=3 method=1 q=60
+lossy-part3-photo-333x211 enc photo-333x211 partitions=3 method=1 q=60
+lossy-part3-noise-100x75 enc noise-100x75 partitions=3 method=1 q=90
+lossy-part3-filter0-photo-64x48 enc photo-64x48 partitions=3 method=1 filter_type=0 filter_strength=60 segments=2
 lossy-large-photo-1024x683 cwebp photo-1024x683 -q 80
 lossy-large-text-1024x683 cwebp text-1024x683 -q 50 -m 6
 alpha-alpha-gradient-1x1 cwebp alpha-gradient-1x1 -q 75

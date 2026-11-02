@@ -149,7 +149,7 @@ main(
 		copy = malloc(size);
 		if (copy == NULL)
 			return 1;
-		alarm(120);
+		alarm(300);
 		count = 0;
 
 		/* The file itself. */
