@@ -145,7 +145,9 @@ struct ssh_transport_ops {
  * version_peer are the identification lines without CR LF (kept for the
  * exchange hash of every re-exchange).  kexinit_local and kexinit_peer are
  * the KEXINIT payloads of the exchange in progress.  hybrid is the
- * client's half while it waits for the reply.  k and h are kept between
+ * client's half while it waits for the reply, and c_init the C_INIT it
+ * sent, kept for the exchange hash until the reply comes (wiped with the
+ * other values of the exchange).  k and h are kept between
  * computing them and the NEWKEYS that uses them (secret).  held keeps
  * upper-layer payloads sent during an exchange (each as uint32 length and
  * the bytes).  kex_time is the tick time of the last key.
@@ -165,6 +167,7 @@ struct ssh_transport {
 	struct ssh_buf kexinit_local;
 	struct ssh_buf kexinit_peer;
 	struct ssh_hybrid_client hybrid;
+	uint8_t c_init[SSH_HYBRID_INIT_SIZE];
 	uint8_t k[SSH_KEX_HASH_SIZE];
 	uint8_t h[SSH_KEX_HASH_SIZE];
 	uint8_t session_id[SSH_KEX_HASH_SIZE];
