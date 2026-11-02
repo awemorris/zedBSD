@@ -14,7 +14,7 @@
 | P5 | [WS336](ws336/ws.md) p008 | 自前の ssh・sshd | ssh-transport（q1932、Opus） | p015 以降 |
 | P6 | — | libssl-compat・libcrypto-compat | 返却。p029（TLS 1.3 の handshake）cleared | p031・p032 の候補 |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
-| P8 | [BUG-402](bugs/BUG-402.md)〜[BUG-407](bugs/BUG-407.md) | ブラウザ（Windows 版と libbrowser） | Windows の UAT の 2 回目の 6 件（q1924）。BUG-401 は fixed | — |
+| P8 | [BUG-411](bugs/BUG-411.md) | ブラウザ | JS の engine の速さ（store.google.com の 17〜21 秒）と小さな残り（q1941）。UAT の 2 回目は BUG-402・403・404・406・407 が fixed、405 は WS344 | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 

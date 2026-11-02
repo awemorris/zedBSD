@@ -57,7 +57,7 @@
 | P8 | phase-runner-high | BUG-401 (q1921-i01) | `/home/awe/zedBSD-worktrees/p8-bug401` / `agent/p8-bug401` | 返却（2026-11-02 08:37、fixed） | 60998cbd5（2026-11-02 08:37 に main へ merge） |
 | P1 | phase-runner-high | ws324 p007 (q1922-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | 返却（2026-11-02 11:17、cleared。今日の WS324 の作業は終わり、encode は次に再開） | 3f03eb54a（2026-11-02 11:17 に main へ merge） |
 | P3 | phase-runner-high | ws321 p001〜p003 (q1923-i01) | `/home/awe/zedBSD-worktrees/p3-ws321` / `agent/p3-ws321` | 返却（2026-11-02 10:17、cleared） | fa5992dd0（2026-11-02 10:17 に main へ merge） |
-| P8 | phase-runner-high | BUG-402〜407 (q1924-i01) | `/home/awe/zedBSD-worktrees/p8-uat2` / `agent/p8-uat2` | in-progress（2026-11-02 08:37 起動） | 60998cbd5 |
+| P8 | phase-runner-high | BUG-402〜407 (q1924-i01) | `/home/awe/zedBSD-worktrees/p8-uat2` / `agent/p8-uat2` | 返却（2026-11-02 11:38、5 件 fixed） | 9b4b9f627（2026-11-02 11:38 に main へ merge） |
 | Sonnet | phase-runner-low | ws335 p039 (q1925-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p039` / `agent/s-ws335-p039` | 返却（2026-11-02 10:21、cleared） | 6cb4f008b |
 | P4 | phase-runner-high | ws319 H.265 decode (q1926-i01) | `/home/awe/zedBSD-worktrees/p4-ws319` / `agent/p4-ws319` | in-progress（2026-11-02 10:07 起動、5330） | — |
 | Sonnet | phase-runner-low | ws335 p022 (q1927-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p022` / `agent/s-ws335-p022` | in-progress（2026-11-02 10:10 起動） | — |
@@ -74,3 +74,4 @@
 | P6 | phase-runner-high | ws336 p016 (q1938-i01) | `/home/awe/zedBSD-worktrees/p6-ws336` / `agent/p6-ws336` | in-progress（2026-11-02 11:26 起動） | — |
 | P2 | phase-runner-high | ws344 p001 (q1939-i01) | `/home/awe/zedBSD-worktrees/p2-ws344` / `agent/p2-ws344` | in-progress（2026-11-02 11:31 起動） | — |
 | P5 | phase-runner-high | ws336 p015 (q1940-i01) | `/home/awe/zedBSD-worktrees/p5-ws336` / `agent/p5-ws336` | in-progress（2026-11-02 11:37 起動） | 06852dcc9 |
+| P8 | phase-runner-high | BUG-411 ほか (q1941-i01) | `/home/awe/zedBSD-worktrees/p8-uat3` / `agent/p8-uat3` | in-progress（2026-11-02 11:38 起動） | — |
