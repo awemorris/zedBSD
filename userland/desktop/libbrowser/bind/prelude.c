@@ -1364,7 +1364,7 @@ prelude_send(
 	if (status == 0)
 		status = prelude_utf8_argument(args, count, 3, &body, &has_body);
 	pending = NULL;
-	if (status == 0 && (!has_href || window->host.request == NULL))
+	if (status == 0 && (!has_href || window->host.request == NULL || window->detached))
 		status = EINVAL;
 	if (status == 0) {
 		pending = calloc(1, sizeof(*pending));
@@ -1526,6 +1526,22 @@ bind_follow_hyperlink(
 
 	/* Succeeded: the link is followed. */
 	return 0;
+}
+
+/* Cancels the window's pending script requests with its host and forgets them (their callbacks are not called). */
+void
+bind_requests_cancel(
+	struct bind_window *window)
+{
+	struct bind_request_pending *pending;
+
+	/* Each host request, then the records. */
+	for (pending = window->requests; pending != NULL; pending = pending->next) {
+		if (pending->handle != NULL && window->host.request_cancel != NULL)
+			window->host.request_cancel(window->host.context, pending->handle);
+		pending->handle = NULL;
+	}
+	bind_requests_release(window);
 }
 
 /* Forgets the window's pending script requests (the page cancelled their host requests). */

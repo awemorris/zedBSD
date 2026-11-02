@@ -191,6 +191,19 @@ vm_heap_set_stack_base(
 }
 
 /*
+ * Reports the stack base the heap scans to now (vm_heap_set_stack_base),
+ * so that a thread that runs the heap's tasks for a while can put back the
+ * one it replaced.
+ */
+const void *
+vm_heap_stack_base(
+	const struct vm_heap *heap)
+{
+	/* The base set last. */
+	return heap->stack_base;
+}
+
+/*
  * Allocates a cell of size bytes of the given type, cleared to zero.
  *
  * May collect first.  Returns NULL when memory runs out or the live bytes

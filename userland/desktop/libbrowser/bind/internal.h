@@ -665,6 +665,7 @@ int bind_illegal_constructor(struct vm_realm *realm, vm_value this_value, const 
 int bind_string(struct vm_realm *realm, const char *ascii, vm_value *value);
 int bind_install_prelude(struct bind_window *window);
 void bind_requests_release(struct bind_window *window);
+void bind_requests_cancel(struct bind_window *window);
 int bind_follow_hyperlink(struct bind_window *window, struct dom_element *element);
 int bind_animation_sync(struct bind_window *window, int op, struct dom_element *element, const struct vm_string *name, double delay, double duration, double iterations);
 int bind_units(struct vm_realm *realm, const uint16_t *units, size_t length, vm_value *value);

@@ -20,6 +20,9 @@
 #include <errno.h>
 #include <stdio.h>
 
+/* The loader's client of the calling thread when it is not the loader's own (page_set_thread_client): NULL on the thread that made the loader. */
+static _Thread_local struct net_loader_client *network_thread_client;
+
 /*
  * Fetches a resource a page needs at once (a parser-blocking script the
  * scan did not find, a synchronous XMLHttpRequest, a frame's script): an
@@ -109,9 +112,9 @@ page_fetch_response_now(
 		return error;
 	}
 
-	/* The request of the page's thread's client, waited for. */
+	/* The request of the calling thread's client, waited for. */
 	net_response_init(response);
-	client = net_loader_own_client(page->loader);
+	client = page_client(page);
 	error = net_loader_client_start_waited(client, location, kind, NULL, &request);
 	if (error != 0)
 		return error;
@@ -128,6 +131,31 @@ page_fetch_response_now(
 
 	/* Succeeded: the response is the caller's. */
 	return 0;
+}
+
+/*
+ * Sets the client of the pages' loader the calling thread makes its
+ * requests through (NULL: the loader's own, of the thread that made it):
+ * a thread that runs the tasks of a page's frames sets its own, so that
+ * the callbacks of its requests run on it.
+ */
+void
+page_set_thread_client(
+	struct net_loader_client *client)
+{
+	/* This thread's. */
+	network_thread_client = client;
+}
+
+/* Reports the client of a page's loader the calling thread makes its requests through (the page has a loader). */
+struct net_loader_client *
+page_client(
+	const struct page *page)
+{
+	/* The thread's own, or the loader's. */
+	if (network_thread_client != NULL)
+		return network_thread_client;
+	return net_loader_own_client(page->loader);
 }
 
 /*
