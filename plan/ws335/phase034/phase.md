@@ -2,7 +2,7 @@
 
 # ws335-p034: 安全の review と hardening
 
-Status: 実装済み・試験 PASS（2026-11-02 21:35 P1 q1986-i01。cleared は Q1）。前: in-progress（2026-11-02 19:00 P1 q1986-i01）。前: planned（2026-11-01 p001 が作成。依存: p033）
+Status: 実装済み・試験 PASS（2026-11-02 21:35 P1 q1986-i01。cleared は Q1）。前: in-progress（2026-11-02 18:41 P1 q1986-i01）。前: planned（2026-11-01 p001 が作成。依存: p033）
 Parent: [WS335](../ws.md)。担当: Opus（敵対的な review。実装の担当とは別の起動）。
 
 ## 1. 読む物
@@ -22,7 +22,7 @@ Parent: [WS335](../ws.md)。担当: Opus（敵対的な review。実装の担当
 
 ## 4. 結果
 
-2026-11-02（host の `date`、19:00〜20:10）P1（Opus、q1986-i01）。worktree `/home/awe/zedBSD-worktrees/p1-ws335`（main 52417432e6 から）。review は 5 つの読むだけの subagent（libssl の conn・record・msg・api、handshake と AEAD、X.509 と path、OS・ERR・EVP、primitive）に分けて行い、指摘は全部この担当が code で確かめてから直すか見送るかを決めた。凍結の header は変えていない。
+2026-11-02（host の `date`、18:41〜21:35）P1（Opus、q1986-i01）。worktree `/home/awe/zedBSD-worktrees/p1-ws335`（main 52417432e6 から）。review は 5 つの読むだけの subagent（libssl の conn・record・msg・api、handshake と AEAD、X.509 と path、OS・ERR・EVP、primitive）に分けて行い、指摘は全部この担当が code で確かめてから直すか見送るかを決めた。凍結の header は変えていない。
 
 ### 4.1 道具（新）
 
