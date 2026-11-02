@@ -369,6 +369,8 @@ char *bind_take_navigation(struct bind_window *window, int *replace);
 int bind_navigation_pending(const struct bind_window *window);
 int bind_run_script_source(struct bind_window *window, const uint16_t *source, size_t length, const char *name, int known_inline);
 int bind_checkpoint(struct bind_window *window);
+void bind_window_terminated(struct bind_window *window);
+int bind_window_was_terminated(const struct bind_window *window);
 void bind_report_exception(struct bind_window *window, vm_value exception);
 void bind_report_exception_at(struct bind_window *window, vm_value exception, unsigned line, unsigned column);
 void bind_console(struct bind_window *window, int level, const char *text);

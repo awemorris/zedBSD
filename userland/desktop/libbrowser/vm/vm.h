@@ -18,6 +18,12 @@
  * must be reported by a tracer, or it is freed under its holder.
  *
  * One heap serves one tab; nothing is shared between heaps.
+ *
+ * One thread at a time runs a heap's scripts, in tasks: vm_heap_task_begin
+ * numbers the task, and any other thread may ask that numbered task to end
+ * (vm_heap_request_termination).  The engine looks at the request at every
+ * loop's head, at every entry to a function and now and then inside the
+ * long native functions, and leaves the task with VM_TERMINATED.
  */
 
 #ifndef KEILAND_BROWSER_VM_H
@@ -68,6 +74,14 @@
 
 /* The status a native function or an engine call reports when it threw (the value is the realm's exception). */
 #define VM_THROWN (-1)
+
+/*
+ * The status every engine call reports when another thread asked the task
+ * that runs to end (vm_heap_request_termination).  Unlike VM_THROWN it is
+ * not an exception: no catch and no finally of the script runs, and it goes
+ * up through every frame and native function to whoever began the task.
+ */
+#define VM_TERMINATED (-3)
 
 /* The object's flags: array identity, nonextensibility, and immutable BigInt TypedArray content. */
 #define VM_OBJECT_ARRAY 0x1U
@@ -582,6 +596,14 @@ int vm_heap_add_tracer(struct vm_heap *heap, vm_tracer tracer, void *context);
 void vm_heap_remove_tracer(struct vm_heap *heap, vm_tracer tracer, void *context);
 struct vm_cell *vm_heap_find_cell(struct vm_heap *heap, uintptr_t word);
 void vm_heap_stats(const struct vm_heap *heap, struct vm_heap_stats *stats);
+
+/* The heap's tasks and their termination from another thread (heap.c). */
+uint32_t vm_heap_task_begin(struct vm_heap *heap);
+void vm_heap_task_end(struct vm_heap *heap);
+uint32_t vm_heap_task_current(struct vm_heap *heap);
+void vm_heap_request_termination(struct vm_heap *heap, uint32_t task);
+int vm_heap_check_termination(struct vm_heap *heap);
+int vm_heap_count_step(struct vm_heap *heap);
 
 /* Strings (string.c). */
 struct vm_string *vm_string_from_latin1(struct vm_heap *heap, const unsigned char *bytes, size_t length);

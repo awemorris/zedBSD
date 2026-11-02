@@ -46,6 +46,9 @@
 
 /* The most steps one match may take, and the most entries its stack may hold, before it gives up. */
 #define REGEXP_STEPS_MAX	((uint64_t)400000000)
+
+/* How many steps the matcher takes between two calls of the input's poll (the mask of a power of two). */
+#define REGEXP_POLL_MASK	((uint64_t)0xFFFF)
 #define REGEXP_STACK_MAX	((size_t)1 << 25)
 
 /* The largest code point. */
@@ -3631,6 +3634,15 @@ regexp_attempt(
 		matcher->steps++;
 		if (matcher->steps > REGEXP_STEPS_MAX)
 			return E2BIG;
+
+		/* Now and then, the input's owner says whether the match goes on. */
+		if ((matcher->steps & REGEXP_POLL_MASK) == 0U && matcher->input->poll != NULL) {
+			error = matcher->input->poll(matcher->input->poll_context);
+			if (error != 0)
+				return error;
+		}
+
+		/* One step of the program. */
 		error = regexp_step(matcher, &outcome);
 		if (error != 0)
 			return error;

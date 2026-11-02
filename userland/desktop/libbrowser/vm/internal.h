@@ -14,6 +14,9 @@
 
 #include "vm/vm.h"
 
+/* How many steps of long native functions go between two looks at the request to end the task (a power of two, less one). */
+#define VM_STEPS_MASK		0xFFFU
+
 /* The size and alignment of a block of small cells. */
 #define VM_BLOCK_SIZE		(64U * 1024U)
 
@@ -136,6 +139,22 @@ struct vm_heap {
 	 * made from it.
 	 */
 	struct vm_shape *root_shape;
+
+	/*
+	 * The tasks (vm_heap_task_begin).  task is the number of the task the
+	 * heap's thread runs, 0 between tasks: only that thread writes it, any
+	 * thread reads it (__atomic).  task_last is the number the last task
+	 * got, that thread's alone.  terminate is the task another thread
+	 * asked to end, 0 for none: any thread writes it (__atomic), and the
+	 * heap's thread puts 0 back when a task begins and when it ends, so a
+	 * request never outlives the task it named.
+	 */
+	uint32_t task;
+	uint32_t task_last;
+	uint32_t terminate;
+
+	/* The steps of long native functions counted (vm_heap_count_step), the heap's thread's alone. */
+	uint32_t steps;
 };
 
 /* The states of a generator (or of an async function's run). */
@@ -234,6 +253,33 @@ struct vm_promise_job {
 	vm_value reject;
 	struct vm_generator *generator;
 };
+
+/*
+ * Reports VM_TERMINATED when another thread asked the task that runs to
+ * end, 0 otherwise.  The engine calls it where a script can run for long
+ * (a loop's head, a function's entry), so the common case is one relaxed
+ * load of a word nobody writes.
+ */
+static __inline int
+vm_termination_poll(
+	struct vm_heap *heap)
+{
+	uint32_t asked;
+	uint32_t task;
+
+	/* Nobody asked: the task goes on. */
+	asked = __atomic_load_n(&heap->terminate, __ATOMIC_RELAXED);
+	if (asked == 0U)
+		return 0;
+
+	/* A request for another task (one that ended already) does not end this one. */
+	task = __atomic_load_n(&heap->task, __ATOMIC_RELAXED);
+	if (asked != task)
+		return 0;
+
+	/* The task that runs is asked to end. */
+	return VM_TERMINATED;
+}
 
 /* The interpreter's runs of generators (interpreter.c). */
 int vm_interpret_start(struct vm_realm *realm, struct vm_function *function, vm_value this_value, const vm_value *args, unsigned count, struct vm_generator *generator, vm_value *result, int *suspended);

@@ -878,6 +878,10 @@ browser_view_process(
 
 	/* The timers due by now, in the page's own time. */
 	error = page_set_time(view->page, (double)(view_clock() - view->page_epoch));
+
+	/* A script whose task was asked to end is no error of the page (the console said so). */
+	if (error == VM_TERMINATED)
+		error = 0;
 	if (error != 0 && view->callbacks.script_error != NULL)
 		view->callbacks.script_error(view->callbacks.context, view, error);
 
@@ -886,6 +890,10 @@ browser_view_process(
 
 	/* The images that came fire their elements' events. */
 	error = page_images_checkpoint(view->page);
+
+	/* A script whose task was asked to end is no error of the page (the console said so). */
+	if (error == VM_TERMINATED)
+		error = 0;
 	if (error != 0 && view->callbacks.script_error != NULL)
 		view->callbacks.script_error(view->callbacks.context, view, error);
 	if (view->page == NULL)
@@ -2660,7 +2668,8 @@ view_commit_document(
 /*
  * Keeps the page left at a step of the history for Back and Forward, the
  * oldest kept one going when there are too many; a page that may not be
- * kept (its document came with no-store, or it plays media) goes at once.
+ * kept (its document came with no-store, it plays media, or a script of it
+ * was stopped) goes at once.
  */
 static void
 view_keep(
@@ -2670,9 +2679,11 @@ view_keep(
 {
 	struct view_kept *kept;
 	size_t slot;
+	int stopped;
 
 	/* A page that may not be kept goes. */
-	if (page->no_store || page->media.count != 0) {
+	stopped = bind_window_was_terminated(page->window);
+	if (page->no_store || page->media.count != 0 || stopped) {
 		page_destroy(page);
 		return;
 	}
