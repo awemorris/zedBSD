@@ -13,6 +13,8 @@
 #   h265   the same with the H.265 clips
 #   probe  vkvideo-probe --list, then vkvideo-probe --copy --expect on each HEVC stream (NAMES, or every one of
 #          HEVC/list.txt), one line a stream in OUT/probe.txt
+#   raw    each RAW_NAMES stream through vkvideo-probe --raw, read back and turned into I420 on the host, its MD5 in
+#          OUT/raw.txt (to compare with the HEVC_v1 zip's MD5 where ffmpeg's reference is in doubt)
 # then Debian again (a reboot), the kept zedbsd.cfg and kernel back on the NVMe and their cksums compared.  Each step
 # has a time limit.  Holds /tmp/i915-hw.lock for the whole run.  The 5330 has no remote power: a zedBSD that does not
 # answer is reported (exit 2) and left for a person.  Output: OUT/summary.txt (also printed), OUT/*.png, OUT/m/.
@@ -164,6 +166,22 @@ for part in $parts; do
 		run_part "$part"
 		compare "$part" "$part-1080p30" "$clips/mp4/$part-1080p30.ref"
 		compare "$part" "$part-1080p60" "$clips/mp4/$part-1080p60.ref"
+		;;
+	raw)
+		# Each RAW_NAMES stream's frames as raw NV12 (vkvideo-probe --raw), read back through SSH and turned into
+		# I420 by the host's ffmpeg, its MD5 printed (the HEVC_v1 zips carry the MD5 of the decoded I420 YUV).
+		: > "$out/raw.txt"
+		for n in $RAW_NAMES; do
+			T=600 zput "$hevc/$n.h265" "user@$ZB:$H/c/" || say "FAIL $n was not copied"
+			size=$(zb "LD_LIBRARY_PATH=$H/lib $H/bin/vkvideo-probe --copy --raw=$H/m/$n.raw $H/c/$n.h265 2>&1 | grep -E 'stream .*H.265' | head -1" |
+				sed -n 's/.*, \([0-9]*x[0-9]*\), .*/\1/p')
+			md5=$(T=900 zb "cat $H/m/$n.raw" | timeout 900 ffmpeg -hide_banner -loglevel error -f rawvideo -pix_fmt nv12 -s "$size" -i pipe:0 \
+				-f rawvideo -pix_fmt yuv420p - | md5sum | cut -c1-32)
+			zb "rm -f $H/m/$n.raw"
+			say "raw $n $size $md5"
+			echo "$n $size $md5" >> "$out/raw.txt"
+		done
+		continue
 		;;
 	probe)
 		names=${NAMES:-$(cut -f1 "$hevc/list.txt")}
