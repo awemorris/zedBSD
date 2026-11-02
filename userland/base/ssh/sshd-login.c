@@ -130,7 +130,10 @@ sshd_account_allowed(
 	int allowed;
 
 	/* Refuses a call without its arguments as a refusal, never as a grant. */
-	if (config == NULL || user == NULL || account == NULL || buffer == NULL)
+	if (config == NULL ||
+	    user == NULL ||
+	    account == NULL ||
+	    buffer == NULL)
 		return EACCES;
 
 	/* Learns whether sshd runs as root. */
@@ -361,7 +364,9 @@ sshd_password_ok(
 		return EACCES;
 
 	/* Refuses every password when password authentication is off (this depends on no account). */
-	if (config == NULL || user == NULL || !config->password) {
+	if (config == NULL ||
+	    user == NULL ||
+	    !config->password) {
 		length = strlen(password);
 		ssh_wipe(password, length);
 		return EACCES;
@@ -478,10 +483,15 @@ sshd_authorized_path(
 	int added;
 
 	/* Refuses a call without its arguments, and a home directory that is not absolute. */
-	if (pattern == NULL || account == NULL || out == NULL || capacity == 0)
+	if (pattern == NULL ||
+	    account == NULL ||
+	    out == NULL ||
+	    capacity == 0)
 		return EINVAL;
 	out[0] = '\0';
-	if (account->pw_dir == NULL || account->pw_dir[0] != '/' || account->pw_name == NULL)
+	if (account->pw_dir == NULL ||
+	    account->pw_dir[0] != '/' ||
+	    account->pw_name == NULL)
 		return EINVAL;
 	home_size = strlen(account->pw_dir);
 	name_size = strlen(account->pw_name);
@@ -533,6 +543,26 @@ sshd_authorized_path(
 		return EINVAL;
 
 	/* Succeeded: out holds the account's path. */
+	return 0;
+}
+
+/*
+ * Checks that tty names a pseudo-terminal: "/dev/pts/" and 1 to
+ * SSHD_PTS_DIGITS_MAX digits, nothing else.
+ */
+int
+sshd_tty_path_ok(
+	const char *tty)
+{
+	const char *number;
+	int shaped;
+
+	/* Reads the path as a pseudo-terminal's. */
+	shaped = login_tty_number(tty, &number);
+	if (shaped != 0)
+		return EINVAL;
+
+	/* Succeeded: the path is a pseudo-terminal's. */
 	return 0;
 }
 
@@ -808,6 +838,10 @@ login_keys_take_ids(
 	const struct passwd *account)
 {
 	uid_t self;
+	uid_t real_user;
+	uid_t effective_user;
+	gid_t real_group;
+	gid_t effective_group;
 	int changed;
 
 	/* Without root, the account must be the one sshd runs as. */
@@ -834,9 +868,13 @@ login_keys_take_ids(
 		return LOGIN_KEYS_IDS;
 
 	/* Checks that the ids took. */
-	if (getuid() != account->pw_uid || geteuid() != account->pw_uid)
+	real_user = getuid();
+	effective_user = geteuid();
+	if (real_user != account->pw_uid || effective_user != account->pw_uid)
 		return LOGIN_KEYS_IDS;
-	if (getgid() != account->pw_gid || getegid() != account->pw_gid)
+	real_group = getgid();
+	effective_group = getegid();
+	if (real_group != account->pw_gid || effective_group != account->pw_gid)
 		return LOGIN_KEYS_IDS;
 
 	/* Checks that an account other than root cannot take root back. */
@@ -870,10 +908,12 @@ login_keys_open(
 	int looked;
 	int saved;
 
-	/* With StrictModes, walks the path a directory at a time. */
+	/* With StrictModes, walks the path a directory at a time, and reports how the walk ended. */
 	if (config->strict_modes) {
 		opened = login_keys_open_strict(path, account->pw_dir, account->pw_uid, descriptor);
-		return opened;
+		if (opened != LOGIN_KEYS_READ)
+			return opened;
+		return LOGIN_KEYS_READ;
 	}
 
 	/* Without, opens the path in one step, still refusing a link at its end. */
@@ -933,7 +973,10 @@ login_keys_open_strict(
 	while (home_size > 1 && home[home_size - 1] == '/')
 		home_size--;
 	same = strncmp(path, home, home_size);
-	if (home_size > 1 && home_size < sizeof(start) && same == 0 && path[home_size] == '/') {
+	if (home_size > 1 &&
+	    home_size < sizeof(start) &&
+	    same == 0 &&
+	    path[home_size] == '/') {
 		memcpy(start, home, home_size);
 		start[home_size] = '\0';
 		rest = path + home_size + 1;
@@ -961,7 +1004,9 @@ login_keys_open_strict(
 		name_size = (size_t)(end - rest);
 
 		/* Passes over an empty name (a doubled '/') and "." before the last name. */
-		if (*end == '/' && (name_size == 0 || (name_size == 1 && rest[0] == '.'))) {
+		if (*end == '/' &&
+		    (name_size == 0 ||
+		     (name_size == 1 && rest[0] == '.'))) {
 			rest = end + 1;
 			continue;
 		}

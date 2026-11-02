@@ -176,6 +176,7 @@ sshd_monitor_run_program(
 	int served;
 	int exit_status;
 	int privileged;
+	uid_t self;
 
 	/* Starts with nothing to undo. */
 	exit_status = 1;
@@ -185,12 +186,17 @@ sshd_monitor_run_program(
 	ssh_buf_init(&start_body, SSH_MON_STATE_MAX, 1);
 
 	/* Refuses a call that could only run wrongly. */
-	if (context == NULL || host_key == NULL || program == NULL || client < 0 || !host_key->private)
+	if (context == NULL ||
+	    host_key == NULL ||
+	    program == NULL ||
+	    client < 0 ||
+	    !host_key->private)
 		goto done;
 
 	/* Refuses a context that does not say how sshd runs. */
+	self = geteuid();
 	privileged = 0;
-	if (geteuid() == 0)
+	if (self == 0)
 		privileged = 1;
 	if (privileged != (context->privileged != 0)) {
 		syslog(LOG_AUTH | LOG_ERR, "monitor: the context does not match the user sshd runs as");
@@ -895,6 +901,7 @@ monitor_login_record(
 	struct ssh_buf *reply)
 {
 	char tty[SSHD_TTY_MAX];
+	const char *reason;
 	pid_t pid;
 	unsigned index;
 	unsigned slot;
@@ -909,15 +916,22 @@ monitor_login_record(
 	if (status != 0)
 		return status;
 
-	/* Finds that the terminal has no open record and that there is room for one. */
-	result = 0;
+	/* Refuses a field that cannot be a terminal or a process, and a path that is not a pseudo-terminal's. */
+	reason = NULL;
 	if (!valid)
-		result = EACCES;
+		reason = "not a terminal path and a process id";
+	if (reason == NULL) {
+		status = sshd_tty_path_ok(tty);
+		if (status != 0)
+			reason = "not a pseudo-terminal";
+	}
+
+	/* Finds that the terminal has no open record and that there is room for one. */
 	slots = monitor->config->max_sessions;
 	if (slots > SSH_CHANNEL_MAX)
 		slots = SSH_CHANNEL_MAX;
 	slot = slots;
-	for (index = 0; result == 0 && index < slots; index++) {
+	for (index = 0; reason == NULL && index < slots; index++) {
 		if (!monitor->records[index].used) {
 			if (slot == slots)
 				slot = index;
@@ -925,25 +939,29 @@ monitor_login_record(
 		}
 		same = strcmp(monitor->records[index].tty, tty);
 		if (same == 0)
-			result = EACCES;
+			reason = "the terminal has a record";
 	}
-	if (result == 0 && slot == slots)
-		result = EACCES;
+	if (reason == NULL && slot == slots)
+		reason = "no room for another record";
 
 	/* Checks the terminal and the process against the user and the session. */
-	if (result == 0) {
+	if (reason == NULL) {
 		status = sshd_tty_check(tty, monitor->user_uid);
 		if (status != 0)
-			result = EACCES;
+			reason = "not the user's terminal";
 	}
-	if (result == 0) {
+	if (reason == NULL) {
 		status = monitor_pid_is_child(pid, monitor->session_pid, monitor->user_uid);
 		if (status != 0)
-			result = EACCES;
+			reason = "not a process of the session";
 	}
 
-	/* Writes the record and keeps it for its logout. */
-	if (result == 0) {
+	/* Writes the record and keeps it for its logout, or says why not. */
+	result = 0;
+	if (reason != NULL) {
+		syslog(LOG_AUTH | LOG_NOTICE, "monitor: login record of %.17s refused: %s", tty, reason);
+		result = EACCES;
+	} else {
 		status = sshd_login_record(monitor->user, tty, pid, 1);
 		if (status != 0) {
 			result = EIO;
@@ -1005,6 +1023,8 @@ monitor_logout_record(
 		monitor->records[index].used = 0;
 		break;
 	}
+	if (result == EACCES)
+		syslog(LOG_AUTH | LOG_NOTICE, "monitor: logout record of %.17s refused: no such record", tty);
 
 	/* Answers with the outcome. */
 	status = monitor_put_result(result, reply);
@@ -1050,7 +1070,9 @@ monitor_read_record(
 	nul = NULL;
 	if (path_size > 0)
 		nul = memchr(path, 0, path_size);
-	if (path_size == 0 || path_size >= SSHD_TTY_MAX || nul != NULL) {
+	if (path_size == 0 ||
+	    path_size >= SSHD_TTY_MAX ||
+	    nul != NULL) {
 		*valid = 0;
 	} else {
 		memcpy(tty, path, path_size);

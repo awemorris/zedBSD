@@ -25,6 +25,7 @@
 /* The host's pseudo-terminal calls (ptsname_r) and environ; the modules under test do not depend on this. */
 #define _GNU_SOURCE
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -114,6 +115,7 @@ static void build_query(struct wire *wire, const char *user, const struct wire *
 static void build_password(struct wire *wire, const char *user, const char *password, size_t size);
 static void build_record(struct wire *wire, const char *tty, size_t tty_size, uint32_t pid, int trailing);
 static int login_good(struct sshd_monitor *monitor);
+static void build_right(unsigned type);
 static long elapsed_ms(const struct timespec *start);
 static void test_config_text(void);
 static void test_account_policy(void);
@@ -132,7 +134,8 @@ static void test_timing(void);
 static void test_session_sign(void);
 static void test_records(void);
 static void test_run(void);
-static int run_scenario(const char *codes, const struct sshd_config *config, char *report, size_t capacity, int *grant_byte, long *took);
+static int run_scenario(const char *codes, const struct sshd_config *config, int bad_blob, char *report, size_t capacity, int *grant_byte, long *took);
+static int child_parent_holds_connection(void);
 static int child_read_frame(int descriptor, struct ssh_buf *input, enum ssh_mon_type *type, struct ssh_buf *body);
 static int child_check_config(const struct ssh_buf *body);
 static void child_report(const char *text);
@@ -577,6 +580,30 @@ build_record(
 	wire_u32(wire, pid);
 	if (trailing)
 		wire_u8(wire, 0);
+}
+
+/* Builds in request a body of type that is right in itself (for the session identifier session_h), so only the order is wrong. */
+static void
+build_right(
+	unsigned type)
+{
+	/* The body each request type takes. */
+	build_signed(&signed_data, session_h, sizeof(session_h), 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
+	if (type == SSH_MON_PUBKEY_LOGIN) {
+		build_login(&request, self_name, &user_blob, &signed_data, &user_key, 0);
+	} else if (type == SSH_MON_PUBKEY_QUERY) {
+		build_query(&request, self_name, &user_blob);
+	} else if (type == SSH_MON_PASSWORD_LOGIN) {
+		build_password(&request, self_name, "pw", 2);
+	} else if (type == SSH_MON_LOGIN_RECORD || type == SSH_MON_LOGOUT_RECORD) {
+		build_record(&request, "/dev/pts/1", 10, 100, 0);
+	} else if (type == SSH_MON_SIGN) {
+		wire_reset(&request);
+		wire_string(&request, other_h, sizeof(other_h));
+	} else {
+		wire_reset(&request);
+		wire_text(&request, TEST_STATE);
+	}
 }
 
 /* Signs the session identifier and logs in with the user key; returns the RESULT (or 0xffff on a monitor error). */
@@ -1156,6 +1183,11 @@ test_key_authorized(void)
 	CHECK_EQ(status, EACCES);
 	config.strict_modes = 1;
 
+	/* A path beside the home whose name starts with the home's is not walked from the home. */
+	(void)snprintf(config.authorized_keys_file, sizeof(config.authorized_keys_file), "%sX/.ssh/authorized_keys", home);
+	status = sshd_key_authorized(&config, &account, user_key.public_key);
+	CHECK_EQ(status, EACCES);
+
 	/* A ".." that climbs, a missing file, a path ending in a slash, none. */
 	strcpy(config.authorized_keys_file, ".ssh/../.ssh/authorized_keys");
 	status = sshd_key_authorized(&config, &account, user_key.public_key);
@@ -1281,19 +1313,7 @@ test_stages(void)
 	/* Before any signature: the requests built right, but out of order. */
 	for (index = 0; index < sizeof(refused_first) / sizeof(refused_first[0]); index++) {
 		fresh(&monitor, &base_config);
-		build_signed(&signed_data, session_h, sizeof(session_h), 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
-		if (refused_first[index] == SSH_MON_PUBKEY_LOGIN)
-			build_login(&request, self_name, &user_blob, &signed_data, &user_key, 0);
-		else if (refused_first[index] == SSH_MON_PUBKEY_QUERY)
-			build_query(&request, self_name, &user_blob);
-		else if (refused_first[index] == SSH_MON_PASSWORD_LOGIN)
-			build_password(&request, self_name, "pw", 2);
-		else if (refused_first[index] == SSH_MON_LOGIN_RECORD || refused_first[index] == SSH_MON_LOGOUT_RECORD)
-			build_record(&request, "/dev/pts/1", 10, 100, 0);
-		else {
-			wire_reset(&request);
-			wire_text(&request, TEST_STATE);
-		}
+		build_right(refused_first[index]);
 		status = call(&monitor, refused_first[index], &request, &type, &result, NULL, NULL);
 		CHECK_EQ(status, EPROTO);
 		CHECK_EQ(monitor.stage, SSHD_STAGE_PREAUTH);
@@ -1307,7 +1327,7 @@ test_stages(void)
 		status = login_good(&monitor);
 		CHECK_EQ(status, 0);
 		CHECK_EQ(monitor.stage, SSHD_STAGE_GRANTED);
-		build_query(&request, self_name, &user_blob);
+		build_right(refused_granted[index]);
 		status = call(&monitor, refused_granted[index], &request, &type, &result, NULL, NULL);
 		CHECK_EQ(status, EPROTO);
 		sshd_monitor_clear(&monitor);
@@ -1333,7 +1353,8 @@ test_stages(void)
 
 	/* A second AUTH_DONE, and every pre-authentication request, in the session stage. */
 	for (index = 0; index < sizeof(refused_session) / sizeof(refused_session[0]); index++) {
-		status = call(&monitor, refused_session[index], &body, &type, &result, NULL, NULL);
+		build_right(refused_session[index]);
+		status = call(&monitor, refused_session[index], &request, &type, &result, NULL, NULL);
 		CHECK_EQ(status, EPROTO);
 	}
 	sshd_monitor_clear(&monitor);
@@ -1431,17 +1452,20 @@ test_signed_data(void)
 {
 	struct sshd_monitor monitor;
 	struct wire wrong_blob;
+	struct wire long_blob;
 	uint8_t sid[SSH_SHA256_SIZE + 1];
 	unsigned type;
 	uint32_t result;
 	unsigned variant;
 	int status;
 
-	/* The other key's blob, for a blob that differs from the request's. */
+	/* The other key's blob, for a blob that differs from the request's, and the user's with a byte more. */
 	put_blob(&wrong_blob, &host_key);
+	put_blob(&long_blob, &user_key);
+	wire_u8(&long_blob, 0);
 
 	/* Each variant changes one field of the signed data the user key signs. */
-	for (variant = 0; variant < 16; variant++) {
+	for (variant = 0; variant < 17; variant++) {
 		fresh(&monitor, &base_config);
 		status = sign_h(&monitor, session_h, sizeof(session_h));
 		CHECK_EQ(status, 0);
@@ -1513,6 +1537,10 @@ test_signed_data(void)
 			/* The identifier of a later exchange instead of the first. */
 			build_signed(&signed_data, other_h, 32, 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
 			(void)sign_h(&monitor, other_h, sizeof(other_h));
+			break;
+		case 16:
+			/* The blob of the request with a byte more. */
+			build_signed(&signed_data, sid, 32, 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &long_blob, 0);
 			break;
 		default:
 			/* All right, but signed by another key than the request names. */
@@ -1919,6 +1947,16 @@ test_timing(void)
 	took = elapsed_ms(&start);
 	CHECK(took >= 400L);
 	CHECK(took < 900L);
+
+	/* A shorter delay, which is not a whole number of seconds, is kept to as well. */
+	monitor.fail_delay_ms = 300;
+	ssh_buf_reset(&reply);
+	(void)clock_gettime(CLOCK_MONOTONIC, &arrived);
+	status = sshd_monitor_handle(&monitor, SSH_MON_PUBKEY_QUERY, request.data, request.size, &arrived, &reply, &next);
+	CHECK_EQ(status, 0);
+	took = elapsed_ms(&arrived);
+	CHECK(took >= 300L);
+	CHECK(took < 900L);
 	ssh_buf_free(&reply);
 	sshd_monitor_clear(&monitor);
 }
@@ -1970,11 +2008,12 @@ test_session_sign(void)
 	sshd_monitor_clear(&monitor);
 }
 
-/* LOGIN_RECORD and LOGOUT_RECORD in the session stage, on a host where the parent check cannot be made. */
+/* LOGIN_RECORD and LOGOUT_RECORD in the session stage, on a host where the parent check cannot be made; the log line says which check refused. */
 static void
 test_records(void)
 {
 	struct sshd_monitor monitor;
+	struct sshd_config config;
 	struct wire body;
 	char name[64];
 	char long_tty[40];
@@ -1982,6 +2021,28 @@ test_records(void)
 	uint32_t result;
 	int master;
 	int status;
+
+	/* The path rule by itself: "/dev/pts/" and one to eight digits. */
+	status = sshd_tty_path_ok("/dev/pts/0");
+	CHECK_EQ(status, 0);
+	status = sshd_tty_path_ok("/dev/pts/12345678");
+	CHECK_EQ(status, 0);
+	status = sshd_tty_path_ok("/dev/pts/123456789");
+	CHECK_EQ(status, EINVAL);
+	status = sshd_tty_path_ok("/dev/pts/");
+	CHECK_EQ(status, EINVAL);
+	status = sshd_tty_path_ok("/dev/pts/1a");
+	CHECK_EQ(status, EINVAL);
+	status = sshd_tty_path_ok("/dev/pts/a1");
+	CHECK_EQ(status, EINVAL);
+	status = sshd_tty_path_ok("/dev/pts/1/");
+	CHECK_EQ(status, EINVAL);
+	status = sshd_tty_path_ok("/dev/ptsx1");
+	CHECK_EQ(status, EINVAL);
+	status = sshd_tty_path_ok("/dev/tty1");
+	CHECK_EQ(status, EINVAL);
+	status = sshd_tty_path_ok(NULL);
+	CHECK_EQ(status, EINVAL);
 
 	/* A session reached by a login and the hand-over. */
 	fresh(&monitor, &base_config);
@@ -1993,12 +2054,33 @@ test_records(void)
 	CHECK_EQ(status, 0);
 	monitor.session_pid = getpid();
 
-	/* A terminal that is not a pseudo-terminal: refused, the connection kept. */
+	/* Terminals that are not pseudo-terminals: refused, the connection kept. */
 	build_record(&request, "/dev/tty1", 9, (uint32_t)getpid(), 0);
 	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(type, SSH_MON_RESULT);
 	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a pseudo-terminal") != NULL);
+	build_record(&request, "/dev/pts/", 9, (uint32_t)getpid(), 0);
+	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
+	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a pseudo-terminal") != NULL);
+	build_record(&request, "/dev/pts/1a", 11, (uint32_t)getpid(), 0);
+	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
+	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a pseudo-terminal") != NULL);
+
+	/* The longest path that fits (eight digits, 17 bytes) is read and checked further; one byte more is not read. */
+	build_record(&request, "/dev/pts/12345678", 17, (uint32_t)getpid(), 0);
+	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
+	CHECK_EQ(status, 0);
+	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not the user's terminal") != NULL);
+	build_record(&request, "/dev/pts/123456789", 18, (uint32_t)getpid(), 0);
+	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
+	CHECK_EQ(status, 0);
+	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a terminal path and a process id") != NULL);
 
 	/* A tty too long, holding a NUL, empty; a pid of 0 and one past 2^31 - 1. */
 	memset(long_tty, '1', sizeof(long_tty));
@@ -2007,27 +2089,37 @@ test_records(void)
 	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a terminal path and a process id") != NULL);
 	build_record(&request, "/dev/pts/1\0", 11, (uint32_t)getpid(), 0);
 	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a terminal path and a process id") != NULL);
 	build_record(&request, "", 0, (uint32_t)getpid(), 0);
 	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a terminal path and a process id") != NULL);
 	build_record(&request, "/dev/pts/1", 10, 0, 0);
 	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a terminal path and a process id") != NULL);
 	build_record(&request, "/dev/pts/1", 10, 0x80000000UL, 0);
 	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a terminal path and a process id") != NULL);
+	build_record(&request, "/dev/pts/1", 10, 0x7fffffffUL, 0);
+	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
+	CHECK_EQ(status, 0);
+	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: not a terminal path and a process id") == NULL);
 
 	/*
 	 * The test's own terminal: refused for another user's uid (the owner
-	 * check), and refused for the user too, since this host has no
-	 * process list to check the parent with.
+	 * check), and for the user by the parent check, which this host has
+	 * no process list for.
 	 */
 	master = posix_openpt(O_RDWR | O_NOCTTY);
 	if (master >= 0 && grantpt(master) == 0 && unlockpt(master) == 0 && ptsname_r(master, name, sizeof(name)) == 0) {
@@ -2036,10 +2128,12 @@ test_records(void)
 		status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 		CHECK_EQ(status, 0);
 		CHECK_EQ(result, EACCES);
+		CHECK(strstr(log_last, "refused: not the user's terminal") != NULL);
 		monitor.user_uid = getuid();
 		status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 		CHECK_EQ(status, 0);
 		CHECK_EQ(result, EACCES);
+		CHECK(strstr(log_last, "refused: not a process of the session") != NULL);
 	}
 	if (master >= 0)
 		(void)close(master);
@@ -2053,11 +2147,12 @@ test_records(void)
 	status = call(&monitor, SSH_MON_LOGOUT_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, EPROTO);
 
-	/* A logout of a record this session did not write, and of one it did but with another pid. */
+	/* A logout of a record this session did not write, and of one it did but with another pid or terminal. */
 	build_record(&request, "/dev/pts/1", 10, 100, 0);
 	status = call(&monitor, SSH_MON_LOGOUT_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: no such record") != NULL);
 	strcpy(monitor.records[0].tty, "/dev/pts/1");
 	monitor.records[0].pid = 100;
 	monitor.records[0].used = 1;
@@ -2071,12 +2166,28 @@ test_records(void)
 	CHECK_EQ(result, EACCES);
 	CHECK_EQ(monitor.records[0].used, 1);
 
-	/* A second login record for a terminal that has one is refused before any other check. */
+	/* A second login record for a terminal that has one is refused before the terminal is looked at. */
 	build_record(&request, "/dev/pts/1", 10, (uint32_t)getpid(), 0);
 	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: the terminal has a record") != NULL);
 	monitor.records[0].used = 0;
+	sshd_monitor_clear(&monitor);
+
+	/* With MaxSessions 0 there is no room for any record. */
+	config = base_config;
+	config.max_sessions = 0;
+	fresh(&monitor, &config);
+	status = login_good(&monitor);
+	CHECK_EQ(status, 0);
+	status = call(&monitor, SSH_MON_AUTH_DONE, &body, &type, &result, NULL, NULL);
+	CHECK_EQ(status, 0);
+	build_record(&request, "/dev/pts/1", 10, (uint32_t)getpid(), 0);
+	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
+	CHECK_EQ(status, 0);
+	CHECK_EQ(result, EACCES);
+	CHECK(strstr(log_last, "refused: no room for another record") != NULL);
 	sshd_monitor_clear(&monitor);
 }
 
@@ -2097,7 +2208,7 @@ test_run(void)
 
 	/* A login and a session: both children report, the listener is told once. */
 	config = base_config;
-	status = run_scenario("LL", &config, report, sizeof(report), &grant, &took);
+	status = run_scenario("LL", &config, 0, report, sizeof(report), &grant, &took);
 	CHECK_EQ(status, 0);
 	CHECK(strstr(report, "P:config ok\n") != NULL);
 	CHECK(strstr(report, "P:sent auth-done\n") != NULL);
@@ -2109,7 +2220,7 @@ test_run(void)
 	CHECK(took >= (long)SSHD_FAIL_DELAY_MS + (long)SSHD_SIGN_INTERVAL_MS);
 
 	/* A pre-authentication process that asks for a login record: killed, no session, no grant. */
-	status = run_scenario("VL", &config, report, sizeof(report), &grant, &took);
+	status = run_scenario("VL", &config, 0, report, sizeof(report), &grant, &took);
 	CHECK_EQ(status, 1);
 	CHECK(strstr(report, "P:sent record\n") != NULL);
 	CHECK(strstr(report, "P:answered") == NULL);
@@ -2118,7 +2229,7 @@ test_run(void)
 
 	/* One that overstays a LoginGraceTime of one second. */
 	config.login_grace_time = 1;
-	status = run_scenario("GL", &config, report, sizeof(report), &grant, &took);
+	status = run_scenario("GL", &config, 0, report, sizeof(report), &grant, &took);
 	CHECK_EQ(status, 1);
 	CHECK(took >= 1000L);
 	CHECK(took < 8000L);
@@ -2127,12 +2238,27 @@ test_run(void)
 	config.login_grace_time = 120;
 
 	/* One that ends without a login. */
-	status = run_scenario("EL", &config, report, sizeof(report), &grant, &took);
+	status = run_scenario("EL", &config, 0, report, sizeof(report), &grant, &took);
 	CHECK_EQ(status, 1);
 	CHECK(strstr(report, "S:") == NULL);
 
+	/* A pre-authentication process that sends a frame of no type: killed at once, long before LoginGraceTime. */
+	config.login_grace_time = 3;
+	status = run_scenario("BL", &config, 0, report, sizeof(report), &grant, &took);
+	CHECK_EQ(status, 1);
+	CHECK(strstr(report, "P:sent bad frame\n") != NULL);
+	CHECK(strstr(report, "P:answered") == NULL);
+	CHECK(took < 2000L);
+	config.login_grace_time = 120;
+
+	/* A context whose host key blob is not the host key's: no child is started. */
+	status = run_scenario("LL", &config, 1, report, sizeof(report), &grant, &took);
+	CHECK_EQ(status, 1);
+	CHECK_EQ(report[0], 0);
+	CHECK_EQ(grant, 0);
+
 	/* A session that sends a second AUTH_DONE: killed after the grant. */
-	status = run_scenario("LR", &config, report, sizeof(report), &grant, &took);
+	status = run_scenario("LR", &config, 0, report, sizeof(report), &grant, &took);
 	CHECK_EQ(status, 1);
 	CHECK(strstr(report, "S:sent auth-done\n") != NULL);
 	CHECK(strstr(report, "S:answered") == NULL);
@@ -2150,6 +2276,7 @@ static int
 run_scenario(
 	const char *codes,
 	const struct sshd_config *config,
+	int bad_blob,
 	char *report,
 	size_t capacity,
 	int *grant_byte,
@@ -2184,6 +2311,8 @@ run_scenario(
 	memset(&context, 0, sizeof(context));
 	context.config = *config;
 	memcpy(context.host_key_blob, host_blob.data, SSH_KEY_BLOB_SIZE);
+	if (bad_blob)
+		context.host_key_blob[SSH_KEY_BLOB_SIZE - 1U] ^= 1;
 	strcpy(context.peer, TEST_PEER);
 	context.privileged = 0;
 	key = host_key;
@@ -2320,6 +2449,42 @@ child_other_descriptors(void)
 	return 0;
 }
 
+/*
+ * Reports whether the parent (the monitor) still holds the connection
+ * this process has at SSHD_FD_CLIENT: some /proc/<parent>/fd entry names
+ * the same socket (this is the host's Linux interface, used by the test
+ * only).  Returns 1 or 0.
+ */
+static int
+child_parent_holds_connection(void)
+{
+	struct stat own;
+	struct stat other;
+	struct dirent *entry;
+	char directory[64];
+	char path[128];
+	DIR *listing;
+	int held;
+
+	/* What the connection is. */
+	if (fstat(SSHD_FD_CLIENT, &own) != 0)
+		return 0;
+
+	/* Looks through the parent's descriptors. */
+	(void)snprintf(directory, sizeof(directory), "/proc/%ld/fd", (long)getppid());
+	listing = opendir(directory);
+	if (listing == NULL)
+		return 0;
+	held = 0;
+	while ((entry = readdir(listing)) != NULL) {
+		(void)snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
+		if (stat(path, &other) == 0 && other.st_ino == own.st_ino && other.st_dev == own.st_dev)
+			held = 1;
+	}
+	(void)closedir(listing);
+	return held;
+}
+
 /* Writes one report line to the connection. */
 static void
 child_report(
@@ -2375,6 +2540,15 @@ fake_preauth(void)
 	if (code == 'G') {
 		sleep(20);
 		child_report("P:woke\n");
+		_exit(0);
+	}
+	if (code == 'B') {
+		static const uint8_t bad[5] = { 0, 0, 0, 1, 99 };
+		child_report("P:sent bad frame\n");
+		got = write(SSHD_FD_MONITOR, bad, sizeof(bad));
+		status = child_read_frame(SSHD_FD_MONITOR, &input, &type, &body);
+		if (status == 0)
+			child_report("P:answered\n");
 		_exit(0);
 	}
 	if (code == 'V') {
@@ -2463,6 +2637,10 @@ fake_session(void)
 		child_report("S:environment fail\n");
 	if (child_other_descriptors())
 		child_report("S:descriptor fail\n");
+
+	/* The monitor let its copy of the connection go once this process had it. */
+	if (child_parent_holds_connection())
+		child_report("S:monitor kept connection fail\n");
 
 	/* R: a second hand-over, which the monitor answers by ending this process. */
 	if (code == 'R') {

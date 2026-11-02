@@ -201,9 +201,15 @@ int sshd_account_policy(const struct sshd_config *config, const struct passwd *a
 int sshd_authorized_path(const char *pattern, const struct passwd *account, char *out, size_t capacity);
 
 /*
- * Checks that tty names a pseudo-terminal ("/dev/pts/" and 1 to
- * SSHD_PTS_DIGITS_MAX digits) and that it is a character device owned by
- * uid (lstat, so a link is not followed).  Returns 0 or EACCES.
+ * Checks that tty names a pseudo-terminal: "/dev/pts/" and 1 to
+ * SSHD_PTS_DIGITS_MAX digits, nothing else.  Returns 0 or EINVAL.
+ */
+int sshd_tty_path_ok(const char *tty);
+
+/*
+ * Checks that tty names a pseudo-terminal (sshd_tty_path_ok) and that it
+ * is a character device owned by uid (lstat, so a link is not followed).
+ * Returns 0 or EACCES.
  */
 int sshd_tty_check(const char *tty, uid_t uid);
 
