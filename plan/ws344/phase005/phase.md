@@ -2,7 +2,7 @@
 
 # ws344-p005 VP8L の entropy-coded image（vp8l-image.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet 5.5 q1957-i01、2026-11-02。cleared は Q1）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p004。
 - 目的: color cache、meta prefix code と entropy image、literal・LZ77・cache の画素の decode。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -67,4 +67,11 @@ git diff --check
 
 ## 結果
 
-（未着手）
+- 2026-11-02 14:14（host の `date`）、Sonnet 5.5（q1957-i01）。作った物: `userland/desktop/libwebp-compat/vp8l-image.c`、`plan/ws344/tests/unit/test-vp8l_image.c`。header・道具・他の module は変えていない。
+- 確かめ（最後の行を読んだ。`PATH=/usr/bin:$PATH` を付けた。理由は下）: `run-unit.sh vp8l_image` → `test-vp8l_image: PASS (90215 checks)`、`run-unit: PASS`。`run-unit.sh all` → 11 test 全部 PASS（bool 8376・common 32・helpers 26・lbits 205384・prefix 1430293・riff 42324・vp8_header 45344・vp8_modes 627570・vp8_tables 37674・vp8l_codes 95925・vp8l_image 90215）、`run-unit: PASS`。`BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 check-skeleton.sh` → `check-skeleton: PASS`。`target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`。`git diff --check` は出力なし。
+- 試験の内容: lz77_value（Table 4 の行 0〜7・23・38・39 の両端と読んだ bit 数の正確さ、40 以上は 0 で bit を読まない、値 1〜4200 と以降の飛び飛びと最後の 1048576 を test 側の逆変換で往復）、plane_distance（Figure 20 の 120 符号 × 幅 1・10・1000・16384 を test 側の表と、符号 1・2・3・4・120 は手の式と、121→1・1000→880・0 の扱い）、Figure 20 の表の形（120 組・重複なし・(0,0) なし・xi −7〜8・yi 0〜7・yi 0 は xi 正・112 + 8 の組が全部ある）、cache_index（0・0xffffffff・0x12345678 を bits 1・4・11 で。手計算の値）、画像（lbitwriter で組み、期待の画素は組む時に test 側が決める。literal だけ・1 画素・1 色（0 bit の画素）・256 色、cache の大きさ 1〜11 の全て・cache 命中・未設定の entry、cache 命中と copy の画素も cache に入ること、distance 1 length 10 の重なる copy・近傍符号 1・2・3・4、length 4096・distance の大きな extra bits、distance が最初の画素より前・length が最後を越える・ちょうどの境の EINVAL、meta prefix（block ごとに別の group、group 番号の最大 3 で 0 と 3 だけ使う、未使用の group の読み捨て、端の block が 1 画素幅になる大きさ、copy が block の境をまたぐ）、argb_role 0 は meta の bit を読まない、cache_bits 0・12〜15 の EINVAL、大きさの範囲（0・16385 は EINVAL、16384×1 と 1×16384 は成功）、limit（最小の limit を二分探索し、それ未満と 0 は ENOMEM。使われない group 6 つを大きくしても最小の limit が変わらない=kept の pool に数えず scratch の pool も group ごとに空にする）、全ての byte の長さでの途中切れ（ENOBUFS）、乱数の byte 1000 本と有効な stream の bit 反転・切り詰め 1000 本（ASan・UBSan）。全ての画像は後ろの marker 1 byte を読んで、decoder が使った bit が正確であることも確かめた。期待の値は Table 4・Figure 20・式と test 側の逆変換だけ。
+- mutation（git の外の複写、`build/tmp/p005-mut/mut.py`、50 通り）: 初回は 12 が生き残り（うち 2 は pattern の指定が 2 か所に当たり未適用）。試験を足して（端が 1 画素幅の meta の画像、大きな未使用 group 6 つの limit、16384 の幅と高さ、有効な stream での大きさの EINVAL）3 つ + pattern を直した 2 つ + 1 つを殺した。最後に生き残るのは 6 つで、全て同値と判断した: (a) `prefix_code <= 3` を `< 3`（符号 3 は式でも値 4 になる）、(b)(c)(d)(e) reader の ended の検査を外す 4 か所（cache の情報の後、meta の bit の後、group の後、最後）。ended は 1 度立つと戻らず、各 symbol の後の検査と後の読みの失敗がどの経路でも ENOBUFS を返すので結果は同じ（早く止まるかどうかだけ）。header が「少なくとも符号の後・各行の後・最後」と言うので、検査は残した。それ以外の mutation（44）は全部 killed（FAIL か ASan・UBSan の停止）。
+- 自分で決めた点（header が黙っている所）: (1) 大きさが 0 または 16384 を越えるなら読む前に EINVAL。(2) distance_code 0（「1 以上」の外）は表を引かずに 1。lz77_value の prefix_code 40 以上は 0 を返し bit を読まない。cache_index の bits が 1〜11 の外は 0。(3) reader が末尾を越えたら、symbol を読んだ後で長さ・距離を判定する前に ENOBUFS にする（零で補った値からの EINVAL を出さない）。(4) 画素は各 symbol（literal・copy・cache）の後に ended を確かめ、cache 命中の画素も cache に入れる（spec の「全ての画素」の字義。未設定の entry 0 が hash 0 の entry を 0 で上書きする）。(5) 使う group の印は entropy image の全 pixel から付け、group の配列は group 数（最大 65536）の分を確保する（約 8 MiB）。(6) entropy image は子の呼び出し（argb_role 0、同じ limit、table は自分の pool）で読み、読み終えて解放した後に親の group を読むので、子の table は親の limit を使わない。
+- 仕様と phase.md・header の食い違い: (a) phase.md の試験の項目に「23 → 3072〜4096」とあるが、RFC 9649 の式（offset = (2 + (code & 1)) << extra_bits、value = offset + extra + 1）は符号 23 を 3073〜4096 にする（Table 4 の行 "3072..4096" の下端は誤り。3072 は符号 22、2049〜3072）。式に従い、試験も 3073 にした。header の comment は式の通りで直す所なし。(b) header の変更の要望なし。
+- 試験の実行の注意: `/home/awe/.local/bin/python3`（amaterrace の同時実行数を絞る wrapper）が `run-unit.sh` の `python3`（RFC 6386 の表の抽出）を、3 つの slot が他の process に取られている間待たせて固まる。`PATH=/usr/bin:$PATH sh plan/ws344/tests/run-unit.sh ...` で回避した（script は変えていない）。
+- 未実施: fixture での全体の試験（p007 以降）、QEMU・実機。
