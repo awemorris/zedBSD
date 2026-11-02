@@ -2,7 +2,7 @@
 
 # ws335-p020: trust store と path の検証
 
-Status: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1912-i01。cleared は Q1。依存: p018、p019、p015）
+Status: cleared（2026-11-02 10:10 Q1）。前: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1912-i01。cleared は Q1。依存: p018、p019、p015）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

@@ -2,7 +2,7 @@
 
 # ws335-p029: handshake の共通と TLS 1.3
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p027、p028、p020、p011、p008、p037）
+Status: in-progress（2026-11-02 10:10 P6、Opus）。前: planned（2026-11-01 p001 が作成。起動は Q1。依存: p027、p028、p020、p011、p008、p037）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（重い。Q1 の判断で Opus）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
