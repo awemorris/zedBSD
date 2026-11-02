@@ -10,11 +10,11 @@
 | P1 | [WS335](ws335/ws.md) | 自前の TLS | p033（統合と相互接続、q1971）に 15:49 着手 | — |
 | P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p017（VP8 の decoder）cleared: 非可逆の試験の画像と適合の集まりが全部 dwebp 1.5.0 と一致。p019（API の口 decode.c、q1969）に 15:22 着手 | — |
 | P3 | — | 待機 | BUG-412: Pi 5 は常時の記録（ring=1 drain=0）で普段の使い方。直しの候補（xHCI の割り込みの endpoint の Max ESIT Payload・Interval、report の写しと即時の再投入）は agent/p3-bug412 e3be6a7a3 に用意、未 merge・未配置 | 直しの kernel を Pi 5 に入れる時期（Q1、効かない click の記録の後かユーザーの言葉で） |
-| P4 | — | 待機 | WS319 の H.265 decode と Video Player の GPU の道を 12:03 に merge（q1926 cleared）。5330 は Debian で空き | — |
-| P5 | — | 待機 | WS336 p015（自前の ssh の client）を 13:46 に merge（host の OpenSSH の sshd と 93 項目 PASS） | p018（sshd の listener、p017 の後） |
+| P4 | [WS345](ws345/ws.md) | ブラウザ | p013（libkeiland の resize の hook、q1974）に 15:59 着手 | — |
+| P5 | [WS345](ws345/ws.md) | ブラウザ | p004（VM の打ち切り、q1973）に 15:59 着手 | — |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p017 cleared。p018（sshd の listener と自前の ssh との相互運用、q1965）に 14:36 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
-| P8 | [WS345](ws345/ws.md) | ブラウザ | p001 の設計 cleared（thread の表、p002〜p013）。p002（thread の表と pthread の置き換え、q1968）に 14:46 着手 | — |
+| P8 | [WS345](ws345/ws.md) | ブラウザ | p002（thread の表）cleared。p003（通信を全部 loader に、q1972）に 15:59 着手 | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 

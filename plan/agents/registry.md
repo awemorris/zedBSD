@@ -103,5 +103,8 @@
 | P5 | phase-runner-high | ws336 p015 (q1940-i01) | `/home/awe/zedBSD-worktrees/p5-ws336` / `agent/p5-ws336` | 返却（2026-11-02 13:46、cleared） | 00a9f4ccc（2026-11-02 13:46 に main へ merge） |
 | P8 | phase-runner-high | BUG-411 ほか (q1941-i01) | `/home/awe/zedBSD-worktrees/p8-uat3` / `agent/p8-uat3` | 返却（2026-11-02 13:52、一部） | e58b58424（2026-11-02 13:52 に main へ merge） |
 | P8 | phase-runner-high | ws345 p001 (q1959-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | 返却（2026-11-02 14:46、cleared） | 87feb4707（2026-11-02 14:46 に main へ merge） |
-| P8 | phase-runner-high | ws345 p002 (q1968-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | in-progress（2026-11-02 14:46 起動） | — |
+| P8 | phase-runner-high | ws345 p002 (q1968-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | 返却（2026-11-02 15:59、cleared） | 4a4b68de0（2026-11-02 15:59 に main へ merge） |
+| P8 | phase-runner-high | ws345 p003 (q1972-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | in-progress（2026-11-02 15:59 起動） | — |
+| P5 | phase-runner-high | ws345 p004 (q1973-i01) | `/home/awe/zedBSD-worktrees/p5-ws345` / `agent/p5-ws345` | in-progress（2026-11-02 15:59 起動） | — |
+| P4 | phase-runner-high | ws345 p013 (q1974-i01) | `/home/awe/zedBSD-worktrees/p4-ws345` / `agent/p4-ws345` | in-progress（2026-11-02 15:59 起動） | — |
 | P1 | phase-runner-high | BUG-413 (q1942-i01) | `/home/awe/zedBSD-worktrees/p1-bug413` / `agent/p1-bug413` | 返却（2026-11-02 12:20、fixed） | 28ad1130b（2026-11-02 12:20 に main へ merge） |
