@@ -111,6 +111,19 @@ $(DYNAMIC_DIR)/libgif-compat.so: $(DYNAMIC_GIF_COMPAT_OBJS) $(DYNAMIC_DIR)/libc.
 	$(PYTHON) tools/build/check-dynamic-elf.py --machine $(DYNAMIC_ELF_MACHINE) --role shared-library \
  --needed libc.so --soname libgif-compat.so $@
 
+# libwebp-compat: libwebp's decoding interface of the desktop programs and the browser; it needs nothing but
+# the C library.
+DYNAMIC_WEBP_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libwebp-compat)
+
+$(DYNAMIC_DIR)/libwebp-compat.so: $(DYNAMIC_WEBP_COMPAT_OBJS) $(DYNAMIC_DIR)/libc.so \
+	userland/desktop/libwebp-compat/exports.map tools/build/check-dynamic-elf.py
+	$(LD) $(DYNAMIC_LINK_LDFLAGS) -shared -soname libwebp-compat.so --hash-style=both -Bsymbolic-functions \
+ -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
+ --version-script=userland/desktop/libwebp-compat/exports.map \
+ $(DYNAMIC_WEBP_COMPAT_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine $(DYNAMIC_ELF_MACHINE) --role shared-library \
+ --needed libc.so --soname libwebp-compat.so $@
+
 # The Wayland EGL window (WS068 p002); it needs nothing but the C library.
 DYNAMIC_WAYLAND_EGL_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libwayland-egl)
 
