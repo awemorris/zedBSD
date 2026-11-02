@@ -85,7 +85,7 @@ VF2 の Wave511 で H.265（Main、8 bit 4:2:0、progressive）を Vulkan Video 
 | H.265 の大きさの変化 | x265 の 3 つの大きさの流れ（上り・下り）と H.264 の同じ物: vkvideo-probe も media-probe（新しい context）も各部分の参照と 90/90 一致（流れ全体の ffmpeg の参照は上の理由で誤り） |
 | 断る物 | RAP_B_Bossen_2 の MP4 は libmedia が断る（SPS の level 6.2 > device の 5.1、H.264 と同じ規則）。vkvideo-probe は level を見ないので decode し一致 |
 
-p004・p007 の回帰（`plan/ws322/tests/p007/run-vf2.sh`、kernel 3355858240）: （下の追記）
+p004・p007 の回帰（`PATH=/usr/bin:/bin:/usr/local/bin VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=AC276E432AE6 sh plan/ws322/tests/p007/run-vf2.sh build/tmp/p006-reg7 build/ws322-p006t build/tmp/p004-clips2 build/tmp/p007-clips build/tmp/p007-jvt build/tmp/vpu-fw`、09:21〜09:44、kernel 3355858240）: vf2-regress（vkmatrix 109/109、`-p 3` PASS、`-r 3` 327/327、vkcoherency PASS、vkcompute 4096/4096、desktop の compositor error 0・起動 1、keiland-shot の PNG cksum 518389155 は p007・p007b と同じ）。S1 1080p30 平均 13.5 ms・1080p60 13.2 ms・2160p30 42.4 ms、1080p60 120 枚・2160p30 30 枚が一致。F1 240 枚一致（flush 4）・600 枚で flush 10。F2 2 session 240 枚・誤り 0。F3 立て直しの後に次の IDR から続く。F4 ×1.0 は誤り 269、×1.05〜1.25 は誤り 0、後の 60 枚一致。F5 は 3 回で止まり、以後 session は「opened no stream (5)」、vkcompute PASS。F6 の SIGKILL の後も続く。V media-probe 1080p30 600/600 一致。VP 1080p30 16 s に 480 枚・late 1、1080p60 899 枚・late 64（p007 は 930・late 32、p007b は 1179・late 21 の 20 s の別の道具。始めの数秒の late の形は同じ）、compositor の誤り 0。J は 100/101（BA3_SVA_C だけ、Extended を理由つきで断る）。板は元に戻し cksum 一致。p004 の `run-vf2.sh`（ws083 の 7 本、--sampled）は別に流していない（H.264 の decode の道は上の S1・J・V で見た）。
 
 ### 判断（範囲の中の技術）
 
@@ -101,4 +101,5 @@ p004・p007 の回帰（`plan/ws322/tests/p007/run-vf2.sh`、kernel 3355858240�
 - SAODBLK_A・B の正否: ffmpeg の参照が zip の md5 と合わないので、板の出力の I420 の md5 を zip の md5 と照らす道具（vkvideo-probe の出力の md5、または dump）が要る。P1 が vkvideo-probe に copy-out を足しているので、その後に足すのが良い。
 - HEVC の参照を全部 zip の md5 で照らすこと（今は ffmpeg の NV12 の SHA-256）。
 - Video Player の H.265 1080p60 の始めの late（約 5 s）の改善と 4K（p012）。
+- p004 の `run-vf2.sh`（ws083 の 7 本、--sampled の GPU の plane の copy）は流していない。
 - Main10（driver が出さない、範囲の外）。
