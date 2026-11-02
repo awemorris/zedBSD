@@ -1781,6 +1781,7 @@ test_certificates(void)
 	static const uint8_t p256_oid[10] = { 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07 };
 	static const uint8_t other_oid[10] = { 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x06 };
 	static uint8_t leaf[TLSPEER_CERT_MAX];
+	uint8_t bad_public[65];
 	struct tlspeer_config config;
 	struct run *run;
 
@@ -1893,6 +1894,23 @@ test_certificates(void)
 	run_peer(run, &config);
 	go(run);
 	expect_failed(run, ENOTSUP, SSLC_ALERT_UNSUPPORTED_CERTIFICATE);
+	run_free(run);
+
+	/* A leaf whose public key is not on its curve, without verification: the signature check refuses the malformed key (bad_certificate). */
+	memcpy(leaf, pki256.leaf, pki256.leaf_size);
+	memcpy(bad_public, pki256.leaf_key.public_key, sizeof(bad_public));
+	bad_public[sizeof(bad_public) - 1U] ^= 1U;
+	CHECK(patch(leaf, pki256.leaf_size, pki256.leaf_key.public_key, bad_public, sizeof(bad_public)) == 1U);
+	peer12(&config, &pki256);
+	config.chain[0] = leaf;
+	config.chain_size[0] = pki256.leaf_size;
+	run = run_new(SSLC_TLS12, SSLC_TLS12, &pki256, "server.test");
+	run->config.verify_peer = 0;
+	run_peer(run, &config);
+	go(run);
+	expect_failed(run, EINVAL, SSLC_ALERT_BAD_CERTIFICATE);
+	CHECK(strcmp(run->log, "S") == 0);
+	CHECK(run->hs.peer_count == 1U);
 	run_free(run);
 
 	/* A certificate that does not parse, and an empty certificate list. */
