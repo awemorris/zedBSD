@@ -31,8 +31,12 @@
 # connections that send nothing, the eleventh closed, a login frees a place) and sshd -t.
 # SSH_SOURCE_DIR=<dir> builds from another source directory (a changed copy under build/tmp).
 # Last line: interop-host: PASS or interop-host: FAIL.  Output under build/tmp/interop-host.
+# SSH_CRYPTO_INCLUDE=<dir whose compat/crypto/ holds libcrypto-compat's headers> and SSH_CRYPTO_LIB=<what to link for
+# it> build against libcrypto-compat instead of the host's OpenSSL (plan/ws336/tests/compat-host.sh sets both).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
+crypto_include=${SSH_CRYPTO_INCLUDE:-plan/ws336/tests/host-crypto}
+crypto_lib=${SSH_CRYPTO_LIB:--lcrypto}
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh
 out=${INTEROP_OUT:-build/tmp/interop-host}
@@ -805,9 +809,9 @@ mkdir -p "$b_dir/home/.ssh"
 chmod 700 "$b_dir/home" "$b_dir/home/.ssh"
 # shellcheck disable=SC2086
 timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined \
-    -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto \
+    -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -I"$source_dir" -I"$crypto_include" \
     $(ls "$source_dir"/sshd-*.c) userland/base/login/verify.c plan/ws336/tests/sshd-host-shim.c $b_modules \
-    -lcrypto -lcrypt -o "$b_dir/sshd" > "$out/sshd-b.build.log" 2>&1
+    $crypto_lib -lcrypt -o "$b_dir/sshd" > "$out/sshd-b.build.log" 2>&1
 check "zedBSD's sshd builds for the host with the test's shim" $?
 cp "$HOME/.ssh/id_ed25519.pub" "$b_dir/home/.ssh/authorized_keys"
 chmod 600 "$b_dir/home/.ssh/authorized_keys"
@@ -1045,7 +1049,7 @@ fuzz_runs=${INTEROP_FUZZ_RUNS:-5000}
 mkdir -p "$work/sftp-raw" "$work/sftp-fuzz"
 "$python" -I plan/ws336/tests/sftp-host.py raw "$out/bin/sftp-server" "$work/sftp-raw" > "$work/sftp-raw.out" 2>&1
 check "sftp-server: the protocol checks ($(grep -c '^ok' "$work/sftp-raw.out") ok, $(grep '^FAIL' "$work/sftp-raw.out" | tr '\n' ' '))" $?
-cc -std=c89 -O1 -D_DEFAULT_SOURCE -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto -c "$source_dir/sftp-server-main.c" \
+cc -std=c89 -O1 -D_DEFAULT_SOURCE -I. -I"$source_dir" -I"$crypto_include" -c "$source_dir/sftp-server-main.c" \
     -o "$out/sftp-server-main.o" > "$out/sftp-stub.build.log" 2>&1
 stub_allowed=" chmod chown close closedir fchmod fchown fstat ftruncate futimens getgrgid getpwuid link lstat mkdir open opendir pread pwrite readdir readlink realpath rename rmdir stat symlink truncate unlink utimensat __errno_location signal malloc free fwrite read write snprintf sprintf strlen strcmp strrchr strcpy memcpy memset memchr stderr time "
 unexpected=""
@@ -1063,8 +1067,8 @@ stub_ok=1
 if [ -z "$unexpected" ]; then
 	# shellcheck disable=SC2086
 	timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -D_DEFAULT_SOURCE -fsanitize=address,undefined \
-	    -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto \
-	    "$source_dir/sftp-server-main.c" plan/ws336/tests/sftp-fs-stub.c $b_modules -lcrypto -o "$out/bin/sftp-server-stub" \
+	    -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -I"$source_dir" -I"$crypto_include" \
+	    "$source_dir/sftp-server-main.c" plan/ws336/tests/sftp-fs-stub.c $b_modules $crypto_lib -o "$out/bin/sftp-server-stub" \
 	    >> "$out/sftp-stub.build.log" 2>&1 && stub_ok=0
 fi
 check "the stubbed sftp-server builds" "$stub_ok"

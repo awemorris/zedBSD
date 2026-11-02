@@ -3,7 +3,7 @@
 # The platform provides DYNAMIC_SYSROOT, DYNAMIC_LINK_CFLAGS,
 # DYNAMIC_LINK_LDFLAGS and DYNAMIC_ELF_MACHINE. Source and link dependencies
 # stay identical on amd64, arm64 and riscv64; libc, rtld and assembly stay platform-owned.
-DYNAMIC_PORTABLE_PROGRAMS := vkdemo vkcompute vkreset vkcoherency vkimage vkstage vkmatrix vkquad vkvideo-probe media-probe display-events wayland wltest acquire-fence-test gpu-forge-test menu-probe keiland-settings keiland-system printtest keiland-notify mediastorage fidoctl passkey-fido2 titlebar-probe popup-probe subsurface-probe seat-probe tablet-probe data-probe extras-probe wlshm keiland-ime ime-probe mview terminal files settings monitor notes pdfviewer imageview videoplayer music photos phone calendar mailer textedit kuidemo browser browser-probe glxtest zgears egltest glescompute xserver gpu-fence-test gpu-share-test hvs-load camvk
+DYNAMIC_PORTABLE_PROGRAMS := vkdemo vkcompute vkreset vkcoherency vkimage vkstage vkmatrix vkquad vkvideo-probe media-probe display-events wayland wltest acquire-fence-test gpu-forge-test menu-probe keiland-settings keiland-system printtest keiland-notify mediastorage fidoctl passkey-fido2 ssh sshd ssh-keygen sftp-server titlebar-probe popup-probe subsurface-probe seat-probe tablet-probe data-probe extras-probe wlshm keiland-ime ime-probe mview terminal files settings monitor notes pdfviewer imageview videoplayer music photos phone calendar mailer textedit kuidemo browser browser-probe glxtest zgears egltest glescompute xserver gpu-fence-test gpu-share-test hvs-load camvk
 
 $(eval $(call ZEDBSD_LIBUTIL_RULE,$(DYNAMIC_DIR),$(LD),$(DYNAMIC_LINK_LDFLAGS),$(DYNAMIC_ELF_MACHINE)))
 
@@ -623,8 +623,14 @@ $(BUILD)/bin/fidoctl: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
 # library (crypt() for the password of a registration).
 DYNAMIC_PASSKEY_FIDO2_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,passkey-fido2)
 
-$(DYNAMIC_PASSKEY_FIDO2_OBJS): DYNAMIC_CPPFLAGS += -I$(DYNAMIC_FIDOCTL_SSL)/include
-$(DYNAMIC_PASSKEY_FIDO2_OBJS): $(ZEDBSD_OPENSSL_STAGED)
+# The objects other programs share (login, su, sudo, passwd, passkey, account-admin, sshd) include no OpenSSL
+# header, so building them does not wait for OpenSSL or see its headers.
+DYNAMIC_PASSKEY_FIDO2_SHARED_OBJS := $(addprefix $(DYNAMIC_DIR)/obj/userland/base/,login/verify.o common/account.o \
+	passkey/record.o passkey/request.o)
+DYNAMIC_PASSKEY_FIDO2_SSL_OBJS := $(filter-out $(DYNAMIC_PASSKEY_FIDO2_SHARED_OBJS),$(DYNAMIC_PASSKEY_FIDO2_OBJS))
+
+$(DYNAMIC_PASSKEY_FIDO2_SSL_OBJS): DYNAMIC_CPPFLAGS += -I$(DYNAMIC_FIDOCTL_SSL)/include
+$(DYNAMIC_PASSKEY_FIDO2_SSL_OBJS): $(ZEDBSD_OPENSSL_STAGED)
 
 $(BUILD)/bin/passkey-fido2: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
 	$(DYNAMIC_PASSKEY_FIDO2_OBJS) $(ZEDBSD_OPENSSL_LIBCRYPTO) \
@@ -639,6 +645,25 @@ $(BUILD)/bin/passkey-fido2: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
  -l:libcrypto.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine $(DYNAMIC_ELF_MACHINE) --role application \
  --needed libcrypto.so --needed libc.so $@
+
+# zedBSD's own SSH programs (userland/base/ssh): their sources, libcrypto-compat and the C library (sshd's password
+# check takes crypt from it).  $(1) is the program.
+define DYNAMIC_SSH_PROGRAM
+$(BUILD)/bin/$(1): $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,$(1)) $(DYNAMIC_DIR)/libcrypto-compat.so \
+	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
+	@mkdir -p $$(dir $$@)
+	$(CC) $(DYNAMIC_LINK_CFLAGS) -nostdlib -pie -Wl,--no-relax \
+ -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
+ -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so \
+ $(DYNAMIC_SYSROOT)/usr/lib/crt1.o $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,$(1)) \
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
+ -l:libcrypto-compat.so -l:libc.so -o $$@
+	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine $(DYNAMIC_ELF_MACHINE) --role application \
+ --needed libcrypto-compat.so --needed libc.so $$@
+endef
+$(foreach program,ssh sshd ssh-keygen sftp-server,$(eval $(call DYNAMIC_SSH_PROGRAM,$(program))))
 
 # The Titlebar Presentation probe (WS070 p008): Wayland, libkeiland and the C library.
 DYNAMIC_TITLEBAR_PROBE_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,titlebar-probe)
