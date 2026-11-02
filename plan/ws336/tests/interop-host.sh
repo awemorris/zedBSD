@@ -257,9 +257,10 @@ def run_pty(args):
     open(out, "wb").write(data)
     return status
 
-# startups PORT LIMIT -- LOGIN-COMMAND...: MaxStartups.  LIMIT connections that send nothing each get the
+# startups PORT LIMIT LOG -- LOGIN-COMMAND...: MaxStartups.  LIMIT connections that send nothing each get the
 # server's identification line; one more is closed at once.  One of them is let go, the login command (a session
-# that stays a few seconds) logs in, and then one more connection is taken and the next closed again.
+# that stays a while) logs in (seen as one more "Accepted login" line in the server's LOG), and then one more
+# connection is taken and the next closed again.
 def ident(port):
     s = socket.create_connection(("127.0.0.1", port), 5)
     s.settimeout(5)
@@ -276,8 +277,13 @@ def ident(port):
 
 def startups(args):
     import subprocess
-    port, limit = int(args[0]), int(args[1])
-    command = args[3:]
+    port, limit, log = int(args[0]), int(args[1]), args[2]
+    command = args[4:]
+    def accepted():
+        try:
+            return open(log, errors="replace").read().count("Accepted login")
+        except OSError:
+            return 0
     held = []
     for i in range(limit):
         s, ok = ident(port)
@@ -292,8 +298,15 @@ def startups(args):
         return 1
     held.pop().close()
     time.sleep(1)
+    before = accepted()
     login = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(3)
+    end = time.time() + 30
+    while accepted() == before and time.time() < end:
+        time.sleep(0.2)
+    if accepted() == before:
+        print("the login was not granted")
+        return 1
+    time.sleep(1)
     s, ok = ident(port)
     held.append(s)
     if not ok:
@@ -488,12 +501,12 @@ MaxSessions 0" || { echo "interop-host: FAIL"; exit 1; }
 start_sshd notty "$port_notty" "KexAlgorithms mlkem768x25519-sha256
 PasswordAuthentication no
 PermitTTY no" || { echo "interop-host: FAIL"; exit 1; }
-timeout 120 "$python" -I "$out/helper.py" silent "$port_silent" 110 &
+timeout 900 "$python" -I "$out/helper.py" silent "$port_silent" 890 &
 server_pids="$server_pids $!"
 helper wait-port "$port_silent" 10 || fail "the silent listener did not start"
 helper owner "$port_silent" "$!" || { echo "interop-host: FAIL (port $port_silent is not the test's)"; exit 1; }
 owned="$owned $port_silent $!"
-timeout 120 "$python" -I "$out/helper.py" closer "$port_closer" 110 &
+timeout 900 "$python" -I "$out/helper.py" closer "$port_closer" 890 &
 server_pids="$server_pids $!"
 helper wait-port "$port_closer" 10 || fail "the closing listener did not start"
 helper owner "$port_closer" "$!" || { echo "interop-host: FAIL (port $port_closer is not the test's)"; exit 1; }
@@ -1027,7 +1040,8 @@ grep -q 'exec request failed on channel' "$work/z3.err"
 check "ours: a refused exec is reported ($(cat "$work/z3.err"))" $?
 
 # --- MaxStartups (10): ten connections that send nothing, the eleventh closed; a login frees a place.
-helper startups "$port_b" 10 -- "$ssh" -F "$config" -p "$port_b" 127.0.0.1 'sleep 6' > "$work/b-startups.out" 2>&1
+helper startups "$port_b" 10 "$b_dir/log" -- "$ssh" -F "$config" -p "$port_b" 127.0.0.1 'sleep 8' \
+    > "$work/b-startups.out" 2>&1
 expect_eq "B: MaxStartups ($(cat "$work/b-startups.out"))" "$?" 0
 zssh -p "$port_b" 127.0.0.1 'echo after-startups' > "$work/b10.out" 2> "$work/b10.err"
 expect_eq "B: the server serves after MaxStartups" "$?:$(cat "$work/b10.out")" "0:after-startups"
@@ -1042,10 +1056,14 @@ check "B: a monitor names its peer in the log" $?
 # --- a listener stopped while a session runs: the session goes on, the port is closed.
 start_b stop "$stop_dir" "$port_stop" || fail "the sshd to stop did not start"
 stop_listener=$(helper holder "$port_stop" "$b_pid")
-zssh -o StrictHostKeyChecking=accept-new -p "$port_stop" 127.0.0.1 'sleep 3; echo survived' > "$work/b11.out" \
+zssh -o StrictHostKeyChecking=accept-new -p "$port_stop" 127.0.0.1 'sleep 4; echo survived' > "$work/b11.out" \
     2> "$work/b11.err" &
 session_pid=$!
-sleep 1.5
+tries=0
+while ! grep -q 'Accepted login' "$stop_dir/log" 2>/dev/null && [ "$tries" -lt 300 ]; do
+	sleep 0.1
+	tries=$((tries + 1))
+done
 kill -TERM "$stop_listener"
 sleep 0.5
 "$python" -I -c 'import socket, sys
