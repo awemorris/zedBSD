@@ -91,8 +91,10 @@ int cryc_gcm_init(struct cryc_gcm *gcm, const uint8_t *key, size_t key_size);
  * room for size bytes of ciphertext; out may be in.  tag: 16 bytes
  * written.
  *
- * Returns 0, or EINVAL for an empty IV or a plaintext over the limit
- * (nothing is written).
+ * Returns 0, or EINVAL (nothing is written) for an empty IV, an IV or
+ * additional data of 2^61 bytes or more (its length in bits must fit the
+ * 64-bit field of the last GHASH block, 7.1), a plaintext over the limit,
+ * or one whose size plus the tag does not fit size_t.
  */
 int cryc_gcm_seal(const struct cryc_gcm *gcm, const uint8_t *iv, size_t iv_size, const uint8_t *aad, size_t aad_size, const uint8_t *in, size_t size, uint8_t *out, uint8_t *tag);
 
@@ -105,7 +107,7 @@ int cryc_gcm_seal(const struct cryc_gcm *gcm, const uint8_t *iv, size_t iv_size,
  * (no plaintext of a forged message is ever visible to the caller) and
  * EBADMSG is returned.  out may be in.
  *
- * Returns 0, EBADMSG, or EINVAL (empty IV, ciphertext over the limit; out
+ * Returns 0, EBADMSG, or EINVAL for the sizes cryc_gcm_seal refuses (out
  * is then not written).
  */
 int cryc_gcm_open(const struct cryc_gcm *gcm, const uint8_t *iv, size_t iv_size, const uint8_t *aad, size_t aad_size, const uint8_t *in, size_t size, uint8_t *out, const uint8_t *tag);

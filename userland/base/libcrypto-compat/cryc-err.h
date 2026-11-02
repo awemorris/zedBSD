@@ -99,8 +99,9 @@ void cryc_err_clear(void);
  * Writes "error:%08lX:<library>::<reason>" for code into buffer (length
  * bytes, NUL-terminated, cut to fit; nothing when length is 0).  The
  * library names are OpenSSL's ("SSL routines", "x509 certificate
- * routines", ...; own wording allowed); a reason without a text is written
- * as "reason(<number>)" (ERR_error_string_n).
+ * routines", ...; own wording allowed); a library without a name is
+ * written as "lib(<number>)" and a reason without a text as
+ * "reason(<number>)" (ERR_error_string_n).
  */
 void cryc_err_string(unsigned long code, char *buffer, size_t length);
 
@@ -108,8 +109,10 @@ void cryc_err_string(unsigned long code, char *buffer, size_t length);
  * Registers libssl-compat's reason texts: table is count pairs of a
  * reason number and its text, constant for the life of the process.
  * Called once by libssl-compat's initialization (a constructor of its
- * shared object, or its first SSL_CTX_new); a second call with the same
- * table is a no-op.  Thread safe.
+ * shared object, or its first SSL_CTX_new).  Only the first call with
+ * tables and a count above 0 takes effect; a call with a NULL table or a
+ * count of 0 is ignored, and every later call is a no-op whatever its
+ * table.  Thread safe.
  */
 void cryc_err_register_ssl(const unsigned *reasons, const char *const *texts, size_t count);
 

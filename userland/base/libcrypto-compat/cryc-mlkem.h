@@ -78,21 +78,22 @@ void cryc_mlkem_ntt_inverse(struct cryc_mlkem_poly *f);
 /* h = f * g in T_q (MultiplyNTTs, Algorithm 11, with BaseCaseMultiply, Algorithm 12).  h may alias f or g.  Constant time. */
 void cryc_mlkem_multiply_ntts(struct cryc_mlkem_poly *h, const struct cryc_mlkem_poly *f, const struct cryc_mlkem_poly *g);
 
-/* Writes ByteEncode_d(f) (Algorithm 5), 32 * d bytes, for d from 1 to 12. */
+/* Writes ByteEncode_d(f) (Algorithm 5), 32 * d bytes, for d from 1 to 12 (another d writes nothing). */
 void cryc_mlkem_byte_encode(uint8_t *out, const struct cryc_mlkem_poly *f, unsigned d);
 
 /*
  * Reads ByteDecode_d (Algorithm 6) from 32 * d bytes.  For d = 12 the
  * values are reduced modulo q (Algorithm 6's m = q for d = 12); the
  * return value is 1 when every value read was already below q (the
- * encapsulation key check of 7.2), else 0.
+ * encapsulation key check of 7.2), else 0.  d is 1 to 12; another d sets
+ * every coefficient of f to 0 and returns 0.
  */
 int cryc_mlkem_byte_decode(struct cryc_mlkem_poly *f, const uint8_t *in, unsigned d);
 
-/* Compress_d of every coefficient in place (4.2.1, equation (4.7)), d below 12. */
+/* Compress_d of every coefficient in place (4.2.1, equation (4.7)), d from 1 to 11 (another d leaves f unchanged). */
 void cryc_mlkem_compress(struct cryc_mlkem_poly *f, unsigned d);
 
-/* Decompress_d of every coefficient in place (4.2.1, equation (4.8)), d below 12. */
+/* Decompress_d of every coefficient in place (4.2.1, equation (4.8)), d from 1 to 11 (another d leaves f unchanged). */
 void cryc_mlkem_decompress(struct cryc_mlkem_poly *f, unsigned d);
 
 /*

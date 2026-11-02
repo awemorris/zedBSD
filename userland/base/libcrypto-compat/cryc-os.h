@@ -59,9 +59,10 @@ struct cryc_os_mutex {
  * BCryptGenRandom(NULL, out, n, BCRYPT_USE_SYSTEM_PREFERRED_RNG) on
  * Windows.
  *
- * Has the type cryc_random_fn; context is unused (NULL).  Returns 0, or
- * EIO when the system refused (out is then wiped).  Never falls back to
- * a weaker source.
+ * Has the type cryc_random_fn; context is unused (NULL).  A size of 0
+ * returns 0 without a call.  Returns 0, EINVAL for a NULL out with a
+ * size, or EIO when the system refused (out is then wiped).  Never falls
+ * back to a weaker source.
  */
 int cryc_os_random(void *context, uint8_t *out, size_t size);
 
@@ -132,10 +133,13 @@ int cryc_os_read_file(const char *path, size_t max, uint8_t **data, size_t *size
  * descriptor) without waiting longer than the socket's own mode makes it.
  *
  * descriptor is the value given to SSL_set_fd: a file descriptor on POSIX
- * (read()), a SOCKET on Windows (recv()).  *done receives the bytes read.
- * Returns 0 with *done > 0; 0 with *done == 0 at the end of the stream;
+ * (read()), a SOCKET on Windows (recv()).  *done receives the bytes read
+ * and *os_error (when not NULL) starts at 0.  A NULL done, a NULL buffer
+ * or a size of 0 is EINVAL (a read of nothing would look like the end of
+ * the stream).  Returns 0 with *done > 0; 0 with *done == 0 at the end of the stream;
  * EAGAIN when a non-blocking socket has nothing now (EWOULDBLOCK and
- * WSAEWOULDBLOCK included); EINTR is retried inside; EIO for any other
+ * WSAEWOULDBLOCK included; *os_error then holds the system's code too);
+ * EINTR is retried inside; EIO for any other
  * failure, with *os_error set to the system's code (errno, or
  * WSAGetLastError() on Windows) and, on Windows, errno also set to the
  * nearest errno value so that a program written for OpenSSL's
@@ -191,7 +195,8 @@ int cryc_os_socket_write(intptr_t descriptor, const uint8_t *buffer, size_t size
  *
  * A callback's error is passed back at once; a missing file or an empty
  * store is not an error (the callbacks report ENOENT for a missing file,
- * which this function ignores).  Returns 0 or the first error other than
+ * which this function ignores).  Every callback is required (EINVAL when
+ * one is NULL, on every system).  Returns 0 or the first error other than
  * ENOENT.
  */
 int cryc_os_system_roots(int (*add_distrusted)(void *context, const uint8_t *der, size_t size), int (*add_der)(void *context, const uint8_t *der, size_t size), int (*add_file)(void *context, const char *path), void *context);

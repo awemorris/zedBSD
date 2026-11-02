@@ -340,7 +340,8 @@ cryc_bn_mod_sub(
 /*
  * out = a mod m for a less than 2m (one conditional subtraction, by mask):
  * reduces a hash taken as an integer of the order's bit length (FIPS 186-5
- * 6.4.2 step 4's e) into the range.
+ * 6.4.2 step 3's e, derived from the leftmost bits of the hash) into the
+ * range.
  */
 void
 cryc_bn_reduce_once(

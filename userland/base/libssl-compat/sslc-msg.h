@@ -165,8 +165,13 @@ void sslc_msg_header(const uint8_t *in, unsigned *type, size_t *length);
 
 /*
  * Writes a ClientHello (above).  Returns 0, ENOBUFS, or EINVAL for
- * inconsistent fields (no suite, min above max, a share without TLS 1.3,
- * a server name over CRYC_NAME_HOST_MAX).
+ * inconsistent fields: a NULL hello; a version bound that is not TLS 1.2
+ * or 1.3, or min above max; a session id over SSLC_MSG_SESSION_ID_MAX;
+ * an empty or NULL list of suites, groups or schemes, or one over
+ * SSLC_MSG_LIST_MAX; more than SSLC_MSG_MAX_SHARES shares, a share
+ * without TLS 1.3, a share key NULL, empty or over 2^16 - 1 bytes; a
+ * cookie without TLS 1.3, NULL with a size, or over SSLC_MSG_COOKIE_MAX;
+ * an empty server name or one over CRYC_NAME_HOST_MAX.
  */
 int sslc_msg_write_client_hello(const struct sslc_client_hello *hello, uint8_t *out, size_t room, size_t *written);
 

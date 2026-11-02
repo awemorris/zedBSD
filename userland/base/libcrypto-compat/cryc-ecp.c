@@ -488,7 +488,7 @@ cryc_ecp_mul_base(
 }
 
 /*
- * out = u1 * G + u2 * q, for ECDSA verification (FIPS 186-5 6.4.2 step 5).
+ * out = u1 * G + u2 * q, for ECDSA verification (FIPS 186-5 6.4.2 step 6).
  */
 void
 cryc_ecp_mul_add_public(
