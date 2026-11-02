@@ -6,11 +6,11 @@
 - Status: incomplete（2026-11-02 08:32 ユーザーの指示で P3 が着手。WS318 の completed を待たない）
 - 目標: Pi 5（BCM2712） の video の hardware のうち zedBSD で未実装の物を、kernel の Vulkan の executor（`src/drivers/gpu/bcm2712/`）の Vulkan Video（`VK_KHR_video_decode_*`・`VK_KHR_video_encode_*`）として実装し、libmedia から使えるようにする。
 
-## ユーザーの決定（2026-10-30、原文）
+## ユーザーの決定
 
-- 「…H.264とH.265のデコーダとエンコーダの表の中で未の部分を埋めるようにVulkan Video driverを実装して…ドライバは個別のWSに分けて依存関係にしてもかまいません。先にlibmediaの方を作りきってcompleteにしてから、個別のドライバを実装する流れにします。…」（全文は [WS318](../ws318/ws.md)）
-- 「VPUが独立だとしても、我々はVulkan Video driverとして見せる必要があります。それがOSのAPIなので。」
-- H.265（2026-10-30 ユーザー「H.265のパテントプールへの支払いは行う方針です。H.265の実装を行っていいです。」）: WS236（2026-10-14）の「HEVCはライセンスがないのでやらないです」を置き換え、H.265 の decode・encode を実装する。
+- （2026-10-30）ユーザーから、H.264・H.265 の decoder・encoder の表の未の部分を埋めるように Vulkan Video の driver を実装する、driver は個別の WS に分けて依存にしてよい、先に libmedia を作り切ってから個別の driver を実装する流れにする、という趣旨の指示を受けた（詳しくは [WS318](../ws318/ws.md)）。
+- （2026-10-30）ユーザーから、VPU が独立した hardware でも、OS の API として Vulkan Video の driver として見せる、という趣旨の指示を受けた。
+- （2026-10-30）ユーザーから、H.265 の patent pool への支払いは行う方針なので H.265 を実装してよい、という趣旨の決定を受けた。WS236（2026-10-14）の「HEVC は license が無いので行わない」という決定を置き換え、H.265 の decode・encode を実装する。
 
 - （2026-11-02 08:32）ユーザーから、Pi 5 の H.265 decode を P3 で実装し、Video Player の GPU の道（VP_GPU_PRESENT）で再生できるところまで完了させる、という趣旨の指示を受けた（WS318 の completed を待たずに始める）。
 
