@@ -9,6 +9,10 @@
 __chkstk
 ___chkstk_ms
 
+# The C runtime's start-up code (mingw-w64's crt, tlssup.c): the index of the image's thread-local storage,
+# which _Thread_local variables (each thread's own state of a computation in libbrowser) are reached through.
+_tls_index
+
 # UCRT: the heap.
 calloc
 free

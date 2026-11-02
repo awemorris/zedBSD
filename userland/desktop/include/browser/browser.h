@@ -127,6 +127,9 @@ extern "C" {
 /* A view, opaque to the program. */
 struct browser_view;
 
+/* An image of the page shown (browser_view_image_at, below). */
+struct browser_image;
+
 /* An instance of the engine: what its views share and what it remembers (cookies, the HTTP cache, Web Storage). */
 struct browser_instance;
 
@@ -294,6 +297,20 @@ struct browser_fonts {
  *   it some other way).
  * - console: a script wrote to the console (level 0 log, 1 warn, 2 error).
  * - script_error: a timer's script failed (error is an errno value).
+ * - image: the answer to browser_view_request_image: 0 with the image
+ *   (valid during the call: a program that keeps it copies the record and
+ *   sets its pixels and url to NULL, and frees the copy's with
+ *   browser_view_image_release), or an errno value (ENOENT when no image
+ *   was there) with NULL.
+ * - field: the answer to browser_view_focus_field in a view of its own
+ *   threads: 0 with the caret's rectangle of the field that took the focus
+ *   (x, y, width, height in the view's pixels), or an errno value (ENOENT
+ *   when there was none) with NULL.
+ *
+ * In a view of its own threads (BROWSER_THREADING_OWN) every callback but
+ * link is called on the program's thread, from browser_view_process; link
+ * is called on the view's script thread, since the view needs its answer at
+ * once: it must not call into the view nor touch the program's window.
  */
 struct browser_callbacks {
 	void (*redraw)(void *context, struct browser_view *view);
@@ -305,6 +322,8 @@ struct browser_callbacks {
 	void (*console)(void *context, struct browser_view *view, int level, const char *text, size_t length);
 	void (*script_error)(void *context, struct browser_view *view, int error);
 	void *context;
+	void (*image)(void *context, struct browser_view *view, int error, struct browser_image *image);
+	void (*field)(void *context, struct browser_view *view, int error, const float *caret);
 };
 
 /*
@@ -352,6 +371,25 @@ struct browser_gpu_failure {
  * the context it is called with (NULL for none: a program without a
  * window settles the view instead), and the instance it belongs to (NULL
  * for the process's default instance; it must outlive the view).
+ *
+ * threading says where the view's pages run.  BROWSER_THREADING_CALLER
+ * (zero): on the thread that calls the view, which waits in each call for
+ * the pages' scripts, layout and network (a program without a window, the
+ * tests and tools).  BROWSER_THREADING_OWN: on threads of the view's own (a
+ * window's program): the program's thread only hands the view its inputs
+ * and commands, which are queued in the order they come and return at once
+ * (0, ENOMEM, or ENOBUFS when 1024 presses wait already: the program drops
+ * the press), and reads the state the view published last (the location,
+ * the title, the history, the load's progress, the scroll, the document's
+ * height and range, the text input's), which browser_view_process brings
+ * up to date before it calls the callbacks; the strings stay valid until
+ * the next browser_view_process.  The view's stack_base is not used then.
+ * frame_wake (with frame_wake_context) is called from the view's thread
+ * when a new picture of the page is ready for browser_view_render_pixels
+ * (NULL for none); it must not call into the view.  In a view of its own
+ * threads browser_view_settle, _dump, _draw_pixels, _prepare, _draw,
+ * _record and _image_at report ENOTSUP, browser_view_set_gpu and
+ * _release_targets do nothing, and browser_view_timeout reports -1.
  */
 struct browser_view_options {
 	int version;
@@ -365,7 +403,48 @@ struct browser_view_options {
 	browser_wake wake;
 	void *wake_context;
 	struct browser_instance *instance;
+	int threading;
+	browser_wake frame_wake;
+	void *frame_wake_context;
 };
+
+/* Where a view's pages run (struct browser_view_options's threading). */
+#define BROWSER_THREADING_CALLER	0
+#define BROWSER_THREADING_OWN		1
+
+/*
+ * The number of the state a view published last (the getters' state): it
+ * grows with each new state, 0 before the first and in a view of the
+ * caller's thread.
+ */
+uint64_t browser_view_snapshot_serial(const struct browser_view *view);
+
+/*
+ * Draws the latest picture of the page shown into the caller's pixels
+ * (0xAARRGGBB, width by height, rows stride bytes apart), from any thread
+ * in a view of its own threads (the picture its script thread made last,
+ * at the view's size; what it leaves is the page's canvas color), or as
+ * browser_view_draw_pixels in a view of the caller's.  Reports 0, ENOENT
+ * when there is no picture yet, or EINVAL.
+ */
+int browser_view_render_pixels(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);
+
+/*
+ * Asks for the image at a place of the view (a picture dragged out): the
+ * answer is the image callback (in a view of the caller's thread, before
+ * this returns).  Reports 0, or ENOMEM.
+ */
+int browser_view_request_image(struct browser_view *view, float x, float y);
+
+/*
+ * Commits text as browser_view_commit_text does, for the text input's
+ * session the program saw (browser_view_text_session): when the page's
+ * session has changed meanwhile (the focus moved), the text is dropped, so
+ * that what the input method deletes around the caret is never another
+ * field's.
+ */
+int browser_view_commit_text_in(struct browser_view *view, uint64_t session, const char *text, uint32_t delete_before,
+    uint32_t delete_after);
 
 /*
  * Makes an instance of the engine over its options' storage backend; the

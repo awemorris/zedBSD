@@ -140,18 +140,9 @@ struct vm_heap {
 	 */
 	struct vm_shape *root_shape;
 
-	/*
-	 * The tasks (vm_heap_task_begin).  task is the number of the task the
-	 * heap's thread runs, 0 between tasks: only that thread writes it, any
-	 * thread reads it (__atomic).  task_last is the number the last task
-	 * got, that thread's alone.  terminate is the task another thread
-	 * asked to end, 0 for none: any thread writes it (__atomic), and the
-	 * heap's thread puts 0 back when a task begins and when it ends, so a
-	 * request never outlives the task it named.
-	 */
-	uint32_t task;
-	uint32_t task_last;
-	uint32_t terminate;
+	/* The heap's tasks: its own agent, and the agent its tasks run in (own_agent unless its user shares one). */
+	struct vm_agent own_agent;
+	struct vm_agent *agent;
 
 	/* The steps of long native functions counted (vm_heap_count_step), the heap's thread's alone. */
 	uint32_t steps;
@@ -264,16 +255,26 @@ static __inline int
 vm_termination_poll(
 	struct vm_heap *heap)
 {
+	struct vm_agent *agent;
 	uint32_t asked;
 	uint32_t task;
+	int passed;
 
 	/* Nobody asked: the task goes on. */
-	asked = __atomic_load_n(&heap->terminate, __ATOMIC_RELAXED);
+	agent = heap->agent;
+	asked = __atomic_load_n(&agent->terminate, __ATOMIC_RELAXED);
 	if (asked == 0U)
 		return 0;
 
+	/* A task with a deadline ends at it. */
+	if (agent->deadline_ns != 0U) {
+		passed = vm_agent_deadline_passed(agent);
+		if (passed)
+			return VM_TERMINATED;
+	}
+
 	/* A request for another task (one that ended already) does not end this one. */
-	task = __atomic_load_n(&heap->task, __ATOMIC_RELAXED);
+	task = __atomic_load_n(&agent->task, __ATOMIC_RELAXED);
 	if (asked != task)
 		return 0;
 

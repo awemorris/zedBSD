@@ -1041,6 +1041,34 @@ net_loader_client_abort_before(
 }
 
 /*
+ * Aborts, from any thread, every live request of a client that its thread
+ * waits for (a synchronous XMLHttpRequest, a parser's script): the waiter
+ * wakes with ECANCELED.  The requests called back are left, since their
+ * holders free them through their callbacks.
+ */
+void
+net_loader_client_abort_waited(
+	struct net_loader_client *client)
+{
+	struct net_loader *loader;
+	struct net_request *request;
+
+	/* The marks, under the lock. */
+	loader = client->loader;
+	wb_mutex_lock(&loader->lock);
+
+	for (request = client->live; request != NULL; request = request->live_next) {
+		if (request->waited)
+			loader_abort_marked(request);
+	}
+
+	wb_mutex_unlock(&loader->lock);
+
+	/* The network thread wakes to close them. */
+	loader_poke(loader);
+}
+
+/*
  * Tells how many requests of the loader's own client were started that
  * have neither ended to their callbacks nor been cancelled.
  */

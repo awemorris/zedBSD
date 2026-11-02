@@ -89,9 +89,13 @@ struct svg_shape {
 	size_t capacity;
 };
 
-/* The size of the viewport (the viewBox, else the bitmap) that percentage lengths of the picture being drawn are of. */
-static float svg_view_width;
-static float svg_view_height;
+/*
+ * The size of the viewport (the viewBox, else the bitmap) that percentage
+ * lengths of the picture being drawn are of.  Each thread has its own: it
+ * belongs to the picture the thread draws.
+ */
+static _Thread_local float svg_view_width;
+static _Thread_local float svg_view_height;
 
 /* The bitmap being drawn: premultiplied float RGBA, and a row's coverage. */
 struct svg_canvas {

@@ -189,6 +189,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/page/input.c \
 	$(LIBBROWSER_DIR)/page/form.c \
 	$(LIBBROWSER_DIR)/view/view.c \
+	$(LIBBROWSER_DIR)/view/front.c \
 	$(LIBBROWSER_DIR)/image/decode.c \
 	$(LIBBROWSER_DIR)/image/jpeg.c \
 	$(LIBBROWSER_DIR)/image/png.c \

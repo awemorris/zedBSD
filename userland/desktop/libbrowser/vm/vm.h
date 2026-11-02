@@ -19,11 +19,13 @@
  *
  * One heap serves one tab; nothing is shared between heaps.
  *
- * One thread at a time runs a heap's scripts, in tasks: vm_heap_task_begin
- * numbers the task, and any other thread may ask that numbered task to end
- * (vm_heap_request_termination).  The engine looks at the request at every
- * loop's head, at every entry to a function and now and then inside the
- * long native functions, and leaves the task with VM_TERMINATED.
+ * One thread at a time runs a heap's scripts, in tasks of its agent
+ * (struct vm_agent: the heap's own, or one its user shares among the heaps
+ * of a view): vm_agent_task_begin numbers the task, and any other thread
+ * may ask that numbered task to end (vm_agent_request_termination).  The
+ * engine looks at the request at every loop's head, at every entry to a
+ * function and now and then inside the long native functions, and leaves
+ * the task with VM_TERMINATED.
  */
 
 #ifndef KEILAND_BROWSER_VM_H
@@ -82,6 +84,29 @@
  * up through every frame and native function to whoever began the task.
  */
 #define VM_TERMINATED (-3)
+
+/*
+ * The tasks of the heaps that run on one thread at a time (an agent): the
+ * number of the task that runs, 0 between tasks (written by the thread that
+ * runs the tasks, read by any through __atomic), the number the last task
+ * got (that thread's alone), the task another thread asked to end, 0 for
+ * none (written by any thread through __atomic, put back to 0 by the
+ * running thread when a task begins and ends, so that a request never
+ * outlives its task; VM_AGENT_DEADLINE while a deadline is set), and the
+ * deadline of the running task on the monotonic clock in nanoseconds, 0
+ * for none (the running thread's alone).  It must outlive the heaps that
+ * use it.
+ */
+struct vm_agent {
+	uint32_t task;
+	uint32_t task_last;
+	uint32_t terminate;
+	uint32_t reserved;
+	uint64_t deadline_ns;
+};
+
+/* What terminate holds while the running task has a deadline and nobody asked it to end: no task has this number. */
+#define VM_AGENT_DEADLINE	0xFFFFFFFFU
 
 /* The object's flags: array identity, nonextensibility, and immutable BigInt TypedArray content. */
 #define VM_OBJECT_ARRAY 0x1U
@@ -597,7 +622,17 @@ void vm_heap_remove_tracer(struct vm_heap *heap, vm_tracer tracer, void *context
 struct vm_cell *vm_heap_find_cell(struct vm_heap *heap, uintptr_t word);
 void vm_heap_stats(const struct vm_heap *heap, struct vm_heap_stats *stats);
 
-/* The heap's tasks and their termination from another thread (heap.c). */
+/* The tasks of an agent and their termination from another thread (heap.c). */
+void vm_agent_init(struct vm_agent *agent);
+uint32_t vm_agent_task_begin(struct vm_agent *agent);
+void vm_agent_task_end(struct vm_agent *agent);
+uint32_t vm_agent_task_current(struct vm_agent *agent);
+void vm_agent_request_termination(struct vm_agent *agent, uint32_t task);
+void vm_agent_set_deadline(struct vm_agent *agent, uint32_t milliseconds);
+void vm_agent_clear_deadline(struct vm_agent *agent);
+int vm_agent_deadline_passed(struct vm_agent *agent);
+void vm_heap_set_agent(struct vm_heap *heap, struct vm_agent *agent);
+struct vm_agent *vm_heap_agent(struct vm_heap *heap);
 uint32_t vm_heap_task_begin(struct vm_heap *heap);
 void vm_heap_task_end(struct vm_heap *heap);
 uint32_t vm_heap_task_current(struct vm_heap *heap);

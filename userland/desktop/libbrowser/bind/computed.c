@@ -213,9 +213,13 @@ struct computed_ref {
 	struct vm_string *pseudo_name;
 };
 
-/* The pseudo-element of the declaration being read (set by bind_computed_element, read by computed_write). */
-static int computed_pseudo;
-static struct vm_string *computed_pseudo_name;
+/*
+ * The pseudo-element of the declaration being read (set by
+ * bind_computed_element, read by computed_write).  Each thread has its own:
+ * it belongs to the computation the thread runs.
+ */
+static _Thread_local int computed_pseudo;
+static _Thread_local struct vm_string *computed_pseudo_name;
 
 static void computed_trace(struct vm_heap *heap, struct vm_cell *cell);
 static int computed_box_shorthand(struct vm_realm *realm, struct dom_element *element, const struct vm_string *name, vm_value *result, int *found);
@@ -227,8 +231,8 @@ static int computed_layout_bound(int property);
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
 static int computed_overflow_axis(int own, int other);
-/* The zoom the style being written was laid out in (lengths are reported without it). */
-static float computed_zoom = 1.0f;
+/* The zoom the style being written was laid out in (lengths are reported without it); each thread's own, as above. */
+static _Thread_local float computed_zoom = 1.0f;
 
 static int computed_logical_property(const struct css_style *style, int property);
 static int computed_write_radius(const struct css_style *style, int index, struct wb_units *out);
