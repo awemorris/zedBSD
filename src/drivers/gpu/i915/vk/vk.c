@@ -44,10 +44,12 @@
 /*
  * The native word after the vendor suffix, which only this executor writes
  * (the Venus renderers stop at the vendor suffix): its tag ("TANZ" read
- * little endian) and its feature bits, of which bit 0 is H.264 decode.
+ * little endian) and its feature bits, of which bit 0 is H.264 decode and
+ * bit 2 H.265 decode.
  */
 #define I915_CAPSET_NATIVE_TAG		0x5a4e4154U
 #define I915_CAPSET_NATIVE_VIDEO_H264	1U
+#define I915_CAPSET_NATIVE_VIDEO_H265	4U
 
 /*
  * Whether Vulkan video decode is offered.
@@ -347,8 +349,8 @@ i915_render_capset_fill(
 	 */
 	if (vk->video) {
 		vk->capset[168U / 4U] = I915_CAPSET_NATIVE_TAG;
-		vk->capset[172U / 4U] = I915_CAPSET_NATIVE_VIDEO_H264;
+		vk->capset[172U / 4U] = I915_CAPSET_NATIVE_VIDEO_H264 | I915_CAPSET_NATIVE_VIDEO_H265;
 		vk->capset_bytes = 176U;
-		kern_logf("i915: vk: capset declares H.264 video decode\n");
+		kern_logf("i915: vk: capset declares H.264 and H.265 video decode\n");
 	}
 }

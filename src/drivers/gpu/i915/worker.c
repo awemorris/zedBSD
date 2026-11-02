@@ -2124,6 +2124,12 @@ i915_worker_video_hung(
 	    hang,
 	    sw_id);
 
+	/* The engine's registers as the hang left them, before the reset clears them. */
+	drv_i915_engine_dump(&device->gt.engines.ge[worker->video_index],
+	    &device->gt.engines.el[worker->video_index],
+	    &device->gt.mmio,
+	    "video hang");
+
 	/* A stream that hangs the engine again and again stops video for good. */
 	if (hang > I915_WORKER_VIDEO_HANG_LIMIT) {
 		irq = spin_lock_irqsave(&device->irq_lock);
