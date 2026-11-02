@@ -26,8 +26,8 @@
 | ws344-p004 | VP8L の code の読み（vp8l-codes.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8l_codes 95925 PASS）。実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p003 |
 | ws344-p005 | VP8L の entropy-coded image（vp8l-image.c） | cleared（2026-11-02 14:17 Q1、main で test-vp8l_image 90215 PASS）。実装済み・試験 PASS（Sonnet 5.5 q1957-i01、2026-11-02、test-vp8l_image 90215 checks。cleared は Q1） | p004 |
 | ws344-p006 | VP8L の逆変換（vp8l-transform.c） | cleared（2026-11-02 14:14 Q1、main で test-vp8l_transform 457604 PASS）。実装済み・試験 PASS（Sonnet 5.5 q1956-i01、2026-11-02、test-vp8l_transform 457604 checks、run-unit all・check-skeleton・target-build PASS。cleared は Q1） | p001 |
-| ws344-p007 | VP8L の decoder（vp8l.c、run-fixtures lossless） | 実装済み・試験 PASS（Sonnet q1962-i01、2026-11-02、test-vp8l 9490 checks・run-fixtures lossless 174 PASS、Q1 の受け入れ待ち） | p002, p005, p006 |
-| ws344-p008 | ALPH（alpha.c、run-fixtures alpha） | planned | p002, p007 |
+| ws344-p007 | VP8L の decoder（vp8l.c、run-fixtures lossless） | cleared（2026-11-02 14:32 Q1、main で test-vp8l 9490・run-fixtures lossless 174 PASS は担当の結果、main で run-unit all PASS）。実装済み・試験 PASS（Sonnet q1962-i01、2026-11-02、test-vp8l 9490 checks・run-fixtures lossless 174 PASS、Q1 の受け入れ待ち） | p002, p005, p006 |
+| ws344-p008 | ALPH（alpha.c、run-fixtures alpha） | in-progress（2026-11-02 14:32 Sonnet q1964-i01） | p002, p007 |
 | ws344-p009 | bool decoder（bool.c） | cleared（2026-11-02 13:29 Q1、main で test-bool 8376 PASS）。実装済み・試験 PASS（Sonnet q1948-i01、2026-11-02。cleared は Q1） | p001 |
 | ws344-p010 | VP8 の表（vp8-tables.c、RFC の text と照合） | cleared（2026-11-02 13:37 Q1、main で test-vp8_tables 37674 PASS）。実装済み・試験 PASS（Sonnet q1949-i01、2026-11-02。cleared は Q1） | p001 |
 | ws344-p011 | VP8 の frame header（vp8-header.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8_header 45344 PASS）。実装済み・試験 PASS（Sonnet q1951-i01、2026-11-02。cleared は Q1） | p009, p010 |
