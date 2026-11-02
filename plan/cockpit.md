@@ -14,7 +14,7 @@
 | P5 | [WS345](ws345/ws.md) | ブラウザ | p004（VM の打ち切り、q1973）に 15:59 着手 | — |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p018（sshd の listener、相互運用 143 項目）cleared。p019（sftp-server、q1975）に 16:35 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
-| P8 | [WS345](ws345/ws.md) | ブラウザ | p002（thread の表）cleared。p003（通信を全部 loader に、q1972）に 15:59 着手 | — |
+| P8 | [BUG-414](bugs/BUG-414.md)・[BUG-415](bugs/BUG-415.md) | ブラウザ | WS345 p003（通信を全部 loader に）cleared。p005 は P5 の p004 待ちなので、その間に Reflect と pagehide（q1977、16:47） | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
