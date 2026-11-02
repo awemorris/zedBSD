@@ -254,4 +254,31 @@ $(foreach command,$(filter-out sh mount umount $(ARMV7_APP_NET_COMMANDS),$(ARMV7
 $(foreach command,$(ARMV7_APP_NET_COMMANDS),\
 	$(eval $(call ARMV7_APP_NET_COMMAND,$(command))))
 
+# libcrypto-compat, the cryptography of the SSH programs: it needs nothing but the C library (threads and the
+# random bytes), and the run-time ABI's helpers it calls are taken from the archive and kept to itself, as the
+# loader does.  It stays mapped once loaded (-z nodelete): the destroy function of a per-thread value lives in it.
+ARMV7_CRYPTO_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libcrypto-compat)
+
+$(DYNAMIC_DIR)/libcrypto-compat.so: $(ARMV7_CRYPTO_COMPAT_OBJS) $(DYNAMIC_DIR)/libc.so $(DYNAMIC_BUILTIN_ARCHIVE) \
+	userland/base/libcrypto-compat/exports.map tools/build/check-dynamic-elf.py
+	$(ZEDBSD_TARGET_LLVM_BIN)/ld.lld $(ARMV7_USER_LDFLAGS) -shared -soname libcrypto-compat.so --hash-style=both \
+ -Bsymbolic-functions -z defs -z now -z relro -z separate-code -z nodelete -z stack-size=0x100000 \
+ --exclude-libs ALL --version-script=userland/base/libcrypto-compat/exports.map \
+ $(ARMV7_CRYPTO_COMPAT_OBJS) $(DYNAMIC_BUILTIN_ARCHIVE) -L$(DYNAMIC_DIR) -l:libc.so -o $@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine armv7 --role shared-library \
+ --needed libc.so --soname libcrypto-compat.so $@
+
+# zedBSD's own SSH programs (userland/base/ssh): their objects, libcrypto-compat and the C library.  $(1) is the
+# program.
+define ARMV7_SSH_PROGRAM
+$(BUILD)/bin/$(1): $(ARMV7_APP_INPUTS) $(call ZEDBSD_USERLAND_OBJECTS,$(ARMV7_APP_OBJ),$(1)) \
+	$(DYNAMIC_DIR)/libcrypto-compat.so
+	@mkdir -p $$(dir $$@)
+	$(ARMV7_APP_LINK) $(call ZEDBSD_USERLAND_OBJECTS,$(ARMV7_APP_OBJ),$(1)) \
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) -l:libcrypto-compat.so -l:libc.so -o $$@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine armv7 --role application \
+ --needed libcrypto-compat.so --needed libc.so $$@
+endef
+$(foreach program,ssh sshd ssh-keygen sftp-server,$(eval $(call ARMV7_SSH_PROGRAM,$(program))))
+
 -include $(wildcard $(DYNAMIC_DIR)/obj/*/*/*.d $(DYNAMIC_DIR)/obj/*/*/*/*.d $(DYNAMIC_DIR)/obj/*/*/*/*/*.d)
