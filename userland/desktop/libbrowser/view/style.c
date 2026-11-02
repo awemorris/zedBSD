@@ -266,10 +266,12 @@ style_run(
 		style->enter(style->context);
 	vm_thread_set_borrower(1);
 
-	/* Request after request, until the end with an empty queue. */
+	/* The queue, under the lock except while a work runs. */
 	wb_mutex_lock(&style->lock);
 
+	/* Request after request, until the end with an empty queue. */
 	for (;;) {
+		/* The next request, or the end. */
 		while (style->first == NULL && !style->ending)
 			wb_cond_wait(&style->asked, &style->lock);
 		if (style->first == NULL)
