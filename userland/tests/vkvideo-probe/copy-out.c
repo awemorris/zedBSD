@@ -11,12 +11,11 @@
  * rows of the picture's width, then the chroma plane's), so a device whose
  * optimal NV12 image has no layout the host can read (NVIDIA's block
  * linear) is read as any other.  The copy is its own submission, made
- * when the frame is output, so the pictures are read in output order; the
+ * when the frame is output, so the pictures are read in output order, on
+ * the copy-out's family (the video family when it transfers); the
  * buffer's bytes are then copied whole into the host's memory (a device's
  * memory the host sees uncached is slow to read a byte at a time, as the
  * hash reads it).
- * when the frame is output, so the pictures are read in output order, on
- * the copy-out's family (the video family when it transfers).
  */
 
 #include "probe.h"
