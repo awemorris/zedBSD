@@ -96,7 +96,7 @@ put の全関数（service request・accept・none・publickey の問い合わ�
 - `ssh_auth_put_signed_data`: session_id が NULL か、payload が NULL で size > 0 なら out に EINVAL を記録（何も書かない）。session id の長さは `SSH_SHA256_SIZE`（32）。
 - `ssh_auth_put_publickey_signed`: 引数が NULL・seed の無い鍵は EINVAL（out は変わらない）。out が既に error なら、その error を返す。署名の失敗（`ssh_key_sign` の EIO など）の時はこの呼び出しが足した分を `out->size = start` で取り戻す。署名する data の buffer の上限は `SSH_PACKET_LIMIT + 64`、署名 blob の buffer の上限は 128。user の長さは確かめない（program の側）。
 - put 系の `auth_put_key_blob_string` は blob の長さ（51）を先に書いてから `ssh_key_put_public_blob` を呼ぶ（blob を別の buffer に組まない）。
-- 表の値の block に当たる物（UTF-8 の範囲）は `auth_utf8_length` の comment に「Values referenced:」を置いた。PDF ではなく RFC 3629 4 の text を読んだ（RFC 4252・4253 と同じ directory には無い。RFC 3629 4 の ABNF は知識から書き、試験の例は手で作った。**この表の値の独立した 2 つの方法での照合は、RFC 3629 の text が手元の specs に無いため未実施**）。
+- 表の値の block に当たる物（UTF-8 の範囲）は `auth_utf8_length` の comment に「Values referenced:」を置いた。RFC 3629 4 の ABNF は知識から書き、試験の例は手で作った。**この表の値の独立した 2 つの方法での照合は、RFC 3629 の text が手元の specs に無いため未実施**）。
 
 ### 契約への注意（header の変更案ではない）
 
