@@ -451,3 +451,5 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-411](bugs/BUG-411.md) | ブラウザの JavaScript の engine が重い頁で遅い（property の線形の探し、layout） | open（2026-11-02 P8 q1941-i01 で一部: shape の hash 表、layout に依らない getComputedStyle は layout しない ほか。store の最長の呼び出し 40〜42 秒 → 約 10 秒、目標 2 秒は未達で残りは layout そのもの（1 回 0.8〜0.9 秒、intrinsic の測りの繰り返し）。host で確かめた、本物の Windows は未実施） |
 | [BUG-412](bugs/BUG-412.md) | Pi 5 の desktop で click が効かない（1 秒以上押してから離すと click になる） | open・再現せず（2026-11-02 11:02 Q1 が起票、ユーザーの Pi 5 の UAT。13:13 P3 q1936-i01: 注入と実の mouse、kernel 8f91a0d・8e5e20cec のどれでも 38〜67 ms の click が効いた。原因は未特定、[ticket](bugs/BUG-412.md)） |
 | [BUG-413](bugs/BUG-413.md) | Settings の Ethernet の IPv6 が「Not available on zedBSD yet」の固定の文 | fixed（2026-11-02 P1 q1942-i01、backend が ifconfig・route -6 と同じ口で IPv6 の address と router を読み、kl_system_network_v1 version 35 の link_inet6・link_router6 で Settings へ。無い時は「None」。QEMU amd64 で確かめた、実機は未実施） |
+| [BUG-414](bugs/BUG-414.md) | ブラウザ: JavaScript の `Reflect` の global が無い | open（2026-11-02 13:52 Q1 が起票、P8） |
+| [BUG-415](bugs/BUG-415.md) | ブラウザ: 保たない頁を離れる時に pagehide（persisted false）が出ない | open（2026-11-02 13:52 Q1 が起票、P8） |

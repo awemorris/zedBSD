@@ -14,7 +14,7 @@
 | P5 | — | 待機 | WS336 p015（自前の ssh の client）を 13:46 に merge（host の OpenSSH の sshd と 93 項目 PASS） | p018（sshd の listener、p017 の後） |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p016（sshd の monitor）cleared。p017（sshd の pre-auth と session の process、q1944）に着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
-| P8 | [BUG-411](bugs/BUG-411.md) | ブラウザ | JS の engine の速さ（store.google.com の 17〜21 秒）と小さな残り（q1941）。UAT の 2 回目は BUG-402・403・404・406・407 が fixed、405 は WS344 | — |
+| P8 | — | 待機 | BUG-411 は一部（store.google.com の最長 約 40 秒→約 10 秒、残りは layout の結果の cache が要る）。location.replace・pagehide/pageshow・about.google の script の誤りは直した（13:52 merge）。新しい ticket: BUG-414（Reflect が無い）・BUG-415（保たない頁の pagehide） | BUG-411 の layout の cache の判断（Q1） |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
