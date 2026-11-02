@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS335](ws335/ws.md) | 自前の TLS | p034（安全の review、21 件中 12 件を直した、1 時間の fuzz で crash 0）cleared。p035（規約の見直しと持ち越し、q1992）に 21:35 着手 | — |
-| P2 | [WS343](ws343/ws.md) | base の TLS と ssh を自前に | p002（libcrypto-compat に passkey の OpenSSL の関数 16 個、link の差し替えだけで OpenSSL から外す、q1990）に 20:46 着手 | — |
+| P2 | — | 待機 | WS343 p002（libcrypto-compat に passkey の OpenSSL の関数、link の差し替えだけで passkey-fido2・fidoctl が OpenSSL 無し）cleared、22:20 merge | — |
 | P3 | [BUG-412](bugs/BUG-412.md) | Pi 5・USB | 起動の時から挿さっている受信機では click が全部効いた（22:16）。挿し直した受信機で落ちる見立てで、起動の時と hot-plug の列挙の違いを調べる（q1994） | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | [WS345](ws345/ws.md) | ブラウザ | p008（style の thread）cleared。p009（iframe ごとの script の thread、q1993）に 21:40 着手 | — |
