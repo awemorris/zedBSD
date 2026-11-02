@@ -281,22 +281,41 @@ page_vt_pseudo_style(
 	size_t first;
 	size_t last;
 	size_t index;
+	uint32_t lookups;
+	uint32_t met;
 	int siblings;
 	int level;
 	int count;
 	int kind;
+	int changed;
 	int error;
 
 	page = context;
 
-	/* ::before and ::after of any element: the cascade's style for the pseudo-element, inheriting from the element's. */
+	/*
+	 * ::before and ::after of any element: the cascade's style for the pseudo-element, inheriting from the
+	 * element's (which needs no new layout; the used values of the pseudo-element's box are read from the layout).
+	 */
 	if (pseudo == CSS_PSEUDO_ELEMENT_BEFORE || pseudo == CSS_PSEUDO_ELEMENT_AFTER) {
 		chain = malloc(sizeof(*chain));
 		if (chain == NULL)
 			return ENOMEM;
-		error = page_computed_style(page, element, chain);
-		if (error == 0)
-			error = css_engine_compute_pseudo(page->css, element, pseudo, chain, style);
+		error = page_cascaded_style(page, element, chain);
+		if (error != 0) {
+			free(chain);
+			return error;
+		}
+		lookups = css_engine_container_lookups(page->css);
+		error = css_engine_compute_pseudo(page->css, element, pseudo, chain, style);
+
+		/* A pseudo-element's style that met a query container is computed again after the layout gives it its size. */
+		changed = page_needs_layout(page);
+		met = css_engine_container_lookups(page->css);
+		if (error == 0 && changed && met != lookups) {
+			error = page_computed_style(page, element, chain);
+			if (error == 0)
+				error = css_engine_compute_pseudo(page->css, element, pseudo, chain, style);
+		}
 		free(chain);
 		return error;
 	}

@@ -640,7 +640,7 @@ void vm_object_finalize(struct vm_heap *heap, struct vm_cell *cell);
 /* Shapes (shape.c). */
 struct vm_shape *vm_shape_root(struct vm_heap *heap);
 struct vm_shape *vm_shape_add(struct vm_heap *heap, struct vm_shape *shape, vm_value key, uint32_t attributes);
-int vm_shape_find(const struct vm_shape *shape, vm_value key, uint32_t *slot, uint32_t *attributes);
+int vm_shape_find(struct vm_shape *shape, vm_value key, uint32_t *slot, uint32_t *attributes);
 uint32_t vm_shape_count(const struct vm_shape *shape);
 int vm_shape_keys(const struct vm_shape *shape, vm_value *keys, uint32_t *slots, uint32_t *attributes);
 

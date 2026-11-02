@@ -132,8 +132,9 @@ struct page {
 	double now;
 	uint32_t styled_generation;
 	uint32_t laid_out_generation;
-	/* The sum of the generations of the documents in the iframes when the page was laid out. */
+	/* The sum of the generations of the documents in the iframes when the page was laid out, and how many iframe elements there were. */
 	uint64_t laid_out_frames;
+	size_t laid_out_iframes;
 	/* Only successful same-origin child navigations observed by this page. */
 	struct wb_vector visited_urls;
 	uint32_t visits_generation;
@@ -379,6 +380,7 @@ double page_frame_view_transition_duration(void *context, struct dom_element *el
 double page_transition_longest(const struct layout_box *box, int depth);
 int page_frame_capture(void *context, struct dom_element *element);
 uint64_t page_frames_generation(const struct page *page);
+uint64_t page_frames_generation_count(const struct page *page, size_t *iframes);
 int page_frame_paint(void *context, const struct dom_element *element, layout_unit width, layout_unit height, float zoom, struct paint_frame **out);
 int page_node_rects(void *context, struct dom_node *node, struct bind_rect *rects, size_t max, size_t *count);
 int page_view_transition(void *context, int step);
@@ -392,6 +394,7 @@ void page_view_transition_active(void *context, int active, struct vm_string **t
 void page_document_size(void *context, double *width, double *height);
 void page_scroll(void *context, double *x, double *y);
 int page_computed_style(void *context, struct dom_element *element, struct css_style *style);
+int page_cascaded_style(void *context, struct dom_element *element, struct css_style *style);
 void page_box_index_release(struct page *page);
 void page_scroll_to(void *context, double x, double y);
 void page_rendering(void *context);

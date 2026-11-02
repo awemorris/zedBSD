@@ -58,7 +58,8 @@ static int geometry_index(struct page *page);
 static size_t geometry_count_boxes(const struct layout_box *box, int depth);
 static void geometry_index_boxes(struct page *page, const struct layout_box *box, int depth);
 static size_t geometry_slot_of(const struct page *page, const struct dom_node *node);
-static int geometry_cascade(struct page *page, struct dom_element *element, struct css_style *style);
+static int geometry_cascade(struct page *page, struct dom_element *element, struct css_style *style, int *bound);
+static int geometry_root_flow(struct page *page, struct dom_element *root, struct css_style *style, int *bound);
 
 /*
  * Finds or creates the script selector engine for bind_host.selector_engine.
@@ -480,9 +481,69 @@ page_computed_style(
 	}
 
 	/* Otherwise the cascade's. */
-	error = geometry_cascade(page, element, style);
+	error = geometry_cascade(page, element, style, NULL);
 	if (error != 0)
 		return error;
+
+	/* Succeeded: the style. */
+	return 0;
+}
+
+/*
+ * Computes an element's style for bind_host.cascaded_style, for the
+ * properties whose values do not depend on the layout: the cascade's
+ * without laying the page out again, as page_computed_style would give
+ * it.  A page laid out as it is now gives its box's style as
+ * page_computed_style does; so does an element whose style the layout
+ * changes or decides: one whose style or an ancestor's met a query
+ * container or has a vertical writing mode, and any while a view
+ * transition is shown.  The root's style takes its body's flow as its
+ * box does.  ENOENT for an element outside the document.
+ */
+int
+page_cascaded_style(
+	void *context,
+	struct dom_element *element,
+	struct css_style *style)
+{
+	const struct dom_node *walk;
+	struct page *page;
+	int changed;
+	int bound;
+	int error;
+
+	/* An element outside the document has no style. */
+	page = context;
+	for (walk = &element->node; dom_flat_parent(walk) != NULL; walk = dom_flat_parent(walk))
+		continue;
+	if (walk != &page->document->node)
+		return ENOENT;
+
+	/* A page laid out as it is now, or one showing a view transition, takes its boxes' styles. */
+	changed = page_needs_layout(page);
+	if (!changed || page->transition_on) {
+		error = page_computed_style(context, element, style);
+		return error;
+	}
+
+	/* The cascade's, unless the layout would change or decide it. */
+	bound = 0;
+	error = geometry_cascade(page, element, style, &bound);
+	if (error != 0)
+		return error;
+
+	/* The root element's box takes its body's writing mode and direction. */
+	if (!bound && dom_flat_parent(&element->node) == &page->document->node) {
+		error = geometry_root_flow(page, element, style, &bound);
+		if (error != 0)
+			return error;
+	}
+
+	/* A style the layout decides is the layout's. */
+	if (bound) {
+		error = page_computed_style(context, element, style);
+		return error;
+	}
 
 	/* Succeeded: the style. */
 	return 0;
@@ -1256,12 +1317,16 @@ geometry_slot_of(
 /*
  * Computes an element's style with the cascade, from the root element
  * down to it (an element without a box has no style of its own kept).
+ * When bound is not NULL it is set when the layout would give the
+ * element's box another style or decide it: the style of the element or an
+ * ancestor met a query container, or has a vertical writing mode.
  */
 static int
 geometry_cascade(
 	struct page *page,
 	struct dom_element *element,
-	struct css_style *style)
+	struct css_style *style,
+	int *bound)
 {
 	struct dom_element **chain;
 	struct css_style *parent;
@@ -1269,6 +1334,7 @@ geometry_cascade(
 	struct dom_node *walk;
 	size_t count;
 	size_t index;
+	int contained;
 	int error;
 
 	/* The styles as the document and its sheets are now. */
@@ -1309,6 +1375,13 @@ geometry_cascade(
 			return error;
 		}
 
+		/* A vertical flow makes the layout's style a logical one, and a style that met a query container depends on its laid out size (as do the styles that inherit from it). */
+		contained = css_engine_computed_contained(page->css);
+		if (bound != NULL && style->writing_mode != CSS_WRITING_HORIZONTAL_TB)
+			*bound = 1;
+		if (bound != NULL && contained)
+			*bound = 1;
+
 		/* The next one inherits from this one. */
 		*parent = *style;
 		inherited = parent;
@@ -1319,5 +1392,68 @@ geometry_cascade(
 	free(chain);
 
 	/* Succeeded: the style. */
+	return 0;
+}
+
+/*
+ * Gives the root element's style the writing mode and direction of its
+ * first body child that makes a box, as the root's box takes them
+ * (layout's box_root_flow).  bound is set when a child that makes no box
+ * of its own but whose children do (display: contents) comes first, which
+ * the layout decides.
+ */
+static int
+geometry_root_flow(
+	struct page *page,
+	struct dom_element *root,
+	struct css_style *style,
+	int *bound)
+{
+	struct dom_element *element;
+	struct css_style *child_style;
+	struct dom_node *child;
+	int is_body;
+	int error;
+
+	/* The children's styles (on the heap: they are large). */
+	child_style = malloc(sizeof(*child_style));
+	if (child_style == NULL)
+		return ENOMEM;
+
+	/* Each element child, in order, until the first body that makes a box. */
+	for (child = root->node.first_child; child != NULL; child = child->next) {
+		if (child->type != DOM_ELEMENT)
+			continue;
+		element = (struct dom_element *)child;
+		error = geometry_cascade(page, element, child_style, NULL);
+		if (error != 0) {
+			free(child_style);
+			return error;
+		}
+
+		/* A child of no box is passed over; one whose children take its place is the layout's to decide. */
+		if (child_style->display == CSS_DISPLAY_NONE || child_style->display == CSS_DISPLAY_TABLE_COLUMN)
+			continue;
+		if (child_style->display == CSS_DISPLAY_CONTENTS) {
+			*bound = 1;
+			break;
+		}
+
+		/* The first body's flow is the root's. */
+		is_body = vm_string_equal_ascii(element->local_name, "body");
+		if (!is_body)
+			continue;
+		style->writing_mode = child_style->writing_mode;
+		style->writing_sideways = child_style->writing_sideways;
+		style->direction = child_style->direction;
+
+		/* A vertical flow makes the root's box style a logical one. */
+		if (style->writing_mode != CSS_WRITING_HORIZONTAL_TB)
+			*bound = 1;
+		break;
+	}
+
+	/* Succeeded: the root's flow is its box's. */
+	free(child_style);
 	return 0;
 }

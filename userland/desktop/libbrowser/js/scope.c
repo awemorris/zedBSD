@@ -37,6 +37,9 @@
 /* The length of the name arguments. */
 #define SCOPE_ARGUMENTS_LENGTH	9U
 
+/* The fewest bindings a scope has before its names are found through a hash index. */
+#define SCOPE_INDEX_MIN		16U
+
 /* The name arguments, as the tree's texts are written (a constant for the life of the program). */
 static const uint16_t scope_arguments_name[SCOPE_ARGUMENTS_LENGTH] = {
 	'a', 'r', 'g', 'u', 'm', 'e', 'n', 't', 's'
@@ -45,6 +48,8 @@ static const uint16_t scope_arguments_name[SCOPE_ARGUMENTS_LENGTH] = {
 static struct js_function_info *scope_function(struct js_compiler *compiler, struct js_scope *parent, struct js_node *node, int program);
 static struct js_scope *scope_new(struct js_compiler *compiler, struct js_scope *parent, struct js_function_info *function, int kind);
 static struct js_binding *scope_find(const struct js_scope *scope, const uint16_t *name, size_t length);
+static uint32_t scope_hash(const uint16_t *name, size_t length);
+static void scope_index(struct js_compiler *compiler, struct js_scope *scope);
 static struct js_binding *scope_declare(struct js_compiler *compiler, struct js_scope *scope, const uint16_t *name, size_t length, int kind);
 static void scope_declare_var(struct js_compiler *compiler, struct js_function_info *info, const uint16_t *name, size_t length);
 static void scope_declarations(struct js_compiler *compiler, struct js_function_info *info, struct js_node *list);
@@ -339,7 +344,20 @@ scope_find(
 	size_t length)
 {
 	struct js_binding *binding;
+	uint32_t slot;
 	int same;
+
+	/* A scope of many bindings probes its index from the name's hash to a free slot. */
+	if (scope->index != NULL) {
+		slot = scope_hash(name, length) & scope->index_mask;
+		for (binding = scope->index[slot]; binding != NULL; binding = scope->index[slot]) {
+			same = js_text_equal(binding->name, binding->length, name, length);
+			if (same)
+				return binding;
+			slot = (slot + 1U) & scope->index_mask;
+		}
+		return NULL;
+	}
 
 	/* Each binding of the scope. */
 	for (binding = scope->bindings; binding != NULL; binding = binding->next) {
@@ -350,6 +368,75 @@ scope_find(
 
 	/* The scope does not declare it. */
 	return NULL;
+}
+
+/* Hashes a name's UTF-16 units (FNV-1a). */
+static uint32_t
+scope_hash(
+	const uint16_t *name,
+	size_t length)
+{
+	uint32_t hash;
+	size_t index;
+
+	/* Each unit, low byte then high byte. */
+	hash = 2166136261U;
+	for (index = 0; index < length; index++) {
+		hash = (hash ^ (name[index] & 0xffU)) * 16777619U;
+		hash = (hash ^ (uint32_t)(name[index] >> 8)) * 16777619U;
+	}
+
+	/* Succeeded: the hash. */
+	return hash;
+}
+
+/*
+ * Keeps the hash index of a scope's bindings at most half full: made once
+ * the scope has SCOPE_INDEX_MIN of them and made again, twice as large,
+ * when it would be fuller (the old index stays in the arena).  Called
+ * after a binding is added at the front of the list.
+ */
+static void
+scope_index(
+	struct js_compiler *compiler,
+	struct js_scope *scope)
+{
+	struct js_binding **index;
+	struct js_binding *binding;
+	uint32_t count;
+	uint32_t slot;
+
+	/* A scope of few bindings walks its list. */
+	if (scope->binding_count < SCOPE_INDEX_MIN)
+		return;
+
+	/* The new binding goes in an index with room for it. */
+	if (scope->index != NULL && scope->binding_count * 2U <= scope->index_mask + 1U) {
+		binding = scope->bindings;
+		slot = scope_hash(binding->name, binding->length) & scope->index_mask;
+		while (scope->index[slot] != NULL)
+			slot = (slot + 1U) & scope->index_mask;
+		scope->index[slot] = binding;
+		return;
+	}
+
+	/* Otherwise a new index of at least four times the bindings. */
+	count = SCOPE_INDEX_MIN * 4U;
+	while (count < scope->binding_count * 4U)
+		count *= 2U;
+	index = wb_arena_zalloc(compiler->arena, count * sizeof(*index));
+	if (index == NULL)
+		js_compile_out_of_memory(compiler);
+
+	/* Every binding in it. */
+	for (binding = scope->bindings; binding != NULL; binding = binding->next) {
+		slot = scope_hash(binding->name, binding->length) & (count - 1U);
+		while (index[slot] != NULL)
+			slot = (slot + 1U) & (count - 1U);
+		index[slot] = binding;
+	}
+	scope->index = index;
+	scope->index_mask = count - 1U;
 }
 
 /* Declares a name in a scope (a name declared already keeps its binding). */
@@ -377,6 +464,10 @@ scope_declare(
 	binding->kind = kind;
 	binding->next = scope->bindings;
 	scope->bindings = binding;
+	scope->binding_count++;
+
+	/* A scope of many bindings finds them through its index. */
+	scope_index(compiler, scope);
 
 	/* Succeeded: the binding. */
 	return binding;

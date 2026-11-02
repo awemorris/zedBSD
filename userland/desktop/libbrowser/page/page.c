@@ -784,7 +784,7 @@ page_layout(
 
 	/* Only a complete layout advances observable generation and geometry caches. */
 	page->laid_out_generation = page_generation(page);
-	page->laid_out_frames = page_frames_generation(page);
+	page->laid_out_frames = page_frames_generation_count(page, &page->laid_out_iframes);
 	page_animations_sync(page);
 	page->laid_out_transition = page->transition_generation;
 	page->laid_out_visits = page->visits_generation;

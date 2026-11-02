@@ -223,7 +223,9 @@ typedef void (*bind_request_done)(void *context, int error, int status, const ch
  * scripts get storage that holds nothing).  It computes an
  * element's style (computed_style: the style of its box when the page is
  * laid out and the element has one, otherwise the cascade's; 0, ENOENT
- * for an element not in the document, or ENOMEM), and takes a scroll a
+ * for an element not in the document, or ENOMEM; cascaded_style, which may
+ * be NULL, gives the same values of the properties that do not depend on
+ * the layout without laying a changed page out again), and takes a scroll a
  * script asks for (scroll_to, in CSS pixels; the host keeps it inside the
  * document, and scroll reports where it went).  A NULL callback reads as nothing and
  * writes nothing: no engine matches selectors, and missing layout supplies no geometry proof.
@@ -271,6 +273,7 @@ struct bind_host {
 	void (*scroll)(void *context, double *x, double *y);
 	const struct bind_storage_calls *storage;
 	int (*computed_style)(void *context, struct dom_element *element, struct css_style *style);
+	int (*cascaded_style)(void *context, struct dom_element *element, struct css_style *style);
 	void (*scroll_to)(void *context, double x, double y);
 	/* An animation frame is about to run its callbacks: the rendering update before them happens (may be NULL). */
 	void (*rendering)(void *context);
