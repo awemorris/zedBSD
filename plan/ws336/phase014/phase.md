@@ -89,8 +89,8 @@ WS335 の待ち: p003 経由
 
 生き残った 8 通りは全部同値か host の試験で作れない状態で、試験は足していない。
 - 同値（もう 1 つの確かめが同じ結果を出す）: `join-first-boundary`（`first_size >= capacity` を `>` にしても、直後の `second_size >= capacity - first_size` が長さがちょうど capacity の時に断る）、`read-limit-off`（`keygen_read_file` の長さの上限を外しても `ssh_buf` の limit が同じ長さで EMSGSIZE にする）、`write-replace-check-off`（`keygen_write_file` の「既存を置き換えない」の再確認を外しても、書く前に `keygen_generate_pair` が同じ確かめを済ませている。再確認は競合の備え）、`pair-private-check-off`（`keygen_generate_pair` の先の確かめを外しても `keygen_write_file` の確かめが同じ文で断る）、`port-digits-missing`（`[h]:` の後に数字が無い時の確かめを外しても、port が 0 になり次の確かめで断る）。
-- 試験では見えない: `write-fsync-off`（fsync を外す。出力は同じ）、`write-partial-off`（write が途中までで返った時の続きを外す。host の file では途中までの write が起きない）、`read-eintr`（read の EINTR の再試行を外す。signal を送る試験は作っていない。最後の版では comment を足したので変更の位置が一致せず適用されなかったが、前の版では生き残り）。
-- 生き残りに数えない 1 つ: `hostkeys-prefix-default`（`-A` で `-f` が無い時の prefix を `""` から `"/tmp"` にする）。`-f` 無しの `-A` は実在の `/etc/ssh` に書くので host の試験では流さない。p019 の QEMU で確かめる。これも生き残りの 8 通りの中に数えている（8 通り = 同値 5 + fsync・partial の 2 + prefix の 1）。
+- 試験では見えない: `write-fsync-off`（fsync を外す。出力は同じ）、`write-partial-off`（write が途中までで返った時の続きを外す。host の file では途中までの write が起きない）。適用できなかった 1 通り `read-eintr`（read の EINTR の再試行を外す）も、前の版では生き残りで、signal を送る試験は作っていない（最後の版では read の loop に comment を足したので変更の位置が一致しなかった）。
+- host の試験で作れない状態: `hostkeys-prefix-default`（`-A` で `-f` が無い時の prefix を `""` から `"/tmp"` にする）。`-f` 無しの `-A` は実在の `/etc/ssh` に書くので host の試験では流さない。p019 の QEMU で確かめる。生き残り 8 通り = 同値 5 + fsync・partial の 2 + prefix の 1。
 
 最初の版（HOME を使う試験・境界の試験を足す前）では 15 通りが生き残り、その中で試験が足りなかった物（余りの operand が `-N` 無しの別の理由で 1 になっていた、`-l -A`・`-R h -l` が既定の file の失敗で 1 になっていた、1 MiB・path 長・`-R ""` の文・comment の LF・CR の文の確かめが無かった、など）は試験を足して検出するようにした。mutant の一覧の script は scratchpad の `p014/mut.py`（git に入れていない）、最終の結果は `build/tmp/p014-mut-final.txt`。
 
