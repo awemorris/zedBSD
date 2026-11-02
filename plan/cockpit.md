@@ -10,7 +10,7 @@
 | P1 | [WS324](ws324/ws.md) | RTX 2070 の Vulkan Video | 返却（11:17）。p007 cleared: H.265 decode が HEVC_v1 の範囲内 131 本中 130 本で正しい、Video Player の GPU の道で H.264・H.265 を再生。今日の作業は終わり | 次の指示で encode（p008a）から再開 |
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（09:46）。p006 cleared: H.265 の decode（HEVC_v1 128 本一致）と Video Player の GPU の道での H.264・H.265 の再生。今日の作業は終わり | 次の指示で encode（p008）から再開 |
 | P3 | [BUG-412](bugs/BUG-412.md) | Pi 5 | desktop の click が効かない（q1936）。注入の入力・今の main の kernel では再現せず、ユーザーの元の kernel 8f91a0d に戻して本物の mouse の押し方を記録する所（11:43〜） | — |
-| P4 | — | 待機 | WS319 の H.265 decode と Video Player の GPU の道を 12:05 に merge（q1926 cleared）。5330 は Debian で空き | — |
+| P4 | — | 待機 | WS319 の H.265 decode と Video Player の GPU の道を 12:03 に merge（q1926 cleared）。5330 は Debian で空き | — |
 | P5 | [WS336](ws336/ws.md) p008 | 自前の ssh・sshd | ssh-transport（q1932、Opus） | p015 以降 |
 | P6 | — | libssl-compat・libcrypto-compat | 返却。p029（TLS 1.3 の handshake）cleared | p031・p032 の候補 |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |

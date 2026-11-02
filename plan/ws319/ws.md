@@ -19,13 +19,13 @@
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | ws319-p001 | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | planning | WS318 completed |
-| [ws319-p002](phase002/phase.md) | H.264 の Video Player の GPU の道（VP_GPU_PRESENT）を 5330 で確かめて直す | cleared（2026-11-02 P4 q1926-i01、Q1 が 12:05 に受け入れ、00ac64803 で main に merge） | WS083 |
-| [ws319-p003](phase003/phase.md) | H.265 decode: HCP の long format を Vulkan Video として（設計・実装・host 試験） | cleared（2026-11-02 P4 q1926-i01、Q1 が 12:05 に受け入れ、00ac64803 で main に merge） | WS322 p005・p006 |
-| [ws319-p004](phase004/phase.md) | 5330 の実機: HEVC_v1 の stream ごとの表、Video Player の H.265 の GPU の道 1080p30/60 | cleared（2026-11-02 P4 q1926-i01、Q1 が 12:05 に受け入れ、00ac64803 で main に merge） | p003 |
+| [ws319-p002](phase002/phase.md) | H.264 の Video Player の GPU の道（VP_GPU_PRESENT）を 5330 で確かめて直す | cleared（2026-11-02 P4 q1926-i01、Q1 が 12:03 に受け入れ、00ac64803 で main に merge） | WS083 |
+| [ws319-p003](phase003/phase.md) | H.265 decode: HCP の long format を Vulkan Video として（設計・実装・host 試験） | cleared（2026-11-02 P4 q1926-i01、Q1 が 12:03 に受け入れ、00ac64803 で main に merge） | WS322 p005・p006 |
+| [ws319-p004](phase004/phase.md) | 5330 の実機: HEVC_v1 の stream ごとの表、Video Player の H.265 の GPU の道 1080p30/60 | cleared（2026-11-02 P4 q1926-i01、Q1 が 12:03 に受け入れ、00ac64803 で main に merge） | p003 |
 
 ## Resume point
 
-- 2026-11-02 12:05 Q1: p002〜p004 を受け入れて main に merge（00ac64803、source は先に 01c046344 までで merge 済み）。main で hevc-slice の host 試験 PASS（147 本、15 本は断る）。HEVC_v1 146 本: 128 本が全 frame 一致、3 本（SAODBLK_A・B、VPSSPSPPS_A）は ffmpeg の参照の誤りで i915 は正しい、15 本は理由付きで断る、失敗 0。Video Player の GPU の道: H.264・H.265 とも 1080p30 late 0、1080p60 は late 19（H.264）・52（H.265）。次の再開: 1080p60 の late（swapchain の acquire の待ち 8〜13 ms）、実の desktop の session での再生、H.264・H.265 encode。
+- 2026-11-02 12:03 Q1: p002〜p004 を受け入れて main に merge（00ac64803、source は先に 01c046344 までで merge 済み）。main で hevc-slice の host 試験 PASS（147 本、15 本は断る）。HEVC_v1 146 本: 128 本が全 frame 一致、3 本（SAODBLK_A・B、VPSSPSPPS_A）は ffmpeg の参照の誤りで i915 は正しい、15 本は理由付きで断る、失敗 0。Video Player の GPU の道: H.264・H.265 とも 1080p30 late 0、1080p60 は late 19（H.264）・52（H.265）。次の再開: 1080p60 の late（swapchain の acquire の待ち 8〜13 ms）、実の desktop の session での再生、H.264・H.265 encode。
 
 - 2026-10-30 Q1: 作成。WS318 の completed の後。
 - 2026-11-02 P4（q1926-i01）: p002 cleared（H.264 の GPU の道）、p003・p004 cleared（H.265 decode、HCP の long format、HEVC_v1 の Main 131 本が正しい）。残り: 1080p60 の late、H.264 encode・H.265 encode は未着手。試験は `plan/ws319/tests/`（run-5330-video.sh、make-clips.sh、probe-table.py、hcp/、hevc-slice/、gpu-hold/）。
