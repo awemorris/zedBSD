@@ -25,6 +25,9 @@
 #include "userland/base/libcrypto-compat/cryc-mlkem.h"
 
 /* Fills size bytes with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Fills size bytes with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -54,6 +57,7 @@ main(void)
 	unsigned total;
 	int error;
 
+	/* The sum of the folded outputs starts at zero. */
 	total = 0U;
 
 	/* Key generation with a secret z (d is public, see the file comment). */

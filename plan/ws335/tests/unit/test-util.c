@@ -31,6 +31,9 @@ random_next(void)
 }
 
 /* Fills size bytes at out with pseudo-random bytes. */
+static void random_fill(uint8_t *out, size_t size);
+
+/* Fills size bytes at out with pseudo-random bytes. */
 static void
 random_fill(
 	uint8_t *out,
@@ -65,17 +68,27 @@ test_wipe(void)
 		memset(buffer, 0xaa, sizeof(buffer));
 		cryc_wipe(buffer + 10, size);
 
+		/* The wiped bytes are all zero. */
 		clean = 1;
-		for (index = 10; index < 10 + size; index++)
+		for (index = 10; index < 10 + size; index++) {
 			if (buffer[index] != 0)
 				clean = 0;
+		}
+
+		/* The bytes before are still 0xaa. */
 		intact = 1;
-		for (index = 0; index < 10; index++)
+		for (index = 0; index < 10; index++) {
 			if (buffer[index] != 0xaa)
 				intact = 0;
-		for (index = 10 + size; index < sizeof(buffer); index++)
+		}
+
+		/* The bytes after are still 0xaa. */
+		for (index = 10 + size; index < sizeof(buffer); index++) {
 			if (buffer[index] != 0xaa)
 				intact = 0;
+		}
+
+		/* The wiped range is zero and its neighbours are untouched. */
 		CHECK(clean);
 		CHECK(intact);
 	}
@@ -93,6 +106,10 @@ test_ct_equal(void)
 	unsigned b;
 	unsigned bit;
 	int round;
+	int expected_equal;
+	int good;
+	int different;
+	uint32_t coin;
 
 	/* The empty strings are equal even when absent. */
 	CHECK(cryc_ct_equal(NULL, NULL, 0) == 1);
@@ -103,7 +120,11 @@ test_ct_equal(void)
 		for (b = 0; b < 256U; b++) {
 			left[0] = (uint8_t)a;
 			right[0] = (uint8_t)b;
-			if (!CHECK(cryc_ct_equal(left, right, 1) == (a == b ? 1 : 0)))
+			expected_equal = 0;
+			if (a == b)
+				expected_equal = 1;
+			good = CHECK(cryc_ct_equal(left, right, 1) == expected_equal);
+			if (!good)
 				return;
 		}
 	}
@@ -134,9 +155,18 @@ test_ct_equal(void)
 		size = 1U + (random_next() >> 8) % sizeof(left);
 		random_fill(left, size);
 		memcpy(right, left, size);
-		if ((random_next() & 1U) != 0)
-			right[(random_next() >> 8) % size] = (uint8_t)(random_next() >> 24);
-		CHECK(cryc_ct_equal(left, right, size) == (memcmp(left, right, size) == 0 ? 1 : 0));
+		coin = random_next() & 1U;
+		if (coin != 0) {
+			position = (random_next() >> 8) % size;
+			right[position] = (uint8_t)(random_next() >> 24);
+		}
+
+		/* The constant-time comparison agrees with memcmp. */
+		different = memcmp(left, right, size);
+		expected_equal = 0;
+		if (different == 0)
+			expected_equal = 1;
+		CHECK(cryc_ct_equal(left, right, size) == expected_equal);
 	}
 }
 
@@ -160,13 +190,19 @@ test_masks(void)
 	/* Every pair of edge values. */
 	for (first = 0; first < sizeof(edge) / sizeof(edge[0]); first++) {
 		left = edge[first];
-		expected = left == 0 ? 0xffffffffU : 0U;
+		expected = 0U;
+		if (left == 0)
+			expected = 0xffffffffU;
 		CHECK(cryc_ct_mask_zero32(left) == expected);
 		for (second = 0; second < sizeof(edge) / sizeof(edge[0]); second++) {
 			right = edge[second];
-			expected = left == right ? 0xffffffffU : 0U;
+			expected = 0U;
+			if (left == right)
+				expected = 0xffffffffU;
 			CHECK(cryc_ct_mask_eq32(left, right) == expected);
-			expected = left < right ? 0xffffffffU : 0U;
+			expected = 0U;
+			if (left < right)
+				expected = 0xffffffffU;
 			CHECK(cryc_ct_mask_lt32(left, right) == expected);
 		}
 	}
@@ -181,11 +217,17 @@ test_masks(void)
 			right = left - 1U;
 		if (round % 7 == 0)
 			right = left;
-		expected = left == 0 ? 0xffffffffU : 0U;
+		expected = 0U;
+		if (left == 0)
+			expected = 0xffffffffU;
 		CHECK(cryc_ct_mask_zero32(left) == expected);
-		expected = left == right ? 0xffffffffU : 0U;
+		expected = 0U;
+		if (left == right)
+			expected = 0xffffffffU;
 		CHECK(cryc_ct_mask_eq32(left, right) == expected);
-		expected = left < right ? 0xffffffffU : 0U;
+		expected = 0U;
+		if (left < right)
+			expected = 0xffffffffU;
 		CHECK(cryc_ct_mask_lt32(left, right) == expected);
 	}
 }
@@ -201,6 +243,7 @@ test_select(void)
 	size_t size;
 	size_t index;
 	uint32_t mask;
+	const uint8_t *want;
 	int which;
 
 	/* Zero bytes touch nothing, even with absent buffers. */
@@ -213,24 +256,31 @@ test_select(void)
 		random_fill(when_set, size);
 		random_fill(when_clear, size);
 		for (which = 0; which < 2; which++) {
-			mask = which == 0 ? 0xffffffffU : 0U;
+			mask = 0U;
+			want = when_clear;
+			if (which == 0) {
+				mask = 0xffffffffU;
+				want = when_set;
+			}
+
+			/* The selection takes the first buffer for the full mask and the second for zero. */
 			memset(out, 0x5a, sizeof(out));
 			cryc_ct_select_bytes(out, when_set, when_clear, size, mask);
-			CHECK_BYTES(out, which == 0 ? when_set : when_clear, size);
+			CHECK_BYTES(out, want, size);
 			CHECK(out[size] == 0x5a);
 
 			/* The result may be written over either input. */
 			memcpy(expected, when_set, size);
 			cryc_ct_select_bytes(expected, expected, when_clear, size, mask);
-			CHECK_BYTES(expected, which == 0 ? when_set : when_clear, size);
+			CHECK_BYTES(expected, want, size);
 			memcpy(expected, when_clear, size);
 			cryc_ct_select_bytes(expected, when_set, expected, size, mask);
-			CHECK_BYTES(expected, which == 0 ? when_set : when_clear, size);
+			CHECK_BYTES(expected, want, size);
 
 			/* The conditional copy: destination takes the source only for the full mask. */
 			memcpy(expected, when_clear, size);
 			cryc_ct_copy_if(expected, when_set, size, mask);
-			CHECK_BYTES(expected, which == 0 ? when_set : when_clear, size);
+			CHECK_BYTES(expected, want, size);
 			for (index = size; index < sizeof(expected); index++)
 				expected[index] = 0x77;
 			cryc_ct_copy_if(expected, when_set, size, mask);

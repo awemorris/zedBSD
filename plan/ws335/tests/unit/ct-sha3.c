@@ -18,6 +18,12 @@
 #include "userland/base/libcrypto-compat/cryc-sha3.h"
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -44,6 +50,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value. */
 	return value & 0xffU;
 }
 
@@ -58,6 +66,7 @@ main(void)
 	unsigned total;
 	unsigned lane;
 
+	/* The sum of the folded outputs starts at zero. */
 	total = 0;
 
 	/* The permutation of a secret state. */

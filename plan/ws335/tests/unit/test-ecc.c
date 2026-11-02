@@ -525,6 +525,137 @@ static const struct cavp_ecdh cavp_ecdh_p384[CAVP_ECDH_COUNT] = {
 	},
 };
 
+/* The candidates a scripted random source hands out, and what it saw. */
+struct script {
+	const uint8_t *data;
+	unsigned count;
+	size_t size;
+	unsigned calls;
+	unsigned fail_at;
+	unsigned wrong_size;
+	unsigned overdrawn;
+};
+
+/* Fills out with size pseudo-random bytes. */
+static void random_bytes(uint8_t *out, size_t size);
+
+/* A random source for the library: pseudo-random bytes from random_bytes. */
+static int prng_random(void *context, uint8_t *out, size_t size);
+
+/* Reads hex text into exactly size bytes, left-padded with zeros; returns 0, or -1 when the value is wider. */
+static int hex_to_size(const char *text, uint8_t *out, size_t size);
+
+/* Adds one to the size big-endian bytes (wrapping at the top). */
+static void bytes_inc(uint8_t *bytes, size_t size);
+
+/* Subtracts one from the size big-endian bytes (wrapping at zero). */
+static void bytes_dec(uint8_t *bytes, size_t size);
+
+/* Sets out = left - right for size big-endian bytes, left not below right. */
+static void bytes_sub(uint8_t *out, const uint8_t *left, const uint8_t *right, size_t size);
+
+/* Returns 1 when the size bytes are all zero. */
+static int bytes_zero(const uint8_t *bytes, size_t size);
+
+/* Reads big-endian bytes (the curve's size) into a scalar of the curve's limbs. */
+static void scalar_from_bytes(uint32_t *scalar, const struct cryc_ecp *ec, const uint8_t *bytes);
+
+/* Sets scalar to a random value in [1, n - 1]. */
+static void random_scalar(uint32_t *scalar, const struct cryc_ecp *ec);
+
+/* out = a * b mod n for plain values below n. */
+static void order_mul(const struct cryc_ecp *ec, uint32_t *out, const uint32_t *a, const uint32_t *b);
+
+/* out = a^-1 mod n for a plain value in [1, n - 1] (Fermat: a^(n - 2)). */
+static void order_inv(const struct cryc_ecp *ec, uint32_t *out, const uint32_t *a);
+
+/* out = (0 - a) mod n for a plain value below n. */
+static void order_neg(const struct cryc_ecp *ec, uint32_t *out, const uint32_t *a);
+
+/* Writes the uncompressed encoding of scalar * G into out (1 + 2 * size bytes). */
+static void base_encode(const struct cryc_ecp *ec, uint8_t *out, const uint32_t *scalar);
+
+/* A random source that hands out the scripted candidates in turn, and fails at fail_at or past the end. */
+static int script_random(void *context, uint8_t *out, size_t size);
+
+/* Sets up a script over data (count candidates of the curve's size). */
+static void script_start(struct script *script, const uint8_t *data, unsigned count, size_t size);
+
+/* Runs cryc_ecc_keygen on the script with both outputs filled with the sentinel; returns its result. */
+static int keygen_run(const struct cryc_ecp *ec, struct script *script, uint8_t *private_key, uint8_t *public_key);
+
+/* Checks that cryc_ecc_keygen on the candidates gave the private key and public key, after draws draws. */
+static void keygen_expect(const struct cryc_ecp *ec, const uint8_t *candidates, unsigned count, unsigned draws, const uint8_t *want_private, const uint8_t *want_public);
+
+/* Checks the key generation against scripted candidates at the edges of the range. */
+static void check_keygen_script(const struct params *params, const struct cryc_ecp *ec);
+
+/* Checks the CAVP key pairs: feeding d - 1 as the candidate must give d and the published Q. */
+static void check_keygen_cavp(const struct params *params, const struct cryc_ecp *ec);
+
+/* Checks the CAVP ECC CDH cases: Z = x(dIUT * QCAVS), and dIUT gives QIUT. */
+static void check_ecdh_cavp(const struct params *params, const struct cryc_ecp *ec, const struct cavp_ecdh *table);
+
+/* Returns the leading-zero-stripped private key of a Wycheproof case in out; returns 0, or -1 when it is wider than the curve. */
+static int wide_private(const uint8_t *priv, size_t priv_size, uint8_t *out, size_t size);
+
+/* Checks the Wycheproof ECDH cases for P-256. */
+static void check_ecdh_wycheproof(const struct params *params, const struct cryc_ecp *ec);
+
+/* Checks the errors of ECDH: the private key's range, every refusal of the peer's point, and the wiping of the output. */
+static void check_ecdh_errors(const struct params *params, const struct cryc_ecp *ec);
+
+/* Checks ECDH on generated keys: both sides agree, x(d Q) = x((n - d) Q), and x(d G) is the public key's x. */
+static void check_ecdh_properties(const struct params *params, const struct cryc_ecp *ec, unsigned pairs);
+
+/* Looks for a private key whose public point has a zero first x byte, and checks ECDH gives all size bytes. */
+static void check_ecdh_leading_zero(const struct params *params, const struct cryc_ecp *ec);
+
+/* Hashes size bytes of msg with the hash id into out; returns the digest size. */
+static size_t digest_message(enum cryc_hash_id id, const uint8_t *msg, size_t size, uint8_t *out);
+
+/* Signs a hash with the private scalar and the nonce scalar. */
+static int sign(const struct cryc_ecp *ec, const uint32_t *d, const uint32_t *k, const uint8_t *hash, size_t hash_size, uint8_t *r_out, uint8_t *s_out);
+
+/* Makes a key pair and a signature of hash with it (drawing nonces until r and s are non-zero). */
+static void make_signature(const struct cryc_ecp *ec, uint32_t *d, uint8_t *public_key, const uint8_t *hash, size_t hash_size, uint8_t *r, uint8_t *s);
+
+/* Decodes a DER signature strictly. */
+static int der_signature(const uint8_t *sig, size_t length, size_t size, uint8_t *r, uint8_t *s);
+
+/* Returns the last section key of the record that names a curve ("P-256,SHA-256" for SigVer, "P-256" for KeyPair), or NULL. */
+static const char * record_section(const struct vec_file *file);
+
+/* Maps a hash's name as the vectors write it to an id; CRYC_HASH_NONE for one this module lacks. */
+static enum cryc_hash_id hash_from_name(const char *name);
+
+/* Checks the CAVP SigVer cases of the curve with SHA-256, SHA-384 and SHA-512. */
+static void check_sigver_cavp(const struct params *params, const struct cryc_ecp *ec);
+
+/* Checks one Wycheproof ECDSA file. */
+static void check_wycheproof_ecdsa(const struct cryc_ecp *ec, const char *name);
+
+/* Checks signatures made here: round trips, each field changed, the hash cut and padded. */
+static void check_roundtrip(const struct cryc_ecp *ec, unsigned iterations);
+
+/* Checks r and s out of range, and every refusal of the key and of the hash size. */
+static void check_verify_errors(const struct params *params, const struct cryc_ecp *ec);
+
+/* Checks E at or above n, E = 0, and a verification whose result R is at infinity. */
+static void check_hash_edges(const struct params *params, const struct cryc_ecp *ec);
+
+/* Sets out to the right side x^3 - 3 x + b of the curve equation, all in Montgomery form. */
+static void rhs_mont(const struct cryc_ecp *ec, uint32_t *out, const uint32_t *x_mont);
+
+/* Sets out to the square root of a in Montgomery form. */
+static void sqrt_mont(const struct cryc_ecp *ec, uint32_t *out, const uint32_t *a);
+
+/* Checks a verification whose R has an x coordinate at or above n. */
+static void check_x_above_order(const struct params *params, const struct cryc_ecp *ec);
+
+/* Runs the checks of one curve. */
+static void run_curve(const struct params *params, const struct cavp_ecdh *cavp, const char *wycheproof_a, const char *wycheproof_b);
+
 /* Fills out with size pseudo-random bytes. */
 static void
 random_bytes(
@@ -562,11 +693,13 @@ hex_to_size(
 	size_t length;
 	size_t start;
 	char padded[1100];
+	size_t text_size;
 
 	/* Decodes the text (an odd length is padded with one zero digit) and drops the leading zero bytes. */
 	length = hex_decode(text, raw, sizeof(raw));
 	if (length == (size_t)-1) {
-		if (strlen(text) + 2U > sizeof(padded))
+		text_size = strlen(text);
+		if (text_size + 2U > sizeof(padded))
 			return -1;
 		padded[0] = '0';
 		strcpy(padded + 1, text);
@@ -574,6 +707,8 @@ hex_to_size(
 		if (length == (size_t)-1)
 			return -1;
 	}
+
+	/* Skips the leading zero bytes. */
 	start = 0;
 	while (start < length && raw[start] == 0)
 		start++;
@@ -583,6 +718,8 @@ hex_to_size(
 	/* Pads on the left. */
 	memset(out, 0, size);
 	memcpy(out + (size - (length - start)), raw + start, length - start);
+
+	/* Succeeded: the value fits the size. */
 	return 0;
 }
 
@@ -648,9 +785,12 @@ bytes_zero(
 	size_t index;
 
 	/* Every byte. */
-	for (index = 0; index < size; index++)
+	for (index = 0; index < size; index++) {
 		if (bytes[index] != 0U)
 			return 0;
+	}
+
+	/* Succeeded: every byte is zero. */
 	return 1;
 }
 
@@ -676,12 +816,16 @@ random_scalar(
 	const struct cryc_ecp *ec)
 {
 	uint8_t bytes[CRYC_ECP_MAX_BYTES];
+	uint32_t below;
+	uint32_t is_zero;
 
 	/* Draws until the value is in range (nearly always the first draw). */
 	do {
 		random_bytes(bytes, ec->size);
 		scalar_from_bytes(scalar, ec, bytes);
-	} while (cryc_bn_lt(scalar, ec->order.modulus, ec->limbs) == 0U || cryc_bn_is_zero(scalar, ec->limbs) != 0U);
+		below = cryc_bn_lt(scalar, ec->order.modulus, ec->limbs);
+		is_zero = cryc_bn_is_zero(scalar, ec->limbs);
+	} while (below == 0U || is_zero != 0U);
 }
 
 /* out = a * b mod n for plain values below n. */
@@ -755,17 +899,6 @@ base_encode(
 	error = cryc_ecp_encode(ec, &point, out, 1U + 2U * ec->size);
 	CHECK(error == 0);
 }
-
-/* The candidates a scripted random source hands out, and what it saw. */
-struct script {
-	const uint8_t *data;
-	unsigned count;
-	size_t size;
-	unsigned calls;
-	unsigned fail_at;
-	unsigned wrong_size;
-	unsigned overdrawn;
-};
 
 /* A random source that hands out the scripted candidates in turn, and fails at fail_at or past the end. */
 static int
@@ -1050,9 +1183,14 @@ check_keygen_cavp(
 	uint8_t public_key[1U + 2U * CRYC_ECP_MAX_BYTES];
 	const char *section;
 	const char *d_text;
+	const char *key;
+	const char *qx_text;
+	const char *qy_text;
 	unsigned long count;
 	size_t index;
 	int error;
+	int more;
+	int different;
 
 	/* Each record of this curve (the section keys are cumulative: the curve is the last curve key). */
 	count = 0;
@@ -1060,16 +1198,25 @@ check_keygen_cavp(
 	CHECK(error == 0);
 	if (error != 0)
 		return;
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		d_text = vec_get(&file, "d");
 		section = NULL;
 		for (index = file.count; index > 0U && section == NULL; index--) {
-			const char *key = file.keys[index - 1U];
-
-			if (strncmp(key, "section.", 8) == 0 && key[9] == '-')
+			key = file.keys[index - 1U];
+			different = strncmp(key, "section.", 8);
+			if (different == 0 && key[9] == '-')
 				section = key + 8;
 		}
-		if (d_text == NULL || section == NULL || strcmp(section, params->cavp_key) != 0)
+
+		/* A record of another curve, or without a private key, is skipped. */
+		if (d_text == NULL)
+			continue;
+		if (section == NULL)
+			continue;
+		different = strcmp(section, params->cavp_key);
+		if (different != 0)
 			continue;
 
 		/* The candidate is d - 1 (d is at least 1). */
@@ -1077,8 +1224,10 @@ check_keygen_cavp(
 		memcpy(candidate, want_private, ec->size);
 		bytes_dec(candidate, ec->size);
 		want_public[0] = 0x04U;
-		CHECK(hex_to_size(vec_get(&file, "Qx"), want_public + 1U, ec->size) == 0);
-		CHECK(hex_to_size(vec_get(&file, "Qy"), want_public + 1U + ec->size, ec->size) == 0);
+		qx_text = vec_get(&file, "Qx");
+		qy_text = vec_get(&file, "Qy");
+		CHECK(hex_to_size(qx_text, want_public + 1U, ec->size) == 0);
+		CHECK(hex_to_size(qy_text, want_public + 1U + ec->size, ec->size) == 0);
 
 		/* The generation gives d and Q. */
 		script_start(&script, candidate, 1U, ec->size);
@@ -1088,7 +1237,11 @@ check_keygen_cavp(
 		CHECK_BYTES(public_key, want_public, 1U + 2U * ec->size);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of key pairs and requires at least ten. */
 	printf("  %s CAVP key pairs: %lu\n", params->name, count);
 	CHECK(count >= 10U);
 }
@@ -1138,6 +1291,8 @@ check_ecdh_cavp(
 		CHECK_BYTES(generated_private, private_key, ec->size);
 		CHECK_BYTES(generated_public, want_public, 1U + 2U * ec->size);
 	}
+
+	/* Reports the number of cases. */
 	printf("  %s CAVP ECDH cases: %u\n", params->name, (unsigned)CAVP_ECDH_COUNT);
 }
 
@@ -1183,7 +1338,13 @@ check_ecdh_wycheproof(
 	unsigned long refused;
 	unsigned long wide;
 	int error;
+	int more;
+	int too_wide;
+	int verdict;
+	uint32_t is_zero;
+	uint32_t below;
 
+	/* Starts with no record counted, and opens the vector file. */
 	valid = 0;
 	refused = 0;
 	wide = 0;
@@ -1191,7 +1352,11 @@ check_ecdh_wycheproof(
 	CHECK(error == 0);
 	if (error != 0)
 		return;
-	while (vec_next(&file)) {
+
+	/* Checks each record. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		pub_size = vec_hex(&file, "public", pub, sizeof(pub));
 		priv_size = vec_hex(&file, "private", priv, sizeof(priv));
@@ -1202,16 +1367,21 @@ check_ecdh_wycheproof(
 			continue;
 
 		/* A private key wider than the curve cannot be passed (the header takes ec->size bytes). */
-		if (wide_private(priv, priv_size, private_key, ec->size) != 0) {
+		too_wide = wide_private(priv, priv_size, private_key, ec->size);
+		if (too_wide != 0) {
 			wide++;
 			continue;
 		}
+
+		/* The shared secret of the record. */
 		scalar_from_bytes(scalar, ec, private_key);
 		memset(shared, SENTINEL_BYTE, sizeof(shared));
 		error = cryc_ecc_ecdh(ec, private_key, pub, pub_size, shared);
 
 		/* An out-of-range private key is refused whatever the point. */
-		if (cryc_bn_is_zero(scalar, ec->limbs) != 0U || cryc_bn_lt(scalar, ec->order.modulus, ec->limbs) == 0U) {
+		is_zero = cryc_bn_is_zero(scalar, ec->limbs);
+		below = cryc_bn_lt(scalar, ec->order.modulus, ec->limbs);
+		if (is_zero != 0U || below == 0U) {
 			CHECK(error != 0);
 			CHECK(bytes_zero(shared, ec->size));
 			refused++;
@@ -1219,7 +1389,8 @@ check_ecdh_wycheproof(
 		}
 
 		/* An invalid public point is refused and nothing is left in the output. */
-		if (strcmp(result, "invalid") == 0) {
+		verdict = strcmp(result, "invalid");
+		if (verdict == 0) {
 			CHECK(error != 0);
 			CHECK(bytes_zero(shared, ec->size));
 			refused++;
@@ -1241,7 +1412,11 @@ check_ecdh_wycheproof(
 		CHECK_BYTES(shared, want, ec->size);
 		valid++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the counts and requires that cases were computed. */
 	printf("  %s Wycheproof ECDH: %lu computed, %lu refused, %lu wider than the curve\n", params->name, valid, refused, wide);
 	CHECK(valid > 100U);
 	CHECK(refused > 0U);
@@ -1491,6 +1666,8 @@ check_ecdh_leading_zero(
 		CHECK(shared[0] == 0U);
 		found = 1;
 	}
+
+	/* Reports where the zero byte was found. */
 	printf("  %s zero first byte found at d = %u\n", params->name, tries - 1U);
 	CHECK(found);
 }
@@ -1538,13 +1715,18 @@ sign(
 	uint32_t k_inverse[CRYC_ECP_MAX_LIMBS];
 	size_t used;
 	int error;
+	uint32_t below;
+	uint32_t is_zero;
 
 	/* E: the leftmost bits(n) bits as an integer, reduced modulo n (it is below 2^bits < 2 n). */
 	memset(e, 0, sizeof(e));
-	used = hash_size < ec->size ? hash_size : ec->size;
+	used = ec->size;
+	if (hash_size < ec->size)
+		used = hash_size;
 	error = cryc_bn_decode(e, ec->limbs, hash, used);
 	CHECK(error == 0);
-	if (cryc_bn_lt(e, ec->order.modulus, ec->limbs) == 0U)
+	below = cryc_bn_lt(e, ec->order.modulus, ec->limbs);
+	if (below == 0U)
 		cryc_bn_mod_sub(e, e, ec->order.modulus, &ec->order);
 
 	/* r = x(k G) mod n. */
@@ -1554,9 +1736,11 @@ sign(
 	memset(r, 0, sizeof(r));
 	error = cryc_bn_decode(r, ec->limbs, x_bytes, ec->size);
 	CHECK(error == 0);
-	if (cryc_bn_lt(r, ec->order.modulus, ec->limbs) == 0U)
+	below = cryc_bn_lt(r, ec->order.modulus, ec->limbs);
+	if (below == 0U)
 		cryc_bn_mod_sub(r, r, ec->order.modulus, &ec->order);
-	if (cryc_bn_is_zero(r, ec->limbs) != 0U)
+	is_zero = cryc_bn_is_zero(r, ec->limbs);
+	if (is_zero != 0U)
 		return -1;
 
 	/* s = k^-1 (E + r d) mod n. */
@@ -1567,12 +1751,15 @@ sign(
 	cryc_bn_mod_add(sum, e, rd, &ec->order);
 	order_inv(ec, k_inverse, k);
 	order_mul(ec, s, k_inverse, sum);
-	if (cryc_bn_is_zero(s, ec->limbs) != 0U)
+	is_zero = cryc_bn_is_zero(s, ec->limbs);
+	if (is_zero != 0U)
 		return -1;
 
 	/* The two as bytes. */
 	cryc_bn_encode(r, ec->limbs, r_out, ec->size);
 	cryc_bn_encode(s, ec->limbs, s_out, ec->size);
+
+	/* Succeeded: r and s are written. */
 	return 0;
 }
 
@@ -1654,11 +1841,17 @@ der_signature(
 			body++;
 			item_length--;
 		}
+
+		/* An integer wider than the curve is flagged and not stored. */
 		if (item_length > size) {
 			wide = 1;
 			continue;
 		}
-		out = which == 0 ? r : s;
+
+		/* The first integer is r, the second is s. */
+		out = s;
+		if (which == 0)
+			out = r;
 		memset(out, 0, size);
 		memcpy(out + (size - item_length), body, item_length);
 	}
@@ -1666,6 +1859,8 @@ der_signature(
 	/* Nothing after the second integer. */
 	if (cursor != end)
 		return -1;
+
+	/* Reports 1 when an integer was wider than the curve, else 0. */
 	return wide;
 }
 
@@ -1676,13 +1871,17 @@ record_section(
 {
 	size_t index;
 	const char *key;
+	int different;
 
 	/* From the last key backwards: the first section key that starts with a curve name (not the key-generation method's). */
 	for (index = file->count; index > 0U; index--) {
 		key = file->keys[index - 1U];
-		if (strncmp(key, "section.", 8) == 0 && key[9] == '-')
+		different = strncmp(key, "section.", 8);
+		if (different == 0 && key[9] == '-')
 			return key + 8;
 	}
+
+	/* The record names no curve. */
 	return NULL;
 }
 
@@ -1691,13 +1890,20 @@ static enum cryc_hash_id
 hash_from_name(
 	const char *name)
 {
+	int different;
+
 	/* The three hashes of the module. */
-	if (strcmp(name, "SHA-256") == 0)
+	different = strcmp(name, "SHA-256");
+	if (different == 0)
 		return CRYC_HASH_SHA256;
-	if (strcmp(name, "SHA-384") == 0)
+	different = strcmp(name, "SHA-384");
+	if (different == 0)
 		return CRYC_HASH_SHA384;
-	if (strcmp(name, "SHA-512") == 0)
+	different = strcmp(name, "SHA-512");
+	if (different == 0)
 		return CRYC_HASH_SHA512;
+
+	/* A hash the module lacks. */
 	return CRYC_HASH_NONE;
 }
 
@@ -1724,7 +1930,15 @@ check_sigver_cavp(
 	unsigned long bad;
 	int key_error;
 	int error;
+	int more;
+	int different;
+	int expected_error;
+	const char *qx_text;
+	const char *qy_text;
+	const char *r_text;
+	const char *s_text;
 
+	/* Starts with no record counted, and opens the vector file. */
 	good = 0;
 	bad = 0;
 	name_size = strlen(params->cavp_key);
@@ -1732,10 +1946,17 @@ check_sigver_cavp(
 	CHECK(error == 0);
 	if (error != 0)
 		return;
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		/* This curve with a hash the module has. */
 		section = record_section(&file);
-		if (section == NULL || strncmp(section, params->cavp_key, name_size) != 0 || section[name_size] != ',')
+		if (section == NULL)
+			continue;
+		different = strncmp(section, params->cavp_key, name_size);
+		if (different != 0)
+			continue;
+		if (section[name_size] != ',')
 			continue;
 		hash = hash_from_name(section + name_size + 1U);
 		if (hash == CRYC_HASH_NONE)
@@ -1749,10 +1970,14 @@ check_sigver_cavp(
 		if (msg_size == (size_t)-1 || result == NULL)
 			continue;
 		public_key[0] = 0x04U;
-		CHECK(hex_to_size(vec_get(&file, "Qx"), public_key + 1U, ec->size) == 0);
-		CHECK(hex_to_size(vec_get(&file, "Qy"), public_key + 1U + ec->size, ec->size) == 0);
-		CHECK(hex_to_size(vec_get(&file, "R"), r, ec->size) == 0);
-		CHECK(hex_to_size(vec_get(&file, "S"), s, ec->size) == 0);
+		qx_text = vec_get(&file, "Qx");
+		qy_text = vec_get(&file, "Qy");
+		r_text = vec_get(&file, "R");
+		s_text = vec_get(&file, "S");
+		CHECK(hex_to_size(qx_text, public_key + 1U, ec->size) == 0);
+		CHECK(hex_to_size(qy_text, public_key + 1U + ec->size, ec->size) == 0);
+		CHECK(hex_to_size(r_text, r, ec->size) == 0);
+		CHECK(hex_to_size(s_text, s, ec->size) == 0);
 		digest_size = digest_message(hash, msg, msg_size, digest);
 
 		/* A good signature verifies; a bad one gives EBADMSG, or the refusal of the key when the key is not a point of the curve. */
@@ -1763,11 +1988,18 @@ check_sigver_cavp(
 		} else {
 			CHECK(result[0] == 'F');
 			key_error = cryc_ecp_decode(ec, &point, public_key, 1U + 2U * ec->size);
-			CHECK(error == (key_error != 0 ? key_error : EBADMSG));
+			expected_error = EBADMSG;
+			if (key_error != 0)
+				expected_error = key_error;
+			CHECK(error == expected_error);
 			bad++;
 		}
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the counts and requires that both kinds occurred. */
 	printf("  %s CAVP SigVer: %lu good, %lu bad\n", params->name, good, bad);
 	CHECK(good >= 9U);
 	CHECK(bad >= 30U);
@@ -1800,7 +2032,11 @@ check_wycheproof_ecdsa(
 	unsigned long wide;
 	int parsed;
 	int error;
+	int more;
+	int verdict;
+	const char *group_key;
 
+	/* Starts with no record counted, and opens the vector file. */
 	good = 0;
 	bad = 0;
 	malformed = 0;
@@ -1810,17 +2046,24 @@ check_wycheproof_ecdsa(
 	CHECK(error == 0);
 	if (error != 0)
 		return;
-	while (vec_next(&file)) {
+
+	/* Checks each record. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		/*
 		 * A group's public key is in a record of its own (its PEM text
 		 * ends with a blank line, which ends the record), before the
 		 * records of the group's tests.
 		 */
-		if (vec_get(&file, "group.publicKey.uncompressed") != NULL) {
+		group_key = vec_get(&file, "group.publicKey.uncompressed");
+		if (group_key != NULL) {
 			group_size = vec_hex(&file, "group.publicKey.uncompressed", public_key, sizeof(public_key));
 			CHECK(group_size != (size_t)-1);
 			continue;
 		}
+
+		/* The fields of a test record. */
 		result = vec_get(&file, "result");
 		sha = vec_get(&file, "group.sha");
 		msg_size = vec_hex(&file, "msg", msg, sizeof(msg));
@@ -1830,7 +2073,11 @@ check_wycheproof_ecdsa(
 		CHECK(sha != NULL);
 		CHECK(msg_size != (size_t)-1);
 		CHECK(public_size != (size_t)-1 && public_size != 0U);
-		if (result == NULL || sha == NULL || msg_size == (size_t)-1 || public_size == (size_t)-1 || public_size == 0U)
+		if (result == NULL ||
+		    sha == NULL ||
+		    msg_size == (size_t)-1 ||
+		    public_size == (size_t)-1 ||
+		    public_size == 0U)
 			continue;
 		hash = hash_from_name(sha);
 		CHECK(hash != CRYC_HASH_NONE);
@@ -1844,12 +2091,16 @@ check_wycheproof_ecdsa(
 			malformed++;
 			continue;
 		}
+
+		/* A signature that does not parse is invalid by the file's own verdict. */
 		parsed = der_signature(sig, sig_size, ec->size, r, s);
 		if (parsed < 0) {
 			CHECK(strcmp(result, "invalid") == 0);
 			malformed++;
 			continue;
 		}
+
+		/* A signature with an integer wider than the curve is invalid too. */
 		if (parsed > 0) {
 			CHECK(strcmp(result, "invalid") == 0);
 			wide++;
@@ -1858,7 +2109,8 @@ check_wycheproof_ecdsa(
 
 		/* A well-formed signature verifies when the file says valid, and not otherwise. */
 		error = cryc_ecdsa_verify(ec, public_key, public_size, digest, digest_size, r, s);
-		if (strcmp(result, "valid") == 0) {
+		verdict = strcmp(result, "valid");
+		if (verdict == 0) {
 			CHECK(error == 0);
 			good++;
 		} else {
@@ -1867,7 +2119,11 @@ check_wycheproof_ecdsa(
 			bad++;
 		}
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the counts and requires that both kinds were verified. */
 	printf("  %s: %lu valid, %lu invalid verified, %lu malformed DER, %lu wider than the curve\n", name, good, bad, malformed, wide);
 	CHECK(good > 100U);
 	CHECK(bad > 50U);
@@ -1894,9 +2150,11 @@ check_roundtrip(
 	size_t used;
 	size_t index;
 	size_t total;
+	size_t position;
 	unsigned iteration;
 	int error;
 
+	/* The size of an uncompressed key, and the order as bytes. */
 	total = 1U + 2U * ec->size;
 	cryc_bn_encode(ec->order.modulus, ec->limbs, n_bytes, ec->size);
 	for (iteration = 0; iteration < iterations; iteration++) {
@@ -1907,7 +2165,9 @@ check_roundtrip(
 		make_signature(ec, d, public_key, hash, hash_size, r, s);
 		error = cryc_ecdsa_verify(ec, public_key, total, hash, hash_size, r, s);
 		CHECK(error == 0);
-		used = hash_size < ec->size ? hash_size : ec->size;
+		used = ec->size;
+		if (hash_size < ec->size)
+			used = hash_size;
 
 		/* The same (r, n - s) also verifies: ECDSA does not require a low s. */
 		bytes_sub(other, n_bytes, s, ec->size);
@@ -1917,7 +2177,12 @@ check_roundtrip(
 		/* Each used byte of the hash matters: a changed first, middle and last byte fail. */
 		for (index = 0; index < 3U; index++) {
 			memcpy(altered, hash, hash_size);
-			altered[index == 0U ? 0U : (index == 1U ? used / 2U : used - 1U)] ^= 0x01U;
+			position = used - 1U;
+			if (index == 0U)
+				position = 0U;
+			else if (index == 1U)
+				position = used / 2U;
+			altered[position] ^= 0x01U;
 			error = cryc_ecdsa_verify(ec, public_key, total, altered, hash_size, r, s);
 			CHECK(error == EBADMSG);
 		}
@@ -1949,12 +2214,17 @@ check_roundtrip(
 
 		/* A bit changed in each of several bytes of r and of s. */
 		for (index = 0; index < 3U; index++) {
+			position = ec->size - 1U;
+			if (index == 0U)
+				position = 0U;
+			else if (index == 1U)
+				position = ec->size / 2U;
 			memcpy(other, r, ec->size);
-			other[index == 0U ? 0U : (index == 1U ? ec->size / 2U : ec->size - 1U)] ^= 0x01U;
+			other[position] ^= 0x01U;
 			error = cryc_ecdsa_verify(ec, public_key, total, hash, hash_size, other, s);
 			CHECK(error == EBADMSG);
 			memcpy(other, s, ec->size);
-			other[index == 0U ? 0U : (index == 1U ? ec->size / 2U : ec->size - 1U)] ^= 0x01U;
+			other[position] ^= 0x01U;
 			error = cryc_ecdsa_verify(ec, public_key, total, hash, hash_size, r, other);
 			CHECK(error == EBADMSG);
 		}
@@ -2004,6 +2274,7 @@ check_verify_errors(
 	size_t length;
 	unsigned which;
 	int error;
+	uint8_t *target;
 
 	/* A valid signature to alter. */
 	size = ec->size;
@@ -2020,30 +2291,35 @@ check_verify_errors(
 		memcpy(r, good_r, size);
 		memcpy(s, good_s, size);
 
+		/* The value that is replaced: r for the first round, s for the second. */
+		target = s;
+		if (which == 0U)
+			target = r;
+
 		/* Zero is out of range. */
 		memset(edge, 0, size);
-		memcpy(which == 0U ? r : s, edge, size);
+		memcpy(target, edge, size);
 		error = cryc_ecdsa_verify(ec, public_key, total, hash, 32U, r, s);
 		CHECK(error == EBADMSG);
 
 		/* n - 1 is in range but the signature is wrong. */
 		memcpy(edge, n_bytes, size);
 		bytes_dec(edge, size);
-		memcpy(which == 0U ? r : s, edge, size);
+		memcpy(target, edge, size);
 		error = cryc_ecdsa_verify(ec, public_key, total, hash, 32U, r, s);
 		CHECK(error == EBADMSG);
 
 		/* n, n + 1 and all ones are out of range. */
 		memcpy(edge, n_bytes, size);
-		memcpy(which == 0U ? r : s, edge, size);
+		memcpy(target, edge, size);
 		error = cryc_ecdsa_verify(ec, public_key, total, hash, 32U, r, s);
 		CHECK(error == EBADMSG);
 		bytes_inc(edge, size);
-		memcpy(which == 0U ? r : s, edge, size);
+		memcpy(target, edge, size);
 		error = cryc_ecdsa_verify(ec, public_key, total, hash, 32U, r, s);
 		CHECK(error == EBADMSG);
 		memset(edge, 0xff, size);
-		memcpy(which == 0U ? r : s, edge, size);
+		memcpy(target, edge, size);
 		error = cryc_ecdsa_verify(ec, public_key, total, hash, 32U, r, s);
 		CHECK(error == EBADMSG);
 	}
@@ -2245,6 +2521,8 @@ sqrt_mont(
 		if (index > 1U)
 			exponent[index - 1U] = (uint8_t)(exponent[index - 1U] | (uint8_t)(exponent[index - 2U] << 6));
 	}
+
+	/* The power a^((p + 1) / 4). */
 	cryc_bn_mont_exp(out, a, exponent, ec->size, &ec->field);
 }
 
@@ -2294,7 +2572,10 @@ check_x_above_order(
 	unsigned hits;
 	unsigned variant;
 	int error;
+	int different;
+	int expected_error;
 
+	/* The sizes, and n as bytes. */
 	size = ec->size;
 	total = 1U + 2U * size;
 	CHECK(hex_to_size(params->n, n_bytes, size) == 0);
@@ -2316,7 +2597,8 @@ check_x_above_order(
 		rhs_mont(ec, rhs, x_mont);
 		sqrt_mont(ec, root, rhs);
 		cryc_bn_mont_mul(square, root, root, &ec->field);
-		if (memcmp(square, rhs, ec->limbs * sizeof(square[0])) != 0)
+		different = memcmp(square, rhs, ec->limbs * sizeof(square[0]));
+		if (different != 0)
 			continue;
 		hits++;
 
@@ -2367,7 +2649,10 @@ check_x_above_order(
 
 			/* Only the reduced x coordinate verifies. */
 			error = cryc_ecdsa_verify(ec, public_key, total, hash, size, r, s);
-			CHECK(error == (variant == 0U ? 0 : EBADMSG));
+			expected_error = EBADMSG;
+			if (variant == 0U)
+				expected_error = 0;
+			CHECK(error == expected_error);
 
 			/* The x coordinate itself as r is out of range (it is not below n), and so is the next r. */
 			if (variant == 0U) {
@@ -2381,6 +2666,8 @@ check_x_above_order(
 			}
 		}
 	}
+
+	/* Reports the number of points found and requires three. */
 	printf("  %s verifications with x(R) at or above n: %u\n", params->name, hits);
 	CHECK(hits == 3U);
 }

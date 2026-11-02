@@ -183,6 +183,85 @@ static struct replay replay_plain;
 static struct replay replay_retry;
 
 /* Draws size bytes from the stream; fails at the call fail_at names. */
+static int stream_random(void *context, uint8_t *out, size_t size);
+
+/* The verification callback: counts, records, answers as told. */
+static int verify_callback(void *context, int preverified, enum cryc_verify_code code);
+
+/* Returns 1 when two sets of record keys are equal. */
+static int keys_equal(const struct sslc_traffic_keys *left, const struct sslc_traffic_keys *right);
+
+/* Makes a run: a client of min to max trusting root (may be NULL), verifying host at the PKI time. */
+static struct run * run_new(uint16_t min_version, uint16_t max_version, const struct tlspeer_pki *root, const char *host);
+
+/* Frees a run and its peer. */
+static void run_free(struct run *run);
+
+/* Appends a letter to the run's log of actions. */
+static void log_action(struct run *run, char letter);
+
+/* Carries out the client's actions of the last call against the peer (when there is one). */
+static void apply(struct run *run);
+
+/* Feeds the peer's messages to the client (checking the client reads each under the peer's keys) until none wait or the client fails. */
+static void pump(struct run *run);
+
+/* Makes the run's peer from config. */
+static int run_peer(struct run *run, const struct tlspeer_config *config);
+
+/* Starts the client and runs the exchange until it ends; returns the client's error. */
+static int go(struct run *run);
+
+/* Returns 1 when size bytes at bytes are all zero. */
+static int all_zero(const uint8_t *bytes, size_t size);
+
+/* Checks that a run completed its handshake, and clears done so that a later failure can be checked. */
+static void connected_then(struct run *run);
+
+/* Checks that a run ended in a failure with error and alert, and that the failed handshake refuses more. */
+static void expect_failed(struct run *run, int error, unsigned alert);
+
+/* Checks that a run completed a TLS 1.3 handshake with the peer. */
+static void check_connected(struct run *run, const char *log);
+
+/* Writes the ClientHello the header promises, from its fields, into out; returns its size. */
+static size_t expected_hello(uint8_t *out, size_t room, const uint8_t *random, const uint8_t *session_id, size_t session_id_size, int offer12, int offer13, const char *host, uint16_t share_group, const uint8_t *share, size_t share_size, const uint8_t *cookie, size_t cookie_size);
+
+/* Fills a hand-made TLS 1.3 ServerHello for run: echoes its session id, AES-128-GCM, x25519 (RFC 7748's Bob). */
+static void sh_default(struct sh_spec *spec, const struct run *run);
+
+/* Makes it a HelloRetryRequest naming group (0: none). */
+static void sh_retry(struct sh_spec *spec, uint16_t group);
+
+/* Writes a hand-made ServerHello message into out; returns its size. */
+static size_t sh_write(const struct sh_spec *spec, uint8_t *out, size_t room);
+
+/* Starts a client without a peer and feeds it a hand-made ServerHello; returns the run. */
+static struct run * feed_sh(uint16_t min_version, uint16_t max_version, const struct sh_spec *spec);
+
+/* Feeds a hand-made ServerHello made from the default with change applied, and checks the failure. */
+static void check_sh(uint16_t min_version, uint16_t max_version, const struct sh_spec *spec, int error, unsigned alert);
+
+/* Makes a TLS 1.3 peer config over pki with the given changes. */
+static void peer13(struct tlspeer_config *config, const struct tlspeer_pki *pki);
+
+/* Runs a full handshake against config with a 1.2-1.3 client of host trusting pki; returns the run (to be freed). */
+static struct run * handshake(const struct tlspeer_config *config, const struct tlspeer_pki *pki, uint16_t min_version, const char *host);
+
+/* Records the server's messages of a run's peer from a fresh handshake of the same random source. */
+static void record_replay(const struct tlspeer_config *config, struct replay *replay);
+
+static struct run * replay_run(const struct replay *replay, size_t index, const uint8_t *message, size_t size);
+
+/* Checks a handshake against a peer config that must fail with error and alert. */
+static void check_peer_fails(const struct tlspeer_config *config, const struct tlspeer_pki *pki, uint16_t min_version, const char *host, int error, unsigned alert);
+
+/* Replaces every occurrence of the size bytes from by to in data; returns how many. */
+static unsigned patch(uint8_t *data, size_t data_size, const uint8_t *from, const uint8_t *to, size_t size);
+
+static void test_altered(const struct replay *replay, unsigned step);
+
+/* Draws size bytes from the stream; fails at the call fail_at names. */
 static int
 stream_random(
 	void *context,
@@ -214,6 +293,8 @@ stream_random(
 		if (position < sizeof(stream->log))
 			stream->log[position] = out[index];
 	}
+
+	/* Counts the bytes drawn so far. */
 	stream->position += size;
 	return 0;
 }
@@ -241,15 +322,25 @@ keys_equal(
 	const struct sslc_traffic_keys *left,
 	const struct sslc_traffic_keys *right)
 {
+	int different;
+
 	/* Every field that the record layer uses. */
 	if (left->suite != right->suite)
 		return 0;
 	if (left->key_size != right->key_size || left->iv_size != right->iv_size)
 		return 0;
-	if (memcmp(left->key, right->key, left->key_size) != 0)
+
+	/* Compares the keys. */
+	different = memcmp(left->key, right->key, left->key_size);
+	if (different != 0)
 		return 0;
-	if (memcmp(left->iv, right->iv, left->iv_size) != 0)
+
+	/* Compares the IVs. */
+	different = memcmp(left->iv, right->iv, left->iv_size);
+	if (different != 0)
 		return 0;
+
+	/* Succeeded: the keys are equal. */
 	return 1;
 }
 
@@ -269,6 +360,8 @@ run_new(
 		CHECK(0);
 		return NULL;
 	}
+
+	/* Makes the certificate store. */
 	CHECK(cryc_store_init(&run->store) == 0);
 	if (root != NULL)
 		CHECK(cryc_store_add_der(&run->store, root->root, root->root_size) == 0);
@@ -284,6 +377,8 @@ run_new(
 		CHECK(cryc_name_host_normalize(host, run->config.params.host) == 0);
 		run->config.server_name = run->config.params.host;
 	}
+
+	/* Asks for certificate verification and gives the client the stream of random bytes. */
 	run->config.verify_peer = 1;
 	run->config.random = stream_random;
 	run->config.random_context = &run->stream;
@@ -329,6 +424,7 @@ apply(
 	size_t index;
 	size_t offset;
 	size_t length;
+	int equal;
 	int error;
 
 	/* In order. */
@@ -346,24 +442,33 @@ apply(
 					CHECK(0);
 					break;
 				}
+
+				/* Takes the length from the message's header. */
 				length = 4U + cryc_load_be24(bytes + 1);
 				if (length > action->size - offset) {
 					CHECK(0);
 					break;
 				}
+
+				/* Counts the message and keeps the first two ClientHellos. */
 				run->messages_sent++;
 				if (bytes[0] == SSLC_HS_CLIENT_HELLO && run->hello_count < 2U) {
 					memcpy(run->hellos[run->hello_count], bytes, length);
 					run->hello_size[run->hello_count] = length;
 					run->hello_count++;
 				}
+
+				/* Hands the message to the peer script. */
 				if (run->peer != NULL) {
 					error = tlspeer_handshake(run->peer, bytes, length);
 					if (error != 0 && run->peer_error == 0)
 						run->peer_error = error;
 				}
+
+				/* Moves on to the next message of the action. */
 				offset += length;
 			}
+
 			break;
 		case SSLC_HS_SEND_CCS:
 			log_action(run, 'C');
@@ -372,6 +477,7 @@ apply(
 				if (error != 0 && run->peer_error == 0)
 					run->peer_error = error;
 			}
+
 			break;
 		case SSLC_HS_SEND_WARNING:
 			log_action(run, 'A');
@@ -388,11 +494,21 @@ apply(
 
 			/* The first change is to the handshake keys, every later one to the application keys. */
 			if (run->peer != NULL) {
-				if (run->write_changes == 0U && !keys_equal(&action->keys, &run->peer->client_handshake_keys))
-					run->key_mismatch++;
-				if (run->write_changes > 0U && !keys_equal(&action->keys, &run->peer->client_application_keys))
-					run->key_mismatch++;
+				if (run->write_changes == 0U) {
+					equal = keys_equal(&action->keys, &run->peer->client_handshake_keys);
+					if (!equal)
+						run->key_mismatch++;
+				}
+
+				/* Every later change is to the application keys. */
+				if (run->write_changes > 0U) {
+					equal = keys_equal(&action->keys, &run->peer->client_application_keys);
+					if (!equal)
+						run->key_mismatch++;
+				}
 			}
+
+			/* Counts the key change. */
 			run->write_changes++;
 			break;
 		case SSLC_HS_DONE:
@@ -413,6 +529,7 @@ pump(
 {
 	static uint8_t copy[TLSPEER_MESSAGE_MAX];
 	struct tlspeer_item item;
+	int equal;
 	int more;
 
 	/* One item at a time; the client's answers may make more. */
@@ -424,8 +541,15 @@ pump(
 		if (item.kind == TLSPEER_ITEM_HANDSHAKE) {
 			if (item.epoch == 0U && run->read_keyed)
 				run->key_mismatch++;
-			if (item.epoch != 0U && (!run->read_keyed || !keys_equal(&run->peer->write_keys[item.epoch], &run->read_keys)))
-				run->key_mismatch++;
+			if (item.epoch != 0U) {
+				equal = 0;
+				if (run->read_keyed)
+					equal = keys_equal(&run->peer->write_keys[item.epoch], &run->read_keys);
+				if (!equal)
+					run->key_mismatch++;
+			}
+
+			/* Feeds the message to the client. */
 			run->error = sslc_hs_message(&run->hs, copy, item.size, &run->actions);
 		} else if (item.kind == TLSPEER_ITEM_CCS) {
 			run->error = sslc_hs_change_cipher_spec(&run->hs, &run->actions);
@@ -433,6 +557,8 @@ pump(
 			CHECK(0);
 			break;
 		}
+
+		/* Applies the next action unless the handshake already failed. */
 		if (run->error == 0)
 			apply(run);
 	}
@@ -480,6 +606,8 @@ all_zero(
 		if (bytes[index] != 0U)
 			return 0;
 	}
+
+	/* Succeeded: every byte is zero. */
 	return 1;
 }
 
@@ -531,11 +659,20 @@ check_connected(
 	struct run *run,
 	const char *log)
 {
+	const char *why;
+	int different;
+
 	/* Both sides finished, with the same keys, one change_cipher_spec from the client. */
 	CHECK(run->error == 0);
 	CHECK(run->peer_error == 0);
-	if (run->error != 0 || run->peer_error != 0)
-		printf("  error %d alert %u peer %d (%s)\n", run->error, run->hs.alert, run->peer_error, run->peer->why != NULL ? run->peer->why : "");
+	if (run->error != 0 || run->peer_error != 0) {
+		why = "";
+		if (run->peer->why != NULL)
+			why = run->peer->why;
+		printf("  error %d alert %u peer %d (%s)\n", run->error, run->hs.alert, run->peer_error, why);
+	}
+
+	/* Checks that the run finished. */
 	CHECK(run->done == 1);
 	CHECK(sslc_hs_connected(&run->hs) == 1);
 	CHECK(run->hs.state == SSLC_HS13_CONNECTED);
@@ -545,7 +682,8 @@ check_connected(
 	CHECK(run->peer->ccs_count == 1U);
 	CHECK(run->key_mismatch == 0U);
 	CHECK(strcmp(run->log, log) == 0);
-	if (strcmp(run->log, log) != 0)
+	different = strcmp(run->log, log);
+	if (different != 0)
 		printf("  log %s, expected %s\n", run->log, log);
 
 	/* The handshake's secrets are gone; the application secrets stay for KeyUpdate. */
@@ -594,11 +732,15 @@ expected_hello(
 		for (index = 0; index < 3U; index++)
 			tlspeer_put_int(&writer, suites13[index], 2);
 	}
+
+	/* Offers the TLS 1.2 suites and the signalling suite value. */
 	if (offer12) {
 		for (index = 0; index < 6U; index++)
 			tlspeer_put_int(&writer, suites12[index], 2);
 		tlspeer_put_int(&writer, 0x00ff, 2);
 	}
+
+	/* Ends the cipher_suites vector. */
 	tlspeer_end(&writer);
 
 	/* compression_methods: null. */
@@ -618,6 +760,8 @@ expected_hello(
 		tlspeer_end(&writer);
 		tlspeer_end(&writer);
 	}
+
+	/* Adds supported_groups. */
 	tlspeer_put_int(&writer, 0x000a, 2);
 	tlspeer_put_int(&writer, 8, 2);
 	tlspeer_put_int(&writer, 6, 2);
@@ -632,6 +776,8 @@ expected_hello(
 		tlspeer_put_int(&writer, 0x0017, 2);
 		tlspeer_put_int(&writer, 0, 2);
 	}
+
+	/* Adds signature_algorithms. */
 	tlspeer_put_int(&writer, 0x000d, 2);
 	tlspeer_put_int(&writer, 18, 2);
 	tlspeer_put_int(&writer, 16, 2);
@@ -647,6 +793,8 @@ expected_hello(
 		tlspeer_end(&writer);
 		tlspeer_end(&writer);
 	}
+
+	/* Adds the cookie extension when a cookie is to be echoed. */
 	if (cookie_size > 0U) {
 		tlspeer_put_int(&writer, 0x002c, 2);
 		tlspeer_begin(&writer, 2);
@@ -655,6 +803,8 @@ expected_hello(
 		tlspeer_end(&writer);
 		tlspeer_end(&writer);
 	}
+
+	/* Adds the key share when TLS 1.3 is offered. */
 	if (offer13) {
 		tlspeer_put_int(&writer, 0x0033, 2);
 		tlspeer_begin(&writer, 2);
@@ -666,6 +816,8 @@ expected_hello(
 		tlspeer_end(&writer);
 		tlspeer_end(&writer);
 	}
+
+	/* Ends the extensions and the message. */
 	tlspeer_end(&writer);
 	tlspeer_end(&writer);
 	CHECK(writer.error == 0);
@@ -735,6 +887,8 @@ sh_write(
 		tlspeer_put_int(&writer, 2, 2);
 		tlspeer_put_int(&writer, spec->version, 2);
 	}
+
+	/* Adds the key share when the spec has one. */
 	if (spec->has_share) {
 		tlspeer_put_int(&writer, 0x0033, 2);
 		tlspeer_begin(&writer, 2);
@@ -744,8 +898,12 @@ sh_write(
 			tlspeer_put(&writer, spec->key, spec->key_size);
 			tlspeer_end(&writer);
 		}
+
+		/* Ends the key_share extension. */
 		tlspeer_end(&writer);
 	}
+
+	/* Adds the cookie when the spec has one. */
 	if (spec->cookie != NULL) {
 		tlspeer_put_int(&writer, 0x002c, 2);
 		tlspeer_begin(&writer, 2);
@@ -754,6 +912,8 @@ sh_write(
 		tlspeer_end(&writer);
 		tlspeer_end(&writer);
 	}
+
+	/* Adds the extra extension when the spec has one. */
 	if (spec->has_extra)
 		tlspeer_put_extension(&writer, spec->extra_type, spec->extra, spec->extra_size);
 	tlspeer_end(&writer);
@@ -772,10 +932,12 @@ feed_sh(
 	static uint8_t message[4096];
 	struct run *run;
 	size_t size;
+	int error;
 
 	/* A client, its ClientHello sent nowhere, the message. */
 	run = run_new(min_version, max_version, &pki256, "server.test");
-	if (go(run) != 0)
+	error = go(run);
+	if (error != 0)
 		CHECK(0);
 	size = sh_write(spec, message, sizeof(message));
 	run->error = sslc_hs_message(&run->hs, message, size, &run->actions);
@@ -819,10 +981,12 @@ handshake(
 	const char *host)
 {
 	struct run *run;
+	int error;
 
 	/* A client and its peer, run to the end. */
 	run = run_new(min_version, SSLC_TLS13, pki, host);
-	if (run_peer(run, config) != 0)
+	error = run_peer(run, config);
+	if (error != 0)
 		return run;
 	go(run);
 	return run;
@@ -842,10 +1006,13 @@ record_replay(
 	/* A client whose actions go to the peer, and every handshake item of the peer kept. */
 	memset(replay, 0, sizeof(*replay));
 	run = run_new(SSLC_TLS12, SSLC_TLS13, &pki256, "server.test");
-	if (run_peer(run, config) != 0) {
+	error = run_peer(run, config);
+	if (error != 0) {
 		run_free(run);
 		return;
 	}
+
+	/* Starts the handshake and applies its first actions. */
 	run->error = sslc_hs_start(&run->hs, &run->config, &run->actions);
 	apply(run);
 	while (run->error == 0) {
@@ -856,6 +1023,8 @@ record_replay(
 			CHECK(0);
 			break;
 		}
+
+		/* Keeps the item for the later replay. */
 		replay->kind[replay->count] = item.kind;
 		memcpy(replay->data[replay->count], item.data, item.size);
 		replay->size[replay->count] = item.size;
@@ -868,6 +1037,8 @@ record_replay(
 		if (error == 0)
 			apply(run);
 	}
+
+	/* Checks that the handshake completed. */
 	CHECK(run->error == 0);
 	CHECK(run->done == 1);
 	CHECK(run->peer->state == TLSPEER_CONNECTED);
@@ -900,9 +1071,13 @@ replay_run(
 		} else {
 			run->error = sslc_hs_change_cipher_spec(&run->hs, &run->actions);
 		}
+
+		/* Applies the actions unless the handshake already failed. */
 		if (run->error == 0)
 			apply(run);
 	}
+
+	/* Reports the finished run. */
 	return run;
 }
 
@@ -912,6 +1087,46 @@ replay_run(
  * name; the order of the random draws; and that the same source gives the
  * same bytes.
  */
+static void test_client_hello(void);
+
+/* Checks the configuration's refusals and the random source's failures. */
+static void test_config(void);
+
+static void test_handshakes(void);
+
+/* Checks each of the peer's breaks and unexpected extensions. */
+static void test_breaks(void);
+
+/* Checks the CertificateVerify checks with hand-made messages and mismatched schemes. */
+static void test_certificate_verify(void);
+
+/* Checks the certificate verdicts, the callback and the leaf checks. */
+static void test_certificates(void);
+
+/* Checks hand-made ServerHellos against each check of the header. */
+static void test_server_hello(void);
+
+/* Checks hand-made HelloRetryRequests and the ServerHellos after one. */
+static void test_retry(void);
+
+/* Checks the messages a state does not take, the header checks and the change_cipher_spec rules. */
+static void test_states(void);
+
+/* Feeds every replayed item, with the change_cipher_spec records in between, and checks each state's refusals. */
+static void test_order(void);
+
+/* Checks the messages after the handshake against the peer: tickets and KeyUpdates both ways. */
+static void test_post_handshake(void);
+
+/* Checks sslc_hs_queue_message and sslc_hs_queue_action directly. */
+static void test_queue(void);
+
+/* Checks sslc_hs_shared_secret with the RFC 7748 and CAVP values and the bad shares. */
+static void test_shared_secret(void);
+
+/* Checks sslc_hs_certificate directly: a second Certificate, a context, an empty list. */
+static void test_certificate_direct(void);
+
 static void
 test_client_hello(void)
 {
@@ -962,6 +1177,8 @@ test_client_hello(void)
 			CHECK(run->stream.calls == 2U);
 			CHECK(memcmp(run->hs.x25519_private, run->stream.log + 32, 32) == 0);
 		}
+
+		/* Checks the x25519 public key that goes with the private key. */
 		cryc_x25519_public(share, run->hs.x25519_private);
 		CHECK_BYTES(run->hs.x25519_public, share, 32);
 
@@ -973,6 +1190,8 @@ test_client_hello(void)
 			size = expected_hello(expected, sizeof(expected), run->stream.log, NULL, 0,
 			    1, 0, host, 0, NULL, 0, NULL, 0);
 		}
+
+		/* Checks the ClientHello that was sent. */
 		CHECK(run->actions.list[0].size == size);
 		CHECK(run->hello_size[0] == size);
 		CHECK_BYTES(run->hellos[0], expected, size);
@@ -1482,15 +1701,19 @@ patch(
 {
 	size_t index;
 	unsigned count;
+	int different;
 
 	/* A scan. */
 	count = 0;
 	for (index = 0; index + size <= data_size; index++) {
-		if (memcmp(data + index, from, size) == 0) {
+		different = memcmp(data + index, from, size);
+		if (different == 0) {
 			memcpy(data + index, to, size);
 			count++;
 		}
 	}
+
+	/* Reports how many were found. */
 	return count;
 }
 
@@ -1785,6 +2008,7 @@ test_server_hello(void)
 	spec.suite = 0x009c;
 	check_sh(SSLC_TLS12, SSLC_TLS13, &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 
+	/* Frees the model run. */
 	run_free(model);
 }
 
@@ -2037,6 +2261,8 @@ test_states(void)
 		CHECK(sslc_hs_change_cipher_spec(&run->hs, &run->actions) == 0);
 		CHECK(run->actions.count == 0U);
 	}
+
+	/* Checks that the state waits for the ServerHello. */
 	CHECK(run->hs.state == SSLC_HS_WAIT_SERVER_HELLO);
 	run_free(run);
 

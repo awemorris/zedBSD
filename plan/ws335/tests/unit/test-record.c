@@ -29,6 +29,57 @@
 static uint32_t random_state = 0x2f6b1c97U;
 
 /* Returns the next pseudo-random 32-bit value. */
+static uint32_t random_next(void);
+
+/* The largest sequence number, which can never be used (5.3). */
+static uint64_t sequence_max(void);
+
+/* Walks the labelled values of RFC 8448 and checks every record. */
+static void test_rfc8448(void);
+
+/* Checks sslc_record_header. */
+static void test_header(void);
+
+/* Checks the overhead of every kind of direction. */
+static void test_overhead(void);
+
+/* Seals and opens many sizes, sequence numbers and types on every suite. */
+static void test_suites(void);
+
+/* Checks the padding, the inner content type and the limits of TLS 1.3. */
+static void test_inner_plaintext(void);
+
+/* Checks the records that TLS 1.3 accepts or refuses by their outer type. */
+static void test_outer_types(void);
+
+/* Checks the refusals of a forged record on every suite. */
+static void test_forgery(void);
+
+/* Checks truncated and mismatched sizes with blocks of exactly the size. */
+static void test_truncated(void);
+
+/* Checks the sequence number: lock-step runs, the key change reset and the wrap. */
+static void test_sequence(void);
+
+/* Checks the open of the largest sequence number returns EOVERFLOW without touching the record. */
+static void test_open_overflow(void);
+
+/* Checks the refusals of seal, and that a refused call writes nothing and keeps the sequence number. */
+static void test_seal_errors(void);
+
+/* Checks set_keys, clear and init. */
+static void test_keys(void);
+
+/* Checks the plaintext direction's open and seal round trip. */
+static void test_plaintext(void);
+
+/* Checks that random bytes in a record never crash and give one of the documented errors. */
+static void test_random(void);
+
+/* Checks a long run of random seal and open pairs, each in a block of exactly its size. */
+static void test_round_trips(void);
+
+/* Returns the next pseudo-random 32-bit value. */
 static uint32_t
 random_next(void)
 {
@@ -38,6 +89,47 @@ random_next(void)
 	random_state ^= random_state << 5;
 	return random_state;
 }
+
+/* Returns a pseudo-random number below limit (limit above 0). */
+static uint32_t random_below(uint32_t limit);
+
+/* Fills size bytes with pseudo-random bytes. */
+static void random_fill(uint8_t *out, size_t size);
+
+/* Allocates size bytes (at least 1) in a block of exactly that size, so that ASan sees any overrun. */
+static uint8_t * block_new(size_t size);
+
+/* Makes a 64-bit value from its two halves. */
+static uint64_t make64(uint32_t high, uint32_t low);
+
+/* Fills the keys of a direction for a suite from a seed. */
+static void fill_keys(struct sslc_traffic_keys *keys, const struct sslc_suite *suite, unsigned seed);
+
+/* Returns 1 when the suite belongs to TLS 1.3. */
+static int is13(const struct sslc_suite *suite);
+
+static size_t ref_seal(const struct sslc_traffic_keys *keys, uint64_t sequence, unsigned type, const uint8_t *plain, size_t size, size_t padding, uint8_t *out);
+
+/* Sets a direction's keys and checks that the call succeeded. */
+static void make_dir(struct sslc_record_dir *dir, const struct sslc_traffic_keys *keys);
+
+/* Returns the offset of the payload in a protected record of the direction. */
+static size_t payload_offset(const struct sslc_suite *suite);
+
+/* Returns 1 when text contains word. */
+static int contains(const char *text, const char *word);
+
+/* The directions the header tests use: plaintext, TLS 1.3, TLS 1.2 AES-GCM and TLS 1.2 ChaCha20-Poly1305. */
+static void header_dirs(struct sslc_record_dir *plain, struct sslc_record_dir *tls13, struct sslc_record_dir *gcm12, struct sslc_record_dir *chacha12);
+
+/* Makes a record header of the type, version and length. */
+static void make_header(uint8_t *header, unsigned type, unsigned version, unsigned length);
+
+/* Seals and opens one record on a suite and checks it against the reference. */
+static void check_seal_open(const struct sslc_traffic_keys *keys, uint64_t sequence, unsigned type, const uint8_t *plain, size_t size);
+
+/* Opens a reference record, returns the result and the record. */
+static int open_reference(const struct sslc_traffic_keys *keys, uint64_t sequence, unsigned type, const uint8_t *plain, size_t size, size_t padding, struct sslc_record *record, uint8_t **block);
 
 /* Returns a pseudo-random number below limit (limit above 0). */
 static uint32_t
@@ -67,14 +159,20 @@ block_new(
 	size_t size)
 {
 	uint8_t *block;
+	size_t room;
 
 	/* A zero size still gets a block. */
-	block = malloc(size == 0U ? 1U : size);
+	room = size;
+	if (size == 0U)
+		room = 1U;
+	block = malloc(room);
 	if (block == NULL) {
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
-	memset(block, 0xa5, size == 0U ? 1U : size);
+
+	/* Fills the block with a pattern so a read of uninitialized bytes shows. */
+	memset(block, 0xa5, room);
 	return block;
 }
 
@@ -222,6 +320,8 @@ ref_seal(
 			out[5U + index] = nonce[4U + index];
 		body = out + 13;
 	}
+
+	/* Copies the plaintext in. */
 	if (size > 0U)
 		memcpy(body, plain, size);
 	if (chacha)
@@ -248,10 +348,16 @@ static size_t
 payload_offset(
 	const struct sslc_suite *suite)
 {
+	int version13;
+
 	/* TLS 1.2 AES-GCM has 8 explicit bytes. */
-	if (!is13(suite))
+	version13 = is13(suite);
+	if (!version13) {
 		if (suite->aead != SSLC_AEAD_CHACHA20_POLY1305)
 			return 13;
+	}
+
+	/* The payload follows the 5-byte header directly. */
 	return 5;
 }
 
@@ -267,6 +373,12 @@ struct rfc_state {
 	unsigned long protected_records;
 	unsigned long plain_records;
 };
+
+/* Sets the keys of one sender's direction (0 client, 1 server) from the key and IV just read. */
+static void rfc_set_keys(struct rfc_state *state, int role);
+
+/* Checks one record of RFC 8448: sealed again and opened. */
+static void rfc_check_record(struct rfc_state *state, int role, unsigned type, const uint8_t *payload, size_t payload_size, const uint8_t *wire, size_t wire_size);
 
 /* Sets the keys of one sender's direction (0 client, 1 server) from the key and IV just read. */
 static void
@@ -318,16 +430,28 @@ rfc_check_record(
 	size_t length;
 	size_t index;
 	unsigned header_type;
+	unsigned first_hello;
 	int is_plain;
+	int different;
 
 	/* A plaintext record is the header and the payload. */
-	is_plain = wire_size == payload_size + 5U && memcmp(wire + 5, payload, payload_size) == 0;
+	is_plain = 0;
+	if (wire_size == payload_size + 5U) {
+		different = memcmp(wire + 5, payload, payload_size);
+		if (different == 0)
+			is_plain = 1;
+	}
+
+	/* A plaintext record is checked by sealing it again. */
 	if (is_plain) {
 		state->plain_records++;
 		sslc_record_init(&plain);
 
 		/* Sealing gives the wire bytes (version 0x0301 for the first ClientHello). */
-		CHECK(sslc_record_seal(&plain, type, wire[2] == 1 ? 1 : 0, payload, payload_size, out, sizeof(out), &written) == 0);
+		first_hello = 0;
+		if (wire[2] == 1)
+			first_hello = 1;
+		CHECK(sslc_record_seal(&plain, type, (int)first_hello, payload, payload_size, out, sizeof(out), &written) == 0);
 		CHECK(written == wire_size);
 		CHECK_BYTES(out, wire, wire_size);
 		CHECK(sslc_record_overhead(&plain, payload_size) == wire_size);
@@ -371,6 +495,8 @@ rfc_check_record(
 		} else {
 			CHECK(sslc_record_open(&saved, copy, wire_size, &record) == EBADMSG);
 		}
+
+		/* Checks that a refused record does not move the sequence number. */
 		CHECK(saved.sequence == state->sent[role]);
 	}
 
@@ -418,12 +544,21 @@ test_rfc8448(void)
 	unsigned type;
 	int role;
 	int has_payload;
+	int different;
+	int derives_write;
+	int derives_read;
+	int is_record_step;
+	int more;
+	int error;
 
 	/* The vector file of RFC 8448. */
-	if (vec_open(&file, "rfc8448") != 0) {
+	error = vec_open(&file, "rfc8448");
+	if (error != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Starts the state empty. */
 	memset(&state, 0, sizeof(state));
 	section[0] = '\0';
 	payload_size = 0;
@@ -431,7 +566,10 @@ test_rfc8448(void)
 	has_payload = 0;
 
 	/* Each labelled value in order. */
-	while (vec_next(&file)) {
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
 		text = vec_get(&file, "section");
 		step = vec_get(&file, "step");
 		label = vec_get(&file, "label");
@@ -439,26 +577,41 @@ test_rfc8448(void)
 			continue;
 
 		/* A new section starts without keys. */
-		if (strcmp(text, section) != 0) {
+		different = strcmp(text, section);
+		if (different != 0) {
 			strncpy(section, text, sizeof(section) - 1U);
 			section[sizeof(section) - 1U] = '\0';
 			memset(state.keyed, 0, sizeof(state.keyed));
 			has_payload = 0;
 		}
-		role = strncmp(step, "{client}", 8) == 0 ? 0 : 1;
+
+		/* The sender of the step: the client (0) or the server (1). */
+		different = strncmp(step, "{client}", 8);
+		role = 1;
+		if (different == 0)
+			role = 0;
 
 		/* New traffic keys: a sender's own write keys, or the server's read keys which are the client's write keys. */
-		if (contains(step, "derive write traffic keys") || strncmp(step, "{server} derive read traffic keys", 33) == 0) {
-			if (strncmp(step, "{server} derive read traffic keys", 33) == 0)
+		derives_write = contains(step, "derive write traffic keys");
+		different = strncmp(step, "{server} derive read traffic keys", 33);
+		derives_read = 0;
+		if (different == 0)
+			derives_read = 1;
+		if (derives_write || derives_read) {
+			if (derives_read)
 				role = 0;
-			if (strcmp(label, "key expanded") == 0) {
+			different = strcmp(label, "key expanded");
+			if (different == 0) {
 				size = vec_hex(&file, "hex", value, sizeof(value));
 				CHECK(size == 16U);
 				if (size == 16U)
 					memcpy(state.key[role], value, 16);
 				state.have_key[role] = 1;
 			}
-			if (strcmp(label, "iv expanded") == 0) {
+
+			/* The IV of the new keys, which completes them. */
+			different = strcmp(label, "iv expanded");
+			if (different == 0) {
 				size = vec_hex(&file, "hex", value, sizeof(value));
 				CHECK(size == 12U);
 				if (size == 12U && state.have_key[role] != 0) {
@@ -466,29 +619,39 @@ test_rfc8448(void)
 					rfc_set_keys(&state, role);
 				}
 			}
+
 			continue;
 		}
 
 		/* A record's plaintext, then the record. */
-		if (!contains(step, " record:"))
+		is_record_step = contains(step, " record:");
+		if (!is_record_step)
 			continue;
-		if (strcmp(label, "payload") == 0) {
+		different = strcmp(label, "payload");
+		if (different == 0) {
 			payload_size = vec_hex(&file, "hex", payload, sizeof(payload));
 			CHECK(payload_size != (size_t)-1);
 			has_payload = payload_size != (size_t)-1;
 			type = 0;
-			if (contains(step, "handshake record"))
+			is_record_step = contains(step, "handshake record");
+			if (is_record_step)
 				type = 22;
-			if (contains(step, "application_data record"))
+			is_record_step = contains(step, "application_data record");
+			if (is_record_step)
 				type = 23;
-			if (contains(step, "alert record"))
+			is_record_step = contains(step, "alert record");
+			if (is_record_step)
 				type = 21;
-			if (contains(step, "change_cipher_spec record"))
+			is_record_step = contains(step, "change_cipher_spec record");
+			if (is_record_step)
 				type = 20;
 			CHECK(type != 0);
 			continue;
 		}
-		if (strcmp(label, "complete record") == 0) {
+
+		/* The complete record, which is checked against the payload. */
+		different = strcmp(label, "complete record");
+		if (different == 0) {
 			size = vec_hex(&file, "hex", wire, sizeof(wire));
 			CHECK(size != (size_t)-1);
 			CHECK(has_payload);
@@ -497,6 +660,8 @@ test_rfc8448(void)
 			has_payload = 0;
 		}
 	}
+
+	/* Closes the vector file. */
 	vec_close(&file);
 
 	/* Every record of the file was seen: 27 protected and 14 plaintext. */
@@ -555,6 +720,9 @@ test_header(void)
 	unsigned minimum;
 	unsigned maximum;
 	unsigned version;
+	unsigned version_step;
+	unsigned value_step;
+	unsigned expected_error;
 	unsigned index;
 	int result;
 
@@ -581,7 +749,10 @@ test_header(void)
 
 	/* The version, when none is demanded: 0x0301 to 0x0303 only. */
 	for (kind = 0; kind < 4U; kind++) {
-		for (version = 0; version < 0x10000U; version += (version < 0x400U ? 1U : 0x101U)) {
+		for (version = 0; version < 0x10000U; version += version_step) {
+			version_step = 0x101U;
+			if (version < 0x400U)
+				version_step = 1U;
 			make_header(header, 23, version, 100U);
 			result = sslc_record_header(&dirs[kind], header, 0, &type, &length);
 			if (version >= 0x0301U && version <= 0x0303U)
@@ -623,6 +794,8 @@ test_header(void)
 			minimum = 16;
 			maximum = 16384U + 2048U;
 		}
+
+		/* A spread of lengths in the range the keys allow. */
 		for (index = 0; index < 140U; index++) {
 			/* 0 to 39 one by one, then five lengths around each limit, then spread-out lengths. */
 			if (index < 40U)
@@ -640,12 +813,17 @@ test_header(void)
 			if (value > maximum) {
 				CHECK(result == EMSGSIZE);
 			} else if (value < minimum) {
-				CHECK(result == (kind == 0U ? EPROTO : EBADMSG));
+				expected_error = EBADMSG;
+				if (kind == 0U)
+					expected_error = EPROTO;
+				CHECK(result == (int)expected_error);
 			} else {
 				CHECK(result == 0);
 				CHECK(length == value);
 			}
 		}
+
+		/* A length above the largest record is refused for every kind. */
 		make_header(header, 23, 0x0303U, 65535U);
 		CHECK(sslc_record_header(&dirs[kind], header, 0x0303U, &type, &length) == EMSGSIZE);
 	}
@@ -654,7 +832,10 @@ test_header(void)
 	make_header(header, 20, 0x0303U, 1);
 	CHECK(sslc_record_header(&dirs[1], header, 0x0303U, &type, &length) == 0);
 	CHECK(type == 20 && length == 1U);
-	for (value = 0; value < 70000U; value += (value < 40U ? 1U : 1009U)) {
+	for (value = 0; value < 70000U; value += value_step) {
+		value_step = 1009U;
+		if (value < 40U)
+			value_step = 1U;
 		if (value == 1U)
 			continue;
 		if (value > 65535U)
@@ -739,6 +920,10 @@ check_seal_open(
 	size_t offset;
 	unsigned header_type;
 	size_t length;
+	unsigned expected_type;
+	int sealed;
+	int version13;
+	uint64_t last;
 
 	/* Two directions with the same keys, at the same sequence number. */
 	make_dir(&send, keys);
@@ -752,12 +937,15 @@ check_seal_open(
 	copy = block_new(total);
 
 	/* Sealing into a block of exactly the size, compared with the reference. */
-	if (!CHECK(sslc_record_seal(&send, type, 0, plain, size, wire, total, &written) == 0)) {
+	sealed = CHECK(sslc_record_seal(&send, type, 0, plain, size, wire, total, &written) == 0);
+	if (!sealed) {
 		free(copy);
 		free(expected);
 		free(wire);
 		return;
 	}
+
+	/* Checks the written size against the reference. */
 	CHECK(written == total);
 	reference_size = ref_seal(keys, sequence, type, plain, size, 0, expected);
 	CHECK(reference_size == total);
@@ -766,7 +954,11 @@ check_seal_open(
 
 	/* The header says the right type and length (TLS 1.3 hides the type). */
 	CHECK(sslc_record_header(&recv, wire, 0x0303U, &header_type, &length) == 0);
-	CHECK(header_type == (is13(keys->suite) ? 23U : type));
+	version13 = is13(keys->suite);
+	expected_type = type;
+	if (version13)
+		expected_type = 23U;
+	CHECK(header_type == expected_type);
 	CHECK(length == total - 5U);
 
 	/* TLS 1.2 AES-GCM sends the sequence number as its explicit nonce. */
@@ -787,11 +979,13 @@ check_seal_open(
 	CHECK(recv.sequence == sequence + 1U);
 
 	/* Sealing again gives another record (the sequence number moved). */
-	if (sequence + 1U != sequence_max()) {
+	last = sequence_max();
+	if (sequence + 1U != last) {
 		CHECK(sslc_record_seal(&send, type, 0, plain, size, expected, total, &written) == 0);
 		CHECK(memcmp(expected + 5, wire + 5, total - 5U) != 0);
 	}
 
+	/* Frees the buffers. */
 	free(copy);
 	free(expected);
 	free(wire);
@@ -845,6 +1039,8 @@ test_suites(void)
 			}
 		}
 	}
+
+	/* Frees the buffer and checks that enough combinations ran. */
 	free(plain);
 	CHECK(count > 1000U);
 }
@@ -900,6 +1096,9 @@ test_inner_plaintext(void)
 	unsigned padding_index;
 	unsigned type_index;
 	int result;
+	struct sslc_record_dir recv;
+	uint8_t *wire;
+	size_t total;
 
 	/* Plaintext of a pattern that ends in a non-zero byte. */
 	plain = block_new(16384U);
@@ -924,6 +1123,8 @@ test_inner_plaintext(void)
 						CHECK(record.size == sizes[size_index]);
 						CHECK_BYTES(record.data, plain, sizes[size_index]);
 					}
+
+					/* Frees the block. */
 					free(block);
 				}
 			}
@@ -958,37 +1159,27 @@ test_inner_plaintext(void)
 		free(block);
 
 		/* A forged record of too long an inner plaintext is a bad tag first. */
-		{
-			struct sslc_record_dir recv;
-			uint8_t *wire;
-			size_t total;
-
-			wire = block_new(5U + 16000U + 1U + 400U + 16U);
-			total = ref_seal(&keys, 6, 23, plain, 16000, 400, wire);
-			make_dir(&recv, &keys);
-			recv.sequence = 6;
-			wire[total - 1U] ^= 0x80;
-			CHECK(sslc_record_open(&recv, wire, total, &record) == EBADMSG);
-			CHECK(recv.sequence == 6U);
-			free(wire);
-		}
+		wire = block_new(5U + 16000U + 1U + 400U + 16U);
+		total = ref_seal(&keys, 6, 23, plain, 16000, 400, wire);
+		make_dir(&recv, &keys);
+		recv.sequence = 6;
+		wire[total - 1U] ^= 0x80;
+		CHECK(sslc_record_open(&recv, wire, total, &record) == EBADMSG);
+		CHECK(recv.sequence == 6U);
+		free(wire);
 
 		/* A record over the limit of the whole ciphertext (2^14 + 256) is record_overflow before anything else. */
-		{
-			struct sslc_record_dir recv;
-			uint8_t *wire;
-			size_t total;
-
-			wire = block_new(5U + 16000U + 1U + 700U + 16U);
-			total = ref_seal(&keys, 7, 23, plain, 16000, 700, wire);
-			make_dir(&recv, &keys);
-			recv.sequence = 7;
-			CHECK(total - 5U > 16640U);
-			CHECK(sslc_record_open(&recv, wire, total, &record) == EMSGSIZE);
-			CHECK(recv.sequence == 7U);
-			free(wire);
-		}
+		wire = block_new(5U + 16000U + 1U + 700U + 16U);
+		total = ref_seal(&keys, 7, 23, plain, 16000, 700, wire);
+		make_dir(&recv, &keys);
+		recv.sequence = 7;
+		CHECK(total - 5U > 16640U);
+		CHECK(sslc_record_open(&recv, wire, total, &record) == EMSGSIZE);
+		CHECK(recv.sequence == 7U);
+		free(wire);
 	}
+
+	/* Frees the buffer. */
 	free(plain);
 }
 
@@ -1035,6 +1226,8 @@ test_outer_types(void)
 			CHECK(sslc_record_open(&dir, wire, 6, &record) == EPROTO);
 		}
 	}
+
+	/* Checks a plaintext record header with every content type. */
 	memset(wire, 1, sizeof(wire));
 	wire[0] = 20;
 	wire[1] = 3;
@@ -1122,9 +1315,12 @@ test_forgery(void)
 
 				/* A bad tag leaves no plaintext behind: the bytes the plaintext would have had are zero. */
 				if (result == EBADMSG && index >= 5U) {
-					for (zero = 0; zero < total - offset - 16U; zero++)
+					for (zero = 0; zero < total - offset - 16U; zero++) {
 						if (copy[offset + zero] != 0)
 							break;
+					}
+
+					/* Checks that the bytes the plaintext would have had are all zero. */
 					CHECK(zero == total - offset - 16U);
 				}
 			}
@@ -1187,6 +1383,8 @@ test_truncated(void)
 			make_dir(&send, &keys);
 			make_dir(&recv, &keys);
 		}
+
+		/* Seals the record to test the cuts. */
 		CHECK(sslc_record_seal(&send, 23, 0, plain, sizeof(plain), wire, sizeof(wire), &total) == 0);
 
 		/* Every shorter size with the header untouched: the length field does not match. */
@@ -1215,6 +1413,8 @@ test_truncated(void)
 			} else {
 				CHECK(result == EBADMSG);
 			}
+
+			/* Checks that a refused record does not move the sequence number. */
 			CHECK(recv.sequence == 0U);
 			free(copy);
 		}
@@ -1361,6 +1561,8 @@ test_seal_errors(void)
 			fill_keys(&keys, sslc_tls_suite(suite_ids[suite_index]), suite_index + 160U);
 			make_dir(&dir, &keys);
 		}
+
+		/* Takes the size of a sealed record. */
 		total = sslc_record_overhead(&dir, sizeof(content));
 		out = block_new(total + 32U);
 		written = 12345;
@@ -1371,6 +1573,8 @@ test_seal_errors(void)
 				continue;
 			CHECK(sslc_record_seal(&dir, type, 0, content, sizeof(content), out, total + 32U, &written) == EINVAL);
 		}
+
+		/* Checks that nothing was written for an invalid type. */
 		CHECK(written == 12345U);
 		CHECK(dir.sequence == 0U);
 
@@ -1386,6 +1590,8 @@ test_seal_errors(void)
 			CHECK(sslc_record_seal(&dir, 23, 0, content, sizeof(content), out, room, &written) == ENOBUFS);
 			CHECK(out[0] == 0x6e && out[total - 1U] == 0x6e);
 		}
+
+		/* Checks that a refusal leaves the sequence and the size alone. */
 		CHECK(dir.sequence == 0U);
 		CHECK(written == 12345U);
 
@@ -1407,6 +1613,8 @@ test_seal_errors(void)
 		CHECK(written <= SSLC_RECORD_BUFFER);
 		free(out);
 	}
+
+	/* Frees the large buffer. */
 	free(big);
 
 	/* A plaintext record's first ClientHello carries the legacy version 0x0301, the rest 0x0303; a protected one ignores the flag. */
@@ -1443,6 +1651,7 @@ test_keys(void)
 	size_t total;
 	unsigned suite_index;
 	unsigned version13;
+	int suite13;
 
 	/* init makes a plaintext direction. */
 	memset(&dir, 0xee, sizeof(dir));
@@ -1458,7 +1667,8 @@ test_keys(void)
 		for (version13 = 0; version13 < 2U; version13++) {
 			sslc_record_init(&dir);
 			dir.sequence = 99;
-			if ((int)version13 == is13(keys.suite)) {
+			suite13 = is13(keys.suite);
+			if ((int)version13 == suite13) {
 				CHECK(sslc_record_set_keys(&dir, (int)version13, &keys) == 0);
 				CHECK(dir.suite == keys.suite);
 				CHECK(dir.version13 == (int)version13);
@@ -1600,6 +1810,8 @@ test_plaintext(void)
 			free(wire);
 		}
 	}
+
+	/* Frees the content. */
 	free(content);
 
 	/* An empty plaintext record is a protocol error (a decode_error), whichever way it is made. */
@@ -1646,6 +1858,8 @@ test_random(void)
 	unsigned type;
 	unsigned kind;
 	unsigned count;
+	unsigned draw;
+	unsigned accepted_version;
 	int result;
 
 	/* The nine suites and the plaintext direction. */
@@ -1653,21 +1867,32 @@ test_random(void)
 		fill_keys(&keys, sslc_tls_suite(suite_ids[kind]), kind + 170U);
 		make_dir(&dirs[kind], &keys);
 	}
+
+	/* The tenth direction is plaintext. */
 	sslc_record_init(&dirs[9]);
 
 	/* Random whole records with a header made to fit (or not) and random bytes. */
 	for (kind = 0; kind < 10U; kind++) {
 		for (count = 0; count < 3000U; count++) {
-			size = random_below(8U) == 0U ? random_below(18500U) : random_below(300U);
+			draw = random_below(8U);
+			if (draw == 0U)
+				size = random_below(18500U);
+			else
+				size = random_below(300U);
 			wire = block_new(size);
 			random_fill(wire, size);
-			if (size >= 5U && random_below(4U) != 0U) {
+			draw = 0U;
+			if (size >= 5U)
+				draw = random_below(4U);
+			if (size >= 5U && draw != 0U) {
 				wire[0] = (uint8_t)(20U + random_below(4U));
 				wire[1] = 3;
 				wire[2] = (uint8_t)(1U + random_below(3U));
 				wire[3] = (uint8_t)((size - 5U) >> 8);
 				wire[4] = (uint8_t)(size - 5U);
 			}
+
+			/* Opens a copy so the direction keeps its sequence. */
 			copy = dirs[kind];
 			result = sslc_record_open(&copy, wire, size, &record);
 			CHECK(result == 0 || result == EBADMSG || result == EPROTO || result == EMSGSIZE);
@@ -1677,6 +1902,8 @@ test_random(void)
 			} else {
 				CHECK(copy.sequence == dirs[kind].sequence);
 			}
+
+			/* Frees the wire. */
 			free(wire);
 		}
 	}
@@ -1685,13 +1912,21 @@ test_random(void)
 	for (kind = 0; kind < 10U; kind++) {
 		for (count = 0; count < 5000U; count++) {
 			random_fill(header, sizeof(header));
-			if (random_below(2U) == 0U)
+			draw = random_below(2U);
+			if (draw == 0U)
 				header[0] = (uint8_t)(20U + random_below(4U));
-			if (random_below(2U) == 0U) {
+			draw = random_below(2U);
+			if (draw == 0U) {
 				header[1] = 3;
 				header[2] = (uint8_t)random_below(5U);
 			}
-			result = sslc_record_header(&dirs[kind], header, random_below(2U) == 0U ? 0U : 0x0303U, &type, &length);
+
+			/* Chooses at random whether the version is demanded. */
+			draw = random_below(2U);
+			accepted_version = 0x0303U;
+			if (draw == 0U)
+				accepted_version = 0U;
+			result = sslc_record_header(&dirs[kind], header, accepted_version, &type, &length);
 			CHECK(result == 0 || result == EBADMSG || result == EPROTO || result == EMSGSIZE);
 			if (result == 0) {
 				CHECK(type >= 20U && type <= 23U);
@@ -1718,7 +1953,9 @@ test_round_trips(void)
 	unsigned suite_index;
 	unsigned count;
 	unsigned type;
+	unsigned draw;
 	uint64_t sequence;
+	uint64_t last;
 
 	/* Each suite, with random sizes up to a full fragment, types and a random starting sequence number. */
 	content = block_new(16384U);
@@ -1727,12 +1964,17 @@ test_round_trips(void)
 		make_dir(&send, &keys);
 		make_dir(&recv, &keys);
 		sequence = make64(random_next(), random_next());
-		if (sequence > sequence_max() - 1000U)
+		last = sequence_max();
+		if (sequence > last - 1000U)
 			sequence = 77;
 		send.sequence = sequence;
 		recv.sequence = sequence;
 		for (count = 0; count < 120U; count++) {
-			size = random_below(4U) == 0U ? random_below(16385U) : random_below(200U);
+			draw = random_below(4U);
+			if (draw == 0U)
+				size = random_below(16385U);
+			else
+				size = random_below(200U);
 			type = 20U + random_below(4U);
 			random_fill(content, size);
 			total = sslc_record_overhead(&send, size);
@@ -1746,8 +1988,12 @@ test_round_trips(void)
 			CHECK(send.sequence == recv.sequence);
 			free(wire);
 		}
+
+		/* Checks that all the records moved the sequence. */
 		CHECK(send.sequence == sequence + 120U);
 	}
+
+	/* Frees the content. */
 	free(content);
 }
 

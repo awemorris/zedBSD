@@ -151,6 +151,75 @@ static unsigned long limbo_parsed;
 static unsigned long limbo_success_certs;
 static unsigned long limbo_success_failed;
 
+/*
+ * Forward declarations of the static functions, in the order they are defined.
+ */
+static int check_view(const unsigned char *view, const unsigned char *expected, size_t size, const char *file, int line, const char *text);
+static int view_byte(const unsigned char *view, size_t size, size_t index);
+static uint32_t random32(void);
+static void hx_reset(void);
+static char *hx_buffer(void);
+static const char *hx_tlv(unsigned tag, const char *contents);
+static const char *hx_cat(const char *first, const char *second);
+static const char *hx_cat3(const char *first, const char *second, const char *third);
+static const char *hx_text(const char *text);
+static void blob_init(struct blob *blob);
+static size_t blob_size(const struct blob *blob);
+static void blob_hex(struct blob *blob, const char *hex);
+static void blob_cat(struct blob *blob, const struct blob *other);
+static void blob_wrap(struct blob *blob, unsigned tag, const struct blob *inner);
+static void blob_tlv(struct blob *blob, unsigned tag, const char *hex);
+static void blob_text(struct blob *blob, unsigned tag, const char *text);
+static void blob_oid(struct blob *blob, const char *text);
+static void make_alg(struct blob *out, const char *oid, const struct blob *params);
+static void make_name(struct blob *out, const char *text);
+static void make_validity(struct blob *out, unsigned first_tag, const char *first, unsigned second_tag, const char *second);
+static void make_extension(struct blob *out, const char *oid, int critical, const char *value_hex);
+static void append_point(struct blob *out, unsigned char first, size_t count, unsigned seed);
+static void make_spki(struct blob *out, const struct blob *algorithm, const struct blob *key, unsigned unused);
+static void make_spki_ec(struct blob *out, const char *curve, const struct blob *point, unsigned unused);
+static void make_rsa_public_key(struct blob *out, const unsigned char *n, size_t n_size, const unsigned char *e, size_t e_size);
+static void make_pss(struct blob *out, const char *hash, const char *mask, const char *salt, const char *trailer);
+static void held_release(void);
+static const unsigned char *held_copy(const unsigned char *bytes, size_t size);
+static int cert_is_zero(const struct cryc_x509 *cert);
+static int parse_bytes(struct cryc_x509 *cert, const unsigned char *bytes, size_t size);
+static int parse_blob(struct cryc_x509 *cert, const struct blob *blob);
+static void build_cert(const struct cert_spec *spec, struct blob *out, size_t *tbs_offset, size_t *tbs_size);
+static void spec_default(struct cert_spec *spec);
+static int parse_spec(const struct cert_spec *spec, struct cryc_x509 *cert);
+static void expect_refused(const struct cert_spec *spec);
+static void expect_accepted(const struct cert_spec *spec, struct cryc_x509 *cert);
+static int parse_with_extensions(const struct blob *extensions, struct cryc_x509 *cert);
+static int parse_ext(struct cryc_x509 *cert, const char *oid, int critical, const char *value_hex);
+static int view_inside(const unsigned char *view, size_t view_size, const unsigned char *base, size_t size);
+static int cert_views_inside(const struct cryc_x509 *cert, const unsigned char *base, size_t size);
+static void prepare_parts(void);
+static void check_algorithm(const struct blob *encoding, int expected_error, enum cryc_sig_alg expected_alg, size_t expected_salt);
+static void test_signature_algorithms(void);
+static void check_key(const struct blob *spki, int expected_error, enum cryc_key_type expected_type);
+static void test_rsa_keys(void);
+static void test_ec_keys(void);
+static void test_other_keys(void);
+static void test_default_certificate(void);
+static void test_version_and_serial(void);
+static void test_signature_fields(void);
+static void test_names_and_validity(void);
+static void test_basic_constraints(void);
+static void test_usages(void);
+static void test_names_extensions(void);
+static void test_extension_list(void);
+static void test_certificate_keys(void);
+static void test_prefixes(void);
+static void test_mutations(void);
+static int contains_bytes(const unsigned char *haystack, size_t haystack_size, const unsigned char *needle, size_t needle_size);
+static char *read_file(const char *path, size_t *size);
+static void check_bundle_certificate(const struct cryc_x509 *cert, const unsigned char *der, size_t size);
+static void test_bundle(void);
+static void limbo_one(const struct vec_file *file, const char *key, unsigned char *der, int expect_success);
+static void test_limbo(void);
+static void test_wycheproof_keys(const char *name, enum cryc_key_type expected_type, enum cryc_curve_id expected_curve, unsigned long *seen);
+
 /* Compares a view with expected bytes; a NULL view fails the check without being read. */
 static int
 check_view(
@@ -210,6 +279,8 @@ hx_buffer(void)
 		printf("FAIL hex text pool exhausted\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Takes the next buffer of the pool. */
 	buffer = hex_pool[hex_next];
 	hex_next++;
 	return buffer;
@@ -311,6 +382,8 @@ blob_hex(
 		blob->writer.error = 1;
 		return;
 	}
+
+	/* Appends the decoded bytes. */
 	der_raw(&blob->writer, bytes, size);
 }
 
@@ -325,6 +398,8 @@ blob_cat(
 		blob->writer.error = 1;
 		return;
 	}
+
+	/* Appends the bytes of the other blob. */
 	der_raw(&blob->writer, other->data, other->writer.used);
 }
 
@@ -354,6 +429,8 @@ blob_tlv(
 		blob->writer.error = 1;
 		return;
 	}
+
+	/* Writes the element around the decoded contents. */
 	der_put(&blob->writer, tag, bytes, size);
 }
 
@@ -554,21 +631,29 @@ make_pss(
 		blob_hex(&inner, hash);
 		blob_wrap(&body, 0xa0U, &inner);
 	}
+
+	/* Adds the mask field when given. */
 	if (mask != NULL) {
 		blob_init(&inner);
 		blob_hex(&inner, mask);
 		blob_wrap(&body, 0xa1U, &inner);
 	}
+
+	/* Adds the salt field when given. */
 	if (salt != NULL) {
 		blob_init(&inner);
 		blob_hex(&inner, salt);
 		blob_wrap(&body, 0xa2U, &inner);
 	}
+
+	/* Adds the trailer field when given. */
 	if (trailer != NULL) {
 		blob_init(&inner);
 		blob_hex(&inner, trailer);
 		blob_wrap(&body, 0xa3U, &inner);
 	}
+
+	/* Wraps the fields as the parameters of the identifier. */
 	blob_init(&parameters);
 	blob_wrap(&parameters, CRYC_DER_SEQUENCE, &body);
 	make_alg(out, "1.2.840.113549.1.1.10", &parameters);
@@ -590,12 +675,22 @@ held_copy(
 	const unsigned char *bytes,
 	size_t size)
 {
+	size_t room;
+
+	/* Drops the previous copy. */
 	held_release();
-	held = malloc(size == 0U ? 1U : size);
+
+	/* A zero-size input still gets one byte, so that the allocation is a real object. */
+	room = size;
+	if (size == 0U)
+		room = 1U;
+	held = malloc(room);
 	if (held == NULL) {
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Fills the copy, or the one spare byte when nothing is copied. */
 	if (size > 0U)
 		memcpy(held, bytes, size);
 	else
@@ -673,6 +768,8 @@ build_cert(
 		der_put(&inner.writer, CRYC_DER_INTEGER, &version_value, 1);
 		blob_wrap(&tbs_body, 0xa0U, &inner);
 	}
+
+	/* Writes the serial, the algorithm, the names and the key of the tbsCertificate. */
 	blob_tlv(&tbs_body, CRYC_DER_INTEGER, spec->serial);
 	blob_cat(&tbs_body, spec->tbs_alg);
 	blob_cat(&tbs_body, spec->issuer);
@@ -700,6 +797,8 @@ build_cert(
 		blob_wrap(&inner, CRYC_DER_SEQUENCE, spec->extensions);
 		blob_wrap(&tbs_body, 0xa3U, &inner);
 	}
+
+	/* Adds the raw extensions and the tail, then wraps the tbsCertificate. */
 	if (spec->extensions_raw != NULL)
 		blob_tlv(&tbs_body, 0xa3U, spec->extensions_raw);
 	if (spec->tbs_tail != NULL)
@@ -721,6 +820,8 @@ build_cert(
 		blob_hex(&wrapper, spec->outer_tail);
 		tail_size = strlen(spec->outer_tail) / 2U;
 	}
+
+	/* Copies the finished wrapper to the output. */
 	blob_init(out);
 	blob_cat(out, &wrapper);
 
@@ -847,37 +948,83 @@ cert_views_inside(
 	const unsigned char *base,
 	size_t size)
 {
-	/* Each view of the structure. */
+	int inside;
+
+	/* The certificate itself is the buffer it was parsed from. */
 	if (cert->der != base || cert->der_size != size)
 		return 0;
-	if (!view_inside(cert->tbs, cert->tbs_size, base, size))
+
+	/* The tbsCertificate view lies inside the buffer. */
+	inside = view_inside(cert->tbs, cert->tbs_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->signature, cert->signature_size, base, size))
+
+	/* The signature value view lies inside the buffer. */
+	inside = view_inside(cert->signature, cert->signature_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->serial, cert->serial_size, base, size))
+
+	/* The serial number view lies inside the buffer. */
+	inside = view_inside(cert->serial, cert->serial_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->issuer, cert->issuer_size, base, size))
+
+	/* The issuer Name view lies inside the buffer. */
+	inside = view_inside(cert->issuer, cert->issuer_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->subject, cert->subject_size, base, size))
+
+	/* The subject Name view lies inside the buffer. */
+	inside = view_inside(cert->subject, cert->subject_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->spki, cert->spki_size, base, size))
+
+	/* The SubjectPublicKeyInfo view lies inside the buffer. */
+	inside = view_inside(cert->spki, cert->spki_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->san, cert->san_size, base, size))
+
+	/* The subjectAltName view lies inside the buffer. */
+	inside = view_inside(cert->san, cert->san_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->permitted, cert->permitted_size, base, size))
+
+	/* The permitted name constraints view lies inside the buffer. */
+	inside = view_inside(cert->permitted, cert->permitted_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->excluded, cert->excluded_size, base, size))
+
+	/* The excluded name constraints view lies inside the buffer. */
+	inside = view_inside(cert->excluded, cert->excluded_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->ski, cert->ski_size, base, size))
+
+	/* The subject key identifier view lies inside the buffer. */
+	inside = view_inside(cert->ski, cert->ski_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->aki, cert->aki_size, base, size))
+
+	/* The authority key identifier view lies inside the buffer. */
+	inside = view_inside(cert->aki, cert->aki_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->key.rsa.n, cert->key.rsa.n_size, base, size))
+
+	/* The RSA modulus view lies inside the buffer. */
+	inside = view_inside(cert->key.rsa.n, cert->key.rsa.n_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->key.rsa.e, cert->key.rsa.e_size, base, size))
+
+	/* The RSA exponent view lies inside the buffer. */
+	inside = view_inside(cert->key.rsa.e, cert->key.rsa.e_size, base, size);
+	if (!inside)
 		return 0;
-	if (!view_inside(cert->key.point, cert->key.point_size, base, size))
+
+	/* The EC point view lies inside the buffer. */
+	inside = view_inside(cert->key.point, cert->key.point_size, base, size);
+	if (!inside)
 		return 0;
+
+	/* Every view lies inside the buffer. */
 	return 1;
 }
 
@@ -985,6 +1132,7 @@ test_signature_algorithms(void)
 	size_t index;
 	unsigned round;
 	struct cryc_sig_params params;
+	size_t alg_size;
 	int error;
 
 	/* sha256/384/512WithRSAEncryption, with NULL parameters and without (RFC 4055 5). */
@@ -1194,12 +1342,16 @@ test_signature_algorithms(void)
 
 	/* Every strict prefix of well-formed identifiers is refused. */
 	make_pss(&alg, HEX_SHA256, HEX_MGF256, "020120", "020101");
-	for (index = 0; index < blob_size(&alg); index++) {
+	alg_size = blob_size(&alg);
+	for (index = 0; index < alg_size; index++) {
 		blob_init(&inner);
 		der_raw(&inner.writer, alg.data, index);
 		check_algorithm(&inner, EINVAL, CRYC_SIG_NONE, 0);
 	}
-	for (index = 0; index < blob_size(&alg_rsa256); index++) {
+
+	/* The same for every strict prefix of the RSA identifier. */
+	alg_size = blob_size(&alg_rsa256);
+	for (index = 0; index < alg_size; index++) {
 		blob_init(&inner);
 		der_raw(&inner.writer, alg_rsa256.data, index);
 		check_algorithm(&inner, EINVAL, CRYC_SIG_NONE, 0);
@@ -1215,6 +1367,8 @@ test_signature_algorithms(void)
 			bytes[1] = (unsigned char)(size - 2U);
 			bytes[2] = 0x06;
 		}
+
+		/* Feeds the parser the random bytes and checks what a refusal leaves. */
 		memset(&params, 0xa5, sizeof(params));
 		error = cryc_x509_signature_algorithm(held_copy(bytes, size), size, &params);
 		if (error != 0) {
@@ -1475,6 +1629,7 @@ test_other_keys(void)
 	struct blob key_bytes;
 	struct blob inner;
 	size_t index;
+	size_t key_size;
 
 	/* Other algorithms are well formed and outside the range: Ed25519, X25519, RSASSA-PSS keys with and without parameters, an unknown OID. */
 	blob_init(&point);
@@ -1544,12 +1699,16 @@ test_other_keys(void)
 	check_key(&spki, EINVAL, CRYC_KEY_NONE);
 
 	/* Every strict prefix of an RSA and of an EC key is refused. */
-	for (index = 0; index < blob_size(&spki_rsa); index++) {
+	key_size = blob_size(&spki_rsa);
+	for (index = 0; index < key_size; index++) {
 		blob_init(&inner);
 		der_raw(&inner.writer, spki_rsa.data, index);
 		check_key(&inner, EINVAL, CRYC_KEY_NONE);
 	}
-	for (index = 0; index < blob_size(&spki_ec256); index++) {
+
+	/* The same for every strict prefix of the EC key. */
+	key_size = blob_size(&spki_ec256);
+	for (index = 0; index < key_size; index++) {
 		blob_init(&inner);
 		der_raw(&inner.writer, spki_ec256.data, index);
 		check_key(&inner, EINVAL, CRYC_KEY_NONE);
@@ -1762,6 +1921,8 @@ test_version_and_serial(void)
 		CHECK(cert.serial_size == count);
 		CHECK_VIEW(cert.serial, expected, count);
 	}
+
+	/* Refuses each bad serial. */
 	for (index = 0; bad_serials[index] != NULL; index++) {
 		spec_default(&spec);
 		spec.serial = bad_serials[index];
@@ -2340,6 +2501,8 @@ test_extension_list(void)
 			make_extension(&extension, oid, 0, "0500");
 			blob_cat(&list, &extension);
 		}
+
+		/* Parses the list of extensions built so far. */
 		error = parse_with_extensions(&list, &cert);
 		if (index <= 64U)
 			CHECK(error == 0);
@@ -2359,6 +2522,8 @@ test_extension_list(void)
 		error = parse_with_extensions(&list, &cert);
 		CHECK(error == EINVAL);
 	}
+
+	/* Refuses an extension list whose element is not a SEQUENCE. */
 	blob_init(&list);
 	blob_hex(&list, "06022a030401aa");
 	error = parse_with_extensions(&list, &cert);
@@ -2450,6 +2615,7 @@ test_prefixes(void)
 	struct cryc_x509 cert;
 	static struct blob built;
 	size_t index;
+	size_t built_size;
 	int error;
 
 	/* The default certificate with an RSA key and both unique identifiers. */
@@ -2459,11 +2625,14 @@ test_prefixes(void)
 	spec.spki = &spki_rsa;
 	build_cert(&spec, &built, NULL, NULL);
 	CHECK(!built.writer.error);
-	for (index = 0; index < blob_size(&built); index++) {
+	built_size = blob_size(&built);
+	for (index = 0; index < built_size; index++) {
 		error = parse_bytes(&cert, built.data, index);
 		CHECK(error == EINVAL);
 		CHECK(cert_is_zero(&cert));
 	}
+
+	/* Accepts the whole certificate. */
 	error = parse_bytes(&cert, built.data, blob_size(&built));
 	CHECK(error == 0);
 	CHECK(cert_views_inside(&cert, held, held_size));
@@ -2486,6 +2655,7 @@ test_mutations(void)
 	unsigned run;
 	unsigned mode;
 	unsigned changes;
+	unsigned change_limit;
 	unsigned char original;
 	unsigned char values[4];
 	int error;
@@ -2536,8 +2706,15 @@ test_mutations(void)
 		count = size;
 		mode = random32() % 4U;
 		if (mode == 0U) {
-			for (changes = 0; changes < 1U + random32() % 3U; changes++)
+			/* Each round draws how many bytes to change, so the limit is drawn again before every change. */
+			changes = 0;
+			for (;;) {
+				change_limit = 1U + random32() % 3U;
+				if (changes >= change_limit)
+					break;
 				mutated[random32() % size] = (unsigned char)random32();
+				changes++;
+			}
 		} else if (mode == 1U) {
 			position = random32() % size;
 			memmove(mutated + position + 1U, mutated + position, size - position);
@@ -2553,6 +2730,8 @@ test_mutations(void)
 			position = random32() % size;
 			mutated[position] = (unsigned char)(mutated[position] - 1U);
 		}
+
+		/* Parses the mutated certificate. */
 		error = parse_bytes(&cert, mutated, count);
 		if (error == 0) {
 			CHECK(cert_views_inside(&cert, held, held_size));
@@ -2572,14 +2751,18 @@ contains_bytes(
 	size_t needle_size)
 {
 	size_t index;
+	int difference;
 
 	/* Every start position. */
 	if (needle_size > haystack_size)
 		return 0;
 	for (index = 0; index + needle_size <= haystack_size; index++) {
-		if (memcmp(haystack + index, needle, needle_size) == 0)
+		difference = memcmp(haystack + index, needle, needle_size);
+		if (difference == 0)
 			return 1;
 	}
+
+	/* Reports that the byte string does not occur in the buffer. */
 	return 0;
 }
 
@@ -2605,6 +2788,8 @@ read_file(
 		fclose(stream);
 		return NULL;
 	}
+
+	/* Reads the file and ends it with a NUL. */
 	*size = fread(data, 1, (size_t)length, stream);
 	fclose(stream);
 	data[*size] = '\0';
@@ -2624,6 +2809,11 @@ check_bundle_certificate(
 	static const unsigned char p384_oid[] = { 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22 };
 	static const unsigned char p521_oid[] = { 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23 };
 	size_t header;
+	int is_rsa;
+	int is_ec;
+	int is_p256;
+	int is_p384;
+	int is_p521;
 
 	/* The Certificate header is 30 and a length of 2 or 3 octets here; the tbs follows it and the signature ends the certificate. */
 	CHECK(cert_views_inside(cert, der, size));
@@ -2634,20 +2824,27 @@ check_bundle_certificate(
 	CHECK(cert->tbs == der + header);
 	CHECK(cert->signature + cert->signature_size == der + size);
 
+	/* Searches the encoded key for each algorithm and curve identifier. */
+	is_rsa = contains_bytes(cert->spki, cert->spki_size, rsa_oid, sizeof(rsa_oid));
+	is_ec = contains_bytes(cert->spki, cert->spki_size, ec_oid, sizeof(ec_oid));
+	is_p256 = contains_bytes(cert->spki, cert->spki_size, p256_oid, sizeof(p256_oid));
+	is_p384 = contains_bytes(cert->spki, cert->spki_size, p384_oid, sizeof(p384_oid));
+	is_p521 = contains_bytes(cert->spki, cert->spki_size, p521_oid, sizeof(p521_oid));
+
 	/* The key kind agrees with a plain search of the encoded key. */
-	if (contains_bytes(cert->spki, cert->spki_size, rsa_oid, sizeof(rsa_oid))) {
+	if (is_rsa) {
 		CHECK(cert->key.type == CRYC_KEY_RSA);
 		CHECK(cert->key.rsa.n_size >= 128U && view_byte(cert->key.rsa.n, cert->key.rsa.n_size, 0) >= 0x80);
-	} else if (contains_bytes(cert->spki, cert->spki_size, ec_oid, sizeof(ec_oid))) {
-		if (contains_bytes(cert->spki, cert->spki_size, p256_oid, sizeof(p256_oid))) {
+	} else if (is_ec) {
+		if (is_p256) {
 			CHECK(cert->key.type == CRYC_KEY_EC && cert->key.curve == CRYC_CURVE_P256);
 			CHECK(cert->key.point_size == 65U && view_byte(cert->key.point, cert->key.point_size, 0) == 0x04);
-		} else if (contains_bytes(cert->spki, cert->spki_size, p384_oid, sizeof(p384_oid))) {
+		} else if (is_p384) {
 			CHECK(cert->key.type == CRYC_KEY_EC && cert->key.curve == CRYC_CURVE_P384);
 			CHECK(cert->key.point_size == 97U && view_byte(cert->key.point, cert->key.point_size, 0) == 0x04);
 		} else {
 			CHECK(cert->key.type == CRYC_KEY_UNSUPPORTED);
-			if (contains_bytes(cert->spki, cert->spki_size, p521_oid, sizeof(p521_oid)))
+			if (is_p521)
 				bundle_p521++;
 		}
 	} else {
@@ -2710,6 +2907,8 @@ test_bundle(void)
 			free(der);
 			continue;
 		}
+
+		/* Cross-checks the parsed certificate and counts it. */
 		parsed++;
 		check_bundle_certificate(&cert, der, der_size);
 		if ((cert.flags & CRYC_X509_SELF_ISSUED) != 0U)
@@ -2732,6 +2931,8 @@ test_bundle(void)
 			bundle_unsupported++;
 		free(der);
 	}
+
+	/* Frees the bundle text. */
 	free(text);
 
 	/* All of them parse; the bundle holds roots, every one self-issued; the keys outside the range are exactly the P-521 ones. */
@@ -2787,6 +2988,7 @@ limbo_one(
 	size_t index;
 	int error;
 	int known;
+	int different;
 
 	/* Absent keys are skipped. */
 	size = vec_hex(file, key, der, LIMBO_MAX);
@@ -2808,11 +3010,14 @@ limbo_one(
 	id = vec_get(file, "id");
 	known = 0;
 	for (index = 0; limbo_refused_ids[index] != NULL; index++) {
-		if (strcmp(id, limbo_refused_ids[index]) == 0) {
+		different = strcmp(id, limbo_refused_ids[index]);
+		if (different == 0) {
 			known = 1;
 			limbo_refused_count[index]++;
 		}
 	}
+
+	/* Reports a refusal that is not one of the known ones. */
 	if (!known)
 		printf("unexpected refusal in %s (%s)\n", id, key);
 	CHECK(known);
@@ -2833,22 +3038,36 @@ test_limbo(void)
 	size_t index;
 	char key[32];
 	int expect_success;
+	int different;
+	int error;
+	int more;
 
 	/* The records. */
 	der = malloc(LIMBO_MAX);
 	CHECK(der != NULL);
 	if (der == NULL)
 		return;
-	if (vec_open(&file, "limbo") != 0) {
+
+	/* Opens the limbo records; a missing file is a failure. */
+	error = vec_open(&file, "limbo");
+	if (error != 0) {
 		CHECK(0);
 		free(der);
 		return;
 	}
+
+	/* Walks the records, counting them and the SUCCESS cases. */
 	records = 0;
 	success_cases = 0;
-	while (vec_next(&file)) {
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
 		records++;
-		expect_success = strcmp(vec_get(&file, "expected"), "SUCCESS") == 0;
+		different = strcmp(vec_get(&file, "expected"), "SUCCESS");
+		expect_success = 0;
+		if (different == 0)
+			expect_success = 1;
 		if (expect_success)
 			success_cases++;
 		limbo_one(&file, "peer", der, expect_success);
@@ -2856,11 +3075,15 @@ test_limbo(void)
 			sprintf(key, "trusted.%u", (unsigned)index);
 			limbo_one(&file, key, der, expect_success);
 		}
+
+		/* Parses the untrusted certificates of the record. */
 		for (index = 0; index < 120U; index++) {
 			sprintf(key, "untrusted.%u", (unsigned)index);
 			limbo_one(&file, key, der, expect_success);
 		}
 	}
+
+	/* Releases the file and the buffer. */
 	vec_close(&file);
 	free(der);
 	CHECK(records == 9792UL);
@@ -2896,13 +3119,20 @@ test_wycheproof_keys(
 	struct der_writer writer;
 	struct der_writer body;
 	int error;
+	int more;
 
-	/* Every record carries its group's key. */
-	if (vec_open(&file, name) != 0) {
+	/* Opens the file; a missing file is a failure. */
+	error = vec_open(&file, name);
+	if (error != 0) {
 		CHECK(0);
 		return;
 	}
-	while (vec_next(&file)) {
+
+	/* Every record carries its group's key. */
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
 		der_size = vec_hex(&file, "group.publicKeyDer", der, sizeof(der));
 		if (der_size == (size_t)-1)
 			continue;
@@ -2917,6 +3147,8 @@ test_wycheproof_keys(
 			if (point_size != (size_t)-1 && key.point_size == point_size)
 				CHECK_VIEW(key.point, point, point_size);
 		}
+
+		/* Checks an RSA key against the RSAPublicKey the file gives. */
 		if (expected_type == CRYC_KEY_RSA) {
 			/* The RSAPublicKey the file gives, rebuilt from the parsed n and e. */
 			asn_size = vec_hex(&file, "group.publicKeyAsn", asn, sizeof(asn));
@@ -2931,6 +3163,8 @@ test_wycheproof_keys(
 				CHECK_BYTES(rebuilt, asn, asn_size);
 		}
 	}
+
+	/* Closes the file. */
 	vec_close(&file);
 }
 

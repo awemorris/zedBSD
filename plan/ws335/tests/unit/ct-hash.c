@@ -18,6 +18,12 @@
 #include "userland/base/libcrypto-compat/cryc-hash.h"
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -44,6 +50,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value. */
 	return value & 0xffU;
 }
 
@@ -94,6 +102,7 @@ main(void)
 			CT_PUBLIC(out, digest);
 			total += fold(out, digest);
 
+			/* The same HMAC fed in pieces. */
 			CHECK(cryc_hmac_init(&hmac, ids[which], key, key_sizes[sizes]) == 0);
 			cryc_hmac_update(&hmac, data, 33U);
 			cryc_hmac_update(&hmac, data + 33, 200U);

@@ -32,6 +32,72 @@
 static uint32_t random_state = 0x6b43a9b5U;
 
 /* Returns the next pseudo-random 32-bit value (xorshift). */
+static uint32_t random_next(void);
+
+/* Checks the writer against the two literal messages. */
+static void test_write_literal(void);
+
+/* Checks the writer over many combinations of its fields against the model. */
+static void test_write_models(void);
+
+/* Checks every condition the writer refuses, and that nothing is claimed written. */
+static void test_write_errors(void);
+
+/* Checks that every smaller room is ENOBUFS with nothing claimed written, and the exact room works. */
+static void test_write_room(void);
+
+/* Checks the writer against the five RFC 8448 ClientHellos that carry no pre-shared key. */
+static void test_write_rfc8448(void);
+
+/* Checks the message header reader. */
+static void test_header(void);
+
+/* Checks the writers of Finished, the empty Certificate, ClientKeyExchange and KeyUpdate. */
+static void test_small_writers(void);
+
+/* Checks the fields of good ServerHellos and HelloRetryRequests. */
+static void test_server_hello_good(void);
+
+/* The table of bad ServerHello bodies. */
+static void test_server_hello_bad(void);
+
+/* A good ServerHello cut at every length. */
+static void test_server_hello_prefixes(void);
+
+/* Parses the ServerHellos of RFC 8448. */
+static void test_rfc_server_hello(void);
+
+/* Parses the EncryptedExtensions, Certificate, CertificateVerify, Finished and the others of RFC 8448. */
+static void test_rfc_messages(void);
+
+/* Checks the Certificate parser on built and malformed bodies, both versions, against the model. */
+static void test_certificate(void);
+
+/* Checks the largest messages a 3-byte length field holds: a Finished and a TLS 1.2 Certificate of 2^24-1 bytes. */
+static void test_largest_messages(void);
+
+/* Checks the CertificateVerify parser over boundary lengths. */
+static void test_certificate_verify(void);
+
+/* Checks the ServerKeyExchange parser. */
+static void test_server_key_exchange(void);
+
+/* Checks the EncryptedExtensions parser on tables. */
+static void test_encrypted_extensions(void);
+
+/* Checks the KeyUpdate parser over every length 0 to 3 and every byte value. */
+static void test_key_update(void);
+
+/* Checks the CertificateRequest parser of both versions on tables. */
+static void test_certificate_request(void);
+
+/* Checks the NewSessionTicket parser on tables. */
+static void test_new_session_ticket(void);
+
+/* Runs the mutated seeds and random bytes through every parser. */
+static void test_random(void);
+
+/* Returns the next pseudo-random 32-bit value (xorshift). */
 static uint32_t
 random_next(void)
 {
@@ -41,6 +107,75 @@ random_next(void)
 	random_state ^= random_state << 5;
 	return random_state;
 }
+
+/* Returns a pseudo-random value below limit (limit above 0). */
+static uint32_t random_below(uint32_t limit);
+
+/* Returns a heap block of exactly size bytes holding a copy of data (a block of 1 byte for size 0). */
+static uint8_t * exact_copy(const uint8_t *data, size_t size);
+
+/* Reads a big-endian 16-bit value at p. */
+static unsigned get16(const uint8_t *p);
+
+/* Reads a big-endian 24-bit value at p. */
+static unsigned long get24(const uint8_t *p);
+
+/* Returns 1 when the status and the alert agree with each other as the header says. */
+static int alert_agrees(int status, unsigned alert);
+
+/* Returns 1 when size bytes at view lie inside the body (a view of size 0 may be NULL). */
+static int inside(const uint8_t *view, size_t size, const uint8_t *body, size_t body_size);
+
+/* Tells whether the RFC 8448 trace can be read; without it the RFC tests are skipped and the run fails. */
+static int rfc_available(void);
+
+/* Reads the nth labelled value of an RFC 8448 trace section; returns its size, or (size_t)-1. */
+static size_t rfc_value(const char *section, const char *step, const char *label, size_t nth, uint8_t *out, size_t room);
+
+/* Runs the writer into an exact-size block and compares with the model; returns the writer's size or 0. */
+static size_t check_writer(const struct sslc_client_hello *hello);
+
+/* Checks one RFC 8448 ClientHello: the same fields given to the writer give the same bytes in every extension the writer sends. */
+static void check_rfc_client_hello(const char *section, size_t nth, const unsigned *missing, size_t missing_count);
+
+/* Walks an extensions block for its syntax alone; returns 1 when well formed (the model's own walker). */
+static int model_extensions_ok(const uint8_t *data, size_t size);
+
+/* The model of the KeyUpdate parser. */
+static struct outcome model_key_update(const uint8_t *body, size_t size, int *requested);
+
+/* Runs the KeyUpdate parser and its model on the same bytes and compares. */
+static void compare_key_update(const uint8_t *data, size_t size);
+
+/* The model of the CertificateVerify parser: fields in want_*; returns the outcome. */
+static struct outcome model_certificate_verify(const uint8_t *body, size_t size, unsigned *scheme, size_t *signature_offset, size_t *signature_size);
+
+/* Runs the CertificateVerify parser and its model on the same bytes and compares. */
+static void compare_certificate_verify(const uint8_t *data, size_t size);
+
+/* Runs the ServerKeyExchange parser and its model on the same bytes and compares. */
+static void compare_server_key_exchange(const uint8_t *data, size_t size);
+
+/* Runs the Certificate parser and its model on the same bytes and compares. */
+static void compare_certificate(const uint8_t *data, size_t size, int tls13);
+
+/* Runs the EncryptedExtensions parser and its model on the same bytes and compares. */
+static void compare_encrypted_extensions(const uint8_t *data, size_t size);
+
+/* Loads an RFC 8448 handshake message and checks its header against its length; returns the size. */
+static size_t rfc_message(const char *section, const char *step, const char *label, size_t nth, unsigned type, uint8_t *out, size_t room);
+
+/* Parses the ServerHello (or HelloRetryRequest) of an RFC 8448 section and checks its fields. */
+static void check_rfc_server_hello(const char *section, size_t nth, const char *random_hex, const char *session_hex, int retry, unsigned group, size_t key_size, const char *key_label, const char *key_step);
+
+/* The extensions of an RFC 8448 EncryptedExtensions without one type, as a new body (the model walker's view of the bytes). */
+static size_t without_extension(const uint8_t *body, size_t size, unsigned type, uint8_t *out);
+
+/* Checks the invariants of every parser's answer on one input, and the models where there are some. */
+static void check_every_parser(const uint8_t *data, size_t size);
+
+/* Applies one random change to a message in place (a flip, a set, a cut, an insertion or a deletion); returns the new size. */
+static size_t mutate(uint8_t *data, size_t size, size_t room);
 
 /* Returns a pseudo-random value below limit (limit above 0). */
 static uint32_t
@@ -64,13 +199,19 @@ exact_copy(
 	size_t size)
 {
 	uint8_t *block;
+	size_t room;
 
 	/* Exact size, so that AddressSanitizer sees every read past the end. */
-	block = malloc(size == 0U ? 1U : size);
+	room = size;
+	if (size == 0U)
+		room = 1U;
+	block = malloc(room);
 	if (block == NULL) {
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Copies the bytes, if there are any. */
 	if (size != 0U)
 		memcpy(block, data, size);
 	return block;
@@ -81,6 +222,41 @@ struct buffer {
 	uint8_t *bytes;
 	size_t size;
 };
+
+/* Starts an empty buffer. */
+static void buffer_init(struct buffer *buffer);
+
+/* Frees a buffer. */
+static void buffer_free(struct buffer *buffer);
+
+/* Appends one byte. */
+static void put8(struct buffer *buffer, unsigned value);
+
+/* Appends a 2-byte big-endian value. */
+static void put16(struct buffer *buffer, unsigned value);
+
+/* Appends a 3-byte big-endian value. */
+static void put24(struct buffer *buffer, unsigned long value);
+
+/* Appends size bytes. */
+static void put_bytes(struct buffer *buffer, const uint8_t *data, size_t size);
+
+/* Appends size copies of one byte. */
+static void put_fill(struct buffer *buffer, unsigned value, size_t size);
+
+/* Appends an extension: its type, its length and its data. */
+static void put_extension(struct buffer *buffer, unsigned type, const uint8_t *data, size_t size);
+
+/* Appends the decoded bytes of a hex string; returns 0, or -1 for a bad string. */
+static int put_hex(struct buffer *buffer, const char *text);
+
+static void model_client_hello(const struct sslc_client_hello *hello, struct buffer *out);
+
+/* Builds a ServerHello body from the head and up to four extension hex pieces; returns the buffer's size. */
+static void make_server_hello(struct buffer *body, const char *head, const char *e1, const char *e2, const char *e3, const char *e4);
+
+/* Builds a Certificate body of count certificates of the given size each, with TLS 1.3's context and extensions or TLS 1.2's plain list. */
+static void make_certificate(struct buffer *body, int tls13, size_t context_size, size_t count, size_t cert_size, size_t ext_size);
 
 /* Largest message a test builds. */
 #define BUFFER_MAX	(1U << 17)
@@ -96,6 +272,8 @@ buffer_init(
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Starts the buffer empty. */
 	buffer->size = 0;
 }
 
@@ -263,6 +441,25 @@ inside(
 #define SEC6	"6 Client Authentication"
 #define SEC7	"7 Compatibility Mode"
 
+/* Tells whether the RFC 8448 trace can be read; without it the RFC tests are skipped and the run fails. */
+static int
+rfc_available(void)
+{
+	struct vec_file file;
+	int error;
+
+	/* Opens the trace and closes it again. */
+	error = vec_open(&file, "rfc8448");
+	if (error != 0) {
+		CHECK(0);
+		return 0;
+	}
+
+	/* Readable. */
+	vec_close(&file);
+	return 1;
+}
+
 /*
  * Reads the nth labelled value of the RFC 8448 trace whose section is
  * section, whose step contains step and whose label is label; returns its
@@ -278,31 +475,56 @@ rfc_value(
 	size_t room)
 {
 	struct vec_file file;
+	const char *value;
+	const char *contained;
 	size_t found;
 	size_t size;
+	int different;
+	int error;
+	int more;
 
 	/* The trace file. */
 	size = (size_t)-1;
-	if (vec_open(&file, "rfc8448") != 0) {
+	error = vec_open(&file, "rfc8448");
+	if (error != 0) {
 		CHECK(0);
 		return size;
 	}
 
 	/* The nth record that matches. */
 	found = 0;
-	while (vec_next(&file)) {
-		if (strcmp(vec_get(&file, "section"), section) != 0)
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
+
+		/* Looks for the section of the record. */
+		value = vec_get(&file, "section");
+		different = strcmp(value, section);
+		if (different != 0)
 			continue;
-		if (strstr(vec_get(&file, "step"), step) == NULL)
+
+		/* Looks for the step name inside the record's step. */
+		value = vec_get(&file, "step");
+		contained = strstr(value, step);
+		if (contained == NULL)
 			continue;
-		if (strcmp(vec_get(&file, "label"), label) != 0)
+
+		/* Looks for the label of the record. */
+		value = vec_get(&file, "label");
+		different = strcmp(value, label);
+		if (different != 0)
 			continue;
 		if (found == nth) {
 			size = vec_hex(&file, "hex", out, room);
 			break;
 		}
+
+		/* Counts the record found. */
 		found++;
 	}
+
+	/* Closes the vector file. */
 	vec_close(&file);
 	CHECK(size != (size_t)-1);
 	return size;
@@ -328,6 +550,12 @@ struct decoded_hello {
 };
 
 /* Takes a ClientHello apart; returns 0, or -1 when its framing is wrong. */
+static int decode_hello(const uint8_t *message, size_t size, struct decoded_hello *hello);
+
+/* Returns the index of the extension of the type, or -1. */
+static int find_extension(const struct decoded_hello *hello, unsigned type);
+
+/* Takes a ClientHello apart; returns 0, or -1 when its framing is wrong. */
 static int
 decode_hello(
 	const uint8_t *message,
@@ -337,16 +565,22 @@ decode_hello(
 	size_t position;
 	size_t end;
 	size_t length;
+	unsigned long declared;
+	unsigned version;
 
 	/* The handshake header: type 1 and a length that covers the rest. */
 	memset(hello, 0, sizeof(*hello));
-	if (size < 4U || message[0] != 1U || get24(message + 1) != (unsigned long)(size - 4U))
+	if (size < 4U || message[0] != 1U)
+		return -1;
+	declared = get24(message + 1);
+	if (declared != (unsigned long)(size - 4U))
 		return -1;
 
 	/* The version and the random. */
 	if (size < 4U + 2U + 32U + 1U)
 		return -1;
-	if (get16(message + 4) != 0x0303U)
+	version = get16(message + 4);
+	if (version != 0x0303U)
 		return -1;
 	hello->random = 6;
 	position = 38;
@@ -395,6 +629,8 @@ decode_hello(
 			return -1;
 		hello->ext_count++;
 	}
+
+	/* Succeeded: every extension is noted. */
 	return 0;
 }
 
@@ -411,6 +647,8 @@ find_extension(
 		if (hello->ext_type[index] == type)
 			return (int)index;
 	}
+
+	/* The extension is not in the hello. */
 	return -1;
 }
 
@@ -428,6 +666,9 @@ struct hello_input {
 	uint8_t cookie[SSLC_MSG_COOKIE_MAX + 8U];
 	char name[400];
 };
+
+/* Fills an input with a typical ClientHello: both versions, one suite of each, one share. */
+static void input_typical(struct hello_input *input, uint16_t min_version, uint16_t max_version);
 
 /* Fills an input with a typical ClientHello: both versions, one suite of each, one share. */
 static void
@@ -489,6 +730,8 @@ model_client_hello(
 	int offer12;
 	int offer13;
 	size_t name_size;
+	unsigned versions_size;
+	unsigned suites_extra;
 
 	/* Which versions are offered. */
 	offer12 = hello->min_version == SSLC_TLS12;
@@ -534,7 +777,10 @@ model_client_hello(
 	/* supported_versions. */
 	if (offer13) {
 		data.size = 0;
-		put8(&data, offer12 ? 4U : 2U);
+		versions_size = 2U;
+		if (offer12)
+			versions_size = 4U;
+		put8(&data, versions_size);
 		put16(&data, 0x0304U);
 		if (offer12)
 			put16(&data, 0x0303U);
@@ -558,6 +804,8 @@ model_client_hello(
 			put16(&data, (unsigned)hello->shares[index].key_size);
 			put_bytes(&data, hello->shares[index].key, hello->shares[index].key_size);
 		}
+
+		/* Fills in the length of the key_share list. */
 		data.bytes[0] = (uint8_t)((data.size - 2U) >> 8);
 		data.bytes[1] = (uint8_t)((data.size - 2U) & 0xffU);
 		put_extension(&exts, 51, data.bytes, data.size);
@@ -568,7 +816,10 @@ model_client_hello(
 	put_bytes(&body, hello->random, 32);
 	put8(&body, (unsigned)hello->session_id_size);
 	put_bytes(&body, hello->session_id, hello->session_id_size);
-	put16(&body, (unsigned)((hello->suite_count + (offer12 ? 1U : 0U)) * 2U));
+	suites_extra = 0U;
+	if (offer12)
+		suites_extra = 1U;
+	put16(&body, (unsigned)((hello->suite_count + suites_extra) * 2U));
 	for (index = 0; index < hello->suite_count; index++)
 		put16(&body, hello->suites[index]);
 	if (offer12)
@@ -611,7 +862,9 @@ check_writer(
 	if (status == 0 && written == model.size)
 		CHECK_BYTES(out, model.bytes, model.size);
 	free(out);
-	status = written == model.size ? (int)model.size : 0;
+	status = 0;
+	if (written == model.size)
+		status = (int)model.size;
 	buffer_free(&model);
 	return (size_t)status;
 }
@@ -705,6 +958,11 @@ test_write_models(void)
 	size_t written;
 	size_t size;
 	int slot;
+	uint16_t *many;
+	uint8_t *out;
+	size_t room;
+	int status;
+	uint8_t *key;
 
 	/* One big input, reused. */
 	input = malloc(sizeof(*input));
@@ -721,19 +979,29 @@ test_write_models(void)
 							if (cookie_case != 0U || share_count != 0U)
 								continue;
 						}
+
+						/* Builds the key shares of the case. */
 						input->hello.share_count = 0;
 						for (index = 0; index < share_count; index++) {
 							memset(input->shares[index], (int)(0x40U + index), sizeof(input->shares[index]));
-							input->hello.shares[index].group = index == 0U ? SSLC_GROUP_X25519 : SSLC_GROUP_SECP256R1;
+							input->hello.shares[index].group = SSLC_GROUP_SECP256R1;
 							input->hello.shares[index].key = input->shares[index];
-							input->hello.shares[index].key_size = index == 0U ? 32U : 65U;
+							input->hello.shares[index].key_size = 65U;
+							if (index == 0U) {
+								input->hello.shares[index].group = SSLC_GROUP_X25519;
+								input->hello.shares[index].key_size = 32U;
+							}
 						}
+
+						/* Records how many shares there are and the session id. */
 						input->hello.share_count = share_count;
 						input->hello.session_id_size = session_sizes[session_case];
 						memset(input->hello.session_id, 0x5a, sizeof(input->hello.session_id));
 						input->hello.cookie_size = cookie_sizes[cookie_case];
 						memset(input->cookie, 0xc7, sizeof(input->cookie));
-						input->hello.cookie = cookie_sizes[cookie_case] != 0U ? input->cookie : NULL;
+						input->hello.cookie = NULL;
+						if (cookie_sizes[cookie_case] != 0U)
+							input->hello.cookie = input->cookie;
 						input->hello.server_name = NULL;
 						if (name_case == 1U) {
 							strcpy(input->name, "a");
@@ -749,6 +1017,8 @@ test_write_models(void)
 							strcpy(input->name, "1.2.3.4");
 							input->hello.server_name = input->name;
 						}
+
+						/* Writes the ClientHello and checks it against the model. */
 						size = check_writer(&input->hello);
 
 						/* The first of each is also taken apart by the file's reader. */
@@ -781,6 +1051,8 @@ test_write_models(void)
 		input->groups[index] = (uint16_t)(0x0100U + index);
 		input->schemes[index] = (uint16_t)(0x0800U + index);
 	}
+
+	/* Counts the entries of each list. */
 	input->hello.suite_count = 64;
 	input->hello.group_count = 64;
 	input->hello.scheme_count = 64;
@@ -789,108 +1061,87 @@ test_write_models(void)
 	written = 0;
 
 	/* A ClientHello with as many suites as a 2-byte list holds (32766, plus the signalling suite in 1.2). */
-	{
-		uint16_t *many;
-		uint8_t *out;
-		size_t room;
-		int status;
-
-		many = malloc(32767U * sizeof(*many));
-		for (index = 0; index < 32767U; index++)
-			many[index] = (uint16_t)(0x1000U + index);
-		input->hello.suites = many;
-		input->hello.suite_count = 32766;
-		room = 4U + 2U + 32U + 1U + 2U + 32767U * 2U + 2U + 2U + 1000U;
-		out = malloc(room);
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == 0);
-		CHECK(written >= 65534U);
-		CHECK(get16(out + 4 + 2 + 32 + 1) == 65534U);
-		input->hello.suite_count = 32767;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == EINVAL);
-		CHECK(written == 0U);
-		input->hello.min_version = SSLC_TLS13;
-		input->hello.max_version = SSLC_TLS13;
-		input->hello.suite_count = 32766;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == 0);
-		CHECK(get16(out + 4 + 2 + 32 + 1) == 65532U);
-		free(out);
-		free(many);
-	}
+	many = malloc(32767U * sizeof(*many));
+	for (index = 0; index < 32767U; index++)
+		many[index] = (uint16_t)(0x1000U + index);
+	input->hello.suites = many;
+	input->hello.suite_count = 32766;
+	room = 4U + 2U + 32U + 1U + 2U + 32767U * 2U + 2U + 2U + 1000U;
+	out = malloc(room);
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == 0);
+	CHECK(written >= 65534U);
+	CHECK(get16(out + 4 + 2 + 32 + 1) == 65534U);
+	input->hello.suite_count = 32767;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == EINVAL);
+	CHECK(written == 0U);
+	input->hello.min_version = SSLC_TLS13;
+	input->hello.max_version = SSLC_TLS13;
+	input->hello.suite_count = 32766;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == 0);
+	CHECK(get16(out + 4 + 2 + 32 + 1) == 65532U);
+	free(out);
+	free(many);
 
 	/* Long lists of groups and schemes: 30000 fit; 32766 and 32767 do not (the extensions block, 2^16-1 bytes, is full first). */
-	{
-		uint16_t *many;
-		uint8_t *out;
-		size_t room;
-		int status;
+	many = malloc(32767U * sizeof(*many));
+	for (index = 0; index < 32767U; index++)
+		many[index] = (uint16_t)(0x0100U + (index & 0xffU));
+	input_typical(input, SSLC_TLS13, SSLC_TLS13);
+	room = 70000U + 2000U;
+	out = malloc(room);
 
-		many = malloc(32767U * sizeof(*many));
-		for (index = 0; index < 32767U; index++)
-			many[index] = (uint16_t)(0x0100U + (index & 0xffU));
-		input_typical(input, SSLC_TLS13, SSLC_TLS13);
-		room = 70000U + 2000U;
-		out = malloc(room);
+	/* Groups. */
+	input->hello.groups = many;
+	input->hello.group_count = 30000;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == 0 && written > 60000U);
+	input->hello.group_count = 32766;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == EINVAL && written == 0U);
+	input->hello.group_count = 32767;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == EINVAL && written == 0U);
+	input->hello.groups = input->groups;
+	input->hello.group_count = 2;
 
-		/* Groups. */
-		input->hello.groups = many;
-		input->hello.group_count = 30000;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == 0 && written > 60000U);
-		input->hello.group_count = 32766;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == EINVAL && written == 0U);
-		input->hello.group_count = 32767;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == EINVAL && written == 0U);
-		input->hello.groups = input->groups;
-		input->hello.group_count = 2;
-
-		/* Schemes. */
-		input->hello.schemes = many;
-		input->hello.scheme_count = 30000;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == 0 && written > 60000U);
-		input->hello.scheme_count = 32766;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == EINVAL && written == 0U);
-		input->hello.scheme_count = 32767;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == EINVAL && written == 0U);
-		free(out);
-		free(many);
-	}
+	/* Schemes. */
+	input->hello.schemes = many;
+	input->hello.scheme_count = 30000;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == 0 && written > 60000U);
+	input->hello.scheme_count = 32766;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == EINVAL && written == 0U);
+	input->hello.scheme_count = 32767;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == EINVAL && written == 0U);
+	free(out);
+	free(many);
 
 	/* Key shares of 1 byte and of 60000 bytes; 65529 and above fill the extensions block (2^16-1 bytes) past its end. */
-	{
-		uint8_t *key;
-		uint8_t *out;
-		size_t room;
-		int status;
-
-		key = calloc(65536U, 1U);
-		room = 70000U;
-		out = malloc(room);
-		input_typical(input, SSLC_TLS13, SSLC_TLS13);
-		input->hello.shares[0].key = key;
-		input->hello.shares[0].key_size = 1;
-		CHECK(check_writer(&input->hello) != 0U);
-		input->hello.shares[0].key_size = 60000;
-		CHECK(check_writer(&input->hello) != 0U);
-		input->hello.shares[0].key_size = 65529;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == EINVAL && written == 0U);
-		input->hello.shares[0].key_size = 65530;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == EINVAL && written == 0U);
-		input->hello.shares[0].key_size = 65535;
-		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
-		CHECK(status == EINVAL && written == 0U);
-		free(out);
-		free(key);
-	}
+	key = calloc(65536U, 1U);
+	room = 70000U;
+	out = malloc(room);
+	input_typical(input, SSLC_TLS13, SSLC_TLS13);
+	input->hello.shares[0].key = key;
+	input->hello.shares[0].key_size = 1;
+	CHECK(check_writer(&input->hello) != 0U);
+	input->hello.shares[0].key_size = 60000;
+	CHECK(check_writer(&input->hello) != 0U);
+	input->hello.shares[0].key_size = 65529;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == EINVAL && written == 0U);
+	input->hello.shares[0].key_size = 65530;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == EINVAL && written == 0U);
+	input->hello.shares[0].key_size = 65535;
+	status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+	CHECK(status == EINVAL && written == 0U);
+	free(out);
+	free(key);
 	buffer_free(&model);
 	free(input);
 }
@@ -1060,6 +1311,8 @@ test_write_room(void)
 			input->hello.share_count = 2;
 			input->hello.session_id_size = 32;
 		}
+
+		/* Writes the model of the ClientHello. */
 		model.size = 0;
 		model_client_hello(&input->hello, &model);
 		size = model.size;
@@ -1086,6 +1339,8 @@ test_write_room(void)
 		CHECK_BYTES(out + size, canary, sizeof(canary));
 		free(out);
 	}
+
+	/* Frees the model buffer and the input. */
 	buffer_free(&model);
 	free(input);
 }
@@ -1115,13 +1370,25 @@ check_rfc_client_hello(
 	size_t end;
 	int slot;
 	int status;
+	int decoded;
 	unsigned type;
 
 	/* The RFC's message, taken apart by this file's reader. */
 	input = malloc(sizeof(*input));
 	size = rfc_value(section, "{client} construct a ClientHello", "ClientHello", nth, message, sizeof(message));
 	CHECK(size != (size_t)-1);
-	CHECK(decode_hello(message, size, &rfc) == 0);
+	decoded = -1;
+	if (size != (size_t)-1)
+		decoded = decode_hello(message, size, &rfc);
+	CHECK(decoded == 0);
+
+	/* Without the RFC's message (or the memory for the input) there is nothing to compare. */
+	if (input == NULL || decoded != 0) {
+		free(input);
+		return;
+	}
+
+	/* The writer's input, from the RFC's fields. */
 	input_typical(input, SSLC_TLS13, SSLC_TLS13);
 	memcpy(input->hello.random, message + rfc.random, 32);
 	input->hello.session_id_size = rfc.session_size;
@@ -1200,6 +1467,8 @@ check_rfc_client_hello(
 			listed++;
 		}
 	}
+
+	/* Checks that every missing item was listed. */
 	CHECK(listed == missing_count);
 
 	/* Nothing the RFC lacks is sent. */
@@ -1333,6 +1602,8 @@ test_small_writers(void)
 		CHECK(status == ENOBUFS && written == 0U);
 		free(block);
 	}
+
+	/* Writes the Finished message into an exact-size block. */
 	block = exact_copy(out, 36);
 	status = sslc_msg_write_finished(data, 32, block, 36, &written);
 	CHECK(status == 0 && written == 36U);
@@ -1373,6 +1644,8 @@ test_small_writers(void)
 		CHECK(status == ENOBUFS && written == 0U);
 		free(block);
 	}
+
+	/* Every room too small for the message is refused. */
 	for (room = 0; room < 7U; room++) {
 		block = exact_copy(out, room);
 		status = sslc_msg_write_empty_certificate(0, NULL, 0, block, room, &written);
@@ -1412,6 +1685,8 @@ test_small_writers(void)
 		status = sslc_msg_parse_key_update(out + 4, 1, &requested, &alert);
 		CHECK(status == 0 && requested == update && alert == 0U);
 	}
+
+	/* A value of the update request that RFC 8446 does not define is refused. */
 	status = sslc_msg_write_key_update(2, out, sizeof(out), &written);
 	CHECK(status == EINVAL && written == 0U);
 	status = sslc_msg_write_key_update(-1, out, sizeof(out), &written);
@@ -1455,6 +1730,8 @@ model_extensions_ok(
 			return 0;
 		position += 4U + length;
 	}
+
+	/* Succeeded: the messages fit the body exactly. */
 	return 1;
 }
 
@@ -1480,6 +1757,8 @@ model_key_update(
 	} else {
 		*requested = body[0];
 	}
+
+	/* Reports the outcome of the model. */
 	return outcome;
 }
 
@@ -1520,6 +1799,7 @@ model_certificate_verify(
 	size_t *signature_size)
 {
 	struct outcome outcome;
+	unsigned declared;
 
 	/* Two bytes of scheme, two of length, then exactly that many bytes. */
 	outcome.status = 0;
@@ -1527,11 +1807,16 @@ model_certificate_verify(
 	*scheme = 0;
 	*signature_offset = 0;
 	*signature_size = 0;
-	if (size < 4U || get16(body + 2) != size - 4U) {
+	declared = 0;
+	if (size >= 4U)
+		declared = get16(body + 2);
+	if (size < 4U || declared != size - 4U) {
 		outcome.status = EINVAL;
 		outcome.alert = DEC;
 		return outcome;
 	}
+
+	/* Reads the scheme and the position of the signature. */
 	*scheme = get16(body);
 	*signature_offset = 4;
 	*signature_size = size - 4U;
@@ -1570,6 +1855,8 @@ compare_certificate_verify(
 		CHECK(signature_size == want_size);
 		CHECK(signature == block + want_offset);
 	}
+
+	/* Frees the block. */
 	free(block);
 }
 
@@ -1583,6 +1870,9 @@ struct ske_model {
 	size_t signature_size;
 	size_t params_size;
 };
+
+/* The model of the ServerKeyExchange parser. */
+static struct outcome model_server_key_exchange(const uint8_t *body, size_t size, struct ske_model *fields);
 
 /* The model of the ServerKeyExchange parser. */
 static struct outcome
@@ -1607,6 +1897,8 @@ model_server_key_exchange(
 		outcome.alert = ILL;
 		return outcome;
 	}
+
+	/* Refuses a message too short for the fields. */
 	if (size < 4U)
 		return outcome;
 	fields->group = get16(body + 1);
@@ -1662,6 +1954,8 @@ compare_server_key_exchange(
 		CHECK(exchange.params == block);
 		CHECK(exchange.params_size == want_fields.params_size);
 	}
+
+	/* Frees the block. */
 	free(block);
 }
 
@@ -1673,6 +1967,9 @@ struct cert_model {
 	size_t der[CRYC_CHAIN_MAX_PEER];
 	size_t der_size[CRYC_CHAIN_MAX_PEER];
 };
+
+/* The model of the Certificate parser (both versions). */
+static struct outcome model_certificate(const uint8_t *body, size_t size, int tls13, struct cert_model *fields);
 
 /* The model of the Certificate parser (both versions). */
 static struct outcome
@@ -1689,6 +1986,7 @@ model_certificate(
 	size_t position;
 	size_t entry_size;
 	size_t ext_size;
+	int extensions_ok;
 
 	/* The result of a failure to read the syntax. */
 	outcome.status = EINVAL;
@@ -1725,6 +2023,8 @@ model_certificate(
 			outcome.alert = BADC;
 			return outcome;
 		}
+
+		/* Refuses an entry without room for its length. */
 		if (size - position < 3U)
 			return outcome;
 		entry_size = (size_t)get24(body + position);
@@ -1740,16 +2040,21 @@ model_certificate(
 			ext_size = get16(body + position);
 			if (size - position - 2U < ext_size)
 				return outcome;
-			if (!model_extensions_ok(body + position + 2U, ext_size))
+			extensions_ok = model_extensions_ok(body + position + 2U, ext_size);
+			if (!extensions_ok)
 				return outcome;
 			if (ext_size != 0U) {
 				outcome.status = EPROTO;
 				outcome.alert = UNS;
 				return outcome;
 			}
+
+			/* Moves to the next extension. */
 			position += 2U + ext_size;
 		}
 	}
+
+	/* Succeeded: the message is well formed. */
 	outcome.status = 0;
 	outcome.alert = 0;
 	return outcome;
@@ -1791,6 +2096,8 @@ compare_certificate(
 			CHECK(message.der_size[index] == want_fields.der_size[index]);
 		}
 	}
+
+	/* Frees the block. */
 	free(block);
 }
 
@@ -1798,6 +2105,9 @@ compare_certificate(
 struct ee_model {
 	int ack;
 };
+
+/* The model of the EncryptedExtensions parser. */
+static struct outcome model_encrypted_extensions(const uint8_t *body, size_t size, struct ee_model *fields);
 
 /* The model of the EncryptedExtensions parser. */
 static struct outcome
@@ -1811,6 +2121,7 @@ model_encrypted_extensions(
 	size_t length;
 	size_t type;
 	size_t list;
+	unsigned declared;
 	int seen_name;
 	int seen_groups;
 
@@ -1820,7 +2131,10 @@ model_encrypted_extensions(
 	fields->ack = 0;
 	seen_name = 0;
 	seen_groups = 0;
-	if (size < 2U || get16(body) != size - 2U)
+	declared = 0;
+	if (size >= 2U)
+		declared = get16(body);
+	if (size < 2U || declared != size - 2U)
 		return outcome;
 
 	/* Each extension. */
@@ -1840,6 +2154,8 @@ model_encrypted_extensions(
 				outcome.alert = ILL;
 			return outcome;
 		}
+
+		/* Checks the fields of the extension by its type. */
 		if (type == 0U) {
 			if (seen_name || length != 0U)
 				return outcome;
@@ -1853,8 +2169,12 @@ model_encrypted_extensions(
 			if (list != length - 2U || list < 2U || list % 2U != 0U)
 				return outcome;
 		}
+
+		/* Moves to the next extension. */
 		position += 4U + length;
 	}
+
+	/* Succeeded: the message is well formed. */
 	outcome.status = 0;
 	outcome.alert = 0;
 	return outcome;
@@ -1912,6 +2232,9 @@ struct hex_case {
 };
 
 /* Runs one parser over a table of hex bodies, checking the status and the alert, and the invariants. */
+static void run_server_hello_cases(const struct hex_case *cases, size_t count);
+
+/* Runs one parser over a table of hex bodies, checking the status and the alert, and the invariants. */
 static void
 run_server_hello_cases(
 	const struct hex_case *cases,
@@ -1923,16 +2246,20 @@ run_server_hello_cases(
 	unsigned alert;
 	size_t index;
 	int status;
+	int error;
 
 	/* Each case. */
 	buffer_init(&body);
 	for (index = 0; index < count; index++) {
 		body.size = 0;
-		if (put_hex(&body, cases[index].hex) != 0) {
+		error = put_hex(&body, cases[index].hex);
+		if (error != 0) {
 			printf("FAIL bad hex in case %s\n", cases[index].name);
 			CHECK(0);
 			continue;
 		}
+
+		/* Parses the message and keeps the alert. */
 		block = exact_copy(body.bytes, body.size);
 		alert = 777;
 		status = sslc_msg_parse_server_hello(block, body.size, &hello, &alert);
@@ -1942,6 +2269,8 @@ run_server_hello_cases(
 		CHECK(alert == cases[index].alert);
 		free(block);
 	}
+
+	/* Frees the body buffer. */
 	buffer_free(&body);
 }
 
@@ -1969,6 +2298,8 @@ make_server_hello(
 		if (pieces[index] != NULL)
 			CHECK(put_hex(&exts, pieces[index]) == 0);
 	}
+
+	/* Builds the message: the head and the extensions block. */
 	body->size = 0;
 	CHECK(put_hex(body, head) == 0);
 	put16(body, (unsigned)exts.size);
@@ -2004,6 +2335,7 @@ test_server_hello_good(void)
 	size_t size;
 	int status;
 	char hex[8192];
+	struct buffer built;
 
 	/* No extensions block: a TLS 1.2 ServerHello with only its fixed fields. */
 	buffer_init(&body);
@@ -2083,8 +2415,6 @@ test_server_hello_good(void)
 
 	/* The session id echoed, every length from 0 to 32. */
 	for (index = 0; index <= 32U; index++) {
-		struct buffer built;
-
 		buffer_init(&built);
 		put16(&built, 0x0303U);
 		put_fill(&built, 0x11, 32);
@@ -2100,6 +2430,8 @@ test_server_hello_good(void)
 			CHECK(hello.session_id == block + 35U);
 			CHECK(hello.session_id[0] == (uint8_t)(0xd0U + index));
 		}
+
+		/* Frees the block and the built message. */
 		free(block);
 		buffer_free(&built);
 	}
@@ -2107,8 +2439,6 @@ test_server_hello_good(void)
 	/* A cookie of 1 and of the limit, 1024 bytes. */
 	size = 1;
 	for (index = 0; index < 2U; index++) {
-		struct buffer built;
-
 		buffer_init(&built);
 		put16(&built, 0x0303U);
 		put_bytes(&built, (const uint8_t *)"\xcf\x21\xad\x74\xe5\x9a\x61\x11\xbe\x1d\x8c\x02\x1e\x65\xb8\x91\xc2\xa2\x11\x16\x7a\xbb\x8c\x5e\x07\x9e\x09\xe2\xc8\xa8\x33\x9c", 32);
@@ -2137,6 +2467,8 @@ test_server_hello_good(void)
 		hex[size++] = '9';
 		hex[size++] = '9';
 	}
+
+	/* Ends the hex string of the message. */
 	hex[size] = '\0';
 	body.size = 0;
 	CHECK(put_hex(&body, hex) == 0);
@@ -2147,8 +2479,6 @@ test_server_hello_good(void)
 
 	/* A random that differs from the HelloRetryRequest's in any one byte is an ordinary ServerHello. */
 	for (index = 0; index < 32U; index++) {
-		struct buffer built;
-
 		buffer_init(&built);
 		put16(&built, 0x0303U);
 		put_bytes(&built, (const uint8_t *)"\xcf\x21\xad\x74\xe5\x9a\x61\x11\xbe\x1d\x8c\x02\x1e\x65\xb8\x91\xc2\xa2\x11\x16\x7a\xbb\x8c\x5e\x07\x9e\x09\xe2\xc8\xa8\x33\x9c", 32);
@@ -2168,6 +2498,7 @@ test_server_hello_good(void)
 		static const char *const lists[] = { "0100", "020001", "020100", "03010200", "03000102", "0300ff00" };
 		static const char *const bad_lists[] = { "0101", "020102", "02ffee", "03010203" };
 
+		/* Every well formed point format list is taken. */
 		for (index = 0; index < sizeof(lists) / sizeof(lists[0]); index++) {
 			snprintf(hex, sizeof(hex), "000b" "%04x" "%s", (unsigned)(strlen(lists[index]) / 2U), lists[index]);
 			make_server_hello(&body, SH_HEAD, hex, NULL, NULL, NULL);
@@ -2178,6 +2509,8 @@ test_server_hello_good(void)
 			CHECK(hello.seen == SSLC_SEEN_EC_POINT_FORMATS);
 			free(block);
 		}
+
+		/* Every malformed point format list is refused. */
 		for (index = 0; index < sizeof(bad_lists) / sizeof(bad_lists[0]); index++) {
 			snprintf(hex, sizeof(hex), "000b" "%04x" "%s", (unsigned)(strlen(bad_lists[index]) / 2U), bad_lists[index]);
 			make_server_hello(&body, SH_HEAD, hex, NULL, NULL, NULL);
@@ -2189,6 +2522,7 @@ test_server_hello_good(void)
 		}
 	}
 
+	/* Frees the body buffer. */
 	buffer_free(&body);
 }
 
@@ -2336,13 +2670,19 @@ test_server_hello_prefixes(void)
 			} else {
 				CHECK(status == EINVAL && alert == DEC);
 			}
+
+			/* Frees the block. */
 			free(block);
 		}
+
+		/* Parses the message with no extra cut. */
 		block = exact_copy(body.bytes, body.size);
 		status = sslc_msg_parse_server_hello(block, body.size, &hello, &alert);
 		CHECK(status == 0);
 		free(block);
 	}
+
+	/* Frees the body buffer. */
 	buffer_free(&body);
 }
 
@@ -2371,6 +2711,8 @@ rfc_message(
 		CHECK(0);
 		return 0;
 	}
+
+	/* Reads the header of the written message. */
 	sslc_msg_header(out, &header_type, &length);
 	CHECK(header_type == type);
 	CHECK(length == size - 4U);
@@ -2431,6 +2773,8 @@ check_rfc_server_hello(
 	} else {
 		CHECK(hello.share_size == 0U);
 	}
+
+	/* Frees the block. */
 	free(block);
 }
 
@@ -2494,18 +2838,24 @@ without_extension(
 	size_t position;
 	size_t length;
 	size_t used;
+	unsigned found_type;
 
 	/* Everything except the extensions of the type; the block's length is rewritten. */
 	used = 2;
 	position = 2;
 	while (position + 4U <= size) {
 		length = get16(body + position + 2U);
-		if (get16(body + position) != type) {
+		found_type = get16(body + position);
+		if (found_type != type) {
 			memcpy(out + used, body + position, 4U + length);
 			used += 4U + length;
 		}
+
+		/* Moves to the next extension. */
 		position += 4U + length;
 	}
+
+	/* Fills in the length of the extensions block. */
 	out[0] = (uint8_t)((used - 2U) >> 8);
 	out[1] = (uint8_t)((used - 2U) & 0xffU);
 	return used;
@@ -2531,6 +2881,7 @@ test_rfc_messages(void)
 	size_t size;
 	size_t index;
 	size_t cut_size;
+	size_t cut_step;
 	size_t written;
 	size_t room;
 	uint16_t scheme;
@@ -2540,6 +2891,8 @@ test_rfc_messages(void)
 	int ack;
 	int status;
 	char step[96];
+	const uint8_t *context;
+	size_t context_size;
 
 	/* The EncryptedExtensions of five sections: each has record_size_limit, which this client never offers. */
 	for (index = 0; index < 5U; index++) {
@@ -2602,12 +2955,18 @@ test_rfc_messages(void)
 			CHECK(certificate.der[0][1] == 0x82U);
 			CHECK(get16(certificate.der[0] + 2) + 4U == certificate.der_size[0]);
 		}
+
+		/* Compares the parsed certificate with the model. */
 		compare_certificate(message + 4, size - 4U, 1);
 		free(block);
 
 		/* Every shorter body is refused and agrees with the model. */
-		for (cut_size = 0; cut_size < size - 4U; cut_size += (cut_size < 16U ? 1U : 13U))
+		for (cut_size = 0; cut_size < size - 4U; cut_size += cut_step) {
+			cut_step = 13U;
+			if (cut_size < 16U)
+				cut_step = 1U;
 			compare_certificate(message + 4, cut_size, 1);
+		}
 	}
 
 	/* The CertificateVerify messages. */
@@ -2663,29 +3022,24 @@ test_rfc_messages(void)
 	/* The CertificateRequest of section 6: an empty context and a signature_algorithms extension. */
 	size = rfc_message(SEC6, "{server} construct a CertificateRequest", "CertificateRequest", 0, SSLC_HS_CERTIFICATE_REQUEST, message, sizeof(message));
 	CHECK(size == 43U);
-	{
-		const uint8_t *context;
-		size_t context_size;
-
-		block = exact_copy(message + 4, size - 4U);
-		alert = 777;
-		context = (const uint8_t *)1;
-		context_size = 555;
-		status = sslc_msg_parse_certificate_request(block, size - 4U, 1, &context, &context_size, &alert);
-		CHECK(status == 0 && alert == 0U);
-		CHECK(context_size == 0U);
+	block = exact_copy(message + 4, size - 4U);
+	alert = 777;
+	context = (const uint8_t *)1;
+	context_size = 555;
+	status = sslc_msg_parse_certificate_request(block, size - 4U, 1, &context, &context_size, &alert);
+	CHECK(status == 0 && alert == 0U);
+	CHECK(context_size == 0U);
+	free(block);
+	for (cut_size = 0; cut_size < size - 4U; cut_size++) {
+		block = exact_copy(message + 4, cut_size);
+		status = sslc_msg_parse_certificate_request(block, cut_size, 1, &context, &context_size, &alert);
+		CHECK(status == EINVAL && alert == DEC);
 		free(block);
-		for (cut_size = 0; cut_size < size - 4U; cut_size++) {
-			block = exact_copy(message + 4, cut_size);
-			status = sslc_msg_parse_certificate_request(block, cut_size, 1, &context, &context_size, &alert);
-			CHECK(status == EINVAL && alert == DEC);
-			free(block);
-		}
-
-		/* The client's reply to it: an empty Certificate echoing the context (nothing, here). */
-		status = sslc_msg_write_empty_certificate(1, context, 0, written_bytes, sizeof(written_bytes), &written);
-		CHECK(status == 0 && written == 8U);
 	}
+
+	/* The client's reply to it: an empty Certificate echoing the context (nothing, here). */
+	status = sslc_msg_write_empty_certificate(1, context, 0, written_bytes, sizeof(written_bytes), &written);
+	CHECK(status == 0 && written == 8U);
 
 	/* Message headers of the first handshake message of each section. */
 	size = rfc_message(SEC3, "{server} construct a Finished", "Finished", 0, SSLC_HS_FINISHED, message, sizeof(message));
@@ -2712,11 +3066,15 @@ make_certificate(
 
 	/* The context, the list length, then each entry. */
 	body->size = 0;
-	entry = 3U + cert_size + (tls13 ? 2U + ext_size : 0U);
+	entry = 3U + cert_size;
+	if (tls13)
+		entry += 2U + ext_size;
 	if (tls13) {
 		put8(body, (unsigned)context_size);
 		put_fill(body, 0x55, context_size);
 	}
+
+	/* Writes the length of the list and then each certificate. */
 	put24(body, (unsigned long)(entry * count));
 	for (index = 0; index < count; index++) {
 		put24(body, (unsigned long)cert_size);
@@ -2745,15 +3103,20 @@ test_certificate(void)
 	size_t count;
 	size_t cert_size;
 	size_t index;
+	size_t context_size;
 	int tls13;
 	int status;
+	static const size_t contexts[3] = { 0, 1, 255 };
 
 	/* Each version, from 0 to 17 certificates of a few sizes. */
 	buffer_init(&body);
 	for (tls13 = 0; tls13 < 2; tls13++) {
 		for (count = 0; count <= 17U; count++) {
 			for (cert_size = 1; cert_size < 600U; cert_size = cert_size * 3U + 1U) {
-				make_certificate(&body, tls13, tls13 ? 4U : 0U, count, cert_size, 0);
+				context_size = 0;
+				if (tls13)
+					context_size = 4U;
+				make_certificate(&body, tls13, context_size, count, cert_size, 0);
 				compare_certificate(body.bytes, body.size, tls13);
 				block = exact_copy(body.bytes, body.size);
 				status = sslc_msg_parse_certificate(block, body.size, tls13, &certificate, &alert);
@@ -2764,10 +3127,12 @@ test_certificate(void)
 					CHECK(certificate.count == count);
 					for (index = 0; index < count; index++)
 						CHECK(certificate.der_size[index] == cert_size);
-					CHECK(certificate.context_size == (tls13 ? 4U : 0U));
+					CHECK(certificate.context_size == context_size);
 				} else {
 					CHECK(status == EPROTO && alert == BADC);
 				}
+
+				/* Frees the block. */
 				free(block);
 			}
 		}
@@ -2784,13 +3149,13 @@ test_certificate(void)
 		} else {
 			CHECK(status == EINVAL && alert == DEC);
 		}
+
+		/* Frees the block. */
 		free(block);
 	}
 
 	/* Contexts of 0, 1 and 255 bytes. */
 	for (index = 0; index < 3U; index++) {
-		static const size_t contexts[3] = { 0, 1, 255 };
-
 		make_certificate(&body, 1, contexts[index], 2, 10, 0);
 		compare_certificate(body.bytes, body.size, 1);
 		block = exact_copy(body.bytes, body.size);
@@ -2816,6 +3181,7 @@ test_certificate(void)
 			"000009" "000003aabbcc" "000001", "000003" "ffffff"
 		};
 
+		/* Every malformed TLS 1.2 certificate message is refused. */
 		for (index = 0; index < sizeof(bad12) / sizeof(bad12[0]); index++) {
 			body.size = 0;
 			CHECK(put_hex(&body, bad12[index]) == 0);
@@ -2896,11 +3262,15 @@ test_certificate_verify(void)
 {
 	struct buffer body;
 	size_t length;
+	size_t length_step;
 	size_t extra;
 
 	/* The signature length against the body: equal, short and long, at the 8-bit and 16-bit boundaries. */
 	buffer_init(&body);
-	for (length = 0; length <= 300U; length += (length < 8U ? 1U : 37U)) {
+	for (length = 0; length <= 300U; length += length_step) {
+		length_step = 37U;
+		if (length < 8U)
+			length_step = 1U;
 		for (extra = 0; extra < 3U; extra++) {
 			body.size = 0;
 			put16(&body, 0x0804U);
@@ -2941,7 +3311,9 @@ test_server_key_exchange(void)
 	uint8_t *block;
 	unsigned alert;
 	size_t point_size;
+	size_t point_step;
 	size_t signature_size;
+	size_t next_signature_size;
 	size_t curve;
 	int status;
 
@@ -2993,12 +3365,20 @@ test_server_key_exchange(void)
 		} else {
 			CHECK(status == EPROTO && alert == ILL);
 		}
+
+		/* Frees the block. */
 		free(block);
 	}
 
 	/* Point and signature sizes at their ends: 0 (refused for the point), 1, 255; 0, 1, 256, 65535 for the signature. */
-	for (point_size = 0; point_size <= 255U; point_size += (point_size < 2U ? 1U : 127U)) {
-		for (signature_size = 0; signature_size <= 65535U; signature_size = (signature_size < 2U ? signature_size + 1U : signature_size * 16U + 1U)) {
+	for (point_size = 0; point_size <= 255U; point_size += point_step) {
+		point_step = 127U;
+		if (point_size < 2U)
+			point_step = 1U;
+		for (signature_size = 0; signature_size <= 65535U; signature_size = next_signature_size) {
+			next_signature_size = signature_size * 16U + 1U;
+			if (signature_size < 2U)
+				next_signature_size = signature_size + 1U;
 			body.size = 0;
 			put8(&body, 3);
 			put16(&body, 0x0018U);
@@ -3010,6 +3390,8 @@ test_server_key_exchange(void)
 			compare_server_key_exchange(body.bytes, body.size);
 		}
 	}
+
+	/* Builds a message with a curve type that is not named_curve. */
 	body.size = 0;
 	put8(&body, 3);
 	put16(&body, 0x0018U);
@@ -3043,6 +3425,9 @@ test_encrypted_extensions(void)
 	struct buffer body;
 	size_t index;
 	size_t cut;
+	int status;
+	int ack;
+	uint8_t *block;
 
 	/* Each, against the model. */
 	buffer_init(&body);
@@ -3087,11 +3472,9 @@ test_encrypted_extensions(void)
 			{ "00", EINVAL, DEC, 0 },
 			{ "0000" "00", EINVAL, DEC, 0 }
 		};
-		uint8_t *block;
 		unsigned alert;
-		int ack;
-		int status;
 
+		/* Every malformed EncryptedExtensions body is refused. */
 		for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++) {
 			body.size = 0;
 			CHECK(put_hex(&body, cases[index].hex) == 0);
@@ -3117,6 +3500,8 @@ test_encrypted_extensions(void)
 		put_fill(&body, 0x1d, index * 2U);
 		compare_encrypted_extensions(body.bytes, body.size);
 	}
+
+	/* Builds a body at the largest size the length field allows. */
 	body.size = 0;
 	put16(&body, (unsigned)(4U + 2U + 65532U));
 	put16(&body, 10);
@@ -3221,6 +3606,8 @@ test_certificate_request(void)
 			if (cases[index].tls13)
 				CHECK(inside(context, context_size, block, body.size));
 		}
+
+		/* Frees the block. */
 		free(block);
 
 		/* The cuts of the good ones are all errors. */
@@ -3233,6 +3620,8 @@ test_certificate_request(void)
 			}
 		}
 	}
+
+	/* Frees the body buffer. */
 	buffer_free(&body);
 }
 
@@ -3268,6 +3657,9 @@ test_new_session_ticket(void)
 	size_t index;
 	size_t cut;
 	size_t big;
+	size_t extension_total;
+	size_t extension_size;
+	size_t ticket_size;
 	int status;
 
 	/* Each case. */
@@ -3301,17 +3693,30 @@ test_new_session_ticket(void)
 		put16(&body, 0);
 		put16(&body, 0);
 		put8(&body, 0);
-		put16(&body, big == 0U ? 65535U : 1U);
-		put_fill(&body, 0xaa, big == 0U ? 65535U : 1U);
+		ticket_size = 1U;
+		if (big == 0U)
+			ticket_size = 65535U;
+		put16(&body, (unsigned)ticket_size);
+		put_fill(&body, 0xaa, ticket_size);
 		if (big == 0U) {
 			put16(&body, 0);
 		} else {
 			/* One extension (type 5) that fills the block exactly. */
-			put16(&body, big == 1U ? 65534U : 65535U);
+			extension_total = 65535U;
+			extension_size = 65531U;
+			if (big == 1U) {
+				extension_total = 65534U;
+				extension_size = 65530U;
+			}
+
+			/* Writes the extension header and its data. */
+			put16(&body, (unsigned)extension_total);
 			put16(&body, 5);
-			put16(&body, big == 1U ? 65530U : 65531U);
-			put_fill(&body, 0x00, big == 1U ? 65530U : 65531U);
+			put16(&body, (unsigned)extension_size);
+			put_fill(&body, 0x00, extension_size);
 		}
+
+		/* Parses the message and keeps the alert. */
 		block = exact_copy(body.bytes, body.size);
 		alert = 777;
 		status = sslc_msg_parse_new_session_ticket(block, body.size, &alert);
@@ -3320,8 +3725,12 @@ test_new_session_ticket(void)
 		} else {
 			CHECK(status == EINVAL && alert == DEC);
 		}
+
+		/* Frees the block. */
 		free(block);
 	}
+
+	/* Frees the body buffer. */
 	buffer_free(&body);
 }
 
@@ -3358,6 +3767,8 @@ check_every_parser(
 		CHECK(hello.cookie_size <= SSLC_MSG_COOKIE_MAX);
 		CHECK(hello.compression <= 255U);
 	}
+
+	/* Frees the block. */
 	free(block);
 
 	/* Certificate, both versions: against the model. */
@@ -3371,6 +3782,8 @@ check_every_parser(
 			CHECK(inside(certificate.der[index], certificate.der_size[index], block, size));
 		CHECK(inside(certificate.context, certificate.context_size, block, size));
 	}
+
+	/* Frees the block. */
 	free(block);
 
 	/* The parsers with models. */
@@ -3409,6 +3822,7 @@ mutate(
 {
 	size_t position;
 	unsigned kind;
+	unsigned coin;
 
 	/* Which change. */
 	kind = random_below(7U);
@@ -3440,8 +3854,13 @@ mutate(
 		}
 	} else {
 		position = random_below((uint32_t)size);
-		data[position] = (uint8_t)(random_below(2U) == 0U ? 0x00U : 0xffU);
+		coin = random_below(2U);
+		data[position] = 0xffU;
+		if (coin == 0U)
+			data[position] = 0x00U;
 	}
+
+	/* Reports the size of the mutated message. */
 	return size;
 }
 
@@ -3472,6 +3891,7 @@ test_random(void)
 	size_t size;
 	size_t changes;
 	size_t index;
+	uint32_t coin;
 
 	/* Mutations of each seed. */
 	buffer_init(&body);
@@ -3494,14 +3914,22 @@ test_random(void)
 		size = random_below(200U);
 		for (index = 0; index < size; index++)
 			data[index] = (uint8_t)random_next();
-		if (random_below(2U) == 0U && size >= 4U) {
+		coin = random_below(2U);
+		if (coin == 0U && size >= 4U) {
 			data[0] = 0;
-			data[1] = (uint8_t)(random_below(2U) == 0U ? 0x00 : 0x03);
+			coin = random_below(2U);
+			data[1] = 0x03;
+			if (coin == 0U)
+				data[1] = 0x00;
 			data[2] = (uint8_t)(random_below(3U));
 			data[3] = (uint8_t)(random_below(4U));
 		}
+
+		/* Parses the mutated message with every parser. */
 		check_every_parser(data, size);
 	}
+
+	/* Frees the body buffer. */
 	buffer_free(&body);
 }
 
@@ -3509,21 +3937,29 @@ test_random(void)
 int
 main(void)
 {
+	int available;
+
 	/* The header, the writer and its literal bytes, the models and errors, the room, the RFC ClientHellos. */
 	test_header();
 	test_write_literal();
 	test_write_models();
 	test_write_errors();
 	test_write_room();
-	test_write_rfc8448();
+	available = rfc_available();
+	if (available)
+		test_write_rfc8448();
 	test_small_writers();
 
 	/* The parsers: the ServerHello, the RFC 8448 messages, and the rest. */
 	test_server_hello_good();
 	test_server_hello_bad();
 	test_server_hello_prefixes();
-	test_rfc_server_hello();
-	test_rfc_messages();
+	if (available) {
+		test_rfc_server_hello();
+		test_rfc_messages();
+	}
+
+	/* The other messages. */
 	test_certificate();
 	test_largest_messages();
 	test_certificate_verify();

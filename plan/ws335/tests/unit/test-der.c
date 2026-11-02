@@ -31,6 +31,7 @@
 #include "vecfile.h"
 
 #include "userland/base/libcrypto-compat/cryc-der.h"
+#include "userland/base/libcrypto-compat/cryc-pem.h"
 
 /* The value of a fill that shows a field was not written. */
 #define FILL_BYTE	0xa5U
@@ -56,6 +57,135 @@ static uint32_t rng_state = 0x2545f491U;
 /* The elements the random walker has seen, and the views it found outside the input. */
 static unsigned long walk_elements;
 static unsigned long walk_bad;
+
+/* Returns the next pseudo-random 32-bit value. */
+static uint32_t random32(void);
+
+/* Fills an element with a recognisable pattern, so that a missing write shows. */
+static void element_fill(struct cryc_der_element *element);
+
+/* Returns 1 when the element is all zero (what a failed read leaves). */
+static int element_is_zero(const struct cryc_der_element *element);
+
+/* Returns a copy of size bytes in an allocation of exactly that size, so that a read past either end is seen by the sanitizer. */
+static unsigned char *exact_copy(const unsigned char *bytes, size_t size);
+
+/* Reads one element from bytes as a whole reader; returns the error and the reader's remaining size. */
+static int read_one(const unsigned char *bytes, size_t size, struct cryc_der_element *element, size_t *left);
+
+/* Checks a hex-encoded element: the error, and for success the tag, the length and the remaining bytes. */
+static void check_hex_next(const char *hex, int expected_error, unsigned expected_tag, size_t expected_length, size_t expected_left);
+
+/* Reads every strict prefix of an encoding (an error) and the whole (a success). */
+static void check_truncations(const unsigned char *bytes, size_t size);
+
+/* Reads elements with every length form of 8.1.3 and the limits of 10.1. */
+static void test_lengths(void);
+
+/* The hand-written header cases: forms DER forbids and the edges of the ones it allows. */
+static void test_headers(void);
+
+/* Builds nested structures with the writer and walks them with expect, optional and enter. */
+static void test_walk(void);
+
+/* An optional field whose tag matches but whose encoding is bad is an error, not an absence. */
+static void test_optional_malformed(void);
+
+/* Checks one INTEGER given as hex contents: the error, and the magnitude as hex. */
+static void check_integer(const char *hex, int expected_error, const char *expected_magnitude);
+
+/* INTEGER contents (8.3): minimality, sign, leading zero for the top bit. */
+static void test_integer(void);
+
+/* Checks one small INTEGER given as hex contents: the error and the value. */
+static void check_small(const char *hex, uint32_t max, int expected_error, uint32_t expected_value);
+
+/* Small INTEGERs: the range checks and every error of cryc_der_integer. */
+static void test_small_integer(void);
+
+/* Checks one BOOLEAN given as hex contents. */
+static void check_boolean(const char *hex, int expected_error, int expected_value);
+
+/* BOOLEAN (8.2, 11.1): every value of the one octet, and the wrong lengths. */
+static void test_boolean(void);
+
+/* Checks one BIT STRING given as hex contents: the error, the bytes and the unused count. */
+static void check_bit_string(const char *hex, int expected_error, const char *expected_bytes, unsigned expected_unused);
+
+/* BIT STRING (8.6, 11.2): the unused-bit rules, exhaustively for one byte of data. */
+static void test_bit_string(void);
+
+/* Returns the expected verdict for OID contents of the given bytes (X.690 8.19.2, written out from the rules). */
+static int oid_expected(const unsigned char *bytes, size_t size);
+
+/* OBJECT IDENTIFIER contents (8.19): the real OIDs, then every one- and two-octet contents, then random ones. */
+static void test_oid(void);
+
+/* Checks one time: the tag and text, the error, and the seconds. */
+static void check_time(unsigned tag, const char *text, int expected_error, int64_t expected_seconds);
+
+/* Hand-computed epochs (days between 1970-01-01 and the date, times 86400, plus the time of day). */
+static void test_time_values(void);
+
+/* Builds YYYYMMDDHHMMSSZ (or YYMMDDHHMMSSZ) text for a date counter and a time of day derived from the counter. */
+static void time_text(char *text, int wide, long year, int month, int day, long counter);
+
+/* Returns the days of a month by the Gregorian rule written out here. */
+static int month_days(long year, int month);
+
+/* Converts every day of 0000-01-01 .. 9999-12-31 by a calendar counter that walks away from the epoch. */
+static void test_time_every_day(void);
+
+/* Every field out of its range, every character position, the lengths and the forms RFC 5280 forbids. */
+static void test_time_errors(void);
+
+/* Walks the elements of a structure recursively, checking that every view lies inside the input. */
+static void walk(struct cryc_der der, const uint8_t *base, size_t base_size, unsigned depth);
+
+/* Runs the whole reader on random and mutated inputs; the sanitizers watch the reads. */
+static void test_random(const unsigned char *seed, size_t seed_size);
+
+/* Reads a SEQUENCE { SEQUENCE { OID, ... }, ... } style item's first OID check: returns 0 when well formed. */
+static int read_algorithm(struct cryc_der *parent);
+
+/* Reads a Validity time: UTCTime or GeneralizedTime that converts. */
+static int read_validity_time(struct cryc_der *validity);
+
+/* Reads a SubjectPublicKeyInfo and gives its key bits. */
+static int read_spki(struct cryc_der *parent, const uint8_t **key, size_t *key_size);
+
+/* Walks one X.509 Certificate down to its parts; returns 0 when it parses strictly to the last byte. */
+static int walk_certificate(const unsigned char *bytes, size_t size);
+
+/* Reads the first bytes of a file (all of it) with "rb"; returns a malloc'd buffer or NULL. */
+static char *read_file(const char *path, size_t *size);
+
+/* Walks every certificate of the ca-certificates bundle as an X.509 Certificate. */
+static void test_bundle(unsigned char **first, size_t *first_size);
+
+/* Copies a vector's hex string into a buffer, returning the size or (size_t)-1. */
+static size_t decode_field(const struct vec_file *file, const char *key, unsigned char *buffer);
+
+/* Checks a Wycheproof signature: SEQUENCE { INTEGER r, INTEGER s } read strictly to the last byte. */
+static int read_ecdsa_signature(const unsigned char *bytes, size_t size);
+
+/* Returns 1 when the comma-separated flags contain the word. */
+static int has_flag(const char *flags, const char *word);
+
+/* The signatures of one Wycheproof ECDSA file: valid ones parse; ones flagged as broken encodings do not. */
+static void test_wycheproof_signatures(const char *name, unsigned long *parsed);
+
+/* Counts leading zero octets of a hex string (for comparing a modulus with a magnitude). */
+static size_t skip_zero_octets(const unsigned char *bytes, size_t size);
+
+/* Compares an RSA modulus given as hex with the magnitude read from the key; returns 1 when they are the same number. */
+static int modulus_matches(const struct vec_file *file, const unsigned char *magnitude, size_t magnitude_size);
+
+/* Checks the public keys of one Wycheproof file. */
+static void test_wycheproof_keys(const char *name, int is_rsa, unsigned long *keys);
+
+/* The certificates of the x509-limbo cases: whatever the reader decides, the walk stays inside the input. */
+static void test_limbo(unsigned char **first, size_t *first_size);
 
 /* Returns the next pseudo-random 32-bit value. */
 static uint32_t
@@ -95,17 +225,25 @@ exact_copy(
 	size_t size)
 {
 	unsigned char *copy;
+	size_t allocation;
 
 	/* One byte at least, so that an empty input has an address. */
-	copy = malloc(size == 0U ? 1U : size);
+	allocation = size;
+	if (size == 0U)
+		allocation = 1U;
+	copy = malloc(allocation);
 	if (copy == NULL) {
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Fills the copy from the input; an empty input leaves one zero byte. */
 	if (size > 0U)
 		memcpy(copy, bytes, size);
 	else
 		copy[0] = 0;
+
+	/* Reports the copy, which the caller frees. */
 	return copy;
 }
 
@@ -128,6 +266,8 @@ read_one(
 	error = cryc_der_next(&der, element);
 	*left = der.size;
 	free(copy);
+
+	/* Reports the reader's verdict. */
 	return error;
 }
 
@@ -157,6 +297,8 @@ check_hex_next(
 		CHECK(element_is_zero(&element));
 		return;
 	}
+
+	/* A successful read shows the tag, the length and what is left. */
 	CHECK(element.tag == expected_tag);
 	CHECK(element.length == expected_length);
 	CHECK(left == expected_left);
@@ -172,15 +314,21 @@ check_truncations(
 	size_t prefix;
 	size_t left;
 	int bad;
+	int error;
+	int zero;
 
 	/* Every strict prefix of a valid element is an error that leaves the reader alone. */
 	bad = 0;
 	for (prefix = 0; prefix < size; prefix++) {
-		if (read_one(bytes, prefix, &element, &left) != EINVAL)
+		error = read_one(bytes, prefix, &element, &left);
+		if (error != EINVAL)
 			bad++;
-		if (left != prefix || !element_is_zero(&element))
+		zero = element_is_zero(&element);
+		if (left != prefix || !zero)
 			bad++;
 	}
+
+	/* No prefix was misjudged. */
 	CHECK(bad == 0);
 
 	/* The whole is read, consuming everything. */
@@ -195,6 +343,8 @@ test_lengths(void)
 	static const size_t lengths[] = {
 		0, 1, 2, 126, 127, 128, 129, 254, 255, 256, 257, 4095, 65535, 65536, 65537, 1000000, 16777214, 16777215
 	};
+	static const size_t padded[] = { 128, 129, 255, 256, 300, 400, 500, 511, 130 };
+	unsigned char with_zero[520];
 	unsigned char *buffer;
 	unsigned char *source;
 	unsigned char small[512];
@@ -220,6 +370,8 @@ test_lengths(void)
 		free(buffer);
 		return;
 	}
+
+	/* Fills the contents with a pattern and clears the output. */
 	memset(source, 0x5a, 16777215U);
 	memset(buffer, 0, room);
 
@@ -290,9 +442,7 @@ test_lengths(void)
 	/* The same lengths with one extra leading zero octet, and five- and eight-octet forms, with the contents present. */
 	memset(small, 0x44, sizeof(small));
 	for (index = 0; index < 9U; index++) {
-		static const size_t padded[] = { 128, 129, 255, 256, 300, 400, 500, 511, 130 };
-		unsigned char with_zero[520];
-
+		/* Builds the header with one padding zero in the length. */
 		length = padded[index];
 		memset(with_zero, 0x44, sizeof(with_zero));
 		with_zero[0] = 0x04;
@@ -308,6 +458,8 @@ test_lengths(void)
 			with_zero[4] = (unsigned char)length;
 			CHECK(read_one(with_zero, 5U + length, &element, &left) == EINVAL);
 		}
+
+		/* The padded length is refused, and so are the five- and eight-octet forms with the contents present. */
 		CHECK(element_is_zero(&element));
 		with_zero[1] = 0x85;
 		with_zero[2] = 0x01;
@@ -618,6 +770,8 @@ check_integer(
 		free(exact);
 		return;
 	}
+
+	/* A success shows the magnitude without its leading zero. */
 	want_size = hex_decode(expected_magnitude, want, sizeof(want));
 	CHECK(size == want_size);
 	CHECK_BYTES(magnitude, want, want_size);
@@ -641,6 +795,9 @@ test_integer(void)
 	size_t skip;
 	size_t index;
 	int bad;
+	int error;
+	int empty;
+	int different;
 
 	/* Valid: zero, small values, the top bit set with its 0x00, longer values. */
 	check_integer("00", 0, "00");
@@ -696,18 +853,42 @@ test_integer(void)
 			bad++;
 			continue;
 		}
+
+		/* Reads the INTEGER back; it must be the only element. */
 		cryc_der_init(&der, output, writer.used);
-		if (cryc_der_expect(&der, CRYC_DER_INTEGER, &element) != 0 || !cryc_der_empty(&der)) {
+		error = cryc_der_expect(&der, CRYC_DER_INTEGER, &element);
+		if (error != 0) {
 			bad++;
 			continue;
 		}
-		if (cryc_der_integer(&element, &magnitude, &size) != 0) {
+
+		/* The INTEGER must be the only element. */
+		empty = cryc_der_empty(&der);
+		if (!empty) {
 			bad++;
 			continue;
 		}
-		if (size != length - skip || memcmp(magnitude, magnitude_bytes, size) != 0)
+
+		/* Takes the magnitude out of the INTEGER. */
+		error = cryc_der_integer(&element, &magnitude, &size);
+		if (error != 0) {
+			bad++;
+			continue;
+		}
+
+		/* The magnitude must be the random bytes without their leading zeros. */
+		if (size != length - skip) {
+			bad++;
+			continue;
+		}
+
+		/* The magnitude must equal the random bytes without their leading zeros. */
+		different = memcmp(magnitude, magnitude_bytes, size);
+		if (different != 0)
 			bad++;
 	}
+
+	/* No round trip went wrong. */
 	CHECK(bad == 0);
 }
 
@@ -877,6 +1058,8 @@ check_bit_string(
 		free(exact);
 		return;
 	}
+
+	/* A success shows the bytes after the unused count, and that count. */
 	want_size = hex_decode(expected_bytes, want, sizeof(want));
 	CHECK(got_size == want_size);
 	CHECK(got == exact + 1);
@@ -953,6 +1136,8 @@ test_bit_string(void)
 				bad++;
 		}
 	}
+
+	/* Every combination was judged as the rule says. */
 	CHECK(bad == 0);
 }
 
@@ -980,6 +1165,8 @@ oid_expected(
 			return EINVAL;
 		starting = bytes[index] < 0x80U;
 	}
+
+	/* Succeeded: the contents follow the rules. */
 	return 0;
 }
 
@@ -1002,7 +1189,10 @@ test_oid(void)
 	unsigned first;
 	unsigned second;
 	unsigned third;
+	unsigned random_value;
 	int mismatch;
+	int verdict;
+	int expected;
 
 	/* Well-formed OIDs: sha256WithRSAEncryption, commonName, id-ecPublicKey, id-Ed25519 and others. */
 	for (index = 0; index < sizeof(good) / sizeof(good[0]); index++) {
@@ -1036,33 +1226,58 @@ test_oid(void)
 	for (first = 0; first < 256U; first++) {
 		state[0] = (unsigned char)first;
 		element.length = 1;
-		if (cryc_der_oid(&element) != oid_expected(state, 1))
+		verdict = cryc_der_oid(&element);
+		expected = oid_expected(state, 1);
+		if (verdict != expected)
 			mismatch++;
 		for (second = 0; second < 256U; second++) {
 			state[1] = (unsigned char)second;
 			element.length = 2;
-			if (cryc_der_oid(&element) != oid_expected(state, 2))
+			verdict = cryc_der_oid(&element);
+			expected = oid_expected(state, 2);
+			if (verdict != expected)
 				mismatch++;
 			for (third = 0; third < 256U; third += 1U) {
 				state[2] = (unsigned char)third;
 				element.length = 3;
-				if (cryc_der_oid(&element) != oid_expected(state, 3))
+				verdict = cryc_der_oid(&element);
+				expected = oid_expected(state, 3);
+				if (verdict != expected)
 					mismatch++;
 			}
 		}
 	}
+
+	/* The reader agreed with the rules on every one. */
 	CHECK(mismatch == 0);
 
 	/* Random longer contents. */
 	mismatch = 0;
 	for (index = 0; index < 20000U; index++) {
 		size = 1U + random32() % 15U;
-		for (first = 0; first < size; first++)
-			state[first] = (unsigned char)((random32() & 4U) != 0U ? random32() : (random32() & 0x80U ? 0x80U : 0x01U));
+		for (first = 0; first < size; first++) {
+			/* A random octet, or a continuation or a bare 0x01 so that both kinds of subidentifier occur. */
+			random_value = random32();
+			if ((random_value & 4U) != 0U) {
+				state[first] = (unsigned char)random32();
+			} else {
+				random_value = random32();
+				if ((random_value & 0x80U) != 0U)
+					state[first] = 0x80U;
+				else
+					state[first] = 0x01U;
+			}
+		}
+
+		/* Judges the contents against the rules. */
 		element.length = size;
-		if (cryc_der_oid(&element) != oid_expected(state, size))
+		verdict = cryc_der_oid(&element);
+		expected = oid_expected(state, size);
+		if (verdict != expected)
 			mismatch++;
 	}
+
+	/* The reader agreed with the rules on every one. */
 	CHECK(mismatch == 0);
 }
 
@@ -1078,6 +1293,7 @@ check_time(
 	unsigned char *exact;
 	int64_t seconds;
 	int error;
+	int matched;
 
 	/* The element, over an exact-size copy of the text. */
 	exact = exact_copy((const unsigned char *)text, strlen(text));
@@ -1089,10 +1305,13 @@ check_time(
 	error = cryc_der_time(&element, &seconds);
 	free(exact);
 	CHECK(error == expected_error);
-	if (expected_error != 0)
+	if (expected_error != 0) {
 		CHECK(seconds == 0);
-	else if (!CHECK(seconds == expected_seconds))
-		printf("  %s -> %lld, expected %lld\n", text, (long long)seconds, (long long)expected_seconds);
+	} else {
+		matched = CHECK(seconds == expected_seconds);
+		if (!matched)
+			printf("  %s -> %lld, expected %lld\n", text, (long long)seconds, (long long)expected_seconds);
+	}
 }
 
 /* Hand-computed epochs (days between 1970-01-01 and the date, times 86400, plus the time of day). */
@@ -1194,6 +1413,8 @@ test_time_every_day(void)
 	int second;
 	unsigned long mismatches;
 	unsigned long count;
+	int month_length;
+	int error;
 
 	/* Forward from 1970-01-01 (counter 0) to 9999-12-31, both forms where the form can name the year. */
 	mismatches = 0;
@@ -1212,21 +1433,33 @@ test_time_every_day(void)
 		expected = (int64_t)counter * 86400 + hour * 3600 + minute * 60 + second;
 		element.tag = CRYC_DER_GENERALIZED_TIME;
 		element.length = 15;
-		if (cryc_der_time(&element, &seconds) != 0 || seconds != expected)
+		/* The reader must accept the text and give the counted seconds. */
+		error = cryc_der_time(&element, &seconds);
+		if (error != 0)
 			mismatches++;
+		else if (seconds != expected)
+			mismatches++;
+
+		/* The UTCTime form is tried where the year fits it. */
 		if (year >= 1970L && year <= 2049L) {
 			time_text(text, 0, year, month, day, counter);
 			element.tag = CRYC_DER_UTC_TIME;
 			element.length = 13;
-			if (cryc_der_time(&element, &seconds) != 0 || seconds != expected)
+			error = cryc_der_time(&element, &seconds);
+			if (error != 0)
+				mismatches++;
+			else if (seconds != expected)
 				mismatches++;
 		}
+
+		/* Counts the day. */
 		count++;
 
 		/* The next day. */
 		counter++;
 		day++;
-		if (day > month_days(year, month)) {
+		month_length = month_days(year, month);
+		if (day > month_length) {
 			day = 1;
 			month++;
 			if (month > 12) {
@@ -1255,15 +1488,26 @@ test_time_every_day(void)
 		expected = (int64_t)counter * 86400 + hour * 3600 + minute * 60 + second;
 		element.tag = CRYC_DER_GENERALIZED_TIME;
 		element.length = 15;
-		if (cryc_der_time(&element, &seconds) != 0 || seconds != expected)
+		/* The reader must accept the text and give the counted seconds. */
+		error = cryc_der_time(&element, &seconds);
+		if (error != 0)
 			mismatches++;
+		else if (seconds != expected)
+			mismatches++;
+
+		/* The UTCTime form is tried where the year fits it. */
 		if (year >= 1950L) {
 			time_text(text, 0, year, month, day, counter);
 			element.tag = CRYC_DER_UTC_TIME;
 			element.length = 13;
-			if (cryc_der_time(&element, &seconds) != 0 || seconds != expected)
+			error = cryc_der_time(&element, &seconds);
+			if (error != 0)
+				mismatches++;
+			else if (seconds != expected)
 				mismatches++;
 		}
+
+		/* Counts the day. */
 		count++;
 
 		/* The previous day. */
@@ -1275,6 +1519,8 @@ test_time_every_day(void)
 				month = 12;
 				year--;
 			}
+
+			/* Takes the last day of the earlier month. */
 			day = month_days(year, month);
 		}
 	}
@@ -1314,6 +1560,7 @@ test_time_errors(void)
 	int64_t seconds;
 	const char *substitutes = "x +-:/.Z \t";
 	size_t which;
+	size_t substitute_count;
 
 	/* The lists of bad forms. */
 	for (index = 0; index < sizeof(wide_bad) / sizeof(wide_bad[0]); index++)
@@ -1334,7 +1581,8 @@ test_time_errors(void)
 	bad = 0;
 	memset(&element, 0, sizeof(element));
 	element.contents = (const uint8_t *)text;
-	for (which = 0; which < strlen(substitutes); which++) {
+	substitute_count = strlen(substitutes);
+	for (which = 0; which < substitute_count; which++) {
 		for (position = 0; position < 14U; position++) {
 			strcpy(text, "20250101000000Z");
 			text[position] = substitutes[which];
@@ -1344,6 +1592,8 @@ test_time_errors(void)
 			if (error != EINVAL)
 				bad++;
 		}
+
+		/* The same for the twelve digits of the UTCTime form. */
 		for (position = 0; position < 12U; position++) {
 			strcpy(text, "250101000000Z");
 			text[position] = substitutes[which];
@@ -1354,6 +1604,8 @@ test_time_errors(void)
 				bad++;
 		}
 	}
+
+	/* Every substitution was refused. */
 	CHECK(bad == 0);
 
 	/* The characters next to the digits in ASCII (/ and :) and 0x80 and above in each position. */
@@ -1372,12 +1624,22 @@ test_time_errors(void)
 		text[length] = 'Z';
 		element.tag = CRYC_DER_UTC_TIME;
 		element.length = length;
-		if (length != 13U && cryc_der_time(&element, &seconds) != EINVAL)
-			bad++;
+		if (length != 13U) {
+			error = cryc_der_time(&element, &seconds);
+			if (error != EINVAL)
+				bad++;
+		}
+
+		/* The GeneralizedTime form of the same text. */
 		element.tag = CRYC_DER_GENERALIZED_TIME;
-		if (length != 15U && cryc_der_time(&element, &seconds) != EINVAL)
-			bad++;
+		if (length != 15U) {
+			error = cryc_der_time(&element, &seconds);
+			if (error != EINVAL)
+				bad++;
+		}
 	}
+
+	/* Every wrong length was refused. */
 	CHECK(bad == 0);
 }
 
@@ -1400,12 +1662,14 @@ walk(
 	int boolean;
 	uint32_t small;
 	int moved;
+	int error;
 
 	/* Reads until the reader fails or is empty; every success moves the reader forward. */
 	end = base + base_size;
 	for (;;) {
 		moved = (int)der.size;
-		if (cryc_der_next(&der, &element) != 0)
+		error = cryc_der_next(&der, &element);
+		if (error != 0)
 			break;
 		walk_elements++;
 		if ((int)der.size >= moved)
@@ -1418,21 +1682,28 @@ walk(
 			walk_bad++;
 
 		/* The content readers answer anything, and what they hand back lies inside the contents. */
-		if (cryc_der_integer(&element, &magnitude, &size) == 0) {
+		error = cryc_der_integer(&element, &magnitude, &size);
+		if (error == 0) {
 			if (magnitude < element.contents || magnitude + size > element.contents + element.length || size == 0U)
 				walk_bad++;
 		}
+
+		/* The small integer, boolean and bit string readers stay inside the contents too. */
 		(void)cryc_der_small_integer(&element, 100, &small);
 		(void)cryc_der_boolean(&element, &boolean);
-		if (cryc_der_bit_string(&element, &bytes, &size, &unused) == 0) {
+		error = cryc_der_bit_string(&element, &bytes, &size, &unused);
+		if (error == 0) {
 			if (bytes < element.contents || bytes + size > element.contents + element.length || unused > 7U)
 				walk_bad++;
 		}
+
+		/* The OID and time readers must not read outside the contents. */
 		(void)cryc_der_oid(&element);
 		(void)cryc_der_time(&element, &seconds);
 
 		/* Goes inside constructed elements. */
-		if (cryc_der_enter(&element, &inner) == 0 && depth < WALK_DEPTH)
+		error = cryc_der_enter(&element, &inner);
+		if (error == 0 && depth < WALK_DEPTH)
 			walk(inner, base, base_size, depth + 1U);
 	}
 }
@@ -1463,6 +1734,8 @@ test_random(
 			else
 				bytes[index] = alphabet[random32() % sizeof(alphabet)];
 		}
+
+		/* Walks the random bytes. */
 		cryc_der_init(&der, bytes, size);
 		walk(der, bytes, size, 0);
 	}
@@ -1485,9 +1758,12 @@ test_random(
 			size = random32() % (seed_size + 1U);
 		if (round % 4U == 2U)
 			copy[random32() % 12U] = alphabet[random32() % sizeof(alphabet)];
+		/* Walks the mutated certificate. */
 		cryc_der_init(&der, copy, size);
 		walk(der, copy, size, 0);
 	}
+
+	/* Releases the copy; nothing the walks found was bad. */
 	free(copy);
 	CHECK(walk_bad == 0UL);
 	CHECK(walk_elements > 100000UL);
@@ -1503,6 +1779,7 @@ read_algorithm(
 	struct cryc_der body;
 	struct cryc_der_element rest;
 	int error;
+	int empty;
 
 	/* AlgorithmIdentifier ::= SEQUENCE { OID, parameters ANY OPTIONAL } (RFC 5280 4.1.1.2). */
 	error = cryc_der_expect(parent, CRYC_DER_SEQUENCE, &sequence);
@@ -1519,11 +1796,15 @@ read_algorithm(
 		return error;
 
 	/* Whatever parameters follow must themselves be well-formed elements. */
-	while (!cryc_der_empty(&body)) {
+	empty = cryc_der_empty(&body);
+	while (!empty) {
 		error = cryc_der_next(&body, &rest);
 		if (error != 0)
 			return error;
+		empty = cryc_der_empty(&body);
 	}
+
+	/* Succeeded: the identifier is well formed. */
 	return 0;
 }
 
@@ -1541,6 +1822,8 @@ read_validity_time(
 	if (error != 0)
 		return error;
 	error = cryc_der_time(&element, &seconds);
+
+	/* Reports whether the time converted. */
 	return error;
 }
 
@@ -1556,6 +1839,7 @@ read_spki(
 	struct cryc_der body;
 	unsigned unused;
 	int error;
+	int empty;
 
 	/* SEQUENCE { AlgorithmIdentifier, BIT STRING } (RFC 5280 4.1). */
 	error = cryc_der_expect(parent, CRYC_DER_SEQUENCE, &sequence);
@@ -1573,8 +1857,11 @@ read_spki(
 	error = cryc_der_bit_string(&bits, key, key_size, &unused);
 	if (error != 0)
 		return error;
-	if (unused != 0U || !cryc_der_empty(&body))
+	empty = cryc_der_empty(&body);
+	if (unused != 0U || !empty)
 		return EINVAL;
+
+	/* Succeeded: the key bits are the whole of the BIT STRING. */
 	return 0;
 }
 
@@ -1604,13 +1891,15 @@ walk_certificate(
 	int present;
 	int boolean;
 	int error;
+	int empty;
 
 	/* Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signatureValue } (RFC 5280 4.1). */
 	cryc_der_init(&top, bytes, size);
 	error = cryc_der_expect(&top, CRYC_DER_SEQUENCE, &sequence);
 	if (error != 0)
 		return error;
-	if (!cryc_der_empty(&top))
+	empty = cryc_der_empty(&top);
+	if (!empty)
 		return EINVAL;
 	error = cryc_der_enter(&sequence, &certificate);
 	if (error != 0)
@@ -1630,7 +1919,8 @@ walk_certificate(
 	error = cryc_der_bit_string(&signature, &key, &key_size, &unused);
 	if (error != 0)
 		return error;
-	if (!cryc_der_empty(&certificate))
+	empty = cryc_der_empty(&certificate);
+	if (!empty)
 		return EINVAL;
 
 	/* The optional [0] EXPLICIT version, then the serial number. */
@@ -1647,9 +1937,12 @@ walk_certificate(
 		error = cryc_der_small_integer(&element, 2, &number);
 		if (error != 0)
 			return error;
-		if (!cryc_der_empty(&version))
+		empty = cryc_der_empty(&version);
+		if (!empty)
 			return EINVAL;
 	}
+
+	/* The serial number is an INTEGER. */
 	error = cryc_der_expect(&tbs, CRYC_DER_INTEGER, &element);
 	if (error != 0)
 		return error;
@@ -1676,7 +1969,8 @@ walk_certificate(
 	error = read_validity_time(&validity);
 	if (error != 0)
 		return error;
-	if (!cryc_der_empty(&validity))
+	empty = cryc_der_empty(&validity);
+	if (!empty)
 		return EINVAL;
 	error = cryc_der_expect(&tbs, CRYC_DER_SEQUENCE, &element);
 	if (error != 0)
@@ -1707,7 +2001,8 @@ walk_certificate(
 			return error;
 
 		/* Extension ::= SEQUENCE { OID, critical BOOLEAN DEFAULT FALSE, OCTET STRING }. */
-		while (!cryc_der_empty(&extensions)) {
+		empty = cryc_der_empty(&extensions);
+		while (!empty) {
 			error = cryc_der_expect(&extensions, CRYC_DER_SEQUENCE, &element);
 			if (error != 0)
 				return error;
@@ -1728,14 +2023,21 @@ walk_certificate(
 				if (error != 0)
 					return error;
 			}
+
+			/* The extension value is an OCTET STRING with nothing after it. */
 			error = cryc_der_expect(&extension, CRYC_DER_OCTET_STRING, &element);
 			if (error != 0)
 				return error;
-			if (!cryc_der_empty(&extension))
+			empty = cryc_der_empty(&extension);
+			if (!empty)
 				return EINVAL;
+			empty = cryc_der_empty(&extensions);
 		}
 	}
-	if (!cryc_der_empty(&tbs))
+
+	/* Nothing follows the extensions in the TBSCertificate. */
+	empty = cryc_der_empty(&tbs);
+	if (!empty)
 		return EINVAL;
 
 	/* Succeeded: the certificate parsed to its last byte. */
@@ -1763,19 +2065,22 @@ read_file(
 		fclose(stream);
 		return NULL;
 	}
+
+	/* Allocates the buffer for the contents and a terminating zero. */
 	data = malloc((size_t)length + 1U);
 	if (data == NULL) {
 		fclose(stream);
 		return NULL;
 	}
+
+	/* Reads the whole file and closes it. */
 	*size = fread(data, 1, (size_t)length, stream);
 	fclose(stream);
 	data[*size] = '\0';
+
+	/* Reports the buffer, which the caller frees. */
 	return data;
 }
-
-/* Decodes a base64 line group into DER with the reader's sibling module: used only to get the bundle's DER. */
-#include "userland/base/libcrypto-compat/cryc-pem.h"
 
 /* Walks every certificate of the ca-certificates bundle as an X.509 Certificate. */
 static void
@@ -1823,9 +2128,14 @@ test_bundle(
 			failed++;
 			continue;
 		}
+
+		/* Walks the certificate as an X.509 Certificate. */
 		count++;
-		if (walk_certificate(der, der_size) != 0)
+		error = walk_certificate(der, der_size);
+		if (error != 0)
 			failed++;
+
+		/* Keeps the first certificate for the mutation test; frees the others. */
 		if (*first == NULL) {
 			*first = der;
 			*first_size = der_size;
@@ -1833,6 +2143,8 @@ test_bundle(
 			free(der);
 		}
 	}
+
+	/* Every certificate counted was walked, and none failed. */
 	CHECK(count == expected);
 	CHECK(failed == 0UL);
 	free(text);
@@ -1845,7 +2157,13 @@ decode_field(
 	const char *key,
 	unsigned char *buffer)
 {
-	return vec_hex(file, key, buffer, OBJECT_MAX);
+	size_t size;
+
+	/* Reads the field. */
+	size = vec_hex(file, key, buffer, OBJECT_MAX);
+
+	/* Reports the size of the field. */
+	return size;
 }
 
 /* Checks a Wycheproof signature: SEQUENCE { INTEGER r, INTEGER s } read strictly to the last byte. */
@@ -1861,13 +2179,15 @@ read_ecdsa_signature(
 	const uint8_t *magnitude;
 	size_t magnitude_size;
 	int error;
+	int empty;
 
 	/* The shape of FIPS 186-5 / X9.62 Ecdsa-Sig-Value. */
 	cryc_der_init(&top, bytes, size);
 	error = cryc_der_expect(&top, CRYC_DER_SEQUENCE, &sequence);
 	if (error != 0)
 		return error;
-	if (!cryc_der_empty(&top))
+	empty = cryc_der_empty(&top);
+	if (!empty)
 		return EINVAL;
 	error = cryc_der_enter(&sequence, &body);
 	if (error != 0)
@@ -1884,8 +2204,11 @@ read_ecdsa_signature(
 	error = cryc_der_integer(&element, &magnitude, &magnitude_size);
 	if (error != 0)
 		return error;
-	if (!cryc_der_empty(&body))
+	empty = cryc_der_empty(&body);
+	if (!empty)
 		return EINVAL;
+
+	/* Succeeded: both integers read and nothing follows them. */
 	return 0;
 }
 
@@ -1904,6 +2227,8 @@ has_flag(
 		if ((found == flags || found[-1] == ',') && (found[length] == '\0' || found[length] == ','))
 			return 1;
 	}
+
+	/* The word is not an item of the flags. */
 	return 0;
 }
 
@@ -1925,23 +2250,37 @@ test_wycheproof_signatures(
 	unsigned long broken_wrong;
 	unsigned long valid_count;
 	unsigned long broken_count;
+	const char *signature_text;
 	size_t index;
 	int broken;
 	int error;
+	int more;
+	int same;
+	int listed;
 
-	/* Reads every record. */
-	if (vec_open(&file, name) != 0) {
+	/* Opens the vector file. */
+	error = vec_open(&file, name);
+	if (error != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Reads every record. */
 	valid_wrong = 0;
 	broken_wrong = 0;
 	valid_count = 0;
 	broken_count = 0;
-	while (vec_next(&file)) {
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
+
 		/* A PEM text in a group ends its record at the blank line inside it, so some records hold no test. */
-		if (vec_get(&file, "sig") == NULL)
+		signature_text = vec_get(&file, "sig");
+		if (signature_text == NULL)
 			continue;
+
+		/* Reads the signature, its flags and its expected result. */
 		size = decode_field(&file, "sig", bytes);
 		flags = vec_get(&file, "flags");
 		result = vec_get(&file, "result");
@@ -1949,26 +2288,38 @@ test_wycheproof_signatures(
 			valid_wrong++;
 			continue;
 		}
+
+		/* Parses the signature strictly. */
 		error = read_ecdsa_signature(bytes, size);
-		if (strcmp(result, "valid") == 0) {
+		same = strcmp(result, "valid");
+		if (same == 0) {
 			valid_count++;
 			if (error != 0) {
 				valid_wrong++;
 				printf("  %s tcId %s: valid signature refused (%d)\n", name, vec_get(&file, "tcId"), error);
 			}
 		}
+
+		/* A signature flagged with a broken encoding must be refused. */
 		broken = 0;
 		for (index = 0; index < sizeof(encoding_flags) / sizeof(encoding_flags[0]); index++) {
-			if (has_flag(flags, encoding_flags[index]))
+			listed = has_flag(flags, encoding_flags[index]);
+			if (listed)
 				broken = 1;
 		}
+
+		/* Counts the signatures flagged as broken encodings, which must be refused. */
 		if (broken) {
 			broken_count++;
 			if (error == 0)
 				broken_wrong++;
 		}
+
+		/* Counts the record as parsed. */
 		*parsed += 1UL;
 	}
+
+	/* Every kind of signature was seen, and none was misjudged. */
 	vec_close(&file);
 	CHECK(valid_count > 0UL);
 	CHECK(broken_count > 0UL);
@@ -1988,6 +2339,8 @@ skip_zero_octets(
 	skip = 0;
 	while (skip + 1U < size && bytes[skip] == 0U)
 		skip++;
+
+	/* Reports the number of leading zero octets. */
 	return skip;
 }
 
@@ -2001,6 +2354,7 @@ modulus_matches(
 	unsigned char modulus[OBJECT_MAX];
 	size_t modulus_size;
 	size_t skip;
+	int different;
 
 	/* The file writes the modulus with or without a leading 0x00; the number is the same. */
 	modulus_size = decode_field(file, "group.publicKey.modulus", modulus);
@@ -2009,8 +2363,11 @@ modulus_matches(
 	skip = skip_zero_octets(modulus, modulus_size);
 	if (modulus_size - skip != magnitude_size)
 		return 0;
-	if (memcmp(modulus + skip, magnitude, magnitude_size) != 0)
+	different = memcmp(modulus + skip, magnitude, magnitude_size);
+	if (different != 0)
 		return 0;
+
+	/* Succeeded: the modulus is the magnitude. */
 	return 1;
 }
 
@@ -2045,37 +2402,62 @@ test_wycheproof_keys(
 	unsigned long seen;
 	unsigned long compared;
 	unsigned unused;
+	const char *modulus_text;
+	const char *key_text;
 	int have_pending;
 	int error;
+	int empty;
+	int more;
+	int matched;
+	int same;
 
-	/* Reads every record; a group repeats its key in each of its tests, so a repeat is skipped. */
-	if (vec_open(&file, name) != 0) {
+	/* Opens the vector file. */
+	error = vec_open(&file, name);
+	if (error != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Reads every record; a group repeats its key in each of its tests, so a repeat is skipped. */
 	wrong = 0;
 	seen = 0;
 	compared = 0;
 	previous_size = 0;
 	pending_size = 0;
 	have_pending = 0;
-	while (vec_next(&file)) {
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
+
 		/* A modulus waits in a later record than its key. */
-		if (have_pending && vec_get(&file, "group.publicKey.modulus") != NULL) {
+		modulus_text = vec_get(&file, "group.publicKey.modulus");
+		if (have_pending && modulus_text != NULL) {
 			compared++;
-			if (!modulus_matches(&file, pending, pending_size))
+			matched = modulus_matches(&file, pending, pending_size);
+			if (!matched)
 				wrong++;
 			have_pending = 0;
 		}
-		if (vec_get(&file, "group.publicKeyDer") == NULL)
+
+		/* A record without a key holds nothing to walk. */
+		key_text = vec_get(&file, "group.publicKeyDer");
+		if (key_text == NULL)
 			continue;
 		size = decode_field(&file, "group.publicKeyDer", der);
 		if (size == (size_t)-1) {
 			wrong++;
 			continue;
 		}
-		if (size == previous_size && memcmp(der, previous, size) == 0)
-			continue;
+
+		/* A key the same as the one before is skipped. */
+		if (size == previous_size) {
+			same = memcmp(der, previous, size);
+			if (same == 0)
+				continue;
+		}
+
+		/* Remembers the key, which a repeat is compared with. */
 		memcpy(previous, der, size);
 		previous_size = size;
 		seen++;
@@ -2083,10 +2465,13 @@ test_wycheproof_keys(
 		/* SubjectPublicKeyInfo, to the last byte. */
 		cryc_der_init(&top, der, size);
 		error = cryc_der_expect(&top, CRYC_DER_SEQUENCE, &sequence);
-		if (error != 0 || !cryc_der_empty(&top)) {
+		empty = cryc_der_empty(&top);
+		if (error != 0 || !empty) {
 			wrong++;
 			continue;
 		}
+
+		/* Enters the SubjectPublicKeyInfo and reads the algorithm and the key bits. */
 		error = cryc_der_enter(&sequence, &top);
 		if (error == 0)
 			error = read_algorithm(&top);
@@ -2094,20 +2479,26 @@ test_wycheproof_keys(
 			error = cryc_der_expect(&top, CRYC_DER_BIT_STRING, &element);
 		if (error == 0)
 			error = cryc_der_bit_string(&element, &key, &key_size, &unused);
-		if (error != 0 || !cryc_der_empty(&top)) {
+		empty = cryc_der_empty(&top);
+		if (error != 0 || !empty) {
 			wrong++;
 			continue;
 		}
+
+		/* Only an RSA key has a modulus to compare. */
 		if (!is_rsa)
 			continue;
 
 		/* RSAPublicKey ::= SEQUENCE { modulus INTEGER, publicExponent INTEGER } (RFC 8017 A.1.1). */
 		cryc_der_init(&top, key, key_size);
 		error = cryc_der_expect(&top, CRYC_DER_SEQUENCE, &sequence);
-		if (error != 0 || !cryc_der_empty(&top)) {
+		empty = cryc_der_empty(&top);
+		if (error != 0 || !empty) {
 			wrong++;
 			continue;
 		}
+
+		/* Enters the RSAPublicKey and reads the modulus. */
 		error = cryc_der_enter(&sequence, &rsa);
 		if (error == 0)
 			error = cryc_der_expect(&rsa, CRYC_DER_INTEGER, &element);
@@ -2117,23 +2508,30 @@ test_wycheproof_keys(
 			wrong++;
 			continue;
 		}
+
+		/* Keeps the modulus, and reads the public exponent after it. */
 		memcpy(pending, magnitude, magnitude_size);
 		pending_size = magnitude_size;
 		have_pending = 1;
 		error = cryc_der_expect(&rsa, CRYC_DER_INTEGER, &element);
 		if (error == 0)
 			error = cryc_der_integer(&element, &magnitude, &magnitude_size);
-		if (error != 0 || !cryc_der_empty(&rsa))
+		empty = cryc_der_empty(&rsa);
+		if (error != 0 || !empty)
 			wrong++;
 
 		/* The modulus may be in this very record. */
-		if (vec_get(&file, "group.publicKey.modulus") != NULL) {
+		modulus_text = vec_get(&file, "group.publicKey.modulus");
+		if (modulus_text != NULL) {
 			compared++;
-			if (!modulus_matches(&file, pending, pending_size))
+			matched = modulus_matches(&file, pending, pending_size);
+			if (!matched)
 				wrong++;
 			have_pending = 0;
 		}
 	}
+
+	/* Reports what was compared, and checks that nothing was wrong. */
 	vec_close(&file);
 	printf("  %s: %lu keys, %lu moduli compared, %lu wrong\n", name, seen, compared, wrong);
 	CHECK(seen > 0UL);
@@ -2160,35 +2558,59 @@ test_limbo(
 	unsigned long negative;
 	unsigned long unexplained;
 	struct cryc_der top;
+	const char *id;
+	int error;
+	int more;
+	int same;
 
-	/* The peer and the trusted certificates of every case. */
+	/* Allocates the buffer a certificate is read into. */
 	der = malloc(LIMBO_MAX);
 	CHECK(der != NULL);
 	if (der == NULL)
 		return;
-	if (vec_open(&file, "limbo") != 0) {
+
+	/* Opens the case file. */
+	error = vec_open(&file, "limbo");
+	if (error != 0) {
 		CHECK(0);
 		free(der);
 		return;
 	}
+
+	/* The peer and the trusted certificates of every case. */
 	records = 0;
 	certificates = 0;
 	accepted = 0;
 	negative = 0;
 	unexplained = 0;
-	while (vec_next(&file)) {
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
+
+		/* Counts the record and reads the peer certificate. */
 		records++;
 		size = vec_hex(&file, "peer", der, LIMBO_MAX);
 		if (size != (size_t)-1) {
+			/* Walks the peer as an X.509 Certificate, and counts a refusal under its case. */
 			certificates++;
-			if (walk_certificate(der, size) == 0)
+			error = walk_certificate(der, size);
+			if (error == 0) {
 				accepted++;
-			else if (strcmp(vec_get(&file, "id"), NEGATIVE_SERIAL_CASE) == 0)
-				negative++;
-			else
-				unexplained++;
+			} else {
+				id = vec_get(&file, "id");
+				same = strcmp(id, NEGATIVE_SERIAL_CASE);
+				if (same == 0)
+					negative++;
+				else
+					unexplained++;
+			}
+
+			/* Walks the same bytes with the random walker. */
 			cryc_der_init(&top, der, size);
 			walk(top, der, size, 0);
+
+			/* Keeps the first peer for the mutation test. */
 			if (*first == NULL) {
 				*first = malloc(size);
 				if (*first != NULL) {
@@ -2197,20 +2619,29 @@ test_limbo(
 				}
 			}
 		}
+
+		/* The trusted certificates of the case. */
 		for (index = 0; index < 4U; index++) {
 			sprintf(key, "trusted.%u", (unsigned)index);
 			size = vec_hex(&file, key, der, LIMBO_MAX);
 			if (size == (size_t)-1)
 				continue;
 			certificates++;
-			if (walk_certificate(der, size) == 0)
+			error = walk_certificate(der, size);
+			if (error == 0) {
 				accepted++;
-			else if (strcmp(vec_get(&file, "id"), NEGATIVE_SERIAL_CASE) == 0)
-				negative++;
-			else
-				unexplained++;
+			} else {
+				id = vec_get(&file, "id");
+				same = strcmp(id, NEGATIVE_SERIAL_CASE);
+				if (same == 0)
+					negative++;
+				else
+					unexplained++;
+			}
 		}
 	}
+
+	/* Releases the file and the buffer. */
 	vec_close(&file);
 	free(der);
 	CHECK(records == 9792UL);
@@ -2235,6 +2666,7 @@ main(void)
 	size_t seed_size;
 	unsigned long parsed;
 	unsigned long keys;
+	int status;
 
 	/* The reader. */
 	test_lengths();
@@ -2279,5 +2711,8 @@ main(void)
 		test_random(seed, seed_size);
 		free(seed);
 	}
-	return check_finish("test-der");
+
+	/* Reports the outcome of the checks. */
+	status = check_finish("test-der");
+	return status;
 }

@@ -25,6 +25,51 @@
 static uint32_t random_state = 0x6d2b79f5U;
 
 /* Returns the next pseudo-random 32-bit value (xorshift; not a secret). */
+static uint32_t random_next(void);
+
+/* Checks the integer examples of RFC 8446 3.3 and the byte order of 3.1. */
+static void test_integers(void);
+
+/* Checks reads that run past the end: zeros, the error, and the error staying. */
+static void test_short_reads(void);
+
+/* Checks sslc_reader_bytes. */
+static void test_reader_bytes(void);
+
+/* Checks sslc_reader_vector, including the examples of RFC 8446 3.4. */
+static void test_reader_vector(void);
+
+/* Checks sslc_reader_finish. */
+static void test_reader_finish(void);
+
+/* Checks the integer writers: the low bits, the byte order and the room. */
+static void test_writer_integers(void);
+
+/* Checks sslc_writer_bytes. */
+static void test_writer_bytes(void);
+
+/* Checks vectors written with begin and end, including the prefix limits. */
+static void test_writer_vectors(void);
+
+/* Checks the open-vector stack: the depth, an end without a begin, and a vector left open. */
+static void test_writer_depth(void);
+
+/* Parses and rewrites the three hellos of RFC 8448. */
+static void test_rfc8448(void);
+
+/* Runs the reader over random bytes of random sizes against the model. */
+static void test_random_reader(void);
+
+/* Runs random writer operations on a guarded buffer and the model, and compares the bytes and the status. */
+static void test_random_writer(void);
+
+/* Writes random trees of vectors and integers, reads them back with the reader, and compares. */
+static void test_round_trip(void);
+
+/* Checks that a writer rejects, and a reader refuses, structure that does not fit a given prefix width. */
+static void test_prefix_fit(void);
+
+/* Returns the next pseudo-random 32-bit value (xorshift; not a secret). */
 static uint32_t
 random_next(void)
 {
@@ -34,6 +79,27 @@ random_next(void)
 	random_state ^= random_state << 5;
 	return random_state;
 }
+
+/* Returns a pseudo-random number below limit (limit above 0). */
+static uint32_t random_below(uint32_t limit);
+
+/* Returns a heap block of exactly size bytes holding a copy of source (size 0 gives a 1-byte block never read). */
+static uint8_t * exact_copy(const uint8_t *source, size_t size);
+
+/* Writes value as a big-endian integer of width bytes into out, by shifts written out here. */
+static void put_integer(uint8_t *out, size_t width, uint32_t value);
+
+/* Reads one integer of width bytes (1 to 4) with the reader. */
+static uint32_t read_integer(struct sslc_reader *reader, size_t width);
+
+/* Builds a vector in a block: a prefix of width bytes, then length bytes counting up from seed. */
+static uint8_t * make_vector(size_t width, size_t length, size_t extra, uint8_t seed, size_t *total);
+
+/* Fills a guarded buffer: guard bytes of 0xa5 around a region of room bytes at offset 8 (room at most 120). */
+static void guarded_init(uint8_t *buffer, size_t room);
+
+/* Returns 1 when every byte outside the region (the guard) and after the used part still has the fill value. */
+static int guarded_intact(const uint8_t *buffer, size_t room, size_t used);
 
 /* Returns a pseudo-random number below limit (limit above 0). */
 static uint32_t
@@ -51,9 +117,13 @@ exact_copy(
 	size_t size)
 {
 	uint8_t *block;
+	size_t room;
 
 	/* A block that ends where the bytes end. */
-	block = (uint8_t *)malloc(size > 0 ? size : 1);
+	room = 1;
+	if (size > 0)
+		room = size;
+	block = (uint8_t *)malloc(room);
 	if (block == NULL)
 		abort();
 	if (size > 0)
@@ -175,6 +245,7 @@ test_short_reads(void)
 	static const uint8_t source[8] = { 0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88 };
 	struct sslc_reader reader;
 	uint8_t *block;
+	uint8_t *view;
 	size_t width;
 	size_t length;
 
@@ -182,7 +253,10 @@ test_short_reads(void)
 	for (width = 1; width <= 4U; width++) {
 		for (length = 0; length < width; length++) {
 			block = exact_copy(source, length);
-			sslc_reader_init(&reader, length > 0 ? block : NULL, length);
+			view = NULL;
+			if (length > 0)
+				view = block;
+			sslc_reader_init(&reader, view, length);
 			CHECK(read_integer(&reader, width) == 0U);
 			CHECK(reader.error != 0);
 			CHECK(sslc_reader_left(&reader) == 0U);
@@ -296,10 +370,14 @@ make_vector(
 {
 	uint8_t *block;
 	size_t index;
+	size_t room;
 
 	/* The prefix, the contents and extra bytes after them. */
 	*total = width + length + extra;
-	block = (uint8_t *)malloc(*total > 0 ? *total : 1);
+	room = 1;
+	if (*total > 0)
+		room = *total;
+	block = (uint8_t *)malloc(room);
 	if (block == NULL)
 		abort();
 	put_integer(block, width, (uint32_t)length);
@@ -322,6 +400,7 @@ test_reader_vector(void)
 	size_t index;
 	int good;
 	int status;
+	int expected;
 	static const size_t lengths[] = { 0, 1, 2, 254, 255, 256, 299, 300, 301, 399, 400, 401, 799, 800, 801 };
 	static const uint8_t nested[] = { 0x00, 0x05, 0x02, 0xaa, 0xbb, 0x01, 0xcc, 0x7f };
 
@@ -330,7 +409,10 @@ test_reader_vector(void)
 		length = lengths[index];
 		block = make_vector(2, length, 0, 0x10, &total);
 		sslc_reader_init(&reader, block, total);
-		CHECK(sslc_reader_vector(&reader, 2, 300, 400, &inner) == (length >= 300U && length <= 400U ? 0 : EINVAL));
+		expected = EINVAL;
+		if (length >= 300U && length <= 400U)
+			expected = 0;
+		CHECK(sslc_reader_vector(&reader, 2, 300, 400, &inner) == expected);
 		if (length >= 300U && length <= 400U) {
 			CHECK(reader.error == 0);
 			CHECK(inner.error == 0);
@@ -344,6 +426,8 @@ test_reader_vector(void)
 			CHECK(sslc_reader_left(&inner) == 0U);
 			CHECK(sslc_reader_u8(&inner) == 0U);
 		}
+
+		/* Frees the block. */
 		free(block);
 	}
 
@@ -358,6 +442,8 @@ test_reader_vector(void)
 			CHECK(sslc_reader_left(&inner) == length);
 			CHECK(sslc_reader_finish(&reader) == 0);
 		}
+
+		/* Frees the block. */
 		free(block);
 	}
 
@@ -398,6 +484,8 @@ test_reader_vector(void)
 		CHECK(reader.error != 0);
 		CHECK(inner.error != 0);
 	}
+
+	/* Frees the block. */
 	free(block);
 
 	/* A prefix size other than 1, 2 or 3 is refused, even over bytes that would be a valid empty vector (all zeros). */
@@ -409,6 +497,8 @@ test_reader_vector(void)
 		CHECK((reader.error == 0) == (width >= 1U && width <= 3U));
 		CHECK((inner.error == 0) == (width >= 1U && width <= 3U));
 	}
+
+	/* Frees the block. */
 	free(block);
 
 	/* A reader that has failed refuses a vector, and the inner reader is empty and failed. */
@@ -507,6 +597,8 @@ guarded_intact(
 		if (buffer[index] != 0xa5U)
 			return 0;
 	}
+
+	/* The guard after the usable room is untouched. */
 	for (index = 8U + room; index < 8U + 120U + 8U; index++) {
 		if (buffer[index] != 0xa5U)
 			return 0;
@@ -517,6 +609,8 @@ guarded_intact(
 		if (buffer[index] != 0xa5U)
 			return 0;
 	}
+
+	/* Succeeded: both guards are intact. */
 	return 1;
 }
 
@@ -569,6 +663,8 @@ test_writer_integers(void)
 		CHECK(sslc_writer_finish(&writer) == ENOBUFS);
 		CHECK(guarded_intact(buffer, room, 0));
 	}
+
+	/* A writer over a room of 5 bytes. */
 	guarded_init(buffer, 5);
 	sslc_writer_init(&writer, buffer + 8, 5);
 	sslc_writer_u24(&writer, 0x010203U);
@@ -728,6 +824,7 @@ test_writer_vectors(void)
 			CHECK(large[1] == 0xffU);
 		}
 
+		/* The same, with a width that cannot hold the length. */
 		sslc_writer_init(&writer, large, 70000U);
 		sslc_writer_begin(&writer, (unsigned)widths[which]);
 		for (index = 0; index < limit; index++)
@@ -736,6 +833,8 @@ test_writer_vectors(void)
 		CHECK(writer.error == EINVAL);
 		CHECK(sslc_writer_finish(&writer) == EINVAL);
 	}
+
+	/* Frees the large block. */
 	free(large);
 
 	/* The 3-byte prefix: 2^24 - 1 bytes are the most (a block of that size is made once). */
@@ -871,6 +970,8 @@ test_writer_depth(void)
 		sslc_writer_u8(&writer, (uint32_t)level);
 		sslc_writer_end(&writer);
 	}
+
+	/* Closes the outermost vector. */
 	CHECK(sslc_writer_finish(&writer) == 0);
 	CHECK(writer.used == 40U);
 	CHECK(buffer[8 + 38] == 1U);
@@ -902,6 +1003,11 @@ struct hello_fields {
 	struct hello_extension extensions[16];
 };
 
+static int parse_hello(const uint8_t *message, size_t size, int client, struct hello_fields *fields);
+
+/* Writes the fields of a hello back with the writer, into out; returns the writer's finish status and sets *size. */
+static int write_hello(const struct hello_fields *fields, int client, uint8_t *out, size_t room, size_t *size);
+
 /*
  * Parses a ClientHello (client nonzero) or a ServerHello (4.1.2, 4.1.3)
  * with the reader.  Returns 0 or the error of the first failed step.
@@ -920,6 +1026,7 @@ parse_hello(
 	struct sslc_reader compression;
 	struct sslc_reader extensions;
 	struct sslc_reader data;
+	size_t left;
 	int status;
 
 	/* The handshake header: a type and a 3-byte length that must cover the rest exactly. */
@@ -974,7 +1081,10 @@ parse_hello(
 	status = sslc_reader_finish(&body);
 	if (status != 0)
 		return status;
-	while (sslc_reader_left(&extensions) > 0U) {
+	for (;;) {
+		left = sslc_reader_left(&extensions);
+		if (left == 0U)
+			break;
 		if (fields->extension_count >= 16U)
 			return ERANGE;
 		fields->extensions[fields->extension_count].type = sslc_reader_u16(&extensions);
@@ -985,6 +1095,8 @@ parse_hello(
 		fields->extensions[fields->extension_count].data = sslc_reader_bytes(&data, fields->extensions[fields->extension_count].size);
 		fields->extension_count++;
 	}
+
+	/* Checks that the extensions block was read to its end. */
 	status = sslc_reader_finish(&extensions);
 	if (status != 0)
 		return status;
@@ -1034,6 +1146,8 @@ write_hello(
 		sslc_writer_bytes(&writer, fields->extensions[index].data, fields->extensions[index].size);
 		sslc_writer_end(&writer);
 	}
+
+	/* Closes the extensions and the message. */
 	sslc_writer_end(&writer);
 	sslc_writer_end(&writer);
 	*size = writer.used;
@@ -1045,6 +1159,8 @@ struct expected_extension {
 	uint32_t type;
 	size_t size;
 };
+
+static void check_hello(const char *hex, size_t size, int client, uint32_t message_type, uint32_t suite, const struct expected_extension *expected, size_t expected_count);
 
 /* The ClientHello of RFC 8448 section 3, "{client} send handshake record", payload (196 octets). */
 static const char client_hello_hex[] =
@@ -1115,6 +1231,8 @@ check_hello(
 		CHECK(fields.suite == suite);
 		CHECK(fields.compression_method == 0U);
 	}
+
+	/* Checks that every extension was read. */
 	CHECK(fields.extension_count == expected_count);
 	for (index = 0; index < expected_count && index < fields.extension_count; index++) {
 		CHECK(fields.extensions[index].type == expected[index].type);
@@ -1155,6 +1273,8 @@ check_hello(
 		status = write_hello(&fields, client, rewritten, index, &rewritten_size);
 		CHECK(status == ENOBUFS);
 	}
+
+	/* Frees the block. */
 	free(block);
 }
 
@@ -1174,6 +1294,7 @@ test_rfc8448(void)
 		{ 0x0033U, 2U }, { 0x002cU, 116U }, { 0x002bU, 2U }
 	};
 
+	/* Checks the three messages. */
 	check_hello(client_hello_hex, 196U, 1, 1U, 0U, client_extensions, 9U);
 	check_hello(server_hello_hex, 90U, 0, 2U, 0x1301U, server_extensions, 2U);
 	check_hello(retry_request_hex, 176U, 0, 2U, 0x1301U, retry_extensions, 3U);
@@ -1186,6 +1307,11 @@ struct reader_model {
 	size_t position;
 	int failed;
 };
+
+/* The model's integer of width bytes. */
+static uint32_t model_integer(struct reader_model *model, size_t width);
+
+static void random_reader_run(struct sslc_reader *reader, struct reader_model *model, int depth, int steps);
 
 /* The model's integer of width bytes. */
 static uint32_t
@@ -1203,6 +1329,8 @@ model_integer(
 		model->failed = 1;
 		return 0;
 	}
+
+	/* Reads the value, most significant byte first. */
 	value = 0;
 	for (index = 0; index < width; index++)
 		value = value * 256U + model->data[model->position + index];
@@ -1235,6 +1363,7 @@ random_reader_run(
 	int status;
 	int expect_ok;
 	int before;
+	unsigned draw;
 
 	/* A few operations of a random kind. */
 	for (step = 0; step < steps; step++) {
@@ -1247,7 +1376,8 @@ random_reader_run(
 			CHECK(got == want);
 		} else if (operation == 4) {
 			amount = random_below(12U);
-			if (random_below(20U) == 0U)
+			draw = random_below(20U);
+			if (draw == 0U)
 				amount = (size_t)-1 - random_below(3U);
 			if (!model->failed && amount <= model->size - model->position) {
 				view = sslc_reader_bytes(reader, amount);
@@ -1307,8 +1437,10 @@ test_random_reader(void)
 	struct reader_model model;
 	uint8_t source[80];
 	uint8_t *block;
+	uint8_t *view;
 	size_t size;
 	size_t index;
+	unsigned draw;
 	int round;
 
 	/* Many inputs, each with its own run of operations. */
@@ -1318,13 +1450,19 @@ test_random_reader(void)
 			source[index] = (uint8_t)(random_next() >> 24);
 
 		/* Some inputs are made of small bytes so that the vector lengths are plausible. */
-		if (random_below(2U) == 0U) {
+		draw = random_below(2U);
+		if (draw == 0U) {
 			for (index = 0; index < size; index++)
 				source[index] = (uint8_t)(source[index] % 9U);
 		}
+
+		/* Makes an exact-size copy and starts the reader and its model over it. */
 		block = exact_copy(source, size);
-		sslc_reader_init(&reader, size > 0U ? block : NULL, size);
-		model.data = size > 0U ? block : NULL;
+		view = NULL;
+		if (size > 0U)
+			view = block;
+		sslc_reader_init(&reader, view, size);
+		model.data = view;
 		model.size = size;
 		model.position = 0;
 		model.failed = 0;
@@ -1345,6 +1483,15 @@ struct writer_model {
 };
 
 /* The model's write of count bytes of the pattern: the first error is kept, a failed stream writes nothing. */
+static void model_write(struct writer_model *model, const uint8_t *bytes, size_t count);
+
+/* The model's begin of a vector. */
+static void model_begin(struct writer_model *model, unsigned prefix);
+
+/* The model's end of the innermost vector. */
+static void model_end(struct writer_model *model);
+
+/* The model's write of count bytes of the pattern: the first error is kept, a failed stream writes nothing. */
 static void
 model_write(
 	struct writer_model *model,
@@ -1358,6 +1505,8 @@ model_write(
 		model->error = ENOBUFS;
 		return;
 	}
+
+	/* Copies the bytes in, if there are any. */
 	if (count > 0U)
 		memcpy(model->bytes + model->used, bytes, count);
 	model->used += count;
@@ -1378,14 +1527,20 @@ model_begin(
 		model->error = EINVAL;
 		return;
 	}
+
+	/* Refuses a vector nested deeper than the writer allows. */
 	if (model->depth >= SSLC_WRITER_DEPTH) {
 		model->error = EINVAL;
 		return;
 	}
+
+	/* Refuses a prefix that does not fit in the room. */
 	if (prefix > model->room - model->used) {
 		model->error = ENOBUFS;
 		return;
 	}
+
+	/* Opens the vector. */
 	model->open[model->depth] = model->used;
 	model->prefix[model->depth] = prefix;
 	model->depth++;
@@ -1409,6 +1564,8 @@ model_end(
 		model->error = EINVAL;
 		return;
 	}
+
+	/* Closes the innermost vector and fills its length. */
 	model->depth--;
 	start = model->open[model->depth];
 	width = model->prefix[model->depth];
@@ -1417,6 +1574,8 @@ model_end(
 		model->error = EINVAL;
 		return;
 	}
+
+	/* Writes the length big-endian into the prefix. */
 	for (index = 0; index < width; index++)
 		model->bytes[start + index] = (uint8_t)((length >> (8U * (width - 1U - index))) & 0xffU);
 }
@@ -1435,6 +1594,7 @@ test_random_writer(void)
 	size_t index;
 	uint32_t value;
 	unsigned prefix;
+	unsigned draw;
 	int round;
 	int step;
 	int operation;
@@ -1472,7 +1632,11 @@ test_random_writer(void)
 				sslc_writer_bytes(&writer, pattern, count);
 				model_write(&model, pattern, count);
 			} else if (operation == 5 || operation == 6) {
-				prefix = random_below(20U) == 0U ? random_below(6U) : 1U + random_below(3U);
+				draw = random_below(20U);
+				if (draw == 0U)
+					prefix = random_below(6U);
+				else
+					prefix = 1U + random_below(3U);
 				sslc_writer_begin(&writer, prefix);
 				model_begin(&model, prefix);
 			} else {
@@ -1544,6 +1708,8 @@ test_round_trip(void)
 			sslc_writer_bytes(&writer, chunk, count);
 			sslc_writer_end(&writer);
 		}
+
+		/* Closes the two vectors and writes the rest. */
 		sslc_writer_u16(&writer, a);
 		sslc_writer_end(&writer);
 		sslc_writer_u8(&writer, b);
@@ -1570,6 +1736,8 @@ test_round_trip(void)
 				CHECK_BYTES(view, chunk, count);
 			CHECK(sslc_reader_finish(&deeper) == 0);
 		}
+
+		/* Checks the values read back. */
 		CHECK(sslc_reader_u16(&inner) == (a & 0xffffU));
 		CHECK(sslc_reader_finish(&inner) == 0);
 		CHECK(sslc_reader_u8(&reader) == (b & 0xffU));

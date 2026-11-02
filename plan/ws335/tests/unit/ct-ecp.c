@@ -20,6 +20,9 @@
 #include "userland/base/libcrypto-compat/cryc-ecp.h"
 
 /* Runs the operations on one curve. */
+static unsigned run(enum cryc_curve_id id);
+
+/* Runs the operations on one curve. */
 static unsigned
 run(
 	enum cryc_curve_id id)
@@ -96,6 +99,8 @@ run(
 	/* Everything public again. */
 	CT_PUBLIC(&base, sizeof(base));
 	CT_PUBLIC(&secret_point, sizeof(secret_point));
+
+	/* Reports the folded outputs of this curve, so no call is dropped. */
 	return total;
 }
 

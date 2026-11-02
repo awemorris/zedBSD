@@ -80,6 +80,20 @@ typedef pthread_t test_thread;
 #define THREAD_RESULT	NULL
 #endif
 
+#ifdef _WIN32
+/* The test's own certificates (see make_certificate). */
+#define CERT_DISALLOWED	0
+#define CERT_PLAIN	1
+#define CERT_CLIENT_ONLY	2
+#define CERT_EMPTY_USAGE	3
+#define CERT_BOTH_USAGES	4
+#define CERT_EXTENSION_ONLY	5
+#define CERT_COUNT	6
+#endif
+
+/* The fills a byte the random call did not write would keep. */
+static const unsigned char fills[4] = { 0x00U, 0xffU, 0x5aU, 0xa5U };
+
 /* The directory the test's files go in: the directory of the test program (a fresh one per run). */
 static char test_dir[DIRECTORY_ROOM];
 
@@ -108,6 +122,19 @@ static void *volatile destroy_last;
 /* Threads that have reached the barrier of the thread-value test. */
 static volatile long barrier_arrived;
 
+#ifndef _WIN32
+/* The state of a handler that runs while a socket call blocks: the ticks it has counted and the descriptors it acts on. */
+static volatile sig_atomic_t signal_ticks;
+static volatile int signal_read_fd;
+static volatile int signal_write_fd;
+#endif
+
+#ifdef _WIN32
+/* The DER of each test certificate and its length. */
+static unsigned char cert_der[CERT_COUNT][700];
+static size_t cert_size[CERT_COUNT];
+#endif
+
 /* One thread's work and result. */
 struct worker {
 	test_thread thread;
@@ -117,23 +144,90 @@ struct worker {
 	void *value;
 };
 
+/* The calls one run of cryc_os_system_roots made, as the callbacks see them. */
+struct roots_log {
+	int distrusted;
+	int ders;
+	int files;
+	int order_broken;
+	int last_kind;
+	int stop_kind;
+	int stop_error;
+	int file_error;
+	char file_path[1100];
+	int hits[8];
+	int hit_kind[8];
+	const unsigned char *known[8];
+	size_t known_size[8];
+};
+
+static uint32_t next_random(void);
 static void fill_random_bytes(unsigned char *bytes, size_t size);
-static void wait_at_gate(void);
 static void pause_milliseconds(unsigned milliseconds);
 static void yield_thread(void);
+static void wait_at_gate(void);
 static int thread_start(test_thread *thread, THREAD_RETURN (THREAD_CALL *function)(void *), void *argument);
 static void thread_join(test_thread thread);
 static void make_path(char *out, size_t room, const char *name);
 static int write_file(const char *path, const unsigned char *bytes, size_t size);
 static int write_sparse_file(const char *path, size_t size, unsigned char last);
+static void check_random_size(size_t size);
+static void test_random(void);
+static void test_time(void);
+static THREAD_RETURN THREAD_CALL mutex_worker(void *argument);
+static void test_mutex(void);
+static THREAD_RETURN THREAD_CALL atomic_worker(void *argument);
+static void test_atomic(void);
+static void test_destroy(void *value);
+static THREAD_RETURN THREAD_CALL value_worker_replace(void *argument);
+static THREAD_RETURN THREAD_CALL value_worker_none(void *argument);
+static THREAD_RETURN THREAD_CALL value_worker_barrier(void *argument);
+static void test_thread_value(void);
+static unsigned char pattern_byte(size_t index);
+static void check_file_size(size_t size);
+static void test_read_file(void);
+static int make_pair(intptr_t *first, intptr_t *second);
+static void set_nonblocking(intptr_t descriptor, int nonblocking);
+static void close_descriptor(intptr_t descriptor);
+static int read_settled(intptr_t descriptor, uint8_t *buffer, size_t size, size_t *done, int *os_error);
+static void check_socket_basic(void);
+static void check_socket_transfer(void);
+static void check_socket_errors(void);
+#ifndef _WIN32
+static void alarm_handler(int number);
+static void set_timer(int on);
+static void check_socket_interrupted(void);
+static void check_socket_pipe(void);
+#endif
+static void note_kind(struct roots_log *log, int kind);
+static void note_certificate(struct roots_log *log, int kind, const uint8_t *der, size_t size);
+static int log_distrusted(void *context, const uint8_t *der, size_t size);
+static int log_der(void *context, const uint8_t *der, size_t size);
+static int log_file(void *context, const char *path);
+static void roots_log_clear(struct roots_log *log);
+#ifdef _WIN32
+static void write_name(struct der_writer *writer, const char *common_name);
+static void write_algorithm(struct der_writer *writer, const char *oid);
+static size_t make_certificate(unsigned char *out, size_t room, unsigned serial, const char *common_name, int client_only_extension);
+static HCERTSTORE open_store(const WCHAR *name);
+static void purge_store(const WCHAR *key_path);
+static int add_certificate(HCERTSTORE store, int index, const char **usages, DWORD usage_count, int with_property);
+static int expected_certificate_path(char *out, size_t room);
+static void check_roots_windows(void);
+#endif
+static void test_system_roots(void);
+static void find_test_directory(const char *program);
 
 /* The next pseudo-random 32-bit number. */
 static uint32_t
 next_random(void)
 {
+	/* Advances the generator by one xorshift round. */
 	rng_state ^= rng_state << 13;
 	rng_state ^= rng_state >> 17;
 	rng_state ^= rng_state << 5;
+
+	/* The new state is the number. */
 	return rng_state;
 }
 
@@ -145,6 +239,7 @@ fill_random_bytes(
 {
 	size_t index;
 
+	/* Draws each byte from the high bits of the generator. */
 	for (index = 0; index < size; index++)
 		bytes[index] = (unsigned char)(next_random() >> 11);
 }
@@ -159,6 +254,7 @@ pause_milliseconds(
 #else
 	struct timespec request;
 
+	/* Splits the wait into seconds and nanoseconds and sleeps. */
 	request.tv_sec = (time_t)(milliseconds / 1000U);
 	request.tv_nsec = (long)(milliseconds % 1000U) * 1000000L;
 	nanosleep(&request, NULL);
@@ -182,6 +278,7 @@ wait_at_gate(void)
 {
 	unsigned spins;
 
+	/* Counts this thread as started, then yields until every thread of the batch has started. */
 	cryc_os_atomic_add(&gate_ready, 1);
 	for (spins = 0; spins < 20000000U && gate_ready < (long)THREAD_COUNT; spins++)
 		yield_thread();
@@ -194,12 +291,24 @@ thread_start(
 	THREAD_RETURN (THREAD_CALL *function)(void *),
 	void *argument)
 {
-#ifdef _WIN32
-	*thread = CreateThread(NULL, 0, function, argument, 0, NULL);
-	return *thread != NULL;
-#else
-	return pthread_create(thread, NULL, function, argument) == 0;
+#ifndef _WIN32
+	int error;
 #endif
+
+#ifdef _WIN32
+	/* Starts the thread. */
+	*thread = CreateThread(NULL, 0, function, argument, 0, NULL);
+	if (*thread == NULL)
+		return 0;
+#else
+	/* Starts the thread. */
+	error = pthread_create(thread, NULL, function, argument);
+	if (error != 0)
+		return 0;
+#endif
+
+	/* Succeeded: the thread is running. */
+	return 1;
 }
 
 /* Waits for a thread to end. */
@@ -225,12 +334,17 @@ make_path(
 	size_t length;
 	size_t name_length;
 
+	/* Measures the directory and the name. */
 	length = strlen(test_dir);
 	name_length = strlen(name);
+
+	/* Leaves an empty string when the path does not fit. */
 	if (length + 1U + name_length + 1U > room) {
 		out[0] = 0;
 		return;
 	}
+
+	/* Joins the directory, the slash and the name. */
 	memcpy(out, test_dir, length);
 	out[length] = '/';
 	memcpy(out + length + 1U, name, name_length + 1U);
@@ -245,22 +359,41 @@ write_file(
 {
 	FILE *file;
 	size_t put;
-
+	int closed;
 #ifdef _WIN32
 	WCHAR wide[1100];
+	int converted;
+#endif
 
-	if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, 1100) <= 0)
+#ifdef _WIN32
+	/* Converts the UTF-8 path to UTF-16 and opens the file. */
+	converted = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, 1100);
+	if (converted <= 0)
 		return 0;
 	file = _wfopen(wide, L"wb");
 #else
+	/* Opens the file. */
 	file = fopen(path, "wb");
 #endif
 	if (file == NULL)
 		return 0;
-	put = size == 0U ? 0U : fwrite(bytes, 1, size, file);
-	if (fclose(file) != 0)
+
+	/* Writes the bytes; an empty file writes nothing. */
+	put = 0;
+	if (size != 0U)
+		put = fwrite(bytes, 1, size, file);
+
+	/* Closes the file, which fails when the data could not be flushed. */
+	closed = fclose(file);
+	if (closed != 0)
 		return 0;
-	return put == size;
+
+	/* Reports a short write. */
+	if (put != size)
+		return 0;
+
+	/* Succeeded: the whole content is in the file. */
+	return 1;
 }
 
 /* Writes a file of size bytes, all zero except the last, without writing the middle on POSIX. */
@@ -271,33 +404,49 @@ write_sparse_file(
 	unsigned char last)
 {
 	FILE *file;
+	size_t written;
 	int good;
-
+	int seek_error;
+	int closed;
 #ifdef _WIN32
 	WCHAR wide[1100];
+	int converted;
+#endif
 
-	if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, 1100) <= 0)
+#ifdef _WIN32
+	/* Converts the UTF-8 path to UTF-16 and opens the file. */
+	converted = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, 1100);
+	if (converted <= 0)
 		return 0;
 	file = _wfopen(wide, L"wb");
 #else
+	/* Opens the file. */
 	file = fopen(path, "wb");
 #endif
 	if (file == NULL)
 		return 0;
-	good = fseek(file, (long)(size - 1U), SEEK_SET) == 0;
-	if (good)
-		good = fwrite(&last, 1, 1, file) == 1U;
-	if (fclose(file) != 0)
+
+	/* Seeks to the last byte and writes it, which leaves the middle a hole. */
+	good = 0;
+	seek_error = fseek(file, (long)(size - 1U), SEEK_SET);
+	if (seek_error == 0) {
+		written = fwrite(&last, 1, 1, file);
+		if (written == 1U)
+			good = 1;
+	}
+
+	/* Closes the file; a close that fails makes the file bad. */
+	closed = fclose(file);
+	if (closed != 0)
 		good = 0;
+
+	/* Reports whether the file was written. */
 	return good;
 }
 
 /*
  * ---- random ----
  */
-
-/* The fills a byte the call did not write would keep. */
-static const unsigned char fills[4] = { 0x00U, 0xffU, 0x5aU, 0xa5U };
 
 /* Draws size bytes into four buffers that start with the four fills; every byte must differ from at least one fill. */
 static void
@@ -310,13 +459,17 @@ check_random_size(
 	size_t which;
 	size_t before;
 	size_t after;
+	size_t room;
 	int error;
 	int untouched;
 
 	/* Each buffer is exactly size bytes (at least one), so that AddressSanitizer sees an overrun. */
+	room = size;
+	if (size == 0U)
+		room = 1U;
 	for (which = 0; which < 4U; which++) {
-		buffers[which] = (unsigned char *)malloc(size == 0U ? 1U : size);
-		memset(buffers[which], fills[which], size == 0U ? 1U : size);
+		buffers[which] = (unsigned char *)malloc(room);
+		memset(buffers[which], fills[which], room);
 		error = cryc_os_random(NULL, buffers[which], size);
 		CHECK(error == 0);
 	}
@@ -328,11 +481,15 @@ check_random_size(
 		    buffers[3][index] == fills[3])
 			untouched++;
 	}
+
+	/* Reports that every byte was written. */
 	CHECK(untouched == 0);
 
 	/* A buffer of size 0 is left as it was. */
 	if (size == 0U)
 		CHECK(buffers[0][0] == fills[0]);
+
+	/* Gives the buffers back. */
 	for (which = 0; which < 4U; which++)
 		free(buffers[which]);
 
@@ -341,6 +498,8 @@ check_random_size(
 	memset(guarded, GUARD_BYTE, size + 64U);
 	error = cryc_os_random(NULL, guarded + 32U, size);
 	CHECK(error == 0);
+
+	/* Counts the guard bytes that survived on each side. */
 	before = 0;
 	after = 0;
 	for (index = 0; index < 32U; index++) {
@@ -349,8 +508,12 @@ check_random_size(
 		if (guarded[32U + size + index] == GUARD_BYTE)
 			after++;
 	}
+
+	/* Reports that every guard byte on both sides survived. */
 	CHECK(before == 32U);
 	CHECK(after == 32U);
+
+	/* Gives the guarded buffer back. */
 	free(guarded);
 }
 
@@ -398,6 +561,8 @@ test_random(void)
 	size = 1048576U + 3U;
 	big = (unsigned char *)malloc(size);
 	CHECK(cryc_os_random(NULL, big, size) == 0);
+
+	/* Counts how often each byte value occurs and how many bits are set. */
 	memset(histogram, 0, sizeof(histogram));
 	ones = 0;
 	for (index = 0; index < size; index++) {
@@ -406,13 +571,19 @@ test_random(void)
 		    ((big[index] >> 3) & 1U) + ((big[index] >> 4) & 1U) + ((big[index] >> 5) & 1U) +
 		    ((big[index] >> 6) & 1U) + ((big[index] >> 7) & 1U));
 	}
+
+	/* Checks the count of every byte value. */
 	for (index = 0; index < 256U; index++) {
 		/* The mean is 4096 with a standard deviation of 64: 3500 to 4700 is more than nine of them. */
 		CHECK(histogram[index] > 3500UL);
 		CHECK(histogram[index] < 4700UL);
 	}
+
+	/* Reports that about half of the bits are set. */
 	CHECK(ones > size * 4U - 5000U);
 	CHECK(ones < size * 4U + 5000U);
+
+	/* Gives the large draw back. */
 	free(big);
 }
 
@@ -458,18 +629,27 @@ mutex_worker(
 	struct worker *worker;
 	unsigned index;
 
+	/* Takes the worker record and waits until every thread is running. */
 	worker = (struct worker *)argument;
 	wait_at_gate();
+
+	/* Enters the critical section many times, noting any other thread found inside it. */
 	for (index = 0; index < MUTEX_EACH; index++) {
 		cryc_os_mutex_lock(&shared_mutex);
+
 		if (shared_inside != 0)
 			shared_violations++;
 		shared_inside = 1;
 		shared_counter = shared_counter + 1;
 		shared_inside = 0;
+
 		cryc_os_mutex_unlock(&shared_mutex);
 	}
+
+	/* The checks are made by the main thread, from the shared counters. */
 	worker->failures = 0;
+
+	/* Succeeded. */
 	return THREAD_RESULT;
 }
 
@@ -519,10 +699,14 @@ test_mutex(void)
 		workers[index].started = thread_start(&workers[index].thread, mutex_worker, &workers[index]);
 		CHECK(workers[index].started);
 	}
+
+	/* Waits for the threads that started. */
 	for (index = 0; index < THREAD_COUNT; index++) {
 		if (workers[index].started)
 			thread_join(workers[index].thread);
 	}
+
+	/* Reports that no thread found another inside the section and no increment was lost. */
 	CHECK(shared_violations == 0);
 	CHECK(shared_counter == (long)(THREAD_COUNT * MUTEX_EACH));
 	cryc_os_mutex_destroy(&shared_mutex);
@@ -538,10 +722,13 @@ atomic_worker(
 	long result;
 	unsigned index;
 
+	/* Takes the delta from the worker record and waits until every thread is running. */
 	worker = (struct worker *)argument;
 	delta = (long)(size_t)worker->value;
 	worker->failures = 0;
 	wait_at_gate();
+
+	/* Adds the delta many times and marks each number the addition returns. */
 	for (index = 0; index < ATOMIC_EACH; index++) {
 		result = cryc_os_atomic_add(&atomic_total, delta);
 
@@ -550,10 +737,14 @@ atomic_worker(
 			worker->failures++;
 			continue;
 		}
+
+		/* A number that was already seen is returned twice. */
 		if (atomic_seen[result] != 0U)
 			worker->failures++;
 		atomic_seen[result] = 1;
 	}
+
+	/* Succeeded. */
 	return THREAD_RESULT;
 }
 
@@ -591,6 +782,8 @@ test_atomic(void)
 		workers[index].started = thread_start(&workers[index].thread, atomic_worker, &workers[index]);
 		CHECK(workers[index].started);
 	}
+
+	/* Waits for the threads and adds up their failures. */
 	failures = 0;
 	for (index = 0; index < THREAD_COUNT; index++) {
 		if (workers[index].started) {
@@ -598,13 +791,19 @@ test_atomic(void)
 			failures += workers[index].failures;
 		}
 	}
+
+	/* Reports that no thread saw a bad number and the total is right. */
 	CHECK(failures == 0);
 	CHECK(atomic_total == (long)(THREAD_COUNT * ATOMIC_EACH));
+
+	/* Counts the numbers no addition returned. */
 	missing = 0;
 	for (number = 1; number <= THREAD_COUNT * ATOMIC_EACH; number++) {
 		if (atomic_seen[number] == 0U)
 			missing++;
 	}
+
+	/* Reports that every number was returned once. */
 	CHECK(missing == 0UL);
 
 	/* Four threads add -1 from there: the returned numbers are exactly N-1..0, each once. */
@@ -616,6 +815,8 @@ test_atomic(void)
 		workers[index].started = thread_start(&workers[index].thread, atomic_worker, &workers[index]);
 		CHECK(workers[index].started);
 	}
+
+	/* Waits for the threads and adds up their failures. */
 	failures = 0;
 	for (index = 0; index < THREAD_COUNT; index++) {
 		if (workers[index].started) {
@@ -623,14 +824,22 @@ test_atomic(void)
 			failures += workers[index].failures;
 		}
 	}
+
+	/* Reports that no thread saw a bad number and the total is back to zero. */
 	CHECK(failures == 0);
 	CHECK(atomic_total == 0);
+
+	/* Counts the numbers no addition returned. */
 	missing = 0;
 	for (number = 0; number < THREAD_COUNT * ATOMIC_EACH; number++) {
 		if (atomic_seen[number] == 0U)
 			missing++;
 	}
+
+	/* Reports that every number was returned once. */
 	CHECK(missing == 0UL);
+
+	/* Gives the table back. */
 	free(atomic_seen);
 	atomic_seen = NULL;
 }
@@ -644,6 +853,7 @@ static void
 test_destroy(
 	void *value)
 {
+	/* Counts the call, notes the value, and frees it. */
 	cryc_os_atomic_add(&destroy_calls, 1);
 	destroy_last = value;
 	free(value);
@@ -657,25 +867,39 @@ value_worker_replace(
 	struct worker *worker;
 	void *first;
 	void *second;
+	void *current;
+	int error;
 
+	/* A new thread starts with no value. */
 	worker = (struct worker *)argument;
 	worker->failures = 0;
-	if (cryc_os_thread_value() != NULL)
+	current = cryc_os_thread_value();
+	if (current != NULL)
 		worker->failures++;
+
+	/* Stores the first value and reads it back. */
 	first = malloc(16);
 	second = malloc(16);
-	if (cryc_os_thread_set_value(first, test_destroy) != 0)
+	error = cryc_os_thread_set_value(first, test_destroy);
+	if (error != 0)
 		worker->failures++;
-	if (cryc_os_thread_value() != first)
+	current = cryc_os_thread_value();
+	if (current != first)
 		worker->failures++;
 
 	/* The first value is the owner's again once it is replaced: destroy is never called for it. */
-	if (cryc_os_thread_set_value(second, test_destroy) != 0)
+	error = cryc_os_thread_set_value(second, test_destroy);
+	if (error != 0)
 		worker->failures++;
-	if (cryc_os_thread_value() != second)
+	current = cryc_os_thread_value();
+	if (current != second)
 		worker->failures++;
+
+	/* Frees the replaced value and hands the stored one back for the destroy check. */
 	free(first);
 	worker->value = second;
+
+	/* Succeeded. */
 	return THREAD_RESULT;
 }
 
@@ -685,17 +909,27 @@ value_worker_none(
 	void *argument)
 {
 	struct worker *worker;
+	void *current;
+	int error;
 
+	/* A thread that stored nothing reads NULL. */
 	worker = (struct worker *)argument;
 	worker->failures = 0;
-	if (cryc_os_thread_value() != NULL)
+	current = cryc_os_thread_value();
+	if (current != NULL)
 		worker->failures++;
+
+	/* The second thread stores NULL, which still reads as NULL. */
 	if (worker->number == 1U) {
-		if (cryc_os_thread_set_value(NULL, test_destroy) != 0)
+		error = cryc_os_thread_set_value(NULL, test_destroy);
+		if (error != 0)
 			worker->failures++;
-		if (cryc_os_thread_value() != NULL)
+		current = cryc_os_thread_value();
+		if (current != NULL)
 			worker->failures++;
 	}
+
+	/* Succeeded. */
 	return THREAD_RESULT;
 }
 
@@ -706,20 +940,33 @@ value_worker_barrier(
 {
 	struct worker *worker;
 	void *mine;
+	void *current;
 	unsigned spins;
+	int error;
 
+	/* Stores this thread's own value. */
 	worker = (struct worker *)argument;
 	worker->failures = 0;
 	mine = malloc(16);
-	if (cryc_os_thread_set_value(mine, test_destroy) != 0)
+	error = cryc_os_thread_set_value(mine, test_destroy);
+	if (error != 0)
 		worker->failures++;
+
+	/* Waits at the barrier until every sibling has stored its value. */
 	cryc_os_atomic_add(&barrier_arrived, 1);
 	for (spins = 0; spins < 20000000U && barrier_arrived < 8; spins++)
 		yield_thread();
+
+	/* Notes a barrier that was never filled. */
 	if (barrier_arrived < 8)
 		worker->failures++;
-	if (cryc_os_thread_value() != mine)
+
+	/* The value read is still this thread's own. */
+	current = cryc_os_thread_value();
+	if (current != mine)
 		worker->failures++;
+
+	/* Succeeded. */
 	return THREAD_RESULT;
 }
 
@@ -762,6 +1009,8 @@ test_thread_value(void)
 			thread_join(workers[index].thread);
 		CHECK(workers[index].failures == 0);
 	}
+
+	/* Reports that no destroy function ran. */
 	CHECK(destroy_calls == calls_before);
 
 	/* The main thread has a value of its own, apart from the threads'. */
@@ -779,6 +1028,8 @@ test_thread_value(void)
 			thread_join(single.thread);
 		CHECK(single.failures == 0);
 	}
+
+	/* Reports one destroy call per thread, and that the main thread's value is untouched. */
 	CHECK(destroy_calls == calls_before + 64);
 	CHECK(cryc_os_thread_value() == mine);
 
@@ -790,12 +1041,16 @@ test_thread_value(void)
 		workers[index].started = thread_start(&workers[index].thread, value_worker_barrier, &workers[index]);
 		CHECK(workers[index].started);
 	}
+
+	/* Waits for the eight threads and checks that none failed. */
 	for (index = 0; index < 8U; index++) {
 		if (workers[index].started) {
 			thread_join(workers[index].thread);
 			CHECK(workers[index].failures == 0);
 		}
 	}
+
+	/* Reports one destroy call per thread again. */
 	CHECK(destroy_calls == calls_before + 8);
 	CHECK(cryc_os_thread_value() == mine);
 
@@ -814,6 +1069,7 @@ static unsigned char
 pattern_byte(
 	size_t index)
 {
+	/* The byte of the pattern at the index. */
 	return (unsigned char)((index * 7U + 3U + (index >> 8)) & 0xffU);
 }
 
@@ -828,11 +1084,15 @@ check_file_size(
 	size_t length;
 	size_t index;
 	size_t wrong;
+	size_t room;
 	int error;
 
 	/* Writes the file. */
 	make_path(path, sizeof(path), "os-pattern.bin");
-	content = (unsigned char *)malloc(size == 0U ? 1U : size);
+	room = size;
+	if (size == 0U)
+		room = 1U;
+	content = (unsigned char *)malloc(room);
 	for (index = 0; index < size; index++)
 		content[index] = pattern_byte(index);
 	CHECK(write_file(path, content, size));
@@ -850,6 +1110,8 @@ check_file_size(
 			if (data[index] != content[index])
 				wrong++;
 		}
+
+		/* Reports that every byte matches and the zero byte follows. */
 		CHECK(wrong == 0U);
 		CHECK(data[size] == 0U);
 		free(data);
@@ -876,6 +1138,8 @@ check_file_size(
 		CHECK(data == NULL);
 		CHECK(length == 0U);
 	}
+
+	/* Gives the content back. */
 	free(content);
 }
 
@@ -895,6 +1159,7 @@ test_read_file(void)
 	uint8_t *data;
 	size_t length;
 	size_t index;
+	int created;
 	int error;
 
 	/* The sizes around the buffer's growth. */
@@ -943,7 +1208,8 @@ test_read_file(void)
 
 	/* Names in UTF-8: Japanese (three bytes a character) and an emoji (a surrogate pair on Windows). */
 	make_path(other, sizeof(other), japanese);
-	if (!write_file(other, crlf, sizeof(crlf)))
+	created = write_file(other, crlf, sizeof(crlf));
+	if (!created)
 		printf("note: a file with a UTF-8 name could not be created here (under Wine run with LC_ALL=C.UTF-8)\n");
 	CHECK(write_file(other, crlf, sizeof(crlf)));
 	error = cryc_os_read_file(other, 100, &data, &length);
@@ -953,6 +1219,8 @@ test_read_file(void)
 		CHECK_BYTES(data, crlf, sizeof(crlf));
 		free(data);
 	}
+
+	/* Does the same with a name that holds an emoji, and reads a name that was never written. */
 	make_path(other, sizeof(other), emoji);
 	CHECK(write_file(other, crlf, sizeof(crlf)));
 	error = cryc_os_read_file(other, 100, &data, &length);
@@ -986,6 +1254,8 @@ test_read_file(void)
 		CHECK(data[CRYC_OS_FILE_MAX] == 0U);
 		free(data);
 	}
+
+	/* One byte of room less than the file holds is too large. */
 	error = cryc_os_read_file(path, CRYC_OS_FILE_MAX - 1U, &data, &length);
 	CHECK(error == EFBIG);
 	make_path(path, sizeof(path), "os-over-limit.bin");
@@ -1000,13 +1270,6 @@ test_read_file(void)
  * ---- sockets ----
  */
 
-/* The state of a handler that runs while a socket call blocks (POSIX). */
-#ifndef _WIN32
-static volatile sig_atomic_t signal_ticks;
-static volatile int signal_read_fd;
-static volatile int signal_write_fd;
-#endif
-
 /* Makes a connected pair of stream sockets; returns 1 on success. */
 static int
 make_pair(
@@ -1019,6 +1282,7 @@ make_pair(
 	SOCKET server;
 	struct sockaddr_in address;
 	int length;
+	int status;
 
 	/* A loopback listener on a port the system picks. */
 	listener = socket(AF_INET, SOCK_STREAM, 0);
@@ -1029,34 +1293,68 @@ make_pair(
 	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	address.sin_port = 0;
 	length = (int)sizeof(address);
-	if (bind(listener, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(listener, 1) != 0 ||
-	    getsockname(listener, (struct sockaddr *)&address, &length) != 0) {
+	status = bind(listener, (struct sockaddr *)&address, sizeof(address));
+	if (status != 0) {
+		closesocket(listener);
+		return 0;
+	}
+
+	/* Starts listening for the client. */
+	status = listen(listener, 1);
+	if (status != 0) {
+		closesocket(listener);
+		return 0;
+	}
+
+	/* Learns the port the system picked. */
+	status = getsockname(listener, (struct sockaddr *)&address, &length);
+	if (status != 0) {
 		closesocket(listener);
 		return 0;
 	}
 
 	/* The client connects (the backlog completes it) and the server accepts. */
 	client = socket(AF_INET, SOCK_STREAM, 0);
-	if (client == INVALID_SOCKET || connect(client, (struct sockaddr *)&address, sizeof(address)) != 0) {
+	if (client == INVALID_SOCKET) {
 		closesocket(listener);
 		return 0;
 	}
+
+	/* Connects the client to the listener. */
+	status = connect(client, (struct sockaddr *)&address, sizeof(address));
+	if (status != 0) {
+		closesocket(listener);
+		return 0;
+	}
+
+	/* Takes the connection and no longer needs the listener. */
 	server = accept(listener, NULL, NULL);
 	closesocket(listener);
 	if (server == INVALID_SOCKET) {
 		closesocket(client);
 		return 0;
 	}
+
+	/* Hands both ends to the caller. */
 	*first = (intptr_t)client;
 	*second = (intptr_t)server;
+
+	/* Succeeded: the two ends are connected. */
 	return 1;
 #else
 	int fds[2];
+	int status;
 
-	if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0)
+	/* Makes the pair. */
+	status = socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+	if (status != 0)
 		return 0;
+
+	/* Hands both ends to the caller. */
 	*first = fds[0];
 	*second = fds[1];
+
+	/* Succeeded: the two ends are connected. */
 	return 1;
 #endif
 }
@@ -1070,11 +1368,15 @@ set_nonblocking(
 #ifdef _WIN32
 	u_long mode;
 
-	mode = nonblocking ? 1UL : 0UL;
+	/* Turns the non-blocking mode on or off. */
+	mode = 0UL;
+	if (nonblocking)
+		mode = 1UL;
 	ioctlsocket((SOCKET)descriptor, FIONBIO, &mode);
 #else
 	int flags;
 
+	/* Reads the flags, sets or clears the non-blocking flag, and writes them back. */
 	flags = fcntl((int)descriptor, F_GETFL, 0);
 	if (nonblocking)
 		flags |= O_NONBLOCK;
@@ -1108,12 +1410,15 @@ read_settled(
 	unsigned tries;
 	int error;
 
+	/* Reads again, a little later each time, while the socket still says EAGAIN. */
 	error = EAGAIN;
 	for (tries = 0; tries < 200U && error == EAGAIN; tries++) {
 		error = cryc_os_socket_read(descriptor, buffer, size, done, os_error);
 		if (error == EAGAIN)
 			pause_milliseconds(10);
 	}
+
+	/* Reports the last answer of the socket (EAGAIN if it never settled). */
 	return error;
 }
 
@@ -1128,6 +1433,7 @@ check_socket_basic(void)
 	int os_error;
 	int error;
 
+	/* Makes the connected pair. */
 	CHECK(make_pair(&first, &second));
 
 	/* A short write arrives whole; a read with more room than data returns what there is. */
@@ -1218,6 +1524,8 @@ check_socket_transfer(void)
 	size_t received;
 	size_t done;
 	size_t pending;
+	size_t wanted;
+	size_t compare_size;
 	unsigned long iterations;
 	int partial_seen;
 	int write_blocked;
@@ -1225,7 +1533,9 @@ check_socket_transfer(void)
 	int broken;
 	int os_error;
 	int error;
+	int difference;
 
+	/* Makes the pair, sets both ends non-blocking, and prepares the buffers. */
 	CHECK(make_pair(&first, &second));
 	set_nonblocking(first, 1);
 	set_nonblocking(second, 1);
@@ -1253,24 +1563,38 @@ check_socket_transfer(void)
 			broken = 1;
 		}
 	}
+
+	/* Reports that no write failed and the socket ran out of room. */
 	CHECK(!broken);
 	CHECK(write_blocked);
 
 	/* Reads all of that back (the bytes are the chunk's), then the socket is empty: EAGAIN. */
 	received = 0;
 	for (iterations = 0; iterations < 5000000UL && received < pending && !broken; iterations++) {
-		error = cryc_os_socket_read(second, sink, pending - received < TRANSFER_SIZE ? pending - received : TRANSFER_SIZE,
-		    &done, &os_error);
+		/* Asks for no more than is still pending. */
+		wanted = pending - received;
+		if (wanted > TRANSFER_SIZE)
+			wanted = TRANSFER_SIZE;
+		error = cryc_os_socket_read(second, sink, wanted, &done, &os_error);
 		if (error == 0 && done > 0U) {
-			if (memcmp(sink, chunk, done < 65536U ? done : 65536U) != 0 && done <= 65536U)
+			/* Compares the bytes with the chunk, as far as the chunk reaches. */
+			compare_size = done;
+			if (compare_size > 65536U)
+				compare_size = 65536U;
+			difference = memcmp(sink, chunk, compare_size);
+			if (difference != 0 && done <= 65536U)
 				broken = 1;
 			received += done;
 		} else if (error != EAGAIN) {
 			broken = 1;
 		}
 	}
+
+	/* Reports that the reads matched and everything written came back. */
 	CHECK(!broken);
 	CHECK(received == pending);
+
+	/* The empty socket answers EAGAIN. */
 	error = cryc_os_socket_read(second, sink, 1, &done, &os_error);
 	if (error == EAGAIN && done == 0U)
 		read_blocked = 1;
@@ -1292,6 +1616,8 @@ check_socket_transfer(void)
 				broken = 1;
 			}
 		}
+
+		/* Reads whatever has arrived. */
 		error = cryc_os_socket_read(second, sink + received, TRANSFER_SIZE - received, &done, &os_error);
 		if (error == 0) {
 			if (done == 0U || done > TRANSFER_SIZE - received)
@@ -1301,6 +1627,8 @@ check_socket_transfer(void)
 			broken = 1;
 		}
 	}
+
+	/* Reports that the whole block crossed intact. */
 	CHECK(!broken);
 	CHECK(sent == TRANSFER_SIZE);
 	CHECK(received == TRANSFER_SIZE);
@@ -1313,6 +1641,8 @@ check_socket_transfer(void)
 #else
 	UNUSED_PARAMETER(partial_seen);
 #endif
+
+	/* Gives the buffers back and closes the pair. */
 	free(source);
 	free(sink);
 	free(chunk);
@@ -1334,6 +1664,7 @@ check_socket_errors(void)
 	int error;
 	int saved_errno;
 
+	/* Fills the bytes the writes send. */
 	memset(bytes, 0x33, sizeof(bytes));
 
 	/* The peer closes: sooner or later a write fails (a TCP peer answers the first one with a reset). */
@@ -1347,6 +1678,8 @@ check_socket_errors(void)
 		if (error == 0)
 			pause_milliseconds(20);
 	}
+
+	/* Notes the errno the failed write left. */
 	saved_errno = errno;
 	CHECK(error == EIO);
 	CHECK(os_error != 0);
@@ -1421,9 +1754,12 @@ alarm_handler(
 	char junk[65536];
 	ssize_t got;
 
+	/* Counts the tick. */
 	got = 0;
 	(void)number;
 	signal_ticks++;
+
+	/* The third tick lets the blocked call finish: it writes a byte or drains the socket. */
 	if (signal_ticks == 3) {
 		if (signal_write_fd >= 0)
 			got = write(signal_write_fd, "z", 1);
@@ -1440,11 +1776,14 @@ set_timer(
 {
 	struct itimerval timer;
 
+	/* Fills the timer: running when asked, stopped otherwise. */
 	memset(&timer, 0, sizeof(timer));
 	if (on) {
 		timer.it_interval.tv_usec = 20000;
 		timer.it_value.tv_usec = 20000;
 	}
+
+	/* Applies the timer. */
 	setitimer(ITIMER_REAL, &timer, NULL);
 }
 
@@ -1524,9 +1863,14 @@ check_socket_pipe(void)
 	int fds[2];
 	uint8_t buffer[16];
 	size_t done;
+	intptr_t high_read;
+	intptr_t high_write;
+	intptr_t low_read;
+	intptr_t low_write;
 	int os_error;
 	int error;
 
+	/* Makes the pipe. */
 	CHECK(pipe(fds) == 0);
 
 	/* The read end does not block, so a call that fails to move bytes cannot hang the test. */
@@ -1544,11 +1888,7 @@ check_socket_pipe(void)
 	 * the bytes written first must still be in the pipe afterwards, and nothing may be written through the wrapped end.
 	 */
 	if (sizeof(intptr_t) > 4U) {
-		intptr_t high_read;
-		intptr_t high_write;
-		intptr_t low_read;
-		intptr_t low_write;
-
+		/* Builds the values that wrap to each end of the pipe. */
 		high_read = (intptr_t)(((uint64_t)1 << 32) + (uint64_t)fds[0]);
 		high_write = (intptr_t)(((uint64_t)1 << 32) + (uint64_t)fds[1]);
 		low_read = (intptr_t)((int64_t)fds[0] - ((int64_t)1 << 32));
@@ -1594,29 +1934,13 @@ check_socket_pipe(void)
  * ---- the system's trust sources ----
  */
 
-/* The calls one run of cryc_os_system_roots made, as the callbacks see them. */
-struct roots_log {
-	int distrusted;
-	int ders;
-	int files;
-	int order_broken;
-	int last_kind;
-	int stop_kind;
-	int stop_error;
-	int file_error;
-	char file_path[1100];
-	int hits[8];
-	int hit_kind[8];
-	const unsigned char *known[8];
-	size_t known_size[8];
-};
-
 /* Notes which kind of call came now: 0 distrusted, 1 DER, 2 file; they must come in that order. */
 static void
 note_kind(
 	struct roots_log *log,
 	int kind)
 {
+	/* A call of an earlier kind after a later one breaks the order. */
 	if (kind < log->last_kind)
 		log->order_broken = 1;
 	log->last_kind = kind;
@@ -1631,9 +1955,19 @@ note_certificate(
 	size_t size)
 {
 	int index;
+	int difference;
 
+	/* Compares the certificate with each known one, and counts a hit with the kind of call that carried it. */
 	for (index = 0; index < 8; index++) {
-		if (log->known[index] != NULL && log->known_size[index] == size && memcmp(log->known[index], der, size) == 0) {
+		/* Skips an unused slot and a certificate of another size. */
+		if (log->known[index] == NULL)
+			continue;
+		if (log->known_size[index] != size)
+			continue;
+
+		/* A match is a hit, recorded with the kind of call that carried it. */
+		difference = memcmp(log->known[index], der, size);
+		if (difference == 0) {
 			log->hits[index]++;
 			log->hit_kind[index] = kind;
 		}
@@ -1649,12 +1983,17 @@ log_distrusted(
 {
 	struct roots_log *log;
 
+	/* Counts the call and notes its kind and the certificate it carries. */
 	log = (struct roots_log *)context;
 	log->distrusted++;
 	note_kind(log, 0);
 	note_certificate(log, 0, der, size);
+
+	/* Fails when the test asked this kind of call to fail. */
 	if (log->stop_kind == 0)
 		return log->stop_error;
+
+	/* Succeeded: the call is recorded. */
 	return 0;
 }
 
@@ -1667,12 +2006,17 @@ log_der(
 {
 	struct roots_log *log;
 
+	/* Counts the call and notes its kind and the certificate it carries. */
 	log = (struct roots_log *)context;
 	log->ders++;
 	note_kind(log, 1);
 	note_certificate(log, 1, der, size);
+
+	/* Fails when the test asked this kind of call to fail. */
 	if (log->stop_kind == 1)
 		return log->stop_error;
+
+	/* Succeeded: the call is recorded. */
 	return 0;
 }
 
@@ -1683,12 +2027,19 @@ log_file(
 	const char *path)
 {
 	struct roots_log *log;
+	size_t length;
 
+	/* Counts the call and notes its kind. */
 	log = (struct roots_log *)context;
 	log->files++;
 	note_kind(log, 2);
-	if (strlen(path) < sizeof(log->file_path))
+
+	/* Keeps the path when it fits. */
+	length = strlen(path);
+	if (length < sizeof(log->file_path))
 		strcpy(log->file_path, path);
+
+	/* Reports the error the test chose for the file call. */
 	return log->file_error;
 }
 
@@ -1697,25 +2048,13 @@ static void
 roots_log_clear(
 	struct roots_log *log)
 {
+	/* Zeroes the log, then marks that no call came yet and no call is to fail. */
 	memset(log, 0, sizeof(*log));
 	log->last_kind = -1;
 	log->stop_kind = -1;
 }
 
 #ifdef _WIN32
-
-/* The test's own certificates (see make_certificate). */
-#define CERT_DISALLOWED	0
-#define CERT_PLAIN	1
-#define CERT_CLIENT_ONLY	2
-#define CERT_EMPTY_USAGE	3
-#define CERT_BOTH_USAGES	4
-#define CERT_EXTENSION_ONLY	5
-#define CERT_COUNT	6
-
-/* The DER of each test certificate and its length. */
-static unsigned char cert_der[CERT_COUNT][700];
-static size_t cert_size[CERT_COUNT];
 
 /* Writes a Name with one common name (X.690 8.1; X.501 Name, RDN, AttributeTypeAndValue). */
 static void
@@ -1730,6 +2069,7 @@ write_name(
 	struct der_writer pair_writer;
 	struct der_writer set_writer;
 
+	/* Builds the attribute (the common name), wraps it in a SET, then in the Name. */
 	der_init(&pair_writer, pair, sizeof(pair));
 	der_oid(&pair_writer, "2.5.4.3");
 	der_put(&pair_writer, 0x0cU, (const unsigned char *)common_name, strlen(common_name));
@@ -1749,6 +2089,7 @@ write_algorithm(
 	unsigned char inner[40];
 	struct der_writer algorithm;
 
+	/* Builds the identifier and its NULL parameter, and wraps them. */
 	der_init(&algorithm, inner, sizeof(inner));
 	der_oid(&algorithm, oid);
 	der_put(&algorithm, 0x05U, NULL, 0);
@@ -1780,6 +2121,8 @@ make_certificate(
 	unsigned char usage_bytes[40];
 	unsigned char extension_list[100];
 	unsigned char fake_signature[65];
+	unsigned char body[900];
+	struct der_writer body_writer;
 	struct der_writer tbs;
 	struct der_writer part;
 	struct der_writer key;
@@ -1843,21 +2186,20 @@ make_certificate(
 
 	/* The Certificate: TBS, algorithm, signature (not a real one). */
 	der_init(&outer, out, room);
-	{
-		unsigned char body[900];
-		struct der_writer body_writer;
+	der_init(&body_writer, body, sizeof(body));
+	der_wrap(&body_writer, 0x30U, &tbs);
+	write_algorithm(&body_writer, "1.2.840.113549.1.1.11");
+	fake_signature[0] = 0;
+	for (index = 1; index < sizeof(fake_signature); index++)
+		fake_signature[index] = (unsigned char)(index * 5U + serial);
+	der_put(&body_writer, 0x03U, fake_signature, sizeof(fake_signature));
+	der_wrap(&outer, 0x30U, &body_writer);
 
-		der_init(&body_writer, body, sizeof(body));
-		der_wrap(&body_writer, 0x30U, &tbs);
-		write_algorithm(&body_writer, "1.2.840.113549.1.1.11");
-		fake_signature[0] = 0;
-		for (index = 1; index < sizeof(fake_signature); index++)
-			fake_signature[index] = (unsigned char)(index * 5U + serial);
-		der_put(&body_writer, 0x03U, fake_signature, sizeof(fake_signature));
-		der_wrap(&outer, 0x30U, &body_writer);
-	}
+	/* A writer that ran out of room yields no certificate. */
 	if (outer.error)
 		return 0;
+
+	/* Succeeded: the length of the certificate. */
 	return outer.used;
 }
 
@@ -1866,7 +2208,13 @@ static HCERTSTORE
 open_store(
 	const WCHAR *name)
 {
-	return CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER, name);
+	HCERTSTORE store;
+
+	/* Opens the logical store. */
+	store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER, name);
+
+	/* The store, NULL when it could not be opened. */
+	return store;
 }
 
 /*
@@ -1882,15 +2230,21 @@ purge_store(
 	HCERTSTORE store;
 	PCCERT_CONTEXT wanted;
 	PCCERT_CONTEXT found;
+	LONG status;
+	BOOL deleted;
 	int index;
 
-	if (RegOpenKeyExW(HKEY_CURRENT_USER, key_path, 0, KEY_ALL_ACCESS, &key) != ERROR_SUCCESS)
+	/* Opens the registry key and the registry store on it. */
+	status = RegOpenKeyExW(HKEY_CURRENT_USER, key_path, 0, KEY_ALL_ACCESS, &key);
+	if (status != ERROR_SUCCESS)
 		return;
 	store = CertOpenStore(CERT_STORE_PROV_REG, 0, 0, 0, key);
 	if (store == NULL) {
 		RegCloseKey(key);
 		return;
 	}
+
+	/* Removes every copy of every test certificate. */
 	for (index = 0; index < CERT_COUNT; index++) {
 		wanted = CertCreateCertificateContext(X509_ASN_ENCODING, cert_der[index], (DWORD)cert_size[index]);
 		if (wanted == NULL)
@@ -1899,12 +2253,18 @@ purge_store(
 			found = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0, CERT_FIND_EXISTING, wanted, NULL);
 			if (found == NULL)
 				break;
+
 			/* The delete frees the context passed in. */
-			if (!CertDeleteCertificateFromStore(found))
+			deleted = CertDeleteCertificateFromStore(found);
+			if (!deleted)
 				break;
 		}
+
+		/* Gives back the context of the wanted certificate. */
 		CertFreeCertificateContext(wanted);
 	}
+
+	/* Closes the store and the key. */
 	CertCloseStore(store, 0);
 	RegCloseKey(key);
 }
@@ -1921,19 +2281,32 @@ add_certificate(
 	PCCERT_CONTEXT added;
 	CERT_ENHKEY_USAGE usage;
 	BOOL good;
+	BOOL stored;
 
+	/* Adds the certificate, replacing a copy that is already there. */
 	added = NULL;
-	if (!CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, cert_der[index], (DWORD)cert_size[index],
-	    CERT_STORE_ADD_REPLACE_EXISTING, &added))
+	stored = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, cert_der[index], (DWORD)cert_size[index],
+	    CERT_STORE_ADD_REPLACE_EXISTING, &added);
+	if (!stored)
 		return 0;
+
+	/* Sets the enhanced key usage property when asked. */
 	good = TRUE;
 	if (with_property) {
 		usage.cUsageIdentifier = usage_count;
 		usage.rgpszUsageIdentifier = (LPSTR *)usages;
 		good = CertSetEnhancedKeyUsage(added, &usage);
 	}
+
+	/* Gives back the context the add returned. */
 	CertFreeCertificateContext(added);
-	return good ? 1 : 0;
+
+	/* A property that could not be set fails the call. */
+	if (!good)
+		return 0;
+
+	/* Succeeded: the certificate is in the store. */
+	return 1;
 }
 
 /* The directory of the running program and the path cert.pem beside it, in UTF-8 (the way the library builds it). */
@@ -1947,18 +2320,29 @@ expected_certificate_path(
 	DWORD directory;
 	WCHAR full[1200];
 	static const WCHAR name[] = { 'c', 'e', 'r', 't', '.', 'p', 'e', 'm', 0 };
+	int converted;
 
+	/* Finds the path of the running program. */
 	length = GetModuleFileNameW(NULL, path, 1100);
 	if (length == 0 || length >= 1100)
 		return 0;
+
+	/* Cuts the path at its last separator. */
 	directory = length;
 	while (directory > 0 && path[directory - 1] != L'\\')
 		directory--;
 	if (directory == 0)
 		return 0;
+
+	/* Appends the file name and converts the result to UTF-8. */
 	memcpy(full, path, directory * sizeof(WCHAR));
 	memcpy(full + directory, name, sizeof(name));
-	return WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, full, -1, out, (int)room, NULL, NULL) > 0;
+	converted = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, full, -1, out, (int)room, NULL, NULL);
+	if (converted <= 0)
+		return 0;
+
+	/* Succeeded: the path is in out. */
+	return 1;
 }
 
 /* The Windows trust sources against certificates this test adds to the current user's stores. */
@@ -2006,6 +2390,8 @@ check_roots_windows(void)
 			CertCloseStore(root_store, 0);
 		return;
 	}
+
+	/* Adds the certificates to the stores, some with an enhanced key usage property. */
 	CHECK(add_certificate(disallowed_store, CERT_DISALLOWED, NULL, 0, 0));
 	CHECK(add_certificate(root_store, CERT_DISALLOWED, NULL, 0, 0));
 	CHECK(add_certificate(root_store, CERT_PLAIN, NULL, 0, 0));
@@ -2027,6 +2413,8 @@ check_roots_windows(void)
 		log.known[index] = cert_der[index];
 		log.known_size[index] = cert_size[index];
 	}
+
+	/* Runs the trust sources. */
 	error = cryc_os_system_roots(log_distrusted, log_der, log_file, &log);
 	CHECK(error == 0);
 	CHECK(log.order_broken == 0);
@@ -2092,6 +2480,8 @@ check_roots_windows(void)
 		log.known[index] = cert_der[index];
 		log.known_size[index] = cert_size[index];
 	}
+
+	/* Runs the trust sources again: none of the removed certificates comes back. */
 	error = cryc_os_system_roots(log_distrusted, log_der, log_file, &log);
 	CHECK(error == 0);
 	for (index = 0; index < CERT_COUNT; index++)
@@ -2168,14 +2558,20 @@ find_test_directory(
 		strcpy(test_dir, ".");
 		return;
 	}
+
+	/* Measures the path of the program. */
 	length = strlen(utf8);
 #else
 	char utf8[DIRECTORY_ROOM];
 
-	if (strlen(program) >= sizeof(utf8)) {
+	/* Falls back to the current directory when the program name does not fit. */
+	length = strlen(program);
+	if (length >= sizeof(utf8)) {
 		strcpy(test_dir, ".");
 		return;
 	}
+
+	/* Copies the program name and measures it. */
 	strcpy(utf8, program);
 	length = strlen(utf8);
 #endif
@@ -2186,6 +2582,8 @@ find_test_directory(
 		strcpy(test_dir, ".");
 		return;
 	}
+
+	/* Keeps the directory without its trailing separator. */
 	memcpy(test_dir, utf8, length - 1U);
 	test_dir[length - 1U] = 0;
 }
@@ -2197,6 +2595,7 @@ main(
 {
 #ifdef _WIN32
 	WSADATA wsa;
+	int status;
 #endif
 
 	UNUSED_PARAMETER(argc);
@@ -2207,7 +2606,9 @@ main(
 	/* The test's files go beside the program; a closed peer must not kill the test with SIGPIPE. */
 	find_test_directory(argv[0]);
 #ifdef _WIN32
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+	/* Starts the socket library. */
+	status = WSAStartup(MAKEWORD(2, 2), &wsa);
+	if (status != 0) {
 		printf("WSAStartup failed\n");
 		return EXIT_FAILURE;
 	}
@@ -2234,5 +2635,7 @@ main(
 #ifdef _WIN32
 	WSACleanup();
 #endif
+
+	/* The last line run-unit.sh reads. */
 	return check_finish("test-os");
 }

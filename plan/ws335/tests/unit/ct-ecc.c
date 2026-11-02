@@ -29,6 +29,12 @@
 #include "userland/base/libcrypto-compat/cryc-ecc.h"
 
 /* A random source that hands out pseudo-random public bytes. */
+static int public_random(void *context, uint8_t *out, size_t size);
+
+/* Runs the operations on one curve. */
+static unsigned run(enum cryc_curve_id id);
+
+/* A random source that hands out pseudo-random public bytes. */
 static int
 public_random(
 	void *context,
@@ -46,6 +52,8 @@ public_random(
 		*state ^= *state << 5;
 		out[index] = (uint8_t)(*state >> 11);
 	}
+
+	/* Succeeded: the source never fails. */
 	return 0;
 }
 

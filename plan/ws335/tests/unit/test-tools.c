@@ -20,20 +20,35 @@
 #include "userland/base/libssl-compat/sslc-api.h"
 
 /* Counts the records of one vector file; returns the count, or 0 when it cannot be opened. */
+static unsigned long count_records(const char *name);
+
+/* Counts the records of one vector file; returns the count, or 0 when it cannot be opened. */
 static unsigned long
 count_records(
 	const char *name)
 {
 	struct vec_file file;
 	unsigned long count;
+	int opened;
+	int more;
 
-	/* Every record. */
-	if (vec_open(&file, name) != 0)
+	/* Opens the file; one that cannot be opened has no records. */
+	opened = vec_open(&file, name);
+	if (opened != 0)
 		return 0;
+
+	/* Counts every record. */
 	count = 0;
-	while (vec_next(&file))
+	more = vec_next(&file);
+	while (more) {
 		count++;
+		more = vec_next(&file);
+	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of records. */
 	return count;
 }
 
@@ -46,6 +61,10 @@ main(void)
 	struct vec_file file;
 	unsigned char bytes[64];
 	size_t size;
+	const char *label;
+	int opened;
+	int more;
+	int different;
 	int found;
 
 	/* hex_decode: good, odd, bad character, no room. */
@@ -73,22 +92,35 @@ main(void)
 
 	/* The first x25519 key of RFC 8448 section 3 reads back. */
 	found = 0;
-	if (vec_open(&file, "rfc8448") == 0) {
-		while (!found && vec_next(&file)) {
-			if (strcmp(vec_get(&file, "label"), "private key") == 0) {
+	opened = vec_open(&file, "rfc8448");
+	if (opened == 0) {
+		more = vec_next(&file);
+		while (!found && more) {
+			label = vec_get(&file, "label");
+			different = strcmp(label, "private key");
+			if (different == 0) {
 				size = vec_hex(&file, "hex", bytes, sizeof(bytes));
 				CHECK(size == 32U);
 				CHECK(bytes[0] == 0x49 && bytes[31] == 0x05);
 				found = 1;
 			}
+
+			/* Moves to the next record unless the key was found. */
+			if (!found)
+				more = vec_next(&file);
 		}
+
+		/* Releases the file. */
 		vec_close(&file);
 	}
+
+	/* The key was found. */
 	CHECK(found);
 
 	/* The libraries link (a function of each end). */
 	CHECK(cryc_hash_size(CRYC_HASH_SHA256) == 0U || cryc_hash_size(CRYC_HASH_SHA256) == 32U);
 	CHECK(TLS_client_method() == NULL || TLS_client_method() != NULL);
 
+	/* Reports the result of the checks as the exit status. */
 	return check_finish("test-tools");
 }

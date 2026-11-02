@@ -70,6 +70,88 @@ random_next(void)
 	return random_state;
 }
 
+/*
+ * The reference permutation: the state is a bit array a[x][y][z], and a
+ * string of 200 bytes becomes the array by S[64(5y + x) + z] = a[x][y][z]
+ * with bit i of the string being bit (i mod 8) of byte i / 8 (3.1.2, B.1).
+ */
+typedef unsigned char ref_array[5][5][64];
+
+/* Fills size bytes at out with pseudo-random bytes. */
+static void random_fill(void *out, size_t size);
+
+/* Returns whether size bytes at buffer all equal value. */
+static int all_equal(const uint8_t *buffer, size_t size, uint8_t value);
+
+/* Turns a state string into the array of bits (3.1.2). */
+static void ref_to_array(const uint8_t *string, ref_array a);
+
+/* Turns the array of bits back into a state string (3.1.3). */
+static void ref_to_string(ref_array a, uint8_t *string);
+
+/* Algorithm 1, theta. */
+static void ref_theta(ref_array a);
+
+/* Algorithm 2, rho: the lane (0, 0) stays; the others walk the path (x, y) = (1, 0), (y, (2x + 3y) mod 5). */
+static void ref_rho(ref_array a);
+
+/* Algorithm 3, pi: A'[x, y, z] = A[(x + 3y) mod 5, x, z]. */
+static void ref_pi(ref_array a);
+
+/* Algorithm 4, chi: A'[x, y, z] = A[x, y, z] xor ((A[(x + 1) mod 5, y, z] xor 1) and A[(x + 2) mod 5, y, z]). */
+static void ref_chi(ref_array a);
+
+/* Algorithm 5, rc(t): the output bit of the degree 8 linear feedback shift register. */
+static unsigned ref_rc(unsigned t);
+
+/* Algorithm 6, iota, for round ir: RC[2^j - 1] = rc(j + 7ir) for j = 0 to l, with l = 6 for w = 64. */
+static void ref_iota(ref_array a, unsigned ir);
+
+/* Algorithm 7, Keccak-p[1600, 24] on a state string: the rounds ir = 12 + 2l - nr to 12 + 2l - 1, that is 0 to 23. */
+static void ref_permute(uint8_t *string);
+
+/* Computes the reference sponge. */
+static void ref_sponge(size_t rate, unsigned suffix, const uint8_t *message, size_t size, uint8_t *out, size_t out_size);
+
+/* Converts 25 lanes to a state string, little-endian within a lane (3.1.2, B.1). */
+static void lanes_to_string(const uint64_t *lanes, uint8_t *string);
+
+/* Converts a state string to 25 lanes. */
+static void string_to_lanes(const uint8_t *string, uint64_t *lanes);
+
+/* Checks the permutation against the reference on one state string. */
+static void check_permute_one(const uint8_t *string);
+
+/* Starts a sponge of kind. */
+static void sponge_init(struct cryc_sha3 *sponge, int kind);
+
+/* Absorbs size bytes in pieces of piece bytes (0 is all at once), with an empty absorb between the pieces. */
+static void absorb_pieces(struct cryc_sha3 *sponge, const uint8_t *data, size_t size, size_t piece);
+
+/* Squeezes size bytes in pieces of piece bytes (0 is all at once), with an empty squeeze between the pieces. */
+static void squeeze_pieces(struct cryc_sha3 *sponge, uint8_t *out, size_t size, size_t piece);
+
+/* Runs a function of the given kind over a message and writes out_size bytes. */
+static void run_sponge(int kind, const uint8_t *data, size_t size, size_t in_piece, uint8_t *out, size_t out_size, size_t out_piece);
+
+/* Checks one message against its output in one go and in pieces. */
+static void check_message(int kind, const uint8_t *message, size_t size, const uint8_t *expected, size_t out_size);
+
+/* Maps a vector file name part to the function and the output size it checks. */
+static unsigned long run_message_file(int kind, const char *name);
+
+/* Runs the SHAKE variable-output file: Msg (hex, Len given by "Input Length" bits) and Outputlen. */
+static unsigned long run_variable_file(int kind, const char *name);
+
+/* Runs the Monte Carlo file of a SHA-3 hash. */
+static unsigned long run_hash_monte_file(int kind, const char *name);
+
+/* Returns whether a started-looking sponge is one the module accepts: a rate of the four functions, a position not past it. */
+static int looks_usable(const struct cryc_sha3 *sponge);
+
+/* Runs the Monte Carlo file of a SHAKE. */
+static unsigned long run_shake_monte(int kind, const char *name);
+
 /* Fills size bytes at out with pseudo-random bytes. */
 static void
 random_fill(
@@ -95,18 +177,14 @@ all_equal(
 	size_t index;
 
 	/* Any other byte. */
-	for (index = 0; index < size; index++)
+	for (index = 0; index < size; index++) {
 		if (buffer[index] != value)
 			return 0;
+	}
+
+	/* Succeeded: every byte equals the value. */
 	return 1;
 }
-
-/*
- * The reference permutation: the state is a bit array a[x][y][z], and a
- * string of 200 bytes becomes the array by S[64(5y + x) + z] = a[x][y][z]
- * with bit i of the string being bit (i mod 8) of byte i / 8 (3.1.2, B.1).
- */
-typedef unsigned char ref_array[5][5][64];
 
 /* Turns a state string into the array of bits (3.1.2). */
 static void
@@ -215,6 +293,8 @@ ref_rho(
 		x = y;
 		y = next_y;
 	}
+
+	/* The rotated lanes replace the state. */
 	memcpy(a, b, sizeof(b));
 }
 
@@ -229,10 +309,14 @@ ref_pi(
 	unsigned z;
 
 	/* Every bit. */
-	for (y = 0; y < 5U; y++)
-		for (x = 0; x < 5U; x++)
+	for (y = 0; y < 5U; y++) {
+		for (x = 0; x < 5U; x++) {
 			for (z = 0; z < 64U; z++)
 				b[x][y][z] = a[(x + 3U * y) % 5U][x][z];
+		}
+	}
+
+	/* The permuted lanes replace the state. */
 	memcpy(a, b, sizeof(b));
 }
 
@@ -247,11 +331,16 @@ ref_chi(
 	unsigned z;
 
 	/* Every bit. */
-	for (y = 0; y < 5U; y++)
-		for (x = 0; x < 5U; x++)
-			for (z = 0; z < 64U; z++)
+	for (y = 0; y < 5U; y++) {
+		for (x = 0; x < 5U; x++) {
+			for (z = 0; z < 64U; z++) {
 				b[x][y][z] = (unsigned char)(a[x][y][z] ^
 				    ((a[(x + 1U) % 5U][y][z] ^ 1U) & a[(x + 2U) % 5U][y][z]));
+			}
+		}
+	}
+
+	/* The mixed bits replace the state. */
 	memcpy(a, b, sizeof(b));
 }
 
@@ -281,6 +370,8 @@ ref_rc(
 		r[5] = (unsigned char)(r[5] ^ r[8]);
 		r[6] = (unsigned char)(r[6] ^ r[8]);
 	}
+
+	/* Reports the output bit. */
 	return r[0];
 }
 
@@ -321,6 +412,8 @@ ref_permute(
 		ref_chi(a);
 		ref_iota(a, ir);
 	}
+
+	/* The bit array goes back to the state string. */
 	ref_to_string(a, string);
 }
 
@@ -363,6 +456,8 @@ ref_sponge(
 			state[index] = (uint8_t)(state[index] ^ padded[offset + index]);
 		ref_permute(state);
 	}
+
+	/* Releases the padded message. */
 	free(padded);
 
 	/* Squeezes: r bits at a time, permuting between blocks. */
@@ -388,9 +483,10 @@ lanes_to_string(
 	unsigned byte;
 
 	/* Every lane. */
-	for (lane = 0; lane < 25U; lane++)
+	for (lane = 0; lane < 25U; lane++) {
 		for (byte = 0; byte < 8U; byte++)
 			string[lane * 8U + byte] = (uint8_t)(lanes[lane] >> (8U * byte));
+	}
 }
 
 /* Converts a state string to 25 lanes. */
@@ -470,6 +566,8 @@ test_permute(void)
 		lanes_to_string(lanes, got);
 		CHECK_BYTES(got, chained, STATE_BYTES);
 	}
+
+	/* The chained state is the expectation of the next steps. */
 	memcpy(expected, chained, sizeof(expected));
 
 	/* A missing state is left alone (no crash). */
@@ -582,6 +680,8 @@ run_sponge(
 		squeeze_pieces(&sponge, out, out_size, out_piece);
 		cryc_sha3_clear(&sponge);
 	}
+
+	/* Both ways leave the structure wiped. */
 	CHECK_BYTES(&sponge, zeros, sizeof(sponge));
 }
 
@@ -615,6 +715,8 @@ check_message(
 		CHECK_BYTES(got, expected, out_size);
 		CHECK(got[out_size] == 0xa5U);
 	}
+
+	/* Releases the output buffer. */
 	free(got);
 }
 
@@ -629,41 +731,66 @@ run_message_file(
 	uint8_t *expected;
 	const char *text;
 	const char *answer_key;
+	const char *answer_text;
+	const char *message_text;
+	const char *outputlen_text;
 	size_t size;
 	size_t answer_size;
+	size_t message_room;
+	size_t answer_room;
 	unsigned long count;
+	int opened;
+	int more;
 
 	/* The SHA-3 files give MD, the SHAKE files give Output. */
-	answer_key = kind < KIND_SHAKE128 ? "MD" : "Output";
+	answer_key = "Output";
+	if (kind < KIND_SHAKE128)
+		answer_key = "MD";
 	count = 0;
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return 0;
 	}
-	while (vec_next(&file)) {
+
+	/* Checks every record that has a length and an answer. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		text = vec_get(&file, "Len");
-		if (text == NULL || vec_get(&file, answer_key) == NULL)
+		answer_text = vec_get(&file, answer_key);
+		if (text == NULL)
+			continue;
+		if (answer_text == NULL)
 			continue;
 		size = (size_t)strtoul(text, NULL, 10) / 8U;
-		message = (uint8_t *)malloc(strlen(vec_get(&file, "Msg")) / 2U + 1U);
-		expected = (uint8_t *)malloc(strlen(vec_get(&file, answer_key)) / 2U + 1U);
+		message_text = vec_get(&file, "Msg");
+		message_room = strlen(message_text) / 2U + 1U;
+		answer_room = strlen(answer_text) / 2U + 1U;
+		message = (uint8_t *)malloc(message_room);
+		expected = (uint8_t *)malloc(answer_room);
 		CHECK(message != NULL && expected != NULL);
 		if (message == NULL || expected == NULL)
 			break;
-		CHECK(vec_hex(&file, "Msg", message, strlen(vec_get(&file, "Msg")) / 2U + 1U) != (size_t)-1);
-		answer_size = vec_hex(&file, answer_key, expected, strlen(vec_get(&file, answer_key)) / 2U + 1U);
+		CHECK(vec_hex(&file, "Msg", message, message_room) != (size_t)-1);
+		answer_size = vec_hex(&file, answer_key, expected, answer_room);
 		CHECK(answer_size != (size_t)-1);
+		outputlen_text = vec_get(&file, "Outputlen");
 		if (kind < KIND_SHAKE128)
 			CHECK(answer_size == kinds[kind].digest);
-		else if (vec_get(&file, "Outputlen") != NULL)
-			CHECK(answer_size * 8U == (size_t)strtoul(vec_get(&file, "Outputlen"), NULL, 10));
+		else if (outputlen_text != NULL)
+			CHECK(answer_size * 8U == (size_t)strtoul(outputlen_text, NULL, 10));
 		if (answer_size != (size_t)-1 && answer_size > 0)
 			check_message(kind, message, size, expected, answer_size);
 		free(message);
 		free(expected);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of records read. */
 	return count;
 }
 
@@ -677,41 +804,63 @@ run_variable_file(
 	uint8_t *message;
 	uint8_t *expected;
 	const char *text;
+	const char *output_text;
+	const char *message_text;
+	const char *outputlen_text;
 	size_t size;
 	size_t answer_size;
+	size_t message_room;
+	size_t answer_room;
 	unsigned long count;
+	int opened;
+	int more;
 
 	/* Every record has COUNT, Outputlen, Msg and Output. */
 	count = 0;
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return 0;
 	}
-	while (vec_next(&file)) {
-		text = vec_get(&file, "Outputlen");
-		if (text == NULL || vec_get(&file, "Output") == NULL)
+
+	/* Checks every record that has an output length and an output. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
+		outputlen_text = vec_get(&file, "Outputlen");
+		output_text = vec_get(&file, "Output");
+		if (outputlen_text == NULL)
+			continue;
+		if (output_text == NULL)
 			continue;
 		text = vec_get(&file, "section.Input Length");
 		CHECK(text != NULL);
 		if (text == NULL)
 			break;
 		size = (size_t)strtoul(text, NULL, 10) / 8U;
-		message = (uint8_t *)malloc(strlen(vec_get(&file, "Msg")) / 2U + 1U);
-		expected = (uint8_t *)malloc(strlen(vec_get(&file, "Output")) / 2U + 1U);
+		message_text = vec_get(&file, "Msg");
+		message_room = strlen(message_text) / 2U + 1U;
+		answer_room = strlen(output_text) / 2U + 1U;
+		message = (uint8_t *)malloc(message_room);
+		expected = (uint8_t *)malloc(answer_room);
 		CHECK(message != NULL && expected != NULL);
 		if (message == NULL || expected == NULL)
 			break;
-		CHECK(vec_hex(&file, "Msg", message, strlen(vec_get(&file, "Msg")) / 2U + 1U) == size);
-		answer_size = vec_hex(&file, "Output", expected, strlen(vec_get(&file, "Output")) / 2U + 1U);
+		CHECK(vec_hex(&file, "Msg", message, message_room) == size);
+		answer_size = vec_hex(&file, "Output", expected, answer_room);
 		CHECK(answer_size != (size_t)-1);
-		CHECK(answer_size * 8U == (size_t)strtoul(vec_get(&file, "Outputlen"), NULL, 10));
+		CHECK(answer_size * 8U == (size_t)strtoul(outputlen_text, NULL, 10));
 		if (answer_size != (size_t)-1 && answer_size > 0)
 			check_message(kind, message, size, expected, answer_size);
 		free(message);
 		free(expected);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of records read. */
 	return count;
 }
 
@@ -733,32 +882,55 @@ run_hash_monte_file(
 	size_t step;
 	int have_seed;
 	unsigned long count;
+	const char *seed_text;
+	const char *md_text;
+	int opened;
+	int more;
 
 	/* The seed record, then the checkpoints in order. */
 	count = 0;
 	have_seed = 0;
 	size = kinds[kind].digest;
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return 0;
 	}
-	while (vec_next(&file)) {
-		if (vec_get(&file, "Seed") != NULL) {
+
+	/* Takes the seed record, then checks each checkpoint. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
+		seed_text = vec_get(&file, "Seed");
+		md_text = vec_get(&file, "MD");
+		if (seed_text != NULL) {
 			CHECK(vec_hex(&file, "Seed", seed, sizeof(seed)) == size);
 			have_seed = 1;
 			continue;
 		}
-		if (!have_seed || vec_get(&file, "MD") == NULL)
+
+		/* Skips records before the seed and records that carry no digest. */
+		if (!have_seed)
+			continue;
+		if (md_text == NULL)
 			continue;
 		CHECK(vec_hex(&file, "MD", expected, sizeof(expected)) == size);
+
+		/* 1000 chained hashes give the checkpoint. */
 		for (step = 0; step < 1000U; step++) {
 			run_sponge(kind, seed, size, 0, next, size, 0);
 			memcpy(seed, next, size);
 		}
+
+		/* The last hash is the checkpoint, and seeds the next chain. */
 		CHECK_BYTES(seed, expected, size);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of checkpoints read. */
 	return count;
 }
 
@@ -806,6 +978,8 @@ test_reference(void)
 					run_sponge(kind, message, size, 0, got, wanted[which], 0);
 					CHECK_BYTES(got, expected, wanted[which]);
 				}
+
+				/* The same output fed and taken in pieces. */
 				in_piece = size % 13U + 1U;
 				run_sponge(kind, message, size, in_piece, got, 3U * 168U + 5U, size % 29U + 1U);
 				CHECK_BYTES(got, expected, 3U * 168U + 5U);
@@ -823,6 +997,7 @@ test_long(void)
 	uint8_t got[168U + 8U];
 	int kind;
 	size_t size;
+	size_t want_size;
 
 	/* A pseudo-random message. */
 	size = 100000U;
@@ -831,14 +1006,20 @@ test_long(void)
 	if (message == NULL)
 		return;
 	random_fill(message, size);
+
+	/* Each function against the reference, in one go and in awkward pieces. */
 	for (kind = 0; kind < KIND_COUNT; kind++) {
-		ref_sponge(kinds[kind].rate, kinds[kind].suffix, message, size, expected,
-		    kind < KIND_SHAKE128 ? kinds[kind].digest : 168U + 8U);
-		run_sponge(kind, message, size, 0, got, kind < KIND_SHAKE128 ? kinds[kind].digest : 168U + 8U, 0);
-		CHECK_BYTES(got, expected, kind < KIND_SHAKE128 ? kinds[kind].digest : 168U + 8U);
-		run_sponge(kind, message, size, 997U, got, kind < KIND_SHAKE128 ? kinds[kind].digest : 168U + 8U, 33U);
-		CHECK_BYTES(got, expected, kind < KIND_SHAKE128 ? kinds[kind].digest : 168U + 8U);
+		want_size = 168U + 8U;
+		if (kind < KIND_SHAKE128)
+			want_size = kinds[kind].digest;
+		ref_sponge(kinds[kind].rate, kinds[kind].suffix, message, size, expected, want_size);
+		run_sponge(kind, message, size, 0, got, want_size, 0);
+		CHECK_BYTES(got, expected, want_size);
+		run_sponge(kind, message, size, 997U, got, want_size, 33U);
+		CHECK_BYTES(got, expected, want_size);
 	}
+
+	/* Releases the message. */
 	free(message);
 }
 
@@ -1015,6 +1196,8 @@ test_misuse(void)
 			cryc_shake_squeeze(&copy, second, 64U);
 			CHECK_BYTES(first, second, 64U);
 		}
+
+		/* Both structures are wiped. */
 		cryc_sha3_clear(&sponge);
 		cryc_sha3_clear(&copy);
 	}
@@ -1026,9 +1209,17 @@ looks_usable(
 	const struct cryc_sha3 *sponge)
 {
 	/* The rates 72, 136 and 168 only. */
-	if (sponge->rate != 72U && sponge->rate != 136U && sponge->rate != 168U)
+	if (sponge->rate != 72U &&
+	    sponge->rate != 136U &&
+	    sponge->rate != 168U)
 		return 0;
-	return sponge->position <= sponge->rate;
+
+	/* A position past the rate is unusable. */
+	if (sponge->position > sponge->rate)
+		return 0;
+
+	/* Succeeded: the rate and the position are usable. */
+	return 1;
 }
 
 /* Calls everything on damaged and random structures; ASan and UBSan must stay quiet and unusable ones must not change. */
@@ -1045,11 +1236,16 @@ test_damaged(void)
 	size_t position;
 	unsigned round;
 	size_t size;
+	size_t step;
+	int usable;
 
 	/* Each rate, with positions around the end of the block and beyond. */
 	random_fill(message, sizeof(message));
 	for (which = 0; which < sizeof(rates) / sizeof(rates[0]); which++) {
-		for (position = 0; position < 4U * 169U; position += (position < 180U ? 1U : 97U)) {
+		for (position = 0; position < 4U * 169U; position += step) {
+			step = 97U;
+			if (position < 180U)
+				step = 1U;
 			memset(&sponge, 0, sizeof(sponge));
 			random_fill(sponge.lanes, sizeof(sponge.lanes));
 			sponge.rate = rates[which];
@@ -1058,7 +1254,8 @@ test_damaged(void)
 
 			/* Absorb, on an unusable one nothing changes (the size is huge to catch any read). */
 			before = sponge;
-			if (!looks_usable(&sponge)) {
+			usable = looks_usable(&sponge);
+			if (!usable) {
 				cryc_sha3_absorb(&sponge, message, (size_t)-1);
 				CHECK_BYTES(&sponge, &before, sizeof(sponge));
 				memset(out, 0xa5, sizeof(out));
@@ -1090,15 +1287,20 @@ test_damaged(void)
 			sponge.rate = kinds[random_next() % KIND_COUNT].rate;
 			sponge.position = random_next() % (sponge.rate + 40U);
 		}
+
+		/* Absorb on an unusable one changes nothing; on a usable one it runs. */
 		before = sponge;
 		size = random_next() % 300U;
-		if (!looks_usable(&sponge)) {
+		usable = looks_usable(&sponge);
+		if (!usable) {
 			cryc_sha3_absorb(&sponge, message, size);
 			CHECK_BYTES(&sponge, &before, sizeof(sponge));
 		} else {
 			cryc_sha3_absorb(&sponge, message, size);
 			cryc_shake_squeeze(&sponge, out, size);
 		}
+
+		/* Final always wipes, whatever the sponge was. */
 		sponge = before;
 		cryc_sha3_final(&sponge, out);
 		CHECK_BYTES(&sponge, zeros, sizeof(sponge));
@@ -1130,6 +1332,12 @@ run_shake_monte(
 	size_t step;
 	int have_seed;
 	unsigned long count;
+	const char *count_text;
+	const char *message_text;
+	const char *min_text;
+	const char *max_text;
+	int opened;
+	int more;
 
 	/* The first record gives the message and the range. */
 	count = 0;
@@ -1139,24 +1347,37 @@ run_shake_monte(
 	out_size = 0;
 	produced = 0;
 	memset(output, 0, sizeof(output));
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return 0;
 	}
-	while (vec_next(&file)) {
-		if (vec_get(&file, "COUNT") == NULL) {
-			if (vec_get(&file, "Msg") == NULL)
+
+	/* Takes the message and the range, then checks each checkpoint. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
+		count_text = vec_get(&file, "COUNT");
+		if (count_text == NULL) {
+			message_text = vec_get(&file, "Msg");
+			if (message_text == NULL)
 				continue;
 			CHECK(vec_hex(&file, "Msg", message, sizeof(message)) == sizeof(message));
-			min_size = (size_t)strtoul(vec_get(&file, "section.Minimum Output Length (bits)"), NULL, 10) / 8U;
-			max_size = (size_t)strtoul(vec_get(&file, "section.Maximum Output Length (bits)"), NULL, 10) / 8U;
+			min_text = vec_get(&file, "section.Minimum Output Length (bits)");
+			max_text = vec_get(&file, "section.Maximum Output Length (bits)");
+			min_size = (size_t)strtoul(min_text, NULL, 10) / 8U;
+			max_size = (size_t)strtoul(max_text, NULL, 10) / 8U;
 			CHECK(max_size <= sizeof(output) && max_size >= min_size && min_size >= 2U);
 			out_size = max_size;
 			memcpy(output, message, sizeof(message));
 			have_seed = 1;
 			continue;
 		}
-		if (!have_seed || max_size > sizeof(output))
+
+		/* A checkpoint before the first record, or a range that does not fit, ends the run. */
+		if (!have_seed)
+			break;
+		if (max_size > sizeof(output))
 			break;
 		for (step = 0; step < 1000U; step++) {
 			/* The message is the first 16 bytes of the last output, zero padded. */
@@ -1176,7 +1397,11 @@ run_shake_monte(
 			CHECK_BYTES(output, expected, produced);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of checkpoints read. */
 	return count;
 }
 

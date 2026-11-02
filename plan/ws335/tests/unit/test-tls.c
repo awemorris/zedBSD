@@ -23,6 +23,12 @@
 #include "userland/base/libssl-compat/sslc-tls.h"
 
 /* Joins the two bytes of an IANA number as the RFCs print them, {0xAA,0xBB}. */
+static uint32_t pair(unsigned high, unsigned low);
+
+/* Checks the offered list for one pair of versions against the expected numbers. */
+static void check_offered(uint16_t min_version, uint16_t max_version, const uint16_t *expected, size_t expected_count);
+
+/* Joins the two bytes of an IANA number as the RFCs print them, {0xAA,0xBB}. */
 static uint32_t
 pair(
 	unsigned high,
@@ -32,71 +38,84 @@ pair(
 	return (uint32_t)(high * 256U + low);
 }
 
-/* Checks that one macro equals the number the RFC gives. */
-#define CHECK_VALUE(macro, expected) CHECK((uint32_t)(macro) == (uint32_t)(expected))
+
+/* Checks the record, handshake and alert numbers. */
+static void test_numbers(void);
+
+/* Checks the group, scheme, extension and signalling numbers. */
+static void test_registries(void);
+
+/* Checks the three special byte strings. */
+static void test_special_bytes(void);
+
+/* Checks the suite table row by row, and that no other number is a suite. */
+static void test_suite_table(void);
+
+/* Checks sslc_tls_offered_suites. */
+static void test_offered_suites(void);
 
 /* Checks the record, handshake and alert numbers. */
 static void
 test_numbers(void)
 {
 	/* The versions (RFC 8446 B.3.1.1: TLS 1.2 is 0x0303 and TLS 1.3 is 0x0304). */
-	CHECK_VALUE(SSLC_TLS12, pair(3, 3));
-	CHECK_VALUE(SSLC_TLS13, pair(3, 4));
+	CHECK((uint32_t)(SSLC_TLS12) == (uint32_t)(pair(3, 3)));
+	CHECK((uint32_t)(SSLC_TLS13) == (uint32_t)(pair(3, 4)));
 
 	/* The content types (RFC 8446 B.1). */
-	CHECK_VALUE(SSLC_CT_CHANGE_CIPHER_SPEC, 20);
-	CHECK_VALUE(SSLC_CT_ALERT, 21);
-	CHECK_VALUE(SSLC_CT_HANDSHAKE, 22);
-	CHECK_VALUE(SSLC_CT_APPLICATION_DATA, 23);
+	CHECK((uint32_t)(SSLC_CT_CHANGE_CIPHER_SPEC) == (uint32_t)(20));
+	CHECK((uint32_t)(SSLC_CT_ALERT) == (uint32_t)(21));
+	CHECK((uint32_t)(SSLC_CT_HANDSHAKE) == (uint32_t)(22));
+	CHECK((uint32_t)(SSLC_CT_APPLICATION_DATA) == (uint32_t)(23));
 
 	/* The handshake types (RFC 8446 B.3 and RFC 5246 A.4). */
-	CHECK_VALUE(SSLC_HS_HELLO_REQUEST, 0);
-	CHECK_VALUE(SSLC_HS_CLIENT_HELLO, 1);
-	CHECK_VALUE(SSLC_HS_SERVER_HELLO, 2);
-	CHECK_VALUE(SSLC_HS_NEW_SESSION_TICKET, 4);
-	CHECK_VALUE(SSLC_HS_END_OF_EARLY_DATA, 5);
-	CHECK_VALUE(SSLC_HS_ENCRYPTED_EXTENSIONS, 8);
-	CHECK_VALUE(SSLC_HS_CERTIFICATE, 11);
-	CHECK_VALUE(SSLC_HS_SERVER_KEY_EXCHANGE, 12);
-	CHECK_VALUE(SSLC_HS_CERTIFICATE_REQUEST, 13);
-	CHECK_VALUE(SSLC_HS_SERVER_HELLO_DONE, 14);
-	CHECK_VALUE(SSLC_HS_CERTIFICATE_VERIFY, 15);
-	CHECK_VALUE(SSLC_HS_CLIENT_KEY_EXCHANGE, 16);
-	CHECK_VALUE(SSLC_HS_FINISHED, 20);
-	CHECK_VALUE(SSLC_HS_KEY_UPDATE, 24);
-	CHECK_VALUE(SSLC_HS_MESSAGE_HASH, 254);
+	CHECK((uint32_t)(SSLC_HS_HELLO_REQUEST) == (uint32_t)(0));
+	CHECK((uint32_t)(SSLC_HS_CLIENT_HELLO) == (uint32_t)(1));
+	CHECK((uint32_t)(SSLC_HS_SERVER_HELLO) == (uint32_t)(2));
+	CHECK((uint32_t)(SSLC_HS_NEW_SESSION_TICKET) == (uint32_t)(4));
+	CHECK((uint32_t)(SSLC_HS_END_OF_EARLY_DATA) == (uint32_t)(5));
+	CHECK((uint32_t)(SSLC_HS_ENCRYPTED_EXTENSIONS) == (uint32_t)(8));
+	CHECK((uint32_t)(SSLC_HS_CERTIFICATE) == (uint32_t)(11));
+	CHECK((uint32_t)(SSLC_HS_SERVER_KEY_EXCHANGE) == (uint32_t)(12));
+	CHECK((uint32_t)(SSLC_HS_CERTIFICATE_REQUEST) == (uint32_t)(13));
+	CHECK((uint32_t)(SSLC_HS_SERVER_HELLO_DONE) == (uint32_t)(14));
+	CHECK((uint32_t)(SSLC_HS_CERTIFICATE_VERIFY) == (uint32_t)(15));
+	CHECK((uint32_t)(SSLC_HS_CLIENT_KEY_EXCHANGE) == (uint32_t)(16));
+	CHECK((uint32_t)(SSLC_HS_FINISHED) == (uint32_t)(20));
+	CHECK((uint32_t)(SSLC_HS_KEY_UPDATE) == (uint32_t)(24));
+	CHECK((uint32_t)(SSLC_HS_MESSAGE_HASH) == (uint32_t)(254));
 
 	/* The alert levels (RFC 8446 6) and descriptions (RFC 8446 B.2; no_renegotiation is RFC 5246 7.2). */
-	CHECK_VALUE(SSLC_ALERT_WARNING, 1);
-	CHECK_VALUE(SSLC_ALERT_FATAL, 2);
-	CHECK_VALUE(SSLC_ALERT_CLOSE_NOTIFY, 0);
-	CHECK_VALUE(SSLC_ALERT_UNEXPECTED_MESSAGE, 10);
-	CHECK_VALUE(SSLC_ALERT_BAD_RECORD_MAC, 20);
-	CHECK_VALUE(SSLC_ALERT_RECORD_OVERFLOW, 22);
-	CHECK_VALUE(SSLC_ALERT_HANDSHAKE_FAILURE, 40);
-	CHECK_VALUE(SSLC_ALERT_BAD_CERTIFICATE, 42);
-	CHECK_VALUE(SSLC_ALERT_UNSUPPORTED_CERTIFICATE, 43);
-	CHECK_VALUE(SSLC_ALERT_CERTIFICATE_REVOKED, 44);
-	CHECK_VALUE(SSLC_ALERT_CERTIFICATE_EXPIRED, 45);
-	CHECK_VALUE(SSLC_ALERT_CERTIFICATE_UNKNOWN, 46);
-	CHECK_VALUE(SSLC_ALERT_ILLEGAL_PARAMETER, 47);
-	CHECK_VALUE(SSLC_ALERT_UNKNOWN_CA, 48);
-	CHECK_VALUE(SSLC_ALERT_ACCESS_DENIED, 49);
-	CHECK_VALUE(SSLC_ALERT_DECODE_ERROR, 50);
-	CHECK_VALUE(SSLC_ALERT_DECRYPT_ERROR, 51);
-	CHECK_VALUE(SSLC_ALERT_PROTOCOL_VERSION, 70);
-	CHECK_VALUE(SSLC_ALERT_INSUFFICIENT_SECURITY, 71);
-	CHECK_VALUE(SSLC_ALERT_INTERNAL_ERROR, 80);
-	CHECK_VALUE(SSLC_ALERT_INAPPROPRIATE_FALLBACK, 86);
-	CHECK_VALUE(SSLC_ALERT_USER_CANCELED, 90);
-	CHECK_VALUE(SSLC_ALERT_NO_RENEGOTIATION, 100);
-	CHECK_VALUE(SSLC_ALERT_MISSING_EXTENSION, 109);
-	CHECK_VALUE(SSLC_ALERT_UNSUPPORTED_EXTENSION, 110);
-	CHECK_VALUE(SSLC_ALERT_UNRECOGNIZED_NAME, 112);
-	CHECK_VALUE(SSLC_ALERT_BAD_CERTIFICATE_STATUS_RESPONSE, 113);
-	CHECK_VALUE(SSLC_ALERT_UNKNOWN_PSK_IDENTITY, 115);
-	CHECK_VALUE(SSLC_ALERT_CERTIFICATE_REQUIRED, 116);
-	CHECK_VALUE(SSLC_ALERT_NO_APPLICATION_PROTOCOL, 120);
+	CHECK((uint32_t)(SSLC_ALERT_WARNING) == (uint32_t)(1));
+	CHECK((uint32_t)(SSLC_ALERT_FATAL) == (uint32_t)(2));
+	CHECK((uint32_t)(SSLC_ALERT_CLOSE_NOTIFY) == (uint32_t)(0));
+	CHECK((uint32_t)(SSLC_ALERT_UNEXPECTED_MESSAGE) == (uint32_t)(10));
+	CHECK((uint32_t)(SSLC_ALERT_BAD_RECORD_MAC) == (uint32_t)(20));
+	CHECK((uint32_t)(SSLC_ALERT_RECORD_OVERFLOW) == (uint32_t)(22));
+	CHECK((uint32_t)(SSLC_ALERT_HANDSHAKE_FAILURE) == (uint32_t)(40));
+	CHECK((uint32_t)(SSLC_ALERT_BAD_CERTIFICATE) == (uint32_t)(42));
+	CHECK((uint32_t)(SSLC_ALERT_UNSUPPORTED_CERTIFICATE) == (uint32_t)(43));
+	CHECK((uint32_t)(SSLC_ALERT_CERTIFICATE_REVOKED) == (uint32_t)(44));
+	CHECK((uint32_t)(SSLC_ALERT_CERTIFICATE_EXPIRED) == (uint32_t)(45));
+	CHECK((uint32_t)(SSLC_ALERT_CERTIFICATE_UNKNOWN) == (uint32_t)(46));
+	CHECK((uint32_t)(SSLC_ALERT_ILLEGAL_PARAMETER) == (uint32_t)(47));
+	CHECK((uint32_t)(SSLC_ALERT_UNKNOWN_CA) == (uint32_t)(48));
+	CHECK((uint32_t)(SSLC_ALERT_ACCESS_DENIED) == (uint32_t)(49));
+	CHECK((uint32_t)(SSLC_ALERT_DECODE_ERROR) == (uint32_t)(50));
+	CHECK((uint32_t)(SSLC_ALERT_DECRYPT_ERROR) == (uint32_t)(51));
+	CHECK((uint32_t)(SSLC_ALERT_PROTOCOL_VERSION) == (uint32_t)(70));
+	CHECK((uint32_t)(SSLC_ALERT_INSUFFICIENT_SECURITY) == (uint32_t)(71));
+	CHECK((uint32_t)(SSLC_ALERT_INTERNAL_ERROR) == (uint32_t)(80));
+	CHECK((uint32_t)(SSLC_ALERT_INAPPROPRIATE_FALLBACK) == (uint32_t)(86));
+	CHECK((uint32_t)(SSLC_ALERT_USER_CANCELED) == (uint32_t)(90));
+	CHECK((uint32_t)(SSLC_ALERT_NO_RENEGOTIATION) == (uint32_t)(100));
+	CHECK((uint32_t)(SSLC_ALERT_MISSING_EXTENSION) == (uint32_t)(109));
+	CHECK((uint32_t)(SSLC_ALERT_UNSUPPORTED_EXTENSION) == (uint32_t)(110));
+	CHECK((uint32_t)(SSLC_ALERT_UNRECOGNIZED_NAME) == (uint32_t)(112));
+	CHECK((uint32_t)(SSLC_ALERT_BAD_CERTIFICATE_STATUS_RESPONSE) == (uint32_t)(113));
+	CHECK((uint32_t)(SSLC_ALERT_UNKNOWN_PSK_IDENTITY) == (uint32_t)(115));
+	CHECK((uint32_t)(SSLC_ALERT_CERTIFICATE_REQUIRED) == (uint32_t)(116));
+	CHECK((uint32_t)(SSLC_ALERT_NO_APPLICATION_PROTOCOL) == (uint32_t)(120));
 }
 
 /* Checks the group, scheme, extension and signalling numbers. */
@@ -104,46 +123,46 @@ static void
 test_registries(void)
 {
 	/* The named groups (RFC 8446 4.2.7). */
-	CHECK_VALUE(SSLC_GROUP_SECP256R1, pair(0x00, 0x17));
-	CHECK_VALUE(SSLC_GROUP_SECP384R1, pair(0x00, 0x18));
-	CHECK_VALUE(SSLC_GROUP_X25519, pair(0x00, 0x1d));
+	CHECK((uint32_t)(SSLC_GROUP_SECP256R1) == (uint32_t)(pair(0x00, 0x17)));
+	CHECK((uint32_t)(SSLC_GROUP_SECP384R1) == (uint32_t)(pair(0x00, 0x18)));
+	CHECK((uint32_t)(SSLC_GROUP_X25519) == (uint32_t)(pair(0x00, 0x1d)));
 
 	/* The signature schemes (RFC 8446 4.2.3). */
-	CHECK_VALUE(SSLC_SCHEME_RSA_PKCS1_SHA256, pair(0x04, 0x01));
-	CHECK_VALUE(SSLC_SCHEME_RSA_PKCS1_SHA384, pair(0x05, 0x01));
-	CHECK_VALUE(SSLC_SCHEME_RSA_PKCS1_SHA512, pair(0x06, 0x01));
-	CHECK_VALUE(SSLC_SCHEME_ECDSA_SECP256R1_SHA256, pair(0x04, 0x03));
-	CHECK_VALUE(SSLC_SCHEME_ECDSA_SECP384R1_SHA384, pair(0x05, 0x03));
-	CHECK_VALUE(SSLC_SCHEME_RSA_PSS_RSAE_SHA256, pair(0x08, 0x04));
-	CHECK_VALUE(SSLC_SCHEME_RSA_PSS_RSAE_SHA384, pair(0x08, 0x05));
-	CHECK_VALUE(SSLC_SCHEME_RSA_PSS_RSAE_SHA512, pair(0x08, 0x06));
+	CHECK((uint32_t)(SSLC_SCHEME_RSA_PKCS1_SHA256) == (uint32_t)(pair(0x04, 0x01)));
+	CHECK((uint32_t)(SSLC_SCHEME_RSA_PKCS1_SHA384) == (uint32_t)(pair(0x05, 0x01)));
+	CHECK((uint32_t)(SSLC_SCHEME_RSA_PKCS1_SHA512) == (uint32_t)(pair(0x06, 0x01)));
+	CHECK((uint32_t)(SSLC_SCHEME_ECDSA_SECP256R1_SHA256) == (uint32_t)(pair(0x04, 0x03)));
+	CHECK((uint32_t)(SSLC_SCHEME_ECDSA_SECP384R1_SHA384) == (uint32_t)(pair(0x05, 0x03)));
+	CHECK((uint32_t)(SSLC_SCHEME_RSA_PSS_RSAE_SHA256) == (uint32_t)(pair(0x08, 0x04)));
+	CHECK((uint32_t)(SSLC_SCHEME_RSA_PSS_RSAE_SHA384) == (uint32_t)(pair(0x08, 0x05)));
+	CHECK((uint32_t)(SSLC_SCHEME_RSA_PSS_RSAE_SHA512) == (uint32_t)(pair(0x08, 0x06)));
 
 	/* The extension types (RFC 8446 4.2; RFC 8422 5.1.2; RFC 7627 5.1; RFC 5746 3.2). */
-	CHECK_VALUE(SSLC_EXT_SERVER_NAME, 0);
-	CHECK_VALUE(SSLC_EXT_SUPPORTED_GROUPS, 10);
-	CHECK_VALUE(SSLC_EXT_EC_POINT_FORMATS, 11);
-	CHECK_VALUE(SSLC_EXT_SIGNATURE_ALGORITHMS, 13);
-	CHECK_VALUE(SSLC_EXT_ALPN, 16);
-	CHECK_VALUE(SSLC_EXT_EXTENDED_MASTER_SECRET, pair(0x00, 0x17));
-	CHECK_VALUE(SSLC_EXT_SESSION_TICKET, 35);
-	CHECK_VALUE(SSLC_EXT_PRE_SHARED_KEY, 41);
-	CHECK_VALUE(SSLC_EXT_EARLY_DATA, 42);
-	CHECK_VALUE(SSLC_EXT_SUPPORTED_VERSIONS, 43);
-	CHECK_VALUE(SSLC_EXT_COOKIE, 44);
-	CHECK_VALUE(SSLC_EXT_PSK_KEY_EXCHANGE_MODES, 45);
-	CHECK_VALUE(SSLC_EXT_KEY_SHARE, 51);
-	CHECK_VALUE(SSLC_EXT_RENEGOTIATION_INFO, pair(0xff, 0x01));
+	CHECK((uint32_t)(SSLC_EXT_SERVER_NAME) == (uint32_t)(0));
+	CHECK((uint32_t)(SSLC_EXT_SUPPORTED_GROUPS) == (uint32_t)(10));
+	CHECK((uint32_t)(SSLC_EXT_EC_POINT_FORMATS) == (uint32_t)(11));
+	CHECK((uint32_t)(SSLC_EXT_SIGNATURE_ALGORITHMS) == (uint32_t)(13));
+	CHECK((uint32_t)(SSLC_EXT_ALPN) == (uint32_t)(16));
+	CHECK((uint32_t)(SSLC_EXT_EXTENDED_MASTER_SECRET) == (uint32_t)(pair(0x00, 0x17)));
+	CHECK((uint32_t)(SSLC_EXT_SESSION_TICKET) == (uint32_t)(35));
+	CHECK((uint32_t)(SSLC_EXT_PRE_SHARED_KEY) == (uint32_t)(41));
+	CHECK((uint32_t)(SSLC_EXT_EARLY_DATA) == (uint32_t)(42));
+	CHECK((uint32_t)(SSLC_EXT_SUPPORTED_VERSIONS) == (uint32_t)(43));
+	CHECK((uint32_t)(SSLC_EXT_COOKIE) == (uint32_t)(44));
+	CHECK((uint32_t)(SSLC_EXT_PSK_KEY_EXCHANGE_MODES) == (uint32_t)(45));
+	CHECK((uint32_t)(SSLC_EXT_KEY_SHARE) == (uint32_t)(51));
+	CHECK((uint32_t)(SSLC_EXT_RENEGOTIATION_INFO) == (uint32_t)(pair(0xff, 0x01)));
 
 	/* The renegotiation SCSV {0x00,0xFF} (RFC 5746 3.3). */
-	CHECK_VALUE(SSLC_SUITE_EMPTY_RENEGOTIATION_INFO_SCSV, pair(0x00, 0xff));
+	CHECK((uint32_t)(SSLC_SUITE_EMPTY_RENEGOTIATION_INFO_SCSV) == (uint32_t)(pair(0x00, 0xff)));
 
 	/* The record limits: 2^14, 2^14 + 256 (RFC 8446 5.2), 2^14 + 2048 (RFC 5246 6.2.3), the 5-byte header (5.1). */
-	CHECK_VALUE(SSLC_RECORD_HEADER, 5);
-	CHECK_VALUE(SSLC_RECORD_PLAINTEXT_MAX, 16384);
-	CHECK_VALUE(SSLC_RECORD13_CIPHERTEXT_MAX, 16640);
-	CHECK_VALUE(SSLC_RECORD12_CIPHERTEXT_MAX, 18432);
-	CHECK_VALUE(SSLC_RECORD_BUFFER, 5 + 18432);
-	CHECK_VALUE(SSLC_HANDSHAKE_MAX, 102404);
+	CHECK((uint32_t)(SSLC_RECORD_HEADER) == (uint32_t)(5));
+	CHECK((uint32_t)(SSLC_RECORD_PLAINTEXT_MAX) == (uint32_t)(16384));
+	CHECK((uint32_t)(SSLC_RECORD13_CIPHERTEXT_MAX) == (uint32_t)(16640));
+	CHECK((uint32_t)(SSLC_RECORD12_CIPHERTEXT_MAX) == (uint32_t)(18432));
+	CHECK((uint32_t)(SSLC_RECORD_BUFFER) == (uint32_t)(5 + 18432));
+	CHECK((uint32_t)(SSLC_HANDSHAKE_MAX) == (uint32_t)(102404));
 
 	/* The AEAD and authentication enumerations start at "none" and are distinct. */
 	CHECK(SSLC_AEAD_NONE == 0);
@@ -274,6 +293,8 @@ test_suite_table(void)
 		supported++;
 		CHECK(suite->id == number);
 	}
+
+	/* Checks that exactly nine numbers are suites. */
 	CHECK(supported == 9UL);
 
 	/* Numbers a reader might expect: the SCSV, the CCM suites, CBC suites, RSA key transport, DHE, PSK and static ECDH are not supported. */
@@ -309,6 +330,8 @@ check_offered(
 	size_t count;
 	size_t index;
 	size_t room;
+	size_t wanted;
+	uint16_t *block;
 
 	/* A list with room to spare is the whole list, in order, and nothing after it is touched. */
 	for (index = 0; index < 16U; index++)
@@ -322,11 +345,15 @@ check_offered(
 
 	/* A smaller room gives the first numbers only and writes nothing past the room. */
 	for (room = 0; room <= expected_count + 2U; room++) {
-		for (index = 0; index < 4U; index++)
 		for (index = 0; index < 16U; index++)
 			out[index] = 0xeeeeU;
+
+		/* Asks for the list in the smaller room. */
 		count = sslc_tls_offered_suites(min_version, max_version, out, room);
-		CHECK(count == (room < expected_count ? room : expected_count));
+		wanted = expected_count;
+		if (room < expected_count)
+			wanted = room;
+		CHECK(count == wanted);
 		for (index = 0; index < count; index++)
 			CHECK(out[index] == expected[index]);
 		for (index = count; index < 16U; index++)
@@ -335,8 +362,6 @@ check_offered(
 
 	/* An exact-size block: a write outside it is an AddressSanitizer error. */
 	if (expected_count > 0U) {
-		uint16_t *block;
-
 		block = (uint16_t *)malloc(expected_count * sizeof(uint16_t));
 		if (block == NULL)
 			abort();

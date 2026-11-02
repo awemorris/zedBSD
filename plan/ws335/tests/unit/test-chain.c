@@ -177,6 +177,26 @@ struct built {
 	struct cryc_x509 cert;
 };
 
+/* The threads of the multi-thread test: what a thread returns, how it is declared, and its result. */
+#ifdef _WIN32
+#define THREAD_RETURN	DWORD
+#define THREAD_CALL	WINAPI
+#define THREAD_RESULT	0
+#else
+#define THREAD_RETURN	void *
+#define THREAD_CALL
+#define THREAD_RESULT	NULL
+#endif
+
+/* A root, an intermediate and a leaf for "a.test" with the store holding the root. */
+struct standard {
+	struct built *root;
+	struct built *inter;
+	struct built *leaf;
+	struct built *list[2];
+	struct cryc_store store;
+};
+
 /* The keys made so far, and which are made. */
 static struct tlspeer_key keys[KEYS_MAX];
 static int keys_made[KEYS_MAX];
@@ -190,6 +210,176 @@ static char test_dir[1024];
 
 /* The state of the pseudo-random generator of the tests (xorshift32, Marsaglia 2003). */
 static uint32_t rng_state = 0x2545f491U;
+
+/*
+ * The static functions of this file, so that each may be defined after the
+ * ones that use it.
+ */
+
+/* Returns the next pseudo-random 32-bit value. */
+static uint32_t rng_next(void);
+
+/* Returns the key of an index, making it on first use from a label. */
+static const struct tlspeer_key *key_get(unsigned index);
+
+/* Starts a spec: version 3, valid 2026 to 2036, not a CA, key identifiers, signed by key issuer_key. */
+static void spec_init(struct spec *spec, const char *subject, unsigned subject_key, const char *issuer, unsigned issuer_key);
+
+/* Makes the spec a CA: basicConstraints cA TRUE and keyUsage keyCertSign and cRLSign. */
+static void spec_ca(struct spec *spec);
+
+/* Writes one extension with a SEQUENCE value built by the caller into the list. */
+static void put_extension(struct der_writer *list, const char *oid, int critical, const struct der_writer *value);
+
+/* Writes the keyUsage BIT STRING of the named bits in mask (X.690 8.6 and 11.2.2: trailing zero bits dropped). */
+static void put_key_usage_bits(struct der_writer *value, unsigned mask);
+
+/* Writes the SubjectPublicKeyInfo of a key kind. */
+static void put_spki(struct der_writer *writer, const struct spec *spec);
+
+/* Writes the extensions of a certificate; returns 0 or ENOBUFS. */
+static int put_extensions(struct der_writer *writer, const struct spec *spec);
+
+/* Writes the AlgorithmIdentifier of a signature (sig_kind picks the algorithm; key size picks the hash). */
+static void put_sigalg(struct der_writer *writer, const struct spec *spec);
+
+/* Makes the certificate a spec describes, parses it and returns it from the pool. */
+static struct built *make(const struct spec *spec);
+
+/* A self-signed root CA called name with key index key. */
+static struct built *make_root(const char *name, unsigned key);
+
+/* A CA called name (key index key) issued by issuer (key index issuer_key). */
+static struct built *make_ca(const char *name, unsigned key, const char *issuer, unsigned issuer_key);
+
+/* A TLS server certificate for host (a subjectAltName dNSName) issued by issuer. */
+static struct built *make_leaf(const char *host, unsigned key, const char *issuer, unsigned issuer_key);
+
+/* The default parameters: validate at NOW, no name, the default depth. */
+static void params_init(struct cryc_verify_params *params);
+
+/* Runs one validation of the certificates (a list of built pointers, leaf first); the result is in *result. */
+static void run(struct cryc_store *store, struct built **list, size_t count, const struct cryc_verify_params *params, struct cryc_verify_result *result);
+
+/* Reports whether a result is what is wanted, with a line to find the case. */
+static void expect(const struct cryc_verify_result *result, enum cryc_verify_code code, size_t depth, int line);
+
+/* A store with the given certificates added (made fresh each time; the test frees it). */
+static void store_with(struct cryc_store *store, struct built **list, size_t count);
+
+/* Makes a PEM block of a DER with a label into out (RFC 7468 2: 64 characters per line); returns the length. */
+static size_t pem_encode(const char *label, const unsigned char *der, size_t size, char *out);
+
+/* Writes a file in the test directory in binary mode; returns 1 on success. */
+static int write_file(const char *name, const unsigned char *bytes, size_t size, char *path_out);
+
+/* Makes a certificate for the store tests (a root, key 0) and returns it. */
+static struct built *store_cert(const char *name, uint32_t serial);
+
+/* The basic behaviour of the store: init, add, duplicates, copies, stable entries, free. */
+static void test_store_basics(void);
+
+/* Makes the same certificate with the other valid signature (r, n - s) and returns it parsed, or NULL. */
+static struct built *malleate(const struct built *original, enum cryc_curve_id curve);
+
+/* The distrusted marks: kept by SHA-256 only, no duplicates, errors, not in the entries. */
+static void test_store_distrusted(void);
+
+/* The limits: CRYC_STORE_MAX entries and CRYC_STORE_MAX marks, and a duplicate at the limit is not an error. */
+static void test_store_limits(void);
+
+/* PEM text: several blocks with text between, bad blocks skipped, the codes of the header. */
+static void test_store_pem(void);
+
+/* Files: a PEM file, a bad block, a missing file, an empty file, and the arguments. */
+static void test_store_file(void);
+
+/* The system's roots against the real source: the call succeeds, adds what the source has, and is repeatable. */
+static void test_store_system(void);
+
+/* One thread: adds THREAD_ADDS certificates that differ in their serial number. */
+static THREAD_RETURN THREAD_CALL thread_adder(void *argument);
+
+/* Several threads add certificates while this thread validates and calls cryc_store_add_system: nothing hangs, nothing is lost. */
+static void test_store_threads(void);
+
+/* Writes one GeneralSubtree (RFC 5280 4.2.1.10: base, minimum 0 and maximum absent) with a base of the given tag. */
+static size_t subtree(unsigned char *out, size_t room, unsigned tag, const unsigned char *base, size_t size);
+
+/* Makes the standard chain: Root (key 0) signs Inter (key 1) signs the leaf (key 3). */
+static void standard_make(struct standard *chain);
+
+/* Checks that result.chain holds the DER of the given certificates (peer) in order, the last being the store's entry for anchor. */
+static void expect_chain(const struct cryc_verify_result *result, struct built **peer, size_t peer_count, const struct cryc_store *store, size_t anchor_index, int line);
+
+/* Arguments, limits of the call, and what is written whatever happens. */
+static void test_verify_arguments(void);
+
+/* Paths that are valid: shapes of the peer's list, the store holding more than a root, and a trusted self-signed server. */
+static void test_verify_ok(void);
+
+/* Key identifiers: a certificate whose AKI is not the candidate's SKI is not its issuer; one side missing does not exclude. */
+static void test_verify_identifiers(void);
+
+/* Validity periods at their edges, in every position of the path, and the order of the checks (anchor first). */
+static void test_verify_validity(void);
+
+/* Signatures: faults at each position, the algorithms and keys outside the range, the anchor's own signature not checked. */
+static void test_verify_signatures(void);
+
+/* What each role asks: an intermediate is a v3 CA that may sign and serve; the leaf may serve and sign. */
+static void test_verify_roles(void);
+
+/* pathLenConstraint: counted in non-self-issued intermediates below, not in the leaf, self-issued ones skipped. */
+static void test_verify_pathlen(void);
+
+/* Name constraints at the anchor, at an intermediate, critical or not, self-issued skip, unevaluated forms. */
+static void test_verify_names(void);
+
+/* Critical extensions, certificatePolicies, and the position of the unknown critical one. */
+static void test_verify_extensions(void);
+
+/* Makes a chain of count intermediates below "Root" and a leaf for them: list[0] is the leaf, list[1] the lowest intermediate, list[count] the highest. */
+static void make_deep_chain(struct built **list, unsigned count);
+
+/* The depth limit: chains of 10 and 11 certificates, and a too-long path is only the answer when no valid one exists. */
+static void test_verify_depth(void);
+
+/* Matching the name or address of the server against the leaf after a valid path. */
+static void test_verify_host(void);
+
+/* Makes a self-issued junk certificate called name signed by its own key (a look-alike for the search tests). */
+static struct built *make_junk(const char *name, unsigned key);
+
+/* Extends the model's path by each candidate of its last certificate. */
+static void model_extend(void);
+
+/* Runs the model for count look-alikes: model_stopped tells whether a bound stopped the search, model_depth where. */
+static void model_run(unsigned count);
+
+/* Path building: backtracking to another candidate, the code of the first complete path, dead ends, cycles, the work bound. */
+static void test_verify_search(void);
+
+/* The distrusted marks: the lowest depth, other paths, other anchors, order of adding. */
+static void test_verify_distrusted(void);
+
+/* Damaged and shuffled input: no crash, a code of the enumeration, and a chain that is what a valid result promises. */
+static void test_verify_random(void);
+
+/* The real bundle of root certificates (WS335_CACERT, as test-pem.c reads it): all load, each as a trusted server, each marked. */
+static void test_bundle(void);
+
+/* Parses a text IP address (IPv4 dotted, or IPv6 with groups and one "::") into out; returns 4, 16, or 0 when it is not one. */
+static size_t parse_ip(const char *text, unsigned char *out);
+
+/* Reads decimal seconds since 1970 in 64 bits (long is 32 bits on Windows). */
+static int64_t parse_time(const char *text);
+
+/* Runs one case: the trusted certificates are the store, the peer and the untrusted intermediates (up to 15) the server's list. */
+static void limbo_run(const struct vec_file *file, unsigned char *buffer);
+
+/* Runs the cases with the ids rfc5280::, pathlen::, webpki:: and pathological::. */
+static void test_limbo(void);
 
 /* Returns the next pseudo-random 32-bit value. */
 static uint32_t
@@ -221,6 +411,8 @@ key_get(
 		CHECK(error == 0);
 		keys_made[index] = 1;
 	}
+
+	/* Reports the key, which is made by now. */
 	return &keys[index];
 }
 
@@ -292,6 +484,8 @@ put_key_usage_bits(
 		if ((mask & (1U << bit)) != 0U)
 			highest = bit;
 	}
+
+	/* Collects the named bits into the octets of the BIT STRING. */
 	bytes = highest / 8U + 1U;
 	memset(bits, 0, sizeof(bits));
 	for (bit = 0; bit < 9U; bit++) {
@@ -396,6 +590,9 @@ put_extensions(
 	struct der_writer outer;
 	struct der_writer extra;
 	unsigned char length_octet;
+	unsigned authority_key;
+	size_t identifier_size;
+	const struct tlspeer_key *key;
 	int error;
 
 	/* Extensions ::= SEQUENCE OF Extension (4.1). */
@@ -410,6 +607,8 @@ put_extensions(
 			length_octet = (unsigned char)spec->path_len;
 			der_put(&inner, 0x02U, &length_octet, 1);
 		}
+
+		/* Writes the extension: the SEQUENCE of the contents is its value. */
 		der_init(&value, value_bytes, sizeof(value_bytes));
 		der_wrap(&value, 0x30U, &inner);
 		put_extension(&list, TLSPEER_OID_BASIC_CONSTRAINTS, spec->basic_critical, &value);
@@ -491,10 +690,17 @@ put_extensions(
 
 	/* authorityKeyIdentifier { keyIdentifier [0] } (4.2.1.1); aki 2 names another key. */
 	if (spec->aki != 0) {
-		error = tlspeer_key_id(key_get(spec->aki == 2 ? 30U : spec->issuer_key), identifier);
+		authority_key = spec->issuer_key;
+		if (spec->aki == 2)
+			authority_key = 30U;
+		identifier_size = sizeof(identifier);
+		if (spec->aki == 3)
+			identifier_size = sizeof(identifier) - 1U;
+		key = key_get(authority_key);
+		error = tlspeer_key_id(key, identifier);
 		CHECK(error == 0);
 		der_init(&inner, inner_bytes, sizeof(inner_bytes));
-		der_put(&inner, 0x80U, identifier, spec->aki == 3 ? sizeof(identifier) - 1U : sizeof(identifier));
+		der_put(&inner, 0x80U, identifier, identifier_size);
 		der_init(&value, value_bytes, sizeof(value_bytes));
 		der_wrap(&value, 0x30U, &inner);
 		put_extension(&list, TLSPEER_OID_AUTHORITY_KEY_ID, 0, &value);
@@ -533,6 +739,8 @@ put_sigalg(
 	} else {
 		der_oid(&inner, TLSPEER_OID_ECDSA_SHA256);
 	}
+
+	/* Wraps the algorithm in its SEQUENCE. */
 	der_wrap(writer, 0x30U, &inner);
 }
 
@@ -578,6 +786,8 @@ make(
 		der_put(&version, 0x02U, version3, 1);
 		der_wrap(&tbs, 0xa0U, &version);
 	}
+
+	/* Writes the serial number as an INTEGER of four octets. */
 	serial[0] = (uint8_t)(spec->serial >> 24);
 	serial[1] = (uint8_t)(spec->serial >> 16);
 	serial[2] = (uint8_t)(spec->serial >> 8);
@@ -599,6 +809,8 @@ make(
 		error = put_extensions(&tbs, spec);
 		CHECK(error == 0);
 	}
+
+	/* Wraps the tbsCertificate in its SEQUENCE. */
 	der_init(&body, body_bytes, sizeof(body_bytes));
 	der_wrap(&body, 0x30U, &tbs);
 	CHECK(body.error == 0);
@@ -619,6 +831,8 @@ make(
 		error = tlspeer_ecdsa_sign_der(signer, digest, cryc_hash_size(hash), signature + 1, sizeof(signature) - 1U, &signature_size);
 		CHECK(error == 0);
 	}
+
+	/* Damages the last byte of the signature when the spec asks for a corrupt one. */
 	if (spec->sig_kind == SIG_CORRUPT)
 		signature[signature_size] = (uint8_t)(signature[signature_size] ^ 0x01U);
 
@@ -736,10 +950,14 @@ expect(
 	int line)
 {
 	int good;
+	int passed;
 
 	/* The code and the depth together. */
 	good = result->code == code && result->depth == depth;
-	if (!check_one(good, __FILE__, line, "verify result")) {
+
+	/* Counts the check, against the line of the caller. */
+	passed = check_one(good, __FILE__, line, "verify result");
+	if (!passed) {
 		printf("  line %d: got code %d depth %u, wanted code %d depth %u\n", line, (int)result->code, (unsigned)result->depth, (int)code, (unsigned)depth);
 	}
 }
@@ -807,6 +1025,8 @@ pem_encode(
 			}
 		}
 	}
+
+	/* Ends the last line when it is not full. */
 	if (column != 0U)
 		out[used++] = '\n';
 
@@ -825,15 +1045,25 @@ write_file(
 {
 	FILE *file;
 	size_t put;
+	int closed;
 
 	/* The path is the directory, a slash and the name. */
 	sprintf(path_out, "%s/%s", test_dir, name);
 	file = fopen(path_out, "wb");
 	if (file == NULL)
 		return 0;
-	put = size == 0U ? 0U : fwrite(bytes, 1, size, file);
-	if (fclose(file) != 0)
+
+	/* Writes the bytes, when there are any. */
+	put = 0U;
+	if (size != 0U)
+		put = fwrite(bytes, 1, size, file);
+
+	/* The file must close without an error for the bytes to be there. */
+	closed = fclose(file);
+	if (closed != 0)
 		return 0;
+
+	/* Succeeded when every byte was written. */
 	return put == size;
 }
 
@@ -869,6 +1099,7 @@ test_store_basics(void)
 	char name[32];
 	int error;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 
 	/* Init needs a store; the store starts empty. */
@@ -924,6 +1155,8 @@ test_store_basics(void)
 		CHECK(cryc_store_add_der(&store, other->der, other->size) == 0);
 		entries[index] = store.entries[index];
 	}
+
+	/* Checks that the table grew to hold all 24 entries and kept each one in place. */
 	CHECK(store.count == 24U);
 	CHECK(store.capacity >= 24U);
 	for (index = 0; index < 24U; index++)
@@ -939,6 +1172,7 @@ test_store_basics(void)
 	cryc_store_free(&store);
 	cryc_store_free(NULL);
 
+	/* Gives the pool entries of this test back. */
 	pool_used = mark;
 }
 
@@ -990,28 +1224,73 @@ malleate(
 	unsigned borrow;
 	unsigned difference;
 	struct built *made;
+	const char *order_hex;
+	int error;
 
-	/* The three parts of the outer SEQUENCE. */
-	size = curve == CRYC_CURVE_P384 ? 48U : 32U;
-	CHECK(hex_decode(curve == CRYC_CURVE_P384 ? p384_order_hex : p256_order_hex, order, size) == size);
+	/* The size and the hex text of the order of the issuer key's curve. */
+	size = 32U;
+	order_hex = p256_order_hex;
+	if (curve == CRYC_CURVE_P384) {
+		size = 48U;
+		order_hex = p384_order_hex;
+	}
+
+	/* Reads the order of the curve of the issuer key. */
+	CHECK(hex_decode(order_hex, order, size) == size);
+
+	/* Enters the outer SEQUENCE of the certificate. */
 	cryc_der_init(&reader, original->der, original->size);
-	if (cryc_der_expect(&reader, CRYC_DER_SEQUENCE, &element) != 0 || cryc_der_enter(&element, &inner) != 0)
+	error = cryc_der_expect(&reader, CRYC_DER_SEQUENCE, &element);
+	if (error != 0)
 		return NULL;
-	if (cryc_der_next(&inner, &tbs) != 0 || cryc_der_next(&inner, &alg) != 0 || cryc_der_next(&inner, &bit_string) != 0)
-		return NULL;
-	if (cryc_der_bit_string(&bit_string, &signature, &signature_size, &unused) != 0)
+	error = cryc_der_enter(&element, &inner);
+	if (error != 0)
 		return NULL;
 
-	/* r and s of the Ecdsa-Sig-Value, and n - s (s < n, so no borrow out). */
+	/* Reads the tbsCertificate, the signatureAlgorithm and the signatureValue. */
+	error = cryc_der_next(&inner, &tbs);
+	if (error != 0)
+		return NULL;
+	error = cryc_der_next(&inner, &alg);
+	if (error != 0)
+		return NULL;
+	error = cryc_der_next(&inner, &bit_string);
+	if (error != 0)
+		return NULL;
+
+	/* Takes the signature bytes out of the BIT STRING. */
+	error = cryc_der_bit_string(&bit_string, &signature, &signature_size, &unused);
+	if (error != 0)
+		return NULL;
+
+	/* Enters the Ecdsa-Sig-Value SEQUENCE. */
 	cryc_der_init(&reader, signature, signature_size);
-	if (cryc_der_expect(&reader, CRYC_DER_SEQUENCE, &element) != 0 || cryc_der_enter(&element, &inner) != 0)
+	error = cryc_der_expect(&reader, CRYC_DER_SEQUENCE, &element);
+	if (error != 0)
 		return NULL;
-	if (cryc_der_next(&inner, &r_element) != 0 || cryc_der_next(&inner, &s_element) != 0)
+	error = cryc_der_enter(&element, &inner);
+	if (error != 0)
 		return NULL;
-	if (cryc_der_integer(&r_element, &r_bytes, &r_size) != 0 || cryc_der_integer(&s_element, &s_bytes, &s_size) != 0)
+
+	/* Reads the two INTEGERs r and s of it. */
+	error = cryc_der_next(&inner, &r_element);
+	if (error != 0)
 		return NULL;
+	error = cryc_der_next(&inner, &s_element);
+	if (error != 0)
+		return NULL;
+	error = cryc_der_integer(&r_element, &r_bytes, &r_size);
+	if (error != 0)
+		return NULL;
+	error = cryc_der_integer(&s_element, &s_bytes, &s_size);
+	if (error != 0)
+		return NULL;
+
+	/* Refuses an s longer than the order. */
 	if (s_size > size)
 		return NULL;
+
+	/* Computes n - s from s padded to the size of the order (s < n, so no borrow out). */
 	memset(s_value, 0, sizeof(s_value));
 	memcpy(s_value + size - s_size, s_bytes, s_size);
 	borrow = 0;
@@ -1042,8 +1321,13 @@ malleate(
 	if (sig.error || bits.error || body.error || outer.error)
 		return NULL;
 	made->size = outer.used;
-	if (cryc_x509_parse(&made->cert, made->der, made->size) != 0)
+
+	/* The parse of the new certificate must succeed. */
+	error = cryc_x509_parse(&made->cert, made->der, made->size);
+	if (error != 0)
 		return NULL;
+
+	/* Succeeded: the new certificate. */
 	return made;
 }
 
@@ -1058,6 +1342,7 @@ test_store_distrusted(void)
 	unsigned mark;
 	int error;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	CHECK(cryc_store_init(&store) == 0);
 	CHECK(store.distrusted == NULL);
@@ -1092,6 +1377,7 @@ test_store_distrusted(void)
 	CHECK(store.count == 1U);
 	CHECK(store.distrusted_count == 3U);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&store);
 	pool_used = mark;
 }
@@ -1110,6 +1396,7 @@ test_store_limits(void)
 	unsigned mark;
 	int error;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	CHECK(cryc_store_init(&store) == 0);
 
@@ -1122,6 +1409,8 @@ test_store_limits(void)
 		cryc_store_free(&store);
 		return;
 	}
+
+	/* Copies the certificate, to patch its serial number. */
 	memcpy(copy, template_cert->der, size);
 	serial_offset = (size_t)(template_cert->cert.serial - template_cert->der);
 	CHECK(template_cert->cert.serial_size == 4U);
@@ -1133,6 +1422,8 @@ test_store_limits(void)
 		error = cryc_store_add_der(&store, copy, size);
 		CHECK(error == 0);
 	}
+
+	/* Checks that the store is full. */
 	CHECK(store.count == CRYC_STORE_MAX);
 
 	/* One more is ENOBUFS and changes nothing; one already in the store is still 0. */
@@ -1158,6 +1449,8 @@ test_store_limits(void)
 		if (error != 0)
 			CHECK(error == 0);
 	}
+
+	/* Checks that the table of distrusted marks is full. */
 	CHECK(store.distrusted_count == CRYC_STORE_MAX);
 	mark_bytes[0] = 0;
 	mark_bytes[1] = 0xff;
@@ -1184,9 +1477,14 @@ test_store_pem(void)
 	size_t used;
 	size_t added;
 	unsigned char junk[40];
+	struct built *big;
+	unsigned char *copy;
+	size_t serial_offset;
+	unsigned index;
 	unsigned mark;
 	int error;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	text = malloc(20000);
 	CHECK(text != NULL);
@@ -1275,35 +1573,32 @@ test_store_pem(void)
 
 	/* A store with room for one more takes the first certificate of a text and then gives ENOBUFS: the count of the first is reported. */
 	CHECK(cryc_store_init(&store) == 0);
-	{
-		struct built *big;
-		unsigned char *copy;
-		size_t serial_offset;
-		unsigned index;
-
-		big = store_cert("Pem Big", 0x01000000UL);
-		copy = malloc(big->size);
-		CHECK(copy != NULL);
-		if (copy != NULL) {
-			memcpy(copy, big->der, big->size);
-			serial_offset = (size_t)(big->cert.serial - big->der);
-			for (index = 0; index < CRYC_STORE_MAX - 1U; index++) {
-				copy[serial_offset + 2U] = (unsigned char)(index >> 8);
-				copy[serial_offset + 3U] = (unsigned char)index;
-				CHECK(cryc_store_add_der(&store, copy, big->size) == 0);
-			}
-			copy[serial_offset + 2U] = 0x7e;
-			copy[serial_offset + 3U] = 0x7e;
-			used = pem_encode("CERTIFICATE", copy, big->size, text);
-			copy[serial_offset + 3U] = 0x7f;
-			used += pem_encode("CERTIFICATE", copy, big->size, text + used);
-			added = 99;
-			CHECK(cryc_store_add_pem(&store, text, used, &added) == ENOBUFS);
-			CHECK(added == 1U);
-			CHECK(store.count == CRYC_STORE_MAX);
-			free(copy);
+	big = store_cert("Pem Big", 0x01000000UL);
+	copy = malloc(big->size);
+	CHECK(copy != NULL);
+	if (copy != NULL) {
+		memcpy(copy, big->der, big->size);
+		serial_offset = (size_t)(big->cert.serial - big->der);
+		for (index = 0; index < CRYC_STORE_MAX - 1U; index++) {
+			copy[serial_offset + 2U] = (unsigned char)(index >> 8);
+			copy[serial_offset + 3U] = (unsigned char)index;
+			CHECK(cryc_store_add_der(&store, copy, big->size) == 0);
 		}
+
+		/* Writes two PEM blocks of new serial numbers, of which only the first still fits. */
+		copy[serial_offset + 2U] = 0x7e;
+		copy[serial_offset + 3U] = 0x7e;
+		used = pem_encode("CERTIFICATE", copy, big->size, text);
+		copy[serial_offset + 3U] = 0x7f;
+		used += pem_encode("CERTIFICATE", copy, big->size, text + used);
+		added = 99;
+		CHECK(cryc_store_add_pem(&store, text, used, &added) == ENOBUFS);
+		CHECK(added == 1U);
+		CHECK(store.count == CRYC_STORE_MAX);
+		free(copy);
 	}
+
+	/* Releases the store and the text, and gives the pool entries of this test back. */
 	cryc_store_free(&store);
 	free(text);
 	pool_used = mark;
@@ -1323,6 +1618,7 @@ test_store_file(void)
 	unsigned mark;
 	int error;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	CHECK(cryc_store_init(&store) == 0);
 	first = store_cert("File Root", 1);
@@ -1373,6 +1669,7 @@ test_store_system(void)
 	FILE *file;
 #endif
 
+	/* Makes the empty store the system's roots are added to. */
 	CHECK(cryc_store_init(&store) == 0);
 	CHECK(cryc_store_add_system(NULL) == EINVAL);
 
@@ -1416,16 +1713,6 @@ struct thread_job {
 #endif
 };
 
-#ifdef _WIN32
-#define THREAD_RETURN	DWORD
-#define THREAD_CALL	WINAPI
-#define THREAD_RESULT	0
-#else
-#define THREAD_RETURN	void *
-#define THREAD_CALL
-#define THREAD_RESULT	NULL
-#endif
-
 /* One thread: adds THREAD_ADDS certificates that differ in their serial number. */
 static THREAD_RETURN THREAD_CALL
 thread_adder(
@@ -1443,6 +1730,8 @@ thread_adder(
 		job->errors++;
 		return THREAD_RESULT;
 	}
+
+	/* Adds the certificates, each with a serial number of its own. */
 	memcpy(copy, job->der, job->size);
 	for (index = 0; index < THREAD_ADDS; index++) {
 		copy[job->serial_offset + 1U] = (unsigned char)(job->base + index);
@@ -1451,6 +1740,8 @@ thread_adder(
 		if (error != 0)
 			job->errors++;
 	}
+
+	/* Releases the private copy. */
 	free(copy);
 	return THREAD_RESULT;
 }
@@ -1473,7 +1764,11 @@ test_store_threads(void)
 	unsigned round;
 	unsigned started;
 	unsigned mark;
+#ifndef _WIN32
+	int create_error;
+#endif
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	root = make_root("Thread Root", 0);
 	inter = make_ca("Thread Inter", 1, "Thread Root", 0);
@@ -1496,10 +1791,13 @@ test_store_threads(void)
 		if (jobs[index].thread != NULL)
 			started++;
 #else
-		if (pthread_create(&jobs[index].thread, NULL, thread_adder, &jobs[index]) == 0)
+		create_error = pthread_create(&jobs[index].thread, NULL, thread_adder, &jobs[index]);
+		if (create_error == 0)
 			started++;
 #endif
 	}
+
+	/* Checks that every thread started. */
 	CHECK(started == THREAD_COUNT);
 
 	/* Meanwhile: validations that must keep working, and the system's roots. */
@@ -1511,6 +1809,8 @@ test_store_threads(void)
 		EXPECT(result, CRYC_VERIFY_OK, 0);
 		CHECK(result.chain_count == 3U);
 	}
+
+	/* Checks that the system's roots can be added while the threads run. */
 	CHECK(cryc_store_add_system(&store) == 0);
 
 	/* The threads end. */
@@ -1557,15 +1857,6 @@ subtree(
 	return outer.used;
 }
 
-/* A root, an intermediate and a leaf for "a.test" with the store holding the root. */
-struct standard {
-	struct built *root;
-	struct built *inter;
-	struct built *leaf;
-	struct built *list[2];
-	struct cryc_store store;
-};
-
 /* Makes the standard chain: Root (key 0) signs Inter (key 1) signs the leaf (key 3). */
 static void
 standard_make(
@@ -1591,6 +1882,7 @@ expect_chain(
 {
 	size_t index;
 	int good;
+	int passed;
 
 	/* The peer's certificates first, then the anchor, which is the store's own copy. */
 	good = result->chain_count == peer_count + 1U;
@@ -1599,10 +1891,15 @@ expect_chain(
 			if (result->chain[index]->der != peer[index]->der)
 				good = 0;
 		}
+
+		/* Checks that the anchor is the store's own copy of the certificate. */
 		if (result->chain[peer_count]->der != store->entries[anchor_index]->der)
 			good = 0;
 	}
-	if (!check_one(good, __FILE__, line, "chain contents"))
+
+	/* Counts the check, against the line of the caller. */
+	passed = check_one(good, __FILE__, line, "chain contents");
+	if (!passed)
 		printf("  line %d: chain_count %u\n", line, (unsigned)result->chain_count);
 }
 
@@ -1623,6 +1920,7 @@ test_verify_arguments(void)
 	unsigned index;
 	int error;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -1710,6 +2008,7 @@ test_verify_arguments(void)
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_EXPIRED, 0);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&chain.store);
 	pool_used = mark;
 }
@@ -1730,6 +2029,7 @@ test_verify_ok(void)
 	struct spec spec;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -1833,6 +2133,7 @@ test_verify_ok(void)
 	run(&chain.store, list, 1, &params, &result);
 	EXPECT(result, CRYC_VERIFY_DEPTH_ZERO_SELF_SIGNED, 0);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&chain.store);
 	pool_used = mark;
 }
@@ -1850,6 +2151,7 @@ test_verify_identifiers(void)
 	struct spec spec;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -1902,6 +2204,7 @@ test_verify_identifiers(void)
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&chain.store);
 	pool_used = mark;
 }
@@ -1918,6 +2221,7 @@ test_verify_validity(void)
 	struct spec spec;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -2005,6 +2309,7 @@ test_verify_validity(void)
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_EXPIRED, 1);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&chain.store);
 	pool_used = mark;
 }
@@ -2021,6 +2326,7 @@ test_verify_signatures(void)
 	struct spec spec;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -2168,6 +2474,7 @@ test_verify_signatures(void)
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_UNSUPPORTED_ALGORITHM, 0);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&chain.store);
 	pool_used = mark;
 }
@@ -2183,6 +2490,7 @@ test_verify_roles(void)
 	struct spec spec;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -2304,6 +2612,7 @@ test_verify_roles(void)
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&chain.store);
 	pool_used = mark;
 }
@@ -2321,6 +2630,7 @@ test_verify_pathlen(void)
 	struct spec spec;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	params_init(&params);
 	root = make_root("Root", 0);
@@ -2399,6 +2709,7 @@ test_verify_pathlen(void)
 	run(&store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&store);
 	pool_used = mark;
 }
@@ -2417,6 +2728,7 @@ test_verify_names(void)
 	unsigned char excluded[200];
 	unsigned char extra[100];
 	unsigned char subtree_bytes[100];
+	struct der_writer writer;
 	size_t permitted_size;
 	size_t excluded_size;
 	size_t extra_size;
@@ -2425,6 +2737,7 @@ test_verify_names(void)
 	static const unsigned char ten_host[4] = { 10, 1, 2, 3 };
 	static const unsigned char other_host[4] = { 192, 0, 2, 1 };
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	params_init(&params);
 
@@ -2575,13 +2888,9 @@ test_verify_names(void)
 	CHECK(extra_size > 2U);
 	memset(extra, 0, sizeof(extra));
 	extra_size = 0;
-	{
-		struct der_writer writer;
-
-		der_init(&writer, extra, sizeof(extra));
-		der_put(&writer, 0x86U, (const unsigned char *)"http://x.example.org/", 21);
-		extra_size = writer.used;
-	}
+	der_init(&writer, extra, sizeof(extra));
+	der_put(&writer, 0x86U, (const unsigned char *)"http://x.example.org/", 21);
+	extra_size = writer.used;
 	spec_init(&spec, "uri.test", 3, "Inter", 1);
 	spec.dns = "uri.test";
 	spec.san_extra = extra;
@@ -2624,6 +2933,7 @@ test_verify_names(void)
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 	cryc_store_free(&store);
 
+	/* Gives the pool entries of this test back. */
 	pool_used = mark;
 }
 
@@ -2639,6 +2949,7 @@ test_verify_extensions(void)
 	struct spec spec;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -2698,6 +3009,7 @@ test_verify_extensions(void)
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&chain.store);
 	pool_used = mark;
 }
@@ -2720,6 +3032,8 @@ make_deep_chain(
 		else
 			list[count + 1U - index] = make_ca(names[index], index, names[index - 1U], index - 1U);
 	}
+
+	/* Makes the leaf below the lowest intermediate. */
 	list[0] = make_leaf("a.test", 20, names[count], count);
 }
 
@@ -2735,6 +3049,7 @@ test_verify_depth(void)
 	struct built *alternative;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	params_init(&params);
 	roots[0] = make_root("Root", 0);
@@ -2772,6 +3087,7 @@ test_verify_depth(void)
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 	CHECK(result.chain_count == 3U);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&store);
 	pool_used = mark;
 }
@@ -2789,6 +3105,7 @@ test_verify_host(void)
 	static const unsigned char other[4] = { 192, 0, 2, 2 };
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -2841,6 +3158,7 @@ test_verify_host(void)
 	run(&chain.store, chain.list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_EXPIRED, 2);
 
+	/* Releases the store and gives the pool entries of this test back. */
 	cryc_store_free(&chain.store);
 	pool_used = mark;
 }
@@ -2906,6 +3224,8 @@ model_extend(void)
 			if (model_path[position] == candidate)
 				on_path = 1;
 		}
+
+		/* Skips a candidate that is already on the path. */
 		if (on_path != 0)
 			continue;
 
@@ -2916,9 +3236,13 @@ model_extend(void)
 				model_depth = model_length - 1U;
 				return;
 			}
+
+			/* Counts the verification of this pair, which is done once whatever the path. */
 			model_work++;
 			model_done[top][candidate] = 1;
 		}
+
+		/* Searches below the candidate, which is on the path meanwhile. */
 		model_path[model_length++] = candidate;
 		model_extend();
 		model_length--;
@@ -2963,8 +3287,10 @@ test_verify_search(void)
 	struct spec spec;
 	unsigned index;
 	unsigned count;
+	unsigned expected_count;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	params_init(&params);
 
@@ -3125,6 +3451,7 @@ test_verify_search(void)
 		junk[index] = make_junk("J", 8U + index);
 		list[1U + index] = junk[index];
 	}
+
 	/* With 1 to 15 look-alikes: a bound stops the search where the model says (with 9 or more the pairs alone are more than CRYC_CHAIN_MAX_WORK, with 6 or more the paths alone are more than the nodes allowed), and with fewer the search ends with every look-alike on the path, the last one self-signed in the chain. */
 	for (count = 1; count <= 15U; count++) {
 		model_run(count);
@@ -3132,16 +3459,23 @@ test_verify_search(void)
 		CHECK(result.chain[0]->der == list[0]->der);
 		if (model_stopped != 0) {
 			EXPECT(result, CRYC_VERIFY_WORK_EXCEEDED, model_depth);
-			CHECK(result.chain_count == (count + 1U < CRYC_CHAIN_MAX_DEPTH ? count + 1U : CRYC_CHAIN_MAX_DEPTH));
+			expected_count = count + 1U;
+			if (expected_count >= CRYC_CHAIN_MAX_DEPTH)
+				expected_count = CRYC_CHAIN_MAX_DEPTH;
+			CHECK(result.chain_count == expected_count);
 		} else {
 			EXPECT(result, CRYC_VERIFY_SELF_SIGNED_IN_CHAIN, count);
 			CHECK(result.chain_count == count + 1U);
 		}
+
+		/* Checks that the bound stops the search from six look-alikes on and not at five. */
 		if (count == 5U)
 			CHECK(model_stopped == 0);
 		if (count == 6U)
 			CHECK(model_stopped != 0);
 	}
+
+	/* Releases the store. */
 	cryc_store_free(&store);
 
 	/* Exactly CRYC_CHAIN_MAX_WORK verifications are allowed: 8 look-alikes of one name below the leaf and 7 of another below those need 8 + 8 * 7 and no more, and end in a missing issuer, not in the bound. */
@@ -3157,12 +3491,16 @@ test_verify_search(void)
 		spec.aki = 0;
 		list[1U + index] = make(&spec);
 	}
+
+	/* Makes the 7 look-alikes of the second name. */
 	for (index = 0; index < 7U; index++) {
 		spec_init(&spec, "I", 16U + index, "X", 23);
 		spec_ca(&spec);
 		spec.aki = 0;
 		list[9U + index] = make(&spec);
 	}
+
+	/* Validates the list, whose work is exactly the allowed bound, so the search does not stop. */
 	run(&store, list, 16, &params, &result);
 	EXPECT(result, CRYC_VERIFY_UNABLE_TO_GET_ISSUER, 2);
 	CHECK(result.chain_count == 3U);
@@ -3183,6 +3521,7 @@ test_verify_search(void)
 	CHECK(result.chain[1]->der == list[1]->der);
 	cryc_store_free(&store);
 
+	/* Gives the pool entries of this test back. */
 	pool_used = mark;
 }
 
@@ -3207,6 +3546,7 @@ test_verify_distrusted(void)
 	unsigned index;
 	unsigned mark;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -3238,6 +3578,8 @@ test_verify_distrusted(void)
 		run(&chain.store, list, 2, &params, &result);
 		EXPECT(result, CRYC_VERIFY_REJECTED, 1);
 	}
+
+	/* Releases the store of the first part. */
 	cryc_store_free(&chain.store);
 
 	/* Without the mark the re-encoded intermediate is a valid link (the signature verifies). */
@@ -3388,11 +3730,14 @@ test_verify_distrusted(void)
 		junk[index] = make_junk("J", 8U + index);
 		list[2U + index] = junk[index];
 	}
+
+	/* Validates with the junk after the rejected path: the search must keep the answer of the path. */
 	run(&chain.store, list, 15, &params, &result);
 	EXPECT(result, CRYC_VERIFY_REJECTED, 1);
 	CHECK(result.chain_count == 3U);
 	cryc_store_free(&chain.store);
 
+	/* Gives the pool entries of this test back. */
 	pool_used = mark;
 }
 
@@ -3416,11 +3761,13 @@ test_verify_random(void)
 	unsigned long ok_count;
 	size_t count;
 	size_t position;
+	uint32_t draw;
 	unsigned index;
 	unsigned round;
 	unsigned mark;
 	int error;
 
+	/* Remembers how much of the pool is in use, to give it back when the test ends. */
 	mark = pool_used;
 	standard_make(&chain);
 	params_init(&params);
@@ -3445,6 +3792,8 @@ test_verify_random(void)
 		CHECK((int)result.code >= 0 && (int)result.code <= CODE_LAST);
 		CHECK(result.code != CRYC_VERIFY_OK);
 	}
+
+	/* Checks that enough of the damaged certificates parsed for the test to mean something, and releases the store. */
 	CHECK(damaged_parsed > 20UL);
 	cryc_store_free(&chain.store);
 
@@ -3464,21 +3813,34 @@ test_verify_random(void)
 			list[index] = others[rng_next() % 8U];
 			peer[index] = list[index]->cert;
 		}
+
+		/* Picks the certificates that may be roots. */
 		roots[0] = others[2];
 		roots[1] = others[4];
 		roots[2] = others[1];
 		error = cryc_store_init(&store);
 		CHECK(error == 0);
 		for (index = 0; index < 3U; index++) {
-			if ((rng_next() & 1U) != 0U)
+			draw = rng_next();
+			if ((draw & 1U) != 0U)
 				cryc_store_add_der(&store, roots[index]->der, roots[index]->size);
 		}
-		if ((rng_next() & 7U) == 0U)
-			cryc_store_add_distrusted(&store, others[rng_next() % 8U]->der, 10);
-		if ((rng_next() & 7U) == 0U) {
+
+		/* Sometimes marks the first 10 bytes of a random certificate as distrusted. */
+		draw = rng_next();
+		if ((draw & 7U) == 0U) {
+			draw = rng_next();
+			cryc_store_add_distrusted(&store, others[draw % 8U]->der, 10);
+		}
+
+		/* Sometimes marks a whole random certificate as distrusted. */
+		draw = rng_next();
+		if ((draw & 7U) == 0U) {
 			position = rng_next() % 8U;
 			cryc_store_add_distrusted(&store, others[position]->der, others[position]->size);
 		}
+
+		/* Picks a random depth limit, never 1. */
 		params.max_depth = rng_next() % 6U;
 		if (params.max_depth == 1U)
 			params.max_depth = 2;
@@ -3492,11 +3854,16 @@ test_verify_random(void)
 			CHECK(result.chain[0]->der == peer[0].der);
 			CHECK(result.depth == 0U);
 		}
+
+		/* Releases the store of this round. */
 		cryc_store_free(&store);
 	}
+
+	/* Checks that enough rounds gave a valid result. */
 	CHECK(ok_count > 50UL);
 	params.max_depth = 0;
 
+	/* Gives the pool entries of this test back. */
 	pool_used = mark;
 }
 
@@ -3526,6 +3893,8 @@ test_bundle(void)
 		cryc_store_free(&store);
 		return;
 	}
+
+	/* Sets the default parameters. */
 	params_init(&params);
 
 	/* Loading it again adds nothing. */
@@ -3547,6 +3916,8 @@ test_bundle(void)
 		CHECK(result.code != CRYC_VERIFY_MALFORMED);
 		CHECK(result.chain_count >= 1U);
 	}
+
+	/* Reports how the roots fared as servers. */
 	printf("bundle: %u roots; as a server: %lu valid, %lu key usage, %lu expired, %lu other\n", (unsigned)store.count, kinds[CRYC_VERIFY_OK], kinds[CRYC_VERIFY_KEY_USAGE], kinds[CRYC_VERIFY_EXPIRED], (unsigned long)store.count - kinds[CRYC_VERIFY_OK] - kinds[CRYC_VERIFY_KEY_USAGE] - kinds[CRYC_VERIFY_EXPIRED]);
 
 	/* With every root marked distrusted every one is rejected at depth 0. */
@@ -3554,6 +3925,8 @@ test_bundle(void)
 		error = cryc_store_add_distrusted(&store, store.entries[index]->der, store.entries[index]->der_size);
 		CHECK(error == 0);
 	}
+
+	/* Checks that every root is marked. */
 	CHECK(store.distrusted_count == store.count);
 	for (index = 0; index < store.count; index++) {
 		peer[0] = store.entries[index]->cert;
@@ -3562,11 +3935,12 @@ test_bundle(void)
 		CHECK(result.code == CRYC_VERIFY_REJECTED);
 		CHECK(result.depth == 0U);
 	}
+
+	/* Releases the store. */
 	cryc_store_free(&store);
 }
 
-/* x509-limbo
- */
+/* The x509-limbo cases: the address and time parsers of its files, its listed differences and the runner of one case. */
 
 /* Parses a text IP address (IPv4 dotted, or IPv6 with groups and one "::") into out; returns 4, 16, or 0 when it is not one. */
 static size_t
@@ -3582,12 +3956,16 @@ parse_ip(
 	unsigned index;
 	unsigned total;
 	const char *at;
+	const char *colon;
 	int double_colon;
 	unsigned groups[8];
 	unsigned count;
 
+	/* A text with no colon is IPv4; the search is for that. */
+	colon = strchr(text, ':');
+
 	/* IPv4: four decimal numbers separated by dots. */
-	if (strchr(text, ':') == NULL) {
+	if (colon == NULL) {
 		at = text;
 		for (index = 0; index < 4U; index++) {
 			value = 0;
@@ -3599,6 +3977,8 @@ parse_ip(
 				if (value > 255U || digits > 3U)
 					return 0;
 			}
+
+			/* Refuses a number with no digits. */
 			if (digits == 0U)
 				return 0;
 			out[index] = (unsigned char)value;
@@ -3608,6 +3988,8 @@ parse_ip(
 				at++;
 			}
 		}
+
+		/* Refuses text after the fourth number. */
 		if (*at != '\0')
 			return 0;
 		return 4;
@@ -3638,6 +4020,8 @@ parse_ip(
 			digits++;
 			at++;
 		}
+
+		/* Refuses a group with no digits or more than four, and a ninth group. */
 		if (digits == 0U || digits > 4U || count >= 8U)
 			return 0;
 		groups[count++] = value;
@@ -3660,6 +4044,8 @@ parse_ip(
 			return 0;
 		}
 	}
+
+	/* Checks that the groups make eight, with the "::" standing for the rest or without it. */
 	total = head + tail;
 	if (double_colon && total > 7U)
 		return 0;
@@ -3677,6 +4063,8 @@ parse_ip(
 		out[index * 2U] = (unsigned char)(parts[index] >> 8);
 		out[index * 2U + 1U] = (unsigned char)(parts[index] & 0xffU);
 	}
+
+	/* Reports the length of an IPv6 address. */
 	return 16;
 }
 
@@ -3776,6 +4164,8 @@ parse_time(
 		value = value * 10 + (int64_t)(*text - '0');
 		text++;
 	}
+
+	/* Reports the seconds read. */
 	return value;
 }
 
@@ -3801,11 +4191,15 @@ limbo_run(
 	size_t depth;
 	unsigned index;
 	unsigned entry;
+	const char *found;
 	int success;
 	int ok;
 	int explained;
+	int different;
+	int is_dns;
 	int error;
 
+	/* Reads the id and the expectation of the case, and counts it. */
 	id = vec_get(file, "id");
 	expected = vec_get(file, "expected");
 	success = strcmp(expected, "SUCCESS") == 0;
@@ -3833,12 +4227,16 @@ limbo_run(
 		cryc_store_free(&store);
 		return;
 	}
+
+	/* Takes a private copy of the peer's DER, which its parse points into. */
 	der[0] = malloc(size);
 	CHECK(der[0] != NULL);
 	if (der[0] == NULL) {
 		cryc_store_free(&store);
 		return;
 	}
+
+	/* Parses the peer certificate from the copy. */
 	memcpy(der[0], buffer, size);
 	error = cryc_x509_parse(&peer[0], der[0], size);
 	if (error != 0) {
@@ -3851,10 +4249,14 @@ limbo_run(
 			limbo_unexplained++;
 			printf("limbo: %s: unparsed leaf, expected %s\n", id, expected);
 		}
+
+		/* Releases what the case holds; no validation runs for it. */
 		free(der[0]);
 		cryc_store_free(&store);
 		return;
 	}
+
+	/* Collects the untrusted certificates after the peer: one that does not parse is dropped, and the list stops at the most a server sends. */
 	peer_count = 1;
 	entry = 1;
 	for (index = 0; index < 120U; index++) {
@@ -3866,6 +4268,8 @@ limbo_run(
 			limbo_truncated++;
 			break;
 		}
+
+		/* Keeps a private copy of the certificate and parses it. */
 		der[entry] = malloc(size);
 		CHECK(der[entry] != NULL);
 		if (der[entry] == NULL)
@@ -3884,19 +4288,29 @@ limbo_run(
 		params.has_time = 1;
 		params.time = parse_time(time_text);
 	}
+
+	/* Sets the name or the address the peer must have. */
 	kind = vec_get(file, "peer_kind");
-	if (kind != NULL && strcmp(kind, "DNS") == 0) {
+	is_dns = 0;
+	if (kind != NULL)
+		is_dns = strcmp(kind, "DNS") == 0;
+	if (is_dns) {
 		params.has_host = 1;
 		strncpy(params.host, vec_get(file, "peer_value"), CRYC_NAME_HOST_MAX);
 	} else if (kind != NULL) {
 		params.ip_size = parse_ip(vec_get(file, "peer_value"), params.ip);
 	}
+
+	/* Sets the depth limit, which counts all the certificates where the case counts only the intermediates. */
 	depth = (size_t)atol(vec_get(file, "max_depth"));
 	features = vec_get(file, "features");
-	if (depth != 0U)
+	if (depth != 0U) {
 		params.max_depth = depth + 2U;
-	else if (features != NULL && strstr(features, "max-chain-depth") != NULL)
-		params.max_depth = 2;
+	} else if (features != NULL) {
+		found = strstr(features, "max-chain-depth");
+		if (found != NULL)
+			params.max_depth = 2;
+	}
 
 	/* Validates, and compares with the case's expectation. */
 	error = cryc_chain_verify(&store, peer, peer_count, &params, &result);
@@ -3910,11 +4324,14 @@ limbo_run(
 	} else {
 		explained = 0;
 		for (index = 0; limbo_exceptions[index].id != NULL; index++) {
-			if (strcmp(limbo_exceptions[index].id, id) == 0) {
+			different = strcmp(limbo_exceptions[index].id, id);
+			if (different == 0) {
 				limbo_exceptions[index].seen++;
 				explained = 1;
 			}
 		}
+
+		/* Counts the difference as explained when the case is listed, and reports it when not. */
 		if (explained != 0) {
 			limbo_explained++;
 		} else {
@@ -3928,6 +4345,8 @@ limbo_run(
 		CHECK(result.chain_count >= 1U);
 		CHECK(result.chain[0]->der == peer[0].der);
 	}
+
+	/* Releases the copies of the certificates and the store. */
 	for (index = 0; index < PEER_MAX; index++)
 		free(der[index]);
 	cryc_store_free(&store);
@@ -3941,22 +4360,49 @@ test_limbo(void)
 	unsigned char *buffer;
 	const char *id;
 	unsigned index;
+	int selected;
+	int more;
+	int matched;
+	int error;
 
+	/* Takes the buffer one case is read into. */
 	buffer = malloc(LIMBO_MAX);
 	CHECK(buffer != NULL);
 	if (buffer == NULL)
 		return;
-	if (vec_open(&file, "limbo") != 0) {
+	error = vec_open(&file, "limbo");
+	if (error != 0) {
 		CHECK(0);
 		free(buffer);
 		return;
 	}
-	while (vec_next(&file)) {
+
+	/* Runs the selected cases of the corpus. */
+	for (more = vec_next(&file);
+	     more != 0;
+	     more = vec_next(&file)) {
 		id = vec_get(&file, "id");
-		if (strncmp(id, "rfc5280::", 9) != 0 && strncmp(id, "pathlen::", 9) != 0 && strncmp(id, "webpki::", 8) != 0 && strncmp(id, "pathological::", 14) != 0)
+
+		/* Picks the cases of the four id families this test covers. */
+		selected = 0;
+		matched = strncmp(id, "rfc5280::", 9);
+		if (matched == 0)
+			selected = 1;
+		matched = strncmp(id, "pathlen::", 9);
+		if (matched == 0)
+			selected = 1;
+		matched = strncmp(id, "webpki::", 8);
+		if (matched == 0)
+			selected = 1;
+		matched = strncmp(id, "pathological::", 14);
+		if (matched == 0)
+			selected = 1;
+		if (selected == 0)
 			continue;
 		limbo_run(&file, buffer);
 	}
+
+	/* Releases the file and the buffer. */
 	vec_close(&file);
 	free(buffer);
 
@@ -3966,6 +4412,8 @@ test_limbo(void)
 			printf("limbo: listed case did not differ once: %s\n", limbo_exceptions[index].id);
 		CHECK(limbo_exceptions[index].seen == 1);
 	}
+
+	/* Reports how the cases fared, and checks that every difference is listed. */
 	printf("limbo: %lu cases (%lu SUCCESS); %lu agree with the case, %lu differ with a listed reason, %lu unexplained; %lu SUCCESS cases valid; %lu unparsed leaves; %lu lists cut at 16\n", limbo_cases, limbo_success, limbo_agree, limbo_explained, limbo_unexplained, limbo_success_ok, limbo_refused_unparsed, limbo_truncated);
 	CHECK(limbo_unexplained == 0UL);
 	CHECK(limbo_cases == 179UL);
@@ -3998,6 +4446,7 @@ main(
 #endif
 	UNUSED_PARAMETER(length);
 
+	/* Runs the tests in turn. */
 	test_store_basics();
 	test_store_distrusted();
 	test_store_limits();

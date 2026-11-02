@@ -78,13 +78,29 @@ struct bytes {
 /* The state of the pseudo-random generator of the tests (xorshift32, Marsaglia 2003). */
 static uint32_t rng_state = 0x2545f491U;
 
-/* The pool of built byte strings: a test function takes a mark, builds, and puts the mark back. */
+/*
+ * The pool of built byte strings.
+ *
+ * A test function takes a mark, builds from the pool, and puts the mark back, so the pool is
+ * empty again between test functions.
+ */
 static struct bytes pool[POOL_MAX];
+
+/* How many byte strings of the pool are in use; the next one taken is pool[pool_next]. */
 static unsigned pool_next;
 
-/* The exact-size copies of the views of the certificates under test: a read past the end of a view is then an error of the address sanitizer. */
+/* The most exact-size copies that may be in use at once. */
 #define EXACT_MAX	8192U
+
+/*
+ * The exact-size copies of the views of the certificates under test.
+ *
+ * A read past the end of a view is then an error of the address sanitizer.  The copies are
+ * freed when the mark that preceded them is released.
+ */
 static unsigned char *exact_pointer[EXACT_MAX];
+
+/* How many entries of exact_pointer are in use. */
 static unsigned exact_count;
 
 /* What a test function takes back at its end: the pool of byte strings and the exact-size copies. */
@@ -93,8 +109,10 @@ struct mark {
 	unsigned exact;
 };
 
-/* The big lists of the budget test. */
+/* The permitted list of the budget test, filled by big_subtrees. */
 static unsigned char big_permitted[BIG_MAX];
+
+/* The excluded list or the subjectAltName contents of the budget test, filled by big_subtrees or by the DER writer. */
 static unsigned char big_san[BIG_MAX];
 
 /* The attribute types: CommonName, countryName, organizationName, organizationalUnitName, emailAddress. */
@@ -104,6 +122,399 @@ static unsigned char big_san[BIG_MAX];
 #define OID_OU		"2.5.4.11"
 #define OID_EMAIL	"1.2.840.113549.1.9.1"
 
+/* Expectations: the check allows (0), refuses (EACCES), or the names or constraints are malformed (EINVAL). */
+#define ALLOW		0
+#define DENY		EACCES
+
+/* One attribute of the random Names: its type index (0 CN, 1 O), tag index (0 printable, 1 UTF8, 2 IA5) and text. */
+struct model_attr {
+	unsigned type;
+	unsigned tag;
+	char text[8];
+};
+
+/* One random Name: RDNs of one or two attributes. */
+struct model_name {
+	unsigned rdn_count;
+	unsigned attr_count[3];
+	struct model_attr attr[3][2];
+};
+
+/* The string tag of each tag index of a model attribute. */
+static const unsigned model_tags[3] = { TAG_PRINTABLE, TAG_UTF8, TAG_IA5 };
+
+/* The attribute type of each type index of a model attribute. */
+static const char *const model_oids[2] = { OID_CN, OID_O };
+
+/*
+ * One x509-limbo case: the certificates as the case lists them (the peer
+ * first, then trusted.0 to trusted.3, then untrusted.0 to untrusted.119),
+ * each with its DER copy, its parse, whether it parsed and whether it is
+ * trusted.  The views of a parse point into the DER copy.
+ */
+struct limbo_case {
+	unsigned char *der[CHAIN_MAX];
+	struct cryc_x509 cert[CHAIN_MAX];
+	int parsed[CHAIN_MAX];
+	int trusted[CHAIN_MAX];
+	unsigned count;
+};
+
+/* How many x509-limbo cases the run read; counted up by test_limbo and checked at its end. */
+static unsigned long limbo_cases;
+
+/* How many cases had a peer name that could be read. */
+static unsigned long limbo_peer_names;
+
+/* How many cases expect SUCCESS. */
+static unsigned long limbo_success_cases;
+
+/* How many SUCCESS cases had a peer name that matched the peer certificate. */
+static unsigned long limbo_success_matched;
+
+/* How many cases that do not expect SUCCESS had a peer name that matched all the same. */
+static unsigned long limbo_failure_matched;
+
+/* How many cases had no peer certificate that parsed. */
+static unsigned long limbo_unparsed_peer;
+
+/* How many cases were tried for a chain. */
+static unsigned long limbo_chains;
+
+/* How many cases had no chain that can be built without a choice. */
+static unsigned long limbo_chain_skipped;
+
+/* How many SUCCESS cases had a chain whose name constraints were applied. */
+static unsigned long limbo_nc_success_chains;
+
+/* How many cases are about name constraints. */
+static unsigned long limbo_nc_cases;
+
+/* How many of those cases came out as the case says. */
+static unsigned long limbo_nc_agree;
+
+/* How many of those cases came out otherwise and are not listed with a reason. */
+static unsigned long limbo_nc_unexplained;
+
+/* How many of those cases are listed with a reason for coming out otherwise. */
+static unsigned long limbo_nc_explained;
+
+/* How many of those cases were refused by the name constraints. */
+static unsigned long limbo_nc_refused;
+
+/* How many of those cases were refused by the name only. */
+static unsigned long limbo_nc_refused_by_name;
+
+/* One x509-limbo case whose id says whether the peer name matches the peer certificate (1), does not (0), or is malformed (-1). */
+struct limbo_name_case {
+	const char *id;
+	int matches;
+};
+
+/*
+ * The table of x509-limbo cases whose match is known by id.
+ *
+ * It holds what a name match gives for the cases where the case itself says why
+ * the validation fails: a wrong name, a wildcard that breaks a rule, no
+ * subjectAltName.  The ones marked 1 match here because the case fails
+ * for a reason this module does not judge: a wildcard on a public suffix
+ * (no list is consulted), an underscore (the match accepts it), and the
+ * policy of the validation.
+ */
+static const struct limbo_name_case limbo_name_cases[] = {
+	{ "webpki::san::mismatch-domain-san", 0 },
+	{ "webpki::san::mismatch-subdomain-san", 0 },
+	{ "webpki::san::mismatch-subdomain-apex-san", 0 },
+	{ "webpki::san::mismatch-apex-subdomain-san", 0 },
+	{ "webpki::san::public-suffix-wildcard-san", 0 },
+	{ "webpki::san::public-suffix-multi-label-wildcard-san", 1 },
+	{ "webpki::san::public-suffix-private-namespace-wildcard-san", 1 },
+	{ "webpki::san::wildcard-embedded-leftmost-san", 0 },
+	{ "webpki::san::wildcard-not-in-leftmost-san", 0 },
+	{ "webpki::san::wildcard-match-across-labels-san", 0 },
+	{ "webpki::san::wildcard-embedded-ulabel-san", 0 },
+	{ "webpki::san::unicode-emoji-san", 0 },
+	{ "webpki::san::no-san", 0 },
+	{ "webpki::san::san-wildcard-only", 0 },
+	{ "webpki::san::san-wildcard-only-tld", 0 },
+	{ "webpki::san::leftmost-wildcard-san", 1 },
+	{ "webpki::san::exact-dns-san", 1 },
+	{ "webpki::san::exact-localhost-ip-san", 1 },
+	{ "rfc5280::san::underscore-dns", 1 },
+	{ "rfc5280::san::ip-in-dns", 0 },
+	{ "webpki::cn::ipv4-hex-mismatch", 1 },
+	{ "webpki::cn::ipv4-leading-zeros-mismatch", 1 },
+	{ "webpki::cn::ipv6-uppercase-mismatch", 1 },
+	{ "webpki::cn::ipv6-uncompressed-mismatch", 1 },
+	{ "webpki::cn::ipv6-non-rfc5952-mismatch", 1 },
+	{ "webpki::cn::punycode-not-in-san", 1 },
+	{ "webpki::cn::utf8-vs-punycode-mismatch", 1 },
+	{ "webpki::cn::not-in-san", 1 },
+	{ "webpki::cn::case-mismatch", 1 },
+	{ "webpki::san::san-critical-with-nonempty-subject", 1 },
+	{ "rfc5280::san::noncritical-with-empty-subject", 1 },
+	{ "rfc5280::san::malformed", -1 },
+	{ NULL, 0 }
+};
+
+/* One x509-limbo case about name constraints whose outcome this module does not decide, with the result the check gives. */
+struct limbo_nc_exception {
+	const char *id;
+	int check_result;
+};
+
+/*
+ * The table of the name-constraint cases that come out otherwise.
+ *
+ * These are the cases (by id) where the constraint check on
+ * the chain gives a different answer from the case's expected result: the
+ * case fails for a reason that is not a name constraint, or the case
+ * expects a rule this check does not apply.  The check's result is the one
+ * given here.
+ */
+static const struct limbo_nc_exception limbo_nc_exceptions[] = {
+	{ "rfc5280::nc::permitted-dns-match-noncritical", 0 },
+	{ "rfc5280::nc::not-allowed-in-ee-noncritical", 0 },
+	{ "rfc5280::nc::not-allowed-in-ee-critical", 0 },
+	{ "rfc5280::nc::invalid-dnsname-leading-period", 0 },
+	{ NULL, 0 }
+};
+
+/* Returns the next pseudo-random 32-bit value. */
+static uint32_t rng_next(void);
+
+/* Returns a pseudo-random value below limit. */
+static unsigned rng_below(unsigned limit);
+
+/* Takes a fresh byte string from the pool. */
+static struct bytes *b_new(void);
+
+/* Takes a mark of the pool and of the exact-size copies. */
+static struct mark mark_take(void);
+
+/* Gives back everything taken since the mark. */
+static void mark_release(struct mark taken);
+
+/* Copies bytes into a block of exactly their size (a block of one byte for none), kept until the mark is released. */
+static unsigned char *exact_copy(const unsigned char *data, size_t size);
+
+/* Builds a byte string from raw bytes. */
+static struct bytes *b_raw(const void *data, size_t size);
+
+/* Builds the bytes of a C string, without the NUL. */
+static struct bytes *b_text(const char *text);
+
+/* Builds hex text as bytes. */
+static struct bytes *b_hex(const char *text);
+
+/* Builds one element: tag, minimal length, contents. */
+static struct bytes *b_tlv(unsigned tag, const struct bytes *content);
+
+/* Builds an element with the bytes of a C string as its contents. */
+static struct bytes *b_str(unsigned tag, const char *text);
+
+/* Concatenates two byte strings. */
+static struct bytes *b_cat(const struct bytes *first, const struct bytes *second);
+
+/* Concatenates three byte strings. */
+static struct bytes *b_cat3(const struct bytes *first, const struct bytes *second, const struct bytes *third);
+
+/* Builds an OBJECT IDENTIFIER element from dotted text. */
+static struct bytes *b_oid(const char *dotted);
+
+/* Builds an AttributeTypeAndValue: SEQUENCE { OID, string of the given tag }. */
+static struct bytes *b_attr(const char *oid, unsigned tag, const char *text);
+
+/* Builds an RDN of one attribute: SET { attribute }. */
+static struct bytes *b_rdn(const struct bytes *attribute);
+
+/* Builds a Name from RDNs already concatenated: SEQUENCE { rdns }. */
+static struct bytes *b_name(const struct bytes *rdns);
+
+/* The empty Name. */
+static struct bytes *n_empty(void);
+
+/* A Name of one RDN with one attribute. */
+static struct bytes *n_one(const char *oid, unsigned tag, const char *text);
+
+/* A Name from a short spec: "C=US,O=Org,CN=a b".  Each item is one RDN of one attribute; C is a PrintableString, E an IA5String, the others UTF8Strings. / */
+static struct bytes *n_spec(const char *spec);
+
+/* Builds a dNSName GeneralName. */
+static struct bytes *g_dns(const char *text);
+
+/* Builds an rfc822Name GeneralName. */
+static struct bytes *g_mail(const char *text);
+
+/* Builds a uniformResourceIdentifier GeneralName. */
+static struct bytes *g_uri(const char *text);
+
+/* Builds an iPAddress GeneralName of a 4-octet IPv4 address. */
+static struct bytes *g_ip4(unsigned a, unsigned b, unsigned c, unsigned d);
+
+/* An iPAddress of 8 octets: an address and a mask (a constraint), or any other length from hex. */
+static struct bytes *g_ip_hex(const char *hex);
+
+/* Builds a directoryName GeneralName from a Name. */
+static struct bytes *g_dir(const struct bytes *name);
+
+/* A subtree of a base: SEQUENCE { base }. */
+static struct bytes *s_sub(const struct bytes *base);
+
+/* Builds a certificate structure with only the fields of this module's functions: subject Name, subjectAltName contents. */
+static void make_cert(struct cryc_x509 *cert, const struct bytes *subject, const struct bytes *san);
+
+/* Builds a constraining certificate: the two lists' contents (NULL leaves a list out). */
+static void make_ca(struct cryc_x509 *ca, const struct bytes *permitted, const struct bytes *excluded);
+
+/* Runs a name constraints check and returns its result. */
+static int nc(const struct bytes *permitted, const struct bytes *excluded, const struct bytes *subject, const struct bytes *san);
+
+/* The names of a SAN of one dNSName with a permitted dNSName constraint, as one call. */
+static int nc_dns(const char *permitted, const char *excluded, const char *name);
+
+/* Compares two Names given as raw bytes, each in a block of exactly its size (NULL is passed as NULL). */
+static int raw_eq(const unsigned char *left, size_t left_size, const unsigned char *right, size_t right_size);
+
+/* Compares two Names given as byte strings. */
+static int name_eq(const struct bytes *left, const struct bytes *right);
+
+/* The model of RFC 5280 7.1 for ASCII text: trim, collapse spaces, lower case, written as a new string. */
+static void model_fold(const char *text, char *out);
+
+/* Makes a random Name model. */
+static void model_random(struct model_name *model);
+
+/* Builds the DER of a model Name. */
+static struct bytes *model_build(const struct model_name *model);
+
+/* The model's answer: are two attributes equal by the rule. */
+static int model_attr_equal(const struct model_attr *left, const struct model_attr *right);
+
+/* The model's answer for two Names. */
+static int model_equal(const struct model_name *left, const struct model_name *right);
+
+/* Changes a model Name a little: the case of a letter, spaces, the tag between printable and UTF8, or one letter. */
+static void model_perturb(struct model_name *model);
+
+/* The hand-written cases of cryc_name_equal. */
+static void test_equal_cases(void);
+
+/* Random Names against a model, and reflexivity and symmetry. */
+static void test_equal_random(void);
+
+/* Mutated and random encodings: no crash, and equal only to itself-like names. */
+static void test_equal_mutations(void);
+
+/* The model of the normalization, written from the rules: returns 1 and the result, or 0 for an error. */
+static int model_normalize(const char *host, char *out);
+
+/* Checks one input of the normalization against its expected outcome. */
+static void normalize_case(const char *host, const char *expected);
+
+/* Builds a host name of count labels of the given length joined by dots into out. */
+static void build_labels(char *out, unsigned count, unsigned length);
+
+/* The cases of cryc_name_host_normalize. */
+static void test_normalize(void);
+
+/* Matches a host against a certificate whose SAN has the given GeneralNames. */
+static int host_vs(const struct bytes *san, const char *host);
+
+/* Matches a host against one dNSName of a certificate. */
+static int dns_vs(const char *presented, const char *host);
+
+/* The model of the matching of one dNSName against a normalized reference, written from RFC 9525 6.3 with labels in arrays. */
+static int model_match(const char *presented, const char *reference);
+
+/* The hand-written cases of host matching. */
+static void test_match_host(void);
+
+/* The cases of IP address matching. */
+static void test_match_ip(void);
+
+/* The cases of dNSName constraints. */
+static void test_nc_dns(void);
+
+/* Runs a check with one iPAddress constraint (hex of address and mask) and one name of the given hex. */
+static int nc_ip(const char *permitted, const char *excluded, const char *name);
+
+/* The cases of iPAddress constraints. */
+static void test_nc_ip(void);
+
+/* Runs a check with one rfc822Name constraint and one mailbox name. */
+static int nc_mail(const char *permitted, const char *excluded, const char *name);
+
+/* The cases of rfc822Name constraints and of the emailAddress attribute of the subject. */
+static void test_nc_mail(void);
+
+/* The cases of directoryName constraints. */
+static void test_nc_directory(void);
+
+/* The forms this module does not evaluate, malformed tags, and the preconditions. */
+static void test_nc_other(void);
+
+/* Writes count subtrees "<format with %u>" into dest, then the subtree last when it is not NULL; returns the size. */
+static size_t big_subtrees(unsigned char *dest, unsigned count, const char *format, const char *last);
+
+/* The budget of comparisons, tested at its edge. */
+static void test_nc_budget(void);
+
+/* Parses a text IP address (IPv4 dotted, or IPv6 with groups and one "::") into out; returns 4, 16, or 0 when it is not one. */
+static size_t parse_ip(const char *text, unsigned char *out);
+
+/* Checks the IP parser on the forms the cases use. */
+static void test_parse_ip(void);
+
+/* Reads the certificates of one record into a case. */
+static void limbo_load(const struct vec_file *file, struct limbo_case *chain);
+
+/* Frees what limbo_load allocated. */
+static void limbo_free(struct limbo_case *chain);
+
+/* Builds the chain from the peer up when each step has exactly one certificate whose subject equals the issuer of the one below and the chain ends in a trusted one; writes the indexes, peer first, and returns the length, or 0 when a step has none or has a choice. / */
+static unsigned limbo_build_chain(const struct limbo_case *chain, unsigned *order);
+
+/* Applies the name constraints of every certificate of a chain to the certificates below it; returns 0 when all are allowed, else the first error. */
+static int limbo_apply_constraints(const struct limbo_case *chain, const unsigned *order, unsigned length);
+
+/* Looks up the expected match of a case id; returns -1 when the id is not in the list. */
+static int limbo_name_expected(const char *id);
+
+/* Matches the peer name of a case against the peer certificate; returns 1 or 0, and -1 when the case has no name or it cannot be read. */
+static int limbo_match_peer(const struct vec_file *file, const struct limbo_case *chain);
+
+/* Runs the name constraints of the chain of one case and compares with the case. */
+static void limbo_check_constraints(const struct vec_file *file, const struct limbo_case *chain, int name_match);
+
+/* Runs the name matching and the name constraints over every SERVER case of x509-limbo. */
+static void test_limbo(void);
+
+/*
+ * Runs every test of the names of certificates in turn.
+ *
+ * The exit status is that of check_finish, which prints the result line the test runner reads.
+ */
+int
+main(void)
+{
+	test_equal_cases();
+	test_equal_random();
+	test_equal_mutations();
+	test_normalize();
+	test_match_host();
+	test_match_ip();
+	test_nc_dns();
+	test_nc_ip();
+	test_nc_mail();
+	test_nc_directory();
+	test_nc_other();
+	test_nc_budget();
+	test_parse_ip();
+	test_limbo();
+	return check_finish("test-name");
+}
+
 /* Returns the next pseudo-random 32-bit value. */
 static uint32_t
 rng_next(void)
@@ -112,6 +523,8 @@ rng_next(void)
 	rng_state ^= rng_state << 13;
 	rng_state ^= rng_state >> 17;
 	rng_state ^= rng_state << 5;
+
+	/* Reports the new state as the next random value. */
 	return rng_state;
 }
 
@@ -120,7 +533,13 @@ static unsigned
 rng_below(
 	unsigned limit)
 {
-	return (unsigned)(rng_next() % limit);
+	unsigned below;
+
+	/* Reduces the next random value into the range. */
+	below = (unsigned)(rng_next() % limit);
+
+	/* Reports the random value below the limit. */
+	return below;
 }
 
 /* Takes a fresh byte string from the pool. */
@@ -134,8 +553,12 @@ b_new(void)
 		printf("FAIL pool exhausted\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Takes the next free byte string and empties it. */
 	item = &pool[pool_next++];
 	item->size = 0;
+
+	/* Reports the empty byte string. */
 	return item;
 }
 
@@ -145,8 +568,11 @@ mark_take(void)
 {
 	struct mark taken;
 
+	/* Records how far the pool and the exact-size copies are used. */
 	taken.pool = pool_next;
 	taken.exact = exact_count;
+
+	/* Reports the mark. */
 	return taken;
 }
 
@@ -155,8 +581,11 @@ static void
 mark_release(
 	struct mark taken)
 {
+	/* Frees the exact-size copies taken since the mark. */
 	while (exact_count > taken.exact)
 		free(exact_pointer[--exact_count]);
+
+	/* Puts the pool back to where it stood at the mark. */
 	pool_next = taken.pool;
 }
 
@@ -167,19 +596,32 @@ exact_copy(
 	size_t size)
 {
 	unsigned char *copy;
+	size_t room;
 
+	/* The table of copies has a fixed size; running out is a mistake of the test. */
 	if (exact_count >= EXACT_MAX) {
 		printf("FAIL too many exact copies\n");
 		exit(EXIT_FAILURE);
 	}
-	copy = malloc(size > 0U ? size : 1U);
+
+	/* Takes a block of exactly the size, or of one byte when there is nothing to copy. */
+	room = size;
+	if (size == 0U)
+		room = 1U;
+	copy = malloc(room);
 	if (copy == NULL) {
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Fills the block when there are bytes to copy. */
 	if (size > 0U)
 		memcpy(copy, data, size);
+
+	/* Keeps the block until the mark is released. */
 	exact_pointer[exact_count++] = copy;
+
+	/* Reports the block. */
 	return copy;
 }
 
@@ -191,14 +633,23 @@ b_raw(
 {
 	struct bytes *item;
 
+	/* Takes a byte string from the pool. */
 	item = b_new();
+
+	/* Data over the room of a byte string is a mistake of the test. */
 	if (size > BYTES_MAX) {
 		printf("FAIL byte string too large\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Copies the bytes in when there are any. */
 	if (size > 0U)
 		memcpy(item->data, data, size);
+
+	/* Records how many bytes the string holds. */
 	item->size = size;
+
+	/* Reports the byte string. */
 	return item;
 }
 
@@ -207,7 +658,13 @@ static struct bytes *
 b_text(
 	const char *text)
 {
-	return b_raw(text, strlen(text));
+	struct bytes *item;
+
+	/* Copies the characters of the text, without the NUL, into a byte string. */
+	item = b_raw(text, strlen(text));
+
+	/* Reports the byte string. */
+	return item;
 }
 
 /* Builds hex text as bytes. */
@@ -218,13 +675,18 @@ b_hex(
 	struct bytes *item;
 	size_t size;
 
+	/* Takes a byte string from the pool and decodes the text into it. */
 	item = b_new();
 	size = hex_decode(text, item->data, BYTES_MAX);
 	if (size == (size_t)-1) {
 		printf("FAIL bad hex %s\n", text);
 		exit(EXIT_FAILURE);
 	}
+
+	/* Records how many bytes the text decoded to. */
 	item->size = size;
+
+	/* Reports the byte string. */
 	return item;
 }
 
@@ -237,6 +699,7 @@ b_tlv(
 	struct bytes *item;
 	struct der_writer writer;
 
+	/* Takes a byte string from the pool and writes the element into it. */
 	item = b_new();
 	der_init(&writer, item->data, BYTES_MAX);
 	der_put(&writer, tag, content->data, content->size);
@@ -244,7 +707,11 @@ b_tlv(
 		printf("FAIL element too large\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Records how many bytes the element takes. */
 	item->size = writer.used;
+
+	/* Reports the element. */
 	return item;
 }
 
@@ -254,10 +721,17 @@ b_str(
 	unsigned tag,
 	const char *text)
 {
+	struct bytes *contents;
 	struct bytes *item;
 
-	item = b_text(text);
-	return b_tlv(tag, item);
+	/* Takes the bytes of the text as the contents of the element. */
+	contents = b_text(text);
+
+	/* Wraps the contents in the element of the tag. */
+	item = b_tlv(tag, contents);
+
+	/* Reports the element. */
+	return item;
 }
 
 /* Concatenates two byte strings. */
@@ -268,14 +742,19 @@ b_cat(
 {
 	struct bytes *item;
 
+	/* Two parts that together do not fit are a mistake of the test. */
 	if (first->size + second->size > BYTES_MAX) {
 		printf("FAIL concatenation too large\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Takes a byte string and fills it with the first part and then the second. */
 	item = b_new();
 	memcpy(item->data, first->data, first->size);
 	memcpy(item->data + first->size, second->data, second->size);
 	item->size = first->size + second->size;
+
+	/* Reports the concatenation. */
 	return item;
 }
 
@@ -286,7 +765,15 @@ b_cat3(
 	const struct bytes *second,
 	const struct bytes *third)
 {
-	return b_cat(b_cat(first, second), third);
+	struct bytes *pair;
+	struct bytes *item;
+
+	/* Joins the first two parts, then the third after them. */
+	pair = b_cat(first, second);
+	item = b_cat(pair, third);
+
+	/* Reports the concatenation. */
+	return item;
 }
 
 /* Builds an OBJECT IDENTIFIER element from dotted text. */
@@ -297,10 +784,13 @@ b_oid(
 	struct bytes *item;
 	struct der_writer writer;
 
+	/* Takes a byte string from the pool and writes the identifier into it. */
 	item = b_new();
 	der_init(&writer, item->data, BYTES_MAX);
 	der_oid(&writer, dotted);
 	item->size = writer.used;
+
+	/* Reports the OBJECT IDENTIFIER element. */
 	return item;
 }
 
@@ -311,7 +801,21 @@ b_attr(
 	unsigned tag,
 	const char *text)
 {
-	return b_tlv(0x30U, b_cat(b_oid(oid), b_str(tag, text)));
+	struct bytes *type;
+	struct bytes *value;
+	struct bytes *pair;
+	struct bytes *item;
+
+	/* Builds the two parts of the attribute: its type and its value. */
+	type = b_oid(oid);
+	value = b_str(tag, text);
+
+	/* Joins them and wraps them in the SEQUENCE. */
+	pair = b_cat(type, value);
+	item = b_tlv(0x30U, pair);
+
+	/* Reports the attribute. */
+	return item;
 }
 
 /* Builds an RDN of one attribute: SET { attribute }. */
@@ -319,7 +823,13 @@ static struct bytes *
 b_rdn(
 	const struct bytes *attribute)
 {
-	return b_tlv(0x31U, attribute);
+	struct bytes *item;
+
+	/* Wraps the attribute in the SET. */
+	item = b_tlv(0x31U, attribute);
+
+	/* Reports the RDN. */
+	return item;
 }
 
 /* Builds a Name from RDNs already concatenated: SEQUENCE { rdns }. */
@@ -327,7 +837,13 @@ static struct bytes *
 b_name(
 	const struct bytes *rdns)
 {
-	return b_tlv(0x30U, rdns);
+	struct bytes *item;
+
+	/* Wraps the RDNs in the SEQUENCE. */
+	item = b_tlv(0x30U, rdns);
+
+	/* Reports the Name. */
+	return item;
 }
 
 /* The empty Name. */
@@ -335,9 +851,14 @@ static struct bytes *
 n_empty(void)
 {
 	struct bytes *none;
+	struct bytes *item;
 
+	/* Takes an empty list of RDNs and wraps it as a Name. */
 	none = b_new();
-	return b_name(none);
+	item = b_name(none);
+
+	/* Reports the empty Name. */
+	return item;
 }
 
 /* A Name of one RDN with one attribute. */
@@ -347,7 +868,17 @@ n_one(
 	unsigned tag,
 	const char *text)
 {
-	return b_name(b_rdn(b_attr(oid, tag, text)));
+	struct bytes *attribute;
+	struct bytes *rdn;
+	struct bytes *item;
+
+	/* Builds the attribute, the RDN around it, and the Name around that. */
+	attribute = b_attr(oid, tag, text);
+	rdn = b_rdn(attribute);
+	item = b_name(rdn);
+
+	/* Reports the Name. */
+	return item;
 }
 
 /*
@@ -360,68 +891,119 @@ n_spec(
 	const char *spec)
 {
 	struct bytes *rdns;
+	struct bytes *attribute;
+	struct bytes *rdn;
+	struct bytes *item;
 	char key[8];
 	char value[64];
 	const char *oid;
 	unsigned tag;
 	size_t length;
+	int is_country;
+	int is_organization;
+	int is_unit;
+	int is_mail;
 
+	/* Starts with no RDN; each item of the spec adds one. */
 	rdns = b_new();
 	while (*spec != '\0') {
+		/* Cuts the key at the "=". */
 		length = 0;
 		while (spec[length] != '=')
 			length++;
 		memcpy(key, spec, length);
 		key[length] = '\0';
 		spec += length + 1U;
+
+		/* Cuts the value at the next "," or at the end. */
 		length = 0;
 		while (spec[length] != ',' && spec[length] != '\0')
 			length++;
 		memcpy(value, spec, length);
 		value[length] = '\0';
 		spec += length;
+
+		/* Steps over the separator when another item follows. */
 		if (*spec == ',')
 			spec++;
+
+		/* Looks the key up in the table of the keys of the spec. */
+		is_country = strcmp(key, "C");
+		is_organization = strcmp(key, "O");
+		is_unit = strcmp(key, "OU");
+		is_mail = strcmp(key, "E");
+
+		/* Picks the attribute type and the string tag of the key; CommonName and UTF8String are the default. */
 		oid = OID_CN;
 		tag = TAG_UTF8;
-		if (strcmp(key, "C") == 0) {
+		if (is_country == 0) {
 			oid = OID_C;
 			tag = TAG_PRINTABLE;
-		} else if (strcmp(key, "O") == 0) {
+		} else if (is_organization == 0) {
 			oid = OID_O;
-		} else if (strcmp(key, "OU") == 0) {
+		} else if (is_unit == 0) {
 			oid = OID_OU;
-		} else if (strcmp(key, "E") == 0) {
+		} else if (is_mail == 0) {
 			oid = OID_EMAIL;
 			tag = TAG_IA5;
 		}
-		rdns = b_cat(rdns, b_rdn(b_attr(oid, tag, value)));
+
+		/* Appends the RDN of the item to the list. */
+		attribute = b_attr(oid, tag, value);
+		rdn = b_rdn(attribute);
+		rdns = b_cat(rdns, rdn);
 	}
-	return b_name(rdns);
+
+	/* Wraps the RDNs in the Name. */
+	item = b_name(rdns);
+
+	/* Reports the Name. */
+	return item;
 }
 
-/* GeneralName builders. */
+/* Builds a dNSName GeneralName. */
 static struct bytes *
 g_dns(
 	const char *text)
 {
-	return b_str(TAG_DNS, text);
+	struct bytes *item;
+
+	/* Wraps the text in the GeneralName of the kind. */
+	item = b_str(TAG_DNS, text);
+
+	/* Reports the GeneralName. */
+	return item;
 }
 
+/* Builds an rfc822Name GeneralName. */
 static struct bytes *
 g_mail(
 	const char *text)
 {
-	return b_str(TAG_MAIL, text);
+	struct bytes *item;
+
+	/* Wraps the text in the GeneralName of the kind. */
+	item = b_str(TAG_MAIL, text);
+
+	/* Reports the GeneralName. */
+	return item;
 }
 
+/* Builds a uniformResourceIdentifier GeneralName. */
 static struct bytes *
 g_uri(
 	const char *text)
 {
-	return b_str(TAG_URI, text);
+	struct bytes *item;
+
+	/* Wraps the text in the GeneralName of the kind. */
+	item = b_str(TAG_URI, text);
+
+	/* Reports the GeneralName. */
+	return item;
 }
 
+/* Builds an iPAddress GeneralName of a 4-octet IPv4 address. */
 static struct bytes *
 g_ip4(
 	unsigned a,
@@ -430,12 +1012,21 @@ g_ip4(
 	unsigned d)
 {
 	unsigned char octets[4];
+	struct bytes *raw;
+	struct bytes *item;
 
+	/* Lays out the four octets of the address. */
 	octets[0] = (unsigned char)a;
 	octets[1] = (unsigned char)b;
 	octets[2] = (unsigned char)c;
 	octets[3] = (unsigned char)d;
-	return b_tlv(TAG_IP, b_raw(octets, sizeof(octets)));
+
+	/* Wraps them in the iPAddress GeneralName. */
+	raw = b_raw(octets, sizeof(octets));
+	item = b_tlv(TAG_IP, raw);
+
+	/* Reports the GeneralName. */
+	return item;
 }
 
 /* An iPAddress of 8 octets: an address and a mask (a constraint), or any other length from hex. */
@@ -443,14 +1034,29 @@ static struct bytes *
 g_ip_hex(
 	const char *hex)
 {
-	return b_tlv(TAG_IP, b_hex(hex));
+	struct bytes *octets;
+	struct bytes *item;
+
+	/* Decodes the hex text and wraps it in the iPAddress GeneralName. */
+	octets = b_hex(hex);
+	item = b_tlv(TAG_IP, octets);
+
+	/* Reports the GeneralName. */
+	return item;
 }
 
+/* Builds a directoryName GeneralName from a Name. */
 static struct bytes *
 g_dir(
 	const struct bytes *name)
 {
-	return b_tlv(TAG_DIR, name);
+	struct bytes *item;
+
+	/* Wraps the Name in the directoryName GeneralName. */
+	item = b_tlv(TAG_DIR, name);
+
+	/* Reports the GeneralName. */
+	return item;
 }
 
 /* A subtree of a base: SEQUENCE { base }. */
@@ -458,7 +1064,13 @@ static struct bytes *
 s_sub(
 	const struct bytes *base)
 {
-	return b_tlv(0x30U, base);
+	struct bytes *item;
+
+	/* Wraps the base in the SEQUENCE of a subtree. */
+	item = b_tlv(0x30U, base);
+
+	/* Reports the subtree. */
+	return item;
 }
 
 /* Builds a certificate structure with only the fields of this module's functions: subject Name, subjectAltName contents. */
@@ -468,11 +1080,16 @@ make_cert(
 	const struct bytes *subject,
 	const struct bytes *san)
 {
+	/* Starts from a certificate with nothing set. */
 	memset(cert, 0, sizeof(*cert));
+
+	/* Sets the subject Name when one is given. */
 	if (subject != NULL) {
 		cert->subject = exact_copy(subject->data, subject->size);
 		cert->subject_size = subject->size;
 	}
+
+	/* Sets the subjectAltName when one is given. */
 	if (san != NULL) {
 		cert->flags |= CRYC_X509_HAS_SAN;
 		cert->san = exact_copy(san->data, san->size);
@@ -487,12 +1104,17 @@ make_ca(
 	const struct bytes *permitted,
 	const struct bytes *excluded)
 {
+	/* Starts from a certificate that has name constraints and no list. */
 	memset(ca, 0, sizeof(*ca));
 	ca->flags |= CRYC_X509_HAS_NAME_CONSTRAINTS;
+
+	/* Sets the permitted list when one is given. */
 	if (permitted != NULL) {
 		ca->permitted = exact_copy(permitted->data, permitted->size);
 		ca->permitted_size = permitted->size;
 	}
+
+	/* Sets the excluded list when one is given. */
 	if (excluded != NULL) {
 		ca->excluded = exact_copy(excluded->data, excluded->size);
 		ca->excluded_size = excluded->size;
@@ -512,13 +1134,18 @@ nc(
 	int first;
 	int second;
 
+	/* Builds the constraining certificate and the certificate under test. */
 	make_ca(&ca, permitted, excluded);
 	make_cert(&leaf, subject, san);
+
+	/* Checks the certificate as the leaf of the chain. */
 	first = cryc_name_constraints_check(&ca, &leaf, 1);
 
-	/* is_leaf does not change the result. */
+	/* Checks it again as a certificate in the middle: is_leaf does not change the result. */
 	second = cryc_name_constraints_check(&ca, &leaf, 0);
 	CHECK(first == second);
+
+	/* Reports the result of the check. */
 	return first;
 }
 
@@ -529,16 +1156,31 @@ nc_dns(
 	const char *excluded,
 	const char *name)
 {
-	struct bytes *p;
-	struct bytes *e;
+	struct bytes *permitted_list;
+	struct bytes *excluded_list;
+	struct bytes *subject;
+	struct bytes *san;
+	int result;
 
-	p = NULL;
-	e = NULL;
+	/* Starts with no list. */
+	permitted_list = NULL;
+	excluded_list = NULL;
+
+	/* Builds the permitted list when a constraint is given. */
 	if (permitted != NULL)
-		p = s_sub(g_dns(permitted));
+		permitted_list = s_sub(g_dns(permitted));
+
+	/* Builds the excluded list when a constraint is given. */
 	if (excluded != NULL)
-		e = s_sub(g_dns(excluded));
-	return nc(p, e, n_empty(), g_dns(name));
+		excluded_list = s_sub(g_dns(excluded));
+
+	/* Runs the check on a certificate with an empty subject and the one name. */
+	subject = n_empty();
+	san = g_dns(name);
+	result = nc(permitted_list, excluded_list, subject, san);
+
+	/* Reports the result of the check. */
+	return result;
 }
 
 /* Compares two Names given as raw bytes, each in a block of exactly its size (NULL is passed as NULL). */
@@ -554,11 +1196,24 @@ raw_eq(
 	const unsigned char *right_copy;
 	int result;
 
+	/* Remembers where the copies start, to give them back after the comparison. */
 	taken = mark_take();
-	left_copy = left == NULL ? NULL : exact_copy(left, left_size);
-	right_copy = right == NULL ? NULL : exact_copy(right, right_size);
+
+	/* Gives each Name a block of exactly its size; a NULL stays NULL. */
+	left_copy = NULL;
+	if (left != NULL)
+		left_copy = exact_copy(left, left_size);
+	right_copy = NULL;
+	if (right != NULL)
+		right_copy = exact_copy(right, right_size);
+
+	/* Compares the Names in their blocks. */
 	result = cryc_name_equal(left_copy, left_size, right_copy, right_size);
+
+	/* Gives the copies back. */
 	mark_release(taken);
+
+	/* Reports the result of the comparison. */
 	return result;
 }
 
@@ -568,7 +1223,13 @@ name_eq(
 	const struct bytes *left,
 	const struct bytes *right)
 {
-	return raw_eq(left->data, left->size, right->data, right->size);
+	int result;
+
+	/* Compares the bytes of the two Names. */
+	result = raw_eq(left->data, left->size, right->data, right->size);
+
+	/* Reports the result of the comparison. */
+	return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -585,40 +1246,35 @@ model_fold(
 	size_t index;
 	size_t used;
 	int in_space;
+	char letter;
 
+	/* Starts at the beginning of the text, outside a run of spaces. */
 	length = strlen(text);
 	used = 0;
 	in_space = 0;
+
+	/* Copies the text, folding runs of spaces and the case of letters. */
 	for (index = 0; index < length; index++) {
 		if (text[index] == ' ') {
+			/* A space is held back until a letter follows, so the ends are trimmed. */
 			in_space = 1;
 		} else {
+			/* A held space between two words becomes one space. */
 			if (in_space && used > 0U)
 				out[used++] = ' ';
 			in_space = 0;
-			out[used++] = (char)((text[index] >= 'A' && text[index] <= 'Z') ? text[index] + 32 : text[index]);
+
+			/* An upper-case ASCII letter becomes lower case. */
+			letter = text[index];
+			if (letter >= 'A' && letter <= 'Z')
+				letter = (char)(letter + 32);
+			out[used++] = letter;
 		}
 	}
+
+	/* Ends the folded text. */
 	out[used] = '\0';
 }
-
-/* One attribute of the random Names: its type index (0 CN, 1 O), tag index (0 printable, 1 UTF8, 2 IA5) and text. */
-struct model_attr {
-	unsigned type;
-	unsigned tag;
-	char text[8];
-};
-
-/* One random Name: RDNs of one or two attributes. */
-struct model_name {
-	unsigned rdn_count;
-	unsigned attr_count[3];
-	struct model_attr attr[3][2];
-};
-
-/* The tags and types by index. */
-static const unsigned model_tags[3] = { TAG_PRINTABLE, TAG_UTF8, TAG_IA5 };
-static const char *const model_oids[2] = { OID_CN, OID_O };
 
 /* Makes a random Name model. */
 static void
@@ -631,8 +1287,11 @@ model_random(
 	unsigned index;
 	static const char alphabet[4] = { 'a', 'A', ' ', 'b' };
 
+	/* Starts from an empty model, then draws the number of RDNs. */
 	memset(model, 0, sizeof(*model));
 	model->rdn_count = rng_below(4);
+
+	/* Draws the attributes of each RDN. */
 	for (rdn = 0; rdn < model->rdn_count; rdn++) {
 		model->attr_count[rdn] = 1U + rng_below(2);
 		for (attr = 0; attr < model->attr_count[rdn]; attr++) {
@@ -652,17 +1311,37 @@ model_build(
 {
 	struct bytes *rdns;
 	struct bytes *attrs;
+	struct bytes *attribute;
+	struct bytes *rdn_set;
+	struct bytes *item;
+	const char *oid;
+	unsigned tag;
 	unsigned rdn;
 	unsigned attr;
 
+	/* Starts with no RDN. */
 	rdns = b_new();
+
+	/* Builds each RDN as a SET of its attributes. */
 	for (rdn = 0; rdn < model->rdn_count; rdn++) {
 		attrs = b_new();
-		for (attr = 0; attr < model->attr_count[rdn]; attr++)
-			attrs = b_cat(attrs, b_attr(model_oids[model->attr[rdn][attr].type], model_tags[model->attr[rdn][attr].tag], model->attr[rdn][attr].text));
-		rdns = b_cat(rdns, b_tlv(0x31U, attrs));
+		for (attr = 0; attr < model->attr_count[rdn]; attr++) {
+			oid = model_oids[model->attr[rdn][attr].type];
+			tag = model_tags[model->attr[rdn][attr].tag];
+			attribute = b_attr(oid, tag, model->attr[rdn][attr].text);
+			attrs = b_cat(attrs, attribute);
+		}
+
+		/* Wraps the attributes in the SET of the RDN and appends it. */
+		rdn_set = b_tlv(0x31U, attrs);
+		rdns = b_cat(rdns, rdn_set);
 	}
-	return b_name(rdns);
+
+	/* Wraps the RDNs in the Name. */
+	item = b_name(rdns);
+
+	/* Reports the Name. */
+	return item;
 }
 
 /* The model's answer: are two attributes equal by the rule. */
@@ -673,6 +1352,7 @@ model_attr_equal(
 {
 	char left_folded[16];
 	char right_folded[16];
+	int order;
 
 	/* Different types are different. */
 	if (left->type != right->type)
@@ -682,11 +1362,23 @@ model_attr_equal(
 	if (left->tag != 2U && right->tag != 2U) {
 		model_fold(left->text, left_folded);
 		model_fold(right->text, right_folded);
-		return strcmp(left_folded, right_folded) == 0;
+		order = strcmp(left_folded, right_folded);
+		if (order != 0)
+			return 0;
+
+		/* Succeeded: the folded texts are the same. */
+		return 1;
 	}
 
 	/* Anything with an IA5String compares byte for byte, tag included. */
-	return left->tag == right->tag && strcmp(left->text, right->text) == 0;
+	if (left->tag != right->tag)
+		return 0;
+	order = strcmp(left->text, right->text);
+	if (order != 0)
+		return 0;
+
+	/* Succeeded: the tags and the texts are the same. */
+	return 1;
 }
 
 /* The model's answer for two Names. */
@@ -697,17 +1389,27 @@ model_equal(
 {
 	unsigned rdn;
 	unsigned attr;
+	int same;
 
+	/* Names with another number of RDNs are different. */
 	if (left->rdn_count != right->rdn_count)
 		return 0;
+
+	/* Compares the RDNs one by one. */
 	for (rdn = 0; rdn < left->rdn_count; rdn++) {
+		/* RDNs with another number of attributes are different. */
 		if (left->attr_count[rdn] != right->attr_count[rdn])
 			return 0;
+
+		/* Compares the attributes of the RDN one by one. */
 		for (attr = 0; attr < left->attr_count[rdn]; attr++) {
-			if (!model_attr_equal(&left->attr[rdn][attr], &right->attr[rdn][attr]))
+			same = model_attr_equal(&left->attr[rdn][attr], &right->attr[rdn][attr]);
+			if (!same)
 				return 0;
 		}
 	}
+
+	/* Succeeded: every RDN and attribute is equal. */
 	return 1;
 }
 
@@ -722,13 +1424,18 @@ model_perturb(
 	size_t length;
 	unsigned kind;
 
+	/* Leaves an empty Name as it is. */
 	if (model->rdn_count == 0U)
 		return;
+
+	/* Picks an attribute and the kind of change. */
 	rdn = rng_below(model->rdn_count);
 	attr = rng_below(model->attr_count[rdn]);
 	target = &model->attr[rdn][attr];
 	length = strlen(target->text);
 	kind = rng_below(5);
+
+	/* Applies the change of the kind when the attribute allows it. */
 	if (kind == 0U && length > 0U) {
 		/* Flips the case of one letter. */
 		if (target->text[0] == 'a')
@@ -743,7 +1450,10 @@ model_perturb(
 		target->tag = 1U - target->tag;
 	} else if (kind == 3U && length > 0U) {
 		/* Changes one letter. */
-		target->text[length - 1U] = target->text[length - 1U] == 'b' ? 'a' : 'b';
+		if (target->text[length - 1U] == 'b')
+			target->text[length - 1U] = 'a';
+		else
+			target->text[length - 1U] = 'b';
 	}
 }
 
@@ -760,6 +1470,7 @@ test_equal_cases(void)
 	size_t index;
 	unsigned char changed[256];
 
+	/* Remembers the pool and the copies, to give them back at the end. */
 	mark = mark_take();
 
 	/* A Name equals itself byte for byte, and two empty Names are equal. */
@@ -910,6 +1621,7 @@ test_equal_cases(void)
 		CHECK(raw_eq(changed, left->size, left->data, left->size) == 0);
 	}
 
+	/* Gives back everything this test function built. */
 	mark_release(mark);
 }
 
@@ -927,20 +1639,32 @@ test_equal_random(void)
 	int got;
 	int back;
 	unsigned long equal_count;
+	unsigned mostly;
+	unsigned twice;
 
+	/* Counts how many pairs come out equal. */
 	equal_count = 0;
+
+	/* Compares random pairs of Names with the model. */
 	for (run = 0; run < 30000U; run++) {
+		/* Remembers the pool and the copies of this run. */
 		mark = mark_take();
+
+		/* Draws a Name and a second one that starts as a copy of it. */
 		model_random(&left);
 		right = left;
-		if (rng_below(4) != 0U) {
+		mostly = rng_below(4);
+		if (mostly != 0U) {
 			/* Mostly a perturbation of the first, so that equal pairs are common. */
 			model_perturb(&right);
-			if (rng_below(2) == 0U)
+			twice = rng_below(2);
+			if (twice == 0U)
 				model_perturb(&right);
 		} else {
 			model_random(&right);
 		}
+
+		/* Builds both Names, asks the model, and compares them both ways with the library. */
 		left_bytes = model_build(&left);
 		right_bytes = model_build(&right);
 		expected = model_equal(&left, &right);
@@ -949,8 +1673,12 @@ test_equal_random(void)
 		CHECK(got == expected);
 		CHECK(back == expected);
 		CHECK(name_eq(left_bytes, left_bytes) == 1);
+
+		/* Counts the pair when the Names are equal. */
 		if (got)
 			equal_count++;
+
+		/* Gives back what this run built. */
 		mark_release(mark);
 	}
 
@@ -968,50 +1696,81 @@ test_equal_mutations(void)
 	struct bytes *base;
 	unsigned char copy[BYTES_MAX];
 	size_t index;
+	size_t position;
+	size_t length;
 	unsigned value;
+	unsigned second_change;
+	unsigned header;
 	int equal;
+	int same_letter;
+	int same_tag;
 
+	/* Builds the Name that each run changes. */
 	base = n_spec("C=US,O=Example Org,CN=www.example.com");
+
+	/* Changes one or two bytes of the Name at random and compares it with the original. */
 	for (run = 0; run < 20000U; run++) {
+		/* Remembers the pool and the copies of this run. */
 		mark = mark_take();
+
+		/* Changes one byte, and in a third of the runs another one. */
 		memcpy(copy, base->data, base->size);
 		index = rng_below((unsigned)base->size);
 		value = rng_below(256);
 		copy[index] = (unsigned char)value;
-		if (rng_below(3) == 0U)
+		second_change = rng_below(3);
+		if (second_change == 0U)
 			copy[rng_below((unsigned)base->size)] = (unsigned char)rng_below(256);
+
+		/* Compares the changed encoding with the original. */
 		equal = raw_eq(copy, base->size, base->data, base->size);
 
 		/* A changed encoding that is still equal differs only in the case of letters (the same size, so no space run changed). */
 		if (equal == 1) {
-			size_t position;
-			int same_letter;
-			int same_tag;
-
 			for (position = 0; position < base->size; position++) {
 				if (copy[position] != base->data[position]) {
 					/* Either the case of a letter, or a string tag turned into the other folded string tag. */
-					same_letter = (copy[position] | 0x20U) == (base->data[position] | 0x20U) && (copy[position] | 0x20U) >= 'a' && (copy[position] | 0x20U) <= 'z';
-					same_tag = (copy[position] == TAG_PRINTABLE && base->data[position] == TAG_UTF8) || (copy[position] == TAG_UTF8 && base->data[position] == TAG_PRINTABLE);
+					same_letter = 0;
+					if ((copy[position] | 0x20U) == (base->data[position] | 0x20U)) {
+						if ((copy[position] | 0x20U) >= 'a' && (copy[position] | 0x20U) <= 'z')
+							same_letter = 1;
+					}
+
+					/* A string tag turned into the other folded string tag. */
+					same_tag = 0;
+					if (copy[position] == TAG_PRINTABLE && base->data[position] == TAG_UTF8)
+						same_tag = 1;
+					else if (copy[position] == TAG_UTF8 && base->data[position] == TAG_PRINTABLE)
+						same_tag = 1;
 					CHECK(same_letter || same_tag);
 				}
 			}
 		}
+
+		/* The answer is either equal or not equal. */
 		CHECK(equal == 0 || equal == 1);
+
+		/* Gives back what this run built. */
 		mark_release(mark);
 	}
 
-	/* Fully random bytes. */
+	/* Compares fully random bytes with themselves. */
 	for (run = 0; run < 20000U; run++) {
-		size_t length;
-
+		/* Fills a random number of bytes. */
 		length = rng_below(40);
 		for (index = 0; index < length; index++)
 			copy[index] = (unsigned char)rng_below(256);
-		if (length > 3U && rng_below(2) == 0U) {
-			copy[0] = 0x30;
-			copy[1] = (unsigned char)(length - 2U);
+
+		/* Makes a plausible header out of some of the longer inputs: a SEQUENCE whose length covers the rest. */
+		if (length > 3U) {
+			header = rng_below(2);
+			if (header == 0U) {
+				copy[0] = 0x30;
+				copy[1] = (unsigned char)(length - 2U);
+			}
 		}
+
+		/* A Name is equal to itself or malformed; either way the answer is 0 or 1. */
 		equal = raw_eq(copy, length, copy, length);
 		CHECK(equal == 0 || equal == 1);
 	}
@@ -1031,15 +1790,23 @@ model_normalize(
 	size_t index;
 	size_t label;
 	char c;
+	int valid;
 
+	/* Drops one trailing dot. */
 	length = strlen(host);
 	if (length > 0U && host[length - 1U] == '.')
 		length--;
+
+	/* Refuses an empty name and a name over 253 characters. */
 	if (length < 1U || length > 253U)
 		return 0;
+
+	/* Copies the name label by label, lower-casing it and refusing what a host name cannot hold. */
 	label = 0;
 	for (index = 0; index < length; index++) {
 		c = host[index];
+
+		/* A dot ends a label; an empty label is refused. */
 		if (c == '.') {
 			if (label == 0U)
 				return 0;
@@ -1047,16 +1814,39 @@ model_normalize(
 			out[index] = c;
 			continue;
 		}
-		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_'))
+
+		/* Only letters, digits, hyphen and underscore are allowed in a label. */
+		valid = 0;
+		if (c >= 'a' && c <= 'z')
+			valid = 1;
+		else if (c >= 'A' && c <= 'Z')
+			valid = 1;
+		else if (c >= '0' && c <= '9')
+			valid = 1;
+		else if (c == '-' || c == '_')
+			valid = 1;
+		if (!valid)
 			return 0;
+
+		/* A label has at most 63 characters. */
 		label++;
 		if (label > 63U)
 			return 0;
-		out[index] = (char)((c >= 'A' && c <= 'Z') ? c + 32 : c);
+
+		/* Lower-cases the letter and copies it. */
+		if (c >= 'A' && c <= 'Z')
+			c = (char)(c + 32);
+		out[index] = c;
 	}
+
+	/* The last label must not be empty. */
 	if (label == 0U)
 		return 0;
+
+	/* Ends the normalized name. */
 	out[length] = '\0';
+
+	/* Succeeded: the host name is valid and out holds its normal form. */
 	return 1;
 }
 
@@ -1073,8 +1863,12 @@ normalize_case(
 	/* A canary after the room shows a write past it. */
 	memset(out, 0x5a, sizeof(out));
 	error = cryc_name_host_normalize(host, out);
+
+	/* The canary must be untouched. */
 	for (index = CRYC_NAME_HOST_MAX + 1U; index < sizeof(out); index++)
 		CHECK((unsigned char)out[index] == 0x5aU);
+
+	/* A refused name leaves an empty text; an accepted one gives the expected text. */
 	if (expected == NULL) {
 		CHECK(error == EINVAL);
 		CHECK(out[0] == '\0');
@@ -1095,13 +1889,19 @@ build_labels(
 	unsigned index;
 	size_t used;
 
+	/* Writes the labels one after the other. */
 	used = 0;
 	for (label = 0; label < count; label++) {
+		/* A dot goes between two labels. */
 		if (label > 0U)
 			out[used++] = '.';
+
+		/* The letters of one label run through the alphabet. */
 		for (index = 0; index < length; index++)
 			out[used++] = (char)('a' + (index % 26U));
 	}
+
+	/* Ends the text. */
 	out[used] = '\0';
 }
 
@@ -1228,15 +2028,22 @@ test_normalize(void)
 
 	/* Random strings against the model. */
 	for (run = 0; run < 40000U; run++) {
+		/* Draws a random text of up to 11 characters. */
 		length = rng_below(12);
 		for (index = 0; index < length; index++)
 			name[index] = alphabet[rng_below(sizeof(alphabet))];
 		name[length] = '\0';
+
+		/* Asks the model and the library; they must agree on whether the name is valid. */
 		model_ok = model_normalize(name, model_out);
 		error = cryc_name_host_normalize(name, out);
 		CHECK((error == 0) == (model_ok == 1));
+
+		/* A valid name has the normal form of the model. */
 		if (model_ok == 1 && error == 0)
 			CHECK(strcmp(out, model_out) == 0);
+
+		/* A refused name leaves an empty text. */
 		if (error != 0)
 			CHECK(out[0] == '\0');
 	}
@@ -1253,9 +2060,18 @@ host_vs(
 	const char *host)
 {
 	struct cryc_x509 cert;
+	struct bytes *subject;
+	int result;
 
-	make_cert(&cert, n_empty(), san);
-	return cryc_name_match_host(&cert, host);
+	/* Builds a certificate with an empty subject and the SAN. */
+	subject = n_empty();
+	make_cert(&cert, subject, san);
+
+	/* Matches the host against it. */
+	result = cryc_name_match_host(&cert, host);
+
+	/* Reports the result of the match. */
+	return result;
 }
 
 /* Matches a host against one dNSName of a certificate. */
@@ -1264,7 +2080,15 @@ dns_vs(
 	const char *presented,
 	const char *host)
 {
-	return host_vs(g_dns(presented), host);
+	struct bytes *san;
+	int result;
+
+	/* Builds a SAN of the one dNSName and matches the host against it. */
+	san = g_dns(presented);
+	result = host_vs(san, host);
+
+	/* Reports the result of the match. */
+	return result;
 }
 
 /* The model of the matching of one dNSName against a normalized reference, written from RFC 9525 6.3 with labels in arrays. */
@@ -1280,17 +2104,21 @@ model_match(
 	unsigned p_count;
 	unsigned r_count;
 	unsigned index;
+	unsigned first_label;
 	size_t at;
 	size_t start;
 	size_t length;
 	size_t k;
+	char presented_char;
+	char reference_char;
 	int star;
 
-	/* Splits both. */
+	/* Splits the presented identifier into labels. */
 	p_count = 0;
 	start = 0;
 	length = strlen(presented);
 	for (at = 0; at <= length; at++) {
+		/* A label ends at a dot and at the end of the text. */
 		if (presented[at] == '.' || presented[at] == '\0') {
 			if (p_count >= 16U)
 				return 0;
@@ -1300,10 +2128,13 @@ model_match(
 			start = at + 1U;
 		}
 	}
+
+	/* Splits the reference into labels. */
 	r_count = 0;
 	start = 0;
 	length = strlen(reference);
 	for (at = 0; at <= length; at++) {
+		/* A label ends at a dot and at the end of the text. */
 		if (reference[at] == '.' || reference[at] == '\0') {
 			if (r_count >= 16U)
 				return 0;
@@ -1328,28 +2159,34 @@ model_match(
 		}
 	}
 
-	/* The label counts, and the labels one by one ignoring ASCII case. */
+	/* The label counts must be the same, and a star needs at least three labels. */
 	if (p_count != r_count)
 		return 0;
 	if (star && p_count < 3U)
 		return 0;
-	for (index = star ? 1U : 0U; index < p_count; index++) {
+
+	/* The star stands for the first label of the reference; the other labels are compared one by one. */
+	first_label = 0;
+	if (star)
+		first_label = 1U;
+	for (index = first_label; index < p_count; index++) {
 		if (p_length[index] != r_length[index])
 			return 0;
-		for (k = 0; k < p_length[index]; k++) {
-			char a;
-			char b;
 
-			a = p_label[index][k];
-			b = r_label[index][k];
-			if (a >= 'A' && a <= 'Z')
-				a = (char)(a + 32);
-			if (b >= 'A' && b <= 'Z')
-				b = (char)(b + 32);
-			if (a != b)
+		/* Compares the letters of the label ignoring ASCII case. */
+		for (k = 0; k < p_length[index]; k++) {
+			presented_char = p_label[index][k];
+			reference_char = r_label[index][k];
+			if (presented_char >= 'A' && presented_char <= 'Z')
+				presented_char = (char)(presented_char + 32);
+			if (reference_char >= 'A' && reference_char <= 'Z')
+				reference_char = (char)(reference_char + 32);
+			if (presented_char != reference_char)
 				return 0;
 		}
 	}
+
+	/* Succeeded: the identifier matches the reference. */
 	return 1;
 }
 
@@ -1371,7 +2208,11 @@ test_match_host(void)
 	static const char presented_alphabet[] = { 'a', 'B', '*', '.', '-', '1' };
 	static const char reference_alphabet[] = { 'a', 'b', 'c', '.', 'A', '1' };
 	unsigned long matches;
+	unsigned coin;
+	int normalize_error;
+	int model_result;
 
+	/* Remembers the pool and the copies, to give them back at the end. */
 	mark = mark_take();
 
 	/* Exact names, case ignored on both sides, a trailing dot on the reference. */
@@ -1527,50 +2368,79 @@ test_match_host(void)
 		cert.flags |= CRYC_X509_HAS_SAN;
 		cert.san = san->data;
 		cert.san_size = index;
-		if (index == san->size || index == 15U)
+
+		/* The first name is whole when the SAN is cut right after it (15 bytes) or not cut at all. */
+		if (index == san->size || index == 15U) {
 			CHECK(cryc_name_match_host(&cert, "a.example.com") == 1);
-		else
+		} else {
 			CHECK(cryc_name_match_host(&cert, "a.example.com") == 0);
+		}
 	}
 
 	/* Random identifiers and references against the model. */
 	matches = 0;
 	for (run = 0; run < 60000U; run++) {
+		/* Gives back what the run before built. */
 		mark_release(mark);
+
+		/* Draws a random identifier. */
 		length = rng_below(9);
 		for (index = 0; index < length; index++)
 			presented[index] = presented_alphabet[rng_below(sizeof(presented_alphabet))];
 		presented[length] = '\0';
+
+		/* Draws the length of a random reference, and whether to make it from the identifier. */
 		length = rng_below(9);
-		if (rng_below(2) == 0U) {
+		coin = rng_below(2);
+		if (coin == 0U) {
 			/* A reference made from the identifier: the star replaced by a label, letters in either case. */
 			strcpy(reference, presented);
 			if (reference[0] == '*')
 				reference[0] = 'c';
 			for (index = 0; reference[index] != '\0'; index++) {
-				if (reference[index] == 'a' && rng_below(2) == 0U)
-					reference[index] = 'A';
+				if (reference[index] == 'a') {
+					coin = rng_below(2);
+					if (coin == 0U)
+						reference[index] = 'A';
+				}
+
+				/* The star and the capital B become lower-case b. */
 				if (reference[index] == '*' || reference[index] == 'B')
 					reference[index] = 'b';
 			}
-			if (rng_below(8) == 0U && strlen(reference) < 14U) {
-				end = strlen(reference);
+
+			/* Now and then ends the reference with a dot. */
+			coin = rng_below(8);
+			end = strlen(reference);
+			if (coin == 0U && end < 14U) {
 				reference[end] = '.';
 				reference[end + 1U] = '\0';
 			}
 		} else {
+			/* A reference of random letters. */
 			for (index = 0; index < length; index++)
 				reference[index] = reference_alphabet[rng_below(sizeof(reference_alphabet))];
 			reference[length] = '\0';
 		}
-		if (cryc_name_host_normalize(reference, normal) != 0)
+
+		/* Skips a reference that does not normalize; the matching only gets normal references. */
+		normalize_error = cryc_name_host_normalize(reference, normal);
+		if (normalize_error != 0)
 			continue;
-		CHECK(dns_vs(presented, reference) == model_match(presented, normal));
-		if (model_match(presented, normal))
+
+		/* The library must give the answer of the model. */
+		model_result = model_match(presented, normal);
+		CHECK(dns_vs(presented, reference) == model_result);
+
+		/* Counts the pairs that match. */
+		if (model_result)
 			matches++;
 	}
+
+	/* The matches were common in the run. */
 	CHECK(matches > 200UL);
 
+	/* Gives back everything this test function built. */
 	mark_release(mark);
 }
 
@@ -1586,7 +2456,10 @@ test_match_ip(void)
 	unsigned char v6_other[16];
 	size_t index;
 
+	/* Remembers the pool and the copies, to give them back at the end. */
 	mark = mark_take();
+
+	/* The IPv4 address 192.0.2.1 and the IPv6 addresses ::1 and ::2 that the cases change. */
 	v4[0] = 192;
 	v4[1] = 0;
 	v4[2] = 2;
@@ -1604,6 +2477,8 @@ test_match_ip(void)
 		CHECK(cryc_name_match_ip(&cert, v4, 4) == 0);
 		v4[index] = (unsigned char)(v4[index] - 1U);
 	}
+
+	/* The address is back as it was and matches again. */
 	CHECK(cryc_name_match_ip(&cert, v4, 4) == 1);
 
 	/* An IPv6 entry matches the same 16 octets only. */
@@ -1615,6 +2490,8 @@ test_match_ip(void)
 		CHECK(cryc_name_match_ip(&cert, v6, 16) == 0);
 		v6[index] = (unsigned char)(v6[index] ^ 0x80U);
 	}
+
+	/* The address is back as it was and matches again. */
 	CHECK(cryc_name_match_ip(&cert, v6, 16) == 1);
 
 	/* The families and sizes do not mix: ::ffff:192.0.2.1 is not 192.0.2.1, and a 4-octet prefix of an IPv6 entry is not a match. */
@@ -1709,16 +2586,13 @@ test_match_ip(void)
 	make_cert(&cert, n_empty(), san);
 	CHECK(cryc_name_match_ip(&cert, v4, 4) == 0);
 
+	/* Gives back everything this test function built. */
 	mark_release(mark);
 }
 
 /* ------------------------------------------------------------------ */
 /* cryc_name_constraints_check                                          */
 /* ------------------------------------------------------------------ */
-
-/* Expectations: the check allows (0), refuses (EACCES), or the names or constraints are malformed (EINVAL). */
-#define ALLOW		0
-#define DENY		EACCES
 
 /* The cases of dNSName constraints. */
 static void
@@ -1728,6 +2602,7 @@ test_nc_dns(void)
 	struct bytes *san;
 	char longname[512];
 
+	/* Remembers the pool and the copies, to give them back at the end. */
 	mark = mark_take();
 
 	/* A constraint "example.com" permits the name and every name with labels added on the left, ignoring case. */
@@ -1927,6 +2802,7 @@ test_nc_dns(void)
 	strcat(longname, "b");
 	CHECK(nc(s_sub(g_dns(longname)), NULL, n_empty(), NULL) == EINVAL);
 
+	/* Gives back everything this test function built. */
 	mark_release(mark);
 }
 
@@ -1937,16 +2813,31 @@ nc_ip(
 	const char *excluded,
 	const char *name)
 {
-	struct bytes *p;
-	struct bytes *e;
+	struct bytes *permitted_list;
+	struct bytes *excluded_list;
+	struct bytes *subject;
+	struct bytes *san;
+	int result;
 
-	p = NULL;
-	e = NULL;
+	/* Starts with no list. */
+	permitted_list = NULL;
+	excluded_list = NULL;
+
+	/* Builds the permitted list when a constraint is given. */
 	if (permitted != NULL)
-		p = s_sub(g_ip_hex(permitted));
+		permitted_list = s_sub(g_ip_hex(permitted));
+
+	/* Builds the excluded list when a constraint is given. */
 	if (excluded != NULL)
-		e = s_sub(g_ip_hex(excluded));
-	return nc(p, e, n_empty(), g_ip_hex(name));
+		excluded_list = s_sub(g_ip_hex(excluded));
+
+	/* Runs the check on a certificate with an empty subject and the one name. */
+	subject = n_empty();
+	san = g_ip_hex(name);
+	result = nc(permitted_list, excluded_list, subject, san);
+
+	/* Reports the result of the check. */
+	return result;
 }
 
 /* The cases of iPAddress constraints. */
@@ -1956,7 +2847,9 @@ test_nc_ip(void)
 	struct mark mark;
 	char hex[128];
 	size_t index;
+	unsigned long value;
 
+	/* Remembers the pool and the copies, to give them back at the end. */
 	mark = mark_take();
 
 	/* 192.0.2.0/24 (RFC 5280 4.2.1.10's example). */
@@ -1994,8 +2887,7 @@ test_nc_ip(void)
 
 	/* Every bit of a /32 counts. */
 	for (index = 0; index < 32U; index++) {
-		unsigned long value;
-
+		/* Flips the one bit of the address and writes the address as hex. */
 		value = 0xc0000201UL ^ (1UL << index);
 		sprintf(hex, "%08lx", value);
 		CHECK(nc_ip("c0000201ffffffff", NULL, hex) == DENY);
@@ -2062,6 +2954,7 @@ test_nc_ip(void)
 	CHECK(nc_ip("00000000000000000000000000000001", NULL, "00000000000000000000000000000001") == EINVAL);
 	CHECK(nc_ip("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", NULL, "00000000000000000000000000000001") == DENY);
 
+	/* Gives back everything this test function built. */
 	mark_release(mark);
 }
 
@@ -2072,16 +2965,31 @@ nc_mail(
 	const char *excluded,
 	const char *name)
 {
-	struct bytes *p;
-	struct bytes *e;
+	struct bytes *permitted_list;
+	struct bytes *excluded_list;
+	struct bytes *subject;
+	struct bytes *san;
+	int result;
 
-	p = NULL;
-	e = NULL;
+	/* Starts with no list. */
+	permitted_list = NULL;
+	excluded_list = NULL;
+
+	/* Builds the permitted list when a constraint is given. */
 	if (permitted != NULL)
-		p = s_sub(g_mail(permitted));
+		permitted_list = s_sub(g_mail(permitted));
+
+	/* Builds the excluded list when a constraint is given. */
 	if (excluded != NULL)
-		e = s_sub(g_mail(excluded));
-	return nc(p, e, n_empty(), g_mail(name));
+		excluded_list = s_sub(g_mail(excluded));
+
+	/* Runs the check on a certificate with an empty subject and the one name. */
+	subject = n_empty();
+	san = g_mail(name);
+	result = nc(permitted_list, excluded_list, subject, san);
+
+	/* Reports the result of the check. */
+	return result;
 }
 
 /* The cases of rfc822Name constraints and of the emailAddress attribute of the subject. */
@@ -2093,6 +3001,7 @@ test_nc_mail(void)
 	struct bytes *san;
 	char longname[600];
 
+	/* Remembers the pool and the copies, to give them back at the end. */
 	mark = mark_take();
 
 	/* A host: the mailboxes on that host only. */
@@ -2233,6 +3142,7 @@ test_nc_mail(void)
 	subject = n_one(OID_EMAIL, TAG_BMP, "x");
 	CHECK(nc(s_sub(g_dns("example.com")), NULL, subject, NULL) == ALLOW);
 
+	/* Gives back everything this test function built. */
 	mark_release(mark);
 }
 
@@ -2246,6 +3156,7 @@ test_nc_directory(void)
 	struct bytes *subject;
 	struct bytes *bad;
 
+	/* Remembers the pool and the copies, to give them back at the end. */
 	mark = mark_take();
 
 	/* The subject must begin with the constraint's RDNs. */
@@ -2360,6 +3271,7 @@ test_nc_directory(void)
 	CHECK(nc(NULL, s_sub(g_dir(bad)), n_empty(), NULL) == EINVAL);
 	CHECK(nc(s_sub(b_tlv(0x84U, n_spec("C=US"))), NULL, n_empty(), NULL) == EINVAL);
 
+	/* Gives back everything this test function built. */
 	mark_release(mark);
 }
 
@@ -2375,7 +3287,10 @@ test_nc_other(void)
 	struct cryc_x509 leaf;
 	size_t index;
 	unsigned char flipped[256];
+	struct bytes *copy;
+	int result;
 
+	/* Remembers the pool and the copies, to give them back at the end. */
 	mark = mark_take();
 
 	/* A constraint of a form not evaluated fails the check when the subject has a name of that form, and is ignored otherwise. */
@@ -2432,9 +3347,7 @@ test_nc_other(void)
 	/* Every position of a valid list of two subtrees changed to another value makes the check come out as allowed, refused or malformed without a crash. */
 	subtrees = b_cat(s_sub(g_dns("example.com")), s_sub(g_ip_hex("0a000000ff000000")));
 	for (index = 0; index < subtrees->size; index++) {
-		struct bytes *copy;
-		int result;
-
+		/* Changes one byte of the list and runs the check on it. */
 		memcpy(flipped, subtrees->data, subtrees->size);
 		flipped[index] = (unsigned char)(flipped[index] ^ 0x5aU);
 		copy = b_raw(flipped, subtrees->size);
@@ -2496,6 +3409,7 @@ test_nc_other(void)
 	leaf.flags |= CRYC_X509_HAS_SAN;
 	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == 0);
 
+	/* Gives back everything this test function built. */
 	mark_release(mark);
 }
 
@@ -2513,19 +3427,29 @@ big_subtrees(
 	char name[48];
 	unsigned index;
 
+	/* Starts the list. */
 	der_init(&writer, dest, BIG_MAX);
+
+	/* Writes the numbered subtrees. */
 	for (index = 0; index < count; index++) {
+		/* Writes one subtree of a dNSName named by the format and the number. */
 		sprintf(name, format, index);
 		der_init(&inner, scratch, sizeof(scratch));
 		der_put(&inner, TAG_DNS, (const unsigned char *)name, strlen(name));
 		der_wrap(&writer, 0x30U, &inner);
 	}
+
+	/* Writes the last subtree when there is one. */
 	if (last != NULL) {
 		der_init(&inner, scratch, sizeof(scratch));
 		der_put(&inner, TAG_DNS, (const unsigned char *)last, strlen(last));
 		der_wrap(&writer, 0x30U, &inner);
 	}
+
+	/* The lists must fit their room. */
 	CHECK(writer.error == 0);
+
+	/* Reports how many bytes the list takes. */
 	return writer.used;
 }
 
@@ -2545,6 +3469,7 @@ test_nc_budget(void)
 	size_t excluded_size;
 	struct der_writer writer;
 
+	/* Remembers the pool and the copies, to give them back at the end. */
 	mark = mark_take();
 
 	/* 64 subtrees that do not match, then one that does: a name costs 65 comparisons, so 63 names cost 4095. */
@@ -2553,10 +3478,16 @@ test_nc_budget(void)
 		sprintf(name, "n%u.example", count);
 		permitted = b_cat(permitted, s_sub(g_dns(name)));
 	}
+
+	/* Adds the subtree that matches after the ones that do not. */
 	permitted = b_cat(permitted, s_sub(g_dns("match.example")));
+
+	/* Builds a SAN of 63 names that all match the last subtree. */
 	san = b_new();
 	for (names = 0; names < 63U; names++)
 		san = b_cat(san, g_dns("a.match.example"));
+
+	/* Checks the names against the list. */
 	CHECK(nc(permitted, NULL, n_empty(), san) == ALLOW);
 
 	/* 64 names cost 4160: refused as too much work. */
@@ -2603,12 +3534,20 @@ test_nc_budget(void)
 		sprintf(name, "n%u.example", count);
 		permitted = b_cat(permitted, s_sub(g_dns(name)));
 	}
+
+	/* Adds the iPAddress subtrees. */
 	for (count = 0; count < 100U; count++)
 		permitted = b_cat(permitted, s_sub(g_ip_hex("0a000000ff000000")));
+
+	/* Adds the dNSName subtree that matches. */
 	permitted = b_cat(permitted, s_sub(g_dns("match.example")));
+
+	/* Builds a SAN of 63 names that all match the last dNSName subtree. */
 	san = b_new();
 	for (names = 0; names < 63U; names++)
 		san = b_cat(san, g_dns("a.match.example"));
+
+	/* Checks the names against the list. */
 	CHECK(nc(permitted, NULL, n_empty(), san) == ALLOW);
 	CHECK(nc(permitted, NULL, n_empty(), b_cat(san, g_dns("a.n1.example"))) == ENOTSUP);
 
@@ -2633,7 +3572,11 @@ test_nc_budget(void)
 	der_init(&writer, big_san, BIG_MAX);
 	for (count = 0; count < 2049U; count++)
 		der_put(&writer, TAG_DNS, (const unsigned char *)"tlast.test", 10U);
+
+	/* The names must fit their room. */
 	CHECK(writer.error == 0);
+
+	/* Builds the certificate whose SAN is that list of names. */
 	memset(&leaf, 0, sizeof(leaf));
 	leaf.flags = CRYC_X509_HAS_SAN;
 	leaf.san = big_san;
@@ -2644,47 +3587,21 @@ test_nc_budget(void)
 		sprintf(name, "x%u.nomatch", count);
 		der_put(&writer, TAG_DNS, (const unsigned char *)name, strlen(name));
 	}
+
+	/* The names must fit their room. */
 	CHECK(writer.error == 0);
+
+	/* Makes the list of names that match none the SAN of the certificate. */
 	leaf.san_size = writer.used;
 	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == DENY);
 
+	/* Gives back everything this test function built. */
 	mark_release(mark);
 }
 
 /* ------------------------------------------------------------------ */
 /* x509-limbo                                                           */
 /* ------------------------------------------------------------------ */
-
-/*
- * One x509-limbo case: the certificates as the case lists them (the peer
- * first, then trusted.0 to trusted.3, then untrusted.0 to untrusted.119),
- * each with its DER copy, its parse, whether it parsed and whether it is
- * trusted.  The views of a parse point into the DER copy.
- */
-struct limbo_case {
-	unsigned char *der[CHAIN_MAX];
-	struct cryc_x509 cert[CHAIN_MAX];
-	int parsed[CHAIN_MAX];
-	int trusted[CHAIN_MAX];
-	unsigned count;
-};
-
-/* The statistics of the x509-limbo run. */
-static unsigned long limbo_cases;
-static unsigned long limbo_peer_names;
-static unsigned long limbo_success_cases;
-static unsigned long limbo_success_matched;
-static unsigned long limbo_failure_matched;
-static unsigned long limbo_unparsed_peer;
-static unsigned long limbo_chains;
-static unsigned long limbo_chain_skipped;
-static unsigned long limbo_nc_success_chains;
-static unsigned long limbo_nc_cases;
-static unsigned long limbo_nc_agree;
-static unsigned long limbo_nc_unexplained;
-static unsigned long limbo_nc_explained;
-static unsigned long limbo_nc_refused;
-static unsigned long limbo_nc_refused_by_name;
 
 /* Parses a text IP address (IPv4 dotted, or IPv6 with groups and one "::") into out; returns 4, 16, or 0 when it is not one. */
 static size_t
@@ -2700,14 +3617,17 @@ parse_ip(
 	unsigned index;
 	unsigned total;
 	const char *at;
+	const char *colon;
 	int double_colon;
 	unsigned groups[8];
 	unsigned count;
 
-	/* IPv4: four decimal numbers separated by dots. */
-	if (strchr(text, ':') == NULL) {
+	/* A text without a colon is IPv4: four decimal numbers separated by dots. */
+	colon = strchr(text, ':');
+	if (colon == NULL) {
 		at = text;
 		for (index = 0; index < 4U; index++) {
+			/* Reads the digits of one number: at most three, and at most 255. */
 			value = 0;
 			digits = 0;
 			while (*at >= '0' && *at <= '9') {
@@ -2717,17 +3637,25 @@ parse_ip(
 				if (value > 255U || digits > 3U)
 					return 0;
 			}
+
+			/* A number has at least one digit. */
 			if (digits == 0U)
 				return 0;
 			out[index] = (unsigned char)value;
+
+			/* A dot separates a number from the next one. */
 			if (index < 3U) {
 				if (*at != '.')
 					return 0;
 				at++;
 			}
 		}
+
+		/* Nothing may follow the fourth number. */
 		if (*at != '\0')
 			return 0;
+
+		/* Succeeded: an IPv4 address of 4 octets. */
 		return 4;
 	}
 
@@ -2737,16 +3665,23 @@ parse_ip(
 	double_colon = 0;
 	count = 0;
 	at = text;
+
+	/* A leading "::" is the double colon; a single leading colon is wrong. */
 	if (at[0] == ':' && at[1] == ':') {
 		double_colon = 1;
 		at += 2;
 	} else if (at[0] == ':') {
 		return 0;
 	}
+
+	/* Reads the groups one by one. */
 	while (*at != '\0') {
+		/* Reads the hex digits of one group. */
 		value = 0;
 		digits = 0;
-		while ((*at >= '0' && *at <= '9') || (*at >= 'a' && *at <= 'f') || (*at >= 'A' && *at <= 'F')) {
+		while ((*at >= '0' && *at <= '9') ||
+		       (*at >= 'a' && *at <= 'f') ||
+		       (*at >= 'A' && *at <= 'F')) {
 			if (*at <= '9')
 				value = value * 16U + (unsigned)(*at - '0');
 			else if (*at >= 'a')
@@ -2756,13 +3691,21 @@ parse_ip(
 			digits++;
 			at++;
 		}
-		if (digits == 0U || digits > 4U || count >= 8U)
+
+		/* A group has one to four digits, and there are at most eight groups. */
+		if (digits == 0U ||
+		    digits > 4U ||
+		    count >= 8U)
 			return 0;
+
+		/* Keeps the group, counted before or after the double colon. */
 		groups[count++] = value;
 		if (double_colon)
 			tail++;
 		else
 			head++;
+
+		/* A colon separates a group from the next; two colons are the double colon. */
 		if (*at == ':') {
 			if (at[1] == ':') {
 				if (double_colon)
@@ -2778,6 +3721,8 @@ parse_ip(
 			return 0;
 		}
 	}
+
+	/* A double colon stands for at least one group; without one there are exactly eight. */
 	total = head + tail;
 	if (double_colon && total > 7U)
 		return 0;
@@ -2791,10 +3736,14 @@ parse_ip(
 		parts[index] = groups[index];
 	for (index = 0; index < tail; index++)
 		parts[8U - tail + index] = groups[head + index];
+
+	/* Writes the eight groups as 16 octets. */
 	for (index = 0; index < 8U; index++) {
 		out[index * 2U] = (unsigned char)(parts[index] >> 8);
 		out[index * 2U + 1U] = (unsigned char)(parts[index] & 0xffU);
 	}
+
+	/* Succeeded: an IPv6 address of 16 octets. */
 	return 16;
 }
 
@@ -2805,16 +3754,21 @@ test_parse_ip(void)
 	unsigned char out[16];
 	unsigned char expected[16];
 
+	/* IPv4 addresses: the largest numbers, a number over 255, and the wrong count of numbers. */
 	CHECK(parse_ip("192.0.2.1", out) == 4U && out[0] == 192 && out[1] == 0 && out[2] == 2 && out[3] == 1);
 	CHECK(parse_ip("255.255.255.255", out) == 4U && out[3] == 255);
 	CHECK(parse_ip("256.0.0.1", out) == 0U);
 	CHECK(parse_ip("1.2.3", out) == 0U);
 	CHECK(parse_ip("1.2.3.4.5", out) == 0U);
+
+	/* IPv6 addresses with the double colon at the start. */
 	memset(expected, 0, sizeof(expected));
 	expected[15] = 1;
 	CHECK(parse_ip("::1", out) == 16U && memcmp(out, expected, 16) == 0);
 	memset(expected, 0, sizeof(expected));
 	CHECK(parse_ip("::", out) == 16U && memcmp(out, expected, 16) == 0);
+
+	/* IPv6 addresses with the double colon in the middle, and written out in full. */
 	memset(expected, 0, sizeof(expected));
 	expected[0] = 0x20;
 	expected[1] = 0x01;
@@ -2828,13 +3782,15 @@ test_parse_ip(void)
 	expected[11] = 0x2e;
 	CHECK(parse_ip("2001:db8::8a2e:370:7334", out) == 16U && memcmp(out, expected, 16) == 0);
 	CHECK(parse_ip("2001:0db8:0000:0000:0000:8a2e:0370:7334", out) == 16U && memcmp(out, expected, 16) == 0);
+
+	/* Forms that are not addresses. */
 	CHECK(parse_ip("2001:db8:::1", out) == 0U);
 	CHECK(parse_ip(":1", out) == 0U);
 	CHECK(parse_ip("1:2:3:4:5:6:7", out) == 0U);
 	CHECK(parse_ip("1::2::3", out) == 0U);
 }
 
-/* Reads the certificates of one record into a case; returns the number of certificates. */
+/* Reads the certificates of one record into a case. */
 static void
 limbo_load(
 	const struct vec_file *file,
@@ -2846,10 +3802,16 @@ limbo_load(
 	unsigned char *der;
 	const char *kind;
 	unsigned slot;
+	int order;
+	int error;
 
+	/* Takes a buffer for the largest certificate. */
 	der = malloc(LIMBO_MAX);
+
+	/* Reads the peer, the trusted and the untrusted certificates in that order. */
 	chain->count = 0;
 	for (index = 0; index < CHAIN_MAX; index++) {
+		/* Names the key of the certificate and its kind. */
 		if (index == 0U) {
 			strcpy(key, "peer");
 			kind = "peer";
@@ -2860,17 +3822,35 @@ limbo_load(
 			sprintf(key, "untrusted.%u", index - 5U);
 			kind = "untrusted";
 		}
+
+		/* Skips a certificate the record does not have. */
 		size = vec_hex(file, key, der, LIMBO_MAX);
 		if (size == (size_t)-1)
 			continue;
+
+		/* Keeps a copy of the certificate in the case. */
 		slot = chain->count++;
 		chain->der[slot] = malloc(size);
 		memcpy(chain->der[slot], der, size);
-		chain->trusted[slot] = strcmp(kind, "trusted") == 0;
-		chain->parsed[slot] = cryc_x509_parse(&chain->cert[slot], chain->der[slot], size) == 0;
+
+		/* Records whether the certificate is trusted. */
+		order = strcmp(kind, "trusted");
+		chain->trusted[slot] = 0;
+		if (order == 0)
+			chain->trusted[slot] = 1;
+
+		/* Records whether the certificate parses. */
+		error = cryc_x509_parse(&chain->cert[slot], chain->der[slot], size);
+		chain->parsed[slot] = 0;
+		if (error == 0)
+			chain->parsed[slot] = 1;
+
+		/* A record whose peer is missing would put another certificate first. */
 		if (index == 0U && slot != 0U)
 			printf("FAIL limbo case without a peer\n");
 	}
+
+	/* Gives back the buffer. */
 	free(der);
 }
 
@@ -2881,8 +3861,11 @@ limbo_free(
 {
 	unsigned index;
 
+	/* Frees the DER copy of every certificate. */
 	for (index = 0; index < chain->count; index++)
 		free(chain->der[index]);
+
+	/* Empties the case. */
 	chain->count = 0;
 }
 
@@ -2905,37 +3888,59 @@ limbo_build_chain(
 	unsigned seen;
 	unsigned index;
 	unsigned previous;
+	int same_name;
 
+	/* A case whose peer does not parse has no chain. */
 	if (!chain->parsed[0])
 		return 0;
+
+	/* Starts the chain with the peer. */
 	order[0] = 0;
 	length = 1;
 	current = 0;
+
+	/* Climbs from the peer through the issuers, at most 15 steps. */
 	for (step = 0; step < 15U; step++) {
+		/* The chain is done when it has reached a trusted certificate. */
 		if (chain->trusted[current])
 			return length;
+
+		/* Counts the certificates, not yet in the chain, whose subject is the issuer of the current one. */
 		found = 0;
 		candidate = 0;
 		for (index = 0; index < chain->count; index++) {
 			if (!chain->parsed[index])
 				continue;
-			if (!cryc_name_equal(chain->cert[current].issuer, chain->cert[current].issuer_size, chain->cert[index].subject, chain->cert[index].subject_size))
+			same_name = cryc_name_equal(chain->cert[current].issuer, chain->cert[current].issuer_size, chain->cert[index].subject, chain->cert[index].subject_size);
+			if (!same_name)
 				continue;
+
+			/* Looks the certificate up in the chain. */
 			seen = 0;
 			for (previous = 0; previous < length; previous++) {
 				if (order[previous] == index)
 					seen = 1;
 			}
+
+			/* A certificate already in the chain is not an issuer to choose. */
 			if (seen)
 				continue;
+
+			/* Counts the issuer and remembers it. */
 			found++;
 			candidate = index;
 		}
+
+		/* No issuer, or a choice between several, ends the attempt. */
 		if (found != 1U)
 			return 0;
+
+		/* Adds the one issuer to the chain and climbs to it. */
 		order[length++] = candidate;
 		current = candidate;
 	}
+
+	/* Gives up: no trusted certificate within 15 steps. */
 	return 0;
 }
 
@@ -2950,75 +3955,37 @@ limbo_apply_constraints(
 	unsigned below;
 	int error;
 	int self_issued;
+	int is_leaf;
+	const struct cryc_x509 *lower;
 
 	/* From the trust anchor down; self-issued certificates in the middle of the path are not checked (RFC 5280 6.1.3). */
 	for (above = length - 1U; above > 0U; above--) {
+		/* Skips a certificate without name constraints. */
 		if ((chain->cert[order[above]].flags & CRYC_X509_HAS_NAME_CONSTRAINTS) == 0U)
 			continue;
-		for (below = above; below > 0U; below--) {
-			const struct cryc_x509 *lower;
 
+		/* Applies its constraints to every certificate below it. */
+		for (below = above; below > 0U; below--) {
 			lower = &chain->cert[order[below - 1U]];
 			self_issued = cryc_name_equal(lower->issuer, lower->issuer_size, lower->subject, lower->subject_size);
+
+			/* Skips a self-issued certificate that is not the leaf. */
 			if (self_issued && below - 1U != 0U)
 				continue;
-			error = cryc_name_constraints_check(&chain->cert[order[above]], lower, below - 1U == 0U);
+
+			/* Checks the certificate below; only the peer is the leaf. */
+			is_leaf = 0;
+			if (below - 1U == 0U)
+				is_leaf = 1;
+			error = cryc_name_constraints_check(&chain->cert[order[above]], lower, is_leaf);
 			if (error != 0)
 				return error;
 		}
 	}
+
+	/* Succeeded: every certificate is allowed. */
 	return 0;
 }
-
-/* The cases where the host or address match is known by id: whether the peer name matches the peer certificate. */
-struct limbo_name_case {
-	const char *id;
-	int matches;
-};
-
-/*
- * What a name match gives for the cases where the case itself says why
- * the validation fails: a wrong name, a wildcard that breaks a rule, no
- * subjectAltName.  The ones marked 1 match here because the case fails
- * for a reason this module does not judge: a wildcard on a public suffix
- * (no list is consulted), an underscore (the match accepts it), and the
- * policy of the validation.
- */
-static const struct limbo_name_case limbo_name_cases[] = {
-	{ "webpki::san::mismatch-domain-san", 0 },
-	{ "webpki::san::mismatch-subdomain-san", 0 },
-	{ "webpki::san::mismatch-subdomain-apex-san", 0 },
-	{ "webpki::san::mismatch-apex-subdomain-san", 0 },
-	{ "webpki::san::public-suffix-wildcard-san", 0 },
-	{ "webpki::san::public-suffix-multi-label-wildcard-san", 1 },
-	{ "webpki::san::public-suffix-private-namespace-wildcard-san", 1 },
-	{ "webpki::san::wildcard-embedded-leftmost-san", 0 },
-	{ "webpki::san::wildcard-not-in-leftmost-san", 0 },
-	{ "webpki::san::wildcard-match-across-labels-san", 0 },
-	{ "webpki::san::wildcard-embedded-ulabel-san", 0 },
-	{ "webpki::san::unicode-emoji-san", 0 },
-	{ "webpki::san::no-san", 0 },
-	{ "webpki::san::san-wildcard-only", 0 },
-	{ "webpki::san::san-wildcard-only-tld", 0 },
-	{ "webpki::san::leftmost-wildcard-san", 1 },
-	{ "webpki::san::exact-dns-san", 1 },
-	{ "webpki::san::exact-localhost-ip-san", 1 },
-	{ "rfc5280::san::underscore-dns", 1 },
-	{ "rfc5280::san::ip-in-dns", 0 },
-	{ "webpki::cn::ipv4-hex-mismatch", 1 },
-	{ "webpki::cn::ipv4-leading-zeros-mismatch", 1 },
-	{ "webpki::cn::ipv6-uppercase-mismatch", 1 },
-	{ "webpki::cn::ipv6-uncompressed-mismatch", 1 },
-	{ "webpki::cn::ipv6-non-rfc5952-mismatch", 1 },
-	{ "webpki::cn::punycode-not-in-san", 1 },
-	{ "webpki::cn::utf8-vs-punycode-mismatch", 1 },
-	{ "webpki::cn::not-in-san", 1 },
-	{ "webpki::cn::case-mismatch", 1 },
-	{ "webpki::san::san-critical-with-nonempty-subject", 1 },
-	{ "rfc5280::san::noncritical-with-empty-subject", 1 },
-	{ "rfc5280::san::malformed", -1 },
-	{ NULL, 0 }
-};
 
 /* Looks up the expected match of a case id; returns -1 when the id is not in the list. */
 static int
@@ -3026,11 +3993,16 @@ limbo_name_expected(
 	const char *id)
 {
 	unsigned index;
+	int order;
 
+	/* Looks the id up in the table. */
 	for (index = 0; limbo_name_cases[index].id != NULL; index++) {
-		if (strcmp(limbo_name_cases[index].id, id) == 0)
+		order = strcmp(limbo_name_cases[index].id, id);
+		if (order == 0)
 			return limbo_name_cases[index].matches;
 	}
+
+	/* The id is not in the table. */
 	return -1;
 }
 
@@ -3045,42 +4017,44 @@ limbo_match_peer(
 	unsigned char address[16];
 	size_t size;
 	char normal[CRYC_NAME_HOST_MAX + 1U];
+	int order;
+	int error;
+	int result;
 
+	/* Reads the kind and the value of the peer name. */
 	kind = vec_get(file, "peer_kind");
 	value = vec_get(file, "peer_value");
-	if (kind == NULL || value == NULL || chain->count == 0U || !chain->parsed[0])
+
+	/* A case with no name, or no peer certificate that parses, has nothing to match. */
+	if (kind == NULL ||
+	    value == NULL ||
+	    chain->count == 0U ||
+	    !chain->parsed[0])
 		return -1;
-	if (strcmp(kind, "DNS") == 0) {
-		if (cryc_name_host_normalize(value, normal) != 0)
+
+	/* A DNS name is normalized and matched as a host name. */
+	order = strcmp(kind, "DNS");
+	if (order == 0) {
+		error = cryc_name_host_normalize(value, normal);
+		if (error != 0)
 			return -1;
-		return cryc_name_match_host(&chain->cert[0], value);
+		result = cryc_name_match_host(&chain->cert[0], value);
+
+		/* Reports whether the host name matches. */
+		return result;
 	}
+
+	/* Any other kind is an IP address; a text that is not one cannot be read. */
 	size = parse_ip(value, address);
 	if (size == 0U)
 		return -1;
-	return cryc_name_match_ip(&chain->cert[0], address, size);
+
+	/* Matches the address against the peer certificate. */
+	result = cryc_name_match_ip(&chain->cert[0], address, size);
+
+	/* Reports whether the address matches. */
+	return result;
 }
-
-/* The cases about name constraints whose outcome this module does not decide, and why the check here differs from the case. */
-struct limbo_nc_exception {
-	const char *id;
-	int check_result;
-};
-
-/*
- * The name-constraint cases (by id prefix) where the constraint check on
- * the chain gives a different answer from the case's expected result: the
- * case fails for a reason that is not a name constraint, or the case
- * expects a rule this check does not apply.  The check's result is the one
- * given here.
- */
-static const struct limbo_nc_exception limbo_nc_exceptions[] = {
-	{ "rfc5280::nc::permitted-dns-match-noncritical", 0 },
-	{ "rfc5280::nc::not-allowed-in-ee-noncritical", 0 },
-	{ "rfc5280::nc::not-allowed-in-ee-critical", 0 },
-	{ "rfc5280::nc::invalid-dnsname-leading-period", 0 },
-	{ NULL, 0 }
-};
 
 /* Runs the name constraints of the chain of one case and compares with the case. */
 static void
@@ -3098,18 +4072,34 @@ limbo_check_constraints(
 	int expect_success;
 	unsigned index;
 	int is_nc_case;
+	int compared;
+	int prefix_better;
+	int prefix_rfc;
+	int prefix_webpki;
+	int prefix_cve;
+	int prefix_pathological;
 
+	/* Reads the id of the case and what it expects. */
 	id = vec_get(file, "id");
 	expected = vec_get(file, "expected");
-	expect_success = strcmp(expected, "SUCCESS") == 0;
+	compared = strcmp(expected, "SUCCESS");
+	expect_success = 0;
+	if (compared == 0)
+		expect_success = 1;
+
+	/* Builds the chain of the case; a case with no chain that can be built without a choice is skipped. */
 	length = limbo_build_chain(chain, order);
 	limbo_chains++;
 	if (length == 0U) {
 		limbo_chain_skipped++;
 		return;
 	}
+
+	/* Applies the name constraints of the chain, and decides whether the case is allowed by them and by its name. */
 	constraints = limbo_apply_constraints(chain, order, length);
-	allowed = constraints == 0 && name_match != 0;
+	allowed = 0;
+	if (constraints == 0 && name_match != 0)
+		allowed = 1;
 
 	/* Every SUCCESS case must pass its name constraints, and match its name when it has one. */
 	if (expect_success) {
@@ -3119,24 +4109,50 @@ limbo_check_constraints(
 		CHECK(constraints == 0);
 	}
 
-	/* The cases about name constraints must come out as the case says, but for the listed ones. */
-	is_nc_case = strncmp(id, "bettertls::nameconstraints", 26) == 0 || strncmp(id, "rfc5280::nc::", 13) == 0 || strncmp(id, "webpki::nc::", 12) == 0 || strncmp(id, "cve::", 5) == 0 || strncmp(id, "pathological::nc-dos", 20) == 0;
+	/* Finds out whether the case is about name constraints, by the prefix of its id. */
+	prefix_better = strncmp(id, "bettertls::nameconstraints", 26);
+	prefix_rfc = strncmp(id, "rfc5280::nc::", 13);
+	prefix_webpki = strncmp(id, "webpki::nc::", 12);
+	prefix_cve = strncmp(id, "cve::", 5);
+	prefix_pathological = strncmp(id, "pathological::nc-dos", 20);
+	is_nc_case = 0;
+	if (prefix_better == 0)
+		is_nc_case = 1;
+	else if (prefix_rfc == 0)
+		is_nc_case = 1;
+	else if (prefix_webpki == 0)
+		is_nc_case = 1;
+	else if (prefix_cve == 0)
+		is_nc_case = 1;
+	else if (prefix_pathological == 0)
+		is_nc_case = 1;
+
+	/* The other cases are not about name constraints and are not judged here. */
 	if (!is_nc_case)
 		return;
+
+	/* The cases about name constraints must come out as the case says, but for the listed ones. */
 	limbo_nc_cases++;
 	for (index = 0; limbo_nc_exceptions[index].id != NULL; index++) {
-		if (strcmp(limbo_nc_exceptions[index].id, id) == 0) {
+		compared = strcmp(limbo_nc_exceptions[index].id, id);
+		if (compared == 0) {
 			limbo_nc_explained++;
 			CHECK((constraints == 0) == (limbo_nc_exceptions[index].check_result == 0));
 			return;
 		}
 	}
+
+	/* A case with no name to match counts as matching. */
 	if (name_match < 0)
 		name_match = 1;
+
+	/* Counts the cases the constraints refuse, and the ones only the name refuses. */
 	if (constraints != 0)
 		limbo_nc_refused++;
 	if (constraints == 0 && name_match == 0)
 		limbo_nc_refused_by_name++;
+
+	/* Counts the case as agreeing when it comes out as the case says; prints the ones that do not. */
 	if (allowed == expect_success) {
 		limbo_nc_agree++;
 	} else {
@@ -3156,26 +4172,44 @@ test_limbo(void)
 	int match;
 	int known;
 	int success;
+	int compared;
+	int open_error;
+	int more;
 
+	/* Takes room for one case. */
 	chain = malloc(sizeof(*chain));
 	CHECK(chain != NULL);
 	if (chain == NULL)
 		return;
-	if (vec_open(&file, "limbo") != 0) {
+
+	/* Opens the records of x509-limbo. */
+	open_error = vec_open(&file, "limbo");
+	if (open_error != 0) {
 		CHECK(0);
 		free(chain);
 		return;
 	}
-	while (vec_next(&file)) {
+
+	/* Runs the name matching and the name constraints on every record. */
+	more = vec_next(&file);
+	while (more) {
+		/* Reads what the record expects. */
 		limbo_cases++;
 		id = vec_get(&file, "id");
 		expected = vec_get(&file, "expected");
-		success = strcmp(expected, "SUCCESS") == 0;
+		compared = strcmp(expected, "SUCCESS");
+		success = 0;
+		if (compared == 0)
+			success = 1;
 		if (success)
 			limbo_success_cases++;
+
+		/* Loads the certificates of the record and counts a peer that does not parse. */
 		limbo_load(&file, chain);
 		if (chain->count == 0U || !chain->parsed[0])
 			limbo_unparsed_peer++;
+
+		/* Matches the peer name of the record against the peer certificate. */
 		match = limbo_match_peer(&file, chain);
 		if (match >= 0)
 			limbo_peer_names++;
@@ -3187,6 +4221,8 @@ test_limbo(void)
 			CHECK(match == 1);
 			limbo_success_matched++;
 		}
+
+		/* Counts the cases that fail for another reason though their name matches. */
 		if (!success && match == 1)
 			limbo_failure_matched++;
 
@@ -3197,14 +4233,24 @@ test_limbo(void)
 				printf("name case differs: %s expected match %d got %d\n", id, known, match);
 			CHECK(match == known);
 		}
+
+		/* Applies the name constraints of the chain and frees the case. */
 		limbo_check_constraints(&file, chain, match);
 		limbo_free(chain);
+
+		/* Reads the next record. */
+		more = vec_next(&file);
 	}
+
+	/* Closes the records and gives back the room. */
 	vec_close(&file);
 	free(chain);
 
+	/* Prints the statistics of the run. */
 	printf("limbo: %lu cases, %lu SUCCESS, %lu with a peer name, %lu SUCCESS names matched, %lu FAILURE names matched, %lu unparsed peers\n", limbo_cases, limbo_success_cases, limbo_peer_names, limbo_success_matched, limbo_failure_matched, limbo_unparsed_peer);
 	printf("limbo chains: %lu tried, %lu skipped, %lu SUCCESS chains checked; name constraint cases %lu: %lu agree, %lu listed, %lu differ; %lu refused by the constraints, %lu by the name only\n", limbo_chains, limbo_chain_skipped, limbo_nc_success_chains, limbo_nc_cases, limbo_nc_agree, limbo_nc_explained, limbo_nc_unexplained, limbo_nc_refused, limbo_nc_refused_by_name);
+
+	/* The statistics must be those of the corpus. */
 	CHECK(limbo_cases == 9792UL);
 	CHECK(limbo_success_cases == 930UL);
 	CHECK(limbo_peer_names == 9784UL);
@@ -3219,24 +4265,4 @@ test_limbo(void)
 	CHECK(limbo_nc_unexplained == 0UL);
 	CHECK(limbo_nc_refused == 5863UL);
 	CHECK(limbo_nc_refused_by_name == 2840UL);
-}
-
-int
-main(void)
-{
-	test_equal_cases();
-	test_equal_random();
-	test_equal_mutations();
-	test_normalize();
-	test_match_host();
-	test_match_ip();
-	test_nc_dns();
-	test_nc_ip();
-	test_nc_mail();
-	test_nc_directory();
-	test_nc_other();
-	test_nc_budget();
-	test_parse_ip();
-	test_limbo();
-	return check_finish("test-name");
 }

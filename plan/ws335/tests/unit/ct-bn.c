@@ -24,6 +24,12 @@
 #define LARGE_LIMBS	64U
 
 /* Fills n limbs with a fixed pattern below a modulus with the top limb set. */
+static void fill(uint32_t *out, size_t n, unsigned seed);
+
+/* Runs the operations on one modulus of the given width. */
+static unsigned run(size_t limbs);
+
+/* Fills n limbs with a fixed pattern below a modulus with the top limb set. */
 static void
 fill(
 	uint32_t *out,
@@ -154,6 +160,8 @@ run(
 	/* Everything public again, so the final use is not reported. */
 	CT_PUBLIC(a, limbs * sizeof(a[0]));
 	CT_PUBLIC(b, limbs * sizeof(b[0]));
+
+	/* Reports the folded outputs of this width, so no call is dropped. */
 	return total;
 }
 

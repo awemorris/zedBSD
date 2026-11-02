@@ -22,6 +22,15 @@
 #include "userland/base/libcrypto-compat/cryc-gcm.h"
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* Runs one key size and one IV size. */
+static unsigned run_case(size_t key_size, size_t iv_size, unsigned seed);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -48,6 +57,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value. */
 	return value & 0xffU;
 }
 
@@ -73,6 +84,7 @@ run_case(
 	unsigned total;
 	int error;
 
+	/* The sum of the folded outputs starts at zero. */
 	total = 0;
 
 	/* The multiplication of two secret blocks, and the same in place. */
@@ -135,6 +147,8 @@ run_case(
 
 	/* The key is wiped. */
 	cryc_gcm_clear(&gcm);
+
+	/* Reports the folded outputs, so no call is dropped. */
 	return total;
 }
 

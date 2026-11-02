@@ -39,12 +39,100 @@ struct big {
 static uint32_t rng_state = 0x2545f491U;
 
 /* The width in bits of limb i. */
+static unsigned limb_width(unsigned i);
+
+/* The bit position of limb i: ceil(25.5 * i). */
+static unsigned limb_position(unsigned i);
+
+/* Sets a number to zero. */
+static void big_zero(struct big *n);
+
+/* Sets n to the value of a small number. */
+static void big_set(struct big *n, uint32_t value);
+
+/* Normalizes the carries so each digit is below 2^16. */
+static void big_normalize(struct big *n);
+
+/* Returns 1 when the digits from first up are all zero. */
+static int big_high_is_zero(const struct big *n, unsigned first);
+
+/* Sets n to p = 2^255 - 19. */
+static void big_p(struct big *n);
+
+/* Returns 1 when the number is at least p (both normalized, the number below 2^256). */
+static int big_ge_p(const struct big *n);
+
+/* Subtracts p from a normalized number that is at least p. */
+static void big_sub_p(struct big *n);
+
+/* Reduces a number modulo p to [0, p - 1]. */
+static void big_reduce(struct big *n);
+
+/* out = a * b modulo p (a and b normalized, below 2^256). */
+static void big_mul(struct big *out, const struct big *a, const struct big *b);
+
+/* out = a + b modulo p. */
+static void big_add(struct big *out, const struct big *a, const struct big *b);
+
+/* out = a - b modulo p (a + p - b). */
+static void big_sub(struct big *out, const struct big *a, const struct big *b);
+
+/* Returns 1 when two reduced numbers are equal. */
+static int big_equal(const struct big *a, const struct big *b);
+
+/* Sets a number from 32 little-endian bytes (unreduced). */
+static void big_from_bytes(struct big *n, const uint8_t *bytes);
+
+/* Writes a reduced number as 32 little-endian bytes. */
+static void big_to_bytes(uint8_t *bytes, const struct big *n);
+
+/* Returns the value of an element (any limbs) modulo p. */
+static void big_from_element(struct big *out, const struct cryc_f25519 *e);
+
+/* Returns 1 when every limb of the element is within 0 to bound_factor * 2^width (inclusive or below). */
+static int element_within(const struct cryc_f25519 *e, unsigned factor, int inclusive);
+
+/* Returns 1 when the element is reduced: every limb at most 2^width. */
+static int is_reduced(const struct cryc_f25519 *e);
+
+/* Returns 1 when the element is loose: every limb below 3 * 2^width. */
+static int is_loose(const struct cryc_f25519 *e);
+
+/* Makes a random element bounded by a factor of 2^width, biased to the boundary values. */
+static void random_element(struct cryc_f25519 *e, unsigned factor, int inclusive);
+
+/* Sets an element with every limb at the largest the range allows. */
+static void max_element(struct cryc_f25519 *e, unsigned factor, int inclusive);
+
+/* Checks that the element has the value of the number. */
+static int value_is(const struct cryc_f25519 *e, const struct big *expected);
+
+/* Checks decode and encode on the 32-byte input. */
+static void check_codec(const uint8_t *bytes);
+
+/* Adds a small signed amount to the 32 bytes, as a little-endian number (no carry out of the top byte for the values used). */
+static void bytes_add(uint8_t *bytes, int delta);
+
+/* Sets n to the exponent 2^252 - 3 = (p - 5) / 8. */
+static void exponent_p58(struct big *n);
+
+/* Sets n to the exponent p - 2. */
+static void exponent_inverse(struct big *n);
+
+/* out = base^exponent modulo p, square and multiply from the top bit. */
+static void big_pow(struct big *out, const struct big *base, const struct big *exponent);
+
+/* The width in bits of limb i. */
 static unsigned
 limb_width(
 	unsigned i)
 {
-	/* Even limbs carry 26 bits, odd limbs 25. */
-	return (i & 1U) == 0U ? 26U : 25U;
+	/* Even limbs carry 26 bits. */
+	if ((i & 1U) == 0U)
+		return 26U;
+
+	/* Odd limbs carry 25 bits. */
+	return 25U;
 }
 
 /* The bit position of limb i: ceil(25.5 * i). */
@@ -117,9 +205,12 @@ big_high_is_zero(
 	unsigned i;
 
 	/* Any non-zero digit. */
-	for (i = first; i < BIG_DIGITS; i++)
+	for (i = first; i < BIG_DIGITS; i++) {
 		if (n->digit[i] != 0U)
 			return 0;
+	}
+
+	/* Succeeded: every digit from first up is zero. */
 	return 1;
 }
 
@@ -154,6 +245,8 @@ big_ge_p(
 		if (n->digit[i - 1U] < p.digit[i - 1U])
 			return 0;
 	}
+
+	/* Succeeded: the number equals p, which counts as at least p. */
 	return 1;
 }
 
@@ -177,6 +270,8 @@ big_sub_p(
 			value += 0x10000;
 			borrow = 1;
 		}
+
+		/* The digit of the difference. */
 		n->digit[i] = (uint32_t)value;
 	}
 }
@@ -188,21 +283,28 @@ big_reduce(
 {
 	struct big fold;
 	unsigned i;
+	int high_zero;
+	int above;
 
 	/* Folds 2^256 = 38 (mod p) until nothing is left above 256 bits. */
 	big_normalize(n);
-	while (!big_high_is_zero(n, 16U)) {
+	high_zero = big_high_is_zero(n, 16U);
+	while (!high_zero) {
 		fold = *n;
 		for (i = 16U; i < BIG_DIGITS; i++)
 			n->digit[i] = 0;
 		for (i = 16U; i < BIG_DIGITS; i++)
 			n->digit[i - 16U] += fold.digit[i] * 38U;
 		big_normalize(n);
+		high_zero = big_high_is_zero(n, 16U);
 	}
 
 	/* 2^256 is 2p + 38, so at most two subtractions. */
-	while (big_ge_p(n))
+	above = big_ge_p(n);
+	while (above) {
 		big_sub_p(n);
+		above = big_ge_p(n);
+	}
 }
 
 /* out = a * b modulo p (a and b normalized, below 2^256). */
@@ -223,6 +325,8 @@ big_mul(
 			product.digit[i + j] += a->digit[i] * b->digit[j];
 		big_normalize(&product);
 	}
+
+	/* Reduces the product and stores it. */
 	big_reduce(&product);
 	*out = product;
 }
@@ -256,6 +360,7 @@ big_sub(
 	struct big result;
 	int32_t borrow;
 	int32_t value;
+	int32_t subtrahend;
 	unsigned i;
 
 	/* a + p first (below 2^257), then the subtraction with a borrow: never negative. */
@@ -266,14 +371,21 @@ big_sub(
 	big_normalize(&result);
 	borrow = 0;
 	for (i = 0; i < BIG_DIGITS; i++) {
-		value = (int32_t)result.digit[i] - (int32_t)(i < 16U ? b->digit[i] : 0U) - borrow;
+		subtrahend = 0;
+		if (i < 16U)
+			subtrahend = (int32_t)b->digit[i];
+		value = (int32_t)result.digit[i] - subtrahend - borrow;
 		borrow = 0;
 		if (value < 0) {
 			value += 0x10000;
 			borrow = 1;
 		}
+
+		/* The digit of the difference. */
 		result.digit[i] = (uint32_t)value;
 	}
+
+	/* Reduces the difference and stores it. */
 	big_reduce(&result);
 	*out = result;
 }
@@ -287,9 +399,12 @@ big_equal(
 	unsigned i;
 
 	/* Every digit. */
-	for (i = 0; i < 16U; i++)
+	for (i = 0; i < 16U; i++) {
 		if (a->digit[i] != b->digit[i])
 			return 0;
+	}
+
+	/* Succeeded: every digit is equal. */
 	return 1;
 }
 
@@ -353,6 +468,8 @@ big_from_element(
 		total.digit[digit + 2U] += part;
 		big_normalize(&total);
 	}
+
+	/* Reduces the sum and stores it. */
 	big_reduce(&total);
 	*out = total;
 }
@@ -374,9 +491,16 @@ element_within(
 			return 0;
 		value = (uint64_t)(uint32_t)e->limb[i];
 		bound = (uint64_t)factor << limb_width(i);
-		if (inclusive ? value > bound : value >= bound)
-			return 0;
+		if (inclusive) {
+			if (value > bound)
+				return 0;
+		} else {
+			if (value >= bound)
+				return 0;
+		}
 	}
+
+	/* Succeeded: every limb is within its bound. */
 	return 1;
 }
 
@@ -511,6 +635,8 @@ bytes_add(
 			value -= 256;
 			carry += 1;
 		}
+
+		/* The byte of the sum. */
 		bytes[i] = (uint8_t)value;
 	}
 }
@@ -558,10 +684,20 @@ check_encode_elements(void)
 	uint8_t want[32];
 	unsigned i;
 	unsigned round;
+	unsigned factor;
+	int strict;
 
 	/* Random reduced and loose elements. */
 	for (round = 0; round < RANDOM_CASES; round++) {
-		random_element(&e, round % 2U == 0U ? 1U : 3U, round % 2U == 0U);
+		factor = 3U;
+		strict = 0;
+		if (round % 2U == 0U) {
+			factor = 1U;
+			strict = 1;
+		}
+
+		/* The element of this round. */
+		random_element(&e, factor, strict);
 		big_from_element(&expected, &e);
 		big_to_bytes(want, &expected);
 		cryc_f25519_encode(out, &e);
@@ -619,6 +755,8 @@ check_predicates(void)
 	uint8_t bytes[32];
 	unsigned round;
 	unsigned i;
+	uint32_t want_zero;
+	int high_zero;
 
 	/* zero and one. */
 	cryc_f25519_zero(&e);
@@ -650,7 +788,11 @@ check_predicates(void)
 		big_from_element(&n, &f);
 		big_to_bytes(bytes, &n);
 		CHECK(cryc_f25519_is_negative(&f) == (uint32_t)(bytes[0] & 1U));
-		CHECK(cryc_f25519_is_zero(&f) == (big_high_is_zero(&n, 0U) ? 0xffffffffU : 0U));
+		high_zero = big_high_is_zero(&n, 0U);
+		want_zero = 0U;
+		if (high_zero)
+			want_zero = 0xffffffffU;
+		CHECK(cryc_f25519_is_zero(&f) == want_zero);
 	}
 }
 
@@ -668,6 +810,7 @@ check_additive(void)
 	struct big zero;
 	unsigned round;
 
+	/* The zero reference. */
 	big_zero(&zero);
 
 	/* Random reduced operands, plus every limb at its largest. */
@@ -685,6 +828,8 @@ check_additive(void)
 			random_element(&a, 1U, 1);
 			random_element(&b, 1U, 1);
 		}
+
+		/* The reference values of the operands. */
 		big_from_element(&na, &a);
 		big_from_element(&nb, &b);
 
@@ -763,7 +908,9 @@ check_multiplicative(void)
 
 	/* Operands reduced (factor 1) and loose (factor 3), random and at their largest. */
 	for (round = 0; round < RANDOM_CASES * 2U; round++) {
-		factor = round % 2U == 0U ? 1U : 3U;
+		factor = 3U;
+		if (round % 2U == 0U)
+			factor = 1U;
 		if (round < 4U) {
 			max_element(&a, factor, factor == 1U);
 			max_element(&b, factor, factor == 1U);
@@ -771,6 +918,8 @@ check_multiplicative(void)
 			random_element(&a, factor, factor == 1U);
 			random_element(&b, factor, factor == 1U);
 		}
+
+		/* The reference values of the operands. */
 		big_from_element(&na, &a);
 		big_from_element(&nb, &b);
 
@@ -806,7 +955,9 @@ check_multiplicative(void)
 	smalls[4] = 65536U;
 	smalls[5] = 2U;
 	for (round = 0; round < RANDOM_CASES; round++) {
-		factor = round % 2U == 0U ? 1U : 3U;
+		factor = 3U;
+		if (round % 2U == 0U)
+			factor = 1U;
 		if (round < 4U)
 			max_element(&a, factor, factor == 1U);
 		else
@@ -821,6 +972,8 @@ check_multiplicative(void)
 			CHECK(value_is(&r, &expected));
 			CHECK(is_reduced(&r));
 		}
+
+		/* The constant of the curve in place. */
 		copy = a;
 		cryc_f25519_mul_small(&copy, &copy, 121665U);
 		big_set(&small, 121665U);
@@ -871,6 +1024,8 @@ big_pow(
 		if (((exponent->digit[bit / 16] >> (bit % 16)) & 1U) != 0U)
 			big_mul(&result, &result, base);
 	}
+
+	/* Stores the power. */
 	*out = result;
 }
 
@@ -887,8 +1042,14 @@ check_powers(void)
 	struct big exponent;
 	struct big one;
 	unsigned round;
+	unsigned factor;
+	int strict;
+	uint32_t is_zero;
 
+	/* The reference one. */
 	big_set(&one, 1U);
+
+	/* Special elements first, then random ones. */
 	for (round = 0; round < 40U; round++) {
 		if (round == 0U)
 			cryc_f25519_zero(&a);
@@ -898,8 +1059,19 @@ check_powers(void)
 			max_element(&a, 1U, 1);
 		else if (round == 3U)
 			max_element(&a, 3U, 0);
-		else
-			random_element(&a, round % 2U == 0U ? 1U : 3U, round % 2U == 0U);
+		else {
+			factor = 3U;
+			strict = 0;
+			if (round % 2U == 0U) {
+				factor = 1U;
+				strict = 1;
+			}
+
+			/* A random element, reduced in even rounds and loose in odd ones. */
+			random_element(&a, factor, strict);
+		}
+
+		/* The reference value of the element. */
 		big_from_element(&na, &a);
 
 		/* invert: a^(p - 2), zero for zero, and a * a^-1 = 1 otherwise. */
@@ -909,10 +1081,13 @@ check_powers(void)
 		CHECK(value_is(&r, &expected));
 		CHECK(is_reduced(&r));
 		cryc_f25519_mul(&product, &a, &r);
-		if (cryc_f25519_is_zero(&a) == 0U)
+		is_zero = cryc_f25519_is_zero(&a);
+		if (is_zero == 0U)
 			CHECK(value_is(&product, &one));
 		else
 			CHECK(cryc_f25519_is_zero(&product) == 0xffffffffU);
+
+		/* invert in place gives the same value. */
 		copy = a;
 		cryc_f25519_invert(&copy, &copy);
 		CHECK(value_is(&copy, &expected));
@@ -964,7 +1139,16 @@ check_chains(void)
 	struct big nx;
 	struct big ny;
 	struct big nt;
+	struct cryc_f25519 sum;
+	struct cryc_f25519 diff;
+	struct cryc_f25519 prod;
+	struct cryc_f25519 small;
+	struct big nsum;
+	struct big ndiff;
+	struct big nsmall;
+	struct big k;
 	unsigned round;
+	int good;
 
 	/* x = (x + y) * (x - y) + 121665 * y, y = x * y, 1000 steps; limbs never leave their ranges. */
 	random_element(&x, 1U, 1);
@@ -972,15 +1156,6 @@ check_chains(void)
 	big_from_element(&nx, &x);
 	big_from_element(&ny, &y);
 	for (round = 0; round < 1000U; round++) {
-		struct cryc_f25519 sum;
-		struct cryc_f25519 diff;
-		struct cryc_f25519 prod;
-		struct cryc_f25519 small;
-		struct big nsum;
-		struct big ndiff;
-		struct big nsmall;
-		struct big k;
-
 		cryc_f25519_add(&sum, &x, &y);
 		cryc_f25519_sub(&diff, &x, &y);
 		cryc_f25519_mul(&prod, &sum, &diff);
@@ -996,7 +1171,8 @@ check_chains(void)
 		big_add(&nt, &nt, &nsmall);
 		big_mul(&ny, &nx, &ny);
 		nx = nt;
-		if (!CHECK(value_is(&x, &nx) && value_is(&y, &ny) && is_reduced(&x) && is_reduced(&y)))
+		good = CHECK(value_is(&x, &nx) && value_is(&y, &ny) && is_reduced(&x) && is_reduced(&y));
+		if (!good)
 			break;
 	}
 }
@@ -1016,6 +1192,8 @@ main(void)
 			bytes[i] = (uint8_t)random32();
 		check_codec(bytes);
 	}
+
+	/* The encoding of elements. */
 	check_encode_elements();
 
 	/* The rest. */

@@ -40,6 +40,8 @@ main(void)
 		left[index] = (unsigned char)(index * 11U + 3U);
 		right[index] = left[index];
 	}
+
+	/* The comparison of the two secrets; its verdict is public afterwards. */
 	CT_SECRET(left, sizeof(left));
 	CT_SECRET(right, sizeof(right));
 	result = CRYPTO_memcmp(left, right, sizeof(left));
@@ -69,6 +71,6 @@ main(void)
 	CT_PUBLIC(secret, sizeof(secret));
 	CHECK(secret[0] == 0 && secret[63] == 0);
 
-	/* The last line run-ct.sh reads. */
+	/* The last line the runner reads. */
 	return check_finish("ct-err");
 }
