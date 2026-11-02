@@ -73,6 +73,7 @@ sslc_record_set_keys(
 	struct sslc_record_dir next;
 	const struct sslc_suite *suite;
 	uint16_t version;
+	int init_error;
 	int error;
 
 	/* A suite is required: plaintext is made by sslc_record_clear. */
@@ -85,7 +86,11 @@ sslc_record_set_keys(
 		return EINVAL;
 
 	/* The record format and the suite's protocol version must agree. */
-	version = version13 != 0 ? SSLC_TLS13 : SSLC_TLS12;
+	version = SSLC_TLS12;
+	if (version13 != 0)
+		version = SSLC_TLS13;
+
+	/* Refuses a suite that belongs to the other protocol version. */
 	if (suite->version != version)
 		return EINVAL;
 
@@ -102,7 +107,9 @@ sslc_record_set_keys(
 	/* The new direction: the suite, the format, the IV and the expanded key. */
 	sslc_record_init(&next);
 	next.suite = suite;
-	next.version13 = version13 != 0 ? 1 : 0;
+	next.version13 = 0;
+	if (version13 != 0)
+		next.version13 = 1;
 	memcpy(next.iv, keys->iv, keys->iv_size);
 	next.iv_size = keys->iv_size;
 	error = 0;
@@ -112,9 +119,13 @@ sslc_record_set_keys(
 		else
 			memcpy(next.chacha_key, keys->key, keys->key_size);
 	} else {
-		if (cryc_gcm_init(&next.gcm, keys->key, keys->key_size) != 0)
+		/* Expands the AES key and the hash subkey of GCM. */
+		init_error = cryc_gcm_init(&next.gcm, keys->key, keys->key_size);
+		if (init_error != 0)
 			error = EINVAL;
 	}
+
+	/* Discards the partial state when the key setup failed. */
 	if (error != 0) {
 		cryc_wipe(&next, sizeof(next));
 		return error;
@@ -235,6 +246,7 @@ sslc_record_overhead(
 	size_t size)
 {
 	size_t total;
+	int gcm12;
 
 	/* No record carries more than a full fragment. */
 	if (size > SSLC_RECORD_PLAINTEXT_MAX)
@@ -251,8 +263,13 @@ sslc_record_overhead(
 	total += SSLC_RECORD_TAG;
 	if (dir->version13 != 0)
 		total += 1;
-	if (sslc_record_is_gcm12(dir) != 0)
+
+	/* Whether the direction is TLS 1.2 AES-GCM. */
+	gcm12 = sslc_record_is_gcm12(dir);
+	if (gcm12 != 0)
 		total += SSLC_RECORD12_EXPLICIT;
+
+	/* Reports the size of the whole record. */
 	return total;
 }
 
@@ -283,7 +300,9 @@ sslc_record_seal(
 	size_t payload;
 	size_t body;
 	size_t explicit_size;
+	size_t aad_size;
 	uint32_t version;
+	int gcm12;
 	int error;
 
 	/* The caller's mistakes: a bad type, a fragment too large, no bytes to read. */
@@ -322,7 +341,8 @@ sslc_record_seal(
 
 	/* The explicit nonce (TLS 1.2 AES-GCM only) goes between the header and the payload. */
 	explicit_size = 0;
-	if (sslc_record_is_gcm12(dir) != 0)
+	gcm12 = sslc_record_is_gcm12(dir);
+	if (gcm12 != 0)
 		explicit_size = SSLC_RECORD12_EXPLICIT;
 
 	/* The payload: the plaintext, and for TLS 1.3 its content type; the tag follows. */
@@ -357,7 +377,10 @@ sslc_record_seal(
 		sslc_record_make_aad12(sequence_bytes, type, SSLC_RECORD_LEGACY_VERSION, size, aad);
 
 	/* The payload is encrypted where it stands and the tag written after it. */
-	error = sslc_record_aead_seal(dir, nonce, aad, dir->version13 != 0 ? SSLC_RECORD_HEADER : SSLC_RECORD12_AAD,
+	aad_size = SSLC_RECORD12_AAD;
+	if (dir->version13 != 0)
+		aad_size = SSLC_RECORD_HEADER;
+	error = sslc_record_aead_seal(dir, nonce, aad, aad_size,
 	    out + SSLC_RECORD_HEADER + explicit_size, payload, out + SSLC_RECORD_HEADER + explicit_size + payload);
 	cryc_wipe(nonce, sizeof(nonce));
 	if (error != 0)
@@ -400,6 +423,9 @@ sslc_record_open(
 	size_t explicit_size;
 	size_t plain_size;
 	size_t index;
+	size_t aad_size;
+	size_t length_field;
+	size_t protected_min;
 	uint32_t status;
 	uint32_t tag_error;
 	uint32_t size_error;
@@ -409,6 +435,7 @@ sslc_record_open(
 	uint32_t not_zero;
 	uint32_t ok;
 	unsigned outer;
+	int gcm12;
 	int result;
 
 	/* The result is empty until the record is accepted. */
@@ -420,7 +447,8 @@ sslc_record_open(
 	if (size < SSLC_RECORD_HEADER)
 		return EPROTO;
 	length = size - SSLC_RECORD_HEADER;
-	if (length != (size_t)cryc_load_be16(record + 3))
+	length_field = (size_t)cryc_load_be16(record + 3);
+	if (length != length_field)
 		return EPROTO;
 	outer = record[0];
 
@@ -464,7 +492,8 @@ sslc_record_open(
 	}
 
 	/* Too short to hold the nonce, the tag and the inner type. */
-	if (length < sslc_record_protected_min(dir))
+	protected_min = sslc_record_protected_min(dir);
+	if (length < protected_min)
 		return EBADMSG;
 
 	/* The sequence number must not wrap (5.3). */
@@ -474,7 +503,8 @@ sslc_record_open(
 
 	/* The explicit nonce (TLS 1.2 AES-GCM) follows the header; the payload, then the tag, after it. */
 	explicit_size = 0;
-	if (sslc_record_is_gcm12(dir) != 0)
+	gcm12 = sslc_record_is_gcm12(dir);
+	if (gcm12 != 0)
 		explicit_size = SSLC_RECORD12_EXPLICIT;
 	payload = record + SSLC_RECORD_HEADER + explicit_size;
 	plain_size = length - explicit_size - SSLC_RECORD_TAG;
@@ -488,7 +518,10 @@ sslc_record_open(
 		sslc_record_make_aad12(sequence_bytes, outer, cryc_load_be16(record + 1), plain_size, aad);
 
 	/* The tag is checked and the plaintext released (zeroed on a bad tag), in place. */
-	result = sslc_record_aead_open(dir, nonce, aad, dir->version13 != 0 ? SSLC_RECORD_HEADER : SSLC_RECORD12_AAD,
+	aad_size = SSLC_RECORD12_AAD;
+	if (dir->version13 != 0)
+		aad_size = SSLC_RECORD_HEADER;
+	result = sslc_record_aead_open(dir, nonce, aad, aad_size,
 	    payload, plain_size, tag);
 	cryc_wipe(nonce, sizeof(nonce));
 	tag_error = (uint32_t)result;
@@ -570,6 +603,7 @@ sslc_record_protected_min(
 	const struct sslc_record_dir *dir)
 {
 	size_t minimum;
+	int gcm12;
 
 	/* Every protected record carries a tag. */
 	minimum = SSLC_RECORD_TAG;
@@ -577,7 +611,8 @@ sslc_record_protected_min(
 	/* TLS 1.3 adds the inner content type, TLS 1.2 AES-GCM the explicit nonce. */
 	if (dir->version13 != 0)
 		minimum += 1;
-	if (sslc_record_is_gcm12(dir) != 0)
+	gcm12 = sslc_record_is_gcm12(dir);
+	if (gcm12 != 0)
 		minimum += SSLC_RECORD12_EXPLICIT;
 	return minimum;
 }
@@ -598,9 +633,11 @@ sslc_record_make_nonce(
 	uint8_t *nonce)
 {
 	size_t index;
+	int gcm12;
 
 	/* The salt and the explicit bytes. */
-	if (sslc_record_is_gcm12(dir) != 0) {
+	gcm12 = sslc_record_is_gcm12(dir);
+	if (gcm12 != 0) {
 		memcpy(nonce, dir->iv, 4);
 		memcpy(nonce + 4, explicit_nonce, SSLC_RECORD12_EXPLICIT);
 		return;

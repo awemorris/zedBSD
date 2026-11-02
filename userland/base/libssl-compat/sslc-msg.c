@@ -418,6 +418,8 @@ sslc_msg_parse_certificate(
 			if (extensions.size != 0U)
 				return sslc_msg_fail(alert, SSLC_ALERT_UNSUPPORTED_EXTENSION, EPROTO);
 		}
+
+		/* Measures what is left of the list. */
 		left = sslc_reader_left(&list);
 	}
 
@@ -1057,6 +1059,8 @@ sslc_msg_write_extensions(
 			sslc_writer_bytes(writer, hello->shares[index].key, hello->shares[index].key_size);
 			sslc_writer_end(writer);
 		}
+
+		/* Closes the share list and the extension. */
 		sslc_writer_end(writer);
 		sslc_writer_end(writer);
 	}
@@ -1125,6 +1129,8 @@ sslc_msg_hello_extension(
 			hello->share_key = inner.data;
 			hello->share_size = inner.size;
 		}
+
+		/* Checks that the extension has no trailing bytes. */
 		error = sslc_reader_finish(data);
 		if (error != 0)
 			return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
@@ -1172,6 +1178,8 @@ sslc_msg_hello_extension(
 			if (inner.data[index] == SSLC_MSG_POINT_UNCOMPRESSED)
 				found = 1;
 		}
+
+		/* Refuses a list without the uncompressed point format. */
 		if (!found)
 			return sslc_msg_fail(alert, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
 		return 0;

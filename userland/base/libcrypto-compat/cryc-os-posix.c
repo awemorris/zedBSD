@@ -106,11 +106,15 @@ cryc_os_random(
 			cryc_wipe(out, size);
 			return EIO;
 		}
+
+		/* Refuses a call that drew nothing. */
 		if (got == 0) {
 			/* A call that draws nothing and reports no error would never end. */
 			cryc_wipe(out, size);
 			return EIO;
 		}
+
+		/* Counts the bytes drawn. */
 		filled += (size_t)got;
 	}
 
@@ -312,6 +316,7 @@ cryc_os_read_file(
 	size_t limit;
 	size_t total;
 	size_t got;
+	int failed;
 	int error;
 
 	/* Refuses missing outputs; with them there is nothing to clear. */
@@ -351,6 +356,8 @@ cryc_os_read_file(
 		(void)fclose(file);
 		return ENOMEM;
 	}
+
+	/* Starts with an empty file. */
 	total = 0;
 	error = 0;
 
@@ -373,6 +380,8 @@ cryc_os_read_file(
 				error = ENOMEM;
 				break;
 			}
+
+			/* Takes the grown buffer. */
 			buffer = grown;
 		}
 
@@ -380,20 +389,25 @@ cryc_os_read_file(
 		got = fread(buffer + total, 1, capacity - 1U - total, file);
 		if (got == 0) {
 			/* A signal that interrupted the read is retried. */
-			if (ferror(file) != 0 && errno == EINTR) {
+			failed = ferror(file);
+			if (failed != 0 && errno == EINTR) {
 				clearerr(file);
 				continue;
 			}
 
 			/* A failed read leaves the file unusable. */
-			if (ferror(file) != 0)
+			if (failed != 0)
 				error = EIO;
 
 			/* The end of the file. */
 			break;
 		}
+
+		/* Counts the bytes read. */
 		total += got;
 	}
+
+	/* Closes the file. */
 	(void)fclose(file);
 
 	/* A file that reached the limit's extra byte is larger than max. */

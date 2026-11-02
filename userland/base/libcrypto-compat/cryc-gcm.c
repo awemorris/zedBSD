@@ -477,6 +477,7 @@ gcm_counter_xor(
 		for (index = 0; index < chunk; index++)
 			out[index] = (uint8_t)(in[index] ^ keystream[index]);
 
+		/* Moves past the bytes handled. */
 		in += chunk;
 		out += chunk;
 		size -= chunk;

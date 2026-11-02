@@ -684,6 +684,7 @@ chacha_stream(
 	while (done < size) {
 		chacha_permute(state, keystream);
 
+		/* Limits the chunk to one block. */
 		chunk = size - done;
 		if (chunk > CRYC_CHACHA20_BLOCK)
 			chunk = CRYC_CHACHA20_BLOCK;
@@ -693,6 +694,8 @@ chacha_stream(
 			byte = (uint8_t)(in[done + index] ^ keystream[index]);
 			out[done + index] = (uint8_t)(byte & keep_mask);
 		}
+
+		/* Moves past the bytes taken. */
 		done += chunk;
 
 		/* Advances the counter: its low word, and for the 64-bit form its high word on a carry. */

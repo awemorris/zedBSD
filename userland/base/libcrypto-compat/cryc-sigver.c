@@ -49,6 +49,7 @@ cryc_ecdsa_signature_decode(
 	const uint8_t *s_magnitude;
 	size_t r_size;
 	size_t s_size;
+	int empty;
 	int error;
 
 	/* Reads the outer SEQUENCE, which must be the whole input. */
@@ -56,7 +57,8 @@ cryc_ecdsa_signature_decode(
 	error = cryc_der_expect(&outer, CRYC_DER_SEQUENCE, &sequence);
 	if (error != 0)
 		return EBADMSG;
-	if (cryc_der_empty(&outer) == 0)
+	empty = cryc_der_empty(&outer);
+	if (empty == 0)
 		return EBADMSG;
 
 	/* Reads r and s, which must be the whole contents of the SEQUENCE. */
@@ -69,7 +71,8 @@ cryc_ecdsa_signature_decode(
 	error = cryc_der_expect(&inner, CRYC_DER_INTEGER, &s_element);
 	if (error != 0)
 		return EBADMSG;
-	if (cryc_der_empty(&inner) == 0)
+	empty = cryc_der_empty(&inner);
+	if (empty == 0)
 		return EBADMSG;
 
 	/* Checks each value without writing anything. */

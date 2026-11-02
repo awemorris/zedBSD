@@ -642,6 +642,8 @@ ed_point_decode(
 				at_least_p = 0;
 		}
 	}
+
+	/* Refuses a y coordinate that is not reduced. */
 	if (at_least_p != 0)
 		return EINVAL;
 
@@ -792,6 +794,8 @@ ed_scalar_muladd(
 			product[left + right] = (uint32_t)accumulator;
 			carry = (uint32_t)(accumulator >> 32);
 		}
+
+		/* Stores the last carry above the products of this row. */
 		product[left + ED_SCALAR_LIMBS] = carry;
 	}
 

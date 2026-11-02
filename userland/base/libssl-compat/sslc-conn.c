@@ -283,6 +283,8 @@ sslc_conn_read(
 				cryc_wipe(conn->in, conn->in_used);
 				conn->in_used = 0;
 			}
+
+			/* Reports how many bytes of the record were given. */
 			*done = count;
 
 			/* Succeeded: bytes of application data were given. */
@@ -657,6 +659,8 @@ sslc_conn_write_out(
 			conn->os_error = 0;
 			return EIO;
 		}
+
+		/* Counts the bytes the transport took. */
 		conn->out_sent += done;
 	}
 
@@ -682,6 +686,8 @@ sslc_conn_flush(
 		/* The transport failed: no alert can be sent over it. */
 		return sslc_conn_fail(conn, EIO, 0U, 0U);
 	}
+
+	/* Propagates a failed write. */
 	if (error != 0)
 		return error;
 
@@ -990,6 +996,8 @@ sslc_conn_header_failure(
 		if (version != SSLC_TLS12)
 			version_wrong = 1;
 	}
+
+	/* Refuses a record whose version is not the one agreed. */
 	if (version_wrong)
 		return sslc_conn_fail(conn, EPROTO, SSL_R_WRONG_VERSION_NUMBER, SSLC_ALERT_PROTOCOL_VERSION);
 
@@ -1085,6 +1093,8 @@ sslc_conn_fill(
 			conn->os_error = 0;
 			return sslc_conn_fail(conn, EIO, 0U, 0U);
 		}
+
+		/* Counts the bytes the transport gave. */
 		conn->in_used += done;
 	}
 }
@@ -1159,6 +1169,8 @@ sslc_conn_record(
 		error = sslc_conn_fail(conn, EPROTO, SSL_R_UNEXPECTED_MESSAGE, SSLC_ALERT_UNEXPECTED_MESSAGE);
 		break;
 	}
+
+	/* Propagates a failed record. */
 	if (error != 0)
 		return error;
 
@@ -1241,6 +1253,8 @@ sslc_conn_on_alert(
 			conn->alert_received = description;
 			conn->reason = SSL_AD_REASON_OFFSET + description;
 		}
+
+		/* Succeeded: the closure alert was recorded. */
 		return 0;
 	}
 

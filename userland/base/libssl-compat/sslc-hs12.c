@@ -194,6 +194,8 @@ sslc_hs12_message(
 		/* Before the server's change_cipher_spec, after the handshake, or in a state TLS 1.2 does not have. */
 		return sslc_hs12_fail(hs, SSLC_ALERT_UNEXPECTED_MESSAGE, EPROTO);
 	}
+
+	/* Propagates a failed message. */
 	if (error != 0)
 		return error;
 
@@ -320,6 +322,7 @@ sslc_hs12_server_key_exchange(
 	struct cryc_sig_params params;
 	size_t index;
 	size_t content_size;
+	size_t point_size;
 	unsigned alert;
 	int offered;
 	int error;
@@ -335,6 +338,8 @@ sslc_hs12_server_key_exchange(
 		if (hs->groups[index] == exchange.group)
 			offered = 1;
 	}
+
+	/* Refuses a group the client did not offer. */
 	if (!offered)
 		return sslc_hs12_fail(hs, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
 
@@ -343,7 +348,13 @@ sslc_hs12_server_key_exchange(
 		if (exchange.point_size != CRYC_X25519_SIZE)
 			return sslc_hs12_fail(hs, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
 	} else {
-		if (exchange.point_size != (exchange.group == SSLC_GROUP_SECP384R1 ? SSLC_HS12_P384_POINT : SSLC_HS12_P256_POINT))
+		/* The size of an uncompressed point of the curve. */
+		point_size = SSLC_HS12_P256_POINT;
+		if (exchange.group == SSLC_GROUP_SECP384R1)
+			point_size = SSLC_HS12_P384_POINT;
+
+		/* Refuses a point of the wrong size for the group. */
+		if (exchange.point_size != point_size)
 			return sslc_hs12_fail(hs, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
 		if (exchange.point[0] != SSLC_HS12_POINT_UNCOMPRESSED)
 			return sslc_hs12_fail(hs, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
@@ -415,6 +426,8 @@ sslc_hs12_scheme(
 		if (hs->schemes[index] == scheme)
 			offered = 1;
 	}
+
+	/* Refuses a scheme the client did not offer. */
 	if (!offered)
 		return sslc_hs12_fail(hs, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
 
@@ -599,6 +612,8 @@ sslc_hs12_client_flight(
 		point = hs->ec_public;
 		point_size = hs->ec_public_size;
 	}
+
+	/* Builds the ClientKeyExchange from the chosen public point. */
 	error = sslc_msg_write_client_key_exchange(point, point_size, message, sizeof(message), &written);
 	if (error != 0)
 		return sslc_hs12_fail(hs, 0, error);
@@ -636,6 +651,8 @@ sslc_hs12_client_flight(
 		cryc_wipe(&client_keys, sizeof(client_keys));
 		return sslc_hs12_fail(hs, 0, error);
 	}
+
+	/* Installs the client's write keys. */
 	error = sslc_hs12_queue_keys(hs, actions, SSLC_HS_SET_WRITE_KEYS, &client_keys);
 	cryc_wipe(&client_keys, sizeof(client_keys));
 	if (error != 0)
@@ -654,6 +671,8 @@ sslc_hs12_client_flight(
 		cryc_wipe(message, sizeof(message));
 		return sslc_hs12_fail(hs, 0, error);
 	}
+
+	/* Queues the Finished message. */
 	error = sslc_hs_queue_message(hs, actions, message, written);
 
 	/* The Finished is copied into the actions; the local copy of verify_data goes. */
@@ -726,8 +745,12 @@ sslc_hs12_make_ec(
 	if (hs->has_ec)
 		return 0;
 
-	/* The curve, on the heap (it is about 4 KiB). */
-	curve = group == SSLC_GROUP_SECP384R1 ? CRYC_CURVE_P384 : CRYC_CURVE_P256;
+	/* The curve of the group; the curve itself lives on the heap (it is about 4 KiB). */
+	curve = CRYC_CURVE_P256;
+	if (group == SSLC_GROUP_SECP384R1)
+		curve = CRYC_CURVE_P384;
+
+	/* Allocates the curve once per handshake. */
 	if (hs->ec == NULL) {
 		hs->ec = malloc(sizeof(*hs->ec));
 		if (hs->ec == NULL)

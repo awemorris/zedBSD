@@ -161,6 +161,8 @@ cryc_f25519_encode(
 			held -= 8U;
 		}
 	}
+
+	/* Writes the last partial byte. */
 	out[position] = (uint8_t)(accumulator & 0xffU);
 
 	/* The limbs are secret. */
@@ -319,6 +321,8 @@ cryc_f25519_mul(
 				position -= F25519_LIMBS;
 				factor *= 19U;
 			}
+
+			/* Adds the weighted product into its limb. */
 			wide[position] += product * factor;
 		}
 	}

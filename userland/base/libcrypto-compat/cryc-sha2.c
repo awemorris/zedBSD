@@ -265,14 +265,17 @@ cryc_sha256_update(
 		if (chunk > room)
 			chunk = room;
 
+		/* Copies the chunk into the block. */
 		memcpy(hash->block + hash->used, data, chunk);
 		hash->used += chunk;
 		data += chunk;
 		size -= chunk;
 
+		/* Waits for more input while the block is not full. */
 		if (hash->used < CRYC_SHA256_BLOCK)
 			return;
 
+		/* Compresses the full block. */
 		sha256_compress(hash->state, hash->block);
 		hash->used = 0;
 	}
@@ -325,6 +328,8 @@ cryc_sha256_final(
 		sha256_compress(hash->state, hash->block);
 		used = 0;
 	}
+
+	/* Zero-fills up to the length field. */
 	memset(hash->block + used, 0, SHA256_LENGTH_OFFSET - used);
 
 	/* Appends the message length in bits as a 64-bit big-endian number (5.1.1 step c). */
@@ -401,14 +406,17 @@ cryc_sha512_update(
 		if (chunk > room)
 			chunk = room;
 
+		/* Copies the chunk into the block. */
 		memcpy(hash->block + hash->used, data, chunk);
 		hash->used += chunk;
 		data += chunk;
 		size -= chunk;
 
+		/* Waits for more input while the block is not full. */
 		if (hash->used < CRYC_SHA512_BLOCK)
 			return;
 
+		/* Compresses the full block. */
 		sha512_compress(hash->state, hash->block);
 		hash->used = 0;
 	}
@@ -465,6 +473,8 @@ cryc_sha512_final(
 		sha512_compress(hash->state, hash->block);
 		used = 0;
 	}
+
+	/* Zero-fills up to the length field. */
 	memset(hash->block + used, 0, SHA512_LENGTH_OFFSET - used);
 
 	/*

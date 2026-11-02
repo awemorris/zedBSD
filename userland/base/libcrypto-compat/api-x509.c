@@ -405,11 +405,15 @@ X509_STORE_add_cert(
 		x509_fail(CRYC_R_MALLOC_FAILURE);
 		return 0;
 	}
+
+	/* Reports a store that is full as an unsupported request. */
 	if (error == ENOBUFS) {
 		/* The store holds as many certificates as this library allows. */
 		x509_fail(CRYC_R_UNSUPPORTED);
 		return 0;
 	}
+
+	/* Reports any other refusal as an internal fault. */
 	if (error != 0) {
 		/* The certificate parsed when it was made, so the store refusing it is an internal fault. */
 		x509_fail(CRYC_R_INTERNAL_ERROR);
@@ -433,6 +437,7 @@ X509_VERIFY_PARAM_set1_host(
 	char text[HOST_TEXT_ROOM];
 	char normalized[CRYC_NAME_HOST_MAX + 1U];
 	size_t count;
+	size_t text_length;
 	int error;
 
 	/* Refuses a missing parameter object. */
@@ -477,7 +482,8 @@ X509_VERIFY_PARAM_set1_host(
 	text[count] = '\0';
 
 	/* Refuses a name with a NUL inside it: a host name cannot have one, and the check would stop at it. */
-	if (strlen(text) != count) {
+	text_length = strlen(text);
+	if (text_length != count) {
 		x509_fail(CRYC_R_PASSED_INVALID_ARGUMENT);
 		return 0;
 	}
@@ -512,6 +518,7 @@ X509_VERIFY_PARAM_set1_ip_asc(
 {
 	uint8_t bytes[16];
 	const char *end;
+	const char *colon;
 	size_t size;
 	int good;
 
@@ -524,7 +531,8 @@ X509_VERIFY_PARAM_set1_ip_asc(
 	/* An address with a colon is IPv6, any other is IPv4. */
 	memset(bytes, 0, sizeof(bytes));
 	size = 4U;
-	if (strchr(address, ':') != NULL) {
+	colon = strchr(address, ':');
+	if (colon != NULL) {
 		size = 16U;
 		good = ip_parse_v6(address, bytes);
 	} else {
@@ -735,6 +743,7 @@ ip_parse_v6(
 		if (token_end == cursor)
 			return 0;
 
+		/* A token with a dot is the IPv4 tail; any other is a group of hexadecimal digits. */
 		if (has_dot) {
 			/* An IPv4 tail is the last token and takes two groups. */
 			if (*token_end != '\0')
@@ -766,6 +775,8 @@ ip_parse_v6(
 					return 0;
 				value = value * 16U + (unsigned)digit;
 			}
+
+			/* Records the group just read. */
 			groups[group_count] = value;
 			group_count++;
 
@@ -802,6 +813,8 @@ ip_parse_v6(
 		out[index * 2U] = (uint8_t)(groups[index] >> 8);
 		out[index * 2U + 1U] = (uint8_t)(groups[index] & 0xffU);
 	}
+
+	/* Writes the groups that follow the zero run. */
 	tail_count = group_count - (unsigned)compress_at;
 	for (index = 0U;
 	     index < tail_count;
