@@ -21,30 +21,18 @@
 **判断が解決した時（2026-10-30 ユーザー「判断事項が解決されたらcockpit.mdをアップデートするようにmaster.mdに記録してください。」）**: ユーザーが答えたら、同じ turn のうちに cockpit.md を直して commit する。その項目を「ユーザーの判断を待つ事」から外し、「決まった事」の節へ一行（日付・WS・決定の要約・記録した ws.md か ticket の link）で移す。決定で変わった担当の予定・WS の進捗の表も同じ時に直す。「決まった事」の節もセッションをまたいで残し、消すのはユーザーの指示か確認の後。
 
 <!-- master:agents:start -->
-**今の割り振り（2026-11-01 20:20、ユーザーの指示）**: P1 は RTX、P2 は VF2、P3 は Pi 5 の作業（Q1 が WS291 の Phase を選んだ）。Bug の修正は P4（まず BUG-387）。WS074 は Claude のクラウドのセッションが担当し、成果の origin/browser を Q1 が main に merge する（P8 は立てない）。
-**注意**: `~/.local/bin/python3` と `~/.local/bin/vivado` は 07:22 の再起動で空の file（何もせず 0 で終わる）。python は `/usr/bin/python3`。shell の `grep` は binary を飛ばす wrapper（NUL の検査は `/usr/bin/grep`）。大きな I/O の後は `sync`（AGENTS.md §4）。壊れた object・worktree の退避は /home/awe/zedBSD-recovery/（要らなければ消してよい）。
+**ハンドオーバー（2026-11-02 23:52）**: ユーザーの指示で全担当をラップアップ中（各担当は区切りで commit し、phase.md に引き継ぎを書いて返す）。main は未 push（push はユーザーの指示で）。詳しい状況は [cockpit.md](cockpit.md)。
 
-| 担当 | Queue | 中身 |
+| 担当 | Queue | 中身（ラップアップの時点） |
 | --- | --- | --- |
-| P1 | q1884 `p1-ws324` | [WS324](ws324/ws.md) p009b: NVENC の関門（I・P の絵を encode、上限なし）。p009a の channel は cleared |
-| P2 | q1896 `p2-ws322` | [WS322](ws322/ws.md) p007: VF2 の VPU の速さと頑丈さ（timeout の立て直し・seek）。p004 H.264 decode は cleared（1080p30 を GPU の道で再生） |
-| P5 | q1886 `p5-ws334b` | [WS334](ws334/ws.md) p033: 後半の Windows の口（p032 Wine の確かめは cleared） |
-| Sonnet ×2 | q1887・q1888 | [WS334](ws334/ws.md) p034 libbrowser の試験を Windows で・TLS の誤りの文 |
-| P6 | q1897 `p6-ws335b` | [WS335](ws335/ws.md) p015: OS の層（p014 ML-KEM-768 は cleared） |
-| P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
-| P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
-| P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
-| Sonnet ×3 | q1885・q1893・q1895 | [WS335](ws335/ws.md) p026 record の保護・p028 handshake の message・p017 X.509 の parse（p016 は cleared） |
-| Sonnet | q1883 `s-ws324-p006c` | [WS324](ws324/ws.md) p006c: H.265 の解析の rps・ps（p006b は cleared） |
-| P4 | — | 返却。[BUG-390](bugs/BUG-390.md) は fixed。次の Bug を待つ |
-| P8 | q1890 `p8-bug391` | [BUG-391](bugs/BUG-391.md)・[BUG-392](bugs/BUG-392.md): compositor が落ちた時の再開と PIN の既定 |
-| P3 | q1891 `p3-bug393` | [BUG-393](bugs/BUG-393.md): Pi 5 の GPU の起動時の自己試験を既定で off |
-| P7 | q1892 `p7-bug394` | [BUG-394](bugs/BUG-394.md): 起動が長い、init が desktop を優先 |
-| WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
+| P1 | q1992 `p1-ws335` | [WS335](ws335/ws.md) p035（規約の全文の見直しと持ち越し）。library・試験の書き直しと動きの直しは main に。残り: P2 の file の書き直し・evp.h/err.h/rand.h の comment・design.md §5、最後の回帰。次は p036（Windows 版の切り替えの提案） |
+| P5 | q1995 `p5-ws345` | [WS345](ws345/ws.md) p010（origin ごとの agent、iframe の frame の item）。stage B の中心を commit（a6479c00c）、回帰は途中 |
+| P8 | q1996 `p8-ws345` | [WS345](ws345/ws.md) p014（応答しない頁の確かめ）。libbrowser・shell の側は main に（cbcdf4977）、QEMU・tsan・cross-build の結果待ち |
+| P6 | q1999 `p6-ws336` | [WS336](ws336/ws.md) p024（OpenSSH からの入れ替えの用意。config/ci は変えず WS343 に差分を渡す）。sshd の log を OpenSSH の形に直した |
+| P2・P3・P4 | — | 待機 |
 
-- 起動しない pending: q1836（WS336 p009 ssh-auth）。q1837（WS334 p025）は P5 の q1843 へ、q1835（WS335 p004）は P6 の q1844 へ。
-- ユーザーの答えで設計の改訂が要る: WS318（libavcodec を使わない、MJPEG 無し、hardware が無ければ独自の software）、WS329（速さ優先、vector 化の Phase と intrinsics）。WS310（_OSC、デスクトップで壊すつもりで）・WS339（起動の画面を EDID に）・WS338（H.264 の速さ）は担当の割当待ち。
-- **止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd、[WS287](ws287/ws.md) EHCI の full・low speed（保留）。HAL の差分の承認は無い。
+- BUG-412（Pi 5 の click）: 直しは main に。Pi 5 は main の普段の kernel。ユーザーの click の確かめで閉じる。Pi 5 の /boot/boot0 に試験の残り（*.aatold・*.q1967old・*.q1997old・cmdline.txt.ring・/bin/wayland.q1955old）を確かめの後に消す。
+- 5330 はユーザーが zedBSD（d00e071）で使用中。触らない。
 <!-- master:agents:end -->
 
 **ユーザー不在の間の自律実行（2026-10-29 12:4x ユーザー「夜まで寝ます。しばらく質問に回答できないので、疑問で止まったphaseがあれば、質問はメッセージ表示だけしてクリック回答にはせず、別なphaseに移って作業を進めてください。」）**: 判断が要る Phase は uncleared・止めにして理由と要る判断を記録し、Q1 は問いをメッセージで書くだけ（クリックの問いにしない）。担当は別の Phase に移る。
