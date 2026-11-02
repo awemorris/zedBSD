@@ -436,6 +436,10 @@
 		kl_window_present_parts;
 		kl_window_set_pacing;
 		kl_window_frame_wait;
+		kl_window_set_configure_deferred;
+		kl_window_configure_take;
+		kl_window_configure_ack;
+		kl_window_on_resize;
 		kl_window_see_through;
 		kl_window_display;
 		kl_window_surface;

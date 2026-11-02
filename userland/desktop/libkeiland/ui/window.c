@@ -776,6 +776,136 @@ kl_window_frame_wait(
 }
 
 /*
+ * Defers the acknowledgement of a configure that changes the window's size
+ * to the application (KL_VERSION 109), or no longer: turned off, the one
+ * waiting is acknowledged now.  Returns 0, EINVAL without a window, or
+ * ENOTSUP for the desktop's surface (its configures are acknowledged at
+ * once).
+ */
+int
+kl_window_set_configure_deferred(
+	struct kl_window *window,
+	int deferred)
+{
+	/* A window with a toplevel's configures. */
+	if (window == NULL)
+		return EINVAL;
+	if (window->role == NULL || window->toplevel == NULL)
+		return ENOTSUP;
+
+	/* Turned off: what waits is acknowledged now (the latest serial consumes the earlier ones), and no take waits. */
+	if (!deferred && window->configure_waiting) {
+		xdg_surface_ack_configure(window->role, window->configure_serial);
+		(void)wl_display_flush(window->display);
+		window->configure_waiting = 0;
+	}
+	if (!deferred)
+		window->configure_taken = 0;
+
+	/* The choice, for the configures that come from now on. */
+	window->configure_deferred = 0;
+	if (deferred)
+		window->configure_deferred = 1;
+
+	/* Succeeded: configures are deferred, or acknowledged as they arrive. */
+	return 0;
+}
+
+/*
+ * Takes the configure that waits for the application's acknowledgement
+ * (KL_VERSION 109): its serial and the window's size it gave.  Returns 0,
+ * EAGAIN when none waits, or EINVAL.
+ */
+int
+kl_window_configure_take(
+	struct kl_window *window,
+	struct kl_window_configure *configure)
+{
+	/* A window and the place for the configure. */
+	if (window == NULL || configure == NULL)
+		return EINVAL;
+
+	/* Nothing waits (always for a window that does not defer). */
+	if (window->configure_waiting == 0)
+		return EAGAIN;
+
+	/* The latest serial and its size; the take remembers which size change it is. */
+	configure->serial = window->configure_serial;
+	configure->width = window->width;
+	configure->height = window->height;
+	window->configure_taken = 1;
+	window->configure_taken_serial = window->configure_serial;
+	window->configure_taken_sizes = window->configure_sizes;
+
+	/* Succeeded: the configure is the application's to acknowledge. */
+	return 0;
+}
+
+/*
+ * Acknowledges the configure the last kl_window_configure_take gave
+ * (KL_VERSION 109), before the first frame of its size is committed.
+ * When no size changed after it, the latest serial is acknowledged (a
+ * configure that changed nothing came meanwhile) and nothing waits any
+ * more; otherwise only the taken one, and the later size waits for its own
+ * take.  Returns 0, EALREADY when it was acknowledged already, or EINVAL
+ * for another serial.
+ */
+int
+kl_window_configure_ack(
+	struct kl_window *window,
+	uint32_t serial)
+{
+	/* Only the serial of the last take. */
+	if (window == NULL || window->role == NULL)
+		return EINVAL;
+	if (serial != window->configure_taken_serial)
+		return EINVAL;
+	if (window->configure_taken == 0)
+		return EALREADY;
+	window->configure_taken = 0;
+
+	/*
+	 * No size changed since the take: the latest serial, which consumes
+	 * the taken one, and nothing waits.  A later size waits: the taken
+	 * serial alone (one the compositor sent, not consumed yet).  Nothing
+	 * is sent for a configure that no longer waits (the deferral turned
+	 * off meanwhile acknowledged it).
+	 */
+	if (window->configure_waiting == 0) {
+		/* Acknowledged already. */
+	} else if (window->configure_taken_sizes == window->configure_sizes) {
+		xdg_surface_ack_configure(window->role, window->configure_serial);
+		window->configure_waiting = 0;
+	} else {
+		xdg_surface_ack_configure(window->role, serial);
+	}
+
+	/* The acknowledgement goes now, ahead of the frame another thread commits after it. */
+	(void)wl_display_flush(window->display);
+
+	/* Succeeded: the compositor takes the next frame for that configure. */
+	return 0;
+}
+
+/*
+ * Keeps a callback for the size during a system's modal resize
+ * (KL_VERSION 109).  Wayland has no such loop: the inputs are taken
+ * throughout a resize, and the callback is never called.
+ */
+void
+kl_window_on_resize(
+	struct kl_window *window,
+	kl_window_resize_fn callback,
+	void *data)
+{
+	(void)window;
+	(void)callback;
+	(void)data;
+
+	/* Nothing to keep: every size comes as a KL_WINDOW_RESIZE at once. */
+}
+
+/*
  * Shows a frame of which only a part changed since the last one
  * (KL_VERSION 63, BUG-221): as kl_window_present, but only the part's
  * rows are copied and the compositor is told that part alone, so it
@@ -2032,10 +2162,38 @@ window_configure(
 	uint32_t serial)
 {
 	struct kl_window *window;
+	int deferred;
+	int resized;
 
-	/* The acknowledgement comes before any image of the new state. */
+	/* The toplevel's part of this configure: whether it changed the size. */
 	window = data;
-	xdg_surface_ack_configure(surface, serial);
+	resized = window->configure_resized;
+	window->configure_resized = 0;
+
+	/*
+	 * A window that defers its configures leaves one that changes the
+	 * size waiting for the application, and one that changes nothing while
+	 * another waits (it is acknowledged with that one); its first configure
+	 * is never left waiting.
+	 */
+	deferred = 0;
+	if (window->configure_deferred && window->configured != 0) {
+		if (resized || window->configure_waiting)
+			deferred = 1;
+	}
+
+	/* Waiting: the latest serial, and one more size change when this one changed it. */
+	if (deferred) {
+		window->configure_waiting = 1;
+		window->configure_serial = serial;
+		if (resized)
+			window->configure_sizes++;
+	} else {
+		/* The acknowledgement comes before any image of the new state. */
+		xdg_surface_ack_configure(surface, serial);
+	}
+
+	/* The window is configured, and its owner woken. */
 	window->configured = 1;
 	keiui_window_wake(window);
 }
@@ -2104,6 +2262,9 @@ window_toplevel_configure(
 		resized = 1;
 	if (resized)
 		(void)window_push(window, KL_WINDOW_RESIZE);
+
+	/* The surface's configure that ends this one learns whether it may wait (a deferring window's). */
+	window->configure_resized = resized;
 }
 
 /* The compositor asks the window to close (its close button). */
