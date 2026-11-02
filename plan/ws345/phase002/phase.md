@@ -11,11 +11,12 @@ libbrowser が自分で thread を作らない形にする（ユーザーの決�
 
 ## file
 
-- `userland/desktop/include/browser/browser.h`: `struct browser_threads`、`browser_threads_set`（`BROWSER_API_VERSION` 4）。`exports.map`。
+- `userland/desktop/include/browser/browser.h`: `struct browser_threads`（`BROWSER_THREADS_VERSION` 1、`is_current` を含む、design.md §5.1）、`browser_threads_set`、`BROWSER_API_VERSION` を 5 に。`exports.map`。
 - `userland/desktop/libbrowser/base/thread.c`・`thread.h`（新）: 表の包み（`wb_thread_start`・`wb_thread_join`・`wb_mutex_*`・`wb_cond_*`）、`base/once.c`（C11 atomic の一度）。
-- 替える所: `net/loader.c`・`net/cache.c`・`net/cookie.c`・`net/tls.c`・`net/url.c`・`storage/queue.c`・`storage/instance.c`・`text/font.c`・`base/os-file-posix.c`、`page/media.c`（libmedia の engine を開く時に表の `start`・`join` を渡す）、`userland/desktop/libmedia/engine.c`・`media.h`（engine の thread を渡された口で作る。渡されなければ今の pthread、videoplayer 用）。
+- 替える所: `net/loader.c`・`net/cache.c`・`net/cookie.c`・`net/tls.c`（`tls_reason_key` を接続・request の context に）・`net/url.c`・`storage/queue.c`・`storage/instance.c`・`text/font.c`・`base/os-file-posix.c`・`base/os-system-posix.c`（`wb_os_thread_name` を無くす）、`page/media.c`（libmedia の engine を開く時に表の `start`・`join` を渡す）、`userland/desktop/libmedia/engine.c`・`media.h`（engine の thread を渡された口で作る。渡されなければ今の pthread、videoplayer 用）。
 - shell: `userland/desktop/browser/shell/threads.c`（新、kl_thread・kl_mutex・kl_cond の表）、`browser/main.c`（全ての mode の始めに `browser_threads_set`）、`browser/sources.mk`。
-- 試験の側: POSIX の表の実装（`userland/tests/browser-threads/threads-posix.c` 新）を host の試験・`userland/tests/browser-probe` が使う。host の試験（`plan/ws074/tests/host-*.c`）と `host-build.sh` の追従は WS074 の path なので、Q1 が所有を調整する（この Phase の Queue に含める）。
+- 試験の側: POSIX の表の実装（`userland/tests/browser-threads/threads-posix.c` 新）を、view・instance を作る試験と道具が使う: `plan/ws074/tests/host-*.c`・`wpt-ready-render.c`・`host-build.sh`、`plan/ws334/tests/scheme-test.c`・`storage-test.c`（と WS334 の Windows の試験の harness が要れば）、`plan/ws345/tests/stall-probe.c`、`userland/tests/browser-probe/main.c`、`plan/tools/browser-component/client.c`（plan/tools は Q1 の物、Queue で許可を確かめる）。WS074・WS334 の試験の変更は Q1 が許可した（ws.md の Q1 の判断）。変えた試験の file は全部「結果」に書く。
+- `plan/ws074/tests/host-build.sh` に ThreadSanitizer の variant（`tsan`）を足す。保守的な stack の走査（`vm/heap.c` の `heap_scan_stack`）に `no_sanitize("thread")`。
 - Windows: `apps/browser-win32/Makefile`（libbrowser の winpthreads への依存を外す。libmedia の lock が使う間は link に残る）。
 
 ## 手順

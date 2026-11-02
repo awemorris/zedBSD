@@ -13,12 +13,13 @@ browser の shell（zedBSD・Linux の Keiland、Windows の OmniGrammaton に�
 
 - `userland/desktop/browser/shell/shell.c`・`window.c`・`present.c`・`present-cpu.c`・`touch.c`・`mail.c`・`internal.h`、新しい `shell/render.c`（描画の thread、kl_thread で作る shell の thread）。
 - `apps/browser-win32/`（必要なら。WM_COPYDATA の道は今のまま窓の thread）。
+- libkeiland の resize の口は p013（この Phase は p013 に依存）。
 
 ## 手順
 
 1. view を `_OWN` で作る。窓の loop から `browser_view_prepare`・`shell_frame` を外し、描画の thread へ。
-2. surface は窓の thread で作り、device・swapchain・present は描画の thread。resize は窓の thread が ack した大きさを描画の thread に（R8）。CPU の道は描画の thread が描いて窓の thread が shm の present。
-3. drag の画像は `browser_view_request_image` と callback、文字入力・touch の scroller・mail は snapshot と命令。
+2. surface は窓の thread で作り、device・swapchain・present は描画の thread。resize は p013 の口で、ack を描画の thread の新しい大きさの最初の present の直前に（R8）。止め方: acquire の時間切れ 100 ms、閉じる順（描画の thread の join → swapchain・surface → 窓 → view）、Windows は join の間も message を回す（design.md §6.3）。CPU の道は描画の thread が描いて窓の thread が shm の present。
+3. drag の画像は `browser_view_request_image` と callback、mail は `_focus_field` の答えの callback、文字入力は session の番号付きの commit、touch の scroller は snapshot と命令。
 4. Windows: system の modal loop の間も描画の thread が描く事を確かめる。
 
 ## 試験

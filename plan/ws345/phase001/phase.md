@@ -3,7 +3,7 @@
 # ws345-p001 調べと設計
 
 - WS: [ws.md](../ws.md)。Queue: q1959-i01（P8、worktree `/home/awe/zedBSD-worktrees/p8-ws345`、branch `agent/p8-ws345`、基点 main 4249e9a927）。
-- 状態: in-progress（2026-11-02 14:03 P8）
+- 状態: cleared（2026-11-02 P8）
 
 ## 目的
 
@@ -13,7 +13,7 @@
 
 - [design.md](../design.md): 調べ（§1）、計測（§1.3）、thread の表（§3）、持ち主の模型と DOM の貸し（§4）、libbrowser の口と shell の thread の表（§5）、描画（§6）、通信（§7）、frame の間（§8）、打ち切りと閉じ方（§9）、判断の点（§10）、危険（§11）、敵対的レビュー（§12）。
 - 計測の probe: [../tests/stall-probe.c](../tests/stall-probe.c)、[../tests/stall-probe.sh](../tests/stall-probe.sh)（`sh plan/ws345/tests/stall-probe.sh [SCENARIO...]`、engine は `BROWSER_HOST_BUILD=build/ws345-host sh plan/ws074/tests/host-build.sh plain`）。
-- p002〜p012 の phase.md。
+- p002〜p013 の phase.md（p013 は design-reviewer の指摘 4 で足した）。
 
 ## 確かめ（2026-11-02 P8、host）
 
@@ -23,4 +23,6 @@
 
 ## 結果
 
-（design-reviewer の後に書く。）
+- 設計 [design.md](../design.md) を書き、design-reviewer（subagent）を 1 回流して、指摘 19 件（high 5、medium-high 3、medium 8、low 3）を全部 design.md と phase.md に反映した（design.md §12 の表）。p013（libkeiland の resize の口）を足した。
+- Q1 に返した判断の点: J2（応答しない頁の問い、製品）、J6（窓の thread の iframe の枠の表の引き）、J7（D5 の paint の分け方）。P8 が決めた技術の点: J1・J3・J4・J5。
+- 変えた試験の file: 無し（WS074・WS334 の試験は変えていない）。product の code は変えていない。

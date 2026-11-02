@@ -11,16 +11,16 @@
 
 ## file
 
-- `net/loader.c`・`net/net.h`: loader の client（`net_loader_client_open`・`_close`、request は client に属する、完了は client の list と notify、`net_loader_dispatch(client)`、どの thread からでも取り消せる `net_request_cancel`）。
+- `net/loader.c`・`net/net.h`: loader の client（`net_loader_client_open`・`_close`、request は client に属する、完了は client の list と notify、`net_loader_dispatch(client)`）。取り消しはどの thread からでも印を付けるだけで、放すのは持ち主の thread。取り消しの範囲は頁の epoch（design.md §7）。client は page でなく呼んだ thread の context から選ぶ。
 - `page/network.c`・`page/script.c`（`script_fetch_sync`・`script_fetch_file`・`page_wait_sheets`・`script_settle_network`）・`page/frame-load.c`（iframe の `<script src>`）・`page/link.c`（`page_fetch` の http の道は loader の無い時だけ）・`view/view.c`。
 - `net/http.c` の同期の道は `BROWSER_FETCH_AT_ONCE` と loader の無い headless にだけ残す。
 
 ## 手順
 
 1. client を作り、今の view の一つの caller を「view の client」にする（動作は同じ）。
-2. 同期の待ち `page_net_wait_request(page, request)`: client の condition で、完了・取り消し・打ち切り（p004 の flag、この Phase では取り消しまで）を待つ。
+2. 同期の待ち `page_net_wait_request(context, request)`: request 自身の condition で、完了・取り消し・打ち切り（p004、この Phase では取り消しまで）を待つ。dispatch する者は要らない（net の thread が request に終わりを書いて signal する）。
 3. 同期の XHR、漏れた parser の script、iframe の script、`page_wait_sheets` をこの待ちに替える。
-4. 取り消し: navigation・stop・destroy で client の request を全部取り消すと、待っている thread がすぐ起きる。
+4. 取り消し: navigation・stop・destroy で古い epoch の request を取り消すと、待っている thread がすぐ起き、新しい navigation の取得は残る。
 
 ## 試験
 

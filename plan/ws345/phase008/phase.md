@@ -13,12 +13,12 @@ style・CSS・layout・display list の組み立てを `browser-style` の threa
 
 - `view/`・`page/`（`page/geometry.c`・`page/sheets.c`・`page/fonts.c`・`page/script.c` の `page_needs_layout`）・`bind/computed.c`・`bind/geometry.c`: request（描画の更新・style の読み・形の読み・当たり判定）と返事、DOM の世代、古くない時の直の読み。
 - `css/`・`layout/`・`text/`: style の engine と layout の font の face を style の thread の物に。
-- layout・style の中から JS を呼ぶ所（ResizeObserver・container query の結果・画像の到着など）を「後で出す event」の印にする（R2）。
-- style の thread の loader の client（sheet・font・背景の画像）。
+- layout・style の中から JS・資源・heap に触る所（R2 の一覧: `page_load_images`・`page_load_media`・`bind_document_fonts_settle`・`bind_animation_sync`・`bind_window_set_viewport`・`page_frames_size`・ResizeObserver・container query・画像の到着）を、貸しの前か後の script の thread の仕事にし、返事に「後でする事」の一覧を持たせる。最初に全部洗い直す。
+- style の thread は loader を使わない。sheet・font・背景の画像の取得と完了の callback は frame の script の thread で、style の thread は貸しの間に bytes と解いた結果を読む（design.md §4.3）。
 
 ## 手順
 
-1. request の queue と返事（condition）。script の thread は貸しの間 agent の lock を持ったまま待つ。
+1. request の queue と返事（condition）。script の thread は貸しの間 agent の lock を持ったまま待つ。貸しの間は heap の collect を止める深さを上げ、collect は lock の持ち主だけ（assert、design.md §4.2）。
 2. 古くない時の直の読み（DOM の世代と、style の thread がその frame の物を書くのは貸しの間だけ）。
 3. 後で出す event。
 4. 計測: `offsetWidth` を 3 万回の頁で貸しの回数と時間（BUG-411 の bench に足す）。

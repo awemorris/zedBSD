@@ -17,8 +17,9 @@ WS345 の目標（窓の event が止まらない）を測って確かめ、全�
    - `document.write` の `<script src>` が connect の掛かる listener を待つ
    - 6000 個の box の頁の resize、3000 × 3000 の PNG の decode
    - cross-origin の iframe の無限 loop
-2. ThreadSanitizer の variant で 1 の全場面と host-threaded-view・host-frames。
-3. 回帰: host-build（plain・asan）warning 0、host-* が前と同じ、js、test262 の部分集合（前後で落ちた一覧が同じ）、http・http-async・loader・fetch・component、WPT の reftest の見本と DOM の試験、段 1 の前後、cross-build、BUG-411 の bench。
+2. ThreadSanitizer の variant（p002 の `tsan`）で 1 の全場面と host-threaded-view・host-frames。
+3a. guest の計測（1 本の script `plan/ws345/tests/guest-latency.sh`、配置 → 起動 → 実行 → 回収 → 要約）: zedBSD の QEMU と Windows の Wine で、browser を到達しない address（`192.0.2.1`、TEST-NET-1）への同期の XHR と 10 s の loop の頁で開き、shell の窓の thread が受けた event の時刻と取った時刻の差の最長を shell の診断の行（`BROWSER_LATENCY` の時だけ、終わりに stdout へ 1 行）で集める。guest の stdout は SSH（Wine は host の process）で読み、QEMU の console・serial の log では判定しない。入力は WS074 の guest の道具で送る（Q1 が割り当てる名前・port）。上限は 1 と同じ。
+3. 回帰: host-build（plain・asan・tsan）warning 0、host-* が前と同じ、js、test262 の部分集合（前後で落ちた一覧が同じ）、http・http-async・loader・fetch・component、WPT の reftest の見本と DOM の試験、段 1 の前後、cross-build、BUG-411 の bench。component・WPT の見本・DOM の試験・段 1 の host の試験は、headless の `--threads`（`_OWN` の道）でも流す（R12）。
 4. zedBSD の QEMU（boot-test.sh と browser の画面の PNG）、Linux の Keiland の guest（SSH と画面の PNG）、Windows の Wine。本物の Windows・実機はユーザーが拾える試験の一覧に（Q1）。
 
 ## 受け入れ
