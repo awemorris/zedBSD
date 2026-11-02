@@ -11,10 +11,10 @@
 | P2 | — | 待機 | WS343 p002（libcrypto-compat に passkey の OpenSSL の関数、link の差し替えだけで passkey-fido2・fidoctl が OpenSSL 無し）cleared、22:20 merge | — |
 | P3 | — | 待機 | BUG-412: 挿し直しでは再現せず。22:31 に Pi 5 を debug の option 無し（cmdline を元に、kernel は記録の kernel のまま）で再起動 | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
-| P5 | [WS345](ws345/ws.md) | ブラウザ | p008（style の thread）cleared。p009（iframe ごとの script の thread、q1993）に 21:40 着手 | — |
+| P5 | [WS345](ws345/ws.md) | ブラウザ | p009（iframe ごとの script の thread）cleared。p010（origin ごとの agent、q1995）に 22:58 着手 | — |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p021（package と amd64 の build、passkey-fido2 の規則が OpenSSL を作らせていたのを直した）cleared。p022（QEMU の相互運用、q1991）に 21:15 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
-| P8 | — | 待機 | WS345 p007（3 つの shell を OWN に、QEMU 15/15・Wine 15/15、窓の待ち 最長 15 ms）cleared、22:31 merge | — |
+| P8 | [WS345](ws345/ws.md) | ブラウザ | p007 cleared。p014（応答しない頁の確かめの表示、q1996）に 22:58 着手 | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
