@@ -6,8 +6,12 @@
 #   sh plan/ws336/tests/build-host.sh <out-dir> [program...]     default: every program
 # SSH_SOURCE_DIR=<dir> takes the sources from another directory (a changed copy under build/tmp).
 # Prints "build-host: <program> ok" or "build-host: <program> FAIL" for each; last line: build-host: PASS or FAIL.
+# SSH_CRYPTO_INCLUDE=<dir whose compat/crypto/ holds libcrypto-compat's headers> and SSH_CRYPTO_LIB=<what to link for
+# it> build against libcrypto-compat instead of the host's OpenSSL (plan/ws336/tests/compat-host.sh sets both).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
+crypto_include=${SSH_CRYPTO_INCLUDE:-plan/ws336/tests/host-crypto}
+crypto_lib=${SSH_CRYPTO_LIB:--lcrypto}
 cd "$(dirname -- "$0")/../../.."
 if [ $# -lt 1 ]; then
 	echo "usage: sh plan/ws336/tests/build-host.sh <out-dir> [program...]"
@@ -30,15 +34,15 @@ for file in "$source_dir"/ssh-*.c; do
 done
 
 flags="-std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-sanitize-recover=undefined
- -fno-omit-frame-pointer -I. -I$source_dir -Iplan/ws336/tests/host-crypto"
+ -fno-omit-frame-pointer -I. -I$source_dir -I$crypto_include"
 status=0
 for program in $programs; do
 	case "$program" in
-	ssh) sources="$source_dir/ssh-main.c $(ls "$source_dir"/ssh-client-*.c)"; libraries="-lcrypto" ;;
-	ssh-keygen) sources="$source_dir/ssh-keygen-main.c"; libraries="-lcrypto" ;;
-	sshd) sources="$(ls "$source_dir"/sshd-*.c) userland/base/login/verify.c"; libraries="-lcrypto -lcrypt"
+	ssh) sources="$source_dir/ssh-main.c $(ls "$source_dir"/ssh-client-*.c)"; libraries="$crypto_lib" ;;
+	ssh-keygen) sources="$source_dir/ssh-keygen-main.c"; libraries="$crypto_lib" ;;
+	sshd) sources="$(ls "$source_dir"/sshd-*.c) userland/base/login/verify.c"; libraries="$crypto_lib -lcrypt"
 		flags_extra="-Iuserland/base/login" ;;
-	sftp-server) sources="$source_dir/sftp-server-main.c"; libraries="-lcrypto" ;;
+	sftp-server) sources="$source_dir/sftp-server-main.c"; libraries="$crypto_lib" ;;
 	*) echo "build-host: $program FAIL (unknown program)"; status=1; continue ;;
 	esac
 	[ "$program" = sshd ] || flags_extra=""
