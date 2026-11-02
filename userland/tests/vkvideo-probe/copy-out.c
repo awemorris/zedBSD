@@ -11,7 +11,8 @@
  * rows of the picture's width, then the chroma plane's), so a device whose
  * optimal NV12 image has no layout the host can read (NVIDIA's block
  * linear) is read as any other.  The copy is its own submission, made
- * when the frame is output, so the pictures are read in output order.
+ * when the frame is output, so the pictures are read in output order, on
+ * the copy-out's family (the video family when it transfers).
  */
 
 #include "probe.h"
@@ -60,11 +61,11 @@ probe_copy_out(
 	memset(&record, 0, sizeof(record));
 	record.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	record.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	result = vkBeginCommandBuffer(probe->command, &record);
+	result = vkBeginCommandBuffer(probe->copy_command, &record);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkBeginCommandBuffer");
 	copy_out_commands(probe, slot);
-	result = vkEndCommandBuffer(probe->command);
+	result = vkEndCommandBuffer(probe->copy_command);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkEndCommandBuffer");
 
@@ -72,8 +73,8 @@ probe_copy_out(
 	memset(&submit, 0, sizeof(submit));
 	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	submit.commandBufferCount = 1U;
-	submit.pCommandBuffers = &probe->command;
-	result = vkQueueSubmit(probe->queue, 1U, &submit, probe->fence);
+	submit.pCommandBuffers = &probe->copy_command;
+	result = vkQueueSubmit(probe->copy_queue, 1U, &submit, probe->fence);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkQueueSubmit");
 	result = vkWaitForFences(probe->device, 1U, &probe->fence, VK_TRUE, PROBE_WAIT_NS);
@@ -82,7 +83,7 @@ probe_copy_out(
 	result = vkResetFences(probe->device, 1U, &probe->fence);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkResetFences");
-	result = vkResetCommandBuffer(probe->command, 0U);
+	result = vkResetCommandBuffer(probe->copy_command, 0U);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkResetCommandBuffer");
 
@@ -195,7 +196,7 @@ copy_out_commands(
 	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	barrier.subresourceRange.levelCount = 1U;
 	barrier.subresourceRange.layerCount = 1U;
-	vkCmdPipelineBarrier(probe->command, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
+	vkCmdPipelineBarrier(probe->copy_command, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
 
 	/* The luma plane's rows, then the chroma plane's (a texel of two bytes, half the width and height). */
 	memset(regions, 0, sizeof(regions));
@@ -211,12 +212,12 @@ copy_out_commands(
 	regions[1].imageExtent.width = probe->extent.width / 2U;
 	regions[1].imageExtent.height = probe->extent.height / 2U;
 	regions[1].imageExtent.depth = 1U;
-	vkCmdCopyImageToBuffer(probe->command, probe->image[slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, copy_out.buffer, 2U, regions);
+	vkCmdCopyImageToBuffer(probe->copy_command, probe->image[slot], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, copy_out.buffer, 2U, regions);
 
 	/* The buffer's writes seen by the host, the image back in the DPB layout. */
 	barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 	barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 	barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 	barrier.newLayout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR;
-	vkCmdPipelineBarrier(probe->command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
+	vkCmdPipelineBarrier(probe->copy_command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
 }
