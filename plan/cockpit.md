@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS324](ws324/ws.md) | RTX 2070 の Vulkan Video | 返却（11:17）。p007 cleared: H.265 decode が HEVC_v1 の範囲内 131 本中 130 本で正しい、Video Player の GPU の道で H.264・H.265 を再生。今日の作業は終わり | 次の指示で encode（p008a）から再開 |
+| P1 | [WS335](ws335/ws.md) | 自前の TLS | p033（統合と相互接続、q1971）に 15:49 着手 | — |
 | P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p017（VP8 の decoder）cleared: 非可逆の試験の画像と適合の集まりが全部 dwebp 1.5.0 と一致。p019（API の口 decode.c、q1969）に 15:22 着手 | — |
 | P3 | — | 待機 | BUG-412: Pi 5 は常時の記録（ring=1 drain=0）で普段の使い方。直しの候補（xHCI の割り込みの endpoint の Max ESIT Payload・Interval、report の写しと即時の再投入）は agent/p3-bug412 e3be6a7a3 に用意、未 merge・未配置 | 直しの kernel を Pi 5 に入れる時期（Q1、効かない click の記録の後かユーザーの言葉で） |
 | P4 | — | 待機 | WS319 の H.265 decode と Video Player の GPU の道を 12:03 に merge（q1926 cleared）。5330 は Debian で空き | — |
