@@ -42,7 +42,9 @@ UBSAN_OPTIONS=halt_on_error=1:exitcode=99
 export ASAN_OPTIONS UBSAN_OPTIONS
 
 work="$out/work"
-mkdir -p "$work"
+mkdir -p "$work/nohome"
+HOME="$work/nohome"
+export HOME
 checks=0
 failures=0
 
@@ -173,6 +175,14 @@ expect_eq "private key lines are at most 70 characters" "$(awk 'length($0) > 70'
 magic=$(sed '1d;$d' "$d/k" | tr -d '\n' | base64 -d 2>/dev/null | head -c 15 | od -An -tx1 | tr -d ' \n')
 expect_eq "private key magic" "$magic" "6f70656e7373682d6b65792d763100"
 
+# PROTOCOL.key: the two check values are 4 bytes each at offset 98 (magic 15, cipher 8, kdf 8, options 4, key count 4, public blob 55, section length 4).
+checkint=$(sed '1d;$d' "$d/k" | tr -d '\n' | base64 -d 2>/dev/null | head -c 106 | tail -c 8 | od -An -tx1 | tr -d ' \n')
+expect_eq "the two check values are the same" "$(printf '%s' "$checkint" | cut -c1-8)" "$(printf '%s' "$checkint" | cut -c9-16)"
+checks=$((checks + 1))
+if [ "$(printf '%s' "$checkint" | cut -c1-8)" = "00000000" ]; then
+	fail "the check value is zero"
+fi
+
 run 0 -l -f "$d/k.pub"
 expect_match "-l line form" "$stdout" '^256 SHA256:[A-Za-z0-9+/]{43} c \(ED25519\)$'
 expect_eq "-l fingerprint is SHA-256 of the blob" "$(printf '%s' "$stdout" | awk '{print $2}')" "$(fingerprint_of "$d/k.pub")"
@@ -260,8 +270,10 @@ expect_match "no -N is refused" "$stderr" "-N"
 expect_missing "no file without -N" "$d/np"
 run 1 -f "$d/nl" -N "" -C "a
 b" -q
+expect_match "a line feed in the comment is named" "$stderr" "line break"
 expect_missing "a comment with a line break is refused" "$d/nl"
 run 1 -f "$d/cr" -N "" -C "$(printf 'a\rb')" -q
+expect_match "a CR in the comment is named" "$stderr" "line break"
 expect_missing "a comment with CR is refused" "$d/cr"
 run 1 -f "$d/nodir/k" -N "" -q
 expect_missing "a missing directory is an error" "$d/nodir"
@@ -269,8 +281,12 @@ run 1 -l -y -f "$d/k"
 run 1 -z
 run 1 -f
 run 1 -f "$d/k" extra
+run 1 -l -f "$d/k.pub" extra
 run 1 -l -A
+run 1 -y -A -f "$d/k"
 run 1 -R host -l
+run 1 -R h1 -l -f "$d/k.pub"
+run 1 -R h1 -y -f "$d/k"
 run 1 -t rsa -l -f "$d/k"
 if [ "$(id -u)" != 0 ]; then
 	mkdir "$d/ro"
@@ -432,6 +448,7 @@ expect_same "an absent host leaves the file" "$d/kh" "$d/kh.before"
 expect_same "an absent host leaves .old" "$d/kh.old" "$d/kh.old.before"
 cp "$d/expected.start" "$d/fresh"
 run 0 -R nothere -f "$d/fresh" -q
+expect_eq "-q -R of an absent host prints nothing" "$stdout" ""
 expect_missing "an absent host makes no .old" "$d/fresh.old"
 # Another port of the same name stays.
 run 0 -R h3 -f "$d/fresh" -q
@@ -444,7 +461,9 @@ run 1 -R "[h1]:0" -f "$d/fresh"
 run 1 -R "[h1]:65536" -f "$d/fresh"
 run 1 -R "[h1]:22x" -f "$d/fresh"
 run 1 -R "[]:22" -f "$d/fresh"
+expect_match "an empty bracketed name is refused as an argument" "$stderr" "not a host name"
 run 1 -R "" -f "$d/fresh"
+expect_match "an empty name is refused as an argument" "$stderr" "not a host name"
 run 1 -R h1 -f "$d/missing"
 expect_match "missing known_hosts" "$stderr" "No such file"
 expect_missing "no .old for a missing file" "$d/missing.old"
@@ -457,6 +476,121 @@ with_home "$d" 0 -R h2 -q
 expect_eq "-R without -f uses the default file" "$(grep -c '^h2,h1' "$d/.ssh/known_hosts")" 0
 expect_missing "the default file has its .old" "$d/.ssh/known_hosts.nonesuch"
 expect_same "default .old" "$d/.ssh/known_hosts.old" "$work/known/expected.start"
+
+# --- limits and odd states ---
+d="$work/edge"
+mkdir "$d"
+run 0 -f "$d/k" -N "" -C c -q
+key=$(awk '{print $2}' "$d/k.pub")
+
+# A temporary name left by another process is never reused: the key is not made, the left-over stays untouched.
+mkdir "$d/stale"
+timeout 60 sh -c 'f=$1; shift; : > "$f.tmp.$$"; exec "$@"' sh "$d/stale/k" "$keygen" -f "$d/stale/k" -N "" -q > "$work/stdout" 2> "$work/stderr"
+expect_eq "a left-over temporary file stops the run" "$?" 1
+expect_missing "no private key beside a left-over temporary file" "$d/stale/k"
+expect_missing "no public key beside a left-over temporary file" "$d/stale/k.pub"
+expect_eq "one file stays, the left-over" "$(ls -A "$d/stale" | wc -l | tr -d ' ')" 1
+expect_eq "the left-over temporary file is untouched" "$(wc -c < "$d/stale/$(ls -A "$d/stale")" | tr -d ' ')" 0
+
+# The old contents cannot be kept (the .old name is a directory): the known_hosts file stays as it was and no temporary file stays.
+printf 'h1 ssh-ed25519 %s one\nh2 ssh-ed25519 %s two\n' "$key" "$key" > "$d/kh2"
+cp "$d/kh2" "$d/kh2.saved"
+mkdir "$d/kh2.old"
+run 1 -R h1 -f "$d/kh2"
+expect_same "a failed .old leaves the known_hosts file" "$d/kh2" "$d/kh2.saved"
+expect_listing "a failed rewrite leaves no temporary file" "$d" k k.pub kh2 kh2.old kh2.saved stale
+
+# A directory where the public key goes: the private key was written and the message says how to get the public key.
+mkdir -p "$d/hostx/etc/ssh/ssh_host_ed25519_key.pub"
+run 1 -A -f "$d/hostx" -q
+expect_match "a public key that cannot be written is explained" "$stderr" "ssh-keygen -y -f"
+expect_listing "the host directory keeps the private key and the directory" "$d/hostx/etc/ssh" ssh_host_ed25519_key ssh_host_ed25519_key.pub
+expect_eq "no temporary file inside the public key directory" "$(ls -A "$d/hostx/etc/ssh/ssh_host_ed25519_key.pub" | wc -l | tr -d ' ')" 0
+
+# A path that is too long is refused and nothing is made.
+longpath=$(/usr/bin/python3 -I -c 'print("/".join(["a" * 200] * 25))')
+run 1 -f "$d/$longpath" -N "" -q
+run 1 -l -f "$d/$longpath"
+run 1 -R h1 -f "$d/$longpath"
+run 1 -A -f "$d/$longpath"
+expect_missing "nothing is made for a long path" "$d/a"
+
+# Paths at the longest length the program builds (4095 characters; the .old name of -R has 4 more).
+exactpath() {
+	/usr/bin/python3 -I -c '
+import sys
+total = int(sys.argv[1])
+text = ""
+while len(text) < total:
+    remaining = total - len(text)
+    text += "/" + "a" * min(200, remaining - 1)
+assert len(text) == total
+sys.stdout.write(text)' "$1"
+}
+run 1 -l -f "$(exactpath 4095)"
+expect_match "a path of 4095 characters is used" "$stderr" "No such file"
+run 1 -l -f "$(exactpath 4096)"
+expect_match "a path of 4096 characters is refused" "$stderr" "File name too long"
+run 1 -R h1 -f "$(exactpath 4091)"
+expect_match "a known_hosts path of 4091 characters is used" "$stderr" "No such file"
+run 1 -R h1 -f "$(exactpath 4092)"
+expect_match "a known_hosts path of 4092 characters is refused" "$stderr" "File name too long"
+
+# The known_hosts file may be 1 MiB; one byte more is refused.
+/usr/bin/python3 -I -c '
+import sys
+line = "x9 ssh-ed25519 AAAA c\n"
+size = 1048576
+text = line * (size // len(line))
+text += "#" * (size - len(text) - 1) + "\n"
+assert len(text) == size
+sys.stdout.write(text)' > "$d/kh.max"
+expect_eq "limit file is 1 MiB" "$(wc -c < "$d/kh.max" | tr -d ' ')" 1048576
+run 0 -R h1 -f "$d/kh.max"
+expect_match "a file of 1 MiB is read" "$stdout" "not found"
+printf '\n' >> "$d/kh.max"
+run 1 -R h1 -f "$d/kh.max"
+expect_eq "one byte over 1 MiB is refused" "$(wc -c < "$d/kh.max" | tr -d ' ')" 1048577
+
+# Ports and host names at their limits.
+printf 'h1 ssh-ed25519 %s a\n[h1]:1 ssh-ed25519 %s b\n[h1]:65535 ssh-ed25519 %s c\n[h1]:9090 ssh-ed25519 %s d\n[h1]:2200 ssh-ed25519 %s e\n' "$key" "$key" "$key" "$key" "$key" > "$d/kh3"
+run 0 -R "[h1]:9090" -f "$d/kh3" -q
+expect_eq "a port with the digits 9 and 0" "$(grep -c '9090' "$d/kh3")" 0
+run 0 -R "[h1]:2200" -f "$d/kh3" -q
+expect_eq "a port with zeros" "$(grep -c '2200' "$d/kh3")" 0
+run 1 -R "[h1]x5" -f "$d/kh3"
+run 0 -R "[h1]:65535" -f "$d/kh3" -q
+expect_eq "port 65535 is accepted" "$(grep -c '65535' "$d/kh3")" 0
+expect_eq "the other port stays" "$(grep -c '^\[h1\]:1 ' "$d/kh3")" 1
+run 0 -R "[h1]:1" -f "$d/kh3" -q
+expect_eq "port 1 is accepted" "$(grep -c '^\[h1\]:1 ' "$d/kh3")" 0
+expect_eq "the standard port stays" "$(grep -c '^h1 ' "$d/kh3")" 1
+name255=$(/usr/bin/python3 -I -c 'print("h" * 255)')
+name256=$(/usr/bin/python3 -I -c 'print("h" * 256)')
+run 0 -R "$name255" -f "$d/kh3" -q
+run 0 -R "[$name255]:22" -f "$d/kh3" -q
+run 1 -R "$name256" -f "$d/kh3"
+run 1 -R "[$name256]:22" -f "$d/kh3"
+run 1 -R "$(printf 'a\001b')" -f "$d/kh3"
+
+# Public key files in other shapes: no final line feed, CR LF, a second line, comment lines are not skipped.
+printf '%s' "$(cat "$d/k.pub")" > "$d/nolf.pub"
+run 0 -l -f "$d/nolf.pub"
+expect_match "a public key line without a line feed" "$stdout" '^256 SHA256:[A-Za-z0-9+/]{43} c \(ED25519\)$'
+printf 'ssh-ed25519 %s c\r\n' "$key" > "$d/crlf.pub"
+run 0 -l -f "$d/crlf.pub"
+expect_match "a public key line with CR LF" "$stdout" '^256 SHA256:[A-Za-z0-9+/]{43} c \(ED25519\)$'
+printf 'ssh-ed25519 %s first\nssh-rsa AAAA second\n' "$key" > "$d/two.pub"
+run 0 -l -f "$d/two.pub"
+expect_match "only the first line is read" "$stdout" ' first \(ED25519\)$'
+printf '# comment\nssh-ed25519 %s c\n' "$key" > "$d/lead.pub"
+run 1 -l -f "$d/lead.pub"
+
+# -t ed25519 is accepted with the other jobs; an empty comment is announced without a trailing space.
+run 0 -t ed25519 -l -f "$d/k.pub"
+run 0 -f "$d/ann" -N "" -C ""
+expect_match "announcement of a key without a comment ends with the fingerprint" "$stdout" 'SHA256:[A-Za-z0-9+/]{43}$'
+expect_eq "no trailing space in the announcement" "$(grep -c ' $' "$work/stdout")" 0
 
 # --- OpenSSH's ssh-keygen reads our files and we read its files ---
 if command -v ssh-keygen > /dev/null 2>&1; then

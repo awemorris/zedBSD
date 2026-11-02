@@ -185,11 +185,13 @@ static void
 keygen_usage(void)
 {
 	/* Describes every accepted form of the command line. */
-	fputs("usage: ssh-keygen [-q] [-t ed25519] [-f file] [-N ''] [-C comment]\n"
-	      "       ssh-keygen [-q] -l [-f file]\n"
-	      "       ssh-keygen -y [-f file]\n"
-	      "       ssh-keygen [-q] -A [-f prefix]\n"
-	      "       ssh-keygen [-q] -R host [-f known_hosts]\n", stderr);
+	fputs(
+		"usage: ssh-keygen [-q] [-t ed25519] [-f file] [-N ''] [-C comment]\n"
+		"       ssh-keygen [-q] -l [-f file]\n"
+		"       ssh-keygen -y [-f file]\n"
+		"       ssh-keygen [-q] -A [-f prefix]\n"
+		"       ssh-keygen [-q] -R host [-f known_hosts]\n",
+		stderr);
 }
 
 /*
@@ -460,12 +462,16 @@ keygen_read_file(
 	error = 0;
 	for (;;) {
 		count = read(descriptor, chunk, sizeof(chunk));
+
+		/* Retries a read that a signal cut short, and stops on any other failure. */
 		if (count < 0) {
 			if (errno == EINTR)
 				continue;
 			error = errno;
 			break;
 		}
+
+		/* Stops at the end of the file. */
 		if (count == 0)
 			break;
 
@@ -535,16 +541,22 @@ keygen_write_file(
 	done = 0;
 	while (done < size) {
 		count = write(descriptor, data + done, size - done);
+
+		/* Retries a write that a signal cut short, and stops on any other failure. */
 		if (count < 0) {
 			if (errno == EINTR)
 				continue;
 			error = errno;
 			break;
 		}
+
+		/* Treats a write that accepts nothing as a failure, so the loop always ends. */
 		if (count == 0) {
 			error = EIO;
 			break;
 		}
+
+		/* Counts the bytes that are on their way to the file. */
 		done += (size_t)count;
 	}
 
@@ -887,6 +899,8 @@ keygen_generate_pair(
 		printf("Your identification has been saved in %s\n", path);
 		printf("Your public key has been saved in %s\n", public_path);
 		printf("The key fingerprint is:\n");
+
+		/* Prints the comment after the fingerprint when the key has one. */
 		if (key.comment[0] != '\0') {
 			printf("%s %s\n", fingerprint, key.comment);
 		} else {
