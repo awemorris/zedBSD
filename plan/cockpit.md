@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
+最終更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
-| Q1 | [WS074](ws074/ws.md) p263 | Web ブラウザ（libbrowser） | 実際の Web サイトでの UAT の指摘への対処（q2000、サブエージェントなし） | ユーザーの指摘ごとに直す |
+| Q1 | [WS074](ws074/ws.md) p263・[WS346](ws346/ws.md) p001 | Web ブラウザ（libbrowser）、layout cache の設計 | p263 U1（amazon.co.jp）は host で直した。WS346 の設計 版 1 を書いた（[design.md](ws346/design.md)） | WS346 の未決の答えの後、p002 から Sonnet に渡す |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
@@ -24,6 +24,10 @@
 ## WS ごとの進捗
 
 （2026-11-01 10:29 クリア。これより後の進捗をここに書く。各 WS の状態は [master.md](master.md) と各 ws.md）
+
+### WS346 layout cache（style と layout の差分の再計算）
+
+- 2026-11-03 06:31: p001 の設計 版 1（[design.md](ws346/design.md)、p002〜p009 の phase.md）。amazon.co.jp の 1 回の読み込みで、全体の layout 392 回・style の engine の作り直し 508 回・style の計算 82 万回、画面の描画は 7 回（layout はほぼ全部が script の幾何の問いが強いた物）。CPU は style 22%・JS 22%・layout 11%。
 
 ### WS074 p263 実際の site の UAT
 
@@ -81,7 +85,19 @@
 
 ## ユーザーの判断を待つ事
 
-（無し）
+| # | WS | 問い |
+| --- | --- | --- |
+| 1 | WS346 layout cache | 目標を満たしたら既定を on にしてよいか |
+| 2 | WS346 layout cache | live の頁（amazon ほか）を照合の mode で読む回数 |
+| 3 | WS346 layout cache | 範囲の外にした機能の再利用を別の WS にするか |
+
+**背景（3 件に共通）**: WS346 は、zedBSD のブラウザの engine（libbrowser、Windows 版・Linux 版も同じ）で、DOM が変わるたびに style と layout を頁の全体で作り直している今の形を、変わった所だけ計算し直す形にする WS（2026-11-03 ユーザーの指示、設計は Q1、実装は Sonnet）。amazon.co.jp では 1 回の読み込みで全体の作り直しが約 400 回起き、表示まで数分かかる。設計は [design.md](ws346/design.md)。用語: **style** は各 element の CSS の計算済みの値、**layout** は box の位置と大きさの計算、**照合（verify）の mode** は差分の計算と全体の作り直しを両方して結果を比べ、違いを報告する検査の動き（遅いが正しさを確かめられる）、**既定の mode** は環境変数を何も付けない時の動き。
+
+**1. 既定を on にしてよいか**: 実装が終わり（p008）、bench で 10 倍以上速く、照合で違いが 0 なら、既定を「差分の計算（on）」にする案。選択肢: (a) on にする（推し。違いが見つかっても `BROWSER_LAYOUT_CACHE=off` で今の動きに戻せる）、(b) しばらく off のままにして、ユーザーの UAT の後に on。決まらない間は off で実装を進める（p008 まで影響なし）。
+
+**2. live の頁を照合の mode で読む回数**: 正しさの確かめのため、p005・p007・p008 で amazon.co.jp・yahoo.co.jp・google.com・store.google.com を照合の mode で各 1〜2 回読む案（合わせて約 20 回）。amazon は前の件（WS074 p263）で bot の確認を通る形になったが、取得は最小にする方針。選択肢: (a) 案どおり（推し）、(b) amazon は除く、(c) 回数を指定する。決まらない間は live の頁を読まない（保存した頁と試験の組だけ）。
+
+**3. 範囲の外の機能**: anchor positioning（CSS で他の要素に位置を合わせる機能）・container query（親の大きさで style を変える機能）・sticky（scroll に貼り付く配置）などを含む部分は、外の状態に依るので、この WS では再利用せず毎回計算する（安全側）。選択肢: (a) この WS の後に別の WS で扱う（推し）、(b) この WS の中で扱う（Phase が 2〜3 増え、危険が増える）。決まらない間は (a) の形で設計のまま進める。
 
 - 2026-11-02 08:15 Latitude 5330 の NVMe の zedBSD を main d00e07108 の image（plan/tools/hw5330/config-5330.mk）に更新（ユーザーの指示）。5330-run --nvme-image PASS、画面 build/review/5330/q1-5330-main-d00e071.png。Debian に戻した。
 

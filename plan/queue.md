@@ -745,3 +745,11 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q2000 / q2000-i01 | Q1（直に開発、main の checkout `/home/awe/zedBSD-claude1`） | [ws074-p263](ws074/phase263/phase.md) 実際の Web サイトでの UAT の指摘への対処 | libbrowser と browser の shell。HAL・toolchain・compositor は範囲の外 | in-progress |
+
+## 2026-11-03: WS346 layout cache の設計（q2001）
+
+承認: 2026-11-03 06:17 ユーザーから、layout cache を実装したいので設計書を外部設計まで作ってほしい、実装は Sonnet が設計書を元に行う、という趣旨の指示を受けた。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q2001 / q2001-i01 | Q1（直に、main の checkout） | [ws346-p001](ws346/phase001/phase.md) 設計（要求・外部設計・Phase の分割） | plan/ws346/ の文書だけ。code は書かない（計測の一時の uprobe を除く） | in-progress（2026-11-03 06:3x design.md 版 1、未決 3 件のユーザーの答え待ち） |

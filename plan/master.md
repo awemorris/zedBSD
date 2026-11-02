@@ -29,7 +29,7 @@
 | P5 | q1995 `p5-ws345` | [WS345](ws345/ws.md) p010（origin ごとの agent、iframe の frame の item）。stage B の中心を commit（a6479c00c）、回帰は途中 |
 | P8 | q1996 `p8-ws345` | [WS345](ws345/ws.md) p014（応答しない頁の確かめ）。libbrowser・shell の側は main に（cbcdf4977）、QEMU・tsan・cross-build の結果待ち |
 | P6 | q1999 `p6-ws336` | [WS336](ws336/ws.md) p024（OpenSSH からの入れ替えの用意。config/ci は変えず WS343 に差分を渡す）。sshd の log を OpenSSH の形に直した |
-| Q1 | q2000 | [WS074](ws074/ws.md) [p263](ws074/phase263/phase.md)（実際の Web サイトでの UAT の指摘への対処、2026-11-03 ユーザーの指示で Q1 が直に開発、サブエージェントは使わない） |
+| Q1 | q2000・q2001 | [WS074](ws074/ws.md) [p263](ws074/phase263/phase.md)（実際の Web サイトでの UAT の指摘への対処、U1 は host で直った）、[WS346](ws346/ws.md) p001（layout cache の設計）。2026-11-03 ユーザーの指示で Q1 が直に行う、サブエージェントは使わない |
 | P2・P3・P4 | — | 待機 |
 
 - BUG-412（Pi 5 の click）: 直しは main に。Pi 5 は main の普段の kernel。ユーザーの click の確かめで閉じる。Pi 5 の /boot/boot0 に試験の残り（*.aatold・*.q1967old・*.q1997old・cmdline.txt.ring・/bin/wayland.q1955old）を確かめの後に消す。
@@ -106,7 +106,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-418 · q2001 · WS346 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯の進み具合、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-418 · q2002 · WS347 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯の進み具合、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -190,6 +190,7 @@ BUG-418 · q2001 · WS346 · KL_VERSION 110（106 は BUG-396 の reload、107 �
 | [WS342](ws342/ws.md) | MG006 | Windows 版の libvulkan（userland/desktop/libvulkan-win32、vulkan-1.dll への橋渡し、handle の共有）と Keiland の Windows の backend の compositor（userland/desktop/libkeiland-backend-win32、DWM の上）（2026-11-02 ユーザー） | planning | 着手しない（議論の後） |
 | [WS343](ws343/ws.md) | MG005 | base の TLS と ssh を自前に（CI の config から OpenSSH・OpenSSL・curl・libcurl を外し、base に自前の ssh・sshd・libssl.so・libcrypto.so、fetch の https、ca-certificates は packages に残す）（2026-11-02 ユーザー） | incomplete | p002（passkey の OpenSSL の関数を libcrypto-compat に、P2 q1990、20:46） |
 | [WS345](ws345/ws.md) | MG006 | ブラウザの thread の分け方: JavaScript を窓の event と別の thread に、通信を独立した thread に（2026-11-02 ユーザー） | incomplete | P8 が p001 の設計（q1959） |
+| [WS346](ws346/ws.md) | MG006 | libbrowser の style と layout の差分の再計算（layout cache）。DOM の変更の記録・style の無効化・layout の部分木の再利用、全体の作り直しとの照合（2026-11-03 ユーザー、設計は Q1、実装は Sonnet） | planning | p001 設計（[design.md](ws346/design.md)）のユーザーの確かめと未決 3 件の答えの後、p002 から |
 | [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
 | [WS339](ws339/ws.md) | MG004 | x86 の PC の UEFI の起動の画面の解像度を monitor（EDID）に合わせる、標準の設定の video=640x480 を外す（2026-11-01 ユーザー） | planning | p001（担当の割当はユーザーの指示で） |
 | [WS338](ws338/ws.md) | MG006 | libmedia の H.264 の software の decoder の速さの続き（WS326 から分けた、2026-11-01 ユーザー） | planning | p001 設計（担当の割当はユーザーの指示で） |
