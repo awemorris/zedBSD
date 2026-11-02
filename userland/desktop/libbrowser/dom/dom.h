@@ -512,6 +512,8 @@ struct dom_document {
 	struct vm_object *forms_collection;
 	/* SameObject images retains one live native HTML img query rooted at this Document. */
 	struct vm_object *images_collection;
+	/* SameObject scripts retains one live native HTML script query rooted at this Document. */
+	struct vm_object *scripts_collection;
 	/* The current native inline stylesheet query retains its SameObject wrapper. */
 	struct vm_object *style_sheets;
 	/* A fragment of the style elements of the constructed sheets the document adopted. */

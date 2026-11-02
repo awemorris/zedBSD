@@ -1,5 +1,5 @@
 // The network objects of the web platform written in the page's own language (ws074-p232): fetch, Headers,
-// Request, Response, Blob, File, FormData, TextEncoder, TextDecoder, XMLHttpRequest, sendBeacon.
+// Request, Response, Blob, File, FileReader, FormData, TextEncoder, TextDecoder, XMLHttpRequest, sendBeacon.
 // bind/prelude.c runs this over three natives: send(method, url, headerLines, body, callback) starts a request
 // (the page's loader; callback(error, status, url, headerLines, bodyText) is called on the page's event loop),
 // cancel(id) drops it, syncGet(url) is a blocking GET for a synchronous XMLHttpRequest.
@@ -157,32 +157,46 @@
   }
 
   // ---- Blob and File
-  function partText(p) {
-    if (p instanceof Blob) return p._text;
-    if (p instanceof ArrayBuffer) return utf8Decode(new Uint8Array(p));
-    if (ArrayBuffer.isView(p)) return utf8Decode(new Uint8Array(p.buffer, p.byteOffset, p.byteLength));
-    return String(p);
+  // A Blob holds bytes; _text is their UTF-8 reading for the consumers that send text (fetch, FormData).
+  function copyBytes(view) { var out = new Uint8Array(view.length); out.set(view); return out; }
+  function partBytes(p) {
+    if (p instanceof Blob) return p._bytes;
+    if (p instanceof ArrayBuffer) return new Uint8Array(p);
+    if (ArrayBuffer.isView(p)) return new Uint8Array(p.buffer, p.byteOffset, p.byteLength);
+    return utf8Encode(p);
+  }
+  function blobType(t) {
+    // A type with a character outside U+0020 to U+007E is dropped (File API, the Blob constructor).
+    t = t === undefined ? '' : String(t);
+    return /^[\x20-\x7e]*$/.test(t) ? lower(t) : '';
   }
   class Blob {
     constructor(parts, options) {
-      var text = '';
-      if (parts !== undefined && parts !== null) Array.from(parts).forEach(function (p) { text += partText(p); });
-      hidden(this, '_text', text);
-      hidden(this, '_type', options && options.type !== undefined ? lower(options.type) : '');
+      var list = [], total = 0, bytes, at = 0;
+      if (parts !== undefined && parts !== null) {
+        if (typeof parts !== 'object' || typeof parts[Symbol.iterator] !== 'function')
+          throw new TypeError("Failed to construct 'Blob': The provided value cannot be converted to a sequence.");
+        Array.from(parts).forEach(function (p) { var b = partBytes(p); list.push(b); total += b.length; });
+      }
+      bytes = new Uint8Array(total);
+      list.forEach(function (b) { bytes.set(b, at); at += b.length; });
+      hidden(this, '_bytes', bytes);
+      hidden(this, '_type', blobType(options && options.type));
     }
-    get size() { return utf8Encode(this._text).length; }
+    get _text() { return utf8Decode(this._bytes); }
+    get size() { return this._bytes.length; }
     get type() { return this._type; }
-    text() { return Promise.resolve(this._text); }
-    arrayBuffer() { return Promise.resolve(utf8Encode(this._text).buffer); }
-    bytes() { return Promise.resolve(utf8Encode(this._text)); }
+    text() { return Promise.resolve(utf8Decode(this._bytes)); }
+    arrayBuffer() { return Promise.resolve(copyBytes(this._bytes).buffer); }
+    bytes() { return Promise.resolve(copyBytes(this._bytes)); }
     slice(start, end, type) {
-      var b = utf8Encode(this._text), s = start === undefined ? 0 : start, e = end === undefined ? b.length : end;
-      if (s < 0) s = Math.max(b.length + s, 0);
-      if (e < 0) e = Math.max(b.length + e, 0);
-      return new Blob([utf8Decode(b.subarray(Math.min(s, b.length), Math.min(e, b.length)))], { type: type });
+      var n = this._bytes.length, s = start === undefined ? 0 : Math.trunc(Number(start)) || 0, e = end === undefined ? n : Math.trunc(Number(end)) || 0;
+      if (s < 0) s = Math.max(n + s, 0);
+      if (e < 0) e = Math.max(n + e, 0);
+      s = Math.min(s, n); e = Math.min(e, n);
+      return new Blob([this._bytes.subarray(s, Math.max(s, e))], { type: type });
     }
   }
-  tag(Blob, 'Blob');
   class File extends Blob {
     constructor(parts, name, options) {
       super(parts, options);
@@ -501,6 +515,65 @@
     xhr._state = state;
     fire(xhr, 'readystatechange');
   }
+  // ---- FileReader (File API): reads a Blob in a later task and reports it through progress events
+  function latin1(bytes) {
+    var parts = [], i;
+    for (i = 0; i < bytes.length; i += 8192) parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + 8192)));
+    return parts.join('');
+  }
+  var READER_EVENTS = ['loadstart', 'progress', 'load', 'abort', 'error', 'loadend'];
+  class FileReader extends EventTarget {
+    constructor() {
+      super();
+      var self = this;
+      READER_EVENTS.forEach(function (t) { hidden(self, 'on' + t, null); });
+      hidden(this, '_state', 0); hidden(this, '_result', null); hidden(this, '_error', null); hidden(this, '_run', 0);
+    }
+    get readyState() { return this._state; }
+    get result() { return this._result; }
+    get error() { return this._error; }
+    _read(blob, kind, label) {
+      var self = this, run;
+      if (!(blob instanceof Blob)) throw new TypeError("Failed to execute 'read' on 'FileReader': parameter 1 is not of type 'Blob'.");
+      if (this._state === 1) throw new DOMException("Failed to execute 'read' on 'FileReader': The object is already busy reading Blobs.", 'InvalidStateError');
+      this._state = 1; this._result = null; this._error = null;
+      run = ++this._run;
+      setTimeout(function () {
+        var bytes = blob._bytes, n = bytes.length, result;
+        if (self._run !== run) return;
+        fire(self, 'loadstart', 0);
+        if (self._run !== run) return;
+        switch (kind) {
+          case 'buffer': result = copyBytes(bytes).buffer; break;
+          case 'binary': result = latin1(bytes); break;
+          case 'url': result = 'data:' + (blob.type || 'application/octet-stream') + ';base64,' + g.btoa(latin1(bytes)); break;
+          default: result = new g.TextDecoder(label === undefined ? 'utf-8' : label).decode(bytes); break;
+        }
+        fire(self, 'progress', n);
+        if (self._run !== run) return;
+        self._state = 2; self._result = result;
+        fire(self, 'load', n);
+        if (self._state !== 1) fire(self, 'loadend', n);
+      }, 0);
+    }
+    readAsArrayBuffer(blob) { this._read(blob, 'buffer'); }
+    readAsBinaryString(blob) { this._read(blob, 'binary'); }
+    readAsText(blob, label) { this._read(blob, 'text', label); }
+    readAsDataURL(blob) { this._read(blob, 'url'); }
+    abort() {
+      if (this._state === 0 || this._state === 2) { this._result = null; return; }
+      this._run++; this._state = 2; this._result = null;
+      fire(this, 'abort', 0);
+      if (this._state !== 1) fire(this, 'loadend', 0);
+    }
+  }
+  [['EMPTY', 0], ['LOADING', 1], ['DONE', 2]].forEach(function (c) {
+    Object.defineProperty(FileReader, c[0], { value: c[1], enumerable: true });
+    Object.defineProperty(FileReader.prototype, c[0], { value: c[1], enumerable: true });
+  });
+  tag(FileReader, 'FileReader');
+  if (!g.FileReader) def(g, 'FileReader', FileReader);
+
   class XMLHttpRequestEventTarget extends EventTarget {
     constructor() {
       super();

@@ -993,6 +993,10 @@ node_trace(
 		if (node->document->images_collection != NULL)
 			vm_heap_mark(heap, &node->document->images_collection->cell);
 
+		/* Script collection identity is kept the same way as the image collection's. */
+		if (node->document->scripts_collection != NULL)
+			vm_heap_mark(heap, &node->document->scripts_collection->cell);
+
 		/* A Document alone preserves its current live stylesheet query identity. */
 		if (node->document->style_sheets != NULL)
 			vm_heap_mark(heap, &node->document->style_sheets->cell);

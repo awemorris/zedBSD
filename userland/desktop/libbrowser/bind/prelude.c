@@ -278,6 +278,8 @@ prelude_navigate_top(
 		return ENOMEM;
 
 	/* The request, which the program takes (bind_take_navigation). */
+	if (getenv("BROWSER_NET_DUMP") != NULL)
+		fprintf(stderr, "navigate: %.200s\n", copy);
 	free(window->top_navigation);
 	window->top_navigation = copy;
 	window->top_navigation_replace = vm_to_boolean(js_argument(args, count, 1));
@@ -1300,6 +1302,8 @@ prelude_request_done(
 	/* The record goes before the script runs, since the script may cancel others (not this one). */
 	pending = context;
 	window = pending->window;
+	if (getenv("BROWSER_NET_DUMP") != NULL)
+		fprintf(stderr, "request %lu: done error %d status %d bytes %lu %.200s\n", pending->id, error, status, (unsigned long)length, url == NULL ? "" : url);
 	realm = window->realm;
 	callback = vm_value_cell(pending->callback);
 	arguments[0] = vm_value_int32(error);
@@ -1393,6 +1397,8 @@ prelude_send(
 		request.body_length = body.length;
 		handle = NULL;
 		status = window->host.request(window->host.context, &request, prelude_request_done, pending, &handle);
+		if (getenv("BROWSER_NET_DUMP") != NULL)
+			fprintf(stderr, "request %lu: %s %.200s (body %lu) -> start %d\n", id, request.method, request.href, (unsigned long)body.length, status);
 
 		/* A request that did not start tells the script it failed (it did not finish yet). */
 		if (status != 0) {

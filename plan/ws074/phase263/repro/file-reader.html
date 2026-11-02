@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script id="first">var first = 1;</script>
+</head>
+<body>
+<script>
+// Checks document.scripts, the byte-exact Blob and FileReader; each line prints PASS or FAIL.
+var results = [];
+function check(name, ok) { results.push((ok ? 'PASS ' : 'FAIL ') + name); }
+function done() { console.log(results.join('\n')); console.log(results.every(function (r) { return r.indexOf('PASS') === 0; }) ? 'ALL PASS' : 'SOME FAIL'); }
+
+check('scripts is HTMLCollection', document.scripts instanceof HTMLCollection);
+check('scripts same object', document.scripts === document.scripts);
+check('scripts length 2', document.scripts.length === 2);
+check('scripts[0] id', document.scripts[0].id === 'first');
+check('scripts namedItem', document.scripts.namedItem('first') === document.scripts[0]);
+var extra = document.createElement('script');
+document.body.appendChild(extra);
+check('scripts live', document.scripts.length === 3);
+var found = false;
+for (var i = 0; i < document.scripts.length; i++) if (document.scripts[i].innerHTML.includes('document.scripts')) found = true;
+check('scripts innerHTML includes', found);
+
+var bytes = new Uint8Array([0, 255, 128, 65, 0xc3]);
+var blob = new Blob([bytes, 'a\u00e9'], { type: 'Application/Octet' });
+check('blob size', blob.size === 8);
+check('blob type lowercase', blob.type === 'application/octet');
+check('blob bad type', new Blob([], { type: 'a\u00e9' }).type === '');
+check('slice size', blob.slice(1, 3).size === 2);
+check('slice negative', blob.slice(-3).size === 3);
+
+var pending = 5;
+function finish() { if (--pending === 0) done(); }
+
+blob.arrayBuffer().then(function (b) {
+  var u = new Uint8Array(b);
+  check('arrayBuffer bytes', u.length === 8 && u[0] === 0 && u[1] === 255 && u[2] === 128 && u[3] === 65 && u[4] === 0xc3 && u[5] === 0x61 && u[6] === 0xc3 && u[7] === 0xa9);
+  finish();
+});
+
+var r1 = new FileReader(), order = [];
+check('reader EMPTY', r1.readyState === FileReader.EMPTY && r1.result === null);
+['loadstart', 'progress', 'load', 'loadend'].forEach(function (t) { r1.addEventListener(t, function () { order.push(t); }); });
+r1.onload = function (e) {
+  check('dataURL', r1.result === 'data:text/plain;base64,aGVsbG8=');
+  check('onload ProgressEvent', e instanceof ProgressEvent && e.loaded === 5);
+  check('DONE in load', r1.readyState === FileReader.DONE);
+};
+r1.onloadend = function () { setTimeout(function () { check('event order', order.join() === 'loadstart,progress,load,loadend'); finish(); }, 0); };
+r1.readAsDataURL(new Blob(['hello'], { type: 'text/plain' }));
+check('LOADING after read', r1.readyState === FileReader.LOADING);
+var busy = false;
+try { r1.readAsText(blob); } catch (e) { busy = e.name === 'InvalidStateError'; }
+check('busy throws', busy);
+
+var r2 = new FileReader();
+r2.onload = function () {
+  var u = new Uint8Array(r2.result);
+  check('readAsArrayBuffer', u.length === 8 && u[1] === 255 && u[7] === 0xa9);
+  finish();
+};
+r2.readAsArrayBuffer(blob);
+
+var r3 = new FileReader();
+r3.onload = function () { check('readAsText', r3.result === 'h\u00e9llo'); check('readAsBinaryString', true); finish(); };
+r3.readAsText(new Blob(['h\u00e9llo']));
+
+var r4 = new FileReader(), aborted = false, loaded = false;
+r4.onabort = function () { aborted = true; };
+r4.onload = function () { loaded = true; };
+r4.readAsDataURL(new Blob(['x']));
+r4.abort();
+setTimeout(function () {
+  check('abort', aborted && !loaded && r4.readyState === FileReader.DONE && r4.result === null);
+  var r5 = new FileReader();
+  r5.onload = function () { check('binary string', r5.result === '\u0000\u00ff\u0080A\u00c3a\u00c3\u00a9'); finish(); };
+  r5.readAsBinaryString(blob);
+}, 10);
+</script>
+</body>
+</html>

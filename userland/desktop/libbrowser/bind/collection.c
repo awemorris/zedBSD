@@ -25,6 +25,7 @@ enum collection_kind {
 	COLLECTION_ROW_CELLS,
 	COLLECTION_OPTIONS,
 	COLLECTION_IMAGES,
+	COLLECTION_SCRIPTS,
 	COLLECTION_EMPTY_NODE_LIST
 };
 
@@ -432,6 +433,54 @@ bind_document_images(
 
 	/* Succeeded: the current images remain observable through this saved wrapper. */
 	*result = vm_value_cell(document->images_collection);
+	return 0;
+}
+
+/*
+ * Reports the same live collection of descendant HTML script elements.
+ */
+int
+bind_document_scripts(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_node *node;
+	struct dom_document *document;
+	struct vm_object *wrapper;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* Borrowing the getter never permits an Element to masquerade as a Document. */
+	status = bind_this_node(realm, receiver, &node);
+	if (status != 0)
+		return status;
+	if (node->type != DOM_DOCUMENT) {
+		status = bind_throw_illegal(realm);
+		if (status != VM_THROWN)
+			return status;
+
+		/* Succeeded: the requested native exception is installed. */
+		return VM_THROWN;
+	}
+
+	/* A Document owns its SameObject cache without retaining unrelated query lists. */
+	document = (struct dom_document *)node;
+	if (document->scripts_collection == NULL) {
+		status = collection_create(realm, node, COLLECTION_SCRIPTS, NULL, &wrapper);
+		if (status != 0)
+			return status;
+
+		/* Publish only the successfully constructed complete wrapper into its traced cache. */
+		document->scripts_collection = wrapper;
+	}
+
+	/* Succeeded: the current scripts remain observable through this saved wrapper. */
+	*result = vm_value_cell(document->scripts_collection);
 	return 0;
 }
 
@@ -918,6 +967,16 @@ collection_matches(
 			return 0;
 
 		/* Succeeded: this current descendant is an actual HTML namespace img element. */
+		return 1;
+	}
+
+	/* Script membership, like images, depends only on the HTML namespace and the exact local name. */
+	if (state->kind == COLLECTION_SCRIPTS) {
+		same = vm_string_equal_ascii(element->local_name, "script");
+		if (!same)
+			return 0;
+
+		/* Succeeded: this current descendant is an actual HTML namespace script element. */
 		return 1;
 	}
 

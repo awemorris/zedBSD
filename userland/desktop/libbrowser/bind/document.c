@@ -97,6 +97,7 @@ static const struct bind_attribute document_attributes[] = {
 	{ "lastElementChild", bind_last_element_child_get, NULL },
 	{ "childElementCount", bind_child_element_count, NULL },
 	{ "images", bind_document_images, NULL },
+	{ "scripts", bind_document_scripts, NULL },
 	{ "styleSheets", bind_cssom_document_sheets, NULL },
 	{ NULL, NULL, NULL }
 };

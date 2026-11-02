@@ -522,6 +522,7 @@ int bind_select_options(struct vm_realm *realm, vm_value receiver, const vm_valu
 int bind_document_forms(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 int bind_document_images(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 int bind_document_links(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
+int bind_document_scripts(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 
 /* URL resolution and frame helpers retain actual parent/child document ownership. */
 int bind_document_url(struct dom_document *document, int use_base, struct wb_buffer *out);
