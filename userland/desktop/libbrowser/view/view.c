@@ -72,6 +72,9 @@
  */
 #define VIEW_DISPATCH_NS	50000000U
 
+/* The most pages kept for Back and Forward (a page left stays as it was, and comes back at once). */
+#define VIEW_KEPT_MAX		3U
+
 /* How long a parsed document waits for its style sheets before it is shown without the ones still on their way, in milliseconds. */
 #define VIEW_SHEETS_WAIT_MS	30000U
 
@@ -155,6 +158,19 @@ struct browser_offscreen {
  *: the view it is for, its location, its request (NULL once it
  * ended), how it ended (0, or an errno value) and the bytes it brought.
  */
+/*
+ * A page kept for Back and Forward: the page as it was left, the step of
+ * the history it is, its scroll, its clock's start and when it was left
+ * (its clock goes on from there when it comes back).
+ */
+struct view_kept {
+	struct page *page;
+	size_t index;
+	layout_unit scroll_y;
+	uint64_t page_epoch;
+	uint64_t left_at;
+};
+
 struct view_prefetch_script {
 	struct browser_view *view;
 	char *location;
@@ -260,6 +276,10 @@ struct browser_view {
 	 */
 	struct page *finishing;
 	char *finishing_url;
+	/* Whether the document that arrived last came with no-store, and the pages kept for Back and Forward, the oldest first. */
+	int arrived_no_store;
+	struct view_kept kept[VIEW_KEPT_MAX];
+	size_t kept_count;
 	int finishing_step;
 	size_t finishing_index;
 	uint64_t finishing_since;
@@ -299,6 +319,9 @@ static uint64_t view_clock(void);
 static int view_navigate(struct browser_view *view, const char *path, int step, size_t history_index);
 static void view_script_navigation(struct browser_view *view);
 static void view_finish_check(struct browser_view *view);
+static void view_keep(struct browser_view *view, struct page *page, size_t index);
+static void view_kept_remove(struct browser_view *view, size_t slot, int destroy);
+static int view_restore(struct browser_view *view, size_t index);
 static int view_make_page(struct browser_view *view, struct page **page);
 static int view_open_page(struct browser_view *view, const char *path, struct page **page);
 static int view_show_page(struct browser_view *view, struct page *page, const char *path, int step, size_t history_index);
@@ -458,8 +481,10 @@ browser_view_destroy(
 	/* The renderer and the framebuffers on the caller's device. */
 	view_gpu_close(view);
 
-	/* A load under way, then the page and its path (its image requests go with it). */
+	/* A load under way, the pages kept for Back and Forward, then the page and its path (its image requests go with it). */
 	view_stop_load(view, 0);
+	while (view->kept_count != 0)
+		view_kept_remove(view, view->kept_count - 1U, 1);
 	page_destroy(view->page);
 	free(view->path);
 
@@ -612,6 +637,13 @@ browser_view_go(
 		index -= (size_t)-(int64_t)steps;
 	else
 		index += (size_t)steps;
+
+	/* A page kept for that step comes back as it was left. */
+	if (steps != 0) {
+		error = view_restore(view, index);
+		if (error != ENOENT)
+			return error;
+	}
 
 	/* Loads the destination without publishing its history index before success. */
 	error = view_navigate(view, view->history[index], VIEW_STEP_KEEP, index);
@@ -2367,8 +2399,11 @@ view_show_page(
 	/* The new page has the focus of the view's program as the view has it (it has no focused element to tell yet). */
 	(void)page_window_focus(page, view->has_focus);
 
-	/* The new page replaces the old one, from its top, with its own clock. */
-	page_destroy(view->page);
+	/* The new page replaces the old one (kept for Back and Forward, unless it is the same step loaded again), from its top, with its own clock. */
+	if (view->page != NULL && view->history_count != 0 && !(step == VIEW_STEP_KEEP && history_index == view->history_index))
+		view_keep(view, view->page, view->history_index);
+	else
+		page_destroy(view->page);
 	view->page = page;
 	view->page_serial++;
 	view->page_epoch = view->open_epoch;
@@ -2383,10 +2418,20 @@ view_show_page(
 			free(view->history[index]);
 		if (view->history_count != 0)
 			view->history_count = view->history_index + 1U;
+		for (index = view->kept_count; index > 0; index--) {
+			if (view->kept[index - 1U].index >= view->history_count)
+				view_kept_remove(view, index - 1U, 1);
+		}
 		if (view->history_count == VIEW_HISTORY_MAX) {
 			free(view->history[0]);
 			memmove(view->history, view->history + 1, (VIEW_HISTORY_MAX - 1U) * sizeof(view->history[0]));
 			view->history_count--;
+			for (index = view->kept_count; index > 0; index--) {
+				if (view->kept[index - 1U].index == 0)
+					view_kept_remove(view, index - 1U, 1);
+				else
+					view->kept[index - 1U].index--;
+			}
 		}
 
 		/* Records the new step. */
@@ -2425,10 +2470,11 @@ view_start_load(
 	/* One load at a time. */
 	view_stop_load(view, 0);
 
-	/* The location, kept for the arrival. */
+	/* The location, kept for the arrival, whose no-store is not known yet. */
 	copy = strdup(path);
 	if (copy == NULL)
 		return ENOMEM;
+	view->arrived_no_store = 0;
 
 	/* The request. */
 	error = page_net_fetch(view->loader, path, view_document_arrived, view, &view->pending);
@@ -2485,6 +2531,7 @@ view_document_arrived(
 	response = net_request_response(request);
 	mime = wb_buffer_string(&response->content_type);
 	mime_length = response->content_type.length;
+	view->arrived_no_store = response->no_store;
 
 	/* A strict XHTML document has no HTML parser-blocking script prefetch in this scope. */
 	error = page_document_content(mime, mime_length, &content);
@@ -2535,8 +2582,10 @@ view_commit_document(
 	history_index = view->pending_index;
 	view->pending_path = NULL;
 
-	/* A new page. */
+	/* A new page, which knows whether its document may be kept. */
 	error = view_make_page(view, &page);
+	if (error == 0)
+		page->no_store = view->arrived_no_store;
 
 	/* The scripts fetched ahead, for its parser. */
 	if (error == 0 && scripts != NULL) {
@@ -2585,6 +2634,122 @@ view_commit_document(
 	if (error != 0)
 		view_failed(view, url, error, "");
 	free(path);
+}
+
+/*
+ * Keeps the page left at a step of the history for Back and Forward, the
+ * oldest kept one going when there are too many; a page that may not be
+ * kept (its document came with no-store, or it plays media) goes at once.
+ */
+static void
+view_keep(
+	struct browser_view *view,
+	struct page *page,
+	size_t index)
+{
+	struct view_kept *kept;
+	size_t slot;
+
+	/* A page that may not be kept goes. */
+	if (page->no_store || page->media.count != 0) {
+		page_destroy(page);
+		return;
+	}
+
+	/* Room, made by letting the oldest go, and a page kept before for the same step goes too. */
+	for (slot = view->kept_count; slot > 0; slot--) {
+		if (view->kept[slot - 1U].index == index)
+			view_kept_remove(view, slot - 1U, 1);
+	}
+	if (view->kept_count == VIEW_KEPT_MAX)
+		view_kept_remove(view, 0, 1);
+
+	/* The page as it is left. */
+	kept = &view->kept[view->kept_count++];
+	kept->page = page;
+	kept->index = index;
+	kept->scroll_y = view->scroll_y;
+	kept->page_epoch = view->page_epoch;
+	kept->left_at = view_clock();
+}
+
+/* Takes a kept page out of the list, destroying it when asked. */
+static void
+view_kept_remove(
+	struct browser_view *view,
+	size_t slot,
+	int destroy)
+{
+	/* The page, when it goes. */
+	if (destroy)
+		page_destroy(view->kept[slot].page);
+
+	/* The later ones close up. */
+	memmove(view->kept + slot, view->kept + slot + 1U, (view->kept_count - slot - 1U) * sizeof(view->kept[0]));
+	view->kept_count--;
+}
+
+/*
+ * Shows again the page kept for a step of the history, as it was left: its
+ * document, its scroll, and its clock going on from when it was left (its
+ * timers did not run meanwhile); the page shown is kept in its turn.  A
+ * load under way stops.  Returns ENOENT when no page is kept for the step,
+ * ENOMEM.
+ */
+static int
+view_restore(
+	struct browser_view *view,
+	size_t index)
+{
+	struct view_kept kept;
+	size_t slot;
+	char *copy;
+
+	/* The page kept for the step, whose location is still the step's. */
+	for (slot = 0; slot < view->kept_count; slot++) {
+		if (view->kept[slot].index == index)
+			break;
+	}
+	if (slot == view->kept_count || view->page == NULL)
+		return ENOENT;
+	if (view->kept[slot].page->base == NULL || strcmp(view->kept[slot].page->base, view->history[index]) != 0) {
+		view_kept_remove(view, slot, 1);
+		return ENOENT;
+	}
+	copy = strdup(view->history[index]);
+	if (copy == NULL)
+		return ENOMEM;
+
+	/* A load under way stops; the page comes out of the list. */
+	view_stop_load(view, 1);
+	kept = view->kept[slot];
+	view_kept_remove(view, slot, 0);
+
+	/* The atlas's glyphs are the page shown's; that page is kept in its turn. */
+	if (view->gpu_open)
+		paint_gpu_forget_glyphs(&view->gpu);
+	view_keep(view, view->page, view->history_index);
+
+	/* The page comes back with the view's focus, its scroll, and its clock going on from where it stopped. */
+	(void)page_window_focus(kept.page, view->has_focus);
+	view->page = kept.page;
+	view->page_serial++;
+	view->page_epoch = kept.page_epoch + (view_clock() - kept.left_at);
+	free(view->path);
+	view->path = copy;
+	view->scroll_y = kept.scroll_y;
+	view->overscroll_y = 0;
+	view->history_index = index;
+
+	/* Its title, then the caller hears of it and draws it. */
+	wb_buffer_clear(&view->title);
+	(void)page_title(view->page, &view->title);
+	if (view->callbacks.committed != NULL)
+		view->callbacks.committed(view->callbacks.context, view);
+	view_redraw(view);
+
+	/* Succeeded: the page is shown again. */
+	return 0;
 }
 
 /*
