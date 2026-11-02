@@ -21,6 +21,7 @@
 #include "check.h"
 
 #include "base/os-file.h"
+#include "userland/tests/browser-threads/threads-posix.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -1752,6 +1753,13 @@ main(
 	int argc,
 	char **argv)
 {
+	int error;
+
+	/* The locks' mutex comes from the POSIX threads, in every process of the test. */
+	error = browser_threads_set(browser_threads_posix());
+	if (error != 0)
+		return 2;
+
 	/* The second process of the lock test does its one job. */
 	if (argc >= 3 && strcmp(argv[1], "lock-child") == 0)
 		return lock_child_main(argv[2]);

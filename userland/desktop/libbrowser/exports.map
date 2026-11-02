@@ -15,6 +15,7 @@
 		browser_free;
 		browser_add_ca_file;
 		browser_script_tool;
+		browser_threads_set;
 	local:
 		*;
 };

@@ -71,12 +71,16 @@ struct net_data {
 	struct wb_buffer body;
 };
 
+/* The longest reason of a TLS failure kept (with its NUL). */
+#define NET_TLS_REASON_MAX	256U
+
 /*
  * The response of an HTTP fetch: the final URL (after the redirects), the
  * status, the Content-Type header's value, the body (decoded from
  * chunks), and what the response says of caching it: Cache-Control's
  * max-age in seconds (-1 without one), no-store and no-cache, and its
- * ETag (empty without one).
+ * ETag (empty without one).  A fetch that failed over TLS leaves why in
+ * reason ("" otherwise).
  */
 struct net_response {
 	struct wb_buffer url;
@@ -89,6 +93,7 @@ struct net_response {
 	struct wb_buffer etag;
 	/* The response headers but Set-Cookie, one "Name: value" per line, each ending in LF (ws074-p232). */
 	struct wb_buffer headers;
+	char reason[NET_TLS_REASON_MAX];
 };
 
 /*
@@ -143,9 +148,6 @@ typedef void (*net_request_done)(void *context, struct net_request *request);
  */
 typedef void (*net_loader_notify)(void *context);
 
-/* The longest reason of a TLS failure kept (with its NUL). */
-#define NET_TLS_REASON_MAX	256U
-
 /* URLs (url.c). */
 int net_url_parse(const char *input, size_t length, const struct net_url *base, struct net_url *url);
 void net_url_release(struct net_url *url);
@@ -185,8 +187,8 @@ void net_response_release(struct net_response *response);
 /* TLS for https (tls.c): the OpenSSL package's library, loaded when first needed. */
 struct net_tls;
 int net_tls_add_ca_file(const char *path);
-int net_tls_open(wb_os_socket socket, const char *host, struct net_tls **tls);
-int net_tls_start(wb_os_socket socket, const char *host, struct net_tls **tls);
+int net_tls_open(wb_os_socket socket, const char *host, char *reason, struct net_tls **tls);
+int net_tls_start(wb_os_socket socket, const char *host, char *reason, struct net_tls **tls);
 int net_tls_handshake(struct net_tls *tls, unsigned *wants);
 int net_tls_read_some(struct net_tls *tls, unsigned char *bytes, size_t length, size_t *received, unsigned *wants);
 int net_tls_write_some(struct net_tls *tls, const unsigned char *bytes, size_t length, size_t *sent, unsigned *wants);
@@ -194,9 +196,7 @@ int net_tls_read(struct net_tls *tls, unsigned char *bytes, size_t length, size_
 int net_tls_write(struct net_tls *tls, const unsigned char *bytes, size_t length);
 int net_tls_pending(const struct net_tls *tls);
 void net_tls_close(struct net_tls *tls);
-void net_tls_clear_error(void);
-void net_tls_set_error(const char *reason);
-const char *net_tls_error(void);
+const char *net_tls_reason(const struct net_tls *tls);
 
 /* The asynchronous loader (loader.c). */
 int net_loader_create(net_loader_notify notify, void *context, struct net_loader **loader);
@@ -211,6 +211,7 @@ int net_loader_send(struct net_loader *loader, const char *url, int kind, const 
 void net_request_cancel(struct net_request *request);
 int net_request_error(const struct net_request *request);
 const struct net_response *net_request_response(const struct net_request *request);
+const char *net_request_reason(const struct net_request *request);
 size_t net_loader_pending(const struct net_loader *loader);
 void net_loader_wait(struct net_loader *loader, int timeout);
 void net_loader_dispatch(struct net_loader *loader);

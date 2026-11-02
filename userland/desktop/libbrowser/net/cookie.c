@@ -36,12 +36,12 @@
  */
 
 #include "net/net.h"
+#include "base/thread.h"
 #include "base/os-time.h"
 #include "storage/queue.h"
 #include "storage/records.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,7 +90,7 @@ struct cookie {
 struct net_cookie_jar {
 	struct cookie cookies[COOKIE_MAX];
 	size_t count;
-	pthread_mutex_t lock;
+	struct wb_mutex lock;
 	struct wb_storage_queue *queue;
 };
 
@@ -167,7 +167,11 @@ net_cookie_jar_open(
 		return ENOMEM;
 
 	/* Its lock and its storage. */
-	pthread_mutex_init(&made->lock, NULL);
+	error = wb_mutex_init(&made->lock);
+	if (error != 0) {
+		free(made);
+		return error;
+	}
 	made->queue = queue;
 
 	/* The cookies its storage kept; only a lack of memory fails the opening. */
@@ -202,7 +206,7 @@ net_cookie_jar_close(
 		cookie_free(&jar->cookies[index]);
 
 	/* Then the lock and the jar. */
-	pthread_mutex_destroy(&jar->lock);
+	wb_mutex_destroy(&jar->lock);
 	free(jar);
 }
 
@@ -225,11 +229,11 @@ net_cookie_store(
 		return 0;
 
 	/* A response may set any cookie. */
-	pthread_mutex_lock(&jar->lock);
+	wb_mutex_lock(&jar->lock);
 
 	error = cookie_store(jar, url, header, length, 0);
 
-	pthread_mutex_unlock(&jar->lock);
+	wb_mutex_unlock(&jar->lock);
 
 	/* The jar could not take it. */
 	if (error != 0)
@@ -259,11 +263,11 @@ net_cookie_store_script(
 		return 0;
 
 	/* A script may not touch the cookies only HTTP sees. */
-	pthread_mutex_lock(&jar->lock);
+	wb_mutex_lock(&jar->lock);
 
 	error = cookie_store(jar, url, text, length, 1);
 
-	pthread_mutex_unlock(&jar->lock);
+	wb_mutex_unlock(&jar->lock);
 
 	/* The jar could not take it. */
 	if (error != 0)
@@ -295,11 +299,11 @@ net_cookie_header(
 	wb_buffer_init(&pairs);
 
 	/* The name and value pairs of every cookie for the URL. */
-	pthread_mutex_lock(&jar->lock);
+	wb_mutex_lock(&jar->lock);
 
 	error = cookie_pairs(jar, url, 0, &pairs);
 
-	pthread_mutex_unlock(&jar->lock);
+	wb_mutex_unlock(&jar->lock);
 
 	/* The header, when there is a cookie. */
 	if (error == 0 && pairs.length != 0)
@@ -330,11 +334,11 @@ net_cookie_string(
 		return 0;
 
 	/* The pairs a script may see. */
-	pthread_mutex_lock(&jar->lock);
+	wb_mutex_lock(&jar->lock);
 
 	error = cookie_pairs(jar, url, 1, out);
 
-	pthread_mutex_unlock(&jar->lock);
+	wb_mutex_unlock(&jar->lock);
 
 	/* The pairs could not be written. */
 	if (error != 0)

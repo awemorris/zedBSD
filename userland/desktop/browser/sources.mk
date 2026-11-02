@@ -12,5 +12,6 @@ KEILAND_BROWSER_SOURCES := $(KEILAND_BROWSER_DIR)/main.c \
 	$(KEILAND_BROWSER_DIR)/shell/keys.c \
 	$(KEILAND_BROWSER_DIR)/shell/touch.c \
 	$(KEILAND_BROWSER_DIR)/shell/mail.c \
+	$(KEILAND_BROWSER_DIR)/shell/threads.c \
 	userland/desktop/libbrowser/base/os-error.c \
 	userland/desktop/picture/png-write.c

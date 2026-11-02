@@ -65,10 +65,10 @@
 #include "base/os-net.h"
 #include "base/os-system.h"
 #include "base/os-time.h"
+#include "base/thread.h"
 #include "storage/records.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -276,18 +276,16 @@ struct net_loader {
 	struct wb_os_poll_item *items;
 	size_t items_capacity;
 	int rang;
-	pthread_t resolver;
-	int resolver_started;
-	pthread_mutex_t resolver_lock;
-	pthread_cond_t resolver_wake;
+	struct wb_thread resolver;
+	struct wb_mutex resolver_lock;
+	struct wb_cond resolver_wake;
 	struct loader_job *jobs;
 	struct loader_job *answers;
 	int resolver_stopping;
 	struct wb_os_waker *answers_waker;
-	pthread_t thread;
-	int thread_started;
-	pthread_mutex_t lock;
-	pthread_cond_t changed;
+	struct wb_thread thread;
+	struct wb_mutex lock;
+	struct wb_cond changed;
 	struct net_request *incoming;
 	struct net_request *incoming_last;
 	struct net_request *completed;
@@ -305,12 +303,13 @@ struct net_loader {
 };
 
 static uint64_t loader_clock(void);
-static void loader_name_thread(const char *name);
 static void loader_poke(struct net_loader *loader);
 static void loader_release(struct net_loader *loader);
 static void loader_free_queue(struct net_request *queue);
-static void *loader_resolver(void *argument);
-static void *loader_run(void *argument);
+static int loader_locks(struct net_loader *loader);
+static void loader_locks_release(struct net_loader *loader);
+static void loader_resolver(void *argument);
+static void loader_run(void *argument);
 static void loader_ready(struct net_loader *loader, size_t count);
 static int loader_intake(struct net_loader *loader);
 static void loader_tick(struct net_loader *loader);
@@ -373,10 +372,11 @@ net_loader_create(
 	made->notify_context = context;
 
 	/* Its locks and conditions (the caller's timed waits measure the time on the monotonic clock themselves). */
-	pthread_mutex_init(&made->resolver_lock, NULL);
-	pthread_cond_init(&made->resolver_wake, NULL);
-	pthread_mutex_init(&made->lock, NULL);
-	pthread_cond_init(&made->changed, NULL);
+	status = loader_locks(made);
+	if (status != 0) {
+		free(made);
+		return status;
+	}
 
 	/* The items of the network thread's wait, with room for some connections. */
 	made->items_capacity = 2U + LOADER_PER_HOST * 4U;
@@ -401,22 +401,20 @@ net_loader_create(
 	}
 
 	/* The resolver's thread. */
-	status = pthread_create(&made->resolver, NULL, loader_resolver, made);
+	status = wb_thread_start("browser-resolve", 0, loader_resolver, made, &made->resolver);
 	if (status != 0) {
 		loader_release(made);
 		return status;
 	}
 
 	/* It runs, and the network thread starts. */
-	made->resolver_started = 1;
-	status = pthread_create(&made->thread, NULL, loader_run, made);
+	status = wb_thread_start("browser-net", 0, loader_run, made, &made->thread);
 	if (status != 0) {
 		loader_release(made);
 		return status;
 	}
 
 	/* Succeeded: the loader takes requests. */
-	made->thread_started = 1;
 	*loader = made;
 	return 0;
 }
@@ -569,7 +567,7 @@ net_loader_send(
 	}
 
 	/* Handed to the network thread, which begins it. */
-	pthread_mutex_lock(&loader->lock);
+	wb_mutex_lock(&loader->lock);
 
 	if (loader->incoming_last != NULL)
 		loader->incoming_last->queue_next = made;
@@ -577,7 +575,7 @@ net_loader_send(
 		loader->incoming = made;
 	loader->incoming_last = made;
 
-	pthread_mutex_unlock(&loader->lock);
+	wb_mutex_unlock(&loader->lock);
 
 	/* The network thread wakes to take it. */
 	loader_poke(loader);
@@ -618,18 +616,18 @@ net_request_cancel(
 	loader->pending--;
 
 	/* The network thread is asked to close its connection and hand it back. */
-	pthread_mutex_lock(&loader->lock);
+	wb_mutex_lock(&loader->lock);
 
 	request->asked_cancel = 1;
 	loader->cancel_asked = 1;
 
-	pthread_mutex_unlock(&loader->lock);
+	wb_mutex_unlock(&loader->lock);
 
 	/* The network thread wakes to do so. */
 	loader_poke(loader);
 }
 
-/* Tells how a request ended: 0, or an errno value (EPROTO for TLS, whose reason net_tls_error gives). */
+/* Tells how a request ended: 0, or an errno value (EPROTO for TLS, whose reason net_request_reason gives). */
 int
 net_request_error(
 	const struct net_request *request)
@@ -645,6 +643,15 @@ net_request_response(
 {
 	/* The response the request read. */
 	return &request->response;
+}
+
+/* Tells why a request failed over TLS ("" when it did not), valid in its callback. */
+const char *
+net_request_reason(
+	const struct net_request *request)
+{
+	/* The reason the network thread kept. */
+	return request->reason;
 }
 
 /*
@@ -669,10 +676,10 @@ net_loader_wait(
 	struct net_loader *loader,
 	int timeout)
 {
-	struct timespec deadline;
 	uint64_t end;
 	uint64_t now;
 	uint64_t left;
+	uint32_t milliseconds;
 
 	/* The end of the wait on the monotonic clock. */
 	end = 0;
@@ -680,12 +687,12 @@ net_loader_wait(
 		end = wb_os_monotonic_ns() + (uint64_t)timeout * 1000000U;
 
 	/* Until the network thread tells of news, or the time is up. */
-	pthread_mutex_lock(&loader->lock);
+	wb_mutex_lock(&loader->lock);
 
 	/* Each wake of the condition, until there is news or the time is up. */
 	while (!loader->notified) {
 		if (timeout < 0) {
-			pthread_cond_wait(&loader->changed, &loader->lock);
+			wb_cond_wait(&loader->changed, &loader->lock);
 			continue;
 		}
 
@@ -695,18 +702,14 @@ net_loader_wait(
 			break;
 		left = end - now;
 
-		/* The condition's deadline: the wall clock now and the time left (a move of the wall clock is caught by measuring again). */
-		(void)timespec_get(&deadline, TIME_UTC);
-		deadline.tv_sec += (time_t)(left / 1000000000U);
-		deadline.tv_nsec += (long)(left % 1000000000U);
-		if (deadline.tv_nsec >= 1000000000L) {
-			deadline.tv_sec++;
-			deadline.tv_nsec -= 1000000000L;
-		}
-		(void)pthread_cond_timedwait(&loader->changed, &loader->lock, &deadline);
+		/* The wait for the time left, in whole milliseconds rounded up so that a short wait still sleeps. */
+		milliseconds = (uint32_t)(left / 1000000U);
+		if (left % 1000000U != 0)
+			milliseconds++;
+		(void)wb_cond_wait_for(&loader->changed, &loader->lock, milliseconds);
 	}
 
-	pthread_mutex_unlock(&loader->lock);
+	wb_mutex_unlock(&loader->lock);
 }
 
 /*
@@ -739,16 +742,16 @@ net_loader_dispatch_until(
 	struct net_request *last;
 
 	/* The ended requests, all of them, and the caller is told of the next news again. */
-	pthread_mutex_lock(&loader->lock);
+	wb_mutex_lock(&loader->lock);
 
 	taken = loader->completed;
 	loader->completed = NULL;
 	loader->completed_last = NULL;
 	loader->notified = 0;
 
-	pthread_mutex_unlock(&loader->lock);
+	wb_mutex_unlock(&loader->lock);
 
-	/* Each request in turn: its callback (with its TLS reason as the thread's), then it goes. */
+	/* Each request in turn: its callback, then it goes. */
 	while (taken != NULL) {
 		request = taken;
 		taken = request->queue_next;
@@ -757,7 +760,6 @@ net_loader_dispatch_until(
 		if (!request->dropped) {
 			request->delivered = 1;
 			loader->pending--;
-			net_tls_set_error(request->reason);
 			if (request->done != NULL)
 				request->done(request->context, request);
 		}
@@ -777,12 +779,12 @@ net_loader_dispatch_until(
 	/* The rest go back before any that ended meanwhile. */
 	for (last = taken; last->queue_next != NULL; last = last->queue_next)
 		;
-	pthread_mutex_lock(&loader->lock);
+	wb_mutex_lock(&loader->lock);
 	last->queue_next = loader->completed;
 	if (loader->completed == NULL)
 		loader->completed_last = last;
 	loader->completed = taken;
-	pthread_mutex_unlock(&loader->lock);
+	wb_mutex_unlock(&loader->lock);
 	return 1;
 }
 
@@ -797,11 +799,11 @@ net_loader_ring(
 	struct net_loader *loader)
 {
 	/* The mark the network thread takes at its next round. */
-	pthread_mutex_lock(&loader->lock);
+	wb_mutex_lock(&loader->lock);
 
 	loader->rung = 1;
 
-	pthread_mutex_unlock(&loader->lock);
+	wb_mutex_unlock(&loader->lock);
 
 	/* The network thread wakes to take it. */
 	loader_poke(loader);
@@ -838,30 +840,29 @@ loader_clock(void)
 }
 
 /* The resolver's thread: each job's lookup, answered through the list and the waker, until the loader stops. */
-static void *
+static void
 loader_resolver(
 	void *argument)
 {
 	struct net_loader *loader;
 	struct loader_job *job;
 
-	/* The thread's name. */
+	/* The loader the thread looks names up for. */
 	loader = argument;
-	loader_name_thread("browser-resolve");
 
 	/* Each job, as they come. */
 	for (;;) {
 		/* The next job, waited for. */
-		pthread_mutex_lock(&loader->resolver_lock);
+		wb_mutex_lock(&loader->resolver_lock);
 
 		/* Waits until a lookup job arrives or shutdown releases the resolver. */
 		while (loader->jobs == NULL && !loader->resolver_stopping)
-			pthread_cond_wait(&loader->resolver_wake, &loader->resolver_lock);
+			wb_cond_wait(&loader->resolver_wake, &loader->resolver_lock);
 		job = loader->jobs;
 		if (job != NULL)
 			loader->jobs = job->next;
 
-		pthread_mutex_unlock(&loader->resolver_lock);
+		wb_mutex_unlock(&loader->resolver_lock);
 
 		/* A loader that stops ends the thread. */
 		if (job == NULL)
@@ -872,28 +873,16 @@ loader_resolver(
 		job->status = wb_os_resolve(job->host, job->port, &job->addresses);
 
 		/* The answer, then the waker rung to wake the network thread. */
-		pthread_mutex_lock(&loader->resolver_lock);
+		wb_mutex_lock(&loader->resolver_lock);
 
 		job->next = loader->answers;
 		loader->answers = job;
 
-		pthread_mutex_unlock(&loader->resolver_lock);
+		wb_mutex_unlock(&loader->resolver_lock);
 
 		/* The ring. */
 		wb_os_waker_ring(loader->answers_waker);
 	}
-
-	/* The loader stopped. */
-	return NULL;
-}
-
-/* Names the calling thread, on a system that keeps names (others leave it unnamed). */
-static void
-loader_name_thread(
-	const char *name)
-{
-	/* The name, or nothing on a system without names. */
-	wb_os_thread_name(name);
 }
 
 /* Wakes the network thread from its wait (a ring before the last is drained adds nothing). */
@@ -918,29 +907,27 @@ loader_release(
 	struct loader_job *job;
 
 	/* The network thread, told to stop; it ends after its round. */
-	pthread_mutex_lock(&loader->lock);
+	wb_mutex_lock(&loader->lock);
 
 	loader->stopping = 1;
 
-	pthread_mutex_unlock(&loader->lock);
+	wb_mutex_unlock(&loader->lock);
 
-	/* Woken from its wait, then waited for. */
-	if (loader->thread_started) {
+	/* Woken from its wait, then waited for (a thread that never started is passed over). */
+	if (loader->thread.handle != NULL)
 		loader_poke(loader);
-		pthread_join(loader->thread, NULL);
-	}
+	wb_thread_join(&loader->thread);
 
 	/* The resolver's thread, told to stop. */
-	pthread_mutex_lock(&loader->resolver_lock);
+	wb_mutex_lock(&loader->resolver_lock);
 
 	loader->resolver_stopping = 1;
-	pthread_cond_signal(&loader->resolver_wake);
+	wb_cond_signal(&loader->resolver_wake);
 
-	pthread_mutex_unlock(&loader->resolver_lock);
+	wb_mutex_unlock(&loader->resolver_lock);
 
 	/* It ends after its current lookup. */
-	if (loader->resolver_started)
-		pthread_join(loader->resolver, NULL);
+	wb_thread_join(&loader->resolver);
 
 	/* The requests the network thread ran. */
 	while (loader->requests != NULL) {
@@ -981,12 +968,49 @@ loader_release(
 	wb_os_waker_close(loader->control);
 
 	/* The locks, the wait's items, then the loader. */
-	pthread_mutex_destroy(&loader->resolver_lock);
-	pthread_cond_destroy(&loader->resolver_wake);
-	pthread_mutex_destroy(&loader->lock);
-	pthread_cond_destroy(&loader->changed);
+	loader_locks_release(loader);
 	free(loader->items);
 	free(loader);
+}
+
+/* Makes the loader's locks and conditions; on failure none is left. */
+static int
+loader_locks(
+	struct net_loader *loader)
+{
+	int error;
+
+	/* The resolver's lock and the condition its jobs come by. */
+	error = wb_mutex_init(&loader->resolver_lock);
+	if (error == 0)
+		error = wb_cond_init(&loader->resolver_wake);
+
+	/* The loader's lock and the condition its news comes by. */
+	if (error == 0)
+		error = wb_mutex_init(&loader->lock);
+	if (error == 0)
+		error = wb_cond_init(&loader->changed);
+
+	/* A failure lets go of those made. */
+	if (error != 0) {
+		loader_locks_release(loader);
+		return error;
+	}
+
+	/* Succeeded: the locks are made. */
+	return 0;
+}
+
+/* Lets go of the loader's locks and conditions (those never made are passed over). */
+static void
+loader_locks_release(
+	struct net_loader *loader)
+{
+	/* The resolver's, then the loader's. */
+	wb_cond_destroy(&loader->resolver_wake);
+	wb_mutex_destroy(&loader->resolver_lock);
+	wb_cond_destroy(&loader->changed);
+	wb_mutex_destroy(&loader->lock);
 }
 
 /* Frees the requests of a list linked by queue_next. */
@@ -1009,7 +1033,7 @@ loader_free_queue(
  * the cache's answers and the time outs, the ended requests handed over,
  * and a wait on the wakers and the connections, until the loader stops.
  */
-static void *
+static void
 loader_run(
 	void *argument)
 {
@@ -1020,9 +1044,8 @@ loader_run(
 	int status;
 	int stop;
 
-	/* The thread's name, and nothing waited on yet. */
+	/* The loader the thread runs, and nothing waited on yet. */
 	loader = argument;
-	loader_name_thread("browser-net");
 	count = 0;
 
 	/* Each round, until the loader stops. */
@@ -1050,7 +1073,6 @@ loader_run(
 
 	/* The ended requests leave the list; net_loader_destroy frees every request. */
 	loader_reap(loader);
-	return NULL;
 }
 
 /*
@@ -1102,7 +1124,7 @@ loader_intake(
 	int stop;
 
 	/* The new requests and the cancels, marked while the caller cannot change them. */
-	pthread_mutex_lock(&loader->lock);
+	wb_mutex_lock(&loader->lock);
 
 	taken = loader->incoming;
 	loader->incoming = NULL;
@@ -1132,7 +1154,7 @@ loader_intake(
 	/* Whether the caller ends the loader. */
 	stop = loader->stopping;
 
-	pthread_mutex_unlock(&loader->lock);
+	wb_mutex_unlock(&loader->lock);
 
 	/* Each running request cancelled now: its connection closed, its place given up, and back to the caller. */
 	for (request = loader->requests; request != NULL; request = request->next) {
@@ -1224,7 +1246,7 @@ loader_publish(
 
 	/* The ended requests follow those the caller has not taken; the caller is told once. */
 	tell = 0;
-	pthread_mutex_lock(&loader->lock);
+	wb_mutex_lock(&loader->lock);
 
 	/* The ended requests, after those already waiting. */
 	if (loader->ended != NULL) {
@@ -1239,9 +1261,9 @@ loader_publish(
 	if (!loader->notified)
 		tell = 1;
 	loader->notified = 1;
-	pthread_cond_broadcast(&loader->changed);
+	wb_cond_broadcast(&loader->changed);
 
-	pthread_mutex_unlock(&loader->lock);
+	wb_mutex_unlock(&loader->lock);
 
 	/* The network thread holds none of them now. */
 	loader->ended = NULL;
@@ -1490,13 +1512,13 @@ loader_begin(
 	request->deadline = loader_clock() + LOADER_TIMEOUT;
 
 	/* The job to the thread. */
-	pthread_mutex_lock(&loader->resolver_lock);
+	wb_mutex_lock(&loader->resolver_lock);
 
 	job->next = loader->jobs;
 	loader->jobs = job;
-	pthread_cond_signal(&loader->resolver_wake);
+	wb_cond_signal(&loader->resolver_wake);
 
-	pthread_mutex_unlock(&loader->resolver_lock);
+	wb_mutex_unlock(&loader->resolver_lock);
 
 	/* Succeeded: the lookup is under way. */
 	return 0;
@@ -1516,12 +1538,12 @@ loader_answers(
 	wb_os_waker_drain(loader->answers_waker);
 
 	/* The answers, taken at once. */
-	pthread_mutex_lock(&loader->resolver_lock);
+	wb_mutex_lock(&loader->resolver_lock);
 
 	answers = loader->answers;
 	loader->answers = NULL;
 
-	pthread_mutex_unlock(&loader->resolver_lock);
+	wb_mutex_unlock(&loader->resolver_lock);
 
 	/* Each answer to its request, when it is still there and waiting. */
 	while (answers != NULL) {
@@ -1670,8 +1692,8 @@ loader_connected(
 	/* https starts TLS over the connection; http sends at once. */
 	is_https = !strcmp(request->url.scheme, "https");
 	if (is_https) {
-		net_tls_clear_error();
-		error = net_tls_start(request->socket, request->url.host, &request->tls);
+		request->reason[0] = '\0';
+		error = net_tls_start(request->socket, request->url.host, request->reason, &request->tls);
 		if (error != 0)
 			return error;
 		request->state = LOADER_HANDSHAKE;
@@ -1945,19 +1967,23 @@ loader_end(
 	struct net_request *request,
 	int error)
 {
-	int differs;
+	const char *kept;
 
 	/* Ended once. */
 	if (request->state == LOADER_ENDED || request->cancelled)
 		return;
+
+	/* The reason an https request's connection failed, kept before the connection closes (a failure of its start is kept already). */
+	if (error != 0 && request->tls != NULL) {
+		kept = net_tls_reason(request->tls);
+		if (kept[0] != '\0')
+			snprintf(request->reason, sizeof(request->reason), "%s", kept);
+	}
+
+	/* The connection closes, and the request has ended. */
 	loader_close(request);
 	request->state = LOADER_ENDED;
 	request->error = error;
-
-	/* The reason an https request failed, as this thread's TLS kept it. */
-	differs = strcmp(request->url.scheme, "https");
-	if (error != 0 && differs == 0)
-		snprintf(request->reason, sizeof(request->reason), "%s", net_tls_error());
 
 	/* A request waiting for its place may go. */
 	loader_release_place(request->loader, request->key);

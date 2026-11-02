@@ -27,6 +27,8 @@
 
 #include <browser/browser.h>
 
+#include "userland/tests/browser-threads/threads-posix.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -95,6 +97,13 @@ main(
 		fprintf(stderr, "usage: browser-probe [--width=N] [--height=N] [--gpu] [--tab=N] [--font=PATH] [--mono-font=PATH]\n"
 		    "                     [--fallback-font=PATH] PAGE OUT.ppm\n");
 		return 2;
+	}
+
+	/* The engine makes its threads with the POSIX threads. */
+	error = browser_threads_set(browser_threads_posix());
+	if (error != 0) {
+		fprintf(stderr, "browser-probe: the engine refused the threads (%d)\n", error);
+		return 1;
 	}
 
 	/* What the view tells the probe. */

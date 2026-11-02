@@ -18,6 +18,7 @@
 #include "xml/dom.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -473,6 +474,9 @@ page_load_location(
 			error = ENOMEM;
 	}
 
+	/* Why the fetch failed over TLS, for the load callback. */
+	snprintf(page->failure_reason, sizeof(page->failure_reason), "%s", response.reason);
+
 	/* The document (and whether it may be kept for Back and Forward). */
 	page->no_store = response.no_store;
 	if (error == 0)
@@ -584,18 +588,16 @@ page_set_console(
 }
 
 /*
- * Describes why the last load failed beyond its error number (the TLS
- * verification's reason, for an https page); empty when there is nothing
- * more to say.
+ * Describes why the page's last load of a location failed beyond its error
+ * number (the TLS verification's reason, for an https page); empty when
+ * there is nothing more to say.
  */
 const char *
-page_failure_reason(void)
+page_failure_reason(
+	const struct page *page)
 {
-	const char *reason;
-
-	/* The network's reason. */
-	reason = net_tls_error();
-	return reason;
+	/* The reason the fetch kept. */
+	return page->failure_reason;
 }
 
 /*

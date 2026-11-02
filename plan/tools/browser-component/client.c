@@ -13,6 +13,8 @@
 
 #include <browser/browser.h>
 
+#include "userland/tests/browser-threads/threads-posix.h"
+
 #include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
@@ -146,6 +148,13 @@ main(
 	int total_copies;
 	int point;
 	int commits;
+
+	/* The engine makes its threads with the POSIX threads, before any view. */
+	error = browser_threads_set(browser_threads_posix());
+	if (error != 0) {
+		printf("FAIL threads refused %d\n", error);
+		return 1;
+	}
 
 	/* Keeps the first view's callback state alive for the complete run. */
 	memset(&a, 0, sizeof(a));

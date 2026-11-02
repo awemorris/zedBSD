@@ -14,10 +14,10 @@
 
 #include "text/text.h"
 #include "base/os-system.h"
+#include "base/thread.h"
 #include "base/os.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <truetype/truetype.h>
@@ -63,10 +63,10 @@ static const char *const font_default_names[TEXT_PATHS] = {
  * The paths of the default fonts, made once on the first request and kept
  * for the life of the program (an empty path when it could not be made).
  */
-static pthread_once_t font_defaults_once = PTHREAD_ONCE_INIT;
+static struct wb_once font_defaults_once = WB_ONCE_INIT;
 static struct wb_buffer font_defaults[TEXT_PATHS];
 
-static void font_defaults_make(void);
+static void font_defaults_make(void *argument);
 static uint64_t font_key(const struct text_font *font, uint32_t code_point);
 static struct text_glyph_entry **font_slot(struct text_system *system, uint64_t key);
 static int font_grow(struct text_system *system);
@@ -160,7 +160,7 @@ text_default_path(
 		return NULL;
 
 	/* The paths, made on the first call. */
-	pthread_once(&font_defaults_once, font_defaults_make);
+	wb_once_run(&font_defaults_once, font_defaults_make, NULL);
 
 	/* Succeeded: the face's path (empty when the system named no directory). */
 	return wb_buffer_string(&font_defaults[face]);
@@ -887,11 +887,14 @@ font_open_face(
 
 /* Makes the default fonts' paths from the directory of the system's bundled data. */
 static void
-font_defaults_make(void)
+font_defaults_make(
+	void *argument)
 {
 	char *directory;
 	int face;
 	int error;
+
+	UNUSED_PARAMETER(argument);
 
 	/* Every path starts empty. */
 	for (face = TEXT_FACE_SANS; face < TEXT_PATHS; face++)

@@ -13,8 +13,8 @@ cd "$(dirname -- "$0")/../../.."
 out=build/ws345-host/plain
 [ -f "$out/libbrowser.so" ] || { echo "stall-probe: no $out/libbrowser.so (run host-build.sh first)" >&2; exit 2; }
 cc=${CC:-cc}
-"$cc" -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -Ibuild/ws345-host/include -o "$out/stall-probe" \
-    plan/ws345/tests/stall-probe.c -L"$out" -Wl,-rpath,"$(pwd)/$out" -l:libbrowser.so -lpthread -lm
+"$cc" -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I. -Ibuild/ws345-host/include -o "$out/stall-probe" \
+    plan/ws345/tests/stall-probe.c userland/tests/browser-threads/threads-posix.c -L"$out" -Wl,-rpath,"$(pwd)/$out" -l:libbrowser.so -lpthread -lm
 scenarios=${*:-"idle loop handler sync-xhr-connect sync-xhr-read docwrite-connect async-connect resize-big decode-big"}
 for scenario in $scenarios; do
 	timeout 60 "$out/stall-probe" "$scenario" 6 2>"$out/stall-probe-$scenario.err" || echo "stall-probe $scenario: exit $?"

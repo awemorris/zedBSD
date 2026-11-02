@@ -19,6 +19,7 @@
 
 #include "storage/queue.h"
 #include "storage/records.h"
+#include "userland/tests/browser-threads/threads-posix.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -165,8 +166,14 @@ main(
 	int argc,
 	char **argv)
 {
+	int error;
+
 	(void)argc;
 	(void)argv;
+
+	/* The queue's threads and locks come from the POSIX threads. */
+	error = browser_threads_set(browser_threads_posix());
+	CHECK_EQ(error, 0);
 
 	test_open();
 	test_arguments();

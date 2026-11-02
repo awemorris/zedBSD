@@ -62,6 +62,9 @@
 struct media_engine {
 	pthread_t thread;
 	int thread_started;
+	struct media_threads threads;
+	int threads_given;
+	void *threads_handle;
 	char *path;
 	struct media_source source;
 	unsigned flags;
@@ -107,6 +110,7 @@ static void (*engine_log_function)(void *context, const char *line);
 static void *engine_log_context;
 
 static void *engine_run(void *argument);
+static void engine_run_given(void *argument);
 static int engine_open_file(struct media_engine *engine);
 static int engine_decoder(struct media_engine *engine, unsigned kind, struct media_decoder **result, unsigned *track);
 static int engine_feed(struct media_engine *engine, struct media_decoder *decoder, const struct media_packet *packet);
@@ -162,14 +166,16 @@ media_log(
  * Starts playing a file, paused at its start: from its path, or (path
  * NULL) from the caller's source, whose reader the engine's thread calls.
  * Returns 0 with the engine, which is opening (MEDIA_OPENING) until the
- * wake says otherwise, or an errno value.  flags: MEDIA_SOUND.  wake
- * (which may be NULL) is called with wake_context as media.h says.
+ * wake says otherwise, or an errno value.  flags: MEDIA_SOUND.  threads
+ * (NULL for the system's) makes the engine's thread.  wake (which may be
+ * NULL) is called with wake_context as media.h says.
  */
 int
 media_engine_open(
 	const char *path,
 	const struct media_source *source,
 	unsigned flags,
+	const struct media_threads *threads,
 	media_wake_function wake,
 	void *wake_context,
 	struct media_engine **engine)
@@ -202,8 +208,14 @@ media_engine_open(
 		made->source = *source;
 	}
 
-	/* The thread, which opens the file. */
-	error = pthread_create(&made->thread, NULL, engine_run, made);
+	/* The thread, which opens the file: the caller's when it makes its threads, else the system's. */
+	if (threads != NULL) {
+		made->threads = *threads;
+		made->threads_given = 1;
+		error = made->threads.start(made->threads.context, made->threads.name, engine_run_given, made, &made->threads_handle);
+	} else {
+		error = pthread_create(&made->thread, NULL, engine_run, made);
+	}
 	if (error != 0) {
 		media_engine_close(made);
 		return error;
@@ -441,7 +453,10 @@ media_engine_close(
 		engine->quit = 1;
 		(void)pthread_cond_broadcast(&engine->ready);
 		(void)pthread_mutex_unlock(&engine->lock);
-		(void)pthread_join(engine->thread, NULL);
+		if (engine->threads_given)
+			engine->threads.join(engine->threads.context, engine->threads_handle);
+		else
+			(void)pthread_join(engine->thread, NULL);
 	}
 
 	/* What the caller held, and the pictures waiting. */
@@ -454,6 +469,15 @@ media_engine_close(
 	(void)pthread_mutex_destroy(&engine->lock);
 	free(engine->path);
 	free(engine);
+}
+
+/* The thread the caller made: the engine's thread as engine_run runs it. */
+static void
+engine_run_given(
+	void *argument)
+{
+	/* The same work as on a thread of the system's. */
+	(void)engine_run(argument);
 }
 
 /* The thread: opens the file, then reads, decodes and queues until it is told to end. */

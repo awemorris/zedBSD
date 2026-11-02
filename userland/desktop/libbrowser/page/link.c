@@ -20,6 +20,7 @@
 #include "net/net.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 /* The deepest element nesting searched for a link (the parser caps nesting too). */
@@ -343,6 +344,7 @@ page_fetch_response(
 	struct wb_buffer location;
 	struct wb_buffer path;
 	const char *mime;
+	char reason[NET_TLS_REASON_MAX];
 	int is_data;
 	int is_http;
 	int is_file;
@@ -444,10 +446,12 @@ cleanup:
 	wb_buffer_release(&location);
 	wb_buffer_release(&path);
 
-	/* A failed operation leaves the caller the same fresh empty response contract. */
+	/* A failed operation leaves the caller the same fresh empty response contract, with why TLS failed. */
 	if (status != 0) {
+		snprintf(reason, sizeof(reason), "%s", response->reason);
 		net_response_release(response);
 		net_response_init(response);
+		snprintf(response->reason, sizeof(response->reason), "%s", reason);
 		return status;
 	}
 

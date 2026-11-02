@@ -24,6 +24,7 @@
 #include "storage/files.h"
 #include "storage/records.h"
 #include "base/os-file.h"
+#include "userland/tests/browser-threads/threads-posix.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -102,6 +103,13 @@ main(
 	int argc,
 	char **argv)
 {
+	int error;
+
+	/* The directory locks' mutex comes from the POSIX threads, in every process of the test. */
+	error = browser_threads_set(browser_threads_posix());
+	if (error != 0)
+		return 2;
+
 	if (argc >= 3 && strcmp(argv[1], "files-child") == 0)
 		return child_main("files-child", argv[2]);
 	if (argc >= 3 && strcmp(argv[1], "files-free") == 0)

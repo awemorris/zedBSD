@@ -21,7 +21,6 @@
 #include "base/os-system.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -218,47 +217,6 @@ test_random(
 	CHECK(distinct_values(first + length - 4096U, 4096U) > 200U);
 	CHECK(distinct_values(first + length - 5U, 5U) > 1U);
 	free(first);
-}
-
-/* The thread the name test starts: it names itself with every kind of name. */
-static void *
-name_thread(
-	void *argument)
-{
-	(void)argument;
-
-	wb_os_thread_name(NULL);
-	wb_os_thread_name("");
-	wb_os_thread_name("browser-network");
-	wb_os_thread_name("a-name-of-forty-characters-0123456789abcd");
-
-	return NULL;
-}
-
-/* Checks wb_os_thread_name from the main thread and from a started thread (it must only not fail). */
-static void
-test_thread_name(
-	void)
-{
-	pthread_t thread;
-	void *result;
-	int error;
-
-	wb_os_thread_name(NULL);
-	wb_os_thread_name("");
-	wb_os_thread_name("browser-network");
-	wb_os_thread_name("a-name-of-forty-characters-0123456789abcd");
-
-	result = NULL;
-	error = pthread_create(&thread, NULL, name_thread, NULL);
-	CHECK_EQ(error, 0);
-	if (error == 0) {
-		error = pthread_join(thread, &result);
-		CHECK_EQ(error, 0);
-	}
-
-	/* Reaching this line is the check: naming a thread returns nothing to compare. */
-	CHECK(1);
 }
 
 /* Checks wb_os_library_open, wb_os_library_symbol and wb_os_library_close. */
@@ -648,7 +606,6 @@ main(
 
 	test_aligned();
 	test_random();
-	test_thread_name();
 	test_library();
 	test_names();
 	test_data_directory();

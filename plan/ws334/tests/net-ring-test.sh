@@ -19,8 +19,10 @@ out=build/tmp/ws334-net-ring/$variant
 mkdir -p "$out"
 src=userland/desktop/libbrowser
 base=$(ls $src/base/*.c | grep -v -e '-win32\.c$')
-cc $sanitize -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I$src -I. -Ibuild/ws074-host/include \
-	$src/net/*.c $src/storage/queue.c $src/storage/records.c $base userland/base/libz-compat/*.c \
-	plan/ws334/tests/net-ring-test.c \
+# The network's sources but the static OpenSSL's binding (tls-static.c, the Windows build's).
+net=$(ls $src/net/*.c | grep -v -e '/tls-static\.c$')
+cc $sanitize -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I$src -I. -Iuserland/desktop/include -Ibuild/ws074-host/include \
+	$net $src/storage/queue.c $src/storage/records.c $base userland/base/libz-compat/*.c \
+	plan/ws334/tests/net-ring-test.c userland/tests/browser-threads/threads-posix.c \
 	-o "$out/net-ring-test" -ldl -lpthread -lm || exit 1
 TSAN_OPTIONS="halt_on_error=1 exitcode=66" timeout 120 "$out/net-ring-test"

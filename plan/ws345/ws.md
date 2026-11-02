@@ -3,7 +3,7 @@
 # WS345 ブラウザの thread の分け方: JavaScript を窓の event の処理と別の thread に、通信（connect を含む）を独立した thread に
 
 - Master: [plan/master.md](../master.md)（2026-11-02 14:03 作成）。Primary Milestone: MG006。
-- Status: incomplete（2026-11-02 P8 q1959-i01: p001 cleared、設計 [design.md](design.md)。実装の Phase p002〜p013 は planned）
+- Status: incomplete（2026-11-02 P8: p001・p002 cleared、設計 [design.md](design.md)。p003〜p014 は planned）
 - 目標: ブラウザ（libbrowser と browser の shell、zedBSD・Windows・Linux の Keiland）で、JavaScript の実行と通信がどれだけ長くかかっても、窓の event の処理（入力・再描画・resize・title bar の操作）が止まらない形にする。JavaScript は窓の event の thread と別の名前付きの thread で動かす。通信は同期の呼び出し（connect・TLS の handshake・read・write）のままでよく、それを独立した名前付きの thread で行う。
 - 置き場所: userland/desktop/libbrowser/、userland/desktop/browser/（shell）、Windows の OmniGrammaton の build（WS334）。
 
@@ -19,6 +19,7 @@
   4. style sheet と CSS（cascade、computed style・描画の属性の更新）は専用の「描画の属性の更新」の thread で行う。
   5. 描画（paint・GPU の submit）は、できるなら shell が作る thread で、event の処理と別に行う。
   6. thread の作成は上の決定のとおり shell の側で、登録した関数の表を通す。
+- （2026-11-02、Q1 経由、J2 への答え）ユーザーから、長く走る script の頁には Chrome・Firefox のように「このページは応答していません（待つ／止める）」の問いを出す、決まった時間（10 秒ほど）script が走り続けたら出し、「止める」は p004 の打ち切りで script を終わらせる、という趣旨の決定を受けた（ws345-p014）。
 
 ## Q1 の判断
 
@@ -30,14 +31,13 @@
   - J6: 窓の thread は入力を libbrowser の FIFO に積むだけにし、iframe への振り分け（確定した iframe の矩形の参照）も libbrowser の側の thread（top の script の thread か style の thread）で行う。窓の thread では libbrowser の処理を一切しないという決定 1 を字義どおり守る。
   - J7: 決定 5 は「display list を style の thread で作り、shell の render の thread で記録・提出・表示する」と読んでよい。
   - 所有: p013 の libkeiland の変更と、p002 の plan/tools/browser-component/client.c の変更を、WS345 の範囲として認める。
-  - J2（長く応答しない頁の「応答しない頁」の確かめの表示）は製品の判断なのでユーザーに聞く。答えまでは表示無しで進める。
+  - J2（長く応答しない頁の「応答しない頁」の確かめの表示）は製品の判断なのでユーザーに聞く。答えまでは表示無しで進める。→ 2026-11-02 ユーザーが答えた（上のユーザーの決定、ws345-p014）。
 
 ## P8 の技術の判断（p001、Q1 が覆してよい）
 
 - 通信は今の非同期の loader（`browser-net` 1 本、`browser-resolve` 1 本、view ごと）を保ち、窓・script の thread に残った同期の socket の道（同期の XHR、先取りに無い parser の script、iframe の script、sheet の待ち）を loader に移す。blocking の connect の thread の pool にはしない（理由は [design.md](design.md) §3.1、判断の点 J1）。
 - libmedia の中の lock は pthread のまま、engine の thread の作成だけ shell の表を通す（J3）。1 つの view の frame は top を含め 64 まで（J4）。
-- 長い script の頁に「応答しない頁」の問いを出すかは製品の判断として Q1 に返す（J2）。今の案は出さない。navigation と閉じるは打ち切り（termination）で効く。
-- 再生中の media の engine は view に 8 まで（J5）。Q1 に確かめる点: 窓の thread が確定の iframe の枠の表を引いて入力を iframe に直に渡す事が D1 の中か（J6）、D5 の paint を「display list の組み立ては style の thread、GPU の記録と submit は shell の描画の thread」と読む事（J7）。
+- 再生中の media の engine は view に 8 まで（J5）。J2・J6・J7 は Q1 とユーザーが答えた（Q1 の判断、ユーザーの決定）。
 
 ## 計測（p001、host、2026-11-02）
 
@@ -48,7 +48,7 @@
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [ws345-p001](phase001/phase.md) | 調べと設計: 今の thread と event loop、止まる所の計測、thread の表（名前・数・持つ物・渡し方）、DOM・layout と JS の持ち主、event の受け渡し、取り消し、試験の道 | cleared（2026-11-02 14:46 Q1、87feb4707 を main に merge 1ec103957）。cleared（2026-11-02 P8 q1959-i01。[design.md](design.md)、design-reviewer の指摘 19 件の反映は §12） | — |
-| [ws345-p002](phase002/phase.md) | shell が登録する thread の表（`struct browser_threads`、`browser_threads_set`）と libbrowser の base の包み。libbrowser の pthread を全部替え、shell（kl_thread）・試験（POSIX）の実装、libmedia の engine の thread の作成 | in-progress（2026-11-02 14:46 P8 q1968-i01） | p001 |
+| [ws345-p002](phase002/phase.md) | shell が登録する thread の表（`struct browser_threads`、`browser_threads_set`）と libbrowser の base の包み。libbrowser の pthread を全部替え、shell（kl_thread）・試験（POSIX）の実装、libmedia の engine の thread の作成 | cleared（2026-11-02 P8 q1968-i01: libbrowser の thread・lock・condition を全部 shell の表で、段 1・tsan・cross-build・Wine の回帰。[phase.md](phase002/phase.md) の結果） | p001 |
 | [ws345-p003](phase003/phase.md) | 通信を全部 loader に: loader の client（要求した thread ごとの完了と起こし、どの thread からでも取り消し）、同期の XHR・漏れた parser の script・iframe の script・sheet の待ちを client の待ちに | planned | p002 |
 | [ws345-p004](phase004/phase.md) | VM の打ち切り（agent ごとの atomic の flag、loop の印・関数の入口・長い native で見る、catch・finally を走らせない終わり） | planned | p001 |
 | [ws345-p005](phase005/phase.md) | view の front と top の script の thread（`BROWSER_THREADING_OWN`）: mailbox・入力の合わせ方と順・snapshot・callback を窓の thread で・navigation と destroy の打ち切りと join・process に一つの可変の static の追い出し・CPU の確定した frame | planned | p002、p003、p004 |
@@ -57,11 +57,13 @@
 | [ws345-p008](phase008/phase.md) | style の thread（D4）: DOM の同期の貸し、request の種類、古くない時は貸さない、style・layout から JS を呼ぶ所を後で出す event に、style の thread の loader の client | planned | p005 |
 | [ws345-p009](phase009/phase.md) | iframe ごとの script の thread（段 A: 一つの agent の lock と heap のまま）: frame ごとの task の queue、入力の routing、frame の上限、GC の stack の底の切り替え | planned | p006、p008 |
 | [ws345-p010](phase010/phase.md) | origin ごとの agent（段 B）: cross-origin の iframe を別の heap で並べて走らせる、遠くの WindowProxy、heap を越える postMessage、location・frames・parent、agent ごとの打ち切り | planned | p009 |
-| [ws345-p011](phase011/phase.md) | 受け入れと回帰: 窓の event の遅れの上限（script の loop・connect の掛かり・document.write・resize・decode の間）、ThreadSanitizer、host の試験・js・test262 の部分集合・段 1・cross-build、zedBSD の QEMU、Windows の Wine、Linux の Keiland | planned | p007、p010 |
+| [ws345-p011](phase011/phase.md) | 受け入れと回帰: 窓の event の遅れの上限（script の loop・connect の掛かり・document.write・resize・decode の間）、ThreadSanitizer、host の試験・js・test262 の部分集合・段 1・cross-build、zedBSD の QEMU、Windows の Wine、Linux の Keiland | planned | p007、p010、p014 |
 | [ws345-p012](phase012/phase.md) | 規約の全文の見直し（AGENTS §2） | planned | p011 |
+| [ws345-p014](phase014/phase.md) | 応答しない頁の問い（約 10 s 走り続ける script に「応答していません: 待つ／止める」、止めるは p004 の打ち切り）。各 shell の UI、窓の側の timer が script の thread の task の番号と始めの時刻を読む | planned | p004、p005、p007 |
 | [ws345-p013](phase013/phase.md) | libkeiland の resize の口（Wayland の configure の ack を描画の側の present の直前に、Win32 の modal loop の間の大きさ）。design-reviewer の指摘 4 で足した（番号は表の後ろ、p007 の前にする） | planned | p001 |
 
 ## Resume point
 
 - 2026-11-02 14:03 Q1: 作成。P8 が p001（設計）に着手。設計の後に実装の Phase を立てる。
 - 2026-11-02 P8（q1959-i01）: p001 の設計と計測、design-reviewer の反映、p002〜p013 の phase.md。次は Q1 が p002 の Queue を立てる（p004・p013 は p002 と並べてよい）。J2・J6・J7 は Q1 の答え待ち（実装の p005・p009・p006 の前に）。
+- 2026-11-02 P8（q1968-i01）: p002 cleared（thread の表）。次は p003（通信を loader に）・p004（打ち切り）・p013（libkeiland の resize の口）が並べて始められる。

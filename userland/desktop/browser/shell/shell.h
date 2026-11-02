@@ -55,6 +55,14 @@ struct shell_options {
 int shell_run(const struct shell_options *options);
 
 struct browser_storage_calls;
+struct browser_threads;
+
+/*
+ * The program's threads the engine makes its own threads with (given to it
+ * with browser_threads_set before anything else): libkeiland's threads
+ * (shell/threads.c), the same on every system the browser runs on.
+ */
+const struct browser_threads *shell_threads(void);
 
 /*
  * The system's wrapping of the storage backend the instance keeps its

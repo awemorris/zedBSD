@@ -56,7 +56,7 @@ struct net_cache;
  * cache_limit:   bytes of the persistent HTTP cache.
  * view_count:    the views made with it and not yet destroyed; an
  *                instance with views is not destroyed.
- * is_default:    1 for a thread's default instance, which the program
+ * is_default:    1 for the process's default instance, which the program
  *                does not see and browser_instance_destroy refuses.
  */
 struct browser_instance {
@@ -70,10 +70,10 @@ struct browser_instance {
 };
 
 /*
- * Reports the calling thread's default instance, made the first time (no
- * backend: it remembers nothing beyond the process).  It is destroyed when
- * the thread ends if no view uses it then, and otherwise kept until the
- * process ends.  Returns 0 or ENOMEM.
+ * Reports the process's default instance, made the first time (no
+ * backend: it remembers nothing beyond the process) and kept until the
+ * process ends.  Returns 0, ENOTSUP (the program gave no threads) or
+ * ENOMEM.
  */
 int wb_instance_default(struct browser_instance **instance);
 
