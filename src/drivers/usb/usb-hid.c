@@ -113,6 +113,12 @@ struct usb_hid {
 	uint8_t *buffer;
 	size_t buffer_size;
 	/*
+	 * The last finished report, copied out of buffer by the worker before
+	 * the transfer goes back on the endpoint, and handed on from here
+	 * while the next transfer runs (buffer_size bytes).
+	 */
+	uint8_t *report;
+	/*
 	 * Nonzero when the interface is a touch screen that reports its
 	 * fingers (its Device Mode set, or a descriptor without one, BUG-313):
 	 * a pointer beside it on the same device is its mouse emulation.
@@ -180,6 +186,21 @@ struct usb_hid {
 	unsigned reports_dumped;
 };
 
+/*
+ * One finished report as the worker took it out of its transfer: its
+ * length (the bytes are struct usb_hid's report) and when and how the
+ * transfer ended.  It lives on the worker's stack from the take to the
+ * publication, while the next transfer overwrites the copies in struct
+ * usb_hid and in the URB.
+ */
+struct usb_hid_taken {
+	size_t length;
+	uint64_t milliseconds;
+	uint64_t counter_us;
+	uint64_t monotonic_us;
+	struct drv_usb_urb_hcd_result hcd;
+};
+
 static struct spinlock usb_hid_pending_lock;
 static struct usb_hid *usb_hid_pending;
 static unsigned usb_hid_input_is_ready;
@@ -232,7 +253,9 @@ static void usb_hid_completion(struct drv_usb_urb *urb, void *argument);
 static int usb_hid_begin_submit(struct usb_hid *hid);
 static void usb_hid_end_submit(struct usb_hid *hid);
 static int usb_hid_arm(struct usb_hid *hid);
-static void usb_hid_publish_report(struct usb_hid *hid, const uint8_t *buffer, size_t length);
+static void usb_hid_take_report(struct usb_hid *hid, struct usb_hid_taken *taken);
+static void usb_hid_publish_report(struct usb_hid *hid, const struct usb_hid_taken *taken);
+static void usb_hid_rearm_failed(struct usb_hid *hid, int error);
 static unsigned usb_hid_take_work(struct usb_hid *hid, int *stopping);
 static void usb_hid_unpublish(struct usb_hid *hid);
 static void usb_hid_runtime_stop(struct usb_hid *hid, const char *stage, int error, int transfer_status);
@@ -505,6 +528,13 @@ usb_hid_attach(
 
 	/* Handles the buffer availability. */
 	if (hid->buffer == NULL) {
+		error = ENOMEM;
+		goto fail;
+	}
+
+	/* The copy a finished report is handed on from while the next transfer runs. */
+	hid->report = kern_malloc(hid->buffer_size);
+	if (hid->report == NULL) {
 		error = ENOMEM;
 		goto fail;
 	}
@@ -1158,34 +1188,55 @@ usb_hid_arm(
 	return 0;
 }
 
-/* Hands one received report on: a raw interface's to hidraw, any other's to the input glue. */
+/*
+ * Takes a finished report out of its transfer: the bytes into struct
+ * usb_hid's report, and when and how the transfer ended, before the
+ * transfer is armed again.
+ */
 static void
-usb_hid_publish_report(
+usb_hid_take_report(
 	struct usb_hid *hid,
-	const uint8_t *buffer,
-	size_t length)
+	struct usb_hid_taken *taken)
 {
-	uint64_t milliseconds;
-	struct drv_usb_urb_hcd_result hcd;
-	uint64_t counter_us;
-	uint64_t monotonic_us;
 	unsigned long irq;
-	unsigned flags;
-	int dump;
+
+	/* The bytes the transfer carried, never more than the buffer holds. */
+	taken->length = drv_usb_urb_actual_length(hid->urb);
+	if (taken->length > hid->buffer_size)
+		taken->length = hid->buffer_size;
+	kern_memcpy(hid->report, hid->buffer, taken->length);
 
 	/* Every event of the report is stamped with the time its transfer finished. */
 	irq = spin_lock_irqsave(&hid->lock);
 
-	milliseconds = hid->completed_milliseconds;
-	counter_us = hid->completed_counter_us;
-	monotonic_us = hid->completed_monotonic_us;
+	taken->milliseconds = hid->completed_milliseconds;
+	taken->counter_us = hid->completed_counter_us;
+	taken->monotonic_us = hid->completed_monotonic_us;
 
 	spin_unlock_irqrestore(&hid->lock, irq);
 
+	/* What the controller said of the transfer, for the report ring. */
+	drv_usb_urb_hcd_result(hid->urb, &taken->hcd);
+}
+
+/* Hands one taken report on: a raw interface's to hidraw, any other's to the input glue. */
+static void
+usb_hid_publish_report(
+	struct usb_hid *hid,
+	const struct usb_hid_taken *taken)
+{
+	const uint8_t *buffer;
+	size_t length;
+	unsigned flags;
+	int dump;
+
+	/* The report's copy, which the next transfer does not touch. */
+	buffer = hid->report;
+	length = taken->length;
+
 	/* The report ring keeps every report of every interface, as it came, with what the controller said of it. */
-	drv_usb_urb_hcd_result(hid->urb, &hcd);
 	flags = usb_hid_ring_flags(hid);
-	usb_hid_ring_note(hid, counter_us, monotonic_us, &hcd, flags, buffer, length);
+	usb_hid_ring_note(hid, taken->counter_us, taken->monotonic_us, &taken->hcd, flags, buffer, length);
 
 	/* A raw interface's report goes to its readers as it came. */
 	if (hid->raw) {
@@ -1205,7 +1256,7 @@ usb_hid_publish_report(
 		return;
 
 	/* The glue decodes the report and tells the devices what changed. */
-	drv_hid_input_report(hid->hidinput, buffer, length, milliseconds);
+	drv_hid_input_report(hid->hidinput, buffer, length, taken->milliseconds);
 }
 
 /* Takes whatever the worker thread has to do next. */
@@ -1301,9 +1352,8 @@ static void
 usb_hid_worker(
 	void *argument)
 {
+	struct usb_hid_taken taken;
 	enum drv_usb_urb_status status;
-	unsigned long irq;
-	int stopping_now;
 	unsigned work;
 	int error, stopping;
 	struct usb_hid *hid = argument;
@@ -1337,10 +1387,23 @@ usb_hid_worker(
 			/* Checks the operation status. */
 			status = drv_usb_urb_status(hid->urb);
 			if (status == DRV_USB_URB_COMPLETE) {
-				usb_hid_publish_report(
-					hid, hid->buffer,
-					drv_usb_urb_actual_length(hid->urb));
-				work |= USB_HID_WORK_ARM;
+				/*
+				 * The report is taken out of the transfer and
+				 * the transfer goes back on the endpoint before
+				 * the report is decoded, so the endpoint is
+				 * left without a transfer only as long as the
+				 * copy takes: a device that keeps one report
+				 * could otherwise fold a press and its release
+				 * into one while the endpoint waits.
+				 */
+				usb_hid_take_report(hid, &taken);
+				error = usb_hid_arm(hid);
+				usb_hid_publish_report(hid, &taken);
+				if (error != 0) {
+					usb_hid_rearm_failed(hid, error);
+					return;
+				}
+				continue;
 			} else if (status == DRV_USB_URB_STALL) {
 				/* The report ring shows the stall among the reports. */
 				usb_hid_ring_note_status(hid, DRV_USB_HID_RING_STALL, status);
@@ -1375,28 +1438,40 @@ usb_hid_worker(
 			/* Checks the operation status. */
 			error = usb_hid_arm(hid);
 			if (error != 0) {
-				/*
-				 * EBUSY is expected only after detach closes
-				 * admission.  In that case detach owns
-				 * publication; any other EBUSY is still a
-				 * terminal always-on-URB contract failure.
-				 */
-				irq = spin_lock_irqsave(&hid->lock);
-				stopping_now = hid->stopping != 0U;
-
-				spin_unlock_irqrestore(&hid->lock, irq);
-
-				/* Handles the stopping now condition. */
-				if (!stopping_now) {
-					usb_hid_runtime_stop(hid, "rearm",
-							     error, 0);
-				}
+				usb_hid_rearm_failed(hid, error);
 
 				/* Returns the computed result. */
 				return;
 			}
 		}
 	}
+}
+
+/*
+ * Ends the worker's service after the transfer could not be armed again.
+ *
+ * EBUSY is expected only after detach closes admission.  In that case
+ * detach owns publication; any other EBUSY is still a terminal
+ * always-on-URB contract failure.
+ */
+static void
+usb_hid_rearm_failed(
+	struct usb_hid *hid,
+	int error)
+{
+	unsigned long irq;
+	int stopping_now;
+
+	/* Whether detach is under way. */
+	irq = spin_lock_irqsave(&hid->lock);
+
+	stopping_now = hid->stopping != 0U;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/* Without a detach the interface leaves service. */
+	if (!stopping_now)
+		usb_hid_runtime_stop(hid, "rearm", error, 0);
 }
 
 /* Waits for that worker to leave. */
@@ -1805,6 +1880,8 @@ usb_hid_free(
 	/* The input and the output buffers. */
 	if (hid->buffer != NULL)
 		kern_free(hid->buffer);
+	if (hid->report != NULL)
+		kern_free(hid->report);
 	if (hid->out_buffer != NULL)
 		kern_free(hid->out_buffer);
 
