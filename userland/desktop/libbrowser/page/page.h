@@ -116,10 +116,37 @@ struct page_prefetched {
  * calls are made with the page's tasks held (on any of its threads).
  */
 struct page;
+
+/* A response an iframe shows in a browsing context of another agent: its final URL, its Content-Type and its bytes. */
+struct page_remote_response {
+	const char *url;
+	const char *mime;
+	size_t mime_length;
+	const unsigned char *body;
+	size_t length;
+};
+
+/*
+ * With the threads, how an embedder gives an iframe whose document is of
+ * another origin a browsing context in an agent of its own (NULL calls:
+ * the page keeps every document in its own heap): remote_load shows a
+ * response there (in the context the iframe has, or a new one), which
+ * runs on a thread and in a heap of its own, and tells the page when its
+ * document loaded (page_remote_loaded); remote_close ends it (the iframe
+ * left its document, shows a document of the page's agent again, or the
+ * page is put away); remote_frame gives the number of its frame item,
+ * told the size the page lays it out at (on any of the page's threads, the
+ * style thread's too; 0: none).  The calls that change it are made with the
+ * page's tasks held.
+ */
 struct page_frame_calls {
 	int (*attach)(void *context, struct page *page, struct dom_element *element);
 	void (*detach)(void *context, struct dom_element *element);
 	void (*ring)(void *context, void *runner);
+	int (*remote_load)(void *context, struct page *page, struct dom_element *element, const struct page_remote_response *response);
+	void (*remote_close)(void *context, struct dom_element *element);
+	uint64_t (*remote_frame)(void *context, const struct dom_element *element, int width, int height);
+	const struct bind_remote_calls *remote;
 };
 
 /* A link element whose stylesheet arrived (or failed), waiting for its load or error event. */
@@ -196,8 +223,9 @@ struct page {
 	struct wb_vector frame_cache;
 	/* Defer nested child-response checkpoints while the outer snapshot drains. */
 	int frames_running;
-	/* The window's load event waits for the frames the document embeds. */
+	/* The window's load event waits for the frames the document embeds (those of other agents too: how many have not loaded). */
 	int load_pending;
+	unsigned remote_loads;
 	/* The document came with Cache-Control: no-store (the view keeps no copy of it for Back and Forward). */
 	int no_store;
 	/* The document's page is showing: set by its pageshow, cleared by its pagehide (HTML's page showing). */
@@ -295,6 +323,10 @@ int page_frame_attach(void *context, struct dom_element *element);
 void page_frame_detach(void *context, struct dom_element *element);
 void page_frames_suspend(struct page *page);
 int page_frames_resume(struct page *page);
+uint64_t page_frame_remote(void *context, const struct dom_element *element, layout_unit width, layout_unit height, float zoom);
+void page_remote_loading(struct page *page);
+int page_remote_loaded(struct page *page, struct dom_element *element, int fire);
+int page_remote_navigate(struct page *page, struct dom_element *element, const char *url);
 
 /* Dynamic scripts (script.c). */
 void page_scripts_init(struct page *page);

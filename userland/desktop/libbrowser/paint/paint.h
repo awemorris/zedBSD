@@ -39,7 +39,15 @@ enum paint_kind {
 	PAINT_BACKDROP,
 	/* The items up to the matching PAINT_GROUP_END are painted apart from the page (over nothing) and the filters applied to the result. */
 	PAINT_GROUP,
-	PAINT_GROUP_END
+	PAINT_GROUP_END,
+	/*
+	 * The document of a frame that commits apart from the list (in an agent
+	 * of its own): its number (frame) and its content box (x, y, width,
+	 * height), inside a clip of it.  What it shows is found by its number
+	 * when the list is drawn (paint_frames_resolve); a renderer given the
+	 * item itself draws nothing for it.
+	 */
+	PAINT_FRAME
 };
 
 /* The deepest nesting of clips the renderers keep (deeper clips are ignored). */
@@ -85,6 +93,8 @@ struct paint_item {
 	/* A backdrop item's rounded corners (horizontal and vertical radius of each, clockwise from the top left), when it has any. */
 	int rounded;
 	layout_unit radius[4][2];
+	/* A frame item's frame number (PAINT_FRAME). */
+	uint64_t frame;
 };
 
 /*
@@ -128,6 +138,29 @@ struct paint_scene {
 	unsigned refs;
 	struct paint_list list;
 	struct wb_vector holds;
+	struct text_bytes *faces[TEXT_FACES];
+};
+
+/*
+ * Finds the latest scene of a frame committed apart (PAINT_FRAME), held for
+ * the caller, and how far its document is scrolled; NULL when it has none
+ * yet.  Called on the drawing thread.
+ */
+typedef struct paint_scene *(*paint_frame_lookup)(void *context, uint64_t frame, layout_unit *scroll_x, layout_unit *scroll_y);
+
+/*
+ * What one drawing of a scene draws (paint_frames_resolve): when the
+ * scene has frame items (resolved), a list of its items with each frame
+ * item replaced by its frame's scene, moved to the item's box, which
+ * points into the scenes it holds (held, struct paint_scene *) and whose
+ * glyphs take their faces from faces (the scene's, with the frames' web
+ * faces put in the web faces the scene leaves free).  The drawing's holds
+ * are kept until the work recorded from it is done.
+ */
+struct paint_drawing {
+	int resolved;
+	struct paint_list list;
+	struct wb_vector held;
 	struct text_bytes *faces[TEXT_FACES];
 };
 
@@ -193,6 +226,10 @@ void paint_list_init(struct paint_list *list);
 int paint_scene_make(struct paint_list *list, const struct text_system *text, struct paint_scene **out);
 void paint_scene_retain(struct paint_scene *scene);
 void paint_scene_release(struct paint_scene *scene);
+void paint_drawing_init(struct paint_drawing *drawing);
+int paint_frames_resolve(const struct paint_scene *scene, paint_frame_lookup lookup, void *context, struct paint_drawing *drawing);
+const struct paint_list *paint_drawing_list(const struct paint_scene *scene, const struct paint_drawing *drawing);
+void paint_drawing_release(struct paint_drawing *drawing);
 int paint_add_ring(struct paint_list *list, layout_unit x, layout_unit y, layout_unit width, layout_unit height, layout_unit thickness, uint32_t color);
 int paint_add_rect(struct paint_list *list, layout_unit x, layout_unit y, layout_unit width, layout_unit height, uint32_t color);
 int paint_gradient_render(struct wb_arena *arena, const struct css_gradient *gradient, int width, int height, struct img_bitmap *bitmap);

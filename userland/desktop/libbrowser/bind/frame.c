@@ -200,6 +200,50 @@ bind_window_reachable(
 }
 
 /*
+ * Tells whether a document of a URL in a frame of a window is of another
+ * agent than the window's: both have a web origin and the two differ (the
+ * windows that reach each other are of one agent; an opaque origin's frame
+ * keeps the restricted view of the window's agent).
+ */
+int
+bind_frame_foreign(
+	struct bind_window *parent,
+	const char *location,
+	size_t length)
+{
+	struct wb_buffer one;
+	struct wb_buffer other;
+	struct net_url url;
+	int foreign;
+	int error;
+
+	/* An opaque origin is no web one. */
+	if (parent->opaque)
+		return 0;
+
+	/* Both origins, serialized. */
+	wb_buffer_init(&one);
+	wb_buffer_init(&other);
+	memset(&url, 0, sizeof(url));
+	error = frame_origin(parent, &one);
+	if (error == 0)
+		error = net_url_parse(location, length, NULL, &url);
+	if (error == 0)
+		error = net_url_component(&url, NET_URL_ORIGIN, &other);
+	foreign = 0;
+	if (error == 0 && frame_web_origin(&one) && frame_web_origin(&other)) {
+		if (one.length != other.length || memcmp(one.data, other.data, one.length) != 0)
+			foreign = 1;
+	}
+
+	/* The copies are released on either outcome. */
+	net_url_release(&url);
+	wb_buffer_release(&one);
+	wb_buffer_release(&other);
+	return foreign;
+}
+
+/*
  * Tells whether a frame's sandbox leaves it an opaque origin, which no child global is exposed for: it has a sandbox
  * attribute without the allow-same-origin token.
  */
@@ -572,6 +616,10 @@ bind_frame_parent(
 	if (status != 0)
 		return status;
 
+	/* The top-level window of a frame of another agent sees its parent through a proxy. */
+	if (window->remote_framed && !window->detached)
+		return bind_remote_relative(window, BIND_REMOTE_PARENT, result);
+
 	/* The parent relation remains readable from a saved detached Window. */
 	global = window->parent_global;
 	if (global == NULL)
@@ -611,6 +659,10 @@ bind_frame_top(
 	status = frame_window_this(realm, this_value, &window);
 	if (status != 0)
 		return status;
+
+	/* The top-level window of a frame of another agent sees its top through a proxy. */
+	if (window->remote_framed && !window->detached)
+		return bind_remote_relative(window, BIND_REMOTE_TOP, result);
 
 	/* A top-level context has no separate ancestor global. */
 	global = window->top_global;
@@ -775,6 +827,7 @@ frame_global(
 	vm_value *result)
 {
 	struct bind_window *window;
+	struct dom_node *node;
 	int status;
 
 	UNUSED_PARAMETER(args);
@@ -782,6 +835,13 @@ frame_global(
 
 	/* No caller-realm alias is returned when there is no supported context. */
 	*result = VM_VALUE_NULL;
+
+	/* A frame of another agent is seen through its proxy. */
+	status = bind_this_node(realm, this_value, &node);
+	if (status != 0)
+		return status;
+	if (node->type == DOM_ELEMENT && ((struct dom_element *)node)->frame_remote != NULL)
+		return bind_remote_child(bind_window_of(realm), (struct dom_element *)node, result);
 	status = frame_context(realm, this_value, &window);
 	if (status != 0)
 		return status;
@@ -849,8 +909,8 @@ frame_context(
 		return 0;
 	}
 
-	/* An iframe the embedder gave no thread has no browsing context. */
-	if (element->frame_refused)
+	/* An iframe the embedder gave no thread has no browsing context, and one that shows a frame of another agent none of this agent. */
+	if (element->frame_refused || element->frame_remote != NULL)
 		return 0;
 
 	/* Publishes only a complete initial context, propagating allocation failures. */
@@ -1072,7 +1132,7 @@ frame_remove_subtree(
 
 			/* Its thread ends first (the embedder's), then its context. */
 			owner = element->node.document->view;
-			if (element->frame_thread != NULL && owner != NULL && owner->host.frame_detach != NULL)
+			if ((element->frame_thread != NULL || element->frame_remote != NULL) && owner != NULL && owner->host.frame_detach != NULL)
 				owner->host.frame_detach(owner->host.context, element);
 
 			/* Only published child contexts participate in synchronous retirement. */

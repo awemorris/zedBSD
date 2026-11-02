@@ -1220,6 +1220,10 @@ gpu_stage(
 		if (item->kind == PAINT_BACKDROP || item->kind == PAINT_GROUP || item->kind == PAINT_GROUP_END)
 			continue;
 
+		/* A frame committed apart that the drawing did not resolve shows nothing. */
+		if (item->kind == PAINT_FRAME)
+			continue;
+
 		/* A rectangle is one instance. */
 		if (item->kind == PAINT_RECT) {
 			status = gpu_stage_rect(gpu, item, scroll_y, extent, paint_clips_top(&clips));

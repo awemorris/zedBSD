@@ -2304,6 +2304,7 @@ window_trace(
 		vm_heap_mark(heap, window->window_wrapper);
 	if (window->frame_proxy_maker != NULL)
 		vm_heap_mark(heap, window->frame_proxy_maker);
+	bind_remote_trace(heap, window);
 	if (window->listeners != NULL)
 		vm_heap_mark(heap, window->listeners);
 	bind_timers_trace(heap, window);

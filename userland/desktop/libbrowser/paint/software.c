@@ -150,7 +150,7 @@ software_items(
 			index = end;
 			continue;
 		}
-		if (item->kind == PAINT_GROUP_END)
+		if (item->kind == PAINT_GROUP_END || item->kind == PAINT_FRAME)
 			continue;
 
 		/* The filters of a backdrop-filter, over what is drawn so far. */

@@ -116,6 +116,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/bind/window.c \
 	$(LIBBROWSER_DIR)/bind/frame.c \
 	$(LIBBROWSER_DIR)/bind/frame-resource.c \
+	$(LIBBROWSER_DIR)/bind/remote.c \
 	$(LIBBROWSER_DIR)/bind/svg-text.c \
 	$(LIBBROWSER_DIR)/bind/svg-length.c \
 	$(LIBBROWSER_DIR)/bind/style-context.c \
@@ -190,6 +191,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/page/form.c \
 	$(LIBBROWSER_DIR)/view/view.c \
 	$(LIBBROWSER_DIR)/view/frames.c \
+	$(LIBBROWSER_DIR)/view/remote.c \
 	$(LIBBROWSER_DIR)/view/front.c \
 	$(LIBBROWSER_DIR)/view/style.c \
 	$(LIBBROWSER_DIR)/image/decode.c \

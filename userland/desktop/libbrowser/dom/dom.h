@@ -427,6 +427,8 @@ struct dom_element {
 	 */
 	void *frame_thread;
 	int frame_refused;
+	/* The browsing context of another agent the iframe shows (the embedder's; NULL for none), whose number the frame's window proxy names. */
+	void *frame_remote;
 	/* How far a scroll container's content is scrolled, in CSS pixels (the document's is the page's). */
 	double scroll_x;
 	double scroll_y;

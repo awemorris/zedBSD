@@ -46,6 +46,7 @@
 #include "storage/instance.h"
 #include "storage/queue.h"
 #include "view/front.h"
+#include "view/remote.h"
 #include "view/frames.h"
 #include "base/os-error.h"
 
@@ -274,6 +275,11 @@ struct browser_view {
 	struct text_system render_text;
 	int render_text_open;
 	struct view_commit *drawn;
+	/* What the drawing of drawn resolved of its frames of other agents (kept with it). */
+	struct paint_drawing drawn_frames;
+	int drawn_frames_set;
+	/* The frame of another agent the pointer's press went into, which the keys go to (0: the page). */
+	uint64_t input_frame;
 	struct paint_scene *scene;
 	uint64_t scene_generation;
 	float pointer_x;
@@ -369,7 +375,10 @@ static int view_gpu_ready(struct browser_view *view, const struct browser_target
 static void view_framebuffers_release(struct browser_view *view);
 static int view_render_gpu(struct browser_view *view, const struct browser_target *target, VkCommandBuffer commands, uint64_t *serial);
 static int view_render_cpu(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);
-static int view_render_text(struct browser_view *view, const struct paint_scene *scene, int *changed);
+static int view_render_text(struct browser_view *view, struct text_bytes *const *faces, int *changed);
+static void view_render_frames(struct browser_view *view, const struct paint_scene *scene, struct paint_drawing *drawing);
+static uint64_t view_route_at(struct browser_view *view, float x, float y, struct page_pointer *pointer);
+static int view_route_pointer(struct browser_view *view, float x, float y, const char *type, int button, uint32_t modifiers, float delta_x, float delta_y);
 static void view_gpu_close(struct browser_view *view);
 static int view_framebuffer(struct browser_view *view, const struct browser_target *target, VkFramebuffer *framebuffer);
 static int view_gpu_failed(struct browser_view *view, const char *operation, VkResult result);
@@ -533,6 +542,8 @@ browser_view_destroy(
 	/* The renderer and the framebuffers on the caller's device, and the drawing's frame, text and lock. */
 	view_gpu_close(view);
 	view_commit_release(view->drawn);
+	if (view->drawn_frames_set)
+		paint_drawing_release(&view->drawn_frames);
 	if (view->render_text_open)
 		text_system_close(&view->render_text);
 	wb_mutex_destroy(&view->render_lock);
@@ -1292,6 +1303,9 @@ browser_view_pointer_move(
 	view->pointer_y = y;
 	view->pointer_inside = 1;
 
+	/* Over a frame of another agent, the frame's move. */
+	(void)view_route_pointer(view, x, y, "mousemove", 0, modifiers, 0.0f, 0.0f);
+
 	/* Succeeded: the place is kept. */
 	return 0;
 }
@@ -1326,6 +1340,14 @@ browser_view_pointer_button(
 	if (windowed) {
 		error = view_front_pointer_button(view, x, y, button, pressed, modifiers);
 		return error;
+	}
+
+	/* Over a frame of another agent, the frame's press or release (a press there sends it the keys too). */
+	if (pressed)
+		view->input_frame = 0;
+	if (view_route_pointer(view, x, y, pressed ? "mousedown" : "mouseup", button, modifiers, 0.0f, 0.0f)) {
+		view->press_button = -1;
+		return 0;
 	}
 
 	/* The place, which the pointer is at now. */
@@ -1449,6 +1471,10 @@ browser_view_wheel(
 		return error;
 	}
 
+	/* Over a frame of another agent, the frame's wheel. */
+	if (view_route_pointer(view, x, y, "wheel", 0, modifiers, delta_x, delta_y))
+		return 0;
+
 	/* The place, which the pointer is at now. */
 	view->pointer_x = x;
 	view->pointer_y = y;
@@ -1511,6 +1537,15 @@ browser_view_key(
 	if (windowed) {
 		error = view_front_key(view, key, code, text, pressed, repeat, modifiers);
 		return error;
+	}
+
+	/* A frame of another agent pressed last takes the keys while it lasts. */
+	if (view->input_frame != 0 && view->front != NULL) {
+		error = view_remotes_key(view_frames_remotes(view_front_frames(view->front)), view->input_frame, pressed ? "keydown" : "keyup", key, code,
+		    repeat, view_bind_modifiers(modifiers));
+		if (error != ENOENT)
+			return 0;
+		view->input_frame = 0;
 	}
 
 	/* The key as the page sees it (a missing name is empty). */
@@ -2420,6 +2455,8 @@ view_render_gpu(
 {
 	struct view_commit *commit;
 	struct paint_scene *scene;
+	struct paint_drawing drawing;
+	const struct paint_list *list;
 	VkFramebuffer framebuffer;
 	VkExtent2D extent;
 	VkResult result;
@@ -2432,8 +2469,9 @@ view_render_gpu(
 		return ENOENT;
 	scene = commit->scene;
 
-	/* The drawing's faces for the frame's fonts, the renderer for the target, and the framebuffer over it. */
-	error = view_render_text(view, scene, &changed);
+	/* The frames of other agents its list shows, the drawing's faces for the fonts, the renderer for the target, and the framebuffer over it. */
+	view_render_frames(view, scene, &drawing);
+	error = view_render_text(view, drawing.faces, &changed);
 	if (error == 0)
 		error = view_gpu_ready(view, target);
 	if (error == 0 && changed)
@@ -2441,6 +2479,7 @@ view_render_gpu(
 	if (error == 0)
 		error = view_framebuffer(view, target, &framebuffer);
 	if (error != 0) {
+		paint_drawing_release(&drawing);
 		view_commit_release(commit);
 		return error;
 	}
@@ -2448,18 +2487,24 @@ view_render_gpu(
 	/* The frame's instances and atlas, written by the host now. */
 	extent.width = target->width;
 	extent.height = target->height;
-	result = paint_gpu_prepare(&view->gpu, &scene->list, &view->render_text, commit->scroll_y, extent);
+	list = paint_drawing_list(scene, &drawing);
+	result = paint_gpu_prepare(&view->gpu, list, &view->render_text, commit->scroll_y, extent);
 	if (result != VK_SUCCESS) {
+		paint_drawing_release(&drawing);
 		view_commit_release(commit);
 		error = view_gpu_failed(view, view->gpu.operation, result);
 		return error;
 	}
 
 	/* The pass, into the caller's command buffer. */
-	paint_gpu_record(&view->gpu, commands, &scene->list, framebuffer, extent);
+	paint_gpu_record(&view->gpu, commands, list, framebuffer, extent);
 
-	/* The frame is kept until the next drawing (the work recorded may still read what it put in the atlas). */
+	/* The frame is kept until the next drawing (the work recorded may still read what it put in the atlas), with its frames. */
 	view_commit_release(view->drawn);
+	if (view->drawn_frames_set)
+		paint_drawing_release(&view->drawn_frames);
+	view->drawn_frames = drawing;
+	view->drawn_frames_set = 1;
 	view->drawn = commit;
 	*serial = commit->serial;
 
@@ -2477,6 +2522,7 @@ view_render_cpu(
 	size_t stride)
 {
 	struct view_commit *commit;
+	struct paint_drawing drawing;
 	struct paint_bitmap bitmap;
 	unsigned char *row_start;
 	unsigned row;
@@ -2488,9 +2534,11 @@ view_render_cpu(
 	if (commit == NULL)
 		return ENOENT;
 
-	/* The drawing's faces for the frame's fonts (a GPU atlas of other glyphs starts over). */
-	error = view_render_text(view, commit->scene, &changed);
+	/* The frames of other agents its list shows, and the drawing's faces for the fonts (a GPU atlas of other glyphs starts over). */
+	view_render_frames(view, commit->scene, &drawing);
+	error = view_render_text(view, drawing.faces, &changed);
 	if (error != 0) {
+		paint_drawing_release(&drawing);
 		view_commit_release(commit);
 		return error;
 	}
@@ -2504,11 +2552,12 @@ view_render_cpu(
 	if (stride != (size_t)width * sizeof(uint32_t)) {
 		error = paint_bitmap_create(&bitmap, (int)width, (int)height);
 		if (error != 0) {
+			paint_drawing_release(&drawing);
 			view_commit_release(commit);
 			return error;
 		}
 	}
-	error = paint_software(&commit->scene->list, &view->render_text, commit->scroll_y, &bitmap);
+	error = paint_software(paint_drawing_list(commit->scene, &drawing), &view->render_text, commit->scroll_y, &bitmap);
 
 	/* A packed bitmap is copied into the caller's rows and goes. */
 	if (bitmap.pixels != pixels) {
@@ -2519,7 +2568,8 @@ view_render_cpu(
 		paint_bitmap_release(&bitmap);
 	}
 
-	/* The frame is let go. */
+	/* The frame is let go, with its frames. */
+	paint_drawing_release(&drawing);
 	view_commit_release(commit);
 	if (error != 0)
 		return error;
@@ -2537,7 +2587,7 @@ view_render_cpu(
 static int
 view_render_text(
 	struct browser_view *view,
-	const struct paint_scene *scene,
+	struct text_bytes *const *faces,
 	int *changed)
 {
 	int replaced;
@@ -2556,7 +2606,7 @@ view_render_text(
 
 	/* Each web face, the scene's. */
 	for (face = TEXT_FACE_WEB; face < TEXT_FACES; face++) {
-		error = text_system_use_face(&view->render_text, face, scene->faces[face], &replaced);
+		error = text_system_use_face(&view->render_text, face, faces[face], &replaced);
 		if (replaced)
 			*changed = 1;
 		if (error != 0)
@@ -2565,6 +2615,112 @@ view_render_text(
 
 	/* Succeeded: the faces are the scene's. */
 	return 0;
+}
+
+/*
+ * Finds the frame of another agent at a place of the view (on the page's
+ * own thread, J6 of the design: by the frame items of the latest committed
+ * frame, as the user saw them): its number (0: none, or a view of the
+ * caller's) and the place in its viewport.
+ */
+static uint64_t
+view_route_at(
+	struct browser_view *view,
+	float x,
+	float y,
+	struct page_pointer *pointer)
+{
+	const struct paint_item *item;
+	struct view_commit *commit;
+	uint64_t found;
+	float document_y;
+	float left;
+	float top;
+	size_t index;
+
+	/* Only a view of its own threads has frames of other agents. */
+	if (view->front == NULL)
+		return 0;
+	commit = view_front_commit(view);
+	if (commit == NULL)
+		return 0;
+
+	/* The last frame item under the place (the one painted on top). */
+	found = 0;
+	document_y = y + layout_to_px(commit->scroll_y);
+	for (index = 0; index < commit->scene->list.items.count; index++) {
+		item = wb_vector_at(&commit->scene->list.items, index);
+		if (item->kind != PAINT_FRAME)
+			continue;
+		left = layout_to_px(item->x);
+		top = layout_to_px(item->y);
+		if (x < left || x >= left + layout_to_px(item->width) || document_y < top || document_y >= top + layout_to_px(item->height))
+			continue;
+		found = item->frame;
+		memset(pointer, 0, sizeof(*pointer));
+		pointer->client_x = (int)floorf(x - left);
+		pointer->client_y = (int)floorf(document_y - top);
+	}
+	view_commit_release(commit);
+	return found;
+}
+
+/*
+ * Hands a pointer's input at a place to the frame of another agent there:
+ * 1 when one took it (a press makes it the keys' too), 0 when the place
+ * is the page's.
+ */
+static int
+view_route_pointer(
+	struct browser_view *view,
+	float x,
+	float y,
+	const char *type,
+	int button,
+	uint32_t modifiers,
+	float delta_x,
+	float delta_y)
+{
+	struct page_pointer pointer;
+	uint64_t frame;
+	int error;
+
+	/* The frame there. */
+	frame = view_route_at(view, x, y, &pointer);
+	if (frame == 0)
+		return 0;
+
+	/* Its input, as the page's would be (the DOM's button numbers are the view's). */
+	pointer.button = button;
+	pointer.modifiers = view_bind_modifiers(modifiers);
+	pointer.delta_x = (double)delta_x;
+	pointer.delta_y = (double)delta_y;
+	error = view_remotes_pointer(view_frames_remotes(view_front_frames(view->front)), frame, type, &pointer);
+	if (error == ENOENT)
+		return 0;
+	if (strcmp(type, "mousedown") == 0)
+		view->input_frame = frame;
+	return 1;
+}
+
+/*
+ * Resolves the frames of other agents a committed scene shows for one
+ * drawing (paint_frames_resolve): each frame item drawn as its frame's
+ * latest scene.  A drawing that could not resolve them draws the scene
+ * without them.
+ */
+static void
+view_render_frames(
+	struct browser_view *view,
+	const struct paint_scene *scene,
+	struct paint_drawing *drawing)
+{
+	struct view_frames *frames;
+
+	/* The frames' scenes by their numbers. */
+	paint_drawing_init(drawing);
+	frames = view_front_frames(view->front);
+	(void)paint_frames_resolve(scene, view_remotes_scene, frames != NULL ? view_frames_remotes(frames) : NULL, drawing);
 }
 
 /*
@@ -3229,6 +3385,45 @@ view_make_page(
 	view->open_epoch = view_clock();
 
 	/* Its http and https images come through the loader (without one, they are read at once), with the instance's cookies and storage. */
+	page_set_loader(made, view->loader);
+	page_set_instance(made, view->instance);
+
+	/* Succeeded: the page is empty. */
+	*page = made;
+	return 0;
+}
+
+/*
+ * Makes the page of a frame of another agent on its thread: its own heap
+ * and agent (no frame calls: its iframes keep its agent and its thread),
+ * the size its parent lays it out at, the view's fonts, its console
+ * through the view, the view's loader (its requests go through the
+ * calling thread's client) and instance.
+ */
+int
+view_make_remote_page(
+	struct browser_view *view,
+	const void *stack_base,
+	int width,
+	int height,
+	int dark,
+	struct page **page)
+{
+	struct page *made;
+	int error;
+
+	/* The page. */
+	*page = NULL;
+	error = page_create(&made, stack_base);
+	if (error != 0)
+		return error;
+
+	/* Its scripts see its size, its parent's color scheme and the view's fonts, write their console through the view. */
+	page_set_viewport(made, width, height);
+	page_set_color_scheme(made, dark);
+	page_set_fonts(made, &view->fonts);
+	page_set_font_companions(made, &view->companions);
+	page_set_console(made, view_console, view);
 	page_set_loader(made, view->loader);
 	page_set_instance(made, view->instance);
 

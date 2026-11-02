@@ -155,6 +155,33 @@ bind_frame_location(
 }
 
 /*
+ * Retires the context an iframe element shows (it is to show a frame of
+ * another agent): its window is detached, as when it is replaced by
+ * another of this agent, and the element keeps no proxy of it.
+ */
+void
+bind_frame_retire(
+	struct bind_window *parent,
+	struct dom_element *element)
+{
+	struct vm_realm *previous;
+	struct bind_window *retired;
+
+	/* The window, if there is one, goes as a replaced one does. */
+	previous = (struct vm_realm *)element->child_context;
+	element->child_context = NULL;
+	element->frame_proxy = NULL;
+	if (previous == NULL)
+		return;
+	retired = previous->host;
+	if (retired != NULL) {
+		retired->frame = NULL;
+		retired->realm->job_target = parent->realm;
+		bind_window_detach(retired);
+	}
+}
+
+/*
  * Installs a complete actual child context before retiring its previous owner.
  */
 int
@@ -243,6 +270,10 @@ bind_frame_install(
 			host.request_cancel = parent->host.request_cancel;
 			host.fetch_sync = parent->host.fetch_sync;
 		}
+
+		/* Its frames of other agents are reached as the parent's are. */
+		host.remote = parent->host.remote;
+		host.remote_context = parent->host.remote_context;
 
 		/* Construct the independently retained owner with this complete abstract host adapter. */
 		error = bind_window_create(realm, document, &host, &made);

@@ -716,8 +716,8 @@ int
 page_load_waiting(
 	const struct page *page)
 {
-	/* The frames. */
-	if (page->frame_loads.count != 0)
+	/* The frames, of the page's agent and of others. */
+	if (page->frame_loads.count != 0 || page->remote_loads != 0)
 		return 1;
 
 	/* The sheets, the fonts and the images. */
@@ -987,6 +987,7 @@ page_layout_work(
 	page->laid_out = 1;
 	page->layout.image_variant = page_image_variant;
 	page->layout.frame_paint = page_frame_paint;
+	page->layout.frame_remote = page_frame_remote;
 	if (error != 0)
 		return error;
 
@@ -1012,6 +1013,7 @@ page_layout_work(
 		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 		page->layout.image_variant = page_image_variant;
 		page->layout.frame_paint = page_frame_paint;
+		page->layout.frame_remote = page_frame_remote;
 		if (error != 0)
 			return error;
 	}

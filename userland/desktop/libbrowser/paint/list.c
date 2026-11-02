@@ -565,6 +565,13 @@ paint_dump(
 			continue;
 		}
 
+		/* A frame committed apart: its number and content box. */
+		if (item->kind == PAINT_FRAME) {
+			wb_buffer_printf(out, "frame %.2f %.2f %.2f %.2f %llu\n", (double)layout_to_px(item->x), (double)layout_to_px(item->y),
+			    (double)layout_to_px(item->width), (double)layout_to_px(item->height), (unsigned long long)item->frame);
+			continue;
+		}
+
 		/* An image: its rectangle and its image's size. */
 		if (item->kind == PAINT_IMAGE) {
 			wb_buffer_printf(out, "image %.2f %.2f %.2f %.2f %dx%d\n", (double)layout_to_px(item->x), (double)layout_to_px(item->y),
@@ -1749,6 +1756,7 @@ list_frame(
 	struct paint_item item;
 	struct paint_item *source;
 	struct list_area area;
+	uint64_t number;
 	size_t index;
 	int error;
 
@@ -1758,6 +1766,30 @@ list_frame(
 	element = (const struct dom_element *)box->node;
 	if (element->ns != DOM_NS_HTML || element->tag != DOM_TAG_IFRAME)
 		return;
+
+	/* A frame that commits apart is one item, found by its number when the list is drawn. */
+	if (walk->source->frame_remote != NULL) {
+		number = walk->source->frame_remote(walk->source->image_context, element, box->width, box->height, box->style.zoom_eff);
+		if (number != 0) {
+			area.x = x;
+			area.y = y;
+			area.width = box->width;
+			area.height = box->height;
+			list_clip_rect(walk, &area);
+			memset(&item, 0, sizeof(item));
+			item.kind = PAINT_FRAME;
+			item.x = x;
+			item.y = y;
+			item.width = box->width;
+			item.height = box->height;
+			item.frame = number;
+			error = wb_vector_push(&walk->list->items, &item);
+			if (error != 0)
+				walk->error = error;
+			list_unclip(walk);
+			return;
+		}
+	}
 	frame = NULL;
 	error = walk->source->frame_paint(walk->source->image_context, element, box->width, box->height, box->style.zoom_eff, &frame);
 	if (error != 0) {

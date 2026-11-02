@@ -30,6 +30,7 @@
  */
 
 #include "view/frames.h"
+#include "view/remote.h"
 #include "page/page.h"
 #include "bind/internal.h"
 #include "base/base.h"
@@ -102,6 +103,8 @@ struct view_frames {
 	struct wb_vector live;
 	struct wb_vector dead;
 	size_t limit;
+	/* The frames of other agents (remote.c): they count in the bound too. */
+	struct view_remotes *remotes;
 };
 
 /* The frame whose thread the calling thread is (NULL on every other thread). */
@@ -125,7 +128,11 @@ static void frames_free(struct view_frame *frame);
 static const struct page_frame_calls frames_calls = {
 	frames_attach,
 	frames_detach,
-	frames_ring
+	frames_ring,
+	view_remotes_load,
+	view_remotes_close,
+	view_remotes_frame,
+	&view_remote_parent_calls
 };
 
 /* Makes the frames of a view (none yet). */
@@ -157,6 +164,8 @@ view_frames_create(
 	error = wb_mutex_init(&made->lock);
 	if (error == 0)
 		error = wb_cond_init(&made->freed);
+	if (error == 0)
+		error = view_remotes_create(made, &made->remotes);
 	if (error != 0) {
 		wb_cond_destroy(&made->freed);
 		wb_mutex_destroy(&made->lock);
@@ -184,6 +193,9 @@ view_frames_close(
 	/* Nothing to end. */
 	if (frames == NULL)
 		return;
+
+	/* A frame of another agent still live (none should be: its page went) ends first. */
+	view_remotes_close_all(frames->remotes);
 
 	/* A frame still live (none should be: its page went) ends like a dead one. */
 	for (index = 0; index < frames->live.count; index++) {
@@ -220,7 +232,9 @@ view_frames_destroy(
 	if (frames == NULL)
 		return;
 
-	/* Whatever is left ends, then the lists, the condition and the lock. */
+	/* Whatever is left ends (the frames of other agents first), then the lists, the condition and the lock. */
+	view_remotes_destroy(frames->remotes);
+	frames->remotes = NULL;
 	view_frames_close(frames);
 	wb_vector_release(&frames->live);
 	wb_vector_release(&frames->dead);
@@ -237,6 +251,52 @@ view_frames_set_view(
 {
 	/* The view whose clock the frames' timers go by. */
 	frames->view = view;
+	view_remotes_set_view(frames->remotes, view);
+}
+
+/* The frames of other agents of a view's frames. */
+struct view_remotes *
+view_frames_remotes(
+	struct view_frames *frames)
+{
+	/* Made with them. */
+	return frames->remotes;
+}
+
+/* Tells whether the view has room for one frame more (its iframes' threads and its frames of other agents, its page's own counted); the agent held. */
+int
+view_frames_room(
+	struct view_frames *frames)
+{
+	size_t count;
+
+	/* Both lists. */
+	wb_mutex_lock(&frames->lock);
+
+	count = frames->live.count;
+
+	wb_mutex_unlock(&frames->lock);
+	count += view_remotes_count(frames->remotes);
+	return count + 1U < frames->limit;
+}
+
+/* Wakes a runner's thread (NULL: the page's own) for work left there, from any thread. */
+void
+view_frames_ring(
+	struct view_frames *frames,
+	void *runner)
+{
+	/* As the pages' calls do. */
+	frames_ring(frames, runner);
+}
+
+/* The page's own thread delivers what the frames of other agents ask of its documents (a task; the agent held). */
+void
+view_frames_deliver(
+	struct view_frames *frames)
+{
+	/* The page's own thread's entries. */
+	view_remotes_deliver(frames->remotes, NULL);
 }
 
 /* The page's own thread takes the agent (and empties the dead frames it can). */
@@ -281,6 +341,9 @@ view_frames_abort_waited(
 	}
 
 	wb_mutex_unlock(&frames->lock);
+
+	/* The frames of other agents too. */
+	view_remotes_abort(frames->remotes);
 }
 
 /* Reports how many iframes have a thread now. */
@@ -303,7 +366,7 @@ view_frames_count(
 	return count;
 }
 
-/* Reports the calls a page gives its iframes their threads through. */
+/* Reports the calls a page gives its iframes their threads (and its frames of other agents) through. */
 const struct page_frame_calls *
 view_frames_calls(void)
 {
@@ -327,9 +390,9 @@ frames_attach(
 	size_t stack;
 	int error;
 
-	/* A frame more than the view may have (its page's own counts) gets none. */
+	/* A frame more than the view may have (its page's own and the frames of other agents count) gets none. */
 	frames = context;
-	if (frames->live.count + 1U >= frames->limit || page->loader == NULL)
+	if (frames->live.count + view_remotes_count(frames->remotes) + 1U >= frames->limit || page->loader == NULL)
 		return EAGAIN;
 
 	/* The record, its lock, its condition and its client. */
@@ -564,8 +627,10 @@ frames_round(
 	vm_heap_set_stack_base(heap, frame->stack_base);
 	vm_agent_task_begin(frames->agent);
 
-	/* The callbacks of its requests that ended. */
+	/* The callbacks of its requests that ended, and what the frames of other agents ask of its documents. */
 	left = net_loader_client_dispatch_until(frame->client, wb_os_monotonic_ns() + FRAMES_DISPATCH_NS);
+	if (!__atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE))
+		view_remotes_deliver(frames->remotes, frame);
 
 	/* Its timers due, at the page's time, and the checkpoint after them (its documents' loads are activated there). */
 	status = 0;

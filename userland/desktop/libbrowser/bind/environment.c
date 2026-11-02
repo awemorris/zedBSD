@@ -1327,10 +1327,7 @@ environment_install_window(
 	if (error != 0)
 		return error;
 
-	/* Frame enumeration remains outside the initial-context interface. */
-	error = js_builtin_value(realm, global, "length", vm_value_int32(0), VM_PROPERTY_DEFAULT);
-	if (error != 0)
-		return error;
+	/* The count of the window's frames (length) is the prelude's: it counts the windows of the document's frames. */
 
 	/* The window has no name and is open. */
 	error = bind_string(realm, "", &self);

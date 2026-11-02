@@ -1069,6 +1069,19 @@ view_front_agent(
 }
 
 /*
+ * Wakes the drawing for a new scene of a frame of another agent (from
+ * its thread): the latest committed frame is drawn again with it.
+ */
+void
+view_front_wake_drawing(
+	struct view_front *front)
+{
+	/* The program's drawing thread. */
+	if (front != NULL && front->options.frame_wake != NULL)
+		front->options.frame_wake(front->options.frame_wake_context);
+}
+
+/*
  * The script thread: starts the style thread, makes the view with its own
  * frame as the pages' stack base and the front's callbacks and wake, tells
  * the program's thread how that went, runs the view until its end, and
@@ -1220,6 +1233,11 @@ front_loop(
 			view_frames_leave(front->frames);
 			break;
 		}
+
+		/* What the frames of other agents asked of the page's documents, a task. */
+		vm_agent_task_begin(&front->agent);
+		view_frames_deliver(front->frames);
+		vm_agent_task_end(&front->agent);
 
 		/* A present came: the page's animation frames are due in the round. */
 		if (opportunity)
