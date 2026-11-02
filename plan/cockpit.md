@@ -7,14 +7,14 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS335](ws335/ws.md) | 自前の TLS | p034（安全の review、21 件中 12 件を直した、1 時間の fuzz で crash 0）cleared。p035（規約の見直しと持ち越し、q1992）に 21:35 着手 | — |
+| P1 | — | ラップアップ | WS335 p035 の途中まで main に（00:05）。残り: Windows の単体・ct・ct の組み合わせ・check-skeleton（BASE=b8c4adaf6c）・相互接続・limbo・fuzz の確かめ（phase035 の引き継ぎ）。次は p036 | — |
 | P2 | — | 待機 | WS343 p002（libcrypto-compat に passkey の OpenSSL の関数、link の差し替えだけで passkey-fido2・fidoctl が OpenSSL 無し）cleared、22:20 merge | — |
 | P3 | — | 待機 | BUG-412 の締め（xHCI・再投入の直しと読み捨てを main に、debug を外した）、23:40 merge。Pi 5 は普段の kernel、ユーザーの click の確かめ待ち | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
-| P5 | [WS345](ws345/ws.md) | ブラウザ | p009（iframe ごとの script の thread）cleared。p010（origin ごとの agent、q1995）に 22:58 着手 | — |
-| P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p023（arm64・riscv64・armv7 の build）cleared。p024（OpenSSH からの入れ替え、q1999）に 23:40 着手 | — |
+| P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
+| P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
-| P8 | [WS345](ws345/ws.md) | ブラウザ | p007 cleared。p014（応答しない頁の確かめの表示、q1996）に 22:58 着手 | — |
+| P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
