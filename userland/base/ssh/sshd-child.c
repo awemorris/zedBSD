@@ -175,7 +175,9 @@ sshd_child_read_config(
 	ssh_reader_get_cstring(&reader, child->peer, sizeof(child->peer));
 	privileged = ssh_reader_get_u32(&reader);
 	status = ssh_reader_finish(&reader);
-	if (status != 0 || blob_size != SSH_KEY_BLOB_SIZE || privileged > 1) {
+	if (status != 0 ||
+	    blob_size != SSH_KEY_BLOB_SIZE ||
+	    privileged > 1) {
 		ssh_buf_free(&body);
 		return EPROTO;
 	}
@@ -290,7 +292,9 @@ sshd_child_ask(
 	/* A RESULT is four bytes; the buffer is secret since the request's call keeps nothing else here. */
 	ssh_buf_init(&reply, 64, 1);
 	called = ssh_mon_call(SSHD_FD_MONITOR, type, body, size, &reply_type, &reply);
-	if (called != 0 || reply_type != SSH_MON_RESULT || reply.size != CHILD_RESULT_SIZE) {
+	if (called != 0 ||
+	    reply_type != SSH_MON_RESULT ||
+	    reply.size != CHILD_RESULT_SIZE) {
 		ssh_buf_free(&reply);
 		return EIO;
 	}
@@ -326,7 +330,9 @@ sshd_child_flush(
 		}
 		if (written < 0 && errno == EINTR)
 			continue;
-		if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+		if (written < 0 &&
+		    errno != EAGAIN &&
+		    errno != EWOULDBLOCK)
 			return EIO;
 
 		/* Waits until the connection takes more. */

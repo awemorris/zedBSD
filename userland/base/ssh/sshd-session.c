@@ -348,7 +348,9 @@ session_take_start(
 		ssh_reader_get_cstring(&reader, user, SSH_USER_MAX + 1U);
 		ssh_reader_get_string(&reader, &data, &size);
 		status = ssh_reader_finish(&reader);
-		if (status == 0 && (user[0] == '\0' || size == 0))
+		if (status == 0 &&
+		    (user[0] == '\0' ||
+		     size == 0))
 			status = EPROTO;
 		if (status == 0) {
 			ssh_buf_put_bytes(state, data, size);
@@ -409,7 +411,8 @@ session_become_user(
 	}
 	real_user = getuid();
 	real_group = getgid();
-	if (real_user != session->account.pw_uid || geteuid() != session->account.pw_uid)
+	self = geteuid();
+	if (real_user != session->account.pw_uid || self != session->account.pw_uid)
 		return EPERM;
 	if (session->child.privileged && real_group != session->account.pw_gid)
 		return EPERM;
@@ -510,6 +513,7 @@ session_serve(
 	const uint8_t *pending;
 	size_t size;
 	ssize_t got;
+	size_t room;
 	unsigned count;
 	unsigned index;
 	int timeout;
@@ -586,7 +590,8 @@ session_serve(
 			link = &session->links[index];
 			if (link->channel == NULL || !link->started)
 				continue;
-			if (size < SESSION_OUTPUT_SOFT && ssh_channel_send_room(link->channel) > 0) {
+			room = ssh_channel_send_room(link->channel);
+			if (size < SESSION_OUTPUT_SOFT && room > 0) {
 				if (link->from_child >= 0 && !link->out_done) {
 					waiting[count].fd = link->from_child;
 					waiting[count].events = POLLIN;
@@ -613,7 +618,8 @@ session_serve(
 		for (index = 0; index < count; index++)
 			waiting[index].revents = 0;
 		timeout = SESSION_POLL_MS;
-		if (session->child.config.client_alive_interval != 0 && session->child.config.client_alive_interval < (unsigned)(SESSION_POLL_MS / 1000))
+		if (session->child.config.client_alive_interval != 0 &&
+		    session->child.config.client_alive_interval < (unsigned)(SESSION_POLL_MS / 1000))
 			timeout = (int)session->child.config.client_alive_interval * 1000;
 		ready = poll(waiting, (nfds_t)count, timeout);
 		if (ready < 0 && errno != EINTR) {
@@ -930,7 +936,9 @@ session_request(
 
 	/* Carries out what may be carried out. */
 	success = 0;
-	if (link != NULL && channel->state == SSH_CHANNEL_OPEN && !link->finished) {
+	if (link != NULL &&
+	    channel->state == SSH_CHANNEL_OPEN &&
+	    !link->finished) {
 		switch (request.type) {
 		case SSH_CREQ_PTY:
 			if (!link->started && !link->have_pty)
@@ -956,7 +964,9 @@ session_request(
 			break;
 		case SSH_CREQ_SUBSYSTEM:
 			status = strcmp(request.name, SESSION_SFTP);
-			if (!link->started && status == 0 && session->child.config.sftp_command[0] != '\0') {
+			if (!link->started &&
+			    status == 0 &&
+			    session->child.config.sftp_command[0] != '\0') {
 				status = session_start(session, link, session->child.config.sftp_command, strlen(session->child.config.sftp_command));
 				if (status == 0)
 					success = 1;
@@ -975,7 +985,9 @@ session_request(
 			break;
 		case SSH_CREQ_SIGNAL:
 			number = session_signal_number(request.name);
-			if (link->started && !link->exited && number != 0) {
+			if (link->started &&
+			    !link->exited &&
+			    number != 0) {
 				status = kill(-link->child, number);
 				if (status == 0)
 					success = 1;
@@ -1088,7 +1100,9 @@ session_env(
 	name_size = strlen(request->name);
 	for (index = 0; index < name_size; index++) {
 		byte = request->name[index];
-		if ((byte < 'A' || byte > 'Z') && (byte < '0' || byte > '9') && byte != '_')
+		if ((byte < 'A' || byte > 'Z') &&
+		    (byte < '0' || byte > '9') &&
+		    byte != '_')
 			return 0;
 	}
 
@@ -1341,7 +1355,9 @@ session_build_environment(
 	/* Then the client's, without a TERM when pty-req gave one. */
 	for (index = 0; index < link->env_count; index++) {
 		same = strncmp(link->env[index], "TERM=", 5);
-		if (same == 0 && link->have_pty && link->term[0] != '\0')
+		if (same == 0 &&
+		    link->have_pty &&
+		    link->term[0] != '\0')
 			continue;
 		environment[count++] = (char *)link->env[index];
 	}
@@ -1449,7 +1465,9 @@ session_pump(
 			continue;
 		if (written <= 0) {
 			/* A child that closed its input takes nothing more; the data is dropped. */
-			if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+			if (written < 0 &&
+			    errno != EAGAIN &&
+			    errno != EWOULDBLOCK) {
 				ssh_buf_reset(&session->message);
 				ssh_channel_consumed(link->channel, link->input.size, &session->message);
 				(void)session_send(session);
@@ -1466,7 +1484,9 @@ session_pump(
 	}
 
 	/* The client's EOF closes the input once it is all written. */
-	if (link->client_eof && link->input.size == 0 && !link->have_pty)
+	if (link->client_eof &&
+	    link->input.size == 0 &&
+	    !link->have_pty)
 		session_close_descriptor(&link->to_child);
 }
 
@@ -1499,7 +1519,10 @@ session_read_child(
 	if (descriptor < 0 || room == 0)
 		return SESSION_READ_NONE;
 	got = read(descriptor, chunk, room);
-	if (got < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+	if (got < 0 &&
+	    (errno == EINTR ||
+	     errno == EAGAIN ||
+	     errno == EWOULDBLOCK))
 		return SESSION_READ_NONE;
 	if (got <= 0) {
 		/* The stream ended. */
@@ -1542,7 +1565,9 @@ session_finish(
 	int found;
 
 	/* Waits for the child. */
-	if (!link->started || !link->exited || link->finished)
+	if (!link->started ||
+	    !link->exited ||
+	    link->finished)
 		return 0;
 
 	/* Takes what the terminal still holds; once it holds nothing, its output is done. */
@@ -1610,7 +1635,9 @@ session_release(
 	int status;
 
 	/* Hangs up a child that still runs. */
-	if (link->started && !link->exited && link->child > 0)
+	if (link->started &&
+	    !link->exited &&
+	    link->child > 0)
 		(void)kill(-link->child, SIGHUP);
 
 	/* Closes every descriptor of the link (the master is both of a terminal's ends). */
@@ -1639,7 +1666,9 @@ session_release(
 	}
 
 	/* A link whose channel is freed is unused again. */
-	if (link->channel != NULL && link->channel->close_sent && link->channel->close_received) {
+	if (link->channel != NULL &&
+	    link->channel->close_sent &&
+	    link->channel->close_received) {
 		link->channel->user = NULL;
 		link->channel = NULL;
 	}

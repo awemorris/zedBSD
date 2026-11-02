@@ -61,6 +61,7 @@ static int case_user_change(struct client *client);
 static int case_service(struct client *client);
 static int case_requests(struct client *client);
 static int case_signal(struct client *client);
+static int case_max_sessions(struct client *client);
 static int fail(const char *name, const char *what);
 
 /* Takes any host key: the test's known_hosts is not this client's concern. */
@@ -443,8 +444,8 @@ case_requests(
 	int status;
 	int success;
 	int index;
-	static const char *names[] = { "LD_PRELOAD", "LANG", "LC_", "lc_all", "LC_ALL" };
-	static const int expected[] = { 0, 1, 0, 0, 1 };
+	static const char *names[] = { "LD_PRELOAD", "LANG", "LC_", "lc_all", "LC_ALL", "LC_A-B", "LC_A=B", "TERM", "LANGUAGE" };
+	static const int expected[] = { 0, 1, 0, 0, 1, 0, 0, 1, 0 };
 
 	status = client_login(client);
 	if (status == 0)
@@ -453,7 +454,7 @@ case_requests(
 		return fail("requests", "login or open");
 
 	/* env with a reply wanted (the field after the name in RFC 4254 6.4 is set by hand). */
-	for (index = 0; index < 5; index++) {
+	for (index = 0; index < (int)(sizeof(names) / sizeof(names[0])); index++) {
 		ssh_channel_put_env(channel, names[index], "x", &client->out);
 		client->out.data[1U + 4U + 4U + 3U] = 1;
 		status = client_send(client);
@@ -552,6 +553,46 @@ case_signal(
 	return 0;
 }
 
+/* With MaxSessions 1, a second session channel is confirmed and closed at once; the first runs on. */
+static int
+case_max_sessions(
+	struct client *client)
+{
+	struct ssh_channel *first;
+	struct ssh_channel *second;
+	struct ssh_channel *other;
+	int status;
+
+	status = client_login(client);
+	if (status == 0)
+		status = client_open(client, &first);
+	if (status != 0)
+		return fail("max-sessions", "login or open");
+	ssh_channel_put_exec(first, (const uint8_t *)"sleep 2; echo first", 19, &client->out);
+	status = client_send(client);
+	if (status == 0)
+		status = client_wait(client, SSH_MSG_CHANNEL_SUCCESS, first);
+	if (status != 0)
+		return fail("max-sessions", "first exec");
+	status = client_open(client, &second);
+	if (status != 0)
+		return fail("max-sessions", "second open");
+	status = client_next(client);
+	if (status != 0 || client->payload.data[0] != SSH_MSG_CHANNEL_CLOSE)
+		return fail("max-sessions", "the second channel was not closed at once");
+	status = ssh_channel_parse_end(&client->channels, client->payload.data, client->payload.size, &other);
+	if (status != 0 || other != second)
+		return fail("max-sessions", "the close was not the second channel's");
+	ssh_channel_put_close(second, &client->out);
+	status = client_send(client);
+	(void)ssh_channel_closed(&client->channels, second);
+	if (status == 0)
+		status = client_wait(client, SSH_MSG_CHANNEL_CLOSE, first);
+	if (status != 0)
+		return fail("max-sessions", "the first channel did not end");
+	return 0;
+}
+
 /* Prints a failure and returns 1. */
 static int
 fail(
@@ -602,6 +643,8 @@ main(
 		status = case_requests(&client);
 	else if (strcmp(argv[4], "signal") == 0)
 		status = case_signal(&client);
+	else if (strcmp(argv[4], "max-sessions") == 0)
+		status = case_max_sessions(&client);
 	else
 		status = fail(argv[4], "no such case");
 	if (status == 0)

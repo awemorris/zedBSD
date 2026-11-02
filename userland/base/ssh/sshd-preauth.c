@@ -360,7 +360,9 @@ preauth_serve(
 				status = ssh_transport_input(&preauth->transport, chunk, (size_t)got);
 				if (status != 0)
 					break;
-			} else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+			} else if (errno != EINTR &&
+			    errno != EAGAIN &&
+			    errno != EWOULDBLOCK) {
 				status = EIO;
 				break;
 			}

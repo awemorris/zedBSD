@@ -167,7 +167,7 @@ echo "ok rekey ($kex exchanges)"
 # no command.  The login record is refused on this host (no process list), which only the log shows.
 base_config > "$work/pty.config"
 start_driver pty
-run_ssh pty -o IdentityFile="$work/client_key" -o LogLevel=ERROR -tt 127.0.0.1 'tty; echo "TERM=$TERM"; ls /proc/$$/fd | tr "\n" " "; echo' \
+run_ssh pty -o IdentityFile="$work/client_key" -o LogLevel=ERROR -tt 127.0.0.1 'tty; echo "TERM=$TERM"; echo "Y=$SSH_TTY"; ls /proc/$$/fd | tr "\n" " "; echo' \
     > "$work/pty.out" 2> "$work/pty.err"
 rc=$?
 end_driver pty
@@ -175,6 +175,7 @@ end_driver pty
 tr -d '\r' < "$work/pty.out" > "$work/pty.txt"
 grep -Eq '^/dev/pts/[0-9]+$' "$work/pty.txt" || fail "pty: $(cat "$work/pty.txt")"
 grep -qx 'TERM=xterm-test' "$work/pty.txt" || fail "pty: TERM $(cat "$work/pty.txt")"
+[ "Y=$(grep -E '^/dev/pts/' "$work/pty.txt")" = "$(grep '^Y=' "$work/pty.txt")" ] || fail "pty: SSH_TTY $(cat "$work/pty.txt")"
 grep -qx '0 1 2 ' "$work/pty.txt" || fail "pty: descriptors $(cat "$work/pty.txt")"
 grep -q 'no login record' "$work/log" || fail "pty: the record's refusal is not logged"
 base_config > "$work/login.config"
@@ -250,8 +251,9 @@ echo "ok tries"
 
 # The cases of the library's client: requests on a closing channel, the order of the channel's end, a change of user
 # or service, refused and repeated requests, a signal.
-for case in closing user-change service requests signal; do
+for case in closing user-change service requests signal max-sessions; do
 	base_config > "$work/raw-$case.config"
+	[ "$case" = max-sessions ] && echo "MaxSessions 1" >> "$work/raw-$case.config"
 	start_driver "raw-$case"
 	timeout 90 "$work/sshd-pair-client" "$port" "$user" "$work/client_key" "$case" > "$work/raw-$case.out" 2>&1
 	rc=$?
