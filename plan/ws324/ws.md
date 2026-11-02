@@ -81,3 +81,4 @@
 - 2026-11-01 21:46 Q1: ユーザーの指示で前倒し、p001 を P1（q1854）に。WS291 の P1 の返却の後に起動。
 - 2026-10-30 Q1: 作成。WS318 の completed の後。
 - 2026-11-02 06:16 Q1: Q324-3 と Q322-4 の食い違いの整理: WS324 の p004 が未着手のうちに WS322 p005 が先に着手したので、libvulkan の H.265 decode の転送は P2 が ws322-p005 で WS324 の design §10（StdVideoH265 の全部、capset の bit 2）どおりに作り、WS324 の p004 はそれをそのまま使う（p004 は残りの確かめだけ）。H.265 の Vulkan の header（Khronos、Apache-2.0、Debian libvulkan-dev 1.4.309.0-1 の複写）も p005 の最初の commit で入れる（WS324 の design §11 の段 1）。encode の転送（p008a）は今までどおり WS324。
+- 2026-11-02 10:37 Q1: P1 の 0471507af（transform skip の大きさ、scaling list の列順、filter の buffer の大きさ、状態の log、probe の --copy の host memory）を main に merge（68c4519b7）。main で hevc 160・h265 wire 54・nvdec 88 PASS、vmunix warning 0。RTX で HEVC_v1 130 本のうち 126 本が全 frame 一致（P1）。
