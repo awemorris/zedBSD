@@ -532,6 +532,17 @@ test_bare(void)
 	CHECK(out.bitstream_size == 100U);
 	CHECK(out.available_size == 10U);
 
+	/* A chunk size one over what the data holds fails for the whole file, and 8 over too. */
+	put_le32(data + 4, 11UL);
+	error = parse_exact(data, 18U, 1, &out);
+	CHECK(error == ENOBUFS);
+	put_le32(data + 4, 18UL);
+	error = parse_exact(data, 18U, 1, &out);
+	CHECK(error == ENOBUFS);
+	put_le32(data + 4, 10UL);
+	error = parse_exact(data, 18U, 1, &out);
+	CHECK(error == 0);
+
 	/* A chunk size above the format's limit is a failure even for data that may be cut. */
 	put_le32(data + 4, 0xfffffff7UL);
 	error = parse_exact(data, 18U, 0, &out);
@@ -878,6 +889,20 @@ test_vp8x_errors(void)
 	error = parse_both(file, file_len);
 	CHECK(error == EINVAL);
 
+	/*
+	 * The largest area that is allowed, 65537 x 65535 = 2^32 - 1: read as
+	 * features of a file that ends after the VP8X chunk, it succeeds.
+	 */
+	make_vp8x(vp8x, 0U, 65537UL, 65535UL);
+	file_start();
+	file_chunk("VP8X", vp8x, 10UL, 10UL);
+	file_end();
+	error = parse_exact(file, file_len, 0, &out);
+	CHECK(error == 0);
+	CHECK(out.width == 65537U);
+	CHECK(out.height == 65535U);
+	CHECK(out.extended == 1);
+
 	/* One short of the limit: 65536 x 65535 (area 4294901760) passes the area check and fails on the bitstream's size. */
 	make_vp8x(vp8x, 0U, 65536UL, 65535UL);
 	file_start();
@@ -897,6 +922,12 @@ test_vp8x_errors(void)
 	put_le32(file + 22, 10UL);
 	memcpy(file + 26, frame, 10);
 	error = parse_both(file, 36U);
+	CHECK(error == EINVAL);
+
+	/* A VP8X chunk with no RIFF header and nothing after it: still a failure for the features. */
+	error = parse_exact(file, 18U, 0, &out);
+	CHECK(error == EINVAL);
+	error = parse_exact(file, 18U, 1, &out);
 	CHECK(error == EINVAL);
 
 	/* A VP8X chunk with no RIFF header, cut inside its 18 bytes: it is too short first. */
@@ -1117,6 +1148,15 @@ test_lossy_header_errors(void)
 	error = parse_both(file, file_len);
 	CHECK(error == EINVAL);
 
+	/* A first partition size with a bit above the 16th (bit 16 of the size, bit 21 of the tag). */
+	make_vp8_frame(frame, 0x10U, 100U, 50U);
+	put_le24(frame, 0x10UL | (0x10000UL << 5));
+	file_start();
+	file_chunk("VP8 ", frame, 10UL, 10UL);
+	file_end();
+	error = parse_both(file, file_len);
+	CHECK(error == EINVAL);
+
 	/* A width of 0 and a height of 0, also when only the scale bits are set. */
 	make_vp8_frame(frame, 0x30U, 0U, 50U);
 	file_start();
@@ -1296,6 +1336,7 @@ test_incomplete(void)
 	uint8_t alph[3];
 	uint8_t longer[16];
 	struct webpc_container out;
+	size_t copy_len;
 	int error;
 
 	/* VP8X (no flags) and nothing else, File Size claims more: the canvas and an UNDEFINED format. */
@@ -1367,6 +1408,14 @@ test_incomplete(void)
 	CHECK(out.has_alpha == 1);
 	CHECK(out.format == WEBPC_FORMAT_UNDEFINED);
 	CHECK(out.bitstream == NULL);
+
+	/* A cut exactly after the ALPH chunk: the chunk is whole, so it is kept. */
+	copy_len = 30U + 12U;
+	error = parse_exact(file, copy_len, 0, &out);
+	CHECK(error == 0);
+	CHECK(out.has_alpha == 1);
+	CHECK(out.alpha != NULL);
+	CHECK(out.alpha_size == 3U);
 
 	/* A cut inside the ALPH chunk: it is not found, so the alpha stays as the flag says. */
 	error = parse_exact(file, 30U + 11U, 0, &out);

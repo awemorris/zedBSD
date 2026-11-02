@@ -21,7 +21,7 @@
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | ws344-p001 | 設計（標準廉価実装手順 §4）: module・header・骨格・試験の道具・実装の Phase の表、試験の画像（cwebp で作る 364 file） | cleared（2026-11-02 13:25 Q1、BASE aa2426a57 を main に merge。main で sysroot を作り直して libwebp-compat.so を build）。実施済み・道具の確かめ PASS（P2 q1939、2026-11-02、BASE aa2426a576、Q1 の受け入れ待ち） | — |
-| ws344-p002 | container（riff.c、test-riff） | in-progress（2026-11-02 13:21 Sonnet q1946-i01） | p001 |
+| ws344-p002 | container（riff.c、test-riff） | 実装済み・試験 PASS（Sonnet q1946-i01、2026-11-02、test-riff 42324 checks、Q1 の受け入れ待ち） | p001 |
 | ws344-p003 | VP8L の bit reader と prefix code（lbits.c・prefix.c） | in-progress（2026-11-02 13:21 Sonnet q1947-i01） | p001 |
 | ws344-p004 | VP8L の code の読み（vp8l-codes.c） | planned | p003 |
 | ws344-p005 | VP8L の entropy-coded image（vp8l-image.c） | planned | p004 |

@@ -2,7 +2,7 @@
 
 # ws344-p002 container（riff.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet q1946-i01、2026-11-02、Q1 の受け入れ待ち）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p001。
 - 目的: RIFF・VP8X・optional chunk・bitstream の chunk を読み、features と bitstream・ALPH の位置を返す。状態の規則は libwebp と同じ。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -70,4 +70,29 @@ git diff --check
 
 ## 結果
 
-（未着手）
+- 日付: 2026-11-02（host の `date`）。担当: Sonnet 5.5（q1946-i01）。worktree `/home/awe/zedBSD-worktrees/s-ws344-p002`、branch `agent/s-ws344-p002`。
+- 作った物: `userland/desktop/libwebp-compat/riff.c`（`webpc_riff_parse` と static の補助 7 つ）、`plan/ws344/tests/unit/test-riff.c`。header・道具・Makefile は変えていない。
+- 実行した command と最後の行:
+  - `sh plan/ws344/tests/run-unit.sh riff` → `test-riff: PASS (42324 checks)` / `run-unit: PASS`
+  - `sh plan/ws344/tests/run-unit.sh all` → `test-common: PASS (32 checks)`、`test-helpers: PASS (26 checks)`、`test-riff: PASS (...)`、`run-unit: PASS`
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`
+  - `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`
+  - `git diff --check` → 出力なし。
+- 試験の中身: 手で組んだ file（simple VP8・VP8L、VP8X+ALPH+VP8、VP8X+ICCP+奇数の未知 chunk+VP8L+後ろの chunk、裸の VP8・VP8L、RIFF の無い chunk、余りの byte）、step 1〜8 の各誤り、VP8 header の各 field（version 0..7、partition 19 bit、14 bit の size と scale、start code の 3 byte）、VP8L header（version 1..7、14 bit の size の端）、has_alpha の規則（flag × alpha bit の 4 通り、ALPH）、animation、complete 0 の部分の file、4 種の有効な file を 0〜長さ - 1 の全長で切る（complete 0 と 1、ちょうどの大きさの malloc の複写で ASan）、乱数 10000 個（RIFF・VP8X・既知の tag を混ぜた構造入り、各 complete 0・1）。期待の値は RFC の図と手の計算（VP8L の `2f 02 40 00 10` など）だけから作った。
+- わざと壊す確かめ（git の外、`build/tmp/ws344-mut-p002/mut.py`、99 通りの変異: 境界の比較を 1 つずらす・符号を逆にする・bit の位置と幅・定数・分岐の削除）: 最初の版の見逃し 12 件のうち 5 件は試験を足して塞いだ（canvas の面積ちょうど 2^32 - 1、RIFF の無い VP8X のちょうど 18 byte、ちょうど ALPH で終わる部分の file、RIFF の無い chunk の size が data を 8 越える、partition size の bit 16）。残った見逃し 7 件は全て等価の変異（観測できる違いが無い）: 
+  - 「tag の 4 byte が残っていない」の判定（step 4、`< 4` を `< 3`・`<= 4` に）: 直後の step 5・6 が 8 byte 未満を同じ ENOBUFS（拡張形式は soften で 0）にするため、結果が同じ。header の手順どおりに残した。
+  - step 5 の chunk size の `> 0xfffffff6` を `>=` に: size ちょうど 0xfffffff6 の chunk は padded size が必ず File Size を越えて直後の和の検査で EINVAL になる。
+  - 裸の bitstream の判定の `left >= 5` と `chunk[4] >> 5`: ここへ来る時は left が常に 8 以上。signature 0x2f は frame tag の bit 0 が 1（interframe）なので、lossless と見なされなくても lossy の検査で必ず EINVAL になり、失敗の時の format は未規定。
+  - soften の中の bitstream の項目を 0 にする代入: 成功の前は元々 0。
+  - step 6 の `left < 8`: step 5 と step 3 を通った時は left が常に 8 以上。
+  - 元に戻したことは `git status`（riff.c は無変更、複写だけで変異した）で確かめた。
+- 自分で決めた点（header が黙っている所）:
+  1. File Size + 8 より長い data は complete 0 でも切る（header の「Bytes after File Size + 8 are never used」）。File Size が小さく VP8X の 18 byte が切れた範囲に入る時は、VP8X が「そこに無い」ので ENOBUFS（失敗）。VP8X の後で 8 byte 未満しか残らない時は complete 0 で部分の成功、complete 1 で ENOBUFS。
+  2. RIFF の無い bitstream の chunk の size が 0xfffffff6 を越える時は、complete 1 の「data より大」の ENOBUFS の後で EINVAL にした（libwebp の ParseHeadersInternal の compressed_size の検査に合わせた。header の step 6 は RIFF の File Size - 12 だけを書く）。
+  3. complete 0 の部分の成功でも、見つけた ALPH の alpha・alpha_size は out に残す（header は has_alpha に含めると書くだけ）。bitstream・bitstream_size・available_size は 0 / NULL。
+  4. has_alpha の計算: VP8X の flag → VP8L の alpha_is_used で置き換え（lossless のみ）→ ALPH があれば 1。VP8L の header に届かず部分の成功になった時は flag と ALPH のみ。
+  5. 部分の成功の時の format は step 6 を通っていれば LOSSY / LOSSLESS、通っていなければ UNDEFINED。animation は UNDEFINED のまま（step 3 の直後に返る）。
+  6. 内部の補助の名前は riff_state・tag_is・parse_riff_header・parse_vp8x・parse_optional_chunks・parse_bitstream_chunk・read_lossy_header・read_lossless_header・soften（全て static）。
+- 仕様と phase.md・header の食い違い: 無し。header の step 4 は step 5・6 の検査と重なる（等価の変異の 1 つ目）が、誤りではない。
+- 未実施: fixtures の全体の試験（phase.md の command に無い。p019 の compare で確かめる）、QEMU・実機（この Phase の範囲外）。
+- Q1 が消す物: `/home/awe/zedBSD-worktrees/s-ws344-p002/build/tmp/`（ws344-unit・ws344-skeleton・ws344-mut-p002 など、使い捨て）。
