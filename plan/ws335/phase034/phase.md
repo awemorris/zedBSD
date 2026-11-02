@@ -66,10 +66,10 @@ Parent: [WS335](../ws.md)。担当: Opus（敵対的な review。実装の担当
 | `FUZZ_SECONDS=300 sh plan/ws335/tests/run-fuzz.sh`（11 target を並べて 5 分、修正後の code） | `run-fuzz: PASS`、crash 0。実行の回数: der 4.35M、x509 26.1M、pem 1.42M、server-hello 91.7M、encrypted-extensions 120.6M、certificate 59.3M、server-key-exchange 93.6M、msg-other 83.3M、record 148k、conn 30k、mlkem 87k |
 | 各 target 1 時間 | FUZZ_HOUR_RESULT |
 | `WS335_VECTORS=… sh plan/ws335/tests/run-unit.sh all` | test と ct の 57 本が PASS、`run-unit: PASS` |
-| `WS335_VECTORS=… sh plan/ws335/tests/run-unit.sh --win32 all` | WIN32_UNIT_RESULT |
+| `WS335_VECTORS=… sh plan/ws335/tests/run-unit.sh --win32 all` | test と ct の 57 本が PASS（win32）、`run-unit: PASS` |
 | `BASE=ddc678f690 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: PASS` |
 | `sh plan/ws335/tests/run-interop.sh` | `run-interop: PASS (139 cases, 0 of them known limits)` |
-| `sh plan/ws335/tests/run-interop.sh --win32` | WIN32_INTEROP_RESULT |
+| `sh plan/ws335/tests/run-interop.sh --win32` | `run-interop: PASS (47 cases, 0 of them known limits)` |
 | `sh plan/ws335/tests/run-limbo.sh` | `run-limbo: PASS` |
 | わざと壊す（写しから戻し cmp で確かめた） | iPAddress の mask の修正を外す → test-name 3 件 FAIL。close_notify の後の送りを戻す → test-conn FAIL。SSL_connect の FAILED の確かめを外す → test-api-ssl 5 件 FAIL。1.2 の CCS の確かめを外す → test-hs13 3 件 FAIL |
 
