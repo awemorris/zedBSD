@@ -76,7 +76,7 @@ for tool in "$sshd_program" "$openssh_keygen" "$openssh_client" "$python"; do
 	fi
 done
 
-if ! SSH_SOURCE_DIR=${SSH_SOURCE_DIR:-userland/base/ssh} sh plan/ws336/tests/build-host.sh "$out/bin" ssh ssh-keygen \
+if ! SSH_SOURCE_DIR=${SSH_SOURCE_DIR:-userland/base/ssh} sh plan/ws336/tests/build-host.sh "$out/bin" ssh ssh-keygen sftp-server \
     > "$out/build.log" 2>&1; then
 	tail -20 "$out/build.log"
 	echo "interop-host: FAIL (build)"
@@ -846,7 +846,7 @@ HostKey $work/server/host_key
 AuthorizedKeysFile .ssh/authorized_keys
 PasswordAuthentication no
 LoginGraceTime 30
-Subsystem sftp /usr/lib/openssh/sftp-server
+Subsystem sftp $out/bin/sftp-server
 EOF
 }
 { echo "HostKey $work/server/rsa_key"; b_config "$port_b"; } > "$b_dir/sshd_config"
@@ -987,6 +987,96 @@ grep -q 'b-dir/two' "$work/b-sftp.out"
 check "B: sftp ls shows the renamed file" $?
 cmp -s "$work/b-small" "$work/b-small.back"
 check "B: sftp put, rename and get keep the bytes" $?
+
+# --- zedBSD's sftp-server through zedBSD's sshd: scp -r of a directory, scp -p (times and modes), and the sftp
+# requests one by one.
+mkdir -p "$work/tree/sub/deeper"
+printf 'one\n' > "$work/tree/one"
+head -c 70000 /dev/urandom > "$work/tree/sub/two"
+printf 'three\n' > "$work/tree/sub/deeper/three"
+oscp -r "$work/tree" 127.0.0.1:b-tree > "$work/b-scp3.out" 2>&1
+expect_eq "B: scp -r up exit" "$?" 0
+oscp -r 127.0.0.1:b-tree "$work/tree-back" > "$work/b-scp4.out" 2>&1
+expect_eq "B: scp -r down exit" "$?" 0
+diff -r "$work/tree" "$work/tree-back" > /dev/null 2>&1
+check "B: scp -r keeps the tree" $?
+printf 'kept\n' > "$work/timed"
+chmod 640 "$work/timed"
+touch -d @1000000000 "$work/timed"
+oscp -p "$work/timed" 127.0.0.1:b-timed > "$work/b-scp5.out" 2>&1
+expect_eq "B: scp -p up exit" "$?" 0
+expect_eq "B: scp -p up keeps the mode and the time" "$(stat -c '%a %Y' "$b_dir/home/b-timed" 2>/dev/null)" "640 1000000000"
+chmod 604 "$b_dir/home/b-timed"
+touch -d @1100000000 "$b_dir/home/b-timed"
+oscp -p 127.0.0.1:b-timed "$work/timed-back" > "$work/b-scp6.out" 2>&1
+expect_eq "B: scp -p down exit" "$?" 0
+expect_eq "B: scp -p down keeps the mode and the time" "$(stat -c '%a %Y' "$work/timed-back" 2>/dev/null)" "604 1100000000"
+cat > "$work/b-sftp2.batch" <<EOF
+mkdir b-gone
+rmdir b-gone
+put $work/b-small b-file
+symlink b-file b-symlink
+-get b-missing $work/b-missing.back
+-get b-noperm $work/b-noperm.back
+rm b-file
+EOF
+printf 'secret\n' > "$b_dir/home/b-noperm"
+chmod 000 "$b_dir/home/b-noperm"
+timeout 60 env -i PATH="$PATH" /usr/bin/sftp -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes \
+    -i "$HOME/.ssh/id_ed25519" -o UserKnownHostsFile="$known_b" -o GlobalKnownHostsFile=/dev/null -P "$port_b" \
+    -b "$work/b-sftp2.batch" 127.0.0.1 > "$work/b-sftp2.out" 2>&1
+expect_eq "B: sftp -b of mkdir, rmdir, put, symlink, get, rm exit" "$?" 0
+[ ! -e "$b_dir/home/b-gone" ]
+check "B: sftp rmdir removed the directory" $?
+expect_eq "B: sftp symlink makes the link point at its target" "$(readlink "$b_dir/home/b-symlink" 2>/dev/null)" b-file
+[ ! -e "$b_dir/home/b-file" ] && [ -L "$b_dir/home/b-symlink" ]
+check "B: sftp rm removed the file and left the link" $?
+grep -q 'b-missing" not found' "$work/b-sftp2.out"
+check "B: sftp get of a missing file says it is not found (NO_SUCH_FILE)" $?
+grep -q 'Permission denied' "$work/b-sftp2.out"
+check "B: sftp get of a file without permission says Permission denied" $?
+chmod 600 "$b_dir/home/b-noperm"
+
+# --- zedBSD's sftp-server on its own: the protocol (expected bytes from the draft), then 5000 runs of requests
+# with short names in an empty directory, and 5000 runs of random bytes against a build whose file system calls all go
+# to sftp-fs-stub.c.  That build fails closed: sftp-server-main.c may call no file system function the stub lacks.
+# INTEROP_FUZZ_RUNS=<n> runs fewer of each kind (for the checks of a changed copy); 5000 of each is the phase's 10000.
+fuzz_runs=${INTEROP_FUZZ_RUNS:-5000}
+mkdir -p "$work/sftp-raw" "$work/sftp-fuzz"
+"$python" -I plan/ws336/tests/sftp-host.py raw "$out/bin/sftp-server" "$work/sftp-raw" > "$work/sftp-raw.out" 2>&1
+check "sftp-server: the protocol checks ($(grep -c '^ok' "$work/sftp-raw.out") ok, $(grep '^FAIL' "$work/sftp-raw.out" | tr '\n' ' '))" $?
+cc -std=c89 -O1 -D_DEFAULT_SOURCE -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto -c "$source_dir/sftp-server-main.c" \
+    -o "$out/sftp-server-main.o" > "$out/sftp-stub.build.log" 2>&1
+stub_allowed=" chmod chown close closedir fchmod fchown fstat ftruncate futimens getgrgid getpwuid link lstat mkdir open opendir pread pwrite readdir readlink realpath rename rmdir stat symlink truncate unlink utimensat __errno_location malloc free fwrite read write snprintf sprintf strlen strcmp strrchr strcpy memcpy memset memchr stderr time "
+unexpected=""
+for symbol in $(nm -u "$out/sftp-server-main.o" | awk '{print $2}'); do
+	case "$symbol" in
+	ssh_*) continue ;;
+	esac
+	case "$stub_allowed" in
+	*" $symbol "*) ;;
+	*) unexpected="$unexpected $symbol" ;;
+	esac
+done
+expect_eq "sftp-server calls nothing the stub does not answer" "$unexpected" ""
+stub_ok=1
+if [ -z "$unexpected" ]; then
+	# shellcheck disable=SC2086
+	timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -D_DEFAULT_SOURCE -fsanitize=address,undefined \
+	    -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto \
+	    "$source_dir/sftp-server-main.c" plan/ws336/tests/sftp-fs-stub.c $b_modules -lcrypto -o "$out/bin/sftp-server-stub" \
+	    >> "$out/sftp-stub.build.log" 2>&1 && stub_ok=0
+fi
+check "the stubbed sftp-server builds" "$stub_ok"
+"$python" -I plan/ws336/tests/sftp-host.py fuzz-structured "$out/bin/sftp-server" "$work/sftp-fuzz" "$fuzz_runs" \
+    > "$work/sftp-fuzz1.out" 2>&1
+check "sftp-server: $fuzz_runs runs of requests with short names ($(tail -1 "$work/sftp-fuzz1.out"))" $?
+if [ "$stub_ok" = 0 ]; then
+	mkdir -p "$work/sftp-stub"
+	"$python" -I plan/ws336/tests/sftp-host.py fuzz-random "$out/bin/sftp-server-stub" "$work/sftp-stub" "$fuzz_runs" \
+	    > "$work/sftp-fuzz2.out" 2>&1
+	check "sftp-server: $fuzz_runs runs of random bytes ($(tail -1 "$work/sftp-fuzz2.out"))" $?
+fi
 
 # --- refused algorithms, and the server still serves.
 ossh -o KexAlgorithms=curve25519-sha256 -p "$port_b" 127.0.0.1 'echo reached' > "$work/b4.out" 2> "$work/b4.err"
