@@ -12,7 +12,7 @@
 | P3 | [BUG-412](bugs/BUG-412.md) | Pi 5・USB | 締め: xHCI の直しを main に、debug・試験用の部分を外す、Pi 5 を main の普段の kernel に（q1997、23:23） | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | [WS345](ws345/ws.md) | ブラウザ | p009（iframe ごとの script の thread）cleared。p010（origin ごとの agent、q1995）に 22:58 着手 | — |
-| P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p021（package と amd64 の build、passkey-fido2 の規則が OpenSSL を作らせていたのを直した）cleared。p022（QEMU の相互運用、q1991）に 21:15 着手 | — |
+| P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p022（QEMU の相互運用 53/53、root の道と privsep、libc の ttyname の直し）cleared。p023（他の arch の build、q1998）に 23:27 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | [WS345](ws345/ws.md) | ブラウザ | p007 cleared。p014（応答しない頁の確かめの表示、q1996）に 22:58 着手 | — |
 
