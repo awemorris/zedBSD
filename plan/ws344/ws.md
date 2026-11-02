@@ -23,7 +23,7 @@
 | ws344-p001 | 設計（標準廉価実装手順 §4）: module・header・骨格・試験の道具・実装の Phase の表、試験の画像（cwebp で作る 364 file） | cleared（2026-11-02 13:25 Q1、BASE aa2426a57 を main に merge。main で sysroot を作り直して libwebp-compat.so を build）。実施済み・道具の確かめ PASS（P2 q1939、2026-11-02、BASE aa2426a576、Q1 の受け入れ待ち） | — |
 | ws344-p002 | container（riff.c、test-riff） | cleared（2026-11-02 13:39 Q1、main で test-riff 42324・run-unit all PASS）。実装済み・試験 PASS（Sonnet q1946-i01、2026-11-02、test-riff 42324 checks、Q1 の受け入れ待ち） | p001 |
 | ws344-p003 | VP8L の bit reader と prefix code（lbits.c・prefix.c） | cleared（2026-11-02 13:36 Q1、main で test-lbits・test-prefix PASS）。実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p001 |
-| ws344-p004 | VP8L の code の読み（vp8l-codes.c） | in-progress（2026-11-02 13:36 Sonnet q1950-i01） | p003 |
+| ws344-p004 | VP8L の code の読み（vp8l-codes.c） | 実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p003 |
 | ws344-p005 | VP8L の entropy-coded image（vp8l-image.c） | planned | p004 |
 | ws344-p006 | VP8L の逆変換（vp8l-transform.c） | planned | p001 |
 | ws344-p007 | VP8L の decoder（vp8l.c、run-fixtures lossless） | planned | p002, p005, p006 |
