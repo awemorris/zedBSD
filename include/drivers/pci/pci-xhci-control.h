@@ -108,8 +108,8 @@ drv_xhci_endpoint_context_word1(unsigned type, unsigned packet,
  * Build the controller-owned endpoint context fields which do not depend on
  * the transfer-ring address.  The SuperSpeed interrupt case is intentionally
  * strict because xHCI cannot truthfully schedule it without its companion's
- * total service-interval payload.  Other endpoint kinds retain the legacy
- * encoding while their wider periodic rules remain outside this contract.
+ * total service-interval payload.  Isochronous and slower interrupt
+ * endpoints carry their interval's payload too; control and bulk have none.
  */
 static inline int
 drv_xhci_endpoint_context_encode(enum drv_usb_speed speed, unsigned type,
@@ -123,12 +123,10 @@ drv_xhci_endpoint_context_encode(enum drv_usb_speed speed, unsigned type,
 	unsigned microframes;
 	unsigned packet = maximum_packet_size & 0x7ffU;
 	unsigned interval_payload;
-	unsigned periodic;
 	unsigned interrupt;
 
 	if (context == NULL || type < 1U || type > 7U)
 		return 0;
-	periodic = type == 1U || type == 3U || type == 5U || type == 7U;
 	interrupt = type == 3U || type == 7U;
 	if (speed >= DRV_USB_SPEED_SUPER && companion != NULL)
 		maximum_burst = companion->maximum_burst;
@@ -214,22 +212,62 @@ drv_xhci_endpoint_context_encode(enum drv_usb_speed speed, unsigned type,
 		/* Succeeded: the isochronous context is encoded. */
 		return 1;
 	}
-	if (periodic) {
+	/*
+	 * Interrupt below SuperSpeed.  The interval is 2^Interval x 125 us:
+	 * at high speed 2^(bInterval - 1) microframes (bInterval 1..16); at
+	 * full and low speed bInterval frames rounded down to a power of two,
+	 * so the endpoint is served at least as often as it asked, and kept to
+	 * 3..10 (1 to 128 ms).  A high-speed endpoint may take extra
+	 * transactions a microframe (wMaxPacketSize bits 12:11, the reserved
+	 * 3 read as 2), which go to Max Burst Size.  Max ESIT Payload is the
+	 * bytes an interval carries, Max Packet Size x (Max Burst Size + 1),
+	 * and an interrupt TD is one interval's data, so it is also the
+	 * Average TRB Length (Value(s) referenced: xHCI 1.2 6.2.3.4, 6.2.3.6
+	 * and 6.2.3.8; the same rounding and limits as Linux's
+	 * xhci_get_endpoint_interval() and xhci_get_max_esit_payload()).
+	 */
+	if (interrupt) {
+		/* The extra transactions a high-speed microframe. */
+		if (speed == DRV_USB_SPEED_HIGH) {
+			maximum_burst = (maximum_packet_size >> 11) & 3U;
+			if (maximum_burst == 3U)
+				maximum_burst = 2U;
+		}
+
+		/* The interval's exponent: in microframes from high speed up, in frames below. */
 		if (speed >= DRV_USB_SPEED_HIGH) {
-			interval = descriptor_interval != 0 ?
-			    descriptor_interval - 1U : 0;
+			interval = 0;
+			if (descriptor_interval != 0)
+				interval = descriptor_interval - 1U;
 			if (interval > 15U)
 				interval = 15U;
 		} else {
-			microframes = (descriptor_interval != 0 ?
-			    descriptor_interval : 1U) * 8U;
-			for (interval = 0;
-			    (1U << interval) < microframes && interval < 15U;
-			    interval++)
-				;
+			microframes = 8U;
+			if (descriptor_interval != 0)
+				microframes = (unsigned)descriptor_interval * 8U;
+			interval = 0;
+			while ((2U << interval) <= microframes)
+				interval++;
+			if (interval < 3U)
+				interval = 3U;
+			if (interval > 10U)
+				interval = 10U;
 		}
+
+		/* Encodes the interval, the burst and the bytes an interval carries. */
+		interval_payload = packet * (maximum_burst + 1U);
+		encoded.word0 = (uint32_t)interval << 16;
+		encoded.word1 = drv_xhci_endpoint_context_word1(type, packet,
+		    maximum_burst);
+		encoded.word4 = ((uint32_t)interval_payload << 16) | interval_payload;
+		*context = encoded;
+
+		/* Succeeded: the interrupt context is encoded. */
+		return 1;
 	}
-	encoded.word0 = (uint32_t)(interval & 0xffU) << 16;
+
+	/* Control and bulk: not periodic, no interval and no ESIT payload. */
+	encoded.word0 = 0;
 	encoded.word1 = drv_xhci_endpoint_context_word1(type, packet,
 	    maximum_burst);
 	encoded.word4 = type == 4U ?
