@@ -193,6 +193,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/image/jpeg.c \
 	$(LIBBROWSER_DIR)/image/png.c \
 	$(LIBBROWSER_DIR)/image/gif.c \
+	$(LIBBROWSER_DIR)/image/webp.c \
 	$(LIBBROWSER_DIR)/text/font.c \
 	$(LIBBROWSER_DIR)/text/linebreak.c \
 	$(LIBBROWSER_DIR)/text/woff.c \

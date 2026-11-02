@@ -26,7 +26,9 @@ static uint64_t img_next_serial = 1;
 
 /*
  * Tells an image's kind from its first bytes: JPEG starts with FF D8 FF,
- * PNG with its eight-byte signature, GIF with "GIF87a" or "GIF89a".
+ * PNG with its eight-byte signature, GIF with "GIF87a" or "GIF89a", WebP
+ * with "RIFF", four bytes of size and "WEBPVP" (the MIME Sniffing
+ * standard's image pattern).
  */
 enum img_kind
 img_sniff(
@@ -55,6 +57,16 @@ img_sniff(
 		differs = memcmp(bytes, "GIF89a", 6);
 		if (differs == 0)
 			return IMG_GIF;
+	}
+
+	/* WebP's RIFF header and the start of its first chunk's name. */
+	if (length >= 14) {
+		differs = memcmp(bytes, "RIFF", 4);
+		if (differs == 0) {
+			differs = memcmp(bytes + 8, "WEBPVP", 6);
+			if (differs == 0)
+				return IMG_WEBP;
+		}
 	}
 
 	/* Anything else is not an image the browser decodes. */
@@ -88,6 +100,9 @@ img_decode(
 		break;
 	case IMG_GIF:
 		error = img_decode_gif(bytes, length, bitmap);
+		break;
+	case IMG_WEBP:
+		error = img_decode_webp(bytes, length, bitmap);
 		break;
 	default:
 		error = ENOTSUP;

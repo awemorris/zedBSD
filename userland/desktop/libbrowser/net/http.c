@@ -77,7 +77,7 @@ http_dump(
 }
 
 /* The fixed headers of an image's request: only the formats the decoders read. */
-#define NET_HTTP_IMAGE_HEADERS	"Accept: image/png,image/jpeg\r\n" \
+#define NET_HTTP_IMAGE_HEADERS	"Accept: image/webp,image/png,image/jpeg,image/gif\r\n" \
 				"Accept-Language: ja,en-US;q=0.9,en;q=0.8\r\n" \
 				"Accept-Encoding: identity\r\n"
 
@@ -290,9 +290,9 @@ net_http_request_text(
 }
 
 /*
- * The same, for a kind of fetch: an image is asked for as PNG or JPEG only
- * (the decoders do not read WebP or AVIF, so a server that varies by Accept
- * answers with one that they do).
+ * The same, for a kind of fetch: an image is asked for as WebP, PNG, JPEG
+ * or GIF only (the decoders do not read AVIF, so a server that varies by
+ * Accept answers with one that they do).
  */
 int
 net_http_request_text_kind(
