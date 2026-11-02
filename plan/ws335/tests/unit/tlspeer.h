@@ -175,8 +175,9 @@
  *   UNSHARED       TLS 1.3: a ServerHello for the group even when the
  *                  client sent no share for it; the script ends there.
  *   ZERO_SHARE     The server's share is x25519's u = 0 (an all-zero
- *                  shared secret) or, for secp256r1, 0x04 and 64 zero
- *                  bytes (not on the curve).  TLS 1.3: the script ends
+ *                  shared secret) or, for secp256r1 and secp384r1,
+ *                  0x04 and 64 or 96 zero bytes (not on the curve).
+ *                  TLS 1.3: the script ends
  *                  after the ServerHello; TLS 1.2: in the
  *                  ServerKeyExchange, signed as usual.
  */
@@ -342,8 +343,8 @@ struct tlspeer_hello {
  *                    hash is the transcript's; a suite of the other
  *                    version is sent as it is and the script ends where
  *                    keys cannot be made).
- *   group            The key exchange: SSLC_GROUP_X25519 or
- *                    SSLC_GROUP_SECP256R1.
+ *   group            The key exchange: SSLC_GROUP_X25519,
+ *                    SSLC_GROUP_SECP256R1 or SSLC_GROUP_SECP384R1.
  *   scheme           The CertificateVerify / ServerKeyExchange scheme:
  *                    SSLC_SCHEME_ECDSA_SECP256R1_SHA256 or _SECP384R1_
  *                    SHA384 (the hash; the key is key's curve).
@@ -352,6 +353,7 @@ struct tlspeer_hello {
  *   random           The ServerHello random.
  *   x25519_private   The server's x25519 scalar.
  *   p256_private     The server's secp256r1 private key (1 <= d < n).
+ *   p384_private     The server's secp384r1 private key (1 <= d < n).
  *   hello_retry      1: the first ClientHello gets a HelloRetryRequest
  *                    naming group (TLS 1.3).
  *   cookie, cookie_size  A cookie for the HelloRetryRequest (NULL: none).
@@ -382,6 +384,7 @@ struct tlspeer_config {
 	uint8_t random[32];
 	uint8_t x25519_private[CRYC_X25519_SIZE];
 	uint8_t p256_private[32];
+	uint8_t p384_private[48];
 	int hello_retry;
 	const uint8_t *cookie;
 	size_t cookie_size;
@@ -490,6 +493,7 @@ struct tlspeer {
 	uint8_t client_random[32];
 	uint8_t server_random[32];
 	struct tlspeer_key p256;
+	struct tlspeer_key p384;
 	uint8_t server_share[CRYC_ECP_MAX_POINT];
 	size_t server_share_size;
 	uint8_t shared[CRYC_ECP_MAX_BYTES];
@@ -2029,7 +2033,7 @@ tlspeer_config_init(
 	uint16_t version,
 	const struct tlspeer_pki *pki)
 {
-	uint8_t digest[CRYC_SHA256_SIZE];
+	uint8_t digest[CRYC_SHA384_SIZE];
 	int error;
 
 	/* The version's default suite, x25519, the leaf's key and scheme. */
@@ -2060,6 +2064,10 @@ tlspeer_config_init(
 	if (error != 0)
 		return error;
 	memcpy(config->p256_private, digest, 32);
+	error = cryc_hash_digest(CRYC_HASH_SHA384, (const uint8_t *)"tlspeer p384", 12, digest);
+	if (error != 0)
+		return error;
+	memcpy(config->p384_private, digest, 48);
 
 	/* Succeeded. */
 	return 0;
@@ -2079,7 +2087,8 @@ tlspeer_new(
 	*out = NULL;
 	if (config->version != SSLC_TLS13 && config->version != SSLC_TLS12)
 		return EINVAL;
-	if (config->group != SSLC_GROUP_X25519 && config->group != SSLC_GROUP_SECP256R1)
+	if (config->group != SSLC_GROUP_X25519 && config->group != SSLC_GROUP_SECP256R1 &&
+	    config->group != SSLC_GROUP_SECP384R1)
 		return EINVAL;
 	if (config->chain_count > TLSPEER_CHAIN_MAX)
 		return EINVAL;
@@ -2115,9 +2124,16 @@ tlspeer_new(
 		return EINVAL;
 	}
 
-	/* The secp256r1 key pair when that is the group. */
+	/* The secp256r1 or secp384r1 key pair when that is the group. */
 	if (config->group == SSLC_GROUP_SECP256R1) {
 		error = tlspeer_key_init(&peer->p256, CRYC_CURVE_P256, config->p256_private);
+		if (error != 0) {
+			free(peer);
+			return EINVAL;
+		}
+	}
+	if (config->group == SSLC_GROUP_SECP384R1) {
+		error = tlspeer_key_init(&peer->p384, CRYC_CURVE_P384, config->p384_private);
 		if (error != 0) {
 			free(peer);
 			return EINVAL;
@@ -2347,6 +2363,15 @@ tlspeer_compute_shared(
 		return 0;
 	}
 
+	/* secp384r1 ECDH (RFC 8446 7.4.2; RFC 8422 5.10): the 48-byte x coordinate. */
+	if (peer->config.group == SSLC_GROUP_SECP384R1) {
+		error = cryc_ecc_ecdh(&peer->p384.ec, peer->p384.private_key, client_key, client_key_size, peer->shared);
+		if (error != 0)
+			return tlspeer_fail(peer, EINVAL, "the client's secp384r1 key does not validate");
+		peer->shared_size = 48;
+		return 0;
+	}
+
 	/* secp256r1 ECDH (RFC 8446 7.4.2; RFC 8422 5.10). */
 	error = cryc_ecc_ecdh(&peer->p256.ec, peer->p256.private_key, client_key, client_key_size, peer->shared);
 	if (error != 0)
@@ -2370,6 +2395,10 @@ tlspeer_make_share(
 			peer->server_share[0] = 0x04;
 			peer->server_share_size = 65;
 		}
+		if (peer->config.group == SSLC_GROUP_SECP384R1) {
+			peer->server_share[0] = 0x04;
+			peer->server_share_size = 97;
+		}
 		return 0;
 	}
 
@@ -2377,6 +2406,13 @@ tlspeer_make_share(
 	if (peer->config.group == SSLC_GROUP_X25519) {
 		cryc_x25519_public(peer->server_share, peer->config.x25519_private);
 		peer->server_share_size = CRYC_X25519_SIZE;
+		return 0;
+	}
+
+	/* secp384r1: the uncompressed point of the configured key. */
+	if (peer->config.group == SSLC_GROUP_SECP384R1) {
+		memcpy(peer->server_share, peer->p384.public_key, peer->p384.public_size);
+		peer->server_share_size = peer->p384.public_size;
 		return 0;
 	}
 

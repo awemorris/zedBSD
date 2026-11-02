@@ -21,5 +21,6 @@ share/licenses/README.txt
 share/licenses/Unicode-License-V3.txt
 share/licenses/WHATWG-entities.txt
 share/licenses/ca-certificates-MPL-2.0.txt
+share/licenses/libwebp-COPYING.txt
 share/licenses/winpthreads.txt
 share/licenses/zedBSD-LICENSE.txt

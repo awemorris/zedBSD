@@ -15,7 +15,13 @@
  * event (it hands the view a pointer move for it, as the shell does).  An
  * event's latency is the time from its stamp to the loop taking it.
  *
- *   stall-probe SCENARIO [SECONDS]
+ *   stall-probe SCENARIO [SECONDS [own]]
+ *
+ * With "own" the view runs on its own threads (BROWSER_THREADING_OWN): the
+ * loop only hands it the events and the size, and a drawing thread of the
+ * probe's draws its latest committed frame (browser_view_render_pixels)
+ * whenever the view says there is a new one (frame_wake), as a window's
+ * program does then.
  *
  * The scenarios (the page is loaded through a small HTTP server of the
  * probe's own on 127.0.0.1; "hang-connect" is a listener whose accept
@@ -42,6 +48,8 @@
  */
 
 #include <browser/browser.h>
+
+#include "userland/tests/browser-threads/threads-posix.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -103,6 +111,12 @@ static unsigned short port_serve;
 static unsigned short port_hang_connect;
 static unsigned short port_hang_read;
 static uint64_t start_ns;
+static pthread_mutex_t draw_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t draw_cond = PTHREAD_COND_INITIALIZER;
+static int draw_owed;
+static int draw_stop;
+static unsigned draw_width;
+static struct browser_view *draw_view;
 
 static uint64_t probe_now(void);
 static int probe_listen(int backlog, unsigned short *port);
@@ -117,6 +131,8 @@ static int probe_page(char *page, size_t size);
 static unsigned char *probe_png(unsigned side, size_t *length);
 static void probe_summary(const char *how, uint64_t held_ns);
 static void probe_wake(void *context);
+static void probe_frame_wake(void *context);
+static void *probe_draw(void *context);
 static void probe_redraw(void *context, struct browser_view *view);
 static void probe_console(void *context, struct browser_view *view, int level, const char *text, size_t length);
 
@@ -135,6 +151,7 @@ main(
 	struct browser_view *view;
 	struct pollfd descriptors[2];
 	pthread_t thread;
+	pthread_t draw_thread;
 	uint64_t stamp;
 	uint64_t now;
 	uint64_t latency;
@@ -149,6 +166,7 @@ main(
 	ssize_t got;
 	char drain[64];
 	int listener;
+	int own;
 	int pressed;
 	int hold;
 	int timeout;
@@ -161,7 +179,15 @@ main(
 	}
 	scenario = argv[1];
 	seconds = argc > 2 ? atof(argv[2]) : 6.0;
+	own = argc > 3 && strcmp(argv[3], "own") == 0;
 	setenv("XDG_DATA_HOME", "build/ws345-probe-data", 1);
+
+	/* The engine makes its threads with the POSIX threads. */
+	error = browser_threads_set(browser_threads_posix());
+	if (error != 0) {
+		fprintf(stderr, "stall-probe: the engine refused the threads (%d)\n", error);
+		return 2;
+	}
 
 	/* The server, and the two listeners that hold a connection. */
 	listener = probe_listen(64, &port_serve);
@@ -222,6 +248,10 @@ main(
 	options.width = PROBE_WIDTH;
 	options.height = PROBE_HEIGHT;
 	options.wake = probe_wake;
+	if (own) {
+		options.threading = BROWSER_THREADING_OWN;
+		options.frame_wake = probe_frame_wake;
+	}
 	error = browser_view_create(&options, &view);
 	if (error != 0) {
 		fprintf(stderr, "stall-probe: no view (%d)\n", error);
@@ -238,7 +268,8 @@ main(
 		fprintf(stderr, "stall-probe: the first page did not load (%d)\n", error);
 		return 2;
 	}
-	(void)browser_view_prepare(view);
+	if (!own)
+		(void)browser_view_prepare(view);
 	snprintf(url, sizeof(url), "http://127.0.0.1:%u/page.html", (unsigned)port_serve);
 	error = browser_view_load(view, url);
 	if (error != 0) {
@@ -251,6 +282,10 @@ main(
 	atomic_store(&stats.last_taken_ns, start_ns);
 	pthread_create(&thread, NULL, probe_input, NULL);
 	pthread_create(&thread, NULL, probe_watchdog, NULL);
+	draw_view = view;
+	draw_width = PROBE_WIDTH;
+	if (own)
+		pthread_create(&draw_thread, NULL, probe_draw, NULL);
 
 	/* The shell's loop. */
 	pressed = 0;
@@ -260,8 +295,16 @@ main(
 		/* Draws when the view asked for it. */
 		if (redraw_due) {
 			redraw_due = 0;
-			(void)browser_view_prepare(view);
-			(void)browser_view_draw_pixels(view, pixels, width, PROBE_HEIGHT, (size_t)width * 4U);
+			if (own) {
+				pthread_mutex_lock(&draw_lock);
+				draw_owed = 1;
+				draw_width = width;
+				pthread_cond_signal(&draw_cond);
+				pthread_mutex_unlock(&draw_lock);
+			} else {
+				(void)browser_view_prepare(view);
+				(void)browser_view_draw_pixels(view, pixels, width, PROBE_HEIGHT, (size_t)width * 4U);
+			}
 		}
 
 		/* The window's resize, every 250 ms in its scenario. */
@@ -685,6 +728,45 @@ probe_wake(
 	(void)context;
 	byte = 1;
 	(void)write(wake_pipe[1], &byte, 1U);
+}
+
+/* A new committed frame (from the view's thread): the drawing thread draws it. */
+static void
+probe_frame_wake(
+	void *context)
+{
+	(void)context;
+	pthread_mutex_lock(&draw_lock);
+	draw_owed = 1;
+	pthread_cond_signal(&draw_cond);
+	pthread_mutex_unlock(&draw_lock);
+}
+
+/* The drawing thread of the own mode: the latest committed frame at the window's width, whenever one is owed. */
+static void *
+probe_draw(
+	void *context)
+{
+	uint32_t *pixels;
+	unsigned width;
+
+	(void)context;
+	pixels = malloc((size_t)(PROBE_WIDTH + 200U) * PROBE_HEIGHT * 4U);
+	if (pixels == NULL)
+		return NULL;
+	pthread_mutex_lock(&draw_lock);
+	while (!draw_stop) {
+		while (!draw_owed && !draw_stop)
+			pthread_cond_wait(&draw_cond, &draw_lock);
+		draw_owed = 0;
+		width = draw_width;
+		pthread_mutex_unlock(&draw_lock);
+		(void)browser_view_render_pixels(draw_view, pixels, width, PROBE_HEIGHT, (size_t)width * 4U);
+		pthread_mutex_lock(&draw_lock);
+	}
+	pthread_mutex_unlock(&draw_lock);
+	free(pixels);
+	return NULL;
 }
 
 /* The view asks for a redraw. */

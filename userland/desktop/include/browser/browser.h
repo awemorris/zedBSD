@@ -88,9 +88,11 @@
  * remembers: the cookies, the HTTP cache and Web Storage.  The program
  * makes an instance with a storage backend (<browser/storage.h>; the
  * engine's files backend, or its own) to keep them across runs, or
- * without one to keep nothing; a view made without an instance uses its
- * thread's default instance, which keeps nothing beyond the process.  An
- * instance and its views are used from the thread that made the instance.
+ * without one to keep nothing; a view made without an instance uses the
+ * process's default instance, which keeps nothing beyond the process.  An
+ * instance and its views are used from the thread that made the instance
+ * (the default instance's views from one thread at a time).  Before any of
+ * it the program gives the engine its threads (browser_threads_set).
  * Two instances share nothing.  Memory the engine hands to the program
  * (a dump's text) is freed with browser_free, so a program built with
  * another C runtime than the engine's frees it in the engine's.
@@ -120,13 +122,76 @@ extern "C" {
  * each view it makes; a library of another version refuses the view
  * (ENOTSUP) rather than read options laid out differently.
  */
-#define BROWSER_API_VERSION		4
+#define BROWSER_API_VERSION		5
 
 /* A view, opaque to the program. */
 struct browser_view;
 
+/* An image of the page shown (browser_view_image_at, below). */
+struct browser_image;
+
 /* An instance of the engine: what its views share and what it remembers (cookies, the HTTP cache, Web Storage). */
 struct browser_instance;
+
+/* The version of struct browser_threads; browser_threads_set refuses a table of another one (ENOTSUP). */
+#define BROWSER_THREADS_VERSION		1
+
+/*
+ * The program's threads, which the engine has its own threads made and
+ * synchronized with: the engine decides which threads it has, how many,
+ * their names and what runs on them, and never makes a thread itself.
+ * Every call may be made from any thread, so the program's functions are
+ * safe to call from several threads at once.
+ *
+ * - start: starts a thread named name (at most 15 bytes of ASCII; the
+ *   program gives it to the system's thread if it can) with a stack of
+ *   stack_size bytes (0 for the system's), running run(argument); it ends
+ *   when run returns.  Sets *thread to the program's handle and returns 0,
+ *   or EAGAIN or ENOMEM (the engine then does without the thread: the call
+ *   that wanted it fails).
+ * - join: waits until the thread ended and gives its handle back.  The
+ *   engine joins every thread it started, exactly once, and never from the
+ *   thread itself.
+ * - is_current: whether the calling thread is the thread (1) or not (0).
+ * - mutex_create, mutex_destroy, mutex_lock, mutex_unlock: a mutex that is
+ *   not recursive.  create returns 0 or ENOMEM; the others cannot fail.
+ * - cond_create, cond_destroy, cond_wait, cond_wait_for, cond_signal,
+ *   cond_broadcast: a condition waited on under a mutex.  A wait may end
+ *   without a signal (the engine checks what it waits for again);
+ *   cond_wait_for waits at most so many milliseconds on a clock that only
+ *   goes forward, and returns 0 or ETIMEDOUT.
+ *
+ * The engine needs no value of each thread's own and no call made once
+ * from the program (it makes those with atomic operations), nor anything
+ * about signals (its sockets never raise SIGPIPE).
+ */
+struct browser_threads {
+	int version;
+	void *context;
+	int (*start)(void *context, const char *name, size_t stack_size, void (*run)(void *argument), void *argument, void **thread);
+	void (*join)(void *context, void *thread);
+	int (*is_current)(void *context, const void *thread);
+	int (*mutex_create)(void *context, void **mutex);
+	void (*mutex_destroy)(void *context, void *mutex);
+	void (*mutex_lock)(void *context, void *mutex);
+	void (*mutex_unlock)(void *context, void *mutex);
+	int (*cond_create)(void *context, void **cond);
+	void (*cond_destroy)(void *context, void *cond);
+	void (*cond_wait)(void *context, void *cond, void *mutex);
+	int (*cond_wait_for)(void *context, void *cond, void *mutex, uint32_t milliseconds);
+	void (*cond_signal)(void *context, void *cond);
+	void (*cond_broadcast)(void *context, void *cond);
+};
+
+/*
+ * Gives the engine the program's threads, once in the process and before
+ * any instance, view or offscreen image is made (the engine keeps a copy
+ * of the table; its context must outlive the engine's use).  Returns 0,
+ * EINVAL (NULL), ENOTSUP (a table of another version, or missing a call)
+ * or EBUSY (the threads were given already).  An instance or a view made
+ * before fails with ENOTSUP.
+ */
+int browser_threads_set(const struct browser_threads *threads);
 
 /*
  * What an instance is made with: the interface's version
@@ -232,6 +297,20 @@ struct browser_fonts {
  *   it some other way).
  * - console: a script wrote to the console (level 0 log, 1 warn, 2 error).
  * - script_error: a timer's script failed (error is an errno value).
+ * - image: the answer to browser_view_request_image: 0 with the image
+ *   (valid during the call: a program that keeps it copies the record and
+ *   sets its pixels and url to NULL, and frees the copy's with
+ *   browser_view_image_release), or an errno value (ENOENT when no image
+ *   was there) with NULL.
+ * - field: the answer to browser_view_focus_field in a view of its own
+ *   threads: 0 with the caret's rectangle of the field that took the focus
+ *   (x, y, width, height in the view's pixels), or an errno value (ENOENT
+ *   when there was none) with NULL.
+ *
+ * In a view of its own threads (BROWSER_THREADING_OWN) every callback but
+ * link is called on the program's thread, from browser_view_process; link
+ * is called on the view's script thread, since the view needs its answer at
+ * once: it must not call into the view nor touch the program's window.
  */
 struct browser_callbacks {
 	void (*redraw)(void *context, struct browser_view *view);
@@ -243,6 +322,8 @@ struct browser_callbacks {
 	void (*console)(void *context, struct browser_view *view, int level, const char *text, size_t length);
 	void (*script_error)(void *context, struct browser_view *view, int error);
 	void *context;
+	void (*image)(void *context, struct browser_view *view, int error, struct browser_image *image);
+	void (*field)(void *context, struct browser_view *view, int error, const float *caret);
 };
 
 /*
@@ -289,7 +370,29 @@ struct browser_gpu_failure {
  * browser_view_set_gpu gives it one later), the program's wake with
  * the context it is called with (NULL for none: a program without a
  * window settles the view instead), and the instance it belongs to (NULL
- * for its thread's default instance; it must outlive the view).
+ * for the process's default instance; it must outlive the view).
+ *
+ * threading says where the view's pages run.  BROWSER_THREADING_CALLER
+ * (zero): on the thread that calls the view, which waits in each call for
+ * the pages' scripts, layout and network (a program without a window, the
+ * tests and tools).  BROWSER_THREADING_OWN: on threads of the view's own (a
+ * window's program): the program's thread only hands the view its inputs
+ * and commands, which are queued in the order they come and return at once
+ * (0, ENOMEM, or ENOBUFS when 1024 presses wait already: the program drops
+ * the press), and reads the state the view published last (the location,
+ * the title, the history, the load's progress, the scroll, the document's
+ * height and range, the text input's), which browser_view_process brings
+ * up to date before it calls the callbacks; the strings stay valid until
+ * the next browser_view_process.  The view's stack_base is not used then.
+ * frame_wake (with frame_wake_context) is called from the view's thread
+ * when the page committed a new frame (NULL for none); it must not call
+ * into the view.  The program's drawing thread draws the latest committed
+ * frame (browser_view_render, _render_pixels), owns the view's GPU side
+ * (browser_view_set_gpu, _release_targets) and tells of each present
+ * (browser_view_presented), when the page's animation frames run.  In a
+ * view of its own threads browser_view_settle, _dump, _draw_pixels,
+ * _prepare, _draw, _record and _image_at report ENOTSUP, and
+ * browser_view_timeout reports -1.
  */
 struct browser_view_options {
 	int version;
@@ -303,7 +406,65 @@ struct browser_view_options {
 	browser_wake wake;
 	void *wake_context;
 	struct browser_instance *instance;
+	int threading;
+	browser_wake frame_wake;
+	void *frame_wake_context;
 };
+
+/* Where a view's pages run (struct browser_view_options's threading). */
+#define BROWSER_THREADING_CALLER	0
+#define BROWSER_THREADING_OWN		1
+
+/*
+ * The number of the state a view published last (the getters' state): it
+ * grows with each new state, 0 before the first and in a view of the
+ * caller's thread.
+ */
+uint64_t browser_view_snapshot_serial(const struct browser_view *view);
+
+/*
+ * The drawing thread's side of a view of its own threads.  The page
+ * commits a frame (its display list, the scroll and the size it was laid
+ * out at) after each round that changed it; nothing changes a committed
+ * frame, so the drawing thread draws the latest while the page goes on
+ * (a long script, a layout), at any size (what the frame leaves is its
+ * canvas color).
+ *
+ * browser_view_render_pixels draws the latest committed frame with the
+ * CPU into the caller's pixels (0xAARRGGBB, width by height, rows stride
+ * bytes apart), or does as browser_view_draw_pixels in a view of the
+ * caller's.  browser_view_render records the drawing of it into the
+ * caller's image on the view's GPU (browser_view_set_gpu), render pass and
+ * all, into a command buffer the caller began and submits, and gives the
+ * frame's number; the drawing recorded before must have finished.  In a
+ * view of the caller's thread it does as browser_view_record (number 0).
+ * Both report 0, ENOENT when no frame is committed yet, EINVAL, and the
+ * GPU's errors as browser_view_record does.  Drawing calls of several
+ * threads take turns.  browser_view_presented tells the view the frame of
+ * a number was presented: the page's animation frames
+ * (requestAnimationFrame) wait for it, so that they stop while nothing is
+ * drawn; nothing in a view of the caller's thread.
+ */
+int browser_view_render_pixels(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);
+int browser_view_render(struct browser_view *view, const struct browser_target *target, VkCommandBuffer commands, uint64_t *serial);
+void browser_view_presented(struct browser_view *view, uint64_t serial);
+
+/*
+ * Asks for the image at a place of the view (a picture dragged out): the
+ * answer is the image callback (in a view of the caller's thread, before
+ * this returns).  Reports 0, or ENOMEM.
+ */
+int browser_view_request_image(struct browser_view *view, float x, float y);
+
+/*
+ * Commits text as browser_view_commit_text does, for the text input's
+ * session the program saw (browser_view_text_session): when the page's
+ * session has changed meanwhile (the focus moved), the text is dropped, so
+ * that what the input method deletes around the caret is never another
+ * field's.
+ */
+int browser_view_commit_text_in(struct browser_view *view, uint64_t session, const char *text, uint32_t delete_before,
+    uint32_t delete_after);
 
 /*
  * Makes an instance of the engine over its options' storage backend; the
@@ -313,8 +474,9 @@ struct browser_view_options {
  * fails).  Whether it succeeds or not, the backend's close is called
  * exactly once (here on failure, by browser_instance_destroy otherwise).
  * Returns 0, EINVAL (options or instance NULL), ENOTSUP (options or the
- * backend's table of another version, or a table missing a call),
- * ENOMEM, EAGAIN (its storage thread could not start).  *instance is NULL
+ * backend's table of another version, or a table missing a call, or no
+ * threads given with browser_threads_set), ENOMEM, EAGAIN (its storage
+ * thread could not start).  *instance is NULL
  * on failure.
  */
 int browser_instance_create(const struct browser_instance_options *options, struct browser_instance **instance);

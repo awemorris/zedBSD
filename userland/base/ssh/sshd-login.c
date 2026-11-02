@@ -101,6 +101,7 @@ static int login_keys_collect(pid_t child, int input, char *text, size_t capacit
 static long login_elapsed_ms(const struct timespec *start);
 static int login_write_all(int descriptor, const char *data, size_t size);
 static pid_t login_wait(pid_t child, int *status);
+static void login_log_text(const char *text, char *out, size_t size);
 
 /*
  * Checks that user may log in at all with method (SSH_AUTH_PUBLICKEY or
@@ -122,6 +123,7 @@ sshd_account_allowed(
 	size_t size)
 {
 	char hash[LOGIN_VERIFY_BUFFER];
+	char shown[SSH_USER_MAX + 1];
 	const char *shadow_hash;
 	uid_t self;
 	int have_hash;
@@ -145,7 +147,9 @@ sshd_account_allowed(
 	/* Finds the account in passwd, and in shadow when sshd can read it. */
 	found = login_lookup(user, account, buffer, size, hash, sizeof(hash), &have_hash);
 	if (found != 0) {
-		syslog(LOG_AUTH | LOG_NOTICE, "invalid user %.64s", user);
+		/* Logs the name as the log may show it. */
+		login_log_text(user, shown, sizeof(shown));
+		syslog(LOG_AUTH | LOG_NOTICE, "invalid user %.64s", shown);
 		return ENOENT;
 	}
 
@@ -158,7 +162,9 @@ sshd_account_allowed(
 	allowed = sshd_account_policy(config, account, shadow_hash, method, privileged, self);
 	ssh_wipe(hash, sizeof(hash));
 	if (allowed != 0) {
-		syslog(LOG_AUTH | LOG_NOTICE, "user %.64s not allowed", user);
+		/* Logs the name as the log may show it. */
+		login_log_text(user, shown, sizeof(shown));
+		syslog(LOG_AUTH | LOG_NOTICE, "user %.64s not allowed", shown);
 		return EACCES;
 	}
 
@@ -1284,4 +1290,34 @@ login_wait(
 
 	/* Reports the child reaped. */
 	return reaped;
+}
+
+/*
+ * Copies text into out, of size bytes, for a line of the log: every byte
+ * that is not printable ASCII (a control byte, DEL, or a byte of a
+ * character outside ASCII) becomes '?', so that a name the peer chose cannot
+ * end the line, start a forged one, or send a terminal that shows the log
+ * a control sequence.  A longer text is cut to size - 1 bytes.
+ */
+static void
+login_log_text(
+	const char *text,
+	char *out,
+	size_t size)
+{
+	size_t index;
+	unsigned char byte;
+
+	/* Copies the text up to the room, replacing what is not printable. */
+	for (index = 0;
+	     index + 1U < size && text[index] != '\0';
+	     index++) {
+		byte = (unsigned char)text[index];
+		if (byte < 0x20U || byte > 0x7eU)
+			byte = '?';
+		out[index] = (char)byte;
+	}
+
+	/* Ends the copy as a string. */
+	out[index] = '\0';
 }

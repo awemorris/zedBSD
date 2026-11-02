@@ -3066,6 +3066,10 @@ event_call_listener(
 		status = 0;
 	}
 
+	/* A task asked to end stops the dispatch too, without its microtasks. */
+	if (status == VM_TERMINATED)
+		bind_window_terminated(window);
+
 	/* Running out of memory stops the dispatch. */
 	if (status != 0)
 		return status;

@@ -381,8 +381,12 @@ static const struct css_gradient *cascade_gradient(struct css_engine *engine, co
 static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 static void cascade_animation(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 
-/* Whether a script reads a style without the animation filters and tracks (the styles the engine kept are not used or kept then). */
-static int cascade_animation_suppressed;
+/*
+ * Whether a script reads a style without the animation filters and tracks
+ * (the styles the engine kept are not used or kept then).  Each thread has
+ * its own: it belongs to the read the thread makes.
+ */
+static _Thread_local int cascade_animation_suppressed;
 static const struct css_try_rule *cascade_try_rule(const struct css_engine *engine, const struct vm_string *name, const void *tree);
 static void cascade_anchor(struct css_engine *engine, struct css_style *style, int property, const struct css_anchor_expr *expr);
 static const struct css_grid_areas *cascade_keep_areas(struct css_engine *engine, const struct css_grid_areas *areas);

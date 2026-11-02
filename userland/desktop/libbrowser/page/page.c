@@ -18,6 +18,7 @@
 #include "xml/dom.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -30,7 +31,49 @@
 /* The deepest element nesting the style dump descends (the parser caps nesting too). */
 #define PAGE_DUMP_DEPTH		512
 
+/* The number of the last display list any page painted (page->paint_generation), changed atomically: pages of several views paint on their own threads. */
+static uint64_t page_paint_next;
+
+/*
+ * A work lent to the style thread with its arguments and what it gives
+ * back: the page laid out at a size (page_layout_work), a tree laid out
+ * (page_lend_layout), a list painted (page_lend_paint) or the sticky boxes
+ * moved for a scroll (page_sticky_sync).
+ */
+struct page_layout_args {
+	struct page *page;
+	int width;
+	int height;
+};
+
+struct page_tree_args {
+	struct page *page;
+	struct layout_tree *tree;
+	struct css_engine *engine;
+	struct dom_document *document;
+	int width;
+	int height;
+	layout_unit scroll_x;
+	layout_unit scroll_y;
+	const struct layout_transition *transition;
+};
+
+struct page_paint_args {
+	struct paint_list *list;
+	const struct layout_tree *tree;
+};
+
+struct page_sticky_args {
+	struct page *page;
+	layout_unit scroll_y;
+};
+
 static int page_gather_styles(struct page *page);
+static int page_layout_work(void *argument);
+static int page_tree_work(void *argument);
+static int page_list_work(void *argument);
+static int page_paint_work(void *argument);
+static int page_sticky_work(void *argument);
 static void page_animations_sync(struct page *page);
 static int page_load_xhtml(struct page *page, const unsigned char *bytes, size_t length);
 static int page_xhtml_inline_scripts(struct page *page);
@@ -460,7 +503,7 @@ page_load_location(
 
 	/* The document's bytes and its final URL. */
 	wb_buffer_init(&where);
-	error = page_fetch_response(page_cookies(page), location, location, &response);
+	error = page_fetch_response_now(page, location, NET_FETCH_DOCUMENT, &response);
 
 	/* The page's location: a file's path, or the final URL. */
 	if (error == 0)
@@ -472,6 +515,9 @@ page_load_location(
 		if (page->base == NULL)
 			error = ENOMEM;
 	}
+
+	/* Why the fetch failed over TLS, for the load callback. */
+	snprintf(page->failure_reason, sizeof(page->failure_reason), "%s", response.reason);
 
 	/* The document (and whether it may be kept for Back and Forward). */
 	page->no_store = response.no_store;
@@ -554,6 +600,50 @@ page_set_font_companions(
 }
 
 /*
+ * Makes the page's animation frames wait for the presents of a drawing
+ * thread (page_frame_presented) instead of coming by the clock.
+ */
+void
+page_set_frames_presented(
+	struct page *page,
+	int presented)
+{
+	/* The presents decide from now on. */
+	page->frames_presented = presented;
+}
+
+/* Counts a present of the drawing thread: the animation frames asked for before it are due. */
+void
+page_frame_presented(
+	struct page *page)
+{
+	/* One chance more. */
+	page->frames++;
+}
+
+/*
+ * Reports how many presents the page (the context) had, when its
+ * animation frames wait for them (bind_host.frame_count): 1 with the
+ * count, or 0 when they come by the clock.
+ */
+int
+page_frame_count(
+	void *context,
+	uint64_t *count)
+{
+	struct page *page;
+
+	/* Frames by the clock have no count. */
+	page = context;
+	*count = page->frames;
+	if (!page->frames_presented)
+		return 0;
+
+	/* Succeeded: the frames are the presents. */
+	return 1;
+}
+
+/*
  * Tells the page how far its view is scrolled, in CSS pixels (the
  * scripts' scrollX, scrollY and client rectangles).
  */
@@ -584,18 +674,16 @@ page_set_console(
 }
 
 /*
- * Describes why the last load failed beyond its error number (the TLS
- * verification's reason, for an https page); empty when there is nothing
- * more to say.
+ * Describes why the page's last load of a location failed beyond its error
+ * number (the TLS verification's reason, for an https page); empty when
+ * there is nothing more to say.
  */
 const char *
-page_failure_reason(void)
+page_failure_reason(
+	const struct page *page)
 {
-	const char *reason;
-
-	/* The network's reason. */
-	reason = net_tls_error();
-	return reason;
+	/* The reason the fetch kept. */
+	return page->failure_reason;
 }
 
 /*
@@ -672,7 +760,9 @@ page_open_fonts(
 
 /*
  * Lays the page out for a viewport of width by height pixels (the fonts
- * must be open).
+ * must be open).  The styles, the fetches the document names and the
+ * events are the page's thread's; the box tree is built on the style
+ * thread (page_layout_work, lent).
  */
 int
 page_layout(
@@ -680,8 +770,7 @@ page_layout(
 	int width,
 	int height)
 {
-	int missed;
-	int pass;
+	struct page_layout_args args;
 	int error;
 	uint32_t old_laid_out_images;
 
@@ -711,9 +800,6 @@ page_layout(
 	if (error != 0)
 		goto cleanup;
 
-	/* The web fonts that arrived join the text system. */
-	page_fonts_install(page);
-
 	/* The window's size for the scripts, and the size their questions lay the page out at. */
 	page->viewport_width = width;
 	page->viewport_height = height;
@@ -729,45 +815,13 @@ page_layout(
 	if (error != 0)
 		goto cleanup;
 
-	/* Builds and lays out the box tree, the images found by their elements (the ones there are now), with the styles gathered last. */
-	page->laid_out_images = page->images_generation;
-	page->laid_out_gathered = page->gathered;
-	css_engine_set_container_lookup(page->css, page_container_size, page);
-	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
-	page->laid_out = 1;
-	page->layout.image_variant = page_image_variant;
-	page->layout.frame_paint = page_frame_paint;
+	/* The box tree, built on the style thread with the fonts that arrived, the images there are now and the styles gathered last. */
+	args.page = page;
+	args.width = width;
+	args.height = height;
+	error = page_lend(page, page_layout_work, &args);
 	if (error != 0)
 		goto cleanup;
-
-	/*
-	 * A query container the old layout did not have (the first layout), or
-	 * one this layout gave another size than the styles used: the page is
-	 * laid out again with the sizes it has now (twice more at most).
-	 */
-	for (pass = 0; pass < PAGE_CONTAINER_PASSES; pass++) {
-		missed = css_engine_container_missed(page->css);
-		if (!missed)
-			missed = page_containers_moved(page);
-		if (!missed)
-			break;
-
-		/* This layout is the one the sizes come from now. */
-		if (page->previous_laid_out)
-			layout_release(&page->previous_layout);
-		page->previous_layout = page->layout;
-		page->previous_laid_out = 1;
-		memset(&page->layout, 0, sizeof(page->layout));
-		css_engine_forget_styles(page->css);
-		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
-		page->layout.image_variant = page_image_variant;
-	page->layout.frame_paint = page_frame_paint;
-		if (error != 0)
-			goto cleanup;
-	}
-
-	/* The loaded frames' windows have their iframes' sizes. */
-	page_frames_size(page);
 
 	/* The ready promise may allocate; retain the prior layout if it fails. */
 	if (!page_sheets_pending(page) && !page_fonts_pending(page)) {
@@ -813,6 +867,199 @@ cleanup:
 	return error;
 }
 
+/*
+ * Runs a work that runs no script with the page's heap and document lent
+ * to the style thread of its view (on this thread for a view of the
+ * caller's), then fetches the images the work met new.  Reports the work's
+ * outcome.
+ */
+int
+page_lend(
+	struct page *page,
+	vm_lend_work work,
+	void *argument)
+{
+	int borrower;
+	int error;
+
+	/* The work, on the style thread while this one waits. */
+	error = vm_heap_lend(page->heap, work, argument);
+
+	/* The page's thread starts the fetches the style thread did not (a lend inside a lend leaves them to the outer one). */
+	borrower = vm_thread_is_borrower();
+	if (!borrower)
+		(void)page_images_fetch_deferred(page);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the work ran. */
+	return 0;
+}
+
+/*
+ * Lays a document out into a tree of the caller's with an engine at a
+ * size and a scroll (a transition given is the one the tree is built
+ * with), on the style thread.  Reports 0 or layout_build's error (the tree
+ * is the caller's to release either way).
+ */
+int
+page_lend_layout(
+	struct page *page,
+	struct layout_tree *tree,
+	struct css_engine *engine,
+	struct dom_document *document,
+	int width,
+	int height,
+	layout_unit scroll_x,
+	layout_unit scroll_y,
+	const struct layout_transition *transition)
+{
+	struct page_tree_args args;
+	int error;
+
+	/* The tree's arguments, lent. */
+	args.page = page;
+	args.tree = tree;
+	args.engine = engine;
+	args.document = document;
+	args.width = width;
+	args.height = height;
+	args.scroll_x = scroll_x;
+	args.scroll_y = scroll_y;
+	args.transition = transition;
+	error = page_lend(page, page_tree_work, &args);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the tree is laid out. */
+	return 0;
+}
+
+/* Paints a laid out tree into a list of the caller's, on the style thread; reports 0 or paint_build's error. */
+int
+page_lend_paint(
+	struct page *page,
+	struct paint_list *list,
+	const struct layout_tree *tree)
+{
+	struct page_paint_args args;
+	int error;
+
+	/* The list's arguments, lent. */
+	args.list = list;
+	args.tree = tree;
+	error = page_lend(page, page_list_work, &args);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the list is painted. */
+	return 0;
+}
+
+/*
+ * Builds the page's box tree at a size, on the style thread (a work lent
+ * by page_layout): the web fonts that arrived join the text system, the
+ * tree is built and built again while the query containers' sizes move,
+ * and the loaded frames' windows get their iframes' sizes.  page->laid_out
+ * says whether a tree was built (page_layout's cleanup releases it on a
+ * failure).
+ */
+static int
+page_layout_work(
+	void *argument)
+{
+	struct page_layout_args *args;
+	struct page *page;
+	int missed;
+	int pass;
+	int error;
+
+	/* The web fonts that arrived join the text system. */
+	args = argument;
+	page = args->page;
+	page_fonts_install(page);
+
+	/* Builds and lays out the box tree, the images found by their elements (the ones there are now), with the styles gathered last. */
+	page->laid_out_images = page->images_generation;
+	page->laid_out_gathered = page->gathered;
+	css_engine_set_container_lookup(page->css, page_container_size, page);
+	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
+	page->laid_out = 1;
+	page->layout.image_variant = page_image_variant;
+	page->layout.frame_paint = page_frame_paint;
+	if (error != 0)
+		return error;
+
+	/*
+	 * A query container the old layout did not have (the first layout), or
+	 * one this layout gave another size than the styles used: the page is
+	 * laid out again with the sizes it has now (twice more at most).
+	 */
+	for (pass = 0; pass < PAGE_CONTAINER_PASSES; pass++) {
+		missed = css_engine_container_missed(page->css);
+		if (!missed)
+			missed = page_containers_moved(page);
+		if (!missed)
+			break;
+
+		/* This layout is the one the sizes come from now. */
+		if (page->previous_laid_out)
+			layout_release(&page->previous_layout);
+		page->previous_layout = page->layout;
+		page->previous_laid_out = 1;
+		memset(&page->layout, 0, sizeof(page->layout));
+		css_engine_forget_styles(page->css);
+		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
+		page->layout.image_variant = page_image_variant;
+		page->layout.frame_paint = page_frame_paint;
+		if (error != 0)
+			return error;
+	}
+
+	/* The loaded frames' windows have their iframes' sizes. */
+	page_frames_size(page);
+
+	/* Succeeded: the tree is built. */
+	return 0;
+}
+
+/* Lays a document out into a tree (a work lent by page_lend_layout). */
+static int
+page_tree_work(
+	void *argument)
+{
+	struct page_tree_args *args;
+	int error;
+
+	/* The tree, with the page's text, images and frames. */
+	args = argument;
+	error = layout_build(args->tree, args->engine, &args->page->text, args->document, page_image_of, page_image_by_url, args->page, args->width, args->height,
+	    args->scroll_x, args->scroll_y, args->transition);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the tree is laid out. */
+	return 0;
+}
+
+/* Paints a tree into a list (a work lent by page_lend_paint). */
+static int
+page_list_work(
+	void *argument)
+{
+	struct page_paint_args *args;
+	int error;
+
+	/* The list. */
+	args = argument;
+	error = paint_build(args->list, args->tree);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the list is painted. */
+	return 0;
+}
+
 /* Tells the prelude which boxes have a running animation (a name with @keyframes), for the animation events. */
 static void
 page_animations_walk(
@@ -856,10 +1103,46 @@ page_sticky_sync(
 	struct page *page,
 	layout_unit scroll_y)
 {
+	struct page_sticky_args args;
+	layout_unit scroll_x;
+	int moved;
+
 	/* Only a laid out page with sticky boxes has any. */
 	if (!page->laid_out)
 		return 0;
-	return layout_sticky_apply(&page->layout, layout_from_px((float)page->scroll_x), scroll_y);
+	if (page->layout.sticky_count == 0)
+		return 0;
+
+	/* The same scroll leaves them where they are (read here: the style thread writes the tree only while it is lent). */
+	scroll_x = layout_from_px((float)page->scroll_x);
+	if (page->layout.sticky_scroll == scroll_y && page->layout.sticky_scroll_x == scroll_x)
+		return 0;
+
+	/* The boxes moved on the style thread, which owns the tree. */
+	args.page = page;
+	args.scroll_y = scroll_y;
+	moved = page_lend(page, page_sticky_work, &args);
+
+	/* Whether any moved. */
+	return moved;
+}
+
+/* Moves the page's sticky boxes for a scroll (a work lent by page_sticky_sync); reports whether any moved. */
+static int
+page_sticky_work(
+	void *argument)
+{
+	struct page_sticky_args *args;
+	struct page *page;
+	int moved;
+
+	/* The boxes, for the page's scroll across and the one given down. */
+	args = argument;
+	page = args->page;
+	moved = layout_sticky_apply(&page->layout, layout_from_px((float)page->scroll_x), args->scroll_y);
+
+	/* Whether any moved. */
+	return moved;
 }
 
 /*
@@ -881,11 +1164,34 @@ page_paint(
 		page->painted = 0;
 	}
 
-	/* Walks the layout into a new one. */
+	/* The new one, made on the style thread. */
+	error = page_lend(page, page_paint_work, page);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the page has its display list. */
+	return 0;
+}
+
+/*
+ * Builds the display list of the laid out page with its focus ring and
+ * caret (a work lent by page_paint).
+ */
+static int
+page_paint_work(
+	void *argument)
+{
+	struct page *page;
+	int error;
+
+	/* Walks the layout into a new list. */
+	page = argument;
 	error = paint_build(&page->paint, &page->layout);
 	if (error != 0)
 		return error;
 	page->painted = 1;
+	page->paint_generation = __atomic_add_fetch(&page_paint_next, 1U, __ATOMIC_RELAXED);
+	page->paint_taken = 0;
 	page->painted_media = page->media_generation;
 
 	/* The focus ring over it, when the keyboard put the focus somewhere. */

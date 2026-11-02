@@ -749,14 +749,26 @@ frame_load_activate(
 				goto release_roots;
 		}
 
-		/* The document that is left is told its page is hidden, and then it is replaced if the frame is still this attempt's. */
+		/*
+		 * The document that is left for good is unloaded (pagehide, not
+		 * persisted, then unload), and then it is replaced if the frame is
+		 * still this attempt's.
+		 */
 		realm = (struct vm_realm *)load->element->child_context;
 		leaving = NULL;
 		if (realm != NULL)
 			leaving = realm->host;
 		if (leaving != NULL && leaving->document->resource_url != NULL) {
 			bind_window_set_unloading(leaving);
-			error = bind_fire_event(leaving, NULL, "pagehide", BIND_EVENT_DOCUMENT, &canceled);
+			error = bind_fire_page_transition(leaving, "pagehide", 0);
+			if (error != 0)
+				goto release_roots;
+			current = frame_load_current(load);
+			if (!current)
+				goto release_roots;
+
+			/* unload, with the document as its target, once pagehide's listeners left the frame to this attempt. */
+			error = bind_fire_event(leaving, NULL, "unload", BIND_EVENT_DOCUMENT, &canceled);
 			if (error != 0)
 				goto release_roots;
 			current = frame_load_current(load);
@@ -1134,7 +1146,7 @@ frame_load_inline(
 		return 0;
 	}
 
-	/* A script with a source is fetched at once, where the parser stands, and run as the page's own are. */
+	/* A script with a source is fetched where the parser stands (a web one through the loader, waited for), and run as the page's own are. */
 	source = dom_attribute_ascii(script, "src");
 	if (source != NULL && source->length != 0 && window->host.context != NULL) {
 		struct page *page;
@@ -1155,7 +1167,7 @@ frame_load_inline(
 		if (error == 0)
 			error = net_url_serialize(&parsed, 0, &location);
 		if (error == 0)
-			error = page_fetch(page_cookies(page), page->base, wb_buffer_string(&location), &bytes, NULL);
+			error = page_fetch_now(page, wb_buffer_string(&location), NET_FETCH_DOCUMENT, &bytes, NULL);
 		if (error == 0)
 			error = wb_utf8_to_units(bytes.data, bytes.length, &units);
 		if (error == 0)
@@ -1382,8 +1394,7 @@ frame_tree(
 	if (tree == NULL)
 		return ENOMEM;
 	css_engine_set_base_zoom(engine, zoom);
-	status = layout_build(tree, engine, &page->text, window->document, page_image_of, page_image_by_url, page,
-	    viewport_width, viewport_height, 0, 0, transition);
+	status = page_lend_layout(page, tree, engine, window->document, viewport_width, viewport_height, 0, 0, transition);
 	if (status != 0) {
 		layout_release(tree);
 		free(tree);
@@ -1425,8 +1436,8 @@ frame_make(
 		return ENOMEM;
 	}
 	frame->tree = tree;
-	frame->refs = 1;
-	status = paint_build(&frame->list, tree);
+	frame->refs = 1U;
+	status = page_lend_paint(page, &frame->list, tree);
 	if (status != 0) {
 		paint_frame_release(frame);
 		return status;
@@ -1435,7 +1446,7 @@ frame_make(
 	/* The page keeps it too, for as long as the frame's painting may be held. */
 	entry = frame_cache_get(page, element);
 	if (entry != NULL) {
-		frame->refs++;
+		__atomic_fetch_add(&frame->refs, 1U, __ATOMIC_RELAXED);
 		paint_frame_release(entry->frame);
 		entry->frame = frame;
 	}
@@ -1468,7 +1479,7 @@ page_frame_paint(
 		return 0;
 	entry = frame_cache_find(page, element);
 	if (window->frame_hold && entry != NULL && entry->frame != NULL) {
-		entry->frame->refs++;
+		__atomic_fetch_add(&entry->frame->refs, 1U, __ATOMIC_RELAXED);
 		*out = entry->frame;
 		return 0;
 	}

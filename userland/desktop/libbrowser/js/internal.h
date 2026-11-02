@@ -277,7 +277,7 @@ struct js_node *js_parse_lhs(struct js_parser *parser);
 struct js_node *js_parse_expression_cover(struct js_parser *parser);
 int js_next_is_name(struct js_parser *parser, int star);
 struct js_node *js_parse_function(struct js_parser *parser, uint32_t flags, int declaration, int name_optional);
-struct js_node *js_parse_method(struct js_parser *parser, struct js_node *key, int kind, uint32_t flags);
+struct js_node *js_parse_method(struct js_parser *parser, struct js_node *key, uint32_t key_flags, int kind, uint32_t flags);
 struct js_node *js_parse_identifier_reference(struct js_parser *parser);
 int js_is_binding_identifier(const struct js_parser *parser);
 void js_enter_function(struct js_parser *parser, struct js_context *saved, uint32_t flags, int method);

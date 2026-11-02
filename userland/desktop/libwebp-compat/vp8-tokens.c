@@ -230,6 +230,7 @@ tokens_read_block(
 	unsigned magnitude;
 	unsigned factor_index;
 	int token;
+	int sign;
 	int value;
 
 	/* Walks the positions until an EOB or the last position. */
@@ -263,8 +264,9 @@ tokens_read_block(
 			magnitude = (unsigned)token;
 
 		/* The sign comes after the magnitude, a 1 meaning negative. */
+		sign = webpc_bool_read(tokens, TOKENS_SIGN_PROB);
 		value = (int)magnitude;
-		if (webpc_bool_read(tokens, TOKENS_SIGN_PROB) != 0)
+		if (sign != 0)
 			value = -value;
 
 		/* The first position takes the DC factor and every later one the AC factor. */
@@ -284,7 +286,7 @@ tokens_read_block(
 		position++;
 	}
 
-	/* Reports whether the block held more than an immediate EOB. */
+	/* Succeeded: reports whether the block held more than an immediate EOB. */
 	return advanced;
 }
 

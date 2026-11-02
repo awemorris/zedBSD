@@ -31,13 +31,17 @@ static unsigned
 modes_implied_bmode(
 	unsigned ymode)
 {
-	/* V_PRED, H_PRED and TM_PRED have their own subblock modes. */
+	/* V_PRED has the vertical subblock mode. */
 	if (ymode == WEBPC_VP8_V_PRED) {
 		return WEBPC_VP8_B_VE_PRED;
 	}
+
+	/* H_PRED has the horizontal subblock mode. */
 	if (ymode == WEBPC_VP8_H_PRED) {
 		return WEBPC_VP8_B_HE_PRED;
 	}
+
+	/* TM_PRED has the true-motion subblock mode. */
 	if (ymode == WEBPC_VP8_TM_PRED) {
 		return WEBPC_VP8_B_TM_PRED;
 	}
@@ -60,6 +64,7 @@ modes_context(
 		return WEBPC_VP8_B_DC_PRED;
 	}
 
+	/* Succeeded: the mode itself is a valid context. */
 	return mode;
 }
 

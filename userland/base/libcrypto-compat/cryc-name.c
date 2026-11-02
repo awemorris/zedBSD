@@ -1330,6 +1330,12 @@ name_ip_constraint_valid(
 			if (ended)
 				return EINVAL;
 		} else {
+			/* After the partial byte every byte is zero. */
+			if (ended) {
+				if (mask[index] != 0)
+					return EINVAL;
+				continue;
+			}
 			inverse = (unsigned)(mask[index] ^ 0xff);
 			if ((inverse & (inverse + 1U)) != 0U)
 				return EINVAL;

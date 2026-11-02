@@ -20,9 +20,9 @@
 #include "net/net.h"
 #include "base/os-file.h"
 #include "base/os-system.h"
+#include "base/thread.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,11 +125,11 @@ static const struct url_special url_specials[] = {
 };
 
 /* The User-Agent, made once from the system's part. */
-static pthread_once_t url_agent_once = PTHREAD_ONCE_INIT;
+static struct wb_once url_agent_once = WB_ONCE_INIT;
 static char url_agent[256];
 
 static void url_parts_init(struct url_parts *parts);
-static void url_agent_make(void);
+static void url_agent_make(void *argument);
 static void url_parts_release(struct url_parts *parts);
 static int url_clean(const char *input, size_t length, struct wb_buffer *cleaned);
 static int url_step(struct url_parser *parser, int c);
@@ -508,7 +508,7 @@ const char *
 net_user_agent(void)
 {
 	/* Made on the first call. */
-	pthread_once(&url_agent_once, url_agent_make);
+	wb_once_run(&url_agent_once, url_agent_make, NULL);
 
 	/* Succeeded: the string lives as long as the program. */
 	return url_agent;
@@ -2083,9 +2083,12 @@ url_named(
 
 /* Makes the User-Agent from the system's part of it. */
 static void
-url_agent_make(void)
+url_agent_make(
+	void *argument)
 {
 	const char *system;
+
+	UNUSED_PARAMETER(argument);
 
 	/* The browser's names around the system's. */
 	system = wb_os_user_agent_system();

@@ -141,6 +141,7 @@ webpc_vp8_read_header(
 	size_t after_tag;
 	size_t after_first;
 	uint32_t literal;
+	int ended;
 	int error;
 
 	/* The first partition must lie inside the data after the tag. */
@@ -186,7 +187,8 @@ webpc_vp8_read_header(
 	}
 
 	/* A header that read past the first partition's end was cut short. */
-	if (webpc_bool_ended(first) != 0)
+	ended = webpc_bool_ended(first);
+	if (ended != 0)
 		return ENOBUFS;
 
 	/* Splits what follows the first partition into the token partitions. */
@@ -226,6 +228,7 @@ webpc_vp8_dequant_build(
 	int32_t y2_ac_index;
 	int32_t uv_dc_index;
 	int32_t uv_ac_index;
+	int32_t y1_ac_index;
 	int32_t y2_ac;
 
 	/* Limits q early so that adding a delta cannot overflow; no result changes. */
@@ -243,7 +246,8 @@ webpc_vp8_dequant_build(
 
 	/* Looks up the factors of the Y plane; its AC index is q itself. */
 	out->y1[0] = (int32_t)webpc_vp8_dc_q[y1_dc_index];
-	out->y1[1] = (int32_t)webpc_vp8_ac_q[header_clamp_q(q)];
+	y1_ac_index = header_clamp_q(q);
+	out->y1[1] = (int32_t)webpc_vp8_ac_q[y1_ac_index];
 
 	/* Looks up the Y2 factors: the DC one is doubled, the AC one scaled by 155/100 with a floor of 8. */
 	out->y2[0] = (int32_t)webpc_vp8_dc_q[y2_dc_index] * 2;
@@ -347,6 +351,8 @@ header_read_segmentation(
 	if (segmentation->update_map != 0) {
 		for (index = 0U; index < 3U; index++) {
 			literal = webpc_bool_literal(first, 1U);
+
+			/* A set flag is followed by the probability itself. */
 			if (literal != 0U) {
 				literal = webpc_bool_literal(first, 8U);
 				segmentation->tree_probs[index] = (uint8_t)literal;
@@ -491,8 +497,12 @@ header_read_partitions(
 	/* Cuts each partition but the last at its size, or at the end of the data. */
 	for (index = 0U; index < last; index++) {
 		part_size = (size_t)webpc_le24(rest + (size_t)HEADER_PARTITION_ENTRY * (size_t)index);
+
+		/* A size that passes the end of the data is cut to what is left. */
 		if (part_size > remaining)
 			part_size = remaining;
+
+		/* Places the partition and moves past it. */
 		header->partitions[index] = cursor;
 		header->partition_sizes[index] = part_size;
 		cursor += part_size;
@@ -526,11 +536,14 @@ header_build_dequant(
 	for (index = 0U; index < WEBPC_VP8_SEGMENTS; index++) {
 		q = header->base_q;
 		if (header->segmentation.enabled != 0) {
+			/* The segment's quantizer replaces the base index or is added to it. */
 			if (header->segmentation.absolute != 0)
 				q = header->segmentation.quantizer[index];
 			else
 				q = header->base_q + header->segmentation.quantizer[index];
 		}
+
+		/* Builds this segment's factors. */
 		webpc_vp8_dequant_build(q, header, &header->dequant[index]);
 	}
 }

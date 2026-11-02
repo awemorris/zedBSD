@@ -27,6 +27,7 @@
 
 #include "page/page.h"
 #include "base/os-file.h"
+#include "base/thread.h"
 #include "net/net.h"
 
 #include "userland/desktop/libmedia/media.h"
@@ -83,6 +84,21 @@ struct page_media {
 	unsigned drawn_state;
 	int drawn_position;
 	struct page *page;
+};
+
+static int media_thread_start(void *context, const char *name, void (*run)(void *argument), void *argument, void **thread);
+static void media_thread_join(void *context, void *thread);
+
+/*
+ * How the engines' threads are made: through the program's threads
+ * (base/thread.h), each named browser-media.  The table is constant and
+ * lives as long as the program.
+ */
+static const struct media_threads media_threads = {
+	"browser-media",
+	NULL,
+	media_thread_start,
+	media_thread_join
 };
 
 static int media_walk(struct page *page, struct dom_node *node, int depth);
@@ -638,7 +654,7 @@ media_start(
 
 	/* A local file by its path. */
 	if (bytes == NULL) {
-		error = media_engine_open(media->location, NULL, flags, media_waker(media), media, &media->engine);
+		error = media_engine_open(media->location, NULL, flags, &media_threads, media_waker(media), media, &media->engine);
 		if (error != 0)
 			media->failed = 1;
 		return;
@@ -663,9 +679,48 @@ media_start(
 	source.read_at = media_read_at;
 	source.size = length;
 	source.context = media;
-	error = media_engine_open(NULL, &source, flags, media_waker(media), media, &media->engine);
+	error = media_engine_open(NULL, &source, flags, &media_threads, media_waker(media), media, &media->engine);
 	if (error != 0)
 		media->failed = 1;
+}
+
+/* Starts an engine's thread through the program's threads (the engine's start). */
+static int
+media_thread_start(
+	void *context,
+	const char *name,
+	void (*run)(void *argument),
+	void *argument,
+	void **thread)
+{
+	struct wb_thread started;
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The thread, with the system's stack. */
+	error = wb_thread_start(name, 0, run, argument, &started);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the engine keeps the handle. */
+	*thread = started.handle;
+	return 0;
+}
+
+/* Waits for an engine's thread to end (the engine's join). */
+static void
+media_thread_join(
+	void *context,
+	void *thread)
+{
+	struct wb_thread started;
+
+	UNUSED_PARAMETER(context);
+
+	/* The thread, by its handle. */
+	started.handle = thread;
+	wb_thread_join(&started);
 }
 
 /*
@@ -804,6 +859,11 @@ media_follow(
 
 	/* The picture whose time has come, into the bitmap (a new serial: the GPU takes it anew). */
 	if (media->bitmap.pixels == NULL)
+		return 0;
+
+	/* Pixels a committed frame still draws are not drawn over: the bitmap gets its own first (without memory, no picture this time). */
+	error = img_bitmap_writable(&media->bitmap);
+	if (error != 0)
 		return 0;
 	drawn = media_engine_picture(media->engine, media->bitmap.pixels, (size_t)media->bitmap.width, media->bitmap.width,
 	    media->bitmap.height, &next);

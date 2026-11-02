@@ -469,7 +469,7 @@ expect_failed(
 	CHECK(run->done == 0);
 	CHECK(sslc_hs_connected(&run->hs) == 0);
 	CHECK(all_zero(run->hs.x25519_private, sizeof(run->hs.x25519_private)));
-	CHECK(all_zero(run->hs.p256_private, sizeof(run->hs.p256_private)));
+	CHECK(all_zero(run->hs.ec_private, sizeof(run->hs.ec_private)));
 	CHECK(all_zero(run->hs.master, sizeof(run->hs.master)));
 
 	/* Later calls are refused, and the alert stays. */
@@ -509,7 +509,7 @@ check_connected(
 
 	/* No secret is kept: the key pairs and the master secret are gone. */
 	CHECK(all_zero(run->hs.x25519_private, sizeof(run->hs.x25519_private)));
-	CHECK(all_zero(run->hs.p256_private, sizeof(run->hs.p256_private)));
+	CHECK(all_zero(run->hs.ec_private, sizeof(run->hs.ec_private)));
 	CHECK(all_zero(run->hs.master, sizeof(run->hs.master)));
 }
 
@@ -866,14 +866,14 @@ patch(
 
 /*
  * Checks every combination of the main parameters in a full handshake:
- * three suites, both groups, both leaves, a client of TLS 1.2 alone and
+ * three suites, the three groups, both leaves, a client of TLS 1.2 alone and
  * of 1.2 and 1.3, with the optional parts of the server varied.
  */
 static void
 test_handshakes(void)
 {
 	static const uint16_t suite_ids[3] = { 0xc02b, 0xc02c, 0xcca9 };
-	static const uint16_t groups[2] = { SSLC_GROUP_X25519, SSLC_GROUP_SECP256R1 };
+	static const uint16_t groups[3] = { SSLC_GROUP_X25519, SSLC_GROUP_SECP256R1, SSLC_GROUP_SECP384R1 };
 	struct tlspeer_config config;
 	const struct tlspeer_pki *pki;
 	struct run *run;
@@ -890,7 +890,7 @@ test_handshakes(void)
 	/* Every combination, the options of the server chosen by the combination's number. */
 	count = 0;
 	for (suite_index = 0; suite_index < 3U; suite_index++) {
-		for (group_index = 0; group_index < 2U; group_index++) {
+		for (group_index = 0; group_index < 3U; group_index++) {
 			for (curve_index = 0; curve_index < 2U; curve_index++) {
 				for (client_index = 0; client_index < 2U; client_index++) {
 					pki = curve_index == 0U ? &pki256 : &pki384;
@@ -918,14 +918,19 @@ test_handshakes(void)
 					CHECK(run->messages_sent == ((options & TLSPEER_OPT_CERT_REQUEST) != 0U ? 4U : 3U));
 					CHECK(run->hs.has_request == ((options & TLSPEER_OPT_CERT_REQUEST) != 0U));
 					CHECK(run->hs.server_group == groups[group_index]);
-					CHECK(run->hs.has_p256 == (groups[group_index] == SSLC_GROUP_SECP256R1));
+					CHECK(run->hs.has_ec == (groups[group_index] != SSLC_GROUP_X25519));
+					if (groups[group_index] != SSLC_GROUP_X25519) {
+						CHECK(run->hs.ec_group == groups[group_index]);
+						CHECK(run->hs.ec_public_size == (groups[group_index] == SSLC_GROUP_SECP384R1 ? 97U : 65U));
+						CHECK(run->peer->shared_size == (groups[group_index] == SSLC_GROUP_SECP384R1 ? 48U : 32U));
+					}
 					run_free(run);
 					count++;
 				}
 			}
 		}
 	}
-	CHECK(count == 24U);
+	CHECK(count == 36U);
 
 	/* The hash of an ECDSA scheme and the curve of the key are independent in TLS 1.2: SHA-256 with P-384, SHA-384 with P-256. */
 	peer12(&config, &pki384);
@@ -987,8 +992,8 @@ test_draws(void)
 	check_connected(run, "SSCWSRD", 1);
 	CHECK(run->stream.calls > 2U);
 	CHECK(run->hs.ec != NULL);
-	CHECK(run->hs.has_p256 == 1);
-	CHECK(run->hs.p256_public[0] == 4U);
+	CHECK(run->hs.has_ec == 1);
+	CHECK(run->hs.ec_public[0] == 4U);
 	run_free(run);
 
 	/* The same random source gives the same client random, whoever the server is. */
@@ -1014,7 +1019,7 @@ test_draws(void)
 	go(run);
 	check_connected(run, "SSCWSRD", 1);
 	CHECK(run->hs.ec == NULL);
-	CHECK(run->hs.has_p256 == 0);
+	CHECK(run->hs.has_ec == 0);
 	run_free(run);
 }
 
@@ -1298,12 +1303,12 @@ test_server_key_exchange(void)
 {
 	static uint8_t message[512];
 	static uint8_t point32[32];
-	static uint8_t point65[80];
+	static uint8_t point65[100];
 	static uint8_t signature[16];
 	size_t size;
 	size_t index;
 
-	/* A point of 32 bytes (x25519) and room for one of up to 80 (secp256r1 is 65, uncompressed), neither a signed one. */
+	/* A point of 32 bytes (x25519) and room for one of up to 100 (secp256r1 is 65, secp384r1 97, uncompressed), neither a signed one. */
 	CHECK(hex_decode(x25519_bob_public, point32, sizeof(point32)) == 32U);
 	memset(point65, 0x11, sizeof(point65));
 	point65[0] = 4;
@@ -1313,8 +1318,8 @@ test_server_key_exchange(void)
 	size = ske_write(message, sizeof(message), 1, 0x001d, point32, 32, 0x0403, bogus_signature, sizeof(bogus_signature));
 	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 
-	/* A group that was not offered (secp384r1, or unknown): illegal_parameter. */
-	size = ske_write(message, sizeof(message), 3, 0x0018, point65, 65, 0x0403, bogus_signature, sizeof(bogus_signature));
+	/* A group that was not offered (secp521r1, or unknown): illegal_parameter. */
+	size = ske_write(message, sizeof(message), 3, 0x0019, point65, 65, 0x0403, bogus_signature, sizeof(bogus_signature));
 	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 	size = ske_write(message, sizeof(message), 3, 0x0000, point32, 32, 0x0403, bogus_signature, sizeof(bogus_signature));
 	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
@@ -1329,6 +1334,14 @@ test_server_key_exchange(void)
 	size = ske_write(message, sizeof(message), 3, 0x0017, point65, 64, 0x0403, bogus_signature, sizeof(bogus_signature));
 	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 	size = ske_write(message, sizeof(message), 3, 0x0017, point65, 66, 0x0403, bogus_signature, sizeof(bogus_signature));
+	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
+	size = ske_write(message, sizeof(message), 3, 0x0017, point65, 97, 0x0403, bogus_signature, sizeof(bogus_signature));
+	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
+	size = ske_write(message, sizeof(message), 3, 0x0018, point65, 65, 0x0403, bogus_signature, sizeof(bogus_signature));
+	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
+	size = ske_write(message, sizeof(message), 3, 0x0018, point65, 96, 0x0403, bogus_signature, sizeof(bogus_signature));
+	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
+	size = ske_write(message, sizeof(message), 3, 0x0018, point65, 98, 0x0403, bogus_signature, sizeof(bogus_signature));
 	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 	point65[0] = 2;
 	size = ske_write(message, sizeof(message), 3, 0x0017, point65, 65, 0x0403, bogus_signature, sizeof(bogus_signature));
@@ -1600,7 +1613,7 @@ test_flight(void)
 
 	/* The private keys are gone, the master secret kept for the server's Finished. */
 	CHECK(all_zero(run->hs.x25519_private, sizeof(run->hs.x25519_private)));
-	CHECK(all_zero(run->hs.p256_private, sizeof(run->hs.p256_private)));
+	CHECK(all_zero(run->hs.ec_private, sizeof(run->hs.ec_private)));
 	CHECK(!all_zero(run->hs.master, sizeof(run->hs.master)));
 	CHECK(run->hs.state == SSLC_HS12_WAIT_CHANGE_CIPHER_SPEC);
 	run_free(run);
@@ -1633,7 +1646,7 @@ test_flight(void)
 	CHECK(bytes[10] == 66U);
 	CHECK(bytes[11] == 65U);
 	CHECK(bytes[12] == 4U);
-	CHECK_BYTES(bytes + 12, run->hs.p256_public, 65);
+	CHECK_BYTES(bytes + 12, run->hs.ec_public, 65);
 	CHECK(run->actions.list[3].offset == 7U + 4U + 1U + 65U);
 	run_free(run);
 }

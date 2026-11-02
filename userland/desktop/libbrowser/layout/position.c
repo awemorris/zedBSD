@@ -888,8 +888,12 @@ position_place(
 	return 0;
 }
 
-/* Whether a layout updates the position option that last fit (a rendering update does; a layout a script forces does not). */
-static int position_remember = 1;
+/*
+ * Whether a layout updates the position option that last fit (a rendering
+ * update does; a layout a script forces does not).  Each thread has its
+ * own: it belongs to the layout the thread runs.
+ */
+static _Thread_local int position_remember = 1;
 
 /* Tells the layouts that follow whether they update the last successful position options. */
 void
@@ -897,6 +901,13 @@ layout_try_remember(
 	int remember)
 {
 	position_remember = remember;
+}
+
+/* Tells whether the layouts this thread makes update the last successful position options (what layout_try_remember set). */
+int
+layout_try_remembers(void)
+{
+	return position_remember;
 }
 
 /* Lays out and places one box, trying its position-try-fallbacks when it overflows. */

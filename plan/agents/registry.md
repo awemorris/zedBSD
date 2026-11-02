@@ -73,7 +73,7 @@
 | P3 | phase-runner-high | BUG-412 の log (q1945-i01) | `/home/awe/zedBSD-worktrees/p3-bug412` / `agent/p3-bug412` | 返却（2026-11-02 13:31、cleared） | 8e9c773ad（2026-11-02 13:31 に main へ merge） |
 | P3 | phase-runner-high | BUG-412 の直し (q1955-i01) | `/home/awe/zedBSD-worktrees/p3-bug412` / `agent/p3-bug412` | 返却（2026-11-02 14:27、uncleared） | 82f7aba10（2026-11-02 14:27 に main へ merge） |
 | P3 | phase-runner-high | BUG-412 の常時の記録 (q1967-i01) | `/home/awe/zedBSD-worktrees/p3-bug412` / `agent/p3-bug412` | 返却（2026-11-02 15:29、cleared） | 15e61e1cf（2026-11-02 15:29 に main へ merge） |
-| P3 | phase-runner-high | BUG-412 の直しの候補 (q1970-i01) | `/home/awe/zedBSD-worktrees/p3-bug412` / `agent/p3-bug412` | in-progress（2026-11-02 15:29 起動） | — |
+| P3 | phase-runner-high | BUG-412 の直しの候補 (q1970-i01) | `/home/awe/zedBSD-worktrees/p3-bug412` / `agent/p3-bug412` | 返却（2026-11-02 15:44、実機の確かめ待ち） | — |
 | Sonnet | phase-runner-low | ws344 p002 (q1946-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p002` / `agent/s-ws344-p002` | 返却（2026-11-02 13:39、cleared） | c9339766d（2026-11-02 13:39 に main へ merge） |
 | Sonnet | phase-runner-low | ws344 p012 (q1952-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p012` / `agent/s-ws344-p012` | 返却（2026-11-02 13:46、cleared） | 17414580f（2026-11-02 13:46 に main へ merge） |
 | Sonnet | phase-runner-low | ws344 p013 (q1954-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p013` / `agent/s-ws344-p013` | 返却（2026-11-02 13:58、cleared） | c7e335d80（2026-11-02 13:58 に main へ merge） |
@@ -92,15 +92,39 @@
 | Sonnet | phase-runner-low | ws344 p016 (q1961-i01) | `/home/awe/zedBSD-worktrees/s-ws344-p016` / `agent/s-ws344-p016` | 返却（2026-11-02 14:41、cleared） | 5dd9aa50c（2026-11-02 14:41 に main へ merge） |
 | Sonnet | phase-runner-low | ws335 p030 (q1937-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p030` / `agent/s-ws335-p030` | 返却（2026-11-02 12:21、cleared） | 37f9fa0dd（2026-11-02 12:21 に main へ merge） |
 | Sonnet | phase-runner-low | ws335 p031 (q1943-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p031` / `agent/s-ws335-p031` | 返却（2026-11-02 13:41、cleared） | 9336ee6f5（2026-11-02 13:41 に main へ merge） |
-| Sonnet | phase-runner-low | ws335 p032 (q1953-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p032` / `agent/s-ws335-p032` | in-progress（2026-11-02 13:41 起動） | — |
+| Sonnet | phase-runner-low | ws335 p032 (q1953-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p032` / `agent/s-ws335-p032` | 返却（2026-11-02 15:49、cleared） | 0bd943451（2026-11-02 15:49 に main へ merge） |
+| P1 | phase-runner-high | ws335 p033 (q1971-i01) | `/home/awe/zedBSD-worktrees/p1-ws335` / `agent/p1-ws335` | 返却（2026-11-02 17:43、cleared） | f31fbecbd（2026-11-02 17:43 に main へ merge） |
+| P1 | phase-runner-high | ws335 p040 (q1981-i01) | `/home/awe/zedBSD-worktrees/p1-ws335` / `agent/p1-ws335` | 返却（2026-11-02 18:41、cleared） | ddc678f69（2026-11-02 18:41 に main へ merge） |
+| P1 | phase-runner-high | ws335 p034 (q1986-i01) | `/home/awe/zedBSD-worktrees/p1-ws335` / `agent/p1-ws335` | 返却（2026-11-02 21:35、cleared） | a37f972c7（2026-11-02 21:35 に main へ merge） |
+| P1 | phase-runner-high | ws335 p035 (q1992-i01) | `/home/awe/zedBSD-worktrees/p1-ws335` / `agent/p1-ws335` | in-progress（2026-11-02 21:35 起動） | — |
 | P6 | phase-runner-high | ws336 p016 (q1938-i01) | `/home/awe/zedBSD-worktrees/p6-ws336` / `agent/p6-ws336` | 返却（2026-11-02 12:37、cleared） | e8b178482（2026-11-02 12:37 に main へ merge） |
 | P6 | phase-runner-high | ws336 p017 (q1944-i01) | `/home/awe/zedBSD-worktrees/p6-ws336` / `agent/p6-ws336` | 返却（2026-11-02 14:36、cleared） | 9f1fdd60f（2026-11-02 14:36 に main へ merge） |
-| P6 | phase-runner-high | ws336 p018 (q1965-i01) | `/home/awe/zedBSD-worktrees/p6-ws336` / `agent/p6-ws336` | in-progress（2026-11-02 14:36 起動） | — |
+| P6 | phase-runner-high | ws336 p018 (q1965-i01) | `/home/awe/zedBSD-worktrees/p6-ws336` / `agent/p6-ws336` | 返却（2026-11-02 16:35、cleared） | 1d7df5834（2026-11-02 16:35 に main へ merge） |
+| P6 | phase-runner-high | ws336 p019 (q1975-i01) | `/home/awe/zedBSD-worktrees/p6-ws336` / `agent/p6-ws336` | 返却（2026-11-02 18:04、cleared） | 024a472c7（2026-11-02 18:04 に main へ merge） |
+| P6 | phase-runner-high | ws336 p020 (q1983-i01) | `/home/awe/zedBSD-worktrees/p6-ws336` / `agent/p6-ws336` | 返却（2026-11-02 20:23、cleared） | 0aaa5801c（2026-11-02 20:23 に main へ merge） |
+| P6 | phase-runner-high | ws336 p021 (q1989-i01) | `/home/awe/zedBSD-worktrees/p6-ws336` / `agent/p6-ws336` | 返却（2026-11-02 21:15、cleared） | 54778d48a（2026-11-02 21:15 に main へ merge） |
+| P6 | phase-runner-high | ws336 p022 (q1991-i01) | `/home/awe/zedBSD-worktrees/p6-ws336` / `agent/p6-ws336` | in-progress（2026-11-02 21:15 起動） | — |
+| P2 | phase-runner-high | ws343 p002 (q1990-i01) | `/home/awe/zedBSD-worktrees/p2-ws343` / `agent/p2-ws343` | in-progress（2026-11-02 20:46 起動） | — |
 | P2 | phase-runner-high | ws344 p001 (q1939-i01) | `/home/awe/zedBSD-worktrees/p2-ws344` / `agent/p2-ws344` | 返却（2026-11-02 13:21、cleared） | ffa491347（2026-11-02 13:21 に main へ merge） |
 | P2 | phase-runner-high | ws344 p017 (q1966-i01) | `/home/awe/zedBSD-worktrees/p2-ws344` / `agent/p2-ws344` | 返却（2026-11-02 15:22、cleared） | 0fd7fe84d（2026-11-02 15:22 に main へ merge） |
-| P2 | phase-runner-high | ws344 p019 (q1969-i01) | `/home/awe/zedBSD-worktrees/p2-ws344` / `agent/p2-ws344` | in-progress（2026-11-02 15:22 起動） | — |
+| P2 | phase-runner-high | ws344 p019 (q1969-i01) | `/home/awe/zedBSD-worktrees/p2-ws344` / `agent/p2-ws344` | 返却（2026-11-02 16:35、cleared） | 15ec0a6de（2026-11-02 16:35 に main へ merge） |
+| P2 | phase-runner-high | ws344 p020 (q1976-i01) | `/home/awe/zedBSD-worktrees/p2-ws344` / `agent/p2-ws344` | 返却（2026-11-02 17:29、cleared） | 9424d21b0（2026-11-02 17:29 に main へ merge） |
+| P2 | phase-runner-high | ws344 p021 (q1979-i01) | `/home/awe/zedBSD-worktrees/p2-ws344` / `agent/p2-ws344` | 返却（2026-11-02 17:56、cleared） | 2d115efe8（2026-11-02 17:56 に main へ merge） |
+| P2 | phase-runner-high | ws344 p022 (q1982-i01) | `/home/awe/zedBSD-worktrees/p2-ws344` / `agent/p2-ws344` | 返却（2026-11-02 18:41、cleared） | b114f4ef2（2026-11-02 18:41 に main へ merge） |
+| P2 | phase-runner-high | WS344 の完了 (q1987-i01) | `/home/awe/zedBSD-worktrees/p2-ws344` / `agent/p2-ws344` | 返却（2026-11-02 20:23、cleared） | 166e6f675（2026-11-02 20:23 に main へ merge） |
 | P5 | phase-runner-high | ws336 p015 (q1940-i01) | `/home/awe/zedBSD-worktrees/p5-ws336` / `agent/p5-ws336` | 返却（2026-11-02 13:46、cleared） | 00a9f4ccc（2026-11-02 13:46 に main へ merge） |
 | P8 | phase-runner-high | BUG-411 ほか (q1941-i01) | `/home/awe/zedBSD-worktrees/p8-uat3` / `agent/p8-uat3` | 返却（2026-11-02 13:52、一部） | e58b58424（2026-11-02 13:52 に main へ merge） |
 | P8 | phase-runner-high | ws345 p001 (q1959-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | 返却（2026-11-02 14:46、cleared） | 87feb4707（2026-11-02 14:46 に main へ merge） |
-| P8 | phase-runner-high | ws345 p002 (q1968-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | in-progress（2026-11-02 14:46 起動） | — |
+| P8 | phase-runner-high | ws345 p002 (q1968-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | 返却（2026-11-02 15:59、cleared） | 4a4b68de0（2026-11-02 15:59 に main へ merge） |
+| P8 | phase-runner-high | ws345 p003 (q1972-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | 返却（2026-11-02 16:47、cleared） | 6bfb56328（2026-11-02 16:47 に main へ merge） |
+| P8 | phase-runner-high | BUG-414・415 (q1977-i01) | `/home/awe/zedBSD-worktrees/p8-uat3` / `agent/p8-uat3` | 返却（2026-11-02 17:56、cleared） | cb162ceca（2026-11-02 17:56 に main へ merge） |
+| P3 | phase-runner-high | BUG-416 (q1978-i01) | `/home/awe/zedBSD-worktrees/p3-bug416` / `agent/p3-bug416` | 返却（2026-11-02 17:56、cleared） | de9fd4b3f（2026-11-02 17:56 に main へ merge） |
+| P5 | phase-runner-high | ws345 p004 (q1973-i01) | `/home/awe/zedBSD-worktrees/p5-ws345` / `agent/p5-ws345` | 返却（2026-11-02 17:33、cleared） | db42ea1a8（2026-11-02 17:33 に main へ merge） |
+| P5 | phase-runner-high | ws345 p005 (q1980-i01) | `/home/awe/zedBSD-worktrees/p5-ws345` / `agent/p5-ws345` | 返却（2026-11-02 18:28、cleared） | 283f5600c（2026-11-02 18:28 に main へ merge） |
+| P8 | phase-runner-high | ws345 p006 (q1984-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | 返却（2026-11-02 20:23、cleared） | 0ac211b5c（2026-11-02 20:23 に main へ merge） |
+| P8 | phase-runner-high | ws345 p007 (q1988-i01) | `/home/awe/zedBSD-worktrees/p8-ws345` / `agent/p8-ws345` | in-progress（2026-11-02 20:25 新しい P8 に引き継ぎ、前の P8 は未着手） | — |
+| P5 | phase-runner-high | ws345 p008 (q1985-i01) | `/home/awe/zedBSD-worktrees/p5-ws345` / `agent/p5-ws345` | 返却（2026-11-02 21:40、cleared） | d8517c082（2026-11-02 21:40 に main へ merge） |
+| P5 | phase-runner-high | ws345 p009 (q1993-i01) | `/home/awe/zedBSD-worktrees/p5-ws345` / `agent/p5-ws345` | in-progress（2026-11-02 21:40 起動） | — |
+| P3 | phase-runner-high | BUG-412 hot-plug (q1994-i01) | `/home/awe/zedBSD-worktrees/p3-bug412` / `agent/p3-bug412` | in-progress（2026-11-02 22:16 起動、Pi 5） | — |
+| P4 | phase-runner-high | ws345 p013 (q1974-i01) | `/home/awe/zedBSD-worktrees/p4-ws345` / `agent/p4-ws345` | 返却（2026-11-02 17:29、cleared） | 481b0ef40（2026-11-02 17:29 に main へ merge） |
 | P1 | phase-runner-high | BUG-413 (q1942-i01) | `/home/awe/zedBSD-worktrees/p1-bug413` / `agent/p1-bug413` | 返却（2026-11-02 12:20、fixed） | 28ad1130b（2026-11-02 12:20 に main へ merge） |

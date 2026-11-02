@@ -167,8 +167,9 @@ struct kl_app {
  * title bar is written with (text_open 0 when it could not be opened), and
  * the text input: whether the program asked for it and its caret's
  * rectangle (the content's pixels); whether the program takes the pen
- * as a tablet (tablet, pointer.c); and the drag waiting for its start
- * (NULL when none, drag.c).
+ * as a tablet (tablet, pointer.c); the drag waiting for its start
+ * (NULL when none, drag.c); and the program's callback for the sizes
+ * during the modal size loop (NULL when none) with its data.
  */
 struct kl_window {
 	struct kl_app *app;
@@ -219,6 +220,8 @@ struct kl_window {
 	RECT text_caret;
 	int tablet;
 	struct keiui_win32_drag *drag;
+	kl_window_resize_fn resize_callback;
+	void *resize_data;
 };
 
 /* app.c */

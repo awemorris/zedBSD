@@ -1177,7 +1177,7 @@ stmt_class_member(
 		    key->word == JS_W_PROTOTYPE)
 			js_fail_at(parser, key->line, key->column, "a static method cannot be named prototype");
 		member->op = kind;
-		member->second = js_parse_method(parser, key, kind, function_flags);
+		member->second = js_parse_method(parser, key, flags, kind, function_flags);
 		return member;
 	}
 

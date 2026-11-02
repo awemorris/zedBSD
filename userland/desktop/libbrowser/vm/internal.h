@@ -14,6 +14,9 @@
 
 #include "vm/vm.h"
 
+/* How many steps of long native functions go between two looks at the request to end the task (a power of two, less one). */
+#define VM_STEPS_MASK		0xFFFU
+
 /* The size and alignment of a block of small cells. */
 #define VM_BLOCK_SIZE		(64U * 1024U)
 
@@ -123,6 +126,9 @@ struct vm_heap {
 	/* Whether a collection is running (allocation is refused inside one). */
 	int collecting;
 
+	/* How deep the heap is lent to another thread (vm_heap_lend): no collection while it is. */
+	unsigned lent;
+
 	/* The counts for vm_heap_stats. */
 	size_t collections;
 	size_t freed_cells;
@@ -136,6 +142,13 @@ struct vm_heap {
 	 * made from it.
 	 */
 	struct vm_shape *root_shape;
+
+	/* The heap's tasks: its own agent, and the agent its tasks run in (own_agent unless its user shares one). */
+	struct vm_agent own_agent;
+	struct vm_agent *agent;
+
+	/* The steps of long native functions counted (vm_heap_count_step), the heap's thread's alone. */
+	uint32_t steps;
 };
 
 /* The states of a generator (or of an async function's run). */
@@ -234,6 +247,46 @@ struct vm_promise_job {
 	vm_value reject;
 	struct vm_generator *generator;
 };
+
+/*
+ * Reports VM_TERMINATED when another thread asked the task that runs to
+ * end, 0 otherwise.  The engine calls it where a script can run for long
+ * (a loop's head, a function's entry), so the common case is one relaxed
+ * load of a word nobody writes.
+ */
+static __inline int
+vm_termination_poll(
+	struct vm_heap *heap)
+{
+	struct vm_agent *agent;
+	uint32_t asked;
+	uint32_t task;
+	int passed;
+
+	/* Nobody asked: the task goes on. */
+	agent = heap->agent;
+	asked = __atomic_load_n(&agent->terminate, __ATOMIC_RELAXED);
+	if (asked == 0U)
+		return 0;
+
+	/* A task with a deadline ends at it. */
+	if (agent->deadline_ns != 0U) {
+		passed = vm_agent_deadline_passed(agent);
+		if (passed)
+			return VM_TERMINATED;
+	}
+
+	/* A request for another task (one that ended already) does not end this one. */
+	task = __atomic_load_n(&agent->task, __ATOMIC_RELAXED);
+	if (asked != task)
+		return 0;
+
+	/* The task that runs is asked to end. */
+	return VM_TERMINATED;
+}
+
+/* Counts a script entered on a borrower thread, which never should be (heap.c). */
+void vm_borrower_entry(void);
 
 /* The interpreter's runs of generators (interpreter.c). */
 int vm_interpret_start(struct vm_realm *realm, struct vm_function *function, vm_value this_value, const vm_value *args, unsigned count, struct vm_generator *generator, vm_value *result, int *suspended);

@@ -7,7 +7,8 @@
 
 /*
  * The operating-system layer of the browser engine: everything the engine
- * asks of the system beyond ISO C and the threads of <pthread.h>.
+ * asks of the system beyond ISO C (its threads come from the program's
+ * table, base/thread.h).
  *
  * The layer is private to libbrowser.  Its groups each have a header of
  * their own (os-system.h, os-file.h, os-net.h, os-time.h; os-error.h gives

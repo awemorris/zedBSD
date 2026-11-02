@@ -96,6 +96,7 @@ static int regexp_to_length(struct vm_realm *realm, vm_value value, double *leng
 static int regexp_get_string(struct vm_realm *realm, vm_value object, const char *name, struct vm_string **string);
 static int regexp_get_match(struct vm_realm *realm, vm_value result, struct vm_string **string);
 static void regexp_input(const struct vm_string *string, struct js_regexp_input *input);
+static int regexp_poll(void *context);
 static int regexp_slice(struct vm_realm *realm, const struct vm_string *string, size_t start, size_t end, vm_value *result);
 static size_t regexp_advance(const struct vm_string *string, size_t index, int unicode);
 static int regexp_append(struct wb_units *units, const struct vm_string *string, size_t start, size_t end);
@@ -1690,6 +1691,8 @@ regexp_builtin_exec(
 	if (captures == NULL)
 		return ENOMEM;
 	regexp_input(string, &input);
+	input.poll = regexp_poll;
+	input.poll_context = realm->heap;
 	error = js_regexp_match(state->program, &input, (size_t)last_index, captures, &matched);
 	if (error == E2BIG) {
 		free(captures);
@@ -1697,7 +1700,7 @@ regexp_builtin_exec(
 		return error;
 	}
 
-	/* Out of memory. */
+	/* Out of memory, or the task was asked to end. */
 	if (error != 0) {
 		free(captures);
 		return error;
@@ -2089,15 +2092,35 @@ regexp_input(
 	const struct vm_string *string,
 	struct js_regexp_input *input)
 {
-	/* UTF-16 or Latin-1. */
+	/* UTF-16 or Latin-1, and no poll until the caller gives one. */
 	input->units = NULL;
 	input->latin1 = NULL;
 	input->length = string->length;
+	input->poll = NULL;
+	input->poll_context = NULL;
 	if ((string->flags & VM_STRING_WIDE) != 0) {
 		input->units = vm_string_units(string);
 	} else {
 		input->latin1 = vm_string_latin1(string);
 	}
+}
+
+/* Tells the matcher whether its match goes on: VM_TERMINATED when the heap's (context) task was asked to end. */
+static int
+regexp_poll(
+	void *context)
+{
+	struct vm_heap *heap;
+	int status;
+
+	/* The heap's look. */
+	heap = context;
+	status = vm_heap_check_termination(heap);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the match goes on. */
+	return 0;
 }
 
 /* Makes the string of a range of a string's units. */

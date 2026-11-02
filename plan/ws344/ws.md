@@ -3,66 +3,63 @@
 # WS344 自前の WebP の decoder（libwebp-compat、libbrowser の画像、VP8・VP8L・ALPH・RIFF）
 
 - Master: [plan/master.md](../master.md)（2026-11-02 11:31 作成）。Primary Milestone: MG006。
-- Status: incomplete（p001 の設計は P2 が実施・commit 済み、Q1 の受け入れ待ち）
-- 目標: WebP の静止画（非可逆の VP8 の key frame、可逆の VP8L、透明度の ALPH、RIFF・VP8X の入れ物）を読む自前の library **libwebp-compat**（libwebp 1.5.0 の decode の interface の部分集合、`include/libc/compat/webp/`）を作り、libbrowser の img_sniff・img_decode に RIFF/WEBP の枝を足す。zedBSD（共有 library）と Windows 版のブラウザ（static link）の両方で使う。animation は後（範囲の外）。
-- 出典: RFC 9649（WebP）、RFC 6386（VP8）。試験の期待の値は libwebp（BSD）の出力と照らす（libwebp は試験の道具としてだけ host で使い、tree に取り込まない）。
-- 進め方: 標準廉価実装手順（docs/agent/spec-module-delegation.md）。Opus が設計（module の分け方・header・試験の道具）、Sonnet が実装。設計は [design.md](design.md)。
-- 置き場所: `userland/desktop/libwebp-compat/`（内部の接頭辞 `webpc_`）、header `include/libc/compat/webp/types.h`・`decode.h`。
-- 基点（header と試験の道具を凍結した commit）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。実装の Phase は `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` で header が変わっていないことを確かめる。
+- Status: completed（2026-11-02 18:43。全 Phase cleared、Q1 が main に merge 済み）
+- 目標: WebP の静止画（非可逆の VP8 の key frame、可逆の VP8L、透明度の ALPH、RIFF・VP8X の入れ物）を読む自前の library **libwebp-compat**（libwebp 1.5.0 の decode の interface の部分集合）を作り、libbrowser の img_sniff・img_decode に RIFF/WEBP の枝を足す。zedBSD（共有 library）と Windows 版のブラウザ（static link）の両方で使う。
+- 設計: [design.md](design.md)（module・header・決定・design-reviewer の 25 件の表）。出典は RFC 9649（WebP）と RFC 6386（VP8）。libwebp（BSD）は host の試験の oracle としてだけ使い、tree に取り込んでいない。
 
 ## ユーザーの決定
 
 - （2026-11-02 11:31）ユーザーから、BUG-405（about.google の画像が WebP で届き表示されない）を、libwebp の package でなく自前の WebP の decoder で直す、という趣旨の答えを受けた。
-- （2026-11-02 12:45）ユーザーから、VP8 の特許の危険を受け入れて自前の VP8 の decoder で進め、許諾の条件は後でユーザーが確かめる、という趣旨の答えを受けた（design.md §11 の 3 は閉じた）。
 - （2026-11-02 11:32）ユーザーから、libwebp-compat（libwebp と互換の API を持つ自前の library、libpng-compat などと同じ形）を標準廉価実装手順で実装する、という趣旨の指示を受けた。共有 library の package の規則と Windows の .exe の static の build を持ち、libbrowser の img_decode がそれを呼ぶ（Q1 の具体化）。
+- （2026-11-02 12:45）ユーザーから、VP8 の特許の危険を受け入れて自前の VP8 の decoder で進め、許諾の条件は後でユーザーが確かめる、という趣旨の答えを受けた。
+
+## Q1 の判断（要点）
+
+- libwebp 1.5.0 の source を参照してよいのは RFC が決めていない interface の振る舞い（状態・誤りの規則、API の約束、buffer の検査、bit 一致に要る YUV → RGB と fancy upsampling の規則）だけ。block ごとに「Procedure referenced:」「Values referenced:」で書く。codec の算術は RFC から。libwebp の値（YUV → RGB の定数）のため libwebp の BSD の表示を license の監査と配る形に入れた。
+- libwebp-test-data と libvpx の vp80-00-comprehensive の key frame を追加の試験の画像として取得してよい（tree の外、SHA-256 を記録）。
+- `coded` の bit（bit 31 だけを使う）と WHT の 1 段目の 16 bit の包みは、全ての試験の画像で libwebp と一致したのでそのまま。
+- animation は範囲の外（Future Work）。
+- Q1 の記録の「51 … is not a constructor」の script の誤りは、この WS（画像の decode）と関係が無い。
+
+## 結果
+
+- library: `userland/desktop/libwebp-compat/`（19 の header と 20 の .c、内部の接頭辞 `webpc_`）、公開の header `include/libc/compat/webp/types.h`・`decode.h`（libwebp 1.5.0 の名前と値、ABI 0x0209、21 の呼び出し）。zedBSD の `libwebp-compat.so`（version script、check-dynamic-elf、amd64・arm64・riscv64 で warning 0）、Windows の static library（OmniGrammaton に link）。libbrowser の `image/webp.c` が bitmap の画素に直に decode し、`img_sniff` が RIFF/WEBP を見分け、画像の Accept に `image/webp`。libbrowser のある 6 つの config に libwebp-compat。
+- 出力: libwebp 1.5.0 の encoder の file で libwebp と byte ごとに同じ（364 の試験の画像と、libwebp-test-data・vp80 の key frame・多 partition の 214 file。API の全呼び出し・色空間・option・Into・padding・部分の data の features を 1 行ずつ比べて全一致）。host・Wine（Windows の static library）・zedBSD の QEMU の guest（/lib/libwebp-compat.so）の 3 つで同じ。
+- 安全: 単体試験は ASan・UBSan、mutate（約 12 万入力）・libFuzzer（600 s）で報告 0。悪意の入力の上限は design.md §7（prefix の table 64 MiB など）。
+- BUG-405 は fixed: about.google の WebP の画像（拡張子 .png の物を含む 7 枚）が host の browser と Windows 版（Wine）で出た。
+- license: `userland/base/licenses/libwebp-compat/libwebp-COPYING`、`tools/release/license-components.json` の `libwebp-values`、Windows の `share/licenses/libwebp-COPYING.txt`。
+- 試験の道具: `plan/tools/webp/`（[plan/tools.md](../tools.md) に登録）。WS の中だけの check-skeleton.sh（header の凍結）と target-build.sh（sysroot の複写）は消した。
+
+## 制限・移管
+
+- Future Work: animation（`<webp/demux.h>` の WebPAnimDecoder の部分集合と libbrowser の動く画像）、incremental decode（WebPIDecoder、届く途中の表示）、cropping・scaling、4444・565 の色空間、可逆の画像の YUV の出力、速さ（VP8 の行ごとの filter、IDCT・filter・YUV 変換の SIMD、thread）、Linux・FreeBSD の Keiland の build（使う program ができた時）。
+- libwebp と違う点（decode.h の先頭に列挙）: RFC 6386 の参照 decoder に従う所（segment の data の無い key frame、segment の filter level の 1 回目の clamp、0 の token だけの macroblock の内側の edge）、ALPH の reserved・pre-processing の bit を無視、外部の buffer の負の stride を断る、壊れた file の状態の値。どれも libwebp の encoder は作らない。
+- 試験の C（`plan/tools/webp/unit/` と driver）の規約の全文の見直しはしていない（library の code は済み）。
+- Windows の実機での OmniGrammaton の UAT はユーザーが拾える試験の一覧へ（Wine では確かめた）。
 
 ## Phase
 
-| Phase | 目的 | 状態 | 依存 |
-| --- | --- | --- | --- |
-| ws344-p001 | 設計（標準廉価実装手順 §4）: module・header・骨格・試験の道具・実装の Phase の表、試験の画像（cwebp で作る 364 file） | cleared（2026-11-02 13:25 Q1、BASE aa2426a57 を main に merge。main で sysroot を作り直して libwebp-compat.so を build）。実施済み・道具の確かめ PASS（P2 q1939、2026-11-02、BASE aa2426a576、Q1 の受け入れ待ち） | — |
-| ws344-p002 | container（riff.c、test-riff） | cleared（2026-11-02 13:39 Q1、main で test-riff 42324・run-unit all PASS）。実装済み・試験 PASS（Sonnet q1946-i01、2026-11-02、test-riff 42324 checks、Q1 の受け入れ待ち） | p001 |
-| ws344-p003 | VP8L の bit reader と prefix code（lbits.c・prefix.c） | cleared（2026-11-02 13:36 Q1、main で test-lbits・test-prefix PASS）。実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p001 |
-| ws344-p004 | VP8L の code の読み（vp8l-codes.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8l_codes 95925 PASS）。実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p003 |
-| ws344-p005 | VP8L の entropy-coded image（vp8l-image.c） | cleared（2026-11-02 14:17 Q1、main で test-vp8l_image 90215 PASS）。実装済み・試験 PASS（Sonnet 5.5 q1957-i01、2026-11-02、test-vp8l_image 90215 checks。cleared は Q1） | p004 |
-| ws344-p006 | VP8L の逆変換（vp8l-transform.c） | cleared（2026-11-02 14:14 Q1、main で test-vp8l_transform 457604 PASS）。実装済み・試験 PASS（Sonnet 5.5 q1956-i01、2026-11-02、test-vp8l_transform 457604 checks、run-unit all・check-skeleton・target-build PASS。cleared は Q1） | p001 |
-| ws344-p007 | VP8L の decoder（vp8l.c、run-fixtures lossless） | cleared（2026-11-02 14:32 Q1、main で test-vp8l 9490・run-fixtures lossless 174 PASS は担当の結果、main で run-unit all PASS）。実装済み・試験 PASS（Sonnet q1962-i01、2026-11-02、test-vp8l 9490 checks・run-fixtures lossless 174 PASS、Q1 の受け入れ待ち） | p002, p005, p006 |
-| ws344-p008 | ALPH（alpha.c、run-fixtures alpha） | cleared（2026-11-02 14:42 Q1、main で test-alpha PASS（run-fixtures alpha 54 は担当の結果））。実装済み・試験 PASS（Sonnet q1964-i01、2026-11-02、test-alpha 2293 checks・run-fixtures alpha 54 PASS、Q1 の受け入れ待ち） | p002, p007 |
-| ws344-p009 | bool decoder（bool.c） | cleared（2026-11-02 13:29 Q1、main で test-bool 8376 PASS）。実装済み・試験 PASS（Sonnet q1948-i01、2026-11-02。cleared は Q1） | p001 |
-| ws344-p010 | VP8 の表（vp8-tables.c、RFC の text と照合） | cleared（2026-11-02 13:37 Q1、main で test-vp8_tables 37674 PASS）。実装済み・試験 PASS（Sonnet q1949-i01、2026-11-02。cleared は Q1） | p001 |
-| ws344-p011 | VP8 の frame header（vp8-header.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8_header 45344 PASS）。実装済み・試験 PASS（Sonnet q1951-i01、2026-11-02。cleared は Q1） | p009, p010 |
-| ws344-p012 | VP8 の macroblock header（vp8-modes.c） | cleared（2026-11-02 13:46 Q1、main で test-vp8_modes 627570 PASS）。実装済み・試験 PASS（Sonnet q1952-i01、2026-11-02。cleared は Q1） | p009, p010 |
-| ws344-p013 | VP8 の係数（vp8-tokens.c） | cleared（2026-11-02 13:58 Q1、main で test-vp8_tokens 336179 PASS）。実装済み・試験 PASS（Sonnet 担当、2026-11-02） | p009, p010 |
-| ws344-p014 | VP8 の逆変換（vp8-idct.c） | cleared（2026-11-02 14:07 Q1、main で test-vp8_idct PASS）。実装済み・試験 PASS（Sonnet q1958-i01、2026-11-02。cleared は Q1） | p001 |
-| ws344-p015 | VP8 の intra 予測（vp8-predict.c） | cleared（2026-11-02 14:19 Q1、main で test-vp8_predict 5281 PASS）。実装済み・試験 PASS（Sonnet q1960-i01、2026-11-02 14:18。cleared は Q1） | p001 |
-| ws344-p016 | VP8 の loop filter（vp8-filter.c） | cleared（2026-11-02 14:41 Q1、main で test-vp8_filter 166661 PASS）。実装済み・試験 PASS（Sonnet q1961-i01、2026-11-02 14:38、Q1 の受け入れ待ち） | p001 |
-| ws344-p017 | VP8 の decoder（vp8.c、run-fixtures lossy）— Opus を推す | cleared（2026-11-02 15:22 Q1、main で run-fixtures lossy 352・lossless 174・alpha 54 PASS）。実装済み・試験 PASS（P2 q1966-i01、2026-11-02 15:10。lossy 352 + conformance 342 checks） | p002, p011〜p016 |
-| ws344-p018 | 出力の変換（output.c） | cleared（2026-11-02 14:30 Q1、main で test-output 536115 PASS）。実装済み・試験 PASS（Sonnet q1963-i01、2026-11-02 14:28、cleared は Q1 が決める） | p001 |
-| ws344-p019 | interface（decode.c、compare・mutate・fuzz）— Opus を推す | in-progress（2026-11-02 15:22 P2 q1969-i01） | p002, p008, p017, p018 |
-| ws344-p020 | platform（Windows の static、config、QEMU の guest の driver）— Opus を推す | planned | p019 |
-| ws344-p021 | libbrowser への組み込み（img_sniff・img_decode・Accept、BUG-405）— Opus を推す | planned | p020 |
-| ws344-p022 | 規約の全文の見直し（conformance-reviewer） | planned | p021 |
-
-最初に並べて起動できる Phase（依存が p001 だけ）: p002、p003、p006、p009、p010、p014、p015、p016、p018。
-
-## Q1 の判断
-
-- （2026-11-02 15:22、p017 の報告）p013 の `coded` の bit（vp8.c は bit 31 だけを使い、RFC 20.16 の eob_mask の bit 31 と同じ値）と p014 の WHT の 16 bit の包みは、試験の画像と vp80 の key frame の全部で libwebp と一致したので、そのままでよい。fixtures.list の `partitions=N` の行は libwebp の encoder が method 3 以上で 1 partition に戻すため効いていない（凍結の道具）。複数の partition は conformance の集まり（54 本）で確かめているので、fixtures.list の直し（method=1 を足す）と fixtures.sha256 の更新は p022 で行う。
-
-- （2026-11-02 14:07、p014 の報告）vp8-idct.c の WHT の最初の段は RFC 6386 14.3・20.8 のとおり 16 bit に包む（header の comment の「int32_t のまま」は誤り。凍結の header なので p022 で直す）。普通の encoder の出力では違いは出ない。p017 で fixture が libwebp と一致するかを確かめる。
-
-- （2026-11-02 13:58、p013 の報告）vp8-tokens.c の `coded` の bit は header と phase.md のとおり context の値 t（block が最初の位置を越えたか）にした。RFC 6386 20.16 の `eob_mask |= (c > 1) << i` とは、位置 0 から始まり token が 1 つだけの block で違う。p017（VP8 の decoder の統合）で、この bit の使い方（IDCT の DC だけの近道など）が fixture で libwebp と一致するかを必ず確かめる。
-
-- （2026-11-02 13:31、design.md §11-5）libwebp-test-data と libvpx の vp80-00-comprehensive の key frame を追加の試験の画像として取得してよい。tree に入れず共有の `build/sources/` に置き、SHA-256 を記録して照合する。期待の値は libwebp 1.5.0 の出力と照らす（試験の道具の扱いは他の試験の画像と同じ）。取得と組み込みは p017・p019 の担当が行う。
-- （2026-11-02 13:31）共有の sysroot（amd64・arm64・riscv64）を Q1 が作り直した。新しい compat/webp の header が入ったので、以後の Phase は target-build.sh の複写を使わなくてよい。
-
-- （2026-11-02 Q1、design.md §11 への答え）
-  1. libwebp 1.5.0 の source を参照してよいのは、RFC が決めていない interface の振る舞い（状態・誤りの規則、API の約束、buffer の検査、bit 一致の出力に要る fancy upsampling の YUV → RGB の規則）だけ。block ごとに「Procedure referenced: libwebp 1.5.0 <file> (BSD-3-Clause)」「Values referenced: …」と書く。codec の算術（VP8・VP8L・ALPH）は RFC 9649・6386 から。code・構造は写さない。表の値を libwebp から取ったら（output.c の YUV → RGB の定数）、libwebp の BSD の表示を license の監査に足す（p022）。
-  2. 共有の sysroot は BASE の commit の merge の直後に Q1 が作り直す。Q1 が知らせるまで target-build.sh の複写を使う。
-  3. VP8 の特許の点は Q1 がユーザーに聞いた（答えは「ユーザーの決定」、閉じた）。
-  4. animation は範囲の外のまま（Future Work）。
-
-## Resume point
-
-- 2026-11-02 11:31 Q1: 作成。p001 の担当を割り当てる。
-- 2026-11-02 P2: p001 の設計を実施（[phase001](phase001/phase.md)）。基点 `aa2426a5763975c358cf667aff3e17bfb841b7e2`。次は Q1 の受け入れと §11 の判断、実装の Phase の起動。
+| Phase | 目的 | 結果 |
+| --- | --- | --- |
+| ws344-p001 | 設計（module・header・骨格・試験の道具・Phase の表、design-reviewer） | 19 header と骨格、試験の道具、364 の試験の画像。BASE aa2426a576 |
+| ws344-p002 | container（riff.c） | libwebp の状態の規則どおり、test-riff 42324 checks |
+| ws344-p003 | VP8L の bit reader と prefix code（lbits.c・prefix.c） | 2 段の table と pool、単体試験 PASS |
+| ws344-p004 | VP8L の code の読み（vp8l-codes.c） | simple・normal、max_symbol は token の数、95925 checks |
+| ws344-p005 | VP8L の entropy-coded image（vp8l-image.c） | cache・meta prefix・LZ77、90215 checks |
+| ws344-p006 | VP8L の逆変換（vp8l-transform.c） | 4 つの変換、457604 checks |
+| ws344-p007 | VP8L の decoder（vp8l.c） | lossless の 174 試験の画像が dwebp と全画素一致 |
+| ws344-p008 | ALPH（alpha.c） | alpha の 54 試験の画像が一致 |
+| ws344-p009 | bool decoder（bool.c） | ended の規則が libwebp と同じ、8376 checks |
+| ws344-p010 | VP8 の表（vp8-tables.c） | RFC の text から抜いた表と全要素一致 |
+| ws344-p011 | VP8 の frame header（vp8-header.c） | 45344 checks |
+| ws344-p012 | VP8 の macroblock header（vp8-modes.c） | 627570 checks |
+| ws344-p013 | VP8 の係数（vp8-tokens.c） | 336179 checks |
+| ws344-p014 | VP8 の逆変換（vp8-idct.c） | 単体試験 PASS（WHT の 1 段目の包みは RFC どおり） |
+| ws344-p015 | VP8 の intra 予測（vp8-predict.c） | 5281 checks |
+| ws344-p016 | VP8 の loop filter（vp8-filter.c） | 166661 checks |
+| ws344-p017 | VP8 の decoder（vp8.c） | lossy の 352 と conformance の 342 の check が dwebp と全 sample 一致 |
+| ws344-p018 | 出力の変換（output.c） | 536115 checks |
+| ws344-p019 | interface（decode.c） | compare 364・conformance 214 が libwebp と全行一致、mutate・fuzz 600 s PASS |
+| ws344-p020 | platform（Windows の static、config、QEMU の guest） | Wine と QEMU の guest で 578 file 一致、arm64・riscv64 の build |
+| ws344-p021 | libbrowser への組み込み（BUG-405） | about.google の画像が host と Wine で出た |
+| ws344-p022 | 規約の全文の見直しと持ち越し | style-check 74 → 0、license の表示、fixtures の partition、新しい BASE a6859dc064 |

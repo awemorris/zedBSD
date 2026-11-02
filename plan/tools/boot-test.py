@@ -300,7 +300,7 @@ def write_png(source: Path, destination: Path) -> None:
         + chunk(b"IEND", b""))
 
 
-DEFAULT_PATTERN = r"^(?:\S+ )?login: ?"
+DEFAULT_PATTERN = r"(?:^(?:\S+ )?|\S)login: ?"
 
 
 class SerialLine:

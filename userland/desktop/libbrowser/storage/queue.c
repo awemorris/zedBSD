@@ -21,9 +21,9 @@
 #include "storage/records.h"
 #include "base/base.h"
 #include "base/os-system.h"
+#include "base/thread.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,12 +93,11 @@ struct wb_storage_request {
 struct wb_storage_queue {
 	const struct browser_storage_calls *calls;
 	void *context;
-	pthread_t thread;
-	int started;
+	struct wb_thread thread;
 	int sync_ready;
-	pthread_mutex_t lock;
-	pthread_cond_t work;
-	pthread_cond_t done;
+	struct wb_mutex lock;
+	struct wb_cond work;
+	struct wb_cond done;
 	struct wb_storage_request *head;
 	struct wb_storage_request *tail;
 	size_t pending_bytes;
@@ -124,7 +123,7 @@ static int queue_add(struct wb_storage_queue *queue, struct wb_storage_request *
 static void queue_wait(struct wb_storage_queue *queue, struct wb_storage_request *request);
 static void queue_link_tail(struct wb_storage_queue *queue, struct wb_storage_request *request);
 static struct wb_storage_request *queue_find_merge(const struct wb_storage_queue *queue, const struct wb_storage_request *request);
-static void *queue_thread_main(void *argument);
+static void queue_thread_main(void *argument);
 static void queue_execute(struct wb_storage_queue *queue, struct wb_storage_request *request);
 static void queue_execute_read(struct wb_storage_queue *queue, struct wb_storage_request *request);
 static void queue_execute_list(struct wb_storage_queue *queue, struct wb_storage_request *request);
@@ -167,41 +166,40 @@ wb_storage_queue_open(
 	created->sync_ready = QUEUE_SYNC_NONE;
 
 	/* Makes the lock; every queue has one, a queue without a backend simply never contends on it. */
-	error = pthread_mutex_init(&created->lock, NULL);
+	error = wb_mutex_init(&created->lock);
 	if (error != 0) {
 		queue_release_sync(created);
 		free(created);
-		return ENOMEM;
+		return error;
 	}
 	created->sync_ready = QUEUE_SYNC_LOCK;
 
 	/* Makes the condition the thread sleeps on. */
-	error = pthread_cond_init(&created->work, NULL);
+	error = wb_cond_init(&created->work);
 	if (error != 0) {
 		queue_release_sync(created);
 		free(created);
-		return ENOMEM;
+		return error;
 	}
 	created->sync_ready = QUEUE_SYNC_WORK;
 
 	/* Makes the condition the waiting callers sleep on. */
-	error = pthread_cond_init(&created->done, NULL);
+	error = wb_cond_init(&created->done);
 	if (error != 0) {
 		queue_release_sync(created);
 		free(created);
-		return ENOMEM;
+		return error;
 	}
 	created->sync_ready = QUEUE_SYNC_ALL;
 
 	/* Starts the storage thread, unless there is no backend for it to call. */
 	if (calls != NULL) {
-		error = pthread_create(&created->thread, NULL, queue_thread_main, created);
+		error = wb_thread_start(WB_STORAGE_QUEUE_THREAD, 0, queue_thread_main, created, &created->thread);
 		if (error != 0) {
 			queue_release_sync(created);
 			free(created);
 			return EAGAIN;
 		}
-		created->started = 1;
 	}
 
 	/* Succeeded: the caller owns the queue until it closes it. */
@@ -471,12 +469,12 @@ wb_storage_queue_take_error(
 		return 0;
 
 	/* Takes the kept error so the next call starts afresh. */
-	pthread_mutex_lock(&queue->lock);
+	wb_mutex_lock(&queue->lock);
 
 	error = queue->first_error;
 	queue->first_error = 0;
 
-	pthread_mutex_unlock(&queue->lock);
+	wb_mutex_unlock(&queue->lock);
 
 	/* Reports the error that was kept, or 0 for none. */
 	return error;
@@ -494,16 +492,15 @@ wb_storage_queue_close(
 		return;
 
 	/* Tells the thread to finish what is queued and stop, then waits for it. */
-	if (queue->started != 0) {
-		pthread_mutex_lock(&queue->lock);
+	if (queue->thread.handle != NULL) {
+		wb_mutex_lock(&queue->lock);
 
 		queue->closing = 1;
-		pthread_cond_broadcast(&queue->work);
+		wb_cond_broadcast(&queue->work);
 
-		pthread_mutex_unlock(&queue->lock);
+		wb_mutex_unlock(&queue->lock);
 
-		pthread_join(queue->thread, NULL);
-		queue->started = 0;
+		wb_thread_join(&queue->thread);
 	}
 
 	/* The thread is gone, so the backend is called no more; closes it exactly once. */
@@ -526,11 +523,11 @@ queue_release_sync(
 {
 	/* Destroys them in the opposite order of their making. */
 	if (queue->sync_ready >= QUEUE_SYNC_ALL)
-		pthread_cond_destroy(&queue->done);
+		wb_cond_destroy(&queue->done);
 	if (queue->sync_ready >= QUEUE_SYNC_WORK)
-		pthread_cond_destroy(&queue->work);
+		wb_cond_destroy(&queue->work);
 	if (queue->sync_ready >= QUEUE_SYNC_LOCK)
-		pthread_mutex_destroy(&queue->lock);
+		wb_mutex_destroy(&queue->lock);
 	queue->sync_ready = QUEUE_SYNC_NONE;
 }
 
@@ -643,7 +640,7 @@ queue_add(
 	size_t bytes_after;
 
 	/* Links the request under the lock, refusing it when the queue is full. */
-	pthread_mutex_lock(&queue->lock);
+	wb_mutex_lock(&queue->lock);
 
 	old = NULL;
 	if (request->kind == REQUEST_WRITE)
@@ -654,11 +651,11 @@ queue_add(
 		bytes_after -= old->length;
 
 	if (old == NULL && queue->pending_items >= QUEUE_ITEM_LIMIT) {
-		pthread_mutex_unlock(&queue->lock);
+		wb_mutex_unlock(&queue->lock);
 		return ENOSPC;
 	}
 	if (request->length > WB_STORAGE_QUEUE_LIMIT - bytes_after) {
-		pthread_mutex_unlock(&queue->lock);
+		wb_mutex_unlock(&queue->lock);
 		return ENOSPC;
 	}
 
@@ -682,9 +679,9 @@ queue_add(
 		queue->pending_items++;
 	}
 
-	pthread_cond_signal(&queue->work);
+	wb_cond_signal(&queue->work);
 
-	pthread_mutex_unlock(&queue->lock);
+	wb_mutex_unlock(&queue->lock);
 
 	/* The replaced write was never run; its block is no longer in the list. */
 	free(old);
@@ -702,16 +699,16 @@ queue_wait(
 	struct wb_storage_request *request)
 {
 	/* Links the request behind everything queued so far, then sleeps until the thread marks it done. */
-	pthread_mutex_lock(&queue->lock);
+	wb_mutex_lock(&queue->lock);
 
 	queue_link_tail(queue, request);
-	pthread_cond_signal(&queue->work);
+	wb_cond_signal(&queue->work);
 
 	/* Waits again after every wakeup that was not for this request. */
 	while (request->done == 0)
-		pthread_cond_wait(&queue->done, &queue->lock);
+		wb_cond_wait(&queue->done, &queue->lock);
 
-	pthread_mutex_unlock(&queue->lock);
+	wb_mutex_unlock(&queue->lock);
 }
 
 /*
@@ -794,7 +791,7 @@ queue_find_merge(
 /*
  * The body of the storage thread: runs requests in order until the queue is closing and empty.
  */
-static void *
+static void
 queue_thread_main(
 	void *argument)
 {
@@ -803,16 +800,13 @@ queue_thread_main(
 
 	queue = argument;
 
-	/* Names this thread for debuggers. */
-	wb_os_thread_name(WB_STORAGE_QUEUE_THREAD);
-
 	/* Takes requests from the front until the queue is closing and empty. */
-	pthread_mutex_lock(&queue->lock);
+	wb_mutex_lock(&queue->lock);
 
 	for (;;) {
 		/* Sleeps until a request arrives or the queue closes; every wakeup rechecks both. */
 		while (queue->head == NULL && queue->closing == 0)
-			pthread_cond_wait(&queue->work, &queue->lock);
+			wb_cond_wait(&queue->work, &queue->lock);
 
 		/* Stops when everything queued was run and the queue is closing. */
 		request = queue->head;
@@ -828,18 +822,18 @@ queue_thread_main(
 		request->next = NULL;
 		request->prev = NULL;
 
-		pthread_mutex_unlock(&queue->lock);
+		wb_mutex_unlock(&queue->lock);
 
 		/* Runs the request without the lock, because the backend may take long. */
 		queue_execute(queue, request);
 
 		/* Publishes the outcome under the lock. */
-		pthread_mutex_lock(&queue->lock);
+		wb_mutex_lock(&queue->lock);
 
 		if (request->waiting != 0) {
 			/* The caller waits with the request on its stack: marks it done and wakes the callers; it is not touched again. */
 			request->done = 1;
-			pthread_cond_broadcast(&queue->done);
+			wb_cond_broadcast(&queue->done);
 			continue;
 		}
 
@@ -849,18 +843,15 @@ queue_thread_main(
 		if (request->error != 0 && queue->first_error == 0)
 			queue->first_error = request->error;
 
-		pthread_mutex_unlock(&queue->lock);
+		wb_mutex_unlock(&queue->lock);
 
 		/* Frees the finished block outside the lock. */
 		free(request);
 
-		pthread_mutex_lock(&queue->lock);
+		wb_mutex_lock(&queue->lock);
 	}
 
-	pthread_mutex_unlock(&queue->lock);
-
-	/* The thread has nothing more to run. */
-	return NULL;
+	wb_mutex_unlock(&queue->lock);
 }
 
 /*

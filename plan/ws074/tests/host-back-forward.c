@@ -14,9 +14,10 @@
  * came with Cache-Control: no-store is fetched again; a new page after Back
  * drops the steps after it.  A kept page hears pagehide with persisted true
  * when it is put away and pageshow with persisted true when it is shown
- * again (its first pageshow has persisted false).  location.replace, and a
- * script's navigation before the load event ends, take the place of the
- * step shown instead of adding one.
+ * again (its first pageshow has persisted false), and no unload; a page
+ * left for good (no-store, or replaced) hears pagehide with persisted false
+ * and then unload.  location.replace, and a script's navigation before the
+ * load event ends, take the place of the step shown instead of adding one.
  *
  *   host-back-forward
  *
@@ -63,18 +64,28 @@ static pthread_mutex_t back_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct back_page back_pages[] = {
 	{ "/a.html", 0, "<!DOCTYPE html><title>a</title><script>var runs = (window.runs || 0) + 1; var mark = 'kept-a'; console.log('a ran');"
 	  "addEventListener('pageshow', function (e) { console.log('a pageshow ' + e.persisted + ' ' + (e.target === document)); });"
-	  "addEventListener('pagehide', function (e) { console.log('a pagehide ' + e.persisted); });</script>"
+	  "addEventListener('pagehide', function (e) { console.log('a pagehide ' + e.persisted); });"
+	  "addEventListener('unload', function () { console.log('a unload'); });</script>"
 	  "<a href=/b.html style='display:block;height:40px'>b</a>", 0 },
 	{ "/b.html", 0, "<!DOCTYPE html><title>b</title><script>console.log('b ran');</script><a href=/c.html style='display:block;height:40px'>c</a>", 0 },
 	{ "/c.html", 0, "<!DOCTYPE html><title>c</title><script>console.log('c ran');</script>", 0 },
-	{ "/n.html", 1, "<!DOCTYPE html><title>n</title><script>console.log('n ran');</script><a href=/b.html style='display:block;height:40px'>b</a>", 0 },
+	{ "/n.html", 1, "<!DOCTYPE html><title>n</title><script>console.log('n ran');"
+	  "addEventListener('pagehide', function (e) { console.log('n pagehide ' + e.persisted); });"
+	  "addEventListener('unload', function (e) { console.log('n unload ' + (e.target === document)); });</script>"
+	  "<a href=/b.html style='display:block;height:40px'>b</a>", 0 },
 	{ "/r.html", 0, "<!DOCTYPE html><title>r</title><script>console.log('r ran');"
+	  "addEventListener('pagehide', function (e) { console.log('r pagehide ' + e.persisted); });"
+	  "addEventListener('unload', function () { console.log('r unload'); });"
 	  "addEventListener('load', function () { setTimeout(function () { location.replace('/c.html'); }, 0); });</script>", 0 },
-	{ "/e.html", 0, "<!DOCTYPE html><title>e</title><script>console.log('e ran'); location.href = '/b.html';</script>", 0 },
+	{ "/e.html", 0, "<!DOCTYPE html><title>e</title><script>console.log('e ran');"
+	  "addEventListener('pagehide', function (e) { console.log('e pagehide ' + e.persisted); });"
+	  "addEventListener('unload', function () { console.log('e unload'); });"
+	  "location.href = '/b.html';</script>", 0 },
 };
 
 static void back_check(int condition, const char *what);
 static int back_count(const char *text);
+static int back_before(const char *first, const char *second);
 static int back_requests(const char *path);
 static void back_run(struct browser_view *view, double ms);
 static void back_click(struct browser_view *view);
@@ -171,6 +182,7 @@ main(
 	back_check(browser_view_can_go(view, 1) == 0, "c: no step after it");
 	(void)browser_view_go(view, -1);
 	back_check(strstr(browser_view_url(view), "/a.html") != NULL && back_count("a ran") == 1, "Back from c: a as it was");
+	back_check(back_count("a unload") == 0, "a: no unload while it is kept");
 	browser_view_destroy(view);
 
 	/* 4. A no-store page is fetched again when Back goes to it. */
@@ -187,6 +199,8 @@ main(
 	back_run(view, 1500.0);
 	back_check(strstr(browser_view_url(view), "/n.html") != NULL && back_requests("/n.html") == 2 && back_count("n ran") == 2,
 	    "Back to a no-store page fetches and runs it again");
+	back_check(back_count("n pagehide false") == 1 && back_count("n pagehide true") == 0 && back_count("n unload true") == 1 &&
+	    back_before("n pagehide false", "n unload true"), "no-store: left with pagehide persisted false, then unload at the window with the document as its target");
 	browser_view_destroy(view);
 
 	/* 5. location.replace after the load: Back from the page it went to skips the page that replaced itself, and Forward comes back to it. */
@@ -200,6 +214,8 @@ main(
 	(void)browser_view_follow(view, "/r.html");
 	back_run(view, 1500.0);
 	back_check(strstr(browser_view_url(view), "/c.html") != NULL && back_count("r ran") == 1, "replace: r went on to c");
+	back_check(back_count("r pagehide false") == 1 && back_count("r pagehide true") == 0 && back_count("r unload") == 1 &&
+	    back_before("r pagehide false", "r unload"), "replace: r is left with pagehide persisted false, then unload");
 	back_check(browser_view_can_go(view, -2) == 0 && browser_view_can_go(view, -1) == 1, "replace: one step before c");
 	(void)browser_view_go(view, -1);
 	back_run(view, 300.0);
@@ -212,6 +228,7 @@ main(
 	(void)browser_view_follow(view, "/e.html");
 	back_run(view, 1500.0);
 	back_check(strstr(browser_view_url(view), "/b.html") != NULL && back_count("e ran") == 1, "early: e went on to b");
+	back_check(back_count("e pagehide true") == 0 && back_count("e unload") == 1, "early: e is left for good, with unload and no persisted pagehide");
 	(void)browser_view_go(view, -1);
 	back_run(view, 1500.0);
 	back_check(strstr(browser_view_url(view), "/c.html") != NULL, "early: Back from b is c, not e");
@@ -251,6 +268,20 @@ back_count(
 	for (at = strstr(state.console, text); at != NULL; at = strstr(at + 1, text))
 		count++;
 	return count;
+}
+
+/* Whether the console has the first text, and the second only after it. */
+static int
+back_before(
+	const char *first,
+	const char *second)
+{
+	const char *first_at;
+	const char *second_at;
+
+	first_at = strstr(state.console, first);
+	second_at = strstr(state.console, second);
+	return first_at != NULL && second_at != NULL && first_at < second_at;
 }
 
 /* How many times the server was asked for a page. */

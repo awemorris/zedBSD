@@ -20,6 +20,7 @@
 
 #include "vm/internal.h"
 #include "base/os-system.h"
+#include "base/os-time.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -46,6 +47,12 @@ static const uint32_t heap_class_sizes[VM_SIZE_CLASSES] = {
 	16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256,
 	320, 384, 448, 512, 640, 768, 896, 1024, 1280, 1536, 2048, 3072, 4096
 };
+
+/* Whether the calling thread is one heaps are lent to (vm_thread_set_borrower): each thread's own. */
+static _Thread_local int heap_borrower;
+
+/* How many times a borrower entered a script or would have collected, in the process (atomic). */
+static unsigned long heap_borrower_slips;
 
 static int heap_size_class(size_t size, unsigned *size_class);
 static int heap_add_block(struct vm_heap *heap, unsigned size_class);
@@ -89,6 +96,8 @@ vm_heap_create(
 	/* Starts with no cells, the smallest threshold and empty root lists. */
 	created->threshold = HEAP_MIN_THRESHOLD;
 	created->limit = limit;
+	vm_agent_init(&created->own_agent);
+	created->agent = &created->own_agent;
 	created->lowest = (uintptr_t)-1;
 	created->highest = 0;
 	wb_vector_init(&created->roots, sizeof(struct vm_cell **));
@@ -204,13 +213,14 @@ vm_heap_alloc(
 	assert(!heap->collecting);
 	assert(size >= sizeof(struct vm_cell));
 
-	/* Collects when enough has been allocated since the last collection. */
-	if (heap->allocated_since >= heap->threshold)
+	/* Collects when enough has been allocated since the last collection (not while the heap is lent: the cells may be held by the other thread). */
+	if (heap->allocated_since >= heap->threshold && heap->lent == 0U)
 		vm_heap_collect(heap);
 
 	/* Refuses a cell that would take the live bytes past the limit. */
 	if (heap->limit != 0 && heap->live_bytes + size > heap->limit) {
-		vm_heap_collect(heap);
+		if (heap->lent == 0U)
+			vm_heap_collect(heap);
 		if (heap->live_bytes + size > heap->limit)
 			return NULL;
 	}
@@ -266,6 +276,18 @@ vm_heap_collect(
 	/* A collection never nests (a finalizer or tracer cannot start one). */
 	if (heap->collecting)
 		return;
+
+	/*
+	 * Nor does it run while the heap is lent, nor on a thread it is lent to:
+	 * the scan would walk this thread's stack and miss the cells the other
+	 * thread holds.
+	 */
+	if (heap->lent != 0U)
+		return;
+	if (heap_borrower) {
+		__atomic_fetch_add(&heap_borrower_slips, 1UL, __ATOMIC_RELAXED);
+		return;
+	}
 	heap->collecting = 1;
 
 	/*
@@ -523,6 +545,382 @@ vm_heap_stats(
 	stats->heap_bytes = heap->block_count * (size_t)VM_BLOCK_SIZE;
 	stats->collections = heap->collections;
 	stats->freed_cells = heap->freed_cells;
+}
+
+/*
+ * Sets the lender an agent's heaps are lent through (NULL: the work runs on
+ * the calling thread), before the agent's first task.
+ */
+void
+vm_agent_set_lender(
+	struct vm_agent *agent,
+	vm_lender lend,
+	void *context)
+{
+	/* The lender and what it gets back. */
+	agent->lend = lend;
+	agent->lend_context = context;
+}
+
+/*
+ * Runs a piece of work that runs no script with the heap lent to the
+ * agent's lender, which runs it on its own thread while this one waits; the
+ * heap does not collect meanwhile.  Without a lender, or on a thread the
+ * heap is lent to already, the work runs here.  Reports the work's outcome.
+ */
+int
+vm_heap_lend(
+	struct vm_heap *heap,
+	vm_lend_work work,
+	void *argument)
+{
+	struct vm_agent *agent;
+	int error;
+
+	/* No lender, or lent already: the work is this thread's. */
+	agent = heap->agent;
+	if (agent->lend == NULL || heap_borrower) {
+		error = work(argument);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Lent: no collection until the work came back. */
+	heap->lent++;
+	error = agent->lend(agent->lend_context, work, argument);
+	heap->lent--;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the work ran. */
+	return 0;
+}
+
+/* Tells whether the heap is lent to another thread now (the lending thread's question). */
+int
+vm_heap_lent(
+	const struct vm_heap *heap)
+{
+	/* Not lent. */
+	if (heap->lent == 0U)
+		return 0;
+
+	/* Lent. */
+	return 1;
+}
+
+/*
+ * Marks the calling thread as one heaps are lent to (nonzero) or not: it
+ * never collects and its vm_heap_lend runs the work at once.
+ */
+void
+vm_thread_set_borrower(
+	int borrower)
+{
+	/* The thread's mark, 0 or 1. */
+	heap_borrower = 0;
+	if (borrower)
+		heap_borrower = 1;
+}
+
+/* Tells whether the calling thread is one heaps are lent to. */
+int
+vm_thread_is_borrower(void)
+{
+	/* The thread's mark. */
+	return heap_borrower;
+}
+
+/* Counts a script entered on a borrower thread (a work lent must run none). */
+void
+vm_borrower_entry(void)
+{
+	/* Only a borrower's entry counts. */
+	if (heap_borrower)
+		__atomic_fetch_add(&heap_borrower_slips, 1UL, __ATOMIC_RELAXED);
+}
+
+/*
+ * Reports how many times, in the process, a borrower thread entered a
+ * script or would have collected (neither should ever happen).
+ */
+unsigned long
+vm_borrower_slips(void)
+{
+	/* The count. */
+	return __atomic_load_n(&heap_borrower_slips, __ATOMIC_RELAXED);
+}
+
+/*
+ * Makes an agent with no task, no request and no deadline.
+ */
+void
+vm_agent_init(
+	struct vm_agent *agent)
+{
+	/* Nothing runs, nothing is asked. */
+	memset(agent, 0, sizeof(*agent));
+}
+
+/*
+ * Begins a task of the agent's thread: gives it the next number (never 0
+ * nor VM_AGENT_DEADLINE) and forgets any request to end an earlier task.
+ * Returns the number, which vm_agent_task_current reports to the other
+ * threads until vm_agent_task_end.
+ */
+uint32_t
+vm_agent_task_begin(
+	struct vm_agent *agent)
+{
+	uint32_t task;
+
+	/* The next number; 0 means no task and the deadline's mark is no task's, so the count skips them when it wraps. */
+	task = agent->task_last + 1U;
+	if (task == 0U || task == VM_AGENT_DEADLINE)
+		task = 1U;
+	agent->task_last = task;
+	agent->deadline_ns = 0;
+
+	/*
+	 * The old request goes before the new number is seen: a thread that
+	 * reads the new number (acquire) and asks for it stores after this
+	 * clearing, so its request stays.
+	 */
+	__atomic_store_n(&agent->terminate, 0U, __ATOMIC_RELAXED);
+	__atomic_store_n(&agent->task, task, __ATOMIC_RELEASE);
+
+	/* Succeeded: the task runs under its number. */
+	return task;
+}
+
+/*
+ * Ends the agent's thread's task: no task runs until the next
+ * vm_agent_task_begin, and a request to end it or its deadline is put
+ * back to none.
+ */
+void
+vm_agent_task_end(
+	struct vm_agent *agent)
+{
+	/* No task runs, and nothing is asked of one (a late request names a task that is gone). */
+	__atomic_store_n(&agent->task, 0U, __ATOMIC_RELEASE);
+	__atomic_store_n(&agent->terminate, 0U, __ATOMIC_RELAXED);
+	agent->deadline_ns = 0;
+}
+
+/*
+ * Reports the number of the task the agent's thread runs, 0 between
+ * tasks.  Any thread may call it; the number is what
+ * vm_agent_request_termination takes.
+ */
+uint32_t
+vm_agent_task_current(
+	struct vm_agent *agent)
+{
+	uint32_t task;
+
+	/* The number the agent's thread published. */
+	task = __atomic_load_n(&agent->task, __ATOMIC_ACQUIRE);
+
+	/* Succeeded: the task that runs now, or 0. */
+	return task;
+}
+
+/*
+ * Asks the agent's task numbered task to end, from any thread.  The task
+ * leaves with VM_TERMINATED at the engine's next look; a number that is
+ * not the running task's (it ended, or another began) ends nothing, and 0
+ * asks nothing.
+ */
+void
+vm_agent_request_termination(
+	struct vm_agent *agent,
+	uint32_t task)
+{
+	/* No task is no request. */
+	if (task == 0U || task == VM_AGENT_DEADLINE)
+		return;
+
+	/* The request, which the agent's thread reads at its next look. */
+	__atomic_store_n(&agent->terminate, task, __ATOMIC_RELAXED);
+}
+
+/*
+ * Gives the running task of the agent's thread a deadline so many
+ * milliseconds from now (an unload handler's time): the engine's looks then
+ * read the clock, and the task leaves with VM_TERMINATED at it.  For the
+ * agent's thread, inside a task; the task's end clears it.
+ */
+void
+vm_agent_set_deadline(
+	struct vm_agent *agent,
+	uint32_t milliseconds)
+{
+	uint32_t expected;
+
+	/* The moment, and the mark that sends the engine's looks to it (unless a request is there already). */
+	agent->deadline_ns = wb_os_monotonic_ns() + (uint64_t)milliseconds * 1000000U;
+	expected = 0U;
+	(void)__atomic_compare_exchange_n(&agent->terminate, &expected, VM_AGENT_DEADLINE, 0, __ATOMIC_RELAXED,
+	    __ATOMIC_RELAXED);
+}
+
+/*
+ * Takes the deadline of the running task away (its handler ended in time).
+ * For the agent's thread.
+ */
+void
+vm_agent_clear_deadline(
+	struct vm_agent *agent)
+{
+	uint32_t expected;
+
+	/* No deadline, and the mark goes unless a request replaced it. */
+	agent->deadline_ns = 0;
+	expected = VM_AGENT_DEADLINE;
+	(void)__atomic_compare_exchange_n(&agent->terminate, &expected, 0U, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+}
+
+/*
+ * Reports whether the running task's deadline has come (1) or not, or there
+ * is none (0).  For the agent's thread.
+ */
+int
+vm_agent_deadline_passed(
+	struct vm_agent *agent)
+{
+	uint64_t now;
+
+	/* No deadline never passes. */
+	if (agent->deadline_ns == 0U)
+		return 0;
+
+	/* The clock against it. */
+	now = wb_os_monotonic_ns();
+	if (now < agent->deadline_ns)
+		return 0;
+
+	/* The deadline has come. */
+	return 1;
+}
+
+/*
+ * Has the heap's tasks run in an agent its user shares among heaps (the
+ * pages of a view), or in its own again (NULL).  The agent must outlive
+ * the heap's use of it.
+ */
+void
+vm_heap_set_agent(
+	struct vm_heap *heap,
+	struct vm_agent *agent)
+{
+	/* The shared agent, or the heap's own. */
+	heap->agent = &heap->own_agent;
+	if (agent != NULL)
+		heap->agent = agent;
+}
+
+/* Reports the agent the heap's tasks run in. */
+struct vm_agent *
+vm_heap_agent(
+	struct vm_heap *heap)
+{
+	/* The agent in use. */
+	return heap->agent;
+}
+
+/* Begins a task in the heap's agent (vm_agent_task_begin). */
+uint32_t
+vm_heap_task_begin(
+	struct vm_heap *heap)
+{
+	uint32_t task;
+
+	/* The agent's next task. */
+	task = vm_agent_task_begin(heap->agent);
+
+	/* Succeeded: its number. */
+	return task;
+}
+
+/* Ends the task of the heap's agent (vm_agent_task_end). */
+void
+vm_heap_task_end(
+	struct vm_heap *heap)
+{
+	/* The agent's task ends. */
+	vm_agent_task_end(heap->agent);
+}
+
+/* Reports the task the heap's agent runs, from any thread (vm_agent_task_current). */
+uint32_t
+vm_heap_task_current(
+	struct vm_heap *heap)
+{
+	uint32_t task;
+
+	/* The agent's number. */
+	task = vm_agent_task_current(heap->agent);
+
+	/* Succeeded: the task, or 0. */
+	return task;
+}
+
+/* Asks the task of the heap's agent to end, from any thread (vm_agent_request_termination). */
+void
+vm_heap_request_termination(
+	struct vm_heap *heap,
+	uint32_t task)
+{
+	/* The agent's request. */
+	vm_agent_request_termination(heap->agent, task);
+}
+
+/*
+ * Reports VM_TERMINATED when the task the heap's thread runs is asked to
+ * end, 0 otherwise.  For the heap's thread: the native functions that run
+ * long without calling scripts call it now and then.
+ */
+int
+vm_heap_check_termination(
+	struct vm_heap *heap)
+{
+	int status;
+
+	/* The engine's own look. */
+	status = vm_termination_poll(heap);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the task goes on. */
+	return 0;
+}
+
+/*
+ * Counts one step of a long native function (an element of a sort, of
+ * JSON or of an array method's walk, a copy of a string) and, every few
+ * thousand steps, reports VM_TERMINATED when the task was asked to end.
+ * For the heap's thread; 0 when the task goes on.
+ */
+int
+vm_heap_count_step(
+	struct vm_heap *heap)
+{
+	int status;
+
+	/* Most steps only count. */
+	heap->steps++;
+	if ((heap->steps & VM_STEPS_MASK) != 0U)
+		return 0;
+
+	/* Now and then, the look. */
+	status = vm_termination_poll(heap);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the task goes on. */
+	return 0;
 }
 
 /* Finds the smallest size class that holds size bytes; returns 0 when the cell is large. */
@@ -907,9 +1305,11 @@ heap_scan_stack(
  * Marks every cell a word in [low, high) points into.
  *
  * The words read are other functions' frames, which the address sanitizer
- * would call out of bounds; the scan is exempt from it.
+ * would call out of bounds and the thread sanitizer would watch for no
+ * use (they are the scanning thread's own); the scan is exempt from both.
  */
 __attribute__((no_sanitize_address))
+__attribute__((no_sanitize("thread")))
 static void
 heap_scan_range(
 	struct vm_heap *heap,

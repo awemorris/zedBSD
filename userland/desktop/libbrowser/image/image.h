@@ -8,9 +8,9 @@
 /*
  * Images (plan/ws074/design.md §10): the kind of an image told from its
  * first bytes, and its decoding into a bitmap the renderers draw.  JPEG
- * goes through libjpeg-compat, PNG through libpng-compat and GIF through
- * libgif-compat (the first frame); the module depends on nothing of the
- * browser but base.
+ * goes through libjpeg-compat, PNG through libpng-compat, GIF through
+ * libgif-compat (the first frame) and WebP through libwebp-compat (still
+ * images); the module depends on nothing of the browser but base.
  */
 
 #ifndef KEILAND_BROWSER_IMAGE_H
@@ -24,7 +24,8 @@ enum img_kind {
 	IMG_UNKNOWN,
 	IMG_JPEG,
 	IMG_PNG,
-	IMG_GIF
+	IMG_GIF,
+	IMG_WEBP
 };
 
 /*
@@ -33,9 +34,18 @@ enum img_kind {
  * and both renderers take them.  The pixels are the bitmap's own (freed by
  * img_bitmap_release).  serial tells bitmaps apart for the life of the
  * program (a GPU keeps an image's pixels by it).
+ *
+ * The pixels of a bitmap made by img_bitmap_create are held (hold): a
+ * committed frame of the page holds them too (img_hold_retain), so that
+ * they outlive the bitmap until the frame lets go; whoever draws into such
+ * a bitmap again first makes its pixels its own (img_bitmap_writable).
+ * A bitmap whose pixels live in an arena has no hold.
  */
+struct img_hold;
+
 struct img_bitmap {
 	uint32_t *pixels;
+	struct img_hold *hold;
 	int width;
 	int height;
 	uint64_t serial;
@@ -73,8 +83,12 @@ int img_decode(const unsigned char *bytes, size_t length, struct img_bitmap *bit
 void img_bitmap_release(struct img_bitmap *bitmap);
 int img_bitmap_create(struct img_bitmap *bitmap, int width, int height);
 void img_bitmap_renew(struct img_bitmap *bitmap);
+int img_bitmap_writable(struct img_bitmap *bitmap);
+struct img_hold *img_hold_retain(const struct img_bitmap *bitmap);
+void img_hold_release(struct img_hold *hold);
 int img_decode_jpeg(const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
 int img_decode_png(const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
 int img_decode_gif(const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
+int img_decode_webp(const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
 
 #endif

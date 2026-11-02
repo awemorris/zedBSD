@@ -16,6 +16,8 @@ LIBBROWSER_OS_SOURCES := $(LIBBROWSER_DIR)/base/os-system-posix.c \
 LIBBROWSER_OS_NET_SOURCES := $(LIBBROWSER_DIR)/base/os-net-posix.c
 LIBBROWSER_SCRIPT_SOURCES := $(LIBBROWSER_OS_SOURCES) \
 	$(LIBBROWSER_DIR)/base/os-error.c \
+	$(LIBBROWSER_DIR)/base/thread.c \
+	$(LIBBROWSER_DIR)/base/once.c \
 	$(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/base/buffer.c \
 	$(LIBBROWSER_DIR)/base/vector.c \
@@ -57,6 +59,7 @@ LIBBROWSER_SCRIPT_SOURCES := $(LIBBROWSER_OS_SOURCES) \
 	$(LIBBROWSER_DIR)/js/builtin_object.c \
 	$(LIBBROWSER_DIR)/js/builtin_function.c \
 	$(LIBBROWSER_DIR)/js/builtin_proxy.c \
+	$(LIBBROWSER_DIR)/js/builtin_reflect.c \
 	$(LIBBROWSER_DIR)/js/builtin_array.c \
 	$(LIBBROWSER_DIR)/js/builtin_string.c \
 	$(LIBBROWSER_DIR)/js/builtin_regexp.c \
@@ -186,10 +189,13 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/page/input.c \
 	$(LIBBROWSER_DIR)/page/form.c \
 	$(LIBBROWSER_DIR)/view/view.c \
+	$(LIBBROWSER_DIR)/view/front.c \
+	$(LIBBROWSER_DIR)/view/style.c \
 	$(LIBBROWSER_DIR)/image/decode.c \
 	$(LIBBROWSER_DIR)/image/jpeg.c \
 	$(LIBBROWSER_DIR)/image/png.c \
 	$(LIBBROWSER_DIR)/image/gif.c \
+	$(LIBBROWSER_DIR)/image/webp.c \
 	$(LIBBROWSER_DIR)/text/font.c \
 	$(LIBBROWSER_DIR)/text/linebreak.c \
 	$(LIBBROWSER_DIR)/text/woff.c \
@@ -216,6 +222,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/layout/hit.c \
 	$(LIBBROWSER_DIR)/layout/bounds.c \
 	$(LIBBROWSER_DIR)/paint/list.c \
+	$(LIBBROWSER_DIR)/paint/scene.c \
 	$(LIBBROWSER_DIR)/paint/gradient.c \
 	$(LIBBROWSER_DIR)/paint/software.c \
 	$(LIBBROWSER_DIR)/paint/vulkan.c

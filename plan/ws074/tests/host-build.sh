@@ -1,7 +1,7 @@
 #!/bin/sh
 # ws074: builds browser's engine and its host tests with the host's C compiler.
 #
-#   sh plan/ws074/tests/host-build.sh [plain|asan]     (default plain)
+#   sh plan/ws074/tests/host-build.sh [plain|asan|tsan]     (default plain)
 #
 # Every engine source listed in userland/desktop/libbrowser/Makefile and main.c and main-posix.c from
 # userland/desktop/browser/Makefile are built, not the shell/ directory (the zdesktop window);
@@ -13,6 +13,10 @@
 #   browser-probe      the second program over the engine (userland/tests/browser-probe)
 #   host-NAME          each plan/ws074/tests/host-NAME.c unit test, linked with the engine
 # BROWSER_HOST_BUILD selects a separate output root (default build/ws074-host).
+# The engine makes its threads through a table of the program's (browser_threads_set): the browser program
+# gets the POSIX threads from the stand-in, and every unit test from plan/ws074/tests/host-threads.c, which
+# gives them before main (userland/tests/browser-threads/threads-posix.c is the table).
+# The tsan variant adds -fsanitize=thread (ThreadSanitizer: the races between the engine's threads).
 # The asan variant adds -fsanitize=address,undefined; the runners use it to find crashes.  Run it with
 # ASAN_OPTIONS=detect_stack_use_after_return=0: the collector scans the real stack, and the sanitizer's
 # separate stacks for address-taken locals would hide cells from it.
@@ -29,6 +33,7 @@ flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fPIC -I$src -I$app
 case $variant in
 plain) ;;
 asan) flags="$flags -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" ;;
+tsan) flags="$flags -fsanitize=thread -fno-omit-frame-pointer" ;;
 *) echo "host-build: unknown variant $variant" >&2; exit 2 ;;
 esac
 mkdir -p "$out/obj"
@@ -62,10 +67,10 @@ for file in userland/desktop/libtruetype/face.c userland/desktop/libtruetype/cma
 	objects="$objects $object"
 done
 
-# The image libraries (ws074-p021): libjpeg-compat, libpng-compat with libz-compat, libgif-compat.
+# The image libraries (ws074-p021): libjpeg-compat, libpng-compat with libz-compat, libgif-compat, libwebp-compat.
 ln -sfn "$(pwd)/include/libc/compat" $base/include/compat
 for file in userland/desktop/libjpeg-compat/*.c userland/desktop/libpng-compat/*.c userland/base/libz-compat/*.c \
-    userland/desktop/libgif-compat/*.c; do
+    userland/desktop/libgif-compat/*.c userland/desktop/libwebp-compat/*.c; do
 	library=$(basename "$(dirname "$file")")
 	object=$out/obj/$library-$(basename "$file" .c).o
 	if [ ! -f "$object" ] || [ "$file" -nt "$object" ] || [ "$out/flags" -nt "$object" ]; then
@@ -107,27 +112,35 @@ for file in $sources; do
 	esac
 done
 
-# The stand-in for the window.
+# The stand-in for the window, the table of the POSIX threads, and the unit tests' giving of it.
 "$cc" $flags -c plan/ws074/tests/host-shell.c -o "$out/obj/host-shell.o"
+"$cc" $flags -c userland/tests/browser-threads/threads-posix.c -o "$out/obj/threads-posix.o"
+"$cc" $flags -c plan/ws074/tests/host-threads.c -o "$out/obj/host-threads.o"
 # The program's own copy of the error texts (the production browser app compiles it too; the library keeps
 # its symbols local).
 "$cc" $flags -c userland/desktop/libbrowser/base/os-error.c -o "$out/obj/browser-os-error.o"
 # The host component has the same public exports as the production library.
 "$cc" $flags -shared -Wl,-z,defs -Wl,-soname,libbrowser.so \
     -Wl,--version-script=userland/desktop/libbrowser/exports.map -o "$out/libbrowser.so" $engine -lvulkan -lm -ldl -lpthread
-"$cc" $flags -o "$out/browser" "$out/obj/browser_main.o" "$out/obj/browser_main-posix.o" "$out/obj/host-shell.o" "$out/obj/browser-os-error.o" \
+"$cc" $flags -o "$out/browser" "$out/obj/browser_main.o" "$out/obj/browser_main-posix.o" "$out/obj/host-shell.o" "$out/obj/threads-posix.o" "$out/obj/browser-os-error.o" \
     -L"$out" -Wl,-rpath,'$ORIGIN' -l:libbrowser.so -lvulkan -lm
 echo "built $out/browser"
 
 # The second program over the engine (ws074-p057), built from <browser/browser.h> only (on the host it links the
 # engine's shared library, as on the target).
-"$cc" $flags -I$base/include -o "$out/browser-probe" userland/tests/browser-probe/main.c -L"$out" -Wl,-rpath,'$ORIGIN' -l:libbrowser.so -lm
+"$cc" $flags -I$base/include -o "$out/browser-probe" userland/tests/browser-probe/main.c "$out/obj/threads-posix.o" -L"$out" -Wl,-rpath,'$ORIGIN' -l:libbrowser.so -lm
 echo "built $out/browser-probe"
+
+# The scripted reftests' client over the public interface (plan/ws074/tests/wpt-ready-render.c).
+"$cc" $flags -I$base/include -o "$out/wpt-ready-render" plan/ws074/tests/wpt-ready-render.c "$out/obj/threads-posix.o" -L"$out" \
+    -Wl,-rpath,'$ORIGIN' -l:libbrowser.so -lm
+echo "built $out/wpt-ready-render"
 
 # The unit tests.
 for test in plan/ws074/tests/host-*.c; do
 	name=$(basename "$test" .c)
 	[ "$name" = host-shell ] && continue
-	"$cc" $flags -o "$out/$name" "$test" $engine "$out/obj/host-shell.o" -lvulkan -lm -ldl -lpthread
+	[ "$name" = host-threads ] && continue
+	"$cc" $flags -o "$out/$name" "$test" $engine "$out/obj/host-shell.o" "$out/obj/threads-posix.o" "$out/obj/host-threads.o" -lvulkan -lm -ldl -lpthread
 	echo "built $out/$name"
 done

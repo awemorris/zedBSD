@@ -256,3 +256,4 @@ WS が完了・取り下げになったら、行を master.md からここへ移
 | [WS332](ws332/ws.md) | MG004 | tick の周波数を API で扱う（KERN_CLOCK_HZ の削除、今の周波数の取得の口。変える実装は将来）（2026-10-30 ユーザー） | completed（2026-10-31 Q1、main 39fc879c5。可変の tick の実装は F-WS332-variable-tick） | — |
 | [WS331](ws331/ws.md) | MG001 | driver から HAL への直の依存を除き kernel の口だけに（2026-10-30 ユーザー） | completed（2026-10-31 Q1、main 1035ec0a0。driver の HAL の include と hal_* の呼び出しは 0。試験は plan/tools/ports・boot-images・console-end） | — |
 | [WS326](ws326/ws.md) | MG006 | libmedia の H.264 の software の decoder（独自、module の設計は Opus、実装は Sonnet 5.5 high）（2026-10-30 ユーザー） | completed（2026-10-31 Q1、main 8bf8f0280。JVT の適合 101 本 14526 frame が一致、libmedia の backend、試験は plan/tools/h264sw/） | — |
+| [WS344](ws344/ws.md) | MG006 | libwebp-compat（自前の WebP の decoder、libwebp と互換の API、libbrowser の画像、BUG-405）（2026-11-02 ユーザー） | completed（2026-11-02 20:23 Q1、main c10e15fa6。libwebp 1.5.0 と 364 + 214 file で byte 一致（host・Wine・QEMU）、about.google の画像が出た、試験は plan/tools/webp/） | — |

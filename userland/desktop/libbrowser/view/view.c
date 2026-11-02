@@ -39,11 +39,13 @@
 
 #include "base/os-file.h"
 #include "base/os-time.h"
+#include "base/thread.h"
 #include "net/net.h"
 #include "page/page.h"
 #include "paint/gpu.h"
 #include "storage/instance.h"
 #include "storage/queue.h"
+#include "view/front.h"
 #include "base/os-error.h"
 
 #include <browser/browser.h>
@@ -74,6 +76,9 @@
 
 /* The most pages kept for Back and Forward (a page left stays as it was, and comes back at once). */
 #define VIEW_KEPT_MAX		3U
+
+/* How long the handlers of a page put away for the history may run in a view of its own threads, in milliseconds. */
+#define VIEW_UNLOAD_MS		1000U
 
 /* How long a parsed document waits for its style sheets before it is shown without the ones still on their way, in milliseconds. */
 #define VIEW_SHEETS_WAIT_MS	30000U
@@ -194,15 +199,22 @@ struct view_prefetch_script {
  * (open_epoch) began, how pages are fetched, the loader (NULL when every
  * page is read at once), the page being fetched (its location and how it
  * joins the history; NULL when none), the title shown, and the callbacks.
- * instance is the instance the view belongs to (the program's, or its
- * thread's default), which counts it among its views; storage_told says
+ * instance is the instance the view belongs to (the program's, or the
+ * process's default), which counts it among its views; storage_told says
  * the view has told its console that the storage could not save.
  *
  * On the GPU: the caller's device (has_device says the caller lent one),
  * the renderer on it (opened at the first drawing, for the target's format
  * and final layout; gpu_open says it is), the framebuffers made for the
  * caller's image views (oldest first), and the Vulkan call that failed
- * last.
+ * last.  In a view of its own threads these are the drawing thread's, as
+ * are the drawing's own text system (render_text, opened at the first
+ * drawing on the view's fonts, its web faces on the committed frame's
+ * font files) and the committed frame it drew last (drawn, kept until the
+ * next drawing, since the recorded work may still read what it uploaded);
+ * render_lock is held across a drawing, so that the drawing calls of
+ * several threads take turns.  scene is the script thread's: the scene
+ * made last from the page's display list, and the number of that list.
  *
  * The input: where the pointer is (pointer_inside says it is over the
  * view), the button held down and where (press_button is -1 when none;
@@ -257,6 +269,12 @@ struct browser_view {
 	struct view_framebuffer framebuffers[VIEW_FRAMEBUFFERS_MAX];
 	size_t framebuffer_count;
 	struct browser_gpu_failure failure;
+	struct wb_mutex render_lock;
+	struct text_system render_text;
+	int render_text_open;
+	struct view_commit *drawn;
+	struct paint_scene *scene;
+	uint64_t scene_generation;
 	float pointer_x;
 	float pointer_y;
 	int pointer_inside;
@@ -284,6 +302,8 @@ struct browser_view {
 	int finishing_step;
 	size_t finishing_index;
 	uint64_t finishing_since;
+	/* The front of a view of its own threads (NULL for a view of the caller's), set once before the program has the view. */
+	struct view_front *front;
 };
 
 /*
@@ -345,6 +365,10 @@ static void view_failed(struct browser_view *view, const char *url, int error, c
 static void view_console(void *context, int level, const char *text, size_t length);
 static void view_storage_failed(struct browser_view *view, int error);
 static int view_gpu_ready(struct browser_view *view, const struct browser_target *target);
+static void view_framebuffers_release(struct browser_view *view);
+static int view_render_gpu(struct browser_view *view, const struct browser_target *target, VkCommandBuffer commands, uint64_t *serial);
+static int view_render_cpu(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);
+static int view_render_text(struct browser_view *view, const struct paint_scene *scene, int *changed);
 static void view_gpu_close(struct browser_view *view);
 static int view_framebuffer(struct browser_view *view, const struct browser_target *target, VkFramebuffer *framebuffer);
 static int view_gpu_failed(struct browser_view *view, const char *operation, VkResult result);
@@ -387,6 +411,18 @@ browser_view_create(
 	if (options->version != BROWSER_API_VERSION)
 		return ENOTSUP;
 
+	/* The view runs on the caller's thread or on its own. */
+	if (options->threading != BROWSER_THREADING_CALLER && options->threading != BROWSER_THREADING_OWN)
+		return EINVAL;
+	if (options->threading == BROWSER_THREADING_OWN) {
+		error = view_front_create(options, view);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the view runs on its own threads. */
+		return 0;
+	}
+
 	/* Rejects dimensions that cannot be represented by the layout engine. */
 	error = view_dimensions(options->width, options->height);
 	if (error != 0)
@@ -396,7 +432,7 @@ browser_view_create(
 	if (options->fetch < BROWSER_FETCH_DEFAULT || options->fetch > BROWSER_FETCH_BACKGROUND)
 		return EINVAL;
 
-	/* The instance: the program's, or this thread's default one. */
+	/* The instance: the program's, or the process's default one. */
 	instance = options->instance;
 	if (instance == NULL) {
 		error = wb_instance_default(&instance);
@@ -404,11 +440,16 @@ browser_view_create(
 			return error;
 	}
 
-	/* The view, empty. */
+	/* The view, empty, with the drawing's lock. */
 	made = calloc(1, sizeof(*made));
 	if (made == NULL)
 		return ENOMEM;
 	made->instance = instance;
+	error = wb_mutex_init(&made->render_lock);
+	if (error != 0) {
+		free(made);
+		return error;
+	}
 
 	/* The fonts the program names, and the system's for the ones it leaves out. */
 	made->fonts.sans = text_default_path(TEXT_FACE_SANS);
@@ -458,6 +499,7 @@ browser_view_create(
 	/* The loader of the http and https pages and images, with the instance's cookies, which wakes the program when it has news. */
 	error = page_net_create(instance->cookies, instance->cache, options->wake, options->wake_context, &made->loader);
 	if (error != 0) {
+		wb_mutex_destroy(&made->render_lock);
 		free(made);
 		return error;
 	}
@@ -474,13 +516,28 @@ browser_view_destroy(
 	struct browser_view *view)
 {
 	size_t index;
+	int windowed;
 
 	/* No view. */
 	if (view == NULL)
 		return;
 
-	/* The renderer and the framebuffers on the caller's device. */
+	/* A view of its own threads is ended by its front, which has its thread end it. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		view_front_destroy(view);
+		return;
+	}
+
+	/* The renderer and the framebuffers on the caller's device, and the drawing's frame, text and lock. */
 	view_gpu_close(view);
+	view_commit_release(view->drawn);
+	if (view->render_text_open)
+		text_system_close(&view->render_text);
+	wb_mutex_destroy(&view->render_lock);
+
+	/* The scene made last. */
+	paint_scene_release(view->scene);
 
 	/* A load under way, the pages kept for Back and Forward, then the page and its path (its image requests go with it). */
 	view_stop_load(view, 0);
@@ -519,6 +576,14 @@ browser_view_load(
 	struct wb_buffer base;
 	struct wb_buffer path;
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the load. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_load(view, location, 0);
+		return error;
+	}
 
 	/* The working directory, which a relative path starts from. */
 	wb_buffer_init(&directory);
@@ -561,6 +626,14 @@ browser_view_follow(
 {
 	struct wb_buffer path;
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the link's load. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_load(view, target, 1);
+		return error;
+	}
 
 	/* The target's location. */
 	wb_buffer_init(&path);
@@ -588,9 +661,24 @@ browser_view_can_go(
 	const struct browser_view *view,
 	int steps)
 {
+	const struct view_snapshot *shown;
+	size_t history_index;
+	size_t history_count;
+	int windowed;
+
+	/* The history: the view's, or the state a view of its own threads published. */
+	history_index = view->history_index;
+	history_count = view->history_count;
+	windowed = view_front_window(view);
+	if (windowed) {
+		shown = view_front_snapshot(view);
+		history_index = shown->history_index;
+		history_count = shown->history_count;
+	}
+
 	/* Widens before negation so INT_MIN remains a defined history query. */
 	if (steps < 0) {
-		if (view->history_index < (size_t)-(int64_t)steps)
+		if (history_index < (size_t)-(int64_t)steps)
 			return 0;
 
 		/* Succeeded: the requested older step exists. */
@@ -599,7 +687,7 @@ browser_view_can_go(
 
 	/* A forward step must stay within the committed history. */
 	if (steps > 0) {
-		if (view->history_index + (size_t)steps >= view->history_count)
+		if (history_index + (size_t)steps >= history_count)
 			return 0;
 
 		/* Succeeded: the requested newer step exists. */
@@ -607,7 +695,7 @@ browser_view_can_go(
 	}
 
 	/* A reload requires a committed page. */
-	if (view->history_count == 0)
+	if (history_count == 0)
 		return 0;
 
 	/* Succeeded: the current step can be reloaded. */
@@ -626,6 +714,14 @@ browser_view_go(
 	size_t index;
 	int possible;
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the step. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_go(view, steps);
+		return error;
+	}
 
 	/* No step before the first or after the last. */
 	possible = browser_view_can_go(view, steps);
@@ -662,6 +758,15 @@ browser_view_load_progress(
 {
 	size_t total;
 	size_t done;
+	int windowed;
+	const struct view_snapshot *shown;
+
+	/* A view of its own threads: the state it published. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		shown = view_front_snapshot(view);
+		return shown->progress;
+	}
 
 	/* A parsed document that waits for its style sheets is nearly there. */
 	if (view->finishing != NULL)
@@ -689,6 +794,15 @@ void
 browser_view_stop(
 	struct browser_view *view)
 {
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the stop. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		view_front_stop(view);
+		return;
+	}
+
 	/* The load, reported. */
 	view_stop_load(view, 1);
 }
@@ -702,12 +816,20 @@ browser_view_resize(
 	unsigned width,
 	unsigned height)
 {
+	int windowed;
 	int error;
 
 	/* A refused resize leaves both the view and its page at the previous size. */
 	error = view_dimensions(width, height);
 	if (error != 0)
 		return error;
+
+	/* A view of its own threads: the program's thread only queues the size. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_resize(view, width, height);
+		return error;
+	}
 
 	/* The size, and the page's scripts see it. */
 	view->width = width;
@@ -734,6 +856,14 @@ browser_view_set_color_scheme(
 	enum browser_color_scheme scheme)
 {
 	int dark;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the scheme. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		view_front_color_scheme(view, (int)scheme);
+		return;
+	}
 
 	/* The scheme as 0 or 1; the same one changes nothing. */
 	dark = 0;
@@ -758,6 +888,16 @@ const char *
 browser_view_url(
 	const struct browser_view *view)
 {
+	int windowed;
+	const struct view_snapshot *shown;
+
+	/* A view of its own threads: the state it published. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		shown = view_front_snapshot(view);
+		return shown->url;
+	}
+
 	/* The location kept for it. */
 	return view->path;
 }
@@ -767,6 +907,16 @@ const char *
 browser_view_title(
 	const struct browser_view *view)
 {
+	int windowed;
+	const struct view_snapshot *shown;
+
+	/* A view of its own threads: the state it published. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		shown = view_front_snapshot(view);
+		return shown->title;
+	}
+
 	/* A page without a title shows its location. */
 	if (view->title.length == 0)
 		return view->path;
@@ -781,6 +931,15 @@ browser_view_document_height(
 	struct browser_view *view)
 {
 	int error;
+	int windowed;
+	const struct view_snapshot *shown;
+
+	/* A view of its own threads: the state it published. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		shown = view_front_snapshot(view);
+		return shown->document_height;
+	}
 
 	/* No page is no height. */
 	if (view->page == NULL)
@@ -810,6 +969,13 @@ browser_view_timeout(
 	int timeout;
 	int media;
 	int found;
+	int windowed;
+
+	/* A view of its own threads keeps its clock on its own thread. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		return -1;
+	}
 
 	/* Callbacks left by the last call, and a parsed document whose sheets came, are due at once. */
 	if (view->dispatch_left || (view->finishing != NULL && !page_sheets_blocking(view->finishing)))
@@ -858,6 +1024,14 @@ browser_view_process(
 {
 	int changed;
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's side only (the state and the callbacks). */
+	windowed = view_front_window(view);
+	if (windowed) {
+		view_front_process(view);
+		return;
+	}
 
 	/* The storage's failure to save, told on the view's console once. */
 	error = wb_storage_queue_take_error(view->instance->queue);
@@ -878,6 +1052,10 @@ browser_view_process(
 
 	/* The timers due by now, in the page's own time. */
 	error = page_set_time(view->page, (double)(view_clock() - view->page_epoch));
+
+	/* A script whose task was asked to end is no error of the page (the console said so). */
+	if (error == VM_TERMINATED)
+		error = 0;
 	if (error != 0 && view->callbacks.script_error != NULL)
 		view->callbacks.script_error(view->callbacks.context, view, error);
 
@@ -886,6 +1064,10 @@ browser_view_process(
 
 	/* The images that came fire their elements' events. */
 	error = page_images_checkpoint(view->page);
+
+	/* A script whose task was asked to end is no error of the page (the console said so). */
+	if (error == VM_TERMINATED)
+		error = 0;
 	if (error != 0 && view->callbacks.script_error != NULL)
 		view->callbacks.script_error(view->callbacks.context, view, error);
 	if (view->page == NULL)
@@ -913,6 +1095,16 @@ double
 browser_view_scroll_y(
 	const struct browser_view *view)
 {
+	int windowed;
+	const struct view_snapshot *shown;
+
+	/* A view of its own threads: the state it published. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		shown = view_front_snapshot(view);
+		return shown->scroll_y;
+	}
+
 	/* The scroll in pixels. */
 	return (double)layout_to_px(view->scroll_y);
 }
@@ -931,8 +1123,16 @@ browser_view_scroll_to(
 {
 	layout_unit before;
 	int error;
+	int windowed;
 
 	UNUSED_PARAMETER(x);
+
+	/* A view of its own threads: the program's thread only queues the scroll. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_scroll_to(view, x, y);
+		return error;
+	}
 
 	/* No page, no scroll. */
 	if (view->page == NULL)
@@ -970,6 +1170,17 @@ browser_view_scroll_range(
 {
 	layout_unit limit;
 	int error;
+	int windowed;
+	const struct view_snapshot *shown;
+
+	/* A view of its own threads: the state it published. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		shown = view_front_snapshot(view);
+		*largest_x = shown->largest_x;
+		*largest_y = shown->largest_y;
+		return shown->range_error;
+	}
 
 	/* Nothing scrolls without a page. */
 	*largest_x = 0.0;
@@ -1010,8 +1221,17 @@ browser_view_set_overscroll(
 	layout_unit shift;
 	float limit;
 	float distance;
+	int windowed;
+	int error;
 
 	UNUSED_PARAMETER(dx);
+
+	/* A view of its own threads: the program's thread only queues the shift. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_overscroll(view, dx, dy);
+		return error;
+	}
 
 	/* At most the view's height either way. */
 	limit = (float)view->height * VIEW_OVERSCROLL_MAX;
@@ -1043,7 +1263,17 @@ browser_view_pointer_move(
 	float y,
 	uint32_t modifiers)
 {
+	int windowed;
+	int error;
+
 	UNUSED_PARAMETER(modifiers);
+
+	/* A view of its own threads: the program's thread only queues the move. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_pointer_move(view, x, y, modifiers);
+		return error;
+	}
 
 	/* The place, and the pointer is over the view. */
 	view->pointer_x = x;
@@ -1077,6 +1307,14 @@ browser_view_pointer_button(
 	int clicked;
 	int canceled;
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the button. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_pointer_button(view, x, y, button, pressed, modifiers);
+		return error;
+	}
 
 	/* The place, which the pointer is at now. */
 	view->pointer_x = x;
@@ -1155,6 +1393,16 @@ int
 browser_view_pointer_leave(
 	struct browser_view *view)
 {
+	int windowed;
+	int error;
+
+	/* A view of its own threads: the program's thread only queues the leave. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_pointer_leave(view);
+		return error;
+	}
+
 	/* Nothing is pressed or pointed at any more. */
 	view->pointer_inside = 0;
 	view->press_button = -1;
@@ -1180,6 +1428,14 @@ browser_view_wheel(
 	struct page_pointer pointer;
 	int canceled;
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the turn. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_wheel(view, x, y, delta_x, delta_y, modifiers);
+		return error;
+	}
 
 	/* The place, which the pointer is at now. */
 	view->pointer_x = x;
@@ -1236,6 +1492,14 @@ browser_view_key(
 	int canceled;
 	int handled;
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the key. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_key(view, key, code, text, pressed, repeat, modifiers);
+		return error;
+	}
 
 	/* The key as the page sees it (a missing name is empty). */
 	memset(&event, 0, sizeof(event));
@@ -1311,6 +1575,14 @@ browser_view_focus(
 	int focused)
 {
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the focus. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_focus(view, focused);
+		return error;
+	}
 
 	/* The view's own record, which a new page starts from. */
 	view->has_focus = focused;
@@ -1341,6 +1613,14 @@ browser_view_focus_field(
 {
 	int focused;
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread queues it, and the field callback answers. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_focus_field(view, autocomplete);
+		return error;
+	}
 
 	/* No page has no field. */
 	if (view->page == NULL)
@@ -1390,6 +1670,15 @@ browser_view_text_context(
 	int page_purpose;
 	unsigned page_hints;
 	int found;
+	int windowed;
+	int taken;
+
+	/* A view of its own threads: the state it published. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		taken = view_front_text_context(view, text, size, cursor, purpose, hints);
+		return taken;
+	}
 
 	/* Nothing yet. */
 	*cursor = 0;
@@ -1451,6 +1740,15 @@ browser_view_text_session(
 	const struct browser_view *view)
 {
 	uint64_t session;
+	int windowed;
+	const struct view_snapshot *shown;
+
+	/* A view of its own threads: the state it published. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		shown = view_front_snapshot(view);
+		return shown->text_session;
+	}
 
 	/* The pages shown, in the upper half. */
 	session = (uint64_t)view->page_serial << 32;
@@ -1478,6 +1776,16 @@ browser_view_text_target(
 	struct dom_element *element;
 	struct dom_control *control;
 	layout_unit top;
+	int windowed;
+	const struct view_snapshot *shown;
+
+	/* A view of its own threads: the state it published. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		shown = view_front_snapshot(view);
+		memcpy(caret, shown->caret, sizeof(shown->caret));
+		return shown->has_target;
+	}
 
 	/* No caret until one is found. */
 	caret[0] = 0.0f;
@@ -1521,6 +1829,14 @@ browser_view_compose(
 {
 	int cursor;
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the composition. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_compose(view, preedit, begin, end);
+		return error;
+	}
 
 	/* No page has nothing to compose in. */
 	if (view->page == NULL)
@@ -1561,6 +1877,14 @@ browser_view_commit_text(
 	uint32_t delete_after)
 {
 	int error;
+	int windowed;
+
+	/* A view of its own threads: the program's thread only queues the text. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_commit_text(view, 0, 0, text, delete_before, delete_after);
+		return error;
+	}
 
 	/* No page has nothing to commit to. */
 	if (view->page == NULL)
@@ -1599,6 +1923,13 @@ browser_view_settle(
 	int found;
 	int settled;
 	int error;
+	int windowed;
+
+	/* A view of its own threads is not settled by the program. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		return ENOTSUP;
+	}
 
 	/* Drains each task batch before laying out and releasing its font-ready reactions. */
 	settled = 0;
@@ -1686,6 +2017,13 @@ browser_view_draw_pixels(
 	unsigned char *row_start;
 	unsigned row;
 	int error;
+	int windowed;
+
+	/* A view of its own threads draws through browser_view_render_pixels. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		return ENOTSUP;
+	}
 
 	/* Refuses an output whose rows overlap or wrap the address space. */
 	error = view_pixels(pixels, width, height, stride);
@@ -1751,6 +2089,13 @@ browser_view_dump(
 {
 	struct wb_buffer out;
 	int error;
+	int windowed;
+
+	/* A view of its own threads is not dumped by the program. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		return ENOTSUP;
+	}
 
 	/* No page has nothing to dump. */
 	*text = NULL;
@@ -1806,18 +2151,20 @@ browser_view_set_gpu(
 	struct browser_view *view,
 	const struct browser_gpu *gpu)
 {
+	/* The drawing's calls take turns (in a view of its own threads, the drawing thread's). */
+	wb_mutex_lock(&view->render_lock);
+
 	/* The renderer and the framebuffers on the old device. */
 	view_gpu_close(view);
 
-	/* No GPU from now on. */
-	if (gpu == NULL) {
-		view->has_device = 0;
-		return;
+	/* The new one, made on it at the next drawing; none when there is none. */
+	view->has_device = 0;
+	if (gpu != NULL) {
+		view->device = *gpu;
+		view->has_device = 1;
 	}
 
-	/* The new one; the renderer is made on it at the next drawing. */
-	view->device = *gpu;
-	view->has_device = 1;
+	wb_mutex_unlock(&view->render_lock);
 }
 
 /*
@@ -1829,12 +2176,12 @@ void
 browser_view_release_targets(
 	struct browser_view *view)
 {
-	size_t index;
+	/* The drawing's calls take turns (in a view of its own threads, the drawing thread's). */
+	wb_mutex_lock(&view->render_lock);
 
-	/* Each framebuffer, oldest first. */
-	for (index = 0; index < view->framebuffer_count; index++)
-		vkDestroyFramebuffer(view->device.device, view->framebuffers[index].framebuffer, NULL);
-	view->framebuffer_count = 0;
+	view_framebuffers_release(view);
+
+	wb_mutex_unlock(&view->render_lock);
 }
 
 /* Lays the page out now when it changed, so that a frame the caller begins next cannot fail on the layout. */
@@ -1843,6 +2190,13 @@ browser_view_prepare(
 	struct browser_view *view)
 {
 	int error;
+	int windowed;
+
+	/* A view of its own threads lays itself out on its own thread. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		return ENOTSUP;
+	}
 
 	/* No page has nothing to lay out. */
 	if (view->page == NULL)
@@ -1873,6 +2227,13 @@ browser_view_draw(
 	VkExtent2D extent;
 	VkResult result;
 	int error;
+	int windowed;
+
+	/* A view of its own threads draws through browser_view_render_pixels. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		return ENOTSUP;
+	}
 
 	/* Refuses an absent or empty target before issuing any Vulkan command. */
 	error = view_target(target);
@@ -1924,6 +2285,13 @@ browser_view_record(
 	VkExtent2D extent;
 	VkResult result;
 	int error;
+	int windowed;
+
+	/* A view of its own threads draws through browser_view_render_pixels. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		return ENOTSUP;
+	}
 
 	/* Refuses an absent or empty target before issuing any Vulkan command. */
 	error = view_target(target);
@@ -1964,6 +2332,298 @@ browser_view_record(
 }
 
 /*
+ * Records the drawing of the latest committed frame of a view of its own
+ * threads into the caller's image, render pass and all, into a command
+ * buffer the caller (the drawing thread) began and submits, and reports
+ * the frame's number for browser_view_presented.  The drawing recorded
+ * before must have finished.  A view of the caller's thread records the
+ * page as it is now (browser_view_record; number 0).
+ */
+int
+browser_view_render(
+	struct browser_view *view,
+	const struct browser_target *target,
+	VkCommandBuffer commands,
+	uint64_t *serial)
+{
+	int error;
+
+	/* No number until a frame is drawn. */
+	*serial = 0;
+
+	/* A view of the caller's thread records the page as it is now. */
+	if (view->front == NULL) {
+		error = browser_view_record(view, target, commands);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the caller's commands draw the page. */
+		return 0;
+	}
+
+	/* Refuses an absent or empty target before issuing any Vulkan command. */
+	error = view_target(target);
+	if (error != 0)
+		return error;
+
+	/* The latest committed frame, recorded while the drawing's calls take turns. */
+	wb_mutex_lock(&view->render_lock);
+
+	error = view_render_gpu(view, target, commands, serial);
+
+	wb_mutex_unlock(&view->render_lock);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller's commands draw the frame. */
+	return 0;
+}
+
+/*
+ * Tells a view of its own threads that the frame of a number (from
+ * browser_view_render) was presented: the page's animation frames run
+ * then (requestAnimationFrame waits for it).  Nothing in a view of the
+ * caller's thread.
+ */
+void
+browser_view_presented(
+	struct browser_view *view,
+	uint64_t serial)
+{
+	/* A view of the caller's thread has its animation frames by the clock. */
+	if (view->front == NULL)
+		return;
+
+	/* The script thread hears of it. */
+	view_front_presented(view, serial);
+}
+
+/* Records the latest committed frame on the drawing thread (the render lock held). */
+static int
+view_render_gpu(
+	struct browser_view *view,
+	const struct browser_target *target,
+	VkCommandBuffer commands,
+	uint64_t *serial)
+{
+	struct view_commit *commit;
+	struct paint_scene *scene;
+	VkFramebuffer framebuffer;
+	VkExtent2D extent;
+	VkResult result;
+	int changed;
+	int error;
+
+	/* The latest committed frame, held. */
+	commit = view_front_commit(view);
+	if (commit == NULL)
+		return ENOENT;
+	scene = commit->scene;
+
+	/* The drawing's faces for the frame's fonts, the renderer for the target, and the framebuffer over it. */
+	error = view_render_text(view, scene, &changed);
+	if (error == 0)
+		error = view_gpu_ready(view, target);
+	if (error == 0 && changed)
+		paint_gpu_forget_glyphs(&view->gpu);
+	if (error == 0)
+		error = view_framebuffer(view, target, &framebuffer);
+	if (error != 0) {
+		view_commit_release(commit);
+		return error;
+	}
+
+	/* The frame's instances and atlas, written by the host now. */
+	extent.width = target->width;
+	extent.height = target->height;
+	result = paint_gpu_prepare(&view->gpu, &scene->list, &view->render_text, commit->scroll_y, extent);
+	if (result != VK_SUCCESS) {
+		view_commit_release(commit);
+		error = view_gpu_failed(view, view->gpu.operation, result);
+		return error;
+	}
+
+	/* The pass, into the caller's command buffer. */
+	paint_gpu_record(&view->gpu, commands, &scene->list, framebuffer, extent);
+
+	/* The frame is kept until the next drawing (the work recorded may still read what it put in the atlas). */
+	view_commit_release(view->drawn);
+	view->drawn = commit;
+	*serial = commit->serial;
+
+	/* Succeeded: the caller's commands draw the frame. */
+	return 0;
+}
+
+/* Draws the latest committed frame with the CPU on the calling thread (the render lock held); what the frame leaves is its canvas color. */
+static int
+view_render_cpu(
+	struct browser_view *view,
+	uint32_t *pixels,
+	unsigned width,
+	unsigned height,
+	size_t stride)
+{
+	struct view_commit *commit;
+	struct paint_bitmap bitmap;
+	unsigned char *row_start;
+	unsigned row;
+	int changed;
+	int error;
+
+	/* The latest committed frame, held. */
+	commit = view_front_commit(view);
+	if (commit == NULL)
+		return ENOENT;
+
+	/* The drawing's faces for the frame's fonts (a GPU atlas of other glyphs starts over). */
+	error = view_render_text(view, commit->scene, &changed);
+	if (error != 0) {
+		view_commit_release(commit);
+		return error;
+	}
+	if (changed && view->gpu_open)
+		paint_gpu_forget_glyphs(&view->gpu);
+
+	/* Rows packed one after another are drawn in place, others into a packed bitmap first. */
+	bitmap.pixels = pixels;
+	bitmap.width = (int)width;
+	bitmap.height = (int)height;
+	if (stride != (size_t)width * sizeof(uint32_t)) {
+		error = paint_bitmap_create(&bitmap, (int)width, (int)height);
+		if (error != 0) {
+			view_commit_release(commit);
+			return error;
+		}
+	}
+	error = paint_software(&commit->scene->list, &view->render_text, commit->scroll_y, &bitmap);
+
+	/* A packed bitmap is copied into the caller's rows and goes. */
+	if (bitmap.pixels != pixels) {
+		for (row = 0; error == 0 && row < height; row++) {
+			row_start = (unsigned char *)pixels + (size_t)row * stride;
+			memcpy(row_start, bitmap.pixels + (size_t)row * width, (size_t)width * sizeof(uint32_t));
+		}
+		paint_bitmap_release(&bitmap);
+	}
+
+	/* The frame is let go. */
+	view_commit_release(commit);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the pixels hold the frame. */
+	return 0;
+}
+
+/*
+ * Makes the drawing's text system draw a scene's glyphs: opened at the
+ * first drawing on the view's fonts (the page's base faces), its web
+ * faces on the font files the scene holds.  *changed says the glyphs it
+ * cached were forgotten.
+ */
+static int
+view_render_text(
+	struct browser_view *view,
+	const struct paint_scene *scene,
+	int *changed)
+{
+	int replaced;
+	int face;
+	int error;
+
+	/* The base faces, once. */
+	*changed = 0;
+	if (!view->render_text_open) {
+		error = text_system_open_with(&view->render_text, &view->fonts, &view->companions);
+		if (error != 0)
+			return error;
+		view->render_text_open = 1;
+		*changed = 1;
+	}
+
+	/* Each web face, the scene's. */
+	for (face = TEXT_FACE_WEB; face < TEXT_FACES; face++) {
+		error = text_system_use_face(&view->render_text, face, scene->faces[face], &replaced);
+		if (replaced)
+			*changed = 1;
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the faces are the scene's. */
+	return 0;
+}
+
+/*
+ * Makes the scene of the page as it is now for the front's committed
+ * frame, on the script thread: the page laid out and painted, its display
+ * list taken into a new scene when it painted again (else the last one
+ * again), held for the caller, and the scroll it is drawn at.  Reports 0,
+ * ENOENT without a page, or the layout's error.
+ */
+int
+view_commit_scene(
+	struct browser_view *view,
+	struct paint_scene **scene,
+	layout_unit *scroll_y)
+{
+	struct paint_scene *made;
+	int error;
+
+	/* No page has nothing to commit. */
+	*scene = NULL;
+	if (view->page == NULL)
+		return ENOENT;
+
+	/* The page as it is now. */
+	error = view_update(view);
+	if (error != 0)
+		return error;
+
+	/* A list taken before (the page shown again from the history) is painted again. */
+	if (view->scene == NULL || view->scene_generation != view->page->paint_generation) {
+		if (view->page->painted && view->page->paint_taken) {
+			error = page_paint(view->page);
+			if (error != 0)
+				return error;
+		}
+	}
+
+	/* A list painted since the last scene becomes the new one. */
+	if (view->scene == NULL || view->scene_generation != view->page->paint_generation) {
+		if (!view->page->painted)
+			return ENOENT;
+		error = paint_scene_make(&view->page->paint, &view->page->text, &made);
+		if (error != 0)
+			return error;
+		view->page->paint_taken = 1;
+		paint_scene_release(view->scene);
+		view->scene = made;
+		view->scene_generation = view->page->paint_generation;
+	}
+
+	/* Succeeded: the scene, held for the frame, and the scroll. */
+	paint_scene_retain(view->scene);
+	*scene = view->scene;
+	*scroll_y = view_drawn_scroll(view);
+	return 0;
+}
+
+/* Tells the page shown that a frame was presented (on the script thread): its animation frames are due now. */
+void
+view_frame_opportunity(
+	struct browser_view *view)
+{
+	/* No page has no animation frames. */
+	if (view->page == NULL)
+		return;
+
+	/* The page counts the chance. */
+	page_frame_presented(view->page);
+}
+
+/*
  * Finds the image shown at a place of the view (ws189-p003: a picture
  * dragged out of the browser): a copy of its pixels, premultiplied
  * 0xAARRGGBB words (the decoder's are straight), and the absolute URL of
@@ -1989,6 +2649,13 @@ browser_view_image_at(
 	size_t count;
 	size_t index;
 	int error;
+	int windowed;
+
+	/* A view of its own threads answers browser_view_request_image instead. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		return ENOTSUP;
+	}
 
 	/* Nothing yet, and a page. */
 	memset(image, 0, sizeof(*image));
@@ -2059,12 +2726,239 @@ browser_view_image_release(
 	memset(image, 0, sizeof(*image));
 }
 
+/*
+ * Reports the number of the state a view of its own threads published
+ * last (0 before the first, and for a view of the caller's thread).
+ */
+uint64_t
+browser_view_snapshot_serial(
+	const struct browser_view *view)
+{
+	const struct view_snapshot *shown;
+
+	/* A view of the caller's thread publishes nothing. */
+	if (view->front == NULL)
+		return 0;
+
+	/* The state the program's getters read. */
+	shown = view_front_snapshot(view);
+	return shown->serial;
+}
+
+/*
+ * Draws the latest picture of the page shown: the one a view of its own
+ * threads made last (from any thread), or the page as it is now in a view
+ * of the caller's (browser_view_draw_pixels).
+ */
+int
+browser_view_render_pixels(
+	struct browser_view *view,
+	uint32_t *pixels,
+	unsigned width,
+	unsigned height,
+	size_t stride)
+{
+	int error;
+
+	/* Refuses an output whose rows overlap or wrap the address space. */
+	error = view_pixels(pixels, width, height, stride);
+	if (error != 0)
+		return error;
+
+	/* A view of the caller's thread draws now. */
+	if (view->front == NULL) {
+		error = browser_view_draw_pixels(view, pixels, width, height, stride);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the pixels hold the page. */
+		return 0;
+	}
+
+	/* The frame a view of its own threads committed last, drawn by the caller's thread (the drawing thread). */
+	wb_mutex_lock(&view->render_lock);
+
+	error = view_render_cpu(view, pixels, width, height, stride);
+
+	wb_mutex_unlock(&view->render_lock);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the pixels hold the latest picture. */
+	return 0;
+}
+
+/*
+ * Asks for the image at a place of the view: a view of its own threads
+ * queues the request and answers with the image callback later; a view of
+ * the caller's thread answers before this returns.
+ */
+int
+browser_view_request_image(
+	struct browser_view *view,
+	float x,
+	float y)
+{
+	struct browser_image image;
+	int windowed;
+	int error;
+
+	/* A view of its own threads: the program's thread only queues the request. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_request_image(view, x, y);
+		return error;
+	}
+
+	/* The image now, lent to the callback. */
+	memset(&image, 0, sizeof(image));
+	error = browser_view_image_at(view, x, y, &image);
+	if (view->callbacks.image != NULL) {
+		if (error == 0)
+			view->callbacks.image(view->callbacks.context, view, 0, &image);
+		else
+			view->callbacks.image(view->callbacks.context, view, error, NULL);
+	}
+
+	/* What the program left of the image goes. */
+	if (error == 0)
+		browser_view_image_release(&image);
+
+	/* Succeeded: the callback has the answer. */
+	return 0;
+}
+
+/*
+ * Commits text for the text input's session the program saw: text for a
+ * session that has ended (the focus moved) is dropped.
+ */
+int
+browser_view_commit_text_in(
+	struct browser_view *view,
+	uint64_t session,
+	const char *text,
+	uint32_t delete_before,
+	uint32_t delete_after)
+{
+	uint64_t current;
+	int windowed;
+	int error;
+
+	/* A view of its own threads checks the session on its own thread, where the focus is. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_commit_text(view, 1, session, text, delete_before, delete_after);
+		return error;
+	}
+
+	/* Text for another session is dropped. */
+	current = browser_view_text_session(view);
+	if (current != session)
+		return 0;
+
+	/* The text, committed. */
+	error = browser_view_commit_text(view, text, delete_before, delete_after);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the text is in the field. */
+	return 0;
+}
+
+/* Gives a view made on its script thread the front it runs under (before the program has it). */
+void
+view_attach_front(
+	struct browser_view *view,
+	struct view_front *front)
+{
+	/* The front, set once. */
+	view->front = front;
+}
+
+/* Reports the front a view runs under (NULL for a view of the caller's thread). */
+struct view_front *
+view_front_of(
+	const struct browser_view *view)
+{
+	/* The front set at the creation. */
+	return view->front;
+}
+
+/* Reports a view's loader (NULL when it reads every page at once); it lives as long as the view. */
+struct net_loader *
+view_loader(
+	const struct browser_view *view)
+{
+	/* The loader made with the view. */
+	return view->loader;
+}
+
+/*
+ * Fills the state a view of its own threads publishes, on its script
+ * thread (the strings are the state's own).  Reports 0, ENOMEM, or a
+ * layout's error.
+ */
+int
+view_fill_snapshot(
+	struct browser_view *view,
+	struct view_snapshot *snapshot)
+{
+	const char *title;
+
+	/* The page's location and title. */
+	memset(snapshot, 0, sizeof(*snapshot));
+	if (view->path != NULL) {
+		snapshot->url = strdup(view->path);
+		if (snapshot->url == NULL)
+			return ENOMEM;
+	}
+	title = browser_view_title(view);
+	if (title != NULL) {
+		snapshot->title = strdup(title);
+		if (snapshot->title == NULL)
+			return ENOMEM;
+	}
+
+	/* The history, the load, the scroll and the document. */
+	snapshot->history_index = view->history_index;
+	snapshot->history_count = view->history_count;
+	snapshot->progress = browser_view_load_progress(view);
+	snapshot->scroll_y = browser_view_scroll_y(view);
+	snapshot->document_height = browser_view_document_height(view);
+	snapshot->range_error = browser_view_scroll_range(view, &snapshot->largest_x, &snapshot->largest_y);
+	snapshot->width = view->width;
+	snapshot->height = view->height;
+
+	/* The text input: its session, its caret, and the value around the caret. */
+	snapshot->text_session = browser_view_text_session(view);
+	snapshot->has_target = browser_view_text_target(view, snapshot->caret);
+	snapshot->context_text = malloc(VIEW_SNAPSHOT_TEXT_MAX);
+	if (snapshot->context_text == NULL)
+		return ENOMEM;
+	snapshot->has_context = browser_view_text_context(view, snapshot->context_text, VIEW_SNAPSHOT_TEXT_MAX, &snapshot->cursor,
+	    &snapshot->purpose, &snapshot->hints);
+	if (!snapshot->has_context)
+		snapshot->context_text[0] = '\0';
+
+	/* Succeeded: the state is whole. */
+	return 0;
+}
+
 /* Tells which Vulkan call (or step) failed last in a drawing, and what it returned. */
 void
 browser_view_gpu_failure(
 	const struct browser_view *view,
 	struct browser_gpu_failure *failure)
 {
+	int windowed;
+
+	/* A view of its own threads made no Vulkan call for the program. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		memset(failure, 0, sizeof(*failure));
+		return;
+	}
+
 	/* The one kept. */
 	*failure = view->failure;
 }
@@ -2300,11 +3194,17 @@ view_make_page(
 	struct page *made;
 	int error;
 
-	/* The page. */
+	/* The page, whose tasks are the view's agent's in a view of its own threads. */
 	*page = NULL;
 	error = page_create(&made, view->stack_base);
 	if (error != 0)
 		return error;
+	if (view->front != NULL)
+		vm_heap_set_agent(made->heap, view_front_agent(view->front));
+
+	/* In a view of its own threads its animation frames wait for the drawing thread's presents. */
+	if (view->front != NULL)
+		page_set_frames_presented(made, 1);
 
 	/* Its scripts see the view's size and its fonts, write their console through the view, and count time from now. */
 	page_set_viewport(made, (int)view->width, (int)view->height);
@@ -2344,7 +3244,7 @@ view_open_page(
 	/* The location. */
 	error = page_load_location(loaded, path);
 	if (error != 0) {
-		view_failed(view, path, error, page_failure_reason());
+		view_failed(view, path, error, page_failure_reason(loaded));
 		page_destroy(loaded);
 		return error;
 	}
@@ -2412,10 +3312,14 @@ view_show_page(
 	if (view->page != NULL &&
 	    view->history_count != 0 &&
 	    !(step == VIEW_STEP_KEEP && history_index == view->history_index) &&
-	    !(step == VIEW_STEP_REPLACE && history_index == view->history_index))
+	    !(step == VIEW_STEP_REPLACE && history_index == view->history_index)) {
 		view_keep(view, view->page, view->history_index);
-	else
+	} else {
+		/* The page left for good hears it first (a failure of its listeners does not keep it). */
+		if (view->page != NULL)
+			(void)page_unload(view->page);
 		page_destroy(view->page);
+	}
 	view->page = page;
 	view->page_serial++;
 	view->page_epoch = view->open_epoch;
@@ -2545,7 +3449,7 @@ view_document_arrived(
 	if (error != 0) {
 		path = view->pending_path;
 		view->pending_path = NULL;
-		view_failed(view, path, error, page_failure_reason());
+		view_failed(view, path, error, page_net_reason(request));
 		free(path);
 		return;
 	}
@@ -2660,7 +3564,8 @@ view_commit_document(
 /*
  * Keeps the page left at a step of the history for Back and Forward, the
  * oldest kept one going when there are too many; a page that may not be
- * kept (its document came with no-store, or it plays media) goes at once.
+ * kept (its document came with no-store, it plays media, or a script of it
+ * was stopped) goes at once.
  */
 static void
 view_keep(
@@ -2670,15 +3575,36 @@ view_keep(
 {
 	struct view_kept *kept;
 	size_t slot;
+	int stopped;
 
-	/* A page that may not be kept goes. */
-	if (page->no_store || page->media.count != 0) {
+	/*
+	 * A page that may not be kept is unloaded and goes (a failure of its
+	 * listeners does not keep it); a page whose script was stopped runs no
+	 * more script, so it goes without its unload.
+	 */
+	stopped = bind_window_was_terminated(page->window);
+	if (page->no_store || page->media.count != 0 || stopped) {
+		if (!stopped)
+			(void)page_unload(page);
 		page_destroy(page);
 		return;
 	}
 
-	/* The page hears that it is put away for the history (a failure leaves it kept all the same). */
+	/*
+	 * The page hears that it is put away for the history (a failure leaves
+	 * it kept all the same); in a view of its own threads its handlers have
+	 * a second, after which they are stopped and the page is not kept.
+	 */
+	if (view->front != NULL)
+		vm_agent_set_deadline(view_front_agent(view->front), VIEW_UNLOAD_MS);
 	(void)page_page_transition(page, "pagehide", 1);
+	if (view->front != NULL)
+		vm_agent_clear_deadline(view_front_agent(view->front));
+	stopped = bind_window_was_terminated(page->window);
+	if (stopped) {
+		page_destroy(page);
+		return;
+	}
 
 	/* Room, made by letting the oldest go, and a page kept before for the same step goes too. */
 	for (slot = view->kept_count; slot > 0; slot--) {
@@ -3369,9 +4295,22 @@ view_gpu_close(
 	(void)vkDeviceWaitIdle(view->device.device);
 
 	/* The framebuffers (made in the renderer's pass), then the renderer. */
-	browser_view_release_targets(view);
+	view_framebuffers_release(view);
 	paint_gpu_close(&view->gpu);
 	view->gpu_open = 0;
+}
+
+/* Destroys the framebuffers made for the caller's image views, oldest first. */
+static void
+view_framebuffers_release(
+	struct browser_view *view)
+{
+	size_t index;
+
+	/* Each framebuffer, oldest first. */
+	for (index = 0; index < view->framebuffer_count; index++)
+		vkDestroyFramebuffer(view->device.device, view->framebuffers[index].framebuffer, NULL);
+	view->framebuffer_count = 0;
 }
 
 /*

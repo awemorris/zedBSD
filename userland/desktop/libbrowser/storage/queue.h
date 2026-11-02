@@ -42,7 +42,7 @@
  */
 #define WB_STORAGE_QUEUE_LIMIT		(64UL * 1024UL * 1024UL)
 
-/* The name of the storage thread (wb_os_thread_name). */
+/* The name of the storage thread (base/thread.h). */
 #define WB_STORAGE_QUEUE_THREAD		"browser-storage"
 
 /*

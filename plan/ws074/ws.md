@@ -362,10 +362,11 @@ CC=clang sh plan/ws074/tests/host-build.sh plain   # build/ws074-host/plain/brow
 python3 plan/ws074/tests/render-compare.py plan/ws074/tests/pages/blocks.html   # 1 頁を比べる
 sh plan/ws074/tests/fetch-suites.sh wpt            # WPT の固定 commit を build/ws074-suites/wpt へ（約 30 秒、425 MB）
 python3 -I plan/ws074/tests/run-acid-tests.py      # Acid2・Acid3（結果は build/ws074-acid/report.json）
-# scripted reftest の client（libbrowser.so を公開 API で使う）
-clang -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -Ibuild/ws074-host/include -Iuserland/desktop/include \
-    plan/ws074/tests/wpt-ready-render.c -Lbuild/ws074-host/plain -lbrowser -Wl,-rpath,'$ORIGIN' \
-    -o build/ws074-host/plain/wpt-ready-render
+# scripted reftest の client（libbrowser.so を公開 API で使う。host-build.sh が build/ws074-host/plain/wpt-ready-render も作る。
+# 手で作る時は thread の表 userland/tests/browser-threads/threads-posix.c も link する、WS345 p002）
+clang -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I. -Ibuild/ws074-host/include -Iuserland/desktop/include \
+    plan/ws074/tests/wpt-ready-render.c userland/tests/browser-threads/threads-posix.c -Lbuild/ws074-host/plain -lbrowser \
+    -Wl,-rpath,'$ORIGIN' -o build/ws074-host/plain/wpt-ready-render
 # Interop 2025 を Chromium と browser で測って比べる（p260）
 python3 plan/ws074/tests/interop2025-chrome-gap.py measure --kind chrome --out build/ws074-cmp/chrome
 python3 plan/ws074/tests/interop2025-chrome-gap.py measure --kind ours --out build/ws074-cmp/ours

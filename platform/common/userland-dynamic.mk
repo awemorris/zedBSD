@@ -3,7 +3,7 @@
 # The platform provides DYNAMIC_SYSROOT, DYNAMIC_LINK_CFLAGS,
 # DYNAMIC_LINK_LDFLAGS and DYNAMIC_ELF_MACHINE. Source and link dependencies
 # stay identical on amd64, arm64 and riscv64; libc, rtld and assembly stay platform-owned.
-DYNAMIC_PORTABLE_PROGRAMS := vkdemo vkcompute vkreset vkcoherency vkimage vkstage vkmatrix vkquad vkvideo-probe media-probe display-events wayland wltest acquire-fence-test gpu-forge-test menu-probe keiland-settings keiland-system printtest keiland-notify mediastorage fidoctl passkey-fido2 titlebar-probe popup-probe subsurface-probe seat-probe tablet-probe data-probe extras-probe wlshm keiland-ime ime-probe mview terminal files settings monitor notes pdfviewer imageview videoplayer music photos phone calendar mailer textedit kuidemo browser browser-probe glxtest zgears egltest glescompute xserver gpu-fence-test gpu-share-test hvs-load camvk
+DYNAMIC_PORTABLE_PROGRAMS := vkdemo vkcompute vkreset vkcoherency vkimage vkstage vkmatrix vkquad vkvideo-probe media-probe display-events wayland wltest acquire-fence-test gpu-forge-test menu-probe keiland-settings keiland-system printtest keiland-notify mediastorage fidoctl passkey-fido2 ssh sshd ssh-keygen sftp-server titlebar-probe popup-probe subsurface-probe seat-probe tablet-probe data-probe extras-probe wlshm keiland-ime ime-probe mview terminal files settings monitor notes pdfviewer imageview videoplayer music photos phone calendar mailer textedit kuidemo browser browser-probe glxtest zgears egltest glescompute xserver gpu-fence-test gpu-share-test hvs-load camvk
 
 $(eval $(call ZEDBSD_LIBUTIL_RULE,$(DYNAMIC_DIR),$(LD),$(DYNAMIC_LINK_LDFLAGS),$(DYNAMIC_ELF_MACHINE)))
 
@@ -57,6 +57,19 @@ $(DYNAMIC_DIR)/libcrypto-compat.so: $(DYNAMIC_CRYPTO_COMPAT_OBJS) $(DYNAMIC_DIR)
  $(DYNAMIC_CRYPTO_COMPAT_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
 	$(PYTHON) tools/build/check-dynamic-elf.py --machine $(DYNAMIC_ELF_MACHINE) --role shared-library \
  --needed libc.so --soname libcrypto-compat.so $@
+
+# libssl-compat: the TLS client of the browser, over libcrypto-compat (whose cryc_ names it calls) and the C
+# library.  It stays mapped once loaded (-z nodelete), as libcrypto-compat does.
+DYNAMIC_SSL_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libssl-compat)
+
+$(DYNAMIC_DIR)/libssl-compat.so: $(DYNAMIC_SSL_COMPAT_OBJS) $(DYNAMIC_DIR)/libcrypto-compat.so $(DYNAMIC_DIR)/libc.so \
+	userland/base/libssl-compat/exports.map tools/build/check-dynamic-elf.py
+	$(LD) $(DYNAMIC_LINK_LDFLAGS) -shared -soname libssl-compat.so --hash-style=both -Bsymbolic-functions \
+ -z defs -z now -z relro -z separate-code -z nodelete -z stack-size=0x100000 \
+ --version-script=userland/base/libssl-compat/exports.map \
+ $(DYNAMIC_SSL_COMPAT_OBJS) -L$(DYNAMIC_DIR) -l:libcrypto-compat.so -l:libc.so -o $@
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine $(DYNAMIC_ELF_MACHINE) --role shared-library \
+ --needed libcrypto-compat.so --needed libc.so --soname libssl-compat.so $@
 
 # libpng-compat (ws071-p010): libpng's simplified API of the desktop programs, over libz-compat.
 DYNAMIC_PNG_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libpng-compat)
@@ -610,8 +623,14 @@ $(BUILD)/bin/fidoctl: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
 # library (crypt() for the password of a registration).
 DYNAMIC_PASSKEY_FIDO2_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,passkey-fido2)
 
-$(DYNAMIC_PASSKEY_FIDO2_OBJS): DYNAMIC_CPPFLAGS += -I$(DYNAMIC_FIDOCTL_SSL)/include
-$(DYNAMIC_PASSKEY_FIDO2_OBJS): $(ZEDBSD_OPENSSL_STAGED)
+# The objects other programs share (login, su, sudo, passwd, passkey, account-admin, sshd) include no OpenSSL
+# header, so building them does not wait for OpenSSL or see its headers.
+DYNAMIC_PASSKEY_FIDO2_SHARED_OBJS := $(addprefix $(DYNAMIC_DIR)/obj/userland/base/,login/verify.o common/account.o \
+	passkey/record.o passkey/request.o)
+DYNAMIC_PASSKEY_FIDO2_SSL_OBJS := $(filter-out $(DYNAMIC_PASSKEY_FIDO2_SHARED_OBJS),$(DYNAMIC_PASSKEY_FIDO2_OBJS))
+
+$(DYNAMIC_PASSKEY_FIDO2_SSL_OBJS): DYNAMIC_CPPFLAGS += -I$(DYNAMIC_FIDOCTL_SSL)/include
+$(DYNAMIC_PASSKEY_FIDO2_SSL_OBJS): $(ZEDBSD_OPENSSL_STAGED)
 
 $(BUILD)/bin/passkey-fido2: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
 	$(DYNAMIC_PASSKEY_FIDO2_OBJS) $(ZEDBSD_OPENSSL_LIBCRYPTO) \
@@ -626,6 +645,25 @@ $(BUILD)/bin/passkey-fido2: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
  -l:libcrypto.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine $(DYNAMIC_ELF_MACHINE) --role application \
  --needed libcrypto.so --needed libc.so $@
+
+# zedBSD's own SSH programs (userland/base/ssh): their sources, libcrypto-compat and the C library (sshd's password
+# check takes crypt from it).  $(1) is the program.
+define DYNAMIC_SSH_PROGRAM
+$(BUILD)/bin/$(1): $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,$(1)) $(DYNAMIC_DIR)/libcrypto-compat.so \
+	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
+	@mkdir -p $$(dir $$@)
+	$(CC) $(DYNAMIC_LINK_CFLAGS) -nostdlib -pie -Wl,--no-relax \
+ -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
+ -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so \
+ $(DYNAMIC_SYSROOT)/usr/lib/crt1.o $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,$(1)) \
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
+ -l:libcrypto-compat.so -l:libc.so -o $$@
+	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine $(DYNAMIC_ELF_MACHINE) --role application \
+ --needed libcrypto-compat.so --needed libc.so $$@
+endef
+$(foreach program,ssh sshd ssh-keygen sftp-server,$(eval $(call DYNAMIC_SSH_PROGRAM,$(program))))
 
 # The Titlebar Presentation probe (WS070 p008): Wayland, libkeiland and the C library.
 DYNAMIC_TITLEBAR_PROBE_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,titlebar-probe)
@@ -1169,20 +1207,26 @@ $(DYNAMIC_DIR)/libyolox.so: $(DYNAMIC_YOLOX_LIBRARY_OBJS) $(DYNAMIC_DIR)/libc.so
 # libz-compat) and libgif-compat for its images (ws074-p021), and libmedia for <video> and <audio> (ws121-p004).  Only the calls of <browser.h> leave it.
 DYNAMIC_BROWSER_LIBRARY_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libbrowser)
 $(DYNAMIC_BROWSER_LIBRARY_OBJS): DYNAMIC_CPPFLAGS += -Iuserland/desktop/libbrowser
+# libbrowser has thread-local variables too (per-thread scratch state of style,
+# layout and the script engine): the same TLS dialect, link mode and providers
+# as libvulkan's above.
+$(DYNAMIC_BROWSER_LIBRARY_OBJS): DYNAMIC_CFLAGS += $(DYNAMIC_VULKAN_TLS_CFLAGS)
+DYNAMIC_BROWSER_DEFS ?= -z defs
+DYNAMIC_BROWSER_PROVIDERS ?=
 
 $(DYNAMIC_DIR)/libbrowser.so: $(DYNAMIC_BROWSER_LIBRARY_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libtruetype.so \
 	$(DYNAMIC_DIR)/libmedia.so \
 	$(DYNAMIC_DIR)/libjpeg-compat.so $(DYNAMIC_DIR)/libpng-compat.so $(DYNAMIC_DIR)/libz-compat.so \
-	$(DYNAMIC_DIR)/libgif-compat.so $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/libgif-compat.so $(DYNAMIC_DIR)/libwebp-compat.so $(DYNAMIC_DIR)/libc.so \
 	userland/desktop/libbrowser/exports.map tools/build/check-dynamic-elf.py
 	$(LD) $(DYNAMIC_LINK_LDFLAGS) -shared -soname libbrowser.so --hash-style=both -Bsymbolic-functions \
- -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
+ $(DYNAMIC_BROWSER_DEFS) -z now -z relro -z separate-code -z stack-size=0x100000 \
  --version-script=userland/desktop/libbrowser/exports.map \
  $(DYNAMIC_BROWSER_LIBRARY_OBJS) -L$(DYNAMIC_DIR) -l:libvulkan.so -l:libtruetype.so -l:libmedia.so \
- -l:libjpeg-compat.so -l:libpng-compat.so -l:libz-compat.so -l:libgif-compat.so -l:libc.so -o $@
+ -l:libjpeg-compat.so -l:libpng-compat.so -l:libz-compat.so -l:libgif-compat.so -l:libwebp-compat.so -l:libc.so -o $@
 	$(PYTHON) tools/build/check-dynamic-elf.py --machine $(DYNAMIC_ELF_MACHINE) --role shared-library \
  --needed libvulkan.so --needed libtruetype.so --needed libmedia.so --needed libjpeg-compat.so --needed libpng-compat.so \
- --needed libz-compat.so --needed libgif-compat.so --needed libc.so --soname libbrowser.so $@
+ --needed libz-compat.so --needed libgif-compat.so --needed libwebp-compat.so --needed libc.so --soname libbrowser.so $(DYNAMIC_BROWSER_PROVIDERS) $@
 
 # /bin/browser is the shell over libbrowser (ws074-p057): its command line and headless modes (main.c)
 # and its window (shell/), which import the engine through <browser.h>, standard Wayland and Vulkan

@@ -7,8 +7,12 @@
 # own known_hosts file and key, and an empty environment.
 #   sh plan/ws336/tests/sshd-pair-host.sh
 # Last line: sshd-pair-host: PASS or sshd-pair-host: FAIL.  Output under build/tmp/sshd-pair (a fresh run directory).
+# SSH_CRYPTO_INCLUDE=<dir whose compat/crypto/ holds libcrypto-compat's headers> and SSH_CRYPTO_LIB=<what to link for
+# it> build against libcrypto-compat instead of the host's OpenSSL (plan/ws336/tests/compat-host.sh sets both).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
+crypto_include=${SSH_CRYPTO_INCLUDE:-plan/ws336/tests/host-crypto}
+crypto_lib=${SSH_CRYPTO_LIB:--lcrypto}
 cd "$(dirname -- "$0")/../../.."
 root=$(pwd)
 . plan/tools/fresh-out.sh
@@ -31,9 +35,9 @@ for file in userland/base/ssh/ssh-*.c; do
 	esac
 done
 if ! timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-    -fno-omit-frame-pointer -I. -Iuserland/base/ssh -Iplan/ws336/tests/host-crypto plan/ws336/tests/sshd-pair-host.c \
+    -fno-omit-frame-pointer -I. -Iuserland/base/ssh -I"$crypto_include" plan/ws336/tests/sshd-pair-host.c \
     $modules userland/base/ssh/sshd-monitor.c userland/base/ssh/sshd-login.c userland/base/ssh/sshd-child.c \
-    userland/base/ssh/sshd-preauth.c userland/base/ssh/sshd-session.c userland/base/login/verify.c -lcrypto -lcrypt \
+    userland/base/ssh/sshd-preauth.c userland/base/ssh/sshd-session.c userland/base/login/verify.c $crypto_lib -lcrypt \
     -o "$work/sshd-pair" > "$work/build.log" 2>&1; then
 	echo "build failed:"
 	head -30 "$work/build.log"
@@ -43,8 +47,8 @@ fi
 
 # The client of the cases the host's ssh does not send, from the library's client parts.
 if ! timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-    -fno-omit-frame-pointer -I. -Iuserland/base/ssh -Iplan/ws336/tests/host-crypto plan/ws336/tests/sshd-pair-client.c \
-    $modules -lcrypto -o "$work/sshd-pair-client" > "$work/build-client.log" 2>&1; then
+    -fno-omit-frame-pointer -I. -Iuserland/base/ssh -I"$crypto_include" plan/ws336/tests/sshd-pair-client.c \
+    $modules $crypto_lib -o "$work/sshd-pair-client" > "$work/build-client.log" 2>&1; then
 	echo "build of the client failed:"
 	head -30 "$work/build-client.log"
 	echo "sshd-pair-host: FAIL"
@@ -314,6 +318,23 @@ for case in closing user-change service service-change service-request early req
 done
 grep -q 'refused request' "$work/log" && fail "raw: the monitor saw a request it refuses"
 echo "ok raw cases"
+
+# A user name with an escape sequence and a line end (MaxAuthTries 1, two wrong passwords): every process logs the
+# name with '?' for those bytes, and no line of the log starts with anything but a process id.
+base_config | sed 's/^PasswordAuthentication no$/PasswordAuthentication yes/' > "$work/raw-name.config"
+echo "MaxAuthTries 1" >> "$work/raw-name.config"
+start_driver raw-name
+timeout 90 "$work/sshd-pair-client" "$port" "$(printf 'zz\033[2J\nforged')" "$work/client_key" limit-password \
+    > "$work/raw-name.out" 2>&1
+rc=$?
+end_driver raw-name
+[ "$rc" = 0 ] || fail "name: $(cat "$work/raw-name.out")"
+grep -q ' invalid user zz?\[2J?forged$' "$work/log" || fail "name: the account check's line"
+grep -q ' Failed password for zz?\[2J?forged$' "$work/log" || fail "name: the monitor's line"
+grep -q ' too many authentication failures for zz?\[2J?forged from ' "$work/log" || fail "name: the pre-authentication line"
+grep -v -q '^[0-9][0-9]* [0-7] ' "$work/log" && fail "name: a log line that is not the program's: $(grep -v '^[0-9][0-9]* [0-7] ' "$work/log" | head -2)"
+tr -d '\033' < "$work/log" | cmp -s - "$work/log" || fail "name: an escape byte reached the log"
+echo "ok name in the log"
 
 # Nothing the sanitizers found in any process (the children write their reports to the driver's standard error).
 if grep -l 'ERROR: AddressSanitizer\|runtime error:' "$work"/*.driver > /dev/null 2>&1; then

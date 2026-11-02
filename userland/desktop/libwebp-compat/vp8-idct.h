@@ -20,8 +20,10 @@
  * Inverts the WHT of a Y2 block (RFC 6386 14.3, vp8_short_inv_walsh4x4_c):
  * input the 16 dequantized coefficients in raster order; dc[i] receives
  * the DC coefficient of Y block i (raster), (a + 3) >> 3 of the second
- * pass, wrapped to 16 bits.  The intermediate values stay in int32_t
- * (inputs of 16 bits cannot overflow it); ">>" is webpc_asr.
+ * pass, wrapped to 16 bits.  The first pass's results are wrapped to 16
+ * bits as the reference decoder keeps them in shorts (RFC 6386 14.3,
+ * 20.8); a valid stream never reaches the wrap, so the output is the
+ * same as with int32_t intermediates.  ">>" is webpc_asr.
  */
 void webpc_vp8_iwht(const int16_t input[16], int16_t dc[16]);
 

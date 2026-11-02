@@ -14,11 +14,9 @@
 
 #include "sslc-hs.h"
 
-/* The size of the (EC)DHE shared secret of both groups, which is the premaster secret (RFC 8422 5.10; RFC 7748 6.1). */
-#define SSLC_HS12_SHARED_SIZE		32U
-
-/* The size of an uncompressed secp256r1 public key (SEC 1 2.3.3: 0x04, x and y). */
+/* The size of an uncompressed secp256r1 and secp384r1 public key (SEC 1 2.3.3: 0x04, x and y). */
 #define SSLC_HS12_P256_POINT		65U
+#define SSLC_HS12_P384_POINT		97U
 
 /* The first byte of an uncompressed point (SEC 1 2.3.3). */
 #define SSLC_HS12_POINT_UNCOMPRESSED	4U
@@ -26,8 +24,8 @@
 /* The most bytes a ServerKeyExchange's ServerECDHParams take: curve_type, the group and a point of up to 255 bytes (RFC 8422 5.4). */
 #define SSLC_HS12_PARAMS_MAX		(1U + 2U + 1U + 255U)
 
-/* The most bytes of one client message of the flight: its 4-byte header, the length byte and a secp256r1 point (RFC 8422 5.7). */
-#define SSLC_HS12_MESSAGE_MAX		(4U + 1U + SSLC_HS12_P256_POINT)
+/* The most bytes of one client message of the flight: its 4-byte header, the length byte and a secp384r1 point (RFC 8422 5.7). */
+#define SSLC_HS12_MESSAGE_MAX		(4U + 1U + SSLC_HS12_P384_POINT)
 
 /* The extensions a TLS 1.2 ServerHello must not carry: the TLS 1.3 ones (RFC 8446 4.2's table). */
 #define SSLC_HS12_SEEN_FORBIDDEN	(SSLC_SEEN_SUPPORTED_VERSIONS | SSLC_SEEN_KEY_SHARE | SSLC_SEEN_COOKIE)
@@ -54,13 +52,13 @@ static int sslc_hs12_certificate_request(struct sslc_hs *hs, const uint8_t *mess
 static int sslc_hs12_server_hello_done(struct sslc_hs *hs, const uint8_t *message, size_t size, struct sslc_hs_actions *actions);
 
 /* Queues the client's flight: Certificate when asked, ClientKeyExchange, change_cipher_spec, keys, Finished. */
-static int sslc_hs12_client_flight(struct sslc_hs *hs, const uint8_t *shared, struct sslc_hs_actions *actions);
+static int sslc_hs12_client_flight(struct sslc_hs *hs, const uint8_t *shared, size_t shared_size, struct sslc_hs_actions *actions);
 
 /* Takes the server's Finished (RFC 5246 7.4.9). */
 static int sslc_hs12_finished(struct sslc_hs *hs, const uint8_t *message, size_t size, struct sslc_hs_actions *actions);
 
-/* Makes the secp256r1 key pair (once); returns 0, ENOMEM or EIO. */
-static int sslc_hs12_make_p256(struct sslc_hs *hs);
+/* Makes the key pair of group (secp256r1 or secp384r1, once); returns 0, ENOMEM or EIO. */
+static int sslc_hs12_make_ec(struct sslc_hs *hs, uint16_t group);
 
 /* Queues a key action with the record keys given. */
 static int sslc_hs12_queue_keys(struct sslc_hs *hs, struct sslc_hs_actions *actions, enum sslc_hs_action_kind kind, const struct sslc_traffic_keys *keys);
@@ -307,8 +305,9 @@ sslc_hs12_certificate(
 /*
  * Takes the server's ServerKeyExchange: the group and the point it
  * names, and the signature over the two randoms and the parameters by the
- * leaf's key (RFC 8422 5.4).  The secp256r1 key pair is made now when the
- * server chose that group; the shared secret waits for the ServerHelloDone.
+ * leaf's key (RFC 8422 5.4).  The secp256r1 or secp384r1 key pair is made
+ * now when the server chose that group; the shared secret waits for the
+ * ServerHelloDone.
  */
 static int
 sslc_hs12_server_key_exchange(
@@ -344,7 +343,7 @@ sslc_hs12_server_key_exchange(
 		if (exchange.point_size != CRYC_X25519_SIZE)
 			return sslc_hs12_fail(hs, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
 	} else {
-		if (exchange.point_size != SSLC_HS12_P256_POINT)
+		if (exchange.point_size != (exchange.group == SSLC_GROUP_SECP384R1 ? SSLC_HS12_P384_POINT : SSLC_HS12_P256_POINT))
 			return sslc_hs12_fail(hs, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
 		if (exchange.point[0] != SSLC_HS12_POINT_UNCOMPRESSED)
 			return sslc_hs12_fail(hs, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
@@ -372,9 +371,9 @@ sslc_hs12_server_key_exchange(
 	if (error != 0)
 		return sslc_hs12_fail(hs, SSLC_ALERT_BAD_CERTIFICATE, EINVAL);
 
-	/* A server that chose secp256r1 needs a key pair of ours to answer with. */
-	if (exchange.group == SSLC_GROUP_SECP256R1) {
-		error = sslc_hs12_make_p256(hs);
+	/* A server that chose secp256r1 or secp384r1 needs a key pair of ours to answer with. */
+	if (exchange.group == SSLC_GROUP_SECP256R1 || exchange.group == SSLC_GROUP_SECP384R1) {
+		error = sslc_hs12_make_ec(hs, exchange.group);
 		if (error != 0)
 			return sslc_hs12_fail(hs, 0, error);
 	}
@@ -523,7 +522,8 @@ sslc_hs12_server_hello_done(
 	size_t size,
 	struct sslc_hs_actions *actions)
 {
-	uint8_t shared[SSLC_HS12_SHARED_SIZE];
+	uint8_t shared[SSLC_HS_SHARED_MAX];
+	size_t shared_size;
 	int error;
 
 	/* The body is empty. */
@@ -534,16 +534,16 @@ sslc_hs12_server_hello_done(
 	sslc_transcript_update(&hs->transcript, message, size);
 
 	/* The (EC)DHE shared secret with the server's point: the premaster secret (an invalid point is illegal_parameter). */
-	error = sslc_hs_shared_secret(hs, hs->server_group, hs->server_point, hs->server_point_size, shared);
+	error = sslc_hs_shared_secret(hs, hs->server_group, hs->server_point, hs->server_point_size, shared, &shared_size);
 	if (error != 0)
 		return error;
 
 	/* The private keys have done their work. */
 	cryc_wipe(hs->x25519_private, sizeof(hs->x25519_private));
-	cryc_wipe(hs->p256_private, sizeof(hs->p256_private));
+	cryc_wipe(hs->ec_private, sizeof(hs->ec_private));
 
 	/* The client's flight; the premaster secret is spent once the master secret is made. */
-	error = sslc_hs12_client_flight(hs, shared, actions);
+	error = sslc_hs12_client_flight(hs, shared, shared_size, actions);
 	cryc_wipe(shared, sizeof(shared));
 	if (error != 0)
 		return error;
@@ -566,6 +566,7 @@ static int
 sslc_hs12_client_flight(
 	struct sslc_hs *hs,
 	const uint8_t *shared,
+	size_t shared_size,
 	struct sslc_hs_actions *actions)
 {
 	uint8_t message[SSLC_HS12_MESSAGE_MAX];
@@ -594,9 +595,9 @@ sslc_hs12_client_flight(
 	/* The ClientKeyExchange carries our public point of the group the server chose. */
 	point = hs->x25519_public;
 	point_size = CRYC_X25519_SIZE;
-	if (hs->server_group == SSLC_GROUP_SECP256R1) {
-		point = hs->p256_public;
-		point_size = SSLC_HS12_P256_POINT;
+	if (hs->server_group == SSLC_GROUP_SECP256R1 || hs->server_group == SSLC_GROUP_SECP384R1) {
+		point = hs->ec_public;
+		point_size = hs->ec_public_size;
 	}
 	error = sslc_msg_write_client_key_exchange(point, point_size, message, sizeof(message), &written);
 	if (error != 0)
@@ -617,7 +618,7 @@ sslc_hs12_client_flight(
 	}
 
 	/* The master secret from the premaster secret. */
-	error = sslc_tls12_master(hs->suite->hash, hs->extended_master_secret, shared, SSLC_HS12_SHARED_SIZE, context, context_size, hs->master);
+	error = sslc_tls12_master(hs->suite->hash, hs->extended_master_secret, shared, shared_size, context, context_size, hs->master);
 	if (error != 0)
 		return sslc_hs12_fail(hs, 0, error);
 
@@ -649,9 +650,14 @@ sslc_hs12_client_flight(
 		return sslc_hs12_fail(hs, 0, error);
 	error = sslc_msg_write_finished(verify_data, sizeof(verify_data), message, sizeof(message), &written);
 	cryc_wipe(verify_data, sizeof(verify_data));
-	if (error != 0)
+	if (error != 0) {
+		cryc_wipe(message, sizeof(message));
 		return sslc_hs12_fail(hs, 0, error);
+	}
 	error = sslc_hs_queue_message(hs, actions, message, written);
+
+	/* The Finished is copied into the actions; the local copy of verify_data goes. */
+	cryc_wipe(message, sizeof(message));
 	if (error != 0)
 		return sslc_hs12_fail(hs, 0, error);
 
@@ -707,36 +713,41 @@ sslc_hs12_finished(
 	return 0;
 }
 
-/* Makes the secp256r1 key pair (once). */
+/* Makes the key pair of group (once; a TLS 1.2 handshake has one ServerKeyExchange). */
 static int
-sslc_hs12_make_p256(
-	struct sslc_hs *hs)
+sslc_hs12_make_ec(
+	struct sslc_hs *hs,
+	uint16_t group)
 {
+	enum cryc_curve_id curve;
 	int error;
 
 	/* Made once per handshake. */
-	if (hs->has_p256)
+	if (hs->has_ec)
 		return 0;
 
 	/* The curve, on the heap (it is about 4 KiB). */
+	curve = group == SSLC_GROUP_SECP384R1 ? CRYC_CURVE_P384 : CRYC_CURVE_P256;
 	if (hs->ec == NULL) {
 		hs->ec = malloc(sizeof(*hs->ec));
 		if (hs->ec == NULL)
 			return ENOMEM;
-
-		/* Prepared for arithmetic. */
-		error = cryc_ecp_init(hs->ec, CRYC_CURVE_P256);
-		if (error != 0)
-			return error;
 	}
 
+	/* Prepared for arithmetic. */
+	error = cryc_ecp_init(hs->ec, curve);
+	if (error != 0)
+		return error;
+
 	/* The key pair from the configuration's random source. */
-	error = cryc_ecc_keygen(hs->ec, hs->p256_private, hs->p256_public, hs->config->random, hs->config->random_context);
+	error = cryc_ecc_keygen(hs->ec, hs->ec_private, hs->ec_public, hs->config->random, hs->config->random_context);
 	if (error != 0)
 		return EIO;
 
-	/* Succeeded: has_p256 tells the shared secret and the ClientKeyExchange that the pair exists. */
-	hs->has_p256 = 1;
+	/* Succeeded: has_ec tells the shared secret and the ClientKeyExchange that the pair exists. */
+	hs->ec_group = group;
+	hs->ec_public_size = 1U + 2U * hs->ec->size;
+	hs->has_ec = 1;
 	return 0;
 }
 

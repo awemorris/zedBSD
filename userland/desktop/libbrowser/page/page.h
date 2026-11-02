@@ -23,6 +23,7 @@
 #include "html/html.h"
 #include "image/image.h"
 #include "layout/layout.h"
+#include "net/net.h"
 #include "paint/paint.h"
 #include "text/text.h"
 
@@ -128,6 +129,13 @@ struct page {
 	int previous_laid_out;
 	struct paint_list paint;
 	int painted;
+	/* The number of the display list painted last, which no other list of any page has (a view of its own threads takes each into a scene). */
+	uint64_t paint_generation;
+	/* Whether the display list painted last was taken into a scene (the page's list is empty until it paints again). */
+	int paint_taken;
+	/* Whether its animation frames wait for the presents of a drawing thread (frames_presented), and how many came. */
+	int frames_presented;
+	uint64_t frames;
 	char *base;
 	double now;
 	uint32_t styled_generation;
@@ -143,6 +151,8 @@ struct page {
 	struct wb_vector images;
 	/* The <img> elements (heap roots) whose load or error event is still to be fired (struct page_image_watch *). */
 	struct wb_vector image_watches;
+	/* The locations (char *) of the http and https images a work lent to the style thread met new, fetched by the page's thread when the work came back. */
+	struct wb_vector images_deferred;
 	struct net_loader *loader;
 	struct browser_instance *instance;
 	uint32_t images_generation;
@@ -172,6 +182,10 @@ struct page {
 	int load_pending;
 	/* The document came with Cache-Control: no-store (the view keeps no copy of it for Back and Forward). */
 	int no_store;
+	/* The document's page is showing: set by its pageshow, cleared by its pagehide (HTML's page showing). */
+	int showing;
+	/* Why the last load of a location failed over TLS ("" when it did not), for the load callback. */
+	char failure_reason[NET_TLS_REASON_MAX];
 	/* Defer nested ready-script drains while the outer insertion-order loop runs. */
 	int scripts_running;
 	struct wb_vector fonts;
@@ -241,6 +255,10 @@ int page_dump_dom(const struct page *page, struct wb_buffer *out);
 int page_dump_style(struct page *page, struct wb_buffer *out);
 int page_open_fonts(struct page *page, const struct text_font_paths *paths);
 int page_layout(struct page *page, int width, int height);
+int page_lend(struct page *page, vm_lend_work work, void *argument);
+int page_lend_layout(struct page *page, struct layout_tree *tree, struct css_engine *engine, struct dom_document *document, int width, int height,
+    layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
+int page_lend_paint(struct page *page, struct paint_list *list, const struct layout_tree *tree);
 int page_update_styles(struct page *page);
 uint32_t page_generation(const struct page *page);
 int page_load_resources(struct page *page);
@@ -308,6 +326,7 @@ int page_focus_move(struct page *page, int backward);
 int page_focus_field(struct page *page, const char *token);
 int page_window_focus(struct page *page, int focused);
 int page_page_transition(struct page *page, const char *type, int persisted);
+int page_unload(struct page *page);
 int page_activate_focused(struct page *page, struct wb_buffer *href, int *found);
 int page_click_control(struct page *page, int x, int y, struct wb_buffer *href, int *found);
 int page_focus_pressable(struct page *page);
@@ -346,6 +365,7 @@ int page_resolve_file(const char *base, const char *href, struct wb_buffer *out)
 int page_resolve_location(const char *base, const char *href, struct wb_buffer *out);
 int page_record_visited(struct page *page, const struct wb_buffer *url);
 void page_images_init(struct page *page);
+int page_images_fetch_deferred(struct page *page);
 void page_set_loader(struct page *page, struct net_loader *loader);
 void page_set_instance(struct page *page, struct browser_instance *instance);
 struct browser_instance *page_instance(struct page *page);
@@ -362,11 +382,15 @@ int page_net_is_remote(const char *location);
 int page_net_fetch(struct net_loader *loader, const char *location, page_request_done done, void *context, struct net_request **request);
 void page_net_cancel(struct net_request *request);
 int page_net_result(const struct net_request *request, const unsigned char **bytes, size_t *length, const char **url);
+const char *page_net_reason(const struct net_request *request);
 int page_load_images(struct page *page);
 void page_set_viewport(struct page *page, int width, int height);
 void page_set_color_scheme(struct page *page, int dark);
 void page_set_fonts(struct page *page, const struct text_font_paths *paths);
 void page_set_font_companions(struct page *page, const struct text_font_companions *companions);
+void page_set_frames_presented(struct page *page, int presented);
+void page_frame_presented(struct page *page);
+int page_frame_count(void *context, uint64_t *count);
 int page_sticky_sync(struct page *page, layout_unit scroll_y);
 void page_set_scroll(struct page *page, double x, double y);
 
@@ -406,7 +430,7 @@ struct dom_node *page_child_element_at(void *context, struct bind_window *window
 const struct bind_storage_calls *page_storage_calls(void);
 void page_storage_release(struct wb_vector *areas);
 void page_set_console(struct page *page, page_console console, void *context);
-const char *page_failure_reason(void);
+const char *page_failure_reason(const struct page *page);
 const struct img_bitmap *page_image_of(void *context, const struct dom_element *element);
 int page_svg_render(const struct dom_element *svg, struct img_bitmap *bitmap, int width, int height);
 int page_svg_decode(struct page *page, const unsigned char *bytes, size_t length, struct img_bitmap *bitmap, int width, int height);
@@ -436,6 +460,8 @@ int page_media_click(struct page *page, struct dom_element *element, int x, int 
 int page_fetch(struct net_cookie_jar *jar, const char *base, const char *href, struct wb_buffer *bytes, struct wb_buffer *final_url);
 /* Fresh response storage receives owned metadata/body, or an empty response on failure. */
 int page_fetch_response(struct net_cookie_jar *jar, const char *base, const char *href, struct net_response *response);
+int page_fetch_now(struct page *page, const char *href, int kind, struct wb_buffer *bytes, struct wb_buffer *final_url);
+int page_fetch_response_now(struct page *page, const char *location, int kind, struct net_response *response);
 /* Declared MIME essence selects a supported native document kind; failures preserve content. */
 int page_document_content(const char *mime, size_t length, enum dom_document_content *content);
 

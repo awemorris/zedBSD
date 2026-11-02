@@ -45,7 +45,7 @@ if [ -z "$names" ]; then
 	exit 2
 fi
 
-host_flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -DWB_OS_THREAD_NAMES=1 -fsanitize=address,undefined -fno-omit-frame-pointer"
+host_flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer"
 host_libs="-lpthread -ldl -lm"
 win_cc=$LLVM_MINGW/bin/x86_64-w64-mingw32-clang
 win_flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE

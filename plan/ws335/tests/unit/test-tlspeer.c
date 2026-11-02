@@ -2208,7 +2208,7 @@ test_breaks(void)
 
 	/* A config out of range. */
 	tlspeer_config_init(&config, SSLC_TLS13, &pki);
-	config.group = SSLC_GROUP_SECP384R1;
+	config.group = 0x0019;
 	CHECK(tlspeer_new(&peer, &config) == EINVAL && peer == NULL);
 	config.group = SSLC_GROUP_X25519;
 	config.suite = 0x1234;

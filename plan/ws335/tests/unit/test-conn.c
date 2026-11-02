@@ -2767,6 +2767,26 @@ test_key_update(void)
 		bench_free(bench);
 	}
 
+	/* After our close_notify a KeyUpdate that asks for an answer gets none: nothing more goes out, the data is still read. */
+	bench = connected13();
+	if (bench != NULL) {
+		int both;
+		unsigned wants;
+
+		CHECK(sslc_conn_shutdown(&bench->conn, &both, &wants) == 0);
+		CHECK((bench->conn.flags & SSLC_CONN_CLOSE_SENT) != 0U);
+		before = bench->pipe.sent_used;
+		CHECK(tlspeer_send_key_update(bench->peer, 1) == 0);
+		pipe_seal(&bench->pipe);
+		pattern(data, sizeof(data), 5U);
+		CHECK(tlspeer_send_data(bench->peer, data, sizeof(data)) == 0);
+		pipe_seal(&bench->pipe);
+		read_exact(bench, data, sizeof(data), 1000U);
+		CHECK(bench->pipe.sent_used == before);
+		CHECK((bench->conn.flags & SSLC_CONN_FAILED) == 0U);
+		bench_free(bench);
+	}
+
 	/* With the transport full the answer waits: the read says EAGAIN to write, and gives its data after the answer is sent. */
 	bench = connected13();
 	if (bench != NULL) {
@@ -2995,6 +3015,9 @@ make_record13(
 	return 5U + length + 16U;
 }
 
+/* When not 0, manual_server splits the message of that record (a protected one) in two with the compatibility record between. */
+static size_t manual_split;
+
 /*
  * Plays the server of a TLS 1.3 handshake by hand: the peer makes the
  * messages and keys, and this puts them into records, with one record made
@@ -3048,6 +3071,14 @@ manual_server(
 			stream[used + 4U] = (uint8_t)(item.size & 0xffU);
 			memcpy(stream + used + 5U, item.data, item.size);
 			used += 5U + item.size;
+		} else if (manual_split != 0U && records + 1U == manual_split && item.size >= 2U) {
+			/* The first half, the unprotected compatibility record, the second half. */
+			used += make_record13(&bench->peer->write_keys[item.epoch], sequence[item.epoch], T_HANDSHAKE, item.data, item.size / 2U, 0, stream + used);
+			sequence[item.epoch]++;
+			memcpy(stream + used, "\024\003\003\000\001\001", 6);
+			used += 6U;
+			used += make_record13(&bench->peer->write_keys[item.epoch], sequence[item.epoch], T_HANDSHAKE, item.data + item.size / 2U, item.size - item.size / 2U, 0, stream + used);
+			sequence[item.epoch]++;
 		} else {
 			used += make_record13(&bench->peer->write_keys[item.epoch], sequence[item.epoch], T_HANDSHAKE, item.data, item.size, 0, stream + used);
 			sequence[item.epoch]++;
@@ -3087,6 +3118,17 @@ test_manual(void)
 	if (bench != NULL) {
 		CHECK(result == 0);
 		CHECK((bench->conn.flags & SSLC_CONN_CONNECTED) != 0U);
+		bench_free(bench);
+	}
+
+	/* The compatibility record inside the Certificate split over two records: unexpected_message (RFC 8446 5.1), and whole between messages it is dropped. */
+	manual_split = 3;
+	bench = manual_server(0, 0, NULL, 0, &result);
+	manual_split = 0;
+	if (bench != NULL) {
+		CHECK(result == EPROTO);
+		CHECK(bench->conn.reason == SSL_R_UNEXPECTED_MESSAGE);
+		check_wire_alert(bench, A_UNEXPECTED_MESSAGE);
 		bench_free(bench);
 	}
 

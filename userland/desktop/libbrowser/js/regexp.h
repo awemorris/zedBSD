@@ -37,12 +37,21 @@ struct js_regexp_program;
 
 /*
  * The string a program runs over: UTF-16 code units, or Latin-1 bytes
- * (exactly one of the two is not NULL, unless the string is empty).
+ * (exactly one of the two is not NULL, unless the string is empty), and
+ * who is asked whether a long match goes on.
  */
 struct js_regexp_input {
 	const uint16_t *units;
 	const unsigned char *latin1;
 	size_t length;
+
+	/*
+	 * Called now and then while a match runs (NULL for never): a status
+	 * other than 0 ends the match with that status (the caller's task was
+	 * asked to end).
+	 */
+	int (*poll)(void *context);
+	void *poll_context;
 };
 
 /* Compiling (regexp.c). */

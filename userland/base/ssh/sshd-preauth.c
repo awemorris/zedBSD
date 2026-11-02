@@ -39,8 +39,12 @@
 #include "ssh-auth.h"
 #include "sshd-child.h"
 
-/* The most bytes one read of the connection takes. */
-#define PREAUTH_READ_CHUNK	16384U
+/*
+ * The most bytes one read of the connection takes: the room the packet
+ * layer keeps beside a packet not yet whole (SSH_PACKET_INPUT_MAX), so a
+ * read always fits.
+ */
+#define PREAUTH_READ_CHUNK	4096U
 
 /* The longest list of methods offered: "publickey,password" and its NUL. */
 #define PREAUTH_METHODS_MAX	32U
@@ -89,6 +93,7 @@ static int preauth_fail(struct preauth *preauth);
 static int preauth_reply(struct preauth *preauth, const struct ssh_buf *message);
 static int preauth_hand_over(struct preauth *preauth);
 static void preauth_exit(struct preauth *preauth, int status);
+static void preauth_log_text(const char *text, char *out, size_t size);
 
 /*
  * Runs the pre-authentication process (sshd started with
@@ -707,10 +712,14 @@ preauth_counted(
 	struct preauth *preauth,
 	int query)
 {
+	char shown[SSH_USER_MAX + 1];
+
 	/* Ends the connection at the limit. */
 	if (preauth->tries >= preauth->child.config.max_auth_tries ||
 	    (query && preauth->granted_queries >= preauth->child.config.max_auth_tries)) {
-		syslog(LOG_NOTICE, "too many authentication failures for %.64s from %.63s", preauth->user, preauth->child.peer);
+		/* Logs the end with the user the client named, as the log may show it. */
+		preauth_log_text(preauth->user, shown, sizeof(shown));
+		syslog(LOG_NOTICE, "too many authentication failures for %.64s from %.63s", shown, preauth->child.peer);
 		ssh_transport_disconnect(&preauth->transport, SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE, "Too many authentication failures");
 		return EACCES;
 	}
@@ -859,4 +868,34 @@ preauth_exit(
 		(void)sshd_child_flush(&preauth->transport);
 	ssh_transport_free(&preauth->transport);
 	_exit(status);
+}
+
+/*
+ * Copies text into out, of size bytes, for a line of the log: every byte
+ * that is not printable ASCII (a control byte, DEL, or a byte of a
+ * character outside ASCII) becomes '?', so that a name the client chose cannot
+ * end the line, start a forged one, or send a terminal that shows the log
+ * a control sequence.  A longer text is cut to size - 1 bytes.
+ */
+static void
+preauth_log_text(
+	const char *text,
+	char *out,
+	size_t size)
+{
+	size_t index;
+	unsigned char byte;
+
+	/* Copies the text up to the room, replacing what is not printable. */
+	for (index = 0;
+	     index + 1U < size && text[index] != '\0';
+	     index++) {
+		byte = (unsigned char)text[index];
+		if (byte < 0x20U || byte > 0x7eU)
+			byte = '?';
+		out[index] = (char)byte;
+	}
+
+	/* Ends the copy as a string. */
+	out[index] = '\0';
 }

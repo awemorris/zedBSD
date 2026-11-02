@@ -2177,6 +2177,11 @@ array_get(
 	struct vm_cell *object_root;
 	int status;
 
+	/* An element of a walk that may be long: a task asked to end stops it. */
+	status = vm_heap_count_step(realm->heap);
+	if (status != 0)
+		return status;
+
 	/* Through the chain. */
 	object_root = vm_value_as_cell(object);
 	status = vm_heap_add_root(realm->heap, &object_root);
@@ -2199,6 +2204,11 @@ array_set(
 	struct vm_cell *value_root;
 	int is_cell;
 	int status;
+
+	/* An element of a walk that may be long: a task asked to end stops it. */
+	status = vm_heap_count_step(realm->heap);
+	if (status != 0)
+		return status;
 
 	/* Strictly. */
 	object_root = vm_value_as_cell(object);
@@ -2794,6 +2804,13 @@ array_merge_sort(
 				status = array_compare(realm, comparator, items[left], items[right], &order);
 				if (status != 0)
 					return status;
+
+				/* A task asked to end stops the sort (a comparator in script stops at its own entry). */
+				status = vm_heap_count_step(realm->heap);
+				if (status != 0)
+					return status;
+
+				/* The smaller goes out first; equal ones keep their order. */
 				if (order <= 0) {
 					scratch[out] = items[left];
 					left++;

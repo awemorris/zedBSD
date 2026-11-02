@@ -87,7 +87,7 @@ for name in win64 winarm64; do
 	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" flags |
 	    sed "s/'/'\\\\''/g; s/^\([A-Z0-9_]*\)=\(.*\)$/\1='\2'/")"
 	archives="$build/obj/libtruetype.a $build/obj/libpng-compat.a $build/obj/libjpeg-compat.a
-		$build/obj/libgif-compat.a $build/obj/libz-compat.a"
+		$build/obj/libgif-compat.a $build/obj/libz-compat.a $build/obj/libwebp-compat.a"
 	"${WIN32_TOOL_PREFIX}nm" -u $archives 2> /dev/null |
 	    awk 'NF == 2 { print $2 } NF == 1 && $1 !~ /:$/ { print $1 }' | sed 's/^__imp_//' |
 	    sort -u > "$out/undefined-$name.txt"

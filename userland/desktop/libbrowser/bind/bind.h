@@ -277,6 +277,8 @@ struct bind_host {
 	void (*scroll_to)(void *context, double x, double y);
 	/* An animation frame is about to run its callbacks: the rendering update before them happens (may be NULL). */
 	void (*rendering)(void *context);
+	/* How many frames were presented, when the animation frames wait for them: 1 and the count, or 0 when they come by the clock (may be NULL: by the clock). */
+	int (*frame_count)(void *context, uint64_t *count);
 	int (*node_inserted)(void *context, struct dom_node *node);
 	int (*checkpoint)(void *context);
 	/* Starts a request; done is called once, from here or later, and *handle names it for request_cancel. */
@@ -369,6 +371,8 @@ char *bind_take_navigation(struct bind_window *window, int *replace);
 int bind_navigation_pending(const struct bind_window *window);
 int bind_run_script_source(struct bind_window *window, const uint16_t *source, size_t length, const char *name, int known_inline);
 int bind_checkpoint(struct bind_window *window);
+void bind_window_terminated(struct bind_window *window);
+int bind_window_was_terminated(const struct bind_window *window);
 void bind_report_exception(struct bind_window *window, vm_value exception);
 void bind_report_exception_at(struct bind_window *window, vm_value exception, unsigned line, unsigned column);
 void bind_console(struct bind_window *window, int level, const char *text);

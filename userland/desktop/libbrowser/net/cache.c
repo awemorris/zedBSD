@@ -50,12 +50,12 @@
  */
 
 #include "net/net.h"
+#include "base/thread.h"
 #include "base/os-time.h"
 #include "storage/queue.h"
 #include "storage/records.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,7 +95,7 @@ struct cache_entry {
  * written is when the record was last queued.
  */
 struct net_cache {
-	pthread_mutex_t lock;
+	struct wb_mutex lock;
 	struct wb_storage_queue *queue;
 	struct cache_entry *entries;
 	size_t count;
@@ -148,7 +148,11 @@ net_cache_open(
 		return ENOMEM;
 
 	/* Its lock, its storage and its limit. */
-	pthread_mutex_init(&made->lock, NULL);
+	error = wb_mutex_init(&made->lock);
+	if (error != 0) {
+		free(made);
+		return error;
+	}
 	made->queue = queue;
 	made->limit = limit;
 	made->written = cache_now();
@@ -185,7 +189,7 @@ net_cache_close(
 		cache_write_index(cache);
 
 	/* Then the lock and the index. */
-	pthread_mutex_destroy(&cache->lock);
+	wb_mutex_destroy(&cache->lock);
 	free(cache->entries);
 	free(cache);
 }
@@ -229,11 +233,11 @@ net_cache_read(
 		return 0;
 
 	/* The index decides whether the storage is asked at all. */
-	pthread_mutex_lock(&cache->lock);
+	wb_mutex_lock(&cache->lock);
 
 	index = cache_find(cache, key);
 
-	pthread_mutex_unlock(&cache->lock);
+	wb_mutex_unlock(&cache->lock);
 
 	/* A URL the index does not list is not kept. */
 	if (index == (size_t)-1)
@@ -251,14 +255,14 @@ net_cache_read(
 	if (error != 0 || !present) {
 		wb_buffer_clear(record);
 
-		pthread_mutex_lock(&cache->lock);
+		wb_mutex_lock(&cache->lock);
 
 		index = cache_find(cache, key);
 		if (index != (size_t)-1)
 			cache_drop(cache, index, error != 0);
 		cache_write_index(cache);
 
-		pthread_mutex_unlock(&cache->lock);
+		wb_mutex_unlock(&cache->lock);
 
 		/* Succeeded: the cache has no such response. */
 		return 0;
@@ -269,14 +273,14 @@ net_cache_read(
 	if (error != 0) {
 		wb_buffer_clear(record);
 
-		pthread_mutex_lock(&cache->lock);
+		wb_mutex_lock(&cache->lock);
 
 		index = cache_find(cache, key);
 		if (index != (size_t)-1)
 			cache_drop(cache, index, 1);
 		cache_write_index(cache);
 
-		pthread_mutex_unlock(&cache->lock);
+		wb_mutex_unlock(&cache->lock);
 
 		/* Succeeded: the cache has no such response. */
 		return 0;
@@ -289,7 +293,7 @@ net_cache_read(
 	}
 
 	/* The response is used now; the index record follows at most once in a while. */
-	pthread_mutex_lock(&cache->lock);
+	wb_mutex_lock(&cache->lock);
 
 	index = cache_find(cache, key);
 	if (index != (size_t)-1) {
@@ -299,7 +303,7 @@ net_cache_read(
 			cache_write_index(cache);
 	}
 
-	pthread_mutex_unlock(&cache->lock);
+	wb_mutex_unlock(&cache->lock);
 
 	/* Succeeded: the record is the URL's response. */
 	*found = 1;
@@ -347,7 +351,7 @@ net_cache_store(
 	}
 
 	/* The index and the queue change together. */
-	pthread_mutex_lock(&cache->lock);
+	wb_mutex_lock(&cache->lock);
 
 	/* A record beyond the limit is not kept; the URL's older one is stale now. */
 	if (record.length > cache->limit) {
@@ -357,7 +361,7 @@ net_cache_store(
 			cache_write_index(cache);
 		}
 
-		pthread_mutex_unlock(&cache->lock);
+		wb_mutex_unlock(&cache->lock);
 
 		wb_buffer_release(&record);
 		return EFBIG;
@@ -373,7 +377,7 @@ net_cache_store(
 		/* Whatever the queue made room by dropping is not in the index record yet. */
 		cache->dirty = 1;
 
-		pthread_mutex_unlock(&cache->lock);
+		wb_mutex_unlock(&cache->lock);
 
 		wb_buffer_release(&record);
 		return error;
@@ -394,7 +398,7 @@ net_cache_store(
 		cache_evict(cache, key, UINT64_MAX, CACHE_ENTRY_MAX - 1U);
 		error = cache_push(cache, key, record.length, entry->stored, now);
 		if (error != 0) {
-			pthread_mutex_unlock(&cache->lock);
+			wb_mutex_unlock(&cache->lock);
 
 			wb_buffer_release(&record);
 			return error;
@@ -406,7 +410,7 @@ net_cache_store(
 	cache_evict(cache, key, cache->limit, CACHE_ENTRY_MAX);
 	cache_write_index(cache);
 
-	pthread_mutex_unlock(&cache->lock);
+	wb_mutex_unlock(&cache->lock);
 
 	/* Succeeded: the response is queued and indexed. */
 	wb_buffer_release(&record);

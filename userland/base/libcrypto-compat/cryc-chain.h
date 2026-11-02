@@ -98,7 +98,8 @@ struct cryc_store_entry {
  * other threads).  The store owns the entries and their DER.
  *
  * distrusted is a malloc'd array of distrusted_capacity SHA-256 values
- * (of a certificate's whole DER) of which distrusted_count are used, at
+ * (of a certificate's tbsCertificate, or of its whole DER when it does not
+ * parse) of which distrusted_count are used, at
  * most CRYC_STORE_MAX, no value twice; NULL with both counts 0 while
  * empty.  Only the system's distrusted certificates go there (Windows'
  * Disallowed stores, through cryc_store_add_system); the same lock
@@ -170,11 +171,14 @@ void cryc_store_free(struct cryc_store *store);
 int cryc_store_add_der(struct cryc_store *store, const uint8_t *der, size_t size);
 
 /*
- * Marks one certificate as distrusted, from its DER (only its SHA-256 is
- * kept; the DER need not parse).  A path that contains a certificate with
- * that SHA-256, as a trust anchor or as a certificate the server sent, is
- * not valid (cryc_chain_verify); the certificate is not removed from the
- * entries.  A value already marked is not marked again and is not an
+ * Marks one certificate as distrusted, from its DER: only a SHA-256 is
+ * kept, of its tbsCertificate when the DER parses (what the issuer
+ * signed, so a copy whose signature is encoded otherwise, as an ECDSA
+ * (r, n - s) is, carries the same mark) and of the whole DER when it does
+ * not.  A path that contains a certificate whose tbsCertificate or whole
+ * DER has a marked SHA-256, as a trust anchor or as a certificate the
+ * server sent, is not valid (cryc_chain_verify); the certificate is not
+ * removed from the entries.  A value already marked is not marked again and is not an
  * error.  Returns 0; EINVAL when size is 0; ENOBUFS when CRYC_STORE_MAX
  * values are marked; ENOMEM.
  */

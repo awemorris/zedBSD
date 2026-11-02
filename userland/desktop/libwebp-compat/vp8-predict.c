@@ -73,11 +73,13 @@ webpc_vp8_predict_block(
 	if (size != 8U && size != 16U)
 		return;
 
-	/* The DC and TM modes need the neighbours' arithmetic. */
+	/* DC averages the neighbours. */
 	if (mode == WEBPC_VP8_DC_PRED) {
 		predict_dc(size, edges, dst, stride);
 		return;
 	}
+
+	/* TM extends the gradient of the neighbours. */
 	if (mode == WEBPC_VP8_TM_PRED) {
 		predict_tm(size, edges, dst, stride);
 		return;
@@ -91,6 +93,8 @@ webpc_vp8_predict_block(
 				row_start[column] = edges->above[column];
 			}
 		}
+
+		/* The block is written. */
 		return;
 	}
 
@@ -99,6 +103,8 @@ webpc_vp8_predict_block(
 		for (row = 0; row < size; row++) {
 			predict_fill(dst + (ptrdiff_t)row * stride, size, edges->left[row]);
 		}
+
+		/* The block is written. */
 		return;
 	}
 
@@ -141,6 +147,8 @@ webpc_vp8_predict_subblock(
 	for (index = 0; index < 4; index++) {
 		edge[PREDICT_EDGE_LEFT_LAST + index] = left[3 - index];
 	}
+
+	/* The corner and the row above follow the left column. */
 	edge[PREDICT_EDGE_CORNER] = above[-1];
 	for (index = 0; index < 8; index++) {
 		edge[PREDICT_EDGE_ABOVE_FIRST + index] = above[index];
@@ -497,9 +505,13 @@ predict_sub_ld(
 				value = predict_smooth3(edge, PREDICT_EDGE_ABOVE_FIRST + row + column + 1);
 			} else {
 				/* The last pixel's right neighbour does not exist, so above[7] repeats. */
-				value = predict_avg3(edge[PREDICT_EDGE_ABOVE_FIRST + 6],
-				    edge[PREDICT_EDGE_ABOVE_FIRST + 7], edge[PREDICT_EDGE_ABOVE_FIRST + 7]);
+				value = predict_avg3(
+				    edge[PREDICT_EDGE_ABOVE_FIRST + 6],
+				    edge[PREDICT_EDGE_ABOVE_FIRST + 7],
+				    edge[PREDICT_EDGE_ABOVE_FIRST + 7]);
 			}
+
+			/* Stores the pixel. */
 			pixels[row][column] = (uint8_t)value;
 		}
 	}

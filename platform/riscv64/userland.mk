@@ -94,6 +94,8 @@ DYNAMIC_ELF_MACHINE := riscv64
 # libvulkan's thread-local variables go through the loader's __tls_get_addr (no TLS descriptors here).
 DYNAMIC_VULKAN_DEFS := -z undefs
 DYNAMIC_VULKAN_PROVIDERS = --provider $(DYNAMIC_DIR)/libwayland-client.so --provider $(DYNAMIC_DIR)/libc.so
+DYNAMIC_BROWSER_DEFS := -z undefs
+DYNAMIC_BROWSER_PROVIDERS = $(foreach l,libvulkan libtruetype libmedia libjpeg-compat libpng-compat libz-compat libgif-compat libwebp-compat libc,--provider $(DYNAMIC_DIR)/$(l).so)
 include platform/common/userland-dynamic.mk
 
 # The runtime's test objects the root carries on every LP64 processor: a

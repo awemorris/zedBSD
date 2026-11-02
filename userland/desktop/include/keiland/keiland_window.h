@@ -234,6 +234,54 @@ int kl_window_present_parts(struct kl_window *window, const uint32_t *pixels, si
 #define KL_PACING_FRAME	2U
 int kl_window_set_pacing(struct kl_window *window, unsigned flags, unsigned max_fps);
 int kl_window_frame_wait(const struct kl_window *window, uint64_t now_us);
+
+/*
+ * KL_VERSION 109: a new size shown by another thread of the program.  By
+ * default the window acknowledges the compositor's configure as it
+ * arrives, so a frame of the old size committed after it would claim the
+ * new one.  A window that defers them (kl_window_set_configure_deferred)
+ * leaves a configure that changes the size (or the maximized state)
+ * waiting: its KL_WINDOW_RESIZE comes as before, kl_window_configure_take
+ * gives its serial and size, and kl_window_configure_ack acknowledges it
+ * just before the first frame of that size is committed.  The thread that
+ * draws asks the window's thread for the acknowledgement (kl_window_post)
+ * and presents once it is done; the requests then reach the compositor in
+ * that order.  A configure that changes no size while none waits, and the
+ * window's first, are acknowledged at once; one that changes no size
+ * while another waits is acknowledged with it.  A size that changed again
+ * after the take waits for its own take and acknowledgement.  Turning the
+ * deferral off acknowledges what waits.
+ *
+ * The three are called on the window's thread (the application's thread
+ * for a window of an application).  set: 0, EINVAL, or ENOTSUP for the
+ * desktop's surface.  take: 0 with the configure, EAGAIN when none waits
+ * (always on a system without configures, Windows), or EINVAL.  ack: 0,
+ * EALREADY when that configure was acknowledged already, or EINVAL for a
+ * serial other than the last take's.
+ */
+struct kl_window_configure {
+	uint32_t serial;
+	uint32_t width;
+	uint32_t height;
+};
+int kl_window_set_configure_deferred(struct kl_window *window, int deferred);
+int kl_window_configure_take(struct kl_window *window, struct kl_window_configure *configure);
+int kl_window_configure_ack(struct kl_window *window, uint32_t serial);
+
+/*
+ * KL_VERSION 109: the size while the program cannot take its inputs.  On
+ * Windows the system's modal loop of a resize (a drag of the frame's edge,
+ * WM_ENTERSIZEMOVE to WM_EXITSIZEMOVE) keeps the window's thread inside
+ * the system, and the KL_WINDOW_RESIZE comes only at its end.  A window
+ * with a callback hears every size the content takes meanwhile, on the
+ * window's thread inside the loop, and kl_window_size reports it; the
+ * KL_WINDOW_RESIZE at the end still comes.  The callback only hands the
+ * size on (to the thread that draws) and calls no other kl_window_*
+ * function.  A NULL callback stops it.  On Wayland the inputs are taken
+ * throughout a resize and the callback is never called.
+ */
+typedef void (*kl_window_resize_fn)(void *data, uint32_t width, uint32_t height);
+void kl_window_on_resize(struct kl_window *window, kl_window_resize_fn callback, void *data);
 int kl_window_see_through(const struct kl_window *window);
 struct wl_display *kl_window_display(const struct kl_window *window);
 struct wl_surface *kl_window_surface(const struct kl_window *window);

@@ -97,6 +97,7 @@ webpc_vp8_iwht(
 		difference_inner = (int32_t)input[index + 4] - (int32_t)input[index + 8];
 		difference_outer = (int32_t)input[index] - (int32_t)input[index + 12];
 
+		/* Each output is the wrapped combination of the column's four values. */
 		middle[index] = webpc_wrap16(sum_outer + sum_inner);
 		middle[index + 4] = webpc_wrap16(difference_inner + difference_outer);
 		middle[index + 8] = webpc_wrap16(sum_outer - sum_inner);
@@ -110,6 +111,7 @@ webpc_vp8_iwht(
 		difference_inner = middle[index * 4 + 1] - middle[index * 4 + 2];
 		difference_outer = middle[index * 4] - middle[index * 4 + 3];
 
+		/* Each output is the rounded, wrapped combination of the row's four values. */
 		value = webpc_asr(sum_outer + sum_inner + 3, 3);
 		dc[index * 4] = (int16_t)webpc_wrap16(value);
 		value = webpc_asr(difference_inner + difference_outer + 3, 3);
@@ -155,6 +157,7 @@ webpc_vp8_idct_add(
 			column_in[row] = (int32_t)input[row * 4 + column];
 		}
 
+		/* The column through the one-dimensional transform. */
 		idct_butterfly(column_in, column_out);
 
 		/* The four results go back into the same column. */
@@ -168,6 +171,7 @@ webpc_vp8_idct_add(
 	 * (x + 4) >> 3 and added to the prediction row.
 	 */
 	for (row = 0; row < 4; row++) {
+		/* The row through the one-dimensional transform. */
 		row_start = dst + (ptrdiff_t)row * stride;
 		idct_butterfly(&middle[row * 4], row_out);
 

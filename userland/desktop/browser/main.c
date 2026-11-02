@@ -178,6 +178,13 @@ browser_main(
 		return 2;
 	}
 
+	/* The engine makes its threads through the program's, whatever the mode. */
+	error = browser_threads_set(shell_threads());
+	if (error != 0) {
+		fprintf(stderr, "browser: cannot give the engine its threads: %s\n", wb_os_error_text(error));
+		return 1;
+	}
+
 	/* Runs the mode. */
 	switch (options.mode) {
 	case MAIN_MODE_VERSION:

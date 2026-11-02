@@ -60,6 +60,7 @@ http_dump(
 	const struct net_response *response)
 {
 	static unsigned counter;
+	unsigned number;
 	char path[512];
 	const char *directory;
 	FILE *file;
@@ -67,7 +68,8 @@ http_dump(
 	directory = getenv("BROWSER_NET_DUMP");
 	if (directory == NULL || directory[0] == '\0')
 		return;
-	snprintf(path, sizeof(path), "%s/%04u.bin", directory, counter++);
+	number = __atomic_fetch_add(&counter, 1U, __ATOMIC_RELAXED);
+	snprintf(path, sizeof(path), "%s/%04u.bin", directory, number);
 	file = fopen(path, "wb");
 	if (file != NULL) {
 		fwrite(response->body.data, 1U, response->body.length, file);
@@ -77,12 +79,12 @@ http_dump(
 }
 
 /* The fixed headers of an image's request: only the formats the decoders read. */
-#define NET_HTTP_IMAGE_HEADERS	"Accept: image/png,image/jpeg\r\n" \
+#define NET_HTTP_IMAGE_HEADERS	"Accept: image/webp,image/png,image/jpeg,image/gif\r\n" \
 				"Accept-Language: ja,en-US;q=0.9,en;q=0.8\r\n" \
 				"Accept-Encoding: identity\r\n"
 
-/* The kind of the blocking fetches that follow (NET_FETCH_*); the browser is single-threaded. */
-static int http_fetch_kind = NET_FETCH_DOCUMENT;
+/* The kind of the blocking fetches that follow (NET_FETCH_*); each thread has its own, for the fetches it makes. */
+static _Thread_local int http_fetch_kind = NET_FETCH_DOCUMENT;
 
 /* Sets what the blocking fetches that follow are for, so the Accept header follows. */
 void
@@ -136,7 +138,7 @@ static int http_case_differs(const char *text, const char *name, size_t length);
  * final URL, status, Content-Type and body) or returns an errno value
  * (EPROTONOSUPPORT for a scheme other than http and https, or https
  * without the OpenSSL package; EPROTO for a TLS failure, whose reason
- * net_tls_error gives; EINVAL for a response
+ * response->reason gives; EINVAL for a response
  * that is not HTTP, ELOOP for too many redirects).  The cookies of the
  * jar (NULL for none) go with each request, and the responses' cookies
  * go into it.
@@ -172,8 +174,7 @@ net_http_fetch_send(
 	int redirected;
 	int error;
 
-	/* The URL (and no TLS failure yet). */
-	net_tls_clear_error();
+	/* The URL (and no TLS failure yet: the empty response has no reason). */
 	net_response_init(response);
 	error = net_url_parse(url_text, strlen(url_text), NULL, &url);
 	if (error != 0)
@@ -291,9 +292,9 @@ net_http_request_text(
 }
 
 /*
- * The same, for a kind of fetch: an image is asked for as PNG or JPEG only
- * (the decoders do not read WebP or AVIF, so a server that varies by Accept
- * answers with one that they do).
+ * The same, for a kind of fetch: an image is asked for as WebP, PNG, JPEG
+ * or GIF only (the decoders do not read AVIF, so a server that varies by
+ * Accept answers with one that they do).
  */
 int
 net_http_request_text_kind(
@@ -622,13 +623,17 @@ http_request(
 	error = http_connect(url, &connection.socket);
 	is_https = !strcmp(url->scheme, "https");
 	if (error == 0 && is_https)
-		error = net_tls_open(connection.socket, url->host, &connection.tls);
+		error = net_tls_open(connection.socket, url->host, response->reason, &connection.tls);
 
 	/* The request and everything the server sends until it closes. */
 	if (error == 0)
 		error = http_send_all(&connection, request.data, request.length);
 	if (error == 0)
 		error = http_receive_all(&connection, &raw);
+
+	/* Why the connection failed, kept before it closes. */
+	if (error != 0 && connection.tls != NULL)
+		snprintf(response->reason, sizeof(response->reason), "%s", net_tls_reason(connection.tls));
 	net_tls_close(connection.tls);
 	wb_os_socket_close(connection.socket);
 

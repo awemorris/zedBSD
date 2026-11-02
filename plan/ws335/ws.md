@@ -69,14 +69,15 @@
 | [p029](phase029/phase.md) | handshake の共通と TLS 1.3（test-hs13） | cleared（2026-11-02 11:25 Q1、main で test-hs13 18565 PASS。client の handshake の write の鍵は server の Finished の後（ServerHello の直後の alert は平文）、p033 の相互運用で OpenSSL の扱いを確かめる）。実装済み・試験 PASS（2026-11-02 11:23 P6 q1928-i01、Opus。test-hs13 18565 checks、posix・win32 PASS、run-unit all・check-skeleton（BASE=4eae22020）PASS、わざと壊す 120 通りのうち 112 が試験の失敗・2 が ASan の検出、残り 6 は等価。TLS 1.2 の SH の固有の確かめは p030 の sslc_hs12_server_hello。cleared は Q1） | p027、p028、p020、p011、p008、p037 |
 | [p030](phase030/phase.md) | TLS 1.2 の handshake（test-hs12） | cleared（2026-11-02 12:21 Q1、main で test-hs12 17451 PASS。RSA の道の 13 件の見逃しは p033 で、1.2 の ServerHello の cookie の alert の種類は p035 で決める）。実装済み・試験 PASS（2026-11-02 12:20 Sonnet q1937-i01。test-hs12 17451 checks、posix・win32 PASS、run-unit all・check-skeleton（BASE=4eae22020）PASS、わざと壊す 166 通りのうち 140 が試験の失敗、残り 26 は RSA の道 13（p033）・redundant な守り 6・観測できない 7。cleared は Q1） | p029、p037 |
 | [p031](phase031/phase.md) | 接続（record の I/O・再組み立て・alert・close）（test-conn） | cleared（2026-11-02 13:41 Q1、main で test-conn 164417 PASS。reason の表と alert 43・109・ENOMEM の未試験は p032・p033 で）。実装済み・試験 PASS（2026-11-02 13:15 Sonnet q1943-i01。test-conn 164417 checks、posix・win32 PASS、run-unit all・check-skeleton（BASE=4eae22020）PASS、わざと壊す 216 通りのうち 202 が検出・生き残り 14 は等価な守り 11・試験の道具で作れない 3。cleared は Q1） | p030、p015、p037 |
-| [p032](phase032/phase.md) | 公開の SSL・SSL_CTX（test-api-ssl） | in-progress（2026-11-02 13:41 Sonnet q1953-i01） | p031、p022 |
-| [p033](phase033/phase.md) | 統合: zedBSD の libssl-compat.so と exports、Windows の static library の一覧、相互接続（OpenSSL s_server、Wine も）・x509-limbo・net/tls.c の host 試験（Opus） | planned | p032、p023、p024、p039 |
-| [p034](phase034/phase.md) | 安全の review と hardening: 定数時間・fuzz・checklist（Opus） | planned | p033 |
-| [p035](phase035/phase.md) | 規約の全文の見直しと header の持ち越しの直し | planned | p034 |
+| [p032](phase032/phase.md) | 公開の SSL・SSL_CTX（test-api-ssl） | cleared（2026-11-02 15:49 Q1、main で test-api-ssl PASS）。実装済み・試験 PASS（2026-11-02 15:30 Sonnet q1953-i01。test-api-ssl posix 5129・win32 5570 checks、run-unit all・check-skeleton（BASE=4eae22020）PASS、わざと壊す 113 通りのうち 106 が検出・生き残り 7 は等価な守り 5・未試験 2（malloc の失敗・2 GiB の SSL_pending）。SSL_new でなく最初の handshake の call で設定を読む点を Q1 に返す。cleared は Q1） | p031、p022 |
+| [p033](phase033/phase.md) | 統合: zedBSD の libssl-compat.so と exports、Windows の static library の一覧、相互接続（OpenSSL s_server、Wine も）・x509-limbo・net/tls.c の host 試験（Opus） | cleared（2026-11-02 17:43 Q1、f31fbecbd を main に merge d2e15818e、main で libssl-compat.so・libwebp-compat.so warning 0、check-exports PASS）。実装済み・試験 PASS（2026-11-02 17:35 P1 q1971-i01。libssl-compat.so（amd64・aarch64）warning 0・check-exports PASS、run-interop host 110 件（known limit 8: TLS 1.2 × ECDSA P-384 の leaf、p040）・Wine 44 件（cert.pem と Disallowed）・zedBSD の QEMU 30 件、run-limbo 9,792 件で理由の無い違い 0、net/tls.c の host 試験 http 15・loader 11 が OpenSSL と同数、run-faults（確保の失敗・alert 109）PASS、run-unit all・--win32 all・run-ct all・check-skeleton（BASE=4eae22020）PASS。guest の usb-net の不具合は BUG-416。cleared は Q1） | p032、p023、p024、p039 |
+| [p034](phase034/phase.md) | 安全の review と hardening: 定数時間・fuzz・checklist（Opus） | cleared（2026-11-02 21:35 Q1、a37f972c7 を main に merge ec48eb04d、main で test-chain・conn・api-ssl・hs13・name PASS、check-skeleton は BASE=a37f972c7 に移して PASS）。実装済み・試験 PASS（2026-11-02 21:35 P1 q1986-i01。指摘 21 件: 直した 12（clang の ct の分岐 bn と潜在 5 か所、Disallowed の ECDSA 署名の書き換えでの通り抜け、Windows の EKU、iPAddress の mask、close_notify の後の送り、SSL_connect、1.2 の CCS、消去 2）、見送り 9 は理由付き。ct matrix 72/72、fuzz 11 target × 1 時間 crash 0、run-unit all・--win32 all・interop・limbo PASS。check-skeleton（BASE=ddc678f690）は承認済みの cryc-chain.h の comment だけで FAIL。cleared は Q1）。前: in-progress（2026-11-02 18:41 P1 q1986） | p033 |
+| [p035](phase035/phase.md) | 規約の全文の見直しと header の持ち越しの直し | in-progress（2026-11-02 21:35 P1 q1992） | p034 |
 | [p036](phase036/phase.md) | 提案（U2 は A で答え済み）: net/tls.c の libssl-compat への切り替え（zedBSD は開く名前、Windows は static link の表）。WS074・WS334 と調整 | planning | p033、WS334 の p022・p030 |
 | [p037](phase037/phase.md) | 試験の道具: scripted な TLS server（tlspeer.h）と試験の側の ECDSA の署名器（Opus。p029〜p032 が使う） | cleared（2026-11-02 03:59 Q1、main で test-tlspeer 35566 PASS）。実装済み・試験 PASS（2026-11-02 04:20 P6 q1904-i01。test-tlspeer 35566 checks、posix・win32 PASS、RFC 8448 3・5 節の server の側を byte ごとに再生、24 通りの壊しは全部 FAIL。RSA の秘密鍵は持たない（Q1 の判断、RSA の server は p033）。cleared は Q1） | p025、p026、p027、p011、p008 |
 | [p038](phase038/phase.md) | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類（Opus） | cleared（2026-11-02 11:50 Q1、limbo 9,792 件のうち 9,733 件が一致・59 件は理由付き・理由の無い違い 0。Q1 の判断は ws.md の「Q1 の判断（p038）」）。実装済み・試験 PASS（2026-11-02 P7 q1929-i01。test-limbo 95464 checks、posix・win32 PASS、9,792 件のうち一致 9,733・理由つきの違い 59（issuance 11・cabf 23・no-crl 10・name 4・no-mldsa 3・anchor 2・key-usage 2・nc-leaf 2・depth 1・nc-noncritical 1）・理由の無い違い 0。cryc の欠陥は無し。16 枚を越える list は名前で辿れる certificate に減らしてから切る（bettertls pathbuilding の 20 件が path の組み立てを経る）。anchor の制約・CA/B Forum の規則・先頭の dot は Q1 に案を返した。cleared は Q1） | p020 |
 | [p039](phase039/phase.md) | zedBSD の libcrypto-compat.so（build の規則・exports・package と image の登録、`sources.mk`）。TLS は無し。WS336 の zedBSD の Phase が待つ | cleared（2026-11-02 10:21 Q1、main で libcrypto-compat.so の build warning 0・check-exports PASS。version node は置かない（Q1、p035 で design.md を直す）。dlclose の NODELETE は BUG-409）。実装済み・試験 PASS（2026-11-02 10:20 Sonnet 5.5 q1925-i01。amd64・aarch64・riscv64 の libcrypto-compat.so が warning 0 で build、check-dynamic-elf と check-exports PASS、QEMU の serial で crypto-smoke 47 checks PASS、run-unit all・check-skeleton PASS。map は version node 無し（Q1 承認）。ld.so が NODELETE を守らない件は phase039 の結果に。cleared は Q1） | p023、p024 |
+| [p040](phase040/phase.md) | secp384r1 の group: supported_groups で申し出る（x25519・secp256r1 の後）、TLS 1.2 の ServerKeyExchange の P-384 の ECDHE、TLS 1.3 の HRR の後の P-384 の key share、共有の秘密 48 byte（凍結の header の変更は Q1 の承認の後）。p033 の 8 件の known limit を繋がる側に戻す | cleared（2026-11-02 18:41 Q1、ddc678f69 を main に merge 4535e4137、main で test-hs13・hs12・api-ssl PASS、check-skeleton は BASE=ddc678f69 に移して PASS）。実装済み・試験 PASS（2026-11-02 18:30 P1 q1981-i01。run-unit all・--win32 all（57 本）・run-ct all PASS、run-interop host 139 件・Wine 47 件が known limit 0 で PASS、run-limbo PASS、ecc384.badssl.com が繋がる、zedBSD の .so warning 0・check-exports PASS、check-skeleton（BASE=4eae22020）は承認済みの sslc-hs.h・sslc-keysched.h の差だけで FAIL。cleared は Q1） | p033（p034 の前） |
 
 - 2026-11-02 03:56 Q1: check-skeleton の BASE は 641a2f195 に移す（p015 で Q1 が run-unit.sh に Wine の LC_ALL=C.UTF-8 を足したため。header と道具はこの commit で固定）。
 
@@ -87,3 +88,32 @@
 - CA/Browser Forum の規則（23 件）は守らせない。D11（RFC 5280 6.1 の web PKI の client）のとおり。private な CA（例: mail の試験の server の証明書は EKU を持たない）を断らないため。
 - dNSName の制限の先頭の「.」は、今の header の規則（その下の名前だけ）のまま。
 - run-unit.sh の 1 本あたりの timeout（600 秒）に test-limbo（ASan で約 6 分）が近い。p035 で timeout を 1200 秒にする（試験の道具の変更、Q1 の判断）。
+
+## Q1 の判断（2026-11-02 15:49、p032 の報告）
+
+- SSL の設定（option・verify の mode・版の範囲）は、今は最初の handshake の呼び出しで context から読む。OpenSSL と header の約束（SSL_new が写す）に合わせ、SSL_new の時に写す形に p035 で直す（ssl_st に写しの field を足す。header の変更は p035 の範囲）。
+- SSL_VERIFY_NONE で verify の callback を呼ばない点、SSL_get_error の写しの表、SSL_shutdown の扱い、SNI の IP の文字列を送らない扱いは、p032 の結果のとおりでよい。
+- p035 に回す header の comment の直し: sslc-api.h の「SSL_new copies its settings」、ssl.h の SSL_set1_host の空の文字列。
+
+## Q1 の判断（2026-11-02、p033 の問い。P1 が 16:47 に記録）
+
+- TLS 1.2 で ECDSA P-384 の leaf の server に繋がらない件（RFC 8422 5.1: TLS 1.2 の server は client の supported_groups の曲線の上の ECDSA の証明書だけを使う。libssl-compat は x25519 と secp256r1 だけを申し出る）は B: secp384r1 を足す。web の client は Chrome・Firefox（x25519・secp256r1・secp384r1 を申し出る）と同じ所に繋がるべきなので。ただし p033 の中ではしない。
+  p033 は run-interop.sh の 8 件を「known limit」（server が no shared cipher で断る事を確かめる）として別に数えて終える。足す作業は [p040](phase040/phase.md)（p033 の後、p034 の前。凍結の header の変更は Q1 の承認の後、design.md D8 の文は案として phase040 に）。
+
+
+## Q1 の判断（2026-11-02 17:43、p040 の header の変更）
+
+- phase040 §3 の凍結の header の変更（sslc-hs.h の struct sslc_hs の P-256 の field を曲線を問わない ec_* に、鍵の共有の大きさ、sslc-keysched.h の comment、試験の道具 tlspeer.h の group）を承認する。HAL ではない。check-skeleton の BASE は p040 の後に Q1 が移す。D8 の案（x25519・secp256r1・secp384r1 の順、key share は x25519 の 1 つ、HRR で他）を採る。design.md への反映は p035。
+
+## Q1 の判断（2026-11-02 18:41、p040 の merge）
+
+- check-skeleton の BASE を ddc678f690（p040 の終わり）に移す。p035 に回す header の comment: sslc-tls.h の file の comment と sslc-msg.h:35 の「group は x25519 と secp256r1 だけ」、design.md の D8 の本文。
+
+## Q1 の判断（2026-11-02、p034 の問い。P1 が 20:25 に記録）
+
+- Windows の Disallowed の印（D24）は、DER の全体でなく tbsCertificate の SHA-256 にする（案 A。DER が parse できない時は全体の SHA-256）。ECDSA の署名は (r, n − s) に書き換えても有効なので、DER の全体の印では、盗まれた中間を Disallowed に入れても、署名を書き換えた写しが通ってしまうため。凍結の header cryc-chain.h の 2 つの comment（struct cryc_store と cryc_store_add_distrusted）の変更を承認する。design.md の D24 の文の直しは p035 で。
+- 各 fuzz の target を 1 時間、11 個を並べて流す事は、ユーザーの承認を Q1 が伝えた（2026-11-02）。
+
+## Q1 の判断（2026-11-02 21:35、p034 の merge）
+
+- check-skeleton の BASE を a37f972c7a（p034 の終わり）に移す。WS343 p002（P2）が libcrypto-compat の公開の header を広げるので、その merge の後に Q1 がもう一度移す。

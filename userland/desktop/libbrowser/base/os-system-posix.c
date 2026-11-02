@@ -9,14 +9,6 @@
  * The system services of the operating-system layer on POSIX systems.
  */
 
-/*
- * pthread_setname_np is declared only when the C library is asked for its
- * GNU facilities; the build switch WB_OS_THREAD_NAMES says it is wanted.
- */
-#if defined(WB_OS_THREAD_NAMES) && !defined(_GNU_SOURCE)
-#define _GNU_SOURCE
-#endif
-
 #include "base/os-system.h"
 #include "base/base.h"
 
@@ -26,7 +18,6 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <pthread.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,8 +39,6 @@
 /* The largest alignment wb_os_aligned_alloc accepts, in bytes. */
 #define OS_ALIGNMENT_MAX	65536U
 
-/* The most bytes a thread name keeps (the limit of Linux's thread names, without the NUL). */
-#define OS_THREAD_NAME_MAX	15U
 
 /* The most bytes one read of the random device asks for, so a huge request is served in pieces. */
 #define OS_RANDOM_PIECE		(1U << 20)
@@ -193,39 +182,6 @@ wb_os_random(
 
 	/* Succeeded: every byte came from the system's generator. */
 	return 0;
-}
-
-/*
- * Names the calling thread for debuggers and the system's tools.
- *
- * A build without WB_OS_THREAD_NAMES has no such facility and ignores the call.
- */
-void
-wb_os_thread_name(
-	const char *name)
-{
-#if defined(WB_OS_THREAD_NAMES)
-	char kept[OS_THREAD_NAME_MAX + 1U];
-	size_t length;
-
-	/* Ignores a call that gives no name. */
-	if (name == NULL)
-		return;
-
-	/* Keeps at most the first bytes of the name, which is all the system stores. */
-	length = 0;
-	while (length < OS_THREAD_NAME_MAX && name[length] != '\0') {
-		kept[length] = name[length];
-		length++;
-	}
-	kept[length] = '\0';
-
-	/* Names the calling thread; a failure leaves the thread unnamed, which is harmless. */
-	(void)pthread_setname_np(pthread_self(), kept);
-#else
-	/* The facility is not built in, so the name is dropped. */
-	UNUSED_PARAMETER(name);
-#endif
 }
 
 /*

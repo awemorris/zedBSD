@@ -27,6 +27,11 @@
  * caller, its call instruction) takes it; a run whose entry frame has no
  * handler returns VM_THROWN to its C caller.  Any other failure (out of
  * memory, a fault in the code's use of environments) ends the run at once.
+ *
+ * A task another thread asked to end (vm_heap_request_termination) is
+ * seen at every loop's head, at every function's entry and resumption and
+ * when an exception looks for its handler; the run then ends with
+ * VM_TERMINATED like any other failure, so no catch or finally runs.
  */
 
 #include "vm/bytecode.h"
@@ -231,9 +236,17 @@ vm_interpret_resume(
 	uint32_t size;
 	int status;
 
-	/* Too many entries from C, or a frame that does not fit, is a stack overflow for the script. */
+	/* A thread a heap is lent to runs no script (counted, to be found). */
+	vm_borrower_entry();
+
+	/* A task asked to end resumes nothing. */
 	*result = VM_VALUE_UNDEFINED;
 	*suspended = 0;
+	status = vm_termination_poll(realm->heap);
+	if (status != 0)
+		return status;
+
+	/* Too many entries from C, or a frame that does not fit, is a stack overflow for the script. */
 	code = generator->function->code;
 	size = FRAME_HEADER + code->register_count;
 	if (realm->depth >= INTERPRETER_DEPTH_MAX || size > realm->stack_capacity - realm->stack_top) {
@@ -311,6 +324,9 @@ interpreter_enter(
 	run->generator = generator;
 	run->result = VM_VALUE_UNDEFINED;
 
+	/* A thread a heap is lent to runs no script (counted, to be found). */
+	vm_borrower_entry();
+
 	/* Too many entries from C is a stack overflow for the script. */
 	if (realm->depth >= INTERPRETER_DEPTH_MAX) {
 		status = vm_throw_range_error(realm, "Maximum call stack size exceeded");
@@ -364,6 +380,11 @@ interpreter_push(
 	uint32_t size;
 	uint32_t index;
 	int status;
+
+	/* A function's entry: a task asked to end calls nothing more. */
+	status = vm_termination_poll(realm->heap);
+	if (status != 0)
+		return status;
 
 	/* A frame that does not fit is a stack overflow for the script. */
 	code = function->code;
@@ -551,12 +572,13 @@ interpreter_run(
 		if (status == INTERPRETER_DONE)
 			return 0;
 
-		/* An exception looks for a handler; without one it leaves the run. */
+		/* An exception looks for a handler; without one it leaves the run (a task asked to end finds none). */
 		if (status == VM_THROWN) {
 			status = interpreter_unwind(run);
 			if (status == 0)
 				continue;
-			return VM_THROWN;
+			if (status == VM_THROWN)
+				return VM_THROWN;
 		}
 
 		/* Anything else ends the run and drops its frames. */
@@ -584,7 +606,13 @@ interpreter_step(
 	/* The shared instructions, and the JavaScript ones that move the pc themselves. */
 	switch (words[0]) {
 	case VM_OP_NOP:
+		run->pc = next;
+		return 0;
 	case VM_OP_LOOP_HINT:
+		/* A loop's head: a task asked to end leaves here. */
+		status = vm_termination_poll(run->realm->heap);
+		if (status != 0)
+			return status;
 		run->pc = next;
 		return 0;
 	case VM_OP_MOV:
@@ -753,6 +781,7 @@ interpreter_step_js(
 	case VM_OP_LOAD_NEW_TARGET:
 	case VM_OP_CLASS_SETUP:
 	case VM_OP_DEFINE_METHOD:
+	case VM_OP_SET_FUNCTION_NAME:
 	case VM_OP_LOAD_HOME:
 	case VM_OP_GET_SUPER:
 	case VM_OP_SUPER_CONSTRUCT:
@@ -1354,6 +1383,7 @@ interpreter_step_wasm(
 	uint32_t start;
 	uint32_t left;
 	uint32_t right;
+	int status;
 
 	/* The next instruction, unless a branch is taken (jumps count from the instruction's start). */
 	start = run->pc;
@@ -1388,8 +1418,16 @@ interpreter_step_wasm(
 		break;
 	case VM_OP_BR_IF:
 		/* Taken when the i32 is not zero. */
-		if ((uint32_t)registers[words[1]] != 0U)
-			run->pc = start + words[2];
+		if ((uint32_t)registers[words[1]] == 0U)
+			break;
+		run->pc = start + words[2];
+
+		/* A branch back is a loop's: a task asked to end leaves there. */
+		if ((int32_t)words[2] <= 0) {
+			status = vm_termination_poll(run->realm->heap);
+			if (status != 0)
+				return status;
+		}
 		break;
 	case VM_OP_I64_CONST:
 	case VM_OP_F64_CONST:
@@ -1823,7 +1861,8 @@ interpreter_suspend(
 /*
  * Finds the handler of the realm's exception from the running
  * instruction outwards through the run's frames; 0 when one takes it (the
- * run goes on there), VM_THROWN when the run's entry frame has none.
+ * run goes on there), VM_THROWN when the run's entry frame has none, and
+ * VM_TERMINATED (the exception dropped) when the task was asked to end.
  */
 static int
 interpreter_unwind(
@@ -1835,9 +1874,17 @@ interpreter_unwind(
 	uint32_t throw_pc;
 	uint32_t caller;
 	uint32_t index;
+	int status;
+
+	/* A task asked to end gives the exception to no handler: it is dropped with the run's frames. */
+	realm = run->realm;
+	status = vm_termination_poll(realm->heap);
+	if (status != 0) {
+		realm->exception = VM_VALUE_UNDEFINED;
+		return status;
+	}
 
 	/* From the instruction that threw, frame by frame. */
-	realm = run->realm;
 	throw_pc = run->pc;
 
 	/*
@@ -2017,6 +2064,9 @@ interpreter_class(
 		break;
 	case VM_OP_DEFINE_METHOD:
 		status = vm_define_method(realm, registers[words[1]], registers[words[2]], registers[words[3]], words[4]);
+		return status;
+	case VM_OP_SET_FUNCTION_NAME:
+		status = vm_set_function_name(realm, registers[words[1]], registers[words[2]], words[3]);
 		return status;
 	case VM_OP_LOAD_HOME:
 		/* The running method's home object, in its function's data. */

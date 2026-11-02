@@ -221,8 +221,16 @@ void
 paint_frame_release(
 	struct paint_frame *frame)
 {
-	if (frame == NULL || --frame->refs > 0)
+	unsigned refs;
+
+	/* Nothing held, or held by others still. */
+	if (frame == NULL)
 		return;
+	refs = __atomic_sub_fetch(&frame->refs, 1U, __ATOMIC_ACQ_REL);
+	if (refs != 0U)
+		return;
+
+	/* The last: its list and its laid out tree. */
 	paint_release(&frame->list);
 	if (frame->tree != NULL) {
 		layout_release(frame->tree);
@@ -252,10 +260,7 @@ paint_build(
 	int error;
 
 	/* Starts an empty list the size of the document, at least the viewport. */
-	memset(list, 0, sizeof(*list));
-	wb_arena_init(&list->arena, 0);
-	wb_vector_init(&list->items, sizeof(struct paint_item));
-	wb_vector_init(&list->frames, sizeof(struct paint_frame *));
+	paint_list_init(list);
 	list->width = tree->viewport_width;
 	list->height = tree->document_height;
 	if (list->height < tree->viewport_height)
@@ -389,6 +394,18 @@ paint_release(
 	wb_vector_release(&list->items);
 	wb_arena_release(&list->arena);
 	memset(list, 0, sizeof(*list));
+}
+
+/* Makes an empty list: no items, no frames, an empty arena. */
+void
+paint_list_init(
+	struct paint_list *list)
+{
+	/* Nothing in it. */
+	memset(list, 0, sizeof(*list));
+	wb_arena_init(&list->arena, 0);
+	wb_vector_init(&list->items, sizeof(struct paint_item));
+	wb_vector_init(&list->frames, sizeof(struct paint_frame *));
 }
 
 /*
@@ -3125,7 +3142,9 @@ list_filter_items(
 	int filter_count,
 	int kind)
 {
+	struct css_filter *copied;
 	struct paint_item item;
+	int index;
 	int error;
 
 	if (walk->error != 0)
@@ -3138,7 +3157,21 @@ list_filter_items(
 	item.height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 	if (item.width <= 0 || item.height <= 0)
 		return;
-	item.filters = filters;
+
+	/* The filters are the list's own (a committed list points into no style): copied into its arena, without their references. */
+	copied = NULL;
+	if (filter_count > 0) {
+		copied = wb_arena_alloc(&walk->list->arena, (size_t)filter_count * sizeof(*copied));
+		if (copied == NULL) {
+			walk->error = ENOMEM;
+			return;
+		}
+		for (index = 0; index < filter_count; index++) {
+			copied[index] = filters[index];
+			copied[index].url = NULL;
+		}
+	}
+	item.filters = copied;
 	item.filter_count = filter_count;
 
 	/* A backdrop's color is its opacity (a fade scales it): how much of the filtered pixels cover the unfiltered ones. */

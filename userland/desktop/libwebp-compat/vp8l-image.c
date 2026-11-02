@@ -329,6 +329,7 @@ image_read_entropy(
 	struct image_context *context)
 {
 	uint32_t has_meta;
+	uint32_t prefix_bits_field;
 	size_t block_size;
 	size_t entropy_height;
 	size_t index;
@@ -347,7 +348,8 @@ image_read_entropy(
 		return 0;
 
 	/* Reads the size of the blocks, which gives the size of the entropy image. */
-	context->prefix_bits = IMAGE_PREFIX_BITS_MIN + webpc_lbits_read(context->reader, IMAGE_PREFIX_BITS_FIELD);
+	prefix_bits_field = webpc_lbits_read(context->reader, IMAGE_PREFIX_BITS_FIELD);
+	context->prefix_bits = IMAGE_PREFIX_BITS_MIN + prefix_bits_field;
 	error = image_check_reader(context);
 	if (error != 0)
 		return error;
@@ -364,8 +366,13 @@ image_read_entropy(
 		return ENOMEM;
 
 	/* Decodes the entropy image, an image of its own with no meta prefix codes. */
-	error = webpc_vp8l_decode_image(context->reader, (unsigned)context->entropy_width, (unsigned)entropy_height, 0,
-		context->limit, context->entropy);
+	error = webpc_vp8l_decode_image(
+		context->reader,
+		(unsigned)context->entropy_width,
+		(unsigned)entropy_height,
+		0,
+		context->limit,
+		context->entropy);
 	if (error != 0)
 		return error;
 
@@ -376,6 +383,8 @@ image_read_entropy(
 		if (group > largest)
 			largest = group;
 	}
+
+	/* Counts the groups up to the largest number named. */
 	context->group_count = (size_t)largest + 1U;
 
 	/* Succeeded: the entropy image and the group count are known. */
@@ -405,6 +414,8 @@ image_read_groups(
 	used = (unsigned char *)calloc(context->group_count, 1U);
 	if (used == NULL)
 		return ENOMEM;
+
+	/* Marks the groups some block names, or the one group when there is no entropy image. */
 	if (context->entropy == NULL) {
 		used[0] = 1;
 	} else {
@@ -419,10 +430,16 @@ image_read_groups(
 	error = 0;
 	for (index = 0; index < context->group_count && error == 0; index++) {
 		if (used[index] != 0) {
-			error = webpc_vp8l_read_group(context->reader, &context->pool, context->cache_bits,
+			error = webpc_vp8l_read_group(
+				context->reader,
+				&context->pool,
+				context->cache_bits,
 				&context->groups[index]);
 		} else {
-			error = webpc_vp8l_read_group(context->reader, &context->scratch, context->cache_bits,
+			error = webpc_vp8l_read_group(
+				context->reader,
+				&context->scratch,
+				context->cache_bits,
 				&unused_group);
 
 			/* A group nothing uses leaves no table behind: the scratch pool starts empty again. */
@@ -470,6 +487,7 @@ image_read_pixels(
 	uint32_t blue;
 	uint32_t alpha;
 	uint32_t argb;
+	size_t group_number;
 	int error;
 
 	/* Starts at the first pixel of the image. */
@@ -484,7 +502,8 @@ image_read_pixels(
 	/* Reads one literal, one backward reference or one cache index at a time until the image is full. */
 	while (position < total) {
 		/* The group of the block the symbol starts in (groups are as many as the largest number plus one). */
-		group = &context->groups[image_group_at(context, x, y)];
+		group_number = image_group_at(context, x, y);
+		group = &context->groups[group_number];
 
 		/* Reads the green symbol, which says which of the three methods this is. */
 		symbol = webpc_prefix_read(&context->pool, &group->codes[WEBPC_VP8L_CODE_GREEN], context->reader);

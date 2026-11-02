@@ -11,7 +11,7 @@
  * own URL parser), the session history (History, Location's navigation and
  * the Navigation API, over the natives that change the document's URL and
  * scroll to a fragment), and the smaller objects that scripts probe for
- * (Intl, Reflect, matchMedia, MessageChannel).  The source is
+ * (Intl, matchMedia, MessageChannel).  The source is
  * prelude-source.inc, made from plan/ws074/phase230/prelude.js.
  */
 
@@ -1167,11 +1167,12 @@ prelude_set_popover(
 	element = (struct dom_element *)node;
 	open = js_argument(args, count, 1) == VM_VALUE_TRUE;
 	if ((element->popover_open != 0) != (open != 0)) {
-		/* What opens later is above (its number is its place in the top layer). */
+		/* What opens later is above (its number is its place in the top layer, counted for the process with an atomic). */
 		static int top_layer_order;
+		int order;
 
-		top_layer_order++;
-		element->popover_open = open ? top_layer_order : 0;
+		order = __atomic_add_fetch(&top_layer_order, 1, __ATOMIC_RELAXED);
+		element->popover_open = open ? order : 0;
 		element->node.document->generation++;
 	}
 	UNUSED_PARAMETER(realm);

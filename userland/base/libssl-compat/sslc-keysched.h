@@ -119,7 +119,8 @@ int sslc_tls13_start(struct sslc_tls13_schedule *schedule, enum cryc_hash_id has
  * client_handshake and server_handshake ("c hs traffic", "s hs traffic")
  * over transcript_hash (ClientHello...ServerHello).
  *
- * shared is shared_size bytes (32 for x25519, 32 for secp256r1).
+ * shared is shared_size bytes (32 for x25519, 32 for secp256r1, 48 for
+ * secp384r1).
  * transcript_hash is the schedule's hash size.  Returns 0 or EINVAL.
  */
 int sslc_tls13_handshake(struct sslc_tls13_schedule *schedule, const uint8_t *shared, size_t shared_size, const uint8_t *transcript_hash);

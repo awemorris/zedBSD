@@ -209,6 +209,149 @@ vm_define_method(
 }
 
 /*
+ * Names a function after the key it is defined under (SetFunctionName):
+ * a string key is the name, an index its numeral, a symbol its
+ * description in brackets (or "" when it has none), a private name its
+ * description as it is; prefix 1 puts "get " before it and 2 "set ".
+ *
+ * Only a bytecode function whose own name is still the one its code gave
+ * is renamed, so a class's static name member stays.
+ */
+int
+vm_set_function_name(
+	struct vm_realm *realm,
+	vm_value function,
+	vm_value key,
+	uint32_t prefix)
+{
+	const struct vm_cell_type *type;
+	struct vm_property property;
+	struct vm_symbol *symbol;
+	struct vm_code *code;
+	struct vm_string *name;
+	struct vm_string *head;
+	struct vm_cell *roots[2];
+	struct vm_object *object;
+	vm_value name_key;
+	vm_value original;
+	unsigned registered;
+	int is_object;
+	int is_cell;
+	int is_int32;
+	int found;
+	int status;
+
+	/* Only a bytecode function is named. */
+	is_object = vm_value_is_object(function);
+	if (!is_object)
+		return 0;
+	object = (struct vm_object *)vm_value_as_cell(function);
+	if (object->kind != VM_KIND_FUNCTION)
+		return 0;
+	code = ((struct vm_function *)object)->code;
+	if (code == NULL)
+		return 0;
+
+	/* Its own name must still be the one its code gave (a class's static name member stays). */
+	name_key = vm_key_from_ascii(realm->heap, "name");
+	if (name_key == VM_VALUE_EMPTY)
+		return ENOMEM;
+	found = vm_object_get_own(object, name_key, &property);
+	if (found < 0)
+		return -found;
+	if (!found || (property.attributes & VM_PROPERTY_ACCESSOR) != 0U)
+		return 0;
+	original = VM_VALUE_EMPTY;
+	if (code->name != NULL)
+		original = vm_value_cell(code->name);
+	if (*property.value != original)
+		return 0;
+
+	/* The key's kind: an index, a string, a symbol or a private name. */
+	is_int32 = vm_value_is_int32(key);
+	is_cell = vm_value_is_cell(key);
+	type = NULL;
+	if (is_cell)
+		type = vm_value_as_cell(key)->type;
+	symbol = NULL;
+	if (type == &vm_symbol_type)
+		symbol = (struct vm_symbol *)vm_value_as_cell(key);
+	if (!is_int32 && type != &vm_string_type && symbol == NULL)
+		return 0;
+
+	/* The parts being joined stay alive while the next one is allocated. */
+	roots[0] = NULL;
+	roots[1] = NULL;
+	registered = 0;
+	while (registered < 2U) {
+		status = vm_heap_add_root(realm->heap, &roots[registered]);
+		if (status != 0)
+			goto cleanup;
+		registered++;
+	}
+
+	/* The base name: an index's numeral, a string, a private name's description, or a symbol's in brackets ("" without one). */
+	name = NULL;
+	status = 0;
+	if (is_int32) {
+		status = vm_to_string(realm, key, &name);
+	} else if (symbol == NULL) {
+		name = (struct vm_string *)vm_value_as_cell(key);
+	} else if (symbol->description == VM_VALUE_UNDEFINED) {
+		name = vm_string_from_utf8(realm->heap, "", 0);
+	} else if (symbol->private_name) {
+		name = (struct vm_string *)vm_value_as_cell(symbol->description);
+	} else {
+		head = vm_string_from_utf8(realm->heap, "[", 1);
+		if (head != NULL) {
+			roots[0] = &head->cell;
+			head = vm_string_concat(realm->heap, head, (struct vm_string *)vm_value_as_cell(symbol->description));
+		}
+		if (head != NULL) {
+			roots[0] = &head->cell;
+			name = vm_string_from_utf8(realm->heap, "]", 1);
+		}
+		if (name != NULL)
+			name = vm_string_concat(realm->heap, head, name);
+	}
+	if (status != 0)
+		goto cleanup;
+	if (name == NULL) {
+		status = ENOMEM;
+		goto cleanup;
+	}
+
+	/* An accessor's half: "get " or "set " before it. */
+	if (prefix != 0U) {
+		head = name;
+		roots[0] = &head->cell;
+		name = vm_string_from_utf8(realm->heap, prefix == 1U ? "get " : "set ", 4);
+		if (name != NULL)
+			name = vm_string_concat(realm->heap, name, head);
+		if (name == NULL) {
+			status = ENOMEM;
+			goto cleanup;
+		}
+	}
+
+	/* The name, configurable and neither writable nor enumerable. */
+	roots[1] = &name->cell;
+	status = vm_object_define(realm->heap, object, name_key, vm_value_cell(name), VM_PROPERTY_CONFIGURABLE);
+
+cleanup:
+	/* The parts are owned by the function's name, or no longer needed. */
+	while (registered != 0U) {
+		registered--;
+		vm_heap_remove_root(realm->heap, &roots[registered]);
+	}
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the function has the key's name. */
+	return 0;
+}
+
+/*
  * Reads a property through a class method's native home prototype.
  *
  * An inherited getter receives the current method's actual this value.

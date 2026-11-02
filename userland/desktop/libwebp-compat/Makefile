@@ -5,5 +5,6 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # include/libc/compat/webp/decode.h); no libwebp code.  Still images: lossy, lossless, alpha, RIFF and VP8X.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-LIBWEBP_COMPAT_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libwebp-compat.so=$(BUILD)/dynamic/libwebp-compat.so)
+LIBWEBP_COMPAT_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libwebp-compat.so=$(BUILD)/dynamic/libwebp-compat.so) \
+	/usr/share/licenses/libwebp-compat/libwebp-COPYING=userland/base/licenses/libwebp-compat/libwebp-COPYING
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,libwebp-compat,libwebp-compat,*,y,library,$(LIBWEBP_COMPAT_SOURCES),y,desktop,desktop/libwebp-compat,,,shared-library,$(LIBWEBP_COMPAT_IMAGE_DATA),,lib))

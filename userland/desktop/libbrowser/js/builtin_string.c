@@ -904,11 +904,16 @@ string_repeat(
 		return status;
 	}
 
-	/* The copies. */
+	/* The copies; a long run looks now and then whether its task was asked to end. */
 	wb_units_init(&units);
 	status = 0;
-	for (index = 0.0; status == 0 && index < times; index += 1.0)
+	for (index = 0.0; status == 0 && index < times; index += 1.0) {
 		status = vm_string_append_units(string, &units);
+		if (status == 0)
+			status = vm_heap_count_step(realm->heap);
+	}
+
+	/* The string of the copies. */
 	if (status == 0)
 		status = string_units_value(realm, &units, result);
 	wb_units_release(&units);
