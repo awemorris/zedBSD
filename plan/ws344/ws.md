@@ -25,7 +25,7 @@
 | ws344-p003 | VP8L の bit reader と prefix code（lbits.c・prefix.c） | cleared（2026-11-02 13:36 Q1、main で test-lbits・test-prefix PASS）。実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p001 |
 | ws344-p004 | VP8L の code の読み（vp8l-codes.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8l_codes 95925 PASS）。実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1） | p003 |
 | ws344-p005 | VP8L の entropy-coded image（vp8l-image.c） | in-progress（2026-11-02 13:55 Sonnet q1957-i01） | p004 |
-| ws344-p006 | VP8L の逆変換（vp8l-transform.c） | 実装済み・試験 PASS（Sonnet 5.5 q1956-i01、2026-11-02、test-vp8l_transform 457604 checks、run-unit all・check-skeleton・target-build PASS。cleared は Q1） | p001 |
+| ws344-p006 | VP8L の逆変換（vp8l-transform.c） | cleared（2026-11-02 14:14 Q1、main で test-vp8l_transform 457604 PASS）。実装済み・試験 PASS（Sonnet 5.5 q1956-i01、2026-11-02、test-vp8l_transform 457604 checks、run-unit all・check-skeleton・target-build PASS。cleared は Q1） | p001 |
 | ws344-p007 | VP8L の decoder（vp8l.c、run-fixtures lossless） | planned | p002, p005, p006 |
 | ws344-p008 | ALPH（alpha.c、run-fixtures alpha） | planned | p002, p007 |
 | ws344-p009 | bool decoder（bool.c） | cleared（2026-11-02 13:29 Q1、main で test-bool 8376 PASS）。実装済み・試験 PASS（Sonnet q1948-i01、2026-11-02。cleared は Q1） | p001 |
@@ -35,7 +35,7 @@
 | ws344-p013 | VP8 の係数（vp8-tokens.c） | cleared（2026-11-02 13:58 Q1、main で test-vp8_tokens 336179 PASS）。実装済み・試験 PASS（Sonnet 担当、2026-11-02） | p009, p010 |
 | ws344-p014 | VP8 の逆変換（vp8-idct.c） | cleared（2026-11-02 14:07 Q1、main で test-vp8_idct PASS）。実装済み・試験 PASS（Sonnet q1958-i01、2026-11-02。cleared は Q1） | p001 |
 | ws344-p015 | VP8 の intra 予測（vp8-predict.c） | in-progress（2026-11-02 14:07 Sonnet q1960-i01） | p001 |
-| ws344-p016 | VP8 の loop filter（vp8-filter.c） | planned | p001 |
+| ws344-p016 | VP8 の loop filter（vp8-filter.c） | in-progress（2026-11-02 14:14 Sonnet q1961-i01） | p001 |
 | ws344-p017 | VP8 の decoder（vp8.c、run-fixtures lossy）— Opus を推す | planned | p002, p011〜p016 |
 | ws344-p018 | 出力の変換（output.c） | planned | p001 |
 | ws344-p019 | interface（decode.c、compare・mutate・fuzz）— Opus を推す | planned | p002, p008, p017, p018 |
