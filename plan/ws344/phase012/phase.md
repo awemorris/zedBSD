@@ -2,7 +2,7 @@
 
 # ws344-p012 VP8 の macroblock header（vp8-modes.c）
 
-- Status: planned
+- Status: in-progress（実装済み・試験 PASS、Sonnet q1952-i01、2026-11-02。cleared は Q1）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p009, p010（vp8-header.h の struct だけを使う。test が struct を手で埋める）。
 - 目的: segment・skip・luma の mode・16 の subblock の mode（context）・chroma の mode。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -64,4 +64,17 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02（host の `date`）、Sonnet q1952-i01。
+
+- 作った物: `userland/desktop/libwebp-compat/vp8-modes.c`、`plan/ws344/tests/unit/test-vp8_modes.c`。header・道具は変えていない。
+- 実行した command と最後の行:
+  - `sh plan/ws344/tests/run-unit.sh vp8_modes` -> `test-vp8_modes: PASS (627570 checks)` / `run-unit: PASS`
+  - `sh plan/ws344/tests/run-unit.sh all` -> 8 試験（bool 8376、common 32、helpers 26、lbits 205384、prefix 1430293、riff 42324、vp8_modes 627570、vp8_tables 37674）全部 PASS、`run-unit: PASS`
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` -> `check-skeleton: PASS`
+  - `sh plan/ws344/tests/target-build.sh` -> `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`
+  - `git diff --check` -> 出力なし（終了 0）
+- 試験の内容: boolwriter で tree・確率（vp8-tables）を使って macroblock header を書き、subblock の context は test が全 subblock の mode の grid（frame の外は border）から自分で求める。単独の macroblock（ymode 0..4 × uvmode 0..3、B_PRED の 10 mode、segment・skip の全組合せ、非対称の above/left の context）、3x2 の frame（B_PRED の割合 0〜100%、border は B_DC_PRED）、乱数の frame 1000 本（乱数の確率・border）。ended（空・全ての切り方・全体）、乱数 byte の 2000 partition × 6 macroblock（範囲と context の更新）、segment・skip を読まない header で 0 になること、範囲外の context（10・11・200・255）。
+- 自分で決めた点: header が黙っている「呼び出し側の context が 0..9 の外」は B_DC_PRED として扱う（確率表を範囲外に引かないため）。segment は header の `update_map` だけで読むかを決める（read_header が enabled でない時 update_map を 0 にする約束）。
+- mutation（git の外の複写 `build/tmp/p012-mut/orig.c` から戻し、`cmp` で戻りを確認）: 23 通り。A と L の入れ替え、上・左の添字のずれ、top 行・left 列の境界、V/H/TM の implied の取り違え、context の guard の境界と無効化、segment・skip・uv・ymode の確率の取り違え、skip・segment の条件の反転、context の更新の添字、segment・skip の初期値。22 通りが FAIL（ASan の範囲外 index の検出を含む）。生き残り 1: `modes->ymode == B_PRED` を `>= B_PRED` にする変更。B_PRED が ymode の最大値（4）で kf_ymode_tree に 5 以上の leaf が無いので同値の変更で、見逃しではない。
+- 未実施: QEMU・実機・fixture の全体の試験（この Phase の範囲外）。`mutate.sh`・fuzz は未実行（fixture が無い）。
+- 仕様・header との食い違い: なし。
