@@ -3552,23 +3552,20 @@ parse_ip(
 /*
  * The x509-limbo cases whose outcome here differs from the case's
  * expectation, with the reason.  A case in this table must differ; a case
- * that differs and is not in it is a failure.  The reasons:
+ * that differs and is not in it is a failure.  The reasons are those of
+ * test-limbo.c, which runs every case of the corpus:
  *
- *   profile        the case tests a rule of a profile (the CA/Browser
- *                  Forum baseline, webpki) or of the issuance of RFC 5280
- *                  that path validation (6.1) does not enforce: this
- *                  library follows 6.1 and the header's list of checks.
- *   no-policy      the case needs policy processing, which is not done.
- *   anchor         the case faults the trust anchor's own contents, which
- *                  are taken as they are (6.1.1 (d)).
- *   name           the case faults a name rule the name module defines
- *                  otherwise (header of cryc-name.h).
- *   key-usage      a leaf whose keyUsage lacks digitalSignature is
- *                  refused (the header: TLS signs with the leaf's key), as
- *                  the case does not.
- *   depth          the case counts the verify depth without self-issued
- *                  intermediates, the header counts every certificate.
- *   decided        a decision about what the library accepts, explained where the table is used.
+ *   issuance        a rule RFC 5280 sets for issuing CAs, not checked by
+ *                   path validation (6.1).
+ *   cabf            a rule of the CA/Browser Forum Baseline Requirements.
+ *   anchor          a fault of the trust anchor's own contents, which are
+ *                   taken as they are (6.1.1 (d)).
+ *   name            a name rule cryc-name.h defines otherwise.
+ *   key-usage       a leaf whose keyUsage lacks digitalSignature is
+ *                   refused (the header); the case accepts it.
+ *   depth           the case does not count self-issued intermediates.
+ *   nc-noncritical  nameConstraints that are not critical are processed.
+ *   nc-leaf         the leaf's own nameConstraints constrain nothing.
  */
 struct limbo_exception {
 	const char *id;
@@ -3579,50 +3576,50 @@ struct limbo_exception {
 static struct limbo_exception limbo_exceptions[] = {
 	{ "pathlen::validation-ignores-pathlen-in-leaf", "key-usage", 0 },
 	{ "pathlen::max-chain-depth-1-self-issued", "depth", 0 },
-	{ "rfc5280::aki::critical-aki", "profile", 0 },
-	{ "rfc5280::aki::leaf-missing-aki", "profile", 0 },
-	{ "rfc5280::aki::intermediate-missing-aki", "profile", 0 },
-	{ "rfc5280::aki::cross-signed-root-missing-aki", "profile", 0 },
-	{ "rfc5280::nc::permitted-dns-match-noncritical", "decided", 0 },
+	{ "rfc5280::aki::critical-aki", "issuance", 0 },
+	{ "rfc5280::aki::leaf-missing-aki", "issuance", 0 },
+	{ "rfc5280::aki::intermediate-missing-aki", "issuance", 0 },
+	{ "rfc5280::aki::cross-signed-root-missing-aki", "issuance", 0 },
+	{ "rfc5280::nc::permitted-dns-match-noncritical", "nc-noncritical", 0 },
 	{ "rfc5280::nc::invalid-dnsname-leading-period", "name", 0 },
-	{ "rfc5280::nc::not-allowed-in-ee-noncritical", "decided", 0 },
-	{ "rfc5280::nc::not-allowed-in-ee-critical", "decided", 0 },
-	{ "rfc5280::pc::ica-noncritical-pc", "no-policy", 0 },
-	{ "rfc5280::san::noncritical-with-empty-subject", "profile", 0 },
+	{ "rfc5280::nc::not-allowed-in-ee-noncritical", "nc-leaf", 0 },
+	{ "rfc5280::nc::not-allowed-in-ee-critical", "nc-leaf", 0 },
+	{ "rfc5280::pc::ica-noncritical-pc", "issuance", 0 },
+	{ "rfc5280::san::noncritical-with-empty-subject", "issuance", 0 },
 	{ "rfc5280::san::underscore-dns", "name", 0 },
-	{ "rfc5280::serial::zero", "profile", 0 },
-	{ "rfc5280::ski::root-missing-ski", "profile", 0 },
-	{ "rfc5280::ski::intermediate-missing-ski", "profile", 0 },
+	{ "rfc5280::serial::zero", "issuance", 0 },
+	{ "rfc5280::ski::root-missing-ski", "issuance", 0 },
+	{ "rfc5280::ski::intermediate-missing-ski", "issuance", 0 },
 	{ "rfc5280::unknown-critical-extension-root", "anchor", 0 },
 	{ "rfc5280::root-missing-basic-constraints", "anchor", 0 },
-	{ "rfc5280::root-non-critical-basic-constraints", "anchor", 0 },
-	{ "rfc5280::leaf-ku-keycertsign", "profile", 0 },
+	{ "rfc5280::root-non-critical-basic-constraints", "issuance", 0 },
+	{ "rfc5280::leaf-ku-keycertsign", "issuance", 0 },
 	{ "rfc5280::ca-as-leaf", "key-usage", 0 },
-	{ "webpki::aki::root-with-aki-missing-keyidentifier", "anchor", 0 },
-	{ "webpki::aki::root-with-aki-authoritycertissuer", "anchor", 0 },
-	{ "webpki::aki::root-with-aki-authoritycertserialnumber", "anchor", 0 },
-	{ "webpki::aki::root-with-aki-all-fields", "anchor", 0 },
-	{ "webpki::aki::root-with-aki-ski-mismatch", "anchor", 0 },
-	{ "webpki::cn::ipv4-hex-mismatch", "profile", 0 },
-	{ "webpki::cn::ipv4-leading-zeros-mismatch", "profile", 0 },
-	{ "webpki::cn::ipv6-uppercase-mismatch", "profile", 0 },
-	{ "webpki::cn::ipv6-uncompressed-mismatch", "profile", 0 },
-	{ "webpki::cn::ipv6-non-rfc5952-mismatch", "profile", 0 },
-	{ "webpki::cn::punycode-not-in-san", "profile", 0 },
-	{ "webpki::cn::utf8-vs-punycode-mismatch", "profile", 0 },
-	{ "webpki::cn::not-in-san", "profile", 0 },
-	{ "webpki::cn::case-mismatch", "profile", 0 },
-	{ "webpki::eku::ee-anyeku", "profile", 0 },
-	{ "webpki::eku::ee-critical-eku", "profile", 0 },
-	{ "webpki::eku::ee-without-eku", "profile", 0 },
-	{ "webpki::eku::root-has-eku", "profile", 0 },
+	{ "webpki::aki::root-with-aki-missing-keyidentifier", "cabf", 0 },
+	{ "webpki::aki::root-with-aki-authoritycertissuer", "cabf", 0 },
+	{ "webpki::aki::root-with-aki-authoritycertserialnumber", "cabf", 0 },
+	{ "webpki::aki::root-with-aki-all-fields", "cabf", 0 },
+	{ "webpki::aki::root-with-aki-ski-mismatch", "cabf", 0 },
+	{ "webpki::cn::ipv4-hex-mismatch", "cabf", 0 },
+	{ "webpki::cn::ipv4-leading-zeros-mismatch", "cabf", 0 },
+	{ "webpki::cn::ipv6-uppercase-mismatch", "cabf", 0 },
+	{ "webpki::cn::ipv6-uncompressed-mismatch", "cabf", 0 },
+	{ "webpki::cn::ipv6-non-rfc5952-mismatch", "cabf", 0 },
+	{ "webpki::cn::punycode-not-in-san", "cabf", 0 },
+	{ "webpki::cn::utf8-vs-punycode-mismatch", "cabf", 0 },
+	{ "webpki::cn::not-in-san", "cabf", 0 },
+	{ "webpki::cn::case-mismatch", "cabf", 0 },
+	{ "webpki::eku::ee-anyeku", "cabf", 0 },
+	{ "webpki::eku::ee-critical-eku", "cabf", 0 },
+	{ "webpki::eku::ee-without-eku", "cabf", 0 },
+	{ "webpki::eku::root-has-eku", "cabf", 0 },
 	{ "webpki::san::public-suffix-multi-label-wildcard-san", "name", 0 },
 	{ "webpki::san::public-suffix-private-namespace-wildcard-san", "name", 0 },
-	{ "webpki::san::san-critical-with-nonempty-subject", "profile", 0 },
-	{ "webpki::malformed-aia", "profile", 0 },
-	{ "webpki::forbidden-rsa-not-divisible-by-8-in-root", "anchor", 0 },
-	{ "webpki::forbidden-rsa-key-not-divisible-by-8-in-leaf", "profile", 0 },
-	{ "webpki::ee-basicconstraints-ca", "profile", 0 },
+	{ "webpki::san::san-critical-with-nonempty-subject", "cabf", 0 },
+	{ "webpki::malformed-aia", "cabf", 0 },
+	{ "webpki::forbidden-rsa-not-divisible-by-8-in-root", "cabf", 0 },
+	{ "webpki::forbidden-rsa-key-not-divisible-by-8-in-leaf", "cabf", 0 },
+	{ "webpki::ee-basicconstraints-ca", "cabf", 0 },
 	{ NULL, NULL, 0 }
 };
 
