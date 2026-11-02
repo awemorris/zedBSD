@@ -190,6 +190,9 @@ struct rtld_object {
 	uint32_t lookup_mark;
 };
 
+/* The C library's __cxa_finalize(), which runs one object's exit handlers. */
+typedef void (*rtld_exit_finalizer)(void *);
+
 /*
  * A chunk of the object table (WS140): the first is static, the others
  * are mapped when the objects before them are all in use.  A chunk is
@@ -648,6 +651,8 @@ static Elf_Sym *resolve_tls_symbol(struct rtld_object *object, uint32_t index, s
 static void unload_object_locked(struct rtld_object *object);
 static void remove_initialization_record(struct rtld_object *object);
 static void finalize_object_unlocked(struct rtld_object *object);
+static uintptr_t object_header_address(const struct rtld_object *object);
+static rtld_exit_finalizer exit_handler_finalizer(void);
 static void lookup_generation_next(void);
 static void *rtld_dlsym_common(void *value, const char *name, const char *version);
 static struct rtld_handle *validate_handle(void *value);
@@ -1529,7 +1534,7 @@ __rtld_dladdr(
 		}
 	}
 	information->dli_fname = object->path;
-	information->dli_fbase = (void *)object->base;
+	information->dli_fbase = (void *)object_header_address(object);
 	information->dli_sname = best_name;
 	information->dli_saddr =
 	    best_name != NULL ? (void *)best_address : NULL;
@@ -5842,6 +5847,8 @@ unload_object_locked(
 	struct rtld_object **dependencies;
 	struct rtld_object_tables tables;
 	struct rtld_tls_module *module;
+	rtld_exit_finalizer finalizer;
+	uintptr_t handle_address;
 	size_t tls_size;
 	unsigned i, dependency_count;
 
@@ -5882,8 +5889,19 @@ unload_object_locked(
 		dependencies = inline_copy;
 	}
 
+	/*
+	 * The C library runs the object's exit handlers -- its atexit()
+	 * functions and its C++ static objects' destructors -- before its
+	 * own destructors, as exit() runs them before the loader's
+	 * teardown; after the unmapping below they would call nothing.
+	 */
+	finalizer = exit_handler_finalizer();
+	handle_address = object_header_address(object);
+
 	/* Application callbacks may recursively use the loader. */
 	loader_unlock();
+	if (finalizer != NULL)
+		finalizer((void *)handle_address);
 	finalize_object_unlocked(object);
 	loader_lock();
 
@@ -5996,6 +6014,54 @@ finalize_object_unlocked(
 	/* Checks the current object. */
 	if (object->fini != 0)
 		((void (*)(void))object->fini)();
+}
+
+/*
+ * Finds the address of an object's ELF header in memory: the start of the
+ * load segment that maps the file from its first byte.  It is what the
+ * linker gives the object as its __dso_handle, the handle the C library
+ * files the object's exit handlers under.
+ */
+static uintptr_t
+object_header_address(
+	const struct rtld_object *object)
+{
+	unsigned i;
+
+	/* Finds the load segment that begins at the file's first byte. */
+	for (i = 0; i < object->phnum; i++) {
+		/* Skips a segment that does not map the header. */
+		if (object->phdr[i].p_type != PT_LOAD ||
+		    object->phdr[i].p_offset != 0)
+			continue;
+
+		/* The header lies at the segment's start. */
+		return object->base + (uintptr_t)object->phdr[i].p_vaddr;
+	}
+
+	/* An object without one is named by its load base. */
+	return object->base;
+}
+
+/*
+ * Finds the C library's __cxa_finalize(), which runs the exit handlers of
+ * one object, or NULL when no loaded object has one.  The loader lock is
+ * held, and the object being unloaded is no longer searched.
+ */
+static rtld_exit_finalizer
+exit_handler_finalizer(
+	void)
+{
+	uintptr_t address;
+	int found;
+
+	/* Looks the function up in the process's objects. */
+	address = lookup_global_optional("__cxa_finalize", NULL, &found);
+	if (!found || address == 0)
+		return NULL;
+
+	/* The function to call with the object's handle. */
+	return (rtld_exit_finalizer)address;
 }
 
 /*
