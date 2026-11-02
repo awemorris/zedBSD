@@ -473,7 +473,8 @@ page_load_location(
 			error = ENOMEM;
 	}
 
-	/* The document. */
+	/* The document (and whether it may be kept for Back and Forward). */
+	page->no_store = response.no_store;
 	if (error == 0)
 		error = page_load_document(page, response.body.data, response.body.length,
 		wb_buffer_string(&response.content_type), response.content_type.length);

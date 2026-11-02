@@ -169,6 +169,8 @@ struct page {
 	int frames_running;
 	/* The window's load event waits for the frames the document embeds. */
 	int load_pending;
+	/* The document came with Cache-Control: no-store (the view keeps no copy of it for Back and Forward). */
+	int no_store;
 	/* Defer nested ready-script drains while the outer insertion-order loop runs. */
 	int scripts_running;
 	struct wb_vector fonts;

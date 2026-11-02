@@ -443,7 +443,7 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-403](bugs/BUG-403.md) | ブラウザ: link を押してから遷移まで約 2 秒 app が応答しない（取得の間も event の処理を続ける） | fixed（2026-11-02 P8 q1924-i01、文書の後半を非同期に・script を止める sheet を仕様どおりに・sheet の先取り・callback を 50 ms で区切る。host と live で確かめた、本物の Windows は未実施。1 つの重い script の長さは残る） |
 | [BUG-404](bugs/BUG-404.md) | ブラウザ: 頁の取得中の視覚的な反応が無い（address の欄を進み具合の表示に、押した時点で URL を更新） | fixed（2026-11-02 P8 q1924-i01、browser_view_load_progress・location の箱の塗り（KL_VERSION 107、kl_titlebar_v1 version 7）・押した時点の URL。Wine で画面を確かめた、zedBSD の画面と本物の Windows は未実施） |
 | [BUG-405](bugs/BUG-405.md) | ブラウザ: Google の「Googleについて」の頁で画像が出ない | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
-| [BUG-406](bugs/BUG-406.md) | ブラウザ: 戻る button で数秒待たされる（cache で表示し、再取得は cache できない頁だけ） | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
+| [BUG-406](bugs/BUG-406.md) | ブラウザ: 戻る button で数秒待たされる（cache で表示し、再取得は cache できない頁だけ） | fixed（2026-11-02 P8 q1924-i01、戻る・進むの cache（最大 3 頁、no-store と media の頁は取り直す）。host と live で確かめた、本物の Windows は未実施） |
 | [BUG-407](bugs/BUG-407.md) | ブラウザ: Google の検索の button（Google 検索・I'm Feeling Lucky・AI モード）が反応しない | fixed（2026-11-02 P8 q1924-i01、pointer-events・for await・script の top-level の遷移ほか。host と live の google.com で確かめた、本物の Windows は未実施。結果の頁は Google の JS の確認で reCAPTCHA になる＝別件） |
 | [BUG-409](bugs/BUG-409.md) | ld.so が DF_1_NODELETE を守らず dlclose で unload する | fixed（2026-11-02 P3 q1930-i01、DT_FLAGS_1 の DF_1_NODELETE と dlopen の RTLD_NODELETE で object を exit まで残す。QEMU amd64 で rtld-nodelete・rtld-many・TLS の試験が PASS、実機は未実施） |
 | [BUG-410](bugs/BUG-410.md) | libc の atexit が登録した object を覚えず、dlclose した library の関数を exit で呼ぶ | open（2026-11-02 10:41 Q1 が起票、P3） |
