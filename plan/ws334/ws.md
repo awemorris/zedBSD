@@ -11,6 +11,7 @@
 
 ## ユーザーの決定
 
+- （2026-11-02 10:52）ユーザーから、WS335 の完了の後に、Windows 版のブラウザの OpenSSL を libssl-compat・libcrypto-compat（static link）に切り替え、OpenSSL への依存を無くす、という趣旨の指示を受けた。
 - 2026-10-31 ユーザーから、次の趣旨の指示を受けた。
   1. libbrowser のブラウザを Windows に移植する WS を作る。
   2. libbrowser が platform に依らない事を、移植を通して結果として確かめる。

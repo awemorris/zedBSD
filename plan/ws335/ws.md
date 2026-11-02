@@ -13,6 +13,7 @@
 
 ## ユーザーの決定
 
+- （2026-11-02 10:52）ユーザーから、WS335 の完了の後に、Windows 版のブラウザ（WS334）の OpenSSL を libssl-compat・libcrypto-compat に切り替えて OpenSSL への依存を無くす、という趣旨の指示を受けた（p036 の切り替えを Windows にも、WS335 の後）。
 - （2026-11-02 10:07）ユーザーから、WS335 を completed まで進める、Sonnet なら 3 並列で実装してよい、という趣旨の指示を受けた。
 - 2026-11-01 ユーザーから、WS を立てて libssl-compat を実装する、標準廉価実装手順を使う、今 P6 で始める、という趣旨の指示を受けた。
 - 2026-11-01 ユーザーから、いったん libbrowser に要る範囲だけを実装すればよい、header は他の compat の library と同じ置き方にし、本家（OpenSSL）の header とは分ける、という趣旨の指示を受けた（他の compat は `include/libc/compat/<名前>/`、例 `include/libc/compat/png/png.h`）。
