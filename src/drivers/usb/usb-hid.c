@@ -15,12 +15,9 @@
 #include <drivers/generic/hidraw.h>
 #include <drivers/generic/hid-report.h>
 #include <drivers/usb/usb-hid.h>
-#include <drivers/usb/usb-hid-ring.h>
 #include <drivers/usb/usb.h>
 #include <kern/boot.h>
-#include <kern/cdev.h>
 #include <kern/clock.h>
-#include <kern/file.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
@@ -74,28 +71,6 @@
 #define USB_HID_DUMP_REPORTS		300U
 #define USB_HID_DUMP_LINE		32U
 
-/*
- * The boot parameter that keeps every report in the ring read from
- * /dev/usbhid-ring, and the ring's size: 131072 records of 64 bytes (8 MiB),
- * some 17 minutes of a mouse moving without a pause at 125 reports a
- * second, two at 1000.  A read copies at most USB_HID_RING_READ_CHUNK bytes
- * a time with the ring held.
- */
-#define USB_HID_RING_TOKEN		"usbhid.ring=1"
-#define USB_HID_RING_RECORDS		(1ULL << 17)
-#define USB_HID_RING_DEVICE_NAME	"usbhid-ring"
-#define USB_HID_RING_DEVICE_NUMBER	0x001c0000U
-#define USB_HID_RING_READ_CHUNK		4096U
-
-/* The boot parameter that leaves a vendor's interface unread instead of drained. */
-#define USB_HID_NO_DRAIN_TOKEN		"usbhid.drain=0"
-
-/* Where usb_hid_ring_state stands: not looked at, being started, off, on. */
-#define USB_HID_RING_UNKNOWN		0U
-#define USB_HID_RING_STARTING		1U
-#define USB_HID_RING_OFF		2U
-#define USB_HID_RING_ON			3U
-
 struct usb_hid {
 	struct drv_usb_interface *interface;
 	struct drv_usb_device *device;
@@ -131,18 +106,11 @@ struct usb_hid {
 	/*
 	 * When the last transfer finished (CLOCK_MONOTONIC milliseconds): the
 	 * completion sets it under the lock, and the worker takes it for the
-	 * time of every event of the report it publishes.  The one URB is not
-	 * submitted again before the worker has published its report, so the
-	 * time always belongs to the buffer.
+	 * time of every event of the report it publishes.  The worker takes
+	 * it with the report's copy before the one URB is submitted again,
+	 * so the time always belongs to the copy.
 	 */
 	uint64_t completed_milliseconds;
-	/*
-	 * The same moment for the report ring, in microseconds of the
-	 * platform's counter and of CLOCK_MONOTONIC: set beside
-	 * completed_milliseconds while the ring is on.
-	 */
-	uint64_t completed_counter_us;
-	uint64_t completed_monotonic_us;
 	unsigned stopping;
 	unsigned submit_active;
 	unsigned activating;
@@ -188,17 +156,14 @@ struct usb_hid {
 
 /*
  * One finished report as the worker took it out of its transfer: its
- * length (the bytes are struct usb_hid's report) and when and how the
- * transfer ended.  It lives on the worker's stack from the take to the
+ * length (the bytes are struct usb_hid's report) and when the transfer
+ * ended.  It lives on the worker's stack from the take to the
  * publication, while the next transfer overwrites the copies in struct
  * usb_hid and in the URB.
  */
 struct usb_hid_taken {
 	size_t length;
 	uint64_t milliseconds;
-	uint64_t counter_us;
-	uint64_t monotonic_us;
-	struct drv_usb_urb_hcd_result hcd;
 };
 
 static struct spinlock usb_hid_pending_lock;
@@ -212,29 +177,6 @@ static unsigned usb_hid_registered;
  * parameters do not change while the kernel runs.
  */
 static unsigned usb_hid_dump_state;
-
-/*
- * Whether usbhid.drain=0 is among the boot parameters, kept as
- * usb_hid_dump_state is: 0 until the first vendor's interface looks, then 1
- * without it (drained) and 2 with it (left unread).
- */
-static unsigned usb_hid_no_drain_state;
-
-/*
- * Where the report ring stands (USB_HID_RING_*), moved with atomics: the
- * first attachment takes it from UNKNOWN to STARTING, looks at the boot
- * parameters and leaves it OFF or, once the ring and its lock are ready,
- * ON (release).  A report is kept only when it reads ON (acquire).  It
- * does not change after that.
- */
-static unsigned usb_hid_ring_state;
-
-/*
- * The report ring and the lock that serializes it, ready before
- * usb_hid_ring_state turns ON and kept for as long as the kernel runs.
- */
-static struct spinlock usb_hid_ring_lock;
-static struct drv_usb_hid_ring usb_hid_ring;
 
 /*
  * Forward declaration
@@ -280,25 +222,10 @@ static int usb_hid_sibling_fingers(struct usb_hid *hid);
 static void usb_hid_put_bits(uint8_t *data, uint32_t offset, uint32_t bits, uint32_t value);
 static void usb_hid_contact_maximum(struct usb_hid *hid);
 static uint32_t usb_hid_get_bits(const uint8_t *data, uint32_t offset, uint32_t bits);
-static int usb_hid_boot_token(const char *token, unsigned *state);
-static int usb_hid_drain_wanted(void);
-static void usb_hid_ring_start(void);
-static int usb_hid_ring_on(void);
-static void usb_hid_now(uint64_t *counter_us, uint64_t *monotonic_us);
-static void usb_hid_ring_note(struct usb_hid *hid, uint64_t counter_us, uint64_t monotonic_us, const struct drv_usb_urb_hcd_result *hcd, unsigned flags, const uint8_t *bytes, size_t length);
-static unsigned usb_hid_ring_flags(const struct usb_hid *hid);
-static void usb_hid_ring_note_status(struct usb_hid *hid, unsigned flags, enum drv_usb_urb_status status);
-static ssize_t usb_hid_ring_device_read(struct file *file, void *buffer, size_t size);
 
 /* What a raw interface's transport does: its output reports (ws161-p002). */
 static const struct drv_hidraw_ops usb_hid_raw_ops = {
 	.output = usb_hid_raw_output
-};
-
-/* /dev/usbhid-ring: reads the report ring; a read never waits for a report. */
-static const struct cdev_ops usb_hid_ring_ops = {
-	.read = usb_hid_ring_device_read,
-	.flags = CDEV_READ_NEVER_WAITS,
 };
 
 /*
@@ -464,9 +391,6 @@ usb_hid_attach(
 
 	(void)id;
 
-	/* The report ring starts with the first interface, when the boot parameters ask for it. */
-	usb_hid_ring_start();
-
 	/* Handles the interface descriptor availability. */
 	interface_descriptor = drv_usb_interface_descriptor(interface);
 	if (interface_descriptor == NULL ||
@@ -608,8 +532,6 @@ usb_hid_detach(
 {
 	struct usb_hid *hid = drv_usb_interface_driver_data(interface);
 	enum drv_usb_urb_status status;
-	uint64_t counter_us;
-	uint64_t monotonic_us;
 	int drain_error = 0, join_error;
 
 	(void)flags;
@@ -617,11 +539,6 @@ usb_hid_detach(
 	/* Handles the hid availability. */
 	if (hid == NULL)
 		return 0;
-
-	/* The report ring shows when the interface left. */
-	usb_hid_now(&counter_us, &monotonic_us);
-	usb_hid_ring_note(hid, counter_us, monotonic_us, NULL, DRV_USB_HID_RING_DETACH, NULL, 0);
-
 	usb_hid_pending_remove(hid);
 	usb_hid_close_admission(hid);
 
@@ -835,7 +752,6 @@ usb_hid_fetch_layout(
 	size_t maximum_report;
 	int raw;
 	int dump;
-	int drain;
 	int prepared;
 	int touch_error;
 	int error;
@@ -883,13 +799,8 @@ usb_hid_fetch_layout(
 			return 0;
 		}
 
-		/*
-		 * A vendor's interface alone is read and its reports dropped
-		 * (struct usb_hid's drain), unless usbhid.drain=0 leaves it to
-		 * be refused below and never read.
-		 */
-		drain = usb_hid_drain_wanted();
-		if (raw == 0 && hid->raw_layout.vendor_only && drain) {
+		/* A vendor's interface alone is read and its reports dropped (struct usb_hid's drain). */
+		if (raw == 0 && hid->raw_layout.vendor_only) {
 			kern_free(descriptor);
 			hid->drain = 1U;
 			hid->stage = "capacity";
@@ -1082,9 +993,6 @@ usb_hid_completion(
 	struct thread *worker;
 	unsigned long irq;
 	uint64_t milliseconds;
-	uint64_t counter_us;
-	uint64_t monotonic_us;
-	int ring;
 
 	/* Handles the hid availability. */
 	if (hid == NULL || urb != hid->urb)
@@ -1093,20 +1001,11 @@ usb_hid_completion(
 	/* The report's time is when the transfer finished, not when the worker runs. */
 	milliseconds = clock_milliseconds(NULL);
 
-	/* The finer time of the same moment, only for the report ring. */
-	counter_us = 0;
-	monotonic_us = 0;
-	ring = usb_hid_ring_on();
-	if (ring)
-		usb_hid_now(&counter_us, &monotonic_us);
-
 	/* Hands the finished transfer and its time to the worker. */
 	irq = spin_lock_irqsave(&hid->lock);
 
 	hid->work_pending |= USB_HID_WORK_COMPLETE;
 	hid->completed_milliseconds = milliseconds;
-	hid->completed_counter_us = counter_us;
-	hid->completed_monotonic_us = monotonic_us;
 	worker = hid->worker;
 
 	spin_unlock_irqrestore(&hid->lock, irq);
@@ -1156,8 +1055,6 @@ static int
 usb_hid_arm(
 	struct usb_hid *hid)
 {
-	unsigned urb_flags;
-	int ring;
 	int error;
 
 	/* Checks the operation status. */
@@ -1166,15 +1063,9 @@ usb_hid_arm(
 		return error;
 	kern_memset(hid->buffer, 0, hid->buffer_size);
 
-	/* The report ring keeps when the controller was given the transfer and when it ended it. */
-	urb_flags = DRV_USB_URB_SHORT_OK;
-	ring = usb_hid_ring_on();
-	if (ring)
-		urb_flags |= DRV_USB_URB_HCD_TIMES;
-
 	/* Checks the operation status. */
 	error = drv_usb_urb_setup(hid->urb, hid->buffer, hid->buffer_size,
-				  urb_flags, 0, usb_hid_completion,
+				  DRV_USB_URB_SHORT_OK, 0, usb_hid_completion,
 				  hid);
 	if (error == 0)
 		error = drv_usb_urb_submit(hid->urb);
@@ -1190,8 +1081,8 @@ usb_hid_arm(
 
 /*
  * Takes a finished report out of its transfer: the bytes into struct
- * usb_hid's report, and when and how the transfer ended, before the
- * transfer is armed again.
+ * usb_hid's report and the time the transfer ended, before the transfer
+ * is armed again.
  */
 static void
 usb_hid_take_report(
@@ -1210,13 +1101,8 @@ usb_hid_take_report(
 	irq = spin_lock_irqsave(&hid->lock);
 
 	taken->milliseconds = hid->completed_milliseconds;
-	taken->counter_us = hid->completed_counter_us;
-	taken->monotonic_us = hid->completed_monotonic_us;
 
 	spin_unlock_irqrestore(&hid->lock, irq);
-
-	/* What the controller said of the transfer, for the report ring. */
-	drv_usb_urb_hcd_result(hid->urb, &taken->hcd);
 }
 
 /* Hands one taken report on: a raw interface's to hidraw, any other's to the input glue. */
@@ -1227,16 +1113,11 @@ usb_hid_publish_report(
 {
 	const uint8_t *buffer;
 	size_t length;
-	unsigned flags;
 	int dump;
 
 	/* The report's copy, which the next transfer does not touch. */
 	buffer = hid->report;
 	length = taken->length;
-
-	/* The report ring keeps every report of every interface, as it came, with what the controller said of it. */
-	flags = usb_hid_ring_flags(hid);
-	usb_hid_ring_note(hid, taken->counter_us, taken->monotonic_us, &taken->hcd, flags, buffer, length);
 
 	/* A raw interface's report goes to its readers as it came. */
 	if (hid->raw) {
@@ -1405,9 +1286,6 @@ usb_hid_worker(
 				}
 				continue;
 			} else if (status == DRV_USB_URB_STALL) {
-				/* The report ring shows the stall among the reports. */
-				usb_hid_ring_note_status(hid, DRV_USB_HID_RING_STALL, status);
-
 				/* Checks the operation status. */
 				error = drv_usb_endpoint_clear_halt(
 					hid->endpoint);
@@ -1422,9 +1300,6 @@ usb_hid_worker(
 				}
 			} else if (status != DRV_USB_URB_CANCELLED &&
 				   status != DRV_USB_URB_DISCONNECTED) {
-				/* The report ring shows the status that ends the interface's service. */
-				usb_hid_ring_note_status(hid, DRV_USB_HID_RING_ERROR, status);
-
 				usb_hid_runtime_stop(hid, "terminal transfer",
 						     (int)status, 1);
 
@@ -1601,9 +1476,6 @@ usb_hid_activate_start(
 	struct hid_input_identity identity;
 	struct thread *worker;
 	unsigned long irq;
-	uint64_t counter_us;
-	uint64_t monotonic_us;
-	unsigned flags;
 	int error;
 
 	/* The worker that decodes the reports, not started yet. */
@@ -1665,12 +1537,6 @@ usb_hid_activate_start(
 
 	/* The worker takes the reports from now on. */
 	thread_start(worker);
-
-	/* The report ring shows when the interface went into service, and how long its transfer is. */
-	usb_hid_now(&counter_us, &monotonic_us);
-	flags = usb_hid_ring_flags(hid) | DRV_USB_HID_RING_ATTACH;
-	usb_hid_ring_note(hid, counter_us, monotonic_us, NULL, flags, NULL, hid->buffer_size);
-
 	if (hid->drain) {
 		kern_logf("usb-hid: drained vendor interface usb%u device=%u interface=%u endpoint=%02x report-bytes=%u\n",
 			  drv_usb_bus_number(drv_usb_device_bus(hid->device)),
@@ -1909,342 +1775,31 @@ static int
 usb_hid_dump_wanted(
 	void)
 {
-	int present;
-
-	/* Looks for usbhid.dump=1. */
-	present = usb_hid_boot_token(USB_HID_DUMP_TOKEN, &usb_hid_dump_state);
-
-	/* Reports what the parameters ask. */
-	return present;
-}
-
-/* Tells whether a vendor's interface is drained, as it is unless the boot parameters hold usbhid.drain=0. */
-static int
-usb_hid_drain_wanted(
-	void)
-{
-	int refused;
-
-	/* Looks for usbhid.drain=0. */
-	refused = usb_hid_boot_token(USB_HID_NO_DRAIN_TOKEN, &usb_hid_no_drain_state);
-	if (refused)
-		return 0;
-
-	/* Succeeded: vendor interfaces are drained. */
-	return 1;
-}
-
-/*
- * Tells whether a whole token is among the boot parameters, looked at once:
- * state is 0 until the first look, then 1 without the token and 2 with it.
- * The parameters do not change while the kernel runs, so callers that race
- * on the first look store the same answer.
- */
-static int
-usb_hid_boot_token(
-	const char *token,
-	unsigned *state)
-{
 	const char *line;
 	int present;
 
 	/* Looked at once: the parameters do not change. */
-	if (*state != 0U) {
-		if (*state == 2U)
+	if (usb_hid_dump_state != 0U) {
+		if (usb_hid_dump_state == 2U)
 			return 1;
 		return 0;
 	}
 
-	/* The line the loader handed over, and whether it holds the token. */
+	/* The line the loader handed over, and whether it holds usbhid.dump=1. */
 	line = kern_boot_handoff("boot.command-line");
 	present = 0;
 	if (line != NULL)
-		present = kern_boot_parameters_token_present(line, token);
+		present = kern_boot_parameters_token_present(line, USB_HID_DUMP_TOKEN);
 
 	/* Kept for the next look. */
-	*state = 1U;
+	usb_hid_dump_state = 1U;
 	if (present)
-		*state = 2U;
+		usb_hid_dump_state = 2U;
 
-	/* Reports whether the token is there. */
+	/* Reports what the parameters ask. */
 	if (present)
 		return 1;
 	return 0;
-}
-
-/*
- * Starts the report ring and /dev/usbhid-ring once, when the boot
- * parameters hold usbhid.ring=1.  The first caller does the work; one that
- * comes while it is under way goes on without the ring, which then misses
- * only that interface's first reports.
- */
-static void
-usb_hid_ring_start(
-	void)
-{
-	struct drv_usb_hid_ring_record *records;
-	unsigned expected;
-	unsigned looked;
-	int claimed;
-	int wanted;
-	int error;
-
-	/* Only the first caller starts the ring. */
-	expected = USB_HID_RING_UNKNOWN;
-	claimed = __atomic_compare_exchange_n(&usb_hid_ring_state, &expected, USB_HID_RING_STARTING, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
-	if (!claimed)
-		return;
-
-	/* Off unless the boot parameters ask for it. */
-	looked = 0;
-	wanted = usb_hid_boot_token(USB_HID_RING_TOKEN, &looked);
-	if (!wanted) {
-		__atomic_store_n(&usb_hid_ring_state, USB_HID_RING_OFF, __ATOMIC_RELEASE);
-		return;
-	}
-
-	/* The records, kept for as long as the kernel runs. */
-	records = kern_malloc((size_t)(USB_HID_RING_RECORDS * sizeof(*records)));
-	if (records == NULL) {
-		kern_logf("usb-hid: report ring not started (no memory for %llu records)\n",
-			  (unsigned long long)USB_HID_RING_RECORDS);
-		__atomic_store_n(&usb_hid_ring_state, USB_HID_RING_OFF, __ATOMIC_RELEASE);
-		return;
-	}
-	kern_memset(records, 0, (size_t)(USB_HID_RING_RECORDS * sizeof(*records)));
-
-	/* The ring and its lock, ready before any report reads ON. */
-	(void)drv_usb_hid_ring_init(&usb_hid_ring, records, USB_HID_RING_RECORDS);
-	spin_init(&usb_hid_ring_lock, LOCK_RANK_DEVICE, "usb hid ring");
-	__atomic_store_n(&usb_hid_ring_state, USB_HID_RING_ON, __ATOMIC_RELEASE);
-
-	/* The node root reads the ring from; the ring keeps reports even without it. */
-	error = cdev_register(USB_HID_RING_DEVICE_NAME, (dev_t)USB_HID_RING_DEVICE_NUMBER, &usb_hid_ring_ops, NULL);
-	if (error != 0) {
-		kern_logf("usb-hid: report ring /dev/%s not published (%d)\n", USB_HID_RING_DEVICE_NAME, error);
-		return;
-	}
-
-	/* Succeeded: the ring keeps every report from now on. */
-	kern_logf("usb-hid: report ring /dev/%s records=%llu record-bytes=%u\n",
-		  USB_HID_RING_DEVICE_NAME,
-		  (unsigned long long)USB_HID_RING_RECORDS,
-		  (unsigned)sizeof(*records));
-}
-
-/* Tells whether the report ring keeps reports. */
-static int
-usb_hid_ring_on(
-	void)
-{
-	unsigned state;
-
-	/* ON is published after the ring and its lock are ready. */
-	state = __atomic_load_n(&usb_hid_ring_state, __ATOMIC_ACQUIRE);
-	if (state == USB_HID_RING_ON)
-		return 1;
-
-	/* Off, or not started yet. */
-	return 0;
-}
-
-/*
- * Gives the time now in microseconds of the USB core's counter (the clock
- * of drv_usb_urb_hcd_result's times) and of CLOCK_MONOTONIC.
- */
-static void
-usb_hid_now(
-	uint64_t *counter_us,
-	uint64_t *monotonic_us)
-{
-	uint64_t nanoseconds;
-
-	/* The counter the controller's times are read from. */
-	nanoseconds = drv_usb_trace_now_ns();
-	*counter_us = nanoseconds / 1000U;
-
-	/* The clock user space reads as CLOCK_MONOTONIC. */
-	*monotonic_us = kern_ticks_to_us(clock_ticks());
-}
-
-/*
- * Keeps one record in the report ring when it is on: the interface, the
- * time, what the record stands for (DRV_USB_HID_RING_* flags), the length
- * of the report (or of the transfer, for ATTACH) and its first bytes.
- */
-static void
-usb_hid_ring_note(
-	struct usb_hid *hid,
-	uint64_t counter_us,
-	uint64_t monotonic_us,
-	const struct drv_usb_urb_hcd_result *hcd,
-	unsigned flags,
-	const uint8_t *bytes,
-	size_t length)
-{
-	struct drv_usb_hid_ring_record record;
-	uint64_t event_us;
-	uint64_t submitted_us;
-	uint64_t span;
-	unsigned bus;
-	unsigned address;
-	unsigned interface_number;
-	unsigned long irq;
-	size_t kept;
-	int on;
-
-	/* Nothing is kept while the ring is off. */
-	on = usb_hid_ring_on();
-	if (!on)
-		return;
-
-	/* The interface and the time. */
-	kern_memset(&record, 0, sizeof(record));
-	usb_hid_location(hid, &bus, &address, &interface_number);
-	record.counter_us = counter_us;
-	record.monotonic_us = monotonic_us;
-	record.bus = (uint8_t)bus;
-	record.address = (uint8_t)address;
-	record.interface = (uint8_t)interface_number;
-	record.endpoint = (uint8_t)drv_usb_endpoint_address(hid->endpoint);
-	record.flags = (uint8_t)flags;
-
-	/* What the controller said: its code, the bytes left, and the times it was given the transfer and ended it. */
-	if (hcd != NULL && hcd->noted) {
-		record.code = (uint8_t)hcd->code;
-		record.residual = (uint16_t)hcd->residual;
-		if (hcd->residual > UINT16_MAX)
-			record.residual = UINT16_MAX;
-	}
-
-	/* The times, when the transfer asked for them and the controller's driver took its event. */
-	if (hcd != NULL &&
-	    hcd->submitted_ns != 0U &&
-	    hcd->event_ns >= hcd->submitted_ns) {
-		submitted_us = hcd->submitted_ns / 1000U;
-		event_us = hcd->event_ns / 1000U;
-		span = event_us - submitted_us;
-		record.queued_us = (uint32_t)span;
-		if (span > UINT32_MAX)
-			record.queued_us = UINT32_MAX;
-		span = 0;
-		if (counter_us > event_us)
-			span = counter_us - event_us;
-		record.event_us = (uint16_t)span;
-		if (span > UINT16_MAX)
-			record.event_us = UINT16_MAX;
-	}
-
-	/* The length as it came, and as many of the bytes as a record holds. */
-	record.length = (uint16_t)length;
-	if (length > UINT16_MAX)
-		record.length = UINT16_MAX;
-	kept = 0;
-	if (bytes != NULL) {
-		kept = length;
-		if (kept > DRV_USB_HID_RING_BYTES)
-			kept = DRV_USB_HID_RING_BYTES;
-		kern_memcpy(record.bytes, bytes, kept);
-	}
-	record.kept = (uint8_t)kept;
-
-	/* Adds the record, overwriting the oldest. */
-	irq = spin_lock_irqsave(&usb_hid_ring_lock);
-
-	drv_usb_hid_ring_put(&usb_hid_ring, &record);
-
-	spin_unlock_irqrestore(&usb_hid_ring_lock, irq);
-}
-
-/* Gives the report ring's flags for what kind of interface this is. */
-static unsigned
-usb_hid_ring_flags(
-	const struct usb_hid *hid)
-{
-	/* A raw interface's, a drained one's, or an input interface's (none). */
-	if (hid->raw)
-		return DRV_USB_HID_RING_RAW;
-	if (hid->drain)
-		return DRV_USB_HID_RING_DRAIN;
-
-	/* An interface published for input. */
-	return 0;
-}
-
-/* Keeps a transfer that carried no report (a stall or a terminal status) in the report ring, at the time it finished. */
-static void
-usb_hid_ring_note_status(
-	struct usb_hid *hid,
-	unsigned flags,
-	enum drv_usb_urb_status status)
-{
-	struct drv_usb_urb_hcd_result hcd;
-	uint64_t counter_us;
-	uint64_t monotonic_us;
-	unsigned long irq;
-	uint8_t code;
-
-	/* The time the completion took. */
-	irq = spin_lock_irqsave(&hid->lock);
-
-	counter_us = hid->completed_counter_us;
-	monotonic_us = hid->completed_monotonic_us;
-
-	spin_unlock_irqrestore(&hid->lock, irq);
-
-	/* The status, in the record's first byte, and what the controller said of it. */
-	drv_usb_urb_hcd_result(hid->urb, &hcd);
-	code = (uint8_t)status;
-	flags |= usb_hid_ring_flags(hid);
-	usb_hid_ring_note(hid, counter_us, monotonic_us, &hcd, flags, &code, 1U);
-}
-
-/*
- * Reads the report ring from the file's offset on (see
- * drv_usb_hid_ring_read): whole records when the reads are multiples of 64
- * bytes.  Zero once the reader has caught up with the newest record.
- */
-static ssize_t
-usb_hid_ring_device_read(
-	struct file *file,
-	void *buffer,
-	size_t size)
-{
-	uint8_t *out;
-	uint64_t offset;
-	unsigned long irq;
-	size_t done;
-	size_t chunk;
-	size_t copied;
-
-	/* Refuses a negative offset. */
-	if (file->f_offset < 0)
-		return -EINVAL;
-
-	/* Copies a chunk a time, so the ring is not held for a long read. */
-	offset = (uint64_t)file->f_offset;
-	out = buffer;
-	done = 0;
-	while (done < size) {
-		chunk = size - done;
-		if (chunk > USB_HID_RING_READ_CHUNK)
-			chunk = USB_HID_RING_READ_CHUNK;
-
-		irq = spin_lock_irqsave(&usb_hid_ring_lock);
-
-		copied = drv_usb_hid_ring_read(&usb_hid_ring, offset, out + done, chunk, &offset);
-
-		spin_unlock_irqrestore(&usb_hid_ring_lock, irq);
-
-		/* A short chunk means the reader reached the newest record. */
-		done += copied;
-		if (copied < chunk)
-			break;
-	}
-
-	/* Succeeded: the bytes read; the offset moves past them. */
-	file->f_offset = (off_t)offset;
-	return (ssize_t)done;
 }
 
 /* Gives the bus, the device's address and the interface's number, which name an interface in the kernel's log. */

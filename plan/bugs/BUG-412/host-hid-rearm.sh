@@ -9,8 +9,8 @@ OUT=${OUT:-build/bug412-rearm-test}
 mkdir -p "$OUT"
 F="-std=gnu11 -w -DKERN_UAPI_NATIVE -Iinclude -Isrc -I. -no-pie -Wl,--unresolved-symbols=ignore-all"
 # shellcheck disable=SC2086
-cc $F -O1 -o "$OUT/plain" plan/bugs/BUG-412/host-hid-rearm.c src/drivers/usb/usb-hid-ring.c
+cc $F -O1 -o "$OUT/plain" plan/bugs/BUG-412/host-hid-rearm.c
 # shellcheck disable=SC2086
-cc $F -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -o "$OUT/sanitized" plan/bugs/BUG-412/host-hid-rearm.c src/drivers/usb/usb-hid-ring.c
+cc $F -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -o "$OUT/sanitized" plan/bugs/BUG-412/host-hid-rearm.c
 timeout 60 "$OUT/plain"
 timeout 60 "$OUT/sanitized"

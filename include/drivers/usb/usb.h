@@ -76,13 +76,6 @@
 #define DRV_USB_URB_RECLAIM_SAFE		(1U << 4)
 #define DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE	8192U
 
-/*
- * Asks for the times of the transfer on the host controller in
- * drv_usb_urb_hcd_result(): when it was handed over and when the
- * controller reported its end.  Without it neither is read.
- */
-#define DRV_USB_URB_HCD_TIMES			(1U << 5)
-
 /* The HCD accepts one active URB per endpoint instead of one per controller. */
 #define DRV_USB_HCD_CAP_CONCURRENT_URBS		(1U << 0)
 #define DRV_USB_HCD_CAP_TRANSFER_RESERVE	(1U << 1)
@@ -1154,40 +1147,6 @@ void
 drv_usb_urb_trace_read(
 	const struct drv_usb_urb *u,
 	struct drv_usb_urb_trace *trace);
-
-/*
- * What the host controller reported of a transfer's last submission, for
- * a diagnosis: its own completion code (an xHCI Completion Code; 0 when the
- * controller's driver does not say), the bytes it did not move, and, for a
- * transfer set up with DRV_USB_URB_HCD_TIMES, when it was handed to the
- * controller and when the controller's event for it was taken
- * (drv_usb_trace_now_ns(); 0 when not known).
- */
-struct drv_usb_urb_hcd_result {
-	uint64_t submitted_ns;
-	uint64_t event_ns;
-	size_t residual;
-	unsigned code;
-	unsigned noted;
-};
-
-/*
- * Notes the controller's completion code and the bytes left of a transfer;
- * a host controller driver calls it when it takes the transfer's event.
- */
-void
-drv_usb_urb_hcd_note(
-	struct drv_usb_urb *u,
-	unsigned code,
-	size_t residual);
-
-/*
- * Copies what the host controller reported of a transfer's last submission.
- */
-void
-drv_usb_urb_hcd_result(
-	const struct drv_usb_urb *u,
-	struct drv_usb_urb_hcd_result *result);
 
 size_t
 drv_usb_urb_length(

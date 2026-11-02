@@ -114,15 +114,6 @@ drv_usb_urb_actual_length(
 	return urb_length;
 }
 
-void
-drv_usb_urb_hcd_result(
-	const struct drv_usb_urb *u,
-	struct drv_usb_urb_hcd_result *result)
-{
-	(void)u;
-	memset(result, 0, sizeof(*result));
-}
-
 int
 drv_usb_urb_setup(
 	struct drv_usb_urb *u,

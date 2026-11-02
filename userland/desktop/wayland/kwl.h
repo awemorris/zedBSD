@@ -2401,7 +2401,7 @@ void kwl_compose_poll(struct kwl_server *server);
 void kwl_compose_give_tasks(struct kwl_server *server);
 void kwl_glass_glyphs_poll(struct kwl_server *server);
 void kwl_glass_blur_take(struct kwl_server *server);
-int kwl_glass_button(struct kwl_server *server, uint32_t button, uint32_t state, const char **by);
+int kwl_glass_button(struct kwl_server *server, uint32_t button, uint32_t state);
 int kwl_glass_motion(struct kwl_server *server);
 void kwl_glass_gesture(struct kwl_server *server, uint32_t gesture, uint32_t phase, int32_t travel_um, int32_t speed);
 int kwl_glass_apps_room(struct kwl_server *server, unsigned slot, int32_t *left, int32_t *right, int32_t *top);
@@ -2703,11 +2703,10 @@ void kwl_clipboard_history_clear(struct kwl_server *server, const char *reason);
 
 /* The edge gestures over a fullscreen window, whether the input is theirs, and whether one shows something (shell.c). */
 int kwl_glass_fullscreen_input(struct kwl_server *server);
-int kwl_glass_edge_button(struct kwl_server *server, uint32_t button, uint32_t state, const char **by);
+int kwl_glass_edge_button(struct kwl_server *server, uint32_t button, uint32_t state);
 int kwl_glass_edge_motion(struct kwl_server *server);
 int kwl_glass_overlay(struct kwl_server *server);
 struct kwl_object *kwl_glass_title_at(struct kwl_server *server, int32_t x, int32_t y);
-struct kwl_object *kwl_glass_part_at(struct kwl_server *server, int32_t x, int32_t y, const char **part);
 void kwl_glass_lower(struct kwl_server *server, struct kwl_object *surface, const char *via);
 void kwl_glass_mapped(struct kwl_server *server, struct kwl_object *surface);
 void kwl_glass_forget(struct kwl_server *server, struct kwl_object *surface);
