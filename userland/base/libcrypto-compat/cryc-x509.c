@@ -1314,7 +1314,12 @@ x509_parse_tbs(
 	if (validity.size != 0)
 		return EINVAL;
 
-	/* The subject: a Name, empty only when a critical subjectAltName names the subject (4.1.2.6). */
+	/*
+	 * The subject: a Name, which may be empty.  RFC 5280 4.1.2.6 asks the
+	 * issuing CA to mark the subjectAltName critical then; that is a rule
+	 * for the CA, not for path validation, and it is not enforced here
+	 * (host names come from the subjectAltName alone).
+	 */
 	error = cryc_der_expect(&body, CRYC_DER_SEQUENCE, &subject);
 	if (error != 0)
 		return EINVAL;

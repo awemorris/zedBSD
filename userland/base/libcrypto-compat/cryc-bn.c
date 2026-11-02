@@ -13,6 +13,13 @@
  * built from arithmetic, so the time and the addresses touched depend
  * only on the widths.  A local buffer that holds a value which may be
  * secret is wiped before the function returns.
+ *
+ * A mask that selects or clears by a secret goes through bn_opaque first:
+ * an optimizer that can see a mask is 0 or all ones (it is made from a
+ * carry or a borrow here) may otherwise turn the bitwise selection into a
+ * branch or into a choice of which buffer to load from (clang 19 at -O2
+ * and -O3 did both; Valgrind's memcheck with the secret marked undefined
+ * shows it).
  */
 
 #include "cryc-bn.h"
@@ -22,6 +29,7 @@ static uint32_t bn_add(uint32_t *out, const uint32_t *a, const uint32_t *b, size
 static uint32_t bn_sub(uint32_t *out, const uint32_t *a, const uint32_t *b, size_t limbs);
 static uint32_t bn_borrow(const uint32_t *a, const uint32_t *b, size_t limbs);
 static uint32_t bn_mask_nonzero(uint32_t value);
+static uint32_t bn_opaque(uint32_t value);
 
 /*
  * Prepares the modulus given as size big-endian bytes (leading zero bytes
@@ -259,7 +267,8 @@ cryc_bn_select(
 {
 	size_t index;
 
-	/* Takes each limb from a or from b by the mask. */
+	/* Takes each limb from a or from b by the mask, whose value the optimizer may not use. */
+	mask = bn_opaque(mask);
 	for (index = 0; index < limbs; index++)
 		out[index] = (a[index] & mask) | (b[index] & ~mask);
 }
@@ -317,7 +326,7 @@ cryc_bn_mod_sub(
 	borrow = bn_sub(out, a, b, limbs);
 
 	/* Takes m where the difference was negative and zero where it was not. */
-	mask = 0U - borrow;
+	mask = bn_opaque(0U - borrow);
 	for (index = 0; index < limbs; index++)
 		addend[index] = mont->modulus[index] & mask;
 
@@ -641,4 +650,19 @@ bn_mask_nonzero(
 
 	/* Reports the inverse. */
 	return ~zero_mask;
+}
+
+/*
+ * Returns value through a volatile object, so that the compiler cannot
+ * know which of the values of a mask (0 or 0xffffffff) it holds.
+ */
+static uint32_t
+bn_opaque(
+	uint32_t value)
+{
+	volatile uint32_t hidden;
+
+	/* Stored and loaded again. */
+	hidden = value;
+	return hidden;
 }

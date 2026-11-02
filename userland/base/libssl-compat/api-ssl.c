@@ -748,8 +748,10 @@ SSL_connect(
 	if (error != 0)
 		return -1;
 
-	/* A handshake that is already done is done. */
-	if (ssl->started && (ssl->conn.flags & SSLC_CONN_CONNECTED) != 0U)
+	/* A handshake that is already done is done, unless the connection failed since (then it is shut down). */
+	if (ssl->started &&
+	    (ssl->conn.flags & SSLC_CONN_CONNECTED) != 0U &&
+	    (ssl->conn.flags & SSLC_CONN_FAILED) == 0U)
 		return 1;
 
 	/* Makes the connection at the first call. */

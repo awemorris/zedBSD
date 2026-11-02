@@ -33,6 +33,9 @@
 
 #include "cryc-f25519.h"
 
+/* Hides a mask from the optimizer. */
+static uint32_t f25519_opaque(uint32_t value);
+
 /* The count of limbs of an element. */
 #define F25519_LIMBS	10
 
@@ -451,8 +454,8 @@ cryc_f25519_cswap(
 	uint32_t difference;
 	unsigned int index;
 
-	/* All ones when swap is 1, all zeros when it is 0. */
-	mask = 0U - swap;
+	/* All ones when swap is 1, all zeros when it is 0 (hidden from the optimizer). */
+	mask = f25519_opaque(0U - swap);
 
 	/*
 	 * Exchanges the limbs under the mask: the masked difference of the
@@ -724,4 +727,20 @@ f25519_chain_250(
 	cryc_wipe(&x100, sizeof(x100));
 	cryc_wipe(&x200, sizeof(x200));
 	cryc_wipe(&work, sizeof(work));
+}
+
+/*
+ * Returns value through a volatile object, so that the compiler cannot
+ * know which of the values of a mask (0 or 0xffffffff) it holds and turn
+ * a selection by it into a branch or a choice of load.
+ */
+static uint32_t
+f25519_opaque(
+	uint32_t value)
+{
+	volatile uint32_t hidden;
+
+	/* Stored and loaded again. */
+	hidden = value;
+	return hidden;
 }

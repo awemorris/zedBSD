@@ -12,6 +12,9 @@
 
 #include "cryc.h"
 
+/* Hides a mask from the optimizer. */
+static uint32_t util_opaque(uint32_t value);
+
 /*
  * Overwrites size bytes at memory with zeros in a way the compiler does
  * not remove (the stores go through a volatile pointer).
@@ -174,7 +177,7 @@ cryc_ct_select_bytes(
 	 * a byte are read before its output is written, so out may be one of
 	 * the inputs.
 	 */
-	byte_mask = (uint8_t)(mask & 0xffU);
+	byte_mask = (uint8_t)(util_opaque(mask) & 0xffU);
 	for (index = 0; index < size; index++) {
 		chosen = (uint8_t)(when_clear[index] ^ ((when_set[index] ^ when_clear[index]) & byte_mask));
 		out[index] = chosen;
@@ -211,7 +214,7 @@ cryc_ct_copy_if(
 	 * mask has ones, and stores every byte either way so that the stores
 	 * do not depend on the mask.
 	 */
-	byte_mask = (uint8_t)(mask & 0xffU);
+	byte_mask = (uint8_t)(util_opaque(mask) & 0xffU);
 	for (index = 0; index < size; index++) {
 		chosen = (uint8_t)(destination[index] ^ ((source[index] ^ destination[index]) & byte_mask));
 		destination[index] = chosen;
@@ -407,4 +410,20 @@ cryc_store_le64(
 	bytes[5] = (uint8_t)((value >> 40) & 0xffU);
 	bytes[6] = (uint8_t)((value >> 48) & 0xffU);
 	bytes[7] = (uint8_t)((value >> 56) & 0xffU);
+}
+
+/*
+ * Returns value through a volatile object, so that the compiler cannot
+ * know which of the values of a mask (0 or 0xffffffff) it holds and turn
+ * a selection by it into a branch or a choice of load.
+ */
+static uint32_t
+util_opaque(
+	uint32_t value)
+{
+	volatile uint32_t hidden;
+
+	/* Stored and loaded again. */
+	hidden = value;
+	return hidden;
 }
