@@ -176,7 +176,7 @@ design-reviewer を 1 本（header・design.md・phase.md・試験の道具を�
 | 14 | 使わない group の scratch の pool の上限が header と phase.md で食い違う | header に「別の pool、同じ limit、group ごとに空」、phase.md を合わせた |
 | 15 | check-skeleton が新しい header と common.c・build の file・fixtures.sha256 を見ない | 凍結の list に足し、追跡されていない・BASE の後に足した header と道具を FAIL に |
 | 16 | target-build.sh が link 経由で共有の sysroot に書きうる | realpath が main の checkout の下なら FAIL |
-| 17 | `@BASE@` が残る | BASE の commit の直後に SHA に置き換える（この p001 の 2 つ目の commit） |
+| 17 | `aa2426a5763975c358cf667aff3e17bfb841b7e2` が残る | BASE の commit の直後に SHA に置き換える（この p001 の 2 つ目の commit） |
 | 18 | mutate.sh の時間の上限の comment の食い違い、空の出力で shell が止まる | comment を直し、空を 0 に。実の時間は p019 で測る |
 | 19 | fixture-check の strstr が NUL で終わらない buffer を読む | header を NUL で終わる複写にしてから読み、NULL を確かめる |
 | 20 | driver の部分の data が 40 byte まで | 0〜160 byte の全ての長さに |

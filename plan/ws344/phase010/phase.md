@@ -5,7 +5,7 @@
 - Status: planned
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p001。
 - 目的: tree・確率・係数の既定と更新・band・zigzag・category・量子化の表を RFC から入れる。
-- 基点の SHA（header と道具の凍結）: `@BASE@`。
+- 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
 
 ## 1. 読む物
 
@@ -51,14 +51,14 @@
 cd <worktree>
 sh plan/ws344/tests/run-unit.sh vp8_tables
 sh plan/ws344/tests/run-unit.sh all
-BASE=@BASE@ sh plan/ws344/tests/check-skeleton.sh
+BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh
 sh plan/ws344/tests/target-build.sh
 git diff --check
 ```
 
 ## 7. 終わりの条件
 
-- 上の command が全部 PASS（最後の行を自分で読んで確かめる）。`check-skeleton` は `BASE=@BASE@` で header と道具が変わっていないこと。
+- 上の command が全部 PASS（最後の行を自分で読んで確かめる）。`check-skeleton` は `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2` で header と道具が変わっていないこと。
 - 試験が通った後、実装をわざと数通りに壊し（git の外の複写で。例: 境界の比較を 1 つずらす、符号を 1 つ逆にする、表の値を 1 つ変える）、単体試験が FAIL することを確かめ、元に戻す（`cmp` で戻ったことを確かめる）。見逃しがあれば試験を足す。
 - 規約の checklist（coding-style.md §14）で自分の diff を見直した。表・定数の block ごとに出典の comment がある。source の comment に開発の管理情報（WS・Phase・Queue・Bug の番号、plan/ への参照、日付）が無い。
 - commit: 新しい file は先に `git add`、`git commit -m WIP -- <作った path>...`。push しない。rm しない。

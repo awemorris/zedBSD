@@ -3,12 +3,12 @@
 # WS344 自前の WebP の decoder（libwebp-compat、libbrowser の画像、VP8・VP8L・ALPH・RIFF）
 
 - Master: [plan/master.md](../master.md)（2026-11-02 11:31 作成）。Primary Milestone: MG006。
-- Status: incomplete（p001 の設計は P2 が実施、Q1 の受け入れ待ち）
+- Status: incomplete（p001 の設計は P2 が実施・commit 済み、Q1 の受け入れ待ち）
 - 目標: WebP の静止画（非可逆の VP8 の key frame、可逆の VP8L、透明度の ALPH、RIFF・VP8X の入れ物）を読む自前の library **libwebp-compat**（libwebp 1.5.0 の decode の interface の部分集合、`include/libc/compat/webp/`）を作り、libbrowser の img_sniff・img_decode に RIFF/WEBP の枝を足す。zedBSD（共有 library）と Windows 版のブラウザ（static link）の両方で使う。animation は後（範囲の外）。
 - 出典: RFC 9649（WebP）、RFC 6386（VP8）。試験の期待の値は libwebp（BSD）の出力と照らす（libwebp は試験の道具としてだけ host で使い、tree に取り込まない）。
 - 進め方: 標準廉価実装手順（docs/agent/spec-module-delegation.md）。Opus が設計（module の分け方・header・試験の道具）、Sonnet が実装。設計は [design.md](design.md)。
 - 置き場所: `userland/desktop/libwebp-compat/`（内部の接頭辞 `webpc_`）、header `include/libc/compat/webp/types.h`・`decode.h`。
-- 基点（header と試験の道具を凍結した commit）: `@BASE@`。実装の Phase は `BASE=@BASE@ sh plan/ws344/tests/check-skeleton.sh` で header が変わっていないことを確かめる。
+- 基点（header と試験の道具を凍結した commit）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。実装の Phase は `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` で header が変わっていないことを確かめる。
 
 ## ユーザーの決定
 
@@ -20,7 +20,7 @@
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| ws344-p001 | 設計（標準廉価実装手順 §4）: module・header・骨格・試験の道具・実装の Phase の表、試験の画像（cwebp で作る 364 file） | 実施済み（P2 q1939、Q1 の受け入れ待ち） | — |
+| ws344-p001 | 設計（標準廉価実装手順 §4）: module・header・骨格・試験の道具・実装の Phase の表、試験の画像（cwebp で作る 364 file） | 実施済み・道具の確かめ PASS（P2 q1939、2026-11-02、BASE aa2426a576、Q1 の受け入れ待ち） | — |
 | ws344-p002 | container（riff.c、test-riff） | planned | p001 |
 | ws344-p003 | VP8L の bit reader と prefix code（lbits.c・prefix.c） | planned | p001 |
 | ws344-p004 | VP8L の code の読み（vp8l-codes.c） | planned | p003 |
@@ -56,4 +56,4 @@
 ## Resume point
 
 - 2026-11-02 11:31 Q1: 作成。p001 の担当を割り当てる。
-- 2026-11-02 P2: p001 の設計を実施（[phase001](phase001/phase.md)）。基点 `@BASE@`。次は Q1 の受け入れと §11 の判断、実装の Phase の起動。
+- 2026-11-02 P2: p001 の設計を実施（[phase001](phase001/phase.md)）。基点 `aa2426a5763975c358cf667aff3e17bfb841b7e2`。次は Q1 の受け入れと §11 の判断、実装の Phase の起動。
