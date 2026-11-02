@@ -34,13 +34,12 @@ struct chain_snapshot {
 };
 
 /*
- * One certificate of the path being searched: the certificate, the
- * SHA-256 of its DER (a view into the peer's table or the store's entry)
- * and whether that value is marked distrusted.
+ * One certificate of the path being searched: the certificate (a view into
+ * the peer's table or the store's entry) and whether the SHA-256 of its DER
+ * is marked distrusted.
  */
 struct chain_node {
 	const struct cryc_x509 *cert;
-	const uint8_t *digest;
 	int distrusted;
 };
 
@@ -1433,7 +1432,6 @@ chain_extend(
 
 			/* Puts the entry on the path as its trust anchor and handles the complete path. */
 			search->path[search->count].cert = &entry->cert;
-			search->path[search->count].digest = entry->digest;
 			search->path[search->count].distrusted = candidate_distrusted;
 			search->count++;
 			chain_complete(search);
@@ -1467,7 +1465,6 @@ chain_extend(
 
 			/* Walks on from the certificate. */
 			search->path[search->count].cert = &search->peer[peer_index];
-			search->path[search->count].digest = search->peer_digest[peer_index];
 			search->path[search->count].distrusted = candidate_distrusted;
 			search->count++;
 			chain_extend(search);
@@ -1541,7 +1538,6 @@ chain_search_prepare(
 
 		/* Puts the store's copy on the path as its only certificate. */
 		search->path[0].cert = &entry->cert;
-		search->path[0].digest = entry->digest;
 		search->path[0].distrusted = chain_is_distrusted(search->store, entry->digest);
 		search->count = 1;
 		chain_complete(search);
@@ -1550,7 +1546,6 @@ chain_search_prepare(
 
 	/* The leaf is the first certificate of the path the walk extends. */
 	search->path[0].cert = &search->peer[0];
-	search->path[0].digest = search->peer_digest[0];
 	search->path[0].distrusted = chain_is_distrusted(search->store, search->peer_digest[0]);
 	search->count = 1;
 

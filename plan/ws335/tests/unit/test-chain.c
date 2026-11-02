@@ -84,6 +84,8 @@
 #define KEY_RSA_2048	2
 #define KEY_UNKNOWN	3
 #define KEY_RSA_2049	4
+#define KEY_RSA_2047	5
+#define KEY_RSA_HUGE	6
 
 /* The values of struct spec's nc_mode. */
 #define NC_NONE		0
@@ -127,7 +129,8 @@
  *   nc_mode ...       nameConstraints and the GeneralSubtrees contents.
  *   unknown           1: an unknown critical extension; 2: not critical.
  *   policies          1: a critical certificatePolicies extension.
- *   ski, aki          1: the key identifiers; aki 2: a wrong one.
+ *   ski, aki          1: the key identifiers; aki 2: a wrong one; aki 3:
+ *                     the right one cut by a byte.
  *   sig_kind          SIG_ value.
  *   key_kind          KEY_ value: what SubjectPublicKeyInfo holds.
  */
@@ -210,7 +213,7 @@ key_get(
 
 	/* Makes the key when it is first asked for. */
 	if (keys_made[index] == 0) {
-		sprintf(label, "p020 key %u", index);
+		sprintf(label, "chain test key %u", index);
 		curve = CRYC_CURVE_P256;
 		if (index >= KEYS_P384_FIRST)
 			curve = CRYC_CURVE_P384;
@@ -308,11 +311,11 @@ put_spki(
 	const struct spec *spec)
 {
 	unsigned char algorithm_bytes[64];
-	unsigned char key_bytes[600];
-	unsigned char spki_bytes[700];
-	unsigned char modulus[260];
+	unsigned char key_bytes[1200];
+	unsigned char spki_bytes[1300];
+	unsigned char modulus[1100];
 	static const unsigned char exponent[3] = { 0x01, 0x00, 0x01 };
-	unsigned char bits[600];
+	unsigned char bits[1300];
 	static const unsigned char null_value[1] = { 0 };
 	struct der_writer algorithm;
 	struct der_writer rsa;
@@ -345,11 +348,17 @@ put_spki(
 		modulus_size = 256;
 	if (spec->key_kind == KEY_RSA_2049)
 		modulus_size = 257;
+	if (spec->key_kind == KEY_RSA_2047)
+		modulus_size = 256;
+	if (spec->key_kind == KEY_RSA_HUGE)
+		modulus_size = 1025;
 	for (index = 0; index < modulus_size; index++)
 		modulus[index] = (unsigned char)(0xc3U ^ (index * 7U));
 	modulus[0] = 0xc3;
 	if (spec->key_kind == KEY_RSA_2049)
 		modulus[0] = 0x01;
+	if (spec->key_kind == KEY_RSA_2047)
+		modulus[0] = 0x7f;
 	modulus[modulus_size - 1U] = (unsigned char)(modulus[modulus_size - 1U] | 1U);
 	der_init(&rsa, key_bytes, sizeof(key_bytes));
 	der_unsigned(&rsa, modulus, modulus_size);
@@ -485,7 +494,7 @@ put_extensions(
 		error = tlspeer_key_id(key_get(spec->aki == 2 ? 30U : spec->issuer_key), identifier);
 		CHECK(error == 0);
 		der_init(&inner, inner_bytes, sizeof(inner_bytes));
-		der_put(&inner, 0x80U, identifier, sizeof(identifier));
+		der_put(&inner, 0x80U, identifier, spec->aki == 3 ? sizeof(identifier) - 1U : sizeof(identifier));
 		der_init(&value, value_bytes, sizeof(value_bytes));
 		der_wrap(&value, 0x30U, &inner);
 		put_extension(&list, TLSPEER_OID_AUTHORITY_KEY_ID, 0, &value);
@@ -1137,13 +1146,29 @@ test_store_pem(void)
 	CHECK(cryc_store_add_pem(&store, "", 0, &added) == ENOENT);
 	CHECK(cryc_store_add_pem(&store, NULL, 0, &added) == ENOENT);
 
-	/* Arguments: no store, text missing with a size. */
+	/* Arguments: no store, text missing with a size; the count is zero whatever it held before. */
+	added = 99;
 	CHECK(cryc_store_add_pem(NULL, "x", 1, &added) == EINVAL);
+	CHECK(added == 0U);
+	added = 99;
 	CHECK(cryc_store_add_pem(&store, NULL, 5, &added) == EINVAL);
 	CHECK(added == 0U);
 	cryc_store_free(&store);
 
-	/* A full store gives ENOBUFS with the certificates that fit before it counted. */
+	/* A block that decodes but is not a certificate is EINVAL on its own, and a good block after it is kept. */
+	CHECK(cryc_store_init(&store) == 0);
+	used = pem_encode("CERTIFICATE", junk, sizeof(junk), text);
+	added = 99;
+	CHECK(cryc_store_add_pem(&store, text, used, &added) == EINVAL);
+	CHECK(added == 0U);
+	CHECK(store.count == 0U);
+	used += pem_encode("CERTIFICATE", first->der, first->size, text + used);
+	CHECK(cryc_store_add_pem(&store, text, used, &added) == EINVAL);
+	CHECK(added == 1U);
+	CHECK(store.count == 1U);
+	cryc_store_free(&store);
+
+	/* A store with room for one more takes the first certificate of a text and then gives ENOBUFS: the count of the first is reported. */
 	CHECK(cryc_store_init(&store) == 0);
 	{
 		struct built *big;
@@ -1157,7 +1182,7 @@ test_store_pem(void)
 		if (copy != NULL) {
 			memcpy(copy, big->der, big->size);
 			serial_offset = (size_t)(big->cert.serial - big->der);
-			for (index = 0; index < CRYC_STORE_MAX; index++) {
+			for (index = 0; index < CRYC_STORE_MAX - 1U; index++) {
 				copy[serial_offset + 2U] = (unsigned char)(index >> 8);
 				copy[serial_offset + 3U] = (unsigned char)index;
 				CHECK(cryc_store_add_der(&store, copy, big->size) == 0);
@@ -1165,9 +1190,11 @@ test_store_pem(void)
 			copy[serial_offset + 2U] = 0x7e;
 			copy[serial_offset + 3U] = 0x7e;
 			used = pem_encode("CERTIFICATE", copy, big->size, text);
+			copy[serial_offset + 3U] = 0x7f;
+			used += pem_encode("CERTIFICATE", copy, big->size, text + used);
 			added = 99;
 			CHECK(cryc_store_add_pem(&store, text, used, &added) == ENOBUFS);
-			CHECK(added == 0U);
+			CHECK(added == 1U);
 			CHECK(store.count == CRYC_STORE_MAX);
 			free(copy);
 		}
@@ -1199,7 +1226,7 @@ test_store_file(void)
 	/* A file with two certificates, read as the library reads a bundle. */
 	used = pem_encode("CERTIFICATE", first->der, first->size, text);
 	used += pem_encode("CERTIFICATE", second->der, second->size, text + used);
-	CHECK(write_file("p020-bundle.pem", (const unsigned char *)text, used, path));
+	CHECK(write_file("chain-test-bundle.pem", (const unsigned char *)text, used, path));
 	error = cryc_store_add_file(&store, path);
 	CHECK(error == 0);
 	CHECK(store.count == 2U);
@@ -1209,9 +1236,9 @@ test_store_file(void)
 	CHECK(store.count == 2U);
 
 	/* A missing file is ENOENT and an empty one has no block. */
-	sprintf(missing, "%s/p020-does-not-exist.pem", test_dir);
+	sprintf(missing, "%s/chain-test-missing.pem", test_dir);
 	CHECK(cryc_store_add_file(&store, missing) == ENOENT);
-	CHECK(write_file("p020-empty.pem", (const unsigned char *)text, 0, path));
+	CHECK(write_file("chain-test-empty.pem", (const unsigned char *)text, 0, path));
 	CHECK(cryc_store_add_file(&store, path) == ENOENT);
 
 	/* A bad block in a file is EINVAL and the good one stays. */
@@ -1219,7 +1246,7 @@ test_store_file(void)
 	CHECK(cryc_store_init(&store) == 0);
 	used = (size_t)sprintf(text, "-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n");
 	used += pem_encode("CERTIFICATE", first->der, first->size, text + used);
-	CHECK(write_file("p020-bad.pem", (const unsigned char *)text, used, path));
+	CHECK(write_file("chain-test-bad.pem", (const unsigned char *)text, used, path));
 	CHECK(cryc_store_add_file(&store, path) == EINVAL);
 	CHECK(store.count == 1U);
 
@@ -1655,6 +1682,22 @@ test_verify_ok(void)
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 	CHECK(result.chain_count == 4U);
 
+	/* Two anchors that both make a valid path: the first path found is the answer and a later one does not replace it. */
+	spec_init(&spec, "Root", 0, "Root", 0);
+	spec_ca(&spec);
+	spec.aki = 0;
+	spec.serial = 9;
+	other_root = make(&spec);
+	both[0] = chain.root;
+	both[1] = other_root;
+	cryc_store_free(&chain.store);
+	store_with(&chain.store, both, 2);
+	run(&chain.store, chain.list, 2, &params, &result);
+	EXPECT(result, CRYC_VERIFY_OK, 0);
+	CHECK(result.chain[2]->der == chain.store.entries[0]->der);
+	cryc_store_free(&chain.store);
+	store_with(&chain.store, &chain.root, 1);
+
 	/* A trusted self-signed server is its own anchor (a one-certificate path) and passes the leaf's checks. */
 	spec_init(&spec, "self.test", 6, "self.test", 6);
 	spec.dns = "self.test";
@@ -1716,6 +1759,15 @@ test_verify_identifiers(void)
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_UNABLE_TO_GET_ISSUER, 0);
 	CHECK(result.chain_count == 1U);
+
+	/* A key identifier that is the right one cut by a byte is a different identifier. */
+	spec_init(&spec, "a.test", 3, "Inter", 1);
+	spec.dns = "a.test";
+	spec.aki = 3;
+	list[0] = make(&spec);
+	list[1] = chain.inter;
+	run(&chain.store, list, 2, &params, &result);
+	EXPECT(result, CRYC_VERIFY_UNABLE_TO_GET_ISSUER, 0);
 
 	/* An intermediate without a subjectKeyIdentifier is a candidate whatever the leaf's AKI says. */
 	spec_init(&spec, "Inter", 1, "Root", 0);
@@ -1959,6 +2011,24 @@ test_verify_signatures(void)
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_SIGNATURE_FAILURE, 0);
 
+	/* An issuer key of 2047 bits is just too small; one of 8200 bits is beyond the range, which is not a matter of size. */
+	spec_init(&spec, "Inter", 1, "Root", 0);
+	spec_ca(&spec);
+	spec.key_kind = KEY_RSA_2047;
+	list[1] = make(&spec);
+	spec_init(&spec, "a.test", 3, "Inter", 1);
+	spec.dns = "a.test";
+	spec.sig_kind = SIG_RSA_ALG;
+	list[0] = make(&spec);
+	run(&chain.store, list, 2, &params, &result);
+	EXPECT(result, CRYC_VERIFY_KEY_TOO_SMALL, 0);
+	spec_init(&spec, "Inter", 1, "Root", 0);
+	spec_ca(&spec);
+	spec.key_kind = KEY_RSA_HUGE;
+	list[1] = make(&spec);
+	run(&chain.store, list, 2, &params, &result);
+	EXPECT(result, CRYC_VERIFY_UNSUPPORTED_ALGORITHM, 0);
+
 	/* An issuer key of a kind outside the range (Ed25519) makes the signature unsupported. */
 	spec_init(&spec, "Inter", 1, "Root", 0);
 	spec_ca(&spec);
@@ -1984,6 +2054,10 @@ test_verify_signatures(void)
 	list[0] = make(&spec);
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_OK, 0);
+	spec.key_kind = KEY_RSA_2047;
+	list[0] = make(&spec);
+	run(&chain.store, list, 2, &params, &result);
+	EXPECT(result, CRYC_VERIFY_KEY_TOO_SMALL, 0);
 	spec.key_kind = KEY_UNKNOWN;
 	list[0] = make(&spec);
 	run(&chain.store, list, 2, &params, &result);
@@ -2193,6 +2267,20 @@ test_verify_pathlen(void)
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 	CHECK(result.chain_count == 4U);
 
+	/* Self-issued means the same name in the sense of 7.1, not only the same bytes: a new key whose issuer is written in capitals is not counted either. */
+	spec_init(&spec, "Inter 1", 1, "Root", 0);
+	spec_ca(&spec);
+	spec.path_len = 0;
+	list[2] = make(&spec);
+	spec_init(&spec, "Inter 1", 2, "INTER 1", 1);
+	spec_ca(&spec);
+	list[1] = make(&spec);
+	CHECK((list[1]->cert.flags & CRYC_X509_SELF_ISSUED) == 0U);
+	list[0] = make_leaf("a.test", 3, "Inter 1", 2);
+	run(&store, list, 3, &params, &result);
+	EXPECT(result, CRYC_VERIFY_OK, 0);
+	CHECK(result.chain_count == 4U);
+
 	/* The root's own pathLenConstraint does not limit the path (the anchor is taken as it is). */
 	cryc_store_free(&store);
 	spec_init(&spec, "Root", 0, "Root", 0);
@@ -2320,6 +2408,27 @@ test_verify_names(void)
 	list[1] = make(&spec);
 	list[0] = make_leaf("a.example.com", 3, "Inter", 2);
 	run(&store, list, 3, &params, &result);
+	EXPECT(result, CRYC_VERIFY_OK, 0);
+	cryc_store_free(&store);
+
+	/* A leaf that is self-issued (a re-keyed certificate of the anchor's own name) is checked: only self-issued intermediates are not. */
+	permitted_size = subtree(permitted, sizeof(permitted), 0x82U, (const unsigned char *)"example.com", 11);
+	spec_init(&spec, "Self", 12, "Self", 12);
+	spec_ca(&spec);
+	spec.aki = 0;
+	spec.nc_mode = NC_CRITICAL;
+	spec.nc_permitted = permitted;
+	spec.nc_permitted_size = permitted_size;
+	roots[0] = make(&spec);
+	store_with(&store, roots, 1);
+	spec_init(&spec, "Self", 13, "Self", 12);
+	spec.dns = "evil.org";
+	list[0] = make(&spec);
+	run(&store, list, 1, &params, &result);
+	EXPECT(result, CRYC_VERIFY_NAME_CONSTRAINT_VIOLATION, 0);
+	spec.dns = "www.example.com";
+	list[0] = make(&spec);
+	run(&store, list, 1, &params, &result);
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 	cryc_store_free(&store);
 
@@ -2640,6 +2749,90 @@ make_junk(
 	return make(&spec);
 }
 
+/*
+ * A model of the search over look-alikes, written from the header: certificates 1 to count are all named "J" and
+ * issued by "J" (so each is a candidate issuer of every other and of the leaf, which is certificate 0), the search
+ * goes depth first, tries the candidates in the order the server sent them, skips one already on the path, makes one
+ * signature verification for each pair (child, issuer) it has not made, extends a path only while it has fewer
+ * certificates than the limit, and stops when it needs verification number CRYC_CHAIN_MAX_WORK + 1 or when it would
+ * expand node number MODEL_MAX_NODES + 1 (the library's own bound on the nodes of one search, 1024: a search over
+ * look-alikes whose pairs are all verified already still has many paths to walk).
+ */
+#define MODEL_MAX_NODES	1024U
+static unsigned model_path[CRYC_CHAIN_MAX_DEPTH + 1U];
+static unsigned model_length;
+static unsigned model_work;
+static unsigned model_nodes;
+static unsigned model_count;
+static unsigned model_depth;
+static int model_stopped;
+static unsigned char model_done[PEER_ROOM][PEER_ROOM];
+
+/* Extends the model's path by each candidate of its last certificate. */
+static void
+model_extend(void)
+{
+	unsigned top;
+	unsigned candidate;
+	unsigned position;
+	int on_path;
+
+	/* Each expansion is a node; the one beyond the bound stops the search at the depth of the path. */
+	model_nodes++;
+	if (model_nodes > MODEL_MAX_NODES) {
+		model_stopped = 1;
+		model_depth = model_length - 1U;
+		return;
+	}
+
+	/* Peers may be added while the path is shorter than the largest depth. */
+	top = model_path[model_length - 1U];
+	if (model_length >= CRYC_CHAIN_MAX_DEPTH)
+		return;
+	for (candidate = 1; candidate <= model_count; candidate++) {
+		on_path = 0;
+		for (position = 0; position < model_length; position++) {
+			if (model_path[position] == candidate)
+				on_path = 1;
+		}
+		if (on_path != 0)
+			continue;
+
+		/* A pair not verified yet costs one verification; the one beyond the bound stops the search. */
+		if (model_done[top][candidate] == 0U) {
+			if (model_work >= CRYC_CHAIN_MAX_WORK) {
+				model_stopped = 1;
+				model_depth = model_length - 1U;
+				return;
+			}
+			model_work++;
+			model_done[top][candidate] = 1;
+		}
+		model_path[model_length++] = candidate;
+		model_extend();
+		model_length--;
+		if (model_stopped != 0)
+			return;
+	}
+}
+
+/* Runs the model for count look-alikes: model_stopped tells whether a bound stopped the search, model_depth where. */
+static void
+model_run(
+	unsigned count)
+{
+	/* The path starts with the leaf. */
+	memset(model_done, 0, sizeof(model_done));
+	model_path[0] = 0;
+	model_length = 1;
+	model_work = 0;
+	model_nodes = 0;
+	model_count = count;
+	model_stopped = 0;
+	model_depth = 0;
+	model_extend();
+}
+
 /* Path building: backtracking to another candidate, the code of the first complete path, dead ends, cycles, the work bound. */
 static void
 test_verify_search(void)
@@ -2658,6 +2851,7 @@ test_verify_search(void)
 	struct built *root_b;
 	struct spec spec;
 	unsigned index;
+	unsigned count;
 	unsigned mark;
 
 	mark = pool_used;
@@ -2770,6 +2964,45 @@ test_verify_search(void)
 	CHECK(result.chain_count == 3U);
 	cryc_store_free(&store);
 
+	/* Two candidates for an issuer that both lead nowhere: the partial path reported is the first found. */
+	roots[0] = make_root("Other Root", 9);
+	store_with(&store, roots, 1);
+	spec_init(&spec, "Mid", 1, "Nowhere", 14);
+	spec_ca(&spec);
+	list[1] = make(&spec);
+	spec.serial = 2;
+	list[2] = make(&spec);
+	list[0] = make_leaf("a.test", 3, "Mid", 1);
+	run(&store, list, 3, &params, &result);
+	EXPECT(result, CRYC_VERIFY_UNABLE_TO_GET_ISSUER, 1);
+	CHECK(result.chain_count == 2U);
+	CHECK(result.chain[1]->der == list[1]->der);
+
+	/* A root the server sent right after the leaf, unknown to the store: self-signed in the chain at depth 1. */
+	list[0] = make_leaf("a.test", 3, "Root", 0);
+	list[1] = make_root("Root", 0);
+	run(&store, list, 2, &params, &result);
+	EXPECT(result, CRYC_VERIFY_SELF_SIGNED_IN_CHAIN, 1);
+	CHECK(result.chain_count == 2U);
+	cryc_store_free(&store);
+
+	/* A self-issued certificate that does have a candidate issuer is not a dead end of the self-signed kind: the failure is the missing issuer of the candidate. */
+	spec_init(&spec, "S", 1, "S", 1);
+	spec_ca(&spec);
+	spec.aki = 0;
+	list[1] = make(&spec);
+	spec_init(&spec, "S", 14, "Missing", 15);
+	spec_ca(&spec);
+	spec.aki = 0;
+	list[2] = make(&spec);
+	spec_init(&spec, "a.test", 3, "S", 1);
+	spec.dns = "a.test";
+	spec.aki = 0;
+	list[0] = make(&spec);
+	run(&store, list, 3, &params, &result);
+	EXPECT(result, CRYC_VERIFY_UNABLE_TO_GET_ISSUER, 2);
+	CHECK(result.chain_count == 3U);
+
 	/* A hostile chain of look-alikes with no way to an anchor: the work bound ends it with WORK_EXCEEDED and the longest partial path. */
 	roots[0] = make_root("Root", 0);
 	store_with(&store, roots, 1);
@@ -2781,11 +3014,47 @@ test_verify_search(void)
 		junk[index] = make_junk("J", 8U + index);
 		list[1U + index] = junk[index];
 	}
+	/* With 1 to 15 look-alikes: a bound stops the search where the model says (with 9 or more the pairs alone are more than CRYC_CHAIN_MAX_WORK, with 6 or more the paths alone are more than the nodes allowed), and with fewer the search ends with every look-alike on the path, the last one self-signed in the chain. */
+	for (count = 1; count <= 15U; count++) {
+		model_run(count);
+		run(&store, list, count + 1U, &params, &result);
+		CHECK(result.chain[0]->der == list[0]->der);
+		if (model_stopped != 0) {
+			EXPECT(result, CRYC_VERIFY_WORK_EXCEEDED, model_depth);
+			CHECK(result.chain_count == (count + 1U < CRYC_CHAIN_MAX_DEPTH ? count + 1U : CRYC_CHAIN_MAX_DEPTH));
+		} else {
+			EXPECT(result, CRYC_VERIFY_SELF_SIGNED_IN_CHAIN, count);
+			CHECK(result.chain_count == count + 1U);
+		}
+		if (count == 5U)
+			CHECK(model_stopped == 0);
+		if (count == 6U)
+			CHECK(model_stopped != 0);
+	}
+	cryc_store_free(&store);
+
+	/* Exactly CRYC_CHAIN_MAX_WORK verifications are allowed: 8 look-alikes of one name below the leaf and 7 of another below those need 8 + 8 * 7 and no more, and end in a missing issuer, not in the bound. */
+	roots[0] = make_root("Root", 0);
+	store_with(&store, roots, 1);
+	spec_init(&spec, "a.test", 1, "J", 1);
+	spec.dns = "a.test";
+	spec.aki = 0;
+	list[0] = make(&spec);
+	for (index = 0; index < 8U; index++) {
+		spec_init(&spec, "J", 8U + index, "I", 16);
+		spec_ca(&spec);
+		spec.aki = 0;
+		list[1U + index] = make(&spec);
+	}
+	for (index = 0; index < 7U; index++) {
+		spec_init(&spec, "I", 16U + index, "X", 23);
+		spec_ca(&spec);
+		spec.aki = 0;
+		list[9U + index] = make(&spec);
+	}
 	run(&store, list, 16, &params, &result);
-	EXPECT(result, CRYC_VERIFY_WORK_EXCEEDED, result.depth);
-	CHECK(result.depth >= 1U);
-	CHECK(result.chain_count >= 2U);
-	CHECK(result.chain[0]->der == list[0]->der);
+	EXPECT(result, CRYC_VERIFY_UNABLE_TO_GET_ISSUER, 2);
+	CHECK(result.chain_count == 3U);
 	cryc_store_free(&store);
 
 	/* A complete path found first keeps its own code over the work bound that ends the search later. */
@@ -3299,7 +3568,7 @@ parse_ip(
  *                  the case does not.
  *   depth          the case counts the verify depth without self-issued
  *                  intermediates, the header counts every certificate.
- *   decided        a decision recorded in the results of this phase.
+ *   decided        a decision about what the library accepts, explained where the table is used.
  */
 struct limbo_exception {
 	const char *id;
