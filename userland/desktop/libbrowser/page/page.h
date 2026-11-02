@@ -173,6 +173,8 @@ struct page {
 	int load_pending;
 	/* The document came with Cache-Control: no-store (the view keeps no copy of it for Back and Forward). */
 	int no_store;
+	/* The document's page is showing: set by its pageshow, cleared by its pagehide (HTML's page showing). */
+	int showing;
 	/* Why the last load of a location failed over TLS ("" when it did not), for the load callback. */
 	char failure_reason[NET_TLS_REASON_MAX];
 	/* Defer nested ready-script drains while the outer insertion-order loop runs. */
@@ -311,6 +313,7 @@ int page_focus_move(struct page *page, int backward);
 int page_focus_field(struct page *page, const char *token);
 int page_window_focus(struct page *page, int focused);
 int page_page_transition(struct page *page, const char *type, int persisted);
+int page_unload(struct page *page);
 int page_activate_focused(struct page *page, struct wb_buffer *href, int *found);
 int page_click_control(struct page *page, int x, int y, struct wb_buffer *href, int *found);
 int page_focus_pressable(struct page *page);

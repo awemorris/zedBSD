@@ -11,7 +11,7 @@
  * own URL parser), the session history (History, Location's navigation and
  * the Navigation API, over the natives that change the document's URL and
  * scroll to a fragment), and the smaller objects that scripts probe for
- * (Intl, Reflect, matchMedia, MessageChannel).  The source is
+ * (Intl, matchMedia, MessageChannel).  The source is
  * prelude-source.inc, made from plan/ws074/phase230/prelude.js.
  */
 

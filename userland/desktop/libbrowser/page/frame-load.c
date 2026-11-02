@@ -749,14 +749,26 @@ frame_load_activate(
 				goto release_roots;
 		}
 
-		/* The document that is left is told its page is hidden, and then it is replaced if the frame is still this attempt's. */
+		/*
+		 * The document that is left for good is unloaded (pagehide, not
+		 * persisted, then unload), and then it is replaced if the frame is
+		 * still this attempt's.
+		 */
 		realm = (struct vm_realm *)load->element->child_context;
 		leaving = NULL;
 		if (realm != NULL)
 			leaving = realm->host;
 		if (leaving != NULL && leaving->document->resource_url != NULL) {
 			bind_window_set_unloading(leaving);
-			error = bind_fire_event(leaving, NULL, "pagehide", BIND_EVENT_DOCUMENT, &canceled);
+			error = bind_fire_page_transition(leaving, "pagehide", 0);
+			if (error != 0)
+				goto release_roots;
+			current = frame_load_current(load);
+			if (!current)
+				goto release_roots;
+
+			/* unload, with the document as its target, once pagehide's listeners left the frame to this attempt. */
+			error = bind_fire_event(leaving, NULL, "unload", BIND_EVENT_DOCUMENT, &canceled);
 			if (error != 0)
 				goto release_roots;
 			current = frame_load_current(load);
