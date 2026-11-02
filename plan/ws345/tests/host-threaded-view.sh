@@ -17,4 +17,9 @@ out=$base/$variant
 flags=$(cut -d' ' -f2- "$out/flags")
 objects=$(ls "$out"/obj/*.o | grep -v -e '/browser_main' -e '/browser-os-error\.o$')
 "${CC:-cc}" $flags -o "$out/host-threaded-view" plan/ws345/tests/host-threaded-view.c $objects -lvulkan -lm -ldl -lpthread
+# lavapipe's own threads are not the engine's: their reports are suppressed in the tsan variant.
+if [ "$variant" = tsan ]; then
+	TSAN_OPTIONS="${TSAN_OPTIONS:-} suppressions=$(pwd)/plan/ws345/tests/tsan-lavapipe.supp"
+	export TSAN_OPTIONS
+fi
 timeout 600 "$out/host-threaded-view"

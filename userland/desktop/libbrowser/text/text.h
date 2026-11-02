@@ -64,10 +64,21 @@ struct text_font_companions {
 };
 
 /*
+ * The bytes of a font file, which never change once read, and how many
+ * hold them: the face of each text system opened on them (the page's and
+ * a drawing thread's), and each committed frame that draws with them.
+ * The last to let go frees them; refs is changed atomically.
+ */
+struct text_bytes {
+	unsigned refs;
+	struct wb_buffer data;
+};
+
+/*
  * One font file and its face.
  */
 struct text_face {
-	struct wb_buffer data;
+	struct text_bytes *bytes;
 	struct truetype_face *face;
 	int open;
 };
@@ -145,6 +156,9 @@ void text_system_close(struct text_system *system);
 void text_select_font(const struct text_system *system, int monospace, float size, int weight, struct text_font *font);
 int text_add_face(struct text_system *system, const void *family, int weight_min, int weight_max, int italic, struct wb_buffer *data);
 int text_select_family(const struct text_system *system, const void *family, int weight, int italic, struct text_font *font);
+struct text_bytes *text_face_bytes(const struct text_system *system, int face);
+void text_bytes_release(struct text_bytes *bytes);
+int text_system_use_face(struct text_system *system, int face, struct text_bytes *bytes, int *changed);
 
 /* Web font files (woff.c). */
 int text_font_file(const unsigned char *bytes, size_t length, struct wb_buffer *sfnt);

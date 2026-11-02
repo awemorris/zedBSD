@@ -1437,7 +1437,7 @@ frame_make(
 		return ENOMEM;
 	}
 	frame->tree = tree;
-	frame->refs = 1;
+	frame->refs = 1U;
 	status = paint_build(&frame->list, tree);
 	if (status != 0) {
 		paint_frame_release(frame);
@@ -1447,7 +1447,7 @@ frame_make(
 	/* The page keeps it too, for as long as the frame's painting may be held. */
 	entry = frame_cache_get(page, element);
 	if (entry != NULL) {
-		frame->refs++;
+		__atomic_fetch_add(&frame->refs, 1U, __ATOMIC_RELAXED);
 		paint_frame_release(entry->frame);
 		entry->frame = frame;
 	}
@@ -1480,7 +1480,7 @@ page_frame_paint(
 		return 0;
 	entry = frame_cache_find(page, element);
 	if (window->frame_hold && entry != NULL && entry->frame != NULL) {
-		entry->frame->refs++;
+		__atomic_fetch_add(&entry->frame->refs, 1U, __ATOMIC_RELAXED);
 		*out = entry->frame;
 		return 0;
 	}

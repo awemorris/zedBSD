@@ -221,6 +221,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/layout/hit.c \
 	$(LIBBROWSER_DIR)/layout/bounds.c \
 	$(LIBBROWSER_DIR)/paint/list.c \
+	$(LIBBROWSER_DIR)/paint/scene.c \
 	$(LIBBROWSER_DIR)/paint/gradient.c \
 	$(LIBBROWSER_DIR)/paint/software.c \
 	$(LIBBROWSER_DIR)/paint/vulkan.c

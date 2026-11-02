@@ -860,6 +860,11 @@ media_follow(
 	/* The picture whose time has come, into the bitmap (a new serial: the GPU takes it anew). */
 	if (media->bitmap.pixels == NULL)
 		return 0;
+
+	/* Pixels a committed frame still draws are not drawn over: the bitmap gets its own first (without memory, no picture this time). */
+	error = img_bitmap_writable(&media->bitmap);
+	if (error != 0)
+		return 0;
 	drawn = media_engine_picture(media->engine, media->bitmap.pixels, (size_t)media->bitmap.width, media->bitmap.width,
 	    media->bitmap.height, &next);
 

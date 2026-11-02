@@ -34,6 +34,7 @@ static int timer_add(struct vm_realm *realm, const vm_value *args, unsigned coun
 static int timer_find_due(const struct bind_window *window, uint64_t limit, size_t *index);
 static int timer_run(struct bind_window *window, const struct bind_timer *timer);
 static int timer_run_due(struct bind_window *window);
+static int timer_waits_frame(const struct bind_window *window, const struct bind_timer *timer);
 static int timer_run_children(struct bind_window *window);
 
 /*
@@ -49,13 +50,17 @@ bind_next_timer(
 	const struct bind_window *child;
 	double child_due;
 	size_t index;
+	int waits;
 	int found;
 
-	/* The earliest due time among the timers. */
+	/* The earliest due time among the timers (an animation frame that waits for a present has none). */
 	found = 0;
 	for (index = 0; index < window->timers.count; index++) {
 		/* Resolves the stored timer before comparing its due time. */
 		timer = wb_vector_at(&window->timers, index);
+		waits = timer_waits_frame(window, timer);
+		if (waits)
+			continue;
 		if (!found || timer->due < *due) {
 			*due = timer->due;
 			found = 1;
@@ -346,6 +351,8 @@ bind_request_animation_frame(
 	struct bind_window *window;
 	struct bind_timer timer;
 	vm_value callback;
+	uint64_t presented;
+	int counted;
 	int callable;
 	int status;
 
@@ -369,6 +376,16 @@ bind_request_animation_frame(
 	timer.id = window->next_timer_id;
 	timer.animation = 1;
 	timer.due = window->now + TIMER_FRAME;
+
+	/* Where frames are presented, the next present instead: due as soon as it comes. */
+	counted = 0;
+	presented = 0;
+	if (window->host.frame_count != NULL)
+		counted = window->host.frame_count(window->host.context, &presented);
+	if (counted) {
+		timer.frame = presented + 1U;
+		timer.due = window->now;
+	}
 	timer.sequence = window->next_sequence;
 	timer.callback = callback;
 	timer.arguments = VM_VALUE_UNDEFINED;
@@ -534,6 +551,7 @@ timer_find_due(
 	const struct bind_timer *timer;
 	const struct bind_timer *best;
 	size_t item;
+	int waits;
 
 	/* The earliest due, and the oldest among equals. */
 	best = NULL;
@@ -541,6 +559,11 @@ timer_find_due(
 		/* Future timers cannot run at the current embedding time. */
 		timer = wb_vector_at(&window->timers, item);
 		if (timer->due > window->now)
+			continue;
+
+		/* An animation frame waits for its present. */
+		waits = timer_waits_frame(window, timer);
+		if (waits)
 			continue;
 
 		/* Timers created during this round wait for the next round. */
@@ -567,6 +590,31 @@ timer_find_due(
 		return 0;
 
 	/* Succeeded: a queued timer is due within this finite round. */
+	return 1;
+}
+
+/* Tells whether a timer is an animation frame that waits for a present still. */
+static int
+timer_waits_frame(
+	const struct bind_window *window,
+	const struct bind_timer *timer)
+{
+	uint64_t presented;
+	int counted;
+
+	/* Only an animation frame of presented frames waits. */
+	if (timer->frame == 0U || window->host.frame_count == NULL)
+		return 0;
+
+	/* It waits until the count reaches its frame. */
+	presented = 0;
+	counted = window->host.frame_count(window->host.context, &presented);
+	if (!counted)
+		return 0;
+	if (presented >= timer->frame)
+		return 0;
+
+	/* Succeeded: still waiting. */
 	return 1;
 }
 

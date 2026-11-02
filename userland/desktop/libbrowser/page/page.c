@@ -31,6 +31,9 @@
 /* The deepest element nesting the style dump descends (the parser caps nesting too). */
 #define PAGE_DUMP_DEPTH		512
 
+/* The number of the last display list any page painted (page->paint_generation), changed atomically: pages of several views paint on their own threads. */
+static uint64_t page_paint_next;
+
 static int page_gather_styles(struct page *page);
 static void page_animations_sync(struct page *page);
 static int page_load_xhtml(struct page *page, const unsigned char *bytes, size_t length);
@@ -558,6 +561,50 @@ page_set_font_companions(
 }
 
 /*
+ * Makes the page's animation frames wait for the presents of a drawing
+ * thread (page_frame_presented) instead of coming by the clock.
+ */
+void
+page_set_frames_presented(
+	struct page *page,
+	int presented)
+{
+	/* The presents decide from now on. */
+	page->frames_presented = presented;
+}
+
+/* Counts a present of the drawing thread: the animation frames asked for before it are due. */
+void
+page_frame_presented(
+	struct page *page)
+{
+	/* One chance more. */
+	page->frames++;
+}
+
+/*
+ * Reports how many presents the page (the context) had, when its
+ * animation frames wait for them (bind_host.frame_count): 1 with the
+ * count, or 0 when they come by the clock.
+ */
+int
+page_frame_count(
+	void *context,
+	uint64_t *count)
+{
+	struct page *page;
+
+	/* Frames by the clock have no count. */
+	page = context;
+	*count = page->frames;
+	if (!page->frames_presented)
+		return 0;
+
+	/* Succeeded: the frames are the presents. */
+	return 1;
+}
+
+/*
  * Tells the page how far its view is scrolled, in CSS pixels (the
  * scripts' scrollX, scrollY and client rectangles).
  */
@@ -888,6 +935,8 @@ page_paint(
 	if (error != 0)
 		return error;
 	page->painted = 1;
+	page->paint_generation = __atomic_add_fetch(&page_paint_next, 1U, __ATOMIC_RELAXED);
+	page->paint_taken = 0;
 	page->painted_media = page->media_generation;
 
 	/* The focus ring over it, when the keyboard put the focus somewhere. */

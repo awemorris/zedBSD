@@ -8,8 +8,9 @@
 /*
  * The front of a view of its own threads (view/front.h): the view's script
  * thread, the mailbox the program's thread queues its inputs and commands
- * in, the state, the notifications and the picture the script thread
- * publishes, and the program's side of all of them.
+ * in, the state, the notifications and the committed frames the script
+ * thread publishes, and the program's and the drawing thread's side of
+ * all of them.
  *
  * The mailbox is one FIFO under the front's lock: the program's thread
  * pushes, the script thread takes everything there is at once and runs
@@ -124,18 +125,6 @@ struct front_note {
 };
 
 /*
- * A picture of the page the script thread drew last: its pixels at the
- * view's size and how many hold it (the front, and a render under way);
- * the last to let go frees it.  refs is changed under the front's lock.
- */
-struct front_picture {
-	int refs;
-	unsigned width;
-	unsigned height;
-	uint32_t *pixels;
-};
-
-/*
  * The front of one view.
  *
  * The program's thread made it and ends it; the script thread (thread)
@@ -144,12 +133,14 @@ struct front_picture {
  * __atomic outside the lock), the creation's outcome (created, error), the
  * state published last, the notifications waiting (notes, with the console
  * lines dropped and whether a redraw waits), whether the program's wake is
- * owed, and the picture.  changed is signalled for a new entry, news and
- * the end, and broadcast when the creation ended.
+ * owed, the latest committed frame and whether a present came since the
+ * script thread last looked (opportunity).  changed is signalled for a new
+ * entry, news, a present and the end, and broadcast when the creation
+ * ended.
  *
  * The script thread's alone: dirty (the view asked for a redraw since the
- * last picture), serial (the number of the last state) and the agent's
- * running side.  The program's thread's alone: shown (the state its
+ * last committed frame), serial (the number of the last state), the
+ * number of the last committed frame and the agent's running side.  The program's thread's alone: shown (the state its
  * getters read, replaced in browser_view_process) and the copy of the
  * options and callbacks.
  */
@@ -174,9 +165,11 @@ struct view_front {
 	size_t console_dropped;
 	int redraw_noted;
 	int wake_owed;
-	struct front_picture *picture;
+	struct view_commit *latest;
+	int opportunity;
 	int dirty;
 	uint64_t serial;
+	uint64_t commit_serial;
 };
 
 /*
@@ -190,7 +183,7 @@ static void front_run(void *argument);
 static void front_loop(struct view_front *front);
 static void front_execute(struct view_front *front, struct front_item *item);
 static void front_publish(struct view_front *front);
-static void front_paint(struct view_front *front, unsigned width, unsigned height);
+static int front_commit(struct view_front *front, unsigned width, unsigned height);
 static int front_push(struct browser_view *view, struct front_item *item);
 static void front_navigation(struct view_front *front);
 static int front_note(struct view_front *front, struct front_note *note);
@@ -202,7 +195,6 @@ static int front_snapshot_same(const struct view_snapshot *left, const struct vi
 static int front_string_same(const char *left, const char *right);
 static char *front_copy(const char *text);
 static char *front_copy_bytes(const char *text, size_t length);
-static void front_picture_release(struct view_front *front, struct front_picture *picture);
 static void front_ring(void *context);
 static void front_redraw(void *context, struct browser_view *view);
 static void front_title(void *context, struct browser_view *view, const char *title);
@@ -330,7 +322,7 @@ view_front_destroy(
 	/* The thread ends the view and itself. */
 	wb_thread_join(&front->thread);
 
-	/* What was left: entries, notifications, the states and the picture. */
+	/* What was left: entries, notifications, the states and the latest committed frame. */
 	for (index = 0; index < front->items.count; index++) {
 		item = wb_vector_at(&front->items, index);
 		front_item_free(item);
@@ -343,8 +335,7 @@ view_front_destroy(
 	wb_vector_release(&front->notes);
 	front_snapshot_free(&front->published);
 	front_snapshot_free(&front->shown);
-	if (front->picture != NULL)
-		front_picture_release(front, front->picture);
+	view_commit_release(front->latest);
 	wb_cond_destroy(&front->changed);
 	wb_mutex_destroy(&front->lock);
 	free(front);
@@ -915,59 +906,69 @@ view_front_process(
 	}
 }
 
-/*
- * Draws the latest picture into the caller's pixels, from any thread; what
- * the picture does not cover is white.  Reports 0 or ENOENT (no picture yet).
- */
-int
-view_front_render_pixels(
-	struct browser_view *view,
-	uint32_t *pixels,
-	unsigned width,
-	unsigned height,
-	size_t stride)
+/* Holds the latest committed frame of a view of its own threads, from any thread (NULL before the first). */
+struct view_commit *
+view_front_commit(
+	struct browser_view *view)
 {
 	struct view_front *front;
-	struct front_picture *picture;
-	uint32_t *row;
-	unsigned columns;
-	unsigned line;
-	unsigned column;
+	struct view_commit *commit;
 
-	/* The picture, held while it is copied. */
+	/* The latest, held before the front may let it go. */
 	front = view_front_of(view);
 	wb_mutex_lock(&front->lock);
 
-	picture = front->picture;
-	if (picture != NULL)
-		picture->refs++;
+	commit = front->latest;
+	if (commit != NULL)
+		__atomic_fetch_add(&commit->refs, 1U, __ATOMIC_RELAXED);
 
 	wb_mutex_unlock(&front->lock);
 
-	/* No picture yet. */
-	if (picture == NULL)
-		return ENOENT;
+	/* Succeeded: the frame, or none yet. */
+	return commit;
+}
 
-	/* Each row: the picture's part, then white. */
-	columns = width;
-	if (columns > picture->width)
-		columns = picture->width;
-	for (line = 0; line < height; line++) {
-		row = (uint32_t *)((unsigned char *)pixels + (size_t)line * stride);
-		column = 0;
-		if (line < picture->height) {
-			memcpy(row, picture->pixels + (size_t)line * picture->width, (size_t)columns * sizeof(uint32_t));
-			column = columns;
-		}
-		for (; column < width; column++)
-			row[column] = 0xFFFFFFFFU;
-	}
+/* Lets go of a hold on a committed frame, from any thread (NULL is nothing); the last frees it and lets go of its scene. */
+void
+view_commit_release(
+	struct view_commit *commit)
+{
+	unsigned refs;
 
-	/* The picture is let go. */
-	front_picture_release(front, picture);
+	/* Nothing held, or held by others still. */
+	if (commit == NULL)
+		return;
+	refs = __atomic_sub_fetch(&commit->refs, 1U, __ATOMIC_ACQ_REL);
+	if (refs != 0U)
+		return;
 
-	/* Succeeded: the pixels hold the latest picture. */
-	return 0;
+	/* The last: the scene's hold, then the frame. */
+	paint_scene_release(commit->scene);
+	free(commit);
+}
+
+/*
+ * Tells a view of its own threads, from the drawing thread, that a frame
+ * was presented: the script thread takes it as the chance for the page's
+ * animation frames and its rendering update.
+ */
+void
+view_front_presented(
+	struct browser_view *view,
+	uint64_t serial)
+{
+	struct view_front *front;
+
+	UNUSED_PARAMETER(serial);
+
+	/* The chance, and the script thread wakes. */
+	front = view_front_of(view);
+	wb_mutex_lock(&front->lock);
+
+	front->opportunity = 1;
+	wb_cond_signal(&front->changed);
+
+	wb_mutex_unlock(&front->lock);
 }
 
 /* Reports how many entries wait in a view's mailbox now (merged ones count once). */
@@ -1063,6 +1064,7 @@ front_loop(
 	struct wb_vector taken;
 	struct front_item *item;
 	size_t index;
+	int opportunity;
 	int timeout;
 	int ending;
 
@@ -1072,7 +1074,7 @@ front_loop(
 		timeout = browser_view_timeout(front->view);
 		wb_mutex_lock(&front->lock);
 
-		if (front->items.count == 0 && !front->rung && !front->ending) {
+		if (front->items.count == 0 && !front->rung && !front->ending && !front->opportunity) {
 			if (timeout < 0)
 				wb_cond_wait(&front->changed, &front->lock);
 			else
@@ -1082,6 +1084,8 @@ front_loop(
 		wb_vector_init(&front->items, sizeof(struct front_item));
 		front->presses = 0;
 		front->rung = 0;
+		opportunity = front->opportunity;
+		front->opportunity = 0;
 		ending = front->ending;
 
 		wb_mutex_unlock(&front->lock);
@@ -1103,6 +1107,10 @@ front_loop(
 		ending = __atomic_load_n(&front->ending, __ATOMIC_ACQUIRE);
 		if (ending)
 			break;
+
+		/* A present came: the page's animation frames are due in the round. */
+		if (opportunity)
+			view_frame_opportunity(front->view);
 
 		/* The view's round (the news, the timers, the images), a task too. */
 		vm_agent_task_begin(&front->agent);
@@ -1239,9 +1247,9 @@ front_execute(
 
 /*
  * Publishes what the program sees after a round, on the script thread: the
- * view's state (with a new number when it changed), a new picture when the
- * view asked for a redraw or its size changed, and the program's wake when
- * it has something new.
+ * view's state (with a new number when it changed), a new committed frame
+ * when the view asked for a redraw or its size changed, and the program's
+ * wake when it has something new.
  */
 static void
 front_publish(
@@ -1262,11 +1270,12 @@ front_publish(
 		return;
 	}
 
-	/* A picture at the view's size, when the page changed. */
+	/* A committed frame at the view's size, when the page changed. */
 	painted = 0;
-	if (front->dirty || front->picture == NULL || front->picture->width != next.width || front->picture->height != next.height) {
-		front_paint(front, next.width, next.height);
-		painted = 1;
+	if (front->dirty || front->latest == NULL || front->latest->width != next.width || front->latest->height != next.height) {
+		error = front_commit(front, next.width, next.height);
+		if (error == 0)
+			painted = 1;
 	}
 
 	/* The state replaces the published one when it differs. */
@@ -1294,61 +1303,68 @@ front_publish(
 	else
 		front_snapshot_free(&next);
 
-	/* The drawing side hears of a new picture, the program of the rest. */
+	/* The drawing side hears of a new committed frame, the program of the rest. */
 	if (painted && front->options.frame_wake != NULL)
 		front->options.frame_wake(front->options.frame_wake_context);
 	if (wake && front->options.wake != NULL)
 		front->options.wake(front->options.wake_context);
 }
 
-/* Draws the page with the CPU into a new picture at a size, on the script thread, and makes it the latest. */
-static void
-front_paint(
+/*
+ * Commits the page as it is now at a size, on the script thread: its scene
+ * (a new one when the page painted again), the scroll and the size, as the
+ * latest committed frame; the one before goes when nobody draws from it.
+ * Reports 0, or an error (no page: ENOENT; the latest stays).
+ */
+static int
+front_commit(
 	struct view_front *front,
 	unsigned width,
 	unsigned height)
 {
-	struct front_picture *picture;
-	struct front_picture *old;
+	struct view_commit *commit;
+	struct view_commit *old;
+	struct paint_scene *scene;
+	layout_unit scroll_y;
 	int error;
 
-	/* A view without a size has nothing to draw. */
+	/* A view without a size has nothing to commit. */
 	front->dirty = 0;
 	if (width == 0 || height == 0)
-		return;
+		return EINVAL;
 
-	/* The picture's room. */
-	picture = calloc(1, sizeof(*picture));
-	if (picture == NULL)
-		return;
-	picture->pixels = malloc((size_t)width * height * sizeof(uint32_t));
-	if (picture->pixels == NULL) {
-		free(picture);
-		return;
+	/* The page laid out and painted as it is now, as a scene. */
+	error = view_commit_scene(front->view, &scene, &scroll_y);
+	if (error != 0)
+		return error;
+
+	/* The frame, with the next number. */
+	commit = calloc(1, sizeof(*commit));
+	if (commit == NULL) {
+		paint_scene_release(scene);
+		return ENOMEM;
 	}
-	picture->width = width;
-	picture->height = height;
-	picture->refs = 1;
+	front->commit_serial++;
+	commit->refs = 1U;
+	commit->scene = scene;
+	commit->scroll_y = scroll_y;
+	commit->width = width;
+	commit->height = height;
+	commit->serial = front->commit_serial;
 
-	/* The page drawn as it is now (no page has no picture). */
-	error = browser_view_draw_pixels(front->view, picture->pixels, width, height, (size_t)width * sizeof(uint32_t));
-	if (error != 0) {
-		free(picture->pixels);
-		free(picture);
-		return;
-	}
-
-	/* The latest picture; the old one goes when nobody draws from it. */
+	/* The latest; the old one goes when nobody draws from it. */
 	wb_mutex_lock(&front->lock);
 
-	old = front->picture;
-	front->picture = picture;
+	old = front->latest;
+	front->latest = commit;
 
 	wb_mutex_unlock(&front->lock);
 
 	/* The front's hold on the old one ends. */
-	if (old != NULL)
-		front_picture_release(front, old);
+	view_commit_release(old);
+
+	/* Succeeded: the drawing thread draws this one next. */
+	return 0;
 }
 
 /* Queues an entry (its strings become the mailbox's), merging it with the last one when they merge; ENOBUFS or ENOMEM frees them. */
@@ -1649,31 +1665,6 @@ front_copy_bytes(
 	return copy;
 }
 
-/* Lets go of a hold on a picture; the last frees it. */
-static void
-front_picture_release(
-	struct view_front *front,
-	struct front_picture *picture)
-{
-	int refs;
-
-	/* One hold less. */
-	wb_mutex_lock(&front->lock);
-
-	picture->refs--;
-	refs = picture->refs;
-
-	wb_mutex_unlock(&front->lock);
-
-	/* Held by others still. */
-	if (refs != 0)
-		return;
-
-	/* The last hold: the pixels go. */
-	free(picture->pixels);
-	free(picture);
-}
-
 /* The loader's wake (on its thread): the script thread has news to take. */
 static void
 front_ring(
@@ -1691,7 +1682,7 @@ front_ring(
 	wb_mutex_unlock(&front->lock);
 }
 
-/* The view's redraw (on the script thread): a new picture after this round, and the program's redraw once. */
+/* The view's redraw (on the script thread): a new committed frame after this round, and the program's redraw once. */
 static void
 front_redraw(
 	void *context,
@@ -1703,7 +1694,7 @@ front_redraw(
 
 	UNUSED_PARAMETER(view);
 
-	/* The picture is owed. */
+	/* The committed frame is owed. */
 	front = context;
 	front->dirty = 1;
 

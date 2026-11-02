@@ -193,7 +193,7 @@ text_system_close(
 	for (face = 0; face < TEXT_FACES; face++) {
 		if (system->faces[face].open)
 			truetype_close(system->faces[face].face);
-		wb_buffer_release(&system->faces[face].data);
+		text_bytes_release(system->faces[face].bytes);
 	}
 
 	/* Nothing is left open. */
@@ -285,11 +285,16 @@ text_add_face(
 	face = &system->faces[index];
 
 	/* The face takes the bytes and opens its first face. */
-	face->data = *data;
+	face->bytes = calloc(1, sizeof(*face->bytes));
+	if (face->bytes == NULL)
+		return ENOMEM;
+	face->bytes->refs = 1U;
+	face->bytes->data = *data;
 	wb_buffer_init(data);
-	error = truetype_open(face->data.data, face->data.length, 0, &face->face);
+	error = truetype_open(face->bytes->data.data, face->bytes->data.length, 0, &face->face);
 	if (error != 0) {
-		wb_buffer_release(&face->data);
+		text_bytes_release(face->bytes);
+		face->bytes = NULL;
 		return error;
 	}
 
@@ -380,6 +385,108 @@ text_select_family(
 }
 
 /*
+ * Holds the bytes a face of a text system was opened on (NULL when the
+ * face is not open), for another text system to open the same face on
+ * (text_system_use_face) or a committed frame to keep.
+ */
+struct text_bytes *
+text_face_bytes(
+	const struct text_system *system,
+	int face)
+{
+	struct text_bytes *bytes;
+
+	/* A face that is not open has no bytes. */
+	if (face < 0 || face >= TEXT_FACES || !system->faces[face].open)
+		return NULL;
+	bytes = system->faces[face].bytes;
+	if (bytes == NULL)
+		return NULL;
+
+	/* One hold more. */
+	__atomic_fetch_add(&bytes->refs, 1U, __ATOMIC_RELAXED);
+	return bytes;
+}
+
+/* Lets go of a hold on a font file's bytes (NULL is nothing); the last frees them. */
+void
+text_bytes_release(
+	struct text_bytes *bytes)
+{
+	unsigned refs;
+
+	/* Nothing held. */
+	if (bytes == NULL)
+		return;
+
+	/* One hold less; others still hold them. */
+	refs = __atomic_sub_fetch(&bytes->refs, 1U, __ATOMIC_ACQ_REL);
+	if (refs != 0U)
+		return;
+
+	/* The last: the file goes. */
+	wb_buffer_release(&bytes->data);
+	free(bytes);
+}
+
+/*
+ * Makes a face of a text system the one opened on bytes another system's
+ * face holds (text_face_bytes; NULL closes the face), so that a drawing
+ * thread draws a page's web fonts with faces of its own.  When the face
+ * changes the glyphs cached so far are forgotten (their bitmaps freed) and
+ * *changed is set.  Reports 0, or an error (the face is then closed).
+ */
+int
+text_system_use_face(
+	struct text_system *system,
+	int face,
+	struct text_bytes *bytes,
+	int *changed)
+{
+	struct text_face *slot;
+	size_t index;
+	int error;
+
+	/* The face it is already. */
+	*changed = 0;
+	if (face < 0 || face >= TEXT_FACES)
+		return EINVAL;
+	slot = &system->faces[face];
+	if (slot->bytes == bytes && (bytes == NULL || slot->open))
+		return 0;
+	*changed = 1;
+
+	/* The old face goes, and every glyph cached (the old face's among them). */
+	if (slot->open)
+		truetype_close(slot->face);
+	text_bytes_release(slot->bytes);
+	memset(slot, 0, sizeof(*slot));
+	for (index = 0; index < system->cache_capacity; index++) {
+		if (system->cache[index] == NULL)
+			continue;
+		free(system->cache[index]->pixels);
+		free(system->cache[index]);
+		system->cache[index] = NULL;
+	}
+	system->cache_count = 0;
+
+	/* No face from now on. */
+	if (bytes == NULL)
+		return 0;
+
+	/* The face on the same bytes, held. */
+	error = truetype_open(bytes->data.data, bytes->data.length, 0, &slot->face);
+	if (error != 0)
+		return error;
+	__atomic_fetch_add(&bytes->refs, 1U, __ATOMIC_RELAXED);
+	slot->bytes = bytes;
+	slot->open = 1;
+
+	/* Succeeded: the face is the other system's, its glyphs drawn anew. */
+	return 0;
+}
+
+/*
  * Measures how far a face's weights are from a weight asked for, the way
  * CSS prefers: none inside its range; for a bold weight, heavier faces
  * before lighter ones; otherwise lighter faces before heavier ones.
@@ -466,8 +573,10 @@ text_font_char_widths(
 
 	/* The two tables of the face's file. */
 	face = &system->faces[font->face];
-	head = font_table(&face->data, "head", 44U);
-	os2 = font_table(&face->data, "OS/2", 4U);
+	if (face->bytes == NULL)
+		return ENOENT;
+	head = font_table(&face->bytes->data, "head", 44U);
+	os2 = font_table(&face->bytes->data, "OS/2", 4U);
 	if (head == NULL || os2 == NULL)
 		return ENOENT;
 
@@ -866,17 +975,23 @@ font_open_face(
 	int error;
 
 	/* Reads the file. */
-	wb_buffer_init(&face->data);
-	error = wb_file_read(path, &face->data);
+	face->bytes = calloc(1, sizeof(*face->bytes));
+	if (face->bytes == NULL)
+		return ENOMEM;
+	face->bytes->refs = 1U;
+	wb_buffer_init(&face->bytes->data);
+	error = wb_file_read(path, &face->bytes->data);
 	if (error != 0) {
-		wb_buffer_release(&face->data);
+		text_bytes_release(face->bytes);
+		face->bytes = NULL;
 		return error;
 	}
 
 	/* Opens the face; the data stays with it. */
-	error = truetype_open(face->data.data, face->data.length, 0, &face->face);
+	error = truetype_open(face->bytes->data.data, face->bytes->data.length, 0, &face->face);
 	if (error != 0) {
-		wb_buffer_release(&face->data);
+		text_bytes_release(face->bytes);
+		face->bytes = NULL;
 		return error;
 	}
 

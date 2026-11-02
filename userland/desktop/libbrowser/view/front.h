@@ -18,7 +18,10 @@
  * answers from the state the script thread published last (a getter).
  * The script thread takes the mailbox in order, each entry a task of the
  * view's agent, and publishes the state, the notifications for the
- * program's callbacks and a picture of the page after each round.
+ * program's callbacks and, when the page changed, a committed frame after
+ * each round.  The drawing thread draws the latest committed frame
+ * (browser_view_render, _render_pixels) and tells of each present
+ * (browser_view_presented), a chance for the page's animation frames.
  */
 
 #ifndef KEILAND_BROWSER_VIEW_FRONT_H
@@ -26,6 +29,7 @@
 
 #include <browser/browser.h>
 
+#include "paint/paint.h"
 #include "vm/vm.h"
 
 #include <stddef.h>
@@ -36,6 +40,22 @@
 
 struct view_front;
 struct net_loader;
+
+/*
+ * A committed frame of the page: the scene of its display list (shared by
+ * the frames of the same list), the scroll it is drawn at, the view's size
+ * it was laid out for and its number (growing, from 1).  Nothing changes
+ * it once made; refs counts its holders (the front's latest, a drawing
+ * under way, the drawing thread's last) and is changed atomically.
+ */
+struct view_commit {
+	unsigned refs;
+	struct paint_scene *scene;
+	layout_unit scroll_y;
+	unsigned width;
+	unsigned height;
+	uint64_t serial;
+};
 
 /*
  * The state of a view the script thread publishes for the program's
@@ -102,7 +122,11 @@ int view_front_request_image(struct browser_view *view, float x, float y);
 const struct view_snapshot *view_front_snapshot(const struct browser_view *view);
 int view_front_text_context(const struct browser_view *view, char *text, size_t size, size_t *cursor, int *purpose, unsigned *hints);
 void view_front_process(struct browser_view *view);
-int view_front_render_pixels(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);
+
+/* The drawing thread's side (front.c): the latest committed frame, held (NULL before the first), let go, and a present told. */
+struct view_commit *view_front_commit(struct browser_view *view);
+void view_commit_release(struct view_commit *commit);
+void view_front_presented(struct browser_view *view, uint64_t serial);
 
 /* How many entries wait in the view's mailbox now (front.c), from any thread. */
 size_t view_front_queued(const struct browser_view *view);
@@ -115,5 +139,7 @@ void view_attach_front(struct browser_view *view, struct view_front *front);
 struct view_front *view_front_of(const struct browser_view *view);
 struct net_loader *view_loader(const struct browser_view *view);
 int view_fill_snapshot(struct browser_view *view, struct view_snapshot *snapshot);
+int view_commit_scene(struct browser_view *view, struct paint_scene **scene, layout_unit *scroll_y);
+void view_frame_opportunity(struct browser_view *view);
 
 #endif

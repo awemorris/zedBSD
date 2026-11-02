@@ -107,12 +107,29 @@ struct paint_list {
 struct paint_frame {
 	struct layout_tree *tree;
 	struct paint_list list;
-	/* The lists and the page's cache that hold it; it is freed when the last lets go. */
-	int refs;
+	/* The lists and the page's cache that hold it; it is freed when the last lets go (changed atomically: a scene lets go on the drawing thread). */
+	unsigned refs;
 };
 
 /* Lets go of a reference to a frame (the last frees it). */
 void paint_frame_release(struct paint_frame *frame);
+
+/*
+ * A display list taken from the page that built it (paint_scene_make), to
+ * be drawn on another thread: its items point only into its arena, into the
+ * documents of its frames (which it holds), and at copies of the image
+ * records over pixels it holds; faces holds the font files of the text
+ * system it was built with (face by face, NULL for a face not open), from
+ * which a drawing thread opens faces of its own.  It is not changed once
+ * made.  refs counts its holders and is changed atomically (it is let go
+ * on the drawing thread too).
+ */
+struct paint_scene {
+	unsigned refs;
+	struct paint_list list;
+	struct wb_vector holds;
+	struct text_bytes *faces[TEXT_FACES];
+};
 
 /*
  * A bitmap the CPU renderer draws into: width by height pixels, each
@@ -167,11 +184,15 @@ struct paint_snapshot {
 	layout_unit height;
 };
 
-/* The display list (list.c). */
+/* The display list (list.c) and its scenes (scene.c). */
 int paint_transition_capture(const struct layout_tree *tree, const struct layout_transition *transition, const struct layout_box *box, struct paint_snapshot **out);
 void paint_snapshot_release(struct paint_snapshot *snapshot);
 int paint_build(struct paint_list *list, const struct layout_tree *tree);
 void paint_release(struct paint_list *list);
+void paint_list_init(struct paint_list *list);
+int paint_scene_make(struct paint_list *list, const struct text_system *text, struct paint_scene **out);
+void paint_scene_retain(struct paint_scene *scene);
+void paint_scene_release(struct paint_scene *scene);
 int paint_add_ring(struct paint_list *list, layout_unit x, layout_unit y, layout_unit width, layout_unit height, layout_unit thickness, uint32_t color);
 int paint_add_rect(struct paint_list *list, layout_unit x, layout_unit y, layout_unit width, layout_unit height, uint32_t color);
 int paint_gradient_render(struct wb_arena *arena, const struct css_gradient *gradient, int width, int height, struct img_bitmap *bitmap);
