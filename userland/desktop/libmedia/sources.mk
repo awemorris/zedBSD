@@ -6,6 +6,12 @@ LIBMEDIA_SOURCES := $(LIBMEDIA_OS_SOURCES) userland/desktop/libmedia/engine.c us
 	userland/desktop/libmedia/bitstream.c userland/desktop/libmedia/picture.c \
 	userland/desktop/libmedia/h264.c userland/desktop/libmedia/h264-dpb.c \
 	userland/desktop/libmedia/vkvideo.c userland/desktop/libmedia/vkvideo-runtime.c \
+	userland/desktop/libmedia/vkvideo-h265.c userland/desktop/libmedia/h265-stream.c \
+	userland/desktop/libmedia/h265-dpb.c userland/desktop/libmedia/h265-std.c \
+	userland/desktop/libmedia/h265sw-nal.c userland/desktop/libmedia/h265sw-poc.c \
+	userland/desktop/libmedia/h265sw-ps.c userland/desktop/libmedia/h265sw-rps.c \
+	userland/desktop/libmedia/h265sw-scaling.c userland/desktop/libmedia/h265sw-slice.c \
+	userland/desktop/libmedia/h265sw-vui.c \
 	userland/desktop/libmedia/bits.c userland/desktop/libmedia/aac-input.c \
 	userland/desktop/libmedia/aac-huffman.c userland/desktop/libmedia/aac-codec.c \
 	userland/desktop/libmedia/aac-bands.c userland/desktop/libmedia/aac-frame.c \

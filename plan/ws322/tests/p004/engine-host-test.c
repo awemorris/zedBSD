@@ -318,7 +318,7 @@ main(void)
 
 	error = drv_wave5_video_register((struct drv_wave5 *)&core);
 	check(error == 0 && core.ops != NULL, "registered");
-	check(core.ops->operations(core.engine) == DRV_POWERVR_VIDEO_DECODE_H264, "H.264 decode offered");
+	check(core.ops->operations(core.engine) == (DRV_POWERVR_VIDEO_DECODE_H264 | DRV_POWERVR_VIDEO_DECODE_H265), "H.264 and H.265 decode offered");
 
 	open.width = 1920;
 	open.height = 1088;

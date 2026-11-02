@@ -191,8 +191,9 @@ check_reports(void)
 
 	all = DRV_POWERVR_VIDEO_DECODE_H264 | DRV_POWERVR_VIDEO_DECODE_H265 | DRV_POWERVR_VIDEO_ENCODE_H265;
 	expect(powervr_video_capset_flags(0) == 0, "no capset flag without an engine");
-	expect(powervr_video_capset_flags(DRV_POWERVR_VIDEO_DECODE_H265) == 0, "no capset flag for H.265 alone");
+	expect(powervr_video_capset_flags(DRV_POWERVR_VIDEO_DECODE_H265) == 4U, "the H.265 decode capset flag");
 	expect(powervr_video_capset_flags(DRV_POWERVR_VIDEO_DECODE_H264) == 1U, "the H.264 decode capset flag");
+	expect(powervr_video_capset_flags(DRV_POWERVR_VIDEO_DECODE_H264 | DRV_POWERVR_VIDEO_DECODE_H265 | DRV_POWERVR_VIDEO_ENCODE_H265) == 5U, "both decode capset flags, none for the encode");
 	expect(powervr_video_queue_flags(0) == 0, "no queue flag without an engine");
 	expect(powervr_video_queue_flags(DRV_POWERVR_VIDEO_DECODE_H265) == VK_QUEUE_VIDEO_DECODE_BIT_KHR, "the decode queue flag");
 	expect(powervr_video_queue_flags(all) == (VK_QUEUE_VIDEO_DECODE_BIT_KHR | 0x40U), "the decode and encode queue flags");

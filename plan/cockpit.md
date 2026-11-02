@@ -14,7 +14,7 @@
 | P5 | — | Windows 版ブラウザ | 返却（08:12）。BUG-400（storage-test の時々の FAIL、試験の側）fixed。以後ブラウザは P8 | 次を待つ |
 | P6 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | 返却（03:59）。p037（試験の TLS server tlspeer）cleared | p024・p029（handshake）の候補 |
 | P7 | — | — | 返却（07:50）。BUG-398 fixed（Google の app の一覧が 15 個の icon で描ける、host と Wine）。以後ブラウザは P8 | 次を待つ |
-| P8 | [BUG-401](bugs/BUG-401.md) | ブラウザ（Windows 版と libbrowser、ユーザーの決定で P8） | host の試験 10 本の退行（q1921）。BUG-395・396 は fixed（Windows の題の帯、Reload の icon は zedBSD でも） | 次のブラウザの作業 |
+| P8 | [BUG-402](bugs/BUG-402.md)〜[BUG-407](bugs/BUG-407.md) | ブラウザ（Windows 版と libbrowser） | Windows の UAT の 2 回目の 6 件（q1924）。BUG-401 は fixed | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 

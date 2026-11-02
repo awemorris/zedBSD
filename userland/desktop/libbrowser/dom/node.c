@@ -1067,6 +1067,10 @@ element_trace(
 	if (element->svg_width != NULL)
 		vm_heap_mark(heap, element->svg_width);
 
+	/* A frame element keeps the window proxy its scripts were given. */
+	if (element->frame_proxy != NULL)
+		vm_heap_mark(heap, element->frame_proxy);
+
 	/* A form alone retains its cached live controls list across collection. */
 	if (element->controls_collection != NULL)
 		vm_heap_mark(heap, &element->controls_collection->cell);
