@@ -3335,6 +3335,51 @@ test_failure_with_buffer(void)
 	}
 }
 
+/*
+ * Two messages in one record, the first of which makes the connection
+ * send something: the second waits until the first answer is sent, so the
+ * output never holds more than one answer.
+ */
+static void
+test_pending_output(void)
+{
+	static const uint8_t requests[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+	struct bench *bench;
+	uint8_t buffer[16];
+	size_t done;
+	unsigned wants;
+
+	/* Two HelloRequests of TLS 1.2 (each answered with a warning of 2 + 8 + 16 + 5 bytes), and data after them; the transport is full. */
+	bench = connected12();
+	if (bench == NULL)
+		return;
+	CHECK(tlspeer_send_record(bench->peer, T_HANDSHAKE, requests, sizeof(requests)) == 0);
+	pipe_seal(&bench->pipe);
+	peer_data(bench, "after");
+	bench->pipe.write_limited = 1;
+	bench->pipe.write_budget = 0;
+	done = 5;
+	wants = 0;
+	CHECK(sslc_conn_read(&bench->conn, buffer, sizeof(buffer), &done, &wants) == EAGAIN);
+	CHECK(done == 0U);
+	CHECK(wants == SSLC_WANT_WRITE);
+
+	/* The first answer is held, the second message waits whole in the buffer. */
+	CHECK(bench->conn.out_used - bench->conn.out_sent == 31U);
+	CHECK(bench->conn.message_used == 4U);
+
+	/* The transport takes it: both answers are sent, once each, and the data is read. */
+	bench->pipe.write_budget = 1U << 20;
+	CHECK(sslc_conn_read(&bench->conn, buffer, sizeof(buffer), &done, &wants) == 0);
+	CHECK(done == 5U);
+	CHECK_BYTES(buffer, "after", 5);
+	CHECK(bench->peer->alert_count == 2U);
+	CHECK(bench->peer->alert_level == 1U);
+	CHECK(bench->peer->alert_description == A_NO_RENEGOTIATION);
+	CHECK(bench->peer->error == 0);
+	bench_free(bench);
+}
+
 /* Runs every group of checks. */
 int
 main(void)
@@ -3373,5 +3418,6 @@ main(void)
 	test_tweaked_failures();
 	test_before_handshake();
 	test_failure_with_buffer();
+	test_pending_output();
 	return check_finish("test-conn");
 }
