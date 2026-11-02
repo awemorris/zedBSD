@@ -486,7 +486,10 @@ for key in $keys; do
 	interop "1.3 non-blocking hrr $key" $key "-tls1_3 -groups P-256" "-n" v13 hrr
 	[ "$key" = p384 ] && continue
 	interop "1.2 fragments of 512 $key" $key "-tls1_2 -max_send_frag 512" "-s 12000 -r 300 -P" v12
-	interop "1.2 non-blocking $key" $key "-tls1_2 -groups P-256" "-n -s 5000 -r 777 -P" v12 group=23
+	# 5003, not 5000: in the zedBSD guest a 5000-byte line ends in an Ethernet frame of 704 bytes, a multiple of the
+	# USB adapter's 64-byte packets, which the guest's USB network does not get across (its frames that need a
+	# zero-length packet are lost: BUG-416, a driver fault, not one of these libraries).
+	interop "1.2 non-blocking $key" $key "-tls1_2 -groups P-256" "-n -s 5003 -r 777 -P" v12 group=23
 done
 interop "client pinned to 1.2" p256 "" "-v 1.2" v12
 interop "client pinned to 1.3" p256 "" "-v 1.3" v13
