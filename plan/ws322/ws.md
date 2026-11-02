@@ -24,6 +24,7 @@
 | [ws322-p004](phase004/phase.md) | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、COINCIDE で pool から GPU の transfer、Video Player の GPU の道） | cleared（2026-11-02 01:55 Q1、main f9acea845。VF2 で H.264 の 8 本が全 frame で ffmpeg と一致、1080p30 の 600 frame 一致、Video Player の GPU の道で 16 s に 479 frame（late 2、CPU 約 20%）） | p002、p003 |
 | [ws322-p005](phase005/phase.md) | libvulkan の H.265 decode の転送 | cleared（2026-11-02 06:45 Q1 が受け入れ、main で p005/run.sh・p004/run.sh PASS。06:44 P2 q1911-i01。H.265 の header（bafa50879）と libvulkan の転送・host 試験、host の試験は全部 0 failed、amd64・riscv64 の libvulkan.so が warning 0） | WS318 p011a か先に着手（Q322-4） |
 | ws322-p006 | H.265 decode | in-progress（P2 q1919） | p004、p005 |
+| [ws322-p006](phase006/phase.md) | H.265 decode（PowerVR の executor の H.265 の reader、Wave5 の HEVC、vkvideo-probe の H.265、libmedia の H.265 の back end、Video Player の GPU の道での H.264・H.265 の再生） | cleared（2026-11-02 P2 q1919-i01、Q1 の受け入れ待ち。HEVC_v1 146 本のうち 128 本が全 frame 一致・15 本は理由を出して断る・VPSSPSPPS_A は正しい参照で一致・SAODBLK_A/B は参照が疑わしく未決。media-probe H.265 1080p30・60 600/600、Video Player GPU の道 H.265 1080p30 shown 478 late 3、H.264 は前と同じ） | p004、p005 |
 | [ws322-p007](phase007/phase.md) | 速さと頑丈さ（timeout の後の立て直し、RESET の flush、task buffer の大きさ、速さの測り、JVT の照合） | cleared（2026-11-02 03:45 Q1 が受け入れ、main で p004/run.sh 全部 0 failed。2026-11-02 03:45 P2 q1896-i01。VF2 で立て直し・flush・3 回で停止・2 session・SIGKILL を確かめた、task buffer は vendor の ×1.5、1080p の VPU 7 ms・2160p 20 ms、Video Player 1080p60 は始めの数秒の後 late 0、JVT 75/101 一致。非同期・命令の queue は入れず） | p004 |
 | [ws322-p007b](phase007b/phase.md) | JVT の 26 本（probe の parser・DPB の planner で止まる 13 本、重み付き予測など絵が違う 13 本）の原因と直し | cleared（2026-11-02 06:09 Q1 が受け入れ、main で p004/run.sh PASS。2026-11-02 05:39 P2 q1907-i01。原因は全部 vkvideo-probe（PPS の送り直し、表示順の 256 の境目、type 1、operation 5、gap）で firmware・engine は正しかった。VF2 で vkvideo-probe 100/101 が全部の絵で一致し BA3_SVA_C（Extended）は理由を出して断る。libmedia の 3 つ（gap の list の比べ、Baseline の並べ替え 0、待ちの長い絵の結果）を直し media-probe 101/101 一致。p007 の回帰と host 試験は前と同じ） | p007 |
 | ws322-p008 | encode の設計の詳細（Wave420L） | planned | Q322-2 は A（2026-11-01 ユーザー） |
@@ -71,6 +72,12 @@
 - p006（H.265 decode）は WS324 の h265-std.h の約束（StdVideoH265 の埋め方）を入力にする。
 
 ## Resume point
+
+- 2026-11-02 P2（q1919-i01）: p006 を実装し VF2 で確かめた（[phase006](phase006/phase.md)）。2026-11-02 ユーザーから、今日の WS322 は H.264・H.265 の decode までで区切り、encode（p008 以降）は次の指示で続ける、という趣旨の指示を受けた（Q1 経由）。p012 の decode の部分（Video Player の GPU の道での H.264・H.265 の再生）も p006 で済ませた。
+  - 次に始める Phase: **p008 encode の設計の詳細（Wave420L）**。読む物: design.md §3.3（能力）・§4（firmware、`monet.bin` は `wave420l/firmware/`）・§5（出典、soft_3rdpart の wave420l/code/vpuapi は Q322-2 の A で値と手順だけを block ごとに出典つきで使う）・§13（encode の方針: IDR と P、CQP と CBR、header は vpu-h265-ps.c の writer で software）・§15 の p008〜p011、WS324 の design §10（encode の wire）と ws.md の p008a・p008b（libvulkan の encode の転送は WS324 が持つ、Q324-3。capset bit 3 = H.264 encode、bit 4 = H.265 encode）。
+  - 使える物: `src/drivers/vpu/vpu-h265-ps.c`（VPS・SPS・PPS の writer、encode の header にも使う）、`vpu-bits.c`、`wave5-core.c` の core の扱い（Wave420L は別の core、glue は vf2-vpu.c に足す）、executor の `vk-video.c`・`vk-video-h265.c`（reader の形）。
+  - 先に決める事（p008 の中で）: wave420l の firmware の package（zedBSD-firmware への `monet.bin` の追加と push はユーザーの指示が要る、Q322-1 の A の形）、p010（libvulkan の encode の転送）を WS324 p008a・p008b の後にするか先に作るか（Q322-4 と Q324-3 の「先に着手する方」）。
+  - p006 の残り: SAODBLK_A/B の正否（板の出力の I420 の md5 を zip の md5 と照らす道具、vkvideo-probe の P1 の copy-out の後）、HEVC の参照を zip の md5 にする事、Video Player の H.265 1080p60 の始めの late（p012）。
 
 - 2026-11-02 P2（q1911-i01）: p005 を実装した（[phase005](phase005/phase.md)）。header は Q1 の許しで別の commit（bafa50879）。wire は WS324 design §10 の形で、WS324 p005 がそのまま使える。次: Q1 の受け入れ、p006（PowerVR の reader と Wave5 の HEVC）。
 
