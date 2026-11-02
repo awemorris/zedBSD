@@ -2376,12 +2376,15 @@ scaling_table(
 }
 
 /*
- * Writes one matrix into the table: 4x4 and 8x8 as they are; 16x16 and
- * 32x32 with each entry of the 8x8 list repeated two or four times across
- * and down, and the DC value first.
+ * Writes one matrix into the table in raster order: the coded (up-right
+ * diagonal) list put in its raster places, 4x4 and 8x8 as they are; 16x16
+ * and 32x32 with each entry of the 8x8 raster repeated two or four times
+ * across and down, and the DC value first.
  *
  * Procedure referenced: hevc_d_h265.c (rpi-6.12.y, 7821b6a1)
- * expand_scaling_list.
+ * expand_scaling_list (the raster expansion and the DC value);
+ * Recommendation ITU-T H.265 (6.5.3, the up-right diagonal scan the lists
+ * are coded in).
  */
 static void
 scaling_expand(
@@ -2390,29 +2393,53 @@ scaling_expand(
 	uint8_t dc,
 	uint8_t *out)
 {
+	uint8_t raster[64];
 	uint32_t repeat;
 	uint32_t side;
+	uint32_t count;
+	uint32_t index;
 	uint32_t x;
 	uint32_t y;
+	int32_t diagonal;
+	int32_t column;
+	int32_t row;
 
-	/* The two smaller sizes are copied. */
+	/* The coded list's side: 4 for the 4x4 lists, 8 for the others. */
+	side = 8U;
+	if (size == 0U)
+		side = 4U;
+	count = side * side;
+
+	/* Each anti-diagonal from its bottom left up to its top right, entry by entry into its raster place. */
+	index = 0;
+	for (diagonal = 0; diagonal < (int32_t)(2U * side - 1U); diagonal++) {
+		column = 0;
+		row = diagonal;
+		while (row >= 0) {
+			if (column < (int32_t)side && row < (int32_t)side && index < count) {
+				raster[(uint32_t)row * side + (uint32_t)column] = coded[index];
+				index++;
+			}
+			row--;
+			column++;
+		}
+	}
+
+	/* The two smaller sizes are the raster as it is. */
 	if (size == 0U || size == 1U) {
-		side = 16U;
-		if (size == 1U)
-			side = 64U;
-		for (x = 0; x < side; x++)
-			out[x] = coded[x];
+		for (x = 0; x < count; x++)
+			out[x] = raster[x];
 		return;
 	}
 
-	/* The larger: each row of the 8x8 list for repeat rows, each entry repeat times. */
+	/* The larger: each row of the 8x8 raster for repeat rows, each entry repeat times. */
 	repeat = 2U;
 	if (size == 3U)
 		repeat = 4U;
 	side = 8U * repeat;
 	for (y = 0; y < side; y++) {
 		for (x = 0; x < side; x++)
-			out[y * side + x] = coded[(y / repeat) * 8U + x / repeat];
+			out[y * side + x] = raster[(y / repeat) * 8U + x / repeat];
 	}
 	out[0] = dc;
 }

@@ -3,6 +3,8 @@
 #   PI5=ADDRESS sh plan/ws321/tests/pi5-hevc.sh check                  the board's kernel and boot files (cksums)
 #   PI5=ADDRESS KERNEL=VMUNIX sh plan/ws321/tests/pi5-hevc.sh deploy   keeps /boot/boot0/vmunix once as vmunix.p321old,
 #       puts KERNEL in its place (checked by cksum) and reboots
+#   PI5=ADDRESS sh plan/ws321/tests/pi5-hevc.sh textlogin   keeps cmdline.txt once as cmdline.txt.p321old and boots
+#       without the desktop's login (rpi5gpu.start=boot alone), so the player step's compositor has the display
 #   PI5=ADDRESS BUILD=DIR STREAMS=DIR sh plan/ws321/tests/pi5-hevc.sh files
 #       BUILD's bin/vkvideo-probe, bin/media-probe, bin/videoplayer, bin/wayland, bin/files, bin/keiland-shot and
 #       dynamic/*.so into /tmp/p321 (a tmpfs) with STREAMS's *.h265 and *.sha256 (plan/ws322/tests/p006/make-hevc.sh)
@@ -11,6 +13,9 @@
 #       lines; OUT/probe.txt has one line a stream: name, exit, frames decoded, output, matched, failed
 #   PI5=ADDRESS OUT=DIR CLIP=FILE [SECONDS=16] sh plan/ws321/tests/pi5-hevc.sh player
 #       Video Player on CLIP (on the board) in a compositor of its own for SECONDS, its FRAMES line, the screen's PNG
+#   PI5=ADDRESS OUT=DIR CLIP=FILE [SECONDS=20] sh plan/ws321/tests/pi5-hevc.sh session
+#       Video Player on CLIP (on the board) in the board's own desktop session (the user's compositor, wayland-0) for
+#       SECONDS, as the user; its log and FRAMES line, the CPU load midway and the kernel's video lines
 #   PI5=ADDRESS sh plan/ws321/tests/pi5-hevc.sh restore               the kept kernel back, a boot, the cksums compared
 #       with the ones deploy saw (RESTORED OK); /tmp/p321 goes with the boot
 # The board's user is user/user (sudo).  The cksums deploy saw are in build/tmp/p321-board.txt.
@@ -93,6 +98,12 @@ deploy)
 	reboot_board
 	b 'dmesg | grep -E "hevc|video" | head -8'
 	;;
+textlogin)
+	sb 'cd /boot/boot0 && (test -f cmdline.txt.p321old || cp cmdline.txt cmdline.txt.p321old) && echo rpi5gpu.start=boot > cmdline.txt && sync' ||
+	    { echo "FAIL cmdline"; exit 1; }
+	echo "cmdline $(b 'cat /boot/boot0/cmdline.txt')"
+	reboot_board
+	;;
 files)
 	: "${BUILD:?BUILD=the build}"
 	: "${STREAMS:?STREAMS=the streams}"
@@ -158,8 +169,33 @@ BOARD
 	put "user@$PI5:$H/player.png" "user@$PI5:$H/player.log" "user@$PI5:$H/wayland.log" "$OUT/" > /dev/null 2>&1
 	cat "$OUT/player.txt"
 	;;
+session)
+	: "${OUT:?OUT=the output directory}"
+	: "${CLIP:?CLIP=the clip on the board}"
+	mkdir -p "$OUT"
+	tag=$(basename "$CLIP" .mp4)
+	cat > "$OUT/session-$tag.sh" <<BOARD
+H=$H
+export LD_LIBRARY_PATH=\$H/lib XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0
+\$H/bin/videoplayer --timeout-s=${SECONDS:-20} $CLIP > \$H/session-$tag.log 2>&1 < /dev/null &
+ppid=\$!
+sleep $(( ${SECONDS:-20} / 2 ))
+top -b -n 1 2> /dev/null | head -12 | sed 's/^/top /'
+wait \$ppid
+echo "player exit=\$?"
+grep -E 'VIDEOPLAYER|GPU holds|read back|Vulkan Video|H.265|h265|backend' \$H/session-$tag.log | tail -12
+dmesg | grep -iE 'video|hevc' | tail -4
+BOARD
+	put "$OUT/session-$tag.sh" "user@$PI5:$H/session-$tag.sh" || { echo "FAIL script"; exit 1; }
+	echo "start $(date +%s.%N)"
+	BT=$(( ${SECONDS:-20} + 120 )) b "sh $H/session-$tag.sh" > "$OUT/session-$tag.txt" 2>&1
+	echo "end $(date +%s.%N)"
+	put "user@$PI5:$H/session-$tag.log" "$OUT/" > /dev/null 2>&1
+	cat "$OUT/session-$tag.txt"
+	;;
 restore)
 	sb 'cd /boot/boot0 && test -f vmunix.p321old && mv vmunix.p321old vmunix && sync' || { echo "FAIL restore"; exit 1; }
+	sb 'cd /boot/boot0 && if test -f cmdline.txt.p321old; then mv cmdline.txt.p321old cmdline.txt; fi; sync'
 	reboot_board
 	now=$(sums)
 	was=$(sed -n 's/^original //p' "$STATE")

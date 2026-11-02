@@ -311,7 +311,7 @@ struct video_command {
 	bool has_setup;
 	struct video_slot setup;
 	uint32_t slot_count;
-	struct video_slot slots[VIDEO_MAX_DPB_SLOTS];
+	struct video_slot slots[VIDEO_MAX_DPB_SLOTS + 1U];
 	bool has_picture;
 	struct bcm2712_hevc_picture picture;
 	uint32_t slice_count;
@@ -2275,7 +2275,7 @@ read_slot(
 		read_resource(reader, resource);
 }
 
-/* Reads an array of slots into the command, up to the DPB's slots (more fails the stream). */
+/* Reads an array of slots into the command, up to the DPB's slots and a setup slot (more fails the stream). */
 static void
 read_slots(
 	struct i915_wire_reader *reader,
@@ -2285,10 +2285,10 @@ read_slots(
 	uint64_t total;
 	uint64_t item;
 
-	/* [count][array]: a count past the bytes left, or past the slots, is malformed. */
+	/* [count][array]: a count past the bytes left, or past the slots and the setup slot of a begin, is malformed. */
 	(void)drv_i915_wire_read_u32(reader);
 	total = drv_i915_wire_read_u64(reader);
-	if (total > (uint64_t)(reader->size - reader->offset) || total > VIDEO_MAX_DPB_SLOTS)
+	if (total > (uint64_t)(reader->size - reader->offset) || total > VIDEO_MAX_DPB_SLOTS + 1U)
 		reader->error = 1;
 
 	/* Each slot in order. */
@@ -3786,6 +3786,15 @@ convert(
 		width = image->width;
 	if (height > image->height)
 		height = image->height;
+
+	/*
+	 * In whole 16-sample blocks: the unit's SAND input is read so, and the
+	 * image's rows (32 bytes) and planes (16 rows) have room for them.
+	 */
+	width = (width + 15U) & ~15U;
+	height = (height + 15U) & ~15U;
+	if (width > pitch)
+		width = pitch;
 
 	/* The luma plane: SAND R8 into raster R8. */
 	kern_memset(&job, 0, sizeof(job));
