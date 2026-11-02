@@ -65,8 +65,7 @@ bool_update_ended(
  * Starts a decoder at the first byte of data (size bytes, NULL only when
  * size is 0), as RFC 6386 7.3's init_bool_decoder: range 255, the first two
  * bytes in value (a byte past the end is 0).
- */
-/*
+ *
  * Procedure referenced: RFC 6386 (November 2011) section 7.3
  * (init_bool_decoder).
  */
@@ -102,8 +101,7 @@ webpc_bool_init(
  * as RFC 6386 7.3's read_bool: split = 1 + (((range - 1) * prob) >> 8); then
  * the comparison, the new range and value, and the normalisation, bytes past
  * the end of the data shifting in as 0.
- */
-/*
+ *
  * Procedure referenced: RFC 6386 (November 2011) section 7.3 (read_bool).
  */
 int
@@ -157,8 +155,7 @@ webpc_bool_read(
 /*
  * Decodes an unsigned literal of bits (0..24) bits, most significant first,
  * each with probability 128 (RFC 6386 8, L(n)).
- */
-/*
+ *
  * Procedure referenced: RFC 6386 (November 2011) section 7.3
  * (read_literal).
  */
@@ -191,8 +188,7 @@ webpc_bool_literal(
  * Decodes a signed value as the frame header codes one: a magnitude of bits
  * (1..24) bits (L(n)), then a sign bit (L(1), 1 for negative) (RFC 6386 9.3,
  * 9.6, 19.2).
- */
-/*
+ *
  * Procedure referenced: RFC 6386 (November 2011) sections 9.3 and 19.2
  * (a magnitude, then a sign flag).
  */
@@ -225,8 +221,7 @@ webpc_bool_signed(
  * probability probs[i >> 1] chooses tree[i] or tree[i + 1]; a positive entry
  * is the next node, an entry of 0 or less is the leaf -entry, the value
  * returned.
- */
-/*
+ *
  * Procedure referenced: RFC 6386 (November 2011) section 8.1 (treed_read).
  */
 int
