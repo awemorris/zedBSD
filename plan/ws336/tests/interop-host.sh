@@ -132,6 +132,33 @@ def silent(port, seconds):
         except OSError:
             pass
 
+def holder(port, root):
+    inodes = set()
+    for line in open("/proc/net/tcp").read().splitlines()[1:]:
+        fields = line.split()
+        if fields[3] == "0A" and fields[1] == "0100007F:%04X" % port:
+            inodes.add("socket:[%s]" % fields[9])
+    children = {}
+    for entry in os.listdir("/proc"):
+        if entry.isdigit():
+            try:
+                parent = int(open("/proc/%s/stat" % entry).read().rsplit(")", 1)[1].split()[1])
+            except OSError:
+                continue
+            children.setdefault(parent, []).append(int(entry))
+    pending = [root]
+    while pending:
+        pid = pending.pop(0)
+        pending.extend(children.get(pid, []))
+        try:
+            links = [os.readlink("/proc/%d/fd/%s" % (pid, fd)) for fd in os.listdir("/proc/%d/fd" % pid)]
+        except OSError:
+            continue
+        if inodes & set(links):
+            print(pid)
+            return 0
+    return 1
+
 def owner(port, root):
     inodes = set()
     for line in open("/proc/net/tcp").read().splitlines()[1:]:
@@ -286,6 +313,11 @@ def startups(args):
     print("ok")
     return 0
 
+# fds PID: the number of descriptors the process has open.
+def fds(pid):
+    print(len(os.listdir("/proc/%d/fd" % pid)))
+    return 0
+
 what = sys.argv[1]
 if what == "free-port":
     free_port()
@@ -299,6 +331,10 @@ elif what == "closer":
     closer(int(sys.argv[2]), float(sys.argv[3]))
 elif what == "pty":
     sys.exit(run_pty(sys.argv[2:]))
+elif what == "holder":
+    sys.exit(holder(int(sys.argv[2]), int(sys.argv[3])))
+elif what == "fds":
+    sys.exit(fds(int(sys.argv[2])))
 elif what == "startups":
     sys.exit(startups(sys.argv[2:]))
 EOF
@@ -779,8 +815,16 @@ chmod 700 "$noshell_dir/home" "$noshell_dir/home/.ssh"
 cp "$b_dir/sshd" "$noshell_dir/sshd"
 cp "$b_dir/home/.ssh/authorized_keys" "$noshell_dir/home/.ssh/authorized_keys"
 
+# The same server once more, to be stopped while a session runs.
+stop_dir="$work/sshd-stop"
+mkdir -p "$stop_dir/home/.ssh"
+chmod 700 "$stop_dir/home" "$stop_dir/home/.ssh"
+cp "$b_dir/sshd" "$b_dir/shell.sh" "$stop_dir/"
+cp "$b_dir/home/.ssh/authorized_keys" "$stop_dir/home/.ssh/authorized_keys"
+
 port_b=$(helper free-port)
 port_noshell=$(helper free-port)
+port_stop=$(helper free-port)
 b_config() {
 	cat <<EOF
 Port $1
@@ -794,25 +838,29 @@ EOF
 }
 { echo "HostKey $work/server/rsa_key"; b_config "$port_b"; } > "$b_dir/sshd_config"
 b_config "$port_noshell" > "$noshell_dir/sshd_config"
+b_config "$port_stop" > "$stop_dir/sshd_config"
 
 # sshd -t: a usable configuration gives 0; an unknown keyword gives its line and 1.
-"$b_dir/sshd" -t -f "$b_dir/sshd_config" > "$work/b-t1.out" 2>&1
+timeout 30 "$b_dir/sshd" -t -f "$b_dir/sshd_config" > "$work/b-t1.out" 2>&1
 expect_eq "sshd -t on a usable configuration" "$?:$(cat "$work/b-t1.out")" "0:"
 { echo "Port $port_b"; echo "PasswordAuthentication no"; echo "NoSuchKeyword yes"; } > "$work/b-bad_config"
-"$b_dir/sshd" -t -f "$work/b-bad_config" > "$work/b-t2.out" 2>&1
+timeout 30 "$b_dir/sshd" -t -f "$work/b-bad_config" > "$work/b-t2.out" 2>&1
 expect_eq "sshd -t on an unknown keyword gives 1" "$?" 1
 grep -q 'line 3:' "$work/b-t2.out"
 check "sshd -t names the line ($(cat "$work/b-t2.out"))" $?
-"$b_dir/sshd" -t -f "$b_dir/sshd_config" extra > "$work/b-t3.out" 2>&1
+timeout 30 "$b_dir/sshd" -t -f "$b_dir/sshd_config" extra > "$work/b-t3.out" 2>&1
 expect_eq "sshd -t with an operand gives 1" "$?" 1
 { echo "HostKey $work/server/rsa_key"; b_config "$port_b"; } > "$work/b-rsa_config"
-"$b_dir/sshd" -t -f "$work/b-rsa_config" > "$work/b-t4.out" 2>&1
+timeout 30 "$b_dir/sshd" -t -f "$work/b-rsa_config" > "$work/b-t4.out" 2>&1
 expect_eq "sshd -t passes over an RSA host key to the ssh-ed25519 one" "$?:$(cat "$work/b-t4.out")" "0:"
 { echo "HostKey $work/server/rsa_key"; echo "Port $port_b"; } > "$work/b-rsa-only_config"
-"$b_dir/sshd" -t -f "$work/b-rsa-only_config" > "$work/b-t5.out" 2>&1
+timeout 30 "$b_dir/sshd" -t -f "$work/b-rsa-only_config" > "$work/b-t5.out" 2>&1
 expect_eq "sshd -t with only an RSA host key gives 1" "$?" 1
 grep -q 'no ssh-ed25519 host key' "$work/b-t5.out"
 check "sshd -t says there is no ssh-ed25519 host key" $?
+{ echo "HostKey $work/server/host_key"; echo "Port $port_b"; echo "NoSuchKeyword yes"; } > "$work/b-bad2_config"
+timeout 30 "$b_dir/sshd" -t -f "$work/b-bad2_config" > "$work/b-t6.out" 2>&1
+expect_eq "sshd -t on an unknown keyword after a usable host key gives 1" "$?" 1
 
 # start_b NAME DIR PORT: starts zedBSD's sshd and fails closed unless the port is its own.
 start_b() {
@@ -831,6 +879,9 @@ start_b() {
 	return 0
 }
 start_b b "$b_dir" "$port_b" || { servers_owned; stop_servers; echo "interop-host: FAIL"; exit 1; }
+b_listener=$(helper holder "$port_b" "$b_pid")
+sleep 1
+b_fds=$(helper fds "$b_listener")
 start_b noshell "$noshell_dir" "$port_noshell" || { servers_owned; stop_servers; echo "interop-host: FAIL"; exit 1; }
 
 # ossh ARGS...: the host's OpenSSH ssh with an empty environment, no configuration and the test's own files.
@@ -981,8 +1032,41 @@ expect_eq "B: MaxStartups ($(cat "$work/b-startups.out"))" "$?" 0
 zssh -p "$port_b" 127.0.0.1 'echo after-startups' > "$work/b10.out" 2> "$work/b10.err"
 expect_eq "B: the server serves after MaxStartups" "$?:$(cat "$work/b10.out")" "0:after-startups"
 
+# --- the listener keeps nothing of the connections it handed to monitors (the same descriptors as at its start),
+# and the monitors told the log their peer.
+sleep 2
+expect_eq "B: the listener's descriptors after every connection" "$(helper fds "$b_listener")" "$b_fds"
+grep -q 'connection from 127\.0\.0\.1 [0-9]* ended before a session' "$b_dir/log"
+check "B: a monitor names its peer in the log" $?
+
+# --- a listener stopped while a session runs: the session goes on, the port is closed.
+start_b stop "$stop_dir" "$port_stop" || fail "the sshd to stop did not start"
+stop_listener=$(helper holder "$port_stop" "$b_pid")
+zssh -o StrictHostKeyChecking=accept-new -p "$port_stop" 127.0.0.1 'sleep 3; echo survived' > "$work/b11.out" \
+    2> "$work/b11.err" &
+session_pid=$!
+sleep 1.5
+kill -TERM "$stop_listener"
+sleep 0.5
+"$python" -I -c 'import socket, sys
+try:
+    socket.create_connection(("127.0.0.1", int(sys.argv[1])), 2).close()
+except OSError:
+    sys.exit(0)
+sys.exit(1)' "$port_stop"
+check "B: a stopped listener's port takes no connection (no monitor holds it)" $?
+wait "$session_pid"
+expect_eq "B: the session goes on after the listener stopped" "$?:$(cat "$work/b11.out")" "0:survived"
+owned_left=""
+set -- $owned
+while [ $# -ge 2 ]; do
+	[ "$1" = "$port_stop" ] || owned_left="$owned_left $1 $2"
+	shift 2
+done
+owned=$owned_left
+
 # --- no sanitizer report in any of zedBSD's sshd processes (their standard error is the server's file).
-grep -l 'ERROR: AddressSanitizer\|runtime error:' "$b_dir/stderr" "$noshell_dir/stderr" > /dev/null 2>&1
+grep -l 'ERROR: AddressSanitizer\|runtime error:' "$b_dir/stderr" "$noshell_dir/stderr" "$stop_dir/stderr" > /dev/null 2>&1
 expect_eq "B: no sanitizer report from zedBSD's sshd" "$?" 1
 
 servers_owned

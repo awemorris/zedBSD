@@ -113,6 +113,8 @@ main(
 	struct ssh_buf blob;
 	const char *config_path;
 	char *resolved;
+	size_t resolved_size;
+	uid_t self;
 	char program[SSH_CONFIG_PATH_MAX];
 	char drain[64];
 	unsigned count;
@@ -179,11 +181,12 @@ main(
 		openlog("sshd", LOG_PID | LOG_PERROR, LOG_AUTH);
 	else
 		openlog("sshd", LOG_PID, LOG_AUTH);
+	self = geteuid();
 	context.privileged = 0;
-	if (geteuid() == 0)
+	if (self == 0)
 		context.privileged = 1;
 	else
-		syslog(LOG_NOTICE, "not running as root: serving only uid %lu", (unsigned long)geteuid());
+		syslog(LOG_NOTICE, "not running as root: serving only uid %lu", (unsigned long)self);
 	ssh_buf_init(&blob, SSH_KEY_BLOB_SIZE + 8U, 0);
 	ssh_key_put_public_blob(key.public_key, &blob);
 	memcpy(context.host_key_blob, blob.data, SSH_KEY_BLOB_SIZE);
@@ -192,7 +195,10 @@ main(
 	/* The children are started from this program's own path when it can be told. */
 	strcpy(program, SSHD_PROGRAM);
 	resolved = realpath(argv[0], NULL);
-	if (resolved != NULL && strlen(resolved) < sizeof(program))
+	resolved_size = sizeof(program);
+	if (resolved != NULL)
+		resolved_size = strlen(resolved);
+	if (resolved != NULL && resolved_size < sizeof(program))
 		strcpy(program, resolved);
 	free(resolved);
 
@@ -417,11 +423,15 @@ main_listen(
 	struct sockaddr_in address4;
 	struct sockaddr_in6 address6;
 	int descriptor;
+	int family;
 	int one;
 	int status;
 
 	/* The socket of the family. */
-	descriptor = socket(config->inet6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0);
+	family = AF_INET;
+	if (config->inet6)
+		family = AF_INET6;
+	descriptor = socket(family, SOCK_STREAM, 0);
 	if (descriptor < 0) {
 		fprintf(stderr, "sshd: socket: %s\n", strerror(errno));
 		return -1;
@@ -562,6 +572,7 @@ main_accept(
 	unsigned index;
 	unsigned slot;
 	unsigned other;
+	unsigned waiting_count;
 	int started[2];
 	int client;
 	int ready;
@@ -589,7 +600,8 @@ main_accept(
 			break;
 		}
 	}
-	if (slot == MAIN_MONITORS_MAX || main_unauthenticated() >= context->config.max_startups) {
+	waiting_count = main_unauthenticated();
+	if (slot == MAIN_MONITORS_MAX || waiting_count >= context->config.max_startups) {
 		syslog(LOG_NOTICE, "too many connections not authenticated: %.63s closed", peer);
 		(void)close(client);
 		return;
