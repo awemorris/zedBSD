@@ -2,7 +2,7 @@
 
 # ws344-p016 VP8 の loop filter（vp8-filter.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet q1961-i01、2026-11-02 14:38、Q1 の受け入れ待ち）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p001（vp8-header.h の struct だけを使う。test が struct を手で埋める）。
 - 目的: 制御値、simple・normal の edge、macroblock の 4 段。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -66,4 +66,23 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02 14:38（host の `date`）、担当 Sonnet（q1961-i01）、worktree `/home/awe/zedBSD-worktrees/s-ws344-p016`、基点 main ba21654e24。
+
+- 作った物: `userland/desktop/libwebp-compat/vp8-filter.c`（5 つの公開関数、凍結の header どおり）、`plan/ws344/tests/unit/test-vp8_filter.c`。
+- 実行した command と最後の行（PATH=/usr/bin:$PATH）:
+  - `sh plan/ws344/tests/run-unit.sh vp8_filter` → `test-vp8_filter: PASS (166661 checks)` / `run-unit: PASS`
+  - `sh plan/ws344/tests/run-unit.sh all` → 14 本全て PASS / `run-unit: PASS`
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`
+  - `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`
+  - `git diff --check` → 出力なし。
+- 試験の中身: 制御値の表（sharpness 0〜7 × level 0・1・14・15・39・40・63 を手で）、segment（absolute・delta・1 回目の clamp で base 5・delta −10・ref_delta +2 → 2・update_data 0）、deltas（ref_delta[0]・B_PRED の mode_delta[0]・2 回目の clamp・無効）、範囲の外の入力（NULL・segment 4・int32 の端の delta・sharpness の範囲外）、20000 の乱数の header を RFC 6386 20.6 の写し（試験の中）と照合。edge は simple・MB（27・18・9、正負の floor）・subblock（(f1 + 1) >> 1、f1 が正負）を手で追った segment、limit と interior と hev の閾値ちょうど・1 つ越え、c() の clamp に当たる値、縦横の向きと count（正確な大きさの配列で範囲外の読みを ASan が拾う）、乱数の segment 60000 と画像 4000 を RFC 15.2・15.3 の narrative の写し（copy out、u2s、filter、s2u、copy back）と照合。macroblock は level 0、mb_x 0・mb_y 0 の skip、filter_inner 0、simple が chroma を変えない、順序（左・内の縦・上・内の横。横を先にした模型と結果が違うことを確かめる）、mb_limit と sub_limit の境界（level 10 で step 12・13・14）、3 × 3 macroblock の枠を正確な大きさで malloc して全位置・全 flag を模型と照合。
+- 変異の確認（git の外の複写、`build/tmp/ws344-mutscript/`、`build/tmp/ws344-mutwork/`）: 100 通り（境界の比較のずれ、符号の逆、定数 27・18・9・63・7・+3・+4、clamp の削除、step の順序・offset・count・plane、制御値の各定数と添字）のうち 98 が FAIL。生き残り 2 は等価: (1) common_adjust の `a` の clamp（`c(a + 4)`・`c(a + 3)` が同じ結果を作る）、(2) MB filter の 27・18・9 の結果の clamp（|w| ≤ 128 なので 27 を越えない）。順序の変異 8 通りのうち normal の 4 通りは FAIL、simple の「step 1 と 2」「step 3 と 4」の入れ替えは生き残る（simple の MB edge は p1..q1、subblock edge は p1..q1 で、読む・書く画素が重ならず結果が同じ。等価）。初回に生き残った 2 つ（MB filter の内側の c(p1 - q1) の削除、luma の縦の sub edge に mb_limit を使う変異）は試験を足して FAIL にした。
+- 自分で決めた点（header が黙っている所）:
+  - 画素は 0〜255 のまま計算する（u2s・s2u の 128 のずれは差で消え、s2u の clamp は 0〜255 の clamp と同じ）。file の先頭の comment にその旨を書いた。
+  - segmentation 有効で segment が 4 以上なら level 0（filter しない、interior 1・hev 0・limit 5 と 1）。header が NULL も level 0。params が NULL なら何もしない。
+  - sharpness は 0〜7 に clamp。header の delta の加算は int32 の端に張り付ける（1 回目・2 回目の clamp が同じ結果にするので、正確な和と同じ）。
+  - level 0 の制御値も計算して返す（interior 1・hev 0・mb_limit 5・sub_limit 1。webpc_vp8_filter_macroblock が level 0 を skip する）。
+  - webpc_vp8_filter_macroblock は y・params が NULL、または normal で u・v が NULL なら何もしない。
+- 仕様と phase.md・header の食い違い: 無し。header の comment のとおり（RFC 6386 §15.1 の「step 4 は縦」の誤りは step 2 として実装。1 回目の clamp は §20.6 のとおり）。
+- 未実施: QEMU・実機の試験は無い（この Phase の範囲外）。fixture の全体の試験（libwebp との比較）は p017 以降。
+- Q1 に頼む削除: `build/tmp/` の中の自分の一時の directory（`ws344-mutscript`・`ws344-mutwork`・`ws344-unit`・`ws344-skeleton` など）は worktree の破棄の時で良い。作業中に `build/tmp-note`（空の file、自分で作った）を `rm -f` してしまった（規則違反、害は無い。以後 rm は使っていない）。

@@ -42,11 +42,8 @@ static int filter_high_variance(const uint8_t *segment, ptrdiff_t across, int th
 static int filter_adjust_common(uint8_t *segment, ptrdiff_t across, int outer_taps);
 static void filter_adjust_wide(uint8_t *segment, ptrdiff_t across);
 static void filter_params_fill(int level, int sharpness, struct webpc_vp8_filter_params *params);
-static void filter_macroblock_simple(uint8_t *y, ptrdiff_t y_stride, unsigned mb_x, unsigned mb_y,
-	const struct webpc_vp8_filter_params *params, int filter_inner);
-static void filter_macroblock_normal(uint8_t *y, uint8_t *u, uint8_t *v, ptrdiff_t y_stride,
-	ptrdiff_t uv_stride, unsigned mb_x, unsigned mb_y, const struct webpc_vp8_filter_params *params,
-	int filter_inner);
+static void filter_macroblock_simple(uint8_t *y, ptrdiff_t y_stride, unsigned mb_x, unsigned mb_y, const struct webpc_vp8_filter_params *params, int filter_inner);
+static void filter_macroblock_normal(uint8_t *y, uint8_t *u, uint8_t *v, ptrdiff_t y_stride, ptrdiff_t uv_stride, unsigned mb_x, unsigned mb_y, const struct webpc_vp8_filter_params *params, int filter_inner);
 
 /*
  * Works out a key-frame macroblock's controls: the level starts as the

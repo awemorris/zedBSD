@@ -76,6 +76,7 @@ static int frames_equal(const unsigned char *left, const unsigned char *right, s
 static void test_macroblock(void);
 static void test_macroblock_skips(void);
 static void test_macroblock_order(void);
+static void test_macroblock_limits(void);
 
 /*
  * Runs the tests of vp8-filter.c.
@@ -103,6 +104,7 @@ main(
 	test_macroblock();
 	test_macroblock_skips();
 	test_macroblock_order();
+	test_macroblock_limits();
 
 	/* The summary line. */
 	status = check_finish("vp8_filter");
@@ -1032,6 +1034,13 @@ test_mb_hand(void)
 	static const unsigned char interior_at_in[8] = {90, 100, 100, 100, 108, 110, 110, 110};
 	static const unsigned char interior_at_out[8] = {90, 101, 102, 103, 105, 108, 109, 110};
 	static const unsigned char interior_over_in[8] = {89, 100, 100, 100, 108, 110, 110, 110};
+	/*
+	 * |p1 - q1| = 140 clamps to 127 before the 3 * (q0 - p0) = -180 is
+	 * added: w = c(127 - 180) = -53 (without the inner clamp it would be
+	 * -40).  a = -1368 >> 7 = -11, -891 >> 7 = -7, -414 >> 7 = -4.
+	 */
+	static const unsigned char wide_in[8] = {200, 200, 200, 130, 70, 60, 60, 60};
+	static const unsigned char wide_out[8] = {200, 196, 193, 119, 81, 67, 64, 60};
 
 	/* The weights, positive. */
 	check_mb(plus_in, 30, 10, 2, plus_out);
@@ -1051,6 +1060,9 @@ test_mb_hand(void)
 	/* The interior limit: a difference of exactly 10 filters, 11 does not. */
 	check_mb(interior_at_in, 30, 10, 2, interior_at_out);
 	check_mb(interior_over_in, 30, 10, 2, interior_over_in);
+
+	/* The inner clamp of the edge difference. */
+	check_mb(wide_in, 500, 100, 200, wide_out);
 }
 
 /*
@@ -1712,4 +1724,86 @@ out:
 	free(wy);
 	free(wu);
 	free(wv);
+}
+
+/*
+ * The two edge limits at a macroblock level of 10 (interior limit 10, no
+ * high edge variance): a step of k across a subblock edge has the measure
+ * 2k + (k >> 1), at most the limit 30 when k <= 12; across a macroblock
+ * edge the limit is 34, so k <= 13.  Each plane has one step, in columns
+ * or in rows, at the macroblock edge or at the first subblock edge, and the
+ * macroblock's result is compared with the model and the luma judged
+ * changed or not.
+ */
+static void
+test_macroblock_limits(void)
+{
+	unsigned char y[32 * 32];
+	unsigned char u[16 * 16];
+	unsigned char v[16 * 16];
+	unsigned char y_before[32 * 32];
+	unsigned char ry[32 * 32];
+	unsigned char ru[16 * 16];
+	unsigned char rv[16 * 16];
+	struct webpc_vp8_header header;
+	struct webpc_vp8_filter_params params;
+	int k;
+	int rows;
+	int mb_edge;
+	int row;
+	int column;
+	int step_at;
+	int position;
+	int expect_changed;
+
+	/* A level of 10 with sharpness 0. */
+	header_clear(&header);
+	header.filter.level = 10;
+	webpc_vp8_filter_params(&header, 0, 0, &params);
+	CHECK(params.mb_limit == 34);
+	CHECK(params.sub_limit == 30);
+
+	/* Steps of 12, 13 and 14, in columns and in rows, at the macroblock edge and at a subblock edge. */
+	for (k = 12; k <= 14; k++) {
+		for (rows = 0; rows < 2; rows++) {
+			for (mb_edge = 0; mb_edge < 2; mb_edge++) {
+				/* The luma step is at the macroblock's edge (16) or 4 inside it; chroma at 8 or 4 inside. */
+				for (row = 0; row < 32; row++) {
+					for (column = 0; column < 32; column++) {
+						position = rows ? row : column;
+						step_at = mb_edge ? 16 : 20;
+						y[row * 32 + column] = (unsigned char)(position >= step_at ? 100 + k : 100);
+					}
+				}
+				for (row = 0; row < 16; row++) {
+					for (column = 0; column < 16; column++) {
+						position = rows ? row : column;
+						step_at = mb_edge ? 8 : 12;
+						u[row * 16 + column] = (unsigned char)(position >= step_at ? 100 + k : 100);
+						v[row * 16 + column] = (unsigned char)(position >= step_at ? 100 + k : 100);
+					}
+				}
+				memcpy(y_before, y, sizeof(y));
+				memcpy(ry, y, sizeof(ry));
+				memcpy(ru, u, sizeof(ru));
+				memcpy(rv, v, sizeof(rv));
+
+				/* The macroblock at (1, 1), all four steps. */
+				webpc_vp8_filter_macroblock(y + 16 * 32 + 16, u + 8 * 16 + 8, v + 8 * 16 + 8, 32, 16, 1, 1,
+					&params, 0, 1);
+				ref_macroblock(ry + 16 * 32 + 16, ru + 8 * 16 + 8, rv + 8 * 16 + 8, 32, 16, 1, 1, &params,
+					0, 1, 0);
+				CHECK(frames_equal(y, ry, sizeof(y)));
+				CHECK(frames_equal(u, ru, sizeof(u)));
+				CHECK(frames_equal(v, rv, sizeof(v)));
+
+				/* Filtered exactly when the step is within the edge's limit. */
+				expect_changed = mb_edge ? (k <= 13) : (k <= 12);
+				if (expect_changed)
+					CHECK(!frames_equal(y, y_before, sizeof(y)));
+				else
+					CHECK(frames_equal(y, y_before, sizeof(y)));
+			}
+		}
+	}
 }
