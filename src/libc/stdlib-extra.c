@@ -11,6 +11,7 @@
 
 #include "src/libc/heap.h"
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -25,10 +26,12 @@ extern pid_t waitpid(pid_t, int *, int);
 
 /*
  * An exit handler is either a plain atexit function or the C++ ABI's form,
- * which takes an argument and names the shared object it belongs to.  Both
- * run in the reverse of their registration order, in one sequence, because
- * C++ requires a static object to be destroyed before anything registered
- * before it.
+ * which takes an argument.  Both run in the reverse of their registration
+ * order, in one sequence, because C++ requires a static object to be
+ * destroyed before anything registered before it.  Each names the object
+ * it belongs to -- the ELF header address of the shared object or program,
+ * which is the __dso_handle the linker defines in each of them -- so that
+ * dlclose() can run an object's handlers before its code goes away.
  */
 struct exit_handler {
 	void (*plain)(void);
@@ -42,79 +45,199 @@ static void (*quick_handlers[EXIT_HANDLER_MAX])(void);
 static size_t exit_handler_count, quick_handler_count;
 static volatile uint32_t handler_lock;
 
+static void *exit_handler_owner(const void *address);
+static int exit_handler_add(const struct exit_handler *handler);
+static int exit_handler_take(void *owner, struct exit_handler *handler);
+
 static void lock_handlers(void)
 { while (__atomic_exchange_n(&handler_lock, 1U, __ATOMIC_ACQUIRE) != 0) ; }
 static void unlock_handlers(void)
 { __atomic_store_n(&handler_lock, 0U, __ATOMIC_RELEASE); }
 
-int atexit(void (*fn)(void))
+/*
+ * Registers a function to run at exit.
+ *
+ * The function belongs to the object its code lies in, so unloading that
+ * object runs it then, through __cxa_finalize(), and nothing calls it after
+ * its code is unmapped.  The object is found from the function's address,
+ * not from the caller's return address, which a caller's tail call to
+ * atexit() would leave pointing at the caller's own caller.
+ */
+int
+atexit(
+	void (*fn)(void))
 {
-	if (fn == NULL) return -1;
-	lock_handlers();
-	if (exit_handler_count == EXIT_HANDLER_MAX) { unlock_handlers(); return -1; }
-	exit_handlers[exit_handler_count].plain = fn;
-	exit_handlers[exit_handler_count].with_argument = NULL;
-	exit_handlers[exit_handler_count].argument = NULL;
-	exit_handlers[exit_handler_count].owner = NULL;
-	exit_handler_count++;
-	unlock_handlers(); return 0;
+	struct exit_handler handler;
+	int error;
+
+	/* Rejects a registration with nothing to run. */
+	if (fn == NULL)
+		return -1;
+
+	/* Describes the plain form, owned by the function's object. */
+	handler.plain = fn;
+	handler.with_argument = NULL;
+	handler.argument = NULL;
+	handler.owner = exit_handler_owner((const void *)fn);
+
+	/* Records it after every earlier registration. */
+	error = exit_handler_add(&handler);
+
+	/* Reports whether there was room. */
+	return error;
 }
 
 /*
- * Implements the cxa atexit operation.
+ * Registers a static object's destructor.
  *
- * The Itanium C++ ABI's registration for a static object's destructor: the
- * destructor takes the object, and the handle names the shared object it
- * lives in so that unloading that object can run it early.  Nothing here
- * unloads a shared object while its static objects are alive, so the handle
- * is recorded and __cxa_finalize has nothing of its own to do.
+ * The Itanium C++ ABI's registration: the destructor takes the object, and
+ * the handle is the __dso_handle of the shared object it lives in, so that
+ * unloading that object runs it early, through __cxa_finalize().  A caller
+ * that gives no handle gets the object of the destructor's code, as for
+ * atexit().
  */
-int __cxa_atexit(void (*destructor)(void *), void *object, void *handle)
+int
+__cxa_atexit(
+	void (*destructor)(void *),
+	void *object,
+	void *handle)
 {
-	if (destructor == NULL) return -1;
-	lock_handlers();
-	if (exit_handler_count == EXIT_HANDLER_MAX) { unlock_handlers(); return -1; }
-	exit_handlers[exit_handler_count].plain = NULL;
-	exit_handlers[exit_handler_count].with_argument = destructor;
-	exit_handlers[exit_handler_count].argument = object;
-	exit_handlers[exit_handler_count].owner = handle;
-	exit_handler_count++;
-	unlock_handlers(); return 0;
+	struct exit_handler handler;
+	int error;
+
+	/* Rejects a registration with nothing to run. */
+	if (destructor == NULL)
+		return -1;
+
+	/* Describes the form with an argument, owned by the handle's object. */
+	handler.plain = NULL;
+	handler.with_argument = destructor;
+	handler.argument = object;
+	handler.owner = handle;
+
+	/* Without a handle, the object the destructor's code lies in owns it. */
+	if (handle == NULL)
+		handler.owner = exit_handler_owner((const void *)destructor);
+
+	/* Records it after every earlier registration. */
+	error = exit_handler_add(&handler);
+
+	/* Reports whether there was room. */
+	return error;
 }
 
 /*
- * Implements the cxa finalize operation.
+ * Runs the exit handlers of one object, or of all when the handle is NULL.
  *
- * Runs the destructors registered for one shared object, or for all of them
- * when the handle is NULL.  Each runs once: it is taken out of the list
- * before it is called, so a destructor that exits again does not repeat it.
+ * The dynamic loader calls it with an object's handle before it unloads
+ * the object.  The handlers run newest first; each is taken out of the list
+ * before it is called, so it runs once even if it exits or the object is
+ * closed again, and a handler may register or finalize others.
  */
-void __cxa_finalize(void *handle)
+void
+__cxa_finalize(
+	void *handle)
 {
-	size_t index;
+	struct exit_handler handler;
+	int taken;
 
+	/* Runs the object's handlers until none of them is left. */
 	for (;;) {
-		void (*with_argument)(void *) = NULL;
-		void *argument = NULL;
+		taken = exit_handler_take(handle, &handler);
+		if (!taken)
+			return;
 
-		lock_handlers();
-		for (index = exit_handler_count; index > 0; index--) {
-			struct exit_handler *entry = &exit_handlers[index - 1U];
-			if (entry->with_argument == NULL) continue;
-			if (handle != NULL && entry->owner != handle) continue;
-			with_argument = entry->with_argument;
-			argument = entry->argument;
-			/* Closes the gap so the remaining order is kept. */
-			for (; index < exit_handler_count; index++)
-				exit_handlers[index - 1U] = exit_handlers[index];
-			exit_handler_count--;
-			break;
+		/* Runs whichever form this registration was. */
+		if (handler.with_argument != NULL) {
+			handler.with_argument(handler.argument);
+		} else {
+			handler.plain();
 		}
-		unlock_handlers();
-		if (with_argument == NULL) return;
-		with_argument(argument);
 	}
 }
+
+/* Finds the handle of the object an address lies in, NULL without one. */
+static void *
+exit_handler_owner(
+	const void *address)
+{
+#if defined(KERN_DYNAMIC_LIBC)
+	Dl_info information;
+	int found;
+
+	/* Looks the address up among the loaded objects. */
+	found = dladdr(address, &information);
+	if (found == 0)
+		return NULL;
+
+	/* The object's ELF header address, its __dso_handle. */
+	return information.dli_fbase;
+#else
+	/* A static program is one object, which nothing unloads. */
+	(void)address;
+	return NULL;
+#endif
+}
+
+/* Appends one handler to the list; -1 when the list is full. */
+static int
+exit_handler_add(
+	const struct exit_handler *handler)
+{
+	int error;
+
+	/* Appends the handler, if there is room. */
+	lock_handlers();
+
+	error = -1;
+	if (exit_handler_count < EXIT_HANDLER_MAX) {
+		exit_handlers[exit_handler_count] = *handler;
+		exit_handler_count++;
+		error = 0;
+	}
+
+	unlock_handlers();
+
+	/* Reports whether it was added. */
+	return error;
+}
+
+/*
+ * Takes the newest handler of an owner, or of any owner when it is NULL,
+ * out of the list.  Reports whether there was one.
+ */
+static int
+exit_handler_take(
+	void *owner,
+	struct exit_handler *handler)
+{
+	size_t index;
+	int taken;
+
+	/* Finds the newest match and closes its gap, keeping the order. */
+	lock_handlers();
+
+	taken = 0;
+	for (index = exit_handler_count; index > 0; index--) {
+		/* Skips a handler of another object. */
+		if (owner != NULL && exit_handlers[index - 1U].owner != owner)
+			continue;
+
+		/* Takes this one and moves the newer ones down over it. */
+		*handler = exit_handlers[index - 1U];
+		for (; index < exit_handler_count; index++)
+			exit_handlers[index - 1U] = exit_handlers[index];
+		exit_handler_count--;
+		taken = 1;
+		break;
+	}
+
+	unlock_handlers();
+
+	/* Reports whether a handler was taken. */
+	return taken;
+}
+
 int at_quick_exit(void (*fn)(void))
 {
 	if (fn == NULL) return -1;
@@ -123,23 +246,17 @@ int at_quick_exit(void (*fn)(void))
 	quick_handlers[quick_handler_count++] = fn;
 	unlock_handlers(); return 0;
 }
-void __libc_run_exit_handlers(void)
+/*
+ * Runs every exit handler left, newest first, as exit() does.
+ */
+void
+__libc_run_exit_handlers(
+	void)
 {
-	for (;;) {
-		struct exit_handler entry;
-
-		lock_handlers();
-		if (!exit_handler_count) { unlock_handlers(); return; }
-		entry = exit_handlers[--exit_handler_count];
-		unlock_handlers();
-
-		/* Runs whichever form this registration was. */
-		if (entry.with_argument != NULL)
-			entry.with_argument(entry.argument);
-		else if (entry.plain != NULL)
-			entry.plain();
-	}
+	/* Runs the handlers of every object. */
+	__cxa_finalize(NULL);
 }
+
 void __libc_run_quick_exit_handlers(void)
 { for (;;) { void (*fn)(void); lock_handlers(); if (!quick_handler_count) { unlock_handlers(); return; } fn = quick_handlers[--quick_handler_count]; unlock_handlers(); fn(); } }
 void _Exit(int status) { _exit(status); }
