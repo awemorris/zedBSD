@@ -557,6 +557,7 @@ int layout_scroll_apply(struct layout_tree *tree);
 int layout_scroll_offset(const struct layout_box *box, double *x, double *y);
 const struct layout_box *layout_containing_box(const struct layout_box *box);
 void layout_try_remember(int remember);
+int layout_try_remembers(void);
 int layout_sticky_build(struct layout_tree *tree);
 int layout_sticky_apply(struct layout_tree *tree, layout_unit scroll_x, layout_unit scroll_y);
 

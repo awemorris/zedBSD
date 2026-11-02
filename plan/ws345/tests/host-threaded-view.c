@@ -37,10 +37,23 @@
  *       (browser_view_presented) and not at all while nothing is presented;
  *   (k) while a script spins for 5 s the drawing thread draws the last
  *       committed frame, at a size other than the view's too, at once;
- *   (l) a page committed is told with its own state: the committed
- *       callback, with the window's thread processing while the new page's
- *       load handler spins before its state is published, reads the new
- *       location and title;
+ *   (l) the engine's DOM pages of getComputedStyle, offsetWidth and
+ *       getBoundingClientRect (plan/ws074/tests/dom computed, geometry,
+ *       fit-content-computed) write the same console in a view of its own
+ *       threads (where the style thread computes the styles and the boxes)
+ *       as in a view of the caller's;
+ *   (m) 30000 reads of offsetWidth after one change of the document lend
+ *       the document to the style thread a few times only (the first read
+ *       and the rendering update), 1000 reads each after a change lend it
+ *       at least 1000 times; the time a lend takes is printed;
+ *   (n) a heap lent to another thread (vm_heap_lend) does not collect
+ *       while the work runs there, however much it allocates, and collects
+ *       at the lender's next allocation; the work runs on a borrower; and
+ *       the round trip of an empty work lent to a style thread is printed;
+ *   (o) plan/ws074/tests/bench/bug411.html in both views: the same checks,
+ *       the times and the lends printed;
+ *   (p) no thread a heap was lent to entered a script or tried to collect
+ *       (vm_borrower_slips) in all the checks above;
  *   and, in both modes, a link to a page whose style sheet comes slowly
  *   (as host-navigation-wait): the window's calls stay short, the page
  *   shown stays the first until the new one is ready, and the new one is
@@ -48,15 +61,18 @@
  *
  *   host-threaded-view      (run from the repository's root; prints one line per check and a summary)
  *
- * The test uses the view's public calls, and view_front_queued (the
- * mailbox's length) for (c).
+ * The test uses the view's public calls, view_front_queued (the
+ * mailbox's length) for (c), view_front_lend_counts for (m) and (o), and
+ * the heap's lending (vm/vm.h) for (n) and (p).
  */
 
 #include <browser/browser.h>
 
 #include "view/front.h"
+#include "view/style.h"
 
 #include <arpa/inet.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -86,9 +102,6 @@ static char test_console[65536];
 static size_t test_console_length;
 static int test_redraw;
 static int test_field_answered;
-static unsigned test_committed;
-static char test_committed_url[512];
-static char test_committed_title[128];
 static int test_field_error;
 static unsigned test_checks;
 static unsigned test_failures;
@@ -110,7 +123,6 @@ static void test_frame_wake(void *context);
 static void test_redraw_callback(void *context, struct browser_view *view);
 static void test_console_callback(void *context, struct browser_view *view, int level, const char *text, size_t length);
 static void test_field(void *context, struct browser_view *view, int error, const float *caret);
-static void test_committed_callback(void *context, struct browser_view *view);
 static void *test_render(void *context);
 static int test_view(int threading, struct browser_view **view);
 static double test_pump(struct browser_view *view, int ms, const char *title);
@@ -126,7 +138,17 @@ static void test_same_pictures(void);
 static int test_gpu_render(struct browser_view *view, int own, uint32_t *pixels);
 static void test_animation_frames(void);
 static void test_draw_during_script(void);
-static void test_committed_state(void);
+static void test_wait(struct browser_view *view, int ms, const char *title);
+static void test_settle_console(struct browser_view *view, int quiet_ms, int most_ms);
+static void test_dom_pages(void);
+static void test_lends(void);
+static int test_lender(void *context, vm_lend_work work, void *argument);
+static void *test_borrower(void *context);
+static int test_lent_work(void *argument);
+static void test_lend_heap(void);
+static void test_bench_both(void);
+static int test_empty_work(void *argument);
+static void test_lend_round_trip(void);
 
 /* Runs every check and prints the summary. */
 int
@@ -138,6 +160,13 @@ main(
 	int listener;
 	int filler;
 	int index;
+
+	/*
+	 * lavapipe stays loaded to the end: ThreadSanitizer stops the process
+	 * when a library its suppressions name is unloaded (the GPU checks load
+	 * and unload it).
+	 */
+	(void)dlopen("libvulkan_lvp.so", RTLD_NOW | RTLD_NODELETE);
 
 	/* The pages' directory, the server and the listener whose connects never complete. */
 	setenv("XDG_DATA_HOME", "build/tmp/host-threaded-view-data", 1);
@@ -167,7 +196,12 @@ main(
 	test_same_pictures();
 	test_animation_frames();
 	test_draw_during_script();
-	test_committed_state();
+	test_dom_pages();
+	test_lends();
+	test_lend_heap();
+	test_lend_round_trip();
+	test_bench_both();
+	test_check(vm_borrower_slips() == 0, "(p) no borrower thread entered a script or collected", "%lu times", vm_borrower_slips());
 
 	/* The summary. */
 	printf("host-threaded-view: %u checks, %u failed\n", test_checks, test_failures);
@@ -285,23 +319,6 @@ test_field(
 	test_field_error = error;
 }
 
-/* A page committed: the location and the title the getters read in the callback, kept. */
-static void
-test_committed_callback(
-	void *context,
-	struct browser_view *view)
-{
-	const char *url;
-	const char *title;
-
-	(void)context;
-	url = browser_view_url(view);
-	title = browser_view_title(view);
-	snprintf(test_committed_url, sizeof(test_committed_url), "%s", url != NULL ? url : "(none)");
-	snprintf(test_committed_title, sizeof(test_committed_title), "%s", title != NULL ? title : "(none)");
-	test_committed++;
-}
-
 /* The drawing stand-in: the latest picture whenever there is a new one, until told to stop. */
 static void *
 test_render(
@@ -348,7 +365,6 @@ test_view(
 	callbacks.redraw = test_redraw_callback;
 	callbacks.console = test_console_callback;
 	callbacks.field = test_field;
-	callbacks.committed = test_committed_callback;
 	memset(&options, 0, sizeof(options));
 	options.version = BROWSER_API_VERSION;
 	options.fonts = &fonts;
@@ -1040,44 +1056,362 @@ test_draw_during_script(void)
 	browser_view_destroy(view);
 }
 
-/*
- * (l): a page committed is told with its own state.  The page's load
- * handler spins 800 ms after the commit, before the script thread
- * publishes the new state, while the window's thread runs
- * browser_view_process every 2 ms: the committed callback must come only
- * with the published state (the new location and title), not with the old
- * page's.
- */
+/* The window's loop without inputs for so many milliseconds, or until the page shown has the title (when one is given). */
 static void
-test_committed_state(void)
+test_wait(
+	struct browser_view *view,
+	int ms,
+	const char *title)
+{
+	const char *shown;
+	long long end;
+
+	end = test_now() + (long long)ms * 1000000LL;
+	while (test_now() < end) {
+		browser_view_process(view);
+		if (title != NULL) {
+			shown = browser_view_title(view);
+			if (shown != NULL && strcmp(shown, title) == 0)
+				return;
+		}
+		test_sleep_ms(2);
+	}
+}
+
+/* The window's loop until the console has not grown for quiet_ms, at most most_ms. */
+static void
+test_settle_console(
+	struct browser_view *view,
+	int quiet_ms,
+	int most_ms)
+{
+	long long end;
+	long long quiet;
+	size_t length;
+
+	end = test_now() + (long long)most_ms * 1000000LL;
+	length = test_console_length;
+	quiet = test_now();
+	while (test_now() < end && test_now() - quiet < (long long)quiet_ms * 1000000LL) {
+		browser_view_process(view);
+		if (test_console_length != length) {
+			length = test_console_length;
+			quiet = test_now();
+		}
+		test_sleep_ms(2);
+	}
+}
+
+/* (l): the DOM pages of styles and boxes write the same console in both views. */
+static void
+test_dom_pages(void)
+{
+	static const char *const names[3] = { "computed", "geometry", "fit-content-computed" };
+	static char caller_console[65536];
+	struct browser_view *caller;
+	struct browser_view *own;
+	char path[1024];
+	char root[256];
+	unsigned index;
+	long long start;
+	size_t lines;
+	size_t at;
+	int error;
+
+	if (getcwd(root, sizeof(root)) == NULL)
+		return;
+	for (index = 0; index < 3U; index++) {
+		snprintf(path, sizeof(path), "%s/plan/ws074/tests/dom/%s.html", root, names[index]);
+
+		/* The caller's view: the console of the load and its timers. */
+		error = test_view(BROWSER_THREADING_CALLER, &caller);
+		if (error != 0) {
+			test_check(0, "(l) view", "none (%d)", error);
+			return;
+		}
+		test_console_length = 0;
+		test_console[0] = '\0';
+		(void)browser_view_load(caller, path);
+		(void)browser_view_settle(caller, 5000.0, BROWSER_SETTLE_LAYOUT);
+		memcpy(caller_console, test_console, test_console_length + 1U);
+		browser_view_destroy(caller);
+
+		/* The view of its own threads: the console once it is quiet. */
+		error = test_view(BROWSER_THREADING_OWN, &own);
+		if (error != 0) {
+			test_check(0, "(l) view", "none (%d)", error);
+			return;
+		}
+		test_console_length = 0;
+		test_console[0] = '\0';
+		(void)browser_view_load(own, path);
+		lines = 0;
+		for (at = 0; caller_console[at] != '\0'; at++)
+			lines += caller_console[at] == '\n';
+		start = test_now();
+		while (test_console_length < strlen(caller_console) && test_now() - start < 30000000000LL)
+			test_wait(own, 20, NULL);
+		test_settle_console(own, 300, 2000);
+		browser_view_destroy(own);
+
+		/* The same lines. */
+		test_check(lines != 0 && strcmp(caller_console, test_console) == 0, "(l) the style thread's styles and boxes are the caller's view's",
+		    "%s: %zu lines%s", names[index], lines, strcmp(caller_console, test_console) == 0 ? "" : ", the consoles differ");
+		if (strcmp(caller_console, test_console) != 0)
+			printf("caller:\n%sown:\n%s", caller_console, test_console);
+	}
+}
+
+/* (m): reads of a box that did not change lend nothing; reads after each change lend each time. */
+static void
+test_lends(void)
 {
 	struct browser_view *view;
-	const char *first;
-	const char *second;
-	unsigned before;
-	size_t length;
-	int index;
+	const char *path;
+	const char *title;
+	uint64_t lends[3];
+	uint64_t waited[3];
 	int error;
 
 	error = test_view(BROWSER_THREADING_OWN, &view);
 	if (error != 0) {
-		test_check(0, "(l) view", "no view (%d)", error);
+		test_check(0, "(m) view", "no view (%d)", error);
 		return;
 	}
-	first = test_page("first.html", "<!DOCTYPE html><title>First</title><p>first");
-	(void)browser_view_load(view, first);
-	(void)test_pump(view, 3000, "First");
-	second = test_page("second.html", "<!DOCTYPE html><title>Second</title><p>second<script>"
-	    "addEventListener('load', function () { var end = Date.now() + 800; while (Date.now() < end) {} });</script>");
-	before = test_committed;
-	(void)browser_view_load(view, second);
-	for (index = 0; index < 2000 && test_committed == before; index++) {
-		browser_view_process(view);
-		test_sleep_ms(2);
-	}
-	length = strlen(test_committed_url);
-	test_check(test_committed != before && length >= 11 && strcmp(test_committed_url + length - 11, "second.html") == 0 &&
-	    strcmp(test_committed_title, "Second") == 0, "(l) the committed callback reads the new page's state",
-	    "%u callbacks, url \"%s\", title \"%s\"", test_committed - before, test_committed_url, test_committed_title);
+	path = test_page("lends.html", "<!DOCTYPE html><title>ready</title><div id=b style='width:120px'>box</div><script>"
+	    "var e = document.getElementById('b');"
+	    "document.addEventListener('keydown', function (k) { var t = 0, i, s = Date.now();"
+	    " if (k.key === 'a') { e.style.width = '130px'; for (i = 0; i < 30000; i++) t += e.offsetWidth;"
+	    "  console.log('reads ' + (Date.now() - s)); document.title = 'a' + t; }"
+	    " if (k.key === 'b') { for (i = 0; i < 1000; i++) { e.style.width = (100 + i % 50) + 'px'; t += e.offsetWidth; }"
+	    "  console.log('changes ' + (Date.now() - s)); document.title = 'b' + t; } });</script>");
+	(void)browser_view_load(view, path);
+	test_wait(view, 5000, "ready");
+	test_wait(view, 500, NULL);
+	test_console_length = 0;
+	test_console[0] = '\0';
+
+	/* 30000 reads after one change. */
+	view_front_lend_counts(view, &lends[0], &waited[0]);
+	(void)browser_view_key(view, "a", "KeyA", "a", 1, 0, 0);
+	(void)browser_view_key(view, "a", "KeyA", NULL, 0, 0, 0);
+	test_wait(view, 10000, "a3900000");
+	view_front_lend_counts(view, &lends[1], &waited[1]);
+
+	/* 1000 reads, each after a change. */
+	(void)browser_view_key(view, "b", "KeyB", "b", 1, 0, 0);
+	(void)browser_view_key(view, "b", "KeyB", NULL, 0, 0, 0);
+	test_wait(view, 10000, "b124500");
+	view_front_lend_counts(view, &lends[2], &waited[2]);
+	title = browser_view_title(view);
+	test_check(title != NULL && strcmp(title, "b124500") == 0 && lends[1] - lends[0] <= 10U,
+	    "(m) 30000 reads of a box after one change lend a few times", "%llu lends (%s)", (unsigned long long)(lends[1] - lends[0]), test_console);
+	test_check(lends[2] - lends[1] >= 1000U, "(m) 1000 reads each after a change lend each time", "%llu lends, %.1f us a lend",
+	    (unsigned long long)(lends[2] - lends[1]), (double)(waited[2] - waited[1]) / 1e3 / (double)(lends[2] - lends[1] + (lends[2] == lends[1])));
 	browser_view_destroy(view);
+}
+
+/* What the lend of (n) did: the heap, the collections before and while the work ran, whether it ran on a borrower and was lent. */
+struct test_lend {
+	struct vm_heap *heap;
+	vm_lend_work work;
+	void *argument;
+	int result;
+	size_t collections_before;
+	size_t collections_after;
+	int borrower;
+	int lent;
+	size_t made;
+};
+
+/* The test's lender: runs the work on a new thread marked a borrower, and waits for it. */
+static int
+test_lender(
+	void *context,
+	vm_lend_work work,
+	void *argument)
+{
+	struct test_lend *lend;
+	pthread_t thread;
+
+	lend = context;
+	lend->work = work;
+	lend->argument = argument;
+	pthread_create(&thread, NULL, test_borrower, lend);
+	pthread_join(thread, NULL);
+	return lend->result;
+}
+
+/* The borrower thread of (n). */
+static void *
+test_borrower(
+	void *context)
+{
+	struct test_lend *lend;
+
+	lend = context;
+	vm_thread_set_borrower(1);
+	lend->result = lend->work(lend->argument);
+	return NULL;
+}
+
+/* The work of (n): 16 MiB of strings, nothing keeping them. */
+static int
+test_lent_work(
+	void *argument)
+{
+	struct vm_heap_stats stats;
+	struct test_lend *lend;
+	unsigned char bytes[1000];
+	unsigned index;
+
+	lend = argument;
+	lend->borrower = vm_thread_is_borrower();
+	lend->lent = vm_heap_lent(lend->heap);
+	memset(bytes, 'x', sizeof(bytes));
+	vm_heap_stats(lend->heap, &stats);
+	lend->collections_before = stats.collections;
+	for (index = 0; index < 16384U; index++) {
+		if (vm_string_from_latin1(lend->heap, bytes, sizeof(bytes)) != NULL)
+			lend->made++;
+	}
+	vm_heap_stats(lend->heap, &stats);
+	lend->collections_after = stats.collections;
+	return 0;
+}
+
+/* (n): a lent heap does not collect while it is lent, and collects again after. */
+static void
+test_lend_heap(void)
+{
+	struct vm_heap_stats stats;
+	struct vm_agent agent;
+	struct test_lend lend;
+	unsigned char bytes[16];
+	int error;
+
+	memset(&lend, 0, sizeof(lend));
+	error = vm_heap_create(&lend.heap, 0);
+	if (error != 0) {
+		test_check(0, "(n) heap", "none (%d)", error);
+		return;
+	}
+	vm_heap_set_stack_base(lend.heap, __builtin_frame_address(0));
+	vm_agent_init(&agent);
+	vm_agent_set_lender(&agent, test_lender, &lend);
+	vm_heap_set_agent(lend.heap, &agent);
+	error = vm_heap_lend(lend.heap, test_lent_work, &lend);
+	test_check(error == 0 && lend.borrower && lend.lent && lend.made == 16384U && lend.collections_after == lend.collections_before,
+	    "(n) a lent heap does not collect while the work runs", "%zu strings on a %s, %zu collections while lent",
+	    lend.made, lend.borrower ? "borrower" : "lender", lend.collections_after - lend.collections_before);
+	memset(bytes, 'y', sizeof(bytes));
+	(void)vm_string_from_latin1(lend.heap, bytes, sizeof(bytes));
+	vm_heap_stats(lend.heap, &stats);
+	test_check(stats.collections == lend.collections_after + 1U && vm_heap_lent(lend.heap) == 0, "(n) the lender's next allocation collects",
+	    "%zu collections, %zu live cells", stats.collections - lend.collections_after, stats.live_cells);
+	vm_heap_set_agent(lend.heap, NULL);
+	vm_heap_destroy(lend.heap);
+}
+
+/* (o): the BUG-411 bench in both views, its lines and lends printed; the checks the same. */
+static void
+test_bench_both(void)
+{
+	static char caller_console[65536];
+	struct browser_view *caller;
+	struct browser_view *own;
+	char path[1024];
+	char root[256];
+	char *line;
+	char *next;
+	char *caller_line;
+	char *caller_next;
+	long long start;
+	uint64_t lends[2];
+	uint64_t waited[2];
+	int error;
+	int same;
+
+	if (getcwd(root, sizeof(root)) == NULL)
+		return;
+	snprintf(path, sizeof(path), "%s/plan/ws074/tests/bench/bug411.html", root);
+	error = test_view(BROWSER_THREADING_CALLER, &caller);
+	if (error != 0) {
+		test_check(0, "(o) view", "none (%d)", error);
+		return;
+	}
+	test_console_length = 0;
+	test_console[0] = '\0';
+	(void)browser_view_load(caller, path);
+	(void)browser_view_settle(caller, 5000.0, BROWSER_SETTLE_LAYOUT);
+	memcpy(caller_console, test_console, test_console_length + 1U);
+	browser_view_destroy(caller);
+	error = test_view(BROWSER_THREADING_OWN, &own);
+	if (error != 0) {
+		test_check(0, "(o) view", "none (%d)", error);
+		return;
+	}
+	test_console_length = 0;
+	test_console[0] = '\0';
+	view_front_lend_counts(own, &lends[0], &waited[0]);
+	(void)browser_view_load(own, path);
+	start = test_now();
+	while (strstr(test_console, "compile-many-names") == NULL && test_now() - start < 30000000000LL)
+		test_wait(own, 20, NULL);
+	view_front_lend_counts(own, &lends[1], &waited[1]);
+	browser_view_destroy(own);
+
+	/* The checks (the last word of each line) the same, the lines printed. */
+	same = 1;
+	line = test_console;
+	caller_line = caller_console;
+	while (*line != '\0' && *caller_line != '\0') {
+		next = strchr(line, '\n');
+		caller_next = strchr(caller_line, '\n');
+		if (next == NULL || caller_next == NULL)
+			break;
+		*next = '\0';
+		*caller_next = '\0';
+		printf("  own    %s\n  caller %s\n", line, caller_line);
+		if (strrchr(line, ' ') == NULL || strrchr(caller_line, ' ') == NULL || strcmp(strrchr(line, ' '), strrchr(caller_line, ' ')) != 0)
+			same = 0;
+		line = next + 1;
+		caller_line = caller_next + 1;
+	}
+	test_check(same && test_console_length != 0, "(o) the bench's checks are the same in both views", "%llu lends, %.2f ms waited",
+	    (unsigned long long)(lends[1] - lends[0]), (double)(waited[1] - waited[0]) / 1e6);
+}
+
+/* An empty work, counted. */
+static int
+test_empty_work(
+	void *argument)
+{
+	(*(unsigned *)argument)++;
+	return 0;
+}
+
+/* (n): the round trip of an empty work lent to a style thread, 10000 times. */
+static void
+test_lend_round_trip(void)
+{
+	struct view_style *style;
+	unsigned count;
+	long long start;
+	long long took;
+	unsigned index;
+	int error;
+
+	error = view_style_start(NULL, NULL, &style);
+	if (error != 0) {
+		test_check(0, "(n) style thread", "none (%d)", error);
+		return;
+	}
+	count = 0;
+	start = test_now();
+	for (index = 0; index < 10000U; index++)
+		(void)view_style_lend(style, test_empty_work, &count);
+	took = test_now() - start;
+	view_style_stop(style);
+	test_check(count == 10000U, "(n) the round trip of an empty lend", "%.2f us", (double)took / 1e3 / 10000.0);
 }

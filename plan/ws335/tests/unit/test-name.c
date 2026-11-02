@@ -2032,6 +2032,12 @@ test_nc_ip(void)
 	CHECK(nc_ip("c0000200ff00ff00", NULL, "c0000201") == EINVAL);
 	CHECK(nc_ip("c000020000ffffff", NULL, "c0000201") == EINVAL);
 	CHECK(nc_ip("c00002007fffffff", NULL, "c0000201") == EINVAL);
+
+	/* After the byte where the ones end, every byte must be zero (a partial byte later is not a CIDR mask). */
+	CHECK(nc_ip("c0000200fff0f000", NULL, "c0000201") == EINVAL);
+	CHECK(nc_ip("c0000200ff80c000", NULL, "c0000201") == EINVAL);
+	CHECK(nc_ip("c0000200ffe00080", NULL, "c0000201") == EINVAL);
+	CHECK(nc_ip("c0000200fff00000", NULL, "c0000201") == ALLOW);
 	CHECK(nc_ip("c0000200fe000000", NULL, "c0000201") == ALLOW);
 	CHECK(nc_ip("c0000200f0000000", NULL, "c0000201") == ALLOW);
 	CHECK(nc_ip("c0000200f0000000", NULL, "d0000201") == DENY);

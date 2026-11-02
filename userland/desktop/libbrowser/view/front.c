@@ -28,6 +28,7 @@
  */
 
 #include "view/front.h"
+#include "view/style.h"
 #include "base/base.h"
 #include "base/thread.h"
 #include "net/net.h"
@@ -148,7 +149,9 @@ struct front_note {
  *
  * The script thread's alone: dirty (the view asked for a redraw since the
  * last committed frame), serial (the number of the last state), the
- * number of the last committed frame and the agent's running side.  The program's thread's alone: shown (the state its
+ * number of the last committed frame, the agent's running side and the
+ * style thread the agent lends its heaps to (style, made and ended by the
+ * script thread).  The program's thread's alone: shown (the state its
  * getters read, replaced in browser_view_process) and the copy of the
  * options and callbacks.
  */
@@ -178,6 +181,7 @@ struct view_front {
 	int dirty;
 	uint64_t serial;
 	uint64_t commit_serial;
+	struct view_style *style;
 };
 
 /*
@@ -188,6 +192,7 @@ struct view_front {
 static _Thread_local struct view_front *front_current;
 
 static void front_run(void *argument);
+static void front_enter(void *context);
 static void front_loop(struct view_front *front);
 static void front_execute(struct view_front *front, struct front_item *item);
 static void front_publish(struct view_front *front);
@@ -1017,6 +1022,30 @@ view_front_queued(
 	return count;
 }
 
+/*
+ * Reports how many works the view's pages lent to its style thread and how
+ * long they waited for them in all, in nanoseconds (0 and 0 for a view of
+ * the caller's thread); any thread may ask.
+ */
+void
+view_front_lend_counts(
+	const struct browser_view *view,
+	uint64_t *lends,
+	uint64_t *waited_ns)
+{
+	struct view_front *front;
+
+	/* A view of the caller's thread lends nothing. */
+	*lends = 0;
+	*waited_ns = 0;
+	front = view_front_of(view);
+	if (front == NULL)
+		return;
+
+	/* The style thread's counts. */
+	view_style_counts(front->style, lends, waited_ns);
+}
+
 /* Reports the agent a front's pages run their tasks in. */
 struct vm_agent *
 view_front_agent(
@@ -1027,9 +1056,10 @@ view_front_agent(
 }
 
 /*
- * The script thread: makes the view with its own frame as the pages'
- * stack base and the front's callbacks and wake, tells the program's thread
- * how that went, runs the view until its end, and ends it.
+ * The script thread: starts the style thread, makes the view with its own
+ * frame as the pages' stack base and the front's callbacks and wake, tells
+ * the program's thread how that went, runs the view until its end, and
+ * ends it and the style thread.
  */
 static void
 front_run(
@@ -1040,9 +1070,16 @@ front_run(
 	struct browser_view *view;
 	int error;
 
-	/* The view, of this thread, which knows itself as the front's. */
+	/* This thread knows itself as the front's. */
 	front = argument;
 	front_current = front;
+
+	/* The style thread, which the agent lends the pages' heaps to for their style, layout and display lists. */
+	error = view_style_start(front_enter, front, &front->style);
+	if (error == 0)
+		vm_agent_set_lender(&front->agent, view_style_lend, front->style);
+
+	/* The view, of this thread. */
 	options = front->options;
 	options.threading = BROWSER_THREADING_CALLER;
 	options.stack_base = __builtin_frame_address(0);
@@ -1053,7 +1090,8 @@ front_run(
 	options.frame_wake = NULL;
 	options.frame_wake_context = NULL;
 	view = NULL;
-	error = browser_view_create(&options, &view);
+	if (error == 0)
+		error = browser_view_create(&options, &view);
 	if (error == 0) {
 		view_attach_front(view, front);
 		front->view = view;
@@ -1069,13 +1107,29 @@ front_run(
 
 	wb_mutex_unlock(&front->lock);
 
-	/* A view that could not be made ends here. */
-	if (error != 0)
+	/* A view that could not be made ends here, with its style thread. */
+	if (error != 0) {
+		vm_agent_set_lender(&front->agent, NULL, NULL);
+		view_style_stop(front->style);
+		front->style = NULL;
 		return;
+	}
 
-	/* The view runs until its end, then goes. */
+	/* The view runs until its end, then goes, then the style thread that served its pages. */
 	front_loop(front);
 	browser_view_destroy(view);
+	vm_agent_set_lender(&front->agent, NULL, NULL);
+	view_style_stop(front->style);
+	front->style = NULL;
+}
+
+/* The style thread's first call: it knows itself as the front's too (the view's calls it may make are its own). */
+static void
+front_enter(
+	void *context)
+{
+	/* The front's thread. */
+	front_current = context;
 }
 
 /*

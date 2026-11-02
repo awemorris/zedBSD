@@ -1394,8 +1394,7 @@ frame_tree(
 	if (tree == NULL)
 		return ENOMEM;
 	css_engine_set_base_zoom(engine, zoom);
-	status = layout_build(tree, engine, &page->text, window->document, page_image_of, page_image_by_url, page,
-	    viewport_width, viewport_height, 0, 0, transition);
+	status = page_lend_layout(page, tree, engine, window->document, viewport_width, viewport_height, 0, 0, transition);
 	if (status != 0) {
 		layout_release(tree);
 		free(tree);
@@ -1438,7 +1437,7 @@ frame_make(
 	}
 	frame->tree = tree;
 	frame->refs = 1U;
-	status = paint_build(&frame->list, tree);
+	status = page_lend_paint(page, &frame->list, tree);
 	if (status != 0) {
 		paint_frame_release(frame);
 		return status;

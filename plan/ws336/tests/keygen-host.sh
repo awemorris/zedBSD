@@ -9,8 +9,12 @@
 # copies of the program under build/tmp).
 #   sh plan/ws336/tests/keygen-host.sh
 # Last line: keygen-host: PASS or keygen-host: FAIL.  Output under build/tmp/keygen-host.
+# SSH_CRYPTO_INCLUDE=<dir whose compat/crypto/ holds libcrypto-compat's headers> and SSH_CRYPTO_LIB=<what to link for
+# it> build against libcrypto-compat instead of the host's OpenSSL (plan/ws336/tests/compat-host.sh sets both).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
+crypto_include=${SSH_CRYPTO_INCLUDE:-plan/ws336/tests/host-crypto}
+crypto_lib=${SSH_CRYPTO_LIB:--lcrypto}
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh
 source=${KEYGEN_SOURCE:-userland/base/ssh/ssh-keygen-main.c}
@@ -28,8 +32,8 @@ for file in userland/base/ssh/ssh-*.c; do
 done
 
 if ! timeout 300 cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined \
-    -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -Iuserland/base/ssh -Iplan/ws336/tests/host-crypto \
-    "$source" $modules -lcrypto -o "$out/ssh-keygen" > "$out/build.log" 2>&1; then
+    -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -Iuserland/base/ssh -I"$crypto_include" \
+    "$source" $modules $crypto_lib -o "$out/ssh-keygen" > "$out/build.log" 2>&1; then
 	head -20 "$out/build.log"
 	echo "keygen-host: FAIL (build)"
 	exit 1

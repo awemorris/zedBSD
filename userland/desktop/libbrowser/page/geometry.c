@@ -46,6 +46,18 @@ struct page_box_slot {
 	const struct layout_box *box;
 };
 
+/*
+ * The cascade of one element lent to the style thread (geometry_cascade):
+ * the page, the element, the style it writes and where it says the layout
+ * decides the style (NULL: not asked).
+ */
+struct geometry_cascade_args {
+	struct page *page;
+	struct dom_element *element;
+	struct css_style *style;
+	int *bound;
+};
+
 static int geometry_tree_box(const struct layout_tree *tree, const struct layout_box *first, struct dom_node *node, struct bind_box *box);
 static int geometry_child_box(struct page *page, struct dom_node *node, struct bind_box *box);
 static void geometry_overflow(const struct layout_box *box, int depth, layout_unit *left, layout_unit *top, layout_unit *right, layout_unit *bottom);
@@ -59,6 +71,7 @@ static size_t geometry_count_boxes(const struct layout_box *box, int depth);
 static void geometry_index_boxes(struct page *page, const struct layout_box *box, int depth);
 static size_t geometry_slot_of(const struct page *page, const struct dom_node *node);
 static int geometry_cascade(struct page *page, struct dom_element *element, struct css_style *style, int *bound);
+static int geometry_cascade_work(void *argument);
 static int geometry_root_flow(struct page *page, struct dom_element *root, struct css_style *style, int *bound);
 
 /*
@@ -435,7 +448,7 @@ page_child_element_at(
 	if (vm_heap_add_root(page->heap, &root) != 0)
 		return NULL;
 	memset(&tree, 0, sizeof(tree));
-	status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height, 0, 0, NULL);
+	status = page_lend_layout(page, &tree, engine, document, width, height, 0, 0, NULL);
 	if (status == 0 && bind_window_child_document(window) == document) {
 		node = layout_hit_node(&tree, (layout_unit)(x * LAYOUT_UNIT), (layout_unit)(y * LAYOUT_UNIT));
 		while (node != NULL && node->type != DOM_ELEMENT)
@@ -1073,7 +1086,7 @@ geometry_child_box(
 	    height >= 0 &&
 	    width <= INT_MAX / LAYOUT_UNIT &&
 	    height <= INT_MAX / LAYOUT_UNIT) {
-		status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), NULL);
+		status = page_lend_layout(page, &tree, engine, document, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), NULL);
 		if (status != 0) {
 			layout_release(&tree);
 			goto release_roots;
@@ -1328,21 +1341,52 @@ geometry_cascade(
 	struct css_style *style,
 	int *bound)
 {
-	struct dom_element **chain;
-	struct css_style *parent;
-	const struct css_style *inherited;
-	struct dom_node *walk;
-	size_t count;
-	size_t index;
-	int contained;
+	struct geometry_cascade_args args;
 	int error;
 
-	/* The styles as the document and its sheets are now. */
+	/* The styles as the document and its sheets are now (the fetches and events of the sheets are this thread's). */
 	error = page_update_styles(page);
 	if (error != 0)
 		return error;
 
+	/* The cascade, on the style thread. */
+	args.page = page;
+	args.element = element;
+	args.style = style;
+	args.bound = bound;
+	error = page_lend(page, geometry_cascade_work, &args);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the style. */
+	return 0;
+}
+
+/* Computes an element's style from the root element down to it (a work lent by geometry_cascade). */
+static int
+geometry_cascade_work(
+	void *argument)
+{
+	struct geometry_cascade_args *args;
+	struct dom_element **chain;
+	struct dom_element *element;
+	struct css_style *parent;
+	struct css_style *style;
+	const struct css_style *inherited;
+	struct dom_node *walk;
+	struct page *page;
+	size_t count;
+	size_t index;
+	int *bound;
+	int contained;
+	int error;
+
 	/* The element's ancestors that are elements, it first. */
+	args = argument;
+	page = args->page;
+	element = args->element;
+	style = args->style;
+	bound = args->bound;
 	chain = malloc(GEOMETRY_STYLE_DEPTH * sizeof(*chain));
 	if (chain == NULL)
 		return ENOMEM;

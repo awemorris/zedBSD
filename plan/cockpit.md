@@ -7,12 +7,12 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS335](ws335/ws.md) | 自前の TLS | p040（secp384r1、相互接続 139・Wine 47、ecc384.badssl.com も通る）cleared。p034（安全の review、q1986）に 18:41 着手 | — |
-| P2 | — | 待機 | WS344（自前の WebP の decoder）completed（20:23） | — |
+| P1 | [WS335](ws335/ws.md) | 自前の TLS | p034（安全の review、21 件中 12 件を直した、1 時間の fuzz で crash 0）cleared。p035（規約の見直しと持ち越し、q1992）に 21:35 着手 | — |
+| P2 | [WS343](ws343/ws.md) | base の TLS と ssh を自前に | p002（libcrypto-compat に passkey の OpenSSL の関数 16 個、link の差し替えだけで OpenSSL から外す、q1990）に 20:46 着手 | — |
 | P3 | — | 待機 | BUG-416（usb-net の 64 byte の倍数の frame）fixed、17:56 merge。BUG-412 の直しの候補は agent/p3-bug412 に未 merge、Pi 5 は記録の状態 | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
-| P5 | [WS345](ws345/ws.md) | ブラウザ | p008（style の thread、q1985）を新しい P5 で 20:23 着手 | — |
-| P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p020（敵対的な入力の見直し、log の注入を直した）cleared。p021（package と amd64 の build、q1989）に 20:23 着手 | — |
+| P5 | [WS345](ws345/ws.md) | ブラウザ | p008（style の thread）cleared。p009（iframe ごとの script の thread、q1993）に 21:40 着手 | — |
+| P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p021（package と amd64 の build、passkey-fido2 の規則が OpenSSL を作らせていたのを直した）cleared。p022（QEMU の相互運用、q1991）に 21:15 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | [WS345](ws345/ws.md) | ブラウザ | p006（描画の API、確定した frame）cleared。p007（3 つの shell を OWN に、q1988）に 20:23 着手 | — |
 
