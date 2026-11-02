@@ -481,6 +481,10 @@ zssh() {
 	timeout 60 "$ssh" -F "$config" "$@"
 }
 
+head -c 8388608 /dev/urandom > "$work/data8"
+
+# The checks of peer A (INTEROP_PART=b leaves them out, for a run of peer B alone).
+peer_a() {
 # --- known_hosts: accept-new adds the "[host]:port" line (sshd(8) SSH_KNOWN_HOSTS FILE FORMAT) and connects.
 zssh -o StrictHostKeyChecking=accept-new -p "$port_a" 127.0.0.1 true > "$work/t1.out" 2> "$work/t1.err"
 expect_eq "accept-new connection exit" "$?" 0
@@ -505,7 +509,6 @@ zssh -p "$port_a" 127.0.0.1 echo one two '  three' > "$work/t5.out" 2>&1
 expect_eq "the command arguments are joined with spaces" "$(cat "$work/t5.out")" "one two three"
 
 # --- 8 MiB through stdin and back, on stdout and on stderr.
-head -c 8388608 /dev/urandom > "$work/data8"
 zssh -p "$port_a" 127.0.0.1 cat < "$work/data8" > "$work/data8.out" 2> "$work/t6.err"
 expect_eq "8 MiB round trip exit" "$?" 0
 cmp -s "$work/data8" "$work/data8.out"
@@ -732,6 +735,11 @@ check "a refused connection is reported" $?
 zssh -p "$port_a" 127.0.0.1 'echo still-serving' > "$work/t28.out" 2> "$work/t28.err"
 expect_eq "the server still serves" "$?:$(cat "$work/t28.out")" "0:still-serving"
 
+}
+if [ "${INTEROP_PART:-all}" != b ]; then
+	peer_a
+fi
+
 # ======== Peer B: zedBSD's sshd. ========
 source_dir=${SSH_SOURCE_DIR:-userland/base/ssh}
 b_modules=""
@@ -742,6 +750,8 @@ for file in "$source_dir"/ssh-*.c; do
 	esac
 done
 b_dir="$work/sshd-b"
+# An RSA host key the server passes over (the image's configuration names one before the ssh-ed25519 key).
+timeout 60 "$openssh_keygen" -q -t rsa -b 2048 -N '' -f "$work/server/rsa_key" > /dev/null 2>&1
 mkdir -p "$b_dir/home/.ssh"
 chmod 700 "$b_dir/home" "$b_dir/home/.ssh"
 # shellcheck disable=SC2086
@@ -782,7 +792,7 @@ LoginGraceTime 30
 Subsystem sftp /usr/lib/openssh/sftp-server
 EOF
 }
-b_config "$port_b" > "$b_dir/sshd_config"
+{ echo "HostKey $work/server/rsa_key"; b_config "$port_b"; } > "$b_dir/sshd_config"
 b_config "$port_noshell" > "$noshell_dir/sshd_config"
 
 # sshd -t: a usable configuration gives 0; an unknown keyword gives its line and 1.
@@ -793,6 +803,16 @@ expect_eq "sshd -t on a usable configuration" "$?:$(cat "$work/b-t1.out")" "0:"
 expect_eq "sshd -t on an unknown keyword gives 1" "$?" 1
 grep -q 'line 3:' "$work/b-t2.out"
 check "sshd -t names the line ($(cat "$work/b-t2.out"))" $?
+"$b_dir/sshd" -t -f "$b_dir/sshd_config" extra > "$work/b-t3.out" 2>&1
+expect_eq "sshd -t with an operand gives 1" "$?" 1
+{ echo "HostKey $work/server/rsa_key"; b_config "$port_b"; } > "$work/b-rsa_config"
+"$b_dir/sshd" -t -f "$work/b-rsa_config" > "$work/b-t4.out" 2>&1
+expect_eq "sshd -t passes over an RSA host key to the ssh-ed25519 one" "$?:$(cat "$work/b-t4.out")" "0:"
+{ echo "HostKey $work/server/rsa_key"; echo "Port $port_b"; } > "$work/b-rsa-only_config"
+"$b_dir/sshd" -t -f "$work/b-rsa-only_config" > "$work/b-t5.out" 2>&1
+expect_eq "sshd -t with only an RSA host key gives 1" "$?" 1
+grep -q 'no ssh-ed25519 host key' "$work/b-t5.out"
+check "sshd -t says there is no ssh-ed25519 host key" $?
 
 # start_b NAME DIR PORT: starts zedBSD's sshd and fails closed unless the port is its own.
 start_b() {
