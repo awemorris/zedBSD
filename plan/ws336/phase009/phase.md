@@ -2,7 +2,7 @@
 
 # ws336-p009: ssh-auth（service request と userauth の message）
 
-Status: planned（2026-11-01 p001 の設計で作成）
+Status: in-progress（2026-11-02 10:52 Sonnet）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p005

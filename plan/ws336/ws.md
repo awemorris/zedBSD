@@ -11,6 +11,7 @@
 
 ## ユーザーの決定
 
+- （2026-11-02 10:52）ユーザーから、互換の ssh・sshd は WS335 の完了を待たずに進めてよい、という趣旨の指示を受けた（libcrypto-compat の済んだ部分で進め、WS335 の実装が要る p021〜p024 は WS335 の該当の Phase の後）。
 - （2026-11-02 10:52）ユーザーから、WS335 の完了の後に、互換の ssh・sshd を完成させる、という趣旨の指示を受けた。
 - 2026-11-01 ユーザーから、次の趣旨の指示を受けた。
   1. 互換の sshd と ssh を作る WS を立てる。
@@ -42,13 +43,13 @@
 | [p005](phase005/phase.md) | ssh-key | cleared（2026-11-01 09:04 Q1、main e41eccfc3。08:54 q1824-i03、Sonnet。run-unit all PASS、key 2771 checks、壊す確かめ 38 通り中 36 が FAIL・2 は同値の変更） | p003 | p003 経由 |
 | [p006](phase006/phase.md) | ssh-hostfile | cleared（2026-11-01 09:34 Q1、main 9622eaa29。Sonnet、hostfile 736314 checks、壊す確かめ 48 通り中 46 が FAIL・2 は同値） | p005 | p003 経由 |
 | [p007](phase007/phase.md) | ssh-kex | cleared（2026-11-01 09:46 Q1。09:44 Sonnet、run-unit all PASS、kex 402989 checks、壊す確かめ 25 通り全部 FAIL) | p004 | p003 経由 |
-| [p008](phase008/phase.md) | ssh-transport（Opus） | planned | p005・p007 | p003 経由 |
-| [p009](phase009/phase.md) | ssh-auth | planned | p005 | p003 経由 |
+| [p008](phase008/phase.md) | ssh-transport（Opus） | in-progress（P5 q1932） | p005・p007 | p003 経由 |
+| [p009](phase009/phase.md) | ssh-auth | in-progress（Sonnet q1933） | p005 | p003 経由 |
 | [p010](phase010/phase.md) | ssh-ttymodes・ssh-channel | cleared（2026-11-01 06:19 Q1、main 290b99bab。ssh-ttymodes・ssh-channel 実装、run-unit ttymodes 20682・channel 1603651 checks PASS（Q1 再実行で確認）。phase.md と header の食い違い 2 件（長さの上限を越えた要求は header の通り OTHER、no-more-sessions は want_reply なら SUCCESS）は担当の判断を採り、header の comment の直しは規約の見直しの Phase で） | p002 | — |
-| [p011](phase011/phase.md) | ssh-config | planned | p006 | p003 経由 |
+| [p011](phase011/phase.md) | ssh-config | in-progress（Sonnet q1934） | p006 | p003 経由 |
 | [p012](phase012/phase.md) | ssh-privsep（frame） | cleared（2026-11-01 06:22 Q1、main e8b028959。ssh-privsep（monitor との frame と同期の呼び出し）実装、run-unit privsep 947 checks PASS（Q1 再実行で確認）。mon_call を呼ぶ process は SIGPIPE を無視する前提（p016・p017 で守る）） | p002 | — |
 | [p013](phase013/phase.md) | ssh-sftp（Q3 の A: sftp-server のため） | cleared（2026-11-01 06:09 Q1、main 8872d89fe。ssh-sftp（SFTP v3）実装、run-unit sftp 1836 checks PASS（Q1 再実行で確認）、ASan・UBSan、c89。READ の長さは parser が 64 KiB に切る（担当の判断、phase.md の結果）） | p002 | — |
-| [p014](phase014/phase.md) | ssh-keygen の program | planned | p006 | p003 経由 |
+| [p014](phase014/phase.md) | ssh-keygen の program | in-progress（Sonnet q1935） | p006 | p003 経由 |
 | [p015](phase015/phase.md) | ssh の program・host の相互運用 A（Opus） | planned | p006・p008・p009・p010・p011 | p003 経由 |
 | [p016](phase016/phase.md) | sshd の monitor と login の確かめ（Opus） | planned | p009・p011・p012・p014 | p003 経由 |
 | [p017](phase017/phase.md) | sshd の pre-auth と session の process（Opus） | planned | p008・p010・p016 | p003 経由 |

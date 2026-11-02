@@ -11,7 +11,7 @@
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（09:46）。p006 cleared: H.265 の decode（HEVC_v1 128 本一致）と Video Player の GPU の道での H.264・H.265 の再生。今日の作業は終わり | 次の指示で encode（p008）から再開 |
 | P3 | [BUG-410](bugs/BUG-410.md) | libc | atexit の object ごとの後始末（__cxa_atexit・__cxa_finalize、q1931）。BUG-409（ld.so の NODELETE）は fixed | — |
 | P4 | [WS319](ws319/ws.md) | i915（5330）の Vulkan Video | H.265 decode の実装と Video Player の H.264 の確かめ（q1926） | — |
-| P5 | — | Windows 版ブラウザ | 返却（08:12）。BUG-400（storage-test の時々の FAIL、試験の側）fixed。以後ブラウザは P8 | 次を待つ |
+| P5 | [WS336](ws336/ws.md) p008 | 自前の ssh・sshd | ssh-transport（q1932、Opus） | p015 以降 |
 | P6 | [WS335](ws335/ws.md) p029 | libssl-compat・libcrypto-compat | TLS の handshake の本体（q1928、Opus） | p030〜 |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | [BUG-402](bugs/BUG-402.md)〜[BUG-407](bugs/BUG-407.md) | ブラウザ（Windows 版と libbrowser） | Windows の UAT の 2 回目の 6 件（q1924）。BUG-401 は fixed | — |
