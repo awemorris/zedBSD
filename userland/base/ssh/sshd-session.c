@@ -52,8 +52,15 @@
 #include "sshd-child.h"
 #include "sshd-monitor.h"
 
-/* The most bytes one read of the connection or of a child takes. */
+/* The most bytes one read of a child takes. */
 #define SESSION_READ_CHUNK	16384U
+
+/*
+ * The most bytes one read of the connection takes: the room the packet
+ * layer keeps beside a packet not yet whole (SSH_PACKET_INPUT_MAX), so a
+ * read always fits.
+ */
+#define SESSION_CLIENT_READ	4096U
 
 /* The most environment variables a client may set on one channel. */
 #define SESSION_ENV_MAX		32U
@@ -633,7 +640,7 @@ session_serve(
 				continue;
 			if (kinds[index] == 0 && (waiting[index].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
 				/* The client: an end of file is the client gone. */
-				got = read(SSHD_FD_CLIENT, chunk, sizeof(chunk));
+				got = read(SSHD_FD_CLIENT, chunk, SESSION_CLIENT_READ);
 				if (got == 0) {
 					status = EPIPE;
 					break;
@@ -677,7 +684,8 @@ session_serve(
 	if (status == EPIPE || status == ECONNABORTED)
 		return 0;
 
-	/* Reports a connection that failed. */
+	/* Reports a connection that failed, and why. */
+	syslog(LOG_NOTICE, "session: the connection of %.63s failed (%d)", session->child.peer, status);
 	return 1;
 }
 
