@@ -1163,19 +1163,21 @@ test_server_hello(void)
 	check_sh(SSLC_TLS12, NULL, &spec, EPROTO, SSLC_ALERT_UNSUPPORTED_EXTENSION);
 	check_sh_taken(SSLC_TLS12, "server.test", &spec, 0);
 
-	/* A cookie outside a HelloRetryRequest is refused (the alert is the parser's, unsupported_extension or illegal_parameter). */
+	/* A cookie outside a HelloRetryRequest is recognized and not specified for a TLS 1.2 ServerHello: illegal_parameter. */
 	sh_default(&spec);
 	spec.cookie = 1;
 	run = feed_sh(SSLC_TLS12, "server.test", &spec);
 	CHECK(run->error == EPROTO);
 	CHECK(run->hs.state == SSLC_HS_FAILED);
-	CHECK(run->hs.alert == SSLC_ALERT_UNSUPPORTED_EXTENSION || run->hs.alert == SSLC_ALERT_ILLEGAL_PARAMETER);
+	CHECK(run->hs.alert == SSLC_ALERT_ILLEGAL_PARAMETER);
 	run_free(run);
 
-	/* An extension nobody asked for is the parser's unsupported_extension. */
+	/* signature_algorithms, which the client offers, has no place in a ServerHello: illegal_parameter (RFC 8446 4.2); ALPN, never offered: unsupported_extension. */
 	sh_default(&spec);
 	spec.has_extra = 1;
 	spec.extra_type = SSLC_EXT_SIGNATURE_ALGORITHMS;
+	check_sh(SSLC_TLS12, "server.test", &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
+	spec.extra_type = SSLC_EXT_ALPN;
 	check_sh(SSLC_TLS12, "server.test", &spec, EPROTO, SSLC_ALERT_UNSUPPORTED_EXTENSION);
 
 	/* The session id: a TLS 1.2 client has sent none, so a server's own id (any length to 32) is no echo. */

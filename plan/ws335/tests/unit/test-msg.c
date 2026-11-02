@@ -1833,8 +1833,11 @@ model_encrypted_extensions(
 		if (size - position - 4U < length)
 			return outcome;
 		if (type != 0U && type != 10U) {
+			/* RFC 8446 4.2: an extension the client offers is illegal here, one it never offers unsupported. */
 			outcome.status = EPROTO;
 			outcome.alert = UNS;
+			if (type == 11U || type == 13U || type == 23U || type == 43U || type == 44U || type == 51U || type == 0xff01U)
+				outcome.alert = ILL;
 			return outcome;
 		}
 		if (type == 0U) {
@@ -2273,8 +2276,8 @@ test_server_hello_bad(void)
 		{ "ec_point_formats two without", SH_HEAD "0007" "000b0003" "02" "0102", EPROTO, ILL },
 
 		/* Extensions the client did not offer, or that have no place here. */
-		{ "supported_groups", SH_HEAD "0008" "000a0004" "0002" "001d", EPROTO, UNS },
-		{ "signature_algorithms", SH_HEAD "0008" "000d0004" "0002" "0804", EPROTO, UNS },
+		{ "supported_groups", SH_HEAD "0008" "000a0004" "0002" "001d", EPROTO, ILL },
+		{ "signature_algorithms", SH_HEAD "0008" "000d0004" "0002" "0804", EPROTO, ILL },
 		{ "alpn", SH_HEAD "0008" "00100004" "0002" "0100", EPROTO, UNS },
 		{ "session_ticket", SH_HEAD "0004" "00230000", EPROTO, UNS },
 		{ "pre_shared_key", SH_HEAD "0006" "00290002" "0000", EPROTO, UNS },
@@ -2284,7 +2287,7 @@ test_server_hello_bad(void)
 		{ "padding", SH_HEAD "0004" "00150000", EPROTO, UNS },
 		{ "unknown", SH_HEAD "0004" "99990000", EPROTO, UNS },
 		{ "grease", SH_HEAD "0004" "0a0a0000", EPROTO, UNS },
-		{ "cookie in a ServerHello", SH_HEAD "0008" E_COOKIE2, EPROTO, UNS },
+		{ "cookie in a ServerHello (recorded; the handshake refuses it)", SH_HEAD "0008" E_COOKIE2, 0, 0 },
 
 		/* The order of the findings: the first extension decides. */
 		{ "unsupported before bad syntax", SH_HEAD "0009" "00290000" "002b0001" "03", EPROTO, UNS },
@@ -3073,6 +3076,11 @@ test_encrypted_extensions(void)
 			{ "0004" "00290000", EPROTO, UNS, 0 },
 			{ "0004" "002a0000", EPROTO, UNS, 0 },
 			{ "0004" "00100000", EPROTO, UNS, 0 },
+			{ "0004" "00170000", EPROTO, ILL, 0 },
+			{ "0006" "002b0002" "0304", EPROTO, ILL, 0 },
+			{ "0004" "002c0000", EPROTO, ILL, 0 },
+			{ "0006" "000d0002" "0403", EPROTO, ILL, 0 },
+			{ "0005" "ff010001" "00", EPROTO, ILL, 0 },
 			{ "0001" "00", EINVAL, DEC, 0 },
 			{ "0003" "000a00", EINVAL, DEC, 0 },
 			{ "", EINVAL, DEC, 0 },

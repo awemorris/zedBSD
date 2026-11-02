@@ -146,7 +146,6 @@ static struct limbo_exception limbo_exceptions[] = {
 	{ "rfc5280::serial::zero", "issuance", 0 },
 	{ "rfc5280::ski::intermediate-missing-ski", "issuance", 0 },
 	{ "rfc5280::ski::root-missing-ski", "issuance", 0 },
-	{ "rfc5280::unknown-critical-extension-root", "anchor", 0 },
 	{ "rfc9881::ml-dsa-44", "no-mldsa", 0 },
 	{ "rfc9881::ml-dsa-65", "no-mldsa", 0 },
 	{ "rfc9881::ml-dsa-87", "no-mldsa", 0 },

@@ -13,8 +13,8 @@
  * 1.1).  TLS 1.3 suites: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
  * TLS_CHACHA20_POLY1305_SHA256.  TLS 1.2 suites: ECDHE with ECDSA or RSA
  * signatures and AES-GCM or ChaCha20-Poly1305 only (no CBC, no RSA key
- * transport, no finite-field DHE, no static ECDH).  Groups: x25519 and
- * secp256r1 for key exchange.  Signature schemes: ECDSA with P-256 and
+ * transport, no finite-field DHE, no static ECDH).  Groups: x25519,
+ * secp256r1 and secp384r1 for key exchange.  Signature schemes: ECDSA with P-256 and
  * P-384, RSA-PSS with an rsaEncryption key (rsae), RSA PKCS #1 v1.5 (for
  * TLS 1.2 and for certificates only, 4.2.3).  Extensions: server_name,
  * supported_groups, ec_point_formats (1.2), signature_algorithms,

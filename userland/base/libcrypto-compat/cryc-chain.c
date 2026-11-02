@@ -1234,9 +1234,17 @@ chain_validate_certificate(
 	if (code != CRYC_VERIFY_OK)
 		return code;
 
-	/* The anchor of a longer path is taken as trusted as it is: nothing else of it is checked. */
-	if (index == anchor && index != 0U)
+	/*
+	 * The anchor of a longer path is taken as trusted as it is, except that
+	 * a constraint it marks critical and this library cannot honour is not
+	 * ignored: such an anchor is refused (no basicConstraints is asked of
+	 * it, as old version 1 roots have none).
+	 */
+	if (index == anchor && index != 0U) {
+		if ((cert->flags & CRYC_X509_UNKNOWN_CRITICAL) != 0U)
+			return CRYC_VERIFY_UNHANDLED_CRITICAL_EXTENSION;
 		return CRYC_VERIFY_OK;
+	}
 
 	/* The name constraints of the certificates above apply to this one. */
 	code = chain_check_names(search, index);

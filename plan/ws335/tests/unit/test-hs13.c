@@ -1399,11 +1399,11 @@ test_breaks(void)
 	config.extra_type = SSLC_EXT_EXTENDED_MASTER_SECRET;
 	check_peer_fails(&config, &pki256, SSLC_TLS12, "server.test", EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 
-	/* extended_master_secret in EncryptedExtensions was not offered there. */
+	/* extended_master_secret in EncryptedExtensions: offered by the client, not specified for the message (RFC 8446 4.2): illegal_parameter. */
 	peer13(&config, &pki256);
 	config.extra_type = SSLC_EXT_EXTENDED_MASTER_SECRET;
 	config.extra_at = TLSPEER_AT_ENCRYPTED_EXTENSIONS;
-	check_peer_fails(&config, &pki256, SSLC_TLS12, "server.test", EPROTO, SSLC_ALERT_UNSUPPORTED_EXTENSION);
+	check_peer_fails(&config, &pki256, SSLC_TLS12, "server.test", EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 
 	/* A server_name acknowledgement to a client that sent no name. */
 	peer13(&config, &pki256);
@@ -1757,11 +1757,11 @@ test_server_hello(void)
 	spec.extra_size = 0;
 	check_sh(SSLC_TLS12, SSLC_TLS13, &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 
-	/* A cookie outside a HelloRetryRequest, and an extension never offered (sslc-msg's refusal). */
+	/* A cookie outside a HelloRetryRequest (recognized, not specified there: illegal_parameter), and an extension never offered (unsupported_extension). */
 	sh_default(&spec, model);
 	spec.cookie = cookie;
 	spec.cookie_size = sizeof(cookie);
-	check_sh(SSLC_TLS12, SSLC_TLS13, &spec, EPROTO, SSLC_ALERT_UNSUPPORTED_EXTENSION);
+	check_sh(SSLC_TLS12, SSLC_TLS13, &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 	sh_default(&spec, model);
 	spec.has_extra = 1;
 	spec.extra_type = SSLC_EXT_ALPN;

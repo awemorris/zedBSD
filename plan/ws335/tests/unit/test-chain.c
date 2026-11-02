@@ -2665,7 +2665,7 @@ test_verify_extensions(void)
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 
-	/* The anchor's own extensions are not processed: a root with an unknown critical extension is still an anchor. */
+	/* An anchor with an unknown critical extension is refused at its depth; with an unknown extension that is not critical it is an anchor. */
 	spec_init(&spec, "Root", 0, "Root", 0);
 	spec_ca(&spec);
 	spec.aki = 0;
@@ -2674,6 +2674,12 @@ test_verify_extensions(void)
 	cryc_store_free(&chain.store);
 	store_with(&chain.store, roots, 1);
 	list[1] = chain.inter;
+	run(&chain.store, list, 2, &params, &result);
+	EXPECT(result, CRYC_VERIFY_UNHANDLED_CRITICAL_EXTENSION, 2);
+	spec.unknown = 2;
+	roots[0] = make(&spec);
+	cryc_store_free(&chain.store);
+	store_with(&chain.store, roots, 1);
 	run(&chain.store, list, 2, &params, &result);
 	EXPECT(result, CRYC_VERIFY_OK, 0);
 
@@ -3715,7 +3721,6 @@ static struct limbo_exception limbo_exceptions[] = {
 	{ "rfc5280::serial::zero", "issuance", 0 },
 	{ "rfc5280::ski::root-missing-ski", "issuance", 0 },
 	{ "rfc5280::ski::intermediate-missing-ski", "issuance", 0 },
-	{ "rfc5280::unknown-critical-extension-root", "anchor", 0 },
 	{ "rfc5280::root-missing-basic-constraints", "anchor", 0 },
 	{ "rfc5280::root-non-critical-basic-constraints", "issuance", 0 },
 	{ "rfc5280::leaf-ku-keycertsign", "issuance", 0 },

@@ -17,7 +17,9 @@
  * self-signed or other certificates taken as trusted as they are (RFC
  * 5280 6.1.1 (d): their name, key and name constraints are used; their own
  * signature, basicConstraints and keyUsage are not checked; their validity
- * period is checked, as OpenSSL does).
+ * period is checked, as OpenSSL does; an anchor with an extension it marks
+ * critical that this library does not know is refused, since a constraint
+ * it cannot honour is not ignored).
  *
  * All inputs are public.  The peer's certificates are untrusted; the work
  * of path building is bounded (CRYC_CHAIN_MAX_WORK) so that a hostile
@@ -241,7 +243,8 @@ int cryc_store_add_system(struct cryc_store *store);
  * Distrusted certificates: before anything else of a complete path is
  * checked (no signature, so it costs no work), every certificate of the
  * path, the leaf, the intermediates and the trust anchor, is looked up by
- * the SHA-256 of its DER among the marks of cryc_store_add_distrusted,
+ * the SHA-256 of its tbsCertificate and of its DER among the marks of
+ * cryc_store_add_distrusted,
  * from the leaf upward; the first one found ends the path's validation
  * with REJECTED at its depth (the lowest distrusted depth).
  *
@@ -258,7 +261,8 @@ int cryc_store_add_system(struct cryc_store *store);
  *     the trust anchor included, unless it is a self-issued
  *     intermediate (6.1.3 (b) and (c); cryc_name_constraints_check: EACCES gives
  *     NAME_CONSTRAINT_VIOLATION, ENOTSUP UNSUPPORTED_NAME_CONSTRAINT);
- *   - no unknown critical extension (UNHANDLED_CRITICAL_EXTENSION);
+ *   - no unknown critical extension (UNHANDLED_CRITICAL_EXTENSION; this one
+ *     is checked for the trust anchor of a longer path too);
  *   - for an intermediate: version 3 with basicConstraints cA TRUE
  *     (INVALID_CA); keyUsage, when present, with keyCertSign (KEY_USAGE);
  *     pathLenConstraint not less than the number of non-self-issued
