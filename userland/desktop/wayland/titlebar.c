@@ -98,6 +98,9 @@
 /* The version that has the reload role (KWL_CONTROL_RELOAD). */
 #define TITLEBAR_RELOAD_VERSION		6U
 
+/* The version whose box takes its load: KWL_BREADCRUMB_PROGRESS_MASK. */
+#define TITLEBAR_PROGRESS_VERSION	7U
+
 static uint32_t titlebar_word(const unsigned char *bytes, size_t offset);
 static int titlebar_string(const unsigned char *bytes, size_t size, size_t offset, const char **text, size_t *next);
 static int manager_request(struct kwl_object *manager, uint32_t opcode, const unsigned char *bytes, size_t size);
@@ -836,10 +839,13 @@ titlebar_edit_control(
 			return EPROTO;
 		value = titlebar_word(bytes, 4U);
 
-		/* A breadcrumb's look since version 5: 0, or always a box (KWL_BREADCRUMB_BOXED). */
+		/* A breadcrumb's look since version 5: 0, or always a box (KWL_BREADCRUMB_BOXED), with its load since version 7. */
 		if (control->role == KWL_CONTROL_BREADCRUMB && titlebar->version >= TITLEBAR_BOXED_VERSION) {
-			if (value > KWL_BREADCRUMB_BOXED) {
-				error = titlebar_fail(titlebar, ERROR_INVALID_VALUE, "a breadcrumb's value that is not 0 or 1");
+			if (value > KWL_BREADCRUMB_BOXED &&
+			    (titlebar->version < TITLEBAR_PROGRESS_VERSION ||
+			     (value & ~(KWL_BREADCRUMB_BOXED | KWL_BREADCRUMB_PROGRESS_MASK)) != 0U ||
+			     (value & KWL_BREADCRUMB_PROGRESS_MASK) > (1001U << KWL_BREADCRUMB_PROGRESS_SHIFT))) {
+				error = titlebar_fail(titlebar, ERROR_INVALID_VALUE, "a breadcrumb's value that is not 0, 1 or a box's load");
 				return error;
 			}
 

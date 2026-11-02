@@ -110,6 +110,10 @@
  * cookies and localStorage in the user's data directory (shell_instance;
  * nothing is kept when the directory cannot be used); it outlives the view.
  *
+ * loading is the location of the load under way (empty when none), which
+ * the titlebar shows from the click on, before its page is shown, while
+ * its box fills as the load goes on (browser_view_load_progress).
+ *
  * The view's wake runs on the library's network thread: wake_app is the
  * application it posts to (NULL until the window is up; written and read
  * with atomic operations), and wake_missed is set when a wake could not
@@ -136,6 +140,7 @@ struct shell_state {
 	int drag_press_y;
 	uint64_t text_session;
 	char load_failure[SHELL_FAILURE_MAX];
+	char loading[SHELL_LOCATION_MAX + 1U];
 	char *failure_page;
 	const char *failure_location;
 	struct kl_app *wake_app;
@@ -154,6 +159,7 @@ struct shell_text {
 };
 
 static void shell_show_state(struct shell_state *state);
+static void shell_show_titlebar(struct shell_state *state);
 static void shell_input(struct shell_state *state, const struct shell_event *event);
 static void shell_button(struct shell_state *state, const struct shell_event *event);
 static int shell_drag_image(struct shell_state *state);
@@ -397,8 +403,9 @@ shell_run(
 		if (changed)
 			shell_show_state(&state);
 
-		/* The view's work: the network, the page's timers, and the layout they changed. */
+		/* The view's work: the network, the page's timers, and the layout they changed; then how far a load has come, in the location's box. */
 		browser_view_process(state.view);
+		shell_titlebar_progress(&state.titlebar, browser_view_load_progress(state.view));
 	}
 
 	/* Closes everything. */
@@ -457,10 +464,6 @@ shell_show_state(
 {
 	const char *title;
 	const char *url;
-	int can_back;
-	int can_forward;
-	int shown;
-	int error;
 
 	/* The window's title: the page's, or its location. */
 	title = browser_view_title(state->view);
@@ -471,10 +474,28 @@ shell_show_state(
 	printf("ZBROWSER NAVIGATE path=%s title=%s\n", url, title);
 	fflush(stdout);
 
-	/* The titlebar shows the start page that did not open in the place of the page that says why. */
+	/* The titlebar. */
+	shell_show_titlebar(state);
+}
+
+/* Shows the history and the location in the titlebar: the page's, or the location of a load under way. */
+static void
+shell_show_titlebar(
+	struct shell_state *state)
+{
+	const char *url;
+	int can_back;
+	int can_forward;
+	int shown;
+	int error;
+
+	/* The titlebar shows the start page that did not open in the place of the page that says why, and a load under way's location in the place of the page's. */
 	shown = shell_failure_shown(state);
+	url = browser_view_url(state->view);
 	if (shown)
 		url = state->failure_location;
+	if (state->loading[0] != '\0')
+		url = state->loading;
 
 	/* The titlebar; a refusal is reported and the titlebar stays as it was. */
 	can_back = browser_view_can_go(state->view, -1);
@@ -1220,9 +1241,10 @@ shell_committed(
 {
 	struct shell_state *state;
 
-	/* The title, the NAVIGATE line and the titlebar. */
+	/* The title, the NAVIGATE line and the titlebar (with the page's location: no load is under way now). */
 	UNUSED_PARAMETER(view);
 	state = context;
+	state->loading[0] = '\0';
 	if (state->ready)
 		shell_show_state(state);
 
@@ -1256,6 +1278,13 @@ shell_load(
 	/* The reason of a failure, kept for the page that says why the start page did not open (cut to what fits). */
 	if (state == BROWSER_LOAD_FAILED)
 		snprintf(shell->load_failure, sizeof(shell->load_failure), "%s", reason);
+
+	/* The titlebar shows the location of a load as it starts, and the page's again when it stops or fails. */
+	shell->loading[0] = '\0';
+	if (state == BROWSER_LOAD_STARTED)
+		snprintf(shell->loading, sizeof(shell->loading), "%s", url);
+	if (shell->ready)
+		shell_show_titlebar(shell);
 }
 
 /* The view's callback: a click opens a link, which the shell allows (and writes the LINK line). */

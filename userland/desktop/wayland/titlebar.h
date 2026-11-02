@@ -56,6 +56,14 @@
  */
 #define KWL_BREADCRUMB_BOXED		1U
 
+/*
+ * A box's load (since version 7): (thousandths + 1) in these bits of a
+ * KWL_BREADCRUMB_BOXED breadcrumb's value, 0 for none; its ground is
+ * filled from the left that far (the browser's page loading).
+ */
+#define KWL_BREADCRUMB_PROGRESS_SHIFT	8U
+#define KWL_BREADCRUMB_PROGRESS_MASK	(0x7ffU << KWL_BREADCRUMB_PROGRESS_SHIFT)
+
 /* The tabs' flags, and the tab strip's options. */
 #define KWL_TAB_ACTIVE			1U
 #define KWL_TAB_ATTENTION		2U

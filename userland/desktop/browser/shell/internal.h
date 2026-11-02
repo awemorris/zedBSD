@@ -254,6 +254,8 @@ struct shell_titlebar {
 	struct kl_window *kui;
 	struct shell_titlebar_event events[SHELL_TITLEBAR_EVENTS];
 	unsigned event_count;
+	/* The load the location's box shows, in thousandths (-1 for none). */
+	int progress;
 };
 
 /*
@@ -289,6 +291,7 @@ int shell_key_button(uint32_t button);
 /* The titlebar (titlebar.c). */
 int shell_titlebar_open(struct shell_titlebar *titlebar, struct shell_window *window);
 int shell_titlebar_show(struct shell_titlebar *titlebar, int can_back, int can_forward, const char *path);
+void shell_titlebar_progress(struct shell_titlebar *titlebar, int progress);
 int shell_titlebar_edit_location(struct shell_titlebar *titlebar);
 int shell_titlebar_offer_code(struct shell_titlebar *titlebar, const char *label);
 int shell_titlebar_take(struct shell_titlebar *titlebar, struct shell_titlebar_event *event);

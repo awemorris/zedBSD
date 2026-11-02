@@ -2221,7 +2221,8 @@ shell_draw_crumbs(
 /*
  * Draws a breadcrumb that is a box always (KWL_BREADCRUMB_BOXED, the
  * browser's address) while it is not edited: a rounded box, paler than the
- * field it becomes and lighter under the pointer, with the client's text
+ * field it becomes and lighter under the pointer, filled from the left as
+ * far as a load of its address has come (KWL_BREADCRUMB_PROGRESS_MASK), with the client's text
  * (its URL) where the field's text goes, or the placeholder, paler.  The
  * whole box is a field to press (shell_act edits it).
  */
@@ -2243,6 +2244,8 @@ shell_draw_crumb_box(
 	const char *text;
 	float ground[4];
 	float colour[4];
+	float load[4];
+	unsigned share;
 	int32_t baseline;
 	int hovered;
 
@@ -2260,6 +2263,14 @@ shell_draw_crumb_box(
 	if (hovered != 0 && control->enabled != 0U)
 		ground[3] = 0.72f * fade;
 	glass_draw_solid(server, command, (float)x, (float)y + 2.0f, (float)width, (float)size - 4.0f, 8.0f, ground);
+
+	/* A load under way fills the box from the left, in the ink's colour, faintly. */
+	share = (control->value & KWL_BREADCRUMB_PROGRESS_MASK) >> KWL_BREADCRUMB_PROGRESS_SHIFT;
+	if (share > 1U) {
+		shell_colour(load, ink, fade);
+		load[3] *= 0.16f;
+		glass_draw_solid(server, command, (float)x, (float)y + 2.0f, (float)width * (float)(share - 1U) / 1000.0f, (float)size - 4.0f, 8.0f, load);
+	}
 
 	/* The client's text, or the placeholder, paler. */
 	text = control->text;

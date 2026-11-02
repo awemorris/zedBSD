@@ -68,7 +68,7 @@ static const struct kwl_global globals[] = {
 	{ 13, "zwp_text_input_manager_v3", 1, KWL_TEXT_INPUT_MANAGER },
 	{ 14, "zwp_input_method_manager_v2", 1, KWL_INPUT_METHOD_MANAGER },
 	{ 15, "zwp_virtual_keyboard_manager_v1", 1, KWL_VIRTUAL_KEYBOARD_MANAGER },
-	{ 16, "kl_titlebar_manager_v1", 6, KWL_TITLEBAR_MANAGER },
+	{ 16, "kl_titlebar_manager_v1", 7, KWL_TITLEBAR_MANAGER },
 	{ 17, "kl_glass_manager_v1", 2, KWL_GLASS_MANAGER },
 	{ 18, "zwp_primary_selection_device_manager_v1", 1, KWL_PRIMARY_MANAGER },
 	{ 19, "zwp_tablet_manager_v2", 1, KWL_TABLET_MANAGER },

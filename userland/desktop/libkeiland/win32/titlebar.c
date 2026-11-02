@@ -232,7 +232,8 @@ kl_window_set_control_parts(
 }
 
 /*
- * Sets a control's value (a breadcrumb's KL_BREADCRUMB_BOXED).
+ * Sets a control's value (a breadcrumb's KL_BREADCRUMB_BOXED, with a box's
+ * load KL_BREADCRUMB_PROGRESS).
  */
 int
 kl_window_set_control_value(
@@ -974,6 +975,7 @@ titlebar_box(
 	struct kl_rect clip;
 	struct kl_rect mark;
 	unsigned pixels;
+	unsigned share;
 	size_t low;
 	size_t high;
 	int inset;
@@ -990,6 +992,19 @@ titlebar_box(
 	pixels = titlebar_pixels(window);
 	kl_canvas_round(canvas, (float)control->x, (float)control->y, (float)control->width, (float)control->height,
 	    (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi), theme->control);
+
+	/* A load under way fills it from the left in the selection's colour (KL_BREADCRUMB_PROGRESS). */
+	share = (control->value & KL_BREADCRUMB_PROGRESS_MASK) >> KL_BREADCRUMB_PROGRESS_SHIFT;
+	if (share > 1U) {
+		clip.x = control->x;
+		clip.y = control->y;
+		clip.width = (int)((unsigned long)control->width * (share - 1U) / 1000U);
+		clip.height = (int)control->height;
+		kl_canvas_clip_push(canvas, &clip);
+		kl_canvas_round(canvas, (float)control->x, (float)control->y, (float)control->width, (float)control->height,
+		    (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi), theme->selection);
+		kl_canvas_clip_pop(canvas);
+	}
 	kl_canvas_round_border(canvas, (float)control->x, (float)control->y, (float)control->width, (float)control->height,
 	    (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi), (float)window->dpi / 96.0f,
 	    window->editing && window->field.control == index ? theme->accent : theme->control_edge);

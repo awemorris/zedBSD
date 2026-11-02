@@ -36,6 +36,7 @@
 #define TITLEBAR_VERSION_SUGGEST	4U
 #define TITLEBAR_VERSION_BOXED	5U
 #define TITLEBAR_VERSION_RELOAD	6U
+#define TITLEBAR_VERSION_PROGRESS	7U
 
 /* The compositor's bounds of one titlebar (plan/ws070/titlebar-design.md section 2.2). */
 #define TITLEBAR_CONTROLS_MAX	64U
@@ -394,7 +395,9 @@ kl_titlebar_set_control_state(
 
 /*
  * Sets a progress control's share done, or a breadcrumb's look
- * (KL_BREADCRUMB_BOXED, since the protocol's version 5).
+ * (KL_BREADCRUMB_BOXED, since the protocol's version 5, with a box's load
+ * KL_BREADCRUMB_PROGRESS since version 7: an older compositor gets the
+ * box without it).
  */
 int
 kl_titlebar_set_control_value(
@@ -412,13 +415,16 @@ kl_titlebar_set_control_value(
 	if (entry == NULL)
 		return ENOENT;
 
-	/* A breadcrumb takes 0 or KL_BREADCRUMB_BOXED from a compositor that knows it (version 5, ws074-p229). */
+	/* A breadcrumb takes 0 or KL_BREADCRUMB_BOXED from a compositor that knows it (version 5, ws074-p229), a box with its load too (version 7). */
 	if (entry->role == KL_CONTROL_BREADCRUMB) {
-		if (value > KL_BREADCRUMB_BOXED)
+		if ((value & ~(KL_BREADCRUMB_BOXED | KL_BREADCRUMB_PROGRESS_MASK)) != 0U ||
+		    (value & KL_BREADCRUMB_PROGRESS_MASK) > KL_BREADCRUMB_PROGRESS(1000U))
 			return EINVAL;
 		version = wl_proxy_get_version((struct wl_proxy *)titlebar->proxy);
 		if (version < TITLEBAR_VERSION_BOXED)
 			return ENOTSUP;
+		if (version < TITLEBAR_VERSION_PROGRESS)
+			value &= KL_BREADCRUMB_BOXED;
 		kl_titlebar_v1_set_control_value(titlebar->proxy, id, value);
 		return 0;
 	}
@@ -787,6 +793,8 @@ titlebar_bind(
 		version = TITLEBAR_VERSION_BOXED;
 	if (search.version >= TITLEBAR_VERSION_RELOAD)
 		version = TITLEBAR_VERSION_RELOAD;
+	if (search.version >= TITLEBAR_VERSION_PROGRESS)
+		version = TITLEBAR_VERSION_PROGRESS;
 
 	/* The manager, bound when announced; the search ends. */
 	manager = keiui_global_bind(&search, &kl_titlebar_manager_v1_interface, version);

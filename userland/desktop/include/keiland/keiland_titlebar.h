@@ -93,6 +93,16 @@ struct kl_titlebar;
  */
 #define KL_BREADCRUMB_BOXED	1U
 
+/*
+ * KL_VERSION 107: a box's load (KL_BREADCRUMB_BOXED |
+ * KL_BREADCRUMB_PROGRESS(thousandths), 0 to 1000): its ground is filled
+ * from the left that far, as a browser's address field while a page
+ * loads.  Without it the box shows no load.
+ */
+#define KL_BREADCRUMB_PROGRESS_SHIFT	8U
+#define KL_BREADCRUMB_PROGRESS_MASK	(0x7ffU << KL_BREADCRUMB_PROGRESS_SHIFT)
+#define KL_BREADCRUMB_PROGRESS(thousandths)	((((unsigned)(thousandths)) + 1U) << KL_BREADCRUMB_PROGRESS_SHIFT)
+
 /* The tabs' flags, and the tab strip's options. */
 #define KL_TAB_ACTIVE		1U
 #define KL_TAB_ATTENTION		2U
@@ -192,8 +202,9 @@ int kl_titlebar_set_control_state(struct kl_titlebar *titlebar, uint32_t id, int
  * Sets a progress control's share done, in thousandths (KL_PROGRESS_UNKNOWN
  * when not known), or a breadcrumb's look: KL_BREADCRUMB_BOXED (KL_VERSION
  * 94) shows it always as a box, as a browser's address field, and 0 as its
- * parts.  ENOTSUP for a breadcrumb when the compositor is older
- * (kl_titlebar_v1 before version 5).
+ * parts; a box may add KL_BREADCRUMB_PROGRESS (KL_VERSION 107), which a
+ * compositor before version 7 does not show.  ENOTSUP for a breadcrumb
+ * when the compositor is older (kl_titlebar_v1 before version 5).
  */
 int kl_titlebar_set_control_value(struct kl_titlebar *titlebar, uint32_t id, unsigned value);
 
