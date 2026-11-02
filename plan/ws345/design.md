@@ -290,6 +290,9 @@ int browser_threads_set(const struct browser_threads *threads);
 - 確定は view の「frame の箱」（lock の下で frame の id ごとの最新の参照）に置き、`frame_wake` を呼ぶ。古い frame は描画の thread が放した時に消える。
 - 確定の後に木を書き換えてはいけない。今 `page_sticky_sync` は scroll の時に box を書き換えるので、scroll の変化は新しい確定（sticky の位置を display list に書いた物）にする（§11 の R5）。
 
+- p006 の実装（2026-11-02）: 確定した frame は `struct view_commit`（`view/front.h`。scene・scroll・大きさ・通し番号、atomic の参照の数）で、front の `latest` に一つ置く。scene（`struct paint_scene`、`paint/scene.c`）は頁の display list をそのまま取り（頁の list は空になり、次の paint で作り直す）、list の arena（glyph・gradient・filter の写し）、iframe の文書（`paint_frame`、参照の数を atomic に）を持ち、item の画像は arena に写した bitmap の記録にして pixel を `img_hold` で持つ（再び描く bitmap は `img_bitmap_writable` で写してから書く: video）。font は face ごとに `text_bytes`（変えない bytes、atomic の参照の数）を持ち、描画の thread は view の font の path で自分の `text_system` を開き、web の face をその bytes で開く（`text_system_use_face`、変われば glyph の cache と GPU の atlas を捨てる）。item は木を指さない（filter は build の時に arena へ写す）ので、確定の後に sticky などで木を書いても描画は変わらない（R5 の checksum の試験は要らない）。scroll だけの変化は同じ scene の新しい確定。描画の thread の状態（GPU の renderer・framebuffer・text・最後に描いた確定）は view の物で `render_lock` の下。
+- p006 で入れなかった物: (1) 確定は「present の一つ先まで」にせず、新しい確定が未描画の確定を置き換える（描画の thread が止まっても script の thread は待たない。rAF は present を待つので animation は止まる）。(2) iframe を子の更新として別に layout・確定する事（frame の item）は p009（iframe ごとの script の thread）に回す: 段 A では iframe の文書も top の script の thread にあり、親の list に入る今の形で確定は不変・自己完結になっている（Q1 に提案）。
+
 ### 6.2 描画の機会と rAF
 
 - 描画の thread は present の後に `browser_view_presented(view, serial)` を呼ぶ。libbrowser は top の script の thread（と各 iframe の thread）に「描画の機会」を積む。
