@@ -221,9 +221,10 @@ aes_field_square(
 	squared[6] = in[3] ^ in[5];
 	squared[7] = in[6] ^ in[7];
 
-	/* Copies the result, so that out may be in. */
+	/* Copies the result, so that out may be in, and wipes the local copy of the secret slices. */
 	for (i = 0; i < AES_SLICES; i++)
 		out[i] = squared[i];
+	cryc_wipe(squared, sizeof(squared));
 }
 
 /*

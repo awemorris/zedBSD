@@ -530,9 +530,14 @@ sslc_hs13_client_flight(
 		return sslc_hs13_fail(hs, 0, error);
 	error = sslc_msg_write_finished(verify_data, hs->schedule.size, message, sizeof(message), &written);
 	cryc_wipe(verify_data, sizeof(verify_data));
-	if (error != 0)
+	if (error != 0) {
+		cryc_wipe(message, sizeof(message));
 		return sslc_hs13_fail(hs, 0, error);
+	}
 	error = sslc_hs_queue_message(hs, actions, message, written);
+
+	/* The Finished is copied into the actions; the local copy of verify_data goes. */
+	cryc_wipe(message, sizeof(message));
 	if (error != 0)
 		return sslc_hs13_fail(hs, 0, error);
 

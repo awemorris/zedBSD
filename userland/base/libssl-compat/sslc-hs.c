@@ -335,6 +335,15 @@ sslc_hs_change_cipher_spec(
 		}
 		break;
 	case SSLC_HS_WAIT_SERVER_HELLO:
+		/*
+		 * Before the ServerHello the compatibility record is taken only
+		 * from a client that offered TLS 1.3 (RFC 8446 5); a TLS 1.2 client
+		 * takes a change_cipher_spec only before the Finished (RFC 5246
+		 * 7.1).
+		 */
+		if (hs->config->max_version != SSLC_TLS13)
+			return sslc_hs_fail(hs, SSLC_ALERT_UNEXPECTED_MESSAGE, EPROTO);
+		break;
 	case SSLC_HS13_WAIT_ENCRYPTED_EXTENSIONS:
 	case SSLC_HS13_WAIT_CERTIFICATE_OR_REQUEST:
 	case SSLC_HS13_WAIT_CERTIFICATE:

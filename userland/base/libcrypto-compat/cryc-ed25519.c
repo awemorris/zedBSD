@@ -21,6 +21,9 @@
 
 #include "cryc-ed25519.h"
 
+/* Hides a mask from the optimizer. */
+static uint32_t ed_opaque(uint32_t value);
+
 /* The number of 32-bit limbs of a scalar below 2^256. */
 #define ED_SCALAR_LIMBS	8U
 
@@ -743,7 +746,7 @@ ed_reduce_order(
 		}
 
 		/* A final borrow of 1 means value < L: keep value; otherwise take trial. */
-		mask = borrow - 1U;
+		mask = ed_opaque(borrow - 1U);
 		for (limb = 0; limb < ED_SCALAR_LIMBS; limb++)
 			value[limb] = (trial[limb] & mask) | (value[limb] & ~mask);
 	}
@@ -920,4 +923,20 @@ ed_hash(
 	if (message_size > 0U)
 		cryc_sha512_update(&hash, message, message_size);
 	cryc_sha512_final(&hash, out);
+}
+
+/*
+ * Returns value through a volatile object, so that the compiler cannot
+ * know which of the values of a mask (0 or 0xffffffff) it holds and turn
+ * a selection by it into a branch or a choice of load.
+ */
+static uint32_t
+ed_opaque(
+	uint32_t value)
+{
+	volatile uint32_t hidden;
+
+	/* Stored and loaded again. */
+	hidden = value;
+	return hidden;
 }

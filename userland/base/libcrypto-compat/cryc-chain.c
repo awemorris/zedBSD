@@ -98,7 +98,7 @@ static int store_system_distrusted(void *context, const uint8_t *der, size_t siz
 static int store_system_der(void *context, const uint8_t *der, size_t size);
 static int store_system_file(void *context, const char *path);
 static void chain_snapshot_take(struct chain_snapshot *snapshot, const struct chain_search *search);
-static int chain_is_distrusted(const struct cryc_store *store, const uint8_t *digest);
+static int chain_is_distrusted(const struct cryc_store *store, const uint8_t *digest, const struct cryc_x509 *cert);
 static int chain_same_der(const struct cryc_x509 *left, const struct cryc_x509 *right);
 static int chain_self_issued(const struct cryc_x509 *cert);
 static int chain_issued_by(const struct cryc_x509 *cert, const struct cryc_x509 *issuer);
@@ -195,8 +195,10 @@ cryc_store_add_der(
 }
 
 /*
- * Marks one certificate as distrusted, from its DER (only its SHA-256 is
- * kept; the DER need not parse).
+ * Marks one certificate as distrusted, from its DER: the mark is the
+ * SHA-256 of its tbsCertificate when the DER parses (what its issuer
+ * signed: a certificate whose signature is encoded otherwise, as an ECDSA
+ * (r, n - s) is, keeps the mark), else of the whole DER.
  */
 int
 cryc_store_add_distrusted(
@@ -206,6 +208,7 @@ cryc_store_add_distrusted(
 {
 	uint8_t digest[CRYC_SHA256_SIZE];
 	uint8_t (*grown)[CRYC_SHA256_SIZE];
+	struct cryc_x509 parsed;
 	size_t index;
 	size_t capacity;
 	int error;
@@ -214,8 +217,11 @@ cryc_store_add_distrusted(
 	if (store == NULL || der == NULL || size == 0U)
 		return EINVAL;
 
-	/* Takes the SHA-256 of the whole DER, which is what a mark is. */
-	error = cryc_hash_digest(CRYC_HASH_SHA256, der, size, digest);
+	/* The mark: the SHA-256 of the tbsCertificate, or of the whole DER when it does not parse. */
+	if (cryc_x509_parse(&parsed, der, size) == 0)
+		error = cryc_hash_digest(CRYC_HASH_SHA256, parsed.tbs, parsed.tbs_size, digest);
+	else
+		error = cryc_hash_digest(CRYC_HASH_SHA256, der, size, digest);
 	if (error != 0)
 		return error;
 
@@ -782,18 +788,30 @@ chain_snapshot_take(
 }
 
 /*
- * Reports whether a SHA-256 is one of the store's distrusted marks.
+ * Reports whether a certificate is marked distrusted: the SHA-256 of its
+ * tbsCertificate, or digest (that of its whole DER), is one of the
+ * store's marks.
  */
 static int
 chain_is_distrusted(
 	const struct cryc_store *store,
-	const uint8_t *digest)
+	const uint8_t *digest,
+	const struct cryc_x509 *cert)
 {
+	uint8_t tbs_digest[CRYC_SHA256_SIZE];
 	size_t index;
+	int have_tbs;
 
-	/* Looks the value up among the marks. */
+	/* Nothing to compare with. */
+	if (store->distrusted_count == 0U)
+		return 0;
+	have_tbs = cryc_hash_digest(CRYC_HASH_SHA256, cert->tbs, cert->tbs_size, tbs_digest) == 0;
+
+	/* Looks both values up among the marks. */
 	for (index = 0; index < store->distrusted_count; index++) {
 		if (memcmp(store->distrusted[index], digest, CRYC_SHA256_SIZE) == 0)
+			return 1;
+		if (have_tbs && memcmp(store->distrusted[index], tbs_digest, CRYC_SHA256_SIZE) == 0)
 			return 1;
 	}
 
@@ -1422,7 +1440,7 @@ chain_extend(
 
 			/* A path with a distrusted certificate needs no signature; any other has its signature verified now, which bounds the work of a hostile chain. */
 			rejected = chain_path_rejected(search);
-			candidate_distrusted = chain_is_distrusted(search->store, entry->digest);
+			candidate_distrusted = chain_is_distrusted(search->store, entry->digest, &entry->cert);
 			if (rejected == 0 && candidate_distrusted == 0) {
 				edge = chain_edge_code(search, top, &entry->cert);
 				UNUSED_PARAMETER(edge);
@@ -1455,7 +1473,7 @@ chain_extend(
 
 			/* Verifies the signature now, unless the path is already rejected. */
 			rejected = chain_path_rejected(search);
-			candidate_distrusted = chain_is_distrusted(search->store, search->peer_digest[peer_index]);
+			candidate_distrusted = chain_is_distrusted(search->store, search->peer_digest[peer_index], &search->peer[peer_index]);
 			if (rejected == 0 && candidate_distrusted == 0) {
 				edge = chain_edge_code(search, top, &search->peer[peer_index]);
 				UNUSED_PARAMETER(edge);
@@ -1538,7 +1556,7 @@ chain_search_prepare(
 
 		/* Puts the store's copy on the path as its only certificate. */
 		search->path[0].cert = &entry->cert;
-		search->path[0].distrusted = chain_is_distrusted(search->store, entry->digest);
+		search->path[0].distrusted = chain_is_distrusted(search->store, entry->digest, &entry->cert);
 		search->count = 1;
 		chain_complete(search);
 		break;
@@ -1546,7 +1564,7 @@ chain_search_prepare(
 
 	/* The leaf is the first certificate of the path the walk extends. */
 	search->path[0].cert = &search->peer[0];
-	search->path[0].distrusted = chain_is_distrusted(search->store, search->peer_digest[0]);
+	search->path[0].distrusted = chain_is_distrusted(search->store, search->peer_digest[0], &search->peer[0]);
 	search->count = 1;
 
 	/* Succeeded: the walk can start. */
