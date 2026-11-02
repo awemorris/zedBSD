@@ -29,8 +29,8 @@
 | ws344-p007 | VP8L の decoder（vp8l.c、run-fixtures lossless） | planned | p002, p005, p006 |
 | ws344-p008 | ALPH（alpha.c、run-fixtures alpha） | planned | p002, p007 |
 | ws344-p009 | bool decoder（bool.c） | cleared（2026-11-02 13:29 Q1、main で test-bool 8376 PASS）。実装済み・試験 PASS（Sonnet q1948-i01、2026-11-02。cleared は Q1） | p001 |
-| ws344-p010 | VP8 の表（vp8-tables.c、RFC の text と照合） | 実装済み・試験 PASS（Sonnet q1949-i01、2026-11-02。cleared は Q1） | p001 |
-| ws344-p011 | VP8 の frame header（vp8-header.c） | planned | p009, p010 |
+| ws344-p010 | VP8 の表（vp8-tables.c、RFC の text と照合） | cleared（2026-11-02 13:37 Q1、main で test-vp8_tables 37674 PASS）。実装済み・試験 PASS（Sonnet q1949-i01、2026-11-02。cleared は Q1） | p001 |
+| ws344-p011 | VP8 の frame header（vp8-header.c） | in-progress（2026-11-02 13:37 Sonnet q1951-i01） | p009, p010 |
 | ws344-p012 | VP8 の macroblock header（vp8-modes.c） | planned | p009, p010 |
 | ws344-p013 | VP8 の係数（vp8-tokens.c） | planned | p009, p010 |
 | ws344-p014 | VP8 の逆変換（vp8-idct.c） | planned | p001 |
