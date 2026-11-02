@@ -3,7 +3,7 @@
 # ws345-p008 style の thread
 
 - WS: [ws.md](../ws.md)。設計: [design.md](../design.md)。
-- 状態: cleared 候補（2026-11-02 P5 q1985-i01。WPT の reftest の見本は未実施、下の「未実施・残り」。判定は Q1）
+- 状態: in-progress（2026-11-02 P5 q1985-i01: 実装と試験は終わり、WPT の reftest の見本だけ未実施（下の「未実施・残り」）。cleared の判定は Q1）
 
 ## 目的
 
