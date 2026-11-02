@@ -2,13 +2,13 @@
 
 # WS346: libbrowser の style と layout の差分の再計算（layout cache）
 
-Status: planning
+Status: incomplete
 Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O1, O2
 Parent: [Master](../master.md)
 Owner: Q1
-Queue: [q2001](../queue.md)（p001 設計、Q1）
+Queue: [q2001](../queue.md)（p001 設計）→ [q2002](../queue.md)（p002 から、Q1 が直に実装）
 
 ## 目標
 
@@ -37,8 +37,8 @@ script が DOM を変えては幾何を読む頁（amazon.co.jp、store.google.c
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [ws346-p001](phase001/phase.md) | 設計（要求・外部設計・Phase の分割）[design.md](design.md) | in-progress | — |
-| [ws346-p002](phase002/phase.md) | DOM の変更の記録・切り替え・計数の土台（振る舞いは変えない） | planned | p001 |
+| [ws346-p001](phase001/phase.md) | 設計（要求・外部設計・Phase の分割）[design.md](design.md) | cleared（2026-11-03 06:40、ユーザーの決定 3 件） | — |
+| [ws346-p002](phase002/phase.md) | DOM の変更の記録・切り替え・計数の土台（振る舞いは変えない） | in-progress / q2002 | p001 |
 | [ws346-p003](phase003/phase.md) | 照合（verify）の道具と bench | planned | p002 |
 | [ws346-p004](phase004/phase.md) | selector の特徴の表と変更の影響の範囲（css） | planned | p002 |
 | [ws346-p005](phase005/phase.md) | style の無効化の統合（engine を保つ） | planned | p003, p004 |
@@ -47,7 +47,9 @@ script が DOM を変えては幾何を読む頁（amazon.co.jp、store.google.c
 | [ws346-p008](phase008/phase.md) | 統合の試験・速さの測定・既定の判定 | planned | p007 |
 | [ws346-p009](phase009/phase.md) | 規約の全文の見直し | planned | p008 |
 
+- 2026-11-03 06:40 ユーザーから、design.md §12 の 3 件（既定は目標を満たしたら on・live の頁を照合の mode で約 20 回・範囲の外は別の WS）を推しのとおりにしてよい、という趣旨の答えを受けた。
+- 2026-11-03 06:39 ユーザーから、定義した Phase をこのメインのエージェント（Sonnet 5.5）で実装し、サブエージェントは使わない、という趣旨の指示を受けた。
+
 ## Resume point
 
-p001 の設計の文書をユーザーが確かめる。未決（[design.md §12](design.md#12-未決ユーザーの判断)）に答えてもらった後、p002 から
-Sonnet（phase-runner-low）に順に渡す。
+p002 を実装中（Q1、main の checkout）。p002 → p003・p004 → p005 → p006 → p007 → p008 → p009 の順。

@@ -15,7 +15,7 @@
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
-| Q1 | [WS074](ws074/ws.md) p263・[WS346](ws346/ws.md) p001 | Web ブラウザ（libbrowser）、layout cache の設計 | p263 U1（amazon.co.jp）は host で直した。WS346 の設計 版 1 を書いた（[design.md](ws346/design.md)） | WS346 の未決の答えの後、p002 から Sonnet に渡す |
+| Q1 | [WS074](ws074/ws.md) p263・[WS346](ws346/ws.md) p002 | Web ブラウザ（libbrowser）、layout cache の実装 | p263 U1（amazon.co.jp）は host で直した。WS346 の設計 版 1 を書いた（[design.md](ws346/design.md)） | WS346 の未決の答えの後、p002 から Sonnet に渡す |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
@@ -85,21 +85,7 @@
 
 ## ユーザーの判断を待つ事
 
-| # | WS | 問い |
-| --- | --- | --- |
-| 1 | WS346 layout cache | 目標を満たしたら既定を on にしてよいか |
-| 2 | WS346 layout cache | live の頁（amazon ほか）を照合の mode で読む回数 |
-| 3 | WS346 layout cache | 範囲の外にした機能の再利用を別の WS にするか |
-
-**背景（3 件に共通）**: WS346 は、zedBSD のブラウザの engine（libbrowser、Windows 版・Linux 版も同じ）で、DOM が変わるたびに style と layout を頁の全体で作り直している今の形を、変わった所だけ計算し直す形にする WS（2026-11-03 ユーザーの指示、設計は Q1、実装は Sonnet）。amazon.co.jp では 1 回の読み込みで全体の作り直しが約 400 回起き、表示まで数分かかる。設計は [design.md](ws346/design.md)。用語: **style** は各 element の CSS の計算済みの値、**layout** は box の位置と大きさの計算、**照合（verify）の mode** は差分の計算と全体の作り直しを両方して結果を比べ、違いを報告する検査の動き（遅いが正しさを確かめられる）、**既定の mode** は環境変数を何も付けない時の動き。
-
-**1. 既定を on にしてよいか**: 実装が終わり（p008）、bench で 10 倍以上速く、照合で違いが 0 なら、既定を「差分の計算（on）」にする案。選択肢: (a) on にする（推し。違いが見つかっても `BROWSER_LAYOUT_CACHE=off` で今の動きに戻せる）、(b) しばらく off のままにして、ユーザーの UAT の後に on。決まらない間は off で実装を進める（p008 まで影響なし）。
-
-**2. live の頁を照合の mode で読む回数**: 正しさの確かめのため、p005・p007・p008 で amazon.co.jp・yahoo.co.jp・google.com・store.google.com を照合の mode で各 1〜2 回読む案（合わせて約 20 回）。amazon は前の件（WS074 p263）で bot の確認を通る形になったが、取得は最小にする方針。選択肢: (a) 案どおり（推し）、(b) amazon は除く、(c) 回数を指定する。決まらない間は live の頁を読まない（保存した頁と試験の組だけ）。
-
-**3. 範囲の外の機能**: anchor positioning（CSS で他の要素に位置を合わせる機能）・container query（親の大きさで style を変える機能）・sticky（scroll に貼り付く配置）などを含む部分は、外の状態に依るので、この WS では再利用せず毎回計算する（安全側）。選択肢: (a) この WS の後に別の WS で扱う（推し）、(b) この WS の中で扱う（Phase が 2〜3 増え、危険が増える）。決まらない間は (a) の形で設計のまま進める。
-
-- 2026-11-02 08:15 Latitude 5330 の NVMe の zedBSD を main d00e07108 の image（plan/tools/hw5330/config-5330.mk）に更新（ユーザーの指示）。5330-run --nvme-image PASS、画面 build/review/5330/q1-5330-main-d00e071.png。Debian に戻した。
+（無し）
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
@@ -114,6 +100,8 @@
 - Pi 5 の en0 の link: P3 の計測で、起動 3・4 の途中に en0 が 1000 Mbps から 100 Mbps に落ちて SSH が切れた。cable・switch の側か driver かは未調査。
 
 ## 決まった事
+
+- 2026-11-03 06:40 [WS346](ws346/ws.md): 目標を満たしたら既定の mode を on にする、live の頁（amazon・yahoo・google・store.google）を照合の mode で約 20 回読む、anchor・container query・sticky などの再利用は別の WS（ユーザー、[design.md §12](ws346/design.md)）。
 
 - 2026-11-02 15:00 WS345（ブラウザの thread の分け方）: 長く応答しない頁に「この頁は応答しません（待つ／止める）」の確かめを付ける（ユーザー）。P8 が Phase を足す。
 

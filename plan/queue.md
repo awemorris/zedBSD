@@ -752,4 +752,5 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q2001 / q2001-i01 | Q1（直に、main の checkout） | [ws346-p001](ws346/phase001/phase.md) 設計（要求・外部設計・Phase の分割） | plan/ws346/ の文書だけ。code は書かない（計測の一時の uprobe を除く） | in-progress（2026-11-03 06:3x design.md 版 1、未決 3 件のユーザーの答え待ち） |
+| q2001 / q2001-i01 | Q1（直に、main の checkout） | [ws346-p001](ws346/phase001/phase.md) 設計（要求・外部設計・Phase の分割） | plan/ws346/ の文書だけ。code は書かない（計測の一時の uprobe を除く） | cleared（2026-11-03 06:40、design.md 版 1、ユーザーが未決 3 件に答えた） |
+| q2002 / q2002-i01 | Q1（直に、main の checkout） | [ws346-p002](ws346/phase002/phase.md) DOM の変更の記録・mode と計数の土台 | 2026-11-03 06:39 ユーザーの指示（定義した Phase をこのメインで実装、サブエージェントなし）。振る舞いは変えない | in-progress |
