@@ -445,4 +445,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-405](bugs/BUG-405.md) | ブラウザ: Google の「Googleについて」の頁で画像が出ない | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
 | [BUG-406](bugs/BUG-406.md) | ブラウザ: 戻る button で数秒待たされる（cache で表示し、再取得は cache できない頁だけ） | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
 | [BUG-407](bugs/BUG-407.md) | ブラウザ: Google の検索の button（Google 検索・I'm Feeling Lucky・AI モード）が反応しない | fixed（2026-11-02 P8 q1924-i01、pointer-events・for await・script の top-level の遷移ほか。host と live の google.com で確かめた、本物の Windows は未実施。結果の頁は Google の JS の確認で reCAPTCHA になる＝別件） |
-| [BUG-409](bugs/BUG-409.md) | ld.so が DF_1_NODELETE を守らず dlclose で unload する | open（2026-11-02 10:21 Q1 が起票、P3） |
+| [BUG-409](bugs/BUG-409.md) | ld.so が DF_1_NODELETE を守らず dlclose で unload する | fixed（2026-11-02 P3 q1930-i01、DT_FLAGS_1 の DF_1_NODELETE と dlopen の RTLD_NODELETE で object を exit まで残す。QEMU amd64 で rtld-nodelete・rtld-many・TLS の試験が PASS、実機は未実施） |

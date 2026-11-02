@@ -92,10 +92,13 @@
 #define DT_PREINIT_ARRAY 32
 #define DT_PREINIT_ARRAYSZ 33
 #define DT_VERSYM 0x6ffffff0
+#define DT_FLAGS_1 0x6ffffffb
 #define DT_VERDEF 0x6ffffffc
 #define DT_VERDEFNUM 0x6ffffffd
 #define DT_VERNEED 0x6ffffffe
 #define DT_VERNEEDNUM 0x6fffffff
+
+#define DF_1_NODELETE 0x00000008U
 
 #define VER_DEF_CURRENT 1
 #define VER_NEED_CURRENT 1
