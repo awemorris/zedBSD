@@ -40,4 +40,5 @@ const char *kwpa_control_directory(void);
 int kwpa_socket_address(struct sockaddr_un *address, const char *path, socklen_t *length);
 int kwpa_wireless(const char *interface);
 int kwpa_link_usable(const struct kl_backend_network_link *link);
+void kwpa_link_inet6(struct kl_backend_network_link *link, const struct sockaddr *address, const struct sockaddr *netmask);
 #endif

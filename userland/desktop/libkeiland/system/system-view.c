@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 static void system_view_phone_mark(struct system_view *view, unsigned kind);
+static struct kl_network_link *system_view_pending_link(struct system_view *view, const char *name);
 
 /*
  * Starts a view with nothing told: the network not reached, the sound not
@@ -202,6 +203,53 @@ system_view_link_speed(
 		link->link_mbps = mbps;
 		return;
 	}
+}
+
+/*
+ * Adds one IPv6 address ("ADDRESS/LENGTH") to a pending interface of the
+ * details; past the room an interface has, or for a name not among them,
+ * it changes nothing.
+ */
+void
+system_view_link_inet6(
+	struct system_view *view,
+	const char *name,
+	const char *address)
+{
+	struct kl_network_link *link;
+
+	/* Only within details being received, for an empty address no address. */
+	if (!view->details_open || address[0] == '\0')
+		return;
+
+	/* The pending interface of that name, while it has room. */
+	link = system_view_pending_link(view, name);
+	if (link == NULL || link->inet6_count >= KL_NETWORK_INET6_COUNT)
+		return;
+	system_view_copy(link->inet6[link->inet6_count], sizeof(link->inet6[0]), address);
+	link->inet6_count++;
+}
+
+/*
+ * Gives a pending interface of the details the router of its IPv6
+ * default route; a name not among them changes nothing.
+ */
+void
+system_view_link_router6(
+	struct system_view *view,
+	const char *name,
+	const char *router)
+{
+	struct kl_network_link *link;
+
+	/* Only within details being received. */
+	if (!view->details_open)
+		return;
+
+	/* The pending interface of that name. */
+	link = system_view_pending_link(view, name);
+	if (link != NULL)
+		system_view_copy(link->router6, sizeof(link->router6), router);
 }
 
 /*
@@ -1656,4 +1704,24 @@ system_view_phone_mark(
 	memset(&event, 0, sizeof(event));
 	event.kind = kind;
 	system_view_phone_event(view, &event);
+}
+
+/* Finds the pending interface of a name among the details being received; NULL when none has it. */
+static struct kl_network_link *
+system_view_pending_link(
+	struct system_view *view,
+	const char *name)
+{
+	size_t index;
+	int differs;
+
+	/* Each pending interface. */
+	for (index = 0; index < view->links_pending_count; index++) {
+		differs = strcmp(view->links_pending[index].name, name);
+		if (differs == 0)
+			return &view->links_pending[index];
+	}
+
+	/* No interface has that name. */
+	return NULL;
 }

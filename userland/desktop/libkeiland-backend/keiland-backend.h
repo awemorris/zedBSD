@@ -331,6 +331,10 @@ int kl_backend_network_set_scanning(struct kl_backend_network *network, unsigned
 #define KL_BACKEND_NETWORK_DNS_MAX		4U
 #define KL_BACKEND_NETWORK_ADDRESS_MAX	16U
 
+/* An IPv6 address's text with its prefix length ("ADDRESS/LENGTH") and its NUL, and the most a link reports. */
+#define KL_BACKEND_NETWORK_INET6_MAX	50U
+#define KL_BACKEND_NETWORK_INET6_COUNT	4U
+
 /* The shortest and the longest key. */
 #define KL_BACKEND_NETWORK_KEY_MIN		8U
 #define KL_BACKEND_NETWORK_KEY_MAX		63U
@@ -339,8 +343,11 @@ int kl_backend_network_set_scanning(struct kl_backend_network *network, unsigned
  * One interface: its name, whether it is up and has its link, whether it
  * is the loopback, its IPv4 address and netmask (empty when it has none),
  * its hardware address and MTU, the bytes it has received and sent, its
- * link's speed in Mb/s (0 while not known, BUG-222), and whether it is a
- * radio (Wi-Fi), as the system tells it (BUG-284: not by its name).
+ * link's speed in Mb/s (0 while not known, BUG-222), whether it is a
+ * radio (Wi-Fi), as the system tells it (BUG-284: not by its name), its
+ * IPv6 addresses as "ADDRESS/LENGTH" (the global ones kept before the
+ * link-local ones when there are more than fit), and the router of its
+ * IPv6 default route (empty when none or not known).
  */
 struct kl_backend_network_link {
 	char name[KL_BACKEND_NETWORK_NAME_MAX];
@@ -357,6 +364,9 @@ struct kl_backend_network_link {
 	char router[KL_BACKEND_NETWORK_ADDRESS_MAX];
 	unsigned link_mbps;
 	unsigned wireless;
+	unsigned inet6_count;
+	char inet6[KL_BACKEND_NETWORK_INET6_COUNT][KL_BACKEND_NETWORK_INET6_MAX];
+	char router6[KL_BACKEND_NETWORK_INET6_MAX];
 };
 
 /*

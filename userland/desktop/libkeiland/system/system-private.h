@@ -382,6 +382,8 @@ void system_view_network_done(struct system_view *view);
 void system_view_link(struct system_view *view, const struct kl_network_link *link);
 void system_view_wired(struct system_view *view, const char *name, unsigned mode, const char *router);
 void system_view_link_speed(struct system_view *view, const char *name, unsigned mbps);
+void system_view_link_inet6(struct system_view *view, const char *name, const char *address);
+void system_view_link_router6(struct system_view *view, const char *name, const char *router);
 void system_view_dns(struct system_view *view, const char *address);
 void system_view_saved(struct system_view *view, const char *ssid);
 void system_view_details_done(struct system_view *view);

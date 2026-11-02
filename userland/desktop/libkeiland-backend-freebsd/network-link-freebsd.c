@@ -133,6 +133,9 @@ kl_backend_network_get_links(
 				if (printed == NULL)
 					links[index].netmask[0] = '\0';
 			}
+		} else if (address->ifa_addr->sa_family == AF_INET6) {
+			/* Each IPv6 address with its prefix length, the global ones first. */
+			kwpa_link_inet6(&links[index], address->ifa_addr, address->ifa_netmask);
 		}
 	}
 

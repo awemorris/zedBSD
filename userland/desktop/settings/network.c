@@ -482,6 +482,9 @@ network_take_details(
 	struct se_network *network;
 	char addresses[SE_NETWORK_LINKS][KL_NETWORK_ADDRESS_MAX];
 	unsigned modes[SE_NETWORK_LINKS];
+	unsigned inet6[SE_NETWORK_LINKS];
+	const char *first6;
+	const char *router6;
 	size_t old_count;
 	int differs;
 	int moved;
@@ -499,6 +502,7 @@ network_take_details(
 	for (index = 0; index < old_count; index++) {
 		(void)snprintf(addresses[index], sizeof(addresses[index]), "%s", network->links[index].address);
 		modes[index] = network->links[index].wired_mode;
+		inet6[index] = network->links[index].inet6_count;
 	}
 
 	/* The interfaces, as many as are kept. */
@@ -563,13 +567,19 @@ network_take_details(
 	network->sent_total = sent;
 	network->sampled_at = now;
 
-	/* The wired interfaces' configuration when it changed, the log line the tests read (ws089-p022). */
+	/* The wired interfaces' configuration when it or their count of IPv6 addresses changed, the log line the tests read (ws089-p022). */
 	for (index = 0; index < count; index++) {
 		if (network->links[index].wired_mode == KL_WIRED_UNKNOWN)
 			continue;
-		if (moved == 0 && index < old_count && modes[index] == network->links[index].wired_mode)
+		if (moved == 0 && index < old_count && modes[index] == network->links[index].wired_mode && inet6[index] == network->links[index].inet6_count)
 			continue;
-		se_log("NETWORK wired-link name=%s mode=%u address=%s router=%s", network->links[index].name, network->links[index].wired_mode, network->links[index].address, network->links[index].router);
+		first6 = "-";
+		if (network->links[index].inet6_count != 0U)
+			first6 = network->links[index].inet6[0];
+		router6 = "-";
+		if (network->links[index].router6[0] != '\0')
+			router6 = network->links[index].router6;
+		se_log("NETWORK wired-link name=%s mode=%u address=%s router=%s inet6=%u first6=%s router6=%s", network->links[index].name, network->links[index].wired_mode, network->links[index].address, network->links[index].router, network->links[index].inet6_count, first6, router6);
 	}
 
 	/* Succeeded: whether the interfaces moved. */

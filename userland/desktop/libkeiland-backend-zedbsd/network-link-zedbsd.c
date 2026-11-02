@@ -21,6 +21,11 @@
  * also says how it is configured, as net.conf names it (an interface it
  * does not name takes DHCP, as networkd's wired policy gives it), and the
  * router of the default route through it.
+ *
+ * Every interface also says its IPv6 addresses (SIOCGIFADDRS_IN6, as
+ * ifconfig lists them) and the router of its IPv6 default route
+ * (SIOCGRTENTRY_IN6, as route lists them), the routes networkd made from
+ * the Router Advertisements; both are queries anyone may make.
  */
 
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
@@ -54,6 +59,9 @@ static void link_address(const struct ifreq *request, char *text, size_t size);
 static void link_wired(int descriptor, struct kl_backend_network_link *links, size_t count);
 static unsigned link_wired_mode(const struct netconf *configuration, const char *name);
 static void link_router(int descriptor, struct kl_backend_network_link *link);
+static void link_inet6(int descriptor, struct kl_backend_network_link *link);
+static void link_inet6_add(struct kl_backend_network_link *link, const struct in6_ifaddr_entry *entry);
+static void link_routers6(int descriptor, struct kl_backend_network_link *links, size_t count);
 
 /*
  * Copies up to capacity interfaces and returns how many there are (0 when they cannot be read).
@@ -110,6 +118,9 @@ kl_backend_network_get_links(
 	if (filled > capacity)
 		filled = capacity;
 	link_wired(descriptor, links, filled);
+
+	/* The routers of their IPv6 default routes. */
+	link_routers6(descriptor, links, filled);
 
 	/* The list and the socket go. */
 	free(requests);
@@ -333,6 +344,9 @@ link_read(
 	if (error == 0 && link->address[0] != '\0')
 		link_address(&request, link->netmask, sizeof(link->netmask));
 
+	/* The IPv6 addresses. */
+	link_inet6(descriptor, link);
+
 	/* A radio: the kernel answers its Wi-Fi status, or says it has Wi-Fi but cannot answer now (BUG-284). */
 	link->wireless = link_wireless(descriptor, name);
 
@@ -539,5 +553,115 @@ link_router(
 		if (shown == NULL)
 			link->router[0] = '\0';
 		return;
+	}
+}
+
+/*
+ * Reads an interface's IPv6 addresses as "ADDRESS/LENGTH": the global ones
+ * first, then the link-local ones, as many as the link has room for; a
+ * duplicated one (that the interface does not use) is left out.
+ */
+static void
+link_inet6(
+	int descriptor,
+	struct kl_backend_network_link *link)
+{
+	struct in6_ifaddrs list;
+	const struct in6_ifaddr_entry *entry;
+	unsigned count;
+	unsigned index;
+	int local;
+	int pass;
+	int status;
+
+	/* The interface's addresses; one without IPv6 has none. */
+	memset(&list, 0, sizeof(list));
+	(void)snprintf(list.ifa_name, sizeof(list.ifa_name), "%s", link->name);
+	status = ioctl(descriptor, SIOCGIFADDRS_IN6, &list);
+	if (status != 0)
+		return;
+	count = list.ifa_count;
+	if (count > IN6_IFADDRS_MAX)
+		count = IN6_IFADDRS_MAX;
+
+	/* The global ones in the first pass, the link-local ones in the second. */
+	for (pass = 0; pass < 2; pass++) {
+		for (index = 0; index < count; index++) {
+			entry = &list.ifa_list[index];
+			local = IN6_IS_ADDR_LINKLOCAL(&entry->ife_addr) ? 1 : 0;
+			if (local != pass || (entry->ife_flags & IN6_IFF_DUPLICATED) != 0U)
+				continue;
+			link_inet6_add(link, entry);
+		}
+	}
+}
+
+/* Adds one IPv6 address to an interface as "ADDRESS/LENGTH", while it has room. */
+static void
+link_inet6_add(
+	struct kl_backend_network_link *link,
+	const struct in6_ifaddr_entry *entry)
+{
+	char text[INET6_ADDRSTRLEN];
+	const char *written;
+
+	/* No room left. */
+	if (link->inet6_count >= KL_BACKEND_NETWORK_INET6_COUNT)
+		return;
+
+	/* The address as text, and its prefix length. */
+	written = inet_ntop(AF_INET6, &entry->ife_addr, text, sizeof(text));
+	if (written == NULL)
+		return;
+	(void)snprintf(link->inet6[link->inet6_count], sizeof(link->inet6[0]), "%s/%u", text, (unsigned)entry->ife_prefixlen);
+	link->inet6_count++;
+}
+
+/*
+ * Gives each interface of the list the router of its IPv6 default route
+ * (none: empty), from one reading of the IPv6 routes.
+ */
+static void
+link_routers6(
+	int descriptor,
+	struct kl_backend_network_link *links,
+	size_t count)
+{
+	struct in6_rtentry route;
+	struct ifreq request;
+	const char *shown;
+	uint32_t ifindex;
+	size_t index;
+	int status;
+	int error;
+
+	/* Each route, until the kernel says ENOENT past the last. */
+	memset(&route, 0, sizeof(route));
+	for (route.rt6_index = 0;; route.rt6_index++) {
+		status = ioctl(descriptor, SIOCGRTENTRY_IN6, &route);
+		if (status != 0)
+			return;
+
+		/* Only a default route through a router. */
+		if (route.rt6_prefixlen != 0U || !IN6_IS_ADDR_UNSPECIFIED(&route.rt6_dst) || (route.rt6_flags & RTF_GATEWAY) == 0U)
+			continue;
+
+		/* The interface it goes through, the first default route of each kept. */
+		for (index = 0; index < count; index++) {
+			if (links[index].router6[0] != '\0')
+				continue;
+			error = link_request(descriptor, links[index].name, SIOCGIFINDEX, &request);
+			if (error != 0)
+				continue;
+			ifindex = (uint32_t)request.ifr_ifindex;
+			if (ifindex != route.rt6_ifindex)
+				continue;
+
+			/* Its router, as text. */
+			shown = inet_ntop(AF_INET6, &route.rt6_gateway, links[index].router6, sizeof(links[index].router6));
+			if (shown == NULL)
+				links[index].router6[0] = '\0';
+			break;
+		}
 	}
 }

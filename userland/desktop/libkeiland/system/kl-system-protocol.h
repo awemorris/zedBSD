@@ -75,6 +75,13 @@
  *   event  10 link_speed(string name, uint mbps)  since version 12 (BUG-222): after an interface's link in the
  *                                                              details, the speed its driver last heard, in Mb/s
  *                                                              (not sent while it is not known)
+ *   event  11 link_inet6(string name, string address)  since version 35: after an interface's link in the
+ *                                                              details, one of its IPv6 addresses as
+ *                                                              "ADDRESS/LENGTH" (one event each, the global ones
+ *                                                              first)
+ *   event  12 link_router6(string name, string router)  since version 35: after an interface's link in the
+ *                                                              details, the router of its IPv6 default route
+ *                                                              (not sent when it has none)
  *   One request of the network is outstanding at a time, the system bar's
  *   included; another is answered busy.  query_details is no request of
  *   the daemon's: every object that asked hears the next reading.  A join
@@ -343,7 +350,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION 34U
+#define KL_SYSTEM_MANAGER_VERSION 35U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -899,10 +906,13 @@
 #define KL_SYSTEM_NETWORK_EVENT_RESULT		8U
 #define KL_SYSTEM_NETWORK_EVENT_WIRED		9U
 #define KL_SYSTEM_NETWORK_EVENT_LINK_SPEED	10U
+#define KL_SYSTEM_NETWORK_EVENT_LINK_INET6	11U
+#define KL_SYSTEM_NETWORK_EVENT_LINK_ROUTER6	12U
 
-/* Since when the network has configure_wired and wired (ws089-p022), and link_speed (BUG-222). */
+/* Since when the network has configure_wired and wired (ws089-p022), link_speed (BUG-222), and link_inet6 and link_router6. */
 #define KL_SYSTEM_NETWORK_SINCE_WIRED		6U
 #define KL_SYSTEM_NETWORK_SINCE_LINK_SPEED	12U
+#define KL_SYSTEM_NETWORK_SINCE_INET6		35U
 
 /* How a wired interface is configured (configure_wired's mode and wired's). */
 #define KL_SYSTEM_WIRED_UNKNOWN			0U

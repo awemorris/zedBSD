@@ -123,6 +123,8 @@ struct system_network_listener {
 	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
 	void (*wired)(void *data, struct wl_proxy *proxy, const char *name, uint32_t mode, const char *router);
 	void (*link_speed)(void *data, struct wl_proxy *proxy, const char *name, uint32_t mbps);
+	void (*link_inet6)(void *data, struct wl_proxy *proxy, const char *name, const char *address);
+	void (*link_router6)(void *data, struct wl_proxy *proxy, const char *name, const char *router);
 };
 
 /* The listener of kl_system_audio_v1's events, in their order. */
@@ -303,6 +305,8 @@ static void system_link(void *data, struct wl_proxy *proxy, const char *name, ui
 static void system_dns(void *data, struct wl_proxy *proxy, const char *address);
 static void system_wired(void *data, struct wl_proxy *proxy, const char *name, uint32_t mode, const char *router);
 static void system_link_speed(void *data, struct wl_proxy *proxy, const char *name, uint32_t mbps);
+static void system_link_inet6(void *data, struct wl_proxy *proxy, const char *name, const char *address);
+static void system_link_router6(void *data, struct wl_proxy *proxy, const char *name, const char *router);
 static void system_saved_network(void *data, struct wl_proxy *proxy, const char *ssid);
 static void system_details_done(void *data, struct wl_proxy *proxy);
 static void system_network_done(void *data, struct wl_proxy *proxy, uint32_t serial);
@@ -358,7 +362,9 @@ static const struct system_network_listener system_network_listener = {
 	system_network_done,
 	system_result,
 	system_wired,
-	system_link_speed
+	system_link_speed,
+	system_link_inet6,
+	system_link_router6
 };
 
 /* The sound object's callbacks. */
@@ -4143,6 +4149,40 @@ system_link_speed(
 	/* Given to the pending interface of that name. */
 	system = data;
 	system_view_link_speed(&system->view, name, mbps);
+}
+
+/* Gives an interface of the details one of its IPv6 addresses ("ADDRESS/LENGTH"). */
+static void
+system_link_inet6(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *name,
+	const char *address)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* Given to the pending interface of that name. */
+	system = data;
+	system_view_link_inet6(&system->view, name, address);
+}
+
+/* Gives an interface of the details the router of its IPv6 default route. */
+static void
+system_link_router6(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *name,
+	const char *router)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* Given to the pending interface of that name. */
+	system = data;
+	system_view_link_router6(&system->view, name, router);
 }
 
 /* Keeps Remote Login's state until its done (ws089-p025). */

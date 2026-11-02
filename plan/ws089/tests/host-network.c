@@ -67,8 +67,15 @@ host_link(
 	radio = strncmp(name, "wlan", 4U);
 	if (loopback != 0 && radio != 0) {
 		link->wired_mode = KL_WIRED_DHCP;
-		if (address[0] != '\0')
+		if (address[0] != '\0') {
 			(void)snprintf(link->router, sizeof(link->router), "%s", "192.168.1.1");
+
+			/* Its IPv6 from a Router Advertisement: a global and a link-local address, and the router. */
+			(void)snprintf(link->inet6[0], sizeof(link->inet6[0]), "%s", "2001:db8:1:0:5054:ff:fe00:11/64");
+			(void)snprintf(link->inet6[1], sizeof(link->inet6[1]), "%s", "fe80::5054:ff:fe00:11/64");
+			link->inet6_count = 2U;
+			(void)snprintf(link->router6, sizeof(link->router6), "%s", "fe80::1");
+		}
 	}
 
 	/* The counters, and the interface counted. */
@@ -151,6 +158,8 @@ host_network_fake(
 		network->links[1].address[0] = '\0';
 		network->links[1].netmask[0] = '\0';
 		network->links[1].router[0] = '\0';
+		network->links[1].inet6_count = 0U;
+		network->links[1].router6[0] = '\0';
 		network->links[1].link_mbps = 0U;
 		network->state.connected = 0;
 		network->state.kind = KL_NETWORK_NONE;

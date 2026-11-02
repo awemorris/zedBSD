@@ -40,6 +40,10 @@ struct wl_display;
 #define KL_NETWORK_NAME_MAX	16U
 #define KL_NETWORK_ADDRESS_MAX	16U
 
+/* The longest IPv6 address with its prefix length ("ADDRESS/LENGTH") and its NUL, and the most a link carries. */
+#define KL_NETWORK_INET6_MAX	50U
+#define KL_NETWORK_INET6_COUNT	4U
+
 /* The most networks a scan, interfaces, DNS servers and saved networks a kl_system keeps. */
 #define KL_NETWORK_SCAN_MAX	24U
 #define KL_NETWORK_LINKS_MAX	16U
@@ -159,8 +163,11 @@ struct kl_network_ap {
  * wired one (KL_VERSION 29) how it is configured (KL_WIRED_*, unknown for
  * any other or an older compositor) and the router it was given;
  * (KL_VERSION 39) its link's speed in Mb/s, 0 while it is not known (or
- * from an older compositor); and (KL_VERSION 76) whether it is a radio
- * (Wi-Fi), as the system tells it (0 from an older compositor).
+ * from an older compositor); (KL_VERSION 76) whether it is a radio
+ * (Wi-Fi), as the system tells it (0 from an older compositor); and
+ * (KL_VERSION 108) its IPv6 addresses, each "ADDRESS/LENGTH", the global
+ * ones before the link-local ones, and the router of its IPv6 default
+ * route (none and empty from an older compositor).
  */
 struct kl_network_link {
 	char name[KL_NETWORK_NAME_MAX];
@@ -177,6 +184,9 @@ struct kl_network_link {
 	char router[KL_NETWORK_ADDRESS_MAX];
 	unsigned link_mbps;
 	unsigned wireless;
+	unsigned inet6_count;
+	char inet6[KL_NETWORK_INET6_COUNT][KL_NETWORK_INET6_MAX];
+	char router6[KL_NETWORK_INET6_MAX];
 };
 
 /* How a wired interface is configured (KL_VERSION 29). */

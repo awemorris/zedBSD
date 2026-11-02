@@ -6,19 +6,20 @@
  */
 
 /*
- * The Ethernet page's IPv4 card of each wired interface (ws089-p022): how
- * it is configured (DHCP or a static address) and its router, the IPv6
- * that the system does not have yet, and Edit; while edited, the choice of DHCP
- * or a static address, the address, subnet mask and router of a static
- * one, two DNS servers, and Apply and Cancel (wired.c checks and sends
- * them).  "Use DHCP" puts a static interface back on DHCP at once.
+ * The Ethernet page's IP card of each wired interface (ws089-p022): how
+ * it is configured (DHCP or a static address) and its router, its IPv6
+ * addresses (the global ones, then the link-local ones, each with its
+ * prefix length, or "None") and the router of its IPv6 default route, and
+ * Edit; while edited, the choice of DHCP or a static address, the address,
+ * subnet mask and router of a static one, two DNS servers, the IPv6 as
+ * before (the network gives it by itself; it is not edited here), and Apply
+ * and Cancel (wired.c checks and sends them).  "Use DHCP" puts a static
+ * interface back on DHCP at once.
  *
  * Tab moves between the fields that count, Enter applies, Esc cancels.
  */
 
 #include "settings.h"
-
-#include "include/kern/os-name.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -40,16 +41,22 @@
 #define WIRED_TEXT_ROW		15U
 #define WIRED_TEXT_SUB		13U
 
+/* The height of an IPv6 line of the edited card. */
+#define WIRED_INET6_ROW		40
+
 /* The fields' labels and what an empty one is for. */
-static const char *const wired_labels[SE_WIRED_FIELDS] = { "IPv4 address", "Subnet mask", "Router", "DNS server 1", "DNS server 2" };
+static const char *const wired_labels[SE_WIRED_FIELDS] = { "IPv4 address", "Subnet mask", "IPv4 router", "DNS server 1", "DNS server 2" };
 static const char *const wired_placeholders[SE_WIRED_FIELDS] = { "192.168.1.20", "255.255.255.0", "Optional", "From DHCP when empty", "Optional" };
 
 static int wired_counts(const struct se_wired *wired, int index);
+static int wired_inet6_lines(const struct kl_network_link *link);
+static void wired_inet6_line(struct se_app *app, struct kl_canvas *canvas, int x, int y, int width, const char *label, const char *value);
+static const char *wired_inet6_label(const char *address);
 static void wired_field_draw(struct se_app *app, struct kl_canvas *canvas, int index, int x, int y, int width);
 static const char *wired_mode_text(unsigned mode);
 
 /*
- * Draws the IPv4 card of a wired interface, read-only or edited.  Returns
+ * Draws the IP card of a wired interface, read-only or edited.  Returns
  * the edge below it.
  */
 int
@@ -65,6 +72,7 @@ se_wired_card(
 	char title[48];
 	const char *router;
 	kl_color ink;
+	unsigned address;
 	size_t which;
 	int editing;
 	int differs;
@@ -78,19 +86,28 @@ se_wired_card(
 	wired = &app->wired;
 	differs = strcmp(wired->interface, link->name);
 	editing = wired->interface[0] != '\0' && differs == 0;
-	(void)snprintf(title, sizeof(title), "IPv4 (%s)", link->name);
+	(void)snprintf(title, sizeof(title), "IP (%s)", link->name);
 	which = (size_t)(link - app->network.links);
 
 	/* Not edited: how it is configured, its router, the IPv6, and Edit (Use DHCP for a static one). */
 	if (!editing) {
-		height = se_card_height(3, 1) + 56;
+		height = se_card_height(2 + wired_inet6_lines(link), 1) + 56;
 		y = se_card_begin(app, canvas, x, top, width, height, title, NULL);
-		y = se_row_value(app, canvas, x, y, width, "Configured by", wired_mode_text(link->wired_mode), 0);
+		y = se_row_value(app, canvas, x, y, width, "IPv4 configured by", wired_mode_text(link->wired_mode), 0);
 		router = "-";
 		if (link->router[0] != '\0')
 			router = link->router;
-		y = se_row_value(app, canvas, x, y, width, "Router", router, 0);
-		y = se_row_value(app, canvas, x, y, width, "IPv6", "Not available on " ZEDBSD_OS_NAME " yet", 1);
+		y = se_row_value(app, canvas, x, y, width, "IPv4 router", router, 0);
+
+		/* Each IPv6 address (or none), and the IPv6 router. */
+		if (link->inet6_count == 0U)
+			y = se_row_value(app, canvas, x, y, width, "IPv6 address", "None", 0);
+		for (address = 0U; address < link->inet6_count && address < KL_NETWORK_INET6_COUNT; address++)
+			y = se_row_value(app, canvas, x, y, width, wired_inet6_label(link->inet6[address]), link->inet6[address], 0);
+		router = "-";
+		if (link->router6[0] != '\0')
+			router = link->router6;
+		y = se_row_value(app, canvas, x, y, width, "IPv6 router", router, 1);
 		right = x + width - WIRED_PAD;
 		button = se_button_width(app, "Edit");
 		(void)se_button_draw(app, canvas, right - button, y + 10, "Edit", 0, app->network.live, WIRED_EDIT_FIRST + (int)which);
@@ -100,7 +117,7 @@ se_wired_card(
 	}
 
 	/* Edited: the choice, the fields, the IPv6, the buttons and the message. */
-	height = 64 + 56 + SE_WIRED_FIELDS * WIRED_ROW + 50 + 60 + WIRED_MESSAGE_LINE;
+	height = 64 + 56 + SE_WIRED_FIELDS * WIRED_ROW + wired_inet6_lines(link) * WIRED_INET6_ROW + 10 + 60 + WIRED_MESSAGE_LINE;
 	y = se_card_begin(app, canvas, x, top, width, height, title, "DHCP gives the address by itself; a static one is typed here.");
 
 	/* DHCP or a static address, the chosen one in the accent. */
@@ -116,10 +133,20 @@ se_wired_card(
 		y += WIRED_ROW;
 	}
 
-	/* The IPv6, which the system does not have yet, faint. */
-	(void)kl_text_draw_fit(app->text, canvas, x + WIRED_PAD, kl_text_center(WIRED_TEXT_ROW, y + 8, 36), "IPv6", WIRED_TEXT_ROW, 0, WIRED_FIELD_X - 30, SE_COLOR_TEXT_FAINT);
-	(void)kl_text_draw_fit(app->text, canvas, x + WIRED_FIELD_X, kl_text_center(WIRED_TEXT_ROW, y + 8, 36), "Not available on " ZEDBSD_OS_NAME " yet", WIRED_TEXT_ROW, 0, width - WIRED_FIELD_X - WIRED_PAD, SE_COLOR_TEXT_FAINT);
-	y += 50;
+	/* The IPv6 as the card shows it unedited, its labels faint: the network gives it, it is not edited here. */
+	if (link->inet6_count == 0U) {
+		wired_inet6_line(app, canvas, x, y, width, "IPv6 address", "None");
+		y += WIRED_INET6_ROW;
+	}
+	for (address = 0U; address < link->inet6_count && address < KL_NETWORK_INET6_COUNT; address++) {
+		wired_inet6_line(app, canvas, x, y, width, wired_inet6_label(link->inet6[address]), link->inet6[address]);
+		y += WIRED_INET6_ROW;
+	}
+	router = "-";
+	if (link->router6[0] != '\0')
+		router = link->router6;
+	wired_inet6_line(app, canvas, x, y, width, "IPv6 router", router);
+	y += WIRED_INET6_ROW + 10;
 
 	/* Apply and Cancel at the right. */
 	right = x + width - WIRED_PAD;
@@ -140,7 +167,7 @@ se_wired_card(
 }
 
 /*
- * Carries out a click on a control of the Ethernet page: the IPv4 cards'
+ * Carries out a click on a control of the Ethernet page: the IP cards'
  * own, or the network pages' (se_network_press).
  */
 void
@@ -336,6 +363,65 @@ wired_field_draw(
 	if (wired->focus == index)
 		focused = 1;
 	(void)se_field_draw(app, canvas, field, &box, wired_placeholders[index], SE_FIELD_PLAIN, focused);
+}
+
+/* Counts the IPv6 lines of a card: each address (one saying "None" without any) and the router. */
+static int
+wired_inet6_lines(
+	const struct kl_network_link *link)
+{
+	unsigned count;
+
+	/* The addresses, at least one line. */
+	count = link->inet6_count;
+	if (count > KL_NETWORK_INET6_COUNT)
+		count = KL_NETWORK_INET6_COUNT;
+	if (count == 0U)
+		count = 1U;
+
+	/* Succeeded: and the router's line. */
+	return (int)count + 1;
+}
+
+/* Draws one IPv6 line of the edited card: its label faint, its value beside the fields' boxes. */
+static void
+wired_inet6_line(
+	struct se_app *app,
+	struct kl_canvas *canvas,
+	int x,
+	int y,
+	int width,
+	const char *label,
+	const char *value)
+{
+	int line;
+
+	/* The label and the value on the line's middle. */
+	line = kl_text_center(WIRED_TEXT_ROW, y + 2, 36);
+	(void)kl_text_draw_fit(app->text, canvas, x + WIRED_PAD, line, label, WIRED_TEXT_ROW, 0, WIRED_FIELD_X - 30, SE_COLOR_TEXT_FAINT);
+	(void)kl_text_draw_fit(app->text, canvas, x + WIRED_FIELD_X, line, value, WIRED_TEXT_ROW, 0, width - WIRED_FIELD_X - WIRED_PAD, SE_COLOR_TEXT_SECONDARY);
+}
+
+/* Names an IPv6 address's kind: a link-local one (fe80::/10) or one beyond the link. */
+static const char *
+wired_inet6_label(
+	const char *address)
+{
+	const char *third;
+	int local;
+
+	/* fe80 to febf in the first group (four digits, lower case as the address is written). */
+	local = 0;
+	if (address[0] == 'f' && address[1] == 'e' && address[2] != '\0' && address[3] != ':' && address[3] != '\0') {
+		third = strchr("89ab", address[2]);
+		if (third != NULL)
+			local = 1;
+	}
+	if (local)
+		return "IPv6 link-local";
+
+	/* Succeeded: an address beyond the link. */
+	return "IPv6 address";
 }
 
 /* Says how a wired interface is configured, in words. */

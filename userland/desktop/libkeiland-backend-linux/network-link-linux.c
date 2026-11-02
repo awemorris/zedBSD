@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 static uint64_t link_counter(const char *interface, const char *field);
+static void link_routers6(struct kl_backend_network_link *links, size_t count);
 
 /*
  * Merges address and hardware records into bounded interface snapshots.
@@ -117,6 +118,9 @@ kl_backend_network_get_links(
 				if (printed == NULL)
 					links[index].netmask[0] = '\0';
 			}
+		} else if (address->ifa_addr->sa_family == AF_INET6) {
+			/* Each IPv6 address with its prefix length, the global ones first. */
+			kwpa_link_inet6(&links[index], address->ifa_addr, address->ifa_netmask);
 		} else if (address->ifa_addr->sa_family == AF_PACKET) {
 			/* Copies only complete Ethernet hardware addresses. */
 			hardware = (struct sockaddr_ll *)address->ifa_addr;
@@ -154,6 +158,9 @@ kl_backend_network_get_links(
 	/* The optional inquiry socket is the only retained kernel resource. */
 	if (descriptor >= 0)
 		(void)close(descriptor);
+
+	/* The routers of the IPv6 default routes. */
+	link_routers6(links, count);
 
 	/* Succeeded: every reported entry belongs to the caller's capacity. */
 	return count;
@@ -318,4 +325,77 @@ link_counter(
 
 	/* Succeeded: the kernel's counter is copied without retaining its file. */
 	return (uint64_t)bytes;
+}
+
+/*
+ * Gives each interface the router of its IPv6 default route from the
+ * kernel's table of IPv6 routes (/proc/net/ipv6_route: the destination and
+ * its length, the source and its length, the next hop, the metric, the
+ * reference and use counts, the RTF_* flags and the interface, the
+ * addresses in 32 hexadecimal digits); none leaves it empty.
+ */
+static void
+link_routers6(
+	struct kl_backend_network_link *links,
+	size_t count)
+{
+	char destination[33];
+	char hop[33];
+	char name[IFNAMSIZ];
+	char line[256];
+	struct in6_addr router;
+	const char *shown;
+	unsigned prefix;
+	unsigned flags;
+	unsigned value;
+	unsigned byte;
+	size_t index;
+	FILE *file;
+	char *read_line;
+	int fields;
+	int same;
+
+	/* No table: no router known. */
+	file = fopen("/proc/net/ipv6_route", "r");
+	if (file == NULL)
+		return;
+
+	/* Each route. */
+	for (;;) {
+		read_line = fgets(line, sizeof(line), file);
+		if (read_line == NULL)
+			break;
+		fields = sscanf(line, "%32s %x %*32s %*x %32s %*x %*x %*x %x %15s", destination, &prefix, hop, &flags, name);
+		if (fields != 5)
+			continue;
+
+		/* Only a default route through a router (RTF_GATEWAY). */
+		same = strcmp(destination, "00000000000000000000000000000000");
+		if (same != 0 || prefix != 0U || (flags & 0x2U) == 0U || strlen(hop) != 32U)
+			continue;
+
+		/* The router's address from its digits. */
+		for (byte = 0U; byte < 16U; byte++) {
+			fields = sscanf(&hop[byte * 2U], "%2x", &value);
+			if (fields != 1)
+				break;
+			router.s6_addr[byte] = (unsigned char)value;
+		}
+		if (byte != 16U)
+			continue;
+
+		/* The interface it goes through, the first default route of each kept. */
+		for (index = 0; index < count; index++) {
+			same = strcmp(links[index].name, name);
+			if (same != 0 || links[index].router6[0] != '\0')
+				continue;
+			shown = inet_ntop(AF_INET6, &router, links[index].router6, sizeof(links[index].router6));
+			if (shown == NULL)
+				links[index].router6[0] = '\0';
+			break;
+		}
+	}
+
+	/* The table goes. */
+	(void)fclose(file);
 }
