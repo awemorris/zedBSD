@@ -449,12 +449,29 @@ test_alphabet_range(void)
 	struct webpc_prefix_code code;
 	struct webpc_lbits reader;
 	uint8_t bytes[4] = { 0, 0, 0, 0 };
+	uint8_t cl[19];
 
 	/* Zero and one past the largest alphabet. */
 	webpc_prefix_pool_init(&pool, 1000);
 	webpc_lbits_init(&reader, bytes, sizeof(bytes));
 	CHECK(webpc_vp8l_read_code(&reader, &pool, 0, &code) == EINVAL);
 	CHECK(webpc_vp8l_read_code(&reader, &pool, WEBPC_PREFIX_ALPHABET_MAX + 1U, &code) == EINVAL);
+	CHECK(pool.count == 0U);
+
+	/*
+	 * A normal code whose length code is a single symbol reads no more than
+	 * its header, so it would be read in full for any alphabet: the size
+	 * above the largest is refused before the lengths are laid out.
+	 */
+	memset(cl, 0, sizeof(cl));
+	cl[8] = 1;
+	lbitwriter_init(&stream);
+	put_normal(cl, 12, 0, 0, tokens, 0);
+	put_padding();
+	webpc_lbits_init(&reader, stream.bytes, lbitwriter_size(&stream));
+	CHECK(webpc_vp8l_read_code(&reader, &pool, WEBPC_PREFIX_ALPHABET_MAX + 1U, &code) == EINVAL);
+	webpc_lbits_init(&reader, stream.bytes, lbitwriter_size(&stream));
+	CHECK(webpc_vp8l_read_code(&reader, &pool, 0, &code) == EINVAL);
 	CHECK(pool.count == 0U);
 	webpc_prefix_pool_release(&pool);
 }
@@ -705,6 +722,29 @@ test_normal_repeats(void)
 	lbitwriter_init(&stream);
 	put_normal(cl, 19, 0, 0, tokens, 3);
 	check_stream_valid(7, expected);
+
+	/*
+	 * Tokens 2, 0, 16 (3 repeats): a literal 0 does not change the length a
+	 * 16 repeats either, so the lengths are 2 0 2 2 2 (complete).
+	 */
+	memset(cl, 0, sizeof(cl));
+	cl[2] = 1;
+	cl[0] = 2;
+	cl[16] = 2;
+	tokens[0].symbol = 2;
+	tokens[0].extra = 0;
+	tokens[1].symbol = 0;
+	tokens[1].extra = 0;
+	tokens[2].symbol = 16;
+	tokens[2].extra = 0;
+	set_expected(5, 0, 0, 0, 0);
+	expected[0] = 2;
+	expected[2] = 2;
+	expected[3] = 2;
+	expected[4] = 2;
+	lbitwriter_init(&stream);
+	put_normal(cl, 9, 0, 0, tokens, 3);
+	check_stream_valid(5, expected);
 
 	/* Tokens 1, 18 (27: 38 zeros), 1: lengths 1, 38 zeros, 1 for the 40 symbols of the distance alphabet. */
 	memset(cl, 0, sizeof(cl));
@@ -1011,8 +1051,9 @@ write_two_length_code(
 /*
  * Appends one group of five codes for cache_bits to the stream and records
  * each code's lengths and alphabet: green a normal code with two lengths, red
- * a simple code of two symbols, blue a simple code of one symbol, alpha a
- * normal code of 256 lengths of 8, distance a simple code of two symbols.
+ * a normal code of 256 lengths of 8, blue a simple code of one symbol, alpha
+ * a normal code of 256 lengths of 8, distance a normal code with two
+ * lengths.
  */
 static void
 write_group(
@@ -1038,11 +1079,13 @@ write_group(
 		write_two_length_code(green_size, 11, 1768);
 	memcpy(group_lengths[0], expected, sizeof(expected));
 
-	/* Red: symbols 10 and 20. */
-	put_simple(2, 1, 10, 20);
+	/* Red: 256 lengths of 8 from a code length code of one symbol. */
+	memset(cl, 0, sizeof(cl));
+	cl[8] = 1;
+	fill_tokens(0, 256, 8, 0);
+	put_normal(cl, 12, 0, 0, tokens, 256);
 	memset(group_lengths[1], 0, WEBPC_PREFIX_ALPHABET_MAX);
-	group_lengths[1][10] = 1;
-	group_lengths[1][20] = 1;
+	memset(group_lengths[1], 8, 256);
 
 	/* Blue: the one symbol 33. */
 	put_simple(1, 1, 33, 0);
@@ -1057,11 +1100,9 @@ write_group(
 	memset(group_lengths[3], 0, WEBPC_PREFIX_ALPHABET_MAX);
 	memset(group_lengths[3], 8, 256);
 
-	/* Distance: symbols 0 and 39. */
-	put_simple(2, 1, 0, 39);
-	memset(group_lengths[4], 0, WEBPC_PREFIX_ALPHABET_MAX);
-	group_lengths[4][0] = 1;
-	group_lengths[4][39] = 1;
+	/* Distance: 24 lengths of 5 and 16 of 6, a complete code of 40 symbols. */
+	write_two_length_code(40, 5, 24);
+	memcpy(group_lengths[4], expected, sizeof(expected));
 }
 
 /* The group for cache_bits 0, 1 and 11: the five codes in their order and the alphabets of each. */

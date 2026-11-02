@@ -2,7 +2,7 @@
 
 # ws344-p004 VP8L の code の読み（vp8l-codes.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p003。
 - 目的: simple と normal の code length code を読み、prefix code と 5 つの group を作る。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -67,4 +67,10 @@ git diff --check
 
 ## 結果
 
-（未着手）
+- 2026-11-02 13:47（host の `date`）、Sonnet 5.5（q1950-i01）。作った物: `userland/desktop/libwebp-compat/vp8l-codes.c`、`plan/ws344/tests/unit/test-vp8l_codes.c`。header・道具・他の module は変えていない。
+- 確かめ（最後の行を読んだ）: `sh plan/ws344/tests/run-unit.sh vp8l_codes` → `test-vp8l_codes: PASS (95925 checks)`、`run-unit: PASS`。`run-unit.sh all` → 6 test 全部 PASS（bool 8376・common 32・helpers 26・lbits 205384・prefix 1430293・vp8l_codes 95925）、`run-unit: PASS`。`BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 check-skeleton.sh` → `check-skeleton: PASS`。`target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`。`git diff --check` は出力なし。
+- 試験の内容: simple（1 symbol の 1 bit・8 bit の形、2 symbol の両順、同じ 2 symbol、alphabet 40 で 40 以上が外れる、両方外れる・alphabet 1 で symbol 1 は EINVAL）、normal（literal の長さ 0〜15、16 の既定 8 と「直前の非 0」（17 と literal 0 の後でも変わらない）、17・18 の最小と最大、num_code_lengths 4・9・12・19、max_symbol の bit 0 と length_nbits 2・4・6・8・16、max_symbol が token の数であること、alphabet より大・repeat の超過・不完全・過剰・長さが全部 0・code length code の不完全・過剰・symbol 無しは EINVAL、1 symbol の code length code）、group（cache_bits 0・1・11 で green 280・282・2328、5 つの code の順と alphabet、後ろの code の失敗で pool を戻す、cache_bits 12 は EINVAL）、途中で切れた stream を全ての byte の長さで ENOBUFS と pool の count の復元、pool の limit（ENOMEM と復元）、乱数の byte 6000 本と有効な group の mutation 3000 本（ASan・UBSan）。期待の値は test の側の RFC 1951 の符号の割り当てと手計算の長さの列だけ。
+- mutation（複写で 41 通り、build は warning ありで通る形）: 全部 FAIL（killed）にした上で生き残りは 5 つ、全て同値か無変更: (a) simple の `symbols[index] < alphabet_size` を `<=` にする（alphabet 外の長さは webpc_prefix_build が count で無視するので出力が変わらない）、(b) `cache_bits > 11` の閾値を 12 に緩める（green の alphabet が 2328 を越え read_code の alphabet の検査が同じ EINVAL を返す）、(c) `alphabet_size == 0` の検査を外す（prefix_build が count 0 を EINVAL にする）、(d)(e) 意図的な無変更の mutation 2 つ。途中で見つかった生き残り（16 が literal 0 の後で 0 を繰り返す、red と distance の alphabet、範囲外の alphabet の normal の経路）は試験を足して殺した。
+- 自分で決めた点（header が黙っている所）: (1) reader が末尾を越えていたら、どの失敗も成功も ENOBUFS にし pool を戻す（零で補った bit からの EINVAL を出さない）。(2) code length code の table は length を読む間だけ pool に置き、読み終えたら count を戻す（main の code の table が続く）。(3) normal の code length code の build 失敗は EINVAL（prefix_build の規則）、ENOMEM は prefix_build のまま伝える。(4) alphabet_size が 0 または 2328 より大は読む前に EINVAL。
+- 仕様と header の食い違い: なし。header の変更の要望なし。
+- 未実施: fixture での全体の試験（p007 以降）、QEMU・実機。
