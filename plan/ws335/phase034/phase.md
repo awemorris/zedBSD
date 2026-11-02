@@ -2,7 +2,7 @@
 
 # ws335-p034: 安全の review と hardening
 
-Status: in-progress（2026-11-02 19:00 P1 q1986-i01）。前: planned（2026-11-01 p001 が作成。依存: p033）
+Status: 実装済み・試験 PASS（2026-11-02 21:35 P1 q1986-i01。cleared は Q1）。前: in-progress（2026-11-02 19:00 P1 q1986-i01）。前: planned（2026-11-01 p001 が作成。依存: p033）
 Parent: [WS335](../ws.md)。担当: Opus（敵対的な review。実装の担当とは別の起動）。
 
 ## 1. 読む物
@@ -64,15 +64,17 @@ Parent: [WS335](../ws.md)。担当: Opus（敵対的な review。実装の担当
 | `sh plan/ws335/tests/run-ct-matrix.sh all`（修正後） | `run-ct-matrix: PASS (72 builds)` |
 | `sh plan/ws335/tests/run-ct.sh all` | `run-ct: PASS` |
 | `FUZZ_SECONDS=300 sh plan/ws335/tests/run-fuzz.sh`（11 target を並べて 5 分、修正後の code） | `run-fuzz: PASS`、crash 0。実行の回数: der 4.35M、x509 26.1M、pem 1.42M、server-hello 91.7M、encrypted-extensions 120.6M、certificate 59.3M、server-key-exchange 93.6M、msg-other 83.3M、record 148k、conn 30k、mlkem 87k |
-| 各 target 1 時間 | FUZZ_HOUR_RESULT |
+| `FUZZ_SECONDS=3600 sh plan/ws335/tests/run-fuzz.sh`（ユーザーの承認を Q1 が伝えた。11 target を並べて 1 時間、20:26〜21:27、#11 の修正の後の code） | `run-fuzz: PASS`、crash・leak・timeout 0。実行の回数: der 57.0M、x509 264.8M、pem 4.94M、server-hello 993M、encrypted-extensions 1286M、certificate 635M、server-key-exchange 999M、msg-other 832M、record 688k、conn 336k、mlkem 973k |
 | `WS335_VECTORS=… sh plan/ws335/tests/run-unit.sh all` | test と ct の 57 本が PASS、`run-unit: PASS` |
 | `WS335_VECTORS=… sh plan/ws335/tests/run-unit.sh --win32 all` | test と ct の 57 本が PASS（win32）、`run-unit: PASS` |
-| `BASE=ddc678f690 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: PASS` |
+| `BASE=ddc678f690 sh plan/ws335/tests/check-skeleton.sh` | #11 の前は `check-skeleton: PASS`。#11 の後は `check-skeleton: FAIL`、FAILED は凍結の差の 1 つだけ: `userland/base/libcrypto-compat/cryc-chain.h`（16 行、Q1 が承認した 2 つの comment）。他の check は通る。BASE は Q1 が移す |
 | `sh plan/ws335/tests/run-interop.sh` | `run-interop: PASS (139 cases, 0 of them known limits)` |
 | `sh plan/ws335/tests/run-interop.sh --win32` | `run-interop: PASS (47 cases, 0 of them known limits)` |
 | `sh plan/ws335/tests/run-limbo.sh` | `run-limbo: PASS` |
+| #11 の後の回帰（`run-unit.sh all`・`--win32 all`・`run-interop.sh` host と `--win32`・`run-limbo.sh`・`run-ct.sh all`） | 57 本・57 本 PASS、`run-interop: PASS (139 cases, …)`・`(47 cases, …)`、`run-limbo: PASS`、`run-ct: PASS` |
+| `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=build/p034 build/p034/dynamic/libssl-compat.so`（#11 の前） | rc 0、warning 0、check-exports PASS |
 | わざと壊す（写しから戻し cmp で確かめた） | iPAddress の mask の修正を外す → test-name 3 件 FAIL。close_notify の後の送りを戻す → test-conn FAIL。SSL_connect の FAILED の確かめを外す → test-api-ssl 5 件 FAIL。1.2 の CCS の確かめを外す → test-hs13 3 件 FAIL |
 
 未実施: 実の Windows の機械（#4 の確かめ）、aarch64 の ct（host は x86_64 だけ。primitive の review は aarch64・armv7・riscv64・i386 の clang の assembly の分岐の数を数えた）、LTO の build での ct。
 
-消してほしい path（worktree の中）: `build/tmp/p034-*`、`build/tmp/ws335-*`（ct・ct-matrix・fuzz・unit・interop・limbo・skeleton の run）、`build/tmp/ws335-fuzz-corpus` は次の fuzz の始まりに使えるので残すかは Q1 の判断。
+消してほしい path（worktree の中）: `build/p034`、`build/tmp/p034-*`・`build/tmp/p034b-*`、`build/tmp/ws335-*`（ct・ct-matrix・fuzz・unit・interop・limbo・skeleton の run）、`build/tmp/ws335-fuzz-corpus` は次の fuzz の始まりに使えるので残すかは Q1 の判断。
