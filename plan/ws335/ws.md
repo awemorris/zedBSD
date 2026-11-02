@@ -66,7 +66,7 @@
 | [p026](phase026/phase.md) | record の保護（test-record） | cleared（2026-11-02 02:15 Q1、main で test-record 240579 checks・ct-record PASS）。実装（2026-11-02 02:15 Sonnet。test-record 240579 checks、ct-record 49 checks、posix・win32・ct PASS、63 通りの破壊のうち 58 通りが試験の失敗で FAIL、見逃し 5 通りは全部等価。cleared は Q1） | p025、p005、p006 |
 | [p027](phase027/phase.md) | transcript と鍵の schedule（1.3 と 1.2）（test-keysched） | cleared（2026-11-02 01:41 Q1、main で test-keysched 79369・ct-keysched PASS。段の順は呼び出す側の p029 の責任） | p025、p002 |
 | [p028](phase028/phase.md) | handshake の message の encode と syntax の確かめ（test-msg） | cleared（2026-11-02 02:34 Q1、main で test-msg 936784 checks PASS。Q1 の判断: ServerHello・HRR で、知っていてその message に指定の無い拡張は RFC 8446 4.2 どおり illegal_parameter、送っていない拡張は unsupported_extension に分ける。code と header の comment は p035 で直す）。実装（2026-11-02 02:30 Sonnet q1893-i01。test-msg 936784 checks、posix・win32 PASS、153 通りの破壊のうち 146 通りが試験の失敗で FAIL、見逃し 7 通りは等価。cleared は Q1） | p025 |
-| [p029](phase029/phase.md) | handshake の共通と TLS 1.3（test-hs13） | in-progress（P6 q1928、Q1 の判断で Opus） | p027、p028、p020、p011、p008、p037 |
+| [p029](phase029/phase.md) | handshake の共通と TLS 1.3（test-hs13） | 実装済み・試験 PASS（2026-11-02 11:23 P6 q1928-i01、Opus。test-hs13 18565 checks、posix・win32 PASS、run-unit all・check-skeleton（BASE=4eae22020）PASS、わざと壊す 120 通りのうち 112 が試験の失敗・2 が ASan の検出、残り 6 は等価。TLS 1.2 の SH の固有の確かめは p030 の sslc_hs12_server_hello。cleared は Q1） | p027、p028、p020、p011、p008、p037 |
 | [p030](phase030/phase.md) | TLS 1.2 の handshake（test-hs12） | planned | p029、p037 |
 | [p031](phase031/phase.md) | 接続（record の I/O・再組み立て・alert・close）（test-conn） | planned | p030、p015、p037 |
 | [p032](phase032/phase.md) | 公開の SSL・SSL_CTX（test-api-ssl） | planned | p031、p022 |
