@@ -454,3 +454,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-414](bugs/BUG-414.md) | ブラウザ: JavaScript の `Reflect` の global が無い | open（2026-11-02 13:52 Q1 が起票、P8） |
 | [BUG-415](bugs/BUG-415.md) | ブラウザ: 保たない頁を離れる時に pagehide（persisted false）が出ない | open（2026-11-02 13:52 Q1 が起票、P8） |
 | [BUG-416](bugs/BUG-416.md) | usb-net で長さが 64 byte の倍数の frame が届かない（xHCI の 0 長の packet の Short Packet） | open（2026-11-02 17:09 Q1 が起票、P1 の報告、P3） |
+| [BUG-417](bugs/BUG-417.md) | ブラウザ: web platform の prelude の WebIDL の operation が constructor として呼べる | open（2026-11-02 17:16 Q1 が起票、P8） |
