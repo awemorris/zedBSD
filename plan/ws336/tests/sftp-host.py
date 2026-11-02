@@ -114,6 +114,56 @@ def raw(server, d):
     check("REMOVE of the link is OK, then LSTAT is NO_SUCH_FILE", len(r) == 3 and status_of(r[1]) == (1, FX_OK) and status_of(r[2]) == (2, FX_NO_SUCH_FILE))
     check("the link's target stays", os.path.exists(os.path.join(d, "data")))
 
+    # Attributes, truncation, modes, READ's bound, READDIR's form, LSTAT of a link, an empty REALPATH.
+    big = os.path.join(d, "big")
+    open(big, "wb").write(b"z" * 70000)
+    os.utime(big, (1000, 2000))
+    os.symlink("big", os.path.join(d, "biglink"))
+    os.mkdir(os.path.join(d, "dir"))
+    for n in ("x", "y", "z"):
+        open(os.path.join(d, "dir", n), "w").write(n)
+    seq = [request(FXP["STAT"], 1, string("big")),
+           request(FXP["LSTAT"], 2, string("biglink")),
+           request(FXP["OPEN"], 3, string("big") + u32(FXF_READ) + no_attrs()),
+           request(FXP["READ"], 4, string(u32(0)) + u64(0) + u32(65537)),
+           request(FXP["CLOSE"], 5, string(u32(0) + b"\0")),
+           request(FXP["OPEN"], 6, string("new") + u32(FXF_WRITE | FXF_CREAT) + u32(4) + u32(0o600)),
+           request(FXP["FSETSTAT"], 7, string(u32(1)) + u32(4) + u32(0o640)),
+           request(FXP["SETSTAT"], 8, string("big") + u32(1 | 4 | 8) + u64(3) + u32(0o604) + u32(1111) + u32(2222)),
+           request(FXP["OPEN"], 9, string("trunc") + u32(FXF_WRITE | FXF_TRUNC) + no_attrs()),
+           request(FXP["OPENDIR"], 10, string("dir")),
+           request(FXP["READDIR"], 11, string(u32(3))),
+           request(FXP["READDIR"], 12, string(u32(3))),
+           request(FXP["REALPATH"], 13, string("")),
+           request(FXP["OPEN"], 14, string("new2") + u32(FXF_WRITE | FXF_CREAT) + u32(4) + u32(0o600))]
+    open(os.path.join(d, "trunc"), "w").write("not empty")
+    code, out, err = run(server, d, init + b"".join(seq))
+    r = replies(out)
+    check("the second run answers every request (%d)" % len(r), len(r) == 1 + len(seq))
+    if len(r) == 1 + len(seq):
+        check("STAT gives the modification time apart from the access time", r[1][-8:] == u32(1000) + u32(2000))
+        check("LSTAT of a link gives a link's type bits", (struct.unpack(">I", r[2][1 + 4 + 4 + 8 + 4 + 4:1 + 4 + 4 + 8 + 4 + 4 + 4])[0] & 0o170000) == 0o120000)
+        check("READ of 65537 bytes gives at most 65536", r[4][0] == FXP["DATA"] and r[4][5:9] == u32(65536))
+        check("a 5-byte handle is refused", status_of(r[5]) == (5, FX_FAILURE))
+        check("OPEN with CREAT gives the new file the asked permissions", (os.stat(os.path.join(d, "new2")).st_mode & 0o7777) == 0o600)
+        check("FSETSTAT sets the permissions", status_of(r[7]) == (7, FX_OK) and (os.stat(os.path.join(d, "new")).st_mode & 0o7777) == 0o640)
+        st = os.stat(big)
+        check("SETSTAT sets the size, the permissions and both times", status_of(r[8]) == (8, FX_OK) and st.st_size == 3 and (st.st_mode & 0o7777) == 0o604 and int(st.st_atime) == 1111 and int(st.st_mtime) == 2222)
+        check("OPEN with TRUNC empties the file", os.path.getsize(os.path.join(d, "trunc")) == 0)
+        count = struct.unpack(">I", r[11][5:9])[0] if r[11][0] == FXP["NAME"] else -1
+        check("READDIR gives the five entries in one reply", count == 5)
+        check("the next READDIR is EOF", status_of(r[12]) == (12, FX_EOF))
+        real = os.path.realpath(d)
+        check("REALPATH of an empty path is the working directory", r[13] == bytes([104]) + u32(13) + u32(1) + string(real) + string(real) + u32(0))
+
+    # Handles left open at the end are closed (no leak report); a length of 0 ends the server; arguments are refused.
+    code, out, err = run(server, d, init + request(FXP["OPENDIR"], 1, string("dir")) + request(FXP["OPEN"], 2, string("data") + u32(FXF_READ) + no_attrs()))
+    check("handles left open at the end are let go", code == 0 and b"Sanitizer" not in err)
+    code, out, err = run(server, d, init + u32(0))
+    check("a packet length of 0 ends the server with 1", code == 1)
+    p = subprocess.run([server, "-e"], input=b"", capture_output=True, timeout=10)
+    check("an argument is refused", p.returncode == 1)
+
     # 64 handles at most: the 65th OPEN is refused, a CLOSE frees one.
     seq = [request(FXP["OPEN"], 100 + i, string("data") + u32(FXF_READ) + no_attrs()) for i in range(65)]
     seq.append(request(FXP["CLOSE"], 200, string(u32(63))))

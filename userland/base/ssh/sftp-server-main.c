@@ -36,6 +36,7 @@
 #include <grp.h>
 #include <limits.h>
 #include <pwd.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -137,6 +138,9 @@ main(
 		fputs("usage: sftp-server\n", stderr);
 		return 1;
 	}
+
+	/* A write past the file size limit fails with EFBIG (a FAILURE answer) instead of ending the server. */
+	(void)signal(SIGXFSZ, SIG_IGN);
 
 	/* Starts with every handle free. */
 	for (index = 0; index < SFTP_HANDLES_MAX; index++) {

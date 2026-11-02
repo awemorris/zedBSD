@@ -1047,7 +1047,7 @@ mkdir -p "$work/sftp-raw" "$work/sftp-fuzz"
 check "sftp-server: the protocol checks ($(grep -c '^ok' "$work/sftp-raw.out") ok, $(grep '^FAIL' "$work/sftp-raw.out" | tr '\n' ' '))" $?
 cc -std=c89 -O1 -D_DEFAULT_SOURCE -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto -c "$source_dir/sftp-server-main.c" \
     -o "$out/sftp-server-main.o" > "$out/sftp-stub.build.log" 2>&1
-stub_allowed=" chmod chown close closedir fchmod fchown fstat ftruncate futimens getgrgid getpwuid link lstat mkdir open opendir pread pwrite readdir readlink realpath rename rmdir stat symlink truncate unlink utimensat __errno_location malloc free fwrite read write snprintf sprintf strlen strcmp strrchr strcpy memcpy memset memchr stderr time "
+stub_allowed=" chmod chown close closedir fchmod fchown fstat ftruncate futimens getgrgid getpwuid link lstat mkdir open opendir pread pwrite readdir readlink realpath rename rmdir stat symlink truncate unlink utimensat __errno_location signal malloc free fwrite read write snprintf sprintf strlen strcmp strrchr strcpy memcpy memset memchr stderr time "
 unexpected=""
 for symbol in $(nm -u "$out/sftp-server-main.o" | awk '{print $2}'); do
 	case "$symbol" in
