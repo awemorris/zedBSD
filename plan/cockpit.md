@@ -14,7 +14,7 @@
 | P5 | — | 待機 | WS336 p015（自前の ssh の client）を 13:46 に merge（host の OpenSSH の sshd と 93 項目 PASS） | p018（sshd の listener、p017 の後） |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p017 cleared。p018（sshd の listener と自前の ssh との相互運用、q1965）に 14:36 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
-| P8 | [WS345](ws345/ws.md) | ブラウザ | JavaScript を窓の event と別の thread に、通信を独立した thread に（p001 の設計、q1959、14:03 着手） | — |
+| P8 | [WS345](ws345/ws.md) | ブラウザ | p001 の設計 cleared（thread の表、p002〜p013）。p002（thread の表と pthread の置き換え、q1968）に 14:46 着手 | J2: 応答しない頁の確かめの表示を出すか（ユーザー） |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 

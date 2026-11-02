@@ -25,6 +25,13 @@
 - （2026-11-02）ユーザーの「thread の作りを libbrowser の中に置けるか」の問いに対し、Q1 が、page（script）と通信の thread は libbrowser が持って libbrowser の口の後ろで始め、zedBSD・Windows・Linux の shell が一つの実装を共有し、各 shell は窓の event の thread だけを持って thread-safe な口（入力を積む、確定した frame・状態の変化を今の wake で受ける）で libbrowser と話す形にする、と決めた。thread の道具を libbrowser の中の pthread にする部分は、上のユーザーの決定（shell が登録する表）で置き換わった。
 - （2026-11-02）Q1 が、WS345 の Phase が shell の thread の表を登録するために WS074 の host の試験と host-build.sh（`plan/ws074/tests/host-*.c`、`host-build.sh`）と、要れば WS334 の Windows の試験の harness を変えてよい、と許可した。変えた試験は通るように保ち、各 phase.md の結果に変えた試験の file を全部書く。
 
+- （2026-11-02 14:46、p001 の J1・J3〜J7 への答え）
+  - J1・J3・J4・J5: P8 の判断のとおり（非同期の loader の thread を保つ、libmedia の内部の lock は pthread のまま thread の作成だけ表を通す、view あたり frame 64、media 8）。loader の thread はユーザーの決定の「通信は個別の thread」を満たす。
+  - J6: 窓の thread は入力を libbrowser の FIFO に積むだけにし、iframe への振り分け（確定した iframe の矩形の参照）も libbrowser の側の thread（top の script の thread か style の thread）で行う。窓の thread では libbrowser の処理を一切しないという決定 1 を字義どおり守る。
+  - J7: 決定 5 は「display list を style の thread で作り、shell の render の thread で記録・提出・表示する」と読んでよい。
+  - 所有: p013 の libkeiland の変更と、p002 の plan/tools/browser-component/client.c の変更を、WS345 の範囲として認める。
+  - J2（長く応答しない頁の「応答しない頁」の確かめの表示）は製品の判断なのでユーザーに聞く。答えまでは表示無しで進める。
+
 ## P8 の技術の判断（p001、Q1 が覆してよい）
 
 - 通信は今の非同期の loader（`browser-net` 1 本、`browser-resolve` 1 本、view ごと）を保ち、窓・script の thread に残った同期の socket の道（同期の XHR、先取りに無い parser の script、iframe の script、sheet の待ち）を loader に移す。blocking の connect の thread の pool にはしない（理由は [design.md](design.md) §3.1、判断の点 J1）。
@@ -40,8 +47,8 @@
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [ws345-p001](phase001/phase.md) | 調べと設計: 今の thread と event loop、止まる所の計測、thread の表（名前・数・持つ物・渡し方）、DOM・layout と JS の持ち主、event の受け渡し、取り消し、試験の道 | cleared（2026-11-02 P8 q1959-i01。[design.md](design.md)、design-reviewer の指摘 19 件の反映は §12） | — |
-| [ws345-p002](phase002/phase.md) | shell が登録する thread の表（`struct browser_threads`、`browser_threads_set`）と libbrowser の base の包み。libbrowser の pthread を全部替え、shell（kl_thread）・試験（POSIX）の実装、libmedia の engine の thread の作成 | planned | p001 |
+| [ws345-p001](phase001/phase.md) | 調べと設計: 今の thread と event loop、止まる所の計測、thread の表（名前・数・持つ物・渡し方）、DOM・layout と JS の持ち主、event の受け渡し、取り消し、試験の道 | cleared（2026-11-02 14:46 Q1、87feb4707 を main に merge 1ec103957）。cleared（2026-11-02 P8 q1959-i01。[design.md](design.md)、design-reviewer の指摘 19 件の反映は §12） | — |
+| [ws345-p002](phase002/phase.md) | shell が登録する thread の表（`struct browser_threads`、`browser_threads_set`）と libbrowser の base の包み。libbrowser の pthread を全部替え、shell（kl_thread）・試験（POSIX）の実装、libmedia の engine の thread の作成 | in-progress（2026-11-02 14:46 P8 q1968-i01） | p001 |
 | [ws345-p003](phase003/phase.md) | 通信を全部 loader に: loader の client（要求した thread ごとの完了と起こし、どの thread からでも取り消し）、同期の XHR・漏れた parser の script・iframe の script・sheet の待ちを client の待ちに | planned | p002 |
 | [ws345-p004](phase004/phase.md) | VM の打ち切り（agent ごとの atomic の flag、loop の印・関数の入口・長い native で見る、catch・finally を走らせない終わり） | planned | p001 |
 | [ws345-p005](phase005/phase.md) | view の front と top の script の thread（`BROWSER_THREADING_OWN`）: mailbox・入力の合わせ方と順・snapshot・callback を窓の thread で・navigation と destroy の打ち切りと join・process に一つの可変の static の追い出し・CPU の確定した frame | planned | p002、p003、p004 |
