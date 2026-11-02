@@ -7,8 +7,8 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS335](ws335/ws.md) | 自前の TLS | p033（統合・相互接続 110・Wine 44・QEMU 30・limbo 9,792）cleared。p040（secp384r1、q1981）に 17:43 着手 | — |
-| P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p021（libbrowser への組み込み、BUG-405 fixed）cleared。p022（規約の見直し、q1982）に 17:56 着手 | — |
+| P1 | [WS335](ws335/ws.md) | 自前の TLS | p040（secp384r1、相互接続 139・Wine 47、ecc384.badssl.com も通る）cleared。p034（安全の review、q1986）に 18:41 着手 | — |
+| P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p022（規約の見直し）cleared、全 Phase cleared。WS の完了の形にまとめる（q1987、18:41） | — |
 | P3 | — | 待機 | BUG-416（usb-net の 64 byte の倍数の frame）fixed、17:56 merge。BUG-412 の直しの候補は agent/p3-bug412 に未 merge、Pi 5 は記録の状態 | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | — | 待機 | WS345 p005 cleared。p008（style の thread）は文脈の都合で未着手のまま返却。p006 の merge の後に新しい P5 で始める | — |

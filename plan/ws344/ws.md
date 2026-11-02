@@ -41,7 +41,7 @@
 | ws344-p019 | interface（decode.c、compare・mutate・fuzz）— Opus を推す | cleared（2026-11-02 16:35 Q1、main で compare 364 PASS）。実装済み・試験 PASS（P2 q1969-i01、2026-11-02 16:20。compare 364 + conformance 214、mutate、fuzz 600 s） | p002, p008, p017, p018 |
 | ws344-p020 | platform（Windows の static、config、QEMU の guest の driver）— Opus を推す | cleared（2026-11-02 17:29 Q1、3ef6f4efac で merge。Windows（Wine）と zedBSD の QEMU の guest で 578 file が libwebp と一致は P2 の結果）。実装済み・試験 PASS（P2 q1976-i01、2026-11-02 17:27。QEMU guest 578・Wine 578 file 一致、arm64・riscv64 build） | p019 |
 | ws344-p021 | libbrowser への組み込み（img_sniff・img_decode・Accept、BUG-405）— Opus を推す | cleared（2026-11-02 17:56 Q1、main で host-image 358 PASS・libbrowser.so warning 0。about.google の画像が host と Wine で描けた画面は P2 の結果）。実装済み・試験 PASS（P2 q1979-i01、2026-11-02 17:47。about.google の画像が host・Wine で出た、BUG-405） | p020 |
-| ws344-p022 | 規約の全文の見直し（conformance-reviewer） | 実装済み・試験 PASS（P2 q1982-i01、2026-11-02 18:38。規約の見直しと持ち越し、新しい BASE a6859dc064） | p021 |
+| ws344-p022 | 規約の全文の見直し（conformance-reviewer） | cleared（2026-11-02 18:41 Q1、b114f4ef2 を main に merge 5139d82c8、main で run-unit all・check-skeleton（BASE=a6859dc06）PASS・libwebp-compat.so warning 0）。実装済み・試験 PASS（P2 q1982-i01、2026-11-02 18:38。規約の見直しと持ち越し、新しい BASE a6859dc064） | p021 |
 
 最初に並べて起動できる Phase（依存が p001 だけ）: p002、p003、p006、p009、p010、p014、p015、p016、p018。
 
