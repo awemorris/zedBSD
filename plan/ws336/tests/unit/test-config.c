@@ -92,15 +92,28 @@ static const struct time_case time_cases[] = {
 /* The number of rows of the time table. */
 #define TIME_CASE_COUNT		(sizeof(time_cases) / sizeof(time_cases[0]))
 
+static int client_add(const char *text, const char *host);
+
 /* Fills sshd with the defaults and reads text into it; the status of sshd_config_parse. */
 static int
 sshd_read(
 	const char *text)
 {
+	char *copy;
+	size_t length;
+	int status;
+
+	/* The text is copied to a block of exactly its size, so that a read past its end is caught by the checker. */
+	length = strlen(text);
+	copy = malloc(length != 0 ? length : 1);
+	CHECK(copy != NULL);
+	memcpy(copy, text, length);
 	sshd_config_defaults(&sshd);
 	memset(error, 'x', sizeof(error) - 1);
 	error[sizeof(error) - 1] = '\0';
-	return sshd_config_parse(&sshd, text, strlen(text), error);
+	status = sshd_config_parse(&sshd, copy, length, error);
+	free(copy);
+	return status;
 }
 
 /* Clears the client configuration and reads text into it for host; the status of ssh_config_parse. */
@@ -110,9 +123,7 @@ client_read(
 	const char *host)
 {
 	ssh_config_init(&client);
-	memset(error, 'x', sizeof(error) - 1);
-	error[sizeof(error) - 1] = '\0';
-	return ssh_config_parse(&client, text, strlen(text), host, error);
+	return client_add(text, host);
 }
 
 /* Applies one option to the client configuration, which is not cleared. */
@@ -120,9 +131,20 @@ static int
 client_option(
 	const char *option)
 {
+	char *copy;
+	size_t length;
+	int status;
+
+	/* The option is copied to a block of exactly its size with its NUL, so that a read past its end is caught. */
+	length = strlen(option);
+	copy = malloc(length + 1);
+	CHECK(copy != NULL);
+	memcpy(copy, option, length + 1);
 	memset(error, 'x', sizeof(error) - 1);
 	error[sizeof(error) - 1] = '\0';
-	return ssh_config_option(&client, option, error);
+	status = ssh_config_option(&client, copy, error);
+	free(copy);
+	return status;
 }
 
 /* Reads text into the client for host without clearing it first (a second file); the status. */
@@ -131,9 +153,20 @@ client_add(
 	const char *text,
 	const char *host)
 {
+	char *copy;
+	size_t length;
+	int status;
+
+	/* The text is copied to a block of exactly its size, so that a read past its end is caught by the checker. */
+	length = strlen(text);
+	copy = malloc(length != 0 ? length : 1);
+	CHECK(copy != NULL);
+	memcpy(copy, text, length);
 	memset(error, 'x', sizeof(error) - 1);
 	error[sizeof(error) - 1] = '\0';
-	return ssh_config_parse(&client, text, strlen(text), host, error);
+	status = ssh_config_parse(&client, copy, length, host, error);
+	free(copy);
+	return status;
 }
 
 /* Reads text into the client for host with the defaults applied after it; the status. */
@@ -490,6 +523,10 @@ test_sshd_listen(void)
 	CHECK_EQ(sshd_read("ListenAddress fe80::1:2\n"), 0);
 	CHECK_EQ(sshd_read("ListenAddress host-1.example.com\n"), 0);
 	CHECK(strcmp(sshd.listen_address, "host-1.example.com") == 0);
+	CHECK_EQ(sshd_read("ListenAddress my_host\n"), 0);
+	CHECK(strcmp(sshd.listen_address, "my_host") == 0);
+	CHECK_EQ(sshd_read("ListenAddress zz.ZZ-Az09\n"), 0);
+	CHECK(strcmp(sshd.listen_address, "zz.ZZ-Az09") == 0);
 	CHECK_EQ(sshd_read("ListenAddress \"::\"\n"), 0);
 	CHECK(strcmp(sshd.listen_address, "::") == 0);
 	make_line(line, "ListenAddress", 'a', 63);
@@ -569,6 +606,12 @@ test_sshd_values(void)
 	make_line(line, "HostKey", 'k', 1024);
 	CHECK_EQ(sshd_read(line), EINVAL);
 	CHECK_EQ(sshd_read("HostKey \"/a\tb\"\n"), EINVAL);
+	CHECK_EQ(sshd_read("HostKey \"/a\037b\"\n"), EINVAL);
+	CHECK_EQ(sshd_read("HostKey \"/a\177b\"\n"), EINVAL);
+	CHECK_EQ(sshd_read("HostKey \"/a~b \"\n"), 0);
+	CHECK(strcmp(sshd.host_key[0], "/a~b ") == 0);
+	CHECK_EQ(sshd_read("HostKey none\n"), 0);
+	CHECK(strcmp(sshd.host_key[0], "none") == 0);
 	CHECK_EQ(sshd_read("HostKey /etc/%h\n"), EINVAL);
 	CHECK_EQ(sshd_read("HostKey \"\"\n"), EINVAL);
 	CHECK_EQ(sshd_read("HostKey\n"), EINVAL);
@@ -585,6 +628,9 @@ test_sshd_values(void)
 	CHECK(strcmp(sshd.authorized_keys_file, "/dev/null") == 0);
 	CHECK_EQ(sshd_read("AuthorizedKeysFile /a%x\n"), EINVAL);
 	CHECK_EQ(sshd_read("AuthorizedKeysFile /a%\n"), EINVAL);
+	CHECK_EQ(sshd_read("AuthorizedKeysFile /a%"), EINVAL);
+	CHECK_EQ(sshd_read("AuthorizedKeysFile /a%h"), 0);
+	CHECK_EQ(sshd_read("AuthorizedKeysFile %"), EINVAL);
 	CHECK_EQ(sshd_read("AuthorizedKeysFile /a%%%\n"), EINVAL);
 	CHECK_EQ(sshd_read("AuthorizedKeysFile a b\n"), EINVAL);
 	CHECK_EQ(sshd_read("AuthorizedKeysFile\n"), EINVAL);
@@ -669,6 +715,12 @@ test_sshd_values(void)
 	CHECK_EQ(sshd_read("Subsystem sftp\n"), EINVAL);
 	CHECK_EQ(sshd_read("Subsystem\n"), EINVAL);
 	CHECK_EQ(sshd_read("Subsystem sftp /x -l INFO\n"), EINVAL);
+	CHECK_EQ(sshd_read("Subsystem sftp /x -l\n"), EINVAL);
+	CHECK_EQ(sshd_read("Subsystem sftp /x%h\n"), EINVAL);
+	CHECK_EQ(sshd_read("Subsystem sftp none\n"), 0);
+	CHECK(strcmp(sshd.sftp_command, "none") == 0);
+	CHECK_EQ(sshd_read("AcceptEnv w1 w2\nSubsystem sftp\n"), EINVAL);
+	CHECK(error_starts("line 2: missing value"));
 	CHECK_EQ(sshd_read("Subsystem scp /usr/bin/scp\n"), EINVAL);
 	CHECK(error_starts("line 1: "));
 	CHECK_EQ(sshd_read("Subsystem SFTP /x\n"), EINVAL);
@@ -751,6 +803,8 @@ test_sshd_ignored(void)
 	CHECK(strlen(error) < SSH_CONFIG_ERROR_MAX);
 	CHECK(strlen(error) > 20);
 	CHECK(error_has("KKKKKKKKKKKKKKKK"));
+	CHECK(error_has("unknown keyword: KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK"));
+	CHECK(!error_has("KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK"));
 }
 
 /* Checks the shape of lines: white space, comments, quotes, CR LF, long lines and line numbers. */
@@ -809,6 +863,12 @@ test_syntax(void)
 	CHECK_EQ(sshd_read("HostKey /a #b\n"), 0);
 	CHECK(strcmp(sshd.host_key[0], "/a") == 0);
 	CHECK_EQ(sshd_read("Port 22 # 33 44\n"), 0);
+
+	/* A vertical tab and a form feed are blanks. */
+	CHECK_EQ(sshd_read("Port\v2207\f\n"), 0);
+	CHECK_EQ(sshd.port, 2207);
+	CHECK_EQ(sshd_read("\v\fPort\f2208\v# x\n"), 0);
+	CHECK_EQ(sshd.port, 2208);
 
 	/* A line number counts every line, also blank and comment lines and CR LF ones. */
 	CHECK_EQ(sshd_read("Port 22\n\n# a\n  \r\nPort x\n"), EINVAL);
@@ -1037,6 +1097,9 @@ test_ssh_values(void)
 	CHECK_EQ(client_read("User\n", "h"), EINVAL);
 	CHECK_EQ(client_read("HostName a b\n", "h"), EINVAL);
 	CHECK_EQ(client_read("HostName a\001b\n", "h"), EINVAL);
+	CHECK_EQ(client_read("HostName a\177b\n", "h"), EINVAL);
+	CHECK_EQ(client_read("HostName a~b\n", "h"), 0);
+	CHECK_EQ(client_read("User a\177b\n", "h"), EINVAL);
 
 	/* IdentityFile: paths accumulate in order, a repeat is kept once, eight are the most. */
 	CHECK_EQ(client_read("IdentityFile ~/.ssh/id_a\nIdentityFile ~/.ssh/id_b\nIdentityFile ~/.ssh/id_a\n", "h"), 0);
@@ -1054,6 +1117,9 @@ test_ssh_values(void)
 	CHECK_EQ(client_read(text, "h"), EINVAL);
 	CHECK(error_starts("line 9: "));
 	CHECK_EQ(client_read("IdentityFile %d/id\n", "h"), EINVAL);
+	CHECK_EQ(client_read("IdentityFile %h/id\n", "h"), EINVAL);
+	CHECK_EQ(client_read("IdentityFile none\n", "h"), 0);
+	CHECK(strcmp(client.identity[0], "none") == 0);
 	CHECK_EQ(client_read("IdentityFile\n", "h"), EINVAL);
 	CHECK_EQ(client_read("IdentityFile a b\n", "h"), EINVAL);
 	make_line(line, "IdentityFile", 'i', 1023);
@@ -1306,6 +1372,85 @@ test_ssh_order(void)
 	CHECK_EQ(client.identity_count, 1);
 	CHECK(strcmp(client.identity[0], "/only") == 0);
 
+	/* Each field set alone, to a value that is not its default, survives the defaults. */
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("User=zed"), 0);
+	ssh_config_defaults(&client);
+	CHECK(strcmp(client.user, "zed") == 0);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("HostName=real"), 0);
+	ssh_config_defaults(&client);
+	CHECK(strcmp(client.host_name, "real") == 0);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("Port=99"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.port, 99);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("StrictHostKeyChecking=accept-new"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.strict, SSH_STRICT_ACCEPT_NEW);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("UserKnownHostsFile=/uk"), 0);
+	ssh_config_defaults(&client);
+	CHECK(strcmp(client.user_known_hosts, "/uk") == 0);
+	CHECK(strcmp(client.global_known_hosts, "/etc/ssh/ssh_known_hosts") == 0);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("GlobalKnownHostsFile=/gk"), 0);
+	ssh_config_defaults(&client);
+	CHECK(strcmp(client.global_known_hosts, "/gk") == 0);
+	CHECK(strcmp(client.user_known_hosts, "~/.ssh/known_hosts") == 0);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("BatchMode=yes"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.batch_mode, 1);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("ConnectTimeout=5"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.connect_timeout, 5);
+	CHECK_EQ(client.server_alive_interval, 0);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("ServerAliveInterval=7"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.server_alive_interval, 7);
+	CHECK_EQ(client.connect_timeout, 0);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("ServerAliveCountMax=9"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.server_alive_count, 9);
+	CHECK_EQ(client.server_alive_interval, 0);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("RequestTTY=force"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.request_tty, SSH_TTY_FORCE);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("PasswordAuthentication=no"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.password, 0);
+	CHECK_EQ(client.pubkey, 1);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("PubkeyAuthentication=no"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.pubkey, 0);
+	CHECK_EQ(client.password, 1);
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("LogLevel=DEBUG"), 0);
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.log_level, 3);
+	CHECK_EQ(client.request_tty, SSH_TTY_AUTO);
+
+	/* A string written over a field that held other bytes ends where the value ends. */
+	ssh_config_init(&client);
+	memset(client.user, 'x', sizeof(client.user));
+	memset(client.host_name, 'x', sizeof(client.host_name));
+	CHECK_EQ(client_option("User=ab"), 0);
+	CHECK_EQ(client_option("HostName=cd"), 0);
+	CHECK(strcmp(client.user, "ab") == 0);
+	CHECK(strcmp(client.host_name, "cd") == 0);
+	sshd_config_defaults(&sshd);
+	memset(sshd.listen_address, 'x', sizeof(sshd.listen_address));
+	CHECK_EQ(sshd_config_parse(&sshd, "ListenAddress ab\n", 17, error), 0);
+	CHECK(strcmp(sshd.listen_address, "ab") == 0);
+
 	/* Null arguments to the other two do not crash. */
 	ssh_config_init(NULL);
 	ssh_config_defaults(NULL);
@@ -1354,6 +1499,9 @@ test_ssh_option(void)
 	CHECK_EQ(client_option("#Port=1"), EINVAL);
 	CHECK_EQ(client_option("=1"), EINVAL);
 	CHECK(error_has("missing keyword"));
+	CHECK(!error_starts("line"));
+	CHECK_EQ(client_option("Port=\"1"), EINVAL);
+	CHECK(!error_starts("line"));
 	CHECK_EQ(client_option("Port=\"1"), EINVAL);
 	CHECK_EQ(client_option("Port=1\nUser=x"), EINVAL);
 	CHECK(error_has("line break"));
@@ -1379,6 +1527,196 @@ test_ssh_option(void)
 	CHECK_EQ(ssh_config_option(&client, "Bogus=1", NULL), EINVAL);
 	CHECK_EQ(ssh_config_option(&client, "Port=3", NULL), 0);
 	CHECK_EQ(client.port, 3);
+}
+
+/*
+ * Every keyword of sshd_config once with a value different from its
+ * default, and then each again with another value: the first line of each
+ * keyword is the one used, so no keyword's "already given" mark may be
+ * shared with another keyword.
+ */
+static void
+test_sshd_all(void)
+{
+	static const char first[] =
+		"Port 2022\nListenAddress 10.1.2.3\nAddressFamily inet6\nHostKey /h1\nPermitRootLogin no\n"
+		"PasswordAuthentication no\nPermitEmptyPasswords yes\nPubkeyAuthentication no\nAuthorizedKeysFile /ak\n"
+		"MaxAuthTries 3\nLoginGraceTime 45\nMaxSessions 4\nMaxStartups 7:30:70\nStrictModes no\n"
+		"Subsystem sftp /sftp\nClientAliveInterval 15\nClientAliveCountMax 5\n";
+	static const char second[] =
+		"Port 2022\nListenAddress 10.1.2.3\nAddressFamily inet\nHostKey /h2\nPermitRootLogin yes\n"
+		"PasswordAuthentication yes\nPermitEmptyPasswords no\nPubkeyAuthentication yes\nAuthorizedKeysFile /ak2\n"
+		"MaxAuthTries 9\nLoginGraceTime 99\nMaxSessions 8\nMaxStartups 9:30:90\nStrictModes yes\n"
+		"Subsystem sftp /sftp2\nClientAliveInterval 25\nClientAliveCountMax 6\n";
+	char text[1024];
+
+	/* The first group is read in full. */
+	CHECK_EQ(sshd_read(first), 0);
+	CHECK_EQ(sshd.port, 2022);
+	CHECK(strcmp(sshd.listen_address, "10.1.2.3") == 0);
+	CHECK_EQ(sshd.inet6, 1);
+	CHECK_EQ(sshd.host_key_count, 1);
+	CHECK(strcmp(sshd.host_key[0], "/h1") == 0);
+	CHECK_EQ(sshd.permit_root, SSHD_PERMIT_ROOT_NO);
+	CHECK_EQ(sshd.password, 0);
+	CHECK_EQ(sshd.permit_empty, 1);
+	CHECK_EQ(sshd.pubkey, 0);
+	CHECK(strcmp(sshd.authorized_keys_file, "/ak") == 0);
+	CHECK_EQ(sshd.max_auth_tries, 3);
+	CHECK_EQ(sshd.login_grace_time, 45);
+	CHECK_EQ(sshd.max_sessions, 4);
+	CHECK_EQ(sshd.max_startups, 7);
+	CHECK_EQ(sshd.strict_modes, 0);
+	CHECK(strcmp(sshd.sftp_command, "/sftp") == 0);
+	CHECK_EQ(sshd.client_alive_interval, 15);
+	CHECK_EQ(sshd.client_alive_count, 5);
+
+	/* The second group after it changes nothing but adds its HostKey. */
+	strcpy(text, first);
+	strcat(text, second);
+	CHECK_EQ(sshd_read(text), 0);
+	CHECK_EQ(sshd.port, 2022);
+	CHECK(strcmp(sshd.listen_address, "10.1.2.3") == 0);
+	CHECK_EQ(sshd.inet6, 1);
+	CHECK_EQ(sshd.host_key_count, 2);
+	CHECK(strcmp(sshd.host_key[1], "/h2") == 0);
+	CHECK_EQ(sshd.permit_root, SSHD_PERMIT_ROOT_NO);
+	CHECK_EQ(sshd.password, 0);
+	CHECK_EQ(sshd.permit_empty, 1);
+	CHECK_EQ(sshd.pubkey, 0);
+	CHECK(strcmp(sshd.authorized_keys_file, "/ak") == 0);
+	CHECK_EQ(sshd.max_auth_tries, 3);
+	CHECK_EQ(sshd.login_grace_time, 45);
+	CHECK_EQ(sshd.max_sessions, 4);
+	CHECK_EQ(sshd.max_startups, 7);
+	CHECK_EQ(sshd.strict_modes, 0);
+	CHECK(strcmp(sshd.sftp_command, "/sftp") == 0);
+	CHECK_EQ(sshd.client_alive_interval, 15);
+	CHECK_EQ(sshd.client_alive_count, 5);
+
+	/* The lines in the other order: now the second group's values are the ones used. */
+	strcpy(text, second);
+	strcat(text, first);
+	CHECK_EQ(sshd_read(text), 0);
+	CHECK_EQ(sshd.inet6, 0);
+	CHECK_EQ(sshd.permit_root, SSHD_PERMIT_ROOT_YES);
+	CHECK_EQ(sshd.password, 1);
+	CHECK_EQ(sshd.permit_empty, 0);
+	CHECK_EQ(sshd.pubkey, 1);
+	CHECK(strcmp(sshd.authorized_keys_file, "/ak2") == 0);
+	CHECK_EQ(sshd.max_auth_tries, 9);
+	CHECK_EQ(sshd.login_grace_time, 99);
+	CHECK_EQ(sshd.max_sessions, 8);
+	CHECK_EQ(sshd.max_startups, 9);
+	CHECK_EQ(sshd.strict_modes, 1);
+	CHECK(strcmp(sshd.sftp_command, "/sftp2") == 0);
+	CHECK_EQ(sshd.client_alive_interval, 25);
+	CHECK_EQ(sshd.client_alive_count, 6);
+}
+
+/*
+ * Every acted-on keyword of ssh_config once with a value different from
+ * its default, then each again with another value, as for sshd: each field
+ * has its own bit in set_mask, and the two files are two sources.
+ */
+static void
+test_ssh_all(void)
+{
+	static const char first[] =
+		"User u1\nHostName hn1\nPort 2201\nIdentityFile /i1\nStrictHostKeyChecking yes\nUserKnownHostsFile /uk\n"
+		"GlobalKnownHostsFile /gk\nBatchMode yes\nConnectTimeout 30\nServerAliveInterval 20\nServerAliveCountMax 5\n"
+		"RequestTTY force\nPasswordAuthentication no\nPubkeyAuthentication no\nLogLevel VERBOSE\n";
+	static const char second[] =
+		"User u2\nHostName hn2\nPort 2202\nIdentityFile /i2\nStrictHostKeyChecking no\nUserKnownHostsFile /uk2\n"
+		"GlobalKnownHostsFile /gk2\nBatchMode no\nConnectTimeout 31\nServerAliveInterval 21\nServerAliveCountMax 6\n"
+		"RequestTTY no\nPasswordAuthentication yes\nPubkeyAuthentication yes\nLogLevel DEBUG\n";
+
+	/* The first file sets every field, and each field has a bit of its own. */
+	ssh_config_init(&client);
+	CHECK_EQ(client_add(first, "h"), 0);
+	CHECK_EQ(bit_count(client.set_mask), 15);
+	CHECK(strcmp(client.user, "u1") == 0);
+	CHECK(strcmp(client.host_name, "hn1") == 0);
+	CHECK_EQ(client.port, 2201);
+	CHECK_EQ(client.identity_count, 1);
+	CHECK(strcmp(client.identity[0], "/i1") == 0);
+	CHECK_EQ(client.strict, SSH_STRICT_YES);
+	CHECK(strcmp(client.user_known_hosts, "/uk") == 0);
+	CHECK(strcmp(client.global_known_hosts, "/gk") == 0);
+	CHECK_EQ(client.batch_mode, 1);
+	CHECK_EQ(client.connect_timeout, 30);
+	CHECK_EQ(client.server_alive_interval, 20);
+	CHECK_EQ(client.server_alive_count, 5);
+	CHECK_EQ(client.request_tty, SSH_TTY_FORCE);
+	CHECK_EQ(client.password, 0);
+	CHECK_EQ(client.pubkey, 0);
+	CHECK_EQ(client.log_level, 2);
+
+	/* A second file after it changes nothing but adds an identity. */
+	CHECK_EQ(client_add(second, "h"), 0);
+	CHECK_EQ(bit_count(client.set_mask), 15);
+	CHECK(strcmp(client.user, "u1") == 0);
+	CHECK(strcmp(client.host_name, "hn1") == 0);
+	CHECK_EQ(client.port, 2201);
+	CHECK_EQ(client.identity_count, 2);
+	CHECK(strcmp(client.identity[1], "/i2") == 0);
+	CHECK_EQ(client.strict, SSH_STRICT_YES);
+	CHECK(strcmp(client.user_known_hosts, "/uk") == 0);
+	CHECK(strcmp(client.global_known_hosts, "/gk") == 0);
+	CHECK_EQ(client.batch_mode, 1);
+	CHECK_EQ(client.connect_timeout, 30);
+	CHECK_EQ(client.server_alive_interval, 20);
+	CHECK_EQ(client.server_alive_count, 5);
+	CHECK_EQ(client.request_tty, SSH_TTY_FORCE);
+	CHECK_EQ(client.password, 0);
+	CHECK_EQ(client.pubkey, 0);
+	CHECK_EQ(client.log_level, 2);
+
+	/* The defaults leave all of it alone. */
+	ssh_config_defaults(&client);
+	CHECK_EQ(client.port, 2201);
+	CHECK_EQ(client.identity_count, 2);
+	CHECK_EQ(client.strict, SSH_STRICT_YES);
+	CHECK_EQ(client.server_alive_count, 5);
+	CHECK_EQ(client.log_level, 2);
+
+	/* The second file read first: its values are the ones used. */
+	ssh_config_init(&client);
+	CHECK_EQ(client_add(second, "h"), 0);
+	CHECK_EQ(client_add(first, "h"), 0);
+	CHECK(strcmp(client.user, "u2") == 0);
+	CHECK(strcmp(client.host_name, "hn2") == 0);
+	CHECK_EQ(client.port, 2202);
+	CHECK_EQ(client.strict, SSH_STRICT_NO);
+	CHECK(strcmp(client.user_known_hosts, "/uk2") == 0);
+	CHECK(strcmp(client.global_known_hosts, "/gk2") == 0);
+	CHECK_EQ(client.batch_mode, 0);
+	CHECK_EQ(client.connect_timeout, 31);
+	CHECK_EQ(client.server_alive_interval, 21);
+	CHECK_EQ(client.server_alive_count, 6);
+	CHECK_EQ(client.request_tty, SSH_TTY_NO);
+	CHECK_EQ(client.password, 1);
+	CHECK_EQ(client.pubkey, 1);
+	CHECK_EQ(client.log_level, 3);
+
+	/* The same fields set from -o options, one at a time, give the same bits. */
+	ssh_config_init(&client);
+	CHECK_EQ(client_option("User=u1"), 0);
+	CHECK_EQ(client_option("HostName=hn1"), 0);
+	CHECK_EQ(client_option("Port=2201"), 0);
+	CHECK_EQ(client_option("IdentityFile=/i1"), 0);
+	CHECK_EQ(client_option("StrictHostKeyChecking=yes"), 0);
+	CHECK_EQ(client_option("UserKnownHostsFile=/uk"), 0);
+	CHECK_EQ(client_option("GlobalKnownHostsFile=/gk"), 0);
+	CHECK_EQ(client_option("BatchMode=yes"), 0);
+	CHECK_EQ(client_option("ConnectTimeout=30"), 0);
+	CHECK_EQ(client_option("ServerAliveInterval=20"), 0);
+	CHECK_EQ(client_option("ServerAliveCountMax=5"), 0);
+	CHECK_EQ(client_option("RequestTTY=force"), 0);
+	CHECK_EQ(client_option("PasswordAuthentication=no"), 0);
+	CHECK_EQ(client_option("PubkeyAuthentication=no"), 0);
+	CHECK_EQ(client_option("LogLevel=VERBOSE"), 0);
+	CHECK_EQ(bit_count(client.set_mask), 15);
 }
 
 /* Words a random line is made of: keywords of both files, values of every kind and punctuation. */
@@ -1516,6 +1854,7 @@ static void
 test_fuzz(void)
 {
 	static char text[4096];
+	char *copy;
 	unsigned long round;
 	size_t size;
 	int status;
@@ -1526,7 +1865,11 @@ test_fuzz(void)
 		sshd_config_defaults(&sshd);
 		memset(error, 'x', sizeof(error) - 1);
 		error[sizeof(error) - 1] = '\0';
-		status = sshd_config_parse(&sshd, text, size, error);
+		copy = malloc(size != 0 ? size : 1);
+		CHECK(copy != NULL);
+		memcpy(copy, text, size);
+		status = sshd_config_parse(&sshd, copy, size, error);
+		free(copy);
 		CHECK(status == 0 || status == EINVAL);
 		if (status != 0) {
 			CHECK(strlen(error) > 0);
@@ -1543,7 +1886,11 @@ test_fuzz(void)
 		ssh_config_init(&client);
 		memset(error, 'x', sizeof(error) - 1);
 		error[sizeof(error) - 1] = '\0';
-		status = ssh_config_parse(&client, text, size, fuzz_hosts[round % 3], error);
+		copy = malloc(size != 0 ? size : 1);
+		CHECK(copy != NULL);
+		memcpy(copy, text, size);
+		status = ssh_config_parse(&client, copy, size, fuzz_hosts[round % 3], error);
+		free(copy);
 		CHECK(status == 0 || status == EINVAL);
 		if (status != 0) {
 			CHECK(strlen(error) > 0);
@@ -1559,7 +1906,11 @@ test_fuzz(void)
 		size = fuzz_text(text, sizeof(text));
 		text[size] = '\0';
 		ssh_config_init(&client);
-		status = ssh_config_option(&client, text, error);
+		copy = malloc(strlen(text) + 1);
+		CHECK(copy != NULL);
+		strcpy(copy, text);
+		status = ssh_config_option(&client, copy, error);
+		free(copy);
 		CHECK(status == 0 || status == EINVAL);
 		ssh_config_defaults(&client);
 		check_client_invariants();
@@ -1589,6 +1940,7 @@ main(void)
 	test_sshd_values();
 	test_sshd_ignored();
 	test_syntax();
+	test_sshd_all();
 
 	/* The client's keywords, Host blocks, the order of sources, options. */
 	test_ssh_values();
@@ -1596,6 +1948,7 @@ main(void)
 	test_ssh_host();
 	test_ssh_order();
 	test_ssh_option();
+	test_ssh_all();
 
 	/* Random input. */
 	test_fuzz();
