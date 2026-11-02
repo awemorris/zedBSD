@@ -6,9 +6,9 @@
  */
 
 /*
- * The AES block cipher (AES-128, AES-192, AES-256) in the forward
- * direction, and the counter mode GCM uses.  The inverse cipher is not
- * needed (GCM only encrypts blocks) and is not provided.
+ * The AES block cipher (AES-128, AES-192, AES-256) in both directions,
+ * and the counter mode GCM uses.  GCM only encrypts blocks; the inverse
+ * cipher (5.3) serves the CBC mode of the public EVP interface.
  *
  * Constant time.  The key, the round keys and every state byte are
  * secret.  The implementation has no table indexed by a secret: SubBytes
@@ -24,7 +24,11 @@
  * and 4.4; the unit tests check every one of the 256 inputs against the
  * S-box of Table 4.  ShiftRows and
  * MixColumns are permutations and XORs of the slices.  The key expansion
- * (5.2, Algorithm 2) uses the same SubBytes circuit for SubWord.
+ * (5.2, Algorithm 2) uses the same SubBytes circuit for SubWord.  The
+ * inverse cipher (5.3, Algorithm 3) uses the same round keys in reverse
+ * order; InvSubBytes is the inverse affine transformation of equation
+ * (5.16) followed by the same inversion circuit, and InvShiftRows and
+ * InvMixColumns are permutations and XORs of the slices again.
  *
  * Inputs and outputs are byte strings in the order of 3.4 (input byte n
  * is s[n mod 4, n / 4]).
@@ -85,6 +89,15 @@ int cryc_aes_init(struct cryc_aes *aes, const uint8_t *key, size_t key_size);
  * count may be 0.  Constant time.
  */
 void cryc_aes_encrypt_blocks(const struct cryc_aes *aes, const uint8_t *in, uint8_t *out, size_t count);
+
+/*
+ * Decrypts count blocks of 16 bytes (InvCipher, 5.3, Algorithm 3) from in
+ * to out, each block independently (the caller builds a mode on top).
+ *
+ * in and out may be the same buffer, or must not overlap otherwise.
+ * count may be 0.  Constant time.
+ */
+void cryc_aes_decrypt_blocks(const struct cryc_aes *aes, const uint8_t *in, uint8_t *out, size_t count);
 
 /*
  * XORs size bytes of in with the keystream E(CB), E(inc32(CB)),

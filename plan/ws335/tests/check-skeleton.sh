@@ -19,7 +19,7 @@
 #     without the version and UNICODE macros), warnings as errors;
 #  7. the namespace: every external name an object defines (nm, for the cc objects and each Windows arch's) is a
 #     public name or starts with cryc_ (libcrypto-compat: cryc_, ERR_, X509_, EVP_, RAND_, OPENSSL_, CRYPTO_,
-#     d2i_X509) or sslc_ (libssl-compat: sslc_, SSL_, TLS_); the Windows static libraries share the namespace of
+#     OSSL_PARAM_, d2i_X509, HMAC) or sslc_ (libssl-compat: sslc_, SSL_, TLS_); the Windows static libraries share the namespace of
 #     the executable they are linked into.  Names that are not C identifiers or start with __ (the compiler's) are
 #     not checked.
 #   sh plan/ws335/tests/check-skeleton.sh
@@ -38,7 +38,7 @@ crypto=userland/base/libcrypto-compat
 ssl=userland/base/libssl-compat
 headers="$crypto/cryc*.h $ssl/sslc*.h include/libc/compat/crypto/*.h include/libc/compat/ssl/*.h"
 status=0
-crypto_names='^(cryc_|ERR_|X509_|EVP_|RAND_|OPENSSL_|CRYPTO_|d2i_X509$)'
+crypto_names='^(cryc_|ERR_|X509_|EVP_|RAND_|OPENSSL_|CRYPTO_|OSSL_PARAM_|d2i_X509$|HMAC$)'
 ssl_names='^(sslc_|SSL_|TLS_)'
 
 # The library a source belongs to: crypto or ssl.

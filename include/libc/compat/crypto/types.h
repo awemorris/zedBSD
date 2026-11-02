@@ -65,20 +65,26 @@ typedef struct evp_mac_st EVP_MAC;
 /* A MAC computation in progress. */
 typedef struct evp_mac_ctx_st EVP_MAC_CTX;
 
+/* A key derivation algorithm (EVP_KDF_fetch returns it; only HKDF). */
+typedef struct evp_kdf_st EVP_KDF;
+
+/* A key derivation's settings (the digest, the key, the salt, the info). */
+typedef struct evp_kdf_ctx_st EVP_KDF_CTX;
+
 /*
  * Types that appear in OpenSSL's signatures but that libcrypto-compat
  * does not implement: every argument of these types must be NULL (an
- * ENGINE, a library context, a property query's context, a parameter
- * array), or the call fails.
+ * ENGINE, a library context), or the call fails.
  */
 typedef struct engine_st ENGINE;
 typedef struct ossl_lib_ctx_st OSSL_LIB_CTX;
 
 /*
- * A parameter of OpenSSL 3's parameter arrays.  libcrypto-compat takes no
- * parameters (every OSSL_PARAM array argument must be NULL), but the
- * structure is complete, as in OpenSSL, so that "const OSSL_PARAM
- * params[]" is a valid parameter type.
+ * A parameter of OpenSSL 3's parameter arrays (made with the constructors
+ * of <compat/crypto/params.h>; an array ends with a parameter whose key is
+ * NULL).  Only EVP_PKEY_fromdata and EVP_KDF_derive take parameters, and
+ * only the ones their comments name; every other OSSL_PARAM array argument
+ * must be NULL.
  * Values referenced: OpenSSL 3.5.8 include/openssl/core.h (the members
  * of struct ossl_param_st, in order).
  */
