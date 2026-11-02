@@ -32,8 +32,16 @@ p260（Interop 2025 の Chromium が通る試験を全部通す）の目標・�
 
 | # | 日付 | site | 指摘 | 状態 |
 | --- | --- | --- | --- | --- |
-| （ユーザーの指摘を待つ） | | | | |
+| U1 | 2026-11-03 | https://www.amazon.co.jp/ | 画面が真っ白（Windows 版で確認） | 調査済み・ユーザーの判断待ち |
 
 ## 状態
 
-2026-11-03 01:4x: Phase を立てた（Q1）。ユーザーの指摘を待つ。
+2026-11-03 01:4x: Phase を立てた（Q1）。
+
+2026-11-03 01:47: U1 を host で再現（main 010f487aa1 の host build、warning 0。`--render --async` 1280x900 で画面は白の 1 色）。
+- amazon.co.jp は本当の頁ではなく **AWS WAF の bot の確認の頁**（`challenge.js` を読み、`AwsWafIntegration.getToken()` の後に
+  `location.reload(true)` で開き直す）を返した。この頁は `<div id="challenge-container">` だけで、Chromium でも確認の間は白い。
+- engine の誤り: `ReferenceError: FileReader is not defined` と `TypeError: Cannot read properties of undefined or null (at 1:646274)`
+  （challenge.js の中）。token が取れず、開き直しに進まないので白のまま。
+- AGENTS・master の規則「bot の確認に当たったら止めて報告、User-Agent の変更・別の取り方の再試行はしない」に当たるので、
+  先へ進む前にユーザーに方針を聞く。
