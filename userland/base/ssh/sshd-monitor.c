@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -85,6 +86,17 @@
  */
 #define MONITOR_METHOD_PUBLICKEY	"publickey"
 
+/* The room for the " from <address> port <port>" part of a log line, with the NUL. */
+#define MONITOR_FROM_MAX	96U
+
+/*
+ * The connection's peer as "address port" for the log lines of logins,
+ * empty until sshd_monitor_run_program sets it before the first request.
+ * A monitor process serves one connection, so it is set once and only
+ * read afterwards.
+ */
+static char monitor_peer[64];
+
 static int monitor_sign(struct sshd_monitor *monitor, const uint8_t *body, size_t size, struct ssh_buf *reply);
 static int monitor_pubkey_query(struct sshd_monitor *monitor, const uint8_t *body, size_t size, const struct timespec *arrived, struct ssh_buf *reply);
 static int monitor_pubkey_login(struct sshd_monitor *monitor, const uint8_t *body, size_t size, const struct timespec *arrived, struct ssh_buf *reply);
@@ -120,6 +132,7 @@ static void monitor_report_grant(int *started);
 static void monitor_stop_child(pid_t child, int socket_end);
 static void monitor_reap(pid_t child);
 static void monitor_log_text(const char *text, char *out, size_t size);
+static void monitor_log_from(char *out, size_t size);
 
 /*
  * Runs the monitor of one connection on descriptor client until the
@@ -203,6 +216,9 @@ sshd_monitor_run_program(
 		syslog(LOG_AUTH | LOG_ERR, "monitor: the context does not match the user sshd runs as");
 		goto done;
 	}
+
+	/* Keeps the peer for the log lines of the logins, as the log may show it. */
+	monitor_log_text(context->peer, monitor_peer, sizeof(monitor_peer));
 
 	/* A child that closes its socket must not end the monitor with SIGPIPE. */
 	(void)signal(SIGPIPE, SIG_IGN);
@@ -705,7 +721,10 @@ monitor_pubkey_login(
 	int status;
 	int granted;
 	int verified;
+	int printed;
 	char shown[SSH_USER_MAX + 1];
+	char from[MONITOR_FROM_MAX];
+	char fingerprint[SSH_KEY_FINGERPRINT_SIZE];
 
 	/* Reads the user, the key blob, the signed data and the signature, with nothing after them. */
 	ssh_reader_init(&reader, body, size);
@@ -748,12 +767,19 @@ monitor_pubkey_login(
 		}
 	}
 
+	/* Names the key and the peer for the log line, as OpenSSH's sshd writes it, so the lines can be counted. */
+	monitor_log_from(from, sizeof(from));
+	printed = ssh_key_fingerprint(public_key, fingerprint, sizeof(fingerprint));
+	if (printed != 0)
+		strcpy(fingerprint, "?");
+
 	/* Answers no sooner than the delay after the request arrived. */
 	monitor_wait_until(arrived, monitor->fail_delay_ms);
 	if (granted) {
+		syslog(LOG_AUTH | LOG_INFO, "Accepted publickey for %.64s%s ssh2: ED25519 %s", shown, from, fingerprint);
 		status = monitor_put_result(0, reply);
 	} else {
-		syslog(LOG_AUTH | LOG_NOTICE, "Failed publickey for %.64s", shown);
+		syslog(LOG_AUTH | LOG_NOTICE, "Failed publickey for %.64s%s ssh2: ED25519 %s", shown, from, fingerprint);
 		status = monitor_put_result(EACCES, reply);
 	}
 	if (status != 0)
@@ -794,6 +820,7 @@ monitor_password_login(
 	int allowed;
 	int correct;
 	char shown[SSH_USER_MAX + 1];
+	char from[MONITOR_FROM_MAX];
 
 	/* Reads the user and the password, with nothing after them. */
 	ssh_reader_init(&reader, body, size);
@@ -834,14 +861,17 @@ monitor_password_login(
 	correct = sshd_password_ok(monitor->config, user, password);
 	ssh_wipe(password, sizeof(password));
 
+	/* Names the user and the peer for the log line, as OpenSSH's sshd writes it. */
+	monitor_log_text(user, shown, sizeof(shown));
+	monitor_log_from(from, sizeof(from));
+
 	/* Answers no sooner than the delay after the request arrived. */
 	monitor_wait_until(arrived, monitor->fail_delay_ms);
 	if (allowed == 0 && correct == 0) {
+		syslog(LOG_AUTH | LOG_INFO, "Accepted password for %.64s%s ssh2", shown, from);
 		status = monitor_put_result(0, reply);
 	} else {
-		/* Logs the failure with the user as the log may show it. */
-		monitor_log_text(user, shown, sizeof(shown));
-		syslog(LOG_AUTH | LOG_NOTICE, "Failed password for %.64s", shown);
+		syslog(LOG_AUTH | LOG_NOTICE, "Failed password for %.64s%s ssh2", shown, from);
 		status = monitor_put_result(EACCES, reply);
 	}
 	if (status != 0)
@@ -1380,7 +1410,6 @@ monitor_grant(
 	/* Remembers whom the session belongs to. */
 	monitor->user_uid = uid;
 	monitor->stage = SSHD_STAGE_GRANTED;
-	syslog(LOG_AUTH | LOG_INFO, "Accepted login for %.64s", monitor->user);
 }
 
 /* Appends a RESULT frame with result to reply; 0 or the frame's error. */
@@ -2104,4 +2133,28 @@ monitor_log_text(
 
 	/* Ends the copy as a string. */
 	out[index] = '\0';
+}
+
+/*
+ * Writes " from <address> port <port>" for a log line from the peer
+ * sshd_monitor_run_program kept ("address port"), or nothing when there
+ * is no peer (the monitor run without a connection, as in a test).
+ */
+static void
+monitor_log_from(
+	char *out,
+	size_t size)
+{
+	const char *space;
+	size_t address_length;
+
+	/* Nothing when no peer is known. */
+	out[0] = '\0';
+	space = strrchr(monitor_peer, ' ');
+	if (space == NULL)
+		return;
+
+	/* The address before the last blank, the port after it. */
+	address_length = (size_t)(space - monitor_peer);
+	(void)snprintf(out, size, " from %.*s port %s", (int)address_length, monitor_peer, space + 1);
 }

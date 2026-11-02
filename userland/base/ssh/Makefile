@@ -5,8 +5,9 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # library module (ssh-*.c other than the programs' own); sshd also takes the console login's password check.  They
 # are linked by their own rules in platform/common/userland-dynamic.mk (libcrypto-compat.so and libc.so).
 #
-# They sit in the test menu and are off by default while OpenSSH is the image's: the two install the same paths
-# (/usr/bin/ssh, /usr/sbin/sshd, /usr/libexec/sftp-server, /etc/ssh, /etc/service.d/sshd), so an image holds one.
+# They are base programs, off by default until the configurations choose them in the place of OpenSSH: the two
+# install the same paths (/usr/bin/ssh, /usr/sbin/sshd, /usr/bin/ssh-keygen, /usr/libexec/sftp-server, /etc/ssh,
+# /etc/service.d/sshd), so a configuration that names both is refused.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 ZEDBSD_SSH_DIR := userland/base/ssh
@@ -19,10 +20,16 @@ ZEDBSD_SSHD_SOURCES := $(sort $(wildcard $(ZEDBSD_SSH_DIR)/sshd-*.c)) userland/b
 ZEDBSD_SSH_KEYGEN_SOURCES := $(ZEDBSD_SSH_DIR)/ssh-keygen-main.c $(ZEDBSD_SSH_MODULES)
 ZEDBSD_SFTP_SERVER_SOURCES := $(ZEDBSD_SSH_DIR)/sftp-server-main.c $(ZEDBSD_SSH_MODULES)
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,ssh,ssh secure shell client,*,n,basic,$(ZEDBSD_SSH_SOURCES),y,tests,base/ssh,base/libcrypto-compat,,program,,,usr/bin))
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,sshd,ssh secure shell server,*,n,basic,$(ZEDBSD_SSHD_SOURCES),y,tests,base/ssh,base/libcrypto-compat,,program,,,usr/sbin))
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,ssh-keygen,ssh key generator,*,n,basic,$(ZEDBSD_SSH_KEYGEN_SOURCES),y,tests,base/ssh,base/libcrypto-compat,,program,,,usr/bin))
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,sftp-server,SFTP server of sshd,*,n,basic,$(ZEDBSD_SFTP_SERVER_SOURCES),y,tests,base/ssh,base/libcrypto-compat,,program,,,usr/libexec))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,ssh,ssh secure shell client,*,n,basic,$(ZEDBSD_SSH_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/bin))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,sshd,ssh secure shell server,*,n,basic,$(ZEDBSD_SSHD_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/sbin))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,ssh-keygen,ssh key generator,*,n,basic,$(ZEDBSD_SSH_KEYGEN_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/bin))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,sftp-server,SFTP server of sshd,*,n,basic,$(ZEDBSD_SFTP_SERVER_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/libexec))
+
+# OpenSSH's package and these give the same paths; an image can hold only one of them.
+ifneq ($(and $(filter openssh,$(ZEDBSD_USER_PROGRAMS)),$(filter ssh sshd ssh-keygen sftp-server,$(ZEDBSD_USER_PROGRAMS))),)
+$(error ZEDBSD_USER_PROGRAMS names openssh and $(filter ssh sshd ssh-keygen sftp-server,$(ZEDBSD_USER_PROGRAMS)), \
+	which install the same files: choose one)
+endif
 
 # The files that come with the programs: the server's configuration (root only, it names the host key), the
 # service definition init reads, and the script it runs, which makes the host key on the machine the first time.

@@ -180,11 +180,15 @@ abi-image: $(BUILD)/abi.img
 # application: every symbol it names is the C library's.
 ARMV7_ROOT_COMMANDS ?= cat cksum dd df dmesg echo getty init login ls mount \
 	ps reboot rm sh swapon sync syslogd time umount uname
-# The script that starts OpenSSH's server makes /var/empty and sets the
-# modes of the host keys it makes, and the kernel update over SSH
-# (plan/tools/zybo/deploy.sh) renames the boot files on /boot/boot0, so a
-# root with OpenSSH has those commands.
-ARMV7_ROOT_COMMANDS += $(if $(filter openssh,$(ZEDBSD_USER_PROGRAMS)),chmod mkdir mv)
+# The script that starts the SSH server (OpenSSH's or zedBSD's own) makes
+# /var/empty and sets the modes of the host keys it makes, and the kernel
+# update over SSH (plan/tools/zybo/deploy.sh) renames the boot files on
+# /boot/boot0, so a root with an SSH server has those commands.
+ARMV7_ROOT_COMMANDS += $(if $(filter openssh sshd,$(ZEDBSD_USER_PROGRAMS)),chmod mkdir mv)
+# zedBSD's own SSH programs a configuration names go into the root; they
+# are linked by their own rule (below), with libcrypto-compat.
+ARMV7_SSH_COMMANDS := $(filter ssh sshd ssh-keygen sftp-server,$(ZEDBSD_USER_PROGRAMS))
+ARMV7_ROOT_COMMANDS += $(ARMV7_SSH_COMMANDS)
 # The network's programs, those a configuration names (the ZYBO's network
 # login, config/ci/config-zybo.mk): the network daemon, the
 # commands it runs to configure an interface (ifconfig, route) and to take
@@ -249,7 +253,7 @@ $(BUILD)/bin/$(1): $(ARMV7_APP_INPUTS) $(ARMV7_APP_NET_COMMON_OBJS) \
  $(call ZEDBSD_USERLAND_OBJECTS,$(ARMV7_APP_OBJ),$(1)) $(ARMV7_APP_LIBS) -o $$@
 	$(ARMV7_APP_CHECK) $$@
 endef
-$(foreach command,$(filter-out sh mount umount $(ARMV7_APP_NET_COMMANDS),$(ARMV7_ROOT_COMMANDS)),\
+$(foreach command,$(filter-out sh mount umount $(ARMV7_APP_NET_COMMANDS) $(ARMV7_SSH_COMMANDS),$(ARMV7_ROOT_COMMANDS)),\
 	$(eval $(call ARMV7_APP_BASIC_COMMAND,$(command))))
 $(foreach command,$(ARMV7_APP_NET_COMMANDS),\
 	$(eval $(call ARMV7_APP_NET_COMMAND,$(command))))

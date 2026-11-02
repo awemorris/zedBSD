@@ -263,7 +263,7 @@ def run_pty(args):
 
 # startups PORT LIMIT LOG -- LOGIN-COMMAND...: MaxStartups.  LIMIT connections that send nothing each get the
 # server's identification line; one more is closed at once.  One of them is let go, the login command (a session
-# that stays a while) logs in (seen as one more "Accepted login" line in the server's LOG), and then one more
+# that stays a while) logs in (seen as one more "Accepted publickey" line in the server's LOG), and then one more
 # connection is taken and the next closed again.
 def ident(port):
     s = socket.create_connection(("127.0.0.1", port), 5)
@@ -285,7 +285,7 @@ def startups(args):
     command = args[4:]
     def accepted():
         try:
-            return open(log, errors="replace").read().count("Accepted login")
+            return open(log, errors="replace").read().count("Accepted publickey")
         except OSError:
             return 0
     held = []
@@ -1154,7 +1154,7 @@ zssh -o StrictHostKeyChecking=accept-new -p "$port_stop" 127.0.0.1 'sleep 4; ech
     2> "$work/b11.err" &
 session_pid=$!
 tries=0
-while ! grep -q 'Accepted login' "$stop_dir/log" 2>/dev/null && [ "$tries" -lt 300 ]; do
+while ! grep -q 'Accepted publickey' "$stop_dir/log" 2>/dev/null && [ "$tries" -lt 300 ]; do
 	sleep 0.1
 	tries=$((tries + 1))
 done

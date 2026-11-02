@@ -2,7 +2,7 @@
 
 # ws336-p024: OpenSSH からの入れ替え
 
-Status: planned（2026-11-01 p001 の設計で作成）
+Status: in-progress（2026-11-02 23:40 P6 q1999。2026-11-03 00:05 Q1 のラップアップで途中で引き継ぎ: 下の「結果（引き継ぎ）」）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p022・p023
@@ -56,6 +56,57 @@ WS335 の待ち: **WS335 の実装**。Q6 は A（p022 が通ったら既定の 
 
 上の command が全部 PASS（出力の最後の行を自分で読む）。試験が通った後、実装を git の外でわざと数通りに壊し（境界の比較を 1 つずらす、byte 順を逆にする、範囲の確かめを 1 つ外す など）、試験が FAIL することを確かめて元に戻す（`cmp` で戻ったことを確かめる。見逃しがあれば試験を足す）。規約の checklist（coding-style §14）で自分の diff を見直す。表の値には block ごとに複数行の「Values referenced:」の comment。commit は新しい file を `git add` してから `git commit -m WIP -- <この Phase の path>`。この phase.md の「結果」の節（日付は host の `date`、実行した command と最後の行、件数、自分で決めた点、未実施）と [ws.md](../ws.md) の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が決める）。push しない、rm しない。
 
-## 結果
+## 結果（引き継ぎ）
 
-（未着手）
+2026-11-03 00:05（host の `date`）。**途中**（Q1 のラップアップの指示で区切った。実装済み・試験 PASS ではない）。P6、worktree `p6-ws336`（branch `agent/p6-ws336`、基点 main 5fb95f5669）。
+
+### 範囲（2026-11-02 Q1 の決め）
+
+- `config/ci/*` はこの Phase では変えない（WS343 がユーザーの WS として、OpenSSH・OpenSSL・curl・libcurl を CI の config から外し、自前の ssh・sshd・libssl.so・libcrypto.so を base に入れる）。p024 は入れ替えの準備（同じ path・service を出す package、rootfs の規則、OpenSSH の package との衝突、host key の引き継ぎ）を作り、自分の試験の config で確かめ、`config/ci` の差分の案を下に書く。`config/ci/config-amd64-server.mk` はユーザーの物で、案にも入れない。
+- 自前の package は既定 n のまま（衝突の規則があるので、openssh を選ぶ config/ci が WS343 の変更の前に build できなくなるため）。既定 y は config/ci の変更と一緒に WS343 で（案の 2）。
+- `scp -O` の 4 本の道具は Q1 の OK で直した。
+
+### 済んだ事
+
+1. **sshd の log の行を OpenSSH の形に**（`userland/base/ssh/sshd-monitor.c`、header の変更なし）: `plan/tools/ssh-rtt/qemu-ssh-rtt.sh`（この Phase の確かめの 1 つ）が `/var/log/messages` の "Accepted publickey" を数えるのに、monitor は "Accepted login for USER" を書いていた（design.md の sshd の行と §8 の約束は OpenSSH と同じ形）。今は "Accepted publickey for U from A port P ssh2: ED25519 SHA256:…"・"Failed publickey …"・"Accepted password for U from A port P ssh2"・"Failed password …"。peer は monitor の process ごとに 1 度だけ置く file-scope の文字列（`sshd_monitor_run_program` が context の peer を log に出せる形で写す）。peer の無い時（試験の monitor）は from・port を省く。test-monitor（1455 checks、受け入れの行の check を足した）・sshd-pair-host・interop-host（数える語）を新しい行に合わせた。
+2. **package**（`userland/base/ssh/Makefile`）: 4 つを menu `base` に（既定 n のまま）。`openssh` と自前のどれかを両方選ぶ config は make の始めに止める（同じ file を置くため、`$(error … choose one)`）。`config/ci/config-amd64.mk` に sshd を足した config で止まる事を確かめた。
+3. **armv7 の root**（`platform/armv7/userland.mk`・`rootfs.mk`）: 自前の 4 つを選ぶと root の command（`ARMV7_SSH_COMMANDS`、自前の link の規則で、basic の規則から外す）と runtime の `libcrypto-compat.so` に入り、sshd-start が使う `chmod mkdir mv` も（OpenSSH の時と同じく）入る。`make ZEDBSD_CONFIG=plan/ws336/tests/config-armv7-ssh.mk BUILD=build/p024-zybo build/p024-zybo/root.img` → rc 0・warning 0、root に ssh・sshd・ssh-keygen・sftp-server・libcrypto-compat.so・sshd_config・service・sshd-start・chmod・mkdir・mv、4 MiB の root に入った（OpenSSH の時の 16 MiB は要らない）。
+4. **host key の引き継ぎ**: 自前の sshd-start は ed25519 の鍵が無い時だけ作り、ある鍵（OpenSSH の時に作られた rsa・ecdsa・ed25519）には触らない。自前の sshd は ed25519 の鍵だけを使い、rsa などの HostKey の行は読み飛ばす（p016・p019 で確かめ済み、interop-host の相手 B は rsa の行が先の設定で動く）。だから OpenSSH の image から入れ替えても既存の ed25519 の host key がそのまま使われ、client の known_hosts は変わらない（OpenSSH の client が ed25519 を選んでいた場合）。
+5. **`scp -O` を外した**（Q1 の OK、SFTP mode。OpenSSH の guest でも動く）:
+   - `plan/tools/gpu-perf/measure.sh:97` `timeout 120 scp -O -i "$KEY" $ZSSHOPT "$@" && return 0` → `scp -i …`（:94 の comment も「old SCP protocol」→「its SFTP mode」）
+   - `plan/tools/rtx-video/rtx-s5-check.sh:70`、`rtx-video-check.sh:67`、`rtx-notes-check.sh:57`・`:60`: 同じく `scp -O -i` → `scp -i`
+   - 4 本とも実機（RTX の機械）が要り、host の自己試験や dry run は無い。`sh -n` だけ通した（未実施: 実機での実行）。
+6. **試験の config**（`plan/ws336/tests/`）: `config-amd64-ci-ssh.mk`・`config-rpi5-ssh.mk`・`config-odroid-c5-ssh.mk`（新）、`config-arm64-ssh.mk`（rpi4）・`config-riscv64-ssh.mk`（visionfive2-keiland）は openssh だけを外すように直した（OpenSSL は curl のために残る）、`config-armv7-ssh.mk`（zybo、openssh と openssl を外す）、`config-amd64-tcp-ssh.mk`（qemu-close.sh 用、ws221 の tcp の config の自前版）。7 つとも make が読める（`list-user-programs` rc 0）。
+7. **1 本の script** `plan/ws336/tests/replace-check.sh`（書いた、**まだ流していない**）: amd64 の既定の image と TCP の image を build（warning 0）、guest.sh の start・wait・run・put・get（1 MiB の往復）と server が自前で OpenSSH の program が無い事、qemu-ssh-rtt.sh と qemu-close.sh の PASS と "Accepted publickey" の数、他の arch（rpi4・rpi5・odroid-c5・visionfive2-keiland・zybo）の image の build と root の中身。最後の行 `replace-check: PASS`。
+8. amd64 の既定の image（`plan/tools/guest/test-image.sh plan/ws336/tests/config-amd64-ci-ssh.mk build/p024-amd64`）: 10 分 31 秒、rc 0。compiler の warning 15 行は全部 OpenSSL（curl のために残る外部の package、`../src/crypto/…`）の物で、自前の code は 0。
+
+### 確かめた command と最後の行
+
+- `sh plan/ws336/tests/run-unit.sh all` → `run-unit: PASS`（test-monitor 1455 checks）
+- `sh plan/ws336/tests/sshd-pair-host.sh` → `sshd-pair-host: PASS`（新しい log の行で）
+- `BASE=0e9b68f948 sh plan/ws336/tests/check-skeleton.sh` → `check-skeleton: PASS`
+- `git diff --check` → 出力なし
+- zybo の root.img（上の 3）、amd64 の既定の image の build（上の 8）
+
+### 残り（次の担当へ）
+
+1. `sh plan/ws336/tests/replace-check.sh` を流す（guest.sh・qemu-ssh-rtt・qemu-close・他 arch の image）。期待: 最後の行 PASS。amd64 の image の build で OpenSSL の warning が数えられて FAIL になるので、`warnings` を OpenSSL（外部の package の `../src/`）を除いて数えるか、OpenSSL を外した後（WS343）に流すかを決める（OpenSSL の warning は今の main の既定の image でも出る）。
+2. interop-host.sh を流し直す（log の行の語を変えた。sshd-pair-host は PASS）。fuzz-host は monitor の log だけの変更なので要らないはず（未実施）。
+3. 壊す確かめ（log の行の形、衝突の規則、armv7 の root の規則）と coding-style §14 の見直し（sshd-monitor.c の変更は §14 で見た: 宣言は先頭、呼び出しに comment、条件の中で関数を呼ばない）。
+4. 実機の試験の一覧（Q1 がユーザーの拾える試験の一覧に置く）: 5330（NVMe の zedBSD）・VF2・ZYBO・RPi で、自前の sshd の image に入れ替えた後、今の道具（sshpass・scp・`plan/tools/aat`・`plan/tools/hw5330/5330-run.sh`・`plan/tools/zybo/deploy.sh`）がそのまま通る事、既存の host key が引き継がれ known_hosts が変わらない事。
+5. phase.md の「作る物」の既定の config の変更は WS343 で（下の案）。
+
+### config/ci の差分の案（WS343 が当てる）
+
+`config/ci/config-amd64-server.mk` は案に入れない（ユーザーの物。同じ 1 語の置き換えが当てはまる）。
+
+1. 次の 7 つの `ZEDBSD_USER_PROGRAMS :=` の行で、語 `openssh` を `libcrypto-compat ssh sshd ssh-keygen sftp-server` に置き換える（`openssl` は curl・libcurl が要るので、それらを外す WS343 の同じ変更で外す）:
+   `config/ci/config-amd64.mk:57`、`config-rpi4.mk:57`、`config-rpi4-server.mk`、`config-rpi5.mk:74`、`config-odroid-c5.mk:67`、`config-odroid-c5-keiland.mk`、`config-visionfive2-keiland.mk:59`。
+   （確かめ: `sed 's/ openssh / libcrypto-compat ssh sshd ssh-keygen sftp-server /'` で各 file の `openssh` は 0 になる。）
+2. `config/ci/config-zybo.mk:56`: ` ca-certificates openssh openssl zlib` → ` ca-certificates libcrypto-compat ssh sshd ssh-keygen sftp-server zlib`（zybo では OpenSSL を使うのは OpenSSH だけ。zlib を残すかは WS343 で: OpenSSH の package の外の利用者を確かめる）。root は 4 MiB に入る（上の 3）。
+3. 同じ変更で `userland/base/ssh/Makefile` の 4 つの `ZEDBSD_USER_PROGRAMS` の登録の 4 番目の引数を `n` から `y` に（既定 y）。libcrypto-compat も既定 y にするか（require で選ばれる）は WS343 で。
+4. 試験の config（`plan/ws336/tests/config-<board>-ssh.mk`）は上の案と同じ program の集合を作る（順だけ違う）。WS343 は案を当てた後、`replace-check.sh` を config/ci の config で流せる。
+
+### 消す物（Q1 に頼む）
+
+`build/p024-amd64/`・`build/p024-zybo/`・`build/p024-x`（無ければ無し）・`build/amd64/packages/toolchain/` と worktree の `build/packages/openssl`・`build/packages/curl` など（amd64 の既定の image の build が作った外部の package）、`build/tmp/p024-*`、`build/tmp/ssh-unit.run.*`・`ssh-skeleton.run.*`・`sshd-pair.run.*`。

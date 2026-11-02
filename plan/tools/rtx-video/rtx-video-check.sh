@@ -64,7 +64,7 @@ zs() {
 
 # zput FILE... DEST: files copied to zedBSD.
 zput() {
-	timeout 300 scp -O -i "$KEY" $ZSSHOPT "$@" > /dev/null 2>&1
+	timeout 300 scp -i "$KEY" $ZSSHOPT "$@" > /dev/null 2>&1
 }
 
 # run NAME LIMIT: the script on stdin run on zedBSD as root (at most LIMIT seconds), its output in OUT/NAME.log.

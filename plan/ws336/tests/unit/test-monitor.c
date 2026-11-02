@@ -1309,6 +1309,7 @@ test_stages(void)
 	};
 	struct sshd_monitor monitor;
 	struct wire body;
+	char expected_log[160];
 	enum sshd_monitor_next next;
 	unsigned type;
 	uint32_t result;
@@ -1343,6 +1344,15 @@ test_stages(void)
 	status = login_good(&monitor);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(monitor.user_uid, getuid());
+
+	/*
+	 * The grant is logged in OpenSSH's form: "Accepted publickey for",
+	 * the user, " ssh2: ED25519 " and the key's "SHA256:" fingerprint of
+	 * 43 base64 characters (no peer: the monitor runs without one here).
+	 */
+	snprintf(expected_log, sizeof(expected_log), "Accepted publickey for %s ssh2: ED25519 SHA256:", self_name);
+	CHECK(strncmp(log_last, expected_log, strlen(expected_log)) == 0);
+	CHECK_EQ(strlen(log_last), strlen(expected_log) + 43U);
 	status = sign_h(&monitor, other_h, sizeof(other_h));
 	CHECK_EQ(status, 0);
 	wire_reset(&body);
@@ -1857,7 +1867,7 @@ test_password_requests(void)
 	status = call(&monitor, SSH_MON_PASSWORD_LOGIN, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(status, 0);
 	CHECK_EQ(result, EACCES);
-	CHECK(strcmp(log_last, "Failed password for zz??forged?]0;x????") == 0);
+	CHECK(strcmp(log_last, "Failed password for zz??forged?]0;x???? ssh2") == 0);
 	sshd_monitor_clear(&monitor);
 
 	/* PasswordAuthentication off: refused without crypt. */
