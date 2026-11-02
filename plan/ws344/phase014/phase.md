@@ -2,7 +2,7 @@
 
 # ws344-p014 VP8 の逆変換（vp8-idct.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet q1958-i01、2026-11-02。cleared は Q1）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p001。
 - 目的: Y2 の逆 WHT と 4x4 の逆 DCT、予測への加算。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -65,4 +65,33 @@ git diff --check
 
 ## 結果
 
-（未着手）
+日付: 2026-11-02（host の `date`）。担当: Sonnet q1958-i01。commit: f4b1f51161（`vp8-idct.c`、`unit/test-vp8_idct.c`）。
+
+実行した command と最後の行:
+
+- `sh plan/ws344/tests/run-unit.sh vp8_idct`: `test-vp8_idct: PASS (221 checks)` / `run-unit: PASS`
+- `sh plan/ws344/tests/run-unit.sh all`: 全 test PASS、最後の行 `run-unit: PASS`
+- `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh`: `check-skeleton: PASS`
+- `sh plan/ws344/tests/target-build.sh`: `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`
+- `git diff --check`: 出力なし（0）。
+
+試験の内容: WHT・IDCT それぞれ、全 0、DC だけ、手で式を追った入力（WHT 3 つ、IDCT 4 つ、comment に途中の値）、DC だけの全 16 bit の値（65536 通り、IDCT は予測 0・100・255）、
+clamp の両端、stride（4・16・33）と block の外の画素が変わらないこと、極端な入力（±32767・−32768・0 の組、各位置に 1 つ）、乱数 20000 block（4 通りの大きさ）。
+乱数と極端な入力の期待は、test の中に RFC 6386 14.3・14.4 の式をそのまま（short への格納を modular な wrap で）書いた物（仕様の式であって他の実装ではない）。
+
+わざと壊す確かめ（git の外の複写、`cmp` で戻りを確認）: 14 通り（定数 35468・20091 を 1 ずらす、IDCT の (x+4) を +3、符号 1 つ逆、clamp の除去、1 段目の 16 bit wrap の除去、
+WHT の (a+3) を +4、WHT の 1 段目の wrap の除去 2 通り、stride を 4 に固定、WHT の出力の位置の入れ替え、WHT の符号 1 つ、floor の shift を 0 向きの除算に、偶数入力の組の取り違え）。全部 FAIL、見逃し 0。
+
+未実施: fixture の全体の試験（libwebp との比較は vp8.c の Phase）、QEMU・実機（この Phase の範囲外）。
+
+自分で決めた点:
+
+- `webpc_vp8_iwht` の 1 段目の結果を 16 bit に wrap する（webpc_wrap16）。header の comment は「intermediate values stay in int32_t」と書くが、RFC 6386 14.3 と 20.8 の参照 decoder は
+  どちらも 1 段目の結果を short の配列に格納する（14.3 の本文も「intermediate ... are all stored as arrays of 16-bit signed integers」）。common.h は参照 decoder を正とするので、仕様に従った。
+  差が出るのは 1 段目の和が 16 bit を超える時（全入力 32767 など）だけで、整った encoder の stream では起きない。試験（test_wht_wrap）が全 32767 で wrap の振る舞いを手で追って固定している。
+  Q1 が header の comment 通り（wrap しない）を望むなら、`webpc_wrap16` を 4 行外し、test_wht_wrap の期待と reference_wht を直す。
+- 1 次元の逆 DCT は static 関数 idct_butterfly に 1 つにまとめ、1 段目（列）と 2 段目（行）で使う。2 段目の結果は 14.4 の通り short に収まる範囲（±15760 以内）なので wrap しない。
+- 2 段目の ">> 3" の後の値は residue として int32 のまま予測に足して clamp255 する（14.5）。
+- `ptrdiff_t` の stride は負も受けられる作りだが、header は何も言わないので試験は正の stride だけ。
+
+仕様と phase.md・header の食い違い: 上の WHT の 1 段目の wrap（header の comment の誤り。header は固定のため規約の見直しの Phase に持ち越し）。phase.md の他の記述は仕様と一致。

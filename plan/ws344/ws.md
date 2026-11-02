@@ -33,7 +33,7 @@
 | ws344-p011 | VP8 の frame header（vp8-header.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8_header 45344 PASS）。実装済み・試験 PASS（Sonnet q1951-i01、2026-11-02。cleared は Q1） | p009, p010 |
 | ws344-p012 | VP8 の macroblock header（vp8-modes.c） | cleared（2026-11-02 13:46 Q1、main で test-vp8_modes 627570 PASS）。実装済み・試験 PASS（Sonnet q1952-i01、2026-11-02。cleared は Q1） | p009, p010 |
 | ws344-p013 | VP8 の係数（vp8-tokens.c） | cleared（2026-11-02 13:58 Q1、main で test-vp8_tokens 336179 PASS）。実装済み・試験 PASS（Sonnet 担当、2026-11-02） | p009, p010 |
-| ws344-p014 | VP8 の逆変換（vp8-idct.c） | in-progress（2026-11-02 13:58 Sonnet q1958-i01） | p001 |
+| ws344-p014 | VP8 の逆変換（vp8-idct.c） | 実装済み・試験 PASS（Sonnet q1958-i01、2026-11-02。cleared は Q1） | p001 |
 | ws344-p015 | VP8 の intra 予測（vp8-predict.c） | planned | p001 |
 | ws344-p016 | VP8 の loop filter（vp8-filter.c） | planned | p001 |
 | ws344-p017 | VP8 の decoder（vp8.c、run-fixtures lossy）— Opus を推す | planned | p002, p011〜p016 |
