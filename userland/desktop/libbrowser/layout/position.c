@@ -903,6 +903,13 @@ layout_try_remember(
 	position_remember = remember;
 }
 
+/* Tells whether the layouts this thread makes update the last successful position options (what layout_try_remember set). */
+int
+layout_try_remembers(void)
+{
+	return position_remember;
+}
+
 /* Lays out and places one box, trying its position-try-fallbacks when it overflows. */
 static int
 position_place_fallbacks(

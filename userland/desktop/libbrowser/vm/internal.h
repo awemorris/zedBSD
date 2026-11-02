@@ -126,6 +126,9 @@ struct vm_heap {
 	/* Whether a collection is running (allocation is refused inside one). */
 	int collecting;
 
+	/* How deep the heap is lent to another thread (vm_heap_lend): no collection while it is. */
+	unsigned lent;
+
 	/* The counts for vm_heap_stats. */
 	size_t collections;
 	size_t freed_cells;
@@ -281,6 +284,9 @@ vm_termination_poll(
 	/* The task that runs is asked to end. */
 	return VM_TERMINATED;
 }
+
+/* Counts a script entered on a borrower thread, which never should be (heap.c). */
+void vm_borrower_entry(void);
 
 /* The interpreter's runs of generators (interpreter.c). */
 int vm_interpret_start(struct vm_realm *realm, struct vm_function *function, vm_value this_value, const vm_value *args, unsigned count, struct vm_generator *generator, vm_value *result, int *suspended);

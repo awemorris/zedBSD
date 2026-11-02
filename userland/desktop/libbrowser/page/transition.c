@@ -18,7 +18,27 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * A pseudo-element's cascade lent to the style thread: the page, the element, the pseudo-element (with a view
+ * transition's name, classes and siblings, and how many levels of the tree, for the view transition's), the
+ * style it inherits from and the styles it writes.
+ */
+struct transition_pseudo_args {
+	struct page *page;
+	struct dom_element *element;
+	int pseudo;
+	const struct vm_string *name;
+	const struct vm_string *classes;
+	int siblings;
+	int count;
+	const struct css_style *parent;
+	struct css_style *style;
+};
+
 static void transition_end(struct page *page);
+static int transition_pseudo_work(void *argument);
+static int transition_vt_work(void *argument);
+static int transition_pseudo(struct page *page, struct dom_element *element, int pseudo, const struct css_style *parent, struct css_style *style);
 
 
 /* Ends the transition: its snapshots are freed and the page is laid out without its tree. */
@@ -269,6 +289,7 @@ page_vt_pseudo_style(
 	const struct vm_string *name,
 	struct css_style *style)
 {
+	struct transition_pseudo_args args;
 	struct page *page;
 	struct css_style *chain;
 	const struct layout_transition_name *entry;
@@ -284,9 +305,7 @@ page_vt_pseudo_style(
 	uint32_t lookups;
 	uint32_t met;
 	int siblings;
-	int level;
 	int count;
-	int kind;
 	int changed;
 	int error;
 
@@ -306,7 +325,7 @@ page_vt_pseudo_style(
 			return error;
 		}
 		lookups = css_engine_container_lookups(page->css);
-		error = css_engine_compute_pseudo(page->css, element, pseudo, chain, style);
+		error = transition_pseudo(page, element, pseudo, chain, style);
 
 		/* A pseudo-element's style that met a query container is computed again after the layout gives it its size. */
 		changed = page_needs_layout(page);
@@ -314,7 +333,7 @@ page_vt_pseudo_style(
 		if (error == 0 && changed && met != lookups) {
 			error = page_computed_style(page, element, chain);
 			if (error == 0)
-				error = css_engine_compute_pseudo(page->css, element, pseudo, chain, style);
+				error = transition_pseudo(page, element, pseudo, chain, style);
 		}
 		free(chain);
 		return error;
@@ -353,11 +372,18 @@ page_vt_pseudo_style(
 		if (entry != NULL && entry->has_old && pseudo == CSS_PSEUDO_ELEMENT_VT_NEW)
 			siblings = CSS_VT_LAST;
 	}
-	for (level = 0; error == 0 && level < count; level++) {
-		kind = level == count - 1 ? pseudo : CSS_PSEUDO_ELEMENT_VT_ROOT + level;
-		error = css_engine_compute_vt_pseudo(page->css, element, kind, kind == CSS_PSEUDO_ELEMENT_VT_ROOT ? NULL : name,
-		    kind == CSS_PSEUDO_ELEMENT_VT_ROOT ? NULL : classes, kind == pseudo ? siblings : CSS_VT_FIRST | CSS_VT_LAST,
-		    &chain[level], &chain[level + 1]);
+	/* The levels of the tree down to the pseudo-element, on the style thread. */
+	if (error == 0) {
+		args.page = page;
+		args.element = element;
+		args.pseudo = pseudo;
+		args.name = name;
+		args.classes = classes;
+		args.siblings = siblings;
+		args.count = count;
+		args.parent = NULL;
+		args.style = chain;
+		error = page_lend(page, transition_vt_work, &args);
 	}
 	if (error == 0)
 		*style = chain[count];
@@ -427,4 +453,90 @@ page_view_transition_active(
 	if (page->query_css != NULL)
 		css_engine_set_view_transition(page->query_css, active, page->vt_types, page->vt_type_count);
 	page->document->generation++;
+}
+
+/* Computes a pseudo-element's style from its element's, on the style thread. */
+static int
+transition_pseudo(
+	struct page *page,
+	struct dom_element *element,
+	int pseudo,
+	const struct css_style *parent,
+	struct css_style *style)
+{
+	struct transition_pseudo_args args;
+	int error;
+
+	/* The cascade, lent. */
+	memset(&args, 0, sizeof(args));
+	args.page = page;
+	args.element = element;
+	args.pseudo = pseudo;
+	args.parent = parent;
+	args.style = style;
+	error = page_lend(page, transition_pseudo_work, &args);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the style. */
+	return 0;
+}
+
+/* Computes a ::before's or an ::after's style (a work lent by transition_pseudo). */
+static int
+transition_pseudo_work(
+	void *argument)
+{
+	struct transition_pseudo_args *args;
+	int error;
+
+	/* The cascade of the pseudo-element. */
+	args = argument;
+	error = css_engine_compute_pseudo(args->page->css, args->element, args->pseudo, args->parent, args->style);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the style. */
+	return 0;
+}
+
+/*
+ * Computes the styles of a view transition's tree down to a pseudo-element, each level inheriting from the one
+ * above it, into style[1] to style[count] (style[0] is the element's): a work lent by page_vt_pseudo_style.
+ */
+static int
+transition_vt_work(
+	void *argument)
+{
+	struct transition_pseudo_args *args;
+	const struct vm_string *name;
+	const struct vm_string *classes;
+	int siblings;
+	int level;
+	int kind;
+	int error;
+
+	/* Each level, the root first; the root has no name nor classes, only the pseudo-element itself its siblings. */
+	args = argument;
+	error = 0;
+	for (level = 0; error == 0 && level < args->count; level++) {
+		kind = CSS_PSEUDO_ELEMENT_VT_ROOT + level;
+		if (level == args->count - 1)
+			kind = args->pseudo;
+		name = args->name;
+		classes = args->classes;
+		if (kind == CSS_PSEUDO_ELEMENT_VT_ROOT) {
+			name = NULL;
+			classes = NULL;
+		}
+		siblings = CSS_VT_FIRST | CSS_VT_LAST;
+		if (kind == args->pseudo)
+			siblings = args->siblings;
+		error = css_engine_compute_vt_pseudo(args->page->css, args->element, kind, name, classes, siblings, &args->style[level], &args->style[level + 1]);
+	}
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the styles. */
+	return 0;
 }
