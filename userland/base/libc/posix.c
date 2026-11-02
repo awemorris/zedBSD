@@ -168,6 +168,7 @@ static ssize_t positional_vector_io(int fd, const struct iovec *iov, int count, 
 static int ioctl_has_argument(unsigned long request);
 static int ttyname_match(const char *path, const struct stat *wanted, char *buffer, size_t size);
 static int ttyname_scan(const char *directory, const struct stat *wanted, char *buffer, size_t size);
+static int ttyname_is_alias(const char *name);
 static long path_limit(int name);
 static void uname_release(struct utsname *name);
 static void uname_field(const char *text, const char *key, char *value, size_t size);
@@ -5332,17 +5333,48 @@ ttyname_r(
 	error = ttyname_match("/dev/console", &wanted, buffer, size);
 	if (error != ENOENT)
 		return error;
-	first_error = ttyname_scan("/dev", &wanted, buffer, size);
+
+	/*
+	 * PTY names are dynamic: discover them without depending on rdev
+	 * encoding, before /dev, whose descriptor aliases (/dev/stdin and the
+	 * like) are the same inode as the descriptor itself.
+	 */
+	first_error = ttyname_scan("/dev/pts", &wanted, buffer, size);
 	if (first_error == 0 || first_error == ERANGE)
 		return first_error;
 
-	/* PTY names are dynamic: discover them without depending on rdev encoding. */
-	error = ttyname_scan("/dev/pts", &wanted, buffer, size);
+	/* Then the other terminals in /dev, passing over the descriptor aliases. */
+	error = ttyname_scan("/dev", &wanted, buffer, size);
 	if (error == 0 || error == ERANGE)
 		return error;
-	if (first_error != ENODEV && first_error != ENOENT)
-		return first_error;
-	return error == ENOENT ? ENODEV : error;
+	if (error != ENODEV && error != ENOENT)
+		return error;
+	return first_error == ENOENT ? ENODEV : first_error;
+}
+
+/*
+ * Tells whether name is one of /dev's names for a descriptor of the
+ * process (stdin, stdout, stderr, or the fd directory), which name the
+ * descriptor's file rather than a terminal of its own.
+ */
+static int
+ttyname_is_alias(
+	const char *name)
+{
+	/* The three standard streams. */
+	if (strcmp(name, "stdin") == 0)
+		return 1;
+	if (strcmp(name, "stdout") == 0)
+		return 1;
+	if (strcmp(name, "stderr") == 0)
+		return 1;
+
+	/* The directory of every descriptor. */
+	if (strcmp(name, "fd") == 0)
+		return 1;
+
+	/* Succeeded: the name is not an alias. */
+	return 0;
 }
 
 /* Copies a name only when its character-device identity matches the open fd. */
@@ -5381,6 +5413,11 @@ ttyname_scan(
 	char path[PATH_MAX];
 	int length;
 	int error;
+	int other_directory;
+	int alias;
+
+	/* Only /dev holds the descriptor aliases (other_directory is 0 for /dev). */
+	other_directory = strcmp(directory, "/dev");
 
 	stream = opendir(directory);
 	if (stream == NULL)
@@ -5395,6 +5432,11 @@ ttyname_scan(
 			break;
 		}
 		if (entry->d_name[0] == '.')
+			continue;
+		alias = 0;
+		if (other_directory == 0)
+			alias = ttyname_is_alias(entry->d_name);
+		if (alias)
 			continue;
 		length = snprintf(path, sizeof(path), "%s/%s", directory,
 		    entry->d_name);
