@@ -2420,10 +2420,14 @@ view_show_page(
 	if (view->page != NULL &&
 	    view->history_count != 0 &&
 	    !(step == VIEW_STEP_KEEP && history_index == view->history_index) &&
-	    !(step == VIEW_STEP_REPLACE && history_index == view->history_index))
+	    !(step == VIEW_STEP_REPLACE && history_index == view->history_index)) {
 		view_keep(view, view->page, view->history_index);
-	else
+	} else {
+		/* The page left for good hears it first (a failure of its listeners does not keep it). */
+		if (view->page != NULL)
+			(void)page_unload(view->page);
 		page_destroy(view->page);
+	}
 	view->page = page;
 	view->page_serial++;
 	view->page_epoch = view->open_epoch;
@@ -2681,9 +2685,15 @@ view_keep(
 	size_t slot;
 	int stopped;
 
-	/* A page that may not be kept goes. */
+	/*
+	 * A page that may not be kept is unloaded and goes (a failure of its
+	 * listeners does not keep it); a page whose script was stopped runs no
+	 * more script, so it goes without its unload.
+	 */
 	stopped = bind_window_was_terminated(page->window);
 	if (page->no_store || page->media.count != 0 || stopped) {
+		if (!stopped)
+			(void)page_unload(page);
 		page_destroy(page);
 		return;
 	}

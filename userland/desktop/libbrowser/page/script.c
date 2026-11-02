@@ -1338,7 +1338,8 @@ page_fire_load_resume(
 /*
  * Fires the page's pageshow or pagehide for the pages the view keeps for
  * the history (persisted when it is shown again from them or put in
- * them), then the microtasks its listeners queued.
+ * them) or for a page left for good (not persisted), then the microtasks
+ * its listeners queued.  A pagehide fires only while the page is showing.
  */
 int
 page_page_transition(
@@ -1346,11 +1347,22 @@ page_page_transition(
 	const char *type,
 	int persisted)
 {
+	int not_hide;
 	int error;
 
 	/* A page without a window has no listeners. */
 	if (page->window == NULL)
 		return 0;
+
+	/* Only a page that is showing is hidden, and it is showing from its pageshow on. */
+	not_hide = strcmp(type, "pagehide");
+	if (not_hide == 0) {
+		if (!page->showing)
+			return 0;
+		page->showing = 0;
+	} else {
+		page->showing = 1;
+	}
 
 	/* The event. */
 	error = bind_fire_page_transition(page->window, type, persisted);
@@ -1363,6 +1375,47 @@ page_page_transition(
 		return error;
 
 	/* Succeeded: the event has run. */
+	return 0;
+}
+
+/*
+ * Unloads the page's document as it is left for good, not kept for the
+ * history (HTML's unload a document, its salvageable state false):
+ * pagehide with persisted false when its page is showing, then unload at
+ * the window with the document as its target, each followed by the
+ * microtasks its listeners queued.  A navigation its listeners ask for is
+ * not taken, as the page goes.
+ */
+int
+page_unload(
+	struct page *page)
+{
+	int canceled;
+	int error;
+
+	/* A page without a window has no listeners. */
+	if (page->window == NULL)
+		return 0;
+
+	/* The document is being left: it is no longer fully active for its scripts. */
+	bind_window_set_unloading(page->window);
+
+	/* pagehide, not persisted, when the page is showing. */
+	error = page_page_transition(page, "pagehide", 0);
+	if (error != 0)
+		return error;
+
+	/* unload, with the document as its target as load has. */
+	error = bind_fire_event(page->window, NULL, "unload", BIND_EVENT_DOCUMENT, &canceled);
+	if (error != 0)
+		return error;
+
+	/* The microtasks it queued. */
+	error = bind_checkpoint(page->window);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the document heard that it is left. */
 	return 0;
 }
 
@@ -1381,7 +1434,8 @@ page_fire_load_events(
 	if (error != 0)
 		return error;
 
-	/* The document is shown, not from the kept pages: pageshow. */
+	/* The document is shown, not from the kept pages: pageshow, and from then on its page is showing. */
+	page->showing = 1;
 	error = bind_fire_page_transition(page->window, "pageshow", 0);
 	if (error != 0)
 		return error;

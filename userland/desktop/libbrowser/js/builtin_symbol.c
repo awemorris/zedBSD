@@ -270,7 +270,7 @@ int
 js_builtin_install_tags(
 	struct vm_realm *realm)
 {
-	const char *const globals[2] = {"Math", "JSON"};
+	const char *const globals[3] = {"Math", "JSON", "Reflect"};
 	const char *const species[3] = {"Array", "Promise", "RegExp"};
 	struct vm_property property;
 	vm_value key;
@@ -278,8 +278,8 @@ js_builtin_install_tags(
 	int index;
 	int error;
 
-	/* Math and JSON by their global names. */
-	for (index = 0; index < 2; index++) {
+	/* Math, JSON and Reflect by their global names. */
+	for (index = 0; index < 3; index++) {
 		key = vm_key_from_ascii(realm->heap, globals[index]);
 		if (key == VM_VALUE_EMPTY)
 			return ENOMEM;

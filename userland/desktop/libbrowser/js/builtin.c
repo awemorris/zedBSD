@@ -138,6 +138,11 @@ js_install_builtins(
 	if (error != 0)
 		return error;
 
+	/* Installs Reflect, whose functions call the same internal methods as Proxy's traps. */
+	error = js_builtin_install_reflect(realm);
+	if (error != 0)
+		return error;
+
 	/* Publishes builtin type tags only after all referenced objects exist. */
 	error = js_builtin_install_tags(realm);
 	if (error != 0)

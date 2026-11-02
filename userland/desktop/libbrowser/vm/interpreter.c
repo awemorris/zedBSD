@@ -775,6 +775,7 @@ interpreter_step_js(
 	case VM_OP_LOAD_NEW_TARGET:
 	case VM_OP_CLASS_SETUP:
 	case VM_OP_DEFINE_METHOD:
+	case VM_OP_SET_FUNCTION_NAME:
 	case VM_OP_LOAD_HOME:
 	case VM_OP_GET_SUPER:
 	case VM_OP_SUPER_CONSTRUCT:
@@ -2057,6 +2058,9 @@ interpreter_class(
 		break;
 	case VM_OP_DEFINE_METHOD:
 		status = vm_define_method(realm, registers[words[1]], registers[words[2]], registers[words[3]], words[4]);
+		return status;
+	case VM_OP_SET_FUNCTION_NAME:
+		status = vm_set_function_name(realm, registers[words[1]], registers[words[2]], words[3]);
 		return status;
 	case VM_OP_LOAD_HOME:
 		/* The running method's home object, in its function's data. */

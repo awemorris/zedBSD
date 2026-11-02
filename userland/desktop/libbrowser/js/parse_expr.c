@@ -234,12 +234,14 @@ js_parse_function(
 
 /*
  * Parses a method (of an object literal or a class) after its key: its
- * parameters and body; kind is a js_property_kind.
+ * parameters and body; kind is a js_property_kind.  key_flags are the
+ * key's (JS_FLAG_COMPUTED for a computed one, which names nothing here).
  */
 struct js_node *
 js_parse_method(
 	struct js_parser *parser,
 	struct js_node *key,
+	uint32_t key_flags,
 	int kind,
 	uint32_t flags)
 {
@@ -247,10 +249,10 @@ js_parse_method(
 	struct js_node *function;
 	int parameters;
 
-	/* The function, named after a plain key (a method never repeats a parameter name). */
+	/* The function, named after a plain key (a method never repeats a parameter name); a computed key's name comes when it runs. */
 	function = js_node_new(parser, JS_NODE_FUNCTION);
 	function->flags = flags | JS_FLAG_METHOD;
-	if (key->kind == JS_NODE_IDENTIFIER || key->kind == JS_NODE_STRING) {
+	if ((key_flags & JS_FLAG_COMPUTED) == 0U && (key->kind == JS_NODE_IDENTIFIER || key->kind == JS_NODE_STRING)) {
 		function->text = key->text;
 		function->word = key->word;
 		function->text_length = key->text_length;
@@ -2013,7 +2015,7 @@ expr_object_property(
 		if (kind == JS_PROPERTY_INIT)
 			kind = JS_PROPERTY_METHOD;
 		property->op = kind;
-		property->second = js_parse_method(parser, key, kind, function_flags);
+		property->second = js_parse_method(parser, key, flags, kind, function_flags);
 		return property;
 	}
 

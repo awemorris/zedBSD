@@ -86,51 +86,59 @@ static int typed_delete(struct vm_heap *heap, struct vm_object *object, vm_value
 static const struct vm_native_operations typed_operations = {
 	typed_get_own, typed_own_keys, typed_define, typed_delete, NULL};
 
-/* The page-language half of %TypedArray%.prototype (the walks over elements and the static makers). */
+/*
+ * The page-language half of %TypedArray%.prototype (the walks over elements and the static makers).
+ * Each function is an object literal's method, so that, like a native built-in, it is no constructor
+ * and has no prototype property.
+ */
 static const char typed_prelude[] =
 	"(function (P, T, A) {\n"
 	"  var AP = Array.prototype;\n"
 	"  function def(o, name, f) { Object.defineProperty(o, name, { value: f, writable: true, configurable: true, enumerable: false }); }\n"
-	"  function viaArray(name) { var f = AP[name]; def(P, name, function () { return f.apply(this, arguments); }); }\n"
+	"  function named(f, name) { Object.defineProperty(f, 'name', { value: name, configurable: true }); return f; }\n"
+	"  function viaArray(name) { var f = AP[name]; def(P, name, named({ m() { return f.apply(this, arguments); } }.m, name)); }\n"
 	"  ['forEach', 'indexOf', 'lastIndexOf', 'includes', 'join', 'reverse', 'every', 'some', 'find', 'findIndex', 'findLast',\n"
 	"   'findLastIndex', 'reduce', 'reduceRight', 'fill', 'copyWithin', 'at', 'toLocaleString'].forEach(viaArray);\n"
 	"  function make(self, n) { return new self.constructor(n); }\n"
-	"  def(P, 'map', function map(f, thisArg) {\n"
+	"  def(P, 'map', { map(f, thisArg) {\n"
 	"    var n = this.length, r = make(this, n), i;\n"
 	"    for (i = 0; i < n; i++) r[i] = f.call(thisArg, this[i], i, this);\n"
 	"    return r;\n"
-	"  });\n"
-	"  def(P, 'filter', function filter(f, thisArg) {\n"
+	"  } }.map);\n"
+	"  def(P, 'filter', { filter(f, thisArg) {\n"
 	"    var kept = [], i;\n"
 	"    for (i = 0; i < this.length; i++) if (f.call(thisArg, this[i], i, this)) kept.push(this[i]);\n"
 	"    var r = make(this, kept.length);\n"
 	"    for (i = 0; i < kept.length; i++) r[i] = kept[i];\n"
 	"    return r;\n"
-	"  });\n"
-	"  def(P, 'sort', function sort(cmp) {\n"
+	"  } }.filter);\n"
+	"  def(P, 'sort', { sort(cmp) {\n"
 	"    var a = AP.slice.call(this), i;\n"
 	"    a.sort(cmp || function (x, y) { return x < y ? -1 : x > y ? 1 : 0; });\n"
 	"    for (i = 0; i < a.length; i++) this[i] = a[i];\n"
 	"    return this;\n"
-	"  });\n"
-	"  def(P, 'toSorted', function toSorted(cmp) { return this.slice().sort(cmp); });\n"
-	"  def(P, 'toReversed', function toReversed() { return this.slice().reverse(); });\n"
-	"  def(P, 'with', function (index, value) { var r = this.slice(); r[index < 0 ? this.length + index : index] = value; return r; });\n"
+	"  } }.sort);\n"
+	"  def(P, 'toSorted', { toSorted(cmp) { return this.slice().sort(cmp); } }.toSorted);\n"
+	"  def(P, 'toReversed', { toReversed() { return this.slice().reverse(); } }.toReversed);\n"
+	"  def(P, 'with', { with(index, value) { var r = this.slice(); r[index < 0 ? this.length + index : index] = value; return r; } }.with);\n"
 	"  def(P, 'toString', AP.toString);\n"
-	"  def(P, 'keys', function keys() { return AP.keys.call(this); });\n"
-	"  def(P, 'entries', function entries() { return AP.entries.call(this); });\n"
-	"  var values = function values() { return AP.values.call(this); };\n"
+	"  def(P, 'keys', { keys() { return AP.keys.call(this); } }.keys);\n"
+	"  def(P, 'entries', { entries() { return AP.entries.call(this); } }.entries);\n"
+	"  var values = { values() { return AP.values.call(this); } }.values;\n"
 	"  def(P, 'values', values);\n"
 	"  def(P, Symbol.iterator, values);\n"
-	"  def(T, 'of', function of() { var r = new this(arguments.length), i; for (i = 0; i < arguments.length; i++) r[i] = arguments[i]; return r; });\n"
-	"  def(T, 'from', function from(source, mapFn, thisArg) {\n"
+	"  def(T, 'of', { of() { var r = new this(arguments.length), i; for (i = 0; i < arguments.length; i++) r[i] = arguments[i]; return r; } }.of);\n"
+	"  def(T, 'from', { from(source, mapFn, thisArg) {\n"
 	"    var list = Array.from(source), r = new this(list.length), i;\n"
 	"    for (i = 0; i < list.length; i++) r[i] = mapFn ? mapFn.call(thisArg, list[i], i) : list[i];\n"
 	"    return r;\n"
-	"  });\n"
+	"  } }.from);\n"
 	"})";
 
-/* WeakRef and FinalizationRegistry: the target is held strongly (nothing is collected early, so a deref never fails). */
+/*
+ * WeakRef and FinalizationRegistry: the target is held strongly (nothing is collected early, so a deref never fails).
+ * Their prototype's functions are methods, no constructors.
+ */
 static const char typed_weak_prelude[] =
 	"(function (g) {\n"
 	"  function def(o, name, f) { Object.defineProperty(o, name, { value: f, writable: true, configurable: true, enumerable: false }); }\n"
@@ -139,14 +147,14 @@ static const char typed_weak_prelude[] =
 	"    if ((typeof target !== 'object' && typeof target !== 'function') || target === null) throw new TypeError('WeakRef: invalid target');\n"
 	"    Object.defineProperty(this, '__target', { value: target });\n"
 	"  }\n"
-	"  def(WeakRef.prototype, 'deref', function deref() { return this.__target; });\n"
+	"  def(WeakRef.prototype, 'deref', { deref() { return this.__target; } }.deref);\n"
 	"  Object.defineProperty(WeakRef.prototype, Symbol.toStringTag, { value: 'WeakRef', configurable: true });\n"
 	"  function FinalizationRegistry(cleanup) {\n"
 	"    if (!new.target) throw new TypeError(\"Constructor FinalizationRegistry requires 'new'\");\n"
 	"    if (typeof cleanup !== 'function') throw new TypeError('FinalizationRegistry: cleanup must be callable');\n"
 	"  }\n"
-	"  def(FinalizationRegistry.prototype, 'register', function register() {});\n"
-	"  def(FinalizationRegistry.prototype, 'unregister', function unregister() { return false; });\n"
+	"  def(FinalizationRegistry.prototype, 'register', { register() {} }.register);\n"
+	"  def(FinalizationRegistry.prototype, 'unregister', { unregister() { return false; } }.unregister);\n"
 	"  Object.defineProperty(FinalizationRegistry.prototype, Symbol.toStringTag, { value: 'FinalizationRegistry', configurable: true });\n"
 	"  def(g, 'WeakRef', WeakRef);\n"
 	"  def(g, 'FinalizationRegistry', FinalizationRegistry);\n"

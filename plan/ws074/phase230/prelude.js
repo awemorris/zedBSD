@@ -250,27 +250,6 @@
       hidden(o, 'stack', String(o && o.name ? o.name + ': ' + o.message : o));
     });
   }
-  if (!g.Reflect) {
-    var R = {
-      apply: function (f, t, a) { return Function.prototype.apply.call(f, t, a); },
-      construct: function (C, a) { return new (Function.prototype.bind.apply(C, [null].concat(Array.from(a))))(); },
-      defineProperty: function (o, k, d) { try { Object.defineProperty(o, k, d); return true; } catch (e) { return false; } },
-      deleteProperty: function (o, k) { try { return delete o[k]; } catch (e) { return false; } },
-      get: function (o, k) { return o[k]; },
-      set: function (o, k, v) { try { o[k] = v; return true; } catch (e) { return false; } },
-      has: function (o, k) { return k in o; },
-      ownKeys: function (o) { return Object.getOwnPropertyNames(o).concat(Object.getOwnPropertySymbols(o)); },
-      getPrototypeOf: function (o) { return Object.getPrototypeOf(o); },
-      setPrototypeOf: function (o, p) { try { Object.setPrototypeOf(o, p); return true; } catch (e) { return false; } },
-      isExtensible: function (o) { return Object.isExtensible(o); },
-      preventExtensions: function (o) { Object.preventExtensions(o); return true; },
-      getOwnPropertyDescriptor: function (o, k) { return Object.getOwnPropertyDescriptor(o, k); }
-    };
-    var Refl = {};
-    Object.keys(R).forEach(function (k) { def(Refl, k, R[k]); });
-    Object.defineProperty(Refl, Symbol.toStringTag, { value: 'Reflect', configurable: true });
-    def(g, 'Reflect', Refl);
-  }
 
   // ---- Intl (the formats of the page's locale, without locale data)
   if (!g.Intl) {

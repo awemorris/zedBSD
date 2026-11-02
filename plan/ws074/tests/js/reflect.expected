@@ -1,0 +1,32 @@
+namespace object [object Reflect] true
+global true false true
+names apply,construct,defineProperty,deleteProperty,get,getOwnPropertyDescriptor,getPrototypeOf,has,isExtensible,ownKeys,preventExtensions,set,setPrototypeOf
+lengths apply=3,construct=2,defineProperty=3,deleteProperty=2,get=2,getOwnPropertyDescriptor=2,getPrototypeOf=1,has=2,isExtensible=1,ownKeys=1,preventExtensions=1,set=3,setPrototypeOf=2
+tag Reflect false false true
+not-constructors TypeError TypeError
+apply 16 12
+apply-errors TypeError TypeError TypeError
+construct true 3 4
+construct-new-target true other 1
+construct-class true
+construct-builtin true 3 true
+construct-errors TypeError TypeError TypeError
+defineProperty true 1 false false
+defineProperty-errors TypeError TypeError
+deleteProperty true false false true
+get 1 receiver 6 undefined
+set true 8 false 1
+set-receiver true 1 plain
+get-errors TypeError TypeError
+getOwnPropertyDescriptor 1 true true true undefined
+getOwnPropertyDescriptor-errors TypeError
+getPrototypeOf true null
+setPrototypeOf true null false false
+setPrototypeOf-errors TypeError TypeError
+has true false true
+extensible true true false false
+extensible-errors TypeError TypeError
+ownKeys 6 1,2,b,a,hidden string true
+ownKeys-array 0,1,length
+key-conversion 2 TypeError 2
+proxy apply,construct,get,defineProperty,get,set,getOwnPropertyDescriptor,defineProperty,has,getOwnPropertyDescriptor,deleteProperty,ownKeys,getPrototypeOf,setPrototypeOf,isExtensible,preventExtensions
