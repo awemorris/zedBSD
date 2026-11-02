@@ -180,9 +180,6 @@ struct view_remotes {
 	uint64_t next_number;
 };
 
-/* The frame whose thread the calling thread is (NULL on every other thread). */
-static _Thread_local struct view_remote *remote_current;
-
 static int remote_post(void *context, struct bind_window *from, int kind, uint64_t frame, struct bind_tape *tape, const char *target_origin, const char *origin);
 static int remote_navigate(void *context, struct bind_window *from, int kind, uint64_t frame, const char *url, int replace);
 static int remote_info(void *context, int kind, uint64_t frame, int what);
@@ -207,6 +204,7 @@ static void remote_commit(struct view_remote *remote);
 static uint64_t remote_deadline(struct view_remote *remote);
 static double remote_time(const struct view_remote *remote);
 static int remote_count_frames(struct page *page);
+static int remote_count_document(struct dom_document *document);
 static void remote_release(struct view_remote *remote);
 static void remote_end(struct view_remote *remote);
 static void remote_terminate(struct view_remote *remote, uint32_t task);
@@ -378,9 +376,13 @@ view_remotes_load(
 	if (response->length != 0)
 		memcpy(entry.body, response->body, response->length);
 
-	/* The frame the iframe has shows it next. */
+	/* The frame the iframe has shows it next (its relatives' frames counted again). */
 	remote = element->frame_remote;
 	if (remote != NULL) {
+		wb_mutex_lock(&remotes->lock);
+		remote->parent_count = remote_count_document(element->node.document);
+		remote->top_count = remote_count_document(page->document);
+		wb_mutex_unlock(&remotes->lock);
 		error = remote_queue(remote, &entry, 0);
 		if (error != 0)
 			return error;
@@ -409,8 +411,8 @@ view_remotes_load(
 	remote->attached = 1;
 	remote->parent_is_top = element->node.document->view == page->window;
 	remote->dark = page->dark;
-	remote->parent_count = remote_count_frames(page);
-	remote->top_count = remote->parent_count;
+	remote->parent_count = remote_count_document(element->node.document);
+	remote->top_count = remote_count_document(page->document);
 	wb_vector_init(&remote->inbox, sizeof(struct remote_entry));
 	error = wb_mutex_init(&remote->lock);
 	if (error == 0)
@@ -1232,7 +1234,6 @@ remote_run(
 
 	/* This thread is the frame's: its requests' client, no runner (its page is its own). */
 	remote = argument;
-	remote_current = remote;
 	bind_set_thread_runner(NULL);
 	page_set_thread_client(remote->client);
 	deadline = UINT64_MAX;
@@ -1281,7 +1282,6 @@ remote_run(
 		page_destroy(remote->own);
 		remote->own = NULL;
 	}
-	remote_current = NULL;
 }
 
 /*
@@ -1643,18 +1643,29 @@ static int
 remote_count_frames(
 	struct page *page)
 {
+	/* The document's. */
+	if (page == NULL)
+		return 0;
+	return remote_count_document(page->document);
+}
+
+/* Counts the iframes of a document. */
+static int
+remote_count_document(
+	struct dom_document *document)
+{
 	struct dom_node *walk;
 	int count;
 
 	/* Each iframe element. */
 	count = 0;
-	if (page == NULL || page->document == NULL)
+	if (document == NULL)
 		return 0;
-	walk = page->document->node.first_child;
+	walk = document->node.first_child;
 	while (walk != NULL) {
 		if (walk->type == DOM_ELEMENT && dom_element_is(walk, DOM_NS_HTML, DOM_TAG_IFRAME))
 			count++;
-		walk = bind_following(walk, &page->document->node);
+		walk = bind_following(walk, &document->node);
 	}
 	return count;
 }
