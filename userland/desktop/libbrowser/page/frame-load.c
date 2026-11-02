@@ -1134,7 +1134,7 @@ frame_load_inline(
 		return 0;
 	}
 
-	/* A script with a source is fetched at once, where the parser stands, and run as the page's own are. */
+	/* A script with a source is fetched where the parser stands (a web one through the loader, waited for), and run as the page's own are. */
 	source = dom_attribute_ascii(script, "src");
 	if (source != NULL && source->length != 0 && window->host.context != NULL) {
 		struct page *page;
@@ -1155,7 +1155,7 @@ frame_load_inline(
 		if (error == 0)
 			error = net_url_serialize(&parsed, 0, &location);
 		if (error == 0)
-			error = page_fetch(page_cookies(page), page->base, wb_buffer_string(&location), &bytes, NULL);
+			error = page_fetch_now(page, wb_buffer_string(&location), NET_FETCH_DOCUMENT, &bytes, NULL);
 		if (error == 0)
 			error = wb_utf8_to_units(bytes.data, bytes.length, &units);
 		if (error == 0)

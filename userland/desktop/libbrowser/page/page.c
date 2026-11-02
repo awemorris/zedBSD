@@ -461,7 +461,7 @@ page_load_location(
 
 	/* The document's bytes and its final URL. */
 	wb_buffer_init(&where);
-	error = page_fetch_response(page_cookies(page), location, location, &response);
+	error = page_fetch_response_now(page, location, NET_FETCH_DOCUMENT, &response);
 
 	/* The page's location: a file's path, or the final URL. */
 	if (error == 0)

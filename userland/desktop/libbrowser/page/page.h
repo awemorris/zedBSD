@@ -440,6 +440,8 @@ int page_media_click(struct page *page, struct dom_element *element, int x, int 
 int page_fetch(struct net_cookie_jar *jar, const char *base, const char *href, struct wb_buffer *bytes, struct wb_buffer *final_url);
 /* Fresh response storage receives owned metadata/body, or an empty response on failure. */
 int page_fetch_response(struct net_cookie_jar *jar, const char *base, const char *href, struct net_response *response);
+int page_fetch_now(struct page *page, const char *href, int kind, struct wb_buffer *bytes, struct wb_buffer *final_url);
+int page_fetch_response_now(struct page *page, const char *location, int kind, struct net_response *response);
 /* Declared MIME essence selects a supported native document kind; failures preserve content. */
 int page_document_content(const char *mime, size_t length, enum dom_document_content *content);
 

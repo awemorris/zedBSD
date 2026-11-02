@@ -53,12 +53,27 @@
  * is judged as any entry is, by the wall clock since the response was
  * stored.
  *
- * The caller makes requests and cancels them on its thread; the network
- * thread takes them from a list under the loader's lock.  An ended request
- * goes back on another list and is freed by the caller's thread after its
+ * The callers are the loader's clients: the loader's own (the thread that
+ * made it, through the net_loader_* calls) and the clients other threads
+ * open (net_loader_client_open), each used from one thread.  A client
+ * makes requests and cancels them on its thread; the network thread takes
+ * them from a list under the loader's lock.  An ended request goes back on
+ * its client's list and is freed by the client's thread after its
  * callback (a cancelled one without it, once the network thread has
- * closed its connection).  A callback may start other requests and cancel
- * any request, itself included.
+ * closed its connection); each client is told of its own news.  A
+ * callback may start other requests and cancel any request of its client,
+ * itself included.
+ *
+ * A request may also be waited for instead of called back
+ * (net_loader_client_start_waited, net_request_wait): the network thread
+ * marks it finished under the lock and wakes the waiters, so nothing has
+ * to dispatch it, and the client's thread then reads it and lets it go
+ * (net_request_release).  Any thread may abort a request
+ * (net_request_abort) or a client's requests of the navigations before
+ * one (net_loader_client_abort_before, by the epoch each request was made
+ * in): an abort only marks the request; the network thread closes its
+ * connection and hands it back, and the client's thread lets it go as it
+ * lets a cancelled one go.
  */
 
 #include "net/net.h"
@@ -100,6 +115,9 @@
 
 /* How long the network thread waits at most when it could not poll every connection, in milliseconds. */
 #define LOADER_CUT_WAIT		10
+
+/* The most clients a loader has at once (its own among them). */
+#define LOADER_CLIENTS_MAX	96U
 
 /* The deadline of a request that waits for a connection (it does not time out while it waits). */
 #define LOADER_NEVER		((uint64_t)-1)
@@ -188,10 +206,21 @@ struct loader_entry {
  * caller's thread alone reads delivered and dropped, and frees the
  * request.  asked_cancel is under the loader's lock.  queue_next links the
  * request in whichever of the incoming, ended and completed lists holds
- * it.
+ * it.  The client it belongs to, the navigation's epoch it was made in and
+ * whether it is waited for are fixed when it is made; its links in the
+ * client's list of live requests (live_prev, live_next) and finished (it
+ * ended, for a waited one) are under the loader's lock; aborted is the
+ * client's thread's (what asked_cancel said when the request came back).
  */
 struct net_request {
 	struct net_loader *loader;
+	struct net_loader_client *client;
+	struct net_request *live_prev;
+	struct net_request *live_next;
+	uint64_t epoch;
+	int waited;
+	int finished;
+	int aborted;
 	struct net_request *next;
 	struct net_request *queue_next;
 	uint64_t number;
@@ -234,6 +263,36 @@ struct net_request {
 };
 
 /*
+ * One client of a loader: the requests it made that are not freed yet
+ * (live, live_count), those that ended and wait for its thread (completed
+ * to completed_last), whether it was told of them (notified), how many of
+ * the network thread's calls of its notify are under way (telling), and
+ * whether it closes (closing): all under the loader's lock, with the
+ * clients' list (next).  Its thread's own: the notify function and context
+ * (fixed when it is opened), how many requests it started that have
+ * neither ended to it nor been cancelled (pending), and the epoch its
+ * requests are made in.  own says it is the loader's own, which lives in
+ * the loader.
+ */
+struct net_loader_client {
+	struct net_loader *loader;
+	struct net_loader_client *next;
+	struct net_request *live;
+	size_t live_count;
+	struct net_request *completed;
+	struct net_request *completed_last;
+	int notified;
+	int telling;
+	int closing;
+	int tell;
+	net_loader_notify notify;
+	void *notify_context;
+	size_t pending;
+	uint64_t epoch;
+	int own;
+};
+
+/*
  * The loader.
  *
  * The network thread's own: the requests it runs (requests), the ones
@@ -247,23 +306,21 @@ struct net_request {
  * resolver_stopping under resolver_lock (resolver_wake tells it a job is
  * there), and rings the answers waker for each answer.
  *
- * Under lock, the caller's thread and the network thread meet: the
+ * Under lock, the clients' threads and the network thread meet: the
  * requests started and not yet taken by the network thread (incoming),
  * whether a cancel was asked of a running request (cancel_asked), the
- * requests ended and not yet taken by the caller (completed), whether the
- * caller was told of news it has not taken (notified), whether
- * net_loader_ring was called since the network thread last looked (rung),
- * and whether the network thread is to stop.  changed is signalled when
- * notified becomes set.  Ringing the control waker wakes the network
- * thread from its wait.
+ * clients (clients, the loader's own first; each with its requests ended
+ * and not yet taken), whether net_loader_ring was called since the network
+ * thread last looked (rung), and whether the network thread is to stop.
+ * changed is broadcast when a client is told of news, a waited request
+ * finishes, or a closing client's request or call of its notify ends.
+ * Ringing the control waker wakes the network thread from its wait.
  *
- * The caller's own: its notify function and context (set when the loader
- * is made), how many requests it started that have neither ended to it
- * nor been cancelled (pending), and the cookie jar of the requests
- * (cookies, set before the first request and read by the network thread;
- * the jar has its own lock), and the persistent cache behind the memory
- * cache (disk, set and read the same way; NULL for none, with its own
- * lock).
+ * The thread that made the loader has its own client (own), and sets the
+ * cookie jar of the requests (cookies, set before the first request and
+ * read by the network thread; the jar has its own lock) and the persistent
+ * cache behind the memory cache (disk, set and read the same way; NULL for
+ * none, with its own lock).
  */
 struct net_loader {
 	struct net_request *requests;
@@ -288,16 +345,13 @@ struct net_loader {
 	struct wb_cond changed;
 	struct net_request *incoming;
 	struct net_request *incoming_last;
-	struct net_request *completed;
-	struct net_request *completed_last;
+	struct net_loader_client *clients;
+	size_t client_count;
 	int cancel_asked;
-	int notified;
 	int rung;
 	int stopping;
 	struct wb_os_waker *control;
-	net_loader_notify notify;
-	void *notify_context;
-	size_t pending;
+	struct net_loader_client own;
 	struct net_cookie_jar *cookies;
 	struct net_cache *disk;
 };
@@ -306,6 +360,10 @@ static uint64_t loader_clock(void);
 static void loader_poke(struct net_loader *loader);
 static void loader_release(struct net_loader *loader);
 static void loader_free_queue(struct net_request *queue);
+static void loader_forget(struct net_request *request);
+static int loader_start(struct net_loader_client *client, const char *url, int kind, const struct net_send *send, int waited, net_request_done done, void *context, struct net_request **request);
+static void loader_abort_marked(struct net_request *request);
+static void loader_unlink_live(struct net_request *request);
 static int loader_locks(struct net_loader *loader);
 static void loader_locks_release(struct net_loader *loader);
 static void loader_resolver(void *argument);
@@ -368,8 +426,14 @@ net_loader_create(
 	if (made == NULL)
 		return ENOMEM;
 	made->next_number = 1;
-	made->notify = notify;
-	made->notify_context = context;
+
+	/* Its own client, for the thread that makes it. */
+	made->own.loader = made;
+	made->own.notify = notify;
+	made->own.notify_context = context;
+	made->own.own = 1;
+	made->clients = &made->own;
+	made->client_count = 1;
 
 	/* Its locks and conditions (the caller's timed waits measure the time on the monotonic clock themselves). */
 	status = loader_locks(made);
@@ -498,7 +562,7 @@ net_loader_fetch_kind(
  * a plain GET).  Only a plain GET is answered from or kept in the cache,
  * and a redirect of a POST becomes a GET as a browser's does.  A request
  * that cannot even start fails here; one that fails later ends with its
- * error through its callback.
+ * error through its callback.  The request is the loader's own client's.
  */
 int
 net_loader_send(
@@ -510,17 +574,83 @@ net_loader_send(
 	void *context,
 	struct net_request **request)
 {
+	int error;
+
+	/* A request of the loader's own client. */
+	error = net_loader_client_send(&loader->own, url, kind, send, done, context, request);
+	return error;
+}
+
+/*
+ * Starts a request of a client as net_loader_send does, from the client's
+ * thread; its callback runs from the client's dispatch.
+ */
+int
+net_loader_client_send(
+	struct net_loader_client *client,
+	const char *url,
+	int kind,
+	const struct net_send *send,
+	net_request_done done,
+	void *context,
+	struct net_request **request)
+{
+	int error;
+
+	/* A request called back. */
+	error = loader_start(client, url, kind, send, 0, done, context, request);
+	return error;
+}
+
+/*
+ * Starts a request of a client that its thread waits for
+ * (net_request_wait) instead of being called back, then reads and lets go
+ * (net_request_release).  Returns 0 with the request, or the error of a
+ * request that cannot even start.
+ */
+int
+net_loader_client_start_waited(
+	struct net_loader_client *client,
+	const char *url,
+	int kind,
+	const struct net_send *send,
+	struct net_request **request)
+{
+	int error;
+
+	/* A request waited for. */
+	error = loader_start(client, url, kind, send, 1, NULL, NULL, request);
+	return error;
+}
+
+/* Makes a request of a client (called back, or waited for) and hands it to the network thread. */
+static int
+loader_start(
+	struct net_loader_client *client,
+	const char *url,
+	int kind,
+	const struct net_send *send,
+	int waited,
+	net_request_done done,
+	void *context,
+	struct net_request **request)
+{
+	struct net_loader *loader;
 	struct net_request *made;
 	int is_web;
 	int error;
 
 	/* The request. */
+	loader = client->loader;
 	if (request != NULL)
 		*request = NULL;
 	made = calloc(1, sizeof(*made));
 	if (made == NULL)
 		return ENOMEM;
 	made->loader = loader;
+	made->client = client;
+	made->epoch = client->epoch;
+	made->waited = waited;
 	made->socket = WB_OS_SOCKET_NONE;
 	made->kind = kind;
 	made->done = done;
@@ -566,7 +696,7 @@ net_loader_send(
 		return EPROTONOSUPPORT;
 	}
 
-	/* Handed to the network thread, which begins it. */
+	/* Handed to the network thread, which begins it, and one of the client's live requests. */
 	wb_mutex_lock(&loader->lock);
 
 	if (loader->incoming_last != NULL)
@@ -574,6 +704,11 @@ net_loader_send(
 	else
 		loader->incoming = made;
 	loader->incoming_last = made;
+	made->live_next = client->live;
+	if (client->live != NULL)
+		client->live->live_prev = made;
+	client->live = made;
+	client->live_count++;
 
 	wb_mutex_unlock(&loader->lock);
 
@@ -581,7 +716,7 @@ net_loader_send(
 	loader_poke(loader);
 
 	/* Succeeded: the request runs, and counts until it ends or is cancelled. */
-	loader->pending++;
+	client->pending++;
 	if (request != NULL)
 		*request = made;
 	return 0;
@@ -613,7 +748,7 @@ net_request_cancel(
 	/* Its callback will not be called, and it no longer counts. */
 	loader = request->loader;
 	request->dropped = 1;
-	loader->pending--;
+	request->client->pending--;
 
 	/* The network thread is asked to close its connection and hand it back. */
 	wb_mutex_lock(&loader->lock);
@@ -655,15 +790,278 @@ net_request_reason(
 }
 
 /*
- * Tells how many requests were started that have neither ended to their
- * callbacks nor been cancelled.
+ * Moves a request's response (and the reason of a TLS failure) to the
+ * caller's, which then owns its buffers; the request keeps an empty one.
+ * For the thread of the request's client, after it ended.
+ */
+void
+net_request_take_response(
+	struct net_request *request,
+	struct net_response *response)
+{
+	/* The response with its buffers, then the request's emptied. */
+	*response = request->response;
+	snprintf(response->reason, sizeof(response->reason), "%s", request->reason);
+	net_response_init(&request->response);
+}
+
+/*
+ * Waits for a request made to be waited for until it finished (ended, or
+ * came back aborted), from its client's thread.  Returns how it ended (0,
+ * an errno value, ECANCELED for an abort); its response and reason are
+ * then read as a called-back request's are.
+ */
+int
+net_request_wait(
+	struct net_request *request)
+{
+	struct net_loader *loader;
+	int error;
+
+	/* The network thread marks it finished and wakes every waiter. */
+	loader = request->loader;
+	wb_mutex_lock(&loader->lock);
+
+	while (!request->finished)
+		wb_cond_wait(&loader->changed, &loader->lock);
+	error = request->error;
+
+	wb_mutex_unlock(&loader->lock);
+
+	/* How it ended. */
+	return error;
+}
+
+/*
+ * Lets go of a request that was waited for (after net_request_wait), from
+ * its client's thread.
+ */
+void
+net_request_release(
+	struct net_request *request)
+{
+	/* Nothing to let go. */
+	if (request == NULL)
+		return;
+
+	/* It no longer counts, leaves the client's live requests, and is freed. */
+	request->client->pending--;
+	loader_forget(request);
+	loader_free(request);
+}
+
+/*
+ * Aborts a request from any thread: the network thread closes its
+ * connection and hands it back; a waited one finishes with ECANCELED, a
+ * called-back one is let go without its callback.  A request that already
+ * finished is left as it is.
+ */
+void
+net_request_abort(
+	struct net_request *request)
+{
+	struct net_loader *loader;
+
+	/* The mark, under the lock the network thread reads it under. */
+	loader = request->loader;
+	wb_mutex_lock(&loader->lock);
+
+	loader_abort_marked(request);
+
+	wb_mutex_unlock(&loader->lock);
+
+	/* The network thread wakes to close it. */
+	loader_poke(loader);
+}
+
+/*
+ * Opens a client of a loader for a thread other than the loader's: its
+ * requests' callbacks run from its own dispatch, and notify (which may be
+ * NULL) is called with context from the network thread when it has news
+ * (once, until its thread has dispatched).  Returns 0, ENOMEM, or EAGAIN
+ * (LOADER_CLIENTS_MAX clients are open).
+ */
+int
+net_loader_client_open(
+	struct net_loader *loader,
+	net_loader_notify notify,
+	void *context,
+	struct net_loader_client **client)
+{
+	struct net_loader_client *made;
+	int full;
+
+	/* The client. */
+	*client = NULL;
+	made = calloc(1, sizeof(*made));
+	if (made == NULL)
+		return ENOMEM;
+	made->loader = loader;
+	made->notify = notify;
+	made->notify_context = context;
+
+	/* One of the loader's clients, unless it has as many as it keeps. */
+	full = 0;
+	wb_mutex_lock(&loader->lock);
+
+	if (loader->client_count >= LOADER_CLIENTS_MAX) {
+		full = 1;
+	} else {
+		made->next = loader->clients;
+		loader->clients = made;
+		loader->client_count++;
+	}
+
+	wb_mutex_unlock(&loader->lock);
+
+	/* A loader with no room for it. */
+	if (full) {
+		free(made);
+		return EAGAIN;
+	}
+
+	/* Succeeded: the client takes requests. */
+	*client = made;
+	return 0;
+}
+
+/*
+ * Closes a client from its thread: its requests are aborted and let go
+ * (their callbacks are not called), and it is freed once the network
+ * thread has handed every one back and is not telling it of news.  Its
+ * waited requests must have been released.  The loader's own client is
+ * not closed this way (net_loader_destroy ends it).
+ */
+void
+net_loader_client_close(
+	struct net_loader_client *client)
+{
+	struct net_loader_client **link;
+	struct net_loader *loader;
+	struct net_request *request;
+	struct net_request *taken;
+
+	/* Nothing to close, or the loader's own. */
+	if (client == NULL || client->own)
+		return;
+
+	/* Closing: every live request aborted, and the ended ones taken. */
+	loader = client->loader;
+	wb_mutex_lock(&loader->lock);
+
+	client->closing = 1;
+	for (request = client->live; request != NULL; request = request->live_next)
+		loader_abort_marked(request);
+	taken = client->completed;
+	client->completed = NULL;
+	client->completed_last = NULL;
+
+	wb_mutex_unlock(&loader->lock);
+
+	/* The network thread wakes to close their connections. */
+	loader_poke(loader);
+
+	/* The ended ones go now. */
+	while (taken != NULL) {
+		request = taken;
+		taken = request->queue_next;
+		loader_forget(request);
+		loader_free(request);
+	}
+
+	/* The rest go as the network thread hands them back; then the client leaves the loader. */
+	wb_mutex_lock(&loader->lock);
+
+	while (client->live_count != 0 || client->telling != 0)
+		wb_cond_wait(&loader->changed, &loader->lock);
+	for (link = &loader->clients; *link != NULL; link = &(*link)->next) {
+		if (*link == client) {
+			*link = client->next;
+			break;
+		}
+	}
+	loader->client_count--;
+
+	wb_mutex_unlock(&loader->lock);
+
+	/* The client. */
+	free(client);
+}
+
+/*
+ * Reports the loader's own client (the thread that made the loader).
+ */
+struct net_loader_client *
+net_loader_own_client(
+	struct net_loader *loader)
+{
+	/* The client inside the loader. */
+	return &loader->own;
+}
+
+/*
+ * Sets the epoch a client's requests are made in from now on (its
+ * thread's navigation number); net_loader_client_abort_before aborts by it.
+ */
+void
+net_loader_client_set_epoch(
+	struct net_loader_client *client,
+	uint64_t epoch)
+{
+	/* The epoch of the next requests. */
+	client->epoch = epoch;
+}
+
+/*
+ * Aborts, from any thread, every live request of a client made in an
+ * epoch before the one given (the navigations before the current one);
+ * the requests of that epoch and after are left.
+ */
+void
+net_loader_client_abort_before(
+	struct net_loader_client *client,
+	uint64_t epoch)
+{
+	struct net_loader *loader;
+	struct net_request *request;
+
+	/* The marks, under the lock. */
+	loader = client->loader;
+	wb_mutex_lock(&loader->lock);
+
+	for (request = client->live; request != NULL; request = request->live_next) {
+		if (request->epoch < epoch)
+			loader_abort_marked(request);
+	}
+
+	wb_mutex_unlock(&loader->lock);
+
+	/* The network thread wakes to close them. */
+	loader_poke(loader);
+}
+
+/*
+ * Tells how many requests of the loader's own client were started that
+ * have neither ended to their callbacks nor been cancelled.
  */
 size_t
 net_loader_pending(
 	const struct net_loader *loader)
 {
-	/* The caller's own count. */
-	return loader->pending;
+	/* The own client's count. */
+	return loader->own.pending;
+}
+
+/*
+ * Tells how many requests of a client were started that have neither
+ * ended to it nor been cancelled (its thread's count).
+ */
+size_t
+net_loader_client_pending(
+	const struct net_loader_client *client)
+{
+	/* The client's count. */
+	return client->pending;
 }
 
 /*
@@ -676,12 +1074,27 @@ net_loader_wait(
 	struct net_loader *loader,
 	int timeout)
 {
+	/* The own client's wait. */
+	net_loader_client_wait(&loader->own, timeout);
+}
+
+/*
+ * Waits until the network thread has news for a client's dispatch, or
+ * for a number of milliseconds at most (-1: until there is news).
+ */
+void
+net_loader_client_wait(
+	struct net_loader_client *client,
+	int timeout)
+{
+	struct net_loader *loader;
 	uint64_t end;
 	uint64_t now;
 	uint64_t left;
 	uint32_t milliseconds;
 
 	/* The end of the wait on the monotonic clock. */
+	loader = client->loader;
 	end = 0;
 	if (timeout > 0)
 		end = wb_os_monotonic_ns() + (uint64_t)timeout * 1000000U;
@@ -690,7 +1103,7 @@ net_loader_wait(
 	wb_mutex_lock(&loader->lock);
 
 	/* Each wake of the condition, until there is news or the time is up. */
-	while (!loader->notified) {
+	while (!client->notified) {
 		if (timeout < 0) {
 			wb_cond_wait(&loader->changed, &loader->lock);
 			continue;
@@ -723,7 +1136,7 @@ net_loader_dispatch(
 	struct net_loader *loader)
 {
 	/* All of them, however long their callbacks take. */
-	(void)net_loader_dispatch_until(loader, UINT64_MAX);
+	(void)net_loader_client_dispatch_until(&loader->own, UINT64_MAX);
 }
 
 /*
@@ -737,17 +1150,38 @@ net_loader_dispatch_until(
 	struct net_loader *loader,
 	uint64_t deadline)
 {
+	int left;
+
+	/* The own client's dispatch. */
+	left = net_loader_client_dispatch_until(&loader->own, deadline);
+	return left;
+}
+
+/*
+ * Does a client's dispatch, from its thread, until a deadline, as
+ * net_loader_dispatch_until does.  A request aborted (by any thread) is
+ * let go without its callback.
+ */
+int
+net_loader_client_dispatch_until(
+	struct net_loader_client *client,
+	uint64_t deadline)
+{
+	struct net_loader *loader;
 	struct net_request *taken;
 	struct net_request *request;
 	struct net_request *last;
 
-	/* The ended requests, all of them, and the caller is told of the next news again. */
+	/* The ended requests, all of them, each with whether it was aborted, and the client is told of the next news again. */
+	loader = client->loader;
 	wb_mutex_lock(&loader->lock);
 
-	taken = loader->completed;
-	loader->completed = NULL;
-	loader->completed_last = NULL;
-	loader->notified = 0;
+	taken = client->completed;
+	client->completed = NULL;
+	client->completed_last = NULL;
+	client->notified = 0;
+	for (request = taken; request != NULL; request = request->queue_next)
+		request->aborted = request->asked_cancel;
 
 	wb_mutex_unlock(&loader->lock);
 
@@ -756,15 +1190,18 @@ net_loader_dispatch_until(
 		request = taken;
 		taken = request->queue_next;
 
-		/* One cancelled meanwhile, even by an earlier callback, only goes. */
-		if (!request->dropped) {
+		/* One cancelled or aborted meanwhile, even by an earlier callback, only goes (an abort still counted). */
+		if (!request->dropped && !request->aborted) {
 			request->delivered = 1;
-			loader->pending--;
+			client->pending--;
 			if (request->done != NULL)
 				request->done(request->context, request);
+		} else if (!request->dropped) {
+			client->pending--;
 		}
 
 		/* The request is freed. */
+		loader_forget(request);
 		loader_free(request);
 
 		/* Past the deadline the rest wait. */
@@ -780,10 +1217,10 @@ net_loader_dispatch_until(
 	for (last = taken; last->queue_next != NULL; last = last->queue_next)
 		;
 	wb_mutex_lock(&loader->lock);
-	last->queue_next = loader->completed;
-	if (loader->completed == NULL)
-		loader->completed_last = last;
-	loader->completed = taken;
+	last->queue_next = client->completed;
+	if (client->completed == NULL)
+		client->completed_last = last;
+	client->completed = taken;
 	wb_mutex_unlock(&loader->lock);
 	return 1;
 }
@@ -903,6 +1340,7 @@ static void
 loader_release(
 	struct net_loader *loader)
 {
+	struct net_loader_client *client;
 	struct net_request *request;
 	struct loader_job *job;
 
@@ -936,10 +1374,16 @@ loader_release(
 		loader_free(request);
 	}
 
-	/* Those it ended and did not hand over, those it did not take, and those the caller did not take. */
+	/* Those it ended and did not hand over, those it did not take, and those the clients did not take. */
 	loader_free_queue(loader->ended);
 	loader_free_queue(loader->incoming);
-	loader_free_queue(loader->completed);
+	while (loader->clients != NULL) {
+		client = loader->clients;
+		loader->clients = client->next;
+		loader_free_queue(client->completed);
+		if (!client->own)
+			free(client);
+	}
 
 	/* The jobs and answers left. */
 	while (loader->jobs != NULL) {
@@ -1235,7 +1679,13 @@ static void
 loader_publish(
 	struct net_loader *loader)
 {
-	int tell;
+	struct net_loader_client *told[LOADER_CLIENTS_MAX];
+	struct net_loader_client *client;
+	struct net_request *request;
+	struct net_request *ended;
+	struct net_request *gone;
+	size_t told_count;
+	size_t index;
 
 	/* The ended requests leave the network thread's list. */
 	loader_reap(loader);
@@ -1244,23 +1694,60 @@ loader_publish(
 	if (loader->ended == NULL && !loader->rang)
 		return;
 
-	/* The ended requests follow those the caller has not taken; the caller is told once. */
-	tell = 0;
+	/* Each ended request to its client, and the clients to tell. */
+	gone = NULL;
+	told_count = 0;
+	ended = loader->ended;
 	wb_mutex_lock(&loader->lock);
 
-	/* The ended requests, after those already waiting. */
-	if (loader->ended != NULL) {
-		if (loader->completed_last != NULL)
-			loader->completed_last->queue_next = loader->ended;
+	while (ended != NULL) {
+		request = ended;
+		ended = request->queue_next;
+		request->queue_next = NULL;
+		client = request->client;
+
+		/* A closing client's request is let go here, and its closing goes on. */
+		if (client->closing) {
+			loader_unlink_live(request);
+			request->queue_next = gone;
+			gone = request;
+			continue;
+		}
+
+		/* A waited one finishes (an aborted one with ECANCELED) and its waiter wakes. */
+		if (request->waited) {
+			if (request->cancelled && request->error == 0)
+				request->error = ECANCELED;
+			request->finished = 1;
+			continue;
+		}
+
+		/* A called-back one waits for its client's dispatch, after those already waiting. */
+		request->finished = 1;
+		if (client->completed_last != NULL)
+			client->completed_last->queue_next = request;
 		else
-			loader->completed = loader->ended;
-		loader->completed_last = loader->ended_last;
+			client->completed = request;
+		client->completed_last = request;
+		client->tell = 1;
 	}
 
-	/* The caller is told when it was not told already; a waiting caller wakes. */
-	if (!loader->notified)
-		tell = 1;
-	loader->notified = 1;
+	/* A ring is the own client's news. */
+	if (loader->rang)
+		loader->own.tell = 1;
+
+	/* The clients with news that were not told yet are told now (outside the lock); a waiting client wakes. */
+	for (client = loader->clients; client != NULL; client = client->next) {
+		if (!client->tell)
+			continue;
+		client->tell = 0;
+		if (!client->notified && client->notify != NULL && told_count < LOADER_CLIENTS_MAX) {
+			client->telling++;
+			told[told_count] = client;
+			told_count++;
+		}
+		client->notified = 1;
+	}
 	wb_cond_broadcast(&loader->changed);
 
 	wb_mutex_unlock(&loader->lock);
@@ -1270,9 +1757,27 @@ loader_publish(
 	loader->ended_last = NULL;
 	loader->rang = 0;
 
-	/* The caller's notify, outside the lock. */
-	if (tell && loader->notify != NULL)
-		loader->notify(loader->notify_context);
+	/* The closing clients' requests. */
+	while (gone != NULL) {
+		request = gone;
+		gone = request->queue_next;
+		loader_free(request);
+	}
+
+	/* The clients' notify, outside the lock. */
+	for (index = 0; index < told_count; index++)
+		told[index]->notify(told[index]->notify_context);
+
+	/* The calls are over: a closing client may go. */
+	if (told_count == 0)
+		return;
+	wb_mutex_lock(&loader->lock);
+
+	for (index = 0; index < told_count; index++)
+		told[index]->telling--;
+	wb_cond_broadcast(&loader->changed);
+
+	wb_mutex_unlock(&loader->lock);
 }
 
 /*
@@ -2035,6 +2540,56 @@ loader_reap(
 		*link = request->next;
 		request->next = NULL;
 	}
+}
+
+/* Takes a request out of its client's live requests (the caller holds the loader's lock). */
+static void
+loader_unlink_live(
+	struct net_request *request)
+{
+	struct net_loader_client *client;
+
+	/* Out of the list, one fewer. */
+	client = request->client;
+	if (request->live_prev != NULL)
+		request->live_prev->live_next = request->live_next;
+	else
+		client->live = request->live_next;
+	if (request->live_next != NULL)
+		request->live_next->live_prev = request->live_prev;
+	request->live_prev = NULL;
+	request->live_next = NULL;
+	client->live_count--;
+}
+
+/* Takes a request its client's thread lets go out of the client's live requests, under the lock. */
+static void
+loader_forget(
+	struct net_request *request)
+{
+	struct net_loader *loader;
+
+	/* Out of the list, while no other thread looks at it. */
+	loader = request->loader;
+	wb_mutex_lock(&loader->lock);
+
+	loader_unlink_live(request);
+
+	wb_mutex_unlock(&loader->lock);
+}
+
+/* Marks a request aborted unless it finished (the caller holds the loader's lock and pokes the network thread). */
+static void
+loader_abort_marked(
+	struct net_request *request)
+{
+	/* One that came back already stays as it came. */
+	if (request->finished)
+		return;
+
+	/* The network thread closes it at its next round. */
+	request->asked_cancel = 1;
+	request->loader->cancel_asked = 1;
 }
 
 /* Frees a request and what it holds. */

@@ -527,11 +527,11 @@ script_fetch_sync(
 {
 	struct page *page;
 
-	/* The original blocking page fetcher remains available to synchronous XHR. */
+	/* A synchronous XHR waits for the loader's request (the network runs on the loader's thread), or reads a local resource at once. */
 	page = context;
 	if (page->base == NULL)
 		return EINVAL;
-	return page_fetch(page_cookies(page), page->base, href, bytes, final_url);
+	return page_fetch_now(page, href, NET_FETCH_SCRIPT_API, bytes, final_url);
 }
 
 /* Starts a script's request, resolved against this page; a web resource goes through the page's loader. */
@@ -1956,8 +1956,8 @@ script_fetch_file(
 		return 0;
 	}
 
-	/* Any other (a local file, or one the scan did not find) is read at once. */
-	error = page_fetch(page_cookies(page), page->base, href, bytes, NULL);
+	/* Any other (a local file, or one the scan did not find) is read now: a web one through the loader, waited for. */
+	error = page_fetch_now(page, href, NET_FETCH_DOCUMENT, bytes, NULL);
 	if (error != 0)
 		return error;
 
