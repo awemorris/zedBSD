@@ -120,6 +120,9 @@ static int client_view_page(const char *path, const char *line, enum browser_fet
 /* The client the epoch thread aborts in. */
 static struct net_loader_client *epoch_client;
 
+/* When the abort thread called net_request_abort, on client_now's clock (written before the wait ends, read after the join). */
+static double abort_time;
+
 int
 main(
 	void)
@@ -212,9 +215,10 @@ main(
 		error = net_request_wait(hanging);
 		took = client_now() - start;
 		pthread_join(aborter, NULL);
-		printf("host-loader-client: the aborted request ended %.0f ms after the wait began (the abort at 200 ms)\n", took);
+		took = start + took - abort_time;
+		printf("host-loader-client: the waited request woke %.1f ms after the abort (the bound is 100 ms)\n", took);
 		client_check(error == ECANCELED, "abort: the waited request ends with ECANCELED");
-		client_check(took >= 190.0 && took < 300.0, "abort: within 100 ms of the abort");
+		client_check(took >= 0.0 && took < 100.0, "abort: the wait ends within 100 ms of the abort");
 		net_request_release(hanging);
 	}
 
@@ -408,6 +412,7 @@ client_abort_later(
 	void *context)
 {
 	usleep(200000);
+	abort_time = client_now();
 	net_request_abort(context);
 	return NULL;
 }
