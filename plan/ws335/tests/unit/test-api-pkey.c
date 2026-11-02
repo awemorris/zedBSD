@@ -659,6 +659,7 @@ test_raw_keys(void)
 			if (other == NULL)
 				continue;
 			CHECK(other->has_private == 0 && other->references == 1);
+			CHECK(other->private_key == NULL && other->private_size == 0U && other->public_size == 32U);
 			memset(out, SENTINEL_BYTE, sizeof(out));
 			length = 32U;
 			OK(EVP_PKEY_get_raw_public_key(other, out, &length));
@@ -736,6 +737,11 @@ test_references(void)
 	CHECK(key->references == 2);
 	ctx2 = EVP_PKEY_CTX_new_from_pkey(NULL, key, NULL);
 	CHECK(ctx2 != NULL);
+	CHECK(ctx != NULL && ctx2 != NULL);
+	if (ctx != NULL && ctx2 != NULL) {
+		CHECK(ctx->key == key && ctx->keygen_type == 0 && ctx->operation == CRYC_OP_NONE && ctx->peer == NULL);
+		CHECK(ctx2->key == key && ctx2->keygen_type == 0 && ctx2->operation == CRYC_OP_NONE && ctx2->peer == NULL);
+	}
 	CHECK(key->references == 3);
 	EVP_PKEY_CTX_free(ctx);
 	CHECK(key->references == 2);
