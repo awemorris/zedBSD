@@ -36,6 +36,8 @@ static int page_load_xhtml(struct page *page, const unsigned char *bytes, size_t
 static int page_xhtml_inline_scripts(struct page *page);
 static int page_xhtml_script_eligible(const struct dom_node *node, const struct dom_document *document);
 static int page_load_document(struct page *page, const unsigned char *bytes, size_t length, const char *mime, size_t mime_length);
+static int page_parse_html(struct page *page, const unsigned char *bytes, size_t length);
+static int page_finish_html(struct page *page, int started);
 static int page_file_xhtml(const char *path);
 static int page_link_visited(void *context, struct dom_element *element);
 static int page_container_size(void *context, const struct dom_element *container, float *width, float *height);
@@ -183,6 +185,27 @@ page_load_html(
 	const unsigned char *bytes,
 	size_t length)
 {
+	int error;
+
+	/* The parse, then what follows it once the sheets came. */
+	error = page_parse_html(page, bytes, length);
+	if (error != 0)
+		return error;
+	error = page_finish_html(page, 0);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the page holds the document and its styles. */
+	return 0;
+}
+
+/* Parses an HTML document's bytes into the page's document, running the scripts the parser reaches. */
+static int
+page_parse_html(
+	struct page *page,
+	const unsigned char *bytes,
+	size_t length)
+{
 	struct html_parser *parser;
 	struct wb_units units;
 	int error;
@@ -222,8 +245,40 @@ page_load_html(
 	if (error != 0)
 		return error;
 
+	/* Succeeded: the document is parsed. */
+	return 0;
+}
+
+/*
+ * Does what follows page_load_begin for an HTML document, once
+ * page_sheets_blocking says no sheet that blocks its scripts is on its way (or the caller waited
+ * long enough: one that comes later is styled in when it comes).
+ */
+int
+page_load_finish(
+	struct page *page)
+{
+	return page_finish_html(page, 1);
+}
+
+/*
+ * Does what follows the parse of an HTML document: waits for the sheets it
+ * links (unless started says the caller waited for them), which block its deferred scripts,
+ * runs them and its modules, fires DOMContentLoaded and the window's load,
+ * and gathers its style sheets.
+ */
+static int
+page_finish_html(
+	struct page *page,
+	int started)
+{
+	int error;
+
 	/* The document is parsed: DOMContentLoaded, then the window's load.  The sheets it links block its deferred scripts. */
-	error = page_wait_sheets(page);
+	if (started)
+		error = page_update_styles(page);
+	else
+		error = page_wait_sheets(page);
 	if (error != 0)
 		return error;
 	error = page_deferred_run(page);
@@ -272,6 +327,51 @@ page_load_bytes(
 		return error;
 
 	/* Succeeded: the page is loaded. */
+	return 0;
+}
+
+/*
+ * Starts loading a document from its bytes as page_load_bytes does, up to
+ * where an HTML document would wait for its style sheets: *finish says
+ * that page_load_finish is left to do (when page_sheets_blocking says none
+ * is on its way), or that the page is loaded (another kind of document).
+ */
+int
+page_load_begin(
+	struct page *page,
+	const unsigned char *bytes,
+	size_t length,
+	const char *location,
+	const char *mime,
+	size_t mime_length,
+	int *finish)
+{
+	enum dom_document_content content;
+	int error;
+
+	/* The location. */
+	*finish = 0;
+	free(page->base);
+	page->base = strdup(location);
+	if (page->base == NULL)
+		return ENOMEM;
+
+	/* An XHTML document is loaded at once. */
+	if (mime != NULL) {
+		error = page_document_content(mime, mime_length, &content);
+		if (error == 0 && content == DOM_CONTENT_XHTML)
+			return page_load_xhtml(page, bytes, length);
+	}
+
+	/* An HTML document is parsed, and the sheets it links so far start loading; the rest waits for them. */
+	error = page_parse_html(page, bytes, length);
+	if (error == 0)
+		error = page_update_styles(page);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the rest is the caller's to finish. */
+	*finish = 1;
 	return 0;
 }
 
@@ -628,8 +728,9 @@ page_layout(
 	if (error != 0)
 		goto cleanup;
 
-	/* Builds and lays out the box tree, the images found by their elements (the ones there are now). */
+	/* Builds and lays out the box tree, the images found by their elements (the ones there are now), with the styles gathered last. */
 	page->laid_out_images = page->images_generation;
+	page->laid_out_gathered = page->gathered;
 	css_engine_set_container_lookup(page->css, page_container_size, page);
 	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 	page->laid_out = 1;
@@ -1411,7 +1512,8 @@ page_gather_styles(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the sheets match the document of this generation. */
+	/* Succeeded: the sheets match the document of this generation (a layout made before them is stale). */
+	page->gathered++;
 	page->styled_generation = page_generation(page);
 	page->styled_visits = page->visits_generation;
 

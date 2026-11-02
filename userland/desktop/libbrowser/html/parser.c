@@ -1073,12 +1073,14 @@ tb_create_element(
 		return NULL;
 	}
 
-	/* Makes the element. */
+	/* Makes the element (a document's parser's own). */
 	element = dom_element_create(p->document, ns, local_name, NULL);
 	if (element == NULL) {
 		parser_nomem(p);
 		return NULL;
 	}
+	if (p->context == NULL)
+		element->node.flags |= DOM_NODE_PARSER_CREATED;
 
 	/* The element is detached while its attributes and contents are allocated. */
 	element_root = &element->node.cell;
@@ -1156,12 +1158,14 @@ tb_create_element_for_tag(
 		return NULL;
 	}
 
-	/* Makes the element. */
+	/* Makes the element (a document's parser's own). */
 	element = dom_element_create(p->document, DOM_NS_HTML, local_name, NULL);
 	if (element == NULL) {
 		parser_nomem(p);
 		return NULL;
 	}
+	if (p->context == NULL)
+		element->node.flags |= DOM_NODE_PARSER_CREATED;
 
 	/* The element stays live until its template fragment has been allocated. */
 	element_root = &element->node.cell;
@@ -2505,6 +2509,8 @@ parser_clone_element(
 		parser_nomem(p);
 		return NULL;
 	}
+	if (p->context == NULL)
+		clone->node.flags |= DOM_NODE_PARSER_CREATED;
 
 	/* Copies the attributes. */
 	for (index = 0; index < element->attribute_count; index++) {

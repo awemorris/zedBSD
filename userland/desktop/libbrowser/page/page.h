@@ -46,14 +46,17 @@ struct net_url;
 typedef void (*page_request_done)(void *context, struct net_request *request);
 
 /*
- * A parser-blocking script fetched before its document was parsed
- * (BUG-207, script.c): its location (resolved against the document's
- * URL), how the fetch ended (0, or an errno value) and the bytes it
- * brought.  The page owns it from page_add_prefetched to page_destroy.
+ * A parser-blocking script or a style sheet fetched before its document
+ * was parsed (script.c): its location (resolved against the document's
+ * URL), how the fetch ended (0, or an errno value), the response's status
+ * and Content-Type, and the bytes it brought.  The page owns it from
+ * page_add_prefetched to page_destroy.
  */
 struct page_prefetched {
 	char *location;
 	int error;
+	int status;
+	struct wb_buffer mime;
 	struct wb_buffer bytes;
 };
 
@@ -147,6 +150,9 @@ struct page {
 	struct wb_vector link_events;
 	uint32_t sheets_generation;
 	uint32_t styled_sheets;
+	/* How many times the sheets were gathered, and the count the layout was made with (a gathering outside a layout makes it stale). */
+	uint32_t gathered;
+	uint32_t laid_out_gathered;
 	struct wb_vector scripts;
 	/* Parser-inserted inline module scripts and their retained URL graph. */
 	struct wb_vector module_scripts;
@@ -260,14 +266,16 @@ int page_import_module(void *context, const char *url, int json, vm_value *names
 int page_deferred_run(struct page *page);
 int page_sheets_fire_links(struct page *page);
 
-/* The parser-blocking scripts fetched before a document is parsed (script.c, BUG-207). */
+/* The parser-blocking scripts and the style sheets fetched before a document is parsed (script.c). */
 int page_scan_scripts(const char *base, const unsigned char *bytes, size_t length, struct wb_vector *locations);
-int page_add_prefetched(struct page *page, const char *location, int error, const unsigned char *bytes, size_t length);
+int page_add_prefetched(struct page *page, const char *location, int error, int response_status, const char *mime, const unsigned char *bytes, size_t length);
+const struct page_prefetched *page_prefetched_find(const struct page *page, const char *location);
 
 /* Style sheets (sheets.c). */
 void page_sheets_init(struct page *page);
 int page_sheets_add(struct page *page);
 int page_sheets_pending(const struct page *page);
+int page_sheets_blocking(const struct page *page);
 void page_sheets_release(struct page *page);
 
 /* Web fonts (fonts.c, ws074-p070). */
@@ -339,6 +347,8 @@ void page_set_instance(struct page *page, struct browser_instance *instance);
 struct browser_instance *page_instance(struct page *page);
 struct net_cookie_jar *page_cookies(struct page *page);
 int page_load_bytes(struct page *page, const unsigned char *bytes, size_t length, const char *location, const char *mime, size_t mime_length);
+int page_load_begin(struct page *page, const unsigned char *bytes, size_t length, const char *location, const char *mime, size_t mime_length, int *finish);
+int page_load_finish(struct page *page);
 int page_net_create(struct net_cookie_jar *jar, struct net_cache *cache, void (*notify)(void *context), void *context, struct net_loader **loader);
 void page_net_destroy(struct net_loader *loader);
 size_t page_net_pending(const struct net_loader *loader);

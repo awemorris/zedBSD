@@ -65,6 +65,16 @@
 /* The longest a timer is waited for at once, in milliseconds. */
 #define VIEW_WAIT_MAX		60000.0
 
+/*
+ * How long one browser_view_process spends on the requests that ended (the
+ * scripts that arrived run in their callbacks), in nanoseconds: the rest
+ * wait for the next call, so the program draws and takes its input between.
+ */
+#define VIEW_DISPATCH_NS	50000000U
+
+/* How long a parsed document waits for its style sheets before it is shown without the ones still on their way, in milliseconds. */
+#define VIEW_SHEETS_WAIT_MS	30000U
+
 /* The most layout/checkpoint passes used to drain work released by initial font settlement. */
 #define VIEW_SETTLE_ROUNDS 32U
 
@@ -150,6 +160,8 @@ struct view_prefetch_script {
 	char *location;
 	struct net_request *request;
 	int error;
+	int status;
+	struct wb_buffer mime;
 	struct wb_buffer bytes;
 };
 
@@ -238,6 +250,19 @@ struct browser_view {
 	uint32_t page_serial;
 	struct browser_instance *instance;
 	int storage_told;
+	/* Ended requests whose callbacks the last browser_view_process left for the next one. */
+	int dispatch_left;
+	/*
+	 * A document that arrived and was parsed, which waits for its style
+	 * sheets before its scripts after the parse run and it is shown (NULL
+	 * for none): its final URL, how it joins the history, and since when
+	 * it waits.  pending_path stays the load's until it is shown.
+	 */
+	struct page *finishing;
+	char *finishing_url;
+	int finishing_step;
+	size_t finishing_index;
+	uint64_t finishing_since;
 };
 
 /*
@@ -273,6 +298,7 @@ static int view_target(const struct browser_target *target);
 static uint64_t view_clock(void);
 static int view_navigate(struct browser_view *view, const char *path, int step, size_t history_index);
 static void view_script_navigation(struct browser_view *view);
+static void view_finish_check(struct browser_view *view);
 static int view_make_page(struct browser_view *view, struct page **page);
 static int view_open_page(struct browser_view *view, const char *path, struct page **page);
 static int view_show_page(struct browser_view *view, struct page *page, const char *path, int step, size_t history_index);
@@ -723,6 +749,10 @@ browser_view_timeout(
 	int media;
 	int found;
 
+	/* Callbacks left by the last call, and a parsed document whose sheets came, are due at once. */
+	if (view->dispatch_left || (view->finishing != NULL && !page_sheets_blocking(view->finishing)))
+		return 0;
+
 	/* No page, nothing timed. */
 	timeout = -1;
 	if (view->page == NULL)
@@ -774,9 +804,13 @@ browser_view_process(
 		view->storage_told = 1;
 	}
 
-	/* The loader's news: the callbacks of the requests that ended. */
+	/* The loader's news: the callbacks of the requests that ended, for a while (the rest at the next call). */
+	view->dispatch_left = 0;
 	if (view->loader != NULL)
-		page_net_process(view->loader);
+		view->dispatch_left = net_loader_dispatch_until(view->loader, wb_os_monotonic_ns() + VIEW_DISPATCH_NS);
+
+	/* A parsed document whose sheets came is shown. */
+	view_finish_check(view);
 	if (view->page == NULL)
 		return;
 
@@ -2462,6 +2496,7 @@ view_commit_document(
 	char *path;
 	size_t history_index;
 	size_t index;
+	int finish;
 	int step;
 	int error;
 
@@ -2478,7 +2513,8 @@ view_commit_document(
 	if (error == 0 && scripts != NULL) {
 		for (index = 0; index < scripts->count; index++) {
 			script = *(const struct view_prefetch_script **)wb_vector_at(scripts, index);
-			error = page_add_prefetched(page, script->location, script->error, script->bytes.data, script->bytes.length);
+			error = page_add_prefetched(page, script->location, script->error, script->status, wb_buffer_string(&script->mime),
+			    script->bytes.data, script->bytes.length);
 			if (error != 0)
 				break;
 		}
@@ -2488,11 +2524,28 @@ view_commit_document(
 			page_destroy(page);
 	}
 
-	/* The document, at its final URL. */
+	/* The document, at its final URL: an HTML one is parsed, and waits for its style sheets without blocking. */
+	finish = 0;
 	if (error == 0) {
-		error = page_load_bytes(page, bytes, length, url, mime, mime_length);
+		error = page_load_begin(page, bytes, length, url, mime, mime_length, &finish);
 		if (error != 0)
 			page_destroy(page);
+	}
+	if (error == 0 && finish) {
+		view->finishing_url = strdup(url);
+		if (view->finishing_url == NULL) {
+			page_destroy(page);
+			error = ENOMEM;
+		}
+	}
+	if (error == 0 && finish) {
+		view->finishing = page;
+		view->finishing_step = step;
+		view->finishing_index = history_index;
+		view->finishing_since = view_clock();
+		view->pending_path = path;
+		view_finish_check(view);
+		return;
 	}
 
 	/* The new page is shown; a page that could not be made is reported. */
@@ -2502,6 +2555,53 @@ view_commit_document(
 	/* Allocation failures during commit also reach the caller's failure callback. */
 	if (error != 0)
 		view_failed(view, url, error, "");
+	free(path);
+}
+
+/*
+ * Shows the document that waits for its style sheets once none is on its
+ * way (or it waited VIEW_SHEETS_WAIT_MS): its scripts after the parse run
+ * and its load events fire first.  A failure is reported and the page
+ * shown stays.
+ */
+static void
+view_finish_check(
+	struct browser_view *view)
+{
+	struct page *page;
+	char *path;
+	char *url;
+	size_t history_index;
+	int pending;
+	int step;
+	int error;
+
+	/* Nothing waits, or its sheets are still on their way. */
+	if (view->finishing == NULL)
+		return;
+	pending = page_sheets_blocking(view->finishing);
+	if (pending && view_clock() - view->finishing_since < VIEW_SHEETS_WAIT_MS)
+		return;
+
+	/* The page and its load, taken from the view (the scripts may start another load). */
+	page = view->finishing;
+	url = view->finishing_url;
+	step = view->finishing_step;
+	history_index = view->finishing_index;
+	path = view->pending_path;
+	view->finishing = NULL;
+	view->finishing_url = NULL;
+	view->pending_path = NULL;
+
+	/* The rest of its loading, then it is shown; a failure is reported. */
+	error = page_load_finish(page);
+	if (error != 0)
+		page_destroy(page);
+	if (error == 0)
+		error = view_show_page(view, page, url, step, history_index);
+	if (error != 0)
+		view_failed(view, url, error, "");
+	free(url);
 	free(path);
 }
 
@@ -2572,6 +2672,7 @@ view_prefetch_start(
 		/* Initializes the script object with view and location. */
 		script->view = view;
 		script->location = location;
+		wb_buffer_init(&script->mime);
 		wb_buffer_init(&script->bytes);
 
 		/* The view's list keeps it. */
@@ -2620,15 +2721,21 @@ view_prefetch_arrived(
 	struct net_request *request)
 {
 	struct view_prefetch_script *script;
+	const struct net_response *response;
 	const unsigned char *bytes;
 	const char *url;
 	size_t length;
 	int error;
 
-	/* The script's request is over: its error, or its body (of any status, as reading it at once gives). */
+	/* The request is over: its error, or its body (of any status, as reading it at once gives) with the status and the type a sheet is checked by. */
 	script = context;
 	script->request = NULL;
 	error = page_net_result(request, &bytes, &length, &url);
+	if (error == 0) {
+		response = net_request_response(request);
+		script->status = response->status;
+		error = wb_buffer_append(&script->mime, response->content_type.data, response->content_type.length);
+	}
 	if (error == 0)
 		error = wb_buffer_append(&script->bytes, bytes, length);
 	script->error = error;
@@ -2699,6 +2806,7 @@ view_prefetch_free(
 		if (script->request != NULL)
 			page_net_cancel(script->request);
 		free(script->location);
+		wb_buffer_release(&script->mime);
 		wb_buffer_release(&script->bytes);
 		free(script);
 	}
@@ -2713,9 +2821,17 @@ view_stop_load(
 	struct browser_view *view,
 	int report)
 {
-	/* Nothing loads: no request runs and no document waits for its scripts. */
-	if (view->pending == NULL && view->arrived_url == NULL)
+	/* Nothing loads: no request runs and no document waits for its scripts or its sheets. */
+	if (view->pending == NULL && view->arrived_url == NULL && view->finishing == NULL)
 		return;
+
+	/* A parsed document that waits for its sheets goes. */
+	if (view->finishing != NULL) {
+		page_destroy(view->finishing);
+		view->finishing = NULL;
+		free(view->finishing_url);
+		view->finishing_url = NULL;
+	}
 
 	/* The request, or the scripts a document that arrived waits for. */
 	if (view->pending != NULL)
@@ -2817,10 +2933,14 @@ view_settle_network(
 		if (pending == 0)
 			break;
 
-		/* The news, waited for, then the callbacks. */
+		/* The news, waited for, then the callbacks, and a parsed document whose sheets came. */
 		page_net_wait(view->loader, -1);
 		page_net_process(view->loader);
+		view_finish_check(view);
 	}
+
+	/* A parsed document that waited for nothing more. */
+	view_finish_check(view);
 }
 
 /* Keeps the scroll between the top and the last view's worth of the document as it is laid out. */
