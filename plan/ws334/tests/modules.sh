@@ -59,7 +59,7 @@ ws334_test_sources() {
 	os-zones:*) echo "$lb/base/os-zones.c $ws334_base" ;;
 	records:*) echo "$lb/storage/records.c $ws334_base" ;;
 	files:posix) echo "$lb/storage/files.c $lb/storage/records.c $lb/base/os-file-posix.c $ws334_threads $ws334_base" ;;
-	files:win32) echo "$lb/storage/files.c $lb/storage/records.c $lb/base/os-file-win32.c $lb/base/os-win32.c $ws334_base" ;;
+	files:win32) echo "$lb/storage/files.c $lb/storage/records.c $lb/base/os-file-win32.c $lb/base/os-win32.c $ws334_threads $ws334_base" ;;
 	queue:posix) echo "$lb/storage/queue.c $lb/storage/records.c $lb/base/os-system-posix.c $ws334_threads $ws334_base" ;;
 	queue:win32) echo "$lb/storage/queue.c $lb/storage/records.c $lb/base/os-system-win32.c $lb/base/os-win32.c $ws334_threads $ws334_base" ;;
 	tools:*) echo "$ws334_base" ;;
