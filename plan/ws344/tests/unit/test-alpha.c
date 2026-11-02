@@ -480,7 +480,10 @@ static void
 test_bad_arguments(void)
 {
 	static const uint8_t payload[3] = { 0x00, 1, 2 };
+	static const uint8_t lossless_only[1] = { 0x01 };
 	uint8_t alpha[4];
+	uint8_t *wide;
+	uint8_t *wide_alpha;
 
 	/* No payload or no output. */
 	CHECK(webpc_alpha_decode(NULL, 3U, 1U, 2U, alpha) == EINVAL);
@@ -492,6 +495,22 @@ test_bad_arguments(void)
 	CHECK(webpc_alpha_decode(payload, 3U, 16384U, 1U, alpha) == EINVAL);
 	CHECK(webpc_alpha_decode(payload, 3U, 1U, 16384U, alpha) == EINVAL);
 	CHECK(webpc_alpha_decode(payload, 3U, 0xffffffffU, 0xffffffffU, alpha) == EINVAL);
+
+	/* A side of 16384 is refused even when the payload holds all its values (the lossless format would allow it). */
+	wide = (uint8_t *)malloc(16385U);
+	wide_alpha = (uint8_t *)malloc(16384U);
+	CHECK(wide != NULL && wide_alpha != NULL);
+	if (wide != NULL && wide_alpha != NULL) {
+		memset(wide, 0, 16385U);
+		CHECK(webpc_alpha_decode(wide, 16385U, 16384U, 1U, wide_alpha) == EINVAL);
+		CHECK(webpc_alpha_decode(wide, 16385U, 1U, 16384U, wide_alpha) == EINVAL);
+		CHECK(webpc_alpha_decode(wide, 16385U, 16383U, 1U, wide_alpha) == 0);
+	}
+	free(wide);
+	free(wide_alpha);
+
+	/* A lossless header byte alone is EINVAL as well (not the ENOBUFS an empty stream would give). */
+	CHECK(webpc_alpha_decode(lossless_only, 1U, 1U, 1U, alpha) == EINVAL);
 }
 
 /* Checks the lossless method: streams written with flat codes, with and without a filter, in several sizes. */
