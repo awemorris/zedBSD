@@ -2803,8 +2803,11 @@ vkvideo_complete_all(
 /*
  * Decides whether this context gives pictures the GPU holds: the program
  * asked for them, the device exports memory, decodes into its references
- * on the one family, and offers sampled NV12 images whose planes may be
- * viewed, and the slots that holds every picture can hold fit the device.
+ * (the output is the DPB picture), and offers sampled NV12 images whose
+ * planes may be viewed, and the slots that holds every picture can hold
+ * fit the device.  The decode family need not be the transfer family:
+ * nothing is read back, and the images are shared by both families when
+ * they differ.
  * The slots: the references, the pictures waiting for their turn and those
  * in flight, the pictures the program holds, and the one decoded into.
  */
@@ -2828,8 +2831,8 @@ vkvideo_gpu_capabilities(
 		return;
 	}
 
-	/* And decode into the images it keeps, on the one family. */
-	if (video->distinct || video->family != video->transfer_family)
+	/* And decode into the images it keeps. */
+	if (video->distinct)
 		return;
 
 	/* Sampled NV12 images whose planes may be viewed. */
