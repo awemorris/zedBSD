@@ -39,8 +39,12 @@
 #include "ssh-auth.h"
 #include "sshd-child.h"
 
-/* The most bytes one read of the connection takes. */
-#define PREAUTH_READ_CHUNK	16384U
+/*
+ * The most bytes one read of the connection takes: the room the packet
+ * layer keeps beside a packet not yet whole (SSH_PACKET_INPUT_MAX), so a
+ * read always fits.
+ */
+#define PREAUTH_READ_CHUNK	4096U
 
 /* The longest list of methods offered: "publickey,password" and its NUL. */
 #define PREAUTH_METHODS_MAX	32U

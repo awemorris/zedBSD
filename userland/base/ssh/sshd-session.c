@@ -52,8 +52,15 @@
 #include "sshd-child.h"
 #include "sshd-monitor.h"
 
-/* The most bytes one read of the connection or of a child takes. */
+/* The most bytes one read of a child takes. */
 #define SESSION_READ_CHUNK	16384U
+
+/*
+ * The most bytes one read of the connection takes: the room the packet
+ * layer keeps beside a packet not yet whole (SSH_PACKET_INPUT_MAX), so a
+ * read always fits.
+ */
+#define SESSION_CLIENT_READ	4096U
 
 /* The most environment variables a client may set on one channel. */
 #define SESSION_ENV_MAX		32U
@@ -633,7 +640,7 @@ session_serve(
 				continue;
 			if (kinds[index] == 0 && (waiting[index].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
 				/* The client: an end of file is the client gone. */
-				got = read(SSHD_FD_CLIENT, chunk, sizeof(chunk));
+				got = read(SSHD_FD_CLIENT, chunk, SESSION_CLIENT_READ);
 				if (got == 0) {
 					status = EPIPE;
 					break;
@@ -677,7 +684,8 @@ session_serve(
 	if (status == EPIPE || status == ECONNABORTED)
 		return 0;
 
-	/* Reports a connection that failed. */
+	/* Reports a connection that failed, and why. */
+	syslog(LOG_NOTICE, "session: the connection of %.63s failed (%d)", session->child.peer, status);
 	return 1;
 }
 
@@ -1117,7 +1125,8 @@ session_env(
 /*
  * Starts the channel's child: the login shell with no arguments (command
  * NULL) or with -c and command (command_size bytes, which may not hold a
- * NUL), on the terminal or on three pipes.  Returns 0, EINVAL or EIO.
+ * NUL), on the terminal or on three pipes.  Returns 0, EACCES (the
+ * shell cannot be executed), EINVAL or EIO.
  */
 static int
 session_start(
@@ -1128,7 +1137,9 @@ session_start(
 {
 	static char storage[SESSION_ENV_FIXED][SESSION_ENV_FIXED_ENTRY];
 	char *environment[SESSION_ENV_FIXED + SESSION_ENV_MAX + 1];
+	const char *shell;
 	char *text;
+	int runnable;
 	int in_pipe[2];
 	int out_pipe[2];
 	int err_pipe[2];
@@ -1137,6 +1148,20 @@ session_start(
 	struct ssh_buf body;
 	pid_t child;
 	int status;
+
+	/*
+	 * A shell this process (already the user) cannot execute is refused
+	 * here, so the client hears of it; a shell that goes away between this
+	 * check and the start still ends the child with 127.
+	 */
+	shell = session->account.pw_shell;
+	if (shell == NULL || shell[0] == '\0')
+		shell = SESSION_SHELL;
+	runnable = access(shell, X_OK);
+	if (runnable != 0) {
+		syslog(LOG_NOTICE, "session: the shell %.200s of %.64s cannot be executed", shell, session->account.pw_name);
+		return EACCES;
+	}
 
 	/* A command is text: one with a NUL inside is refused. */
 	text = NULL;
