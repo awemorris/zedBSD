@@ -36,7 +36,7 @@
 | ws344-p014 | VP8 の逆変換（vp8-idct.c） | cleared（2026-11-02 14:07 Q1、main で test-vp8_idct PASS）。実装済み・試験 PASS（Sonnet q1958-i01、2026-11-02。cleared は Q1） | p001 |
 | ws344-p015 | VP8 の intra 予測（vp8-predict.c） | cleared（2026-11-02 14:19 Q1、main で test-vp8_predict 5281 PASS）。実装済み・試験 PASS（Sonnet q1960-i01、2026-11-02 14:18。cleared は Q1） | p001 |
 | ws344-p016 | VP8 の loop filter（vp8-filter.c） | cleared（2026-11-02 14:41 Q1、main で test-vp8_filter 166661 PASS）。実装済み・試験 PASS（Sonnet q1961-i01、2026-11-02 14:38、Q1 の受け入れ待ち） | p001 |
-| ws344-p017 | VP8 の decoder（vp8.c、run-fixtures lossy）— Opus を推す | in-progress（2026-11-02 14:41 P2 q1966-i01） | p002, p011〜p016 |
+| ws344-p017 | VP8 の decoder（vp8.c、run-fixtures lossy）— Opus を推す | 実装済み・試験 PASS（P2 q1966-i01、2026-11-02 15:10。lossy 352 + conformance 342 checks） | p002, p011〜p016 |
 | ws344-p018 | 出力の変換（output.c） | cleared（2026-11-02 14:30 Q1、main で test-output 536115 PASS）。実装済み・試験 PASS（Sonnet q1963-i01、2026-11-02 14:28、cleared は Q1 が決める） | p001 |
 | ws344-p019 | interface（decode.c、compare・mutate・fuzz）— Opus を推す | planned | p002, p008, p017, p018 |
 | ws344-p020 | platform（Windows の static、config、QEMU の guest の driver）— Opus を推す | planned | p019 |
