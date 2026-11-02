@@ -233,14 +233,20 @@ struct nvrtx_nvdec_buffers {
 #define NVRTX_NVDEC_HEVC_TILE_ROWS	22U
 
 /*
- * The status words an H.265 decode reports errors in, after the CTBs in
- * error (NVRTX_NVDEC_STATUS_ERRORS_AT): the decode's error and its slice
- * header's error.
+ * The status words an H.265 decode reports, besides the blocks in error
+ * (NVRTX_NVDEC_STATUS_ERRORS_AT): the blocks decoded, the decode's error,
+ * the first block and slice in error (the row in bits 15:0, the column in
+ * bits 31:16) and its slice header's error.
  *
  * Values referenced: NVIDIA open-gpu-doc classes/video/nvdec_drv.h
- * (nvdec_status_s: error_status 12, slice_header_error_code 52).
+ * (nvdec_status_s: mbs_correctly_decoded 0, error_status 12,
+ * hevc.error_ctb_pos 44, hevc.error_slice_pos 48, slice_header_error_code
+ * 52).
  */
+#define NVRTX_NVDEC_STATUS_DECODED_AT	0U
 #define NVRTX_NVDEC_STATUS_ERROR_AT	12U
+#define NVRTX_NVDEC_STATUS_CTB_AT	44U
+#define NVRTX_NVDEC_STATUS_SLICE_AT	48U
 #define NVRTX_NVDEC_STATUS_HEADER_AT	52U
 
 /*

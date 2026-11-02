@@ -132,6 +132,12 @@
  */
 #define STAGE_HEVC_DXVA_TOKEN		"nvrtx.hevc.dxva=1"
 
+/*
+ * The whole token that has the driver log what it gives the video decoder
+ * for the first pictures of each H.265 session.
+ */
+#define STAGE_HEVC_TRACE_TOKEN		"nvrtx.hevc.trace=1"
+
 /* The whole token that breaks the first copy-engine clear of the VRAM on purpose. */
 #define STAGE_CLEAR_FAULT_TOKEN		"nvrtx.clear.fault=1"
 
@@ -437,6 +443,24 @@ nvrtx_stage_hevc_dxva_wanted(void)
 		return true;
 
 	/* Without it the driver counts the bits the decoder skips. */
+	return false;
+}
+
+/*
+ * Reports whether the boot asked for the log of what the video decoder is
+ * given for the first pictures of each H.265 session (nvrtx.hevc.trace=1).
+ */
+bool
+nvrtx_stage_hevc_trace_wanted(void)
+{
+	bool present;
+
+	/* Looks for nvrtx.hevc.trace=1 among the boot parameters. */
+	present = stage_token_present(STAGE_HEVC_TRACE_TOKEN);
+	if (present)
+		return true;
+
+	/* Without it nothing is logged. */
 	return false;
 }
 

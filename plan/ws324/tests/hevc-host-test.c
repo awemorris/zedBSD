@@ -148,6 +148,7 @@ static const struct field fields[] = {
 	{ "num_delta_pocs_of_rps_idx", 212U, 19U, 8U },
 	{ "long_term_ref_pics_present_flag", 212U, 27U, 1U },
 	{ "num_bits_short_term_ref_pics_in_slice", 216U, 0U, 32U },
+	{ "log2MaxTransformSkipSize", 224U, 0U, 4U },
 	{ "HevcFltAboveOffset", 240U, 0U, 32U },
 	{ "HevcSaoAboveOffset", 244U, 0U, 32U },
 };
@@ -432,6 +433,8 @@ test_pic(void)
 	check_field(pic, "num_delta_pocs_of_rps_idx", 200U);
 	check_field(pic, "long_term_ref_pics_present_flag", 1U);
 	check_field(pic, "num_bits_short_term_ref_pics_in_slice", 0x89abU);
+	check_field(pic, "log2MaxTransformSkipSize", 2U);
+	check(word(pic, 224) == 2U, "pic: no range extension but the transform skip size");
 	check_field(pic, "HevcFltAboveOffset", 18615U);
 	check_field(pic, "HevcSaoAboveOffset", 18920U);
 
@@ -460,12 +463,12 @@ test_sizes(void)
 	nvrtx_nvdec_hevc_buffer_sizes(1920U, 1080U, 17U, &buffers);
 	check(buffers.coloc_picture == 130560U && buffers.coloc == 130560U * 17U, "sizes: 1080p co-located data");
 	check(buffers.sao_at == 522240U && buffers.bsd_at == 4700160U, "sizes: 1080p SAO and BSD");
-	check(buffers.filter_above_at == 4765440U && buffers.sao_above_at == 4843520U && buffers.filter == 4937216U, "sizes: 1080p above parts");
+	check(buffers.filter_above_at == 4765440U && buffers.sao_above_at == 7376640U && buffers.filter == 9987840U, "sizes: 1080p above parts");
 
 	/* 4K: 3840 by 2176 on CTBs, 242 columns of 16. */
 	nvrtx_nvdec_hevc_buffer_sizes(3840U, 2160U, 17U, &buffers);
 	check(buffers.coloc_picture == 522240U && buffers.sao_at == 1044480U && buffers.bsd_at == 9400320U, "sizes: 4K");
-	check(buffers.filter_above_at == 9530880U && buffers.sao_above_at == 9685760U && buffers.filter == 9871616U, "sizes: 4K above parts");
+	check(buffers.filter_above_at == 9530880U && buffers.sao_above_at == 19975680U && buffers.filter == 30420480U, "sizes: 4K above parts");
 
 	/* Every part on 256 bytes for an odd size. */
 	nvrtx_nvdec_hevc_buffer_sizes(1000U, 70U, 17U, &buffers);
@@ -596,11 +599,16 @@ test_scaling(void)
 	scaling.list16[5][63] = 14U;
 	scaling.list32[0][0] = 15U;
 	scaling.list32[1][63] = 16U;
+	scaling.list4[1][1] = 17U;
+	scaling.list8[2][3] = 18U;
+	scaling.list16[4][8] = 19U;
+	scaling.list32[0][7] = 20U;
 	memset(buffer, 0xee, sizeof(buffer));
 	nvrtx_nvdec_hevc_scaling(buffer, &scaling);
 	check(buffer[0] == 1U && buffer[5] == 6U && buffer[6] == 7U && buffer[7] == 8U && buffer[8] == 0U && buffer[15] == 0U, "scaling: DC values and the pad");
 	check(buffer[16] == 9U && buffer[111] == 10U && buffer[112] == 11U && buffer[495] == 12U, "scaling: 4x4 and 8x8 parts");
 	check(buffer[496] == 13U && buffer[879] == 14U && buffer[880] == 15U && buffer[1007] == 16U && buffer[1008] == 0U, "scaling: 16x16 and 32x32 parts");
+	check(buffer[16 + 16 + 4] == 17U && buffer[112 + 128 + 24] == 18U && buffer[496 + 256 + 1] == 19U && buffer[880 + 56] == 20U, "scaling: each list column by column");
 }
 
 /* Reads a 16-bit little-endian value. */

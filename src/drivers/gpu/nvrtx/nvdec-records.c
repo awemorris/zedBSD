@@ -277,6 +277,20 @@
 #define HEVC_FILTER_ABOVE_AT		240U
 #define HEVC_SAO_ABOVE_AT		244U
 
+/*
+ * The range extension word of the H.265 picture structure (224): the
+ * largest transform skip block, which the decoder takes as its log2 (2,
+ * a 4x4 block, the only one a Main picture skips; 0 there desynchronizes
+ * the first picture that skips a transform).
+ *
+ * Value referenced: NVIDIA open-gpu-doc classes/video/nvdec_drv.h
+ * (nvdec_hevc_main10_444_ext_s.log2MaxTransformSkipSize, at 224 in
+ * nvdec_hevc_pic_s laid out by a host compiler).
+ */
+#define HEVC_RANGE_EXTENSION_AT		224U
+#define HEVC_SKIP_SIZE_LOW		0U
+#define HEVC_SKIP_SIZE_MAIN		2U
+
 /* The bit fields of the size word (92). */
 #define HEVC_CHROMA_FORMAT_LOW		0U
 #define HEVC_DEPTH_LUMA_LOW		4U
@@ -392,6 +406,17 @@
  * more.  The co-located data of a picture is a sixteenth of the bytes of
  * its area on 64 pixels.
  *
+ * The decoder of the Turing GPUs writes more than these sizes say: the
+ * deblocking above part grows with every row of CTBs, not only with the
+ * width (about 150 bytes for each 16-pixel column of each row of CTBs,
+ * whatever the CTB's size: 640 bytes a column are used up after a few
+ * rows, and the SAO above part written after it then overwrites what the
+ * deblocking keeps for the next row), and the SAO above part takes more
+ * than 768 bytes a column too (past the buffer's end with tiles).  Each
+ * of the two parts is therefore at least 320 bytes for each 16x16 block
+ * of the picture (the smallest CTB's rows), and the SAO above part at
+ * least four times 768 bytes a column.
+ *
  * Values referenced: averne's FFmpeg nvtegra libavcodec/nvtegra_hevc.c
  * (FILTER_SIZE 480, SAO_SIZE 3840, BSD_SIZE 60, CTU_SIZE 64;
  * nvtegra_hevc_decode_init, colmv_size) and NVIDIA open-gpu-doc
@@ -403,7 +428,8 @@
 #define FILTER_BSD_ROW_BYTES		60U
 #define FILTER_CTB			64U
 #define FILTER_ABOVE_COLUMN_BYTES	640U
-#define FILTER_SAO_ABOVE_COLUMN_BYTES	768U
+#define FILTER_SAO_ABOVE_COLUMN_BYTES	(4U * 768U)
+#define FILTER_ABOVE_BLOCK_BYTES	320U
 #define FILTER_COLUMN			16U
 #define COLOC_AREA_DIVISOR		16U
 
@@ -413,6 +439,7 @@ static void records_bits(uint8_t *bytes, size_t at, uint32_t low, uint32_t bits,
 static void records_put16(uint8_t *bytes, size_t at, uint16_t value);
 static void records_reference(uint8_t *pic, uint32_t entry, const struct nvrtx_nvdec_h264_reference *reference);
 static uint32_t records_align(uint32_t value, uint32_t boundary);
+static uint32_t records_column(uint32_t index, uint32_t side);
 static void records_clear(uint8_t *bytes, size_t length);
 
 /*
@@ -825,6 +852,9 @@ nvrtx_nvdec_hevc_pic(
 	nvrtx_put32(pic, HEVC_FILTER_ABOVE_AT, picture->filter_above_units);
 	nvrtx_put32(pic, HEVC_SAO_ABOVE_AT, picture->sao_above_units);
 
+	/* The largest transform skip block of a Main picture. */
+	records_bits(pic, HEVC_RANGE_EXTENSION_AT, HEVC_SKIP_SIZE_LOW, 4U, HEVC_SKIP_SIZE_MAIN);
+
 	/* The picture's size in luma samples, 16 bits each. */
 	records_put16(pic, HEVC_WIDTH_AT, (uint16_t)picture->width);
 	records_put16(pic, HEVC_HEIGHT_AT, (uint16_t)picture->height);
@@ -926,7 +956,9 @@ nvrtx_nvdec_hevc_pic(
 
 /*
  * Fills the H.265 scaling list buffer (NVRTX_NVDEC_HEVC_SCALING_BYTES)
- * from lists in raster order.
+ * from lists in raster order: the decoder reads each list column by
+ * column (the first column's coefficients from the top, then the next
+ * column's), so every list is written transposed.
  */
 void
 nvrtx_nvdec_hevc_scaling(
@@ -948,25 +980,25 @@ nvrtx_nvdec_hevc_scaling(
 	/* The six 4x4 lists. */
 	for (list = 0U; list < 6U; list++) {
 		for (index = 0U; index < 16U; index++)
-			buffer[SCALING_LIST4_AT + list * 16U + index] = scaling->list4[list][index];
+			buffer[SCALING_LIST4_AT + list * 16U + index] = scaling->list4[list][records_column(index, 4U)];
 	}
 
 	/* The six 8x8 lists. */
 	for (list = 0U; list < 6U; list++) {
 		for (index = 0U; index < 64U; index++)
-			buffer[SCALING_LIST8_AT + list * 64U + index] = scaling->list8[list][index];
+			buffer[SCALING_LIST8_AT + list * 64U + index] = scaling->list8[list][records_column(index, 8U)];
 	}
 
 	/* The six 16x16 lists, as their coded 8x8 matrices. */
 	for (list = 0U; list < 6U; list++) {
 		for (index = 0U; index < 64U; index++)
-			buffer[SCALING_LIST16_AT + list * 64U + index] = scaling->list16[list][index];
+			buffer[SCALING_LIST16_AT + list * 64U + index] = scaling->list16[list][records_column(index, 8U)];
 	}
 
 	/* The two 32x32 lists, as their coded 8x8 matrices. */
 	for (list = 0U; list < 2U; list++) {
 		for (index = 0U; index < 64U; index++)
-			buffer[SCALING_LIST32_AT + list * 64U + index] = scaling->list32[list][index];
+			buffer[SCALING_LIST32_AT + list * 64U + index] = scaling->list32[list][records_column(index, 8U)];
 	}
 }
 
@@ -1049,6 +1081,8 @@ nvrtx_nvdec_hevc_buffer_sizes(
 	uint32_t aligned_width;
 	uint32_t aligned_height;
 	uint32_t columns;
+	uint32_t blocks;
+	uint32_t part;
 	uint32_t at;
 
 	/* The picture on whole CTBs of the largest size. */
@@ -1067,9 +1101,16 @@ nvrtx_nvdec_hevc_buffer_sizes(
 	/* The columns' parts after them: the deblocking above, then the SAO above. */
 	columns = records_align(width, FILTER_COLUMN) / FILTER_COLUMN + 2U;
 	buffers->filter_above_at = at;
-	at = records_align(at + columns * FILTER_ABOVE_COLUMN_BYTES, RECORDS_BUFFER_ALIGN);
+	blocks = (aligned_width / FILTER_COLUMN) * (aligned_height / FILTER_COLUMN);
+	part = columns * FILTER_ABOVE_COLUMN_BYTES;
+	if (part < blocks * FILTER_ABOVE_BLOCK_BYTES)
+		part = blocks * FILTER_ABOVE_BLOCK_BYTES;
+	at = records_align(at + part, RECORDS_BUFFER_ALIGN);
 	buffers->sao_above_at = at;
-	at = records_align(at + columns * FILTER_SAO_ABOVE_COLUMN_BYTES, RECORDS_BUFFER_ALIGN);
+	part = columns * FILTER_SAO_ABOVE_COLUMN_BYTES;
+	if (part < blocks * FILTER_ABOVE_BLOCK_BYTES)
+		part = blocks * FILTER_ABOVE_BLOCK_BYTES;
+	at = records_align(at + part, RECORDS_BUFFER_ALIGN);
 
 	/* Succeeded: the whole filter buffer. */
 	buffers->filter = at;
@@ -1302,4 +1343,17 @@ records_clear(
 	/* Every byte. */
 	for (index = 0U; index < length; index++)
 		bytes[index] = 0U;
+}
+
+/*
+ * Reports the raster place (row times side plus column) of the index-th
+ * coefficient of a side by side list read column by column.
+ */
+static uint32_t
+records_column(
+	uint32_t index,
+	uint32_t side)
+{
+	/* The column is the index over the side, the row what is left. */
+	return (index % side) * side + index / side;
 }

@@ -9,6 +9,13 @@
 #   4b. (with H265_DIR) H1: vkvideo-probe --h265 --time --expect=NAME.sha256 on each H265_DIR/NAME.h265 (the
 #      references by ffmpeg's framehash, -pix_fmt nv12 sha256); with DXVA_PASS=1 again after a restart with
 #      nvrtx.hevc.dxva=1 (the decoder parses the slice header's reference sets itself)
+#      With RAW=1 each stream's frames are also written raw (vkvideo-probe --raw) and copied back to
+#      OUT/raw-TAG-NAME.nv12 (h265-raw-compare.py compares them with ffmpeg's); H265_FRAMES=N decodes the first N
+#      pictures only; H264=0 leaves out step 4; H265_NAMES="A B" takes those streams of H265_DIR only; H265_OPTIONS
+#      are vkvideo-probe's own (default --copy: the frames read through a copy, as the decoder's pictures are block
+#      linear)
+#   4c. with VARIANTS="W1,W2 W3 ..." the H.265 streams again after a restart for each variant, its boot words (comma-
+#      separated) in place of the variant before
 #   5. the desktop's session socket
 #   6. the NVMe kernel and the boot line put back, checked by cksum against 1, and Debian running again
 # OUT/summary.txt has what is printed; the logs stay in OUT.
@@ -88,11 +95,29 @@ done
 h265_pass() {
 	tag=$1
 	[ -n "${H265_DIR:-}" ] || return 0
-	for stream in "$H265_DIR"/*.h265; do
-		name=$(basename "$stream" .h265)
-		ZS_TIMEOUT=150 zs "$IP" "n=\$(dmesg | wc -l); cd $DIR && timeout 120 env LD_LIBRARY_PATH=$DIR $DIR/vkvideo-probe --h265 --time --expect=$name.sha256 $name.h265 > /tmp/$name.out 2>&1; echo \"vkvideo-probe rc \$?\"; tail -n 12 /tmp/$name.out; echo '--- kernel'; dmesg | tail -n +\$n | grep -E 'nvrtx'" > "$OUT/h1-$tag-$name.log" 2>&1 < /dev/null
+	for name in $(h265_names); do
+		extra=${H265_OPTIONS---copy}
+		[ -n "${H265_FRAMES:-}" ] && extra="$extra --frames=$H265_FRAMES"
+		[ "${RAW:-0}" = 1 ] && extra="$extra --raw=/tmp/$name.nv12"
+		ZS_TIMEOUT=150 zs "$IP" "n=\$(dmesg | wc -l); cd $DIR && timeout 120 env LD_LIBRARY_PATH=$DIR $DIR/vkvideo-probe --h265 --time $extra --expect=$name.sha256 $name.h265 > /tmp/$name.out 2>&1; echo \"vkvideo-probe rc \$?\"; tail -n 12 /tmp/$name.out; echo '--- kernel'; dmesg | tail -n +\$n | grep -E 'nvrtx'" > "$OUT/h1-$tag-$name.log" 2>&1 < /dev/null
+		zs "$IP" "cat /tmp/$name.out" > "$OUT/h1-$tag-$name.full" 2>&1 < /dev/null
+		if [ "${RAW:-0}" = 1 ]; then
+			zcp "root@$IP:/tmp/$name.nv12" "$OUT/raw-$tag-$name.nv12" || say "FAIL copy back the raw frames of $name"
+			zs "$IP" "rm -f /tmp/$name.nv12" < /dev/null
+		fi
 		say "H1 $tag $name: $(grep -m1 'vkvideo-probe rc' "$OUT/h1-$tag-$name.log") | $(grep -ciE 'mismatch|differ' "$OUT/h1-$tag-$name.log") mismatch lines | $(grep -c 'nvrtx: vk: video' "$OUT/h1-$tag-$name.log") video kernel lines"
 		grep -E 'mismatch|differ|frames|decodes|refused|skipped|did not finish|held for the boot|nvdec' "$OUT/h1-$tag-$name.log" | head -4 | cut -c1-150 | sed 's/^/    /' | tee -a "$SUMMARY"
+	done
+}
+
+# h265_names: the names of the H.265 streams to run (H265_NAMES, else every stream of H265_DIR).
+h265_names() {
+	if [ -n "${H265_NAMES:-}" ]; then
+		echo "$H265_NAMES"
+		return
+	fi
+	for stream in "$H265_DIR"/*.h265; do
+		basename "$stream" .h265
 	done
 }
 
@@ -133,8 +158,9 @@ if [ -n "$IP" ]; then
 	grep -E "$KLINES" "$OUT/nvrtx.log" > "$OUT/v0.log"
 	say "V0 $(grep -E 'nvdec-channel (ok|fail)' "$OUT/nvrtx.log" | tail -1 | cut -c1-140) | $(grep -c 'work-channel ok' "$OUT/nvrtx.log") work-channel ok | copy objects $(grep -c 'copy object on engine' "$OUT/nvrtx.log")"
 
-	# 4. V1: each clip's hashes.
-	for clip in "$CLIPS"/*.mp4; do
+	# 4. V1: each clip's hashes (unless H264=0).
+	[ "${H264:-1}" = 1 ] || CLIPS_RUN=
+	for clip in ${CLIPS_RUN-"$CLIPS"/*.mp4}; do
 		name=$(basename "$clip" .mp4)
 		ZS_TIMEOUT=330 zs "$IP" "n=\$(dmesg | wc -l); cd $DIR && timeout 300 $PROBE --video-hash --time $name.mp4 > /tmp/$name.hash 2> /tmp/$name.err; echo \"media-probe rc \$?\"; cat /tmp/$name.err; echo '--- hashes'; cat /tmp/$name.hash; echo '--- kernel'; dmesg | tail -n +\$n | grep -E 'nvrtx'" > "$OUT/v1-$name.log" 2>&1 < /dev/null
 		sed -n '/^--- hashes/,/^--- kernel/p' "$OUT/v1-$name.log" > "$OUT/v1-$name.hash"
@@ -156,6 +182,30 @@ if [ -n "$IP" ]; then
 			say "FAIL zedBSD not up with the dxva line"
 		fi
 	fi
+
+	# 4c. (with VARIANTS) H1 again after a restart for each variant: its boot words (comma-separated) in place of the
+	#     last variant's.
+	last=
+	for variant in ${VARIANTS:-}; do
+		[ -n "${H265_DIR:-}" ] || break
+		words=$(echo "$variant" | tr ',' ' ')
+		for w in $last; do
+			zs "$IP" "sed -i -e '/^$(echo "$w" | sed 's/\./\\./g')\$/d' /boot/boot0/zedbsd.cfg && sync" < /dev/null
+		done
+		for w in $words; do
+			zs "$IP" "echo $w >> /boot/boot0/zedbsd.cfg && sync" < /dev/null || say "FAIL the line $w"
+		done
+		last=$words
+		timeout 900 $MEASURE linux >> "$OUT/restart.log" 2>&1 || say "FAIL Debian not up"
+		IP=$(timeout 900 $MEASURE zedbsd 2>> "$OUT/zedbsd.log")
+		if [ -n "$IP" ]; then
+			say "variant $variant: zedbsd $IP, lines: $(zs "$IP" "grep -E '^nvrtx\\.' /boot/boot0/zedbsd.cfg | tr '\\n' ' '" < /dev/null)"
+			h265_pass "$(echo "$variant" | tr ',=.' '+__')"
+		else
+			say "FAIL zedBSD not up with the variant $variant"
+			break
+		fi
+	done
 
 	# 5. The desktop's session, the faults and the channel errors of the whole run.
 	zs "$IP" "dmesg | grep 'nvrtx'" > "$OUT/nvrtx-end.log" 2>&1 < /dev/null
