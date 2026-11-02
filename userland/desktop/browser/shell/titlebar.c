@@ -52,6 +52,7 @@ static const struct kl_control_entry titlebar_controls[] = {
 static void titlebar_queue(struct shell_titlebar *titlebar, int kind, uint32_t id, uint32_t detail, const char *text);
 static int titlebar_state(struct shell_titlebar *titlebar, int can_back, int can_forward, const char *path);
 static size_t titlebar_scheme_length(const char *location);
+static unsigned titlebar_box_value(const struct shell_titlebar *titlebar);
 static int titlebar_is_system_path(const char *location, int *share);
 
 /*
@@ -68,8 +69,9 @@ shell_titlebar_open(
 {
 	int error;
 
-	/* Nothing yet. */
+	/* Nothing yet, and no load. */
 	memset(titlebar, 0, sizeof(*titlebar));
+	titlebar->progress = -1;
 
 	/* The controls, in their order. */
 	error = kl_window_set_controls(window->kui, titlebar_controls, sizeof(titlebar_controls) / sizeof(titlebar_controls[0]));
@@ -110,6 +112,34 @@ shell_titlebar_show(
 
 	/* Succeeded: the titlebar shows the state. */
 	return 0;
+}
+
+/*
+ * Shows how far a load has come in the location's box, in thousandths (-1
+ * for none); the same value again changes nothing.
+ */
+void
+shell_titlebar_progress(
+	struct shell_titlebar *titlebar,
+	int progress)
+{
+	int error;
+
+	/* Without a titlebar, or with no change, nothing is done. */
+	if (titlebar->kui == NULL || progress == titlebar->progress)
+		return;
+	titlebar->progress = progress;
+
+	/* The box with its load (an older compositor shows the box alone; one without boxes, nothing). */
+	error = kl_window_set_control_value(titlebar->kui, SHELL_CONTROL_LOCATION, titlebar_box_value(titlebar));
+	if (error != 0 && error != ENOTSUP) {
+		printf("ZBROWSER ERROR titlebar-progress error=%d\n", error);
+		fflush(stdout);
+	}
+
+	/* The line the tests read. */
+	printf("ZBROWSER PROGRESS value=%d\n", progress);
+	fflush(stdout);
 }
 
 /*
@@ -365,12 +395,26 @@ titlebar_state(
 	 * browser's address field (ws074-p229, the user's decision of
 	 * 2026-10-14); an older compositor (ENOTSUP) shows the parts.
 	 */
-	error = kl_window_set_control_value(titlebar->kui, SHELL_CONTROL_LOCATION, KL_BREADCRUMB_BOXED);
+	error = kl_window_set_control_value(titlebar->kui, SHELL_CONTROL_LOCATION, titlebar_box_value(titlebar));
 	if (error != 0 && error != ENOTSUP)
 		return error;
 
 	/* Succeeded: the titlebar shows the state. */
 	return 0;
+}
+
+/* The location's value: always a box, with the load under way when there is one. */
+static unsigned
+titlebar_box_value(
+	const struct shell_titlebar *titlebar)
+{
+	unsigned value;
+
+	/* The box, and its load. */
+	value = KL_BREADCRUMB_BOXED;
+	if (titlebar->progress >= 0)
+		value |= KL_BREADCRUMB_PROGRESS((unsigned)(titlebar->progress > 1000 ? 1000 : titlebar->progress));
+	return value;
 }
 
 /*

@@ -341,6 +341,15 @@ int browser_view_go(struct browser_view *view, int steps);
 int browser_view_can_go(const struct browser_view *view, int steps);
 void browser_view_stop(struct browser_view *view);
 
+/*
+ * How far the load under way has come, in thousandths (for a progress
+ * shown while a page loads; it only grows during one load): the document
+ * being fetched, the scripts and style sheets it names being fetched, and
+ * its style sheets waited for before it is shown.  -1 when nothing loads
+ * (the page shown is the last one loaded).
+ */
+int browser_view_load_progress(const struct browser_view *view);
+
 /* The size in pixels. */
 int browser_view_resize(struct browser_view *view, unsigned width, unsigned height);
 

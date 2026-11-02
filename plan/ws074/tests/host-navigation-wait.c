@@ -115,6 +115,10 @@ main(
 	int one;
 	int error;
 	int first_shown;
+	int progress;
+	int highest;
+	int seen;
+	int shrank;
 
 	/* Storage stays under build/, away from the home directory. */
 	setenv("XDG_DATA_HOME", "build/ws074-host-data", 1);
@@ -158,12 +162,18 @@ main(
 
 	/* The click on the link, then the loop a program runs, timing each call. */
 	state.committed = 0;
+	wait_check(browser_view_load_progress(view) == -1, "progress: none before the click");
 	(void)browser_view_pointer_move(view, 20.0f, 20.0f, 0);
 	(void)browser_view_pointer_button(view, 20.0f, 20.0f, BROWSER_BUTTON_PRIMARY, 1, 0);
 	(void)browser_view_pointer_button(view, 20.0f, 20.0f, BROWSER_BUTTON_PRIMARY, 0, 0);
 	start = wait_now();
 	longest = 0.0;
 	first_shown = 1;
+	progress = browser_view_load_progress(view);
+	wait_check(progress >= 0 && progress < 1000, "progress: a load under way from the click on");
+	highest = progress;
+	seen = 1;
+	shrank = 0;
 	end = start + WAIT_LIMIT_MS;
 	while (wait_now() < end && (state.committed == 0 || !wait_heard_all())) {
 		took = wait_now();
@@ -173,6 +183,15 @@ main(
 			longest = took;
 		if (wait_now() - start < WAIT_SHEET_MS - 200 && (state.committed || strstr(browser_view_url(view), "first.html") == NULL))
 			first_shown = 0;
+		progress = browser_view_load_progress(view);
+		if (progress >= 0 && state.committed == 0) {
+			if (progress < highest)
+				shrank = 1;
+			if (progress > highest) {
+				highest = progress;
+				seen++;
+			}
+		}
 		usleep(2000);
 	}
 
@@ -180,6 +199,8 @@ main(
 	printf("host-navigation-wait: the longest call %.0f ms, the page after %.0f ms\n", longest, wait_now() - start);
 	wait_check(longest < WAIT_PROCESS_MAX_MS, "no browser_view_process call blocks while the sheets come and the scripts run");
 	wait_check(first_shown, "the first page stays while the second one's sheets are on their way");
+	wait_check(!shrank && seen >= 2, "progress: grows while the page loads");
+	wait_check(browser_view_load_progress(view) == -1, "progress: none once the page is shown");
 	wait_check(state.committed == 1 && strstr(browser_view_url(view), "second.html") != NULL, "the second page is shown");
 	wait_check(strstr(state.console, "styled rgb(1, 2, 3)") != NULL, "its deferred script sees the sheet its markup links");
 	wait_check(strstr(state.console, "added sheet applied") != NULL, "the sheet its script links applies when it comes");

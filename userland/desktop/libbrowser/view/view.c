@@ -622,6 +622,35 @@ browser_view_go(
 	return 0;
 }
 
+/* Reports how far the load under way has come, in thousandths, or -1 when nothing loads. */
+int
+browser_view_load_progress(
+	const struct browser_view *view)
+{
+	size_t total;
+	size_t done;
+
+	/* A parsed document that waits for its style sheets is nearly there. */
+	if (view->finishing != NULL)
+		return 900;
+
+	/* A document that arrived and waits for the scripts and sheets it names: halfway, and on as they come. */
+	if (view->arrived_url != NULL) {
+		total = view->prefetches.count;
+		if (total == 0)
+			return 500;
+		done = total - (size_t)view->prefetch_waiting;
+		return 500 + (int)(350U * done / total);
+	}
+
+	/* The document itself on its way. */
+	if (view->pending != NULL)
+		return 150;
+
+	/* Nothing loads. */
+	return -1;
+}
+
 /* Stops the page being fetched, if any (the load callback hears BROWSER_LOAD_STOPPED). */
 void
 browser_view_stop(
