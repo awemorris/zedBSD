@@ -1,0 +1,34 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Only the calls <compat/webp/decode.h> and <compat/webp/types.h> declare leave the library. */
+{
+	global:
+		WebPDecode;
+		WebPDecodeARGB;
+		WebPDecodeARGBInto;
+		WebPDecodeBGR;
+		WebPDecodeBGRA;
+		WebPDecodeBGRAInto;
+		WebPDecodeBGRInto;
+		WebPDecodeRGB;
+		WebPDecodeRGBA;
+		WebPDecodeRGBAInto;
+		WebPDecodeRGBInto;
+		WebPDecodeYUV;
+		WebPDecodeYUVInto;
+		WebPFree;
+		WebPFreeDecBuffer;
+		WebPGetDecoderVersion;
+		WebPGetFeaturesInternal;
+		WebPGetInfo;
+		WebPInitDecBufferInternal;
+		WebPInitDecoderConfigInternal;
+		WebPMalloc;
+	local:
+		*;
+};
