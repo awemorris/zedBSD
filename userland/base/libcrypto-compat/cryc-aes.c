@@ -382,6 +382,7 @@ aes_rotate_rows(
 	rotated = (slice >> 1) & AES_ROWS_LOW;
 	rotated |= (slice << 3) & AES_ROWS_HIGH;
 
+	/* Reports the lane with every row moved. */
 	return rotated;
 }
 
@@ -418,6 +419,7 @@ aes_shift_rows(
 		shifted |= (slice & AES_ROW3 & AES_COLUMNS_FROM3) >> 12;
 		shifted |= (slice & AES_ROW3 & AES_COLUMNS_BELOW3) << 4;
 
+		/* Replaces the lane with its shifted form. */
 		slices[i] = shifted;
 	}
 }
@@ -503,6 +505,7 @@ aes_inv_shift_rows(
 		shifted |= (slice & AES_ROW3 & AES_COLUMNS_BELOW1) << 12;
 		shifted |= (slice & AES_ROW3 & AES_COLUMNS_FROM1) >> 4;
 
+		/* Replaces the lane with its shifted form. */
 		slices[i] = shifted;
 	}
 }
@@ -644,6 +647,7 @@ aes_sub_word(
 	cryc_wipe(slices, sizeof(slices));
 	cryc_wipe(bytes, sizeof(bytes));
 
+	/* Reports the substituted word. */
 	return result;
 }
 
@@ -780,6 +784,8 @@ cryc_aes_init(
 			/* AES-256 only: a SubWord in the middle of the group. */
 			temp = aes_sub_word(temp);
 		}
+
+		/* The new word is the one a key length back, combined with the transformed one. */
 		words[word_index] = words[word_index - key_words] ^ temp;
 	}
 
@@ -823,6 +829,7 @@ cryc_aes_encrypt_blocks(
 		aes_cipher_slices(aes, slices);
 		aes_store(slices, out, group * CRYC_AES_BLOCK);
 
+		/* Moves on to the next group. */
 		in += group * CRYC_AES_BLOCK;
 		out += group * CRYC_AES_BLOCK;
 		count -= group;
@@ -857,6 +864,7 @@ cryc_aes_decrypt_blocks(
 		aes_inv_cipher_slices(aes, slices);
 		aes_store(slices, out, group * CRYC_AES_BLOCK);
 
+		/* Moves on to the next group. */
 		in += group * CRYC_AES_BLOCK;
 		out += group * CRYC_AES_BLOCK;
 		count -= group;
@@ -906,6 +914,8 @@ cryc_aes_ctr32_xor(
 			memcpy(blocks + block * CRYC_AES_BLOCK, counter, 12);
 			cryc_store_be32(blocks + block * CRYC_AES_BLOCK + 12, count32 + (uint32_t)block);
 		}
+
+		/* The counter value after this chunk. */
 		count32 = count32 + (uint32_t)block_count;
 
 		/* The keystream. */
@@ -915,6 +925,7 @@ cryc_aes_ctr32_xor(
 		for (index = 0; index < chunk; index++)
 			out[index] = (uint8_t)(in[index] ^ keystream[index]);
 
+		/* Moves on to the next chunk. */
 		in += chunk;
 		out += chunk;
 		size -= chunk;

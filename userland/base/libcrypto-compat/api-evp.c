@@ -663,10 +663,14 @@ EVP_CipherFinal_ex(
 
 	/* AES-256-CBC: padding is not implemented, and data must have been whole blocks (NIST SP 800-38A 6.2, Appendix A). */
 	if (ctx->cipher == &aes256_cbc_object) {
+
+		/* Refuses padding, which this mode does not implement. */
 		if (ctx->padding) {
 			cryc_err_put(CRYC_LIB_EVP, CRYC_R_UNSUPPORTED);
 			return 0;
 		}
+
+		/* Refuses data that does not end on a block boundary. */
 		if (ctx->partial_size != 0U) {
 			cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH);
 			return 0;
@@ -898,6 +902,8 @@ EVP_MAC_final(
 			cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
 			return 0;
 		}
+
+		/* Succeeded: the size of the tag is reported. */
 		*out_length = CRYC_POLY1305_TAG;
 		return 1;
 	}
@@ -1045,10 +1051,14 @@ cipher_stream(
 	 * request can need.
 	 */
 	if (blocks > 0) {
+
+		/* Refuses a request once the last key's counter range is in use. */
 		if (ctx->key_set == CIPHER_KEY_LAST) {
 			cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_INVALID_ARGUMENT);
 			return 0;
 		}
+
+		/* Refuses a request that needs more blocks than the counter has left. */
 		if (ctx->counter != 0) {
 			blocks_left = (uint64_t)0 - ctx->counter;
 			if (blocks > blocks_left) {
@@ -1218,11 +1228,13 @@ cipher_cbc_update(
 		return 1;
 	}
 
-	/* Refuses missing buffers, and a length whose output could pass INT_MAX. */
+	/* Refuses missing buffers. */
 	if (in == NULL || out == NULL) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
 		return 0;
 	}
+
+	/* Refuses a length whose output could pass INT_MAX. */
 	if (size > INT_MAX - (int)CRYC_AES_BLOCK) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_INVALID_ARGUMENT);
 		return 0;
@@ -1269,6 +1281,7 @@ cipher_cbc_block(
 	uint8_t work[CRYC_AES_BLOCK];
 	size_t index;
 
+	/* Chains and transforms the block in the direction the context was set up for. */
 	if (ctx->encrypt) {
 		/* Encrypts the block chained with the previous ciphertext, which it then replaces. */
 		for (index = 0U; index < CRYC_AES_BLOCK; index++)

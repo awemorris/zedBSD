@@ -122,6 +122,69 @@ static const char b_output[] = "3925841d02dc09fbdc118597196a0b32";
 /* The state of a pseudo-random generator (xorshift64, Marsaglia 2003). */
 static uint64_t random_state = CRYC_U64(0x2545f491U, 0x4f6cdd1dU);
 
+/* The reference cipher: the bytewise Algorithm 1 and 2 with the S-box of Table 4. */
+struct reference {
+	uint8_t round_key[15][16];
+	unsigned int rounds;
+};
+
+/* Returns the next pseudo-random byte. */
+static uint8_t random_byte(void);
+
+/* Fills size bytes with pseudo-random bytes. */
+static void random_fill(uint8_t *out, size_t size);
+
+/* Reads byte n of round key k out of the slices of the schedule (the layout is the one described at the top of cryc-aes.c). */
+static uint8_t round_key_byte(const struct cryc_aes *aes, unsigned int round, unsigned int byte);
+
+/* Checks that the round key is the same in all four lanes of every slice. */
+static int round_key_in_four_lanes(const struct cryc_aes *aes, unsigned int round);
+
+/* Reads word w of the expansion out of round key w / 4. */
+static uint32_t schedule_word(const struct cryc_aes *aes, unsigned int word);
+
+/* Checks the whole expansion of a key against the words of Appendix A. */
+static void check_expansion(const char *key_hex, size_t key_size, const uint32_t *words, size_t word_count, unsigned int rounds);
+
+/* Checks the 256 entries of the S-box through the key expansion of AES-128 (the first SubWord of the first round key). */
+static void check_sbox(void);
+
+/* Multiplies by {02} in GF(2^8) (4.5, XTIMES). */
+static uint8_t reference_xtime(uint8_t value);
+
+/* Expands a key (5.2, Algorithm 2) bytewise. */
+static void reference_expand(struct reference *reference, const uint8_t *key, size_t key_size);
+
+/* Encrypts one block bytewise (5.1, Algorithm 1). */
+static void reference_encrypt(const struct reference *reference, const uint8_t *in, uint8_t *out);
+
+/* Encrypts the blocks of one pseudo-random message with the reference and with the implementation and compares. */
+static void check_random_blocks(size_t key_size, size_t blocks);
+
+/* Reads one CAVP known-answer file and checks every record (the encryption direction of each). */
+static void check_cavp(const char *name);
+
+/* Adds one to the last four bytes of a counter block, bytewise, as a big-endian integer (6.2, inc32). */
+static void reference_inc32(uint8_t *block);
+
+/* The reference GCTR (6.5): block by block with the single-block cipher. */
+static void reference_gctr(const struct cryc_aes *aes, uint8_t *counter, const uint8_t *in, uint8_t *out, size_t size);
+
+/* Checks the counter mode on one size, one key size and one initial counter. */
+static void check_ctr_one(size_t key_size, size_t size, uint32_t low_counter, int in_place);
+
+/* Checks the counter mode on many sizes and counters, including the wrap of the 32-bit counter. */
+static void check_ctr(void);
+
+/* Checks the counter mode against the ciphertext of the Wycheproof AES-GCM vectors with a 96-bit IV. */
+static void check_gcm_keystream(void);
+
+/* Checks that init refuses every key size but 16, 24 and 32, and leaves the structure wiped. */
+static void check_init_errors(void);
+
+/* Checks that the encryption does not change the key and that count 0 touches nothing. */
+static void check_const_and_zero(void);
+
 /* Returns the next pseudo-random byte. */
 static uint8_t
 random_byte(void)
@@ -170,14 +233,18 @@ round_key_in_four_lanes(
 	unsigned int round)
 {
 	uint64_t slice;
+	uint64_t repeater;
 	unsigned int bit;
 
 	/* A lane is 16 bits and the other three lanes must repeat it. */
+	repeater = CRYC_U64(0x00010001U, 0x00010001U);
 	for (bit = 0; bit < 8U; bit++) {
 		slice = aes->schedule[round * 8U + bit];
-		if ((slice & 0xffffU) * CRYC_U64(0x00010001U, 0x00010001U) != slice)
+		if ((slice & 0xffffU) * repeater != slice)
 			return 0;
 	}
+
+	/* Every slice repeated its first lane. */
 	return 1;
 }
 
@@ -211,6 +278,7 @@ check_expansion(
 	unsigned int key_words;
 	uint32_t expected;
 	int lanes;
+	int in_lanes;
 	unsigned int round;
 
 	/* The key is expanded. */
@@ -231,13 +299,18 @@ check_expansion(
 		CHECK(schedule_word(&aes, key_words + word) == words[word]);
 	CHECK(key_words + word_count == 4U * (rounds + 1U));
 
-	/* Every round key is in all four lanes, and the slices after the last round key are zero. */
+	/* Every round key is in all four lanes. */
 	lanes = 1;
 	for (round = 0; round <= rounds; round++) {
-		if (!round_key_in_four_lanes(&aes, round))
+		in_lanes = round_key_in_four_lanes(&aes, round);
+		if (!in_lanes)
 			lanes = 0;
 	}
+
+	/* Records that every round key was in all four lanes. */
 	CHECK(lanes);
+
+	/* The slices after the last round key are zero. */
 	for (word = (rounds + 1U) * 8U; word < CRYC_AES_SCHEDULE_WORDS; word++)
 		CHECK(aes.schedule[word] == 0);
 }
@@ -273,12 +346,6 @@ check_sbox(void)
 		}
 	}
 }
-
-/* The reference cipher: the bytewise Algorithm 1 and 2 with the S-box of Table 4. */
-struct reference {
-	uint8_t round_key[15][16];
-	unsigned int rounds;
-};
 
 /* Multiplies by {02} in GF(2^8) (4.5, XTIMES). */
 static uint8_t
@@ -334,6 +401,8 @@ reference_expand(
 			for (part = 0; part < 4U; part++)
 				temp[part] = sbox[temp[part]];
 		}
+
+		/* The word is the word Nk back plus the transformed previous word. */
 		for (part = 0; part < 4U; part++)
 			words[word][part] = (uint8_t)(words[word - key_words][part] ^ temp[part]);
 	}
@@ -373,6 +442,8 @@ reference_encrypt(
 			for (col = 0; col < 4U; col++)
 				shifted[row + 4U * col] = state[row + 4U * ((col + row) % 4U)];
 		}
+
+		/* The shifted rows are the state from here on. */
 		memcpy(state, shifted, sizeof(state));
 
 		/* MixColumns (5.1.3), except in the last round. */
@@ -391,6 +462,8 @@ reference_encrypt(
 		for (index = 0; index < 16U; index++)
 			state[index] = (uint8_t)(state[index] ^ reference->round_key[round][index]);
 	}
+
+	/* The state after the last round is the output block. */
 	memcpy(out, state, 16);
 }
 
@@ -435,6 +508,7 @@ check_random_blocks(
 	cryc_aes_encrypt_blocks(&aes, out, out, blocks);
 	CHECK_BYTES(out, expected, blocks * 16U);
 
+	/* Releases the buffers and wipes the key schedule. */
 	free(in);
 	free(out);
 	free(expected);
@@ -453,25 +527,36 @@ check_cavp(
 	uint8_t cipher[16];
 	uint8_t out[16];
 	size_t key_size;
+	const char *key_text;
+	int opened;
+	int more;
 
-	/* The records. */
-	if (vec_open(&file, name) != 0) {
+	/* Opens the known-answer file. */
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
-	while (vec_next(&file)) {
-		if (vec_get(&file, "KEY") == NULL)
+
+	/* The records. */
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
+		key_text = vec_get(&file, "KEY");
+		if (key_text == NULL)
 			continue;
 		key_size = vec_hex(&file, "KEY", key, sizeof(key));
 		CHECK(key_size == 16U || key_size == 24U || key_size == 32U);
 		CHECK(vec_hex(&file, "PLAINTEXT", plain, sizeof(plain)) == 16U);
 		CHECK(vec_hex(&file, "CIPHERTEXT", cipher, sizeof(cipher)) == 16U);
-		if (key_size != 16U && key_size != 24U && key_size != 32U)
+		if (key_size != 16U &&
+		    key_size != 24U &&
+		    key_size != 32U)
 			continue;
 		CHECK(cryc_aes_init(&aes, key, key_size) == 0);
 		cryc_aes_encrypt_blocks(&aes, plain, out, 1);
 		CHECK_BYTES(out, cipher, 16);
 	}
+
+	/* The file held at least one record, and it is closed. */
 	CHECK(file.records > 0);
 	vec_close(&file);
 }
@@ -557,12 +642,15 @@ check_ctr_one(
 	} else {
 		cryc_aes_ctr32_xor(&aes, counter, in, out, size);
 	}
+
+	/* The output equals the reference, and nothing was written past it. */
 	CHECK_BYTES(out, expected, size);
 	CHECK(out[size] == SENTINEL_BYTE);
 
 	/* The counter after the call is the next block not used, as the reference left it (and size 0 changes nothing). */
 	CHECK_BYTES(counter, reference_counter, 16);
 
+	/* Releases the buffers and wipes the key schedule. */
 	free(in);
 	free(out);
 	free(expected);
@@ -612,24 +700,37 @@ check_gcm_keystream(void)
 	size_t cipher_size;
 	const char *result;
 	unsigned long used;
+	int opened;
+	int more;
+	int differs;
 
-	/* The records with a valid result and a 12-byte IV. */
-	if (vec_open(&file, "wycheproof-aes_gcm_test") != 0) {
+	/* Opens the Wycheproof AES-GCM file. */
+	opened = vec_open(&file, "wycheproof-aes_gcm_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* The records with a valid result and a 12-byte IV. */
 	used = 0;
-	while (vec_next(&file)) {
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		result = vec_get(&file, "result");
-		if (result == NULL || strcmp(result, "valid") != 0)
+		if (result == NULL)
+			continue;
+		differs = strcmp(result, "valid");
+		if (differs != 0)
 			continue;
 		iv_size = vec_hex(&file, "iv", iv, sizeof(iv));
 		key_size = vec_hex(&file, "key", key, sizeof(key));
 		message_size = vec_hex(&file, "msg", message, sizeof(message));
 		cipher_size = vec_hex(&file, "ct", cipher, sizeof(cipher));
-		if (iv_size != 12U || message_size == (size_t)-1 || message_size != cipher_size)
+		if (iv_size != 12U ||
+		    message_size == (size_t)-1 ||
+		    message_size != cipher_size)
 			continue;
-		if (key_size != 16U && key_size != 24U && key_size != 32U)
+		if (key_size != 16U &&
+		    key_size != 24U &&
+		    key_size != 32U)
 			continue;
 
 		/* GCM encrypts with the keystream that starts at inc32(IV || 00000001) (SP 800-38D 7.1, step 3). */
@@ -641,6 +742,8 @@ check_gcm_keystream(void)
 		CHECK(cryc_load_be32(counter + 12) == 2U + (uint32_t)((message_size + 15U) / 16U));
 		used++;
 	}
+
+	/* Enough records were used for the check to mean something, and the file is closed. */
 	CHECK(used > 100UL);
 	vec_close(&file);
 }
@@ -755,6 +858,8 @@ main(void)
 			for (repeat = 0; repeat < 5U; repeat++)
 				check_random_blocks(key_sizes[key_index], blocks);
 		}
+
+		/* One long message of 64 blocks. */
 		check_random_blocks(key_sizes[key_index], 64U);
 	}
 

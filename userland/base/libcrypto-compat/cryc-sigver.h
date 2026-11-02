@@ -45,8 +45,7 @@ int cryc_ecdsa_signature_decode(const uint8_t *der, size_t der_size, size_t size
  * of cryc-rsa.h); EC for ECDSA, any of P-256 and P-384 with any of the
  * ECDSA hashes (X.509 allows the combinations; TLS 1.3's restriction of
  * the curve to the scheme is checked by the caller, libssl-compat's
- * handshake).  PSS
- * uses params->salt_size.
+ * handshake).  PSS uses params->salt_size.
  *
  * Returns 0 when it verifies; EBADMSG when it does not; EINVAL for a
  * NULL key or params, a NULL message or signature with a size, an

@@ -32,6 +32,63 @@
 #define TEST_MAX		512U
 
 /* Makes a hex string's bytes; returns the size (checked). */
+static size_t hex(const char *text, uint8_t *out, size_t room);
+
+/* Tells whether the error queue holds exactly one code of reason, and empties it. */
+static int one_error(unsigned reason);
+
+/* Tells whether the error queue is empty. */
+static int no_error(void);
+
+/* Checks the inverse cipher with FIPS 197 Appendix C and the round trip of every group size. */
+static void check_aes_inverse(void);
+
+/* Checks one CAVP AES KAT file: ECB through cryc_aes, CBC (256-bit keys) through EVP. */
+static void check_aes_kat(const char *name, int cbc);
+
+/* Checks AES-256-CBC through EVP with NIST SP 800-38A F.2.5 and F.2.6, and its edges. */
+static void check_cbc(void);
+
+/* Checks HMAC with RFC 4231 section 4 (the full-length tags) and its edges. */
+static void check_hmac_rfc(void);
+
+/* Checks HMAC with Wycheproof's hmac_sha256 file (the full-length tags). */
+static void check_hmac_wycheproof(void);
+
+/* Derives with HKDF through EVP_KDF in one call; returns EVP_KDF_derive's answer. */
+static int derive(const char *digest, const uint8_t *ikm, size_t ikm_size, const uint8_t *salt, size_t salt_size, const uint8_t *info, size_t info_size, uint8_t *out, size_t out_size);
+
+/* Checks HKDF with RFC 5869 Appendix A (A.1 to A.3), Wycheproof's hkdf_sha256 file, and the parameter rules. */
+static void check_hkdf(void);
+
+/* Checks the OSSL_PARAM constructors. */
+static void check_params(void);
+
+/* Makes a P-256 public key with EVP_PKEY_fromdata from an uncompressed point; NULL when it is refused. */
+static EVP_PKEY * p256_public(const uint8_t *point, size_t size);
+
+/* Makes a P-256 key with a given private scalar (32 bytes) through the key's structure: a test-only door. */
+static EVP_PKEY * p256_private(const uint8_t *scalar);
+
+/* Puts a hex coordinate of up to 32 bytes into 32 bytes, left-padded; returns 0 when it is wider. */
+static int coordinate(const char *text, uint8_t *out);
+
+/* Checks EVP_PKEY_fromdata and EVP_PKEY_public_check with the P-256 records of the CAVP PKV file. */
+static void check_pkv(void);
+
+/* Checks ECDSA verification with Wycheproof's ecdsa_secp256r1_sha256 file (DER signatures). */
+static void check_ecdsa(void);
+
+/* Checks ECDH with Wycheproof's ecdh_secp256r1_ecpoint file. */
+static void check_ecdh(void);
+
+/* Derives the shared secret of own with peer into shared (32 bytes); returns EVP_PKEY_derive's answer. */
+static int agree(EVP_PKEY *own, EVP_PKEY *peer, uint8_t *shared);
+
+/* Checks EVP_PKEY_Q_keygen, EVP_PKEY_get_octet_string_param and ECDH between two new keys, and the refusals. */
+static void check_keygen(void);
+
+/* Makes a hex string's bytes; returns the size (checked). */
 static size_t
 hex(
 	const char *text,
@@ -55,6 +112,7 @@ one_error(
 {
 	unsigned long code;
 	unsigned long next;
+	unsigned code_reason;
 
 	/* The first code, then nothing. */
 	code = ERR_get_error();
@@ -62,8 +120,11 @@ one_error(
 	ERR_clear_error();
 	if (code == 0UL || next != 0UL)
 		return 0;
-	if ((unsigned)ERR_GET_REASON(code) != (reason & 0x7fffffU))
+	code_reason = (unsigned)ERR_GET_REASON(code);
+	if (code_reason != (reason & 0x7fffffU))
 		return 0;
+
+	/* Exactly the one wanted code was queued. */
 	return 1;
 }
 
@@ -136,6 +197,8 @@ check_aes_inverse(void)
 		cryc_aes_decrypt_blocks(&aes, round, round, count);
 		CHECK_BYTES(round, data, count * 16U);
 	}
+
+	/* Wipes the key schedule. */
 	cryc_aes_clear(&aes);
 }
 
@@ -161,19 +224,26 @@ check_aes_kat(
 	int written;
 	int last;
 	int good;
+	int opened;
+	int more;
 
 	/* The file must be there. */
 	records = 0UL;
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
-	while (vec_next(&file)) {
+
+	/* Every record. */
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		key_size = vec_hex(&file, "KEY", key, sizeof(key));
 		plain_size = vec_hex(&file, "PLAINTEXT", plain, sizeof(plain));
 		cipher_size = vec_hex(&file, "CIPHERTEXT", cipher, sizeof(cipher));
 		decrypt = vec_get(&file, "section.DECRYPT");
-		if (key_size == (size_t)-1 || plain_size == (size_t)-1 || cipher_size == (size_t)-1)
+		if (key_size == (size_t)-1 ||
+		    plain_size == (size_t)-1 ||
+		    cipher_size == (size_t)-1)
 			continue;
 		CHECK(plain_size == cipher_size && plain_size % 16U == 0U);
 		records++;
@@ -188,6 +258,8 @@ check_aes_kat(
 				cryc_aes_encrypt_blocks(&aes, plain, out, plain_size / 16U);
 				CHECK_BYTES(out, cipher, cipher_size);
 			}
+
+			/* Wipes the key schedule before the next record. */
 			cryc_aes_clear(&aes);
 			continue;
 		}
@@ -214,9 +286,13 @@ check_aes_kat(
 			CHECK(written == (int)cipher_size && last == 0);
 			CHECK_BYTES(out, cipher, cipher_size);
 		}
+
+		/* Releases the context and checks that no error is left queued. */
 		EVP_CIPHER_CTX_free(ctx);
 		CHECK(no_error());
 	}
+
+	/* Closes the file; at least one record was checked. */
 	vec_close(&file);
 	CHECK(records > 0UL);
 }
@@ -239,7 +315,10 @@ check_cbc(void)
 	int total;
 	int last;
 	int direction;
+	const uint8_t *input;
+	const uint8_t *output_expected;
 
+	/* The key, the IV, the plaintext and the ciphertext of the example. */
 	hex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4", key, sizeof(key));
 	hex("000102030405060708090a0b0c0d0e0f", iv, sizeof(iv));
 	hex("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51"
@@ -253,6 +332,15 @@ check_cbc(void)
 
 	/* Both directions, fed in steps of every size from 1 to 64 bytes: the output is the same. */
 	for (direction = 1; direction >= 0; direction--) {
+		/* Encryption reads the plaintext and gives the ciphertext, decryption the other way round. */
+		input = plain;
+		output_expected = cipher;
+		if (!direction) {
+			input = cipher;
+			output_expected = plain;
+		}
+
+		/* Feeds the data in steps of one size and compares the result. */
 		for (step = 1U; step <= 64U; step++) {
 			CHECK(EVP_CipherInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv, direction) == 1);
 			CHECK(EVP_CIPHER_CTX_set_padding(ctx, 0) == 1);
@@ -262,13 +350,15 @@ check_cbc(void)
 				if (chunk > 64U - offset)
 					chunk = 64U - offset;
 				written = -1;
-				CHECK(EVP_CipherUpdate(ctx, out + total, &written, (direction ? plain : cipher) + offset, (int)chunk) == 1);
+				CHECK(EVP_CipherUpdate(ctx, out + total, &written, input + offset, (int)chunk) == 1);
 				CHECK(written >= 0 && written % 16 == 0);
 				total += written;
 			}
+
+			/* Finishes the stream and compares it with the expected output. */
 			CHECK(EVP_CipherFinal_ex(ctx, out + total, &last) == 1);
 			CHECK(total == 64 && last == 0);
-			CHECK_BYTES(out, direction ? cipher : plain, 64U);
+			CHECK_BYTES(out, output_expected, 64U);
 		}
 	}
 
@@ -398,6 +488,8 @@ check_hmac_rfc(void)
 		CHECK(length == 32U);
 		CHECK_BYTES(mac, want, 32U);
 	}
+
+	/* No tag check left an error queued. */
 	CHECK(no_error());
 
 	/* An empty key and an empty message may be NULL; md_len may be NULL. */
@@ -440,30 +532,47 @@ check_hmac_wycheproof(void)
 	size_t tag_size;
 	unsigned long count;
 	unsigned char *made;
+	int opened;
+	int more;
+	int comparison;
 
+	/* Opens the Wycheproof file. */
 	count = 0UL;
-	if (vec_open(&file, "wycheproof-hmac_sha256_test") != 0) {
+	opened = vec_open(&file, "wycheproof-hmac_sha256_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
-	while (vec_next(&file)) {
+
+	/* Checks every record that has a full-length tag. */
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		tag_bits = vec_get(&file, "group.tagSize");
 		result = vec_get(&file, "result");
 		key_size = vec_hex(&file, "key", key, sizeof(key));
 		msg_size = vec_hex(&file, "msg", msg, sizeof(msg));
 		tag_size = vec_hex(&file, "tag", tag, sizeof(tag));
-		if (tag_bits == NULL || strcmp(tag_bits, "256") != 0 || result == NULL)
+		if (tag_bits == NULL)
 			continue;
-		if (key_size == (size_t)-1 || msg_size == (size_t)-1 || tag_size != 32U)
+		comparison = strcmp(tag_bits, "256");
+		if (comparison != 0)
+			continue;
+		if (result == NULL)
+			continue;
+		if (key_size == (size_t)-1 ||
+		    msg_size == (size_t)-1 ||
+		    tag_size != 32U)
 			continue;
 		made = HMAC(EVP_sha256(), key, (int)key_size, msg, msg_size, mac, NULL);
 		CHECK(made == mac);
-		if (strcmp(result, "valid") == 0)
+		comparison = strcmp(result, "valid");
+		if (comparison == 0)
 			CHECK_BYTES(mac, tag, 32U);
 		else
 			CHECK(memcmp(mac, tag, 32U) != 0);
 		count++;
 	}
+
+	/* Closes the file and reports how many tags were checked. */
 	vec_close(&file);
 	printf("  Wycheproof HMAC-SHA-256: %lu tags\n", count);
 	CHECK(count > 50UL);
@@ -531,6 +640,9 @@ check_hkdf(void)
 	size_t index;
 	unsigned long count;
 	int good;
+	int opened;
+	int more;
+	int comparison;
 
 	/* A.1: the basic case. */
 	ikm_size = hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", ikm, sizeof(ikm));
@@ -546,6 +658,8 @@ check_hkdf(void)
 		salt[index] = (uint8_t)(0x60U + index);
 		info[index] = (uint8_t)(0xb0U + index);
 	}
+
+	/* The expected output of the longer case. */
 	want_size = hex("b11e398dc80327a1c8e7f78c596a49344f012eda2d4efad8a050cc4c19afa97c59045a99cac7827271cb41c65e590e09"
 	    "da3275600c2f09b8367793a9aca3db71cc30c58179ec3e87c14c01d5c1f3434f1d87", want, sizeof(want));
 	CHECK(derive("sha2-256", ikm, 80U, salt, 80U, info, 80U, out, want_size) == 1);
@@ -574,22 +688,28 @@ check_hkdf(void)
 
 	/* Wycheproof. */
 	count = 0UL;
-	if (vec_open(&file, "wycheproof-hkdf_sha256_test") != 0) {
+	opened = vec_open(&file, "wycheproof-hkdf_sha256_test");
+	if (opened != 0) {
 		CHECK(0);
 	} else {
-		while (vec_next(&file)) {
+		for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 			result = vec_get(&file, "result");
 			size_text = vec_get(&file, "size");
 			ikm_size = vec_hex(&file, "ikm", ikm, sizeof(ikm));
 			salt_size = vec_hex(&file, "salt", salt, sizeof(salt));
 			info_size = vec_hex(&file, "info", info, sizeof(info));
 			want_size = vec_hex(&file, "okm", want, sizeof(want));
-			if (result == NULL || size_text == NULL || ikm_size == (size_t)-1 || salt_size == (size_t)-1 ||
-			    info_size == (size_t)-1 || want_size == (size_t)-1)
+			if (result == NULL ||
+			    size_text == NULL ||
+			    ikm_size == (size_t)-1 ||
+			    salt_size == (size_t)-1 ||
+			    info_size == (size_t)-1 ||
+			    want_size == (size_t)-1)
 				continue;
 			size = (size_t)strtoul(size_text, NULL, 10);
 			good = derive("SHA256", ikm, ikm_size, salt, salt_size, info, info_size, out, size);
-			if (strcmp(result, "valid") == 0) {
+			comparison = strcmp(result, "valid");
+			if (comparison == 0) {
 				CHECK(good == 1);
 				CHECK(want_size == size);
 				CHECK_BYTES(out, want, want_size);
@@ -597,10 +717,16 @@ check_hkdf(void)
 				CHECK(good == 0);
 				ERR_clear_error();
 			}
+
+			/* Counts the case. */
 			count++;
 		}
+
+		/* Closes the file. */
 		vec_close(&file);
 	}
+
+	/* Reports how many cases ran, and that there were enough. */
 	printf("  Wycheproof HKDF-SHA-256: %lu cases\n", count);
 	CHECK(count > 50UL);
 
@@ -736,6 +862,8 @@ p256_public(
 		ERR_clear_error();
 		return NULL;
 	}
+
+	/* Returns the key that the public interface made. */
 	CHECK(key != NULL);
 	return key;
 }
@@ -758,6 +886,8 @@ p256_private(
 		free(key);
 		return NULL;
 	}
+
+	/* Stores the scalar and describes the key as a P-256 key with a private part. */
 	memcpy(key->private_key, scalar, 32U);
 	key->references = 1L;
 	key->type = CRYC_PKEY_EC_P256;
@@ -778,6 +908,7 @@ coordinate(
 	size_t length;
 	size_t size;
 	size_t skip;
+	const char *source;
 
 	/* An odd number of digits gets a leading zero. */
 	length = strlen(text);
@@ -785,7 +916,10 @@ coordinate(
 		return 0;
 	padded[0] = '0';
 	memcpy(padded + 1, text, length + 1U);
-	size = hex_decode(length % 2U != 0U ? padded : padded + 1, bytes, sizeof(bytes));
+	source = padded + 1;
+	if (length % 2U != 0U)
+		source = padded;
+	size = hex_decode(source, bytes, sizeof(bytes));
 	if (size == (size_t)-1)
 		return 0;
 
@@ -815,21 +949,31 @@ check_pkv(void)
 	unsigned long passed;
 	unsigned long failed;
 	int fits;
+	int opened;
+	int more;
 
+	/* Opens the CAVP file. */
 	passed = 0UL;
 	failed = 0UL;
-	if (vec_open(&file, "cavp-186-4ecdsatestvectors-PKV") != 0) {
+	opened = vec_open(&file, "cavp-186-4ecdsatestvectors-PKV");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
-	while (vec_next(&file)) {
+
+	/* Checks every P-256 record. */
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		/* The converted file lists every section seen so far: a P-256 record has P-256 as its last. */
 		section = vec_get(&file, "section.P-256");
 		later = vec_get(&file, "section.P-384");
 		qx = vec_get(&file, "Qx");
 		qy = vec_get(&file, "Qy");
 		result = vec_get(&file, "Result");
-		if (section == NULL || later != NULL || qx == NULL || qy == NULL || result == NULL)
+		if (section == NULL ||
+		    later != NULL ||
+		    qx == NULL ||
+		    qy == NULL ||
+		    result == NULL)
 			continue;
 
 		/* A coordinate wider than 32 bytes cannot be given: it is a failing record. */
@@ -856,8 +1000,12 @@ check_pkv(void)
 			CHECK(key == NULL);
 			failed++;
 		}
+
+		/* Releases the key of the record. */
 		EVP_PKEY_free(key);
 	}
+
+	/* Closes the file and reports the counts. */
 	vec_close(&file);
 	printf("  CAVP PKV P-256: %lu pass, %lu fail\n", passed, failed);
 	CHECK(passed > 0UL && failed > 0UL);
@@ -884,15 +1032,22 @@ check_ecdsa(void)
 	unsigned long bad_count;
 	int verdict;
 	int plain;
+	int opened;
+	int more;
+	int comparison;
 
+	/* Opens the Wycheproof file. */
 	good_count = 0UL;
 	bad_count = 0UL;
-	if (vec_open(&file, "wycheproof-ecdsa_secp256r1_sha256_test") != 0) {
+	opened = vec_open(&file, "wycheproof-ecdsa_secp256r1_sha256_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Checks every test, with the key of the group it belongs to. */
 	point_size = 0U;
-	while (vec_next(&file)) {
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		/* The group's key comes in a record of its own (its PEM form holds a blank line); the tests after it use it. */
 		size = vec_hex(&file, "group.publicKey.uncompressed", point, sizeof(point));
 		if (size != (size_t)-1)
@@ -900,7 +1055,10 @@ check_ecdsa(void)
 		result = vec_get(&file, "result");
 		msg_size = vec_hex(&file, "msg", msg, sizeof(msg));
 		sig_size = vec_hex(&file, "sig", sig, sizeof(sig));
-		if (result == NULL || point_size != 65U || msg_size == (size_t)-1 || sig_size == (size_t)-1)
+		if (result == NULL ||
+		    point_size != 65U ||
+		    msg_size == (size_t)-1 ||
+		    sig_size == (size_t)-1)
 			continue;
 		CHECK(EVP_Digest(msg, msg_size, hash, NULL, EVP_sha256(), NULL) == 1);
 		key = p256_public(point, point_size);
@@ -918,16 +1076,24 @@ check_ecdsa(void)
 			verdict = EVP_PKEY_verify(ctx, sig, sig_size, hash, sizeof(hash));
 			EVP_PKEY_CTX_free(ctx);
 			ERR_clear_error();
-			if (strcmp(result, "valid") == 0) {
+			comparison = strcmp(result, "valid");
+			if (comparison == 0) {
 				CHECK(verdict == 1);
 				good_count++;
-			} else if (strcmp(result, "invalid") == 0) {
-				CHECK(verdict != 1);
-				bad_count++;
+			} else {
+				comparison = strcmp(result, "invalid");
+				if (comparison == 0) {
+					CHECK(verdict != 1);
+					bad_count++;
+				}
 			}
 		}
+
+		/* Releases the key of the test. */
 		EVP_PKEY_free(key);
 	}
+
+	/* Closes the file and reports the verdicts. */
 	vec_close(&file);
 	printf("  Wycheproof ECDSA P-256 SHA-256: %lu valid, %lu invalid verdicts\n", good_count, bad_count);
 	CHECK(good_count > 50UL && bad_count > 50UL);
@@ -955,19 +1121,29 @@ check_ecdh(void)
 	unsigned long computed;
 	unsigned long refused;
 	int good;
+	int opened;
+	int more;
+	int comparison;
 
+	/* Opens the Wycheproof file. */
 	computed = 0UL;
 	refused = 0UL;
-	if (vec_open(&file, "wycheproof-ecdh_secp256r1_ecpoint_test") != 0) {
+	opened = vec_open(&file, "wycheproof-ecdh_secp256r1_ecpoint_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
-	while (vec_next(&file)) {
+
+	/* Checks every record. */
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		pub_size = vec_hex(&file, "public", pub, sizeof(pub));
 		priv_size = vec_hex(&file, "private", priv, sizeof(priv));
 		want_size = vec_hex(&file, "shared", want, sizeof(want));
-		if (result == NULL || pub_size == (size_t)-1 || priv_size == (size_t)-1 || want_size == (size_t)-1)
+		if (result == NULL ||
+		    pub_size == (size_t)-1 ||
+		    priv_size == (size_t)-1 ||
+		    want_size == (size_t)-1)
 			continue;
 
 		/* The private scalar in 32 bytes (Wycheproof may add a leading zero). */
@@ -985,6 +1161,8 @@ check_ecdh(void)
 			refused++;
 			continue;
 		}
+
+		/* Derives with the private key made from the scalar and the peer. */
 		own = p256_private(scalar);
 		ctx = EVP_PKEY_CTX_new(own, NULL);
 		CHECK(ctx != NULL);
@@ -994,7 +1172,8 @@ check_ecdh(void)
 		CHECK(good == 1);
 		length = sizeof(shared);
 		good = EVP_PKEY_derive(ctx, shared, &length);
-		if (strcmp(result, "invalid") == 0) {
+		comparison = strcmp(result, "invalid");
+		if (comparison == 0) {
 			CHECK(good != 1);
 			ERR_clear_error();
 			refused++;
@@ -1004,10 +1183,14 @@ check_ecdh(void)
 			CHECK_BYTES(shared, want, 32U);
 			computed++;
 		}
+
+		/* Releases the context and both keys. */
 		EVP_PKEY_CTX_free(ctx);
 		EVP_PKEY_free(own);
 		EVP_PKEY_free(peer);
 	}
+
+	/* Closes the file and reports the counts. */
 	vec_close(&file);
 	printf("  Wycheproof ECDH P-256: %lu computed, %lu refused\n", computed, refused);
 	CHECK(computed > 50UL && refused > 0UL);
@@ -1061,10 +1244,15 @@ check_keygen(void)
 	EVP_PKEY *x25519;
 	size_t length;
 	int round;
+	const char *group;
 
+	/* Makes pairs of keys with both spellings of the curve and checks that they agree. */
 	for (round = 0; round < 8; round++) {
 		/* Two key pairs; each public point is on the curve. */
-		a = EVP_PKEY_Q_keygen(NULL, NULL, "EC", round % 2 ? "P-256" : "prime256v1");
+		group = "prime256v1";
+		if (round % 2)
+			group = "P-256";
+		a = EVP_PKEY_Q_keygen(NULL, NULL, "EC", group);
 		b = EVP_PKEY_Q_keygen(NULL, NULL, "ec", "secp256r1");
 		CHECK(a != NULL && b != NULL);
 		if (a == NULL || b == NULL) {
@@ -1072,6 +1260,8 @@ check_keygen(void)
 			EVP_PKEY_free(b);
 			return;
 		}
+
+		/* Reads the public point of the first pair through one name and of the second through the other. */
 		length = 0U;
 		CHECK(EVP_PKEY_get_octet_string_param(a, OSSL_PKEY_PARAM_PUB_KEY, point_a, sizeof(point_a), &length) == 1);
 		CHECK(length == 65U && point_a[0] == 0x04U);
@@ -1092,6 +1282,8 @@ check_keygen(void)
 		EVP_PKEY_free(a);
 		EVP_PKEY_free(b);
 	}
+
+	/* The loop left no error queued. */
 	CHECK(no_error());
 
 	/* The octet string parameter: the size query, a small buffer, another name. */
@@ -1233,5 +1425,6 @@ main(void)
 	check_ecdh();
 	check_keygen();
 
+	/* Reports the number of checks and whether all of them passed. */
 	return check_finish("test-api-passkey");
 }

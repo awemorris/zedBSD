@@ -206,6 +206,8 @@ EVP_KDF_CTX_new(
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_MALLOC_FAILURE);
 		return NULL;
 	}
+
+	/* No digest is chosen until one is given. */
 	ctx->hash = CRYC_HASH_NONE;
 
 	/* Succeeded: an empty context. */
@@ -285,20 +287,26 @@ EVP_KDF_derive(
 		}
 	}
 
-	/* Applies the digest, the key, the salt and the info, replacing what the context held. */
+	/* Applies the digest, replacing the one the context held. */
 	if (settings.has_digest)
 		ctx->hash = settings.hash;
+
+	/* Applies the key, replacing the one the context held. */
 	if (settings.has_key) {
 		kdf_release(ctx->key, ctx->key_size);
 		ctx->key = key_copy;
 		ctx->key_size = settings.key_size;
 		ctx->key_set = 1;
 	}
+
+	/* Applies the salt, replacing the one the context held. */
 	if (settings.has_salt) {
 		kdf_release(ctx->salt, ctx->salt_size);
 		ctx->salt = salt_copy;
 		ctx->salt_size = settings.salt_size;
 	}
+
+	/* Applies the info, replacing the one the context held. */
 	if (settings.has_info) {
 		kdf_release(ctx->info, ctx->info_size);
 		ctx->info = settings.info;
@@ -311,11 +319,13 @@ EVP_KDF_derive(
 		return 0;
 	}
 
-	/* Refuses a missing output, and an output of no bytes. */
+	/* Refuses a missing output. */
 	if (key == NULL) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
 		return 0;
 	}
+
+	/* Refuses an output of no bytes, or of more than HKDF-Expand can make. */
 	if (keylen == 0U || keylen > 255U * KDF_SHA256_SIZE) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_INVALID_KEY_LENGTH);
 		return 0;
@@ -353,6 +363,10 @@ kdf_read_params(
 	const OSSL_PARAM params[])
 {
 	const OSSL_PARAM *param;
+	int digest_order;
+	int key_order;
+	int salt_order;
+	int info_order;
 	int known;
 	int joined;
 
@@ -362,8 +376,14 @@ kdf_read_params(
 
 	/* Each parameter until the one with no name. */
 	for (param = params; param->key != NULL; param++) {
-		if (strcmp(param->key, OSSL_KDF_PARAM_DIGEST) == 0) {
-			/* The digest's name (the first one counts): only SHA-256's names are known. */
+		/* Compares the name of the parameter with each name that is known. */
+		digest_order = strcmp(param->key, OSSL_KDF_PARAM_DIGEST);
+		key_order = strcmp(param->key, OSSL_KDF_PARAM_KEY);
+		salt_order = strcmp(param->key, OSSL_KDF_PARAM_SALT);
+		info_order = strcmp(param->key, OSSL_KDF_PARAM_INFO);
+
+		/* The digest's name (the first one counts): only SHA-256's names are known. */
+		if (digest_order == 0) {
 			if (settings->has_digest)
 				continue;
 			known = cryc_param_string_equal(param, "SHA256");
@@ -375,15 +395,17 @@ kdf_read_params(
 				cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_UNSUPPORTED_ALGORITHM);
 				return 0;
 			}
+
+			/* Records that the digest is SHA-256. */
 			settings->has_digest = 1;
 			settings->hash = CRYC_HASH_SHA256;
 			continue;
 		}
 
 		/* Any other parameter than the key, the salt and the info (a mode among them) is not supported. */
-		if (strcmp(param->key, OSSL_KDF_PARAM_KEY) != 0 &&
-		    strcmp(param->key, OSSL_KDF_PARAM_SALT) != 0 &&
-		    strcmp(param->key, OSSL_KDF_PARAM_INFO) != 0) {
+		if (key_order != 0 &&
+		    salt_order != 0 &&
+		    info_order != 0) {
 			cryc_err_put(CRYC_LIB_EVP, CRYC_R_UNSUPPORTED);
 			return 0;
 		}
@@ -395,23 +417,27 @@ kdf_read_params(
 			return 0;
 		}
 
-		if (strcmp(param->key, OSSL_KDF_PARAM_KEY) == 0) {
-			/* The input keying material: the first one counts. */
+		/* The input keying material: the first one counts. */
+		if (key_order == 0) {
 			if (!settings->has_key) {
 				settings->has_key = 1;
 				settings->key = (const uint8_t *)param->data;
 				settings->key_size = param->data_size;
 			}
+
+			/* Moves on to the next parameter. */
 			continue;
 		}
 
-		if (strcmp(param->key, OSSL_KDF_PARAM_SALT) == 0) {
-			/* The salt: the first one counts. */
+		/* The salt: the first one counts. */
+		if (salt_order == 0) {
 			if (!settings->has_salt) {
 				settings->has_salt = 1;
 				settings->salt = (const uint8_t *)param->data;
 				settings->salt_size = param->data_size;
 			}
+
+			/* Moves on to the next parameter. */
 			continue;
 		}
 
@@ -443,18 +469,23 @@ kdf_join_info(
 	uint8_t *joined;
 	size_t total;
 	size_t offset;
-	int info;
+	int info_order;
 
 	/* The total size, refused above the limit (checked before each addition, so it cannot wrap). */
 	total = 0U;
 	for (param = params; param->key != NULL; param++) {
-		info = strcmp(param->key, OSSL_KDF_PARAM_INFO) == 0;
-		if (!info)
+		/* Skips a parameter that is not an info. */
+		info_order = strcmp(param->key, OSSL_KDF_PARAM_INFO);
+		if (info_order != 0)
 			continue;
+
+		/* Refuses a total above the limit. */
 		if (param->data_size > CRYC_KDF_MAX_INFO - total) {
 			cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_INVALID_ARGUMENT);
 			return 0;
 		}
+
+		/* Counts the bytes this info adds. */
 		total += param->data_size;
 	}
 
@@ -475,9 +506,16 @@ kdf_join_info(
 	/* Copies each info in order. */
 	offset = 0U;
 	for (param = params; param->key != NULL; param++) {
-		info = strcmp(param->key, OSSL_KDF_PARAM_INFO) == 0;
-		if (!info || param->data_size == 0U)
+		/* Skips a parameter that is not an info. */
+		info_order = strcmp(param->key, OSSL_KDF_PARAM_INFO);
+		if (info_order != 0)
 			continue;
+
+		/* Skips an info with no bytes. */
+		if (param->data_size == 0U)
+			continue;
+
+		/* Appends the bytes of this info. */
 		memcpy(joined + offset, param->data, param->data_size);
 		offset += param->data_size;
 	}

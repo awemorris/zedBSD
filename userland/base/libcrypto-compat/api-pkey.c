@@ -846,6 +846,8 @@ EVP_PKEY_keygen(
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_INTERNAL_ERROR);
 		return 0;
 	}
+
+	/* Marks the key as holding the private half as well. */
 	made->has_private = 1;
 
 	/* Hands the new key to the caller; whatever *pkey held before is not touched. */
@@ -1140,6 +1142,8 @@ EVP_PKEY_Q_keygen(
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_INTERNAL_ERROR);
 		return NULL;
 	}
+
+	/* Marks the key as holding the private half as well. */
 	made->has_private = 1;
 
 	/* Succeeded: a P-256 key pair with one reference. */
@@ -1188,6 +1192,8 @@ EVP_PKEY_fromdata(
 	const OSSL_PARAM *point;
 	const OSSL_PARAM *param;
 	EVP_PKEY *made;
+	int group_order;
+	int point_order;
 	int is_p256;
 	int error;
 
@@ -1213,14 +1219,23 @@ EVP_PKEY_fromdata(
 	group = NULL;
 	point = NULL;
 	for (param = params; param->key != NULL; param++) {
-		if (group == NULL && strcmp(param->key, OSSL_PKEY_PARAM_GROUP_NAME) == 0) {
+		/* Compares the name of the parameter with the two names that are known. */
+		group_order = strcmp(param->key, OSSL_PKEY_PARAM_GROUP_NAME);
+		point_order = strcmp(param->key, OSSL_PKEY_PARAM_PUB_KEY);
+
+		/* The group name: the first one counts. */
+		if (group == NULL && group_order == 0) {
 			group = param;
 			continue;
 		}
-		if (point == NULL && strcmp(param->key, OSSL_PKEY_PARAM_PUB_KEY) == 0) {
+
+		/* The point: the first one counts. */
+		if (point == NULL && point_order == 0) {
 			point = param;
 			continue;
 		}
+
+		/* Any other parameter, or a repeated one, is not supported. */
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_UNSUPPORTED);
 		return 0;
 	}
@@ -1313,15 +1328,22 @@ EVP_PKEY_get_octet_string_param(
 	size_t max_buf_sz,
 	size_t *out_len)
 {
+	int pub_order;
+	int encoded_order;
+
 	/* Refuses a missing key or name. */
 	if (pkey == NULL || key_name == NULL) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
 		return 0;
 	}
 
+	/* Compares the name with the two names the public key goes by. */
+	pub_order = strcmp(key_name, OSSL_PKEY_PARAM_PUB_KEY);
+	encoded_order = strcmp(key_name, OSSL_PKEY_PARAM_ENCODED_PUBLIC_KEY);
+
 	/* Only the public key is given as an octet string. */
-	if (strcmp(key_name, OSSL_PKEY_PARAM_PUB_KEY) != 0 &&
-	    strcmp(key_name, OSSL_PKEY_PARAM_ENCODED_PUBLIC_KEY) != 0) {
+	if (pub_order != 0 &&
+	    encoded_order != 0) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_UNSUPPORTED);
 		return 0;
 	}
@@ -1332,6 +1354,8 @@ EVP_PKEY_get_octet_string_param(
 			cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
 			return 0;
 		}
+
+		/* Succeeded: the size of the public key is reported. */
 		*out_len = pkey->public_size;
 		return 1;
 	}
@@ -1342,10 +1366,14 @@ EVP_PKEY_get_octet_string_param(
 		return 0;
 	}
 
-	/* Succeeded: the public key is written. */
+	/* Writes the public key. */
 	memcpy(buf, pkey->public_key, pkey->public_size);
+
+	/* Reports the length written, when the caller asks for it. */
 	if (out_len != NULL)
 		*out_len = pkey->public_size;
+
+	/* Succeeded: the public key is written. */
 	return 1;
 }
 

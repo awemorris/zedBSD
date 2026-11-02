@@ -23,6 +23,24 @@
 #include "userland/base/libcrypto-compat/cryc-api.h"
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* The inverse cipher of every key size with a secret key: five blocks (a group of four and one). */
+static unsigned run_inverse(void);
+
+/* AES-256-CBC through EVP: a secret key, a secret plaintext encrypted in uneven pieces, then decrypted. */
+static unsigned run_cbc(void);
+
+/* HMAC-SHA-256 with a secret key and a secret message, and HKDF with secret input keying material. */
+static unsigned run_hmac_hkdf(void);
+
+/* P-256 ECDH through EVP_PKEY_derive with a secret private scalar (a new key's) and a public peer. */
+static unsigned run_ecdh(void);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -49,6 +67,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value, one byte wide. */
 	return value & 0xffU;
 }
 
@@ -63,7 +83,10 @@ run_inverse(void)
 	size_t key_size;
 	unsigned total;
 
+	/* Starts the folded value at zero. */
 	total = 0U;
+
+	/* Runs every AES key size. */
 	for (key_size = 16U; key_size <= 32U; key_size += 8U) {
 		/* The expansion of a secret key; the ciphertext is public, the plaintext it gives is secret. */
 		fill(key, key_size, (unsigned)key_size);
@@ -82,6 +105,8 @@ run_inverse(void)
 		total += fold(plain, sizeof(plain));
 		cryc_aes_clear(&aes);
 	}
+
+	/* Reports the folded outputs of every key size. */
 	return total;
 }
 
@@ -100,12 +125,17 @@ run_cbc(void)
 	int more;
 	int last;
 
+	/* Starts the folded value at zero. */
 	total = 0U;
+
+	/* Makes the key, the IV, the plaintext and the cipher context. */
 	fill(key, sizeof(key), 21U);
 	fill(iv, sizeof(iv), 22U);
 	fill(plain, sizeof(plain), 23U);
 	ctx = EVP_CIPHER_CTX_new();
 	CHECK(ctx != NULL);
+
+	/* Gives up when the context could not be made. */
 	if (ctx == NULL)
 		return 0U;
 
@@ -131,6 +161,8 @@ run_cbc(void)
 	CHECK(memcmp(back, plain, sizeof(plain)) == 0);
 	total += fold(back, sizeof(plain));
 	EVP_CIPHER_CTX_free(ctx);
+
+	/* Reports the folded ciphertext and plaintext. */
 	return total;
 }
 
@@ -150,6 +182,7 @@ run_hmac_hkdf(void)
 	unsigned total;
 	unsigned char *made;
 
+	/* Starts the folded value at zero. */
 	total = 0U;
 
 	/* HMAC: a key longer than the block (hashed first) and a message of a few blocks. */
@@ -176,8 +209,12 @@ run_hmac_hkdf(void)
 	ctx = EVP_KDF_CTX_new(kdf);
 	EVP_KDF_free(kdf);
 	CHECK(ctx != NULL);
+
+	/* Gives up when the KDF context could not be made. */
 	if (ctx == NULL)
 		return total;
+
+	/* The parameters: the digest, the key, the salt and the info. */
 	params[0] = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, (char *)"SHA256", 0U);
 	params[1] = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_KEY, key, 32U);
 	params[2] = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT, salt, sizeof(salt));
@@ -188,6 +225,8 @@ run_hmac_hkdf(void)
 	total += fold(okm, sizeof(okm));
 	EVP_KDF_CTX_free(ctx);
 	CT_PUBLIC(key, sizeof(key));
+
+	/* Reports the folded outputs of the HMAC and the HKDF. */
 	return total;
 }
 
@@ -202,10 +241,15 @@ run_ecdh(void)
 	size_t length;
 	unsigned total;
 
+	/* Starts the folded value at zero. */
 	total = 0U;
+
+	/* Makes the key pairs of both sides. */
 	own = EVP_PKEY_Q_keygen(NULL, NULL, "EC", "P-256");
 	peer = EVP_PKEY_Q_keygen(NULL, NULL, "EC", "P-256");
 	CHECK(own != NULL && peer != NULL);
+
+	/* Gives up when a key could not be made. */
 	if (own == NULL || peer == NULL) {
 		EVP_PKEY_free(own);
 		EVP_PKEY_free(peer);
@@ -232,6 +276,8 @@ run_ecdh(void)
 	EVP_PKEY_CTX_free(ctx);
 	EVP_PKEY_free(own);
 	EVP_PKEY_free(peer);
+
+	/* Reports the folded shared secret. */
 	return total;
 }
 

@@ -22,8 +22,14 @@
 #include "userland/base/libcrypto-compat/cryc-name.h"
 #include "userland/base/libcrypto-compat/cryc-x509.h"
 
+/* The libFuzzer entry point, run once for every generated input. */
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
+/*
+ * Parses the input as a certificate through both parsers.
+ *
+ * Always reports 0, because a refusal is not a failure.
+ */
 int
 LLVMFuzzerTestOneInput(
 	const uint8_t *data,
@@ -34,15 +40,25 @@ LLVMFuzzerTestOneInput(
 	static const uint8_t address[4] = { 192, 0, 2, 1 };
 	const unsigned char *cursor;
 	uint8_t *copy;
+	size_t copy_size;
+	int status;
 	X509 *public_certificate;
 
 	/* A copy of exactly size bytes, so a read past the end is caught. */
-	copy = malloc(size != 0U ? size : 1U);
+	copy_size = size;
+	if (copy_size == 0U)
+		copy_size = 1U;
+	copy = malloc(copy_size);
 	if (copy == NULL)
 		return 0;
+
+	/* Fills the copy with the input. */
 	if (size != 0U)
 		memcpy(copy, data, size);
-	if (cryc_x509_parse(&certificate, copy, size) == 0) {
+
+	/* Parses the input directly, then reads what a parsed certificate offers. */
+	status = cryc_x509_parse(&certificate, copy, size);
+	if (status == 0) {
 		(void)cryc_x509_public_key(certificate.spki, certificate.spki_size, &key);
 		(void)cryc_name_match_host(&certificate, "www.example.com");
 		(void)cryc_name_match_ip(&certificate, address, sizeof(address));
@@ -54,5 +70,7 @@ LLVMFuzzerTestOneInput(
 	public_certificate = d2i_X509(NULL, &cursor, (long)size);
 	X509_free(public_certificate);
 	free(copy);
+
+	/* The input never fails the run on its own. */
 	return 0;
 }

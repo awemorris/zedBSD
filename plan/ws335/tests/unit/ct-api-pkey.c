@@ -33,6 +33,12 @@
 #include "userland/base/libcrypto-compat/cryc-mlkem.h"
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -59,6 +65,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value, one byte wide. */
 	return value & 0xffU;
 }
 
@@ -88,6 +96,7 @@ main(void)
 	EVP_MD_CTX *md;
 	int status;
 
+	/* Starts the folded value at zero. */
 	total = 0;
 
 	/* Ed25519: a secret seed and message; the signing key's public form is public. */
@@ -129,6 +138,8 @@ main(void)
 		/* Freeing wipes the secret. */
 		EVP_PKEY_free(key);
 	}
+
+	/* The seed and the message are public again once the calls are done. */
 	CT_PUBLIC(seed, sizeof(seed));
 	CT_PUBLIC(message, sizeof(message));
 
@@ -159,6 +170,8 @@ main(void)
 		total += fold(shared, sizeof(shared));
 		EVP_PKEY_CTX_free(ctx);
 	}
+
+	/* Frees both keys; the scalar is public again once the calls are done. */
 	EVP_PKEY_free(key);
 	EVP_PKEY_free(peer);
 	CT_PUBLIC(scalar, sizeof(scalar));
@@ -205,6 +218,8 @@ main(void)
 			CT_PUBLIC(pair->private_key, 1152U);
 			CT_PUBLIC(pair->private_key + 2368, 32U);
 		}
+
+		/* Frees the key pair. */
 		EVP_PKEY_free(pair);
 	}
 

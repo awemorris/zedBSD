@@ -19,10 +19,31 @@
 #include <stdio.h>
 #include <string.h>
 
-/* The number of checks that failed. */
+/* Records one check of a condition. */
+static void check(int good, const char *what);
+
+/* Turns a hex string into bytes; returns the count. */
+static size_t hex_decode(const char *hex, unsigned char *out);
+
+/* SHA-256 of "abc" through EVP_Digest and through the context calls. */
+static void check_sha256(void);
+
+/* The X25519 exchange of RFC 7748 6.1: both sides reach the same secret. */
+static void check_x25519(void);
+
+/* The Ed25519 signature of RFC 8032 7.1 TEST 1 (the empty message), and its check. */
+static void check_ed25519(void);
+
+/* 32 random bytes: not all zero, and two calls differ. */
+static void check_random(void);
+
+/* The constant-time helpers. */
+static void check_helpers(void);
+
+/* The number of checks that failed, reported on the last line; it lives for the whole run. */
 static int failed;
 
-/* The number of checks made. */
+/* The number of checks made, reported before the verdict; it lives for the whole run. */
 static int made;
 
 /* Records one check of a condition. */
@@ -31,8 +52,10 @@ check(
 	int good,
 	const char *what)
 {
-	/* Counted either way. */
+	/* Counts the check, whether it passed or not. */
 	made++;
+
+	/* Reports a check that failed. */
 	if (!good) {
 		failed++;
 		printf("FAIL %s\n", what);
@@ -49,6 +72,7 @@ hex_decode(
 	int high;
 	int value;
 
+	/* Pairs the hex digits into bytes, high digit first. */
 	count = 0;
 	high = -1;
 	for (; *hex != '\0'; hex++) {
@@ -57,6 +81,8 @@ hex_decode(
 			value = *hex - '0';
 		else
 			value = *hex - 'a' + 10;
+
+		/* Keeps the high digit, or completes the byte with the low one. */
 		if (high < 0) {
 			high = value;
 		} else {
@@ -64,6 +90,8 @@ hex_decode(
 			high = -1;
 		}
 	}
+
+	/* The number of bytes decoded. */
 	return count;
 }
 
@@ -76,6 +104,7 @@ check_sha256(void)
 	unsigned int size;
 	EVP_MD_CTX *ctx;
 
+	/* Decodes the expected digest and clears the outputs. */
 	hex_decode("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", expected);
 	size = 0;
 	memset(digest, 0, sizeof(digest));
@@ -116,12 +145,14 @@ check_x25519(void)
 	EVP_PKEY *bob_only;
 	EVP_PKEY_CTX *ctx;
 
+	/* Decodes the keys and the shared secret of the RFC. */
 	hex_decode("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a", alice_private);
 	hex_decode("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a", alice_public);
 	hex_decode("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb", bob_private);
 	hex_decode("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f", bob_public);
 	hex_decode("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742", secret);
 
+	/* Makes the keys of both sides, and Bob's public key alone. */
 	alice = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, alice_private, 32);
 	bob = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, bob_private, 32);
 	bob_only = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, bob_public, 32);
@@ -169,6 +200,7 @@ check_x25519(void)
 		EVP_PKEY_CTX_free(ctx);
 	}
 
+	/* Releases the keys. */
 	EVP_PKEY_free(alice);
 	EVP_PKEY_free(bob);
 	EVP_PKEY_free(bob_only);
@@ -188,10 +220,12 @@ check_ed25519(void)
 	EVP_PKEY *verify_key;
 	EVP_MD_CTX *ctx;
 
+	/* Decodes the seed, the public key and the signature of the RFC. */
 	hex_decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60", seed);
 	hex_decode("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", public_key);
 	hex_decode("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b", expected);
 
+	/* Makes the signing key from the seed and the verifying key from the public key. */
 	secret_key = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, NULL, seed, 32);
 	verify_key = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL, public_key, 32);
 	check(secret_key != NULL && verify_key != NULL, "Ed25519 keys");
@@ -227,6 +261,8 @@ check_ed25519(void)
 		check(EVP_DigestVerify(ctx, expected, 64, NULL, 0) == 1, "EVP_DigestVerify");
 		EVP_MD_CTX_free(ctx);
 	}
+
+	/* Flips one bit of the signature, which must not verify. */
 	ctx = EVP_MD_CTX_new();
 	if (ctx != NULL) {
 		expected[10] ^= 1;
@@ -244,6 +280,7 @@ check_ed25519(void)
 		EVP_MD_CTX_free(ctx);
 	}
 
+	/* Releases the keys. */
 	EVP_PKEY_free(secret_key);
 	EVP_PKEY_free(verify_key);
 }
@@ -256,6 +293,7 @@ check_random(void)
 	unsigned char second[32];
 	unsigned char zero[32];
 
+	/* Clears the buffers, so that an unfilled one is seen. */
 	memset(first, 0, sizeof(first));
 	memset(second, 0, sizeof(second));
 	memset(zero, 0, sizeof(zero));
@@ -272,6 +310,7 @@ check_helpers(void)
 	unsigned char one[8];
 	unsigned char two[8];
 
+	/* Makes two equal buffers. */
 	memset(one, 7, sizeof(one));
 	memset(two, 7, sizeof(two));
 	check(CRYPTO_memcmp(one, two, 8) == 0, "CRYPTO_memcmp equal");
@@ -281,9 +320,11 @@ check_helpers(void)
 	check(one[0] == 0 && one[7] == 0, "OPENSSL_cleanse");
 }
 
+/* Runs every check of the smoke program and reports the verdict. */
 int
 main(void)
 {
+	/* Runs each group of checks. */
 	check_sha256();
 	check_x25519();
 	check_ed25519();
@@ -293,11 +334,18 @@ main(void)
 	/* Every call above succeeded, so the error queue is empty. */
 	check(ERR_get_error() == 0, "ERR_get_error is 0");
 
+	/* Reports the number of checks made. */
 	printf("crypto-smoke: %d checks\n", made);
+
+	/* Fails the run when any check failed. */
 	if (failed != 0) {
 		printf("crypto-smoke: FAIL (%d failed)\n", failed);
 		return 1;
 	}
+
+	/* Reports that every check passed. */
 	printf("crypto-smoke: PASS\n");
+
+	/* Succeeded: every check passed. */
 	return 0;
 }

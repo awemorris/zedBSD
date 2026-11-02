@@ -183,43 +183,113 @@ static struct limbo_exception limbo_exceptions[] = {
 	{ NULL, NULL, 0 }
 };
 
-/* The counts of the run. */
+/* The number of SERVER cases run. */
 static unsigned long limbo_cases;
+
+/* The number of cases whose outcome agrees with the case's expectation. */
 static unsigned long limbo_agree;
+
+/* The number of cases that differ and have a listed reason. */
 static unsigned long limbo_explained;
+
+/* The number of cases that differ without a listed reason; the run fails unless it is zero. */
 static unsigned long limbo_unexplained;
+
+/* The number of cases that expect SUCCESS. */
 static unsigned long limbo_success;
+
+/* The number of cases that expect SUCCESS and whose chain validated here. */
 static unsigned long limbo_success_ok;
+
+/* The number of cases where the handshake never reached the verify callback. */
 static unsigned long limbo_not_reached;
+
+/* The number of cases whose list of untrusted certificates was reduced to the chain from the leaf. */
 static unsigned long limbo_reduced;
+
+/* The number of cases whose list was still cut at 16 certificates. */
 static unsigned long limbo_truncated;
+
+/* The number of cases whose name or address SSL_set1_host refused. */
 static unsigned long limbo_name_refused;
+
+/* The counts of each id prefix, filled as cases run, and prefix_used of them are in use. */
 static struct prefix_count prefixes[16];
+
+/* The number of rows of prefixes in use. */
 static unsigned prefix_used;
+
+/* The count of each reason, filled by check_table and counted as differences are found. */
 static struct reason_count reasons[16];
+
+/* Whether to print a line for every case, set from the environment. */
 static int trace;
 
 /* The reason of the first error the last handshake queued (for the report of a difference). */
 static int last_reason;
 
-/* The clock the library reads: the case's time, or the real clock when has_fake_time is 0. */
+/* Whether the library's clock is the case's time; when 0 the real clock is read. */
 static int has_fake_time;
+
+/* The case's time, valid while has_fake_time is set. */
 static time_t fake_time;
 
-/* What the verify callback was told in the current handshake. */
+/* The number of times the verify callback was called in the current handshake. */
 static int callback_calls;
+
+/* What the verify callback was told about the chain in the current handshake. */
 static int callback_ok;
 
-/* The untrusted certificates of the case being run, and which of them are sent. */
+/* The parsed untrusted certificates of the case being run. */
 static struct cryc_x509 pool[UNTRUSTED_MAX];
+
+/* The DER of each untrusted certificate in pool, kept alive until the case ends. */
 static unsigned char *pool_der[UNTRUSTED_MAX];
+
+/* The size of each DER in pool_der. */
 static size_t pool_size[UNTRUSTED_MAX];
+
+/* Whether each certificate of pool is sent by the server. */
 static int keep[UNTRUSTED_MAX];
 
-/* The server's flight and its writer thread's end of the pair. */
+/* The server's flight, made once for each case. */
 static unsigned char flight[FLIGHT_MAX];
+
+/* The number of bytes of flight in use. */
 static size_t flight_used;
+
+/* The server thread's end of the socket pair, set before the thread starts. */
 static int server_end;
+
+/* The verify callback: records the verdict and ends the handshake (the leaf's key is not the server's). */
+static int verify_callback(int preverify_ok, X509_STORE_CTX *store);
+
+/* Returns the counts of the id's prefix (the text before the first "::"). */
+static struct prefix_count *prefix_of(const char *id);
+
+/* Marks the certificates of candidates that chain up from leaf by name (test-limbo.c's rule). */
+static void keep_closure(const struct cryc_x509 *leaf, const struct cryc_x509 *candidates, size_t count, int *marks);
+
+/* Counts a case that differs: with its listed reason, or reported as unexplained. */
+static void count_difference(struct prefix_count *row, const char *id, const char *expected, long code);
+
+/* Appends bytes to the flight (a flight over FLIGHT_MAX is a test failure). */
+static void put(const unsigned char *data, size_t size);
+
+/* Appends a 24-bit length. */
+static void put24(size_t value);
+
+/* Makes the server's flight into flight. */
+static void make_flight(const unsigned char *const *der, const size_t *der_size, size_t count, unsigned suite);
+
+/* The server thread: writes the flight, then reads (and drops) what the client sends until it closes. */
+static void *server_main(void *argument);
+
+/* Runs one case. */
+static void limbo_run(const struct vec_file *file, unsigned char *buffer);
+
+/* Every table entry is in order, unique and has a known reason. */
+static void check_table(void);
 
 /* The library's clock (cryc_os_time calls time(NULL)): the case's time when it has one. */
 time_t
@@ -229,15 +299,116 @@ time(
 	struct timespec now;
 	time_t value;
 
+	/* Takes the case's time when it has one, and the real clock otherwise. */
 	if (has_fake_time) {
 		value = fake_time;
 	} else {
 		clock_gettime(CLOCK_REALTIME, &now);
 		value = now.tv_sec;
 	}
+
+	/* Stores the time where the caller asked. */
 	if (out != NULL)
 		*out = value;
+
+	/* The time the library reads. */
 	return value;
+}
+
+/* Runs every SERVER case and prints the summary; the last line is the verdict. */
+int
+main(void)
+{
+	struct vec_file file;
+	unsigned char *buffer;
+	const char *only;
+	const char *current;
+	const char *trace_text;
+	unsigned index;
+	int opened;
+	int more;
+	int cmp;
+	int status;
+
+	/* Makes the output line by line, and reads the controls of the run. */
+	setvbuf(stdout, NULL, _IOLBF, 0);
+	trace = 0;
+	trace_text = getenv("WS335_LIMBO_TRACE");
+	if (trace_text != NULL)
+		trace = 1;
+	only = getenv("WS335_LIMBO_ONLY");
+
+	/* Puts the table of reasons in order and checks it. */
+	check_table();
+
+	/* Allocates the buffer a case's certificates are decoded into. */
+	buffer = malloc(LIMBO_MAX);
+	CHECK(buffer != NULL);
+
+	/* Opens the case file, when the buffer exists. */
+	opened = -1;
+	if (buffer != NULL)
+		opened = vec_open(&file, "limbo");
+
+	/* Gives up when the buffer or the case file is missing. */
+	if (buffer == NULL || opened != 0) {
+		CHECK(0);
+		free(buffer);
+		status = check_finish("limbo-api");
+		return status;
+	}
+
+	/* Runs the cases one after another, or only the one named in the environment. */
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
+
+		/* Skips every case but the one asked for. */
+		if (only != NULL) {
+			current = vec_get(&file, "id");
+			if (current == NULL)
+				continue;
+
+			/* Compares the id with the one asked for. */
+			cmp = strcmp(current, only);
+			if (cmp != 0)
+				continue;
+		}
+
+		/* Runs the case. */
+		limbo_run(&file, buffer);
+	}
+
+	/* Releases the case file and the buffer. */
+	vec_close(&file);
+	free(buffer);
+
+	/* Every listed case must really differ, and no other may. */
+	for (index = 0; limbo_exceptions[index].id != NULL; index++) {
+		if (limbo_exceptions[index].seen != 1)
+			printf("limbo-api: listed case did not differ once: %s\n", limbo_exceptions[index].id);
+		CHECK(limbo_exceptions[index].seen == 1);
+	}
+
+	/* Prints the counts of each id prefix. */
+	for (index = 0; index < prefix_used; index++)
+		printf("limbo-api: %-14s %5lu cases, %5lu agree, %4lu differ with a reason, %lu unexplained\n", prefixes[index].prefix, prefixes[index].cases, prefixes[index].agree, prefixes[index].explained, prefixes[index].unexplained);
+
+	/* Prints the count of each reason. */
+	for (index = 0; reasons[index].reason != NULL; index++)
+		printf("limbo-api: reason %-14s %lu\n", reasons[index].reason, reasons[index].count);
+
+	/* Prints the totals of the run. */
+	printf("limbo-api: %lu cases (%lu SUCCESS); %lu agree with the case, %lu differ with a listed reason, %lu unexplained; %lu SUCCESS cases valid; %lu never reached the callback; %lu names SSL_set1_host refused; %lu long lists reduced, %lu still cut at 16\n", limbo_cases, limbo_success, limbo_agree, limbo_explained, limbo_unexplained, limbo_success_ok, limbo_not_reached, limbo_name_refused, limbo_reduced, limbo_truncated);
+
+	/* Requires every difference to be explained, and the number of cases to be the pinned one. */
+	CHECK(limbo_unexplained == 0UL);
+	CHECK(limbo_cases == LIMBO_CASES);
+
+	/* Reports the verdict of the checks. */
+	status = check_finish("limbo-api");
+	return status;
 }
 
 /* The verify callback: records the verdict and ends the handshake (the leaf's key is not the server's). */
@@ -247,8 +418,12 @@ verify_callback(
 	X509_STORE_CTX *store)
 {
 	(void)store;
+
+	/* Records that the callback was reached and what it was told. */
 	callback_calls++;
 	callback_ok = preverify_ok;
+
+	/* Refuses the chain, which ends the handshake there. */
 	return 0;
 }
 
@@ -258,22 +433,40 @@ prefix_of(
 	const char *id)
 {
 	size_t length;
+	size_t prefix_length;
 	unsigned index;
 	const char *end;
+	int cmp;
 
+	/* Takes the text before the first "::", or the whole id, cut to fit a row. */
 	end = strstr(id, "::");
-	length = end == NULL ? strlen(id) : (size_t)(end - id);
+	if (end == NULL)
+		length = strlen(id);
+	else
+		length = (size_t)(end - id);
 	if (length >= sizeof(prefixes[0].prefix))
 		length = sizeof(prefixes[0].prefix) - 1U;
+
+	/* Looks for a row with the prefix already. */
 	for (index = 0; index < prefix_used; index++) {
-		if (strlen(prefixes[index].prefix) == length && memcmp(prefixes[index].prefix, id, length) == 0)
+		prefix_length = strlen(prefixes[index].prefix);
+		if (prefix_length != length)
+			continue;
+
+		/* Takes the row when the text is the same. */
+		cmp = memcmp(prefixes[index].prefix, id, length);
+		if (cmp == 0)
 			return &prefixes[index];
 	}
+
+	/* Starts a row for a prefix not seen yet, when there is room. */
 	if (prefix_used < sizeof(prefixes) / sizeof(prefixes[0])) {
 		memcpy(prefixes[prefix_used].prefix, id, length);
 		prefixes[prefix_used].prefix[length] = '\0';
 		prefix_used++;
 	}
+
+	/* The row of the prefix (the last one when the table is full). */
 	return &prefixes[prefix_used - 1U];
 }
 
@@ -290,18 +483,27 @@ keep_closure(
 	int changed;
 	int issues;
 
+	/* Repeats until a pass marks no new certificate. */
 	changed = 1;
 	while (changed != 0) {
 		changed = 0;
+
+		/* Looks at each certificate not marked yet. */
 		for (index = 0; index < count; index++) {
 			if (marks[index] != 0)
 				continue;
+
+			/* Asks whether it issued the leaf, or a certificate already marked. */
 			issues = cryc_name_equal(candidates[index].subject, candidates[index].subject_size, leaf->issuer, leaf->issuer_size);
 			for (below = 0; below < count && issues == 0; below++) {
 				if (marks[below] == 0)
 					continue;
+
+				/* Asks whether it issued a certificate already marked. */
 				issues = cryc_name_equal(candidates[index].subject, candidates[index].subject_size, candidates[below].issuer, candidates[below].issuer_size);
 			}
+
+			/* Marks the certificate that chains up from the leaf. */
 			if (issues != 0) {
 				marks[index] = 1;
 				changed = 1;
@@ -318,30 +520,48 @@ count_difference(
 	const char *expected,
 	long code)
 {
+	const char *error_text;
+	const char *reached_text;
 	unsigned index;
 	unsigned word;
 	int explained;
+	int cmp;
 
+	/* Looks the case up in the table of listed differences, and counts its reason. */
 	explained = 0;
 	for (index = 0; limbo_exceptions[index].id != NULL; index++) {
-		if (strcmp(limbo_exceptions[index].id, id) != 0)
+		cmp = strcmp(limbo_exceptions[index].id, id);
+		if (cmp != 0)
 			continue;
+
+		/* Records that the listed difference came up, and that this case is explained. */
 		limbo_exceptions[index].seen++;
 		explained = 1;
+
+		/* Counts the case under its reason. */
 		for (word = 0; reasons[word].reason != NULL; word++) {
-			if (strcmp(reasons[word].reason, limbo_exceptions[index].reason) == 0)
+			cmp = strcmp(reasons[word].reason, limbo_exceptions[index].reason);
+			if (cmp == 0)
 				reasons[word].count++;
 		}
 	}
+
+	/* Counts a difference with a listed reason. */
 	if (explained != 0) {
 		limbo_explained++;
 		row->explained++;
 		return;
 	}
+
+	/* Counts a difference without a reason and reports it. */
 	limbo_unexplained++;
 	row->unexplained++;
+	error_text = X509_verify_cert_error_string(code);
+	reached_text = "reached";
+	if (callback_calls == 0)
+		reached_text = "not reached";
 	printf("limbo-api: %s: expected %s, got verify result %ld (%s), callback %s, reason %d\n", id, expected, code,
-	    X509_verify_cert_error_string(code), callback_calls == 0 ? "not reached" : "reached", last_reason);
+	    error_text, reached_text, last_reason);
 }
 
 /* Appends bytes to the flight (a flight over FLIGHT_MAX is a test failure). */
@@ -350,9 +570,12 @@ put(
 	const unsigned char *data,
 	size_t size)
 {
+	/* Fails the test when the flight would not fit. */
 	CHECK(flight_used + size <= FLIGHT_MAX);
 	if (flight_used + size > FLIGHT_MAX)
 		return;
+
+	/* Appends the bytes at the end of the flight. */
 	memcpy(flight + flight_used, data, size);
 	flight_used += size;
 }
@@ -364,9 +587,12 @@ put24(
 {
 	unsigned char bytes[3];
 
+	/* Splits the value into three bytes, most significant first. */
 	bytes[0] = (unsigned char)(value >> 16);
 	bytes[1] = (unsigned char)(value >> 8);
 	bytes[2] = (unsigned char)value;
+
+	/* Appends the three bytes. */
 	put(bytes, 3);
 }
 
@@ -405,6 +631,8 @@ make_flight(
 
 	/* The handshake messages, built in the flight buffer and then moved into records. */
 	flight_used = 0;
+
+	/* Appends the ServerHello: head, random, empty session id, suite and extensions. */
 	put(hello_head, sizeof(hello_head));
 	for (index = 0; index < sizeof(random); index++)
 		random[index] = (unsigned char)(0x40U + index);
@@ -415,6 +643,8 @@ make_flight(
 	suite_bytes[1] = (unsigned char)suite;
 	put(suite_bytes, 2);
 	put(hello_tail, sizeof(hello_tail));
+
+	/* Appends the Certificate header, with the length of every certificate entry. */
 	total = 0;
 	for (index = 0; index < count; index++)
 		total += 3U + der_size[index];
@@ -422,15 +652,21 @@ make_flight(
 	put(header, 1);
 	put24(3U + total);
 	put24(total);
+
+	/* Appends every certificate with its length. */
 	for (index = 0; index < count; index++) {
 		put24(der_size[index]);
 		put(der[index], der_size[index]);
 	}
+
+	/* Fails the test when the messages do not fit, and moves them aside. */
 	CHECK(flight_used <= sizeof(messages));
 	if (flight_used > sizeof(messages)) {
 		flight_used = 0;
 		return;
 	}
+
+	/* Moves the messages aside, to be cut into records. */
 	memcpy(messages, flight, flight_used);
 	total = flight_used;
 
@@ -459,17 +695,24 @@ server_main(
 	size_t at;
 	ssize_t done;
 
+	/* The thread takes no argument. */
 	(void)argument;
+
+	/* Writes the flight, until it is all out or the client has gone. */
 	for (at = 0; at < flight_used; at += (size_t)done) {
 		done = write(server_end, flight + at, flight_used - at);
 		if (done <= 0)
 			break;
 	}
+
+	/* Reads and drops what the client sends, until it closes its end. */
 	for (;;) {
 		done = read(server_end, sink, sizeof(sink));
 		if (done <= 0)
 			break;
 	}
+
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -506,13 +749,22 @@ limbo_run(
 	int leaf_parsed;
 	int success;
 	int ok;
+	int cmp;
+	int status;
+	int use_host;
 
+	/* Reads the case's id and expected outcome. */
 	id = vec_get(file, "id");
 	expected = vec_get(file, "expected");
 	CHECK(id != NULL && expected != NULL);
 	if (id == NULL || expected == NULL)
 		return;
-	success = strcmp(expected, "SUCCESS") == 0;
+
+	/* Counts the case. */
+	cmp = strcmp(expected, "SUCCESS");
+	success = 0;
+	if (cmp == 0)
+		success = 1;
 	row = prefix_of(id);
 	row->cases++;
 	limbo_cases++;
@@ -531,6 +783,8 @@ limbo_run(
 		size = vec_hex(file, key, buffer, LIMBO_MAX);
 		if (size == (size_t)-1)
 			continue;
+
+		/* Parses the trusted certificate through the public decoder. */
 		in = buffer;
 		certificate = d2i_X509(NULL, &in, (long)size);
 		if (certificate == NULL) {
@@ -538,9 +792,13 @@ limbo_run(
 				printf("trace: %s %s does not parse\n", id, key);
 			continue;
 		}
+
+		/* Trusts the certificate. */
 		CHECK(X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx), certificate) == 1);
 		X509_free(certificate);
 	}
+
+	/* Drops the errors the setup queued. */
 	ERR_clear_error();
 
 	/* The server's list: the peer, then the untrusted certificates that parse (reduced and cut as test-limbo.c does). */
@@ -550,55 +808,88 @@ limbo_run(
 		SSL_CTX_free(ctx);
 		return;
 	}
+
+	/* Keeps a copy of the peer's certificate, and parses it. */
 	leaf_der = malloc(leaf_size);
 	CHECK(leaf_der != NULL);
 	if (leaf_der == NULL) {
 		SSL_CTX_free(ctx);
 		return;
 	}
+
+	/* Copies the peer's certificate, which the parsed form points into. */
 	memcpy(leaf_der, buffer, leaf_size);
-	leaf_parsed = cryc_x509_parse(&leaf, leaf_der, leaf_size) == 0;
+	status = cryc_x509_parse(&leaf, leaf_der, leaf_size);
+	leaf_parsed = 0;
+	if (status == 0)
+		leaf_parsed = 1;
+
+	/* Keeps a copy of each untrusted certificate that parses. */
 	pool_count = 0;
 	for (index = 0; index < UNTRUSTED_MAX; index++) {
 		sprintf(key, "untrusted.%u", index);
 		size = vec_hex(file, key, buffer, LIMBO_MAX);
 		if (size == (size_t)-1)
 			continue;
+
+		/* Copies the certificate, which the parsed form points into. */
 		pool_der[pool_count] = malloc(size);
 		CHECK(pool_der[pool_count] != NULL);
 		if (pool_der[pool_count] == NULL)
 			break;
 		memcpy(pool_der[pool_count], buffer, size);
 		pool_size[pool_count] = size;
-		if (cryc_x509_parse(&pool[pool_count], pool_der[pool_count], size) != 0) {
+
+		/* Drops a certificate that does not parse. */
+		status = cryc_x509_parse(&pool[pool_count], pool_der[pool_count], size);
+		if (status != 0) {
 			free(pool_der[pool_count]);
 			pool_der[pool_count] = NULL;
 			continue;
 		}
+
+		/* Takes the certificate into the pool. */
 		pool_count++;
 	}
-	for (index = 0; index < pool_count; index++)
-		keep[index] = pool_count <= PEER_MAX - 1U;
+
+	/* Sends every certificate when the list fits, or only those that chain up from the leaf when it is too long. */
+	for (index = 0; index < pool_count; index++) {
+		keep[index] = 0;
+		if (pool_count <= PEER_MAX - 1U)
+			keep[index] = 1;
+	}
+
+	/* Reduces a long list to the certificates that chain up from the leaf. */
 	if (pool_count > PEER_MAX - 1U) {
 		limbo_reduced++;
 		if (leaf_parsed)
 			keep_closure(&leaf, pool, pool_count, keep);
 	}
+
+	/* Puts the peer first and then the certificates to send, cut at PEER_MAX. */
 	send_der[0] = leaf_der;
 	send_size[0] = leaf_size;
 	send_count = 1;
 	for (index = 0; index < pool_count; index++) {
 		if (keep[index] == 0)
 			continue;
+
+		/* Cuts the list at the most the client takes. */
 		if (send_count >= PEER_MAX) {
 			limbo_truncated++;
 			break;
 		}
+
+		/* Appends the certificate to the list. */
 		send_der[send_count] = pool_der[index];
 		send_size[send_count] = pool_size[index];
 		send_count++;
 	}
-	suite = leaf_parsed && leaf.key.type == CRYC_KEY_RSA ? 0xc02fU : 0xc02bU;
+
+	/* Chooses the ECDHE suite that matches the leaf's key, and makes the flight. */
+	suite = 0xc02bU;
+	if (leaf_parsed && leaf.key.type == CRYC_KEY_RSA)
+		suite = 0xc02fU;
 	make_flight(send_der, send_size, send_count, suite);
 
 	/* The case's time is the library's clock. */
@@ -614,22 +905,42 @@ limbo_run(
 	CHECK(ssl != NULL);
 	kind = vec_get(file, "peer_kind");
 	value = vec_get(file, "peer_value");
-	if (ssl != NULL && kind != NULL && value != NULL && (strcmp(kind, "DNS") == 0 || strcmp(kind, "IP") == 0)) {
-		if (SSL_set1_host(ssl, value) != 1) {
+	use_host = 0;
+	if (ssl != NULL && kind != NULL && value != NULL) {
+		cmp = strcmp(kind, "DNS");
+		if (cmp == 0) {
+			use_host = 1;
+		} else {
+			cmp = strcmp(kind, "IP");
+			if (cmp == 0)
+				use_host = 1;
+		}
+	}
+
+	/* Sets the name or the address to match. */
+	if (use_host) {
+		status = SSL_set1_host(ssl, value);
+		if (status != 1) {
 			limbo_name_refused++;
 			if (trace != 0)
 				printf("trace: %s SSL_set1_host refused %s\n", id, value);
 		}
 	}
+
+	/* Drops the errors the setup queued. */
 	ERR_clear_error();
 
 	/* The handshake against the server thread. */
 	callback_calls = 0;
 	callback_ok = 0;
 	code = -1;
-	if (ssl != NULL && socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0) {
+	status = -1;
+	if (ssl != NULL)
+		status = socketpair(AF_UNIX, SOCK_STREAM, 0, pair);
+	if (status == 0) {
 		server_end = pair[1];
-		if (pthread_create(&thread, NULL, server_main, NULL) == 0) {
+		status = pthread_create(&thread, NULL, server_main, NULL);
+		if (status == 0) {
 			CHECK(SSL_set_fd(ssl, pair[0]) == 1);
 			CHECK(SSL_connect(ssl) != 1);
 			code = SSL_get_verify_result(ssl);
@@ -644,10 +955,14 @@ limbo_run(
 			CHECK(0);
 			close(pair[0]);
 		}
+
+		/* Closes the server's end. */
 		close(pair[1]);
 	} else {
 		CHECK(0);
 	}
+
+	/* Releases the connection and the context, and puts the real clock back. */
 	SSL_free(ssl);
 	SSL_CTX_free(ctx);
 	has_fake_time = 0;
@@ -656,19 +971,25 @@ limbo_run(
 	CHECK(callback_calls <= 1);
 	if (callback_calls == 0)
 		limbo_not_reached++;
-	ok = callback_calls == 1 && callback_ok == 1;
+	ok = 0;
+	if (callback_calls == 1 && callback_ok == 1)
+		ok = 1;
 	if (callback_calls == 1)
 		CHECK((code == X509_V_OK) == (callback_ok == 1));
 	if (trace != 0)
 		printf("trace: %s %s verify %ld callback %d/%d reason %d\n", id, expected, code, callback_calls, callback_ok, last_reason);
 	if (ok && success)
 		limbo_success_ok++;
+
+	/* Counts the case as agreeing with its expectation, or as a difference. */
 	if (ok == success) {
 		limbo_agree++;
 		row->agree++;
 	} else {
 		count_difference(row, id, expected, code);
 	}
+
+	/* Releases the certificates kept for the case. */
 	free(leaf_der);
 	for (index = 0; index < pool_count; index++)
 		free(pool_der[index]);
@@ -681,60 +1002,24 @@ check_table(void)
 	unsigned index;
 	unsigned word;
 	int known;
+	int cmp;
 
+	/* Checks that each entry has a known reason, and that the ids are in order. */
 	for (index = 0; limbo_exceptions[index].id != NULL; index++) {
 		known = 0;
 		for (word = 0; reason_words[word] != NULL; word++) {
-			if (strcmp(reason_words[word], limbo_exceptions[index].reason) == 0)
+			cmp = strcmp(reason_words[word], limbo_exceptions[index].reason);
+			if (cmp == 0)
 				known = 1;
 		}
+
+		/* Requires a known reason, and ids in order. */
 		CHECK(known != 0);
 		if (index > 0U)
 			CHECK(strcmp(limbo_exceptions[index - 1U].id, limbo_exceptions[index].id) < 0);
 	}
+
+	/* Gives each known reason a counter. */
 	for (word = 0; reason_words[word] != NULL; word++)
 		reasons[word].reason = reason_words[word];
-}
-
-int
-main(void)
-{
-	struct vec_file file;
-	unsigned char *buffer;
-	const char *only;
-	unsigned index;
-
-	setvbuf(stdout, NULL, _IOLBF, 0);
-	trace = getenv("WS335_LIMBO_TRACE") != NULL;
-	only = getenv("WS335_LIMBO_ONLY");
-	check_table();
-	buffer = malloc(LIMBO_MAX);
-	CHECK(buffer != NULL);
-	if (buffer == NULL || vec_open(&file, "limbo") != 0) {
-		CHECK(0);
-		free(buffer);
-		return check_finish("limbo-api");
-	}
-	while (vec_next(&file)) {
-		if (only != NULL && (vec_get(&file, "id") == NULL || strcmp(vec_get(&file, "id"), only) != 0))
-			continue;
-		limbo_run(&file, buffer);
-	}
-	vec_close(&file);
-	free(buffer);
-
-	/* Every listed case must really differ, and no other may. */
-	for (index = 0; limbo_exceptions[index].id != NULL; index++) {
-		if (limbo_exceptions[index].seen != 1)
-			printf("limbo-api: listed case did not differ once: %s\n", limbo_exceptions[index].id);
-		CHECK(limbo_exceptions[index].seen == 1);
-	}
-	for (index = 0; index < prefix_used; index++)
-		printf("limbo-api: %-14s %5lu cases, %5lu agree, %4lu differ with a reason, %lu unexplained\n", prefixes[index].prefix, prefixes[index].cases, prefixes[index].agree, prefixes[index].explained, prefixes[index].unexplained);
-	for (index = 0; reasons[index].reason != NULL; index++)
-		printf("limbo-api: reason %-14s %lu\n", reasons[index].reason, reasons[index].count);
-	printf("limbo-api: %lu cases (%lu SUCCESS); %lu agree with the case, %lu differ with a listed reason, %lu unexplained; %lu SUCCESS cases valid; %lu never reached the callback; %lu names SSL_set1_host refused; %lu long lists reduced, %lu still cut at 16\n", limbo_cases, limbo_success, limbo_agree, limbo_explained, limbo_unexplained, limbo_success_ok, limbo_not_reached, limbo_name_refused, limbo_reduced, limbo_truncated);
-	CHECK(limbo_unexplained == 0UL);
-	CHECK(limbo_cases == LIMBO_CASES);
-	return check_finish("limbo-api");
 }

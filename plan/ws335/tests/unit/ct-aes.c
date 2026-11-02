@@ -21,6 +21,15 @@
 #include "userland/base/libcrypto-compat/cryc-aes.h"
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* Runs one key size. */
+static unsigned run_key_size(size_t key_size, unsigned seed);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -47,6 +56,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value, one byte wide. */
 	return value & 0xffU;
 }
 
@@ -64,6 +75,7 @@ run_key_size(
 	unsigned total;
 	int error;
 
+	/* Starts the folded value at zero. */
 	total = 0;
 
 	/* The key expansion of a secret key. */
@@ -99,6 +111,8 @@ run_key_size(
 
 	/* The key is wiped. */
 	cryc_aes_clear(&aes);
+
+	/* Reports the folded outputs of this key size. */
 	return total;
 }
 

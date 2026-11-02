@@ -457,6 +457,189 @@ static uint32_t random_state = 0x3a1f7c25U;
 static unsigned long wycheproof_checked;
 static unsigned long wycheproof_skipped;
 
+/* Runs a call that must fail with the value failure and queue exactly the error for reason. */
+#define REFUSED(call, failure, reason) \
+	do { \
+		ERR_clear_error(); \
+		CHECK((call) == (failure)); \
+		check_refusal(reason); \
+	} while (0)
+
+/* Runs a call that must succeed (return 1) and queue nothing. */
+#define OK(call) \
+	do { \
+		ERR_clear_error(); \
+		CHECK((call) == 1); \
+		CHECK(ERR_peek_error() == 0UL); \
+	} while (0)
+
+/* The reasons the implementation queues (the header's constants, spelled for each condition). */
+#define R_NULL		CRYC_R_PASSED_NULL_PARAMETER
+#define R_ARGUMENT	CRYC_R_PASSED_INVALID_ARGUMENT
+#define R_ALGORITHM	CRYC_R_EVP_UNSUPPORTED_ALGORITHM
+#define R_NOT_SET_UP	CRYC_R_EVP_OPERATION_NOT_INITIALIZED
+#define R_KEY_LENGTH	CRYC_R_EVP_INVALID_KEY_LENGTH
+#define R_TOO_SMALL	CRYC_R_EVP_BUFFER_TOO_SMALL
+
+/* A made-up digest algorithm, cipher and MAC that the functions must refuse (they are not the constant objects). */
+static struct evp_md_st fake_md = { CRYC_HASH_SHA384, 48 };
+static struct evp_cipher_st fake_cipher = { 32, 16 };
+static struct evp_mac_st fake_mac = { 16 };
+
+/* Returns the next pseudo-random 32-bit value (xorshift). */
+static uint32_t random_next(void);
+
+/* Fills size bytes at out with pseudo-random bytes. */
+static void random_fill(uint8_t *out, size_t size);
+
+/* Returns a pseudo-random number from 0 to limit - 1. */
+static size_t random_below(size_t limit);
+
+/* Returns whether size bytes at buffer all equal value. */
+static int all_equal(const uint8_t *buffer, size_t size, uint8_t value);
+
+/* Writes a 32-bit little-endian word (the test's own, not the library's). */
+static void write_le32(uint8_t *bytes, uint32_t value);
+
+/* Writes a 64-bit little-endian integer. */
+static void write_le64(uint8_t *bytes, uint64_t value);
+
+/* Writes a 64-bit big-endian integer. */
+static void write_be64(uint8_t *bytes, uint64_t value);
+
+/* Decodes the hex text of a vector into out and checks that it was well formed; returns the size (0 when not). */
+static size_t unhex(const char *text, uint8_t *out, size_t room);
+
+/*
+ * The code of the error the EVP library queues for a reason: OpenSSL's
+ * packing of library 6 and the reason number (the common reasons carry
+ * their flag bits).
+ */
+static unsigned long error_code(unsigned int reason);
+
+/* Checks that the queue holds exactly one error, the one for reason, and empties it. */
+static void check_refusal(unsigned int reason);
+
+/* Hashes with EVP_Digest, checking the call, and writes 32 bytes to out. */
+static void digest_one_shot(const uint8_t *data, size_t size, uint8_t *out);
+
+/*
+ * Checks a message of the vector files against its digest through every
+ * way of using the digest functions: one shot, one update, random chunks
+ * with empty updates in between, and a snapshot taken in the middle that
+ * both halves continue independently.
+ */
+static void check_digest_message(EVP_MD_CTX *ctx, EVP_MD_CTX *copy, const uint8_t *message, size_t size, const uint8_t *expected);
+
+/* Runs the short-message or long-message vector file of SHA-256 (Len in bits, Msg, MD); returns the records read. */
+static unsigned long run_digest_message_file(const char *name);
+
+/* Runs the Monte Carlo vector file of SHA-256 through EVP_Digest; returns the checkpoints checked. */
+static unsigned long run_digest_monte_file(void);
+
+/* Checks the example messages published for SHA-256: the empty message, "abc", the two-block message, a million letters a. */
+static void test_digest_examples(void);
+
+/* Checks the SHA-256 vector files of the National Institute of Standards and Technology. */
+static void test_digest_vectors(void);
+
+/* Checks the digest functions' arguments, states and refusals. */
+static void test_digest_api(void);
+
+/*
+ * Checks that a digest context used for a signature or a verification
+ * releases the reference it holds to the key: when it is freed, when it
+ * is started as a digest and when it is the destination of a copy.  It
+ * needs EVP_PKEY_free to count references, which is another module's
+ * function: when that is not yet written the checks are skipped.
+ */
+static void test_digest_key(void);
+
+/*
+ * The reference keystream: size bytes from the block at the 64-bit
+ * counter, each block from the block function with the counter's low half
+ * as word 12 and the counter's high half followed by the 8-byte nonce as
+ * the 12-byte nonce of words 13 to 15.
+ */
+static void reference_stream(const uint8_t *key, uint64_t counter, const uint8_t *nonce8, uint8_t *stream, size_t size);
+
+/* Builds the 16-byte IV of EVP_chacha20: the 64-bit little-endian counter, then the 8-byte nonce. */
+static void make_iv(uint8_t *iv, uint64_t counter, const uint8_t *nonce8);
+
+/* Makes a cipher context for the key and IV and checks the setup; NULL when it failed. */
+static EVP_CIPHER_CTX * new_cipher(const uint8_t *key, const uint8_t *iv);
+
+/*
+ * Transforms size bytes through a context in chunks of random sizes and
+ * checks them against the reference keystream.  style 0 is EVP_CipherUpdate
+ * out of place, 1 is EVP_CipherUpdate in place, 2 is EVP_Cipher out of
+ * place.  The bytes after the output are never written.
+ */
+static void check_stream(const uint8_t *key, uint64_t counter, const uint8_t *nonce8, const uint8_t *plain, size_t size, unsigned int style, size_t max_chunk);
+
+/* Checks one vector of the RFC: the 12-byte nonce and 32-bit counter mapped to the IV, encrypting and decrypting out of place and in place. */
+static void check_rfc_vector(const char *key_hex, const char *nonce_hex, uint32_t counter, const char *plain_hex, const char *cipher_hex);
+
+/* Checks ChaCha20 against the examples and vectors of RFC 8439 through the EVP interface. */
+static void test_cipher_rfc(void);
+
+/* Checks streams of many lengths, chunk sizes and positions against the reference keystream, with every 64-bit counter of interest. */
+static void test_cipher_stream(void);
+
+/* Checks the end of the counter's range: the last block can be used, nothing past it, and a refused call changes nothing. */
+static void test_cipher_exhaustion(void);
+
+/* Checks the set-up function: which arguments are required, kept, restarted, and refused. */
+static void test_cipher_setup(void);
+
+/*
+ * Authenticates a message through a context that already exists: the same
+ * result as the vector's tag whether it comes as one update, random chunks
+ * with empty updates, or after an abandoned computation on the same
+ * context.
+ */
+static void check_mac_message(EVP_MAC_CTX *ctx, const uint8_t *key, const uint8_t *message, size_t size, const uint8_t *expected);
+
+/* Checks Poly1305 against the vectors of RFC 8439 (2.5.2 and A.3) through the EVP interface. */
+static void test_mac_rfc(void);
+
+/* Checks the fetch, the context and the refusals of the MAC functions. */
+static void test_mac_api(void);
+
+/*
+ * Seals with AEAD_CHACHA20_POLY1305 of RFC 8439 2.8 built from the EVP
+ * functions only: block 0 of the keystream is the Poly1305 key, blocks
+ * from 1 encrypt, and the tag covers the padded additional data and
+ * ciphertext and their lengths.
+ */
+static void aead_seal(const uint8_t *key, const uint8_t *nonce12, const uint8_t *aad, size_t aad_size, const uint8_t *plain, size_t size, uint8_t *cipher, uint8_t *tag);
+
+/* Checks the AEAD example of RFC 8439 2.8.2 sealed with the EVP functions. */
+static void test_aead_rfc(void);
+
+/* Says whether a field of a record is missing or differs from the expected text. */
+static int field_differs(const char *text, const char *expected);
+
+/*
+ * Checks the Wycheproof vectors of ChaCha20-Poly1305 sealed with the EVP
+ * functions: a valid record gives the ciphertext and tag of the file, an
+ * invalid record's tag is not the tag computed over its ciphertext.
+ */
+static void test_wycheproof(void);
+
+/*
+ * Checks the packet construction of SSH's chacha20-poly1305@openssh.com
+ * through the EVP functions against the primitives called directly: a
+ * 4-byte length encrypted with a header key at counter 0, the one-time
+ * key from block 0 of the main key, the payload encrypted from block 1,
+ * and a tag over the encrypted length and payload; the nonce is the
+ * 64-bit big-endian packet sequence number.
+ */
+static void check_ssh_packet(const uint8_t *main_key, const uint8_t *header_key, uint64_t sequence, const uint8_t *payload, size_t payload_size);
+
+/* Runs the packet check for several sequence numbers and payload sizes. */
+static void test_ssh_packets(void);
+
 /* Returns the next pseudo-random 32-bit value (xorshift). */
 static uint32_t
 random_next(void)
@@ -500,9 +683,12 @@ all_equal(
 	size_t index;
 
 	/* Any other byte. */
-	for (index = 0; index < size; index++)
+	for (index = 0; index < size; index++) {
 		if (buffer[index] != value)
 			return 0;
+	}
+
+	/* Every byte equals the value. */
 	return 1;
 }
 
@@ -588,35 +774,6 @@ check_refusal(
 	CHECK(second == 0UL);
 }
 
-/* Runs a call that must fail with the value failure and queue exactly the error for reason. */
-#define REFUSED(call, failure, reason) \
-	do { \
-		ERR_clear_error(); \
-		CHECK((call) == (failure)); \
-		check_refusal(reason); \
-	} while (0)
-
-/* Runs a call that must succeed (return 1) and queue nothing. */
-#define OK(call) \
-	do { \
-		ERR_clear_error(); \
-		CHECK((call) == 1); \
-		CHECK(ERR_peek_error() == 0UL); \
-	} while (0)
-
-/* The reasons the implementation queues (the header's constants, spelled for each condition). */
-#define R_NULL		CRYC_R_PASSED_NULL_PARAMETER
-#define R_ARGUMENT	CRYC_R_PASSED_INVALID_ARGUMENT
-#define R_ALGORITHM	CRYC_R_EVP_UNSUPPORTED_ALGORITHM
-#define R_NOT_SET_UP	CRYC_R_EVP_OPERATION_NOT_INITIALIZED
-#define R_KEY_LENGTH	CRYC_R_EVP_INVALID_KEY_LENGTH
-#define R_TOO_SMALL	CRYC_R_EVP_BUFFER_TOO_SMALL
-
-/* A made-up digest algorithm, cipher and MAC that the functions must refuse (they are not the constant objects). */
-static struct evp_md_st fake_md = { CRYC_HASH_SHA384, 48 };
-static struct evp_cipher_st fake_cipher = { 32, 16 };
-static struct evp_mac_st fake_mac = { 16 };
-
 /* ------------------------------------------------------------------ */
 /* SHA-256                                                              */
 /* ------------------------------------------------------------------ */
@@ -657,6 +814,7 @@ check_digest_message(
 	size_t offset;
 	size_t take;
 	size_t half;
+	uint32_t coin;
 
 	/* One shot, with and without the size output; nothing is written past the digest. */
 	memset(got, SENTINEL_BYTE, sizeof(got));
@@ -700,6 +858,8 @@ check_digest_message(
 			OK(EVP_DigestUpdate(ctx, message + offset, take));
 		offset += take;
 	}
+
+	/* Finishes the digest, writing the size output nowhere. */
 	memset(got, SENTINEL_BYTE, sizeof(got));
 	OK(EVP_DigestFinal_ex(ctx, got, NULL));
 	CHECK_BYTES(got, expected, 32U);
@@ -713,10 +873,13 @@ check_digest_message(
 	half = size / 2U;
 	OK(EVP_DigestInit_ex(ctx, EVP_sha256(), NULL));
 	OK(EVP_DigestUpdate(ctx, message, half));
-	if ((random_next() & 1U) != 0U) {
+	coin = random_next();
+	if ((coin & 1U) != 0U) {
 		OK(EVP_DigestInit_ex(copy, EVP_sha256(), NULL));
 		OK(EVP_DigestUpdate(copy, "junk", 4U));
 	}
+
+	/* Copies the context in progress into the snapshot. */
 	OK(EVP_MD_CTX_copy_ex(copy, ctx));
 	CHECK(copy->mode == CRYC_MD_DIGEST);
 	CHECK(copy->md == EVP_sha256());
@@ -750,27 +913,36 @@ run_digest_message_file(
 	uint8_t *message;
 	uint8_t expected[64];
 	const char *text;
+	const char *message_text;
 	size_t size;
 	size_t room;
 	unsigned long count;
+	int opened;
+	int more;
 
 	/* The two contexts are reused for every message of the file. */
 	count = 0;
 	ctx = EVP_MD_CTX_new();
 	copy = EVP_MD_CTX_new();
 	CHECK(ctx != NULL && copy != NULL);
-	if (vec_open(&file, name) != 0 || ctx == NULL || copy == NULL) {
+
+	/* Opens the vector file. */
+	opened = vec_open(&file, name);
+	if (opened != 0 || ctx == NULL || copy == NULL) {
 		CHECK(0);
 		EVP_MD_CTX_free(ctx);
 		EVP_MD_CTX_free(copy);
 		return 0;
 	}
-	while (vec_next(&file)) {
+
+	/* Every record that has a message length. */
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		text = vec_get(&file, "Len");
 		if (text == NULL)
 			continue;
 		size = (size_t)strtoul(text, NULL, 10) / 8U;
-		room = strlen(vec_get(&file, "Msg")) / 2U + 1U;
+		message_text = vec_get(&file, "Msg");
+		room = strlen(message_text) / 2U + 1U;
 		message = malloc(room);
 		CHECK(message != NULL);
 		if (message == NULL)
@@ -781,9 +953,13 @@ run_digest_message_file(
 		free(message);
 		count++;
 	}
+
+	/* Releases the file and the contexts. */
 	vec_close(&file);
 	EVP_MD_CTX_free(ctx);
 	EVP_MD_CTX_free(copy);
+
+	/* Reports the records checked. */
 	return count;
 }
 
@@ -799,21 +975,35 @@ run_digest_monte_file(void)
 	size_t step;
 	int have_seed;
 	unsigned long count;
+	const char *text;
+	const EVP_MD *sha256;
+	int opened;
+	int more;
+	int status;
+
+	/* Opens the Monte Carlo file. */
+	opened = vec_open(&file, "cavp-shabytetestvectors-SHA256Monte");
+	if (opened != 0) {
+		CHECK(0);
+		return 0;
+	}
 
 	/* The seed record, then the 100 checkpoints in order. */
 	count = 0;
 	have_seed = 0;
-	if (vec_open(&file, "cavp-shabytetestvectors-SHA256Monte") != 0) {
-		CHECK(0);
-		return 0;
-	}
-	while (vec_next(&file)) {
-		if (vec_get(&file, "Seed") != NULL) {
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
+		text = vec_get(&file, "Seed");
+		if (text != NULL) {
 			CHECK(vec_hex(&file, "Seed", seed, sizeof(seed)) == 32U);
 			have_seed = 1;
 			continue;
 		}
-		if (!have_seed || vec_get(&file, "MD") == NULL)
+
+		/* Skips records that come before the seed. */
+		if (!have_seed)
+			continue;
+		text = vec_get(&file, "MD");
+		if (text == NULL)
 			continue;
 		CHECK(vec_hex(&file, "MD", expected, sizeof(expected)) == 32U);
 
@@ -822,16 +1012,24 @@ run_digest_monte_file(void)
 		memcpy(chain + 32U, seed, 32U);
 		memcpy(chain + 64U, seed, 32U);
 		for (step = 0; step < 1000U; step++) {
-			if (EVP_Digest(chain, sizeof(chain), next, NULL, EVP_sha256(), NULL) != 1)
+			sha256 = EVP_sha256();
+			status = EVP_Digest(chain, sizeof(chain), next, NULL, sha256, NULL);
+			if (status != 1)
 				CHECK(0);
 			memmove(chain, chain + 32U, 64U);
 			memcpy(chain + 64U, next, 32U);
 		}
+
+		/* The last hash of the chain is the checkpoint of this record. */
 		CHECK_BYTES(next, expected, 32U);
 		memcpy(seed, next, 32U);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the checkpoints checked. */
 	return count;
 }
 
@@ -883,10 +1081,14 @@ test_digest_examples(void)
 			OK(EVP_DigestUpdate(ctx, block, 1000U));
 			block += 1000U;
 		}
+
+		/* Finishes the digest and compares it with the one-shot hash. */
 		OK(EVP_DigestFinal_ex(ctx, got, NULL));
 		CHECK_BYTES(got, expected, 32U);
 		EVP_MD_CTX_free(ctx);
 	}
+
+	/* Releases the message buffer. */
 	free(million);
 }
 
@@ -947,6 +1149,8 @@ test_digest_api(void)
 		EVP_MD_CTX_free(other);
 		return;
 	}
+
+	/* A new context has no mode and no key. */
 	CHECK(ctx->mode == CRYC_MD_NONE && ctx->key == NULL);
 	memset(out, SENTINEL_BYTE, sizeof(out));
 	memcpy(guard, out, sizeof(out));
@@ -1028,6 +1232,7 @@ test_digest_api(void)
 	CHECK(length == 77U);
 	CHECK_BYTES(out, guard, sizeof(out));
 
+	/* Releases the contexts and checks that no error is left queued. */
 	EVP_MD_CTX_free(ctx);
 	EVP_MD_CTX_free(other);
 	CHECK(ERR_peek_error() == 0UL);
@@ -1073,6 +1278,8 @@ test_digest_key(void)
 		free(key);
 		return;
 	}
+
+	/* Makes the context a signing context that holds the second reference to the key. */
 	key->references = 2;
 	ctx->mode = CRYC_MD_SIGN;
 	ctx->key = (EVP_PKEY *)key;
@@ -1089,6 +1296,8 @@ test_digest_key(void)
 		free(key);
 		return;
 	}
+
+	/* Makes the context a verification context that holds the second reference to the key. */
 	key->references = 2;
 	ctx->mode = CRYC_MD_VERIFY;
 	ctx->key = (EVP_PKEY *)key;
@@ -1119,6 +1328,7 @@ test_digest_key(void)
 	OK(EVP_DigestFinal_ex(ctx, out, NULL));
 	OK(EVP_DigestFinal_ex(source, out, NULL));
 
+	/* Releases the contexts and the key. */
 	EVP_MD_CTX_free(ctx);
 	EVP_MD_CTX_free(source);
 	free(key);
@@ -1252,6 +1462,8 @@ check_stream(
 			CHECK(returned == (int)take);
 			CHECK(ERR_peek_error() == 0UL);
 		}
+
+		/* Moves past the chunk that was processed. */
 		offset += take;
 
 		/* Nothing beyond the chunk is written (an in-place buffer holds the rest of the message there). */
@@ -1365,6 +1577,8 @@ test_cipher_rfc(void)
 	for (index = 0; index < sizeof(a4_vectors) / sizeof(a4_vectors[0]); index++) {
 		check_rfc_vector(a4_vectors[index].key, a4_vectors[index].nonce, 0U, ZERO_32_BYTES, a4_vectors[index].onetime);
 	}
+
+	/* 2.6.2: the one-time key generation example. */
 	check_rfc_vector(rfc_keygen_key, "000000000001020304050607", 0U, ZERO_32_BYTES, rfc_keygen_output);
 }
 
@@ -1447,6 +1661,7 @@ test_cipher_exhaustion(void)
 	uint8_t output[300];
 	EVP_CIPHER_CTX *ctx;
 	int out_length;
+	int extra;
 	size_t index;
 
 	/* One key and nonce; the last blocks of the range as the reference. */
@@ -1562,7 +1777,12 @@ test_cipher_exhaustion(void)
 			return;
 		OK(EVP_CipherUpdate(ctx, output, &out_length, input, 64));
 		memset(output, SENTINEL_BYTE, sizeof(output));
-		REFUSED(EVP_CipherUpdate(ctx, output, &out_length, input, 16 + 16 * (int)index + (index == 3U ? 16 : 0)), 0, R_ARGUMENT);
+
+		/* The fourth request is 80 bytes, the others 16, 32 and 48. */
+		extra = 0;
+		if (index == 3U)
+			extra = 16;
+		REFUSED(EVP_CipherUpdate(ctx, output, &out_length, input, 16 + 16 * (int)index + extra), 0, R_ARGUMENT);
 		CHECK(all_equal(output, sizeof(output), SENTINEL_BYTE));
 		EVP_CIPHER_CTX_free(ctx);
 	}
@@ -1741,7 +1961,7 @@ test_cipher_setup(void)
 	reference_stream(key, CRYC_U64(0x00000003U, 0x00000007U), nonce, stream, 64U);
 	CHECK_BYTES(output, stream, 64U);
 
-
+	/* Releases the context and checks that the queue is still empty. */
 	EVP_CIPHER_CTX_free(ctx);
 	CHECK(ERR_peek_error() == 0UL);
 }
@@ -1797,6 +2017,8 @@ check_mac_message(
 			OK(EVP_MAC_update(ctx, message + offset, take));
 		offset += take;
 	}
+
+	/* Finishes the MAC, writing the size output nowhere. */
 	memset(tag, SENTINEL_BYTE, sizeof(tag));
 	OK(EVP_MAC_final(ctx, tag, NULL, 16U));
 	CHECK_BYTES(tag, expected, 16U);
@@ -1850,6 +2072,7 @@ test_mac_rfc(void)
 		check_mac_message(ctx, key, message, size, tag);
 	}
 
+	/* Releases the context and the algorithm. */
 	EVP_MAC_CTX_free(ctx);
 	EVP_MAC_free(mac);
 }
@@ -1934,6 +2157,8 @@ test_mac_api(void)
 			continue;
 		REFUSED(EVP_MAC_init(ctx, key, length, NULL), 0, R_KEY_LENGTH);
 	}
+
+	/* A size of -1 is refused too, and the context was not started. */
 	REFUSED(EVP_MAC_init(ctx, key, (size_t)-1, NULL), 0, R_KEY_LENGTH);
 	CHECK(ctx->started == 0);
 
@@ -2044,6 +2269,8 @@ aead_seal(
 		EVP_MAC_free(mac);
 		return;
 	}
+
+	/* Computes the tag over the associated data, the ciphertext and the lengths, the first two padded to 16 bytes. */
 	memset(padding, 0, sizeof(padding));
 	OK(EVP_MAC_init(mac_ctx, one_time_key, 32U, NULL));
 	OK(EVP_MAC_update(mac_ctx, aad, aad_size));
@@ -2121,6 +2348,27 @@ test_aead_rfc(void)
 	CHECK_BYTES(tag, expected_tag, 16U);
 }
 
+/* Says whether a field of a record is missing or differs from the expected text. */
+static int
+field_differs(
+	const char *text,
+	const char *expected)
+{
+	int comparison;
+
+	/* A missing field differs. */
+	if (text == NULL)
+		return 1;
+
+	/* A field with other text differs. */
+	comparison = strcmp(text, expected);
+	if (comparison != 0)
+		return 1;
+
+	/* The field equals the expected text. */
+	return 0;
+}
+
 /*
  * Checks the Wycheproof vectors of ChaCha20-Poly1305 sealed with the EVP
  * functions: a valid record gives the ciphertext and tag of the file, an
@@ -2146,13 +2394,20 @@ test_wycheproof(void)
 	size_t size;
 	size_t cipher_size;
 	size_t tag_size;
+	int opened;
+	int more;
+	int differs;
+	int comparison;
 
-	/* Every record. */
-	if (vec_open(&file, "wycheproof-chacha20_poly1305_test") != 0) {
+	/* Opens the Wycheproof file. */
+	opened = vec_open(&file, "wycheproof-chacha20_poly1305_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
-	while (vec_next(&file)) {
+
+	/* Every record. */
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		CHECK(result != NULL);
 		if (result == NULL)
@@ -2160,17 +2415,24 @@ test_wycheproof(void)
 
 		/* Only 256-bit keys, 96-bit nonces and 128-bit tags are in the interface. */
 		text = vec_get(&file, "group.ivSize");
-		if (text == NULL || strcmp(text, "96") != 0) {
+		differs = field_differs(text, "96");
+		if (differs) {
 			wycheproof_skipped++;
 			continue;
 		}
+
+		/* Only 128-bit tags are in the interface. */
 		text = vec_get(&file, "group.tagSize");
-		if (text == NULL || strcmp(text, "128") != 0) {
+		differs = field_differs(text, "128");
+		if (differs) {
 			wycheproof_skipped++;
 			continue;
 		}
+
+		/* Only 256-bit keys are in the interface. */
 		text = vec_get(&file, "group.keySize");
-		if (text == NULL || strcmp(text, "256") != 0) {
+		differs = field_differs(text, "256");
+		if (differs) {
 			wycheproof_skipped++;
 			continue;
 		}
@@ -2184,20 +2446,30 @@ test_wycheproof(void)
 		tag_size = vec_hex(&file, "tag", tag, sizeof(tag));
 		CHECK(key_size == 32U && nonce_size == 12U && tag_size == 16U);
 		CHECK(aad_size != (size_t)-1 && size != (size_t)-1 && cipher_size == size);
-		if (key_size != 32U || nonce_size != 12U || tag_size != 16U || aad_size == (size_t)-1 || size == (size_t)-1 || cipher_size != size)
+		if (key_size != 32U ||
+		    nonce_size != 12U ||
+		    tag_size != 16U ||
+		    aad_size == (size_t)-1 ||
+		    size == (size_t)-1 ||
+		    cipher_size != size)
 			continue;
 
 		/* Seals the message; a valid record's ciphertext and tag are the file's. */
 		aead_seal(key, nonce, aad, aad_size, message, size, computed_cipher, computed_tag);
-		if (strcmp(result, "valid") == 0) {
+		comparison = strcmp(result, "valid");
+		if (comparison == 0) {
 			CHECK_BYTES(computed_cipher, cipher, size);
 			CHECK_BYTES(computed_tag, tag, 16U);
 		} else {
 			/* The tag of an invalid record is wrong for its message (the ciphertext of such a record is the message's own). */
 			CHECK(memcmp(computed_tag, tag, 16U) != 0 || memcmp(computed_cipher, cipher, size) != 0);
 		}
+
+		/* Counts the record as checked. */
 		wycheproof_checked++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 }
 
@@ -2273,6 +2545,8 @@ check_ssh_packet(
 		EVP_MAC_free(mac);
 		return;
 	}
+
+	/* Encrypts the length field with the header key. */
 	OK(EVP_CipherUpdate(header_ctx, sealed_length, &out_length, length_field, 4));
 	CHECK_BYTES(sealed_length, expected_length, 4U);
 
@@ -2306,6 +2580,8 @@ check_ssh_packet(
 		OK(EVP_CipherUpdate(main_ctx, opened_payload, &out_length, sealed_payload, (int)payload_size));
 		CHECK_BYTES(opened_payload, payload, payload_size);
 	}
+
+	/* Releases the contexts. */
 	EVP_CIPHER_CTX_free(header_ctx);
 	EVP_CIPHER_CTX_free(main_ctx);
 	EVP_MAC_CTX_free(mac_ctx);
