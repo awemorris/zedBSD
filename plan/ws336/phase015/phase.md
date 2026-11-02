@@ -2,7 +2,7 @@
 
 # ws336-p015: ssh の program と host の相互運用（相手 A: host の OpenSSH sshd）
 
-Status: planned（2026-11-01 p001 の設計で作成）
+Status: in-progress（2026-11-02 11:37 P5）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p006・p008・p009・p010・p011
@@ -61,3 +61,6 @@ WS335 の待ち: p003 経由
 ## 結果
 
 （未着手）
+
+
+- （2026-11-02 11:37 Q1 の条件）ssh は再鍵の時に server の host key が最初の鍵の交換と同じ事を check_host_key で確かめ、違えば切る（ssh-transport は覚える場所を持たない、p008 の結果）。

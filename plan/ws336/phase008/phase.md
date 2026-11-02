@@ -2,7 +2,7 @@
 
 # ws336-p008: ssh-transport（transport の状態機械・re-key・export と import）
 
-Status: in-progress（2026-11-02 10:52 P5。11:36 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
+Status: cleared（2026-11-02 11:37 Q1）。前: in-progress（2026-11-02 10:52 P5。11:36 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus。状態機械と安全の要）
 依存: p005・p007
