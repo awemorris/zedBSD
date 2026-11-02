@@ -672,6 +672,6 @@
 | q1932 / q1932-i01 | P5（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p5-ws336` | [ws336 p008](ws336/phase008/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | in-progress |
 | q1933 / q1933-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws336-p009` | [ws336 p009](ws336/phase009/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | cleared（2026-11-02 11:14、main に merge、main で試験 PASS） |
 | q1934 / q1934-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws336-p011` | [ws336 p011](ws336/phase011/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | cleared（2026-11-02 11:21、cb76c8b1d を main に merge、main で test-config PASS） |
-| q1935 / q1935-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws336-p014` | [ws336 p014](ws336/phase014/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | in-progress |
+| q1935 / q1935-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws336-p014` | [ws336 p014](ws336/phase014/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | cleared（2026-11-02 11:26、13c60ad5d を main に merge、main で keygen-host PASS） |
 | q1936 / q1936-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-bug412`・branch `agent/p3-bug412`、Pi 5） | [BUG-412](bugs/BUG-412.md) Pi 5 の click | 2026-11-02 11:02 ユーザーの UAT（直ちに） | in-progress |
 | q1937 / q1937-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws335-p030` | [ws335 p030](ws335/phase030/phase.md) | 2026-11-02 11:25 Q1 | in-progress |
