@@ -52,9 +52,9 @@
 | [ws345-p003](phase003/phase.md) | 通信を全部 loader に: loader の client（要求した thread ごとの完了と起こし、どの thread からでも取り消し）、同期の XHR・漏れた parser の script・iframe の script・sheet の待ちを client の待ちに | cleared（2026-11-02 P8 q1972-i01: loader の client・waited の request・abort と epoch、頁の待つ取得を全部 loader に。[phase.md](phase003/phase.md) の結果） | p002 |
 | [ws345-p004](phase004/phase.md) | VM の打ち切り（agent ごとの atomic の flag、loop の印・関数の入口・長い native で見る、catch・finally を走らせない終わり） | cleared（2026-11-02 P5 q1973-i01: VM_TERMINATED、heap の task の番号と atomic の要求、loop・入口・unwind・長い native で見る。host-terminate 39/39（tsan も）、bug411・test262・段 1 が前と同じ。[phase.md](phase004/phase.md) の結果） | p001 |
 | [ws345-p005](phase005/phase.md) | view の front と top の script の thread（`BROWSER_THREADING_OWN`）: mailbox・入力の合わせ方と順・snapshot・callback を窓の thread で・navigation と destroy の打ち切りと join・process に一つの可変の static の追い出し・CPU の確定した frame | cleared（2026-11-02 P5 q1980-i01: `_OWN` の view の front と `browser-script` の thread、mailbox・snapshot・通知、打ち切りを navigation と destroy に、CPU の絵は暫定（Q1）。host-threaded-view 18 checks 0 failed（tsan の報告 0）、stall-probe の own で窓の event の最長 0.1〜7 ms、段 1 と cross-build が前と同じ。[phase.md](phase005/phase.md) の結果） | p002、p003、p004 |
-| [ws345-p006](phase006/phase.md) | 描画の口（D5）: 確定した frame の箱と frame の item、`browser_view_render`・`_render_pixels`・`_presented`、renderer と glyph の face を描画の thread に、描画の機会と rAF、確定の後の木を書かない | planned | p005 |
+| [ws345-p006](phase006/phase.md) | 描画の口（D5）: 確定した frame の箱と frame の item、`browser_view_render`・`_render_pixels`・`_presented`、renderer と glyph の face を描画の thread に、描画の機会と rAF、確定の後の木を書かない | in-progress（2026-11-02 18:28 P8 q1984） | p005 |
 | [ws345-p007](phase007/phase.md) | shell（zedBSD・Linux の Keiland、Windows）: 窓の thread は event だけ、shell の描画の thread、resize と modal loop、drag の画像・文字入力・touch・mail の新しい口 | planned | p006、p013 |
-| [ws345-p008](phase008/phase.md) | style の thread（D4）: DOM の同期の貸し、request の種類、古くない時は貸さない、style・layout から JS を呼ぶ所を後で出す event に、style の thread の loader の client | planned | p005 |
+| [ws345-p008](phase008/phase.md) | style の thread（D4）: DOM の同期の貸し、request の種類、古くない時は貸さない、style・layout から JS を呼ぶ所を後で出す event に、style の thread の loader の client | in-progress（2026-11-02 18:28 P5 q1985） | p005 |
 | [ws345-p009](phase009/phase.md) | iframe ごとの script の thread（段 A: 一つの agent の lock と heap のまま）: frame ごとの task の queue、入力の routing、frame の上限、GC の stack の底の切り替え | planned | p006、p008 |
 | [ws345-p010](phase010/phase.md) | origin ごとの agent（段 B）: cross-origin の iframe を別の heap で並べて走らせる、遠くの WindowProxy、heap を越える postMessage、location・frames・parent、agent ごとの打ち切り | planned | p009 |
 | [ws345-p011](phase011/phase.md) | 受け入れと回帰: 窓の event の遅れの上限（script の loop・connect の掛かり・document.write・resize・decode の間）、ThreadSanitizer、host の試験・js・test262 の部分集合・段 1・cross-build、zedBSD の QEMU、Windows の Wine、Linux の Keiland | planned | p007、p010、p014 |
@@ -68,3 +68,8 @@
 - 2026-11-02 P8（q1959-i01）: p001 の設計と計測、design-reviewer の反映、p002〜p013 の phase.md。次は Q1 が p002 の Queue を立てる（p004・p013 は p002 と並べてよい）。J2・J6・J7 は Q1 の答え待ち（実装の p005・p009・p006 の前に）。
 - 2026-11-02 P8（q1968-i01）: p002 cleared（thread の表）。次は p003（通信を loader に）・p004（打ち切り）・p013（libkeiland の resize の口）が並べて始められる。
 - 2026-11-02 P8（q1972-i01）: p003 cleared（通信を loader の client に）。p005 は p004（P5）の merge の後。
+
+## Q1 の判断（2026-11-02 18:28、p005 の merge）
+
+- p005 の _Thread_local で zedBSD amd64 の libbrowser.so が __tls_get_addr の未定義で link できなくなった（host と arm64 は通っていた）。Q1 が libvulkan と同じ形（amd64 は -mtls-dialect=gnu2 の TLS descriptor、riscv64 は -z undefs と provider の一覧）を libbrowser に当てて直した。amd64・riscv64 の libbrowser.so は warning 0。以後の Phase は zedBSD の amd64・arm64・riscv64 の libbrowser.so の build も確かめる。
+- p005 の design.md の案（§6.1 の仮の CPU の絵と費用、§9 の agent・abort_waited・pagehide の 1 秒）は P8 が p006 で design.md に入れる。
