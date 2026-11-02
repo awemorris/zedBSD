@@ -1401,9 +1401,19 @@ read_sequence(
 	sequence->success = drv_wave5_core_read(core, RESULT_VERDICT);
 	sequence->error = drv_wave5_core_read(core, RESULT_ERRORS);
 
-	/* The coded size and the frame buffers needed. */
+	/*
+	 * The coded size and the frame buffers needed.  An H.265 picture's
+	 * width is a multiple of 8 only; its frame buffers are as wide as the
+	 * next multiple of 16 (the stride and size the core is given; H.264's
+	 * width is a multiple of 16 already).  StarFive's driver rounds the
+	 * frame buffers' width up the same way (wave5-vpu-dec.c,
+	 * wave5_update_pix_fmt, to 32; 16 is what the H.264 pictures here
+	 * already show the core takes).
+	 */
 	value = drv_wave5_core_read(core, RESULT_SIZE);
 	sequence->width = value >> 16;
+	if (stream->codec == DRV_WAVE5_H265)
+		sequence->width = align_up(sequence->width, 16U);
 	sequence->height = value & 0xffffU;
 	sequence->required = drv_wave5_core_read(core, RESULT_REQUIRED);
 

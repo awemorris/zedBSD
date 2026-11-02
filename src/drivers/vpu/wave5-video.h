@@ -7,7 +7,7 @@
 
 /*
  * The Wave5 decoder as the PowerVR render node's video engine: Vulkan
- * Video's H.264 decode run on the core's instances (wave5-video.c).
+ * Video's H.264 and H.265 decode run on the core's instances (wave5-video.c).
  */
 
 #ifndef KERN_DRIVERS_VPU_WAVE5_VIDEO_H

@@ -1,0 +1,10 @@
+plain: open, next 0, body 0, next 1, body 1, next 2, body 2, next 3
+sync: 1 2 3
+break: open, next 0, next 1, return
+return: returned 2 open, next 0, next 1, next 2, return
+throw: thrown open, next 0, return
+next fails: next failed next
+patterns: 0:1=1 0:3=9 1:1=1 1:3=9 1:4=16
+not iterable: true
+not an object: true
+done

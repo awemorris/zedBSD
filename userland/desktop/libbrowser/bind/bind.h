@@ -362,6 +362,8 @@ struct dom_document *bind_window_child_document(struct bind_window *window);
 /* Appends actual inline source for primary or managed-child rendering without DOM mutation. */
 int bind_style_sheet_source(struct dom_element *element, struct wb_units *units);
 int bind_run_script(struct bind_window *window, const uint16_t *source, size_t length, const char *name);
+char *bind_take_navigation(struct bind_window *window, int *replace);
+int bind_navigation_pending(const struct bind_window *window);
 int bind_run_script_source(struct bind_window *window, const uint16_t *source, size_t length, const char *name, int known_inline);
 int bind_checkpoint(struct bind_window *window);
 void bind_report_exception(struct bind_window *window, vm_value exception);

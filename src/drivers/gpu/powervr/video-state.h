@@ -24,8 +24,9 @@
 
 #include "drivers/gpu/powervr/powervr.h"
 
-/* The native capset's flags: H.264 decode (the only codec bit libvulkan defines). */
+/* The native capset's flags of the codecs: H.264 decode (bit 0) and H.265 decode (bit 2). */
 #define POWERVR_VIDEO_CAPSET_DECODE_H264	1U
+#define POWERVR_VIDEO_CAPSET_DECODE_H265	4U
 
 /* The most bytes one query's record takes: a 64-bit status and a 64-bit availability. */
 #define POWERVR_VIDEO_QUERY_RECORD_MAX		16U

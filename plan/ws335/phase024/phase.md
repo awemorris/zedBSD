@@ -2,7 +2,7 @@
 
 # ws335-p024: 公開の EVP_PKEY（Ed25519・X25519・ML-KEM-768）
 
-Status: in-progress（2026-11-02 06:10 Sonnet）（2026-11-01 p001 が作成。起動は Q1。依存: p021、p009、p008、p014）
+Status: cleared（2026-11-02 09:40 Q1、main で試験 PASS）。前: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1913-i01。cleared は Q1。2026-11-01 p001 が作成。依存: p021、p009、p008、p014）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -67,4 +67,57 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02（host の `date` は 09:37 JST）Sonnet 5.5、Queue q1913-i01。worktree s-ws335-p024（main 4eae22020 から）。
+
+作った物: `userland/base/libcrypto-compat/api-pkey.c`、`plan/ws335/tests/unit/test-api-pkey.c`、`plan/ws335/tests/unit/ct-api-pkey.c`（鍵・seed・scalar・dk・message の秘密の扱い）。header・試験の道具・他の module・Makefile は変えていない。
+
+実行した command と最後の行（`WS335_VECTORS=/home/awe/zedBSD-claude1/build/sources/tls-vectors`）:
+
+| command | 最後の行 |
+| --- | --- |
+| `sh plan/ws335/tests/run-unit.sh api-pkey`（ASan・UBSan・LeakSanitizer） | `test-api-pkey: PASS (40701 checks)` / `run-unit: PASS` |
+| `LC_ALL=C.UTF-8 sh plan/ws335/tests/run-unit.sh --win32 api-pkey`（x86_64・Wine） | `test-api-pkey: PASS (40701 checks) (win32)` / `run-unit: PASS` |
+| `sh plan/ws335/tests/run-ct.sh api-pkey`（valgrind） | `ct-api-pkey: PASS (20 checks)` / `run-ct: PASS` |
+| `sh plan/ws335/tests/run-unit.sh api-evp ct-api-evp` | `test-api-evp: PASS (190769 checks)`（p023 の 190733 + 鍵の解放の 36 checks が飛ばずに流れた）、`ct-api-evp: PASS (31 checks)` |
+| `sh plan/ws335/tests/run-unit.sh all` | 全 test と全 ct の 50 行が PASS（test-api-pkey 40658・ct-api-pkey 20、後で 43 checks 足した）、最後の行 `run-unit: PASS` |
+| `BASE=641a2f195 sh plan/ws335/tests/check-skeleton.sh` | `FAILED headers or test tools changed since 641a2f195: userland/base/libcrypto-compat/cryc-x509.h`（p019 の承認済みの 1 語の変更。この Phase の変更ではない） |
+| `BASE=4eae22020 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: PASS`（cc・clang・zedBSD の clang・llvm-mingw の 2 arch の warning 0、名前の範囲を含む） |
+| `git diff --check` | 出力なし |
+| WS336 の契約の試験（main の `plan/ws336/tests/crypto-contract.c` を libcrypto-compat の全 .c（win32 を除く）と ASan・UBSan で build して実行。`build/tmp/p024-contract/`） | `test-crypto-contract: PASS (108 checks)`（p023 の時は 66 checks のうち 3 件の EVP_PKEY の失敗） |
+
+試験の内容:
+
+- 生の鍵: 型・長さ・NULL・engine・名前（大文字小文字・近い名前の拒否）・libctx・propq の全ての拒否が 1 件の error（reason を全部）、失敗が出力 buffer と長さを変えない事、Ed25519 の seed（RFC 8032 7.1 TEST 1）と X25519 の scalar（RFC 7748 6.1）から公開鍵、unclamped な scalar がそのまま戻る事、公開鍵だけの鍵の往復（点でない値・全 0・全 0xff も）と私鍵の取り出しの拒否、size の問い合わせ・ちょうどの room・多い room・足りない room（0〜31 の全部）。
+- 参照の数: 鍵を持つ全ての持ち主（EVP_PKEY_CTX_new・new_from_pkey、DigestSign/VerifyInit、derive の peer）が参照を取り、free・再 start・別の鍵・拒否・context の解放で正しく戻る事、同じ鍵や同じ peer の再設定、拒否が何も変えない事、鍵を先に free しても context の参照で生きる事。4 thread × 5000 回の取り・手放しで参照が釣り合う事。
+- Ed25519: RFC 8032 7.1 の 5 vector と 6 の説明の python で作った 0〜1000 byte の message の署名（署名の byte が一致、検証できる、署名の 64 byte の全位置の 1 bit の反転と別の message で検証が 0）、Wycheproof ed25519_test の 210 件（valid 117・invalid 64（うち別の長さの署名 12）・acceptable 29 のうち header の式で受理される 8 を EVP_DigestVerify 経由で）、署名の長さ 0〜130 と `(size_t)-1`、NULL の組み合わせ、状態（未 start・署名の ctx で検証・検証の ctx で署名・digest の ctx からの切り替え）、署名の buffer の room 0〜63、message を NULL で長さ 0、署名が message と重なる場合、復号できない公開鍵、乱数の seed と 21 通りの message の長さ（SHA-512 の block の境を含む。100000 byte まで）で EVP の署名が primitive の署名と一致。
+- X25519: RFC 7748 5.2 の 2 vector と iterated test（1 回・1000 回）、6.1 の Alice・Bob を EVP の context 経由で、Wycheproof x25519_test の 518 件（全零の結果は失敗・error 1 件・出力が零で length 不変）、状態（鍵の型・公開鍵だけ・未 init・peer 無し・peer の型違い）、room の全部、200 組の乱数の鍵の往復と primitive との一致。
+- ML-KEM-768: Wycheproof の mlkem_768_test の 201 件（seed から作った鍵が published の ek を持ち、c を K に decapsulate（implicit rejection の物も）、ek を名前で import して encapsulate → EVP と primitive の decapsulate が一致、誤りの長さの ciphertext 20 件が拒否）、mlkem_768_encaps_test の 265 件（ek は 1184 byte で全 coefficient が q 未満の時だけ受理: 受理 133・長さで拒否 20・modulus で拒否 112）、mlkem_768_semi_expanded_decaps_test の 9 件（dk の長さが正しい 7 件のうち、valid 3 件が K に一致、長さの誤りの ciphertext 2 件が拒否）、EVP の keygen を 24 回（sizes、dk の hash check、dk の中の ek、2 つの鍵が違う、3 回の encapsulate で ciphertext が違い K が一致、ciphertext の 12 か所の bit 反転が error なしで別の K（primitive の implicit rejection と一致））、名前と各関数の拒否と room の全部、ek の import の check（384 個の 3 byte の group の全部で 3329 と 4095 の coefficient を拒否、全 0 と 3328 は受理、rho の部分は検査しない）、modulus の check に通らない公開鍵の object で encapsulate が 1 件の error。
+
+期待の値は RFC 8032・7748 の表（RFC の本文 rfc7748.txt・rfc8032.txt の sha256 は phase.md の値と一致を確認）・Wycheproof・説明の python の署名・primitive（ML-KEM の implicit rejection と、EVP と独立の decapsulate の照合）だけから作った。他の実装の出力は使っていない。OpenSSL の man は振る舞いの確認にだけ読んだ（文・code は写していない）。
+
+わざと壊す確かめ（git の外。`build/tmp/p024-mut/mut.py`: api-pkey.c の 1 行ずつを 1715 通りに書き換えた複写（比較・論理・if 条件の 0/1/反転・節の削除・return 値・定数 ±1・reason と型と mode と operation と大きさの定数の入れ替わり・文の削除・private と public の入れ替わり）、test の最初の失敗で終わる複写（check.h の複写を直し、api-pkey.o と試験の object を link）、ASan・UBSan、RLIMIT_FSIZE 64 MB・RLIMIT_CPU 400 秒・RSS 6 GB か 600 秒で kill、4 並列。最後に実装の file の sha256（0433d907…）が変わっていない事を確認。baseline は PASS）:
+
+- 試験の check の FAIL 951、sanitizer の中断 134、見逃し 125、build の誤り（`-Werror`）505。
+- build の誤り 505 は `-Werror` を外して書き直して再実行し: check の FAIL 249、sanitizer 36、見逃し 100、型の誤りで build できない 120（int の関数で `return pkey;`、宣言の削除など意味の無い物）。
+- 合計: check の FAIL 1200、sanitizer の中断 170、見逃し 225、build できない 120（= 1715）。
+- 見逃しの 225 のうち、試験を足して塞いだ物 3（公開鍵だけの鍵が private_key・private_size を持たない事 1、`EVP_PKEY_CTX_new`・`new_from_pkey` の context の keygen_type 2。塞いだ後 3 通りとも check の FAIL、baseline は PASS）。残る 222 は等価か実行できない経路: (a) calloc・malloc が NULL を返す経路（検査・error の積み・戻り値・free、40 余り）、(b) `return NULL` と `return 0` の取り違え（NULL は 0 の定数）と結果が NULL の時の `return pkey`・`return ctx`、(c) 同じ値の定数の入れ替え（`CRYC_X25519_SIZE`・`CRYC_MLKEM_SHARED` は共に 32、`CRYC_PKEY_ED25519` は 1）と大きすぎる stack の配列、(d) wipe の削除（free した memory・stack の消去は見る手段が無い）、(e) calloc が零にする field を零にする文の削除、(f) 乱数の失敗（`cryc_os_random` を失敗させる手段が無い）の分岐、(g) `ctx->key == NULL` と `ctx->operation` を落とす物（mode・peer が設定されていれば key・operation は必ず設定済み）、(h) 名前の folding の境の `'a'`・`'z'`（期待の名前に無い文字）、(i) `tbs` の NULL の置き換え（空の message に NULL を渡しても primitive は触らない）と `empty[]` の大きさと値、(j) 初期化しない `pkey_type`（未初期化の stack）。
+- 手で作った constant-time の壊し 8 通り（鍵の seed・scalar・message・dk・共有鍵・書き出す private の byte で分岐、secret の添字の番地）は valgrind が全部検出（元は clean）。
+
+自分で決めた点（header が黙っていた所。Q1 が確認する）:
+
+1. 失敗は EVP library の error をちょうど 1 件積む（reason は null の引数 = `PASSED_NULL_PARAMETER`、NULL でなければならない引数・digest を渡した署名・長さの誤りの ciphertext = `PASSED_INVALID_ARGUMENT`、別の型・名前・鍵の型の違う操作 = `EVP_UNSUPPORTED_ALGORITHM`、鍵の長さ = `EVP_INVALID_KEY_LENGTH`、ek が modulus の check に通らない・公開鍵だけの鍵で私鍵が要る操作・全零の共有鍵 = `EVP_INVALID_KEY`、未 init = `EVP_OPERATION_NOT_INITIALIZED`、room 不足 = `EVP_BUFFER_TOO_SMALL`、peer の型違い = `EVP_DIFFERENT_KEY_TYPES`、ML-KEM の私鍵の取り出し = `UNSUPPORTED`、乱数の失敗 = `INTERNAL_ERROR`、メモリ無し = `MALLOC_FAILURE`）。成功は何も積まない。失敗は鍵・context・出力 buffer・length を変えない（例外は header の言う `EVP_PKEY_derive` の全零で、出力 32 byte を零にして length は変えない）。
+2. 署名の検証が通らない事は error でなく判定（0・何も積まない）。署名の長さが 64 でない事も 0（message や NULL の検査より前）。未 start の ctx と NULL の ctx は -1 と error 1 件。署名が NULL で長さ 64、message が NULL で長さ 0 でない場合は 0 と `PASSED_NULL_PARAMETER`。
+3. 署名・検証の ctx は鍵への参照を持ち、start で同じ鍵なら参照を先に増やしてから古い鍵を手放す。start は digest の state を wipe し `mode`・`md = NULL` にする。署名・検証の ctx は何度でも署名・検証できる。署名は中の buffer に作ってから書く（message と署名の buffer が重なっても安全）。`pctx` は成功で `*pctx = NULL`、失敗は触らない。`type` が NULL でないと拒否（EVP_sha256 でも）。Ed25519 でない鍵は署名・検証とも拒否。
+4. `EVP_PKEY_new_raw_public_key`・`_ex` は Ed25519 の点として decode できるかを調べない（検証が 0 になる）。X25519 は任意の 32 byte（RFC 7748 5）。型の名前は ASCII の大文字小文字を区別しない（`ml-kem-768` 可）。`EVP_PKEY_new_raw_public_key` に ML-KEM の数値の型は無く拒否。
+5. `EVP_PKEY_get_raw_private_key` は ML-KEM を（鍵があっても size の問い合わせでも）`UNSUPPORTED`、公開鍵だけの Ed25519・X25519 を `EVP_INVALID_KEY`、room 不足は `length` を変えずに拒否。
+6. 参照の数: `EVP_PKEY_free` は `cryc_os_atomic_add(-1)` が 0 になった呼び出しが private_key を wipe して free し、object も wipe して free する。負の数（二重 free）は何もしない。
+7. `EVP_PKEY_derive_init` は peer を手放す（毎回 set_peer が要る）。`EVP_PKEY_derive_set_peer` は X25519 だけ（`EVP_DIFFERENT_KEY_TYPES`）、新しい参照を先に取ってから古い peer を手放す。peer は公開鍵だけでよい。
+8. `EVP_PKEY_keygen` は成功したら `*pkey` に新しい鍵を書き、失敗は `*pkey` を触らない。成功時に `*pkey` が以前持っていた pointer は手放さない（呼び出す側の持ち物）。一つの context で何度でも生成できる。生成した鍵は dk の hash check に通り、ek は dk の中の ek と同じ（試験で確認）。
+9. `EVP_PKEY_encapsulate` は 2 つの length が常に必要。両方の buffer が NULL なら sizes の問い合わせ、片方だけ NULL は `PASSED_NULL_PARAMETER`。room が足りなければ乱数を使う前に拒否。ek が modulus の check に通らない鍵 object（インターフェース外で作った物）は `EVP_INVALID_KEY`。`EVP_PKEY_decapsulate` は key が NULL なら length だけを返し、ciphertext の検査は後（key が NULL の時は ciphertext を見ない）。ciphertext が 1088 byte でなければ `PASSED_INVALID_ARGUMENT`。dk の hash check は import が無いので decapsulate では繰り返さない。
+10. `EVP_PKEY_CTX_new_from_name` で ML-KEM-768 以外は `EVP_UNSUPPORTED_ALGORITHM`（Ed25519・X25519 の名前も。keygen は ML-KEM だけ）。keygen_init は鍵を持つ context（new・new_from_pkey）を拒否。
+11. constant-time の試験では、`EVP_PKEY_derive` の全零の判定が秘密から作った値での分岐（RFC 7748 6.1 で公開してよい）なので、valgrind に区別できず、derive は scalar を公開にして流す（primitive の arithmetic は ct-x25519）。keygen と encapsulate は OS の乱数（秘密の印を付けられない）から作るので ct-mlkem で primitive を見る。
+
+header の不備: 止める物は見つからなかった。header の comment の持ち越し（規約の見直しの Phase へ）: (a) 失敗時の reason の割り当て、(b) 署名の検証の戻り値（長さの誤りは 0・判定は error を積まない・NULL の ctx は -1）、(c) `EVP_PKEY_keygen` が `*pkey` の古い pointer を手放さない事、(d) `EVP_PKEY_derive_init` が peer を手放す事、(e) `EVP_DigestSign` の size の問い合わせにも start が要る事、(f) 型の名前の大文字小文字、(g) `EVP_PKEY_encapsulate` の片方だけ NULL の拒否、(h) 全零の derive は `length` を変えない事。
+
+未実施: zedBSD・QEMU・実機での実行（範囲外）、aarch64 Windows の実行（check-skeleton で build と link のみ）、実際の Windows での実行（Wine のみ）、malloc と乱数の失敗の経路（失敗させる手段が無い）、free した memory の wipe の確認（手段が無い）、`EVP_PKEY_derive` の全零の判定の constant-time（上の 11）、実装を足した 43 checks（公開鍵だけの鍵の private の field と context の field）の後で `run-unit.sh all` は流し直していない（api-pkey・win32・ct・api-evp は流し直した）。
+

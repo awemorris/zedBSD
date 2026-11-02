@@ -251,9 +251,9 @@ validate_job(
 		if ((tfu->input & 63U) != 0 || (tfu->output & 63U) != 0)
 			return EINVAL;
 
-		/* The output control word names a tiled output format. */
+		/* The output control word names a raster or a tiled output format. */
 		output_format = (tfu->output_format >> 12) & 7U;
-		if (output_format < 3U)
+		if (output_format != 0U && output_format < 3U)
 			return EINVAL;
 		error = validate_span(engine, tfu->input, tfu->input_bytes);
 		if (error != 0)

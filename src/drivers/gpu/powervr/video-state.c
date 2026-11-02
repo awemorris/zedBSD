@@ -135,23 +135,29 @@ powervr_video_engine(
 }
 
 /*
- * Reports the native capset's flags for a session's operations: H.264
- * decode, the one codec bit libvulkan reads; 0 when the session offers
+ * Reports the native capset's flags for a session's operations: the
+ * H.264 and H.265 decode bits libvulkan reads; 0 when the session offers
  * nothing libvulkan can use, and the node then reports the plain capset.
  *
  * Value referenced: zedBSD userland/desktop/libvulkan/context.c
- * (VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H264, bit 0 of the word at 172).
+ * (VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H264 and _H265, bits 0 and 2 of the
+ * word at 172).
  */
 uint32_t
 powervr_video_capset_flags(
 	uint32_t operations)
 {
-	/* Only H.264 decode has a bit. */
-	if ((operations & DRV_POWERVR_VIDEO_DECODE_H264) == 0)
-		return 0;
+	uint32_t flags;
 
-	/* Succeeded: the decode bit. */
-	return POWERVR_VIDEO_CAPSET_DECODE_H264;
+	/* Each decode's bit; the encode has none yet. */
+	flags = 0;
+	if ((operations & DRV_POWERVR_VIDEO_DECODE_H264) != 0)
+		flags |= POWERVR_VIDEO_CAPSET_DECODE_H264;
+	if ((operations & DRV_POWERVR_VIDEO_DECODE_H265) != 0)
+		flags |= POWERVR_VIDEO_CAPSET_DECODE_H265;
+
+	/* Succeeded: the decode bits. */
+	return flags;
 }
 
 /* Reports the queue flags the session's one family adds for its operations. */

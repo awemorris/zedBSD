@@ -39,6 +39,9 @@
 
 #include "drivers/gpu/bcm2711/bcm2712-gpu.h"
 #include "drivers/gpu/bcm2711/display/hvs6.h"
+#if CONFIG_DRIVER_BCM2712_VIDEO
+#include "drivers/gpu/bcm2711/hevc-decoder.h"
+#endif
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/v3d71-private.h"
 
@@ -142,6 +145,13 @@ drv_bcm2712_gpu_attach(
 		display_error = bcm2712_display_discover(&fdt, &attach_display, &screen);
 	else
 		bcm2712_screen_report(&fdt);
+
+#if CONFIG_DRIVER_BCM2712_VIDEO
+	/* Finds the HEVC decoder, which Vulkan Video decodes with; a board without it decodes nothing. */
+	error = bcm2712_hevc_decoder_discover(&fdt);
+	if (error != 0)
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "no HEVC decoder (%d)", error);
+#endif
 
 	/* Runs discovery, which reads nothing behind the engine's power domain. */
 	error = bcm2712_v3d_discover(&fdt, &attach_v3d);

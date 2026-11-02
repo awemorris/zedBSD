@@ -285,22 +285,30 @@ struct drv_powervr_video_open {
 	int (*pool)(void *owner, uint32_t count, uint32_t width, uint32_t height, uint32_t *pitch, struct drv_powervr_video_picture *pictures);
 };
 
-/* A picture is an IDR picture; it has only I slices. */
+/*
+ * A picture is an IDR picture; it has only I slices (H.264), or it is an
+ * IRAP picture (H.265), where a stream may start.
+ */
 #define DRV_POWERVR_VIDEO_PICTURE_IDR	0x1U
 #define DRV_POWERVR_VIDEO_PICTURE_INTRA	0x2U
 
 /*
  * One picture to decode: its slices' bytes (as the application's buffer
  * holds them, start codes and all; the engine reads them before it
- * returns), the parameter sets it names, its flags, its order count, the
- * DPB slot it becomes (-1 for none), and the slots it references and its
- * coding scope keeps active, a bit per slot.
+ * returns), the parameter sets it names (sps and pps for H.264, vps,
+ * h265_sps and h265_pps for H.265, the others NULL), its flags, its
+ * order count (PicOrderCntVal for H.265), the DPB slot it becomes (-1
+ * for none), and the slots it references and its coding scope keeps
+ * active, a bit per slot.
  */
 struct drv_powervr_video_decode {
 	const uint8_t *bitstream;
 	size_t length;
 	const struct vpu_h264_sps *sps;
 	const struct vpu_h264_pps *pps;
+	const struct vpu_h265_vps *vps;
+	const struct vpu_h265_sps *h265_sps;
+	const struct vpu_h265_pps *h265_pps;
 	uint32_t flags;
 	int32_t order;
 	int32_t setup;

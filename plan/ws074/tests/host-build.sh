@@ -79,7 +79,8 @@ done
 # its decoders; it plays no sound (WS191).
 for file in userland/desktop/libmedia/engine.c userland/desktop/libmedia/decoder.c userland/desktop/libmedia/bitstream.c \
     userland/desktop/libmedia/picture.c userland/desktop/libmedia/h264.c userland/desktop/libmedia/h264-dpb.c \
-    userland/desktop/libmedia/vkvideo.c userland/desktop/libmedia/vkvideo-runtime.c \
+    userland/desktop/libmedia/vkvideo.c userland/desktop/libmedia/vkvideo-runtime.c userland/desktop/libmedia/vkvideo-h265.c \
+    userland/desktop/libmedia/h265-stream.c userland/desktop/libmedia/h265-dpb.c userland/desktop/libmedia/h265-std.c userland/desktop/libmedia/h265sw-*.c \
     userland/desktop/libmedia/bits.c userland/desktop/libmedia/aac-input.c userland/desktop/libmedia/aac-huffman.c \
     userland/desktop/libmedia/aac-codec.c userland/desktop/libmedia/aac-bands.c userland/desktop/libmedia/aac-frame.c \
     userland/desktop/libmedia/aac-synth.c userland/desktop/libmedia/aac.c userland/desktop/libmedia/sound.c \
