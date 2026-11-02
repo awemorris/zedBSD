@@ -70,6 +70,7 @@ struct page_sticky_args {
 
 static int page_gather_styles(struct page *page);
 static int page_layout_work(void *argument);
+static int page_layout_verify(struct page *page, const struct page_layout_args *args);
 static int page_tree_work(void *argument);
 static int page_list_work(void *argument);
 static int page_paint_work(void *argument);
@@ -1021,10 +1022,103 @@ page_layout_work(
 			return error;
 	}
 
+	/* With the cache being verified, the tree is compared with one made whole, and the whole one is used. */
+	if (page_cache_mode() == PAGE_CACHE_VERIFY) {
+		error = page_layout_verify(page, args);
+		if (error != 0)
+			return error;
+	}
+
 	/* The loaded frames' windows have their iframes' sizes. */
 	page_frames_size(page);
 
 	/* Succeeded: the tree is built. */
+	return 0;
+}
+
+/*
+ * Lays the document out again whole into a tree of its own and compares its
+ * dump with the page's tree; a difference is told on standard error (the
+ * first line that differs, and the two lines), counted, and the whole tree
+ * becomes the page's.
+ */
+static int
+page_layout_verify(
+	struct page *page,
+	const struct page_layout_args *args)
+{
+	struct layout_tree whole;
+	struct wb_buffer ours;
+	struct wb_buffer theirs;
+	const char *a;
+	const char *b;
+	const char *a_end;
+	const char *b_end;
+	unsigned line;
+	int differs;
+	int error;
+
+	/* The whole tree, built as the page's was. */
+	memset(&whole, 0, sizeof(whole));
+	error = layout_build(&whole, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height,
+	    layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
+	if (error != 0) {
+		layout_release(&whole);
+		return error;
+	}
+
+	/* The two dumps. */
+	wb_buffer_init(&ours);
+	wb_buffer_init(&theirs);
+	error = layout_dump(&page->layout, &ours);
+	if (error == 0)
+		error = layout_dump(&whole, &theirs);
+	if (error != 0) {
+		wb_buffer_release(&ours);
+		wb_buffer_release(&theirs);
+		layout_release(&whole);
+		return error;
+	}
+
+	/* The first line that differs. */
+	a = ours.data == NULL ? "" : wb_buffer_string(&ours);
+	b = theirs.data == NULL ? "" : wb_buffer_string(&theirs);
+	differs = 0;
+	for (line = 1; ; line++) {
+		a_end = strchr(a, '\n');
+		b_end = strchr(b, '\n');
+		if (a_end == NULL)
+			a_end = a + strlen(a);
+		if (b_end == NULL)
+			b_end = b + strlen(b);
+		if (a_end - a != b_end - b || memcmp(a, b, (size_t)(a_end - a)) != 0) {
+			differs = 1;
+			break;
+		}
+		if (*a_end == '\0')
+			break;
+		a = a_end + 1;
+		b = b_end + 1;
+	}
+	if (differs) {
+		page->cache.mismatches++;
+		fprintf(stderr, "layout-cache: layout mismatch line=%u\n  cached: %.*s\n  whole:  %.*s\n", line, (int)(a_end - a), a, (int)(b_end - b), b);
+	}
+	wb_buffer_release(&ours);
+	wb_buffer_release(&theirs);
+
+	/* The whole tree is the page's from now on (a difference), or goes (the same). */
+	if (differs) {
+		layout_release(&page->layout);
+		page->layout = whole;
+		page->layout.image_variant = page_image_variant;
+		page->layout.frame_paint = page_frame_paint;
+		page->layout.frame_remote = page_frame_remote;
+	} else {
+		layout_release(&whole);
+	}
+
+	/* Succeeded: the page's tree is the whole one's equal. */
 	return 0;
 }
 

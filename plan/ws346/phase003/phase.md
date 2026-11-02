@@ -2,11 +2,11 @@
 
 # ws346-p003: 照合（verify）の道具と bench
 
-Status: planned
+Status: cleared（2026-11-03 Q1。verify で §6.2 の組が off と同じ・差異 0、わざと壊して検出、bench の基準を取った）
 Disposition: normal
 Parent: [WS346](../ws.md)
 Primary Milestone: MG006
-Queue: 未割り当て（Q1 が Sonnet = phase-runner-low に渡す時に決める）
+Queue: [q2003](../../queue.md)（Q1 が直に実装、2026-11-03 ユーザーの指示）
 基点: Q1 が worktree を作る時の main（design.md の基点 8f181e0e1f 以降）
 
 ## 目標
@@ -57,4 +57,36 @@ commit の SHA、流した command と最後の行、自分で決めた点、未
 
 ## 結果
 
-（実装の担当が書く: 自分で決めた点・数・未実施）
+2026-11-03 Q1（main の checkout で実装、p002 の main `02be09ad11` の上）。
+
+### したこと
+
+- `page/page.c`: `BROWSER_LAYOUT_CACHE=verify` の時、`page_layout_work` が（container query の段の後に）`page_layout_verify` を呼ぶ。同じ入力で全体の木を `layout_build` で別に作り、
+  `layout_dump` の 2 つを行ごとに比べる。違えば `layout-cache: layout mismatch line=N` と両方のその行を stderr に出し、`mismatches` を数え、全体の木を page の木にする
+  （差分の木は解放。同じなら全体の木を解放）。確保・build の失敗は error を返す（今の layout の失敗と同じ扱い）。
+- `plan/ws346/tests/bench/restyle.html`・`restyle.sh`（4 項目、3 回の中央値、mode ごと、run 間で check が違えば MISMATCH）。
+- `plan/ws346/tests/run-verify.sh`: dom・js・fetch・WPT reftest（既定 100 件）・Acid の 5 つを off と verify で流し、最後の行と verify の差異の数を並べる（browser の stderr を
+  wrapper で log に写して数える）。scripted reftests（独自の client）は別に流す。
+
+### 自分で決めた点
+
+1. style の照合は p005 で足す（今の verify は layout の木だけ。scratch の木は page の engine を使うので style の cache を共有する）。
+2. 比べるのは `layout_dump` の文字列（R1 の契約）。dump に出ない field（描画の display list など）は比べない。
+3. WPT の checkout: `build/ws074-suites/wpt` は `/tmp/zedbsd-ws074/build/ws074-suites/wpt` を指す壊れた symlink だった（/tmp が消えた）。symlink は残し、指す先の directory を作り、
+   fetch-suites.sh と同じ手順（`git init`・pin の 2d66b9b7998b を `fetch --depth 1`・checkout、LICENSE.md の BSD を確認）で入れた（fetch-suites.sh は directory が在ると
+   「Queue manager が消せ」と止まるため、手で同じ手順を行った。何も消していない）。`/tmp` なので再起動で消える。
+
+### 確かめ
+
+- host build warning 0。
+- `sh plan/ws346/tests/run-verify.sh`（rc 0）: off と verify で同じ。run-dom-tests 39/42、run-js-tests 21/21、run-fetch-tests 38/38（blocking・`--async`）、
+  run-wpt-reftests 62 pass・37 fail・1 error・0 timeout of 100、run-acid-tests Acid3 100/100・pixel 一致 100.00%（exact match True）。**verify の差異 0**。
+- わざと壊した: 全体の木の `document_height` に 64 を足す一時の改変で、`layout mismatch line=1`（`746.00` と `747.00`、1 行目は layout 単位の丸めで 1 の違い）と `mismatches=1` が出た。
+  元に戻して `cmp` で一致を確かめた。
+- bench の基準（`BROWSER_LAYOUT_CACHE=off`、1 回、Linux host、plain build `-O1`）: class-then-offset 14183 ms・style-then-offset 14140 ms・append-then-rect 14395 ms・
+  toggle-then-computed 646 ms（check は 111000・22400・123800・12550）。1 回の全体の layout は約 70 ms（2000 個の element）。3 回の中央値は p005 以降の測りで取る。
+
+### 未実施
+
+- bench の 3 回の中央値（1 回だけ取った）。
+- scripted reftests（`run-interop2025-scripted-reftests.py`）の verify は p005 から。

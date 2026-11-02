@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>restyle bench</title>
+<style>
+body { margin: 8px; font: 14px sans-serif; }
+#list { width: 600px; }
+.item { display: flow-root; border: 1px solid #888; padding: 2px 4px; margin: 1px 0; }
+.item span { display: inline-block; width: 40px; }
+.item.hot { color: #c00; }
+.item.wide { width: 500px; }
+#items { list-style: none; margin: 0; padding: 0; width: 600px; }
+#items li { overflow: hidden; height: 18px; border-bottom: 1px solid #ccc; }
+</style>
+</head>
+<body>
+<div id="list"></div>
+<ul id="items"></ul>
+<script>
+// What a change of the document costs when a script reads geometry or style right after it.  Each line is
+// "bench NAME MILLISECONDS CHECK" (Date.now: the headless clock of performance.now does not move).  CHECK is the page's
+// own sum, which must not depend on how the engine computes: it is the same under every mode of the cache.
+function now() { return Date.now(); }
+function report(name, start, check) { console.log("bench " + name + " " + Math.round(now() - start) + " " + check); }
+
+var list = document.getElementById("list");
+var items = [];
+for (var i = 0; i < 2000; i++) {
+	var item = document.createElement("div");
+	item.className = "item";
+	item.innerHTML = "<span>a" + i + "</span> row " + i + " <span>b</span> text text text text text";
+	list.appendChild(item);
+	items.push(item);
+}
+var ul = document.getElementById("items");
+for (i = 0; i < 2000; i++) {
+	var li = document.createElement("li");
+	li.textContent = "entry " + i;
+	ul.appendChild(li);
+}
+document.body.offsetWidth;
+
+// 1. A class changes, and the element's width is read (200 times).
+var start = now();
+var sum = 0;
+for (i = 0; i < 200; i++) {
+	var el = items[(i * 7) % 2000];
+	el.className = (i % 2) ? "item" : "item hot wide";
+	sum += el.offsetWidth;
+}
+report("class-then-offset", start, sum);
+
+// 2. A style property changes, and the element's width is read (200 times).
+start = now();
+sum = 0;
+for (i = 0; i < 200; i++) {
+	el = items[(i * 11) % 2000];
+	el.style.width = (100 + (i % 5)) + "px";
+	sum += el.offsetWidth;
+}
+report("style-then-offset", start, sum);
+
+// 3. A list item is added, and its rectangle is read (200 times).
+start = now();
+sum = 0;
+for (i = 0; i < 200; i++) {
+	li = document.createElement("li");
+	li.textContent = "new " + i;
+	ul.appendChild(li);
+	var rect = li.getBoundingClientRect();
+	sum += Math.round(rect.height + rect.width);
+}
+report("append-then-rect", start, sum);
+
+// 4. A class toggles on one element and another's computed color is read (1000 times).
+start = now();
+sum = 0;
+for (i = 0; i < 1000; i++) {
+	items[(i * 13) % 2000].classList.toggle("hot");
+	sum += getComputedStyle(items[(i * 17 + 1) % 2000]).color.length;
+}
+report("toggle-then-computed", start, sum);
+</script>
+</body>
+</html>
