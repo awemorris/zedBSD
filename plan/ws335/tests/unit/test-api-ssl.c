@@ -116,6 +116,7 @@
  * did not take yet, and what the sink saw of the client's application data.
  */
 struct rig {
+	unsigned flags;
 	intptr_t client;
 	intptr_t server;
 	struct tlspeer *peer;
@@ -525,6 +526,9 @@ rig_settle_alerts(
 	rig_settle(rig, 3);
 }
 
+/* Makes and remakes a rig's SSL (defined after rig_open). */
+static void rig_make_ssl(struct rig *rig);
+
 /* Makes a rig for a peer script; flags say whether the context trusts the root and the SSL has its names. */
 static struct rig *
 rig_open(
@@ -535,7 +539,6 @@ rig_open(
 	struct rig *rig;
 	const unsigned char *cursor;
 	X509 *root;
-	X509_VERIFY_PARAM *param;
 	int result;
 
 	/* The rig, its sockets and its peer. */
@@ -563,7 +566,20 @@ rig_open(
 	if ((flags & RIG_PEER) != 0U)
 		SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, NULL);
 
-	/* The SSL on the socket, verifying at a fixed time inside the certificates' validity. */
+	/* The SSL on the socket. */
+	rig->flags = flags;
+	rig_make_ssl(rig);
+	return rig;
+}
+
+/* Makes the rig's SSL from its context: on the socket, verifying at a fixed time inside the certificates' validity, with the names when asked. */
+static void
+rig_make_ssl(
+	struct rig *rig)
+{
+	X509_VERIFY_PARAM *param;
+
+	/* The SSL on the socket, at the fixed time. */
 	rig->ssl = SSL_new(rig->ctx);
 	CHECK(rig->ssl != NULL);
 	CHECK(SSL_set_fd(rig->ssl, (int)rig->client) == 1);
@@ -573,11 +589,20 @@ rig_open(
 	param->params.time = TLSPEER_PKI_TIME;
 
 	/* The SNI name and the host name the certificate must match. */
-	if ((flags & RIG_NAMES) != 0U) {
+	if ((rig->flags & RIG_NAMES) != 0U) {
 		CHECK(SSL_set_tlsext_host_name(rig->ssl, HOST) == 1);
 		CHECK(SSL_set1_host(rig->ssl, HOST) == 1);
 	}
-	return rig;
+}
+
+/* Makes the rig's SSL again after its context changed (SSL_new copies the context's settings, as OpenSSL's does). */
+static void
+rig_renew(
+	struct rig *rig)
+{
+	/* The old SSL never started; the new one copies the context as it is now. */
+	SSL_free(rig->ssl);
+	rig_make_ssl(rig);
 }
 
 /* Frees a rig and everything in it. */
@@ -1197,10 +1222,10 @@ test_ssl(void)
 	CHECK(SSL_get0_param(NULL) == NULL);
 	expect_error(L_SSL, (int)CRYC_R_PASSED_NULL_PARAMETER);
 
-	/* The SSL's own version bounds override the context's and are read back; the context keeps its own. */
+	/* The SSL's own version bounds (copied by SSL_new) are read back; a later change to the context does not reach them, and the context keeps its own. */
 	CHECK(SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == 0L);
 	CHECK(SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) == 1L);
-	CHECK(SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == TLS1_2_VERSION);
+	CHECK(SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == 0L);
 	CHECK(SSL_ctrl(ssl, SSL_CTRL_SET_MIN_PROTO_VERSION, TLS1_3_VERSION, NULL) == 1L);
 	CHECK(SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == TLS1_3_VERSION);
 	CHECK(SSL_ctrl(ssl, SSL_CTRL_SET_MAX_PROTO_VERSION, TLS1_3_VERSION, NULL) == 1L);
@@ -1398,6 +1423,7 @@ test_verify(void)
 	peer_config(&config, SSLC_TLS13, &pki256);
 	rig = rig_open(&config, &pki256, RIG_NAMES);
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER | 2 | 4, NULL);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	expect_error(L_SSL, R_CERTIFICATE_VERIFY_FAILED);
@@ -1406,6 +1432,7 @@ test_verify(void)
 	rig = rig_open(&config, &pki256, RIG_NAMES);
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, NULL);
 	SSL_CTX_set_verify(rig->ctx, 8 | 2, NULL);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(SSL_get_verify_result(rig->ssl) == V_UNABLE_TO_GET_ISSUER_LOCALLY);
 	rig_close(rig);
@@ -1425,6 +1452,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 1;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(callback_calls == 1U);
 	CHECK(callback_preverify == 0);
@@ -1441,6 +1469,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 0;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_SSL);
@@ -1458,6 +1487,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 1;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(callback_calls == 1U);
 	CHECK(callback_preverify == 1);
@@ -1468,6 +1498,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 0;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	expect_error(L_SSL, R_CERTIFICATE_VERIFY_FAILED);
@@ -1484,6 +1515,7 @@ test_callback(void)
 	callback_answer = 1;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, NULL);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	expect_error(L_SSL, R_CERTIFICATE_VERIFY_FAILED);
@@ -1496,6 +1528,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 0;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_NONE, verify_callback);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(callback_calls == 0U);
 	rig_close(rig);
@@ -1525,6 +1558,7 @@ test_versions(void)
 	/* A minimum of TLS 1.3 offers only TLS 1.3 and its suites. */
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(rig->peer->hello.version_count == 1U);
 	CHECK(hello_offers(rig->peer, 0x0304));
@@ -1536,6 +1570,7 @@ test_versions(void)
 	/* SSL_OP_NO_TLSv1_2 does the same. */
 	rig = rig_open(&config, &pki256, RIG_STD);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_2);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(rig->peer->hello.version_count == 1U);
 	CHECK(hello_offers(rig->peer, 0x0304));
@@ -1557,6 +1592,7 @@ test_versions(void)
 	peer_config(&config, SSLC_TLS12, &pki256);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_max_proto_version(rig->ctx, TLS1_2_VERSION) == 1L);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(!hello_offers(rig->peer, 0x0304));
 	hello_suites(rig->peer, &tls13, &tls12);
@@ -1567,6 +1603,7 @@ test_versions(void)
 	/* SSL_OP_NO_TLSv1_3 does the same. */
 	rig = rig_open(&config, &pki256, RIG_STD);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_3);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(!hello_offers(rig->peer, 0x0304));
 	rig_close(rig);
@@ -1575,6 +1612,7 @@ test_versions(void)
 	peer_config(&config, SSLC_TLS12, &pki256);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_SSL);
@@ -1587,6 +1625,7 @@ test_versions(void)
 	peer_config(&config, SSLC_TLS13, &pki256);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_2 | SSL_OP_NO_TLSv1_3);
+	rig_renew(rig);
 	CHECK(SSL_connect(rig->ssl) == -1);
 	CHECK(SSL_get_error(rig->ssl, -1) == SSL_ERROR_SSL);
 	expect_error(L_SSL, R_NO_PROTOCOLS_AVAILABLE);
@@ -1597,25 +1636,36 @@ test_versions(void)
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
 	CHECK(SSL_CTX_set_max_proto_version(rig->ctx, TLS1_2_VERSION) == 1L);
+	rig_renew(rig);
 	CHECK(SSL_connect(rig->ssl) == -1);
 	expect_error(L_SSL, R_NO_PROTOCOLS_AVAILABLE);
 	rig_close(rig);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_3);
+	rig_renew(rig);
 	CHECK(SSL_connect(rig->ssl) == -1);
 	expect_error(L_SSL, R_NO_PROTOCOLS_AVAILABLE);
 	rig_close(rig);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_max_proto_version(rig->ctx, TLS1_2_VERSION) == 1L);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_2);
+	rig_renew(rig);
 	CHECK(SSL_connect(rig->ssl) == -1);
 	expect_error(L_SSL, R_NO_PROTOCOLS_AVAILABLE);
 	rig_close(rig);
 
-	/* A setting made on the context after SSL_new and before the first call is seen (the settings are read at the start). */
+	/* A setting made on the context after SSL_new does not reach that SSL (SSL_new copied the settings); an SSL made after it has it. */
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
+	CHECK(SSL_ctrl(rig->ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == 0L);
+	rig_up(rig);
+	CHECK(rig->peer->hello.version_count == 2U);
+	rig_close(rig);
+	rig = rig_open(&config, &pki256, RIG_STD);
+	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
+	rig_renew(rig);
+	CHECK(SSL_ctrl(rig->ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == (long)TLS1_3_VERSION);
 	rig_up(rig);
 	CHECK(rig->peer->hello.version_count == 1U);
 	rig_close(rig);
@@ -2058,6 +2108,7 @@ test_close(void)
 		/* With SSL_OP_IGNORE_UNEXPECTED_EOF the same end is a clean close: 0 and ZERO_RETURN, nothing queued. */
 		rig = rig_open(&config, &pki256, RIG_STD);
 		SSL_CTX_set_options(rig->ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+		rig_renew(rig);
 		rig_up(rig);
 		CHECK(tlspeer_send_data(rig->peer, big_buffer, 10U) == 0);
 		rig->peer_total += 10UL;

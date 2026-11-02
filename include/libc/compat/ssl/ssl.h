@@ -200,8 +200,8 @@ long SSL_ctrl(SSL *ssl, int command, long number, void *pointer);
  * SSL_set1_host: clears the host and the address set before, then an IP
  * address literal (X509_VERIFY_PARAM_set1_ip_asc's forms) sets the
  * address and any other text sets the host name
- * (X509_VERIFY_PARAM_set1_host).  NULL clears both.  Returns 1, or 0 for
- * a text that is neither.
+ * (X509_VERIFY_PARAM_set1_host).  NULL or an empty text clears both.
+ * Returns 1, or 0 for a text that is neither.
  */
 int SSL_set1_host(SSL *ssl, const char *host);
 
