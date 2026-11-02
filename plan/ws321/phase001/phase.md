@@ -3,7 +3,7 @@
 # ws321-p001 調べと設計: BCM2712 の HEVC の block を V3D の executor の Vulkan Video として
 
 - 親: [WS321](../ws.md)。Queue: q1923-i01（P3、worktree p3-ws321、branch agent/p3-ws321、基点 main d4056dfe3）。
-- Status: in-progress（2026-11-02 08:45 P3。設計を書いた。review は下の「review」）
+- Status: cleared（2026-11-02 09:40 P3。設計と review 37 件の反映。p002 の実装が実機で ffmpeg と一致した事で前提を確かめた。Q1 の受け入れ待ち）
 - 依存: なし。WS322（VF2）・WS324（RTX）の共有の部品（libvulkan の H.265 decode の転送 capset の bit 2、libmedia の H.265 の parse、vkvideo-probe `--h265`、plan/ws324/tests/conformance/）は main にある。
 
 ## 出典と license
@@ -11,7 +11,7 @@
 | 出典 | license | 使い方 |
 | --- | --- | --- |
 | Raspberry Pi の Linux の tree `raspberrypi/linux` の branch rpi-6.12.y、commit 7821b6a1baefd97757142d9c3227b5219e9f4568（2025-03-25）、`drivers/media/platform/raspberrypi/hevc_dec/`（hevc_d.c・hevc_d.h・hevc_d_h265.c・hevc_d_hw.c・hevc_d_hw.h・hevc_d_video.c）。SHA-256 は `plan/ws321/temp/linux-hevc/`（git に入れない）の取り寄せの記録 | GPL-2.0（hevc_d_h265.c は GPL-2.0-or-later） | 値（register の offset・bit・式の定数・CABAC の初期値の表・scaling の位置の表）と手順（2 段の順、命令の FIFO の中身の順、終わりの判定）だけを block ごとの出典つきで使う。code・comment・構造・名前は写さない（guardrail「MIT・GPL の出典のデータの引用」） |
-| 同じ tree の `arch/arm64/boot/dts/broadcom/bcm2712.dtsi` | GPL-2.0 OR MIT | node の compatible・reg・割り込み・clock の番号（binding の事実） |
+| 同じ tree の `arch/arm64/boot/dts/broadcom/bcm2712-ds.dtsi`（hevc の node）と `bcm2712.dtsi`（IOMMU2、AXI の dma-ranges） | GPL-2.0、GPL-2.0 OR MIT | node の compatible・reg・割り込み・clock の番号（binding の事実） |
 | 同じ tree の `drivers/iommu/bcm2712-iommu.c` | GPL-2.0-only | IOMMU2 の CTRL・BYPASS の register を読むだけ（hvs6.c と同じ扱い） |
 | Mesa（MIT）`src/broadcom/common/v3d_tfu.h`、`src/gallium/drivers/v3d/v3dx_tfu.c` の `tfu_sand`（P4 の取り寄せ `/home/awe/zedBSD-worktrees/p4-ws291pi/build/tmp/mesa-dl3/`、読むだけ） | MIT | V3D 7.1 の TFU の SAND の入力の field（IFORMAT 1、SVTWID 128、SVSWIZ 15、ICFMT 8 bit、入力の 1 KiB の整列、column の高さの 8 の倍数）。値だけ |
 | ITU-T H.265（2026-01、`build/sources/specs/itu-t-h265-202601.pdf`） | — | slice segment header（7.3.6）、参照の list（8.3.4）、CABAC の初期化（9.3.2.2）、tile（6.5.1） |
@@ -65,11 +65,24 @@ firmware: HEVC の block は firmware を load しない（Linux の driver は 
 - R7: pool の slot ごとの絵は「slot の絵 = その slot を setup にした最後の decode」の約束に頼る（app が slot の image を自分で書き換えると食い違う）。libmedia・vkvideo-probe はしない。
 - R8: Video Player の H.265 の backend（libmedia の Vulkan Video H.265）は P2 の ws322-p006 が作る。p003 の Video Player の段はそれが main に入ってから。
 
-## review
+## review（design-reviewer、37 件、[review.md](review.md)）の反映
 
-- design-reviewer の review は p002 と並べて流す（結果は `review.md`、反映はこの文書）。
+設計は次のとおり直した（実装は p002 でこの形）。
+
+- column の高さは 16 に揃える（色差の column が 8 の倍数、TFU の SAND の入力の条件）。pool の絵は V3D の MMU に map された memory（TFU は V3D の番地で読む）。
+- **pool の memory は app の物にする**: session の memory の要求を絵ごとの binding（DPB の slot の数 + 予備 1、各々 SAND の 2 plane と動き vector、page 揃え）で報告し、app が bind した VkDeviceMemory を使う（kernel が隠れて大きな連続の memory を取らない、DoS を避ける）。phase 1 の list と命令の FIFO だけが executor の物（小さく、足りなければ大きくする）。
+- SPS・PPS は decode ごとに `bcm2712_hevc_check` で検べ、絵の大きさは session の最大（pool の大きさ）以下に限る。block の書く大きさ（FRAMESIZE、stride、PU・係数の list の長さ）は全て検べた値から作る。IOMMU2 は使わない（firmware の後で off を実機で確かめた）。残る危険: 壊れた CABAC の data で block がどう振る舞うかは未確認（Linux も同じ形で使う）。
+- ICTRL の INT は、読んだ値から zero mask を除き EN を保って書き戻して消す。
+- decode の誤り（解けない header、block の失敗、memory の未 bind など）は status query の ERROR で返し、job を失敗させない。block が時間内に終わらない時は block をその boot の間使わない。session・decode の記録の解放は、block がその memory を使う decode を終えるまで待つ（終わらなければ解放しない）。block は一度に一つの decode、他の session の decode は EINPROGRESS で待つ。
+- header は app の uncached の memory から kernel の buffer（64 KiB）に写して読む。segment は表（256）を越えれば絵ごと ERROR（黙って捨てない）。参照の集合の 0xFF（欠けた絵）は数えに入れ、list では最初の参照で埋める。
+- Pi 4 の部品: buffer-copy の Pi 4 の footroom の補正は Pi 4 だけ、capset の decode の bit は Pi 5 で bit 2（H.265）。vulkan-video.h の口は全て vulkan-video-hevc.c が持つ（settle・mark は decode が event の中で終わるので空）。
+- 最小の大きさは 32（Vulkan の報告）。命令の FIFO の 1 組は 32 bit の番地と 32 bit の値。
+- 出力の形は NV12MT_COL128（2 plane）のまま: 出典の commit が列挙から外したのは userspace の都合で、block の register（OUTCBASE・OUTCSTRIDE）は plane ごとに取る。実機で一致を確かめた（p002）。
+- 試験: libmedia との照合に加え、host 試験で 3 つの形（start code あり・なし・4 byte）、ENOSPC の後の作り直し、100000 件の壊れた入力（ASan・UBSan）。hardware の照合は実機の ffmpeg の framehash。
+- Phase: p004「規約の全文の見直し」を足す。p003 の Video Player の段は ws322-p006（libmedia の H.265 の backend、main 5c8c1e7dc）に依る。
 
 ## Phase の分け（p002・p003）
 
 - p002 実装: ① slice header・命令の FIFO の純粋な部分と host 試験、② HEVC の block の driver（probe・clock・poll・2 段・誤り）、③ executor の H.265 の reader と run（session・parameters・pool・TFU の写し・query）、④ build（Pi 5 の config、warning 0）、Pi 4 の build の非退行。
 - p003 実機: vkvideo-probe の表、Video Player の GPU の道。
+- p004 規約の全文の見直し（AGENTS §2）。

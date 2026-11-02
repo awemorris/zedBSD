@@ -30,7 +30,7 @@
  * its two register windows.
  *
  * Values referenced: Raspberry Pi Linux rpi-6.12.y (7821b6a1)
- * arch/arm64/boot/dts/broadcom/bcm2712.dtsi, node hevc_dec (codec@800000).
+ * arch/arm64/boot/dts/broadcom/bcm2712-ds.dtsi, node hevc_dec (codec@800000).
  */
 #define HEVC_COMPATIBLE			"brcm,bcm2712-hevc-dec"
 #define HEVC_WINDOW_DECODER		"hevc"
@@ -40,7 +40,7 @@
  * The firmware's clock of the block and the property tags that ask its
  * highest rate, set its rate and turn it on.
  *
- * Values referenced: bcm2712.dtsi above (clocks = <&firmware_clocks 11>);
+ * Values referenced: bcm2712-ds.dtsi above (clocks = <&firmware_clocks 11>);
  * Raspberry Pi firmware wiki, "Mailbox property interface" (Get max clock
  * rate 0x00030004, Set clock rate 0x00038002, Set clock state 0x00038001,
  * state bit 0 on).
