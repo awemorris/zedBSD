@@ -2,7 +2,7 @@
 
 # ws344-p022 規約の全文の見直し
 
-- Status: planned
+- Status: in-progress（P2、q1982-i01。実施済み・試験 PASS、cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: conformance-reviewer。依存: p021。
 - 目的: WS344 が足した全ての C（library・libbrowser の webp.c・試験）を coding-style.md の全文で読み、書き方だけを直す。header の持ち越しの直しと試験の道具の移動の依頼。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -68,4 +68,16 @@ git diff --check
 
 ## 結果
 
-（未着手）
+（2026-11-02 18:38、P2、q1982-i01）
+
+- commit: 持ち越しの直し `c2985a337f4e4f497cf38f2ce9bc18f6cbc7b67e`、規約の見直し `a6859dc06468c8cd17532d7bc74d46509df3bcd0`（これが新しい check-skeleton の BASE。ws.md の「基点」を書き換えた）、この記録の commit。
+- 持ち越しの直し:
+  - license の監査（ws.md の「Q1 の判断」1）: `userland/base/licenses/libwebp-compat/libwebp-COPYING`（libwebp 1.5.0 の COPYING、BSD-3-Clause、output.c の YUV → RGB の定数が libwebp の値であることの説明つき）、libwebp-compat の package の IMAGE_DATA で `/usr/share/licenses/libwebp-compat/libwebp-COPYING` に入れる、`tools/release/license-components.json` に component `libwebp-values`（when program:libwebp-compat）、Windows の配る形の `share/licenses/libwebp-COPYING.txt`（`apps/browser-win32/Makefile` の OMNIGRAMMATON_LICENSES と `resources/licenses-README.txt`）。`python3 tools/release/license-inventory.py --config config/ci/config-amd64.mk ...`（出力は build/tmp）→ `24 components, 0 open items`、libwebp-values は ok。plan/ws129 の生成物は WS129 の物なので作り直していない。
+  - `vp8-idct.h` の WHT の comment: 1 段目は 16 bit に包む（RFC 6386 14.3・20.8）、正しい stream では int32 と同じ値、に直した（p014 の報告）。
+  - `fixtures.list` の partitions の 11 行に `method=1`（libwebp の encoder は method 3 以上で 1 partition に戻す）と先頭の説明、`fixtures.sha256` を作り直した（変わったのはその 11 file だけ、partition 数は 2・4・8 になった）。
+  - mutate の 1 file の上限: fuzz-target.c の alarm を 120 → 300 s、mutate.sh の timeout を 180 → 360 s と comment。
+  - 他の header の持ち越し: 各 Phase の結果の節を読んで、header の誤りの報告は WHT の 1 件だけだった（p005 の Table 4 の下端と p010 の bmode_tree の comment の符号の長さは RFC の側の誤りで、header は正しい）。
+- 規約の見直し（conformance-reviewer を 1 本、P2 が diff を読み確かめた）: libwebp-compat の 17 の .c と libbrowser の `image/webp.c`（+491/−160）。複数行の static の前方宣言を 1 行に（約 18）、条件の中の関数の呼び出しを先に変数へ（約 20）、`return decode_status(error);` を変数を経て（8）、条件演算子を if に（5）、3 項以上の条件を 1 項 1 行に（短絡の順は保つ、約 9）、分けた呼び出しを 1 引数 1 行に（約 18）、閉じ括弧の後の空行（約 25）、目的の comment と「Succeeded」の comment（約 75）。`plan/tools/style-check.py` の指摘は 74 → 0。alpha.c・vp8-tables.c・vp8l-transform.c・全ての header の文は変えていない（header に開発の管理情報も複数行の comment の区切りの崩れも無かった）。残した物: 1 つの comment の下に続く短い guard の if の組（約 5）、算術の中の関数の呼び出し、case ごとに return する switch。
+- 動作が変わっていないことの確かめ（PATH=/usr/bin:$PATH、規約の見直しの後）: `check-skeleton.sh` PASS（`BASE=a6859dc064…` でも PASS）、`run-unit.sh all` PASS、`run-fixtures.sh` lossy 352・lossless 174・alpha 54 PASS、`compare.sh` PASS (364 files)、conformance の集合で run-fixtures lossy 342・lossless 43・alpha 27 と compare 214 PASS、`mutate.sh`（5 file、最大の lossy-large-photo-1024x683 を含む）PASS (1085 inputs)、`platform/webp-wine.sh` PASS (364 files, 0 warnings)（Windows の static library）、`browser/run-host-image.sh` PASS (358 files)、zedBSD amd64 の libwebp-compat.so と libbrowser.so（共有の sysroot）rc 0・warning 0、`git diff --check` は出力無し。
+- Q1 への依頼: 試験の道具の plan/tools への移動と plan/tools.md の登録（`plan/ws344/tests/` の run-unit.sh・check-skeleton.sh・make-fixtures.sh・compare.sh・run-fixtures.sh・mutate.sh・fuzz.sh・conformance/・platform/・browser/、unit/）。WS の完了の書き直しと Phase の directory の片付けも Q1。
+- 未実施: 試験の C（plan/ws344/tests の unit・driver など）の規約の全文の見直し（library の code を先にした）、実機。
