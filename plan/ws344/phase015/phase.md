@@ -2,7 +2,7 @@
 
 # ws344-p015 VP8 の intra 予測（vp8-predict.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（担当 Sonnet q1960-i01、2026-11-02。cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p001。
 - 目的: 16x16・8x8 の DC・V・H・TM と 4x4 の 10 mode。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -65,4 +65,25 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02 14:18（host の `date`）。
+
+- 作った物: `userland/desktop/libwebp-compat/vp8-predict.c`、`plan/ws344/tests/unit/test-vp8_predict.c`。header・道具・他の module は変えていない。
+- 実行した command と最後の行:
+  - `sh plan/ws344/tests/run-unit.sh vp8_predict` → `test-vp8_predict: PASS (5281 checks)` / `run-unit: PASS`
+  - `sh plan/ws344/tests/run-unit.sh all` → 13 試験すべて PASS、最後 `run-unit: PASS`
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`
+  - `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`
+  - `git diff --check` → 出力なし
+- 試験の中身: 16・8 の V・H（pixel ごとに違う edge）、TM の clamp の両端と丁度 0・255、DC の 4 つの場合と丸めの両側（16・8 の各 mode、無視される edge は 255 などの別の値）、
+  subblock の 10 mode を 1 組の edge（P = 50、A = 10 20 40 80 90 100 200 250、L = 30 60 120 240）で手で追った 16 画素（comment に式）、
+  平坦な edge（0・127・129・255）で全 mode が平坦、stride 4・16・17・40 と block の stride 16・17・40 で隣の画素が不変、範囲の外の size・mode は何も書かない、
+  malloc の大きさちょうどの edge・dst で 3000 回の subblock と 2000 回の block の乱数（§12.3 の式を画素ごとに写した reference と比較）。
+- 変異試験（git の外の複写 `build/tmp/p015/mut/`、script `build/tmp/p015/mut.py`）: 35 通り（DC の shift・丸め・have_* の無視・128、TM の符号・clamp、V・H の写し、
+  size の許可、avg2・avg3 の丸め、subblock の DC・TM・VE・HE の下端と上端・LD の最後・RD の index・VR・VL・HD・HU の各画素、mode の上限、stride）を入れ、全部 FAIL（killed）。見逃しは 0。
+  source は変異の後も commit と同一（`cmp` で確認）。
+- 自分で決めた点（header が黙っている所）:
+  - 範囲の外の size（8・16 以外）と mode（block は DC・V・H・TM 以外、subblock は 10 以上）は何も書かずに返る（戻り値は void。呼び手が検査済みの前提）。
+  - subblock の edge は 13 画素の 1 本の線（左の列の下から上、corner、above[0..7]）に並べ直して読む。B_HE_PRED の最上行は corner（above[-1]）を使う（§12.3 の L[-1]）。
+- 仕様と header・phase.md の食い違い: なし。§12.3 の narrative と §20.14 の predict.c は subblock の 10 mode の全画素で一致することを手で確かめた
+  （narrative の誤記 `svg2p` は avg2p。実装は avg2）。header の DC の shift の記述（3 + have_above + have_left、8 は 1 少ない）は実装と一致。
+- 未実施: ASan・UBSan 以外の実行（QEMU・実機・fixture の全体の比較。依存する module が揃ってから）。
