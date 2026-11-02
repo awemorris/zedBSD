@@ -37,6 +37,10 @@
  *       (browser_view_presented) and not at all while nothing is presented;
  *   (k) while a script spins for 5 s the drawing thread draws the last
  *       committed frame, at a size other than the view's too, at once;
+ *   (l) a page committed is told with its own state: the committed
+ *       callback, with the window's thread processing while the new page's
+ *       load handler spins before its state is published, reads the new
+ *       location and title;
  *   and, in both modes, a link to a page whose style sheet comes slowly
  *   (as host-navigation-wait): the window's calls stay short, the page
  *   shown stays the first until the new one is ready, and the new one is
@@ -82,6 +86,9 @@ static char test_console[65536];
 static size_t test_console_length;
 static int test_redraw;
 static int test_field_answered;
+static unsigned test_committed;
+static char test_committed_url[512];
+static char test_committed_title[128];
 static int test_field_error;
 static unsigned test_checks;
 static unsigned test_failures;
@@ -103,6 +110,7 @@ static void test_frame_wake(void *context);
 static void test_redraw_callback(void *context, struct browser_view *view);
 static void test_console_callback(void *context, struct browser_view *view, int level, const char *text, size_t length);
 static void test_field(void *context, struct browser_view *view, int error, const float *caret);
+static void test_committed_callback(void *context, struct browser_view *view);
 static void *test_render(void *context);
 static int test_view(int threading, struct browser_view **view);
 static double test_pump(struct browser_view *view, int ms, const char *title);
@@ -118,6 +126,7 @@ static void test_same_pictures(void);
 static int test_gpu_render(struct browser_view *view, int own, uint32_t *pixels);
 static void test_animation_frames(void);
 static void test_draw_during_script(void);
+static void test_committed_state(void);
 
 /* Runs every check and prints the summary. */
 int
@@ -158,6 +167,7 @@ main(
 	test_same_pictures();
 	test_animation_frames();
 	test_draw_during_script();
+	test_committed_state();
 
 	/* The summary. */
 	printf("host-threaded-view: %u checks, %u failed\n", test_checks, test_failures);
@@ -275,6 +285,23 @@ test_field(
 	test_field_error = error;
 }
 
+/* A page committed: the location and the title the getters read in the callback, kept. */
+static void
+test_committed_callback(
+	void *context,
+	struct browser_view *view)
+{
+	const char *url;
+	const char *title;
+
+	(void)context;
+	url = browser_view_url(view);
+	title = browser_view_title(view);
+	snprintf(test_committed_url, sizeof(test_committed_url), "%s", url != NULL ? url : "(none)");
+	snprintf(test_committed_title, sizeof(test_committed_title), "%s", title != NULL ? title : "(none)");
+	test_committed++;
+}
+
 /* The drawing stand-in: the latest picture whenever there is a new one, until told to stop. */
 static void *
 test_render(
@@ -321,6 +348,7 @@ test_view(
 	callbacks.redraw = test_redraw_callback;
 	callbacks.console = test_console_callback;
 	callbacks.field = test_field;
+	callbacks.committed = test_committed_callback;
 	memset(&options, 0, sizeof(options));
 	options.version = BROWSER_API_VERSION;
 	options.fonts = &fonts;
@@ -1009,5 +1037,47 @@ test_draw_during_script(void)
 	corner = pixels[699U * 1000U + 999U];
 	test_check(drawn == 0 && corner == 0xFF336699U && took < 100000000LL, "(k) the drawing thread draws the last frame while a script spins",
 	    "error %d, corner %08x, %.2f ms", drawn, (unsigned)corner, (double)took / 1e6);
+	browser_view_destroy(view);
+}
+
+/*
+ * (l): a page committed is told with its own state.  The page's load
+ * handler spins 800 ms after the commit, before the script thread
+ * publishes the new state, while the window's thread runs
+ * browser_view_process every 2 ms: the committed callback must come only
+ * with the published state (the new location and title), not with the old
+ * page's.
+ */
+static void
+test_committed_state(void)
+{
+	struct browser_view *view;
+	const char *first;
+	const char *second;
+	unsigned before;
+	size_t length;
+	int index;
+	int error;
+
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(l) view", "no view (%d)", error);
+		return;
+	}
+	first = test_page("first.html", "<!DOCTYPE html><title>First</title><p>first");
+	(void)browser_view_load(view, first);
+	(void)test_pump(view, 3000, "First");
+	second = test_page("second.html", "<!DOCTYPE html><title>Second</title><p>second<script>"
+	    "addEventListener('load', function () { var end = Date.now() + 800; while (Date.now() < end) {} });</script>");
+	before = test_committed;
+	(void)browser_view_load(view, second);
+	for (index = 0; index < 2000 && test_committed == before; index++) {
+		browser_view_process(view);
+		test_sleep_ms(2);
+	}
+	length = strlen(test_committed_url);
+	test_check(test_committed != before && length >= 11 && strcmp(test_committed_url + length - 11, "second.html") == 0 &&
+	    strcmp(test_committed_title, "Second") == 0, "(l) the committed callback reads the new page's state",
+	    "%u callbacks, url \"%s\", title \"%s\"", test_committed - before, test_committed_url, test_committed_title);
 	browser_view_destroy(view);
 }
