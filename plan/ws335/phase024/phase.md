@@ -2,7 +2,7 @@
 
 # ws335-p024: 公開の EVP_PKEY（Ed25519・X25519・ML-KEM-768）
 
-Status: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1913-i01。cleared は Q1。2026-11-01 p001 が作成。依存: p021、p009、p008、p014）
+Status: cleared（2026-11-02 09:40 Q1、main で試験 PASS）。前: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1913-i01。cleared は Q1。2026-11-01 p001 が作成。依存: p021、p009、p008、p014）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
