@@ -84,8 +84,8 @@ run-ct は流していない（この module は秘密を扱わない: 証明書
 - cryc_x509_from_der: 受理、NULL・0・0x1000005・0x7fffffff・余分な 1 octet・切れ。最大の大きさ（0xffffff + 5）の証明書の受理と、1 octet 多い入力の拒否（大きさの検査と parse の誤りの区別）。
 - 参照数: X509 と X509_STORE を 2 参照にして最初の free で残り、2 回目で解放。NULL の free。
 - X509_STORE_add_cert: NULL 引数、複写（entry の DER は別の buffer）、同じ物の重複（同じ object と別 object の同じ bytes）は成功して増えない、追加の順、caller の X509_free の後も store の複写が残る、4096 枚（上限）の次の 1 枚は 0 と UNSUPPORTED、上限での重複は成功、4 thread × 100 枚＋共有 50 枚の同時の追加で 450 枚・参照数が戻る。parse できない bytes になった object は INTERNAL_ERROR で断る（作れる経路が他に無い防御）。
-- X509_VERIFY_PARAM_set1_host: 小文字化・末尾の dot・長さ指定（先頭 n 文字だけ・0 は C 文字列）・label 63/64・名前 253/254・末尾の dot つき 254・255・NUL を含む・255 文字で NUL が無い buffer（ちょうどの heap で読み過ぎを見る）・空と NULL は host を消す・不正な名前 17 通りは変えない。
-- X509_VERIFY_PARAM_set1_ip_asc: IPv4 8 通り・IPv6 29 通り（完全形・大文字・:: の各位置・IPv4 を含む形）の期待 octet を RFC 4291 2.2 から手計算、拒否 130 通り超（先頭 0・桁・dot の位置・:::・:: 2 回・8 group と ::・zone・括弧・prefix・G などの文字）。別の作りの参照 reader（colon で先に分ける）と、乱数・変異の 40 万の text で受理と octet が一致（受理 80107・拒否 319893・差 0）。
+- X509_VERIFY_PARAM_set1_host: 小文字化・末尾の dot・長さ指定（先頭 n 文字だけ・0 は C 文字列）・label 63/64・名前 253/254・末尾の dot つき 254・255・NUL を含む・255 文字で NUL が無い buffer（ちょうどの heap で読み過ぎを見る）・空と NULL は host を消す・不正な名前 18 通りは変えない。
+- X509_VERIFY_PARAM_set1_ip_asc: IPv4 8 通り・IPv6 28 通り（完全形・大文字・:: の各位置・IPv4 を含む形）の期待 octet を RFC 4291 2.2 から手計算、拒否 98 通り（先頭 0・桁・dot の位置・:::・:: 2 回・8 group と ::・zone・括弧・prefix・G などの文字）。別の作りの参照 reader（colon で先に分ける）と、乱数・変異の 40 万の text で受理と octet が一致（受理 80107・拒否 319893・差 0）。
 - 公開の呼び出しの連携: 自己署名の server が store に無ければ 18（"self-signed certificate"）、追加して 0、host 名の不一致 62・大文字小文字・末尾 dot・親の名前、address の不一致 64、IPv6 の別表記の一致、拒否された設定は前の設定のまま。
 - 外の corpus: ca-certificates の 121 枚を d2i_X509 で読み store に入れる（parser の直読みと field が一致）、x509-limbo の証明書 39936 枚（受理 39923・拒否 13）が parser の判定と全て一致。
 
@@ -115,4 +115,3 @@ phase.md と header の食い違い: 無し（check-skeleton の BASE は Q1 の
 - メモリ不足の経路（store・certificate・add_cert の MALLOC_FAILURE、mutex 作成の失敗）の試験: ASan 下では malloc を失敗させられない。読んで確かめた。
 - run-ct（秘密を扱わない）、aarch64 の Windows（check-skeleton の build だけ）、実機・QEMU。
 - X509_V_ の区別（32 と 39、47 と 48）を呼び側に渡す口（header の変更が要る、上の判断の点）。
-
