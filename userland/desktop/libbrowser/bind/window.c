@@ -501,6 +501,12 @@ bind_run_script_source(
 		status = 0;
 	}
 
+	/* A task asked to end leaves without its microtasks, up to whoever began it. */
+	if (status == VM_TERMINATED) {
+		bind_window_terminated(window);
+		return status;
+	}
+
 	/* Running out of memory stops the page. */
 	if (status == ENOMEM)
 		return status;
@@ -532,6 +538,13 @@ window_report_stop(
 {
 	struct wb_buffer line;
 
+	/* A task asked to end is no fault of the microtasks: it is told once for the task. */
+	if (status == VM_TERMINATED) {
+		bind_window_terminated(window);
+		return;
+	}
+
+	/* The error's line. */
 	wb_buffer_init(&line);
 	if (wb_buffer_printf(&line, "Uncaught InternalError: a microtask stopped (%s)", wb_os_error_text(status)) == 0)
 		bind_console(window, BIND_CONSOLE_ERROR, wb_buffer_string(&line));
@@ -656,6 +669,48 @@ cleanup:
 		return status;
 
 	/* Succeeded: no reentrant checkpoint ran the same pending work twice. */
+	return 0;
+}
+
+/*
+ * Notes that a task of the window's scripts was asked to end and left with
+ * VM_TERMINATED: the microtasks it queued and the rejections it left are
+ * dropped, the window is marked for good (its page is not kept for going
+ * back) and the console says so once for the task, however many scripts
+ * or callbacks of it stopped.
+ */
+void
+bind_window_terminated(
+	struct bind_window *window)
+{
+	uint32_t task;
+
+	/* Nothing the task queued runs. */
+	wb_vector_clear(&window->realm->jobs);
+	wb_vector_clear(&window->realm->rejections);
+	window->terminated = 1;
+
+	/* One line for the task. */
+	task = vm_heap_task_current(window->realm->heap);
+	if (task != 0U && task == window->terminated_task)
+		return;
+	window->terminated_task = task;
+	bind_console(window, BIND_CONSOLE_WARN, "A script was stopped: the page left it or it ran too long");
+}
+
+/*
+ * Reports whether a task of the window's scripts was ever asked to end
+ * (bind_window_terminated).
+ */
+int
+bind_window_was_terminated(
+	const struct bind_window *window)
+{
+	/* The mark stays from the first termination. */
+	if (window->terminated)
+		return 1;
+
+	/* No script of the window was stopped. */
 	return 0;
 }
 

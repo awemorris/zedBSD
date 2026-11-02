@@ -633,6 +633,10 @@ timer_run(
 		status = 0;
 	}
 
+	/* A task asked to end leaves without its microtasks, up to whoever began it. */
+	if (status == VM_TERMINATED)
+		bind_window_terminated(window);
+
 	/* Running out of memory stops the page. */
 	if (status != 0)
 		return status;

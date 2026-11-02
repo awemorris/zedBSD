@@ -525,6 +525,132 @@ vm_heap_stats(
 	stats->freed_cells = heap->freed_cells;
 }
 
+/*
+ * Begins a task of the heap's thread: gives it the next number (never 0)
+ * and forgets any request to end an earlier task.  Returns the number,
+ * which vm_heap_task_current reports to the other threads until
+ * vm_heap_task_end.
+ */
+uint32_t
+vm_heap_task_begin(
+	struct vm_heap *heap)
+{
+	uint32_t task;
+
+	/* The next number; 0 means no task, so the count skips it when it wraps. */
+	task = heap->task_last + 1U;
+	if (task == 0U)
+		task = 1U;
+	heap->task_last = task;
+
+	/*
+	 * The old request goes before the new number is seen: a thread that
+	 * reads the new number (acquire) and asks for it stores after this
+	 * clearing, so its request stays.
+	 */
+	__atomic_store_n(&heap->terminate, 0U, __ATOMIC_RELAXED);
+	__atomic_store_n(&heap->task, task, __ATOMIC_RELEASE);
+
+	/* Succeeded: the task runs under its number. */
+	return task;
+}
+
+/*
+ * Ends the heap's thread's task: no task runs until the next
+ * vm_heap_task_begin, and a request to end the task is put back to none.
+ */
+void
+vm_heap_task_end(
+	struct vm_heap *heap)
+{
+	/* No task runs, and nothing is asked of one (a late request names a task that is gone). */
+	__atomic_store_n(&heap->task, 0U, __ATOMIC_RELEASE);
+	__atomic_store_n(&heap->terminate, 0U, __ATOMIC_RELAXED);
+}
+
+/*
+ * Reports the number of the task the heap's thread runs, 0 between tasks.
+ * Any thread may call it; the number is what vm_heap_request_termination
+ * takes.
+ */
+uint32_t
+vm_heap_task_current(
+	struct vm_heap *heap)
+{
+	uint32_t task;
+
+	/* The number the heap's thread published. */
+	task = __atomic_load_n(&heap->task, __ATOMIC_ACQUIRE);
+
+	/* Succeeded: the task that runs now, or 0. */
+	return task;
+}
+
+/*
+ * Asks the heap's task numbered task to end, from any thread.  The task
+ * leaves with VM_TERMINATED at the engine's next look; a number that is
+ * not the running task's (it ended, or another began) ends nothing, and 0
+ * asks nothing.
+ */
+void
+vm_heap_request_termination(
+	struct vm_heap *heap,
+	uint32_t task)
+{
+	/* No task is no request. */
+	if (task == 0U)
+		return;
+
+	/* The request, which the heap's thread reads at its next look. */
+	__atomic_store_n(&heap->terminate, task, __ATOMIC_RELAXED);
+}
+
+/*
+ * Reports VM_TERMINATED when the task the heap's thread runs is asked to
+ * end, 0 otherwise.  For the heap's thread: the native functions that run
+ * long without calling scripts call it now and then.
+ */
+int
+vm_heap_check_termination(
+	struct vm_heap *heap)
+{
+	int status;
+
+	/* The engine's own look. */
+	status = vm_termination_poll(heap);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the task goes on. */
+	return 0;
+}
+
+/*
+ * Counts one step of a long native function (an element of a sort, of
+ * JSON or of an array method's walk, a copy of a string) and, every few
+ * thousand steps, reports VM_TERMINATED when the task was asked to end.
+ * For the heap's thread; 0 when the task goes on.
+ */
+int
+vm_heap_count_step(
+	struct vm_heap *heap)
+{
+	int status;
+
+	/* Most steps only count. */
+	heap->steps++;
+	if ((heap->steps & VM_STEPS_MASK) != 0U)
+		return 0;
+
+	/* Now and then, the look. */
+	status = vm_termination_poll(heap);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the task goes on. */
+	return 0;
+}
+
 /* Finds the smallest size class that holds size bytes; returns 0 when the cell is large. */
 static int
 heap_size_class(

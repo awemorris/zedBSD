@@ -228,6 +228,14 @@ struct bind_window {
 	unsigned exception_reports;
 	/* A checkpoint cannot recursively run its still-active microtask queue. */
 	int checkpoint_running;
+	/*
+	 * A task of the window's scripts was asked to end (VM_TERMINATED) at
+	 * least once: terminated stays set for the window's life, and
+	 * terminated_task is the heap's number of the last such task, whose
+	 * console line is written (one line per task).
+	 */
+	int terminated;
+	uint32_t terminated_task;
 	/* Globals retain relatives; frame is cleared before child retirement. */
 	struct vm_object *parent_global;
 	struct vm_object *top_global;

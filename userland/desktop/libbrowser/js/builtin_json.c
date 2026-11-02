@@ -583,6 +583,11 @@ json_value(
 	uint16_t unit;
 	int status;
 
+	/* A task asked to end stops a long text. */
+	status = vm_heap_count_step(parser->realm->heap);
+	if (status != 0)
+		return status;
+
 	/* By its first character. */
 	unit = json_peek(parser);
 	switch (unit) {
@@ -1402,6 +1407,11 @@ json_property(
 {
 	struct json_property_roots roots;
 	int status;
+
+	/* A task asked to end stops a long serialization. */
+	status = vm_heap_count_step(writer->realm->heap);
+	if (status != 0)
+		return status;
 
 	/* Initialize every traced slot before publishing native storage to the collector. */
 	roots.writer = writer;

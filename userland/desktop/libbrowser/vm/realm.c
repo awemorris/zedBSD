@@ -147,7 +147,8 @@ vm_enqueue_job(
  * Runs every queued microtask in order, including new jobs, until the queue is empty.
  *
  * A job that throws is reported to report (with context) and the rest
- * still run.  Returns 0, or ENOMEM when a job ran out of memory.
+ * still run.  Returns 0, ENOMEM when a job ran out of memory, or
+ * VM_TERMINATED when the task was asked to end (the rest are dropped).
  */
 int
 vm_run_jobs(
@@ -167,6 +168,14 @@ vm_run_jobs(
 	/* Takes the jobs from the front while there are any (a job may queue more at the end). */
 	next = 0;
 	while (next < realm->jobs.count) {
+		/* A task asked to end runs no more of them: the queue is dropped. */
+		status = vm_termination_poll(realm->heap);
+		if (status != 0) {
+			wb_vector_clear(&realm->jobs);
+			return status;
+		}
+
+		/* The job at the front. */
 		queued = wb_vector_at(&realm->jobs, next);
 		job = *queued;
 		next++;
