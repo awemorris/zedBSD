@@ -489,11 +489,13 @@ view_front_scroll_to(
 	double x,
 	double y)
 {
+	const struct view_snapshot *shown;
 	struct front_item item;
 	int error;
 
 	/* No page shown has no scroll. */
-	if (view_front_snapshot(view)->url == NULL)
+	shown = view_front_snapshot(view);
+	if (shown->url == NULL)
 		return ENOENT;
 
 	/* The entry. */

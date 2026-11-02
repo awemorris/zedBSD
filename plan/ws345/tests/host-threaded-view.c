@@ -24,6 +24,8 @@
  *   (f) once 1024 presses wait, more are refused (ENOBUFS), a release is not;
  *   (g) browser_view_focus_field answers through the field callback, and
  *       text committed for a session that is not the page's is dropped;
+ *   (h) a pagehide handler that runs for ever (the page is put away for
+ *       going back) is stopped after 1 s and the new page is shown;
  *   and, in both modes, a link to a page whose style sheet comes slowly
  *   (as host-navigation-wait): the window's calls stay short, the page
  *   shown stays the first until the new one is ready, and the new one is
@@ -618,6 +620,21 @@ test_destroy_navigate(void)
 	title = browser_view_title(view);
 	test_check(title != NULL && strcmp(title, "B") == 0 && took <= 1000.0, "(e) a load out of a script that runs for ever",
 	    "title \"%s\" after %.1f ms", title != NULL ? title : "(none)", took);
+
+	/* (h): a page whose pagehide handler runs for ever, left for another. */
+	path = test_page("hide.html", "<!DOCTYPE html><title>hide</title><p>hide<script>"
+	    "addEventListener('pagehide', function () { for (;;) {} });</script>");
+	(void)browser_view_load(view, path);
+	(void)test_pump(view, 3000, "hide");
+	path = test_page("c.html", "<!DOCTYPE html><title>C</title><p>c");
+	start = test_now();
+	(void)browser_view_load(view, path);
+	(void)test_pump(view, 4000, "C");
+	took = (double)(test_now() - start) / 1e6;
+	title = browser_view_title(view);
+	test_check(title != NULL && strcmp(title, "C") == 0 && took >= 900.0 && took <= 1600.0,
+	    "(h) a pagehide handler that runs for ever is stopped after 1 s", "title \"%s\" after %.1f ms", title != NULL ? title : "(none)",
+	    took);
 	browser_view_destroy(view);
 }
 
