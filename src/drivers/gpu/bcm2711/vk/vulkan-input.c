@@ -12,7 +12,7 @@
 
 #include "drivers/gpu/bcm2711/vk/vulkan-input.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 #include "drivers/gpu/bcm2711/vk/vulkan-video.h"
 #endif
 
@@ -414,7 +414,7 @@ view_plane(
 		return 0;
 	}
 
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 	/* Only a sampled NV12 picture has planes to view. */
 	if (image->format != (VkFormat)BCM2711_VIDEO_FORMAT_NV12 || (image->usage & VK_IMAGE_USAGE_SAMPLED_BIT) == 0)
 		return ENOTSUP;

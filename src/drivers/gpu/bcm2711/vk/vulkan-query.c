@@ -9,7 +9,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 #include "drivers/gpu/bcm2711/vk/vulkan-video.h"
 #endif
 #include "drivers/gpu/bcm2711/vk/vulkan-device.h"
@@ -271,7 +271,7 @@ queue_properties(
 	/* The one serialized V3D runner supports graphics and transfers, with no public compute or timestamp query support. */
 	kern_memset(&properties, 0, sizeof(properties));
 	properties.queueFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT;
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 	/* A session promised video decode also decodes on the one family. */
 	if (bcm2711_vulkan_video_session(session))
 		properties.queueFlags |= BCM2711_VIDEO_QUEUE_DECODE;
@@ -528,7 +528,7 @@ format_properties(
 	if (format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_X8_D24_UNORM_PACK32)
 		properties->optimalTilingFeatures = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
 
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 	/* The planes of a sampled NV12 picture are viewed as R8 (luma) and RG8 (chroma) textures. */
 	if (format == VK_FORMAT_R8_UNORM || format == VK_FORMAT_R8G8_UNORM) {
 		properties->optimalTilingFeatures = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;

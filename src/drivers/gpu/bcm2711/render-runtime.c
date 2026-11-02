@@ -17,12 +17,20 @@
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/render-runtime.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-dispatch.h"
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 #include "drivers/gpu/bcm2711/vk/vulkan-video.h"
 
-/* The native word after the vendor suffix ("TANZ" read little endian), and its H.264 decode bit. */
+/*
+ * The native word after the vendor suffix ("TANZ" read little endian), and
+ * its decode bit: H.264 (bit 0) on the Pi 4's firmware decoder, H.265 (bit
+ * 2) on the Pi 5's HEVC decoder.
+ */
 #define VULKAN_NATIVE_MAGIC 0x5a4e4154U
-#define VULKAN_NATIVE_VIDEO_H264 1U
+#if CONFIG_DRIVER_BCM2712_VIDEO
+#define VULKAN_NATIVE_VIDEO_DECODE 4U
+#else
+#define VULKAN_NATIVE_VIDEO_DECODE 1U
+#endif
 #define VULKAN_NATIVE_CAPSET_BYTES 176U
 #endif
 
@@ -118,9 +126,9 @@ runtime_capset(
 	capset_word(capset->data, 164, VULKAN_VENDOR_FLAGS);
 	capset->bytes = VULKAN_CAPSET_BYTES;
 
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 	/*
-	 * A session asked while the firmware's link is up is promised H.264
+	 * A session asked while the decoder is there is promised video
 	 * decode, for its life: the native word follows the vendor suffix.
 	 */
 	if (session->vulkan != NULL && capset->capacity >= VULKAN_NATIVE_CAPSET_BYTES) {
@@ -128,7 +136,7 @@ runtime_capset(
 			bcm2711_vulkan_video_promise(session->vulkan);
 		if (bcm2711_vulkan_video_session(session->vulkan)) {
 			capset_word(capset->data, 168, VULKAN_NATIVE_MAGIC);
-			capset_word(capset->data, 172, VULKAN_NATIVE_VIDEO_H264);
+			capset_word(capset->data, 172, VULKAN_NATIVE_VIDEO_DECODE);
 			capset->bytes = VULKAN_NATIVE_CAPSET_BYTES;
 		}
 	}

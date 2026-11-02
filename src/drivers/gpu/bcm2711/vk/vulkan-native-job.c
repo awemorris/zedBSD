@@ -14,7 +14,7 @@
 #include <kern/klog.h>
 #include <uapi/errno.h>
 
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 #include "drivers/gpu/bcm2711/vk/vulkan-video.h"
 #endif
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
@@ -211,7 +211,7 @@ bcm2711_vulkan_native_job_step(
 	region = job->region;
 	event = job->cursor;
 	while (event != NULL) {
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 		/*
 		 * A copy, blit or upload that names an image whose decode is in
 		 * flight waits for its frame first, a step at a time: the step
@@ -292,7 +292,7 @@ bcm2711_vulkan_native_job_step(
 			continue;
 		}
 
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 		/* Video and status query events run on the CPU, in order, after every earlier pass. */
 		if (bcm2711_vulkan_video_event(event->opcode)) {
 			step = clock_ticks();
