@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=ws344 -->
 
-# WS344 自前の WebP の decoder（libbrowser の画像、VP8・VP8L・ALPH・RIFF）
+# WS344 libwebp-compat（自前の WebP の decoder、libwebp と互換の API。libbrowser の画像、VP8・VP8L・ALPH・RIFF）
 
 - Master: [plan/master.md](../master.md)（2026-11-02 11:31 作成）。Primary Milestone: MG006。
 - Status: incomplete（P2 が p001 の設計）
@@ -10,6 +10,7 @@
 
 ## ユーザーの決定
 
+- （2026-11-02 11:32）ユーザーから、libwebp-compat（libwebp と互換の API を持つ自前の library、libpng-compat などと同じ形）を標準廉価実装手順で実装する、という趣旨の指示を受けた。
 - （2026-11-02 11:31）ユーザーから、BUG-405（about.google の画像が WebP で届き表示されない）を、libwebp の package でなく自前の WebP の decoder で直す、という趣旨の答えを受けた。
 
 ## Phase
