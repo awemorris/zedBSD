@@ -975,17 +975,24 @@ clip(
 	return value;
 }
 
-/* Counts the entries of a reference picture set up to its first empty one. */
+/*
+ * Counts the entries of a reference picture set: up to its last entry
+ * that names a slot, so an entry of no slot before it (a missing picture,
+ * which H.265 still counts in NumPicTotalCurr) keeps its place.
+ */
 static uint32_t
 set_count(
 	const uint8_t *set)
 {
 	uint32_t count;
+	uint32_t index;
 
-	/* The slots before the first empty entry. */
+	/* One past the last entry that names a slot. */
 	count = 0;
-	while (count < BCM2712_HEVC_SET_ENTRIES && set[count] != BCM2712_HEVC_NO_SLOT)
-		count++;
+	for (index = 0; index < BCM2712_HEVC_SET_ENTRIES; index++) {
+		if (set[index] != BCM2712_HEVC_NO_SLOT)
+			count = index + 1U;
+	}
 
 	/* Succeeded: the set's size. */
 	return count;
@@ -1114,6 +1121,7 @@ build_list(
 	uint32_t used;
 	uint32_t index;
 	uint32_t entry;
+	uint8_t substitute;
 
 	/* List 0 takes the pictures before the current first, list 1 those after. */
 	first = picture->before;
@@ -1135,6 +1143,19 @@ build_list(
 			temporary[used++] = second[index];
 		for (index = 0; index < set_count(picture->long_term) && used < length; index++)
 			temporary[used++] = picture->long_term[index];
+	}
+
+	/* A missing picture's place takes the first picture the decode does reference (8.3.3 makes one up). */
+	substitute = BCM2712_HEVC_NO_SLOT;
+	for (index = 0; index < used && substitute == BCM2712_HEVC_NO_SLOT; index++) {
+		if (temporary[index] < BCM2712_HEVC_SLOTS && slots[temporary[index]].present)
+			substitute = temporary[index];
+	}
+	if (substitute == BCM2712_HEVC_NO_SLOT)
+		return EINVAL;
+	for (index = 0; index < used; index++) {
+		if (temporary[index] >= BCM2712_HEVC_SLOTS || !slots[temporary[index]].present)
+			temporary[index] = substitute;
 	}
 
 	/* The list's entries, each a slot the decode references. */
