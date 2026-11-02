@@ -87,3 +87,9 @@
 - CA/Browser Forum の規則（23 件）は守らせない。D11（RFC 5280 6.1 の web PKI の client）のとおり。private な CA（例: mail の試験の server の証明書は EKU を持たない）を断らないため。
 - dNSName の制限の先頭の「.」は、今の header の規則（その下の名前だけ）のまま。
 - run-unit.sh の 1 本あたりの timeout（600 秒）に test-limbo（ASan で約 6 分）が近い。p035 で timeout を 1200 秒にする（試験の道具の変更、Q1 の判断）。
+
+## Q1 の判断（2026-11-02 15:49、p032 の報告）
+
+- SSL の設定（option・verify の mode・版の範囲）は、今は最初の handshake の呼び出しで context から読む。OpenSSL と header の約束（SSL_new が写す）に合わせ、SSL_new の時に写す形に p035 で直す（ssl_st に写しの field を足す。header の変更は p035 の範囲）。
+- SSL_VERIFY_NONE で verify の callback を呼ばない点、SSL_get_error の写しの表、SSL_shutdown の扱い、SNI の IP の文字列を送らない扱いは、p032 の結果のとおりでよい。
+- p035 に回す header の comment の直し: sslc-api.h の「SSL_new copies its settings」、ssl.h の SSL_set1_host の空の文字列。
