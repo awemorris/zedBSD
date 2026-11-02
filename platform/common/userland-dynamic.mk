@@ -1182,6 +1182,12 @@ $(DYNAMIC_DIR)/libyolox.so: $(DYNAMIC_YOLOX_LIBRARY_OBJS) $(DYNAMIC_DIR)/libc.so
 # libz-compat) and libgif-compat for its images (ws074-p021), and libmedia for <video> and <audio> (ws121-p004).  Only the calls of <browser.h> leave it.
 DYNAMIC_BROWSER_LIBRARY_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libbrowser)
 $(DYNAMIC_BROWSER_LIBRARY_OBJS): DYNAMIC_CPPFLAGS += -Iuserland/desktop/libbrowser
+# libbrowser has thread-local variables too (per-thread scratch state of style,
+# layout and the script engine): the same TLS dialect, link mode and providers
+# as libvulkan's above.
+$(DYNAMIC_BROWSER_LIBRARY_OBJS): DYNAMIC_CFLAGS += $(DYNAMIC_VULKAN_TLS_CFLAGS)
+DYNAMIC_BROWSER_DEFS ?= -z defs
+DYNAMIC_BROWSER_PROVIDERS ?=
 
 $(DYNAMIC_DIR)/libbrowser.so: $(DYNAMIC_BROWSER_LIBRARY_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libtruetype.so \
 	$(DYNAMIC_DIR)/libmedia.so \
@@ -1189,13 +1195,13 @@ $(DYNAMIC_DIR)/libbrowser.so: $(DYNAMIC_BROWSER_LIBRARY_OBJS) $(DYNAMIC_DIR)/lib
 	$(DYNAMIC_DIR)/libgif-compat.so $(DYNAMIC_DIR)/libwebp-compat.so $(DYNAMIC_DIR)/libc.so \
 	userland/desktop/libbrowser/exports.map tools/build/check-dynamic-elf.py
 	$(LD) $(DYNAMIC_LINK_LDFLAGS) -shared -soname libbrowser.so --hash-style=both -Bsymbolic-functions \
- -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
+ $(DYNAMIC_BROWSER_DEFS) -z now -z relro -z separate-code -z stack-size=0x100000 \
  --version-script=userland/desktop/libbrowser/exports.map \
  $(DYNAMIC_BROWSER_LIBRARY_OBJS) -L$(DYNAMIC_DIR) -l:libvulkan.so -l:libtruetype.so -l:libmedia.so \
  -l:libjpeg-compat.so -l:libpng-compat.so -l:libz-compat.so -l:libgif-compat.so -l:libwebp-compat.so -l:libc.so -o $@
 	$(PYTHON) tools/build/check-dynamic-elf.py --machine $(DYNAMIC_ELF_MACHINE) --role shared-library \
  --needed libvulkan.so --needed libtruetype.so --needed libmedia.so --needed libjpeg-compat.so --needed libpng-compat.so \
- --needed libz-compat.so --needed libgif-compat.so --needed libwebp-compat.so --needed libc.so --soname libbrowser.so $@
+ --needed libz-compat.so --needed libgif-compat.so --needed libwebp-compat.so --needed libc.so --soname libbrowser.so $(DYNAMIC_BROWSER_PROVIDERS) $@
 
 # /bin/browser is the shell over libbrowser (ws074-p057): its command line and headless modes (main.c)
 # and its window (shell/), which import the engine through <browser.h>, standard Wayland and Vulkan
