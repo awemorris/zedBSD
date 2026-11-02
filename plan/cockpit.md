@@ -8,9 +8,9 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS335](ws335/ws.md) | 自前の TLS | p033（統合と相互接続、q1971）に 15:49 着手 | — |
-| P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p019（API の口、libwebp と 364＋214 file で一致）cleared。p020（Windows・config・QEMU、q1976）に 16:35 着手 | — |
+| P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p020（Windows・6 つの config・QEMU、578 file が libwebp と一致）cleared。p021（libbrowser への組み込み、BUG-405、q1979）に 17:29 着手 | — |
 | P3 | [BUG-416](bugs/BUG-416.md) | USB・xHCI | usb-net の 64 byte の倍数の frame が届かない（q1978、17:09）。BUG-412 の直しの候補は agent/p3-bug412 に未 merge・Pi 5 は記録の状態のまま | — |
-| P4 | [WS345](ws345/ws.md) | ブラウザ | p013（libkeiland の resize の hook、q1974）に 15:59 着手 | — |
+| P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | [WS345](ws345/ws.md) | ブラウザ | p004（VM の打ち切り、q1973）に 15:59 着手 | — |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p018（sshd の listener、相互運用 143 項目）cleared。p019（sftp-server、q1975）に 16:35 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
