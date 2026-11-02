@@ -2,7 +2,7 @@
 
 # ws344-p011 VP8 の frame header（vp8-header.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet q1951-i01、2026-11-02。cleared は Q1）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p009, p010。
 - 目的: frame tag、key frame の header（segment・filter・partition・量子化・確率の更新・skip）、逆量子化の係数。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -66,4 +66,21 @@ git diff --check
 
 ## 結果
 
-（未着手）
+- 日付: 2026-11-02（host の `date`）。担当: Sonnet 5.5 high（q1951-i01）。worktree `s-ws344-p011`、実装の commit e12d4f0492（`vp8-header.c`・`unit/test-vp8_header.c`）。
+- 実行した command と最後の行:
+  - `sh plan/ws344/tests/run-unit.sh vp8_header` → `test-vp8_header: PASS (45344 checks)`、`run-unit: PASS`。
+  - `sh plan/ws344/tests/run-unit.sh all` → test-bool 8376、test-common 32、test-helpers 26、test-lbits 205384、test-prefix 1430293、test-vp8_header 45344、test-vp8_tables 37674 の PASS、`run-unit: PASS`。
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`。
+  - `git diff --check` → 出力無し。
+- 変異試験（git の外の複写 `build/tmp/p011-mut-1/m<n>/` に 44 通り: 境界の比較・符号・bit 数・field の順・表の添字・定数・segment の絶対値と差分・partition の切り方・clamp など）: 39 通りが FAIL（検出）、5 通りが生存。生存は全て等価な変異: (8) `first_size >= after_tag`（first が data の終わりちょうどの時、後続が空で最後の partition の ENOBUFS になり同じ誤り）、(23) `rest_size <= table_size`（等しい時 remaining 0 で ENOBUFS、同じ）、(24) `part_size >= remaining`（等しければ同じ値）、(30) `uv[0] > 133`（表に 133 が無い）、(34) `q < 1`（q 0 は元から 0）。元の file は変えていない（git status clean）。
+- 試験の中身: boolwriter で §19.2 の順に first partition を組む spec（全 field に presence flag と値）を作り、読み戻して全 field・dequant（試験の側で long の算術と表の lookup から別に計算）・coeff_probs・partition の位置と大きさ・marker（header の直後に L(8) で 0x5a を書き、`first` が最初の macroblock header の位置にあることを確かめる）を比べる。固定の場合: tag の正誤、segmentation の各形、filter の delta、partition 1・2・4・8 と大きすぎる size・空の最後・足りない table、量子化の delta、確率の更新、手で計算した dequant（q 0・127・1・2・116〜118・60 の delta 付き）、q の clamp と範囲外の q（±2^31 を含む）。4 partition の frame を全長で切り、§9.5 の模型と照合。乱数の spec 300 個、乱数の byte 2000 個と乱数で書き換えた frame 2000 個（誤りは 0 か ENOBUFS だけ、partition は buffer の中）。全て ASan・UBSan で、exact-size の複写から読む。
+- 未実施: fixture の全体の試験（libwebp の出力との比較）は統合の Phase（p017）。QEMU・実機は対象外。
+- 自分で決めた点（header が黙っていた所）:
+  - `read_tag` は最初に header を 0 で消し、10 byte 未満でも消した状態で ENOBUFS を返す。width・height の 0 は field を埋めた後で EINVAL（header は部分的に埋まったまま、失敗の時は不定の約束の内）。
+  - `read_header` は `size < 10` も ENOBUFS。first partition の終わりの検査（`webpc_bool_ended`）は skip の読みの後、partition table の前。`read_header` は segmentation・filter・skip_prob を自分で 0 から作り直す（read_tag を通らず再利用されても古い値が残らない）。
+  - segmentation の update_data が 1 の時、flag 0 の quantizer・filter_level は 0（§20.4 の bool_maybe_get_int と同じ）。無効の時は dequant は base_q から作る（4 segment とも同じ）。
+  - `webpc_vp8_dequant_build` は q を ±256 に先に絞ってから delta（±15）を足す（q が int32 の端でも符号付き溢れが起きず、143 以上は 127、−15 未満は 0 になる結果は変わらない）。
+  - partition の size の読みは 3 byte little endian（common の `webpc_le24`）。size が残りを越える時は残りまでに切り、残りは以降の partition に回らない（以降は空、最後が空になれば ENOBUFS）。
+- 仕様と phase.md・header の食い違い: 無し。RFC 6386 §9.3 の本文は segment_feature_mode を「absolute 0・delta 1」と書くが、§19.2 の欄と §20.4（`abs = bool_get_bit`）は 1 が absolute で、header.h も後者（absolute 1）。後者に従った。token_prob_update の flag は L(1)（確率 128）ではなく `coeff_update_probs` の確率の bool（§13.4、§20.4 の decode_entropy_header）で読む。
+- 削除の依頼: `build/tmp/p011-mut-1/`（変異試験の複写、自分の worktree の scratch）。
