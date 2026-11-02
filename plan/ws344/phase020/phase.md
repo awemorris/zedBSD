@@ -2,7 +2,7 @@
 
 # ws344-p020 platform（Windows の static、config、guest）
 
-- Status: planned
+- Status: in-progress（P2、q1976-i01。実装済み・試験 PASS、cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Opus を推す（phase-runner）。依存: p019。
 - 目的: Windows の static の build、libbrowser のある config に libwebp-compat、QEMU の guest で .so の driver と libwebp の報告の一致。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -67,4 +67,16 @@ git diff --check
 
 ## 結果
 
-（未着手）
+（2026-11-02 17:27、P2、q1976-i01）
+
+- 変えた物: `apps/browser-win32/Makefile`（libwebp-compat の sources.mk の include、WIN32_COMPAT_LIBRARIES と WIN32_SOURCES_webp-compat、先頭の comment）、`config/ci/config-{amd64,rpi4,rpi5,odroid-c5,odroid-c5-keiland,visionfive2-keiland}.mk`（ZEDBSD_USER_PROGRAMS の libgif-compat の後に libwebp-compat。libbrowser を持つ config はこの 6 つだけ、`config-amd64-server.mk` は変えていない）。
+- 作った試験の道具（`plan/ws344/tests/platform/`。phase.md は top の `webp-guest.sh` と書いたが、check-skeleton は BASE の後に top に足した道具を FAIL にするので subdirectory にした）: `config-amd64-webp.mk`（guest の SSH の image + libwebp-compat）、`webp-guest.sh`（image を作るか IMAGE=existing、driver を zedBSD 用に build して image の libwebp-compat.so と link、QEMU の guest（runtime `build/ws344-guest-run`、空いた port）で各 fixture を流し、SSH で回収して libwebp の .ref と比べる。console・serial の log は読まない）、`webp-wine.sh`（Windows の static library を browser-win32 の Makefile で作り warning を数え、driver を Windows の program に link して Wine で各 fixture を流し .ref と比べる）。
+- 確かめた事（PATH=/usr/bin:$PATH）:
+  - zedBSD amd64: `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`。
+  - arm64・riscv64（Q1 が作り直した共有の sysroot を `ZEDBSD_SYSROOT_ARM64`・`ZEDBSD_SYSROOT_RISCV64` と `-o` で使用）: `make ZEDBSD_CONFIG=config/ci/config-rpi5.mk ... build/rpi5/dynamic/libwebp-compat.so` と `config-visionfive2-keiland.mk ... build/visionfive2/dynamic/libwebp-compat.so` が rc 0・warning 0、check-dynamic-elf も通った。
+  - Windows（host に `gcc-mingw-w64-ucrt64` 14.2 を sudo で導入、Makefile が選ぶ x86_64-w64-mingw32ucrt-gcc）: `sh plan/ws344/tests/platform/webp-wine.sh` → `webp-wine: PASS (364 files, 0 warnings)`、`webp-wine.sh build/tmp/ws344-conformance` → `PASS (214 files, 0 warnings)`（Wine で libwebp と全行一致）。`make browser-win64` の全体（OpenSSL・Vulkan・exe）は流していない。
+  - QEMU（amd64、`plan/tools/guest/test-image.sh plan/ws344/tests/platform/config-amd64-webp.mk build/ws344-guest`、5 分 32 秒、libwebp-compat の warning 0）: `IMAGE=existing sh plan/ws344/tests/platform/webp-guest.sh build/tmp/ws344-fixtures build/tmp/ws344-conformance` → `webp-guest: PASS (578 files)`（zedBSD の /lib/libwebp-compat.so で、364 の fixture と 214 の conformance の全部が libwebp と全行一致）。終わった後の QEMU は止まっている。
+  - 起動の確認: `plan/tools/boot-test.sh build/ws344-guest/hdd-image.img` → `boot-test: never saw '^(?:\S+ )?login: ?'`。画面（build/ws344-boot-test/login.png）は `init: system running` と sshd の起動まで出ており、login の prompt は audiod の行と同じ行に混ざって `...write` の後に `login:` と描かれていた（boot-test.sh の正規表現が行頭を求めるため外れた。image の起動の不具合ではなく、その後の SSH の試験は通った）。
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`、`git diff --check` は出力無し。
+- 自分で決めた点: guest の試験は fixture を ustar 1 つで送り（guest に tar が無いので pax）、報告も pax で 1 つにして回収する。driver の報告の file の名前の接頭辞（集合の名前）を host で外して比べる。
+- 未実施: 実機、`make browser-win64` の全体と Windows の実機での実行、arm64・riscv64 の QEMU。
