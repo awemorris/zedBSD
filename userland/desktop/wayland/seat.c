@@ -86,6 +86,32 @@
 /* One wheel notch scrolls this many surface units, as common compositors do. */
 #define WHEEL_STEP			15
 
+/* At most this many log lines of kept presses in one second; the rest are only counted. */
+#define PRESS_LOG_PER_SECOND		20U
+
+/*
+ * The seat's record of pointer presses for the log lines of the presses the
+ * compositor keeps from the clients (press_log): how many lines the current
+ * second has had, so that a fast run of presses writes a few lines and
+ * counts the rest, and the last press a client was given, whose release the
+ * compositor may still keep.
+ */
+struct press_record {
+	uint64_t second_ms;
+	unsigned written;
+	unsigned skipped;
+	uint32_t button;
+	uint64_t pressed_ms;
+};
+
+/*
+ * The presses' record; the main thread's alone, where input is applied.
+ * Zero at the start: no second begun, nothing written or skipped, no press
+ * given (button 0).  button and pressed_ms are set when a press reaches a
+ * client, and button is cleared by that button's release, whoever takes it.
+ */
+static struct press_record press_record;
+
 static int create_device(struct kwl_object *seat, enum kwl_kind kind, const unsigned char *bytes, size_t size);
 static void seat_axis(struct kwl_server *server, uint32_t time, int32_t vertical, int32_t horizontal, int32_t vertical_units, int32_t horizontal_units, uint32_t source);
 static void deliver(struct kwl_client *client, uint32_t id, uint32_t opcode, const void *payload, size_t size);
@@ -100,6 +126,13 @@ static void report_seat(struct kwl_client *client);
 static int keyboard_keymap(struct kwl_object *keyboard);
 static uint32_t pointer_button(struct kwl_object *target, uint32_t time, uint32_t button, uint32_t state, unsigned complete);
 static void interactive_clear(struct kwl_server *server);
+static int button_shell(struct kwl_server *server, uint32_t time, uint32_t button, uint32_t state, const char **by);
+static int press_given(uint32_t button, uint32_t state, uint64_t *held_ms);
+static void press_lost(struct kwl_server *server, const char *reason, uint32_t time, uint32_t button, uint32_t state, int given, uint64_t held_ms);
+static void press_log(struct kwl_server *server, const char *fate, const char *reason, uint32_t time, uint32_t button, uint64_t held_ms);
+static unsigned live_pointers(const struct kwl_client *client);
+static const char *surface_role_name(const struct kwl_object *surface);
+static const char *contact_name(enum kwl_contact_source source);
 
 /*
  * Reserves the next nonzero event serial shared by configure and input events.
@@ -633,7 +666,9 @@ kwl_seat_button(
 /*
  * Records a pointer button and gives it to the compositor's own grabs, screens
  * and title bars; reports whether one of them took it.  A pen's touch
- * passes here first as BTN_LEFT (tablet.c).
+ * passes here first as BTN_LEFT (tablet.c).  A press one of them takes, and
+ * the release of a press a client was given, write a log line that names
+ * what took it.
  */
 int
 kwl_seat_button_shell(
@@ -642,108 +677,33 @@ kwl_seat_button_shell(
 	uint32_t button,
 	uint32_t state)
 {
-	struct kwl_object *origin;
-	struct kwl_object *window;
-	uint32_t bit;
-	int fullscreen;
+	const char *by;
+	uint64_t held_ms;
+	int given;
 	int taken;
 
-	/* The event's time, for whatever measures the pointer's speed (corner.c). */
-	server->input_time = time;
+	/* Whether this is the release of a press a client was given. */
+	given = press_given(button, state, &held_ms);
 
-	/* The buttons held now, which a move or a resize a client asks for needs (toplevel.c). */
-	bit = 0;
-	if (button >= KWL_BUTTON_LEFT && button - KWL_BUTTON_LEFT < 32U)
-		bit = 1U << (button - KWL_BUTTON_LEFT);
-	if (state != 0U) {
-		server->buttons_down |= bit;
-	} else {
-		server->buttons_down &= ~bit;
+	/* The compositor's own, which names the part that took the button. */
+	by = "shell";
+	taken = button_shell(server, time, button, state, &by);
+	if (!taken)
+		return 0;
+
+	/* A release taken here ends its press's record; unless the client heard it all the same, it was kept from the client. */
+	if (given) {
+		press_record.button = 0U;
+		if (by != NULL)
+			press_log(server, "release-kept", by, time, button, held_ms);
 	}
 
-	/* A matching physical release retires the authorization for future requests. */
-	if (state == 0U && button == server->press_button) {
-		server->press_surface = NULL;
-		server->press_button = 0U;
-	}
+	/* A press taken here reached no client. */
+	if (state != 0U && by != NULL)
+		press_log(server, "press-kept", by, time, button, 0U);
 
-	/* Canceled operations retain no client release destination. */
-	window = server->interactive_window;
-	if (window != NULL &&
-	    server->drag != window &&
-	    server->resize != window)
-		interactive_clear(server);
-
-	/* The lock screen takes every button (ws035-p102). */
-	server->lock_input_ms = kwl_milliseconds();
-	if (server->locked) {
-		/* The lock owns this input; retire any client operation destination. */
-		interactive_clear(server);
-		(void)kwl_greeter_button(server, button, state);
-		return 1;
-	}
-
-	/* A drag and drop takes the buttons; the release of the last one ends it (data.c). */
-	if (server->dnd_active) {
-		/* Drag-and-drop ownership supersedes a previous window operation. */
-		interactive_clear(server);
-		if (state == 0U && server->buttons_down == 0U)
-			kwl_data_drag_release(server);
-		return 1;
-	}
-
-	/* Only the initiating button can end a client-requested window operation. */
-	window = server->interactive_window;
-	if (window != NULL) {
-		if (state != 0U || button != server->interactive_button)
-			return 1;
-
-		/* Keep the live origin locally and retire ownership before any emission. */
-		origin = server->interactive_surface;
-		interactive_clear(server);
-
-		/* The original resize or move finishes through its existing shell contract. */
-		if (server->resize == window) {
-			taken = kwl_toplevel_button(server, state);
-		} else {
-			kwl_glass_toplevel_move_end(server, window);
-		}
-
-		/* The matching release reaches the original client even outside its window. */
-		(void)pointer_button(origin, time, button, state, 1U);
-
-		/* Consumed: ordinary hit-based delivery must not duplicate the release. */
-		return 1;
-	}
-
-	/* A window being resized takes the buttons until the release ends the resize (toplevel.c). */
-	taken = kwl_toplevel_button(server, state);
-	if (taken)
-		return 1;
-
-	/* While a popup holds the grab, a press outside its chain closes the popups (popup.c). */
-	taken = kwl_popup_button(server, button, state);
-	if (taken)
-		return 1;
-
-	/* The glass look takes the buttons it acts on (not while a popup holds the grab). */
-	if (server->glass && server->windowed && server->popup_grab == NULL) {
-		fullscreen = kwl_glass_fullscreen_input(server);
-		if (fullscreen) {
-			/* Over a fullscreen window only the edges' gestures take their buttons (shell.c). */
-			taken = kwl_glass_edge_button(server, button, state);
-		} else {
-			/* Elsewhere the title bars, the frames and the desktop. */
-			taken = kwl_glass_button(server, button, state);
-		}
-
-		/* A shell operation consumed this event before ordinary client delivery. */
-		if (taken)
-			return 1;
-	}
-
-	/* Succeeded: nothing of the compositor's took the button. */
-	return 0;
+	/* Succeeded: the compositor took the button. */
+	return 1;
 }
 
 /*
@@ -757,19 +717,36 @@ kwl_seat_button_deliver(
 	uint32_t state)
 {
 	struct kwl_object *target;
+	uint64_t held_ms;
 	uint32_t serial;
+	unsigned pointers;
+	int given;
+
+	/* The release of a press a client was given ends that press's record, however it goes. */
+	given = press_given(button, state, &held_ms);
+	if (given)
+		press_record.button = 0U;
 
 	/* The ordinary event goes to the current pointer surface. */
 	server->pointer_taken = 0U;
 	kwl_seat_pointer_update(server);
 	target = server->pointer_surface;
-	if (target == NULL)
+	if (target == NULL) {
+		press_lost(server, "no-surface", time, button, state, given, held_ms);
 		return;
+	}
 
 	/* Reuses the same event payload and serial ownership as interactive release. */
 	serial = pointer_button(target, time, button, state, 0U);
-	if (serial == 0U)
+	if (serial == 0U) {
+		press_lost(server, "client-gone", time, button, state, given, held_ms);
 		return;
+	}
+
+	/* A client that has no live wl_pointer hears nothing of it. */
+	pointers = live_pointers(target->client);
+	if (pointers == 0U)
+		press_lost(server, "no-pointer", time, button, state, given, held_ms);
 
 	/* A delivered press authorizes requests from this live client's actual button, which start where it was pressed. */
 	if (state != 0U) {
@@ -779,6 +756,10 @@ kwl_seat_button_deliver(
 		server->press_x = server->pointer_x;
 		server->press_y = server->pointer_y;
 		kwl_ping_send(target->client);
+
+		/* The press a client was given, whose release the compositor may still keep (press_log). */
+		press_record.button = button;
+		press_record.pressed_ms = kwl_milliseconds();
 	}
 
 	/* Succeeded: the focused client has heard the button. */
@@ -1715,4 +1696,312 @@ interactive_clear(
 
 	/* No later release can reuse the retired destination. */
 	return;
+}
+
+/* Records a pointer button and gives it to the compositor's own grabs, screens and title bars; reports whether one took it and names it in by (NULL: a client heard it all the same). */
+static int
+button_shell(
+	struct kwl_server *server,
+	uint32_t time,
+	uint32_t button,
+	uint32_t state,
+	const char **by)
+{
+	struct kwl_object *origin;
+	struct kwl_object *window;
+	uint32_t bit;
+	int fullscreen;
+	int taken;
+
+	/* The event's time, for whatever measures the pointer's speed (corner.c). */
+	server->input_time = time;
+
+	/* The buttons held now, which a move or a resize a client asks for needs (toplevel.c). */
+	bit = 0;
+	if (button >= KWL_BUTTON_LEFT && button - KWL_BUTTON_LEFT < 32U)
+		bit = 1U << (button - KWL_BUTTON_LEFT);
+	if (state != 0U) {
+		server->buttons_down |= bit;
+	} else {
+		server->buttons_down &= ~bit;
+	}
+
+	/* A matching physical release retires the authorization for future requests. */
+	if (state == 0U && button == server->press_button) {
+		server->press_surface = NULL;
+		server->press_button = 0U;
+	}
+
+	/* Canceled operations retain no client release destination. */
+	window = server->interactive_window;
+	if (window != NULL &&
+	    server->drag != window &&
+	    server->resize != window)
+		interactive_clear(server);
+
+	/* The lock screen takes every button. */
+	server->lock_input_ms = kwl_milliseconds();
+	if (server->locked) {
+		/* The lock owns this input; retire any client operation destination. */
+		interactive_clear(server);
+		(void)kwl_greeter_button(server, button, state);
+		*by = "lock";
+		return 1;
+	}
+
+	/* A drag and drop takes the buttons; the release of the last one ends it (data.c). */
+	if (server->dnd_active) {
+		/* Drag-and-drop ownership supersedes a previous window operation. */
+		interactive_clear(server);
+		if (state == 0U && server->buttons_down == 0U)
+			kwl_data_drag_release(server);
+		*by = "drag-and-drop";
+		return 1;
+	}
+
+	/* Only the initiating button can end a client-requested window operation. */
+	window = server->interactive_window;
+	if (window != NULL) {
+		if (state != 0U || button != server->interactive_button) {
+			*by = "window-operation";
+			return 1;
+		}
+
+		/* Keep the live origin locally and retire ownership before any emission. */
+		origin = server->interactive_surface;
+		interactive_clear(server);
+
+		/* The original resize or move finishes through its existing shell contract. */
+		if (server->resize == window) {
+			taken = kwl_toplevel_button(server, state);
+		} else {
+			kwl_glass_toplevel_move_end(server, window);
+		}
+
+		/* The matching release reaches the original client even outside its window. */
+		(void)pointer_button(origin, time, button, state, 1U);
+
+		/* Consumed: ordinary hit-based delivery must not duplicate the release, which the origin has heard. */
+		*by = NULL;
+		return 1;
+	}
+
+	/* A window being resized takes the buttons until the release ends the resize (toplevel.c). */
+	taken = kwl_toplevel_button(server, state);
+	if (taken) {
+		*by = "resize";
+		return 1;
+	}
+
+	/* While a popup holds the grab, a press outside its chain closes the popups (popup.c). */
+	taken = kwl_popup_button(server, button, state);
+	if (taken) {
+		*by = "popup-grab";
+		return 1;
+	}
+
+	/* The glass look takes the buttons it acts on (not while a popup holds the grab). */
+	if (server->glass && server->windowed && server->popup_grab == NULL) {
+		fullscreen = kwl_glass_fullscreen_input(server);
+		if (fullscreen) {
+			/* Over a fullscreen window only the edges' gestures take their buttons (shell.c). */
+			*by = "fullscreen-edge";
+			taken = kwl_glass_edge_button(server, button, state, by);
+		} else {
+			/* Elsewhere the title bars, the frames and the desktop. */
+			*by = "glass";
+			taken = kwl_glass_button(server, button, state, by);
+		}
+
+		/* A shell operation consumed this event before ordinary client delivery. */
+		if (taken)
+			return 1;
+	}
+
+	/* Succeeded: nothing of the compositor's took the button. */
+	return 0;
+}
+
+/* Says whether a button is the release of the press a client was last given, and how long it was held. */
+static int
+press_given(
+	uint32_t button,
+	uint32_t state,
+	uint64_t *held_ms)
+{
+	uint64_t now;
+
+	/* Only a release of the button of that press. */
+	*held_ms = 0U;
+	if (state != 0U || press_record.button == 0U || button != press_record.button)
+		return 0;
+
+	/* Succeeded: held from the press until now. */
+	now = kwl_milliseconds();
+	*held_ms = now - press_record.pressed_ms;
+	return 1;
+}
+
+/* Writes the log line of a press, or of the release of a press a client was given, that reached no client. */
+static void
+press_lost(
+	struct kwl_server *server,
+	const char *reason,
+	uint32_t time,
+	uint32_t button,
+	uint32_t state,
+	int given,
+	uint64_t held_ms)
+{
+	/* A press that went nowhere. */
+	if (state != 0U) {
+		press_log(server, "press-lost", reason, time, button, 0U);
+		return;
+	}
+
+	/* Succeeded: the release of a press a client heard, when it went nowhere. */
+	if (given)
+		press_log(server, "release-lost", reason, time, button, held_ms);
+}
+
+/*
+ * Writes one log line of a press or a release no client heard: what became
+ * of it and why, the button, the contact it came from, the point, the
+ * window under it and the part there, the surface with the focus (the
+ * pointer's events go to it or to its sub-surface), the event's time and
+ * now; a release says how long its press was held.  Past
+ * PRESS_LOG_PER_SECOND lines in a second the rest are counted, and the
+ * next line written says how many were left out.
+ */
+static void
+press_log(
+	struct kwl_server *server,
+	const char *fate,
+	const char *reason,
+	uint32_t time,
+	uint32_t button,
+	uint64_t held_ms)
+{
+	const struct kwl_object *focus;
+	const struct kwl_object *under;
+	const char *under_app;
+	const char *focus_app;
+	const char *part;
+	unsigned long long client;
+	uint64_t now;
+	uint32_t under_id;
+	uint32_t focus_id;
+	uint32_t pointer_id;
+	unsigned skipped;
+
+	/* A new second begins its count of lines again. */
+	now = kwl_milliseconds();
+	if (press_record.second_ms == 0U || now - press_record.second_ms >= 1000U) {
+		press_record.second_ms = now;
+		press_record.written = 0U;
+	}
+
+	/* Past the second's lines the rest are only counted. */
+	if (press_record.written >= PRESS_LOG_PER_SECOND) {
+		press_record.skipped++;
+		return;
+	}
+	press_record.written++;
+	skipped = press_record.skipped;
+	press_record.skipped = 0U;
+
+	/* The window under the point in the glass look, the part of it there, and its application. */
+	under = NULL;
+	part = "none";
+	if (server->glass)
+		under = kwl_glass_part_at(server, server->pointer_x, server->pointer_y, &part);
+	under_id = 0U;
+	under_app = "-";
+	if (under != NULL) {
+		under_id = under->id;
+		if (under->app_id[0] != '\0')
+			under_app = under->app_id;
+	}
+
+	/* The surface with the focus, its client and its application. */
+	focus = server->focus;
+	focus_id = 0U;
+	focus_app = "-";
+	client = 0U;
+	if (focus != NULL) {
+		focus_id = focus->id;
+		client = (unsigned long long)focus->client->number;
+		if (focus->app_id[0] != '\0')
+			focus_app = focus->app_id;
+	}
+
+	/* The surface the pointer's events go to now. */
+	pointer_id = 0U;
+	if (server->pointer_surface != NULL)
+		pointer_id = server->pointer_surface->id;
+
+	/* Succeeded: one line. */
+	printf("KWL PRESS %s reason=%s button=%u source=%s x=%d y=%d output=%u under=%u part=%s under_app=%s focus=%u role=%s client=%llu app=%s pointer=%u time=%u at_ms=%llu held_ms=%llu skipped=%u\n",
+	    fate, reason, button, contact_name(server->shell_source), server->pointer_x, server->pointer_y, server->pointer_output,
+	    under_id, part, under_app, focus_id, surface_role_name(focus), client, focus_app, pointer_id,
+	    time, (unsigned long long)now, (unsigned long long)held_ms, skipped);
+}
+
+/* Counts a client's live wl_pointer objects. */
+static unsigned
+live_pointers(
+	const struct kwl_client *client)
+{
+	const struct kwl_object *object;
+	unsigned count;
+
+	/* Every live wl_pointer of the client. */
+	count = 0U;
+	for (object = client->objects; object != NULL; object = object->next) {
+		if (object->kind == KWL_POINTER && !object->dead)
+			count++;
+	}
+
+	/* Succeeded: how many hear pointer events. */
+	return count;
+}
+
+/* Names a surface's role for a log line: toplevel, popup, subsurface, other, or none for no surface. */
+static const char *
+surface_role_name(
+	const struct kwl_object *surface)
+{
+	/* No surface. */
+	if (surface == NULL)
+		return "none";
+
+	/* A sub-surface of a window. */
+	if (surface->sub_role != NULL)
+		return "subsurface";
+
+	/* An xdg_surface's toplevel or popup. */
+	if (surface->role != NULL && surface->role->top != NULL) {
+		if (surface->role->top->kind == KWL_TOPLEVEL)
+			return "toplevel";
+		if (surface->role->top->kind == KWL_POPUP)
+			return "popup";
+	}
+
+	/* Succeeded: any other surface. */
+	return "other";
+}
+
+/* Names where a contact comes from for a log line. */
+static const char *
+contact_name(
+	enum kwl_contact_source source)
+{
+	/* The tip of a pen, a finger, or the pointer's buttons. */
+	if (source == KWL_CONTACT_PEN)
+		return "pen";
+	if (source == KWL_CONTACT_TOUCH)
+		return "touch";
+
+	/* Succeeded: the pointer. */
+	return "pointer";
 }
