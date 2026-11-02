@@ -290,7 +290,7 @@ interop() {
 	echo "$name" > "$dir/name.txt"
 	client_exe=$client
 	if [ "$system" = win32 ]; then
-		client_exe=$dir/tls-client.exe
+		client_exe=$top/$dir/tls-client.exe
 		cp "$client" "$client_exe"
 		# cert.pem beside the .exe (SSL_CTX_set_default_verify_paths reads it).
 		if [ "${case_cert_pem:-}" = yes ]; then
@@ -324,6 +324,13 @@ interop() {
 			run_client -a 127.0.0.1 $client_args "${case_host:-interop.test}" "$port" $ca_arg
 			;;
 		esac
+		# A server the client never reached is not waited for.
+		tries=0
+		while [ $tries -lt 50 ] && kill -0 "$server_pid" 2> /dev/null; do
+			tries=$((tries + 1))
+			sleep 0.1
+		done
+		kill "$server_pid" 2> /dev/null
 		wait "$server_pid" 2> /dev/null
 		last=$(tr -d '\r' < "$dir/client.txt" | tail -1)
 		[ "$last" = "tls-client: PASS" ] || why="client: $last"
