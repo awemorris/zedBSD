@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) | RTX 2070 の Vulkan Video | 返却（11:17）。p007 cleared: H.265 decode が HEVC_v1 の範囲内 131 本中 130 本で正しい、Video Player の GPU の道で H.264・H.265 を再生。今日の作業は終わり | 次の指示で encode（p008a）から再開 |
-| P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（09:46）。p006 cleared: H.265 の decode（HEVC_v1 128 本一致）と Video Player の GPU の道での H.264・H.265 の再生。今日の作業は終わり | 次の指示で encode（p008）から再開 |
+| P2 | — | 待機 | WS344（自前の WebP の decoder）p001 の設計を 13:21 に merge。実装は Sonnet ×3（p002・p003・p009）が始めた | p017・p019〜p021（Opus）の候補 |
 | P3 | — | 待機 | BUG-412（Pi 5 の click）は再現せず（本物の mouse で両方の kernel とも短い click が効いた）。板は元に戻した（13:12、RESTORED OK） | — |
 | P4 | — | 待機 | WS319 の H.265 decode と Video Player の GPU の道を 12:03 に merge（q1926 cleared）。5330 は Debian で空き | — |
 | P5 | [WS336](ws336/ws.md) p008 | 自前の ssh・sshd | ssh-transport（q1932、Opus） | p015 以降 |

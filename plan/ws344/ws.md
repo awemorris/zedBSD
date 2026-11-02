@@ -21,14 +21,14 @@
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | ws344-p001 | 設計（標準廉価実装手順 §4）: module・header・骨格・試験の道具・実装の Phase の表、試験の画像（cwebp で作る 364 file） | cleared（2026-11-02 13:25 Q1、BASE aa2426a57 を main に merge。main で sysroot を作り直して libwebp-compat.so を build）。実施済み・道具の確かめ PASS（P2 q1939、2026-11-02、BASE aa2426a576、Q1 の受け入れ待ち） | — |
-| ws344-p002 | container（riff.c、test-riff） | planned | p001 |
-| ws344-p003 | VP8L の bit reader と prefix code（lbits.c・prefix.c） | planned | p001 |
+| ws344-p002 | container（riff.c、test-riff） | in-progress（2026-11-02 13:21 Sonnet q1946-i01） | p001 |
+| ws344-p003 | VP8L の bit reader と prefix code（lbits.c・prefix.c） | in-progress（2026-11-02 13:21 Sonnet q1947-i01） | p001 |
 | ws344-p004 | VP8L の code の読み（vp8l-codes.c） | planned | p003 |
 | ws344-p005 | VP8L の entropy-coded image（vp8l-image.c） | planned | p004 |
 | ws344-p006 | VP8L の逆変換（vp8l-transform.c） | planned | p001 |
 | ws344-p007 | VP8L の decoder（vp8l.c、run-fixtures lossless） | planned | p002, p005, p006 |
 | ws344-p008 | ALPH（alpha.c、run-fixtures alpha） | planned | p002, p007 |
-| ws344-p009 | bool decoder（bool.c） | planned | p001 |
+| ws344-p009 | bool decoder（bool.c） | in-progress（2026-11-02 13:21 Sonnet q1948-i01） | p001 |
 | ws344-p010 | VP8 の表（vp8-tables.c、RFC の text と照合） | planned | p001 |
 | ws344-p011 | VP8 の frame header（vp8-header.c） | planned | p009, p010 |
 | ws344-p012 | VP8 の macroblock header（vp8-modes.c） | planned | p009, p010 |
