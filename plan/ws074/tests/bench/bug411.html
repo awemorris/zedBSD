@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>bug411 bench</title>
+<style>
+.cell { display: inline-block; width: 30px; padding: 2px; }
+.cell.on { display: block; }
+.cell::before { content: "x"; }
+.flex { display: flex; }
+.flex > div { flex: 1 1 auto; }
+</style>
+</head>
+<body>
+<div id="root" class="flex"></div>
+<script>
+// Timings of what the JavaScript engine and the page's styles spend most on in heavy pages: property lookup in
+// objects of many properties, getComputedStyle of values the layout does not decide after a change, and the
+// compilation of a scope of many names.  Each line is "bench NAME MILLISECONDS CHECK" (Date.now: the headless clock of performance.now does not move).
+function now() { return Date.now(); }
+function report(name, start, check) { console.log("bench " + name + " " + Math.round(now() - start) + " " + check); }
+
+// 1. Reads of an object of 3000 properties, and of its prototype through an object of its own.
+var big = {};
+for (var i = 0; i < 3000; i++)
+	big["key" + i] = i;
+var child = Object.create(big);
+child.own = 1;
+var keys = [];
+for (i = 0; i < 3000; i++)
+	keys.push("key" + ((i * 7919) % 3000));
+var start = now();
+var sum = 0;
+for (var round = 0; round < 200; round++) {
+	for (i = 0; i < keys.length; i++)
+		sum += child[keys[i]];
+	sum += ("missing" + round) in child ? 1 : 0;
+}
+report("big-object-reads", start, sum);
+
+// 2. An object grown a property at a time with a lookup before each addition.
+start = now();
+var grown = {};
+for (i = 0; i < 20000; i++) {
+	if (!(("g" + i) in grown))
+		grown["g" + i] = i;
+}
+report("grow-with-lookups", start, Object.keys(grown).length);
+
+// 3. getComputedStyle(...).display and ::before's content after each change of the document.
+var root = document.getElementById("root");
+var cells = [];
+for (i = 0; i < 400; i++) {
+	var cell = document.createElement("div");
+	cell.className = "cell";
+	cell.textContent = "cell " + i;
+	root.appendChild(cell);
+	cells.push(cell);
+}
+document.body.offsetWidth;
+start = now();
+var blocks = 0;
+for (i = 0; i < 60; i++) {
+	cells[i].classList.toggle("on");
+	if (getComputedStyle(cells[i]).display === "block")
+		blocks++;
+	if (getComputedStyle(cells[i], "::before").content === "\"x\"")
+		blocks++;
+}
+report("computed-after-change", start, blocks);
+
+// 4. Compiling a function of 5000 local names.
+var source = "";
+for (i = 0; i < 5000; i++)
+	source += "var v" + i + " = " + i + ";\n";
+source += "return v0 + v4999;";
+start = now();
+var made = new Function(source);
+report("compile-many-names", start, made());
+</script>
+</body>
+</html>
