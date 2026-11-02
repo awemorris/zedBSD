@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) | RTX 2070 の Vulkan Video | 返却（11:17）。p007 cleared: H.265 decode が HEVC_v1 の範囲内 131 本中 130 本で正しい、Video Player の GPU の道で H.264・H.265 を再生。今日の作業は終わり | 次の指示で encode（p008a）から再開 |
-| P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p017（VP8 の decoder の統合、非可逆の画像を libwebp と照合、q1966）に 14:41 着手 | — |
+| P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p017（VP8 の decoder）cleared: 非可逆の試験の画像と適合の集まりが全部 dwebp 1.5.0 と一致。p019（API の口 decode.c、q1969）に 15:22 着手 | — |
 | P3 | — | 待機 | BUG-412: 実の mouse の session（14:30）で、動かさない click 5/5 は効いた。効かなかった 4 回は押した行と離した行が違う（設計どおり）。usb-hid の直しは main に。Pi 5 は診断の状態 | 元の kernel での同じ session（任意）、板の復元 |
 | P4 | — | 待機 | WS319 の H.265 decode と Video Player の GPU の道を 12:03 に merge（q1926 cleared）。5330 は Debian で空き | — |
 | P5 | — | 待機 | WS336 p015（自前の ssh の client）を 13:46 に merge（host の OpenSSH の sshd と 93 項目 PASS） | p018（sshd の listener、p017 の後） |

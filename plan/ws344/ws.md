@@ -36,9 +36,9 @@
 | ws344-p014 | VP8 の逆変換（vp8-idct.c） | cleared（2026-11-02 14:07 Q1、main で test-vp8_idct PASS）。実装済み・試験 PASS（Sonnet q1958-i01、2026-11-02。cleared は Q1） | p001 |
 | ws344-p015 | VP8 の intra 予測（vp8-predict.c） | cleared（2026-11-02 14:19 Q1、main で test-vp8_predict 5281 PASS）。実装済み・試験 PASS（Sonnet q1960-i01、2026-11-02 14:18。cleared は Q1） | p001 |
 | ws344-p016 | VP8 の loop filter（vp8-filter.c） | cleared（2026-11-02 14:41 Q1、main で test-vp8_filter 166661 PASS）。実装済み・試験 PASS（Sonnet q1961-i01、2026-11-02 14:38、Q1 の受け入れ待ち） | p001 |
-| ws344-p017 | VP8 の decoder（vp8.c、run-fixtures lossy）— Opus を推す | 実装済み・試験 PASS（P2 q1966-i01、2026-11-02 15:10。lossy 352 + conformance 342 checks） | p002, p011〜p016 |
+| ws344-p017 | VP8 の decoder（vp8.c、run-fixtures lossy）— Opus を推す | cleared（2026-11-02 15:22 Q1、main で run-fixtures lossy 352・lossless 174・alpha 54 PASS）。実装済み・試験 PASS（P2 q1966-i01、2026-11-02 15:10。lossy 352 + conformance 342 checks） | p002, p011〜p016 |
 | ws344-p018 | 出力の変換（output.c） | cleared（2026-11-02 14:30 Q1、main で test-output 536115 PASS）。実装済み・試験 PASS（Sonnet q1963-i01、2026-11-02 14:28、cleared は Q1 が決める） | p001 |
-| ws344-p019 | interface（decode.c、compare・mutate・fuzz）— Opus を推す | planned | p002, p008, p017, p018 |
+| ws344-p019 | interface（decode.c、compare・mutate・fuzz）— Opus を推す | in-progress（2026-11-02 15:22 P2 q1969-i01） | p002, p008, p017, p018 |
 | ws344-p020 | platform（Windows の static、config、QEMU の guest の driver）— Opus を推す | planned | p019 |
 | ws344-p021 | libbrowser への組み込み（img_sniff・img_decode・Accept、BUG-405）— Opus を推す | planned | p020 |
 | ws344-p022 | 規約の全文の見直し（conformance-reviewer） | planned | p021 |
@@ -46,6 +46,8 @@
 最初に並べて起動できる Phase（依存が p001 だけ）: p002、p003、p006、p009、p010、p014、p015、p016、p018。
 
 ## Q1 の判断
+
+- （2026-11-02 15:22、p017 の報告）p013 の `coded` の bit（vp8.c は bit 31 だけを使い、RFC 20.16 の eob_mask の bit 31 と同じ値）と p014 の WHT の 16 bit の包みは、試験の画像と vp80 の key frame の全部で libwebp と一致したので、そのままでよい。fixtures.list の `partitions=N` の行は libwebp の encoder が method 3 以上で 1 partition に戻すため効いていない（凍結の道具）。複数の partition は conformance の集まり（54 本）で確かめているので、fixtures.list の直し（method=1 を足す）と fixtures.sha256 の更新は p022 で行う。
 
 - （2026-11-02 14:07、p014 の報告）vp8-idct.c の WHT の最初の段は RFC 6386 14.3・20.8 のとおり 16 bit に包む（header の comment の「int32_t のまま」は誤り。凍結の header なので p022 で直す）。普通の encoder の出力では違いは出ない。p017 で fixture が libwebp と一致するかを確かめる。
 
