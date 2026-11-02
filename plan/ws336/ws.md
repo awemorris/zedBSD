@@ -46,7 +46,7 @@
 | [p008](phase008/phase.md) | ssh-transport（Opus） | in-progress（P5 q1932） | p005・p007 | p003 経由 |
 | [p009](phase009/phase.md) | ssh-auth | cleared（2026-11-02 11:14 Q1、main で test-auth PASS）。実装済み・試験 PASS（2026-11-02 11:10 Sonnet q1933。run-unit auth 2458 checks、all PASS、check-skeleton PASS、変異 94 通りのうち同値の 3 つを除き全て FAIL） | p005 | p003 経由 |
 | [p010](phase010/phase.md) | ssh-ttymodes・ssh-channel | cleared（2026-11-01 06:19 Q1、main 290b99bab。ssh-ttymodes・ssh-channel 実装、run-unit ttymodes 20682・channel 1603651 checks PASS（Q1 再実行で確認）。phase.md と header の食い違い 2 件（長さの上限を越えた要求は header の通り OTHER、no-more-sessions は want_reply なら SUCCESS）は担当の判断を採り、header の comment の直しは規約の見直しの Phase で） | p002 | — |
-| [p011](phase011/phase.md) | ssh-config | in-progress（Sonnet q1934） | p006 | p003 経由 |
+| [p011](phase011/phase.md) | ssh-config | 実装済み・試験 PASS（2026-11-02 11:20 Sonnet q1934。run-unit config 1321693 checks・all PASS、壊す確かめ 325 通り中 311 が FAIL・6 は compile で弾かれ・8 は同値） | p006 | p003 経由 |
 | [p012](phase012/phase.md) | ssh-privsep（frame） | cleared（2026-11-01 06:22 Q1、main e8b028959。ssh-privsep（monitor との frame と同期の呼び出し）実装、run-unit privsep 947 checks PASS（Q1 再実行で確認）。mon_call を呼ぶ process は SIGPIPE を無視する前提（p016・p017 で守る）） | p002 | — |
 | [p013](phase013/phase.md) | ssh-sftp（Q3 の A: sftp-server のため） | cleared（2026-11-01 06:09 Q1、main 8872d89fe。ssh-sftp（SFTP v3）実装、run-unit sftp 1836 checks PASS（Q1 再実行で確認）、ASan・UBSan、c89。READ の長さは parser が 64 KiB に切る（担当の判断、phase.md の結果）） | p002 | — |
 | [p014](phase014/phase.md) | ssh-keygen の program | in-progress（Sonnet q1935） | p006 | p003 経由 |
