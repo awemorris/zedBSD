@@ -654,7 +654,6 @@ prompt_name(
 	const char *title;
 	const char *url;
 	const char *host;
-	const char *end;
 	size_t length;
 
 	/* The title, when the page has one of its own (the view gives the location for a page without). */
@@ -666,15 +665,12 @@ prompt_name(
 	} else if (url != NULL) {
 		/* The host, between "//" and the path. */
 		host = strstr(url, "://");
-		end = NULL;
+		length = 0U;
 		if (host != NULL) {
 			host += 3;
-			end = strpbrk(host, "/?#");
+			length = strcspn(host, "/?#");
 		}
-		if (host != NULL && end != host && host[0] != '\0') {
-			length = strlen(host);
-			if (end != NULL)
-				length = (size_t)(end - host);
+		if (host != NULL && length != 0U) {
 			(void)snprintf(name, size, "%.*s", (int)length, host);
 		} else {
 			(void)snprintf(name, size, "%s", url);
