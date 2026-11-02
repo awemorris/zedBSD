@@ -2,7 +2,7 @@
 
 # ws344-p017 VP8 の decoder（vp8.c）
 
-- Status: planned
+- Status: in-progress（P2、q1966-i01。実装済み・試験 PASS、cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Opus を推す（phase-runner）。依存: p002, p011, p012, p013, p014, p015, p016（fixture-check は riff.c を使う）。
 - 目的: key frame 全体: macroblock の loop、edge の値、再構成、frame 全体の loop filter。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -70,4 +70,20 @@ git diff --check
 
 ## 結果
 
-（未着手）
+（2026-11-02 15:10、P2、q1966-i01）
+
+- 作った物: `userland/desktop/libwebp-compat/vp8.c`（frame header → macroblock ごとに modes・residue（partition は行 % 数）・WHT・予測と IDCT → frame 全体の loop filter）、`plan/ws344/tests/unit/test-vp8.c`（80 check）、`plan/ws344/tests/conformance/`（make-conformance.sh・ivf-key-frames.py・sha256.txt、下の追加の試験の画像）。
+- 確かめた事（command と最後の行、PATH=/usr/bin:$PATH）:
+  - `sh plan/ws344/tests/run-unit.sh vp8` → `test-vp8: PASS (80 checks)`、`run-unit.sh all` → `run-unit: PASS`。
+  - `sh plan/ws344/tests/run-fixtures.sh lossy` → `run-fixtures: PASS (lossy, 352 checks)`（176 の非可逆の fixture × filter あり・-nofilter、dwebp 1.5.0 と全 sample 一致）。
+  - `WEBPC_FIXTURES=build/tmp/ws344-conformance sh plan/ws344/tests/run-fixtures.sh lossy` → `run-fixtures: PASS (lossy, 342 checks)`（libwebp-test-data の非可逆、libvpx の vp80-00-comprehensive-001〜017 の表示される key frame 29 枚、2・4・8 partition の 54 枚を含む）。同じ集合の lossless → `PASS (lossless, 43 checks)`。
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`。`sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`。`git diff --check` は出力無し。
+  - わざと壊す確かめ（vp8.c を一時に書き換え、cmp で戻した）: 左の列の角を 127 に → unit FAIL・fixture 128 件 FAIL、右端の above-right を列 12〜15 に → fixture 50 件 FAIL（unit は通る）、全部の行を partition 0 から → unit FAIL（fixture は通った: 下の欠陥）、inner の判定を block 0 の bit に → fixture 46 件 FAIL、subblock の左の列の角を macroblock の角に → unit・fixture FAIL。
+  - ASan・UBSan: test-vp8 の全ての切り詰め（ちょうどの大きさの複写）と乱数の後半、scratch の program で 335 の非可逆の file × 200 の byte の置き換え（約 67000 入力）と bitstream の切り詰め約 33600 個。報告無し（scratch の program は tree に入れていない）。
+- Q1 の判断の 2 点（libwebp と fixture で照合）:
+  - (a) vp8-tokens.c の `coded`: vp8.c は block ごとの bit を使わない（IDCT は WHT の後の 16 係数が全部 0 の block だけ飛ばす）。bit 31 は inner edge の filter にだけ使う（§20.16 の eob_mask の bit 31 と同じ値: どれかの block の t が 1）。上の全 fixture で libwebp と一致。
+  - (b) WHT の 1 段目の 16 bit の wrap: 全 fixture と vp80 の key frame で libwebp と一致（正しい stream では値が範囲の中）。header の comment の直しは p022 へ。
+- 見つけた試験の道具の欠陥（Q1 へ、凍結の道具なので直していない）: `fixtures.list` の `enc ... partitions=N` の行は全部 1 partition の file になる。libwebp の encoder は method 3 以上（既定 4）で token buffer を使い、partition を 1 にする（src/enc/webp_enc.c）。fixture-encoder に `method=0..2` を足せば直る。代わりに conformance の集合に method 0〜2 の 2・4・8 partition の 54 枚を入れ、全部 PASS。
+- 追加の試験の画像（ws.md の「Q1 の判断」§11-5 の許可）: `/home/awe/zedBSD-claude1/build/sources/webp-conformance/`（git の外）に libwebp-test-data（`https://chromium.googlesource.com/webm/libwebp-test-data` の depth 1 の clone、commit 06ddd96e276c2c638a72d39d3c0f340afd61978c、131 の .webp）と vp80-00-comprehensive-001〜017.ivf。SHA-256 は `plan/ws344/tests/conformance/sha256.txt`（148 行）。`sh plan/ws344/tests/conformance/make-conformance.sh [fetch]` → `make-conformance: PASS (214 files, 214 decoded by dwebp, downloads recorded; build/tmp/ws344-conformance)`。alpha の 27 件は alpha.c（p008）が骨格のため未確かめ。compare・mutate・fuzz は decode.c（p019）の後。
+- 自分で決めた点: plane は border 無しの macroblock の整数倍で、edge は毎回 struct webpc_vp8_edges に集める。filter の情報（segment・B_PRED・inner）を macroblock ごとに持ち、制御値は filter の時に webpc_vp8_filter_params で求める。first partition の ended は行ごと、token の ended は macroblock ごとに確かめる。
+- 未実施: API（decode.c）経由の compare・mutate・fuzz（p019）、alpha の conformance（p008）、QEMU・実機。
