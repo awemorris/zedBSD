@@ -20,6 +20,9 @@
 
 #include "cryc-mlkem.h"
 
+/* Hides a mask from the optimizer. */
+static uint32_t mlkem_opaque(uint32_t value);
+
 /* The module dimension k of ML-KEM-768 (Table 2). */
 #define MLKEM_K		3U
 
@@ -458,7 +461,7 @@ mlkem_poly_add(
 	for (i = 0; i < CRYC_MLKEM_N; i++) {
 		sum = (uint32_t)(uint16_t)f->c[i] + (uint32_t)(uint16_t)g->c[i];
 		sum -= (uint32_t)CRYC_MLKEM_Q;
-		borrow = 0U - (sum >> 31);
+		borrow = mlkem_opaque(0U - (sum >> 31));
 		sum += borrow & (uint32_t)CRYC_MLKEM_Q;
 		h->c[i] = (int16_t)sum;
 	}
@@ -482,7 +485,7 @@ mlkem_poly_sub(
 	for (i = 0; i < CRYC_MLKEM_N; i++) {
 		difference = (uint32_t)(uint16_t)f->c[i] + (uint32_t)CRYC_MLKEM_Q - (uint32_t)(uint16_t)g->c[i];
 		difference -= (uint32_t)CRYC_MLKEM_Q;
-		borrow = 0U - (difference >> 31);
+		borrow = mlkem_opaque(0U - (difference >> 31));
 		difference += borrow & (uint32_t)CRYC_MLKEM_Q;
 		h->c[i] = (int16_t)difference;
 	}
@@ -648,4 +651,20 @@ mlkem_kpke_decrypt(
 	cryc_wipe(&product, sizeof(product));
 	cryc_wipe(&sum, sizeof(sum));
 	cryc_wipe(&v, sizeof(v));
+}
+
+/*
+ * Returns value through a volatile object, so that the compiler cannot
+ * know which of the values of a mask (0 or 0xffffffff) it holds and turn
+ * a selection by it into a branch or a choice of load.
+ */
+static uint32_t
+mlkem_opaque(
+	uint32_t value)
+{
+	volatile uint32_t hidden;
+
+	/* Stored and loaded again. */
+	hidden = value;
+	return hidden;
 }

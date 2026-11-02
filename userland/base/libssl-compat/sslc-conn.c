@@ -476,7 +476,9 @@ sslc_conn_free(
 	sslc_record_clear(&conn->reading);
 	sslc_record_clear(&conn->writing);
 
-	/* The reassembly buffer. */
+	/* The reassembly buffer (it held decrypted handshake messages). */
+	if (conn->message != NULL)
+		cryc_wipe(conn->message, SSLC_CONN_MESSAGE_ROOM);
 	free(conn->message);
 
 	/* Everything else: the buffers hold plaintext and ciphertext, and the structure ends up empty. */
@@ -545,6 +547,8 @@ sslc_conn_fail(
 	conn->in_used = 0;
 	conn->plain = NULL;
 	conn->plain_size = 0;
+	if (conn->message != NULL)
+		cryc_wipe(conn->message, SSLC_CONN_MESSAGE_ROOM);
 	free(conn->message);
 	conn->message = NULL;
 	conn->message_used = 0;
@@ -721,6 +725,17 @@ sslc_conn_apply(
 	     index++) {
 		action = &actions->list[index];
 
+		/*
+		 * After our close_notify nothing more goes out (RFC 8446 6.1, RFC
+		 * 5246 7.2.1): an answer the handshake queues to a message read
+		 * since (a KeyUpdate, a no_renegotiation warning) and the write keys
+		 * that go with it are dropped; reading goes on.
+		 */
+		if ((conn->flags & SSLC_CONN_CLOSE_SENT) != 0U &&
+		    (action->kind == SSLC_HS_SEND || action->kind == SSLC_HS_SEND_CCS ||
+		     action->kind == SSLC_HS_SEND_WARNING || action->kind == SSLC_HS_SET_WRITE_KEYS))
+			continue;
+
 		/* One kind at a time. */
 		switch (action->kind) {
 		case SSLC_HS_SEND:
@@ -894,6 +909,7 @@ sslc_conn_feed_messages(
 	if (conn->message_used == 0U &&
 	    conn->message != NULL &&
 	    (conn->flags & SSLC_CONN_CONNECTED) != 0U) {
+		cryc_wipe(conn->message, SSLC_CONN_MESSAGE_ROOM);
 		free(conn->message);
 		conn->message = NULL;
 	}
@@ -1256,6 +1272,10 @@ sslc_conn_on_change_cipher_spec(
 
 	/* The content is the one byte 1 (RFC 8446 5; RFC 5246 7.1). */
 	if (record->size != 1U || record->data[0] != SSLC_CONN_CCS_VALUE)
+		return sslc_conn_fail(conn, EPROTO, SSL_R_UNEXPECTED_MESSAGE, SSLC_ALERT_UNEXPECTED_MESSAGE);
+
+	/* No record of another type may come inside a handshake message split over records (RFC 8446 5.1). */
+	if (conn->message_used != 0U)
 		return sslc_conn_fail(conn, EPROTO, SSL_R_UNEXPECTED_MESSAGE, SSLC_ALERT_UNEXPECTED_MESSAGE);
 
 	/* It counts as a record without progress, in TLS 1.3 where it is dropped and in TLS 1.2 until the Finished follows. */

@@ -1035,13 +1035,26 @@ os_allows_server_auth(
 		return ENOMEM;
 
 	/* Reads the property. */
+	SetLastError(0);
 	found = CertGetEnhancedKeyUsage(certificate, CERT_FIND_PROP_ONLY_ENHKEY_USAGE_FLAG, usage, &size);
 	if (!found) {
 		free(usage);
 		return 0;
 	}
 
-	/* An empty list means "disabled for all purposes"; otherwise server authentication must be listed. */
+	/*
+	 * An empty list is either no property at all (the call succeeds and
+	 * the last error is CRYPT_E_NOT_FOUND: no local limit) or a property
+	 * that disables every purpose (the last error is 0), as the function's
+	 * documentation tells the two apart.
+	 */
+	if (usage->cUsageIdentifier == 0) {
+		*allowed = GetLastError() == (DWORD)CRYPT_E_NOT_FOUND;
+		free(usage);
+		return 0;
+	}
+
+	/* Otherwise server authentication must be listed. */
 	for (index = 0; index < usage->cUsageIdentifier; index++) {
 		if (strcmp(usage->rgpszUsageIdentifier[index], szOID_PKIX_KP_SERVER_AUTH) == 0)
 			*allowed = 1;
