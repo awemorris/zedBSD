@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head><meta charset="utf-8"><title>Observer callback arguments and lang</title></head>
+<body>
+<div id="box" style="width:50px;height:20px"></div>
+<p id="text" lang="ja">text</p>
+<script>
+// Observer callbacks get their records or entries and the observer, which is also their this (their order is not tested).
+var seen = [];
+var box = document.getElementById("box");
+var mutation = new MutationObserver(function (records, observer) {
+	seen.push(["mutation", records.length, observer === mutation, this === mutation].join(" "));
+	observer.disconnect();
+});
+mutation.observe(box, { attributes: true });
+box.setAttribute("data-x", "1");
+
+var intersection = new IntersectionObserver(function (entries, observer) {
+	seen.push(["intersection", entries.length, entries[0].target === box, observer === intersection, this === intersection,
+		typeof observer.unobserve].join(" "));
+	observer.unobserve(entries[0].target);
+});
+intersection.observe(box);
+
+var resize = new ResizeObserver(function (entries, observer) {
+	seen.push(["resize", entries.length, entries[0].target === box, observer === resize, this === resize].join(" "));
+	observer.disconnect();
+});
+resize.observe(box);
+
+// lang reflects its content attribute (the empty string without one).
+var text = document.getElementById("text");
+console.log("lang", document.documentElement.lang, text.lang, document.body.lang === "", box.lang === "");
+text.lang = "fr";
+console.log("lang set", text.getAttribute("lang"), text.lang);
+setTimeout(function () {
+	seen.sort();
+	seen.forEach(function (line) { console.log(line); });
+}, 1500);
+</script>
+</body>
+</html>

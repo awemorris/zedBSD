@@ -493,6 +493,8 @@ static int environment_observer_observe(struct vm_realm *realm, vm_value this_va
 static int environment_observer_disconnect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int environment_observer_records(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int environment_observer_entry(struct bind_window *window, vm_value target, int type, vm_value *entry);
+static int environment_observer_job(struct vm_realm *realm, vm_value callback, vm_value observer, vm_value argument);
+static int environment_observer_deliver(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int environment_observer_rect(struct vm_realm *realm, double x, double y, double width, double height, vm_value *result);
 static int environment_observer_size(struct vm_realm *realm, double width, double height, vm_value *result);
 static int environment_mutation_add(struct bind_window *window, struct vm_object *observer, vm_value callback);
@@ -3508,8 +3510,8 @@ environment_observer_observe(
 	if (status != 0)
 		return status;
 
-	/* The existing callback remains asynchronous rather than entering the observer now. */
-	status = vm_enqueue_job(realm, callback, entries);
+	/* The callback runs as a microtask, given the entries and the observer (its this too). */
+	status = environment_observer_job(realm, callback, this_value, entries);
 	if (status != 0)
 		return status;
 
@@ -4264,7 +4266,7 @@ bind_environment_checkpoint(
 		if (observer->records == NULL)
 			continue;
 		records = observer->records;
-		status = vm_enqueue_job(window->realm, vm_value_cell(observer->callback), vm_value_cell(records));
+		status = environment_observer_job(window->realm, vm_value_cell(observer->callback), vm_value_cell(observer->observer), vm_value_cell(records));
 		if (status != 0)
 			return status;
 		vm_heap_remove_root(window->realm->heap, &observer->records);
@@ -4540,6 +4542,74 @@ environment_node_list(
 		return status;
 
 	/* Succeeded: the caller receives one fully decorated independent collection. */
+	return 0;
+}
+
+/*
+ * Queues an observer's callback as a microtask that calls it as the
+ * observers' callbacks are called: with the records or entries and the
+ * observer, and the observer as this.
+ */
+static int
+environment_observer_job(
+	struct vm_realm *realm,
+	vm_value callback,
+	vm_value observer,
+	vm_value argument)
+{
+	struct vm_function *deliver;
+	vm_value pair[2];
+	vm_value data;
+	int status;
+
+	/* The callback and the observer, kept by the job's function. */
+	pair[0] = callback;
+	pair[1] = observer;
+	status = js_builtin_array(realm, pair, 2, &data);
+	if (status != 0)
+		return status;
+	status = js_builtin_function(realm, "deliver", 1, environment_observer_deliver, NULL, &deliver);
+	if (status != 0)
+		return status;
+	deliver->data = data;
+
+	/* The job, with the records or entries. */
+	status = vm_enqueue_job(realm, vm_value_cell(deliver), argument);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the callback is queued. */
+	return 0;
+}
+
+/* Calls an observer's callback from its queued job (environment_observer_job): callback(argument, observer). */
+static int
+environment_observer_deliver(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct vm_function *callee;
+	struct vm_object *data;
+	vm_value arguments[2];
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* The callback and the observer the job keeps. */
+	callee = js_builtin_callee(realm);
+	data = (struct vm_object *)vm_value_as_cell(callee->data);
+	arguments[0] = js_argument(args, count, 0);
+	arguments[1] = data->elements[1];
+
+	/* The call; what it throws goes to the checkpoint's report. */
+	status = vm_call(realm, data->elements[0], data->elements[1], arguments, 2, result);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the callback ran. */
 	return 0;
 }
 

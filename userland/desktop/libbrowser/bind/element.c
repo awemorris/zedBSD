@@ -31,6 +31,8 @@ static int element_attributes_get(struct vm_realm *realm, vm_value this_value, c
 static int element_attributes_get_own(struct vm_object *object, vm_value key, struct vm_property *property);
 static int element_title_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int element_title_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int element_lang_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int element_lang_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int element_hidden_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int element_hidden_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int element_hidden_until_found(const struct vm_string *value);
@@ -155,6 +157,7 @@ const struct bind_interface bind_element_interface = {
  */
 static const struct bind_attribute html_element_attributes[] = {
 	{ "title", element_title_get, element_title_set },
+	{ "lang", element_lang_get, element_lang_set },
 	{ "hidden", element_hidden_get, element_hidden_set },
 	{ "dataset", bind_dataset, NULL },
 	{ "style", bind_style, bind_style_set },
@@ -731,6 +734,50 @@ element_title_set(
 		return status;
 
 	/* Succeeded: the title is set. */
+	return 0;
+}
+
+/* Reports the lang attribute, or the empty string (lang). */
+static int
+element_lang_get(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The reflected attribute. */
+	status = element_reflect_get(realm, this_value, "lang", result);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the language is reported. */
+	return 0;
+}
+
+/* Sets the lang attribute (lang). */
+static int
+element_lang_set(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	int status;
+
+	/* The reflected attribute. */
+	*result = VM_VALUE_UNDEFINED;
+	status = element_reflect_set(realm, this_value, "lang", args, count);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the language is set. */
 	return 0;
 }
 
