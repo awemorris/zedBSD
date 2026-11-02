@@ -8,13 +8,13 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS335](ws335/ws.md) | 自前の TLS | p033（統合・相互接続 110・Wine 44・QEMU 30・limbo 9,792）cleared。p040（secp384r1、q1981）に 17:43 着手 | — |
-| P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p020（Windows・6 つの config・QEMU、578 file が libwebp と一致）cleared。p021（libbrowser への組み込み、BUG-405、q1979）に 17:29 着手 | — |
-| P3 | [BUG-416](bugs/BUG-416.md) | USB・xHCI | usb-net の 64 byte の倍数の frame が届かない（q1978、17:09）。BUG-412 の直しの候補は agent/p3-bug412 に未 merge・Pi 5 は記録の状態のまま | — |
+| P2 | [WS344](ws344/ws.md) | 自前の WebP の decoder | p021（libbrowser への組み込み、BUG-405 fixed）cleared。p022（規約の見直し、q1982）に 17:56 着手 | — |
+| P3 | — | 待機 | BUG-416（usb-net の 64 byte の倍数の frame）fixed、17:56 merge。BUG-412 の直しの候補は agent/p3-bug412 に未 merge、Pi 5 は記録の状態 | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | [WS345](ws345/ws.md) | ブラウザ | p004（JavaScript の打ち切り）cleared。p005（thread-safe な front と script の thread、q1980）に 17:33 着手 | — |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p018（sshd の listener、相互運用 143 項目）cleared。p019（sftp-server、q1975）に 16:35 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
-| P8 | [BUG-414](bugs/BUG-414.md)・[BUG-415](bugs/BUG-415.md) | ブラウザ | WS345 p003（通信を全部 loader に）cleared。p005 は P5 の p004 待ちなので、その間に Reflect と pagehide（q1977、16:47） | — |
+| P8 | — | 待機 | BUG-414（Reflect）・BUG-415（pagehide）fixed、17:56 merge（test262 31598→32069）。WS345 の p006・p008 は P5 の p005 の後 | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
