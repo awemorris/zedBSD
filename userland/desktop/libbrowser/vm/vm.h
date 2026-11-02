@@ -762,6 +762,7 @@ int vm_define_global_lexical(struct vm_realm *realm, vm_value key, int is_const)
 /* Classes (class.c). */
 int vm_class_setup(struct vm_realm *realm, vm_value constructor, vm_value parent, vm_value *prototype);
 int vm_define_method(struct vm_realm *realm, vm_value home, vm_value key, vm_value function, uint32_t kind);
+int vm_set_function_name(struct vm_realm *realm, vm_value function, vm_value key, uint32_t prefix);
 int vm_get_super(struct vm_realm *realm, vm_value home, vm_value key, vm_value this_value, vm_value *result);
 int vm_throw_class_call(struct vm_realm *realm, struct vm_function *function);
 int vm_private_get(struct vm_realm *realm, vm_value object, vm_value key, vm_value *result);

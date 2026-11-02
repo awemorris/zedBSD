@@ -24,6 +24,7 @@ static void expr_array(struct js_function_compiler *fc, struct js_node *node, ui
 static void expr_object(struct js_function_compiler *fc, struct js_node *node, uint32_t target);
 static uint32_t expr_property_key(struct js_function_compiler *fc, const struct js_node *key);
 static int expr_is_proto(const struct js_node *property);
+static int expr_is_anonymous_function(const struct js_node *node);
 static void expr_unary(struct js_function_compiler *fc, struct js_node *node, uint32_t target);
 static void expr_typeof(struct js_function_compiler *fc, struct js_node *operand, uint32_t target);
 static void expr_delete(struct js_function_compiler *fc, struct js_node *operand, uint32_t target);
@@ -595,8 +596,12 @@ js_compile_fields(
 	uint32_t object;
 	uint32_t value;
 	uint32_t key;
+	const uint16_t *name;
+	size_t length;
 	uint32_t constant;
 	int is_static;
+	int anonymous;
+	int named;
 	int seen;
 
 	/* this, the object the fields go on. */
@@ -638,9 +643,22 @@ js_compile_fields(
 		if (member->kind != JS_NODE_FIELD)
 			continue;
 
-		/* The value (an anonymous function takes the field's name), or undefined. */
+		/* The value (an anonymous function takes a plain or private name now, a computed or numeric one when it runs), or undefined. */
+		named = 0;
+		if ((member->flags & JS_FLAG_COMPUTED) == 0U &&
+		    (member->first->kind == JS_NODE_IDENTIFIER || member->first->kind == JS_NODE_STRING || member->first->kind == JS_NODE_PRIVATE_NAME))
+			named = 1;
+		anonymous = 0;
 		if (member->second != NULL) {
-			js_compile_expression_named(fc, member->second, value, member->first->text, member->first->text_length);
+			anonymous = expr_is_anonymous_function(member->second);
+			if (named && member->first->kind == JS_NODE_PRIVATE_NAME) {
+				name = js_private_name(fc->compiler, member->first, &length);
+				js_compile_expression_named(fc, member->second, value, name, length);
+			} else if (named) {
+				js_compile_expression_named(fc, member->second, value, member->first->text, member->first->text_length);
+			} else {
+				js_compile_expression(fc, member->second, value);
+			}
 		} else {
 			js_load_value(fc, value, VM_VALUE_UNDEFINED);
 		}
@@ -648,6 +666,8 @@ js_compile_fields(
 		/* A computed name's field: the key the class evaluated. */
 		if ((member->flags & JS_FLAG_COMPUTED) != 0U) {
 			js_load_binding(fc, member->raw, member->raw_length, key);
+			if (anonymous)
+				js_emit3(fc, VM_OP_SET_FUNCTION_NAME, value, key, 0);
 			js_emit3(fc, VM_OP_DEFINE_ELEM, object, key, value);
 			continue;
 		}
@@ -659,8 +679,12 @@ js_compile_fields(
 			continue;
 		}
 
-		/* A data property on this. */
+		/* A data property on this; a numeric key names an anonymous function when it runs. */
 		constant = expr_property_key(fc, member->first);
+		if (!named && anonymous) {
+			js_emit2(fc, VM_OP_LOAD_CONST, key, constant);
+			js_emit3(fc, VM_OP_SET_FUNCTION_NAME, value, key, 0);
+		}
 		js_emit3(fc, VM_OP_DEFINE_PROP, object, constant, value);
 	}
 
@@ -950,8 +974,10 @@ expr_class_method(
 	} else {
 		constant = expr_property_key(fc, member->first);
 		js_emit2(fc, VM_OP_LOAD_CONST, key, constant);
-		name = member->first->text;
-		length = member->first->text_length;
+		if (member->first->kind == JS_NODE_IDENTIFIER || member->first->kind == JS_NODE_STRING) {
+			name = member->first->text;
+			length = member->first->text_length;
+		}
 	}
 
 	/* The function, named after a plain key. */
@@ -959,15 +985,21 @@ expr_class_method(
 	constant = js_constant(fc, vm_value_cell(code));
 	js_emit3(fc, VM_OP_NEW_CLOSURE, function, constant, fc->env_register);
 
-	/* Where it goes, and what it is. */
-	home = prototype;
-	if ((member->flags & JS_FLAG_STATIC) != 0U)
-		home = constructor;
+	/* What it is: a method, or a getter's or setter's half. */
 	kind = 0;
 	if (member->op == JS_PROPERTY_GET)
 		kind = 1;
 	else if (member->op == JS_PROPERTY_SET)
 		kind = 2;
+
+	/* A computed or numeric key's method, and an accessor's half ("get " or "set " before it), take the key's name when they run. */
+	if (name == NULL || kind != 0U)
+		js_emit3(fc, VM_OP_SET_FUNCTION_NAME, function, key, kind);
+
+	/* Where it goes. */
+	home = prototype;
+	if ((member->flags & JS_FLAG_STATIC) != 0U)
+		home = constructor;
 	js_emit4(fc, VM_OP_DEFINE_METHOD, home, key, function, kind);
 	fc->temp_top = mark;
 }
@@ -1513,7 +1545,9 @@ expr_object(
 	uint32_t key;
 	uint32_t value;
 	uint32_t constant;
+	uint32_t prefix;
 	int computed;
+	int anonymous;
 	int proto;
 	int named;
 
@@ -1555,6 +1589,16 @@ expr_object(
 		} else {
 			js_compile_expression(fc, property->second, value);
 		}
+
+		/* An anonymous function under any other key, and an accessor's half ("get " or "set " before it), take the key's name when they run. */
+		prefix = 0;
+		if (property->op == JS_PROPERTY_GET)
+			prefix = 1;
+		else if (property->op == JS_PROPERTY_SET)
+			prefix = 2;
+		anonymous = expr_is_anonymous_function(property->second);
+		if (prefix != 0U || (!named && anonymous))
+			js_emit3(fc, VM_OP_SET_FUNCTION_NAME, value, key, prefix);
 
 		/* An accessor's half. */
 		if (property->op == JS_PROPERTY_GET) {
@@ -1613,6 +1657,29 @@ expr_property_key(
 	/* Reports its constant. */
 	constant = js_constant(fc, property_key);
 	return constant;
+}
+
+/*
+ * Tells whether an expression is an anonymous function definition (a
+ * function, an arrow or a class without its own name, in any parentheses),
+ * which takes the name of what it is defined as.
+ */
+static int
+expr_is_anonymous_function(
+	const struct js_node *node)
+{
+	/* Parentheses keep the definition anonymous. */
+	while (node->kind == JS_NODE_PARENTHESIZED)
+		node = node->first;
+
+	/* Only a function or a class, and only without a name. */
+	if (node->kind != JS_NODE_FUNCTION && node->kind != JS_NODE_CLASS)
+		return 0;
+	if (node->text != NULL)
+		return 0;
+
+	/* It is. */
+	return 1;
 }
 
 /* Tells whether a property of an object literal is __proto__: value (which sets the prototype). */

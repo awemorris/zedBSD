@@ -1,0 +1,10 @@
+object plain quoted 1 16
+computed computed computedArrow computedClass computedParen 5
+symbols "[described]" ""
+methods computedMethod method 7 computedGenerator computedAsync
+kept named inner existing existing
+accessors get plainGetter set plainSetter get computedGetter set computedSetter get [getter] get 9
+descriptor false false true
+class computed computedStatic 3 get computedGetter set computedSetter get plain [described]
+private #hidden
+fields computedField 4 plainField #privateField
