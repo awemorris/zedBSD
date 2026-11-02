@@ -669,7 +669,7 @@
 | q1929 / q1929-i01 | P7（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p7-ws335e` | [ws335 p038](ws335/phase038/phase.md) | 2026-11-02 10:10 Q1 | in-progress |
 | q1930 / q1930-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-bug409`・branch `agent/p3-bug409`） | [BUG-409](bugs/BUG-409.md) ld.so の DF_1_NODELETE | 2026-11-02 10:21 Q1 | cleared（2026-11-02 10:41、708fb3d9c を main に merge、main で ld.so・libc.so warning 0） |
 | q1931 / q1931-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-bug410`・branch `agent/p3-bug410`） | [BUG-410](bugs/BUG-410.md) atexit と __cxa_finalize | 2026-11-02 10:41 Q1 | cleared（2026-11-02 11:03、fbeea4f29 を main に merge、main で ld.so・libc warning 0） |
-| q1932 / q1932-i01 | P5（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p5-ws336` | [ws336 p008](ws336/phase008/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | in-progress |
+| q1932 / q1932-i01 | P5（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p5-ws336` | [ws336 p008](ws336/phase008/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | cleared（2026-11-02 11:37、06852dcc9 を main に merge、main で test-transport PASS） |
 | q1933 / q1933-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws336-p009` | [ws336 p009](ws336/phase009/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | cleared（2026-11-02 11:14、main に merge、main で試験 PASS） |
 | q1934 / q1934-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws336-p011` | [ws336 p011](ws336/phase011/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | cleared（2026-11-02 11:21、cb76c8b1d を main に merge、main で test-config PASS） |
 | q1935 / q1935-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws336-p014` | [ws336 p014](ws336/phase014/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | cleared（2026-11-02 11:26、13c60ad5d を main に merge、main で keygen-host PASS） |
@@ -677,3 +677,4 @@
 | q1937 / q1937-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws335-p030` | [ws335 p030](ws335/phase030/phase.md) | 2026-11-02 11:25 Q1 | in-progress |
 | q1938 / q1938-i01 | P6（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p6-ws336` | [ws336 p016](ws336/phase016/phase.md) sshd の monitor と login の確かめ | 2026-11-02 11:26 Q1 | in-progress |
 | q1939 / q1939-i01 | P2（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p2-ws344` | [ws344 p001](ws344/ws.md) WebP の decoder の設計 | 2026-11-02 11:31 ユーザーの決定 | in-progress |
+| q1940 / q1940-i01 | P5（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p5-ws336` | [ws336 p015](ws336/phase015/phase.md) ssh の program と host の相互運用 A | 2026-11-02 11:37 Q1 | in-progress |
