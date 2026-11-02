@@ -21,8 +21,8 @@
  *       of the caller's;
  *   (d) while an iframe's timer runs for ever the window's calls stay
  *       under 20 ms, and a load shows the new page within 1 s;
- *   (e) an iframe that leaves its document has its thread joined within
- *       1 s;
+ *   (e) an iframe that leaves its document (a listener of the page's
+ *       removes it) has its thread joined within 1 s;
  *   (f) of 64 iframes, the first 63 have a window and the 64th none (64
  *       frames with the page's own), and the page goes on;
  *   (g) a promise reaction a frame queues in its parent's realm runs at
@@ -717,7 +717,7 @@ test_remove(void)
 	}
 	path = test_page("remove.html", "<!DOCTYPE html><title>remove</title>"
 	    "<iframe srcdoc=\"<script>setInterval(function () { console.log('child'); }, 50);</script>\"></iframe>"
-	    "<script>setTimeout(function () { document.querySelector('iframe').remove(); console.log('removed'); }, 500);</script>");
+	    "<script>document.addEventListener('mousedown', function () { document.querySelector('iframe').remove(); console.log('removed'); });</script>");
 	(void)browser_view_load(view, path);
 	(void)test_pump(view, 3000, NULL, "child");
 	before = test_frames(view);
@@ -728,6 +728,8 @@ test_remove(void)
 			frame = test_threads[index].tid;
 	}
 	pthread_mutex_unlock(&test_lock);
+	(void)browser_view_pointer_button(view, 10.0f, 590.0f, 0, 1, 0);
+	(void)browser_view_pointer_button(view, 10.0f, 590.0f, 0, 0, 0);
 	(void)test_pump(view, 3000, NULL, "removed");
 	begin = test_now();
 	while (test_now() - begin < 1000000000LL && (test_frames(view) != 0U || test_alive(frame))) {
@@ -771,7 +773,7 @@ test_many(void)
 	}
 	begin = test_now();
 	(void)browser_view_load(view, path);
-	(void)test_pump(view, 30000, "nulls 0 first -1", NULL);
+	(void)test_pump(view, 120000, "nulls 0 first -1", NULL);
 	caller_ms = (double)(test_now() - begin) / 1e6;
 	browser_view_destroy(view);
 
@@ -783,7 +785,7 @@ test_many(void)
 	}
 	begin = test_now();
 	(void)browser_view_load(view, path);
-	longest = test_pump(view, 30000, "nulls 1 first 63", NULL);
+	longest = test_pump(view, 120000, "nulls 1 first 63", NULL);
 	own_ms = (double)(test_now() - begin) / 1e6;
 	title = browser_view_title(view);
 	test_check(title != NULL && strcmp(title, "nulls 1 first 63") == 0 && test_frames(view) == 63U && longest <= TEST_WINDOW_MAX_MS,

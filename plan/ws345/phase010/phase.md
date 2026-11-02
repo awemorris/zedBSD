@@ -22,3 +22,4 @@ cross-origin の iframe を別の agent（別の heap と lock）にし、並べ
 ## 受け入れ
 
 - 上の試験が通る。
+- cross-origin の iframe の timer が無限 loop の間も、top の文書の script（timer・入力の listener）が走り続ける（2026-11-02 Q1 の判断で p009 の受け入れから移した。段 A の p009 では同じ agent の iframe の task が agent を持つので top の script は待ち、窓と描画だけが止まらない）。
