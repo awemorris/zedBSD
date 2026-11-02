@@ -556,6 +556,7 @@ static int32_t band_depth(struct kwl_server *server);
 static void band_replay(struct kwl_server *server, int release);
 static void band_tick(struct kwl_server *server);
 static void band_handback(struct kwl_server *server, int lifted);
+static int glass_took(const char **by, const char *part, int taken);
 static void draw_desktop_layer(struct kwl_server *server, struct kwl_list *command, struct kwl_object **windows, unsigned count, float home, const struct shell_bar *bar);
 static unsigned cover_holes(struct kwl_server *server, struct kwl_object **windows, unsigned count, float (*holes)[4], int *levels);
 static unsigned cover_window_holes(struct kwl_server *server, struct kwl_object *surface, float (*holes)[4], unsigned room);
@@ -1012,13 +1013,16 @@ kwl_glass_draw_head(
  * (twice) docks it or (three times) sends it to the back; on the system bar
  * it acts on the docked window.  A
  * release ends a move, docking the window when it ends in the system bar.
- * Returns 1 when the button is the compositor's, 0 when it goes to the client.
+ * Returns 1 when the button is the compositor's, 0 when it goes to the client;
+ * for a button it took, by (when not NULL) is given the name of the part
+ * that took it, for the seat's log line.
  */
 int
 kwl_glass_button(
 	struct kwl_server *server,
 	uint32_t button,
-	uint32_t state)
+	uint32_t state,
+	const char **by)
 {
 	struct kwl_plane_rect output;
 	struct kwl_object *surface;
@@ -1037,7 +1041,7 @@ kwl_glass_button(
 	/* The login screen takes every button (greeter.c). */
 	if (server->greeter) {
 		pressed = kwl_greeter_button(server, button, state);
-		return pressed;
+		return glass_took(by, "greeter", pressed);
 	}
 
 	/* A double click is measured from the release before too (BUG-247, click_quick). */
@@ -1047,27 +1051,27 @@ kwl_glass_button(
 	/* A pairing's question, while it shows, takes every button (bluetooth-ask.c, ws143-p006). */
 	pressed = kwl_bluetooth_ask_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "bluetooth-ask", 1);
 
 	/* The power dialog, while it shows, takes every button (power-dialog.c, ws099-p037). */
 	pressed = kwl_power_dialog_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "power-dialog", 1);
 
 	/* A press on a notification's board (notify-popup.c). */
 	pressed = kwl_notify_popup_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "notify", 1);
 
 	/* The switcher, while on, takes every button, and the release of a press it took (switcher-shell.c). */
 	pressed = kwl_switch_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "switcher", 1);
 
 	/* Wiseview, open or being opened, takes every button. */
 	if (server->wiseview_gesture || server->wiseview > 0.0f || server->wiseview_moving) {
 		pressed = wiseview_button(server, button, state);
-		return pressed;
+		return glass_took(by, "wiseview", pressed);
 	}
 
 	/*
@@ -1085,7 +1089,7 @@ kwl_glass_button(
 	if (state != 0 && button == KWL_BUTTON_LEFT && !remote) {
 		pressed = click_docked_third(server);
 		if (pressed)
-			return 1;
+			return glass_took(by, "third-click", 1);
 	}
 
 	/*
@@ -1097,7 +1101,7 @@ kwl_glass_button(
 	if (!remote)
 		pressed = kwl_corner_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "corner", 1);
 
 	/*
 	 * The on-screen keyboard (keyboard.c, ws102) takes a press on its
@@ -1108,7 +1112,7 @@ kwl_glass_button(
 	if (!remote)
 		pressed = kwl_keyboard_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "keyboard", 1);
 
 	/*
 	 * While a fullscreen window keeps the system bar away (ws035-p119),
@@ -1126,7 +1130,7 @@ kwl_glass_button(
 	if ((cover == NULL && !remote) || server->band_press) {
 		pressed = band_button(server, button, state, 1);
 		if (pressed)
-			return 1;
+			return glass_took(by, "band", 1);
 	}
 
 	pressed = 0;
@@ -1153,7 +1157,7 @@ kwl_glass_button(
 
 	/* A button Home took goes no further. */
 	if (pressed)
-		return 1;
+		return glass_took(by, "home", 1);
 
 	/* An open arrangement menu closes first when the press is on another widget of its bar (arrange-shell.c, ws177-p036). */
 	if (cover == NULL || remote)
@@ -1168,21 +1172,21 @@ kwl_glass_button(
 	if (cover == NULL || remote || open) {
 		pressed = kwl_status_panel_button(server, button, state);
 		if (pressed)
-			return 1;
+			return glass_took(by, "status-panel", 1);
 	}
 
 	/* The removable media's icon takes a press on it: Files on its devices (media.c). */
 	if (cover == NULL || remote) {
 		pressed = kwl_media_button(server, button, state);
 		if (pressed)
-			return 1;
+			return glass_took(by, "media", 1);
 	}
 
 	/* The input method's indicator takes a press on it, on any output's bar: the next language (input-method.c). */
 	if (cover == NULL || remote) {
 		pressed = kwl_ime_indicator_button(server, button, state);
 		if (pressed)
-			return 1;
+			return glass_took(by, "ime", 1);
 	}
 
 	/* The volume takes a press on its icon on any output's bar, and every button while its popup is open (volume.c). */
@@ -1190,7 +1194,7 @@ kwl_glass_button(
 	if (cover == NULL || remote || open) {
 		pressed = kwl_volume_button(server, button, state);
 		if (pressed)
-			return 1;
+			return glass_took(by, "volume", 1);
 	}
 
 	/* The network takes a press on its icon on any output's bar, and every button while its menu is open (network.c). */
@@ -1198,7 +1202,7 @@ kwl_glass_button(
 	if (cover == NULL || remote || open) {
 		pressed = kwl_network_button(server, button, state);
 		if (pressed)
-			return 1;
+			return glass_took(by, "network", 1);
 	}
 
 	/* Bluetooth takes a press on its icon on any output's bar, and every button while its menu is open (bluetooth-bar.c, ws143-p006). */
@@ -1206,35 +1210,35 @@ kwl_glass_button(
 	if (cover == NULL || remote || open) {
 		pressed = kwl_bluetooth_button(server, button, state);
 		if (pressed)
-			return 1;
+			return glass_took(by, "bluetooth", 1);
 	}
 
 	/* The arrangement menu takes a press on any output's desktops' pill, and every button while it is open (arrange-shell.c, WS181). */
 	if (cover == NULL || remote) {
 		pressed = kwl_arrange_button(server, button, state);
 		if (pressed)
-			return 1;
+			return glass_took(by, "arrange", 1);
 	}
 
 	/* The menus take a press on a window's menu, and every button while one is open (menu-shell.c). */
 	pressed = kwl_menu_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "menu", 1);
 
 	/* The bars' applications take a press on an icon or a preview, and its release (apps-bar.c). */
 	pressed = kwl_apps_bar_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "apps-bar", 1);
 
 	/* A titlebar's controls take a press on one, and its release (titlebar-shell.c). */
 	pressed = kwl_titlebar_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "titlebar", 1);
 
 	/* The end of a press at the left or right edge: the swipe switches the desktop, or goes back. */
 	if (state == 0 && server->desktop_press) {
 		desktop_release(server);
-		return 1;
+		return glass_took(by, "desktop-swipe", 1);
 	}
 
 	/* A left press at the left or right edge (under the system bar) may become the desktops' swipe. */
@@ -1247,31 +1251,31 @@ kwl_glass_button(
 		server->desktop_dragging = 0;
 		server->desktop_start_x = server->pointer_x;
 		server->desktop_offset = 0;
-		return 1;
+		return glass_took(by, "desktop-swipe", 1);
 	}
 
 	/* A left press at the bottom edge starts the swipe up that opens App Home (WS181; Wiseview is the top edge's). */
 	if (!remote)
 		pressed = home_edge_press(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "home-edge", 1);
 
 	/* A release ends a move (docking in the system bar) or a pull. */
 	if (state == 0) {
 		if (server->pull != NULL) {
 			pull_back(server);
-			return 1;
+			return glass_took(by, "pull", 1);
 		}
 
 		/* The release of a double click's second press: near it the window docks, moved further it was a move (BUG-265). */
 		pressed = title_tap_release(server);
 		if (pressed)
-			return 1;
+			return glass_took(by, "title-tap", 1);
 
 		/* A swap of arranged windows ends (arrange-shell.c). */
 		pressed = kwl_arrange_move_end(server);
 		if (pressed)
-			return 1;
+			return glass_took(by, "arrange-move", 1);
 
 		/* Without a move the client has the release. */
 		if (server->drag == NULL)
@@ -1281,13 +1285,13 @@ kwl_glass_button(
 		kwl_glass_toplevel_move_end(server, server->drag);
 
 		/* The release belonged to this server-owned move. */
-		return 1;
+		return glass_took(by, "move", 1);
 	}
 
 	/* The system bar is the compositor's, where it is drawn (on the anchor). */
 	if (server->pointer_y < KWL_GLASS_BAR && cover == NULL && !remote) {
 		pressed = bar_press(server, button);
-		return pressed;
+		return glass_took(by, "system-bar", pressed);
 	}
 
 	/* A head's bar is too (ws113-p015). */
@@ -1295,7 +1299,7 @@ kwl_glass_button(
 		(void)kwl_output_rect(server, server->pointer_output, &output);
 		if (server->pointer_y < output.y + KWL_GLASS_BAR) {
 			pressed = head_bar_press(server, server->pointer_output);
-			return pressed;
+			return glass_took(by, "head-bar", pressed);
 		}
 	}
 
@@ -1310,7 +1314,7 @@ kwl_glass_button(
 	if (surface == NULL && !remote) {
 		open = layout_takes_press(server);
 		if (open)
-			return 1;
+			return glass_took(by, "docked-space", 1);
 	}
 
 	/* A press where no window is goes to the desktop's icons when there are any (desktop.c); a window's press takes the keyboard back from them. */
@@ -1329,16 +1333,16 @@ kwl_glass_button(
 	if (sheet != NULL) {
 		window_raise(server, surface);
 		printf("KWL GLASS sheet holds surface=%u client=%llu\n", surface->id, (unsigned long long)surface->client->number);
-		return 1;
+		return glass_took(by, "sheet", 1);
 	}
 
 	/* Another button is the client's on a body, the compositor's elsewhere. */
 	if (button != KWL_BUTTON_LEFT)
-		return hit != HIT_BODY;
+		return glass_took(by, "other-button", hit != HIT_BODY);
 
 	/* A press on the desktop is the compositor's. */
 	if (surface == NULL)
-		return 1;
+		return glass_took(by, "desktop", 1);
 
 	/* The window comes to the top and takes the focus. */
 	window_raise(server, surface);
@@ -1353,7 +1357,7 @@ kwl_glass_button(
 		error = kwl_toplevel_resize_start(server, surface, edges);
 		if (error != 0)
 			printf("KWL GLASS frame refused surface=%u edges=%u\n", surface->id, edges);
-		return 1;
+		return glass_took(by, "frame", 1);
 	}
 
 	/* On a button, its action. */
@@ -1361,19 +1365,19 @@ kwl_glass_button(
 	if (pressed == BUTTON_CLOSE) {
 		(void)kwl_emit(surface->client, surface->role->top->id, 1U, NULL, 0U);
 		printf("KWL GLASS close surface=%u client=%llu\n", surface->id, (unsigned long long)surface->client->number);
-		return 1;
+		return glass_took(by, "close", 1);
 	}
 
 	/* Maximize docks the window. */
 	if (pressed == BUTTON_MAXIMIZE) {
 		window_dock(server, surface, surface->x, surface->y, "button");
-		return 1;
+		return glass_took(by, "maximize", 1);
 	}
 
 	/* Minimize hides it. */
 	if (pressed == BUTTON_MINIMIZE) {
 		window_minimize(server, surface);
-		return 1;
+		return glass_took(by, "minimize", 1);
 	}
 
 	/*
@@ -1395,13 +1399,13 @@ kwl_glass_button(
 		server->click_surface = NULL;
 		server->click_count = 0;
 		window_lower(server, surface, "triple-click");
-		return 1;
+		return glass_took(by, "triple-click", 1);
 	}
 
 	/* An arranged window's move is a swap (arrange-shell.c, WS181). */
 	pressed = kwl_arrange_move_start(server, surface, server->pointer_x, server->pointer_y);
 	if (pressed)
-		return 1;
+		return glass_took(by, "arrange-move", 1);
 
 	/* Otherwise a move starts, from a title bar out of the system bar. */
 	server->drag_left_bar = 1U;
@@ -1412,7 +1416,7 @@ kwl_glass_button(
 	server->drag_start_y = surface->y;
 
 	/* Succeeded: the press was the compositor's. */
-	return 1;
+	return glass_took(by, "title-move", 1);
 }
 
 /*
@@ -1446,13 +1450,15 @@ kwl_glass_motion(
  * (the top-left corner's App Home, the top-right corner's Notes, the bottom
  * corners' keyboard, the bottom edge's swipe back to a window) and what
  * they opened.  Returns 1 when the button is the compositor's, 0 when it goes to
- * the fullscreen window.
+ * the fullscreen window; for a button it took, by (when not NULL) is given
+ * the name of the part that took it, as kwl_glass_button does.
  */
 int
 kwl_glass_edge_button(
 	struct kwl_server *server,
 	uint32_t button,
-	uint32_t state)
+	uint32_t state,
+	const char **by)
 {
 	float home;
 	int corner_press;
@@ -1465,29 +1471,29 @@ kwl_glass_edge_button(
 	/* The bottom edge's swipe holds its contact until the release, also once the window has left fullscreen. */
 	if (unfullscreen_swipe.pressing) {
 		pressed = unfullscreen_press(server, button, state);
-		return pressed;
+		return glass_took(by, "unfullscreen", pressed);
 	}
 
 	/* Wiseview, opened from the keyboard (Super+Tab), takes every button. */
 	if (server->wiseview_gesture || server->wiseview > 0.0f || server->wiseview_moving) {
 		pressed = wiseview_button(server, button, state);
-		return pressed;
+		return glass_took(by, "wiseview", pressed);
 	}
 
 	/* The top-right corner's swipe to Notes (corner.c). */
 	pressed = kwl_corner_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "corner", 1);
 
 	/* The on-screen keyboard's panel and its bottom corners' swipe (keyboard.c), before the bottom edge's swipe. */
 	pressed = kwl_keyboard_button(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "keyboard", 1);
 
 	/* A touch's press in the top edge's band may be the swipe down to Wiseview (WS181); otherwise it is lost, not given to the window. */
 	pressed = band_button(server, button, state, 0);
 	if (pressed)
-		return 1;
+		return glass_took(by, "band", 1);
 
 	/* App Home, when it shows or follows a press of its own, has the button as in window mode. */
 	home = kwl_home_progress(server);
@@ -1497,7 +1503,7 @@ kwl_glass_edge_button(
 	    server->home_page_press ||
 	    server->home_rise_press) {
 		pressed = kwl_home_button(server, button, state);
-		return pressed;
+		return glass_took(by, "home", pressed);
 	}
 
 	/* A left press in the top-left corner may open App Home (the launcher is under the window). */
@@ -1509,13 +1515,13 @@ kwl_glass_edge_button(
 		corner_press = 1;
 	if (corner_press) {
 		pressed = kwl_home_button(server, button, state);
-		return pressed;
+		return glass_took(by, "home-corner", pressed);
 	}
 
 	/* A left press at the bottom edge starts the swipe that takes the window back (not Wiseview, ws099-p015). */
 	pressed = unfullscreen_press(server, button, state);
 	if (pressed)
-		return 1;
+		return glass_took(by, "unfullscreen", 1);
 
 	/* Succeeded: anything else is the fullscreen window's. */
 	return 0;
@@ -2026,6 +2032,44 @@ kwl_glass_title_at(
 		return NULL;
 
 	/* Succeeded: the window whose title bar it is. */
+	return surface;
+}
+
+/*
+ * Finds the topmost window at a point and names the part of it there
+ * (title, body, frame or none), as a press there would find them; it
+ * changes nothing (the seat's log line of a press the compositor keeps).
+ */
+struct kwl_object *
+kwl_glass_part_at(
+	struct kwl_server *server,
+	int32_t x,
+	int32_t y,
+	const char **part)
+{
+	struct kwl_object *surface;
+	enum shell_hit hit;
+
+	/* The window, and where on it the point is. */
+	surface = window_at(server, x, y, &hit);
+
+	/* The part's name. */
+	switch (hit) {
+	case HIT_TITLE:
+		*part = "title";
+		break;
+	case HIT_BODY:
+		*part = "body";
+		break;
+	case HIT_FRAME:
+		*part = "frame";
+		break;
+	default:
+		*part = "none";
+		break;
+	}
+
+	/* Succeeded: the window, or NULL. */
 	return surface;
 }
 
@@ -8211,9 +8255,9 @@ band_replay(
 	printf("KWL EDGE band replay release=%d\n", release);
 
 	/* The press, and for a tap its release, as the shell takes them. */
-	(void)kwl_glass_button(server, KWL_BUTTON_LEFT, 1U);
+	(void)kwl_glass_button(server, KWL_BUTTON_LEFT, 1U, NULL);
 	if (release)
-		(void)kwl_glass_button(server, KWL_BUTTON_LEFT, 0U);
+		(void)kwl_glass_button(server, KWL_BUTTON_LEFT, 0U, NULL);
 
 	/* The pointer back where it is. */
 	server->band_replay = 0;
@@ -11328,4 +11372,19 @@ cover_window_holes(
 
 	/* Succeeded: the title bar's hole and the body's. */
 	return count;
+}
+
+/* Names the part of the glass look that took a button (for the seat's log line), when it took it; returns taken. */
+static int
+glass_took(
+	const char **by,
+	const char *part,
+	int taken)
+{
+	/* Only a button that was taken has a part to name. */
+	if (taken && by != NULL)
+		*by = part;
+
+	/* Succeeded: the button's fate is unchanged. */
+	return taken;
 }
