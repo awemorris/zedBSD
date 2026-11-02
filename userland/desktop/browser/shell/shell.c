@@ -362,12 +362,16 @@ shell_run(
 	if (state.latency.thread != NULL)
 		state.window.latency = &state.latency;
 
-	/* The line the tests wait for, and the titlebar's state. */
+	/* The line the tests wait for, and the titlebar's state (the page's own once one is shown; the view tells of a later one). */
 	printf("ZBROWSER READY width=%u height=%u document=%.0f\n", (unsigned)state.width,
 	    (unsigned)state.height, browser_view_document_height(state.view));
 	fflush(stdout);
 	state.ready = 1;
-	shell_show_state(&state);
+	if (state.started) {
+		shell_show_state(&state);
+	} else {
+		shell_show_titlebar(&state);
+	}
 
 	/* Takes the window's events and hands them to the view, until the window closes. */
 	shown_serial = 0;
@@ -1066,6 +1070,7 @@ shell_cpu_frame(
 	struct shell_state *state)
 {
 	const struct shell_cpu_frame *frame;
+	int dropped;
 	int fresh;
 	int error;
 
@@ -1077,16 +1082,16 @@ shell_cpu_frame(
 		return 0;
 
 	/* Shown; an old size's is dropped (the drawing thread draws the new size). */
-	error = shell_cpu_show(&state->cpu, &state->window, frame);
+	error = shell_cpu_show(&state->cpu, &state->window, frame, &dropped);
 	if (error == EAGAIN)
 		return 2;
 	state->cpu_waiting = 0;
-	if (error == ESTALE)
-		return 0;
 	if (error != 0) {
 		fprintf(stderr, "browser: cannot draw a frame: %s\n", wb_os_error_text(error));
 		return 1;
 	}
+	if (dropped)
+		return 0;
 
 	/* The page's animation frames run on the present, and the line the tests read. */
 	browser_view_presented(state->view, 0);

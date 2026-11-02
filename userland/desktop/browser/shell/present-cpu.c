@@ -56,7 +56,7 @@ shell_cpu_resize(
  * drawn before the window's last resize; the drawing thread draws one of
  * the new size).
  *
- * Returns 0 once the frame is shown, ESTALE for a frame of an old size,
+ * Returns 0 once the frame is shown or dropped (*dropped says which),
  * EAGAIN when the window cannot take it now (the caller shows it again
  * after the next dispatch), or an error number.
  */
@@ -64,13 +64,17 @@ int
 shell_cpu_show(
 	struct shell_cpu *cpu,
 	struct shell_window *window,
-	const struct shell_cpu_frame *frame)
+	const struct shell_cpu_frame *frame,
+	int *dropped)
 {
 	int error;
 
 	/* A frame of an old size. */
-	if (frame->width != cpu->width || frame->height != cpu->height)
-		return ESTALE;
+	*dropped = 0;
+	if (frame->width != cpu->width || frame->height != cpu->height) {
+		*dropped = 1;
+		return 0;
+	}
 
 	/* The memory, shown in the window. */
 	error = kl_window_present(window->kui, frame->pixels, (size_t)frame->width);

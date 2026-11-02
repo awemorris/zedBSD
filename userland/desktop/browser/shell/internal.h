@@ -431,7 +431,7 @@ void shell_mail_close(struct shell_mail *mail, struct shell_titlebar *titlebar);
 /* The CPU presenter (present-cpu.c). */
 int shell_cpu_open(struct shell_cpu *cpu, struct shell_window *window);
 int shell_cpu_resize(struct shell_cpu *cpu, struct shell_window *window);
-int shell_cpu_show(struct shell_cpu *cpu, struct shell_window *window, const struct shell_cpu_frame *frame);
+int shell_cpu_show(struct shell_cpu *cpu, struct shell_window *window, const struct shell_cpu_frame *frame, int *dropped);
 void shell_cpu_close(struct shell_cpu *cpu);
 
 /* The presenter (present.c). */
