@@ -134,4 +134,4 @@ header の comment で気づいた点（直すかは p035）: `cryc_chain_verify
 
 未実施: 確保の失敗・hash の失敗・mutex の初期化の失敗の注入（malloc の差し替えが ASan と合わない）、TSan での lock の除去の検出、`cryc_os_system_roots` の差し替え（header の約束で試験は実の物を使う）、Windows の Disallowed の store に実際に印を付ける試験（p015 が OS 層で Wine を使って行った）、aarch64 Windows の実行（build のみ）、32 bit の size_t の機械、性能の測定、`run-ct`（秘密を扱わない）、x509-limbo の 9,792 件の全件（p038）。実機・QEMU は範囲外。
 
-commit: COMMIT_LIST
+commit: 09bc044935（実装と試験の最初）、8973c1d711（試験の追加・実装の整理・この結果の節・ws.md の行）。
