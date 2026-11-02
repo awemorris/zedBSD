@@ -162,6 +162,8 @@ extern "C" {
  * 106: a titlebar's reload control, KL_CONTROL_RELOAD
  * 107: a boxed breadcrumb's load, KL_BREADCRUMB_PROGRESS (kl_titlebar_v1 version 7)
  * 108: a network link's IPv6 addresses and router, kl_network_link's inet6_count, inet6 and router6
+ * 109: a new size shown by another thread, kl_window_set_configure_deferred, kl_window_configure_take
+ *      and _ack (struct kl_window_configure), and the size during Windows' modal resize, kl_window_on_resize
  *
  * The file chooser of KL_VERSION 12 moved to the widgets with KL_VERSION 16:
  * kl_file_chooser_* of <keiland/keiland_file_chooser.h>, made of the
@@ -171,7 +173,7 @@ extern "C" {
  * are kl_settings_* of <keiland/keiland_settings.h>, and desktop.conf is the
  * compositor's own file.
  */
-#define KL_VERSION 108U
+#define KL_VERSION 109U
 
 /*
  * Reports the interface version of the library that was loaded.

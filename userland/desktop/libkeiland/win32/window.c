@@ -25,8 +25,10 @@
  * KL_WINDOW_TEXT_COMMIT.  The pointer's messages come to the content (the
  * wheel's to the frame, with the screen's point, turned into the
  * content's).  While the frame is resized in the system's modal loop
- * (WM_ENTERSIZEMOVE to WM_EXITSIZEMOVE) the program does not draw; the last
- * size is told at the end of the loop.
+ * (WM_ENTERSIZEMOVE to WM_EXITSIZEMOVE) the program's thread takes no
+ * input; the last size is told at the end of the loop, and a program with
+ * a callback (kl_window_on_resize) hears each size inside it, for a
+ * thread of its own that draws meanwhile.
  *
  * The frame follows the system's colours: the dark title bar
  * (DWMWA_USE_IMMERSIVE_DARK_MODE) in the dark appearance, and the system's
@@ -81,6 +83,7 @@ static unsigned window_hit(const struct kl_window *window, int32_t x, int32_t y)
 static unsigned window_button_of(unsigned hit);
 static void window_layout(struct kl_window *window);
 static void window_resized(struct kl_window *window);
+static void window_sizing(struct kl_window *window);
 static void window_key(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam);
 static void window_char(struct kl_window *window, WPARAM wparam);
 static void window_pointer(struct kl_window *window, unsigned kind, LPARAM lparam, uint32_t code, int pressed);
@@ -268,6 +271,78 @@ kl_window_size(
 		*width = window->width;
 	if (height != NULL)
 		*height = window->height;
+}
+
+/*
+ * Keeps whether the window defers its configures (KL_VERSION 109).
+ * Windows sends none: the content's size is the window's own, and
+ * nothing ever waits for an acknowledgement.  Returns 0, or EINVAL.
+ */
+int
+kl_window_set_configure_deferred(
+	struct kl_window *window,
+	int deferred)
+{
+	(void)deferred;
+
+	/* A window. */
+	if (window == NULL)
+		return EINVAL;
+
+	/* Succeeded: nothing changes (no configure comes). */
+	return 0;
+}
+
+/*
+ * Takes the configure waiting for an acknowledgement (KL_VERSION 109):
+ * none on Windows.  Returns EAGAIN, or EINVAL.
+ */
+int
+kl_window_configure_take(
+	struct kl_window *window,
+	struct kl_window_configure *configure)
+{
+	/* A window and the place for the configure. */
+	if (window == NULL || configure == NULL)
+		return EINVAL;
+
+	/* No configure waits on Windows. */
+	return EAGAIN;
+}
+
+/*
+ * Acknowledges a configure (KL_VERSION 109): never taken on Windows, so
+ * every serial is another than the last take's.  Returns EINVAL.
+ */
+int
+kl_window_configure_ack(
+	struct kl_window *window,
+	uint32_t serial)
+{
+	(void)window;
+	(void)serial;
+
+	/* No take gave a serial. */
+	return EINVAL;
+}
+
+/*
+ * Keeps the program's callback for the content's sizes during the
+ * system's modal size loop (KL_VERSION 109); NULL stops it.
+ */
+void
+kl_window_on_resize(
+	struct kl_window *window,
+	kl_window_resize_fn callback,
+	void *data)
+{
+	/* A window. */
+	if (window == NULL)
+		return;
+
+	/* The callback, heard from the next size of a modal loop. */
+	window->resize_callback = callback;
+	window->resize_data = data;
 }
 
 /*
@@ -912,8 +987,41 @@ window_layout(
 	if ((uint32_t)width == window->width && (uint32_t)height == window->height && !window->resize_waiting)
 		return;
 	window->resize_waiting = 1;
-	if (!window->sizing)
+	if (!window->sizing) {
 		window_resized(window);
+		return;
+	}
+
+	/* Inside the modal loop the program hears it through its callback, if it has one (the input still comes at the loop's end). */
+	window_sizing(window);
+}
+
+/* Tells the program's callback the content's size during the modal size loop, keeping the input for the loop's end. */
+static void
+window_sizing(
+	struct kl_window *window)
+{
+	RECT client;
+	uint32_t width;
+	uint32_t height;
+
+	/* Only a program that asked for it. */
+	if (window->resize_callback == NULL)
+		return;
+
+	/* The content's size now, which kl_window_size reports from here. */
+	(void)GetClientRect(window->content, &client);
+	width = (uint32_t)(client.right - client.left);
+	height = (uint32_t)(client.bottom - client.top);
+
+	/* A size told already (the loop's messages repeat it). */
+	if (width == window->width && height == window->height)
+		return;
+	window->width = width;
+	window->height = height;
+
+	/* The callback, on the window's thread inside the loop. */
+	window->resize_callback(window->resize_data, width, height);
 }
 
 /* Tells the content's size (a KL_WINDOW_RESIZE). */

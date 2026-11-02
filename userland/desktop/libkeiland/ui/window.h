@@ -351,6 +351,25 @@ struct kl_window {
 	int fullscreen;
 	int maximized;
 
+	/*
+	 * The configures whose acknowledgement waits for the application
+	 * (KL_VERSION 109, kl_window_set_configure_deferred), all on the
+	 * window's thread: whether the window defers them; whether the
+	 * toplevel's configure just read changed the size (for the surface's
+	 * configure that ends it); whether one waits, the latest waiting serial
+	 * and the count of size changes deferred (which tells the application's
+	 * take from a later size); and the last take: whether it waits for its
+	 * acknowledgement, its serial and the count it was taken at.
+	 */
+	int configure_deferred;
+	int configure_resized;
+	int configure_waiting;
+	uint32_t configure_serial;
+	uint32_t configure_sizes;
+	int configure_taken;
+	uint32_t configure_taken_serial;
+	uint32_t configure_taken_sizes;
+
 	/* The first screen and its current mode (KL_VERSION 45; 0 while unknown; the refresh in millihertz). */
 	struct wl_output *output;
 	int32_t output_width;
