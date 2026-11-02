@@ -1,0 +1,39 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Only the calls <compat/ssl/ssl.h> declares leave the library; the sslc_ names stay inside.  The map has no
+ * version node: the checker of the shared libraries (tools/build/check-dynamic-elf.py) takes no symbol version
+ * definitions in a library, as in every other library of the system.
+ */
+{
+	global:
+		TLS_client_method;
+		SSL_CTX_new;
+		SSL_CTX_free;
+		SSL_CTX_set_verify;
+		SSL_CTX_load_verify_locations;
+		SSL_CTX_set_default_verify_paths;
+		SSL_CTX_set_options;
+		SSL_CTX_ctrl;
+		SSL_CTX_get_cert_store;
+		SSL_new;
+		SSL_free;
+		SSL_set_fd;
+		SSL_ctrl;
+		SSL_set1_host;
+		SSL_get0_param;
+		SSL_connect;
+		SSL_read;
+		SSL_write;
+		SSL_get_error;
+		SSL_pending;
+		SSL_shutdown;
+		SSL_get_verify_result;
+	local:
+		*;
+};
