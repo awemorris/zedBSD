@@ -30,6 +30,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         payload = (root / 'plan/tools/browser-component/pages' / name).read_bytes()
         self.send_response(200)
+        # first.html is not kept for Back (the view keeps left pages unless they are no-store): going back to it
+        # loads it again over the network, which the client's async history checks need.
+        if name == 'first.html':
+            self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Length', str(len(payload)))
         self.send_header('Connection', 'close')
         self.end_headers()
