@@ -902,6 +902,11 @@ test_account_allowed(void)
 	status = sshd_account_allowed(&base_config, long_name, SSH_AUTH_PUBLICKEY, &account, buffer, sizeof(buffer));
 	CHECK_EQ(status, ENOENT);
 
+	/* A name's line end, escape, DEL and bytes outside ASCII reach the log as '?' each. */
+	status = sshd_account_allowed(&base_config, "zz\nforged: x\033[2J\177\302\233", SSH_AUTH_PUBLICKEY, &account, buffer, sizeof(buffer));
+	CHECK_EQ(status, ENOENT);
+	CHECK(strcmp(log_last, "invalid user zz?forged: x?[2J???") == 0);
+
 	/* root is another account than the one sshd runs as. */
 	status = sshd_account_allowed(&base_config, "root", SSH_AUTH_PUBLICKEY, &account, buffer, sizeof(buffer));
 	CHECK_EQ(status, EACCES);
@@ -1845,6 +1850,16 @@ test_password_requests(void)
 	/* The request bytes the monitor was handed are not where the password is kept: they stay the caller's. */
 	CHECK(request.data[request.size - 2] == 'w');
 
+	/* A failed password for a name with a line end and an escape is logged with '?' for them. */
+	fresh(&monitor, &base_config);
+	(void)sign_h(&monitor, session_h, sizeof(session_h));
+	build_password(&request, "zz\r\nforged\033]0;x\007", "pw", 2);
+	status = call(&monitor, SSH_MON_PASSWORD_LOGIN, &request, &type, &result, NULL, NULL);
+	CHECK_EQ(status, 0);
+	CHECK_EQ(result, EACCES);
+	CHECK(strcmp(log_last, "Failed password for zz??forged?]0;x?") == 0);
+	sshd_monitor_clear(&monitor);
+
 	/* PasswordAuthentication off: refused without crypt. */
 	config = base_config;
 	config.password = 0;
@@ -2069,6 +2084,12 @@ test_records(void)
 	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
 	CHECK_EQ(result, EACCES);
 	CHECK(strstr(log_last, "refused: not a pseudo-terminal") != NULL);
+
+	/* A terminal field with a line end is logged with '?' for it. */
+	build_record(&request, "/dev/pts/1\nx", 12, (uint32_t)getpid(), 0);
+	status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
+	CHECK_EQ(result, EACCES);
+	CHECK(strcmp(log_last, "monitor: login record of /dev/pts/1?x refused: not a pseudo-terminal") == 0);
 
 	/* The longest path that fits (eight digits, 17 bytes) is read and checked further; one byte more is not read. */
 	build_record(&request, "/dev/pts/12345678", 17, (uint32_t)getpid(), 0);

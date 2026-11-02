@@ -315,6 +315,23 @@ done
 grep -q 'refused request' "$work/log" && fail "raw: the monitor saw a request it refuses"
 echo "ok raw cases"
 
+# A user name with an escape sequence and a line end (MaxAuthTries 1, two wrong passwords): every process logs the
+# name with '?' for those bytes, and no line of the log starts with anything but a process id.
+base_config | sed 's/^PasswordAuthentication no$/PasswordAuthentication yes/' > "$work/raw-name.config"
+echo "MaxAuthTries 1" >> "$work/raw-name.config"
+start_driver raw-name
+timeout 90 "$work/sshd-pair-client" "$port" "$(printf 'zz\033[2J\nforged')" "$work/client_key" limit-password \
+    > "$work/raw-name.out" 2>&1
+rc=$?
+end_driver raw-name
+[ "$rc" = 0 ] || fail "name: $(cat "$work/raw-name.out")"
+grep -q ' invalid user zz?\[2J?forged$' "$work/log" || fail "name: the account check's line"
+grep -q ' Failed password for zz?\[2J?forged$' "$work/log" || fail "name: the monitor's line"
+grep -q ' too many authentication failures for zz?\[2J?forged from ' "$work/log" || fail "name: the pre-authentication line"
+grep -v -q '^[0-9][0-9]* [0-7] ' "$work/log" && fail "name: a log line that is not the program's: $(grep -v '^[0-9][0-9]* [0-7] ' "$work/log" | head -2)"
+tr -d '\033' < "$work/log" | cmp -s - "$work/log" || fail "name: an escape byte reached the log"
+echo "ok name in the log"
+
 # Nothing the sanitizers found in any process (the children write their reports to the driver's standard error).
 if grep -l 'ERROR: AddressSanitizer\|runtime error:' "$work"/*.driver > /dev/null 2>&1; then
 	fail "sanitizer: $(grep -l 'ERROR: AddressSanitizer\|runtime error:' "$work"/*.driver)"
