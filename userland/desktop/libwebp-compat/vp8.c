@@ -64,13 +64,10 @@ struct vp8_frame {
 static int vp8_allocate(struct vp8_frame *frame);
 static void vp8_release_contexts(struct vp8_frame *frame);
 static int vp8_decode_rows(struct vp8_frame *frame);
-static void vp8_macroblock(struct vp8_frame *frame, unsigned mb_x, unsigned mb_y, const struct webpc_vp8_modes *modes,
-	struct webpc_vp8_residue *residue);
-static void vp8_edges(const uint8_t *plane, ptrdiff_t stride, unsigned size, unsigned x, unsigned y,
-	struct webpc_vp8_edges *edges);
+static void vp8_macroblock(struct vp8_frame *frame, unsigned mb_x, unsigned mb_y, const struct webpc_vp8_modes *modes, struct webpc_vp8_residue *residue);
+static void vp8_edges(const uint8_t *plane, ptrdiff_t stride, unsigned size, unsigned x, unsigned y, struct webpc_vp8_edges *edges);
 static void vp8_above_right(const struct vp8_frame *frame, unsigned mb_x, unsigned mb_y, uint8_t right[4]);
-static void vp8_luma_subblocks(const struct webpc_vp8_modes *modes, const struct webpc_vp8_edges *edges,
-	const uint8_t right[4], const struct webpc_vp8_residue *residue, uint8_t *dst, ptrdiff_t stride);
+static void vp8_luma_subblocks(const struct webpc_vp8_modes *modes, const struct webpc_vp8_edges *edges, const uint8_t right[4], const struct webpc_vp8_residue *residue, uint8_t *dst, ptrdiff_t stride);
 static void vp8_add_residue(const int16_t coeffs[16], uint8_t *dst, ptrdiff_t stride);
 static void vp8_filter_frame(struct vp8_frame *frame);
 
@@ -94,10 +91,12 @@ webpc_vp8_decode(
 	memset(&frame, 0, sizeof(frame));
 	frame.picture = picture;
 
-	/* The frame tag and size, then the rest of the header from the first partition. */
+	/* Reads the frame tag and size. */
 	error = webpc_vp8_read_tag(data, size, &frame.header);
 	if (error != 0)
 		return error;
+
+	/* Reads the rest of the header from the first partition. */
 	error = webpc_vp8_read_header(data, size, &frame.header, &frame.first);
 	if (error != 0)
 		return error;
@@ -130,8 +129,10 @@ webpc_vp8_decode(
 	if (bypass_filtering == 0 && frame.header.filter.level != 0)
 		vp8_filter_frame(&frame);
 
-	/* Succeeded: the picture holds the frame; the contexts are done with. */
+	/* Frees the contexts, which are done with. */
 	vp8_release_contexts(&frame);
+
+	/* Succeeded: the picture holds the frame. */
 	return 0;
 }
 
@@ -173,6 +174,8 @@ vp8_allocate(
 	memory = malloc(luma_size + 2U * chroma_size);
 	if (memory == NULL)
 		return ENOMEM;
+
+	/* Hands the allocation to the picture and points each plane into it. */
 	picture->memory = memory;
 	picture->y = memory;
 	picture->u = memory + luma_size;
@@ -185,6 +188,7 @@ vp8_allocate(
 		return ENOMEM;
 	memset(frame->above_bmodes, (int)WEBPC_VP8_B_DC_PRED, count * 4U);
 
+	/* Allocates the above token contexts, all empty. */
 	frame->above_contexts = calloc(count, WEBPC_VP8_CONTEXTS);
 	if (frame->above_contexts == NULL)
 		return ENOMEM;
@@ -229,7 +233,9 @@ vp8_decode_rows(
 	unsigned mb_y;
 	unsigned mb_width;
 	int has_y2;
+	int ended;
 
+	/* The frame's width in macroblocks. */
 	mb_width = frame->picture->mb_width;
 
 	/* Each row of macroblocks, its tokens from partition mb_y % partition_count (RFC 6386 9.5). */
@@ -242,8 +248,14 @@ vp8_decode_rows(
 
 		/* Each macroblock: header, residue, reconstruction. */
 		for (mb_x = 0; mb_x < mb_width; mb_x++) {
-			webpc_vp8_read_modes(&frame->first, &frame->header, &frame->above_bmodes[(size_t)mb_x * 4U],
-				frame->left_bmodes, &modes);
+			webpc_vp8_read_modes(
+				&frame->first,
+				&frame->header,
+				&frame->above_bmodes[(size_t)mb_x * 4U],
+				frame->left_bmodes,
+				&modes);
+
+			/* A B_PRED macroblock has no Y2 block. */
 			has_y2 = 1;
 			if (modes.ymode == WEBPC_VP8_B_PRED)
 				has_y2 = 0;
@@ -254,19 +266,28 @@ vp8_decode_rows(
 				memset(&residue, 0, sizeof(residue));
 				webpc_vp8_skip_residue(has_y2, frame->left_contexts, above_contexts);
 			} else {
-				webpc_vp8_read_residue(tokens, &frame->header, &frame->header.dequant[modes.segment], has_y2,
-					frame->left_contexts, above_contexts, &residue);
+				webpc_vp8_read_residue(
+					tokens,
+					&frame->header,
+					&frame->header.dequant[modes.segment],
+					has_y2,
+					frame->left_contexts,
+					above_contexts,
+					&residue);
 			}
 
 			/* A token partition read past its end fails the frame (as libwebp fails it). */
-			if (webpc_bool_ended(tokens))
+			ended = webpc_bool_ended(tokens);
+			if (ended)
 				return ENOBUFS;
 
 			/* The pixels, and what the loop filter will need. */
 			vp8_macroblock(frame, mb_x, mb_y, &modes, &residue);
 			filter = &frame->filters[(size_t)mb_y * mb_width + mb_x];
 			filter->segment = (uint8_t)modes.segment;
-			filter->b_pred = (uint8_t)(has_y2 ? 0 : 1);
+			filter->b_pred = 1;
+			if (has_y2)
+				filter->b_pred = 0;
 
 			/* The subblock edges are filtered for B_PRED and for a macroblock with any block coded (RFC 6386 15.1). */
 			filter->inner = 0;
@@ -277,7 +298,8 @@ vp8_decode_rows(
 		}
 
 		/* The first partition read past its end within the row fails the frame. */
-		if (webpc_bool_ended(&frame->first))
+		ended = webpc_bool_ended(&frame->first);
+		if (ended)
 			return ENOBUFS;
 	}
 
@@ -303,6 +325,7 @@ vp8_macroblock(
 	uint8_t *v;
 	unsigned block;
 
+	/* The macroblock's place in each plane. */
 	picture = frame->picture;
 	y = picture->y + (ptrdiff_t)mb_y * 16 * picture->y_stride + (ptrdiff_t)mb_x * 16;
 	u = picture->u + (ptrdiff_t)mb_y * 8 * picture->uv_stride + (ptrdiff_t)mb_x * 8;
@@ -311,6 +334,8 @@ vp8_macroblock(
 	/* A macroblock with Y2 gets the DC of its Y blocks from the WHT (RFC 6386 14.3). */
 	if (modes->ymode != WEBPC_VP8_B_PRED) {
 		webpc_vp8_iwht(residue->coeffs[WEBPC_VP8_BLOCK_Y2], dc);
+
+		/* Each Y block's DC is the matching output of the transform. */
 		for (block = 0; block < 16U; block++)
 			residue->coeffs[WEBPC_VP8_BLOCK_Y + block][0] = dc[block];
 	}
@@ -319,10 +344,12 @@ vp8_macroblock(
 	vp8_edges(picture->y, picture->y_stride, 16U, mb_x * 16U, mb_y * 16U, &edges);
 	if (modes->ymode != WEBPC_VP8_B_PRED) {
 		webpc_vp8_predict_block(modes->ymode, 16U, &edges, y, picture->y_stride);
-		for (block = 0; block < 16U; block++)
-			vp8_add_residue(residue->coeffs[WEBPC_VP8_BLOCK_Y + block],
+		for (block = 0; block < 16U; block++) {
+			vp8_add_residue(
+				residue->coeffs[WEBPC_VP8_BLOCK_Y + block],
 				y + (ptrdiff_t)(block / 4U) * 4 * picture->y_stride + (ptrdiff_t)(block % 4U) * 4,
 				picture->y_stride);
+		}
 	} else {
 		vp8_above_right(frame, mb_x, mb_y, right);
 		vp8_luma_subblocks(modes, &edges, right, residue, y, picture->y_stride);
@@ -334,10 +361,14 @@ vp8_macroblock(
 	vp8_edges(picture->v, picture->uv_stride, 8U, mb_x * 8U, mb_y * 8U, &edges);
 	webpc_vp8_predict_block(modes->uvmode, 8U, &edges, v, picture->uv_stride);
 	for (block = 0; block < 4U; block++) {
-		vp8_add_residue(residue->coeffs[WEBPC_VP8_BLOCK_U + block],
-			u + (ptrdiff_t)(block / 2U) * 4 * picture->uv_stride + (ptrdiff_t)(block % 2U) * 4, picture->uv_stride);
-		vp8_add_residue(residue->coeffs[WEBPC_VP8_BLOCK_V + block],
-			v + (ptrdiff_t)(block / 2U) * 4 * picture->uv_stride + (ptrdiff_t)(block % 2U) * 4, picture->uv_stride);
+		vp8_add_residue(
+			residue->coeffs[WEBPC_VP8_BLOCK_U + block],
+			u + (ptrdiff_t)(block / 2U) * 4 * picture->uv_stride + (ptrdiff_t)(block % 2U) * 4,
+			picture->uv_stride);
+		vp8_add_residue(
+			residue->coeffs[WEBPC_VP8_BLOCK_V + block],
+			v + (ptrdiff_t)(block / 2U) * 4 * picture->uv_stride + (ptrdiff_t)(block % 2U) * 4,
+			picture->uv_stride);
 	}
 }
 
@@ -374,6 +405,7 @@ vp8_edges(
 	if (x > 0U)
 		edges->have_left = 1;
 	for (index = 0; index < size; index++) {
+		/* Inside the frame the pixel left of the block is read; at the left edge it is 129. */
 		if (x > 0U)
 			edges->left[index] = plane[(ptrdiff_t)(y + index) * stride + (ptrdiff_t)x - 1];
 		else
@@ -405,6 +437,7 @@ vp8_above_right(
 	const struct webpc_vp8_picture *picture;
 	const uint8_t *row;
 
+	/* The picture whose rows are read. */
 	picture = frame->picture;
 
 	/* Above the frame. */
@@ -445,6 +478,7 @@ vp8_luma_subblocks(
 	unsigned by;
 	unsigned index;
 
+	/* Predicts and sums each subblock in raster order. */
 	for (block = 0; block < 16U; block++) {
 		bx = block % 4U;
 		by = block / 4U;
@@ -452,6 +486,7 @@ vp8_luma_subblocks(
 
 		/* The 4 pixels above: the macroblock's edge on the first row of subblocks, else the row just reconstructed. */
 		for (index = 0; index < 4U; index++) {
+			/* The first row of subblocks reads the macroblock's edge; the others read the row just above. */
 			if (by == 0U)
 				above[1U + index] = edges->above[bx * 4U + index];
 			else
@@ -460,6 +495,7 @@ vp8_luma_subblocks(
 
 		/* The 4 above-right: the macroblock's above-right for the right column on every row (12.3). */
 		for (index = 0; index < 4U; index++) {
+			/* The right column takes the macroblock's above-right pixels; the others take their neighbours'. */
 			if (bx == 3U)
 				above[5U + index] = right[index];
 			else if (by == 0U)
@@ -470,6 +506,7 @@ vp8_luma_subblocks(
 
 		/* The column on the left: the macroblock's edge in the first column, else the subblock reconstructed there. */
 		for (index = 0; index < 4U; index++) {
+			/* The first column reads the macroblock's edge; the others read the subblock to the left. */
 			if (bx == 0U)
 				left[index] = edges->left[by * 4U + index];
 			else
@@ -529,17 +566,31 @@ vp8_filter_frame(
 	unsigned mb_x;
 	unsigned mb_y;
 
+	/* The picture whose planes are filtered. */
 	picture = frame->picture;
 
 	/* Each macroblock with its own controls. */
 	for (mb_y = 0; mb_y < picture->mb_height; mb_y++) {
 		for (mb_x = 0; mb_x < picture->mb_width; mb_x++) {
+			/* The strengths this macroblock is filtered with. */
 			filter = &frame->filters[(size_t)mb_y * picture->mb_width + mb_x];
-			webpc_vp8_filter_params(&frame->header, filter->segment, filter->b_pred, &params);
-			webpc_vp8_filter_macroblock(picture->y + (ptrdiff_t)mb_y * 16 * picture->y_stride + (ptrdiff_t)mb_x * 16,
+			webpc_vp8_filter_params(
+				&frame->header,
+				filter->segment,
+				filter->b_pred,
+				&params);
+
+			/* Filters the macroblock's edges in the three planes. */
+			webpc_vp8_filter_macroblock(
+				picture->y + (ptrdiff_t)mb_y * 16 * picture->y_stride + (ptrdiff_t)mb_x * 16,
 				picture->u + (ptrdiff_t)mb_y * 8 * picture->uv_stride + (ptrdiff_t)mb_x * 8,
 				picture->v + (ptrdiff_t)mb_y * 8 * picture->uv_stride + (ptrdiff_t)mb_x * 8,
-				picture->y_stride, picture->uv_stride, mb_x, mb_y, &params, frame->header.filter.simple,
+				picture->y_stride,
+				picture->uv_stride,
+				mb_x,
+				mb_y,
+				&params,
+				frame->header.filter.simple,
 				filter->inner);
 		}
 	}

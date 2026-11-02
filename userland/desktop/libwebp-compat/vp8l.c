@@ -60,12 +60,10 @@ struct vp8l_transform {
 };
 
 /* Reads the transforms and the image, and undoes the transforms. */
-static int decode_body(struct webpc_lbits *reader, unsigned width, unsigned height, uint32_t *pixels,
-	struct vp8l_transform *transforms, unsigned *transform_count);
+static int decode_body(struct webpc_lbits *reader, unsigned width, unsigned height, uint32_t *pixels, struct vp8l_transform *transforms, unsigned *transform_count);
 
 /* Reads the data of one transform of the given type from the stream. */
-static int read_transform(struct webpc_lbits *reader, unsigned type, unsigned *current_width, unsigned height,
-	struct vp8l_transform *transform);
+static int read_transform(struct webpc_lbits *reader, unsigned type, unsigned *current_width, unsigned height, struct vp8l_transform *transform);
 
 /* Reads the colour table of a colour indexing transform and sums its deltas. */
 static int read_color_table(struct webpc_lbits *reader, struct vp8l_transform *transform, unsigned *current_width);
@@ -144,7 +142,9 @@ webpc_vp8l_decode(
 	int error;
 
 	/* Refuses missing outputs. */
-	if (pixels == NULL || width == NULL || height == NULL)
+	if (pixels == NULL ||
+	    width == NULL ||
+	    height == NULL)
 		return EINVAL;
 
 	/* Gives no array until one is decoded. */
@@ -162,8 +162,12 @@ webpc_vp8l_decode(
 		return ENOMEM;
 
 	/* Decodes the image-stream that follows the header. */
-	error = webpc_vp8l_decode_stream(data + WEBPC_VP8L_HEADER_SIZE, size - WEBPC_VP8L_HEADER_SIZE, header.width,
-		header.height, array);
+	error = webpc_vp8l_decode_stream(
+		data + WEBPC_VP8L_HEADER_SIZE,
+		size - WEBPC_VP8L_HEADER_SIZE,
+		header.width,
+		header.height,
+		array);
 	if (error != 0) {
 		free(array);
 		return error;
@@ -246,6 +250,7 @@ decode_body(
 	unsigned type;
 	unsigned present;
 	unsigned index;
+	int ended;
 	int error;
 
 	/* The width the next thing is read at: the full width until a colour indexing transform bundles pixels. */
@@ -256,7 +261,8 @@ decode_body(
 	for (;;) {
 		/* Reads the bit that says whether another transform follows. */
 		present = webpc_lbits_read(reader, 1U);
-		if (webpc_lbits_ended(reader) != 0)
+		ended = webpc_lbits_ended(reader);
+		if (ended != 0)
 			return ENOBUFS;
 
 		/* Stops at the 0 bit that ends the list of transforms. */
@@ -317,6 +323,8 @@ read_transform(
 	unsigned sub_width;
 	unsigned sub_height;
 	size_t count;
+	uint32_t size_field;
+	int ended;
 	int error;
 
 	/* Records the type and the width the transform is read at. */
@@ -339,9 +347,11 @@ read_transform(
 	}
 
 	/* Reads size_bits, which is 2 plus a 3-bit field, so 2..9. */
-	size_bits = TRANSFORM_SIZE_BASE + webpc_lbits_read(reader, TRANSFORM_SIZE_BITS);
-	if (webpc_lbits_ended(reader) != 0)
+	size_field = webpc_lbits_read(reader, TRANSFORM_SIZE_BITS);
+	ended = webpc_lbits_ended(reader);
+	if (ended != 0)
 		return ENOBUFS;
+	size_bits = TRANSFORM_SIZE_BASE + size_field;
 	transform->bits = size_bits;
 
 	/* Works out the size of the subresolution image, which covers the image at the current width. */
@@ -382,12 +392,16 @@ read_color_table(
 	uint32_t delta;
 	uint32_t sum;
 	uint32_t byte_sum;
+	uint32_t count_field;
+	int ended;
 	int error;
 
 	/* Reads color_table_size, which is 1 plus an 8-bit field. */
-	color_count = webpc_lbits_read(reader, COLOR_COUNT_BITS) + 1U;
-	if (webpc_lbits_ended(reader) != 0)
+	count_field = webpc_lbits_read(reader, COLOR_COUNT_BITS);
+	ended = webpc_lbits_ended(reader);
+	if (ended != 0)
 		return ENOBUFS;
+	color_count = count_field + 1U;
 
 	/* Allocates the table, padded so that any 8-bit index finds an entry. */
 	transform->data = (uint32_t *)malloc(WEBPC_VP8L_COLOR_TABLE_SIZE * sizeof(uint32_t));
@@ -410,6 +424,8 @@ read_color_table(
 			byte_sum = ((previous >> (8U * channel)) & 0xffU) + ((delta >> (8U * channel)) & 0xffU);
 			sum |= (byte_sum & 0xffU) << (8U * channel);
 		}
+
+		/* Stores the sum and carries it to the next entry. */
 		transform->data[entry] = sum;
 		previous = sum;
 	}

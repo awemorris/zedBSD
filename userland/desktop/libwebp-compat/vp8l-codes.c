@@ -50,14 +50,10 @@ static const uint8_t codes_length_code_order[WEBPC_VP8L_CODE_LENGTH_CODES] = {
 static const uint8_t codes_repeat_bits[3] = { 2, 3, 7 };
 static const uint8_t codes_repeat_base[3] = { 3, 3, 11 };
 
-static int codes_read_unchecked(struct webpc_lbits *reader, struct webpc_prefix_pool *pool, unsigned alphabet_size,
-	struct webpc_prefix_code *code);
-static int codes_read_simple(struct webpc_lbits *reader, struct webpc_prefix_pool *pool, unsigned alphabet_size,
-	struct webpc_prefix_code *code);
-static int codes_read_normal(struct webpc_lbits *reader, struct webpc_prefix_pool *pool, unsigned alphabet_size,
-	struct webpc_prefix_code *code);
-static int codes_read_lengths(struct webpc_lbits *reader, const struct webpc_prefix_pool *pool,
-	const struct webpc_prefix_code *length_code, unsigned alphabet_size, unsigned max_symbol, uint8_t *lengths);
+static int codes_read_unchecked(struct webpc_lbits *reader, struct webpc_prefix_pool *pool, unsigned alphabet_size, struct webpc_prefix_code *code);
+static int codes_read_simple(struct webpc_lbits *reader, struct webpc_prefix_pool *pool, unsigned alphabet_size, struct webpc_prefix_code *code);
+static int codes_read_normal(struct webpc_lbits *reader, struct webpc_prefix_pool *pool, unsigned alphabet_size, struct webpc_prefix_code *code);
+static int codes_read_lengths(struct webpc_lbits *reader, const struct webpc_prefix_pool *pool, const struct webpc_prefix_code *length_code, unsigned alphabet_size, unsigned max_symbol, uint8_t *lengths);
 
 /*
  * Reads one prefix code (RFC 9649 3.7.2.1) for an alphabet of alphabet_size
@@ -203,6 +199,7 @@ codes_read_simple(
 	unsigned symbol_count;
 	unsigned first_bits;
 	uint32_t is_first_8bits;
+	uint32_t count_field;
 	unsigned index;
 	int error;
 
@@ -211,7 +208,8 @@ codes_read_simple(
 	 * symbol is: 1 bit, or 8 bits when is_first_8bits is set.  The second
 	 * symbol always takes 8 bits.
 	 */
-	symbol_count = 1U + webpc_lbits_read(reader, 1U);
+	count_field = webpc_lbits_read(reader, 1U);
+	symbol_count = 1U + count_field;
 	is_first_8bits = webpc_lbits_read(reader, 1U);
 	first_bits = 1U;
 	if (is_first_8bits != 0U)
@@ -228,6 +226,7 @@ codes_read_simple(
 	 */
 	memset(lengths, 0, alphabet_size);
 	for (index = 0; index < symbol_count; index++) {
+		/* A symbol outside the alphabet is left out. */
 		if (symbols[index] < alphabet_size)
 			lengths[symbols[index]] = 1;
 	}
@@ -261,14 +260,18 @@ codes_read_normal(
 	unsigned length_nbits;
 	unsigned max_symbol;
 	uint32_t has_max_symbol;
+	uint32_t field;
 	unsigned index;
 	int error;
 
 	/* Reads how many of the code length code's lengths follow, and the lengths in their order. */
-	num_code_lengths = CODES_NUM_LENGTHS_MIN + webpc_lbits_read(reader, CODES_NUM_LENGTHS_BITS);
+	field = webpc_lbits_read(reader, CODES_NUM_LENGTHS_BITS);
+	num_code_lengths = CODES_NUM_LENGTHS_MIN + field;
 	memset(length_code_lengths, 0, sizeof(length_code_lengths));
-	for (index = 0; index < num_code_lengths; index++)
-		length_code_lengths[codes_length_code_order[index]] = (uint8_t)webpc_lbits_read(reader, CODES_LENGTH_CODE_BITS);
+	for (index = 0; index < num_code_lengths; index++) {
+		field = webpc_lbits_read(reader, CODES_LENGTH_CODE_BITS);
+		length_code_lengths[codes_length_code_order[index]] = (uint8_t)field;
+	}
 
 	/*
 	 * Reads how many code length symbols may be read: the whole alphabet,
@@ -277,8 +280,10 @@ codes_read_normal(
 	max_symbol = alphabet_size;
 	has_max_symbol = webpc_lbits_read(reader, 1U);
 	if (has_max_symbol != 0U) {
-		length_nbits = 2U + 2U * webpc_lbits_read(reader, 3U);
-		max_symbol = 2U + webpc_lbits_read(reader, length_nbits);
+		field = webpc_lbits_read(reader, 3U);
+		length_nbits = 2U + 2U * field;
+		field = webpc_lbits_read(reader, length_nbits);
+		max_symbol = 2U + field;
 
 		/* More symbols than the alphabet has lengths is a broken stream. */
 		if (max_symbol > alphabet_size)
@@ -331,6 +336,7 @@ codes_read_lengths(
 	unsigned repeat;
 	unsigned fill_length;
 	unsigned index;
+	uint32_t extra;
 
 	/*
 	 * Reads one code length symbol at a time.  max_symbol counts these
@@ -357,7 +363,8 @@ codes_read_lengths(
 
 		/* Otherwise it is a repeat: 16 repeats the last length, 17 and 18 give zeros. */
 		repeat_kind = token - CODES_FIRST_REPEAT;
-		repeat = codes_repeat_base[repeat_kind] + webpc_lbits_read(reader, codes_repeat_bits[repeat_kind]);
+		extra = webpc_lbits_read(reader, codes_repeat_bits[repeat_kind]);
+		repeat = codes_repeat_base[repeat_kind] + extra;
 		fill_length = 0;
 		if (token == CODES_FIRST_REPEAT)
 			fill_length = previous_length;
