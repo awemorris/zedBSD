@@ -1854,7 +1854,8 @@ interpreter_suspend(
 /*
  * Finds the handler of the realm's exception from the running
  * instruction outwards through the run's frames; 0 when one takes it (the
- * run goes on there), VM_THROWN when the run's entry frame has none.
+ * run goes on there), VM_THROWN when the run's entry frame has none, and
+ * VM_TERMINATED (the exception dropped) when the task was asked to end.
  */
 static int
 interpreter_unwind(

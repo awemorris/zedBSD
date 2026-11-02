@@ -46,10 +46,10 @@
 
 /* The most steps one match may take, and the most entries its stack may hold, before it gives up. */
 #define REGEXP_STEPS_MAX	((uint64_t)400000000)
+#define REGEXP_STACK_MAX	((size_t)1 << 25)
 
 /* How many steps the matcher takes between two calls of the input's poll (the mask of a power of two). */
 #define REGEXP_POLL_MASK	((uint64_t)0xFFFF)
-#define REGEXP_STACK_MAX	((size_t)1 << 25)
 
 /* The largest code point. */
 #define REGEXP_CODE_POINT_MAX	0x10FFFFU
@@ -590,7 +590,7 @@ js_regexp_capture_name(
  * there where it matches.  The captures (two positions each, starts and
  * ends, JS_REGEXP_UNSET for a capture that did not take part) are stored
  * when it matched.  E2BIG when the match went on too long, ENOMEM when
- * memory ran out.
+ * memory ran out, and the status of the input's poll when it said to stop.
  */
 int
 js_regexp_match(
