@@ -111,9 +111,17 @@ struct front_item {
 /*
  * One notification for the program's callbacks, which browser_view_process
  * calls on the program's thread: its kind and arguments, with the strings
- * and the image it owns (until it is told).
+ * and the image it owns (until it is told).  held says the notification
+ * tells of a state the script thread has not published yet (a page
+ * committed, a load, a title): it waits, with every notification after
+ * it, until the next publish, so that the program's getters read that
+ * state when its callback runs.  browser_view_process marks a note it put
+ * back into the queue FRONT_NOTE_MOVED in its own copy.
  */
+#define FRONT_NOTE_MOVED	2
+
 struct front_note {
+	int held;
 	int kind;
 	int state;
 	int error;
@@ -860,10 +868,12 @@ view_front_process(
 	char line[96];
 	size_t lost;
 	size_t index;
+	size_t told;
+	int pushed;
 	int copied;
 	int error;
 
-	/* The notifications, the lines dropped, and a copy of the newest state. */
+	/* The notifications up to the first one whose state is not published yet (it and those after it wait), the lines dropped, and a copy of the newest state. */
 	front = view_front_of(view);
 	memset(&next, 0, sizeof(next));
 	copied = 0;
@@ -872,6 +882,20 @@ view_front_process(
 
 	notes = front->notes;
 	wb_vector_init(&front->notes, sizeof(struct front_note));
+	told = notes.count;
+	for (index = 0; index < notes.count; index++) {
+		note = wb_vector_at(&notes, index);
+		if (note->held && told == notes.count)
+			told = index;
+
+		/* A waiting one goes back to the queue, in order, and is marked moved here (one that cannot is told now). */
+		if (index >= told) {
+			pushed = wb_vector_push(&front->notes, note);
+			note->held = 0;
+			if (pushed == 0)
+				note->held = FRONT_NOTE_MOVED;
+		}
+	}
 	lost = front->console_dropped;
 	front->console_dropped = 0;
 	front->redraw_noted = 0;
@@ -891,9 +915,11 @@ view_front_process(
 		front_snapshot_free(&next);
 	}
 
-	/* Each notification, told and let go. */
+	/* Each notification that may be told, told and let go (the waiting ones are the queue's again). */
 	for (index = 0; index < notes.count; index++) {
 		note = wb_vector_at(&notes, index);
+		if (note->held == FRONT_NOTE_MOVED)
+			continue;
 		front_tell(front, note);
 		front_note_free(note);
 	}
@@ -1311,6 +1337,8 @@ front_publish(
 {
 	struct view_snapshot next;
 	struct view_snapshot old;
+	struct front_note *note;
+	size_t index;
 	int changed;
 	int painted;
 	int wake;
@@ -1342,6 +1370,12 @@ front_publish(
 		next.serial = front->serial;
 		old = front->published;
 		front->published = next;
+	}
+
+	/* The notifications of the state now published may be told. */
+	for (index = 0; index < front->notes.count; index++) {
+		note = wb_vector_at(&front->notes, index);
+		note->held = 0;
 	}
 	wake = 0;
 	if (!front->wake_owed && (changed || front->notes.count != 0 || front->console_dropped != 0)) {
@@ -1518,6 +1552,13 @@ front_note(
 	struct front_note *note)
 {
 	int error;
+
+	/* A page committed, a load and a title wait for the state they tell of to be published. */
+	note->held = 0;
+	if (note->kind == FRONT_NOTE_COMMITTED ||
+	    note->kind == FRONT_NOTE_LOAD ||
+	    note->kind == FRONT_NOTE_TITLE)
+		note->held = 1;
 
 	/* The queue. */
 	error = 0;

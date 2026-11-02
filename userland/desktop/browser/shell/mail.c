@@ -22,7 +22,9 @@
  * code then goes into the page's field for one-time codes
  * (autocomplete="one-time-code", browser_view_focus_field), and only a
  * page without one gets nothing: the code goes to the clipboard instead,
- * and a notification says to paste it.  A code with
+ * and a notification says to paste it.  The view runs the page on threads
+ * of its own, so the field is asked for and the code typed when the
+ * view's answer comes (its field callback, shell_mail_field).  A code with
  * letters is typed with the letters' DOM names ("KeyK", Shift for a
  * capital).  Each browser window hears the arrival and offers the code,
  * and the notification names the window's page, so the user chooses the
@@ -225,9 +227,10 @@ shell_mail_close(
 
 /*
  * Types the offered code into the page's focused field, key by key, and
- * forgets it (the titlebar's control and the notification go).  A page
- * whose focus is in no field that takes text gets nothing: the code goes
- * to the clipboard instead (ws177-p014).
+ * forgets it (the titlebar's control and the notification go).  When the
+ * focus is in no field that takes text, the page's field for one-time
+ * codes is asked for, and the code goes in when the view answers
+ * (shell_mail_field).
  */
 void
 shell_mail_fill(
@@ -240,24 +243,28 @@ shell_mail_fill(
 	int target;
 	int error;
 
-	/* Nothing offered. */
+	/* Nothing offered, or the field asked for already. */
 	length = strlen(mail->code);
 	if (length == 0U)
+		return;
+	if (mail->asked)
 		return;
 
 	/* The page has the keyboard again (the click went to the notification or the titlebar). */
 	(void)browser_view_focus(view, 1);
 
-	/* No field with the focus: the page's field for one-time codes, else the clipboard (keys would be the page's shortcuts). */
+	/* No field with the focus: the page's field for one-time codes, typed into when the view answers. */
 	target = browser_view_text_target(view, caret);
 	if (target != 1) {
 		error = browser_view_focus_field(view, "one-time-code");
-		printf("ZBROWSER MAIL one-time-code-field error=%d\n", error);
-		fflush(stdout);
-		if (error != 0) {
-			shell_mail_copy(mail, titlebar);
+		if (error == 0) {
+			mail->asked = 1;
 			return;
 		}
+
+		/* The view could not take the request: the answer is that error now. */
+		shell_mail_field(mail, view, titlebar, error);
+		return;
 	}
 
 	/* The code typed into the field. */
@@ -265,6 +272,45 @@ shell_mail_fill(
 
 	/* The log the tests read (its length only), and the code forgotten. */
 	printf("ZBROWSER MAIL fill length=%lu error=%d\n", (unsigned long)length, error);
+	fflush(stdout);
+	shell_mail_withdraw(mail, titlebar);
+}
+
+/*
+ * Carries out the view's answer about the page's field for one-time codes
+ * (the field callback, or the request's own failure): the code typed into
+ * the field that took the focus, or, without one, put on the clipboard
+ * (keys would be the page's shortcuts, ws177-p014).
+ */
+void
+shell_mail_field(
+	struct shell_mail *mail,
+	struct browser_view *view,
+	struct shell_titlebar *titlebar,
+	int error)
+{
+	size_t length;
+	int typed;
+
+	/* The answer is the asking's; an offer that ran out meanwhile has no code left to type. */
+	mail->asked = 0;
+	printf("ZBROWSER MAIL one-time-code-field error=%d\n", error);
+	fflush(stdout);
+	length = strlen(mail->code);
+	if (length == 0U)
+		return;
+
+	/* No such field: the clipboard. */
+	if (error != 0) {
+		shell_mail_copy(mail, titlebar);
+		return;
+	}
+
+	/* The code typed into the field. */
+	typed = shell_mail_type(mail->code, view);
+
+	/* The log the tests read (its length only), and the code forgotten. */
+	printf("ZBROWSER MAIL fill length=%lu error=%d\n", (unsigned long)length, typed);
 	fflush(stdout);
 	shell_mail_withdraw(mail, titlebar);
 }
