@@ -99,6 +99,16 @@ struct probe {
 	VkPhysicalDeviceMemoryProperties memory;
 
 	/*
+	 * The family the copy-out runs on: the video family when it transfers,
+	 * else the first family that does (Intel's video family decodes
+	 * only), with its own queue, pool and command buffer.
+	 */
+	uint32_t copy_family;
+	VkQueue copy_queue;
+	VkCommandPool copy_pool;
+	VkCommandBuffer copy_command;
+
+	/*
 	 * The codec (PROBE_H264 or PROBE_H265), its decode profile (the
 	 * H.264 or the H.265 record chained to the profile), and the list of
 	 * it buffers and images name.

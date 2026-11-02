@@ -403,6 +403,7 @@ probe_video_family(
 	VkVideoCodecOperationFlagsKHR operation;
 	uint32_t count;
 	uint32_t index;
+	uint32_t copy;
 
 	/* The families with their video properties and whether they report result status. */
 	count = PROBE_FAMILIES;
@@ -418,7 +419,7 @@ probe_video_family(
 	}
 	vkGetPhysicalDeviceQueueFamilyProperties2KHR(probe->physical, &count, families);
 
-	/* The first one with video decode of the codec. */
+	/* The first one with video decode of the codec; the copy-out's family is it when it transfers, else the first that does. */
 	operation = VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	if (probe->codec == PROBE_H265)
 		operation = VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR;
@@ -429,6 +430,15 @@ probe_video_family(
 			continue;
 		*family = index;
 		probe->status_supported = status[index].queryResultStatusSupport;
+		probe->copy_family = index;
+		if ((families[index].queueFamilyProperties.queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) == 0U) {
+			for (copy = 0U; copy < count; copy++) {
+				if ((families[copy].queueFamilyProperties.queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) != 0U) {
+					probe->copy_family = copy;
+					break;
+				}
+			}
+		}
 		return 0;
 	}
 
@@ -454,7 +464,7 @@ probe_device(
 		VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
 		VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME
 	};
-	VkDeviceQueueCreateInfo queue;
+	VkDeviceQueueCreateInfo queue[2];
 	VkDeviceCreateInfo info;
 	VkResult result;
 	float priority;
@@ -465,17 +475,21 @@ probe_device(
 	if (error != 0)
 		return error;
 
-	/* The device and its one video queue. */
+	/* The device, its video queue and, when the copy-out's family is another, a queue of that. */
 	priority = 1.0f;
-	memset(&queue, 0, sizeof(queue));
-	queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	queue.queueFamilyIndex = probe->family;
-	queue.queueCount = 1U;
-	queue.pQueuePriorities = &priority;
+	memset(queue, 0, sizeof(queue));
+	queue[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	queue[0].queueFamilyIndex = probe->family;
+	queue[0].queueCount = 1U;
+	queue[0].pQueuePriorities = &priority;
+	queue[1] = queue[0];
+	queue[1].queueFamilyIndex = probe->copy_family;
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	info.queueCreateInfoCount = 1U;
-	info.pQueueCreateInfos = &queue;
+	if (probe->copy_family != probe->family)
+		info.queueCreateInfoCount = 2U;
+	info.pQueueCreateInfos = queue;
 	info.enabledExtensionCount = 4U;
 	info.ppEnabledExtensionNames = extensions;
 	if (probe->codec == PROBE_H265)
@@ -484,6 +498,7 @@ probe_device(
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkCreateDevice");
 	vkGetDeviceQueue(probe->device, probe->family, 0U, &probe->queue);
+	vkGetDeviceQueue(probe->device, probe->copy_family, 0U, &probe->copy_queue);
 
 	/* Succeeded: a device that decodes. */
 	return 0;
@@ -672,6 +687,7 @@ probe_picture(
 	VkImageViewCreateInfo view;
 	VkMemoryRequirements requirements;
 	VkResult result;
+	uint32_t families[2];
 	void *map;
 	int error;
 
@@ -697,8 +713,15 @@ probe_picture(
 		image.usage |= VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	}
 
-	/* One queue owns it, and its contents start undefined. */
+	/* One queue owns it (both families share it when the copy-out's is another), and its contents start undefined. */
 	image.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	families[0] = probe->family;
+	families[1] = probe->copy_family;
+	if (probe->copy_family != probe->family) {
+		image.sharingMode = VK_SHARING_MODE_CONCURRENT;
+		image.queueFamilyIndexCount = 2U;
+		image.pQueueFamilyIndices = families;
+	}
 	image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	result = vkCreateImage(probe->device, &image, NULL, &probe->image[slot]);
 	if (result != VK_SUCCESS)
@@ -1070,6 +1093,19 @@ probe_commands(
 	result = vkAllocateCommandBuffers(probe->device, &command, &probe->command);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkAllocateCommandBuffers");
+
+	/* The copy-out's pool and buffer: the video family's, or their own of the copy-out's family. */
+	probe->copy_command = probe->command;
+	if (probe->copy_family != probe->family) {
+		pool.queueFamilyIndex = probe->copy_family;
+		result = vkCreateCommandPool(probe->device, &pool, NULL, &probe->copy_pool);
+		if (result != VK_SUCCESS)
+			return probe_failed(result, "vkCreateCommandPool copy");
+		command.commandPool = probe->copy_pool;
+		result = vkAllocateCommandBuffers(probe->device, &command, &probe->copy_command);
+		if (result != VK_SUCCESS)
+			return probe_failed(result, "vkAllocateCommandBuffers copy");
+	}
 
 	/* The fence. */
 	memset(&fence, 0, sizeof(fence));
@@ -1770,6 +1806,8 @@ probe_close(
 			vkDestroyFence(probe->device, probe->fence, NULL);
 		if (probe->pool != VK_NULL_HANDLE)
 			vkDestroyCommandPool(probe->device, probe->pool, NULL);
+		if (probe->copy_pool != VK_NULL_HANDLE)
+			vkDestroyCommandPool(probe->device, probe->copy_pool, NULL);
 		if (probe->parameters != VK_NULL_HANDLE)
 			vkDestroyVideoSessionParametersKHR(probe->device, probe->parameters, NULL);
 		if (probe->session != VK_NULL_HANDLE)
