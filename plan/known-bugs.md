@@ -448,5 +448,5 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-409](bugs/BUG-409.md) | ld.so が DF_1_NODELETE を守らず dlclose で unload する | fixed（2026-11-02 P3 q1930-i01、DT_FLAGS_1 の DF_1_NODELETE と dlopen の RTLD_NODELETE で object を exit まで残す。QEMU amd64 で rtld-nodelete・rtld-many・TLS の試験が PASS、実機は未実施） |
 | [BUG-410](bugs/BUG-410.md) | libc の atexit が登録した object を覚えず、dlclose した library の関数を exit で呼ぶ | open（2026-11-02 10:41 Q1 が起票、P3） |
 | [BUG-408](bugs/BUG-408.md) | ブラウザ: Google の検索の結果の頁が JavaScript の確認（BotGuard）を通らず reCAPTCHA の頁になる | open（2026-11-02 10:40 P8 が起票、Q1 の指示、q1924 では直さない） |
-| [BUG-411](bugs/BUG-411.md) | ブラウザの JavaScript の engine が重い頁で遅い（property の線形の探し、layout） | open（2026-11-02 10:47 Q1 が起票、P8 の待ち） |
+| [BUG-411](bugs/BUG-411.md) | ブラウザの JavaScript の engine が重い頁で遅い（property の線形の探し、layout） | open（2026-11-02 P8 q1941-i01 で一部: shape の hash 表、layout に依らない getComputedStyle は layout しない ほか。store の最長の呼び出し 40〜42 秒 → 約 10 秒、目標 2 秒は未達で残りは layout そのもの（1 回 0.8〜0.9 秒、intrinsic の測りの繰り返し）。host で確かめた、本物の Windows は未実施） |
 | [BUG-412](bugs/BUG-412.md) | Pi 5 の desktop で click が効かない（1 秒以上押してから離すと click になる） | open（2026-11-02 11:02 Q1 が起票、ユーザーの Pi 5 の UAT、P3） |
