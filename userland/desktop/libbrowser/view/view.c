@@ -46,6 +46,7 @@
 #include "storage/instance.h"
 #include "storage/queue.h"
 #include "view/front.h"
+#include "view/frames.h"
 #include "base/os-error.h"
 
 #include <browser/browser.h>
@@ -550,7 +551,9 @@ browser_view_destroy(
 	for (index = 0; index < view->history_count; index++)
 		free(view->history[index]);
 
-	/* The loader, once no page uses it, then the view. */
+	/* The iframes' threads ended with the pages; their clients, then the loader, once no page uses it, then the view. */
+	if (view->front != NULL)
+		view_frames_close(view_front_frames(view->front));
 	if (view->loader != NULL)
 		page_net_destroy(view->loader);
 	wb_buffer_release(&view->title);
@@ -1088,6 +1091,15 @@ browser_view_process(
 	/* The redraw, which lays the page out again, and the title the scripts may have set. */
 	view_redraw(view);
 	view_update_title(view);
+}
+
+/* Reports the clock of the page shown, in milliseconds since it began (its timers' time), for the iframes' threads. */
+double
+view_page_time(
+	const struct browser_view *view)
+{
+	/* The view's clock less the page's start. */
+	return (double)(view_clock() - view->page_epoch);
 }
 
 /* How far the page is scrolled, in pixels. */
@@ -3202,9 +3214,11 @@ view_make_page(
 	if (view->front != NULL)
 		vm_heap_set_agent(made->heap, view_front_agent(view->front));
 
-	/* In a view of its own threads its animation frames wait for the drawing thread's presents. */
-	if (view->front != NULL)
+	/* In a view of its own threads its animation frames wait for the drawing thread's presents, and its iframes run on threads of their own. */
+	if (view->front != NULL) {
 		page_set_frames_presented(made, 1);
+		page_set_frame_calls(made, view_frames_calls(), view_front_frames(view->front));
+	}
 
 	/* Its scripts see the view's size and its fonts, write their console through the view, and count time from now. */
 	page_set_viewport(made, (int)view->width, (int)view->height);
@@ -3606,6 +3620,9 @@ view_keep(
 		return;
 	}
 
+	/* A page put away runs nothing: its iframes' threads end (they are made again when it is shown again). */
+	page_frames_suspend(page);
+
 	/* Room, made by letting the oldest go, and a page kept before for the same step goes too. */
 	for (slot = view->kept_count; slot > 0; slot--) {
 		if (view->kept[slot - 1U].index == index)
@@ -3654,6 +3671,7 @@ view_restore(
 	struct view_kept kept;
 	size_t slot;
 	char *copy;
+	int error;
 
 	/* The page kept for the step, whose location is still the step's. */
 	for (slot = 0; slot < view->kept_count; slot++) {
@@ -3674,6 +3692,15 @@ view_restore(
 	view_stop_load(view, 1);
 	kept = view->kept[slot];
 	view_kept_remove(view, slot, 0);
+
+	/* Its iframes get their threads again; a page whose iframes cannot is loaded again instead. */
+	error = page_frames_resume(kept.page);
+	if (error != 0) {
+		page_frames_suspend(kept.page);
+		page_destroy(kept.page);
+		free(copy);
+		return ENOENT;
+	}
 
 	/* The atlas's glyphs are the page shown's; that page is kept in its turn. */
 	if (view->gpu_open)

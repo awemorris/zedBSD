@@ -53,6 +53,8 @@ struct page_sheet {
 	uint32_t used;
 	struct page *page;
 	struct net_request *request;
+	/* The client of the thread that asked for it (its callback runs there). */
+	struct net_loader_client *client;
 	/* A parser's link or style element names it, or such a sheet imports it: the parser's scripts wait for it. */
 	int blocking;
 };
@@ -153,6 +155,30 @@ page_sheets_pending(
 	}
 
 	/* Every sheet is here, or failed. */
+	return 0;
+}
+
+/*
+ * Tells whether a sheet that blocks the parser's scripts is still on its
+ * way for a client of the page's loader: one the client's thread asked for
+ * (only that thread runs its callback, so only it can wait for it).
+ */
+int
+page_sheets_blocking_for(
+	const struct page *page,
+	const struct net_loader_client *client)
+{
+	const struct page_sheet *entry;
+	size_t index;
+
+	/* Any blocking entry with a request of the client under way. */
+	for (index = 0; index < page->sheets.count; index++) {
+		entry = *(struct page_sheet *const *)wb_vector_at(&page->sheets, index);
+		if (entry->request != NULL && entry->blocking && entry->client == client)
+			return 1;
+	}
+
+	/* Every such sheet is here, or failed, or another thread's. */
 	return 0;
 }
 
@@ -775,7 +801,8 @@ sheets_external(
 		if (error != 0)
 			entry->failed = 1;
 	} else if (page->loader != NULL && remote) {
-		error = net_loader_fetch(page->loader, entry->location, sheets_arrived, entry, &entry->request);
+		entry->client = page_client(page);
+		error = net_loader_client_send(entry->client, entry->location, NET_FETCH_DOCUMENT, NULL, sheets_arrived, entry, &entry->request);
 		if (error != 0)
 			entry->failed = 1;
 	} else {

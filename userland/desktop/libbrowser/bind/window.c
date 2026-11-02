@@ -237,10 +237,8 @@ bind_window_create(
 	struct bind_window *made;
 	int error;
 
-	/* Collectible hosts cannot leave asynchronous callbacks in the embedder. */
+	/* A collectible window's requests end when it is retired (bind_window_detach), before it can be collected. */
 	*window = NULL;
-	if (realm->managed && host->request != NULL)
-		return ENOTSUP;
 
 	/* A managed realm and document belong to exactly one live window. */
 	if (realm->managed && realm->host != NULL)
@@ -333,7 +331,9 @@ bind_window_detach(
 	window->detached = 1;
 	bind_frames_detach(window);
 
-	/* This context no longer delivers its own queued tasks. */
+	/* This context no longer delivers its own queued tasks, nor its requests' callbacks. */
+	if (window->realm->managed)
+		bind_requests_cancel(window);
 	window->timers.count = 0;
 	window->realm->jobs.count = 0;
 	window->realm->rejections.count = 0;

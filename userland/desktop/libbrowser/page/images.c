@@ -473,7 +473,7 @@ images_fetch(
 	/* An http or https image with a loader is fetched without blocking; it waits in the table meanwhile. */
 	image->page = page;
 	if (page->loader != NULL && remote) {
-		error = net_loader_fetch_kind(page->loader, image->location, NET_FETCH_IMAGE, images_arrived, image, &image->request);
+		error = net_loader_client_send(page_client(page), image->location, NET_FETCH_IMAGE, NULL, images_arrived, image, &image->request);
 		if (error != 0)
 			image->failed = 1;
 	} else {

@@ -235,7 +235,7 @@ fonts_add_face(
 	/* An http or https font with a loader is fetched without blocking. */
 	remote = net_loader_takes(font->location);
 	if (page->loader != NULL && remote) {
-		error = net_loader_fetch(page->loader, font->location, fonts_arrived, font, &font->request);
+		error = net_loader_client_send(page_client(page), font->location, NET_FETCH_DOCUMENT, NULL, fonts_arrived, font, &font->request);
 		if (error != 0)
 			font->state = FONTS_FAILED;
 		return 0;

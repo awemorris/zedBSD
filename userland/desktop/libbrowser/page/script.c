@@ -502,11 +502,11 @@ script_settle_network(
 	if ((double)timeout < wait)
 		timeout++;
 
-	/* The loader's news, waited for without advancing any virtual timer first. */
-	net_loader_wait(page->loader, timeout);
+	/* The news of the calling thread's client, waited for without advancing any virtual timer first. */
+	net_loader_client_wait(page_client(page), timeout);
 
 	/* A borrowed completion callback copies C metadata; outer Page timing drains child scripts and events later. */
-	net_loader_dispatch(page->loader);
+	(void)net_loader_client_dispatch_until(page_client(page), UINT64_MAX);
 	after = wb_os_monotonic_ns();
 
 	/* Monotonic elapsed duration, rather than a fabricated fixed tick, advances pending child waits. */
@@ -585,7 +585,7 @@ script_request(
 			if (error == 0) {
 				kept = 1;
 				*handle = entry;
-				error = net_loader_send(page->loader, wb_buffer_string(&location), NET_FETCH_SCRIPT_API, &send,
+				error = net_loader_client_send(page_client(page), wb_buffer_string(&location), NET_FETCH_SCRIPT_API, &send,
 				    script_fetch_arrived, entry, &entry->request);
 			}
 
@@ -895,9 +895,9 @@ page_wait_sheets(
 	if (error != 0)
 		return error;
 
-	/* Each short wait lets the loader bring them in. */
+	/* Each short wait lets the loader bring them in (the ones this thread asked for: their callbacks run here). */
 	waited = 0;
-	while (page_sheets_blocking(page) && waited < 30000) {
+	while (page_sheets_blocking_for(page, page_client(page)) && waited < 30000) {
 		error = script_settle_network(page, 10, &elapsed);
 		if (error != 0)
 			return error;
@@ -1087,7 +1087,7 @@ script_prepare_external(
 	/* Web URLs use the page's asynchronous loader; local bytes are ready for the next checkpoint. */
 	remote = net_loader_takes(entry->location);
 	if (page->loader != NULL && remote) {
-		error = net_loader_fetch(page->loader, entry->location, script_arrived, entry, &entry->request);
+		error = net_loader_client_send(page_client(page), entry->location, NET_FETCH_DOCUMENT, NULL, script_arrived, entry, &entry->request);
 	} else {
 		error = page_fetch(page_cookies(page), page->base, entry->location, &bytes, NULL);
 		if (error == 0)
@@ -1144,8 +1144,8 @@ script_run_ready(
 	int ordered_blocked;
 	int error;
 
-	/* A script's checkpoint may recurse while this loop runs. */
-	if (page->scripts_running)
+	/* A script's checkpoint may recurse while this loop runs; the page's scripts run on its own thread (a frame's thread leaves them to it). */
+	if (page->scripts_running || bind_thread_runner() != NULL)
 		return 0;
 
 	/* Each ready entry runs once, in the table's insertion order. */
