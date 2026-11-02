@@ -665,7 +665,7 @@
 | q1925 / q1925-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws335-p039`） | [ws335 p039](ws335/phase039/phase.md) | 2026-11-02 09:40 Q1（標準廉価実装手順） | cleared（2026-11-02 10:21、6cb4f008b を main に merge、main で build・check-exports PASS） |
 | q1926 / q1926-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-ws319`・branch `agent/p4-ws319`、Latitude 5330） | [WS319](ws319/ws.md) i915 の H.265 decode と Video Player の H.264 の確かめ | 2026-11-02 10:07 ユーザーの指示 | in-progress |
 | q1927 / q1927-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws335-p022` | [ws335 p022](ws335/phase022/phase.md) | 2026-11-02 10:10 Q1 | cleared（2026-11-02 11:14、main に merge、main で試験 PASS） |
-| q1928 / q1928-i01 | P6（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p6-ws335d` | [ws335 p029](ws335/phase029/phase.md) | 2026-11-02 10:10 Q1 | in-progress |
+| q1928 / q1928-i01 | P6（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p6-ws335d` | [ws335 p029](ws335/phase029/phase.md) | 2026-11-02 10:10 Q1 | cleared（2026-11-02 11:25、c158243c2 を main に merge、main で test-hs13 PASS） |
 | q1929 / q1929-i01 | P7（phase-runner-high、Opus）、worktree `/home/awe/zedBSD-worktrees/p7-ws335e` | [ws335 p038](ws335/phase038/phase.md) | 2026-11-02 10:10 Q1 | in-progress |
 | q1930 / q1930-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-bug409`・branch `agent/p3-bug409`） | [BUG-409](bugs/BUG-409.md) ld.so の DF_1_NODELETE | 2026-11-02 10:21 Q1 | cleared（2026-11-02 10:41、708fb3d9c を main に merge、main で ld.so・libc.so warning 0） |
 | q1931 / q1931-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-bug410`・branch `agent/p3-bug410`） | [BUG-410](bugs/BUG-410.md) atexit と __cxa_finalize | 2026-11-02 10:41 Q1 | cleared（2026-11-02 11:03、fbeea4f29 を main に merge、main で ld.so・libc warning 0） |
@@ -674,3 +674,4 @@
 | q1934 / q1934-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws336-p011` | [ws336 p011](ws336/phase011/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | cleared（2026-11-02 11:21、cb76c8b1d を main に merge、main で test-config PASS） |
 | q1935 / q1935-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws336-p014` | [ws336 p014](ws336/phase014/phase.md) | 2026-11-02 10:52 Q1（ユーザーの指示: WS335 を待たずに） | in-progress |
 | q1936 / q1936-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-bug412`・branch `agent/p3-bug412`、Pi 5） | [BUG-412](bugs/BUG-412.md) Pi 5 の click | 2026-11-02 11:02 ユーザーの UAT（直ちに） | in-progress |
+| q1937 / q1937-i01 | Sonnet（phase-runner-low）、worktree `/home/awe/zedBSD-worktrees/s-ws335-p030` | [ws335 p030](ws335/phase030/phase.md) | 2026-11-02 11:25 Q1 | in-progress |

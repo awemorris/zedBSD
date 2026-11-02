@@ -61,7 +61,7 @@
 | Sonnet | phase-runner-low | ws335 p039 (q1925-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p039` / `agent/s-ws335-p039` | 返却（2026-11-02 10:21、cleared） | 6cb4f008b |
 | P4 | phase-runner-high | ws319 H.265 decode (q1926-i01) | `/home/awe/zedBSD-worktrees/p4-ws319` / `agent/p4-ws319` | in-progress（2026-11-02 10:07 起動、5330） | — |
 | Sonnet | phase-runner-low | ws335 p022 (q1927-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p022` / `agent/s-ws335-p022` | in-progress（2026-11-02 10:10 起動） | — |
-| P6 | phase-runner-high | ws335 p029 (q1928-i01) | `/home/awe/zedBSD-worktrees/p6-ws335d` / `agent/p6-ws335d` | in-progress（2026-11-02 10:10 起動） | — |
+| P6 | phase-runner-high | ws335 p029 (q1928-i01) | `/home/awe/zedBSD-worktrees/p6-ws335d` / `agent/p6-ws335d` | 返却（2026-11-02、cleared） | c158243c2 |
 | P7 | phase-runner-high | ws335 p038 (q1929-i01) | `/home/awe/zedBSD-worktrees/p7-ws335e` / `agent/p7-ws335e` | in-progress（2026-11-02 10:10 起動） | — |
 | P3 | phase-runner-high | BUG-409 (q1930-i01) | `/home/awe/zedBSD-worktrees/p3-bug409` / `agent/p3-bug409` | 返却（2026-11-02 10:41、fixed） | 708fb3d9c（2026-11-02 10:41 に main へ merge） |
 | P3 | phase-runner-high | BUG-410 (q1931-i01) | `/home/awe/zedBSD-worktrees/p3-bug410` / `agent/p3-bug410` | in-progress（2026-11-02 10:41 起動） | — |
@@ -70,3 +70,4 @@
 | Sonnet | phase-runner-low | ws336 p011 (q1934-i01) | `/home/awe/zedBSD-worktrees/s-ws336-p011` / `agent/s-ws336-p011` | in-progress（2026-11-02 10:52 起動） | — |
 | Sonnet | phase-runner-low | ws336 p014 (q1935-i01) | `/home/awe/zedBSD-worktrees/s-ws336-p014` / `agent/s-ws336-p014` | in-progress（2026-11-02 10:52 起動） | — |
 | P3 | phase-runner-high | BUG-412 (q1936-i01) | `/home/awe/zedBSD-worktrees/p3-bug412` / `agent/p3-bug412` | in-progress（2026-11-02 11:02 起動、Pi 5） | — |
+| Sonnet | phase-runner-low | ws335 p030 (q1937-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p030` / `agent/s-ws335-p030` | in-progress（2026-11-02 11:25 起動） | — |
