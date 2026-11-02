@@ -2,7 +2,7 @@
 
 # ws344-p018 出力の変換（output.c）
 
-- Status: planned
+- Status: in-progress（実装済み・試験 PASS、cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p001。
 - 目的: YUV → RGB（fancy・no_fancy）、alpha、premultiply、ARGB → 配置、flip。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -68,4 +68,20 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02 14:28、Sonnet 5.5（q1963-i01）。作った物: `userland/desktop/libwebp-compat/output.c`、`plan/ws344/tests/unit/test-output.c`。
+
+実行した command と最後の行（`PATH=/usr/bin:$PATH`）:
+
+- `sh plan/ws344/tests/run-unit.sh output` → `test-output: PASS (536115 checks)`、`run-unit: PASS`
+- `sh plan/ws344/tests/run-unit.sh all` → 16 本全て PASS、`run-unit: PASS`
+- `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`
+- `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`
+- `git diff --check` → 出力なし
+
+試験の内容: yuv_pixel は 6 点を手計算（式の途中の値を test の comment に書いた）と、256^3 の全入力を division 版の式の書き写しと比較。premultiply は全 x・a（256x256）と a 255・a 0・x 0 と手計算 4 点。from_yuv は 3x3・4x2・1x1 の chroma を手で計算した表（fancy と no_fancy）で、全 8 layout x flip x alpha 有無 x fancy 有無、row の padding（0xA5）が書かれないこと、plane の stride が幅より大きいこと（padding は 0xEE）。ランダム 400 枚（大きさ 1〜19）は符号付き添字の書き写しと比較。from_argb は 1 画素の byte を各 layout で literal に確かめ、小画像と 400 枚のランダム。
+
+mutation（git の外の複写 `build/tmp/p018-mut/output.c.orig` から差し替え、各回 run-unit の `test-output: FAIL` を確認、build の失敗は数えない）: 30 通り（clip 両端、定数 3 つ、fancy の重み・丸め・shift・偶奇・clamp・斜め、premultiply の除数・opaque、alpha の既定・stride・offset、flip の符号、premultiply の条件、red の位置、argb の shift・行、plane の高さ、u と v の取り違え、layout の bytes ほか）全て FAIL（killed）。見逃し 0。最初の「alpha stride」は build の失敗で、`alpha_stride + 1` に直して killed を確認。元に戻したことを `cmp` で確認。
+
+自分で決めた点（header が黙っている所）: premultiply layout の分岐は layout の `premultiply` だけで決め、alpha の有無（layout->alpha）には依らない（alpha NULL の時は alpha 255 で色は変わらない）。premultiply の計算は `(x * a) / 255`（a 255 は x）。fancy の添字は unsigned の 0 - 1 の折り返しを利用して clamp。
+
+仕様と phase.md・header の食い違い: なし。期待の値（手計算）は初回の実装と一致した。未実施: dwebp との全画素の比較（p019 の compare）。
