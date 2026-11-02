@@ -9,10 +9,10 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS335](ws335/ws.md) | 自前の TLS | p034（安全の review、21 件中 12 件を直した、1 時間の fuzz で crash 0）cleared。p035（規約の見直しと持ち越し、q1992）に 21:35 着手 | — |
 | P2 | — | 待機 | WS343 p002（libcrypto-compat に passkey の OpenSSL の関数、link の差し替えだけで passkey-fido2・fidoctl が OpenSSL 無し）cleared、22:20 merge | — |
-| P3 | [BUG-412](bugs/BUG-412.md) | Pi 5・USB | 締め: xHCI の直しを main に、debug・試験用の部分を外す、Pi 5 を main の普段の kernel に（q1997、23:23） | — |
+| P3 | — | 待機 | BUG-412 の締め（xHCI・再投入の直しと読み捨てを main に、debug を外した）、23:40 merge。Pi 5 は普段の kernel、ユーザーの click の確かめ待ち | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | [WS345](ws345/ws.md) | ブラウザ | p009（iframe ごとの script の thread）cleared。p010（origin ごとの agent、q1995）に 22:58 着手 | — |
-| P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p022（QEMU の相互運用 53/53、root の道と privsep、libc の ttyname の直し）cleared。p023（他の arch の build、q1998）に 23:27 着手 | — |
+| P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p023（arm64・riscv64・armv7 の build）cleared。p024（OpenSSH からの入れ替え、q1999）に 23:40 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | [WS345](ws345/ws.md) | ブラウザ | p007 cleared。p014（応答しない頁の確かめの表示、q1996）に 22:58 着手 | — |
 
@@ -87,7 +87,7 @@
 - VF2 の root（UFS 256 MB）の空き: 2026-11-01 の計測で 95%〜満杯になり、P4 の mview の texture の写しが ENOSPC で切れた。試験は /tmp（tmpfs）に置く形で回避した。板の古い物（~kei の p7・p15 など他の担当の置き物を含む）の整理か、SD の root の拡げをするか。
 - OmniGrammaton.exe（Windows 版のブラウザ）を本物の Windows で: main の build の zip（`make browser-win64-zip`）を展開して起動し、WS334 p032 の M1〜M8（描画・--no-gpu・https・location の欄・IME での日本語入力・cookie と localStorage の保持・暗い mode・snap の配置）。Wine では IME・snap・公開の site が確かめられない。
 - Pi 5 で BUG-391・392: desktop で compositor を kill -9 して desktop から戻るか、Super+L の後の kill で lock 画面から戻り PIN 0000 で開くか、login 画面で PIN 0000 が既定で出るか（QEMU では確認済み、Pi 5 で 1 s 後に GPU が使えるかは未確認）。
-- Pi 5 で BUG-412（click）: 今の Pi 5 は debug の option 無しで起動している。click が効かなくなったら再起動せずに Q1 に知らせる。
+- Pi 5 で BUG-412（click）: Pi 5 は普段の kernel（main、config-rpi5）と元の compositor・起動の option。Settings の左の欄の短い click が効くかを見る。効けば BUG-412 を閉じる。
 - Pi 5 の HDMI: 今の capture の板は、host で開いている間だけ hotplug・EDID を出す。Pi の電源を入れる前に capture を開けば 1920x1080 60 Hz で desktop が出る（P3 が確かめた）。
 - Pi 5 の en0 の link: P3 の計測で、起動 3・4 の途中に en0 が 1000 Mbps から 100 Mbps に落ちて SSH が切れた。cable・switch の側か driver かは未調査。
 
