@@ -10,9 +10,14 @@
  * frames, with standard Vulkan WSI on the window's surface (libkeiland's,
  * WS131 p025).  The view draws the page: the presenter lends it the
  * device, and each frame it acquires an image, has the view record the
- * drawing into the frame's command buffer
- * (browser_view_record), submits it and presents the image
+ * drawing of its latest committed frame into the frame's command buffer
+ * (browser_view_render), submits it and presents the image
  * (ws074-p055, the render target of plan/ws074/design.md §19).
+ *
+ * The window's thread makes the objects (the surface is libkeiland's,
+ * made on the window's thread) and destroys them; in between only the
+ * drawing thread (render.c) uses them: the device, its queue and the
+ * swapchain are never shared between threads.
  *
  * The same way of opening the device and the swapchain as files'
  * presenter, but where the file manager copies a CPU canvas onto the image,
@@ -27,6 +32,9 @@
 
 /* How long the last frame's work may take on the GPU, in nanoseconds. */
 #define PRESENT_TIMEOUT		10000000000ULL
+
+/* How long an acquire waits for the compositor to give an image back before the drawing thread looks at its stop again, in nanoseconds. */
+#define PRESENT_ACQUIRE_TIMEOUT	100000000ULL
 
 /* The most swapchain images the presenter takes. */
 #define PRESENT_IMAGES_MAX	8U
@@ -167,18 +175,22 @@ shell_present_resize(
 }
 
 /*
- * Shows the view in the next swapchain image: once the last frame has
- * finished, the image is acquired, the view records its drawing into the
- * frame's command buffer, and the buffer is submitted and the image
- * presented.
+ * Shows the view's latest committed frame in the next swapchain image:
+ * once the last frame has finished, the image is acquired, the view
+ * records its drawing into the frame's command buffer, and the buffer is
+ * submitted and the image presented; *serial is the number of the frame
+ * drawn (for browser_view_presented).
  *
  * Returns VK_ERROR_OUT_OF_DATE_KHR when the swapchain no longer matches
- * the window; the caller resizes and draws again.
+ * the window (the caller resizes and draws again), and VK_TIMEOUT or
+ * VK_NOT_READY when the compositor gave no image back in a tenth of a
+ * second (nothing was drawn: the caller looks at its stop and tries again).
  */
 VkResult
 shell_present_frame(
 	struct shell_present *present,
-	struct browser_view *view)
+	struct browser_view *view,
+	uint64_t *serial)
 {
 	VkCommandBufferBeginInfo begin;
 	struct browser_target target;
@@ -195,9 +207,10 @@ shell_present_frame(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* The image to draw into, once the compositor has given one back, however long a busy compositor takes (a closed connection ends the wait with an error). */
+	/* The image to draw into, once the compositor has given one back (a tenth of a second at most, so that the drawing thread can be stopped). */
+	*serial = 0;
 	present->operation = "vkAcquireNextImageKHR";
-	error = vkAcquireNextImageKHR(present->device, present->swapchain, UINT64_MAX, present->acquired, VK_NULL_HANDLE, &image);
+	error = vkAcquireNextImageKHR(present->device, present->swapchain, PRESENT_ACQUIRE_TIMEOUT, present->acquired, VK_NULL_HANDLE, &image);
 	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
 		return error;
 
@@ -214,17 +227,17 @@ shell_present_frame(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* The view's drawing of the page into the image, left ready to present. */
+	/* The view's drawing of its latest committed frame into the image, left ready to present. */
 	target.image = present->targets[image].image;
 	target.view = present->targets[image].view;
 	target.format = present->format;
 	target.new_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	target.width = present->extent.width;
 	target.height = present->extent.height;
-	status = browser_view_record(view, &target, present->command);
+	status = browser_view_render(view, &target, present->command, serial);
 	if (status != 0) {
 		browser_view_gpu_failure(view, &failure);
-		present->operation = "browser_view_record";
+		present->operation = "browser_view_render";
 		if (failure.operation != NULL)
 			present->operation = failure.operation;
 		if (status == EIO)

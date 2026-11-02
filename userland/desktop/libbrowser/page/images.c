@@ -69,6 +69,7 @@ static struct page_image *images_find(const struct page *page, const char *locat
 static int images_load(struct page *page, const struct dom_element *element, const struct vm_string *src);
 static const struct img_bitmap *images_svg(struct page *page, const struct dom_element *element);
 static int images_fetch(struct page *page, const char *location, struct page_image **loaded);
+static int images_defer(struct page *page, const char *location);
 static void images_arrived(void *context, struct net_request *request);
 static int images_decode(struct page *page, struct page_image *image, const unsigned char *bytes, size_t length);
 static void images_free(struct page_image *image);
@@ -82,9 +83,35 @@ void
 page_images_init(
 	struct page *page)
 {
-	/* No image yet, and no element waiting for one. */
+	/* No image yet, no element waiting for one and none for the page's thread to fetch. */
 	wb_vector_init(&page->images, sizeof(struct page_image *));
 	wb_vector_init(&page->image_watches, sizeof(struct page_image_watch *));
+	wb_vector_init(&page->images_deferred, sizeof(char *));
+}
+
+/*
+ * Fetches, on the page's thread, the images a work lent to the style thread
+ * met new (it starts no fetch itself), as the layout would have when it met
+ * them; a failure is the image's, as it is for the layout.  Reports 0.
+ */
+int
+page_images_fetch_deferred(
+	struct page *page)
+{
+	struct page_image *image;
+	char **location;
+	size_t index;
+
+	/* Each location, fetched when it is still new (a failure stays in its entry, or leaves it to the next layout). */
+	for (index = 0; index < page->images_deferred.count; index++) {
+		location = wb_vector_at(&page->images_deferred, index);
+		(void)images_fetch(page, *location, &image);
+		free(*location);
+	}
+
+	/* None waits any more. */
+	wb_vector_clear(&page->images_deferred);
+	return 0;
 }
 
 /*
@@ -220,7 +247,15 @@ page_images_release(
 	struct page *page)
 {
 	struct page_image *image;
+	char **deferred;
 	size_t index;
+
+	/* The locations nobody fetched. */
+	for (index = 0; index < page->images_deferred.count; index++) {
+		deferred = wb_vector_at(&page->images_deferred, index);
+		free(*deferred);
+	}
+	wb_vector_release(&page->images_deferred);
 
 	/* The elements still waiting, given back to the heap. */
 	while (page->image_watches.count != 0)
@@ -402,6 +437,7 @@ images_fetch(
 	struct page_image *image;
 	struct page_image *known;
 	struct wb_buffer bytes;
+	int borrower;
 	int remote;
 	int error;
 
@@ -410,6 +446,16 @@ images_fetch(
 	if (known != NULL) {
 		*loaded = known;
 		return 0;
+	}
+
+	/* The style thread starts no fetch: an http or https image it meets new waits for its lender's thread (not yet, for the layout). */
+	remote = net_loader_takes(location);
+	borrower = vm_thread_is_borrower();
+	if (page->loader != NULL && remote && borrower) {
+		error = images_defer(page, location);
+		if (error != 0)
+			return error;
+		return EAGAIN;
 	}
 
 	/* The table's entry for the location, allocated alone so that its bitmap stays where it is while the table grows. */
@@ -426,9 +472,8 @@ images_fetch(
 
 	/* An http or https image with a loader is fetched without blocking; it waits in the table meanwhile. */
 	image->page = page;
-	remote = net_loader_takes(image->location);
 	if (page->loader != NULL && remote) {
-		error = net_loader_fetch_kind(page->loader, image->location, NET_FETCH_IMAGE, images_arrived, image, &image->request);
+		error = net_loader_client_send(page_client(page), image->location, NET_FETCH_IMAGE, NULL, images_arrived, image, &image->request);
 		if (error != 0)
 			image->failed = 1;
 	} else {
@@ -454,6 +499,40 @@ images_fetch(
 
 	/* Succeeded: the image is in the table. */
 	*loaded = image;
+	return 0;
+}
+
+/* Keeps a location for the page's thread to fetch once the work lent to this thread came back (once). */
+static int
+images_defer(
+	struct page *page,
+	const char *location)
+{
+	char **kept;
+	char *copy;
+	size_t index;
+	int order;
+	int error;
+
+	/* A location kept already is kept once. */
+	for (index = 0; index < page->images_deferred.count; index++) {
+		kept = wb_vector_at(&page->images_deferred, index);
+		order = strcmp(*kept, location);
+		if (order == 0)
+			return 0;
+	}
+
+	/* The copy, in the list. */
+	copy = strdup(location);
+	if (copy == NULL)
+		return ENOMEM;
+	error = wb_vector_push(&page->images_deferred, &copy);
+	if (error != 0) {
+		free(copy);
+		return error;
+	}
+
+	/* Succeeded: the page's thread fetches it. */
 	return 0;
 }
 

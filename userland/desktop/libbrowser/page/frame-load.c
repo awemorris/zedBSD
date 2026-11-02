@@ -55,6 +55,8 @@ static int frame_load_html(struct bind_window *window, const struct wb_buffer *b
 static int frame_load_inline(void *context, struct dom_element *script);
 static int frame_load_xml_scripts(struct bind_window *window);
 static int frame_load_events(struct frame_load *load, struct bind_window *window);
+static void frame_ring(struct page *page, void *runner);
+static int frame_threads_walk(struct page *page, struct bind_window *window, int resume);
 
 /*
  * Initializes the Page's empty child response task ownership.
@@ -70,6 +72,154 @@ page_frames_init(
 
 	/* Succeeded: no resource task or temporary root exists yet. */
 	return;
+}
+
+/*
+ * Gives a page the embedder's threads for its iframes (NULL: they run on
+ * the page's thread), before its document is loaded.
+ */
+void
+page_set_frame_calls(
+	struct page *page,
+	const struct page_frame_calls *calls,
+	void *context)
+{
+	/* The calls from now on, which the window's frames reach through its host. */
+	page->frame_calls = calls;
+	page->frame_calls_context = context;
+	if (page->window != NULL) {
+		page->window->host.frame_attach = calls != NULL ? page_frame_attach : NULL;
+		page->window->host.frame_detach = calls != NULL ? page_frame_detach : NULL;
+	}
+}
+
+/*
+ * Gives an iframe of the page (context) its thread, before its first
+ * document: 0 when it has one (or the page gives none), or why not, when
+ * it gets no browsing context (said once on its document's console).
+ */
+int
+page_frame_attach(
+	void *context,
+	struct dom_element *element)
+{
+	struct page *page;
+	struct bind_window *window;
+	int error;
+
+	/* The page's calls, a thread it has, or one it was refused already. */
+	page = context;
+	if (page->frame_calls == NULL || element->frame_thread != NULL)
+		return 0;
+	if (element->frame_refused)
+		return EAGAIN;
+
+	/* The thread, or a refusal the console tells. */
+	error = page->frame_calls->attach(page->frame_calls_context, page, element);
+	if (error == 0)
+		return 0;
+	element->frame_refused = 1;
+	window = element->node.document->view;
+	if (window != NULL)
+		bind_console(window, BIND_CONSOLE_ERROR, "An iframe got no browsing context: no thread could run it (too many frames, or the system refused one)");
+	return error;
+}
+
+/* Ends the thread of an iframe of the page (context) that leaves its document. */
+void
+page_frame_detach(
+	void *context,
+	struct dom_element *element)
+{
+	struct page *page;
+
+	/* Only a thread the page's calls gave. */
+	page = context;
+	if (page->frame_calls == NULL || element->frame_thread == NULL)
+		return;
+	page->frame_calls->detach(page->frame_calls_context, element);
+}
+
+/* Ends the threads of a page's iframes, nested ones too, as the page is put away for going back (it keeps its documents). */
+void
+page_frames_suspend(
+	struct page *page)
+{
+	/* Every iframe of every document of the page. */
+	if (page->frame_calls == NULL || page->window == NULL)
+		return;
+	(void)frame_threads_walk(page, page->window, 0);
+}
+
+/*
+ * Gives the iframes of a page put away for going back their threads
+ * again, as it is shown again.  Returns 0, or why one could not get one
+ * (the page is then not to be shown as it was).
+ */
+int
+page_frames_resume(
+	struct page *page)
+{
+	int error;
+
+	/* Every iframe of every document of the page. */
+	if (page->frame_calls == NULL || page->window == NULL)
+		return 0;
+	error = frame_threads_walk(page, page->window, 1);
+	return error;
+}
+
+/* Ends (resume 0) or gives again (resume 1) the threads of the iframes in a window's document and in theirs; the first refusal is the outcome. */
+static int
+frame_threads_walk(
+	struct page *page,
+	struct bind_window *window,
+	int resume)
+{
+	struct dom_node *walk;
+	struct dom_element *element;
+	struct bind_window *child;
+	int error;
+
+	/* Retired owners and maximum-depth contexts hold none. */
+	if (window->detached || window->context_depth >= 64U)
+		return 0;
+
+	/* Each iframe, then its own document's. */
+	walk = window->document->node.first_child;
+	while (walk != NULL) {
+		element = NULL;
+		if (walk->type == DOM_ELEMENT && dom_element_is(walk, DOM_NS_HTML, DOM_TAG_IFRAME))
+			element = (struct dom_element *)walk;
+		if (element != NULL && !resume && element->frame_thread != NULL)
+			page->frame_calls->detach(page->frame_calls_context, element);
+		if (element != NULL && resume && element->frame_thread == NULL && element->child_context != NULL) {
+			error = page->frame_calls->attach(page->frame_calls_context, page, element);
+			if (error != 0)
+				return error;
+		}
+		child = bind_frame_child(walk);
+		if (child != NULL) {
+			error = frame_threads_walk(page, child, resume);
+			if (error != 0)
+				return error;
+		}
+		walk = bind_following(walk, &window->document->node);
+	}
+
+	/* Succeeded: every iframe has its thread, or none. */
+	return 0;
+}
+
+/* Wakes the thread of a runner of the page's (NULL: the page's own) for work there. */
+static void
+frame_ring(
+	struct page *page,
+	void *runner)
+{
+	/* Only where the embedder gives frames threads. */
+	if (page->frame_calls != NULL)
+		page->frame_calls->ring(page->frame_calls_context, runner);
 }
 
 /*
@@ -135,7 +285,11 @@ page_frames_checkpoint(
 	if (error != 0)
 		return error;
 
-	/* A window load that waited for these frames fires when the last is done. */
+	/* A window load that waited for these frames fires when the last is done (on the page's own thread, which a frame's thread wakes). */
+	if (bind_thread_runner() != NULL) {
+		frame_ring(page, NULL);
+		return 0;
+	}
 	error = page_fire_load_resume(page);
 	if (error != 0)
 		return error;
@@ -166,8 +320,14 @@ frame_load_drain(
 		if (load == NULL)
 			continue;
 
-		/* Removed, adopted, reinserted and superseded sources cannot activate a stale response. */
+		/* A response of a frame of another thread is activated there, which is woken for it. */
 		current = frame_load_current(load);
+		if (current && load->ready && bind_element_runner(load->element) != bind_thread_runner()) {
+			frame_ring(page, bind_element_runner(load->element));
+			continue;
+		}
+
+		/* Removed, adopted, reinserted and superseded sources cannot activate a stale response. */
 		if (!current || load->ready) {
 			/* Remove the task's public slot before execution can cause another checkpoint. */
 			*slot = NULL;
@@ -382,6 +542,13 @@ frame_load_start(
 	int remote;
 	int error;
 
+	/* An iframe gets its thread before its first document, where the embedder gives them (one it refuses gets no document). */
+	if (element->tag == DOM_TAG_IFRAME && page->frame_calls != NULL && element->frame_thread == NULL) {
+		error = page_frame_attach(page, element);
+		if (error != 0)
+			return 0;
+	}
+
 	/* Publish attempted source identity before any callback or recursively observed checkpoint. */
 	element->child_source = source;
 	element->child_load_seen = 1;
@@ -493,7 +660,7 @@ release_urls:
 		}
 		load->response.status = 200;
 	} else if (remote && page->loader != NULL) {
-		error = net_loader_fetch(page->loader, wb_buffer_string(&location), frame_load_done, load, &load->request);
+		error = net_loader_client_send(page_client(page), wb_buffer_string(&location), NET_FETCH_DOCUMENT, NULL, frame_load_done, load, &load->request);
 		if (error != 0) {
 			wb_buffer_release(&location);
 			frame_load_release(load);
@@ -1394,8 +1561,7 @@ frame_tree(
 	if (tree == NULL)
 		return ENOMEM;
 	css_engine_set_base_zoom(engine, zoom);
-	status = layout_build(tree, engine, &page->text, window->document, page_image_of, page_image_by_url, page,
-	    viewport_width, viewport_height, 0, 0, transition);
+	status = page_lend_layout(page, tree, engine, window->document, viewport_width, viewport_height, 0, 0, transition);
 	if (status != 0) {
 		layout_release(tree);
 		free(tree);
@@ -1438,7 +1604,7 @@ frame_make(
 	}
 	frame->tree = tree;
 	frame->refs = 1U;
-	status = paint_build(&frame->list, tree);
+	status = page_lend_paint(page, &frame->list, tree);
 	if (status != 0) {
 		paint_frame_release(frame);
 		return status;

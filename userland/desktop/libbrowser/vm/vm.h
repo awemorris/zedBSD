@@ -26,6 +26,12 @@
  * engine looks at the request at every loop's head, at every entry to a
  * function and now and then inside the long native functions, and leaves
  * the task with VM_TERMINATED.
+ *
+ * The thread that runs a task may lend the heap to another thread for a
+ * piece of work that runs no script (vm_heap_lend: the agent's lender runs
+ * it there while the task's thread waits).  While the heap is lent it does
+ * not collect; the thread it is lent to (a borrower,
+ * vm_thread_set_borrower) never collects and never enters a script.
  */
 
 #ifndef KEILAND_BROWSER_VM_H
@@ -86,6 +92,18 @@
 #define VM_TERMINATED (-3)
 
 /*
+ * A piece of work lent with a heap to another thread (vm_heap_lend), which
+ * runs no script: its outcome, 0 or an errno value.
+ */
+typedef int (*vm_lend_work)(void *argument);
+
+/*
+ * The agent's lender: runs a piece of work on its own thread and returns
+ * the work's outcome once it ran, while the calling thread waits.
+ */
+typedef int (*vm_lender)(void *context, vm_lend_work work, void *argument);
+
+/*
  * The tasks of the heaps that run on one thread at a time (an agent): the
  * number of the task that runs, 0 between tasks (written by the thread that
  * runs the tasks, read by any through __atomic), the number the last task
@@ -94,8 +112,9 @@
  * running thread when a task begins and ends, so that a request never
  * outlives its task; VM_AGENT_DEADLINE while a deadline is set), and the
  * deadline of the running task on the monotonic clock in nanoseconds, 0
- * for none (the running thread's alone).  It must outlive the heaps that
- * use it.
+ * for none (the running thread's alone), and the lender its heaps are lent
+ * through (NULL: the work runs on the calling thread; set before the first
+ * task).  It must outlive the heaps that use it.
  */
 struct vm_agent {
 	uint32_t task;
@@ -103,6 +122,8 @@ struct vm_agent {
 	uint32_t terminate;
 	uint32_t reserved;
 	uint64_t deadline_ns;
+	vm_lender lend;
+	void *lend_context;
 };
 
 /* What terminate holds while the running task has a deadline and nobody asked it to end: no task has this number. */
@@ -611,6 +632,7 @@ extern const struct vm_cell_type vm_promise_job_type;
 int vm_heap_create(struct vm_heap **heap, size_t limit);
 void vm_heap_destroy(struct vm_heap *heap);
 void vm_heap_set_stack_base(struct vm_heap *heap, const void *base);
+const void *vm_heap_stack_base(const struct vm_heap *heap);
 void *vm_heap_alloc(struct vm_heap *heap, const struct vm_cell_type *type, size_t size);
 void vm_heap_collect(struct vm_heap *heap);
 void vm_heap_mark(struct vm_heap *heap, struct vm_cell *cell);
@@ -639,6 +661,14 @@ uint32_t vm_heap_task_current(struct vm_heap *heap);
 void vm_heap_request_termination(struct vm_heap *heap, uint32_t task);
 int vm_heap_check_termination(struct vm_heap *heap);
 int vm_heap_count_step(struct vm_heap *heap);
+
+/* The heap lent to the agent's lender for work that runs no script, and the threads it is lent to (heap.c). */
+void vm_agent_set_lender(struct vm_agent *agent, vm_lender lend, void *context);
+int vm_heap_lend(struct vm_heap *heap, vm_lend_work work, void *argument);
+int vm_heap_lent(const struct vm_heap *heap);
+void vm_thread_set_borrower(int borrower);
+int vm_thread_is_borrower(void);
+unsigned long vm_borrower_slips(void);
 
 /* Strings (string.c). */
 struct vm_string *vm_string_from_latin1(struct vm_heap *heap, const unsigned char *bytes, size_t length);

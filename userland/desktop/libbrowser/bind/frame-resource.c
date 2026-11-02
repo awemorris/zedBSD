@@ -235,6 +235,15 @@ bind_frame_install(
 		host.frame_count = parent->host.frame_count;
 		host.frame = element;
 
+		/* Where frames have threads of their own, a frame makes its own requests on its thread, and its frames get threads too. */
+		if (parent->host.frame_attach != NULL) {
+			host.frame_attach = parent->host.frame_attach;
+			host.frame_detach = parent->host.frame_detach;
+			host.request = parent->host.request;
+			host.request_cancel = parent->host.request_cancel;
+			host.fetch_sync = parent->host.fetch_sync;
+		}
+
 		/* Construct the independently retained owner with this complete abstract host adapter. */
 		error = bind_window_create(realm, document, &host, &made);
 		if (error == 0)

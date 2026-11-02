@@ -131,8 +131,12 @@ void view_front_presented(struct browser_view *view, uint64_t serial);
 /* How many entries wait in the view's mailbox now (front.c), from any thread. */
 size_t view_front_queued(const struct browser_view *view);
 
-/* The agent the view's pages run their tasks in (front.c). */
+/* How many works the view's pages lent to its style thread, and how long they waited for them (front.c), from any thread. */
+void view_front_lend_counts(const struct browser_view *view, uint64_t *lends, uint64_t *waited_ns);
+
+/* The agent the view's pages run their tasks in, and the threads of their iframes (front.c). */
 struct vm_agent *view_front_agent(struct view_front *front);
+struct view_frames *view_front_frames(struct view_front *front);
 
 /* The view's side (view.c): the front a view runs under, its loader and its state. */
 void view_attach_front(struct browser_view *view, struct view_front *front);

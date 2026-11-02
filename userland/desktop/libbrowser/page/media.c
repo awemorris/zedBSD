@@ -540,7 +540,7 @@ media_add(
 	/* A remote source with the loader is fetched without blocking. */
 	remote = net_loader_takes(media->location);
 	if (page->loader != NULL && remote) {
-		error = net_loader_fetch(page->loader, media->location, media_arrived, media, &media->request);
+		error = net_loader_client_send(page_client(page), media->location, NET_FETCH_DOCUMENT, NULL, media_arrived, media, &media->request);
 		if (error != 0)
 			media->failed = 1;
 		return 0;

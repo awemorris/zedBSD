@@ -313,6 +313,14 @@ struct bind_host {
 	void (*view_transition_style)(void *context, int pseudo, const struct vm_string *name, const char *text);
 	/* The frame element of a child window, known from its creation (its scripts may read it at once). */
 	struct dom_element *frame;
+	/*
+	 * Gives an iframe's browsing context a thread of its own, before its
+	 * first document (0, or why not: it then has none, and its parent goes
+	 * on), and ends that thread when the iframe leaves its document (both
+	 * may be NULL: the iframe runs on its document's thread).
+	 */
+	int (*frame_attach)(void *context, struct dom_element *element);
+	void (*frame_detach)(void *context, struct dom_element *element);
 };
 
 /*
@@ -376,6 +384,17 @@ int bind_window_was_terminated(const struct bind_window *window);
 void bind_report_exception(struct bind_window *window, vm_value exception);
 void bind_report_exception_at(struct bind_window *window, vm_value exception, unsigned line, unsigned column);
 void bind_console(struct bind_window *window, int level, const char *text);
+
+/*
+ * The threads frames run on (frame.c): the calling thread's runner (the
+ * embedder's thread of an iframe, NULL for its page's own thread, set by
+ * the thread itself), and the runner of a window and of an element's
+ * browsing context (the element's own thread, or its document's).
+ */
+void bind_set_thread_runner(void *runner);
+void *bind_thread_runner(void);
+void *bind_window_runner(const struct bind_window *window);
+void *bind_element_runner(const struct dom_element *element);
 
 /* The timers (timer.c). */
 int bind_next_timer(const struct bind_window *window, double *due);

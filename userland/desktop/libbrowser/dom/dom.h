@@ -419,6 +419,14 @@ struct dom_element {
 	int child_load_seen;
 	/* The window proxy a frame element gives for a document its parent cannot reach, kept until the element leaves its document. */
 	struct vm_cell *frame_proxy;
+	/*
+	 * The thread an iframe's browsing context runs its tasks on, the
+	 * embedder's (NULL: its document's thread), and whether the embedder
+	 * refused it one (it has no browsing context then, until it leaves its
+	 * document).
+	 */
+	void *frame_thread;
+	int frame_refused;
 	/* How far a scroll container's content is scrolled, in CSS pixels (the document's is the page's). */
 	double scroll_x;
 	double scroll_y;

@@ -38,7 +38,8 @@ static int timer_waits_frame(const struct bind_window *window, const struct bind
 static int timer_run_children(struct bind_window *window);
 
 /*
- * Reports when the next timer is due; zero when there is none.
+ * Reports when the next timer is due, of the window and the frames that
+ * run on its thread; zero when there is none.
  */
 int
 bind_next_timer(
@@ -72,6 +73,8 @@ bind_next_timer(
 		walk = window->document->node.first_child;
 		while (walk != NULL) {
 			child = bind_frame_child(walk);
+			if (child != NULL && bind_window_runner(child) != bind_window_runner(window))
+				child = NULL;
 			if (child != NULL && bind_next_timer(child, &child_due)) {
 				if (!found || child_due < *due)
 					*due = child_due;
@@ -91,8 +94,9 @@ bind_next_timer(
 
 /*
  * Runs the timers due in the frames of a window's document, each at the
- * window's time.  The children are listed first and kept alive, since a
- * callback may remove a frame.
+ * window's time (a frame of a thread of its own runs its timers there).
+ * The children are listed first and kept alive, since a callback may
+ * remove a frame.
  */
 static int
 timer_run_children(
@@ -113,6 +117,8 @@ timer_run_children(
 	walk = window->document->node.first_child;
 	while (walk != NULL && status == 0) {
 		child = bind_frame_child(walk);
+		if (child != NULL && bind_window_runner(child) != bind_window_runner(window))
+			child = NULL;
 		if (child != NULL) {
 			cell = &child->realm->cell;
 			status = wb_vector_push(&children, &cell);

@@ -107,6 +107,21 @@ struct page_prefetched {
  * whose serial box_index_serial is, made when a script first asks after a
  * layout (geometry.c).
  */
+/*
+ * How an embedder gives a page's iframes threads of their own: attach
+ * gives an iframe's browsing context its thread before its first document
+ * (0, or why not: the iframe then has no browsing context), detach ends it
+ * (the iframe left its document, or the page is put away), and ring wakes
+ * a runner's thread (NULL: the page's own) for work it has to do.  The
+ * calls are made with the page's tasks held (on any of its threads).
+ */
+struct page;
+struct page_frame_calls {
+	int (*attach)(void *context, struct page *page, struct dom_element *element);
+	void (*detach)(void *context, struct dom_element *element);
+	void (*ring)(void *context, void *runner);
+};
+
 /* A link element whose stylesheet arrived (or failed), waiting for its load or error event. */
 struct page_link_event {
 	struct dom_element *element;
@@ -151,7 +166,12 @@ struct page {
 	struct wb_vector images;
 	/* The <img> elements (heap roots) whose load or error event is still to be fired (struct page_image_watch *). */
 	struct wb_vector image_watches;
+	/* The locations (char *) of the http and https images a work lent to the style thread met new, fetched by the page's thread when the work came back. */
+	struct wb_vector images_deferred;
 	struct net_loader *loader;
+	/* The embedder's threads for the iframes (NULL: they run on the page's thread), with their context. */
+	const struct page_frame_calls *frame_calls;
+	void *frame_calls_context;
 	struct browser_instance *instance;
 	uint32_t images_generation;
 	uint32_t laid_out_images;
@@ -253,6 +273,10 @@ int page_dump_dom(const struct page *page, struct wb_buffer *out);
 int page_dump_style(struct page *page, struct wb_buffer *out);
 int page_open_fonts(struct page *page, const struct text_font_paths *paths);
 int page_layout(struct page *page, int width, int height);
+int page_lend(struct page *page, vm_lend_work work, void *argument);
+int page_lend_layout(struct page *page, struct layout_tree *tree, struct css_engine *engine, struct dom_document *document, int width, int height,
+    layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
+int page_lend_paint(struct page *page, struct paint_list *list, const struct layout_tree *tree);
 int page_update_styles(struct page *page);
 uint32_t page_generation(const struct page *page);
 int page_load_resources(struct page *page);
@@ -266,6 +290,11 @@ void page_frames_init(struct page *page);
 void page_frames_release(struct page *page);
 int page_frames_checkpoint(struct page *page);
 void page_frames_size(struct page *page);
+void page_set_frame_calls(struct page *page, const struct page_frame_calls *calls, void *context);
+int page_frame_attach(void *context, struct dom_element *element);
+void page_frame_detach(void *context, struct dom_element *element);
+void page_frames_suspend(struct page *page);
+int page_frames_resume(struct page *page);
 
 /* Dynamic scripts (script.c). */
 void page_scripts_init(struct page *page);
@@ -291,6 +320,7 @@ void page_sheets_init(struct page *page);
 int page_sheets_add(struct page *page);
 int page_sheets_pending(const struct page *page);
 int page_sheets_blocking(const struct page *page);
+int page_sheets_blocking_for(const struct page *page, const struct net_loader_client *client);
 void page_sheets_release(struct page *page);
 
 /* Web fonts (fonts.c, ws074-p070). */
@@ -359,7 +389,10 @@ int page_resolve_file(const char *base, const char *href, struct wb_buffer *out)
 int page_resolve_location(const char *base, const char *href, struct wb_buffer *out);
 int page_record_visited(struct page *page, const struct wb_buffer *url);
 void page_images_init(struct page *page);
+int page_images_fetch_deferred(struct page *page);
 void page_set_loader(struct page *page, struct net_loader *loader);
+void page_set_thread_client(struct net_loader_client *client);
+struct net_loader_client *page_client(const struct page *page);
 void page_set_instance(struct page *page, struct browser_instance *instance);
 struct browser_instance *page_instance(struct page *page);
 struct net_cookie_jar *page_cookies(struct page *page);

@@ -121,6 +121,11 @@ ws.md の「ユーザーの決定」の要点（D1〜D9）:
   - 違う agent の frame は別の heap で、本当に並んで走る。互いへの access は、仕様で cross-origin に許された WindowProxy・Location の操作だけで、message で渡す（§8）。
   - `document.domain` の setter は agent を合わせない（origin-keyed の agent の集まりでは仕様が setter を効かなくする）。
 - 段 A と段 B: 今の code は iframe を親と同じ heap・agent に入れている（`bind/frame.c` の先頭）。段 A は全 frame を一つの agent（一つの heap、一つの lock）のまま、iframe ごとの thread を入れる。段 B で origin ごとの agent に分け、cross-origin の iframe を別の heap で並べて走らせる（Phase は ws.md）。段 A の間は、iframe の無限 loop は同じ view の他の frame の script を止めるが、窓と描画は止めない。
+- p009 の実装（段 A、2026-11-02）: iframe の thread は `view/frames.c`（`browser-script`、stack は top と同じ 8 MiB／2 MiB）。iframe の要素（browsing context）ごとに一つで、最初の文書の前（`frame_load_start` の scan か `contentWindow` の最初の読み）に作り（`dom_element.frame_thread`）、要素が文書を離れる時（`frame_remove_subtree`、page の destroy を含む）に止めて join する。数は view に top を含め 64（32-bit は 16）で、超えた iframe と thread が始まらない iframe は `frame_refused` で browsing context を持たず（`contentWindow` は `null`）、console に error を一行、親は続ける。
+  - agent の lock は `struct view_frames` の `held`（frames の lock と condition `freed`）。top の script の thread は `front_loop` の task（mailbox の entry、`browser_view_process`、`front_publish`、次の待ちの期限の計算）の間これを持ち、待つ前に返す。top が待っている時は iframe の thread は取らない（top が先、頁の確定が遅れないため）。iframe の thread は止めの印が付くと agent の待ちから抜けるので、agent を持つ thread（iframe を外した task）がその場で join できる。iframe が自分を外した時は次に top が agent を取る時に join する。
+  - iframe の thread の 1 周（agent を持って一つの task）: 自分の loader の client の callback（50 ms まで）、自分の window の timer（頁の時計で）、checkpoint（その中で `page_frames_checkpoint` が自分の要素の読み込みを activate する）。heap の stack の底は 1 周の間その thread の物に替え、返す前に戻す（R6）。返す時に、次の timer が待っている時刻より早くなった iframe を起こし（postMessage・present の後の rAF）、top を起こす（top がその変化で layout・paint・確定する）。
+  - thread の決め方: `bind_element_runner`（要素の thread、無ければその文書の window の）と `bind_thread_runner`（呼んだ thread の、top は NULL）。`bind_next_timer`・`timer_run_children` は別の thread の子を数えず回さない。`frame_load_drain` は別の thread の要素の読み込みを activate せず、その thread を起こす。page の script（`script_run_ready`）と top の `load` の再開は top の thread だけ。
+  - microtask の checkpoint は今の `bind_checkpoint` のまま agent に一つ（frame の木の全 realm の queue を、走っている thread が空にする）。
 
 ### 4.2 DOM の貸し（script の thread と style の thread）
 
@@ -149,6 +154,12 @@ request の種類:
 
 **この形で得る物と得ない物**: style・layout は script の thread を止める（同期の読みは仕様で避けられない）。窓と描画は止めない。違う frame（段 B の違う agent）の style の更新は style の thread で順に処理される。
 style と script を同じ frame で並べて走らせる事（DOM の写しの上で style を計算する）は、この WS ではしない（Future Work の候補）。
+
+- p008 の実装（2026-11-02）: style の thread は `view/style.c`（`browser-style`、stack は script の thread と同じ 8 MiB／2 MiB）で、front の script の thread が `front_run` の始めに作り、view を壊した後に止めて join する。貸しは agent の lender（`struct vm_agent` の `lend`・`lend_context`、`vm_agent_set_lender`）と `vm_heap_lend(heap, work, argument)`: lender の無い heap（`_CALLER` の view）と、貸された thread（borrower、`vm_thread_set_borrower`）の中の貸しはその場で走る（入れ子にならない）。貸しの間は heap の `lent` の深さが上がり、確保は閾値を越えても collect しない。borrower の thread は collect せず、script に入った回数と collect しかけた回数を `vm_borrower_slips` が数える（試験は 0 を確かめる）。request は lender の stack の上の記録で、script の thread の `css_animation_is_off` と `layout_try_remembers`（§11 R1 の thread ごとの一時の状態のうち計算の thread が読む二つ）を運ぶ。`computed_pseudo`・`_name`・`computed_zoom`（bind の側でだけ読む）と `svg_view_*`（同じ呼び出しの中で書いて読む）は運ばなくてよい。
+- 貸す仕事は葉だけ: `page_layout` の箱の木（`page_layout_work`: web font の face の追加、`layout_build` と container の再度の layout、iframe の window の大きさ）、`page_paint` の display list（focus の輪と caret を含む）、sticky の移動（同じ scroll・sticky の箱が無い時は貸さない）、`geometry_cascade` の cascade、`::before`・`::after`・view transition の擬似要素の cascade、iframe・一時の layout（`page_lend_layout`）と iframe の paint（`page_lend_paint`）、iframe の window の cascade（`bind/style-context.c`）。その前後（sheet の集め・link の event・取得の開始・media・viewport・`bind_document_fonts_settle`・`page_animations_sync`・世代の記録）は script の thread のまま。
+- style の thread が出会った http・https の画像（`page_image_by_url`）は取得せず `page->images_deferred` に積み、貸しが戻った後に script の thread が取得する（`page_lend`）。file・data の画像は今のとおりその場で読み解く（loader を使わない）。
+- 古くない時は貸さない: `page_needs_layout` が偽なら `geometry_layout` は `page_layout` を呼ばず、読みは木を直に読む。計測（host、64 core の機械）: 空の仕事の貸しの往復 10.9 µs。1 回の変更の後の `offsetWidth` 3 万回は貸し 3 回（最初の読み・描画の更新の layout と display list）。変更と読みを 1000 回は貸し 1002 回、`_CALLER` の 600 ms に対し 701〜757 ms（1 回あたり約 0.1〜0.15 ms 増え、往復より大きい分は計算を別の core で走らせる cache の費用と見る）。
+- sheet の解析と engine の組み立て（`page_update_styles`）は、取得の開始と link の event が混ざるので script の thread に残した（Future Work の候補: 解析だけを貸しに移す）。
 
 ### 4.3 共有の物
 
@@ -331,6 +342,7 @@ for (;;) {
   - fonts・sheets・images・media の「loader が無い時は今すぐ読む」の道は、`file:`・`data:` だけに残る。
 - 取り消しの寿命: 他の thread からの取り消しは request に印を付けて net の thread の waker を鳴らすだけで、request を放すのは持ち主の thread（完了の callback を走らせる代わりに捨てる）。callback が走っている間の取り消しは、その callback の後に効く。navigation・閉じる時の取り消しは頁の epoch（navigation の通し番号）で範囲を決め、新しい navigation 自身の取得（新しい epoch）は取り消さない。
 - page の物の分け方（p009）: 今 page に一つの `fetches`・`scripts`・timer（親が子の timer を `bind/timer.c` の `timer_run_children` で回す）を frame ごとに分ける。
+- p009 の実装: page の取得は全部 `page_client(page)`（呼んだ thread の client: iframe の thread は自分の、top は loader の own）で、callback はその thread で走る。`page_fetch_now`（同期の XHR・iframe の `<script src>`）も呼んだ thread の client の waited の request で、iframe の同期の XHR は top を待たない（指摘 2）。`page_wait_sheets` は呼んだ thread の client が取りに行った blocking な sheet だけを待つ（`page_sheets_blocking_for`、その callback を dispatch できるのはその thread だけ）。iframe の window は `_OWN` の view で親の `request`・`request_cancel`・`fetch_sync` を受け継ぎ、XHR・fetch() が iframe で動く（`_CALLER` は今のまま無い）。collectible な window は `request_cancel` がある時だけ `request` を持て、`bind_window_detach` で待っている request を取り消す。止まった iframe の client は閉じず、request が無くなるまで top が agent を取る時に dispatch する。`page->fetches`・`scripts`・timer の表を frame ごとに分ける事はしなかった（表は page に一つのまま、走らせる thread を上の規則で選ぶ）。
 - connect・TLS の handshake・read・write は `browser-net` の中で、今の非同期の状態の機械のまま（§3.1 の理由）。DNS は `browser-resolve`。
 
 ## 8. frame の間の access（D3）
@@ -351,6 +363,7 @@ for (;;) {
 - 書く時: 窓の thread が navigation（`_load`・`_follow`・`_go`・reload）か `_destroy` を積んだ時に、top の agent の script が task の中なら、積むと同時にその task の番号を書く（古い頁は消えるので、その頁の script を待つ理由が無い）。同時に `net_loader_client_abort_waited`（`net/loader.c`）で、script の thread が待つ request（同期の XHR・parser の script・最初の頁）を起こしてから積む。iframe を外す・iframe の navigation は、その frame の task の番号に限って書く（段 A では一つの agent なので、その frame の thread が走っている時だけ）。
 - 打ち切りと unload: 頁の script が始めた navigation（task の中、打ち切りなし）では、今のとおり `pagehide`・`unload` を出す。利用者の navigation・閉じるで走っている task を打ち切った時は、その後に `pagehide`・`unload` を出し、その handler も時間の上限（1 s、上限で同じ打ち切り）の中で走らせる。この 1 s は agent の deadline（`vm_agent_set_deadline`、`VM_AGENT_DEADLINE` の印で VM の poll が遅い道へ行き時計を読む）で、上限を過ぎた頁は保たない。`beforeunload` の確かめの dialog は出さない（今も無い）。
 - 戻る・進むの保った頁（`view_keep`、`VIEW_KEPT_MAX` = 3、各々の heap）: 保つ時に、その頁の iframe の script の thread を終えて join し（top の thread は次の頁を走らせる）、頁は thread を持たない。戻す時に iframe の thread を作り直す。作れなければ戻さずに読み込み直す。打ち切られた頁は保たない。
+  - p009 の実装: `view_keep` が `page_frames_suspend`（全ての iframe の thread を止めて join）、`view_restore` が `page_frames_resume`（文書を持つ iframe に thread を作り直す。一つでも作れなければ止めて頁を捨て、ENOENT で読み込み直す）。
 - `_stop` は読み込みを止める（loader の request を取り消す）が script は打ち切らない（どの browser も同じ）。
 - **応答しない頁の問い**（ユーザーの決定、J2 の答え、ws345-p014）: script の thread は今の task の番号と始めた時刻を atomic に publish する（front の snapshot の一部、窓の thread は読むだけ）。shell の窓の thread は自分の timer でそれを見て、同じ task が 10 s 走り続けたら「このページは応答していません」の問い（待つ／止める）を出す。「止める」は `browser_view_stop_script`（新、front の口）で、その task の番号を打ち切りに書く（上の打ち切り）。「待つ」は問いを閉じ、同じ task がさらに 10 s 走ったらまた出す。task が終われば問いは自分で消える。
 - 通信の取り消し: navigation・閉じる時は、その frame の loader の client の、古い epoch の request を取り消す（§7 の寿命）。net の thread は非同期の connect・TLS の socket をすぐ閉じる。resolve の thread の中の `getaddrinfo` は止められず、答えは番号で捨てられる。同期の XHR の待ちは取り消しで起こされ、打ち切りの番号で script も抜ける。
