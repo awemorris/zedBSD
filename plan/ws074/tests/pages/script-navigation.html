@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>script navigation</title>
+<style>body { margin: 0; font: 16px sans-serif; }</style>
+<form action="script-navigation-target.html" method="get" id="f">
+<textarea name="q">abc</textarea>
+<select name="s"><option>one</option><option value="2" selected>Two</option></select>
+<button name="b" value="go" type="submit" style="position:absolute;left:10px;top:100px;width:100px;height:40px">Go</button>
+</form>
+<div id="cover" style="position:absolute;left:0;top:90px;width:300px;height:60px;pointer-events:none"><span id="inner" style="display:block;height:60px">covering text</span></div>
+<div id="hidden" style="position:absolute;left:0;top:90px;width:300px;height:60px;visibility:hidden"></div>
+<div id="through" style="position:absolute;left:200px;top:300px;width:100px;height:50px;pointer-events:none"><div id="live" style="pointer-events:auto;height:50px"></div></div>
+<svg width="10" height="10"><image id="picture" href="none.png" width="10" height="10"/></svg>
+<input type="hidden" name="h" value="x" form="f">
+<script>
+document.addEventListener('click', function (e) { console.log('click ' + (e.target.id || e.target.localName)); });
+var style = function (id) { return getComputedStyle(document.getElementById(id)).pointerEvents; };
+console.log('pointer-events ' + style('cover') + ' ' + style('inner') + ' ' + style('live') + ' ' + style('f'));
+var f = document.getElementById('f'), cover = document.getElementById('cover'), inner = document.getElementById('inner');
+console.log('position ' + f.compareDocumentPosition(cover) + ' ' + cover.compareDocumentPosition(f) + ' ' + cover.compareDocumentPosition(inner) +
+    ' ' + inner.compareDocumentPosition(cover) + ' ' + f.compareDocumentPosition(f) + ' ' + (f.compareDocumentPosition(document.createElement('p')) & 33) +
+    ' ' + Node.DOCUMENT_POSITION_CONTAINED_BY);
+console.log('names ' + document.getElementsByName('q').length + ' ' + document.getElementsByName('q')[0].localName + ' ' + document.getElementsByName('nothing').length);
+var picture = document.getElementById('picture');
+picture.setAttributeNS && picture.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:title', 't');
+console.log('namespaced ' + picture.getAttributeNS(null, 'href') + ' ' + picture.hasAttributeNS(null, 'width') + ' ' + picture.getAttributeNS(null, 'nothing'));
+var select = f.elements.s, textarea = f.elements.q;
+console.log('controls ' + textarea.name + ' ' + textarea.type + ' ' + select.name + ' ' + select.type + ' ' + select.value + ' ' + select.options[0].value);
+</script>

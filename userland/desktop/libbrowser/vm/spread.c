@@ -70,6 +70,91 @@ static int spread_copy(struct vm_realm *realm, struct vm_object *target, vm_valu
 static void spread_trace_keys(struct vm_heap *heap, void *context);
 
 /*
+ * Gets the iterator of a for await loop (GetIterator with the async kind):
+ * the value's Symbol.asyncIterator method's iterator, or else its
+ * Symbol.iterator method's one with *sync set (the loop then awaits each
+ * value itself, as CreateAsyncFromSyncIterator would).  A TypeError for a
+ * value with neither method, or a method that makes no object.
+ */
+int
+vm_async_iter_start(
+	struct vm_realm *realm,
+	vm_value value,
+	vm_value *iterator,
+	int *sync)
+{
+	struct vm_cell *roots[3];
+	vm_value method;
+	vm_value made;
+	unsigned index;
+	unsigned registered;
+	int is_cell;
+	int is_object;
+	int status;
+
+	/* Retain the collectible realm, the value and the method while the methods run. */
+	*iterator = VM_VALUE_UNDEFINED;
+	*sync = 0;
+	roots[0] = NULL;
+	if (realm->managed)
+		roots[0] = &realm->cell;
+	roots[1] = NULL;
+	is_cell = vm_value_is_cell(value);
+	if (is_cell)
+		roots[1] = vm_value_as_cell(value);
+	roots[2] = NULL;
+	registered = 0;
+	for (index = 0; index < 3U; index++) {
+		status = vm_heap_add_root(realm->heap, &roots[index]);
+		if (status != 0)
+			goto cleanup;
+
+		/* Cleanup owns this slot only after registration succeeds. */
+		registered++;
+	}
+
+	/* The asynchronous method, else the synchronous one (undefined and null have neither). */
+	method = VM_VALUE_UNDEFINED;
+	if (value != VM_VALUE_UNDEFINED && value != VM_VALUE_NULL) {
+		status = vm_get_method(realm, value, vm_symbol_key(realm, VM_SYMBOL_ASYNC_ITERATOR), &method);
+		if (status != 0)
+			goto cleanup;
+		if (method == VM_VALUE_UNDEFINED) {
+			status = vm_get_method(realm, value, vm_symbol_key(realm, VM_SYMBOL_ITERATOR), &method);
+			if (status != 0)
+				goto cleanup;
+			*sync = 1;
+		}
+	}
+	if (method == VM_VALUE_UNDEFINED) {
+		status = vm_throw_type_error(realm, "value is not async iterable");
+		goto cleanup;
+	}
+	is_cell = vm_value_is_cell(method);
+	if (is_cell)
+		roots[2] = vm_value_as_cell(method);
+
+	/* The iterator, which must be an object. */
+	status = vm_call(realm, method, value, NULL, 0, &made);
+	if (status != 0)
+		goto cleanup;
+	is_object = vm_value_is_object(made);
+	if (!is_object) {
+		status = vm_throw_type_error(realm, "Result of the Symbol.asyncIterator method is not an object");
+		goto cleanup;
+	}
+	*iterator = made;
+
+cleanup:
+	/* Remove only acquired registrations before local slots expire. */
+	while (registered != 0) {
+		registered--;
+		vm_heap_remove_root(realm->heap, &roots[registered]);
+	}
+	return status;
+}
+
+/*
  * Starts iterating a value (an array pattern's or a spread's): the state
  * in a new cell, or a TypeError for a value that cannot be iterated.
  */

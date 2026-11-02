@@ -41,6 +41,9 @@ static int element_get_attribute(struct vm_realm *realm, vm_value this_value, co
 static int element_set_attribute(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int element_remove_attribute(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int element_has_attribute(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int element_get_attribute_ns(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int element_has_attribute_ns(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int element_find_ns(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, struct dom_attribute **attribute);
 static int element_click(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int element_attribute_name(struct vm_realm *realm, const struct dom_element *element, vm_value value, struct vm_string **name);
 static int image_src_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -114,6 +117,8 @@ static const struct bind_operation element_operations[] = {
 	{ "setAttribute", 2, element_set_attribute },
 	{ "removeAttribute", 1, element_remove_attribute },
 	{ "hasAttribute", 1, element_has_attribute },
+	{ "getAttributeNS", 2, element_get_attribute_ns },
+	{ "hasAttributeNS", 2, element_has_attribute_ns },
 	{ "getElementsByTagName", 1, bind_get_elements_by_tag_name },
 	{ "getElementsByClassName", 1, bind_get_elements_by_class_name },
 	{ "append", 0, bind_append },
@@ -1141,6 +1146,88 @@ element_has_attribute(
 		*result = VM_VALUE_TRUE;
 
 	/* Succeeded: the answer is reported. */
+	return 0;
+}
+
+/* Reports the value of the attribute of a namespace and a local name, or null (getAttributeNS). */
+static int
+element_get_attribute_ns(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_attribute *attribute;
+	int status;
+
+	/* The attribute, if the element has it. */
+	status = element_find_ns(realm, this_value, args, count, &attribute);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: its value, or null. */
+	*result = VM_VALUE_NULL;
+	if (attribute != NULL)
+		*result = vm_value_cell(attribute->value);
+	return 0;
+}
+
+/* Reports whether the element has the attribute of a namespace and a local name (hasAttributeNS). */
+static int
+element_has_attribute_ns(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_attribute *attribute;
+	int status;
+
+	/* The attribute, if the element has it. */
+	status = element_find_ns(realm, this_value, args, count, &attribute);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: whether it has it. */
+	*result = vm_value_boolean(attribute != NULL);
+	return 0;
+}
+
+/* Finds the attribute that a namespace (null or empty for none) and a local name (as written) name. */
+static int
+element_find_ns(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	struct dom_attribute **attribute)
+{
+	struct dom_element *element;
+	struct vm_string *uri;
+	struct vm_string *name;
+	vm_value space;
+	int status;
+
+	/* The element, the local name and the namespace. */
+	*attribute = NULL;
+	status = element_this(realm, this_value, &element);
+	if (status != 0)
+		return status;
+	status = bind_to_atom(realm, js_argument(args, count, 1), 0, &name);
+	if (status != 0)
+		return status;
+	uri = NULL;
+	space = js_argument(args, count, 0);
+	if (space != VM_VALUE_NULL && space != VM_VALUE_UNDEFINED) {
+		status = bind_to_string(realm, space, &uri);
+		if (status != 0)
+			return status;
+	}
+
+	/* Succeeded: the attribute, or NULL. */
+	*attribute = dom_element_find_attribute_uri(element, uri, name);
 	return 0;
 }
 

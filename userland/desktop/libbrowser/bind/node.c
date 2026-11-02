@@ -41,6 +41,8 @@ static int node_remove_child(struct vm_realm *realm, vm_value this_value, const 
 static int node_replace_child(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int node_has_child_nodes(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int node_contains(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int node_compare_position(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int node_before(const struct dom_node *first, const struct dom_node *second);
 static int node_clone(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int node_link(struct vm_realm *realm, vm_value this_value, struct dom_node *linked, vm_value *result);
 static int node_prototype_index(const struct dom_node *node);
@@ -77,6 +79,7 @@ static const struct bind_operation node_operations[] = {
 	{ "replaceChild", 2, node_replace_child },
 	{ "hasChildNodes", 0, node_has_child_nodes },
 	{ "contains", 1, node_contains },
+	{ "compareDocumentPosition", 1, node_compare_position },
 	{ "cloneNode", 0, node_clone },
 	{ "getRootNode", 0, bind_get_root_node },
 	{ NULL, 0, NULL }
@@ -96,6 +99,12 @@ static const struct bind_constant node_constants[] = {
 	{ "DOCUMENT_NODE", 9 },
 	{ "DOCUMENT_TYPE_NODE", 10 },
 	{ "DOCUMENT_FRAGMENT_NODE", 11 },
+	{ "DOCUMENT_POSITION_DISCONNECTED", 0x01 },
+	{ "DOCUMENT_POSITION_PRECEDING", 0x02 },
+	{ "DOCUMENT_POSITION_FOLLOWING", 0x04 },
+	{ "DOCUMENT_POSITION_CONTAINS", 0x08 },
+	{ "DOCUMENT_POSITION_CONTAINED_BY", 0x10 },
+	{ "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC", 0x20 },
 	{ NULL, 0 }
 };
 
@@ -1328,6 +1337,110 @@ node_contains(
 
 	/* Succeeded: the answer is reported. */
 	*result = vm_value_boolean(contained);
+	return 0;
+}
+
+/*
+ * Reports where another node is from this one (compareDocumentPosition):
+ * 0 for the node itself; for a node of another tree, disconnected and
+ * implementation-specific with a preceding or following that stays the
+ * same for the two; for an ancestor, contains and preceding; for a
+ * descendant, contained-by and following; otherwise preceding or
+ * following in tree order.  A TypeError for a value that is not a node.
+ */
+static int
+node_compare_position(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	const struct dom_node *root;
+	const struct dom_node *other_root;
+	struct dom_node *node;
+	struct dom_node *other;
+	int position;
+	int status;
+
+	/* The node, and the other, which must be a node. */
+	status = bind_this_node(realm, this_value, &node);
+	if (status != 0)
+		return status;
+	other = bind_node_of(js_argument(args, count, 0));
+	if (other == NULL)
+		return vm_throw_type_error(realm, "Failed to execute 'compareDocumentPosition' on 'Node': parameter 1 is not of type 'Node'.");
+
+	/* The same node. */
+	if (other == node) {
+		*result = vm_value_int32(0);
+		return 0;
+	}
+
+	/* Nodes of two trees: an order that is arbitrary but the same each time (by address). */
+	for (root = node; root->parent != NULL; root = root->parent)
+		;
+	for (other_root = other; other_root->parent != NULL; other_root = other_root->parent)
+		;
+	if (root != other_root) {
+		position = 0x01 | 0x20 | ((uintptr_t)other < (uintptr_t)node ? 0x02 : 0x04);
+		*result = vm_value_int32(position);
+		return 0;
+	}
+
+	/* An ancestor contains the node and precedes it; a descendant is contained and follows. */
+	if (dom_is_inclusive_ancestor(other, node)) {
+		position = 0x08 | 0x02;
+	} else if (dom_is_inclusive_ancestor(node, other)) {
+		position = 0x10 | 0x04;
+	} else if (node_before(other, node)) {
+		position = 0x02;
+	} else {
+		position = 0x04;
+	}
+
+	/* Succeeded: the bits. */
+	*result = vm_value_int32(position);
+	return 0;
+}
+
+/* Tells whether a node comes before another of the same tree that is neither its ancestor nor its descendant. */
+static int
+node_before(
+	const struct dom_node *first,
+	const struct dom_node *second)
+{
+	const struct dom_node *a;
+	const struct dom_node *b;
+	const struct dom_node *sibling;
+	unsigned first_depth;
+	unsigned second_depth;
+
+	/* The depths of the two. */
+	first_depth = 0;
+	for (a = first; a->parent != NULL; a = a->parent)
+		first_depth++;
+	second_depth = 0;
+	for (b = second; b->parent != NULL; b = b->parent)
+		second_depth++;
+
+	/* Up to the same depth, then up together to the children of the common ancestor. */
+	a = first;
+	b = second;
+	for (; first_depth > second_depth; first_depth--)
+		a = a->parent;
+	for (; second_depth > first_depth; second_depth--)
+		b = b->parent;
+	while (a->parent != b->parent) {
+		a = a->parent;
+		b = b->parent;
+	}
+
+	/* The one of the two siblings that comes first. */
+	for (sibling = a->next; sibling != NULL; sibling = sibling->next) {
+		if (sibling == b)
+			return 1;
+	}
 	return 0;
 }
 

@@ -274,6 +274,9 @@ struct bind_window {
 	struct environment_mutation_observer *mutation_observers;
 	/* The prelude's function that follows a clicked hyperlink (NULL until the prelude sets it). */
 	struct vm_cell *follow_hyperlink;
+	/* A top-level window's navigation to another document a script asked for, which the program carries out (NULL for none). */
+	char *top_navigation;
+	int top_navigation_replace;
 	/* The prelude's function that starts and stops the animation events of the page's elements (NULL until the prelude sets it). */
 	struct vm_cell *animation_hook;
 	/* The prelude's function that gives a restricted view of another window (postMessage only), for an opaque origin (NULL until the prelude sets it). */

@@ -272,6 +272,7 @@ static int view_pixels(const uint32_t *pixels, unsigned width, unsigned height, 
 static int view_target(const struct browser_target *target);
 static uint64_t view_clock(void);
 static int view_navigate(struct browser_view *view, const char *path, int step, size_t history_index);
+static void view_script_navigation(struct browser_view *view);
 static int view_make_page(struct browser_view *view, struct page **page);
 static int view_open_page(struct browser_view *view, const char *path, struct page **page);
 static int view_show_page(struct browser_view *view, struct page *page, const char *path, int step, size_t history_index);
@@ -727,8 +728,8 @@ browser_view_timeout(
 	if (view->page == NULL)
 		return timeout;
 
-	/* An image's event to fire is due at once. */
-	if (page_images_ready(view->page))
+	/* An image's event to fire, or a navigation a script asked for, is due at once. */
+	if (page_images_ready(view->page) || bind_navigation_pending(view->page->window))
 		return 0;
 
 	/* A playing video's next picture (ws121-p004). */
@@ -791,6 +792,11 @@ browser_view_process(
 	error = page_images_checkpoint(view->page);
 	if (error != 0 && view->callbacks.script_error != NULL)
 		view->callbacks.script_error(view->callbacks.context, view, error);
+	if (view->page == NULL)
+		return;
+
+	/* A navigation the scripts asked for (a location, a form's submit, a link they clicked) goes like a followed link. */
+	view_script_navigation(view);
 	if (view->page == NULL)
 		return;
 
@@ -3256,6 +3262,28 @@ view_click(
 
 	/* Succeeded: the click was carried out. */
 	return 0;
+}
+
+/*
+ * Carries out the navigation to another document a top-level page's
+ * scripts asked for, as a link the program may allow or deny (it goes to
+ * a new step of the history, a replacing one too).
+ */
+static void
+view_script_navigation(
+	struct browser_view *view)
+{
+	char *location;
+	int replace;
+
+	/* The request, if any. */
+	location = bind_take_navigation(view->page->window, &replace);
+	if (location == NULL)
+		return;
+
+	/* Followed like a link, which the program hears of. */
+	view_follow_link(view, location);
+	free(location);
 }
 
 /* Follows a link a click or Enter opened, when the link callback allows it (a load that fails goes to the load callback). */

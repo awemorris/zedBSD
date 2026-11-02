@@ -444,4 +444,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-404](bugs/BUG-404.md) | ブラウザ: 頁の取得中の視覚的な反応が無い（address の欄を進み具合の表示に、押した時点で URL を更新） | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
 | [BUG-405](bugs/BUG-405.md) | ブラウザ: Google の「Googleについて」の頁で画像が出ない | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
 | [BUG-406](bugs/BUG-406.md) | ブラウザ: 戻る button で数秒待たされる（cache で表示し、再取得は cache できない頁だけ） | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
-| [BUG-407](bugs/BUG-407.md) | ブラウザ: Google の検索の button（Google 検索・I'm Feeling Lucky・AI モード）が反応しない | open（2026-11-02 08:22 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
+| [BUG-407](bugs/BUG-407.md) | ブラウザ: Google の検索の button（Google 検索・I'm Feeling Lucky・AI モード）が反応しない | fixed（2026-11-02 P8 q1924-i01、pointer-events・for await・script の top-level の遷移ほか。host と live の google.com で確かめた、本物の Windows は未実施。結果の頁は Google の JS の確認で reCAPTCHA になる＝別件） |

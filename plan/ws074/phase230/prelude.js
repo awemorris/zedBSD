@@ -860,7 +860,9 @@
     function leaveForDocument(o) {
       var frame = null, list, target, index, old, h;
       frame = native.frameElement();
-      if (!frame || o.formData || (o.downloadRequest !== undefined && o.downloadRequest !== null)) return false;
+      if (o.formData || (o.downloadRequest !== undefined && o.downloadRequest !== null)) return false;
+      // A top-level window: the program loads the other document in its place (a traversal is the program's history's own).
+      if (!frame) return o.type !== 'traverse' && native.navigateTop(o.url, o.type !== 'push');
       old = entries[current];
       leave(old);
       censorEntries();
@@ -997,8 +999,8 @@
       }
       intercepted = n.state !== 'none';
       if (!intercepted && !o.sameDocument) {
-        // Another document: a frame loads it, and the document that comes carries on the entries; a window
-        // that is not a frame does not load it here.
+        // Another document: a frame loads it, and the document that comes carries on the entries; a top-level
+        // window asks the program to load it.
         if (t) cleanUp(t);
         leaveForDocument(o);
         return;
@@ -1800,6 +1802,66 @@
       Object.defineProperty(P, 'noValidate', {
         get: function () { return this.hasAttribute('novalidate'); },
         set: function (v) { if (v) this.setAttribute('novalidate', ''); else this.removeAttribute('novalidate'); },
+        configurable: true, enumerable: true
+      });
+    }
+  })();
+  // ---- The other listed form controls' reflected name and disabled, textarea's and select's type, and select's value
+  // (the selected option's value, or the empty string; setting it selects the first option with that value).
+  (function () {
+    ['HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLButtonElement', 'HTMLFieldSetElement', 'HTMLOutputElement'].forEach(function (name) {
+      var P = g[name] && g[name].prototype;
+      if (!P) return;
+      if (!('name' in P)) {
+        Object.defineProperty(P, 'name', {
+          get: function () { var v = this.getAttribute('name'); return v === null ? '' : v; },
+          set: function (v) { this.setAttribute('name', String(v)); },
+          configurable: true, enumerable: true
+        });
+      }
+      if (!('disabled' in P) && name !== 'HTMLOutputElement') {
+        Object.defineProperty(P, 'disabled', {
+          get: function () { return this.hasAttribute('disabled'); },
+          set: function (v) { if (v) this.setAttribute('disabled', ''); else this.removeAttribute('disabled'); },
+          configurable: true, enumerable: true
+        });
+      }
+    });
+    if (g.HTMLTextAreaElement && !('type' in g.HTMLTextAreaElement.prototype))
+      Object.defineProperty(g.HTMLTextAreaElement.prototype, 'type', { get: function () { return 'textarea'; }, configurable: true, enumerable: true });
+    if (!g.HTMLSelectElement) return;
+    var S = g.HTMLSelectElement.prototype;
+    if (!('multiple' in S)) {
+      Object.defineProperty(S, 'multiple', {
+        get: function () { return this.hasAttribute('multiple'); },
+        set: function (v) { if (v) this.setAttribute('multiple', ''); else this.removeAttribute('multiple'); },
+        configurable: true, enumerable: true
+      });
+    }
+    if (!('type' in S))
+      Object.defineProperty(S, 'type', { get: function () { return this.multiple ? 'select-multiple' : 'select-one'; }, configurable: true, enumerable: true });
+    if (g.HTMLOptionElement) {
+      var O = g.HTMLOptionElement.prototype;
+      var optionText = function (o) { return String(o.textContent).replace(/[ \t\n\f\r]+/g, ' ').replace(/^ | $/g, ''); };
+      if (!Object.getOwnPropertyDescriptor(O, 'text'))
+        Object.defineProperty(O, 'text', { get: function () { return optionText(this); }, set: function (v) { this.textContent = String(v); }, configurable: true, enumerable: true });
+      if (!Object.getOwnPropertyDescriptor(O, 'value')) {
+        Object.defineProperty(O, 'value', {
+          get: function () { var v = this.getAttribute('value'); return v === null ? optionText(this) : v; },
+          set: function (v) { this.setAttribute('value', String(v)); },
+          configurable: true, enumerable: true
+        });
+      }
+    }
+    if (!Object.getOwnPropertyDescriptor(S, 'value')) {
+      Object.defineProperty(S, 'value', {
+        get: function () { var i = this.selectedIndex, o = this.options; return i >= 0 && i < o.length ? o[i].value : ''; },
+        set: function (v) {
+          var o = this.options, i;
+          v = String(v);
+          for (i = 0; i < o.length; i++) if (o[i].value === v) { this.selectedIndex = i; return; }
+          this.selectedIndex = -1;
+        },
         configurable: true, enumerable: true
       });
     }
@@ -2792,6 +2854,13 @@
   if (typeof g.Document === 'function' && !('scrollingElement' in g.Document.prototype)) {
     Object.defineProperty(g.Document.prototype, 'scrollingElement', {
       get: function () { return this.documentElement; }, configurable: true, enumerable: true
+    });
+  }
+  // ---- document.getElementsByName: the elements whose name attribute is the value, in tree order (a NodeList that is not live)
+  if (typeof g.Document === 'function' && !g.Document.prototype.getElementsByName) {
+    def(g.Document.prototype, 'getElementsByName', function getElementsByName(name) {
+      var quoted = String(name).replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\a ').replace(/\0/g, '�');
+      return this.querySelectorAll('[name="' + quoted + '"]');
     });
   }
   // ---- Canvas: width and height reflect the attributes (300 by 150 when absent or not a number)

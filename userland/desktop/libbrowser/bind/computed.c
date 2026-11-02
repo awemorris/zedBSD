@@ -96,6 +96,7 @@ enum computed_property {
 	COMPUTED_DIRECTION,
 	COMPUTED_WHITE_SPACE,
 	COMPUTED_CURSOR,
+	COMPUTED_POINTER_EVENTS,
 	COMPUTED_VERTICAL_ALIGN,
 	COMPUTED_LIST_STYLE_TYPE,
 	COMPUTED_LIST_STYLE_POSITION,
@@ -371,6 +372,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "white-space", COMPUTED_WHITE_SPACE },
 	{ "text-transform", COMPUTED_TEXT_TRANSFORM },
 	{ "cursor", COMPUTED_CURSOR },
+	{ "pointer-events", COMPUTED_POINTER_EVENTS },
 	{ "vertical-align", COMPUTED_VERTICAL_ALIGN },
 	{ "list-style-type", COMPUTED_LIST_STYLE_TYPE },
 	{ "list-style-position", COMPUTED_LIST_STYLE_POSITION },
@@ -467,6 +469,9 @@ static const char *const computed_floats[] = { "none", "left", "right", "both" }
 
 /* The names of visibility. */
 static const char *const computed_visibilities[] = { "visible", "hidden" };
+
+/* The names of pointer-events, by its computed number (the SVG values compute to auto here). */
+static const char *const computed_pointer_events[] = { "auto", "none" };
 
 /* The names of overflow, by enum css_overflow. */
 static const char *const computed_overflows[] = { "visible", "hidden", "clip", "scroll", "auto" };
@@ -1939,6 +1944,9 @@ computed_write_keyword(
 		break;
 	case COMPUTED_CURSOR:
 		error = computed_name(computed_cursors, sizeof(computed_cursors) / sizeof(computed_cursors[0]), style->cursor, out);
+		break;
+	case COMPUTED_POINTER_EVENTS:
+		error = computed_name(computed_pointer_events, 2, style->pointer_events, out);
 		break;
 	case COMPUTED_TEXT_TRANSFORM:
 		/* Serialize the actual cascaded keyword in CSS and camel-case accessors alike. */

@@ -34,6 +34,7 @@
 
 static int prelude_set_url(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_navigate_frame(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_navigate_top(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_load_ended(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_fully_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_initial_blank(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -234,6 +235,87 @@ prelude_navigate_frame(
 	/* Succeeded: whether the frame was pointed at the URL. */
 	*result = vm_value_boolean(started);
 	return 0;
+}
+
+/*
+ * navigateTop(url, replace): asks the program to load the URL in place of
+ * a top-level window's document (a later request replaces an earlier one
+ * not yet carried out); whether the window is a top-level one (a frame's
+ * is not, nor a detached one's).
+ */
+static int
+prelude_navigate_top(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_buffer location;
+	char *copy;
+	int present;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* Only a top-level window that is still shown asks. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(0);
+	if (window == NULL || window->frame != NULL || window->detached)
+		return 0;
+
+	/* The URL as UTF-8. */
+	wb_buffer_init(&location);
+	status = prelude_utf8_argument(args, count, 0, &location, &present);
+	if (status != 0 || !present) {
+		wb_buffer_release(&location);
+		return status;
+	}
+	copy = strdup(wb_buffer_string(&location));
+	wb_buffer_release(&location);
+	if (copy == NULL)
+		return ENOMEM;
+
+	/* The request, which the program takes (bind_take_navigation). */
+	free(window->top_navigation);
+	window->top_navigation = copy;
+	window->top_navigation_replace = vm_to_boolean(js_argument(args, count, 1));
+	*result = vm_value_boolean(1);
+	return 0;
+}
+
+/*
+ * Takes the navigation a top-level window's script asked for: the URL
+ * (the caller frees it), or NULL for none; *replace says whether it takes
+ * the place of the current entry of the history.
+ */
+char *
+bind_take_navigation(
+	struct bind_window *window,
+	int *replace)
+{
+	char *location;
+
+	/* Nothing asked. */
+	*replace = 0;
+	if (window == NULL || window->top_navigation == NULL)
+		return NULL;
+
+	/* The request, handed over. */
+	location = window->top_navigation;
+	*replace = window->top_navigation_replace;
+	window->top_navigation = NULL;
+	window->top_navigation_replace = 0;
+	return location;
+}
+
+/* Tells whether a top-level window's script asked for a navigation the program has not taken yet. */
+int
+bind_navigation_pending(
+	const struct bind_window *window)
+{
+	return window != NULL && window->top_navigation != NULL;
 }
 
 /* loadEnded(): whether the window's load event has finished (a navigation before that replaces the current entry). */
@@ -1528,6 +1610,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "navigateFrame", 1, prelude_navigate_frame, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "navigateFrame", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "navigateTop", 2, prelude_navigate_top, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "navigateTop", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "loadEnded", 0, prelude_load_ended, NULL, &function);
 	if (status == 0)
