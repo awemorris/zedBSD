@@ -51,7 +51,7 @@
 | [p013](phase013/phase.md) | ssh-sftp（Q3 の A: sftp-server のため） | cleared（2026-11-01 06:09 Q1、main 8872d89fe。ssh-sftp（SFTP v3）実装、run-unit sftp 1836 checks PASS（Q1 再実行で確認）、ASan・UBSan、c89。READ の長さは parser が 64 KiB に切る（担当の判断、phase.md の結果）） | p002 | — |
 | [p014](phase014/phase.md) | ssh-keygen の program | cleared（2026-11-02 11:26 Q1、main で keygen-host 377 PASS、OpenSSH 10.0p2 の ssh-keygen と鍵を相互に読める）。実装済み・試験 PASS（2026-11-02 11:24 Sonnet q1935。keygen-host 377 checks、run-unit all・check-skeleton PASS、壊す確かめ 80 通り中 71 が FAIL・8 は同値か試験で作れない・1 は適用不能） | p006 | p003 経由 |
 | [p015](phase015/phase.md) | ssh の program・host の相互運用 A（Opus） | planned | p006・p008・p009・p010・p011 | p003 経由 |
-| [p016](phase016/phase.md) | sshd の monitor と login の確かめ（Opus） | planned | p009・p011・p012・p014 | p003 経由 |
+| [p016](phase016/phase.md) | sshd の monitor と login の確かめ（Opus） | in-progress（P6 q1938） | p009・p011・p012・p014 | p003 経由 |
 | [p017](phase017/phase.md) | sshd の pre-auth と session の process（Opus） | planned | p008・p010・p016 | p003 経由 |
 | [p018](phase018/phase.md) | sshd の listener・相互運用 B（Opus） | planned | p015・p017 | p003 経由 |
 | [p019](phase019/phase.md) | sftp-server の program（Q3 の A: 旧の scp の受け手は作らない） | planned | p013・p018 | — |
