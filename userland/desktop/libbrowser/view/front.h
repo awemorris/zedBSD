@@ -104,6 +104,9 @@ int view_front_text_context(const struct browser_view *view, char *text, size_t 
 void view_front_process(struct browser_view *view);
 int view_front_render_pixels(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);
 
+/* How many entries wait in the view's mailbox now (front.c), from any thread. */
+size_t view_front_queued(const struct browser_view *view);
+
 /* The agent the view's pages run their tasks in (front.c). */
 struct vm_agent *view_front_agent(struct view_front *front);
 

@@ -963,6 +963,26 @@ view_front_render_pixels(
 	return 0;
 }
 
+/* Reports how many entries wait in a view's mailbox now (merged ones count once). */
+size_t
+view_front_queued(
+	const struct browser_view *view)
+{
+	struct view_front *front;
+	size_t count;
+
+	/* The mailbox's length, under its lock. */
+	front = view_front_of(view);
+	wb_mutex_lock(&front->lock);
+
+	count = front->items.count;
+
+	wb_mutex_unlock(&front->lock);
+
+	/* Succeeded: the count. */
+	return count;
+}
+
 /* Reports the agent a front's pages run their tasks in. */
 struct vm_agent *
 view_front_agent(
