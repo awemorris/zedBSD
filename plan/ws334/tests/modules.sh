@@ -33,6 +33,10 @@ ws334_sources="$lb/base/os-win32.c $lb/base/os-error.c
 ws334_tools="plan/ws334/tests/modules.sh plan/ws334/tests/run-unit.sh plan/ws334/tests/check-skeleton.sh
 	plan/ws334/tests/unit/check.h"
 
+# libbrowser's threads over the program's table (base/thread.c, base/once.c) and the tests' table of the
+# POSIX threads (winpthreads on Windows), which the tests that make a queue or a lock give the engine first.
+ws334_threads="$lb/base/thread.c $lb/base/once.c userland/tests/browser-threads/threads-posix.c"
+
 # The ISO C helpers of libbrowser's base that the modules use (buffers, vectors, UTF-8 and UTF-16).
 ws334_base="$lb/base/arena.c $lb/base/buffer.c $lb/base/vector.c $lb/base/utf.c $lb/base/hash.c
 	$lb/base/unicode.c $lb/base/unicode-case-table.c"
@@ -46,18 +50,18 @@ ws334_test_sources() {
 	os-error:*) echo "$lb/base/os-error.c" ;;
 	os-system:posix) echo "$lb/base/os-system-posix.c $ws334_base" ;;
 	os-system:win32) echo "$lb/base/os-system-win32.c $lb/base/os-win32.c $ws334_base" ;;
-	os-file:posix) echo "$lb/base/os-file-posix.c $ws334_base" ;;
-	os-file:win32) echo "$lb/base/os-file-win32.c $lb/base/os-win32.c $ws334_base" ;;
+	os-file:posix) echo "$lb/base/os-file-posix.c $ws334_threads $ws334_base" ;;
+	os-file:win32) echo "$lb/base/os-file-win32.c $lb/base/os-win32.c $ws334_threads $ws334_base" ;;
 	os-net:posix) echo "$lb/base/os-net-posix.c $ws334_base" ;;
 	os-net:win32) echo "$lb/base/os-net-win32.c $lb/base/os-win32.c $ws334_base" ;;
 	os-time:posix) echo "$lb/base/os-time-posix.c $ws334_base" ;;
 	os-time:win32) echo "$lb/base/os-time-win32.c $lb/base/os-zones.c $lb/base/os-win32.c $ws334_base" ;;
 	os-zones:*) echo "$lb/base/os-zones.c $ws334_base" ;;
 	records:*) echo "$lb/storage/records.c $ws334_base" ;;
-	files:posix) echo "$lb/storage/files.c $lb/storage/records.c $lb/base/os-file-posix.c $ws334_base" ;;
+	files:posix) echo "$lb/storage/files.c $lb/storage/records.c $lb/base/os-file-posix.c $ws334_threads $ws334_base" ;;
 	files:win32) echo "$lb/storage/files.c $lb/storage/records.c $lb/base/os-file-win32.c $lb/base/os-win32.c $ws334_base" ;;
-	queue:posix) echo "$lb/storage/queue.c $lb/storage/records.c $lb/base/os-system-posix.c $ws334_base" ;;
-	queue:win32) echo "$lb/storage/queue.c $lb/storage/records.c $lb/base/os-system-win32.c $lb/base/os-win32.c $ws334_base" ;;
+	queue:posix) echo "$lb/storage/queue.c $lb/storage/records.c $lb/base/os-system-posix.c $ws334_threads $ws334_base" ;;
+	queue:win32) echo "$lb/storage/queue.c $lb/storage/records.c $lb/base/os-system-win32.c $lb/base/os-win32.c $ws334_threads $ws334_base" ;;
 	tools:*) echo "$ws334_base" ;;
 	keys-table:*) echo "$lk/win32/keys-table.c" ;;
 	frame:*) echo "$lk/win32/frame.c" ;;

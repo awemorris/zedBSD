@@ -7,8 +7,8 @@
 
 /*
  * The instances of the engine (storage/instance.h): browser_instance_create
- * and browser_instance_destroy of <browser/browser.h>, and the default
- * instance of each thread.
+ * and browser_instance_destroy of <browser/browser.h>, and the process's
+ * default instance.
  *
  * Making an instance starts its storage queue over the program's backend,
  * then opens its cookie jar, which reads the persistent cookies through
@@ -17,37 +17,34 @@
  * thread and closes the backend (storage/queue.h), then frees the jar and
  * the Web Storage areas.
  *
- * A view made without an instance uses its thread's default instance:
- * one per thread, so that an instance and its views stay on one thread,
- * made with no backend on the thread's first such view (or page) and kept
- * in a thread-specific slot whose destructor destroys it when the thread
- * ends, unless a view still uses it (it then lasts as long as the process).
+ * A view made without an instance uses the process's default instance,
+ * made with no backend on the first such view (or page) and kept for the
+ * rest of the process.  It remembers nothing, so it needs no ending; the
+ * views that share it are made and used on one thread at a time.
  */
 
 #include "storage/instance.h"
 #include "storage/queue.h"
+#include "base/thread.h"
 #include "net/net.h"
 #include "page/page.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
 /*
- * The thread-specific slot of each thread's default instance (NULL until
- * the thread asks for it), made once for the process by instance_key_once;
- * instance_key_error is what making it reported (0 when the slot exists).
- * Both are written only inside the once and live as long as the process.
+ * The process's default instance: NULL until the first view (or page) made
+ * without an instance asks for it, then kept for the rest of the process.
+ * Read and written only under instance_default_lock.
  */
-static pthread_once_t instance_key_once = PTHREAD_ONCE_INIT;
-static pthread_key_t instance_key;
-static int instance_key_error;
+static struct browser_instance *instance_default;
+
+/* The lock of instance_default: two threads asking at once make only one. */
+static struct wb_static_mutex instance_default_lock = WB_STATIC_MUTEX_INIT;
 
 static int instance_make(const struct browser_storage_calls *storage, void *storage_context, size_t cache_limit, struct browser_instance **instance);
 static void instance_free(struct browser_instance *instance);
-static void instance_key_make(void);
-static void instance_thread_end(void *value);
 
 /*
  * Makes an instance of the engine over a storage backend.
@@ -133,8 +130,8 @@ browser_instance_destroy(
 }
 
 /*
- * Reports the calling thread's default instance, made on its first use
- * without a backend.
+ * Reports the process's default instance, made on its first use without a
+ * backend.  Returns 0, ENOTSUP (the program gave no threads) or ENOMEM.
  */
 int
 wb_instance_default(
@@ -143,33 +140,29 @@ wb_instance_default(
 	struct browser_instance *made;
 	int error;
 
-	/* The slot of the threads' defaults, made once. */
+	/* The lock of the default. */
 	*instance = NULL;
-	pthread_once(&instance_key_once, instance_key_make);
-	if (instance_key_error != 0)
-		return ENOMEM;
-
-	/* This thread's, made before. */
-	made = pthread_getspecific(instance_key);
-	if (made != NULL) {
-		*instance = made;
-		return 0;
-	}
-
-	/* A new one, which remembers nothing. */
-	error = instance_make(NULL, NULL, WB_INSTANCE_CACHE_LIMIT, &made);
+	error = wb_static_mutex_lock(&instance_default_lock);
 	if (error != 0)
-		return ENOMEM;
+		return error;
 
-	/* The thread keeps it, and its end destroys it (instance_thread_end). */
-	made->is_default = 1;
-	error = pthread_setspecific(instance_key, made);
-	if (error != 0) {
-		instance_free(made);
-		return ENOMEM;
+	/* The default made before, or a new one, which remembers nothing. */
+	made = instance_default;
+	if (made == NULL) {
+		error = instance_make(NULL, NULL, WB_INSTANCE_CACHE_LIMIT, &made);
+		if (error == 0) {
+			made->is_default = 1;
+			instance_default = made;
+		}
 	}
 
-	/* Succeeded: the thread's default instance. */
+	wb_static_mutex_unlock(&instance_default_lock);
+
+	/* A default that could not be made. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the process's default instance. */
 	*instance = made;
 	return 0;
 }
@@ -247,31 +240,4 @@ instance_free(
 	page_storage_release(&instance->storage_areas);
 	wb_vector_release(&instance->storage_areas);
 	free(instance);
-}
-
-/* Makes the thread-specific slot of the default instances (once for the process). */
-static void
-instance_key_make(void)
-{
-	/* The slot, with the destructor each thread's end calls. */
-	instance_key_error = pthread_key_create(&instance_key, instance_thread_end);
-}
-
-/*
- * Ends a thread's default instance with the thread: destroyed when no
- * view uses it, otherwise kept for the views (until the process ends).
- */
-static void
-instance_thread_end(
-	void *value)
-{
-	struct browser_instance *instance;
-
-	/* A view still uses it. */
-	instance = value;
-	if (instance->view_count != 0)
-		return;
-
-	/* Nothing uses it any more. */
-	instance_free(instance);
 }

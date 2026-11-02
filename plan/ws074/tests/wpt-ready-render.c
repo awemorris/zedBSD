@@ -8,6 +8,8 @@
 /* A public-API test client captures the first acknowledged frame within an absolute deadline. */
 #include <browser/browser.h>
 
+#include "userland/tests/browser-threads/threads-posix.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,6 +61,13 @@ main(
 	error = ready_options(argc, argv, &options);
 	if (error != 0) {
 		fprintf(stderr, "usage: wpt-ready-render URL OUT.ppm READY_MESSAGE FONT MONO FALLBACK WIDTH HEIGHT DEADLINE_MS\n");
+		return 2;
+	}
+
+	/* The engine makes its threads with the POSIX threads, before the view. */
+	error = browser_threads_set(browser_threads_posix());
+	if (error != 0) {
+		fprintf(stderr, "wpt-ready-render: the engine refused the threads (%d)\n", error);
 		return 2;
 	}
 

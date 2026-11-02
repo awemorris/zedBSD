@@ -10,12 +10,12 @@
  */
 
 #include "base/os-file.h"
+#include "base/thread.h"
 
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,7 +84,7 @@ static unsigned int os_temporary_counter;
 static struct wb_os_lock *os_lock_held;
 
 /* The mutex of os_lock_held. */
-static pthread_mutex_t os_lock_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct wb_static_mutex os_lock_mutex = WB_STATIC_MUTEX_INIT;
 
 static int os_utf8_is_valid(const unsigned char *bytes, size_t length);
 static int os_path_check(const char *path, size_t *length);
@@ -757,12 +757,13 @@ wb_os_lock_open(
 	entry->directory = resolved;
 	entry->descriptor = -1;
 
-	/* Takes the lock with the list of held locks held still. */
-	pthread_mutex_lock(&os_lock_mutex);
+	/* Takes the lock with the list of held locks held still (a mutex that cannot be made fails the lock). */
+	error = wb_static_mutex_lock(&os_lock_mutex);
+	if (error == 0) {
+		error = os_lock_acquire(entry, lock_path);
 
-	error = os_lock_acquire(entry, lock_path);
-
-	pthread_mutex_unlock(&os_lock_mutex);
+		wb_static_mutex_unlock(&os_lock_mutex);
+	}
 
 	/* Frees what the failed attempt allocated. */
 	free(lock_path);
@@ -794,8 +795,8 @@ wb_os_lock_close(
 	if (lock == NULL)
 		return;
 
-	/* Takes the lock off the list and closes the descriptor, which releases the system's lock, while the list is held still. */
-	pthread_mutex_lock(&os_lock_mutex);
+	/* Takes the lock off the list and closes the descriptor, which releases the system's lock, while the list is held still (the mutex was made when the lock was taken). */
+	(void)wb_static_mutex_lock(&os_lock_mutex);
 
 	for (link = &os_lock_held;
 	     *link != NULL;
@@ -807,7 +808,7 @@ wb_os_lock_close(
 	}
 	close(lock->descriptor);
 
-	pthread_mutex_unlock(&os_lock_mutex);
+	wb_static_mutex_unlock(&os_lock_mutex);
 
 	/* Frees the lock. */
 	free(lock->directory);

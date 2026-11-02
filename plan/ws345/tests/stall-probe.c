@@ -43,6 +43,8 @@
 
 #include <browser/browser.h>
 
+#include "userland/tests/browser-threads/threads-posix.h"
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -162,6 +164,13 @@ main(
 	scenario = argv[1];
 	seconds = argc > 2 ? atof(argv[2]) : 6.0;
 	setenv("XDG_DATA_HOME", "build/ws345-probe-data", 1);
+
+	/* The engine makes its threads with the POSIX threads. */
+	error = browser_threads_set(browser_threads_posix());
+	if (error != 0) {
+		fprintf(stderr, "stall-probe: the engine refused the threads (%d)\n", error);
+		return 2;
+	}
 
 	/* The server, and the two listeners that hold a connection. */
 	listener = probe_listen(64, &port_serve);

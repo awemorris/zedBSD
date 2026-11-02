@@ -194,8 +194,8 @@ struct view_prefetch_script {
  * (open_epoch) began, how pages are fetched, the loader (NULL when every
  * page is read at once), the page being fetched (its location and how it
  * joins the history; NULL when none), the title shown, and the callbacks.
- * instance is the instance the view belongs to (the program's, or its
- * thread's default), which counts it among its views; storage_told says
+ * instance is the instance the view belongs to (the program's, or the
+ * process's default), which counts it among its views; storage_told says
  * the view has told its console that the storage could not save.
  *
  * On the GPU: the caller's device (has_device says the caller lent one),
@@ -396,7 +396,7 @@ browser_view_create(
 	if (options->fetch < BROWSER_FETCH_DEFAULT || options->fetch > BROWSER_FETCH_BACKGROUND)
 		return EINVAL;
 
-	/* The instance: the program's, or this thread's default one. */
+	/* The instance: the program's, or the process's default one. */
 	instance = options->instance;
 	if (instance == NULL) {
 		error = wb_instance_default(&instance);
@@ -2344,7 +2344,7 @@ view_open_page(
 	/* The location. */
 	error = page_load_location(loaded, path);
 	if (error != 0) {
-		view_failed(view, path, error, page_failure_reason());
+		view_failed(view, path, error, page_failure_reason(loaded));
 		page_destroy(loaded);
 		return error;
 	}
@@ -2545,7 +2545,7 @@ view_document_arrived(
 	if (error != 0) {
 		path = view->pending_path;
 		view->pending_path = NULL;
-		view_failed(view, path, error, page_failure_reason());
+		view_failed(view, path, error, page_net_reason(request));
 		free(path);
 		return;
 	}

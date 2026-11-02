@@ -88,9 +88,11 @@
  * remembers: the cookies, the HTTP cache and Web Storage.  The program
  * makes an instance with a storage backend (<browser/storage.h>; the
  * engine's files backend, or its own) to keep them across runs, or
- * without one to keep nothing; a view made without an instance uses its
- * thread's default instance, which keeps nothing beyond the process.  An
- * instance and its views are used from the thread that made the instance.
+ * without one to keep nothing; a view made without an instance uses the
+ * process's default instance, which keeps nothing beyond the process.  An
+ * instance and its views are used from the thread that made the instance
+ * (the default instance's views from one thread at a time).  Before any of
+ * it the program gives the engine its threads (browser_threads_set).
  * Two instances share nothing.  Memory the engine hands to the program
  * (a dump's text) is freed with browser_free, so a program built with
  * another C runtime than the engine's frees it in the engine's.
@@ -120,13 +122,73 @@ extern "C" {
  * each view it makes; a library of another version refuses the view
  * (ENOTSUP) rather than read options laid out differently.
  */
-#define BROWSER_API_VERSION		4
+#define BROWSER_API_VERSION		5
 
 /* A view, opaque to the program. */
 struct browser_view;
 
 /* An instance of the engine: what its views share and what it remembers (cookies, the HTTP cache, Web Storage). */
 struct browser_instance;
+
+/* The version of struct browser_threads; browser_threads_set refuses a table of another one (ENOTSUP). */
+#define BROWSER_THREADS_VERSION		1
+
+/*
+ * The program's threads, which the engine has its own threads made and
+ * synchronized with: the engine decides which threads it has, how many,
+ * their names and what runs on them, and never makes a thread itself.
+ * Every call may be made from any thread, so the program's functions are
+ * safe to call from several threads at once.
+ *
+ * - start: starts a thread named name (at most 15 bytes of ASCII; the
+ *   program gives it to the system's thread if it can) with a stack of
+ *   stack_size bytes (0 for the system's), running run(argument); it ends
+ *   when run returns.  Sets *thread to the program's handle and returns 0,
+ *   or EAGAIN or ENOMEM (the engine then does without the thread: the call
+ *   that wanted it fails).
+ * - join: waits until the thread ended and gives its handle back.  The
+ *   engine joins every thread it started, exactly once, and never from the
+ *   thread itself.
+ * - is_current: whether the calling thread is the thread (1) or not (0).
+ * - mutex_create, mutex_destroy, mutex_lock, mutex_unlock: a mutex that is
+ *   not recursive.  create returns 0 or ENOMEM; the others cannot fail.
+ * - cond_create, cond_destroy, cond_wait, cond_wait_for, cond_signal,
+ *   cond_broadcast: a condition waited on under a mutex.  A wait may end
+ *   without a signal (the engine checks what it waits for again);
+ *   cond_wait_for waits at most so many milliseconds on a clock that only
+ *   goes forward, and returns 0 or ETIMEDOUT.
+ *
+ * The engine needs no value of each thread's own and no call made once
+ * from the program (it makes those with atomic operations), nor anything
+ * about signals (its sockets never raise SIGPIPE).
+ */
+struct browser_threads {
+	int version;
+	void *context;
+	int (*start)(void *context, const char *name, size_t stack_size, void (*run)(void *argument), void *argument, void **thread);
+	void (*join)(void *context, void *thread);
+	int (*is_current)(void *context, const void *thread);
+	int (*mutex_create)(void *context, void **mutex);
+	void (*mutex_destroy)(void *context, void *mutex);
+	void (*mutex_lock)(void *context, void *mutex);
+	void (*mutex_unlock)(void *context, void *mutex);
+	int (*cond_create)(void *context, void **cond);
+	void (*cond_destroy)(void *context, void *cond);
+	void (*cond_wait)(void *context, void *cond, void *mutex);
+	int (*cond_wait_for)(void *context, void *cond, void *mutex, uint32_t milliseconds);
+	void (*cond_signal)(void *context, void *cond);
+	void (*cond_broadcast)(void *context, void *cond);
+};
+
+/*
+ * Gives the engine the program's threads, once in the process and before
+ * any instance, view or offscreen image is made (the engine keeps a copy
+ * of the table; its context must outlive the engine's use).  Returns 0,
+ * EINVAL (NULL), ENOTSUP (a table of another version, or missing a call)
+ * or EBUSY (the threads were given already).  An instance or a view made
+ * before fails with ENOTSUP.
+ */
+int browser_threads_set(const struct browser_threads *threads);
 
 /*
  * What an instance is made with: the interface's version
@@ -289,7 +351,7 @@ struct browser_gpu_failure {
  * browser_view_set_gpu gives it one later), the program's wake with
  * the context it is called with (NULL for none: a program without a
  * window settles the view instead), and the instance it belongs to (NULL
- * for its thread's default instance; it must outlive the view).
+ * for the process's default instance; it must outlive the view).
  */
 struct browser_view_options {
 	int version;
@@ -313,8 +375,9 @@ struct browser_view_options {
  * fails).  Whether it succeeds or not, the backend's close is called
  * exactly once (here on failure, by browser_instance_destroy otherwise).
  * Returns 0, EINVAL (options or instance NULL), ENOTSUP (options or the
- * backend's table of another version, or a table missing a call),
- * ENOMEM, EAGAIN (its storage thread could not start).  *instance is NULL
+ * backend's table of another version, or a table missing a call, or no
+ * threads given with browser_threads_set), ENOMEM, EAGAIN (its storage
+ * thread could not start).  *instance is NULL
  * on failure.
  */
 int browser_instance_create(const struct browser_instance_options *options, struct browser_instance **instance);

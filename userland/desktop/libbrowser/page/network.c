@@ -61,7 +61,7 @@ page_instance(
 	if (page->instance != NULL)
 		return page->instance;
 
-	/* Otherwise the thread's default one, which the page keeps from now on. */
+	/* Otherwise the process's default one, which the page keeps from now on. */
 	error = wb_instance_default(&instance);
 	if (error != 0)
 		return NULL;
@@ -217,6 +217,18 @@ page_net_cancel(
 {
 	/* The loader's cancel. */
 	net_request_cancel(request);
+}
+
+/*
+ * Tells why a request failed over TLS ("" when it did not), in its
+ * callback.
+ */
+const char *
+page_net_reason(
+	const struct net_request *request)
+{
+	/* The loader's reason. */
+	return net_request_reason(request);
 }
 
 /*

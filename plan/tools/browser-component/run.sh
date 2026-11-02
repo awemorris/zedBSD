@@ -18,7 +18,7 @@ asan)
 esac
 BROWSER_HOST_BUILD="$base" sh plan/ws074/tests/host-build.sh "$variant"
 "$cc" $flags -Iuserland/desktop/include -o "$base/$variant/component-client" \
-    plan/tools/browser-component/client.c -L"$base/$variant" -Wl,-rpath,'$ORIGIN' \
+    -I. plan/tools/browser-component/client.c userland/tests/browser-threads/threads-posix.c -L"$base/$variant" -Wl,-rpath,'$ORIGIN' \
     -Wl,--export-dynamic-symbol=strdup,--export-dynamic-symbol=vkCreateFramebuffer \
     -l:libbrowser.so -lvulkan -ldl
 python3 plan/tools/browser-component/run.py "$base/$variant/component-client"

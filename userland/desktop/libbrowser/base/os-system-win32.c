@@ -28,8 +28,6 @@
 /* The largest alignment wb_os_aligned_alloc accepts, in bytes. */
 #define OS_ALIGNMENT_MAX	65536U
 
-/* The most bytes a thread name keeps (the limit of Linux's thread names, without the NUL). */
-#define OS_THREAD_NAME_MAX	15U
 
 /* The first size, in UTF-16 units, of the buffer that receives the path of the running program. */
 #define OS_MODULE_PATH_START	260U
@@ -177,59 +175,6 @@ wb_os_random(
 
 	/* Succeeded: every byte came from the system's generator. */
 	return 0;
-}
-
-/*
- * Names the calling thread for debuggers and the system's tools.
- *
- * The facility exists from Windows 10 version 1607 and is looked up at run
- * time, so the program still starts on an older system.
- */
-void
-wb_os_thread_name(
-	const char *name)
-{
-	HRESULT (WINAPI *set_description)(HANDLE, PCWSTR);
-	FARPROC address;
-	HMODULE kernel;
-	wchar_t *wide;
-	char kept[OS_THREAD_NAME_MAX + 1U];
-	size_t length;
-	int error;
-
-	/* Ignores a call that gives no name. */
-	if (name == NULL)
-		return;
-
-	/* Keeps at most the first bytes of the name, as the other systems do. */
-	length = 0;
-	while (length < OS_THREAD_NAME_MAX && name[length] != '\0') {
-		kept[length] = name[length];
-		length++;
-	}
-	kept[length] = '\0';
-
-	/* Finds the system library that holds the facility, which is always loaded. */
-	kernel = GetModuleHandleW(L"kernel32.dll");
-	if (kernel == NULL)
-		return;
-
-	/* Looks the facility up; a system without it ignores the name. */
-	address = GetProcAddress(kernel, "SetThreadDescription");
-	if (address == NULL)
-		return;
-
-	/* Turns the address into the function's type by copying its bytes. */
-	memcpy(&set_description, &address, sizeof(set_description));
-
-	/* Converts the name to the UTF-16 the facility takes; a name that does not convert is dropped. */
-	error = wb_os_wide_from_utf8(kept, &wide, NULL);
-	if (error != 0)
-		return;
-
-	/* Names the calling thread; a failure leaves the thread unnamed, which is harmless. */
-	(void)set_description(GetCurrentThread(), wide);
-	free(wide);
 }
 
 /*

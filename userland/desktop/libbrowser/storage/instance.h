@@ -56,7 +56,7 @@ struct net_cache;
  * cache_limit:   bytes of the persistent HTTP cache.
  * view_count:    the views made with it and not yet destroyed; an
  *                instance with views is not destroyed.
- * is_default:    1 for a thread's default instance, which the program
+ * is_default:    1 for the process's default instance, which the program
  *                does not see and browser_instance_destroy refuses.
  */
 struct browser_instance {

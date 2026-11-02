@@ -907,9 +907,11 @@ heap_scan_stack(
  * Marks every cell a word in [low, high) points into.
  *
  * The words read are other functions' frames, which the address sanitizer
- * would call out of bounds; the scan is exempt from it.
+ * would call out of bounds and the thread sanitizer would watch for no
+ * use (they are the scanning thread's own); the scan is exempt from both.
  */
 __attribute__((no_sanitize_address))
+__attribute__((no_sanitize("thread")))
 static void
 heap_scan_range(
 	struct vm_heap *heap,

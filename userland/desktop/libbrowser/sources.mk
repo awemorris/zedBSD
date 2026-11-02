@@ -16,6 +16,8 @@ LIBBROWSER_OS_SOURCES := $(LIBBROWSER_DIR)/base/os-system-posix.c \
 LIBBROWSER_OS_NET_SOURCES := $(LIBBROWSER_DIR)/base/os-net-posix.c
 LIBBROWSER_SCRIPT_SOURCES := $(LIBBROWSER_OS_SOURCES) \
 	$(LIBBROWSER_DIR)/base/os-error.c \
+	$(LIBBROWSER_DIR)/base/thread.c \
+	$(LIBBROWSER_DIR)/base/once.c \
 	$(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/base/buffer.c \
 	$(LIBBROWSER_DIR)/base/vector.c \

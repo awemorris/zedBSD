@@ -23,6 +23,7 @@
 #include "html/html.h"
 #include "image/image.h"
 #include "layout/layout.h"
+#include "net/net.h"
 #include "paint/paint.h"
 #include "text/text.h"
 
@@ -172,6 +173,8 @@ struct page {
 	int load_pending;
 	/* The document came with Cache-Control: no-store (the view keeps no copy of it for Back and Forward). */
 	int no_store;
+	/* Why the last load of a location failed over TLS ("" when it did not), for the load callback. */
+	char failure_reason[NET_TLS_REASON_MAX];
 	/* Defer nested ready-script drains while the outer insertion-order loop runs. */
 	int scripts_running;
 	struct wb_vector fonts;
@@ -362,6 +365,7 @@ int page_net_is_remote(const char *location);
 int page_net_fetch(struct net_loader *loader, const char *location, page_request_done done, void *context, struct net_request **request);
 void page_net_cancel(struct net_request *request);
 int page_net_result(const struct net_request *request, const unsigned char **bytes, size_t *length, const char **url);
+const char *page_net_reason(const struct net_request *request);
 int page_load_images(struct page *page);
 void page_set_viewport(struct page *page, int width, int height);
 void page_set_color_scheme(struct page *page, int dark);
@@ -406,7 +410,7 @@ struct dom_node *page_child_element_at(void *context, struct bind_window *window
 const struct bind_storage_calls *page_storage_calls(void);
 void page_storage_release(struct wb_vector *areas);
 void page_set_console(struct page *page, page_console console, void *context);
-const char *page_failure_reason(void);
+const char *page_failure_reason(const struct page *page);
 const struct img_bitmap *page_image_of(void *context, const struct dom_element *element);
 int page_svg_render(const struct dom_element *svg, struct img_bitmap *bitmap, int width, int height);
 int page_svg_decode(struct page *page, const unsigned char *bytes, size_t length, struct img_bitmap *bitmap, int width, int height);

@@ -136,7 +136,7 @@ static int http_case_differs(const char *text, const char *name, size_t length);
  * final URL, status, Content-Type and body) or returns an errno value
  * (EPROTONOSUPPORT for a scheme other than http and https, or https
  * without the OpenSSL package; EPROTO for a TLS failure, whose reason
- * net_tls_error gives; EINVAL for a response
+ * response->reason gives; EINVAL for a response
  * that is not HTTP, ELOOP for too many redirects).  The cookies of the
  * jar (NULL for none) go with each request, and the responses' cookies
  * go into it.
@@ -172,8 +172,7 @@ net_http_fetch_send(
 	int redirected;
 	int error;
 
-	/* The URL (and no TLS failure yet). */
-	net_tls_clear_error();
+	/* The URL (and no TLS failure yet: the empty response has no reason). */
 	net_response_init(response);
 	error = net_url_parse(url_text, strlen(url_text), NULL, &url);
 	if (error != 0)
@@ -622,13 +621,17 @@ http_request(
 	error = http_connect(url, &connection.socket);
 	is_https = !strcmp(url->scheme, "https");
 	if (error == 0 && is_https)
-		error = net_tls_open(connection.socket, url->host, &connection.tls);
+		error = net_tls_open(connection.socket, url->host, response->reason, &connection.tls);
 
 	/* The request and everything the server sends until it closes. */
 	if (error == 0)
 		error = http_send_all(&connection, request.data, request.length);
 	if (error == 0)
 		error = http_receive_all(&connection, &raw);
+
+	/* Why the connection failed, kept before it closes. */
+	if (error != 0 && connection.tls != NULL)
+		snprintf(response->reason, sizeof(response->reason), "%s", net_tls_reason(connection.tls));
 	net_tls_close(connection.tls);
 	wb_os_socket_close(connection.socket);
 

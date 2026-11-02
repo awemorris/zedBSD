@@ -88,21 +88,6 @@ void wb_os_aligned_free(void *memory);
 int wb_os_random(void *bytes, size_t length);
 
 /*
- * Names the calling thread for debuggers and the system's tools.
- *
- * name: NUL-terminated ASCII, at most 15 bytes are used (longer names are
- *       cut); NULL does nothing.
- * Best effort: a system without the facility ignores it.
- * POSIX: pthread_setname_np(pthread_self(), name) when the build defines
- * WB_OS_THREAD_NAMES (the Linux and FreeBSD host builds may; it is a build
- * switch for a facility, not a test of the system's name), nothing
- * otherwise (zedBSD has no pthread_setname_np: the engine's behaviour
- * there today).  Windows: SetThreadDescription, looked up at run time in
- * kernel32.dll (absent before Windows 10 1607).
- */
-void wb_os_thread_name(const char *name);
-
-/*
  * Loads the first library of a list that the system can load.
  *
  * names:   NULL-terminated array of file names (no directory), tried in

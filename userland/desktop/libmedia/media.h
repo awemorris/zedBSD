@@ -77,11 +77,25 @@ struct media_engine;
 /* The caller's wake: the engine's state changed or a picture came (see above). */
 typedef void (*media_wake_function)(void *context);
 
+/*
+ * How a caller has the engine's thread made (media_engine_open), when it
+ * makes its threads itself: the thread's name, and start and join over the
+ * caller's context (start returns 0 with the caller's handle in *thread,
+ * or an errno value; join waits for the thread's end).  Without one the
+ * engine makes its thread with the system's threads.
+ */
+struct media_threads {
+	const char *name;
+	void *context;
+	int (*start)(void *context, const char *name, void (*run)(void *argument), void *argument, void **thread);
+	void (*join)(void *context, void *thread);
+};
+
 /* The log: a line of the library's (without its end) goes to the caller's function, or nowhere. */
 void media_set_log(void (*log)(void *context, const char *line), void *context);
 
 /* The engine (engine.c). */
-int media_engine_open(const char *path, const struct media_source *source, unsigned flags, media_wake_function wake, void *wake_context, struct media_engine **engine);
+int media_engine_open(const char *path, const struct media_source *source, unsigned flags, const struct media_threads *threads, media_wake_function wake, void *wake_context, struct media_engine **engine);
 void media_engine_status(struct media_engine *engine, struct media_status *status);
 void media_engine_play(struct media_engine *engine);
 void media_engine_pause(struct media_engine *engine);
