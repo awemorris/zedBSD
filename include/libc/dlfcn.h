@@ -17,6 +17,12 @@ extern "C" {
 #define RTLD_LOCAL  0x0000
 #define RTLD_GLOBAL 0x0100
 
+/*
+ * An extension beyond POSIX, with the value FreeBSD and glibc give it: the
+ * object stays mapped after its last dlclose(), until the process ends.
+ */
+#define RTLD_NODELETE 0x1000
+
 typedef struct dl_info {
 	const char *dli_fname;
 	void *dli_fbase;

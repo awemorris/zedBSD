@@ -171,6 +171,12 @@ struct rtld_object {
 	uintptr_t tls_module_id;
 	unsigned active;
 	unsigned unloading;
+	/*
+	 * Keeps the object mapped until the process ends: one loaded at
+	 * startup, one whose DT_FLAGS_1 holds DF_1_NODELETE, or one opened
+	 * with RTLD_NODELETE.  dlclose() leaves it, so the dependencies it
+	 * counts stay too, and its destructors run only at process exit.
+	 */
 	unsigned permanent;
 	unsigned direct_refs;
 	unsigned dependency_refs;
@@ -1206,7 +1212,8 @@ __rtld_dlopen(
 	clear_loader_error();
 
 	/* Checks the active flags. */
-	if ((flags & ~(RTLD_LAZY | RTLD_NOW | RTLD_GLOBAL)) != 0 ||
+	if ((flags & ~(RTLD_LAZY | RTLD_NOW | RTLD_GLOBAL |
+		       RTLD_NODELETE)) != 0 ||
 	    ((flags & (RTLD_LAZY | RTLD_NOW)) != RTLD_LAZY &&
 	     (flags & (RTLD_LAZY | RTLD_NOW)) != RTLD_NOW)) {
 		set_loader_error("invalid dlopen flags");
@@ -1311,6 +1318,15 @@ __rtld_dlopen(
 	initialize_object(object);
 	loader_lock();
 loaded:
+
+	/*
+	 * RTLD_NODELETE keeps the object, new or already loaded, past its last
+	 * dlclose() as DF_1_NODELETE does.
+	 */
+	if ((flags & RTLD_NODELETE) != 0)
+		object->permanent = 1;
+
+	/* Gives the caller a handle on the object. */
 	handle = allocate_handle(object, 0);
 
 	/* Handles the handle availability. */
@@ -3880,6 +3896,15 @@ parse_dynamic(
 			break;
 		case DT_RUNPATH:
 			runpath_offset = (uintptr_t)dynamic->d_un.d_val;
+			break;
+		case DT_FLAGS_1:
+			/*
+			 * An object linked with -z nodelete may leave code that
+			 * runs after its last dlclose(): a destructor of a thread's
+			 * data, or one registered with atexit().
+			 */
+			if (((uint32_t)dynamic->d_un.d_val & DF_1_NODELETE) != 0)
+				object->permanent = 1;
 			break;
 		case DT_TEXTREL:
 			rtld_fatal("unsupported dynamic feature");
