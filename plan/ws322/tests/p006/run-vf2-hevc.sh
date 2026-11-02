@@ -3,8 +3,10 @@
 # kernel (plan/ws322/tests/config-vf2-video-test.mk: the Wave511 as the render node's video engine, /dev/wave5-test)
 # booted, then on that boot:
 #   L   vkvideo-probe --list (the family's codec operations and the video extensions)
-#   H   vkvideo-probe --expect on every stream of HEVC (make-hevc.sh), each run's whole output kept (OUT/h/<name>.txt),
-#       with the engine's counts (/dev/wave5-test) and the kernel lines the run added
+#   H   vkvideo-probe --expect on every stream of HEVC (make-hevc.sh's directory, or any directory of <name>.h265 or
+#       <name>.h264 streams with their <name>.sha256), each run's whole output kept (OUT/h/<name>.txt), with the
+#       engine's counts (/dev/wave5-test) and the kernel lines the run added
+#   M   media-probe --video-hash on every <name>.mp4 of HEVC (the hashes kept in OUT/h/<name>.hash)
 #   G   vkcompute (the GPU still computes after the decodes)
 # At the end the files put on the board are removed, the board's own kernel goes back (plan/tools/vf2/run.sh) and the
 # board's files are checked by their cksum.  Everything else the board gets is under /tmp.  The password comes from
@@ -36,7 +38,12 @@ old=q1825orig
 kernel=$build/vmunix
 H=/tmp/p6
 F=/lib/firmware/wave511
-names=${NAMES:-$(cut -f1 "$hevc/list.txt")}
+if [ -f "$hevc/list.txt" ]; then
+	names=${NAMES:-$(cut -f1 "$hevc/list.txt")}
+else
+	names=${NAMES:-$(cd "$hevc" && ls *.h265 *.h264 2> /dev/null | sed 's/\.h26[45]$//')}
+fi
+clips=$(cd "$hevc" && ls *.mp4 2> /dev/null)
 
 say "start $(date +%H:%M) kernel $(cksum < "$kernel")"
 say "board before $(b "cksum /boot/boot0/vmunix /boot/boot0/vmunix.$old /etc/group /boot/boot0/zedbsd.cfg; df -k / /tmp; ls $F" 2>&1 | tr '\n' ' ')"
@@ -57,11 +64,14 @@ sync
 timeout 900 sh plan/tools/vf2/run.sh "$kernel" "$out/boot" > "$out/boot.txt" 2>&1
 say "boot $(tail -3 "$out/boot.txt" | tr '\n' ' ')"
 b "mkdir -p $H/bin $H/lib $H/hevc $H/h"
-bcp "$build/bin/vkvideo-probe" "$build/bin/vkcompute" "$VF2_HOST:$H/bin/" &&
+bcp "$build/bin/vkvideo-probe" "$build/bin/vkcompute" "$build/bin/media-probe" "$VF2_HOST:$H/bin/" &&
 	bcp "$build"/dynamic/*.so "$VF2_HOST:$H/lib/" ||
 	say "FAIL the programs were not copied"
 for n in $names; do
-	bcp "$hevc/$n.h265" "$hevc/$n.sha256" "$VF2_HOST:$H/hevc/" > /dev/null || say "FAIL $n was not copied"
+	bcp "$hevc/$n".h26? "$hevc/$n.sha256" "$VF2_HOST:$H/hevc/" > /dev/null || say "FAIL $n was not copied"
+done
+for c in $clips; do
+	bcp "$hevc/$c" "$VF2_HOST:$H/hevc/" > /dev/null || say "FAIL $c was not copied"
 done
 
 # 2. The checks on the board.
@@ -79,12 +89,21 @@ dmesg | grep -E 'vf2-vpu|wave5' | head -4 | sed 's/^/S0 /'
 $P --list 2>&1 | sed 's/^/L /'
 for n in $(cat $H/names.txt); do
 	s=$H/hevc/$n.h265
+	[ -f "$s" ] || s=$H/hevc/$n.h264
 	[ -f "$s" ] || continue
 	mark
 	timeout 900 $P --time --expect=$H/hevc/$n.sha256 $s > $H/h/$n.txt 2>&1
 	e=$?
 	echo "H $n exit=$e reference=$(wc -l < $H/hevc/$n.sha256) $(grep -c MISMATCH $H/h/$n.txt) mismatches $(grep -c ' status ' $H/h/$n.txt) failed | $(grep -vE 'MISMATCH| match$| status |capabilities|session |parameters ' $H/h/$n.txt | tail -3 | tr '\n' ' ')"
 	T "H-$n" | grep -v ' errors 0 '; seen "H-$n" 4
+done
+for c in $H/hevc/*.mp4; do
+	[ -f "$c" ] || continue
+	n=$(basename $c .mp4)
+	mark
+	timeout 900 $H/bin/media-probe --video-hash $c > $H/h/$n.hash 2> $H/h/$n.err
+	echo "M $n exit=$? $(grep -c . $H/h/$n.hash) hashes | $(grep -E 'backend|frames=' $H/h/$n.err | tr '\n' ' ')"
+	T "M-$n" | grep -v ' errors 0 '; seen "M-$n" 4
 done
 mark
 timeout 120 $H/bin/vkcompute > $H/g.txt 2>&1
@@ -95,7 +114,7 @@ BOARD
 bcp "$out/board.sh" "$VF2_HOST:$H/check.sh" || say "FAIL the board's script was not copied"
 printf '%s\n' "$VF2_PASSWORD" | BT=7000 b "sudo -S sh $H/check.sh" > "$out/board.txt" 2>&1
 sed 's/^\[sudo\][^:]*: //' "$out/board.txt" | tee -a "$summary"
-bcp "$VF2_HOST:$H/h/*.txt" "$out/h/" > /dev/null 2>&1
+bcp "$VF2_HOST:$H/h/*" "$out/h/" > /dev/null 2>&1
 bcp "$VF2_HOST:$H/dmesg-end.txt" "$out/" > /dev/null 2>&1
 say "H every frame: $(grep -c '^H .* exit=0 ' "$out/board.txt"), refused: $(grep -c '^H .* exit=6 ' "$out/board.txt"), other: $(grep '^H .* exit=' "$out/board.txt" | grep -vc ' exit=[06] '), of $(grep -c '^H .* exit=' "$out/board.txt")"
 
