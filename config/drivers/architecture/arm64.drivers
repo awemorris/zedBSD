@@ -12,6 +12,7 @@ CONFIG_DRIVER_BCM2711_VIDEO|bool|BCM2711 H.264 decode as Vulkan Video (needs VCH
 -|fixed|BCM2712 SD/eMMC controller, PL011 console and Raspberry Pi 5 platform devices|rpi5|y|
 -|fixed|RP1 south bridge: USB, onboard Ethernet and PCIe|rpi5|y|
 CONFIG_DRIVER_BCM2712_GPU|bool|BCM2712 GPU: Raspberry Pi 5 display and V3D 7.1 Vulkan (experimental)|rpi5|y|
+CONFIG_DRIVER_BCM2712_VIDEO|bool|BCM2712 HEVC decoder: Raspberry Pi 5 Vulkan Video H.265 decode (needs the BCM2712 GPU)|rpi5|y|
 CONFIG_DRIVER_RPI5_FAN|bool|Raspberry Pi 5 fan connector: follows the processor temperature|rpi5|y|
 CONFIG_DRIVER_RPI5_BT|bool|Raspberry Pi 5 onboard Bluetooth (experimental)|rpi5|n|
 -|fixed|Amlogic debug UART console, GIC, timer and PSCI (S905X5M)|odroid-c5|y|

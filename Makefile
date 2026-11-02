@@ -465,8 +465,8 @@ CONFIG_DRIVER_RPI5_FAN ?= y
 CONFIG_DRIVER_BCM2712_GPU ?= $(if $(filter rpi5,$(ZEDBSD_PLATFORM)),y,n)
 
 # The Raspberry Pi 5's HEVC decoder as Vulkan Video H.265 decode on the
-# V3D 7.1 device: off by default; it needs the BCM2712 GPU.
-CONFIG_DRIVER_BCM2712_VIDEO ?= n
+# V3D 7.1 device: on by default on the Pi 5; it needs the BCM2712 GPU.
+CONFIG_DRIVER_BCM2712_VIDEO ?= $(if $(filter rpi5,$(ZEDBSD_PLATFORM)),y,n)
 ifneq ($(ZEDBSD_BOARD)$(CONFIG_DRIVER_BCM2712_GPU),rpi5y)
 override CONFIG_DRIVER_BCM2712_VIDEO := n
 endif
