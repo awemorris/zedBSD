@@ -1213,16 +1213,14 @@ session_requirements(
 	}
 	video = object->payload;
 
-	/* The bindings, as many as the capacity holds (VK_INCOMPLETE when fewer). */
+	/* The bindings, as many as the capacity holds. */
 	count = video->pictures;
 	if (present != 0U && capacity < count)
 		count = capacity;
 	drv_i915_wire_reply_u32(reply, 0U);
-	if (count < video->pictures)
-		drv_i915_wire_reply_u32(reply, (uint32_t)VK_INCOMPLETE);
 	drv_i915_wire_reply_u64(reply, 1U);
 	drv_i915_wire_reply_u32(reply, count);
-	drv_i915_wire_reply_u64(reply, 1U);
+	drv_i915_wire_reply_u64(reply, count);
 	for (index = 0; index < count; index++) {
 		drv_i915_wire_reply_u32(reply, VIDEO_TYPE_MEMORY_REQUIREMENTS);
 		drv_i915_wire_reply_u64(reply, 0U);
