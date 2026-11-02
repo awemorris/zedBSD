@@ -2,7 +2,7 @@
 
 # ws344-p010 VP8 の表（vp8-tables.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet、2026-11-02。cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p001。
 - 目的: tree・確率・係数の既定と更新・band・zigzag・category・量子化の表を RFC から入れる。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -66,4 +66,31 @@ git diff --check
 
 ## 結果
 
-（未着手）
+日付: 2026-11-02（host の `date`）。担当: Sonnet（q1949-i01）。
+
+作った物: `userland/desktop/libwebp-compat/vp8-tables.c`（全部の表）、`plan/ws344/tests/unit/test-vp8_tables.c`。
+
+実行した command と最後の行:
+
+- `sh plan/ws344/tests/run-unit.sh vp8_tables` → `test-vp8_tables: PASS (37674 checks)` / `run-unit: PASS`。
+- `sh plan/ws344/tests/run-unit.sh all` → test-bool 8376、test-common 32、test-helpers 26、test-vp8_tables 37674 checks、`run-unit: PASS`。
+- `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+- `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`。
+- `git diff --check` → 出力なし。
+
+表の入れ方: 大きい表（kf_bmode_prob 900、coeff_default・coeff_update 各 1056、dc_q・ac_q 各 128）は RFC の text の該当の行を sed・awk で切り出して字下げだけ整え（python の extract とは別の経路）、小さい表（tree・確率・bands・zigzag・cat）は RFC の text を目で見て手で書いた。表の数（900・1056・1056・128・128）は件数で確かめた。
+
+試験の中身: 全表を `rfc_*`（extractor の出力）と全要素で比較、cat_probs と rfc_pcat1〜6、coeff_bands の 17 番目が 0、tree の形（葉が値を 1 回ずつ、内部の entry が偶数で前向き、各 pair の親が 1 つ）、各 tree の全ての道の符号長を手の計算（pair から読んだ長さ）と比べ、Kraft の和が 1、手で作った bit 列の読み、乱数の bit 列 2000 本、確率が 1〜255、zigzag が置換、cat_base が 5・7・11・19・35・67 かつ extra bit の数 1・2・3・4・5・11 から導いた値と一致、dc_q・ac_q の範囲と順序、RFC の text から目で読んだ数値（kf_bmode_prob・default・update・量子化）。
+
+mutation（git の外の複写 `build/tmp/p010-mut/m00`〜`m22`、23 通り: tree の葉・符号、各確率表の 1 値（先頭・末尾・中間）、bands の 17 番目と中間、zigzag の入れ替え、cat_probs の値・terminator、cat_base、dc_q・ac_q の端・中間）: 23 通りとも FAIL（survivor 0）。元の file は複写で変えていない。
+
+自分で決めた点・仕様との食い違い:
+
+- RFC 6386 §11.2 の bmode_tree の comment は B_LD_PRED を "111110"、B_VL_PRED を "1111110"、B_HD_PRED を "11111110"、B_HU_PRED を "11111111" と書くが、tree の pair からは "11110"・"111110"・"1111110"・"1111111"（1 bit 短い）。tree の entry が正しい（§20 の参照 decoder の b_mode_tree は同じ entry）。試験は pair から読んだ長さで確かめた。
+- dc_q は RFC の表のまま同値が続く所がある（10, 10 など）ので「単調増加」でなく非減少（ac_q は厳密に増加）で確かめた。最大の刻みは dc 4、ac 6（239→245）。
+- tree の葉は macro でなく数の直書き（macro は unsigned で int8_t への代入が符号の警告になるため）。各行の comment に名前を書いた。
+- tree の entry 0 の葉（B_DC_PRED・DC_PRED・DCT_0・segment 0）は 0（`t[i] > 0` なら pair、そうでなければ葉）。coeff_tree は RFC の通り entry 0 が -11（dct_eob）、entry 2 が 0（DCT_0）。
+- phase.md の「各 tree の葉の値」の記述と header の comment は矛盾なし。header の不足は無かった。
+
+未実施: QEMU・実機（この Phase の範囲外）、fixture の全体の試験（後続の Phase）。
+
