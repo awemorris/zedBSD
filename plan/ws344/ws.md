@@ -32,7 +32,7 @@
 | ws344-p010 | VP8 の表（vp8-tables.c、RFC の text と照合） | cleared（2026-11-02 13:37 Q1、main で test-vp8_tables 37674 PASS）。実装済み・試験 PASS（Sonnet q1949-i01、2026-11-02。cleared は Q1） | p001 |
 | ws344-p011 | VP8 の frame header（vp8-header.c） | cleared（2026-11-02 13:55 Q1、main で test-vp8_header 45344 PASS）。実装済み・試験 PASS（Sonnet q1951-i01、2026-11-02。cleared は Q1） | p009, p010 |
 | ws344-p012 | VP8 の macroblock header（vp8-modes.c） | cleared（2026-11-02 13:46 Q1、main で test-vp8_modes 627570 PASS）。実装済み・試験 PASS（Sonnet q1952-i01、2026-11-02。cleared は Q1） | p009, p010 |
-| ws344-p013 | VP8 の係数（vp8-tokens.c） | in-progress（2026-11-02 13:46 Sonnet q1954-i01） | p009, p010 |
+| ws344-p013 | VP8 の係数（vp8-tokens.c） | 実装済み・試験 PASS（Sonnet 担当、2026-11-02） | p009, p010 |
 | ws344-p014 | VP8 の逆変換（vp8-idct.c） | planned | p001 |
 | ws344-p015 | VP8 の intra 予測（vp8-predict.c） | planned | p001 |
 | ws344-p016 | VP8 の loop filter（vp8-filter.c） | planned | p001 |

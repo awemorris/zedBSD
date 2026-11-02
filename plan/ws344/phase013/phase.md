@@ -2,7 +2,7 @@
 
 # ws344-p013 VP8 の係数（vp8-tokens.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet 担当、2026-11-02。cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p009, p010（vp8-header.h の struct だけを使う。test が struct を手で埋める、coeff_probs は既定の表から）。
 - 目的: macroblock の token を context で読み、逆量子化する。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -69,4 +69,34 @@ git diff --check
 
 ## 結果
 
-（未着手）
+日付: 2026-11-02（host の `date`）。担当: Sonnet 5.5（q1954-i01）。commit: `eaeaaa1168`（vp8-tokens.c、test-vp8_tokens.c。この結果の節と ws.md の行は別の commit）。
+
+実行した command と最後の行:
+
+- `sh plan/ws344/tests/run-unit.sh vp8_tokens` → `test-vp8_tokens: PASS (336179 checks)`、`run-unit: PASS`。
+- `sh plan/ws344/tests/run-unit.sh all` → 9 test 全部 PASS、最後 `run-unit: PASS`。
+- `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+- `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`。
+- `git diff --check` → 出力なし。
+
+試験の内容（`plan/ws344/tests/unit/test-vp8_tokens.c`）: test の側に §13.2 の木・extra bit の確率・band・zigzag・context の index を書き（library の表を使わない）、boolwriter で block を組む。
+各 token（DCT_0〜4、CAT1〜6 の最小・最大、1〜2114 の全ての大きさを 2 つの位置で）、符号、EOB、DCT_0 の後の EOB の枝の省略、位置 15 の後に EOB 無し、0 だけで 16 まで進む block、
+has_y2 の type（Y2=1・Y=0 が位置 1 から・Y=3・chroma=2）、逆量子化（plane ごとの DC・AC、wrap（手で 2114×440 → 12656）、factor が 32 bit の端の値）、
+context（random の初期値、3x2 の macroblock の連鎖、skip の macroblock との混在）、skip_residue、0 でも 1 でもない context の entry、空・途中で切れた・乱数の partition。
+
+mutation（実装の複写を git の外 `build/tmp/p013-mut/` で壊し、単体試験が FAIL することを確かめた。実装は元のまま、`git status` clean）:
+26 通りを試し、23 が killed、3 が生き残り。生き残りは全て等価な変更: m14（`(int32_t)product` をそのまま 16 bit へ cast する形。wrap の結果が同じ）、
+m21c（`offset == 2046` での break は最後の bit の後でしか起きない）、m26（`offset & 2047` は offset が 11 bit なので同じ）。
+等価でない版（m14b: 飽和、m14c: 既知の値の変更、m21b: CAT6 の extra bit を 1 つ省く）は killed。
+killed の例: DC・AC factor の入れ替え、no-EOB の枝の廃止、context の閾値・zero の後の context、符号の逆、U の left の割り算・V の above の剰余、Y2 後の type・先頭位置、
+extra bit の順、category の base、最後の位置、skip の Y2 の条件、wrap、context の合計、bit 31、band の添字、coded の bit、entry の更新、skip の index。
+
+自分で決めた点:
+
+- header が黙っている物: left・above の entry が 0 でも 1 でもない時は「0 でなければ 1」として context を作る（和を 0〜2 に保ち、probs の添字が表の外に出ない）。書き戻す値は 0 か 1。
+- 逆量子化の積は int64_t で作り、`% 65536` で 32 bit に収めてから `webpc_wrap16`（factor は caller の値で、悪意のある値でも未定義の動作を起こさない）。
+- `coded` の bit b は header の定義どおり context の値 t（「最初の位置より進んだか」）。RFC 6386 20.16 の `eob_mask |= (c > 1) << i` とは type 0 以外の block で違う（位置 0 だけの block）が、header と phase.md が t を指定しているので t にした。
+- 位置 15 の DCT_0 の後は block を終える（20.16 と同じ。t は 1）。
+- token の読みは `webpc_bool_tree` を coeff_tree で呼ぶ（DCT_0 の後は node 2 から）。
+
+未実施: QEMU・実機・fixture の全体の試験（この Phase の範囲外）。仕様・header との食い違い: 無し（上の `coded` の注意だけ）。
