@@ -431,8 +431,12 @@ test_staircase(void)
 			CHECK(code.root_bits == longest);
 			CHECK(pool.count == (size_t)1 << longest);
 		} else {
+			/*
+			 * Only the entry of the all-ones prefix has a second level, as
+			 * wide as the bits past the first level (longest - 8).
+			 */
 			CHECK(code.root_bits == 8U);
-			CHECK(pool.count > 256U);
+			CHECK(pool.count == 256U + ((size_t)1 << (longest - 8U)));
 		}
 		webpc_prefix_pool_release(&pool);
 

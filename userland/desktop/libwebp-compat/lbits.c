@@ -56,6 +56,10 @@ webpc_lbits_read(
 	lbits_refill(reader, bits);
 
 	/*
+	 * Procedure referenced: RFC 9649 3.2 (ReadBits: the bits of each byte
+	 * from the least significant, the first bit read being bit 0 of the
+	 * result).
+	 *
 	 * Takes the low bits bits.  The value holds zeros above its count, so a
 	 * bit past the end of the data reads as 0.
 	 */

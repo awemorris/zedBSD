@@ -154,6 +154,11 @@ webpc_prefix_build(
 		return EINVAL;
 
 	/*
+	 * Procedure referenced: RFC 1951 (DEFLATE Compressed Data Format
+	 * Specification version 1.3) 3.2.2, steps 1 to 3 (the count of codes of
+	 * each length, the smallest code of each length, the assignment in the
+	 * order of the symbols).
+	 *
 	 * Finds the first code of each length: the first code of a length is
 	 * the end of the codes of the length before it, shifted up one bit (no
 	 * length 0 symbol was counted, so length_count[0] is 0).

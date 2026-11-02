@@ -2,7 +2,7 @@
 
 # ws344-p003 VP8L の bit reader と prefix code（lbits.c・prefix.c）
 
-- Status: planned
+- Status: 実装済み・試験 PASS（Sonnet 5.5、2026-11-02。cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Sonnet 5.5 high（phase-runner-low）。依存: p001。
 - 目的: LSB-first の bit の読みと、正準の prefix code の 2 段の lookup table（pool）と symbol の読み。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -67,4 +67,35 @@ git diff --check
 
 ## 結果
 
-（未着手）
+日付: 2026-11-02（host の date）。担当: Sonnet 5.5（q1947-i01）。
+
+実行と最後の行（worktree `/home/awe/zedBSD-worktrees/s-ws344-p003`）:
+
+- `sh plan/ws344/tests/run-unit.sh all` → test-common PASS (32 checks)、test-helpers PASS (26 checks)、test-lbits PASS (205384 checks)、test-prefix PASS (1430293 checks)、`run-unit: PASS`（ASan・UBSan）。
+- `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+- `sh plan/ws344/tests/target-build.sh` → `target-build: PASS (build/amd64/dynamic/libwebp-compat.so, 0 warnings)`。
+- `git diff --check` → 出力なし。
+
+作った物: `lbits.c`、`prefix.c`、`unit/test-lbits.c`、`unit/test-prefix.c`。header・道具・他 module は変えていない。
+
+試験の中身: lbits は手計算の列、0 bit・size 0・NULL、data の終わりちょうどと 1 bit 越え、peek が消費も consumed_end も立てないこと、skip、lbitwriter の乱数の列（幅 0〜24、read だけの列と read・peek・skip の混在、各 300 列）。
+prefix は RFC 1951 3.2.2 の例（A=010 … H=1111）、1 symbol の code（長さ 1〜15、alphabet 2328 の先頭・中・末、0 bit で読む、pool 不変）、EINVAL の各種（不完全・over-subscribed・symbol 0 個・長さ 16・255・count 0・2329、pool の count 不変）、
+階段の code（最長 2〜15、table の大きさ 256 + 2^(最長-8) を確認）、等長の code（2^1〜2^11 の symbol）、pool の limit（ちょうど・1 足りない・0・ENOMEM の後に小さい code）、realloc で動いた後も古い code が読めること、data の終わりを越えた read、乱数 byte の読み（常に present な symbol）、
+alphabet 2328 を含む Huffman の完全な code 100 個（長さ 15 で切って Kraft の和を保つ手順の物を含む。test が切った数と 8 bit を越えた数を確認）の全 symbol と乱数列の往復（各 symbol の後に 5 bit の marker を置き、code が bit をちょうど使ったことを確認）。Kraft の和 = 1 は test の側で確認。
+
+わざと壊す確かめ（git の外の複写、`cmp` で元に戻ったことを確認）: 最初の回は 25 通りで 18 が FAIL（検出）、7 が残った。残りの 5 は等価な変更:
+(1) lbits の取り込みの `count < bits` を `<=` にする（余分に 1 byte 先に取り込むだけで結果が変わらない）、(2) 取り込みの shift に `& 31` を足す（その時点で count は 24 未満）、(3) 1 symbol の code の symbol を「最後に見た present」から「最初」に変える（present が 1 つの時だけ使うので同じ）、(4) symbol 0 個の検査を外す（Kraft の検査が和 0 で同じ EINVAL を返す冗長な検査）、
+(5) pool の capacity を 1 小さく申告する（保守的になるだけで誤りにならない）。
+残る 2 つ（2 段目の table を 1 bit 余分に取る、第 1 level の幅の上限を 7 にする）は実際の見逃しで、table の大きさをちょうどで確認する検査を足して塞いだ。足した後に、この 2 つと新しい 2 つ（優先順位を変えた +1、上限を外す）を再実行し、4 つとも FAIL。
+
+自分で決めた点（header が黙っている所）:
+- count が 0 または 2328 を超える時は EINVAL。
+- 1 symbol の code は table を作らず pool を変えない（offset は 0）。
+- 長さ 0 の symbol は code を持たない。第 1 level の幅は `min(最長の長さ, 8)`（最長が 8 以下なら 2^最長 の entry、2 段目なし）。2 段目の table は、その root の entry の下の最長の符号の長さで幅を決め、root の後ろに root の index の順に並べる。link entry の value は code の先頭からの offset（最大 256 + 256×128 で uint16 に収まる）。
+- pool の容量は初回 1024 entry、以後 2 倍（limit で頭打ち、必要量は常に確保）。limit 超過は table の大きさを先に求めて pool に触る前に ENOMEM（count は動かない。realloc に失敗した時も pool は元のまま）。
+- `webpc_prefix_read` は pool の中身を信用する（build が作った code だけを渡す前提）。peek した値は root の幅の中に収まるので table の外は読まない。
+- `webpc_lbits_peek` は reader を変える（byte の取り込み）が、消費・consumed_end は変えない。value は count より上が常に 0 で、data の終わりを越えた bit は 0 と読まれる。
+
+仕様と phase.md・header の食い違い: なし。header の comment の誤り・不足: なし。
+
+未実施: fixtures（run-fixtures・compare）、mutate.sh、fuzz（decoder が揃っていないため範囲外）、QEMU・実機。
