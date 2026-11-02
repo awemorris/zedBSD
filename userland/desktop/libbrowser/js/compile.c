@@ -98,6 +98,10 @@ static void compile_target_pop(struct js_function_compiler *fc, struct js_target
 static void compile_for(struct js_function_compiler *fc, struct js_node *node);
 static void compile_for_in(struct js_function_compiler *fc, struct js_node *node);
 static void compile_for_of(struct js_function_compiler *fc, struct js_node *node);
+static void compile_for_await(struct js_function_compiler *fc, struct js_node *node);
+static void compile_await_value(struct js_function_compiler *fc, uint32_t value);
+static void compile_async_close(struct js_function_compiler *fc, uint32_t iterator, uint32_t sync, int quiet);
+static uint32_t compile_ascii_key(struct js_function_compiler *fc, const char *name);
 static void compile_while(struct js_function_compiler *fc, struct js_node *node);
 static void compile_do_while(struct js_function_compiler *fc, struct js_node *node);
 static void compile_jump_statement(struct js_function_compiler *fc, struct js_node *node);
@@ -1808,9 +1812,11 @@ compile_for_of(
 	uint32_t loud;
 	int lexical;
 
-	/* for await is an async iteration, which is not here yet. */
-	if ((node->flags & JS_FLAG_AWAIT) != 0U)
-		js_compile_unsupported(fc->compiler, node, "for await");
+	/* for await is an async iteration, with its own protocol. */
+	if ((node->flags & JS_FLAG_AWAIT) != 0U) {
+		compile_for_await(fc, node);
+		return;
+	}
 
 	/* The left side: a let's or const's name, a var's name, or a target. */
 	mark = fc->temp_top;
@@ -1901,6 +1907,240 @@ compile_for_of(
 	if (node->scope != NULL)
 		js_scope_leave(fc, saved_scope, saved_env);
 	fc->temp_top = mark;
+}
+
+/*
+ * Compiles for await (in an async function): the iterator's next result
+ * is awaited each round (a synchronous iterator's value is awaited
+ * instead), done ends the loop, and a way out of the body other than the
+ * end closes the iterator, awaiting its return (quietly for an exception,
+ * which keeps its own).  An exception from next or its await leaves the
+ * iterator as it is.
+ */
+static void
+compile_for_await(
+	struct js_function_compiler *fc,
+	struct js_node *node)
+{
+	struct js_finally *handler;
+	struct js_target *target;
+	struct js_node *left;
+	struct js_scope *saved_scope;
+	uint32_t saved_env;
+	uint32_t mark;
+	uint32_t iterable;
+	uint32_t iterator;
+	uint32_t sync;
+	uint32_t stepping;
+	uint32_t method;
+	uint32_t result;
+	uint32_t value;
+	uint32_t start;
+	uint32_t protected_end;
+	uint32_t landing;
+	uint32_t ended;
+	uint32_t loud;
+	uint32_t skip;
+	int lexical;
+
+	/* The left side: a let's or const's name, a var's name, or a target. */
+	mark = fc->temp_top;
+	left = node->first;
+	lexical = 0;
+	if (left->kind == JS_NODE_VARIABLES) {
+		if (left->op != JS_P_VAR)
+			lexical = 1;
+		left = left->first->first;
+	}
+
+	/* The iterator of the value (held for the whole loop), and whether a step is under way. */
+	iterator = js_temp(fc);
+	sync = js_temp(fc);
+	stepping = js_temp(fc);
+	method = js_temp(fc);
+	result = js_temp(fc);
+	value = js_temp(fc);
+	iterable = js_temp(fc);
+	js_compile_expression(fc, node->second, iterable);
+	js_emit3(fc, VM_OP_ASYNC_ITER_START, iterator, sync, iterable);
+
+	/* A let or const on the left has its scope around the body. */
+	saved_scope = fc->scope;
+	saved_env = fc->env_register;
+	if (node->scope != NULL)
+		js_scope_enter(fc, node->scope, &saved_scope, &saved_env);
+
+	/* The body is protected: its ways out go through the close, with a completion code as a finally block's. */
+	handler = wb_arena_zalloc(fc->compiler->arena, sizeof(*handler));
+	if (handler == NULL)
+		js_compile_out_of_memory(fc->compiler);
+	handler->outer = fc->finally;
+	handler->entry_label = js_label_new(fc);
+	handler->kind_register = js_temp(fc);
+	handler->value_register = js_temp(fc);
+	handler->next_code = JS_COMPLETION_JUMPS;
+	fc->finally = handler;
+	fc->finally_depth++;
+
+	/* The head: the next result, awaited, or out of the loop when it is done. */
+	ended = js_label_new(fc);
+	target = compile_target_push(fc, 1);
+	start = js_here(fc);
+	js_label_place(fc, target->continue_label);
+	js_emit0(fc, VM_OP_LOOP_HINT);
+	js_load_value(fc, stepping, VM_VALUE_TRUE);
+	js_emit3(fc, VM_OP_GET_PROP, method, iterator, compile_ascii_key(fc, "next"));
+	js_emit5(fc, VM_OP_CALL, result, method, iterator, fc->temp_top, 0);
+	skip = js_label_new(fc);
+	js_emit_jump(fc, VM_OP_JUMP_IF_TRUE, sync, skip);
+	compile_await_value(fc, result);
+	js_label_place(fc, skip);
+	js_emit1(fc, VM_OP_CHECK_OBJECT, result);
+	js_emit3(fc, VM_OP_GET_PROP, method, result, compile_ascii_key(fc, "done"));
+	js_emit_jump(fc, VM_OP_JUMP_IF_TRUE, method, ended);
+	js_emit3(fc, VM_OP_GET_PROP, value, result, compile_ascii_key(fc, "value"));
+	skip = js_label_new(fc);
+	js_emit_jump(fc, VM_OP_JUMP_IF_FALSE, sync, skip);
+	compile_await_value(fc, value);
+	js_label_place(fc, skip);
+	js_load_value(fc, stepping, VM_VALUE_FALSE);
+
+	/* Each run of the body has its own let or const binding: a new environment for it. */
+	if (node->scope != NULL && node->scope->has_env)
+		js_emit3(fc, VM_OP_NEW_ENV, node->scope->env_register, saved_env, node->scope->env_count);
+
+	/* The value to the left side, then the body, then the next value. */
+	if (lexical) {
+		js_bind_pattern(fc, left, value, JS_BIND_INIT);
+	} else {
+		js_store_target(fc, left, value);
+	}
+	compile_statement(fc, node->fourth);
+	js_emit_jump(fc, VM_OP_JUMP, 0, target->continue_label);
+	protected_end = js_here(fc);
+
+	/* The close is outside what it protects. */
+	fc->finally = handler->outer;
+	fc->finally_depth--;
+
+	/* break of this loop closes the iterator and leaves. */
+	compile_target_pop(fc, target);
+	compile_async_close(fc, iterator, sync, 0);
+	js_emit_jump(fc, VM_OP_JUMP, 0, ended);
+
+	/* An exception from the body (or from a step) arrives with its value, completing by a throw. */
+	landing = js_label_new(fc);
+	js_label_place(fc, landing);
+	js_emit_handler(fc, start, protected_end, landing, handler->value_register);
+	js_emit2(fc, VM_OP_LOAD_INT, handler->kind_register, JS_COMPLETION_THROW);
+
+	/* The close: none when a step failed, quiet for an exception, then where the completion goes. */
+	js_label_place(fc, handler->entry_label);
+	loud = js_label_new(fc);
+	compile_dispatch_case(fc, handler->kind_register, JS_COMPLETION_THROW, loud);
+	skip = js_label_new(fc);
+	js_emit_jump(fc, VM_OP_JUMP_IF_TRUE, stepping, skip);
+	compile_async_close(fc, iterator, sync, 1);
+	js_label_place(fc, skip);
+	js_emit1(fc, VM_OP_THROW, handler->value_register);
+	js_label_place(fc, loud);
+	compile_async_close(fc, iterator, sync, 0);
+	compile_finally_dispatch(fc, handler);
+
+	/* The loop's end, outside the left side's scope. */
+	js_label_place(fc, ended);
+	if (node->scope != NULL)
+		js_scope_leave(fc, saved_scope, saved_env);
+	fc->temp_top = mark;
+}
+
+/* Awaits the value in a register, leaving what it settled to there (a rejection is thrown). */
+static void
+compile_await_value(
+	struct js_function_compiler *fc,
+	uint32_t value)
+{
+	uint32_t mark;
+	uint32_t how;
+	uint32_t goes_on;
+
+	/* The suspension, then a throw for a rejection. */
+	mark = fc->temp_top;
+	how = js_temp(fc);
+	js_emit3(fc, VM_OP_SUSPEND, value, value, how);
+	goes_on = js_label_new(fc);
+	js_emit_jump(fc, VM_OP_JUMP_IF_FALSE, how, goes_on);
+	js_emit1(fc, VM_OP_THROW, value);
+	js_label_place(fc, goes_on);
+	fc->temp_top = mark;
+}
+
+/*
+ * Closes a for await's iterator (AsyncIteratorClose): its return method,
+ * when it has one, is called and its result awaited (a synchronous
+ * iterator's is not), and must be an object.  Quietly, anything that
+ * fails is dropped, since the exception leaving the loop wins.
+ */
+static void
+compile_async_close(
+	struct js_function_compiler *fc,
+	uint32_t iterator,
+	uint32_t sync,
+	int quiet)
+{
+	uint32_t mark;
+	uint32_t method;
+	uint32_t result;
+	uint32_t test;
+	uint32_t caught;
+	uint32_t start;
+	uint32_t end;
+	uint32_t skip;
+	uint32_t no_await;
+
+	/* The return method; without one there is nothing to close. */
+	mark = fc->temp_top;
+	method = js_temp(fc);
+	result = js_temp(fc);
+	test = js_temp(fc);
+	caught = js_temp(fc);
+	skip = js_label_new(fc);
+	start = js_here(fc);
+	js_emit3(fc, VM_OP_GET_PROP, method, iterator, compile_ascii_key(fc, "return"));
+	js_load_value(fc, test, VM_VALUE_NULL);
+	js_emit3(fc, VM_OP_LOOSE_EQ, test, method, test);
+	js_emit_jump(fc, VM_OP_JUMP_IF_TRUE, test, skip);
+
+	/* Its call, then its result awaited. */
+	js_emit5(fc, VM_OP_CALL, result, method, iterator, fc->temp_top, 0);
+	no_await = js_label_new(fc);
+	js_emit_jump(fc, VM_OP_JUMP_IF_TRUE, sync, no_await);
+	compile_await_value(fc, result);
+	js_label_place(fc, no_await);
+	if (!quiet)
+		js_emit1(fc, VM_OP_CHECK_OBJECT, result);
+	end = js_here(fc);
+
+	/* Quietly, an exception on the way lands where the close ends. */
+	if (quiet)
+		js_emit_handler(fc, start, end, skip, caught);
+	js_label_place(fc, skip);
+	fc->temp_top = mark;
+}
+
+/* Adds the property key of an ASCII name as a constant; reports its number. */
+static uint32_t
+compile_ascii_key(
+	struct js_function_compiler *fc,
+	const char *name)
+{
+	uint16_t units[16];
+	size_t length;
+
+	/* The name in UTF-16 (the names used are short). */
+	for (length = 0; name[length] != '\0' && length < sizeof(units) / sizeof(units[0]); length++)
+		units[length] = (uint16_t)(unsigned char)name[length];
+	return js_constant_key(fc, units, length);
 }
 
 /* Compiles a while statement. */

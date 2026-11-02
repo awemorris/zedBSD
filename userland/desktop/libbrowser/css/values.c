@@ -196,6 +196,7 @@ static const struct values_name values_names[] = {
 	{ "white-space", CSS_PROP_WHITE_SPACE },
 	{ "text-transform", CSS_PROP_TEXT_TRANSFORM },
 	{ "cursor", CSS_PROP_CURSOR },
+	{ "pointer-events", CSS_PROP_POINTER_EVENTS },
 	{ "text-decoration-line", CSS_PROP_TEXT_DECORATION_LINE },
 	{ "text-decoration-style", CSS_PROP_TEXT_DECORATION_STYLE },
 	{ "text-decoration-skip-ink", CSS_PROP_TEXT_DECORATION_SKIP_INK },
@@ -653,6 +654,22 @@ static const struct values_keyword values_visibility[] = {
 	{ "visible", 0 },
 	{ "hidden", 1 },
 	{ "collapse", 1 },
+	{ NULL, 0 }
+};
+
+/* The keywords of pointer-events (the SVG values target the box like auto, since only boxes are hit). */
+static const struct values_keyword values_pointer_events[] = {
+	{ "auto", 0 },
+	{ "none", 1 },
+	{ "visiblepainted", 0 },
+	{ "visiblefill", 0 },
+	{ "visiblestroke", 0 },
+	{ "visible", 0 },
+	{ "painted", 0 },
+	{ "fill", 0 },
+	{ "stroke", 0 },
+	{ "all", 0 },
+	{ "bounding-box", 0 },
 	{ NULL, 0 }
 };
 
@@ -3073,6 +3090,9 @@ values_single(
 		break;
 	case CSS_PROP_CURSOR:
 		table = values_cursor;
+		break;
+	case CSS_PROP_POINTER_EVENTS:
+		table = values_pointer_events;
 		break;
 	case CSS_PROP_TEXT_TRANSFORM:
 		/* Use the exact four native computed transform keywords. */

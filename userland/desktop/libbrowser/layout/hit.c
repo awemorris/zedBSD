@@ -13,7 +13,9 @@
  * deepest block around it.  The positioned boxes are searched first, the
  * one painted last first (layout_stacking_order), then the normal flow,
  * then the positioned boxes painted below it.  An inline block is searched
- * like a float among its line's content.
+ * like a float among its line's content.  A box with pointer-events: none
+ * or visibility: hidden is never the one hit (what is under it is), though
+ * its descendants may be.
  */
 
 #include "layout/layout.h"
@@ -32,6 +34,7 @@ static const struct layout_box *hit_in(const struct layout_box *box, layout_unit
 static const struct layout_box *hit_inline_floats(const struct layout_box *box, layout_unit x, layout_unit y, int depth);
 static const struct layout_box *hit_inline_blocks(const struct layout_box *box, layout_unit x, layout_unit y, int depth);
 static const struct layout_box *hit_ordered(const struct layout_tree *tree, layout_unit x, layout_unit y, int what);
+static int hit_target(const struct layout_box *box);
 
 /*
  * Finds the box of the text under a point in document coordinates (layout
@@ -164,8 +167,8 @@ hit_lines(
 		for (item = 0; item < line->fragment_count; item++) {
 			fragment = &line->fragments[item];
 
-			/* Atomic content has a separately tested box. */
-			if (fragment->box->atomic)
+			/* Atomic content has a separately tested box; text the pointer passes through is not hit. */
+			if (fragment->box->atomic || !hit_target(fragment->box))
 				continue;
 
 			/* The run's logical advance maps to the physical y or x axis. */
@@ -224,6 +227,8 @@ hit_block(
 		found = hit_items(box, x, y, depth, 0);
 		if (found != NULL)
 			return found;
+		if (!hit_target(box))
+			return NULL;
 		return box;
 	}
 
@@ -241,7 +246,9 @@ hit_block(
 			return found;
 	}
 
-	/* The block itself. */
+	/* The block itself, unless the pointer passes through it. */
+	if (!hit_target(box))
+		return NULL;
 	return box;
 }
 
@@ -292,8 +299,8 @@ hit_items(
 		if (found != NULL)
 			return found;
 
-		/* An item over the point without text of its own covers the ones under it. */
-		if (text && x >= best->x && x < best->x + best->border[CSS_LEFT] + best->padding[CSS_LEFT] + best->width + best->padding[CSS_RIGHT] + best->border[CSS_RIGHT] &&
+		/* An item over the point without text of its own covers the ones under it (one the pointer passes through does not). */
+		if (text && hit_target(best) && x >= best->x && x < best->x + best->border[CSS_LEFT] + best->padding[CSS_LEFT] + best->width + best->padding[CSS_RIGHT] + best->border[CSS_RIGHT] &&
 		    y >= best->y && y < best->y + best->border[CSS_TOP] + best->padding[CSS_TOP] + best->height + best->padding[CSS_BOTTOM] + best->border[CSS_BOTTOM])
 			return NULL;
 		limit_set = 1;
@@ -453,4 +460,12 @@ hit_inline_floats(
 
 	/* No float has text under the point. */
 	return NULL;
+}
+
+/* Tells whether a box can be the target of the pointer: not pointer-events: none, not visibility: hidden. */
+static int
+hit_target(
+	const struct layout_box *box)
+{
+	return box->style.pointer_events == 0 && box->style.visibility == 0;
 }

@@ -1238,6 +1238,7 @@ cascade_compute(
 		style->white_space = parent->white_space;
 		style->text_transform = parent->text_transform;
 		style->cursor = parent->cursor;
+		style->pointer_events = parent->pointer_events;
 		style->visibility = parent->visibility;
 		style->list_style = parent->list_style;
 		style->list_style_inside = parent->list_style_inside;
@@ -4983,6 +4984,7 @@ cascade_apply(
 		    property == CSS_PROP_TEXT_SHADOW ||
 		    property == CSS_PROP_TEXT_DECORATION_SKIP_INK ||
 		    property == CSS_PROP_CURSOR ||
+		    property == CSS_PROP_POINTER_EVENTS ||
 		    property == CSS_PROP_VISIBILITY ||
 		    property == CSS_PROP_DIRECTION ||
 		    property == CSS_PROP_WRITING_MODE ||
@@ -5445,6 +5447,9 @@ cascade_apply(
 		break;
 	case CSS_PROP_CURSOR:
 		style->cursor = value->keyword;
+		break;
+	case CSS_PROP_POINTER_EVENTS:
+		style->pointer_events = value->keyword;
 		break;
 	case CSS_PROP_TEXT_TRANSFORM:
 		/* Retain the specified keyword without changing the underlying DOM text. */
@@ -6119,6 +6124,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_CURSOR:
 		style->cursor = parent->cursor;
+		break;
+	case CSS_PROP_POINTER_EVENTS:
+		style->pointer_events = parent->pointer_events;
 		break;
 	case CSS_PROP_TEXT_TRANSFORM:
 		/* Explicit inheritance and initial/unset use the same native computed field. */

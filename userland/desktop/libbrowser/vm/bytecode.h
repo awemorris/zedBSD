@@ -154,6 +154,8 @@ enum vm_opcode {
 	VM_OP_DELEGATE_START,	/* R state, R iterable: native synchronous iterator record */
 	VM_OP_DELEGATE_STEP,	/* R result, R state, R sent, R how, R outcome: -1 yields the result, NEXT completes the expression, RETURN returns */
 	VM_OP_SUSPEND_RESULT,	/* R result, R sent, R how: yield the original iterator result without reading its value */
+	VM_OP_ASYNC_ITER_START,	/* R iterator, R sync, R value: the iterator of a for await (sync is true when it is the value's synchronous one) */
+	VM_OP_CHECK_OBJECT,	/* R value: a TypeError unless the value is an object (an iterator's result) */
 
 	/* Wasm (raw values). */
 	VM_OP_I32_CONST,	/* R dst, I value */

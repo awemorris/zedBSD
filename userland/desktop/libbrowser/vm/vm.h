@@ -789,6 +789,7 @@ int vm_code_is_suspendable(const struct vm_function *function);
 
 /* Spreading and destructuring (spread.c). */
 int vm_iter_start(struct vm_realm *realm, vm_value value, vm_value *iterator);
+int vm_async_iter_start(struct vm_realm *realm, vm_value value, vm_value *iterator, int *sync);
 int vm_iter_next(struct vm_realm *realm, vm_value iterator, vm_value *value, int *done);
 int vm_iter_close(struct vm_realm *realm, vm_value iterator, int quiet);
 vm_value vm_symbol_key(const struct vm_realm *realm, int which);

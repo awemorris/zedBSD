@@ -2190,6 +2190,7 @@ window_release(
 
 	/* Timer storage contains values, but releasing it reads none of them. */
 	wb_vector_release(&window->timers);
+	free(window->top_navigation);
 	free(window);
 
 	/* Succeeded: the owner may now release its VM stack. */

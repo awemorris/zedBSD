@@ -1079,6 +1079,8 @@ struct css_style {
 	int white_space;
 	int text_transform;
 	int cursor;
+	/* pointer-events: 0 auto (and the SVG values, which hit like it here), 1 none (the box is not the target of the pointer). */
+	int pointer_events;
 	int underline;
 	int text_decoration_line;
 	int text_decoration_thickness_kind;

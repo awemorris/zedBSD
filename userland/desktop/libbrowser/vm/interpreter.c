@@ -735,6 +735,8 @@ interpreter_step_js(
 		return status;
 	case VM_OP_DELEGATE_START:
 	case VM_OP_DELEGATE_STEP:
+	case VM_OP_ASYNC_ITER_START:
+	case VM_OP_CHECK_OBJECT:
 	case VM_OP_ITER_START:
 	case VM_OP_ITER_NEXT:
 	case VM_OP_ITER_REST:
@@ -1923,6 +1925,24 @@ interpreter_spread(
 	case VM_OP_ITER_START:
 		status = vm_iter_start(realm, registers[words[2]], &value);
 		break;
+	case VM_OP_ASYNC_ITER_START:
+		status = vm_async_iter_start(realm, registers[words[3]], &value, &done);
+		if (status != 0)
+			return status;
+
+		/* Both outputs are written once the methods called have returned. */
+		registers = &realm->stack[run->base + FRAME_HEADER];
+		registers[words[2]] = vm_value_boolean(done);
+		break;
+	case VM_OP_CHECK_OBJECT:
+		/* An iterator's result must be an object. */
+		if (!vm_value_is_object(registers[words[1]])) {
+			status = vm_throw_type_error(realm, "Iterator result is not an object");
+			return status;
+		}
+
+		/* Any object will do. */
+		return 0;
 	case VM_OP_ITER_NEXT:
 		status = vm_iter_next(realm, registers[words[2]], &value, &done);
 		break;
