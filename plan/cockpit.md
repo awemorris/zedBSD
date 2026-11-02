@@ -14,7 +14,7 @@
 | P5 | — | 待機 | WS336 p015（自前の ssh の client）を 13:46 に merge（host の OpenSSH の sshd と 93 項目 PASS） | p018（sshd の listener、p017 の後） |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p017 cleared。p018（sshd の listener と自前の ssh との相互運用、q1965）に 14:36 着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
-| P8 | [WS345](ws345/ws.md) | ブラウザ | p001 の設計 cleared（thread の表、p002〜p013）。p002（thread の表と pthread の置き換え、q1968）に 14:46 着手 | J2: 応答しない頁の確かめの表示を出すか（ユーザー） |
+| P8 | [WS345](ws345/ws.md) | ブラウザ | p001 の設計 cleared（thread の表、p002〜p013）。p002（thread の表と pthread の置き換え、q1968）に 14:46 着手 | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
@@ -92,6 +92,8 @@
 - Pi 5 の en0 の link: P3 の計測で、起動 3・4 の途中に en0 が 1000 Mbps から 100 Mbps に落ちて SSH が切れた。cable・switch の側か driver かは未調査。
 
 ## 決まった事
+
+- 2026-11-02 15:00 WS345（ブラウザの thread の分け方）: 長く応答しない頁に「この頁は応答しません（待つ／止める）」の確かめを付ける（ユーザー）。P8 が Phase を足す。
 
 - 2026-11-02 12:45 WS344（自前の WebP の decoder）: ユーザーが VP8 の特許の危険を受け入れて、自前の VP8 の decoder を進める（許諾の条件は後でユーザーが確かめる）。
 
