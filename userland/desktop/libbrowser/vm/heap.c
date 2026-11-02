@@ -48,6 +48,12 @@ static const uint32_t heap_class_sizes[VM_SIZE_CLASSES] = {
 	320, 384, 448, 512, 640, 768, 896, 1024, 1280, 1536, 2048, 3072, 4096
 };
 
+/* Whether the calling thread is one heaps are lent to (vm_thread_set_borrower): each thread's own. */
+static _Thread_local int heap_borrower;
+
+/* How many times a borrower entered a script or would have collected, in the process (atomic). */
+static unsigned long heap_borrower_slips;
+
 static int heap_size_class(size_t size, unsigned *size_class);
 static int heap_add_block(struct vm_heap *heap, unsigned size_class);
 static int heap_block_set_insert(struct vm_heap *heap, struct vm_block *block);
@@ -207,13 +213,14 @@ vm_heap_alloc(
 	assert(!heap->collecting);
 	assert(size >= sizeof(struct vm_cell));
 
-	/* Collects when enough has been allocated since the last collection. */
-	if (heap->allocated_since >= heap->threshold)
+	/* Collects when enough has been allocated since the last collection (not while the heap is lent: the cells may be held by the other thread). */
+	if (heap->allocated_since >= heap->threshold && heap->lent == 0U)
 		vm_heap_collect(heap);
 
 	/* Refuses a cell that would take the live bytes past the limit. */
 	if (heap->limit != 0 && heap->live_bytes + size > heap->limit) {
-		vm_heap_collect(heap);
+		if (heap->lent == 0U)
+			vm_heap_collect(heap);
 		if (heap->live_bytes + size > heap->limit)
 			return NULL;
 	}
@@ -269,6 +276,18 @@ vm_heap_collect(
 	/* A collection never nests (a finalizer or tracer cannot start one). */
 	if (heap->collecting)
 		return;
+
+	/*
+	 * Nor does it run while the heap is lent, nor on a thread it is lent to:
+	 * the scan would walk this thread's stack and miss the cells the other
+	 * thread holds.
+	 */
+	if (heap->lent != 0U)
+		return;
+	if (heap_borrower) {
+		__atomic_fetch_add(&heap_borrower_slips, 1UL, __ATOMIC_RELAXED);
+		return;
+	}
 	heap->collecting = 1;
 
 	/*
@@ -526,6 +545,111 @@ vm_heap_stats(
 	stats->heap_bytes = heap->block_count * (size_t)VM_BLOCK_SIZE;
 	stats->collections = heap->collections;
 	stats->freed_cells = heap->freed_cells;
+}
+
+/*
+ * Sets the lender an agent's heaps are lent through (NULL: the work runs on
+ * the calling thread), before the agent's first task.
+ */
+void
+vm_agent_set_lender(
+	struct vm_agent *agent,
+	vm_lender lend,
+	void *context)
+{
+	/* The lender and what it gets back. */
+	agent->lend = lend;
+	agent->lend_context = context;
+}
+
+/*
+ * Runs a piece of work that runs no script with the heap lent to the
+ * agent's lender, which runs it on its own thread while this one waits; the
+ * heap does not collect meanwhile.  Without a lender, or on a thread the
+ * heap is lent to already, the work runs here.  Reports the work's outcome.
+ */
+int
+vm_heap_lend(
+	struct vm_heap *heap,
+	vm_lend_work work,
+	void *argument)
+{
+	struct vm_agent *agent;
+	int error;
+
+	/* No lender, or lent already: the work is this thread's. */
+	agent = heap->agent;
+	if (agent->lend == NULL || heap_borrower) {
+		error = work(argument);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Lent: no collection until the work came back. */
+	heap->lent++;
+	error = agent->lend(agent->lend_context, work, argument);
+	heap->lent--;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the work ran. */
+	return 0;
+}
+
+/* Tells whether the heap is lent to another thread now (the lending thread's question). */
+int
+vm_heap_lent(
+	const struct vm_heap *heap)
+{
+	/* Not lent. */
+	if (heap->lent == 0U)
+		return 0;
+
+	/* Lent. */
+	return 1;
+}
+
+/*
+ * Marks the calling thread as one heaps are lent to (nonzero) or not: it
+ * never collects and its vm_heap_lend runs the work at once.
+ */
+void
+vm_thread_set_borrower(
+	int borrower)
+{
+	/* The thread's mark, 0 or 1. */
+	heap_borrower = 0;
+	if (borrower)
+		heap_borrower = 1;
+}
+
+/* Tells whether the calling thread is one heaps are lent to. */
+int
+vm_thread_is_borrower(void)
+{
+	/* The thread's mark. */
+	return heap_borrower;
+}
+
+/* Counts a script entered on a borrower thread (a work lent must run none). */
+void
+vm_borrower_entry(void)
+{
+	/* Only a borrower's entry counts. */
+	if (heap_borrower)
+		__atomic_fetch_add(&heap_borrower_slips, 1UL, __ATOMIC_RELAXED);
+}
+
+/*
+ * Reports how many times, in the process, a borrower thread entered a
+ * script or would have collected (neither should ever happen).
+ */
+unsigned long
+vm_borrower_slips(void)
+{
+	/* The count. */
+	return __atomic_load_n(&heap_borrower_slips, __ATOMIC_RELAXED);
 }
 
 /*

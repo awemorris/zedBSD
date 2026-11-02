@@ -151,6 +151,8 @@ struct page {
 	struct wb_vector images;
 	/* The <img> elements (heap roots) whose load or error event is still to be fired (struct page_image_watch *). */
 	struct wb_vector image_watches;
+	/* The locations (char *) of the http and https images a work lent to the style thread met new, fetched by the page's thread when the work came back. */
+	struct wb_vector images_deferred;
 	struct net_loader *loader;
 	struct browser_instance *instance;
 	uint32_t images_generation;
@@ -253,6 +255,10 @@ int page_dump_dom(const struct page *page, struct wb_buffer *out);
 int page_dump_style(struct page *page, struct wb_buffer *out);
 int page_open_fonts(struct page *page, const struct text_font_paths *paths);
 int page_layout(struct page *page, int width, int height);
+int page_lend(struct page *page, vm_lend_work work, void *argument);
+int page_lend_layout(struct page *page, struct layout_tree *tree, struct css_engine *engine, struct dom_document *document, int width, int height,
+    layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
+int page_lend_paint(struct page *page, struct paint_list *list, const struct layout_tree *tree);
 int page_update_styles(struct page *page);
 uint32_t page_generation(const struct page *page);
 int page_load_resources(struct page *page);
@@ -359,6 +365,7 @@ int page_resolve_file(const char *base, const char *href, struct wb_buffer *out)
 int page_resolve_location(const char *base, const char *href, struct wb_buffer *out);
 int page_record_visited(struct page *page, const struct wb_buffer *url);
 void page_images_init(struct page *page);
+int page_images_fetch_deferred(struct page *page);
 void page_set_loader(struct page *page, struct net_loader *loader);
 void page_set_instance(struct page *page, struct browser_instance *instance);
 struct browser_instance *page_instance(struct page *page);

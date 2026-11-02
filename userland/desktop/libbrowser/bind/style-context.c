@@ -20,7 +20,20 @@ struct bind_style_context {
 	uint32_t generation;
 };
 
+/*
+ * The cascade of an element's ancestors down to it, lent to the style thread
+ * (bind_style_context_compute): the engine, the ancestors (the element
+ * first), the scratch inheritance and the style it writes.
+ */
+struct style_context_args {
+	struct css_engine *engine;
+	struct wb_vector *ancestors;
+	struct css_style *inherited;
+	struct css_style *style;
+};
+
 static void style_context_destroy(struct bind_style_context *context);
+static int style_context_compute_work(void *argument);
 static int style_context_gather(struct bind_style_context *context, struct bind_window *window);
 static int style_context_add(struct bind_style_context *context, struct dom_element *element);
 static int style_context_media(struct bind_style_context *context, struct dom_element *element, const struct css_media **media);
@@ -147,13 +160,12 @@ bind_style_context_compute(
 	struct dom_element *element,
 	struct css_style *style)
 {
+	struct style_context_args args;
 	struct css_engine *engine;
 	struct wb_vector ancestors;
 	struct dom_node *walk;
 	struct dom_element *ancestor;
 	struct css_style *inherited;
-	struct css_style *parent;
-	size_t index;
 	int error;
 
 	/* A retired or differently owned element has no resolved declaration. */
@@ -204,19 +216,12 @@ bind_style_context_compute(
 		return ENOMEM;
 	}
 
-	/* Computes from the outermost ancestor down to the requested element. */
-	parent = NULL;
-	error = 0;
-	for (index = ancestors.count; index != 0; index--) {
-		ancestor = *(struct dom_element **)wb_vector_at(&ancestors, index - 1U);
-		error = css_engine_compute(engine, ancestor, parent, style);
-		if (error != 0)
-			break;
-
-		/* Passes this ancestor's resolved inheritance to the next child. */
-		*inherited = *style;
-		parent = inherited;
-	}
+	/* Computes from the outermost ancestor down to the requested element, on the style thread. */
+	args.engine = engine;
+	args.ancestors = &ancestors;
+	args.inherited = inherited;
+	args.style = style;
+	error = vm_heap_lend(window->realm->heap, style_context_compute_work, &args);
 
 	/* Releases scratch storage without releasing the engine-backed style pointers. */
 	free(inherited);
@@ -227,6 +232,35 @@ bind_style_context_compute(
 		return error;
 
 	/* Succeeded: style pointers remain backed by the Window's current engine. */
+	return 0;
+}
+
+/* Computes the ancestors' styles from the outermost down to the element (a work lent by bind_style_context_compute). */
+static int
+style_context_compute_work(
+	void *argument)
+{
+	struct style_context_args *args;
+	struct dom_element *ancestor;
+	const struct css_style *parent;
+	size_t index;
+	int error;
+
+	/* Each ancestor from the outermost, inheriting from the one before. */
+	args = argument;
+	parent = NULL;
+	for (index = args->ancestors->count; index != 0; index--) {
+		ancestor = *(struct dom_element **)wb_vector_at(args->ancestors, index - 1U);
+		error = css_engine_compute(args->engine, ancestor, parent, args->style);
+		if (error != 0)
+			return error;
+
+		/* Passes this ancestor's resolved inheritance to the next child. */
+		*args->inherited = *args->style;
+		parent = args->inherited;
+	}
+
+	/* Succeeded: the element's style. */
 	return 0;
 }
 

@@ -150,6 +150,12 @@ request の種類:
 **この形で得る物と得ない物**: style・layout は script の thread を止める（同期の読みは仕様で避けられない）。窓と描画は止めない。違う frame（段 B の違う agent）の style の更新は style の thread で順に処理される。
 style と script を同じ frame で並べて走らせる事（DOM の写しの上で style を計算する）は、この WS ではしない（Future Work の候補）。
 
+- p008 の実装（2026-11-02）: style の thread は `view/style.c`（`browser-style`、stack は script の thread と同じ 8 MiB／2 MiB）で、front の script の thread が `front_run` の始めに作り、view を壊した後に止めて join する。貸しは agent の lender（`struct vm_agent` の `lend`・`lend_context`、`vm_agent_set_lender`）と `vm_heap_lend(heap, work, argument)`: lender の無い heap（`_CALLER` の view）と、貸された thread（borrower、`vm_thread_set_borrower`）の中の貸しはその場で走る（入れ子にならない）。貸しの間は heap の `lent` の深さが上がり、確保は閾値を越えても collect しない。borrower の thread は collect せず、script に入った回数と collect しかけた回数を `vm_borrower_slips` が数える（試験は 0 を確かめる）。request は lender の stack の上の記録で、script の thread の `css_animation_is_off` と `layout_try_remembers`（§11 R1 の thread ごとの一時の状態のうち計算の thread が読む二つ）を運ぶ。`computed_pseudo`・`_name`・`computed_zoom`（bind の側でだけ読む）と `svg_view_*`（同じ呼び出しの中で書いて読む）は運ばなくてよい。
+- 貸す仕事は葉だけ: `page_layout` の箱の木（`page_layout_work`: web font の face の追加、`layout_build` と container の再度の layout、iframe の window の大きさ）、`page_paint` の display list（focus の輪と caret を含む）、sticky の移動（同じ scroll・sticky の箱が無い時は貸さない）、`geometry_cascade` の cascade、`::before`・`::after`・view transition の擬似要素の cascade、iframe・一時の layout（`page_lend_layout`）と iframe の paint（`page_lend_paint`）、iframe の window の cascade（`bind/style-context.c`）。その前後（sheet の集め・link の event・取得の開始・media・viewport・`bind_document_fonts_settle`・`page_animations_sync`・世代の記録）は script の thread のまま。
+- style の thread が出会った http・https の画像（`page_image_by_url`）は取得せず `page->images_deferred` に積み、貸しが戻った後に script の thread が取得する（`page_lend`）。file・data の画像は今のとおりその場で読み解く（loader を使わない）。
+- 古くない時は貸さない: `page_needs_layout` が偽なら `geometry_layout` は `page_layout` を呼ばず、読みは木を直に読む。計測（host、64 core の機械）: 空の仕事の貸しの往復 10.9 µs。1 回の変更の後の `offsetWidth` 3 万回は貸し 3 回（最初の読み・描画の更新の layout と display list）。変更と読みを 1000 回は貸し 1002 回、`_CALLER` の 600 ms に対し 701〜757 ms（1 回あたり約 0.1〜0.15 ms 増え、往復より大きい分は計算を別の core で走らせる cache の費用と見る）。
+- sheet の解析と engine の組み立て（`page_update_styles`）は、取得の開始と link の event が混ざるので script の thread に残した（Future Work の候補: 解析だけを貸しに移す）。
+
 ### 4.3 共有の物
 
 | 物 | 持ち主 | 他の thread からの access |

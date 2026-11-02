@@ -236,6 +236,9 @@ vm_interpret_resume(
 	uint32_t size;
 	int status;
 
+	/* A thread a heap is lent to runs no script (counted, to be found). */
+	vm_borrower_entry();
+
 	/* A task asked to end resumes nothing. */
 	*result = VM_VALUE_UNDEFINED;
 	*suspended = 0;
@@ -320,6 +323,9 @@ interpreter_enter(
 	run->realm = realm;
 	run->generator = generator;
 	run->result = VM_VALUE_UNDEFINED;
+
+	/* A thread a heap is lent to runs no script (counted, to be found). */
+	vm_borrower_entry();
 
 	/* Too many entries from C is a stack overflow for the script. */
 	if (realm->depth >= INTERPRETER_DEPTH_MAX) {
