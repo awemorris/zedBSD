@@ -16,6 +16,10 @@
 #      linear)
 #   4c. with VARIANTS="W1,W2 W3 ..." the H.265 streams again after a restart for each variant, its boot words (comma-
 #      separated) in place of the variant before
+#   4d. with PLAY_DIR (MP4 clips with their NAME.ref): media-probe --video-hash on each, compared with its reference,
+#      then Video Player (PROGRAMS/bin/videoplayer, VP_OPTIONS, default a 1280x720 window) on each for 16 s in the
+#      desktop's session: its VIDEOPLAYER lines (the GPU's pictures or the read back ones, frames shown and late) and
+#      a shot of the desktop 8 s in (OUT/vp-NAME.png)
 #   5. the desktop's session socket
 #   6. the NVMe kernel and the boot line put back, checked by cksum against 1, and Debian running again
 # OUT/summary.txt has what is printed; the logs stay in OUT.
@@ -141,6 +145,9 @@ for w in ${EXTRA_CFG:-}; do
 	zs "$IP" "echo $w >> /boot/boot0/zedbsd.cfg && sync" < /dev/null || say "FAIL extra line $w"
 done
 zcp "$PROGRAMS/bin/media-probe" "$PROGRAMS/dynamic/libmedia.so" "$PROGRAMS/dynamic/libc.so" "$PROGRAMS/dynamic/libwayland-client.so" "root@$IP:$DIR/" || say "FAIL copy programs"
+if [ -n "${PLAY_DIR:-}" ]; then
+	zcp "$PROGRAMS/bin/videoplayer" "$PROGRAMS"/dynamic/*.so "$PLAY_DIR"/*.mp4 "root@$IP:$DIR/" || say "FAIL copy the player, its libraries and the clips"
+fi
 if [ -n "${H265_DIR:-}" ]; then
 	zcp "$PROGRAMS/bin/vkvideo-probe" "$H265_DIR"/*.h265 "$H265_DIR"/*.sha256 "root@$IP:$DIR/" || say "FAIL copy the H.265 probe and streams"
 fi
@@ -205,6 +212,18 @@ if [ -n "$IP" ]; then
 			say "FAIL zedBSD not up with the variant $variant"
 			break
 		fi
+	done
+
+	# 4d. (with PLAY_DIR) libmedia's hashes and Video Player on each clip.
+	for clip in ${PLAY_DIR:+"$PLAY_DIR"/*.mp4}; do
+		name=$(basename "$clip" .mp4)
+		ZS_TIMEOUT=330 zs "$IP" "cd $DIR && timeout 300 $PROBE --video-hash --time $name.mp4 > /tmp/$name.hash 2> /tmp/$name.err; echo \"media-probe rc \$?\"; cat /tmp/$name.err; echo '--- hashes'; cat /tmp/$name.hash" > "$OUT/p1-$name.log" 2>&1 < /dev/null
+		sed -n '/^--- hashes/,$p' "$OUT/p1-$name.log" > "$OUT/p1-$name.hash"
+		say "P1 $name: $(grep -m1 'media-probe rc' "$OUT/p1-$name.log") | $(grep -m1 'codec=' "$OUT/p1-$name.log" | cut -c1-70) | $(compare "$OUT/p1-$name.hash" "$PLAY_DIR/$name.ref")"
+		ZS_TIMEOUT=90 zs "$IP" "chmod 755 $DIR/videoplayer; n=\$(dmesg | wc -l); u=\$(awk -F: '\$3 == 1000 { print \$1; exit }' /etc/passwd); su \$u -c 'env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 LD_LIBRARY_PATH=$DIR $DIR/videoplayer ${VP_OPTIONS:---width=1280 --height=720} --timeout-s=16 $DIR/$name.mp4' > /tmp/vp-$name.err 2>&1 & sleep 8; env XDG_RUNTIME_DIR=/run/user/1000 keiland-shot /tmp/vp-$name.png > /tmp/vp-shot.err 2>&1; echo \"keiland-shot rc \$?\"; cat /tmp/vp-shot.err; wait; echo '--- player'; grep -E 'VIDEOPLAYER|GPU holds|read back' /tmp/vp-$name.err | tail -12; echo '--- kernel'; dmesg | tail -n +\$n | grep -E 'nvrtx'" > "$OUT/vp-$name.log" 2>&1 < /dev/null
+		ZS_TIMEOUT=30 zs "$IP" "cat /tmp/vp-$name.png" > "$OUT/vp-$name.png" 2> /dev/null < /dev/null
+		say "VP $name: $(grep -c 'GPU holds' "$OUT/vp-$name.log") gpu-holds lines, $(grep -c 'read back' "$OUT/vp-$name.log") read-back lines, $(grep -ciE 'fail|error|lost' "$OUT/vp-$name.log") failure lines, shot $(wc -c < "$OUT/vp-$name.png") bytes"
+		grep -E 'PRESENT|FRAMES|DONE|FAILED' "$OUT/vp-$name.log" | tail -4 | cut -c1-200 | sed 's/^/    /' | tee -a "$SUMMARY"
 	done
 
 	# 5. The desktop's session, the faults and the channel errors of the whole run.

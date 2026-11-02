@@ -43,7 +43,7 @@
 | p006a | H.265 の解析の設計（標準廉価実装手順）と header の配置（段 2） | Q324-1（p002 は要らない: host の Vulkan の header で試験） |
 | p006b〜h | （上の Phase の表へ移した、2026-11-02 p006a 段 2。Q-B の A） | — |
 | p006i | vkvideo-probe の H.265（前の案の p006e）— P2 が ws322-p006 で作る（2026-11-02 07:22 Q1、WS322 と共有の probe） | p006h、p002 |
-| p007 | H.265 decode の実機の debug | p005、p006i、実機 — in-progress（P1 q1922） |
+| [p007](phase007/phase.md) | H.265 decode の実機の debug | p005、p006i、実機 — in-progress（P1 q1922-i01、2026-11-02 11:15: 受け入れを全部流した。RTX で HEVC_v1 の能力の中の 131 本のうち 130 本が正しい（127 本が ffmpeg と全 frame 一致、SAODBLK_A・B は適合の md5、VPSSPSPPS_A は絵ごとの参照）、WPP_D は原因を書いた DIFFER、能力の外 16 本は probe が断る。driver の直し 3 つ（transform skip の大きさ、scaling list の向き、filter の buffer の大きさ）、H.264 の非退行 PASS、Video Player の GPU の道で H.264・H.265 1080p30 を再生（shown 470・469）。判定は Q1） |
 | p008a | libvulkan の encode の転送（queue と H.264、命令の番号、video の query pool、capset の bit 3） | p003、Q324-3 |
 | p008b | libvulkan の encode の転送（H.265、capset の bit 4） | p008a |
 | p009b | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode、時間の上限） | p009a、Q324-4 |
@@ -71,6 +71,7 @@
 
 ## Resume point
 
+- 2026-11-02 P1（q1922-i01）: p007 を終えた（[phase007](phase007/phase.md) §6）。NVDEC の H.265 decode は RTX で HEVC_v1 の能力の中の 131 本のうち 130 本が正しい（WPP_D だけ DIFFER、原因の見込みは §6.3 の表）、Video Player の GPU の道で H.264・H.265 を再生。次の指示で encode（NVENC）をすぐ再開できる: 起点は p008a（libvulkan の encode の転送、design.md §10・§15）と p009b の続き（NVENC の関門）。最初に読む物は [phase009b](phase009b/phase.md) §4〜§5（HW の誤り error_status 1・GSP の RC 47 の観測と試した約 90 通り）と [phase007](phase007/phase.md) §6.6（文書の注記と hardware の読みが違った例と、variant の起動・設定の dump の手）。実機の道具は `plan/ws324/tests/rtx-nvenc-test.sh`・`rtx-video324.sh`（`VARIANTS`）・`rtx-restore324.sh`。p007 の残り（WPP_D の原因、timeout の後の隔離の実機の確かめ）は §6.5。
 - 2026-11-02 P1（q1917-i01）: p005。nvrtx の H.265 decode を実装（[phase005](phase005/phase.md) §6）。host 試験 157・54 checks PASS、vmunix warning 0。実機（10.0.10.3）で H.264 1080p30 600/600 MATCH、H.265 は DXVA の形で NVDEC が全部の絵を実行（hang 無し）、状態 ERROR・一致 0、skip の形は bitstream の窓の問題（直した、実機は未実施）。次は Q1 の判定と p007（`plan/ws324/tests/rtx-video324.sh`、`H265_DIR=build/ws324-p005/h265`）。
 - 2026-11-02 P1（q1884-i01）: p009b。nvenc-test の段（`nvrtx.nvenc.test=1`）で H.264 の IDR を encode。firmware は setup を受けて（magic・offset の検査は通る、誤りの番号は 2024 版の enum）、rc_process と入力の luma・chroma を読んだ後、出力に触る前に HW の誤り（error_status 1、約 20 µs、GSP の RC 47）。H.265・ME only・IPCM・640x480・monochrome でも同じ。channel は RC の後に作り直せるので 1 起動で 5〜7 通り試せる。GSP の LOGRM に falcon の dump らしい 24 値があるが書式が無い（Q-p009b-1）。次は Q1 の判断（[phase009b](phase009b/phase.md) §4〜§5）。
 - 2026-11-02 P1（q1880-i01）: p009a。NVENC の channel を実機（10.0.10.3）で開いた: chid 49・runlist 2・class c4b7、NOP と NVENC 自身の semaphore の release が通り、RC の通知 0。R5 は「GSP-RM が ucode を持つ、別の firmware は要らない」。機械は Debian に戻し cksum 一致。次は Q1 の受け入れと p009b（関門）。
