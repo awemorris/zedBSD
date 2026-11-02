@@ -31,11 +31,13 @@
 #define SSLC_CONN_CCS_VALUE		1U
 
 /*
- * What an SSL_R_ reason says for the alert a failure sent.  The failing
- * module names an alert and not a reason, so the connection gives the
- * public error queue the nearest reason of <compat/ssl/ssl.h>; the alerts
- * not in the table give SSL_R_SSL_HANDSHAKE_FAILURE, and internal_error
- * gives no reason (0: the errno value says what happened).
+ * What an SSL_R_ reason says for the alert a handshake failure sent.  The
+ * handshake module names an alert and not a reason, so the connection gives
+ * the public error queue the nearest reason of <compat/ssl/ssl.h>; the
+ * alerts not in the table give SSL_R_SSL_HANDSHAKE_FAILURE, and
+ * internal_error gives no reason (0: the errno value says what happened).
+ * The failures of the record layer and of the connection itself name their
+ * reasons where they are found.
  */
 struct sslc_conn_alert_reason {
 	unsigned alert;
@@ -43,18 +45,17 @@ struct sslc_conn_alert_reason {
 };
 
 /*
- * The alerts that have a nearer reason.
+ * The alerts a handshake can fail with that have a nearer reason (the
+ * certificate alerts of sslc-hs.h, decode_error, decrypt_error,
+ * protocol_version, the extension alerts, unexpected_message).
  * Values referenced: RFC 8446 Appendix B.2 (the alert descriptions);
  * OpenSSL 3.5.8 include/openssl/sslerr.h (the reasons).
  */
 static const struct sslc_conn_alert_reason sslc_conn_alert_reasons[] = {
 	{ SSLC_ALERT_UNEXPECTED_MESSAGE, SSL_R_UNEXPECTED_MESSAGE },
-	{ SSLC_ALERT_BAD_RECORD_MAC, SSL_R_DECRYPTION_FAILED_OR_BAD_RECORD_MAC },
-	{ SSLC_ALERT_RECORD_OVERFLOW, SSL_R_PACKET_LENGTH_TOO_LONG },
 	{ SSLC_ALERT_HANDSHAKE_FAILURE, SSL_R_SSL_HANDSHAKE_FAILURE },
 	{ SSLC_ALERT_BAD_CERTIFICATE, SSL_R_CERTIFICATE_VERIFY_FAILED },
 	{ SSLC_ALERT_UNSUPPORTED_CERTIFICATE, SSL_R_CERTIFICATE_VERIFY_FAILED },
-	{ SSLC_ALERT_CERTIFICATE_REVOKED, SSL_R_CERTIFICATE_VERIFY_FAILED },
 	{ SSLC_ALERT_CERTIFICATE_EXPIRED, SSL_R_CERTIFICATE_VERIFY_FAILED },
 	{ SSLC_ALERT_CERTIFICATE_UNKNOWN, SSL_R_CERTIFICATE_VERIFY_FAILED },
 	{ SSLC_ALERT_UNKNOWN_CA, SSL_R_CERTIFICATE_VERIFY_FAILED },
