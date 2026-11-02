@@ -392,15 +392,20 @@ vm_heap_remove_root(
 	struct vm_cell ***slots;
 	size_t index;
 
-	/* Finds the slot and moves the last one into its place. */
+	/*
+	 * Finds the slot and moves the last one into its place.  The search
+	 * starts from the last slot added: a native function's roots are
+	 * removed in the reverse order they were added, after the page's
+	 * long-lived ones.
+	 */
 	slots = heap->roots.items;
-	for (index = 0; index < heap->roots.count; index++) {
+	for (index = heap->roots.count; index > 0; index--) {
 		/* Keeps looking past other slots. */
-		if (slots[index] != slot)
+		if (slots[index - 1U] != slot)
 			continue;
 
 		/* Closes the gap with the last slot. */
-		slots[index] = slots[heap->roots.count - 1U];
+		slots[index - 1U] = slots[heap->roots.count - 1U];
 		wb_vector_pop(&heap->roots);
 		return;
 	}

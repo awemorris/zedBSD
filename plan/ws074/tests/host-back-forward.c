@@ -12,7 +12,11 @@
  * shows it again at once, as it was (its script's state, no new request,
  * no new run of its scripts), and so does Forward; a page whose document
  * came with Cache-Control: no-store is fetched again; a new page after Back
- * drops the steps after it.
+ * drops the steps after it.  A kept page hears pagehide with persisted true
+ * when it is put away and pageshow with persisted true when it is shown
+ * again (its first pageshow has persisted false).  location.replace, and a
+ * script's navigation before the load event ends, take the place of the
+ * step shown instead of adding one.
  *
  *   host-back-forward
  *
@@ -57,11 +61,16 @@ static pthread_mutex_t back_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Each page counts its own runs in a global and links to the next. */
 static struct back_page back_pages[] = {
-	{ "/a.html", 0, "<!DOCTYPE html><title>a</title><script>var runs = (window.runs || 0) + 1; var mark = 'kept-a'; console.log('a ran');</script>"
+	{ "/a.html", 0, "<!DOCTYPE html><title>a</title><script>var runs = (window.runs || 0) + 1; var mark = 'kept-a'; console.log('a ran');"
+	  "addEventListener('pageshow', function (e) { console.log('a pageshow ' + e.persisted + ' ' + (e.target === document)); });"
+	  "addEventListener('pagehide', function (e) { console.log('a pagehide ' + e.persisted); });</script>"
 	  "<a href=/b.html style='display:block;height:40px'>b</a>", 0 },
 	{ "/b.html", 0, "<!DOCTYPE html><title>b</title><script>console.log('b ran');</script><a href=/c.html style='display:block;height:40px'>c</a>", 0 },
 	{ "/c.html", 0, "<!DOCTYPE html><title>c</title><script>console.log('c ran');</script>", 0 },
 	{ "/n.html", 1, "<!DOCTYPE html><title>n</title><script>console.log('n ran');</script><a href=/b.html style='display:block;height:40px'>b</a>", 0 },
+	{ "/r.html", 0, "<!DOCTYPE html><title>r</title><script>console.log('r ran');"
+	  "addEventListener('load', function () { setTimeout(function () { location.replace('/c.html'); }, 0); });</script>", 0 },
+	{ "/e.html", 0, "<!DOCTYPE html><title>e</title><script>console.log('e ran'); location.href = '/b.html';</script>", 0 },
 };
 
 static void back_check(int condition, const char *what);
@@ -144,6 +153,8 @@ main(
 	back_run(view, 300.0);
 	back_check(back_requests("/a.html") == 1 && back_count("a ran") == 1, "Back: a is neither fetched nor run again");
 	back_check(strcmp(browser_view_title(view), "a") == 0, "Back: a's title");
+	back_check(back_count("a pageshow false true") == 1 && back_count("a pagehide true") == 1 && back_count("a pageshow true true") == 1,
+	    "a: pageshow persisted false when loaded, pagehide persisted true when kept, pageshow persisted true when shown again");
 
 	/* 2. Forward: b at once. */
 	state.committed = 0;
@@ -176,6 +187,34 @@ main(
 	back_run(view, 1500.0);
 	back_check(strstr(browser_view_url(view), "/n.html") != NULL && back_requests("/n.html") == 2 && back_count("n ran") == 2,
 	    "Back to a no-store page fetches and runs it again");
+	browser_view_destroy(view);
+
+	/* 5. location.replace after the load: Back from the page it went to skips the page that replaced itself, and Forward comes back to it. */
+	error = browser_view_create(&options, &view);
+	back_check(error == 0, "third view: made");
+	if (error != 0)
+		return 1;
+	snprintf(url, sizeof(url), "http://127.0.0.1:%u/a.html", (unsigned)ntohs(address.sin_port));
+	(void)browser_view_load(view, url);
+	back_run(view, 300.0);
+	(void)browser_view_follow(view, "/r.html");
+	back_run(view, 1500.0);
+	back_check(strstr(browser_view_url(view), "/c.html") != NULL && back_count("r ran") == 1, "replace: r went on to c");
+	back_check(browser_view_can_go(view, -2) == 0 && browser_view_can_go(view, -1) == 1, "replace: one step before c");
+	(void)browser_view_go(view, -1);
+	back_run(view, 300.0);
+	back_check(strstr(browser_view_url(view), "/a.html") != NULL, "replace: Back from c is a");
+	(void)browser_view_go(view, 1);
+	back_run(view, 1500.0);
+	back_check(strstr(browser_view_url(view), "/c.html") != NULL && back_requests("/r.html") == 1, "replace: Forward from a is c, r is not asked for again");
+
+	/* 6. A script's navigation while its page loads replaces that page too. */
+	(void)browser_view_follow(view, "/e.html");
+	back_run(view, 1500.0);
+	back_check(strstr(browser_view_url(view), "/b.html") != NULL && back_count("e ran") == 1, "early: e went on to b");
+	(void)browser_view_go(view, -1);
+	back_run(view, 1500.0);
+	back_check(strstr(browser_view_url(view), "/c.html") != NULL, "early: Back from b is c, not e");
 	browser_view_destroy(view);
 
 	/* The summary. */

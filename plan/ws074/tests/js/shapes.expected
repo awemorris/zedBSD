@@ -1,0 +1,18 @@
+small order a,c,b 1 4 3 true
+mixed order 2,10,z,y,x,Symbol(s)
+big built 1500 0 0 777 1499 undefined
+big deleted 1000 p1 p2 p4 p1499 undefined 4 false
+big re-added 1001 p3 p1 again 5
+for-in 42 c0 c39 shared only
+chain own10 base11 base299 undefined true false
+chain unshadowed base10 false
+accessors 98 7 set 7;get 50
+attributes 5 false 7 19 k0,k1,k2,k3,k4,k5,k6,k7
+descriptor {"value":5,"writable":false,"enumerable":true,"configurable":true} {"value":9,"writable":true,"enumerable":false,"configurable":true}
+diverge undefined two three 29 29 undefined late 17
+diverge order s13,s14,extra,s15
+frozen 3 undefined 4 true 26
+symbols 19 undefined false 19 20
+proxy 40 s21 21 undefined undefined 3
+json {"s0":0,"s2":2,"s3":3,"s4":4,"s6":6,"s7":7,"s8":8,"s9":9,"s10":10,"s11":11,"s1":"b"}
+layouts 19900 first5,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16

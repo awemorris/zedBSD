@@ -1498,11 +1498,15 @@ page_frame_capture(
 	return error;
 }
 
-/* Adds up the generations of the documents the iframes below a document hold (a change in any of them changes the sum). */
+/*
+ * Adds up the generations of the documents the iframes below a document hold (a change in any of them changes the
+ * sum), and counts the iframe elements met in *iframes.
+ */
 static uint64_t
 frame_generation_walk(
 	const struct dom_node *node,
-	int depth)
+	int depth,
+	size_t *iframes)
 {
 	const struct dom_node *child;
 	const struct dom_element *element;
@@ -1515,17 +1519,19 @@ frame_generation_walk(
 		return 0;
 	if (node->type == DOM_ELEMENT) {
 		element = (const struct dom_element *)node;
+		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_IFRAME)
+			(*iframes)++;
 		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_IFRAME && element->child_context != NULL) {
 			realm = (const struct vm_realm *)element->child_context;
 			window = realm->host;
 			if (window != NULL && !window->detached && window->document != NULL) {
 				sum += window->document->generation + 1U + (window->frame_hold ? 1000003U : 0U);
-				sum += frame_generation_walk(&window->document->node, depth + 1);
+				sum += frame_generation_walk(&window->document->node, depth + 1, iframes);
 			}
 		}
 	}
 	for (child = node->first_child; child != NULL; child = child->next)
-		sum += frame_generation_walk(child, depth + 1);
+		sum += frame_generation_walk(child, depth + 1, iframes);
 	return sum;
 }
 
@@ -1535,11 +1541,31 @@ page_frames_generation(
 	const struct page *page)
 {
 	uint64_t sum;
+	size_t iframes;
+
+	/* The documents and the iframes they have. */
+	sum = page_frames_generation_count(page, &iframes);
+
+	/* Succeeded: the sum. */
+	return sum;
+}
+
+/*
+ * Computes page_frames_generation and counts the iframe elements of the page's document (and of theirs) in
+ * *iframes; a document of no iframe element walked again before it changes gives the same sum without them.
+ */
+uint64_t
+page_frames_generation_count(
+	const struct page *page,
+	size_t *iframes)
+{
+	uint64_t sum;
 	size_t index;
 
+	*iframes = 0;
 	if (page->document == NULL)
 		return 0;
-	sum = frame_generation_walk(&page->document->node, 0);
+	sum = frame_generation_walk(&page->document->node, 0, iframes);
 	for (index = 0; index < page->frame_cache.count; index++)
 		sum += ((const struct frame_cache_entry *)wb_vector_at(&page->frame_cache, index))->generation;
 	return sum;

@@ -1290,6 +1290,8 @@ float css_engine_base_zoom(const struct css_engine *engine);
 void css_engine_set_container_lookup(struct css_engine *engine, css_container_lookup lookup, void *context);
 int css_engine_container_missed(const struct css_engine *engine);
 size_t css_engine_container_uses(const struct css_engine *engine);
+uint32_t css_engine_container_lookups(const struct css_engine *engine);
+int css_engine_computed_contained(const struct css_engine *engine);
 void css_engine_container_use(const struct css_engine *engine, size_t index, const struct dom_element **container, float *width, float *height);
 void css_engine_forget_styles(struct css_engine *engine);
 void css_engine_set_view_transition(struct css_engine *engine, int active, const struct vm_string *const *types, int count);

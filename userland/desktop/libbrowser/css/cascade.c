@@ -187,6 +187,13 @@ struct css_engine {
 	uint32_t scope_generation;
 	int container_missed;
 	struct wb_vector container_uses;
+	/*
+	 * How many times a style computed met a query container (it counts
+	 * on for the engine's life), and whether the style css_engine_compute
+	 * gave last did.
+	 */
+	uint32_t container_lookups;
+	int compute_contained;
 	int (*visited_lookup)(void *, struct dom_element *);
 	void *visited_context;
 	int visited_pass;
@@ -208,11 +215,13 @@ struct cascade_container_use {
  * every element again.  The engine is made anew when the document or its
  * sheets change, and forgets the styles when the viewport changes; an
  * element's parent style is the same whenever the engine computes it (the
- * layout and the style dump walk the tree alike).
+ * layout and the style dump walk the tree alike).  contained tells whether
+ * computing it met a query container.
  */
 struct cascade_cached {
 	struct dom_element *element;
 	struct css_style *style;
+	int contained;
 };
 
 /*
@@ -340,7 +349,7 @@ static int cascade_class_atoms(struct css_engine *engine, struct vm_string *clas
 static int cascade_class_grow(struct css_engine *engine);
 static struct cascade_classes *cascade_class_slot(struct css_engine *engine, struct vm_string *classes);
 static struct cascade_cached *cascade_style_slot(struct css_engine *engine, const struct dom_element *element);
-static void cascade_style_keep(struct css_engine *engine, struct dom_element *element, const struct css_style *style);
+static void cascade_style_keep(struct css_engine *engine, struct dom_element *element, const struct css_style *style, int contained);
 static int cascade_style_grow(struct css_engine *engine);
 static void cascade_style_forget(struct css_engine *engine);
 static struct dom_element *cascade_parent_element(struct dom_element *element);
@@ -885,6 +894,30 @@ css_engine_container_use(
 }
 
 /*
+ * Tells how many times a style the engine computed met a query container,
+ * whose size it then depends on (a count that only grows).
+ */
+uint32_t
+css_engine_container_lookups(
+	const struct css_engine *engine)
+{
+	/* The count. */
+	return engine->container_lookups;
+}
+
+/*
+ * Tells whether the style css_engine_compute gave last met a query
+ * container when it was computed (a kept style tells what it met then).
+ */
+int
+css_engine_computed_contained(
+	const struct css_engine *engine)
+{
+	/* What the last computation recorded. */
+	return engine->compute_contained;
+}
+
+/*
  * Computes an element's style from the cascade and its parent's style
  * (NULL for the root).
  */
@@ -896,6 +929,7 @@ css_engine_compute(
 	struct css_style *style)
 {
 	struct cascade_cached *cached;
+	uint32_t lookups;
 	int error;
 
 	/* A style the engine computed before for the element. */
@@ -903,11 +937,13 @@ css_engine_compute(
 		cached = cascade_style_slot(engine, element);
 		if (cached->element != NULL) {
 			*style = *cached->style;
+			engine->compute_contained = cached->contained;
 			return 0;
 		}
 	}
 
 	/* The element itself. */
+	lookups = engine->container_lookups;
 	error = cascade_compute(engine, element, parent, style, CSS_PSEUDO_ELEMENT_NONE);
 	if (error != 0)
 		return error;
@@ -917,9 +953,12 @@ css_engine_compute(
 	if (error != 0)
 		return error;
 
+	/* Whether a query container's size went into it. */
+	engine->compute_contained = engine->container_lookups != lookups;
+
 	/* The engine keeps it (a copy it cannot keep is only computed again). */
 	if (!cascade_animation_suppressed)
-		cascade_style_keep(engine, element, style);
+		cascade_style_keep(engine, element, style, engine->compute_contained);
 
 	/* Succeeded: the style is computed. */
 	return 0;
@@ -3178,7 +3217,8 @@ cascade_container(
 		if (cached->element == NULL || cached->style->container_type == CSS_CONTAINER_NORMAL)
 			continue;
 
-		/* The container: its size as the page knows it. */
+		/* The container: its size as the page knows it (the style now depends on it). */
+		engine->container_lookups++;
 		known = 0;
 		if (engine->container_lookup != NULL)
 			known = engine->container_lookup(engine->container_context, (struct dom_element *)node, &found_width, &found_height);
@@ -4369,12 +4409,13 @@ cascade_style_slot(
 	}
 }
 
-/* Keeps a copy of an element's computed style in the engine; running out of memory only leaves it out. */
+/* Keeps a copy of an element's computed style in the engine, and whether it met a query container; running out of memory only leaves it out. */
 static void
 cascade_style_keep(
 	struct css_engine *engine,
 	struct dom_element *element,
-	const struct css_style *style)
+	const struct css_style *style,
+	int contained)
 {
 	struct cascade_cached *slot;
 	struct css_style *copy;
@@ -4403,6 +4444,7 @@ cascade_style_keep(
 	/* The element's entry. */
 	slot->element = element;
 	slot->style = copy;
+	slot->contained = contained;
 	engine->style_count++;
 }
 

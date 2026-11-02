@@ -119,6 +119,10 @@ struct js_scope {
 	struct js_scope *next_in_function;
 	struct js_function_info *function;
 	struct js_binding *bindings;
+	/* How many bindings there are, and the hash index of them a scope of many has (NULL until then; mask + 1 slots). */
+	uint32_t binding_count;
+	uint32_t index_mask;
+	struct js_binding **index;
 	struct js_hoisted *functions;
 	struct js_hoisted *functions_last;
 	int kind;

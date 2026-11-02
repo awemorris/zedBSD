@@ -223,6 +223,7 @@ static int computed_find(const struct vm_string *name, int *property);
 static int computed_write_grid(struct bind_window *window, struct dom_element *element, const struct css_style *style, int property, struct wb_units *out, int *handled);
 static int computed_write_subgrid(struct bind_window *window, struct dom_element *element, const struct css_style *style, int columns, struct wb_units *out);
 static int computed_write(struct bind_window *window, struct dom_element *element, int property, struct wb_units *out);
+static int computed_layout_bound(int property);
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
 static int computed_overflow_axis(int own, int other);
@@ -1089,7 +1090,9 @@ computed_blockify(
 		parent_style = malloc(sizeof(*parent_style));
 		if (parent_style == NULL)
 			return;
-		if (window->host.computed_style != NULL)
+		if (window->host.cascaded_style != NULL)
+			error = window->host.cascaded_style(window->host.context, (struct dom_element *)parent, parent_style);
+		else if (window->host.computed_style != NULL)
 			error = window->host.computed_style(window->host.context, (struct dom_element *)parent, parent_style);
 		else
 			error = bind_style_context_compute(window, (struct dom_element *)parent, parent_style);
@@ -1235,6 +1238,7 @@ computed_write(
 {
 	struct css_style *style;
 	struct bind_box box;
+	int layout_bound;
 	int found;
 	int handled;
 	int error;
@@ -1252,6 +1256,9 @@ computed_write(
 	if (style == NULL)
 		return ENOMEM;
 
+	/* Whether the value is a used one the layout gives. */
+	layout_bound = computed_layout_bound(property);
+
 	/* Primary pages keep their host path; initial children own their cascade. */
 	if (computed_pseudo < 0) {
 		/* A pseudo-element argument that did not parse has no values. */
@@ -1260,6 +1267,9 @@ computed_write(
 	}
 	if (computed_pseudo != 0 && window->host.vt_pseudo_style != NULL) {
 		error = window->host.vt_pseudo_style(window->host.context, element, computed_pseudo, computed_pseudo_name, style);
+	} else if (computed_pseudo == 0 && window->host.cascaded_style != NULL && !layout_bound) {
+		/* A value the layout does not decide needs no new layout. */
+		error = window->host.cascaded_style(window->host.context, element, style);
 	} else if (window->host.computed_style != NULL) {
 		error = window->host.computed_style(window->host.context, element, style);
 	} else {
@@ -1325,12 +1335,14 @@ computed_write(
 		return 0;
 	}
 
-	/* Its box, for the used values. */
+	/* Its box, for the used values (a value the layout does not give needs none). */
 	memset(&box, 0, sizeof(box));
 	found = 0;
-	if ((computed_pseudo == CSS_PSEUDO_ELEMENT_BEFORE || computed_pseudo == CSS_PSEUDO_ELEMENT_AFTER) && window->host.pseudo_box != NULL)
+	if (layout_bound &&
+	    (computed_pseudo == CSS_PSEUDO_ELEMENT_BEFORE || computed_pseudo == CSS_PSEUDO_ELEMENT_AFTER) &&
+	    window->host.pseudo_box != NULL)
 		found = window->host.pseudo_box(window->host.context, &element->node, computed_pseudo, &box);
-	else if (window->host.node_box != NULL)
+	else if (layout_bound && window->host.node_box != NULL)
 		found = window->host.node_box(window->host.context, &element->node, &box);
 
 	/* Serialize the ordinary resolved value before releasing its style copy. */
@@ -1341,6 +1353,52 @@ computed_write(
 		return error;
 
 	/* Succeeded: the ordinary resolved property value is complete. */
+	return 0;
+}
+
+/*
+ * Tells whether a property's resolved value is a used one the layout
+ * gives (sizes, margins, paddings and insets, by their physical or
+ * flow-relative names, and the grid templates), so it is read from a page
+ * laid out as it is now.
+ */
+static int
+computed_layout_bound(
+	int property)
+{
+	/* The flow-relative names map to physical ones by the style. */
+	if (property >= COMPUTED_LOGICAL_FIRST && property <= COMPUTED_LOGICAL_LAST)
+		return 1;
+	if (property >= COMPUTED_SIZE_FIRST && property <= COMPUTED_SIZE_LAST)
+		return 1;
+
+	/* Chooses by the property. */
+	switch (property) {
+	case COMPUTED_WIDTH:
+	case COMPUTED_HEIGHT:
+	case COMPUTED_MIN_WIDTH:
+	case COMPUTED_MIN_HEIGHT:
+	case COMPUTED_MARGIN_TOP:
+	case COMPUTED_MARGIN_RIGHT:
+	case COMPUTED_MARGIN_BOTTOM:
+	case COMPUTED_MARGIN_LEFT:
+	case COMPUTED_PADDING_TOP:
+	case COMPUTED_PADDING_RIGHT:
+	case COMPUTED_PADDING_BOTTOM:
+	case COMPUTED_PADDING_LEFT:
+	case COMPUTED_TOP:
+	case COMPUTED_RIGHT:
+	case COMPUTED_BOTTOM:
+	case COMPUTED_LEFT:
+	case COMPUTED_GRID_TEMPLATE_COLUMNS:
+	case COMPUTED_GRID_TEMPLATE_ROWS:
+	case COMPUTED_GRID_TEMPLATE:
+		return 1;
+	default:
+		break;
+	}
+
+	/* Every other value is the style's. */
 	return 0;
 }
 

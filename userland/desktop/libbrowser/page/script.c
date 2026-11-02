@@ -447,6 +447,7 @@ page_start_scripts(
 	host.scroll = page_scroll;
 	host.storage = page_storage_calls();
 	host.computed_style = page_computed_style;
+	host.cascaded_style = page_cascaded_style;
 	host.scroll_to = page_scroll_to;
 	host.rendering = page_rendering;
 	host.node_inserted = script_node_inserted;
@@ -1334,6 +1335,37 @@ page_fire_load_resume(
 	return 0;
 }
 
+/*
+ * Fires the page's pageshow or pagehide for the pages the view keeps for
+ * the history (persisted when it is shown again from them or put in
+ * them), then the microtasks its listeners queued.
+ */
+int
+page_page_transition(
+	struct page *page,
+	const char *type,
+	int persisted)
+{
+	int error;
+
+	/* A page without a window has no listeners. */
+	if (page->window == NULL)
+		return 0;
+
+	/* The event. */
+	error = bind_fire_page_transition(page->window, type, persisted);
+	if (error != 0)
+		return error;
+
+	/* The microtasks it queued. */
+	error = bind_checkpoint(page->window);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the event has run. */
+	return 0;
+}
+
 /* The document is complete: load, then pageshow, last of the loading's events. */
 static int
 page_fire_load_events(
@@ -1349,8 +1381,8 @@ page_fire_load_events(
 	if (error != 0)
 		return error;
 
-	/* The document is shown: pageshow. */
-	error = bind_fire_event(page->window, NULL, "pageshow", BIND_EVENT_DOCUMENT, &canceled);
+	/* The document is shown, not from the kept pages: pageshow. */
+	error = bind_fire_page_transition(page->window, "pageshow", 0);
 	if (error != 0)
 		return error;
 
@@ -1495,6 +1527,7 @@ int
 page_needs_layout(
 	const struct page *page)
 {
+	uint64_t frames;
 	int pending;
 
 	/* A page never laid out needs it. */
@@ -1506,8 +1539,13 @@ page_needs_layout(
 		return 1;
 	if (page->laid_out_visits != page->visits_generation)
 		return 1;
-	if (page->laid_out_frames != page_frames_generation(page))
-		return 1;
+
+	/* A frame's document that changed (a document of no iframe, unchanged since the layout, still has none to walk). */
+	if (page->laid_out_iframes != 0 || page->frame_cache.count != 0) {
+		frames = page_frames_generation(page);
+		if (page->laid_out_frames != frames)
+			return 1;
+	}
 
 	/* Styles gathered since the layout (the end of the load gathers them again). */
 	if (page->laid_out_gathered != page->gathered)

@@ -641,6 +641,47 @@ bind_fire_event(
 }
 
 /*
+ * Fires a window's pageshow or pagehide (with the document as its
+ * target, as load has): an event whose persisted says whether the page is
+ * shown again from, or put in, the cache of pages kept for the history.
+ */
+int
+bind_fire_page_transition(
+	struct bind_window *window,
+	const char *type,
+	int persisted)
+{
+	struct bind_event *event;
+	struct vm_string *name;
+	vm_value event_value;
+	vm_value target_value;
+	int canceled;
+	int status;
+
+	/* The event and its target. */
+	status = bind_event_prepare(window, NULL, BIND_EVENT, type, BIND_EVENT_DOCUMENT, &event_value, &target_value, &event);
+	if (status != 0)
+		return status;
+
+	/* Its persisted, read-only as PageTransitionEvent's is. */
+	name = vm_atom_from_ascii(window->realm->heap, "persisted");
+	if (name == NULL)
+		return ENOMEM;
+	status = vm_object_define(window->realm->heap, (struct vm_object *)vm_value_as_cell(event_value), vm_value_cell(name),
+	    vm_value_boolean(persisted), VM_PROPERTY_ENUMERABLE | VM_PROPERTY_CONFIGURABLE);
+	if (status != 0)
+		return status;
+
+	/* The dispatch. */
+	status = bind_dispatch(window, target_value, event_value, &canceled);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the event is dispatched. */
+	return 0;
+}
+
+/*
  * Fires a trusted mouse event (it bubbles and can be canceled) at a node.
  */
 int
