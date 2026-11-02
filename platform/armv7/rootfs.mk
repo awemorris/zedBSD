@@ -17,10 +17,12 @@ ARMV7_ROOT_DATA := /etc/rc.conf=userland/base/etc/rc.conf \
  /etc/net.conf=userland/base/etc/net.conf) \
 	$(foreach service,$(ARMV7_ROOT_SERVICES),\
  /etc/service.d/$(service)=userland/base/init/services/$(service))
-# OpenSSH's programs also load libutil.  The packages a configuration names
+# OpenSSH's programs also load libutil, zedBSD's own SSH programs
+# libcrypto-compat.  The packages a configuration names
 # (ZEDBSD_USER_PROGRAMS) go into the tree with their own files.
 ARMV7_ROOT_RUNTIME := ld.so libc.so \
-	$(if $(filter openssh,$(ZEDBSD_USER_PROGRAMS)),libutil.so)
+	$(if $(filter openssh,$(ZEDBSD_USER_PROGRAMS)),libutil.so) \
+	$(if $(ARMV7_SSH_COMMANDS),libcrypto-compat.so)
 
 ZEDBSD_ROOTFS_INPUTS := $(addprefix $(BUILD)/bin/,$(ARMV7_ROOT_COMMANDS)) \
 	$(addprefix $(DYNAMIC_DIR)/,$(ARMV7_ROOT_RUNTIME)) \

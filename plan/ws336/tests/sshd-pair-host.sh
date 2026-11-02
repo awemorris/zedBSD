@@ -133,7 +133,7 @@ end_driver exec
 grep -qx err "$work/exec.err" || fail "exec: stderr $(cat "$work/exec.err")"
 [ "$result" = "status 0 granted 1" ] || fail "exec: monitor $result"
 [ "$driver_rc" = 0 ] || fail "exec: driver $driver_rc"
-grep -q 'Accepted login for' "$work/log" || fail "exec: no grant in the log"
+grep -q ' Accepted publickey for [^ ]* from 127\.0\.0\.1 port [0-9]* ssh2: ED25519 SHA256:' "$work/log" || fail "exec: no grant in the log"
 echo "ok exec"
 
 # The environment: LANG and LC_* taken, anything else not; sshd's own variables set.
@@ -330,7 +330,7 @@ rc=$?
 end_driver raw-name
 [ "$rc" = 0 ] || fail "name: $(cat "$work/raw-name.out")"
 grep -q ' invalid user zz?\[2J?forged$' "$work/log" || fail "name: the account check's line"
-grep -q ' Failed password for zz?\[2J?forged$' "$work/log" || fail "name: the monitor's line"
+grep -q ' Failed password for zz?\[2J?forged from 127\.0\.0\.1 port [0-9]* ssh2$' "$work/log" || fail "name: the monitor's line"
 grep -q ' too many authentication failures for zz?\[2J?forged from ' "$work/log" || fail "name: the pre-authentication line"
 grep -v -q '^[0-9][0-9]* [0-7] ' "$work/log" && fail "name: a log line that is not the program's: $(grep -v '^[0-9][0-9]* [0-7] ' "$work/log" | head -2)"
 tr -d '\033' < "$work/log" | cmp -s - "$work/log" || fail "name: an escape byte reached the log"

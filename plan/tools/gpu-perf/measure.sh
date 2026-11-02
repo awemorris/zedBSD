@@ -91,10 +91,10 @@ zs() {
 	timeout "${ZS_TIMEOUT:-60}" ssh -i "$KEY" $ZSSHOPT "root@$ip" "$@"
 }
 
-# zcp: scp with the zedBSD key, in the old SCP protocol; a copy that failed is tried again, twice.
+# zcp: scp with the zedBSD key (its SFTP mode); a copy that failed is tried again, twice.
 zcp() {
 	for try in 1 2 3; do
-		timeout 120 scp -O -i "$KEY" $ZSSHOPT "$@" && return 0
+		timeout 120 scp -i "$KEY" $ZSSHOPT "$@" && return 0
 		sleep 5
 	done
 	return 1

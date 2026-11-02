@@ -54,10 +54,10 @@ $MEASURE deploy --kernel "$VMUNIX" > "$OUT/deploy.log" 2>&1 || { say "FAIL deplo
 IP=$($MEASURE zedbsd 2> "$OUT/zedbsd.log") || { say "FAIL zedbsd not up"; exit 1; }
 say "zedbsd $IP kernel $(zs "$IP" "cksum < /boot/boot0/vmunix" < /dev/null | cut -d' ' -f1) (wanted $(cksum < "$VMUNIX" | cut -d' ' -f1)) | $(zs "$IP" "uname -v" < /dev/null)"
 say "machine's notes: $(zs "$IP" "ls -l /bin/notes 2>&1; cksum < /bin/notes 2>&1" < /dev/null | tr '\n' ' ')"
-timeout 120 scp -O -i "$KEY" $ZSSHOPT "$AAT_INPUT" "root@$IP:/tmp/aat-input" > /dev/null 2>&1 || { say "FAIL copy aat-input"; exit 1; }
+timeout 120 scp -i "$KEY" $ZSSHOPT "$AAT_INPUT" "root@$IP:/tmp/aat-input" > /dev/null 2>&1 || { say "FAIL copy aat-input"; exit 1; }
 program=/bin/notes
 if [ -n "$NOTES" ]; then
-	timeout 120 scp -O -i "$KEY" $ZSSHOPT "$NOTES" "root@$IP:/tmp/notes" > /dev/null 2>&1 || { say "FAIL copy notes"; exit 1; }
+	timeout 120 scp -i "$KEY" $ZSSHOPT "$NOTES" "root@$IP:/tmp/notes" > /dev/null 2>&1 || { say "FAIL copy notes"; exit 1; }
 	program=/tmp/notes
 fi
 zs "$IP" "chmod 755 /tmp/aat-input /tmp/notes 2> /dev/null; /tmp/aat-input stop > /dev/null 2>&1; /tmp/aat-input start --width 1920 --height 1080" > "$OUT/input-start.log" 2>&1 < /dev/null

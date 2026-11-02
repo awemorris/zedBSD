@@ -67,7 +67,7 @@ for KERNEL in "$@"; do
 	fi
 	IP=$($MEASURE zedbsd 2> "$DIR/zedbsd.log") || { say "FAIL zedbsd not up"; exit 1; }
 	say "k$number zedbsd $IP kernel $(zs "$IP" "cksum < /boot/boot0/vmunix" < /dev/null | cut -d' ' -f1) (wanted $(cksum < "$VMUNIX" | cut -d' ' -f1)) | line ${LINE:-none}: $(zs "$IP" "grep -cx '${LINE:-none-given}' /boot/boot0/zedbsd.cfg" < /dev/null)"
-	timeout 120 scp -O -i "$KEY" $ZSSHOPT "$USB_VKHANG" "$USB_MVIEW" "root@$IP:/tmp/" > /dev/null 2>&1 || { say "FAIL copy vkhang mview"; exit 1; }
+	timeout 120 scp -i "$KEY" $ZSSHOPT "$USB_VKHANG" "$USB_MVIEW" "root@$IP:/tmp/" > /dev/null 2>&1 || { say "FAIL copy vkhang mview"; exit 1; }
 	zs "$IP" "chmod 755 /tmp/vkhang /tmp/mview" < /dev/null
 
 	# T: a client's start to its first draw's end, three times.
