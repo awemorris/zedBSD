@@ -80,13 +80,14 @@ run_case() {
 	guest "$stop_all" >/dev/null
 	guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0
 picture=; [ -f /usr/share/keiland/wallpaper.png ] && picture=--wallpaper=/usr/share/keiland/wallpaper.png
-/bin/wayland --testing --timeout=900 --width=1280 --height=800 --glass $picture > /tmp/zdesktop.log 2>&1 </dev/null & for w in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do grep -q KWL.READY /tmp/zdesktop.log 2>/dev/null && break; sleep 0.5; done; echo started' >/dev/null
+/bin/wayland --testing --timeout=900 --width=1280 --height=800 --glass $picture > /tmp/zdesktop.log 2>&1 </dev/null & w=0; while [ $w -lt 120 ]; do grep -q KWL.READY /tmp/zdesktop.log 2>/dev/null && break; sleep 0.5; w=$((w+1)); done; sleep 1; echo started' >/dev/null
 	guest "export XDG_RUNTIME_DIR=/tmp BROWSER_LATENCY=1; /bin/browser $option --width=900 --height=600 $pages/$page > /tmp/b.log 2>&1 </dev/null & echo started" >/dev/null
 	if ! wait_more /tmp/b.log 'ZBROWSER READY width=900 height=600' 0 30; then
 		result FAIL "$name" ready "no READY line"
 		guest 'cat /tmp/b.log' > "$out/$name-browser.log"
 		return
 	fi
+	wait_more /tmp/zdesktop.log 'KWL TITLEBAR control client=[0-9]+ surface=[0-9]+ where=[a-z]* id=3 ' 0 20
 	sleep 2
 	set -- $(last /tmp/zdesktop.log 'KWL MAP client=' | sed -n 's/.*client=\([0-9]*\) surface=\([0-9]*\) x=\(-*[0-9]*\) y=\(-*[0-9]*\).*/\1 \2 \3 \4/p')
 	client=${1:-0} surface=${2:-0} wx=${3:-0} wy=${4:-0}
