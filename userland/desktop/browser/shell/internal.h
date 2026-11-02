@@ -26,6 +26,16 @@
 /* The code of the event the view's wake posts to the application (KL_APP_POST): the view has work. */
 #define SHELL_POST_VIEW		1U
 
+/* The code of the diagnostic clock's tick (KL_APP_POST, latency.c): how long the window's thread took to take it. */
+#define SHELL_POST_TICK		2U
+
+/*
+ * The code of the window's input (KL_WINDOW_POST) by which the drawing
+ * thread asks the window's thread to acknowledge the configure it is about
+ * to show a frame of (render.c); its data is NULL.
+ */
+#define SHELL_POST_ACK		0x4F474D32U
+
 /*
  * The code of the window's input (KL_WINDOW_POST) that brings the URLs a
  * later start of the program hands over (Windows' single start): its data
@@ -113,6 +123,8 @@ struct shell_key_names {
 };
 
 struct shell_titlebar;
+struct shell_render;
+struct shell_latency;
 
 /*
  * The window: libkeiland's application and its one window (shown with
@@ -146,6 +158,12 @@ struct shell_window {
 
 	/* The titlebar that hears its controls' inputs (NULL until it opens). */
 	struct shell_titlebar *titlebar;
+
+	/* The drawing thread whose acknowledgements the window carries out (NULL until it starts). */
+	struct shell_render *render;
+
+	/* The diagnostic clock whose ticks the window times (NULL when it is not running). */
+	struct shell_latency *latency;
 
 	/* The inputs waiting, a ring: the oldest's slot and how many. */
 	struct shell_event events[SHELL_WINDOW_EVENTS];
@@ -206,13 +224,117 @@ struct shell_present {
 };
 
 /*
- * The CPU presenter's frame (present-cpu.c): the memory the view draws the
- * page into (0xAARRGGBB words, width by height, packed rows) and its size.
+ * The CPU presenter (present-cpu.c): the size libkeiland shows frames at in
+ * the window (the drawing thread draws the frames, render.c).
  */
 struct shell_cpu {
+	uint32_t width;
+	uint32_t height;
+};
+
+/*
+ * One frame of the CPU's way (render.c): the memory the drawing thread
+ * drew the page into (0xAARRGGBB words, width by height, packed rows), and
+ * its size.
+ */
+struct shell_cpu_frame {
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+};
+
+/* How many frames the CPU's way keeps: one being drawn, one drawn last, one being shown. */
+#define SHELL_CPU_FRAMES	3U
+
+/*
+ * The drawing thread (render.c): it draws the view's latest committed
+ * frame whenever the view commits one (the view's frame_wake), and at
+ * every new size the window gives it, with the GPU into the swapchain of
+ * the presenter (present.c) or with the CPU into frames the window's
+ * thread shows (present-cpu.c).
+ *
+ * view, kui, present (NULL for the CPU's way), wake and wake_context are
+ * set before the thread starts and only read after.  thread is the
+ * window's thread's.  Everything from stop on is under lock; changed is
+ * broadcast whenever one of them changes:
+ *
+ * - stop: the window's thread asked the drawing thread to end; ended: it did.
+ * - committed: the view committed a frame since the last drawing;
+ *   has_commit: it committed one (nothing is drawn before).
+ * - width and height: the size to draw at (zero: nothing is drawn, a
+ *   window minimized); sized: it changed since the drawing thread took it.
+ * - configure and configure_serial: a configure of the window
+ *   (kl_window_configure_take) that waits to be acknowledged before the
+ *   first frame of its size is shown.
+ * - ack_state, ack_serial and ack_error: the acknowledgement the drawing
+ *   thread asked the window's thread for (SHELL_POST_ACK) and its answer.
+ * - failed: the drawing ended on an error (said in a line); the window closes.
+ * - shown, shown_width and shown_height: how many frames the GPU's way has
+ *   presented, and the size of the last.
+ * - frames, back, ready, front and fresh: the CPU's frames, the one the
+ *   drawing thread draws into (back, its own between the swaps), the one
+ *   it drew last (ready, new for the window when fresh), and the one the
+ *   window shows (front, the window's own).
+ *
+ * told is set (atomically) when the drawing thread woke the window's
+ * thread and cleared by the window's thread before it reads the state, so
+ * that a run of frames wakes it once.
+ */
+struct shell_render {
+	struct browser_view *view;
+	struct kl_window *kui;
+	struct shell_present *present;
+	void (*wake)(void *context);
+	void *wake_context;
+	struct kl_thread *thread;
+	int made;
+	struct kl_mutex lock;
+	struct kl_cond changed;
+	int stop;
+	int ended;
+	int committed;
+	int has_commit;
+	uint32_t width;
+	uint32_t height;
+	int sized;
+	int configure;
+	uint32_t configure_serial;
+	int ack_state;
+	uint32_t ack_serial;
+	int ack_error;
+	int failed;
+	unsigned long shown;
+	uint32_t shown_width;
+	uint32_t shown_height;
+	struct shell_cpu_frame frames[SHELL_CPU_FRAMES];
+	unsigned back;
+	unsigned ready;
+	unsigned front;
+	int fresh;
+	int told;
+};
+
+/*
+ * The diagnostic clock of the window's thread (latency.c, run when the
+ * environment has BROWSER_LATENCY): a thread of its own posts a tick to
+ * the application (SHELL_POST_TICK) every few milliseconds, when the last
+ * was taken, and the window's thread times how long each waited to be
+ * taken; the longest and how many waited long are said in one line when
+ * the window closes, and each wait over 100 ms as it is taken.  thread,
+ * app and started_us are set before the thread starts;
+ * stop, waiting and sent_us are atomic; the counts are the window's.
+ */
+struct shell_latency {
+	struct kl_app *app;
+	struct kl_thread *thread;
+	int stop;
+	int waiting;
+	uint64_t sent_us;
+	uint64_t started_us;
+	uint64_t longest_us;
+	unsigned long samples;
+	unsigned long over_20ms;
+	unsigned long over_100ms;
 };
 
 /* The titlebar's controls. */
@@ -262,7 +384,8 @@ struct shell_titlebar {
  * The sign-in codes of mail (mail.c, WS169 p005): the application's system
  * (NULL when the compositor tells no arrivals), the code offered (empty
  * for none) and the label of its titlebar control, until when, the request that posted its notification and the
- * notification's number (0 before it comes or after it closed).
+ * notification's number (0 before it comes or after it closed).  asked says the view was asked for the page's
+ * field for one-time codes and its answer (the view's field callback, shell_mail_field) has not come.
  */
 struct shell_mail {
 	struct kl_system *system;
@@ -271,6 +394,7 @@ struct shell_mail {
 	uint64_t until_ms;
 	uint32_t request;
 	uint32_t notification;
+	int asked;
 };
 
 /* The window (window.c). */
@@ -303,18 +427,36 @@ void shell_mail_open(struct shell_mail *mail, struct kl_app *app);
 int shell_mail_round(struct shell_mail *mail, struct browser_view *view, struct shell_titlebar *titlebar, uint64_t now_ms);
 int shell_mail_timeout(const struct shell_mail *mail, uint64_t now_ms);
 void shell_mail_fill(struct shell_mail *mail, struct browser_view *view, struct shell_titlebar *titlebar);
+void shell_mail_field(struct shell_mail *mail, struct browser_view *view, struct shell_titlebar *titlebar, int error);
 void shell_mail_close(struct shell_mail *mail, struct shell_titlebar *titlebar);
 
 /* The CPU presenter (present-cpu.c). */
 int shell_cpu_open(struct shell_cpu *cpu, struct shell_window *window);
 int shell_cpu_resize(struct shell_cpu *cpu, struct shell_window *window);
-int shell_cpu_frame(struct shell_cpu *cpu, struct shell_window *window, struct browser_view *view);
+int shell_cpu_show(struct shell_cpu *cpu, struct shell_window *window, const struct shell_cpu_frame *frame, int *dropped);
 void shell_cpu_close(struct shell_cpu *cpu);
 
 /* The presenter (present.c). */
 VkResult shell_present_open(struct shell_present *present, struct shell_window *window, struct browser_view *view);
 VkResult shell_present_resize(struct shell_present *present, struct browser_view *view, uint32_t width, uint32_t height);
-VkResult shell_present_frame(struct shell_present *present, struct browser_view *view);
+VkResult shell_present_frame(struct shell_present *present, struct browser_view *view, uint64_t *serial);
 void shell_present_close(struct shell_present *present, struct browser_view *view);
+
+/* The drawing thread (render.c). */
+int shell_render_init(struct shell_render *render);
+void shell_render_frame_wake(void *context);
+int shell_render_start(struct shell_render *render, struct browser_view *view, struct kl_window *kui, struct shell_present *present,
+    void (*wake)(void *context), void *wake_context);
+void shell_render_resize(struct shell_render *render, uint32_t width, uint32_t height, int configure, uint32_t serial);
+void shell_render_ack(struct shell_render *render);
+const struct shell_cpu_frame *shell_render_cpu_frame(struct shell_render *render, int *fresh);
+int shell_render_status(struct shell_render *render, unsigned long *shown, uint32_t *width, uint32_t *height);
+void shell_render_stop(struct shell_render *render, struct shell_window *window);
+void shell_render_close(struct shell_render *render);
+
+/* The diagnostic clock of the window's thread (latency.c). */
+int shell_latency_start(struct shell_latency *latency, struct kl_app *app);
+void shell_latency_take(struct shell_latency *latency);
+void shell_latency_stop(struct shell_latency *latency);
 
 #endif

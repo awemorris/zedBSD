@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>busy</title>
+<style>
+body { margin: 0; background: #dfe9f7; color: #1d2b45; font-family: sans-serif; font-size: 20px; }
+h1 { margin: 0; padding: 24px; background: #2463b3; color: #ffffff; font-size: 28px; }
+p { margin: 16px 24px; }
+.band { height: 120px; margin: 16px 24px; background: linear-gradient(90deg, #f0a030, #30a060); }
+</style>
+</head>
+<body>
+<h1>A page whose script runs for 30 seconds</h1>
+<p>A second after the load, a timer's script loops for 30 seconds without returning. The window must stay
+alive meanwhile: the titlebar's controls, the location, resizing and redrawing.</p>
+<div class="band"></div>
+<p>The end of the page.</p>
+<script>
+setTimeout(function () {
+	var end = Date.now() + 30000;
+	console.log("busy start");
+	while (Date.now() < end) {
+	}
+	document.title = "busy done";
+	console.log("busy end");
+}, 1000);
+</script>
+</body>
+</html>

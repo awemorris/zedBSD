@@ -7,6 +7,8 @@
 LIBCRYPTO_COMPAT_SOURCES := \
 	userland/base/libcrypto-compat/api-err.c \
 	userland/base/libcrypto-compat/api-evp.c \
+	userland/base/libcrypto-compat/api-kdf.c \
+	userland/base/libcrypto-compat/api-param.c \
 	userland/base/libcrypto-compat/api-pkey.c \
 	userland/base/libcrypto-compat/api-x509.c \
 	userland/base/libcrypto-compat/cryc-aes.c \

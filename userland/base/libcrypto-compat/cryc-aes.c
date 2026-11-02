@@ -6,8 +6,8 @@
  */
 
 /*
- * AES in bitsliced, constant-time form, and its counter mode (FIPS 197, SP
- * 800-38D GCTR).
+ * AES in bitsliced, constant-time form: the cipher, the inverse cipher, and
+ * the counter mode (FIPS 197, SP 800-38D GCTR).
  *
  * The section numbers in the comments of this file are those of FIPS 197
  * (May 2023 update) and of NIST SP 800-38D (November 2007).
@@ -25,7 +25,7 @@
  * round key k).  Words after the last round key are zero.
  *
  * Nothing here indexes memory or branches with a key byte or a state byte:
- * the S-box is a circuit of AND and XOR on the slices.  The loop bounds
+ * the S-box and its inverse are circuits of AND and XOR on the slices.  The loop bounds
  * and the indices are the sizes and the round numbers, which are public.
  */
 
@@ -81,6 +81,16 @@
 #define AES_SBOX_AFFINE		0x63U
 
 /*
+ * The constant of the inverse affine transformation of InvSubBytes: bit i
+ * of d is added to output bit i, which is the XOR of the input bits i + 2,
+ * i + 5 and i + 7 (mod 8).
+ *
+ * Values referenced: FIPS 197 (May 2023 update) 5.3.2, equation (5.16),
+ * d = {05} = 00000101 (bits 0 and 2 set).
+ */
+#define AES_INV_SBOX_AFFINE	0x05U
+
+/*
  * The reduction polynomial of GF(2^8) without its top term: m(x) = x^8 +
  * x^4 + x^3 + x + 1 gives 0x1b (4.1, equation (4.1)).  Used for the
  * round constant, which is public.
@@ -93,8 +103,17 @@ static void aes_field_multiply(uint64_t *out, const uint64_t *left, const uint64
 /* Squares a field element held as eight slices (4.2, equation (4.2) with both factors equal; squaring is linear). */
 static void aes_field_square(uint64_t *out, const uint64_t *in);
 
+/* Replaces every byte of the slices by its multiplicative inverse in GF(2^8) (4.4; 0 stays 0). */
+static void aes_invert_slices(uint64_t *slices);
+
 /* Applies the S-box of 5.1.1 to every byte of the slices at once: the inverse of 4.4 then the affine transformation (5.3). */
 static void aes_sub_slices(uint64_t *slices);
+
+/* Applies the inverse S-box of 5.3.2 to every byte of the slices: the inverse affine transformation (5.16), then the inverse of 4.4. */
+static void aes_inv_sub_slices(uint64_t *slices);
+
+/* Multiplies every byte of eight slices by {02} (XTIMES, 4.5), from in to out (out may not be in). */
+static void aes_xtimes(uint64_t *out, const uint64_t *in);
 
 /* Rotates the bytes of every column up by one row: the byte of row r + 1 moves to row r (the row 0 byte moves to row 3). */
 static uint64_t aes_rotate_rows(uint64_t slice);
@@ -104,6 +123,12 @@ static void aes_shift_rows(uint64_t *slices);
 
 /* Applies MixColumns to the slices (5.1.3). */
 static void aes_mix_columns(uint64_t *slices);
+
+/* Applies InvShiftRows to the slices (5.3.1). */
+static void aes_inv_shift_rows(uint64_t *slices);
+
+/* Applies InvMixColumns to the slices (5.3.3). */
+static void aes_inv_mix_columns(uint64_t *slices);
 
 /* Reads size bytes (at most 64) into the slices; the bytes beyond are zero. */
 static void aes_load(uint64_t *slices, const uint8_t *in, size_t size);
@@ -119,6 +144,9 @@ static uint32_t aes_sub_word(uint32_t word);
 
 /* Encrypts up to four blocks held as slices with the round keys (Algorithm 1, 5.1). */
 static void aes_cipher_slices(const struct cryc_aes *aes, uint64_t *slices);
+
+/* Decrypts up to four blocks held as slices with the round keys (InvCipher, Algorithm 3, 5.3). */
+static void aes_inv_cipher_slices(const struct cryc_aes *aes, uint64_t *slices);
 
 /*
  * Multiplies two elements of GF(2^8) (4.2) held in slice form: the product
@@ -200,15 +228,13 @@ aes_field_square(
 }
 
 /*
- * Applies the S-box.  The multiplicative inverse of 4.4 (0 maps to 0) is
- * the power 254 of the byte (4.4: the group of nonzero elements has order
+ * Replaces every byte by its multiplicative inverse (4.4; 0 maps to 0):
+ * the power 254 of the byte (the group of nonzero elements has order
  * 255), found with the addition chain 2, 3, 12, 15, 240, 252, 254 using
- * four multiplications and seven squarings.  The affine transformation of
- * equation (5.3) follows: output bit i is the XOR of the inverse's bits
- * i, i + 4, i + 5, i + 6 and i + 7 (mod 8), complemented where c has bit i.
+ * four multiplications and seven squarings.
  */
 static void
-aes_sub_slices(
+aes_invert_slices(
 	uint64_t *slices)
 {
 	uint64_t power2[8];
@@ -217,10 +243,7 @@ aes_sub_slices(
 	uint64_t power15[8];
 	uint64_t power240[8];
 	uint64_t power252[8];
-	uint64_t inverse[8];
 	uint64_t temp[8];
-	uint64_t complement;
-	unsigned int i;
 
 	/* The powers 2 and 3 of the byte. */
 	aes_field_square(power2, slices);
@@ -239,9 +262,38 @@ aes_sub_slices(
 	aes_field_square(temp, temp);
 	aes_field_square(power240, temp);
 
-	/* The power 252 = 240 + 12 and the power 254 = 252 + 2, the inverse. */
+	/* The power 252 = 240 + 12 and the power 254 = 252 + 2, the inverse, in place. */
 	aes_field_multiply(power252, power240, power12);
-	aes_field_multiply(inverse, power252, power2);
+	aes_field_multiply(slices, power252, power2);
+
+	/* The intermediate powers are secret. */
+	cryc_wipe(power2, sizeof(power2));
+	cryc_wipe(power3, sizeof(power3));
+	cryc_wipe(power12, sizeof(power12));
+	cryc_wipe(power15, sizeof(power15));
+	cryc_wipe(power240, sizeof(power240));
+	cryc_wipe(power252, sizeof(power252));
+	cryc_wipe(temp, sizeof(temp));
+}
+
+/*
+ * Applies the S-box: the multiplicative inverse of 4.4, then the affine
+ * transformation of equation (5.3): output bit i is the XOR of the
+ * inverse's bits i, i + 4, i + 5, i + 6 and i + 7 (mod 8), complemented
+ * where c has bit i.
+ */
+static void
+aes_sub_slices(
+	uint64_t *slices)
+{
+	uint64_t inverse[8];
+	uint64_t complement;
+	unsigned int i;
+
+	/* The inverse of every byte. */
+	for (i = 0; i < AES_SLICES; i++)
+		inverse[i] = slices[i];
+	aes_invert_slices(inverse);
 
 	/* The affine transformation, slice by slice. */
 	for (i = 0; i < AES_SLICES; i++) {
@@ -256,15 +308,63 @@ aes_sub_slices(
 		slices[i] ^= complement;
 	}
 
-	/* The intermediate powers are secret. */
-	cryc_wipe(power2, sizeof(power2));
-	cryc_wipe(power3, sizeof(power3));
-	cryc_wipe(power12, sizeof(power12));
-	cryc_wipe(power15, sizeof(power15));
-	cryc_wipe(power240, sizeof(power240));
-	cryc_wipe(power252, sizeof(power252));
+	/* The inverse is secret. */
 	cryc_wipe(inverse, sizeof(inverse));
-	cryc_wipe(temp, sizeof(temp));
+}
+
+/*
+ * Applies the inverse S-box (5.3.2): the inverse of the affine
+ * transformation, equation (5.16): output bit i is the XOR of the input
+ * bits i + 2, i + 5 and i + 7 (mod 8), complemented where d has bit i;
+ * then the multiplicative inverse of 4.4.
+ */
+static void
+aes_inv_sub_slices(
+	uint64_t *slices)
+{
+	uint64_t affine[8];
+	uint64_t complement;
+	unsigned int i;
+
+	/* The inverse affine transformation, slice by slice. */
+	for (i = 0; i < AES_SLICES; i++) {
+		affine[i] = slices[(i + 2U) & 7U] ^
+		    slices[(i + 5U) & 7U] ^
+		    slices[(i + 7U) & 7U];
+
+		/* A slice is complemented where the constant d has a 1. */
+		complement = 0 - (uint64_t)((AES_INV_SBOX_AFFINE >> i) & 1U);
+		affine[i] ^= complement;
+	}
+
+	/* The inverse of every byte. */
+	for (i = 0; i < AES_SLICES; i++)
+		slices[i] = affine[i];
+	aes_invert_slices(slices);
+
+	/* The intermediate bytes are secret. */
+	cryc_wipe(affine, sizeof(affine));
+}
+
+/*
+ * Multiplies every byte by {02} (XTIMES, 4.5): the slices move up one
+ * bit, and the top bit is folded back with m(x) (slice 0 takes slice 7,
+ * slices 1, 3 and 4 also add it).
+ */
+static void
+aes_xtimes(
+	uint64_t *out,
+	const uint64_t *in)
+{
+	/* The shifted slices, with the reduction of the top bit. */
+	out[0] = in[7];
+	out[1] = in[0] ^ in[7];
+	out[2] = in[1];
+	out[3] = in[2] ^ in[7];
+	out[4] = in[3] ^ in[7];
+	out[5] = in[4];
+	out[6] = in[5];
+	out[7] = in[6];
 }
 
 /*
@@ -368,6 +468,86 @@ aes_mix_columns(
 	cryc_wipe(next3, sizeof(next3));
 	cryc_wipe(sum, sizeof(sum));
 	cryc_wipe(mixed, sizeof(mixed));
+}
+
+/*
+ * InvShiftRows (5.3.1, equation (5.13)): s'[r, (c + r) mod 4] = s[r, c],
+ * so the bytes of row r move left (toward column 3) by r columns, that is
+ * by 4 * r bit positions, and the ones that leave on the left of the lane
+ * wrap around to the right end of the same row of the same lane.
+ */
+static void
+aes_inv_shift_rows(
+	uint64_t *slices)
+{
+	uint64_t slice;
+	uint64_t shifted;
+	unsigned int i;
+
+	/* Each slice is shifted on its own. */
+	for (i = 0; i < AES_SLICES; i++) {
+		slice = slices[i];
+
+		/* Row 0 stays. */
+		shifted = slice & AES_ROW0;
+
+		/* Row 1 by one column: columns 0 to 2 move up, column 3 wraps to column 0. */
+		shifted |= (slice & AES_ROW1 & AES_COLUMNS_BELOW3) << 4;
+		shifted |= (slice & AES_ROW1 & AES_COLUMNS_FROM3) >> 12;
+
+		/* Row 2 by two columns. */
+		shifted |= (slice & AES_ROW2 & AES_COLUMNS_BELOW2) << 8;
+		shifted |= (slice & AES_ROW2 & AES_COLUMNS_FROM2) >> 8;
+
+		/* Row 3 by three columns: column 0 moves to column 3, columns 1 to 3 wrap to 0 to 2. */
+		shifted |= (slice & AES_ROW3 & AES_COLUMNS_BELOW1) << 12;
+		shifted |= (slice & AES_ROW3 & AES_COLUMNS_FROM1) >> 4;
+
+		slices[i] = shifted;
+	}
+}
+
+/*
+ * InvMixColumns (5.3.3): the column is multiplied by the circulant matrix
+ * of {0e}, {0b}, {0d}, {09} (equation (5.15)).  That matrix is the product
+ * of the MixColumns matrix (equation (5.7)) and the circulant matrix of
+ * {05}, {00}, {04}, {00}, as the products of the rows check: {02}{05} +
+ * {01}{04} = {0e}, {03}{05} + {01}{04} = {0b}, {02}{04} + {01}{05} = {0d},
+ * {03}{04} + {01}{05} = {09}.  So each byte first takes s[r] + {04} * (s[r]
+ * + s[r + 2]), and MixColumns follows (circulant matrices commute, so the
+ * order does not matter).
+ */
+static void
+aes_inv_mix_columns(
+	uint64_t *slices)
+{
+	uint64_t sum[8];
+	uint64_t twice[8];
+	uint64_t four_times[8];
+	uint64_t next1;
+	uint64_t next2;
+	unsigned int i;
+
+	/* s[r] + s[r + 2]: the byte two rows further down is two row rotations away. */
+	for (i = 0; i < AES_SLICES; i++) {
+		next1 = aes_rotate_rows(slices[i]);
+		next2 = aes_rotate_rows(next1);
+		sum[i] = slices[i] ^ next2;
+	}
+
+	/* {04} * (s[r] + s[r + 2]), two XTIMES. */
+	aes_xtimes(twice, sum);
+	aes_xtimes(four_times, twice);
+
+	/* Adds it to every byte, then MixColumns. */
+	for (i = 0; i < AES_SLICES; i++)
+		slices[i] ^= four_times[i];
+	aes_mix_columns(slices);
+
+	/* The state is secret. */
+	cryc_wipe(sum, sizeof(sum));
+	cryc_wipe(twice, sizeof(twice));
+	cryc_wipe(four_times, sizeof(four_times));
 }
 
 /*
@@ -501,6 +681,41 @@ aes_cipher_slices(
 }
 
 /*
+ * InvCipher (5.3, Algorithm 3): AddRoundKey with round key Nr; Nr - 1
+ * rounds of InvShiftRows, InvSubBytes, AddRoundKey and InvMixColumns with
+ * the round keys Nr - 1 down to 1; a last round of InvShiftRows,
+ * InvSubBytes and AddRoundKey with round key 0.  The round keys are those
+ * of the cipher (5.2), used in reverse order.
+ */
+static void
+aes_inv_cipher_slices(
+	const struct cryc_aes *aes,
+	uint64_t *slices)
+{
+	unsigned int round;
+	unsigned int i;
+
+	/* Round key Nr. */
+	for (i = 0; i < AES_SLICES; i++)
+		slices[i] ^= aes->schedule[aes->rounds * AES_SLICES + i];
+
+	/* The rounds Nr - 1 down to 1. */
+	for (round = aes->rounds - 1U; round >= 1U; round--) {
+		aes_inv_shift_rows(slices);
+		aes_inv_sub_slices(slices);
+		for (i = 0; i < AES_SLICES; i++)
+			slices[i] ^= aes->schedule[round * AES_SLICES + i];
+		aes_inv_mix_columns(slices);
+	}
+
+	/* The last round, without InvMixColumns, with round key 0. */
+	aes_inv_shift_rows(slices);
+	aes_inv_sub_slices(slices);
+	for (i = 0; i < AES_SLICES; i++)
+		slices[i] ^= aes->schedule[i];
+}
+
+/*
  * Expands key (KeyExpansion, 5.2) into *aes.
  *
  * The words w[0..4 * (Nr + 1) - 1] are made as Algorithm 2 says (the
@@ -614,6 +829,40 @@ cryc_aes_encrypt_blocks(
 	}
 
 	/* The slices hold plaintext and ciphertext. */
+	cryc_wipe(slices, sizeof(slices));
+}
+
+/*
+ * Decrypts count blocks of 16 bytes (InvCipher, 5.3, Algorithm 3) from in
+ * to out, four at a time; the last group may have fewer blocks.
+ */
+void
+cryc_aes_decrypt_blocks(
+	const struct cryc_aes *aes,
+	const uint8_t *in,
+	uint8_t *out,
+	size_t count)
+{
+	uint64_t slices[8];
+	size_t group;
+
+	/* Each group is read completely before it is written, so in may be out. */
+	while (count > 0) {
+		group = count;
+		if (group > AES_GROUP_BLOCKS)
+			group = AES_GROUP_BLOCKS;
+
+		/* Decrypts the group. */
+		aes_load(slices, in, group * CRYC_AES_BLOCK);
+		aes_inv_cipher_slices(aes, slices);
+		aes_store(slices, out, group * CRYC_AES_BLOCK);
+
+		in += group * CRYC_AES_BLOCK;
+		out += group * CRYC_AES_BLOCK;
+		count -= group;
+	}
+
+	/* The slices hold ciphertext and plaintext. */
 	cryc_wipe(slices, sizeof(slices));
 }
 

@@ -6,7 +6,8 @@
  */
 
 /*
- * The public EVP digest, cipher and MAC functions.
+ * The public EVP digest, cipher and MAC functions.  The ciphers are
+ * ChaCha20 and AES-256-CBC without padding (NIST SP 800-38A 6.2).
  *
  * A function that fails queues exactly one error of the EVP library
  * (a null argument, an argument that must be NULL, an unsupported
@@ -60,6 +61,17 @@ static const struct evp_cipher_st chacha20_object = {
 };
 
 /*
+ * The AES-256-CBC algorithm object.
+ *
+ * EVP_aes_256_cbc returns this one constant object; a context is in CBC
+ * mode exactly when its cipher pointer is this one.  Never written.
+ */
+static const struct evp_cipher_st aes256_cbc_object = {
+	32,
+	16
+};
+
+/*
  * The Poly1305 algorithm object.
  *
  * EVP_MAC_fetch returns this one object (its type has no const in the
@@ -81,6 +93,15 @@ static int cipher_stream(EVP_CIPHER_CTX *ctx, unsigned char *out, const unsigned
 
 /* Wipes the unused keystream a cipher context buffers. */
 static void cipher_discard_keystream(EVP_CIPHER_CTX *ctx);
+
+/* Sets up AES-256-CBC on a context, as EVP_CipherInit_ex describes. */
+static int cipher_cbc_init(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, const unsigned char *key, const unsigned char *iv, int enc);
+
+/* Encrypts or decrypts the whole blocks of the buffered bytes and size new bytes in CBC mode, keeping the rest. */
+static int cipher_cbc_update(EVP_CIPHER_CTX *ctx, unsigned char *out, int *out_length, const unsigned char *in, int size);
+
+/* Encrypts or decrypts one 16-byte block in CBC mode, chaining it (NIST SP 800-38A 6.2). */
+static void cipher_cbc_block(EVP_CIPHER_CTX *ctx, const uint8_t *in, unsigned char *out);
 
 /*
  * Returns the SHA-256 digest algorithm (a constant object).
@@ -395,6 +416,17 @@ EVP_chacha20(void)
 }
 
 /*
+ * Returns the AES-256-CBC cipher (a constant object): 32-byte key, 16-byte
+ * IV, 16-byte blocks.
+ */
+const EVP_CIPHER *
+EVP_aes_256_cbc(void)
+{
+	/* The one constant AES-256-CBC object. */
+	return &aes256_cbc_object;
+}
+
+/*
  * Makes an empty cipher context; NULL without memory.
  */
 EVP_CIPHER_CTX *
@@ -448,9 +480,7 @@ EVP_CipherInit_ex(
 {
 	uint64_t low_half;
 	uint64_t high_half;
-
-	/* The direction does not matter: the keystream is the same both ways. */
-	UNUSED_PARAMETER(enc);
+	int done;
 
 	/* Refuses a missing context. */
 	if (ctx == NULL) {
@@ -464,8 +494,10 @@ EVP_CipherInit_ex(
 		return 0;
 	}
 
-	/* Refuses every cipher but ChaCha20. */
-	if (cipher != NULL && cipher != &chacha20_object) {
+	/* Refuses every cipher but ChaCha20 and AES-256-CBC. */
+	if (cipher != NULL &&
+	    cipher != &chacha20_object &&
+	    cipher != &aes256_cbc_object) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_UNSUPPORTED_ALGORITHM);
 		return 0;
 	}
@@ -475,6 +507,16 @@ EVP_CipherInit_ex(
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
 		return 0;
 	}
+
+	/* AES-256-CBC is set up on its own. */
+	if (cipher == &aes256_cbc_object || (cipher == NULL && ctx->cipher == &aes256_cbc_object)) {
+		done = cipher_cbc_init(ctx, cipher, key, iv, enc);
+		return done;
+	}
+
+	/* A context that held AES-256-CBC starts afresh as ChaCha20. */
+	if (ctx->cipher == &aes256_cbc_object)
+		cryc_wipe(ctx, sizeof(*ctx));
 
 	/* The context is for ChaCha20 from here on. */
 	ctx->cipher = &chacha20_object;
@@ -535,6 +577,12 @@ EVP_CipherUpdate(
 		return 0;
 	}
 
+	/* AES-256-CBC works on whole blocks. */
+	if (ctx->cipher == &aes256_cbc_object) {
+		done = cipher_cbc_update(ctx, out, out_length, in, in_length);
+		return done;
+	}
+
 	/* Applies the keystream. */
 	done = cipher_stream(ctx, out, in, (size_t)in_length);
 	if (done == 0)
@@ -567,6 +615,12 @@ EVP_Cipher(
 		return -1;
 	}
 
+	/* Only ChaCha20 is applied without the length output. */
+	if (ctx->cipher == &aes256_cbc_object) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_UNSUPPORTED);
+		return -1;
+	}
+
 	/* Refuses a length that does not fit the int that is returned. */
 	if (length > (unsigned int)INT_MAX) {
 		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_INVALID_ARGUMENT);
@@ -580,6 +634,71 @@ EVP_Cipher(
 
 	/* Succeeded: the number of bytes transformed. */
 	return (int)length;
+}
+
+/*
+ * Ends a cipher: writes nothing and sets *out_length to 0; AES-256-CBC
+ * fails with a partial block buffered or with padding on.
+ */
+int
+EVP_CipherFinal_ex(
+	EVP_CIPHER_CTX *ctx,
+	unsigned char *out,
+	int *out_length)
+{
+	/* Nothing is written: the ciphers here keep no output back. */
+	UNUSED_PARAMETER(out);
+
+	/* Refuses a missing context or length output. */
+	if (ctx == NULL || out_length == NULL) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
+		return 0;
+	}
+
+	/* Refuses a context that was never set up. */
+	if (ctx->cipher == NULL) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_OPERATION_NOT_INITIALIZED);
+		return 0;
+	}
+
+	/* AES-256-CBC: padding is not implemented, and data must have been whole blocks (NIST SP 800-38A 6.2, Appendix A). */
+	if (ctx->cipher == &aes256_cbc_object) {
+		if (ctx->padding) {
+			cryc_err_put(CRYC_LIB_EVP, CRYC_R_UNSUPPORTED);
+			return 0;
+		}
+		if (ctx->partial_size != 0U) {
+			cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH);
+			return 0;
+		}
+	}
+
+	/* Succeeded: no bytes are left to write. */
+	*out_length = 0;
+	return 1;
+}
+
+/*
+ * Turns the block cipher's padding on or off.
+ */
+int
+EVP_CIPHER_CTX_set_padding(
+	EVP_CIPHER_CTX *ctx,
+	int pad)
+{
+	/* Refuses a missing context. */
+	if (ctx == NULL) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
+		return 0;
+	}
+
+	/* Records the choice; ChaCha20 never reads it. */
+	ctx->padding = 0;
+	if (pad != 0)
+		ctx->padding = 1;
+
+	/* Succeeded: the padding is set. */
+	return 1;
 }
 
 /*
@@ -994,4 +1113,177 @@ cipher_stream(
 
 	/* Succeeded: the bytes are transformed and the keystream position is advanced. */
 	return 1;
+}
+
+/*
+ * Sets up AES-256-CBC: a named cipher starts the context afresh (no key,
+ * a zero IV, padding on, encrypting); then the key is expanded, the IV
+ * taken and the direction set.  A key or an IV drops any buffered partial
+ * block.
+ */
+static int
+cipher_cbc_init(
+	EVP_CIPHER_CTX *ctx,
+	const EVP_CIPHER *cipher,
+	const unsigned char *key,
+	const unsigned char *iv,
+	int enc)
+{
+	int error;
+
+	/* Expands the key first, so that a failure leaves the context as it was. */
+	if (key != NULL) {
+		error = cryc_aes_init(&ctx->aes, key, CRYC_AES256_KEY);
+		if (error != 0) {
+			cryc_err_put(CRYC_LIB_EVP, CRYC_R_INTERNAL_ERROR);
+			return 0;
+		}
+	}
+
+	/* A named cipher starts afresh: everything but a new key is forgotten. */
+	if (cipher != NULL) {
+		cryc_wipe(ctx->key, sizeof(ctx->key));
+		cryc_wipe(ctx->keystream, sizeof(ctx->keystream));
+		cryc_wipe(ctx->chain, sizeof(ctx->chain));
+		cryc_wipe(ctx->partial, sizeof(ctx->partial));
+		ctx->counter = 0;
+		cryc_wipe(ctx->nonce, sizeof(ctx->nonce));
+		ctx->available = 0U;
+		ctx->partial_size = 0U;
+		ctx->key_set = CIPHER_KEY_NONE;
+		ctx->encrypt = 1;
+		ctx->padding = 1;
+		if (key == NULL)
+			cryc_aes_clear(&ctx->aes);
+		ctx->cipher = &aes256_cbc_object;
+	}
+
+	/* The key is ready; buffered bytes belonged to the old one. */
+	if (key != NULL) {
+		ctx->key_set = CIPHER_KEY_READY;
+		cryc_wipe(ctx->partial, sizeof(ctx->partial));
+		ctx->partial_size = 0U;
+	}
+
+	/* The IV starts the chain again. */
+	if (iv != NULL) {
+		memcpy(ctx->chain, iv, CRYC_AES_BLOCK);
+		cryc_wipe(ctx->partial, sizeof(ctx->partial));
+		ctx->partial_size = 0U;
+	}
+
+	/* The direction: 1 encrypts, 0 decrypts, anything else keeps it. */
+	if (enc == 1)
+		ctx->encrypt = 1;
+	else if (enc == 0)
+		ctx->encrypt = 0;
+
+	/* Succeeded: the context holds what was given. */
+	return 1;
+}
+
+/*
+ * Takes size bytes after the buffered partial block, transforms every
+ * whole block they make in CBC mode into out, and keeps the rest.  Each
+ * block is gathered into a local buffer before its output is written.
+ */
+static int
+cipher_cbc_update(
+	EVP_CIPHER_CTX *ctx,
+	unsigned char *out,
+	int *out_length,
+	const unsigned char *in,
+	int size)
+{
+	uint8_t block[CRYC_AES_BLOCK];
+	size_t remaining;
+	size_t written;
+	size_t take;
+
+	/* Refuses a context without a key. */
+	if (ctx->key_set == CIPHER_KEY_NONE) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_EVP_OPERATION_NOT_INITIALIZED);
+		return 0;
+	}
+
+	/* Padding is not implemented: it must have been turned off. */
+	if (ctx->padding) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_UNSUPPORTED);
+		return 0;
+	}
+
+	/* No bytes: nothing written. */
+	if (size == 0) {
+		*out_length = 0;
+		return 1;
+	}
+
+	/* Refuses missing buffers, and a length whose output could pass INT_MAX. */
+	if (in == NULL || out == NULL) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_NULL_PARAMETER);
+		return 0;
+	}
+	if (size > INT_MAX - (int)CRYC_AES_BLOCK) {
+		cryc_err_put(CRYC_LIB_EVP, CRYC_R_PASSED_INVALID_ARGUMENT);
+		return 0;
+	}
+
+	/* Each whole block of the buffered bytes and the new ones. */
+	remaining = (size_t)size;
+	written = 0U;
+	while (ctx->partial_size + remaining >= CRYC_AES_BLOCK) {
+		take = CRYC_AES_BLOCK - ctx->partial_size;
+		memcpy(block, ctx->partial, ctx->partial_size);
+		memcpy(block + ctx->partial_size, in, take);
+		in += take;
+		remaining -= take;
+		ctx->partial_size = 0U;
+		cipher_cbc_block(ctx, block, out + written);
+		written += CRYC_AES_BLOCK;
+	}
+
+	/* Keeps the rest for the next call. */
+	memcpy(ctx->partial + ctx->partial_size, in, remaining);
+	ctx->partial_size += remaining;
+
+	/* The block held plaintext or ciphertext. */
+	cryc_wipe(block, sizeof(block));
+
+	/* Succeeded: the whole blocks are written. */
+	*out_length = (int)written;
+	return 1;
+}
+
+/*
+ * Transforms one block in CBC mode (NIST SP 800-38A 6.2): encrypting, C =
+ * CIPH(P xor previous); decrypting, P = CIPH^-1(C) xor previous; the
+ * ciphertext block becomes the previous one.  in is a private copy, so
+ * out may be the caller's input.
+ */
+static void
+cipher_cbc_block(
+	EVP_CIPHER_CTX *ctx,
+	const uint8_t *in,
+	unsigned char *out)
+{
+	uint8_t work[CRYC_AES_BLOCK];
+	size_t index;
+
+	if (ctx->encrypt) {
+		/* Encrypts the block chained with the previous ciphertext, which it then replaces. */
+		for (index = 0U; index < CRYC_AES_BLOCK; index++)
+			work[index] = (uint8_t)(in[index] ^ ctx->chain[index]);
+		cryc_aes_encrypt_blocks(&ctx->aes, work, ctx->chain, 1U);
+		memcpy(out, ctx->chain, CRYC_AES_BLOCK);
+	} else {
+		/* Decrypts the block, unchains it, and keeps the ciphertext for the next one. */
+		cryc_aes_decrypt_blocks(&ctx->aes, in, work, 1U);
+		for (index = 0U; index < CRYC_AES_BLOCK; index++)
+			work[index] = (uint8_t)(work[index] ^ ctx->chain[index]);
+		memcpy(ctx->chain, in, CRYC_AES_BLOCK);
+		memcpy(out, work, CRYC_AES_BLOCK);
+	}
+
+	/* The work block held plaintext. */
+	cryc_wipe(work, sizeof(work));
 }
