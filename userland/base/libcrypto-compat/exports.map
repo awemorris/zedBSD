@@ -1,0 +1,77 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The calls <compat/crypto/*.h> declares, then the library's own inner interface (the cryc_ names, which
+ * libssl-compat.so links against and nothing else may).  The map has no version node: the checker of the
+ * shared libraries (tools/build/check-dynamic-elf.py) takes no symbol version definitions in a library, as in
+ * every other library of the system.
+ */
+{
+	global:
+		OPENSSL_cleanse;
+		CRYPTO_memcmp;
+		ERR_get_error;
+		ERR_peek_error;
+		ERR_error_string_n;
+		ERR_clear_error;
+		EVP_sha256;
+		EVP_MD_get_size;
+		EVP_MD_CTX_new;
+		EVP_MD_CTX_free;
+		EVP_DigestInit_ex;
+		EVP_DigestUpdate;
+		EVP_DigestFinal_ex;
+		EVP_MD_CTX_copy_ex;
+		EVP_Digest;
+		EVP_PKEY_new_raw_private_key;
+		EVP_PKEY_new_raw_public_key;
+		EVP_PKEY_new_raw_public_key_ex;
+		EVP_PKEY_get_raw_public_key;
+		EVP_PKEY_get_raw_private_key;
+		EVP_PKEY_free;
+		EVP_DigestSignInit;
+		EVP_DigestSign;
+		EVP_DigestVerifyInit;
+		EVP_DigestVerify;
+		EVP_PKEY_CTX_new;
+		EVP_PKEY_CTX_new_from_name;
+		EVP_PKEY_CTX_new_from_pkey;
+		EVP_PKEY_CTX_free;
+		EVP_PKEY_derive_init;
+		EVP_PKEY_derive_set_peer;
+		EVP_PKEY_derive;
+		EVP_PKEY_keygen_init;
+		EVP_PKEY_keygen;
+		EVP_PKEY_encapsulate_init;
+		EVP_PKEY_encapsulate;
+		EVP_PKEY_decapsulate_init;
+		EVP_PKEY_decapsulate;
+		EVP_chacha20;
+		EVP_CIPHER_CTX_new;
+		EVP_CIPHER_CTX_free;
+		EVP_CipherInit_ex;
+		EVP_CipherUpdate;
+		EVP_Cipher;
+		EVP_MAC_fetch;
+		EVP_MAC_free;
+		EVP_MAC_CTX_new;
+		EVP_MAC_CTX_free;
+		EVP_MAC_init;
+		EVP_MAC_update;
+		EVP_MAC_final;
+		RAND_bytes;
+		d2i_X509;
+		X509_free;
+		X509_STORE_add_cert;
+		X509_VERIFY_PARAM_set1_host;
+		X509_VERIFY_PARAM_set1_ip_asc;
+		X509_verify_cert_error_string;
+		cryc_*;
+	local:
+		*;
+};
