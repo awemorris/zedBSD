@@ -267,11 +267,14 @@ void nvrtx_vk_gpu_drawn(void *owner, uint32_t draws, uint32_t quads);
  * when the decoder did not finish (it may still write what the push buffer
  * names) and EIO when it is not there or the session's runs are lost.
  * nvrtx_vk_video_hevc_dxva() tells whether the boot asked the decoder to
- * parse an H.265 slice header's reference sets itself.
+ * parse an H.265 slice header's reference sets itself, and
+ * nvrtx_vk_video_hevc_trace() whether it asked for the log of what the
+ * decoder is given for the first pictures of each H.265 session.
  */
 bool nvrtx_vk_video_available(void *owner);
 int nvrtx_vk_video_decode(void *owner, uint64_t va, uint32_t bytes);
 bool nvrtx_vk_video_hevc_dxva(void *owner);
+bool nvrtx_vk_video_hevc_trace(void *owner);
 
 /*
  * Copies a command stream of length bytes out of a blob's bytes in the

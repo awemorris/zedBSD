@@ -491,6 +491,13 @@ bool
 nvrtx_stage_hevc_dxva_wanted(void);
 
 /*
+ * Reports whether the boot asked for the log of what the video decoder is
+ * given for the first pictures of each H.265 session (nvrtx.hevc.trace=1).
+ */
+bool
+nvrtx_stage_hevc_trace_wanted(void);
+
+/*
  * Reports whether the boot asked for the first copy-engine clear of the
  * VRAM to be broken on purpose (nvrtx.clear.fault=1).
  */

@@ -11,7 +11,10 @@
  * rows of the picture's width, then the chroma plane's), so a device whose
  * optimal NV12 image has no layout the host can read (NVIDIA's block
  * linear) is read as any other.  The copy is its own submission, made
- * when the frame is output, so the pictures are read in output order.
+ * when the frame is output, so the pictures are read in output order; the
+ * buffer's bytes are then copied whole into the host's memory (a device's
+ * memory the host sees uncached is slow to read a byte at a time, as the
+ * hash reads it).
  */
 
 #include "probe.h"
@@ -20,14 +23,16 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-/* The buffer the pictures are copied into, its memory (mapped) and its size. */
+/* The buffer the pictures are copied into, its memory (mapped), its size, and the host's copy of its bytes. */
 struct copy_out {
 	VkBuffer buffer;
 	VkDeviceMemory memory;
 	uint8_t *map;
 	VkDeviceSize size;
+	uint8_t *host;
 };
 
 static struct copy_out copy_out;
@@ -86,10 +91,11 @@ probe_copy_out(
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkResetCommandBuffer");
 
-	/* The planes: plain rows of the width, the chroma plane after the luma plane. */
-	planes->luma = copy_out.map;
+	/* The planes, in the host's copy: plain rows of the width, the chroma plane after the luma plane. */
+	memcpy(copy_out.host, copy_out.map, (size_t)copy_out.size);
+	planes->luma = copy_out.host;
 	planes->luma_pitch = probe->extent.width;
-	planes->chroma = copy_out.map + (size_t)probe->extent.width * probe->extent.height;
+	planes->chroma = copy_out.host + (size_t)probe->extent.width * probe->extent.height;
 	planes->chroma_pitch = probe->extent.width;
 	planes->linear = 1;
 
@@ -107,6 +113,7 @@ probe_copy_out_close(
 		vkDestroyBuffer(probe->device, copy_out.buffer, NULL);
 	if (copy_out.memory != VK_NULL_HANDLE)
 		vkFreeMemory(probe->device, copy_out.memory, NULL);
+	free(copy_out.host);
 	memset(&copy_out, 0, sizeof(copy_out));
 }
 
@@ -164,6 +171,13 @@ copy_out_buffer(
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkMapMemory");
 	copy_out.map = map;
+
+	/* The host's copy of its bytes. */
+	copy_out.host = malloc((size_t)copy_out.size);
+	if (copy_out.host == NULL) {
+		fprintf(stderr, "vkvideo-probe: no memory for the copy-out\n");
+		return 1;
+	}
 
 	/* Succeeded: the buffer is ready. */
 	return 0;

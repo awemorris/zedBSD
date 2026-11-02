@@ -231,6 +231,10 @@
 /* The log lines of skipped pictures a boot writes at most. */
 #define VIDEO_SKIP_LINES			32U
 
+/* The first pictures of a session whose decode is logged with nvrtx.hevc.trace=1, and the bytes of a line of it. */
+#define VIDEO_TRACE_PICTURES		3U
+#define VIDEO_TRACE_LINE		32U
+
 /* One picture parameter set a parameters object holds; the object's sets are a list. */
 struct video_pps_node {
 	struct video_pps_node *next;
@@ -513,6 +517,7 @@ static int video_plane_addresses(const struct nvrtx_vk_image *image, uint64_t *l
 static int video_binding_address(const struct video_session *state, uint32_t index, uint64_t *va);
 static void video_status(int32_t status);
 static void video_skip(const char *reason);
+static void video_trace(const char *what, uint32_t serial, const uint8_t *bytes, size_t length);
 static uint32_t video_mbs(uint32_t pixels);
 
 /*
@@ -4107,6 +4112,7 @@ video_run_decode_h265(
 	const char *reason;
 	size_t length;
 	bool dxva;
+	bool trace;
 	int error;
 
 	/* Takes the session's state and the scope's parameters. */
@@ -4276,9 +4282,31 @@ video_run_decode_h265(
 	/* The picture's number, then the push buffer, run on the decoder and waited for. */
 	frame.serial = state->serial;
 	length = nvrtx_nvdec_push_hevc(state->run_cpu + VIDEO_RUN_PUSH_AT, &frame, &hevc);
+	trace = nvrtx_vk_video_hevc_trace(session->owner) && state->serial < VIDEO_TRACE_PICTURES;
+	if (trace) {
+		kern_logf("nvrtx: vk: video: trace %u: bitstream %llx offset %llu range %llu slices %u first %u pitch %u surface %u substitute %u\n",
+			  (unsigned)state->serial,
+			  (unsigned long long)bitstream,
+			  (unsigned long long)video->offset,
+			  (unsigned long long)video->range,
+			  (unsigned)video->slice_count,
+			  (unsigned)video->slices[0],
+			  (unsigned)image->pitch,
+			  (unsigned)description.surface,
+			  (unsigned)substitute);
+		video_trace("pic", state->serial, state->run_cpu + VIDEO_RUN_PIC_AT, NVRTX_NVDEC_HEVC_PIC_BYTES);
+		video_trace("tiles", state->serial, state->run_cpu + VIDEO_RUN_TILES_AT, 32U);
+		if (description.scaling_enabled != 0U)
+			video_trace("scaling", state->serial, state->run_cpu + VIDEO_RUN_SCALING_AT, NVRTX_NVDEC_HEVC_SCALING_BYTES);
+		video_trace("push", state->serial, state->run_cpu + VIDEO_RUN_PUSH_AT, length);
+		if (buffer_cpu != NULL)
+			video_trace("stream", state->serial, buffer_cpu + video->offset, 64U);
+	}
 	error = video_decoded(session, video, state->run_va + VIDEO_RUN_PUSH_AT, length);
 	if (error != 0)
 		return error;
+	if (trace)
+		video_trace("status", state->serial - 1U, state->run_cpu + VIDEO_RUN_STATUS_AT, 56U);
 
 	/* The decoder's status: CTBs in error, a decode error or a slice header error make the result an error. */
 	ctbs = nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_ERRORS_AT);
@@ -4288,9 +4316,12 @@ video_run_decode_h265(
 		/* The first few of them are logged with what the decoder reported and what it was told. */
 		if (video_skip_lines < VIDEO_SKIP_LINES) {
 			video_skip_lines++;
-			kern_logf("nvrtx: vk: video: an H.265 picture in error: %u CTBs, error %08x, slice header %08x (skip %u bits, %u references)\n",
+			kern_logf("nvrtx: vk: video: an H.265 picture in error: %u blocks of %u, error %08x at block %08x slice %08x, slice header %08x (skip %u bits, %u references)\n",
 				  (unsigned)ctbs,
+				  (unsigned)(ctbs + nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_DECODED_AT)),
 				  (unsigned)errors,
+				  (unsigned)nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_CTB_AT),
+				  (unsigned)nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_SLICE_AT),
 				  (unsigned)header,
 				  (unsigned)description.skip_bits,
 				  (unsigned)description.reference_count);
@@ -4479,4 +4510,32 @@ video_hold_for_boot(
 	/* Counts it. */
 	video_isolated_objects++;
 	video_isolated_bytes += bytes;
+}
+
+/* Logs bytes the decoder is given or reports, 32 to a line in hexadecimal. */
+static void
+video_trace(
+	const char *what,
+	uint32_t serial,
+	const uint8_t *bytes,
+	size_t length)
+{
+	static const char digits[] = "0123456789abcdef";
+	char line[VIDEO_TRACE_LINE * 2U + 1U];
+	size_t at;
+	size_t index;
+	size_t count;
+
+	/* Each line: its offset and its bytes. */
+	for (at = 0U; at < length; at += VIDEO_TRACE_LINE) {
+		count = length - at;
+		if (count > VIDEO_TRACE_LINE)
+			count = VIDEO_TRACE_LINE;
+		for (index = 0U; index < count; index++) {
+			line[index * 2U] = digits[bytes[at + index] >> 4];
+			line[index * 2U + 1U] = digits[bytes[at + index] & 15U];
+		}
+		line[count * 2U] = '\0';
+		kern_logf("nvrtx: vk: video: trace %u %s %04x: %s\n", (unsigned)serial, what, (unsigned)at, line);
+	}
 }

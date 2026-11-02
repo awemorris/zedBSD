@@ -1309,3 +1309,22 @@ nvrtx_vk_video_hevc_dxva(
 	/* Succeeded: reports it. */
 	return wanted;
 }
+
+/*
+ * Reports whether the boot asked for the log of what the video decoder is
+ * given for the first pictures of each H.265 session (nvrtx.hevc.trace=1).
+ */
+bool
+nvrtx_vk_video_hevc_trace(
+	void *owner)
+{
+	bool wanted;
+
+	UNUSED_PARAMETER(owner);
+
+	/* The boot's choice. */
+	wanted = nvrtx_stage_hevc_trace_wanted();
+
+	/* Succeeded: reports it. */
+	return wanted;
+}

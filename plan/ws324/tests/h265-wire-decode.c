@@ -178,6 +178,17 @@ nvrtx_vk_video_hevc_dxva(
 	return false;
 }
 
+/* The boot's choice of the decoder's log: off. */
+bool
+nvrtx_vk_video_hevc_trace(
+	void *owner)
+{
+	(void)owner;
+
+	/* The default. */
+	return false;
+}
+
 /* Runs the three round trips. */
 int
 main(void)
