@@ -2,7 +2,7 @@
 
 # ws336-p015: ssh の program と host の相互運用（相手 A: host の OpenSSH sshd）
 
-Status: in-progress（2026-11-02 11:37 P5）。前: planned（2026-11-01 p001 の設計で作成）
+Status: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-02 11:37 P5）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p006・p008・p009・p010・p011

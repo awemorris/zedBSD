@@ -3,7 +3,7 @@
 # ws343-p002 libcrypto-compat に passkey が使う OpenSSL の関数を足し、passkey-fido2・fidoctl を link の差し替えだけで OpenSSL から外す
 
 - 親: [ws.md](../ws.md)。Queue: q1990-i01（P2、worktree `/home/awe/zedBSD-worktrees/p2-ws343`、branch `agent/p2-ws343`、基点 main ca8c38f06e、作業の途中で main 8e12d77f2b（P6 の ws336-p021）を早送りで、bba4a9ef4e（P1 の WS335 p034）を merge bf0fa13238 で取り込んだ。p034 の cryc-aes.c の二乗の buffer の消去と自分の逆の暗号は自動の merge で両方残った）。
-- Status: in-progress（2026-11-02 22:18 P2。実装と host・build の確かめは全部 PASS。cleared は Q1、QEMU・実機の実行は未実施）
+- Status: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-02 22:18 P2。実装と host・build の確かめは全部 PASS。cleared は Q1、QEMU・実機の実行は未実施）
 
 ## 目的と範囲
 

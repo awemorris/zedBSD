@@ -2,7 +2,7 @@
 
 # ws336-p021: package と amd64 の build、libcrypto-compat での確かめ
 
-Status: in-progress（2026-11-02 20:23 P6 q1989。2026-11-02 21:15 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
+Status: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-02 20:23 P6 q1989。2026-11-02 21:15 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p020

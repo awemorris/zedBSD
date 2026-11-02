@@ -2,7 +2,7 @@
 
 # ws336-p018: sshd の listener と相互運用（相手 B）
 
-Status: in-progress（2026-11-02 14:36 P6 q1965。2026-11-02 16:25 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
+Status: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-02 14:36 P6 q1965。2026-11-02 16:25 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p015・p017

@@ -2,7 +2,7 @@
 
 # ws291-p021: Raspberry Pi 5（V3D 7.1）で重い 3D の model を、スペックの比で決めた目標の fps に
 
-Status: in-progress（2026-11-01 21:16 P3 q1840-i02: 6d4ef0df9（pool と overflow の dcache clean を省く）で画面の c74 は 4 つの起動で 51.58〜52.93 fps、offscreen c74 53.5〜55.5、desktop は前と同じ。cleared の判定は Q1。以下は前の記録。2026-11-01 05:45 P4 q1784-i06: 画面が出て、画面の mview c74 49.2〜49.9 fps（目標 50 の境）、desktop は定常 60・launch 57・drag 58。再開点は末尾。06:49 P4 q1817-i01: main b2392803f は Pi 5 で final2 と同じ（回帰なし、checksum 同じ）、VF2 の game mode は c1 136→168・c13 51.6→56.0 fps）
+Status: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-01 21:16 P3 q1840-i02: 6d4ef0df9（pool と overflow の dcache clean を省く）で画面の c74 は 4 つの起動で 51.58〜52.93 fps、offscreen c74 53.5〜55.5、desktop は前と同じ。cleared の判定は Q1。以下は前の記録。2026-11-01 05:45 P4 q1784-i06: 画面が出て、画面の mview c74 49.2〜49.9 fps（目標 50 の境）、desktop は定常 60・launch 57・drag 58。再開点は末尾。06:49 P4 q1817-i01: main b2392803f は Pi 5 で final2 と同じ（回帰なし、checksum 同じ）、VF2 の game mode は c1 136→168・c13 51.6→56.0 fps）
 Parent: [WS291](../ws.md)
 Queue: q1840-i01・i02（P3、2026-11-01）、q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）、q1784-i05・i06（P4、2026-11-01）、q1817-i01（P4、2026-11-01、main の計測だけ）
 

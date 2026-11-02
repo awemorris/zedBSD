@@ -2,7 +2,7 @@
 
 # ws336-p020: 敵対的な入力と privsep の見直し
 
-Status: in-progress（2026-11-02 18:04 P6 q1983。2026-11-02 19:20 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
+Status: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-02 18:04 P6 q1983。2026-11-02 19:20 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p018・p019

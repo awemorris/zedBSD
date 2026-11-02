@@ -2,7 +2,7 @@
 
 # ws324-p001 調べと設計: RTX 2070 の NVENC（H.264・H.265 encode）と NVDEC（H.265 decode）を nvrtx の Vulkan Video として
 
-Status: in-progress（2026-11-01 P1、q1854。design.md 第 2 版（review 1 の反映済み）。Q1 の受け入れと問いの答えが残り）
+Status: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-01 P1、q1854。design.md 第 2 版（review 1 の反映済み）。Q1 の受け入れと問いの答えが残り）
 
 - WS: [WS324](../ws.md)。背景: 2026-11-01 ユーザーから、WS291 をラップアップし、RTX の H.264 encode・H.265 decode・H.265 encode の実装に移る、という趣旨の指示を受けた。ws.md の依存（WS318 の completed の後）は待たない（WS322 と同じ扱い）。
 - 前例: [WS243](../../ws243/ws.md)（nvrtx の NVDEC の H.264 decode、Video Player の GPU の道で 1080p60）。その設計・code・試験の道を土台にする。[WS322](../../ws322/ws.md) の design.md（Q322-4: libvulkan の H.265 と encode の転送は WS322 と WS324 のうち先に着手する方が持つ）。WS318 の ws.md の p011a・p011b（Vulkan の header の版）・p016〜p022（H.265 の decode と encode）の設計の範囲。

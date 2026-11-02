@@ -2,7 +2,7 @@
 
 # ws336-p017: sshd の pre-auth と session の process（sshd-preauth.c・sshd-session.c）
 
-Status: in-progress（2026-11-02 12:37 P6 q1944。2026-11-02 14:28 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
+Status: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-02 12:37 P6 q1944。2026-11-02 14:28 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p008・p010・p016

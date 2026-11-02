@@ -3,7 +3,7 @@
 # ws345-p009 iframe ごとの script の thread（段 A）
 
 - WS: [ws.md](../ws.md)。設計: [design.md](../design.md)。
-- 状態: in-progress（2026-11-02 P5 q1993-i01: 実装と試験は終わり。iframe の frame の item と自分の確定は Q1 の判断で p010 へ移した。cleared の判定は Q1。結果は下）
+- 状態: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-02 P5 q1993-i01: 実装と試験は終わり。iframe の frame の item と自分の確定は Q1 の判断で p010 へ移した。cleared の判定は Q1。結果は下）
 
 ## 目的
 

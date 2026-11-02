@@ -2,7 +2,7 @@
 
 # ws336-p022: QEMU の相互運用（root の sshd と privsep）
 
-Status: in-progress（2026-11-02 21:15 P6 q1991。2026-11-02 23:25 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
+Status: cleared（2026-11-03 Q1、ws.md の表のとおり）。前: in-progress（2026-11-02 21:15 P6 q1991。2026-11-02 23:25 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p021
