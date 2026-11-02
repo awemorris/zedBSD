@@ -277,6 +277,8 @@ struct bind_host {
 	void (*scroll_to)(void *context, double x, double y);
 	/* An animation frame is about to run its callbacks: the rendering update before them happens (may be NULL). */
 	void (*rendering)(void *context);
+	/* How many frames were presented, when the animation frames wait for them: 1 and the count, or 0 when they come by the clock (may be NULL: by the clock). */
+	int (*frame_count)(void *context, uint64_t *count);
 	int (*node_inserted)(void *context, struct dom_node *node);
 	int (*checkpoint)(void *context);
 	/* Starts a request; done is called once, from here or later, and *handle names it for request_cancel. */

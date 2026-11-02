@@ -450,6 +450,7 @@ page_start_scripts(
 	host.cascaded_style = page_cascaded_style;
 	host.scroll_to = page_scroll_to;
 	host.rendering = page_rendering;
+	host.frame_count = page_frame_count;
 	host.node_inserted = script_node_inserted;
 	host.checkpoint = script_checkpoint;
 	host.request = script_request;

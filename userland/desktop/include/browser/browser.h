@@ -385,11 +385,14 @@ struct browser_gpu_failure {
  * up to date before it calls the callbacks; the strings stay valid until
  * the next browser_view_process.  The view's stack_base is not used then.
  * frame_wake (with frame_wake_context) is called from the view's thread
- * when a new picture of the page is ready for browser_view_render_pixels
- * (NULL for none); it must not call into the view.  In a view of its own
- * threads browser_view_settle, _dump, _draw_pixels, _prepare, _draw,
- * _record and _image_at report ENOTSUP, browser_view_set_gpu and
- * _release_targets do nothing, and browser_view_timeout reports -1.
+ * when the page committed a new frame (NULL for none); it must not call
+ * into the view.  The program's drawing thread draws the latest committed
+ * frame (browser_view_render, _render_pixels), owns the view's GPU side
+ * (browser_view_set_gpu, _release_targets) and tells of each present
+ * (browser_view_presented), when the page's animation frames run.  In a
+ * view of its own threads browser_view_settle, _dump, _draw_pixels,
+ * _prepare, _draw, _record and _image_at report ENOTSUP, and
+ * browser_view_timeout reports -1.
  */
 struct browser_view_options {
 	int version;
@@ -420,14 +423,31 @@ struct browser_view_options {
 uint64_t browser_view_snapshot_serial(const struct browser_view *view);
 
 /*
- * Draws the latest picture of the page shown into the caller's pixels
- * (0xAARRGGBB, width by height, rows stride bytes apart), from any thread
- * in a view of its own threads (the picture its script thread made last,
- * at the view's size; what it leaves is the page's canvas color), or as
- * browser_view_draw_pixels in a view of the caller's.  Reports 0, ENOENT
- * when there is no picture yet, or EINVAL.
+ * The drawing thread's side of a view of its own threads.  The page
+ * commits a frame (its display list, the scroll and the size it was laid
+ * out at) after each round that changed it; nothing changes a committed
+ * frame, so the drawing thread draws the latest while the page goes on
+ * (a long script, a layout), at any size (what the frame leaves is its
+ * canvas color).
+ *
+ * browser_view_render_pixels draws the latest committed frame with the
+ * CPU into the caller's pixels (0xAARRGGBB, width by height, rows stride
+ * bytes apart), or does as browser_view_draw_pixels in a view of the
+ * caller's.  browser_view_render records the drawing of it into the
+ * caller's image on the view's GPU (browser_view_set_gpu), render pass and
+ * all, into a command buffer the caller began and submits, and gives the
+ * frame's number; the drawing recorded before must have finished.  In a
+ * view of the caller's thread it does as browser_view_record (number 0).
+ * Both report 0, ENOENT when no frame is committed yet, EINVAL, and the
+ * GPU's errors as browser_view_record does.  Drawing calls of several
+ * threads take turns.  browser_view_presented tells the view the frame of
+ * a number was presented: the page's animation frames
+ * (requestAnimationFrame) wait for it, so that they stop while nothing is
+ * drawn; nothing in a view of the caller's thread.
  */
 int browser_view_render_pixels(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);
+int browser_view_render(struct browser_view *view, const struct browser_target *target, VkCommandBuffer commands, uint64_t *serial);
+void browser_view_presented(struct browser_view *view, uint64_t serial);
 
 /*
  * Asks for the image at a place of the view (a picture dragged out): the

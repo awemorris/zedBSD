@@ -6,11 +6,13 @@
  */
 
 /*
- * A measurement probe: what one picture of a view of its own threads costs
- * its script thread with the CPU renderer (the interim before the committed
- * display list), on heavy pages: the CPU drawing of the page shown at
- * 800 x 600 once it is laid out (the median of 11), and once after each
- * resize (layout and drawing, the median of 11).
+ * A measurement probe: what one frame of a view of its own threads costs,
+ * on heavy pages: the CPU drawing of the page shown at 800 x 600 once it is
+ * laid out (the drawing thread's part of a committed frame; the script
+ * thread's in the interim of p005), the layout and drawing after each
+ * resize (the script thread's part in p005), and the layout and display
+ * list alone after each resize (browser_view_prepare: the script thread's
+ * part of a committed frame), each the median of 11.
  *
  *   raster-cost PAGE...     (paths; run from the repository's root)
  *
@@ -58,6 +60,7 @@ main(
 	struct browser_view *view;
 	double draw[11];
 	double update[11];
+	double commit[11];
 	double start;
 	uint32_t *pixels;
 	int page;
@@ -91,10 +94,17 @@ main(
 			(void)browser_view_draw_pixels(view, pixels, (round & 1) != 0 ? 800U : 900U, 600U, ((round & 1) != 0 ? 800U : 900U) * 4U);
 			update[round] = probe_ms() - start;
 		}
+		for (round = 0; round < 11; round++) {
+			(void)browser_view_resize(view, (round & 1) != 0 ? 900U : 800U, 600U);
+			start = probe_ms();
+			(void)browser_view_prepare(view);
+			commit[round] = probe_ms() - start;
+		}
 		qsort(draw, 11, sizeof(draw[0]), probe_compare);
 		qsort(update, 11, sizeof(update[0]), probe_compare);
-		printf("raster-cost %s: drawing %.2f ms, layout and drawing after a resize %.2f ms (medians of 11)\n", argv[page], draw[5],
-		    update[5]);
+		qsort(commit, 11, sizeof(commit[0]), probe_compare);
+		printf("raster-cost %s: drawing %.2f ms, layout and drawing after a resize %.2f ms, layout and list after a resize %.2f ms"
+		    " (medians of 11)\n", argv[page], draw[5], update[5], commit[5]);
 		browser_view_destroy(view);
 	}
 	free(pixels);

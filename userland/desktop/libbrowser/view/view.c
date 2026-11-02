@@ -39,6 +39,7 @@
 
 #include "base/os-file.h"
 #include "base/os-time.h"
+#include "base/thread.h"
 #include "net/net.h"
 #include "page/page.h"
 #include "paint/gpu.h"
@@ -206,7 +207,14 @@ struct view_prefetch_script {
  * the renderer on it (opened at the first drawing, for the target's format
  * and final layout; gpu_open says it is), the framebuffers made for the
  * caller's image views (oldest first), and the Vulkan call that failed
- * last.
+ * last.  In a view of its own threads these are the drawing thread's, as
+ * are the drawing's own text system (render_text, opened at the first
+ * drawing on the view's fonts, its web faces on the committed frame's
+ * font files) and the committed frame it drew last (drawn, kept until the
+ * next drawing, since the recorded work may still read what it uploaded);
+ * render_lock is held across a drawing, so that the drawing calls of
+ * several threads take turns.  scene is the script thread's: the scene
+ * made last from the page's display list, and the number of that list.
  *
  * The input: where the pointer is (pointer_inside says it is over the
  * view), the button held down and where (press_button is -1 when none;
@@ -261,6 +269,12 @@ struct browser_view {
 	struct view_framebuffer framebuffers[VIEW_FRAMEBUFFERS_MAX];
 	size_t framebuffer_count;
 	struct browser_gpu_failure failure;
+	struct wb_mutex render_lock;
+	struct text_system render_text;
+	int render_text_open;
+	struct view_commit *drawn;
+	struct paint_scene *scene;
+	uint64_t scene_generation;
 	float pointer_x;
 	float pointer_y;
 	int pointer_inside;
@@ -351,6 +365,10 @@ static void view_failed(struct browser_view *view, const char *url, int error, c
 static void view_console(void *context, int level, const char *text, size_t length);
 static void view_storage_failed(struct browser_view *view, int error);
 static int view_gpu_ready(struct browser_view *view, const struct browser_target *target);
+static void view_framebuffers_release(struct browser_view *view);
+static int view_render_gpu(struct browser_view *view, const struct browser_target *target, VkCommandBuffer commands, uint64_t *serial);
+static int view_render_cpu(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);
+static int view_render_text(struct browser_view *view, const struct paint_scene *scene, int *changed);
 static void view_gpu_close(struct browser_view *view);
 static int view_framebuffer(struct browser_view *view, const struct browser_target *target, VkFramebuffer *framebuffer);
 static int view_gpu_failed(struct browser_view *view, const char *operation, VkResult result);
@@ -422,11 +440,16 @@ browser_view_create(
 			return error;
 	}
 
-	/* The view, empty. */
+	/* The view, empty, with the drawing's lock. */
 	made = calloc(1, sizeof(*made));
 	if (made == NULL)
 		return ENOMEM;
 	made->instance = instance;
+	error = wb_mutex_init(&made->render_lock);
+	if (error != 0) {
+		free(made);
+		return error;
+	}
 
 	/* The fonts the program names, and the system's for the ones it leaves out. */
 	made->fonts.sans = text_default_path(TEXT_FACE_SANS);
@@ -476,6 +499,7 @@ browser_view_create(
 	/* The loader of the http and https pages and images, with the instance's cookies, which wakes the program when it has news. */
 	error = page_net_create(instance->cookies, instance->cache, options->wake, options->wake_context, &made->loader);
 	if (error != 0) {
+		wb_mutex_destroy(&made->render_lock);
 		free(made);
 		return error;
 	}
@@ -505,8 +529,15 @@ browser_view_destroy(
 		return;
 	}
 
-	/* The renderer and the framebuffers on the caller's device. */
+	/* The renderer and the framebuffers on the caller's device, and the drawing's frame, text and lock. */
 	view_gpu_close(view);
+	view_commit_release(view->drawn);
+	if (view->render_text_open)
+		text_system_close(&view->render_text);
+	wb_mutex_destroy(&view->render_lock);
+
+	/* The scene made last. */
+	paint_scene_release(view->scene);
 
 	/* A load under way, the pages kept for Back and Forward, then the page and its path (its image requests go with it). */
 	view_stop_load(view, 0);
@@ -2120,26 +2151,20 @@ browser_view_set_gpu(
 	struct browser_view *view,
 	const struct browser_gpu *gpu)
 {
-	int windowed;
-
-	/* A view of its own threads does not draw on the program's GPU yet. */
-	windowed = view_front_window(view);
-	if (windowed) {
-		return;
-	}
+	/* The drawing's calls take turns (in a view of its own threads, the drawing thread's). */
+	wb_mutex_lock(&view->render_lock);
 
 	/* The renderer and the framebuffers on the old device. */
 	view_gpu_close(view);
 
-	/* No GPU from now on. */
-	if (gpu == NULL) {
-		view->has_device = 0;
-		return;
+	/* The new one, made on it at the next drawing; none when there is none. */
+	view->has_device = 0;
+	if (gpu != NULL) {
+		view->device = *gpu;
+		view->has_device = 1;
 	}
 
-	/* The new one; the renderer is made on it at the next drawing. */
-	view->device = *gpu;
-	view->has_device = 1;
+	wb_mutex_unlock(&view->render_lock);
 }
 
 /*
@@ -2151,19 +2176,12 @@ void
 browser_view_release_targets(
 	struct browser_view *view)
 {
-	size_t index;
-	int windowed;
+	/* The drawing's calls take turns (in a view of its own threads, the drawing thread's). */
+	wb_mutex_lock(&view->render_lock);
 
-	/* A view of its own threads keeps no framebuffer of the program's. */
-	windowed = view_front_window(view);
-	if (windowed) {
-		return;
-	}
+	view_framebuffers_release(view);
 
-	/* Each framebuffer, oldest first. */
-	for (index = 0; index < view->framebuffer_count; index++)
-		vkDestroyFramebuffer(view->device.device, view->framebuffers[index].framebuffer, NULL);
-	view->framebuffer_count = 0;
+	wb_mutex_unlock(&view->render_lock);
 }
 
 /* Lays the page out now when it changed, so that a frame the caller begins next cannot fail on the layout. */
@@ -2311,6 +2329,298 @@ browser_view_record(
 
 	/* Succeeded: the caller's commands draw the page. */
 	return 0;
+}
+
+/*
+ * Records the drawing of the latest committed frame of a view of its own
+ * threads into the caller's image, render pass and all, into a command
+ * buffer the caller (the drawing thread) began and submits, and reports
+ * the frame's number for browser_view_presented.  The drawing recorded
+ * before must have finished.  A view of the caller's thread records the
+ * page as it is now (browser_view_record; number 0).
+ */
+int
+browser_view_render(
+	struct browser_view *view,
+	const struct browser_target *target,
+	VkCommandBuffer commands,
+	uint64_t *serial)
+{
+	int error;
+
+	/* No number until a frame is drawn. */
+	*serial = 0;
+
+	/* A view of the caller's thread records the page as it is now. */
+	if (view->front == NULL) {
+		error = browser_view_record(view, target, commands);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the caller's commands draw the page. */
+		return 0;
+	}
+
+	/* Refuses an absent or empty target before issuing any Vulkan command. */
+	error = view_target(target);
+	if (error != 0)
+		return error;
+
+	/* The latest committed frame, recorded while the drawing's calls take turns. */
+	wb_mutex_lock(&view->render_lock);
+
+	error = view_render_gpu(view, target, commands, serial);
+
+	wb_mutex_unlock(&view->render_lock);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller's commands draw the frame. */
+	return 0;
+}
+
+/*
+ * Tells a view of its own threads that the frame of a number (from
+ * browser_view_render) was presented: the page's animation frames run
+ * then (requestAnimationFrame waits for it).  Nothing in a view of the
+ * caller's thread.
+ */
+void
+browser_view_presented(
+	struct browser_view *view,
+	uint64_t serial)
+{
+	/* A view of the caller's thread has its animation frames by the clock. */
+	if (view->front == NULL)
+		return;
+
+	/* The script thread hears of it. */
+	view_front_presented(view, serial);
+}
+
+/* Records the latest committed frame on the drawing thread (the render lock held). */
+static int
+view_render_gpu(
+	struct browser_view *view,
+	const struct browser_target *target,
+	VkCommandBuffer commands,
+	uint64_t *serial)
+{
+	struct view_commit *commit;
+	struct paint_scene *scene;
+	VkFramebuffer framebuffer;
+	VkExtent2D extent;
+	VkResult result;
+	int changed;
+	int error;
+
+	/* The latest committed frame, held. */
+	commit = view_front_commit(view);
+	if (commit == NULL)
+		return ENOENT;
+	scene = commit->scene;
+
+	/* The drawing's faces for the frame's fonts, the renderer for the target, and the framebuffer over it. */
+	error = view_render_text(view, scene, &changed);
+	if (error == 0)
+		error = view_gpu_ready(view, target);
+	if (error == 0 && changed)
+		paint_gpu_forget_glyphs(&view->gpu);
+	if (error == 0)
+		error = view_framebuffer(view, target, &framebuffer);
+	if (error != 0) {
+		view_commit_release(commit);
+		return error;
+	}
+
+	/* The frame's instances and atlas, written by the host now. */
+	extent.width = target->width;
+	extent.height = target->height;
+	result = paint_gpu_prepare(&view->gpu, &scene->list, &view->render_text, commit->scroll_y, extent);
+	if (result != VK_SUCCESS) {
+		view_commit_release(commit);
+		error = view_gpu_failed(view, view->gpu.operation, result);
+		return error;
+	}
+
+	/* The pass, into the caller's command buffer. */
+	paint_gpu_record(&view->gpu, commands, &scene->list, framebuffer, extent);
+
+	/* The frame is kept until the next drawing (the work recorded may still read what it put in the atlas). */
+	view_commit_release(view->drawn);
+	view->drawn = commit;
+	*serial = commit->serial;
+
+	/* Succeeded: the caller's commands draw the frame. */
+	return 0;
+}
+
+/* Draws the latest committed frame with the CPU on the calling thread (the render lock held); what the frame leaves is its canvas color. */
+static int
+view_render_cpu(
+	struct browser_view *view,
+	uint32_t *pixels,
+	unsigned width,
+	unsigned height,
+	size_t stride)
+{
+	struct view_commit *commit;
+	struct paint_bitmap bitmap;
+	unsigned char *row_start;
+	unsigned row;
+	int changed;
+	int error;
+
+	/* The latest committed frame, held. */
+	commit = view_front_commit(view);
+	if (commit == NULL)
+		return ENOENT;
+
+	/* The drawing's faces for the frame's fonts (a GPU atlas of other glyphs starts over). */
+	error = view_render_text(view, commit->scene, &changed);
+	if (error != 0) {
+		view_commit_release(commit);
+		return error;
+	}
+	if (changed && view->gpu_open)
+		paint_gpu_forget_glyphs(&view->gpu);
+
+	/* Rows packed one after another are drawn in place, others into a packed bitmap first. */
+	bitmap.pixels = pixels;
+	bitmap.width = (int)width;
+	bitmap.height = (int)height;
+	if (stride != (size_t)width * sizeof(uint32_t)) {
+		error = paint_bitmap_create(&bitmap, (int)width, (int)height);
+		if (error != 0) {
+			view_commit_release(commit);
+			return error;
+		}
+	}
+	error = paint_software(&commit->scene->list, &view->render_text, commit->scroll_y, &bitmap);
+
+	/* A packed bitmap is copied into the caller's rows and goes. */
+	if (bitmap.pixels != pixels) {
+		for (row = 0; error == 0 && row < height; row++) {
+			row_start = (unsigned char *)pixels + (size_t)row * stride;
+			memcpy(row_start, bitmap.pixels + (size_t)row * width, (size_t)width * sizeof(uint32_t));
+		}
+		paint_bitmap_release(&bitmap);
+	}
+
+	/* The frame is let go. */
+	view_commit_release(commit);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the pixels hold the frame. */
+	return 0;
+}
+
+/*
+ * Makes the drawing's text system draw a scene's glyphs: opened at the
+ * first drawing on the view's fonts (the page's base faces), its web
+ * faces on the font files the scene holds.  *changed says the glyphs it
+ * cached were forgotten.
+ */
+static int
+view_render_text(
+	struct browser_view *view,
+	const struct paint_scene *scene,
+	int *changed)
+{
+	int replaced;
+	int face;
+	int error;
+
+	/* The base faces, once. */
+	*changed = 0;
+	if (!view->render_text_open) {
+		error = text_system_open_with(&view->render_text, &view->fonts, &view->companions);
+		if (error != 0)
+			return error;
+		view->render_text_open = 1;
+		*changed = 1;
+	}
+
+	/* Each web face, the scene's. */
+	for (face = TEXT_FACE_WEB; face < TEXT_FACES; face++) {
+		error = text_system_use_face(&view->render_text, face, scene->faces[face], &replaced);
+		if (replaced)
+			*changed = 1;
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the faces are the scene's. */
+	return 0;
+}
+
+/*
+ * Makes the scene of the page as it is now for the front's committed
+ * frame, on the script thread: the page laid out and painted, its display
+ * list taken into a new scene when it painted again (else the last one
+ * again), held for the caller, and the scroll it is drawn at.  Reports 0,
+ * ENOENT without a page, or the layout's error.
+ */
+int
+view_commit_scene(
+	struct browser_view *view,
+	struct paint_scene **scene,
+	layout_unit *scroll_y)
+{
+	struct paint_scene *made;
+	int error;
+
+	/* No page has nothing to commit. */
+	*scene = NULL;
+	if (view->page == NULL)
+		return ENOENT;
+
+	/* The page as it is now. */
+	error = view_update(view);
+	if (error != 0)
+		return error;
+
+	/* A list taken before (the page shown again from the history) is painted again. */
+	if (view->scene == NULL || view->scene_generation != view->page->paint_generation) {
+		if (view->page->painted && view->page->paint_taken) {
+			error = page_paint(view->page);
+			if (error != 0)
+				return error;
+		}
+	}
+
+	/* A list painted since the last scene becomes the new one. */
+	if (view->scene == NULL || view->scene_generation != view->page->paint_generation) {
+		if (!view->page->painted)
+			return ENOENT;
+		error = paint_scene_make(&view->page->paint, &view->page->text, &made);
+		if (error != 0)
+			return error;
+		view->page->paint_taken = 1;
+		paint_scene_release(view->scene);
+		view->scene = made;
+		view->scene_generation = view->page->paint_generation;
+	}
+
+	/* Succeeded: the scene, held for the frame, and the scroll. */
+	paint_scene_retain(view->scene);
+	*scene = view->scene;
+	*scroll_y = view_drawn_scroll(view);
+	return 0;
+}
+
+/* Tells the page shown that a frame was presented (on the script thread): its animation frames are due now. */
+void
+view_frame_opportunity(
+	struct browser_view *view)
+{
+	/* No page has no animation frames. */
+	if (view->page == NULL)
+		return;
+
+	/* The page counts the chance. */
+	page_frame_presented(view->page);
 }
 
 /*
@@ -2465,8 +2775,12 @@ browser_view_render_pixels(
 		return 0;
 	}
 
-	/* The picture a view of its own threads made last. */
-	error = view_front_render_pixels(view, pixels, width, height, stride);
+	/* The frame a view of its own threads committed last, drawn by the caller's thread (the drawing thread). */
+	wb_mutex_lock(&view->render_lock);
+
+	error = view_render_cpu(view, pixels, width, height, stride);
+
+	wb_mutex_unlock(&view->render_lock);
 	if (error != 0)
 		return error;
 
@@ -2887,6 +3201,10 @@ view_make_page(
 		return error;
 	if (view->front != NULL)
 		vm_heap_set_agent(made->heap, view_front_agent(view->front));
+
+	/* In a view of its own threads its animation frames wait for the drawing thread's presents. */
+	if (view->front != NULL)
+		page_set_frames_presented(made, 1);
 
 	/* Its scripts see the view's size and its fonts, write their console through the view, and count time from now. */
 	page_set_viewport(made, (int)view->width, (int)view->height);
@@ -3977,9 +4295,22 @@ view_gpu_close(
 	(void)vkDeviceWaitIdle(view->device.device);
 
 	/* The framebuffers (made in the renderer's pass), then the renderer. */
-	browser_view_release_targets(view);
+	view_framebuffers_release(view);
 	paint_gpu_close(&view->gpu);
 	view->gpu_open = 0;
+}
+
+/* Destroys the framebuffers made for the caller's image views, oldest first. */
+static void
+view_framebuffers_release(
+	struct browser_view *view)
+{
+	size_t index;
+
+	/* Each framebuffer, oldest first. */
+	for (index = 0; index < view->framebuffer_count; index++)
+		vkDestroyFramebuffer(view->device.device, view->framebuffers[index].framebuffer, NULL);
+	view->framebuffer_count = 0;
 }
 
 /*

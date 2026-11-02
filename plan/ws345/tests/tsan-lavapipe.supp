@@ -1,0 +1,12 @@
+# ThreadSanitizer suppressions of host-threaded-view's tsan variant: lavapipe (the host's software Vulkan
+# driver, not built with -fsanitize=thread) locks its own mutexes on its own queue thread, which the
+# sanitizer reports when the offscreen device is made and destroyed.  The engine's code is not suppressed.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+called_from_lib:libvulkan_lvp.so
+race:libvulkan_lvp.so
+mutex:libvulkan_lvp.so
+# Its compiler (llvmpipe's LLVM) likewise.
+called_from_lib:libLLVM.so.19.1
+race:libLLVM
+deadlock:libLLVM
+deadlock:libvulkan

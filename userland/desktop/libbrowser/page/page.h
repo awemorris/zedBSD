@@ -129,6 +129,13 @@ struct page {
 	int previous_laid_out;
 	struct paint_list paint;
 	int painted;
+	/* The number of the display list painted last, which no other list of any page has (a view of its own threads takes each into a scene). */
+	uint64_t paint_generation;
+	/* Whether the display list painted last was taken into a scene (the page's list is empty until it paints again). */
+	int paint_taken;
+	/* Whether its animation frames wait for the presents of a drawing thread (frames_presented), and how many came. */
+	int frames_presented;
+	uint64_t frames;
 	char *base;
 	double now;
 	uint32_t styled_generation;
@@ -374,6 +381,9 @@ void page_set_viewport(struct page *page, int width, int height);
 void page_set_color_scheme(struct page *page, int dark);
 void page_set_fonts(struct page *page, const struct text_font_paths *paths);
 void page_set_font_companions(struct page *page, const struct text_font_companions *companions);
+void page_set_frames_presented(struct page *page, int presented);
+void page_frame_presented(struct page *page);
+int page_frame_count(void *context, uint64_t *count);
 int page_sticky_sync(struct page *page, layout_unit scroll_y);
 void page_set_scroll(struct page *page, double x, double y);
 

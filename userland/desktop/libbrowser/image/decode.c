@@ -25,6 +25,16 @@
 static uint64_t img_next_serial = 1;
 
 /*
+ * The pixels of a bitmap and how many hold them (the bitmap, and each
+ * committed frame that draws it): the last to let go frees them.  refs is
+ * changed atomically (frames are let go on other threads than the page's).
+ */
+struct img_hold {
+	unsigned refs;
+	uint32_t *pixels;
+};
+
+/*
  * Tells an image's kind from its first bytes: JPEG starts with FF D8 FF,
  * PNG with its eight-byte signature, GIF with "GIF87a" or "GIF89a", WebP
  * with "RIFF", four bytes of size and "WEBPVP" (the MIME Sniffing
@@ -124,8 +134,11 @@ void
 img_bitmap_release(
 	struct img_bitmap *bitmap)
 {
-	/* The pixels, and nothing left behind. */
-	free(bitmap->pixels);
+	/* The pixels (held ones when nobody else holds them), and nothing left behind. */
+	if (bitmap->hold != NULL)
+		img_hold_release(bitmap->hold);
+	else
+		free(bitmap->pixels);
 	memset(bitmap, 0, sizeof(*bitmap));
 }
 
@@ -149,10 +162,18 @@ img_bitmap_create(
 	if (count > IMG_PIXELS_MAX)
 		return EINVAL;
 
-	/* The pixels, cleared. */
-	bitmap->pixels = calloc(count, sizeof(uint32_t));
-	if (bitmap->pixels == NULL)
+	/* The pixels, cleared, and their hold. */
+	bitmap->hold = malloc(sizeof(*bitmap->hold));
+	if (bitmap->hold == NULL)
 		return ENOMEM;
+	bitmap->pixels = calloc(count, sizeof(uint32_t));
+	if (bitmap->pixels == NULL) {
+		free(bitmap->hold);
+		bitmap->hold = NULL;
+		return ENOMEM;
+	}
+	bitmap->hold->refs = 1U;
+	bitmap->hold->pixels = bitmap->pixels;
 
 	/* Succeeded: the bitmap is transparent, with a serial no other bitmap has. */
 	bitmap->width = width;
@@ -171,4 +192,82 @@ img_bitmap_renew(
 {
 	/* A serial no other bitmap has. */
 	bitmap->serial = __atomic_fetch_add(&img_next_serial, 1U, __ATOMIC_RELAXED);
+}
+
+/*
+ * Makes a bitmap's pixels its own before it is drawn into again: pixels a
+ * committed frame holds too are copied into new ones (the frame keeps the
+ * old).  Reports 0, or ENOMEM (the bitmap is unchanged).
+ */
+int
+img_bitmap_writable(
+	struct img_bitmap *bitmap)
+{
+	struct img_hold *hold;
+	uint32_t *pixels;
+	size_t count;
+	unsigned refs;
+
+	/* Pixels nobody else holds are the bitmap's already. */
+	if (bitmap->hold == NULL)
+		return 0;
+	refs = __atomic_load_n(&bitmap->hold->refs, __ATOMIC_ACQUIRE);
+	if (refs == 1U)
+		return 0;
+
+	/* New pixels with the same picture, and their hold. */
+	count = (size_t)bitmap->width * (size_t)bitmap->height;
+	hold = malloc(sizeof(*hold));
+	pixels = malloc(count * sizeof(uint32_t));
+	if (hold == NULL || pixels == NULL) {
+		free(hold);
+		free(pixels);
+		return ENOMEM;
+	}
+	memcpy(pixels, bitmap->pixels, count * sizeof(uint32_t));
+	hold->refs = 1U;
+	hold->pixels = pixels;
+
+	/* The bitmap's hold on the old pixels ends. */
+	img_hold_release(bitmap->hold);
+	bitmap->hold = hold;
+	bitmap->pixels = pixels;
+
+	/* Succeeded: the pixels are the bitmap's alone. */
+	return 0;
+}
+
+/* Holds a bitmap's pixels (NULL for a bitmap without a hold, whose pixels live as long as their arena). */
+struct img_hold *
+img_hold_retain(
+	const struct img_bitmap *bitmap)
+{
+	/* An arena's bitmap has nothing to hold. */
+	if (bitmap->hold == NULL)
+		return NULL;
+
+	/* One hold more. */
+	__atomic_fetch_add(&bitmap->hold->refs, 1U, __ATOMIC_RELAXED);
+	return bitmap->hold;
+}
+
+/* Lets go of a hold on pixels (NULL is nothing); the last frees them. */
+void
+img_hold_release(
+	struct img_hold *hold)
+{
+	unsigned refs;
+
+	/* Nothing held. */
+	if (hold == NULL)
+		return;
+
+	/* One hold less; others still hold them. */
+	refs = __atomic_sub_fetch(&hold->refs, 1U, __ATOMIC_ACQ_REL);
+	if (refs != 0U)
+		return;
+
+	/* The last: the pixels go. */
+	free(hold->pixels);
+	free(hold);
 }

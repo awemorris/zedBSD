@@ -26,6 +26,17 @@
  *       text committed for a session that is not the page's is dropped;
  *   (h) a pagehide handler that runs for ever (the page is put away for
  *       going back) is stopped after 1 s and the new page is shown;
+ *   (i) the committed frame drawn by the drawing thread is the page as a
+ *       view of the caller's draws it, pixel for pixel: with the CPU
+ *       (browser_view_render_pixels against browser_view_draw_pixels) and
+ *       on the GPU (browser_view_render into an offscreen image against
+ *       browser_view_draw; skipped without a Vulkan device), for pages with
+ *       text, a web font, borders, a gradient, an image, filters and an
+ *       iframe;
+ *   (j) requestAnimationFrame runs once for each present
+ *       (browser_view_presented) and not at all while nothing is presented;
+ *   (k) while a script spins for 5 s the drawing thread draws the last
+ *       committed frame, at a size other than the view's too, at once;
  *   and, in both modes, a link to a page whose style sheet comes slowly
  *   (as host-navigation-wait): the window's calls stay short, the page
  *   shown stays the first until the new one is ready, and the new one is
@@ -103,6 +114,10 @@ static void test_order_merge_bound(void);
 static void test_destroy_navigate(void);
 static void test_field_session(void);
 static void test_navigation_wait(int threading);
+static void test_same_pictures(void);
+static int test_gpu_render(struct browser_view *view, int own, uint32_t *pixels);
+static void test_animation_frames(void);
+static void test_draw_during_script(void);
 
 /* Runs every check and prints the summary. */
 int
@@ -140,6 +155,9 @@ main(
 	test_field_session();
 	test_navigation_wait(BROWSER_THREADING_CALLER);
 	test_navigation_wait(BROWSER_THREADING_OWN);
+	test_same_pictures();
+	test_animation_frames();
+	test_draw_during_script();
 
 	/* The summary. */
 	printf("host-threaded-view: %u checks, %u failed\n", test_checks, test_failures);
@@ -341,7 +359,7 @@ test_pump(
 		start = test_now();
 		(void)browser_view_pointer_move(view, 400.0f, 300.0f, 0);
 		browser_view_process(view);
-		if (test_redraw) {
+		if (test_redraw && view_front_of(view) == NULL) {
 			test_redraw = 0;
 			(void)browser_view_render_pixels(view, pixels, 800U, 600U, 800U * sizeof(uint32_t));
 		}
@@ -728,11 +746,8 @@ test_navigation_wait(
 		browser_view_process(view);
 		if (test_redraw) {
 			test_redraw = 0;
-			if (threading == BROWSER_THREADING_OWN) {
-				(void)browser_view_render_pixels(view, pixels, 800U, 600U, 800U * sizeof(uint32_t));
-			} else {
+			if (threading == BROWSER_THREADING_CALLER)
 				(void)browser_view_draw_pixels(view, pixels, 800U, 600U, 800U * sizeof(uint32_t));
-			}
 		}
 		url = browser_view_url(view);
 		if (switched == 0 && url != NULL && strstr(url, "second.html") != NULL)
@@ -751,5 +766,248 @@ test_navigation_wait(
 	test_check(switched != 0 && sent != 0 && switched >= sent, "navigation-wait: the first page stays until the new one is ready",
 	    "%s: shown %.1f ms after the sheet was sent", mode, (double)(switched - sent) / 1e6);
 	test_check(height >= 5000.0, "navigation-wait: the new page is shown with its sheet", "%s: height %.0f", mode, height);
+	browser_view_destroy(view);
+}
+
+/* (i): the committed frames, drawn by the drawing stand-in, are the caller's pictures of the same pages. */
+static void
+test_same_pictures(void)
+{
+	static uint32_t expected[800U * 600U];
+	static uint32_t drawn[800U * 600U];
+	static uint32_t gpu_expected[800U * 600U];
+	static uint32_t gpu_drawn[800U * 600U];
+	struct browser_view *caller;
+	struct browser_view *own;
+	const char *pages[6];
+	char body[4096];
+	char root[256];
+	char name[512];
+	long long start;
+	size_t differ;
+	size_t index;
+	unsigned page;
+	int caller_gpu;
+	int own_gpu;
+	int same;
+	int error;
+
+	/* The pages: the test's own (an iframe, a web font, an image, a gradient, filters) and three of the engine's. */
+	if (getcwd(root, sizeof(root)) == NULL)
+		return;
+	pages[0] = test_page("commit-inner.html", "<!DOCTYPE html><body style='margin:0;background:#ffe'><p style='color:#a00'>inner frame text</p>"
+	    "<div style='width:40px;height:30px;background:linear-gradient(90deg,#00f,#0f0)'></div>");
+	snprintf(body, sizeof(body),
+	    "<!DOCTYPE html><title>commit</title><style>@font-face { font-family: web; src: url('file://%s/userland/desktop/fonts/Mahora-Bold.ttf'); }"
+	    " .web { font-family: web; font-size: 30px }</style><body style='background:#eef'>"
+	    "<p class='web'>A web font: Hamburgefonstiv</p>"
+	    "<div style='border:4px dashed #c33;border-radius:12px;padding:8px;width:300px;background:linear-gradient(45deg,#fc0,#0cf)'>gradient box</div>"
+	    "<img src='file://%s/plan/ws074/tests/pages/canvas-background.png' style='width:120px;height:80px'>"
+	    "<div style='filter:blur(2px) grayscale(1);width:100px;height:40px;background:#f60'>blur</div>"
+	    "<div style='position:relative;width:200px;height:60px'><div style='position:absolute;inset:0;backdrop-filter:invert(1)'></div>backdrop</div>"
+	    "<div style='opacity:0.5;background:#090;width:80px;height:30px'>half</div>"
+	    "<iframe src='%s' style='width:300px;height:100px;border:2px solid #333'></iframe>",
+	    root, root, pages[0]);
+	pages[1] = test_page("commit.html", body);
+	for (index = 0; index < 3U; index++) {
+		static const char *const engine[3] = { "first", "blocks", "flex" };
+
+		snprintf(name, sizeof(name), "%s/plan/ws074/tests/pages/%s.html", root, engine[index]);
+		pages[2U + index] = strdup(name);
+	}
+	pages[5] = NULL;
+
+	/* Each page in both views, the own one drawn by this thread (the drawing stand-in) until it shows the same, at most 5 s. */
+	for (page = 1U; pages[page] != NULL; page++) {
+		error = test_view(BROWSER_THREADING_CALLER, &caller);
+		if (error == 0)
+			error = test_view(BROWSER_THREADING_OWN, &own);
+		if (error != 0) {
+			test_check(0, "(i) views", "none (%d)", error);
+			return;
+		}
+		(void)browser_view_load(caller, pages[page]);
+		(void)browser_view_settle(caller, 5000.0, BROWSER_SETTLE_LAYOUT);
+		error = browser_view_draw_pixels(caller, expected, 800U, 600U, 800U * sizeof(uint32_t));
+		caller_gpu = test_gpu_render(caller, 0, gpu_expected);
+		(void)browser_view_load(own, pages[page]);
+
+		/* The CPU's picture of the latest committed frame, until it is the caller's. */
+		same = 0;
+		differ = 0;
+		start = test_now();
+		while (!same && test_now() - start < 5000000000LL) {
+			browser_view_process(own);
+			memset(drawn, 0, sizeof(drawn));
+			if (browser_view_render_pixels(own, drawn, 800U, 600U, 800U * sizeof(uint32_t)) == 0) {
+				differ = 0;
+				for (index = 0; index < 800U * 600U; index++)
+					differ += drawn[index] != expected[index];
+				same = differ == 0;
+			}
+			if (!same)
+				test_sleep_ms(20);
+		}
+		test_check(error == 0 && same, "(i) the CPU draws the committed frame as the caller's view draws the page", "%s: %zu pixels differ",
+		    strrchr(pages[page], '/') + 1, differ);
+
+		/* The GPU's, likewise (the frame is the same one now). */
+		own_gpu = test_gpu_render(own, 1, gpu_drawn);
+		if (caller_gpu == 77 || own_gpu == 77) {
+			printf("SKIP (i) GPU: no Vulkan device\n");
+		} else {
+			differ = 0;
+			for (index = 0; index < 800U * 600U; index++)
+				differ += gpu_drawn[index] != gpu_expected[index];
+			test_check(caller_gpu == 0 && own_gpu == 0 && differ == 0, "(i) the GPU draws the committed frame as the caller's view draws the page",
+			    "%s: caller %d, own %d, %zu pixels differ", strrchr(pages[page], '/') + 1, caller_gpu, own_gpu, differ);
+		}
+		browser_view_destroy(own);
+		browser_view_destroy(caller);
+	}
+}
+
+/*
+ * Draws a view on an offscreen image of 800 x 600 and reads it back: a
+ * view of the caller's with browser_view_draw, a view of its own threads
+ * with browser_view_render into a command buffer of the test's.  Reports
+ * 0, 77 without a Vulkan device, or another error.
+ */
+static int
+test_gpu_render(
+	struct browser_view *view,
+	int own,
+	uint32_t *pixels)
+{
+	struct browser_offscreen *offscreen;
+	struct browser_gpu_failure failure;
+	struct browser_target target;
+	struct browser_gpu gpu;
+	VkCommandPoolCreateInfo pool_info;
+	VkCommandBufferAllocateInfo buffer_info;
+	VkCommandBufferBeginInfo begin;
+	VkSubmitInfo submit;
+	VkCommandPool pool;
+	VkCommandBuffer commands;
+	VkQueue queue;
+	uint64_t serial;
+	int error;
+
+	error = browser_offscreen_create(800U, 600U, &offscreen, &failure);
+	if (error != 0)
+		return 77;
+	browser_offscreen_target(offscreen, &gpu, &target);
+	browser_view_set_gpu(view, &gpu);
+	if (!own) {
+		error = browser_view_draw(view, &target, VK_NULL_HANDLE, VK_NULL_HANDLE);
+	} else {
+		memset(&pool_info, 0, sizeof(pool_info));
+		pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		pool_info.queueFamilyIndex = gpu.queue_family;
+		error = vkCreateCommandPool(gpu.device, &pool_info, NULL, &pool) == VK_SUCCESS ? 0 : EIO;
+		if (error == 0) {
+			memset(&buffer_info, 0, sizeof(buffer_info));
+			buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+			buffer_info.commandPool = pool;
+			buffer_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+			buffer_info.commandBufferCount = 1U;
+			error = vkAllocateCommandBuffers(gpu.device, &buffer_info, &commands) == VK_SUCCESS ? 0 : EIO;
+			if (error == 0) {
+				memset(&begin, 0, sizeof(begin));
+				begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+				(void)vkBeginCommandBuffer(commands, &begin);
+				error = browser_view_render(view, &target, commands, &serial);
+				(void)vkEndCommandBuffer(commands);
+				if (error == 0) {
+					memset(&submit, 0, sizeof(submit));
+					submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+					submit.commandBufferCount = 1U;
+					submit.pCommandBuffers = &commands;
+					vkGetDeviceQueue(gpu.device, gpu.queue_family, 0U, &queue);
+					error = vkQueueSubmit(queue, 1U, &submit, VK_NULL_HANDLE) == VK_SUCCESS ? 0 : EIO;
+					(void)vkQueueWaitIdle(queue);
+				}
+			}
+			vkDestroyCommandPool(gpu.device, pool, NULL);
+		}
+	}
+	if (error == 0)
+		error = browser_offscreen_read(offscreen, pixels, 800U * sizeof(uint32_t), &failure);
+	browser_view_set_gpu(view, NULL);
+	browser_offscreen_destroy(offscreen);
+	return error;
+}
+
+/* (j): an animation frame for each present, and none without one. */
+static void
+test_animation_frames(void)
+{
+	struct browser_view *view;
+	const char *path;
+	const char *title;
+	char wanted[32];
+	int presents;
+	int error;
+
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(j) view", "no view (%d)", error);
+		return;
+	}
+	path = test_page("raf.html", "<!DOCTYPE html><title>n0</title><p>frames<script>var n = 0;"
+	    " function f() { n++; document.title = 'n' + n; requestAnimationFrame(f); } requestAnimationFrame(f);</script>");
+	(void)browser_view_load(view, path);
+
+	/* Nothing presented for 600 ms after the page is shown: no animation frame. */
+	(void)test_pump(view, 5000, "n0");
+	(void)test_pump(view, 600, NULL);
+	title = browser_view_title(view);
+	test_check(title != NULL && strcmp(title, "n0") == 0, "(j) no animation frame while nothing is presented", "title \"%s\"",
+	    title != NULL ? title : "(none)");
+
+	/* Ten presents, each after the frame of the one before: ten frames, then no more. */
+	for (presents = 0; presents < 10; presents++) {
+		browser_view_presented(view, 0);
+		snprintf(wanted, sizeof(wanted), "n%d", presents + 1);
+		(void)test_pump(view, 2000, wanted);
+	}
+	(void)test_pump(view, 400, NULL);
+	title = browser_view_title(view);
+	snprintf(wanted, sizeof(wanted), "n%d", presents);
+	test_check(title != NULL && strcmp(title, wanted) == 0, "(j) one animation frame for each present", "title \"%s\" after %d presents",
+	    title != NULL ? title : "(none)", presents);
+	browser_view_destroy(view);
+}
+
+/* (k): the last committed frame is drawn while a script spins, at another size too. */
+static void
+test_draw_during_script(void)
+{
+	static uint32_t pixels[1000U * 700U];
+	struct browser_view *view;
+	const char *path;
+	long long start;
+	long long took;
+	uint32_t corner;
+	int drawn;
+	int error;
+
+	error = test_view(BROWSER_THREADING_OWN, &view);
+	if (error != 0) {
+		test_check(0, "(k) view", "no view (%d)", error);
+		return;
+	}
+	path = test_page("spin-color.html", "<!DOCTYPE html><title>spin</title><body style='background:#336699'><p>spin<script>"
+	    "setTimeout(function () { document.title = 'spinning'; var t = Date.now(); while (Date.now() - t < 5000) {} }, 300);</script>");
+	(void)browser_view_load(view, path);
+	(void)test_pump(view, 1000, NULL);
+
+	/* While it spins: the frame at 1000 x 700, the part past the page's 800 x 600 in its canvas color. */
+	start = test_now();
+	drawn = browser_view_render_pixels(view, pixels, 1000U, 700U, 1000U * sizeof(uint32_t));
+	took = test_now() - start;
+	corner = pixels[699U * 1000U + 999U];
+	test_check(drawn == 0 && corner == 0xFF336699U && took < 100000000LL, "(k) the drawing thread draws the last frame while a script spins",
+	    "error %d, corner %08x, %.2f ms", drawn, (unsigned)corner, (double)took / 1e6);
 	browser_view_destroy(view);
 }

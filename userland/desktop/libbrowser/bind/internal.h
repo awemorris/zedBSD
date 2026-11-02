@@ -181,12 +181,15 @@ struct bind_interface {
  * A timer of setTimeout, setInterval or requestAnimationFrame: when it is
  * due (in the window's milliseconds), its period for an interval, what it
  * calls and with what, and the order it was made in (timers due at the
- * same time run in that order).
+ * same time run in that order).  An animation frame of a window whose
+ * frames are presented waits for a present too: it is due once the count
+ * of presents reaches frame (0 for one that waits only for its time).
  */
 struct bind_timer {
 	uint32_t id;
 	int repeat;
 	int animation;
+	uint64_t frame;
 	double due;
 	double interval;
 	uint64_t sequence;
