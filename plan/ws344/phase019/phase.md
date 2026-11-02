@@ -2,7 +2,7 @@
 
 # ws344-p019 interface（decode.c）
 
-- Status: planned
+- Status: in-progress（P2、q1969-i01。実装済み・試験 PASS、cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Opus を推す（phase-runner）。依存: p002, p008, p017, p018。
 - 目的: `<compat/webp/decode.h>`・`types.h` の全呼び出し、buffer の検査と確保、状態の写像。libwebp と報告が一致。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -74,4 +74,17 @@ git diff --check
 
 ## 結果
 
-（未着手）
+（2026-11-02 16:20、P2、q1969-i01）
+
+- 作った物: `userland/desktop/libwebp-compat/decode.c`（`<compat/webp/decode.h>`・`types.h` の 21 の呼び出し: 状態の順は libwebp の通り（config → features（NOT_ENOUGH_DATA は BITSTREAM_ERROR に）→ container と animation → bitstream の header → colour space・option・buffer → decode）、buffer の確保・再利用・検査、lossy（ALPH があれば常に decode、失敗は画像の失敗）と lossless、flip（行を下から、stride は正）、YUVA の alpha の 255）、`plan/ws344/tests/unit/test-decode.c`（125 check）。
+- 確かめた事（command と最後の行、PATH=/usr/bin:$PATH）:
+  - `sh plan/ws344/tests/compare.sh` → `compare: PASS (364 files)`（libwebp 1.5.0 で build した driver の報告と全行一致: 全呼び出し・色空間・option・Into・padding・小さい buffer・0〜160 byte の部分の features・引数の誤り）。
+  - `WEBPC_FIXTURES=build/tmp/ws344-conformance sh plan/ws344/tests/compare.sh` → `compare: PASS (214 files)`（libwebp-test-data・vp80 の key frame・多 partition）。同じ集合の `run-fixtures.sh alpha` → `PASS (alpha, 27 checks)`、lossy 342・lossless 43 も PASS。
+  - `sh plan/ws344/tests/mutate.sh` → `mutate: PASS (361 files, 78215 inputs)`（8 分、最後の decode.c で 2 回）。conformance の集合で `PASS (202 files, 43822 inputs)`（14 分）。1 file の時間: 最大は lossy-large-photo-1024x683（169 KB）で約 109 s（build を含む）、fuzz-target の alarm 120 s に近い（下）。
+  - `sh plan/ws344/tests/fuzz.sh 600` → `fuzz: PASS (600 s, 32724 runs)`（cov 1048、corpus 843。1 秒 54 回: 2^22 画素までの画像を 1 入力で数回 decode するため）。
+  - `sh plan/ws344/tests/run-unit.sh decode` → `test-decode: PASS (125 checks)`。16384x16384 の 0 bit の可逆の画像（34 byte）を MODE_RGB で decode: ASan の下で CPU 18.3 s、全画素の見本が正しい。`run-unit.sh all` → `run-unit: PASS`。
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `PASS`、`target-build.sh` → `PASS (libwebp-compat.so, 0 warnings)`、`git diff --check` は出力無し。
+  - わざと壊す確かめ（decode.c を一時に書き換え、cmp で戻した）: NOT_ENOUGH_DATA → BITSTREAM_ERROR の写像を外す → unit FAIL、lossy の flip を外す → compare FAIL、Argb の premultiply を外す → unit・compare FAIL、external の大きさの検査を 1 byte 緩める → unit・compare FAIL、YUVA の alpha を 0 で埋める → compare FAIL。
+- 自分で決めた点: lossy の header（frame tag・first partition の header）を buffer の検査の前に読み（libwebp の順）、decode でもう一度読む。lossless は 5 byte の header だけを前に読む（libwebp は transform と code まで読むので、壊れた transform と小さい buffer が重なる時の状態が違いうる）。可逆の画像の切り詰めは NOT_ENOUGH_DATA（libwebp は非 incremental でも SUSPENDED を返しうる。decode.h の「壊れた file の状態は違いうる」の範囲）。
+- 道具の注意（Q1 へ、凍結の道具なので直していない）: fuzz-target の 1 file の alarm 120 s に対し lossy-large-photo-1024x683 が約 104 s（build を除く）。遅い host では mutate.sh が誤って FAIL しうる。p022 で alarm を広げるか、その file を mutate の既定から外す。
+- 未実施: QEMU・実機・Windows（p020・p021）。
