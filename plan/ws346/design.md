@@ -2,7 +2,7 @@
 
 # WS346 設計: libbrowser の style と layout の差分の再計算（layout cache）
 
-版: 2（2026-11-03 Q1。版 1 は p001、版 2 は p002 の実装で分かった事: `DOM_CHANGE_SHEETS`、資源の扱い、shadow の中の無効化）。範囲: 要求定義と外部設計（module の境界・interface・振る舞いの契約・試験・Phase の分割）。
+版: 3（2026-11-03 Q1。版 1 は p001、版 2 は p002 の実装で分かった事: `DOM_CHANGE_SHEETS`、資源の扱い、shadow の中の無効化。版 3 は p004 で分かった事: change_scope の hook、STATE は常に SUBTREE、NONE の属性、arena の危険）。範囲: 要求定義と外部設計（module の境界・interface・振る舞いの契約・試験・Phase の分割）。
 内部設計（各関数の中の算法・データの細部）は各 Phase の実装の担当が、この文書の契約の中で決め、phase.md の結果の節に書く。
 
 基点: main `8f181e0e1f`（2026-11-03）。対象の source: `userland/desktop/libbrowser/`（`dom/`・`css/`・`layout/`・`page/`・`bind/`）。
@@ -188,8 +188,8 @@ document の要約（`struct dom_document` に足す field）:
 | CHILDREN（挿入） | **親に `STYLE_SUBTREE`**（:empty・:nth-child・:first-child・:last-child・兄弟の結合子のため、親と子の全部）。入った子の部分木に `STYLE_SUBTREE`。親と入った子に `LAYOUT`。 |
 | CHILDREN（削除） | 親に `STYLE_SUBTREE` と `LAYOUT`。出た子の部分木の bit は消す（もう document に無い）。 |
 | TEXT | 親の element に `STYLE`（:empty）と `LAYOUT`。 |
-| ATTRIBUTE | element に `STYLE_SUBTREE`・`STYLE_SIBLINGS`・`LAYOUT`。どれを本当に計算し直すかは css が §5.2.2 で絞る。`style` 属性も同じ。 |
-| STATE | element に `STYLE_SUBTREE`・`STYLE_SIBLINGS`・`LAYOUT`。 |
+| ATTRIBUTE | element に `LAYOUT` と、document の **`change_scope` hook**（page が engine の `css_engine_change_scope` を渡す。§5.2.2）の答えの `STYLE_SUBTREE`・`STYLE_SIBLINGS`（hook が無い時は両方）。答えが ALL なら `change_full_style`、NONE なら style の bit は立てない。`style` 属性も同じ。 |
+| STATE | ATTRIBUTE と同じ（hook に kind = STATE を渡す）。 |
 | SCROLL | element に `LAYOUT` だけ（style は変わらない）。 |
 | RESOURCE | element に `LAYOUT` だけ。 |
 | SHADOW | host に `STYLE_SUBTREE`・`LAYOUT`。 |
@@ -252,11 +252,11 @@ unsigned css_engine_change_scope(const struct css_engine *engine, const struct d
 契約（安全側。**疑わしい時は広い方**）:
 
 - engine の sheet に `:has()` が 1 つでもあれば、ATTRIBUTE・STATE・CHILDREN・TEXT の全てに `CSS_RESTYLE_ALL`。
-- ATTRIBUTE: 属性が `class`・`id`・`style` でなく、どの selector も名指さず、`attr()`・`:dir()`・`:lang()`（`dir`・`lang` 属性の時）にも当たらない → `CSS_RESTYLE_NONE`。
-  それ以外は `CSS_RESTYLE_SUBTREE`。加えて、兄弟の結合子の左に同じ特徴（その属性・class・id）が出る selector があれば `CSS_RESTYLE_SIBLINGS`。
-  - `class` の変更は、変わる前と後の class の語の対称差のどれかを selector が名指す時だけ広げてよい（語を比べられない実装は名指しの有無で判断してよい）。
-  - `style` 属性は常に `CSS_RESTYLE_SUBTREE`（継承のため）。
-- STATE: engine が状態の擬似 class を 1 つも持たなければ `CSS_RESTYLE_NONE`。持てば `CSS_RESTYLE_SUBTREE`、兄弟の結合子の左に状態の擬似 class があれば `| CSS_RESTYLE_SIBLINGS`。
+- ATTRIBUTE: 属性が **`aria-*`・`data-*`・`role`・`tabindex`** のどれかで、どの sheet の selector・`attr()` にも名指されない（sheet の token の名前の表 `css_engine_names_attribute`、p004 で aria-*・role・tabindex に広げた）→ `CSS_RESTYLE_NONE`。
+  それ以外は `CSS_RESTYLE_SUBTREE`（class・id・style・presentational hint の属性・href・lang などは常に）。加えて、selector に兄弟の結合子（`+`・`~`）が 1 つでもあれば `CSS_RESTYLE_SIBLINGS`（版 3: 兄弟の結合子の左の特徴までは見ない。安全側）。
+- STATE: 常に `CSS_RESTYLE_SUBTREE`（user agent の sheet が `:link`・`:popover-open` を見るので、状態を見る selector が無い engine は無い）。兄弟の結合子があれば `| CSS_RESTYLE_SIBLINGS`。
+- `:has()` が 1 つでもある、または `:nth-child(… of S)` などの `of S` がある → ATTRIBUTE・STATE とも `CSS_RESTYLE_ALL`（`of S` は前の兄弟の index も変える）。
+- `css_engine_invalidate` の scope が `CSS_RESTYLE_SIBLINGS` だけの時も element 自身を外す（兄弟の bit は element の bit と一緒に使う）。
 - CHILDREN・TEXT は css に問わず、§5.1.4 の bit のまま（親の `STYLE_SUBTREE`）。構造の擬似 class も兄弟の結合子も無い時は、親の `STYLE`（:empty のため）と入った子の部分木だけにしてよい。
 
 #### 5.2.3 engine の無効化（`css/`）
@@ -280,6 +280,8 @@ void css_engine_invalidate(struct css_engine *engine, struct dom_element *elemen
 2. `dom_change_needs_sheets` が真、`change_full_style` が立つ、visited の generation・sheet の到着（`sheets_generation`）が変わった、engine が無い → 今どおり `page_gather_styles`（作り直し）、そして変更の記録の style の bit を全部消す。
 3. それ以外 → `dom_changes_take_style` で bit のある node を tree の順に回り、bit と `css_engine_change_scope` から scope を決めて `css_engine_invalidate` を呼ぶ。
    最後に `page->styled_generation` などを今の作り直しの後と同じ値にする。
+3'. 実際には、dom の記録の時（`dom_note_change`）に document の `change_scope` hook（page が `page_change_scope` を渡し、`css_engine_change_scope(page->css, …)` を呼ぶ。engine が無い時は hook を NULL にして両方の bit を立てる）が style の bit を決めるので、
+   take_style の visitor は bit をそのまま `css_engine_invalidate` の scope にする（STYLE → element だけ、STYLE_SUBTREE → SUBTREE、STYLE_SIBLINGS → SIBLINGS）。`change_full_style` が立てば engine を作り直す。
 4. 削除された部分木の element の entry は、削除の記録の時に page の hook で `css_engine_invalidate(…, CSS_RESTYLE_SUBTREE)` を呼んで外す
    （address が新しい element に使い回されても古い style を返さないため。入った部分木は常に計算し直すので二重に守られる）。
 
@@ -455,6 +457,7 @@ p004 は p003 と並べて起動してよい（触る file が重ならない）
 | --- | --- |
 | 無効化の漏れ（古い style が残る） | 安全側の契約（§5.2.2）、`verify` の style の照合、わざと壊す試験 |
 | 接ぎ木の field の写し漏れ・古い pointer | 前の木の arena を指す pointer の禁止（§5.3.1）、ASan の build で §6.2、`verify` の layout の照合 |
+| engine を保つと、element の custom property を engine の arena に写す style（`css_engine_compute` が arena に確保する物）が、再計算のたびに arena を増やす（engine を作り直す時にだけ解放されるため） | p005 で arena の増え方を測り、一定を超えたら engine を作り直す（今の動き）。custom property の多い頁（amazon など）で測る |
 | 計算済みの style が GC で回収された string を指す | engine が保たれる時間が長くなる。p005 で style の中の string の寿命（atom か sheet が持つか）を調べ、回収され得る物は計算し直しの対象にするか根を張る。ASan と GC を強いる試験で確かめる |
 | 外の状態に依る layout（anchor・counter・container・sticky ほか）の見落とし | 根の条件で安全側に外す（§5.3.2 の 3）。見つけたら条件に足す |
 | `verify` が遅すぎて試験が時間切れ | 試験の時間の上限を mode ごとに延ばす。live の頁は Q1 が 1 回 |

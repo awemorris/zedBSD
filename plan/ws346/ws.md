@@ -40,7 +40,7 @@ script が DOM を変えては幾何を読む頁（amazon.co.jp、store.google.c
 | [ws346-p001](phase001/phase.md) | 設計（要求・外部設計・Phase の分割）[design.md](design.md) | cleared（2026-11-03 06:40、ユーザーの決定 3 件） | — |
 | [ws346-p002](phase002/phase.md) | DOM の変更の記録・切り替え・計数の土台（振る舞いは変えない） | cleared（2026-11-03、q2002） | p001 |
 | [ws346-p003](phase003/phase.md) | 照合（verify）の道具と bench | cleared（2026-11-03、q2003） | p002 |
-| [ws346-p004](phase004/phase.md) | selector の特徴の表と変更の影響の範囲（css） | planned | p002 |
+| [ws346-p004](phase004/phase.md) | selector の特徴の表と変更の影響の範囲（css） | cleared（2026-11-03、q2003） | p002 |
 | [ws346-p005](phase005/phase.md) | style の無効化の統合（engine を保つ） | planned | p003, p004 |
 | [ws346-p006](phase006/phase.md) | layout の再利用 A: 幾何の保存・候補の判定・intrinsic の持ち越し | planned | p005 |
 | [ws346-p007](phase007/phase.md) | layout の再利用 B: 部分木の接ぎ木 | planned | p006 |

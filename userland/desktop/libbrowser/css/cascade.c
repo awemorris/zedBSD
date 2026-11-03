@@ -4684,8 +4684,7 @@ cascade_features(
  * siblings too when a selector joins siblings, every element when a
  * selector looks at what is below an element (:has) or counts siblings by a
  * selector (:nth-child(of S)).  An attribute that styles nothing the
- * sheets do not name (an aria-* attribute, role, tabindex) restyles
- * nothing.
+ * sheets do not name (aria-*, data-*, role, tabindex) restyles nothing.
  */
 unsigned
 css_engine_change_scope(
@@ -4694,10 +4693,12 @@ css_engine_change_scope(
 	int kind,
 	const struct vm_string *attribute)
 {
-	static const char aria[] = "aria-";
+	static const char *const prefixes[] = { "aria-", "data-" };
 	unsigned features;
 	unsigned scope;
+	size_t which;
 	size_t index;
+	size_t length;
 	int quiet;
 
 	/* Selectors that look below an element or count by a selector can be changed by anything. */
@@ -4706,13 +4707,16 @@ css_engine_change_scope(
 	if ((features & (CASCADE_FEATURE_HAS | CASCADE_FEATURE_NTH_OF)) != 0U)
 		return CSS_RESTYLE_ALL;
 
-	/* An attribute no style reads unless a selector or attr() names it (a state is looked at by the user agent's own sheet: :link, :popover-open). */
+	/* An attribute no style reads unless a selector or attr() names it: aria-*, data-*, role, tabindex (a state is looked at by the user agent's own sheet: :link, :popover-open). */
 	if (kind != DOM_CHANGE_STATE && attribute != NULL) {
 		quiet = vm_string_equal_ascii(attribute, "role") || vm_string_equal_ascii(attribute, "tabindex");
-		if (!quiet && attribute->length > sizeof(aria) - 1U) {
+		for (which = 0; !quiet && which < sizeof(prefixes) / sizeof(prefixes[0]); which++) {
+			length = strlen(prefixes[which]);
+			if (attribute->length <= length)
+				continue;
 			quiet = 1;
-			for (index = 0; index < sizeof(aria) - 1U; index++) {
-				if (vm_string_at(attribute, index) != (uint16_t)aria[index])
+			for (index = 0; index < length; index++) {
+				if (vm_string_at(attribute, index) != (uint16_t)prefixes[which][index])
 					quiet = 0;
 			}
 		}
