@@ -91,11 +91,11 @@ layout_block(
 		return error;
 	}
 
-	/* A block of a formatting context of its own whose content the previous tree laid out the same way takes it as it is. */
-	if (tree->reuse != NULL && !box->replaced && block_owns_context(box)) {
+	/* A block the previous tree made, laid out with the same things given, keeps what it has. */
+	if (tree->reuse != NULL && !box->replaced) {
 		int grafted;
 
-		error = layout_reuse_graft(tree, box, containing_width, &grafted);
+		error = layout_reuse_graft(tree, box, containing_width, block_owns_context(box), &grafted);
 		if (error != 0)
 			return error;
 		if (grafted)
@@ -297,7 +297,7 @@ layout_block(
 	layout_center_button(box, content_height);
 
 	/* What the layout was made with, for a later tree to take the content as it is. */
-	layout_reuse_record(tree, box, containing_width);
+	layout_reuse_record(tree, box, containing_width, own_context);
 
 	/* Succeeded: the box has its size. */
 	return 0;

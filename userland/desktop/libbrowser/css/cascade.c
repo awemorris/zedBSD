@@ -64,6 +64,8 @@ struct cascade_scope_memo {
 #define CASCADE_FEATURE_HAS		0x1U
 #define CASCADE_FEATURE_SIBLING		0x2U
 #define CASCADE_FEATURE_NTH_OF		0x4U
+#define CASCADE_FEATURE_STRUCTURE	0x8U
+#define CASCADE_FEATURE_UA_STRUCTURE	0x10U
 
 /* How deep a subtree is searched to drop its styles before every kept style is dropped instead. */
 #define CASCADE_DROP_DEPTH		2000U
@@ -1060,6 +1062,25 @@ css_engine_compute(
 
 	/* Succeeded: the style is computed. */
 	return 0;
+}
+
+/*
+ * Tells whether the engine holds a style of an element that nothing has
+ * invalidated since it was computed: what css_engine_compute would give the
+ * element is that style, as its parent's is the one it was computed from.
+ */
+int
+css_engine_style_current(
+	struct css_engine *engine,
+	const struct dom_element *element)
+{
+	const struct cascade_cached *cached;
+
+	/* Nothing is kept without a table, or while the animations' values are left out. */
+	if (engine->style_capacity == 0 || cascade_animation_suppressed)
+		return 0;
+	cached = cascade_style_slot(engine, element);
+	return cached->element != NULL && !cached->stale;
 }
 
 /*
@@ -4715,6 +4736,17 @@ cascade_features_selector(
 					/* An "of S" counts the siblings that match S, before and after the element. */
 					if (simple->argument_count != 0)
 						*features |= CASCADE_FEATURE_NTH_OF;
+					*features |= CASCADE_FEATURE_STRUCTURE;
+					break;
+				case CSS_PSEUDO_FIRST_CHILD:
+				case CSS_PSEUDO_LAST_CHILD:
+				case CSS_PSEUDO_ONLY_CHILD:
+				case CSS_PSEUDO_FIRST_OF_TYPE:
+				case CSS_PSEUDO_LAST_OF_TYPE:
+				case CSS_PSEUDO_ONLY_OF_TYPE:
+				case CSS_PSEUDO_EMPTY:
+					/* The number of children, and whether there are any, decide it. */
+					*features |= CASCADE_FEATURE_STRUCTURE;
 					break;
 				default:
 					break;
@@ -4737,6 +4769,7 @@ cascade_features(
 	const struct css_rule *rule;
 	const struct css_scope *scope;
 	unsigned features;
+	unsigned part;
 	size_t sheet;
 	size_t index;
 	size_t at;
@@ -4749,17 +4782,23 @@ cascade_features(
 	features = 0U;
 	for (sheet = 0; sheet < engine->sheets.count; sheet++) {
 		entry = wb_vector_at(&engine->sheets, sheet);
+		part = 0U;
 		for (index = 0; index < entry->sheet->rule_count; index++) {
 			rule = &entry->sheet->rules[index];
 			for (at = 0; at < rule->selector_count; at++)
-				cascade_features_selector(&rule->selectors[at], &features);
+				cascade_features_selector(&rule->selectors[at], &part);
 			for (scope = rule->scope; scope != NULL; scope = scope->parent) {
 				for (at = 0; at < scope->root_count; at++)
-					cascade_features_selector(&scope->roots[at], &features);
+					cascade_features_selector(&scope->roots[at], &part);
 				for (at = 0; at < scope->limit_count; at++)
-					cascade_features_selector(&scope->limits[at], &features);
+					cascade_features_selector(&scope->limits[at], &part);
 			}
 		}
+
+		/* The user agent's own counting is told apart (it is of the children of a details element only). */
+		if (entry->sheet->origin == CSS_ORIGIN_USER_AGENT && (part & CASCADE_FEATURE_STRUCTURE) != 0U)
+			part = (part & ~CASCADE_FEATURE_STRUCTURE) | CASCADE_FEATURE_UA_STRUCTURE;
+		features |= part;
 	}
 
 	/* Kept for as long as the sheets stay. */
@@ -4791,13 +4830,22 @@ css_engine_change_scope(
 	size_t which;
 	size_t index;
 	size_t length;
+	int counting;
 	int quiet;
 
 	/* Selectors that look below an element or count by a selector can be changed by anything. */
-	UNUSED_PARAMETER(element);
 	features = cascade_features(engine);
 	if ((features & (CASCADE_FEATURE_HAS | CASCADE_FEATURE_NTH_OF)) != 0U)
 		return CSS_RESTYLE_ALL;
+
+	/* What the children of an element, and their text, can restyle: the children when selectors count them or join siblings (the text only when one asks if there are any). */
+	if (kind == DOM_CHANGE_CHILDREN || kind == DOM_CHANGE_TEXT) {
+		counting = (features & CASCADE_FEATURE_STRUCTURE) != 0U ||
+		    ((features & CASCADE_FEATURE_UA_STRUCTURE) != 0U && element->ns == DOM_NS_HTML && element->tag == DOM_TAG_DETAILS);
+		if (counting || (kind == DOM_CHANGE_CHILDREN && (features & CASCADE_FEATURE_SIBLING) != 0U))
+			return CSS_RESTYLE_SUBTREE;
+		return CSS_RESTYLE_NONE;
+	}
 
 	/* An attribute no style reads unless a selector or attr() names it: aria-*, data-*, role, tabindex (a state is looked at by the user agent's own sheet: :link, :popover-open). */
 	if (kind != DOM_CHANGE_STATE && attribute != NULL) {

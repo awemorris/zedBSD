@@ -49,13 +49,17 @@ static int box_flex_items(struct layout_tree *tree, struct layout_box *box);
 static int box_build_transition(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *root);
 static void box_anonymous_style(const struct css_style *parent, struct css_style *style);
 static void box_marker(struct layout_box *box, int ordinal);
+static struct layout_box *box_marker_target(struct layout_box *item);
 static void box_relative_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
 static void box_relative_within(const struct layout_box *box, const struct layout_box *containing, layout_unit *dx, layout_unit *dy);
 static void box_inline_relative(struct layout_box *block);
 static void box_transform_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
-static void box_apply_scale(struct layout_box *box);
+static void box_apply_scale(const struct layout_tree *tree, struct layout_box *box);
 static void box_static_inline(const struct layout_box *block, struct layout_box *box, layout_unit x, layout_unit y, size_t *breaks);
-static int box_build_tree(struct layout_tree *tree, const struct layout_tree *previous, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
+static int box_build_tree(struct layout_tree *tree, const struct layout_tree *previous, int cached, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
+
+/* The number the next tree gets (boxes carry the number of the tree that made them). */
+static uint64_t box_serial;
 
 /*
  * Builds and lays out the box tree of a document for a viewport of width
@@ -66,6 +70,7 @@ static int
 box_build_tree(
 	struct layout_tree *tree,
 	const struct layout_tree *previous,
+	int cached,
 	struct css_engine *css,
 	struct text_system *text,
 	struct dom_document *document,
@@ -97,6 +102,8 @@ box_build_tree(
 	tree->scroll_y = scroll_y;
 	tree->containing_height = tree->viewport_height;
 	tree->containing_height_definite = 1;
+	tree->serial = __atomic_add_fetch(&box_serial, 1, __ATOMIC_RELAXED);
+	tree->cached = cached || previous != NULL;
 	if (previous != NULL)
 		(void)layout_reuse_open(tree, previous);
 	css_engine_set_viewport(css, (float)width / css_engine_base_zoom(css), (float)height / css_engine_base_zoom(css));
@@ -150,7 +157,7 @@ box_build_tree(
 		return error;
 
 	/* A box with nothing inside it that transform scales (a hairline border drawn at twice the size and halved) shrinks about its origin. */
-	box_apply_scale(root);
+	box_apply_scale(tree, root);
 
 	/* Sticky boxes sit where the page's scroll (as the page knows it) puts them. */
 	error = layout_sticky_build(tree);
@@ -163,13 +170,18 @@ box_build_tree(
 
 /*
  * Builds and lays out the box tree of a document as layout_build does, with
- * the content of the blocks of the previous tree taken as it is where
- * nothing changed (reuse.c).
+ * the boxes of the previous tree used as they are where nothing changed
+ * (reuse.c): the new tree owns them afterwards, and the previous one has no
+ * boxes.  The tree records what its blocks were laid out with when cached, or
+ * when it has a previous tree, for the next tree to use.  After a failure that
+ * came after boxes were taken the previous tree is not intact (the tree's
+ * reuse_boxes says so); the tree does not own them then.
  */
 int
 layout_build_reusing(
 	struct layout_tree *tree,
-	const struct layout_tree *previous,
+	struct layout_tree *previous,
+	int cached,
 	struct css_engine *css,
 	struct text_system *text,
 	struct dom_document *document,
@@ -185,8 +197,12 @@ layout_build_reusing(
 	int error;
 
 	/* The tree, then the index of the previous one goes. */
-	error = box_build_tree(tree, previous, css, text, document, image_lookup, url_lookup, image_context, width, height, scroll_x, scroll_y, transition);
+	error = box_build_tree(tree, previous, cached, css, text, document, image_lookup, url_lookup, image_context, width, height, scroll_x, scroll_y, transition);
 	layout_reuse_close(tree);
+
+	/* The boxes taken are the tree's own now. */
+	if (error == 0 && previous != NULL)
+		(void)layout_reuse_adopt(tree, previous);
 	return error;
 }
 
@@ -209,7 +225,7 @@ layout_build(
 	layout_unit scroll_y,
 	const struct layout_transition *transition)
 {
-	return layout_build_reusing(tree, NULL, css, text, document, image_lookup, url_lookup, image_context, width, height, scroll_x, scroll_y, transition);
+	return layout_build_reusing(tree, NULL, 0, css, text, document, image_lookup, url_lookup, image_context, width, height, scroll_x, scroll_y, transition);
 }
 
 /*
@@ -283,6 +299,12 @@ layout_absolute(
 	layout_unit dx;
 	layout_unit dy;
 
+	/* A block that kept what it was laid out with has its content moved to where it is. */
+	if (box->reuse_skipped) {
+		layout_reuse_shift(box, x, y);
+		return;
+	}
+
 	/* The box's border box moves by the parent's content origin, and by its offsets when it is relative. */
 	box_relative_offset(box, &dx, &dy);
 	box_transform_offset(box, &dx, &dy);
@@ -292,6 +314,8 @@ layout_absolute(
 	/* Its children are relative to its content box. */
 	content_x = box->x + box->border[CSS_LEFT] + box->padding[CSS_LEFT];
 	content_y = box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
+	box->abs_x = content_x;
+	box->abs_y = content_y;
 
 	/* The lines are relative to the block; boxes out of the flow among them start at its content's top. */
 	if (box->children_inline && !(box->line_count == 0 && box->physical_style == NULL && box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)) {
@@ -515,6 +539,15 @@ box_build_element(
 	if (depth > LAYOUT_DEPTH_MAX)
 		return 0;
 
+	/* A block the previous tree made, with nothing changed in it, goes under its parent as it is. */
+	if (tree->reuse != NULL && parent != NULL) {
+		box = layout_reuse_take(tree, css, element, parent);
+		if (box != NULL) {
+			box_append(parent, box);
+			return 0;
+		}
+	}
+
 	/* Computes the style into a temporary (the box keeps its own copy). */
 	style = malloc(sizeof(*style));
 	if (style == NULL)
@@ -630,6 +663,7 @@ box_build_element(
 	free(style);
 	if (box == NULL)
 		return ENOMEM;
+	layout_reuse_expand(tree, &element->node);
 	box->out_of_flow = out_of_flow;
 	box->floating = floating;
 	box->atomic = atomic;
@@ -1302,16 +1336,37 @@ box_build_child(
 {
 	const struct dom_character_data *text;
 	struct layout_box *text_box;
+	struct layout_box *target;
+	uint16_t saved[8];
+	size_t saved_length;
+	int taken;
 	int error;
 
 	/* Elements build their own boxes; list items number themselves. */
+	saved_length = 0;
 	if (child->type == DOM_ELEMENT) {
 		error = box_build_element(tree, css, (struct dom_element *)child, style, box, depth);
 		if (error != 0)
 			return error;
 		if (box->last_child != NULL && box->last_child->node == child && box->last_child->style.display == CSS_DISPLAY_LIST_ITEM) {
 			(*ordinal)++;
+			taken = box->last_child->born != tree->serial;
+			target = box->last_child;
+			if (taken) {
+				target = box_marker_target(box->last_child);
+				saved_length = target->marker_length;
+				memcpy(saved, target->marker, sizeof(saved));
+			}
 			box_marker(box->last_child, *ordinal);
+
+			/* A list item taken from the previous tree whose marker is another one is laid out again, with what is between it and the box of the marker. */
+			if (taken && (saved_length != target->marker_length || memcmp(saved, target->marker, sizeof(saved)) != 0)) {
+				for (; target != NULL; target = target->parent) {
+					target->reuse_recorded = 0;
+					if (target == box->last_child)
+						break;
+				}
+			}
 		}
 		return 0;
 	}
@@ -1408,10 +1463,11 @@ box_new(
 	if (box == NULL)
 		return NULL;
 
-	/* Records its kind, node and style. */
+	/* Records its kind, node and style, and the tree it is made for. */
 	box->kind = kind;
 	box->node = node;
 	box->style = *style;
+	box->born = tree->serial;
 
 	/* Anchor functions are only for boxes out of the flow; the others' are invalid. */
 	if (box->style.position != CSS_POSITION_ABSOLUTE && box->style.position != CSS_POSITION_FIXED &&
@@ -2001,23 +2057,19 @@ box_anonymous_style(
 	style->underline = parent->underline;
 }
 
-/* Gives a list item its marker: a bullet, or its number and a period. */
-static void
-box_marker(
-	struct layout_box *item,
-	int ordinal)
+/*
+ * Finds the box that carries a list item's marker: the item itself when its
+ * children are inline, otherwise the first of its blocks (anonymous or not)
+ * with lines, as long as that block is not a list item itself.
+ */
+static struct layout_box *
+box_marker_target(
+	struct layout_box *item)
 {
 	struct layout_box *box;
 	struct layout_box *child;
-	char digits[16];
-	size_t length;
-	size_t index;
 
-	/*
-	 * The marker goes on the first line of the item: its own when its
-	 * children are inline, otherwise that of its first block (anonymous or
-	 * not) with lines, as long as that block is not a list item itself.
-	 */
+	/* The marker goes on the first line of the item: its own when its children are inline, otherwise that of its first block. */
 	box = item;
 	while (!box->children_inline && box->first_child != NULL) {
 		child = box->first_child;
@@ -2033,6 +2085,22 @@ box_marker(
 	/* A box that ends up without lines cannot show the marker; the item keeps it. */
 	if (!box->children_inline)
 		box = item;
+	return box;
+}
+
+/* Gives a list item its marker: a bullet, or its number and a period. */
+static void
+box_marker(
+	struct layout_box *item,
+	int ordinal)
+{
+	struct layout_box *box;
+	char digits[16];
+	size_t length;
+	size_t index;
+
+	/* The box whose first line carries the marker. */
+	box = box_marker_target(item);
 
 	/* The bullets are one character. */
 	box->marker_length = 0;
@@ -2084,6 +2152,7 @@ box_marker(
  */
 static void
 box_apply_scale(
+	const struct layout_tree *tree,
 	struct layout_box *box)
 {
 	struct layout_box *child;
@@ -2100,8 +2169,10 @@ box_apply_scale(
 	layout_unit minimum;
 	int index;
 
-	for (child = box->first_child; child != NULL; child = child->next)
-		box_apply_scale(child);
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (!layout_reuse_frozen(tree, child))
+			box_apply_scale(tree, child);
+	}
 	scale = box->style.transform_scale;
 	if (box->first_child != NULL || box->lines != NULL)
 		return;

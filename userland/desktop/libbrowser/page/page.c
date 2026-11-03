@@ -75,7 +75,7 @@ struct page_sticky_args {
 static int page_gather_styles(struct page *page);
 static int page_layout_work(void *argument);
 static int page_layout_verify(struct page *page, const struct page_layout_args *args);
-static const struct layout_tree *page_layout_previous(const struct page *page);
+static struct layout_tree *page_layout_previous(struct page *page);
 static void page_layout_count(struct page *page);
 static unsigned page_change_scope(void *context, struct dom_element *element, int kind, const struct vm_string *attribute);
 static void page_change_removed(void *context, struct dom_node *node);
@@ -878,6 +878,16 @@ page_layout(
 	return 0;
 
 cleanup:
+	/* A layout that took boxes of the last one leaves neither of them whole: both go. */
+	if (page->laid_out && page->layout.reuse_boxes != 0) {
+		layout_release(&page->layout);
+		page->laid_out = 0;
+		if (page->previous_laid_out) {
+			layout_release(&page->previous_layout);
+			page->previous_laid_out = 0;
+		}
+	}
+
 	/* Discard a partly built layout and restore the last complete one, if any. */
 	if (page->laid_out) {
 		layout_release(&page->layout);
@@ -999,7 +1009,7 @@ page_layout_work(
 	void *argument)
 {
 	struct page_layout_args *args;
-	const struct layout_tree *previous;
+	struct layout_tree *previous;
 	struct page *page;
 	int missed;
 	int pass;
@@ -1016,7 +1026,7 @@ page_layout_work(
 	page->laid_out_gathered = page->gathered;
 	css_engine_set_container_lookup(page->css, page_container_size, page);
 	page->cache.layouts++;
-	error = layout_build_reusing(&page->layout, previous, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
+	error = layout_build_reusing(&page->layout, previous, page_cache_mode() != PAGE_CACHE_OFF, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 	page->laid_out = 1;
 	page->layout.image_variant = page_image_variant;
 	page->layout.frame_paint = page_frame_paint;
@@ -1045,7 +1055,7 @@ page_layout_work(
 		memset(&page->layout, 0, sizeof(page->layout));
 		css_engine_forget_styles(page->css);
 		page->cache.layouts++;
-		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
+		error = layout_build_reusing(&page->layout, NULL, page_cache_mode() != PAGE_CACHE_OFF, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 		page->layout.image_variant = page_image_variant;
 		page->layout.frame_paint = page_frame_paint;
 		page->layout.frame_remote = page_frame_remote;
@@ -1069,14 +1079,14 @@ page_layout_work(
 }
 
 /*
- * Gives the tree a layout may take the content of its blocks from: the last
+ * Gives the tree a layout may take the boxes of its blocks from: the last
  * complete one, when it was laid out for the style engine, sheets, fonts,
  * images, links and view transition the page has now, and the cache is on;
  * otherwise NULL (the page is laid out whole).
  */
-static const struct layout_tree *
+static struct layout_tree *
 page_layout_previous(
-	const struct page *page)
+	struct page *page)
 {
 	if (page_cache_mode() == PAGE_CACHE_OFF || !page->reuse_valid || !page->previous_laid_out)
 		return NULL;
@@ -1085,6 +1095,10 @@ page_layout_previous(
 	if (page->images_generation != page->reuse_images || page->fonts_generation != page->reuse_fonts)
 		return NULL;
 	if (page->visits_generation != page->reuse_visits || page->transition_on || page->transition_generation != page->reuse_transition)
+		return NULL;
+
+	/* A page whose styles ask for the sizes of query containers is laid out whole (the sizes are read from the previous tree). */
+	if (css_engine_container_lookups(page->css) != 0U)
 		return NULL;
 	return &page->previous_layout;
 }

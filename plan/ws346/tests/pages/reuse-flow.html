@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>reuse flow</title>
+<style>
+body { font: 14px sans-serif; margin: 8px; }
+#wrap { width: 640px; }
+.sec { margin: 6px 0; padding: 2px 4px; border: 1px solid #aaa; }
+.sec p { margin: 5px 0; }
+.sec .f { float: left; width: 70px; height: 30px; background: #ccc; margin: 0 6px 6px 0; }
+.clr { clear: both; }
+.hot { color: #c00; }
+.big { font-size: 22px; }
+.pad { padding: 12px; }
+.marks li { margin: 1px 0; }
+.marks li:last-child { font-weight: bold; }
+.marks li:first-child { color: #060; }
+.sib.on + .after span { color: #00c; font-size: 18px; }
+.sib.on + .after { background: #eef; }
+.empty:empty { height: 12px; background: #fdd; }
+.ib { display: inline-block; width: 40px; height: 16px; background: #aac; }
+.inl { background: #ffd; }
+</style>
+</head>
+<body>
+<div id="wrap">
+<div id="s1" class="sec"><p>first section paragraph with enough text to wrap around over several lines when the width is only so big</p><p>second paragraph</p></div>
+<div id="s2" class="sec"><div class="f"></div>text beside a float in section two that also wraps a little<div class="f"></div>and more text after the second float for the line boxes</div>
+<div id="s3" class="sec clr"><p>after the floats (clear)</p></div>
+<div id="s4" class="sec"><ul class="marks" id="ul"><li>one</li><li>two</li><li>three</li></ul><ol id="ol"><li>a</li><li>b</li><li>c</li></ol></div>
+<div id="s5" class="sec"><div id="sib" class="sib">sibling source</div><div class="after"><p>after <span>span inside</span> text</p></div></div>
+<div id="s6" class="sec"><div id="e1" class="empty"></div><p>after empty</p></div>
+<div id="s7" class="sec"><span class="ib"></span> <span class="inl">inline <b>bold</b> <i>italic</i></span> <span class="ib"></span> trailing</div>
+<div id="s8" class="sec"><div><div><p>deeply nested paragraph that is quite long so that it wraps within the section width, it goes on and on</p></div></div></div>
+</div>
+<div id="bottom">end</div>
+<script>
+function box(id) {
+	var e = document.getElementById(id), r = e.getBoundingClientRect(), out = id + " " + [r.left, r.top, r.width, r.height].join(",");
+	var kids = e.querySelectorAll("*");
+	for (var i = 0; i < kids.length; i++) {
+		var k = kids[i].getBoundingClientRect();
+		out += " " + kids[i].tagName + ":" + [k.left, k.top, k.width, k.height].join(",");
+	}
+	return out;
+}
+function dump(label) {
+	var ids = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "bottom"];
+	console.log("== " + label + "\n" + ids.map(box).join("\n") + "\nheight " + document.documentElement.scrollHeight);
+}
+var $ = function (id) { return document.getElementById(id); };
+dump("initial");
+$("s1").firstChild.firstChild.data = "short";
+dump("text of s1 (everything below moves, around the floats)");
+$("s1").firstChild.firstChild.data = "first section paragraph with enough text to wrap around over several lines when the width is only so big";
+dump("restored");
+$("s2").querySelector(".f").style.height = "80px";
+dump("a float of s2 taller (s3 clears it)");
+$("s2").querySelector(".f").style.height = "";
+dump("float restored");
+$("s3").className = "sec";
+dump("s3 no longer clears (its text goes beside the floats)");
+$("s3").className = "sec clr";
+var li = document.createElement("li");
+li.textContent = "four";
+$("ul").appendChild(li);
+dump("list item appended (the last one changes, markers stay)");
+$("ul").removeChild(li);
+dump("and removed");
+var item = document.createElement("li");
+item.textContent = "zero";
+$("ol").insertBefore(item, $("ol").firstChild);
+dump("list item inserted first in the ordered list (numbers shift)");
+$("ol").removeChild(item);
+dump("and removed");
+$("sib").className = "sib on";
+dump("sibling source on (the span after it changes)");
+$("sib").className = "sib";
+dump("sibling source off");
+$("e1").appendChild(document.createTextNode("x"));
+dump("the empty block gets text (:empty stops)");
+$("e1").removeChild($("e1").firstChild);
+dump("and is empty again");
+$("s7").className = "sec big";
+dump("font size of s7");
+$("s7").className = "sec";
+$("s8").className = "sec pad";
+dump("padding of s8");
+$("s8").className = "sec";
+$("wrap").style.width = "420px";
+dump("container width");
+$("wrap").style.width = "";
+dump("container width removed");
+var extra = document.createElement("div");
+extra.className = "sec";
+extra.id = "s9";
+extra.textContent = "a new section";
+$("wrap").insertBefore(extra, $("s2"));
+dump("a section inserted before the floats");
+$("wrap").removeChild(extra);
+dump("and removed");
+$("s4").style.display = "none";
+dump("s4 hidden");
+$("s4").style.display = "";
+dump("s4 shown");
+$("s8").querySelector("p").textContent = "short";
+dump("deep paragraph shorter");
+</script>
+</body>
+</html>

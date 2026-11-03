@@ -99,6 +99,8 @@ void *wb_arena_alloc(struct wb_arena *arena, size_t size);
 void *wb_arena_zalloc(struct wb_arena *arena, size_t size);
 char *wb_arena_strndup(struct wb_arena *arena, const char *string, size_t length);
 void wb_arena_release(struct wb_arena *arena);
+void wb_arena_adopt(struct wb_arena *arena, struct wb_arena *other);
+size_t wb_arena_bytes(const struct wb_arena *arena);
 
 /* The byte buffer (buffer.c). */
 void wb_buffer_init(struct wb_buffer *buffer);

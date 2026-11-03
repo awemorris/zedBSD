@@ -848,7 +848,9 @@ position_walk(
 		if (error != 0)
 			return error;
 
-		/* Its descendants. */
+		/* Its descendants (not those of a box that was taken from the previous tree, plain all the way down). */
+		if (layout_reuse_frozen(tree, child))
+			continue;
 		error = position_walk(tree, child, inner, viewport, depth + 1);
 		if (error != 0)
 			return error;

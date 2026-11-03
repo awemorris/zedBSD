@@ -6,29 +6,30 @@
  */
 
 /*
- * Taking the content of a block from the previous tree.
+ * Using the boxes of the previous tree again.
  *
- * When a page changes a little and is laid out again, most blocks come out
- * as they did.  A block that starts a formatting context of its own is laid
- * out from its containing block's width and height alone; if its element and
- * everything below it did not change (the style engine says which elements
- * got another style, the document's record which ones changed otherwise),
- * its style is the same, and the same width and height are given, then what
- * the previous tree laid out below it is what this one would lay out, and is
- * copied instead.
+ * When a page changes a little and is laid out again, most of its boxes come
+ * out as they did.  A block whose element and everything below it did not
+ * change, whose style the engine still holds as it was computed, and that
+ * stands in the flow of a block, is not built again: the box of the previous
+ * tree, with all it holds, is put under its new parent as it is.  The new tree
+ * then owns the memory of the previous one (its arena), as the boxes lie in it.
  *
- * Only blocks whose whole content is plain flow are taken: blocks, inline
+ * Such a block is laid out again where its place or the sizes it is given
+ * changed.  A block that starts a formatting context of its own is laid out
+ * from its containing block's width and height alone: given the same ones
+ * again it keeps what it has, and the final pass, which makes the positions
+ * absolute, moves its content to where the block is now.
+ *
+ * Only blocks whose whole content is plain flow are shared: blocks, inline
  * boxes, text, line breaks, images, floats and inline blocks, none of them
- * positioned, transformed, scrolled, in columns, with generated content or
- * a first line of its own.  Anything else is laid out as it always was.
+ * positioned, transformed, scrolled, in columns, with generated content or a
+ * first line of its own.  Anything else is built and laid out as it always was.
+ * What a block was laid out with, and whether all below it is plain, is
+ * recorded with the block (layout_reuse_record) for the next tree.
  *
- * The previous tree is read once to find, for each element, its box and
- * whether the box and everything below it is plain.  The copy puts the
- * boxes where the layout leaves them before the final pass makes the
- * positions absolute: the final pass runs over the new tree as it does over
- * any, so the copied boxes' positions are the ones relative to their
- * parents' content boxes (the previous tree's absolute ones less the origin
- * the final pass added).
+ * The previous tree is not read as a whole: the boxes of the elements whose
+ * boxes the new tree builds are searched for the ones they hold.
  */
 
 #include "layout/layout.h"
@@ -37,58 +38,41 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* One element's box in the previous tree: the box, whether it and all below it is plain flow, and whether the element has more than one box. */
+/* How many trees the arena of a tree may hold besides its own, and how many bytes it may hold, before the next tree is built whole. */
+#define REUSE_AGE_MAX		24U
+#define REUSE_BYTES_MAX		((size_t)1 << 30)
+
+/* One element's box in the previous tree, and whether the element has more than one box there. */
 struct reuse_entry {
 	const struct dom_node *node;
-	const struct layout_box *box;
-	int plain;
+	struct layout_box *box;
 	int ambiguous;
 };
 
-/* The index of the previous tree: its elements' boxes by element. */
+/* The boxes of the previous tree found so far, by element. */
 struct layout_reuse {
 	struct reuse_entry *table;
 	size_t capacity;
 	size_t used;
 };
 
-/* A box of the previous tree and its copy. */
-struct reuse_pair {
-	const struct layout_box *old;
-	struct layout_box *copy;
-};
-
-/* The state of one copy: the pairs made, and a table to find a copy by the box it is of. */
-struct reuse_copy {
-	struct layout_tree *tree;
-	struct reuse_pair *pairs;
-	size_t count;
-	size_t capacity;
-	size_t *table;
-	size_t table_capacity;
-};
-
-static size_t reuse_count(const struct layout_box *box, int depth);
-static int reuse_walk(struct layout_reuse *reuse, const struct layout_box *box, int depth);
+static int reuse_note(struct layout_reuse *reuse, struct layout_box *box);
+static void reuse_note_children(struct layout_reuse *reuse, const struct layout_box *box, int depth);
 static int reuse_local_ok(const struct layout_box *box);
+static int reuse_plain_below(const struct layout_box *box, int depth);
 static size_t reuse_slot(const struct reuse_entry *table, size_t capacity, const struct dom_node *node);
 static struct reuse_entry *reuse_find(const struct layout_reuse *reuse, const struct dom_node *node);
-static unsigned reuse_inputs(const struct layout_tree *tree, const struct layout_box *box);
+static unsigned reuse_inputs(const struct layout_tree *tree, const struct layout_box *box, int own_context);
+static int reuse_leaky_below(const struct layout_box *box, int depth);
 static int reuse_allowed(const struct layout_tree *tree, const struct layout_box *box);
-static int reuse_copy_descend(struct reuse_copy *copy, const struct layout_box *old, struct layout_box *fresh, layout_unit x, layout_unit y, int depth);
-static int reuse_copy_blocks(struct reuse_copy *copy, const struct layout_box *old, struct layout_box *fresh, layout_unit x, layout_unit y, int depth);
-static int reuse_copy_inlines(struct reuse_copy *copy, const struct layout_box *first, struct layout_box *fresh, layout_unit x, layout_unit y, int depth);
-static struct layout_box *reuse_copy_one(struct reuse_copy *copy, const struct layout_box *old, struct layout_box *fresh, layout_unit x, layout_unit y);
-static int reuse_copy_pair(struct reuse_copy *copy, const struct layout_box *old, struct layout_box *fresh);
-static int reuse_copy_lines(struct reuse_copy *copy, const struct layout_box *old, struct layout_box *fresh);
-static struct layout_box *reuse_copy_of(const struct reuse_copy *copy, const struct layout_box *old);
-static int reuse_copy_index(struct reuse_copy *copy);
-static void reuse_box_results(const struct layout_box *old, struct layout_box *fresh);
+static void reuse_shift_blocks(struct layout_box *box, layout_unit x, layout_unit y, int depth);
+static void reuse_shift_inlines(struct layout_box *first, layout_unit x, layout_unit y, int depth);
 static size_t reuse_hash(const void *pointer);
 
 /*
- * Reads the previous tree: the index of its elements' boxes.  Without
- * memory the tree is laid out whole (the tree has no index).
+ * Starts the search of the previous tree: its root's box is known.  Without
+ * memory, or when the previous tree holds too much, the tree is built whole
+ * (the tree has no index).
  */
 int
 layout_reuse_open(
@@ -96,31 +80,29 @@ layout_reuse_open(
 	const struct layout_tree *previous)
 {
 	struct layout_reuse *reuse;
-	size_t count;
-	size_t capacity;
 
-	/* Nothing to take from a tree without boxes. */
+	/* Nothing to take from a tree without boxes, or from one that carries too much. */
 	tree->reuse = NULL;
 	if (previous->root == NULL)
 		return 0;
+	if (previous->reuse_age >= REUSE_AGE_MAX || wb_arena_bytes(&previous->arena) > REUSE_BYTES_MAX)
+		return 0;
 
-	/* The index, with room for twice the elements. */
-	count = reuse_count(previous->root, 0);
-	capacity = 16;
-	while (capacity < count * 2U + 2U)
-		capacity *= 2U;
+	/* The index, with the root's box in it. */
 	reuse = calloc(1, sizeof(*reuse));
 	if (reuse == NULL)
 		return ENOMEM;
-	reuse->table = calloc(capacity, sizeof(*reuse->table));
+	reuse->capacity = 256;
+	reuse->table = calloc(reuse->capacity, sizeof(*reuse->table));
 	if (reuse->table == NULL) {
 		free(reuse);
 		return ENOMEM;
 	}
-	reuse->capacity = capacity;
-
-	/* Each element's box, and whether it is plain all the way down. */
-	(void)reuse_walk(reuse, previous->root, 0);
+	if (reuse_note(reuse, previous->root) != 0) {
+		free(reuse->table);
+		free(reuse);
+		return ENOMEM;
+	}
 	tree->reuse = reuse;
 	return 0;
 }
@@ -137,65 +119,120 @@ layout_reuse_close(
 	tree->reuse = NULL;
 }
 
-/* Counts the boxes of elements below a box (and itself). */
-static size_t
-reuse_count(
-	const struct layout_box *box,
-	int depth)
+/*
+ * Makes the new tree the owner of the boxes it took from the previous one:
+ * their memory is the previous tree's, which has none of its own afterwards.
+ * A tree that took nothing leaves the previous one to its owner.
+ */
+int
+layout_reuse_adopt(
+	struct layout_tree *tree,
+	struct layout_tree *previous)
 {
-	const struct layout_box *child;
-	size_t count;
-
-	count = 0;
-	if (depth > LAYOUT_DEPTH_MAX + 8)
+	if (tree->reuse_boxes == 0)
 		return 0;
-	if (box->node != NULL && box->node->type == DOM_ELEMENT)
-		count++;
-	for (child = box->first_child; child != NULL; child = child->next)
-		count += reuse_count(child, depth + 1);
-	return count;
+	wb_arena_adopt(&tree->arena, &previous->arena);
+	tree->reuse_age = previous->reuse_age + 1U;
+	previous->root = NULL;
+	return 1;
 }
 
 /*
- * Enters a box and what is below it in the index, children first; returns
- * whether the box and everything below it is plain flow.
+ * Tells whether the passes that follow the layout have nothing to do in a box's
+ * subtree: it is a box of the previous tree whose content is plain flow all the
+ * way down (nothing positioned, scrolled, stuck or scaled in it), laid out as it
+ * was recorded.
  */
+int
+layout_reuse_frozen(
+	const struct layout_tree *tree,
+	const struct layout_box *box)
+{
+	return tree->reuse_boxes != 0 && box->born != tree->serial && box->reuse_recorded && box->reuse_plain;
+}
+
+/* Enters a box of the previous tree in the index (the box of an element; a second one of the same element makes it ambiguous). */
 static int
-reuse_walk(
+reuse_note(
+	struct layout_reuse *reuse,
+	struct layout_box *box)
+{
+	struct reuse_entry *grown;
+	struct reuse_entry *entry;
+	size_t capacity;
+	size_t index;
+	size_t slot;
+
+	if (box->node == NULL || box->node->type != DOM_ELEMENT)
+		return 0;
+
+	/* Grows the table when adding would fill more than half of it. */
+	if ((reuse->used + 1U) * 2U > reuse->capacity) {
+		capacity = reuse->capacity * 2U;
+		grown = calloc(capacity, sizeof(*grown));
+		if (grown == NULL)
+			return ENOMEM;
+		for (index = 0; index < reuse->capacity; index++) {
+			if (reuse->table[index].node == NULL)
+				continue;
+			slot = reuse_slot(grown, capacity, reuse->table[index].node);
+			grown[slot] = reuse->table[index];
+		}
+		free(reuse->table);
+		reuse->table = grown;
+		reuse->capacity = capacity;
+	}
+
+	/* Its entry. */
+	slot = reuse_slot(reuse->table, reuse->capacity, box->node);
+	entry = &reuse->table[slot];
+	if (entry->node != NULL) {
+		entry->ambiguous = 1;
+		return 0;
+	}
+	entry->node = box->node;
+	entry->box = box;
+	reuse->used++;
+	return 0;
+}
+
+/* Enters the boxes of the elements under a box (those held by anonymous boxes too) in the index. */
+static void
+reuse_note_children(
 	struct layout_reuse *reuse,
 	const struct layout_box *box,
 	int depth)
 {
-	const struct layout_box *child;
-	struct reuse_entry *entry;
-	size_t slot;
-	int plain;
+	struct layout_box *child;
 
-	/* Too deep to be sure. */
-	if (depth > LAYOUT_DEPTH_MAX + 8)
-		return 0;
-
-	/* The box itself, then all that is below it. */
-	plain = reuse_local_ok(box);
+	if (depth > 8)
+		return;
 	for (child = box->first_child; child != NULL; child = child->next) {
-		if (!reuse_walk(reuse, child, depth + 1))
-			plain = 0;
+		if (child->node == NULL)
+			reuse_note_children(reuse, child, depth + 1);
+		else if (reuse_note(reuse, child) != 0)
+			return;
 	}
+}
 
-	/* An element's box goes in the index; a second one of the same element makes it ambiguous. */
-	if (box->node != NULL && box->node->type == DOM_ELEMENT && reuse->used + 1U < reuse->capacity) {
-		slot = reuse_slot(reuse->table, reuse->capacity, box->node);
-		entry = &reuse->table[slot];
-		if (entry->node != NULL) {
-			entry->ambiguous = 1;
-		} else {
-			entry->node = box->node;
-			entry->box = box;
-			entry->plain = plain;
-			reuse->used++;
-		}
-	}
-	return plain;
+/*
+ * Tells the search that the new tree built a box for an element: the boxes of
+ * the element's children in the previous tree become the ones that may be
+ * taken.
+ */
+void
+layout_reuse_expand(
+	struct layout_tree *tree,
+	const struct dom_node *node)
+{
+	const struct reuse_entry *entry;
+
+	if (tree->reuse == NULL)
+		return;
+	entry = reuse_find(tree->reuse, node);
+	if (entry == NULL || entry->ambiguous)
+		return;
+	reuse_note_children(tree->reuse, entry->box, 0);
 }
 
 /* Tells whether a box, on its own, is plain flow whose layout and final position need nothing from outside it. */
@@ -277,7 +314,7 @@ reuse_slot(
 	return slot;
 }
 
-/* Finds an element's entry, NULL when the previous tree has no box of it. */
+/* Finds an element's entry, NULL when no box of it was found in the previous tree. */
 static struct reuse_entry *
 reuse_find(
 	const struct layout_reuse *reuse,
@@ -291,11 +328,12 @@ reuse_find(
 	return &reuse->table[slot];
 }
 
-/* The flags a box's layout depends on besides its containing block's size: what the tree and the box say about heights, measuring and the writing mode. */
+/* The flags a box's layout depends on besides its containing block's size: what the tree and the box say about heights, measuring, the writing mode and (for a block that shares its parent's context) floats. */
 static unsigned
 reuse_inputs(
 	const struct layout_tree *tree,
-	const struct layout_box *box)
+	const struct layout_box *box,
+	int own_context)
 {
 	unsigned inputs;
 
@@ -309,27 +347,84 @@ reuse_inputs(
 	if (box->max_width_hidden)
 		inputs |= 8U;
 	inputs |= (unsigned)tree->logical_mode << 8;
+
+	/* A block in its parent's formatting context lays out around the floats there are. */
+	if (!own_context && tree->floats != NULL && tree->floats->count != 0)
+		inputs |= 16U;
 	return inputs;
 }
 
 /*
  * Records what a block's layout was made with, for a later tree to compare:
  * the width of its containing block, the height the tree held (and whether
- * it was definite) and the flags of reuse_inputs.
+ * it was definite) and the flags of reuse_inputs; and whether the box and all
+ * below it is plain flow, which a later tree may then use as it is.
  */
 void
 layout_reuse_record(
 	struct layout_tree *tree,
 	struct layout_box *box,
-	layout_unit containing_width)
+	layout_unit containing_width,
+	int own_context)
 {
+	if (!tree->cached)
+		return;
 	box->reuse_width = containing_width;
 	box->reuse_height = tree->containing_height;
-	box->reuse_inputs = reuse_inputs(tree, box);
+	box->reuse_inputs = reuse_inputs(tree, box, own_context);
 	box->reuse_recorded = 1;
+	box->reuse_plain = reuse_local_ok(box) && reuse_plain_below(box, 0);
+	box->reuse_leaky = !own_context && reuse_leaky_below(box, 0);
 }
 
-/* Tells whether a box of the new tree may take its content from the previous one: a block of its own formatting context in a block's flow, laid out outside any measuring. */
+/* Tells whether a float below a box joins the formatting context the box is in: floats, and blocks and inline boxes that have such floats. */
+static int
+reuse_leaky_below(
+	const struct layout_box *box,
+	int depth)
+{
+	const struct layout_box *child;
+
+	if (depth > LAYOUT_DEPTH_MAX)
+		return 1;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->floating != CSS_FLOAT_NONE)
+			return 1;
+		if (child->kind == LAYOUT_BLOCK || child->kind == LAYOUT_ANONYMOUS_BLOCK) {
+			if (child->reuse_leaky)
+				return 1;
+		} else if (reuse_leaky_below(child, depth + 1)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* Tells whether everything below a box is plain flow: the blocks by what they recorded, the inline boxes by looking. */
+static int
+reuse_plain_below(
+	const struct layout_box *box,
+	int depth)
+{
+	const struct layout_box *child;
+
+	if (depth > LAYOUT_DEPTH_MAX)
+		return 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->kind == LAYOUT_BLOCK || child->kind == LAYOUT_ANONYMOUS_BLOCK) {
+			if (!child->reuse_recorded || !child->reuse_plain)
+				return 0;
+			continue;
+		}
+		if (!reuse_local_ok(child))
+			return 0;
+		if (child->kind == LAYOUT_INLINE && !reuse_plain_below(child, depth + 1))
+			return 0;
+	}
+	return 1;
+}
+
+/* Tells whether a box that was built for the tree may be a block that keeps what it has: a block in the flow of a block, laid out for real. */
 static int
 reuse_allowed(
 	const struct layout_tree *tree,
@@ -364,373 +459,181 @@ reuse_allowed(
 }
 
 /*
- * Takes a block's content from the previous tree when it can: when the
- * element's box there, and all it holds, is plain flow, nothing changed
- * under the element, the style is the same and the same sizes are given.
- * *grafted tells whether it did (the box has its size and its content, and
- * its layout is done); otherwise the box is as it was, to be laid out.
- * Returns 0 or ENOMEM.
+ * Takes the box of an element from the previous tree when it can: when the
+ * box and all it holds is plain flow, nothing changed under the element, the
+ * style engine still has the style of the element as it computed it, and the
+ * box goes under a block.  Returns the box (free of its old siblings; the
+ * caller puts it under its parent), or NULL when the element is to be built.
+ */
+struct layout_box *
+layout_reuse_take(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_element *element,
+	struct layout_box *parent)
+{
+	const struct reuse_entry *entry;
+	const struct dom_document *document;
+	struct layout_box *box;
+
+	/* Only under a block of the flow, outside any measuring. */
+	if (tree->reuse == NULL || parent == NULL || tree->measuring != 0)
+		return NULL;
+	if (parent->kind != LAYOUT_BLOCK || parent->replaced)
+		return NULL;
+	if (parent->style.display != CSS_DISPLAY_BLOCK && parent->style.display != CSS_DISPLAY_LIST_ITEM &&
+	    parent->style.display != CSS_DISPLAY_INLINE_BLOCK)
+		return NULL;
+
+	/* Nothing changed under the element, and nothing asks for everything. */
+	document = element->node.document;
+	if (document->change_full_layout != 0U || (element->node.change & (DOM_CHANGED_LAYOUT | DOM_CHANGED_LAYOUT_BELOW)) != 0U)
+		return NULL;
+
+	/* The element's one box in the previous tree, a plain block that was laid out, without an animation. */
+	entry = reuse_find(tree->reuse, &element->node);
+	if (entry == NULL || entry->ambiguous)
+		return NULL;
+	box = entry->box;
+	if (!box->reuse_recorded || !box->reuse_plain || box->kind != LAYOUT_BLOCK || box->out_of_flow || box->replaced)
+		return NULL;
+	if (box->style.animation_name != NULL)
+		return NULL;
+
+	/* The style is as it was when the box was made. */
+	tree->reuse_roots++;
+	if (!css_engine_style_current(css, element))
+		return NULL;
+
+	/* Free of the siblings it had. */
+	box->next = NULL;
+	tree->reuse_boxes++;
+	return box;
+}
+
+/*
+ * Lets a block that was taken from the previous tree keep what it has when
+ * its layout would be the same: when the same sizes are given as when it was
+ * laid out, and, for one in its parent's formatting context, there are no
+ * floats around it and none inside it that join that context.  *grafted tells
+ * whether it does (the final pass moves its content); otherwise it is laid
+ * out again, in the place it is.  Returns 0.
  */
 int
 layout_reuse_graft(
 	struct layout_tree *tree,
 	struct layout_box *box,
 	layout_unit containing_width,
+	int own_context,
 	int *grafted)
 {
-	struct reuse_copy copy;
-	struct layout_box *first;
-	struct layout_box *last;
-	struct layout_box *child;
-	const struct reuse_entry *entry;
-	const struct layout_box *old;
-	size_t index;
-	int error;
-
-	/* A box that may take its content, and whose element the previous tree has one box of, plain all the way down. */
+	/* A box this tree made has nothing to keep; one taken is laid out again unless it comes out as it did. */
 	*grafted = 0;
-	if (tree->reuse == NULL || !reuse_allowed(tree, box))
+	if (tree->reuse == NULL || box->born == tree->serial)
 		return 0;
-	entry = reuse_find(tree->reuse, box->node);
-	if (entry == NULL || entry->ambiguous || !entry->plain)
+	box->reuse_skipped = 0;
+	if (!reuse_allowed(tree, box))
 		return 0;
-	old = entry->box;
-	tree->reuse_roots++;
+	if (!box->reuse_recorded || !box->reuse_plain)
+		return 0;
+	if (!own_context && box->reuse_leaky)
+		return 0;
 
 	/* The same box laid out with the same things given. */
-	if (!old->reuse_recorded || old->kind != box->kind || old->parent == NULL)
+	if (box->reuse_width != containing_width || box->reuse_height != tree->containing_height ||
+	    box->reuse_inputs != reuse_inputs(tree, box, own_context))
 		return 0;
-	if (old->reuse_width != containing_width || old->reuse_height != tree->containing_height ||
-	    old->reuse_inputs != reuse_inputs(tree, box))
-		return 0;
-	if (old->children_inline != box->children_inline || old->atomic != box->atomic || old->floating != box->floating ||
-	    old->marker_length != box->marker_length || memcmp(old->marker, box->marker, sizeof(box->marker)) != 0)
-		return 0;
-	if (memcmp(&old->style, &box->style, sizeof(box->style)) != 0)
-		return 0;
-
-	/* The copy of everything below it, apart from the box until it has all succeeded. */
-	memset(&copy, 0, sizeof(copy));
-	copy.tree = tree;
-	first = box->first_child;
-	last = box->last_child;
-	box->first_child = NULL;
-	box->last_child = NULL;
-	error = reuse_copy_descend(&copy, old, box, old->x + old->border[CSS_LEFT] + old->padding[CSS_LEFT],
-	    old->y + old->border[CSS_TOP] + old->padding[CSS_TOP], 0);
-	if (error == 0)
-		error = reuse_copy_pair(&copy, old, box);
-	if (error == 0)
-		error = reuse_copy_index(&copy);
-	for (index = 0; error == 0 && index < copy.count; index++)
-		error = reuse_copy_lines(&copy, copy.pairs[index].old, copy.pairs[index].copy);
-
-	/* A failure leaves the box with the children it was built with. */
-	if (error != 0) {
-		box->first_child = first;
-		box->last_child = last;
-		free(copy.pairs);
-		free(copy.table);
-		return error == ENOMEM ? ENOMEM : 0;
-	}
-
-	/* The box's own result, and what is below it, are the copies. */
-	reuse_box_results(old, box);
+	box->reuse_skipped = 1;
 	tree->reuse_grafts++;
-	tree->reuse_boxes += copy.count;
-	for (child = box->first_child; child != NULL; child = child->next)
-		child->parent = box;
-	free(copy.pairs);
-	free(copy.table);
-	layout_reuse_record(tree, box, containing_width);
 	*grafted = 1;
 	return 0;
 }
 
-/* Gives a box the result of the layout of its box in the previous tree (the lines are copied with the pairs). */
-static void
-reuse_box_results(
-	const struct layout_box *old,
-	struct layout_box *fresh)
-{
-	fresh->width = old->width;
-	fresh->height = old->height;
-	memcpy(fresh->margin, old->margin, sizeof(fresh->margin));
-	memcpy(fresh->border, old->border, sizeof(fresh->border));
-	memcpy(fresh->padding, old->padding, sizeof(fresh->padding));
-	fresh->collapsed_top = old->collapsed_top;
-	fresh->collapsed_bottom = old->collapsed_bottom;
-	fresh->line_count = old->line_count;
-	fresh->vertical_inline = old->vertical_inline;
-	fresh->has_baseline = old->has_baseline;
-	fresh->control_baseline = old->control_baseline;
-	fresh->max_content = old->max_content;
-	fresh->max_content_known = old->max_content_known;
-	fresh->min_content = old->min_content;
-	fresh->min_content_known = old->min_content_known;
-	memcpy(fresh->min_content_sizes, old->min_content_sizes, sizeof(fresh->min_content_sizes));
-	fresh->min_content_sizing = old->min_content_sizing;
-	fresh->min_content_ratio = old->min_content_ratio;
-	fresh->min_content_containing = old->min_content_containing;
-	fresh->min_content_definite = old->min_content_definite;
-	fresh->min_content_indefinite = old->min_content_indefinite;
-}
-
-/* Registers the pair of the box taking its content and the box of the previous tree (its lines are copied too). */
-static int
-reuse_copy_pair(
-	struct reuse_copy *copy,
-	const struct layout_box *old,
-	struct layout_box *fresh)
-{
-	if (copy->count == copy->capacity) {
-		struct reuse_pair *grown;
-		size_t capacity;
-
-		capacity = copy->capacity == 0 ? 64 : copy->capacity * 2U;
-		grown = realloc(copy->pairs, capacity * sizeof(*grown));
-		if (grown == NULL)
-			return ENOMEM;
-		copy->pairs = grown;
-		copy->capacity = capacity;
-	}
-	copy->pairs[copy->count].old = old;
-	copy->pairs[copy->count].copy = fresh;
-	copy->count++;
-	return 0;
-}
-
-/* Makes the table to find a copy by the box it is of. */
-static int
-reuse_copy_index(
-	struct reuse_copy *copy)
-{
-	size_t capacity;
-	size_t index;
-	size_t slot;
-
-	capacity = 16;
-	while (capacity < copy->count * 2U + 2U)
-		capacity *= 2U;
-	copy->table = calloc(capacity, sizeof(*copy->table));
-	if (copy->table == NULL)
-		return ENOMEM;
-	copy->table_capacity = capacity;
-	for (index = 0; index < copy->count; index++) {
-		slot = reuse_hash(copy->pairs[index].old) & (capacity - 1U);
-		while (copy->table[slot] != 0)
-			slot = (slot + 1U) & (capacity - 1U);
-		copy->table[slot] = index + 1U;
-	}
-	return 0;
-}
-
-/* Finds the copy of a box of the previous tree; NULL when it was not copied. */
-static struct layout_box *
-reuse_copy_of(
-	const struct reuse_copy *copy,
-	const struct layout_box *old)
-{
-	size_t slot;
-
-	slot = reuse_hash(old) & (copy->table_capacity - 1U);
-	while (copy->table[slot] != 0) {
-		if (copy->pairs[copy->table[slot] - 1U].old == old)
-			return copy->pairs[copy->table[slot] - 1U].copy;
-		slot = (slot + 1U) & (copy->table_capacity - 1U);
-	}
-	return NULL;
-}
-
 /*
- * Makes the copy of a box under a parent, at a position (relative to its
- * parent's content box), as the box was before the final pass.  Its lines
- * are made after all the copies are.
+ * Moves what is below a block that kept its layout to where the block is:
+ * the block's border box is at x, y (what the final pass added to its position),
+ * and its content, which is as the previous final pass left it, moves by what the
+ * block's content box moved.
  */
-static struct layout_box *
-reuse_copy_one(
-	struct reuse_copy *copy,
-	const struct layout_box *old,
-	struct layout_box *fresh,
+void
+layout_reuse_shift(
+	struct layout_box *box,
 	layout_unit x,
 	layout_unit y)
 {
-	struct layout_box *made;
+	layout_unit content_x;
+	layout_unit content_y;
+	layout_unit dx;
+	layout_unit dy;
 
-	made = wb_arena_alloc(&copy->tree->arena, sizeof(*made));
-	if (made == NULL)
-		return NULL;
-	memcpy(made, old, sizeof(*made));
-	made->parent = fresh;
-	made->first_child = NULL;
-	made->last_child = NULL;
-	made->next = NULL;
-	made->x = x;
-	made->y = y;
+	/* The block's position, as the final pass makes any. */
+	box->reuse_skipped = 0;
+	box->x += x;
+	box->y += y;
+	content_x = box->x + box->border[CSS_LEFT] + box->padding[CSS_LEFT];
+	content_y = box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
 
-	/* Last among its parent's children. */
-	if (fresh->last_child != NULL)
-		fresh->last_child->next = made;
+	/* Its content by what the content box moved. */
+	dx = content_x - box->abs_x;
+	dy = content_y - box->abs_y;
+	box->abs_x = content_x;
+	box->abs_y = content_y;
+	if (dx == 0 && dy == 0)
+		return;
+	if (box->children_inline)
+		reuse_shift_inlines(box->first_child, dx, dy, 0);
 	else
-		fresh->first_child = made;
-	fresh->last_child = made;
-	if (reuse_copy_pair(copy, old, made) != 0)
-		return NULL;
-	return made;
+		reuse_shift_blocks(box, dx, dy, 0);
 }
 
-/*
- * Copies what is below a box (old, whose copy is fresh): its content box's
- * top left is x, y in the previous tree's positions, the origin the final
- * pass added to what is in it.
- */
-static int
-reuse_copy_descend(
-	struct reuse_copy *copy,
-	const struct layout_box *old,
-	struct layout_box *fresh,
+/* Moves the children of a block that holds blocks (all of them in the flow). */
+static void
+reuse_shift_blocks(
+	struct layout_box *box,
 	layout_unit x,
 	layout_unit y,
 	int depth)
 {
+	struct layout_box *child;
+
 	if (depth > LAYOUT_DEPTH_MAX)
-		return E2BIG;
-	if (old->children_inline)
-		return reuse_copy_inlines(copy, old->first_child, fresh, x, y, depth);
-	return reuse_copy_blocks(copy, old, fresh, x, y, depth);
-}
-
-/* Copies the children of a block that holds blocks: each one's position is relative to the block's content box. */
-static int
-reuse_copy_blocks(
-	struct reuse_copy *copy,
-	const struct layout_box *old,
-	struct layout_box *fresh,
-	layout_unit x,
-	layout_unit y,
-	int depth)
-{
-	const struct layout_box *child;
-	struct layout_box *made;
-	int error;
-
-	for (child = old->first_child; child != NULL; child = child->next) {
-		if (child->out_of_flow)
-			return EINVAL;
-		made = reuse_copy_one(copy, child, fresh, child->x - x, child->y - y);
-		if (made == NULL)
-			return ENOMEM;
-		error = reuse_copy_descend(copy, child, made, child->x + child->border[CSS_LEFT] + child->padding[CSS_LEFT],
-		    child->y + child->border[CSS_TOP] + child->padding[CSS_TOP], depth + 1);
-		if (error != 0)
-			return error;
+		return;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		child->x += x;
+		child->y += y;
+		child->abs_x += x;
+		child->abs_y += y;
+		if (child->children_inline)
+			reuse_shift_inlines(child->first_child, x, y, depth + 1);
+		else
+			reuse_shift_blocks(child, x, y, depth + 1);
 	}
-	return 0;
 }
 
-/*
- * Copies the inline content of a block (x, y: its content box's top left):
- * the inline boxes and text keep the position they have, a float or an
- * inline block there is relative to the block's content box.
- */
-static int
-reuse_copy_inlines(
-	struct reuse_copy *copy,
-	const struct layout_box *first,
-	struct layout_box *fresh,
+/* Moves the floats and inline blocks among the inline content of a block (the inline boxes and the text stay where they are). */
+static void
+reuse_shift_inlines(
+	struct layout_box *first,
 	layout_unit x,
 	layout_unit y,
 	int depth)
 {
-	const struct layout_box *child;
-	struct layout_box *made;
-	int error;
+	struct layout_box *child;
 
 	if (depth > LAYOUT_DEPTH_MAX)
-		return E2BIG;
+		return;
 	for (child = first; child != NULL; child = child->next) {
-		if (child->out_of_flow)
-			return EINVAL;
-
-		/* A float or an inline block, which the final pass moved with the content box, and has content of its own. */
 		if (child->floating != CSS_FLOAT_NONE || child->atomic) {
-			made = reuse_copy_one(copy, child, fresh, child->x - x, child->y - y);
-			if (made == NULL)
-				return ENOMEM;
-			error = reuse_copy_descend(copy, child, made, child->x + child->border[CSS_LEFT] + child->padding[CSS_LEFT],
-			    child->y + child->border[CSS_TOP] + child->padding[CSS_TOP], depth + 1);
-			if (error != 0)
-				return error;
+			child->x += x;
+			child->y += y;
+			child->abs_x += x;
+			child->abs_y += y;
+			if (child->children_inline)
+				reuse_shift_inlines(child->first_child, x, y, depth + 1);
+			else
+				reuse_shift_blocks(child, x, y, depth + 1);
 			continue;
 		}
-
-		/* An inline box, text, a break: where it is stays, and an inline box's children are searched. */
-		made = reuse_copy_one(copy, child, fresh, child->x, child->y);
-		if (made == NULL)
-			return ENOMEM;
-		error = reuse_copy_inlines(copy, child->first_child, made, x, y, depth + 1);
-		if (error != 0)
-			return error;
+		reuse_shift_inlines(child->first_child, x, y, depth + 1);
 	}
-	return 0;
-}
-
-/* Copies the lines of a box, their fragments and decorations, with the boxes they name taken to their copies. */
-static int
-reuse_copy_lines(
-	struct reuse_copy *copy,
-	const struct layout_box *old,
-	struct layout_box *fresh)
-{
-	const struct layout_line *from;
-	struct layout_line *to;
-	size_t index;
-	size_t at;
-
-	/* A box without lines has none. */
-	if (old->lines == NULL) {
-		fresh->lines = NULL;
-		return 0;
-	}
-	fresh->lines = wb_arena_alloc(&copy->tree->arena, (old->line_count == 0 ? 1U : old->line_count) * sizeof(struct layout_line));
-	if (fresh->lines == NULL)
-		return ENOMEM;
-	for (index = 0; index < old->line_count; index++) {
-		from = &old->lines[index];
-		to = &fresh->lines[index];
-		*to = *from;
-		to->fragments = NULL;
-		to->decorations = NULL;
-		if (from->fragments != NULL) {
-			to->fragments = wb_arena_alloc(&copy->tree->arena, (from->fragment_count == 0 ? 1U : from->fragment_count) * sizeof(struct layout_fragment));
-			if (to->fragments == NULL)
-				return ENOMEM;
-			for (at = 0; at < from->fragment_count; at++) {
-				to->fragments[at] = from->fragments[at];
-
-				/* A list marker's text is in the box that owns the lines. */
-				if (from->fragments[at].text >= old->marker && from->fragments[at].text < old->marker + sizeof(old->marker) / sizeof(old->marker[0]))
-					to->fragments[at].text = fresh->marker + (from->fragments[at].text - old->marker);
-				if (from->fragments[at].box != NULL) {
-					to->fragments[at].box = reuse_copy_of(copy, from->fragments[at].box);
-					if (to->fragments[at].box == NULL)
-						return EINVAL;
-				}
-			}
-		}
-		if (from->decorations != NULL) {
-			to->decorations = wb_arena_alloc(&copy->tree->arena, (from->decoration_count == 0 ? 1U : from->decoration_count) * sizeof(struct layout_decoration));
-			if (to->decorations == NULL)
-				return ENOMEM;
-			for (at = 0; at < from->decoration_count; at++) {
-				to->decorations[at] = from->decorations[at];
-				if (from->decorations[at].box != NULL) {
-					to->decorations[at].box = reuse_copy_of(copy, from->decorations[at].box);
-					if (to->decorations[at].box == NULL)
-						return EINVAL;
-				}
-			}
-		}
-	}
-	return 0;
 }

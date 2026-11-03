@@ -1303,6 +1303,7 @@ void css_engine_forget_styles(struct css_engine *engine);
 #define CSS_RESTYLE_DROP	0x10U
 unsigned css_engine_change_scope(struct css_engine *engine, struct dom_element *element, int kind, const struct vm_string *attribute);
 void css_engine_invalidate(struct css_engine *engine, struct dom_element *element, unsigned scope);
+int css_engine_style_current(struct css_engine *engine, const struct dom_element *element);
 /* The bytes of its arena the computed styles of custom properties took since the engine was made (the arena is freed with the engine). */
 uint64_t css_engine_arena_bytes(const struct css_engine *engine);
 /* Sets the function told of an element whose style came out different from the one kept (or had none kept). */

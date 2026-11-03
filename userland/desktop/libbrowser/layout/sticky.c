@@ -238,6 +238,8 @@ sticky_collect(
 			return error;
 	}
 	for (child = box->first_child; child != NULL; child = child->next) {
+		if (layout_reuse_frozen(tree, child))
+			continue;
 		error = sticky_collect(tree, child, found, depth + 1);
 		if (error != 0)
 			return error;

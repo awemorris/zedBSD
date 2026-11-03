@@ -391,13 +391,23 @@ struct layout_box {
 
 	/*
 	 * What a block's layout was last made with (layout_block records it): the containing block's width and
-	 * height, and the flags layout_reuse_inputs makes; a later tree takes the block's content as it is when its
+	 * height, and the flags layout_reuse_inputs makes; a later tree takes the block as it is when its
 	 * element and what is below it did not change and the same things are given again (reuse.c).
 	 */
 	layout_unit reuse_width;
 	layout_unit reuse_height;
 	unsigned reuse_inputs;
 	int reuse_recorded;
+	/* Whether the box and all below it is plain flow that another tree may use as it is (set with the record). */
+	int reuse_plain;
+	/* Whether floats inside the box (outside the formatting contexts of its own below it) join the context the box is in. */
+	int reuse_leaky;
+	/* Set while the box's content is the one the previous layout made, to be moved to where the box is by the final pass. */
+	int reuse_skipped;
+	/* The build that made the box (layout_tree.serial), and where the box's content box started after the final pass. */
+	uint64_t born;
+	layout_unit abs_x;
+	layout_unit abs_y;
 };
 
 /*
@@ -504,7 +514,15 @@ struct layout_tree {
 	int logical_mode;
 	/* The view transition being shown or measured (not owned), and whether this build is the measuring one. */
 	const struct layout_transition *transition;
-	/* The previous tree the boxes may be taken from (reuse.c; NULL: none), and how much of it was: the boxes that could be, the ones that were, and the boxes that took. */
+	/* Which build made the tree (boxes carry it), and whether it records what its blocks were laid out with for a later tree. */
+	uint64_t serial;
+	int cached;
+	/* How many trees of boxes the arena holds besides its own (each one that a tree took boxes from). */
+	unsigned reuse_age;
+	/*
+	 * The previous tree the boxes may be taken from (reuse.c; NULL: none), and how much of it was: the
+	 * boxes that could be taken, the blocks that kept their layout, and the boxes that were taken.
+	 */
 	struct layout_reuse *reuse;
 	uint64_t reuse_roots;
 	uint64_t reuse_grafts;
@@ -528,7 +546,7 @@ struct layout_context {
  * change since: the elements whose DOM_CHANGED_LAYOUT and DOM_CHANGED_LAYOUT_BELOW bits are clear, whose styles
  * and layout inputs are the same.  The tree is what layout_build makes; previous is only read.
  */
-int layout_build_reusing(struct layout_tree *tree, const struct layout_tree *previous, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
+int layout_build_reusing(struct layout_tree *tree, struct layout_tree *previous, int cached, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
 int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
 void layout_box_model(struct layout_box *box, layout_unit containing_width);
 void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
@@ -608,11 +626,16 @@ int layout_narrowest(struct layout_tree *tree, struct layout_box *box, layout_un
 int layout_stacking_order(const struct layout_tree *tree, struct wb_vector *boxes, size_t *flow_index);
 void layout_release(struct layout_tree *tree);
 int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
-/* Taking the content of a block from the previous tree, and recording what its layout was made with (reuse.c). */
+/* Taking boxes of the previous tree as they are, and recording what the blocks were laid out with (reuse.c). */
 int layout_reuse_open(struct layout_tree *tree, const struct layout_tree *previous);
 void layout_reuse_close(struct layout_tree *tree);
-int layout_reuse_graft(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width, int *grafted);
-void layout_reuse_record(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
+struct layout_box *layout_reuse_take(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *parent);
+void layout_reuse_expand(struct layout_tree *tree, const struct dom_node *node);
+int layout_reuse_graft(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width, int own_context, int *grafted);
+void layout_reuse_record(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width, int own_context);
+void layout_reuse_shift(struct layout_box *box, layout_unit x, layout_unit y);
+int layout_reuse_adopt(struct layout_tree *tree, struct layout_tree *previous);
+int layout_reuse_frozen(const struct layout_tree *tree, const struct layout_box *box);
 int layout_multicol_wanted(const struct layout_box *box);
 void layout_multicol_geometry(const struct layout_box *box, layout_unit width, int *count, layout_unit *column, layout_unit *gap);
 int layout_multicol_cut(struct layout_tree *tree, struct layout_box *box, layout_unit width, int columns, layout_unit column, layout_unit gap);

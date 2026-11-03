@@ -146,6 +146,48 @@ wb_arena_release(
 	arena->head = NULL;
 }
 
+/*
+ * Takes over every block of another arena: what it handed out lives as long
+ * as this arena does, and the other owns nothing afterwards.  The blocks go
+ * behind this arena's own, so that new pieces still come from its newest one.
+ */
+void
+wb_arena_adopt(
+	struct wb_arena *arena,
+	struct wb_arena *other)
+{
+	struct wb_arena_block *block;
+
+	/* Nothing to take. */
+	if (other->head == NULL)
+		return;
+
+	/* Behind the last block, or as the only ones. */
+	if (arena->head == NULL) {
+		arena->head = other->head;
+	} else {
+		block = arena->head;
+		while (block->next != NULL)
+			block = block->next;
+		block->next = other->head;
+	}
+	other->head = NULL;
+}
+
+/* Tells how many bytes the blocks of the arena hold in all (what it took from malloc, less the blocks' own headers). */
+size_t
+wb_arena_bytes(
+	const struct wb_arena *arena)
+{
+	const struct wb_arena_block *block;
+	size_t bytes;
+
+	bytes = 0;
+	for (block = arena->head; block != NULL; block = block->next)
+		bytes += block->size;
+	return bytes;
+}
+
 /* Rounds a size up to the arena's alignment. */
 static size_t
 arena_round(

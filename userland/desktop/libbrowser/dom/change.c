@@ -144,8 +144,16 @@ dom_note_change(
 	/* What the kind of change leaves to compute again. */
 	switch (kind) {
 	case DOM_CHANGE_CHILDREN:
-		/* The parent's other children may match a different :nth-child or sibling selector now. */
-		change_mark(node, DOM_CHANGED_STYLE_SUBTREE | DOM_CHANGED_LAYOUT);
+		/* The parent's other children may match a different :nth-child or sibling selector now, unless the engine says no selector can. */
+		scope = DOM_RESTYLE_SUBTREE | DOM_RESTYLE_SIBLINGS;
+		if (document->change_scope != NULL && node->type == DOM_ELEMENT)
+			scope = document->change_scope(document->change_scope_context, (struct dom_element *)node, (int)kind, NULL);
+		bits = DOM_CHANGED_LAYOUT;
+		if ((scope & DOM_RESTYLE_ALL) != 0U)
+			document->change_full_style = 1;
+		else if ((scope & DOM_RESTYLE_SUBTREE) != 0U)
+			bits |= DOM_CHANGED_STYLE_SUBTREE;
+		change_mark(node, bits);
 		if (child != NULL) {
 			if (child->parent == node)
 				change_mark(child, DOM_CHANGED_STYLE_SUBTREE | DOM_CHANGED_LAYOUT);
@@ -158,8 +166,17 @@ dom_note_change(
 		/* The text's own box, and the parent's (:empty, and the parent's inline layout). */
 		change_mark(node, DOM_CHANGED_LAYOUT);
 		parent = node->parent;
-		if (parent != NULL)
-			change_mark(parent, DOM_CHANGED_STYLE | DOM_CHANGED_LAYOUT);
+		if (parent != NULL) {
+			scope = DOM_RESTYLE_SUBTREE | DOM_RESTYLE_SIBLINGS;
+			if (document->change_scope != NULL && parent->type == DOM_ELEMENT)
+				scope = document->change_scope(document->change_scope_context, (struct dom_element *)parent, (int)kind, NULL);
+			bits = DOM_CHANGED_LAYOUT;
+			if ((scope & DOM_RESTYLE_ALL) != 0U)
+				document->change_full_style = 1;
+			else if ((scope & DOM_RESTYLE_SUBTREE) != 0U)
+				bits |= DOM_CHANGED_STYLE;
+			change_mark(parent, bits);
+		}
 		break;
 
 	case DOM_CHANGE_ATTRIBUTE:

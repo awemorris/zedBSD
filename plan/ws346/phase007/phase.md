@@ -54,4 +54,23 @@ commit の SHA、流した command と最後の行、自分で決めた点、未
 
 ## 結果
 
-（実装の担当が書く: 自分で決めた点・数・未実施）
+途中の記録（2026-11-03、Q1 が直に実装）:
+
+- 方式: 前の tree の箱を copy せず、そのまま新しい tree の親の下に付ける（構造共有）。`box_build_element` の先頭で
+  `layout_reuse_take` が、DOM の bit が clear・style engine が style を stale にしていない・前の tree でその要素の箱が 1 つで
+  plain flow（`reuse_plain`）・親が block の流れ、の時に箱を返し、その部分木は build しない。build した要素の前の箱の子が
+  `layout_reuse_expand` で索引に入る（前の tree 全体は読まない）。新しい tree は前の tree の arena を引き取る
+  （`wb_arena_adopt`、世代 24 か 1 GiB で全体を build し直す）。
+- layout: 前の tree の箱は、同じ幅・高さ・flag で呼ばれたら中身を触らず（`reuse_skipped`）、最後の pass（`layout_absolute`）が
+  `layout_reuse_shift` で中身を新しい位置へ平行移動する。違う入力なら箱のまま layout し直す。BFC の箱だけでなく、親の context の
+  block も、float が周りにも中にも無い時（`reuse_leaky`、入力の bit 16）は同じ。list item は marker が変わると記録を消して layout し直す。
+- 後の pass（`layout_position`・`sticky`・`scroll`・`box_apply_scale`）は plain flow の部分木（`layout_reuse_frozen`）を飛ばす。
+- 失敗: 箱を取った後の失敗は前の tree を壊すので、`page_layout` は両方を捨てる。`@container` を使う頁は共有しない
+  （前の tree から大きさを読むため）。
+- DOM の記録: 子の増減・text の変更が親の subtree を restyle するのは、構造に関わる selector（`:first-child` `:last-child`
+  `:nth-*` `:empty`、兄弟 combinator、`:has`）がある時だけにした（`css_engine_change_scope` が CHILDREN・TEXT も答える。UA の sheet の
+  数え方は details の子だけ）。
+- 計測（bench、1 回、off は約 14 s・toggle 0.70 s）: class 1.48 s、style 1.29 s、append 1.25 s、toggle 0.042 s。
+- 試験: host-change 88/88、host-restyle-scope 76/76、run-pages 6/6（reuse-flow.html を足した）、run-verify.sh は off と verify の差分 0
+  （dom 39/42・js 21/21・fetch 38/38・WPT 62/37/1・Acid3 100/100）、ASan の run-pages 6/6。
+- 未実施: 下のわざと壊す確認。DOM 全体を歩く pass（media・images・frame・animations・geometry の索引）は残っている。

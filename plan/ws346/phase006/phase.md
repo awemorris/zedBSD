@@ -56,12 +56,10 @@ commit の SHA、流した command と最後の行、自分で決めた点、未
 
 ## 結果
 
-途中の記録（2026-11-03、Q1 が直に実装。stage 1 を commit）:
+途中の記録（2026-11-03、Q1 が直に実装）:
 
-- 実装済み: style の stale 比較（`css_engine_invalidate` は古い style を残して stale にし、`css_engine_compute` が再計算して `memcmp` で
-  比べ、違う時だけ hook で DOM の LAYOUT bit を立てる）、`layout/reuse.c`（前の tree の索引・箱ごとの判定・入力の記録・接ぎ木）。
-- 接ぎ木は部分木を前の tree から deep copy する方式。出力は正しい（`reuse-blocks` が off/on/verify で一致、接ぎ木 107 回、不一致 0。
-  `run-verify.sh` は dom 39/42・js 21/21・fetch 38/38・WPT 62/37/1・Acid3 100/100 で off と verify の差分 0）。
-- 速くはない: 箱 1 つ（8 KB）ごとの copy が多く、bench の class/style/append は off 約 14 s に対し on 15〜17 s。
-  構造共有（pointer 共有と子の build の遅延）が要る。`max_content` の持ち越し（design §5.3.5）は未実装。
-- 試験: host-change 88/88、host-restyle-scope 61/61、run-pages 5/5。
+- style の stale 比較（`css_engine_invalidate` は古い style を残して stale にし、`css_engine_compute` が再計算して `memcmp` で
+  比べ、違う時だけ hook で DOM の LAYOUT bit を立てる）、`css_engine_style_current`（stale でない style を持つか）、
+  `layout/reuse.c`（前の tree の箱の索引・箱ごとの plain 判定と入力の記録）を実装した。
+- 最初の接ぎ木は部分木を前の tree から deep copy する方式で、出力は正しかったが速くなかった（箱 1 つ 8 KB の copy が多い）。
+  p007 で pointer 共有に替えた（reuse.c の冒頭の説明を見よ）。`max_content` の持ち越し（design §5.3.5）は未実装。

@@ -27,7 +27,7 @@
 /* The most nested boxes searched. */
 #define SCROLL_DEPTH	256
 
-static int scroll_collect(const struct layout_box *box, struct wb_vector *containers, int depth);
+static int scroll_collect(const struct layout_tree *tree, const struct layout_box *box, struct wb_vector *containers, int depth);
 static void scroll_shift(struct layout_box *box, const struct layout_box *root, layout_unit dx, layout_unit dy, int self, int depth);
 static int scroll_inside(const struct layout_box *box, const struct layout_box *ancestor);
 static void scroll_hold(const struct layout_box *box, double *y);
@@ -51,7 +51,7 @@ layout_scroll_apply(
 	if (tree->root == NULL)
 		return 0;
 	wb_vector_init(&containers, sizeof(const struct layout_box *));
-	error = scroll_collect(tree->root, &containers, 0);
+	error = scroll_collect(tree, tree->root, &containers, 0);
 	if (error != 0 || containers.count == 0) {
 		wb_vector_release(&containers);
 		return error;
@@ -70,6 +70,7 @@ layout_scroll_apply(
 /* Collects the scrolled containers in tree order. */
 static int
 scroll_collect(
+	const struct layout_tree *tree,
 	const struct layout_box *box,
 	struct wb_vector *containers,
 	int depth)
@@ -87,7 +88,9 @@ scroll_collect(
 			return error;
 	}
 	for (child = box->first_child; child != NULL; child = child->next) {
-		error = scroll_collect(child, containers, depth + 1);
+		if (layout_reuse_frozen(tree, child))
+			continue;
+		error = scroll_collect(tree, child, containers, depth + 1);
 		if (error != 0)
 			return error;
 	}

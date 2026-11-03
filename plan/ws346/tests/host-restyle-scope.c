@@ -206,6 +206,29 @@ test_scopes(void)
 	expect_scope("input:disabled + span { color: red }", DOM_CHANGE_STATE, NULL, subsib, ":disabled with a sibling combinator");
 	expect_scope("input:placeholder-shown { color: red }", DOM_CHANGE_STATE, NULL, sub, ":placeholder-shown: state");
 
+	/* Children and text: selectors that count children, ask if there are any, or join siblings. */
+	expect_scope(".a { color: red }", DOM_CHANGE_CHILDREN, NULL, CSS_RESTYLE_NONE, "plain: children restyle nothing");
+	expect_scope(".a { color: red }", DOM_CHANGE_TEXT, NULL, CSS_RESTYLE_NONE, "plain: text restyles nothing");
+	expect_scope("li:last-child { color: red }", DOM_CHANGE_CHILDREN, NULL, sub, ":last-child: children");
+	expect_scope("li:first-child { color: red }", DOM_CHANGE_CHILDREN, NULL, sub, ":first-child: children");
+	expect_scope("li:nth-child(2) { color: red }", DOM_CHANGE_CHILDREN, NULL, sub, ":nth-child: children");
+	expect_scope("li:only-of-type { color: red }", DOM_CHANGE_CHILDREN, NULL, sub, ":only-of-type: children");
+	expect_scope("li:last-child { color: red }", DOM_CHANGE_TEXT, NULL, sub, ":last-child: text (counted conservatively)");
+	expect_scope("div:empty { color: red }", DOM_CHANGE_CHILDREN, NULL, sub, ":empty: children");
+	expect_scope("div:empty { color: red }", DOM_CHANGE_TEXT, NULL, sub, ":empty: text");
+	expect_scope(".a + .b { color: red }", DOM_CHANGE_CHILDREN, NULL, sub, "a sibling combinator: children");
+	expect_scope(".a + .b { color: red }", DOM_CHANGE_TEXT, NULL, CSS_RESTYLE_NONE, "a sibling combinator: text nodes are no siblings");
+	expect_scope("div:has(.x) { color: red }", DOM_CHANGE_CHILDREN, NULL, CSS_RESTYLE_ALL, ":has: children");
+	expect_scope("div:has(.x) { color: red }", DOM_CHANGE_TEXT, NULL, CSS_RESTYLE_ALL, ":has: text");
+
+	/* The user agent's own counting concerns the children of a details element. */
+	engine = engine_with(".a { color: red }");
+	element = make("details");
+	check(css_engine_change_scope(engine, element, DOM_CHANGE_CHILDREN, NULL) == sub, "details: children");
+	element = make("div");
+	check(css_engine_change_scope(engine, element, DOM_CHANGE_CHILDREN, NULL) == CSS_RESTYLE_NONE, "div: children");
+	css_engine_destroy(engine);
+
 	/* A sheet added after the question changes the answer. */
 	engine = engine_with(".a { color: red }");
 	element = make("div");
