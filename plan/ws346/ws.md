@@ -42,8 +42,8 @@ script が DOM を変えては幾何を読む頁（amazon.co.jp、store.google.c
 | [ws346-p003](phase003/phase.md) | 照合（verify）の道具と bench | cleared（2026-11-03、q2003） | p002 |
 | [ws346-p004](phase004/phase.md) | selector の特徴の表と変更の影響の範囲（css） | cleared（2026-11-03、q2003） | p002 |
 | [ws346-p005](phase005/phase.md) | style の無効化の統合（engine を保つ） | cleared（2026-11-03、q2003） | p003, p004 |
-| [ws346-p006](phase006/phase.md) | layout の再利用 A: 幾何の保存・候補の判定・intrinsic の持ち越し | planned | p005 |
-| [ws346-p007](phase007/phase.md) | layout の再利用 B: 部分木の接ぎ木 | planned | p006 |
+| [ws346-p006](phase006/phase.md) | layout の再利用 A: 幾何の保存・候補の判定・intrinsic の持ち越し | cleared（2026-11-03、q2005。intrinsic の持ち越しは未実装） | p005 |
+| [ws346-p007](phase007/phase.md) | layout の再利用 B: 部分木の接ぎ木（構造共有に替えた） | cleared（2026-11-03、q2006） | p006 |
 | [ws346-p008](phase008/phase.md) | 統合の試験・速さの測定・既定の判定 | planned | p007 |
 | [ws346-p009](phase009/phase.md) | 規約の全文の見直し | planned | p008 |
 
@@ -52,4 +52,4 @@ script が DOM を変えては幾何を読む頁（amazon.co.jp、store.google.c
 
 ## Resume point
 
-p002 を実装中（Q1、main の checkout）。p002 → p003・p004 → p005 → p006 → p007 → p008 → p009 の順。
+p008（統合の試験・速さの測定・既定の判定）を実装中（Q1、main の checkout）。残りは p008 → p009 の順。

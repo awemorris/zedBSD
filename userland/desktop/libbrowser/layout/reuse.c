@@ -63,7 +63,6 @@ static int reuse_plain_below(const struct layout_box *box, int depth);
 static size_t reuse_slot(const struct reuse_entry *table, size_t capacity, const struct dom_node *node);
 static struct reuse_entry *reuse_find(const struct layout_reuse *reuse, const struct dom_node *node);
 static unsigned reuse_inputs(const struct layout_tree *tree, const struct layout_box *box, int own_context);
-static int reuse_leaky_below(const struct layout_box *box, int depth);
 static int reuse_allowed(const struct layout_tree *tree, const struct layout_box *box);
 static void reuse_shift_blocks(struct layout_box *box, layout_unit x, layout_unit y, int depth);
 static void reuse_shift_inlines(struct layout_box *first, layout_unit x, layout_unit y, int depth);
@@ -374,30 +373,6 @@ layout_reuse_record(
 	box->reuse_inputs = reuse_inputs(tree, box, own_context);
 	box->reuse_recorded = 1;
 	box->reuse_plain = reuse_local_ok(box) && reuse_plain_below(box, 0);
-	box->reuse_leaky = !own_context && reuse_leaky_below(box, 0);
-}
-
-/* Tells whether a float below a box joins the formatting context the box is in: floats, and blocks and inline boxes that have such floats. */
-static int
-reuse_leaky_below(
-	const struct layout_box *box,
-	int depth)
-{
-	const struct layout_box *child;
-
-	if (depth > LAYOUT_DEPTH_MAX)
-		return 1;
-	for (child = box->first_child; child != NULL; child = child->next) {
-		if (child->floating != CSS_FLOAT_NONE)
-			return 1;
-		if (child->kind == LAYOUT_BLOCK || child->kind == LAYOUT_ANONYMOUS_BLOCK) {
-			if (child->reuse_leaky)
-				return 1;
-		} else if (reuse_leaky_below(child, depth + 1)) {
-			return 1;
-		}
-	}
-	return 0;
 }
 
 /* Tells whether everything below a box is plain flow: the blocks by what they recorded, the inline boxes by looking. */
@@ -514,8 +489,8 @@ layout_reuse_take(
 /*
  * Lets a block that was taken from the previous tree keep what it has when
  * its layout would be the same: when the same sizes are given as when it was
- * laid out, and, for one in its parent's formatting context, there are no
- * floats around it and none inside it that join that context.  *grafted tells
+ * laid out, and, for one in its parent's formatting context, there were no
+ * floats in that context (none of its own either) and there are none.  *grafted tells
  * whether it does (the final pass moves its content); otherwise it is laid
  * out again, in the place it is.  Returns 0.
  */
@@ -536,7 +511,12 @@ layout_reuse_graft(
 		return 0;
 	if (!box->reuse_recorded || !box->reuse_plain)
 		return 0;
-	if (!own_context && box->reuse_leaky)
+	/*
+	 * A block in its parent's context has its lines and clearance made by the floats there are, not only by whether
+	 * there are any, and floats of its own join that context: it keeps what it has only where there were none (the
+	 * record is made after its own floats are in) and there are none.
+	 */
+	if (!own_context && ((box->reuse_inputs | reuse_inputs(tree, box, own_context)) & 16U) != 0U)
 		return 0;
 
 	/* The same box laid out with the same things given. */

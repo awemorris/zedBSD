@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
+最終更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
-| Q1 | [WS074](ws074/ws.md) p263・[WS346](ws346/ws.md) p006 | Web ブラウザ（libbrowser）、layout cache の実装 | p263 U1（amazon.co.jp）は host で直した。WS346 の設計 版 1 を書いた（[design.md](ws346/design.md)） | WS346 の未決の答えの後、p002 から Sonnet に渡す |
+| Q1 | [WS074](ws074/ws.md) p263・[WS346](ws346/ws.md) p008 | Web ブラウザ（libbrowser）、layout cache の実装 | p263 U1（amazon.co.jp）は host で直した。WS346 は p007 まで cleared（style と layout の部分木の再利用、bench class 9〜10 倍・append 11 倍・toggle 16 倍、verify 差異 0） | p008（目標の測定・live の頁の照合・既定 on の判定） |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 

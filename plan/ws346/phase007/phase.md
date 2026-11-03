@@ -73,4 +73,11 @@ commit の SHA、流した command と最後の行、自分で決めた点、未
 - 計測（bench、1 回、off は約 14 s・toggle 0.70 s）: class 1.48 s、style 1.29 s、append 1.25 s、toggle 0.042 s。
 - 試験: host-change 88/88、host-restyle-scope 76/76、run-pages 6/6（reuse-flow.html を足した）、run-verify.sh は off と verify の差分 0
   （dom 39/42・js 21/21・fetch 38/38・WPT 62/37/1・Acid3 100/100）、ASan の run-pages 6/6。
-- 未実施: 下のわざと壊す確認。DOM 全体を歩く pass（media・images・frame・animations・geometry の索引）は残っている。
+- 試験が見つけた誤り: 親の context の block は、周りの float の「有無」だけでなく形で行が変わる。有無が同じなら再利用する、と
+  していたのを、前も今も float が無い時だけ再利用する、に直した（reuse-flow.html の「背の高い float を消す」の step）。
+  list item の marker の幅が変わる step（reuse-marks.html、9 件の list の先頭に足す）も足した。
+- わざと壊した確認（git の外、`cmp` で戻した）: 後の位置の移動を消す（FAIL）、DOM の bit の確認を消す（FAIL）、style が
+  今のものかの確認を消す（FAIL）、float の確認を消す（FAIL）、marker が変わった list item の記録を消す（FAIL）。
+  float を中に持つ block を避ける旗（`reuse_leaky`）は、記録が float を持った後に作られるため上の確認が必ず先に断り、
+  旗は要らなかったので消した。
+- 残り: DOM 全体を歩く pass（media・images・frame・animations・geometry の索引）は変更の量によらず残る。

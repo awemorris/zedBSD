@@ -756,4 +756,6 @@
 | q2002 / q2002-i01 | Q1（直に、main の checkout） | [ws346-p002](ws346/phase002/phase.md) DOM の変更の記録・mode と計数の土台 | 2026-11-03 06:39 ユーザーの指示（定義した Phase をこのメインで実装、サブエージェントなし）。振る舞いは変えない | cleared（2026-11-03 06:52、host-change 79/79、既存の試験は基点と同じ） |
 | q2003 / q2003-i01 | Q1（直に、main の checkout） | [ws346-p003](ws346/phase003/phase.md) 照合の道具と bench、[ws346-p004](ws346/phase004/phase.md) selector の特徴の表と影響の範囲（p003 と p004 は触る file が重ならない） | 2026-11-03 06:39 ユーザーの指示（定義した Phase をこのメインで実装、サブエージェントなし） | cleared（p003 2026-11-03 07:01 `5031ad9c61`、p004 11:02 `af0251ef21`、p005 は下の q2004） |
 | q2004 / q2004-i01 | Q1（直に、main の checkout） | [ws346-p005](ws346/phase005/phase.md) style の無効化の統合 | 同上 | cleared（2026-11-03 11:35、pages 4/4・verify 差異 0・bench 4 が 16 倍） |
-| q2005 / q2005-i01 | Q1（直に、main の checkout） | [ws346-p006](ws346/phase006/phase.md) layout の再利用 A | 同上 | in-progress |
+| q2005 / q2005-i01 | Q1（直に、main の checkout） | [ws346-p006](ws346/phase006/phase.md) layout の再利用 A | 同上 | cleared（2026-11-03、style の stale 比較と reuse.c の土台。p007 とまとめて commit） |
+| q2006 / q2006-i01 | Q1（直に、main の checkout） | [ws346-p007](ws346/phase007/phase.md) layout の再利用 B（構造共有） | 同上 | cleared（2026-11-03 12:5x、pages 7/7・verify 差異 0・bench class 9〜10 倍・append 11 倍） |
+| q2007 / q2007-i01 | Q1（直に、main の checkout） | [ws346-p008](ws346/phase008/phase.md) 統合の試験・速さの測定・既定の判定 | 同上 | in-progress |

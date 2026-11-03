@@ -8,6 +8,7 @@ body { font: 14px sans-serif; margin: 8px; }
 .sec p { margin: 5px 0; }
 .sec .f { float: left; width: 70px; height: 30px; background: #ccc; margin: 0 6px 6px 0; }
 .clr { clear: both; }
+.tall { height: 90px; width: 50px; }
 .hot { color: #c00; }
 .big { font-size: 22px; }
 .pad { padding: 12px; }
@@ -24,7 +25,8 @@ body { font: 14px sans-serif; margin: 8px; }
 <body>
 <div id="wrap">
 <div id="s1" class="sec"><p>first section paragraph with enough text to wrap around over several lines when the width is only so big</p><p>second paragraph</p></div>
-<div id="s2" class="sec"><div class="f"></div>text beside a float in section two that also wraps a little<div class="f"></div>and more text after the second float for the line boxes</div>
+<div id="s2" class="sec"><div class="f tall"></div><div class="f"></div>text beside a float in section two that also wraps a little<div class="f"></div>and more text after the second float for the line boxes</div>
+<div id="s2b" class="sec">text of a block beside the floats above: it is long enough to wrap around the tall float and to need several lines, and then it goes on a little more so that its line count depends on the room the float leaves</div>
 <div id="s3" class="sec clr"><p>after the floats (clear)</p></div>
 <div id="s4" class="sec"><ul class="marks" id="ul"><li>one</li><li>two</li><li>three</li></ul><ol id="ol"><li>a</li><li>b</li><li>c</li></ol></div>
 <div id="s5" class="sec"><div id="sib" class="sib">sibling source</div><div class="after"><p>after <span>span inside</span> text</p></div></div>
@@ -44,7 +46,7 @@ function box(id) {
 	return out;
 }
 function dump(label) {
-	var ids = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "bottom"];
+	var ids = ["s1", "s2", "s2b", "s3", "s4", "s5", "s6", "s7", "s8", "bottom"];
 	console.log("== " + label + "\n" + ids.map(box).join("\n") + "\nheight " + document.documentElement.scrollHeight);
 }
 var $ = function (id) { return document.getElementById(id); };
@@ -57,6 +59,10 @@ $("s2").querySelector(".f").style.height = "80px";
 dump("a float of s2 taller (s3 clears it)");
 $("s2").querySelector(".f").style.height = "";
 dump("float restored");
+$("s2").querySelector(".tall").style.display = "none";
+dump("the tall float of s2 gone (the text of s2b has more room)");
+$("s2").querySelector(".tall").style.display = "";
+dump("the tall float is back");
 $("s3").className = "sec";
 dump("s3 no longer clears (its text goes beside the floats)");
 $("s3").className = "sec clr";

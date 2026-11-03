@@ -400,8 +400,6 @@ struct layout_box {
 	int reuse_recorded;
 	/* Whether the box and all below it is plain flow that another tree may use as it is (set with the record). */
 	int reuse_plain;
-	/* Whether floats inside the box (outside the formatting contexts of its own below it) join the context the box is in. */
-	int reuse_leaky;
 	/* Set while the box's content is the one the previous layout made, to be moved to where the box is by the final pass. */
 	int reuse_skipped;
 	/* The build that made the box (layout_tree.serial), and where the box's content box started after the final pass. */

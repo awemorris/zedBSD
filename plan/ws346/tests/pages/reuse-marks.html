@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>reuse marks</title>
+<style>
+body { font: 14px sans-serif; margin: 8px; }
+#wrap { width: 500px; }
+.sec { margin: 6px 0; border: 1px solid #aaa; }
+ol, ul { margin: 4px 0; padding-left: 30px; }
+li p { margin: 0; }
+.hot { color: #c00; }
+</style>
+</head>
+<body>
+<div id="wrap">
+<div id="a" class="sec"><ol id="ol"><li>one</li><li>two</li><li><p>three in a paragraph</p><p>second</p></li><li>four</li></ol></div>
+<div id="b" class="sec"><ul id="ul"><li>bullet</li><li><div>block inside</div></li><li>last</li></ul></div>
+<div id="d" class="sec"><ol id="ol3"><li>a</li><li>b</li><li>c</li><li>d</li><li>e</li><li>f</li><li>g</li><li>h</li><li>i</li></ol></div>
+<div id="c" class="sec"><ol id="ol2" start="5"><li>five</li><li><p>six</p></li></ol></div>
+</div>
+<div id="bottom">end</div>
+<script>
+function box(id) {
+	var e = document.getElementById(id), r = e.getBoundingClientRect(), out = id + " " + [r.left, r.top, r.width, r.height].join(",");
+	var kids = e.querySelectorAll("*");
+	for (var i = 0; i < kids.length; i++) {
+		var k = kids[i].getBoundingClientRect();
+		out += " " + kids[i].tagName + ":" + [k.left, k.top, k.width, k.height].join(",");
+	}
+	return out;
+}
+function dump(label) {
+	console.log("== " + label + "\n" + ["a", "b", "d", "c", "bottom"].map(box).join("\n") + "\nheight " + document.documentElement.scrollHeight);
+}
+var $ = function (id) { return document.getElementById(id); };
+dump("initial");
+var item = document.createElement("li");
+item.textContent = "zero";
+$("ol").insertBefore(item, $("ol").firstChild);
+dump("item inserted first (numbers shift, one with a paragraph)");
+$("ol").removeChild(item);
+dump("and removed");
+$("ol").removeChild($("ol").firstChild);
+dump("the first item removed (numbers shift)");
+var mid = document.createElement("li");
+mid.textContent = "inserted in the middle";
+$("ol").insertBefore(mid, $("ol").children[1]);
+dump("item inserted in the middle");
+$("ul").insertBefore(document.createElement("li"), $("ul").firstChild);
+dump("an empty item first in the bullets");
+$("ol2").firstChild.className = "hot";
+dump("class of an item");
+$("ol2").setAttribute("start", "9");
+dump("start of the second list");
+var more = document.createElement("li");
+more.textContent = "first";
+$("ol3").insertBefore(more, $("ol3").firstChild);
+dump("an item first in the list of nine (9 becomes 10: a wider marker)");
+$("ol3").removeChild(more);
+dump("and removed");
+$("a").style.width = "300px";
+dump("width of the first section");
+</script>
+</body>
+</html>
