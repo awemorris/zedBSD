@@ -2,11 +2,11 @@
 
 # ws346-p005: style の無効化の統合
 
-Status: planned
+Status: cleared（2026-11-03 Q1。pages 4/4 が off・on・verify で一致、verify の組で差異 0、ASan で pages 4/4、bench 4 が 701 → 44 ms、わざと壊して検出）
 Disposition: normal
 Parent: [WS346](../ws.md)
 Primary Milestone: MG006
-Queue: 未割り当て（Q1 が Sonnet = phase-runner-low に渡す時に決める）
+Queue: [q2003](../../queue.md)（Q1 が直に実装、2026-11-03 ユーザーの指示）
 基点: Q1 が worktree を作る時の main（design.md の基点 8f181e0e1f 以降）
 
 ## 目標
@@ -57,4 +57,42 @@ commit の SHA、流した command と最後の行、自分で決めた点、未
 
 ## 結果
 
-（実装の担当が書く: 自分で決めた点・数・未実施）
+2026-11-03 Q1（main の checkout で実装、p004 の main `af0251ef21` の上）。
+
+### したこと
+
+- `page/page.c`:
+  - `page_update_styles`: cache が on・verify で、engine があり、sheet が変わっていない（`change_sheets`・`change_full_style` が 0、`styled_visits`・`styled_sheets` が同じ）、engine が大きすぎない（`css_engine_arena_bytes` が 32 MiB 以下、`css_engine_kept_styles` が 100000 以下）時は engine を保ち、`dom_changes_take_style` で bit のある node を回って `css_engine_invalidate` する（`page_style_visit`。style の bit は何でも部分木の無効化にし（子が継承するため）、`STYLE_SIBLINGS` があれば後の兄弟も、document の node なら全部）。それ以外は今どおり `page_gather_styles`（engine の作り直し）。
+  - `page_gather_styles`: 今の記録を `dom_changes_take_style(…, NULL, NULL)` で消し、cache が off でなければ document の hook（`change_scope`・`change_removed`）を登録する。`page_destroy` で hook を外す。
+  - `page_change_scope`（engine が無い時は SUBTREE と SIBLINGS、あれば `css_engine_change_scope`）、`page_change_removed`（document から出た部分木の style を外す）。
+  - `page_layout` の成功の後に `dom_changes_clear_layout`。
+  - `page_layout_verify`（p003）を、**何も保たない新しい engine**（`page_engine_fresh`）で全体の木を作る形に直した。違えばその木と engine が page の物になる。
+- `dom/dom.h`・`dom/change.c`: document の `change_removed` hook（connected な document から出た部分木を知らせる）。
+- `css/cascade.c`・`css/css.h`: `css_engine_arena_bytes`（custom property の style が arena に取った byte）、`css_engine_kept_styles`、`class` の語が 1 つも無い engine で `items + first` が NULL に 0 を足す既存の未定義動作（2026-10-03 から）の直し。
+- `plan/ws074/tests/host-build.sh`: asan の variant で clang の時 `-shared-libsan`（共有 library に静的な runtime を入れられず link が通らなかった）。
+- 試験: `plan/ws346/tests/pages/restyle-{basic,has,shadow,sheets}.html`（変更の後の `getComputedStyle` と `offsetWidth`・`offsetHeight` を出す。class・id・style 属性・兄弟の結合子・`:nth-child`・`:first/last-child`・`:empty`・`:checked`・`:disabled`・属性 selector・`aria-*`・`role`・`tabindex`・`:lang`・継承・`attr()`・移動・削除と同じ id の新しい element・`:has()`・`:nth-child(of S)`・shadow tree と `:host`・`<style>`/`<link>`・CSSOM・adopted sheet など約 220 の確認）と `plan/ws346/tests/run-pages.py`（off・on・verify の出力が同じか、verify が差異を言わないか）。
+
+### 自分で決めた点
+
+1. **style の bit は何でも部分木の無効化**にした（design.md の `STYLE`＝element だけ、は使わない）: element の style が変わると子が継承した値が古くなるため。`:empty` のための text の変更も親の部分木になるが、親は普通は小さい。
+2. **hook は document の node の 1 つ**（page ごとに登録、cache が off の時は付けない）。
+3. **GC**: 計算済みの style が指す `vm_string` は全部 atom（`vm_atom_from_*`、heap と同じ寿命）で、custom property の token は engine の arena に写してあるので、engine を長く保っても回収された string を指さない（`css/values.c`・`cascade_keep_tokens` を読んで確かめた）。
+4. **arena と保つ style の上限**: custom property の style は再計算のたびに engine の arena を増やす（engine を壊す時にだけ解放）ので、32 MiB を超える、または保つ style が 100000 を超えると engine を作り直す。実際の頁での増え方は p008 で amazon で測る（未実施）。
+5. 削除された部分木は `change_removed` で外す（同じ address に新しい element ができても古い style を返さないため）。
+6. ASan を走らせるには `LD_LIBRARY_PATH=/usr/lib/llvm-19/lib/clang/19/lib/linux` と `ASAN_OPTIONS=detect_stack_use_after_return=0:detect_leaks=0` が要る。
+
+### 確かめ
+
+- host build（clang）warning 0。
+- `run-pages.py`: 4/4（off・on・verify の出力が行ごとに一致: restyle-basic 607 行・has 100・shadow 60・sheets 51、verify の差異 0）。例（restyle-basic）: engine の作り直し off 39 → on 2、style の計算 876 → 365、外した style 342。
+- `run-verify.sh`（dom・js・fetch・WPT reftest 100 件・Acid）: off と verify で同じ（dom 39/42、js 21/21、fetch 38/38、WPT 62/37/1、Acid3 100/100 完全一致）、**差異 0**。
+- `host-change` 88/88、`host-restyle-scope` 52/52。
+- ASan（clang 19、`-fsanitize=address,undefined`）: pages 4/4、host-change 88/88、host-restyle-scope 52/52、js 21/21。dom-tests は 38/42: `computed`・`exception` は plain と同じ FAIL、`markup` は `dom/serialize.c:519` の既存の未定義動作（null への 0 の加算、この変更とは無関係で未修正）で落ち、plain で FAIL の `performance-observer` が ASan では通る。
+- bench（`restyle.sh`、3 回の中央値、`-O1`）: off と on の check は同じ。toggle-then-computed **701 → 44 ms（16 倍）**。class-then-offset 14080 → 11387、style-then-offset 14020 → 11336、append-then-rect 14229 → 12121 ms（layout が支配的で、p007 の対象）。
+- わざと壊した（2 つ同時）: 後の兄弟を無効化しない、`css_engine_invalidate` の SUBTREE が element だけを外す → 4 頁のうち 3 頁が FAIL（継承した色・nth-child・兄弟の結合子・shadow の値が違う）、`verify` が差異を報告した。元に戻して `cmp` で一致を確かめ、build し直して 4/4。1 回目の変異は未使用の引数が `-Werror` で止めたので、引数を使う形にして入れ直した。
+
+### 未実施
+
+- live の頁（amazon ほか）の verify（p007 の後でまとめて、design.md §12 の回数の中で）。
+- amazon での arena の増え方（p008）。
+- scripted reftests（`run-interop2025-scripted-reftests.py`）の verify。

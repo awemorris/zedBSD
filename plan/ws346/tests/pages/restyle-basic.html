@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>restyle basic</title>
+<style>
+body { font: 16px sans-serif; color: #111; }
+.box { margin-left: 4px; padding: 2px; border: 1px solid #888; }
+.hot { color: #c00; font-size: 20px; }
+#a.wide { width: 300px; }
+.a + .b { color: #00c; }
+.a ~ .c { margin-left: 30px; }
+li:first-child { color: #070; }
+li:last-child { font-weight: bold; }
+li:nth-child(2n) { background: #eee; }
+p:empty { display: none; }
+p:empty::before { content: "empty"; }
+input:checked + span { color: #a0a; }
+input:disabled + span { color: #888; }
+[data-state="on"] { color: #0aa; }
+[aria-label="x"] { color: #a50; }
+:lang(fr) { color: #05a; }
+.inherit { font-size: 10px; }
+.inherit span { color: inherit; }
+.attr::before { content: attr(data-t); }
+</style>
+</head>
+<body>
+<div id="root">
+<div id="a" class="box a"><span id="a1">a1</span> <b id="a2">a2</b></div>
+<div id="b" class="box b">b</div>
+<div id="c" class="box c">c</div>
+<ul id="list"><li id="l1">1</li><li id="l2">2</li><li id="l3">3</li></ul>
+<p id="p1"></p>
+<div><input id="chk" type="checkbox"><span id="chk-s">check</span></div>
+<div id="d1" class="box"><div id="d2"><span id="d3">deep</span></div></div>
+<div id="e" class="box">e</div>
+<div id="att" class="attr box" data-t="T1">x</div>
+</div>
+<script>
+function line(id) {
+	var e = document.getElementById(id), s = getComputedStyle(e);
+	return id + " color=" + s.color + " display=" + s.display + " fs=" + s.fontSize + " ml=" + s.marginLeft + " fw=" + s.fontWeight +
+	    " bg=" + s.backgroundColor + " w=" + e.offsetWidth + " h=" + e.offsetHeight;
+}
+function dump(label) {
+	var ids = ["a", "a1", "a2", "b", "c", "l1", "l2", "l3", "p1", "chk-s", "d1", "d2", "d3", "e", "att"];
+	var out = [];
+	for (var i = 0; i < ids.length; i++)
+		if (document.getElementById(ids[i]))
+			out.push(line(ids[i]));
+	console.log("== " + label + "\n" + out.join("\n"));
+}
+var $ = function (id) { return document.getElementById(id); };
+dump("initial");
+
+$("a").className = "box a hot";
+dump("class on a (inherits to children, sibling rule)");
+$("a").classList.add("wide");
+dump("id-rule width");
+$("a").className = "box";
+dump("class removed");
+$("b").style.color = "rgb(1, 2, 3)";
+dump("style attribute");
+$("b").style.color = "";
+dump("style cleared");
+$("a").className = "box a";
+dump("sibling combinator on");
+$("a").className = "box";
+dump("sibling combinator off");
+
+var li = document.createElement("li");
+li.id = "l4"; li.textContent = "4";
+$("list").appendChild(li);
+dump("li appended (:last-child, nth-child)");
+$("list").insertBefore(document.createElement("li"), $("l1"));
+dump("li inserted first (:first-child)");
+$("list").removeChild($("list").firstChild);
+$("list").removeChild($("l4"));
+dump("li removed");
+
+$("p1").appendChild(document.createTextNode("x"));
+dump("p no longer empty");
+$("p1").removeChild($("p1").firstChild);
+dump("p empty again");
+$("p1").appendChild(document.createComment("c"));
+dump("comment in p");
+$("p1").removeChild($("p1").firstChild);
+
+$("chk").checked = true;
+dump("checked");
+$("chk").checked = false;
+$("chk").disabled = true;
+dump("disabled");
+$("chk").disabled = false;
+dump("enabled");
+
+$("e").setAttribute("data-state", "on");
+dump("data-state=on");
+$("e").setAttribute("data-state", "off");
+$("e").setAttribute("data-other", "1");
+dump("data-state=off, data-other");
+$("e").setAttribute("aria-label", "x");
+dump("aria-label=x");
+$("e").setAttribute("aria-label", "y");
+$("e").setAttribute("role", "button");
+$("e").setAttribute("tabindex", "0");
+dump("aria-label=y, role, tabindex");
+
+$("e").setAttribute("lang", "fr");
+dump("lang=fr");
+$("e").removeAttribute("lang");
+dump("lang removed");
+$("d1").lang = "fr";
+dump("lang=fr on an ancestor");
+$("d1").removeAttribute("lang");
+
+$("d1").className = "box inherit";
+dump("font-size inherits down");
+$("d1").className = "box";
+dump("inherit removed");
+$("d2").style.fontSize = "30px";
+dump("grandparent style");
+$("d2").removeAttribute("style");
+
+var moved = $("e");
+$("d2").appendChild(moved);
+dump("moved element");
+$("root").appendChild(moved);
+dump("moved back");
+$("root").removeChild(moved);
+dump("removed");
+var fresh = document.createElement("div");
+fresh.id = "e"; fresh.className = "box hot"; fresh.textContent = "new e";
+$("root").appendChild(fresh);
+dump("a new element with the same id");
+
+$("att").setAttribute("data-t", "T2");
+dump("attr() content");
+$("att").textContent = "changed text";
+dump("text changed");
+$("att").className = "box";
+dump("pseudo gone");
+
+document.body.className = "hot";
+dump("body class (everything inherits)");
+document.body.className = "";
+dump("body class removed");
+document.documentElement.style.fontSize = "20px";
+dump("root font size");
+document.documentElement.style.fontSize = "";
+dump("root font size removed");
+</script>
+</body>
+</html>

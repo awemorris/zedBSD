@@ -129,6 +129,10 @@ dom_note_change(
 		return;
 	}
 
+	/* A subtree that went out of the document: the style engine drops what it kept for it. */
+	if (kind == DOM_CHANGE_CHILDREN && child != NULL && child->parent == NULL && document->change_removed != NULL)
+		document->change_removed(document->change_scope_context, child);
+
 	/* A change inside a shadow tree is one of its host's whole subtree. */
 	if (anchor != node) {
 		change_mark(anchor, DOM_CHANGED_STYLE_SUBTREE | DOM_CHANGED_LAYOUT);

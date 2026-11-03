@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>restyle has</title>
+<style>
+.box { margin-left: 4px; padding: 2px; }
+div:has(> .flag) { color: #c00; }
+li:nth-child(2 of .x) { color: #070; font-weight: bold; }
+li.x:nth-last-child(1 of .x) { background: #ddd; }
+</style>
+</head>
+<body>
+<div id="p1" class="box"><span id="s1">one</span></div>
+<div id="p2" class="box"><span id="s2" class="flag">two</span></div>
+<ul id="list">
+<li id="l1" class="x">1</li><li id="l2">2</li><li id="l3" class="x">3</li><li id="l4" class="x">4</li><li id="l5">5</li>
+</ul>
+<script>
+function line(id) {
+	var e = document.getElementById(id), s = getComputedStyle(e);
+	return id + " color=" + s.color + " fw=" + s.fontWeight + " bg=" + s.backgroundColor + " w=" + e.offsetWidth;
+}
+function dump(label) {
+	var ids = ["p1", "s1", "p2", "s2", "l1", "l2", "l3", "l4", "l5"];
+	var out = [];
+	for (var i = 0; i < ids.length; i++)
+		out.push(line(ids[i]));
+	console.log("== " + label + "\n" + out.join("\n"));
+}
+var $ = function (id) { return document.getElementById(id); };
+dump("initial");
+$("s1").className = "flag";
+dump("flag added below p1 (:has)");
+$("s2").className = "";
+dump("flag removed below p2");
+$("l2").className = "x";
+dump("l2 becomes .x (nth-child of S moves)");
+$("l1").className = "";
+dump("l1 loses .x");
+$("l4").className = "";
+dump("l4 loses .x (nth-last-child of S)");
+var n = document.createElement("li");
+n.className = "x"; n.textContent = "6";
+$("list").appendChild(n);
+dump("an .x li appended");
+$("list").removeChild(n);
+dump("removed again");
+var d = document.createElement("span");
+d.className = "flag";
+$("p1").appendChild(d);
+dump("a flag element inserted");
+$("p1").removeChild(d);
+dump("and removed");
+</script>
+</body>
+</html>

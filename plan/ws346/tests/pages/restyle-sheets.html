@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>restyle sheets</title>
+<style id="s1">
+.t { color: #c00; }
+.u { margin-left: 12px; }
+</style>
+</head>
+<body>
+<div id="x" class="t u">x</div>
+<div id="y" class="v">y</div>
+<div id="host"></div>
+<script>
+function line(id) {
+	var e = document.getElementById(id), s = getComputedStyle(e);
+	return id + " color=" + s.color + " ml=" + s.marginLeft + " pad=" + s.paddingLeft + " w=" + e.offsetWidth;
+}
+function dump(label) {
+	console.log("== " + label + "\n" + ["x", "y"].map(line).join("\n"));
+}
+var $ = function (id) { return document.getElementById(id); };
+dump("initial");
+
+var st = document.createElement("style");
+st.id = "s2";
+st.textContent = ".v { color: #0a0; padding-left: 7px; }";
+document.head.appendChild(st);
+dump("style element added");
+st.textContent = ".v { color: #00a; padding-left: 9px; }";
+dump("style text changed");
+st.setAttribute("media", "print");
+dump("media=print");
+st.removeAttribute("media");
+dump("media removed");
+st.disabled = true;
+dump("disabled");
+st.disabled = false;
+dump("enabled");
+document.head.removeChild(st);
+dump("style element removed");
+
+$("s1").textContent = ".t { color: #555; } .u { margin-left: 40px; }";
+dump("first style text replaced");
+$("s1").sheet.insertRule(".t { padding-left: 3px; }", 0);
+dump("insertRule");
+$("s1").sheet.deleteRule(0);
+dump("deleteRule");
+$("s1").sheet.cssRules[0].style.color = "rgb(9, 9, 9)";
+dump("cssRules style");
+
+var sheet = new CSSStyleSheet();
+sheet.replaceSync(".v { color: #a0a; }");
+document.adoptedStyleSheets = [sheet];
+dump("adopted sheet");
+sheet.replaceSync(".v { color: #0aa; }");
+dump("adopted sheet replaced");
+document.adoptedStyleSheets = [];
+dump("adopted sheet removed");
+
+var wrap = document.createElement("div");
+wrap.innerHTML = "<style>.v { margin-left: 77px; }</style><i>z</i>";
+document.body.appendChild(wrap);
+dump("a subtree with a style element");
+document.body.removeChild(wrap);
+dump("and removed");
+</script>
+</body>
+</html>

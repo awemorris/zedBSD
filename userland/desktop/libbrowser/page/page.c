@@ -40,6 +40,10 @@ static uint64_t page_paint_next;
  * (page_lend_layout), a list painted (page_lend_paint) or the sticky boxes
  * moved for a scroll (page_sticky_sync).
  */
+/* The most bytes of its arena the styles of custom properties may take in an engine kept across changes, and the most styles it may keep, before it is made again. */
+#define PAGE_STYLE_ARENA_MAX	(32ULL * 1024ULL * 1024ULL)
+#define PAGE_STYLE_KEPT_MAX	100000ULL
+
 struct page_layout_args {
 	struct page *page;
 	int width;
@@ -71,6 +75,11 @@ struct page_sticky_args {
 static int page_gather_styles(struct page *page);
 static int page_layout_work(void *argument);
 static int page_layout_verify(struct page *page, const struct page_layout_args *args);
+static unsigned page_change_scope(void *context, struct dom_element *element, int kind, const struct vm_string *attribute);
+static void page_change_removed(void *context, struct dom_node *node);
+static int page_style_visit(void *context, struct dom_node *node, unsigned bits);
+static int page_styles_reusable(const struct page *page);
+static int page_engine_fresh(struct page *page, struct css_engine **made);
 static int page_tree_work(void *argument);
 static int page_list_work(void *argument);
 static int page_paint_work(void *argument);
@@ -198,6 +207,10 @@ page_destroy(
 	page_media_release(page);
 	page_images_release(page);
 	page_cache_report(page);
+	if (page->document != NULL) {
+		page->document->change_scope = NULL;
+		page->document->change_removed = NULL;
+	}
 	css_engine_destroy(page->css);
 	css_engine_destroy(page->query_css);
 	page_box_index_release(page);
@@ -846,6 +859,9 @@ page_layout(
 	page->laid_out_visits = page->visits_generation;
 	page->layout_serial++;
 
+	/* The changes recorded so far are in this layout (a style pass has taken the style ones already). */
+	dom_changes_clear_layout(page->document);
+
 	/* Succeeded: the page is laid out. */
 	return 0;
 
@@ -1037,10 +1053,40 @@ page_layout_work(
 }
 
 /*
- * Lays the document out again whole into a tree of its own and compares its
- * dump with the page's tree; a difference is told on standard error (the
- * first line that differs, and the two lines), counted, and the whole tree
- * becomes the page's.
+ * Makes an engine for the page as the sheets and the document are now,
+ * with nothing kept: what page_gather_styles gives page->css, made apart
+ * (page->css stays what it was).
+ */
+static int
+page_engine_fresh(
+	struct page *page,
+	struct css_engine **made)
+{
+	struct css_engine *saved;
+	int error;
+
+	/* The sheets are added to page->css, so it stands in the new engine for the time they are. */
+	saved = page->css;
+	page->css = NULL;
+	error = css_engine_create(&page->css, page->heap);
+	if (error == 0) {
+		if (page->visited_urls.count != 0)
+			css_engine_set_visited_lookup(page->css, page_link_visited, page);
+		css_engine_set_view_transition(page->css, page->vt_active, page->vt_types, page->vt_type_count);
+		css_engine_set_color_scheme(page->css, page->dark);
+		css_engine_set_container_lookup(page->css, page_container_size, page);
+		error = page_sheets_add(page);
+	}
+	*made = page->css;
+	page->css = saved;
+	return error;
+}
+
+/*
+ * Lays the document out again whole, with an engine that kept nothing, into a
+ * tree of its own, and compares its dump with the page's tree; a difference
+ * is told on standard error (the first line that differs, and the two
+ * lines), counted, and the whole tree (with its engine) becomes the page's.
  */
 static int
 page_layout_verify(
@@ -1048,6 +1094,8 @@ page_layout_verify(
 	const struct page_layout_args *args)
 {
 	struct layout_tree whole;
+	struct css_engine *fresh;
+	struct css_engine *live;
 	struct wb_buffer ours;
 	struct wb_buffer theirs;
 	const char *a;
@@ -1058,12 +1106,22 @@ page_layout_verify(
 	int differs;
 	int error;
 
-	/* The whole tree, built as the page's was. */
+	/* The engine that kept nothing, and the whole tree built with it as the page's was. */
+	fresh = NULL;
+	error = page_engine_fresh(page, &fresh);
+	if (error != 0) {
+		css_engine_destroy(fresh);
+		return error;
+	}
+	live = page->css;
+	page->css = fresh;
 	memset(&whole, 0, sizeof(whole));
 	error = layout_build(&whole, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height,
 	    layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
+	page->css = live;
 	if (error != 0) {
 		layout_release(&whole);
+		css_engine_destroy(fresh);
 		return error;
 	}
 
@@ -1077,6 +1135,7 @@ page_layout_verify(
 		wb_buffer_release(&ours);
 		wb_buffer_release(&theirs);
 		layout_release(&whole);
+		css_engine_destroy(fresh);
 		return error;
 	}
 
@@ -1107,15 +1166,19 @@ page_layout_verify(
 	wb_buffer_release(&ours);
 	wb_buffer_release(&theirs);
 
-	/* The whole tree is the page's from now on (a difference), or goes (the same). */
+	/* The whole tree and its engine are the page's from now on (a difference), or go (the same). */
 	if (differs) {
+		page_cache_fold(page);
 		layout_release(&page->layout);
 		page->layout = whole;
 		page->layout.image_variant = page_image_variant;
 		page->layout.frame_paint = page_frame_paint;
 		page->layout.frame_remote = page_frame_remote;
+		css_engine_destroy(page->css);
+		page->css = fresh;
 	} else {
 		layout_release(&whole);
+		css_engine_destroy(fresh);
 	}
 
 	/* Succeeded: the page's tree is the whole one's equal. */
@@ -1614,6 +1677,13 @@ page_update_styles(
 	    page->styled_visits == page->visits_generation && pending)
 		return 0;
 
+	/* The styles the engine kept, less what the changes since reach (the cache of style and layout). */
+	if (page_styles_reusable(page)) {
+		(void)dom_changes_take_style(page->document, page_style_visit, page);
+		page->styled_generation = page_generation(page);
+		return 0;
+	}
+
 	/* A new engine with the sheets as they are now. */
 	error = page_gather_styles(page);
 	if (error != 0)
@@ -1621,6 +1691,89 @@ page_update_styles(
 
 	/* Succeeded: the styles match the document. */
 	return 0;
+}
+
+/*
+ * Tells whether the engine's kept styles can be used after the changes since
+ * they were made, the ones the changes reach dropped (the cache is on, no
+ * sheet may have changed, nothing asks for everything, and the engine has not
+ * kept too much).
+ */
+static int
+page_styles_reusable(
+	const struct page *page)
+{
+	/* Only with the cache on, and an engine that was made for this document's sheets. */
+	if (page_cache_mode() == PAGE_CACHE_OFF || page->css == NULL)
+		return 0;
+	if (page->styled_visits != page->visits_generation || page->styled_sheets != page->sheets_generation)
+		return 0;
+
+	/* The changes since: no sheet may be new or gone, and none may ask for every style. */
+	if (dom_change_needs_sheets(page->document) || page->document->change_full_style != 0U)
+		return 0;
+
+	/* An engine that kept a lot is made again (what custom properties took of its arena stays until it goes). */
+	if (css_engine_arena_bytes(page->css) > PAGE_STYLE_ARENA_MAX || css_engine_kept_styles(page->css) > PAGE_STYLE_KEPT_MAX)
+		return 0;
+	return 1;
+}
+
+/* Drops the styles the engine kept for what a changed node reaches (a style bit of the node means its subtree: the children inherit). */
+static int
+page_style_visit(
+	void *context,
+	struct dom_node *node,
+	unsigned bits)
+{
+	struct page *page;
+	unsigned scope;
+
+	/* The document itself changed (its children): every style. */
+	page = context;
+	if (node->type == DOM_DOCUMENT) {
+		css_engine_invalidate(page->css, NULL, CSS_RESTYLE_ALL);
+		return 0;
+	}
+
+	/* Only elements have styles. */
+	if (node->type != DOM_ELEMENT)
+		return 0;
+	scope = CSS_RESTYLE_SUBTREE;
+	if ((bits & DOM_CHANGED_STYLE_SIBLINGS) != 0U)
+		scope |= CSS_RESTYLE_SIBLINGS;
+	css_engine_invalidate(page->css, (struct dom_element *)node, scope);
+	return 0;
+}
+
+/* Tells the document's recorder what a change of an element's attribute or state restyles, by the engine's selectors. */
+static unsigned
+page_change_scope(
+	void *context,
+	struct dom_element *element,
+	int kind,
+	const struct vm_string *attribute)
+{
+	struct page *page;
+
+	/* Without an engine, what could be reached is everything below the element and its siblings. */
+	page = context;
+	if (page->css == NULL)
+		return DOM_RESTYLE_SUBTREE | DOM_RESTYLE_SIBLINGS;
+	return css_engine_change_scope(page->css, element, kind, attribute);
+}
+
+/* Drops the styles the engine kept for a subtree that went out of the document (its elements may be made again at the same addresses). */
+static void
+page_change_removed(
+	void *context,
+	struct dom_node *node)
+{
+	struct page *page;
+
+	page = context;
+	if (page->css != NULL && node->type == DOM_ELEMENT)
+		css_engine_invalidate(page->css, (struct dom_element *)node, CSS_RESTYLE_SUBTREE);
 }
 
 /*
@@ -1991,6 +2144,14 @@ page_gather_styles(
 	page->gathered++;
 	page->styled_generation = page_generation(page);
 	page->styled_visits = page->visits_generation;
+
+	/* The changes recorded so far are in this engine's styles (it computed them whole); with the cache on, the later ones tell what to drop. */
+	(void)dom_changes_take_style(page->document, NULL, NULL);
+	if (page_cache_mode() != PAGE_CACHE_OFF) {
+		page->document->change_scope = page_change_scope;
+		page->document->change_removed = page_change_removed;
+		page->document->change_scope_context = page;
+	}
 
 	/* The links whose sheets have arrived tell their scripts (a handler may change the document). */
 	return page_sheets_fire_links(page);

@@ -32,7 +32,9 @@ cc=${CC:-cc}
 flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fPIC -I$src -I$app -Iplan/ws074/tests -I$base/include -I."
 case $variant in
 plain) ;;
-asan) flags="$flags -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" ;;
+asan) flags="$flags -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+	# clang links the sanitizer's runtime statically, which a shared library cannot take: it uses the shared one.
+	case $cc in *clang*) flags="$flags -shared-libsan" ;; esac ;;
 tsan) flags="$flags -fsanitize=thread -fno-omit-frame-pointer" ;;
 *) echo "host-build: unknown variant $variant" >&2; exit 2 ;;
 esac

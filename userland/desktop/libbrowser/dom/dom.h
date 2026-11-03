@@ -540,6 +540,8 @@ struct dom_document {
 	/* Tells what a change of an element's attribute (the name given) or state (kind) can restyle; NULL: everything below it (DOM_RESTYLE_*). */
 	unsigned (*change_scope)(void *context, struct dom_element *element, int kind, const struct vm_string *attribute);
 	void *change_scope_context;
+	/* Told of a node that was taken out of the document's tree (with everything below it), so the style engine drops what it kept for it; NULL: nobody. */
+	void (*change_removed)(void *context, struct dom_node *node);
 	int (*attribute_styled)(void *context, const struct vm_string *name);
 	void *attribute_styled_context;
 	uint32_t compose_session;

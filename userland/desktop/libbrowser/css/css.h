@@ -1301,6 +1301,10 @@ void css_engine_forget_styles(struct css_engine *engine);
 #define CSS_RESTYLE_ALL		DOM_RESTYLE_ALL
 unsigned css_engine_change_scope(struct css_engine *engine, struct dom_element *element, int kind, const struct vm_string *attribute);
 void css_engine_invalidate(struct css_engine *engine, struct dom_element *element, unsigned scope);
+/* The bytes of its arena the computed styles of custom properties took since the engine was made (the arena is freed with the engine). */
+uint64_t css_engine_arena_bytes(const struct css_engine *engine);
+/* How many styles the engine keeps now. */
+uint64_t css_engine_kept_styles(const struct css_engine *engine);
 /* How many styles the engine computed, how many it gave from the ones it kept and how many it dropped, since it was made. */
 void css_engine_counts(const struct css_engine *engine, uint64_t *computed, uint64_t *hits, uint64_t *dropped);
 void css_engine_set_view_transition(struct css_engine *engine, int active, const struct vm_string *const *types, int count);

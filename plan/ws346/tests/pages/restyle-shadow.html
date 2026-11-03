@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>restyle shadow</title>
+<style>
+.box { padding: 2px; }
+.hot { color: #c00; }
+my-card::part(label) { font-weight: bold; }
+</style>
+</head>
+<body>
+<my-card id="card" class="box"><span id="light" slot="s">light</span></my-card>
+<div id="plain" class="box">plain</div>
+<script>
+var card = document.getElementById("card");
+var root = card.attachShadow({ mode: "open" });
+root.innerHTML = "<style>.inner { color: #060; } :host(.hot) .inner { color: #a0a; } .inner.on { margin-left: 21px; }</style>" +
+    "<div id='in' class='inner'>inner <slot name='s'></slot></div><span id='lab' part='label'>label</span>";
+function line(e, name) {
+	var s = getComputedStyle(e);
+	return name + " color=" + s.color + " ml=" + s.marginLeft + " fw=" + s.fontWeight + " w=" + e.offsetWidth;
+}
+function dump(label) {
+	console.log("== " + label + "\n" + [line(card, "card"), line(root.getElementById("in"), "in"), line(root.getElementById("lab"), "lab"),
+	    line(document.getElementById("light"), "light"), line(document.getElementById("plain"), "plain")].join("\n"));
+}
+dump("initial");
+root.getElementById("in").classList.add("on");
+dump("class inside the shadow tree");
+root.getElementById("in").classList.remove("on");
+dump("class removed inside");
+card.className = "box hot";
+dump("host class (:host(.hot))");
+card.className = "box";
+dump("host class removed");
+var extra = document.createElement("b");
+extra.className = "inner on";
+extra.textContent = "extra";
+root.appendChild(extra);
+dump("element appended to the shadow root");
+root.removeChild(extra);
+dump("and removed");
+document.getElementById("light").className = "hot";
+dump("light child class");
+document.getElementById("light").className = "";
+var st = root.querySelector("style");
+st.textContent = ".inner { color: #123; } .inner.on { margin-left: 5px; }";
+dump("shadow style text changed");
+document.getElementById("plain").className = "box hot";
+dump("a plain element");
+</script>
+</body>
+</html>

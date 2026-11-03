@@ -169,6 +169,8 @@ struct css_engine {
 	uint64_t stat_computed;
 	uint64_t stat_hits;
 	uint64_t stat_dropped;
+	/* The bytes of the engine's arena that the computed styles of custom properties took (they stay until the engine goes: css_engine_arena_bytes). */
+	uint64_t stat_arena;
 	/* What the selectors of the sheets look at (CASCADE_FEATURE_*), found when first asked (features_valid) and again after a sheet is added. */
 	unsigned features;
 	int features_valid;
@@ -884,6 +886,22 @@ css_engine_forget_styles(
 	cascade_style_forget(engine);
 	engine->container_missed = 0;
 	wb_vector_clear(&engine->container_uses);
+}
+
+/* Tells how many styles the engine keeps now. */
+uint64_t
+css_engine_kept_styles(
+	const struct css_engine *engine)
+{
+	return engine->style_count;
+}
+
+/* Tells how many bytes of its arena the styles computed with custom properties took since the engine was made. */
+uint64_t
+css_engine_arena_bytes(
+	const struct css_engine *engine)
+{
+	return engine->stat_arena;
 }
 
 /*
@@ -2667,6 +2685,7 @@ cascade_customs(
 			continue;
 
 		/* A node for the declaration, its tokens as written for now. */
+		engine->stat_arena += sizeof(*node);
 		node = wb_arena_zalloc(&engine->arena, sizeof(*node));
 		if (node == NULL) {
 			wb_vector_release(&owned);
@@ -2864,6 +2883,7 @@ cascade_keep_tokens(
 		return 0;
 
 	/* The tokens. */
+	engine->stat_arena += count * sizeof(*copy);
 	copy = wb_arena_alloc(&engine->arena, count * sizeof(*copy));
 	if (copy == NULL)
 		return ENOMEM;
@@ -2873,6 +2893,7 @@ cascade_keep_tokens(
 	for (index = 0; index < count; index++) {
 		if (copy[index].text == NULL || copy[index].length == 0)
 			continue;
+		engine->stat_arena += copy[index].length * sizeof(uint16_t);
 		text = wb_arena_alloc(&engine->arena, copy[index].length * sizeof(uint16_t));
 		if (text == NULL)
 			return ENOMEM;
@@ -4353,7 +4374,7 @@ cascade_class_atoms(
 	engine->class_count++;
 
 	/* Succeeded: reports the run. */
-	*atoms = (struct vm_string *const *)engine->class_atoms.items + first;
+	*atoms = engine->class_atoms.items == NULL ? NULL : (struct vm_string *const *)engine->class_atoms.items + first;
 	*count = slot->count;
 	return 0;
 }

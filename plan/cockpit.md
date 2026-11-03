@@ -15,7 +15,7 @@
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
-| Q1 | [WS074](ws074/ws.md) p263・[WS346](ws346/ws.md) p002 | Web ブラウザ（libbrowser）、layout cache の実装 | p263 U1（amazon.co.jp）は host で直した。WS346 の設計 版 1 を書いた（[design.md](ws346/design.md)） | WS346 の未決の答えの後、p002 から Sonnet に渡す |
+| Q1 | [WS074](ws074/ws.md) p263・[WS346](ws346/ws.md) p006 | Web ブラウザ（libbrowser）、layout cache の実装 | p263 U1（amazon.co.jp）は host で直した。WS346 の設計 版 1 を書いた（[design.md](ws346/design.md)） | WS346 の未決の答えの後、p002 から Sonnet に渡す |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
@@ -26,6 +26,8 @@
 （2026-11-01 10:29 クリア。これより後の進捗をここに書く。各 WS の状態は [master.md](master.md) と各 ws.md）
 
 ### WS346 layout cache（style と layout の差分の再計算）
+
+- 2026-11-03 11:36: p002〜p005 を実装（変更の記録・照合の道具・style の無効化。verify で差異 0、restyle の頁 4/4 が off・on・verify で一致）。getComputedStyle を DOM の変更の後に 1000 回読む bench が 701 → 44 ms（16 倍）。layout の再利用（p006・p007）はこれから。layout が支配的な bench（14 s）は style だけでは 11 s にしかならない。
 
 - 2026-11-03 06:31: p001 の設計 版 1（[design.md](ws346/design.md)、p002〜p009 の phase.md）。amazon.co.jp の 1 回の読み込みで、全体の layout 392 回・style の engine の作り直し 508 回・style の計算 82 万回、画面の描画は 7 回（layout はほぼ全部が script の幾何の問いが強いた物）。CPU は style 22%・JS 22%・layout 11%。
 
