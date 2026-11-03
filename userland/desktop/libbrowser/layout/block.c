@@ -91,6 +91,17 @@ layout_block(
 		return error;
 	}
 
+	/* A block of a formatting context of its own whose content the previous tree laid out the same way takes it as it is. */
+	if (tree->reuse != NULL && !box->replaced && block_owns_context(box)) {
+		int grafted;
+
+		error = layout_reuse_graft(tree, box, containing_width, &grafted);
+		if (error != 0)
+			return error;
+		if (grafted)
+			return 0;
+	}
+
 	/* The margins, borders and paddings. */
 	layout_box_model(box, containing_width);
 
@@ -284,6 +295,9 @@ layout_block(
 
 	/* A <button> centers its content in the height it was given beyond it. */
 	layout_center_button(box, content_height);
+
+	/* What the layout was made with, for a later tree to take the content as it is. */
+	layout_reuse_record(tree, box, containing_width);
 
 	/* Succeeded: the box has its size. */
 	return 0;

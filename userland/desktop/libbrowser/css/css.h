@@ -1299,10 +1299,14 @@ void css_engine_forget_styles(struct css_engine *engine);
 #define CSS_RESTYLE_SUBTREE	DOM_RESTYLE_SUBTREE
 #define CSS_RESTYLE_SIBLINGS	DOM_RESTYLE_SIBLINGS
 #define CSS_RESTYLE_ALL		DOM_RESTYLE_ALL
+/* With the others: drop the kept styles for good (an element that left the document) instead of keeping them to compare with the new ones. */
+#define CSS_RESTYLE_DROP	0x10U
 unsigned css_engine_change_scope(struct css_engine *engine, struct dom_element *element, int kind, const struct vm_string *attribute);
 void css_engine_invalidate(struct css_engine *engine, struct dom_element *element, unsigned scope);
 /* The bytes of its arena the computed styles of custom properties took since the engine was made (the arena is freed with the engine). */
 uint64_t css_engine_arena_bytes(const struct css_engine *engine);
+/* Sets the function told of an element whose style came out different from the one kept (or had none kept). */
+void css_engine_set_changed(struct css_engine *engine, void (*changed)(void *context, struct dom_element *element), void *context);
 /* How many styles the engine keeps now. */
 uint64_t css_engine_kept_styles(const struct css_engine *engine);
 /* How many styles the engine computed, how many it gave from the ones it kept and how many it dropped, since it was made. */

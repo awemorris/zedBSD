@@ -171,6 +171,9 @@ struct css_engine {
 	uint64_t stat_dropped;
 	/* The bytes of the engine's arena that the computed styles of custom properties took (they stay until the engine goes: css_engine_arena_bytes). */
 	uint64_t stat_arena;
+	/* Told of an element whose style came out different from the one kept (or that had none kept): the layout must be made again for it. */
+	void (*changed)(void *context, struct dom_element *element);
+	void *changed_context;
 	/* What the selectors of the sheets look at (CASCADE_FEATURE_*), found when first asked (features_valid) and again after a sheet is added. */
 	unsigned features;
 	int features_valid;
@@ -239,6 +242,8 @@ struct cascade_cached {
 	struct dom_element *element;
 	struct css_style *style;
 	int contained;
+	/* The element's styles were invalidated: the kept style is the one to compare the new one with. */
+	int stale;
 };
 
 /*
@@ -371,7 +376,8 @@ static int cascade_style_grow(struct css_engine *engine);
 static void cascade_style_forget(struct css_engine *engine);
 static size_t cascade_style_home(const struct css_engine *engine, const struct dom_element *element);
 static void cascade_style_drop(struct css_engine *engine, const struct dom_element *element);
-static int cascade_drop_tree(struct css_engine *engine, const struct dom_node *node, unsigned depth);
+static int cascade_drop_tree(struct css_engine *engine, const struct dom_node *node, unsigned depth, int drop);
+static void cascade_style_retire(struct css_engine *engine, const struct dom_element *element, int drop);
 static void cascade_features_selector(const struct css_selector *selector, unsigned *features);
 static unsigned cascade_features(struct css_engine *engine);
 static struct dom_element *cascade_parent_element(struct dom_element *element);
@@ -888,6 +894,21 @@ css_engine_forget_styles(
 	wb_vector_clear(&engine->container_uses);
 }
 
+/*
+ * Sets the function the engine tells of an element whose style came out
+ * different from the one it kept before, or that had none kept (the page
+ * lays that element's box out again).
+ */
+void
+css_engine_set_changed(
+	struct css_engine *engine,
+	void (*changed)(void *context, struct dom_element *element),
+	void *context)
+{
+	engine->changed = changed;
+	engine->changed_context = context;
+}
+
 /* Tells how many styles the engine keeps now. */
 uint64_t
 css_engine_kept_styles(
@@ -991,12 +1012,13 @@ css_engine_compute(
 {
 	struct cascade_cached *cached;
 	uint32_t lookups;
+	int same;
 	int error;
 
-	/* A style the engine computed before for the element. */
+	/* A style the engine computed before for the element (one invalidated is computed again and compared with it). */
 	if (engine->style_capacity != 0 && !cascade_animation_suppressed) {
 		cached = cascade_style_slot(engine, element);
-		if (cached->element != NULL) {
+		if (cached->element != NULL && !cached->stale) {
 			*style = *cached->style;
 			engine->compute_contained = cached->contained;
 			engine->stat_hits++;
@@ -1019,9 +1041,22 @@ css_engine_compute(
 	/* Whether a query container's size went into it. */
 	engine->compute_contained = engine->container_lookups != lookups;
 
-	/* The engine keeps it (a copy it cannot keep is only computed again). */
-	if (!cascade_animation_suppressed)
-		cascade_style_keep(engine, element, style, engine->compute_contained);
+	/* The engine keeps it (a copy it cannot keep is only computed again); the one kept before, when it was invalidated, is compared with it. */
+	if (!cascade_animation_suppressed) {
+		cached = engine->style_capacity != 0 ? cascade_style_slot(engine, element) : NULL;
+		if (cached != NULL && cached->element != NULL) {
+			same = memcmp(cached->style, style, sizeof(*style)) == 0;
+			if (!same)
+				*cached->style = *style;
+			cached->contained = engine->compute_contained;
+			cached->stale = 0;
+		} else {
+			cascade_style_keep(engine, element, style, engine->compute_contained);
+			same = 0;
+		}
+		if (!same && engine->changed != NULL)
+			engine->changed(engine->changed_context, element);
+	}
 
 	/* Succeeded: the style is computed. */
 	return 0;
@@ -4525,7 +4560,36 @@ cascade_style_drop(
 }
 
 /*
- * Drops the styles kept for a node and for every element below it (the
+ * Retires the style the engine kept for an element: dropped for good, or
+ * kept to be compared with the style computed next (when asked for the
+ * element, which tells the layout whether the style changed).
+ */
+static void
+cascade_style_retire(
+	struct css_engine *engine,
+	const struct dom_element *element,
+	int drop)
+{
+	struct cascade_cached *slot;
+
+	/* For good. */
+	if (drop) {
+		cascade_style_drop(engine, element);
+		return;
+	}
+
+	/* Marked, once. */
+	if (engine->style_capacity == 0 || engine->style_count == 0)
+		return;
+	slot = cascade_style_slot(engine, element);
+	if (slot->element == NULL || slot->stale)
+		return;
+	slot->stale = 1;
+	engine->stat_dropped++;
+}
+
+/*
+ * Retires the styles kept for a node and for every element below it (the
  * children, and the trees of the shadow roots below them); returns 1 when
  * the tree is too deep to search, which the caller meets by dropping
  * everything.
@@ -4534,7 +4598,8 @@ static int
 cascade_drop_tree(
 	struct css_engine *engine,
 	const struct dom_node *node,
-	unsigned depth)
+	unsigned depth,
+	int drop)
 {
 	const struct dom_node *child;
 	const struct dom_element *element;
@@ -4546,12 +4611,12 @@ cascade_drop_tree(
 	/* The element's own. */
 	if (node->type == DOM_ELEMENT) {
 		element = (const struct dom_element *)node;
-		cascade_style_drop(engine, element);
+		cascade_style_retire(engine, element, drop);
 
 		/* The tree of its shadow root. */
 		if (element->shadow_root != NULL) {
 			for (child = element->shadow_root->first_child; child != NULL; child = child->next) {
-				if (cascade_drop_tree(engine, child, depth + 1U) != 0)
+				if (cascade_drop_tree(engine, child, depth + 1U, drop) != 0)
 					return 1;
 			}
 		}
@@ -4559,19 +4624,21 @@ cascade_drop_tree(
 
 	/* The children. */
 	for (child = node->first_child; child != NULL; child = child->next) {
-		if (cascade_drop_tree(engine, child, depth + 1U) != 0)
+		if (cascade_drop_tree(engine, child, depth + 1U, drop) != 0)
 			return 1;
 	}
 	return 0;
 }
 
 /*
- * Drops the styles the engine kept for an element and, as the scope says,
+ * Retires the styles the engine kept for an element and, as the scope says,
  * for what its change can reach: with CSS_RESTYLE_SUBTREE its descendants
  * (the trees of its shadow roots too), with CSS_RESTYLE_SIBLINGS its
- * following siblings and theirs, with CSS_RESTYLE_ALL every style.  The
- * styles dropped are computed again when asked for; the others are given as
- * before.
+ * following siblings and theirs, with CSS_RESTYLE_ALL every style (dropped
+ * at once).  A style retired is computed again when asked for and compared
+ * with the one that was kept (the engine tells of one that came out
+ * different); with CSS_RESTYLE_DROP it is dropped for good instead.  The
+ * others are given as before.
  */
 void
 css_engine_invalidate(
@@ -4581,6 +4648,10 @@ css_engine_invalidate(
 {
 	const struct dom_node *sibling;
 	int too_deep;
+	int drop;
+
+	/* For good (an element that left the document), or to be compared with the next. */
+	drop = (scope & CSS_RESTYLE_DROP) != 0U;
 
 	/* Every style. */
 	if ((scope & CSS_RESTYLE_ALL) != 0U) {
@@ -4592,16 +4663,16 @@ css_engine_invalidate(
 	/* The element itself, and below it when the scope says. */
 	too_deep = 0;
 	if ((scope & CSS_RESTYLE_SUBTREE) != 0U)
-		too_deep = cascade_drop_tree(engine, &element->node, 0U);
-	else if (scope == CSS_RESTYLE_NONE)
+		too_deep = cascade_drop_tree(engine, &element->node, 0U, drop);
+	else if ((scope & ~CSS_RESTYLE_DROP) == CSS_RESTYLE_NONE)
 		return;
 	else
-		cascade_style_drop(engine, element);
+		cascade_style_retire(engine, element, drop);
 
 	/* The following siblings, each with what is below it. */
 	if (!too_deep && (scope & CSS_RESTYLE_SIBLINGS) != 0U) {
 		for (sibling = element->node.next; sibling != NULL && !too_deep; sibling = sibling->next)
-			too_deep = cascade_drop_tree(engine, sibling, 0U);
+			too_deep = cascade_drop_tree(engine, sibling, 0U, drop);
 	}
 
 	/* A tree too deep to search: every style is dropped instead. */

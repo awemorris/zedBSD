@@ -300,6 +300,19 @@ done:
 	document->change_count = 0U;
 }
 
+/* Marks a node for a new layout of its box; one inside a shadow tree marks its host, as any change in it does. */
+void
+dom_changes_mark_layout(
+	struct dom_node *node)
+{
+	struct dom_node *anchor;
+	int connected;
+
+	anchor = change_anchor(node, &connected);
+	if (connected)
+		change_mark(anchor, DOM_CHANGED_LAYOUT);
+}
+
 /*
  * Finds the node a change of a node is recorded on, and whether it is in
  * the document's tree: the node itself when its ancestors reach the

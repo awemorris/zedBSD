@@ -639,6 +639,8 @@ void dom_note_change(struct dom_node *node, enum dom_change_kind kind, struct do
 int dom_change_needs_sheets(const struct dom_document *document);
 int dom_changes_take_style(struct dom_document *document, dom_change_visit visit, void *context);
 void dom_changes_clear_layout(struct dom_document *document);
+/* Marks a node for a new layout of its box (its style came out different: the style engine says so while the layout builds its boxes). */
+void dom_changes_mark_layout(struct dom_node *node);
 
 /* Shadow trees (shadow.c). */
 struct dom_shadow_root *dom_shadow_attach(struct dom_element *host, int closed);

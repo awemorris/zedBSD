@@ -75,11 +75,14 @@ struct page_sticky_args {
 static int page_gather_styles(struct page *page);
 static int page_layout_work(void *argument);
 static int page_layout_verify(struct page *page, const struct page_layout_args *args);
+static const struct layout_tree *page_layout_previous(const struct page *page);
+static void page_layout_count(struct page *page);
 static unsigned page_change_scope(void *context, struct dom_element *element, int kind, const struct vm_string *attribute);
 static void page_change_removed(void *context, struct dom_node *node);
 static int page_style_visit(void *context, struct dom_node *node, unsigned bits);
 static int page_styles_reusable(const struct page *page);
 static int page_engine_fresh(struct page *page, struct css_engine **made);
+static void page_style_changed(void *context, struct dom_element *element);
 static int page_tree_work(void *argument);
 static int page_list_work(void *argument);
 static int page_paint_work(void *argument);
@@ -862,6 +865,15 @@ page_layout(
 	/* The changes recorded so far are in this layout (a style pass has taken the style ones already). */
 	dom_changes_clear_layout(page->document);
 
+	/* What it was made with, for the next one to take content from it. */
+	page->reuse_engine = page->css;
+	page->reuse_gathered = page->gathered;
+	page->reuse_images = page->images_generation;
+	page->reuse_fonts = page->fonts_generation;
+	page->reuse_visits = page->visits_generation;
+	page->reuse_transition = page->transition_generation;
+	page->reuse_valid = !page->transition_on;
+
 	/* Succeeded: the page is laid out. */
 	return 0;
 
@@ -987,6 +999,7 @@ page_layout_work(
 	void *argument)
 {
 	struct page_layout_args *args;
+	const struct layout_tree *previous;
 	struct page *page;
 	int missed;
 	int pass;
@@ -998,15 +1011,17 @@ page_layout_work(
 	page_fonts_install(page);
 
 	/* Builds and lays out the box tree, the images found by their elements (the ones there are now), with the styles gathered last. */
+	previous = page_layout_previous(page);
 	page->laid_out_images = page->images_generation;
 	page->laid_out_gathered = page->gathered;
 	css_engine_set_container_lookup(page->css, page_container_size, page);
 	page->cache.layouts++;
-	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
+	error = layout_build_reusing(&page->layout, previous, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 	page->laid_out = 1;
 	page->layout.image_variant = page_image_variant;
 	page->layout.frame_paint = page_frame_paint;
 	page->layout.frame_remote = page_frame_remote;
+	page_layout_count(page);
 	if (error != 0)
 		return error;
 
@@ -1034,6 +1049,7 @@ page_layout_work(
 		page->layout.image_variant = page_image_variant;
 		page->layout.frame_paint = page_frame_paint;
 		page->layout.frame_remote = page_frame_remote;
+		page_layout_count(page);
 		if (error != 0)
 			return error;
 	}
@@ -1050,6 +1066,37 @@ page_layout_work(
 
 	/* Succeeded: the tree is built. */
 	return 0;
+}
+
+/*
+ * Gives the tree a layout may take the content of its blocks from: the last
+ * complete one, when it was laid out for the style engine, sheets, fonts,
+ * images, links and view transition the page has now, and the cache is on;
+ * otherwise NULL (the page is laid out whole).
+ */
+static const struct layout_tree *
+page_layout_previous(
+	const struct page *page)
+{
+	if (page_cache_mode() == PAGE_CACHE_OFF || !page->reuse_valid || !page->previous_laid_out)
+		return NULL;
+	if (page->css != page->reuse_engine || page->gathered != page->reuse_gathered)
+		return NULL;
+	if (page->images_generation != page->reuse_images || page->fonts_generation != page->reuse_fonts)
+		return NULL;
+	if (page->visits_generation != page->reuse_visits || page->transition_on || page->transition_generation != page->reuse_transition)
+		return NULL;
+	return &page->previous_layout;
+}
+
+/* Adds what the layout just built took from the previous tree to the page's counts. */
+static void
+page_layout_count(
+	struct page *page)
+{
+	page->cache.roots += page->layout.reuse_roots;
+	page->cache.grafts += page->layout.reuse_grafts;
+	page->cache.graft_boxes += page->layout.reuse_boxes;
 }
 
 /*
@@ -1746,6 +1793,19 @@ page_style_visit(
 	return 0;
 }
 
+/* Marks an element whose style came out different (or new) for a new layout of its box. */
+static void
+page_style_changed(
+	void *context,
+	struct dom_element *element)
+{
+	struct page *page;
+
+	page = context;
+	dom_changes_mark_layout(&element->node);
+	(void)page;
+}
+
 /* Tells the document's recorder what a change of an element's attribute or state restyles, by the engine's selectors. */
 static unsigned
 page_change_scope(
@@ -1773,7 +1833,7 @@ page_change_removed(
 
 	page = context;
 	if (page->css != NULL && node->type == DOM_ELEMENT)
-		css_engine_invalidate(page->css, (struct dom_element *)node, CSS_RESTYLE_SUBTREE);
+		css_engine_invalidate(page->css, (struct dom_element *)node, CSS_RESTYLE_SUBTREE | CSS_RESTYLE_DROP);
 }
 
 /*
@@ -2151,6 +2211,7 @@ page_gather_styles(
 		page->document->change_scope = page_change_scope;
 		page->document->change_removed = page_change_removed;
 		page->document->change_scope_context = page;
+		css_engine_set_changed(page->css, page_style_changed, page);
 	}
 
 	/* The links whose sheets have arrived tell their scripts (a handler may change the document). */

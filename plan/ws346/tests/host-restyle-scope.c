@@ -33,6 +33,9 @@ static void expect_scope(const char *sheet, int kind, const char *attribute, uns
 static void test_scopes(void);
 static void test_invalidate(void);
 static void test_collisions(void);
+static void test_changed(void);
+static void set_class(struct dom_element *element, const char *value);
+static void changed_hook(void *context, struct dom_element *element);
 
 int
 main(
@@ -51,6 +54,7 @@ main(
 	test_scopes();
 	test_invalidate();
 	test_collisions();
+	test_changed();
 
 	printf("restyle-scope: %d/%d passed\n", checks - failures, checks);
 	vm_heap_destroy(heap);
@@ -210,6 +214,15 @@ test_scopes(void)
 	add(engine, "div:has(p) { color: red }");
 	check(css_engine_change_scope(engine, element, DOM_CHANGE_ATTRIBUTE, name("class")) == CSS_RESTYLE_ALL, "after a :has sheet: class");
 	css_engine_destroy(engine);
+}
+
+/* Sets an element's class attribute. */
+static void
+set_class(
+	struct dom_element *element,
+	const char *value)
+{
+	(void)dom_element_set_attribute(element, name("class"), vm_string_from_utf8(heap, value, strlen(value)));
 }
 
 /* Computes an element's style under its parent's (NULL for the root). */
@@ -398,13 +411,13 @@ test_collisions(void)
 	removed = 0;
 	for (index = 0; index < COUNT; index++) {
 		if (index % 3 == 0) {
-			css_engine_invalidate(engine, items[index], CSS_RESTYLE_SUBTREE);
+			css_engine_invalidate(engine, items[index], CSS_RESTYLE_SUBTREE | CSS_RESTYLE_DROP);
 			removed++;
 		}
 	}
 	for (index = 0; index < COUNT; index++) {
 		if (index % 3 != 0 && index % 5 == 0) {
-			css_engine_invalidate(engine, items[index], CSS_RESTYLE_SUBTREE);
+			css_engine_invalidate(engine, items[index], CSS_RESTYLE_SUBTREE | CSS_RESTYLE_DROP);
 			removed++;
 		}
 	}
@@ -419,5 +432,93 @@ test_collisions(void)
 	check(computed == before + (uint64_t)removed, "exactly the dropped ones are computed again");
 	check(hits == (uint64_t)(COUNT - removed), "none of the others was lost");
 	free(items);
+	css_engine_destroy(engine);
+}
+
+/* How many times the engine told of an element whose style came out different. */
+static unsigned changed_count;
+static struct dom_element *changed_last;
+
+static void
+changed_hook(
+	void *context,
+	struct dom_element *element)
+{
+	(void)context;
+	changed_count++;
+	changed_last = element;
+}
+
+/* An invalidated style is compared with the one kept: the engine tells of the ones that came out different, and of the ones it had none for. */
+static void
+test_changed(void)
+{
+	struct css_engine *engine;
+	struct dom_element *html;
+	struct dom_element *body;
+	struct dom_element *d;
+	struct dom_element *e;
+	struct css_style style_html;
+	struct css_style style_body;
+	struct css_style style_d;
+	struct css_style scratch;
+	unsigned before;
+
+	engine = engine_with(".a { color: red } .b { margin-left: 9px }");
+	css_engine_set_changed(engine, changed_hook, NULL);
+	html = make("html");
+	body = make("body");
+	d = make("div");
+	e = make("p");
+	dom_append_child(&document->node, &html->node);
+	dom_append_child(&html->node, &body->node);
+	dom_append_child(&body->node, &d->node);
+	dom_append_child(&d->node, &e->node);
+
+	/* Nothing was kept: each one is told. */
+	changed_count = 0;
+	compute(engine, html, NULL, &style_html);
+	compute(engine, body, &style_html, &style_body);
+	compute(engine, d, &style_body, &style_d);
+	compute(engine, e, &style_d, &scratch);
+	check(changed_count == 4, "a style with none kept is told");
+
+	/* A kept style is given without a word. */
+	compute(engine, d, &style_body, &style_d);
+	check(changed_count == 4, "a kept style is not told");
+
+	/* Invalidated and computed again the same: not told, and the style is the same. */
+	css_engine_invalidate(engine, d, CSS_RESTYLE_SUBTREE);
+	compute(engine, d, &style_body, &style_d);
+	compute(engine, e, &style_d, &scratch);
+	check(changed_count == 4, "an invalidated style that comes out the same is not told");
+	compute(engine, d, &style_body, &style_d);
+	check(changed_count == 4, "and is kept as before");
+
+	/* A change that reaches the style: the element is told, and its child (which inherits the color) too. */
+	set_class(d, "a");
+	css_engine_invalidate(engine, d, CSS_RESTYLE_SUBTREE);
+	before = changed_count;
+	compute(engine, d, &style_body, &style_d);
+	check(changed_count == before + 1 && changed_last == d, "a style that came out different is told");
+	compute(engine, e, &style_d, &scratch);
+	check(changed_count == before + 2 && changed_last == e, "and so is the child that inherits it");
+	compute(engine, e, &style_d, &scratch);
+	check(changed_count == before + 2, "the new style is kept");
+
+	/* A change a rule does not reach on the child (margin does not inherit): told for the element only. */
+	set_class(d, "a b");
+	css_engine_invalidate(engine, d, CSS_RESTYLE_SUBTREE);
+	before = changed_count;
+	compute(engine, d, &style_body, &style_d);
+	compute(engine, e, &style_d, &scratch);
+	check(changed_count == before + 1 && changed_last == d, "only the element whose style changed is told");
+
+	/* Dropped for good: nothing kept, so it is told again. */
+	css_engine_invalidate(engine, d, CSS_RESTYLE_SUBTREE | CSS_RESTYLE_DROP);
+	before = changed_count;
+	compute(engine, d, &style_body, &style_d);
+	compute(engine, e, &style_d, &scratch);
+	check(changed_count == before + 2, "a style dropped for good is told when computed again");
 	css_engine_destroy(engine);
 }

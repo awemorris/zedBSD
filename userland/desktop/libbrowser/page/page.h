@@ -241,6 +241,14 @@ struct page {
 	uint32_t laid_out_gathered;
 	/* What the cache of style and layout did for this page (page_cache_report). */
 	struct page_cache_counts cache;
+	/* What the last complete layout was made with: the next one takes content from it only when these are all the same (page_layout_previous). */
+	const struct css_engine *reuse_engine;
+	uint32_t reuse_gathered;
+	uint32_t reuse_images;
+	uint32_t reuse_fonts;
+	uint32_t reuse_visits;
+	uint32_t reuse_transition;
+	int reuse_valid;
 	struct wb_vector scripts;
 	/* Parser-inserted inline module scripts and their retained URL graph. */
 	struct wb_vector module_scripts;

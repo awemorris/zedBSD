@@ -388,6 +388,16 @@ struct layout_box {
 	int logical_root;
 	/* Set while a flex container lays the item out: its main size is not definite for its children's percentages. */
 	int height_indefinite;
+
+	/*
+	 * What a block's layout was last made with (layout_block records it): the containing block's width and
+	 * height, and the flags layout_reuse_inputs makes; a later tree takes the block's content as it is when its
+	 * element and what is below it did not change and the same things are given again (reuse.c).
+	 */
+	layout_unit reuse_width;
+	layout_unit reuse_height;
+	unsigned reuse_inputs;
+	int reuse_recorded;
 };
 
 /*
@@ -494,6 +504,11 @@ struct layout_tree {
 	int logical_mode;
 	/* The view transition being shown or measured (not owned), and whether this build is the measuring one. */
 	const struct layout_transition *transition;
+	/* The previous tree the boxes may be taken from (reuse.c; NULL: none), and how much of it was: the boxes that could be, the ones that were, and the boxes that took. */
+	struct layout_reuse *reuse;
+	uint64_t reuse_roots;
+	uint64_t reuse_grafts;
+	uint64_t reuse_boxes;
 };
 
 /*
@@ -507,6 +522,13 @@ struct layout_context {
 };
 
 /* The layout (box.c, block.c, inline.c, float.c, position.c, replaced.c, dump.c, hit.c). */
+/*
+ * Lays a document out as layout_build does, taking the content of the blocks of previous (the last complete tree
+ * of the same document, laid out for the same style engine, fonts, images and size; NULL: none) that did not
+ * change since: the elements whose DOM_CHANGED_LAYOUT and DOM_CHANGED_LAYOUT_BELOW bits are clear, whose styles
+ * and layout inputs are the same.  The tree is what layout_build makes; previous is only read.
+ */
+int layout_build_reusing(struct layout_tree *tree, const struct layout_tree *previous, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
 int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
 void layout_box_model(struct layout_box *box, layout_unit containing_width);
 void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
@@ -586,6 +608,11 @@ int layout_narrowest(struct layout_tree *tree, struct layout_box *box, layout_un
 int layout_stacking_order(const struct layout_tree *tree, struct wb_vector *boxes, size_t *flow_index);
 void layout_release(struct layout_tree *tree);
 int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
+/* Taking the content of a block from the previous tree, and recording what its layout was made with (reuse.c). */
+int layout_reuse_open(struct layout_tree *tree, const struct layout_tree *previous);
+void layout_reuse_close(struct layout_tree *tree);
+int layout_reuse_graft(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width, int *grafted);
+void layout_reuse_record(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_multicol_wanted(const struct layout_box *box);
 void layout_multicol_geometry(const struct layout_box *box, layout_unit width, int *count, layout_unit *column, layout_unit *gap);
 int layout_multicol_cut(struct layout_tree *tree, struct layout_box *box, layout_unit width, int columns, layout_unit column, layout_unit gap);

@@ -37,7 +37,7 @@ def main():
     parser.add_argument("--modes", default="off,on,verify")
     parser.add_argument("pages", nargs="*")
     options = parser.parse_args()
-    pages = options.pages or sorted(glob.glob(os.path.join(ROOT, "plan/ws346/tests/pages/restyle-*.html")))
+    pages = options.pages or sorted(glob.glob(os.path.join(ROOT, "plan/ws346/tests/pages/restyle-*.html")) + glob.glob(os.path.join(ROOT, "plan/ws346/tests/pages/reuse-*.html")))
     modes = options.modes.split(",")
     good = 0
     for page in pages:

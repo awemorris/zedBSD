@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>reuse blocks</title>
+<style>
+body { font: 14px sans-serif; margin: 8px; }
+#wrap { width: 700px; }
+.root { overflow: hidden; border: 1px solid #888; margin: 3px 0; padding: 2px 4px; }
+.root p { margin: 4px 0; }
+.root .f { float: left; width: 60px; height: 20px; background: #ccc; margin: 0 4px 4px 0; }
+.root .ib { display: inline-block; width: 50px; height: 18px; background: #aac; }
+.root ul { margin: 2px 0; padding-left: 20px; }
+.root.tall { height: 80px; }
+.flow { display: flow-root; background: #eef; }
+.hot { color: #c00; }
+.big { font-size: 22px; }
+.w { width: 300px; }
+.pad { padding: 10px; }
+.nested { overflow: hidden; margin: 2px; border: 1px dotted #666; }
+.rel { position: relative; left: 3px; }
+</style>
+</head>
+<body>
+<div id="top"></div>
+<div id="wrap">
+<div id="r1" class="root">first block of text that wraps around a few lines when it is long enough to need it, and more text so that it does</div>
+<div id="r2" class="root"><p>paragraph one</p><p>paragraph <b>two</b> with <i>inline</i> markup</p><div class="nested"><p>nested</p><span class="ib"></span> after</div></div>
+<div id="r3" class="root"><div class="f"></div>text next to a float<div class="f"></div> and more text next to floats that goes on</div>
+<div id="r4" class="root"><ul><li>one</li><li>two</li><li>three</li></ul><ol><li>a</li><li>b</li></ol></div>
+<div id="r5" class="root flow tall"><p>tall</p></div>
+<div id="r6" class="root"><span class="ib"></span><span class="ib"></span><span class="ib"></span> inline blocks in a line</div>
+<div id="r7" class="root"><div class="rel">relative child</div><p>plain</p></div>
+<div id="r8" class="root"><br>line<br>breaks<br></div>
+</div>
+<div id="bottom">end</div>
+<script>
+function box(id) {
+	var e = document.getElementById(id), r = e.getBoundingClientRect(), out = id + " " + [r.left, r.top, r.width, r.height].join(",");
+	var kids = e.querySelectorAll("*");
+	for (var i = 0; i < kids.length; i++) {
+		var k = kids[i].getBoundingClientRect();
+		out += " " + kids[i].tagName + ":" + [k.left, k.top, k.width, k.height].join(",");
+	}
+	return out;
+}
+function dump(label) {
+	var ids = ["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "bottom"];
+	console.log("== " + label + "\n" + ids.map(box).join("\n") + "\nheight " + document.documentElement.scrollHeight);
+}
+var $ = function (id) { return document.getElementById(id); };
+dump("initial");
+$("r1").firstChild.data = "short";
+dump("text of r1 changed (r1 shorter: everything below moves)");
+$("r1").firstChild.data = "first block of text that wraps around a few lines when it is long enough to need it, and more text so that it does";
+dump("text of r1 restored");
+$("r2").className = "root hot";
+dump("class of r2 (color inherits)");
+$("r2").className = "root";
+$("r3").style.height = "120px";
+dump("height of r3 (moves what follows)");
+$("r3").style.height = "";
+dump("height of r3 removed");
+$("wrap").style.width = "500px";
+dump("container width (every root gets another width)");
+$("wrap").style.width = "";
+dump("container width removed");
+$("r4").querySelector("li").textContent = "one changed and longer than before";
+dump("a list item of r4");
+var p = document.createElement("p");
+p.textContent = "inserted";
+$("r2").insertBefore(p, $("r2").firstChild);
+dump("a paragraph inserted into r2");
+$("r2").removeChild(p);
+dump("and removed");
+$("r6").className = "root big";
+dump("font size of r6");
+$("r6").className = "root";
+$("top").style.height = "30px";
+dump("an element before everything");
+$("top").style.height = "";
+$("r7").firstChild.className = "";
+dump("the relative child of r7 stops being relative");
+$("r7").firstChild.className = "rel";
+dump("and is again");
+$("r8").className = "root pad";
+dump("padding of r8");
+$("r8").className = "root";
+var extra = document.createElement("div");
+extra.className = "root";
+extra.id = "r9";
+extra.textContent = "a new block";
+$("wrap").insertBefore(extra, $("r3"));
+dump("a new root inserted among them");
+$("wrap").removeChild(extra);
+dump("removed");
+$("r5").firstChild.textContent = "taller text changed";
+dump("r5 content");
+$("r3").querySelector(".f").style.width = "90px";
+dump("a float of r3");
+document.body.style.fontSize = "16px";
+dump("body font size (everything inherits)");
+document.body.style.fontSize = "";
+dump("body font size removed");
+</script>
+</body>
+</html>

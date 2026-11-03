@@ -55,15 +55,17 @@ static void box_inline_relative(struct layout_box *block);
 static void box_transform_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
 static void box_apply_scale(struct layout_box *box);
 static void box_static_inline(const struct layout_box *block, struct layout_box *box, layout_unit x, layout_unit y, size_t *breaks);
+static int box_build_tree(struct layout_tree *tree, const struct layout_tree *previous, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
 
 /*
  * Builds and lays out the box tree of a document for a viewport of width
  * by height pixels; image_lookup (with its context) finds the image of an
  * <img>, url_lookup the image a background names.
  */
-int
-layout_build(
+static int
+box_build_tree(
 	struct layout_tree *tree,
+	const struct layout_tree *previous,
 	struct css_engine *css,
 	struct text_system *text,
 	struct dom_document *document,
@@ -95,6 +97,8 @@ layout_build(
 	tree->scroll_y = scroll_y;
 	tree->containing_height = tree->viewport_height;
 	tree->containing_height_definite = 1;
+	if (previous != NULL)
+		(void)layout_reuse_open(tree, previous);
 	css_engine_set_viewport(css, (float)width / css_engine_base_zoom(css), (float)height / css_engine_base_zoom(css));
 
 	/* Builds the boxes of the root element. */
@@ -155,6 +159,57 @@ layout_build(
 
 	/* Succeeded: the tree is laid out. */
 	return 0;
+}
+
+/*
+ * Builds and lays out the box tree of a document as layout_build does, with
+ * the content of the blocks of the previous tree taken as it is where
+ * nothing changed (reuse.c).
+ */
+int
+layout_build_reusing(
+	struct layout_tree *tree,
+	const struct layout_tree *previous,
+	struct css_engine *css,
+	struct text_system *text,
+	struct dom_document *document,
+	layout_image_lookup image_lookup,
+	layout_url_lookup url_lookup,
+	void *image_context,
+	int width,
+	int height,
+	layout_unit scroll_x,
+	layout_unit scroll_y,
+	const struct layout_transition *transition)
+{
+	int error;
+
+	/* The tree, then the index of the previous one goes. */
+	error = box_build_tree(tree, previous, css, text, document, image_lookup, url_lookup, image_context, width, height, scroll_x, scroll_y, transition);
+	layout_reuse_close(tree);
+	return error;
+}
+
+/*
+ * Builds and lays out the box tree of a document for a viewport of width
+ * by height pixels, whole.
+ */
+int
+layout_build(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct text_system *text,
+	struct dom_document *document,
+	layout_image_lookup image_lookup,
+	layout_url_lookup url_lookup,
+	void *image_context,
+	int width,
+	int height,
+	layout_unit scroll_x,
+	layout_unit scroll_y,
+	const struct layout_transition *transition)
+{
+	return layout_build_reusing(tree, NULL, css, text, document, image_lookup, url_lookup, image_context, width, height, scroll_x, scroll_y, transition);
 }
 
 /*
