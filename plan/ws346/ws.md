@@ -2,7 +2,8 @@
 
 # WS346: libbrowser の style と layout の差分の再計算（layout cache）
 
-Status: incomplete
+Status: completed
+<!-- retained-after-completion --> 照合テストスイート（run-verify.sh、bench、pages）を回帰テストとして継続使用するため残す
 Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O1, O2
@@ -44,12 +45,12 @@ script が DOM を変えては幾何を読む頁（amazon.co.jp、store.google.c
 | [ws346-p005](phase005/phase.md) | style の無効化の統合（engine を保つ） | cleared（2026-11-03、q2003） | p003, p004 |
 | [ws346-p006](phase006/phase.md) | layout の再利用 A: 幾何の保存・候補の判定・intrinsic の持ち越し | cleared（2026-11-03、q2005。intrinsic の持ち越しは未実装） | p005 |
 | [ws346-p007](phase007/phase.md) | layout の再利用 B: 部分木の接ぎ木（構造共有に替えた） | cleared（2026-11-03、q2006） | p006 |
-| [ws346-p008](phase008/phase.md) | 統合の試験・速さの測定・既定の判定 | planned | p007 |
-| [ws346-p009](phase009/phase.md) | 規約の全文の見直し | planned | p008 |
+| [ws346-p008](phase008/phase.md) | 統合の試験・速さの測定・既定の判定 | cleared（2026-11-03、q2007） | p007 |
+| [ws346-p009](phase009/phase.md) | 規約の全文の見直し | cleared（2026-11-03、q2007） | p008 |
 
 - 2026-11-03 06:40 ユーザーから、design.md §12 の 3 件（既定は目標を満たしたら on・live の頁を照合の mode で約 20 回・範囲の外は別の WS）を推しのとおりにしてよい、という趣旨の答えを受けた。
 - 2026-11-03 06:39 ユーザーから、定義した Phase をこのメインのエージェント（Sonnet 5.5）で実装し、サブエージェントは使わない、という趣旨の指示を受けた。
 
 ## Resume point
 
-p008（統合の試験・速さの測定・既定の判定）を実装中（Q1、main の checkout）。残りは p008 → p009 の順。
+完了。全 Phase (p001〜p009) cleared。既定の cache mode を on に切り替え済み。

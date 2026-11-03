@@ -2,7 +2,7 @@
 
 # ws346-p008: 統合の試験・速さの判定・既定の mode の案
 
-Status: completed
+Status: cleared
 Disposition: normal
 Parent: [WS346](../ws.md)
 Primary Milestone: MG006

@@ -758,4 +758,5 @@
 | q2004 / q2004-i01 | Q1（直に、main の checkout） | [ws346-p005](ws346/phase005/phase.md) style の無効化の統合 | 同上 | cleared（2026-11-03 11:35、pages 4/4・verify 差異 0・bench 4 が 16 倍） |
 | q2005 / q2005-i01 | Q1（直に、main の checkout） | [ws346-p006](ws346/phase006/phase.md) layout の再利用 A | 同上 | cleared（2026-11-03、style の stale 比較と reuse.c の土台。p007 とまとめて commit） |
 | q2006 / q2006-i01 | Q1（直に、main の checkout） | [ws346-p007](ws346/phase007/phase.md) layout の再利用 B（構造共有） | 同上 | cleared（2026-11-03 12:5x、pages 7/7・verify 差異 0・bench class 9〜10 倍・append 11 倍） |
-| q2007 / q2007-i01 | Q1（直に、main の checkout） | [ws346-p008](ws346/phase008/phase.md) 統合の試験・速さの測定・既定の判定 | 同上 | in-progress |
+| q2007 / q2007-i01 | Q1（直に、main の checkout） | [ws346-p008](ws346/phase008/phase.md) 統合の試験・速さの測定・既定の判定 | 同上 | cleared（2026-11-03 16:07 `916f831402`、bench 4 種 14〜17 倍、実サイト verify 4 件 0 差異、Windows cross-build PASS、既定 on に切り替え） |
+| q2008 / q2008-i01 | Q1（直に、main の checkout） | [ws346-p009](ws346/phase009/phase.md) 規約の全文の見直し | 同上 | cleared（2026-11-03、plan/coding-style.md 照合、タブ・空白・文言・C89 準拠、全試験 PASS） |

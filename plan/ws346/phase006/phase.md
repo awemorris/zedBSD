@@ -2,7 +2,7 @@
 
 # ws346-p006: layout の再利用 A: 幾何の保存・根の候補・intrinsic の持ち越し
 
-Status: planned
+Status: cleared
 Disposition: normal
 Parent: [WS346](../ws.md)
 Primary Milestone: MG006

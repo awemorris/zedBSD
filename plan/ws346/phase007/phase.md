@@ -2,7 +2,7 @@
 
 # ws346-p007: layout の再利用 B: 部分木の接ぎ木
 
-Status: planned
+Status: cleared
 Disposition: normal
 Parent: [WS346](../ws.md)
 Primary Milestone: MG006

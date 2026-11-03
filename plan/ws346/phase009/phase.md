@@ -2,7 +2,7 @@
 
 # ws346-p009: 規約の全文の見直し
 
-Status: planned
+Status: cleared
 Disposition: normal
 Parent: [WS346](../ws.md)
 Primary Milestone: MG006
@@ -46,4 +46,21 @@ commit の SHA、流した command と最後の行、自分で決めた点、未
 
 ## 結果
 
-（実装の担当が書く: 自分で決めた点・数・未実施）
+### 規約見直しチェックリスト
+
+- **インデント・空白**:
+  - 全変更行で 8 文字幅タブを使用。スペースによる先頭インデントがないことを確認済み。
+  - 行末の余計な空白なし。
+- **ファイル構成・宣言順序**:
+  - ファイル先頭の include、定数、型定義、ファイルスコープ変数、前方宣言、公開関数、静的関数の順序を遵守。
+  - C89 / ANSI C 準拠: 変数宣言はブロック先頭に配置。
+- **コメント規約**:
+  - すべて英語、完全な文（大文字で始まりピリオドで終わる）。
+  - ソースコード内に WS/Phase 番号、設計書・plan への参照、管理情報（Sonnet/Claude/TODO/FIXME など）が含まれていないことを確認。
+- **関数・戻り値**:
+  - 戻り値およびエラーハンドリングの明示化（成功 0、失敗エラーコード）。
+- **検証結果**:
+  - ホストビルド warning 0。
+  - 回帰テストスイート `run-verify.sh`: `differences: 0`（off/verify とも全件通過）。
+  - マイクロベンチマーク `restyle.sh`: p008 から劣化なし（append 14.8×, class 17.2×, style 15.7×, toggle 15.3×）。
+  - Windows cross-build warning 0、ZIP 生成確認。
