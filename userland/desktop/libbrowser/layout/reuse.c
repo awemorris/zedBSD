@@ -38,8 +38,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* How many trees the arena of a tree may hold besides its own, and how many bytes it may hold, before the next tree is built whole. */
-#define REUSE_AGE_MAX		24U
+/*
+ * How many trees the arena of a tree may hold besides its own, how many bytes it may hold beyond twice what the
+ * last tree built whole took (what dead boxes keep), and how many bytes in all, before the next tree is built whole.
+ */
+#define REUSE_AGE_MAX		512U
+#define REUSE_BYTES_SLACK	((size_t)32 << 20)
 #define REUSE_BYTES_MAX		((size_t)1 << 30)
 
 /* One element's box in the previous tree, and whether the element has more than one box there. */
@@ -79,12 +83,16 @@ layout_reuse_open(
 	const struct layout_tree *previous)
 {
 	struct layout_reuse *reuse;
+	size_t bytes;
 
 	/* Nothing to take from a tree without boxes, or from one that carries too much. */
 	tree->reuse = NULL;
 	if (previous->root == NULL)
 		return 0;
-	if (previous->reuse_age >= REUSE_AGE_MAX || wb_arena_bytes(&previous->arena) > REUSE_BYTES_MAX)
+	bytes = wb_arena_bytes(&previous->arena);
+	if (previous->reuse_age >= REUSE_AGE_MAX || bytes > REUSE_BYTES_MAX)
+		return 0;
+	if (previous->reuse_age != 0 && bytes > previous->reuse_base * 2U + REUSE_BYTES_SLACK)
 		return 0;
 
 	/* The index, with the root's box in it. */
@@ -130,6 +138,7 @@ layout_reuse_adopt(
 {
 	if (tree->reuse_boxes == 0)
 		return 0;
+	tree->reuse_base = previous->reuse_age == 0 ? wb_arena_bytes(&previous->arena) : previous->reuse_base;
 	wb_arena_adopt(&tree->arena, &previous->arena);
 	tree->reuse_age = previous->reuse_age + 1U;
 	previous->root = NULL;

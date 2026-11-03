@@ -517,6 +517,8 @@ struct layout_tree {
 	int cached;
 	/* How many trees of boxes the arena holds besides its own (each one that a tree took boxes from). */
 	unsigned reuse_age;
+	/* The bytes the last tree built whole took, which the arena holds besides what its dead boxes keep. */
+	size_t reuse_base;
 	/*
 	 * The previous tree the boxes may be taken from (reuse.c; NULL: none), and how much of it was: the
 	 * boxes that could be taken, the blocks that kept their layout, and the boxes that were taken.
