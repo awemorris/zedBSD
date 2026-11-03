@@ -92,6 +92,10 @@ layout_reuse_open(
 	bytes = wb_arena_bytes(&previous->arena);
 	if (previous->reuse_age >= REUSE_AGE_MAX || bytes > REUSE_BYTES_MAX)
 		return 0;
+
+	/* The final positions of a tree with scrolled content have the scrolls in them, which the final pass of a tree that takes boxes from it would add again. */
+	if (previous->scrolled)
+		return 0;
 	if (previous->reuse_age != 0 && bytes > previous->reuse_base * 2U + REUSE_BYTES_SLACK)
 		return 0;
 

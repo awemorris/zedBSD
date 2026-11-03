@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>reuse scroll</title>
+<style>
+body { font: 14px sans-serif; margin: 8px; }
+#sc { width: 300px; height: 120px; overflow: scroll; border: 1px solid #888; }
+#sc p { margin: 6px 0; }
+.row { height: 30px; background: #eef; margin: 2px 0; }
+.hot { color: #c00; }
+.card { border: 1px solid #aaa; margin: 3px 0; padding: 2px; }
+.card div { padding: 1px 0; }
+#after { margin-top: 10px; }
+</style>
+</head>
+<body>
+<div id="before"><p>before the scroller</p></div>
+<div id="sc"><p>one</p><p>two with some more text so that it takes room</p><div class="row">row</div><div class="row">row</div><div class="card"><div><p>nested paragraph one</p><div><p>deeper</p></div></div></div><p>three</p><div class="row">row</div><p>four</p><div class="card"><div><p>nested paragraph two</p></div></div><div class="row">row</div></div>
+<div id="after"><p>after the scroller</p><div class="row">row</div></div>
+<script>
+function box(id) {
+	var e = document.getElementById(id), r = e.getBoundingClientRect(), out = id + " " + [r.left, r.top, r.width, r.height].join(",");
+	var kids = e.querySelectorAll("*");
+	for (var i = 0; i < kids.length; i++) {
+		var k = kids[i].getBoundingClientRect();
+		out += " " + kids[i].tagName + ":" + [k.left, k.top, k.width, k.height].join(",");
+	}
+	return out;
+}
+function dump(label) {
+	console.log("== " + label + "\n" + ["before", "sc", "after"].map(box).join("\n") + "\nheight " + document.documentElement.scrollHeight);
+}
+var $ = function (id) { return document.getElementById(id); };
+dump("initial");
+$("sc").scrollTop = 40;
+dump("scrolled by 40");
+$("before").style.height = "60px";
+dump("something before the scroller changes (the scroller moves, still scrolled)");
+$("before").style.height = "";
+$("sc").scrollTop = 0;
+dump("scrolled back to 0");
+$("before").style.height = "50px";
+dump("the scroller moves again, at 0");
+$("before").style.height = "";
+$("sc").scrollTop = 25;
+dump("scrolled by 25");
+$("sc").querySelector(".row").className = "row hot";
+dump("a row inside the scroller changes");
+$("sc").querySelector(".card p").textContent = "nested paragraph one, longer, so that it wraps around within the scroller and takes more lines";
+dump("a row inside the scroller changes");
+$("after").style.marginTop = "30px";
+dump("what follows the scroller changes");
+$("sc").scrollTop = 0;
+$("after").style.marginTop = "";
+dump("back");
+</script>
+</body>
+</html>

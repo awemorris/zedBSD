@@ -52,6 +52,7 @@ layout_scroll_apply(
 		return 0;
 	wb_vector_init(&containers, sizeof(const struct layout_box *));
 	error = scroll_collect(tree, tree->root, &containers, 0);
+	tree->scrolled = error == 0 && containers.count != 0;
 	if (error != 0 || containers.count == 0) {
 		wb_vector_release(&containers);
 		return error;

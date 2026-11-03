@@ -512,6 +512,8 @@ struct layout_tree {
 	int logical_mode;
 	/* The view transition being shown or measured (not owned), and whether this build is the measuring one. */
 	const struct layout_transition *transition;
+	/* Whether a scroll container of the tree has its content moved by its scroll (scroll.c): what a later tree cannot take as it is. */
+	int scrolled;
 	/* Which build made the tree (boxes carry it), and whether it records what its blocks were laid out with for a later tree. */
 	uint64_t serial;
 	int cached;
