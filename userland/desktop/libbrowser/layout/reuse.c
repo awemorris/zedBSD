@@ -379,7 +379,7 @@ layout_reuse_record(
 	layout_unit containing_width,
 	int own_context)
 {
-	if (!tree->cached)
+	if (!tree->cached || tree->measuring != 0)
 		return;
 	box->reuse_width = containing_width;
 	box->reuse_height = tree->containing_height;

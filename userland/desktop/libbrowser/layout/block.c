@@ -61,12 +61,28 @@ layout_block(
 	int wanted;
 	int error;
 
+	/* A measuring layout invalidates any previous layout record. */
+	if (tree->measuring != 0)
+		box->reuse_recorded = 0;
+
 	/* A box of another writing mode than the system it is laid out in has coordinates of its own. */
 	wanted = layout_logical_wanted(tree, box);
 	if (wanted) {
 		error = layout_logical(tree, box, containing_width);
 		return error;
 	}
+
+	/* A block the previous tree made, laid out with the same things given, keeps what it has. */
+	if (tree->reuse != NULL && !box->replaced) {
+		int grafted;
+
+		error = layout_reuse_graft(tree, box, containing_width, block_owns_context(box), &grafted);
+		if (error != 0)
+			return error;
+		if (grafted)
+			return 0;
+	}
+	box->born = tree->serial;
 
 	/* A width of max-content, min-content or fit-content is measured first (ws074-p074). */
 	intrinsic = block_is_intrinsic(&box->style.width);
@@ -89,17 +105,6 @@ layout_block(
 		error = block_intrinsic(tree, box, containing_width);
 		box->style.width.unit = CSS_UNIT_AUTO;
 		return error;
-	}
-
-	/* A block the previous tree made, laid out with the same things given, keeps what it has. */
-	if (tree->reuse != NULL && !box->replaced) {
-		int grafted;
-
-		error = layout_reuse_graft(tree, box, containing_width, block_owns_context(box), &grafted);
-		if (error != 0)
-			return error;
-		if (grafted)
-			return 0;
 	}
 
 	/* The margins, borders and paddings. */

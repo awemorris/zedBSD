@@ -2,7 +2,7 @@
 
 # ws346-p008: 統合の試験・速さの判定・既定の mode の案
 
-Status: planned
+Status: completed
 Disposition: normal
 Parent: [WS346](../ws.md)
 Primary Milestone: MG006
@@ -51,4 +51,41 @@ commit の SHA、流した command と最後の行、自分で決めた点、未
 
 ## 結果
 
-（実装の担当が書く: 自分で決めた点・数・未実施）
+### 1. マイクロベンチマーク (`plan/ws346/tests/bench/restyle.sh` 3回中央値)
+
+| ベンチマーク | off | on | 高速化倍率 | 目標 | 判定 |
+|---|---|---|---|---|---|
+| append-then-rect | 14,593 ms | 983 ms | **14.8×** | ≥ 3× | 達成 |
+| class-then-offset | 14,482 ms | 844 ms | **17.2×** | ≥ 10× | 達成 |
+| style-then-offset | 14,416 ms | 918 ms | **15.7×** | ≥ 10× | 達成 |
+| toggle-then-computed | 702 ms | 46 ms | **15.3×** | ≥ 10× | 達成 |
+
+全項目でチェックサム（check 値）が off / on で完全一致（123800 / 111000 / 22400 / 12550）。
+
+### 2. 回帰テストスイート (`plan/ws346/tests/run-verify.sh`)
+
+- `BROWSER_LAYOUT_CACHE=off`:
+  - DOM tests: 39/42 (基点同等)
+  - JS tests: 21/21
+  - Fetch tests: blocking 38/38, async 38/38
+  - WPT reftests: 62 pass, 37 fail, 1 error (基点同等)
+  - Acid3: 100/100, 100.00% pixels agreement
+- `BROWSER_LAYOUT_CACHE=verify`:
+  - 同上、全スイートで `differences: 0`
+- 単体テスト `run-pages.py`: 8/8 pass (`off`, `on`, `verify`)
+
+### 3. 実サイト検証 (`verify` モード / `on` モード)
+
+ユーザー許可の照合回数約20回中13回を使用：
+- **Amazon.co.jp**: `mismatches=0`, engines=469, styles=626k; `on` モード実行時間 65.24s (off: 336.21s, **5.15× 高速化**、目標 ≤ 1/2 達成)、styles 144k (目標 ≤ 1/5 達成)。
+- **Yahoo.co.jp**: `mismatches=0` (`mode=verify engines=11 styles=12970 style_hits=89318 layouts=63 roots=13492 grafts=1378 graft_boxes=12832 intrinsic=0 mismatches=0`)。
+- **Google.com**: `mismatches=0` (`mode=verify engines=28 styles=3614 style_hits=33031 layouts=26 roots=98 grafts=154 graft_boxes=98 intrinsic=0 mismatches=0`)。
+- **Store.google.com**: `mismatches=0` (`mode=verify engines=43 styles=32694 style_hits=4334 layouts=15 mismatches=0`)。
+
+### 4. 既定 mode の設定
+
+すべての要件と品質基準（差分 0、目標性能達成）を満たしたため、ユーザー指示に従い環境変数未指定時の既定 mode を `on` に切り替え完了。
+
+### 5. Windows cross-build
+
+`make browser-win64-zip LLVM_MINGW=$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64` により warning 0 で正常ビルド完了、ZIP アーカイブ生成確認。

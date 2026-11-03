@@ -75,39 +75,6 @@ struct page_sticky_args {
 static int page_gather_styles(struct page *page);
 static int page_layout_work(void *argument);
 static int page_layout_verify(struct page *page, const struct page_layout_args *args);
-static void
-debug_find_mismatch(
-	const struct layout_box *cb,
-	const struct layout_box *wb,
-	uint64_t serial)
-{
-	const struct layout_box *cchild;
-	const struct layout_box *wchild;
-	if (cb == NULL || wb == NULL) return;
-	if (cb->kind == wb->kind && cb->node != NULL && cb->node->type == DOM_ELEMENT &&
-	    (cb->x != wb->x || cb->y != wb->y)) {
-		const struct dom_element *el = (const struct dom_element *)cb->node;
-		fprintf(stderr, "mismatch el tag=%d born=(%llu vs %llu serial=%llu) kind=(%d vs %d) display=(%d vs %d) atomic=(%d vs %d) skipped=(%d vs %d) recorded=(%d vs %d) cinline=(%d vs %d) cx=(%.2f,%.2f) wx=(%.2f,%.2f)\n",
-		    el->tag, (unsigned long long)cb->born, (unsigned long long)wb->born, (unsigned long long)serial,
-		    cb->kind, wb->kind, cb->style.display, wb->style.display, cb->atomic, wb->atomic, cb->reuse_skipped, wb->reuse_skipped,
-		    cb->reuse_recorded, wb->reuse_recorded, cb->children_inline, wb->children_inline,
-		    (double)layout_to_px(cb->x), (double)layout_to_px(cb->y),
-		    (double)layout_to_px(wb->x), (double)layout_to_px(wb->y));
-		if (cb->parent != NULL && wb->parent != NULL) {
-			fprintf(stderr, "  parent: tag=%d born=(%llu vs %llu) cinline=(%d vs %d) skipped=(%d vs %d) cx=(%.2f,%.2f) wx=(%.2f,%.2f)\n",
-			    cb->parent->node && cb->parent->node->type == DOM_ELEMENT ? ((struct dom_element*)cb->parent->node)->tag : -1,
-			    (unsigned long long)cb->parent->born, (unsigned long long)wb->parent->born,
-			    cb->parent->children_inline, wb->parent->children_inline,
-			    cb->parent->reuse_skipped, wb->parent->reuse_skipped,
-			    (double)layout_to_px(cb->parent->x), (double)layout_to_px(cb->parent->y),
-			    (double)layout_to_px(wb->parent->x), (double)layout_to_px(wb->parent->y));
-		}
-		return;
-	}
-	for (cchild = cb->first_child, wchild = wb->first_child; cchild != NULL && wchild != NULL; cchild = cchild->next, wchild = wchild->next) {
-		debug_find_mismatch(cchild, wchild, serial);
-	}
-}
 static struct layout_tree *page_layout_previous(struct page *page);
 static void page_layout_count(struct page *page);
 static unsigned page_change_scope(void *context, struct dom_element *element, int kind, const struct vm_string *attribute);
@@ -1256,7 +1223,6 @@ page_layout_verify(
 	if (differs) {
 		page->cache.mismatches++;
 		fprintf(stderr, "layout-cache: layout mismatch line=%u\n  cached: %.*s\n  whole:  %.*s\n", line, (int)(a_end - a), a, (int)(b_end - b), b);
-		debug_find_mismatch(page->layout.root, whole.root, page->layout.serial);
 	}
 	wb_buffer_release(&ours);
 	wb_buffer_release(&theirs);
@@ -1646,7 +1612,7 @@ page_container_size(
 /*
  * Tells how the cache of style and layout works for this process: the
  * value of BROWSER_LAYOUT_CACHE ("off", "on" or "verify"), read once; any
- * other value, and none, is off.
+ * other value, and none, is on.
  */
 enum page_cache_mode
 page_cache_mode(
@@ -1660,10 +1626,10 @@ page_cache_mode(
 	made = __atomic_load_n(&mode, __ATOMIC_RELAXED);
 	if (made >= 0)
 		return (enum page_cache_mode)made;
-	made = PAGE_CACHE_OFF;
+	made = PAGE_CACHE_ON;
 	value = getenv("BROWSER_LAYOUT_CACHE");
-	if (value != NULL && strcmp(value, "on") == 0)
-		made = PAGE_CACHE_ON;
+	if (value != NULL && strcmp(value, "off") == 0)
+		made = PAGE_CACHE_OFF;
 	else if (value != NULL && strcmp(value, "verify") == 0)
 		made = PAGE_CACHE_VERIFY;
 	__atomic_store_n(&mode, made, __ATOMIC_RELAXED);

@@ -17,7 +17,6 @@
 
 #include <errno.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 
 /* The list markers of list-style-type, as UTF-16. */
@@ -300,28 +299,6 @@ layout_absolute(
 	layout_unit dx;
 	layout_unit dy;
 
-	if (box->node != NULL && box->node->type == DOM_ELEMENT) {
-		const struct dom_element *el = (const struct dom_element *)box->node;
-		if (el->tag == DOM_TAG_SPAN) {
-			fprintf(stderr, "ABS-SPAN: box=%p skipped=%d cinline=%d x=%.2f y=%.2f in_x=%.2f in_y=%.2f\n",
-			    (void*)box, box->reuse_skipped, box->children_inline,
-			    (double)layout_to_px(box->x), (double)layout_to_px(box->y),
-			    (double)layout_to_px(x), (double)layout_to_px(y));
-		}
-		if (el->tag == DOM_TAG_A) {
-			for (child = box->first_child; child != NULL; child = child->next) {
-				if (child->node != NULL && child->node->type == DOM_ELEMENT && ((const struct dom_element *)child->node)->tag == DOM_TAG_SPAN) {
-					fprintf(stderr, "ABS-A: box=%p skipped=%d cinline=%d lines=%zu x=%.2f y=%.2f in_x=%.2f in_y=%.2f child=%p cborn=%llu ckind=%d cskipped=%d cx=%.2f cy=%.2f\n",
-					    (void*)box, box->reuse_skipped, box->children_inline, box->line_count,
-					    (double)layout_to_px(box->x), (double)layout_to_px(box->y),
-					    (double)layout_to_px(x), (double)layout_to_px(y),
-					    (void*)child, (unsigned long long)child->born, child->kind, child->reuse_skipped,
-					    (double)layout_to_px(child->x), (double)layout_to_px(child->y));
-				}
-			}
-		}
-	}
-
 	/* A block that kept what it was laid out with has its content moved to where it is. */
 	if (box->reuse_skipped) {
 		layout_reuse_shift(box, x, y);
@@ -345,11 +322,6 @@ layout_absolute(
 		box_inline_relative(box);
 		breaks = 0;
 		box_static_inline(box, box, content_x, content_y, &breaks);
-		if (box->node != NULL && box->node->type == DOM_ELEMENT && ((const struct dom_element *)box->node)->tag == DOM_TAG_SPAN) {
-			fprintf(stderr, "END-SPAN: box=%p x=%.2f y=%.2f abs_x=%.2f abs_y=%.2f\n",
-			    (void*)box, (double)layout_to_px(box->x), (double)layout_to_px(box->y),
-			    (double)layout_to_px(box->abs_x), (double)layout_to_px(box->abs_y));
-		}
 		return;
 	}
 
