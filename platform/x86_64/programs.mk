@@ -10,8 +10,6 @@ USER_CFLAGS := \
 	$(CFLAGS)\
 	-m64 \
 	-march=x86-64 \
-	-mno-red-zone \
-	-ffreestanding \
 	-fno-pic \
 	-fno-pie \
 	-fno-stack-protector \

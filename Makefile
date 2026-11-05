@@ -1947,19 +1947,8 @@ PROGRAM_DIRS := $(dir $(SELECTED_PROGRAM_MAKEFILES))
 
 .PHONY: packages $(PROGRAM_DIRS)
 
-packages: $(PROGRAM_DIRS)
+programs: $(PROGRAM_DIRS)
 
 $(PROGRAM_DIRS):
-	$(MAKE) \
-		-C $@ \
-		CC="$(CC)" \
-		CPPFLAGS="$(USER_CPPFLAGS)" \
-		CFLAGS="$(USER_CFLAGS)" \
-		AS="$(AS)" \
-		LD="$(LD)" \
-		RANLIB="$(RANLIB)" \
-		NM="$(NM)" \
-		OBJCOPY="$(OBJCOPY)" \
-		OBJDUMP="$(OBJDUMP)" \
-		READELF="$(READELF)" \
-		STRIP="$(STRIP)"
+	echo $@
+	$(MAKE) -C $@ CC="$(CC)" CPPFLAGS="$(USER_CPPFLAGS)" CFLAGS="$(USER_CFLAGS)" AS="$(AS)" LD="$(LD)" RANLIB="$(RANLIB)" NM="$(NM)" OBJCOPY="$(OBJCOPY)" OBJDUMP="$(OBJDUMP)" READELF="$(READELF)" STRIP="$(STRIP)"

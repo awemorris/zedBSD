@@ -74,7 +74,7 @@ build: patch
 		mkdir -p build; objects=; \
 		for source in $(STANDALONE_SOURCES); do \
 			object=build/$$(printf '%s' "$$source" | tr '/.' '__').o; \
-			$(CC) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror \
+			$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror \
 				-I"$(REPO_ROOT)" \
 				-c "$(REPO_ROOT)/$$source" -o "$$object"; \
 			objects="$$objects $$object"; \
