@@ -26,7 +26,7 @@ NOCT_ARTIFACT := $(NOCT_BUILD_DIR)/noct
 NOCT_BIN := $(BUILD)/bin/noct
 NOCT_MAN := $(BUILD)/share/man/man1/noct.1
 
-DISTFILE := $(abspath $(NOCT_DIR)distfiles)/NoctLang-f6efa83a8ccb9262ce7f802c0e89e23a39c31c5a.tar.gz
+DISTFILE := $(abspath $(NOCT_DIR)distfiles)/NoctLang-82c1753ab3002c2742089898fc5f69c383792af1.tar.gz
 PATCHES := $(sort $(wildcard $(abspath $(NOCT_DIR)patches)/*.patch))
 PATCH_STAMP := $(NOCT_SRC)/.patched
 
@@ -45,7 +45,7 @@ patch: $(PATCH_STAMP)
 
 $(DISTFILE):
 	@mkdir -p $(dir $@)
-	curl --fail --location --output $@ "https://codeload.github.com/awemorris/NoctLang/tar.gz/f6efa83a8ccb9262ce7f802c0e89e23a39c31c5a"
+	curl --fail --location --output $@ "https://codeload.github.com/awemorris/NoctLang/tar.gz/82c1753ab3002c2742089898fc5f69c383792af1"
 
 $(PATCH_STAMP): $(DISTFILE) $(PATCHES)
 	@rm -rf $(NOCT_SRC)
@@ -66,7 +66,31 @@ $(NOCT_ARTIFACT): $(PATCH_STAMP)
 		ZEDBSD_SYSROOT=$(BUILD)/sysroot \
 		ZEDBSD_LLVM_BIN=$(REPO_ROOT)/build/llvm/bin \
 		ZEDBSD_DYNAMIC_DIR=$(BUILD)/dynamic \
-		cmake --preset zedbsd-$(ARCH) -B $(NOCT_BUILD_DIR)
+		cmake -B $(NOCT_BUILD_DIR) \
+			-DNOCT_TARGET_ZEDBSD=ON \
+			-DNOCT_ENABLE_INSTALL=ON \
+			-DNOCT_ENABLE_SHARED=ON \
+			-DNOCT_ENABLE_JIT=ON \
+			-DNOCT_ENABLE_OPTIMIZER=ON \
+			-DNOCT_ENABLE_MULTITHREAD=ON \
+			-DNOCT_ENABLE_ACCEL=ON \
+			-DNOCT_ENABLE_CLI=ON \
+			-DNOCT_ENABLE_REPL=ON \
+			-DNOCT_ENABLE_BCBACKEND=ON \
+			-DNOCT_ENABLE_CBACKEND=ON \
+			-DNOCT_ENABLE_ELBACKEND=ON \
+			-DNOCT_ENABLE_SCMBACKEND=ON \
+			-DNOCT_ENABLE_I18N=ON \
+			-DNOCT_ENABLE_I18N_LIBINTL=ON \
+			-DNOCT_ENABLE_API=ON \
+			-DNOCT_ENABLE_API_SYSTEM=ON \
+			-DNOCT_ENABLE_API_CONSOLE=ON \
+			-DNOCT_ENABLE_API_FILE=ON \
+			-DNOCT_ENABLE_API_THREAD=ON \
+			-DNOCT_ENABLE_API_HTTPSERVER=ON \
+			-DNOCT_ENABLE_API_TERM=ON \
+			-DNOCT_ENABLE_API_BEUI=ON \
+			-DNOCT_ENABLE_API_PROCESS=ON
 	cd $(NOCT_SRC) && \
 		env -u CFLAGS -u CPPFLAGS -u LDFLAGS \
 		cmake --build $(NOCT_BUILD_DIR) --parallel $(ZEDBSD_BUILD_JOBS)

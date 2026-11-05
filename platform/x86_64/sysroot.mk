@@ -120,9 +120,7 @@ HEADERS_INSTALLED_STAMP := $(SYSROOT)/.headers-installed
 
 .PHONY: libc sysroot
 
-libc: $(SYSROOT_COMPLETE_STAMP)
-
-sysroot: libc
+sysroot: $(SYSROOT_COMPLETE_STAMP)
 
 # Install public headers into sysroot
 $(HEADERS_INSTALLED_STAMP): $(PUBLIC_HEADERS)

@@ -3,6 +3,7 @@ USER_CPPFLAGS := \
 	-Iinclude \
 	-Isrc \
 	-I. \
+	-D__ZEDBSD__ \
 	-DHAL_ARCH_AMD64 \
 	-DKERN_USER_ABI_LP64
 

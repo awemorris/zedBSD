@@ -3,9 +3,6 @@ NATIVE_ZEDBSD_CONFIG := platform/amd64/zedbsd-native.cfg
 IMAGE_CONTRACT_STAMP := $(BUILD)/.disk-image-contract
 IMAGE_STAGE1         := $(if $(filter bios,$(ZEDBSD_VARIANT)), $(BUILD)/bootloader/stage1-native.bin,$(BUILD)/bootloader/stage1.bin)
 
-
-
-
 EFI_CC     := $(ZEDBSD_TARGET_LLVM_BIN)/clang --target=x86_64-unknown-windows
 EFI_LD     := $(ZEDBSD_TARGET_LLVM_BIN)/lld-link
 EFI_NM     := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-nm

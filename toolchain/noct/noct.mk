@@ -15,10 +15,10 @@ export HOST_NOCT
 NOCT               ?= $(HOST_NOCT)
 
 NOCT_HOST_SRC      := $(REPO_ROOT)/build/NoctLang
-NOCT_HOST_BUILD    := $(NOCT_HOST_SRC)/build-static
+NOCT_HOST_BUILD    := $(NOCT_HOST_SRC)/build
 NOCT_HOST_BIN      := $(HOST_NOCT)
 
-NOCT_DISTFILE      ?= $(REPO_ROOT)/userland/base/noct/distfiles/NoctLang-f6efa83a8ccb9262ce7f802c0e89e23a39c31c5a.tar.gz
+NOCT_DISTFILE      ?= $(REPO_ROOT)/userland/base/noct/distfiles/NoctLang-d198b952dec90120c3d0e7987dd12af06911478e.tar.gz
 NOCT_PATCHES       := $(sort $(wildcard $(REPO_ROOT)/userland/base/noct/patches/*.patch))
 NOCT_PATCH_STAMP   := $(NOCT_HOST_SRC)/.patched
 
@@ -33,7 +33,7 @@ noct-toolchain-cached: noct-toolchain
 
 $(NOCT_DISTFILE):
 	@mkdir -p $(dir $@)
-	curl --fail --location --output $@ "https://codeload.github.com/awemorris/NoctLang/tar.gz/f6efa83a8ccb9262ce7f802c0e89e23a39c31c5a"
+	curl --fail --location --output $@ "https://codeload.github.com/awemorris/NoctLang/tar.gz/d198b952dec90120c3d0e7987dd12af06911478e"
 
 $(NOCT_PATCH_STAMP): $(NOCT_DISTFILE) $(NOCT_PATCHES)
 	@mkdir -p $(NOCT_HOST_SRC)
@@ -50,7 +50,24 @@ $(NOCT_HOST_BIN): $(NOCT_PATCH_STAMP)
 	cd $(NOCT_HOST_SRC) && \
 		env -u CFLAGS -u CPPFLAGS -u LDFLAGS \
 		CC="$(HOST_CC)" CXX="$(HOST_CXX)" \
-		cmake --preset static -B $(NOCT_HOST_BUILD)
+		cmake -B $(NOCT_HOST_BUILD) \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DNOCT_ENABLE_INSTALL=ON \
+			-DNOCT_ENABLE_STATIC=ON \
+			-DNOCT_ENABLE_CLI=ON \
+			-DNOCT_ENABLE_REPL=ON \
+			-DNOCT_ENABLE_JIT=ON \
+			-DNOCT_ENABLE_MULTITHREAD=ON \
+			-DNOCT_ENABLE_OPTIMIZER=ON \
+			-DNOCT_ENABLE_API=ON \
+			-DNOCT_ENABLE_API_SYSTEM=ON \
+			-DNOCT_ENABLE_API_CONSOLE=ON \
+			-DNOCT_ENABLE_API_FILE=ON \
+			-DNOCT_ENABLE_API_THREAD=ON \
+			-DNOCT_ENABLE_API_TERM=ON \
+			-DNOCT_ENABLE_API_PROCESS=ON \
+			-DNOCT_ENABLE_API_HTTPSERVER=ON \
+			-DNOCT_ENABLE_BCBACKEND=ON
 	cd $(NOCT_HOST_SRC) && \
 		env -u CFLAGS -u CPPFLAGS -u LDFLAGS \
 		cmake --build $(NOCT_HOST_BUILD) --parallel $(BUILD_JOBS)

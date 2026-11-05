@@ -60,8 +60,8 @@ mkdir -p "$tree/toolchain" "$tree/build" "$foreign"
 cp -R "$root/toolchain/llvm" "$tree/toolchain/llvm"
 rm -rf "$tree/toolchain/llvm/distfiles"
 cp "$root/build-jobs.mk" "$tree/build-jobs.mk"
-version=$(value ZEDBSD_LLVM_VERSION)
-level=$(value ZEDBSD_LLVM_PATCH_LEVEL)
+version=$(value LLVM_VERSION)
+level=$(value LLVM_PATCH_LEVEL)
 patch=$tree/toolchain/llvm/patches/0001-add-zedbsd-x86-target.patch
 
 # An accepted installation: its identity, the tools (scripts that answer the

@@ -50,6 +50,18 @@ TOPLEVEL_BUILD := 1
 # The default goal for the toplevel Makefile is "disk-image"
 all: vmunix
 
+help:
+	@echo "zedBSD Build System"
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@echo "  toolchain       - Build the toolchain."
+	@echo "  sysroot         - Build the bootloader."
+	@echo "  vmunix          - Build the kernel image."
+	@echo "  bootloader      - Build the bootloader."
+	@echo "  image           - Build the disk image."
+	@echo "  clean           - Clean build artifacts."
+	@echo "  distclean       - Clean all build artifacts and configuration."	
 
 ########################################################################
 # Toolchain
@@ -1958,5 +1970,5 @@ PROGRAM_DIRS := $(dir $(SELECTED_PROGRAM_MAKEFILES))
 programs: libc $(PROGRAM_DIRS)
 
 $(PROGRAM_DIRS):
-	echo $@
+	echo "USER_CPPFLAGS=$(USER_CPPFLAGS)"
 	$(MAKE) -C $@ CC="$(CC)" CPPFLAGS="$(USER_CPPFLAGS)" CFLAGS="$(USER_CFLAGS)" AS="$(AS)" LD="$(LD)" RANLIB="$(RANLIB)" NM="$(NM)" OBJCOPY="$(OBJCOPY)" OBJDUMP="$(OBJDUMP)" READELF="$(READELF)" STRIP="$(STRIP)"
