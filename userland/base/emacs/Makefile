@@ -16,9 +16,12 @@ include $(REMACS_DIR)../../../build-jobs.mk
 include $(REMACS_DIR)../package.mk
 include $(REMACS_DIR)../noct/version.mk
 
-$(eval $(call USERLAND_PACKAGE,emacs,emacs,*,n,package,,y,base,base/emacs,$(REQUIRE)))
+$(eval $(call USERLAND_PACKAGE,emacs,emacs,*,n,package,,y,base,base/emacs,$(REQUIRE),0755,emacs))
 
-REMACS_SOURCE_DIR := userland/base/emacs
+REPO_ROOT ?= $(abspath $(REMACS_DIR)../..)
+BUILD ?= $(REPO_ROOT)/build/$(PLATFORM)
+
+REMACS_SOURCE_DIR := $(REPO_ROOT)/userland/base/emacs
 
 REMACS_SOURCES := \
 	$(wildcard $(REMACS_SOURCE_DIR)/editor/*.noct) \
@@ -27,18 +30,22 @@ REMACS_SOURCES := \
 
 REMACS_WORK_DIR := $(BUILD)/packages/base/emacs/work
 
-REMACS_HOST_NOCT_STAMP := build/host-noct-state/built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)-process
+REMACS_HOST_NOCT_STAMP := $(REPO_ROOT)/build/host-noct-state/built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)-process
+NOCT_HOST_BUILD_STAMP  ?= $(REMACS_HOST_NOCT_STAMP)
+NOCT_HOST_ARTIFACT     ?= $(REPO_ROOT)/build/NoctLang/build-static/noct
+
 REMACS_NAP             := $(BUILD)/packages/base/emacs/remacs.nap
+REMACS_BIN             := $(BUILD)/bin/emacs
 REMACS_DICTIONARY      := $(REMACS_SOURCE_DIR)/dict/SKK-JISYO.remacs
 REMACS_DICTIONARY_X    := $(REMACS_SOURCE_DIR)/dict/SKK-JISYO.X
 
 PACKAGE_INPUTS += \
 	$(if $(filter emacs,$(ZEDBSD_USER_PROGRAMS)), \
-		$(REMACS_NAP) $(REMACS_DICTIONARY) $(REMACS_DICTIONARY_X))
+		$(REMACS_NAP) $(REMACS_BIN) $(REMACS_DICTIONARY) $(REMACS_DICTIONARY_X))
 
 PACKAGE_FILES += \
 	$(if $(filter emacs,$(ZEDBSD_USER_PROGRAMS)),\
-		--file /bin/emacs=$(REMACS_NAP) \
+		--file /bin/emacs=$(REMACS_BIN) \
 		--mode /bin/emacs=0755 \
 		--file /usr/share/remacs/skkjisyo.dic=$(REMACS_DICTIONARY) \
 		--mode /usr/share/remacs/skkjisyo.dic=0644 \
@@ -58,6 +65,11 @@ $(REMACS_NAP): $(REMACS_SOURCES) $(REMACS_HOST_NOCT_STAMP)
 	@mkdir -p $(dir $@)
 	cp -f $(REMACS_WORK_DIR)/build/remacs.nap $@
 	@head -c 16 $@ | grep -qx '#!/usr/bin/noct' || { echo 'remacs: $@ does not start with #!/usr/bin/noct' >&2; rm -f $@; exit 1; }
+	@mkdir -p $(dir $(REMACS_BIN))
+	cp -f $@ $(REMACS_BIN)
+	chmod 0755 $(REMACS_BIN)
 
 .PHONY: emacs
 emacs: $(REMACS_NAP)
+
+build: emacs
