@@ -71,15 +71,17 @@ build: patch
 			"build/$(STANDALONE_PLATFORM_DIR)/dynamic/$(STANDALONE_NAME).so"; \
 	elif test "$(STANDALONE_TYPE)" = library && \
 	    test -n "$(STANDALONE_SOURCES)"; then \
-		mkdir -p build; objects=; \
+		libdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib"; \
+		workdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)"; \
+		mkdir -p "$$libdir" "$$workdir"; objects=; \
 		for source in $(STANDALONE_SOURCES); do \
-			object=build/$$(printf '%s' "$$source" | tr '/.' '__').o; \
+			object="$$workdir/$$(printf '%s' "$$source" | tr '/.' '__').o"; \
 			$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror \
 				-I"$(REPO_ROOT)" \
 				-c "$(REPO_ROOT)/$$source" -o "$$object"; \
 			objects="$$objects $$object"; \
 		done; \
-		$(AR) rcs "build/lib$(STANDALONE_NAME).a" $$objects; \
+		$(AR) rcs "$$libdir/lib$(STANDALONE_NAME).a" $$objects; \
 	fi
 
 install: build
@@ -98,7 +100,7 @@ install: build
 	    test -n "$(STANDALONE_SOURCES)"; then \
 		libdir="$(if $(filter /,$(PREFIX)),/lib,$(patsubst %/,%,$(PREFIX))/lib)"; \
 		$(INSTALL) -d "$(DESTDIR)$$libdir"; \
-		$(INSTALL) -m 0644 "build/lib$(STANDALONE_NAME).a" \
+		$(INSTALL) -m 0644 "$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib/lib$(STANDALONE_NAME).a" \
 			"$(DESTDIR)$$libdir/lib$(STANDALONE_NAME).a"; \
 	fi
 	@set -e; for header in $(STANDALONE_HEADERS); do \
