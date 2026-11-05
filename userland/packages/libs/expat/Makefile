@@ -91,7 +91,7 @@ expat: $(ZEDBSD_EXPAT_STAGED)
 
 # The library goes in under its SONAME, which is the name the loader asks
 # for; libexpat.so is the link-time name a compiler on the target looks for.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,expat,expat XML parser,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,expat,expat XML parser,*,n,package,,y,\
 	packages/libs,libs/expat,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter expat,$(ZEDBSD_USER_PROGRAMS)),\

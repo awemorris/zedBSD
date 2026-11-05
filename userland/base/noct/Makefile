@@ -7,7 +7,7 @@ include $(ZEDBSD_NOCT_PACKAGE_DIR)/../package.mk
 include $(ZEDBSD_NOCT_PACKAGE_DIR)/version.mk
 include $(ZEDBSD_NOCT_PACKAGE_DIR)/../../../build-jobs.mk
 
-ZEDBSD_NOCT_ROOT := $(if $(ZEDBSD_TOPLEVEL_BUILD),$(CURDIR),$(ZEDBSD_REPO_ROOT))
+ZEDBSD_NOCT_ROOT := $(if $(TOPLEVEL_BUILD),$(CURDIR),$(ZEDBSD_REPO_ROOT))
 ZEDBSD_NOCT_PACKAGE_ROOT := $(abspath $(ZEDBSD_NOCT_ROOT)/userland/base/noct)
 ZEDBSD_NOCT_DISTDIR := $(ZEDBSD_NOCT_PACKAGE_ROOT)/distfiles
 ZEDBSD_NOCT_DISTFILE := $(ZEDBSD_NOCT_DISTDIR)/$(ZEDBSD_NOCT_ARCHIVE_NAME)
@@ -24,11 +24,11 @@ ZEDBSD_NOCT_TARGET_PATCHES := $(ZEDBSD_NOCT_PATCHES) \
 ZEDBSD_NOCT_FETCH ?= curl --fail --location --silent --show-error
 ZEDBSD_NOCT_SHA256 ?= sha256sum
 
-NOCT_SOURCE_DIR := $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/base/noct/noct,$(abspath $(ZEDBSD_NOCT_ROOT)/userland/base/noct/noct))
+NOCT_SOURCE_DIR := $(if $(TOPLEVEL_BUILD),userland/base/noct/noct,$(abspath $(ZEDBSD_NOCT_ROOT)/userland/base/noct/noct))
 NOCT_SOURCE_STAMP := $(NOCT_SOURCE_DIR)/.zedbsd-source-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_TARGET_PATCH_LEVEL)
 NOCT_SOURCE_IDENTITY := $(NOCT_SOURCE_DIR)/.zedbsd-source-identity
 NOCT_SOURCE_MANIFEST := $(NOCT_SOURCE_DIR)/.zedbsd-source-manifest
-NOCT_HOST_SOURCE_DIR := $(if $(ZEDBSD_TOPLEVEL_BUILD),build/NoctLang,$(abspath $(ZEDBSD_NOCT_ROOT)/build/NoctLang))
+NOCT_HOST_SOURCE_DIR := $(if $(TOPLEVEL_BUILD),build/NoctLang,$(abspath $(ZEDBSD_NOCT_ROOT)/build/NoctLang))
 NOCT_HOST_SOURCE_STAMP := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)
 NOCT_HOST_SOURCE_IDENTITY := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-identity
 NOCT_HOST_SOURCE_MANIFEST := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-manifest
@@ -68,7 +68,7 @@ NOCT_HOST_SOURCE_VERIFIED := \
 # the rest of the tree asks for it.
 NOCT_HOST_BUILD_DIR := $(NOCT_HOST_SOURCE_DIR)/build-static
 NOCT_HOST_ARTIFACT := $(NOCT_HOST_BUILD_DIR)/noct
-NOCT_HOST_STATE_DIR := $(if $(ZEDBSD_TOPLEVEL_BUILD),build/host-noct-state,\
+NOCT_HOST_STATE_DIR := $(if $(TOPLEVEL_BUILD),build/host-noct-state,\
 	$(abspath $(ZEDBSD_NOCT_ROOT)/build/host-noct-state))
 NOCT_HOST_BUILD_STAMP := \
 	$(NOCT_HOST_STATE_DIR)/built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)-process
@@ -113,7 +113,7 @@ NOCT_PACKAGE_HOLORIS := $(NOCT_SOURCE_DIR)/resources/apps/holoris/holoris.noct
 # not under Packages (2026-10-09 user: "Noctはuserland/base/noct/にあるけど、
 # Baseメニューにないようなので、追加してください。", "PackagesメニューからNoctを
 # 削除してください。Baseに移動するためです。").  Only the menu group changed.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,noct,amd64 i386 pc98 rpi4 rpi5,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,noct,noct,amd64 i386 pc98 rpi4 rpi5,n,package,,y,\
 	base,base/noct,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
@@ -323,7 +323,7 @@ $(NOCT_HOST_SOURCE_VERIFIED): $(NOCT_HOST_SOURCE_STAMP)
 	$(call ZEDBSD_NOCT_VERIFY_SOURCE,$(NOCT_HOST_SOURCE_DIR),$(ZEDBSD_NOCT_PATCH_LEVEL),$(ZEDBSD_NOCT_PATCHES_SHA256))
 	@touch '$@'
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: noct-download
 endif
 patch: noct-target-source-verify
@@ -403,7 +403,7 @@ $(BUILD)/bin/noct: $(NOCT_ZEDBSD_BUILD_STAMP)
 	}
 endif
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 .PHONY: noct-install-holoris
 install: noct-install-holoris
 

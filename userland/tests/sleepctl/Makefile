@@ -4,4 +4,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # mode and prints the outcome.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 SLEEPCTL_SOURCES := userland/tests/sleepctl/main.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,sleepctl,device suspend test,*,n,basic,$(SLEEPCTL_SOURCES),y,tests,tests/sleepctl,,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,sleepctl,device suspend test,*,n,basic,$(SLEEPCTL_SOURCES),y,tests,tests/sleepctl,,0755,program,,,bin))

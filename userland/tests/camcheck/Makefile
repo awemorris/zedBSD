@@ -10,4 +10,4 @@ CAMCHECK_SOURCES := userland/tests/camcheck/main.c userland/tests/camcheck/analy
 	userland/desktop/libjpeg-compat/source.c userland/desktop/libjpeg-compat/marker.c \
 	userland/desktop/libjpeg-compat/huffman.c userland/desktop/libjpeg-compat/idct.c \
 	userland/desktop/libjpeg-compat/decompress.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,camcheck,camera pattern check,*,n,basic,$(CAMCHECK_SOURCES),y,tests,tests/camcheck,,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,camcheck,camera pattern check,*,n,basic,$(CAMCHECK_SOURCES),y,tests,tests/camcheck,,0755,program,,,bin))

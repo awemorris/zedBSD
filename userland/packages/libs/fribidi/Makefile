@@ -62,7 +62,7 @@ fribidi: $(ZEDBSD_FRIBIDI_CHECKED)
 
 # The library goes in under its SONAME.  The headers and the .pc file are the
 # development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,fribidi,Unicode bidirectional algorithm,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,fribidi,Unicode bidirectional algorithm,*,n,package,,y,\
 	packages/libs,libs/fribidi,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter fribidi,$(ZEDBSD_USER_PROGRAMS)),\

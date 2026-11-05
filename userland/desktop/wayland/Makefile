@@ -44,4 +44,4 @@ KEILAND_FONT_DATA := /usr/share/fonts/keiland.ttf=userland/desktop/fonts/Mahora-
 	/usr/share/licenses/keiland-fonts/JetBrainsMono-OFL.txt=userland/desktop/fonts/JetBrainsMono-OFL.txt \
 	/usr/share/licenses/keiland-fonts/DroidSansFallback-LICENSE.txt=userland/desktop/fonts/DroidSansFallback-LICENSE.txt \
 	/usr/share/licenses/keiland-fonts/Apache-2.0.txt=userland/desktop/fonts/Apache-2.0.txt
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,wayland,wayland - Wayland compositor,amd64,y,basic,$(KEILAND_SOURCES),y,desktop,desktop/wayland,desktop/libvulkan desktop/libtruetype desktop/libkeiland desktop/sessiond desktop/mediastorage desktop/libpng-compat base/libz-compat desktop/libjpeg-compat fonts/noto-color-emoji fonts/hand-hershey,0755,program,$(KEILAND_FONT_DATA),,bin))
+$(eval $(call USERLAND_PACKAGE,wayland,wayland - Wayland compositor,amd64,y,basic,$(KEILAND_SOURCES),y,desktop,desktop/wayland,desktop/libvulkan desktop/libtruetype desktop/libkeiland desktop/sessiond desktop/mediastorage desktop/libpng-compat base/libz-compat desktop/libjpeg-compat fonts/noto-color-emoji fonts/hand-hershey,0755,program,$(KEILAND_FONT_DATA),,bin))

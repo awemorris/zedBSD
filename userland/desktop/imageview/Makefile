@@ -16,4 +16,4 @@ IMAGEVIEW_SOURCES := userland/desktop/imageview/main.c userland/desktop/imagevie
 	userland/desktop/imageview/share.c userland/desktop/files/trash.c userland/desktop/files/apps.c \
 	userland/desktop/files/mounts.c \
 	userland/desktop/artwork/mark.c userland/desktop/picture/picture.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,imageview,imageview - Image Viewer,amd64,y,basic,$(IMAGEVIEW_SOURCES),y,desktop,desktop/imageview,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype base/libz-compat desktop/libpng-compat desktop/libjpeg-compat desktop/libgif-compat,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,imageview,imageview - Image Viewer,amd64,y,basic,$(IMAGEVIEW_SOURCES),y,desktop,desktop/imageview,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype base/libz-compat desktop/libpng-compat desktop/libjpeg-compat desktop/libgif-compat,0755,program,,,bin))

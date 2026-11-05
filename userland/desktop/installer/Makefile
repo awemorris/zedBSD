@@ -10,7 +10,7 @@ INSTALL_ADMIN_SOURCES := userland/desktop/installer/admin/main.c userland/deskto
 	userland/desktop/installer/admin/target.c userland/desktop/installer/admin/probe.c \
 	userland/desktop/installer/admin/session.c userland/base/common/account.c userland/base/common/sha256.c \
 	userland/base/diskpart/table.c userland/base/libz-compat/inflate.c userland/base/libz-compat/checksum.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,install-admin,install-admin,amd64,n,basic,$(INSTALL_ADMIN_SOURCES),n,installer,,,4550,program,,,usr/libexec))
+$(eval $(call USERLAND_PACKAGE,install-admin,install-admin,amd64,n,basic,$(INSTALL_ADMIN_SOURCES),n,installer,,,4550,program,,,usr/libexec))
 
 # installer: the installer's window (userland/desktop/installer), a Keiland application in the live root of the
 # installer's image alone, like its helper (menu installer, not selectable).  It runs as the session's user and asks
@@ -18,4 +18,4 @@ $(eval $(call ZEDBSD_USERLAND_PACKAGE,install-admin,install-admin,amd64,n,basic,
 INSTALLER_SOURCES := userland/desktop/installer/main.c userland/desktop/installer/helper.c \
 	userland/desktop/installer/catalog.c userland/desktop/installer/disk.c userland/desktop/installer/flow.c \
 	userland/desktop/installer/screens.c userland/desktop/artwork/mark.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,installer,installer - Install zedBSD,amd64,n,basic,$(INSTALLER_SOURCES),n,installer,,,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,installer,installer - Install zedBSD,amd64,n,basic,$(INSTALLER_SOURCES),n,installer,,,0755,program,,,bin))

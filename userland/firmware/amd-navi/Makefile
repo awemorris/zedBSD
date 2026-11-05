@@ -10,7 +10,7 @@
 # the two copy engines (sdma, sdma1).  The video decoder's firmware (vcn),
 # the trusted applications (ta) and gpu_info are not used and not installed.
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 # Each entry is CACHE-NAME|UPSTREAM-PATH|SIZE|SHA-256.
 override AMD_NAVI_FIRMWARE_FIXTURE_GOAL := amd-navi-firmware-fixture-cache
@@ -76,7 +76,7 @@ override AMD_NAVI_FIRMWARE_VERSION := 20260410
 override AMD_NAVI_FIRMWARE_SHA256_COMMAND := sha256sum
 override AMD_NAVI_FIRMWARE_FILE_COUNT := 13
 
-AMD_NAVI_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/amd-navi
+AMD_NAVI_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/amd-navi
 # The cache holds the file set of one revision.
 override AMD_NAVI_FIRMWARE_CACHE_DIR := $(AMD_NAVI_FIRMWARE_CACHE_ROOT)/$(AMD_NAVI_FIRMWARE_REVISION)
 override AMD_NAVI_FIRMWARE_CACHE_NAMES := $(foreach entry,$(AMD_NAVI_FIRMWARE_FILES),$(word 1,$(subst |, ,$(entry))))
@@ -119,14 +119,14 @@ amd-navi-firmware-license:
 amd-navi-firmware-license-pending:
 	@if test ! -d '$(AMD_NAVI_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(AMD_NAVI_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,amd-navi-firmware,AMD Navi10 GPU firmware for RX 5600 and RX 5700,amd64,n,package,,y,firmware,firmware/amd-navi,,,data,$(AMD_NAVI_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,amd-navi-firmware,AMD Navi10 GPU firmware for RX 5600 and RX 5700,amd64,n,package,,y,firmware,firmware/amd-navi,,,data,$(AMD_NAVI_FIRMWARE_DATA),,))
 override USERLAND_amd-navi-firmware_DATA := $(AMD_NAVI_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += amd-navi-firmware
 
 .PHONY: download amd-navi-firmware amd-navi-firmware-cache \
 	amd-navi-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: amd-navi-firmware
 endif
 

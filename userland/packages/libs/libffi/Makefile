@@ -91,7 +91,7 @@ libffi: $(ZEDBSD_LIBFFI_STAGED)
 
 # The library goes in under its SONAME, which is the name the loader asks
 # for; libffi.so is the link-time name a compiler on the target looks for.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libffi,libffi foreign function interface,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,libffi,libffi foreign function interface,*,n,package,,y,\
 	packages/libs,libs/libffi,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter libffi,$(ZEDBSD_USER_PROGRAMS)),\

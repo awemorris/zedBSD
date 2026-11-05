@@ -6,4 +6,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 PENINJECT_SOURCES := userland/tests/peninject/main.c
 PENINJECT_DATA := /usr/share/peninject/stroke.pen=userland/tests/peninject/stroke.pen
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,peninject,test pen injector,*,n,basic,$(PENINJECT_SOURCES),y,tests,tests/peninject,,0755,program,$(PENINJECT_DATA),,bin))
+$(eval $(call USERLAND_PACKAGE,peninject,test pen injector,*,n,basic,$(PENINJECT_SOURCES),y,tests,tests/peninject,,0755,program,$(PENINJECT_DATA),,bin))

@@ -85,7 +85,7 @@ zlib: $(ZEDBSD_ZLIB_STAGED)
 
 # The library goes in under its SONAME, which is the name the loader asks
 # for; libz.so is the link-time name a compiler on the target looks for.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,zlib,zlib compression library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,zlib,zlib compression library,*,n,package,,y,\
 	packages/libs,libs/zlib,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter zlib,$(ZEDBSD_USER_PROGRAMS)),\

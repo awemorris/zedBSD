@@ -10,4 +10,4 @@ KEILAND_MONITOR_SOURCES := userland/desktop/monitor/main.c \
 	userland/desktop/monitor/atlas.c userland/desktop/monitor/draw.c userland/desktop/monitor/scene.c userland/desktop/monitor/space.c userland/desktop/monitor/interact.c \
 	userland/desktop/monitor/system-source.c \
 	userland/desktop/monitor/render.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,monitor,monitor - System monitor,amd64,y,basic,$(KEILAND_MONITOR_SOURCES),y,desktop,desktop/monitor,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,monitor,monitor - System monitor,amd64,y,basic,$(KEILAND_MONITOR_SOURCES),y,desktop,desktop/monitor,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype,0755,program,,,bin))

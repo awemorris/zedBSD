@@ -18,7 +18,7 @@
 # placed by hand in $(AMLOGIC_S7D_BOOTLOADER_BY_HAND_DIR) (the notice says
 # how) and are checked the same way.
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 # Each entry is CACHE-NAME|UPSTREAM-URL|SIZE|SHA-256; an UPSTREAM-URL of
 # "by-hand" means the file has no upstream a build can fetch, and the copy
@@ -67,7 +67,7 @@ override AMLOGIC_S7D_BOOTLOADER_SHA256_COMMAND := sha256sum
 # The fetched files and the area cut from the image.
 override AMLOGIC_S7D_BOOTLOADER_FILE_COUNT := 4
 
-AMLOGIC_S7D_BOOTLOADER_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/amlogic-s7d
+AMLOGIC_S7D_BOOTLOADER_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/amlogic-s7d
 # The cache holds the file set of one revision.
 override AMLOGIC_S7D_BOOTLOADER_CACHE_DIR := $(AMLOGIC_S7D_BOOTLOADER_CACHE_ROOT)/$(AMLOGIC_S7D_BOOTLOADER_REVISION)
 # Where the files are placed by hand when the firmware repository is not
@@ -109,14 +109,14 @@ amlogic-s7d-bootloader-license:
 amlogic-s7d-bootloader-license-pending:
 	@if test ! -d '$(AMLOGIC_S7D_BOOTLOADER_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(AMLOGIC_S7D_BOOTLOADER_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,amlogic-s7d-bootloader,Amlogic S905X5M bootloader (BL2-BL32 and U-Boot) for ODROID-C5,*,n,package,,y,firmware,firmware/amlogic-s7d,,,data,$(AMLOGIC_S7D_BOOTLOADER_DATA),,))
+$(eval $(call USERLAND_PACKAGE,amlogic-s7d-bootloader,Amlogic S905X5M bootloader (BL2-BL32 and U-Boot) for ODROID-C5,*,n,package,,y,firmware,firmware/amlogic-s7d,,,data,$(AMLOGIC_S7D_BOOTLOADER_DATA),,))
 override USERLAND_amlogic-s7d-bootloader_DATA := $(AMLOGIC_S7D_BOOTLOADER_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += amlogic-s7d-bootloader
 
 .PHONY: download amlogic-s7d-bootloader amlogic-s7d-bootloader-cache \
 	amlogic-s7d-bootloader-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: amlogic-s7d-bootloader
 endif
 

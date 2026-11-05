@@ -7,7 +7,7 @@
 # linux-firmware ships the same bytes for arch 10.8, 10.10 and 10.12, so the
 # one verified file is installed under each of the three names.
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 # Each entry is CACHE-NAME|UPSTREAM-PATH|SIZE|SHA-256.
 override MALI_CSF_FIRMWARE_FIXTURE_GOAL := mali-csf-firmware-fixture-cache
@@ -53,7 +53,7 @@ override MALI_CSF_FIRMWARE_VERSION := 20260410
 override MALI_CSF_FIRMWARE_SHA256_COMMAND := sha256sum
 override MALI_CSF_FIRMWARE_FILE_COUNT := 3
 
-MALI_CSF_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/mali-csf
+MALI_CSF_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/mali-csf
 # The cache holds the file set of one revision.
 override MALI_CSF_FIRMWARE_CACHE_DIR := $(MALI_CSF_FIRMWARE_CACHE_ROOT)/$(MALI_CSF_FIRMWARE_REVISION)
 override MALI_CSF_FIRMWARE_CACHE_NAMES := $(foreach entry,$(MALI_CSF_FIRMWARE_FILES),$(word 1,$(subst |, ,$(entry))))
@@ -89,14 +89,14 @@ mali-csf-firmware-license:
 mali-csf-firmware-license-pending:
 	@if test ! -d '$(MALI_CSF_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(MALI_CSF_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,mali-csf-firmware,Arm Mali-G310 CSF GPU firmware for ODROID-C5,*,n,package,,y,firmware,firmware/mali-csf,,,data,$(MALI_CSF_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,mali-csf-firmware,Arm Mali-G310 CSF GPU firmware for ODROID-C5,*,n,package,,y,firmware,firmware/mali-csf,,,data,$(MALI_CSF_FIRMWARE_DATA),,))
 override USERLAND_mali-csf-firmware_DATA := $(MALI_CSF_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += mali-csf-firmware
 
 .PHONY: download mali-csf-firmware mali-csf-firmware-cache \
 	mali-csf-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: mali-csf-firmware
 endif
 

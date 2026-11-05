@@ -111,7 +111,7 @@ libavcodec: $(ZEDBSD_LIBAVCODEC_STAGED)
 
 # ---------------------------------------------------------------- packaging
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libavcodec,FFmpeg audio and video libraries (LGPL),*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,libavcodec,FFmpeg audio and video libraries (LGPL),*,n,package,,y,\
 	packages/multimedia,multimedia/libavcodec,))
 
 # Each library under its soname (the name the loader asks for) and the license texts.  The headers, the .pc files

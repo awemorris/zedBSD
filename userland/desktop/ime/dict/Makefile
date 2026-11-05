@@ -30,7 +30,7 @@ ime-dict-ja: $(ZEDBSD_IME_DICT_JA)
 
 # Not chosen by default until the input method itself is a package (ws095-p004),
 # which then requires this one.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,ime-dict-ja,ime-dict-ja - Japanese dictionaries of the input method,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,ime-dict-ja,ime-dict-ja - Japanese dictionaries of the input method,*,n,package,,y,\
 	desktop,desktop/ime/dict,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter ime-dict-ja,$(ZEDBSD_USER_PROGRAMS)),\

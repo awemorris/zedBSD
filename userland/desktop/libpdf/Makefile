@@ -25,5 +25,5 @@ LIBPDF_SOURCES := userland/desktop/libpdf/writer.c userland/desktop/libpdf/updat
 	userland/desktop/libpdf/shading.c userland/desktop/libpdf/charstrings.c userland/desktop/libpdf/type1.c \
 	userland/desktop/libpdf/cff.c userland/desktop/libpdf/cffdata.c userland/desktop/libpdf/crypt.c
 
-LIBPDF_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libpdf.so=$(BUILD)/dynamic/libpdf.so)
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libpdf,libpdf,*,y,library,$(LIBPDF_SOURCES),y,desktop,desktop/libpdf,base/libz-compat desktop/libjpeg-compat desktop/libtruetype,,shared-library,$(LIBPDF_IMAGE_DATA),,lib))
+LIBPDF_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libpdf.so=$(BUILD)/dynamic/libpdf.so)
+$(eval $(call USERLAND_PACKAGE,libpdf,libpdf,*,y,library,$(LIBPDF_SOURCES),y,desktop,desktop/libpdf,base/libz-compat desktop/libjpeg-compat desktop/libtruetype,,shared-library,$(LIBPDF_IMAGE_DATA),,lib))

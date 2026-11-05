@@ -35,7 +35,7 @@ override ZEDBSD_FIRMWARE_REPOSITORY_URL := $(if $(ZEDBSD_FIRMWARE_REPOSITORY_REV
 # recorded in CACHE-ROOT/license-accepted and not asked about again.
 #
 # $(call ZEDBSD_FIRMWARE_LICENSE_COMMAND,PACKAGE,CACHE-ROOT,NOTICE,LICENSE-NAME,SIZE,SHA-256,REPOSITORY-URL,UPSTREAM-URL,FETCH)
-override ZEDBSD_FIRMWARE_TREE := $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)
+override ZEDBSD_FIRMWARE_TREE := $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)
 ZEDBSD_FIRMWARE_LICENSE_COMMAND = sh '$(ZEDBSD_FIRMWARE_TREE)/license-agree.sh' '$(1)' '$(2)/license-accepted' '$(3)' '$(4)' '$(5)' '$(6)' '$(7)' '$(8)' $(9)
 
 # GNU make gives the standard input to only one of the jobs it runs in
@@ -52,7 +52,7 @@ ZEDBSD_FIRMWARE_LICENSE_COMMAND = sh '$(ZEDBSD_FIRMWARE_TREE)/license-agree.sh' 
 # not empty when the configuration selects PACKAGE.
 override ZEDBSD_FIRMWARE_BUILD_GOALS := all disk-image world bootloader rootfs \
 	rootfs-bin rootfs-usr run check-disk-image download firmware-licenses %.img
-ZEDBSD_FIRMWARE_ASK_AT_PARSE = $(and $(ZEDBSD_TOPLEVEL_BUILD),$(filter 0,$(MAKELEVEL)),$(if $(findstring n,$(firstword -$(MAKEFLAGS))),,y),$(if $(MAKECMDGOALS),$(or $(and $(2),$(filter $(ZEDBSD_FIRMWARE_BUILD_GOALS),$(MAKECMDGOALS))),$(filter $(1) $(1)-license,$(MAKECMDGOALS))),$(2)),$(if $(wildcard $(3)),,y))
+ZEDBSD_FIRMWARE_ASK_AT_PARSE = $(and $(TOPLEVEL_BUILD),$(filter 0,$(MAKELEVEL)),$(if $(findstring n,$(firstword -$(MAKEFLAGS))),,y),$(if $(MAKECMDGOALS),$(or $(and $(2),$(filter $(ZEDBSD_FIRMWARE_BUILD_GOALS),$(MAKECMDGOALS))),$(filter $(1) $(1)-license,$(MAKECMDGOALS))),$(2)),$(if $(wildcard $(3)),,y))
 
 # One field of the entry NAME in a CACHE-NAME|...|... list:
 # $(call ZEDBSD_FIRMWARE_FIELD,NAME,FIELD-NUMBER,LIST)

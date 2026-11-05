@@ -9,4 +9,4 @@ FIDOCTL_SOURCES := userland/base/fidoctl/main.c userland/base/libpasskey/cbor.c 
 	userland/base/libpasskey/ctap2.c userland/base/libpasskey/descriptor.c userland/base/libpasskey/hid.c \
 	userland/base/libpasskey/os-posix.c userland/base/libpasskey/os-zedbsd.c userland/base/libpasskey/pin.c \
 	userland/base/libpasskey/transport-nfc.c userland/base/libpasskey/verify.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,fidoctl,fidoctl,amd64,n,basic,$(FIDOCTL_SOURCES),y,base,base/fidoctl,base/libcrypto-compat,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,fidoctl,fidoctl,amd64,n,basic,$(FIDOCTL_SOURCES),y,base,base/fidoctl,base/libcrypto-compat,0755,program,,,bin))

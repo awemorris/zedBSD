@@ -75,7 +75,7 @@ xkeyboard-config: $(ZEDBSD_XKEYBOARD_CONFIG_CHECKED)
 
 # The data under /usr/share/xkeyboard-config-2, where libxkbcommon is built
 # to look, and the traditional /usr/share/X11/xkb pointing at it.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,xkeyboard-config,Keyboard layout data,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,xkeyboard-config,Keyboard layout data,*,n,package,,y,\
 	packages/libs,libs/xkeyboard-config,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter xkeyboard-config,$(ZEDBSD_USER_PROGRAMS)),\

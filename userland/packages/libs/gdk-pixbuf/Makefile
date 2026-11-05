@@ -73,7 +73,7 @@ gdk-pixbuf: $(ZEDBSD_GDK_PIXBUF_CHECKED)
 
 # The library goes in under its SONAME.  The headers and the .pc file are the
 # development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,gdk-pixbuf,Image loading library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,gdk-pixbuf,Image loading library,*,n,package,,y,\
 	packages/libs,libs/gdk-pixbuf,libs/glib libs/libpng libs/libjpeg-turbo libs/libtiff))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter gdk-pixbuf,$(ZEDBSD_USER_PROGRAMS)),\

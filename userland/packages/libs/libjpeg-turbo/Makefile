@@ -93,7 +93,7 @@ libjpeg-turbo: $(ZEDBSD_LIBJPEG_TURBO_STAGED)
 
 # The library under its SONAME, with LICENSE.md and the IJG notice it
 # points to.  The headers and the .pc file are the development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libjpeg-turbo,JPEG image codec,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,libjpeg-turbo,JPEG image codec,*,n,package,,y,\
 	packages/libs,libs/libjpeg-turbo,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter libjpeg-turbo,$(ZEDBSD_USER_PROGRAMS)),\

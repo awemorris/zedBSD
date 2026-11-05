@@ -21,7 +21,7 @@ ZEDBSD_EXTERNAL_MK := $(lastword $(MAKEFILE_LIST))
 # The repository Makefile includes every package Makefile from the repository
 # root; a standalone `make -C userland/packages/...` has package.mk set
 # ZEDBSD_REPO_ROOT instead.
-ZEDBSD_EXTERNAL_ROOT := $(if $(ZEDBSD_TOPLEVEL_BUILD),$(CURDIR),$(ZEDBSD_REPO_ROOT))
+ZEDBSD_EXTERNAL_ROOT := $(if $(TOPLEVEL_BUILD),$(CURDIR),$(ZEDBSD_REPO_ROOT))
 ZEDBSD_EXTERNAL_TOOLS := $(abspath $(ZEDBSD_EXTERNAL_ROOT)/userland/packages/tools)
 
 # How many jobs a nested build tool (cmake, ninja) may run; the top-level
@@ -59,7 +59,7 @@ ZEDBSD_EXTERNAL_LLVM_BIN := $(abspath $(ZEDBSD_EXTERNAL_ROOT)/build/llvm/bin)
 ZEDBSD_EXTERNAL_SYSROOT := \
 	$(abspath $(ZEDBSD_EXTERNAL_ROOT)/build/$(ZEDBSD_ARCHITECTURE)/sysroot)
 ZEDBSD_EXTERNAL_PLATFORM_DIR := $(strip \
-	$(if $(ZEDBSD_TOPLEVEL_BUILD),$(ZEDBSD_PLATFORM_DIR),$(ZEDBSD_STANDALONE_PLATFORM_DIR)))
+	$(if $(TOPLEVEL_BUILD),$(ZEDBSD_PLATFORM_DIR),$(ZEDBSD_STANDALONE_PLATFORM_DIR)))
 ZEDBSD_EXTERNAL_DYNAMIC := \
 	$(abspath $(ZEDBSD_EXTERNAL_ROOT)/build/$(ZEDBSD_EXTERNAL_PLATFORM_DIR)/dynamic)
 
@@ -89,7 +89,7 @@ ZEDBSD_EXTERNAL_CROSS_INPUTS := $(ZEDBSD_EXTERNAL_GEN_CROSS) \
 # configure the packages again.
 ZEDBSD_EXTERNAL_LINK_DIR := $(ZEDBSD_EXTERNAL_CROSS_DIR)/lib
 ZEDBSD_EXTERNAL_LINK_LIBS := libc.so $(if $(filter amd64 arm64 riscv64 armv7,$(ZEDBSD_ARCHITECTURE)),libutil.so)
-ZEDBSD_EXTERNAL_LINK_SOURCE := $(if $(ZEDBSD_TOPLEVEL_BUILD),\
+ZEDBSD_EXTERNAL_LINK_SOURCE := $(if $(TOPLEVEL_BUILD),\
 	$(BUILD)/dynamic,$(ZEDBSD_EXTERNAL_DYNAMIC))
 
 $(ZEDBSD_EXTERNAL_LINK_DIR)/%.so: $(ZEDBSD_EXTERNAL_LINK_SOURCE)/%.so

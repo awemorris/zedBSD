@@ -66,7 +66,7 @@ graphene: $(ZEDBSD_GRAPHENE_CHECKED)
 
 # The library goes in under its SONAME.  The headers and the .pc files are the
 # development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,graphene,Vector and matrix library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,graphene,Vector and matrix library,*,n,package,,y,\
 	packages/libs,libs/graphene,libs/glib))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter graphene,$(ZEDBSD_USER_PROGRAMS)),\

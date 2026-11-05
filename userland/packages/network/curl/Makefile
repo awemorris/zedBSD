@@ -129,7 +129,7 @@ curl: $(ZEDBSD_CURL_STAGED)
 # ---------------------------------------------------------------- packaging
 
 # Choosing curl chooses what it is built against and the CA bundle it reads.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,curl,curl and libcurl,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,curl,curl and libcurl,*,n,package,,y,\
 	packages/network,network/curl,security/openssl libs/zlib security/ca-certificates))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter curl,$(ZEDBSD_USER_PROGRAMS)),\

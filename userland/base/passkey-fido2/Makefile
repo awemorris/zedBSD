@@ -12,4 +12,4 @@ PASSKEY_FIDO2_SOURCES := userland/base/passkey-fido2/main.c userland/base/passke
 	userland/base/libpasskey/descriptor.c userland/base/libpasskey/hid.c userland/base/libpasskey/os-posix.c \
 	userland/base/libpasskey/os-zedbsd.c userland/base/libpasskey/pin.c userland/base/libpasskey/verify.c \
 	userland/base/libpasskey/transport-nfc.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,passkey-fido2,passkey-fido2,amd64,n,basic,$(PASSKEY_FIDO2_SOURCES),y,base,base/passkey-fido2,base/passkey base/libcrypto-compat,0500,program,,,usr/libexec))
+$(eval $(call USERLAND_PACKAGE,passkey-fido2,passkey-fido2,amd64,n,basic,$(PASSKEY_FIDO2_SOURCES),y,base,base/passkey-fido2,base/passkey base/libcrypto-compat,0500,program,,,usr/libexec))

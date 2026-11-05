@@ -119,7 +119,7 @@ openssh: $(ZEDBSD_OPENSSH_STAGED)
 # The server and the client are built against OpenSSL, so choosing OpenSSH
 # chooses OpenSSL as well: the requirement is named here rather than left to
 # whoever configures the build to remember.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,openssh,OpenSSH secure shell,*,n,\
+$(eval $(call USERLAND_PACKAGE,openssh,OpenSSH secure shell,*,n,\
 	package,,y,packages/network,network/openssh,security/openssl))
 
 # /var/empty is the directory the unprivileged half of the server moves its

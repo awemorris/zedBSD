@@ -10,6 +10,6 @@ ZEDBSD_TERMINFO_EXTRA_DATA := userland/base/terminfo-extra/alacritty.zti \
 ZEDBSD_TERMINFO_EXTRA_INSTALL := $(foreach file,\
 	$(ZEDBSD_TERMINFO_EXTRA_DATA),/lib/terminfo/$(notdir $(file))=$(file))
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,terminfo-extra,libcurses extra terminal definitions,\
+$(eval $(call USERLAND_PACKAGE,terminfo-extra,libcurses extra terminal definitions,\
 	*,y,data,,y,base,base/terminfo-extra,base/terminfo,,data,\
 	$(ZEDBSD_TERMINFO_EXTRA_INSTALL)))

@@ -4,4 +4,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
 
 XZED_SOURCES := userland/x11/xzed/main.c userland/x11/xzed/input.c \
 	userland/x11/xzed/input-posix.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,Xzed,Xzed,*,n,basic,$(XZED_SOURCES),y,x11-servers,,))
+$(eval $(call USERLAND_PACKAGE,Xzed,Xzed,*,n,basic,$(XZED_SOURCES),y,x11-servers,,))

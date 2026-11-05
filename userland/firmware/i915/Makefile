@@ -1,7 +1,7 @@
 # zedBSD optional Intel i915 display DMC firmware package
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 override I915_FIRMWARE_FIXTURE_GOAL := i915-firmware-fixture-cache
 ifneq ($(filter $(I915_FIRMWARE_FIXTURE_GOAL),$(MAKECMDGOALS)),)
@@ -81,7 +81,7 @@ override I915_FIRMWARE_WHENCE_PATH := WHENCE
 override I915_FIRMWARE_VERSION := 20260410
 override I915_FIRMWARE_SHA256_COMMAND := sha256sum
 
-I915_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/i915
+I915_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/i915
 # The cache of one revision holds one set of files.  The set grew from two
 # DMC programs to every one the driver names on 2026-10-27, so the larger set
 # has a directory of its own and a verified cache of the two-program set is
@@ -126,14 +126,14 @@ i915-firmware-license:
 i915-firmware-license-pending:
 	@if test ! -d '$(I915_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(I915_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,i915-firmware,Intel i915 display DMC firmware,amd64,n,package,,y,firmware,firmware/i915,,,data,$(I915_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,i915-firmware,Intel i915 display DMC firmware,amd64,n,package,,y,firmware,firmware/i915,,,data,$(I915_FIRMWARE_DATA),,))
 override USERLAND_i915-firmware_DATA := $(I915_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += i915-firmware
 
 .PHONY: download i915-firmware i915-firmware-cache \
 	i915-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: i915-firmware
 endif
 

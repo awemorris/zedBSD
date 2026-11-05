@@ -142,7 +142,7 @@ ZEDBSD_CLANG_CMAKE_OPTIONS := \
 # release and both patch levels, so a change to any of them makes a new copy.
 $(ZEDBSD_CLANG_SOURCE_STAMP): $(ZEDBSD_EXTERNAL_LLVM_VERIFIED) \
 	$(ZEDBSD_CLANG_PATCHES) \
-	$(if $(ZEDBSD_TOPLEVEL_BUILD),| $(ZEDBSD_LLVM_NATIVE_STAMP))
+	$(if $(TOPLEVEL_BUILD),| $(ZEDBSD_LLVM_NATIVE_STAMP))
 	$(call ZEDBSD_EXTERNAL_LLVM_COPY,$(ZEDBSD_CLANG_SOURCE),$(ZEDBSD_CLANG_PATCHES))
 	@touch '$@'
 
@@ -205,7 +205,7 @@ clang: $(ZEDBSD_CLANG_STAGED)
 
 # The compiler needs the C++ runtime it was built against, so choosing it
 # chooses that too.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,clang,clang compiler,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,clang,clang compiler,*,n,package,,y,\
 	packages/lang,lang/clang,devel/libcxx))
 
 # What the image carries.
@@ -268,7 +268,7 @@ ZEDBSD_CLANG_LINK_OBJECTS := crt1.o libclang_rt.builtins.a
 # The copy is the C library of this build, the one /lib holds: the external
 # dynamic directory belongs to the default build directory, and taking it
 # from there gave an image built elsewhere a library older than its own /lib.
-ZEDBSD_CLANG_RUNTIME_LIBC := $(strip $(if $(ZEDBSD_TOPLEVEL_BUILD),$(BUILD)/dynamic/libc.so,$(ZEDBSD_EXTERNAL_DYNAMIC)/libc.so))
+ZEDBSD_CLANG_RUNTIME_LIBC := $(strip $(if $(TOPLEVEL_BUILD),$(BUILD)/dynamic/libc.so,$(ZEDBSD_EXTERNAL_DYNAMIC)/libc.so))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
 	$(ZEDBSD_CLANG_STAGED) $(ZEDBSD_CLANG_LICENSE) $(ZEDBSD_CLANG_RUNTIME_LIBC))

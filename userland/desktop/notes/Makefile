@@ -14,4 +14,4 @@ KEILAND_NOTES_SOURCES := userland/desktop/notes/main.c \
 	userland/desktop/notes/window.c userland/desktop/notes/menu.c \
 	userland/desktop/notes/tablet.c userland/desktop/notes/ui.c \
 	userland/desktop/notes/touch.c userland/desktop/notes/picture-file.c userland/desktop/notes/box.c userland/desktop/picture/picture.c userland/desktop/picture/png-write.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,notes,notes - Handwritten notebook,amd64,y,basic,$(KEILAND_NOTES_SOURCES),y,desktop,desktop/notes,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype base/libz-compat desktop/libpng-compat desktop/libjpeg-compat desktop/libgif-compat desktop/libpdf,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,notes,notes - Handwritten notebook,amd64,y,basic,$(KEILAND_NOTES_SOURCES),y,desktop,desktop/notes,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype base/libz-compat desktop/libpng-compat desktop/libjpeg-compat desktop/libgif-compat desktop/libpdf,0755,program,,,bin))

@@ -93,7 +93,7 @@ cairo: $(ZEDBSD_CAIRO_CHECKED)
 # Each library goes in under its SONAME, with the licence notice and both
 # licences it may be taken under.  The headers and the .pc files are the
 # development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,cairo,2D graphics library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,cairo,2D graphics library,*,n,package,,y,\
 	packages/libs,libs/cairo,libs/pixman libs/freetype libs/fontconfig libs/libpng libs/zlib libs/glib))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter cairo,$(ZEDBSD_USER_PROGRAMS)),\

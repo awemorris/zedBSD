@@ -117,7 +117,7 @@ fontconfig: $(ZEDBSD_FONTCONFIG_CHECKED)
 # packages of the GTK port (WS115 p002).  The cache directory is not shipped:
 # fc-cache makes /var/cache/fontconfig when root runs it, and every other user
 # gets a cache of their own.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,fontconfig,Font configuration library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,fontconfig,Font configuration library,*,n,package,,y,\
 	packages/libs,libs/fontconfig,libs/freetype libs/expat))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter fontconfig,$(ZEDBSD_USER_PROGRAMS)),\

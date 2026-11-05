@@ -67,7 +67,7 @@ libepoxy: $(ZEDBSD_LIBEPOXY_CHECKED)
 
 # The library goes in under its SONAME.  The headers and the .pc file are the
 # development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libepoxy,GL function pointer loader,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,libepoxy,GL function pointer loader,*,n,package,,y,\
 	packages/libs,libs/libepoxy,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter libepoxy,$(ZEDBSD_USER_PROGRAMS)),\

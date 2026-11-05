@@ -13,4 +13,4 @@ INIT_DATA := /etc/rc.conf=userland/base/etc/rc.conf \
 	/etc/service.d/ntpdate=userland/base/init/services/ntpdate \
 	/etc/service.d/homes=userland/base/init/services/homes \
 	/usr/libexec/make-homes=userland/base/init/make-homes
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,init,init,*,y,basic,userland/base/init/main.c userland/base/init/root-check.c userland/base/service/service-config.c userland/base/service/rcconf.c userland/base/service/zsv1-protocol.c userland/base/service/zsv1-server.c,n,base,,,0755,program,$(INIT_DATA),,sbin))
+$(eval $(call USERLAND_PACKAGE,init,init,*,y,basic,userland/base/init/main.c userland/base/init/root-check.c userland/base/service/service-config.c userland/base/service/rcconf.c userland/base/service/zsv1-protocol.c userland/base/service/zsv1-server.c,n,base,,,0755,program,$(INIT_DATA),,sbin))

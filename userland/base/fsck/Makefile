@@ -7,4 +7,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # Makefile adds it to every amd64 and arm64 image.
 FSCK_SOURCES := userland/base/fsck/main.c userland/base/fsck/volume.c userland/base/fsck/check.c \
 	userland/base/fsck/directory.c userland/base/mkfs/ufs-super.c userland/base/mkfs/ufs-endian.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,fsck,fsck,*,y,static,$(FSCK_SOURCES),n,base,,,0755,program,,,sbin))
+$(eval $(call USERLAND_PACKAGE,fsck,fsck,*,y,static,$(FSCK_SOURCES),n,base,,,0755,program,,,sbin))

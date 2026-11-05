@@ -36,7 +36,7 @@ ca-certificates: $(ZEDBSD_EXT_ca-certificates_ARCHIVE_VERIFIED)
 
 # ---------------------------------------------------------------- packaging
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,ca-certificates,Trusted CA certificates,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,ca-certificates,Trusted CA certificates,*,n,package,,y,\
 	packages/security,security/ca-certificates,))
 
 # The verified record is the input, so the image waits for the check rather

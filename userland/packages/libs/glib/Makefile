@@ -104,7 +104,7 @@ glib: $(ZEDBSD_GLIB_CHECKED)
 # Each library goes in under its SONAME, which is the name the loader asks
 # for.  The headers and the .pc files are the development files below; the
 # GIO tools are not installed.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,glib,GLib utility library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,glib,GLib utility library,*,n,package,,y,\
 	packages/libs,libs/glib,libs/libffi libs/pcre2 libs/zlib))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter glib,$(ZEDBSD_USER_PROGRAMS)),\

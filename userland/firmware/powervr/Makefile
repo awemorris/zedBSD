@@ -10,7 +10,7 @@
 # investigate the firmware only through its trace buffer, its interface's
 # replies and register values (plan/ws269/design.md section 0.2).
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 override POWERVR_FIRMWARE_FIXTURE_GOAL := powervr-firmware-fixture-cache
 ifneq ($(filter $(POWERVR_FIRMWARE_FIXTURE_GOAL),$(MAKECMDGOALS)),)
@@ -57,7 +57,7 @@ override POWERVR_FIRMWARE_VERSION := 1.1.OS@6976702
 
 POWERVR_FIRMWARE_FETCH ?= curl --fail --location --silent --show-error --retry 3 --retry-all-errors --retry-delay 5
 override POWERVR_FIRMWARE_SHA256_COMMAND := sha256sum
-POWERVR_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/powervr
+POWERVR_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/powervr
 override POWERVR_FIRMWARE_CACHE_DIR := $(POWERVR_FIRMWARE_CACHE_ROOT)/$(POWERVR_FIRMWARE_MIRROR_REVISION)
 override POWERVR_FIRMWARE_CACHE_BLOB := $(POWERVR_FIRMWARE_CACHE_DIR)/rogue_36.50.54.182_v1.fw
 override POWERVR_FIRMWARE_CACHE_LICENSE := $(POWERVR_FIRMWARE_CACHE_DIR)/LICENSE.powervr
@@ -87,14 +87,14 @@ powervr-firmware-license:
 powervr-firmware-license-pending:
 	@if test ! -d '$(POWERVR_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(POWERVR_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,powervr-firmware,Imagination PowerVR BXE-4-32 GPU firmware for VisionFive 2,*,n,package,,y,firmware,firmware/powervr,,,data,$(POWERVR_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,powervr-firmware,Imagination PowerVR BXE-4-32 GPU firmware for VisionFive 2,*,n,package,,y,firmware,firmware/powervr,,,data,$(POWERVR_FIRMWARE_DATA),,))
 override USERLAND_powervr-firmware_DATA := $(POWERVR_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += powervr-firmware
 
 .PHONY: download powervr-firmware powervr-firmware-cache \
 	powervr-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: powervr-firmware
 endif
 

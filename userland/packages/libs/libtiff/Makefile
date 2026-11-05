@@ -113,7 +113,7 @@ libtiff: $(ZEDBSD_LIBTIFF_STAGED)
 
 # The library under its SONAME.  The headers and the .pc file are the
 # development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libtiff,TIFF image library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,libtiff,TIFF image library,*,n,package,,y,\
 	packages/libs,libs/libtiff,libs/zlib libs/libjpeg-turbo))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter libtiff,$(ZEDBSD_USER_PROGRAMS)),\

@@ -9,7 +9,7 @@
 # builder copies files only, so each linked name is installed as a second
 # copy of the same verified cache file.
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 # Each entry is CACHE-NAME|UPSTREAM-PATH|SIZE|SHA-256.
 override INTELBT_FIRMWARE_FIXTURE_GOAL := intelbt-firmware-fixture-cache
@@ -65,7 +65,7 @@ override INTELBT_FIRMWARE_VERSION := 23.50.26053.82122
 override INTELBT_FIRMWARE_SHA256_COMMAND := sha256sum
 override INTELBT_FIRMWARE_FILE_COUNT := 8
 
-INTELBT_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/intelbt
+INTELBT_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/intelbt
 override INTELBT_FIRMWARE_CACHE_DIR := $(INTELBT_FIRMWARE_CACHE_ROOT)/$(INTELBT_FIRMWARE_REVISION)
 override INTELBT_FIRMWARE_CACHE_NAMES := $(foreach entry,$(INTELBT_FIRMWARE_FILES),$(word 1,$(subst |, ,$(entry))))
 override INTELBT_FIRMWARE_CACHE_FILES := $(addprefix $(INTELBT_FIRMWARE_CACHE_DIR)/,$(INTELBT_FIRMWARE_CACHE_NAMES))
@@ -110,14 +110,14 @@ intelbt-firmware-license:
 intelbt-firmware-license-pending:
 	@if test ! -d '$(INTELBT_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(INTELBT_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,intelbt-firmware,Intel Bluetooth firmware,amd64,n,package,,y,firmware,firmware/intelbt,,,data,$(INTELBT_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,intelbt-firmware,Intel Bluetooth firmware,amd64,n,package,,y,firmware,firmware/intelbt,,,data,$(INTELBT_FIRMWARE_DATA),,))
 override USERLAND_intelbt-firmware_DATA := $(INTELBT_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += intelbt-firmware
 
 .PHONY: download intelbt-firmware intelbt-firmware-cache \
 	intelbt-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: intelbt-firmware
 endif
 

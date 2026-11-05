@@ -6,4 +6,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # a default: the Raspberry Pi 4 configuration selects it, and rc.conf names
 # the service as optional, so an image without it says nothing.
 BOOTLOG_DATA := /etc/service.d/bootlog=userland/base/bootlog/service
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,bootlog,bootlog,*,n,basic,userland/base/bootlog/main.c userland/base/bootlog/log-file.c,y,base,,,0755,program,$(BOOTLOG_DATA),,sbin))
+$(eval $(call USERLAND_PACKAGE,bootlog,bootlog,*,n,basic,userland/base/bootlog/main.c userland/base/bootlog/log-file.c,y,base,,,0755,program,$(BOOTLOG_DATA),,sbin))

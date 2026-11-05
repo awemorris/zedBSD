@@ -6,4 +6,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 PASSKEY_SOURCES := userland/base/passkey/main.c userland/base/passkey/request.c userland/base/passkey/record.c \
 	userland/base/common/account.c userland/base/login/verify.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,passkey,passkey,*,y,basic,$(PASSKEY_SOURCES),y,base,base/passkey,,0500,program,,,sbin))
+$(eval $(call USERLAND_PACKAGE,passkey,passkey,*,y,basic,$(PASSKEY_SOURCES),y,base,base/passkey,,0500,program,,,sbin))

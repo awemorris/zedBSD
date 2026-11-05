@@ -13,4 +13,4 @@ KEILAND_PREVIEW_SOURCES := userland/desktop/preview/main.c userland/desktop/prev
 	$(wildcard userland/desktop/libpdf/*.c) $(wildcard userland/desktop/libtruetype/*.c) \
 	$(wildcard userland/base/libz-compat/*.c) $(wildcard userland/desktop/libpng-compat/*.c) \
 	$(wildcard userland/desktop/libjpeg-compat/*.c) $(wildcard userland/desktop/libgif-compat/*.c)
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,keiland-preview,keiland-preview - Preview maker,amd64,n,static,$(KEILAND_PREVIEW_SOURCES),y,desktop,desktop/preview,,0755,program,,,usr/libexec))
+$(eval $(call USERLAND_PACKAGE,keiland-preview,keiland-preview - Preview maker,amd64,n,static,$(KEILAND_PREVIEW_SOURCES),y,desktop,desktop/preview,,0755,program,,,usr/libexec))

@@ -7,6 +7,6 @@ LLVM_RUNTIME_LICENSE_DATA := \
 # Every maintained image carries LLVM compiler-rt builtins. Keep the Apache
 # 2.0 WITH LLVM-exception notice in the distributed root filesystem while the
 # same notice also travels with the host-tool cache itself.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,llvm-runtime-license,LLVM runtime license,\
+$(eval $(call USERLAND_PACKAGE,llvm-runtime-license,LLVM runtime license,\
 	i386 pc98 amd64 rpi4 rpi5,n,data,,n,base,base/licenses/llvm-runtime,,,data,\
 	$(LLVM_RUNTIME_LICENSE_DATA)))

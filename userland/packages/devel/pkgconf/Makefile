@@ -72,7 +72,7 @@ pkgconf: $(ZEDBSD_PKGCONF_CHECKED)
 # The library under its SONAME, the command and its pkg-config name, and the
 # licence.  The library's own headers and .pc file are for programs that
 # link libpkgconf, which nothing on the system does, so they stay out.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,pkgconf,pkg-config for builds on the system,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,pkgconf,pkg-config for builds on the system,*,n,package,,y,\
 	packages/devel,devel/pkgconf,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter pkgconf,$(ZEDBSD_USER_PROGRAMS)),\

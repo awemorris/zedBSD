@@ -40,7 +40,7 @@ noto-color-emoji: $(ZEDBSD_EXT_noto-color-emoji_ARCHIVE_VERIFIED)
 
 # ---------------------------------------------------------------- packaging
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,noto-color-emoji,Colour emoji font,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,noto-color-emoji,Colour emoji font,*,n,package,,y,\
 	packages/fonts,fonts/noto-color-emoji,))
 
 # The verified record is the input, so the image waits for the check rather

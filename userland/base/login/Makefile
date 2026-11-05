@@ -4,4 +4,4 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,login,login,*,y,basic,userland/base/login/main.c userland/base/login/verify.c,y,base,,))
+$(eval $(call USERLAND_PACKAGE,login,login,*,y,basic,userland/base/login/main.c userland/base/login/verify.c,y,base,,))

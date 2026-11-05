@@ -131,7 +131,7 @@ $(ZEDBSD_LIBCXX_LICENSE): $(ZEDBSD_LIBCXX_SOURCE_STAMP)
 libcxx: $(ZEDBSD_LIBCXX_STAGED)
 	@:
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libcxx,LLVM C++ runtime,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,libcxx,LLVM C++ runtime,*,n,package,,y,\
 	packages/devel,devel/libcxx,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter libcxx,$(ZEDBSD_USER_PROGRAMS)),\

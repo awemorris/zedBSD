@@ -4,7 +4,7 @@
 # The top-level build includes every package Makefile to collect metadata.  It
 # owns its aggregate lifecycle targets, so package-local defaults must only be
 # visible when an item is invoked directly with `make -C userland/...`.
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS ?=
 ZEDBSD_USERLAND_PATCH_TARGETS ?=
@@ -28,9 +28,10 @@ patch: download $(ZEDBSD_USERLAND_PATCH_TARGETS)
 # Aggregator Makefiles have no package-specific build/install implementation.
 # Give them the same callable lifecycle while package.mk supplies the concrete
 # build and staged-install recipes for actual packages.
-ifndef ZEDBSD_USERLAND_PACKAGE_LIFECYCLE
-.PHONY: build install
 
+ifndef USERLAND_PACKAGE_LIFECYCLE
+
+.PHONY: build install
 build: patch
 	@:
 

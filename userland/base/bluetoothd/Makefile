@@ -20,4 +20,4 @@ BLUETOOTHD_SOURCES := userland/base/bluetoothd/main.c userland/base/bluetoothd/s
 	userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/desktop/libmms/mms.c userland/base/bluetoothd/map.c \
 	userland/base/bluetoothd/vcard.c userland/base/bluetoothd/phonemux.c userland/base/bluetoothd/pbap.c userland/base/bluetoothd/hfp.c userland/base/bluetoothd/at.c
 BLUETOOTHD_DATA := /etc/service.d/bluetoothd=userland/base/bluetoothd/bluetoothd.service
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,bluetoothd,bluetoothd,*,n,basic,$(BLUETOOTHD_SOURCES),y,base,base/bluetoothd,,0755,program,$(BLUETOOTHD_DATA),,sbin))
+$(eval $(call USERLAND_PACKAGE,bluetoothd,bluetoothd,*,n,basic,$(BLUETOOTHD_SOURCES),y,base,base/bluetoothd,,0755,program,$(BLUETOOTHD_DATA),,sbin))

@@ -20,10 +20,10 @@ ZEDBSD_SSHD_SOURCES := $(sort $(wildcard $(ZEDBSD_SSH_DIR)/sshd-*.c)) userland/b
 ZEDBSD_SSH_KEYGEN_SOURCES := $(ZEDBSD_SSH_DIR)/ssh-keygen-main.c $(ZEDBSD_SSH_MODULES)
 ZEDBSD_SFTP_SERVER_SOURCES := $(ZEDBSD_SSH_DIR)/sftp-server-main.c $(ZEDBSD_SSH_MODULES)
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,ssh,ssh secure shell client,*,n,basic,$(ZEDBSD_SSH_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/bin))
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,sshd,ssh secure shell server,*,n,basic,$(ZEDBSD_SSHD_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/sbin))
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,ssh-keygen,ssh key generator,*,n,basic,$(ZEDBSD_SSH_KEYGEN_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/bin))
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,sftp-server,SFTP server of sshd,*,n,basic,$(ZEDBSD_SFTP_SERVER_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/libexec))
+$(eval $(call USERLAND_PACKAGE,ssh,ssh secure shell client,*,n,basic,$(ZEDBSD_SSH_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/bin))
+$(eval $(call USERLAND_PACKAGE,sshd,ssh secure shell server,*,n,basic,$(ZEDBSD_SSHD_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/sbin))
+$(eval $(call USERLAND_PACKAGE,ssh-keygen,ssh key generator,*,n,basic,$(ZEDBSD_SSH_KEYGEN_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/bin))
+$(eval $(call USERLAND_PACKAGE,sftp-server,SFTP server of sshd,*,n,basic,$(ZEDBSD_SFTP_SERVER_SOURCES),y,base,base/ssh,base/libcrypto-compat,,program,,,usr/libexec))
 
 # OpenSSH's package and these give the same paths; an image can hold only one of them.
 ifneq ($(and $(filter openssh,$(ZEDBSD_USER_PROGRAMS)),$(filter ssh sshd ssh-keygen sftp-server,$(ZEDBSD_USER_PROGRAMS))),)

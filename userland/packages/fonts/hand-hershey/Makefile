@@ -63,7 +63,7 @@ hand-hershey: $(ZEDBSD_HAND_HERSHEY_TEMPLATES)
 
 # ---------------------------------------------------------------- packaging
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,hand-hershey,Handwriting templates,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,hand-hershey,Handwriting templates,*,n,package,,y,\
 	packages/fonts,fonts/hand-hershey,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter hand-hershey,$(ZEDBSD_USER_PROGRAMS)),\

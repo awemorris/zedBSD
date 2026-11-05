@@ -72,7 +72,7 @@ pixman: $(ZEDBSD_PIXMAN_CHECKED)
 
 # The library goes in under its SONAME.  The headers and the .pc file are the
 # development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,pixman,Pixel manipulation library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,pixman,Pixel manipulation library,*,n,package,,y,\
 	packages/libs,libs/pixman,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter pixman,$(ZEDBSD_USER_PROGRAMS)),\

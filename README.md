@@ -214,6 +214,15 @@ Supported GPUs:
 | NVIDIA         | Turing or later   | NVIDIA GeForce RTX 2070 | Modest yet                                   |
 | AMD            | RDNA or later     | AMD Radeon RX 5600 XT   | Desktop-optimized, now optimizing for gaming |
 
+"GPUs need heavy compilers to be fast" and "compilers must stay in
+userland for safety" are just Mesa narratives defending the Linux
+stack. My working codebase proves neither is true.
+
+Other OSes spent 20 years struggling to port the massive DRI/KMS
+architecture just to keep up. In hindsight, wasn't that gap largely
+the result of the Linux camp successfully convincing everyone that
+their complex model was the only choice?
+
 ---
 
 ## Try zedBSD

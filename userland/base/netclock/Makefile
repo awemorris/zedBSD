@@ -12,4 +12,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # selects it, and rc.conf names the service as optional, so an image without
 # it says nothing.  ntpdate itself is a default of every image.
 NETCLOCK_DATA := /etc/service.d/netclock=userland/base/netclock/service
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,netclock,netclock - the clock from the network at boot,*,n,data,,y,base,base/netclock,,,data,$(NETCLOCK_DATA)))
+$(eval $(call USERLAND_PACKAGE,netclock,netclock - the clock from the network at boot,*,n,data,,y,base,base/netclock,,,data,$(NETCLOCK_DATA)))

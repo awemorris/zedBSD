@@ -39,14 +39,16 @@ TOPLEVEL_BUILD := 1
 # The default goal for the toplevel Makefile is "disk-image"
 all: vmunix
 
+
 ########################################################################
 # Cross Toolchain
 ########################################################################
 
 include toolchain/llvm/llvm.mk
 
+
 #######################################################################
-# List of Configurations
+# Configurations
 #######################################################################
 
 ################################################
@@ -77,7 +79,7 @@ CONFIG_DRIVER_PCI                 ?= n
 CONFIG_DRIVER_USB                 ?= n
 
 ################################################
-# 1. Storage
+# Storage
 ################################################
 
 ########################
@@ -121,7 +123,7 @@ CONFIG_DRIVER_FS_OVERLAYFS        ?= n
 CONFIG_BUF_CACHE_KIB              ?= 0
 
 ################################################
-# 2. Network
+# Network
 ################################################
 
 ########################
@@ -196,7 +198,7 @@ CONFIG_DRIVER_RPI4_WIFI           ?= n
 CONFIG_DRIVER_RPI5_WIFI           ?= n
 
 ################################################
-# 3. Graphics
+# Graphics
 ################################################
 
 ########################
@@ -262,7 +264,7 @@ CONFIG_DRIVER_GRAPHICS_PCAT       ?= n
 CONFIG_DRIVER_GRAPHICS_PC98       ?= n
 
 ################################################
-# 4. Audio
+# Audio
 ################################################
 
 ########################
@@ -288,9 +290,9 @@ CONFIG_DRIVER_RPI5_AUDIO          ?= n
 # [Vision Five 2 Audio driver]
 CONFIG_DRIVER_VF2_AUDIO           ?= n
 
-########################################################################
-# 5. Input Device
-########################################################################
+################################################
+# Input Device
+################################################
 
 ########################
 # Framework
@@ -306,7 +308,7 @@ CONFIG_DRIVER_HID                 ?= n
 # None
 
 ################################################
-# 6. USB
+# USB
 ################################################
 
 ########################
@@ -362,7 +364,7 @@ CONFIG_DRIVER_USB_BT              ?= n
 CONFIG_DRIVER_USB_UVC             ?= n
 
 ################################################
-# 7. Bluetooth
+# Bluetooth
 ################################################
 
 ########################
@@ -387,9 +389,9 @@ CONFIG_DRIVER_RPI4_BT             ?= n
 # [RPi5 Onboard Bluetooth]
 CONFIG_DRIVER_RPI5_BT             ?= n
 
-########################################################################
-# 8. Thermal Management
-########################################################################
+################################################
+# Thermal Management
+################################################
 
 ########################
 # Framework
@@ -408,7 +410,7 @@ CONFIG_DRIVER_X86_POWER_CONTROL   ?= n
 CONFIG_DRIVER_RPI5_FAN            ?= n
 
 ################################################
-# 9. Camera and Capture
+# Camera and Capture
 ################################################
 
 ########################
@@ -419,7 +421,7 @@ CONFIG_DRIVER_RPI5_FAN            ?= n
 CONFIG_DRIVER_CAMERA              ?= n
 
 ################################################
-# 10. Smart Card
+# Smart Card
 ################################################
 
 ########################
@@ -429,9 +431,9 @@ CONFIG_DRIVER_CAMERA              ?= n
 # [Smart Card Core]
 CONFIG_DRIVER_SMARTCARD           ?= n
 
-########################################################################
-# 11. ACPI
-########################################################################
+################################################
+# ACPI
+################################################
 
 ########################
 # Framework
@@ -440,9 +442,9 @@ CONFIG_DRIVER_SMARTCARD           ?= n
 # [ACPI Core]
 CONFIG_DRIVER_ACPI                ?= n
 
-########################################################################
-# 12. I2C/SPI/GPIO
-########################################################################
+################################################
+# I2C/SPI/GPIO
+################################################
 
 ########################
 # Framework
@@ -473,9 +475,9 @@ CONFIG_DRIVER_PCI_AMD_GPIO        ?= n
 #  - Depends: 
 CONFIG_DRIVER_I2C_HID             ?= n
 
-########################################################################
-# 98. Debug Options
-########################################################################
+################################################
+# Debug Options
+################################################
 
 # [PC/AT: Console to Serial Mirror]
 CONFIG_PCAT_SERIAL_MIRROR         ?= n
@@ -486,9 +488,9 @@ CONFIG_RPI4_SERIAL_CONSOLE        ?= n
 # [RPi5: Serial Console] (PL011 on 3-pin debug connector)
 CONFIG_RPI5_SERIAL_CONSOLE        ?= n
 
-########################################################################
-# 99. Tests
-########################################################################
+################################################
+# Tests
+################################################
 
 # [Kernel Test: Checkpoints]
 CONFIG_KERNEL_TEST_CHECKPOINTS    ?= n
@@ -505,9 +507,15 @@ CONFIG_BT_TEST_LOOPBACK           ?= n
 # [Kernel Test: USB HID Checkpoint]
 CONFIG_KERNEL_USB_HID_CHECKPOINT  ?= n
 
-########################################################################
+################################################
+# Userland Programs
+################################################
+
+USERLAND_PROGRAMS ?=
+
+################################################
 # Import the configuration file.
-########################################################################
+################################################
 
 #  - Import CONFIG_* variables.
 #  - Import vmunix target.
@@ -515,6 +523,7 @@ CONFIG_KERNEL_USB_HID_CHECKPOINT  ?= n
 #  - Import hdd-image target.
 
 include $(CONFIGMK)
+
 
 ########################################################################
 # Source Files
@@ -1888,6 +1897,7 @@ KERN_SOURCES += \
 	src/drivers/i2c/i2c-hid.c
 endif
 
+
 ########################################################################
 # Platform Makefile
 ########################################################################
@@ -1908,89 +1918,25 @@ endif
 # Include the platform-specific Makefile.
 include $(PLATFORM_MAKEFILE)
 
+
 ########################################################################
-# Packages
+# Userland Program Makefile
 ########################################################################
 
-USERLAND_PACKAGE_BINDIR   := /usr/bin
-USERLAND_PACKAGES         :=
-USERLAND_DOWNLOAD_TARGETS :=
-USERLAND_PATCH_TARGETS    :=
-
-define USERLAND_PACKAGE
-USERLAND_PACKAGES += $(1)
-USERLAND_$(1)_LABEL := $(2)
-USERLAND_$(1)_PLATFORMS := $(if $(filter base comp desktop firmware packages/%,$(8)),*,$(3))
-USERLAND_$(1)_DEFAULT := $(4)
-USERLAND_$(1)_CLASS := $(5)
-USERLAND_$(1)_SOURCES := $(6)
-USERLAND_$(1)_SELECTABLE := $(7)
-USERLAND_$(1)_MENU := $(8)
-USERLAND_$(1)_PACKAGE := $(9)
-USERLAND_$(1)_REQUIRE := $(10)
-USERLAND_$(1)_MODE := $(11)
-USERLAND_$(1)_TYPE := $(if $(12),$(12),$(if $(filter library,$(5)),library,program))
-USERLAND_$(1)_DATA := $(13)
-USERLAND_$(1)_HEADERS := $(14)
-USERLAND_$(1)_INSTALL_DIR := $(if $(15),$(15),bin)
-endef
-
-USERLAND_PACKAGE_MAKEFILES := $(sort \
+ALL_PROGRAM_MAKEFILES := $(sort \
 	$(wildcard userland/*/Makefile) \
 	$(wildcard userland/*/*/Makefile) \
 	$(wildcard userland/*/*/*/Makefile))
 
-#include $(USERLAND_PACKAGE_MAKEFILES)
+SELECTED_PROGRAM_MAKEFILES := $(foreach mf, $(ALL_PROGRAM_MAKEFILES), \
+	$(if $(filter $(notdir $(patsubst %/,%,$(dir $(mf)))), $(USERLAND_PROGRAMS)), \
+		$(mf)))
 
-ALL_USER_PROGRAMS := \
-	$(foreach program,$(USERLAND_PACKAGES), \
-		$(if $(filter y,$(USERLAND_$(program)_SELECTABLE)), \
-			$(program)))
+PROGRAM_DIRS := $(dir $(SELECTED_PROGRAM_MAKEFILES))
 
-user_program_applies := \
-	$(or \
-		$(filter *,$(USERLAND_$(1)_PLATFORMS)), \
-		$(filter $(ZEDBSD_PLATFORM),$(USERLAND_$(1)_PLATFORMS)))
+.PHONY: packages $(PROGRAM_DIRS)
 
-DEFAULT_USER_PROGRAMS := \
-	$(foreach program,$(ALL_USER_PROGRAMS),\
-		$(if $(filter y,$(USERLAND_$(program)_DEFAULT)),\
-			$(if $(call user_program_applies,$(program)), \
-				$(program))))
+packages: $(PROGRAM_DIRS)
 
-USERLAND_BASIC_PROGRAMS := \
-	$(foreach program,$(USERLAND_PACKAGES),\
-		$(if $(filter basic,$(USERLAND_$(program)_CLASS)), \
-			$(program)))
-
-USERLAND_NETWORK_PROGRAMS := \
-	$(foreach program,$(USERLAND_PACKAGES),\
-		$(if $(filter network,$(USERLAND_$(program)_CLASS)), \
-			$(program)))
-
-USER_PROGRAMS ?= $(DEFAULT_USER_PROGRAMS)
-
-IMAGE_PROFILE ?=
-INSTALLER_MENUS := base desktop packages/%
-
-ifeq ($(IMAGE_PROFILE),installer)
-INSTALLER_COMMA := ,
-INSTALLER_FIRMWARE := \
-	$(sort \
-		$(foreach row,$(shell sed -n 's/^\(CONFIG_[A-Z0-9_]*\)|\(.*\)$$/\1=\2/p' config/drivers/firmware.list | tr ' ' ','), \
-			 $(if $(filter y,$($(firstword $(subst =, ,$(row))))),\
-				$(subst $(INSTALLER_COMMA), ,$(lastword $(subst =, ,$(row)))))))
-override USER_PROGRAMS := \
-	$(foreach program,$(ALL_USER_PROGRAMS),\
-		$(if $(filter $(INSTALLER_MENUS), \
-			$(USERLAND_$(program)_MENU)), \
-			$(if $(call user_program_applies,$(program)),
-				$(program)))) \
-	$(filter $(INSTALLER_FIRMWARE),$(foreach program,$(ALL_USER_PROGRAMS),\
-		$(if $(filter firmware,$(USERLAND_$(program)_MENU)), \
-			$(program))))
-override USER_PROGRAMS := \
-	$(filter-out $(INSTALLER_TEST_OMIT),$(USER_PROGRAMS))
-		else ifneq ($(strip $(IMAGE_PROFILE)),)
-$(error Unknown IMAGE_PROFILE '$(IMAGE_PROFILE)'; the only profile is installer)
-endif
+$(PROGRAM_DIRS):
+	$(MAKE) -C $@

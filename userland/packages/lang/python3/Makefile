@@ -206,7 +206,7 @@ python3-image: $(ZEDBSD_PYTHON3_IMAGE_STAMP)
 # Choosing python3 chooses what its modules are built against: zlib, OpenSSL
 # (ssl, hashlib) and the CA bundle ssl reads by default.  Off by default
 # (D3, as vim and Emacs).
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,python3,Python 3 interpreter,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,python3,Python 3 interpreter,*,n,package,,y,\
 	packages/lang,lang/python3,libs/zlib security/openssl security/ca-certificates))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter python3,$(ZEDBSD_USER_PROGRAMS)),\

@@ -100,7 +100,7 @@ harfbuzz: $(ZEDBSD_HARFBUZZ_CHECKED)
 # Each library goes in under its SONAME, which is the name the loader asks
 # for.  The headers and the .pc files are the development files below.  No
 # C++ runtime is listed, because the libraries do not need one.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,harfbuzz,HarfBuzz text shaping library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,harfbuzz,HarfBuzz text shaping library,*,n,package,,y,\
 	packages/libs,libs/harfbuzz,libs/glib libs/freetype))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter harfbuzz,$(ZEDBSD_USER_PROGRAMS)),\

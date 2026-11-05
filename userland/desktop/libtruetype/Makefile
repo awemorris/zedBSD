@@ -5,5 +5,5 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # ws079-p007 (libpdf draws text with it).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-LIBTRUETYPE_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libtruetype.so=$(BUILD)/dynamic/libtruetype.so)
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libtruetype,libtruetype,*,y,library,$(LIBTRUETYPE_SOURCES),y,desktop,desktop/libtruetype,,,shared-library,$(LIBTRUETYPE_IMAGE_DATA),,lib))
+LIBTRUETYPE_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libtruetype.so=$(BUILD)/dynamic/libtruetype.so)
+$(eval $(call USERLAND_PACKAGE,libtruetype,libtruetype,*,y,library,$(LIBTRUETYPE_SOURCES),y,desktop,desktop/libtruetype,,,shared-library,$(LIBTRUETYPE_IMAGE_DATA),,lib))

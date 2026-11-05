@@ -85,7 +85,7 @@ pango: $(ZEDBSD_PANGO_CHECKED)
 # Each library goes in under its SONAME.  The headers and the .pc files are
 # the development files below; pango-view and the other tools are not
 # installed.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,pango,Text layout library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,pango,Text layout library,*,n,package,,y,\
 	packages/libs,libs/pango,libs/glib libs/fribidi libs/harfbuzz libs/fontconfig libs/freetype libs/cairo))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter pango,$(ZEDBSD_USER_PROGRAMS)),\

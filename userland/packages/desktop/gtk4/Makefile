@@ -120,7 +120,7 @@ gtk4: $(ZEDBSD_GTK4_CHECKED) $(ZEDBSD_GTK4_SCHEMAS)
 # the licence.  GTK's own data (icons, CSS, emoji) is compiled into the
 # library as GResources.  The headers and the .pc files are the development
 # files below; the other tools are not installed.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,gtk4,GTK 4 toolkit,amd64,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,gtk4,GTK 4 toolkit,amd64,n,package,,y,\
 	packages/desktop,desktop/gtk4,libs/glib libs/cairo libs/pango libs/harfbuzz libs/fribidi \
 	libs/fontconfig libs/freetype libs/gdk-pixbuf libs/libpng libs/libtiff libs/libjpeg-turbo \
 	libs/libepoxy libs/libxkbcommon libs/xkeyboard-config libs/graphene desktop/libwayland))

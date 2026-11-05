@@ -7,4 +7,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 CALENDAR_SOURCES := userland/desktop/calendar/main.c userland/desktop/calendar/view.c \
 	userland/desktop/calendar/store.c userland/desktop/calendar/date.c \
 	userland/desktop/calendar/scene.c userland/desktop/calendar/render3d.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,calendar,calendar - Calendar,amd64,n,basic,$(CALENDAR_SOURCES),y,desktop,desktop/calendar,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,calendar,calendar - Calendar,amd64,n,basic,$(CALENDAR_SOURCES),y,desktop,desktop/calendar,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype,0755,program,,,bin))

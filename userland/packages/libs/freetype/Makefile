@@ -73,7 +73,7 @@ freetype: $(ZEDBSD_FREETYPE_CHECKED)
 
 # The library goes in under its SONAME, which is the name the loader asks
 # for.  The headers and the .pc file are the development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,freetype,FreeType font rasterizer,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,freetype,FreeType font rasterizer,*,n,package,,y,\
 	packages/libs,libs/freetype,libs/zlib libs/libpng))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter freetype,$(ZEDBSD_USER_PROGRAMS)),\

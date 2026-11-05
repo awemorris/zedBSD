@@ -101,7 +101,7 @@ libpng: $(ZEDBSD_LIBPNG_STAGED)
 # The library goes in under its SONAME, which is the name the loader asks
 # for; libpng16.so and libpng.so are the link-time names a compiler on the
 # target looks for.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libpng,PNG reference library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,libpng,PNG reference library,*,n,package,,y,\
 	packages/libs,libs/libpng,libs/zlib))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter libpng,$(ZEDBSD_USER_PROGRAMS)),\

@@ -10,4 +10,4 @@ PDFVIEWER_SOURCES := userland/desktop/pdfviewer/main.c userland/desktop/pdfviewe
 	userland/desktop/pdfviewer/draw.c userland/desktop/pdfviewer/document.c \
 	userland/desktop/pdfviewer/canvas.c \
 	userland/desktop/pdfviewer/text.c userland/desktop/pdfviewer/touch.c userland/desktop/picture/png-write.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,pdfviewer,pdfviewer - PDF Viewer,amd64,y,basic,$(PDFVIEWER_SOURCES),y,desktop,desktop/pdfviewer,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/libpdf base/libz-compat,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,pdfviewer,pdfviewer - PDF Viewer,amd64,y,basic,$(PDFVIEWER_SOURCES),y,desktop,desktop/pdfviewer,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/libpdf base/libz-compat,0755,program,,,bin))

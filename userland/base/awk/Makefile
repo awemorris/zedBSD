@@ -7,4 +7,4 @@ ZEDBSD_AWK_SOURCES := userland/base/awk/main.c userland/base/awk/lex.c \
 	userland/base/awk/record.c userland/base/awk/run.c \
 	userland/base/awk/builtin.c userland/base/awk/io.c \
 	userland/base/awk/gawk.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,awk,awk,*,y,basic,$(ZEDBSD_AWK_SOURCES),y,base,,))
+$(eval $(call USERLAND_PACKAGE,awk,awk,*,y,basic,$(ZEDBSD_AWK_SOURCES),y,base,,))

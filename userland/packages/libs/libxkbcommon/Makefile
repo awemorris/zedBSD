@@ -74,7 +74,7 @@ libxkbcommon: $(ZEDBSD_LIBXKBCOMMON_CHECKED)
 
 # The library under its SONAME; the data comes with xkeyboard-config.  The
 # headers and the .pc file are the development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libxkbcommon,Keymap handling library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,libxkbcommon,Keymap handling library,*,n,package,,y,\
 	packages/libs,libs/libxkbcommon,libs/xkeyboard-config))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter libxkbcommon,$(ZEDBSD_USER_PROGRAMS)),\

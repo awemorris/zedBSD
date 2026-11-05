@@ -16,4 +16,4 @@ KEILAND_SETTINGS_SOURCES := userland/desktop/settings/main.c \
 	userland/desktop/settings/look.c userland/desktop/settings/palette.c userland/desktop/settings/page-look.c userland/desktop/settings/page-display.c userland/desktop/settings/arrange.c userland/desktop/settings/rotate.c userland/desktop/settings/page-input.c userland/desktop/settings/sound.c userland/desktop/settings/system.c \
 	userland/desktop/artwork/mark.c userland/desktop/preview/client.c userland/desktop/preview/zedbsd/spawn.c
 # ws168-p004: the wallpapers' tiles are made by keiland-preview in a sandbox; Settings links no decoder.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,settings,settings - Settings,amd64,y,basic,$(KEILAND_SETTINGS_SOURCES),y,desktop,desktop/settings,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/preview,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,settings,settings - Settings,amd64,y,basic,$(KEILAND_SETTINGS_SOURCES),y,desktop,desktop/settings,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/preview,0755,program,,,bin))

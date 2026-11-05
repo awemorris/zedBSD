@@ -27,9 +27,9 @@ LIBWAYLAND_SOURCES := userland/desktop/libwayland/client.c \
 
 # The public SONAME follows the standard client library spelling.  The .pc
 # file is for a program built on the system; the headers are the sysroot's.
-LIBWAYLAND_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libwayland-client.so=$(BUILD)/dynamic/libwayland-client.so \
+LIBWAYLAND_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libwayland-client.so=$(BUILD)/dynamic/libwayland-client.so \
 	/usr/lib/pkgconfig/wayland-client.pc=userland/desktop/libwayland/pkgconfig/wayland-client.pc)
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libwayland-client,libwayland-client,amd64,y,library,$(LIBWAYLAND_SOURCES),y,desktop,desktop/libwayland,,,shared-library,$(LIBWAYLAND_IMAGE_DATA),,lib))
+$(eval $(call USERLAND_PACKAGE,libwayland-client,libwayland-client,amd64,y,library,$(LIBWAYLAND_SOURCES),y,desktop,desktop/libwayland,,,shared-library,$(LIBWAYLAND_IMAGE_DATA),,lib))
 
 # ------------------------------------------------- the stage for packages
 

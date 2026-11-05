@@ -105,7 +105,7 @@ openssl: $(ZEDBSD_OPENSSL_STAGED)
 
 # The shared objects go to /usr/lib like every package's; the runtime loader
 # searches /lib (the base system) and then /usr/lib (packages).
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,openssl,OpenSSL cryptography,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,openssl,OpenSSL cryptography,*,n,package,,y,\
 	packages/security,security/openssl,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter openssl,$(ZEDBSD_USER_PROGRAMS)),\
