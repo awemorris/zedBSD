@@ -206,7 +206,7 @@
  */
 #if defined(HAL_ARCH_I386)
 # include <hal/arch/atomic/i386.h>
-#elif defined(HAL_ARCH_AMD64)
+#elif defined(HAL_ARCH_X86_64)
 # include <hal/arch/atomic/amd64.h>
 #elif defined(HAL_ARCH_ARM64)
 # include <hal/arch/atomic/aarch64.h>

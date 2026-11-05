@@ -871,7 +871,7 @@ hal_task_transfer(
  * Reports registered task and kernel-stack accounting.
  */
 void
-hal_amd64_task_memory_stats(
+amd64_hal_task_memory_stats(
 	uint32_t *count,
 	size_t *bytes)
 {

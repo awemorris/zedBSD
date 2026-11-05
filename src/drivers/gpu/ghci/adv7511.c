@@ -6,6 +6,10 @@
  */
 
 /*
+ * XXX: This file should be rewritten to be a generic I2C driver, not
+ * just for the ADV7511.  The ADV7511 is just an example of the KC705
+ * FPGA prototype.
+ *
  * An ADV7511 HDMI transmitter behind a GHCI display controller's I2C
  * master (DC_CAPS[2]): the bus to it is opened through the board's I2C
  * switch when there is one, the chip is identified by its revision, and

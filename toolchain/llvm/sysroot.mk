@@ -1,8 +1,8 @@
-# Deterministic zedBSD target sysroots (amd64, i386, arm64, riscv64 and armv7).
+# Deterministic zedBSD target sysroots (x86_64, i386, arm64, riscv64 and armv7).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 ZEDBSD_SYSROOT_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-ZEDBSD_SYSROOT_AMD64 := $(abspath $(ZEDBSD_LLVM_ROOT)/build/amd64/sysroot)
+ZEDBSD_SYSROOT_X86_64 := $(abspath $(ZEDBSD_LLVM_ROOT)/build/x86_64/sysroot)
 ZEDBSD_SYSROOT_I386 := $(abspath $(ZEDBSD_LLVM_ROOT)/build/i386/sysroot)
 ZEDBSD_SYSROOT_ARM64 := $(abspath $(ZEDBSD_LLVM_ROOT)/build/arm64/sysroot)
 ZEDBSD_SYSROOT_RISCV64 := $(abspath $(ZEDBSD_LLVM_ROOT)/build/riscv64/sysroot)
@@ -150,7 +150,7 @@ ZEDBSD_SYSROOT_INCLUDE_NAMES := $(patsubst include/libc/%,%,\
 	$(patsubst include/uapi/%,uapi/%,\
 	$(patsubst userland/desktop/include/%,%,$(ZEDBSD_SYSROOT_PUBLIC_HEADERS))))
 ZEDBSD_SYSROOT_LINKER_SCRIPTS := \
-	platform/amd64/user.ld platform/amd64/vmunix.ld \
+	platform/x86_64/user.ld platform/x86_64/vmunix.ld \
 	platform/pcat/user.ld platform/pcat/vmunix.ld \
 	platform/pc98/noct-user.ld platform/pc98/user-init.ld \
 	platform/pc98/stage2.ld platform/arm64/user.ld platform/riscv64/user.ld \
@@ -168,12 +168,12 @@ ZEDBSD_SYSROOT_INPUTS := $(ZEDBSD_SYSROOT_LIBC_SOURCES) \
 	$(ZEDBSD_SYSROOT_ARM64_LLVM_BUILTIN_SOURCES) \
 	$(ZEDBSD_SYSROOT_ARMV7_LLVM_BUILTIN_SOURCES) \
 	$(ZEDBSD_SYSROOT_PUBLIC_HEADERS) $(ZEDBSD_SYSROOT_LINKER_SCRIPTS) \
-	src/libc/crt/crt0-amd64.S src/libc/crt/crt1-amd64.S \
+	src/libc/crt/crt0-x86_64.S src/libc/crt/crt1-x86_64.S \
 	src/libc/crt/crt0-i386.S src/libc/crt/crt1-i386.S \
 	src/libc/crt/crt0-aarch64.S src/libc/crt/crt1-aarch64.S \
 	src/libc/crt/crt0-riscv64.S src/libc/crt/crt1-riscv64.S \
 	src/libc/crt/crt0-armv7.S src/libc/crt/crt1-armv7.S \
-	include/hal/arch.h include/hal/arch/amd64.h include/hal/arch/i386.h \
+	include/hal/arch.h include/hal/arch/x86_64.h include/hal/arch/i386.h \
 	include/hal/arch/aarch64.h include/hal/arch/riscv64.h \
 	include/hal/arch/armv7.h
 
@@ -195,7 +195,7 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	cleanup() { if test -n "$$$$temporary" && test -d "$$$$temporary"; then find "$$$$temporary" -depth -delete; fi; }; \
 	trap cleanup EXIT HUP INT TERM; \
 	mkdir -p "$$$$temporary/usr/include" "$$$$temporary/usr/lib" \
-		"$$$$temporary/usr/lib/zedbsd/amd64" \
+		"$$$$temporary/usr/lib/zedbsd/x86_64" \
 		"$$$$temporary/usr/lib/zedbsd/pcat" \
 		"$$$$temporary/usr/lib/zedbsd/pc98" \
 		"$$$$temporary/usr/lib/zedbsd/arm64" \
@@ -272,8 +272,8 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	  'library and contributes nothing, rather than stopping the link' \
 	  'over a library that was never separate on this system.'; \
 	'$(ZEDBSD_SYSROOT_AR)' rcsD "$$$$temporary/usr/lib/libm.a"; \
-	cp platform/amd64/user.ld platform/amd64/vmunix.ld \
-		"$$$$temporary/usr/lib/zedbsd/amd64/"; \
+	cp platform/x86_64/user.ld platform/x86_64/vmunix.ld \
+		"$$$$temporary/usr/lib/zedbsd/x86_64/"; \
 	cp platform/pcat/user.ld platform/pcat/vmunix.ld \
 		bootloader/pcat/stage1.ld bootloader/pcat/stage2.ld \
 		bootloader/pcat/bootzbsd.ld "$$$$temporary/usr/lib/zedbsd/pcat/"; \
@@ -323,28 +323,28 @@ $(1)/.zedbsd-sysroot-complete: $(ZEDBSD_SYSROOT_INPUTS) \
 	mv "$$$$temporary" "$$$$destination"; temporary=; trap - EXIT HUP INT TERM
 endef
 
-$(eval $(call ZEDBSD_BUILD_SYSROOT,$(ZEDBSD_SYSROOT_AMD64),amd64,x86_64-unknown-zedbsd,-m64 -march=x86-64 -mno-red-zone,HAL_ARCH_AMD64,src/libc/crt/crt0-amd64.S,src/libc/crt/crt1-amd64.S,amd64,user.ld,Advanced Micro Devices X86-64,-DKERN_USER_ABI_LP64,,-mlong-double-64,))
+$(eval $(call ZEDBSD_BUILD_SYSROOT,$(ZEDBSD_SYSROOT_X86_64),x86_64,x86_64-unknown-zedbsd,-m64 -march=x86-64 -mno-red-zone,HAL_ARCH_X86_64,src/libc/crt/crt0-x86_64.S,src/libc/crt/crt1-x86_64.S,x86_64,user.ld,Advanced Micro Devices X86-64,-DKERN_USER_ABI_LP64,,-mlong-double-64,))
 $(eval $(call ZEDBSD_BUILD_SYSROOT,$(ZEDBSD_SYSROOT_I386),i386,i386-unknown-zedbsd,-m32 -march=i386 -msoft-float -mno-mmx -mno-sse -mno-sse2,HAL_ARCH_I386,src/libc/crt/crt0-i386.S,src/libc/crt/crt1-i386.S,pcat,user.ld,Intel 80386,,,-mlong-double-64,))
 $(eval $(call ZEDBSD_BUILD_SYSROOT,$(ZEDBSD_SYSROOT_ARM64),arm64,aarch64-unknown-zedbsd,-march=armv8-a -mno-outline-atomics,HAL_ARCH_ARM64,src/libc/crt/crt0-aarch64.S,src/libc/crt/crt1-aarch64.S,arm64,user.ld,AArch64,-DKERN_USER_ABI_AARCH64 -DKERN_USER_ABI_LP64,$(ZEDBSD_SYSROOT_ARM64_LIBC_SOURCES),,$(ZEDBSD_SYSROOT_ARM64_COMPILER_RT_SOURCES),$(ZEDBSD_SYSROOT_ARM64_LLVM_BUILTIN_SOURCES)))
 $(eval $(call ZEDBSD_BUILD_SYSROOT,$(ZEDBSD_SYSROOT_RISCV64),riscv64,riscv64-unknown-zedbsd,-march=rv64gc -mabi=lp64d -mno-relax,HAL_ARCH_RISCV64,src/libc/crt/crt0-riscv64.S,src/libc/crt/crt1-riscv64.S,riscv64,user.ld,RISC-V,-DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64,$(ZEDBSD_SYSROOT_RISCV64_LIBC_SOURCES),,$(ZEDBSD_SYSROOT_RISCV64_COMPILER_RT_SOURCES),))
 $(eval $(call ZEDBSD_BUILD_SYSROOT,$(ZEDBSD_SYSROOT_ARMV7),armv7,armv7-unknown-zedbsd-eabihf,$(ZEDBSD_SYSROOT_ARMV7_CODE_FLAGS),HAL_ARCH_ARMV7,src/libc/crt/crt0-armv7.S,src/libc/crt/crt1-armv7.S,armv7,user.ld,ARM,-DKERN_USER_ABI_ARMV7,$(ZEDBSD_SYSROOT_ARMV7_LIBC_SOURCES),,,$(ZEDBSD_SYSROOT_ARMV7_LLVM_BUILTIN_SOURCES),$(ZEDBSD_SYSROOT_ARMV7_LLVM_BUILTIN_FLAGS)))
 
-.PHONY: sysroot-amd64 sysroot-i386 sysroot-arm64 sysroot-riscv64 sysroot-armv7 sysroots
-sysroot-amd64: $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
+.PHONY: sysroot-x86_64 sysroot-i386 sysroot-arm64 sysroot-riscv64 sysroot-armv7 sysroots
+sysroot-x86_64: $(ZEDBSD_SYSROOT_X86_64)/.zedbsd-sysroot-complete
 sysroot-i386: $(ZEDBSD_SYSROOT_I386)/.zedbsd-sysroot-complete
 sysroot-arm64: $(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 sysroot-riscv64: $(ZEDBSD_SYSROOT_RISCV64)/.zedbsd-sysroot-complete
 sysroot-armv7: $(ZEDBSD_SYSROOT_ARMV7)/.zedbsd-sysroot-complete
-sysroots: sysroot-amd64 sysroot-i386 sysroot-arm64 sysroot-riscv64 sysroot-armv7
+sysroots: sysroot-x86_64 sysroot-i386 sysroot-arm64 sysroot-riscv64 sysroot-armv7
 
-$(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt0.o \
-$(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
-$(ZEDBSD_SYSROOT_AMD64)/usr/lib/libc.a \
-$(ZEDBSD_SYSROOT_AMD64)/usr/lib/libc.o \
-$(ZEDBSD_SYSROOT_AMD64)/usr/lib/libzedbsd-compiler-rt.a \
-$(ZEDBSD_SYSROOT_AMD64)/usr/lib/libzedbsd-compiler-rt.o \
-$(ZEDBSD_SYSROOT_AMD64)/usr/lib/libclang_rt.builtins.a: \
-	$(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
+$(ZEDBSD_SYSROOT_X86_64)/usr/lib/crt0.o \
+$(ZEDBSD_SYSROOT_X86_64)/usr/lib/crt1.o \
+$(ZEDBSD_SYSROOT_X86_64)/usr/lib/libc.a \
+$(ZEDBSD_SYSROOT_X86_64)/usr/lib/libc.o \
+$(ZEDBSD_SYSROOT_X86_64)/usr/lib/libzedbsd-compiler-rt.a \
+$(ZEDBSD_SYSROOT_X86_64)/usr/lib/libzedbsd-compiler-rt.o \
+$(ZEDBSD_SYSROOT_X86_64)/usr/lib/libclang_rt.builtins.a: \
+	$(ZEDBSD_SYSROOT_X86_64)/.zedbsd-sysroot-complete
 	@test -f '$@'
 
 $(ZEDBSD_SYSROOT_I386)/usr/lib/crt0.o \

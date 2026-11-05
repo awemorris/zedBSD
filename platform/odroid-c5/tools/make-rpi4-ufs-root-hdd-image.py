@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Add the canonical UFS root partition to a Raspberry Pi 4 or 5 boot image."""
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+from __future__ import annotations
+
+import argparse
+import os
+import struct
+import subprocess
+import tempfile
+from pathlib import Path
+
+SECTOR=512
+ROOT_LBA=264192
+
+
+def run(*args: str) -> None:
+    subprocess.run(args,check=True)
+
+
+def build(args: argparse.Namespace) -> None:
+    if not args.ufs_root.is_file() or args.ufs_root.stat().st_size%SECTOR:
+        raise SystemExit('invalid UFS root image')
+    if args.output.exists() and not args.force:
+        raise SystemExit(f'output exists (use --force): {args.output}')
+    args.output.parent.mkdir(parents=True,exist_ok=True)
+    descriptor,name=tempfile.mkstemp(prefix=args.output.name+'.',dir=args.output.parent)
+    os.close(descriptor); temporary=Path(name)
+    try:
+        temporary.unlink()
+        base=Path(__file__).with_name('make-rpi4-hdd-image.py')
+        arch=[] if args.arch_image is None else ['--arch-image',str(args.arch_image)]
+        cmdline=[] if args.cmdline is None else ['--cmdline',str(args.cmdline)]
+        run('python3',str(base),'--force','--kernel',str(args.kernel),
+            *arch,*cmdline,'--data-image',str(args.data_image),
+            '--swapfile',str(args.swapfile),'--config',str(args.config),
+            '--firmware-dir',str(args.firmware_dir),'--board',args.board,
+            str(temporary))
+        blocks=args.ufs_root.stat().st_size//SECTOR
+        required_size=(ROOT_LBA+blocks)*SECTOR
+        with temporary.open('r+b') as image:
+            # Keep the FAT layout and grow only when the selected root needs it.
+            image.truncate(max(temporary.stat().st_size,required_size))
+            image.seek(0x1CE)
+            image.write(struct.pack('<B3sB3sII',0,b'\xfe\xff\xff',0xA5,
+                                    b'\xfe\xff\xff',ROOT_LBA,blocks))
+            image.seek(ROOT_LBA*SECTOR)
+            image.write(args.ufs_root.read_bytes())
+        checker=Path(__file__).resolve().parents[3] / 'tools/build/check-ufs-image.py'
+        run('python3',str(checker),str(args.ufs_root))
+        os.replace(temporary,args.output)
+    finally:
+        if temporary.exists(): temporary.unlink()
+
+
+def main() -> None:
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--kernel',type=Path,required=True)
+    parser.add_argument('--arch-image',type=Path)
+    parser.add_argument('--data-image',type=Path,required=True)
+    parser.add_argument('--swapfile',type=Path,required=True)
+    parser.add_argument('--ufs-root',type=Path,required=True)
+    parser.add_argument('--config',type=Path,required=True)
+    parser.add_argument('--cmdline',type=Path)
+    parser.add_argument('--firmware-dir',type=Path,required=True)
+    parser.add_argument('--board',choices=('rpi4','rpi5'),default='rpi4')
+    parser.add_argument('--force',action='store_true')
+    parser.add_argument('output',type=Path)
+    build(parser.parse_args())
+
+
+if __name__=='__main__': main()

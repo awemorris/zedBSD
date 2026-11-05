@@ -28,7 +28,7 @@
 #define RTLD_MACHINE EM_386
 #define RTLD_DATA ELFDATA2LSB
 #define RTLD_RELATIVE R_386_RELATIVE
-#elif defined(HAL_ARCH_AMD64)
+#elif defined(HAL_ARCH_X86_64)
 #define RTLD_MACHINE EM_X86_64
 #define RTLD_DATA ELFDATA2LSB
 #define RTLD_RELATIVE R_X86_64_RELATIVE
@@ -361,7 +361,7 @@ static uintptr_t static_tls_distance;
 static void *static_tls_template;
 static size_t static_tls_template_size;
 static size_t static_tls_alignment = 1;
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386)
 static unsigned static_tls_sealed;
 #endif
 static struct __rtld_tcb *rtld_threads;
@@ -389,7 +389,7 @@ static void object_chunk_grow(void);
 static struct rtld_program_table *program_table_take(size_t size);
 static void object_set_programs(struct rtld_object *object, const Elf_Phdr *phdr, unsigned phnum);
 static Elf_Phdr *read_program_headers(int fd, const Elf_Ehdr *header, Elf_Phdr *room, unsigned room_count, size_t *mapping_size);
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_ARM64)
 static struct __tls_index *tlsdesc_slot(struct rtld_object *object);
 #endif
 static void object_tables_take(const struct rtld_object *object, struct rtld_object_tables *tables);
@@ -534,13 +534,13 @@ static void loader_unlock(void);
 static void *allocate_tls_block(const struct rtld_tls_module *module);
 static uintptr_t thread_pointer(void);
 static void layout_static_tls(void);
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386)
 static uintptr_t static_tls_place(struct rtld_tls_module *module, uintptr_t offset);
 #endif
 static struct rtld_tls_module *tls_module_at(uintptr_t id);
 static uintptr_t tls_module_new_id(void);
 static void dtv_grow(struct __rtld_tcb *tcb, uintptr_t module);
-#if defined(HAL_ARCH_AMD64)
+#if defined(HAL_ARCH_X86_64)
 static uintptr_t static_tls_displacement(const struct rtld_object *owner);
 #endif
 static void initialize_object(struct rtld_object *object);
@@ -660,7 +660,7 @@ static uintptr_t lookup_global_optional(const char *name, const char *version, i
 static uintptr_t lookup_handle_graph(struct rtld_object *object, const char *name, const char *version, int *found);
 static int bootstrap_relative(uintptr_t base, const Elf_Phdr *phdr, unsigned phnum);
 static void setup_premapped_object(struct rtld_object *object, uintptr_t base, const Elf_Phdr *phdr, unsigned phnum, int type);
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_ARM64)
 static void install_tlsdesc(struct rtld_object *object, uintptr_t address, uint32_t symbol_index, uintptr_t addend);
 #endif
 #if defined(HAL_ARCH_SPARCV9)
@@ -1052,7 +1052,7 @@ dtv_grow(
 	loader_unlock();
 }
 
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_ARM64)
 /*
  * Implements the d tlsdesc resolve operation.
  */
@@ -2125,7 +2125,7 @@ tls_module_new_id(
  * every other module loaded at startup.  The result is a template image of
  * the whole area, which each thread copies into place as it is created.
  */
-#if !defined(HAL_ARCH_AMD64) && !defined(HAL_ARCH_I386)
+#if !defined(HAL_ARCH_X86_64) && !defined(HAL_ARCH_I386)
 static void
 layout_static_tls(
 	void)
@@ -2209,7 +2209,7 @@ layout_static_tls(
 }
 #endif
 
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386)
 /*
  * Places one module in the static TLS area below the modules placed
  * before it, whose blocks end offset bytes below the thread pointer, and
@@ -2244,7 +2244,7 @@ static_tls_place(
 }
 #endif
 
-#if defined(HAL_ARCH_AMD64)
+#if defined(HAL_ARCH_X86_64)
 
 /*
  * Supports the static tls displacement operation.
@@ -3322,7 +3322,7 @@ read_program_headers(
 	return headers;
 }
 
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_ARM64)
 /*
  * Gives an object room for one more TLSDESC argument: inside it, then in
  * the last page, then in a new page linked after it.
@@ -4762,7 +4762,7 @@ apply_value(
 	/* Handles the type condition. */
 	if (type == R_386_NONE)
 		return;
-#elif defined(HAL_ARCH_AMD64)
+#elif defined(HAL_ARCH_X86_64)
 
 	/* Handles the type condition. */
 	if (type == R_X86_64_NONE)
@@ -4857,7 +4857,7 @@ apply_value(
 	default:
 		rtld_fatal("unsupported i386 relocation");
 	}
-#elif defined(HAL_ARCH_AMD64)
+#elif defined(HAL_ARCH_X86_64)
 
 	/* Dispatch the selected syntax or record type. */
 	switch (type) {
@@ -5748,7 +5748,7 @@ resolve_tls_symbol(
 	rtld_fatal("undefined TLS symbol");
 }
 
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_ARM64)
 extern uintptr_t d_tlsdesc_resolver(void);
 
 /* Supports the install tlsdesc operation. */
@@ -6433,7 +6433,7 @@ static uintptr_t
 thread_pointer(
 	void)
 {
-#if defined(HAL_ARCH_AMD64)
+#if defined(HAL_ARCH_X86_64)
 	uintptr_t value;
 
 	/* The control block's first word, its own address. */

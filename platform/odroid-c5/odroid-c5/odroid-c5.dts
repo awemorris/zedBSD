@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: Zlib
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ */
+
+/*
+ * The ODROID-C5's device tree as zedBSD boots it: Hardkernel's tree for
+ * the board, with the framebuffer the boot script leaves on HDMI named as
+ * a simple-framebuffer, so that the early console can paint on it.
+ */
+
+#include "s7d_s905x5m_odroidc5.dts"
+
+/ {
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * OSD1's buffer: the reserved logo memory, 1920x1080 pixels
+		 * of four bytes, ARGB with blue in the low byte.
+		 */
+		framebuffer@7f800000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0x7f800000 0x0 0x007e9000>;
+			width = <1920>;
+			height = <1080>;
+			stride = <7680>;
+			format = "a8r8g8b8";
+			status = "okay";
+		};
+	};
+};

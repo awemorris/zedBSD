@@ -740,7 +740,7 @@ drv_pci_pcat_grow_bar(
 		  (unsigned long long)state->new_window_limit);
 
 	/* The kernel's mapping of the boot framebuffer follows a BAR that moved. */
-#if defined(CONFIG_DRIVER_GRAPHICS) && CONFIG_DRIVER_GRAPHICS
+#if CONFIG_DRIVER_GRAPHICS_VGA
 	if (state->new_base != state->old_base)
 		drv_pcat_graphics_framebuffer_moved(state->old_base, state->new_base, state->old_size);
 #endif

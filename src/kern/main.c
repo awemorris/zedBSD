@@ -236,7 +236,7 @@ boot_start(
 
 	/* Selects the init program, defaulting on platforms without a loader. */
 	init_path = kern_boot_parameters_init_path(boot_parameters);
-#if !defined(HAL_ARCH_I386) && !defined(HAL_ARCH_AMD64)
+#if !defined(HAL_ARCH_I386) && !defined(HAL_ARCH_X86_64)
 	if (!kern_boot_parameters_source_present())
 		init_path = KERN_INIT_PATH;
 #endif

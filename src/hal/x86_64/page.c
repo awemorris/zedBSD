@@ -86,7 +86,7 @@ static uint64_t pmem_max_irqoff_cycles;
 static hal_physaddr_t pmem_page_stack[PMEM_PAGE_STACK_MAX];
 static uint32_t pmem_page_stack_count;
 
-void hal_amd64_space_memory_stats(uint32_t *count, uint32_t *page_tables);
+void amd64_hal_space_memory_stats(uint32_t *count, uint32_t *page_tables);
 
 static uint64_t pmem_cycles(void);
 static bool pmem_lock_enter(void);
@@ -306,9 +306,6 @@ record_early_run(uint64_t physical, uint64_t size)
 }
 
 /*
- * Allocates one physical-memory descriptor under the allocator lock.
- */
-/*
  * Allocates one physical RAM block.
  */
 int
@@ -368,9 +365,6 @@ hal_pmem_alloc_limited(
 	return error;
 }
 
-/*
- * Frees one physical-memory descriptor under the allocator lock.
- */
 /*
  * Frees one physical RAM block.
  */
@@ -472,11 +466,28 @@ hal_pmem_get_total_size(
 	return (size_t)managed_pages * PAGE_SIZE;
 }
 
+int
+hal_pmem_map_uncached(
+	hal_physaddr_t paddr,
+	size_t size,
+	void **vaddr)
+{
+	return HAL_ERR_UNSUPPORTED;
+}
+
+int
+hal_pmem_unmap_uncached(
+	void *vaddr,
+	size_t size)
+{
+	return HAL_ERR_UNSUPPORTED;
+}
+
 /*
  * Supplies zero task statistics when the task module is absent.
  */
 void __attribute__((weak))
-hal_amd64_task_memory_stats(
+amd64_hal_task_memory_stats(
 	uint32_t *count,
 	size_t *stack_bytes)
 {
@@ -529,10 +540,10 @@ hal_get_memstat(
 	stats->physical_free += (size_t)pmem_page_stack_count * PAGE_SIZE;
 	stats->physical_allocated -= (size_t)pmem_page_stack_count * PAGE_SIZE;
 
-	hal_amd64_task_memory_stats(
+	amd64_hal_task_memory_stats(
 		&stats->task_count,
 		&stats->task_stack_bytes);
-	hal_amd64_space_memory_stats(
+	amd64_hal_space_memory_stats(
 		&stats->space_count,
 		&stats->page_table_count);
 	pmem_lock_leave(enabled);

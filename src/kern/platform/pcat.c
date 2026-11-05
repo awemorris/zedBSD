@@ -13,110 +13,56 @@
  * probed.  The debug console is the Bochs/QEMU port 0xe9 when enabled.
  */
 
+#include "hal/hal.h"
 #include "kern/platform.h"
 #include "kern/disk.h"
 #include "kern/clock.h"
 #include "kern/sched.h"
 #include "kern/partition.h"
 #include "kern/kmem.h"
-#include <kern/kcrt.h>
-#include <drivers/disklabel/disklabel.h>
+#include "kern/kcrt.h"
+#include "kern/klog.h"
+#include "kern/platform/driver-startup.h"
+#include "drivers/disklabel/disklabel.h"
 #include "drivers/platform/pcat/pcat-ide.h"
 #include "drivers/pci/pci-pcat.h"
 #include "drivers/platform/pcat/ps2-8042.h"
 #include "drivers/platform/pcat/serial-mirror.h"
-#if CONFIG_DRIVER_PCI_UHCI
-#include "drivers/pci/pci-uhci.h"
-#endif
-#if CONFIG_DRIVER_PCI_EHCI
-#include "drivers/pci/pci-ehci.h"
-#endif
-#if CONFIG_DRIVER_PCI_XHCI
-#include "drivers/pci/pci-xhci.h"
-#endif
-#if CONFIG_DRIVER_PCI_NVME
-#include <drivers/pci/pci-nvme.h>
-#include <drivers/pci/pci-vmd.h>
-#endif
-#if CONFIG_DRIVER_PCI_AHCI
-#include <drivers/pci/pci-ahci.h>
-#endif
-#if CONFIG_DRIVER_PCI_INTEL_AX211
-#include <drivers/wifi/intel-ax211/pci-intel-ax211.h>
-#endif
-#if CONFIG_DRIVER_PCI_RTL8125
-#include <drivers/ethernet/rtl8125.h>
-#endif
-#if CONFIG_DRIVER_PCI_VENUS
-#include <drivers/pci/pci-venus.h>
-#endif
-#if CONFIG_DRIVER_PCI_I915
-#include <drivers/pci/pci-i915.h>
-#endif
-#if CONFIG_DRIVER_PCI_NVRTX
-#include <drivers/pci/pci-nvrtx.h>
-#endif
-#if CONFIG_DRIVER_PCI_AMDRDNA
-#include <drivers/pci/pci-amdrdna.h>
-#endif
-#if CONFIG_DRIVER_PCI_GHCI
-#include <drivers/pci/pci-ghci.h>
-#endif
-#if CONFIG_DRIVER_PCI_HDA
-#include <drivers/pci/pci-hda.h>
-#endif
-#if CONFIG_DRIVER_PCI_LPSS_I2C
-#include <drivers/i2c/lpss-i2c.h>
-#endif
-#if CONFIG_DRIVER_PCI_LPSS_I2C && CONFIG_DRIVER_ACPI
-#include <drivers/i2c/i2c-hid.h>
-#endif
-#if CONFIG_DRIVER_USB_STORAGE
-#include "drivers/usb/usb-storage.h"
-#include <drivers/usb/usb-uas.h>
-#endif
-#if CONFIG_DRIVER_USB_CDC_NCM
-#include <drivers/usb/usb-cdc-ncm.h>
-#endif
-#if CONFIG_DRIVER_USB_CDC_ECM
-#include <drivers/usb/usb-cdc-ecm.h>
-#endif
-#if CONFIG_DRIVER_USB_RTL815X
-#include <drivers/usb/usb-rtl815x.h>
-#endif
-#if CONFIG_DRIVER_USB_HID
-#include <drivers/usb/usb-hid.h>
-#include <drivers/usb/usb-hub.h>
-#endif
-#if CONFIG_DRIVER_USB_RTL8822BU
-#include <drivers/usb/usb-rtl8822bu.h>
-#endif
-#if CONFIG_DRIVER_USB_CCID
-#include <drivers/usb/usb-ccid.h>
-#endif
-#if CONFIG_DRIVER_USB_BT
-#include <drivers/usb/usb-bt.h>
-#endif
-#if CONFIG_DRIVER_USB_UVC
-#include <drivers/usb/usb-uvc.h>
-#endif
-#include <drivers/pci/pci.h>
+#include "drivers/pci/pci.h"
+#include "drivers/usb/usb.h"
+#include "uapi/errno.h"
+
 #if CONFIG_DRIVER_ACPI
 #include <drivers/acpi/acpi.h>
 #endif
-#if CONFIG_DRIVER_ACPI && CONFIG_DRIVER_TYPEC
+
+#if CONFIG_DRIVER_TYPEC
 #include <drivers/typec/ucsi-acpi.h>
 #endif
-#include <drivers/usb/usb.h>
-#if CONFIG_DRIVER_NE2000
-#include "drivers/isa/pcat-ne2000.h"
+
+#if CONFIG_DRIVER_USB_HID
+#include <drivers/usb/usb-hid.h>
 #endif
-#if CONFIG_DRIVER_GRAPHICS_DEVICE
+
+#if CONFIG_DRIVER_PCI_NVME
+#include <drivers/pci/pci-nvme.h>
+#endif
+
+#if CONFIG_DRIVER_PCI_AHCI
+#include <drivers/pci/pci-ahci.h>
+#endif
+
+#if CONFIG_DRIVER_GRAPHICS
 #include "drivers/platform/pcat/graphics/pcat.h"
 #endif
-#include <uapi/errno.h>
-#include <hal/hal.h>
-#include "kern/klog.h"
+
+#if CONFIG_DRIVER_PCI_LPSS_I2C
+#include <drivers/i2c/lpss-i2c.h>
+#endif
+
+#if CONFIG_DRIVER_I2C_HID
+#include <drivers/i2c/i2c-hid.h>
+#endif
 
 /*
  * How long each way of resetting the machine is given before the next one
@@ -206,6 +152,7 @@ extern int drv_cpu_x86_init(void) __attribute__((weak));
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 int drv_usb_hid_checkpoint_driver_register(void);
 #endif
+
 #ifdef KERN_TEST_CHECKPOINTS
 int ws004_pci_msi_qemu_register(void);
 void ws004_pci_msi_qemu_raise(void);
@@ -229,45 +176,7 @@ kern_platform_init(
 	size_t count;
 	unsigned slot;
 	unsigned i;
-#if CONFIG_DRIVER_USB_RTL815X
-	int rtl815x_error;
-#endif
-#if CONFIG_DRIVER_NE2000
-	int network_error;
-#endif
-#if CONFIG_DRIVER_PCI_VENUS
-	int venus_error;
-#endif
-#if CONFIG_DRIVER_PCI_AHCI
-	int ahci_error;
-#endif
-#if CONFIG_DRIVER_PCI_VMD
-	int vmd_error;
-#endif
-#if CONFIG_DRIVER_PCI_I915
-	int i915_error;
-#endif
-#if CONFIG_DRIVER_PCI_NVRTX
-	int nvrtx_error;
-#endif
-#if CONFIG_DRIVER_PCI_AMDRDNA
-	int amdrdna_error;
-#endif
-#if CONFIG_DRIVER_PCI_GHCI
-	int ghci_error;
-#endif
-#if CONFIG_DRIVER_PCI_HDA
-	int hda_error;
-#endif
-#if CONFIG_DRIVER_PCI_LPSS_I2C
-	int lpss_error;
-#endif
-#if CONFIG_DRIVER_ACPI
-	int acpi_error;
-#endif
-#if CONFIG_DRIVER_ACPI && CONFIG_DRIVER_TYPEC
-	int typec_error;
-#endif
+	int err;
 
 	count = 0;
 
@@ -283,152 +192,20 @@ kern_platform_init(
 	partition_set_scheme(&drv_partition_scheme_pcat_auto);
 	disk_registry_reset();
 
-	/* Brings up the PCI core and, under test, the MSI fixture. */
-	if (drv_pci_init() != 0)
-		kern_logf("pci: core initialization failed\n");
-#ifdef KERN_TEST_CHECKPOINTS
-	if (ws004_pci_msi_qemu_register() != 0)
-		kern_logf("WS004 MSI fixture registration failed\n");
-#endif
+	/* Brings up the PCI core and devices. */
+	if (kern_driver_startup_pci_devices() != 0)
+		kern_logf("pci: pci device registration failed\n");
 
-	/* Brings up the USB core and registers the USB device drivers. */
-	if (drv_usb_init() != 0)
-		kern_logf("usb: core initialization failed\n");
-#if CONFIG_DRIVER_USB_STORAGE
-	if (drv_usb_storage_driver_register() != 0)
-		kern_logf("usb: mass-storage driver registration failed\n");
-	if (drv_usb_uas_driver_register() != 0)
-		kern_logf("usb: UAS driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_USB_CDC_NCM
-	if (drv_usb_cdc_ncm_driver_register() != 0)
-		kern_logf("usb: CDC NCM driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_USB_CDC_ECM
-	if (drv_usb_cdc_ecm_driver_register() != 0)
-		kern_logf("usb: CDC ECM driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_USB_RTL815X
-	/* Registers the Realtek USB 2.5G/5G network driver with the USB core. */
-	rtl815x_error = drv_usb_rtl815x_driver_register();
-	if (rtl815x_error != 0)
-		kern_logf("usb: Realtek RTL815x driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_USB_RTL8822BU
-	if (drv_usb_rtl8822bu_driver_register() != 0)
-		kern_logf("usb: RTL8822BU WLAN driver registration failed\n");
-#endif
-#if CONFIG_KERNEL_USB_HID_CHECKPOINT
-	if (drv_usb_hid_checkpoint_driver_register() != 0)
-		kern_logf("usb: HID checkpoint driver registration failed\n");
-#elif CONFIG_DRIVER_USB_HID
-	if (drv_usb_hid_driver_register() != 0)
-		kern_logf("usb: HID input driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_USB_HUB
-	if (drv_usb_hub_driver_register() != 0)
-		kern_logf("usb: hub driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_USB_CCID
-	if (drv_usb_ccid_driver_register() != 0)
-		kern_logf("usb: CCID smart card driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_USB_BT
-	if (drv_usb_bt_driver_register() != 0)
-		kern_logf("usb: Bluetooth driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_USB_UVC
-	if (drv_usb_uvc_driver_register() != 0)
-		kern_logf("usb: video class driver registration failed\n");
-#endif
+	/* Brings up the USB core and devices. */
+	if (kern_driver_startup_usb_devices() != 0)
+		kern_logf("usb: usb device registration failed\n");
 
-	/* Registers the PCI drivers: host controllers, NVMe, WLAN, graphics. */
-#if CONFIG_DRIVER_PCI_UHCI
-	if (drv_pci_uhci_driver_register() != 0)
-		kern_logf("usb: UHCI PCI driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_PCI_EHCI
-	if (drv_pci_ehci_driver_register() != 0)
-		kern_logf("usb: EHCI PCI driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_PCI_XHCI
-	if (drv_pci_xhci_driver_register() != 0)
-		kern_logf("usb: xHCI PCI driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_PCI_NVME
-	if (drv_pci_nvme_driver_register() != 0)
-		kern_logf("nvme: PCI driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_PCI_AHCI
-	/* Binds AHCI SATA controllers through the PCI lifecycle. */
-	ahci_error = drv_pci_ahci_driver_register();
-	if (ahci_error != 0)
-		kern_logf("ahci: PCI driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_PCI_VMD
-	/* Binds Intel VMDs, whose attach publishes the NVMe disks hidden behind them. */
-	vmd_error = drv_pci_vmd_driver_register();
-	if (vmd_error != 0)
-		kern_logf("vmd: PCI driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_PCI_VENUS
-	/* Binds Venus through the same PCI lifecycle as other devices. */
-	venus_error = drv_pci_venus_driver_register();
-	if (venus_error != 0)
-		kern_logf("pci: Venus driver registration failed (%d)\n", venus_error);
+	/* Brings up the ISA core and devices. */
+	if (kern_driver_startup_isa_devices() != 0)
+		kern_logf("isa: isa device registration failed\n");
 
-#endif
-#if CONFIG_DRIVER_PCI_I915
-	/* Binds the native Intel GPU through the same PCI lifecycle. */
-	i915_error = drv_pci_i915_driver_register();
-	if (i915_error != 0)
-		kern_logf("pci: i915 driver registration failed (%d)\n", i915_error);
-
-#endif
-#if CONFIG_DRIVER_PCI_NVRTX
-	/* Offers NVIDIA GPUs to the nvrtx driver, which only reads their identity so far. */
-	nvrtx_error = drv_pci_nvrtx_driver_register();
-	if (nvrtx_error != 0)
-		kern_logf("pci: nvrtx driver registration failed (%d)\n", nvrtx_error);
-
-#endif
-#if CONFIG_DRIVER_PCI_AMDRDNA
-	/* Offers AMD GPUs to the amdrdna driver, which reads them and keeps the RDNA ones. */
-	amdrdna_error = drv_pci_amdrdna_driver_register();
-	if (amdrdna_error != 0)
-		kern_logf("pci: amdrdna driver registration failed (%d)\n", amdrdna_error);
-
-#endif
-#if CONFIG_DRIVER_PCI_GHCI
-	/* Offers 3D and other display controllers to the GHCI driver, which keeps those whose BAR0 says GHCI. */
-	ghci_error = drv_pci_ghci_driver_register();
-	if (ghci_error != 0)
-		kern_logf("pci: GHCI driver registration failed (%d)\n", ghci_error);
-
-#endif
-#if CONFIG_DRIVER_PCI_HDA
-	/* Binds every HD Audio controller as an audio device. */
-	hda_error = drv_pci_hda_driver_register();
-	if (hda_error != 0)
-		kern_logf("pci: HD Audio driver registration failed (%d)\n", hda_error);
-
-#endif
-#if CONFIG_DRIVER_PCI_LPSS_I2C
-	/* Binds the PCH's I2C controllers, whose buses the I2C-HID touchpad uses. */
-	lpss_error = drv_pci_lpss_i2c_driver_register();
-	if (lpss_error != 0)
-		kern_logf("pci: LPSS I2C driver registration failed (%d)\n", lpss_error);
-
-#endif
-#if CONFIG_DRIVER_PCI_INTEL_AX211
-	if (drv_pci_intel_ax211_driver_register() != 0)
-		kern_logf("wlan: Intel AX211 PCI driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_PCI_RTL8125
-	if (drv_pci_rtl8125_driver_register() != 0)
-		kern_logf("pci: RTL8125 driver registration failed\n");
-#endif
-#if CONFIG_DRIVER_GRAPHICS_DEVICE
+	/* Brings up the PC/AT graphics driver. */
+#if CONFIG_DRIVER_GRAPHICS_VGA
 	if (drv_pcat_graphics_pci_register() != 0)
 		kern_logf("graphics: PCI driver registration failed\n");
 #endif
@@ -436,20 +213,18 @@ kern_platform_init(
 	/* Probes the host bridge, which binds the registered drivers. */
 	if (drv_pci_pcat_init() != 0)
 		kern_logf("pci: PC/AT host initialization failed\n");
-#ifdef KERN_TEST_CHECKPOINTS
-	else
-		drv_pci_dump();
-#endif
+
 	kern_log_boot_step("the PCI functions are attached");
-#if CONFIG_DRIVER_ACPI
 
 	/*
 	 * Loads the firmware's ACPI tables once the PCI functions are known.
 	 * A platform without ACPI (ENODEV) was logged by the driver already.
 	 */
-	acpi_error = drv_acpi_attach();
-	if (acpi_error != 0 && acpi_error != ENODEV)
-		kern_logf("acpi: attachment failed (error %d)\n", acpi_error);
+#if CONFIG_DRIVER_ACPI
+	err = drv_acpi_attach();
+	if (err != 0 && err != ENODEV)
+		kern_logf("acpi: attachment failed (error %d)\n", err);
+
 	kern_log_boot_step("ACPI is attached");
 
 	/*
@@ -459,27 +234,28 @@ kern_platform_init(
 	 * touch pad's I2C-HID probe below needs).  Without a namespace there
 	 * are no windows, and the functions are attached as they are.
 	 */
-	if (acpi_error == 0) {
+	if (err == 0)
 		drv_pci_pcat_assign_deferred();
-	} else {
+	else
 		(void)drv_pci_probe_deferred();
-	}
+
 	kern_log_boot_step("the deferred PCI functions are attached");
-#if CONFIG_DRIVER_TYPEC
+#endif /* CONFIG_DRIVER_ACPI */
 
 	/*
 	 * Starts the USB-C connectors' UCSI driver on the
 	 * namespace, once the Embedded Controller its _STA and _DSM read is
 	 * attached.  A platform without a UCSI device (ENODEV) has none.
 	 */
-	if (acpi_error == 0) {
-		typec_error = drv_ucsi_acpi_attach();
-		if (typec_error != 0 && typec_error != ENODEV)
+#if CONFIG_DRIVER_TYPEC
+	if (err == 0) {
+		err = drv_ucsi_acpi_attach();
+		if (err != 0 && err != ENODEV)
 			kern_logf("ucsi: attachment failed (error %d)\n", typec_error);
+
 		kern_log_boot_step("UCSI is attached");
 	}
-#endif
-#endif
+#endif /* CONFIG_DRIVER_TYPEC */
 
 	/*
 	 * Reaches the firmware's variables when the loader moved UEFI's runtime
@@ -520,19 +296,8 @@ kern_platform_init(
 		count++;
 	}
 
-	/* Attaches the ISA NE2000 when one is configured and present. */
-#if CONFIG_DRIVER_NE2000
-	network_error = drv_pcat_ne2000_init();
-	if (network_error == 0)
-		kern_logf("net: ISA NE2000 at 0x300 irq 10 registered "
-		    "as ne0\n");
-	else if (network_error != ENODEV)
-		kern_logf("net: ISA NE2000 initialization failed (%d)\n",
-		    network_error);
-#endif
-
 	/* Prepares the graphics driver. */
-#if CONFIG_DRIVER_GRAPHICS_DEVICE
+#if CONFIG_DRIVER_GRAPHICS_VGA
 	if (!drv_pcat_graphics_prepare())
 		kern_logf("graphics: PC/AT driver unavailable\n");
 #endif
@@ -571,18 +336,7 @@ kern_platform_refresh_devices(
 #endif
 
 	/* Probes the USB roots and readies the PCI WLAN devices. */
-#if CONFIG_DRIVER_PCI_UHCI
-	drv_pci_uhci_probe_roots();
-#endif
-#if CONFIG_DRIVER_PCI_EHCI
-	drv_pci_ehci_probe_roots();
-#endif
-#if CONFIG_DRIVER_PCI_XHCI
-	drv_pci_xhci_probe_roots();
-#endif
-#if CONFIG_DRIVER_PCI_INTEL_AX211
-	drv_pci_intel_ax211_devices_ready();
-#endif
+	kern_driver_probe_usb_roots_and_pci_wlan();
 	kern_log_boot_step("the USB roots are probed");
 
 	/* The boot FAT the loader names decides how long to wait, and for what. */
@@ -627,8 +381,6 @@ kern_platform_input_init(
 #endif
 
 	/* Attaches the PS/2 mouse. */
-
-	/* Reports why the mouse attachment failed. */
 	error = drv_pcat_ps2_8042_init();
 	if (error != 0)
 		return error;

@@ -43,7 +43,7 @@
 #define ELF_EXPECTED_DATA ELFDATA2MSB
 #define ELF32_EXPECTED_MACHINE EM_386
 #define ELF64_EXPECTED_MACHINE EM_SPARCV9
-#elif defined(HAL_ARCH_AMD64)
+#elif defined(HAL_ARCH_X86_64)
 #define ELF_EXPECTED_DATA ELFDATA2LSB
 #define ELF32_EXPECTED_MACHINE EM_386
 #define ELF64_EXPECTED_MACHINE EM_X86_64
@@ -145,7 +145,7 @@ static uint32_t segment_prot(uint32_t flags);
 static int read_headers(struct file_content_lease *lease, unsigned elf_class, struct normalized_header *header, struct normalized_program **programs_out, uint64_t *file_size_out);
 static int copy_segment_snapshot(struct file_content_lease *lease, struct vmspace *vm, uintptr_t destination, off_t source, size_t size);
 static int load_segment_snapshot(struct file_content_lease *lease, struct vmspace *vm, uintptr_t destination, off_t source, size_t size, uint32_t prot);
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386) || defined(HAL_ARCH_M68K)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386) || defined(HAL_ARCH_M68K)
 static int load_static_tls(struct file_content_lease *, struct vmspace *, const struct normalized_program *, uintptr_t *);
 #endif
 static int validate_and_load(struct file_content_lease *lease, struct vmspace *vm, unsigned elf_class, enum elf_load_role role, struct normalized_image *image);
@@ -878,7 +878,7 @@ load_segment_snapshot(
 	return 0;
 }
 
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386) || defined(HAL_ARCH_M68K)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386) || defined(HAL_ARCH_M68K)
 /* Builds a private initial block and a VM-owned immutable thread template. */
 static int
 load_static_tls(
@@ -1395,7 +1395,7 @@ validate_and_load(
 
 	/* The runtime linker owns dynamic TLS; static images start with a ready TP. */
 	if (tls != NULL && role == ELF_LOAD_MAIN && interp_count == 0) {
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_I386) || defined(HAL_ARCH_M68K)
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386) || defined(HAL_ARCH_M68K)
 		error = load_static_tls(lease, vm, tls, &image->thread_pointer);
 #else
 		error = ENOEXEC;

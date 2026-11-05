@@ -22,7 +22,7 @@
 #include <uapi/errno.h>
 #include "text.h"
 
-#define GRAPHICS_CAPABILITIES                                                  \
+#define GRAPHICS_CAPABILITIES                                              \
 	(KERN_GRAPHICS_CAP_FILL | KERN_GRAPHICS_CAP_LINE |                 \
 	 KERN_GRAPHICS_CAP_PATTERN | KERN_GRAPHICS_CAP_BLIT_INDEX8 |       \
 	 KERN_GRAPHICS_CAP_BLIT_RGB24 | KERN_GRAPHICS_CAP_BLIT_MONO1 |     \

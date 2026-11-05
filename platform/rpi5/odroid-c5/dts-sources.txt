@@ -1,0 +1,37 @@
+# The device tree sources of the ODROID-C5, fetched file by file at pinned
+# revisions and checked by size and SHA-256 (platform/arm64/odroid-c5.mk).
+# Each line is REPOSITORY|PATH|SIZE|SHA-256; the repositories are named in
+# platform/arm64/tools/fetch-odroid-c5-dts.py.  The files are
+# device tree sources and binding headers under (GPL-2.0+ OR MIT),
+# (GPL-2.0+ OR BSD-3-Clause) or GPL-2.0-only (each file says which).
+common|arch/arm64/boot/dts/amlogic/s7d_s905x5m_odroidc5.dts|21796|106f07f7ec38d019a125b3fc7b5556c1f0547b4c3ba51f5c9279c2af533eb85c
+linux|include/dt-bindings/clock/g12a-aoclkc.h|1156|34371a8ca185b269a586cab8ab4e04aa0557df0d317d4d84bd57228c9f53c457
+linux|include/dt-bindings/phy/phy.h|618|f4221e68541c911f2d24a16473ac48530152e1956a90ba25ca232055cea1bde7
+common|include/dt-bindings/clock/amlogic,s7d-clkc.h|13865|59a4e2319cd5b3a4a31eed50691f68c58e70f9fb60c2e3fc859b9a1568701c5c
+common|include/dt-bindings/clock/amlogic,s7d-scmi-clkc.h|1037|1a5e37f68e21700793c99316c750fed9401e7ed5b3ed179a2b73432f53f9ef55
+common|include/dt-bindings/clock/amlogic,txhd2-audio-clk.h|4139|1b390ac2c44c74639c34343f403464a23d393904c51a23ae8c97278b65bb1ae6
+common|include/dt-bindings/display/hdr10plus.h|285|b32b04040c41718d81d0805436a2e34c61bc2c73e3e771a6462792f3269a324b
+common|include/dt-bindings/display/meson-drm-ids.h|2469|8541c44bfa7a1d5f4f4571d60276f1b3e951a9b75674f635c1b245b5e9c58f61
+common|include/dt-bindings/gpio/gpio.h|1003|795428dd5320c5b8729aaeaefbe804785ed225123bd4fcc9610a1312bbae04e1
+common|include/dt-bindings/gpio/meson-s7d-gpio.h|2214|b2ba61d4c7f89a56c46e5dc7ef1625d89af6a05f30e9329c8d2b2d064a9fc38a
+common|include/dt-bindings/iio/adc/amlogic-saradc.h|394|2d235d240f211a911f44ef7fcd473430f6c3318e136adefdcd05ae4b4f6e36ee
+common|include/dt-bindings/input/input.h|366|ea4b9ac85cf463235b2ca421c2fea22fc114aab04e4e9179eccaa17c7f9df2df
+common|include/dt-bindings/input/linux-event-codes.h|24963|9fae289a127e31a975d31d23705cb69a08e62c61cff5aa61e8a5e5e2e63eee84
+common|include/dt-bindings/input/meson_ir.h|2065|75efd58bfd9f2c92cec49a93cdda29b5362f243f026c2b53699f1087e4443f9b
+common|include/dt-bindings/interrupt-controller/arm-gic.h|545|d5f59ffba3a9521bc49a5093a97992e8ae728b6a42371502dc466ee46c216e3f
+common|include/dt-bindings/interrupt-controller/irq.h|440|b67f4a0c9eed187b0d682208603f3dda5afc43458ae5d6d69c1dc6f6755b1e2a
+common|include/dt-bindings/mailbox/amlogic,mbox.h|1271|dd9f615cb3a3f3efee2a276d87690ea5507442b7cb1cb28f3672bc67069cfd04
+common|include/dt-bindings/mailbox/s7d-mbox.h|2005|1611a5e13b5533df400fff891c7592e2d2360f7ee134a856b28070b24239baa5
+common|include/dt-bindings/power/s7d-pd.h|623|4abaecf83672ae0c393fdfddf8e1eeccb26cc4033342a2ff98c273c899b4965c
+common|include/dt-bindings/pwm/meson.h|831|a906056ebc39211619ef140652ba55346180669a505aef64b8c3a1629b2bf4c0
+common|include/dt-bindings/pwm/pwm.h|232|cfcea10ac409ab4833dd7c37826d042b43cd3b8a7023455fe67bf1ba3d81413e
+common|include/dt-bindings/reset/amlogic,meson-s7d-reset.h|3185|a231c6ad1cd138e559c747838617d25d6ee9c0ad31b26bfe90e2e145f74455de
+common|include/dt-bindings/thermal/ddr-params.h|2450|dc823a5ec49b1c9e57b609409e3d1553ffc03603f11f4c15f831fcd1bbcab689
+common|arch/arm64/boot/dts/amlogic/hardkernel_ir_map.dtsi|785|244739b70f91ec2e738d8f3558949a39f63d9cb2ff3e92b298f7c08ee600ca0a
+common|arch/arm64/boot/dts/amlogic/hdr10plus.dtsi|231|da883fda5796103c122a9e16c4251bb2f9344d52c9eab111293f85307ac83dc0
+common|arch/arm64/boot/dts/amlogic/meson-ir-map.dtsi|6800|8e472da8489a187346801c0246b82185888a2c67a5e6c705e28f05afedfb964a
+common|arch/arm64/boot/dts/amlogic/meson-s7d.dtsi|67390|6ad2a507e103201276be4d2cd35eb9cfc420718cfdb3ec5df22b045bc5d99c90
+common|arch/arm64/boot/dts/amlogic/meson-valhall.dtsi|3148|3e573cb00a7b2508bea6063a20a6fe0cf17b75140c1a9b69272df60fb5432038
+common|arch/arm64/boot/dts/amlogic/mesons7d_audio.dtsi|13862|9b9ea914c46447aef6abe4a335795a215741987a84c9cd94162ed2c06c189e0c
+common|arch/arm64/boot/dts/amlogic/mesons7d_cpufreq.dtsi|5503|eea80089c91b24092905e22af78e3889ddfb6483cde7fb9fede5ba7be145cb84
+common|arch/arm64/boot/dts/amlogic/mesons7d_drm.dtsi|10876|7a55f41b463c85a2b169661792d7fdb727bcdc241dd53ca53ab52e9115912957

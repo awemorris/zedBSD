@@ -1,579 +1,57 @@
+#
 # zedBSD amd64/PC-AT bootstrap rules.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+#
 
-AMD64_PLATFORM := platform/amd64
-BIOS_LOADER := bootloader/pcat
-UEFI_LOADER := bootloader/uefi
-AMD64_ZEDBSD_CONFIG := $(AMD64_PLATFORM)/zedbsd.cfg
-AMD64_NATIVE_ZEDBSD_CONFIG := $(AMD64_PLATFORM)/zedbsd-native.cfg
-AMD64_UEFI_CONFIGURED_IMAGES := \
-	$(BUILD)/bios-hdd-image.img \
-	$(BUILD)/bios-hdd-image-fragmented.img \
-	$(BUILD)/deferred-stub-qemu.img \
-	$(BUILD)/phase19-qemu.img \
-	$(BUILD)/phase20-qemu.img \
-	$(BUILD)/posix-phase2-qemu.img \
-	$(BUILD)/posix-phase3-qemu.img \
-	$(BUILD)/posix-phase4-qemu.img \
-	$(BUILD)/posix-phase5-qemu.img \
-	$(BUILD)/posix-phase6-qemu.img \
-	$(BUILD)/posix-phase7-qemu.img \
-	$(BUILD)/posix-phase8-qemu.img \
-	$(BUILD)/posix-phase85-qemu.img
-$(AMD64_UEFI_CONFIGURED_IMAGES): $(AMD64_ZEDBSD_CONFIG) \
-	$(ZEDBSD_IMAGE_HOST)
-.DELETE_ON_ERROR: $(AMD64_UEFI_CONFIGURED_IMAGES)
-.DELETE_ON_ERROR: $(BUILD)/ufs-root-hdd-image.img \
-	$(BUILD)/hdd-image.img
+ZEDBSD_CONFIG        := platform/amd64/zedbsd.cfg
+NATIVE_ZEDBSD_CONFIG := platform/amd64/zedbsd-native.cfg
+IMAGE_CONTRACT_STAMP := $(BUILD)/.disk-image-contract
+IMAGE_STAGE1         := $(if $(filter bios,$(ZEDBSD_VARIANT)), $(BUILD)/bootloader/stage1-native.bin,$(BUILD)/bootloader/stage1.bin)
+CPPFLAGS             := -nostdlibinc -Iinclude -Isrc -I. -DHAL_ARCH_AMD64 \
+                        -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
+                        -DKERN_USER_ABI_LP64 \
+                        -DPCAT_VGA_APERTURE_ADDRESS=0xffffffffc1400000ULL \
+                        -DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL \
+                        $(ZEDBSD_CONFIG_CPPFLAGS)
+CFLAGS              := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
+	               -ffreestanding -fno-pic -fno-pie -fno-stack-protector \
+                       -fno-asynchronous-unwind-tables -fno-unwind-tables \
+                       -ffunction-sections -fdata-sections -Os -Wall -Wextra \
+                       -Werror -Wframe-larger-than=8192 -fno-builtin
+LIBC_CFLAGS         := $(filter-out -mgeneral-regs-only,$(CFLAGS))
+KERNEL_LTO_CFLAGS   := $(ZEDBSD_KERNEL_LTO_CFLAGS)
 
-# Variant is an image-composition input only. This content-stable stamp
-# invalidates a previously published hdd-image.img without leaking the
-# selection into kernel, userland, or loader compilation.
-AMD64_IMAGE_CONTRACT_STAMP := $(BUILD)/.disk-image-contract
-AMD64_IMAGE_STAGE1 := $(if $(filter bios,$(ZEDBSD_VARIANT)),\
-	$(BUILD)/bootloader/stage1-native.bin,$(BUILD)/bootloader/stage1.bin)
-.PHONY: FORCE_AMD64_IMAGE_CONTRACT
-FORCE_AMD64_IMAGE_CONTRACT:
-
-$(AMD64_IMAGE_CONTRACT_STAMP): FORCE_AMD64_IMAGE_CONTRACT
-	@mkdir -p $(dir $@)
-	@value='layout=$(ZEDBSD_VARIANT)'; \
- if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
- printf '%s\n' "$$value" > $@.tmp; \
- mv $@.tmp $@; \
- fi
+$(BUILD)/vmunix: $(VMUNIX_OBJS) $(ZEDBSD_PLATFORM_DIR)/vmunix.ld
+	$(LD) \
+		-m elf_x86_64 \
+		--gc-sections \
+		-z max-page-size=4096 \
+		-T $(ZEDBSD_PLATFORM_DIR)/vmunix.ld \
+		-nostdlib \
+		-Map $@.map \
+		$(AMD64_VMUNIX_OBJS) \
+		-o $@
 
 define AMD64_VALIDATE_GPT_IMAGE
 	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-gpt-image.noct \
- --layout $(ZEDBSD_VARIANT) \
- --machine pcat --stage1 $(AMD64_IMAGE_STAGE1) \
- --stage2 $(BUILD)/bootloader/stage2-chain.bin \
- --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
- --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
- --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
- --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
- --arch-format ufs --data-image $(DATA_IMAGE) \
- --swapfile $(SWAP_IMAGE) $(1)
+		--layout $(ZEDBSD_VARIANT) \
+		--machine pcat --stage1 $(IMAGE_STAGE1) \
+		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(ZEDBSD_CONFIG) \
+		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $(1)
 endef
-EFI_CC := $(ZEDBSD_TARGET_LLVM_BIN)/clang \
-	--target=x86_64-unknown-windows
-EFI_LD := $(ZEDBSD_TARGET_LLVM_BIN)/lld-link
-EFI_NM := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-nm
-EFI_CFLAGS := -std=c11 -ffreestanding -fshort-wchar -mno-red-zone \
-	-fno-stack-protector -fno-builtin -fno-asynchronous-unwind-tables \
-	-fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections \
-	-Os -Wall -Wextra -Werror -I.
 
-# The kernel and the HAL read the compiler's freestanding headers (stdint.h,
-# stddef.h, stdbool.h, stdarg.h, limits.h) and the tree's own include/ and
-# src/, never the C library: -nostdlibinc keeps only the compiler's resource
-# directory from the system search list, so the sysroot is not read.
-AMD64_CPPFLAGS := -nostdlibinc \
-	-Iinclude -Isrc -I. \
-	-DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
-	-DKERN_USER_ABI_LP64 \
-	-DPCAT_VGA_APERTURE_ADDRESS=0xffffffffc1400000ULL \
-	-DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL
-AMD64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
-AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
-	-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
-	-fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
-	-Wframe-larger-than=8192 -fno-builtin
-AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
-# Link-time optimization of vmunix (ws053): ZEDBSD_KERNEL_LTO_CFLAGS (from the
-# top Makefile) goes to every C object of the kernel, its drivers and the
-# HAL; the assembly stays native.
-AMD64_KERNEL_LTO_CFLAGS := $(ZEDBSD_KERNEL_LTO_CFLAGS)
 
-AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/x86/boot-parameters.c \
-	src/hal/x86/io.c \
-	src/hal/amd64/asm.c src/hal/amd64/lib.c \
-	src/hal/amd64/page.c src/hal/amd64/pmem-range.c \
-	src/hal/amd64/ram-map.c src/hal/amd64/framebuffer-map.c \
-	src/hal/amd64/space.c src/hal/amd64/image.c \
-	src/hal/amd64/acpi-window.c src/hal/amd64/cmain.c \
-	src/hal/amd64/descriptor.c src/hal/amd64/int.c src/hal/amd64/irq.c \
-	src/hal/amd64/msi-source.c \
-	src/hal/amd64/task.c src/hal/amd64/percpu.c src/hal/amd64/smp.c \
-	src/hal/amd64/bsp-pcat/boot.c \
-	src/hal/amd64/bsp-pcat/handoff-validation.c \
-	src/hal/amd64/bsp-pcat/cons.c \
-	src/hal/amd64/bsp-pcat/pic.c src/hal/amd64/bsp-pcat/clock.c \
-	src/hal/amd64/bsp-pcat/acpi.c src/hal/amd64/bsp-pcat/lapic.c \
-	src/hal/amd64/bsp-pcat/idle-suspend.c \
-	src/hal/amd64/bsp-pcat/early-init-policy.c \
-	src/hal/amd64/bsp-pcat/timecounter-policy.c \
-	src/hal/amd64/bsp-pcat/timecounter.c \
-	src/hal/amd64/bsp-pcat/mcfg.c \
-	src/hal/amd64/bsp-pcat/ioapic.c
-AMD64_HAL_ASM := src/hal/amd64/locore.S src/hal/amd64/trap.S \
-	src/hal/amd64/dispatch.S src/hal/amd64/ap-trampoline.S
 AMD64_HAL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AMD64_HAL_SOURCES)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(AMD64_HAL_ASM))
 
-AMD64_USB_HCD_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_UHCI),y)
-AMD64_USB_HCD_SOURCES += src/drivers/pci/pci-uhci.c
-endif
-ifeq ($(CONFIG_DRIVER_PCI_EHCI),y)
-AMD64_USB_HCD_SOURCES += src/drivers/pci/pci-ehci.c
-endif
-ifeq ($(CONFIG_DRIVER_PCI_XHCI),y)
-AMD64_USB_HCD_SOURCES += src/drivers/pci/pci-xhci.c src/drivers/pci/pci-xhci-isoch.c
-endif
-AMD64_USB_CLASS_SOURCES :=
-ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-storage.c
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-uas.c src/drivers/usb/usb-uas-transport.c src/drivers/usb/usb-uas-disk.c
-endif
-AMD64_NVME_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
-AMD64_NVME_SOURCES += src/drivers/pci/pci-nvme.c
-endif
-ifeq ($(CONFIG_DRIVER_PCI_AHCI),y)
-AMD64_NVME_SOURCES += src/drivers/pci/pci-ahci.c
-endif
-# The Intel VMD driver (WS298) shows the NVMe disks a VMD hides (firmware storage mode RAID).
-# Its BAR placement uses pci-window.c, which the ACPI build already links.
-ifeq ($(CONFIG_DRIVER_PCI_VMD),y)
-AMD64_NVME_SOURCES += src/drivers/pci/pci-vmd.c src/drivers/pci/pci-vmd-plan.c
-ifneq ($(CONFIG_DRIVER_ACPI),y)
-AMD64_NVME_SOURCES += src/drivers/pci/pci-window.c
-endif
-endif
-AMD64_HDA_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_HDA),y)
-AMD64_HDA_SOURCES += src/drivers/pci/pci-hda.c
-endif
-AMD64_VENUS_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_VENUS),y)
-AMD64_VENUS_SOURCES += src/drivers/gpu/venus/transport.c \
-	src/drivers/gpu/venus/venus.c src/drivers/gpu/venus/display.c src/drivers/gpu/venus/share.c
-endif
-AMD64_I915_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_I915),y)
-AMD64_I915_SOURCES += src/drivers/gpu/i915/command.c src/drivers/gpu/i915/compiler/compile.c src/drivers/gpu/i915/compiler/eu.c src/drivers/gpu/compiler/spirv.c src/drivers/gpu/i915/context.c src/drivers/gpu/i915/defaults.c src/drivers/gpu/i915/device.c src/drivers/gpu/i915/device-info.c src/drivers/gpu/i915/display/backlight.c src/drivers/gpu/i915/display/bootfb.c src/drivers/gpu/i915/display/clock.c src/drivers/gpu/i915/display/control.c src/drivers/gpu/i915/display/run-log.c src/drivers/gpu/i915/display/display.c src/drivers/gpu/i915/display/display-power.c src/drivers/gpu/i915/display/dmc-shell.c src/drivers/gpu/i915/display/xd-clock.c src/drivers/gpu/i915/display/xd-ddi.c src/drivers/gpu/i915/display/xd-dmc.c src/drivers/gpu/i915/display/edp-device.c src/drivers/gpu/i915/display/xd9-backlight.c src/drivers/gpu/i915/display/xd9-firmware.c src/drivers/gpu/i915/display/xd9-flip.c src/drivers/gpu/i915/display/xd9-node.c src/drivers/gpu/i915/display/xd9-outputs.c src/drivers/gpu/i915/display/xd9-step.c src/drivers/gpu/i915/display/hpd.c src/drivers/gpu/i915/display/interrupts.c src/drivers/gpu/i915/display/output.c src/drivers/gpu/i915/display/present.c src/drivers/gpu/i915/display/vga.c src/drivers/gpu/i915/display/resident.c src/drivers/gpu/i915/display/scanout.c src/drivers/gpu/i915/display/vbt-shell.c src/drivers/gpu/i915/dma.c src/drivers/gpu/i915/engine.c src/drivers/gpu/i915/firmware.c src/drivers/gpu/i915/ggtt.c src/drivers/gpu/i915/gt-power.c src/drivers/gpu/i915/i915.c src/drivers/gpu/i915/irq.c src/drivers/gpu/i915/job.c src/drivers/gpu/i915/memory.c src/drivers/gpu/i915/migrate.c src/drivers/gpu/i915/mmio.c src/drivers/gpu/i915/park.c src/drivers/gpu/i915/pci.c src/drivers/gpu/i915/perf.c src/drivers/gpu/i915/power.c src/drivers/gpu/i915/ppgtt.c src/drivers/gpu/i915/product.c src/drivers/gpu/i915/pxp.c src/drivers/gpu/i915/vk/vk-batch.c src/drivers/gpu/i915/vk/vk-blit.c src/drivers/gpu/i915/vk/vk-codec.c src/drivers/gpu/i915/vk/vk-command.c src/drivers/gpu/i915/vk/vk-compute.c src/drivers/gpu/i915/vk/vk-descriptor.c src/drivers/gpu/i915/vk/vk-dispatch.c src/drivers/gpu/i915/vk/vk-draw.c src/drivers/gpu/i915/vk/vk-fence.c src/drivers/gpu/i915/vk/vk-forget.c src/drivers/gpu/i915/vk/vk-image.c src/drivers/gpu/i915/vk/vk-instance.c src/drivers/gpu/i915/vk/vk-math.c src/drivers/gpu/i915/vk/vk-memory.c src/drivers/gpu/i915/vk/vk-object.c src/drivers/gpu/i915/vk/vk-objects.c src/drivers/gpu/i915/vk/vk-pipeline.c src/drivers/gpu/i915/vk/vk-pipeline-prepare.c src/drivers/gpu/i915/vk/vk-render-pass.c src/drivers/gpu/i915/vk/vk-reply.c src/drivers/gpu/i915/vk/vk-state.c src/drivers/gpu/i915/vk/vk-sync.c src/drivers/gpu/i915/vk/vk-transport.c src/drivers/gpu/i915/vk/vk-video.c src/drivers/gpu/i915/vk/vk-video-h264-tables.c src/drivers/gpu/i915/vk/vk-video-mfx.c src/drivers/gpu/i915/vk/vk-video-h265.c src/drivers/gpu/i915/vk/vk-video-hcp.c src/drivers/gpu/i915/vk/vk.c src/drivers/gpu/i915/request.c src/drivers/gpu/i915/request-queue.c src/drivers/gpu/i915/reset.c src/drivers/gpu/i915/resource.c src/drivers/gpu/i915/runtime-pm.c src/drivers/gpu/i915/session.c src/drivers/gpu/i915/submit.c src/drivers/gpu/i915/sync.c src/drivers/gpu/i915/tlb.c src/drivers/gpu/i915/trace.c src/drivers/gpu/i915/verify-workarounds.c src/drivers/gpu/i915/workarounds.c src/drivers/gpu/i915/worker.c src/drivers/gpu/i915/workqueue.c
-# The binding of the Type-C ports of the display and the hooks of their Dekel PHYs.
-AMD64_I915_SOURCES += src/drivers/gpu/i915/display/tc-port.c
-# The external DisplayPort ports on the Type-C ports: their binding (the probe is xd-dp.c).
-AMD64_I915_SOURCES += src/drivers/gpu/i915/display/dp-ext-kern.c
-AMD64_I915_SOURCES += src/drivers/gpu/i915/display/head.c
-# The display 12 and 13 code: the register window, the platforms, the display and its diagnostics.
-AMD64_I915_SOURCES += src/drivers/gpu/i915/display/xd-io.c src/drivers/gpu/i915/display/xd-platform.c src/drivers/gpu/i915/display/xd-display.c src/drivers/gpu/i915/display/xd-diag.c src/drivers/gpu/i915/display/xd-bandwidth.c
-# The record of the display writes of a start and the survey of the first picture, which two kernels are compared by.
-AMD64_I915_SOURCES += src/drivers/gpu/i915/mmio-record.c src/drivers/gpu/i915/display/survey.c
-# The display 12 and 13 rewrite, continued.
-AMD64_I915_SOURCES += src/drivers/gpu/i915/display/xd-vbt.c src/drivers/gpu/i915/display/xd-edid.c src/drivers/gpu/i915/display/xd-aux.c src/drivers/gpu/i915/display/xd-gmbus.c src/drivers/gpu/i915/display/xd-panel.c src/drivers/gpu/i915/display/xd-power.c src/drivers/gpu/i915/display/xd-tc.c src/drivers/gpu/i915/display/xd-tc-port.c src/drivers/gpu/i915/display/xd-dp.c src/drivers/gpu/i915/display/xd-pipe.c src/drivers/gpu/i915/display/xd-dbuf.c src/drivers/gpu/i915/display/xd-core.c src/drivers/gpu/i915/display/xd-takeover.c src/drivers/gpu/i915/display/xd-screen.c src/drivers/gpu/i915/display/xd-output.c src/drivers/gpu/i915/display/xd-edp.c src/drivers/gpu/i915/display/xd-picture.c src/drivers/gpu/i915/display/xd-hpd.c
-endif
-AMD64_NVRTX_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_NVRTX),y)
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/discover.c src/drivers/gpu/nvrtx/identify.c \
-	src/drivers/gpu/nvrtx/nvrtx.c src/drivers/gpu/nvrtx/stage.c
-# The products (PCI device IDs) of the Turing, Ampere and Ada chips, for the marks (ws242-p001).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/products.c
-# The GSP boot path's parts that touch no hardware (ws037-p004 4a).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/wire.c src/drivers/gpu/nvrtx/image.c \
-	src/drivers/gpu/nvrtx/layout.c src/drivers/gpu/nvrtx/radix3.c src/drivers/gpu/nvrtx/queue.c \
-	src/drivers/gpu/nvrtx/vbios.c src/drivers/gpu/nvrtx/hold.c
-# P0 of the GSP boot: firmware files, DMA memory, VBIOS (ws037-p004 4b).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/file.c src/drivers/gpu/nvrtx/memory.c \
-	src/drivers/gpu/nvrtx/rom.c src/drivers/gpu/nvrtx/gsp.c
-# P1 of the GSP boot: the falcons, FWSEC-FRTS and the region's teardown (ws037-p004 4c).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/falcon.c src/drivers/gpu/nvrtx/boot.c
-# P2 of the GSP boot and its stop: the calls, the sequencer, booter_load (ws037-p004 4d).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/records.c src/drivers/gpu/nvrtx/rpc.c
-# P4 to P6: page tables, the address space and channel records (ws037-p005 5a).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/mmu.c src/drivers/gpu/nvrtx/objects.c
-# P4 to P6 on the GPU: the address space, the channel and its fence (ws037-p005 5b-5d).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/channel.c
-# P5g: the graphics golden context and the TU10x scrubber (ws037-p005 5f, nvrtx.gr=1).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/gr.c
-# P8a: the display under the GSP, its objects and the readout of the lit heads (ws037-p006).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/display/display.c
-# The shader compiler: SPIR-V to SM75 through the shared frontend and optimizer (ws037-p008).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/compiler/sm75/encode.c src/drivers/gpu/nvrtx/compiler/sm75/operands.c \
-	src/drivers/gpu/nvrtx/compiler/sm75/schedule.c src/drivers/gpu/nvrtx/compiler/sm75/compile.c \
-	src/drivers/gpu/nvrtx/compiler/sm75/registers.c src/drivers/gpu/nvrtx/compiler/sm75/lower.c \
-	src/drivers/gpu/nvrtx/compiler/sm75/lower-divide.c src/drivers/gpu/nvrtx/compiler/sm75/lower-memory.c \
-	src/drivers/gpu/nvrtx/compiler/sm75/lower-graphics.c \
-	$(filter-out $(AMD64_I915_SOURCES),src/drivers/gpu/compiler/spirv.c src/drivers/gpu/compiler/optimize.c)
-# P9c: the first compute launch on a graphics channel (ws037-p008 stage C, nvrtx.compute=1).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/compute-launch.c src/drivers/gpu/nvrtx/compute.c
-# P9g: the first draw on the compute launch's channel (ws037-p007, nvrtx.draw=1).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/draw-push.c src/drivers/gpu/nvrtx/draw.c
-# P8b: the takeover of the firmware's head, the display channels and a flip (ws037-p006, nvrtx.disp=1).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/display/disp-records.c src/drivers/gpu/nvrtx/display/disp-first.c src/drivers/gpu/nvrtx/display/scanout.c
-# P4m: the VRAM allocator and the BAR1 window (ws037-p005).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/heap.c src/drivers/gpu/nvrtx/vram.c
-# D2: the Vulkan executor's object registry, sessions, transport and dispatcher (ws037-p007), with the
-# i915 executor's wire codec it shares (built here only when the i915 driver does not build it).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/vk/vk-object.c src/drivers/gpu/nvrtx/vk/vk-session.c \
-	src/drivers/gpu/nvrtx/vk/vk-stream.c src/drivers/gpu/nvrtx/vk/vk-dispatch.c src/drivers/gpu/nvrtx/vk/vk-device.c \
-	src/drivers/gpu/nvrtx/runtime.c src/drivers/gpu/nvrtx/vk/vk-reply.c src/drivers/gpu/nvrtx/vk/vk-memory.c src/drivers/gpu/nvrtx/vk/vk-resource.c \
-	src/drivers/gpu/nvrtx/vk-node.c src/drivers/gpu/nvrtx/vk/vk-layout.c src/drivers/gpu/nvrtx/vk/vk-target.c src/drivers/gpu/nvrtx/vk/vk-pipeline.c \
-	src/drivers/gpu/nvrtx/vk/vk-command.c src/drivers/gpu/nvrtx/vk/vk-record.c src/drivers/gpu/nvrtx/vk/vk-execute.c src/drivers/gpu/nvrtx/vk/vk-queue.c \
-	src/drivers/gpu/nvrtx/vk/exec-push.c src/drivers/gpu/nvrtx/vk/exec-copy.c src/drivers/gpu/nvrtx/vk/vk-video.c \
-	src/drivers/gpu/nvrtx/vk/vk-video-h264.c \
-	src/drivers/gpu/nvrtx/vk/vk-video-h265.c
-ifneq ($(CONFIG_DRIVER_PCI_I915),y)
-AMD64_NVRTX_SOURCES += src/drivers/gpu/i915/vk/vk-codec.c
-endif
-# P9w: the work channel the GPU device keeps (ws037-p007 stage D1, nvrtx.work=1).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/work-records.c src/drivers/gpu/nvrtx/work.c src/drivers/gpu/nvrtx/recover.c
-# The video decoder's and encoder's channels (nvrtx.video=1).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/nvdec-records.c src/drivers/gpu/nvrtx/nvdec.c
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/nvenc-records.c src/drivers/gpu/nvrtx/nvenc.c src/drivers/gpu/nvrtx/nvenc-test.c
-# P9p: the GPU's performance state, and its boost with nvrtx.boost=1 (ws241-p001).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/perf.c
-# P8c: the GPU device, its display (events, refresh, cursor) and blob sharing (ws037-p006, nvrtx.resident=1).
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/node.c src/drivers/gpu/nvrtx/display/present.c src/drivers/gpu/nvrtx/display/cursor.c src/drivers/gpu/nvrtx/share.c
-endif
-# The AMD RDNA driver: the driver's files, then the shader compiler's.
-AMD64_AMDRDNA_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_AMDRDNA),y)
-AMD64_AMDRDNA_SOURCES += src/drivers/gpu/amdrdna/amdrdna.c src/drivers/gpu/amdrdna/stage.c \
-	src/drivers/gpu/amdrdna/mmio.c src/drivers/gpu/amdrdna/identify.c src/drivers/gpu/amdrdna/readout.c \
-	src/drivers/gpu/amdrdna/vbios.c src/drivers/gpu/amdrdna/control.c src/drivers/gpu/amdrdna/bytes.c \
-	src/drivers/gpu/amdrdna/block-table.c src/drivers/gpu/amdrdna/boot-database.c \
-	src/drivers/gpu/amdrdna/vbios-table.c src/drivers/gpu/amdrdna/layout.c src/drivers/gpu/amdrdna/products.c \
-	src/drivers/gpu/amdrdna/bytecode.c src/drivers/gpu/amdrdna/edid.c src/drivers/gpu/amdrdna/sink.c \
-	src/drivers/gpu/amdrdna/display-command.c src/drivers/gpu/amdrdna/relight.c src/drivers/gpu/amdrdna/mode-plan.c \
-	src/drivers/gpu/amdrdna/modeset.c src/drivers/gpu/amdrdna/hotplug.c \
-	src/drivers/gpu/amdrdna/dcn-registers.c src/drivers/gpu/amdrdna/picture.c \
-	src/drivers/gpu/amdrdna/gmc.c src/drivers/gpu/amdrdna/ih.c src/drivers/gpu/amdrdna/span-pool.c \
-	src/drivers/gpu/amdrdna/hub-registers.c src/drivers/gpu/amdrdna/vm-format.c \
-	src/drivers/gpu/amdrdna/interrupt-format.c src/drivers/gpu/amdrdna/firmware-format.c \
-	src/drivers/gpu/amdrdna/psp-format.c src/drivers/gpu/amdrdna/thermal-format.c \
-	src/drivers/gpu/amdrdna/firmware.c src/drivers/gpu/amdrdna/training.c src/drivers/gpu/amdrdna/psp.c \
-	src/drivers/gpu/amdrdna/smu.c src/drivers/gpu/amdrdna/display-memory.c src/drivers/gpu/amdrdna/command-format.c \
-	src/drivers/gpu/amdrdna/queue-format.c src/drivers/gpu/amdrdna/settings.c \
-	src/drivers/gpu/amdrdna/check-program.c src/drivers/gpu/amdrdna/cp.c src/drivers/gpu/amdrdna/sdma.c \
-	src/drivers/gpu/amdrdna/engines.c src/drivers/gpu/amdrdna/context-pool.c \
-	src/drivers/gpu/amdrdna/space.c src/drivers/gpu/amdrdna/node.c src/drivers/gpu/amdrdna/runtime.c \
-	src/drivers/gpu/amdrdna/vk-node.c src/drivers/gpu/amdrdna/sessions.c \
-	src/drivers/gpu/amdrdna/display-format.c src/drivers/gpu/amdrdna/display.c src/drivers/gpu/amdrdna/present.c
-endif
-# The AMD RDNA driver's reset of the GPU and its setting up again.
-ifeq ($(CONFIG_DRIVER_PCI_AMDRDNA),y)
-AMD64_AMDRDNA_SOURCES += src/drivers/gpu/amdrdna/reset.c src/drivers/gpu/amdrdna/reset-display.c \
-	src/drivers/gpu/amdrdna/reset-format.c
-endif
-# The AMD RDNA shader compiler: SPIR-V to GFX10 through the shared frontend and optimizer (ws039-p007).
-AMD64_AMDRDNA_COMPILER_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_AMDRDNA),y)
-AMD64_AMDRDNA_COMPILER_SOURCES += src/drivers/gpu/amdrdna/compiler/gfx10-compile.c \
-	src/drivers/gpu/amdrdna/compiler/gfx10-encode.c src/drivers/gpu/amdrdna/compiler/gfx10-wait.c \
-	src/drivers/gpu/amdrdna/compiler/gfx10-program.c \
-	$(filter-out $(AMD64_I915_SOURCES) $(AMD64_NVRTX_SOURCES),src/drivers/gpu/compiler/spirv.c src/drivers/gpu/compiler/optimize.c)
-endif
-# The AMD RDNA Vulkan executor: Venus's commands to GFX10 packets (ws039-p008, amdrdna.vk=1), with the i915
-# executor's wire codec it shares (built here only when neither the i915 nor the nvrtx driver builds it).
-AMD64_AMDRDNA_VK_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_AMDRDNA),y)
-AMD64_AMDRDNA_VK_SOURCES += src/drivers/gpu/amdrdna/vk/vk-object.c src/drivers/gpu/amdrdna/vk/vk-session.c \
-	src/drivers/gpu/amdrdna/vk/vk-stream.c src/drivers/gpu/amdrdna/vk/vk-dispatch.c src/drivers/gpu/amdrdna/vk/vk-device.c \
-	src/drivers/gpu/amdrdna/vk/vk-reply.c src/drivers/gpu/amdrdna/vk/vk-memory.c src/drivers/gpu/amdrdna/vk/vk-resource.c \
-	src/drivers/gpu/amdrdna/vk/vk-layout.c src/drivers/gpu/amdrdna/vk/vk-target.c src/drivers/gpu/amdrdna/vk/vk-pipeline.c \
-	src/drivers/gpu/amdrdna/vk/vk-command.c src/drivers/gpu/amdrdna/vk/vk-record.c src/drivers/gpu/amdrdna/vk/vk-execute.c \
-	src/drivers/gpu/amdrdna/vk/vk-queue.c src/drivers/gpu/amdrdna/vk/vk-pm4.c src/drivers/gpu/amdrdna/vk/vk-state.c \
-	src/drivers/gpu/amdrdna/vk/vk-descriptor.c src/drivers/gpu/amdrdna/vk/vk-quad.c src/drivers/gpu/amdrdna/vk/vk-float.c \
-	$(filter-out $(AMD64_I915_SOURCES) $(AMD64_NVRTX_SOURCES),src/drivers/gpu/i915/vk/vk-codec.c)
-endif
-# The generic GHCI GPU driver (a PCIe GPU with the GPU Host Controller Interface 1.0): the device, the ring,
-# the fences, the interrupt, the recovery, the sessions and their GPU addresses, the resources, the display
-# (DISP2), the shader compiler and the Vulkan executor (with the shared wire codec of the i915 executor).
-AMD64_GHCI_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_GHCI),y)
-AMD64_GHCI_SOURCES += src/drivers/gpu/ghci/ghci.c src/drivers/gpu/ghci/pci-attach.c src/drivers/gpu/ghci/cp.c \
-	src/drivers/gpu/ghci/recover.c src/drivers/gpu/ghci/service.c src/drivers/gpu/ghci/memory.c \
-	src/drivers/gpu/ghci/check.c src/drivers/gpu/ghci/caps.c src/drivers/gpu/ghci/cmd.c \
-	src/drivers/gpu/ghci/vm.c src/drivers/gpu/ghci/range.c src/drivers/gpu/ghci/share.c \
-	src/drivers/gpu/ghci/isa.c src/drivers/gpu/ghci/compiler/gsi1-compile.c \
-	src/drivers/gpu/ghci/compiler/gsi1-encode.c src/drivers/gpu/ghci/compiler/gsi1-io.c \
-	src/drivers/gpu/ghci/compiler/gsi1-memory.c src/drivers/gpu/ghci/compiler/gsi1-texture.c \
-	src/drivers/gpu/ghci/compiler/gsi1-image.c src/drivers/gpu/ghci/compiler/gsi1-schedule.c \
-	src/drivers/gpu/ghci/compiler/gsi1-spill.c \
-	src/drivers/gpu/ghci/jobs.c src/drivers/gpu/ghci/capset.c \
-	src/drivers/gpu/ghci/display.c src/drivers/gpu/ghci/display-scan.c src/drivers/gpu/ghci/adv7511.c \
-	src/drivers/gpu/ghci/vk/vk-node.c src/drivers/gpu/ghci/vk/vk-stream.c src/drivers/gpu/ghci/vk/vk-dispatch.c \
-	src/drivers/gpu/ghci/vk/vk-object.c src/drivers/gpu/ghci/vk/vk-reply.c src/drivers/gpu/ghci/vk/vk-caps.c \
-	src/drivers/gpu/ghci/vk/vk-format.c src/drivers/gpu/ghci/vk/vk-device.c src/drivers/gpu/ghci/vk/vk-memory.c \
-	src/drivers/gpu/ghci/vk/vk-command.c src/drivers/gpu/ghci/vk/vk-queue.c \
-	src/drivers/gpu/ghci/vk/vk-layout.c src/drivers/gpu/ghci/vk/vk-pipeline.c src/drivers/gpu/ghci/vk/vk-pass.c src/drivers/gpu/ghci/vk/vk-execute.c \
-	src/drivers/gpu/ghci/vk/vk-meta.c \
-	$(filter-out $(AMD64_I915_SOURCES) $(AMD64_NVRTX_SOURCES) $(AMD64_AMDRDNA_COMPILER_SOURCES),src/drivers/gpu/compiler/spirv.c src/drivers/gpu/compiler/optimize.c) \
-	$(filter-out $(AMD64_I915_SOURCES) $(AMD64_NVRTX_SOURCES) $(AMD64_AMDRDNA_VK_SOURCES),src/drivers/gpu/i915/vk/vk-codec.c)
-endif
-# The i915 test build: checkpoints the production code calls through weak symbols.
-# The runner runs the scenario -DI915_TEST_SCENARIO=<name> (in ZEDBSD_TEST_CPPFLAGS) after the start;
-# I915_TEST_ORACLE=y also links the draw readback the pixel oracle reads (slow: it dumps a frame).
-# I915_TEST_SET chooses the scenarios the build links.  The test kernel with every scenario does not fit
-# AMD64_KERNEL_MAX_BYTES (q762, 2026-10-05: the kernel without tests is within about 450 KiB of it, and the tests add
-# 1.4 MiB), so each set links the runner and a part of them (the runner refers to every scenario weakly and says
-# "not linked" for one the set leaves out).  plan/ws031/tests/vkloop-hw.sh builds each scenario's own image and
-# picks its set when I915_TEST_SET is not given:
-#   vkx, vkc, vke1, vke2  that render scenario alone (vke2 with the compiler's boundary steps, ws031-p024,
-#                         -DI915_VKE2_BOUNDARY); "boundary" is vke2's name before q762, "render" vkx's
-#   execution             ktest eu draw r1 tex t3 bl
-#   compute               vkcs (ws101-p006)
-I915_TEST_SET ?= vke2
-AMD64_I915_TEST_SET_STAMP :=
-ifeq ($(I915_TESTS),y)
-ifeq ($(I915_TEST_ORACLE),y)
-AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/readback.c
-endif
-AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/execution/runner.c src/drivers/gpu/i915/tests/execution/firmware-override.c
-ifeq ($(I915_TEST_SET),compute)
-AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/compute.c
-else ifeq ($(I915_TEST_SET),execution)
-AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/execution/ktest.c src/drivers/gpu/i915/tests/execution/ktest-sync.c src/drivers/gpu/i915/tests/execution/ktest-gt.c src/drivers/gpu/i915/tests/execution/eu-test.c src/drivers/gpu/i915/tests/execution/ppgtt-walk.c src/drivers/gpu/i915/tests/execution/draw-test.c src/drivers/gpu/i915/tests/execution/fhd-render.c src/drivers/gpu/i915/tests/fixtures/draw-fixture.c
-else ifneq ($(filter display display_ktest display_ktest2,$(I915_TEST_SET)),)
-$(error I915_TEST_SET=$(I915_TEST_SET): the display scenarios and ktests ran the older modeset, which is gone; the display is tested by the xd host tests)
-else ifneq ($(filter vkx render,$(I915_TEST_SET)),)
-AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/executor.c
-else ifeq ($(I915_TEST_SET),vkc)
-AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/compiler.c
-else ifeq ($(I915_TEST_SET),vke1)
-AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/features.c
-else ifneq ($(filter vke2 boundary,$(I915_TEST_SET)),)
-AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/generality.c
-AMD64_CPPFLAGS += -DI915_VKE2_BOUNDARY=1
-else
-$(error I915_TEST_SET=$(I915_TEST_SET) is not a test set: vkx, vkc, vke1, vke2, execution or compute)
-endif
-# The scenarios linked change with I915_TEST_SET: a content-stable stamp relinks an existing BUILD when it changes.
-AMD64_I915_TEST_SET_STAMP := $(BUILD)/.i915-test-set
-endif
-# The i915 test VBT (I915_TEST_VBT=y, the captured VBT of the 5330 for the QEMU passthrough guest) was removed on
-# 2026-10-14 (plan/ws233/phase001/phase.md); a caller that still asks for it is told so.
-ifeq ($(I915_TEST_VBT),y)
-$(error I915_TEST_VBT=y: the captured test VBT was removed (ws233-p001); drop the setting)
-endif
-# The i915 capture display: I915_TEST_CAPTURE=y leaves the display hardware alone (no modeset, no panel)
-# and captures every presentation into guest RAM that the QEMU host reads (display/capture.c).
-# Test builds only: the production kernel neither compiles nor links capture.c.
-ifeq ($(I915_TEST_CAPTURE),y)
-AMD64_CPPFLAGS += -DI915_TEST_CAPTURE=1
-AMD64_I915_SOURCES += src/drivers/gpu/i915/display/capture.c
-endif
-AMD64_ACPI_SOURCES :=
-ifeq ($(CONFIG_DRIVER_ACPI),y)
-AMD64_ACPI_SOURCES += $(sort $(wildcard src/drivers/acpi/*.c))
-# The PC/AT host places the BARs the firmware left unassigned in the _CRS windows (BUG-210).
-AMD64_ACPI_SOURCES += src/drivers/pci/pci-pcat-assign.c src/drivers/pci/pci-window.c
-# The USB-C connectors' UCSI driver (WS050) runs over the ACPI device USBC000.
-ifeq ($(CONFIG_DRIVER_TYPEC),y)
-AMD64_ACPI_SOURCES += $(sort $(wildcard src/drivers/typec/*.c))
-endif
-endif
-AMD64_I2C_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_LPSS_I2C),y)
-AMD64_I2C_SOURCES += src/drivers/i2c/i2c.c src/drivers/i2c/lpss-i2c.c
-# HID over I2C finds its devices in the ACPI namespace (WS159).
-ifeq ($(CONFIG_DRIVER_ACPI),y)
-AMD64_I2C_SOURCES += src/drivers/i2c/i2c-hid.c src/drivers/gpio/intel-gpio.c
-endif
-endif
-AMD64_RTL8125_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_RTL8125),y)
-AMD64_RTL8125_SOURCES += src/drivers/ethernet/rtl8125.c
-endif
-AMD64_INTEL_WLAN_SOURCES :=
-ifeq ($(CONFIG_DRIVER_PCI_INTEL_AX211),y)
-AMD64_INTEL_WLAN_SOURCES += src/drivers/wifi/intel-ax211/intel-ax211.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-pci.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-assoc.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-boot.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-bss.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-command.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-dma.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-firmware.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-init.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-mmio.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-pci-mmio.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-protocol.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-runtime.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-runtime-start.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-scan.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-scan-session.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-rx.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-key.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-tx.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-transport-backend.c \
-	src/drivers/wifi/intel-ax211/intel-ax211-transport.c \
-
-endif
-ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-ncm.c \
-	src/drivers/usb/usb-cdc-ncm-net.c
-endif
-ifeq ($(CONFIG_DRIVER_USB_CDC_ECM),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-ecm.c
-endif
-ifeq ($(CONFIG_DRIVER_USB_RTL815X),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-rtl815x.c \
-	src/drivers/usb/usb-rtl815x-frame.c
-endif
-# The CDC notification reader both network drivers share (BUG-222).
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_CDC_NCM) $(CONFIG_DRIVER_USB_CDC_ECM)),)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-notification.c
-endif
-ifeq ($(CONFIG_DRIVER_USB_HID),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid.c src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c
-endif
-# The HID report parser, the pen and touch state machines and the HID input glue
-# (ws143-p005) serve every HID transport (USB, I2C-HID) and the test injector
-# (ws159-p003).
-AMD64_HID_SOURCES :=
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_PCI_LPSS_I2C) $(CONFIG_INPUT_TEST_INJECT) $(CONFIG_INPUT_BRIDGE)),)
-AMD64_HID_SOURCES += src/drivers/generic/hid-report.c src/drivers/generic/hid-digitizer.c src/drivers/generic/hid-touch.c \
-	src/drivers/generic/hid-input.c
-endif
-# The USB CCID readers and the smart card slots' class (ws161-p003).
-ifeq ($(CONFIG_DRIVER_USB_CCID),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-ccid.c src/drivers/usb/usb-ccid-proto.c src/drivers/generic/smartcard.c
-endif
-# The USB Bluetooth controllers and the HCI class, /dev/bluetoothN (ws143-p002).
-ifeq ($(CONFIG_DRIVER_USB_BT),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-bt.c src/drivers/generic/bt-hci.c src/drivers/generic/bt-hci-proto.c
-endif
-ifeq ($(CONFIG_DRIVER_USB_HUB),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hub.c
-endif
-# The USB Video Class cameras, on the camera framework.
-ifeq ($(CONFIG_DRIVER_USB_UVC),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-uvc.c src/drivers/usb/usb-uvc-desc.c src/drivers/usb/usb-uvc-stream.c src/drivers/usb/usb-uvc-payload.c
-endif
-ifeq ($(CONFIG_DRIVER_USB_RTL8822BU),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/wifi/rtl8822b/rtl8822b.c \
-	src/drivers/wifi/rtl8822b/rtl8822b-security.c \
-	src/drivers/usb/usb-rtl8822bu.c
-endif
-ifeq ($(CONFIG_KERNEL_USB_HID_CHECKPOINT),y)
-AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid-checkpoint.c
-endif
-
-AMD64_KERNEL_SOURCES := \
-	src/kern/main.c \
-	$(KERN_FAT_SOURCES) src/kern/inode.c src/kern/file.c \
-	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
-	src/kern/tmpfs.c src/kern/tmpfs-pages.c src/drivers/fs/overlayfs.c src/kern/vfs.c \
-	src/kern/backing-claim.c \
- src/kern/buf.c src/kern/cache.c src/kern/readahead.c src/kern/writeback.c src/kern/io.c src/kern/sysctl.c src/kern/thermal.c src/kern/thermal-guard.c \
-	src/kern/resource.c src/kern/poll.c src/kern/usync.c \
-	src/kern/disk.c src/kern/partition.c \
-	src/drivers/generic/loop.c src/drivers/generic/dma.c src/drivers/pci/pci.c \
-	src/drivers/pci/pci-pcat.c src/drivers/pci/pci-power.c src/drivers/usb/usb.c $(AMD64_USB_HCD_SOURCES) \
-	$(AMD64_USB_CLASS_SOURCES) \
-	$(AMD64_HID_SOURCES) \
-	$(AMD64_NVME_SOURCES) \
-	$(AMD64_VENUS_SOURCES) \
-	$(AMD64_HDA_SOURCES) \
-	$(AMD64_I915_SOURCES) \
-	$(AMD64_NVRTX_SOURCES) \
-	$(AMD64_AMDRDNA_SOURCES) \
-	$(AMD64_AMDRDNA_COMPILER_SOURCES) \
-	$(AMD64_AMDRDNA_VK_SOURCES) \
-	$(AMD64_GHCI_SOURCES) \
-	$(AMD64_INTEL_WLAN_SOURCES) \
-	$(AMD64_RTL8125_SOURCES) \
-	$(AMD64_ACPI_SOURCES) \
-	$(AMD64_I2C_SOURCES) \
-	src/drivers/platform/pcat/pcat-ide.c src/drivers/platform/pcat/uefi-variables.c src/drivers/ethernet/dp8390.c \
-	src/drivers/isa/ne2000.c src/drivers/isa/ps2-8042.c \
-	src/drivers/disklabel/mbr.c src/drivers/disklabel/gpt.c \
-	src/drivers/disklabel/pcat.c src/kern/platform/pcat.c \
-	src/kern/panic.c src/kern/entry.c src/kern/heap.c src/kern/clock.c \
-	src/kern/timer.c src/kern/klog.c src/kern/kcrt.c \
-	src/kern/random.c src/kern/random-crypto.c \
-	src/kern/device-io.c src/kern/irq.c src/kern/pmem.c \
-	src/kern/test-checkpoint.c \
-	src/kern/lock.c src/kern/waitq.c \
-	src/kern/process.c src/kern/ptrace.c src/kern/thread.c src/kern/sched.c src/kern/sleep.c src/kern/cpuperf.c src/kern/freeze.c \
- $(KERN_VM_SOURCES) \
-	src/kern/filedesc.c src/kern/handle.c src/kern/fd-object.c \
-	src/kern/record-lock.c \
-	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
-	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c src/kern/sandbox.c \
-	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
-	src/kern/cdev.c src/kern/devfs.c src/kern/text-display.c \
-	src/drivers/generic/console.c \
-	src/drivers/generic/input.c \
-	src/drivers/generic/backlight.c \
-	$(KERN_GPU_SOURCES) \
-	$(KERN_AUDIO_SOURCES) \
-	src/kern/tty.c src/kern/tty-csi.c \
-	src/drivers/generic/system-device.c src/kern/system-event.c src/drivers/generic/memory-device.c src/kern/shutdown.c \
-	src/drivers/platform/pcat/graphics/vgafont.c src/drivers/platform/pcat/graphics/splash.c src/kern/init.c
-ifeq ($(CONFIG_INPUT_TEST_INJECT),y)
-AMD64_KERNEL_SOURCES += src/drivers/generic/input-inject.c
-endif
-# The x86 processor driver and its decoders (pure functions over the CPUID and model-specific
-# register values the driver reads).  The CPUID part serves the topology in every kernel; the
-# register parts are built only with the CPU performance control.
-AMD64_KERNEL_SOURCES += src/drivers/platform/pcat/cpu-x86/cpux86.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c \
-	src/drivers/platform/pcat/cpu-x86/cpu-x86.c \
-	src/drivers/platform/pcat/cpu-x86/cpu-x86-insn.c
-ifeq ($(CONFIG_CPU_PERF),y)
-AMD64_KERNEL_SOURCES += src/drivers/platform/pcat/cpu-x86/cpux86-hwp.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86-pstate.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86-power.c \
-	src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c
-endif
-# /dev/input/bridge (ws143-p005): the Bluetooth daemon's HID devices, on the HID input glue; it refuses a FIDO descriptor
-# with hidraw-describe.c (built with usb-hid, or here without it).
-ifeq ($(CONFIG_INPUT_BRIDGE),y)
-AMD64_KERNEL_SOURCES += src/drivers/generic/input-bridge.c src/drivers/generic/input-bridge-setup.c
-ifneq ($(CONFIG_DRIVER_USB_HID),y)
-AMD64_KERNEL_SOURCES += src/drivers/generic/hidraw-describe.c
-endif
-endif
-# The test kernel's loopback security key and card (ws161-p002, p003), on the raw HID and the smart card classes
-# (built with usb-hid and usb-ccid, or here without them).
-# The test kernel's loopback Bluetooth controller (ws143-p002), on the HCI class (built with usb-bt, or here without it).
-ifeq ($(CONFIG_BT_TEST_LOOPBACK),y)
-AMD64_KERNEL_SOURCES += src/drivers/generic/bt-hci-loopback.c
-ifneq ($(CONFIG_DRIVER_USB_BT),y)
-AMD64_KERNEL_SOURCES += src/drivers/generic/bt-hci.c src/drivers/generic/bt-hci-proto.c
-endif
-endif
-ifeq ($(CONFIG_SECURITY_KEY_TEST_LOOPBACK),y)
-AMD64_KERNEL_SOURCES += src/drivers/generic/hidraw-loopback.c src/drivers/generic/smartcard-loopback.c
-ifneq ($(CONFIG_DRIVER_USB_HID),y)
-AMD64_KERNEL_SOURCES += src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c
-endif
-ifneq ($(CONFIG_DRIVER_USB_CCID),y)
-AMD64_KERNEL_SOURCES += src/drivers/generic/smartcard.c
-endif
-endif
-ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
-AMD64_KERNEL_SOURCES += \
-	src/drivers/platform/pcat/graphics/pcat-graphics.c \
-	src/drivers/platform/pcat/graphics/backend.c \
-	src/drivers/platform/pcat/graphics/font.c \
-	src/drivers/platform/pcat/graphics/text.c \
-	src/drivers/platform/pcat/serial-mirror.c
-endif
-# The camera framework, /dev/camN; the camera source drivers build on it.
-ifneq ($(filter y,$(CONFIG_DRIVER_CAMERA) $(CONFIG_DRIVER_USB_UVC)),)
-AMD64_KERNEL_SOURCES += src/drivers/camera/cam.c
-endif
-AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
-	$(KERN_UFS_SOURCES)
-AMD64_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
-ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
-AMD64_KERNEL_SOURCES += plan/ws004/tests/pci-msi-qemu.c
-endif
-AMD64_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
-AMD64_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
-AMD64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
-	$(AMD64_KERNEL_SOURCES))
-# The kernel links no C library object: kcrt (src/kern/kcrt.c) and the
-# kernel heap (src/kern/heap.c) supply what it used from libc.
 AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS)
 ifneq ($(strip $(ZEDBSD_CONFIG)),)
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_CONFIG)
@@ -581,17 +59,8 @@ $(AMD64_VMUNIX_OBJS): platform/amd64/vmunix.mk
 endif
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_KERNEL_LTO_STAMP)
-# The kernel reads no C library source or header (the sysroot is not a
-# prerequisite): no libc source may appear in the link list, and the link
-# recipe checks every object's -MMD dependencies (check-kernel-includes.noct).
-$(if $(filter libc/% src/libc/%,$(AMD64_KERNEL_SOURCES)),\
-	$(error a C library source is in the amd64 kernel link list: \
-	$(filter libc/% src/libc/%,$(AMD64_KERNEL_SOURCES))))
-$(BUILD)/kern64/src/kern/vfs.o \
-	$(BUILD)/kern64/src/kern/platform/pcat.o: \
-	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
 
-vmunix: $(BUILD)/vmunix
+
 
 # The i915 test build's scenario set (see I915_TEST_SET), rewritten only when it changes.
 .PHONY: FORCE_AMD64_I915_TEST_SET
@@ -605,271 +74,6 @@ $(BUILD)/.i915-test-set: FORCE_AMD64_I915_TEST_SET
  mv $@.tmp $@; \
  fi
 
-$(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.S
-	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -D_ASM_SRC_ -c $< -o $@
-
-$(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
-
-# Shared x86 HAL sources must use the amd64 flags as well. Without this
-# rule the generic i386 pattern can leave a 32-bit object in build/amd64.
-$(BUILD)/src/hal/x86/%.o: src/hal/x86/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
-
-$(BUILD)/kern64/src/kern/%.o: src/kern/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
-
-$(BUILD)/kern64/src/drivers/%.o: src/drivers/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
-
-$(BUILD)/kern64/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(AMD64_CPPFLAGS) $(AMD64_KERNEL_LIBC_CFLAGS) -fno-builtin \
- -fno-strict-aliasing $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
-
-$(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(ZEDBSD_GRAPHICS_CONFIG_STAMP) $(AMD64_I915_TEST_SET_STAMP) \
-	$(AMD64_PLATFORM)/vmunix.ld \
-	platform/amd64/tools/check-amd64-vmunix.noct \
-	platform/amd64/tools/check-kernel-includes.noct
-	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 \
- -T $(AMD64_PLATFORM)/vmunix.ld -nostdlib -Map $@.map \
- $(AMD64_VMUNIX_OBJS) -o $@
-	$(NOCT) --path=tools/build platform/amd64/tools/check-kernel-includes.noct \
- $(wildcard $(AMD64_VMUNIX_OBJS:.o=.d)) || { rm -f $@; exit 1; }
-	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-vmunix.noct $@
-
-$(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
-	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
-	@mkdir -p $(dir $@)
-	$(CC) -m32 -I. -DZBL_STAGE2_LBA_OVERRIDE=34 \
- -x assembler-with-cpp -c $< -o $@
-
-$(BUILD)/bootloader/stage1.elf: $(BUILD)/bootloader/stage1.o \
-	$(BIOS_LOADER)/stage1.ld
-	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage1.ld $< -o $@
-
-$(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
-
-# The GPT hybrid reserves LBA 34 for its chain sector. The separate native
-# BIOS image retains the legacy LBA-1 chain sector and therefore needs a
-# stage-1 artifact built without the GPT override.
-$(BUILD)/bootloader/stage1-native.o: $(BIOS_LOADER)/stage1.S \
-	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
-	@mkdir -p $(dir $@)
-	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
-
-$(BUILD)/bootloader/stage1-native.elf: $(BUILD)/bootloader/stage1-native.o \
-	$(BIOS_LOADER)/stage1.ld
-	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage1.ld $< -o $@
-
-$(BUILD)/bootloader/stage1-native.bin: $(BUILD)/bootloader/stage1-native.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
-
-$(BUILD)/bootloader/stage2-chain.o: $(BIOS_LOADER)/stage2-chain.S \
-	bootloader/include/stage2-header.inc
-	@mkdir -p $(dir $@)
-	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
-
-$(BUILD)/bootloader/stage2-chain.elf: $(BUILD)/bootloader/stage2-chain.o \
-	$(BIOS_LOADER)/stage2.ld
-	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage2.ld $< -o $@
-
-$(BUILD)/bootloader/stage2-chain.raw: $(BUILD)/bootloader/stage2-chain.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-
-$(BUILD)/bootloader/stage2-chain.bin: $(BUILD)/bootloader/stage2-chain.raw \
-	tools/build/finalize-bios-stage2.noct
-	$(NOCT) --path=tools/build tools/build/finalize-bios-stage2.noct --machine pcat $< $@
-
-# Compatibility alias for focused fixtures that predate the chain-loader
-# name. Its new chain-specific prerequisite forces an incremental tree with
-# the retired direct-kernel stage2.o/bin to regenerate before use.
-$(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2-chain.bin
-	cp -f $< $@.tmp
-	mv -f $@.tmp $@
-
-$(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S \
-	bootloader/include/stage2-header.inc
-	@mkdir -p $(dir $@)
-	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
-
-$(BUILD)/bootloader/partition-pbr.elf: $(BUILD)/bootloader/partition-pbr.o
-	$(LD) -m elf_i386 --image-base=0 -Ttext=0 -e _start $< -o $@
-
-$(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 2048
-
-$(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
-	$(BIOS_LOADER)/vbe.inc \
-	bootloader/bios/fat-directory.h bootloader/bios/logo.h bootloader/common/logo-path.h \
-	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
-	bootloader/include/mbr.inc bootloader/include/fat16.inc \
-	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
-	bootloader/include/boot-parameter-handoff.h \
-	bootloader/include/boot-parameter-record.inc \
-	bootloader/uefi/zedbsd-config.h \
-	include/kern/boot.h
-	@mkdir -p $(dir $@)
-	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
-
-$(BUILD)/bootloader/bios-zedbsd-config.i386.o: \
-	bootloader/uefi/zedbsd-config.c bootloader/uefi/zedbsd-config.h \
-	bootloader/include/boot-parameter-handoff.h include/kern/boot.h
-	@mkdir -p $(dir $@)
-	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
- -fno-stack-protector -fno-asynchronous-unwind-tables \
- -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
- -c $< -o $@
-
-
-$(BUILD)/bootloader/bios-fat-directory.i386.o: \
-	bootloader/bios/fat-directory.c bootloader/bios/fat-directory.h
-	@mkdir -p $(dir $@)
-	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
- -fno-stack-protector -fno-asynchronous-unwind-tables \
- -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
- -c $< -o $@
-
-$(BUILD)/bootloader/bios-logo.i386.o: bootloader/bios/logo.c bootloader/bios/logo.h
-	@mkdir -p $(dir $@)
-	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
- -fno-stack-protector -fno-asynchronous-unwind-tables \
- -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
- -c $< -o $@
-$(BUILD)/bootloader/common-logo-path.i386.o: bootloader/common/logo-path.c bootloader/common/logo-path.h
-	@mkdir -p $(dir $@)
-	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
- -fno-stack-protector -fno-asynchronous-unwind-tables \
- -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
- -c $< -o $@
-AMD64_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.i386.o \
-	$(BUILD)/bootloader/bios-logo.i386.o $(BUILD)/bootloader/common-logo-path.i386.o \
-	$(BUILD)/bootloader/bios-fat-directory.i386.o \
-	$(BUILD)/bootloader/bios-memory-map.i386.o $(BUILD)/bootloader/common-memory-map.i386.o
-
-$(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
-	$(AMD64_BOOTZBSD_HELPERS) $(BIOS_LOADER)/bootzbsd.ld
-	$(LD) -m elf_i386 -T $(BIOS_LOADER)/bootzbsd.ld \
- $(filter %.o,$^) -o $@
-
-$(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-
-$(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw \
-	tools/build/finalize-bios-stage2.noct
-	$(NOCT) --path=tools/build tools/build/finalize-bios-stage2.noct --machine pcat $< $@
-
-$(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
-	tools/build/make-mz-exe.noct
-	$(NOCT) --path=tools/build tools/build/make-mz-exe.noct --entry 0x20 $< $@
-
-$(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
-	$(UEFI_LOADER)/include/uefi.h $(UEFI_LOADER)/elf64.h \
-	$(UEFI_LOADER)/framebuffer.h $(UEFI_LOADER)/video.h $(UEFI_LOADER)/logo.h $(UEFI_LOADER)/memory-map.h \
-	$(UEFI_LOADER)/volume-discovery.h \
-	$(UEFI_LOADER)/zedbsd-config.h $(UEFI_LOADER)/root-config.h \
-	bootloader/common/ufs-read.h \
-	$(UEFI_LOADER)/boot-keys.h bootloader/common/boot-override.h \
-	bootloader/include/amd64-handoff.h \
-	bootloader/include/amd64-kernel-image.h \
-	bootloader/include/boot-parameter-handoff.h \
-	include/kern/boot.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/uefi/volume-discovery.o: $(UEFI_LOADER)/volume-discovery.c \
-	$(UEFI_LOADER)/volume-discovery.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/uefi/framebuffer.o: $(UEFI_LOADER)/framebuffer.c \
-	$(UEFI_LOADER)/framebuffer.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/uefi/logo.o: $(UEFI_LOADER)/logo.c $(UEFI_LOADER)/logo.h \
-	bootloader/common/logo-path.h bootloader/include/amd64-handoff.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/uefi/common-logo-path.o: bootloader/common/logo-path.c bootloader/common/logo-path.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
-
-$(BUILD)/uefi/common-ufs-read.o: bootloader/common/ufs-read.c bootloader/common/ufs-read.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
-
-$(BUILD)/uefi/root-config.o: $(UEFI_LOADER)/root-config.c $(UEFI_LOADER)/root-config.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/uefi/common-boot-override.o: bootloader/common/boot-override.c bootloader/common/boot-override.h \
-	bootloader/include/boot-parameter-handoff.h include/kern/boot.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
-
-$(BUILD)/uefi/boot-keys.o: $(UEFI_LOADER)/boot-keys.c $(UEFI_LOADER)/boot-keys.h \
-	$(UEFI_LOADER)/include/uefi.h bootloader/common/boot-override.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/uefi/video.o: $(UEFI_LOADER)/video.c $(UEFI_LOADER)/video.h \
-	$(UEFI_LOADER)/include/uefi.h bootloader/include/boot-parameter-handoff.h \
-	include/kern/boot.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/uefi/zedbsd-config.o: $(UEFI_LOADER)/zedbsd-config.c \
-	$(UEFI_LOADER)/zedbsd-config.h \
-	bootloader/include/boot-parameter-handoff.h \
-	include/kern/boot.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/uefi/elf64.o: $(UEFI_LOADER)/elf64.c $(UEFI_LOADER)/elf64.h \
-	bootloader/include/amd64-kernel-image.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/uefi/memory-map.o: $(UEFI_LOADER)/memory-map.c \
-	$(UEFI_LOADER)/memory-map.h $(UEFI_LOADER)/include/uefi.h \
-	bootloader/include/amd64-handoff.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
-
-$(BUILD)/src/hal/amd64/locore.o: bootloader/include/amd64-handoff.h \
-	bootloader/include/boot-parameter-handoff.h \
-	include/kern/boot.h
-
-$(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S bootloader/include/amd64-handoff.h
-	@mkdir -p $(dir $@)
-	$(EFI_CC) -m64 -mno-red-zone -c $< -o $@
-
-$(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
-	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/framebuffer.o $(BUILD)/uefi/video.o $(BUILD)/uefi/logo.o $(BUILD)/uefi/common-logo-path.o \
-	$(BUILD)/uefi/common-boot-override.o $(BUILD)/uefi/boot-keys.o \
-	$(BUILD)/uefi/memory-map.o $(BUILD)/uefi/memory-map-v6.o $(BUILD)/uefi/common-memory-map.o \
-	$(BUILD)/uefi/volume-discovery.o $(BUILD)/uefi/zedbsd-config.o \
-	$(BUILD)/uefi/root-config.o $(BUILD)/uefi/common-ufs-read.o \
-	$(BUILD)/uefi/transition.o \
-	platform/amd64/tools/check-bootx64.noct
-	$(EFI_LD) /subsystem:efi_application /entry:efi_main /base:0 \
- /fixed:no /timestamp:0 /nodefaultlib \
- /out:$@ $(filter %.o,$^)
-	@test -z "$$($(EFI_NM) -u $@ | grep -Ev \
- ' (__bss_start__|__bss_end__|__end__|___tls_start__|___tls_end__)$$')" \
- || { $(EFI_NM) -u $@; exit 1; }
-	$(NOCT) --path=tools/build platform/amd64/tools/check-bootx64.noct $@
 
 AMD64_USER_CPPFLAGS := -nostdinc \
 	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
@@ -878,51 +82,31 @@ AMD64_USER_CFLAGS := -m64 -march=x86-64 -mno-red-zone -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-builtin -fno-common -ffunction-sections \
 	-fdata-sections -Os -Wall -Wextra -Werror
-AMD64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfcn.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
-	userland/base/libc/termios.c \
-	userland/base/libc/pthread.c \
-	userland/base/libc/timer.c \
-	userland/base/libc/shm.c \
-	userland/base/libc/semaphore.c \
-	userland/base/libc/mqueue.c \
-	userland/base/libc/socket.c userland/base/libc/resolver.c \
-	userland/base/libc/resolver-dns.c \
-	userland/base/libc/signal.c userland/base/libc/account.c userland/base/libc/crypt.c \
-	userland/base/libc/utmpx.c src/libc/heap.c src/libc/string.c src/libc/ctype.c \
-	src/libc/locale.c src/libc/wide.c \
-	src/libc/int64.c src/libc/strto.c src/libc/format.c src/libc/stdio.c \
-	$(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
-AMD64_USER_LIBC_OBJS := $(BUILD)/user64/src/libc/crt/crt0-amd64.o \
-	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
-# User programs consume the canonical target sysroot. The relocatable libc
-# bundle preserves the established whole-runtime static link semantics while
-# eliminating per-command recompilation of the same sources.
-AMD64_USER_LIBC_OBJS := \
-	$(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt0.o \
-	$(ZEDBSD_SYSROOT_AMD64)/usr/lib/libc.o
-AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS)
-AMD64_USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,sh)
-AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/base/libedit/readline.o
-AMD64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
-AMD64_USER_ELF_CHECK := tools/build/check-user-elf.noct
 
 # The base programs are position-independent executables that load
 # /lib/libc.so through /lib/ld.so; their objects are the -fPIC ones built
 # under $(BUILD)/dynamic/obj.  (The POSIX-R and other test ELF files below
 # stay static: they test the static runtime itself.)
+
 AMD64_APP_OBJ := $(BUILD)/dynamic/obj
+
 AMD64_APP_INPUTS := $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 	$(BUILD)/dynamic/libc.so $(BUILD)/dynamic/ld.so \
 	tools/build/check-dynamic-elf.py
+
 AMD64_APP_LINK = $(CC) -m64 -nostdlib -pie -Wl,--no-relax -Wl,--gc-sections \
  -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
  -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
  -Wl,--dynamic-linker=/lib/ld.so $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o
+
 AMD64_APP_LIBS = -L$(BUILD)/dynamic -Wl,-rpath-link,$(BUILD)/dynamic -l:libc.so
+
 AMD64_APP_CHECK = $(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 \
  --role application --needed libc.so
+
 AMD64_APP_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),sh) \
 	$(AMD64_APP_OBJ)/userland/base/libedit/readline.o
+
 $(AMD64_APP_SH_OBJS): DYNAMIC_CPPFLAGS += -Iuserland/base/libedit
 
 $(BUILD)/user64/%.o: %.c $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
@@ -951,39 +135,39 @@ $(BUILD)/lib/libcurses.a: $(AMD64_USER_CURSES_OBJS)
 	$(AR) rcs $@ $^
 
 $(BUILD)/POSIX-R1.ELF: $(AMD64_USER_LIBC_OBJS) \
-	$(BUILD)/user64/userland/tests/syscall-smoke.o $(AMD64_PLATFORM)/user.ld \
+	$(BUILD)/user64/userland/tests/syscall-smoke.o platform/amd64/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
  -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld \
+ -T platform/amd64/user.ld \
  $(AMD64_USER_LIBC_OBJS) \
  $(BUILD)/user64/userland/tests/syscall-smoke.o -o $@
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/POSIX-R2.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
-	$(BUILD)/user64/userland/tests/posix-r2.o $(AMD64_PLATFORM)/user.ld \
+	$(BUILD)/user64/userland/tests/posix-r2.o platform/amd64/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
  -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ -T platform/amd64/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
  $(BUILD)/user64/userland/tests/posix-r2.o -o $@
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/tests/posix-r2-remaining.o \
-	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	platform/amd64/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
  -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ -T platform/amd64/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
  $(BUILD)/user64/userland/tests/posix-r2-remaining.o -o $@
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/tests/susv4-xsi.o \
-	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	platform/amd64/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
  -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ -T platform/amd64/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
  $(BUILD)/user64/userland/tests/susv4-xsi.o -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
@@ -997,10 +181,10 @@ $(BUILD)/bin/sh: $(AMD64_APP_INPUTS) $(AMD64_APP_SH_OBJS)
 
 $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/tests/smp-resource-stress.o \
-	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	platform/amd64/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
  -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ -T platform/amd64/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
  $(BUILD)/user64/userland/tests/smp-resource-stress.o -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
@@ -1074,11 +258,11 @@ $(AMD64_USER_FLOAT_OBJS): $(AMD64_USER_FLOAT_DIR)/%.o: src/libc/%.c $(ZEDBSD_LIB
 
 define AMD64_USER_STATIC_COMMAND
 $(BUILD)/bin/$(1): $(AMD64_USER_LIBC_OBJS) $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) \
-	$(AMD64_USER_STATIC_EXTRA_$(1)) $(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	$(AMD64_USER_STATIC_EXTRA_$(1)) platform/amd64/user.ld $(AMD64_USER_ELF_CHECK)
 	@mkdir -p $$(dir $$@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
  -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ -T platform/amd64/user.ld $(AMD64_USER_LIBC_OBJS) \
  $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) $(AMD64_USER_STATIC_EXTRA_$(1)) -o $$@
 	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
@@ -1295,7 +479,7 @@ $(AMD64_BOOT_LOGO): tools/build/make-boot-splash.py userland/desktop/artwork/zed
 # WS193: the graphical login (login=graphical) is its own choice, ZEDBSD_GRAPHICAL_LOGIN, in the name as well.
 AMD64_BIOS_ZEDBSD_CONFIG := $(BUILD)/zedbsd-bios-graphical-$(ZEDBSD_GRAPHICAL_BOOT)-login-$(ZEDBSD_GRAPHICAL_LOGIN)-kmsg-$(ZEDBSD_BOOT_KERNEL_MESSAGES).cfg
 
-$(AMD64_BIOS_ZEDBSD_CONFIG): $(AMD64_ZEDBSD_CONFIG)
+$(AMD64_BIOS_ZEDBSD_CONFIG): $(ZEDBSD_CONFIG)
 	@mkdir -p $(dir $@)
 	cp $< $@.tmp
 	$(if $(filter y,$(ZEDBSD_GRAPHICAL_BOOT)),printf '%s\n' logo=logo.ppm >> $@.tmp)
@@ -1330,7 +514,7 @@ $(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1-native.bin \
 	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(BUILD)/ufs-root.img \
-	$(AMD64_NATIVE_ZEDBSD_CONFIG) \
+	$(NATIVE_ZEDBSD_CONFIG) \
 	$(ZEDBSD_IMAGE_HOST) \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
 	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct
@@ -1341,7 +525,7 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1-native.bin \
  --stage2 $(BUILD)/bootloader/stage2-chain.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
- --zedbsd-config $(AMD64_NATIVE_ZEDBSD_CONFIG) \
+ --zedbsd-config $(NATIVE_ZEDBSD_CONFIG) \
  --ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
@@ -1358,7 +542,7 @@ $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
  --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) \
@@ -1405,7 +589,7 @@ $(AMD64_NATIVE_ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(ARCH_UFS_IMAGE_TOOLS)
  --profile amd64 --output $@ --tree $(BUILD)/rootfs \
  --size-mib $(AMD64_NATIVE_ROOT_MIB) --min-inodes $(AMD64_NATIVE_ROOT_INODES)
 
-$(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG): $(AMD64_PLATFORM)/zedbsd-native-uefi.cfg
+$(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG): platform/amd64/zedbsd-native-uefi.cfg
 	@mkdir -p $(dir $@)
 	cp $< $@.tmp
 	$(if $(filter y,$(ZEDBSD_GRAPHICAL_BOOT)),grep -v '^video=' $< > $@.tmp)
@@ -1423,7 +607,7 @@ $(AMD64_NATIVE_SWAP_IMAGE): $(BUILD_TOOLS_DIR)/make-swapfile.noct
 $(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/uefi/BOOTX64.EFI \
 	$(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG) $(AMD64_NATIVE_ROOT_IMAGE) \
 	$(AMD64_NATIVE_SWAP_IMAGE) $(ZEDBSD_IMAGE_HOST) $(AMD64_BOOT_LOGO) \
-	$(AMD64_IMAGE_CONTRACT_STAMP) \
+	$(IMAGE_CONTRACT_STAMP) \
 	platform/amd64/tools/check-amd64-native-image.py
 	$(ZEDBSD_IMAGE_HOST) disk --machine pcat --layout native \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
@@ -1442,8 +626,8 @@ $(BUILD)/hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
 	$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
-	$(AMD64_ZEDBSD_CONFIG) $(ZEDBSD_IMAGE_HOST) \
-	$(AMD64_IMAGE_CONTRACT_STAMP) tools/build/make-bios-hdd-image.noct \
+	$(ZEDBSD_CONFIG) $(ZEDBSD_IMAGE_HOST) \
+	$(IMAGE_CONTRACT_STAMP) tools/build/make-bios-hdd-image.noct \
 	tools/build/zedbuild.noct tools/build/overlay_journal_format.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct \
@@ -1451,12 +635,12 @@ $(BUILD)/hdd-image.img: $(BUILD)/bootloader/stage1.bin \
  --layout $(ZEDBSD_VARIANT) \
  --checker platform/amd64/tools/check-amd64-gpt-image.noct \
  --checker-runner $(NOCT) \
- --stage1 $(AMD64_IMAGE_STAGE1) \
+ --stage1 $(IMAGE_STAGE1) \
  --stage2 $(BUILD)/bootloader/stage2-chain.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1481,7 +665,7 @@ $(BUILD)/deferred-stub-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_DEFERRED_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1515,7 +699,7 @@ $(BUILD)/posix-phase2-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE2_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1549,7 +733,7 @@ $(BUILD)/posix-phase3-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE3_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1583,7 +767,7 @@ $(BUILD)/posix-phase4-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE4_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1595,10 +779,10 @@ posix-phase4-qemu-test: $(BUILD)/posix-phase4-qemu.img \
 
 $(BUILD)/bin/posix-phase5-helper: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/tests/posix-phase5-helper.o \
-	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	platform/amd64/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
  -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ -T platform/amd64/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
  $(BUILD)/user64/userland/tests/posix-phase5-helper.o -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
@@ -1625,7 +809,7 @@ $(BUILD)/posix-phase5-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE5_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1658,7 +842,7 @@ $(BUILD)/posix-phase6-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE6_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1689,7 +873,7 @@ $(BUILD)/posix-phase7-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE7_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1721,7 +905,7 @@ $(BUILD)/posix-phase8-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE8_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1756,7 +940,7 @@ $(BUILD)/phase19-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_PHASE19_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1790,7 +974,7 @@ $(BUILD)/phase20-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_PHASE20_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1816,12 +1000,12 @@ AMD64_POSIX_PHASE85_CURSES_SOURCES := tests/posix-phase85-curses.c \
 AMD64_POSIX_PHASE85_CURSES_OBJS := $(patsubst %.c,\
 	$(BUILD)/user64/%.o,$(AMD64_POSIX_PHASE85_CURSES_SOURCES))
 $(BUILD)/bin/phase85-curses-test: $(AMD64_USER_LIBC_OBJS) \
-	$(AMD64_POSIX_PHASE85_CURSES_OBJS) $(AMD64_PLATFORM)/user.ld \
+	$(AMD64_POSIX_PHASE85_CURSES_OBJS) platform/amd64/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
  -z max-page-size=4096 -z stack-size=0x100000 \
- -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ -T platform/amd64/user.ld $(AMD64_USER_LIBC_OBJS) \
  $(AMD64_POSIX_PHASE85_CURSES_OBJS) -o $@
 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
@@ -1849,7 +1033,7 @@ $(BUILD)/posix-phase85-qemu.img: $(BUILD)/bootloader/stage1.bin \
  --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
  --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
  --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
- --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --zedbsd-config $(ZEDBSD_CONFIG) \
  --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE85_TEST_UFS) \
  --arch-format ufs --data-image $(DATA_IMAGE) \
  --swapfile $(SWAP_IMAGE) $@
@@ -1871,7 +1055,7 @@ CHECK_RUN_TARGETS += amd64-hal-compile
 	posix-phase6-qemu-test posix-phase7-qemu-test posix-phase8-qemu-test \
 	posix-phase85-qemu-test posix-phase10-qemu-test
 
-$(BUILD)/uefi/memory-map-v6.o: $(UEFI_LOADER)/memory-map-v6.c $(UEFI_LOADER)/memory-map.h bootloader/common/memory-map.h bootloader/include/amd64-handoff.h
+$(BUILD)/uefi/memory-map-v6.o: bootloader/uefi/memory-map-v6.c bootloader/uefi/memory-map.h bootloader/common/memory-map.h bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
 

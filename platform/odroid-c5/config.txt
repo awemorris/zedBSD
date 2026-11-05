@@ -1,0 +1,36 @@
+[pi4]
+arm_64bit=1
+kernel=vmunix
+# vmunix is linked to run at 0x80000; the firmware's 64-bit default is 0x200000.
+kernel_address=0x80000
+device_tree=bcm2711-rpi-4-b.dtb
+enable_gic=1
+enable_uart=1
+# The PL011 clock: the serial console divides it for 115200 baud (uart.c), or
+# the onboard Bluetooth for its line (rpi4-bt.c).
+init_uart_clock=48000000
+# The firmware logs its own boot on the same UART, which shows whether the
+# serial line works before the kernel starts.
+uart_2ndstage=1
+dtoverlay=disable-bt
+framebuffer_depth=32
+framebuffer_ignore_alpha=1
+# No forced hotplug: forcing it (which applies to HDMI0) made an empty HDMI0
+# display 0, so the kernel's framebuffer went there while a monitor on HDMI1
+# kept the firmware's picture.  Without it, the display actually attached is
+# display 0 on either port.
+# A fixed 1280x720 60 Hz (a CVT mode, DMT group mode 87; 16:9) on both ports,
+# no overscan border, and a framebuffer of the same size, scanned out 1:1:
+# 16:9 so that a 1920x1080 panel scales it 1.5x with no band (2026-10-15 user,
+# an OLED touch display).  Before it was 1024x680 (3:2, the OSC Tokyo demo),
+# 1024x600 for a touch LCD, and 1920x1080 60 Hz (hdmi_mode 82 without
+# hdmi_cvt, framebuffer 1920x1080).
+hdmi_group:0=2
+hdmi_mode:0=87
+hdmi_cvt:0=1280 720 60 3 0 0 0
+hdmi_group:1=2
+hdmi_mode:1=87
+hdmi_cvt:1=1280 720 60 3 0 0 0
+disable_overscan=1
+framebuffer_width=1280
+framebuffer_height=720

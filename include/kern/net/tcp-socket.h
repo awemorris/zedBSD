@@ -43,7 +43,7 @@ enum tcp_state {
  * end's sending that share of the link.
  */
 #ifndef CONFIG_TCP_SEND_QUEUE_MAX
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64) || \
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_ARM64) || \
     defined(HAL_ARCH_RISCV64)
 #define CONFIG_TCP_SEND_QUEUE_MAX 768
 #else
@@ -72,7 +72,7 @@ enum tcp_state {
  */
 #if defined(CONFIG_TCP_REORDER_MAX)
 #define TCP_REORDER_MAX ((unsigned)CONFIG_TCP_REORDER_MAX)
-#elif defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64) || \
+#elif defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_ARM64) || \
     defined(HAL_ARCH_RISCV64)
 #define TCP_REORDER_MAX 128U
 #else

@@ -1786,7 +1786,7 @@ hal_space_get_user_range(
  * Reports live amd64 address-space memory statistics.
  */
 void
-hal_amd64_space_memory_stats(
+amd64_hal_space_memory_stats(
 	uint32_t *spaces,
 	uint32_t *tables)
 {

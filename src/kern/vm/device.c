@@ -34,7 +34,7 @@
  * alone (its HAL maps them through a PAT entry); the other ports would
  * make them Device or cached pages, so such a mapping is refused there.
  */
-#if defined(HAL_ARCH_AMD64)
+#if defined(HAL_ARCH_X86_64)
 #define VM_DEVICE_WC_SUPPORTED 1
 #else
 #define VM_DEVICE_WC_SUPPORTED 0

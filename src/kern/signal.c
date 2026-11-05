@@ -52,7 +52,7 @@
  * function built without -mno-red-zone, such as OpenSSL's, found them
  * zeroed after its handler returned).  The other user ABIs have none.
  */
-#if defined(HAL_ARCH_AMD64)
+#if defined(HAL_ARCH_X86_64)
 #define SIGNAL_USER_RED_ZONE 128U
 #else
 #define SIGNAL_USER_RED_ZONE 0U
