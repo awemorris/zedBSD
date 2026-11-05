@@ -57,12 +57,6 @@ $(eval \
 	)\
 )
 
-#
-# The verified record is the input, so the image waits for the check rather
-# than for the bare download.  The download keeps the fetcher's private mode,
-# so the modes are set: every program that makes a TLS connection reads it.
-#
-
 PACKAGE_INPUTS += \
 	$(if $(filter ca-certificates,$(ZEDBSD_USER_PROGRAMS)),\
 		$(ZEDBSD_EXT_ca-certificates_ARCHIVE_VERIFIED) \
