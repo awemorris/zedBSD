@@ -30,7 +30,7 @@ TARGET_SYSROOT := $(abspath build/$(ARCHITECTURE)/sysroot)
 
 # Determine the commands.
 TARGET_CLANG := $(TARGET_LLVM_BIN)/clang
-CC := $(TARGET_CLANG) --target=$(TARGET_TRIPLE) --sysroot=$(TARGET_SYSROOT)
+CC := $(TARGET_CLANG)
 AS := $(CC)
 LD := $(TARGET_LLVM_BIN)/ld.lld
 AR := $(TARGET_LLVM_BIN)/llvm-ar
@@ -40,6 +40,7 @@ OBJCOPY := $(TARGET_LLVM_BIN)/llvm-objcopy
 OBJDUMP := $(TARGET_LLVM_BIN)/llvm-objdump
 READELF := $(TARGET_LLVM_BIN)/llvm-readelf
 STRIP := $(TARGET_LLVM_BIN)/llvm-strip
+CFLAGS := --target=$(TARGET_TRIPLE) --sysroot=$(TARGET_SYSROOT)
 
 # Determine the LTO flag.
 ifeq ($(KERNEL_LTO),full)

@@ -1,5 +1,11 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+#
 # Common standalone package interface for userland/base.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+#
 
 ifndef TOPLEVEL_BUILD
 
@@ -10,8 +16,6 @@ REPO_ROOT := $(abspath $(dir $(BASE_PACKAGE_MK))/../..)
 PREFIX ?= /usr/local
 DESTDIR ?=
 INSTALL ?= install
-CC ?= cc
-AR ?= ar
 STANDALONE_CONFIG ?= $(REPO_ROOT)/config.mk
 
 # Acquisition and patch preparation must also work in a freshly cloned source

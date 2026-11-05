@@ -8,20 +8,31 @@
 # Project Toplevel Makefile
 #
 
-# C/C++ compilers to build clang and noct
-HOSTCC       := cc
-HOSTCXX      := c++
+# C/C++ compilers to build our toolchain
+HOST_CC       := cc
+HOST_CXX      := c++
+
+# Kernel toolchain which we build
+CC            :=
+AS            :=
+LD            :=
+RANLIB        :=
+NM            :=
+OBJCOPY       :=
+OBJDUMP       :=
+READELF       :=
+STRIP         :=
 
 # Python3
-PYTHON       := python3
+PYTHON        := python3
 
 # Configuration File
-CONFIGMK     := config.mk
+CONFIGMK      := config.mk
 
 # Base Configuration
-PLATFORM     := x86_64
-ARCHITECTURE := x86_64
-BOARD        := pcat
+PLATFORM      := x86_64
+ARCHITECTURE  := x86_64
+BOARD         := pcat
 VARIANT      := native
 
 # Version String
@@ -1939,4 +1950,16 @@ PROGRAM_DIRS := $(dir $(SELECTED_PROGRAM_MAKEFILES))
 packages: $(PROGRAM_DIRS)
 
 $(PROGRAM_DIRS):
-	$(MAKE) -C $@
+	$(MAKE) \
+		-C $@ \
+		CC="$(CC)" \
+		CPPFLAGS="$(USER_CPPFLAGS)" \
+		CFLAGS="$(USER_CFLAGS)" \
+		AS="$(AS)" \
+		LD="$(LD)" \
+		RANLIB="$(RANLIB)" \
+		NM="$(NM)" \
+		OBJCOPY="$(OBJCOPY)" \
+		OBJDUMP="$(OBJDUMP)" \
+		READELF="$(READELF)" \
+		STRIP="$(STRIP)"
