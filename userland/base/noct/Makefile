@@ -17,7 +17,7 @@ BUILD ?= $(REPO_ROOT)/build/$(PLATFORM)
 ARCH ?= $(strip \
 	$(if $(filter i386 pc98,$(PLATFORM)),i386,\
 	$(if $(filter arm64 rpi4 rpi5,$(PLATFORM)),arm64,\
-	amd64)))
+	x86_64)))
 
 ZEDBSD_LLVM_BIN ?= $(REPO_ROOT)/build/llvm/bin
 CLANG ?= $(ZEDBSD_LLVM_BIN)/clang

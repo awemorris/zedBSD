@@ -11,4 +11,4 @@ LIBBROWSER_IMAGE_DATA := \
 		/usr/share/licenses/browser/WHATWG-entities=userland/base/licenses/browser/WHATWG-entities \
 		/usr/share/licenses/browser/Unicode-License-V3=userland/base/licenses/browser/Unicode-License-V3
 
-$(eval $(call USERLAND_PACKAGE,libbrowser,libbrowser,amd64,n,library,$(LIBBROWSER_SOURCES),y,desktop,desktop/libbrowser,desktop/libtruetype desktop/libvulkan desktop/libmedia desktop/libjpeg-compat desktop/libpng-compat base/libz-compat desktop/libgif-compat desktop/libwebp-compat,,shared-library,$(LIBBROWSER_IMAGE_DATA),userland/desktop/include/browser/browser.h userland/desktop/include/browser/storage.h,lib))
+$(eval $(call USERLAND_PACKAGE,libbrowser,libbrowser,x86_64,n,library,$(LIBBROWSER_SOURCES),y,desktop,desktop/libbrowser,desktop/libtruetype desktop/libvulkan desktop/libmedia desktop/libjpeg-compat desktop/libpng-compat base/libz-compat desktop/libgif-compat desktop/libwebp-compat,,shared-library,$(LIBBROWSER_IMAGE_DATA),userland/desktop/include/browser/browser.h userland/desktop/include/browser/storage.h,lib))

@@ -18,38 +18,40 @@
 # To update: take fonts/NotoColorEmoji.ttf of a newer tag of
 # https://github.com/googlefonts/noto-emoji, record its size and SHA-256,
 # and check its license file is still OFL-1.1.
-ZEDBSD_NOTO_COLOR_EMOJI_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-ZEDBSD_NOTO_COLOR_EMOJI_DIR := $(patsubst %/,%,$(dir $(ZEDBSD_NOTO_COLOR_EMOJI_MAKEFILE)))
-include $(ZEDBSD_NOTO_COLOR_EMOJI_DIR)/../../../base/package.mk
-include $(ZEDBSD_NOTO_COLOR_EMOJI_DIR)/../../external.mk
+NOTO_COLOR_EMOJI_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+NOTO_COLOR_EMOJI_DIR := $(patsubst %/,%,$(dir $(NOTO_COLOR_EMOJI_MAKEFILE)))
+include $(NOTO_COLOR_EMOJI_DIR)/../../../base/package.mk
+include $(NOTO_COLOR_EMOJI_DIR)/../../external.mk
 
 # Noto Emoji v2.047 (Unicode 16.0), fonts/NotoColorEmoji.ttf.
-ZEDBSD_EXT_noto-color-emoji_VERSION := 2.047
-ZEDBSD_EXT_noto-color-emoji_ARCHIVE := NotoColorEmoji-2.047.ttf
-ZEDBSD_EXT_noto-color-emoji_URL := https://github.com/googlefonts/noto-emoji/raw/v2.047/fonts/NotoColorEmoji.ttf
-ZEDBSD_EXT_noto-color-emoji_SIZE := 10643852
-ZEDBSD_EXT_noto-color-emoji_SHA256 := 39ee3c587e10e89669b9ff32703261d10d5f9c4dd5ad147b6b5a1c5200591817
+EXT_noto-color-emoji_VERSION := 2.047
+EXT_noto-color-emoji_ARCHIVE := NotoColorEmoji-2.047.ttf
+EXT_noto-color-emoji_URL := https://github.com/googlefonts/noto-emoji/raw/v2.047/fonts/NotoColorEmoji.ttf
+EXT_noto-color-emoji_SIZE := 10643852
+EXT_noto-color-emoji_SHA256 := 39ee3c587e10e89669b9ff32703261d10d5f9c4dd5ad147b6b5a1c5200591817
 
-$(eval $(call ZEDBSD_EXTERNAL_FILE,noto-color-emoji))
+$(eval $(call EXTERNAL_FILE,noto-color-emoji))
 
-ZEDBSD_NOTO_COLOR_EMOJI_LICENSE := $(ZEDBSD_NOTO_COLOR_EMOJI_DIR)/OFL-1.1.txt
+NOTO_COLOR_EMOJI_LICENSE := $(NOTO_COLOR_EMOJI_DIR)/OFL-1.1.txt
 
 .PHONY: noto-color-emoji
-noto-color-emoji: $(ZEDBSD_EXT_noto-color-emoji_ARCHIVE_VERIFIED)
+noto-color-emoji: $(EXT_noto-color-emoji_ARCHIVE_VERIFIED)
 	@:
+
+build: noto-color-emoji
 
 # ---------------------------------------------------------------- packaging
 
 $(eval $(call USERLAND_PACKAGE,noto-color-emoji,Colour emoji font,*,n,package,,y,\
-	packages/fonts,fonts/noto-color-emoji,))
+	packages/fonts,fonts/noto-color-emoji,,0644,custom))
 
 # The verified record is the input, so the image waits for the check rather
 # than for the bare download.  The download keeps the fetcher's private mode,
 # so the modes are set: every program that draws text reads it.
-ZEDBSD_PACKAGE_INPUTS += $(if $(filter noto-color-emoji,$(ZEDBSD_USER_PROGRAMS)),\
-	$(ZEDBSD_EXT_noto-color-emoji_ARCHIVE_VERIFIED) $(ZEDBSD_NOTO_COLOR_EMOJI_LICENSE))
-ZEDBSD_PACKAGE_FILES += $(if $(filter noto-color-emoji,$(ZEDBSD_USER_PROGRAMS)),\
-	--file /usr/share/fonts/keiland-emoji.ttf=$(ZEDBSD_EXT_noto-color-emoji_DISTFILE) \
-	--file /usr/share/licenses/noto-color-emoji/OFL-1.1.txt=$(ZEDBSD_NOTO_COLOR_EMOJI_LICENSE) \
+PACKAGE_INPUTS += $(if $(filter noto-color-emoji,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
+	$(EXT_noto-color-emoji_ARCHIVE_VERIFIED) $(NOTO_COLOR_EMOJI_LICENSE))
+PACKAGE_FILES += $(if $(filter noto-color-emoji,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
+	--file /usr/share/fonts/keiland-emoji.ttf=$(EXT_noto-color-emoji_DISTFILE) \
+	--file /usr/share/licenses/noto-color-emoji/OFL-1.1.txt=$(NOTO_COLOR_EMOJI_LICENSE) \
 	--mode /usr/share/fonts/keiland-emoji.ttf=0644 \
 	--mode /usr/share/licenses/noto-color-emoji/OFL-1.1.txt=0644)

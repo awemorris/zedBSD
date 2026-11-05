@@ -31,4 +31,4 @@ KEILAND_FILES_SOURCES := userland/desktop/files/main.c \
 	userland/desktop/preview/client.c userland/desktop/preview/zedbsd/spawn.c
 # ws168-p004: the pictures (thumbnails, preview, Quick Look, the Today page) are made by keiland-preview in a sandbox;
 # files decodes none itself and links no decoder.
-$(eval $(call USERLAND_PACKAGE,files,files - File manager,amd64,y,basic,$(KEILAND_FILES_SOURCES),y,desktop,desktop/files,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/preview,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,files,files - File manager,x86_64,y,basic,$(KEILAND_FILES_SOURCES),y,desktop,desktop/files,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/preview,0755,program,,,bin))

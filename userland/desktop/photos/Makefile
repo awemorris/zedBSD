@@ -9,4 +9,4 @@ PHOTOS_SOURCES := userland/desktop/photos/main.c userland/desktop/photos/media-w
 	userland/desktop/photos/cache-folders.c userland/desktop/picture/png-write.c \
 	userland/desktop/preview/client.c userland/desktop/preview/zedbsd/spawn.c
 # ws157-p015: the photos' pictures are decoded by keiland-preview in a sandbox, never in Photos' process.
-$(eval $(call USERLAND_PACKAGE,photos,photos - Photos,amd64,n,basic,$(PHOTOS_SOURCES),y,desktop,desktop/photos,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/mediastorage desktop/preview base/libz-compat,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,photos,photos - Photos,x86_64,n,basic,$(PHOTOS_SOURCES),y,desktop,desktop/photos,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/mediastorage desktop/preview base/libz-compat,0755,program,,,bin))

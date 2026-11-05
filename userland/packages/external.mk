@@ -1,9 +1,13 @@
-# Common verified source-distribution lifecycle for external userland packages.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+# zedBSD
+# Copyright (C) 2026 Awe Morris
 #
-# A package under userland/packages/ that is built from an upstream release
-# tarball declares the archive's identity and calls ZEDBSD_EXTERNAL_SOURCE.
-# It gets, for <name>:
+# SPDX-License-Identifier: Zlib
+
+#
+# Common verified source-distribution lifecycle for external userland
+# packages.  A package under userland/packages/ that is built from an
+# upstream release tarball declares the archive's identity and calls
+# ZEDBSD_EXTERNAL_SOURCE.  It gets, for <name>:
 #
 #   <name>-download    acquire and verify the archive (network, on request)
 #   <name>-source      extracted and patched tree, as a stamped target
@@ -14,31 +18,36 @@
 # upstream bytes.  Nothing is extracted, and no name becomes visible, until
 # those hold; the checks themselves live in tools/archive.sh so that they can
 # be tested without a build.
+#
 
 ifndef EXTERNAL_MK
 
 EXTERNAL_MK := $(lastword $(MAKEFILE_LIST))
 
-# The repository Makefile includes every package Makefile from the repository
-# root; a standalone `make -C userland/packages/...` has package.mk set
-# ZEDBSD_REPO_ROOT instead.
+# The repository Makefile includes every package Makefile from the
+# repository root, a standalone `make -C userland/packages/...` has
+# package.mk set ZEDBSD_REPO_ROOT instead.
 EXTERNAL_ROOT := $(if $(TOPLEVEL_BUILD),$(CURDIR),$(REPO_ROOT))
 EXTERNAL_TOOLS := $(abspath $(EXTERNAL_ROOT)/userland/packages/tools)
 
-# How many jobs a nested build tool (cmake, ninja) may run; the top-level
-# build reads the same file, and a standalone package build gets it here.
+# How many jobs a nested build tool (cmake, ninja) may run; the
+# top-level build reads the same file, and a standalone package build
+# gets it here.
 include $(EXTERNAL_ROOT)/build-jobs.mk
 EXTERNAL_ARCHIVE_SH := $(EXTERNAL_TOOLS)/archive.sh
 
-# Archives are architecture-independent, so every configured build shares one
-# distfiles directory.  Extracted trees and build directories are per package.
+USER_PROGRAMS ?= $(USERLAND_PROGRAMS)
+PACKAGE_BINDIR ?= /usr/bin
+PYTHON ?= python3
+
+# Archives are architecture-independent, so every configured build
+# shares one distfiles directory.  Extracted trees and build
+# directories are per package.
 EXTERNAL_DISTDIR := $(abspath $(EXTERNAL_ROOT)/build/distfiles)
 
 # The work trees hold what was built for one architecture, so each
-# architecture has its own.  amd64 keeps the name it had before the others
-# could build packages, so its trees are not built again.
-EXTERNAL_WORKROOT := $(abspath $(EXTERNAL_ROOT)/build/packages$(if \
-	$(filter-out amd64,$(ARCHITECTURE)),-$(ARCHITECTURE),))
+# architecture has its own (<root>/build/packages-<arch>).
+EXTERNAL_WORKROOT := $(abspath $(EXTERNAL_ROOT)/build/packages-$(ARCHITECTURE))
 
 # ---------------------------------------------------------------- cross build
 
@@ -46,7 +55,7 @@ EXTERNAL_WORKROOT := $(abspath $(EXTERNAL_ROOT)/build/packages$(if \
 # Makefile, so that `make -C userland/packages/...` and the top-level build
 # agree without depending on include order.
 EXTERNAL_TRIPLE := $(strip \
-	$(if $(filter amd64,$(ARCHITECTURE)),x86_64-unknown-zedbsd,\
+	$(if $(filter x86_64,$(ARCHITECTURE)),x86_64-unknown-zedbsd,\
 	$(if $(filter i386,$(ARCHITECTURE)),i386-unknown-zedbsd,\
 	$(if $(filter arm64,$(ARCHITECTURE)),aarch64-unknown-zedbsd,\
 	$(if $(filter riscv64,$(ARCHITECTURE)),riscv64-unknown-zedbsd,\
@@ -60,6 +69,10 @@ EXTERNAL_LLVM_TARGET := $(strip \
 EXTERNAL_LLVM_BIN := $(abspath $(EXTERNAL_ROOT)/build/llvm/bin)
 EXTERNAL_SYSROOT := \
 	$(abspath $(EXTERNAL_ROOT)/build/$(ARCHITECTURE)/sysroot)
+PLATFORM_DIR ?= $(if $(filter i386,$(PLATFORM)),pcat,\
+	$(if $(filter rpi4 rpi5,$(PLATFORM)),arm64,\
+	$(if $(filter sun4u,$(PLATFORM)),sparcv9,\
+	$(PLATFORM))))
 EXTERNAL_PLATFORM_DIR := $(strip \
 	$(if $(TOPLEVEL_BUILD),$(PLATFORM_DIR),$(STANDALONE_PLATFORM_DIR)))
 EXTERNAL_DYNAMIC := \
@@ -90,7 +103,7 @@ EXTERNAL_CROSS_INPUTS := $(EXTERNAL_GEN_CROSS) \
 # have to exist before a package links, and a new C library does not
 # configure the packages again.
 EXTERNAL_LINK_DIR := $(EXTERNAL_CROSS_DIR)/lib
-EXTERNAL_LINK_LIBS := libc.so $(if $(filter amd64 arm64 riscv64 armv7,$(ARCHITECTURE)),libutil.so)
+EXTERNAL_LINK_LIBS := libc.so $(if $(filter x86_64 arm64 riscv64 armv7,$(ARCHITECTURE)),libutil.so)
 EXTERNAL_LINK_SOURCE := $(if $(TOPLEVEL_BUILD),\
 	$(BUILD)/dynamic,$(EXTERNAL_DYNAMIC))
 
@@ -247,6 +260,19 @@ $$(EXT_$(1)_STAGED): $$(EXT_$(1)_CONFIGURED)
 	@touch '$$@'
 
 endef
+
+$(EXTERNAL_WORKROOT)/%/stage/.zedbsd-staged:
+	@target_dir=$$(find $(EXTERNAL_ROOT)/userland/packages $(EXTERNAL_ROOT)/userland/desktop -maxdepth 3 -type d -name "$*" | head -n 1); \
+	if [ -z "$$target_dir" ] && [ "$*" = "wayland-client" ]; then \
+		target_dir="$(EXTERNAL_ROOT)/userland/desktop/libwayland"; \
+	fi; \
+	if [ -n "$$target_dir" ] && [ -d "$$target_dir" ]; then \
+		echo "Building dependency $* in $$target_dir..."; \
+		$(MAKE) -C "$$target_dir"; \
+	else \
+		echo "Error: cannot find Makefile for dependency $*" >&2; \
+		exit 1; \
+	fi
 
 # ------------------------------------------------------- the LLVM source tree
 

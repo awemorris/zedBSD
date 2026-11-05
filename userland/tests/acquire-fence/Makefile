@@ -5,4 +5,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 ACQUIRE_FENCE_TEST_SOURCES := userland/tests/acquire-fence/main.c \
 	userland/tests/wltest/window.c userland/tests/wltest/renderer.c
-$(eval $(call USERLAND_PACKAGE,acquire-fence-test,Acquire fence test,amd64,y,basic,$(ACQUIRE_FENCE_TEST_SOURCES),y,tests,tests/acquire-fence,desktop/libvulkan desktop/libwayland,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,acquire-fence-test,Acquire fence test,x86_64,y,basic,$(ACQUIRE_FENCE_TEST_SOURCES),y,tests,tests/acquire-fence,desktop/libvulkan desktop/libwayland,0755,program,,,bin))

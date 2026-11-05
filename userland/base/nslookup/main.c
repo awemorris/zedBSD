@@ -11,7 +11,7 @@
  * Implements the zedBSD nslookup userland command.
  */
 
-#include "userland/base/libc/resolver-internal.h"
+#include "src/libc/resolver-internal.h"
 
 #include <arpa/inet.h>
 #include <net/if.h>

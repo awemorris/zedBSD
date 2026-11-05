@@ -7,42 +7,42 @@
 # builds keymaps from it by name; GTK makes its default keymap that way when
 # it starts (WS115, port-contract §7).  Provenance is in
 # plan/ws034/package-inventory.md and plan/ws115/port-contract.md.
-ZEDBSD_XKEYBOARD_CONFIG_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-ZEDBSD_XKEYBOARD_CONFIG_DIR := $(patsubst %/,%,$(dir $(ZEDBSD_XKEYBOARD_CONFIG_MAKEFILE)))
-include $(ZEDBSD_XKEYBOARD_CONFIG_DIR)/../../../base/package.mk
-include $(ZEDBSD_XKEYBOARD_CONFIG_DIR)/../../external.mk
+XKEYBOARD_CONFIG_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+XKEYBOARD_CONFIG_DIR := $(patsubst %/,%,$(dir $(XKEYBOARD_CONFIG_MAKEFILE)))
+include $(XKEYBOARD_CONFIG_DIR)/../../../base/package.mk
+include $(XKEYBOARD_CONFIG_DIR)/../../external.mk
 
 # 2.48 was the latest release when recorded.  Size and digest are the
 # upstream bytes as measured; the archive's signature was checked
 # (WS034 p001).
-ZEDBSD_EXT_xkeyboard-config_VERSION := 2.48
-ZEDBSD_EXT_xkeyboard-config_ROOT := xkeyboard-config-2.48
-ZEDBSD_EXT_xkeyboard-config_ARCHIVE := xkeyboard-config-2.48.tar.xz
-ZEDBSD_EXT_xkeyboard-config_URL := https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz
-ZEDBSD_EXT_xkeyboard-config_SIZE := 953316
-ZEDBSD_EXT_xkeyboard-config_SHA256 := b77041324f0109f77161ee43743fe04baa485866af8460d31e476ad3f7648fd5
-ZEDBSD_EXT_xkeyboard-config_PATCH_LEVEL := zedbsd0
-ZEDBSD_EXT_xkeyboard-config_PATCHES :=
+EXT_xkeyboard-config_VERSION := 2.48
+EXT_xkeyboard-config_ROOT := xkeyboard-config-2.48
+EXT_xkeyboard-config_ARCHIVE := xkeyboard-config-2.48.tar.xz
+EXT_xkeyboard-config_URL := https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz
+EXT_xkeyboard-config_SIZE := 953316
+EXT_xkeyboard-config_SHA256 := b77041324f0109f77161ee43743fe04baa485866af8460d31e476ad3f7648fd5
+EXT_xkeyboard-config_PATCH_LEVEL := zedbsd0
+EXT_xkeyboard-config_PATCHES :=
 
-$(eval $(call ZEDBSD_EXTERNAL_SOURCE,xkeyboard-config))
+$(eval $(call EXTERNAL_SOURCE,xkeyboard-config))
 
 # ---------------------------------------------------------------- build
 
 # Meson, through the common rule; nothing is compiled.  The compatibility
 # rules stay; translations and the X.Org rule-name links are off.
-ZEDBSD_EXT_xkeyboard-config_MAKEFILE := $(ZEDBSD_XKEYBOARD_CONFIG_MAKEFILE)
-ZEDBSD_EXT_xkeyboard-config_DEPENDS :=
-ZEDBSD_EXT_xkeyboard-config_HOST_TOOLS :=
-ZEDBSD_EXT_xkeyboard-config_MESON_OPTIONS := \
+EXT_xkeyboard-config_MAKEFILE := $(XKEYBOARD_CONFIG_MAKEFILE)
+EXT_xkeyboard-config_DEPENDS :=
+EXT_xkeyboard-config_HOST_TOOLS :=
+EXT_xkeyboard-config_MESON_OPTIONS := \
 	-Dcompat-rules=true -Dxorg-rules-symlinks=false -Dnls=false \
 	-Dnon-latin-layouts-list=false
 
-$(eval $(call ZEDBSD_EXTERNAL_MESON,xkeyboard-config))
+$(eval $(call EXTERNAL_MESON,xkeyboard-config))
 
-ZEDBSD_XKEYBOARD_CONFIG_STAGED := $(ZEDBSD_EXT_xkeyboard-config_STAGEDIR)/.zedbsd-staged
-ZEDBSD_XKEYBOARD_CONFIG_CHECKED := $(ZEDBSD_EXT_xkeyboard-config_STAGEDIR)/.zedbsd-checked
-ZEDBSD_XKEYBOARD_CONFIG_ROOT := $(ZEDBSD_EXT_xkeyboard-config_STAGEDIR)/usr/share/xkeyboard-config-2
-ZEDBSD_XKEYBOARD_CONFIG_LICENSE := $(ZEDBSD_EXT_xkeyboard-config_SRCDIR)/COPYING
+XKEYBOARD_CONFIG_STAGED := $(EXT_xkeyboard-config_STAGEDIR)/.zedbsd-staged
+XKEYBOARD_CONFIG_CHECKED := $(EXT_xkeyboard-config_STAGEDIR)/.zedbsd-checked
+XKEYBOARD_CONFIG_ROOT := $(EXT_xkeyboard-config_STAGEDIR)/usr/share/xkeyboard-config-2
+XKEYBOARD_CONFIG_LICENSE := $(EXT_xkeyboard-config_SRCDIR)/COPYING
 
 # The data files the image carries, relative to the data root: the rules,
 # keycodes, types, compat and symbols libxkbcommon reads.  The geometry
@@ -50,25 +50,25 @@ ZEDBSD_XKEYBOARD_CONFIG_LICENSE := $(ZEDBSD_EXT_xkeyboard-config_SRCDIR)/COPYING
 # built from a file list known when make starts, before the stage exists, so
 # the list is kept here, and the check below fails when the stage and the
 # list differ (a new release regenerates it with the find command there).
-ZEDBSD_XKEYBOARD_CONFIG_LIST := $(ZEDBSD_XKEYBOARD_CONFIG_DIR)/files/data.list
-ZEDBSD_XKEYBOARD_CONFIG_DATA := $(file <$(ZEDBSD_XKEYBOARD_CONFIG_LIST))
+XKEYBOARD_CONFIG_LIST := $(XKEYBOARD_CONFIG_DIR)/files/data.list
+XKEYBOARD_CONFIG_DATA := $(file <$(XKEYBOARD_CONFIG_LIST))
 
 # Checks that the stage holds exactly the listed data files.
-$(ZEDBSD_XKEYBOARD_CONFIG_CHECKED): $(ZEDBSD_XKEYBOARD_CONFIG_STAGED) \
-	$(ZEDBSD_XKEYBOARD_CONFIG_LIST)
-	@cd '$(ZEDBSD_XKEYBOARD_CONFIG_ROOT)' && \
+$(XKEYBOARD_CONFIG_CHECKED): $(XKEYBOARD_CONFIG_STAGED) \
+	$(XKEYBOARD_CONFIG_LIST)
+	@cd '$(XKEYBOARD_CONFIG_ROOT)' && \
 		LC_ALL=C find compat keycodes rules symbols types -type f | LC_ALL=C sort | \
-		cmp -s - '$(abspath $(ZEDBSD_XKEYBOARD_CONFIG_LIST))' || { \
+		cmp -s - '$(abspath $(XKEYBOARD_CONFIG_LIST))' || { \
 			echo "xkeyboard-config: the stage differs from files/data.list" >&2; \
 			exit 1; \
 		}
 	@touch '$@'
 
-$(ZEDBSD_XKEYBOARD_CONFIG_LICENSE): $(ZEDBSD_EXT_xkeyboard-config_SRCSTAMP)
+$(XKEYBOARD_CONFIG_LICENSE): $(EXT_xkeyboard-config_SRCSTAMP)
 	@test -f '$@'
 
 .PHONY: xkeyboard-config
-xkeyboard-config: $(ZEDBSD_XKEYBOARD_CONFIG_CHECKED)
+xkeyboard-config: $(XKEYBOARD_CONFIG_CHECKED)
 	@:
 
 # ---------------------------------------------------------------- packaging
@@ -78,11 +78,11 @@ xkeyboard-config: $(ZEDBSD_XKEYBOARD_CONFIG_CHECKED)
 $(eval $(call USERLAND_PACKAGE,xkeyboard-config,Keyboard layout data,*,n,package,,y,\
 	packages/libs,libs/xkeyboard-config,))
 
-ZEDBSD_PACKAGE_INPUTS += $(if $(filter xkeyboard-config,$(ZEDBSD_USER_PROGRAMS)),\
-	$(ZEDBSD_XKEYBOARD_CONFIG_CHECKED) $(ZEDBSD_XKEYBOARD_CONFIG_LICENSE))
-ZEDBSD_PACKAGE_FILES += $(if $(filter xkeyboard-config,$(ZEDBSD_USER_PROGRAMS)),\
-	$(foreach data,$(ZEDBSD_XKEYBOARD_CONFIG_DATA),\
-		--file /usr/share/xkeyboard-config-2/$(data)=$(ZEDBSD_XKEYBOARD_CONFIG_ROOT)/$(data)) \
-	--file /usr/share/licenses/xkeyboard-config/COPYING=$(ZEDBSD_XKEYBOARD_CONFIG_LICENSE))
-ZEDBSD_PACKAGE_LINKS += $(if $(filter xkeyboard-config,$(ZEDBSD_USER_PROGRAMS)),\
+PACKAGE_INPUTS += $(if $(filter xkeyboard-config,$(USER_PROGRAMS)),\
+	$(XKEYBOARD_CONFIG_CHECKED) $(XKEYBOARD_CONFIG_LICENSE))
+PACKAGE_FILES += $(if $(filter xkeyboard-config,$(USER_PROGRAMS)),\
+	$(foreach data,$(XKEYBOARD_CONFIG_DATA),\
+		--file /usr/share/xkeyboard-config-2/$(data)=$(XKEYBOARD_CONFIG_ROOT)/$(data)) \
+	--file /usr/share/licenses/xkeyboard-config/COPYING=$(XKEYBOARD_CONFIG_LICENSE))
+PACKAGE_LINKS += $(if $(filter xkeyboard-config,$(USER_PROGRAMS)),\
 	/usr/share/X11/xkb=../xkeyboard-config-2)

@@ -23,4 +23,4 @@ LIBVULKAN_SOURCES := userland/desktop/libvulkan/objects.c \
 # The image metadata owns /lib placement; standalone installation honors PREFIX.
 # The command numbers are the zedBSD GPU command protocol's (uapi/gpu-op.h, ws167-p002): no third-party notice.
 LIBVULKAN_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libvulkan.so=$(BUILD)/dynamic/libvulkan.so)
-$(eval $(call USERLAND_PACKAGE,libvulkan,libvulkan,amd64,y,library,$(LIBVULKAN_SOURCES),y,desktop,desktop/libvulkan,desktop/libwayland,,shared-library,$(LIBVULKAN_IMAGE_DATA),,lib))
+$(eval $(call USERLAND_PACKAGE,libvulkan,libvulkan,x86_64,y,library,$(LIBVULKAN_SOURCES),y,desktop,desktop/libvulkan,desktop/libwayland,,shared-library,$(LIBVULKAN_IMAGE_DATA),,lib))

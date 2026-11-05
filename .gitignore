@@ -8,6 +8,10 @@ __pycache__/
 .internal/
 plan/ws*/temp/
 
+.tar.gz
+.tar.bz2
+.tar.xz
+
 # Awesome Plan local cache, write-back journal and conflicts
 /plan/.sync/
 

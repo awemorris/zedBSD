@@ -1,9 +1,13 @@
-﻿# Software floating-point support for zedBSD.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+﻿# zedBSD
+# Copyright (C) 2026 Awe Morris
 #
-# The compiler ABI runtime is integer-only.  libc math and string conversion
-# share its IEEE packing primitives, so this build has no external numerical
-# source dependency.
+# SPDX-License-Identifier: Zlib
+
+#
+# The compiler ABI runtime is integer-only.  libc math and string
+# conversion share its IEEE packing primitives, so this build has no
+# external numerical source dependency.
+#
 
 ZEDBSD_SOFTFLOAT_BUILD_DIR := $(BUILD)/softfloat
 ZEDBSD_SOFTFLOAT_CC ?= $(CC)
@@ -22,10 +26,10 @@ ZEDBSD_SOFTFLOAT_OBJECTS := $(ZEDBSD_COMPILER_RT_OBJECTS) \
 ZEDBSD_SOFTFLOAT_CFLAGS := $(ZEDBSD_LIBC_CFLAGS) -mlong-double-64
 ZEDBSD_SOFTFLOAT_DEPFLAGS := -MMD -MP
 
-# These objects are built by custom rules rather than the generic C rule.  Keep
-# an explicit dependency on the public errno ABI so an existing build tree is
-# rebuilt when errno changes, and emit normal compiler dependency files for
-# subsequent header changes.
+# These objects are built by custom rules rather than the generic C
+# rule.  Keep an explicit dependency on the public errno ABI so an
+# existing build tree is rebuilt when errno changes, and emit normal
+# compiler dependency files for subsequent header changes.
 $(ZEDBSD_SOFTFLOAT_OBJECTS): include/libc/errno.h
 
 $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/%.o: src/libc/%.c \

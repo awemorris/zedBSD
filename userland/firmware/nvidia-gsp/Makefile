@@ -138,7 +138,7 @@ nvidia-gsp-firmware-license:
 nvidia-gsp-firmware-license-pending:
 	@if test ! -d '$(NVIDIA_GSP_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(NVIDIA_GSP_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call USERLAND_PACKAGE,nvidia-gsp-firmware,NVIDIA GSP firmware for Turing Ampere and Ada,amd64,n,package,,y,firmware,firmware/nvidia-gsp,,,data,$(NVIDIA_GSP_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,nvidia-gsp-firmware,NVIDIA GSP firmware for Turing Ampere and Ada,x86_64,n,package,,y,firmware,firmware/nvidia-gsp,,,data,$(NVIDIA_GSP_FIRMWARE_DATA),,))
 override USERLAND_nvidia-gsp-firmware_DATA := $(NVIDIA_GSP_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += nvidia-gsp-firmware
 

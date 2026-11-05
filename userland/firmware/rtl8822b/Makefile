@@ -83,7 +83,7 @@ rtl8822b-firmware-license:
 rtl8822b-firmware-license-pending:
 	@if test ! -d '$(RTL8822B_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(RTL8822B_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call USERLAND_PACKAGE,rtl8822b-firmware,Realtek RTL8822B firmware,i386 pc98 amd64,n,package,,y,firmware,firmware/rtl8822b,,,data,$(RTL8822B_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,rtl8822b-firmware,Realtek RTL8822B firmware,i386 pc98 x86_64,n,package,,y,firmware,firmware/rtl8822b,,,data,$(RTL8822B_FIRMWARE_DATA),,))
 override USERLAND_rtl8822b-firmware_DATA := $(RTL8822B_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += rtl8822b-firmware
 

@@ -12,5 +12,5 @@ ZEDBSD_LICENSE_DATA := \
 # notice in binaries) are in every image's libc, so their notice comes with it.
 # Selected for every image and hidden from menuconfig.
 $(eval $(call USERLAND_PACKAGE,zedbsd-license,zedBSD license,\
-	i386 pc98 amd64 rpi4 rpi5,n,data,,n,base,base/licenses/zedbsd,,,data,\
+	i386 pc98 x86_64 rpi4 rpi5,n,data,,n,base,base/licenses/zedbsd,,,data,\
 	$(ZEDBSD_LICENSE_DATA)))

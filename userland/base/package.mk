@@ -44,14 +44,18 @@ STANDALONE_TERMINFO_DIR = $(strip $(if $(filter /,$(PREFIX)),\
 
 define USERLAND_PACKAGE
 STANDALONE_NAME := $(1)
+STANDALONE_SO_NAME := $(if $(2),$(2),$(1))
 STANDALONE_CLASS := $(5)
 STANDALONE_SOURCES := $(6)
 STANDALONE_REQUIRE := $(10)
 STANDALONE_MODE := $(if $(11),$(11),0755)
-STANDALONE_TYPE := $(if $(12),$(12),$(if $(filter library,$(5)),library,program))
+STANDALONE_TYPE := $(if $(12),$(12),$(if $(filter library,$(5)),library,$(if $(filter package,$(5)),package,program)))
 STANDALONE_DATA := $(13)
 STANDALONE_HEADERS := $(14)
 STANDALONE_INSTALL_DIR := $(if $(15),$(15),bin)
+ifneq ($$(filter package custom,$$(STANDALONE_TYPE)),)
+build: $(1)
+endif
 endef
 
 .PHONY: all build install clean
@@ -68,7 +72,7 @@ build: patch
 		$(MAKE) -C "$(REPO_ROOT)" \
 			CONFIG="$(STANDALONE_CONFIG)" \
 			USER_PROGRAMS="$(STANDALONE_NAME)" \
-			"build/$(STANDALONE_PLATFORM_DIR)/dynamic/$(STANDALONE_NAME).so"; \
+			"build/$(STANDALONE_PLATFORM_DIR)/dynamic/$(STANDALONE_SO_NAME).so"; \
 	elif test "$(STANDALONE_TYPE)" = library && \
 	    test -n "$(STANDALONE_SOURCES)"; then \
 		libdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib"; \
@@ -94,8 +98,8 @@ install: build
 		libdir="$(if $(filter /,$(PREFIX)),/lib,$(patsubst %/,%,$(PREFIX))/lib)"; \
 		$(INSTALL) -d "$(DESTDIR)$$libdir"; \
 		$(INSTALL) -m 0644 \
-			"$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic/$(STANDALONE_NAME).so" \
-			"$(DESTDIR)$$libdir/$(STANDALONE_NAME).so"; \
+			"$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic/$(STANDALONE_SO_NAME).so" \
+			"$(DESTDIR)$$libdir/$(STANDALONE_SO_NAME).so"; \
 	elif test "$(STANDALONE_TYPE)" = library && \
 	    test -n "$(STANDALONE_SOURCES)"; then \
 		libdir="$(if $(filter /,$(PREFIX)),/lib,$(patsubst %/,%,$(PREFIX))/lib)"; \

@@ -119,7 +119,7 @@ amd-navi-firmware-license:
 amd-navi-firmware-license-pending:
 	@if test ! -d '$(AMD_NAVI_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(AMD_NAVI_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call USERLAND_PACKAGE,amd-navi-firmware,AMD Navi10 GPU firmware for RX 5600 and RX 5700,amd64,n,package,,y,firmware,firmware/amd-navi,,,data,$(AMD_NAVI_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,amd-navi-firmware,AMD Navi10 GPU firmware for RX 5600 and RX 5700,x86_64,n,package,,y,firmware,firmware/amd-navi,,,data,$(AMD_NAVI_FIRMWARE_DATA),,))
 override USERLAND_amd-navi-firmware_DATA := $(AMD_NAVI_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += amd-navi-firmware
 

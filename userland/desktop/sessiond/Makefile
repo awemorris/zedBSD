@@ -17,4 +17,4 @@ SESSIOND_SOURCES := userland/desktop/sessiond/main.c userland/desktop/sessiond/g
 SESSIOND_DATA := /etc/service.d/greeter=userland/desktop/sessiond/greeter.service \
 	/etc/keiland/session=userland/desktop/sessiond/session.sh \
 	/etc/keiland/autologin=userland/desktop/sessiond/autologin
-$(eval $(call USERLAND_PACKAGE,sessiond,sessiond - Graphical login session manager,amd64,y,basic,$(SESSIOND_SOURCES),y,desktop,desktop/sessiond,base/passkey,0755,program,$(SESSIOND_DATA),,sbin))
+$(eval $(call USERLAND_PACKAGE,sessiond,sessiond - Graphical login session manager,x86_64,y,basic,$(SESSIOND_SOURCES),y,desktop,desktop/sessiond,base/passkey,0755,program,$(SESSIOND_DATA),,sbin))

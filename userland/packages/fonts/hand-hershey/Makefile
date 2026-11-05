@@ -10,55 +10,55 @@
 # acknowledgements go with the data: NOTICE, installed as /usr/share/licenses/hand-hershey/NOTICE.
 #
 # To update: there is no newer data; a change of the glyphs taken is hershey-unicode.txt's.
-ZEDBSD_HAND_HERSHEY_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-ZEDBSD_HAND_HERSHEY_DIR := $(patsubst %/,%,$(dir $(ZEDBSD_HAND_HERSHEY_MAKEFILE)))
-include $(ZEDBSD_HAND_HERSHEY_DIR)/../../../base/package.mk
-include $(ZEDBSD_HAND_HERSHEY_DIR)/../../external.mk
+HAND_HERSHEY_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+HAND_HERSHEY_DIR := $(patsubst %/,%,$(dir $(HAND_HERSHEY_MAKEFILE)))
+include $(HAND_HERSHEY_DIR)/../../../base/package.mk
+include $(HAND_HERSHEY_DIR)/../../external.mk
 
 # The four parts of the Usenet distribution, as compress(1) files.
-ZEDBSD_HAND_HERSHEY_URL := https://ftp.isc.org/pub/usenet/comp.sources.unix/volume4/hershey
-ZEDBSD_EXT_hand-hershey-part2_VERSION := 1986
-ZEDBSD_EXT_hand-hershey-part2_ARCHIVE := hershey-1986-part2.Z
-ZEDBSD_EXT_hand-hershey-part2_URL := $(ZEDBSD_HAND_HERSHEY_URL)/part2.Z
-ZEDBSD_EXT_hand-hershey-part2_SIZE := 32469
-ZEDBSD_EXT_hand-hershey-part2_SHA256 := 0e227df0675d577f865ff383752c69c4484a80223d3bf98b0c8bb9947761e723
-ZEDBSD_EXT_hand-hershey-part3_VERSION := 1986
-ZEDBSD_EXT_hand-hershey-part3_ARCHIVE := hershey-1986-part3.Z
-ZEDBSD_EXT_hand-hershey-part3_URL := $(ZEDBSD_HAND_HERSHEY_URL)/part3.Z
-ZEDBSD_EXT_hand-hershey-part3_SIZE := 33478
-ZEDBSD_EXT_hand-hershey-part3_SHA256 := feb8c2fb565e94dfe615ae0c83c87004b569200490a8b20a1c92ec6cf5029a0e
-ZEDBSD_EXT_hand-hershey-part4_VERSION := 1986
-ZEDBSD_EXT_hand-hershey-part4_ARCHIVE := hershey-1986-part4.Z
-ZEDBSD_EXT_hand-hershey-part4_URL := $(ZEDBSD_HAND_HERSHEY_URL)/part4.Z
-ZEDBSD_EXT_hand-hershey-part4_SIZE := 31423
-ZEDBSD_EXT_hand-hershey-part4_SHA256 := 8e58672b6e3c81378b8742e28ca6c0f269163c0fc79ad65f5a85eb75798a426a
-ZEDBSD_EXT_hand-hershey-part5_VERSION := 1986
-ZEDBSD_EXT_hand-hershey-part5_ARCHIVE := hershey-1986-part5.Z
-ZEDBSD_EXT_hand-hershey-part5_URL := $(ZEDBSD_HAND_HERSHEY_URL)/part5.Z
-ZEDBSD_EXT_hand-hershey-part5_SIZE := 31260
-ZEDBSD_EXT_hand-hershey-part5_SHA256 := ecfe957bf8969f33d0b8e883cd0845e10615853d68c9cf382df9847901f6d8ce
+HAND_HERSHEY_URL := https://ftp.isc.org/pub/usenet/comp.sources.unix/volume4/hershey
+EXT_hand-hershey-part2_VERSION := 1986
+EXT_hand-hershey-part2_ARCHIVE := hershey-1986-part2.Z
+EXT_hand-hershey-part2_URL := $(HAND_HERSHEY_URL)/part2.Z
+EXT_hand-hershey-part2_SIZE := 32469
+EXT_hand-hershey-part2_SHA256 := 0e227df0675d577f865ff383752c69c4484a80223d3bf98b0c8bb9947761e723
+EXT_hand-hershey-part3_VERSION := 1986
+EXT_hand-hershey-part3_ARCHIVE := hershey-1986-part3.Z
+EXT_hand-hershey-part3_URL := $(HAND_HERSHEY_URL)/part3.Z
+EXT_hand-hershey-part3_SIZE := 33478
+EXT_hand-hershey-part3_SHA256 := feb8c2fb565e94dfe615ae0c83c87004b569200490a8b20a1c92ec6cf5029a0e
+EXT_hand-hershey-part4_VERSION := 1986
+EXT_hand-hershey-part4_ARCHIVE := hershey-1986-part4.Z
+EXT_hand-hershey-part4_URL := $(HAND_HERSHEY_URL)/part4.Z
+EXT_hand-hershey-part4_SIZE := 31423
+EXT_hand-hershey-part4_SHA256 := 8e58672b6e3c81378b8742e28ca6c0f269163c0fc79ad65f5a85eb75798a426a
+EXT_hand-hershey-part5_VERSION := 1986
+EXT_hand-hershey-part5_ARCHIVE := hershey-1986-part5.Z
+EXT_hand-hershey-part5_URL := $(HAND_HERSHEY_URL)/part5.Z
+EXT_hand-hershey-part5_SIZE := 31260
+EXT_hand-hershey-part5_SHA256 := ecfe957bf8969f33d0b8e883cd0845e10615853d68c9cf382df9847901f6d8ce
 
-$(eval $(call ZEDBSD_EXTERNAL_FILE,hand-hershey-part2))
-$(eval $(call ZEDBSD_EXTERNAL_FILE,hand-hershey-part3))
-$(eval $(call ZEDBSD_EXTERNAL_FILE,hand-hershey-part4))
-$(eval $(call ZEDBSD_EXTERNAL_FILE,hand-hershey-part5))
+$(eval $(call EXTERNAL_FILE,hand-hershey-part2))
+$(eval $(call EXTERNAL_FILE,hand-hershey-part3))
+$(eval $(call EXTERNAL_FILE,hand-hershey-part4))
+$(eval $(call EXTERNAL_FILE,hand-hershey-part5))
 
-ZEDBSD_HAND_HERSHEY_PARTS := part2 part3 part4 part5
-ZEDBSD_HAND_HERSHEY_WORK := $(ZEDBSD_EXTERNAL_WORKROOT)/hand-hershey
-ZEDBSD_HAND_HERSHEY_TEMPLATES := $(ZEDBSD_HAND_HERSHEY_WORK)/hershey.txt
-ZEDBSD_HAND_HERSHEY_NOTICE := $(ZEDBSD_HAND_HERSHEY_DIR)/NOTICE
+HAND_HERSHEY_PARTS := part2 part3 part4 part5
+HAND_HERSHEY_WORK := $(EXTERNAL_WORKROOT)/hand-hershey
+HAND_HERSHEY_TEMPLATES := $(HAND_HERSHEY_WORK)/hershey.txt
+HAND_HERSHEY_NOTICE := $(HAND_HERSHEY_DIR)/NOTICE
 
 # The parts uncompressed (as text, never run), then the templates.
-$(ZEDBSD_HAND_HERSHEY_TEMPLATES): $(foreach part,$(ZEDBSD_HAND_HERSHEY_PARTS),$(ZEDBSD_EXT_hand-hershey-$(part)_ARCHIVE_VERIFIED)) \
-	$(ZEDBSD_HAND_HERSHEY_DIR)/convert.py $(ZEDBSD_HAND_HERSHEY_DIR)/hershey-unicode.txt
-	@mkdir -p '$(ZEDBSD_HAND_HERSHEY_WORK)'
-	$(foreach part,$(ZEDBSD_HAND_HERSHEY_PARTS),gzip -dc < '$(ZEDBSD_EXT_hand-hershey-$(part)_DISTFILE)' > '$(ZEDBSD_HAND_HERSHEY_WORK)/$(part).txt' &&) true
-	$(PYTHON) -I '$(ZEDBSD_HAND_HERSHEY_DIR)/convert.py' '$(ZEDBSD_HAND_HERSHEY_DIR)/hershey-unicode.txt' '$@.tmp' \
-		$(foreach part,$(ZEDBSD_HAND_HERSHEY_PARTS),'$(ZEDBSD_HAND_HERSHEY_WORK)/$(part).txt')
+$(HAND_HERSHEY_TEMPLATES): $(foreach part,$(HAND_HERSHEY_PARTS),$(EXT_hand-hershey-$(part)_ARCHIVE_VERIFIED)) \
+	$(HAND_HERSHEY_DIR)/convert.py $(HAND_HERSHEY_DIR)/hershey-unicode.txt
+	@mkdir -p '$(HAND_HERSHEY_WORK)'
+	$(foreach part,$(HAND_HERSHEY_PARTS),gzip -dc < '$(EXT_hand-hershey-$(part)_DISTFILE)' > '$(HAND_HERSHEY_WORK)/$(part).txt' &&) true
+	$(PYTHON) -I '$(HAND_HERSHEY_DIR)/convert.py' '$(HAND_HERSHEY_DIR)/hershey-unicode.txt' '$@.tmp' \
+		$(foreach part,$(HAND_HERSHEY_PARTS),'$(HAND_HERSHEY_WORK)/$(part).txt')
 	mv -f '$@.tmp' '$@'
 
 .PHONY: hand-hershey
-hand-hershey: $(ZEDBSD_HAND_HERSHEY_TEMPLATES)
+hand-hershey: $(HAND_HERSHEY_TEMPLATES)
 	@:
 
 # ---------------------------------------------------------------- packaging
@@ -66,10 +66,10 @@ hand-hershey: $(ZEDBSD_HAND_HERSHEY_TEMPLATES)
 $(eval $(call USERLAND_PACKAGE,hand-hershey,Handwriting templates,*,n,package,,y,\
 	packages/fonts,fonts/hand-hershey,))
 
-ZEDBSD_PACKAGE_INPUTS += $(if $(filter hand-hershey,$(ZEDBSD_USER_PROGRAMS)),\
-	$(ZEDBSD_HAND_HERSHEY_TEMPLATES) $(ZEDBSD_HAND_HERSHEY_NOTICE))
-ZEDBSD_PACKAGE_FILES += $(if $(filter hand-hershey,$(ZEDBSD_USER_PROGRAMS)),\
-	--file /usr/share/keiland/hand/hershey.txt=$(ZEDBSD_HAND_HERSHEY_TEMPLATES) \
-	--file /usr/share/licenses/hand-hershey/NOTICE=$(ZEDBSD_HAND_HERSHEY_NOTICE) \
+PACKAGE_INPUTS += $(if $(filter hand-hershey,$(USER_PROGRAMS)),\
+	$(HAND_HERSHEY_TEMPLATES) $(HAND_HERSHEY_NOTICE))
+PACKAGE_FILES += $(if $(filter hand-hershey,$(USER_PROGRAMS)),\
+	--file /usr/share/keiland/hand/hershey.txt=$(HAND_HERSHEY_TEMPLATES) \
+	--file /usr/share/licenses/hand-hershey/NOTICE=$(HAND_HERSHEY_NOTICE) \
 	--mode /usr/share/keiland/hand/hershey.txt=0644 \
 	--mode /usr/share/licenses/hand-hershey/NOTICE=0644)

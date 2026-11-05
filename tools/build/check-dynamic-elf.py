@@ -23,7 +23,7 @@ DF_TEXTREL = 4
 
 MACHINES = {
     "i386": (1, 3, "<", {0, 1, 2, 6, 7, 8, 35, 36}),
-    "amd64": (2, 62, "<", {0, 1, 6, 7, 8, 16, 17, 36}),
+    "x86_64": (2, 62, "<", {0, 1, 6, 7, 8, 16, 17, 36}),
     "aarch64": (2, 183, "<", {0, 257, 1025, 1026, 1027, 1028, 1029, 1031}),
     "sparcv9": (2, 43, ">", {0, 20, 21, 22, 32, 75, 77}),
     # NONE, 64, RELATIVE, JUMP_SLOT, TLS_DTPMOD64 and TLS_DTPREL64: every
@@ -39,7 +39,7 @@ MACHINES = {
 # bootstrap may carry before it can resolve symbols.
 BOOTSTRAP_RELATIVE = {
     "i386": 8,
-    "amd64": 8,
+    "x86_64": 8,
     "aarch64": 1027,
     "sparcv9": 22,
     "riscv64": 3,
@@ -121,6 +121,8 @@ def check(path, machine_name, role, expected_needed=None, expected_soname=None, 
     # Build configurations call the AArch64 architecture arm64.
     if machine_name == "arm64":
         machine_name = "aarch64"
+    elif machine_name == "amd64":
+        machine_name = "x86_64"
     elf_class, machine, endian, allowed_relocs = MACHINES[machine_name]
     if len(data) < 64 or data[:4] != b"\x7fELF" or data[4] != elf_class:
         fail(path, f"expected ELF{elf_class * 32}")
@@ -327,13 +329,13 @@ def check(path, machine_name, role, expected_needed=None, expected_soname=None, 
                 kind = info & 0xffffffff
             if kind not in allowed_relocs:
                 fail(path, f"unsupported relocation {kind} in {name}")
-            if ((machine_name == "amd64" and kind == 36) or
+            if ((machine_name == "x86_64" and kind == 36) or
                     (machine_name == "aarch64" and kind == 1031)):
                 seen_tlsdesc = True
             if role == "interpreter" and kind != BOOTSTRAP_RELATIVE[machine_name]:
                 fail(path, f"ld.so bootstrap relocation {kind} is not relative")
 
-    if role == "module" and machine_name in ("amd64", "aarch64") and not seen_tlsdesc:
+    if role == "module" and machine_name in ("x86_64", "aarch64") and not seen_tlsdesc:
         fail(path, "test module does not exercise TLSDESC")
 
     exports = set()
@@ -400,7 +402,7 @@ def check(path, machine_name, role, expected_needed=None, expected_soname=None, 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--machine", choices=(*MACHINES, "arm64"), required=True)
+    parser.add_argument("--machine", choices=(*MACHINES, "arm64", "x86_64"), required=True)
     parser.add_argument("--role", choices=("interpreter", "libc", "module",
                                             "rpath-module", "version-definition",
                                             "version-consumer", "program",

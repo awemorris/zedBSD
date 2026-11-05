@@ -8,4 +8,4 @@ MONITOR_PROBE_SOURCES := userland/tests/monitor-probe/main.c \
 	userland/desktop/libkeiland-backend-zedbsd/monitor-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/network-link-zedbsd.c \
 	userland/base/net/protocol.c userland/base/net/wifi-conf.c userland/base/net/wifi-store.c userland/base/net/netconf.c
-$(eval $(call USERLAND_PACKAGE,monitor-probe,System Monitor backend probe,amd64,n,basic,$(MONITOR_PROBE_SOURCES),y,tests,tests/monitor-probe,,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,monitor-probe,System Monitor backend probe,x86_64,n,basic,$(MONITOR_PROBE_SOURCES),y,tests,tests/monitor-probe,,0755,program,,,bin))

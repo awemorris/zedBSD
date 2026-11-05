@@ -12,4 +12,4 @@ KEILAND_X11SERVER_SOURCES := userland/desktop/xserver/main.c \
 # a private libX11 is built in.  The image carries it whenever the server is selected.
 KEILAND_LIBGLX_SOURCES := userland/desktop/xserver/libGLX/glx.c userland/x11/libX11/xlib.c
 KEILAND_X11SERVER_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libGLX.so=$(BUILD)/dynamic/libGLX.so)
-$(eval $(call USERLAND_PACKAGE,xserver,xserver - X11 server for the compositor,amd64,y,basic,$(KEILAND_X11SERVER_SOURCES),y,desktop,desktop/xserver,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/libGL,0755,program,$(KEILAND_X11SERVER_IMAGE_DATA),,bin))
+$(eval $(call USERLAND_PACKAGE,xserver,xserver - X11 server for the compositor,x86_64,y,basic,$(KEILAND_X11SERVER_SOURCES),y,desktop,desktop/xserver,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype desktop/libGL,0755,program,$(KEILAND_X11SERVER_IMAGE_DATA),,bin))

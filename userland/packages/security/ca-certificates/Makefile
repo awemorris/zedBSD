@@ -34,13 +34,15 @@ EXT_ca-certificates_URL := https://curl.se/ca/cacert-2026-08-13.pem
 EXT_ca-certificates_SIZE := 188900
 EXT_ca-certificates_SHA256 := f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9
 
-$(eval $(call ZEDBSD_EXTERNAL_FILE,ca-certificates))
+$(eval $(call EXTERNAL_FILE,ca-certificates))
 
-CA_CERTIFICATES_LICENSE := $(ZEDBSD_CA_CERTIFICATES_DIR)/MPL-2.0.txt
+CA_CERTIFICATES_LICENSE := $(CA_CERTIFICATES_DIR)/MPL-2.0.txt
 
 .PHONY: ca-certificates
-ca-certificates: $(ZEDBSD_EXT_ca-certificates_ARCHIVE_VERIFIED)
+ca-certificates: $(EXT_ca-certificates_ARCHIVE_VERIFIED)
 	@:
+
+build: ca-certificates
 
 $(eval \
 	$(call \
@@ -54,17 +56,20 @@ $(eval \
 		y, \
 		packages/security, \
 		security/ca-certificates, \
+		, \
+		0644, \
+		custom \
 	)\
 )
 
 PACKAGE_INPUTS += \
-	$(if $(filter ca-certificates,$(ZEDBSD_USER_PROGRAMS)),\
-		$(ZEDBSD_EXT_ca-certificates_ARCHIVE_VERIFIED) \
-		$(ZEDBSD_CA_CERTIFICATES_LICENSE))
+	$(if $(filter ca-certificates,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
+		$(EXT_ca-certificates_ARCHIVE_VERIFIED) \
+		$(CA_CERTIFICATES_LICENSE))
 
 PACKAGE_FILES += \
-	$(if $(filter ca-certificates,$(ZEDBSD_USER_PROGRAMS)),\
-		--file /etc/ssl/cert.pem=$(ZEDBSD_EXT_ca-certificates_DISTFILE) \
-		--file /usr/share/licenses/ca-certificates/MPL-2.0.txt=$(ZEDBSD_CA_CERTIFICATES_LICENSE) \
+	$(if $(filter ca-certificates,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
+		--file /etc/ssl/cert.pem=$(EXT_ca-certificates_DISTFILE) \
+		--file /usr/share/licenses/ca-certificates/MPL-2.0.txt=$(CA_CERTIFICATES_LICENSE) \
 		--mode /etc/ssl/cert.pem=0644 \
 		--mode /usr/share/licenses/ca-certificates/MPL-2.0.txt=0644)

@@ -126,7 +126,7 @@ i915-firmware-license:
 i915-firmware-license-pending:
 	@if test ! -d '$(I915_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(I915_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call USERLAND_PACKAGE,i915-firmware,Intel i915 display DMC firmware,amd64,n,package,,y,firmware,firmware/i915,,,data,$(I915_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,i915-firmware,Intel i915 display DMC firmware,x86_64,n,package,,y,firmware,firmware/i915,,,data,$(I915_FIRMWARE_DATA),,))
 override USERLAND_i915-firmware_DATA := $(I915_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += i915-firmware
 

@@ -12,4 +12,4 @@ KEILAND_BROWSER_DATA := /usr/share/browser/start.html=$(KEILAND_BROWSER_DIR)/dat
 	/usr/share/browser/about.html=$(KEILAND_BROWSER_DIR)/data/about.html \
 	/usr/share/browser/text.html=$(KEILAND_BROWSER_DIR)/data/text.html
 
-$(eval $(call USERLAND_PACKAGE,browser,browser - Web browser,amd64,n,basic,$(KEILAND_BROWSER_SOURCES),y,desktop,desktop/browser,desktop/libbrowser desktop/libvulkan desktop/libwayland desktop/libkeiland base/libz-compat,0755,program,$(KEILAND_BROWSER_DATA),,bin))
+$(eval $(call USERLAND_PACKAGE,browser,browser - Web browser,x86_64,n,basic,$(KEILAND_BROWSER_SOURCES),y,desktop,desktop/browser,desktop/libbrowser desktop/libvulkan desktop/libwayland desktop/libkeiland base/libz-compat,0755,program,$(KEILAND_BROWSER_DATA),,bin))

@@ -110,7 +110,7 @@ intelbt-firmware-license:
 intelbt-firmware-license-pending:
 	@if test ! -d '$(INTELBT_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(INTELBT_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call USERLAND_PACKAGE,intelbt-firmware,Intel Bluetooth firmware,amd64,n,package,,y,firmware,firmware/intelbt,,,data,$(INTELBT_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,intelbt-firmware,Intel Bluetooth firmware,x86_64,n,package,,y,firmware,firmware/intelbt,,,data,$(INTELBT_FIRMWARE_DATA),,))
 override USERLAND_intelbt-firmware_DATA := $(INTELBT_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += intelbt-firmware
 

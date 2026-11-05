@@ -14,36 +14,36 @@
 # The tools are linked against one shared LLVM rather than each carrying its
 # own copy: a dozen statically linked LLVM tools would be larger than the disk
 # they are meant to sit on.
-ZEDBSD_CLANG_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-ZEDBSD_CLANG_DIR := $(patsubst %/,%,$(dir $(ZEDBSD_CLANG_MAKEFILE)))
-include $(ZEDBSD_CLANG_DIR)/../../../base/package.mk
-include $(ZEDBSD_CLANG_DIR)/../../external.mk
-include $(ZEDBSD_CLANG_DIR)/../../../../toolchain/llvm/version.mk
+CLANG_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+CLANG_DIR := $(patsubst %/,%,$(dir $(CLANG_MAKEFILE)))
+include $(CLANG_DIR)/../../../base/package.mk
+include $(CLANG_DIR)/../../external.mk
+include $(CLANG_DIR)/../../../../toolchain/llvm/version.mk
 
 # The cross compiler's own source; the toolchain build extracts it.  This
 # package patches a copy of it (external.mk), never the toolchain's tree.
-ZEDBSD_CLANG_SOURCE := $(ZEDBSD_EXTERNAL_WORKROOT)/clang/src
+CLANG_SOURCE := $(EXTERNAL_WORKROOT)/clang/src
 
 # The host build tree, for the generators.  It belongs to the toolchain build
 # rather than to this package, which is why it is named and not made here.
-ZEDBSD_CLANG_NATIVE_DIR := $(abspath $(ZEDBSD_EXTERNAL_ROOT)/build/llvm-build/bin)
+CLANG_NATIVE_DIR := $(abspath $(EXTERNAL_ROOT)/build/llvm-build/bin)
 
-ZEDBSD_CLANG_PATCHES := $(sort $(wildcard \
-	$(abspath $(ZEDBSD_CLANG_DIR))/patches/*.patch))
-ZEDBSD_CLANG_PATCH_LEVEL := zedbsd1
-ZEDBSD_CLANG_SOURCE_STAMP := \
-	$(ZEDBSD_CLANG_SOURCE)/.zedbsd-clang-source-$(LLVM_VERSION)-$(LLVM_PATCH_LEVEL)-$(CLANG_PATCH_LEVEL)
+CLANG_PATCHES := $(sort $(wildcard \
+	$(abspath $(CLANG_DIR))/patches/*.patch))
+CLANG_PATCH_LEVEL := zedbsd1
+CLANG_SOURCE_STAMP := \
+	$(CLANG_SOURCE)/.zedbsd-clang-source-$(LLVM_VERSION)-$(LLVM_PATCH_LEVEL)-$(CLANG_PATCH_LEVEL)
 
-ZEDBSD_CLANG_BUILD := $(ZEDBSD_EXTERNAL_WORKROOT)/clang/build
-ZEDBSD_CLANG_STAGE := $(ZEDBSD_EXTERNAL_WORKROOT)/clang/stage
-ZEDBSD_CLANG_CONFIGURED := $(ZEDBSD_CLANG_BUILD)/.zedbsd-configured
-ZEDBSD_CLANG_STAGED := $(ZEDBSD_CLANG_STAGE)/.zedbsd-staged
+CLANG_BUILD := $(EXTERNAL_WORKROOT)/clang/build
+CLANG_STAGE := $(EXTERNAL_WORKROOT)/clang/stage
+CLANG_CONFIGURED := $(CLANG_BUILD)/.zedbsd-configured
+CLANG_STAGED := $(CLANG_STAGE)/.zedbsd-staged
 
 # The C++ runtime the compiler is linked against.  It is a package like this
 # one, so it is named by the path it stages to rather than built from here.
-ZEDBSD_CLANG_LIBCXX_STAGE := $(ZEDBSD_EXTERNAL_WORKROOT)/libcxx/stage/usr
-ZEDBSD_CLANG_LIBCXX_STAMP := \
-	$(ZEDBSD_EXTERNAL_WORKROOT)/libcxx/stage/.zedbsd-staged
+CLANG_LIBCXX_STAGE := $(EXTERNAL_WORKROOT)/libcxx/stage/usr
+CLANG_LIBCXX_STAMP := \
+	$(EXTERNAL_WORKROOT)/libcxx/stage/.zedbsd-staged
 
 # Where the C++ runtime put its headers and libraries.  It stages them for
 # the image rather than into the sysroot, so a package that is written in
@@ -52,16 +52,16 @@ ZEDBSD_CLANG_LIBCXX_STAMP := \
 #
 # -nostdinc++ keeps the compiler from also offering its own copy, which is
 # the host's and belongs to a different C library.
-ZEDBSD_CLANG_CXX_FLAGS := \
-	-nostdinc++ -isystem $(ZEDBSD_CLANG_LIBCXX_STAGE)/include/c++/v1
-ZEDBSD_CLANG_LINK_FLAGS := \
-	-L$(ZEDBSD_CLANG_LIBCXX_STAGE)/lib -lc++ -lc++abi -lunwind
+CLANG_CXX_FLAGS := \
+	-nostdinc++ -isystem $(CLANG_LIBCXX_STAGE)/include/c++/v1
+CLANG_LINK_FLAGS := \
+	-L$(CLANG_LIBCXX_STAGE)/lib -lc++ -lc++abi -lunwind
 
-ZEDBSD_CLANG_BINDIR := $(ZEDBSD_CLANG_STAGE)/usr/bin
-ZEDBSD_CLANG_LIBDIR := $(ZEDBSD_CLANG_STAGE)/usr/lib
-ZEDBSD_CLANG_CLANG := $(ZEDBSD_CLANG_BINDIR)/clang
-ZEDBSD_CLANG_LLD := $(ZEDBSD_CLANG_BINDIR)/lld
-ZEDBSD_CLANG_LICENSE := $(ZEDBSD_CLANG_SOURCE)/llvm/LICENSE.TXT
+CLANG_BINDIR := $(CLANG_STAGE)/usr/bin
+CLANG_LIBDIR := $(CLANG_STAGE)/usr/lib
+CLANG_CLANG := $(CLANG_BINDIR)/clang
+CLANG_LLD := $(CLANG_BINDIR)/lld
+CLANG_LICENSE := $(CLANG_SOURCE)/llvm/LICENSE.TXT
 
 # What each option is for:
 #   LLVM_NATIVE_TOOL_DIR   the generators that must run while building.
@@ -88,16 +88,16 @@ ZEDBSD_CLANG_LICENSE := $(ZEDBSD_CLANG_SOURCE)/llvm/LICENSE.TXT
 #   The ZLIB/ZSTD/XML/TERMINFO/EDIT/FFI options name libraries this system
 #   does not have; left to look for them, cmake finds the host's.
 #   LLVM_INCLUDE_*=OFF     nothing here runs LLVM's own test suites.
-ZEDBSD_CLANG_CMAKE_OPTIONS := \
+CLANG_CMAKE_OPTIONS := \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DCMAKE_INSTALL_PREFIX=/usr \
-	-DCMAKE_CXX_FLAGS='$(ZEDBSD_CLANG_CXX_FLAGS)' \
-	-DCMAKE_EXE_LINKER_FLAGS='$(ZEDBSD_CLANG_LINK_FLAGS)' \
-	-DCMAKE_SHARED_LINKER_FLAGS='$(ZEDBSD_CLANG_LINK_FLAGS)' \
-	-DCMAKE_MODULE_LINKER_FLAGS='$(ZEDBSD_CLANG_LINK_FLAGS)' \
-	-DLLVM_NATIVE_TOOL_DIR='$(ZEDBSD_CLANG_NATIVE_DIR)' \
+	-DCMAKE_CXX_FLAGS='$(CLANG_CXX_FLAGS)' \
+	-DCMAKE_EXE_LINKER_FLAGS='$(CLANG_LINK_FLAGS)' \
+	-DCMAKE_SHARED_LINKER_FLAGS='$(CLANG_LINK_FLAGS)' \
+	-DCMAKE_MODULE_LINKER_FLAGS='$(CLANG_LINK_FLAGS)' \
+	-DLLVM_NATIVE_TOOL_DIR='$(CLANG_NATIVE_DIR)' \
 	-DLLVM_ENABLE_PROJECTS='clang;lld;lldb' \
-	-DLLDB_TABLEGEN='$(ZEDBSD_CLANG_NATIVE_DIR)/lldb-tblgen' \
+	-DLLDB_TABLEGEN='$(CLANG_NATIVE_DIR)/lldb-tblgen' \
 	-DLLDB_ENABLE_PYTHON=OFF \
 	-DLLDB_ENABLE_LUA=OFF \
 	-DLLDB_ENABLE_LIBEDIT=OFF \
@@ -107,10 +107,10 @@ ZEDBSD_CLANG_CMAKE_OPTIONS := \
 	-DLLDB_ENABLE_SWIG=OFF \
 	-DLLDB_INCLUDE_TESTS=OFF \
 	-DLLDB_BUILD_FRAMEWORK=OFF \
-	-DLLVM_TARGETS_TO_BUILD=$(ZEDBSD_EXTERNAL_LLVM_TARGET) \
-	-DLLVM_DEFAULT_TARGET_TRIPLE='$(ZEDBSD_EXTERNAL_TRIPLE)' \
-	-DLLVM_HOST_TRIPLE='$(ZEDBSD_EXTERNAL_TRIPLE)' \
-	-DLLVM_TARGET_ARCH=$(ZEDBSD_EXTERNAL_LLVM_TARGET) \
+	-DLLVM_TARGETS_TO_BUILD=$(EXTERNAL_LLVM_TARGET) \
+	-DLLVM_DEFAULT_TARGET_TRIPLE='$(EXTERNAL_TRIPLE)' \
+	-DLLVM_HOST_TRIPLE='$(EXTERNAL_TRIPLE)' \
+	-DLLVM_TARGET_ARCH=$(EXTERNAL_LLVM_TARGET) \
 	-DLLVM_BUILD_LLVM_DYLIB=ON \
 	-DLLVM_LINK_LLVM_DYLIB=ON \
 	-DCLANG_LINK_CLANG_DYLIB=ON \
@@ -140,31 +140,31 @@ ZEDBSD_CLANG_CMAKE_OPTIONS := \
 # and its own patch.  The host generators are built from that tree too (with
 # the binary cache, here: llvm-native-tools).  The record names the LLVM
 # release and both patch levels, so a change to any of them makes a new copy.
-$(ZEDBSD_CLANG_SOURCE_STAMP): $(ZEDBSD_EXTERNAL_LLVM_VERIFIED) \
-	$(ZEDBSD_CLANG_PATCHES) \
-	$(if $(TOPLEVEL_BUILD),| $(ZEDBSD_LLVM_NATIVE_STAMP))
-	$(call ZEDBSD_EXTERNAL_LLVM_COPY,$(ZEDBSD_CLANG_SOURCE),$(ZEDBSD_CLANG_PATCHES))
+$(CLANG_SOURCE_STAMP): $(EXTERNAL_LLVM_VERIFIED) \
+	$(CLANG_PATCHES) \
+	$(if $(TOPLEVEL_BUILD),| $(LLVM_NATIVE_STAMP))
+	$(call EXTERNAL_LLVM_COPY,$(CLANG_SOURCE),$(CLANG_PATCHES))
 	@touch '$@'
 
 # The generators are the toolchain build's output.  Saying so here turns a
 # missing one into a sentence rather than into a cmake error about a path.
-$(ZEDBSD_CLANG_CONFIGURED): $(ZEDBSD_CLANG_SOURCE_STAMP) \
-	$(ZEDBSD_CLANG_LIBCXX_STAMP) \
-	$(ZEDBSD_EXTERNAL_CROSS_STAMP) $(ZEDBSD_CLANG_MAKEFILE)
-	@test -x '$(ZEDBSD_CLANG_NATIVE_DIR)/lldb-tblgen' || { \
-		echo "clang: $(ZEDBSD_CLANG_NATIVE_DIR)/lldb-tblgen is missing;" >&2; \
+$(CLANG_CONFIGURED): $(CLANG_SOURCE_STAMP) \
+	$(CLANG_LIBCXX_STAMP) \
+	$(EXTERNAL_CROSS_STAMP) $(CLANG_MAKEFILE)
+	@test -x '$(CLANG_NATIVE_DIR)/lldb-tblgen' || { \
+		echo "clang: $(CLANG_NATIVE_DIR)/lldb-tblgen is missing;" >&2; \
 		echo "clang: build the toolchain first (make toolchain)." >&2; \
 		exit 1; }
-	@test -x '$(ZEDBSD_CLANG_NATIVE_DIR)/llvm-tblgen' || { \
-		echo "clang: $(ZEDBSD_CLANG_NATIVE_DIR)/llvm-tblgen is missing;" >&2; \
+	@test -x '$(CLANG_NATIVE_DIR)/llvm-tblgen' || { \
+		echo "clang: $(CLANG_NATIVE_DIR)/llvm-tblgen is missing;" >&2; \
 		echo "clang: build the toolchain first (make toolchain)." >&2; \
 		exit 1; }
-	@rm -rf '$(ZEDBSD_CLANG_BUILD)'
-	@mkdir -p '$(ZEDBSD_CLANG_BUILD)'
-	cmake -S '$(ZEDBSD_CLANG_SOURCE)/llvm' -B '$(ZEDBSD_CLANG_BUILD)' \
+	@rm -rf '$(CLANG_BUILD)'
+	@mkdir -p '$(CLANG_BUILD)'
+	cmake -S '$(CLANG_SOURCE)/llvm' -B '$(CLANG_BUILD)' \
 		-G Ninja \
-		--toolchain '$(ZEDBSD_EXTERNAL_CROSS_DIR)/zedbsd.cmake' \
-		$(ZEDBSD_CLANG_CMAKE_OPTIONS)
+		--toolchain '$(EXTERNAL_CROSS_DIR)/zedbsd.cmake' \
+		$(CLANG_CMAKE_OPTIONS)
 	@touch '$@'
 
 # Two link options are taken out of the generated build.
@@ -183,24 +183,24 @@ $(ZEDBSD_CLANG_CONFIGURED): $(ZEDBSD_CLANG_SOURCE_STAMP) \
 # flags are, so they are removed from the generated build rather than
 # argued with -- which is how the C++ runtime beside this package deals
 # with the first of them.
-$(ZEDBSD_CLANG_STAGED): $(ZEDBSD_CLANG_CONFIGURED)
-	@rm -rf '$(ZEDBSD_CLANG_STAGE)'
+$(CLANG_STAGED): $(CLANG_CONFIGURED)
+	@rm -rf '$(CLANG_STAGE)'
 	@sed -i -e 's/-Wl,-z,defs//g' \
 		-e 's|-Wl,--version-script,[^ ]*||g' \
-		'$(ZEDBSD_CLANG_BUILD)/build.ninja'
-	cmake --build '$(ZEDBSD_CLANG_BUILD)' --parallel $(ZEDBSD_BUILD_JOBS)
-	cmake --install '$(ZEDBSD_CLANG_BUILD)' \
-		--prefix '$(ZEDBSD_CLANG_STAGE)/usr'
+		'$(CLANG_BUILD)/build.ninja'
+	cmake --build '$(CLANG_BUILD)' --parallel $(BUILD_JOBS)
+	cmake --install '$(CLANG_BUILD)' \
+		--prefix '$(CLANG_STAGE)/usr'
 	@touch '$@'
 
-$(ZEDBSD_CLANG_CLANG) $(ZEDBSD_CLANG_LLD): $(ZEDBSD_CLANG_STAGED)
+$(CLANG_CLANG) $(CLANG_LLD): $(CLANG_STAGED)
 	@test -f '$@'
 
-$(ZEDBSD_CLANG_LICENSE): $(ZEDBSD_CLANG_SOURCE_STAMP)
+$(CLANG_LICENSE): $(CLANG_SOURCE_STAMP)
 	@test -f '$@'
 
 .PHONY: clang
-clang: $(ZEDBSD_CLANG_STAGED)
+clang: $(CLANG_STAGED)
 	@:
 
 # The compiler needs the C++ runtime it was built against, so choosing it
@@ -217,9 +217,9 @@ $(eval $(call USERLAND_PACKAGE,clang,clang compiler,*,n,package,,y,\
 #
 # clang decides what language it is compiling from the name it was run as,
 # so clang++ is a link to it under the other name.
-ZEDBSD_CLANG_TOOLS := ld.lld llvm-ar llvm-ranlib llvm-nm llvm-objcopy \
+CLANG_TOOLS := ld.lld llvm-ar llvm-ranlib llvm-nm llvm-objcopy \
 	llvm-objdump llvm-readelf llvm-strip lldb lldb-server
-ZEDBSD_CLANG_LIBS := libLLVM.so.23.1 libclang-cpp.so.23.1 liblldb.so.23.1
+CLANG_LIBS := libLLVM.so.23.1 libclang-cpp.so.23.1 liblldb.so.23.1
 
 # The headers the compiler supplies for itself -- stddef.h, stdarg.h and the
 # rest, which belong to the compiler rather than to the C library.
@@ -229,9 +229,9 @@ ZEDBSD_CLANG_LIBS := libLLVM.so.23.1 libclang-cpp.so.23.1 liblldb.so.23.1
 # tree's recipe uses it after the stage is made (BUG-087).  find rather than
 # $(wildcard): make keeps what it has read of a directory, and a directory
 # read while parsing would not show the headers installed later.
-ZEDBSD_CLANG_RESOURCE_DIR := $(ZEDBSD_CLANG_LIBDIR)/clang/23/include
-ZEDBSD_CLANG_RESOURCE_HEADERS = $(shell test -d '$(ZEDBSD_CLANG_RESOURCE_DIR)' && \
-	find '$(ZEDBSD_CLANG_RESOURCE_DIR)' -maxdepth 1 -type f -name '*.h' | LC_ALL=C sort)
+CLANG_RESOURCE_DIR := $(CLANG_LIBDIR)/clang/23/include
+CLANG_RESOURCE_HEADERS = $(shell test -d '$(CLANG_RESOURCE_DIR)' && \
+	find '$(CLANG_RESOURCE_DIR)' -maxdepth 1 -type f -name '*.h' | LC_ALL=C sort)
 
 # What the compiler needs besides itself to turn a source file into a program
 # that runs here: the C library's headers, the start file a link begins with,
@@ -260,38 +260,38 @@ ZEDBSD_CLANG_RESOURCE_HEADERS = $(shell test -d '$(ZEDBSD_CLANG_RESOURCE_DIR)' &
 # that copies them when a header is renamed, and a list found in the old one
 # names files the new one no longer has (BUG-084).  Deferred, because that
 # file is read after this one.
-ZEDBSD_CLANG_SYSROOT_INCLUDE := $(ZEDBSD_EXTERNAL_SYSROOT)/usr/include
-ZEDBSD_CLANG_SYSROOT_HEADERS = \
-	$(filter %.h,$(ZEDBSD_SYSROOT_INCLUDE_NAMES))
-ZEDBSD_CLANG_LINK_OBJECTS := crt1.o libclang_rt.builtins.a
+CLANG_SYSROOT_INCLUDE := $(EXTERNAL_SYSROOT)/usr/include
+CLANG_SYSROOT_HEADERS = \
+	$(filter %.h,$(SYSROOT_INCLUDE_NAMES))
+CLANG_LINK_OBJECTS := crt1.o libclang_rt.builtins.a
 #
 # The copy is the C library of this build, the one /lib holds: the external
 # dynamic directory belongs to the default build directory, and taking it
 # from there gave an image built elsewhere a library older than its own /lib.
-ZEDBSD_CLANG_RUNTIME_LIBC := $(strip $(if $(TOPLEVEL_BUILD),$(BUILD)/dynamic/libc.so,$(ZEDBSD_EXTERNAL_DYNAMIC)/libc.so))
+CLANG_RUNTIME_LIBC := $(strip $(if $(TOPLEVEL_BUILD),$(BUILD)/dynamic/libc.so,$(EXTERNAL_DYNAMIC)/libc.so))
 
-ZEDBSD_PACKAGE_INPUTS += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
-	$(ZEDBSD_CLANG_STAGED) $(ZEDBSD_CLANG_LICENSE) $(ZEDBSD_CLANG_RUNTIME_LIBC))
+PACKAGE_INPUTS += $(if $(filter clang,$(USER_PROGRAMS)),\
+	$(CLANG_STAGED) $(CLANG_LICENSE) $(CLANG_RUNTIME_LIBC))
 
-ZEDBSD_PACKAGE_FILES += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
-	--file /usr/bin/clang=$(ZEDBSD_CLANG_BINDIR)/clang-23 \
-	$(foreach tool,$(ZEDBSD_CLANG_TOOLS),\
-	 --file /usr/bin/$(tool)=$(ZEDBSD_CLANG_BINDIR)/$(tool)) \
-	$(foreach library,$(ZEDBSD_CLANG_LIBS),\
-	 --file /usr/lib/$(library)=$(ZEDBSD_CLANG_LIBDIR)/$(library)) \
-	$(foreach header,$(ZEDBSD_CLANG_RESOURCE_HEADERS),\
+PACKAGE_FILES += $(if $(filter clang,$(USER_PROGRAMS)),\
+	--file /usr/bin/clang=$(CLANG_BINDIR)/clang-23 \
+	$(foreach tool,$(CLANG_TOOLS),\
+	 --file /usr/bin/$(tool)=$(CLANG_BINDIR)/$(tool)) \
+	$(foreach library,$(CLANG_LIBS),\
+	 --file /usr/lib/$(library)=$(CLANG_LIBDIR)/$(library)) \
+	$(foreach header,$(CLANG_RESOURCE_HEADERS),\
 	 --file /usr/lib/clang/23/include/$(notdir $(header))=$(header)) \
-	$(foreach header,$(ZEDBSD_CLANG_SYSROOT_HEADERS),\
-	 --file /usr/include/$(header)=$(ZEDBSD_CLANG_SYSROOT_INCLUDE)/$(header)) \
-	$(foreach object,$(ZEDBSD_CLANG_LINK_OBJECTS),\
-	 --file /usr/lib/$(object)=$(ZEDBSD_EXTERNAL_SYSROOT)/usr/lib/$(object)) \
-	--file /usr/lib/libc.so=$(ZEDBSD_CLANG_RUNTIME_LIBC) \
-	--file /usr/bin/clang++.cfg=$(abspath $(ZEDBSD_CLANG_DIR))/clang++.cfg \
-	--file /usr/share/licenses/clang/LICENSE.TXT=$(ZEDBSD_CLANG_LICENSE) \
+	$(foreach header,$(CLANG_SYSROOT_HEADERS),\
+	 --file /usr/include/$(header)=$(CLANG_SYSROOT_INCLUDE)/$(header)) \
+	$(foreach object,$(CLANG_LINK_OBJECTS),\
+	 --file /usr/lib/$(object)=$(EXTERNAL_SYSROOT)/usr/lib/$(object)) \
+	--file /usr/lib/libc.so=$(CLANG_RUNTIME_LIBC) \
+	--file /usr/bin/clang++.cfg=$(abspath $(CLANG_DIR))/clang++.cfg \
+	--file /usr/share/licenses/clang/LICENSE.TXT=$(CLANG_LICENSE) \
 	--mode /usr/bin/clang=0755 \
-	$(foreach tool,$(ZEDBSD_CLANG_TOOLS),--mode /usr/bin/$(tool)=0755) \
-	$(foreach library,$(ZEDBSD_CLANG_LIBS),--mode /usr/lib/$(library)=0755) \
+	$(foreach tool,$(CLANG_TOOLS),--mode /usr/bin/$(tool)=0755) \
+	$(foreach library,$(CLANG_LIBS),--mode /usr/lib/$(library)=0755) \
 	--mode /usr/lib/libc.so=0755 \
 	--mode /usr/bin/clang++.cfg=0644)
-ZEDBSD_PACKAGE_LINKS += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
+PACKAGE_LINKS += $(if $(filter clang,$(USER_PROGRAMS)),\
 	/usr/bin/clang++=clang /usr/bin/cc=clang /usr/bin/ld=ld.lld)
