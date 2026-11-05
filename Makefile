@@ -8,7 +8,7 @@
 # Project Toplevel Makefile
 #
 
-# C/C++ compilers to build our toolchain
+# Host toolchain
 HOST_CC       := cc
 HOST_CXX      := c++
 
@@ -52,11 +52,15 @@ all: vmunix
 
 
 ########################################################################
-# Cross Toolchain
+# Toolchain
 ########################################################################
 
+include toolchain/noct/noct.mk
 include toolchain/llvm/llvm.mk
 
+toolchain: noct-toolchain llvm-toolchain
+
+toolchain-cached: noct-toolchain-cached llvm-toolchain-cached
 
 #######################################################################
 # Configurations
@@ -653,7 +657,7 @@ KERN_SOURCES := \
 # libc Base
 ########################
 
-LIB_SOURCES := \
+LIBC_SOURCES := \
 	userland/base/libc/posix.c \
 	userland/base/libc/dlfcn.c \
 	userland/base/libc/static-tls.c \
@@ -1927,6 +1931,10 @@ endif
 endif
 
 # Include the platform-specific Makefile.
+# Exports:
+#  - vmunix
+#  - libc
+#  - sysroot
 include $(PLATFORM_MAKEFILE)
 
 
@@ -1947,7 +1955,7 @@ PROGRAM_DIRS := $(dir $(SELECTED_PROGRAM_MAKEFILES))
 
 .PHONY: packages $(PROGRAM_DIRS)
 
-programs: $(PROGRAM_DIRS)
+programs: libc $(PROGRAM_DIRS)
 
 $(PROGRAM_DIRS):
 	echo $@
