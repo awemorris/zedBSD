@@ -19,6 +19,30 @@ ARCH ?= $(strip \
 	$(if $(filter arm64 rpi4 rpi5,$(PLATFORM)),arm64,\
 	amd64)))
 
+ZEDBSD_LLVM_BIN ?= $(REPO_ROOT)/build/llvm/bin
+CLANG ?= $(ZEDBSD_LLVM_BIN)/clang
+
+ifeq ($(origin CC),default)
+CC := $(CLANG)
+endif
+CC ?= $(CLANG)
+
+TARGET_TRIPLE ?= $(strip \
+	$(if $(filter i386,$(ARCH)),i386-unknown-zedbsd,\
+	$(if $(filter arm64,$(ARCH)),aarch64-unknown-zedbsd,\
+	x86_64-unknown-zedbsd)))
+
+CFLAGS ?= --target=$(TARGET_TRIPLE) --sysroot=$(BUILD)/sysroot
+CPPFLAGS ?= -D__ZEDBSD__
+
+NOCT_CPPFLAGS := \
+	-I$(REPO_ROOT)/include \
+	-I$(REPO_ROOT)/src \
+	-I$(REPO_ROOT) \
+	-isystem $(BUILD)/sysroot/usr/include \
+	$(CPPFLAGS)
+NOCT_CFLAGS := $(filter-out -Werror -fno-pic -fno-pie,$(CFLAGS)) -fPIE
+
 NOCT_SRC := $(abspath $(NOCT_DIR)noct)
 NOCT_BUILD_DIR := $(NOCT_SRC)/build-zedbsd-$(ARCH)
 NOCT_ARTIFACT := $(NOCT_BUILD_DIR)/noct
@@ -61,15 +85,28 @@ $(NOCT_ARTIFACT): $(PATCH_STAMP)
 	@rm -rf $(NOCT_BUILD_DIR)
 	@mkdir -p $(NOCT_BUILD_DIR)
 	cd $(NOCT_SRC) && \
-		env -u CFLAGS -u CPPFLAGS -u LDFLAGS \
+		CC="$(CC)" \
+		CFLAGS="$(strip $(NOCT_CPPFLAGS) $(NOCT_CFLAGS))" \
+		CPPFLAGS="$(NOCT_CPPFLAGS)" \
 		ZEDBSD_SOURCE_DIR=$(REPO_ROOT) \
 		ZEDBSD_SYSROOT=$(BUILD)/sysroot \
-		ZEDBSD_LLVM_BIN=$(REPO_ROOT)/build/llvm/bin \
+		ZEDBSD_LLVM_BIN=$(ZEDBSD_LLVM_BIN) \
 		ZEDBSD_DYNAMIC_DIR=$(BUILD)/dynamic \
 		cmake -B $(NOCT_BUILD_DIR) \
+			-DCMAKE_C_COMPILER="$(CC)" \
+			-DCMAKE_ASM_COMPILER="$(CC)" \
+			-DCMAKE_C_FLAGS="$(strip $(NOCT_CPPFLAGS) $(NOCT_CFLAGS))" \
+			-DCMAKE_ASM_FLAGS="$(strip $(NOCT_CPPFLAGS) $(NOCT_CFLAGS))" \
+			-DCMAKE_EXE_LINKER_FLAGS="-L$(BUILD)/dynamic" \
+			-DCMAKE_SHARED_LINKER_FLAGS="-L$(BUILD)/dynamic" \
+			-DCMAKE_MODULE_LINKER_FLAGS="-L$(BUILD)/dynamic" \
+			-DCMAKE_SYSROOT=$(BUILD)/sysroot \
+			-DCMAKE_FIND_ROOT_PATH=$(BUILD)/sysroot \
+			-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
 			-DNOCT_TARGET_ZEDBSD=ON \
 			-DNOCT_ENABLE_INSTALL=ON \
-			-DNOCT_ENABLE_SHARED=ON \
+			-DNOCT_ENABLE_STATIC=ON \
+			-DNOCT_ENABLE_SHARED=OFF \
 			-DNOCT_ENABLE_JIT=ON \
 			-DNOCT_ENABLE_OPTIMIZER=ON \
 			-DNOCT_ENABLE_MULTITHREAD=ON \
@@ -92,7 +129,6 @@ $(NOCT_ARTIFACT): $(PATCH_STAMP)
 			-DNOCT_ENABLE_API_BEUI=ON \
 			-DNOCT_ENABLE_API_PROCESS=ON
 	cd $(NOCT_SRC) && \
-		env -u CFLAGS -u CPPFLAGS -u LDFLAGS \
 		cmake --build $(NOCT_BUILD_DIR) --parallel $(ZEDBSD_BUILD_JOBS)
 
 $(NOCT_BIN): $(NOCT_ARTIFACT)
