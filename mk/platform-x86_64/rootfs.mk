@@ -159,20 +159,31 @@ ZEDBSD_ACCOUNT_FILES := \
 
 ZEDBSD_DYNAMIC_INPUTS := \
 	$(BUILD)/dynamic/libc.so \
-	$(BUILD)/dynamic/libm.so
+	$(BUILD)/dynamic/libm.so \
+	$(BUILD)/dynamic/libutil.so
 
 ZEDBSD_DYNAMIC_FILES := \
 	--file /lib/libc.so=$(BUILD)/dynamic/libc.so \
 	--file /lib/libm.so=$(BUILD)/dynamic/libm.so \
+	--file /lib/libutil.so=$(BUILD)/dynamic/libutil.so \
 	--mode /lib/libc.so=0755 \
-	--mode /lib/libm.so=0755
+	--mode /lib/libm.so=0755 \
+	--mode /lib/libutil.so=0755
 
 ROOTFS_BIN_FILES := $(sort $(BUILD)/bin/sh $(wildcard $(BUILD)/bin/*))
 ROOTFS_BIN_INPUTS := $(ROOTFS_BIN_FILES)
 ROOTFS_BIN_ENTRIES := $(foreach b,$(ROOTFS_BIN_FILES),--file /bin/$(notdir $(b))=$(b) --mode /bin/$(notdir $(b))=0755)
 
-ROOTFS_INPUTS ?= $(ZEDBSD_ACCOUNT_INPUTS) $(ZEDBSD_DYNAMIC_INPUTS) $(ROOTFS_BIN_INPUTS)
-ROOTFS_FILES  ?= $(ZEDBSD_ACCOUNT_FILES) $(ZEDBSD_DYNAMIC_FILES) $(ROOTFS_BIN_ENTRIES)
+ROOTFS_SBIN_FILES := $(wildcard $(BUILD)/sbin/*)
+ROOTFS_SBIN_INPUTS := $(ROOTFS_SBIN_FILES)
+ROOTFS_SBIN_ENTRIES := $(foreach b,$(ROOTFS_SBIN_FILES),--file /sbin/$(notdir $(b))=$(b) --mode /sbin/$(notdir $(b))=0755)
+
+ROOTFS_LIBEXEC_FILES := $(wildcard $(BUILD)/usr/libexec/*)
+ROOTFS_LIBEXEC_INPUTS := $(ROOTFS_LIBEXEC_FILES)
+ROOTFS_LIBEXEC_ENTRIES := $(foreach b,$(ROOTFS_LIBEXEC_FILES),--file /usr/libexec/$(notdir $(b))=$(b) --mode /usr/libexec/$(notdir $(b))=0755)
+
+ROOTFS_INPUTS ?= $(ZEDBSD_ACCOUNT_INPUTS) $(ZEDBSD_DYNAMIC_INPUTS) $(ROOTFS_BIN_INPUTS) $(ROOTFS_SBIN_INPUTS) $(ROOTFS_LIBEXEC_INPUTS)
+ROOTFS_FILES  ?= $(ZEDBSD_ACCOUNT_FILES) $(ZEDBSD_DYNAMIC_FILES) $(ROOTFS_BIN_ENTRIES) $(ROOTFS_SBIN_ENTRIES) $(ROOTFS_LIBEXEC_ENTRIES)
 
 X86_64_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 X86_64_ARCH_FILES  ?= $(ROOTFS_FILES)

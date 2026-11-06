@@ -12,6 +12,7 @@ include $(NOCT_DIR)../package.mk
 include $(NOCT_DIR)../../../build-jobs.mk
 
 REPO_ROOT ?= $(abspath $(NOCT_DIR)../..)
+REPO_HASH ?= d6f0f9b4f7debb4a3c8dd3ba0415665a94d561ae
 BUILD ?= $(REPO_ROOT)/build/$(PLATFORM)
 
 ARCH ?= $(strip \
@@ -50,7 +51,7 @@ NOCT_ARTIFACT := $(NOCT_BUILD_DIR)/noct
 NOCT_BIN := $(BUILD)/bin/noct
 NOCT_MAN := $(BUILD)/share/man/man1/noct.1
 
-DISTFILE := $(abspath $(NOCT_DIR)distfiles)/NoctLang-82c1753ab3002c2742089898fc5f69c383792af1.tar.gz
+DISTFILE := $(abspath $(NOCT_DIR)distfiles)/NoctLang-$(REPO_HASH).tar.gz
 PATCHES := $(sort $(wildcard $(abspath $(NOCT_DIR)patches)/*.patch))
 PATCH_STAMP := $(NOCT_SRC)/.patched
 
@@ -69,7 +70,7 @@ patch: $(PATCH_STAMP)
 
 $(DISTFILE):
 	@mkdir -p $(dir $@)
-	curl --fail --location --output $@ "https://codeload.github.com/awemorris/NoctLang/tar.gz/82c1753ab3002c2742089898fc5f69c383792af1"
+	curl --fail --location --output $@ "https://codeload.github.com/awemorris/NoctLang/tar.gz/$(REPO_HASH)"
 
 $(PATCH_STAMP): $(DISTFILE) $(PATCHES)
 	@rm -rf $(NOCT_SRC)

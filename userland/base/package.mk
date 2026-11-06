@@ -18,6 +18,20 @@ DESTDIR ?=
 INSTALL ?= install
 STANDALONE_CONFIG ?= $(REPO_ROOT)/config.mk
 
+ifeq ($(origin CC),default)
+CC := $(REPO_ROOT)/build/llvm/bin/clang
+endif
+ifeq ($(strip $(CC)),)
+CC := $(REPO_ROOT)/build/llvm/bin/clang
+endif
+ifeq ($(origin NM),default)
+NM := $(REPO_ROOT)/build/llvm/bin/llvm-nm
+endif
+ifeq ($(strip $(NM)),)
+NM := $(REPO_ROOT)/build/llvm/bin/llvm-nm
+endif
+AR ?= $(REPO_ROOT)/build/llvm/bin/llvm-ar
+
 # Acquisition and patch preparation must also work in a freshly cloned source
 # tree, before menuconfig has produced config.mk.  Compilation and installation
 # retain the existing configured-target requirement.
@@ -64,15 +78,74 @@ all: build
 
 build: patch
 	@if test "$(STANDALONE_TYPE)" = program; then \
-		$(MAKE) -C "$(REPO_ROOT)" \
-			CONFIG="$(STANDALONE_CONFIG)" \
-			USER_PROGRAMS="$(STANDALONE_NAME)" \
-			"build/$(PLATFORM)/bin/$(STANDALONE_NAME)"; \
+		bindir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/$(STANDALONE_INSTALL_DIR)"; \
+		workdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)"; \
+		sysroot="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/sysroot"; \
+		mkdir -p "$$bindir" "$$workdir"; \
+		extra_srcs=""; \
+		extra_cflags=""; \
+		if test "$(STANDALONE_CLASS)" = "basic"; then \
+			test -f "$(REPO_ROOT)/userland/base/common/command.c" && extra_srcs="$$extra_srcs $(REPO_ROOT)/userland/base/common/command.c"; \
+			test -f "$(REPO_ROOT)/userland/base/common/pager.c" && extra_srcs="$$extra_srcs $(REPO_ROOT)/userland/base/common/pager.c"; \
+		elif test "$(STANDALONE_CLASS)" = "network"; then \
+			test -f "$(REPO_ROOT)/userland/base/net/netutil.c" && extra_srcs="$$extra_srcs $(REPO_ROOT)/userland/base/net/netutil.c $(REPO_ROOT)/userland/base/net/dhcp.c"; \
+		fi; \
+		if test "$(STANDALONE_NAME)" = "sh" || echo "$(STANDALONE_REQUIRE)" | grep -q "base/libedit"; then \
+			test -f "$(REPO_ROOT)/userland/base/libedit/readline.c" && extra_srcs="$$extra_srcs $(REPO_ROOT)/userland/base/libedit/readline.c"; \
+			extra_cflags="$$extra_cflags -I$(REPO_ROOT)/userland/base/libedit"; \
+		fi; \
+		srcs=""; \
+		for s in $(STANDALONE_SOURCES); do \
+			case "$$s" in \
+				/*) srcs="$$srcs $$s" ;; \
+				*) srcs="$$srcs $(REPO_ROOT)/$$s" ;; \
+			esac; \
+		done; \
+		$(CC) --target=$(STANDALONE_PLATFORM_DIR)-unknown-zedbsd --sysroot="$$sysroot" \
+			-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 \
+			-nostdinc -isystem "$$sysroot/usr/include" \
+			-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
+			$$extra_cflags \
+			-ffreestanding -fno-stack-protector -nostdlib -static \
+			$$srcs $$extra_srcs \
+			-Wl,-T,"$$sysroot/usr/lib/zedbsd/$(STANDALONE_PLATFORM_DIR)/user.ld" \
+			"$$sysroot/usr/lib/crt0.o" \
+			-Wl,--start-group "$$sysroot/usr/lib/libc.a" \
+			"$$sysroot/usr/lib/libm.a" \
+			"$$sysroot/usr/lib/libzedbsd-compiler-rt.a" \
+			"$$sysroot/usr/lib/libclang_rt.builtins.a" -Wl,--end-group \
+			-o "$$bindir/$(STANDALONE_NAME)"; \
+		test -z "$$($(NM) -u "$$bindir/$(STANDALONE_NAME)")" || { $(NM) -u "$$bindir/$(STANDALONE_NAME)"; exit 1; }; \
 	elif test "$(STANDALONE_TYPE)" = shared-library; then \
-		$(MAKE) -C "$(REPO_ROOT)" \
-			CONFIG="$(STANDALONE_CONFIG)" \
-			USER_PROGRAMS="$(STANDALONE_NAME)" \
-			"build/$(STANDALONE_PLATFORM_DIR)/dynamic/$(STANDALONE_SO_NAME).so"; \
+		dynamic_dir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic"; \
+		libdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib"; \
+		sysroot="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/sysroot"; \
+		mkdir -p "$$dynamic_dir" "$$libdir"; \
+		srcs=""; \
+		for s in $(STANDALONE_SOURCES); do \
+			case "$$s" in \
+				/*) srcs="$$srcs $$s" ;; \
+				*) srcs="$$srcs $(REPO_ROOT)/$$s" ;; \
+			esac; \
+		done; \
+		version_script=""; \
+		if test -f exports.map; then \
+			version_script="-Wl,--version-script=exports.map"; \
+		fi; \
+		$(CC) --target=$(STANDALONE_PLATFORM_DIR)-unknown-zedbsd --sysroot="$$sysroot" \
+			-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 \
+			-fPIC -shared \
+			-nostdinc -isystem "$$sysroot/usr/include" \
+			-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
+			$$srcs \
+			-Wl,-soname,$(STANDALONE_SO_NAME).so \
+			-Wl,--hash-style=both -Bsymbolic-functions \
+			-Wl,-z,now,-z,relro,-z,separate-code,-z,stack-size=0x100000 \
+			$$version_script \
+			-L"$$dynamic_dir" -L"$$sysroot/usr/lib" \
+			-l:libc.so -l:libm.so \
+			-o "$$dynamic_dir/$(STANDALONE_SO_NAME).so" && \
+		cp -f "$$dynamic_dir/$(STANDALONE_SO_NAME).so" "$$libdir/$(STANDALONE_SO_NAME).so"; \
 	elif test "$(STANDALONE_TYPE)" = library && \
 	    test -n "$(STANDALONE_SOURCES)"; then \
 		libdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib"; \

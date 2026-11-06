@@ -143,6 +143,30 @@ $(LIBC_OUT_DIR)/libm.so: $(LIBM_DYNAMIC_OBJS)
 		$(LIBM_DYNAMIC_OBJS) -o $@
 
 #
+# Static & dynamic libutil
+#
+LIBUTIL_STATIC_OBJS := $(LIBC_OBJ_DIR)/static/src/libc/libutil.o
+$(LIBUTIL_STATIC_OBJS): src/libc/libutil.c
+	@mkdir -p $(dir $@)
+	$(CC) $(X86_64_LIBC_STATIC_CFLAGS) -c $< -o $@
+
+$(LIBC_OUT_DIR)/libutil.a: $(LIBUTIL_STATIC_OBJS)
+	@mkdir -p $(dir $@)
+	@rm -f $@
+	$(AR) rcsD $@ $^
+
+LIBUTIL_DYNAMIC_OBJS := $(LIBC_OBJ_DIR)/dynamic/src/libc/libutil.o
+$(LIBUTIL_DYNAMIC_OBJS): src/libc/libutil.c
+	@mkdir -p $(dir $@)
+	$(CC) $(X86_64_LIBC_DYNAMIC_CFLAGS) -c $< -o $@
+
+$(LIBC_OUT_DIR)/libutil.so: $(LIBUTIL_DYNAMIC_OBJS)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_x86_64 -shared -soname libutil.so --hash-style=both \
+		-z now -z relro -z separate-code \
+		$(LIBUTIL_DYNAMIC_OBJS) -o $@
+
+#
 # Compiler runtime & LLVM builtins
 #
 COMPILER_RT_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/compiler-rt/%.o,$(COMPILER_RT_SOURCES))
@@ -185,6 +209,8 @@ LIBC_ALL_TARGETS := \
 	$(LIBC_OUT_DIR)/libc.so \
 	$(LIBC_OUT_DIR)/libm.a \
 	$(LIBC_OUT_DIR)/libm.so \
+	$(LIBC_OUT_DIR)/libutil.a \
+	$(LIBC_OUT_DIR)/libutil.so \
 	$(LIBC_OUT_DIR)/libc.o \
 	$(LIBC_OUT_DIR)/crt0.o \
 	$(LIBC_OUT_DIR)/crt1.o \

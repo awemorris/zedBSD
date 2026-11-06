@@ -124,10 +124,12 @@ disk-image: toolchain libc-$(PLATFORM) sysroot-$(PLATFORM) programs rootfs-$(PLA
 # Userland Program Makefile
 #
 
+ifeq ($(strip $(CONFIG_USERLAND_PROGRAMS)),)
+CONFIG_USERLAND_PROGRAMS := $(USERLAND_PROGRAMS)
+endif
+
 ALL_PROGRAM_MAKEFILES := $(sort \
-	$(wildcard userland/*/Makefile) \
-	$(wildcard userland/*/*/Makefile) \
-	$(wildcard userland/*/*/*/Makefile))
+	$(wildcard userland/base/*/Makefile))
 
 SELECTED_PROGRAM_MAKEFILES := $(foreach mf, $(ALL_PROGRAM_MAKEFILES), \
 	$(if $(filter $(notdir $(patsubst %/,%,$(dir $(mf)))), $(CONFIG_USERLAND_PROGRAMS)), \
