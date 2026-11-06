@@ -86,11 +86,14 @@ include $(CONFIGMK)
 # Source Files
 #
 
-# Import the kernel source file lists.
+# Import the kernel source file list.
 include mk/sources-kern.mk
 
-# Import the libc source file lists.
+# Import the libc source file list.
 include mk/sources-libc.mk
+
+# rootfs file list.
+include mk/sources-rootfs.mk
 
 #
 # Platform Makefile
@@ -127,7 +130,7 @@ disk:       toolchain libc-$(PLATFORM) sysroot-$(PLATFORM) programs rootfs-$(PLA
 ifeq ($(strip $(CONFIG_USERLAND_PROGRAMS)),)
 CONFIG_USERLAND_PROGRAMS := $(USERLAND_PROGRAMS)
 endif
-CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh)
+CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh init cron getty syslogd networkd mount fsck sysctl net)
 
 ALL_PROGRAM_MAKEFILES := $(sort \
 	$(wildcard userland/base/*/Makefile))

@@ -12,7 +12,6 @@ NET_SOURCES := \
 	userland/base/net/reconcile.c \
 	userland/base/net/wifi-conf.c \
 	userland/base/net/wifi-store.c \
-	userland/base/libedit/readline.c \
 	userland/base/service/rcconf.c \
 	userland/base/service/service-config.c
 

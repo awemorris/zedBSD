@@ -999,10 +999,9 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_GRAPHICS_BOOTLFB)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_GRAPHICS_BOOTLFB=1
 KERN_SOURCES += \
-	src/drivers/generic/boot-fb.c \
-	src/drivers/generic/fb-text.c \
 	src/drivers/generic/graphics-device.c \
-	src/drivers/platform/pcat/graphics/splash.c
+	src/drivers/generic/boot-fb.c \
+	src/drivers/generic/fb-text.c
 endif
 
 # [PC/AT VGA driver]
@@ -1012,7 +1011,8 @@ KERN_SOURCES += \
 	src/drivers/platform/pcat/graphics/pcat-graphics.c \
 	src/drivers/platform/pcat/graphics/backend.c \
 	src/drivers/platform/pcat/graphics/font.c \
-	src/drivers/platform/pcat/graphics/text.c
+	src/drivers/platform/pcat/graphics/text.c \
+	src/drivers/platform/pcat/graphics/splash.c
 endif
 
 # [PC-98 GDC driver]

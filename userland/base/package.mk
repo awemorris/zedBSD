@@ -172,7 +172,7 @@ install: build
 	@if test "$(STANDALONE_TYPE)" = program; then \
 		$(INSTALL) -d "$(DESTDIR)$(STANDALONE_BINDIR)"; \
 		$(INSTALL) -m "$(STANDALONE_MODE)" \
-			"$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/bin/$(STANDALONE_NAME)" \
+			"$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/$(STANDALONE_INSTALL_DIR)/$(STANDALONE_NAME)" \
 			"$(DESTDIR)$(STANDALONE_BINDIR)/$(STANDALONE_NAME)"; \
 	elif test "$(STANDALONE_TYPE)" = shared-library; then \
 		libdir="$(if $(filter /,$(PREFIX)),/lib,$(patsubst %/,%,$(PREFIX))/lib)"; \

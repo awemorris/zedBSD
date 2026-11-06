@@ -16,7 +16,7 @@ HOST_CC ?= cc
 IMAGE_HOST ?= $(BUILD)/zedimage-host
 
 # Host image tool
-$(IMAGE_HOST): tools/build/zedimage-host.c
+$(IMAGE_HOST): mk/old-tools/build/zedimage-host.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c11 -O2 -Wall -Wextra -Werror $< -o $@
 
@@ -35,7 +35,7 @@ NATIVE_ROOT_INODES ?= 65536
 NATIVE_SWAP_IMAGE := $(BUILD)/native-swap-$(NATIVE_SWAP_MIB)m.img
 $(NATIVE_SWAP_IMAGE): mk/tools/make-swapfile.noct
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=tools/build mk/tools/make-swapfile.noct \
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct \
 		--size-mib $(NATIVE_SWAP_MIB) --output $@
 
 NATIVE_UEFI_ZEDBSD_CONFIG := $(BUILD)/zedbsd-native-uefi.cfg
@@ -50,7 +50,7 @@ $(NATIVE_UEFI_ZEDBSD_CONFIG): mk/platform-x86_64/bootcfg/zedbsd-uefi.cfg
 NATIVE_ROOT_IMAGE := $(BUILD)/x86_64-native-root-$(NATIVE_ROOT_MIB)m.ufs
 $(NATIVE_ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=tools/build mk/tools/make-rootfs.noct \
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-rootfs.noct \
 		--backend $(abspath $(IMAGE_HOST)) --force \
 		--profile amd64 --output $@ --tree $(BUILD)/rootfs \
 		--size-mib $(NATIVE_ROOT_MIB) --min-inodes $(NATIVE_ROOT_INODES)
@@ -71,13 +71,13 @@ else
 DATA_IMAGE := $(BUILD)/data.img
 $(DATA_IMAGE): mk/tools/make-data-image.noct $(IMAGE_HOST)
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=tools/build mk/tools/make-data-image.noct \
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-data-image.noct \
 		--backend $(abspath $(IMAGE_HOST)) --output $@
 
 SWAP_IMAGE := $(BUILD)/swapfile
 $(SWAP_IMAGE): mk/tools/make-swapfile.noct
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=tools/build mk/tools/make-swapfile.noct --size-mib 64 --output $@
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct --size-mib 64 --output $@
 
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/bootloader/stage1.bin \
 		$(BUILD)/bootloader/stage1-native.bin \
@@ -88,7 +88,7 @@ $(DISK_IMAGE_ARTIFACT): $(BUILD)/bootloader/stage1.bin \
 		mk/tools/make-bios-hdd-image.noct \
 		mk/tools/zedbuild.noct \
 		mk/tools/journal-format.noct
-	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct \
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-bios-hdd-image.noct \
 		--backend $(abspath $(IMAGE_HOST)) --force --machine pcat \
 		--layout $(VARIANT) \
 		--checker mk/platform-x86_64/tools/check-amd64-gpt-image.noct \
