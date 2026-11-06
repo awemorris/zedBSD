@@ -30,9 +30,7 @@ REMACS_SOURCES := \
 
 REMACS_WORK_DIR := $(BUILD)/packages/base/emacs/work
 
-REMACS_HOST_NOCT_STAMP := $(REPO_ROOT)/build/host-noct-state/built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)-process
-NOCT_HOST_BUILD_STAMP  ?= $(REMACS_HOST_NOCT_STAMP)
-NOCT_HOST_ARTIFACT     ?= $(REPO_ROOT)/build/NoctLang/build-static/noct
+NOCT_HOST_ARTIFACT     ?= $(REPO_ROOT)/build/NoctLang/build/noct
 
 REMACS_NAP             := $(BUILD)/packages/base/emacs/remacs.nap
 REMACS_BIN             := $(BUILD)/bin/emacs
@@ -56,8 +54,7 @@ PACKAGE_LINKS += \
 	$(if $(filter emacs,$(ZEDBSD_USER_PROGRAMS)),\
 		/usr/bin/noct=/bin/noct)
 
-$(REMACS_NAP): $(REMACS_SOURCES) $(REMACS_HOST_NOCT_STAMP)
-	@test '$(REMACS_HOST_NOCT_STAMP)' = '$(NOCT_HOST_BUILD_STAMP)' || { echo 'remacs: the host Noct stamp moved to $(NOCT_HOST_BUILD_STAMP)' >&2; exit 1; }
+$(REMACS_NAP): $(REMACS_SOURCES)
 	@rm -rf $(REMACS_WORK_DIR)
 	@mkdir -p $(REMACS_WORK_DIR)
 	cp -R $(REMACS_SOURCE_DIR)/editor $(REMACS_SOURCE_DIR)/src $(REMACS_SOURCE_DIR)/tools $(REMACS_SOURCE_DIR)/Makefile.remacs $(REMACS_WORK_DIR)/

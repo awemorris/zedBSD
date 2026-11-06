@@ -1,23 +1,54 @@
-include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
-
 # zedBSD
 # Copyright (C) 2026 Awe Morris
+#
 # SPDX-License-Identifier: Zlib
 
-# The Bluetooth daemon (ws143-p003 and p004, plan/ws143/phase00[34]/phase.md): a root parent opens the controller's node
-# /dev/btN for a child running as _bluetooth, which loads Intel's firmware when it needs it (or a UART's Broadcom patch, ws215-p005), sets up the HCI core, pairs
-# (BR/EDR's Secure Simple Pairing, LE's Security Manager), keeps the bonds, and answers on /run/bluetoothd.sock.
-BLUETOOTHD_SOURCES := userland/base/bluetoothd/main.c userland/base/bluetoothd/session.c userland/base/bluetoothd/hci.c \
-	userland/base/bluetoothd/intel.c userland/base/bluetoothd/broadcom.c userland/base/bluetoothd/privsep.c userland/base/bluetoothd/pair.c \
-	userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/acl.c \
-	userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/keys.c userland/base/bluetoothd/sdp.c \
-	userland/base/bluetoothd/hidp.c userland/base/bluetoothd/att.c userland/base/bluetoothd/hidcache.c \
-	userland/base/bluetoothd/snoop.c userland/base/bluetoothd/router.c userland/base/bluetoothd/linkmgr.c \
+include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
+
+#
+# The Bluetooth daemon
+#
+
+BLUETOOTHD_SOURCES := \
+	userland/base/bluetoothd/main.c \
+	userland/base/bluetoothd/session.c \
+	userland/base/bluetoothd/hci.c \
+	userland/base/bluetoothd/intel.c \
+	userland/base/bluetoothd/broadcom.c \
+	userland/base/bluetoothd/privsep.c \
+	userland/base/bluetoothd/pair.c \
+	userland/base/bluetoothd/smp.c \
+	userland/base/bluetoothd/crypto.c \
+	userland/base/bluetoothd/acl.c \
+	userland/base/bluetoothd/l2cap.c \
+	userland/base/bluetoothd/keys.c \
+	userland/base/bluetoothd/sdp.c \
+	userland/base/bluetoothd/hidp.c \
+	userland/base/bluetoothd/att.c \
+	userland/base/bluetoothd/hidcache.c \
+	userland/base/bluetoothd/snoop.c \
+	userland/base/bluetoothd/router.c \
+	userland/base/bluetoothd/linkmgr.c \
 	userland/base/bluetoothd/hid.c \
-	userland/base/bluetoothd/hog.c userland/base/bluetoothd/rfcomm.c userland/base/bluetoothd/obex.c \
-	userland/base/bluetoothd/sdps.c userland/base/bluetoothd/phone.c \
-	userland/base/bluetoothd/phonerec.c userland/base/bluetoothd/outq.c userland/base/bluetoothd/phoneio.c \
-	userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/desktop/libmms/mms.c userland/base/bluetoothd/map.c \
-	userland/base/bluetoothd/vcard.c userland/base/bluetoothd/phonemux.c userland/base/bluetoothd/pbap.c userland/base/bluetoothd/hfp.c userland/base/bluetoothd/at.c
+	userland/base/bluetoothd/hog.c \
+	userland/base/bluetoothd/rfcomm.c \
+	userland/base/bluetoothd/obex.c \
+	userland/base/bluetoothd/sdps.c \
+	userland/base/bluetoothd/phone.c \
+	userland/base/bluetoothd/phonerec.c \
+	userland/base/bluetoothd/outq.c \
+	userland/base/bluetoothd/phoneio.c \
+	userland/base/bluetoothd/mapxml.c \
+	userland/base/bluetoothd/bmsg.c \
+	userland/base/bluetoothd/mms.c \
+	userland/base/bluetoothd/map.c \
+	userland/base/bluetoothd/vcard.c \
+	userland/base/bluetoothd/phonemux.c \
+	userland/base/bluetoothd/pbap.c \
+	userland/base/bluetoothd/hfp.c \
+	userland/base/bluetoothd/at.c \
+	userland/desktop/libmms/mms.c
+
 BLUETOOTHD_DATA := /etc/service.d/bluetoothd=userland/base/bluetoothd/bluetoothd.service
+
 $(eval $(call USERLAND_PACKAGE,bluetoothd,bluetoothd,*,n,basic,$(BLUETOOTHD_SOURCES),y,base,base/bluetoothd,,0755,program,$(BLUETOOTHD_DATA),,sbin))
