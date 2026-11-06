@@ -472,6 +472,9 @@ hal_pmem_map_uncached(
 	size_t size,
 	void **vaddr)
 {
+	(void)paddr;
+	(void)size;
+	(void)vaddr;
 	return HAL_ERR_UNSUPPORTED;
 }
 
@@ -480,6 +483,8 @@ hal_pmem_unmap_uncached(
 	void *vaddr,
 	size_t size)
 {
+	(void)vaddr;
+	(void)size;
 	return HAL_ERR_UNSUPPORTED;
 }
 

@@ -121,8 +121,6 @@ int
 kern_driver_startup_pci_devices(
 	void)
 {
-	int error;
-
 #if CONFIG_DRIVER_PCI
 	if (drv_pci_init() != 0)
 		kern_logf("pci: core initialization failed\n");
@@ -294,11 +292,9 @@ int
 kern_driver_startup_isa_devices(
 	void)
 {
-	int err;
-
 	/* Attaches the ISA NE2000 when one is configured and present. */
 #if CONFIG_DRIVER_NE2000
-	err = drv_pcat_ne2000_init();
+	int err = drv_pcat_ne2000_init();
 	if (err == 0)
 		kern_logf("net: ISA NE2000 at 0x300 irq 10 registered as ne0\n");
 	else if (err != ENODEV)

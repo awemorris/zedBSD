@@ -41,6 +41,7 @@ SECTIONS
 		(ADDR(.data) - __kernel_virt_start)) {
 		__kernel_data_virt_start = .;
 		*(.data*)
+		*(.got*)
 	} :data
 	__kernel_image_end = .;
 	.bss (NOLOAD) : AT(__kernel_phys_start +

@@ -24,7 +24,7 @@ KERN_CPPFLAGS := \
 	$(KERN_CPPFLAGS) \
 	$(CONFIG_CPPFLAGS)
 
-KENR_CFLAGS := \
+KERN_CFLAGS := \
 	-m64 \
 	-mcmodel=kernel \
 	-mno-red-zone \
