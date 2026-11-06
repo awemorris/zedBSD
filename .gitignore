@@ -8,6 +8,8 @@ __pycache__/
 .internal/
 plan/ws*/temp/
 
+distfiles/
+
 .tar.gz
 .tar.bz2
 .tar.xz

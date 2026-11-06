@@ -5,4 +5,8 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-$(eval $(call USERLAND_PACKAGE,admin,admin,*,y,basic,userland/base/sccs/main.c userland/base/common/sccs.c,y,base,,))
+ADMIN_SOURCES := \
+	userland/base/sccs/main.c \
+	userland/base/common/sccs.c
+
+$(eval $(call USERLAND_PACKAGE,admin,admin,*,y,basic,$(ADMIN_SOURCES),y,base,))

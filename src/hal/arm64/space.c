@@ -1,3 +1,10 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include <hal/hal.h>
 #include "asm.h"
 #include "bsp.h"
@@ -8,6 +15,7 @@
 #include "framebuffer.h"
 
 #define ARM64_USER_LIMIT 0x0001000000000000ULL
+
 _Static_assert(ARM64_USER_LIMIT - 1U <= (uintptr_t)INTPTR_MAX,
     "user pointers must not overlap the negative syscall errno window");
 
@@ -153,6 +161,10 @@ static uint64_t fb_window_l3[2][512] __attribute__((aligned(ARM64_PAGE_SIZE)));
  */
 static struct arm64_fb_window fb_window;
 
+extern char __kernel_text_start[], __kernel_text_end[];
+extern char __kernel_rodata_start[], __kernel_rodata_end[];
+extern char __kernel_data_start[], __kernel_data_end[];
+
 static void fb_window_build(void);
 static void fb_window_device_direct(uint64_t physical, uint64_t size);
 static void fb_window_fill(uint64_t physical, uint64_t size, uint64_t flags);
@@ -173,15 +185,28 @@ static int alloc_page(hal_physaddr_t *memory)
 {
 	return hal_pmem_alloc(ARM64_PAGE_SIZE, ARM64_PAGE_SIZE, memory);
 }
-extern char __kernel_text_start[],__kernel_text_end[];
-extern char __kernel_rodata_start[],__kernel_rodata_end[];
-extern char __kernel_data_start[],__kernel_data_end[];
 
-uintptr_t arm64_direct_to_phys(const void *p) { return (uintptr_t)p-ARM64_DIRECT_BASE; }
-void *arm64_phys_to_direct(uintptr_t p) { return (void *)(ARM64_DIRECT_BASE+p); }
 
-static uint64_t table_desc(const void *table)
-{ return arm64_direct_to_phys(table)|PTE_VALID|PTE_TABLE; }
+uintptr_t
+arm64_direct_to_phys(
+	const void *p)
+{
+	return (uintptr_t)p - ARM64_DIRECT_BASE;
+}
+
+void *
+arm64_phys_to_direct(
+	uintptr_t p)
+{
+	return (void *)(ARM64_DIRECT_BASE + p);
+}
+
+static uint64_t
+table_desc(
+	const void *table)
+{
+	return arm64_direct_to_phys(table) | PTE_VALID|PTE_TABLE;
+}
 
 /*
  * Maps the 2 MiB block that holds a peripheral as Device-nGnRE memory, in

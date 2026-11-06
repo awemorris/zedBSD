@@ -5,4 +5,7 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-$(eval $(call USERLAND_PACKAGE,cal,cal,*,y,basic,userland/base/cal/main.c,y,base,,))
+CAL_SOURCES := \
+	userland/base/cal/main.c
+
+$(eval $(call USERLAND_PACKAGE,cal,cal,*,y,basic,$(CAL_SOURCES),y,base,))

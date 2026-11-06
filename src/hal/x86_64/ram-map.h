@@ -1,4 +1,10 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef KERN_AMD64_RAM_MAP_H
 #define KERN_AMD64_RAM_MAP_H
 
@@ -27,9 +33,17 @@ enum amd64_ram_result {
 	AMD64_RAM_COLLISION
 };
 
-enum amd64_ram_result amd64_ram_map(struct amd64_ram_builder *builder,
-    uint64_t physical, uint64_t size, uint64_t flags);
-int amd64_ram_lookup(const struct amd64_ram_builder *builder,
-    uint64_t physical, uint64_t *entry);
+enum amd64_ram_result
+amd64_ram_map(
+	struct amd64_ram_builder *builder,
+	uint64_t physical,
+	uint64_t size,
+	uint64_t flags);
+
+int
+amd64_ram_lookup(
+	const struct amd64_ram_builder *builder,
+	uint64_t physical,
+	uint64_t *entry);
 
 #endif

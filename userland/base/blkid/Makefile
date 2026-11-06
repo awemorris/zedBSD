@@ -5,4 +5,7 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-$(eval $(call USERLAND_PACKAGE,blkid,blkid,*,y,basic,userland/base/blkid/main.c,y,base,,,0755,program,,,sbin))
+BLKID_SOURCES := \
+	userland/base/blkid/main.c
+
+$(eval $(call USERLAND_PACKAGE,blkid,blkid,*,y,basic,$(BLKID_SOURCES),y,base,,,0755,program,,,sbin))

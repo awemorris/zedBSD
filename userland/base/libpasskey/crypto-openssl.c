@@ -21,13 +21,13 @@
 #include <errno.h>
 #include <string.h>
 
-#include <openssl/core_names.h>
-#include <openssl/crypto.h>
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
-#include <openssl/kdf.h>
-#include <openssl/params.h>
-#include <openssl/rand.h>
+#include <compat/crypto/core_names.h>
+#include <compat/crypto/crypto.h>
+#include <compat/crypto/evp.h>
+#include <compat/crypto/hmac.h>
+#include <compat/crypto/kdf.h>
+#include <compat/crypto/params.h>
+#include <compat/crypto/rand.h>
 
 /* An uncompressed P-256 point: 0x04, then x and y. */
 #define CRYPTO_POINT_SIZE	(1U + 2U * PK_P256_SIZE)

@@ -1,5 +1,11 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-# zedBSD userland package
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-$(eval $(call USERLAND_PACKAGE,realpath,realpath,*,y,basic,userland/base/realpath/main.c,y,base,,))
+REALPATH_SOURCES := \
+	userland/base/realpath/main.c
+
+$(eval $(call USERLAND_PACKAGE,realpath,realpath,*,y,basic,$(REALPATH_SOURCES),y,base,))

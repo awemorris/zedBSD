@@ -1,7 +1,10 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-# zedBSD userland package
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 # Installed as /usr/bin/make.
 ZEDBSD_MAKE_SOURCES := userland/base/make/main.c userland/base/make/read.c \
 	userland/base/make/variable.c userland/base/make/expand.c \

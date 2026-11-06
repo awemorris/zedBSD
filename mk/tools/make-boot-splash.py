@@ -1,33 +1,41 @@
 #!/usr/bin/env python3
-"""Makes the boot splash the loaders draw full-screen (ws035-p107).
 
-Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
 
-The splash is userland/desktop/artwork/zedbsd-boot-splash.png (the project
-owner's picture with the system's name, artwork/README.md): the glass mark,
-the word zedBSD, "operating system" and a dotted spinner over a bright
-blurred lake.
-This script turns it into what the UEFI and the BIOS loaders read (logo=):
+"""Makes the boot splash the loaders draw full-screen.
 
-- the spinner is taken out of the picture (its place is filled from the
-  sky and water around it), because the kernel draws a spinner that moves
-  there (src/drivers/platform/pcat/graphics/splash.c);
-- the picture is scaled to WIDTHxHEIGHT (1920x1080 by default, the GOP mode
-  the UEFI loader asks for, 16:9 like the picture) with bilinear sampling;
-- the result is a binary PPM whose header carries the comment "fit=contain"
-  (ws035-p112): a loader then draws it whole in the middle of a black
-  screen, at its own size when the screen holds it, else shrunk with its
-  proportions kept; the sides it does not reach are black bars.  The kernel's
-  splash.c knows the 1920x1080.
+The splash is userland/desktop/artwork/zedbsd-boot-splash.png (the
+project owner's picture with the system's name, artwork/README.md):
+the glass mark, the word zedBSD, "operating system" and a dotted
+spinner over a bright blurred lake.  This script turns it into what
+the UEFI and the BIOS loaders read (logo=):
+
+- the spinner is taken out of the picture (its place is filled from
+  the sky and water around it), because the kernel draws a spinner
+  that moves there (src/drivers/platform/pcat/graphics/splash.c);
+
+- the picture is scaled to WIDTHxHEIGHT (1920x1080 by default, the GOP
+  mode the UEFI loader asks for, 16:9 like the picture) with bilinear
+  sampling;
+
+- the result is a binary PPM whose header carries the comment
+  "fit=contain": a loader then draws it whole in the middle of a black
+  screen, at its own size when the screen holds it, else shrunk with
+  its proportions kept; the sides it does not reach are black bars.
+  The kernel's splash.c knows the 1920x1080.
 
 The spinner's place is a contract with the kernel's splash.c: in the
 picture's coordinates its centre is at the middle of the width and at
 SPINNER_Y of the height, its ring's radius SPINNER_RING of the height.
 
-Only the Python standard library is used (zlib for the PNG).  The output is
-the same for the same input.
+Only the Python standard library is used (zlib for the PNG).  The
+output is the same for the same input.
 
     make-boot-splash.py INPUT.png OUTPUT.ppm [WIDTHxHEIGHT]
+
 """
 import struct
 import sys

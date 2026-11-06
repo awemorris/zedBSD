@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 # zedBSD's own SSH 2 programs: ssh, sshd, ssh-keygen and sftp-server, on libcrypto-compat (mlkem768x25519-sha256,

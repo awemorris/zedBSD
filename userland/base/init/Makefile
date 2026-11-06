@@ -1,7 +1,10 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-# zedBSD userland package
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 INIT_DATA := /etc/rc.conf=userland/base/etc/rc.conf \
 	/etc/fstab=userland/base/etc/fstab \
 	/etc/net.conf=userland/base/etc/net.conf \
@@ -13,4 +16,13 @@ INIT_DATA := /etc/rc.conf=userland/base/etc/rc.conf \
 	/etc/service.d/ntpdate=userland/base/init/services/ntpdate \
 	/etc/service.d/homes=userland/base/init/services/homes \
 	/usr/libexec/make-homes=userland/base/init/make-homes
-$(eval $(call USERLAND_PACKAGE,init,init,*,y,basic,userland/base/init/main.c userland/base/init/root-check.c userland/base/service/service-config.c userland/base/service/rcconf.c userland/base/service/zsv1-protocol.c userland/base/service/zsv1-server.c,n,base,,,0755,program,$(INIT_DATA),,sbin))
+
+INIT_SOURCES := \
+	userland/base/init/main.c \
+	userland/base/init/root-check.c \
+	userland/base/service/service-config.c \
+	userland/base/service/rcconf.c \
+	userland/base/service/zsv1-protocol.c \
+	userland/base/service/zsv1-server.c
+
+$(eval $(call USERLAND_PACKAGE,init,init,*,y,basic,$(INIT_SOURCES),n,base,,,0755,program,$(INIT_DATA),,sbin))

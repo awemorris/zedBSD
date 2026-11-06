@@ -1,4 +1,10 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib.
+ */
+
 #ifndef KERN_AMD64_PMEM_RANGE_H
 #define KERN_AMD64_PMEM_RANGE_H
 
@@ -31,17 +37,45 @@ enum amd64_pmem_result {
 	AMD64_PMEM_STATE
 };
 
-uint64_t amd64_pmem_metadata_size(uint64_t pages);
-enum amd64_pmem_result amd64_pmem_extent_init(struct amd64_pmem_extent *extent,
-    uint64_t base, uint64_t size, void *metadata, uint64_t metadata_size);
-enum amd64_pmem_result amd64_pmem_reserve(struct amd64_pmem_extent *extent,
-    uint64_t base, uint64_t size);
-enum amd64_pmem_result amd64_pmem_release_reserved(struct amd64_pmem_extent *extent,
-    uint64_t base, uint64_t size);
-enum amd64_pmem_result amd64_pmem_extent_alloc(struct amd64_pmem_extent *extent,
-    uint64_t size, uint64_t alignment, uint64_t minimum, uint64_t maximum,
-    uint64_t boundary, uint64_t *physical, uint64_t *allocated_size);
-enum amd64_pmem_result amd64_pmem_extent_free(struct amd64_pmem_extent *extent,
-    uint64_t physical, uint64_t size);
+uint64_t
+amd64_pmem_metadata_size(
+	uint64_t pages);
+
+enum amd64_pmem_result
+amd64_pmem_extent_init(
+	struct amd64_pmem_extent *extent,
+	uint64_t base,
+	uint64_t size,
+	void *metadata,
+	uint64_t metadata_size);
+
+enum amd64_pmem_result
+amd64_pmem_reserve(
+	struct amd64_pmem_extent *extent,
+	uint64_t base,
+	uint64_t size);
+
+enum amd64_pmem_result
+amd64_pmem_release_reserved(
+	struct amd64_pmem_extent *extent,
+	uint64_t base,
+	uint64_t size);
+
+enum amd64_pmem_result
+amd64_pmem_extent_alloc(
+	struct amd64_pmem_extent *extent,
+	uint64_t size,
+	uint64_t alignment,
+	uint64_t minimum,
+	uint64_t maximum,
+	uint64_t boundary,
+	uint64_t *physical,
+	uint64_t *allocated_size);
+
+enum amd64_pmem_result
+amd64_pmem_extent_free(
+	struct amd64_pmem_extent *extent,
+	uint64_t physical,
+	uint64_t size);
 
 #endif

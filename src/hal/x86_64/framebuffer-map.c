@@ -1,6 +1,9 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib. */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib.
+ */
 #include "framebuffer-map.h"
 
 #define FB_PAGE UINT64_C(4096)

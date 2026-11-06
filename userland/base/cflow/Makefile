@@ -5,4 +5,8 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-$(eval $(call USERLAND_PACKAGE,cflow,cflow,*,y,basic,userland/base/cflow/main.c userland/base/common/c_parser.c,y,base,,,0755,program,,,lib/debug))
+CFLOW_SOURCES := \
+	userland/base/cflow/main.c \
+	userland/base/common/c_parser.c
+
+$(eval $(call USERLAND_PACKAGE,cflow,cflow,*,y,basic,$(CFLOW_SOURCES),y,base,,,0755,program,,,lib/debug))

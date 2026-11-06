@@ -10,7 +10,7 @@ include $(REPO_ROOT)/mk/sources-libc.mk
 include $(REPO_ROOT)/build-jobs.mk
 
 LIBC_OUT_DIR := $(BUILD)/libc
-LIBC_OBJ_DIR := $(BUILD)/packages/libc/obj
+LIBC_OBJ_DIR := $(BUILD)/libc/obj
 
 # Static flags
 X86_64_LIBC_STATIC_CFLAGS := \

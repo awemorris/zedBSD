@@ -46,7 +46,7 @@ IMAGE_HOST     := build/zedimage-host
 # Indicates that the build is done by the toplevel Makefile
 TOPLEVEL_BUILD := 1
 
-# The default goal for the toplevel Makefile is "disk-image"
+# The default goal for the toplevel Makefile is "disk"
 all: disk
 
 help:
@@ -57,7 +57,7 @@ help:
 	@echo "  setup      - Setup the build environment."
 	@echo "  vmunix     - Build the kernel image."
 	@echo "  userland   - Build the userland."
-	@echo "  disk-image - Build the boot disk image."
+	@echo "  disk       - Build the boot disk image."
 	@echo "  clean      - Clean build artifacts."
 
 #
@@ -118,7 +118,7 @@ firmware:   firmware-$(PLATFORM)
 vmunix:     toolchain libc-$(PLATFORM) sysroot-$(PLATFORM) vmunix-$(PLATFORM)
 userland:   toolchain libc-$(PLATFORM) sysroot-$(PLATFORM) programs
 rootfs:     toolchain libc-$(PLATFORM) sysroot-$(PLATFORM) programs rootfs-$(PLATFORM)
-disk-image: toolchain libc-$(PLATFORM) sysroot-$(PLATFORM) programs rootfs-$(PLATFORM) image-$(PLATFORM)
+disk:       toolchain libc-$(PLATFORM) sysroot-$(PLATFORM) programs rootfs-$(PLATFORM) image-$(PLATFORM)
 
 #
 # Userland Program Makefile
@@ -127,6 +127,7 @@ disk-image: toolchain libc-$(PLATFORM) sysroot-$(PLATFORM) programs rootfs-$(PLA
 ifeq ($(strip $(CONFIG_USERLAND_PROGRAMS)),)
 CONFIG_USERLAND_PROGRAMS := $(USERLAND_PROGRAMS)
 endif
+CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh)
 
 ALL_PROGRAM_MAKEFILES := $(sort \
 	$(wildcard userland/base/*/Makefile))
@@ -138,15 +139,22 @@ SELECTED_PROGRAM_MAKEFILES := $(foreach mf, $(ALL_PROGRAM_MAKEFILES), \
 PROGRAM_DIRS := $(dir $(SELECTED_PROGRAM_MAKEFILES))
 ALL_PROGRAM_DIRS := $(dir $(ALL_PROGRAM_MAKEFILES))
 
-.PHONY: packages $(PROGRAM_DIRS) $(ALL_PROGRAM_DIRS) $(patsubst %/,%,$(ALL_PROGRAM_DIRS))
+PROGRAM_STAMPS := $(foreach d,$(PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsubst %/,%,$(d)))/.stamp)
 
-programs: libc $(PROGRAM_DIRS)
-
-$(ALL_PROGRAM_DIRS) $(patsubst %/,%,$(ALL_PROGRAM_DIRS)):
-	@case "$@" in \
+define PROGRAM_RULE
+$$(BUILD)/packages/$(notdir $(patsubst %/,%,$(1)))/.stamp: $$(wildcard $(1)* $(1)*/* $(1)*/*/*) userland/base/package.mk
+	@case "$(1)" in \
 		userland/packages/*) \
-			$(MAKE) -C $@ ;; \
+			$$(MAKE) -C $(1) ;; \
 		*) \
-			echo "USER_CPPFLAGS=$(USER_CPPFLAGS)"; \
-			$(MAKE) -C $@ CC="$(CC)" CPPFLAGS="$(USER_CPPFLAGS)" CFLAGS="$(USER_CFLAGS)" AS="$(AS)" LD="$(LD)" RANLIB="$(RANLIB)" NM="$(NM)" OBJCOPY="$(OBJCOPY)" OBJDUMP="$(OBJDUMP)" READELF="$(READELF)" STRIP="$(STRIP)" ;; \
+			$$(MAKE) -C $(1) CC="$$(CC)" CPPFLAGS="$$(USER_CPPFLAGS)" CFLAGS="$$(USER_CFLAGS)" AS="$$(AS)" LD="$$(LD)" RANLIB="$$(RANLIB)" NM="$$(NM)" OBJCOPY="$$(OBJCOPY)" OBJDUMP="$$(OBJDUMP)" READELF="$$(READELF)" STRIP="$$(STRIP)" ;; \
 	esac
+endef
+
+$(foreach d,$(ALL_PROGRAM_DIRS),$(eval $(call PROGRAM_RULE,$(d))))
+
+$(ALL_PROGRAM_DIRS) $(patsubst %/,%,$(ALL_PROGRAM_DIRS)): %: $(BUILD)/packages/$$(notdir $$(patsubst %/,%,%))/.stamp
+
+.PHONY: packages
+
+programs: libc $(PROGRAM_STAMPS)

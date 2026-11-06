@@ -5,4 +5,7 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-$(eval $(call USERLAND_PACKAGE,cat,cat,*,y,basic,userland/base/cat/main.c,y,base,,))
+CAT_SOURCES := \
+	userland/base/cat/main.c
+
+$(eval $(call USERLAND_PACKAGE,cat,cat,*,y,basic,$(CAT_SOURCES),y,base,))

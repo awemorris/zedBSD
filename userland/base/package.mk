@@ -160,6 +160,13 @@ build: patch
 		done; \
 		$(AR) rcs "$$libdir/lib$(STANDALONE_NAME).a" $$objects; \
 	fi
+	@stampdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)"; \
+	mkdir -p "$$stampdir" && touch "$$stampdir/.stamp"; \
+	pkgdir="$${PWD##*/}"; \
+	if test -n "$$pkgdir" && test "$$pkgdir" != "$(STANDALONE_NAME)"; then \
+		curdir_stamp="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$$pkgdir"; \
+		mkdir -p "$$curdir_stamp" && touch "$$curdir_stamp/.stamp"; \
+	fi
 
 install: build
 	@if test "$(STANDALONE_TYPE)" = program; then \
@@ -201,6 +208,7 @@ install: build
 	done
 
 clean:
-	@:
+	@rm -f "$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)/.stamp" \
+		"$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$${PWD##*/}/.stamp"
 
 endif

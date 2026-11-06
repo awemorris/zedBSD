@@ -1,7 +1,13 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+#
 # The source list of libssl-compat, read by its Makefile and by the builds of the other systems: the Windows build
 # (apps/browser-win32/Makefile) takes LIBSSL_COMPAT_SOURCES into one static library, the zedBSD build into a shared
 # one.  No file depends on the operating system (the socket and the clock are libcrypto-compat's cryc-os).
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+#
 
 LIBSSL_COMPAT_SOURCES := \
 	userland/base/libssl-compat/api-ssl.c \

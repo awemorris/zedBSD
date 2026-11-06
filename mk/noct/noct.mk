@@ -10,7 +10,7 @@
 NOCT_TOOLCHAIN_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT          ?= $(abspath $(NOCT_TOOLCHAIN_DIR)/../..)
 
-HOST_NOCT          := $(REPO_ROOT)/build/NoctLang/build-static/noct
+HOST_NOCT          := $(REPO_ROOT)/build/NoctLang/build/noct
 export HOST_NOCT
 NOCT               ?= $(HOST_NOCT)
 
@@ -71,3 +71,6 @@ $(NOCT_HOST_BIN): $(NOCT_PATCH_STAMP)
 	cd $(NOCT_HOST_SRC) && \
 		env -u CFLAGS -u CPPFLAGS -u LDFLAGS \
 		cmake --build $(NOCT_HOST_BUILD) --parallel $(BUILD_JOBS)
+	@ln -sfn build $(NOCT_HOST_SRC)/build-static
+	@mkdir -p $(REPO_ROOT)/build/host-noct-state
+	@touch $(REPO_ROOT)/build/host-noct-state/built-d198b952dec90120c3d0e7987dd12af06911478e

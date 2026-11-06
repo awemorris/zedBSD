@@ -1,7 +1,10 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-# zedBSD userland package
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 # fsck (BUG-312): checks and repairs a UFS volume; init runs it on a root the kernel could only mount read-only.
 # Linked statically (the class static), so that it runs whatever state the root's libraries are in.  The top
 # Makefile adds it to every amd64 and arm64 image.

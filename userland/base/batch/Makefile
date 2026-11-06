@@ -5,4 +5,7 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-$(eval $(call USERLAND_PACKAGE,batch,batch,*,y,basic,userland/base/at/main.c,y,base,,))
+BATCH_SOURCES := \
+	userland/base/at/main.c
+
+$(eval $(call USERLAND_PACKAGE,batch,batch,*,y,basic,$(BATCH_SOURCES),y,base,))

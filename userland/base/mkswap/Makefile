@@ -5,4 +5,11 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-$(eval $(call USERLAND_PACKAGE,mkswap,mkswap,*,y,basic,userland/base/mkswap/main.c userland/base/mkswap/swap-format.c userland/base/mkswap/swap-device.c userland/base/common/format-file.c userland/base/mkswap/swap-codec.c,y,base,,,0755,program,,,sbin))
+MKSWAP_SOURCES := \
+	userland/base/mkswap/main.c \
+	userland/base/mkswap/swap-format.c \
+	userland/base/mkswap/swap-device.c \
+	userland/base/common/format-file.c \
+	userland/base/mkswap/swap-codec.c
+
+$(eval $(call USERLAND_PACKAGE,mkswap,mkswap,*,y,basic,$(MKSWAP_SOURCES),y,base,,,0755,program,,,sbin))
