@@ -6,7 +6,6 @@
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 INFOCMP_SOURCES := \
-	\ \
 	userland/base/infocmp/main.c \
 	userland/base/common/terminfo.c
 

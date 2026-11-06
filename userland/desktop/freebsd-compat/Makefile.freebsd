@@ -1,8 +1,13 @@
-# Native FreeBSD libc plus the maintained permissive digest implementations.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KEILAND_FREEBSD_DIGEST_SOURCES := src/libc/openbsd-sha2.c src/libc/openbsd-digest.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_FREEBSD_DIGEST_SOURCES := \
+	src/libc/openbsd-sha2.c src/libc/openbsd-digest.c \
 	userland/desktop/freebsd-compat/freebsd/xattr-freebsd.c \
 	userland/desktop/freebsd-compat/freebsd/shadow-freebsd.c
+
 $(eval $(call KEILAND_FREEBSD_STATIC,digest,libkeiland-compat.a,$(KEILAND_FREEBSD_DIGEST_SOURCES)))
 
 # These native bridges are private build headers, not installed Keiland public interfaces.

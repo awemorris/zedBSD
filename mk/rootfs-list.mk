@@ -1,6 +1,6 @@
 ROOTFS_DIRECTORIES := \
 	bin sbin lib etc var root home dev boot run \
-	usr/bin usr/sbin usr/libexec var/empty etc/ssh etc/service.d
+	usr/bin usr/sbin usr/libexec usr/share share var/empty etc/ssh etc/service.d etc/keiland
 
 ROOTFS_STICKY_DIRECTORIES := \
 	tmp shm
@@ -56,17 +56,20 @@ ROOTFS_SERVICE_FILES := \
 ROOTFS_DYNAMIC_INPUTS := \
 	$(BUILD)/dynamic/libc.so \
 	$(BUILD)/dynamic/libm.so \
-	$(BUILD)/dynamic/libutil.so
+	$(BUILD)/dynamic/libutil.so \
+	$(if $(wildcard $(BUILD)/dynamic/ld.so),$(BUILD)/dynamic/ld.so)
 
 ROOTFS_DYNAMIC_FILES := \
 	--file /lib/libc.so=$(BUILD)/dynamic/libc.so \
 	--file /lib/libm.so=$(BUILD)/dynamic/libm.so \
 	--file /lib/libutil.so=$(BUILD)/dynamic/libutil.so \
+	$(if $(wildcard $(BUILD)/dynamic/ld.so),--file /lib/ld.so=$(BUILD)/dynamic/ld.so --mode /lib/ld.so=0755) \
 	--mode /lib/libc.so=0755 \
 	--mode /lib/libm.so=0755 \
 	--mode /lib/libutil.so=0755
 
 ROOTFS_PACKAGE_LINKS ?= \
+	/usr/bin/noct=/bin/noct \
 	/usr/lib/libz.so=libz.so.1 \
 	/usr/lib/libcurl.so=libcurl.so.4
 
@@ -150,6 +153,22 @@ $(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) \
 			done; \
 		done
 	@set -e; umask 022; \
+		test -d $(BUILD)/bin && cp -f $(BUILD)/bin/* $(4)/bin/ 2>/dev/null || true; \
+		test -d $(BUILD)/sbin && cp -f $(BUILD)/sbin/* $(4)/sbin/ 2>/dev/null || true; \
+		if test -d $(BUILD)/usr/bin; then mkdir -p $(4)/usr/bin && cp -f $(BUILD)/usr/bin/* $(4)/usr/bin/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/usr/sbin; then mkdir -p $(4)/usr/sbin && cp -f $(BUILD)/usr/sbin/* $(4)/usr/sbin/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/usr/libexec; then mkdir -p $(4)/usr/libexec && cp -f $(BUILD)/usr/libexec/* $(4)/usr/libexec/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/dynamic; then mkdir -p $(4)/lib && cp -f $(BUILD)/dynamic/* $(4)/lib/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/usr/share; then mkdir -p $(4)/usr/share && cp -RP $(BUILD)/usr/share/. $(4)/usr/share/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/share; then mkdir -p $(4)/share && cp -RP $(BUILD)/share/. $(4)/share/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/etc; then mkdir -p $(4)/etc && cp -RP $(BUILD)/etc/. $(4)/etc/ 2>/dev/null || true; fi; \
+		chmod 0755 $(4)/bin/* $(4)/sbin/* 2>/dev/null || true; \
+		test -d $(4)/usr/bin && chmod 0755 $(4)/usr/bin/* 2>/dev/null || true; \
+		test -d $(4)/usr/sbin && chmod 0755 $(4)/usr/sbin/* 2>/dev/null || true; \
+		test -d $(4)/usr/libexec && chmod 0755 $(4)/usr/libexec/* 2>/dev/null || true; \
+		chmod 0755 $(4)/lib/*.so* 2>/dev/null || true; \
+		test -f $(4)/lib/ld.so && chmod 0755 $(4)/lib/ld.so || true
+	@set -e; umask 022; \
 		links=""; \
 		if [ -f "$$(ROOTFS_CONFIG_STAMP)" ]; then \
 			links="$$$$($$(PYTHON) -c 'with open("$$(ROOTFS_CONFIG_STAMP)") as f: d=dict(p.split("=",1) for p in f.read().strip().split(";") if "=" in p); print(d.get("links",""))')"; \
@@ -192,9 +211,17 @@ ROOTFS_SBIN_FILES := $(wildcard $(BUILD)/sbin/*)
 ROOTFS_SBIN_INPUTS := $(ROOTFS_SBIN_FILES)
 ROOTFS_SBIN_ENTRIES := $(foreach b,$(ROOTFS_SBIN_FILES),--file /sbin/$(notdir $(b))=$(b) --mode /sbin/$(notdir $(b))=0755)
 
+ROOTFS_USR_BIN_FILES := $(wildcard $(BUILD)/usr/bin/*)
+ROOTFS_USR_BIN_INPUTS := $(ROOTFS_USR_BIN_FILES)
+ROOTFS_USR_BIN_ENTRIES := $(foreach b,$(ROOTFS_USR_BIN_FILES),--file /usr/bin/$(notdir $(b))=$(b) --mode /usr/bin/$(notdir $(b))=0755)
+
+ROOTFS_USR_SBIN_FILES := $(wildcard $(BUILD)/usr/sbin/*)
+ROOTFS_USR_SBIN_INPUTS := $(ROOTFS_USR_SBIN_FILES)
+ROOTFS_USR_SBIN_ENTRIES := $(foreach b,$(ROOTFS_USR_SBIN_FILES),--file /usr/sbin/$(notdir $(b))=$(b) --mode /usr/sbin/$(notdir $(b))=0755)
+
 ROOTFS_LIBEXEC_FILES := $(wildcard $(BUILD)/usr/libexec/*)
 ROOTFS_LIBEXEC_INPUTS := $(ROOTFS_LIBEXEC_FILES)
 ROOTFS_LIBEXEC_ENTRIES := $(foreach b,$(ROOTFS_LIBEXEC_FILES),--file /usr/libexec/$(notdir $(b))=$(b) --mode /usr/libexec/$(notdir $(b))=0755)
 
-ROOTFS_INPUTS ?= $(ROOTFS_ACCOUNT_INPUTS) $(ROOTFS_SERVICE_INPUTS) $(ROOTFS_DYNAMIC_INPUTS) $(ROOTFS_BIN_INPUTS) $(ROOTFS_SBIN_INPUTS) $(ROOTFS_LIBEXEC_INPUTS)
-ROOTFS_FILES  ?= $(ROOTFS_ACCOUNT_FILES) $(ROOTFS_SERVICE_FILES) $(ROOTFS_DYNAMIC_FILES) $(ROOTFS_BIN_ENTRIES) $(ROOTFS_SBIN_ENTRIES) $(ROOTFS_LIBEXEC_ENTRIES)
+ROOTFS_INPUTS ?= $(ROOTFS_ACCOUNT_INPUTS) $(ROOTFS_SERVICE_INPUTS) $(ROOTFS_DYNAMIC_INPUTS) $(ROOTFS_BIN_INPUTS) $(ROOTFS_SBIN_INPUTS) $(ROOTFS_USR_BIN_INPUTS) $(ROOTFS_USR_SBIN_INPUTS) $(ROOTFS_LIBEXEC_INPUTS)
+ROOTFS_FILES  ?= $(ROOTFS_ACCOUNT_FILES) $(ROOTFS_SERVICE_FILES) $(ROOTFS_DYNAMIC_FILES) $(ROOTFS_BIN_ENTRIES) $(ROOTFS_SBIN_ENTRIES) $(ROOTFS_USR_BIN_ENTRIES) $(ROOTFS_USR_SBIN_ENTRIES) $(ROOTFS_LIBEXEC_ENTRIES)

@@ -1,3 +1,10 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+# The independent Linux build of ime; source membership mirrors the target package.
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 # install-admin: the installer's helper (userland/desktop/installer/admin), set-user-ID root, mode 4550 (owner root,

@@ -96,7 +96,9 @@
 #define DT_VERNEED 0x6ffffffe
 #define DT_VERNEEDNUM 0x6fffffff
 
+#ifndef DF_1_NODELETE
 #define DF_1_NODELETE 0x00000008U
+#endif
 
 #define VER_DEF_CURRENT 1
 #define VER_NEED_CURRENT 1

@@ -411,7 +411,9 @@ typedef struct {
 
 #define DF_1_NOW 0x00000001
 #define DF_1_GLOBAL 0x00000002
+#ifndef DF_1_NODELETE
 #define DF_1_NODELETE 0x00000008
+#endif
 #define DF_1_PIE 0x08000000
 
 /* The header of a note, 32-bit. */

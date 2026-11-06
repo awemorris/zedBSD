@@ -27,44 +27,45 @@ $(BOOT_LOGO): mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-
 	mv -f $@.tmp $@
 
 # Native layout
-NATIVE_SWAP_MIB ?= 1024
-NATIVE_BOOT_MIB ?= 256
-NATIVE_ROOT_MIB ?= 1024
-NATIVE_ROOT_INODES ?= 65536
+SWAP_MIB ?= 1024
+BOOT_MIB ?= 256
+ROOT_MIB ?= 1024
+ROOT_INODES ?= 65536
 
-NATIVE_SWAP_IMAGE := $(BUILD)/native-swap-$(NATIVE_SWAP_MIB)m.img
-$(NATIVE_SWAP_IMAGE): mk/tools/make-swapfile.noct
+SWAP_IMAGE := $(BUILD)/native-swap-$(SWAP_MIB)m.img
+$(SWAP_IMAGE): mk/tools/make-swapfile.noct
 	@mkdir -p $(dir $@)
 	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct \
-		--size-mib $(NATIVE_SWAP_MIB) --output $@
+		--size-mib $(SWAP_MIB) --output $@
 
-NATIVE_UEFI_ZEDBSD_CONFIG := $(BUILD)/zedbsd-native-uefi.cfg
-$(NATIVE_UEFI_ZEDBSD_CONFIG): mk/platform-x86_64/bootcfg/zedbsd-uefi.cfg
+UEFI_ZEDBSD_CONFIG := $(BUILD)/zedbsd-uefi.cfg
+$(UEFI_ZEDBSD_CONFIG): mk/platform-x86_64/bootcfg/zedbsd-uefi.cfg
 	@mkdir -p $(dir $@)
 	cp $< $@.tmp
 	$(if $(filter y,$(CONFIG_BOOT_SPLASH)),grep -v '^video=' $< > $@.tmp)
 	$(if $(filter y,$(CONFIG_BOOT_SPLASH)),printf '%s\n' logo=logo.ppm >> $@.tmp)
 	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),printf '%s\n' login=graphical >> $@.tmp)
+	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),printf '%s\n' kmsg=quiet >> $@.tmp)
 	mv -f $@.tmp $@
 
-NATIVE_ROOT_IMAGE := $(BUILD)/x86_64-native-root-$(NATIVE_ROOT_MIB)m.ufs
-$(NATIVE_ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
+ROOT_IMAGE := $(BUILD)/x86_64-native-root-$(ROOT_MIB)m.ufs
+$(ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
 	@mkdir -p $(dir $@)
 	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-rootfs.noct \
 		--backend $(abspath $(IMAGE_HOST)) --force \
 		--profile amd64 --output $@ --tree $(BUILD)/rootfs \
-		--size-mib $(NATIVE_ROOT_MIB) --min-inodes $(NATIVE_ROOT_INODES)
+		--size-mib $(ROOT_MIB) --min-inodes $(ROOT_INODES)
 
 ifeq ($(VARIANT),native)
 
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(BUILD)/uefi/BOOTX64.EFI \
-		$(NATIVE_UEFI_ZEDBSD_CONFIG) $(NATIVE_ROOT_IMAGE) \
-		$(NATIVE_SWAP_IMAGE) $(IMAGE_HOST) $(BOOT_LOGO)
+		$(UEFI_ZEDBSD_CONFIG) $(ROOT_IMAGE) \
+		$(SWAP_IMAGE) $(IMAGE_HOST) $(BOOT_LOGO)
 	$(IMAGE_HOST) disk --machine pcat --layout native \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(NATIVE_UEFI_ZEDBSD_CONFIG) --logo $(BOOT_LOGO) \
-		--ufs-root $(NATIVE_ROOT_IMAGE) --swapfile $(NATIVE_SWAP_IMAGE) \
-		--fat-size-mib $(NATIVE_BOOT_MIB) $@
+		--zedbsd-config $(UEFI_ZEDBSD_CONFIG) --logo $(BOOT_LOGO) \
+		--ufs-root $(ROOT_IMAGE) --swapfile $(SWAP_IMAGE) \
+		--fat-size-mib $(BOOT_MIB) $@
 
 else
 
@@ -82,7 +83,7 @@ $(SWAP_IMAGE): mk/tools/make-swapfile.noct
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/bootloader/stage1.bin \
 		$(BUILD)/bootloader/stage1-native.bin \
 		$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
-		$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(NATIVE_ROOT_IMAGE) \
+		$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(ROOT_IMAGE) \
 		$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
 		mk/platform-x86_64/bootcfg/zedbsd-bios.cfg $(IMAGE_HOST) \
 		mk/tools/make-bios-hdd-image.noct \
@@ -99,7 +100,7 @@ $(DISK_IMAGE_ARTIFACT): $(BUILD)/bootloader/stage1.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
 		--zedbsd-config mk/platform-x86_64/bootcfg/zedbsd-bios.cfg \
-		--arch-profile amd64 --arch-image $(NATIVE_ROOT_IMAGE) \
+		--arch-profile amd64 --arch-image $(ROOT_IMAGE) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
 

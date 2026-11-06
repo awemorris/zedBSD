@@ -7,6 +7,9 @@
 # Project Toplevel Makefile
 #
 
+MAKEFLAGS += -r
+.SUFFIXES:
+
 # Host toolchain
 HOST_CC        := cc
 HOST_CXX       := c++
@@ -39,9 +42,6 @@ VERSION        := 1.0.0
 
 # LTO setting. (full, thin, none)
 KERNEL_LTO     := full
-
-# "zedimage-host" is a host-side tool to create UFS and disk images.
-IMAGE_HOST     := build/zedimage-host
 
 # Indicates that the build is done by the toplevel Makefile
 TOPLEVEL_BUILD := 1
@@ -129,10 +129,29 @@ endif
 CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh init cron getty syslogd networkd mount fsck sysctl net)
 
 ALL_PROGRAM_MAKEFILES := $(sort \
-	$(wildcard userland/base/*/Makefile))
+	$(wildcard userland/base/*/Makefile) \
+	$(wildcard userland/base/*/*/Makefile) \
+	$(wildcard userland/desktop/*/Makefile) \
+	$(wildcard userland/desktop/*/*/Makefile) \
+	$(wildcard userland/packages/*/*/Makefile) \
+	$(wildcard userland/firmware/*/Makefile) \
+	$(wildcard userland/x11/*/Makefile) \
+	$(wildcard userland/tests/*/Makefile))
+ALL_PROGRAM_MAKEFILES := $(filter-out %/build-%/Makefile,$(ALL_PROGRAM_MAKEFILES))
+
+pkg_aliases = $(strip $(1) \
+	$(if $(filter ime,$(1)),keiland-ime) \
+	$(if $(filter dict,$(1)),ime-dict-ja) \
+	$(if $(filter skk-dict,$(1)),ime-dict-skk) \
+	$(if $(filter libGL,$(1)),libgl) \
+	$(if $(filter libwayland,$(1)),libwayland-client) \
+	$(if $(filter preview,$(1)),keiland-preview) \
+	$(if $(filter printd,$(1)),keiland-printd) \
+	$(if $(filter installer,$(1)),install-admin) \
+	$(1)-firmware $(1)-test)
 
 SELECTED_PROGRAM_MAKEFILES := $(foreach mf, $(ALL_PROGRAM_MAKEFILES), \
-	$(if $(filter $(notdir $(patsubst %/,%,$(dir $(mf)))), $(CONFIG_USERLAND_PROGRAMS)), \
+	$(if $(filter $(call pkg_aliases,$(notdir $(patsubst %/,%,$(dir $(mf))))), $(CONFIG_USERLAND_PROGRAMS)), \
 		$(mf)))
 
 PROGRAM_DIRS := $(dir $(SELECTED_PROGRAM_MAKEFILES))
@@ -148,11 +167,18 @@ $$(BUILD)/packages/$(notdir $(patsubst %/,%,$(1)))/.stamp: $$(wildcard $(1)* $(1
 		*) \
 			$$(MAKE) -C $(1) CC="$$(CC)" CPPFLAGS="$$(USER_CPPFLAGS)" CFLAGS="$$(USER_CFLAGS)" AS="$$(AS)" LD="$$(LD)" RANLIB="$$(RANLIB)" NM="$$(NM)" OBJCOPY="$$(OBJCOPY)" OBJDUMP="$$(OBJDUMP)" READELF="$$(READELF)" STRIP="$$(STRIP)" ;; \
 	esac
+
+.PHONY: $(1) $(patsubst %/,%,$(1))
+$(1) $(patsubst %/,%,$(1)):
+	@case "$(1)" in \
+		userland/packages/*) \
+			$$(MAKE) -C $(1) ;; \
+		*) \
+			$$(MAKE) -C $(1) CC="$$(CC)" CPPFLAGS="$$(USER_CPPFLAGS)" CFLAGS="$$(USER_CFLAGS)" AS="$$(AS)" LD="$$(LD)" RANLIB="$$(RANLIB)" NM="$$(NM)" OBJCOPY="$$(OBJCOPY)" OBJDUMP="$$(OBJDUMP)" READELF="$$(READELF)" STRIP="$$(STRIP)" ;; \
+	esac
 endef
 
 $(foreach d,$(ALL_PROGRAM_DIRS),$(eval $(call PROGRAM_RULE,$(d))))
-
-$(ALL_PROGRAM_DIRS) $(patsubst %/,%,$(ALL_PROGRAM_DIRS)): %: $(BUILD)/packages/$$(notdir $$(patsubst %/,%,%))/.stamp
 
 .PHONY: packages
 

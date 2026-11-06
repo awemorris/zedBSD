@@ -60,7 +60,4 @@ $(LIBWAYLAND_STAGED): $(LIBWAYLAND_STAGE_INPUTS)
 
 .PHONY: wayland-client
 wayland-client: $(LIBWAYLAND_STAGED)
-
-build: wayland-client
-wayland-client: $(LIBWAYLAND_STAGED)
 	@:

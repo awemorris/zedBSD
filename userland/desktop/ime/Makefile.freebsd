@@ -1,5 +1,8 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent FreeBSD build of ime; source membership mirrors the target package.
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 KEILAND_FREEBSD_IME_SOURCES := userland/desktop/ime/main.c \
 	userland/desktop/ime/method.c \
 	userland/desktop/ime/keys.c \
@@ -16,4 +19,5 @@ KEILAND_FREEBSD_IME_SOURCES := userland/desktop/ime/main.c \
 	userland/desktop/ime/skk-engine.c \
 	userland/desktop/ime/ja-predict.c \
 	userland/desktop/ime/popup.c
+
 $(eval $(call KEILAND_FREEBSD_PROGRAM,keiland-ime,libexec,$(KEILAND_FREEBSD_IME_SOURCES),libkeiland.so libtruetype.so libpng-compat.so libz-compat.so libwayland-client.so libvulkan.so.1,-lm -pthread))

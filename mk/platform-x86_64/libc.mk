@@ -204,6 +204,33 @@ $(LIBC_OUT_DIR)/crt1.o: $(CRT1_SRC)
 	@mkdir -p $(dir $@)
 	$(CC) --target=x86_64-unknown-zedbsd -m64 -nostdinc -Iinclude -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $< -o $@
 
+#
+# Dynamic linker (ld.so)
+#
+$(LIBC_OBJ_DIR)/dynamic/src/rtld/entry.o: src/rtld/entry-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(LIBC_OBJ_DIR)/dynamic/src/rtld/tlsdesc.o: src/rtld/tlsdesc-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(LIBC_OBJ_DIR)/dynamic/src/rtld/rtld.o: src/rtld/rtld.c
+	@mkdir -p $(dir $@)
+	$(CC) $(X86_64_LIBC_DYNAMIC_CFLAGS) -DKERN_DYNAMIC_LIBC -c $< -o $@
+
+$(LIBC_OBJ_DIR)/dynamic/src/rtld/string.o: src/rtld/string.c
+	@mkdir -p $(dir $@)
+	$(CC) $(X86_64_LIBC_DYNAMIC_CFLAGS) -DKERN_DYNAMIC_LIBC -c $< -o $@
+
+$(LIBC_OUT_DIR)/ld.so: $(LIBC_OBJ_DIR)/dynamic/src/rtld/entry.o \
+	$(LIBC_OBJ_DIR)/dynamic/src/rtld/tlsdesc.o \
+	$(LIBC_OBJ_DIR)/dynamic/src/rtld/rtld.o \
+	$(LIBC_OBJ_DIR)/dynamic/src/rtld/string.o
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_x86_64 -shared -Bsymbolic -e _rtld_start \
+		--hash-style=sysv -z now -z relro -z separate-code $^ -o $@
+
 LIBC_ALL_TARGETS := \
 	$(LIBC_OUT_DIR)/libc.a \
 	$(LIBC_OUT_DIR)/libc.so \
@@ -211,6 +238,7 @@ LIBC_ALL_TARGETS := \
 	$(LIBC_OUT_DIR)/libm.so \
 	$(LIBC_OUT_DIR)/libutil.a \
 	$(LIBC_OUT_DIR)/libutil.so \
+	$(LIBC_OUT_DIR)/ld.so \
 	$(LIBC_OUT_DIR)/libc.o \
 	$(LIBC_OUT_DIR)/crt0.o \
 	$(LIBC_OUT_DIR)/crt1.o \

@@ -10,6 +10,7 @@ LIBC_SOURCES := \
 	src/libc/wide.c \
 	src/libc/int64.c \
 	src/libc/strto.c \
+	src/libc/float-parse.c \
 	src/libc/format.c \
 	src/libc/stdio.c \
 	src/libc/string-extra.c \

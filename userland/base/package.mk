@@ -13,6 +13,7 @@ ifndef TOPLEVEL_BUILD
 
 BASE_PACKAGE_MK := $(lastword $(MAKEFILE_LIST))
 REPO_ROOT := $(abspath $(dir $(BASE_PACKAGE_MK))/../..)
+ZEDBSD_REPO_ROOT := $(REPO_ROOT)
 PREFIX ?= /usr/local
 DESTDIR ?=
 INSTALL ?= install
@@ -58,7 +59,7 @@ STANDALONE_TERMINFO_DIR = $(strip $(if $(filter /,$(PREFIX)),\
 
 define USERLAND_PACKAGE
 STANDALONE_NAME := $(1)
-STANDALONE_SO_NAME := $(if $(2),$(2),$(1))
+STANDALONE_SO_NAME := $(if $(filter shared-library,$(12)),$(if $(2),$(2),$(1)),$(1))
 STANDALONE_CLASS := $(5)
 STANDALONE_SOURCES := $(6)
 STANDALONE_REQUIRE := $(10)
@@ -77,10 +78,43 @@ endef
 all: build
 
 build: patch
-	@if test "$(STANDALONE_TYPE)" = program; then \
+	@set -e; \
+	dynamic_dir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic"; \
+	sysroot="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/sysroot"; \
+	is_dynamic=0; \
+	req_libs=""; \
+	for req in $(STANDALONE_REQUIRE); do \
+		case "$$req" in \
+			base/libedit) ;; \
+			desktop/xserver) \
+				is_dynamic=1; \
+				if test -f "$(REPO_ROOT)/userland/desktop/xserver/libGLX/Makefile"; then \
+					$(MAKE) -C "$(REPO_ROOT)/userland/desktop/xserver/libGLX"; \
+				fi; \
+				if test -f "$$dynamic_dir/libGLX.so"; then \
+					req_libs="$$req_libs -l:libGLX.so"; \
+				fi ;; \
+			*lib*) \
+				is_dynamic=1; \
+				so="$${req##*/}.so"; \
+				case "$$req" in \
+					desktop/libwayland) so="libwayland-client.so" ;; \
+					desktop/libegl) so="libEGL.so" ;; \
+					desktop/libglesv2) so="libGLESv2.so" ;; \
+					desktop/libGL) so="libGL.so" ;; \
+					desktop/libwayland-client) so="libwayland-client.so" ;; \
+				esac; \
+				if test -f "$(REPO_ROOT)/userland/$$req/Makefile"; then \
+					$(MAKE) -C "$(REPO_ROOT)/userland/$$req"; \
+				fi; \
+				if test -f "$$dynamic_dir/$$so"; then \
+					req_libs="$$req_libs -l:$$so"; \
+				fi ;; \
+		esac; \
+	done; \
+	if test "$(STANDALONE_TYPE)" = program; then \
 		bindir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/$(STANDALONE_INSTALL_DIR)"; \
 		workdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)"; \
-		sysroot="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/sysroot"; \
 		mkdir -p "$$bindir" "$$workdir"; \
 		extra_srcs=""; \
 		extra_cflags=""; \
@@ -101,21 +135,39 @@ build: patch
 				*) srcs="$$srcs $(REPO_ROOT)/$$s" ;; \
 			esac; \
 		done; \
-		$(CC) --target=$(STANDALONE_PLATFORM_DIR)-unknown-zedbsd --sysroot="$$sysroot" \
-			-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 \
-			-nostdinc -isystem "$$sysroot/usr/include" \
-			-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
-			$$extra_cflags \
-			-ffreestanding -fno-stack-protector -nostdlib -static \
-			$$srcs $$extra_srcs \
-			-Wl,-T,"$$sysroot/usr/lib/zedbsd/$(STANDALONE_PLATFORM_DIR)/user.ld" \
-			"$$sysroot/usr/lib/crt0.o" \
-			-Wl,--start-group "$$sysroot/usr/lib/libc.a" \
-			"$$sysroot/usr/lib/libm.a" \
-			"$$sysroot/usr/lib/libzedbsd-compiler-rt.a" \
-			"$$sysroot/usr/lib/libclang_rt.builtins.a" -Wl,--end-group \
-			-o "$$bindir/$(STANDALONE_NAME)"; \
-		test -z "$$($(NM) -u "$$bindir/$(STANDALONE_NAME)")" || { $(NM) -u "$$bindir/$(STANDALONE_NAME)"; exit 1; }; \
+		if test "$$is_dynamic" = 1; then \
+			$(CC) --target=$(STANDALONE_PLATFORM_DIR)-unknown-zedbsd --sysroot="$$sysroot" \
+				-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 \
+				-nostdinc -isystem "$$sysroot/usr/include" \
+				-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
+				$$extra_cflags \
+				-ffreestanding -fno-stack-protector -fPIC -Os \
+				-nostdlib -pie -Wl,--no-relax \
+				-Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
+				-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+				-Wl,--dynamic-linker=/lib/ld.so \
+				"$$sysroot/usr/lib/crt1.o" \
+				$$srcs $$extra_srcs \
+				-L"$$dynamic_dir" -Wl,-rpath-link,"$$dynamic_dir" \
+				$$req_libs -l:libm.so -l:libc.so \
+				-o "$$bindir/$(STANDALONE_NAME)"; \
+		else \
+			$(CC) --target=$(STANDALONE_PLATFORM_DIR)-unknown-zedbsd --sysroot="$$sysroot" \
+				-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 \
+				-nostdinc -isystem "$$sysroot/usr/include" \
+				-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
+				$$extra_cflags \
+				-ffreestanding -fno-stack-protector -nostdlib -static \
+				$$srcs $$extra_srcs \
+				-Wl,-T,"$$sysroot/usr/lib/zedbsd/$(STANDALONE_PLATFORM_DIR)/user.ld" \
+				"$$sysroot/usr/lib/crt0.o" \
+				-Wl,--start-group "$$sysroot/usr/lib/libc.a" \
+				"$$sysroot/usr/lib/libm.a" \
+				"$$sysroot/usr/lib/libzedbsd-compiler-rt.a" \
+				"$$sysroot/usr/lib/libclang_rt.builtins.a" -Wl,--end-group \
+				-o "$$bindir/$(STANDALONE_NAME)"; \
+			test -z "$$($(NM) -u "$$bindir/$(STANDALONE_NAME)")" || { $(NM) -u "$$bindir/$(STANDALONE_NAME)"; exit 1; }; \
+		fi; \
 	elif test "$(STANDALONE_TYPE)" = shared-library; then \
 		dynamic_dir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic"; \
 		libdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib"; \
@@ -138,12 +190,12 @@ build: patch
 			-nostdinc -isystem "$$sysroot/usr/include" \
 			-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
 			$$srcs \
-			-Wl,-soname,$(STANDALONE_SO_NAME).so \
+			-Wl,-soname,"$(STANDALONE_SO_NAME).so" \
 			-Wl,--hash-style=both -Bsymbolic-functions \
 			-Wl,-z,now,-z,relro,-z,separate-code,-z,stack-size=0x100000 \
 			$$version_script \
 			-L"$$dynamic_dir" -L"$$sysroot/usr/lib" \
-			-l:libc.so -l:libm.so \
+			$$req_libs -l:libc.so -l:libm.so \
 			-o "$$dynamic_dir/$(STANDALONE_SO_NAME).so" && \
 		cp -f "$$dynamic_dir/$(STANDALONE_SO_NAME).so" "$$libdir/$(STANDALONE_SO_NAME).so"; \
 	elif test "$(STANDALONE_TYPE)" = library && \
@@ -159,7 +211,20 @@ build: patch
 			objects="$$objects $$object"; \
 		done; \
 		$(AR) rcs "$$libdir/lib$(STANDALONE_NAME).a" $$objects; \
-	fi
+	fi; \
+	for entry in $(STANDALONE_DATA); do \
+		destination=$${entry%%=*}; source=$${entry#*=}; \
+		case "$$destination" in \
+		/lib/terminfo/*) destination="/share/terminfo/$${destination##*/}" ;; \
+		esac; \
+		case "$$source" in \
+		/*) ;; \
+		*) source="$(REPO_ROOT)/$$source" ;; \
+		esac; \
+		target="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)$${destination}"; \
+		mkdir -p "$${target%/*}"; \
+		cp -f "$$source" "$$target"; \
+	done
 	@stampdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)"; \
 	mkdir -p "$$stampdir" && touch "$$stampdir/.stamp"; \
 	pkgdir="$${PWD##*/}"; \
