@@ -1030,38 +1030,38 @@ KERN_SOURCES += \
 endif
 
 # [Audio Core]
-ifneq ($(filter y,$(CONFIG_DRIVER_AUDIO_CORE)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_AUDIO_CORE=1
+ifneq ($(filter y,$(CONFIG_DRIVER_AUDIO)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_AUDIO=1
 KERN_SOURCES += \
 	src/drivers/audio/audio.c
 endif
 
 # [Intel HD Audio driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_AUDIO_HDA)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_AUDIO_HDA=1
+ifneq ($(filter y,$(CONFIG_DRIVER_PCI_HDA)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_HDA=1
 KERN_SOURCES += \
-	src/drivers/pci/pci-hda/hda.c
+	src/drivers/pci/pci-hda.c
 endif
 
 # [RPi4 PWM Audio driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_AUDIO_PWM)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_AUDIO_PWM=1
-KERNEL_SOURCES += \
+ifneq ($(filter y,$(CONFIG_DRIVER_RPI4_AUDIO)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI4_AUDIO=1
+KERN_SOURCES += \
 	src/drivers/platform/rpi4/rpi4-audio.c \
 	src/drivers/platform/rpi4/rpi4-audio-ring.c
 endif
 
 # [RPi5 RP1 Audio driver]
 #  - XXX: not implemented yet??
-ifneq ($(filter y,$(CONFIG_DRIVER_AUDIO_RP1)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_AUDIO_RP1=1
-KERNEL_SOURCES +=
+ifneq ($(filter y,$(CONFIG_DRIVER_RPI5_AUDIO)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI5_AUDIO=1
+KERN_SOURCES +=
 endif
 
 # [Vision Five 2 Audio driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_AUDIO_VF2)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_AUDIO_VF2=1
-KERNEL_SOURCES += \
+ifneq ($(filter y,$(CONFIG_DRIVER_VF2_AUDIO)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_VF2_AUDIO=1
+KERN_SOURCES += \
 	src/drivers/platform/visionfive2/vf2-pwmdac.c
 endif
 
@@ -1087,37 +1087,36 @@ endif
 
 # [USB 1.1 OHCI driver]
 #  - Not implemented yet
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_OHCI)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_USB_OHCI=1
-KERN_SOURCES += \
-	src/drivers/pci/pci-ohci.c
+ifneq ($(filter y,$(CONFIG_DRIVER_PCI_OHCI)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_OHCI=1
+KERN_SOURCES +=
 endif
 
 # [USB 1.1 UHCI driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_UHCI)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_USB_UHCI=1
+ifneq ($(filter y,$(CONFIG_DRIVER_PCI_UHCI)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_UHCI=1
 KERN_SOURCES += \
 	src/drivers/pci/pci-uhci.c
 endif
 
 # [USB 2.0 EHCI driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_EHCI)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_USB_EHCI=1
+ifneq ($(filter y,$(CONFIG_DRIVER_PCI_EHCI)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_EHCI=1
 KERN_SOURCES += \
 	src/drivers/pci/pci-ehci.c
 endif
 
 # [USB 3.0 XHCI driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_XHCI)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_USB_XHCI=1
+ifneq ($(filter y,$(CONFIG_DRIVER_PCI_XHCI)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_XHCI=1
 KERN_SOURCES += \
 	src/drivers/pci/pci-xhci.c \
 	src/drivers/pci/pci-xhci-isoch.c
 endif
 
 # [USB-C USCI driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_USCI)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_USB_USCI=1
+ifneq ($(filter y,$(CONFIG_DRIVER_TYPEC)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_TYPEC=1
 KERN_SOURCES += \
 	src/drivers/typec/typec-kern.c \
 	src/drivers/typec/typec.c \
@@ -1180,16 +1179,16 @@ KERN_SOURCES += \
 endif
 
 # [Generic Bluetooth HCI]
-ifneq ($(filter y,$(CONFIG_DRIVER_BLUETOOTH)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_BLUETOOTH=1
+ifneq ($(filter y,$(CONFIG_DRIVER_BT)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_BT=1
 KERN_SOURCES += \
 	src/drivers/generic/bt-hci.c \
 	src/drivers/generic/bt-hci-proto.c
 endif
 
 # [Bluetooth Input Bridge] (/dev/input/bridge)
-ifneq ($(filter y,$(CONFIG_DRIVER_BLUETOOTH_INPUT_BRIDGE)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_BLUETOOTH_INPUT_BRIDGE=1
+ifneq ($(filter y,$(CONFIG_DRIVER_INPUT_BRIDGE)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_INPUT_BRIDGE=1 -DCONFIG_INPUT_BRIDGE=1
 KERN_SOURCES += \
 	src/drivers/generic/input-bridge.c \
 	src/drivers/generic/input-bridge-setup.c
@@ -1299,23 +1298,23 @@ KERN_SOURCES +=
 endif
 
 # [Intel LPSS I2C / AMD I2C driver] (Synopsis DesignWare I2C)
-ifneq ($(filter y,$(CONFIG_DRIVER_I2C_SYNOPSYS)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_I2C_SYNOPSYS=1
+ifneq ($(filter y,$(CONFIG_DRIVER_PCI_LPSS_I2C)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_LPSS_I2C=1
 KERN_SOURCES += \
 	src/drivers/i2c/lpss-i2c.c
 endif
 
 # [Intel LPSS GPIO driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_LPSS_GPIO)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_LPSS_GPIO=1
+ifneq ($(filter y,$(CONFIG_DRIVER_PCI_LPSS_GPIO)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_LPSS_GPIO=1
 KERN_SOURCES += \
 	src/drivers/gpio/intel-gpio.c
 endif
 
 # [AMD GPIO driver]
 #  - XXX: Not implemented yet
-ifneq ($(filter y,$(CONFIG_DRIVER_AMD_GPIO)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_AMD_GPIO=1
+ifneq ($(filter y,$(CONFIG_DRIVER_PCI_AMD_GPIO)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_AMD_GPIO=1
 KERN_SOURCES +=
 endif
 

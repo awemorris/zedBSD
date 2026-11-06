@@ -60,6 +60,10 @@
 #include <drivers/pci/pci-hda.h>
 #endif
 
+#if CONFIG_DRIVER_PCI_LPSS_I2C
+#include <drivers/i2c/lpss-i2c.h>
+#endif
+
 #if CONFIG_DRIVER_USB_STORAGE
 #include "drivers/usb/usb-storage.h"
 #include <drivers/usb/usb-uas.h>

@@ -38,7 +38,8 @@ ROOTFS_SERVICE_INPUTS := \
 	userland/base/netclock/service \
 	userland/base/audiod/audiod.service \
 	userland/base/volumed/volumed.service \
-	userland/base/bluetoothd/bluetoothd.service
+	userland/base/bluetoothd/bluetoothd.service \
+	userland/desktop/sessiond/greeter.service
 
 ROOTFS_SERVICE_FILES := \
 	$(foreach s,$(wildcard userland/base/init/services/*),--file /etc/service.d/$(notdir $(s))=$(s) --mode /etc/service.d/$(notdir $(s))=0644) \
@@ -47,7 +48,10 @@ ROOTFS_SERVICE_FILES := \
 	--file /etc/service.d/netclock=userland/base/netclock/service --mode /etc/service.d/netclock=0644 \
 	--file /etc/service.d/audiod=userland/base/audiod/audiod.service --mode /etc/service.d/audiod=0644 \
 	--file /etc/service.d/volumed=userland/base/volumed/volumed.service --mode /etc/service.d/volumed=0644 \
-	--file /etc/service.d/bluetoothd=userland/base/bluetoothd/bluetoothd.service --mode /etc/service.d/bluetoothd=0644
+	--file /etc/service.d/bluetoothd=userland/base/bluetoothd/bluetoothd.service --mode /etc/service.d/bluetoothd=0644 \
+	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),--file /etc/service.d/greeter=userland/desktop/sessiond/greeter.service --mode /etc/service.d/greeter=0644) \
+	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),--file /etc/keiland/session=userland/desktop/sessiond/session.sh --mode /etc/keiland/session=0755) \
+	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),--file /etc/keiland/autologin=userland/desktop/sessiond/autologin --mode /etc/keiland/autologin=0644)
 
 ROOTFS_DYNAMIC_INPUTS := \
 	$(BUILD)/dynamic/libc.so \

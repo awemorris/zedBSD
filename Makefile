@@ -92,15 +92,11 @@ include mk/sources-kern.mk
 # Import the libc source file list.
 include mk/sources-libc.mk
 
-# rootfs file list.
-include mk/sources-rootfs.mk
-
-#
-# Platform Makefile
-#
-
 # Deterimen the build directory.
 BUILD := build/$(PLATFORM)
+
+# rootfs file list.
+include mk/rootfs-list.mk
 
 # Determine the platform-specific Makefile
 PLATFORM_MAKEFILE := mk/platform-$(PLATFORM)/Makefile

@@ -1,3 +1,7 @@
+override CONFIG_ROOTFS_DEVELOPMENT         := y
+override CONFIG_BOOT_SPLASH                := y
+override CONFIG_GRAPHICAL_LOGIN            := y
+
 override CONFIG_DRIVER_PCI                 := y
 override CONFIG_DRIVER_USB                 := y
 override CONFIG_DRIVER_PCI_NVME            := y
