@@ -155,11 +155,12 @@ static void display_timings_free(struct venus_display_output *output);
 static int display_status(struct venus_controller *controller, const void *command, uint32_t command_bytes, void *reply, uint32_t reply_bytes, uint32_t expected);
 
 /*
- * Hardware callbacks share the controller mutex; event snapshots use only the IRQ-safe queue lock.
- * Power and refresh are the guest's virtual display's: the refresh boundaries are the
- * virtual clock's, not the host monitor's.  The virtual display has no
- * cursor plane, so the cursor operations are absent.  Presents
- * wait under the open's admission (no DRV_GPU_DISPLAY_UNGATED).
+ * Hardware callbacks share the controller mutex; event snapshots use
+ * only the IRQ-safe queue lock.  Power and refresh are the guest's
+ * virtual display's: the refresh boundaries are the virtual clock's,
+ * not the host monitor's.  The virtual display has no cursor plane,
+ * so the cursor operations are absent.  Presents wait under the
+ * open's admission (no DRV_GPU_DISPLAY_UNGATED).
  */
 const struct drv_gpu_display_ops drv_venus_display_operations = {
 	display_query, display_mode, display_claim,
