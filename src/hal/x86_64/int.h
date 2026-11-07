@@ -23,7 +23,7 @@ struct amd64_interrupt_frame {
 };
 
 extern void *amd64_fault_table[32];
-extern void *amd64_irq_table[16];
+extern void *amd64_irq_table[64];
 extern void *amd64_msi_table[AMD64_VECTOR_MSI_COUNT];
 
 void

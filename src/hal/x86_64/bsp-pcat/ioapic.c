@@ -17,6 +17,8 @@
 #include "../defs.h"
 #include "../space.h"
 
+#define AMD64_IOAPIC_ROUTE_COUNT 64
+
 struct ioapic_state {
 	volatile uint32_t *base;
 	uint32_t gsi_base;
@@ -25,9 +27,9 @@ struct ioapic_state {
 
 static struct ioapic_state controllers[AMD64_IOAPIC_MAX];
 static unsigned controller_count;
-static uint32_t irq_gsi[16];
-static uint16_t irq_flags[16];
-static uint32_t irq_destination[16];
+static uint32_t irq_gsi[AMD64_IOAPIC_ROUTE_COUNT];
+static uint16_t irq_flags[AMD64_IOAPIC_ROUTE_COUNT];
+static uint32_t irq_destination[AMD64_IOAPIC_ROUTE_COUNT];
 static volatile unsigned ioapic_lock;
 
 static uint32_t read_reg_unlocked(struct ioapic_state *ioapic, uint8_t reg);
@@ -148,6 +150,19 @@ amd64_ioapic_init(
 		}
 	}
 
+	/* Installs extended GSI routes (16..AMD64_IOAPIC_ROUTE_COUNT - 1) in masked state with PCI defaults. */
+	for (index = 16; index < AMD64_IOAPIC_ROUTE_COUNT; index++) {
+		unsigned pin;
+		irq_gsi[index] = index;
+		irq_flags[index] = INTI_POLARITY_LOW | INTI_TRIGGER_LEVEL;
+		irq_destination[index] = bootstrap_apic_id;
+
+		/* Programs route only if this GSI exists on an I/O APIC */
+		if (find_gsi(index, &pin) != NULL) {
+			(void)write_route((int)index, bootstrap_apic_id, 1);
+		}
+	}
+
 	/* Reports the completely routed controller set. */
 	hal_printf(
 		"A64 IOAPIC ROUTING READY controllers=%u destination=%u\n",
@@ -165,8 +180,8 @@ void
 amd64_ioapic_mask(
 	int irq)
 {
-	/* Ignores values outside the ISA routing table. */
-	if (irq < 0 || irq >= 16)
+	/* Ignores values outside the I/O APIC routing table. */
+	if (irq < 0 || irq >= AMD64_IOAPIC_ROUTE_COUNT)
 		return;
 
 	/* Rewrites the route with its current destination while masked. */
@@ -180,8 +195,8 @@ void
 amd64_ioapic_unmask(
 	int irq)
 {
-	/* Ignores values outside the ISA routing table. */
-	if (irq < 0 || irq >= 16)
+	/* Ignores values outside the I/O APIC routing table. */
+	if (irq < 0 || irq >= AMD64_IOAPIC_ROUTE_COUNT)
 		return;
 
 	/* Rewrites the route with its current destination while unmasked. */
@@ -222,8 +237,8 @@ amd64_ioapic_set_mode(
 	uint16_t flags;
 	int error;
 
-	/* Only the ISA routing table, and only the two values of each. */
-	if (irq < 0 || irq >= 16)
+	/* Only the I/O APIC routing table, and only the two values of each. */
+	if (irq < 0 || irq >= AMD64_IOAPIC_ROUTE_COUNT)
 		return HAL_ERR_INVALID;
 	if (trigger != HAL_IRQ_TRIGGER_EDGE && trigger != HAL_IRQ_TRIGGER_LEVEL)
 		return HAL_ERR_INVALID;
@@ -326,8 +341,8 @@ write_route(
 	/* Builds the fixed vector before validating the route identity. */
 	low = INT_IRQ_BASE + (uint32_t)irq;
 
-	/* Validates the ISA line and xAPIC destination width. */
-	if (irq < 0 || irq >= 16 || apic_id > 255U)
+	/* Validates the IRQ line and xAPIC destination width. */
+	if (irq < 0 || irq >= AMD64_IOAPIC_ROUTE_COUNT || apic_id > 255U)
 		return HAL_ERR_INVALID;
 
 	/* Resolves the ACPI-translated GSI to a controller pin. */

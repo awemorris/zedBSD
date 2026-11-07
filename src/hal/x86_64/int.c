@@ -91,8 +91,8 @@ prekern_amd64_int_init(
 	idt[8].ist = 1;
 	idt[2].ist = 2;
 
-	/* Installs the legacy IRQ entry points. */
-	for (index = 0; index < 16; index++)
+	/* Installs the IRQ entry points (GSI 0..IRQ_MAX). */
+	for (index = 0; index <= IRQ_MAX; index++)
 		set_gate(INT_IRQ_BASE + index, 0, amd64_irq_table[index]);
 
 	/* Installs the message-signaled interrupt entry points. */

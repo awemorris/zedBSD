@@ -730,7 +730,7 @@ pcat_allocate_irqs(
 
 	/* Checks the drv pci device config read8 result. */
 	if (drv_pci_device_config_read8(device, 0x3cU, &line) != 0 ||
-	    line == 0xffU || line >= 16U) {
+	    line == 0xffU || line == 0) {
 		/* Failed. */
 		return ENODEV;
 	}

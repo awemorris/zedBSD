@@ -45,7 +45,7 @@
 #define INT_SYSCALL_FAST       0xc3
 #define AMD64_VECTOR_MSI_BASE  0xd0
 #define AMD64_VECTOR_MSI_COUNT 16
-#define INT_IRQ_BASE           0xe0
+#define INT_IRQ_BASE           0x40
 #define INT_UNDEF              0xffffffff
 
 #define AMD64_PTE_PRESENT      0x001

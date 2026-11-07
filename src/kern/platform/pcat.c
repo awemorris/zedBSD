@@ -158,6 +158,56 @@ extern int drv_sdhci_acpi_probe(void) __attribute__((weak));
 int drv_usb_hid_checkpoint_driver_register(void);
 #endif
 
+#if CONFIG_DRIVER_ACPI
+static int
+pcat_acpi_crs_visitor(
+	const struct drv_acpi_resource *res,
+	void *argument)
+{
+	(void)argument;
+	if (res->kind == DRV_ACPI_RESOURCE_MEMORY) {
+		kern_logf("acpi:   crs mem 0x%llx + 0x%llx\n",
+			  (unsigned long long)res->base,
+			  (unsigned long long)res->length);
+	} else if (res->kind == DRV_ACPI_RESOURCE_IRQ) {
+		kern_logf("acpi:   crs irq %llu\n", (unsigned long long)res->base);
+	}
+	return 0;
+}
+
+static int
+pcat_acpi_dump_visitor(
+	struct drv_acpi_node *node,
+	unsigned depth,
+	void *argument)
+{
+	struct drv_acpi_object *hid = NULL;
+	char path[128];
+	uint64_t adr;
+	(void)depth;
+	(void)argument;
+
+	if (drv_acpi_evaluate(node, "_HID", NULL, 0, &hid) == 0 && hid != NULL) {
+		drv_acpi_node_path(node, path, sizeof(path));
+		if (drv_acpi_object_type(hid) == DRV_ACPI_TYPE_STRING) {
+			size_t len;
+			const char *s = drv_acpi_object_string(hid, &len);
+			kern_logf("acpi: dev %s _HID=%s\n", path, s ? s : "");
+		} else if (drv_acpi_object_type(hid) == DRV_ACPI_TYPE_INTEGER) {
+			kern_logf("acpi: dev %s _HID=0x%llx\n", path,
+				  (unsigned long long)drv_acpi_object_integer(hid));
+		}
+		drv_acpi_object_release(hid);
+
+		if (drv_acpi_evaluate_integer(node, "_ADR", &adr) == 0) {
+			kern_logf("acpi:   _ADR=0x%llx\n", (unsigned long long)adr);
+		}
+		(void)drv_acpi_resources_walk(node, "_CRS", pcat_acpi_crs_visitor, NULL);
+	}
+	return 0;
+}
+#endif
+
 #ifdef KERN_TEST_CHECKPOINTS
 int ws004_pci_msi_qemu_register(void);
 void ws004_pci_msi_qemu_raise(void);
@@ -220,6 +270,7 @@ kern_platform_init(
 		kern_logf("pci: PC/AT host initialization failed\n");
 
 	kern_log_boot_step("the PCI functions are attached");
+	drv_pci_dump();
 
 	/*
 	 * Loads the firmware's ACPI tables once the PCI functions are known.
@@ -231,6 +282,7 @@ kern_platform_init(
 		kern_logf("acpi: attachment failed (error %d)\n", err);
 
 	kern_log_boot_step("ACPI is attached");
+	(void)drv_acpi_walk(NULL, pcat_acpi_dump_visitor, NULL);
 
 	/*
 	 * Gives the memory BARs the firmware left unassigned an address in the
@@ -245,6 +297,7 @@ kern_platform_init(
 		(void)drv_pci_probe_deferred();
 
 	kern_log_boot_step("the deferred PCI functions are attached");
+	drv_pci_dump();
 #endif /* CONFIG_DRIVER_ACPI */
 
 	/*

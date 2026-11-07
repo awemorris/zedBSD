@@ -15,7 +15,7 @@
 #include <hal/hal.h>
 #include "bsp-pcat/acpi.h"
 
-#define IRQ_MAX         15
+#define IRQ_MAX         63
 #define IRQ_MSI_BASE    (IRQ_MAX + 1)
 #define IRQ_MSI_COUNT   AMD64_VECTOR_MSI_COUNT
 #define IRQ_LOGICAL_MAX (IRQ_MSI_BASE + IRQ_MSI_COUNT - 1)

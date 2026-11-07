@@ -175,6 +175,54 @@ IRQ 12
 IRQ 13
 IRQ 14
 IRQ 15
+IRQ 16
+IRQ 17
+IRQ 18
+IRQ 19
+IRQ 20
+IRQ 21
+IRQ 22
+IRQ 23
+IRQ 24
+IRQ 25
+IRQ 26
+IRQ 27
+IRQ 28
+IRQ 29
+IRQ 30
+IRQ 31
+IRQ 32
+IRQ 33
+IRQ 34
+IRQ 35
+IRQ 36
+IRQ 37
+IRQ 38
+IRQ 39
+IRQ 40
+IRQ 41
+IRQ 42
+IRQ 43
+IRQ 44
+IRQ 45
+IRQ 46
+IRQ 47
+IRQ 48
+IRQ 49
+IRQ 50
+IRQ 51
+IRQ 52
+IRQ 53
+IRQ 54
+IRQ 55
+IRQ 56
+IRQ 57
+IRQ 58
+IRQ 59
+IRQ 60
+IRQ 61
+IRQ 62
+IRQ 63
 
 .macro MSI n
 .Lmsi\n:
@@ -255,6 +303,18 @@ amd64_irq_table:
 	.quad .Lirq4, .Lirq5, .Lirq6, .Lirq7
 	.quad .Lirq8, .Lirq9, .Lirq10, .Lirq11
 	.quad .Lirq12, .Lirq13, .Lirq14, .Lirq15
+	.quad .Lirq16, .Lirq17, .Lirq18, .Lirq19
+	.quad .Lirq20, .Lirq21, .Lirq22, .Lirq23
+	.quad .Lirq24, .Lirq25, .Lirq26, .Lirq27
+	.quad .Lirq28, .Lirq29, .Lirq30, .Lirq31
+	.quad .Lirq32, .Lirq33, .Lirq34, .Lirq35
+	.quad .Lirq36, .Lirq37, .Lirq38, .Lirq39
+	.quad .Lirq40, .Lirq41, .Lirq42, .Lirq43
+	.quad .Lirq44, .Lirq45, .Lirq46, .Lirq47
+	.quad .Lirq48, .Lirq49, .Lirq50, .Lirq51
+	.quad .Lirq52, .Lirq53, .Lirq54, .Lirq55
+	.quad .Lirq56, .Lirq57, .Lirq58, .Lirq59
+	.quad .Lirq60, .Lirq61, .Lirq62, .Lirq63
 
 .global amd64_msi_table
 amd64_msi_table:
