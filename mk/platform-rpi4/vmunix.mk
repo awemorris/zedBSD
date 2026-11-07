@@ -99,6 +99,9 @@ KERN_SOURCES += \
 	src/drivers/platform/rpi4/rpi4-firmware.c \
 	src/drivers/platform/rpi4/rpi4-vchiq.c \
 	src/drivers/platform/rpi4/rpi4-vchiq-wire.c \
+	src/drivers/platform/rpi4/rpi4-mmal.c \
+	src/drivers/platform/rpi4/rpi4-mmal-wire.c \
+	src/drivers/platform/rpi4/rpi4-h264.c \
 	src/drivers/pci/pci-brcmstb.c \
 	src/drivers/mmc/sdhci.c \
 	src/drivers/generic/fdt.c

@@ -74,3 +74,4 @@ $(NOCT_HOST_BIN): $(NOCT_PATCH_STAMP)
 	@ln -sfn build $(NOCT_HOST_SRC)/build-static
 	@mkdir -p $(REPO_ROOT)/build/host-noct-state
 	@touch $(REPO_ROOT)/build/host-noct-state/built-d198b952dec90120c3d0e7987dd12af06911478e
+	@touch $@

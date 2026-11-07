@@ -47,7 +47,7 @@
 #include "drivers/platform/rpi5/rpi5-fan.h"
 #endif
 #if CONFIG_DRIVER_RPI5_GPU
-#include "drivers/gpu/bcm2711/bcm2712-gpu.h"
+#include "drivers/gpu/videocore/bcm2712-gpu.h"
 #endif
 #include <drivers/usb/usb-hid.h>
 

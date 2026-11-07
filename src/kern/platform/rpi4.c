@@ -14,38 +14,46 @@
 
 #include <uapi/errno.h>
 #include <hal/hal.h>
-#include <drivers/disklabel/disklabel.h>
 #include <kern/disk.h>
-#include <kern/partition.h>
-#include <kern/platform.h>
 #include <kern/boot.h>
-#include <drivers/generic/fdt.h>
 #include <kern/klog.h>
 #include <kern/pmem.h>
+#include <kern/partition.h>
+#include <kern/platform.h>
+
+#include "drivers/generic/fdt.h"
+#include "drivers/disklabel/disklabel.h"
+#include "drivers/platform/rpi-common/rpi-console.h"
+#include "drivers/platform/rpi-common/rpi-gpio.h"
+#include "drivers/platform/rpi-common/rpi-sdhci.h"
+#include "drivers/platform/rpi4/rpi4-vchiq.h"
+#include "drivers/platform/rpi4/rpi4-firmware.h"
+#include "drivers/platform/rpi4/rpi4-pcie.h"
+
 #if CONFIG_DRIVER_RPI4_ETHERNET
 #include "drivers/platform/rpi4/rpi4-ethernet.h"
 #endif
+
 #if CONFIG_DRIVER_USB_HID
 #include <drivers/usb/usb-hid.h>
 #endif
+
 #if CONFIG_DRIVER_RPI4_AUDIO
 #include "drivers/platform/rpi4/rpi4-audio.h"
 #endif
-#include "drivers/platform/rpi-common/rpi-console.h"
-#include "drivers/platform/rpi4/rpi4-firmware.h"
-#include "drivers/platform/rpi-common/rpi-gpio.h"
-#include "drivers/platform/rpi4/rpi4-pcie.h"
-#include "drivers/platform/rpi-common/rpi-sdhci.h"
+
 #if CONFIG_DRIVER_RPI4_WIFI
 #include "drivers/platform/rpi4/rpi4-wifi.h"
 #endif
+
 #if CONFIG_DRIVER_RPI4_BT
 #include "drivers/platform/rpi4/rpi4-bt.h"
 #endif
+
 #if CONFIG_DRIVER_RPI4_GPU
-#include "drivers/gpu/bcm2711/bcm2711-gpu.h"
-#include "drivers/platform/rpi4/rpi4-vchiq.h"
+#include "drivers/gpu/videocore/bcm2711-gpu.h"
 #endif
+
 #if CONFIG_DRIVER_RPI4_GPU_PROBE
 #include "drivers/platform/rpi4/rpi4-mmal-probe.h"
 #endif
