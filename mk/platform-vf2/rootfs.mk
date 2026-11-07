@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: Zlib
 
 #
-# Raspberry Pi 4 rootfs Makefile
+# Vision Five 2 (RISC-V 64) rootfs Makefile
 #
 
 ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 ARCH_FILES  ?= $(ROOTFS_FILES)
 
-$(eval $(call ROOTFS_TREE_RULE,arm64,$(ARCH_INPUTS),$(ARCH_FILES)))
+$(eval $(call ROOTFS_TREE_RULE,riscv64,$(ARCH_INPUTS),$(ARCH_FILES)))
 
 .PHONY: rootfs-platform
 rootfs-platform: $(BUILD)/rootfs/.stamp

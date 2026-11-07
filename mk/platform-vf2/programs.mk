@@ -9,14 +9,15 @@ USER_CPPFLAGS := \
 	-Isrc \
 	-I. \
 	-D__ZEDBSD__ \
-	-DHAL_ARCH_ARM64 \
-	-DKERN_USER_ABI_AARCH64 \
+	-DHAL_ARCH_RISCV64 \
+	-DKERN_USER_ABI_RISCV64 \
 	-DKERN_USER_ABI_LP64
 
 USER_CFLAGS := \
 	$(CFLAGS) \
-	-march=armv8-a \
-	-mno-outline-atomics \
+	-march=rv64gc \
+	-mabi=lp64d \
+	-mno-relax \
 	-fno-pic \
 	-fno-pie \
 	-fno-stack-protector \

@@ -15,7 +15,9 @@ LIBC_OBJ_DIR := $(BUILD)/libc/obj
 # Static flags
 LIBC_STATIC_CFLAGS := \
 	--target=riscv64-unknown-zedbsd \
-	-march=rv64imac_zicsr_zifencei \
+	-march=rv64gc \
+	-mabi=lp64d \
+	-mno-relax \
 	-DHAL_ARCH_RISCV64 \
 	-DKERN_USER_ABI_RISCV64 \
 	-DKERN_USER_ABI_LP64 \
@@ -44,7 +46,9 @@ LIBC_STATIC_CFLAGS := \
 # Dynamic flags (shared library)
 LIBC_DYNAMIC_CFLAGS := \
 	--target=riscv64-unknown-zedbsd \
-	-march=rv64imac_zicsr_zifencei \
+	-march=rv64gc \
+	-mabi=lp64d \
+	-mno-relax \
 	-DHAL_ARCH_RISCV64 \
 	-DKERN_USER_ABI_RISCV64 \
 	-DKERN_USER_ABI_LP64 \
@@ -60,6 +64,7 @@ LIBC_DYNAMIC_CFLAGS := \
 	-fno-asynchronous-unwind-tables \
 	-fno-unwind-tables \
 	-ftls-model=global-dynamic \
+	-mtls-dialect=trad \
 	-ffunction-sections \
 	-fdata-sections \
 	-Os \
@@ -144,7 +149,7 @@ LIBC_DYNAMIC_OBJS := $(LIBC_DYNAMIC_C_OBJS) \
 
 $(LIBC_OUT_DIR)/libc.so: $(LIBC_DYNAMIC_OBJS) src/libc/interpose.list
 	@mkdir -p $(dir $@)
-	$(LD) -m riscv64elf -shared -soname libc.so --hash-style=both \
+	$(LD) -m elf64lriscv -shared -soname libc.so --hash-style=both \
 		-Bsymbolic-functions --export-dynamic-symbol-list=src/libc/interpose.list \
 		-z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 \
 		$(LIBC_DYNAMIC_OBJS) -o $@
@@ -169,7 +174,7 @@ $(LIBM_DYNAMIC_OBJS): $(LIBC_OBJ_DIR)/dynamic/%.o: %.c
 
 $(LIBC_OUT_DIR)/libm.so: $(LIBM_DYNAMIC_OBJS)
 	@mkdir -p $(dir $@)
-	$(LD) -m riscv64elf -shared -soname libm.so --hash-style=both \
+	$(LD) -m elf64lriscv -shared -soname libm.so --hash-style=both \
 		-z now -z relro -z separate-code -z max-page-size=4096 \
 		$(LIBM_DYNAMIC_OBJS) -o $@
 
@@ -193,7 +198,7 @@ $(LIBUTIL_DYNAMIC_OBJS): src/libc/libutil.c
 
 $(LIBC_OUT_DIR)/libutil.so: $(LIBUTIL_DYNAMIC_OBJS)
 	@mkdir -p $(dir $@)
-	$(LD) -m riscv64elf -shared -soname libutil.so --hash-style=both \
+	$(LD) -m elf64lriscv -shared -soname libutil.so --hash-style=both \
 		-z now -z relro -z separate-code -z max-page-size=4096 \
 		$(LIBUTIL_DYNAMIC_OBJS) -o $@
 
@@ -229,22 +234,18 @@ $(LIBC_OUT_DIR)/libclang_rt.builtins.a: $(BUILTIN_OBJS)
 #
 $(LIBC_OUT_DIR)/crt0.o: $(CRT0_SRC)
 	@mkdir -p $(dir $@)
-	$(CC) --target=riscv64-unknown-zedbsd -march=rv64imac_zicsr_zifencei -mno-outline-atomics -nostdinc -Iinclude -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $< -o $@
+	$(CC) --target=riscv64-unknown-zedbsd -march=rv64gc -mabi=lp64d -mno-relax -nostdinc -Iinclude -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $< -o $@
 
 $(LIBC_OUT_DIR)/crt1.o: $(CRT1_SRC)
 	@mkdir -p $(dir $@)
-	$(CC) --target=riscv64-unknown-zedbsd -march=rv64imac_zicsr_zifencei -mno-outline-atomics -nostdinc -Iinclude -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $< -o $@
+	$(CC) --target=riscv64-unknown-zedbsd -march=rv64gc -mabi=lp64d -mno-relax -nostdinc -Iinclude -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $< -o $@
 
 #
 # Dynamic linker (ld.so)
 #
 $(LIBC_OBJ_DIR)/dynamic/src/rtld/entry.o: src/rtld/entry-riscv64.S
 	@mkdir -p $(dir $@)
-	$(CC) --target=riscv64-unknown-zedbsd -march=rv64imac_zicsr_zifencei -mno-outline-atomics -c $< -o $@
-
-$(LIBC_OBJ_DIR)/dynamic/src/rtld/tlsdesc.o: src/rtld/tlsdesc-riscv64.S
-	@mkdir -p $(dir $@)
-	$(CC) --target=riscv64-unknown-zedbsd -march=rv64imac_zicsr_zifencei -mno-outline-atomics -c $< -o $@
+	$(CC) --target=riscv64-unknown-zedbsd -march=rv64gc -mabi=lp64d -mno-relax -fPIC -c $< -o $@
 
 $(LIBC_OBJ_DIR)/dynamic/src/rtld/rtld.o: src/rtld/rtld.c
 	@mkdir -p $(dir $@)
@@ -255,11 +256,10 @@ $(LIBC_OBJ_DIR)/dynamic/src/rtld/string.o: src/rtld/string.c
 	$(CC) $(LIBC_DYNAMIC_CFLAGS) -DKERN_DYNAMIC_LIBC -c $< -o $@
 
 $(LIBC_OUT_DIR)/ld.so: $(LIBC_OBJ_DIR)/dynamic/src/rtld/entry.o \
-	$(LIBC_OBJ_DIR)/dynamic/src/rtld/tlsdesc.o \
 	$(LIBC_OBJ_DIR)/dynamic/src/rtld/rtld.o \
 	$(LIBC_OBJ_DIR)/dynamic/src/rtld/string.o
 	@mkdir -p $(dir $@)
-	$(LD) -m riscv64elf -shared -Bsymbolic -e _rtld_start \
+	$(LD) -m elf64lriscv -shared -Bsymbolic -e _rtld_start \
 		--hash-style=sysv -z now -z relro -z separate-code -z max-page-size=4096 $^ -o $@
 
 LIBC_ALL_TARGETS := \

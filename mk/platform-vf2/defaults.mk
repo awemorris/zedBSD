@@ -1,8 +1,13 @@
+override ARCHITECTURE                      := riscv64
+override BOARD                             := vf2
+
 override CONFIG_ROOTFS_DEVELOPMENT         := y
 override CONFIG_GRAPHICAL_LOGIN            := y
 
 override CONFIG_DRIVER_PCI                 := y
 override CONFIG_DRIVER_USB                 := y
+override CONFIG_DRIVER_PCI_NVME            := y
+override CONFIG_DRIVER_PCI_AHCI            := y
 override CONFIG_DRIVER_LOOP                := y
 override CONFIG_DRIVER_FS_UFS              := y
 override CONFIG_DRIVER_FS_FAT              := y

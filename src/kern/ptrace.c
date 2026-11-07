@@ -501,6 +501,64 @@ trace_fpregs_in(
 	to->fpcr = from->fp_fpcr;
 }
 
+#elif defined(__riscv) && __riscv_xlen == 64
+
+/*
+ * Copies the integer registers outward, under the names a process sees.
+ */
+static void
+trace_gpregs_out(
+	const struct hal_gpregs *from,
+	struct reg *to)
+{
+	unsigned index;
+
+	for (index = 0; index < 32U; index++)
+		to->r_x[index] = from->x[index];
+	to->r_pc = from->pc;
+}
+
+/*
+ * Copies the integer registers inward.
+ */
+static void
+trace_gpregs_in(
+	const struct reg *from,
+	struct hal_gpregs *to)
+{
+	unsigned index;
+
+	for (index = 0; index < 32U; index++)
+		to->x[index] = from->r_x[index];
+	to->pc = from->r_pc;
+}
+
+/*
+ * Copies the floating-point state outward.
+ */
+static void
+trace_fpregs_out(
+	const struct hal_fpregs *from,
+	struct fpreg *to)
+{
+	kern_memcpy(to->fp_f, from->f, sizeof(to->fp_f));
+	to->fp_fcsr = from->fcsr;
+	to->fp_reserved = 0;
+}
+
+/*
+ * Copies the floating-point state inward.
+ */
+static void
+trace_fpregs_in(
+	const struct fpreg *from,
+	struct hal_fpregs *to)
+{
+	kern_memcpy(to->f, from->fp_f, sizeof(to->f));
+	to->fcsr = from->fp_fcsr;
+	to->reserved = 0;
+}
+
 #endif
 
 /*

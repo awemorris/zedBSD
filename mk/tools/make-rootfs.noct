@@ -38,7 +38,7 @@ func main(args){
         else if(args[i]=="--force"){force=true;i=i+1;}
         else {zbFail("invalid make-arch-overlay-ufs argument: "+args[i]);}
     }
-    if((profile!="i386"&&profile!="amd64"&&profile!="aarch64")||output==""||backend==""||(sizeMiB!=0&&sizeMiB<16)){zbFail("missing/invalid arch UFS arguments");}
+    if((profile!="i386"&&profile!="amd64"&&profile!="aarch64"&&profile!="riscv64")||output==""||backend==""||(sizeMiB!=0&&sizeMiB<16)){zbFail("missing/invalid arch UFS arguments");}
 
     // --tree names a finished root that the build already staged, which is the
     // one the image must carry.  Staging it a second time from a file list

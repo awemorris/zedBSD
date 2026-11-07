@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: Zlib
 
 #
-# vf2 disk image build rules
+# VisionFive 2 (riscv64) disk image build rules
 #
 
 DISK_IMAGE_ARTIFACT := $(BUILD)/hdd-image.img
@@ -25,7 +25,7 @@ $(ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
 	@mkdir -p $(dir $@)
 	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-rootfs.noct \
 		--backend $(abspath $(IMAGE_HOST)) --force \
-		--profile aarch64 --output $@ --tree $(BUILD)/rootfs \
+		--profile riscv64 --output $@ --tree $(BUILD)/rootfs \
 		--size-mib $(ROOT_MIB) --min-inodes $(ROOT_INODES)
 
 SWAP_MIB ?= 64
@@ -35,26 +35,35 @@ $(SWAP_IMAGE): mk/tools/make-swapfile.noct
 	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct \
 		--size-mib $(SWAP_MIB) --output $@
 
-$(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(ROOT_IMAGE) \
-		$(SWAP_IMAGE) $(BUILD)/config.txt $(BUILD)/cmdline.txt \
-		$(VF2_BOOT_FIRMWARE_CACHE_FILES) \
-		mk/platform-vf2/tools/make-vf2-ufs-root-hdd-image.py \
+$(BUILD)/zedbsd.cfg:
+	@mkdir -p $(dir $@)
+	@printf '%s\n' 'kernel=vmunix' 'rootpart=PARTLABEL=zedBSD-root' > $@.tmp
+	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),@printf '%s\n' 'login=graphical' >> $@.tmp)
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
+
+$(DISK_IMAGE_ARTIFACT): $(BUILD)/uefi/BOOTRISCV64.EFI $(BUILD)/vmunix $(BUILD)/zedbsd.cfg \
+		$(ROOT_IMAGE) $(SWAP_IMAGE) \
 		mk/platform-vf2/tools/make-vf2-hdd-image.py \
 		mk/platform-vf2/tools/check-vf2-hdd-image.py
-	$(PYTHON) mk/platform-vf2/tools/make-vf2-ufs-root-hdd-image.py --force \
-		--kernel $(BUILD)/vmunix --ufs-root $(ROOT_IMAGE) \
-		--swap-image $(SWAP_IMAGE) \
-		--config $(BUILD)/config.txt --cmdline $(BUILD)/cmdline.txt \
-		--board vf2 --firmware-dir $(VF2_BOOT_FIRMWARE_DIR) $@
+	$(PYTHON) mk/platform-vf2/tools/make-vf2-hdd-image.py --force \
+		--efi $(BUILD)/uefi/BOOTRISCV64.EFI \
+		--kernel $(BUILD)/vmunix \
+		--config $(BUILD)/zedbsd.cfg \
+		--ufs-root $(ROOT_IMAGE) \
+		--swap $(SWAP_IMAGE) \
+		$@
 
-.PHONY: disk-image check-disk-image image-vf2
+.PHONY: disk-image check-disk-image image-platform image-vf2
 
 disk-image: $(DISK_IMAGE_ARTIFACT)
 image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
+image-vf2: image-platform
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
 	$(PYTHON) mk/platform-vf2/tools/check-vf2-hdd-image.py \
-		--kernel $(BUILD)/vmunix --ufs-root $(ROOT_IMAGE) \
-		--swap-image $(SWAP_IMAGE) \
-		--config $(BUILD)/config.txt --cmdline $(BUILD)/cmdline.txt \
-		--board vf2 $<
+		--efi $(BUILD)/uefi/BOOTRISCV64.EFI \
+		--kernel $(BUILD)/vmunix \
+		--config $(BUILD)/zedbsd.cfg \
+		--ufs-root $(ROOT_IMAGE) \
+		--swap $(SWAP_IMAGE) \
+		$<

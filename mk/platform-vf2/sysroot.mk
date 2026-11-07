@@ -7,12 +7,12 @@
 # Vision Five 2 (RISC-V 64) sysroot build rules
 #
 
-PLATFORM_VISIONFIVE2_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
-REPO_ROOT                ?= $(abspath $(PLATFORM_VISIONFIVE2_DIR)/../..)
+PLATFORM_VF2_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+REPO_ROOT        ?= $(abspath $(PLATFORM_VF2_DIR)/../..)
 
 include $(REPO_ROOT)/build-jobs.mk
 
-SYSROOT     := $(REPO_ROOT)/build/visionfive2/sysroot
+SYSROOT     := $(BUILD)/sysroot
 SYSROOT_INC := $(SYSROOT)/usr/include
 SYSROOT_LIB := $(SYSROOT)/usr/lib
 
@@ -41,7 +41,7 @@ $(HEADERS_INSTALLED_STAMP): $(PUBLIC_HEADERS)
 
 # Complete sysroot by copying libraries from libc build and verifying with smoke link
 $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
-	@mkdir -p $(SYSROOT_LIB)/zedbsd/riscv64 $(SYSROOT_LIB)/zedbsd/visionfive2 $(SYSROOT_LIB)/zedbsd/riscv64 $(BUILD)/dynamic
+	@mkdir -p $(SYSROOT_LIB)/zedbsd/riscv64 $(SYSROOT_LIB)/zedbsd/vf2 $(BUILD)/dynamic
 	cp -f $(LIBC_OUT_DIR)/libc.a $(LIBC_OUT_DIR)/libc.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libm.a $(LIBC_OUT_DIR)/libm.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libutil.a $(LIBC_OUT_DIR)/libutil.so $(SYSROOT_LIB)/
@@ -51,16 +51,15 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	cp -f $(LIBC_OUT_DIR)/libclang_rt.builtins.a $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/ld.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libc.so $(LIBC_OUT_DIR)/libm.so $(LIBC_OUT_DIR)/libutil.so $(LIBC_OUT_DIR)/ld.so $(BUILD)/dynamic/
-	cp -f mk/platform-visionfive2/user.ld mk/platform-visionfive2/vmunix.ld $(SYSROOT_LIB)/zedbsd/riscv64/
-	cp -f mk/platform-visionfive2/user.ld mk/platform-visionfive2/vmunix.ld $(SYSROOT_LIB)/zedbsd/visionfive2/
-	cp -f mk/platform-visionfive2/user.ld mk/platform-visionfive2/vmunix.ld $(SYSROOT_LIB)/zedbsd/riscv64/
+	cp -f mk/platform-vf2/user.ld mk/platform-vf2/vmunix.ld $(SYSROOT_LIB)/zedbsd/riscv64/
+	cp -f mk/platform-vf2/user.ld mk/platform-vf2/vmunix.ld $(SYSROOT_LIB)/zedbsd/vf2/
 	@printf '%s\n' '#include <stdint.h>' 'int main(void) { return (int)sizeof(uintptr_t); }' > $(SYSROOT)/smoke.c
 	$(CC) --target=riscv64-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-march=rv64imac_zicsr_zifencei -mno-outline-atomics -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64 \
+		-march=rv64gc -mabi=lp64d -mno-relax -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64 \
 		-nostdinc -isystem $(SYSROOT_INC) \
 		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
 		-c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
-	$(CC) --target=riscv6-unknown-zedbsd --sysroot=$(SYSROOT) \
+	$(CC) --target=riscv64-unknown-zedbsd --sysroot=$(SYSROOT) \
 		-nostdlib -static -Wl,--build-id=none \
 		-Wl,-T,$(SYSROOT_LIB)/zedbsd/riscv64/user.ld \
 		$(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o \
@@ -68,7 +67,7 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 		$(SYSROOT_LIB)/libzedbsd-compiler-rt.a \
 		$(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group \
 		-o $(SYSROOT)/smoke.elf
-	@$(READELF) -h $(SYSROOT)/smoke.elf | grep -F 'riscv64' >/dev/null
+	@$(READELF) -h $(SYSROOT)/smoke.elf | grep -F 'RISC-V' >/dev/null
 	@if $(NM) -u $(SYSROOT)/smoke.elf | grep .; then \
 		echo "sysroot: smoke link retained undefined symbols" >&2; exit 1; \
 	fi
