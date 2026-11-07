@@ -206,6 +206,8 @@ def create(args: argparse.Namespace) -> None:
             copy_to_fat(temporary, boot_offset, args.zedbsd_config, "/zedbsd.cfg")
             if args.logo is not None and args.logo.is_file():
                 copy_to_fat(temporary, boot_offset, args.logo, "/logo.ppm")
+            if args.logo_vert is not None and args.logo_vert.is_file():
+                copy_to_fat(temporary, boot_offset, args.logo_vert, "/logovert.ppm")
 
         else:
             # UEFI or Hybrid
@@ -336,6 +338,8 @@ def create(args: argparse.Namespace) -> None:
             copy_to_fat(temporary, boot_offset, args.zedbsd_config, "/zedbsd.cfg")
             if args.logo is not None and args.logo.is_file():
                 copy_to_fat(temporary, boot_offset, args.logo, "/logo.ppm")
+            if args.logo_vert is not None and args.logo_vert.is_file():
+                copy_to_fat(temporary, boot_offset, args.logo_vert, "/logovert.ppm")
 
         # Run validation
         checker = Path(__file__).with_name("check-x86_64-hdd-image.py")
@@ -356,6 +360,8 @@ def create(args: argparse.Namespace) -> None:
             check_args += ["--bootzbsd", str(args.bootzbsd)]
         if args.logo is not None and args.logo.is_file():
             check_args += ["--logo", str(args.logo)]
+        if args.logo_vert is not None and args.logo_vert.is_file():
+            check_args += ["--logo-vert", str(args.logo_vert)]
         check_args.append(str(temporary))
         run(*check_args)
 
@@ -372,6 +378,7 @@ def main() -> None:
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--zedbsd-config", type=Path, required=True)
     parser.add_argument("--logo", type=Path)
+    parser.add_argument("--logo-vert", type=Path)
     parser.add_argument("--ufs-root", type=Path, required=True)
     parser.add_argument("--swap-image", "--swapfile", dest="swap_image",
                         type=Path, required=True)

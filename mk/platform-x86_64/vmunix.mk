@@ -110,6 +110,13 @@ KERN_SOURCES += \
 	src/drivers/isa/ps2-8042.c \
 	src/drivers/platform/pcat/serial-mirror.c
 
+ifneq ($(filter y,$(CONFIG_DRIVER_ACPI_SDHCI)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_ACPI_SDHCI=1
+KERN_SOURCES += \
+	src/drivers/mmc/sdhci.c \
+	src/drivers/mmc/sdhci-acpi.c
+endif
+
 VMUNIX_OBJS := \
 	$(patsubst %.c,$(BUILD)/%.o,$(KERN_SOURCES)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(KERN_ASM))

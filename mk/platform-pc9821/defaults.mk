@@ -1,35 +1,27 @@
-override ARCHITECTURE                      := i386
-override BOARD                             := pc98
+override ARCHITECTURE             := i386
+override BOARD                    := pc98
 
-ifneq ($(origin CONFIG_ROOTFS_DEVELOPMENT),command line)
-override CONFIG_ROOTFS_DEVELOPMENT         := y
-endif
-ifneq ($(origin CONFIG_BOOT_SPLASH),command line)
-override CONFIG_BOOT_SPLASH                := y
-endif
-ifneq ($(origin CONFIG_QUIET_BOOT),command line)
-override CONFIG_QUIET_BOOT                 := n
-endif
-ifneq ($(origin CONFIG_GRAPHICAL_LOGIN),command line)
-override CONFIG_GRAPHICAL_LOGIN            := y
-endif
+CONFIG_ROOTFS_DEVELOPMENT         := y
+CONFIG_BOOT_SPLASH                := n
+CONFIG_QUIET_BOOT                 := n
+CONFIG_GRAPHICAL_LOGIN            := y
 
-override CONFIG_DRIVER_LOOP                := y
-override CONFIG_DRIVER_FS_UFS              := y
-override CONFIG_DRIVER_FS_FAT              := y
-override CONFIG_DRIVER_FS_OVERLAYFS        := y
-override CONFIG_KERN_NET                   := y
-override CONFIG_KERN_NET_IPV4              := y
-override CONFIG_KERN_NET_IPV6              := y
-override CONFIG_KERN_NET_ETHERNET          := y
-override CONFIG_KERN_NET_WIFI              := y
-override CONFIG_DRIVER_HID                 := y
-override CONFIG_DRIVER_CPU_PERF            := y
-override CONFIG_DRIVER_GRAPHICS            := y
-override CONFIG_DRIVER_GRAPHICS_PC98       := y
-override CONFIG_DRIVER_LGY98               := y
+CONFIG_DRIVER_LOOP                := y
+CONFIG_DRIVER_FS_UFS              := y
+CONFIG_DRIVER_FS_FAT              := y
+CONFIG_DRIVER_FS_OVERLAYFS        := y
+CONFIG_KERN_NET                   := y
+CONFIG_KERN_NET_IPV4              := y
+CONFIG_KERN_NET_IPV6              := y
+CONFIG_KERN_NET_ETHERNET          := y
+CONFIG_KERN_NET_WIFI              := y
+CONFIG_DRIVER_HID                 := y
+CONFIG_DRIVER_CPU_PERF            := y
+CONFIG_DRIVER_GRAPHICS            := y
+CONFIG_DRIVER_GRAPHICS_PC98       := y
+CONFIG_DRIVER_LGY98               := y
 
-override CONFIG_USERLAND_PROGRAMS := \
+CONFIG_USERLAND_PROGRAMS          += \
 	account-admin \
 	admin \
 	ar \

@@ -149,6 +149,11 @@ extern int drv_pcat_uefi_variables_init(void) __attribute__((weak));
  */
 extern int drv_cpu_x86_init(void) __attribute__((weak));
 
+/*
+ * The SDHCI ACPI driver (e.g. Intel Atom Moorefield / Bay Trail PNP0D40).
+ */
+extern int drv_sdhci_acpi_probe(void) __attribute__((weak));
+
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 int drv_usb_hid_checkpoint_driver_register(void);
 #endif
@@ -659,6 +664,12 @@ probe_fixed_disks(
 	/* The SATA disks behind AHCI. */
 #if CONFIG_DRIVER_PCI_AHCI
 	drv_pci_ahci_probe_ports();
+#endif
+
+	/* The SD cards attached via ACPI (e.g. Intel Atom / Moorefield PNP0D40). */
+#if CONFIG_DRIVER_ACPI_SDHCI
+	if (drv_sdhci_acpi_probe != NULL)
+		(void)drv_sdhci_acpi_probe();
 #endif
 }
 

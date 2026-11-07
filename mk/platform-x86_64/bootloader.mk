@@ -57,7 +57,7 @@ $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
 			   $(BUILD)/uefi/transition.o
 	$(EFI_LD) /subsystem:efi_application /entry:efi_main /base:0 /fixed:no /timestamp:0 /nodefaultlib /out:$@ $(filter %.o,$^)
 	@test -z "$$($(EFI_NM) -u $@ | grep -Ev ' (__bss_start__|__bss_end__|__end__|___tls_start__|___tls_end__)$$')" || { $(EFI_NM) -u $@; exit 1; }
-	$(NOCT) --path=tools/build mk/platform-x86_64/tools/check-bootx64.noct $@
+	$(NOCT) --path=mk/tools:tools/build mk/platform-x86_64/tools/check-bootx64.noct $@
 
 $(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c
 	@mkdir -p $(dir $@)

@@ -52,8 +52,17 @@
 /* The picture height the spinner's size stops growing at, so its square fits the kept picture. */
 #define SPLASH_SIZE_HEIGHT_MAX	1200U
 
+/* Vertical (portrait) splash layout, in ten-thousandths of the picture's height. */
+#define SPLASH_VERT_CENTRE_Y	1465
+#define SPLASH_VERT_RING	189
+#define SPLASH_VERT_DOT		39
+
+#define SPLASH_VERT_PICTURE_WIDTH	1080U
+#define SPLASH_VERT_PICTURE_HEIGHT	1920U
+#define SPLASH_VERT_SIZE_HEIGHT_MAX	2160U
+
 /* The largest square the spinner is drawn in, in pixels a side. */
-#define SPLASH_PATCH_MAX	96U
+#define SPLASH_PATCH_MAX	128U
 
 /* How long the spinner shows each step, in milliseconds: one turn of the ring a second. */
 #define SPLASH_STEP_MS		125U
@@ -153,31 +162,55 @@ drv_pcat_splash_start(
 	unsigned centre_y;
 	unsigned x;
 	unsigned y;
+	int is_vertical;
+	unsigned native_width;
+	unsigned native_height;
+	unsigned max_size_height;
+	unsigned param_centre_y;
+	unsigned param_ring;
+	unsigned param_dot;
 
 	/* No framebuffer, no spinner. */
 	splash.active = 0;
 	if (pixels == 0 || width == 0U || height == 0U || stride < width)
 		return;
 
+	is_vertical = (height > width);
+	if (is_vertical) {
+		native_width = SPLASH_VERT_PICTURE_WIDTH;
+		native_height = SPLASH_VERT_PICTURE_HEIGHT;
+		max_size_height = SPLASH_VERT_SIZE_HEIGHT_MAX;
+		param_centre_y = SPLASH_VERT_CENTRE_Y;
+		param_ring = SPLASH_VERT_RING;
+		param_dot = SPLASH_VERT_DOT;
+	} else {
+		native_width = SPLASH_PICTURE_WIDTH;
+		native_height = SPLASH_PICTURE_HEIGHT;
+		max_size_height = SPLASH_SIZE_HEIGHT_MAX;
+		param_centre_y = SPLASH_CENTRE_Y;
+		param_ring = SPLASH_RING;
+		param_dot = SPLASH_DOT;
+	}
+
 	/*
 	 * The picture's height on the screen: its own when the screen holds
 	 * it, else shrunk to the screen's height when the screen is the wider
 	 * in proportion, else to the width's (as the loaders draw it).
 	 */
-	picture_height = SPLASH_PICTURE_HEIGHT;
-	if (width < SPLASH_PICTURE_WIDTH || height < SPLASH_PICTURE_HEIGHT) {
-		if ((uint64_t)width * SPLASH_PICTURE_HEIGHT >= (uint64_t)height * SPLASH_PICTURE_WIDTH)
+	picture_height = native_height;
+	if (width < native_width || height < native_height) {
+		if ((uint64_t)width * native_height >= (uint64_t)height * native_width)
 			picture_height = height;
 		else
-			picture_height = SPLASH_PICTURE_HEIGHT * width / SPLASH_PICTURE_WIDTH;
+			picture_height = (unsigned)((uint64_t)native_height * width / native_width);
 	}
 
 	/* The spinner's size follows the picture up to a height, so that its square fits. */
 	size_height = picture_height;
-	if (size_height > SPLASH_SIZE_HEIGHT_MAX)
-		size_height = SPLASH_SIZE_HEIGHT_MAX;
-	splash.ring = (int)(size_height * SPLASH_RING * SPLASH_SUBPIXEL / 10000U);
-	splash.dot = (int)(size_height * SPLASH_DOT * SPLASH_SUBPIXEL / 10000U);
+	if (size_height > max_size_height)
+		size_height = max_size_height;
+	splash.ring = (int)(size_height * param_ring * SPLASH_SUBPIXEL / 10000U);
+	splash.dot = (int)(size_height * param_dot * SPLASH_SUBPIXEL / 10000U);
 	if (splash.dot < 2 * SPLASH_SUBPIXEL)
 		splash.dot = 2 * SPLASH_SUBPIXEL;
 
@@ -185,7 +218,7 @@ drv_pcat_splash_start(
 	reach = (unsigned)((splash.ring + splash.dot) / SPLASH_SUBPIXEL) + 2U;
 	side = 2U * reach;
 	centre_x = width / 2U;
-	centre_y = height / 2U + picture_height * SPLASH_CENTRE_Y / 10000U;
+	centre_y = height / 2U + picture_height * param_centre_y / 10000U;
 
 	/* A square that does not fit the kept picture or the screen is not drawn. */
 	if (side > SPLASH_PATCH_MAX || centre_x < reach || centre_y < reach)

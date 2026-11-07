@@ -75,6 +75,11 @@ CONFIG_DRIVER_PCI_AHCI            ?= n
 #  - Depends: CONFIG_DRIVER_PCI
 CONFIG_DRIVER_PCI_VMD             ?= n
 
+# [ACPI SDHCI driver]
+#  - Description: Enable ACPI SDHCI host controller driver (PNP0D40).
+#  - Depends: CONFIG_DRIVER_ACPI
+CONFIG_DRIVER_ACPI_SDHCI          ?= n
+
 # [Loopback Disk driver]
 CONFIG_DRIVER_LOOP                ?= n
 

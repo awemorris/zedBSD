@@ -142,6 +142,8 @@ def check(args: argparse.Namespace) -> None:
             same_fat_file(args.image, boot_offset, "zedbsd.cfg", args.zedbsd_config)
             if args.logo is not None and args.logo.is_file():
                 same_fat_file(args.image, boot_offset, "logo.ppm", args.logo)
+            if hasattr(args, "logo_vert") and args.logo_vert is not None and args.logo_vert.is_file():
+                same_fat_file(args.image, boot_offset, "logovert.ppm", args.logo_vert)
 
         elif variant == "uefi":
             # Pure protective MBR: entry 1 is 0xEE, entries 2..4 must be 0
@@ -223,6 +225,8 @@ def check(args: argparse.Namespace) -> None:
             same_fat_file(args.image, s2 * SECTOR, "zedbsd.cfg", args.zedbsd_config)
             if args.logo is not None and args.logo.is_file():
                 same_fat_file(args.image, s2 * SECTOR, "logo.ppm", args.logo)
+            if hasattr(args, "logo_vert") and args.logo_vert is not None and args.logo_vert.is_file():
+                same_fat_file(args.image, s2 * SECTOR, "logovert.ppm", args.logo_vert)
 
         elif variant == "hybrid":
             # Hybrid MBR:
@@ -307,6 +311,8 @@ def check(args: argparse.Namespace) -> None:
             same_fat_file(args.image, s2 * SECTOR, "zedbsd.cfg", args.zedbsd_config)
             if args.logo is not None and args.logo.is_file():
                 same_fat_file(args.image, s2 * SECTOR, "logo.ppm", args.logo)
+            if hasattr(args, "logo_vert") and args.logo_vert is not None and args.logo_vert.is_file():
+                same_fat_file(args.image, s2 * SECTOR, "logovert.ppm", args.logo_vert)
 
     print(f"check-x86_64-hdd-image: {args.image} ({variant}): PASS")
 
@@ -318,6 +324,7 @@ def main() -> None:
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--zedbsd-config", type=Path, required=True)
     parser.add_argument("--logo", type=Path)
+    parser.add_argument("--logo-vert", type=Path)
     parser.add_argument("--ufs-root", type=Path, required=True)
     parser.add_argument("--swap-image", "--swapfile", dest="swap_image",
                         type=Path, required=True)

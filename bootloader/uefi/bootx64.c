@@ -399,9 +399,16 @@ efi_main(
 		wish_width = TEXT_MODE_WIDTH;
 		wish_height = TEXT_MODE_HEIGHT;
 	} else if (logo_named > 0) {
-		/* The splash fills the screen at its own size. */
-		wish_width = SPLASH_MODE_WIDTH;
-		wish_height = SPLASH_MODE_HEIGHT;
+		int gop_vertical = (gop != 0 && gop->Mode != 0 && gop->Mode->Info != 0 &&
+				    gop->Mode->Info->VerticalResolution > gop->Mode->Info->HorizontalResolution);
+		if (gop_vertical) {
+			wish_width = 1080U;
+			wish_height = 1920U;
+		} else {
+			/* The splash fills the screen at its own size. */
+			wish_width = SPLASH_MODE_WIDTH;
+			wish_height = SPLASH_MODE_HEIGHT;
+		}
 	} else {
 		/* The current mode stays. */
 		wish_width = 0U;
@@ -2367,6 +2374,9 @@ show_logo(
 	int found;
 	int drawn;
 	int failed;
+	int is_vertical;
+	const char *preferred;
+	const char *fallback;
 
 	/* The logo's path, when zedbsd.cfg names one. */
 	found = zbl_logo_path(configuration->parameter_record.text,
@@ -2380,8 +2390,19 @@ show_logo(
 	if (found <= 0)
 		return 0;
 
+	/*
+	 * Selects logovert.ppm for a portrait (vertical) display, or logo.ppm
+	 * for landscape, falling back to the other if the preferred file is missing.
+	 */
+	is_vertical = (framebuffer != 0 && framebuffer->height > framebuffer->width);
+	preferred = is_vertical ? "logovert.ppm" : path;
+	fallback = is_vertical ? path : "logovert.ppm";
+
 	/* Opens the logo file, on the FAT volume or on the root partition. */
-	status = boot_file_open(context, discovered, path, discovered->root_files.logo_on_root, &file);
+	status = boot_file_open(context, discovered, preferred, discovered->root_files.logo_on_root, &file);
+	if (EFI_ERROR(status) && fallback != 0 && fallback[0] != '\0') {
+		status = boot_file_open(context, discovered, fallback, discovered->root_files.logo_on_root, &file);
+	}
 	failed = EFI_ERROR(status);
 	if (failed) {
 		console_ascii(context, "A64 LOGO missing\n");
@@ -2416,8 +2437,12 @@ show_logo(
 	(void)context->boot->FreePool(buffer);
 
 	/* Notes a drawn logo on the debug port. */
-	if (drawn)
-		debug_port("A64 LOGO shown\n");
+	if (drawn) {
+		if (is_vertical)
+			debug_port("A64 LOGO vertical shown\n");
+		else
+			debug_port("A64 LOGO shown\n");
+	}
 
 	/* Reports whether the logo is on the screen. */
 	return drawn;

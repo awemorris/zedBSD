@@ -97,8 +97,15 @@
 #define CLOCK_INTERNAL_STABLE 0x0002U
 #define CLOCK_CARD_ENABLE 0x0004U
 
-/* The bus power at 3.3 V, and the longest data time-out the controller counts. */
+/* Capabilities register voltage support bits. */
+#define CAPABILITY_VOLTAGE_3V3 (1U << 24)
+#define CAPABILITY_VOLTAGE_3V0 (1U << 25)
+#define CAPABILITY_VOLTAGE_1V8 (1U << 26)
+
+/* The bus power voltages, and the longest data time-out the controller counts. */
 #define POWER_ON_3V3 0x0fU
+#define POWER_ON_3V0 0x0dU
+#define POWER_ON_1V8 0x0bU
 #define TIMEOUT_LONGEST 0x0eU
 
 /* The bit of the host control register that drives four data lines. */
@@ -771,8 +778,22 @@ controller_init(
 			return ETIMEDOUT;
 	}
 
+	/* Forces card detection if requested (e.g. ACPI platforms with GPIO CD). */
+	if ((unit->quirks & DRV_SDHCI_QUIRK_FORCE_CD) != 0) {
+		write_register8(unit, REG_HOST_CONTROL,
+				(uint8_t)(read_register8(unit, REG_HOST_CONTROL) | 0xc0U));
+	}
+
 	/* Powers the bus, sets the longest data time-out, and polls every interrupt without signalling it. */
-	write_register8(unit, REG_POWER_CONTROL, POWER_ON_3V3);
+	uint8_t power = POWER_ON_3V3;
+	if ((unit->card.capabilities & CAPABILITY_VOLTAGE_3V3) != 0) {
+		power = POWER_ON_3V3;
+	} else if ((unit->card.capabilities & CAPABILITY_VOLTAGE_3V0) != 0) {
+		power = POWER_ON_3V0;
+	} else if ((unit->card.capabilities & CAPABILITY_VOLTAGE_1V8) != 0) {
+		power = POWER_ON_1V8;
+	}
+	write_register8(unit, REG_POWER_CONTROL, power);
 	write_register8(unit, REG_TIMEOUT_CONTROL, TIMEOUT_LONGEST);
 	write_register32(unit, REG_INT_ENABLE, 0xffffffffU);
 	write_register32(unit, REG_SIGNAL_ENABLE, 0);

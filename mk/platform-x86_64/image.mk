@@ -26,6 +26,12 @@ $(BOOT_LOGO): mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-
 	$(PYTHON) mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-splash.png $@.tmp
 	mv -f $@.tmp $@
 
+BOOT_LOGO_VERT := $(BUILD)/boot-logo-vert.ppm
+$(BOOT_LOGO_VERT): mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-splash-vertical.png
+	@mkdir -p $(dir $@)
+	$(PYTHON) mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-splash-vertical.png $@.tmp 1080x1920
+	mv -f $@.tmp $@
+
 # Variant: bios, uefi (alias: native), hybrid
 ifeq ($(strip $(VARIANT)),)
 VARIANT := $(if $(ZEDBSD_VARIANT),$(ZEDBSD_VARIANT),uefi)
@@ -76,7 +82,7 @@ $(ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
 
 COMMON_DEPS := $(BUILD)/vmunix $(ROOT_IMAGE) $(SWAP_IMAGE) $(ZEDBSD_CONFIG)
 ifeq ($(CONFIG_BOOT_SPLASH),y)
-COMMON_DEPS += $(BOOT_LOGO)
+COMMON_DEPS += $(BOOT_LOGO) $(BOOT_LOGO_VERT)
 endif
 
 ifeq ($(filter-out uefi native,$(VARIANT)),)
@@ -95,7 +101,7 @@ VARIANT_DEPS := $(BUILD)/uefi/BOOTX64.EFI \
 endif
 
 $(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(VARIANT_DEPS) $(VARIANT_STAMP) $(BOOT_CONFIG_STAMP) mk/platform-x86_64/tools/make-x86_64-hdd-image.py
-	$(PYTHON) mk/platform-x86_64/tools/make-x86_64-hdd-image.py --force --variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) --kernel $(BUILD)/vmunix --zedbsd-config $(ZEDBSD_CONFIG) $(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) $(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) $(if $(filter bios,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1-native.bin) $(if $(filter hybrid,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1.bin) $(if $(filter bios hybrid,$(VARIANT)),--stage2 $(BUILD)/bootloader/stage2-chain.bin) $(if $(filter bios hybrid,$(VARIANT)),--partition-pbr $(BUILD)/bootloader/partition-pbr.bin) $(if $(filter bios hybrid,$(VARIANT)),--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE) --fat-size-mib $(BOOT_MIB) $@
+	$(PYTHON) mk/platform-x86_64/tools/make-x86_64-hdd-image.py --force --variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) --kernel $(BUILD)/vmunix --zedbsd-config $(ZEDBSD_CONFIG) $(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO) --logo-vert $(BOOT_LOGO_VERT)) --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) $(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) $(if $(filter bios,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1-native.bin) $(if $(filter hybrid,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1.bin) $(if $(filter bios hybrid,$(VARIANT)),--stage2 $(BUILD)/bootloader/stage2-chain.bin) $(if $(filter bios hybrid,$(VARIANT)),--partition-pbr $(BUILD)/bootloader/partition-pbr.bin) $(if $(filter bios hybrid,$(VARIANT)),--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE) --fat-size-mib $(BOOT_MIB) $@
 
 .PHONY: image-platform check-disk-image
 image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
@@ -106,7 +112,7 @@ check-disk-image: $(DISK_IMAGE_ARTIFACT)
 		--variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) \
 		--kernel $(BUILD)/vmunix \
 		--zedbsd-config $(ZEDBSD_CONFIG) \
-		$(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) \
+		$(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO) --logo-vert $(BOOT_LOGO_VERT)) \
 		--ufs-root $(ROOT_IMAGE) \
 		--swap-image $(SWAP_IMAGE) \
 		$(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) \

@@ -128,11 +128,16 @@ def unfilter(kind, line, previous, bpp):
 		raise SystemExit('make-boot-splash: bad PNG filter %d' % kind)
 
 
-def clear_spinner(width, height, rows):
+def clear_spinner(width, height, rows, is_vertical=False):
 	"""Fills the spinner's square from the four sides around it (the sky and water there are smooth)."""
 	cx = width / 2.0
-	cy = SPINNER_Y * height
-	half = SPINNER_CLEAR * height
+	spinner_y = 0.6465 if is_vertical else 0.7720
+	spinner_ring = 0.0189 if is_vertical else 0.0308
+	spinner_dot = 0.0039 if is_vertical else 0.0064
+	spinner_clear = spinner_ring + spinner_dot + 0.012
+
+	cy = spinner_y * height
+	half = spinner_clear * height
 	left = int(cx - half)
 	right = int(cx + half) + 1
 	top = int(cy - half)
@@ -189,15 +194,22 @@ def scale(width, height, rows, out_width, out_height):
 
 
 def main():
-	if len(sys.argv) not in (3, 4):
-		raise SystemExit('usage: make-boot-splash.py INPUT.png OUTPUT.ppm [WIDTHxHEIGHT]')
-	out_width, out_height = 1920, 1080
-	if len(sys.argv) == 4:
-		out_width, out_height = (int(value) for value in sys.argv[3].split('x'))
-	width, height, rows = read_png(sys.argv[1])
-	clear_spinner(width, height, rows)
+	args = [arg for arg in sys.argv[1:] if not arg.startswith('--')]
+	flags = [arg for arg in sys.argv[1:] if arg.startswith('--')]
+	no_clear = ('--no-clear' in flags)
+	if len(args) not in (2, 3):
+		raise SystemExit('usage: make-boot-splash.py INPUT.png OUTPUT.ppm [WIDTHxHEIGHT] [--no-clear]')
+	input_png, output_ppm = args[0], args[1]
+	width, height, rows = read_png(input_png)
+	is_vertical = (height > width)
+	if len(args) == 3:
+		out_width, out_height = (int(value) for value in args[2].split('x'))
+	else:
+		out_width, out_height = (1080, 1920) if is_vertical else (1920, 1080)
+	if not no_clear:
+		clear_spinner(width, height, rows, is_vertical=is_vertical)
 	out = scale(width, height, rows, out_width, out_height)
-	with open(sys.argv[2], 'wb') as output:
+	with open(output_ppm, 'wb') as output:
 		output.write(b'P6\n# fit=contain\n%d %d\n255\n' % (out_width, out_height))
 		for line in out:
 			output.write(line)

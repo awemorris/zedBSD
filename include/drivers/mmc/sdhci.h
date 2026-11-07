@@ -44,8 +44,9 @@ struct drv_sdhci_config {
 	/* The fastest card clock once the card is identified, in Hz; zero means 25 MHz. */
 	uint64_t max_clock_hz;
 
-	/* The controller's deviations from the specification; none is defined yet. */
+	/* The controller's deviations from the specification (DRV_SDHCI_QUIRK_*). */
 	unsigned quirks;
+#define DRV_SDHCI_QUIRK_FORCE_CD	0x0001U
 
 	/*
 	 * Reports whether a card is in the slot, or NULL when the slot has no

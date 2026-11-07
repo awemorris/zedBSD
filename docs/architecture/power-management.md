@@ -1,9 +1,5 @@
 # Power management
 
-Status: design (2026-10-05). This is the target design: the document comes
-first and the implementation follows it, so some of what it describes is not
-built yet.
-
 This document describes how zedBSD puts a machine to sleep and wakes it,
 which part decides what, and the interface programs use. The reference
 machine is the Dell Latitude 5330 (Intel Alder Lake-P).

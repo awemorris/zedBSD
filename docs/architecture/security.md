@@ -1,9 +1,5 @@
 # Security design
 
-Status: design (2026-10-05). This is the target design: the document comes
-first and the implementation follows it, so some of what it describes is not
-built yet.
-
 This document records where zedBSD and Keiland draw their privilege
 boundaries and why. It covers account administration and the authentication
 of the graphical login. Later sections will cover the other privileged paths.

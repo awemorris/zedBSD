@@ -1,77 +1,69 @@
-override ARCHITECTURE                      := i386
-override BOARD                             := pcat
+override ARCHITECTURE             := i386
+override BOARD                    := pcat
 
-ifneq ($(origin CONFIG_ROOTFS_DEVELOPMENT),command line)
-override CONFIG_ROOTFS_DEVELOPMENT         := y
-endif
-ifneq ($(origin CONFIG_BOOT_SPLASH),command line)
-override CONFIG_BOOT_SPLASH                := y
-endif
-ifneq ($(origin CONFIG_QUIET_BOOT),command line)
-override CONFIG_QUIET_BOOT                 := n
-endif
-ifneq ($(origin CONFIG_GRAPHICAL_LOGIN),command line)
-override CONFIG_GRAPHICAL_LOGIN            := y
-endif
+CONFIG_ROOTFS_DEVELOPMENT         := y
+CONFIG_BOOT_SPLASH                := n
+CONFIG_QUIET_BOOT                 := n
+CONFIG_GRAPHICAL_LOGIN            := y
 
-override CONFIG_DRIVER_PCI                 := y
-override CONFIG_DRIVER_USB                 := y
-override CONFIG_DRIVER_PCI_NVME            := y
-override CONFIG_DRIVER_PCI_AHCI            := y
-override CONFIG_DRIVER_PCI_VMD             := y
-override CONFIG_DRIVER_LOOP                := y
-override CONFIG_DRIVER_FS_UFS              := y
-override CONFIG_DRIVER_FS_FAT              := y
-override CONFIG_DRIVER_FS_OVERLAYFS        := y
-override CONFIG_KERN_NET                   := y
-override CONFIG_KERN_NET_IPV4              := y
-override CONFIG_KERN_NET_IPV6              := y
-override CONFIG_KERN_NET_ETHERNET          := y
-override CONFIG_KERN_NET_WIFI              := y
-override CONFIG_DRIVER_USB_CDC_NCM         := y
-override CONFIG_DRIVER_USB_CDC_ECM         := y
-override CONFIG_DRIVER_PCI_RTL8125         := y
-override CONFIG_DRIVER_USB_RTL815X         := y
-override CONFIG_DRIVER_PCI_INTEL_AX211     := y
-override CONFIG_DRIVER_USB_RTL8822BU       := y
-override CONFIG_DRIVER_GRAPHICS            := y
-override CONFIG_DRIVER_GRAPHICS_PCAT       := y
-override CONFIG_DRIVER_GPU                 := y
-override CONFIG_DRIVER_PCI_I915            := y
-override CONFIG_DRIVER_PCI_NVRTX           := y
-override CONFIG_DRIVER_PCI_AMDRDNA	   := y
-override CONFIG_DRIVER_PCI_VENUS	   := y
-override CONFIG_DRIVER_AUDIO               := y
-override CONFIG_DRIVER_PCI_HDA             := y
-override CONFIG_DRIVER_HID                 := y
-override CONFIG_DRIVER_I2C_HID             := y
-override CONFIG_DRIVER_USB                 := y
-override CONFIG_DRIVER_PCI_OHCI            := y
-override CONFIG_DRIVER_PCI_UHCI            := y
-override CONFIG_DRIVER_PCI_EHCI            := y
-override CONFIG_DRIVER_PCI_XHCI            := y
-override CONFIG_DRIVER_TYPEC               := y
-override CONFIG_DRIVER_USB_HUB             := y
-override CONFIG_DRIVER_USB_HID             := y
-override CONFIG_DRIVER_USB_STORAGE         := y
-override CONFIG_DRIVER_USB_UASP            := y
-override CONFIG_DRIVER_USB_CCID            := y
-override CONFIG_DRIVER_USB_BT              := y
-override CONFIG_DRIVER_USB_UVC             := y
-override CONFIG_DRIVER_BT                  := y
-override CONFIG_DRIVER_INPUT_BRIDGE        := y
-override CONFIG_DRIVER_CPU_PERF            := y
-override CONFIG_DRIVER_X86_POWER_CONTROL   := y
-override CONFIG_DRIVER_DELL_SMM_BOOST      := y
-override CONFIG_DRIVER_CAMERA              := y
-override CONFIG_DRIVER_ACPI                := y
-override CONFIG_DRIVER_I2C                 := y
-override CONFIG_DRIVER_GPIO                := y
-override CONFIG_DRIVER_PCI_LPSS_I2C        := y
-override CONFIG_DRIVER_PCI_LPSS_GPIO       := y
-override CONFIG_DRIVER_PCI_AMD_GPIO        := y
+CONFIG_DRIVER_PCI                 := y
+CONFIG_DRIVER_USB                 := y
+CONFIG_DRIVER_PCI_NVME            := y
+CONFIG_DRIVER_PCI_AHCI            := y
+CONFIG_DRIVER_PCI_VMD             := y
+CONFIG_DRIVER_LOOP                := y
+CONFIG_DRIVER_FS_UFS              := y
+CONFIG_DRIVER_FS_FAT              := y
+CONFIG_DRIVER_FS_OVERLAYFS        := y
+CONFIG_KERN_NET                   := y
+CONFIG_KERN_NET_IPV4              := y
+CONFIG_KERN_NET_IPV6              := y
+CONFIG_KERN_NET_ETHERNET          := y
+CONFIG_KERN_NET_WIFI              := y
+CONFIG_DRIVER_USB_CDC_NCM         := y
+CONFIG_DRIVER_USB_CDC_ECM         := y
+CONFIG_DRIVER_PCI_RTL8125         := y
+CONFIG_DRIVER_USB_RTL815X         := y
+CONFIG_DRIVER_PCI_INTEL_AX211     := y
+CONFIG_DRIVER_USB_RTL8822BU       := y
+CONFIG_DRIVER_GRAPHICS            := y
+CONFIG_DRIVER_GRAPHICS_PCAT       := y
+CONFIG_DRIVER_GPU                 := y
+CONFIG_DRIVER_PCI_I915            := y
+CONFIG_DRIVER_PCI_NVRTX           := y
+CONFIG_DRIVER_PCI_AMDRDNA	   := y
+CONFIG_DRIVER_PCI_VENUS	   := y
+CONFIG_DRIVER_AUDIO               := y
+CONFIG_DRIVER_PCI_HDA             := y
+CONFIG_DRIVER_HID                 := y
+CONFIG_DRIVER_I2C_HID             := y
+CONFIG_DRIVER_USB                 := y
+CONFIG_DRIVER_PCI_OHCI            := y
+CONFIG_DRIVER_PCI_UHCI            := y
+CONFIG_DRIVER_PCI_EHCI            := y
+CONFIG_DRIVER_PCI_XHCI            := y
+CONFIG_DRIVER_TYPEC               := y
+CONFIG_DRIVER_USB_HUB             := y
+CONFIG_DRIVER_USB_HID             := y
+CONFIG_DRIVER_USB_STORAGE         := y
+CONFIG_DRIVER_USB_UASP            := y
+CONFIG_DRIVER_USB_CCID            := y
+CONFIG_DRIVER_USB_BT              := y
+CONFIG_DRIVER_USB_UVC             := y
+CONFIG_DRIVER_BT                  := y
+CONFIG_DRIVER_INPUT_BRIDGE        := y
+CONFIG_DRIVER_CPU_PERF            := y
+CONFIG_DRIVER_X86_POWER_CONTROL   := y
+CONFIG_DRIVER_DELL_SMM_BOOST      := y
+CONFIG_DRIVER_CAMERA              := y
+CONFIG_DRIVER_ACPI                := y
+CONFIG_DRIVER_I2C                 := y
+CONFIG_DRIVER_GPIO                := y
+CONFIG_DRIVER_PCI_LPSS_I2C        := y
+CONFIG_DRIVER_PCI_LPSS_GPIO       := y
+CONFIG_DRIVER_PCI_AMD_GPIO        := y
 
-override CONFIG_USERLAND_PROGRAMS := \
+CONFIG_USERLAND_PROGRAMS          += \
 	account-admin \
 	admin \
 	ar \
