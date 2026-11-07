@@ -276,6 +276,10 @@ CONFIG_DRIVER_RPI5_GPU            ?= n
 #  - Depends: CONFIG_DRIVER_GPU
 CONFIG_DRIVER_VF2_GPU_VPU         ?= n
 
+# [Intel MID Imagination PowerVR G64xx driver]
+#  - Depends: CONFIG_DRIVER_GPU
+CONFIG_DRIVER_INTELMID64_GPU_VPU  ?= n
+
 # [GHCI GPU driver]
 #  - Depends: CONFIG_DRIVER_GPU
 #  - Depends: CONFIG_DRIVER_CI

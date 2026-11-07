@@ -378,10 +378,26 @@ static const struct drv_pci_id ehci_ids[] = {
 	}
 };
 
+static int
+ehci_match(
+	struct drv_pci_device *device,
+	const struct drv_pci_id *id)
+{
+	(void)id;
+	/* Intel Merrifield/Moorefield SoC USB controllers are DWC3 USB3 cores */
+	if (drv_pci_device_vendor(device) == 0x8086U &&
+	    (drv_pci_device_product(device) == 0x119dU ||
+	     drv_pci_device_product(device) == 0x119eU)) {
+		return DRV_PCI_MATCH_NONE;
+	}
+	return DRV_PCI_MATCH_CLASS;
+}
+
 static struct drv_pci_driver ehci_driver = {
 	.name = "ehci",
 	.ids = ehci_ids,
 	.id_count = 1,
+	.match = ehci_match,
 	.attach = ehci_attach,
 	.detach = ehci_detach
 };
@@ -5447,6 +5463,8 @@ ehci_attach(
 	return 0;
 
 fail:
+
+	kern_logf("ehci: attach failed at stage '%s' (error %d)\n", stage, error);
 
 	/* Checks the operation status. */
 	cleanup_error = ehci_cleanup(controller);

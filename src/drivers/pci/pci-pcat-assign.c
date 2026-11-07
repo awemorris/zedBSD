@@ -192,9 +192,11 @@ assign_pass(
 
 	/* Reads the windows of the host bridge of segment 0, bus 0. */
 	error = drv_acpi_pci_root_resources_walk(0, 0, window_visit, state);
-	if (error != 0) {
-		kern_logf("pci: the host bridge's _CRS could not be read (%d); unassigned BARs stay at 0\n", error);
-		return;
+	if (error != 0 || state->window_count == 0) {
+		kern_logf("pci: the host bridge's _CRS could not be read (%d); using default window 0x80000000-0xefffffff\n", error);
+		state->windows[0].base = 0x80000000ULL;
+		state->windows[0].length = 0x70000000ULL;
+		state->window_count = 1;
 	}
 
 	/* Names the windows the BARs may take, for the log of the machine. */

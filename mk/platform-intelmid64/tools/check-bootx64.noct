@@ -1,0 +1,36 @@
+require zedbuild;
+
+func main(args) {
+    if (Array.size(args) != 1) { zbFail("usage: check-bootx64.noct IMAGE"); }
+    var data = zbReadFile(args[0]); var size = Packed.size(data);
+    if (size < 512 || size > 1048576 || data[0] != 77 || data[1] != 90) { zbFail("invalid DOS/PE image size or signature"); }
+    var pe = zbU32LE(data, 60);
+    if (pe > size - 24 || data[pe] != 80 || data[pe + 1] != 69 || data[pe + 2] != 0 || data[pe + 3] != 0) { zbFail("missing PE signature"); }
+    var sections = zbU16LE(data, pe + 6); var optionalSize = zbU16LE(data, pe + 20); var optional = pe + 24;
+    if (zbU16LE(data, pe + 4) != 0x8664 || sections == 0) { zbFail("image is not x86-64 PE"); }
+    if (optionalSize < 112 || optional + optionalSize > size || zbU16LE(data, optional) != 0x20b) { zbFail("invalid PE32+ optional header"); }
+    var entry = zbU32LE(data, optional + 16); var imageBase = zbU64SmallLE(data, optional + 24);
+    var imageSize = zbU32LE(data, optional + 56); var directoryCount = zbU32LE(data, optional + 108);
+    if (zbU16LE(data, optional + 68) != 10 || entry == 0 || entry >= imageSize) { zbFail("invalid EFI subsystem or entry"); }
+    var importRva = 0; var importSize = 0; var relocations = false;
+    if (directoryCount > 1) { importRva = zbU32LE(data, optional + 120); importSize = zbU32LE(data, optional + 124); }
+    if (directoryCount > 5) { relocations = zbU32LE(data, optional + 152) != 0 && zbU32LE(data, optional + 156) != 0; }
+    var table = optional + optionalSize;
+    if (table + sections * 40 > size) { zbFail("truncated section table"); }
+    var executable = false; var importsZero = false;
+    for (i in 0..sections) {
+        var at = table + i * 40; var virtualSize = zbU32LE(data, at + 8);
+        var virtualAddress = zbU32LE(data, at + 12); var rawSize = zbU32LE(data, at + 16);
+        var rawOffset = zbU32LE(data, at + 20); var characteristics = zbU32LE(data, at + 36);
+        var span = virtualSize; if (span < 1) { span = 1; }
+        if (virtualAddress <= entry && entry < virtualAddress + span && (characteristics & 0x20000000) != 0) { executable = true; }
+        if (importRva >= virtualAddress && importRva - virtualAddress <= rawSize && importSize <= rawSize - (importRva - virtualAddress)) {
+            importsZero = true; var start = rawOffset + importRva - virtualAddress;
+            for (j in 0..importSize) { if (data[start + j] != 0) { importsZero = false; } }
+        }
+    }
+    if (!executable) { zbFail("entry RVA is not in an executable section"); }
+    if ((importRva != 0 || importSize != 0) && !importsZero) { zbFail("UEFI loader has nonempty imports"); }
+    if (!relocations && imageBase != 0) { zbFail("nonzero-base image has no relocations"); }
+    print("BOOTX64.EFI check: PASS");
+}
