@@ -64,10 +64,14 @@ def copy_sparse_file(image_file, offset_bytes: int, source_path: Path) -> None:
 
 
 def format_fat(image_path: Path, offset_bytes: int, start_lba: int,
-               blocks: int, label: str) -> None:
+               blocks: int, label: str, serial: int | None = None) -> None:
     spec = f"{image_path}@@{offset_bytes}"
-    run("mformat", "-i", spec, "-F", "-T", str(blocks), "-H", str(start_lba),
-        "-v", label, "::")
+    cmd = ["mformat", "-i", spec, "-F", "-T", str(blocks), "-H", str(start_lba),
+           "-v", label]
+    if serial is not None:
+        cmd += ["-N", f"0x{serial:08x}"]
+    cmd.append("::")
+    run(*cmd)
 
 
 def install_fat32_pbr(image_path: Path, partition_offset: int,
@@ -191,8 +195,11 @@ def create(args: argparse.Namespace) -> None:
             copy_sparse_file(temporary.open("r+b"), swap_start * SECTOR, args.swap_image)
 
             # Format FAT32 BOOT partition
+            boot_serial = (zlib.crc32(b"BOOT") ^ zlib.crc32(args.kernel.read_bytes())) & 0xFFFFFFFF
+            if boot_serial == 0:
+                boot_serial = 0x55AD19FF
             boot_offset = boot_start * SECTOR
-            format_fat(temporary, boot_offset, boot_start, boot_blocks, "BOOT")
+            format_fat(temporary, boot_offset, boot_start, boot_blocks, "BOOT", boot_serial)
             install_fat32_pbr(temporary, boot_offset, args.partition_pbr.read_bytes())
             copy_to_fat(temporary, boot_offset, args.bootzbsd, "/BOOTZBSD.EXE")
             copy_to_fat(temporary, boot_offset, args.kernel, "/vmunix")
@@ -306,15 +313,21 @@ def create(args: argparse.Namespace) -> None:
             copy_sparse_file(temporary.open("r+b"), swap_start * SECTOR, args.swap_image)
 
             # Format ESP partition
+            esp_serial = (zlib.crc32(b"ESP") ^ zlib.crc32(args.bootx64.read_bytes())) & 0xFFFFFFFF
+            if esp_serial == 0:
+                esp_serial = 0x55AD19EE
             esp_offset = esp_start * SECTOR
-            format_fat(temporary, esp_offset, esp_start, esp_blocks, "ESP")
+            format_fat(temporary, esp_offset, esp_start, esp_blocks, "ESP", esp_serial)
             mkdir_fat(temporary, esp_offset, "/EFI")
             mkdir_fat(temporary, esp_offset, "/EFI/BOOT")
             copy_to_fat(temporary, esp_offset, args.bootx64, "/EFI/BOOT/BOOTX64.EFI")
 
             # Format FAT32 BOOT partition
+            boot_serial = (zlib.crc32(b"BOOT") ^ zlib.crc32(args.kernel.read_bytes())) & 0xFFFFFFFF
+            if boot_serial == 0 or boot_serial == esp_serial:
+                boot_serial = 0x55AD19FF if esp_serial != 0x55AD19FF else 0x55AD19AA
             boot_offset = boot_start * SECTOR
-            format_fat(temporary, boot_offset, boot_start, boot_blocks, "BOOT")
+            format_fat(temporary, boot_offset, boot_start, boot_blocks, "BOOT", boot_serial)
             if variant == "hybrid":
                 install_fat32_pbr(temporary, boot_offset,
                                   args.partition_pbr.read_bytes())

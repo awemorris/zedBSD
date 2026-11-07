@@ -74,6 +74,19 @@ def check_gpt_header(raw: bytes, current_lba: int, backup_lba: int,
     return entries_crc
 
 
+def check_fat_serials_distinct(f, esp_offset: int, boot_offset: int) -> None:
+    f.seek(esp_offset)
+    esp_bpb = f.read(512)
+    f.seek(boot_offset)
+    boot_bpb = f.read(512)
+    esp_fat32 = (struct.unpack_from("<H", esp_bpb, 22)[0] == 0)
+    boot_fat32 = (struct.unpack_from("<H", boot_bpb, 22)[0] == 0)
+    esp_serial = struct.unpack_from("<I", esp_bpb, 0x43 if esp_fat32 else 0x27)[0]
+    boot_serial = struct.unpack_from("<I", boot_bpb, 0x43 if boot_fat32 else 0x27)[0]
+    if esp_serial == boot_serial:
+        fail(f"ESP and BOOT partitions have duplicate FAT volume serial 0x{esp_serial:08x}")
+
+
 def check(args: argparse.Namespace) -> None:
     variant = "uefi" if args.variant == "native" else args.variant
     size = args.image.stat().st_size
@@ -199,6 +212,9 @@ def check(args: argparse.Namespace) -> None:
             compare_extent(f, s3 * SECTOR, args.ufs_root)
             compare_extent(f, s4 * SECTOR, args.swap_image)
 
+            # Check ESP and BOOT FAT volume serials are distinct
+            check_fat_serials_distinct(f, s1 * SECTOR, s2 * SECTOR)
+
             # Check ESP files
             same_fat_file(args.image, s1 * SECTOR, "EFI/BOOT/BOOTX64.EFI", args.bootx64)
 
@@ -278,6 +294,9 @@ def check(args: argparse.Namespace) -> None:
             # Check raw extents
             compare_extent(f, s3 * SECTOR, args.ufs_root)
             compare_extent(f, s4 * SECTOR, args.swap_image)
+
+            # Check ESP and BOOT FAT volume serials are distinct
+            check_fat_serials_distinct(f, s1 * SECTOR, s2 * SECTOR)
 
             # Check ESP files
             same_fat_file(args.image, s1 * SECTOR, "EFI/BOOT/BOOTX64.EFI", args.bootx64)
