@@ -105,20 +105,23 @@ VMUNIX_OBJS := \
 	$(sort $(patsubst %.c,$(BUILD)/%.o,$(KERN_SOURCES))) \
 	$(sort $(patsubst %.S,$(BUILD)/%.o,$(KERN_ASM)))
 
+.PHONY: vmunix-platform
+vmunix-platform: $(BUILD)/vmunix
+
 $(BUILD)/vmunix: $(VMUNIX_OBJS) mk/platform-vf2/vmunix.ld
+	@echo "  LD      vmunix"
 	@mkdir -p $(dir $@)
-	$(LD) -m elf64lriscv --gc-sections --no-relax -z max-page-size=4096 -T mk/platform-vf2/vmunix.ld -nostdlib $(VMUNIX_OBJS) -o $@
+	@$(LD) -m elf64lriscv --gc-sections --no-relax -z max-page-size=4096 -T mk/platform-vf2/vmunix.ld -nostdlib $(VMUNIX_OBJS) -o $@
 	@test -z "$$($(NM) -u $@ | awk '$$1 == "U"')" || { $(NM) -u $@; exit 1; }
 
 # Build rule for C sources
 $(BUILD)/%.o: %.c
+	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
-	$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@
+	@$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@
 
 # Build rule for Assembly sources
 $(BUILD)/%.o: %.S
+	@echo "  AS      $<"
 	@mkdir -p $(dir $@)
-	$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -D_ASM_SRC_ -c $< -o $@
-
-.PHONY: vmunix-platform
-vmunix-platform: $(BUILD)/vmunix
+	@$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -D_ASM_SRC_ -c $< -o $@

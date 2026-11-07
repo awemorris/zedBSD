@@ -53,14 +53,20 @@ else
 ZEDBSD_CONFIG_SRC := mk/platform-x86_64/bootcfg/zedbsd-uefi.cfg
 endif
 
+BOOT_CONFIG_STAMP := $(BUILD)/.boot-config-$(VARIANT)-splash_$(CONFIG_BOOT_SPLASH)-login_$(CONFIG_GRAPHICAL_LOGIN)-quiet_$(CONFIG_QUIET_BOOT)
+$(BOOT_CONFIG_STAMP):
+	@mkdir -p $(dir $@)
+	@rm -f $(BUILD)/.boot-config-*
+	@touch $@
+
 ZEDBSD_CONFIG := $(BUILD)/zedbsd.cfg
-$(ZEDBSD_CONFIG): $(ZEDBSD_CONFIG_SRC) $(VARIANT_STAMP)
+$(ZEDBSD_CONFIG): $(ZEDBSD_CONFIG_SRC) $(VARIANT_STAMP) $(BOOT_CONFIG_STAMP) $(PLATFORM_X86_64_DIR)/image.mk
 	@mkdir -p $(dir $@)
 	cp $< $@.tmp
 	$(if $(filter y,$(CONFIG_BOOT_SPLASH)),grep -v '^video=' $< > $@.tmp)
 	$(if $(filter y,$(CONFIG_BOOT_SPLASH)),printf '%s\n' logo=logo.ppm >> $@.tmp)
 	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),printf '%s\n' login=graphical >> $@.tmp)
-	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),printf '%s\n' kmsg=quiet >> $@.tmp)
+	$(if $(filter y,$(CONFIG_QUIET_BOOT)),printf '%s\n' kmsg=quiet >> $@.tmp)
 	mv -f $@.tmp $@
 
 ROOT_IMAGE := $(BUILD)/x86_64-native-root-$(ROOT_MIB)m.ufs
@@ -88,23 +94,8 @@ VARIANT_DEPS := $(BUILD)/uefi/BOOTX64.EFI \
 		$(BUILD)/bootloader/BOOTZBSD.EXE
 endif
 
-$(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(VARIANT_DEPS) $(VARIANT_STAMP) \
-		mk/platform-x86_64/tools/make-x86_64-hdd-image.py \
-		mk/platform-x86_64/tools/check-x86_64-hdd-image.py
-	$(PYTHON) mk/platform-x86_64/tools/make-x86_64-hdd-image.py --force \
-		--variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) \
-		--kernel $(BUILD)/vmunix \
-		--zedbsd-config $(ZEDBSD_CONFIG) \
-		$(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) \
-		--ufs-root $(ROOT_IMAGE) \
-		--swap-image $(SWAP_IMAGE) \
-		$(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) \
-		$(if $(filter bios,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1-native.bin) \
-		$(if $(filter hybrid,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1.bin) \
-		$(if $(filter bios hybrid,$(VARIANT)),--stage2 $(BUILD)/bootloader/stage2-chain.bin) \
-		$(if $(filter bios hybrid,$(VARIANT)),--partition-pbr $(BUILD)/bootloader/partition-pbr.bin) \
-		$(if $(filter bios hybrid,$(VARIANT)),--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE) \
-		--fat-size-mib $(BOOT_MIB) $@
+$(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(VARIANT_DEPS) $(VARIANT_STAMP) $(BOOT_CONFIG_STAMP) mk/platform-x86_64/tools/make-x86_64-hdd-image.py
+	$(PYTHON) mk/platform-x86_64/tools/make-x86_64-hdd-image.py --force --variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) --kernel $(BUILD)/vmunix --zedbsd-config $(ZEDBSD_CONFIG) $(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) --ufs-root $(ROOT_IMAGE) --swap-image $(SWAP_IMAGE) $(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) $(if $(filter bios,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1-native.bin) $(if $(filter hybrid,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1.bin) $(if $(filter bios hybrid,$(VARIANT)),--stage2 $(BUILD)/bootloader/stage2-chain.bin) $(if $(filter bios hybrid,$(VARIANT)),--partition-pbr $(BUILD)/bootloader/partition-pbr.bin) $(if $(filter bios hybrid,$(VARIANT)),--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE) --fat-size-mib $(BOOT_MIB) $@
 
 .PHONY: image-platform check-disk-image
 image-platform: rootfs $(DISK_IMAGE_ARTIFACT)

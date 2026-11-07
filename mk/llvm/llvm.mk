@@ -73,7 +73,7 @@ LLVM_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 include $(LLVM_DIR)/version.mk
 
 REPO_ROOT ?= $(abspath $(LLVM_DIR)/../..)
-include $(REPO_ROOT)/build-jobs.mk
+include $(REPO_ROOT)/mk/build-jobs.mk
 
 LLVM_DISTDIR := $(LLVM_DIR)/distfiles
 LLVM_DISTFILE := $(LLVM_DISTDIR)/$(ZEDBSD_LLVM_ARCHIVE_NAME)
@@ -133,7 +133,7 @@ $(LLVM_INSTALL)/bin/clang:
 			-DLLVM_TARGETS_TO_BUILD="X86;AArch64;ARM;RISCV" \
 			-DLLVM_DISTRIBUTION_COMPONENTS="$(LLVM_DISTRIBUTION_COMPONENTS)" \
 			$(LLVM_SOURCE)/llvm && \
-		cmake --build $(LLVM_BUILD) --target install-distribution --parallel $(ZEDBSD_BUILD_JOBS); \
+		cmake --build $(LLVM_BUILD) --target install-distribution --parallel $(BUILD_JOBS); \
 	fi
 
 $(filter-out $(LLVM_INSTALL)/bin/clang,$(LLVM_INSTALLED_TOOLS)): $(LLVM_INSTALL)/bin/clang

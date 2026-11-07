@@ -28,6 +28,10 @@ CONFIG_ROOTFS_DEVELOPMENT         ?= n
 #  - Description: Show boot splash screen.
 CONFIG_BOOT_SPLASH                ?= n
 
+# [Quiet Boot]
+#  - Description: Suppress boot messages.
+CONFIG_QUIET_BOOT                 ?= n
+
 # [Graphical Login]
 #  - Description: Start desktop automatically.
 CONFIG_GRAPHICAL_LOGIN            ?= n

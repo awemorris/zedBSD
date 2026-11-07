@@ -10,8 +10,6 @@
 PLATFORM_PC9821_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT ?= $(abspath $(PLATFORM_PC9821_DIR)/../..)
 
-include $(REPO_ROOT)/build-jobs.mk
-
 SYSROOT     := $(BUILD)/sysroot
 SYSROOT_INC := $(SYSROOT)/usr/include
 SYSROOT_LIB := $(SYSROOT)/usr/lib

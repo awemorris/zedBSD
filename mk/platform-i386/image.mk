@@ -50,14 +50,20 @@ $(SWAP_IMAGE): mk/tools/make-swapfile.noct
 
 ZEDBSD_CONFIG_SRC := mk/platform-i386/zedbsd.cfg
 
+BOOT_CONFIG_STAMP := $(BUILD)/.boot-config-$(VARIANT)-splash_$(CONFIG_BOOT_SPLASH)-login_$(CONFIG_GRAPHICAL_LOGIN)-quiet_$(CONFIG_QUIET_BOOT)
+$(BOOT_CONFIG_STAMP):
+	@mkdir -p $(dir $@)
+	@rm -f $(BUILD)/.boot-config-*
+	@touch $@
+
 ZEDBSD_CONFIG := $(BUILD)/zedbsd.cfg
-$(ZEDBSD_CONFIG): $(ZEDBSD_CONFIG_SRC) $(VARIANT_STAMP)
+$(ZEDBSD_CONFIG): $(ZEDBSD_CONFIG_SRC) $(VARIANT_STAMP) $(BOOT_CONFIG_STAMP) $(PLATFORM_I386_DIR)/image.mk
 	@mkdir -p $(dir $@)
 	cp $< $@.tmp
 	$(if $(filter y,$(CONFIG_BOOT_SPLASH)),grep -v '^video=' $< > $@.tmp)
 	$(if $(filter y,$(CONFIG_BOOT_SPLASH)),printf '%s\n' logo=logo.ppm >> $@.tmp)
 	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),printf '%s\n' login=graphical >> $@.tmp)
-	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),printf '%s\n' kmsg=quiet >> $@.tmp)
+	$(if $(filter y,$(CONFIG_QUIET_BOOT)),printf '%s\n' kmsg=quiet >> $@.tmp)
 	mv -f $@.tmp $@
 
 ROOT_IMAGE := $(BUILD)/i386-root-$(ROOT_MIB)m.ufs
@@ -78,7 +84,7 @@ VARIANT_DEPS := $(BUILD)/bootloader/stage1-native.bin \
 		$(BUILD)/bootloader/partition-pbr.bin \
 		$(BUILD)/bootloader/BOOTZBSD.EXE
 
-$(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(VARIANT_DEPS) $(VARIANT_STAMP) \
+$(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(VARIANT_DEPS) $(VARIANT_STAMP) $(BOOT_CONFIG_STAMP) \
 		mk/platform-i386/tools/make-i386-hdd-image.py \
 		mk/platform-i386/tools/check-i386-hdd-image.py
 	$(PYTHON) mk/platform-i386/tools/make-i386-hdd-image.py --force \

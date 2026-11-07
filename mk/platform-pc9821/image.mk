@@ -39,14 +39,20 @@ $(SWAP_IMAGE): mk/tools/make-swapfile.noct
 
 ZEDBSD_CONFIG_SRC := mk/platform-pc9821/zedbsd.cfg
 
+BOOT_CONFIG_STAMP := $(BUILD)/.boot-config-splash_$(CONFIG_BOOT_SPLASH)-login_$(CONFIG_GRAPHICAL_LOGIN)-quiet_$(CONFIG_QUIET_BOOT)
+$(BOOT_CONFIG_STAMP):
+	@mkdir -p $(dir $@)
+	@rm -f $(BUILD)/.boot-config-*
+	@touch $@
+
 ZEDBSD_CONFIG := $(BUILD)/zedbsd.cfg
-$(ZEDBSD_CONFIG): $(ZEDBSD_CONFIG_SRC)
+$(ZEDBSD_CONFIG): $(ZEDBSD_CONFIG_SRC) $(BOOT_CONFIG_STAMP) $(PLATFORM_PC9821_DIR)/image.mk
 	@mkdir -p $(dir $@)
 	cp $< $@.tmp
 	$(if $(filter y,$(CONFIG_BOOT_SPLASH)),grep -v '^video=' $< > $@.tmp)
 	$(if $(filter y,$(CONFIG_BOOT_SPLASH)),printf '%s\n' logo=logo.ppm >> $@.tmp)
 	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),printf '%s\n' login=graphical >> $@.tmp)
-	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),printf '%s\n' kmsg=quiet >> $@.tmp)
+	$(if $(filter y,$(CONFIG_QUIET_BOOT)),printf '%s\n' kmsg=quiet >> $@.tmp)
 	mv -f $@.tmp $@
 
 ROOT_IMAGE := $(BUILD)/pc9821-root-$(ROOT_MIB)m.ufs
@@ -67,7 +73,7 @@ BOOTLOADER_DEPS := $(BUILD)/bootloader/stage1.bin \
 		   $(BUILD)/bootloader/partition-pbr.bin \
 		   $(BUILD)/bootloader/BOOTZBSD.EXE
 
-$(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(BOOTLOADER_DEPS) \
+$(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(BOOTLOADER_DEPS) $(BOOT_CONFIG_STAMP) \
 		mk/platform-pc9821/tools/make-pc98-hdd-image.py \
 		mk/platform-pc9821/tools/check-pc98-hdd-image.py
 	$(PYTHON) mk/platform-pc9821/tools/make-pc98-hdd-image.py --force \

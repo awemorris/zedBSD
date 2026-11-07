@@ -32,4 +32,4 @@ INSTALL_ADMIN_SOURCES := \
 
 $(eval $(call USERLAND_PACKAGE,install-admin,install-admin,x86_64,n,basic,$(INSTALL_ADMIN_SOURCES),n,installer,,,4550,program,,,usr/libexec))
 
-$(eval $(call USERLAND_PACKAGE,installer,installer - Install zedBSD,x86_64,n,basic,$(INSTALLER_SOURCES),n,installer,,,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,installer,installer - Install zedBSD,x86_64,n,basic,$(INSTALLER_SOURCES),n,installer,desktop/installer,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype,0755,program,,,bin))

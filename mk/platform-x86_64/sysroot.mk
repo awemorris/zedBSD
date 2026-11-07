@@ -10,8 +10,6 @@
 PLATFORM_X86_64_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT ?= $(abspath $(PLATFORM_X86_64_DIR)/../..)
 
-include $(REPO_ROOT)/build-jobs.mk
-
 SYSROOT     := $(REPO_ROOT)/build/x86_64/sysroot
 SYSROOT_INC := $(SYSROOT)/usr/include
 SYSROOT_LIB := $(SYSROOT)/usr/lib

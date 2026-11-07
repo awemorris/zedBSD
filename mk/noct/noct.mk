@@ -22,8 +22,7 @@ NOCT_DISTFILE      ?= $(REPO_ROOT)/userland/base/noct/distfiles/NoctLang-d198b95
 NOCT_PATCHES       := $(sort $(wildcard $(REPO_ROOT)/userland/base/noct/patches/*.patch))
 NOCT_PATCH_STAMP   := $(NOCT_HOST_SRC)/.patched
 
-include $(REPO_ROOT)/build-jobs.mk
-BUILD_JOBS ?= $(ZEDBSD_BUILD_JOBS)
+include $(REPO_ROOT)/mk/build-jobs.mk
 
 .PHONY: noct-toolchain noct-toolchain-cached
 

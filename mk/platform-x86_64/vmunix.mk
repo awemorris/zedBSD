@@ -92,10 +92,14 @@ KERN_SOURCES += \
 	src/kern/platform/pcat.c \
 	src/drivers/platform/pcat/uefi-variables.c \
 	src/drivers/platform/pcat/pcat-ide.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c \
 	src/drivers/platform/pcat/cpu-x86/cpu-x86.c \
 	src/drivers/platform/pcat/cpu-x86/cpu-x86-insn.c \
+	src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-hwp.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-power.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-pstate.c \
 	src/drivers/disklabel/mbr.c \
 	src/drivers/disklabel/gpt.c \
 	src/drivers/disklabel/pcat.c \
@@ -114,12 +118,16 @@ VMUNIX_OBJS := \
 vmunix-platform: $(BUILD)/vmunix
 
 $(BUILD)/vmunix: $(VMUNIX_OBJS)
-	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) -o $@
+	@echo "  LD      vmunix"
+	@$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) -o $@
+	@test -z "$$($(NM) -u $@ | awk '$$1 == "U"')" || { $(NM) -u $@; exit 1; }
 
 $(BUILD)/%.o: %.c
+	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
-	$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@
+	@$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@
 
 $(BUILD)/%.o: %.S
+	@echo "  AS      $<"
 	@mkdir -p $(dir $@)
-	$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@
+	@$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@

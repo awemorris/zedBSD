@@ -10,8 +10,6 @@
 PLATFORM_I386_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT ?= $(abspath $(PLATFORM_I386_DIR)/../..)
 
-include $(REPO_ROOT)/build-jobs.mk
-
 SYSROOT     := $(REPO_ROOT)/build/i386/sysroot
 SYSROOT_INC := $(SYSROOT)/usr/include
 SYSROOT_LIB := $(SYSROOT)/usr/lib

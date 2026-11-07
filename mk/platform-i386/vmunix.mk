@@ -104,12 +104,16 @@ VMUNIX_OBJS := \
 vmunix-platform: $(BUILD)/vmunix
 
 $(BUILD)/vmunix: $(VMUNIX_OBJS) $(BUILD)/libc/libclang_rt.builtins.a
-	$(LD) -m elf_i386 --gc-sections -z max-page-size=4096 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) $(BUILD)/libc/libclang_rt.builtins.a -o $@
+	@echo "  LD      vmunix"
+	@$(LD) -m elf_i386 --gc-sections -z max-page-size=4096 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) $(BUILD)/libc/libclang_rt.builtins.a -o $@
+	@test -z "$$($(NM) -u $@ | awk '$$1 == "U"')" || { $(NM) -u $@; exit 1; }
 
 $(BUILD)/%.o: %.c
+	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
-	$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@
+	@$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@
 
 $(BUILD)/%.o: %.S
+	@echo "  AS      $<"
 	@mkdir -p $(dir $@)
-	$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@
+	@$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@

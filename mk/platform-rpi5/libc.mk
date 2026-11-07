@@ -6,9 +6,6 @@
 PLATFORM_RPI5_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT         ?= $(abspath $(PLATFORM_RPI5_DIR)/../..)
 
-include $(REPO_ROOT)/mk/libc.mk
-include $(REPO_ROOT)/build-jobs.mk
-
 LIBC_OUT_DIR := $(BUILD)/libc
 LIBC_OBJ_DIR := $(BUILD)/libc/obj
 

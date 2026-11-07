@@ -1,9 +1,18 @@
 override ARCHITECTURE                      := x86_64
 override BOARD                             := pcat
 
+ifneq ($(origin CONFIG_ROOTFS_DEVELOPMENT),command line)
 override CONFIG_ROOTFS_DEVELOPMENT         := y
+endif
+ifneq ($(origin CONFIG_BOOT_SPLASH),command line)
 override CONFIG_BOOT_SPLASH                := n
+endif
+ifneq ($(origin CONFIG_QUIET_BOOT),command line)
+override CONFIG_QUIET_BOOT                 := n
+endif
+ifneq ($(origin CONFIG_GRAPHICAL_LOGIN),command line)
 override CONFIG_GRAPHICAL_LOGIN            := y
+endif
 
 override CONFIG_DRIVER_PCI                 := y
 override CONFIG_DRIVER_USB                 := y
@@ -305,5 +314,4 @@ override CONFIG_USERLAND_PROGRAMS := \
 	noto-color-emoji \
 	ca-certificates \
 	mview \
-	zgears \
-	installer
+	zgears

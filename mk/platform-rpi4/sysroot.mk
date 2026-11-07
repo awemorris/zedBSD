@@ -10,8 +10,6 @@
 PLATFORM_RPI4_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT         ?= $(abspath $(PLATFORM_RPI4_DIR)/../..)
 
-include $(REPO_ROOT)/build-jobs.mk
-
 SYSROOT     := $(REPO_ROOT)/build/rpi4/sysroot
 SYSROOT_INC := $(SYSROOT)/usr/include
 SYSROOT_LIB := $(SYSROOT)/usr/lib
