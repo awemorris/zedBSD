@@ -3,26 +3,29 @@
 #
 # SPDX-License-Identifier: Zlib
 
-include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
+WALLPAPERS_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+REPO_ROOT      ?= $(abspath $(WALLPAPERS_DIR)/../../..)
+BUILD          ?= $(REPO_ROOT)/build/$(if $(PLATFORM),$(PLATFORM),x86_64)
+PYTHON         ?= python3
 
-KEILAND_WALLPAPERS          ?= $(if $(filter wayland,$(ZEDBSD_USER_PROGRAMS)),y,n)
+KEILAND_WALLPAPERS          ?= $(if $(filter wayland,$(CONFIG_USERLAND_PROGRAMS) $(USERLAND_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),y,n)
 KEILAND_WALLPAPER_DEFAULT   := Dawn
 KEILAND_WALLPAPER_GENERATED := Aurora Dawn Lagoon Meadow Twilight
-KEILAND_WALLPAPER_NAMES     := $(filter-out $(ZEDBSD_KEILAND_WALLPAPER_DEFAULT),$(ZEDBSD_KEILAND_WALLPAPER_GENERATED))
-KEILAND_WALLPAPER_FILES     := $(addprefix $(BUILD)/wallpapers/,$(addsuffix .png,$(ZEDBSD_KEILAND_WALLPAPER_GENERATED)))
+KEILAND_WALLPAPER_NAMES     := $(filter-out $(KEILAND_WALLPAPER_DEFAULT),$(KEILAND_WALLPAPER_GENERATED))
+KEILAND_WALLPAPER_FILES     := $(addprefix $(BUILD)/wallpapers/,$(addsuffix .png,$(KEILAND_WALLPAPER_GENERATED)))
 
 # The pictures as DESTINATION=SOURCE, and those the image takes: all
 # of them, less any a test's extra files name.
 KEILAND_WALLPAPER_DATA := \
 	/usr/share/keiland/wallpaper.png=$(BUILD)/wallpapers/$(KEILAND_WALLPAPER_DEFAULT).png \
-	/usr/share/keiland/wallpapers/Birch-Lake.png=userland/desktop/wallpapers/Birch-Lake.png \
-	/usr/share/keiland/wallpapers/Lakeside.png=userland/desktop/wallpapers/Lakeside.png \
+	/usr/share/keiland/wallpapers/Birch-Lake.png=$(WALLPAPERS_DIR)Birch-Lake.png \
+	/usr/share/keiland/wallpapers/Lakeside.png=$(WALLPAPERS_DIR)Lakeside.png \
 	$(foreach name,$(KEILAND_WALLPAPER_NAMES),/usr/share/keiland/wallpapers/$(name).png=$(BUILD)/wallpapers/$(name).png)
 
 KEILAND_WALLPAPER_TAKEN := \
 	$(if $(filter y,$(KEILAND_WALLPAPERS)), \
 		$(foreach item,$(KEILAND_WALLPAPER_DATA),\
-			$(if $(findstring $(firstword $(subst =, ,$(item)))=,$(TEST_EXTRA_FILES)), \
+			$(if $(findstring $(firstword $(subst =, ,$(item)))=,$(TEST_EXTRA_FILES) $(ZEDBSD_TEST_EXTRA_FILES)), \
 				,$(item) \
 			) \
 		) \
@@ -36,5 +39,12 @@ PACKAGE_FILES += \
 	$(foreach item,$(KEILAND_WALLPAPER_TAKEN), \
 		--file $(item) --mode $(firstword $(subst =, ,$(item)))=0644)
 
-$(KEILAND_WALLPAPER_FILES) &: userland/desktop/wallpapers/generate.py
-	$(PYTHON) userland/desktop/wallpapers/generate.py $(BUILD)/wallpapers >/dev/null
+ifndef TOPLEVEL_BUILD
+.PHONY: all build
+all: build
+build: $(KEILAND_WALLPAPER_FILES)
+endif
+
+$(KEILAND_WALLPAPER_FILES) &: $(WALLPAPERS_DIR)generate.py
+	@mkdir -p $(BUILD)/wallpapers
+	$(PYTHON) $(WALLPAPERS_DIR)generate.py $(BUILD)/wallpapers >/dev/null

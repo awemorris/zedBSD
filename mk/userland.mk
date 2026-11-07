@@ -33,6 +33,7 @@ pkg_aliases = $(strip $(1) \
 	$(if $(filter preview,$(1)),keiland-preview) \
 	$(if $(filter printd,$(1)),keiland-printd) \
 	$(if $(filter installer,$(1)),install-admin) \
+	$(if $(filter wallpapers,$(1)),wayland) \
 	$(1)-firmware $(1)-test)
 
 SELECTED_PROGRAM_MAKEFILES := $(foreach mf, $(ALL_PROGRAM_MAKEFILES), \
@@ -58,6 +59,7 @@ $$(BUILD)/packages/$(notdir $(patsubst %/,%,$(1)))/.stamp: $$(_PKG_SRCS_$(1)) us
 		*) \
 			$$(MAKE) -C $(1) CC="$$(CC)" CPPFLAGS="$$(USER_CPPFLAGS)" CFLAGS="$$(USER_CFLAGS)" AS="$$(AS)" LD="$$(LD)" RANLIB="$$(RANLIB)" NM="$$(NM)" OBJCOPY="$$(OBJCOPY)" OBJDUMP="$$(OBJDUMP)" READELF="$$(READELF)" STRIP="$$(STRIP)" ;; \
 	esac
+	@mkdir -p $$(dir $$@) && touch $$@
 
 .PHONY: $(1) $(patsubst %/,%,$(1))
 $(1) $(patsubst %/,%,$(1)):

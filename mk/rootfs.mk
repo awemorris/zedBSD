@@ -78,6 +78,8 @@ ROOTFS_PACKAGE_LINKS ?= \
 	/usr/lib/libz.so=libz.so.1 \
 	/usr/lib/libcurl.so=libcurl.so.4
 
+include userland/desktop/wallpapers/Makefile
+
 ROOTFS_CONFIG_STAMP := \
 	$(BUILD)/.rootfs-config
 
