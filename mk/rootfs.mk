@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 ROOTFS_DIRECTORIES := \
 	bin sbin lib etc var root home dev boot run \
 	usr/bin usr/sbin usr/libexec usr/share share var/empty etc/ssh etc/service.d etc/keiland

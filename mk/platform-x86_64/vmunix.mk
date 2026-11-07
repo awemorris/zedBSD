@@ -120,15 +120,7 @@ VMUNIX_OBJS := \
 vmunix-x86_64: $(BUILD)/vmunix
 
 $(BUILD)/vmunix: $(VMUNIX_OBJS)
-	$(LD) \
-		-m elf_x86_64 \
-		--gc-sections \
-		-z max-page-size=4096 \
-	 	-T mk/platform-$(PLATFORM)/vmunix.ld \
-		-nostdlib \
-		-Map $@.map \
-		$(VMUNIX_OBJS) \
-		-o $@
+	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) -o $
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)

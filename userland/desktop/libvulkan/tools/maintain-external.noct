@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Awe Morris
 //
 // SPDX-License-Identifier: Zlib
+
 func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
 func lines(text) {
     var result = []; var start = 0;

@@ -1,5 +1,12 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 /* Independent userland copy of zedBSD's SHA-256 implementation. */
+
 #include "sha256.h"
 #include <errno.h>
 #include <string.h>

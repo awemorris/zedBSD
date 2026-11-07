@@ -4,6 +4,7 @@
  *
  * SPDX-License-Identifier: Zlib.
  */
+
 #include "framebuffer-map.h"
 
 #define FB_PAGE UINT64_C(4096)

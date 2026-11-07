@@ -28,12 +28,12 @@ EFI_CFLAGS := \
 	-Werror -I.
 
 .PHONY: bootloader
-bootloader-x86_64: $(BUILD)/uefi/BOOTX64.EFI \
-                   $(BUILD)/bootloader/stage1.bin \
-                   $(BUILD)/bootloader/stage1-native.bin \
-                   $(BUILD)/bootloader/stage2-chain.bin \
-                   $(BUILD)/bootloader/partition-pbr.bin \
-                   $(BUILD)/bootloader/BOOTZBSD.EXE \
+bootloader-platform: $(BUILD)/uefi/BOOTX64.EFI \
+                     $(BUILD)/bootloader/stage1.bin \
+                     $(BUILD)/bootloader/stage1-native.bin \
+                     $(BUILD)/bootloader/stage2-chain.bin \
+                     $(BUILD)/bootloader/partition-pbr.bin \
+                     $(BUILD)/bootloader/BOOTZBSD.EXE \
 
 #
 # UEFI bootloader

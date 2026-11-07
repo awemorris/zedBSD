@@ -1,5 +1,3 @@
-/* -*- mode: c; c-basic-offset: 8; indent-tabs-mode: t; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris

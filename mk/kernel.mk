@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 #
 # Kernel Sources
 #
@@ -260,13 +265,15 @@ endif
 # [Realtek RTL8125 PCIe Ethernet driver]
 ifneq ($(filter y,$(CONFIG_DRIVER_PCI_RTL8125)),)
 KERN_CPPFLAGS += \
-	-DCONFIG_DRIVER_PCI_RTL8125=1 \
+	-DCONFIG_DRIVER_PCI_RTL8125=1
 KERN_SOURCES += \
 	src/drivers/ethernet/rtl8125.c
 endif
 
 # [Realtek RTL8156/8157 USB Ethernet vendor mode driver]
 ifneq ($(filter y,$(CONFIG_DRIVER_USB_RTL815X)),)
+KERN_CPPFLAGS += \
+	-DCONFIG_DRIVER_PCI_RTL815X=1
 KERN_SOURCES += \
 	src/drivers/usb/usb-rtl815x.c
 endif

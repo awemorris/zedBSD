@@ -1,6 +1,20 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 #
 # Configurations
 #
+
+################################################
+# Platform
+################################################
+
+PLATFORM                          ?=
+ARCHITECTURE                      ?=
+BOARD                             ?=
+VARIANT                           ?=
 
 ################################################
 # Boot

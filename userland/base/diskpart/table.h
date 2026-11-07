@@ -1,6 +1,13 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef KERN_DISKPART_TABLE_H
 #define KERN_DISKPART_TABLE_H
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -18,11 +25,13 @@ struct dp_io {
 	int (*write)(void *, uint64_t, const void *, size_t);
 	int (*flush)(void *);
 };
+
 struct dp_part {
 	uint64_t start, count, attributes;
 	unsigned slot;
 	char type[37], uuid[37], name[109];
 };
+
 struct dp_copy {
 	uint8_t *header, *entries;
 	/* Initialization retains the old header separately from its replacement. */
@@ -31,6 +40,7 @@ struct dp_copy {
 	uint32_t slots, entry_size, header_size;
 	size_t bytes;
 };
+
 struct dp_table {
 	struct dp_io io;
 	unsigned format, restrictions, slots, count;
@@ -41,10 +51,16 @@ struct dp_table {
 	unsigned selected;
 	int changed;
 };
+
 int dp_load(struct dp_table *, const struct dp_io *);
-/* Snapshot and prepare only. Caller must provide exclusive media ownership
- * through dp_write; this codec cannot acquire a kernel device reservation. */
+
+/*
+ * Snapshot and prepare only. Caller must provide exclusive media
+ * ownership through dp_write; this codec cannot acquire a kernel
+ * device reservation.
+ */
 int dp_initialize_gpt(struct dp_table *, const struct dp_io *, const char *);
+
 void dp_free(struct dp_table *);
 int dp_guid_parse(const char *, uint8_t[16]);
 void dp_guid_text(const uint8_t[16], char[37]);
@@ -52,10 +68,17 @@ uint32_t dp_crc32(const void *, size_t);
 int dp_add(struct dp_table *, unsigned, uint64_t, uint64_t,
 	const char *, const char *, const char *);
 int dp_delete(struct dp_table *, unsigned);
-/* Replaces one GPT entry's type, PARTUUID, name and attributes in place. */
-int dp_modify(struct dp_table *, unsigned, const char *, const char *,
-	const char *, uint64_t);
-/* Persist metadata only; does not issue reload or promise crash atomicity.
- * started distinguishes preflight rejection from potentially partial writes. */
+
+/*
+ * Replaces one GPT entry's type, PARTUUID, name and attributes in
+ * place.
+ */
+int dp_modify(struct dp_table *, unsigned, const char *, const char *, const char *, uint64_t);
+
+/*
+ * Persist metadata only; does not issue reload or promise crash
+ * atomicity.  started distinguishes preflight rejection from
+ * potentially partial writes.
+ */
 int dp_write(struct dp_table *, int *started);
 #endif
