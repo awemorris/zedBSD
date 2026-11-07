@@ -83,6 +83,9 @@ $(PATCH_STAMP): $(DISTFILE) $(PATCHES)
 	@touch $@
 
 $(NOCT_ARTIFACT): $(PATCH_STAMP)
+	@mkdir -p $(BUILD)/dynamic
+	@test -f $(BUILD)/dynamic/libEGL.so || $(MAKE) -C $(REPO_ROOT)/userland/desktop/libegl
+	@test -f $(BUILD)/dynamic/libGLESv2.so || $(MAKE) -C $(REPO_ROOT)/userland/desktop/libglesv2
 	@rm -rf $(NOCT_BUILD_DIR)
 	@mkdir -p $(NOCT_BUILD_DIR)
 	cd $(NOCT_SRC) && \

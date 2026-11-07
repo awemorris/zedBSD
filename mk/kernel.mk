@@ -137,7 +137,8 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_PCI_VMD)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_VMD=1
 KERN_SOURCES += \
-	src/drivers/pci/pci-vmd.c
+	src/drivers/pci/pci-vmd.c \
+	src/drivers/pci/pci-vmd-plan.c
 endif
 
 # [Loopback Disk driver]

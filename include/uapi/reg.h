@@ -61,6 +61,31 @@ struct xmmreg {
 	uint8_t xmm_register[16][16];
 };
 
+#elif defined(__i386__)
+
+/*
+ * The integer registers of the 32-bit x86 processor.
+ */
+struct reg {
+	uint32_t r_eax, r_ebx, r_ecx, r_edx;
+	uint32_t r_esi, r_edi, r_ebp, r_esp;
+	uint32_t r_eip, r_eflags;
+	uint32_t r_cs, r_ss, r_ds, r_es, r_fs, r_gs;
+};
+
+/*
+ * The x87 floating-point state.
+ */
+struct fpreg {
+	uint16_t fp_control;
+	uint16_t fp_status;
+	uint16_t fp_tag;
+	uint16_t fp_opcode;
+	uint32_t fp_instruction_pointer;
+	uint32_t fp_data_pointer;
+	uint8_t fp_stack[8][16];
+};
+
 #elif defined(__aarch64__)
 
 /*

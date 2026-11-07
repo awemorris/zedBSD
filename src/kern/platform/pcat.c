@@ -251,7 +251,7 @@ kern_platform_init(
 	if (err == 0) {
 		err = drv_ucsi_acpi_attach();
 		if (err != 0 && err != ENODEV)
-			kern_logf("ucsi: attachment failed (error %d)\n", typec_error);
+			kern_logf("ucsi: attachment failed (error %d)\n", err);
 
 		kern_log_boot_step("UCSI is attached");
 	}

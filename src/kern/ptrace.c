@@ -431,6 +431,94 @@ trace_fpregs_in(
 	kern_memcpy(to->stack, from->fp_stack, sizeof(to->stack));
 }
 
+#elif defined(__i386__)
+
+/*
+ * Copies the integer registers outward, under the names a process sees.
+ */
+static void
+trace_gpregs_out(
+	const struct hal_gpregs *from,
+	struct reg *to)
+{
+	to->r_eax = from->eax;
+	to->r_ebx = from->ebx;
+	to->r_ecx = from->ecx;
+	to->r_edx = from->edx;
+	to->r_esi = from->esi;
+	to->r_edi = from->edi;
+	to->r_ebp = from->ebp;
+	to->r_esp = from->esp;
+	to->r_eip = from->eip;
+	to->r_eflags = from->eflags;
+	to->r_cs = from->cs;
+	to->r_ss = from->ss;
+	to->r_ds = from->ds;
+	to->r_es = from->es;
+	to->r_fs = from->fs;
+	to->r_gs = from->gs;
+}
+
+/*
+ * Copies the integer registers inward.
+ */
+static void
+trace_gpregs_in(
+	const struct reg *from,
+	struct hal_gpregs *to)
+{
+	to->eax = from->r_eax;
+	to->ebx = from->r_ebx;
+	to->ecx = from->r_ecx;
+	to->edx = from->r_edx;
+	to->esi = from->r_esi;
+	to->edi = from->r_edi;
+	to->ebp = from->r_ebp;
+	to->esp = from->r_esp;
+	to->eip = from->r_eip;
+	to->eflags = from->r_eflags;
+	to->cs = from->r_cs;
+	to->ss = from->r_ss;
+	to->ds = from->r_ds;
+	to->es = from->r_es;
+	to->fs = from->r_fs;
+	to->gs = from->r_gs;
+}
+
+/*
+ * Copies the x87 state outward.
+ */
+static void
+trace_fpregs_out(
+	const struct hal_fpregs *from,
+	struct fpreg *to)
+{
+	to->fp_control = from->control;
+	to->fp_status = from->status;
+	to->fp_tag = from->tag;
+	to->fp_opcode = from->opcode;
+	to->fp_instruction_pointer = from->instruction_pointer;
+	to->fp_data_pointer = from->data_pointer;
+	kern_memcpy(to->fp_stack, from->stack, sizeof(to->fp_stack));
+}
+
+/*
+ * Copies the x87 state inward.
+ */
+static void
+trace_fpregs_in(
+	const struct fpreg *from,
+	struct hal_fpregs *to)
+{
+	to->control = from->fp_control;
+	to->status = from->fp_status;
+	to->tag = from->fp_tag;
+	to->opcode = from->fp_opcode;
+	to->instruction_pointer = from->fp_instruction_pointer;
+	to->data_pointer = from->fp_data_pointer;
+	kern_memcpy(to->stack, from->fp_stack, sizeof(to->stack));
+}
+
 #elif defined(__aarch64__)
 
 /*

@@ -1,3 +1,6 @@
+override ARCHITECTURE                      := i386
+override BOARD                             := pcat
+
 override CONFIG_ROOTFS_DEVELOPMENT         := y
 override CONFIG_BOOT_SPLASH                := y
 override CONFIG_GRAPHICAL_LOGIN            := y
@@ -49,6 +52,7 @@ override CONFIG_DRIVER_USB_UVC             := y
 override CONFIG_DRIVER_BT                  := y
 override CONFIG_DRIVER_INPUT_BRIDGE        := y
 override CONFIG_DRIVER_CPU_PERF            := y
+override CONFIG_DRIVER_X86_POWER_CONTROL   := y
 override CONFIG_DRIVER_DELL_SMM_BOOST      := y
 override CONFIG_DRIVER_CAMERA              := y
 override CONFIG_DRIVER_ACPI                := y

@@ -66,7 +66,7 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 		$(SYSROOT_LIB)/libzedbsd-compiler-rt.a \
 		$(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group \
 		-o $(SYSROOT)/smoke.elf
-	@$(READELF) -h $(SYSROOT)/smoke.elf | grep -F 'Intel i386' >/dev/null
+	@$(READELF) -h $(SYSROOT)/smoke.elf | grep -E 'Intel (80)?386' >/dev/null
 	@if $(NM) -u $(SYSROOT)/smoke.elf | grep .; then \
 		echo "sysroot: smoke link retained undefined symbols" >&2; exit 1; \
 	fi

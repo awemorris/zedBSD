@@ -58,6 +58,7 @@ COMPILER_RT_SOURCES := \
 	src/libc/float-parse.c
 
 LLVM_BUILTIN_NAMES := \
+	atomic.c \
 	absvdi2.c absvsi2.c absvti2.c \
 	addvdi3.c addvsi3.c addvti3.c \
 	ashldi3.c ashlti3.c ashrdi3.c ashrti3.c \
@@ -210,10 +211,6 @@ $(LIBC_OBJ_DIR)/dynamic/src/rtld/entry.o: src/rtld/entry-i386.S
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -c $< -o $@
 
-$(LIBC_OBJ_DIR)/dynamic/src/rtld/tlsdesc.o: src/rtld/tlsdesc-i386.S
-	@mkdir -p $(dir $@)
-	$(CC) -m32 -c $< -o $@
-
 $(LIBC_OBJ_DIR)/dynamic/src/rtld/rtld.o: src/rtld/rtld.c
 	@mkdir -p $(dir $@)
 	$(CC) $(I386_LIBC_DYNAMIC_CFLAGS) -DKERN_DYNAMIC_LIBC -c $< -o $@
@@ -223,7 +220,6 @@ $(LIBC_OBJ_DIR)/dynamic/src/rtld/string.o: src/rtld/string.c
 	$(CC) $(I386_LIBC_DYNAMIC_CFLAGS) -DKERN_DYNAMIC_LIBC -c $< -o $@
 
 $(LIBC_OUT_DIR)/ld.so: $(LIBC_OBJ_DIR)/dynamic/src/rtld/entry.o \
-	$(LIBC_OBJ_DIR)/dynamic/src/rtld/tlsdesc.o \
 	$(LIBC_OBJ_DIR)/dynamic/src/rtld/rtld.o \
 	$(LIBC_OBJ_DIR)/dynamic/src/rtld/string.o
 	@mkdir -p $(dir $@)

@@ -48,9 +48,8 @@ USERLAND_PACKAGE_LIFECYCLE := 1
 include $(dir $(BASE_PACKAGE_MK))../download.mk
 
 STANDALONE_PLATFORM_DIR = $(strip \
-	$(if $(filter i386,$(PLATFORM)),pcat,\
 	$(if $(filter sun4u,$(PLATFORM)),sparcv9,\
-	$(PLATFORM))))
+	$(PLATFORM)))
 STANDALONE_TARGET_TRIPLE = $(strip \
 	$(if $(filter rpi4 rpi5 arm64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),aarch64-unknown-zedbsd,\
 	$(if $(filter vf2 riscv64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),riscv64-unknown-zedbsd,\

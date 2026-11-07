@@ -27,7 +27,9 @@ $(BOOT_LOGO): mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-
 	mv -f $@.tmp $@
 
 # Variant: bios, uefi (alias: native), hybrid
-VARIANT ?= $(if $(ZEDBSD_VARIANT),$(ZEDBSD_VARIANT),uefi)
+ifeq ($(strip $(VARIANT)),)
+VARIANT := $(if $(ZEDBSD_VARIANT),$(ZEDBSD_VARIANT),bios)
+endif
 
 VARIANT_STAMP := $(BUILD)/.variant-$(VARIANT)
 $(VARIANT_STAMP):

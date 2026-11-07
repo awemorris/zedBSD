@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: Zlib
 
 #
-# x86_64 rootfs Makefile
+# i386 rootfs Makefile
 #
 
 I386_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
 I386_ARCH_FILES  ?= $(ROOTFS_FILES)
 
-$(eval $(call ROOTFS_TREE_RULE,x86_64,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
+$(eval $(call ROOTFS_TREE_RULE,i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 
 .PHONY:rootfs-platform
 rootfs-platform: $(BUILD)/rootfs/.stamp

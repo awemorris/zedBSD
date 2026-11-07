@@ -20,13 +20,16 @@ VARIANT                           ?=
 # Boot
 ################################################
 
-# /usr/include
+# [Development]
+#  - Description: Add development headers to the rootfs.
 CONFIG_ROOTFS_DEVELOPMENT         ?= n
 
-# Show boot splash
+# [Boot Splash]
+#  - Description: Show boot splash screen.
 CONFIG_BOOT_SPLASH                ?= n
 
-# Start sessiond automatically
+# [Graphical Login]
+#  - Description: Start desktop automatically.
 CONFIG_GRAPHICAL_LOGIN            ?= n
 
 ################################################
@@ -38,9 +41,11 @@ CONFIG_GRAPHICAL_LOGIN            ?= n
 ########################
 
 # [PCI Core]
+#  - Description: Enable PCI core.
 CONFIG_DRIVER_PCI                 ?= n
 
 # [USB Core]
+#  - Description: Enable USB core.
 CONFIG_DRIVER_USB                 ?= n
 
 ################################################
@@ -52,14 +57,17 @@ CONFIG_DRIVER_USB                 ?= n
 ########################
 
 # [NVMe driver]
+#  - Description: Enable NVMe driver.
 #  - Depends: CONFIG_DRIVER_PCI
 CONFIG_DRIVER_PCI_NVME            ?= n
 
 # [SATA AHCI driver]
+#  - Description: Enable SATA AHCI driver.
 #  - Depends: CONFIG_DRIVER_PCI
 CONFIG_DRIVER_PCI_AHCI            ?= n
 
 # [Intel VMD driver]
+#  - Description: Enable Intel VMD SATA driver.
 #  - Depends: CONFIG_DRIVER_PCI
 CONFIG_DRIVER_PCI_VMD             ?= n
 

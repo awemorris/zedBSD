@@ -22,8 +22,9 @@ KERN_CPPFLAGS := \
 	$(CONFIG_CPPFLAGS)
 
 KERN_CFLAGS := \
+	--target=i386-unknown-zedbsd \
 	-m32 \
-	-mcmodel=kernel \
+	-march=i686 \
 	-mno-red-zone \
 	-mgeneral-regs-only \
 	-ffreestanding \
@@ -39,6 +40,7 @@ KERN_CFLAGS := \
 	-Wextra \
 	-Werror \
 	-Wframe-larger-than=8192 \
+	-Wno-atomic-alignment \
 	-fno-builtin
 
 # HAL C Sources
@@ -60,6 +62,7 @@ KERN_SOURCES += \
 	src/hal/i386/int.c \
 	src/hal/i386/cmain.c \
 	src/hal/i386/task.c \
+	src/hal/i386/debug.c \
 	src/hal/i386/bsp-pcat/boot.c \
 	src/hal/i386/bsp-pcat/cons.c \
 	src/hal/i386/bsp-pcat/pic.c \
@@ -76,7 +79,6 @@ KERN_ASM += \
 # Kernel Sources
 KERN_SOURCES += \
 	src/kern/platform/pcat.c \
-	src/drivers/platform/pcat/uefi-variables.c \
 	src/drivers/platform/pcat/pcat-ide.c \
 	src/drivers/platform/pcat/cpu-x86/cpux86.c \
 	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c \
@@ -91,7 +93,7 @@ KERN_SOURCES += \
 	src/drivers/pci/pci-power.c \
 	src/drivers/pci/pci-window.c \
 	src/drivers/isa/ps2-8042.c \
-	src/drivers/isa/ne2000.o \
+	src/drivers/isa/ne2000.c \
 	src/drivers/ethernet/dp8390.c
 
 VMUNIX_OBJS := \
@@ -101,8 +103,8 @@ VMUNIX_OBJS := \
 .PHONY: vmunix-platform
 vmunix-platform: $(BUILD)/vmunix
 
-$(BUILD)/vmunix: $(VMUNIX_OBJS)
-	$(LD) -m elf_i386 --gc-sections -z max-page-size=4096 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) -o $@
+$(BUILD)/vmunix: $(VMUNIX_OBJS) $(BUILD)/libc/libclang_rt.builtins.a
+	$(LD) -m elf_i386 --gc-sections -z max-page-size=4096 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) $(BUILD)/libc/libclang_rt.builtins.a -o $@
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)

@@ -67,9 +67,8 @@ EXTERNAL_LLVM_TARGET := $(strip \
 	$(if $(filter riscv64,$(ARCHITECTURE)),RISCV,\
 	$(if $(filter armv7,$(ARCHITECTURE)),ARM,X86))))
 EXTERNAL_LLVM_BIN := $(abspath $(EXTERNAL_ROOT)/build/llvm/bin)
-PLATFORM_DIR ?= $(if $(filter i386,$(PLATFORM)),pcat,\
-	$(if $(filter sun4u,$(PLATFORM)),sparcv9,\
-	$(PLATFORM)))
+PLATFORM_DIR ?= $(if $(filter sun4u,$(PLATFORM)),sparcv9,\
+	$(PLATFORM))
 EXTERNAL_PLATFORM_DIR := $(strip \
 	$(if $(TOPLEVEL_BUILD),$(PLATFORM_DIR),$(STANDALONE_PLATFORM_DIR)))
 EXTERNAL_SYSROOT := \

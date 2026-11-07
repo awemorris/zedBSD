@@ -110,6 +110,41 @@ _Static_assert(
 		HAL_TASK_SIGNAL_FRAME_CONTEXT_POINTER_OFFSET -
 			sizeof(uintptr_t),
 	"i386 restorer context offset");
+
+/*
+ * The integer registers of a stopped task, as the HAL reports them.
+ */
+struct hal_gpregs {
+	uint32_t eax, ebx, ecx, edx;
+	uint32_t esi, edi, ebp, esp;
+	uint32_t eip, eflags;
+	uint32_t cs, ss, ds, es, fs, gs;
+};
+
+/*
+ * The x87 state.
+ */
+struct hal_fpregs {
+	uint16_t control;
+	uint16_t status;
+	uint16_t tag;
+	uint16_t opcode;
+	uint32_t instruction_pointer;
+	uint32_t data_pointer;
+	uint8_t stack[8][16];
+};
+
+/*
+ * The vector state.
+ */
+struct hal_vregs {
+	uint32_t control;
+	uint32_t control_mask;
+	uint8_t xmm[8][16];
+};
 #endif
+
+#define HAL_DEBUG_POINT_MAX		4
+#define HAL_DEBUG_HAS_SINGLE_STEP	1
 
 #endif

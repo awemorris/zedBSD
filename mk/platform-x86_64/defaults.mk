@@ -1,3 +1,6 @@
+override ARCHITECTURE                      := x86_64
+override BOARD                             := pcat
+
 override CONFIG_ROOTFS_DEVELOPMENT         := y
 override CONFIG_BOOT_SPLASH                := y
 override CONFIG_GRAPHICAL_LOGIN            := y

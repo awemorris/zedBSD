@@ -1,3 +1,6 @@
+override ARCHITECTURE                      := arm64
+override BOARD                             := rpi4
+
 override CONFIG_ROOTFS_DEVELOPMENT         := y
 override CONFIG_GRAPHICAL_LOGIN            := y
 

@@ -131,7 +131,7 @@ $(BUILD)/bootloader/stage1-native.o: $(BIOS_LOADER)/stage1.S
 
 # Stage2: Sectors after MBR. Loads the PBR.
 $(BUILD)/bootloader/stage2-chain.bin: $(BUILD)/bootloader/stage2-chain.raw
-	$(NOCT) --path=tools/build tools/build/finalize-bios-stage2.noct --machine pcat $< $@
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/old-tools/build/finalize-bios-stage2.noct --machine pcat $< $@
 
 $(BUILD)/bootloader/stage2-chain.raw: $(BUILD)/bootloader/stage2-chain.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -158,10 +158,10 @@ $(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S \
 
 # Final Stage: BIOS/DOS dual-purpose bootloader.
 $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin
-	$(NOCT) --path=tools/build tools/build/make-mz-exe.noct --entry 0x20 $< $@
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/old-tools/build/make-mz-exe.noct --entry 0x20 $< $@
 
 $(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw
-	$(NOCT) --path=tools/build tools/build/finalize-bios-stage2.noct --machine pcat $< $@
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/old-tools/build/finalize-bios-stage2.noct --machine pcat $< $@
 
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -232,7 +232,7 @@ $(BUILD)/bootloader/bios-memory-map.i386.o: bootloader/bios/memory-map.c bootloa
 		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
 		-c $< -o $@
 
-$(BUILD)/bootloader/common-memory-map.i386.o: bootloader/common/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/i386-handoff.h
+$(BUILD)/bootloader/common-memory-map.i386.o: bootloader/common/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
 	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
 		-fno-stack-protector -fno-asynchronous-unwind-tables \

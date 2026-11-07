@@ -40,6 +40,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifndef CONFIG_DRIVER_PCI_RTL8125_PROFILE
+#define CONFIG_DRIVER_PCI_RTL8125_PROFILE 0
+#endif
+
 /*
  * The PCI identities of the controllers.
  *
