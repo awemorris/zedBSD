@@ -86,4 +86,4 @@ include mk/rootfs.mk
 include mk/platform-$(PLATFORM)/Makefile
 
 # Foreign targets. (targets: keiland-linux, keiland-linux-install, keiland-freebsd, keiland-freebsd-install)
-include mk/userland.mk
+include mk/foreign.mk

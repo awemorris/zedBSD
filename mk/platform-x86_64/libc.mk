@@ -6,7 +6,7 @@
 PLATFORM_X86_64_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT           ?= $(abspath $(PLATFORM_X86_64_DIR)/../..)
 
-include $(REPO_ROOT)/mk/sources-libc.mk
+include $(REPO_ROOT)/mk/libc.mk
 include $(REPO_ROOT)/build-jobs.mk
 
 LIBC_OUT_DIR := $(BUILD)/libc
