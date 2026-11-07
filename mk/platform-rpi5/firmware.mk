@@ -3,14 +3,16 @@
 #
 # SPDX-License-Identifier: Zlib
 
+#
 # Raspberry Pi 5 boot firmware
 #
-# The Pi 5's bootloader is in the board's EEPROM and reads config.txt, the
-# kernel and the device tree from the SD card's FAT partition; no GPU
-# firmware goes there.  The partition carries the two device trees the
-# bootloader picks from by the chip's stepping (bcm2712-rpi-5-b.dtb for C1,
-# bcm2712d0-rpi-5-b.dtb for D0) and their license, fetched file by file from
-# the same raspberrypi/firmware commit as the Pi 4's.
+# The Pi 5's bootloader is in the board's EEPROM and reads config.txt,
+# the kernel and the device tree from the SD card's FAT partition, no
+# GPU firmware goes there.  The partition carries the two device trees
+# the bootloader picks from by the chip's stepping and their license,
+# fetched file by file from the same raspberrypi/firmware commit as
+# the Pi 4's.
+#
 
 include userland/firmware/zedbsd-firmware.mk
 

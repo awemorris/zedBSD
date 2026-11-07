@@ -67,14 +67,13 @@ EXTERNAL_LLVM_TARGET := $(strip \
 	$(if $(filter riscv64,$(ARCHITECTURE)),RISCV,\
 	$(if $(filter armv7,$(ARCHITECTURE)),ARM,X86))))
 EXTERNAL_LLVM_BIN := $(abspath $(EXTERNAL_ROOT)/build/llvm/bin)
-EXTERNAL_SYSROOT := \
-	$(abspath $(EXTERNAL_ROOT)/build/$(ARCHITECTURE)/sysroot)
 PLATFORM_DIR ?= $(if $(filter i386,$(PLATFORM)),pcat,\
-	$(if $(filter rpi4 rpi5,$(PLATFORM)),arm64,\
 	$(if $(filter sun4u,$(PLATFORM)),sparcv9,\
-	$(PLATFORM))))
+	$(PLATFORM)))
 EXTERNAL_PLATFORM_DIR := $(strip \
 	$(if $(TOPLEVEL_BUILD),$(PLATFORM_DIR),$(STANDALONE_PLATFORM_DIR)))
+EXTERNAL_SYSROOT := \
+	$(abspath $(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)/sysroot)
 EXTERNAL_DYNAMIC := \
 	$(abspath $(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)/dynamic)
 

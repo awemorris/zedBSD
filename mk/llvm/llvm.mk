@@ -29,7 +29,7 @@ else ifeq ($(ARCHITECTURE),mips32)
 TARGET_TRIPLE  := mips-unknown-zedbsd
 endif
 
-TARGET_SYSROOT := $(abspath build/$(ARCHITECTURE)/sysroot)
+TARGET_SYSROOT := $(abspath $(or $(BUILD),build/$(PLATFORM))/sysroot)
 
 # Toolchain Commands
 TARGET_CLANG := $(TARGET_LLVM_BIN)/clang

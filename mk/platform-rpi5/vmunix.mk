@@ -123,9 +123,6 @@ VMUNIX_OBJS := \
 	$(sort $(patsubst %.c,$(BUILD)/%.o,$(KERN_SOURCES))) \
 	$(sort $(patsubst %.S,$(BUILD)/%.o,$(KERN_ASM)))
 
-.PHONY: vmunix-platform
-vmunix-platform: $(BUILD)/vmunix
-
 $(BUILD)/kernel.elf: $(VMUNIX_OBJS) mk/platform-rpi5/vmunix.ld mk/platform-rpi5/tools/check-arm64-vmunix.py
 	@mkdir -p $(dir $@)
 	$(LD) -m aarch64elf --gc-sections -z max-page-size=4096 -T mk/platform-rpi5/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) -o $@
@@ -147,3 +144,6 @@ $(BUILD)/%.o: %.c
 $(BUILD)/%.o: %.S
 	@mkdir -p $(dir $@)
 	$(CC) $(KERN_CPPFLAGS) $(KERN_CFLAGS) -c $< -o $@
+
+.PHONY: vmunix-platform
+vmunix-platform: $(BUILD)/vmunix

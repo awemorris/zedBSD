@@ -49,9 +49,8 @@ include $(dir $(BASE_PACKAGE_MK))../download.mk
 
 STANDALONE_PLATFORM_DIR = $(strip \
 	$(if $(filter i386,$(PLATFORM)),pcat,\
-	$(if $(filter rpi4 rpi5,$(PLATFORM)),arm64,\
 	$(if $(filter sun4u,$(PLATFORM)),sparcv9,\
-	$(PLATFORM)))))
+	$(PLATFORM))))
 STANDALONE_TARGET_TRIPLE = $(strip \
 	$(if $(filter rpi4 rpi5 arm64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),aarch64-unknown-zedbsd,\
 	$(if $(filter i386 pcat,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),i386-unknown-zedbsd,\

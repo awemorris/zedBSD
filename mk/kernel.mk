@@ -301,7 +301,10 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_VF2_ETHERNET)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_VF2_ETHERNET=1
 KERN_SOURCES += \
-	src/drivers/vf2/ethernet.c
+	src/drivers/platform/visionfive2/vf2-ethernet.c \
+	src/drivers/ethernet/dw-eqos.c \
+	src/drivers/ethernet/mii-phy.c \
+	src/drivers/ethernet/yt8531.c
 endif
 
 # [PC/AT NE2000-compatible ISA Ethernet driver]
