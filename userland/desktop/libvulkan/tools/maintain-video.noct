@@ -1,13 +1,7 @@
-// zedBSD Vulkan Video declaration maintenance (ws083-p002); Copyright 2026 Awe Morris, Zlib.
-// Selects licensed declaration data from the Khronos Vulkan-Headers 1.4.309 header
-// (Debian libvulkan-dev 1.4.309.0-1): the extensions VK_KHR_video_queue,
-// VK_KHR_video_decode_queue, VK_KHR_video_decode_h264, VK_KHR_video_decode_h265 and
-// VK_KHR_synchronization2, and
-// the Vulkan 1.3 types synchronization2's names alias.  Production builds consume the
-// maintained header and never invoke this tool.
+// zedBSD
+// Copyright (C) 2026 Awe Morris
 //
-//   build/NoctLang/build-static/noct userland/desktop/libvulkan/tools/maintain-video.noct \
-//       /usr/include/vulkan/vulkan_core.h include/libc/vulkan/vulkan_video.h
+// SPDX-License-Identifier: Zlib
 
 func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
 func lines(text) {

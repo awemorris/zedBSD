@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 LIBEGL_SOURCES := userland/desktop/libegl/egl.c userland/desktop/libegl/vulkan.c

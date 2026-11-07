@@ -1,5 +1,10 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))sources.mk
-# The Linux build of libkeiland.so (with the widgets of libkeiland/ui, WS131 p012); the zedBSD build remains in Makefile.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
 KEILAND_LINUX_KEILAND_SOURCES := $(LIBKEILAND_SOURCES)
+
 $(eval $(call KEILAND_LINUX_LIBRARY,keiland,libkeiland.so,$(KEILAND_LINUX_KEILAND_SOURCES),libwayland-client.so libtruetype.so libpng-compat.so libvulkan.so.1,-lm,userland/desktop/libkeiland/exports.map))

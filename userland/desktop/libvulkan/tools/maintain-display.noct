@@ -1,13 +1,10 @@
-// zedBSD display-control declaration maintenance (ws113-p003); Copyright 2026 Awe Morris, Zlib.
-// Selects licensed declaration data from the Khronos Vulkan-Headers 1.4.309 header
-// (Debian libvulkan-dev 1.4.309.0-1): the extensions VK_EXT_display_surface_counter and
-// VK_EXT_display_control.  Production builds consume the maintained header and never
-// invoke this tool.
+// zedBSD
+// Copyright (C) 2026 Awe Morris
 //
-//   build/NoctLang/build-static/noct userland/desktop/libvulkan/tools/maintain-display.noct \
-//       /usr/include/vulkan/vulkan_core.h include/libc/vulkan/vulkan_display_control.h
+// SPDX-License-Identifier: Zlib
 
 func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+
 func lines(text) {
     var result = []; var start = 0;
     for (i in 0..String.charCount(text)) {

@@ -1,7 +1,12 @@
-// zedBSD; Copyright 2026 Awe Morris; SPDX-License-Identifier: Zlib.
-// Generates original recording wrappers from public API declarations and explicit pointer rules.
-// Native protocol identifiers are maintained separately; no renderer implementation is imported.
-func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
+
+func starts(text, prefix) {
+    return String.substring(text, 0, String.charCount(prefix)) == prefix;
+}
+
 func split(text, separator) {
     var result = []; var start = 0;
     for (i in 0..String.charCount(text)) {
@@ -11,13 +16,16 @@ func split(text, separator) {
     }
     Array.push(result, String.substring(text, start, -1)); return result;
 }
+
 func trim(text) {
     var first = 0; var last = String.charCount(text);
     while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) { first = first + 1; }
     while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t")) { last = last - 1; }
     return String.substring(text, first, last - first);
 }
+
 func has(list, name) { for (i in 0..Array.size(list)) { if (list[i] == name) { return true; } } return false; }
+
 func pointerCount(command, name, fixed) {
     if (fixed != "") { return fixed; }
     var counts = [
@@ -37,6 +45,7 @@ func pointerCount(command, name, fixed) {
     if (name == "pColor" || name == "pDepthStencil" || name == "pRenderPassBegin") { return "1"; }
     System.error("unclassified command pointer: " + command + "." + name);
 }
+
 func encodeScalar(handles, records, type, expression, indent) {
     if (has(handles, type)) {
         var cast = "(uint64_t)";
@@ -52,6 +61,7 @@ func encodeScalar(handles, records, type, expression, indent) {
     if (type == "VkDeviceSize" || type == "uint64_t" || type == "size_t") { writer = "vulkan_record_u64"; }
     return indent + writer + "(&writer, " + expression + ");\n";
 }
+
 // The image a transfer command writes, for the swapchain-content counts (ws141-p016 (B)); "" when it writes none.
 func writtenImage(command) {
     var written = [
@@ -62,6 +72,7 @@ func writtenImage(command) {
     for (i in 0..Array.size(written)) { if (written[i][0] == command) { return written[i][1]; } }
     return "";
 }
+
 // The zedBSD GPU command protocol's name of a Vulkan command (uapi/gpu-op.h): vkCmdBindPipeline -> GPU_OP_CMD_BIND_PIPELINE.
 func opName(name) {
     var lower = "abcdefghijklmnopqrstuvwxyz";
@@ -78,6 +89,7 @@ func opName(name) {
     }
     return out;
 }
+
 func main(args) {
     if (Array.size(args) != 2) { System.error("usage: maintain-commands.noct PUBLIC_HEADER OUTPUT_INC"); }
     var input = split(FileUtil.readText(args[0]), "\n"); var handles = []; var records = [];

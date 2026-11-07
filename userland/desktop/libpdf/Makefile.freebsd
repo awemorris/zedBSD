@@ -1,7 +1,12 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent FreeBSD build of libpdf; source membership mirrors the target package.
-KEILAND_FREEBSD_LIBPDF_SOURCES := userland/desktop/libpdf/writer.c \
-	userland/desktop/libpdf/update.c userland/desktop/libpdf/clean.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_FREEBSD_LIBPDF_SOURCES := \
+	userland/desktop/libpdf/writer.c \
+	userland/desktop/libpdf/update.c \
+	userland/desktop/libpdf/clean.c \
 	userland/desktop/libpdf/outline.c \
 	userland/desktop/libpdf/paint.c \
 	userland/desktop/libpdf/object.c \
@@ -27,4 +32,5 @@ KEILAND_FREEBSD_LIBPDF_SOURCES := userland/desktop/libpdf/writer.c \
 	userland/desktop/libpdf/cff.c \
 	userland/desktop/libpdf/cffdata.c \
 	userland/desktop/libpdf/crypt.c
+
 $(eval $(call KEILAND_FREEBSD_LIBRARY,libpdf,libpdf.so,$(KEILAND_FREEBSD_LIBPDF_SOURCES),libz-compat.so libjpeg-compat.so libtruetype.so libkeiland-compat.a,-lm))

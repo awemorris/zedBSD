@@ -1,17 +1,23 @@
-// zedBSD Vulkan declaration maintenance; Copyright 2026 Awe Morris, Zlib.
-// Reads only the public Khronos registry-derived declaration data, not an implementation.
-// Production builds consume maintained headers and never invoke this tool.
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
 
-func fail(message) { System.error(message); }
+func fail(message) {
+     System.error(message);
+}
+
 func starts(text, prefix) {
     return String.substring(text, 0, String.charCount(prefix)) == prefix;
 }
+
 func trim(text) {
     var first = 0; var last = String.charCount(text);
     while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) { first = first + 1; }
     while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t" || String.charAt(text, last - 1) == "\r")) { last = last - 1; }
     return String.substring(text, first, last - first);
 }
+
 func splitLines(text) {
     var lines = []; var start = 0;
     for (i in 0..String.charCount(text)) {
@@ -22,6 +28,7 @@ func splitLines(text) {
     if (start < String.charCount(text)) { Array.push(lines, String.substring(text, start, -1)); }
     return lines;
 }
+
 func compact(text) {
     var out = ""; var space = false;
     for (i in 0..String.charCount(text)) {
@@ -34,12 +41,14 @@ func compact(text) {
     }
     return out;
 }
+
 func containsAny(text, names) {
     for (i in 0..Array.size(names)) {
         if (String.indexOf(text, names[i]) >= 0) { return true; }
     }
     return false;
 }
+
 func main(args) {
     if (Array.size(args) != 2) { fail("usage: maintain-api.noct PINNED-vulkan_core.h OUTPUT-vulkan_core.h"); }
     var source = FileUtil.readText(args[0]);

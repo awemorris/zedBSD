@@ -1,6 +1,10 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent Linux build of settings; source membership mirrors the target package.
-KEILAND_LINUX_SETTINGS_SOURCES := userland/desktop/settings/main.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_SETTINGS_SOURCES := \
+	userland/desktop/settings/main.c \
 	userland/desktop/settings/window.c \
 	userland/desktop/settings/present.c \
 	userland/desktop/settings/glass.c \
@@ -14,8 +18,15 @@ KEILAND_LINUX_SETTINGS_SOURCES := userland/desktop/settings/main.c \
 	userland/desktop/settings/page-home.c \
 	userland/desktop/settings/page-about.c \
 	userland/desktop/settings/welcome.c \
-	userland/desktop/settings/page-users.c userland/desktop/settings/page-users-admin.c userland/desktop/settings/page-users-pin.c userland/desktop/settings/page-users-keys.c userland/desktop/settings/page-users-password.c userland/desktop/settings/dialog.c \
-	userland/desktop/settings/page-soon.c userland/desktop/settings/page-power.c userland/desktop/settings/page-notifications.c \
+	userland/desktop/settings/page-users.c \
+	userland/desktop/settings/page-users-admin.c \
+	userland/desktop/settings/page-users-pin.c \
+	userland/desktop/settings/page-users-keys.c \
+	userland/desktop/settings/page-users-password.c \
+	userland/desktop/settings/dialog.c \
+	userland/desktop/settings/page-soon.c \
+	userland/desktop/settings/page-power.c \
+	userland/desktop/settings/page-notifications.c \
 	userland/desktop/settings/page-network.c \
 	userland/desktop/settings/page-wired.c \
 	userland/desktop/settings/wired.c \
@@ -41,5 +52,5 @@ KEILAND_LINUX_SETTINGS_SOURCES := userland/desktop/settings/main.c \
 	userland/desktop/artwork/mark.c \
 	userland/desktop/preview/client.c \
 	userland/desktop/preview/linux/spawn.c
-# ws168-p004: the wallpapers' tiles are made by keiland-preview (libexec), confined with seccomp.
+
 $(eval $(call KEILAND_LINUX_PROGRAM,settings,bin,$(KEILAND_LINUX_SETTINGS_SOURCES),libkeiland.so libwayland-client.so libtruetype.so libvulkan.so.1,-lm -pthread))

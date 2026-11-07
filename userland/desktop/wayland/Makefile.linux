@@ -1,7 +1,11 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent Linux compositor list; target-only device modules and X11 helper are excluded.
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 # keiland-linux-sync: only userland/desktop/wayland/shot-none.c (the zedBSD Makefile picks shot.c or shot-none.c by ZEDBSD_TEST_SCREEN_CAPTURE)
-# keiland-linux-sync: skip userland/desktop/wayland/shot.c (the zedBSD test images' screen capture, ws173-p002; Linux builds shot-none.c)
+# keiland-linux-sync: skip userland/desktop/wayland/shot.c (the zedBSD test images' screen capture, Linux builds shot-none.c)
+
 WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/wire.c \
 	userland/desktop/wayland/objects.c \
@@ -17,8 +21,38 @@ WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/touchpad.c \
 	userland/desktop/wayland/pointer-accel.c \
 	userland/desktop/wayland/network-info.c \
-	userland/desktop/wayland/super-tap.c userland/desktop/wayland/apps.c userland/desktop/wayland/apps-bar.c userland/desktop/wayland/switcher.c userland/desktop/wayland/switcher-shell.c userland/desktop/wayland/layout.c userland/desktop/wayland/swipe.c userland/desktop/wayland/edge.c userland/desktop/wayland/arrange.c userland/desktop/wayland/arrange-shell.c userland/desktop/wayland/power-layout.c userland/desktop/wayland/lock-clock.c userland/desktop/wayland/dnd-state.c userland/desktop/wayland/lock-swipe.c userland/desktop/wayland/lock-key.c userland/desktop/wayland/lock-keypad.c userland/desktop/wayland/power-dialog.c userland/desktop/wayland/title-tap.c userland/desktop/wayland/lid.c userland/desktop/wayland/sleep-rules.c userland/desktop/wayland/sleep.c userland/desktop/wayland/output-switch.c userland/desktop/wayland/heads.c userland/desktop/wayland/plane.c userland/desktop/wayland/surface-outputs.c userland/desktop/wayland/displays.c userland/desktop/wayland/displays-shell.c userland/desktop/wayland/rotate.c userland/desktop/wayland/output-rotate.c userland/desktop/wayland/turn.c \
-	userland/desktop/wayland/compose.c userland/desktop/wayland/scene.c \
+	userland/desktop/wayland/super-tap.c \
+	userland/desktop/wayland/apps.c \
+	userland/desktop/wayland/apps-bar.c \
+	userland/desktop/wayland/switcher.c \
+	userland/desktop/wayland/switcher-shell.c \
+	userland/desktop/wayland/layout.c \
+	userland/desktop/wayland/swipe.c \
+	userland/desktop/wayland/edge.c \
+	userland/desktop/wayland/arrange.c \
+	userland/desktop/wayland/arrange-shell.c \
+	userland/desktop/wayland/power-layout.c \
+	userland/desktop/wayland/lock-clock.c \
+	userland/desktop/wayland/dnd-state.c \
+	userland/desktop/wayland/lock-swipe.c \
+	userland/desktop/wayland/lock-key.c \
+	userland/desktop/wayland/lock-keypad.c \
+	userland/desktop/wayland/power-dialog.c \
+	userland/desktop/wayland/title-tap.c \
+	userland/desktop/wayland/lid.c \
+	userland/desktop/wayland/sleep-rules.c \
+	userland/desktop/wayland/sleep.c \
+	userland/desktop/wayland/output-switch.c \
+	userland/desktop/wayland/heads.c \
+	userland/desktop/wayland/plane.c \
+	userland/desktop/wayland/surface-outputs.c \
+	userland/desktop/wayland/displays.c \
+	userland/desktop/wayland/displays-shell.c \
+	userland/desktop/wayland/rotate.c \
+	userland/desktop/wayland/output-rotate.c \
+	userland/desktop/wayland/turn.c \
+	userland/desktop/wayland/compose.c \
+	userland/desktop/wayland/scene.c \
 	userland/desktop/wayland/import.c \
 	userland/desktop/wayland/shm.c \
 	userland/desktop/wayland/glass.c \
@@ -28,7 +62,8 @@ WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/corner.c \
 	userland/desktop/wayland/keyboard.c \
 	userland/desktop/wayland/keyboard-layout.c \
-	userland/desktop/wayland/keyboard-hand.c userland/desktop/wayland/hand-cloud.c \
+	userland/desktop/wayland/keyboard-hand.c \
+	userland/desktop/wayland/hand-cloud.c \
 	userland/desktop/wayland/menu.c \
 	userland/desktop/wayland/menu-shell.c \
 	userland/desktop/wayland/titlebar.c \
@@ -70,7 +105,8 @@ WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/network.c \
 	userland/desktop/wayland/volume.c \
 	userland/desktop/wayland/language.c \
-	userland/desktop/wayland/media.c userland/desktop/wayland/media-library.c \
+	userland/desktop/wayland/media.c \
+	userland/desktop/wayland/media-library.c \
 	userland/desktop/wayland/settings.c \
 	userland/desktop/wayland/settings-store.c \
 	userland/desktop/wayland/shot-none.c \
@@ -109,6 +145,7 @@ WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/backend-host.c \
 	userland/desktop/wayland/os.c \
 	userland/desktop/wayland/gpu-host.c
+
 $(eval $(call KEILAND_LINUX_PROGRAM,wayland,bin,$(WAYLAND_LINUX_SOURCES),libkeiland.so libkeiland-backend.a libtruetype.so libpng-compat.so libjpeg-compat.so libz-compat.so libvulkan.so.1,-lm))
 
 $(eval $(call KEILAND_LINUX_DATA,share/fonts/keiland.ttf,userland/desktop/fonts/Mahora-Regular.ttf))
@@ -128,10 +165,13 @@ $(KEILAND_LINUX_EMOJI):
 	curl -fL --max-time 180 -o $@.tmp https://github.com/googlefonts/noto-emoji/raw/v2.047/fonts/NotoColorEmoji.ttf
 	@printf '%s  %s\n' 39ee3c587e10e89669b9ff32703261d10d5f9c4dd5ad147b6b5a1c5200591817 $@.tmp | sha256sum -c -
 	mv $@.tmp $@
+
 $(KEILAND_LINUX_BUILD)/share/fonts/keiland-emoji.ttf: $(KEILAND_LINUX_EMOJI)
 	@printf '%s  %s\n' 39ee3c587e10e89669b9ff32703261d10d5f9c4dd5ad147b6b5a1c5200591817 $< | sha256sum -c -
 	@mkdir -p $(dir $@)
 	cp $< $@
+
 KEILAND_LINUX_ALL += $(KEILAND_LINUX_BUILD)/share/fonts/keiland-emoji.ttf
 KEILAND_LINUX_INSTALL += share/fonts/keiland-emoji.ttf
+
 $(eval $(call KEILAND_LINUX_DATA,share/licenses/noto-color-emoji/OFL-1.1.txt,userland/packages/fonts/noto-color-emoji/OFL-1.1.txt))

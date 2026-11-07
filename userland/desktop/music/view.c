@@ -6,17 +6,18 @@
  */
 
 /*
- * Music's view (ws120-p009; music.h): at the left the albums -- a search
- * field over "All Songs" and each album with its cover, title and artist
- * -- and at the right the album chosen: its cover, title, artist, how many
- * songs and how long, a Play button, and its songs (the number, or a mark
- * on the one playing, the title, the artist when it is not the album's,
- * the length).  A double click or a tap on a song plays it.  At the bottom
- * across the window, the bar of what plays: its cover, title and artist,
- * Previous, Play or Pause and Next, and the position with the times.
+ * Music's view: at the left the albums -- a search field over "All
+ * Songs" and each album with its cover, title and artist -- and at
+ * the right the album chosen: its cover, title, artist, how many
+ * songs and how long, a Play button, and its songs (the number, or a
+ * mark on the one playing, the title, the artist when it is not the
+ * album's, the length).  A double click or a tap on a song plays it.
+ * At the bottom across the window, the bar of what plays: its cover,
+ * title and artist, Previous, Play or Pause and Next, and the
+ * position with the times.
  *
- * The view asks the window for what it cannot do itself (playing, a seek)
- * as requests; the window tells it what plays.
+ * The view asks the window for what it cannot do itself (playing, a
+ * seek) as requests; the window tells it what plays.
  */
 
 #include "music.h"

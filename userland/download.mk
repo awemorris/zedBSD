@@ -1,5 +1,9 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 # Common standalone source-distribution lifecycle for userland items.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 # The top-level build includes every package Makefile to collect metadata.  It
 # owns its aggregate lifecycle targets, so package-local defaults must only be

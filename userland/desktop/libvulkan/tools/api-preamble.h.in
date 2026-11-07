@@ -1,10 +1,8 @@
-/* -*- mode: c; c-file-style: "linux"; tab-width: 8; -*- */
-
 /*
- * zedBSD declaration formatting and selection: Copyright (C) 2026 Awe Morris.
- * Registry-derived API declarations: Copyright 2015-2023 The Khronos Group Inc.
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
  *
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-License-Identifier: Zlib
  */
 
 /*
@@ -14,6 +12,13 @@
  * data described in API-PROVENANCE.md. They declare no implementation support.
  * The library advertises only the features and extensions it implements.
  */
+
+/*
+ * Registry-derived API declarations:
+ * Copyright 2015-2023 The Khronos Group Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 
 #ifndef KERN_VULKAN_CORE_H
 #define KERN_VULKAN_CORE_H

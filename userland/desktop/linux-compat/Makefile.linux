@@ -1,5 +1,10 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 # Linux uses glibc plus the existing OpenBSD digest implementations; no target libc headers are searched.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 # keiland-linux-sync: only src/libc/openbsd-*.c (digest implementation)
+
 KEILAND_LINUX_DIGEST_SOURCES := src/libc/openbsd-sha2.c src/libc/openbsd-digest.c
 $(eval $(call KEILAND_LINUX_STATIC,digest,libkeiland-compat.a,$(KEILAND_LINUX_DIGEST_SOURCES)))

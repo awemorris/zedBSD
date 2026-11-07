@@ -6,31 +6,33 @@
  */
 
 /*
- * The collection (ws120-p008, ws177-p020): the songs of a folder (~/Music)
- * and of the files opened, grouped by album.
+ * The collection: the songs of a folder (~/Music) and of the files
+ * opened, grouped by album.
  *
- * A folder is looked through sixteen levels deep (a folder met again on
- * the way down, through a link, is passed over) for .m4a and .mp4 files
- * with sound; each file's tags (tags.c) give its song.  The tags are kept
- * in a cache file by the file's size and time, so that a file not changed
- * is not read again; the covers are not kept there, but read from the file
- * of the album's first song with one when the album is first drawn.  The
- * folders looked through are remembered with their times, so that a
- * change in them is found (mu_library_changed) and the folder looked
- * through again (mu_library_rescan).
+ * A folder is looked through sixteen levels deep (a folder met again
+ * on the way down, through a link, is passed over) for .m4a and .mp4
+ * files with sound; each file's tags (tags.c) give its song.  The
+ * tags are kept in a cache file by the file's size and time, so that
+ * a file not changed is not read again; the covers are not kept
+ * there, but read from the file of the album's first song with one
+ * when the album is first drawn.  The folders looked through are
+ * remembered with their times, so that a change in them is found
+ * (mu_library_changed) and the folder looked through again
+ * (mu_library_rescan).
  *
- * An album is its title with its album artist (the song's artist when the
- * song names none), the names compared without regard to case or to the
- * spaces around and between their words.  Songs that name no album artist,
- * of one album title in one folder, are one album even when their artists
- * differ (its artist is then "Various Artists").  Two albums of one title
- * and artist in different folders are told apart when both have a song of
- * the same number; a folder named "CD n", "Disc n" or "Disk n" counts as
- * the folder above it.  A file opened from outside the folder joins the
- * album of its title and artist.  The albums are in the order of their
- * titles, the songs in the order of their albums, then of their numbers,
- * then of their titles, so that the next song of a song is the next one of
- * the list.
+ * An album is its title with its album artist (the song's artist when
+ * the song names none), the names compared without regard to case or
+ * to the spaces around and between their words.  Songs that name no
+ * album artist, of one album title in one folder, are one album even
+ * when their artists differ (its artist is then "Various Artists").
+ * Two albums of one title and artist in different folders are told
+ * apart when both have a song of the same number; a folder named "CD
+ * n", "Disc n" or "Disk n" counts as the folder above it.  A file
+ * opened from outside the folder joins the album of its title and
+ * artist.  The albums are in the order of their titles, the songs in
+ * the order of their albums, then of their numbers, then of their
+ * titles, so that the next song of a song is the next one of the
+ * list.
  */
 
 #include "music.h"
@@ -66,10 +68,11 @@
 
 /*
  * What the library knows of an album besides what the view shows: the
- * keys it is found by (its title and artist folded, its folder), whether
- * its artist is an album artist the tags named, and its songs' numbers
- * with their folders (to tell two albums of one name apart).  It follows
- * its album's index; library_sort moves both together.
+ * keys it is found by (its title and artist folded, its folder),
+ * whether its artist is an album artist the tags named, and its
+ * songs' numbers with their folders (to tell two albums of one name
+ * apart).  It follows its album's index; library_sort moves both
+ * together.
  */
 struct library_album {
 	char *title_key;
@@ -91,8 +94,8 @@ struct library_folder {
 /*
  * A file's tags as the cache keeps them: its path, size and time (in
  * nanoseconds, library_time), the tags without the cover's bytes, and
- * whether the last look through the folder met the file (only those are
- * written back).
+ * whether the last look through the folder met the file (only those
+ * are written back).
  */
 struct library_cached {
 	char *path;
@@ -104,10 +107,10 @@ struct library_cached {
 
 /*
  * The collection: the songs and the albums (with the library's own of
- * each album), the folder looked through (and whether it existed), the
- * folders met in it with their times, the files added from outside it,
- * and the cache of the files' tags (sorted by path) with whether it was
- * read and changed since.
+ * each album), the folder looked through (and whether it existed),
+ * the folders met in it with their times, the files added from
+ * outside it, and the cache of the files' tags (sorted by path) with
+ * whether it was read and changed since.
  */
 struct library {
 	struct mu_song *songs;
@@ -136,9 +139,9 @@ struct library {
 static struct library library;
 
 /*
- * Where the cache file is: set by mu_library_set_cache (a test's own, or
- * empty for none), otherwise found from $XDG_CACHE_HOME or $HOME at the
- * first scan.
+ * Where the cache file is: set by mu_library_set_cache (a test's own,
+ * or empty for none), otherwise found from $XDG_CACHE_HOME or $HOME
+ * at the first scan.
  */
 static char library_cache_path[LIBRARY_PATH_MAX];
 static int library_cache_chosen;
@@ -179,8 +182,8 @@ static void library_clean_text(const char *text, char *clean, size_t size);
 static long long library_time(const struct stat *status);
 
 /*
- * Sets the cache file of the tags (NULL or empty for none), before the
- * first scan.
+ * Sets the cache file of the tags (NULL or empty for none), before
+ * the first scan.
  */
 void
 mu_library_set_cache(
@@ -195,7 +198,8 @@ mu_library_set_cache(
 
 /*
  * Looks through a folder for songs and adds them to the collection.
- * Returns 0 (a folder that does not exist has none), or an errno value.
+ * Returns 0 (a folder that does not exist has none), or an errno
+ * value.
  */
 int
 mu_library_scan(
@@ -254,8 +258,9 @@ mu_library_scan(
 }
 
 /*
- * Tells whether the folder changed since it was looked through: a folder
- * met in it changed its time or went, or the folder came.  Returns 1 or 0.
+ * Tells whether the folder changed since it was looked through: a
+ * folder met in it changed its time or went, or the folder came.
+ * Returns 1 or 0.
  */
 int
 mu_library_changed(void)
@@ -294,10 +299,10 @@ mu_library_changed(void)
 }
 
 /*
- * Looks through the folder again (the cache spares the files not changed)
- * and adds the files from outside it again.  The albums' pictures are the
- * view's, forgotten before (mu_view_forget_pictures).  Returns 0 or an
- * errno value.
+ * Looks through the folder again (the cache spares the files not
+ * changed) and adds the files from outside it again.  The albums'
+ * pictures are the view's, forgotten before
+ * (mu_view_forget_pictures).  Returns 0 or an errno value.
  */
 int
 mu_library_rescan(void)
@@ -344,9 +349,9 @@ mu_library_rescan(void)
 }
 
 /*
- * Adds a file's song to the collection (it may be outside the folder),
- * or finds it there.  Returns 0 with its index, or an errno value: the
- * file's or its tags', ENOTSUP for one without sound.
+ * Adds a file's song to the collection (it may be outside the
+ * folder), or finds it there.  Returns 0 with its index, or an errno
+ * value: the file's or its tags', ENOTSUP for one without sound.
  */
 int
 mu_library_add_file(
@@ -435,10 +440,10 @@ mu_library_find(
 }
 
 /*
- * Reads an album's cover from its file, when it has one and it is not read
- * yet.  Returns 0 (the album's cover holds the bytes, or the album has
- * none), ENOENT when the file has none any more, or an errno value of the
- * file's.
+ * Reads an album's cover from its file, when it has one and it is not
+ * read yet.  Returns 0 (the album's cover holds the bytes, or the
+ * album has none), ENOENT when the file has none any more, or an
+ * errno value of the file's.
  */
 int
 mu_library_cover_load(
@@ -498,8 +503,9 @@ mu_albums(
 
 /*
  * Lists the songs shown: those of an album (-1 for every one) whose
- * title, artist or album has a search (any for an empty one or NULL), in
- * order.  Returns how many indices are stored, at most the capacity.
+ * title, artist or album has a search (any for an empty one or NULL),
+ * in order.  Returns how many indices are stored, at most the
+ * capacity.
  */
 size_t
 mu_library_list(
@@ -588,10 +594,10 @@ mu_library_release(void)
 }
 
 /*
- * Looks through a folder, and the folders in it to the depth, adding the
- * songs: devices and nodes hold the folders above (down to this one), so
- * that a folder met again through a link is passed over.  Returns 0 or an
- * errno value.
+ * Looks through a folder, and the folders in it to the depth, adding
+ * the songs: devices and nodes hold the folders above (down to this
+ * one), so that a folder met again through a link is passed over.
+ * Returns 0 or an errno value.
  */
 static int
 library_walk(
@@ -779,9 +785,9 @@ library_wanted(
 }
 
 /*
- * Adds a song from its tags (its file names the album's cover when the
- * album has none yet); outside says the file is not of the folder.
- * Returns 0 or ENOMEM.
+ * Adds a song from its tags (its file names the album's cover when
+ * the album has none yet); outside says the file is not of the
+ * folder.  Returns 0 or ENOMEM.
  */
 static int
 library_insert(
@@ -883,12 +889,12 @@ library_insert(
 }
 
 /*
- * Finds a song's album, or makes it: one of the title and the artist (its
- * album artist's, or, without one, any of the same folder, whose artist is
- * then "Various Artists" when the artists differ) whose songs have no song
- * of the same number from another folder.  A file from outside the folder
- * joins one of the title and artist from any folder.  Returns 0 with the
- * album's index, or ENOMEM.
+ * Finds a song's album, or makes it: one of the title and the artist
+ * (its album artist's, or, without one, any of the same folder, whose
+ * artist is then "Various Artists" when the artists differ) whose
+ * songs have no song of the same number from another folder.  A file
+ * from outside the folder joins one of the title and artist from any
+ * folder.  Returns 0 with the album's index, or ENOMEM.
  */
 static int
 library_album(
@@ -1015,10 +1021,10 @@ library_album_artist(
 }
 
 /*
- * Tells whether an album is a song's by its names: the same title, and the
- * same artist named the same way; or, without an album artist on either
- * side, the same folder (a file from outside the folder does not join by
- * the folder).
+ * Tells whether an album is a song's by its names: the same title,
+ * and the same artist named the same way; or, without an album artist
+ * on either side, the same folder (a file from outside the folder
+ * does not join by the folder).
  */
 static int
 library_album_matches(
@@ -1126,8 +1132,8 @@ library_album_track(
 }
 
 /*
- * Puts the albums and the songs in order: the albums by title, the songs
- * by album, number and title.  Returns 0 or ENOMEM.
+ * Puts the albums and the songs in order: the albums by title, the
+ * songs by album, number and title.  Returns 0 or ENOMEM.
  */
 static int
 library_sort(void)
@@ -1287,10 +1293,11 @@ library_contains(
 }
 
 /*
- * Folds a text for comparing: each letter of the scripts it knows as its
- * small letter (ASCII, Latin-1, Latin Extended-A, Greek, Cyrillic, the
- * full-width Latin letters), the spaces at its ends left out and the
- * spaces between its words made one.  A byte that is not UTF-8 is kept.
+ * Folds a text for comparing: each letter of the scripts it knows as
+ * its small letter (ASCII, Latin-1, Latin Extended-A, Greek,
+ * Cyrillic, the full-width Latin letters), the spaces at its ends
+ * left out and the spaces between its words made one.  A byte that is
+ * not UTF-8 is kept.
  */
 static void
 library_fold(
@@ -1465,9 +1472,9 @@ library_utf8_write(
 }
 
 /*
- * Gives the folder an album's song counts as in (allocated; NULL without
- * memory): the file's folder, or the folder above it for a folder named
- * "CD n", "Disc n" or "Disk n".
+ * Gives the folder an album's song counts as in (allocated; NULL
+ * without memory): the file's folder, or the folder above it for a
+ * folder named "CD n", "Disc n" or "Disk n".
  */
 static char *
 library_folder_of(

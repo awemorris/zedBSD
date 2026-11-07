@@ -1,6 +1,13 @@
-# The FreeBSD build of libkeiland.so (with the widgets of libkeiland/ui, WS131 p012); the zedBSD build remains in Makefile.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KEILAND_FREEBSD_KEILAND_SOURCES := userland/desktop/libkeiland/version.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_FREEBSD_KEILAND_SOURCES := \
+	userland/desktop/settings-keys/settings-keys.c \
+	userland/desktop/libkeiland/process.c \
+	userland/desktop/libkeiland/launch.c \
+	userland/desktop/libkeiland/version.c \
 	userland/desktop/libkeiland/menu.c \
 	userland/desktop/libkeiland/recent.c \
 	userland/desktop/libkeiland/titlebar.c \
@@ -18,15 +25,17 @@ KEILAND_FREEBSD_KEILAND_SOURCES := userland/desktop/libkeiland/version.c \
 	userland/desktop/libkeiland/settings-app.c \
 	userland/desktop/libkeiland/translate.c \
 	userland/desktop/libkeiland/translate-follow.c \
+	userland/desktop/libkeiland/audio/audio.c \
+	userland/desktop/libkeiland/audio/audio-protocol.c \
+	userland/desktop/libkeiland/platform/platform-posix.c \
+	userland/desktop/libkeiland/platform/process-posix.c \
+	userland/desktop/libkeiland/platform/thread-posix.c \
+	userland/desktop/libkeiland/platform/socket-posix.c \
 	userland/desktop/libkeiland/system/system.c \
 	userland/desktop/libkeiland/system/system-view.c \
 	userland/desktop/libkeiland/system/system-protocol.c \
 	userland/desktop/libkeiland/system/system-monitor.c \
 	userland/desktop/libkeiland/system/system-monitor-rate.c \
-	userland/desktop/libkeiland/audio/audio.c \
-	userland/desktop/libkeiland/audio/audio-protocol.c \
-	userland/desktop/settings-keys/settings-keys.c \
-	\
 	userland/desktop/libkeiland/ui/canvas.c \
 	userland/desktop/libkeiland/ui/drop-look.c \
 	userland/desktop/libkeiland/ui/text.c \
@@ -42,12 +51,6 @@ KEILAND_FREEBSD_KEILAND_SOURCES := userland/desktop/libkeiland/version.c \
 	userland/desktop/libkeiland/ui/ui.c \
 	userland/desktop/libkeiland/ui/window.c \
 	userland/desktop/libkeiland/ui/app.c \
-	userland/desktop/libkeiland/platform/platform-posix.c \
-	userland/desktop/libkeiland/platform/process-posix.c \
-	userland/desktop/libkeiland/platform/thread-posix.c \
-	userland/desktop/libkeiland/platform/socket-posix.c \
-	userland/desktop/libkeiland/process.c \
-	userland/desktop/libkeiland/launch.c \
 	userland/desktop/libkeiland/ui/declare.c \
 	userland/desktop/libkeiland/ui/globals.c \
 	userland/desktop/libkeiland/ui/window-declare.c \
@@ -74,4 +77,5 @@ KEILAND_FREEBSD_KEILAND_SOURCES := userland/desktop/libkeiland/version.c \
 	userland/desktop/libkeiland/ui/picker-model.c \
 	userland/desktop/libkeiland/ui/picker-view.c \
 	userland/desktop/picture/color-glyph.c
+
 $(eval $(call KEILAND_FREEBSD_LIBRARY,keiland,libkeiland.so,$(KEILAND_FREEBSD_KEILAND_SOURCES),libwayland-client.so libtruetype.so libpng-compat.so libvulkan.so.1,-lm -pthread -lutil,userland/desktop/libkeiland/exports.map))
