@@ -12,7 +12,7 @@
 #include <kern/klog.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/buffer.h"
+#include "drivers/gpu/videocore/buffer.h"
 
 /* Diagnostic sums of final buffer releases since the last report, updated atomically by any releasing thread. */
 static uint64_t release_count;

@@ -8,7 +8,7 @@
 /* Barrier decoding copies each count-selected dependency without borrowing wire pointers or generated arena contents. */
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-barrier.h"
+#include "drivers/gpu/videocore/vk/vulkan-barrier.h"
 
 static int array_count(struct i915_wire_reader *reader, struct bcm2711_vulkan_barrier *barrier, uint32_t *count);
 static void decode_header(struct i915_wire_reader *reader, struct bcm2711_vulkan_barrier *barrier, VkStructureType expected, struct bcm2711_vulkan_barrier_entry *entry);

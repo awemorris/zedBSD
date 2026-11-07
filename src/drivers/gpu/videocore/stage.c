@@ -49,7 +49,7 @@
 #include <kern/klog.h>
 #include <kern/platform.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /* The handoff object that holds the raw boot command line. */
 #define STAGE_COMMAND_LINE_HANDOFF	"boot.command-line"

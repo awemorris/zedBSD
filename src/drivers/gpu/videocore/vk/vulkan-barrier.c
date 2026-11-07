@@ -11,9 +11,9 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/v3d-memory.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-barrier.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/v3d-memory.h"
+#include "drivers/gpu/videocore/vk/vulkan-barrier.h"
 
 static int release_barrier(struct bcm2711_vulkan_command_node *node);
 static int retain_barrier(struct bcm2711_vulkan_barrier *barrier);

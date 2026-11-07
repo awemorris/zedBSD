@@ -11,6 +11,20 @@
 # the firmware.
 #
 
+# Firmware: Raspberry Pi 4 boot firmware: the GPU firmware (start4.elf, fixup4.dat),
+#           the board's device tree and the disable-bt overlay
+# Hardware: Raspberry Pi 4 Model B (BCM2711)
+# Files:    the SD card's boot partition: /start4.elf, /fixup4.dat,
+#           /bcm2711-rpi-4-b.dtb, /overlays/disable-bt.dtbo, /LICENCE.broadcom
+# Source:   raspberrypi/firmware commit 3d301dd924bcd758a4c8cb19fe8531031f033f43 (boot/)
+#
+# Copyright (c) 2006, Broadcom Corporation.
+# Copyright (c) 2015, Raspberry Pi (Trading) Ltd
+# The device tree files are GPL-2.0, built from raspberrypi/linux commit
+# 89586905b8603e545cce9089a81f5f35d65bc998 (arch/arm/boot/dts/broadcom/bcm2711-rpi-4-b.dts,
+# arch/arm/boot/dts/overlays/disable-bt-overlay.dts). The license below is the
+# one of start4.elf and fixup4.dat.
+
 include userland/firmware/zedbsd-firmware.mk
 
 override RPI4_BOOT_FIRMWARE_BASE_URL := \
@@ -54,7 +68,7 @@ override RPI4_BOOT_FIRMWARE_DTB := \
 	$(RPI4_BOOT_FIRMWARE_DIR)/bcm2711-rpi-4-b.dtb
 
 override RPI4_BOOT_FIRMWARE_LICENSE_COMMAND = \
-	$(call ZEDBSD_FIRMWARE_LICENSE_COMMAND,rpi4-boot-firmware,$(RPI4_BOOT_FIRMWARE_CACHE_ROOT),platform/arm64/rpi4-boot-firmware.notice,LICENCE.broadcom,$(call ZEDBSD_FIRMWARE_FIELD,LICENCE.broadcom,3,$(RPI4_BOOT_FIRMWARE_FILES)),$(call ZEDBSD_FIRMWARE_FIELD,LICENCE.broadcom,4,$(RPI4_BOOT_FIRMWARE_FILES)),$(RPI4_BOOT_FIRMWARE_ZEDBSD_URL),$(RPI4_BOOT_FIRMWARE_BASE_URL)/$(RPI4_BOOT_FIRMWARE_REVISION)/$(call ZEDBSD_FIRMWARE_FIELD,LICENCE.broadcom,2,$(RPI4_BOOT_FIRMWARE_FILES)),$(RPI4_BOOT_FIRMWARE_FETCH))
+	$(call ZEDBSD_FIRMWARE_LICENSE_COMMAND,rpi4-boot-firmware,$(RPI4_BOOT_FIRMWARE_CACHE_ROOT),mk/platform-rpi4/rpi4-boot-firmware.notice,LICENCE.broadcom,$(call ZEDBSD_FIRMWARE_FIELD,LICENCE.broadcom,3,$(RPI4_BOOT_FIRMWARE_FILES)),$(call ZEDBSD_FIRMWARE_FIELD,LICENCE.broadcom,4,$(RPI4_BOOT_FIRMWARE_FILES)),$(RPI4_BOOT_FIRMWARE_ZEDBSD_URL),$(RPI4_BOOT_FIRMWARE_BASE_URL)/$(RPI4_BOOT_FIRMWARE_REVISION)/$(call ZEDBSD_FIRMWARE_FIELD,LICENCE.broadcom,2,$(RPI4_BOOT_FIRMWARE_FILES)),$(RPI4_BOOT_FIRMWARE_FETCH))
 
 ifneq ($(call ZEDBSD_FIRMWARE_ASK_AT_PARSE,rpi4-boot-firmware,y,$(RPI4_BOOT_FIRMWARE_DIR)),)
 ifneq ($(shell $(RPI4_BOOT_FIRMWARE_LICENSE_COMMAND) && echo accepted),accepted)
@@ -83,7 +97,10 @@ rpi4-boot-firmware: $(RPI4_BOOT_FIRMWARE_CACHE_FILES)
 .PHONY: rpi4-boot-firmware-fixture-cache
 rpi4-boot-firmware-fixture-cache: rpi4-boot-firmware-cache
 
-.PHONY: rpi4-boot-firmware-cache:
+.PHONY: firmware-platform firmware-rpi4
+firmware-platform: $(RPI4_BOOT_FIRMWARE_CACHE_FILES)
+
+.PHONY: rpi4-boot-firmware-cache
 rpi4-boot-firmware-cache:
 	@set -eu; \
 	cache='$(RPI4_BOOT_FIRMWARE_DIR)'; \

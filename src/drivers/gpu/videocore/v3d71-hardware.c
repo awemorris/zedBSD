@@ -31,8 +31,8 @@
 #include <kern/sched.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/buffer.h"
-#include "drivers/gpu/bcm2711/v3d71-private.h"
+#include "drivers/gpu/videocore/buffer.h"
+#include "drivers/gpu/videocore/v3d71-private.h"
 #include "drivers/platform/rpi5/rpi5-serror.h"
 
 /* Page-table and scratch storage stay in low CPU RAM, inside the 36 bits a PTE names. */

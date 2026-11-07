@@ -9,8 +9,8 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_NATIVE_STORAGE_H
 #define KERN_DRIVERS_GPU_BCM2711_NATIVE_STORAGE_H
 
-#include "drivers/gpu/bcm2711/v3d-memory.h"
-#include "drivers/gpu/bcm2711/compiler/shader.h"
+#include "drivers/gpu/videocore/v3d-memory.h"
+#include "drivers/gpu/videocore/compiler/shader.h"
 
 /* The registered renderer keeps up to this many bytes of idle upload views mapped for reuse. */
 #define BCM2711_NATIVE_CACHE_BYTES (96ULL * 1024U * 1024U)

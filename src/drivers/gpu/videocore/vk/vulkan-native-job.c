@@ -14,15 +14,15 @@
 #include <kern/klog.h>
 #include <uapi/errno.h>
 
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
-#include "drivers/gpu/bcm2711/vk/vulkan-video.h"
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
+#include "drivers/gpu/videocore/vk/vulkan-video.h"
 #endif
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-native-job.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-barrier.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-native-image.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-buffer-copy.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-job.h"
+#include "drivers/gpu/videocore/vk/vulkan-barrier.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-image.h"
+#include "drivers/gpu/videocore/vk/vulkan-buffer-copy.h"
+#include "drivers/gpu/videocore/vk/vulkan-memory.h"
 
 /* All concurrently resident native pass/draw uploads share this submission-wide padded budget. */
 #define NATIVE_JOB_BYTES (256ULL * 1024U * 1024U)
@@ -211,7 +211,7 @@ bcm2711_vulkan_native_job_step(
 	region = job->region;
 	event = job->cursor;
 	while (event != NULL) {
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 		/*
 		 * A copy, blit or upload that names an image whose decode is in
 		 * flight waits for its frame first, a step at a time: the step
@@ -292,7 +292,7 @@ bcm2711_vulkan_native_job_step(
 			continue;
 		}
 
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 		/* Video and status query events run on the CPU, in order, after every earlier pass. */
 		if (bcm2711_vulkan_video_event(event->opcode)) {
 			step = clock_ticks();

@@ -9,9 +9,9 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_NATIVE_PASS_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_NATIVE_PASS_H
 
-#include "drivers/gpu/bcm2711/native-pass.h"
-#include "drivers/gpu/bcm2711/v3d-job.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-native-draw.h"
+#include "drivers/gpu/videocore/native-pass.h"
+#include "drivers/gpu/videocore/v3d-job.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-draw.h"
 
 #define BCM2711_VULKAN_PASS_STORAGE 9U
 

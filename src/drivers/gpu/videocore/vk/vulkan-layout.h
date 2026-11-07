@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_LAYOUT_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_LAYOUT_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-input.h"
+#include "drivers/gpu/videocore/vk/vulkan-input.h"
 
 #define BCM2711_VULKAN_LAYOUT_BINDINGS 12U
 #define BCM2711_VULKAN_PIPELINE_SETS 4U

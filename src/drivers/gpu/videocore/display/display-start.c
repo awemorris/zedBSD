@@ -19,8 +19,8 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/display/display-program.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/display/display-program.h"
 
 /* Device-tree identities of the encoder blocks and their shared clock gate. */
 static const char *const start_encoders[BCM2711_HDMI_COUNT] = {

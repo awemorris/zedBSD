@@ -246,5 +246,5 @@ LIBC_ALL_TARGETS := \
 	$(LIBC_OUT_DIR)/libzedbsd-compiler-rt.o \
 	$(LIBC_OUT_DIR)/libclang_rt.builtins.a
 
-.PHONY: libc-x86_64
-libc-x86_64: $(LIBC_ALL_TARGETS)
+.PHONY: libc-platform
+libc-platform: $(LIBC_ALL_TARGETS)

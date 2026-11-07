@@ -19,7 +19,7 @@
 
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /* The PTE bit that makes its physical page accessible. */
 #define PAGE_ENTRY_PRESENT 0x10000000U

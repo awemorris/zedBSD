@@ -11,14 +11,14 @@
  *
  * The V3D device's one queue family also decodes: the video commands,
  * the result status query pools and the decode's CPU-side execution in the
- * native job live here.  Built only with CONFIG_DRIVER_BCM2711_VIDEO.
+ * native job live here.  Built only with CONFIG_DRIVER_RPI4_GPU.
  */
 
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_VIDEO_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_VIDEO_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-private.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-record.h"
+#include "drivers/gpu/videocore/vk/vulkan-private.h"
+#include "drivers/gpu/videocore/vk/vulkan-record.h"
 
 struct bcm2711_render_device;
 struct bcm2711_vulkan_resource;

@@ -41,7 +41,7 @@
 #include <kern/pmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/v3d71-private.h"
+#include "drivers/gpu/videocore/v3d71-private.h"
 
 /* Mailbox 0 carries answers to the ARM side; mailbox 1 carries requests. */
 #define MAILBOX_READ			0x00U

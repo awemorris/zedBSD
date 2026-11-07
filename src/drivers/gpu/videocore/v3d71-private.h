@@ -33,7 +33,7 @@
 
 #include <drivers/generic/fdt.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /*
  * The core's interrupt sources the driver owns: render done (bit 0), bin

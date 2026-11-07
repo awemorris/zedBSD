@@ -249,11 +249,11 @@ CONFIG_DRIVER_PCI_AMDRDNA         ?= n
 
 # [RPi4 VideoCore VI GPU driver]
 #  - Depends: CONFIG_DRIVER_GPU
-CONFIG_DRIVER_RPI4_VIDEOCORE_VI   ?= n
+CONFIG_DRIVER_RPI4_GPU            ?= n
 
 # [RPi5 VideoCore VII GPU driver]
 #  - Depends: CONFIG_DRIVER_GPU
-CONFIG_DRIVER_RPI5_VIDEOCORE_VII  ?= n
+CONFIG_DRIVER_RPI5_GPU            ?= n
 
 # [Vision Five 2 Imagination PowerVR GPU and WAVE511 Video Codex driver]
 #  - Depends: CONFIG_DRIVER_GPU

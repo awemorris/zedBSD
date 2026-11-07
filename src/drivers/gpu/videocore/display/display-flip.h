@@ -14,7 +14,7 @@
 #include <kern/lock.h>
 #include <kern/waitq.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-gpu.h"
+#include "drivers/gpu/videocore/bcm2711-gpu.h"
 
 /*
  * Three private SRAM lists while the boot console list stays intact: the

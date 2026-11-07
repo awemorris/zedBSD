@@ -10,8 +10,8 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-transfer.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/vk/vulkan-transfer.h"
+#include "drivers/gpu/videocore/vk/vulkan-resource.h"
 
 static int decode_transfer(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_transfer *transfer);
 static void decode_subresource(struct i915_wire_reader *reader, struct bcm2711_vulkan_transfer *transfer, const struct bcm2711_vulkan_transfer_region *region, uint32_t side);

@@ -9,7 +9,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-native-draw.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-draw.h"
 
 static void depth_tests(const struct bcm2711_vulkan_pipeline *pipeline, struct bcm2711_native_bin *state);
 static void stencil_face(const VkStencilOpState *face, struct bcm2711_native_stencil *native);

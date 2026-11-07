@@ -8,9 +8,9 @@
 /* Complete recording events validate only immutable interfaces; mutable descriptor contents are frozen at submission. */
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-record.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-descriptor.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/vk/vulkan-record.h"
+#include "drivers/gpu/videocore/vk/vulkan-descriptor.h"
+#include "drivers/gpu/videocore/vk/vulkan-resource.h"
 
 static int validate_clear(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int same_device(struct bcm2711_vulkan_object *object, struct bcm2711_vulkan_object *device);

@@ -10,8 +10,8 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/v3d-memory.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/v3d-memory.h"
 
 static int synchronize_range(struct bcm2711_v3d_space *space, uint32_t address, uint64_t bytes);
 static bool memory_ready(struct bcm2711_v3d_space *space);

@@ -21,9 +21,9 @@
 #include <kern/klog.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/hevc-decoder.h"
-#include "drivers/gpu/bcm2711/v3d71-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/hevc-decoder.h"
+#include "drivers/gpu/videocore/v3d71-private.h"
 
 /*
  * The block's device tree binding: its compatible string and the names of

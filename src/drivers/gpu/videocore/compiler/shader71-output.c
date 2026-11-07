@@ -17,7 +17,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/compiler/shader-private.h"
+#include "drivers/gpu/videocore/compiler/shader-private.h"
 
 
 static int vertex_output(struct bcm2711_shader_compiler *compiler);

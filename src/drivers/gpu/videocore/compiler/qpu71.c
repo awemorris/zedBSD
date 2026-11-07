@@ -21,7 +21,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/compiler/qpu.h"
+#include "drivers/gpu/videocore/compiler/qpu.h"
 
 /*
  * The positions of the fields in the 64-bit instruction word.

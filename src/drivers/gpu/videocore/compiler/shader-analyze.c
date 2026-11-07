@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/compiler/shader-private.h"
+#include "drivers/gpu/videocore/compiler/shader-private.h"
 
 /* Bounded source programs cannot force unbounded kernel compiler storage or traversal. */
 #define SHADER_MAX_INSTRUCTIONS 8192U

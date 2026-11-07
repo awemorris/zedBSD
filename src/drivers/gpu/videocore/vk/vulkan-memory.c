@@ -10,9 +10,9 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/vk/vulkan-memory.h"
 
 /* The physical query exposes one bounded logical heap (BCM2711_VULKAN_MEMORY_BUDGET) and one coherent memory type. */
 #define VULKAN_MEMORY_IMPORT 1000384002U

@@ -22,7 +22,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /* The control word: set on the word that closes the list. */
 #define LIST_CONTROL_END		0x80000000U

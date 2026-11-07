@@ -26,7 +26,15 @@ $(BOOT_LOGO): mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-
 	$(PYTHON) mk/tools/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-splash.png $@.tmp
 	mv -f $@.tmp $@
 
-# Native layout
+# Variant: bios, uefi (alias: native), hybrid
+VARIANT ?= $(if $(ZEDBSD_VARIANT),$(ZEDBSD_VARIANT),uefi)
+
+VARIANT_STAMP := $(BUILD)/.variant-$(VARIANT)
+$(VARIANT_STAMP):
+	@mkdir -p $(dir $@)
+	@rm -f $(BUILD)/.variant-*
+	@touch $@
+
 SWAP_MIB ?= 1024
 BOOT_MIB ?= 256
 ROOT_MIB ?= 1024
@@ -36,10 +44,16 @@ SWAP_IMAGE := $(BUILD)/native-swap-$(SWAP_MIB)m.img
 $(SWAP_IMAGE): mk/tools/make-swapfile.noct
 	@mkdir -p $(dir $@)
 	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct \
-		--size-mib $(SWAP_MIB) --output $@
+		--size-mib $(SWAP_MIB) --label zedBSD-swap --output $@
 
-UEFI_ZEDBSD_CONFIG := $(BUILD)/zedbsd-uefi.cfg
-$(UEFI_ZEDBSD_CONFIG): mk/platform-x86_64/bootcfg/zedbsd-uefi.cfg
+ifeq ($(VARIANT),bios)
+ZEDBSD_CONFIG_SRC := mk/platform-x86_64/bootcfg/zedbsd-bios.cfg
+else
+ZEDBSD_CONFIG_SRC := mk/platform-x86_64/bootcfg/zedbsd-uefi.cfg
+endif
+
+ZEDBSD_CONFIG := $(BUILD)/zedbsd.cfg
+$(ZEDBSD_CONFIG): $(ZEDBSD_CONFIG_SRC) $(VARIANT_STAMP)
 	@mkdir -p $(dir $@)
 	cp $< $@.tmp
 	$(if $(filter y,$(CONFIG_BOOT_SPLASH)),grep -v '^video=' $< > $@.tmp)
@@ -56,56 +70,60 @@ $(ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
 		--profile amd64 --output $@ --tree $(BUILD)/rootfs \
 		--size-mib $(ROOT_MIB) --min-inodes $(ROOT_INODES)
 
-ifeq ($(VARIANT),native)
-
-$(DISK_IMAGE_ARTIFACT): $(BUILD)/vmunix $(BUILD)/uefi/BOOTX64.EFI \
-		$(UEFI_ZEDBSD_CONFIG) $(ROOT_IMAGE) \
-		$(SWAP_IMAGE) $(IMAGE_HOST) $(BOOT_LOGO)
-	$(IMAGE_HOST) disk --machine pcat --layout native \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config $(UEFI_ZEDBSD_CONFIG) --logo $(BOOT_LOGO) \
-		--ufs-root $(ROOT_IMAGE) --swapfile $(SWAP_IMAGE) \
-		--fat-size-mib $(BOOT_MIB) $@
-
-else
-
-DATA_IMAGE := $(BUILD)/data.img
-$(DATA_IMAGE): mk/tools/make-data-image.noct $(IMAGE_HOST)
-	@mkdir -p $(dir $@)
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-data-image.noct \
-		--backend $(abspath $(IMAGE_HOST)) --output $@
-
-SWAP_IMAGE := $(BUILD)/swapfile
-$(SWAP_IMAGE): mk/tools/make-swapfile.noct
-	@mkdir -p $(dir $@)
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct --size-mib 64 --output $@
-
-$(DISK_IMAGE_ARTIFACT): $(BUILD)/bootloader/stage1.bin \
-		$(BUILD)/bootloader/stage1-native.bin \
-		$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
-		$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(ROOT_IMAGE) \
-		$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
-		mk/platform-x86_64/bootcfg/zedbsd-bios.cfg $(IMAGE_HOST) \
-		mk/tools/make-bios-hdd-image.noct \
-		mk/tools/zedbuild.noct \
-		mk/tools/journal-format.noct
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-bios-hdd-image.noct \
-		--backend $(abspath $(IMAGE_HOST)) --force --machine pcat \
-		--layout $(VARIANT) \
-		--checker mk/platform-x86_64/tools/check-amd64-gpt-image.noct \
-		--checker-runner $(NOCT) \
-		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
-		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
-		--zedbsd-config mk/platform-x86_64/bootcfg/zedbsd-bios.cfg \
-		--arch-profile amd64 --arch-image $(ROOT_IMAGE) \
-		--arch-format ufs --data-image $(DATA_IMAGE) \
-		--swapfile $(SWAP_IMAGE) $@
-
+COMMON_DEPS := $(BUILD)/vmunix $(ROOT_IMAGE) $(SWAP_IMAGE) $(ZEDBSD_CONFIG)
+ifeq ($(CONFIG_BOOT_SPLASH),y)
+COMMON_DEPS += $(BOOT_LOGO)
 endif
 
-.PHONY: image disk-image image-x86_64 check-disk-image
+ifeq ($(filter-out uefi native,$(VARIANT)),)
+VARIANT_DEPS := $(BUILD)/uefi/BOOTX64.EFI
+else ifeq ($(VARIANT),bios)
+VARIANT_DEPS := $(BUILD)/bootloader/stage1-native.bin \
+		$(BUILD)/bootloader/stage2-chain.bin \
+		$(BUILD)/bootloader/partition-pbr.bin \
+		$(BUILD)/bootloader/BOOTZBSD.EXE
+else ifeq ($(VARIANT),hybrid)
+VARIANT_DEPS := $(BUILD)/uefi/BOOTX64.EFI \
+		$(BUILD)/bootloader/stage1.bin \
+		$(BUILD)/bootloader/stage2-chain.bin \
+		$(BUILD)/bootloader/partition-pbr.bin \
+		$(BUILD)/bootloader/BOOTZBSD.EXE
+endif
 
-image-x86_64: rootfs $(DISK_IMAGE_ARTIFACT)
+$(DISK_IMAGE_ARTIFACT): $(COMMON_DEPS) $(VARIANT_DEPS) $(VARIANT_STAMP) \
+		mk/platform-x86_64/tools/make-x86_64-hdd-image.py \
+		mk/platform-x86_64/tools/check-x86_64-hdd-image.py
+	$(PYTHON) mk/platform-x86_64/tools/make-x86_64-hdd-image.py --force \
+		--variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) \
+		--kernel $(BUILD)/vmunix \
+		--zedbsd-config $(ZEDBSD_CONFIG) \
+		$(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) \
+		--ufs-root $(ROOT_IMAGE) \
+		--swap-image $(SWAP_IMAGE) \
+		$(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) \
+		$(if $(filter bios,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1-native.bin) \
+		$(if $(filter hybrid,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1.bin) \
+		$(if $(filter bios hybrid,$(VARIANT)),--stage2 $(BUILD)/bootloader/stage2-chain.bin) \
+		$(if $(filter bios hybrid,$(VARIANT)),--partition-pbr $(BUILD)/bootloader/partition-pbr.bin) \
+		$(if $(filter bios hybrid,$(VARIANT)),--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE) \
+		--fat-size-mib $(BOOT_MIB) $@
+
+.PHONY: image-platform check-disk-image
+image-platform: rootfs $(DISK_IMAGE_ARTIFACT)
+
+.PHONY: check-disk-image
+check-disk-image: $(DISK_IMAGE_ARTIFACT)
+	$(PYTHON) mk/platform-x86_64/tools/check-x86_64-hdd-image.py \
+		--variant $(if $(filter native,$(VARIANT)),uefi,$(VARIANT)) \
+		--kernel $(BUILD)/vmunix \
+		--zedbsd-config $(ZEDBSD_CONFIG) \
+		$(if $(filter y,$(CONFIG_BOOT_SPLASH)),--logo $(BOOT_LOGO)) \
+		--ufs-root $(ROOT_IMAGE) \
+		--swap-image $(SWAP_IMAGE) \
+		$(if $(filter uefi native hybrid,$(VARIANT)),--bootx64 $(BUILD)/uefi/BOOTX64.EFI) \
+		$(if $(filter bios,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1-native.bin) \
+		$(if $(filter hybrid,$(VARIANT)),--stage1 $(BUILD)/bootloader/stage1.bin) \
+		$(if $(filter bios hybrid,$(VARIANT)),--stage2 $(BUILD)/bootloader/stage2-chain.bin) \
+		$(if $(filter bios hybrid,$(VARIANT)),--partition-pbr $(BUILD)/bootloader/partition-pbr.bin) \
+		$(if $(filter bios hybrid,$(VARIANT)),--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE) \
+		$<

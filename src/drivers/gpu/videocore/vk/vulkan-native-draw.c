@@ -12,11 +12,11 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/native-state.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-native-draw.h"
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
-#include "drivers/gpu/bcm2711/vk/vulkan-video.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/native-state.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-draw.h"
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
+#include "drivers/gpu/videocore/vk/vulkan-video.h"
 #endif
 
 /* One job's aggregate native staging includes page padding and every draw's independently uploaded inputs. */
@@ -1404,7 +1404,7 @@ texture_source(
 	uint32_t swap,
 	struct native_texture_source *source)
 {
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	uint64_t chroma;
 	uint64_t bytes;
 	uint32_t pitch;
@@ -1427,7 +1427,7 @@ texture_source(
 		source->swap = swap;
 	}
 
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/* A plane of an NV12 picture, in the decoder's layout (vulkan-video.c). */
 	if (plane != 0) {
 		if (image->format != (VkFormat)BCM2711_VIDEO_FORMAT_NV12)

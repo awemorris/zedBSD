@@ -4,15 +4,15 @@
 # SPDX-License-Identifier: Zlib
 
 #
-# x86_64 rootfs Makefile
+# Raspberry Pi 4 rootfs Makefile
 #
 
-X86_64_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
-X86_64_ARCH_FILES  ?= $(ROOTFS_FILES)
-AMD64_ARCH_INPUTS  ?= $(X86_64_ARCH_INPUTS)
-AMD64_ARCH_FILES   ?= $(X86_64_ARCH_FILES)
+RPI4_ARCH_INPUTS ?= $(ROOTFS_INPUTS)
+RPI4_ARCH_FILES  ?= $(ROOTFS_FILES)
+AARCH64_ARCH_INPUTS ?= $(RPI4_ARCH_INPUTS)
+AARCH64_ARCH_FILES  ?= $(RPI4_ARCH_FILES)
 
-$(eval $(call ROOTFS_TREE_RULE,x86_64,$(X86_64_ARCH_INPUTS),$(X86_64_ARCH_FILES)))
+$(eval $(call ROOTFS_TREE_RULE,arm64,$(RPI4_ARCH_INPUTS),$(RPI4_ARCH_FILES)))
 
-.PHONY:rootfs-x86_64
-rootfs-x86_64: $(BUILD)/rootfs/.stamp
+.PHONY: rootfs-platform
+rootfs-platform: $(BUILD)/rootfs/.stamp

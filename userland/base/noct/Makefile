@@ -55,7 +55,7 @@ DISTFILE := $(abspath $(NOCT_DIR)distfiles)/NoctLang-$(REPO_HASH).tar.gz
 PATCHES := $(sort $(wildcard $(abspath $(NOCT_DIR)patches)/*.patch))
 PATCH_STAMP := $(NOCT_SRC)/.patched
 
-$(eval $(call USERLAND_PACKAGE,noct,noct,*,n,package,,y,base,base/noct,,0755,custom))
+$(eval $(call USERLAND_PACKAGE,noct,noct,*,n,package,,y,base,base/noct,desktop/libegl desktop/libglesv2,0755,custom))
 
 PACKAGE_INPUTS += $(NOCT_BIN) $(NOCT_MAN)
 PACKAGE_FILES += \

@@ -10,7 +10,7 @@
 #include <kern/device-io.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 #include "drivers/platform/rpi4/rpi4-firmware.h"
 
 /* Binding IDs refer to V3D only; adjacent PM gates belong to other devices. */

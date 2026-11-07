@@ -8,7 +8,7 @@
 /* Count-selected recording payloads copy exact client words and resolve borrowed typed IDs without acquiring partial owners. */
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-record.h"
+#include "drivers/gpu/videocore/vk/vulkan-record.h"
 
 static int decode_clear(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_record *record);
 static int decode_sets(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_record *record);

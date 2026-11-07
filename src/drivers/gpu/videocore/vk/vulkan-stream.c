@@ -11,8 +11,8 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-private.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/vk/vulkan-private.h"
 
 /* One submission has a bounded external-stream copy budget shared by every nested stream. */
 #define VULKAN_STREAM_COPY_BYTES (64U << 20)

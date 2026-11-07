@@ -34,7 +34,7 @@
 #include <kern/device-io.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/v3d71-private.h"
+#include "drivers/gpu/videocore/v3d71-private.h"
 #include "drivers/platform/rpi5/rpi5-serror.h"
 
 /* The device tree names of the engine and of the power manager (binding facts). */

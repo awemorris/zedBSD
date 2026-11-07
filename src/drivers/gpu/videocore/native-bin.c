@@ -11,7 +11,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/native-bin.h"
+#include "drivers/gpu/videocore/native-bin.h"
 
 static void write_word(uint8_t *bytes, uint32_t word);
 static void write_half(uint8_t *bytes, uint32_t half);

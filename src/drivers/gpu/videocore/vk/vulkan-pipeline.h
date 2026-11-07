@@ -9,10 +9,10 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_PIPELINE_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_PIPELINE_H
 
-#include "drivers/gpu/bcm2711/compiler/shader.h"
-#include "drivers/gpu/bcm2711/native-storage.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-layout.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-target.h"
+#include "drivers/gpu/videocore/compiler/shader.h"
+#include "drivers/gpu/videocore/native-storage.h"
+#include "drivers/gpu/videocore/vk/vulkan-layout.h"
+#include "drivers/gpu/videocore/vk/vulkan-target.h"
 
 #define BCM2711_VULKAN_VERTEX_BINDINGS 16U
 #define BCM2711_VULKAN_VERTEX_ATTRIBUTES 16U

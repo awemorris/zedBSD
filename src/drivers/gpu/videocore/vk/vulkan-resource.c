@@ -10,12 +10,12 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
-#include "drivers/gpu/bcm2711/v3d-memory.h"
+#include "drivers/gpu/videocore/vk/vulkan-memory.h"
+#include "drivers/gpu/videocore/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/v3d-memory.h"
 
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
-#include "drivers/gpu/bcm2711/vk/vulkan-video.h"
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
+#include "drivers/gpu/videocore/vk/vulkan-video.h"
 #endif
 
 /* Existing generated record decoding is device-independent Zlib code, without a Gen12 resource implementation. */
@@ -339,7 +339,7 @@ create_buffer(
 	    info.usage == 0)
 		return ENOTSUP;
 	allowed = VULKAN_BUFFER_USAGE;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/* A bitstream buffer is read by the CPU into the video decoder's staging. */
 	allowed |= BCM2711_VIDEO_BUFFER_USAGE_DECODE_SRC;
 #endif
@@ -377,7 +377,7 @@ create_image(
 	uint64_t present;
 	uint32_t largest;
 	uint32_t level;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	uint64_t chroma;
 #endif
 	bool nv12;
@@ -410,7 +410,7 @@ create_image(
 	    info.samples != VK_SAMPLE_COUNT_1_BIT)
 		return ENOTSUP;
 	nv12 = false;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/*
 	 * An NV12 picture decodes, serves as a reference, is read back, and is
 	 * sampled through views of its planes.
@@ -471,7 +471,7 @@ create_image(
 	description.height = info.extent.height;
 	description.pitch = (info.extent.width * 4U + 63U) & ~63U;
 	description.bytes = (uint64_t)description.pitch * info.extent.height;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/* NV12 rows are the decoder's: 32-byte pitch, luma then interleaved chroma (vulkan-video.c). */
 	if (nv12)
 		bcm2711_vulkan_video_nv12_layout(info.extent.width, info.extent.height, &description.pitch, &chroma, &description.bytes);
@@ -738,7 +738,7 @@ image_layout(
 	uint64_t identity;
 	uint64_t input;
 	uint64_t output;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	uint64_t chroma;
 	uint64_t bytes;
 	uint32_t pitch;
@@ -753,7 +753,7 @@ image_layout(
 	kern_memset(&subresource, 0, sizeof(subresource));
 	i915_vkc_dec_VkImageSubresource(reader, &session->arena, &subresource);
 	output = drv_i915_wire_read_u64(reader);
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/* The plane aspects of an NV12 picture are checked with its format below. */
 	if (reader->error != 0 ||
 	    output != 1 ||
@@ -781,7 +781,7 @@ image_layout(
 	layout.rowPitch = resource->pitch;
 	layout.arrayPitch = resource->bytes;
 	layout.depthPitch = resource->bytes;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/*
 	 * An NV12 picture's planes are answered for either tiling (the private
 	 * promise libvulkan's README calls N3): its rows are linear.

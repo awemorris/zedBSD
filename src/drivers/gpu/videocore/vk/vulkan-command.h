@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_COMMAND_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_COMMAND_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-input.h"
+#include "drivers/gpu/videocore/vk/vulkan-input.h"
 
 /* A pending submission keeps an executable recording immutable; invalid recordings require a permitted reset. */
 enum bcm2711_vulkan_command_state {

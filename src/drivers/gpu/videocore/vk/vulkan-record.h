@@ -9,8 +9,8 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_RECORD_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_RECORD_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-command.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-pipeline.h"
+#include "drivers/gpu/videocore/vk/vulkan-command.h"
+#include "drivers/gpu/videocore/vk/vulkan-pipeline.h"
 
 /* Every primary shares this whole immutable recording budget across graphics, transfer and dependency nodes. */
 #define BCM2711_VULKAN_RECORD_BYTES (8U * 1024U * 1024U)

@@ -1,33 +1,37 @@
 #
-# zedBSD amd64/PC-AT bootstrap rules.
+# zedBSD rpi4 (ARM64) bootstrap rules.
 # Copyright (C) 2026 Awe Morris
 #
 # SPDX-License-Identifier: Zlib
 #
 
+PLATFORM_RPI4_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+REPO_ROOT         ?= $(abspath $(PLATFORM_RPI4_DIR)/../..)
+
 KERN_CPPFLAGS := \
 	-nostdlib \
 	-nostdinc \
-	-Ibuild/x86_64/sysroot/usr/include \
+	-I$(BUILD)/sysroot/usr/include \
 	-Iinclude \
 	-Isrc \
 	-I. \
+	-Isrc/hal/arm64 \
+	-Isrc/hal/arm64/bsp-rpi4 \
+	-Isrc/hal/arm64/bsp-rpi-common \
 	-D__ZEDBSD__ \
-	-DHAL_ARCH_X86_64 \
-	-DHAL_BOARD_PCAT \
-	-DHAL_PCAT_DEBUGCON \
+	-DHAL_ARCH_ARM64 \
+	-DHAL_BOARD_RPI4 \
+	-DKERN_USER_ABI_AARCH64 \
 	-DKERN_USER_ABI_LP64 \
 	-DKERN_UAPI_NATIVE \
 	-DZEDBSD_VERSION=\"$(VERSION)\" \
-	-DPCAT_VGA_APERTURE_ADDRESS=0xffffffffc1400000ULL \
-	-DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL \
 	$(KERN_CPPFLAGS) \
 	$(CONFIG_CPPFLAGS)
 
 KERN_CFLAGS := \
-	-m64 \
-	-mcmodel=kernel \
-	-mno-red-zone \
+	--target=aarch64-unknown-zedbsd \
+	-march=armv8-a \
+	-mno-outline-atomics \
 	-mgeneral-regs-only \
 	-ffreestanding \
 	-fno-pic \
@@ -35,92 +39,88 @@ KERN_CFLAGS := \
 	-fno-stack-protector \
 	-fno-asynchronous-unwind-tables \
 	-fno-unwind-tables \
+	-fno-common \
 	-ffunction-sections \
 	-fdata-sections \
 	-Os \
 	-Wall \
 	-Wextra \
 	-Werror \
-	-Wframe-larger-than=8192 \
 	-fno-builtin
 
 # HAL C Sources
 KERN_SOURCES += \
-	src/hal/x86/rtc.c \
-	src/hal/x86/boot-parameters.c \
-	src/hal/x86/io.c \
-	src/hal/x86_64/asm.c \
-	src/hal/x86_64/lib.c \
-	src/hal/x86_64/page.c \
-	src/hal/x86_64/pmem-range.c \
-	src/hal/x86_64/ram-map.c \
-	src/hal/x86_64/framebuffer-map.c \
-	src/hal/x86_64/space.c \
-	src/hal/x86_64/image.c \
-	src/hal/x86_64/acpi-window.c \
-	src/hal/x86_64/cmain.c \
-	src/hal/x86_64/descriptor.c \
-	src/hal/x86_64/int.c \
-	src/hal/x86_64/irq.c \
-	src/hal/x86_64/msi-source.c \
-	src/hal/x86_64/task.c \
-	src/hal/x86_64/percpu.c \
-	src/hal/x86_64/smp.c \
-	src/hal/x86_64/bsp-pcat/boot.c \
-	src/hal/x86_64/bsp-pcat/handoff-validation.c \
-	src/hal/x86_64/bsp-pcat/cons.c \
-	src/hal/x86_64/bsp-pcat/pic.c \
-	src/hal/x86_64/bsp-pcat/clock.c \
-	src/hal/x86_64/bsp-pcat/acpi.c \
-	src/hal/x86_64/bsp-pcat/lapic.c \
-	src/hal/x86_64/bsp-pcat/idle-suspend.c \
-	src/hal/x86_64/bsp-pcat/early-init-policy.c \
-	src/hal/x86_64/bsp-pcat/timecounter-policy.c \
-	src/hal/x86_64/bsp-pcat/timecounter.c \
-	src/hal/x86_64/bsp-pcat/mcfg.c \
-	src/hal/x86_64/bsp-pcat/ioapic.c
+	src/hal/arm64/smp.c \
+	src/hal/arm64/percpu.c \
+	src/hal/arm64/watch.c \
+	src/hal/idle-suspend-unsupported.c \
+	src/hal/arm64/asm.c \
+	src/hal/arm64/lib.c \
+	src/hal/arm64/page.c \
+	src/hal/arm64/space.c \
+	src/hal/arm64/int.c \
+	src/hal/arm64/irq.c \
+	src/hal/arm64/task.c \
+	src/hal/arm64/cmain.c \
+	src/hal/arm64/debug.c \
+	src/hal/arm64/cons.c \
+	src/hal/arm64/framebuffer.c \
+	src/hal/arm64/boot.c \
+	src/hal/arm64/gic.c \
+	src/hal/arm64/clock.c \
+	src/hal/arm64/font.c \
+	src/hal/arm64/led.c \
+	src/hal/arm64/bsp-rpi4/uart.c \
+	src/hal/arm64/bsp-rpi4/fdt.c \
+	src/hal/arm64/bsp-rpi4/activity-led.c \
+	src/hal/arm64/bsp-rpi4/board.c \
+	src/hal/arm64/bsp-rpi4/watch-hvs.c \
+	src/hal/arm64/bsp-rpi-common/mailbox.c \
+	src/hal/arm64/bsp-rpi-common/framebuffer-mailbox.c
 
 # HAL Assembly Sources
 KERN_ASM += \
-	src/hal/x86_64/locore.S \
-	src/hal/x86_64/trap.S \
-	src/hal/x86_64/dispatch.S \
-	src/hal/x86_64/ap-trampoline.S
+	src/hal/arm64/locore.S \
+	src/hal/arm64/trap.S \
+	src/hal/arm64/dispatch.S
 
-# Kernel Sources
+# Kernel Sources for RPi4
 KERN_SOURCES += \
-	src/kern/platform/pcat.c \
-	src/drivers/platform/pcat/uefi-variables.c \
-	src/drivers/platform/pcat/pcat-ide.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c \
-	src/drivers/platform/pcat/cpu-x86/cpu-x86.c \
-	src/drivers/platform/pcat/cpu-x86/cpu-x86-insn.c \
+	src/kern/platform/rpi4.c \
 	src/drivers/disklabel/mbr.c \
-	src/drivers/disklabel/gpt.c \
-	src/drivers/disklabel/pcat.c \
-	src/drivers/pci/pci-pcat.c \
-	src/drivers/pci/pci-pcat-assign.c \
-	src/drivers/pci/pci-power.c \
-	src/drivers/pci/pci-window.c \
-	src/drivers/isa/ps2-8042.c \
-	src/drivers/platform/pcat/serial-mirror.c
-
-#VMUNIX_OBJS := \
-#	$(patsubst %.c,$(BUILD)/%.o,$(notdir $(KERN_SOURCES))) \
-#	$(patsubst %.S,$(BUILD)/%.o,$(notdir $(KERN_ASM)))
-
-#vpath %.c $(sort $(dir $(KERN_SOURCES)))
-#vpath %.S $(sort $(dir $(KERN_ASM)))
+	src/drivers/platform/rpi-common/rpi-sdhci.c \
+	src/drivers/platform/rpi-common/rpi-console.c \
+	src/drivers/platform/rpi-common/rpi-gpio.c \
+	src/drivers/platform/rpi-common/rpi-mmc-irq.c \
+	src/drivers/platform/rpi-common/rpi-sdio-host.c \
+	src/drivers/platform/rpi-common/rpi-sdio.c \
+	src/drivers/platform/rpi4/rpi4-pcie.c \
+	src/drivers/platform/rpi4/rpi4-board.c \
+	src/drivers/platform/rpi4/rpi4-firmware.c \
+	src/drivers/platform/rpi4/rpi4-vchiq.c \
+	src/drivers/platform/rpi4/rpi4-vchiq-wire.c \
+	src/drivers/pci/pci-brcmstb.c \
+	src/drivers/mmc/sdhci.c \
+	src/drivers/generic/fdt.c
 
 VMUNIX_OBJS := \
-	$(patsubst %.c,$(BUILD)/%.o,$(KERN_SOURCES)) \
-	$(patsubst %.S,$(BUILD)/%.o,$(KERN_ASM))
+	$(sort $(patsubst %.c,$(BUILD)/%.o,$(KERN_SOURCES))) \
+	$(sort $(patsubst %.S,$(BUILD)/%.o,$(KERN_ASM)))
 
-vmunix-x86_64: $(BUILD)/vmunix
+.PHONY: vmunix-platform
+vmunix-platform: $(BUILD)/vmunix
 
-$(BUILD)/vmunix: $(VMUNIX_OBJS)
-	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) -o $@
+$(BUILD)/kernel.elf: $(VMUNIX_OBJS) mk/platform-rpi4/vmunix.ld mk/platform-rpi4/tools/check-arm64-vmunix.py
+	@mkdir -p $(dir $@)
+	$(LD) -m aarch64elf --gc-sections -z max-page-size=4096 -T mk/platform-rpi4/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) -o $@
+	@test -z "$$($(NM) -u $@ | awk '$$1 == "U"')" || \
+		{ $(NM) -u $@; exit 1; }
+	$(PYTHON) mk/platform-rpi4/tools/check-arm64-vmunix.py --elf $@
+
+$(BUILD)/vmunix: $(BUILD)/kernel.elf mk/platform-rpi4/tools/check-arm64-vmunix.py
+	@mkdir -p $(dir $@)
+	$(OBJCOPY) -O binary $< $@
+	$(PYTHON) mk/platform-rpi4/tools/check-arm64-vmunix.py --elf $< --image $@
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)

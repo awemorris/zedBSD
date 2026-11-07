@@ -21,9 +21,8 @@ PUBLIC_HEADERS := $(shell find include/libc include/uapi userland/desktop/includ
 SYSROOT_COMPLETE_STAMP := $(SYSROOT)/.zedbsd-sysroot-complete
 HEADERS_INSTALLED_STAMP := $(SYSROOT)/.headers-installed
 
-.PHONY: sysroot
-
-sysroot-x86_64: $(SYSROOT_COMPLETE_STAMP)
+.PHONY: sysroot-platform
+sysroot-platform: $(SYSROOT_COMPLETE_STAMP)
 
 # Install public headers into sysroot
 $(HEADERS_INSTALLED_STAMP): $(PUBLIC_HEADERS)

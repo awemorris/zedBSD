@@ -10,7 +10,7 @@
 #define KERN_DRIVERS_GPU_BCM2711_NATIVE_PASS_H
 
 #include <stddef.h>
-#include "drivers/gpu/bcm2711/native-bin.h"
+#include "drivers/gpu/videocore/native-bin.h"
 
 #define BCM2711_NATIVE_PASS_BIN_PREFIX 13U
 

@@ -10,7 +10,7 @@
 #define KERN_DRIVERS_GPU_BCM2711_NATIVE_BIN_H
 
 #include <stddef.h>
-#include "drivers/gpu/bcm2711/native-viewport.h"
+#include "drivers/gpu/videocore/native-viewport.h"
 
 /*
  * The state takes 123 bytes; the draw after it at most 32 (Index Buffer

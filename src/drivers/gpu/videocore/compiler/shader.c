@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/compiler/shader-private.h"
+#include "drivers/gpu/videocore/compiler/shader-private.h"
 #include "drivers/gpu/compiler/optimize.h"
 #include "drivers/gpu/compiler/spirv.h"
 

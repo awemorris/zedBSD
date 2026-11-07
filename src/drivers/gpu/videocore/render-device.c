@@ -15,12 +15,12 @@
 #include <uapi/gpu-allocation.h>
 #include <uapi/sysctl.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/render-runtime.h"
-#include "drivers/gpu/bcm2711/share.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-native-job.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/render-runtime.h"
+#include "drivers/gpu/videocore/share.h"
+#include "drivers/gpu/videocore/vk/vulkan-memory.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-job.h"
 
 /* These initial capabilities exclude Vulkan until the executor and compiler are bound. */
 #define RENDER_CAPABILITIES (GPU_CAP_RESOURCE | GPU_CAP_BLOB | GPU_CAP_TRANSFER | GPU_CAP_MAPPING | GPU_CAP_SHARE | GPU_CAP_ALLOCATION_SHARE)

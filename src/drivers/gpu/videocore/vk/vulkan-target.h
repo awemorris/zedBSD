@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_TARGET_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_TARGET_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-input.h"
+#include "drivers/gpu/videocore/vk/vulkan-input.h"
 
 #define BCM2711_VULKAN_PASS_DEPENDENCIES 4U
 

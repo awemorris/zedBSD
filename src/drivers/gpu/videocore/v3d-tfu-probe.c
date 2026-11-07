@@ -30,10 +30,10 @@
 #include <kern/klog.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/buffer.h"
-#include "drivers/gpu/bcm2711/native-state.h"
-#include "drivers/gpu/bcm2711/v3d-job.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/buffer.h"
+#include "drivers/gpu/videocore/native-state.h"
+#include "drivers/gpu/videocore/v3d-job.h"
 
 /* The unit's output format code for strict UIF without XOR. */
 #define PROBE_OUTPUT_UIF 6U

@@ -21,7 +21,7 @@
 #include <drivers/generic/fdt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /* The device tree name of the engine (binding fact). */
 #define ENGINE_COMPATIBLE		"brcm,2711-v3d"

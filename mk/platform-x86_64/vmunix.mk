@@ -106,18 +106,12 @@ KERN_SOURCES += \
 	src/drivers/isa/ps2-8042.c \
 	src/drivers/platform/pcat/serial-mirror.c
 
-#VMUNIX_OBJS := \
-#	$(patsubst %.c,$(BUILD)/%.o,$(notdir $(KERN_SOURCES))) \
-#	$(patsubst %.S,$(BUILD)/%.o,$(notdir $(KERN_ASM)))
-
-#vpath %.c $(sort $(dir $(KERN_SOURCES)))
-#vpath %.S $(sort $(dir $(KERN_ASM)))
-
 VMUNIX_OBJS := \
 	$(patsubst %.c,$(BUILD)/%.o,$(KERN_SOURCES)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(KERN_ASM))
 
-vmunix-x86_64: $(BUILD)/vmunix
+.PHONY: vmunix-platform
+vmunix-platform: $(BUILD)/vmunix
 
 $(BUILD)/vmunix: $(VMUNIX_OBJS)
 	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 -T mk/platform-$(PLATFORM)/vmunix.ld -nostdlib -Map $@.map $(VMUNIX_OBJS) -o $@

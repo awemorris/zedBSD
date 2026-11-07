@@ -12,9 +12,9 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/native-state.h"
-#include "drivers/gpu/bcm2711/native-storage.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/native-state.h"
+#include "drivers/gpu/videocore/native-storage.h"
 
 /* The underlying contiguous owner accepts at most 256 MiB per physical allocation. */
 #define NATIVE_STORAGE_BYTES (256ULL * 1024U * 1024U)

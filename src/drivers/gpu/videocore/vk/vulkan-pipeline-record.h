@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_PIPELINE_RECORD_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_PIPELINE_RECORD_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-pipeline.h"
+#include "drivers/gpu/videocore/vk/vulkan-pipeline.h"
 
 /* Self-contained selected-state fields require no per-array arena allocation or borrowed wire/application pointer. */
 struct bcm2711_vulkan_pipeline_record {

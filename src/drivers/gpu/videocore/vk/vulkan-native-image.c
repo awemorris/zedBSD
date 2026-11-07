@@ -10,12 +10,12 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-native-image.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-image.h"
 
 /* Each full resident native image transfer uses the same padded submission budget as ordinary draws. */
 #define NATIVE_IMAGE_BYTES (256ULL * 1024U * 1024U)
 
-#include "drivers/gpu/bcm2711/vk/meta/texture-words.inc"
+#include "drivers/gpu/videocore/vk/meta/texture-words.inc"
 
 /* Two counterclockwise triangles cover the entire private viewport; each pair selects one source UV corner. */
 static const uint32_t meta_corners[6][2] = {

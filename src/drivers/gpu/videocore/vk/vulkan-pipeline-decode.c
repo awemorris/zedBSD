@@ -9,7 +9,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-pipeline-record.h"
+#include "drivers/gpu/videocore/vk/vulkan-pipeline-record.h"
 
 static int structure_header(struct i915_wire_reader *reader, VkStructureType expected);
 static int shader_stages(struct i915_wire_reader *reader, struct bcm2711_vulkan_pipeline_record *record);

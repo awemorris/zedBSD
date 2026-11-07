@@ -38,10 +38,10 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/buffer.h"
-#include "drivers/gpu/bcm2711/native-state.h"
-#include "drivers/gpu/bcm2711/v3d-job.h"
-#include "drivers/gpu/bcm2711/v3d71-private.h"
+#include "drivers/gpu/videocore/buffer.h"
+#include "drivers/gpu/videocore/native-state.h"
+#include "drivers/gpu/videocore/v3d-job.h"
+#include "drivers/gpu/videocore/v3d71-private.h"
 
 /* One mapped run keeps the command lists, tile state, pool, overflow, targets and shaders together. */
 #define DIAGNOSTIC_ADDRESS 0x100000U

@@ -9,8 +9,8 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_SHADER_PRIVATE_H
 #define KERN_DRIVERS_GPU_BCM2711_SHADER_PRIVATE_H
 
-#include "drivers/gpu/bcm2711/compiler/qpu.h"
-#include "drivers/gpu/bcm2711/compiler/shader.h"
+#include "drivers/gpu/videocore/compiler/qpu.h"
+#include "drivers/gpu/videocore/compiler/shader.h"
 #include "drivers/gpu/compiler/ir.h"
 
 /* User outputs occupy sixteen locations; clip position follows those sixty-four scalar slots. */

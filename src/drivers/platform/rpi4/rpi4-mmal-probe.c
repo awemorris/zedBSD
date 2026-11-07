@@ -7,7 +7,7 @@
 
 /*
  * The boot-time probe of the VideoCore H.264 decoder (ws236 design §12),
- * built only by test kernels (CONFIG_DRIVER_BCM2711_VIDEO_PROBE).
+ * built only by test kernels (CONFIG_DRIVER_RPI4_GPU_PROBE).
  *
  * It decodes two embedded streams with B frames, each four ways: as
  * encoded (the control, run a), with every SPS rewritten to ask for no

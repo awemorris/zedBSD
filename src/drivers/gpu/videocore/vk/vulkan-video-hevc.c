@@ -42,19 +42,19 @@
 #include <uapi/errno.h>
 #include <uapi/gpu-op.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-video.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-video-hevc.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-command.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-input.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
-#include "drivers/gpu/bcm2711/v3d-memory.h"
-#include "drivers/gpu/bcm2711/v3d-job.h"
-#include "drivers/gpu/bcm2711/native-state.h"
-#include "drivers/gpu/bcm2711/buffer.h"
-#include "drivers/gpu/bcm2711/hevc-decoder.h"
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/render-worker.h"
+#include "drivers/gpu/videocore/vk/vulkan-video.h"
+#include "drivers/gpu/videocore/vk/vulkan-video-hevc.h"
+#include "drivers/gpu/videocore/vk/vulkan-command.h"
+#include "drivers/gpu/videocore/vk/vulkan-input.h"
+#include "drivers/gpu/videocore/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/vk/vulkan-memory.h"
+#include "drivers/gpu/videocore/v3d-memory.h"
+#include "drivers/gpu/videocore/v3d-job.h"
+#include "drivers/gpu/videocore/native-state.h"
+#include "drivers/gpu/videocore/buffer.h"
+#include "drivers/gpu/videocore/hevc-decoder.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/render-worker.h"
 
 /* The decode limits the executor reports and holds sessions to: one picture of each slot and a spare, at most 4096 a side. */
 #define VIDEO_MAX_DPB_SLOTS		BCM2712_HEVC_SLOTS

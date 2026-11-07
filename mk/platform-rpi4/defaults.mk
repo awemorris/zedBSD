@@ -21,7 +21,7 @@ override CONFIG_DRIVER_USB_RTL8822BU       := y
 override CONFIG_DRIVER_GRAPHICS            := y
 override CONFIG_DRIVER_GRAPHICS_BOOTLFB    := y
 override CONFIG_DRIVER_GPU                 := y
-override CONFIG_DRIVER_RPI4_VIDEOCORE_VI   := y
+override CONFIG_DRIVER_RPI4_GPU            := y
 override CONFIG_GPU_JOB_RESERVATION_MS     := 10000
 override CONFIG_GPU_JOB_EXECUTION_MS       := 60000
 override CONFIG_GPU_JOB_STOP_MS            := 10000
@@ -44,6 +44,8 @@ override CONFIG_DRIVER_BT                  := y
 override CONFIG_DRIVER_INPUT_BRIDGE        := y
 override CONFIG_DRIVER_RPI4_BT             := y
 override CONFIG_DRIVER_CPU_PERF            := y
+override CONFIG_KERN_CPU_PERF              := y
+override CONFIG_DRIVER_RPI4_BT             := y
 override CONFIG_DRIVER_CAMERA              := y
 override CONFIG_DRIVER_I2C                 := y
 override CONFIG_DRIVER_GPIO                := y
@@ -280,7 +282,7 @@ override CONFIG_USERLAND_PROGRAMS := \
 	textedit \
 	videoplayer \
 	wayland \
-	wallpapers\
+	wallpapers \
 	xserver \
 	i915-firmware \
 	intelax211-firmware \

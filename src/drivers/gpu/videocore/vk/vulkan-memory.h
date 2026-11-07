@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_MEMORY_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_MEMORY_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-private.h"
+#include "drivers/gpu/videocore/vk/vulkan-private.h"
 #include <uapi/gpu-scanout.h>
 
 /*

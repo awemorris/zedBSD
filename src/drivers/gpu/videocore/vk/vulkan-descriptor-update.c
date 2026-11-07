@@ -10,8 +10,8 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-descriptor.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/vk/vulkan-descriptor.h"
+#include "drivers/gpu/videocore/vk/vulkan-resource.h"
 
 #define VULKAN_UPDATE_OPERATIONS 64U
 #define VULKAN_UPDATE_SETS (2U * VULKAN_UPDATE_OPERATIONS)

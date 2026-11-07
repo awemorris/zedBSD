@@ -10,13 +10,13 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
-#include "drivers/gpu/bcm2711/vk/vulkan-video.h"
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
+#include "drivers/gpu/videocore/vk/vulkan-video.h"
 #endif
-#include "drivers/gpu/bcm2711/vk/vulkan-draw.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-barrier.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-transfer.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-buffer-copy.h"
+#include "drivers/gpu/videocore/vk/vulkan-draw.h"
+#include "drivers/gpu/videocore/vk/vulkan-barrier.h"
+#include "drivers/gpu/videocore/vk/vulkan-transfer.h"
+#include "drivers/gpu/videocore/vk/vulkan-buffer-copy.h"
 
 static int walk_records(struct bcm2711_vulkan_command_buffer *command, struct bcm2711_vulkan_draw_state *state, bcm2711_vulkan_draw_prepare_t prepare, void *payload);
 static void bind_sets(struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *record);
@@ -195,7 +195,7 @@ walk_records(
 			selected = true;
 			break;
 		default:
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 			/* Video and status query commands run on the CPU outside any render pass. */
 			if (bcm2711_vulkan_video_event(record->opcode)) {
 				if (state->pass != NULL)

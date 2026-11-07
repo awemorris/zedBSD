@@ -9,9 +9,9 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_DRAW_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_DRAW_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-record.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-descriptor.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/vk/vulkan-record.h"
+#include "drivers/gpu/videocore/vk/vulkan-descriptor.h"
+#include "drivers/gpu/videocore/vk/vulkan-resource.h"
 
 /* One bound set remembers the layout that selected it, including disturbed bindings whose descriptors are now undefined. */
 struct bcm2711_vulkan_draw_set {

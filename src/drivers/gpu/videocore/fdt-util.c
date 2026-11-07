@@ -23,7 +23,7 @@
 #include <kern/pmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /* The cells of one GIC interrupt specifier: kind, number and trigger. */
 #define FDT_GIC_CELLS			3U

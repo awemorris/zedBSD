@@ -10,8 +10,8 @@
 #define KERN_DRIVERS_GPU_BCM2711_RENDER_DEVICE_H
 
 #include <drivers/gpu/gpu.h>
-#include "drivers/gpu/bcm2711/v3d-memory.h"
-#include "drivers/gpu/bcm2711/render-worker.h"
+#include "drivers/gpu/videocore/v3d-memory.h"
+#include "drivers/gpu/videocore/render-worker.h"
 
 struct bcm2711_render_device;
 struct bcm2711_vulkan_session;

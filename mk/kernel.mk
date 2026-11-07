@@ -137,7 +137,7 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_PCI_VMD)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI_VMD=1
 KERN_SOURCES += \
-	src/drivers/pci/vmd.c
+	src/drivers/pci/pci-vmd.c
 endif
 
 # [Loopback Disk driver]
@@ -241,7 +241,7 @@ KERN_SOURCES += \
 endif
 
 # [USB CDC driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_USB_CDC)),)
+ifneq ($(filter y,$(CONFIG_DRIVER_USB_CDC) $(CONFIG_DRIVER_USB_CDC_NCM) $(CONFIG_DRIVER_USB_CDC_ECM)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_USB_CDC=1
 KERN_SOURCES += \
 	src/drivers/usb/usb-cdc-notification.c
@@ -283,6 +283,8 @@ ifneq ($(filter y,$(CONFIG_DRIVER_RPI4_ETHERNET)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI4_ETHERNET=1
 KERN_SOURCES += \
 	src/drivers/platform/rpi4/rpi4-ethernet.c \
+	src/drivers/ethernet/cadence-gem.c \
+	src/drivers/ethernet/mii-phy.c \
 	src/drivers/ethernet/bcm54213pe.c
 endif
 
@@ -357,7 +359,20 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_RPI4_WIFI)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI4_WIFI=1
 KERN_SOURCES += \
-	src/drivers/rpi4/wifi.c
+	src/drivers/platform/rpi4/rpi4-wifi.c \
+	src/drivers/platform/rpi-common/rpi-mmc-irq.c \
+	src/drivers/platform/rpi-common/rpi-sdio-host.c \
+	src/drivers/platform/rpi-common/rpi-sdio.c \
+	src/drivers/wifi/bcm43455/bcm43455.c \
+	src/drivers/wifi/bcm43455/bcm43455-bcdc.c \
+	src/drivers/wifi/bcm43455/bcm43455-bus.c \
+	src/drivers/wifi/bcm43455/bcm43455-chip.c \
+	src/drivers/wifi/bcm43455/bcm43455-event.c \
+	src/drivers/wifi/bcm43455/bcm43455-files.c \
+	src/drivers/wifi/bcm43455/bcm43455-nvram.c \
+	src/drivers/wifi/bcm43455/bcm43455-radio.c \
+	src/drivers/wifi/bcm43455/bcm43455-sdpcm.c \
+	src/drivers/wifi/bcm43455/bcm43455-station.c
 endif
 
 # [RPi5 WiFi driver]
@@ -690,8 +705,8 @@ KERN_SOURCES += \
 endif
 
 # [RPi4 VideoCore VI GPU driver]
-ifeq ($(CONFIG_DRIVER_RPI4_VIDEOCORE_VI),y)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI4_VIDEOCORE_VI=1
+ifeq ($(CONFIG_DRIVER_RPI4_GPU),y)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI4_GPU=1
 KERN_SOURCES += \
 	src/drivers/gpu/videocore/v3d.c \
 	src/drivers/gpu/videocore/v3d-power.c \
@@ -726,7 +741,7 @@ KERN_SOURCES += \
 	src/drivers/gpu/videocore/display/display-execute.c \
 	src/drivers/gpu/videocore/display/display-flip.c \
 	src/drivers/gpu/videocore/display/display-device.c \
-	src/drivers/gpu/videocore/display/display-irq.c
+	src/drivers/gpu/videocore/display/display-irq.c \
 	src/drivers/gpu/videocore/display/readout.c \
 	src/drivers/gpu/videocore/display/list.c \
 	src/drivers/gpu/videocore/compiler/shader.c \
@@ -780,8 +795,8 @@ KERN_SOURCES += \
 endif
 
 # [RPi5 VideoCore VII GPU driver]
-ifeq ($(CONFIG_DRIVER_RPI5_VIDEOCORE_VI),y)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI5_VIDEOCORE_VI=1
+ifeq ($(CONFIG_DRIVER_RPI5_GPU),y)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI5_GPU=1
 KERN_SOURCES += \
 	src/drivers/gpu/videocore/v3d71.c \
 	src/drivers/gpu/videocore/v3d71-firmware.c \
@@ -1201,16 +1216,16 @@ KERN_SOURCES += \
 endif
 
 # [RPi4 Bluetooth driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_BCM2711_BT)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_BCM2711_BT=1
+ifneq ($(filter y,$(CONFIG_DRIVER_RPI4_BT)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI4_BT=1
 KERN_SOURCES += \
 	src/drivers/platform/rpi4/rpi4-bt.c \
 	src/drivers/platform/rpi-common/rpi-bt-link.c
 endif
 
 # [RPi5 Onboard Bluetooth]
-ifneq ($(filter y,$(CONFIG_DRIVER_BCM2711_BT)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_BCM2711_BT=1
+ifneq ($(filter y,$(CONFIG_DRIVER_RPI5_BT)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI5_BT=1
 KERN_SOURCES += \
 	src/drivers/platform/rpi5/rpi5-bt.c \
 	src/drivers/platform/rpi-common/rpi-bt-link.c
@@ -1218,14 +1233,14 @@ endif
 
 # [Generic CPU performance monitoring driver] (/dev/thermal)
 #  - XXX: TODO: move this module to drivers/
-ifneq ($(filter y,$(CONFIG_KERN_CPU_PERF)),)
-KERN_CPPFLAGS += -DCONFIG_KERN_CPU_PERF=1
+ifneq ($(filter y,$(CONFIG_KERN_CPU_PERF) $(CONFIG_DRIVER_CPU_PERF)),)
+KERN_CPPFLAGS += -DCONFIG_KERN_CPU_PERF=1 -DCONFIG_CPU_PERF=1
 KERN_SOURCES += \
 	src/kern/cpuperf.c
 endif
 
 # [Smart Card driver] (/dev/smartcard)
-ifneq ($(filter y,$(CONFIG_DRIVER_SMARTCARD)),)
+ifneq ($(filter y,$(CONFIG_DRIVER_SMARTCARD) $(CONFIG_DRIVER_USB_CCID)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_SMARTCARD=1
 KERN_SOURCES += \
 	src/drivers/generic/smartcard.c

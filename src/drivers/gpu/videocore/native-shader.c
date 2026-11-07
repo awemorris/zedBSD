@@ -12,7 +12,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/native-state.h"
+#include "drivers/gpu/videocore/native-state.h"
 
 /* Eight scalar rows across sixteen four-byte channels occupy one VPM sector. */
 #define NATIVE_VPM_SECTOR 512U

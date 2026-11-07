@@ -9,13 +9,14 @@ USER_CPPFLAGS := \
 	-Isrc \
 	-I. \
 	-D__ZEDBSD__ \
-	-DHAL_ARCH_X86_64 \
+	-DHAL_ARCH_ARM64 \
+	-DKERN_USER_ABI_AARCH64 \
 	-DKERN_USER_ABI_LP64
 
 USER_CFLAGS := \
-	$(CFLAGS)\
-	-m64 \
-	-march=x86-64 \
+	$(CFLAGS) \
+	-march=armv8-a \
+	-mno-outline-atomics \
 	-fno-pic \
 	-fno-pie \
 	-fno-stack-protector \
@@ -29,4 +30,3 @@ USER_CFLAGS := \
 	-Wall \
 	-Wextra \
 	-Werror
-

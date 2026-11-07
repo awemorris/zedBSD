@@ -13,10 +13,10 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/buffer.h"
-#include "drivers/gpu/bcm2711/native-state.h"
-#include "drivers/gpu/bcm2711/v3d-job.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/buffer.h"
+#include "drivers/gpu/videocore/native-state.h"
+#include "drivers/gpu/videocore/v3d-job.h"
 
 /* One mapped diagnostic run keeps CLs, tile state, pool and overflow together. */
 #define DIAGNOSTIC_ADDRESS 0x100000U

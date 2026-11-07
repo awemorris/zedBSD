@@ -10,6 +10,7 @@ SECTIONS {
 	.text : ALIGN(4096) { *(.text .text.*) *(.rodata .rodata.*) } :text
 	. = ALIGN(4096);
 	.data : { *(.data .data.*) } :data
+	.got : { *(.got .got.*) } :data
 	.tdata : { *(.tdata .tdata.*) } :data :tls
 	.tbss : { *(.tbss .tbss.*) } :data :tls
 	. = ALIGN(4096);

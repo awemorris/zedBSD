@@ -22,7 +22,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 #include "drivers/platform/rpi4/rpi4-firmware.h"
 
 /* Asks whether a clock is on and whether it exists. */

@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-descriptor.h"
+#include "drivers/gpu/videocore/vk/vulkan-descriptor.h"
 
 /* One immutable command keeps descriptor allocation and free batches finite. */
 #define VULKAN_SET_BATCH 64U

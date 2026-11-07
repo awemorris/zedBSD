@@ -9,9 +9,9 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-sync.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/vk/vulkan-sync.h"
 
 /* The bounded object namespace also bounds one all-or-nothing host reset vector. */
 #define VULKAN_SYNC_RESET_COUNT 4096U

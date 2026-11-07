@@ -8,7 +8,7 @@
 /* Immutable native layout definitions preserve ordinary graphics descriptor and push compatibility. */
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-layout.h"
+#include "drivers/gpu/videocore/vk/vulkan-layout.h"
 
 /*
  * Compares canonical single-element set definitions independently of their public identities.

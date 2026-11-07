@@ -64,7 +64,10 @@ include mk/config.mk
 # Import the current developer configuration.
 include $(CONFIGMK)
 
-# Deterimen the build directory.
+# Import the platform default configuration.
+-include mk/platform-$(PLATFORM)/defaults.mk
+
+# Deterimine the build directory.
 BUILD := build/$(PLATFORM)
 
 # Toolchain. (targets: toolchain, toolchain-cached)

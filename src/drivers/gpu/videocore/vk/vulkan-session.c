@@ -9,7 +9,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-private.h"
+#include "drivers/gpu/videocore/vk/vulkan-private.h"
 
 /* One command's generated records use a bounded arena reset between decoded protocol commands. */
 #define VULKAN_COMMAND_ARENA_BYTES (256U << 10)

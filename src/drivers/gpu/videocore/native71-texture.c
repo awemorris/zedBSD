@@ -20,7 +20,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/native-state.h"
+#include "drivers/gpu/videocore/native-state.h"
 
 /* The current Vulkan image contract admits RGBA/BGRA 32-bpp extents up to 4096 pixels. */
 #define NATIVE_TEXTURE_DIMENSION 4096U

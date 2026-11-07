@@ -30,9 +30,9 @@
 #include <kern/klog.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/buffer.h"
-#include "drivers/gpu/bcm2711/v3d-job.h"
-#include "drivers/gpu/bcm2711/v3d71-private.h"
+#include "drivers/gpu/videocore/buffer.h"
+#include "drivers/gpu/videocore/v3d-job.h"
+#include "drivers/gpu/videocore/v3d71-private.h"
 
 /* Real counter time bounds each 500 ms window; polling count is a fallback guard. */
 #define JOB_POLL_STEPS 50000U

@@ -9,7 +9,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-pipeline.h"
+#include "drivers/gpu/videocore/vk/vulkan-pipeline.h"
 
 static int fetch_state(struct bcm2711_vulkan_pipeline *pipeline, const VkPipelineVertexInputStateCreateInfo *input);
 static int raster_state(struct bcm2711_vulkan_pipeline *pipeline, const VkPipelineRasterizationStateCreateInfo *raster);

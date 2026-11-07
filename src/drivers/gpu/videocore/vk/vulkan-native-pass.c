@@ -12,9 +12,9 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-native-pass.h"
-#include "drivers/gpu/bcm2711/native-colour.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-pass.h"
+#include "drivers/gpu/videocore/native-colour.h"
 
 /* All padded native inputs across the enclosing submission share one finite staging budget. */
 #define NATIVE_PASS_BYTES (256ULL * 1024U * 1024U)

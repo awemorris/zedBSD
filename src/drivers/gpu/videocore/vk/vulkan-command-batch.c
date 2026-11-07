@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-command.h"
+#include "drivers/gpu/videocore/vk/vulkan-command.h"
 
 /* Keiland allocates short primary batches; the session namespace independently limits all surviving typed owners. */
 #define VULKAN_COMMAND_BATCH 64U

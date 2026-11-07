@@ -9,10 +9,10 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_NATIVE_DRAW_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_NATIVE_DRAW_H
 
-#include "drivers/gpu/bcm2711/native-storage.h"
-#include "drivers/gpu/bcm2711/native-bin.h"
-#include "drivers/gpu/bcm2711/v3d-job.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-uniform.h"
+#include "drivers/gpu/videocore/native-storage.h"
+#include "drivers/gpu/videocore/native-bin.h"
+#include "drivers/gpu/videocore/v3d-job.h"
+#include "drivers/gpu/videocore/vk/vulkan-uniform.h"
 
 /* Each canonical slot needs at most one image and one descriptor allocation, plus three code/uniform pairs and fetch/default/shader storage. */
 #define BCM2711_VULKAN_DRAW_STORAGE (BCM2711_VULKAN_PIPELINE_SETS * BCM2711_VULKAN_LAYOUT_BINDINGS * 2U + 9U)

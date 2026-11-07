@@ -9,8 +9,8 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_BARRIER_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_BARRIER_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-record.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/vk/vulkan-record.h"
+#include "drivers/gpu/videocore/vk/vulkan-resource.h"
 
 /* One node bounds the combined memory, buffer and image arrays, including Keiland's batch of thirty-two imports. */
 #define BCM2711_VULKAN_BARRIERS 64U

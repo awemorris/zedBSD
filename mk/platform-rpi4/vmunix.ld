@@ -1,77 +1,70 @@
-/* zedBSD amd64 kernel link layout (PC/AT BSP). */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-OUTPUT_FORMAT(elf64-x86-64)
-OUTPUT_ARCH(i386:x86-64)
-ENTRY(amd64_start)
+OUTPUT_FORMAT("elf64-littleaarch64")
+OUTPUT_ARCH(aarch64)
+ENTRY(_start)
 
-PHDRS {
-	text PT_LOAD FLAGS(5);
-	rodata PT_LOAD FLAGS(4);
-	data PT_LOAD FLAGS(6);
-}
+KERNEL_DIRECT_BASE = 0xffff000000000000;
+KERNEL_PHYS_LOAD = 0x00080000;
 
 SECTIONS
 {
-	. = 0xffffffff80200000;
-	__kernel_virt_start = .;
-	__kernel_phys_start = 0x00200000;
+	. = KERNEL_DIRECT_BASE + KERNEL_PHYS_LOAD;
+	__kernel_vma_start = .;
+	__kernel_phys_start = KERNEL_PHYS_LOAD;
 
-	.text : AT(__kernel_phys_start) {
-		__kernel_text_virt_start = .;
-		KEEP(*(.text.entry))
+	.text : AT(KERNEL_PHYS_LOAD) ALIGN(4096)
+	{
+		__kernel_text_start = .;
+		KEEP(*(.text.boot))
 		*(.hightext)
-		*(.text*)
-		. = ALIGN(4096);
-		__kernel_text_virt_end = .;
-	} :text
+		*(.text .text.*)
+		__kernel_text_end = .;
+	}
 	__kernel_text_phys_start = LOADADDR(.text);
 	__kernel_text_phys_end = LOADADDR(.text) + SIZEOF(.text);
-
-	.rodata : AT(__kernel_phys_start +
-		(ADDR(.rodata) - __kernel_virt_start)) {
-		__kernel_rodata_virt_start = .;
-		*(.rodata*)
-		. = ALIGN(4096);
-		__kernel_rodata_virt_end = .;
-	} :rodata
+	.rodata : AT(ADDR(.rodata) - KERNEL_DIRECT_BASE) ALIGN(4096)
+	{
+		__kernel_rodata_start = .;
+		*(.rodata .rodata.*)
+		__kernel_rodata_end = .;
+	}
 	__kernel_rodata_phys_start = LOADADDR(.rodata);
 	__kernel_rodata_phys_end = LOADADDR(.rodata) + SIZEOF(.rodata);
+	.data : AT(ADDR(.data) - KERNEL_DIRECT_BASE) ALIGN(4096)
+	{
+		__kernel_data_start = .;
+		*(.data .data.*)
+		__kernel_data_loaded_end = .;
+	}
+	__arm64_image_end = .;
 
-	.data : AT(__kernel_phys_start +
-		(ADDR(.data) - __kernel_virt_start)) {
-		__kernel_data_virt_start = .;
-		*(.data*)
-		*(.got*)
-	} :data
-	__kernel_image_end = .;
-	.bss (NOLOAD) : AT(__kernel_phys_start +
-		(ADDR(.bss) - __kernel_virt_start)) {
-		. = ALIGN(16);
-		*(.vfs_bss*) *(.kernel_heap*) *(.bss*) *(COMMON)
-		. = ALIGN(4096);
-		__kernel_data_virt_end = .;
-	} :data
+	.bss (NOLOAD) : AT(ADDR(.bss) - KERNEL_DIRECT_BASE) ALIGN(4096)
+	{
+		__bss_start = .;
+		*(.bss.boot)
+		*(.bss .bss.* COMMON)
+		__bss_end = .;
+		__kernel_data_end = .;
+	}
+
+	__kernel_vma_end = .;
+	__kernel_phys_end = __kernel_vma_end - KERNEL_DIRECT_BASE;
 	__kernel_data_phys_start = LOADADDR(.data);
-	__kernel_data_phys_end = LOADADDR(.bss) + SIZEOF(.bss);
-	__kernel_virt_end = .;
-	__kernel_phys_end = __kernel_phys_start +
-		(__kernel_virt_end - __kernel_virt_start);
-	__low_start = __kernel_virt_start;
-	__low_end = __kernel_virt_end;
-	__high_start = __kernel_virt_end;
-	__high_end = __kernel_virt_end;
-	__kernel_vma_start = __kernel_virt_start;
-	__kernel_vma_end = __kernel_virt_end;
+	__kernel_data_phys_end = __kernel_phys_end;
+
+	/*
+	 * The Image header's sizes.  The image size is the memory the image
+	 * takes once it runs, the BSS included, so a bootloader keeps the
+	 * device tree and the initrd out of it.  The file size covers what
+	 * the bootloader reads from the file: every loaded section, the
+	 * orphans the linker puts after .data among them, comes before the
+	 * BSS, and the raw file ends at most a page short of it.
+	 */
+	__arm64_image_size = ALIGN(__kernel_vma_end, 4096) - __kernel_vma_start;
+	__arm64_image_file_size = __bss_start - __kernel_vma_start;
 
 	/DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
-
-	ASSERT(SIZEOF_HEADERS <= 512,
-	       "ELF/program headers exceed the Stage 2 first-sector window")
-	ASSERT((LOADADDR(.text) & 0x1ff) == 0,
-	       "ELF64 load address must be sector aligned")
-	ASSERT(__kernel_phys_end < 0x40000000,
-	       "amd64 bootstrap kernel exceeds the initial one-GiB map")
-	/* Same literal as AMD64_KERNEL_MAX_BYTES (bootloader/include/amd64-kernel-image.h). */
-	ASSERT(__kernel_phys_end - __kernel_phys_start <= 0x01000000,
-	       "amd64 kernel exceeds AMD64_KERNEL_MAX_BYTES (8 W^X leaf tables)")
 }
+
+ASSERT((_start & 63) == 0, "arm64 Image header must be 64-byte aligned")
+ASSERT(_start == __kernel_vma_start, "the Image header must start the image")
+ASSERT(__kernel_phys_end < 0x40000000, "bootstrap map covers only the first GiB")

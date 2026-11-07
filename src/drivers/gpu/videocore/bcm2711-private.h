@@ -21,9 +21,9 @@
 
 #include <drivers/generic/fdt.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-gpu.h"
-#include "drivers/gpu/bcm2711/display/display-flip.h"
-#include "drivers/gpu/bcm2711/v3d-hardware.h"
+#include "drivers/gpu/videocore/bcm2711-gpu.h"
+#include "drivers/gpu/videocore/display/display-flip.h"
+#include "drivers/gpu/videocore/v3d-hardware.h"
 
 /* The stage-mark family of the display path, and its boot parameter prefix. */
 #define BCM2711_FAMILY_DISPLAY		"rpi4gpu"

@@ -14,8 +14,8 @@
 #include <kern/sched.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/buffer.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/buffer.h"
 
 /* Owned interrupt sources of the fixed, single-core 4.2 engine. */
 #define ENGINE_CORE_EVENTS 0xa7U

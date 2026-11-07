@@ -21,9 +21,9 @@
 #include <uapi/errno.h>
 #include <uapi/gpu-allocation.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/buffer.h"
-#include "drivers/gpu/bcm2711/share.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/buffer.h"
+#include "drivers/gpu/videocore/share.h"
 
 /* Resource limits describe actual ordinary packed-pixel storage support. */
 #define DISPLAY_RESOURCE_BYTES (32ULL * 1024U * 1024U)

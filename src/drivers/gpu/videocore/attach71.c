@@ -37,13 +37,13 @@
 #include <kern/sysctl.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2712-gpu.h"
-#include "drivers/gpu/bcm2711/display/hvs6.h"
-#if CONFIG_DRIVER_BCM2712_VIDEO
-#include "drivers/gpu/bcm2711/hevc-decoder.h"
+#include "drivers/gpu/videocore/bcm2712-gpu.h"
+#include "drivers/gpu/videocore/display/hvs6.h"
+#if CONFIG_DRIVER_RPI5_GPU
+#include "drivers/gpu/videocore/hevc-decoder.h"
 #endif
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/v3d71-private.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/v3d71-private.h"
 
 /*
  * How much of memory at the device tree's address may be read.
@@ -146,7 +146,7 @@ drv_bcm2712_gpu_attach(
 	else
 		bcm2712_screen_report(&fdt);
 
-#if CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI5_GPU
 	/* Finds the HEVC decoder, which Vulkan Video decodes with; a board without it decodes nothing. */
 	error = bcm2712_hevc_decoder_discover(&fdt);
 	if (error != 0)

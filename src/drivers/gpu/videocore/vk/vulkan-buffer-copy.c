@@ -11,14 +11,14 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-buffer-copy.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
-#include "drivers/gpu/bcm2711/v3d-memory.h"
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#include "drivers/gpu/videocore/vk/vulkan-buffer-copy.h"
+#include "drivers/gpu/videocore/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/v3d-memory.h"
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 #include <kern/clock.h>
-#include "drivers/gpu/bcm2711/vk/vulkan-video.h"
+#include "drivers/gpu/videocore/vk/vulkan-video.h"
 #endif
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU
 #include "drivers/platform/rpi4/rpi4-mmal-wire.h"
 #endif
 
@@ -39,7 +39,7 @@ static int decode_copy(struct bcm2711_vulkan_session *session, struct i915_wire_
 static int resolve_resources(const struct bcm2711_vulkan_buffer_copy *copy, struct bcm2711_vulkan_object *device, struct bcm2711_vulkan_resource *resources[2], void *cpu[2]);
 static int release_copy(struct bcm2711_vulkan_command_node *node);
 static bool written_box(const struct bcm2711_vulkan_buffer_copy *copy, uint32_t box[4]);
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 static int prepare_plane(const VkBufferImageCopy *region, const struct bcm2711_vulkan_resource *image, uint32_t buffer_slot, uint32_t image_slot, struct copy_span spans[2]);
 #endif
 
@@ -236,7 +236,7 @@ bcm2711_vulkan_buffer_copy_run(
 	uint32_t box[4];
 	void *destination;
 	bool known;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	uint64_t started;
 	bool cached;
 	bool raw;
@@ -292,7 +292,7 @@ bcm2711_vulkan_buffer_copy_run(
 		/* Copy each equal selected row using the source and destination's independent exact numerical pitches. */
 		source_offset = spans[index * 2U].offset;
 		destination_offset = spans[index * 2U + 1U].offset;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 		/*
 		 * A decoded NV12 picture's rows come from the decoder's cached
 		 * copy of the frame when it still has one; the image's memory is
@@ -317,7 +317,7 @@ bcm2711_vulkan_buffer_copy_run(
 			 */
 			raw = bcm2711_vulkan_video_image_raw(resources[0]);
 			for (row = 0; !cached && row < spans[index * 2U].rows; row++) {
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU
 				if (raw) {
 					drv_rpi4_mmal_copy_samples((uint8_t *)cpu[1] + destination_offset, (const uint8_t *)cpu[0] + source_offset, (size_t)spans[index * 2U].bytes);
 				} else {
@@ -449,7 +449,7 @@ resolve_resources(
 			usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 			if (index != 0)
 				usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 			/* A decoded NV12 picture may be read back, plane by plane. */
 			if (resources[index]->format == (VkFormat)BCM2711_VIDEO_FORMAT_NV12 &&
 			    copy->record.opcode == GPU_OP_CMD_COPY_IMAGE_TO_BUFFER) {
@@ -578,7 +578,7 @@ prepare_spans(
 		buffer_slot = 1U - image_slot;
 		image = resources[image_slot];
 		image_region = &copy->regions.images[index];
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 		/* An NV12 plane has its own size, texel and place. */
 		if (image->format == (VkFormat)BCM2711_VIDEO_FORMAT_NV12) {
 			error = prepare_plane(image_region, image, buffer_slot, image_slot, spans);
@@ -795,7 +795,7 @@ written_box(
 	return true;
 }
 
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 /*
  * Prepares the rows of one NV12 plane region read back to a buffer: plane
  * 0 is one byte a texel over the whole picture, plane 1 two bytes (a Cb

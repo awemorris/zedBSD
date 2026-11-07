@@ -10,8 +10,8 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-record.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-descriptor.h"
+#include "drivers/gpu/videocore/vk/vulkan-record.h"
+#include "drivers/gpu/videocore/vk/vulkan-descriptor.h"
 
 /* One chunk of a recording's events, in recording order, the first used of them. */
 struct bcm2711_vulkan_record_chunk {

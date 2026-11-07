@@ -11,7 +11,7 @@
 
 #include <stdbool.h>
 #include <drivers/gpu/gpu-scanout.h>
-#include "drivers/gpu/bcm2711/buffer.h"
+#include "drivers/gpu/videocore/buffer.h"
 
 struct bcm2711_shared;
 

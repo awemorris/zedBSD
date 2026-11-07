@@ -11,7 +11,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/compiler/qpu.h"
+#include "drivers/gpu/videocore/compiler/qpu.h"
 
 /*
  * One ALU's native operation fields while a word is assembled; the defaults

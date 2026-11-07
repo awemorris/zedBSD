@@ -15,8 +15,8 @@
 #include <kern/pmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/display/display-program.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/display/display-program.h"
 #include "drivers/platform/rpi4/rpi4-firmware.h"
 
 static int execute_command(const struct bcm2711_display_command *command, const struct bcm2711_window *windows, const struct drv_bcm2711_boot_screen *screen, struct bcm2711_display *display, uint32_t *captured);

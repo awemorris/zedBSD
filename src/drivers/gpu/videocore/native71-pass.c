@@ -25,7 +25,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/native-pass.h"
+#include "drivers/gpu/videocore/native-pass.h"
 
 /* One complete native pass remains inside the enclosing job's aggregate staging limit. */
 #define NATIVE_PASS_MAX_BYTES (256U * 1024U * 1024U)

@@ -42,9 +42,9 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/buffer.h"
-#include "drivers/gpu/bcm2711/display/hvs6.h"
-#include "drivers/gpu/bcm2711/v3d71-private.h"
+#include "drivers/gpu/videocore/buffer.h"
+#include "drivers/gpu/videocore/display/hvs6.h"
+#include "drivers/gpu/videocore/v3d71-private.h"
 
 /* The device tree names of the parts (binding facts). */
 #define HVS_COMPATIBLE			"brcm,bcm2712-hvs"

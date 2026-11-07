@@ -10,9 +10,9 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-device.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/vk/vulkan-device.h"
 
 /* The existing Zlib record codec is device-independent and remains unchanged. */
 #include "drivers/gpu/i915/vk/vk-codec.inc"

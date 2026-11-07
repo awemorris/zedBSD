@@ -10,8 +10,8 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/native-viewport.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-uniform.h"
+#include "drivers/gpu/videocore/native-viewport.h"
+#include "drivers/gpu/videocore/vk/vulkan-uniform.h"
 
 /* A finite stream comfortably covers the compiler's current 8192-instruction, eight-uniform-per-instruction bound. */
 #define VULKAN_UNIFORM_BYTES (1024U * 1024U)

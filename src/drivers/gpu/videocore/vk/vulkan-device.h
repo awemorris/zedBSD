@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_DEVICE_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_DEVICE_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-private.h"
+#include "drivers/gpu/videocore/vk/vulkan-private.h"
 
 /* Each native root owns one parent edge; queue roots additionally own a guarded completion domain. */
 struct bcm2711_vulkan_root {

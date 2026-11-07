@@ -7,7 +7,7 @@
 
 /*
  * The boot-time probe of the VideoCore H.264 decoder's output order, built
- * only by test kernels (CONFIG_DRIVER_BCM2711_VIDEO_PROBE).
+ * only by test kernels (CONFIG_DRIVER_RPI4_GPU_PROBE).
  */
 
 #ifndef KERN_DRIVERS_RPI4_MMAL_PROBE_H

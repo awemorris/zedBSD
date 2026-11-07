@@ -9,8 +9,8 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_NATIVE_JOB_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_NATIVE_JOB_H
 
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-native-pass.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-pass.h"
 
 /* One prepared primary and its currently executing FIFO pass remain rooted in the controller quarantine after an uncertain callback. */
 struct bcm2711_vulkan_native_job {

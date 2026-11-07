@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_INPUT_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_INPUT_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-private.h"
+#include "drivers/gpu/videocore/vk/vulkan-private.h"
 
 /* Every ordinary typed input owns its device and optional image dependency independently of public identities. */
 struct bcm2711_vulkan_input_owner {

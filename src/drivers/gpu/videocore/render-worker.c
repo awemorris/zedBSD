@@ -13,10 +13,10 @@
 #include <kern/thread.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/render-worker.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-native-job.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/render-worker.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-job.h"
 
 /* Free slots acquire a callback, execute once and finish that callback before reuse. */
 #define REQUEST_FREE 0U

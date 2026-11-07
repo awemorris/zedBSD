@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-pipeline.h"
+#include "drivers/gpu/videocore/vk/vulkan-pipeline.h"
 #include "drivers/gpu/compiler/spirv.h"
 
 static int build_pipeline(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *device, const VkGraphicsPipelineCreateInfo *info, struct bcm2711_vulkan_pipeline *pipeline);

@@ -9,7 +9,7 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-pipeline-record.h"
+#include "drivers/gpu/videocore/vk/vulkan-pipeline-record.h"
 
 /* Four arena-owned records bound temporary command storage without competing with the compiler for kernel stack space. */
 #define VULKAN_PIPELINE_BATCH 4U

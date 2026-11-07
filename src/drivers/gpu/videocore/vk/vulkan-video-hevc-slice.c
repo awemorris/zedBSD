@@ -18,7 +18,7 @@
 
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-video-hevc.h"
+#include "drivers/gpu/videocore/vk/vulkan-video-hevc.h"
 
 /* The NAL unit types: the last decodable non-IRAP picture, the IRAP range, and the two IDR pictures. */
 #define HEVC_NAL_LAST_PICTURE		9U

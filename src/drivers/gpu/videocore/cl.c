@@ -18,7 +18,7 @@
 
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /*
  * The packets' sizes, field positions and opcodes, and the offsets in the

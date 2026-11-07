@@ -17,8 +17,8 @@
 
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/display/display-program.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/display/display-program.h"
 
 /* SRAM words retained for boot firmware and the permanent eleven-word filter. */
 #define PROGRAM_FILTER_START 32U

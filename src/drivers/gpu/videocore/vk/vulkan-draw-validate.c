@@ -8,7 +8,7 @@
 /* Draw preparation verifies shader-consumed logical intervals and exact dynamic state before acquiring native execution owners. */
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-draw.h"
+#include "drivers/gpu/videocore/vk/vulkan-draw.h"
 
 static int validate_indices(const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *draw);
 static int validate_vertices(const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *draw);

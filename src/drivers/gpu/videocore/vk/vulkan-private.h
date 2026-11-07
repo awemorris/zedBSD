@@ -47,7 +47,7 @@ struct bcm2711_vulkan_session {
 	uint32_t longest_opcode;
 	uint64_t longest_ticks;
 	struct i915_wire_arena arena;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/* The capset promised H.264 video decode; latched for the session's life. */
 	bool video;
 #endif

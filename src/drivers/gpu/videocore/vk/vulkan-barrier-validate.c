@@ -8,11 +8,11 @@
 /* Native synchronization supports one serialized graphics family and one complete coherent colour subresource per image. */
 #include <uapi/errno.h>
 
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
-#include "drivers/gpu/bcm2711/vk/vulkan-video.h"
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
+#include "drivers/gpu/videocore/vk/vulkan-video.h"
 #endif
-#include "drivers/gpu/bcm2711/vk/vulkan-barrier.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
+#include "drivers/gpu/videocore/vk/vulkan-barrier.h"
+#include "drivers/gpu/videocore/vk/vulkan-memory.h"
 
 /* All admitted operations complete serially; stages unsupported by the native advertised graphics features remain refused. */
 #define BARRIER_STAGES (VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT | VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_ALL_COMMANDS_BIT)
@@ -200,7 +200,7 @@ validate_image(
 	case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
 		required = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 		break;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	case (VkImageLayout)BCM2711_VIDEO_LAYOUT_DECODE_DST:
 		/* A decode output. */
 		required = BCM2711_VIDEO_USAGE_DECODE_DST;
@@ -244,7 +244,7 @@ colour_layout(
 	case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
 	case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
 		break;
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	case (VkImageLayout)BCM2711_VIDEO_LAYOUT_DECODE_DST:
 	case (VkImageLayout)BCM2711_VIDEO_LAYOUT_DECODE_DPB:
 		/* The layouts of decoded pictures. */

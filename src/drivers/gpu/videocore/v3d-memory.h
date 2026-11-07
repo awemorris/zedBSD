@@ -10,7 +10,7 @@
 #define KERN_DRIVERS_GPU_BCM2711_V3D_MEMORY_H
 
 #include <stdbool.h>
-#include "drivers/gpu/bcm2711/buffer.h"
+#include "drivers/gpu/videocore/buffer.h"
 
 struct bcm2711_v3d;
 struct bcm2711_native_snapshot;

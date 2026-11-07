@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-prepared.h"
+#include "drivers/gpu/videocore/vk/vulkan-prepared.h"
 
 /* Finite CPU snapshots are bounded independently of the primary's one-MiB recording storage and future GPU backing. */
 #define VULKAN_PREPARED_BYTES (8U * 1024U * 1024U)

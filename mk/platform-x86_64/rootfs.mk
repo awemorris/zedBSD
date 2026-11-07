@@ -14,5 +14,5 @@ AMD64_ARCH_FILES   ?= $(X86_64_ARCH_FILES)
 
 $(eval $(call ROOTFS_TREE_RULE,x86_64,$(X86_64_ARCH_INPUTS),$(X86_64_ARCH_FILES)))
 
-.PHONY:rootfs-x86_64
-rootfs-x86_64: $(BUILD)/rootfs/.stamp
+.PHONY:rootfs-platform
+rootfs-platform: $(BUILD)/rootfs/.stamp

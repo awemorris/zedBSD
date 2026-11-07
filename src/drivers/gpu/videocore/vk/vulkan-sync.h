@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_SYNC_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_SYNC_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-private.h"
+#include "drivers/gpu/videocore/vk/vulkan-private.h"
 
 /*
  * One retained logical device owns each fence or binary semaphore until all independently pending queue references retire.

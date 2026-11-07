@@ -23,7 +23,6 @@ override CONFIG_DRIVER_USB_RTL815X         := y
 override CONFIG_DRIVER_PCI_INTEL_AX211     := y
 override CONFIG_DRIVER_USB_RTL8822BU       := y
 override CONFIG_DRIVER_GRAPHICS            := y
-override CONFIG_DRIVER_GRAPHICS_BOOTLFB    := y
 override CONFIG_DRIVER_GRAPHICS_PCAT       := y
 override CONFIG_DRIVER_GPU                 := y
 override CONFIG_DRIVER_PCI_I915            := y

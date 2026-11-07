@@ -9,7 +9,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-private.h"
+#include "drivers/gpu/videocore/vk/vulkan-private.h"
 
 /* One session has a finite object namespace independent of descriptor, job-slot and GPU VA capacities. */
 #define VULKAN_SESSION_OBJECT_LIMIT 4096U

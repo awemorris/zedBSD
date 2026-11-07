@@ -30,7 +30,7 @@
 
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/v3d71-private.h"
+#include "drivers/gpu/videocore/v3d71-private.h"
 
 /* The exclusive end of V3D's GPU virtual address space. */
 #define CL_VIRTUAL_END ((uint64_t)1 << 32)

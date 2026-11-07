@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_NATIVE_STATE_H
 #define KERN_DRIVERS_GPU_BCM2711_NATIVE_STATE_H
 
-#include "drivers/gpu/bcm2711/compiler/shader.h"
+#include "drivers/gpu/videocore/compiler/shader.h"
 
 /*
  * The shader state record: 36 bytes on V3D 4.2, 32 on the Raspberry Pi 5's

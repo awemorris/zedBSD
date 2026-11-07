@@ -9,7 +9,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-descriptor.h"
+#include "drivers/gpu/videocore/vk/vulkan-descriptor.h"
 
 /* The finite session namespace bounds pool/set metadata independently of any native GPU allocation. */
 #define VULKAN_POOL_SETS 4096U

@@ -25,7 +25,7 @@
 #include <kern/lock.h>
 #include <kern/platform.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /* The stage-mark family of the HVS6 display, and its boot parameter prefix. */
 #define BCM2712_FAMILY_DISPLAY		"hvs6"

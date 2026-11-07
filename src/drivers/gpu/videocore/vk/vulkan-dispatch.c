@@ -8,24 +8,24 @@
 /* Typed Vulkan routing is shared by the public renderer and actual client codec checks. */
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-dispatch.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-device.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-queue.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-sync.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-input.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-layout.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-descriptor.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-target.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-pipeline.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-command.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-barrier.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-buffer-copy.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-record.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-transfer.h"
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
-#include "drivers/gpu/bcm2711/vk/vulkan-video.h"
+#include "drivers/gpu/videocore/vk/vulkan-dispatch.h"
+#include "drivers/gpu/videocore/vk/vulkan-device.h"
+#include "drivers/gpu/videocore/vk/vulkan-queue.h"
+#include "drivers/gpu/videocore/vk/vulkan-sync.h"
+#include "drivers/gpu/videocore/vk/vulkan-memory.h"
+#include "drivers/gpu/videocore/vk/vulkan-resource.h"
+#include "drivers/gpu/videocore/vk/vulkan-input.h"
+#include "drivers/gpu/videocore/vk/vulkan-layout.h"
+#include "drivers/gpu/videocore/vk/vulkan-descriptor.h"
+#include "drivers/gpu/videocore/vk/vulkan-target.h"
+#include "drivers/gpu/videocore/vk/vulkan-pipeline.h"
+#include "drivers/gpu/videocore/vk/vulkan-command.h"
+#include "drivers/gpu/videocore/vk/vulkan-barrier.h"
+#include "drivers/gpu/videocore/vk/vulkan-buffer-copy.h"
+#include "drivers/gpu/videocore/vk/vulkan-record.h"
+#include "drivers/gpu/videocore/vk/vulkan-transfer.h"
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
+#include "drivers/gpu/videocore/vk/vulkan-video.h"
 #endif
 
 /* Each route either owns the exact opcode or leaves both cursors unchanged. */
@@ -53,7 +53,7 @@ static const vulkan_route routes[] = {
 	bcm2711_vulkan_buffer_copy_dispatch,
 	bcm2711_vulkan_transfer_dispatch,
 	bcm2711_vulkan_record_dispatch,
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	bcm2711_vulkan_video_dispatch,
 	bcm2711_vulkan_video_query_dispatch
 #endif

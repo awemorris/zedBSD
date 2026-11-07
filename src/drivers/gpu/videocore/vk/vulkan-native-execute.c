@@ -12,9 +12,9 @@
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/native-colour.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-native-pass.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/native-colour.h"
+#include "drivers/gpu/videocore/vk/vulkan-native-pass.h"
 
 /* The most tile boxes a pass records as writes of their own; more, and its area is recorded. */
 #define NATIVE_EXECUTE_WRITTEN_BOXES 4U

@@ -22,13 +22,13 @@
 #include <drivers/generic/fdt.h>
 #include <kern/klog.h>
 #include <kern/pmem.h>
-#if CONFIG_DRIVER_BCM2711_GENET
+#if CONFIG_DRIVER_RPI4_ETHERNET
 #include "drivers/platform/rpi4/rpi4-ethernet.h"
 #endif
 #if CONFIG_DRIVER_USB_HID
 #include <drivers/usb/usb-hid.h>
 #endif
-#if CONFIG_DRIVER_BCM2711_AUDIO
+#if CONFIG_DRIVER_RPI4_AUDIO
 #include "drivers/platform/rpi4/rpi4-audio.h"
 #endif
 #include "drivers/platform/rpi-common/rpi-console.h"
@@ -36,19 +36,17 @@
 #include "drivers/platform/rpi-common/rpi-gpio.h"
 #include "drivers/platform/rpi4/rpi4-pcie.h"
 #include "drivers/platform/rpi-common/rpi-sdhci.h"
-#if CONFIG_DRIVER_BCM2711_WIFI
+#if CONFIG_DRIVER_RPI4_WIFI
 #include "drivers/platform/rpi4/rpi4-wifi.h"
 #endif
-#if CONFIG_DRIVER_BCM2711_BT
+#if CONFIG_DRIVER_RPI4_BT
 #include "drivers/platform/rpi4/rpi4-bt.h"
 #endif
-#if CONFIG_DRIVER_BCM2711_GPU
+#if CONFIG_DRIVER_RPI4_GPU
 #include "drivers/gpu/bcm2711/bcm2711-gpu.h"
-#endif
-#if CONFIG_DRIVER_BCM2711_VCHIQ
 #include "drivers/platform/rpi4/rpi4-vchiq.h"
 #endif
-#if CONFIG_DRIVER_BCM2711_VIDEO_PROBE
+#if CONFIG_DRIVER_RPI4_GPU_PROBE
 #include "drivers/platform/rpi4/rpi4-mmal-probe.h"
 #endif
 
@@ -60,7 +58,7 @@
  */
 #define RPI4_FDT_READ_LIMIT	(2U * 1024U * 1024U)
 
-#if CONFIG_DRIVER_BCM2711_WIFI
+#if CONFIG_DRIVER_RPI4_WIFI
 /*
  * The SD controller the SD card driver bound to, for the onboard Wi-Fi's
  * probe.
@@ -74,7 +72,7 @@
 static uintptr_t rpi4_sd_base;
 #endif
 
-#if CONFIG_DRIVER_BCM2711_WIFI || CONFIG_DRIVER_BCM2711_BT
+#if CONFIG_DRIVER_RPI4_WIFI || CONFIG_DRIVER_RPI4_BT
 /*
  * The device tree's physical address, for the onboard Wi-Fi's and
  * Bluetooth's probes once interrupts are on.
@@ -105,12 +103,12 @@ kern_platform_init(
 	uint64_t fdt_phys;
 	uint64_t sdhci_phys;
 	int sdhci_error;
-#if CONFIG_DRIVER_BCM2711_GPU
+#if CONFIG_DRIVER_RPI4_GPU
 	struct kern_boot_framebuffer framebuffer;
 	struct drv_bcm2711_boot_screen screen;
 #endif
 	unsigned i;
-#if CONFIG_DRIVER_BCM2711_GENET
+#if CONFIG_DRIVER_RPI4_ETHERNET
 	int ethernet_error;
 #endif
 
@@ -141,7 +139,7 @@ kern_platform_init(
 	/* Selects the MBR partition scheme and starts the SD controller. */
 	partition_set_scheme(&drv_partition_scheme_mbr);
 	disk_registry_reset();
-#if CONFIG_DRIVER_BCM2711_WIFI
+#if CONFIG_DRIVER_RPI4_WIFI
 	rpi4_sd_base = (uintptr_t)sdhci_phys;
 #endif
 	sdhci_error = drv_rpi_sdhci_init((uintptr_t)sdhci_phys, 0);
@@ -158,13 +156,13 @@ kern_platform_init(
 		if (sdhci_error != 0)
 			return 0;
 
-#if CONFIG_DRIVER_BCM2711_WIFI
+#if CONFIG_DRIVER_RPI4_WIFI
 		rpi4_sd_base = (uintptr_t)0xfe300000ULL;
 #endif
 		hal_puts("sdhci: using QEMU legacy-controller fallback\n");
 	}
 
-#if CONFIG_DRIVER_BCM2711_WIFI || CONFIG_DRIVER_BCM2711_BT
+#if CONFIG_DRIVER_RPI4_WIFI || CONFIG_DRIVER_RPI4_BT
 	/* Keeps the tree's address for the Wi-Fi and Bluetooth probes discovery starts later. */
 	rpi4_fdt_phys = fdt_phys;
 #endif
@@ -172,7 +170,7 @@ kern_platform_init(
 	/* Prepares the firmware mailbox and the GPIO block the drivers below share. */
 	prepare_shared_blocks(fdt_phys);
 
-#if CONFIG_DRIVER_BCM2711_GENET
+#if CONFIG_DRIVER_RPI4_ETHERNET
 	/* Starts onboard Ethernet independently of USB and PCIe discovery. */
 	ethernet_error = drv_rpi4_ethernet_init(fdt_phys);
 	if (ethernet_error != 0) {
@@ -188,24 +186,24 @@ kern_platform_init(
 	 */
 	(void)drv_rpi4_pcie_init(fdt_phys);
 
-#if CONFIG_DRIVER_BCM2711_AUDIO
+#if CONFIG_DRIVER_RPI4_AUDIO
 	/* Publishes the headphone jack; a board without it boots without sound. */
 	(void)drv_rpi4_audio_init(fdt_phys);
 #endif
 
-#if CONFIG_DRIVER_BCM2711_VCHIQ
+#if CONFIG_DRIVER_RPI4_GPU
 	/*
 	 * Starts the link to the VideoCore firmware's services before the GPU,
 	 * whose video decode uses it; a board without it boots without them.
 	 */
 	(void)drv_rpi4_vchiq_init(fdt_phys);
 #endif
-#if CONFIG_DRIVER_BCM2711_VIDEO_PROBE
+#if CONFIG_DRIVER_RPI4_GPU_PROBE
 	/* A test kernel publishes the decoder probe's device; a write to it runs the probe. */
 	(void)drv_rpi4_mmal_probe_start();
 #endif
 
-#if CONFIG_DRIVER_BCM2711_GPU
+#if CONFIG_DRIVER_RPI4_GPU
 	/*
 	 * Describes the firmware's screen to the graphics driver; a boot whose
 	 * firmware allocated none describes an empty one, which the record is
@@ -260,7 +258,7 @@ kern_platform_refresh_devices(
 	(void)d;
 	(void)n;
 
-#if CONFIG_DRIVER_BCM2711_GENET
+#if CONFIG_DRIVER_RPI4_ETHERNET
 	/* Starts periodic link and missed-interrupt service after discovery. */
 	drv_rpi4_ethernet_refresh();
 #endif
@@ -268,7 +266,7 @@ kern_platform_refresh_devices(
 	/* Has the USB controllers behind PCIe find their devices. */
 	drv_rpi4_pcie_refresh();
 
-#if CONFIG_DRIVER_BCM2711_WIFI
+#if CONFIG_DRIVER_RPI4_WIFI
 	/*
 	 * Starts the onboard Wi-Fi's thread; a board or emulator without the
 	 * chip, or with the SD card on its controller, goes on without it.
@@ -276,7 +274,7 @@ kern_platform_refresh_devices(
 	(void)drv_rpi4_wifi_probe(rpi4_fdt_phys, rpi4_sd_base);
 #endif
 
-#if CONFIG_DRIVER_BCM2711_BT
+#if CONFIG_DRIVER_RPI4_BT
 	/*
 	 * Starts the onboard Bluetooth's thread; QEMU, a tree with disable-bt,
 	 * or a build whose PL011 is the serial console goes on without it.
@@ -376,7 +374,7 @@ void
 kern_platform_shutdown_prepare(
 	void)
 {
-#if CONFIG_DRIVER_BCM2711_WIFI
+#if CONFIG_DRIVER_RPI4_WIFI
 	/* Ends a bring-up still in progress; a published wlanN is closed by the network's shutdown. */
 	drv_rpi4_wifi_stop();
 #endif

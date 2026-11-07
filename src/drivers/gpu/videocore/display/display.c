@@ -23,7 +23,7 @@
 #include <drivers/generic/fdt.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /* The device tree names of the display hardware (binding facts). */
 #define DISPLAY_COMPAT_COMPOSITOR	"brcm,bcm2711-hvs"

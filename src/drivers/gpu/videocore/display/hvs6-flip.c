@@ -42,9 +42,9 @@
 #include <kern/sched.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/buffer.h"
-#include "drivers/gpu/bcm2711/display/hvs6.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/buffer.h"
+#include "drivers/gpu/videocore/display/hvs6.h"
 
 /* One unscaled HVS6 plane is eight words; a list ends with one terminator word. */
 #define FLIP_PLANE_WORDS 8U

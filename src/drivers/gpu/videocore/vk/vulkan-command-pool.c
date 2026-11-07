@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-command.h"
+#include "drivers/gpu/videocore/vk/vulkan-command.h"
 
 static int create_pool(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int retire_pool(struct bcm2711_vulkan_session *session, bool reset, struct i915_wire_reader *reader, struct i915_wire_writer *reply);

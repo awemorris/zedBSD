@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/native-colour.h"
+#include "drivers/gpu/videocore/native-colour.h"
 
 static uint32_t convert_component(uint32_t word);
 

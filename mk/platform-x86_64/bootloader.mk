@@ -27,7 +27,7 @@ EFI_CFLAGS := \
 	-Wextra \
 	-Werror -I.
 
-.PHONY: bootloader
+.PHONY: bootloader-platform
 bootloader-platform: $(BUILD)/uefi/BOOTX64.EFI \
                      $(BUILD)/bootloader/stage1.bin \
                      $(BUILD)/bootloader/stage1-native.bin \

@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/share.h"
+#include "drivers/gpu/videocore/share.h"
 
 /* One immutable capability keeps its page vector and allocation alive together. */
 struct bcm2711_shared {

@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/vk/vulkan-layout.h"
+#include "drivers/gpu/videocore/vk/vulkan-layout.h"
 
 /* The shader compiler exposes finite graphics-only descriptor and push interfaces. */
 #define VULKAN_LAYOUT_STAGES (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)

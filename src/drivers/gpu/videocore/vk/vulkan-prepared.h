@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_PREPARED_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_PREPARED_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-draw.h"
+#include "drivers/gpu/videocore/vk/vulkan-draw.h"
 
 struct bcm2711_vulkan_meta_draw;
 

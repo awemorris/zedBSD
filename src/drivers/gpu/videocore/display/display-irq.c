@@ -13,8 +13,8 @@
 #include <kern/irq.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/display/display-program.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/display/display-program.h"
 
 static bool service_timing(void *owner);
 static bool service_compositor(void *owner);

@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_DESCRIPTOR_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_DESCRIPTOR_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-layout.h"
+#include "drivers/gpu/videocore/vk/vulkan-layout.h"
 
 /* One pool owns its device and counts charges until each old or current set's final owner retires. */
 struct bcm2711_vulkan_descriptor_pool {

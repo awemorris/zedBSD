@@ -22,9 +22,9 @@
 #include <kern/pmem.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-gpu.h"
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/render-device.h"
+#include "drivers/gpu/videocore/bcm2711-gpu.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/render-device.h"
 #include "drivers/platform/rpi4/rpi4-firmware.h"
 
 /*

@@ -30,8 +30,8 @@
 #include <kern/sched.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/buffer.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/buffer.h"
 #include "drivers/platform/rpi4/rpi4-firmware.h"
 
 /* The boot console list R0 left in SRAM, and the empty pointer of the old submitter state. */

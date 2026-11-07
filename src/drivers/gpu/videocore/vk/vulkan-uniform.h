@@ -9,7 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_VULKAN_UNIFORM_H
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_UNIFORM_H
 
-#include "drivers/gpu/bcm2711/vk/vulkan-prepared.h"
+#include "drivers/gpu/videocore/vk/vulkan-prepared.h"
 
 /* One canonical descriptor slot borrows native record addresses from independently owned job storage; it grants no new DMA lifetime. */
 struct bcm2711_vulkan_native_binding {

@@ -30,7 +30,7 @@
 #include <kern/device-io.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 
 /* Asks the firmware's revision, which a real firmware stamps with its build time. */
 #define READOUT_TAG_REVISION		0x00000001U

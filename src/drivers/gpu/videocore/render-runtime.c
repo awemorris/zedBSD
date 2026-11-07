@@ -13,12 +13,12 @@
 #include <uapi/errno.h>
 #include <uapi/gpu-job.h>
 
-#include "drivers/gpu/bcm2711/bcm2711-private.h"
-#include "drivers/gpu/bcm2711/render-device.h"
-#include "drivers/gpu/bcm2711/render-runtime.h"
-#include "drivers/gpu/bcm2711/vk/vulkan-dispatch.h"
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
-#include "drivers/gpu/bcm2711/vk/vulkan-video.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
+#include "drivers/gpu/videocore/render-device.h"
+#include "drivers/gpu/videocore/render-runtime.h"
+#include "drivers/gpu/videocore/vk/vulkan-dispatch.h"
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
+#include "drivers/gpu/videocore/vk/vulkan-video.h"
 
 /*
  * The native word after the vendor suffix ("TANZ" read little endian), and
@@ -26,7 +26,7 @@
  * 2) on the Pi 5's HEVC decoder.
  */
 #define VULKAN_NATIVE_MAGIC 0x5a4e4154U
-#if CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI5_GPU
 #define VULKAN_NATIVE_VIDEO_DECODE 4U
 #else
 #define VULKAN_NATIVE_VIDEO_DECODE 1U
@@ -126,7 +126,7 @@ runtime_capset(
 	capset_word(capset->data, 164, VULKAN_VENDOR_FLAGS);
 	capset->bytes = VULKAN_CAPSET_BYTES;
 
-#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
+#if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/*
 	 * A session asked while the decoder is there is promised video
 	 * decode, for its life: the native word follows the vendor suffix.

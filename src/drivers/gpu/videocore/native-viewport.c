@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/bcm2711/native-viewport.h"
+#include "drivers/gpu/videocore/native-viewport.h"
 
 static uint32_t half_dimension(uint32_t bits);
 static uint32_t add_magnitudes(uint32_t left, uint32_t right);
