@@ -5294,7 +5294,16 @@ lookup_symbol_version(
 	/* Handles the weak condition. */
 	if (weak)
 		return 0;
-	rtld_fatal("undefined symbol");
+	rtld_debug("ld.so: undefined symbol: ");
+	rtld_debug(name != NULL ? name : "(null)");
+	if (required_version != NULL) {
+		rtld_debug("@");
+		rtld_debug(required_version);
+	}
+	rtld_debug("\n");
+	(void)syscall6(KERN_SYS_exit, 127, 0, 0, 0, 0, 0);
+	for (;;) {
+	}
 }
 
 /* Supports the reserved loader symbol operation. */

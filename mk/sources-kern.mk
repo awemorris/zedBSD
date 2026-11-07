@@ -261,7 +261,6 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_PCI_RTL8125)),)
 KERN_CPPFLAGS += \
 	-DCONFIG_DRIVER_PCI_RTL8125=1 \
-	-DCONFIG_DRIVER_PCI_RTL8125_PROFILE=$(CONFIG_DRIVER_PCI_RTL8125_PROFILE)
 KERN_SOURCES += \
 	src/drivers/ethernet/rtl8125.c
 endif
@@ -1005,8 +1004,8 @@ KERN_SOURCES += \
 endif
 
 # [PC/AT VGA driver]
-ifneq ($(filter y,$(CONFIG_DRIVER_GRAPHICS_VGA)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_GRAPHICS_VGA=1
+ifneq ($(filter y,$(CONFIG_DRIVER_GRAPHICS_PCAT)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_GRAPHICS_PCAT=1
 KERN_SOURCES += \
 	src/drivers/platform/pcat/graphics/pcat-graphics.c \
 	src/drivers/platform/pcat/graphics/backend.c \

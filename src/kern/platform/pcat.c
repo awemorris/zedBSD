@@ -205,7 +205,7 @@ kern_platform_init(
 		kern_logf("isa: isa device registration failed\n");
 
 	/* Brings up the PC/AT graphics driver. */
-#if CONFIG_DRIVER_GRAPHICS_VGA
+#if CONFIG_DRIVER_GRAPHICS_PCAT
 	if (drv_pcat_graphics_pci_register() != 0)
 		kern_logf("graphics: PCI driver registration failed\n");
 #endif
@@ -297,7 +297,7 @@ kern_platform_init(
 	}
 
 	/* Prepares the graphics driver. */
-#if CONFIG_DRIVER_GRAPHICS_VGA
+#if CONFIG_DRIVER_GRAPHICS_PCAT
 	if (!drv_pcat_graphics_prepare())
 		kern_logf("graphics: PC/AT driver unavailable\n");
 #endif
