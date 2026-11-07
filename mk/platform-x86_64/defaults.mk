@@ -2,7 +2,7 @@ override ARCHITECTURE                      := x86_64
 override BOARD                             := pcat
 
 override CONFIG_ROOTFS_DEVELOPMENT         := y
-override CONFIG_BOOT_SPLASH                := y
+override CONFIG_BOOT_SPLASH                := n
 override CONFIG_GRAPHICAL_LOGIN            := y
 
 override CONFIG_DRIVER_PCI                 := y
@@ -305,4 +305,5 @@ override CONFIG_USERLAND_PROGRAMS := \
 	noto-color-emoji \
 	ca-certificates \
 	mview \
-	zgears
+	zgears \
+	installer

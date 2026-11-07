@@ -26,7 +26,9 @@ INSTALL_ADMIN_SOURCES := \
 	userland/desktop/installer/admin/session.c \
 	userland/base/common/account.c \
 	userland/base/common/sha256.c \
-	userland/base/diskpart/table.c userland/base/libz-compat/inflate.c userland/base/libz-compat/checksum.c
+	userland/base/diskpart/table.c \
+	userland/base/libz-compat/inflate.c \
+	userland/base/libz-compat/checksum.c
 
 $(eval $(call USERLAND_PACKAGE,install-admin,install-admin,x86_64,n,basic,$(INSTALL_ADMIN_SOURCES),n,installer,,,4550,program,,,usr/libexec))
 

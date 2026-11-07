@@ -45,8 +45,7 @@ ROOT_INODES ?= 65536
 SWAP_IMAGE := $(BUILD)/native-swap-$(SWAP_MIB)m.img
 $(SWAP_IMAGE): mk/tools/make-swapfile.noct
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct \
-		--size-mib $(SWAP_MIB) --label zedBSD-swap --output $@
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct --size-mib $(SWAP_MIB) --label zedBSD-swap --output $@
 
 ifeq ($(VARIANT),bios)
 ZEDBSD_CONFIG_SRC := mk/platform-x86_64/bootcfg/zedbsd-bios.cfg
@@ -67,10 +66,7 @@ $(ZEDBSD_CONFIG): $(ZEDBSD_CONFIG_SRC) $(VARIANT_STAMP)
 ROOT_IMAGE := $(BUILD)/x86_64-native-root-$(ROOT_MIB)m.ufs
 $(ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(IMAGE_HOST)
 	@mkdir -p $(dir $@)
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-rootfs.noct \
-		--backend $(abspath $(IMAGE_HOST)) --force \
-		--profile amd64 --output $@ --tree $(BUILD)/rootfs \
-		--size-mib $(ROOT_MIB) --min-inodes $(ROOT_INODES)
+	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-rootfs.noct --backend $(abspath $(IMAGE_HOST)) --force --profile amd64 --output $@ --tree $(BUILD)/rootfs --size-mib $(ROOT_MIB) --min-inodes $(ROOT_INODES)
 
 COMMON_DEPS := $(BUILD)/vmunix $(ROOT_IMAGE) $(SWAP_IMAGE) $(ZEDBSD_CONFIG)
 ifeq ($(CONFIG_BOOT_SPLASH),y)

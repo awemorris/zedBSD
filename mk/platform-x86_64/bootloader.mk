@@ -215,24 +215,7 @@ $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 
 $(BUILD)/bootloader/bios-zedbsd-config.i386.o: bootloader/uefi/zedbsd-config.c
 	@mkdir -p $(dir $@)
-	$(CC) \
-		-m16 \
-		-march=i386 \
-		-mtune=i386 \
-		-Os \
-		-ffreestanding \
-		-fno-pic \
-		-fno-pie \
-		-fno-stack-protector \
-		-fno-asynchronous-unwind-tables \
-		-fno-unwind-tables \
-		-fno-builtin \
-		-Wall \
-		-Wextra \
-		-Werror -I. \
-		-c \
-		$<\
-		-o $@
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. -c $< -o $@
 
 $(BUILD)/bootloader/bios-fat-directory.i386.o: bootloader/bios/fat-directory.c
 	@mkdir -p $(dir $@)
@@ -248,16 +231,10 @@ $(BUILD)/bootloader/common-logo-path.i386.o: bootloader/common/logo-path.c
 
 $(BUILD)/bootloader/bios-memory-map.i386.o: bootloader/bios/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
-	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. -c $< -o $@
 
 $(BUILD)/bootloader/common-memory-map.i386.o: bootloader/common/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
-	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
-		-fno-stack-protector -fno-asynchronous-unwind-tables \
-		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
-		-c $< -o $@
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. -c $< -o $@
 
 

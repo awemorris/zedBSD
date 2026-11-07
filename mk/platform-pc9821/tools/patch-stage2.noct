@@ -1,0 +1,47 @@
+require zedbuild;
+
+func main(args) {
+    if (Array.size(args) != 1) { zbFail("usage: patch-stage2.noct VMUNIX"); }
+    var path = args[0];
+    var image = zbReadFile(path);
+    if (Packed.size(image) < 512 || image[0] != 127 || image[1] != 69 ||
+        image[2] != 76 || image[3] != 70) {
+        zbFail(path + ": not an ELF image");
+    }
+    if (image[4] != 1 || image[5] != 1 || zbU16LE(image, 16) != 2 ||
+        zbU16LE(image, 18) != 3) { zbFail(path + ": not ELF32 i386 executable"); }
+    var entry = zbU32LE(image, 24);
+    var phoff = zbU32LE(image, 28);
+    var phentsize = zbU16LE(image, 42);
+    var phnum = zbU16LE(image, 44);
+    if (phoff != 52 || phentsize != 32 || phoff + phnum * phentsize > 512) {
+        zbFail(path + ": invalid first-sector program headers");
+    }
+    var count = 0;
+    var load = 0;
+    for (i in 0..phnum) {
+        var at = phoff + i * phentsize;
+        if (zbU32LE(image, at) == 1) { count = count + 1; load = at; }
+    }
+    if (count != 1) { zbFail(path + ": expected exactly one PT_LOAD"); }
+    var fileOffset = zbU32LE(image, load + 4);
+    var vaddr = zbU32LE(image, load + 8);
+    var paddr = zbU32LE(image, load + 12);
+    var filesz = zbU32LE(image, load + 16);
+    var memsz = zbU32LE(image, load + 20);
+    if (fileOffset != 512 || fileOffset + filesz > Packed.size(image)) {
+        zbFail(path + ": invalid PT_LOAD file range");
+    }
+    if (vaddr != 0x80100000 || paddr != 0x00100000 || memsz < filesz ||
+        paddr + memsz >= 0x00f00000) { zbFail(path + ": invalid PT_LOAD mapping"); }
+    if (entry < vaddr || entry >= vaddr + filesz) { zbFail(path + ": invalid entry"); }
+    if (!zbBytesEqual(image, 512, "B98S") || zbU16LE(image, 516) != 2 ||
+        zbU16LE(image, 518) != 20) { zbFail(path + ": invalid B98S v2 header"); }
+    zbPut32LE(image, 520, Packed.size(image));
+    zbPut32LE(image, 524, entry - 0x80000000);
+    var checksum = 0;
+    for (i in 532..Packed.size(image)) { checksum = (checksum + image[i]) & 4294967295; }
+    zbPut32LE(image, 528, checksum);
+    zbWriteFile(path, image);
+    print(path + ": " + Packed.size(image) + " bytes, checksum " + checksum);
+}

@@ -53,19 +53,8 @@ $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	cp -f $(LIBC_OUT_DIR)/libc.so $(LIBC_OUT_DIR)/libm.so $(LIBC_OUT_DIR)/libutil.so $(LIBC_OUT_DIR)/ld.so $(BUILD)/dynamic/
 	cp -f mk/platform-x86_64/user.ld mk/platform-x86_64/vmunix.ld $(SYSROOT_LIB)/zedbsd/x86_64/
 	@printf '%s\n' '#include <stdint.h>' 'int main(void) { return (int)sizeof(uintptr_t); }' > $(SYSROOT)/smoke.c
-	$(CC) --target=x86_64-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-m64 -march=x86-64 -mno-red-zone -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 \
-		-nostdinc -isystem $(SYSROOT_INC) \
-		-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
-		-c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
-	$(CC) --target=x86_64-unknown-zedbsd --sysroot=$(SYSROOT) \
-		-m64 -nostdlib -static -Wl,--build-id=none \
-		-Wl,-T,$(SYSROOT_LIB)/zedbsd/x86_64/user.ld \
-		$(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o \
-		-Wl,--start-group $(SYSROOT_LIB)/libc.a \
-		$(SYSROOT_LIB)/libzedbsd-compiler-rt.a \
-		$(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group \
-		-o $(SYSROOT)/smoke.elf
+	$(CC) --target=x86_64-unknown-zedbsd --sysroot=$(SYSROOT) -m64 -march=x86-64 -mno-red-zone -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 -nostdinc -isystem $(SYSROOT_INC) -ffreestanding -fno-pic -fno-pie -fno-stack-protector -c $(SYSROOT)/smoke.c -o $(SYSROOT)/smoke.o
+	$(CC) --target=x86_64-unknown-zedbsd --sysroot=$(SYSROOT) -m64 -nostdlib -static -Wl,--build-id=none -Wl,-T,$(SYSROOT_LIB)/zedbsd/x86_64/user.ld $(SYSROOT_LIB)/crt0.o $(SYSROOT)/smoke.o -Wl,--start-group $(SYSROOT_LIB)/libc.a $(SYSROOT_LIB)/libzedbsd-compiler-rt.a $(SYSROOT_LIB)/libclang_rt.builtins.a -Wl,--end-group -o $(SYSROOT)/smoke.elf
 	@$(READELF) -h $(SYSROOT)/smoke.elf | grep -F 'Advanced Micro Devices X86-64' >/dev/null
 	@if $(NM) -u $(SYSROOT)/smoke.elf | grep .; then \
 		echo "sysroot: smoke link retained undefined symbols" >&2; exit 1; \

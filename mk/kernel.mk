@@ -319,7 +319,7 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_LGY98)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_LGY98=1
 KERN_SOURCES += \
-	src/drivers/pci/lgy98.c
+	src/drivers/platform/pc98/pc98-lgy98.c
 endif
 
 # [Intel AX211 PCIe WiFi driver]
@@ -1055,7 +1055,7 @@ KERN_CPPFLAGS += -DCONFIG_DRIVER_GRAPHICS_PC98=1
 KERN_SOURCES += \
 	src/drivers/platform/pc98/graphics/pc98-graphics.c \
 	src/drivers/platform/pc98/graphics/backend.c \
-	src/drivers/platform/pc98/graphics/text.c
+	src/drivers/platform/pc98/graphics/text.c \
 	src/drivers/platform/pc98/graphics/display-auto.c \
 	src/drivers/platform/pc98/graphics/display-gdc.c \
 	src/drivers/platform/pc98/graphics/display-cirrus.c \
