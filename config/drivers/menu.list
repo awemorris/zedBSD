@@ -1,12 +1,4 @@
 # category|driver keys
-# Drivers' categories (2026-10-14 user, WS232 p004: "プラットフォームによって
-# 選べるドライバが変わらない実装にしてください。Platformドライバだけ変えます。
-# また、PiのドライバはPlatformにまとめていいです。"): every category but
-# Platform lists the same bus drivers (config/drivers/{isa,pci,usb}.drivers)
-# on every CPU.  Platform lists the drivers of config/drivers/architecture/
-# that name the chosen platform, the always-built ones too, in that file's
-# order: a driver of a board is in Platform alone, and only on its board.
-# Each bus driver is in one category here; an architecture driver is in none.
 Disk|CONFIG_DRIVER_PCI_NVME CONFIG_DRIVER_PCI_AHCI CONFIG_DRIVER_USB_STORAGE
 Input|CONFIG_DRIVER_USB_HID CONFIG_DRIVER_PCI_LPSS_I2C
 GPU|CONFIG_DRIVER_PCI_VENUS CONFIG_DRIVER_PCI_I915 CONFIG_DRIVER_PCI_NVRTX CONFIG_DRIVER_PCI_AMDRDNA CONFIG_DRIVER_PCI_GHCI

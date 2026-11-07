@@ -42,10 +42,10 @@ $(HEADERS_INSTALLED_STAMP): $(PUBLIC_HEADERS)
 # Complete sysroot by copying libraries from libc build and verifying with smoke link
 $(SYSROOT_COMPLETE_STAMP): $(HEADERS_INSTALLED_STAMP) $(LIBC_ALL_TARGETS)
 	@mkdir -p $(SYSROOT_LIB)/zedbsd/arm64 $(SYSROOT_LIB)/zedbsd/rpi4 $(SYSROOT_LIB)/zedbsd/aarch64 $(BUILD)/dynamic
-	@if [ ! -L "$(REPO_ROOT)/build/arm64" ]; then \
+	@if [ -d "$(REPO_ROOT)/build/arm64" ] && [ ! -L "$(REPO_ROOT)/build/arm64" ]; then \
 		rm -rf "$(REPO_ROOT)/build/arm64"; \
-		ln -sfn rpi4 "$(REPO_ROOT)/build/arm64"; \
 	fi
+	@ln -sfn rpi4 "$(REPO_ROOT)/build/arm64"
 	cp -f $(LIBC_OUT_DIR)/libc.a $(LIBC_OUT_DIR)/libc.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libm.a $(LIBC_OUT_DIR)/libm.so $(SYSROOT_LIB)/
 	cp -f $(LIBC_OUT_DIR)/libutil.a $(LIBC_OUT_DIR)/libutil.so $(SYSROOT_LIB)/

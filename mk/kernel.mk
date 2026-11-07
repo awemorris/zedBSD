@@ -379,7 +379,17 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_RPI5_WIFI)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI5_WIFI=1
 KERN_SOURCES += \
-	src/drivers/rpi5/wifi.c
+	src/drivers/platform/rpi5/rpi5-wifi.c \
+	src/drivers/wifi/bcm43455/bcm43455.c \
+	src/drivers/wifi/bcm43455/bcm43455-bcdc.c \
+	src/drivers/wifi/bcm43455/bcm43455-bus.c \
+	src/drivers/wifi/bcm43455/bcm43455-chip.c \
+	src/drivers/wifi/bcm43455/bcm43455-event.c \
+	src/drivers/wifi/bcm43455/bcm43455-files.c \
+	src/drivers/wifi/bcm43455/bcm43455-nvram.c \
+	src/drivers/wifi/bcm43455/bcm43455-radio.c \
+	src/drivers/wifi/bcm43455/bcm43455-sdpcm.c \
+	src/drivers/wifi/bcm43455/bcm43455-station.c
 endif
 
 # [GPU Core]
@@ -875,8 +885,7 @@ KERN_SOURCES += \
 	src/drivers/gpu/videocore/vk/vulkan-transfer.c \
 	src/drivers/gpu/videocore/vk/vulkan-native-image.c \
 	src/drivers/gpu/videocore/vk/vulkan-video-hevc.c \
-	src/drivers/gpu/videocore/vk/vulkan-video-hevc-slice.c \
-	src/drivers/gpu/videocore/vk/vulkan-video.c
+	src/drivers/gpu/videocore/vk/vulkan-video-hevc-slice.c
 endif
 
 # [Vision Five 2 Imagination PowerVR GPU and VPU driver]

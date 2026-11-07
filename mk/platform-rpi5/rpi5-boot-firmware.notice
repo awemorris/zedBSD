@@ -1,0 +1,11 @@
+Firmware: Raspberry Pi 5 boot files: the board's device trees (the BCM2712 C1
+          and D0 steppings); the bootloader itself is in the board's EEPROM
+Hardware: Raspberry Pi 5 (BCM2712)
+Files:    the SD card's boot partition: /bcm2712-rpi-5-b.dtb,
+          /bcm2712d0-rpi-5-b.dtb, /COPYING.linux
+Source:   raspberrypi/firmware commit 3d301dd924bcd758a4c8cb19fe8531031f033f43 (boot/)
+
+The device tree files are GPL-2.0, built from raspberrypi/linux commit
+89586905b8603e545cce9089a81f5f35d65bc998 (arch/arm64/boot/dts/broadcom/
+bcm2712-rpi-5-b.dts and bcm2712d0-rpi-5-b.dts with the files they include).
+The license below is the one of the device trees.
