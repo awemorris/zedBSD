@@ -53,6 +53,12 @@ LIBWAYLAND_STAGED := $(LIBWAYLAND_STAGE)/.zedbsd-staged
 LIBWAYLAND_STAGE_INPUTS := $(BUILD)/dynamic/libwayland-client.so $(BUILD)/dynamic/libwayland-egl.so \
 	$(LIBWAYLAND_PC_DIR)/wayland-client.pc $(LIBWAYLAND_PC_DIR)/wayland-egl.pc
 
+$(BUILD)/dynamic/libwayland-client.so: build
+	@:
+
+$(BUILD)/dynamic/libwayland-egl.so:
+	@$(MAKE) -C $(REPO_ROOT)/userland/desktop/libwayland-egl
+
 # Replaces the stage as a whole from the libraries just built.
 $(LIBWAYLAND_STAGED): $(LIBWAYLAND_STAGE_INPUTS)
 	@rm -rf '$(LIBWAYLAND_STAGE)'

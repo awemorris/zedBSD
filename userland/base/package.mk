@@ -97,7 +97,7 @@ build: patch
 			base/libedit) ;; \
 			desktop/xserver) \
 				is_dynamic=1; \
-				if test -f "$(REPO_ROOT)/userland/desktop/xserver/libGLX/Makefile"; then \
+				if ! test -f "$$dynamic_dir/libGLX.so" && test -f "$(REPO_ROOT)/userland/desktop/xserver/libGLX/Makefile"; then \
 					$(MAKE) -C "$(REPO_ROOT)/userland/desktop/xserver/libGLX"; \
 				fi; \
 				if test -f "$$dynamic_dir/libGLX.so"; then \
@@ -113,7 +113,7 @@ build: patch
 					desktop/libGL) so="libGL.so" ;; \
 					desktop/libwayland-client) so="libwayland-client.so" ;; \
 				esac; \
-				if test -f "$(REPO_ROOT)/userland/$$req/Makefile"; then \
+				if ! test -f "$$dynamic_dir/$$so" && test -f "$(REPO_ROOT)/userland/$$req/Makefile"; then \
 					$(MAKE) -C "$(REPO_ROOT)/userland/$$req"; \
 				fi; \
 				if test -f "$$dynamic_dir/$$so"; then \
