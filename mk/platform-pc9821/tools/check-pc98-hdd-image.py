@@ -146,6 +146,8 @@ def check(args: argparse.Namespace) -> None:
         sec_per_fat = struct.unpack_from("<H", bpb, 22)[0]
         if sec_per_fat == 0:
             fail("BOOT partition is FAT32, expected FAT16")
+        if struct.unpack_from("<H", bpb, 11)[0] != 1024:
+            fail("BOOT partition FAT16 must use 1024-byte logical sectors")
 
         if args.partition_pbr is not None:
             expected_pbr = args.partition_pbr.read_bytes()

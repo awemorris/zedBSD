@@ -130,7 +130,10 @@ $(LIBC_OUT_DIR)/libc.o: $(LIBC_OUT_DIR)/libc.a
 #
 # Dynamic libc objects & shared library
 #
-LIBC_DYNAMIC_C_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/dynamic/%.o,$(LIBC_SOURCES))
+# long double is IEEE binary128 here and its arithmetic is in software, so
+# libc.so also carries those routines for libm.so and the programs.
+LIBC_DYNAMIC_C_OBJS := $(patsubst %.c,$(LIBC_OBJ_DIR)/dynamic/%.o,$(LIBC_SOURCES) \
+	src/libc/softfloat128.c src/libc/compiler-runtime128.c)
 $(LIBC_DYNAMIC_C_OBJS): $(LIBC_OBJ_DIR)/dynamic/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(LIBC_DYNAMIC_CFLAGS) -c $< -o $@

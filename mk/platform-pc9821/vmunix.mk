@@ -23,7 +23,7 @@ KERN_CPPFLAGS := \
 KERN_CFLAGS := \
 	--target=i386-unknown-zedbsd \
 	-m32 \
-	-march=i686 \
+	-march=i386 \
 	-mno-red-zone \
 	-mgeneral-regs-only \
 	-ffreestanding \

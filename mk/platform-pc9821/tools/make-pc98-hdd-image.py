@@ -40,13 +40,16 @@ def copy_sparse_file(image_file, offset_bytes: int, source_path: Path) -> None:
 
 def format_fat16(image_path: Path, offset_bytes: int, start_lba: int,
                  blocks: int, label: str) -> None:
+    # PC-98 FAT16 uses 1024-byte logical sectors (two physical sectors
+    # each); the partition boot record refuses any other size.
     spec = f"{image_path}@@{offset_bytes}"
+    logical = blocks // 2
     cluster = 1
-    while blocks // cluster >= 65525:
+    while logical // cluster >= 65525:
         cluster *= 2
-    run("mformat", "-i", spec, "-h", str(HEADS), "-s", str(SECTORS_PER_TRACK),
-        "-H", str(start_lba), "-R", "4", "-c", str(cluster), "-T", str(blocks),
-        "-v", label, "::")
+    run("mformat", "-i", spec, "-S", "3", "-h", str(HEADS),
+        "-s", str(SECTORS_PER_TRACK), "-H", str(start_lba), "-R", "4",
+        "-c", str(cluster), "-T", str(logical), "-v", label, "::")
 
 
 def install_fat16_pbr(image_path: Path, partition_offset: int,
@@ -118,6 +121,10 @@ def create(args: argparse.Namespace) -> None:
 
         # Swap partition
         swap_blocks = args.swap_image.stat().st_size // SECTOR
+        if swap_blocks % CYLINDER_SECTORS:
+            raise SystemExit("swap image must be whole cylinders "
+                             f"({CYLINDER_BYTES} bytes); its header records "
+                             "its size, which must equal the partition's")
         cyl_swap_start = cyl_root_end
         swap_cyls = (swap_blocks + CYLINDER_SECTORS - 1) // CYLINDER_SECTORS
         cyl_swap_end = cyl_swap_start + swap_cyls

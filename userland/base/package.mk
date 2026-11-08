@@ -90,13 +90,11 @@ build: patch
 	@set -e; \
 	dynamic_dir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic"; \
 	sysroot="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/sysroot"; \
-	is_dynamic=0; \
 	req_libs=""; \
 	for req in $(STANDALONE_REQUIRE); do \
 		case "$$req" in \
 			base/libedit) ;; \
 			desktop/xserver) \
-				is_dynamic=1; \
 				if ! test -f "$$dynamic_dir/libGLX.so" && test -f "$(REPO_ROOT)/userland/desktop/xserver/libGLX/Makefile"; then \
 					$(MAKE) -C "$(REPO_ROOT)/userland/desktop/xserver/libGLX"; \
 				fi; \
@@ -104,7 +102,6 @@ build: patch
 					req_libs="$$req_libs -l:libGLX.so"; \
 				fi ;; \
 			*lib*) \
-				is_dynamic=1; \
 				so="$${req##*/}.so"; \
 				case "$$req" in \
 					desktop/libwayland) so="libwayland-client.so" ;; \
@@ -144,40 +141,21 @@ build: patch
 				*) srcs="$$srcs $(REPO_ROOT)/$$s" ;; \
 			esac; \
 		done; \
-		if test "$$is_dynamic" = 1; then \
-			$(CC) --target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$$sysroot" \
-				$(STANDALONE_ARCH_CFLAGS) \
-				-nostdinc -isystem "$$sysroot/usr/include" \
-				-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
-				$$extra_cflags \
-				-ffreestanding -fno-stack-protector -fPIC -Os \
-				-nostdlib -pie -Wl,--no-relax \
-				-Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
-				-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
-				-Wl,--dynamic-linker=/lib/ld.so \
-				"$$sysroot/usr/lib/crt1.o" \
-				$$srcs $$extra_srcs \
-				-L"$$dynamic_dir" -Wl,-rpath-link,"$$dynamic_dir" \
-				$$req_libs -l:libm.so -l:libc.so \
-				-o "$$bindir/$(STANDALONE_NAME)"; \
-		else \
-			$(CC) --target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$$sysroot" \
-				$(STANDALONE_ARCH_CFLAGS) \
-				-nostdinc -isystem "$$sysroot/usr/include" \
-				-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
-				$$extra_cflags \
-				-ffreestanding -fno-stack-protector -nostdlib -static \
-				-Wl,--gc-sections \
-				$$srcs $$extra_srcs \
-				-Wl,-T,"$$sysroot/usr/lib/zedbsd/$(STANDALONE_PLATFORM_DIR)/user.ld" \
-				"$$sysroot/usr/lib/crt0.o" \
-				-Wl,--start-group "$$sysroot/usr/lib/libc.a" \
-				"$$sysroot/usr/lib/libm.a" \
-				"$$sysroot/usr/lib/libzedbsd-compiler-rt.a" \
-				"$$sysroot/usr/lib/libclang_rt.builtins.a" -Wl,--end-group \
-				-o "$$bindir/$(STANDALONE_NAME)"; \
-			test -z "$$($(NM) -u "$$bindir/$(STANDALONE_NAME)")" || { $(NM) -u "$$bindir/$(STANDALONE_NAME)"; exit 1; }; \
-		fi; \
+		$(CC) --target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$$sysroot" \
+			$(STANDALONE_ARCH_CFLAGS) \
+			-nostdinc -isystem "$$sysroot/usr/include" \
+			-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
+			$$extra_cflags \
+			-ffreestanding -fno-stack-protector -fPIC -Os \
+			-nostdlib -pie -Wl,--no-relax -Wl,--gc-sections \
+			-Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
+			-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+			-Wl,--dynamic-linker=/lib/ld.so \
+			"$$sysroot/usr/lib/crt1.o" \
+			$$srcs $$extra_srcs \
+			-L"$$dynamic_dir" -Wl,-rpath-link,"$$dynamic_dir" \
+			$$req_libs -l:libm.so -l:libc.so \
+			-o "$$bindir/$(STANDALONE_NAME)"; \
 	elif test "$(STANDALONE_TYPE)" = shared-library; then \
 		dynamic_dir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic"; \
 		libdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib"; \
