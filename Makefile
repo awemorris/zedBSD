@@ -9,15 +9,15 @@ MAKEFLAGS += -r
 .SUFFIXES:
 
 all:        disk
-setup:      toolchain libc sysroot bootloader firmware
-libc:       toolchain libc-platform
-sysroot:    toolchain libc-platform sysroot-platform
-bootloader: bootloader-platform
-firmware:   firmware-platform
-vmunix:     toolchain libc-platform sysroot-platform vmunix-platform
-userland:   toolchain libc-platform sysroot-platform programs
-rootfs:     toolchain firmware-platform bootloader-platform libc-platform sysroot-platform vmunix-platform programs rootfs-platform
-disk:       toolchain firmware-platform bootloader-platform libc-platform sysroot-platform vmunix-platform programs rootfs-platform image-platform
+setup:      toolchain .WAIT libc sysroot bootloader firmware
+bootloader: toolchain .WAIT bootloader-platform
+firmware:   toolchain .WAIT firmware-platform
+libc:       toolchain .WAIT libc-platform
+sysroot:    libc .WAIT sysroot-platform
+vmunix:     sysroot .WAIT vmunix-platform
+userland:   sysroot .WAIT programs
+rootfs:     vmunix userland .WAIT rootfs-platform
+disk:       vmunix rootfs firmware bootloader .WAIT image-platform
 
 help:
 	@echo "The zedBSD Build System"
