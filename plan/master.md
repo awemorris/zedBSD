@@ -106,7 +106,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-418 · q2006 · WS347 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯の進み具合、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-419 · q2009 · WS347 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯の進み具合、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
