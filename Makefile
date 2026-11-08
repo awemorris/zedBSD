@@ -111,5 +111,17 @@ include mk/rootfs.mk
 # Platform build rules (targets: libc-platform, sysroot-platform, firmware-platform, bootloader-platform, vmunix-platform, rootfs-platform, image-platform)
 include mk/platform-$(PLATFORM)/Makefile
 
+# The kernel objects follow the compile flags: a change of the configuration
+# rebuilds them.  The stamp is written every time and replaced only when the
+# flags change.
+KERN_FLAGS_STAMP := $(BUILD)/.kernel-flags
+.PHONY: FORCE_KERN_FLAGS
+FORCE_KERN_FLAGS:
+$(KERN_FLAGS_STAMP): FORCE_KERN_FLAGS
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(KERN_CPPFLAGS) $(KERN_CFLAGS)' > $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
+$(VMUNIX_OBJS): $(KERN_FLAGS_STAMP)
+
 # Foreign targets. (targets: keiland-linux, keiland-linux-install, keiland-freebsd, keiland-freebsd-install)
 include mk/foreign.mk

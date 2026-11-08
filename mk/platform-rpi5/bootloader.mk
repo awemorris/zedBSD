@@ -12,7 +12,12 @@ REPO_ROOT         ?= $(abspath $(PLATFORM_RPI5_DIR)/../..)
 
 RPI5_BOOT_COMMAND_LINE := login=$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),graphical,console)$(if $(or $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),$(filter n,$(CONFIG_BOOT_KERNEL_MESSAGES))), kmsg=quiet)
 
-$(BUILD)/cmdline.txt:
+# The boot files follow the configuration: they are written every time and
+# replaced only when their contents change.
+.PHONY: FORCE_BOOT_FILES
+FORCE_BOOT_FILES:
+
+$(BUILD)/cmdline.txt: FORCE_BOOT_FILES
 	@mkdir -p $(dir $@)
 	@printf '%s\n' '$(RPI5_BOOT_COMMAND_LINE)' > $@.tmp
 	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi

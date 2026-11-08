@@ -90,7 +90,6 @@ KERN_SOURCES += \
 	src/drivers/disklabel/pcat.c \
 	src/drivers/pci/pci-pcat.c \
 	src/drivers/pci/pci-pcat-assign.c \
-	src/drivers/pci/pci-power.c \
 	src/drivers/pci/pci-window.c \
 	src/drivers/isa/ps2-8042.c \
 	src/drivers/isa/ne2000.c \

@@ -138,7 +138,7 @@ static void make_reset(uint32_t index, struct drv_vf2_reset *reset);
 static void put_text(char *text, size_t capacity, size_t *length, const char *line);
 static void describe(char *text, size_t capacity, size_t *length);
 static struct drv_wave5 *boot(struct vf2_vpu *vpu, char *text, size_t capacity, size_t *length);
-#if CONFIG_DRIVER_VF2_VPU
+#if CONFIG_DRIVER_VF2_GPU_VPU
 static void attach_thread(void *argument);
 #endif
 #if CONFIG_DRIVER_VF2_VPU_PROBE
@@ -163,7 +163,7 @@ drv_vf2_vpu_attach(
 	uint32_t node;
 	bool enabled;
 	int error;
-#if CONFIG_DRIVER_VF2_VPU
+#if CONFIG_DRIVER_VF2_GPU_VPU
 	struct thread *thread;
 #endif
 
@@ -207,7 +207,7 @@ drv_vf2_vpu_attach(
 	if (error != 0)
 		kern_logf("vf2-vpu: /dev/%s not published (%d)\n", PROBE_DEVICE_NAME, error);
 #endif
-#if CONFIG_DRIVER_VF2_VPU
+#if CONFIG_DRIVER_VF2_GPU_VPU
 
 	/* Brings the decoder up on a thread of its own, which waits for the root file system. */
 	error = kthread_create(attach_thread, &board_vpu, SCHED_PRIORITY_DEFAULT, &thread);
@@ -621,7 +621,7 @@ make_reset(
 	reset->index = index;
 }
 
-#if CONFIG_DRIVER_VF2_VPU
+#if CONFIG_DRIVER_VF2_GPU_VPU
 /* Brings the decoder up at boot and keeps it up. */
 static void
 attach_thread(

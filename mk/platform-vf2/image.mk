@@ -35,7 +35,12 @@ $(SWAP_IMAGE): mk/tools/make-swapfile.noct
 	$(NOCT) --path=mk/tools:mk/old-tools/build mk/tools/make-swapfile.noct \
 		--size-mib $(SWAP_MIB) --output $@
 
-$(BUILD)/zedbsd.cfg:
+# The boot files follow the configuration: they are written every time and
+# replaced only when their contents change.
+.PHONY: FORCE_BOOT_FILES
+FORCE_BOOT_FILES:
+
+$(BUILD)/zedbsd.cfg: FORCE_BOOT_FILES
 	@mkdir -p $(dir $@)
 	@printf '%s\n' 'kernel=vmunix' 'rootpart=PARTLABEL=zedBSD-root' > $@.tmp
 	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),@printf '%s\n' 'login=graphical' >> $@.tmp)

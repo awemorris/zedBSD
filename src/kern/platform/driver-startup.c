@@ -248,8 +248,7 @@ kern_driver_startup_usb_devices(
 #endif
 
 #if CONFIG_DRIVER_USB_RTL815X
-	rtl815x_error = drv_usb_rtl815x_driver_register();
-	if (rtl815x_error != 0)
+	if (drv_usb_rtl815x_driver_register() != 0)
 		kern_logf("usb: Realtek RTL815x driver registration failed\n");
 #endif
 

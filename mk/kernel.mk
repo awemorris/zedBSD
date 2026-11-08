@@ -116,7 +116,8 @@ KERN_SOURCES := \
 ifneq ($(filter y,$(CONFIG_DRIVER_PCI)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_PCI=1
 KERN_SOURCES += \
-	src/drivers/pci/pci.c
+	src/drivers/pci/pci.c \
+	src/drivers/pci/pci-power.c
 endif
 
 # [NVMe driver]
@@ -274,9 +275,10 @@ endif
 # [Realtek RTL8156/8157 USB Ethernet vendor mode driver]
 ifneq ($(filter y,$(CONFIG_DRIVER_USB_RTL815X)),)
 KERN_CPPFLAGS += \
-	-DCONFIG_DRIVER_PCI_RTL815X=1
+	-DCONFIG_DRIVER_USB_RTL815X=1
 KERN_SOURCES += \
-	src/drivers/usb/usb-rtl815x.c
+	src/drivers/usb/usb-rtl815x.c \
+	src/drivers/usb/usb-rtl815x-frame.c
 endif
 
 # [RPi4 Ethernet driver]
@@ -408,15 +410,17 @@ KERN_SOURCES += \
 	src/drivers/gpu/i915/vk/vk-codec.c \
 	src/drivers/generic/backlight.c
 KERN_CPPFLAGS += \
-	-DCONFIG_GPU_RESERVATION_MS=$(CONFIG_GPU_JOB_RESERVATION_MS) \
-	-DCONFIG_GPU_EXECUTION_MS=$(CONFIG_GPU_JOB_EXECUTION_MS) \
-	-DCONFIG_GPU_STOP_MS=$(CONFIG_GPU_JOB_STOP_MS) \
+	-DCONFIG_GPU_JOB_RESERVATION_MS=$(CONFIG_GPU_JOB_RESERVATION_MS) \
+	-DCONFIG_GPU_JOB_EXECUTION_MS=$(CONFIG_GPU_JOB_EXECUTION_MS) \
+	-DCONFIG_GPU_JOB_STOP_MS=$(CONFIG_GPU_JOB_STOP_MS) \
 	-DCONFIG_GPU_CONTROL_MS=$(CONFIG_GPU_CONTROL_MS)
 endif
 
 # [Legacy 2D Graphics Core]
+# Every platform has a backend for it (PC/AT, PC-98, the boot framebuffer),
+# so the core also registers /dev/graphics.
 ifneq ($(filter y,$(CONFIG_DRIVER_GRAPHICS)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_GRAPHICS=1
+KERN_CPPFLAGS += -DCONFIG_DRIVER_GRAPHICS=1 -DCONFIG_DRIVER_GRAPHICS_DEVICE=1
 KERN_SOURCES += \
 	src/drivers/platform/pcat/graphics/vgafont.c
 endif
@@ -1198,6 +1202,7 @@ endif
 
 # [USB Bluetooth driver]
 ifneq ($(filter y,$(CONFIG_DRIVER_USB_BT)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_USB_BT=1
 KERN_SOURCES += \
 	src/drivers/usb/usb-bt.c
 endif
@@ -1270,8 +1275,8 @@ KERN_SOURCES += \
 endif
 
 # [RPi5 processor temperature] 
-ifneq ($(filter y,$(CONFIG_DRIVER_RPI5_TEMP)),)
-KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI5_TEMP=1
+ifneq ($(filter y,$(CONFIG_DRIVER_RPI5_FAN)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_RPI5_FAN=1
 KERN_SOURCES += \
 	src/drivers/platform/rpi5/rpi5-fan.c
 endif
@@ -1357,4 +1362,51 @@ ifneq ($(filter y,$(CONFIG_DRIVER_I2C_HID)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_I2C_HID=1
 KERN_SOURCES += \
 	src/drivers/i2c/i2c-hid.c
+endif
+
+################################################
+# Settings, debugging and tests
+################################################
+
+# [Kernel Buffer Cache Size]
+KERN_CPPFLAGS += -DCONFIG_BUF_CACHE_KIB=$(if $(strip $(CONFIG_BUF_CACHE_KIB)),$(CONFIG_BUF_CACHE_KIB),0)
+
+# [Dell SMM performance boost]
+ifneq ($(filter y,$(CONFIG_DRIVER_DELL_SMM_BOOST)),)
+KERN_CPPFLAGS += -DCONFIG_DELL_SMM_BOOST=1
+endif
+
+# [PC/AT serial mirror of the console]
+ifneq ($(filter y,$(CONFIG_PCAT_SERIAL_MIRROR)),)
+KERN_CPPFLAGS += -DPCAT_SERIAL_MIRROR
+endif
+
+# [RPi4 / RPi5 serial console] (the PL011 / the debug UART carries the console)
+ifneq ($(filter rpi4y rpi5y,$(PLATFORM)$(CONFIG_RPI4_SERIAL_CONSOLE) $(PLATFORM)$(CONFIG_RPI5_SERIAL_CONSOLE)),)
+KERN_CPPFLAGS += -DARM64_SERIAL_CONSOLE
+endif
+
+# [Kernel Test] checkpoints
+ifneq ($(filter y,$(CONFIG_KERNEL_TEST_CHECKPOINTS)),)
+KERN_CPPFLAGS += -DKERN_TEST_CHECKPOINTS
+endif
+
+# [Kernel Test] input injection
+ifneq ($(filter y,$(CONFIG_INPUT_TEST_INJECT)),)
+KERN_CPPFLAGS += -DINPUT_TEST_INJECT
+endif
+
+# [Kernel Test] security key loopback
+ifneq ($(filter y,$(CONFIG_SECURITY_KEY_TEST_LOOPBACK)),)
+KERN_CPPFLAGS += -DSECURITY_KEY_TEST_LOOPBACK
+endif
+
+# [Kernel Test] Bluetooth loopback
+ifneq ($(filter y,$(CONFIG_BT_TEST_LOOPBACK)),)
+KERN_CPPFLAGS += -DBT_TEST_LOOPBACK
+endif
+
+# [Kernel Test] USB HID checkpoint
+ifneq ($(filter y,$(CONFIG_KERNEL_USB_HID_CHECKPOINT)),)
+KERN_CPPFLAGS += -DCONFIG_KERNEL_USB_HID_CHECKPOINT=1
 endif

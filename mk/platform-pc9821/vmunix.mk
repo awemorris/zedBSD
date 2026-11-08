@@ -70,6 +70,7 @@ KERN_SOURCES += \
 
 # HAL Assembly Sources
 KERN_ASM += \
+	src/hal/i386/bsp-pc98/boot-header.S \
 	src/hal/i386/locore.S \
 	src/hal/i386/ap-trampoline.S \
 	src/hal/i386/trap.S \
