@@ -167,6 +167,7 @@ build: patch
 				-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
 				$$extra_cflags \
 				-ffreestanding -fno-stack-protector -nostdlib -static \
+				-Wl,--gc-sections \
 				$$srcs $$extra_srcs \
 				-Wl,-T,"$$sysroot/usr/lib/zedbsd/$(STANDALONE_PLATFORM_DIR)/user.ld" \
 				"$$sysroot/usr/lib/crt0.o" \
