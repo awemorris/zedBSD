@@ -205,6 +205,7 @@ struct pci_intx_line {
 	void *host;
 	unsigned dispatching;
 	unsigned removing;
+	unsigned unhandled_count;
 	struct pci_irq_cookie *handlers;
 	struct pci_intx_line *next;
 };
@@ -4015,6 +4016,7 @@ intx_line_run(
 	struct pci_intx_line *line;
 	struct pci_irq_cookie *cookie;
 	bool enabled;
+	int handled = 0;
 
 	line = argument;
 
@@ -4045,10 +4047,22 @@ intx_line_run(
 		intx_lock_leave(enabled);
 
 		/* Lets the device's handler serve its own interrupt. */
-		(void)handler(handler_argument);
+		if (handler(handler_argument) != 0)
+			handled = 1;
 
 		/* Moves on to the handler that followed it. */
 		cookie = next;
+	}
+
+	if (!handled) {
+		line->unhandled_count++;
+		if (line->unhandled_count >= 1000) {
+			kern_logf("pci: irq %d unhandled storm (%u), masking line\n",
+				  line->irq, line->unhandled_count);
+			intx_line_mask(line);
+		}
+	} else {
+		line->unhandled_count = 0;
 	}
 
 	/* Drops this dispatcher from the line, which lets removal proceed. */
