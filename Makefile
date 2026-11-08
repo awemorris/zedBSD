@@ -64,6 +64,10 @@ include mk/config.mk
 # Import the current developer configuration.
 include $(CONFIGMK)
 
+# The same configuration file as an absolute path, for the nested makes
+# (they run in other directories).
+ZEDBSD_CONFIGMK := $(abspath $(CONFIGMK))
+
 # If PLATFORM is empty, show a prompt and let user input.
 ifeq ($(PLATFORM),)
 $(info PLATFORM is not set. Please specify the target platform.)

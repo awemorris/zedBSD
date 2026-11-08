@@ -45,6 +45,11 @@ ALL_PROGRAM_DIRS := $(dir $(ALL_PROGRAM_MAKEFILES))
 
 PROGRAM_STAMPS := $(foreach d,$(PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsubst %/,%,$(d)))/.stamp)
 
+# What every nested make is told, so that it reads the same configuration
+# file and builds for the same platform as this one (a platform entered at
+# the prompt or a CONFIGMK= given on the command line would not reach it).
+SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)"
+
 define PROGRAM_RULE
 _CHILD_DIRS_$(1) := $$(filter $(1)%/,$$(filter-out $(1),$$(ALL_PROGRAM_DIRS)))
 _CHILD_SRCS_$(1) := $$(foreach c,$$(_CHILD_DIRS_$(1)),$$(wildcard $$(c)* $$(c)*/* $$(c)*/*/*) $$(patsubst %/,%,$$(c)))
@@ -55,9 +60,9 @@ _PKG_SRCS_$(1) := $$(filter-out $$(_CHILD_SRCS_$(1)) $$(_DIR_NAMES_$(1)),$$(_ALL
 $$(BUILD)/packages/$(notdir $(patsubst %/,%,$(1)))/.stamp: $$(_PKG_SRCS_$(1)) userland/base/package.mk
 	@case "$(1)" in \
 		userland/packages/*) \
-			$$(MAKE) -C $(1) ;; \
+			$$(MAKE) -C $(1) $$(SUBMAKE_CONFIG) ;; \
 		*) \
-			$$(MAKE) -C $(1) CC="$$(CC)" CPPFLAGS="$$(USER_CPPFLAGS)" CFLAGS="$$(USER_CFLAGS)" AS="$$(AS)" LD="$$(LD)" RANLIB="$$(RANLIB)" NM="$$(NM)" OBJCOPY="$$(OBJCOPY)" OBJDUMP="$$(OBJDUMP)" READELF="$$(READELF)" STRIP="$$(STRIP)" ;; \
+			$$(MAKE) -C $(1) $$(SUBMAKE_CONFIG) CC="$$(CC)" CPPFLAGS="$$(USER_CPPFLAGS)" CFLAGS="$$(USER_CFLAGS)" AS="$$(AS)" LD="$$(LD)" RANLIB="$$(RANLIB)" NM="$$(NM)" OBJCOPY="$$(OBJCOPY)" OBJDUMP="$$(OBJDUMP)" READELF="$$(READELF)" STRIP="$$(STRIP)" ;; \
 	esac
 	@mkdir -p $$(dir $$@) && touch $$@
 
@@ -65,9 +70,9 @@ $$(BUILD)/packages/$(notdir $(patsubst %/,%,$(1)))/.stamp: $$(_PKG_SRCS_$(1)) us
 $(1) $(patsubst %/,%,$(1)):
 	@case "$(1)" in \
 		userland/packages/*) \
-			$$(MAKE) -C $(1) ;; \
+			$$(MAKE) -C $(1) $$(SUBMAKE_CONFIG) ;; \
 		*) \
-			$$(MAKE) -C $(1) CC="$$(CC)" CPPFLAGS="$$(USER_CPPFLAGS)" CFLAGS="$$(USER_CFLAGS)" AS="$$(AS)" LD="$$(LD)" RANLIB="$$(RANLIB)" NM="$$(NM)" OBJCOPY="$$(OBJCOPY)" OBJDUMP="$$(OBJDUMP)" READELF="$$(READELF)" STRIP="$$(STRIP)" ;; \
+			$$(MAKE) -C $(1) $$(SUBMAKE_CONFIG) CC="$$(CC)" CPPFLAGS="$$(USER_CPPFLAGS)" CFLAGS="$$(USER_CFLAGS)" AS="$$(AS)" LD="$$(LD)" RANLIB="$$(RANLIB)" NM="$$(NM)" OBJCOPY="$$(OBJCOPY)" OBJDUMP="$$(OBJDUMP)" READELF="$$(READELF)" STRIP="$$(STRIP)" ;; \
 	esac
 endef
 
