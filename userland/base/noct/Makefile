@@ -9,7 +9,7 @@
 
 NOCT_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 include $(NOCT_DIR)../package.mk
-include $(NOCT_DIR)../../../build-jobs.mk
+include $(NOCT_DIR)../../../mk/build-jobs.mk
 
 REPO_ROOT ?= $(abspath $(NOCT_DIR)../..)
 REPO_HASH ?= d6f0f9b4f7debb4a3c8dd3ba0415665a94d561ae

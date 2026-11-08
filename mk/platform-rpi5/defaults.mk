@@ -1,5 +1,5 @@
 override ARCHITECTURE             := arm64
-override BOARD                    := rpi4
+override BOARD                    := rpi5
 
 CONFIG_ROOTFS_DEVELOPMENT         := y
 CONFIG_BOOT_SPLASH                := n

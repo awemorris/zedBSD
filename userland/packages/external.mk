@@ -33,7 +33,7 @@ EXTERNAL_TOOLS := $(abspath $(EXTERNAL_ROOT)/userland/packages/tools)
 # How many jobs a nested build tool (cmake, ninja) may run; the
 # top-level build reads the same file, and a standalone package build
 # gets it here.
-include $(EXTERNAL_ROOT)/build-jobs.mk
+include $(EXTERNAL_ROOT)/mk/build-jobs.mk
 EXTERNAL_ARCHIVE_SH := $(EXTERNAL_TOOLS)/archive.sh
 
 USER_PROGRAMS ?= $(USERLAND_PROGRAMS)

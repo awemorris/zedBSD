@@ -6,7 +6,7 @@
  */
 
 /*
- * The power of PCI functions across S0 idle (ws052-p004).
+ * The power of PCI functions across S0 idle.
  *
  * drv_pci_suspend_all() suspends every function a driver is bound to,
  * the functions behind a bridge before the bridge's own bus: the driver's
@@ -515,11 +515,10 @@ drv_pci_device_set_wake(
 }
 
 /*
- * Asks, from a driver's suspend, that the function stay in D0 while the
- * system is in S0 idle (WS237 p005: a Gen9 i915 keeps the display the
- * firmware lit, which D3hot would lose).  The configuration is still
- * saved and written back; neither the function nor the platform is
- * powered down.  It reports EINVAL outside a suspend.
+ * Asks, from a driver's suspend, that the function stay in D0 while
+ * the system is in S0 idle.  The configuration is still saved and
+ * written back; neither the function nor the platform is powered
+ * down.  It reports EINVAL outside a suspend.
  */
 int
 drv_pci_device_keep_d0(

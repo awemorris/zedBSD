@@ -12,7 +12,7 @@
 REQUIRE = base/noct
 
 REMACS_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
-include $(REMACS_DIR)../../../build-jobs.mk
+include $(REMACS_DIR)../../../mk/build-jobs.mk
 include $(REMACS_DIR)../package.mk
 include $(REMACS_DIR)../noct/version.mk
 

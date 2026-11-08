@@ -117,6 +117,7 @@ KERN_SOURCES += \
 	src/drivers/mmc/sdhci.c \
 	src/drivers/generic/fdt.c \
 	src/drivers/generic/dma.c \
+	src/drivers/pci/pci-power.c \
 	src/drivers/pci/pci-brcmstb.c
 
 VMUNIX_OBJS := \
