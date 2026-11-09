@@ -10,7 +10,9 @@
 PLATFORM_RPI5_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT         ?= $(abspath $(PLATFORM_RPI5_DIR)/../..)
 
-RPI5_BOOT_COMMAND_LINE := login=$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),graphical,console)$(if $(or $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),$(filter n,$(CONFIG_BOOT_KERNEL_MESSAGES))), kmsg=quiet)
+# The GPU's driver holds the engine until it is started; with the driver in
+# the kernel, the boot starts it so that the graphical login finds it.
+RPI5_BOOT_COMMAND_LINE := login=$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),graphical,console)$(if $(or $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),$(filter n,$(CONFIG_BOOT_KERNEL_MESSAGES))), kmsg=quiet)$(if $(filter y,$(CONFIG_DRIVER_RPI5_GPU)), rpi5gpu.start=boot)
 
 # The boot files follow the configuration: they are written every time and
 # replaced only when their contents change.
