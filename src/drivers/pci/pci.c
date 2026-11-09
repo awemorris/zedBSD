@@ -416,6 +416,23 @@ drv_pci_bus_destroy(
 }
 
 /*
+ * Tells whether the functions after 0 of a slot are read.  A multi-function
+ * device says so in its header.  The Intel Merrifield and Moorefield SoC
+ * devices do not, yet have more functions, so every function of an Intel
+ * device is read; a function that is absent answers all ones.  Other
+ * devices are not: some buses answer function 0 for every function number
+ * of a single-function device (the Raspberry Pi 5), which would make
+ * phantom copies of it.
+ */
+static int
+scan_all_functions(
+	const struct drv_pci_device *device)
+{
+	return (device->header_type & 0x80U) != 0 ||
+	    device->vendor == 0x8086U;
+}
+
+/*
  * Finds the devices on one bus.
  */
 int
@@ -433,7 +450,7 @@ drv_pci_bus_scan(
 		return EINVAL;
 	/* Process each element required by the operation. */
 	for (slot = 0; slot < 32U; slot++) {
-		functions = 8;
+		functions = 1;
 		/* Process each element required by the operation. */
 		for (function = 0; function < functions; function++) {
 			struct drv_pci_address address = {
@@ -449,8 +466,7 @@ drv_pci_bus_scan(
 			device = find_device_on_bus(bus, &address);
 			if (device != NULL) {
 				/* Handles the function condition. */
-				if (function == 0 &&
-				    (device->header_type & 0x80U) != 0)
+				if (function == 0 && scan_all_functions(device))
 					functions = 8;
 				continue;
 			}
@@ -473,7 +489,7 @@ drv_pci_bus_scan(
 			bus->devices = device;
 
 			/* Handles the function condition. */
-			if (function == 0 && (device->header_type & 0x80U) != 0)
+			if (function == 0 && scan_all_functions(device))
 				functions = 8;
 
 			/* Handles the device condition. */
