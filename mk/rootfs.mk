@@ -175,7 +175,12 @@ $(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) mk/rootfs.mk \
 		test -d $(4)/usr/sbin && chmod 0755 $(4)/usr/sbin/* 2>/dev/null || true; \
 		test -d $(4)/usr/libexec && chmod 0755 $(4)/usr/libexec/* 2>/dev/null || true; \
 		chmod 0755 $(4)/lib/*.so* 2>/dev/null || true; \
-		test -f $(4)/lib/ld.so && chmod 0755 $(4)/lib/ld.so || true
+		test -f $(4)/lib/ld.so && chmod 0755 $(4)/lib/ld.so || true; \
+		for record in $(BUILD)/packages/*/mode; do \
+			test -f "$$$$record" || continue; \
+			read -r path mode < "$$$$record"; \
+			test -f "$(4)$$$$path" && chmod "$$$$mode" "$(4)$$$$path"; \
+		done; true
 	@set -e; umask 022; \
 		links=""; \
 		if [ -f "$$(ROOTFS_CONFIG_STAMP)" ]; then \

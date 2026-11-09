@@ -156,6 +156,7 @@ build: patch
 			-L"$$dynamic_dir" -Wl,-rpath-link,"$$dynamic_dir" \
 			$$req_libs -l:libm.so -l:libc.so \
 			-o "$$bindir/$(STANDALONE_NAME)"; \
+		printf '%s %s\n' "/$(STANDALONE_INSTALL_DIR)/$(STANDALONE_NAME)" "$(STANDALONE_MODE)" > "$$workdir/mode"; \
 	elif test "$(STANDALONE_TYPE)" = shared-library; then \
 		dynamic_dir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic"; \
 		libdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib"; \
