@@ -3593,17 +3593,6 @@ xhci_irq(
 		}
 	}
 
-	if (!handled) {
-		static unsigned unhandled_log = 0;
-		if (unhandled_log < 5) {
-			unhandled_log++;
-			kern_logf("xhci: unhandled irq #%u: usbsts=0x%08x iman=0x%08x\n",
-				  unhandled_log,
-				  c->operational ? rd32(c->operational, XHCI_USBSTS) : 0,
-				  c->runtime ? rd32(c->runtime, 0x20U) : 0);
-		}
-	}
-
 	/* Publishes that IRQ no longer owns the controller or its DMA. */
 	busy = atomic_raw_fetch_add_release(&c->irq_busy, (unsigned)-1);
 	if (busy == 0U)

@@ -118,8 +118,8 @@ $(call ROOTFS_TREE_RULE_AT,$(1),$(2),$(3),$(or $(4),$(BUILD)/rootfs))
 endef
 
 define ROOTFS_TREE_RULE_AT
-$(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) \
-	$(PACKAGE_INPUTS) $(ROOTFS_DEVELOPMENT_INPUTS)
+$(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) mk/rootfs.mk \
+	$(PACKAGE_INPUTS) $(PROGRAM_STAMPS) $(ROOTFS_DEVELOPMENT_INPUTS)
 	@rm -rf $(4)
 	@umask 022; mkdir -p $(4) $(addprefix $(4)/,\
  $(ROOTFS_DIRECTORIES) $(ROOTFS_STICKY_DIRECTORIES))
@@ -166,6 +166,7 @@ $(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) \
 		if test -d $(BUILD)/usr/sbin; then mkdir -p $(4)/usr/sbin && cp -f $(BUILD)/usr/sbin/* $(4)/usr/sbin/ 2>/dev/null || true; fi; \
 		if test -d $(BUILD)/usr/libexec; then mkdir -p $(4)/usr/libexec && cp -f $(BUILD)/usr/libexec/* $(4)/usr/libexec/ 2>/dev/null || true; fi; \
 		if test -d $(BUILD)/dynamic; then mkdir -p $(4)/lib && cp -f $(BUILD)/dynamic/* $(4)/lib/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/lib/firmware; then mkdir -p $(4)/lib/firmware && cp -RP $(BUILD)/lib/firmware/. $(4)/lib/firmware/; fi; \
 		if test -d $(BUILD)/usr/share; then mkdir -p $(4)/usr/share && cp -RP $(BUILD)/usr/share/. $(4)/usr/share/ 2>/dev/null || true; fi; \
 		if test -d $(BUILD)/share; then mkdir -p $(4)/share && cp -RP $(BUILD)/share/. $(4)/share/ 2>/dev/null || true; fi; \
 		if test -d $(BUILD)/etc; then mkdir -p $(4)/etc && cp -RP $(BUILD)/etc/. $(4)/etc/ 2>/dev/null || true; fi; \
