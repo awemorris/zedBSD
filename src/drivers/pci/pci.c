@@ -205,7 +205,6 @@ struct pci_intx_line {
 	void *host;
 	unsigned dispatching;
 	unsigned removing;
-	unsigned unhandled_count;
 	struct pci_irq_cookie *handlers;
 	struct pci_intx_line *next;
 };
@@ -416,23 +415,6 @@ drv_pci_bus_destroy(
 }
 
 /*
- * Tells whether the functions after 0 of a slot are read.  A multi-function
- * device says so in its header.  The Intel Merrifield and Moorefield SoC
- * devices do not, yet have more functions, so every function of an Intel
- * device is read; a function that is absent answers all ones.  Other
- * devices are not: some buses answer function 0 for every function number
- * of a single-function device (the Raspberry Pi 5), which would make
- * phantom copies of it.
- */
-static int
-scan_all_functions(
-	const struct drv_pci_device *device)
-{
-	return (device->header_type & 0x80U) != 0 ||
-	    device->vendor == 0x8086U;
-}
-
-/*
  * Finds the devices on one bus.
  */
 int
@@ -450,7 +432,16 @@ drv_pci_bus_scan(
 		return EINVAL;
 	/* Process each element required by the operation. */
 	for (slot = 0; slot < 32U; slot++) {
+#ifdef PCI_INTEL_MID_QUIRKS
+		/*
+		 * The Intel Merrifield and Moorefield SoC devices have more
+		 * functions than their headers say, so every function is read;
+		 * an absent one answers all ones.
+		 */
+		functions = 8;
+#else
 		functions = 1;
+#endif
 		/* Process each element required by the operation. */
 		for (function = 0; function < functions; function++) {
 			struct drv_pci_address address = {
@@ -466,7 +457,8 @@ drv_pci_bus_scan(
 			device = find_device_on_bus(bus, &address);
 			if (device != NULL) {
 				/* Handles the function condition. */
-				if (function == 0 && scan_all_functions(device))
+				if (function == 0 &&
+				    (device->header_type & 0x80U) != 0)
 					functions = 8;
 				continue;
 			}
@@ -489,7 +481,7 @@ drv_pci_bus_scan(
 			bus->devices = device;
 
 			/* Handles the function condition. */
-			if (function == 0 && scan_all_functions(device))
+			if (function == 0 && (device->header_type & 0x80U) != 0)
 				functions = 8;
 
 			/* Handles the device condition. */
@@ -1833,14 +1825,8 @@ drv_pci_device_allocate_irqs(
 		error = device->bus->ops->allocate_irqs(
 			device->bus->host, device, choices[choice].type,
 			minimum, maximum, irqs, count);
-		if (error == 0) {
-			kern_logf("pci: allocate_irqs dev %04x:%02x:%02x.%u type=%u count=%u vector=%u cap=0x%x\n",
-				  device->address.segment, device->address.bus,
-				  device->address.device, device->address.function,
-				  irqs[0].type, *count, irqs[0].vector,
-				  (unsigned)irqs[0].private_data[0]);
+		if (error == 0)
 			return 0;
-		}
 		if (error != ENOTSUP && error != ENODEV)
 			return error;
 	}
@@ -1915,10 +1901,6 @@ drv_pci_device_establish_irq(
 
 	/* Checks the operation status. */
 	if (error != 0) {
-		kern_logf("pci: establish_irq dev %04x:%02x:%02x.%u type=%u vector=%u cap=0x%x failed (%d)\n",
-			  device->address.segment, device->address.bus,
-			  device->address.device, device->address.function,
-			  irq->type, irq->vector, cookie->capability, error);
 		kern_free(cookie);
 
 		/* Failed. */
@@ -2211,6 +2193,8 @@ drv_pci_driver_match(
 		return DRV_PCI_MATCH_NONE;
 
 	/* Handles the score condition. */
+#ifdef PCI_INTEL_MID_QUIRKS
+	/* Without a match function, a more specific identity scores higher. */
 	if (r->match) {
 		score = r->match(d, i);
 	} else if (i->vendor != DRV_PCI_ANY_ID && i->device != DRV_PCI_ANY_ID) {
@@ -2222,6 +2206,9 @@ drv_pci_driver_match(
 	} else {
 		score = DRV_PCI_MATCH_GENERIC;
 	}
+#else
+	score = r->match ? r->match(d, i) : DRV_PCI_MATCH_GENERIC;
+#endif
 	if (score > 0 && out)
 		*out = i;
 	/* Returns the computed result. */
@@ -2349,10 +2336,6 @@ drv_pci_device_probe(
 
 	/* An unsuccessful attach owns its cleanup and leaves no service behind. */
 	if (error != 0) {
-		kern_logf("pci: %04x:%02x:%02x.%u driver '%s' attach failed (%d)\n",
-			  device->address.segment, device->address.bus,
-			  device->address.device, device->address.function,
-			  best->driver->name, error);
 		device->service = NULL;
 		device->service_argument = NULL;
 		goto release_binding;
@@ -2673,48 +2656,18 @@ drv_pci_dump(
 {
 	struct drv_pci_bus *b;
 	struct drv_pci_device *d;
-	struct drv_pci_bar bar;
-	unsigned i, count;
-	uint8_t line = 0, pin = 0;
 
 	/* Process each linked entry. */
 	for (b = root_buses; b; b = b->next) {
 		/* Process each linked entry. */
 		for (d = b->devices; d; d = d->next) {
-			(void)drv_pci_device_config_read8(d, 0x3cU, &line);
-			(void)drv_pci_device_config_read8(d, 0x3dU, &pin);
-			kern_logf("pci: %04x:%02x:%02x.%u %04x:%04x class %06x irq(line=%u pin=%u)%s%s\n",
+			kern_logf("pci: %04x:%02x:%02x.%u %04x:%04x class "
+				   "%06x%s%s\n",
 				   d->address.segment, d->address.bus,
 				   d->address.device, d->address.function,
 				   d->vendor, d->product, d->class_code,
-				   line, pin,
 				   d->driver ? " driver=" : "",
 				   d->driver ? d->driver->name : "");
-			count = drv_pci_device_bar_count(d);
-			for (i = 0; i < count; i++) {
-				if (drv_pci_device_bar(d, i, &bar) == 0 && bar.size > 0) {
-					kern_logf("pci:   BAR%u: 0x%llx (size 0x%llx type %u)\n",
-						  bar.index,
-						  (unsigned long long)bar.bus_address,
-						  (unsigned long long)bar.size,
-						  (unsigned)bar.type);
-				}
-			}
-			{
-				uint8_t p, cap_id;
-				uint16_t cap_status;
-				if (drv_pci_device_config_read16(d, 0x06U, &cap_status) == 0 && (cap_status & 0x10U)) {
-					if (drv_pci_device_config_read8(d, 0x34U, &p) == 0) {
-						p &= ~3U;
-						while (p >= 0x40U) {
-							if (drv_pci_device_config_read8(d, p, &cap_id) != 0) break;
-							kern_logf("pci:   cap 0x%02x at offset 0x%02x\n", cap_id, p);
-							if (drv_pci_device_config_read8(d, p + 1U, &p) != 0) break;
-							p &= ~3U;
-						}
-					}
-				}
-			}
 		}
 	}
 }
@@ -2912,6 +2865,7 @@ read_device(
 
 	(void)cfg_write(device->bus, &device->address, PCI_COMMAND, 2, command);
 
+#ifdef PCI_INTEL_MID_QUIRKS
 	/*
 	 * Intel Merrifield/Moorefield internal SoC devices report a dummy 16-byte
 	 * BAR size in PCI config space, but ACPI _CRS and hardware require the
@@ -2922,6 +2876,7 @@ read_device(
 		if (device->bar_count > 0 && device->bars[0].size < 0x100000U)
 			device->bars[0].size = 0x100000U;
 	}
+#endif
 
 	/* Handles the device condition. */
 	if ((device->header_type & 0x7fU) == 0U) {
@@ -3248,7 +3203,6 @@ establish_intx(
 
 	/* Gives back the candidate of a pin that could not be installed. */
 	if (status != 0) {
-		kern_logf("pci: establish_intx line_install irq=%d failed (%d)\n", candidate->irq, status);
 		kern_free(candidate);
 
 		/* Failed: a pin another line holds stays retryable. */
@@ -3475,7 +3429,6 @@ establish_msi(
 	    drv_pci_device_config_read32(device,
 					 cookie->capability + PCI_MSI_ADDRESS,
 					 &cookie->msi_address_low_saved) != 0) {
-		kern_logf("pci: establish_msi read ctrl/addr failed (cap=0x%x)\n", cookie->capability);
 		/* Failed. */
 		return EIO;
 	}
@@ -3487,7 +3440,6 @@ establish_msi(
 		if (drv_pci_device_config_read32(
 			    device, cookie->capability + PCI_MSI_ADDRESS + 4U,
 			    &cookie->msi_address_high_saved) != 0) {
-			kern_logf("pci: establish_msi read addr_high failed\n");
 			/* Failed. */
 			return EIO;
 		}
@@ -3500,7 +3452,6 @@ establish_msi(
 	/* Checks the drv pci device config read16 result. */
 	if (drv_pci_device_config_read16(device, data_offset,
 					 &cookie->msi_data_saved) != 0) {
-		kern_logf("pci: establish_msi read data failed (offset=0x%x)\n", data_offset);
 		/* Failed. */
 		return EIO;
 	}
@@ -3510,15 +3461,12 @@ establish_msi(
 
 	/* Checks the operation status. */
 	error = message_register(cookie, source, &address, &event);
-	if (error != 0) {
-		kern_logf("pci: establish_msi message_register failed (%d, src='%s')\n", error, source);
+	if (error != 0)
 		return error == ENOMEM ? ENOMEM : EIO;
-	}
 	cookie->message_registered = 1;
 
 	/* Handles the event condition. */
 	if (event > UINT16_MAX) {
-		kern_logf("pci: establish_msi event > UINT16_MAX (%u)\n", event);
 		error = EIO;
 		goto fail;
 	}
@@ -3532,7 +3480,6 @@ establish_msi(
 	    drv_pci_device_config_write32(device,
 					  cookie->capability + PCI_MSI_ADDRESS,
 					  (uint32_t)address) != 0) {
-		kern_logf("pci: establish_msi write ctrl/addr failed\n");
 		error = EIO;
 		goto fail;
 	}
@@ -3543,7 +3490,6 @@ establish_msi(
 		if (drv_pci_device_config_write32(
 			    device, cookie->capability + PCI_MSI_ADDRESS + 4U,
 			    (uint32_t)((uint64_t)address >> 32)) != 0) {
-			kern_logf("pci: establish_msi write addr_high failed\n");
 			error = EIO;
 			goto fail;
 		}
@@ -3552,7 +3498,6 @@ establish_msi(
 	} else {
 		/* Handles the address condition. */
 		if (address > UINT32_MAX) {
-			kern_logf("pci: establish_msi address overflow (> 32-bit)\n");
 			error = ERANGE;
 			goto fail;
 		}
@@ -3566,7 +3511,6 @@ establish_msi(
 	    drv_pci_device_config_write16(device,
 					  cookie->capability + PCI_MSI_CONTROL,
 					  control | PCI_MSI_ENABLE) != 0) {
-		kern_logf("pci: establish_msi write data/enable failed\n");
 		error = EIO;
 		goto fail;
 	}
@@ -3653,10 +3597,8 @@ establish_msix(
 
 	/* Checks the operation status. */
 	error = map_msix_entry(cookie);
-	if (error != 0) {
-		kern_logf("pci: establish_msix map_msix_entry failed (%d)\n", error);
+	if (error != 0)
 		return error;
-	}
 	cookie->table_mapped = 1;
 	entry = cookie->table.address;
 
@@ -3664,7 +3606,6 @@ establish_msix(
 	if (drv_pci_device_config_read16(cookie->device,
 					 cookie->capability + PCI_MSIX_CONTROL,
 					 &cookie->msix_control_saved) != 0) {
-		kern_logf("pci: establish_msix read ctrl failed (cap=0x%x)\n", cookie->capability);
 		error = EIO;
 		goto fail;
 	}
@@ -3680,7 +3621,6 @@ establish_msix(
 	/* Checks the operation status. */
 	error = message_register(cookie, source, &address, &event);
 	if (error != 0) {
-		kern_logf("pci: establish_msix message_register failed (%d, src='%s')\n", error, source);
 		error = error == ENOMEM ? ENOMEM : EIO;
 		goto fail;
 	}
@@ -3699,7 +3639,6 @@ establish_msix(
 		    cookie->device, cookie->capability + PCI_MSIX_CONTROL,
 		    (control | PCI_MSIX_ENABLE) &
 			    (uint16_t)~PCI_MSIX_FUNCTION_MASK) != 0) {
-		kern_logf("pci: establish_msix enable failed\n");
 		error = EIO;
 
 		/* Checks the hal irq unregister msi result. */
@@ -4032,7 +3971,6 @@ intx_line_run(
 	struct pci_intx_line *line;
 	struct pci_irq_cookie *cookie;
 	bool enabled;
-	int handled = 0;
 
 	line = argument;
 
@@ -4063,22 +4001,10 @@ intx_line_run(
 		intx_lock_leave(enabled);
 
 		/* Lets the device's handler serve its own interrupt. */
-		if (handler(handler_argument) != 0)
-			handled = 1;
+		(void)handler(handler_argument);
 
 		/* Moves on to the handler that followed it. */
 		cookie = next;
-	}
-
-	if (!handled) {
-		line->unhandled_count++;
-		if (line->unhandled_count >= 1000) {
-			kern_logf("pci: irq %d unhandled storm (%u), masking line\n",
-				  line->irq, line->unhandled_count);
-			intx_line_mask(line);
-		}
-	} else {
-		line->unhandled_count = 0;
 	}
 
 	/* Drops this dispatcher from the line, which lets removal proceed. */
