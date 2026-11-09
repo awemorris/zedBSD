@@ -6988,11 +6988,13 @@ xhci_attach(
 	     product == PCI_DEVICE_INTEL_MRFLD_USB2 ||
 	     product == PCI_DEVICE_INTEL_BYT_USB ||
 	     product == PCI_DEVICE_INTEL_BSW_USB)) {
+		/*
+		 * Only these Intel parts need their DWC3 core put into host
+		 * mode here.  Other DWC3 cores reached as xHCI (the RP1 of the
+		 * Raspberry Pi 5) are set up by their platform code, and their
+		 * interrupt lines are not level-triggered INTx.
+		 */
 		c->is_dwc3 = 1;
-	} else if (c->mapping.size >= DWC3_GSNPSID + 4U) {
-		uint32_t snpsid = rd32(c->mapping.address, DWC3_GSNPSID);
-		if ((snpsid & DWC3_GSNPSID_MASK) == DWC3_SYNOPSYS_ID)
-			c->is_dwc3 = 1;
 	}
 
 	if (c->is_dwc3) {
