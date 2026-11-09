@@ -296,6 +296,8 @@ CONFIG_USERLAND_PROGRAMS          += \
 	nvidia-gsp-firmware \
 	amd-navi-firmware \
 	rtl8822b-firmware \
+	bcm43455-firmware \
+	brcmbt-firmware \
 	hand-hershey \
 	noto-color-emoji \
 	ca-certificates \

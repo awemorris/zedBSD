@@ -27,7 +27,7 @@ CONFIG_DRIVER_USB_RTL8822BU       := y
 CONFIG_DRIVER_GRAPHICS            := y
 CONFIG_DRIVER_GRAPHICS_BOOTLFB    := y
 CONFIG_DRIVER_GPU                 := y
-CONFIG_DRIVER_VF2_GPU             := y
+CONFIG_DRIVER_VF2_GPU_VPU         := y
 CONFIG_GPU_JOB_RESERVATION_MS     := 10000
 CONFIG_GPU_JOB_EXECUTION_MS       := 60000
 CONFIG_GPU_JOB_STOP_MS            := 10000
@@ -294,6 +294,8 @@ CONFIG_USERLAND_PROGRAMS          += \
 	nvidia-gsp-firmware \
 	amd-navi-firmware \
 	rtl8822b-firmware \
+	powervr-firmware \
+	wave511-firmware \
 	hand-hershey \
 	noto-color-emoji \
 	ca-certificates \
