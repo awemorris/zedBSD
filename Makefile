@@ -123,5 +123,10 @@ $(KERN_FLAGS_STAMP): FORCE_KERN_FLAGS
 	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
 $(VMUNIX_OBJS): $(KERN_FLAGS_STAMP)
 
+# The kernel objects also follow the headers they include: the compiler
+# writes each object's header list beside it, and the next run reads them.
+KERN_CFLAGS += -MMD -MP
+-include $(VMUNIX_OBJS:.o=.d)
+
 # Foreign targets. (targets: keiland-linux, keiland-linux-install, keiland-freebsd, keiland-freebsd-install)
 include mk/foreign.mk
