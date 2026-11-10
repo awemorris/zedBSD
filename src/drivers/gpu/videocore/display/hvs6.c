@@ -145,8 +145,10 @@ bcm2712_display_discover(
 
 	/* Finds and maps the compositor; a board without one has no display. */
 	error = bcm2711_fdt_find(fdt, HVS_COMPATIBLE, &node);
-	if (error != 0)
+	if (error != 0) {
+		kern_logf("hvs6: no hvs node: no display\n");
 		return ENODEV;
+	}
 	error = bcm2711_fdt_window(fdt, node, 0, &display->base.compositor);
 	if (error != 0 || display->base.compositor.size < LIST_MEMORY_OFFSET + 4U * LIST_BOOT_WORDS) {
 		kern_logf("hvs6: compositor registers unusable (%d)\n", error);
