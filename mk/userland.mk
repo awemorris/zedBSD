@@ -34,6 +34,7 @@ pkg_aliases = $(strip $(1) \
 	$(if $(filter printd,$(1)),keiland-printd) \
 	$(if $(filter installer,$(1)),install-admin) \
 	$(if $(filter wallpapers,$(1)),wayland) \
+	$(if $(filter sshd ssh-keygen sftp-server,$(1)),ssh) \
 	$(1)-firmware $(1)-test)
 
 SELECTED_PROGRAM_MAKEFILES := $(foreach mf, $(ALL_PROGRAM_MAKEFILES), \

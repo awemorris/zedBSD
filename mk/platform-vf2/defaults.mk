@@ -200,9 +200,6 @@ CONFIG_USERLAND_PROGRAMS          += \
 	sort \
 	split \
 	ssh \
-	sshd \
-	ssh-keygen \
-	sftp-server \
 	stat \
 	strings \
 	stty \
