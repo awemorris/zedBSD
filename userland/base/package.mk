@@ -4,13 +4,55 @@
 # SPDX-License-Identifier: Zlib
 
 #
-# Common standalone package interface for userland/base.
+# The standalone package interface of the userland.
+#
+# A package's Makefile declares what it builds and includes this file:
+#
+#   PROG := cat                         one program
+#   SRCS := main.c
+#   include ../package.mk
+#
+#   PROGS := ssh sshd                   several programs; each one's
+#   ssh_SRCS := ...                     variables carry its name
+#   sshd_SRCS := ...
+#   include ../package.mk
+#
+#   SHLIB := libz-compat                a shared library (SO_NAME names
+#   LIB := curses                       the file), a static library
+#
+# The other variables of a declaration are CLASS, REQUIRE, MODE, DATA,
+# HEADERS and INSTALL_DIR (name_CLASS and so on under PROGS).  SRCS are
+# relative to the package's directory.
+#
+# The older USERLAND_PACKAGE call with its fifteen arguments makes the same
+# rules, so that the packages move to the declarations one at a time.
+#
+# Each source is compiled to its own object, which follows its headers
+# (-MMD -MP) and the compile flags (a stamp), and only what changed is
+# compiled again.  V=1 shows every command.
 #
 
 # The package's own make only: the top-level build reads none of this.
 ifndef TOPLEVEL_BUILD
 
 .DEFAULT_GOAL := all
+
+################################################
+# Output
+################################################
+
+# V=1 shows every command; otherwise each step writes one short line.
+ifeq ($(V),1)
+Q :=
+standalone_log =
+else
+Q := @
+standalone_log = @printf '  %-7s %s\n' '$(1)' '$(2)'
+endif
+
+################################################
+# Environment
+################################################
 
 BASE_PACKAGE_MK := $(lastword $(MAKEFILE_LIST))
 REPO_ROOT := $(abspath $(dir $(BASE_PACKAGE_MK))/../..)
@@ -19,6 +61,7 @@ PREFIX ?= /usr/local
 DESTDIR ?=
 INSTALL ?= install
 STANDALONE_CONFIG ?= $(REPO_ROOT)/config.mk
+comma := ,
 
 # make's own default compiler is not the target's: the tree's clang takes its place.
 ifeq ($(origin CC),default)
@@ -58,6 +101,10 @@ endif
 USERLAND_PACKAGE_LIFECYCLE := 1
 include $(dir $(BASE_PACKAGE_MK))../download.mk
 
+################################################
+# Platform
+################################################
+
 STANDALONE_PLATFORM_DIR = $(strip \
 	$(if $(filter sun4u,$(PLATFORM)),sparcv9,\
 	$(PLATFORM)))
@@ -72,222 +119,341 @@ STANDALONE_ARCH_CFLAGS = $(strip \
 	$(if $(filter vf2 riscv64,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-march=rv64gc -mabi=lp64d -mno-relax -DHAL_ARCH_RISCV64 -DKERN_USER_ABI_RISCV64 -DKERN_USER_ABI_LP64,\
 	$(if $(filter i386 pcat pc98 pc9821 pc9801,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-m32 -march=i386 -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32,\
 	-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64))))
-STANDALONE_BINDIR = $(strip $(if $(filter /,$(PREFIX)),\
-	/$(STANDALONE_INSTALL_DIR),$(patsubst %/,%,$(PREFIX))/$(STANDALONE_INSTALL_DIR)))
+
+# Where the platform's build puts what the packages make.
+STANDALONE_BUILD_DIR = $(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)
+STANDALONE_SYSROOT = $(STANDALONE_BUILD_DIR)/sysroot
+STANDALONE_DYNAMIC_DIR = $(STANDALONE_BUILD_DIR)/dynamic
+STANDALONE_LIB_DIR = $(STANDALONE_BUILD_DIR)/lib
+
+# Where install puts a program (INSTALL_DIR under PREFIX, or at the root when PREFIX is /).
+standalone_bindir = $(strip $(if $(filter /,$(PREFIX)),\
+	/$(1),$(patsubst %/,%,$(PREFIX))/$(1)))
+STANDALONE_INSTALL_LIBDIR = $(if $(filter /,$(PREFIX)),/lib,$(patsubst %/,%,$(PREFIX))/lib)
+STANDALONE_INSTALL_INCLUDEDIR = $(if $(filter /,$(PREFIX)),/include,$(patsubst %/,%,$(PREFIX))/include)
 STANDALONE_TERMINFO_DIR = $(strip $(if $(filter /,$(PREFIX)),\
 	/lib/terminfo,$(patsubst %/,%,$(PREFIX))/share/terminfo))
 
-#
-# One program, library or data set of the package.  A Makefile may call it
-# more than once: each call makes the targets standalone-build-NAME,
-# standalone-install-NAME and standalone-clean-NAME, whose variables are
-# their own (target-specific), and build, install and clean depend on them.
-#
-define USERLAND_PACKAGE
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_NAME := $(strip $(1))
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_SO_NAME := $(if $(filter shared-library,$(12)),$(if $(2),$(2),$(strip $(1))),$(strip $(1)))
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_CLASS := $(5)
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_SOURCES := $(6)
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_REQUIRE := $(10)
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_MODE := $(if $(11),$(11),0755)
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_TYPE := $(if $(12),$(12),$(if $(filter library,$(5)),library,$(if $(filter package,$(5)),package,program)))
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_DATA := $(13)
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_HEADERS := $(14)
-standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_INSTALL_DIR := $(if $(15),$(15),bin)
-build: standalone-build-$(strip $(1))
-install: standalone-install-$(strip $(1))
-clean: standalone-clean-$(strip $(1))
+################################################
+# Compile and link flags
+################################################
 
-# A package or custom type's own target, which its Makefile defines, is built too.
-ifneq ($(filter package custom,$(if $(12),$(12),$(if $(filter library,$(5)),library,$(if $(filter package,$(5)),package,program)))),)
-build: $(strip $(1))
+# A program: position-independent, freestanding, against the sysroot.
+STANDALONE_PROGRAM_CFLAGS = \
+	--target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$(STANDALONE_SYSROOT)" \
+	$(STANDALONE_ARCH_CFLAGS) \
+	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
+	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
+	-ffreestanding -fno-stack-protector -fPIC -Os
+
+# A program's link: a PIE that loads /lib/libc.so through /lib/ld.so.
+STANDALONE_PROGRAM_LDFLAGS = \
+	--target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$(STANDALONE_SYSROOT)" \
+	$(STANDALONE_ARCH_CFLAGS) \
+	-nostdlib -pie -Wl,--no-relax -Wl,--gc-sections \
+	-Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
+	-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+	-Wl,--dynamic-linker=/lib/ld.so
+
+# A shared library's objects.
+STANDALONE_SHLIB_CFLAGS = \
+	--target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$(STANDALONE_SYSROOT)" \
+	$(STANDALONE_ARCH_CFLAGS) \
+	-fPIC \
+	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
+	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I.
+
+# A shared library's link.
+STANDALONE_SHLIB_LDFLAGS = \
+	--target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$(STANDALONE_SYSROOT)" \
+	$(STANDALONE_ARCH_CFLAGS) \
+	-fPIC -shared \
+	-Wl,--hash-style=both -Bsymbolic-functions \
+	-Wl,-z,now,-z,relro,-z,separate-code,-z,stack-size=0x100000
+
+# A static library's objects take the caller's flags (the top-level build's).
+STANDALONE_LIB_CFLAGS = \
+	$(CPPFLAGS) $(CFLAGS) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror \
+	-I"$(REPO_ROOT)"
+
+################################################
+# Package-specific additions
+################################################
+
+#
+# These belong in the packages' own declarations and move there as the
+# packages are converted: the shared sources of the basic and network
+# programs, the line editor, and the shared library names that differ from
+# their packages' directories.
+#
+
+# The files among the arguments that exist, as paths from the top of the tree.
+standalone_existing = $(patsubst $(REPO_ROOT)/%,%,$(wildcard $(addprefix $(REPO_ROOT)/,$(1))))
+
+# A program's extra sources: (1) name, (2) class, (3) requirements.
+standalone_extra_sources = $(strip \
+	$(if $(filter basic,$(2)),$(call standalone_existing,userland/base/common/command.c userland/base/common/pager.c)) \
+	$(if $(filter network,$(2)),$(if $(call standalone_existing,userland/base/net/netutil.c),userland/base/net/netutil.c userland/base/net/dhcp.c)) \
+	$(if $(or $(filter sh,$(1)),$(filter base/libedit,$(3))),$(call standalone_existing,userland/base/libedit/readline.c)))
+
+# A program's extra compile flags: (1) name, (3) requirements.
+standalone_extra_cflags = $(if $(or $(filter sh,$(1)),$(filter base/libedit,$(3))),-I$(REPO_ROOT)/userland/base/libedit)
+
+# The shared library a requirement links, or nothing.
+standalone_required_so = $(strip \
+	$(if $(filter base/libedit,$(1)),,\
+	$(if $(filter desktop/xserver,$(1)),libGLX.so,\
+	$(if $(findstring lib,$(1)),\
+	$(if $(filter desktop/libwayland desktop/libwayland-client,$(1)),libwayland-client.so,\
+	$(if $(filter desktop/libegl,$(1)),libEGL.so,\
+	$(if $(filter desktop/libglesv2,$(1)),libGLESv2.so,\
+	$(if $(filter desktop/libGL,$(1)),libGL.so,\
+	$(notdir $(1)).so))))))))
+
+# The package directory that makes a requirement's shared library.
+standalone_required_dir = $(if $(filter desktop/xserver,$(1)),desktop/xserver/libGLX,$(1))
+
+# The required shared libraries whose packages are in the tree: (1) requirements.
+standalone_makeable_so = $(strip $(foreach req,$(1),$(if $(call standalone_required_so,$(req)),\
+	$(if $(wildcard $(REPO_ROOT)/userland/$(call standalone_required_dir,$(req))/Makefile),\
+	$(call standalone_required_so,$(req))))))
+
+#
+# A required shared library missing from the build is made by its package,
+# once per make: (1) library, (2) package directory.  The top-level build
+# normally made it first (mk/userland.mk orders the packages); this rule
+# covers a package made on its own.  A requirement whose library is still
+# missing at the link is left out of it, as before.
+#
+define STANDALONE_REQUIRED_RULE
+# The first program that requires the library defines its rule.
+ifndef STANDALONE_REQUIRED_RULE_$(1)
+STANDALONE_REQUIRED_RULE_$(1) := 1
+$$(STANDALONE_DYNAMIC_DIR)/$(1):
+	$$(call standalone_log,MAKE,userland/$(2))
+	$$(Q)$$(MAKE) -C "$$(REPO_ROOT)/userland/$(2)"
 endif
+
 endef
 
-.PHONY: all build install clean
+# The link options of the required libraries that exist (a command for the recipe's shell).
+standalone_required_libs = $$$$(for so in $(1); do test -f "$(STANDALONE_DYNAMIC_DIR)/$$$$so" && printf ' -l:%s' "$$$$so"; done)
+
+################################################
+# The rules of one package
+################################################
+
+#
+# One program, library or data set: (1) name, (2) shared library name,
+# (3) class, (4) sources from the top of the tree, (5) requirements,
+# (6) mode, (7) type (program, shared-library, library, data, package or
+# custom), (8) data (DESTINATION=SOURCE), (9) headers, (10) install
+# directory.  Everything it defines carries the name, so a Makefile may
+# make several.
+#
+define STANDALONE_RULES
+STANDALONE_WORK_DIR_$(1) = $$(STANDALONE_BUILD_DIR)/packages/$(1)
+STANDALONE_OBJ_DIR_$(1) = $$(STANDALONE_WORK_DIR_$(1))/obj
+STANDALONE_FLAGS_STAMP_$(1) = $$(STANDALONE_WORK_DIR_$(1))/.flags
+STANDALONE_SOURCES_$(1) := $(4) $(if $(filter program,$(7)),$(call standalone_extra_sources,$(1),$(3),$(5)))
+STANDALONE_OBJECTS_$(1) = $$(foreach src,$$(STANDALONE_SOURCES_$(1)),$$(STANDALONE_OBJ_DIR_$(1))/$$(if $$(filter /%,$$(src)),_abs)$$(src:.c=.o))
+STANDALONE_SO_LIST_$(1) := $(foreach req,$(5),$(call standalone_required_so,$(req)))
+
+# The object compile flags of the type.
+ifeq ($(7),program)
+STANDALONE_CFLAGS_$(1) = $$(STANDALONE_PROGRAM_CFLAGS) $(call standalone_extra_cflags,$(1),,$(5))
+else ifeq ($(7),shared-library)
+STANDALONE_CFLAGS_$(1) = $$(STANDALONE_SHLIB_CFLAGS)
+else
+STANDALONE_CFLAGS_$(1) = $$(STANDALONE_LIB_CFLAGS)
+endif
+
+# The required shared libraries whose packages are in the tree, each made once if missing.
+$(foreach req,$(5),$(if $(call standalone_makeable_so,$(req)),$(call STANDALONE_REQUIRED_RULE,$(call standalone_required_so,$(req)),$(call standalone_required_dir,$(req)))))
+
+# Each source to its own object, following its headers and the flags; the sources are prepared first.
+$$(STANDALONE_OBJ_DIR_$(1))/%.o: $$(REPO_ROOT)/%.c $$(STANDALONE_FLAGS_STAMP_$(1)) | patch
+	$$(call standalone_log,CC,$$*.c)
+	$$(Q)mkdir -p "$$(@D)"
+	$$(Q)$$(CC) $$(STANDALONE_CFLAGS_$(1)) -MMD -MP -c $$< -o $$@
+
+# A source given by its absolute path (one made outside the tree).
+$$(STANDALONE_OBJ_DIR_$(1))/_abs/%.o: /%.c $$(STANDALONE_FLAGS_STAMP_$(1)) | patch
+	$$(call standalone_log,CC,/$$*.c)
+	$$(Q)mkdir -p "$$(@D)"
+	$$(Q)$$(CC) $$(STANDALONE_CFLAGS_$(1)) -MMD -MP -c $$< -o $$@
+
+# The flags the objects were compiled with, replaced only when they change.
+$$(STANDALONE_FLAGS_STAMP_$(1)): FORCE
+	$$(Q)mkdir -p "$$(@D)"
+	$$(Q)printf '%s\n' '$$(CC) $$(STANDALONE_CFLAGS_$(1))' > $$@.tmp
+	$$(Q)if cmp -s $$@.tmp $$@; then rm -f $$@.tmp; else mv -f $$@.tmp $$@; fi
+
+-include $$(STANDALONE_OBJECTS_$(1):.o=.d)
+
+# A program: linked against libc.so, with its mode recorded for the root.
+ifeq ($(7),program)
+STANDALONE_OUTPUT_$(1) = $$(STANDALONE_BUILD_DIR)/$(10)/$(1)
+$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
+	$$(call standalone_log,LD,$(10)/$(1))
+	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_WORK_DIR_$(1))"
+	$$(Q)$$(CC) $$(STANDALONE_PROGRAM_LDFLAGS) \
+		"$$(STANDALONE_SYSROOT)/usr/lib/crt1.o" \
+		$$(STANDALONE_OBJECTS_$(1)) \
+		-L"$$(STANDALONE_DYNAMIC_DIR)" -Wl,-rpath-link,"$$(STANDALONE_DYNAMIC_DIR)" \
+		$(call standalone_required_libs,$$(STANDALONE_SO_LIST_$(1))) -l:libm.so -l:libc.so \
+		-o $$@
+	$$(Q)printf '%s %s\n' "/$(10)/$(1)" "$(6)" > "$$(STANDALONE_WORK_DIR_$(1))/mode"
+endif
+
+# A shared library: in the dynamic directory, and a copy among the libraries.
+ifeq ($(7),shared-library)
+STANDALONE_OUTPUT_$(1) = $$(STANDALONE_DYNAMIC_DIR)/$(2).so
+$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(wildcard exports.map) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
+	$$(call standalone_log,SHLIB,$(2).so)
+	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_LIB_DIR)"
+	$$(Q)$$(CC) $$(STANDALONE_SHLIB_LDFLAGS) \
+		$$(STANDALONE_OBJECTS_$(1)) \
+		-Wl,-soname,"$(2).so" \
+		$$(if $$(wildcard exports.map),-Wl$$(comma)--version-script=exports.map) \
+		-L"$$(STANDALONE_DYNAMIC_DIR)" -L"$$(STANDALONE_SYSROOT)/usr/lib" \
+		$(call standalone_required_libs,$$(STANDALONE_SO_LIST_$(1))) -l:libc.so -l:libm.so \
+		-o $$@
+	$$(Q)cp -f $$@ "$$(STANDALONE_LIB_DIR)/$(2).so"
+endif
+
+# A static library, when it has sources.
+ifeq ($(7)$(if $(strip $(4)),y),libraryy)
+STANDALONE_OUTPUT_$(1) = $$(STANDALONE_LIB_DIR)/lib$(1).a
+$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1))
+	$$(call standalone_log,AR,lib$(1).a)
+	$$(Q)mkdir -p "$$(@D)"
+	$$(Q)rm -f $$@
+	$$(Q)$$(AR) rcs $$@ $$(STANDALONE_OBJECTS_$(1))
+endif
+
+# The data files, each copied when its source changes.
+STANDALONE_DATA_OUTPUTS_$(1) :=
+$(foreach entry,$(8),$(call STANDALONE_DATA_RULE,$(1),$(patsubst /lib/terminfo/%,/share/terminfo/%,$(firstword $(subst =, ,$(entry)))),$(word 2,$(subst =, ,$(entry)))))
+
+# The package is built: the stamps the top-level build reads.
+.PHONY: standalone-build-$(1)
+standalone-build-$(1): $$(STANDALONE_OUTPUT_$(1)) $$(STANDALONE_DATA_OUTPUTS_$(1))
+	$$(Q)mkdir -p "$$(STANDALONE_WORK_DIR_$(1))"
+	$$(Q)touch "$$(STANDALONE_WORK_DIR_$(1))/.stamp"
+	$$(Q)if test -n "$$(notdir $$(CURDIR))" && test "$$(notdir $$(CURDIR))" != "$(1)"; then \
+		mkdir -p "$$(STANDALONE_BUILD_DIR)/packages/$$(notdir $$(CURDIR))"; \
+		touch "$$(STANDALONE_BUILD_DIR)/packages/$$(notdir $$(CURDIR))/.stamp"; \
+	fi
+build: standalone-build-$(1)
+
+# A package or custom type's own target, which its Makefile defines, is built too.
+ifneq ($(filter package custom,$(7)),)
+build: $(1)
+endif
+
+# Installation under DESTDIR and PREFIX.
+.PHONY: standalone-install-$(1)
+standalone-install-$(1): standalone-build-$(1)
+
+# A program goes to its directory with its mode.
+ifeq ($(7),program)
+	$$(Q)$$(INSTALL) -d "$$(DESTDIR)$$(call standalone_bindir,$(10))"
+	$$(Q)$$(INSTALL) -m "$(6)" "$$(STANDALONE_OUTPUT_$(1))" "$$(DESTDIR)$$(call standalone_bindir,$(10))/$(1)"
+endif
+
+# A shared library goes among the libraries.
+ifeq ($(7),shared-library)
+	$$(Q)$$(INSTALL) -d "$$(DESTDIR)$$(STANDALONE_INSTALL_LIBDIR)"
+	$$(Q)$$(INSTALL) -m 0644 "$$(STANDALONE_OUTPUT_$(1))" "$$(DESTDIR)$$(STANDALONE_INSTALL_LIBDIR)/$(2).so"
+endif
+
+# A static library with sources goes among the libraries.
+ifeq ($(7)$(if $(strip $(4)),y),libraryy)
+	$$(Q)$$(INSTALL) -d "$$(DESTDIR)$$(STANDALONE_INSTALL_LIBDIR)"
+	$$(Q)$$(INSTALL) -m 0644 "$$(STANDALONE_OUTPUT_$(1))" "$$(DESTDIR)$$(STANDALONE_INSTALL_LIBDIR)/lib$(1).a"
+endif
+
+# The headers, then the data files (terminfo under PREFIX).
+	$$(Q)set -e; for header in $(9); do \
+		$$(INSTALL) -d "$$(DESTDIR)$$(STANDALONE_INSTALL_INCLUDEDIR)"; \
+		$$(INSTALL) -m 0644 "$$(REPO_ROOT)/$$$$header" "$$(DESTDIR)$$(STANDALONE_INSTALL_INCLUDEDIR)/$$$${header##*/}"; \
+	done
+	$$(Q)set -e; for entry in $(8); do \
+		destination=$$$${entry%%=*}; source=$$$${entry#*=}; \
+		case "$$$$destination" in \
+		/lib/terminfo/*) destination="$$(STANDALONE_TERMINFO_DIR)/$$$${destination##*/}" ;; \
+		esac; \
+		case "$$$$source" in \
+		/*) ;; \
+		*) source="$$(REPO_ROOT)/$$$$source" ;; \
+		esac; \
+		$$(INSTALL) -d "$$(DESTDIR)$$$${destination%/*}"; \
+		$$(INSTALL) -m 0644 "$$$$source" "$$(DESTDIR)$$$$destination"; \
+	done
+install: standalone-install-$(1)
+
+# Removal of what the package made.
+.PHONY: standalone-clean-$(1)
+standalone-clean-$(1):
+	$$(Q)rm -rf "$$(STANDALONE_OBJ_DIR_$(1))" "$$(STANDALONE_FLAGS_STAMP_$(1))" "$$(STANDALONE_WORK_DIR_$(1))/.stamp" \
+		"$$(STANDALONE_BUILD_DIR)/packages/$$(notdir $$(CURDIR))/.stamp"
+clean: standalone-clean-$(1)
+endef
+
+#
+# One data file: (1) package, (2) destination, (3) source from the top of
+# the tree or absolute.  It is copied into the build when its source
+# changes.
+#
+define STANDALONE_DATA_RULE
+STANDALONE_DATA_OUTPUTS_$(1) += $$(STANDALONE_BUILD_DIR)$(2)
+$$(STANDALONE_BUILD_DIR)$(2): $(if $(filter /%,$(3)),$(3),$$(REPO_ROOT)/$(3))
+	$$(call standalone_log,DATA,$(2))
+	$$(Q)mkdir -p "$$(@D)"
+	$$(Q)cp -f $$< $$@
+
+endef
+
+################################################
+# The declarations
+################################################
+
+# The type a USERLAND_PACKAGE call names, or the one its class implies.
+standalone_type = $(strip $(if $(strip $(2)),$(2),$(if $(filter library,$(1)),library,$(if $(filter package,$(1)),package,program))))
+
+#
+# The older call: (1) name, (2) shared library name, (5) class, (6) sources,
+# (10) requirements, (11) mode, (12) type, (13) data, (14) headers, (15)
+# install directory.  The other arguments are not read.
+#
+define USERLAND_PACKAGE
+$(call STANDALONE_RULES,$(strip $(1)),$(strip $(if $(filter shared-library,$(strip $(12))),$(if $(strip $(2)),$(2),$(1)),$(1))),$(strip $(5)),$(strip $(6)),$(strip $(10)),$(strip $(if $(strip $(11)),$(11),0755)),$(call standalone_type,$(5),$(12)),$(strip $(13)),$(strip $(14)),$(strip $(if $(strip $(15)),$(15),bin)))
+endef
+
+# A declared source, relative to the package's directory, as a path from the top of the tree.
+standalone_declared_sources = $(patsubst $(REPO_ROOT)/%,%,$(abspath $(1)))
+
+# PROG, SHLIB or LIB: one declaration.
+ifneq ($(strip $(PROG)$(SHLIB)$(LIB)),)
+STANDALONE_DECLARED := $(firstword $(PROG) $(SHLIB) $(LIB))
+STANDALONE_DECLARED_TYPE := $(if $(PROG),program,$(if $(SHLIB),shared-library,library))
+$(eval $(call STANDALONE_RULES,$(STANDALONE_DECLARED),$(if $(SO_NAME),$(SO_NAME),$(STANDALONE_DECLARED)),$(CLASS),$(call standalone_declared_sources,$(SRCS)),$(REQUIRE),$(if $(MODE),$(MODE),0755),$(STANDALONE_DECLARED_TYPE),$(DATA),$(HEADERS),$(if $(INSTALL_DIR),$(INSTALL_DIR),bin)))
+endif
+
+# PROGS: several programs, each one's variables prefixed with its name.
+$(foreach prog,$(PROGS),$(eval $(call STANDALONE_RULES,$(prog),$(prog),$($(prog)_CLASS),$(call standalone_declared_sources,$($(prog)_SRCS)),$($(prog)_REQUIRE),$(if $($(prog)_MODE),$($(prog)_MODE),0755),program,$($(prog)_DATA),$($(prog)_HEADERS),$(if $($(prog)_INSTALL_DIR),$($(prog)_INSTALL_DIR),bin))))
+
+################################################
+# The goals
+################################################
+
+.PHONY: all build install clean FORCE
+FORCE:
 
 all: build
 
-# The sources are prepared before anything a call adds to build.
+# The sources are prepared before anything a declaration adds to build.
 build: patch
-
-standalone-build-%: patch
-	@set -e; \
-	dynamic_dir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic"; \
-	sysroot="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/sysroot"; \
-	req_libs=""; \
-	for req in $(STANDALONE_REQUIRE); do \
-		case "$$req" in \
-			base/libedit) ;; \
-			desktop/xserver) \
-				if ! test -f "$$dynamic_dir/libGLX.so" && test -f "$(REPO_ROOT)/userland/desktop/xserver/libGLX/Makefile"; then \
-					$(MAKE) -C "$(REPO_ROOT)/userland/desktop/xserver/libGLX"; \
-				fi; \
-				if test -f "$$dynamic_dir/libGLX.so"; then \
-					req_libs="$$req_libs -l:libGLX.so"; \
-				fi ;; \
-			*lib*) \
-				so="$${req##*/}.so"; \
-				case "$$req" in \
-					desktop/libwayland) so="libwayland-client.so" ;; \
-					desktop/libegl) so="libEGL.so" ;; \
-					desktop/libglesv2) so="libGLESv2.so" ;; \
-					desktop/libGL) so="libGL.so" ;; \
-					desktop/libwayland-client) so="libwayland-client.so" ;; \
-				esac; \
-				if ! test -f "$$dynamic_dir/$$so" && test -f "$(REPO_ROOT)/userland/$$req/Makefile"; then \
-					$(MAKE) -C "$(REPO_ROOT)/userland/$$req"; \
-				fi; \
-				if test -f "$$dynamic_dir/$$so"; then \
-					req_libs="$$req_libs -l:$$so"; \
-				fi ;; \
-		esac; \
-	done; \
-	if test "$(STANDALONE_TYPE)" = program; then \
-		bindir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/$(STANDALONE_INSTALL_DIR)"; \
-		workdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)"; \
-		mkdir -p "$$bindir" "$$workdir"; \
-		extra_srcs=""; \
-		extra_cflags=""; \
-		if test "$(STANDALONE_CLASS)" = "basic"; then \
-			test -f "$(REPO_ROOT)/userland/base/common/command.c" && extra_srcs="$$extra_srcs $(REPO_ROOT)/userland/base/common/command.c"; \
-			test -f "$(REPO_ROOT)/userland/base/common/pager.c" && extra_srcs="$$extra_srcs $(REPO_ROOT)/userland/base/common/pager.c"; \
-		elif test "$(STANDALONE_CLASS)" = "network"; then \
-			test -f "$(REPO_ROOT)/userland/base/net/netutil.c" && extra_srcs="$$extra_srcs $(REPO_ROOT)/userland/base/net/netutil.c $(REPO_ROOT)/userland/base/net/dhcp.c"; \
-		fi; \
-		if test "$(STANDALONE_NAME)" = "sh" || echo "$(STANDALONE_REQUIRE)" | grep -q "base/libedit"; then \
-			test -f "$(REPO_ROOT)/userland/base/libedit/readline.c" && extra_srcs="$$extra_srcs $(REPO_ROOT)/userland/base/libedit/readline.c"; \
-			extra_cflags="$$extra_cflags -I$(REPO_ROOT)/userland/base/libedit"; \
-		fi; \
-		srcs=""; \
-		for s in $(STANDALONE_SOURCES); do \
-			case "$$s" in \
-				/*) srcs="$$srcs $$s" ;; \
-				*) srcs="$$srcs $(REPO_ROOT)/$$s" ;; \
-			esac; \
-		done; \
-		$(CC) --target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$$sysroot" \
-			$(STANDALONE_ARCH_CFLAGS) \
-			-nostdinc -isystem "$$sysroot/usr/include" \
-			-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
-			$$extra_cflags \
-			-ffreestanding -fno-stack-protector -fPIC -Os \
-			-nostdlib -pie -Wl,--no-relax -Wl,--gc-sections \
-			-Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
-			-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
-			-Wl,--dynamic-linker=/lib/ld.so \
-			"$$sysroot/usr/lib/crt1.o" \
-			$$srcs $$extra_srcs \
-			-L"$$dynamic_dir" -Wl,-rpath-link,"$$dynamic_dir" \
-			$$req_libs -l:libm.so -l:libc.so \
-			-o "$$bindir/$(STANDALONE_NAME)"; \
-		printf '%s %s\n' "/$(STANDALONE_INSTALL_DIR)/$(STANDALONE_NAME)" "$(STANDALONE_MODE)" > "$$workdir/mode"; \
-	elif test "$(STANDALONE_TYPE)" = shared-library; then \
-		dynamic_dir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic"; \
-		libdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib"; \
-		sysroot="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/sysroot"; \
-		mkdir -p "$$dynamic_dir" "$$libdir"; \
-		srcs=""; \
-		for s in $(STANDALONE_SOURCES); do \
-			case "$$s" in \
-				/*) srcs="$$srcs $$s" ;; \
-				*) srcs="$$srcs $(REPO_ROOT)/$$s" ;; \
-			esac; \
-		done; \
-		version_script=""; \
-		if test -f exports.map; then \
-			version_script="-Wl,--version-script=exports.map"; \
-		fi; \
-		$(CC) --target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$$sysroot" \
-			$(STANDALONE_ARCH_CFLAGS) \
-			-fPIC -shared \
-			-nostdinc -isystem "$$sysroot/usr/include" \
-			-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
-			$$srcs \
-			-Wl,-soname,"$(STANDALONE_SO_NAME).so" \
-			-Wl,--hash-style=both -Bsymbolic-functions \
-			-Wl,-z,now,-z,relro,-z,separate-code,-z,stack-size=0x100000 \
-			$$version_script \
-			-L"$$dynamic_dir" -L"$$sysroot/usr/lib" \
-			$$req_libs -l:libc.so -l:libm.so \
-			-o "$$dynamic_dir/$(STANDALONE_SO_NAME).so" && \
-		cp -f "$$dynamic_dir/$(STANDALONE_SO_NAME).so" "$$libdir/$(STANDALONE_SO_NAME).so"; \
-	elif test "$(STANDALONE_TYPE)" = library && \
-	    test -n "$(STANDALONE_SOURCES)"; then \
-		libdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib"; \
-		workdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)"; \
-		mkdir -p "$$libdir" "$$workdir"; objects=; \
-		for source in $(STANDALONE_SOURCES); do \
-			object="$$workdir/$$(printf '%s' "$$source" | tr '/.' '__').o"; \
-			$(CC) $(CPPFLAGS) $(CFLAGS) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror \
-				-I"$(REPO_ROOT)" \
-				-c "$(REPO_ROOT)/$$source" -o "$$object"; \
-			objects="$$objects $$object"; \
-		done; \
-		$(AR) rcs "$$libdir/lib$(STANDALONE_NAME).a" $$objects; \
-	fi; \
-	for entry in $(STANDALONE_DATA); do \
-		destination=$${entry%%=*}; source=$${entry#*=}; \
-		case "$$destination" in \
-		/lib/terminfo/*) destination="/share/terminfo/$${destination##*/}" ;; \
-		esac; \
-		case "$$source" in \
-		/*) ;; \
-		*) source="$(REPO_ROOT)/$$source" ;; \
-		esac; \
-		target="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)$${destination}"; \
-		mkdir -p "$${target%/*}"; \
-		cp -f "$$source" "$$target"; \
-	done
-	@stampdir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)"; \
-	mkdir -p "$$stampdir" && touch "$$stampdir/.stamp"; \
-	pkgdir="$${PWD##*/}"; \
-	if test -n "$$pkgdir" && test "$$pkgdir" != "$(STANDALONE_NAME)"; then \
-		curdir_stamp="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$$pkgdir"; \
-		mkdir -p "$$curdir_stamp" && touch "$$curdir_stamp/.stamp"; \
-	fi
-
-standalone-install-%: standalone-build-%
-	@if test "$(STANDALONE_TYPE)" = program; then \
-		$(INSTALL) -d "$(DESTDIR)$(STANDALONE_BINDIR)"; \
-		$(INSTALL) -m "$(STANDALONE_MODE)" \
-			"$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/$(STANDALONE_INSTALL_DIR)/$(STANDALONE_NAME)" \
-			"$(DESTDIR)$(STANDALONE_BINDIR)/$(STANDALONE_NAME)"; \
-	elif test "$(STANDALONE_TYPE)" = shared-library; then \
-		libdir="$(if $(filter /,$(PREFIX)),/lib,$(patsubst %/,%,$(PREFIX))/lib)"; \
-		$(INSTALL) -d "$(DESTDIR)$$libdir"; \
-		$(INSTALL) -m 0644 \
-			"$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic/$(STANDALONE_SO_NAME).so" \
-			"$(DESTDIR)$$libdir/$(STANDALONE_SO_NAME).so"; \
-	elif test "$(STANDALONE_TYPE)" = library && \
-	    test -n "$(STANDALONE_SOURCES)"; then \
-		libdir="$(if $(filter /,$(PREFIX)),/lib,$(patsubst %/,%,$(PREFIX))/lib)"; \
-		$(INSTALL) -d "$(DESTDIR)$$libdir"; \
-		$(INSTALL) -m 0644 "$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/lib/lib$(STANDALONE_NAME).a" \
-			"$(DESTDIR)$$libdir/lib$(STANDALONE_NAME).a"; \
-	fi
-	@set -e; for header in $(STANDALONE_HEADERS); do \
-		includedir="$(if $(filter /,$(PREFIX)),/include,$(patsubst %/,%,$(PREFIX))/include)"; \
-		$(INSTALL) -d "$(DESTDIR)$$includedir"; \
-		$(INSTALL) -m 0644 "$(REPO_ROOT)/$$header" \
-			"$(DESTDIR)$$includedir/$${header##*/}"; \
-	done
-	@set -e; for entry in $(STANDALONE_DATA); do \
-		destination=$${entry%%=*}; source=$${entry#*=}; \
-		case "$$destination" in \
-		/lib/terminfo/*) destination="$(STANDALONE_TERMINFO_DIR)/$${destination##*/}" ;; \
-		esac; \
-		case "$$source" in \
-		/*) ;; \
-		*) source="$(REPO_ROOT)/$$source" ;; \
-		esac; \
-		$(INSTALL) -d "$(DESTDIR)$${destination%/*}"; \
-		$(INSTALL) -m 0644 "$$source" \
-			"$(DESTDIR)$$destination"; \
-	done
-
-standalone-clean-%:
-	@rm -f "$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)/.stamp" \
-		"$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$${PWD##*/}/.stamp"
 
 endif
