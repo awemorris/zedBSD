@@ -21,7 +21,7 @@
 
 static int validate_pass(struct bcm2711_vulkan_native_pass *pass);
 static int clear_target(struct bcm2711_vulkan_native_pass *pass);
-static int convert_textures(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result, uint64_t *ticks, uint32_t *jobs, uint64_t *longest);
+static int convert_textures(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result);
 
 /*
  * Executes one completely prepared native pass while its enclosing submission retains all pending owners.
@@ -128,13 +128,10 @@ bcm2711_vulkan_native_pass_launch(
 	struct bcm2711_vulkan_native_pass *pass,
 	struct bcm2711_v3d_job_result *result)
 {
-	uint64_t converted;
-	uint64_t longest;
-	uint32_t jobs;
 	int error;
 
 	/* The texture formatting unit fills every converted texture before any draw samples it. */
-	error = convert_textures(pass, result, &converted, &jobs, &longest);
+	error = convert_textures(pass, result);
 	pass->retired = result->retired;
 	if (error != 0)
 		return error;
@@ -143,9 +140,6 @@ bcm2711_vulkan_native_pass_launch(
 	/* The draws run once all their textures are in place. */
 	error = bcm2711_v3d_job_run(pass->space->native, &pass->job, result);
 	pass->retired = result->retired;
-	result->tfu_ticks = converted;
-	result->tfu_jobs = jobs;
-	result->tfu_max_ticks = longest;
 	if (error != 0)
 		return error;
 
@@ -478,29 +472,20 @@ clear_target(
 static int
 convert_textures(
 	struct bcm2711_vulkan_native_pass *pass,
-	struct bcm2711_v3d_job_result *result,
-	uint64_t *ticks,
-	uint32_t *jobs,
-	uint64_t *longest)
+	struct bcm2711_v3d_job_result *result)
 {
 	struct bcm2711_vulkan_native_draw *draw;
 	struct bcm2711_v3d_job job;
-	uint64_t started;
-	uint64_t step;
 	uint32_t index;
 	uint32_t level;
 	int error;
 
 	/* Nothing has launched yet, so a pass without conversions retires as before. */
-	*ticks = 0;
-	*jobs = 0;
-	*longest = 0;
 	result->retired = true;
 	kern_memset(&job, 0, sizeof(job));
 	job.kind = BCM2711_V3D_JOB_TFU;
 
 	/* Converts the textures in draw order; shared textures belong to the first draw only. */
-	started = clock_ticks();
 	for (draw = pass->first; draw != NULL; draw = draw->next) {
 		for (index = 0; index < draw->texture_count; index++) {
 			/* A texture the CPU already converted needs no unit job. */
@@ -509,34 +494,21 @@ convert_textures(
 
 			/* Each conversion completes before the next starts; one queue holds one job. */
 			job.command.tfu = draw->textures[index].tfu;
-			step = clock_ticks();
 			error = bcm2711_v3d_job_run(pass->space->native, &job, result);
 			if (error != 0)
 				return error;
-
-			/* The diagnostic count and the longest conversion. */
-			step = clock_ticks() - step;
-			(*jobs)++;
-			if (step > *longest)
-				*longest = step;
 
 			/* A mip tree's smaller levels follow its level 0, each from its own raster. */
 			for (level = 1; level < draw->textures[index].levels; level++) {
 				error = bcm2711_vulkan_native_mip_job(&draw->textures[index], level, &job.command.tfu);
 				if (error != 0)
 					return error;
-				step = clock_ticks();
 				error = bcm2711_v3d_job_run(pass->space->native, &job, result);
 				if (error != 0)
 					return error;
-				step = clock_ticks() - step;
-				(*jobs)++;
-				if (step > *longest)
-					*longest = step;
 			}
 		}
 	}
-	*ticks = clock_ticks() - started;
 
 	/* Succeeded: every converted texture is in memory for the following CL job. */
 	return 0;

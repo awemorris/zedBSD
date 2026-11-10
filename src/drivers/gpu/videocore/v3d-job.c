@@ -32,9 +32,6 @@ static int validate_job(struct bcm2711_v3d *engine, const struct bcm2711_v3d_job
 static int validate_span(struct bcm2711_v3d *engine, uint32_t address, uint64_t bytes);
 static int admit_job(struct bcm2711_v3d *engine);
 static void finish_job(struct bcm2711_v3d *engine, bool failed_dma);
-static void counters_prepare(struct bcm2711_v3d *engine);
-static void counters_select(struct bcm2711_v3d *engine, const uint8_t *sources);
-static void counters_read(struct bcm2711_v3d *engine, uint32_t *values);
 static int run_cl(struct bcm2711_v3d *engine, const struct bcm2711_v3d_cl_job *job, struct bcm2711_v3d_job_result *result);
 static int run_tfu(struct bcm2711_v3d *engine, const struct bcm2711_v3d_tfu_job *job, struct bcm2711_v3d_job_result *result);
 static int run_compute(struct bcm2711_v3d *engine, const struct bcm2711_v3d_compute_job *job, struct bcm2711_v3d_job_result *result);
@@ -324,36 +321,10 @@ run_cl(
 	const struct bcm2711_v3d_cl_job *job,
 	struct bcm2711_v3d_job_result *result)
 {
-	/*
-	 * The counter sources of a bin run (cycles, QPU idle, coordinate
-	 * shading, valid instructions, waits for coordinate shading,
-	 * instruction and uniform cache hits and misses, VDW and VCD stalls,
-	 * bin-thread cycles, L2T hits and misses, primitives binned, reversed
-	 * primitives discarded) and of a render run (counters_prepare's).
-	 * Values referenced: Mesa src/broadcom/common/v3d_performance_counters.h
-	 * (the V3D 4.2 counter numbers).
-	 */
-	static const uint8_t bin_sources[BCM2711_V3D_COUNTERS] = {
-		32, 13, 14, 16, 33, 20, 21, 22, 23, 26, 27, 28, 30, 31, 35, 12
-	};
-	static const uint8_t render_sources[BCM2711_V3D_COUNTERS] = {
-		32, 13, 15, 16, 17, 18, 19, 34, 24, 25, 54, 29, 3, 9, 84, 82
-	};
 	const struct job_queue bin = {2, 0, 0x110, 0x118};
 	const struct job_queue render = {1, 0, 0x114, 0x11c};
-	uint32_t before[BCM2711_V3D_COUNTERS];
-	uint32_t after[BCM2711_V3D_COUNTERS];
-	uint32_t index;
 	unsigned long enabled;
-	uint64_t step;
-	uint64_t bin_ticks;
-	uint64_t render_ticks;
-	uint64_t clean_ticks;
 	int error;
-
-	/* Measure queue completion separately from output cache drain. */
-	bin_ticks = 0;
-	clean_ticks = 0;
 
 	/* The bin queue writes tile lists into its prevalidated pool and state allocations. */
 	if (job->bin_start != 0) {
@@ -377,22 +348,14 @@ run_cl(
 		kern_mmio_write32(engine->core.mapped + 0x15c, job->state_address | 2U);
 		kern_mmio_write32(engine->core.mapped + 0x160, job->bin_start);
 		result->retired = false;
-		counters_prepare(engine);
-		counters_select(engine, bin_sources);
-		counters_read(engine, before);
 		kern_mmio_write32(engine->core.mapped + 0x168, job->bin_end);
 
 		spin_unlock_irqrestore(&engine->hardware.guard, enabled);
 
 		/* Render remains unsubmitted while bin completion or overflow is still pending. */
-		step = clock_ticks();
 		error = wait_queue(engine, &bin, job, result);
-		bin_ticks = clock_ticks() - step;
 		if (error != 0)
 			return error;
-		counters_read(engine, after);
-		for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
-			result->bin_counters[index] = after[index] - before[index];
 	}
 
 	/* The render cache sees bin-produced tile lists only after its IRQ fence. */
@@ -407,12 +370,6 @@ run_cl(
 		return error;
 	}
 
-	/* The counters before the run, as the render queue alone runs from here. */
-	counters_prepare(engine);
-	if (job->bin_start != 0)
-		counters_select(engine, render_sources);
-	counters_read(engine, before);
-
 	/* No bin-dependent renderer is placed in a hardware FIFO before software completion. */
 	kern_mmio_write32(engine->core.mapped + 0x164, job->render_start);
 	result->retired = false;
@@ -421,31 +378,17 @@ run_cl(
 	spin_unlock_irqrestore(&engine->hardware.guard, enabled);
 
 	/* The same caller-owned pool and overflow storage stay alive through render completion. */
-	step = clock_ticks();
 	error = wait_queue(engine, &render, NULL, result);
-	render_ticks = clock_ticks() - step;
 	if (error != 0)
 		return error;
-	counters_read(engine, after);
-	for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
-		result->counters[index] = after[index] - before[index];
+
+	/* Cleans the output out of the GPU caches when the caller asked for it. */
 	if (job->clean_output) {
-		step = clock_ticks();
 		error = bcm2711_v3d_hardware_clean(engine);
-		clean_ticks = clock_ticks() - step;
 		if (error != 0)
 			return error;
 	}
-
-	/* Hardware frame counters supplement the actual IRQ completion evidence. */
-	result->bin_counter = kern_mmio_read32(engine->core.mapped + 0x134);
-	result->render_counter = kern_mmio_read32(engine->core.mapped + 0x138);
 	result->retired = true;
-
-	/* The submission cost report totals queue waits, which include scheduler delay as well as GPU busy time. */
-	result->bin_ticks = bin_ticks;
-	result->render_ticks = render_ticks;
-	result->clean_ticks = clean_ticks;
 
 	/* Succeeded: both queues and any requested output cache clean finished. */
 	return 0;
@@ -723,69 +666,4 @@ launch_admit_locked(
 
 	/* Succeeded: the caller owns the job reservation and IRQ publication boundary. */
 	return 0;
-}
-
-/*
- * Gives the performance counters their sources and starts them, once after each power-up or reset.
- *
- * The sources are V3D 4.2 event numbers, four 7-bit fields a register.
- */
-static void
-counters_prepare(
-	struct bcm2711_v3d *engine)
-{
-	static const uint8_t sources[BCM2711_V3D_COUNTERS] = {
-		32, 13, 15, 16, 17, 18, 19, 34, 24, 25, 54, 29, 3, 9, 84, 82
-	};
-	uint32_t index;
-	uint32_t word;
-
-	/* Already counting. */
-	if (engine->hardware.counters_ready)
-		return;
-
-	/* The sources of counters 0 to 15, then enabled, cleared and without overflow. */
-	for (index = 0; index < BCM2711_V3D_COUNTERS / 4U; index++) {
-		word = (uint32_t)sources[index * 4U] |
-		    (uint32_t)sources[index * 4U + 1U] << 8 |
-		    (uint32_t)sources[index * 4U + 2U] << 16 |
-		    (uint32_t)sources[index * 4U + 3U] << 24;
-		kern_mmio_write32(engine->core.mapped + 0x660 + index * 4U, word);
-	}
-	kern_mmio_write32(engine->core.mapped + 0x650, 0xffffU);
-	kern_mmio_write32(engine->core.mapped + 0x654, 0xffffU);
-	kern_mmio_write32(engine->core.mapped + 0x658, 0xffffU);
-	engine->hardware.counters_ready = true;
-}
-
-/* Reads the performance counters 0 to 15. */
-static void
-counters_read(
-	struct bcm2711_v3d *engine,
-	uint32_t *values)
-{
-	uint32_t index;
-
-	/* Free-running 32-bit counts; their differences give a run's share. */
-	for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
-		values[index] = kern_mmio_read32(engine->core.mapped + 0x680 + index * 4U);
-}
-
-/* Points the sixteen counters at the given sources; their free-running counts go on from where they were. */
-static void
-counters_select(
-	struct bcm2711_v3d *engine,
-	const uint8_t *sources)
-{
-	uint32_t index;
-	uint32_t word;
-
-	/* Four sources a register. */
-	for (index = 0; index < BCM2711_V3D_COUNTERS / 4U; index++) {
-		word = (uint32_t)sources[index * 4U] |
-		    (uint32_t)sources[index * 4U + 1U] << 8 |
-		    (uint32_t)sources[index * 4U + 2U] << 16 |
-		    (uint32_t)sources[index * 4U + 3U] << 24;
-		kern_mmio_write32(engine->core.mapped + 0x660 + index * 4U, word);
-	}
 }

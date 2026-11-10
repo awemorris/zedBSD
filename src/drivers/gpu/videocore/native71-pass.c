@@ -234,45 +234,6 @@ bcm2711_native_pass_encode(
 	return 0;
 }
 
-/*
- * Counts the tiles of a pass's rectangle that it renders: all of them, or
- * those in a supertile one of its tile boxes meets.
- *
- * The count is the cost report's.
- */
-uint32_t
-bcm2711_native_pass_tiles(
-	const struct bcm2711_native_pass *state)
-{
-	uint32_t group;
-	uint32_t count;
-	uint32_t x;
-	uint32_t y;
-	bool selected;
-
-	/* An inverted rectangle renders nothing measure would accept. */
-	if (state->first_x > state->last_x || state->first_y > state->last_y)
-		return 0;
-
-	/* A pass not narrowed renders its whole rectangle. */
-	if (state->box_count == 0U)
-		return (state->last_x - state->first_x + 1U) * (state->last_y - state->first_y + 1U);
-
-	/* Each tile of the rectangle whose group is rendered. */
-	group = supertile_group((state->width + 63U) / 64U, (state->height + 63U) / 64U);
-	count = 0;
-	for (y = state->first_y; y <= state->last_y; y++) {
-		for (x = state->first_x; x <= state->last_x; x++) {
-			selected = supertile_selected(state, group, x / group, y / group);
-			if (selected)
-				count++;
-		}
-	}
-
-	/* The tiles rendered. */
-	return count;
-}
-
 /* Establishes one nonempty, aligned complete native interval without wrapping the thirty-two-bit VA space. */
 static int
 prepare_span(

@@ -69,21 +69,6 @@ struct bcm2711_vulkan_native_draw {
 	struct bcm2711_native_storage *code[3];
 	/* All draws use the same immutable sixteen float (0,0,0,1) defaults. */
 	struct bcm2711_native_storage *defaults;
-	/* Preparation diagnostics include scheduler delay and never affect admission. */
-	uint64_t texture_ticks;
-	uint64_t copy_ticks;
-	uint64_t program_ticks;
-	uint64_t record_ticks;
-	/* How each new texture of the draw was obtained: reused or converted snapshot, mapped source, or other private copy. */
-	uint32_t snapshot_hits;
-	uint32_t snapshot_fills;
-	uint32_t snapshot_updates;
-	uint32_t mapped_textures;
-	uint32_t private_textures;
-	uint64_t mapped_bytes;
-	/* The largest texture the draw converted, as width << 16 | height, and how ('f', 'm' or 'p'). */
-	uint32_t largest_size;
-	char largest_kind;
 	uint64_t bytes;
 	uint32_t count;
 	uint32_t shader;

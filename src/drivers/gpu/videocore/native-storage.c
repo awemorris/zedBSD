@@ -6,7 +6,6 @@
  */
 
 /* Native upload owners separate logical callback completion, DMA retirement and final translation flush. */
-#include <kern/clock.h>
 #include <kern/dcache.h>
 #include <kern/kcrt.h>
 #include <kern/kmem.h>
@@ -30,7 +29,7 @@ static bool cache_put(struct bcm2711_v3d_space *space, struct bcm2711_v3d_view *
 static int storage_cleanable(const struct bcm2711_native_storage *storage);
 static int snapshot_fill(struct bcm2711_native_snapshot *snapshot, const void *raster, size_t raster_bytes);
 static int snapshot_narrow(struct bcm2711_native_snapshot *snapshot, const void *indices, size_t indices_bytes);
-static int snapshot_update(struct bcm2711_v3d_space *space, struct bcm2711_native_snapshot *snapshot, const void *raster, size_t raster_bytes, bool unit, bool *updated);
+static int snapshot_update(struct bcm2711_native_snapshot *snapshot, const void *raster, size_t raster_bytes, bool unit, bool *updated);
 static int snapshot_evict(struct bcm2711_v3d_space *space, uint64_t bytes, bool all);
 static int snapshot_release(struct bcm2711_v3d_space *space, struct bcm2711_native_snapshot *snapshot);
 static int snapshot_scrub(struct bcm2711_native_snapshot *snapshot);
@@ -68,7 +67,6 @@ bcm2711_native_storage_create_as(
 	struct bcm2711_buffer *buffer;
 	struct bcm2711_v3d_view *view;
 	uint64_t limit;
-	uint64_t started;
 	uint32_t physical_bits;
 	bool keep;
 	int error;
@@ -114,10 +112,9 @@ bcm2711_native_storage_create_as(
 	 * An idle cached view of the same size is reused with its mapping:
 	 * zeroed again, or as it is for a caller that writes every byte the
 	 * device may read or for a device-only use, or for an owned use when
-	 * the same session left it (counted apart).  The cache keeps no dirty
+	 * the same session left it.  The cache keeps no dirty
 	 * line, so a device-only view taken from it is already clean.
 	 */
-	started = clock_ticks();
 	view = cache_take(space, bytes, created->owner);
 	if (view != NULL) {
 		keep = fill == BCM2711_NATIVE_STORAGE_WRITTEN ||
@@ -127,11 +124,6 @@ bcm2711_native_storage_create_as(
 			kern_memset(view->buffer->address, 0, (size_t)view->bytes);
 		view->owner = 0;
 		view->buffer->bytes = bytes;
-		created->allocation_ticks = clock_ticks() - started;
-		if (keep)
-			bcm2711_buffer_kept(view->bytes);
-		else
-			bcm2711_buffer_zeroed(view->bytes, created->allocation_ticks);
 		created->stale = keep;
 		created->clean = created->device;
 		created->space = space;
@@ -144,18 +136,14 @@ bcm2711_native_storage_create_as(
 	}
 
 	/* Cached private storage has no exported user alias and is explicitly cleaned before device reads. */
-	started = clock_ticks();
 	error = bcm2711_buffer_create(bytes, limit, 4096U, &buffer);
-	created->allocation_ticks = clock_ticks() - started;
 	if (error != 0) {
 		kern_free(created);
 		return error;
 	}
 
 	/* Mapping acquires its own allocation hold before the temporary source reference is retired. */
-	started = clock_ticks();
 	error = bcm2711_v3d_memory_map(space, buffer, &view);
-	created->mapping_ticks = clock_ticks() - started;
 	bcm2711_buffer_release(buffer);
 	if (error != 0) {
 		kern_free(created);
@@ -180,7 +168,6 @@ bcm2711_native_storage_clean(
 	struct bcm2711_native_storage *storage)
 {
 	struct bcm2711_buffer *buffer;
-	uint64_t started;
 	int error;
 
 	/* Only a live, cached, whole private allocation can be written back. */
@@ -194,9 +181,7 @@ bcm2711_native_storage_clean(
 		return 0;
 
 	/* Cache maintenance completes CPU writes before the caller's later command publication barrier. */
-	started = clock_ticks();
 	kern_dcache_clean_range(buffer->address, (size_t)buffer->memory.size);
-	storage->clean_ticks += clock_ticks() - started;
 
 	/* A device-only storage stays clean from here: the CPU writes nothing more into it. */
 	if (storage->device)
@@ -216,7 +201,6 @@ bcm2711_native_storage_clean_range(
 	uint64_t bytes)
 {
 	struct bcm2711_buffer *buffer;
-	uint64_t started;
 	int error;
 
 	/* Only a live, cached, whole private allocation can be written back. */
@@ -230,9 +214,7 @@ bcm2711_native_storage_clean_range(
 		return EINVAL;
 
 	/* Cache maintenance completes the interval's CPU writes before the caller's later command publication barrier. */
-	started = clock_ticks();
 	kern_dcache_clean_range((uint8_t *)buffer->address + offset, (size_t)bytes);
-	storage->clean_ticks += clock_ticks() - started;
 
 	/* Succeeded: device reads of the interval see the CPU's writes. */
 	return 0;
@@ -555,7 +537,7 @@ bcm2711_native_snapshot_get_levels(
 			/* Converted four-byte pixels with a known small change are brought up to date in place. */
 			updated = false;
 			if (snapshot->valid && texel_bytes == 4U && levels == 1U) {
-				error = snapshot_update(space, snapshot, raster, raster_bytes, unit, &updated);
+				error = snapshot_update(snapshot, raster, raster_bytes, unit, &updated);
 				if (error != 0)
 					return error;
 			}
@@ -1033,7 +1015,6 @@ snapshot_scrub(
  */
 static int
 snapshot_update(
-	struct bcm2711_v3d_space *space,
 	struct bcm2711_native_snapshot *snapshot,
 	const void *raster,
 	size_t raster_bytes,
@@ -1116,7 +1097,6 @@ snapshot_update(
 	/* The pixels match the source at the generation read before the ring. */
 	snapshot->generation = generation;
 	snapshot->valid = true;
-	space->snapshot_updates++;
 	*updated = true;
 
 	/* Succeeded: the snapshot is current without a whole conversion. */

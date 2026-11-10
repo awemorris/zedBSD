@@ -99,8 +99,6 @@ bcm2711_shader_compile(
 	created = NULL;
 	if (optimized.instructions != NULL) {
 		error = compile_stage(&optimized, key, stage, diagnostic, &created);
-		if (error == 0)
-			created->optimized = 1;
 	} else {
 		error = compile_stage(ir, key, stage, diagnostic, &created);
 	}
@@ -576,14 +574,11 @@ bcm2711_shader_emit(
 		error = bcm2711_shader_schedule(compiler);
 		if (error == ENOMEM)
 			return error;
-		if (error == 0) {
-			compiler->binary->scheduled = 1;
+		if (error == 0)
 			return 0;
-		}
 	}
 
 	/* The source-order words keep every conservative delay. */
-	compiler->binary->scheduled = 0;
 	error = bcm2711_shader_emit_in_order(compiler);
 	if (error != 0)
 		return error;

@@ -6,7 +6,6 @@
  */
 
 /* Complete FIFO draw preparation owns cached GPU inputs without launching a native command list. */
-#include <kern/clock.h>
 #include <kern/dcache.h>
 #include <kern/kcrt.h>
 #include <kern/kmem.h>
@@ -84,7 +83,6 @@ static int prepare_textures(struct bcm2711_vulkan_native_draw *draw, const struc
 static int prepare_texture(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_descriptor *descriptor, uint64_t available, struct bcm2711_vulkan_native_binding *binding);
 static int texture_source(struct bcm2711_vulkan_resource *image, uint32_t plane, uint32_t swap, struct native_texture_source *source);
 static bool conversion_supported(const struct native_texture_source *source, uint32_t address);
-static uint64_t texture_area(uint32_t size);
 static int prepare_texture_image(struct bcm2711_vulkan_native_draw *draw, const struct native_texture_source *texture_source, const struct bcm2711_vulkan_sampler *source, uint64_t available, struct bcm2711_vulkan_native_binding *binding);
 static int prepare_conversion(const struct native_texture_source *source, uint32_t address, const struct bcm2711_native_storage *pixels, uint32_t bytes, uint32_t levels, const struct bcm2711_native_miptree *tree, struct bcm2711_v3d_tfu_job *tfu);
 static int prepare_meta_texture(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_meta_draw *meta, uint64_t available);
@@ -120,7 +118,6 @@ bcm2711_vulkan_native_draw_create(
 {
 	struct bcm2711_vulkan_native_draw *created;
 	struct bcm2711_native_shader shader;
-	uint64_t started;
 	int error;
 	int released;
 
@@ -169,24 +166,17 @@ bcm2711_vulkan_native_draw_create(
 	shader.vpm_bytes = ((space->native->hardware.core_ident[1] >> 28) & 15U) * 8192U;
 
 	/* Texture snapshots are made or reused within this pass after prior queue writes retire. */
-	started = clock_ticks();
 	error = prepare_textures(created, event, *available);
-	created->texture_ticks = clock_ticks() - started;
-	if (error == 0) {
-		/* Separates code/uniform publication from image conversion costs. */
-		started = clock_ticks();
+
+	/* Code and uniforms are published once the textures are in place. */
+	if (error == 0)
 		error = prepare_programs(created, event, *available, &shader);
-		created->program_ticks = clock_ticks() - started;
-	}
 
-	/* Measures vertex fetch and shader records independently of texture uploads. */
-	if (error == 0) {
-		started = clock_ticks();
+	/* Vertex fetch and the shader records follow. */
+	if (error == 0)
 		error = prepare_records(created, event, *available, &shader);
-		created->record_ticks = clock_ticks() - started;
-	}
 
-	/* Binning state is encoded only after all measured input stages succeed. */
+	/* Binning state is encoded only after all input stages succeed. */
 	if (error == 0)
 		error = bcm2711_vulkan_native_bin_prepare(event, created);
 
@@ -463,13 +453,10 @@ prepare_texture_image(
 	uint8_t *destination;
 	uint32_t address;
 	uint32_t bytes;
-	uint64_t started;
 	uint64_t fills;
-	uint64_t updates;
 	uint32_t levels;
 	uint32_t lod;
 	bool unit;
-	char kind;
 	int error;
 
 	/* Complete coherent logical raster storage is read only at execution, after previous GPU writes become visible. */
@@ -500,9 +487,7 @@ prepare_texture_image(
 		entry = &draw->textures[draw->texture_count];
 
 		/* A source no process maps reuses its converted snapshot until a device or kernel write changes it. */
-		started = clock_ticks();
 		fills = draw->space->snapshot_fills;
-		updates = draw->space->snapshot_updates;
 		entry->levels = levels;
 		error = bcm2711_native_snapshot_get_levels(
 			draw->space,
@@ -518,7 +503,6 @@ prepare_texture_image(
 			levels,
 			bytes,
 			&entry->snapshot);
-		draw->copy_ticks += clock_ticks() - started;
 		if (error != 0 && error != ENOTSUP)
 			return error;
 		if (error == 0)
@@ -536,30 +520,6 @@ prepare_texture_image(
 			}
 			entry->convert = true;
 		}
-
-		/* Diagnostics count how the texture was obtained and keep the largest conversion. */
-		kind = 0;
-		if (error == 0 && draw->space->snapshot_updates != updates) {
-			draw->snapshot_updates++;
-		} else if (error == 0 && draw->space->snapshot_fills == fills) {
-			draw->snapshot_hits++;
-		} else if (error == 0) {
-			draw->snapshot_fills++;
-			kind = 'f';
-		} else if (source_view->buffer->host_mapped) {
-			draw->mapped_textures++;
-			draw->mapped_bytes += texture_source->bytes;
-			kind = 'm';
-		} else {
-			draw->private_textures++;
-			kind = 'p';
-		}
-
-		/* Keeps the largest texture obtained so, for the cost report. */
-		if (kind != 0 && (uint64_t)texture_source->width * texture_source->height > texture_area(draw->largest_size)) {
-			draw->largest_size = texture_source->width << 16 | texture_source->height;
-			draw->largest_kind = kind;
-		}
 	}
 
 	/* A private conversion serves a source that may change behind the device's back. */
@@ -573,7 +533,6 @@ prepare_texture_image(
 		 * The texture formatting unit converts at GPU speed when the pass
 		 * runs; the CPU reads the uncached raster only when it cannot.
 		 */
-		started = clock_ticks();
 		error = ENOTSUP;
 		if (draw->space->native->hardware.tfu_uif_ready)
 			error = prepare_conversion(texture_source, address, pixels, bytes, levels, &tree, &entry->tfu);
@@ -590,7 +549,6 @@ prepare_texture_image(
 				pixels->view->buffer->address,
 				(size_t)pixels->bytes);
 		}
-		draw->copy_ticks += clock_ticks() - started;
 		if (error != 0)
 			return error;
 
@@ -1730,15 +1688,6 @@ find_texture(
 
 	/* No retained snapshot exists in this pass; the caller must convert the current raster. */
 	return NULL;
-}
-
-/* The area of a texture size kept as width << 16 | height. */
-static uint64_t
-texture_area(
-	uint32_t size)
-{
-	/* Width and height are each sixteen bits of the packed size. */
-	return (uint64_t)(size >> 16) * (size & 0xffffU);
 }
 
 /*

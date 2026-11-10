@@ -91,8 +91,7 @@ bcm2711_vulkan_object_publish(
 	created->bucket_next = session->buckets[bucket];
 	session->buckets[bucket] = created;
 
-	/* The registry counts the published identity and its live payload. */
-	session->object_count++;
+	/* The registry counts the live payload. */
 	session->live_objects++;
 	*object = created;
 
@@ -219,7 +218,6 @@ bcm2711_vulkan_object_remove(
 			object->next = NULL;
 			object->link = NULL;
 			object->published = false;
-			session->object_count--;
 			error = bcm2711_vulkan_object_release(object);
 			if (error != 0)
 				return error;
@@ -254,7 +252,6 @@ bcm2711_vulkan_objects_close(
 	session->closing = true;
 	object = session->objects;
 	session->objects = NULL;
-	session->object_count = 0;
 	retirement_error = 0;
 
 	/* The index empties with the list. */

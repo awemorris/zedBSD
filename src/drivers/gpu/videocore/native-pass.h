@@ -93,7 +93,6 @@ struct bcm2711_native_pass_image {
 
 /* Draw sequences must already occupy bin.bytes + PREFIX; this operation preserves those complete numerical sequences. */
 int bcm2711_native_pass_measure(const struct bcm2711_native_pass *state, uint32_t draws, struct bcm2711_native_pass_sizes *sizes);
-uint32_t bcm2711_native_pass_tiles(const struct bcm2711_native_pass *state);
 int bcm2711_native_pass_encode(const struct bcm2711_native_pass *state, uint32_t draws, struct bcm2711_native_pass_image *bin, struct bcm2711_native_pass_image *render, struct bcm2711_native_pass_image *tile);
 
 #endif

@@ -34,14 +34,12 @@ struct bcm2711_vulkan_session {
 	struct bcm2711_vulkan_object *objects;
 	/* The same identities by hashed identity, for the lookups each decoded command makes. */
 	struct bcm2711_vulkan_object *buckets[BCM2711_VULKAN_OBJECT_BUCKETS];
-	uint32_t object_count;
 	uint32_t live_objects;
 	bool closing;
 	/* A legacy synchronous frame is executing: it cannot accept a QueueSubmit. */
 	bool synchronous;
-	/* The opcodes of the last command the decoder refused and the last it decoded, for diagnostics. */
+	/* The opcode of the last command the decoder refused, for the refusal line. */
 	uint32_t failed_opcode;
-	uint32_t last_opcode;
 	struct i915_wire_arena arena;
 #if CONFIG_DRIVER_RPI4_GPU || CONFIG_DRIVER_RPI5_GPU
 	/* The capset promised H.264 video decode; latched for the session's life. */

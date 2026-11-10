@@ -117,12 +117,11 @@ execute_command(
 	uint32_t requested;
 	int error;
 
-	/* All commands have exactly one opcode word and one Boolean reply-request word; diagnostics remember the opcode. */
+	/* All commands have exactly one opcode word and one Boolean reply-request word. */
 	opcode = drv_i915_wire_read_u32(reader);
 	requested = drv_i915_wire_read_u32(reader);
 	if (reader->error != 0 || requested > 1)
 		return EINVAL;
-	stream->session->last_opcode = opcode;
 
 	/* Selector, seek and external-stream wrappers never produce a Vulkan result reply themselves. */
 	if (opcode == GPU_OP_SET_REPLY_STREAM ||

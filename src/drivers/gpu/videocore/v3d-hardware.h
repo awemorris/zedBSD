@@ -22,7 +22,10 @@ struct bcm2711_v3d_events {
 	uint32_t core;
 	uint32_t hub;
 
-	/* Arrival time diagnoses completion-to-worker delay; it never controls retirement. */
+	/*
+	 * When the 4.2 handler latched the events, for the worker's delay
+	 * warning; it never controls retirement.
+	 */
 	uint64_t arrival_tick;
 	uint32_t fault_client;
 	uint32_t fault_address;
@@ -47,8 +50,6 @@ struct bcm2711_v3d_hardware {
 	uint32_t physical_bits;
 	uint32_t virtual_bits;
 	uint64_t resets;
-	/* Serialized maintenance diagnostics count actual yielding waits, never IRQ work. */
-	uint64_t maintenance_yields;
 
 	/*
 	 * The time the jobs ran from launch to retirement, in nanoseconds,
@@ -59,8 +60,6 @@ struct bcm2711_v3d_hardware {
 	volatile uint64_t busy_ns;
 	/* Textures are converted by the texture formatting unit; without it (v3d.tfu=0) they use the CPU. */
 	bool tfu_uif_ready;
-	/* The performance counters have their sources and run (cleared by a reset). */
-	bool counters_ready;
 	bool initialized;
 	bool ready;
 	bool mmu_published;
