@@ -52,16 +52,6 @@
 /* The 4-byte PTE slots that cover V3D's complete 4 GiB virtual space. */
 #define BCM2711_V3D_PAGE_ENTRIES		1048576U
 
-/* The complete command-list byte counts of the initial 1x1 noop job. */
-#define BCM2711_V3D_NOOP_BIN_BYTES	14U
-#define BCM2711_V3D_NOOP_RENDER_BYTES	56U
-#define BCM2711_V3D_NOOP_TILE_BYTES	19U
-
-/* One tile's rounded allocation plus 8 KiB and 512 KiB overflow headroom. */
-#define BCM2711_V3D_NOOP_POOL_BYTES	0x83000U
-
-/* One tile's state array, allocated separately by the future job owner. */
-#define BCM2711_V3D_NOOP_STATE_BYTES	256U
 
 /*
  * One plane of a display list, as the readout decoded it.
@@ -138,33 +128,6 @@ struct bcm2711_v3d_cl {
 	uint32_t capacity;
 	uint32_t address;
 	uint32_t used;
-};
-
-/*
- * The three command buffers and tile-list pool of one shader-free noop job.
- *
- * The caller supplies distinct CPU storage and GPU mappings.  The pool is
- * GPU-writable and must not overlap a command buffer.  Only its mapped VA
- * is used here; allocation, tile state, cache and submission belong to the
- * job owner.  The command buffers remain alive until both queues finish.
- */
-struct bcm2711_v3d_noop {
-	struct bcm2711_v3d_cl bin;
-	struct bcm2711_v3d_cl render;
-	struct bcm2711_v3d_cl tile;
-	uint32_t pool_address;
-	uint32_t pool_bytes;
-};
-
-/* A single unscaled tile clears a caller-owned RGBA8 raster without shaders. */
-struct bcm2711_v3d_clear {
-	struct bcm2711_v3d_noop lists;
-	uint32_t width;
-	uint32_t height;
-	uint32_t target_address;
-	uint32_t target_bytes;
-	uint32_t stride;
-	uint32_t color;
 };
 
 /*
@@ -318,10 +281,6 @@ bool bcm2711_list_screen_matches(const struct bcm2711_list *list, const struct d
 /* Software-only edits of a caller-owned V3D page table (mmu.c). */
 int bcm2711_v3d_pages_map(uint32_t *table, uint32_t address, uint64_t physical, uint64_t bytes);
 int bcm2711_v3d_pages_unmap(uint32_t *table, uint32_t address, uint64_t bytes);
-
-/* Command-list generation without allocation or hardware access (cl.c). */
-int bcm2711_v3d_noop_prepare(struct bcm2711_v3d_noop *job);
-int bcm2711_v3d_clear_prepare(struct bcm2711_v3d_clear *job);
 
 /* The bring-up steps of the two parts (display.c, v3d.c and their neighbours). */
 int bcm2711_display_discover(const struct drv_fdt *fdt, struct bcm2711_display *display);

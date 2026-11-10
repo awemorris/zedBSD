@@ -740,7 +740,6 @@ KERN_SOURCES += \
 	src/drivers/gpu/videocore/mmu.c \
 	src/drivers/gpu/videocore/fdt-util.c \
 	src/drivers/gpu/videocore/firmware.c \
-	src/drivers/gpu/videocore/cl.c \
 	src/drivers/gpu/videocore/compiler/qpu.c \
 	src/drivers/gpu/videocore/buffer.c \
 	src/drivers/gpu/videocore/share.c \
@@ -822,7 +821,6 @@ KERN_SOURCES += \
 	src/drivers/gpu/videocore/v3d71-firmware.c \
 	src/drivers/gpu/videocore/v3d71-hardware.c \
 	src/drivers/gpu/videocore/v3d71-job.c \
-	src/drivers/gpu/videocore/v3d71-cl.c \
 	src/drivers/gpu/videocore/v3d-memory.c \
 	src/drivers/gpu/videocore/stage.c \
 	src/drivers/gpu/videocore/fdt-util.c \

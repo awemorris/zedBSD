@@ -133,18 +133,4 @@ int bcm2712_v3d_sequencer_reset(struct bcm2712_v3d *v3d);
 /* The 7.1 interrupt service of the hub line (v3d71-hardware.c). */
 bool bcm2712_v3d_hub_service(void *owner);
 
-/* The 7.1 command-list images of the self-test (v3d71-cl.c). */
-#define BCM2712_V3D_NOOP_BIN_BYTES	14U
-#define BCM2712_V3D_NOOP_RENDER_BYTES	56U
-#define BCM2712_V3D_NOOP_TILE_BYTES	19U
-#define BCM2712_V3D_CLEAR_RENDER_BYTES	96U
-int bcm2712_v3d_noop_prepare(struct bcm2711_v3d_noop *job);
-int bcm2712_v3d_clear_prepare(struct bcm2711_v3d_clear *job);
-
-/* The QPU words of the self-test's compute shaders (v3d71-cl.c). */
-#define BCM2712_V3D_EMPTY_SHADER_WORDS	3U
-#define BCM2712_V3D_STORE_SHADER_WORDS	8U
-extern const uint64_t bcm2712_v3d_empty_shader[BCM2712_V3D_EMPTY_SHADER_WORDS];
-extern const uint64_t bcm2712_v3d_store_shader[BCM2712_V3D_STORE_SHADER_WORDS];
-
 #endif
