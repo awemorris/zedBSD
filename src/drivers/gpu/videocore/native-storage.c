@@ -344,11 +344,9 @@ bcm2711_native_storage_release(
 	owned->view->owner = owned->owner;
 	cached = cache_put(space, owned->view, owned->clean);
 	if (cached) {
-		space->native->hardware.perf.views_cached++;
 		kern_free(owned);
 		return 0;
 	}
-	space->native->hardware.perf.views_unmapped++;
 
 	/* The native space owns a failed final unmap/flush; callers must never retry a consumed mapped reference. */
 	error = bcm2711_v3d_memory_release(space, owned->view);

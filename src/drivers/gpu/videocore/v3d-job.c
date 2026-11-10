@@ -86,33 +86,16 @@ bcm2711_v3d_job_run(
 	/* The time the job ran, ended or failed, counts in the engine's busy time. */
 	bcm2711_v3d_busy_add(engine, started);
 
-	/* Record the failed native queues before masking or reset discards their fault state. */
+	/* Records the failed job before masking or reset discards its fault state. */
 	if (error != 0) {
-		bcm2711_stage_mark(
-			BCM2711_FAMILY_V3D,
-			"job failed kind=%u error=%d retired=%u irq=%x/%x fault=%x:%x",
-			(unsigned)job->kind,
-			error,
-			(unsigned)result->retired,
-			result->core_events,
-			result->hub_events,
-			result->fault_client,
-			result->fault_address);
-		bcm2711_stage_mark(
-			BCM2711_FAMILY_V3D,
-			"job queues bin=%x/%x render=%x/%x counters=%u/%u",
-			kern_mmio_read32(engine->core.mapped + 0x110),
-			kern_mmio_read32(engine->core.mapped + 0x108),
-			kern_mmio_read32(engine->core.mapped + 0x114),
-			kern_mmio_read32(engine->core.mapped + 0x10c),
-			kern_mmio_read32(engine->core.mapped + 0x134),
-			kern_mmio_read32(engine->core.mapped + 0x138));
-		bcm2711_stage_mark(
-			BCM2711_FAMILY_V3D,
-			"job status bin=%x render=%x pipeline=%x",
-			kern_mmio_read32(engine->core.mapped + 0x100),
-			kern_mmio_read32(engine->core.mapped + 0x104),
-			kern_mmio_read32(engine->core.mapped + 0x130));
+		kern_logf("v3d: job failed kind=%u error=%d retired=%u irq=%x/%x fault=%x:%x\n",
+			  (unsigned)job->kind,
+			  error,
+			  (unsigned)result->retired,
+			  result->core_events,
+			  result->hub_events,
+			  result->fault_client,
+			  result->fault_address);
 	}
 
 	/* Only success or a refusal before the first launch proves DMA retirement. */

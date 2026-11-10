@@ -730,8 +730,6 @@ KERN_SOURCES += \
 	src/drivers/gpu/videocore/v3d-power.c \
 	src/drivers/gpu/videocore/v3d-hardware.c \
 	src/drivers/gpu/videocore/v3d-job.c \
-	src/drivers/gpu/videocore/v3d-diagnostic.c \
-	src/drivers/gpu/videocore/v3d-tfu-probe.c \
 	src/drivers/gpu/videocore/v3d-memory.c \
 	src/drivers/gpu/videocore/attach.c \
 	src/drivers/gpu/videocore/stage.c \
@@ -821,7 +819,6 @@ KERN_SOURCES += \
 	src/drivers/gpu/videocore/v3d71-hardware.c \
 	src/drivers/gpu/videocore/v3d71-job.c \
 	src/drivers/gpu/videocore/v3d71-cl.c \
-	src/drivers/gpu/videocore/v3d71-diagnostic.c \
 	src/drivers/gpu/videocore/v3d-memory.c \
 	src/drivers/gpu/videocore/stage.c \
 	src/drivers/gpu/videocore/fdt-util.c \
