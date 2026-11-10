@@ -130,10 +130,7 @@ struct bcm2711_flip_change {
 /*
  * One SRAM list slot: used while the hardware may read the list (the adopted
  * list and the published ones not yet seen adopted), with the state number
- * it was made from and the images it names.  window_x and window_y place
- * the first overlay (window_shown) and cursor_x, cursor_y the cursor
- * (cursor_shown), for the count of lists that move both together.
- * records[p] is the number of the record that last changed plane p.
+ * it was made from and the images it names.
  */
 struct bcm2711_flip_slot {
 	bool used;
@@ -141,84 +138,12 @@ struct bcm2711_flip_slot {
 	bool has_frame;
 	struct drv_bcm2711_boot_screen frame;
 	uint32_t cursor_image;
-	bool window_shown;
-	uint32_t window_x;
-	uint32_t window_y;
-	bool cursor_shown;
-	int32_t cursor_x;
-	int32_t cursor_y;
-	uint64_t records[BCM2711_FLIP_PLANES];
-};
-
-/*
- * One overlay record's times (v3d.perf=1 only): its plane and plane serial,
- * the state number it got, when it was recorded and when a list showing it
- * was adopted (zero until then, and for good when a later record replaced
- * it before any adoption), in scheduler ticks.
- */
-#define BCM2711_FLIP_TIMES 128U
-struct bcm2711_flip_time {
-	uint32_t plane;
-	uint64_t plane_serial;
-	uint64_t state_serial;
-	uint64_t recorded;
-	uint64_t adopted;
 };
 
 /* A borrowed image replaced by the record numbered serial; it goes once that record's list is adopted. */
 struct bcm2711_flip_retiring {
 	struct bcm2711_buffer *hold;
 	uint64_t serial;
-};
-
-/*
- * The intervals between events of one kind in a cadence window (v3d.perf=1
- * only): the time of the last event, the events of the window, and the
- * first intervals of the window in microseconds.
- */
-#define BCM2711_FLIP_CADENCE_SAMPLES	256U
-struct bcm2711_flip_cadence {
-	uint64_t last;
-	uint32_t count;
-	uint32_t stored;
-	uint32_t intervals[BCM2711_FLIP_CADENCE_SAMPLES];
-};
-
-/* The kinds of display event whose cadence is measured: cursor sets, cursor moves, adopted flips and adopted lists that moved the first overlay. */
-#define BCM2711_FLIP_CADENCE_SET	0U
-#define BCM2711_FLIP_CADENCE_MOVE	1U
-#define BCM2711_FLIP_CADENCE_FLIP	2U
-#define BCM2711_FLIP_CADENCE_OVERLAY	3U
-#define BCM2711_FLIP_CADENCE_KINDS	4U
-
-/* Whether the cadence is measured: the boot line is read at the first event. */
-#define BCM2711_FLIP_CADENCE_UNREAD	0U
-#define BCM2711_FLIP_CADENCE_OFF	1U
-#define BCM2711_FLIP_CADENCE_ON		2U
-
-/*
- * The flip report's counts of one window (v3d.perf=1 only), kept under the
- * guard: the stage times of adopted primary flips in ticks, the records of
- * each plane, the lists written, the replacements of a list the hardware had
- * not yet taken, the changes left for the next adoption because two lists
- * were already out, and the underruns.
- */
-struct bcm2711_flip_perf {
-	uint64_t start;
-	uint64_t flips;
-	uint64_t clean;
-	uint64_t raise;
-	uint64_t wait;
-	uint64_t primary_records;
-	uint64_t cursor_records;
-	uint64_t lists;
-	uint64_t replaced;
-	uint64_t coalesced;
-	uint64_t underruns;
-	uint64_t overlay_records;
-	uint64_t dropped;
-	uint64_t pair_window;
-	uint64_t pair_both;
 };
 
 /*
@@ -250,13 +175,11 @@ struct bcm2711_flip_state {
 
 	/*
 	 * plane_serials[p] is the last serial a commit recorded for plane p (zero
-	 * at a lease's start); plane_records[p] the state number of the record
-	 * that last changed plane p; planes_generation counts primary and
+	 * at a lease's start); planes_generation counts primary and
 	 * overlay records, so a commit can tell its checked view is still the
 	 * state (cursor records do not move it).
 	 */
 	uint64_t plane_serials[BCM2711_FLIP_PLANES];
-	uint64_t plane_records[BCM2711_FLIP_PLANES];
 	uint64_t planes_generation;
 	uint64_t state_serial;
 	uint64_t list_serial;
@@ -273,38 +196,6 @@ struct bcm2711_flip_state {
 	uint64_t adopted_ticks;
 	uint32_t core_hz;
 	int clock_error;
-	struct bcm2711_flip_perf perf;
-
-	/*
-	 * The ring of overlay record times and the next entry to write, and the
-	 * first overlay's and the cursor's places in the last adopted list.
-	 */
-	struct bcm2711_flip_time times[BCM2711_FLIP_TIMES];
-	uint32_t times_next;
-	bool last_window_shown;
-	uint32_t last_window_x;
-	uint32_t last_window_y;
-	bool last_cursor_shown;
-	int32_t last_cursor_x;
-	int32_t last_cursor_y;
-
-	/*
-	 * The cursor images set in the window and those that needed their rows
-	 * copied (the others were shown again unchanged); added atomically by
-	 * the display device under its plane mutex, read and cleared by the report.
-	 */
-	uint64_t perf_cursor_sets;
-	uint64_t perf_cursor_copies;
-
-	/*
-	 * The cadence of display events, kept under guard; reporting
-	 * says one caller is printing the copied window, so no other starts.
-	 */
-	unsigned cadence_state;
-	uint64_t cadence_start;
-	bool cadence_reporting;
-	struct bcm2711_flip_cadence cadence[BCM2711_FLIP_CADENCE_KINDS];
-	bool perf_reporting;
 };
 
 /* A caller-owned copy of the state's progress and of what the lists name. */
@@ -333,7 +224,7 @@ struct bcm2711_display;
 /* Initialization precedes IRQ publication; it must never reset a live owner. */
 void bcm2711_display_flip_init(struct bcm2711_display *display);
 
-/* Attachment requires a successful R0 and sole ownership of HVS channel zero. */
+/* Attachment requires a successful initial scanout and sole ownership of HVS channel zero. */
 int bcm2711_display_flip_attach(struct bcm2711_display *display);
 
 /* Registration unwind may detach only at the confirmed, unheld console list. */
@@ -394,19 +285,6 @@ int bcm2711_display_flip_compose(struct bcm2711_display *display, const struct d
  * bcm2711_display_flip_cursor_named says it is named.
  */
 int bcm2711_display_flip_cursor(struct bcm2711_display *display, const struct bcm2711_flip_owner *owner, const struct bcm2711_flip_cursor *cursor);
-
-/* Counts one cursor image set for the flip report, copied or shown again unchanged. */
-void bcm2711_display_flip_count_cursor(struct bcm2711_display *display, bool copied);
-
-/*
- * Notes the time of one display event of a cadence kind, and prints the
- * cadence window every two seconds; nothing without v3d.perf=1.  The
- * caller holds no spinlock.
- */
-void bcm2711_display_flip_note(struct bcm2711_display *display, unsigned kind);
-
-/* Adds an event (an adopted primary flip with its stage times, or a commit) to the flip report, printing a full window. */
-void bcm2711_display_flip_report(struct bcm2711_display *display, bool flip, uint64_t clean, uint64_t raise, uint64_t wait);
 
 /* Tells whether a list the hardware may read or the recorded cursor names a cursor image. */
 bool bcm2711_display_flip_cursor_named(struct bcm2711_display *display, uint32_t physical);

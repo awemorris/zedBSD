@@ -6,9 +6,8 @@
  */
 
 /*
- * The V3D 7.1 engine's identification (stage V2), page table (V3) and
- * interrupts (V4), and the cache, MMU and reset services the job runner
- * uses.
+ * The V3D 7.1 engine's identification, page table and interrupts, and the
+ * cache, MMU and reset services the job runner uses.
  *
  * The functions keep the names and contracts of the Pi 4's v3d-hardware.c,
  * which a Pi 5 kernel does not build: a single worker owns MMU and cache
@@ -28,6 +27,7 @@
 #include <kern/device-io.h>
 #include <kern/irq.h>
 #include <kern/kcrt.h>
+#include <kern/klog.h>
 #include <kern/sched.h>
 #include <uapi/errno.h>
 
@@ -104,8 +104,8 @@ static bool core_service(void *owner);
 /*
  * Starts the MMU and serviced interrupts after the engine is powered.
  *
- * Runs stages V2 (identification), V3 (page table and MMU) and V4
- * (interrupts).  The persistent engine owns allocations and IRQ arguments
+ * Identifies the engine, then starts the page table and the MMU, then the
+ * interrupts.  The persistent engine owns allocations and IRQ arguments
  * for the kernel's lifetime.  Any refusal after MMU publication retains the
  * table and scratch references.
  */
@@ -115,7 +115,6 @@ bcm2711_v3d_hardware_start(
 {
 	struct bcm2712_v3d *v3d;
 	struct bcm2711_v3d_hardware *hardware;
-	bool allowed;
 	int error;
 
 	/* No engine register is touched before the power-up finished. */
@@ -138,18 +137,12 @@ bcm2711_v3d_hardware_start(
 	v3d->hub_irq.service = bcm2712_v3d_hub_service;
 
 	/* Identification is the first read of the powered engine. */
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V2");
-	if (!allowed)
-		return ECANCELED;
 	error = identify(v3d);
 	(void)drv_rpi5_serror_check("v3d: identifying the engine");
 	if (error != 0)
 		return error;
 
 	/* Sets the whole-cache L2T range and masks every source before the table goes in. */
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V3");
-	if (!allowed)
-		return ECANCELED;
 	kern_mmio_write32(engine->core.mapped + CORE_L2TFLSTA, 0);
 	kern_mmio_write32(engine->core.mapped + CORE_L2TFLEND, UINT32_MAX);
 	prepare_sources(engine);
@@ -163,17 +156,8 @@ bcm2711_v3d_hardware_start(
 		record_failure(engine, error);
 		return error;
 	}
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V3 MMU ctl %08x table %llx scratch %llx",
-		kern_mmio_read32(engine->hub.mapped + HUB_MMU_CTL),
-		(unsigned long long)hardware->pages->memory.paddr,
-		(unsigned long long)hardware->scratch->memory.paddr);
 
 	/* All callbacks, source masks and MMU translations exist before GIC delivery. */
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V4");
-	if (!allowed)
-		return ECANCELED;
 	error = open_sources(v3d);
 	if (error != 0) {
 		record_failure(engine, error);
@@ -182,13 +166,6 @@ bcm2711_v3d_hardware_start(
 
 	/* Publishes worker admission only after serviced source masks were confirmed. */
 	hardware->ready = true;
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V4 IRQ hub %d core %d open, pending hub %x core %x",
-		v3d->hub_irq.irq,
-		engine->irq.irq,
-		kern_mmio_read32(engine->hub.mapped + HUB_INT_STS),
-		kern_mmio_read32(engine->core.mapped + CORE_INT_STS));
 
 	/* Succeeded: the worker can now map resources and run its first job. */
 	return 0;
@@ -316,7 +293,7 @@ bcm2711_v3d_hardware_reset(
 	error_status = 0;
 	if (engine->power.ready)
 		error_status = kern_mmio_read32(engine->core.mapped + 0xf20U);
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "reset: error status %08x", error_status);
+	kern_logf("v3d: reset, error status %08x\n", error_status);
 
 	/* Recovery must return the same engine, not a newly assumed register layout. */
 	kern_memcpy(old_hub, hardware->hub_ident, sizeof(old_hub));
@@ -632,42 +609,21 @@ identify(
 	hardware->physical_bits = 30U + ((widths >> 8) & 15U);
 	hardware->virtual_bits = 30U + ((widths >> 4) & 15U);
 
-	/* Shows everything read, before any refusal. */
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V2 hub %08x %08x %08x %08x",
-		hardware->hub_ident[0],
-		hardware->hub_ident[1],
-		hardware->hub_ident[2],
-		hardware->hub_ident[3]);
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V2 core %08x %08x %08x",
-		hardware->core_ident[0],
-		hardware->core_ident[1],
-		hardware->core_ident[2]);
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V2 version %u.%u rev %u compat %u cores %u QPUs %u VPM %u KiB PA %u VA %u",
-		v3d->version / 10U,
-		v3d->version % 10U,
-		v3d->revision,
-		v3d->compat_revision,
-		cores,
-		v3d->qpus,
-		v3d->vpm_bytes / 1024U,
-		hardware->physical_bits,
-		hardware->virtual_bits);
-
 	/* Refuses anything but a single-core 7.1 with an MMU. */
-	if (v3d->version != 71U || cores != 1U)
+	if (v3d->version != 71U || cores != 1U) {
+		kern_logf("v3d: unsupported engine %u.%u with %u cores\n", v3d->version / 10U, v3d->version % 10U, cores);
 		return ENOTSUP;
-	if ((hardware->hub_ident[2] & 0x100U) == 0)
+	}
+	if ((hardware->hub_ident[2] & 0x100U) == 0) {
+		kern_logf("v3d: engine has no MMU\n");
 		return ENOTSUP;
+	}
 
 	/* Requires the 32-bit GPU addresses the page table covers. */
-	if (hardware->physical_bits < 32U || hardware->virtual_bits < 32U)
+	if (hardware->physical_bits < 32U || hardware->virtual_bits < 32U) {
+		kern_logf("v3d: MMU address widths PA %u VA %u too narrow\n", hardware->physical_bits, hardware->virtual_bits);
 		return ENOTSUP;
+	}
 
 	/* Revision 10 and later take the draw-index form of the shader state record. */
 	bcm2712_v3d_draw_index_record = false;
@@ -898,7 +854,7 @@ open_sources(
 		kern_mmio_write32(engine->core.mapped + CORE_INT_MSK_SET, UINT32_MAX);
 		kern_mmio_write32(engine->hub.mapped + HUB_INT_MSK_SET, UINT32_MAX);
 		spin_unlock_irqrestore(&engine->hardware.guard, enabled);
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V4 masks did not open (core %08x hub %08x)", core_mask, hub_mask);
+		kern_logf("v3d: interrupt masks did not open (core %08x hub %08x)\n", core_mask, hub_mask);
 		return EIO;
 	}
 

@@ -63,7 +63,6 @@ static int dispose_command(struct bcm2711_render_device *controller, void *paylo
 static int runtime_ready(struct bcm2711_render_session *session);
 static bool runtime_uncertain(struct bcm2711_render_device *controller);
 static void capset_word(uint8_t *data, uint32_t offset, uint32_t word);
-static void runtime_decode_timed(struct bcm2711_v3d_perf *perf, const struct bcm2711_vulkan_session *vulkan, uint64_t counts, uint64_t frequency);
 
 /*
  * Binds complete transport, capability and supervised-job operations before node registration.
@@ -231,9 +230,6 @@ runtime_submit(
 {
 	struct bcm2711_render_session *session;
 	struct runtime_command *command;
-	struct bcm2711_v3d_perf *perf;
-	uint64_t started;
-	uint64_t waited;
 	int error;
 
 	/* Refused callback arguments never transfer a completion or retain borrowed command bytes. */
@@ -274,16 +270,7 @@ runtime_submit(
 		kern_memcpy(command->wire, wire, bytes);
 
 	/* Namespace ownership and ordinary resource changes remain mutually exclusive with this callback. */
-	started = clock_ticks();
 	mutex_lock(&session->device->mutex);
-
-	/* Diagnostic: how long this submit waited for the controller, which the worker holds while it executes. */
-	perf = &session->device->space.native->hardware.perf;
-	waited = clock_ticks() - started;
-	perf->submit_locks++;
-	perf->submit_lock_ticks += waited;
-	if (waited > perf->submit_lock_max)
-		perf->submit_lock_max = waited;
 
 	/* Callback admission and namespace publication cannot interleave with close or typed owner destruction. */
 	error = runtime_ready(session);
@@ -329,15 +316,7 @@ execute_command(
 	bool *retired)
 {
 	struct runtime_command *command;
-	struct bcm2711_v3d_perf *perf;
-	uint64_t started;
-	uint64_t held;
-	uint64_t started_counts;
-	uint64_t finished_counts;
-	uint64_t frequency;
 	uint32_t opcode;
-	bool started_timed;
-	bool finished_timed;
 	bool uncertain;
 	bool allowed;
 	int error;
@@ -349,31 +328,8 @@ execute_command(
 	opcode = 0;
 	if (error == 0 && command->bytes != 0) {
 		session->vulkan->failed_opcode = 0;
-		session->vulkan->longest_opcode = 0;
-		session->vulkan->longest_ticks = 0;
-		session->vulkan->command_count = 0;
-		started = clock_ticks();
-		started_timed = kern_rtc_read_counter(&started_counts, &frequency);
 		error = bcm2711_vulkan_stream_execute(session->vulkan, command->wire, command->bytes, bcm2711_vulkan_dispatch);
-		finished_timed = kern_rtc_read_counter(&finished_counts, &frequency);
-		held = clock_ticks() - started;
 		opcode = session->vulkan->failed_opcode;
-
-		/* Diagnostic: the longest decode under the controller mutex and its command count; apart, the longest single command. */
-		perf = &controller->space.native->hardware.perf;
-		if (held > perf->decode_hold_max) {
-			perf->decode_hold_max = held;
-			perf->decode_hold_opcode = session->vulkan->longest_opcode;
-			perf->decode_hold_commands = session->vulkan->command_count;
-		}
-		if (session->vulkan->longest_ticks > perf->decode_command_max) {
-			perf->decode_command_max = session->vulkan->longest_ticks;
-			perf->decode_command_opcode = session->vulkan->longest_opcode;
-		}
-
-		/* Diagnostic: the same on the fine counter, and the identities the session held, for the per-command cost. */
-		if (started_timed && finished_timed)
-			runtime_decode_timed(perf, session->vulkan, finished_counts - started_counts, frequency);
 	}
 
 	/* Names the refused command (a busy command buffer at Begin or End, a malformed stream) in the bounded log. */
@@ -489,29 +445,4 @@ capset_word(
 
 	/* Succeeded: one bounded known field has its stable wire representation. */
 	return;
-}
-
-/* Adds one decoded request's counter time and commands to the window's decode report. */
-static void
-runtime_decode_timed(
-	struct bcm2711_v3d_perf *perf,
-	const struct bcm2711_vulkan_session *vulkan,
-	uint64_t counts,
-	uint64_t frequency)
-{
-	/* The window's sums give the average cost of one command. */
-	perf->decode_requests++;
-	perf->decode_commands += vulkan->command_count;
-	perf->decode_counts += counts;
-	perf->decode_frequency = frequency;
-
-	/* The longest request, with how many commands it carried. */
-	if (counts > perf->decode_counts_max) {
-		perf->decode_counts_max = counts;
-		perf->decode_counts_max_commands = vulkan->command_count;
-	}
-
-	/* How many identities each lookup chose among. */
-	if (vulkan->object_count > perf->decode_objects_max)
-		perf->decode_objects_max = vulkan->object_count;
 }

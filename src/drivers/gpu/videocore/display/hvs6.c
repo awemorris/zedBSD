@@ -6,11 +6,9 @@
  */
 
 /*
- * The BCM2712's HVS6 display: discovery (P0), the readout of what the
- * firmware shows (P1), the takeover of the firmware's display list (R0),
- * the pixel valve's vertical blank (R1) and a moving overlay plane flipped
- * through the driver's own lists (R2).  R2 is a test picture; the
- * attachment runs it only for the self-test (rpi4gpu.selftest=1).
+ * The BCM2712's HVS6 display: discovery, the readout of what the firmware
+ * shows, the takeover of the firmware's display list, the measurement of the
+ * pixel valve's vertical blank, and the publication of the display device.
  *
  * The firmware keeps the mode: the driver writes neither the compositor's
  * control, output buffers and colour conversion nor the pixel valves'
@@ -26,9 +24,7 @@
  * 1090-1096 (the RGBA8888 format and the ARGB order); vc4_plane.c lines
  * 816-831 and 978-1055 (the unified pixel memory), 1187-1201 and
  * 1736-1960 (an unscaled raster plane), vc4_hvs.c lines 1717-1720 (the
- * list memory at 0x4000); Raspberry Pi rpi-6.12.y
- * drivers/iommu/bcm2712-iommu.c lines 24-80 (the IOMMU registers, only
- * read).
+ * list memory at 0x4000).
  */
 
 #include <stdbool.h>
@@ -36,13 +32,12 @@
 
 #include <drivers/generic/fdt.h>
 #include <kern/clock.h>
-#include <kern/dcache.h>
 #include <kern/device-io.h>
 #include <kern/irq.h>
 #include <kern/kcrt.h>
+#include <kern/klog.h>
 #include <uapi/errno.h>
 
-#include "drivers/gpu/videocore/buffer.h"
 #include "drivers/gpu/videocore/display/hvs6.h"
 #include "drivers/gpu/videocore/v3d71-private.h"
 
@@ -54,9 +49,6 @@
 /* The compositor's common registers. */
 #define HVS_VERSION			0x000U
 #define HVS_LIST_SIZE			0x004U
-#define HVS_LINE_BUFFER_SIZE		0x008U
-#define HVS_PIXEL_MEMORY_SIZE		0x00cU
-#define HVS_CONTROL			0x020U
 #define HVS_VERSION_C0			0x53U
 #define HVS_VERSION_D0			0x54U
 
@@ -68,7 +60,6 @@
 
 /* The channel registers' offsets inside a block, which differ by layout. */
 #define CHANNEL_CTRL0			0x00U
-#define CHANNEL_CTRL1			0x04U
 #define CHANNEL_C0_LPTRS		0x0cU
 #define CHANNEL_C0_STATUS		0x14U
 #define CHANNEL_C0_DL			0x18U
@@ -98,62 +89,38 @@
 #define PLANE_NEXT_SHIFT		24U
 #define PLANE_NEXT_MASK			0x3fU
 #define PLANE_ADDRESS_MODE_SHIFT	20U
-#define PLANE_ALPHA_FIXED		(3U << 18)
 #define PLANE_UNITY			0x8000U
 #define PLANE_ORDER_SHIFT		13U
-#define PLANE_ORDER_ARGB		2U
-#define PLANE_FORMAT_RGBA8888		7U
-#define PLANE_OPAQUE_ALPHA		(0xfffU << 4)
-#define PLANE_C0_ALPHA_FIXED		(1U << 30)
-#define PLANE_CONTEXT			0xc0c0c0c0U
 #define PLANE_WORDS			8U
-
-/* The unified pixel memory: 32 handles, 256-byte words, two-line buffers. */
-#define UPM_HANDLES			32U
-#define UPM_WORD_BYTES			256U
-#define UPM_DEFAULT_WORDS		1024U
 
 /* The pixel valve's interrupt registers and the start of its vertical front porch. */
 #define VALVE_INTEN			0x24U
 #define VALVE_INTSTAT			0x28U
 #define VALVE_VFP_START			0x80U
 
-/* The IOMMU's registers the readout shows. */
-#define IOMMU_CTRL			0x00U
-#define IOMMU_ADDR_CAP			0x14U
-#define IOMMU_BYPASS_START		0x1cU
-#define IOMMU_BYPASS_END		0x20U
-#define IOMMU_DEBUG_INFO		0x38U
-
 /* How long the hardware may take to adopt a list: 200 ms, in 1 ms polls. */
 #define ADOPT_POLL_US			1000U
 #define ADOPT_POLLS			200U
 
 /*
- * How long R1 waits for its BCM2712_VBLANK_TIMED timed vertical blanks
- * (six frames, 100 ms at 60 Hz) before it counts over the whole wait.
+ * How long the refresh measurement waits for its BCM2712_VBLANK_TIMED timed
+ * vertical blanks (six frames, 100 ms at 60 Hz) before it counts over the
+ * whole wait.
  */
 #define VBLANK_LIMIT_MS			1000U
-
-/* The overlay of the R2 test: a 64x64 opaque square moved 30 times. */
-#define OVERLAY_SIZE			64U
-#define OVERLAY_STEPS			30U
 
 static void discover_valve(const struct drv_fdt *fdt, struct bcm2712_display *display, unsigned index, const char *compatible);
 static uint32_t channel_register(const struct bcm2712_display *display, uint32_t channel, uint32_t c0_offset, uint32_t d0_offset);
 static uint32_t list_read(const struct bcm2712_display *display, uint32_t word);
 static void list_write(struct bcm2712_display *display, uint32_t word, uint32_t value);
 static int decode_list(struct bcm2712_display *display, uint32_t head);
-static void show_list(const struct bcm2712_display *display, uint32_t head, uint32_t end);
 static int switch_list(struct bcm2712_display *display, uint32_t head, uint32_t *waited_us);
 static bool valve_service(void *owner);
 static uint64_t median_frame(const uint64_t *counters);
 static bool device_vblank_service(void *owner);
-static uint32_t overlay_pixel(uint32_t x, uint32_t y, uint32_t step);
 
 /*
- * Runs stage P0: finds the compositor, the pixel valves and the IOMMU and
- * maps them.
+ * Finds the compositor and the pixel valves and maps them.
  *
  * Reads nothing from the hardware.  Returns ENODEV without a compositor.
  */
@@ -163,12 +130,7 @@ bcm2712_display_discover(
 	struct bcm2712_display *display,
 	const struct kern_boot_framebuffer *screen)
 {
-	const uint8_t *value;
-	uint32_t length;
 	uint32_t node;
-	uint32_t iommu_node;
-	uint32_t phandle;
-	bool allowed;
 	int error;
 
 	/* Starts from an empty description. */
@@ -181,57 +143,26 @@ bcm2712_display_discover(
 		display->screen_known = true;
 	}
 
-	/* Honors hvs6.stop=P0. */
-	allowed = bcm2711_stage_allowed(BCM2712_FAMILY_DISPLAY, "P0");
-	if (!allowed) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P0 stopped by boot parameter");
-		return ECANCELED;
-	}
-
-	/* Finds and maps the compositor. */
+	/* Finds and maps the compositor; a board without one has no display. */
 	error = bcm2711_fdt_find(fdt, HVS_COMPATIBLE, &node);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P0 no hvs node: no display");
+		kern_logf("hvs6: no hvs node: no display\n");
 		return ENODEV;
 	}
 	error = bcm2711_fdt_window(fdt, node, 0, &display->base.compositor);
 	if (error != 0 || display->base.compositor.size < LIST_MEMORY_OFFSET + 4U * LIST_BOOT_WORDS) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P0 hvs reg unusable (%d)", error);
+		kern_logf("hvs6: compositor registers unusable (%d)\n", error);
 		return ENODEV;
 	}
 	error = bcm2711_map_window(&display->base.compositor);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P0 hvs map failed (%d)", error);
+		kern_logf("hvs6: compositor map failed (%d)\n", error);
 		return ENODEV;
-	}
-
-	/* Maps the IOMMU the compositor names, only to read it. */
-	error = drv_fdt_property(fdt, node, "iommus", &value, &length);
-	if (error == 0 && length >= 4U) {
-		/* Finds the IOMMU's node and maps its registers. */
-		phandle = (uint32_t)drv_fdt_cells_value(value, 0, 1);
-		error = drv_fdt_find_phandle(fdt, phandle, &iommu_node);
-		if (error == 0)
-			error = bcm2711_fdt_window(fdt, iommu_node, 0, &display->iommu);
-		if (error == 0 && display->iommu.size >= 0x3cU)
-			error = bcm2711_map_window(&display->iommu);
-		if (error != 0)
-			display->iommu.mapped = NULL;
 	}
 
 	/* Finds the two pixel valves. */
 	discover_valve(fdt, display, 0, VALVE0_COMPATIBLE);
 	discover_valve(fdt, display, 1, VALVE1_COMPATIBLE);
-
-	/* Shows what was found. */
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P0 hvs %llx+%llx iommu %llx pv0 %llx irq %d pv1 %llx irq %d",
-			   (unsigned long long)display->base.compositor.physical,
-			   (unsigned long long)display->base.compositor.size,
-			   (unsigned long long)display->iommu.physical,
-			   (unsigned long long)display->base.timing[0].physical,
-			   display->base.timing_irq[0].irq,
-			   (unsigned long long)display->base.timing[1].physical,
-			   display->base.timing_irq[1].irq);
 	display->present = true;
 
 	/* Succeeded: the compositor is mapped. */
@@ -239,7 +170,7 @@ bcm2712_display_discover(
 }
 
 /*
- * Runs stage P1: reads the compositor, the IOMMU and the firmware's list.
+ * Reads the compositor and the firmware's list.
  *
  * Only reads.  Picks the channel the firmware shows (enabled and running)
  * and decodes its list.  Returns ENOTSUP for an unknown layout and ENODEV
@@ -254,17 +185,12 @@ bcm2712_display_readout(
 	uint32_t control0;
 	uint32_t status;
 	uint32_t mode;
-	uint32_t index;
 	bool found;
-	bool allowed;
 	int error;
 
-	/* Honors hvs6.stop=P1. */
+	/* Needs the compositor discovery found. */
 	if (!display->present)
 		return ENODEV;
-	allowed = bcm2711_stage_allowed(BCM2712_FAMILY_DISPLAY, "P1");
-	if (!allowed)
-		return ECANCELED;
 	hvs = display->base.compositor.mapped;
 
 	/* Reads the layout: C0 and D0 place the channel blocks differently. */
@@ -276,34 +202,19 @@ bcm2712_display_readout(
 		display->channel_base = HVS_C0_CHANNEL_BASE;
 		display->channel_stride = HVS_C0_CHANNEL_STRIDE;
 	} else {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 unknown HVS version %02x", display->version);
+		kern_logf("hvs6: unknown HVS version %02x\n", display->version);
 		return ENOTSUP;
 	}
 
-	/* Reads the memory sizes; the list memory is addressed by a 12-bit head. */
+	/* Reads the list memory's size; the list memory is addressed by a 12-bit head. */
 	display->list_words = kern_mmio_read32(hvs + HVS_LIST_SIZE);
-	display->ubm_words = kern_mmio_read32(hvs + HVS_PIXEL_MEMORY_SIZE);
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 version %02x (%s) control %08x list %u lbm %u ubm %u",
-			   display->version,
-			   display->version == HVS_VERSION_D0 ? "D0" : "C0",
-			   kern_mmio_read32(hvs + HVS_CONTROL),
-			   display->list_words,
-			   kern_mmio_read32(hvs + HVS_LINE_BUFFER_SIZE),
-			   display->ubm_words);
 
-	/* Shows every channel and picks the first enabled, running one. */
+	/* Picks the first enabled, running channel. */
 	found = false;
 	for (channel = 0; channel < BCM2712_HVS_CHANNELS; channel++) {
 		/* Reads the channel's control and status. */
 		control0 = kern_mmio_read32(hvs + channel_register(display, channel, CHANNEL_CTRL0, CHANNEL_CTRL0));
 		status = kern_mmio_read32(hvs + channel_register(display, channel, CHANNEL_C0_STATUS, CHANNEL_D0_STATUS));
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 ch%u ctrl0 %08x ctrl1 %08x lptrs %08x status %08x dl %08x",
-				   channel,
-				   control0,
-				   kern_mmio_read32(hvs + channel_register(display, channel, CHANNEL_CTRL1, CHANNEL_CTRL1)),
-				   kern_mmio_read32(hvs + channel_register(display, channel, CHANNEL_C0_LPTRS, CHANNEL_D0_LPTRS)),
-				   status,
-				   kern_mmio_read32(hvs + channel_register(display, channel, CHANNEL_C0_DL, CHANNEL_D0_DL)));
 
 		/* Takes the first channel that is enabled and running. */
 		mode = (status >> CHANNEL_MODE_SHIFT) & CHANNEL_MODE_MASK;
@@ -313,52 +224,20 @@ bcm2712_display_readout(
 		}
 	}
 
-	/* Shows the IOMMU as the firmware left it. */
-	if (display->iommu.mapped != NULL) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 iommu ctrl %08x cap %08x bypass %08x-%08x debug %08x",
-				   kern_mmio_read32(display->iommu.mapped + IOMMU_CTRL),
-				   kern_mmio_read32(display->iommu.mapped + IOMMU_ADDR_CAP),
-				   kern_mmio_read32(display->iommu.mapped + IOMMU_BYPASS_START),
-				   kern_mmio_read32(display->iommu.mapped + IOMMU_BYPASS_END),
-				   kern_mmio_read32(display->iommu.mapped + IOMMU_DEBUG_INFO));
-	}
-
 	/* Refuses a display the firmware does not show on any channel. */
 	if (!found) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 no running channel");
+		kern_logf("hvs6: no running channel\n");
 		return ENODEV;
 	}
 
 	/* Decodes the channel's list. */
 	display->firmware_head = kern_mmio_read32(hvs + channel_register(display, display->channel, CHANNEL_C0_LPTRS, CHANNEL_D0_LPTRS)) & CHANNEL_HEAD_MASK;
 	error = decode_list(display, display->firmware_head);
-	show_list(display, display->firmware_head, display->firmware_end);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 ch%u list at %u unreadable (%d)", display->channel, display->firmware_head, error);
+		kern_logf("hvs6: firmware list of channel %u unreadable (%d)\n", display->channel, error);
 		return error;
 	}
 
-	/* Shows each plane and whether it is the boot framebuffer. */
-	for (index = 0; index < display->plane_count && index < BCM2712_HVS_LIST_PLANES; index++) {
-		/* Shows one plane. */
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 plane%u fmt %u ord %u mode %u %s %u,%u %ux%u",
-				   index,
-				   display->planes[index].format,
-				   display->planes[index].order,
-				   display->planes[index].address_mode,
-				   display->planes[index].scaled ? "scaled" : "unity",
-				   display->planes[index].x,
-				   display->planes[index].y,
-				   display->planes[index].width,
-				   display->planes[index].height);
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 plane%u addr %llx pitch %u upm %u@%u%s",
-				   index,
-				   (unsigned long long)display->planes[index].address,
-				   display->planes[index].pitch,
-				   display->planes[index].upm_handle,
-				   display->planes[index].upm_base,
-				   (display->screen_known && display->planes[index].address == display->screen.physical_base) ? " = boot framebuffer" : "");
-	}
 	/* Describes the console to the shared record from the firmware's first plane. */
 	display->base.channel = display->channel;
 	display->base.port = display->channel;
@@ -373,23 +252,13 @@ bcm2712_display_readout(
 	display->base.screen.uncached = false;
 	if (display->base.screen.size < (uint64_t)display->base.screen.pitch * display->base.screen.height)
 		display->base.screen.size = (uint64_t)display->base.screen.pitch * display->base.screen.height;
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 ok ch%u list %u-%u, %u planes %u unused, fb %llx %ux%u pitch %u",
-			   display->channel,
-			   display->firmware_head,
-			   display->firmware_end,
-			   display->plane_count,
-			   display->skipped_elements,
-			   (unsigned long long)display->screen.physical_base,
-			   display->screen.width,
-			   display->screen.height,
-			   display->screen.pitch);
 
 	/* Succeeded: the firmware's channel and list are known. */
 	return 0;
 }
 
 /*
- * Runs stage R0: shows the firmware's list from the driver's own memory.
+ * Shows the firmware's list from the driver's own memory.
  *
  * Copies the firmware's list word for word into the driver's first region
  * and points the channel at it; the screen does not change.  Returns
@@ -406,22 +275,18 @@ bcm2712_display_adopt(
 	uint32_t plane;
 	uint32_t at;
 	uint32_t waited_us;
-	bool allowed;
 	int error;
 
-	/* Honors hvs6.stop=R0; needs a decoded firmware list. */
+	/* Needs a decoded firmware list. */
 	if (!display->present || display->plane_count == 0)
 		return ENODEV;
-	allowed = bcm2711_stage_allowed(BCM2712_FAMILY_DISPLAY, "R0");
-	if (!allowed)
-		return ECANCELED;
 
 	/* Places the regions at the top of the memory a list head can name. */
 	limit = display->list_words;
 	if (limit > LIST_ADDRESSABLE_WORDS)
 		limit = LIST_ADDRESSABLE_WORDS;
 	if (limit < LIST_BOOT_WORDS + OWN_REGIONS * OWN_REGION_WORDS) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R0 list memory too small (%u)", display->list_words);
+		kern_logf("hvs6: list memory too small (%u)\n", display->list_words);
 		return ENOSPC;
 	}
 	display->own_head = limit - OWN_REGIONS * OWN_REGION_WORDS;
@@ -431,7 +296,7 @@ bcm2712_display_adopt(
 	for (plane = 0; plane < display->plane_count; plane++)
 		words += display->planes[plane].words;
 	if (display->firmware_end >= display->own_head || words + PLANE_WORDS > OWN_REGION_WORDS) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R0 firmware list %u-%u (%u words) does not fit below %u", display->firmware_head, display->firmware_end, words, display->own_head);
+		kern_logf("hvs6: firmware list %u-%u (%u words) does not fit below %u\n", display->firmware_head, display->firmware_end, words, display->own_head);
 		return ENOSPC;
 	}
 
@@ -448,22 +313,20 @@ bcm2712_display_adopt(
 	kern_io_write_barrier();
 
 	/* Points the channel at the copy and waits for the hardware to take it. */
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R0 switch ch%u to own list at %u (%u words)", display->channel, display->own_head, words);
 	error = switch_list(display, display->own_head, &waited_us);
 	if (error != 0) {
 		(void)switch_list(display, display->firmware_head, &waited_us);
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R0 own list not taken; firmware list restored");
+		kern_logf("hvs6: own list not taken (%d); firmware list restored\n", error);
 		return error;
 	}
 	display->adopted = true;
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R0 ok own list taken after %u us", waited_us);
 
 	/* Succeeded: the channel shows the driver's list. */
 	return 0;
 }
 
 /*
- * Runs stage R1: times the pixel valve's vertical blanks.
+ * Measures the refresh from the pixel valve's vertical blanks.
  *
  * Enables the start-of-front-porch interrupt of the valve behind the
  * channel, waits for BCM2712_VBLANK_TIMED of them (at most
@@ -480,7 +343,6 @@ bcm2712_display_vblank_test(
 	volatile uint8_t *valve;
 	unsigned long enabled;
 	uint32_t enable;
-	uint32_t status;
 	uint64_t counters[BCM2712_VBLANK_TIMED];
 	uint64_t count;
 	uint64_t timed;
@@ -488,27 +350,20 @@ bcm2712_display_vblank_test(
 	uint64_t started;
 	uint64_t elapsed;
 	uint64_t frame;
-	uint64_t frame_us;
 	uint64_t millihz;
 	unsigned step;
 	unsigned index;
-	bool allowed;
 
-	/* Honors hvs6.stop=R1; channel 2 has no valve. */
+	/* Needs a pixel valve: channel 2 has none. */
 	if (!display->present || display->channel >= BCM2712_HVS_VALVES)
 		return ENODEV;
-	allowed = bcm2711_stage_allowed(BCM2712_FAMILY_DISPLAY, "R1");
-	if (!allowed)
-		return ECANCELED;
 	valve = display->base.timing[display->channel].mapped;
 	line = &display->base.timing_irq[display->channel];
 	if (valve == NULL || !line->registered)
 		return ENODEV;
 
-	/* Shows the valve's interrupt state as the firmware left it. */
+	/* Keeps the valve's interrupt enable as the firmware left it. */
 	enable = kern_mmio_read32(valve + VALVE_INTEN);
-	status = kern_mmio_read32(valve + VALVE_INTSTAT);
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R1 pv%u inten %08x intstat %08x", display->channel, enable, status);
 
 	/* Installs the service, clears a stale event and enables the interrupt. */
 	line->owner = display;
@@ -558,13 +413,6 @@ bcm2712_display_vblank_test(
 	frame = 0;
 	if (timed >= BCM2712_VBLANK_TIMED && frequency != 0)
 		frame = median_frame(counters);
-	frame_us = 0;
-	if (frame != 0)
-		frame_us = frame * 1000000U / frequency;
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R1 %llu vblanks in %llu ms, median frame %llu us",
-			   (unsigned long long)count,
-			   (unsigned long long)elapsed,
-			   (unsigned long long)frame_us);
 
 	/* Takes the refresh from the median frame, or else from the count over the time waited. */
 	millihz = 0;
@@ -584,155 +432,6 @@ bcm2712_display_vblank_test(
 	display->base.refresh_millihz = (uint32_t)((millihz + 500U) / 1000U) * 1000U;
 
 	/* Succeeded: the valve's vertical blank reaches the driver. */
-	return 0;
-}
-
-/*
- * Runs stage R2: moves an opaque 64x64 square over the console by flipping
- * between two of the driver's lists, then shows the console alone again.
- *
- * The square has its own unified-pixel-memory handle and area, away from
- * the firmware's.  Each step waits for the hardware to take its list, so the
- * one it replaced is free for the step after.
- */
-int
-bcm2712_display_overlay_test(
-	struct bcm2712_display *display)
-{
-	struct bcm2711_buffer *image;
-	uint32_t *pixels;
-	uint32_t handle;
-	uint32_t upm_base;
-	uint32_t upm_words;
-	uint32_t ubm_words;
-	uint32_t pitch;
-	uint32_t head;
-	uint32_t word;
-	uint32_t x;
-	uint32_t y;
-	uint32_t step;
-	uint32_t taken;
-	uint32_t waited_us;
-	uint32_t slowest_us;
-	uint32_t index;
-	uint32_t plane;
-	uint32_t alpha_control;
-	uint32_t alpha_mode;
-	bool used;
-	bool allowed;
-	int error;
-
-	/* Honors hvs6.stop=R2; needs the driver's lists. */
-	if (!display->adopted)
-		return ENODEV;
-	allowed = bcm2711_stage_allowed(BCM2712_FAMILY_DISPLAY, "R2");
-	if (!allowed)
-		return ECANCELED;
-
-	/* Picks the highest handle no firmware plane uses. */
-	handle = 0;
-	for (index = UPM_HANDLES; index >= 1U && handle == 0; index--) {
-		/* Checks the firmware's planes for this handle. */
-		used = false;
-		for (plane = 0; plane < display->plane_count && plane < BCM2712_HVS_LIST_PLANES; plane++) {
-			/* A plane with this handle makes it taken. */
-			if (display->planes[plane].upm_handle == index)
-				used = true;
-		}
-		if (!used)
-			handle = index;
-	}
-
-	/* Places the square's pixel memory at the top, past every firmware plane's base. */
-	pitch = OVERLAY_SIZE * 4U;
-	upm_words = ((pitch + 62U) / 32U * 32U * 2U + UPM_WORD_BYTES - 1U) / UPM_WORD_BYTES;
-	ubm_words = display->ubm_words;
-	if (ubm_words == 0 || ubm_words > 0x1fffU)
-		ubm_words = UPM_DEFAULT_WORDS;
-	upm_base = ubm_words - upm_words;
-	for (plane = 0; plane < display->plane_count && plane < BCM2712_HVS_LIST_PLANES; plane++) {
-		/* Refuses an area a firmware plane may already use. */
-		if (display->planes[plane].upm_base >= upm_base) {
-			bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R2 no free pixel memory above %u", display->planes[plane].upm_base);
-			return ENOSPC;
-		}
-	}
-	if (handle == 0)
-		return ENOSPC;
-
-	/* An opaque plane's fixed alpha is a control-word field on D0 and a mode of the alpha word on C0. */
-	alpha_control = PLANE_ALPHA_FIXED;
-	alpha_mode = 0;
-	if (display->version == HVS_VERSION_C0) {
-		alpha_control = 0;
-		alpha_mode = PLANE_C0_ALPHA_FIXED;
-	}
-
-	/* Allocates the square below 4 GiB and fills it. */
-	error = bcm2711_buffer_create(OVERLAY_SIZE * pitch, 0xffffffffULL, 4096, &image);
-	if (error != 0)
-		return error;
-	pixels = image->address;
-	for (y = 0; y < OVERLAY_SIZE; y++) {
-		/* Fills one row. */
-		for (x = 0; x < OVERLAY_SIZE; x++)
-			pixels[y * OVERLAY_SIZE + x] = overlay_pixel(x, y, 0);
-	}
-	kern_dcache_clean_range(pixels, OVERLAY_SIZE * pitch);
-	kern_io_write_barrier();
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R2 overlay %llx upm %u@%u (%u words), %u steps",
-			   (unsigned long long)image->memory.paddr,
-			   handle,
-			   upm_base,
-			   upm_words,
-			   OVERLAY_STEPS);
-
-	/* Moves the square: each step writes the region the hardware is not using and flips to it. */
-	taken = 0;
-	slowest_us = 0;
-	error = 0;
-	for (step = 0; step < OVERLAY_STEPS && error == 0; step++) {
-		/* Alternates between the second and the third region. */
-		head = display->own_head + OWN_REGION_WORDS * (1U + step % 2U);
-
-		/* Copies the console's planes without their END word. */
-		for (index = 0; index + 1U < display->own_words; index++)
-			list_write(display, head + index, list_read(display, display->own_head + index));
-		word = head + display->own_words - 1U;
-
-		/* Appends the square: unity RGBA8888 in ARGB order, fixed alpha, at its step's place. */
-		x = 64U + step * 24U;
-		y = 64U + step * 8U;
-		list_write(display, word + 0U, PLANE_VALID | (PLANE_WORDS << PLANE_NEXT_SHIFT) | alpha_control | PLANE_UNITY | (PLANE_ORDER_ARGB << PLANE_ORDER_SHIFT) | PLANE_FORMAT_RGBA8888);
-		list_write(display, word + 1U, (y << 16) | x);
-		list_write(display, word + 2U, PLANE_OPAQUE_ALPHA | alpha_mode);
-		list_write(display, word + 3U, ((OVERLAY_SIZE - 1U) << 16) | (OVERLAY_SIZE - 1U));
-		list_write(display, word + 4U, PLANE_CONTEXT);
-		list_write(display, word + 5U, (upm_base << 16) | ((handle - 1U) << 10) | (uint32_t)((image->memory.paddr >> 32) & 0xffU));
-		list_write(display, word + 6U, (uint32_t)image->memory.paddr);
-		list_write(display, word + 7U, pitch);
-		list_write(display, word + 8U, PLANE_END);
-		kern_io_write_barrier();
-
-		/* Flips to the region and waits until the hardware took it. */
-		error = switch_list(display, head, &waited_us);
-		if (error == 0) {
-			taken++;
-			if (waited_us > slowest_us)
-				slowest_us = waited_us;
-		}
-	}
-
-	/* Shows the console alone again, then the square's memory may go. */
-	(void)switch_list(display, display->own_head, &waited_us);
-	bcm2711_buffer_release(image);
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R2 overlay moved %u/%u steps, slowest flip %u us; console list back", taken, OVERLAY_STEPS, slowest_us);
-
-	/* Reports a step the hardware did not take. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded: every flip was taken at a frame start. */
 	return 0;
 }
 
@@ -768,8 +467,8 @@ bcm2712_display_register_offset(
  *
  * Fills the shared record's mode, clocks and screen, starts the persistent
  * vertical-blank service of the shown channel's pixel valve, and has the
- * shared display device check its flips and register its node.  Needs R0
- * and R1.
+ * shared display device check its flips and register its node.  Needs the
+ * takeover of the firmware's list and a measured refresh.
  */
 int
 bcm2712_display_attach_device(
@@ -780,17 +479,13 @@ bcm2712_display_attach_device(
 	uint32_t rate;
 	uint32_t plane;
 	uint32_t enable;
-	bool allowed;
 	int error;
 
-	/* Honors hvs6.stop=R3; needs the driver's console list and a measured refresh. */
+	/* Needs the driver's console list and a measured refresh. */
 	if (!display->adopted || display->base.refresh_millihz == 0)
 		return ENODEV;
 	if (display->channel >= BCM2712_HVS_VALVES)
 		return ENODEV;
-	allowed = bcm2711_stage_allowed(BCM2712_FAMILY_DISPLAY, "R3");
-	if (!allowed)
-		return ECANCELED;
 	valve = display->base.timing[display->channel].mapped;
 	line = &display->base.timing_irq[display->channel];
 	if (valve == NULL || !line->registered)
@@ -801,7 +496,7 @@ bcm2712_display_attach_device(
 		/* A handle or a base inside the driver's ranges collides. */
 		if (display->planes[plane].upm_handle >= BCM2712_UPM_LOWEST_HANDLE ||
 		    display->planes[plane].upm_base + 129U > BCM2712_UPM_LOWEST_BASE) {
-			bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R3 firmware plane%u upm %u@%u collides", plane, display->planes[plane].upm_handle, display->planes[plane].upm_base);
+			kern_logf("hvs6: firmware plane %u pixel memory %u@%u collides with the driver's\n", plane, display->planes[plane].upm_handle, display->planes[plane].upm_base);
 			return ENOSPC;
 		}
 	}
@@ -826,15 +521,11 @@ bcm2712_display_attach_device(
 	kern_mmio_write32(valve + BCM2712_VALVE_INTEN, enable | BCM2712_VALVE_VFP_START);
 	kern_irq_unmask(line->irq);
 	display->base.scanout_started = true;
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R3 device on console list %u, %u mHz, core %u Hz",
-			   display->own_head,
-			   display->base.refresh_millihz,
-			   rate);
 
 	/* Has the shared display device exercise the flips and publish its node. */
 	error = bcm2711_display_register(&display->base);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R3 display device not registered (%d)", error);
+		kern_logf("hvs6: display device not registered (%d)\n", error);
 		return error;
 	}
 
@@ -875,7 +566,7 @@ discover_valve(
 	(void)bcm2711_irq_install(&display->base.timing_irq[index]);
 }
 
-/* Reports the window offset of one channel register in the layout read at P1. */
+/* Reports the window offset of one channel register in the layout the readout found. */
 static uint32_t
 channel_register(
 	const struct bcm2712_display *display,
@@ -942,7 +633,6 @@ decode_list(
 	word = head;
 	count = 0;
 	display->firmware_end = head;
-	display->skipped_elements = 0;
 	while (word < limit) {
 		/* Stops at the END word. */
 		control = list_read(display, word);
@@ -962,7 +652,6 @@ decode_list(
 
 		/* Skips an element the firmware keeps but marks not valid. */
 		if ((control & PLANE_VALID) == 0) {
-			display->skipped_elements++;
 			word += next;
 			continue;
 		}
@@ -1010,27 +699,6 @@ decode_list(
 	/* Refuses a list that ran off the memory. */
 	display->plane_count = count;
 	return EINVAL;
-}
-
-/* Shows the words of a list, four to a line, through its END word and at most 48 words. */
-static void
-show_list(
-	const struct bcm2712_display *display,
-	uint32_t head,
-	uint32_t end)
-{
-	uint32_t word;
-	uint32_t words[4];
-	uint32_t index;
-
-	/* Shows each group of four words. */
-	for (word = head; word <= end + 3U && word < head + 48U; word += 4U) {
-		/* Reads the group. */
-		for (index = 0; index < 4U; index++)
-			words[index] = list_read(display, word + index);
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "P1 @%u %08x %08x %08x %08x",
-				   word, words[0], words[1], words[2], words[3]);
-	}
 }
 
 /* Points the channel at a list and waits until the hardware reports it as current. */
@@ -1136,21 +804,6 @@ median_frame(
 
 	/* Reports the middle. */
 	return (frames[BCM2712_VBLANK_TIMED / 2U - 1U] + frames[BCM2712_VBLANK_TIMED / 2U]) / 2U;
-}
-
-/* Packs the square's opaque pattern: a magenta and green checker of 8-pixel cells. */
-static uint32_t
-overlay_pixel(
-	uint32_t x,
-	uint32_t y,
-	uint32_t step)
-{
-	/* Alternates the colour by cell. */
-	if ((((x >> 3) + (y >> 3) + step) & 1U) == 0)
-		return 0xffff00ffU;
-
-	/* The other cells are green. */
-	return 0xff00ff00U;
 }
 
 /*

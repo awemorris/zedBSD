@@ -6,8 +6,7 @@
  */
 
 /*
- * The V3D 7.1 render engine of the BCM2712: discovery (stage V0) and power
- * (stage V1).
+ * The V3D 7.1 render engine of the BCM2712: discovery and power.
  *
  * The engine sits in a power domain of the power manager (PM), which the
  * driver releases from reset by one bit, and runs from firmware clock 5.
@@ -15,8 +14,7 @@
  * brought out of its power-off state and reset before the engine's
  * registers answer.  Touching the engine's registers before then can stop
  * the processor, so discovery only reads the device tree, maps the windows,
- * installs the (masked) interrupt handlers and reads the power manager,
- * which is always on.
+ * and installs the (masked) interrupt handlers.
  *
  * Values referenced: Linux v6.19 drivers/pmdomain/bcm/bcm2835-power.c
  * lines 80-101 (the 2712 graphics register 0x304, the V3D reset bit 6 and
@@ -32,6 +30,7 @@
 #include <drivers/generic/fdt.h>
 #include <kern/clock.h>
 #include <kern/device-io.h>
+#include <kern/klog.h>
 #include <uapi/errno.h>
 
 #include "drivers/gpu/videocore/v3d71-private.h"
@@ -50,11 +49,9 @@
 #define POWER_RESET_ENGINE		0U
 
 /*
- * The power manager's registers: the 2711-style graphics register, which
- * is only read here, and the 2712's graphics register with the engine's
+ * The power manager's 2712 graphics register with the engine's
  * reset-release bit.  Every write carries the password.
  */
-#define POWER_GRAPHICS_LEGACY		0x10cU
 #define POWER_GRAPHICS			0x304U
 #define POWER_ENGINE_RELEASE		0x40U
 #define POWER_WRITE_KEY			0x5a000000U
@@ -103,14 +100,12 @@ static int map_engine_window(const struct drv_fdt *fdt, uint32_t node, const cha
 static int clock_start(struct bcm2712_v3d *v3d);
 static int sequencer_wake(struct bcm2712_v3d *v3d);
 static int sequencer_wait(struct bcm2712_v3d *v3d, uint32_t offset, bool idle, uint32_t *state, uint32_t *polls);
-static void clock_report(void);
 
 /*
- * Runs stage V0: finds and maps the V3D 7.1 engine and its power manager.
+ * Finds and maps the V3D 7.1 engine and its power manager.
  *
  * Returns 0 when every window was found and mapped; ENODEV when the board
- * has no usable engine; ECANCELED when the boot parameters stop V3D before
- * V0.  No register of the engine is read.
+ * has no usable engine.  No register of the engine is read.
  */
 int
 bcm2712_v3d_discover(
@@ -123,9 +118,6 @@ bcm2712_v3d_discover(
 	uint32_t number;
 	uint32_t reset_owner;
 	uint32_t index;
-	bool allowed;
-	int core_error;
-	int hub_error;
 	int error;
 
 	/* Starts from an empty description with no interrupt lines. */
@@ -142,35 +134,27 @@ bcm2712_v3d_discover(
 	v3d->hub_irq.service = NULL;
 	v3d->hub_irq.owner = NULL;
 
-	/* Honors v3d.stop=V0. */
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V0");
-	if (!allowed) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 stopped by boot parameter");
-		return ECANCELED;
-	}
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 begin (7.1)");
-
 	/* Finds the engine; without it there is nothing to render with. */
 	error = bcm2711_fdt_find(fdt, ENGINE_COMPATIBLE, &node);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 no %s node: no engine", ENGINE_COMPATIBLE);
+		kern_logf("v3d: no %s node: no engine\n", ENGINE_COMPATIBLE);
 		return ENODEV;
 	}
 
 	/* Requires the power manager's engine domain and reset, as the binding names them. */
 	error = provider(fdt, node, "power-domains", &owner, &number);
 	if (error != 0 || number != POWER_DOMAIN_ENGINE) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 power domain unusable (%d)", error);
+		kern_logf("v3d: power domain unusable (%d)\n", error);
 		return ENODEV;
 	}
 	error = bcm2711_fdt_string_index(fdt, owner, "compatible", POWER_COMPATIBLE, &index);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 power domain is not the BCM2712 PM");
+		kern_logf("v3d: power domain is not the BCM2712 PM\n");
 		return ENODEV;
 	}
 	error = provider(fdt, node, "resets", &reset_owner, &number);
 	if (error != 0 || reset_owner != owner || number != POWER_RESET_ENGINE) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 reset unusable (%d)", error);
+		kern_logf("v3d: reset unusable (%d)\n", error);
 		return ENODEV;
 	}
 	engine->has_power_domain = true;
@@ -179,31 +163,31 @@ bcm2712_v3d_discover(
 	/* Requires the firmware's engine clock; the tree misspells its name, so it is taken by position. */
 	engine->clock_id = read_clock_id(fdt, node);
 	if (engine->clock_id != ENGINE_CLOCK) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 clock %u is not the engine's", (unsigned)engine->clock_id);
+		kern_logf("v3d: clock %u is not the engine's\n", (unsigned)engine->clock_id);
 		return ENODEV;
 	}
 
 	/* Maps the hub, the core and the sequencer by name; nothing is read from them yet. */
 	error = map_engine_window(fdt, node, "hub", ENGINE_HUB_MINIMUM, &engine->hub);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 hub window unusable (%d)", error);
+		kern_logf("v3d: hub window unusable (%d)\n", error);
 		return ENODEV;
 	}
 	error = map_engine_window(fdt, node, "core0", ENGINE_CORE_MINIMUM, &engine->core);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 core window unusable (%d)", error);
+		kern_logf("v3d: core window unusable (%d)\n", error);
 		return ENODEV;
 	}
 	error = map_engine_window(fdt, node, "sms", ENGINE_SEQUENCER_MINIMUM, &v3d->sequencer);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 sequencer window unusable (%d)", error);
+		kern_logf("v3d: sequencer window unusable (%d)\n", error);
 		return ENODEV;
 	}
 
 	/* Maps the power manager, which is always powered. */
 	error = map_engine_window(fdt, owner, "pm", POWER_MINIMUM, &engine->power.control);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 PM window unusable (%d)", error);
+		kern_logf("v3d: PM window unusable (%d)\n", error);
 		return ENODEV;
 	}
 	engine->power.prepared = true;
@@ -216,46 +200,24 @@ bcm2712_v3d_discover(
 	if (error != 0)
 		engine->irq.irq = BCM2711_NO_IRQ;
 
-	/* Installs both handlers, leaving the lines masked. */
-	hub_error = bcm2711_irq_install(&v3d->hub_irq);
-	core_error = bcm2711_irq_install(&engine->irq);
+	/* Installs both handlers, leaving the lines masked; a line without a handler stays absent. */
+	(void)bcm2711_irq_install(&v3d->hub_irq);
+	(void)bcm2711_irq_install(&engine->irq);
 
-	/* Reads the power manager's graphics registers as the firmware left them. */
-	v3d->pm_graphics = kern_mmio_read32(engine->power.control.mapped + POWER_GRAPHICS_LEGACY);
-	v3d->pm_v3d = kern_mmio_read32(engine->power.control.mapped + POWER_GRAPHICS);
-
-	/* Shows the windows, the interrupts and the power manager. */
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 hub %llx core %llx sms %llx pm %llx",
-			   (unsigned long long)engine->hub.physical,
-			   (unsigned long long)engine->core.physical,
-			   (unsigned long long)v3d->sequencer.physical,
-			   (unsigned long long)engine->power.control.physical);
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 irq hub %d%s core %d%s pm 10c=%08x 304=%08x",
-			   v3d->hub_irq.irq,
-			   hub_error == 0 ? "" : " (no handler)",
-			   engine->irq.irq,
-			   core_error == 0 ? "" : " (no handler)",
-			   v3d->pm_graphics,
-			   v3d->pm_v3d);
-
-	/* Shows the firmware's engine clock; only asks. */
-	clock_report();
-
-	/* Publishes the engine to the later stages. */
+	/* Publishes the engine to the later steps. */
 	engine->present = true;
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 ok");
 
 	/* Succeeded: every window is mapped and the providers are known. */
 	return 0;
 }
 
 /*
- * Runs stage V1: powers the engine and wakes its sequencer.
+ * Powers the engine and wakes its sequencer.
  *
  * Releases the power manager's reset, runs the firmware clock at its
  * highest rate and brings the sequencer to idle through its reset.  Every
  * wait is bounded; a failure leaves the engine not ready, which keeps every
- * later stage from reading its registers.
+ * later step from reading its registers.
  */
 int
 bcm2712_v3d_power_start(
@@ -263,7 +225,6 @@ bcm2712_v3d_power_start(
 {
 	struct bcm2711_v3d *engine;
 	uint32_t value;
-	bool allowed;
 	int error;
 
 	/* A partly executed startup is not retried. */
@@ -272,10 +233,6 @@ bcm2712_v3d_power_start(
 		return ENODEV;
 	if (engine->power.attempted)
 		return EBUSY;
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V1");
-	if (!allowed)
-		return ECANCELED;
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 begin PM release, clock, SMS");
 	engine->power.attempted = true;
 
 	/* Releases the engine from the power manager's reset. */
@@ -284,7 +241,7 @@ bcm2712_v3d_power_start(
 	value = kern_mmio_read32(engine->power.control.mapped + POWER_GRAPHICS);
 	kern_usleep_range(1, 1);
 	if ((value & POWER_ENGINE_RELEASE) == 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 PM 304 did not take the release (%08x)", value);
+		kern_logf("v3d: PM did not take the engine's release (%08x)\n", value);
 		return EIO;
 	}
 
@@ -299,9 +256,8 @@ bcm2712_v3d_power_start(
 	if (error != 0)
 		return error;
 
-	/* Grants register access to the later stages. */
+	/* Grants register access to the later steps. */
 	engine->power.ready = true;
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 ok PM 304=%08x clock %u Hz", value, v3d->clock_hz);
 
 	/* Succeeded: the engine's registers may now be read. */
 	return 0;
@@ -371,7 +327,7 @@ bcm2712_v3d_sequencer_reset(
 	/* Waits for the sequencer to leave isolation and reset. */
 	error = sequencer_wait(v3d, SEQUENCER_REE, false, &state, &polls);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "SMS reset timed out, REE %08x", state);
+		kern_logf("v3d: sequencer reset timed out, REE %08x\n", state);
 		return error;
 	}
 
@@ -480,30 +436,30 @@ clock_start(
 	/* Refuses a firmware without the engine's clock. */
 	error = bcm2712_clock_get(CLOCK_TAG_STATE, ENGINE_CLOCK, &state);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 clock state unanswered (%d)", error);
+		kern_logf("v3d: clock state unanswered (%d)\n", error);
 		return error;
 	}
 	if ((state & CLOCK_ABSENT) != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 firmware has no engine clock");
+		kern_logf("v3d: firmware has no engine clock\n");
 		return ENODEV;
 	}
 
 	/* Reads the highest rate the firmware allows. */
 	error = bcm2712_clock_get(CLOCK_TAG_MAX_RATE, ENGINE_CLOCK, &maximum);
 	if (error != 0 || maximum == 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 clock maximum unanswered (%d)", error);
+		kern_logf("v3d: clock maximum unanswered (%d)\n", error);
 		return EIO;
 	}
 
 	/* Asks for the highest rate, then turns the clock on. */
 	error = bcm2712_clock_set(CLOCK_TAG_SET_RATE, ENGINE_CLOCK, maximum);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 clock rate refused (%d)", error);
+		kern_logf("v3d: clock rate refused (%d)\n", error);
 		return error;
 	}
 	error = bcm2712_clock_set(CLOCK_TAG_SET_STATE, ENGINE_CLOCK, CLOCK_RUNNING);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 clock enable refused (%d)", error);
+		kern_logf("v3d: clock enable refused (%d)\n", error);
 		return error;
 	}
 
@@ -515,7 +471,7 @@ clock_start(
 	if (error != 0)
 		return error;
 	if ((state & CLOCK_RUNNING) == 0 || rate == 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 clock not running (state %x rate %u)", state, rate);
+		kern_logf("v3d: clock not running (state %x rate %u)\n", state, rate);
 		return EIO;
 	}
 	v3d->clock_hz = rate;
@@ -525,7 +481,7 @@ clock_start(
 	return 0;
 }
 
-/* Brings the sequencer out of power-off to idle and resets it, logging what it saw. */
+/* Brings the sequencer out of power-off to idle and resets it. */
 static int
 sequencer_wake(
 	struct bcm2712_v3d *v3d)
@@ -533,7 +489,6 @@ sequencer_wake(
 	uint32_t before;
 	uint32_t state;
 	uint32_t polls;
-	uint32_t reset_polls;
 	int error;
 
 	/* Clears a power-off request and waits for the sequencer to become idle. */
@@ -541,26 +496,17 @@ sequencer_wake(
 	kern_mmio_write32(v3d->sequencer.mapped + SEQUENCER_TEE, SEQUENCER_CLEAR_POWER_OFF);
 	error = sequencer_wait(v3d, SEQUENCER_TEE, true, &state, &polls);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 SMS power-up timed out, TEE %08x then %08x", before, state);
+		kern_logf("v3d: sequencer power-up timed out, TEE %08x then %08x\n", before, state);
 		return error;
 	}
 
 	/* Resets the sequencer, as the engine's first start requires. */
 	kern_mmio_write32(v3d->sequencer.mapped + SEQUENCER_REE, SEQUENCER_RESET_REQUEST);
-	error = sequencer_wait(v3d, SEQUENCER_REE, false, &state, &reset_polls);
+	error = sequencer_wait(v3d, SEQUENCER_REE, false, &state, &polls);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 SMS reset timed out, REE %08x", state);
+		kern_logf("v3d: sequencer reset timed out, REE %08x\n", state);
 		return error;
 	}
-
-	/* Shows the sequencer's states and how long each step took. */
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V1 SMS TEE %08x idle after %u us, REE %08x after %u us",
-		before,
-		(unsigned)(polls * SEQUENCER_POLL_US),
-		state,
-		(unsigned)(reset_polls * SEQUENCER_POLL_US));
 
 	/* Succeeded: the sequencer is idle and reset. */
 	return 0;
@@ -613,32 +559,4 @@ sequencer_wait(
 
 	/* Succeeded: the sequencer reached the state. */
 	return 0;
-}
-
-/* Writes one stage-mark line with what the firmware says about the engine's clock. */
-static void
-clock_report(void)
-{
-	uint32_t state;
-	uint32_t rate;
-	uint32_t maximum;
-	int error;
-
-	/* Asks whether the clock exists and runs. */
-	error = bcm2712_clock_get(CLOCK_TAG_STATE, ENGINE_CLOCK, &state);
-	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 clock v3d (5) no answer (%d)", error);
-		return;
-	}
-
-	/* Asks the present and the highest rate; zero stands for an unanswered question. */
-	error = bcm2712_clock_get(CLOCK_TAG_RATE, ENGINE_CLOCK, &rate);
-	if (error != 0)
-		rate = 0;
-	error = bcm2712_clock_get(CLOCK_TAG_MAX_RATE, ENGINE_CLOCK, &maximum);
-	if (error != 0)
-		maximum = 0;
-
-	/* Shows the clock. */
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 clock v3d (5) state %x rate %u max %u", state, rate, maximum);
 }

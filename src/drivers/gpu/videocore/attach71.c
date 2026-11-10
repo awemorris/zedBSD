@@ -112,28 +112,28 @@ drv_bcm2712_gpu_attach(
 	/* Stays out entirely when the boot asked for it. */
 	off = bcm2711_stage_driver_off();
 	if (off) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "off by boot parameter");
+		kern_logf("v3d: off by boot parameter\n");
 		return ENODEV;
 	}
 
 	/* Finds the device tree in the direct map. */
 	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (fdt_phys == 0 || blob == NULL) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "no device tree");
+		kern_logf("v3d: no device tree\n");
 		return ENODEV;
 	}
 
 	/* Refuses a tree whose header does not check out. */
 	error = drv_fdt_open(&fdt, blob, ATTACH_FDT_READ_LIMIT);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "unreadable device tree (%d)", error);
+		kern_logf("v3d: unreadable device tree (%d)\n", error);
 		return ENODEV;
 	}
 
-	/* Prepares the firmware mailbox the clock questions go through; the stages report a missing one. */
+	/* Prepares the firmware mailbox the clock questions go through. */
 	error = bcm2712_firmware_init(&fdt);
 	if (error != 0)
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "firmware mailbox unavailable (%d)", error);
+		kern_logf("v3d: firmware mailbox unavailable (%d)\n", error);
 
 	/* Finds the display path; the firmware's screen is what it will show. */
 	screen_error = kern_boot_framebuffer("rpi5.framebuffer", &screen);
@@ -147,7 +147,7 @@ drv_bcm2712_gpu_attach(
 	/* Finds the HEVC decoder, which Vulkan Video decodes with; a board without it decodes nothing. */
 	error = bcm2712_hevc_decoder_discover(&fdt);
 	if (error != 0)
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "no HEVC decoder (%d)", error);
+		kern_logf("v3d: no HEVC decoder (%d)\n", error);
 #endif
 
 	/* Runs discovery, which reads nothing behind the engine's power domain. */
@@ -162,14 +162,14 @@ drv_bcm2712_gpu_attach(
 	line = kern_boot_handoff("boot.command-line");
 	hold = kern_boot_parameters_token_present(line, ATTACH_HOLD_TOKEN);
 	if (hold) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "held; root starts it with: sysctl hw.gpu.start=1");
+		kern_logf("v3d: held; root starts it with: sysctl hw.gpu.start=1\n");
 		return 0;
 	}
 
 	/* Starts at once; a failure is logged and the boot goes on. */
 	error = start_engine();
 	if (error != 0)
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "start at boot failed (%d); the boot goes on", error);
+		kern_logf("v3d: start at boot failed (%d); the boot goes on\n", error);
 
 	/* Succeeded: the engine was found. */
 	return 0;
@@ -195,15 +195,16 @@ start_held(void)
 }
 
 /*
- * Powers the engine and runs its self-test when the boot asked for it, once.
+ * Starts the display and powers the engine, once.
  *
- * Returns ENODEV when nothing is held, and otherwise the first stage's
- * error, after logging which stage it was.
+ * Returns ENODEV when nothing is held, and otherwise the first step's
+ * error, after logging which step it was.
  */
 static int
 start_engine(void)
 {
 	struct bcm2711_v3d *engine;
+	bool tfu_off;
 	int taken;
 	int display_error;
 	int error;
@@ -216,78 +217,59 @@ start_engine(void)
 		return ENODEV;
 	engine = &attach_v3d.engine;
 	attach_v3d.started = true;
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "start requested");
 
-	/* Runs the display's stages first; their result does not stop the engine's. */
+	/* Starts the display first; its result does not stop the engine's. */
 	display_error = start_display();
 
 	/* Leaves the engine alone when it was not found. */
 	if (!engine->present)
 		return display_error;
 
-	/* Powers the engine and wakes its sequencer (V1). */
+	/* Powers the engine and wakes its sequencer. */
 	error = bcm2712_v3d_power_start(&attach_v3d);
 	if (error != 0) {
-		attach_v3d.stage_failed = "V1";
-		attach_v3d.error = error;
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 not ready (%d); engine left off", error);
+		kern_logf("v3d: power not ready (%d); engine left off\n", error);
 		return error;
 	}
 
-	/* Identifies the engine and starts its MMU and interrupts (V2-V4). */
+	/* Identifies the engine and starts its MMU and interrupts. */
 	error = bcm2711_v3d_hardware_start(engine);
 	if (error != 0) {
-		attach_v3d.stage_failed = "V2-V4";
-		attach_v3d.error = error;
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V2-V4 not ready (%d)", error);
+		kern_logf("v3d: engine not ready (%d)\n", error);
 		return error;
 	}
 
-	/* Runs the self-test jobs (V5-V9) when the boot asked for them. */
-	error = bcm2711_v3d_diagnostic(engine);
-	if (error != 0) {
-		attach_v3d.stage_failed = "V5-V9";
-		attach_v3d.error = error;
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "self-test failed (%d)", error);
-		return error;
-	}
+	/* The texture formatting unit converts textures unless the boot kept the CPU's conversion. */
+	tfu_off = bcm2711_stage_tfu_off();
+	if (!tfu_off)
+		engine->hardware.tfu_uif_ready = true;
 
-	/* Publishes the render node only after the self-test retired its storage. */
+	/* Publishes the render node once the engine is ready. */
 	error = bcm2711_render_register(engine);
 	if (error != 0) {
-		attach_v3d.stage_failed = "render";
-		attach_v3d.error = error;
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "render registration failed (%d)", error);
+		kern_logf("v3d: render registration failed (%d)\n", error);
 		return error;
 	}
 
-	/* Shows the engine's state; a display failure is the start's result. */
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "ready: V3D %u.%u.%u, %u QPUs, %u Hz",
-			   attach_v3d.version / 10U,
-			   attach_v3d.version % 10U,
-			   attach_v3d.revision,
-			   attach_v3d.qpus,
-			   attach_v3d.clock_hz);
+	/* A display failure is the start's result. */
 	if (display_error != 0)
 		return display_error;
 
-	/* Succeeded: the display and the engine are up, and every self-test asked for passed. */
+	/* Succeeded: the display and the engine are up. */
 	return 0;
 }
 
 /*
- * Runs the display's stages: the readout (P1), the takeover (R0), the
- * vertical blank (R1), the overlay flips (R2, a test picture shown only for
- * the self-test) and the display device (R3).
+ * Starts the display: the readout, the takeover of the firmware's list, the
+ * refresh measurement and the display device.
  *
- * Returns 0 when there is no display to start, otherwise the first stage's
+ * Returns 0 when there is no display to start, otherwise the first step's
  * error after logging it.  The channel keeps the driver's own copy of the
  * firmware's list afterwards, which shows the same console.
  */
 static int
 start_display(void)
 {
-	bool selftest;
 	int error;
 
 	/* Leaves a board without the display path alone. */
@@ -304,27 +286,16 @@ start_display(void)
 	if (error != 0)
 		return error;
 
-	/* Counts the vertical blanks. */
+	/* Measures the refresh from the vertical blanks; the display device needs it. */
 	error = bcm2712_display_vblank_test(&attach_display);
 	if (error != 0)
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R1 failed (%d)", error);
-
-	/* Moves an overlay with flips, only when the boot asked for the self-test. */
-	selftest = bcm2711_stage_selftest();
-	if (selftest) {
-		error = bcm2712_display_overlay_test(&attach_display);
-		if (error != 0) {
-			bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R2 failed (%d)", error);
-			return error;
-		}
-	}
+		kern_logf("hvs6: no vertical blank (%d)\n", error);
 
 	/* Publishes the display device on the console list. */
 	error = bcm2712_display_attach_device(&attach_display);
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the display stages passed. */
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "display ready");
+	/* Succeeded: the display is up. */
 	return 0;
 }
