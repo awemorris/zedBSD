@@ -1411,28 +1411,3 @@ endif
 ifneq ($(filter y,$(CONFIG_KERNEL_USB_HID_CHECKPOINT)),)
 KERN_CPPFLAGS += -DCONFIG_KERNEL_USB_HID_CHECKPOINT=1
 endif
-
-#
-# Header Tracking
-#
-
-# The kernel objects follow the compile flags: a change of the
-# configuration rebuilds them.  The stamp is written every time and
-# replaced only when the flags change.
-KERN_FLAGS_STAMP := $(BUILD)/.kernel-flags
-
-# The kernel objects also follow the headers they include: the
-# compiler writes each object's header list beside it, and the next
-# run reads them.
-KERN_CFLAGS += -MMD -MP
-
-.PHONY: FORCE_KERN_FLAGS
-FORCE_KERN_FLAGS:
-$(KERN_FLAGS_STAMP): FORCE_KERN_FLAGS
-	@mkdir -p $(dir $@)
-	@printf '%s\n' '$(KERN_CPPFLAGS) $(KERN_CFLAGS)' > $@.tmp
-	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
-
-$(VMUNIX_OBJS): $(KERN_FLAGS_STAMP)
-
--include $(VMUNIX_OBJS:.o=.d)

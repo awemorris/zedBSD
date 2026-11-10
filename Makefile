@@ -111,5 +111,8 @@ include mk/rootfs.mk
 # Platform build rules (targets: libc-platform, sysroot-platform, firmware-platform, bootloader-platform, vmunix-platform, rootfs-platform, image-platform)
 include mk/platform-$(PLATFORM)/Makefile
 
+# Rebuild tracking: objects follow their flags and headers.
+include mk/tracking.mk
+
 # Foreign targets. (targets: keiland-linux, keiland-linux-install, keiland-freebsd, keiland-freebsd-install)
 include mk/foreign.mk
