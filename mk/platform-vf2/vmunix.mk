@@ -98,8 +98,7 @@ KERN_SOURCES += \
 	src/drivers/platform/visionfive2/vf2-dmac.c \
 	src/drivers/platform/visionfive2/vf2-pwmdac.c \
 	src/drivers/platform/visionfive2/vf2-pcie.c \
-	src/drivers/pci/pci-plda.c \
-	src/drivers/pci/pci-ecam-fdt.c
+	src/drivers/pci/pci-plda.c
 
 VMUNIX_OBJS := \
 	$(sort $(patsubst %.c,$(BUILD)/%.o,$(KERN_SOURCES))) \
