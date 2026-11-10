@@ -11,6 +11,7 @@
 #include <kern/device-io.h>
 #include <kern/irq.h>
 #include <kern/kcrt.h>
+#include <kern/klog.h>
 #include <kern/sched.h>
 #include <uapi/errno.h>
 
@@ -57,7 +58,6 @@ bcm2711_v3d_hardware_start(
 	struct bcm2711_v3d *engine)
 {
 	struct bcm2711_v3d_hardware *hardware;
-	bool allowed;
 	int error;
 
 	/* No engine register is touched without the provider's completed startup. */
@@ -79,26 +79,16 @@ bcm2711_v3d_hardware_start(
 	engine->irq.service = service_sources;
 
 	/* Identification is the first native read of the powered render engine. */
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V3");
-	if (!allowed)
-		return ECANCELED;
 	error = identify(engine);
 	if (error != 0)
 		return error;
 
 	/* Only 4.2's L2T range exists here; older L2C/GCA registers are omitted. */
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V4");
-	if (!allowed)
-		return ECANCELED;
 	kern_mmio_write32(engine->core.mapped + 0x34, 0);
 	kern_mmio_write32(engine->core.mapped + 0x38, UINT32_MAX);
 	prepare_sources(engine);
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V4 cache range and IRQ masks ready");
 
 	/* Creates and cleans both owners before permitting a hardware table fetch. */
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V5");
-	if (!allowed)
-		return ECANCELED;
 	error = allocate_tables(engine);
 	if (error != 0)
 		return error;
@@ -109,14 +99,6 @@ bcm2711_v3d_hardware_start(
 	}
 
 	/* All callbacks, source masks and MMU translations exist before GIC delivery. */
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V5 MMU table %llx scratch %llx",
-		(unsigned long long)hardware->pages->memory.paddr,
-		(unsigned long long)hardware->scratch->memory.paddr);
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V6");
-	if (!allowed)
-		return ECANCELED;
 	error = open_sources(engine);
 	if (error != 0) {
 		record_failure(engine, error);
@@ -125,7 +107,6 @@ bcm2711_v3d_hardware_start(
 
 	/* Publishes worker admission only after serviced source masks were confirmed. */
 	hardware->ready = true;
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V6 core/hub IRQ ready");
 
 	/* Succeeded: the worker can now map resources and publish its first job. */
 	return 0;
@@ -498,45 +479,41 @@ identify(
 	layout = hardware->hub_ident[1];
 	version = (layout & 15U) * 10U + ((layout >> 4) & 15U);
 	cores = (layout >> 8) & 15U;
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V3 hub %08x %08x %08x %08x",
-		hardware->hub_ident[0],
-		hardware->hub_ident[1],
-		hardware->hub_ident[2],
-		hardware->hub_ident[3]);
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V3 core %08x %08x %08x",
-		hardware->core_ident[0],
-		hardware->core_ident[1],
-		hardware->core_ident[2]);
-	if (version != 42U || cores != 1U)
+
+	/* Refuses anything but a single-core 4.2 with an MMU, the native layout and core. */
+	if (version != 42U || cores != 1U) {
+		kern_logf("v3d: unsupported engine %u.%u with %u cores\n", version / 10U, version % 10U, cores);
 		return ENOTSUP;
-	if ((hardware->hub_ident[2] & 0x100U) == 0)
+	}
+	if ((hardware->hub_ident[2] & 0x100U) == 0) {
+		kern_logf("v3d: engine has no MMU\n");
 		return ENOTSUP;
-	if ((layout & 0x20000U) == 0 || (layout & 0x10000U) != 0)
+	}
+	if ((layout & 0x20000U) == 0 || (layout & 0x10000U) != 0) {
+		kern_logf("v3d: unsupported hub layout %08x\n", layout);
 		return ENOTSUP;
-	if ((hardware->core_ident[0] & 0xffffffU) != 0x443356U)
+	}
+	if ((hardware->core_ident[0] & 0xffffffU) != 0x443356U) {
+		kern_logf("v3d: unknown core identification %08x\n", hardware->core_ident[0]);
 		return ENOTSUP;
+	}
 
 	/* PT PFNs encode at most 36 physical bits and this owner reserves 32-bit VAs. */
 	widths = kern_mmio_read32(engine->hub.mapped + 0x1238);
 	hardware->physical_bits = 30U + ((widths >> 8) & 15U);
 	hardware->virtual_bits = 30U + ((widths >> 4) & 15U);
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"V3 version %u cores %u PA %u VA %u",
-		version,
-		cores,
-		hardware->physical_bits,
-		hardware->virtual_bits);
-	if (hardware->physical_bits < 30U || hardware->physical_bits > 36U)
+
+	/* Requires a physical width the page table entries can name. */
+	if (hardware->physical_bits < 30U || hardware->physical_bits > 36U) {
+		kern_logf("v3d: MMU physical width %u unsupported\n", hardware->physical_bits);
 		return ENOTSUP;
+	}
 
 	/* The reported capability may exceed the driver's lower 4 GiB VA window. */
-	if (hardware->virtual_bits < 32U)
+	if (hardware->virtual_bits < 32U) {
+		kern_logf("v3d: MMU virtual width %u too narrow\n", hardware->virtual_bits);
 		return ENOTSUP;
+	}
 
 	/* Succeeded: register layout and address widths match the private hardware owner. */
 	return 0;

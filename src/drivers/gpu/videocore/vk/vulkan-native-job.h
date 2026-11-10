@@ -24,17 +24,12 @@ struct bcm2711_vulkan_native_job {
 	/*
 	 * A job runs in steps of at most one native pass: stepping is true from
 	 * the first step until the last, and cursor, region and remaining say
-	 * where the next step starts; the tick sums gather its cost report.
+	 * where the next step starts.
 	 */
 	bool stepping;
 	const struct bcm2711_vulkan_prepared_event *cursor;
 	uint32_t region;
 	uint64_t remaining;
-	uint64_t started;
-	uint64_t prepare_ticks;
-	uint64_t execute_ticks;
-	uint64_t release_ticks;
-	uint64_t copy_ticks;
 	/* The last step failed while preparing, before it launched anything or left a translation unpublished. */
 	bool prepare_failed;
 };
@@ -44,16 +39,9 @@ int bcm2711_vulkan_native_job_create(struct bcm2711_vulkan_object *command, stru
 
 /* Runs the job's next step (at most one native pass); done tells that the job has finished. */
 int bcm2711_vulkan_native_job_step(struct bcm2711_render_device *controller, struct bcm2711_render_session *session, void *payload, bool *done, bool *retired);
-void bcm2711_vulkan_native_job_count_step(struct bcm2711_render_device *controller, uint64_t ticks);
 int bcm2711_vulkan_native_job_dispose(struct bcm2711_render_device *controller, void *payload, bool retired);
 
 /* Only checked global native reset and zero external sessions authorize whole quarantine/closed-session retirement. */
 int bcm2711_vulkan_native_jobs_recover(struct bcm2711_render_device *controller);
-
-/*
- * Writes the cost report a step formatted (v3d.perf=1) to the log; the
- * executor calls it after it gave up the controller mutex.
- */
-void bcm2711_vulkan_native_perf_flush(void);
 
 #endif

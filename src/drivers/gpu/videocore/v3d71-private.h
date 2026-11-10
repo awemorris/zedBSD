@@ -91,14 +91,8 @@ struct bcm2712_v3d {
 	/* The firmware clock's rate after power-up, in hertz. */
 	uint32_t clock_hz;
 
-	/* The power manager's graphics registers as discovery found them (diagnostics). */
-	uint32_t pm_graphics;
-	uint32_t pm_v3d;
-
-	/* The bring-up ran (it runs once) and how far it came. */
+	/* The bring-up ran (it runs once). */
 	bool started;
-	const char *stage_failed;
-	int error;
 };
 
 /*

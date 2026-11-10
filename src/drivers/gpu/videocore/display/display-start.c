@@ -17,6 +17,7 @@
 
 #include <kern/device-io.h>
 #include <kern/kcrt.h>
+#include <kern/klog.h>
 #include <uapi/errno.h>
 
 #include "drivers/gpu/videocore/bcm2711-private.h"
@@ -65,85 +66,55 @@ bcm2711_display_start(
 	uint32_t order;
 	uint32_t max_core_hz;
 	uint64_t pixels_per_frame;
-	bool allowed;
 	int error;
 
-	/* Requires the unique framebuffer output proved by the read-only stage. */
+	/* Requires the unique framebuffer output proved by the read-only readout. */
 	if (start_attempted)
 		return EBUSY;
 	display->scanout_started = false;
 	if (!display->readout_done || !display->screen_matches)
 		return ENODEV;
 
-	/* Keeps both the new restart stop and the former takeover stop effective. */
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_DISPLAY, "R0");
-	if (!allowed)
-		return ECANCELED;
-	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_DISPLAY, "N1");
-	if (!allowed)
-		return ECANCELED;
-
 	/* Maps all required resources without touching registers. */
 	error = map_regions(fdt, display);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 map error %d", error);
+		kern_logf("rpi4gpu: display windows unusable (%d)\n", error);
 		return error;
 	}
 
 	/* Installs source service while the previously registered lines are masked. */
 	error = bcm2711_display_irq_prepare(display);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 irq error %d", error);
+		kern_logf("rpi4gpu: display interrupts unusable (%d)\n", error);
 		return error;
 	}
 
 	/* Captures the mode and sink metadata before any firmware notification. */
 	error = capture_mode(display, &mode, &order, &max_core_hz);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 capture error %d", error);
+		kern_logf("rpi4gpu: boot mode not captured (%d)\n", error);
 		return error;
 	}
-
-	/* Identifies the exact captured mode when pure program validation refuses it. */
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_DISPLAY,
-		"R0 mode %ux%u tmds %u order %u format %u",
-		mode.width,
-		mode.height,
-		mode.tmds_hz,
-		order,
-		display->screen.format);
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_DISPLAY,
-		"R0 porches h %u/%u/%u v %u/%u/%u",
-		mode.hfront,
-		mode.hsync,
-		mode.hback,
-		mode.vfront,
-		mode.vsync,
-		mode.vback);
 
 	/* Ensures no invalid field can fail preparation after the screen is stopped. */
 	error = bcm2711_display_program_prepare(&start_program, &mode, &display->screen, display->port, order, max_core_hz);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 program error %d", error);
+		kern_logf("rpi4gpu: mode %ux%u tmds %u order %u format %u refused (%d)\n",
+			  mode.width,
+			  mode.height,
+			  mode.tmds_hz,
+			  order,
+			  display->screen.format,
+			  error);
 		return error;
 	}
-
-	/* Publishes the selected port and gives time to record the last visible mark. */
-	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 begin hdmi%u %ux%u tmds %u",
-			   display->port,
-			   mode.width,
-			   mode.height,
-			   mode.tmds_hz);
-	bcm2711_stage_pause(BCM2711_FAMILY_DISPLAY, "R0");
 
 	/* Runs the prepared hardware operations once, stopping on the first failure. */
 	start_attempted = true;
 	display->channel = 0;
 	error = bcm2711_display_program_execute(&start_program, start_windows, &display->screen, display);
 	if (error != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 failed op %u error %d", start_program.failure, error);
+		kern_logf("rpi4gpu: display program failed at step %u (%d)\n", start_program.failure, error);
 		return error;
 	}
 
@@ -154,7 +125,6 @@ bcm2711_display_start(
 	display->console_core_hz = start_program.commands[start_program.count - 1U].value;
 	pixels_per_frame = (uint64_t)(mode.width + mode.hfront + mode.hsync + mode.hback) * (mode.height + mode.vfront + mode.vsync + mode.vback);
 	display->refresh_millihz = (uint32_t)(((uint64_t)mode.tmds_hz * 1000U + pixels_per_frame / 2U) / pixels_per_frame);
-	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 ok hdmi%u ch0 list43 frame observed", display->port);
 	return 0;
 }
 
@@ -259,14 +229,14 @@ capture_mode(
 		return ENODEV;
 	value = kern_mmio_read32(timing->mapped + 0x04);
 	if ((value & 0x11U) != 1U) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject pv-vcontrol=%08x", value);
+		kern_logf("rpi4gpu: mode rejected: pv-vcontrol=%08x\n", value);
 		return ENOTSUP;
 	}
 
 	/* Rejects pixel repetition before decoding full-pixel timings. */
 	value = encoder_read(base, BCM2711_ENCODER_CORE, 0x100);
 	if ((value & 0x0fU) != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject pixel-repeat=%08x", value);
+		kern_logf("rpi4gpu: mode rejected: pixel-repeat=%08x\n", value);
 		return ENOTSUP;
 	}
 
@@ -276,14 +246,14 @@ capture_mode(
 	 */
 	value = encoder_read(base, BCM2711_ENCODER_CORE, 0x170);
 	if ((value & 0x0fU) != 0 && (value & 0x0fU) != 4U) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject deep-color=%08x", value);
+		kern_logf("rpi4gpu: mode rejected: deep-color=%08x\n", value);
 		return ENOTSUP;
 	}
 
 	/* Keeps scrambled links out of the existing non-SCDC restart path. */
 	value = encoder_read(base, BCM2711_ENCODER_CORE, 0x1c4);
 	if ((value & 1U) != 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject scrambler=%08x", value);
+		kern_logf("rpi4gpu: mode rejected: scrambler=%08x\n", value);
 		return ENOTSUP;
 	}
 
@@ -324,21 +294,21 @@ capture_mode(
 	/* Requires the oscillator representation used by the fixed-point recovery. */
 	value = encoder_read(base, BCM2711_ENCODER_RATE, 0x1c);
 	if ((value & 0x03000000U) != 0x02000000U) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject rm-format=%08x", value);
+		kern_logf("rpi4gpu: mode rejected: rm-format=%08x\n", value);
 		return ENOTSUP;
 	}
 
 	/* Requires the PLL prescaler used by the rate recovery formula. */
 	value = encoder_read(base, BCM2711_ENCODER_PHY, 0x34);
 	if ((value & 0x0fU) != 1U) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject pll-pdiv=%08x", value);
+		kern_logf("rpi4gpu: mode rejected: pll-pdiv=%08x\n", value);
 		return ENOTSUP;
 	}
 
 	/* Requires the reference doubler assumed by the captured oscillator ratio. */
 	value = encoder_read(base, BCM2711_ENCODER_PHY, 0x20);
 	if ((value & 0x2000U) == 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject pll-doubler=%08x", value);
+		kern_logf("rpi4gpu: mode rejected: pll-doubler=%08x\n", value);
 		return ENOTSUP;
 	}
 
@@ -348,11 +318,7 @@ capture_mode(
 	offset = encoder_read(base, BCM2711_ENCODER_RATE, 0x18);
 	offset &= 0x7fffffffU;
 	if (divider == 0 || offset == 0) {
-		bcm2711_stage_mark(
-			BCM2711_FAMILY_DISPLAY,
-			"R0 reject pll-vco-div=%u rm-offset=%08x",
-			divider,
-			offset);
+		kern_logf("rpi4gpu: mode rejected: pll-vco-div=%u rm-offset=%08x\n", divider, offset);
 		return ENOTSUP;
 	}
 
@@ -378,19 +344,17 @@ capture_mode(
 		    plane->scaled ||
 		    plane->flipped ||
 		    plane->words != 8U) {
-			bcm2711_stage_mark(
-				BCM2711_FAMILY_DISPLAY,
-				"R0 reject plane fmt=%u scaled=%u flip=%u words=%u",
-				plane->format,
-				(unsigned)plane->scaled,
-				(unsigned)plane->flipped,
-				plane->words);
+			kern_logf("rpi4gpu: mode rejected: plane fmt=%u scaled=%u flip=%u words=%u\n",
+				  plane->format,
+				  (unsigned)plane->scaled,
+				  (unsigned)plane->flipped,
+				  plane->words);
 			return ENOTSUP;
 		}
 
 		/* Reports the layout bits that prevent a packed RGB32 takeover. */
 		if ((plane->control & 0x00300000U) != 0) {
-			bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject plane-control=%08x", plane->control);
+			kern_logf("rpi4gpu: mode rejected: plane-control=%08x\n", plane->control);
 			return ENOTSUP;
 		}
 
@@ -401,7 +365,7 @@ capture_mode(
 
 	/* No retained plane supplied a usable RGB32 order. */
 	if (*order == 0) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject plane-order=%u count=%u", *order, count);
+		kern_logf("rpi4gpu: mode rejected: plane-order=%u count=%u\n", *order, count);
 		return ENOTSUP;
 	}
 
@@ -422,18 +386,6 @@ capture_mode(
 		error = capture_avi(base, mode);
 		if (error != 0)
 			return error;
-	}
-
-	/* Retains metadata needed to explain a later RGB/repetition/header refusal. */
-	if (mode->hdmi) {
-		bcm2711_stage_mark(
-			BCM2711_FAMILY_DISPLAY,
-			"R0 AVI %02x/%02x/%02x color=%02x repeat=%02x",
-			(unsigned)mode->avi[0],
-			(unsigned)mode->avi[1],
-			(unsigned)mode->avi[2],
-			(unsigned)mode->avi[4],
-			(unsigned)mode->avi[8]);
 	}
 
 	/* Requires the core maximum used by both setup and sustained-rate requests. */
@@ -482,7 +434,7 @@ capture_avi(
 	/* Requires AVI transmission to be enabled and the packet RAM to exist. */
 	value = encoder_read(base, BCM2711_ENCODER_CORE, 0xbc);
 	if ((value & 0x10004U) != 0x10004U) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject avi-enable=%08x", value);
+		kern_logf("rpi4gpu: mode rejected: avi-enable=%08x\n", value);
 		return ENOTSUP;
 	}
 
@@ -511,7 +463,7 @@ capture_avi(
 	/* Explicit AVI quantization takes precedence over the CEA default. */
 	quantization = (mode->avi[6] >> 2) & 3U;
 	if (quantization == 3U) {
-		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 reject avi-quantization=%u", quantization);
+		kern_logf("rpi4gpu: mode rejected: avi-quantization=%u\n", quantization);
 		return ENOTSUP;
 	}
 
