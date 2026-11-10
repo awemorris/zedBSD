@@ -27,11 +27,14 @@
 
 #include "drivers/gpu/videocore/bcm2711-private.h"
 
+/* The stage-mark family of the HVS6 display, and its boot parameter prefix. */
+#define BCM2712_FAMILY_DISPLAY		"hvs6"
+
 /* The compositor's output channels and the pixel valves (HDMI0, HDMI1). */
 #define BCM2712_HVS_CHANNELS		3U
 #define BCM2712_HVS_VALVES		2U
 
-/* The vertical blanks the refresh measurement times (an odd count, an even number of frames between them). */
+/* The vertical blanks the display's stage R1 times (an odd count, an even number of frames between them). */
 #define BCM2712_VBLANK_TIMED		7U
 
 /* The most planes of one display list the readout keeps. */
@@ -72,12 +75,13 @@ struct bcm2712_hvs_plane {
  * window is the HVS6's, its timing windows and lines the pixel valves', its
  * port and channel the channel the firmware shows.  Discovery fills the
  * windows and the interrupt lines; the readout fills the rest from the
- * hardware.  guard protects the vertical-blank count and times against the
- * refresh measurement's handler.
+ * hardware.  guard protects the vertical-blank count and times against
+ * R1's handler.
  */
 struct bcm2712_display {
 	struct bcm2711_display base;
 	bool present;
+	struct bcm2711_window iommu;
 	struct kern_boot_framebuffer screen;
 	bool screen_known;
 
@@ -86,14 +90,16 @@ struct bcm2712_display {
 	uint32_t channel_base;
 	uint32_t channel_stride;
 
-	/* The display list memory's words. */
+	/* The display list memory's words and the unified pixel memory's size in 256-byte words. */
 	uint32_t list_words;
+	uint32_t ubm_words;
 
 	/* The channel the firmware shows, its list, and where that list ends (its END word). */
 	uint32_t channel;
 	uint32_t firmware_head;
 	uint32_t firmware_end;
 	uint32_t plane_count;
+	uint32_t skipped_elements;
 	struct bcm2712_hvs_plane planes[BCM2712_HVS_LIST_PLANES];
 
 	/* The driver's own list, once it took the channel over: the console list, and its words with the END word. */
@@ -173,6 +179,7 @@ int bcm2712_display_discover(const struct drv_fdt *fdt, struct bcm2712_display *
 int bcm2712_display_readout(struct bcm2712_display *display);
 int bcm2712_display_adopt(struct bcm2712_display *display);
 int bcm2712_display_vblank_test(struct bcm2712_display *display);
+int bcm2712_display_overlay_test(struct bcm2712_display *display);
 int bcm2712_display_attach_device(struct bcm2712_display *display);
 
 #endif

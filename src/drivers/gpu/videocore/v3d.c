@@ -6,11 +6,11 @@
  */
 
 /*
- * The V3D 4.2 render engine of the BCM2711: discovery.
+ * The V3D 4.2 render engine of the BCM2711: discovery (stage V0).
  *
  * The engine sits in its own power domain, which is off until the driver
  * turns it on, and touching its registers while the domain is off can stop
- * the processor.  Discovery therefore only reads the device tree, maps the hub and
+ * the processor.  V0 therefore only reads the device tree, maps the hub and
  * core windows and installs a (masked) interrupt handler.  It reads no
  * register of the engine.
  */
@@ -19,7 +19,6 @@
 #include <stdint.h>
 
 #include <drivers/generic/fdt.h>
-#include <kern/klog.h>
 #include <uapi/errno.h>
 
 #include "drivers/gpu/videocore/bcm2711-private.h"
@@ -34,14 +33,17 @@
 /* The cells of one clocks entry: the provider's phandle and its clock number. */
 #define ENGINE_CLOCK_CELLS			2U
 
+/* The firmware's clock number of the engine (firmware wiki). */
+#define ENGINE_FIRMWARE_CLOCK		5U
+
 static uint32_t read_clock_id(const struct drv_fdt *fdt, uint32_t node);
 static bool has_property(const struct drv_fdt *fdt, uint32_t node, const char *name);
 
 /*
- * Finds and maps the V3D engine.
+ * Runs stage V0: finds and maps the V3D engine.
  *
  * Returns 0 when both windows were found and mapped; ENODEV when the board
- * has no usable engine.
+ * has no usable engine; ECANCELED when the boot parameters stop V3D before V0.
  */
 int
 bcm2711_v3d_discover(
@@ -49,6 +51,8 @@ bcm2711_v3d_discover(
 	struct bcm2711_v3d *v3d)
 {
 	uint32_t node;
+	bool allowed;
+	int irq_error;
 	int error;
 
 	/* Starts from an empty description with no interrupt line. */
@@ -64,24 +68,34 @@ bcm2711_v3d_discover(
 	v3d->has_reset = false;
 	v3d->clock_id = 0;
 
+	/* Honors v3d.stop=V0. */
+	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V0");
+	if (!allowed) {
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 stopped by boot parameter");
+		return ECANCELED;
+	}
+
+	/* Marks the start of the stage on the screen. */
+	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 begin");
+
 	/* Finds the engine; without it there is nothing to render with. */
 	error = bcm2711_fdt_find(fdt, ENGINE_COMPATIBLE, &node);
 	if (error != 0) {
-		kern_logf("v3d: no v3d node: no engine\n");
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 no v3d node: no engine");
 		return ENODEV;
 	}
 
 	/* Reads the hub window, which holds the parts shared by every core. */
 	error = bcm2711_fdt_window(fdt, node, ENGINE_WINDOW_HUB, &v3d->hub);
 	if (error != 0) {
-		kern_logf("v3d: hub registers unreadable (%d)\n", error);
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 hub reg unreadable (%d)", error);
 		return ENODEV;
 	}
 
 	/* Reads the window of the engine's single core. */
 	error = bcm2711_fdt_window(fdt, node, ENGINE_WINDOW_CORE, &v3d->core);
 	if (error != 0) {
-		kern_logf("v3d: core registers unreadable (%d)\n", error);
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 core reg unreadable (%d)", error);
 		return ENODEV;
 	}
 
@@ -98,22 +112,39 @@ bcm2711_v3d_discover(
 	/* Maps the hub; no register is read while the power domain may be off. */
 	error = bcm2711_map_window(&v3d->hub);
 	if (error != 0) {
-		kern_logf("v3d: hub map failed (%d)\n", error);
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 hub map failed (%d)", error);
 		return ENODEV;
 	}
 
 	/* Maps the core, under the same rule. */
 	error = bcm2711_map_window(&v3d->core);
 	if (error != 0) {
-		kern_logf("v3d: core map failed (%d)\n", error);
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 core map failed (%d)", error);
 		return ENODEV;
 	}
 
-	/* Installs the engine's handler, leaving the line masked; a line without a handler stays absent. */
-	(void)bcm2711_irq_install(&v3d->irq);
+	/* Installs the engine's handler, leaving the line masked. */
+	irq_error = bcm2711_irq_install(&v3d->irq);
 
-	/* Publishes the engine to the later steps. */
+	/* Shows the windows, the interrupt and the providers the node names. */
+	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 hub %llx+%llx core %llx+%llx",
+			   (unsigned long long)v3d->hub.physical,
+			   (unsigned long long)v3d->hub.size,
+			   (unsigned long long)v3d->core.physical,
+			   (unsigned long long)v3d->core.size);
+	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 irq %d%s pd %s reset %s clk %u",
+			   v3d->irq.irq,
+			   irq_error == 0 ? " (masked)" : " (no handler)",
+			   v3d->has_power_domain ? "yes" : "no",
+			   v3d->has_reset ? "yes" : "no",
+			   (unsigned)v3d->clock_id);
+
+	/* Shows the firmware's clock of the engine; only asks. */
+	bcm2711_clock_report(BCM2711_FAMILY_V3D, "v3d", ENGINE_FIRMWARE_CLOCK);
+
+	/* Publishes the engine to the later stages. */
 	v3d->present = true;
+	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V0 ok");
 
 	/* Succeeded: both windows are mapped. */
 	return 0;

@@ -116,8 +116,11 @@ execute_command(
 		 * accepts the message status alone. Firmware may have stopped video
 		 * already, so continue the prepared restart in this one case.
 		 */
-		if (error != 0 && error != ENOTSUP)
+		if (error == ENOTSUP) {
+			bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 display-done has no tag reply; continuing restart");
+		} else if (error != 0) {
 			return error;
+		}
 
 		/* Refuses an observable framebuffer change before rebuilding scanout. */
 		error = verify_framebuffer(screen);

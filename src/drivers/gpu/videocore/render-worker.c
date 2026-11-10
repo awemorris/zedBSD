@@ -225,6 +225,8 @@ bcm2711_render_worker_submit(
 	request->state = REQUEST_QUEUED;
 	request->canceled = 0;
 	request->next = NULL;
+	request->queued_ticks = clock_ticks();
+	request->queued_ns = bcm2711_v3d_busy_clock();
 	session->pending++;
 	if (worker->tail == NULL) {
 		worker->head = request;
@@ -258,7 +260,12 @@ bcm2711_render_worker_step(
 	struct bcm2711_render_device *controller)
 {
 	struct bcm2711_render_request *request;
+	struct bcm2711_v3d_perf *perf;
 	unsigned long enabled;
+	uint64_t started;
+	uint64_t started_ns;
+	uint64_t waited;
+	uint64_t taken;
 	bool parked;
 	bool retired;
 	bool global_failure;
@@ -270,6 +277,8 @@ bcm2711_render_worker_step(
 	request = take_request(controller);
 	if (request == NULL)
 		return EAGAIN;
+	started = clock_ticks();
+	started_ns = bcm2711_v3d_busy_clock();
 	mutex_lock(&controller->mutex);
 
 	/* Stop and global fault may arrive after dequeue while this worker waits for the controller. */
@@ -321,6 +330,27 @@ bcm2711_render_worker_step(
 		if (error == 0)
 			error = disposed;
 	}
+
+	/*
+	 * Diagnostic: how long the request waited in the FIFO behind earlier
+	 * ones, and how long it then held the worker; a synchronous submit
+	 * returns after both.
+	 */
+	perf = &controller->space.native->hardware.perf;
+	waited = started - request->queued_ticks;
+	taken = clock_ticks() - started;
+	perf->requests++;
+	perf->request_wait_ticks += waited;
+	perf->request_run_ticks += taken;
+	if (waited > perf->request_wait_max)
+		perf->request_wait_max = waited;
+	if (taken > perf->request_run_max)
+		perf->request_run_max = taken;
+
+	/* Diagnostic: the same two on the fine counter, for the submission chain. */
+	perf->chain_requests++;
+	perf->chain_fifo_ns += started_ns - request->queued_ns;
+	perf->chain_worker_ns += bcm2711_v3d_busy_clock() - started_ns;
 
 	mutex_unlock(&controller->mutex);
 
@@ -650,6 +680,7 @@ job_reserve(
 	const char *reason;
 	unsigned capacity;
 	uint64_t mask;
+	uint32_t held;
 	uint32_t slot;
 
 	/* A refused reservation transfers no callback or output token to the backend. */
@@ -687,9 +718,12 @@ job_reserve(
 
 	/* The capacity snapshot and pool acquisition share this guard, so a free marker must exist. */
 	request = NULL;
+	held = 0;
 	for (slot = 0; slot < BCM2711_RENDER_MARKERS; slot++) {
-		if (controller->worker.markers[slot].state != REQUEST_FREE)
+		if (controller->worker.markers[slot].state != REQUEST_FREE) {
+			held++;
 			continue;
+		}
 		if (request == NULL)
 			request = &controller->worker.markers[slot];
 	}
@@ -708,6 +742,10 @@ job_reserve(
 		controller->worker.covered++;
 	session->markers++;
 	*token = request;
+
+	/* Diagnostic: the most markers held at once in the report window, this one included. */
+	if (held + 1U > controller->space.native->hardware.perf.markers_max)
+		controller->space.native->hardware.perf.markers_max = held + 1U;
 
 	spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 
@@ -914,6 +952,8 @@ queue_marker(
 	request->canceled = error;
 	request->state = REQUEST_QUEUED;
 	request->next = NULL;
+	request->queued_ticks = clock_ticks();
+	request->queued_ns = bcm2711_v3d_busy_clock();
 	if (controller->worker.tail == NULL) {
 		controller->worker.head = request;
 	} else {
@@ -1202,13 +1242,29 @@ bcm2711_render_execution_submit(
 	struct bcm2711_render_execution *execution)
 {
 	struct bcm2711_render_device *controller;
+	struct bcm2711_v3d_perf *perf;
 	unsigned long enabled;
+	bool idle;
 
-	/* The execution joins the tail of its session's queue. */
+	/* The execution joins the tail of its session's queue, stamped for the submission chain's diagnostic. */
 	controller = session->device;
 	execution->session = session;
 	execution->next = NULL;
+	execution->queued_ns = bcm2711_v3d_busy_clock();
+	execution->started = false;
+	perf = &controller->space.native->hardware.perf;
 	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
+
+	/* Diagnostic: an execution that finds the executor idle ends its idle time since the last delivery. */
+	idle = false;
+	if (controller->worker.executions == 0)
+		idle = true;
+	if (perf->chain_last_end_ns == 0 || execution->queued_ns <= perf->chain_last_end_ns)
+		idle = false;
+	if (idle) {
+		perf->chain_idles++;
+		perf->chain_idle_ns += execution->queued_ns - perf->chain_last_end_ns;
+	}
 
 	if (session->execution_tail == NULL) {
 		session->execution_head = execution;
@@ -1273,8 +1329,12 @@ bcm2711_render_executor_step(
 	struct worker_ended ended;
 	unsigned long enabled;
 	uint64_t bytes;
+	struct bcm2711_v3d_perf *perf;
 	const char *stage;
+	uint64_t held;
+	uint64_t released;
 	uint64_t ordinal;
+	uint64_t done_ns;
 	bool display;
 	bool failed;
 	bool done;
@@ -1305,6 +1365,8 @@ bcm2711_render_executor_step(
 	if (session == NULL)
 		return EAGAIN;
 	mutex_lock(&controller->mutex);
+	held = clock_ticks();
+	released = controller->worker.released_ticks;
 
 	/* A stopped session or a faulted engine ends the execution without running it. */
 	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
@@ -1332,6 +1394,14 @@ bcm2711_render_executor_step(
 		ordinal = execution->ordinal;
 		done = true;
 		if (error == 0) {
+			/* Diagnostic: an execution's first step ends its wait in the queue. */
+			perf = &controller->space.native->hardware.perf;
+			if (!execution->started) {
+				execution->started = true;
+				perf->chain_executions++;
+				perf->chain_queue_ns += bcm2711_v3d_busy_clock() - execution->queued_ns;
+			}
+
 			execution->engine = true;
 			error = execution->step(controller, execution, &done);
 			stage = "step";
@@ -1343,6 +1413,11 @@ bcm2711_render_executor_step(
 			}
 		}
 	}
+
+	/* Diagnostic: when the step that finished the execution returned, for its delivery's wait. */
+	done_ns = 0;
+	if (done)
+		done_ns = bcm2711_v3d_busy_clock();
 
 	/* A finished execution leaves its queue before its end frees it; a submit may be linking behind it. */
 	settled = 0;
@@ -1417,7 +1492,16 @@ bcm2711_render_executor_step(
 		failed = true;
 	}
 
+	/* Diagnostic: the step's hold of the mutex, without the window. */
+	held = clock_ticks() - held - (controller->worker.released_ticks - released);
+	perf = &controller->space.native->hardware.perf;
+	if (held > perf->step_hold_max)
+		perf->step_hold_max = held;
+
 	mutex_unlock(&controller->mutex);
+
+	/* The cost report the step formatted (v3d.perf=1) reaches the log without the mutex. */
+	bcm2711_vulkan_native_perf_flush();
 
 	/* Common observers see the loss outside the mutex. */
 	if (failed)
@@ -1486,6 +1570,14 @@ bcm2711_render_executor_step(
 		next = request->parked_next;
 		request->parked_next = NULL;
 		finish_request(controller, request, parked_outcome(controller, request));
+	}
+
+	/* Diagnostic: the delivery of a finished execution's completions, and where the executor's idle time starts. */
+	if (done_ns != 0) {
+		perf = &controller->space.native->hardware.perf;
+		perf->chain_last_end_ns = bcm2711_v3d_busy_clock();
+		perf->chain_finishes++;
+		perf->chain_finish_ns += perf->chain_last_end_ns - done_ns;
 	}
 
 	/* The ended executions give back their session's pending holds. */
@@ -1998,6 +2090,7 @@ bcm2711_render_window_open(
 		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 
 		mutex_unlock(&controller->mutex);
+		controller->worker.released_at = clock_ticks();
 		enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
 
 		/* A fault ends the wait; the launch then refuses. */
@@ -2011,6 +2104,7 @@ bcm2711_render_window_open(
 		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 
 		mutex_lock(&controller->mutex);
+		controller->worker.released_ticks += clock_ticks() - controller->worker.released_at;
 		enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
 	}
 
@@ -2022,6 +2116,7 @@ bcm2711_render_window_open(
 	spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 
 	mutex_unlock(&controller->mutex);
+	controller->worker.released_at = clock_ticks();
 
 	/* Succeeded: the window is open and the mutex is free. */
 	return;
@@ -2035,8 +2130,9 @@ bcm2711_render_window_close(
 	unsigned long enabled;
 	int error;
 
-	/* The mutex first, so no mapper slips in between. */
+	/* The mutex first, so no mapper slips in between; the time without it leaves the step's hold. */
 	mutex_lock(&controller->mutex);
+	controller->worker.released_ticks += clock_ticks() - controller->worker.released_at;
 	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
 
 	if (!controller->space.native->hardware.window)

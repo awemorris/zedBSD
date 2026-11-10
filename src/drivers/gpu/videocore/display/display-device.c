@@ -152,31 +152,44 @@ static int find_output(const struct display_device *controller, uint32_t identif
 static int restore_console(struct display_device *controller);
 static int copy_frame(struct display_device *controller, struct display_session *session, const struct display_resource *resource, const struct gpu_display_present *request, struct drv_bcm2711_boot_screen *frame);
 static int observe_frames(struct bcm2711_display *display);
+static int exercise_display(struct display_device *controller);
 static void bind_operations(struct display_device *controller);
 
 /*
  * Registers a confirmed boot output with owned copy storage and complete leases.
  * Registration failures unwind only after the console has no borrowed DMA holds.
+ *
+ * The test pictures of P2 and P3 (two striped frames and a translucent
+ * checker) are shown only when the boot asked for the self-test
+ * (rpi4gpu.selftest=1); otherwise the screen keeps the console.
  */
 int
 bcm2711_display_register(
 	struct bcm2711_display *display)
 {
 	struct display_device *controller;
+	bool allowed;
+	bool selftest;
 	uint32_t slot;
 	int error;
 	int detached;
 
-	/* Requires a started scanout whose console fits the copy storage. */
+	/* Keeps diagnostic stop points effective before allocating or publishing a node. */
+	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_DISPLAY, "P1");
+	if (!allowed)
+		return ECANCELED;
 	if (display->screen.size > DISPLAY_RESOURCE_BYTES)
 		return ENOTSUP;
 	if (!display->scanout_started || display->refresh_millihz == 0)
 		return ENODEV;
 
-	/* Requires one serviced frame before allocating or changing the plane. */
+	/* Reports one bounded cadence observation before allocating or changing the plane. */
 	error = observe_frames(display);
 	if (error != 0)
 		return error;
+	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_DISPLAY, "P2");
+	if (!allowed)
+		return ECANCELED;
 
 	/* Creates one persistent controller; repeated registration never resets owners. */
 	controller = &display_controller;
@@ -224,9 +237,23 @@ bcm2711_display_register(
 		return error;
 	}
 
+	/* Exercises the flips and the composition on the screen only when the boot asked for the self-test. */
+	error = 0;
+	selftest = bcm2711_stage_selftest();
+	if (selftest)
+		error = exercise_display(controller);
+	if (error == 0) {
+		/* A P5 stop preserves the observed P1/P2/P3 result without registering a node. */
+		allowed = bcm2711_stage_allowed(BCM2711_FAMILY_DISPLAY, "P5");
+		if (!allowed)
+			error = ECANCELED;
+	}
+
 	/* Publishes only the operations implemented by this display-only device. */
-	bind_operations(controller);
-	error = drv_gpu_register(&controller->operations, controller, &controller->gpu);
+	if (error == 0) {
+		bind_operations(controller);
+		error = drv_gpu_register(&controller->operations, controller, &controller->gpu);
+	}
 
 	/* Unwinds only when the native console owns every active and pending reference. */
 	if (error != 0) {
@@ -243,6 +270,7 @@ bcm2711_display_register(
 
 	/* Borrowed state and copy buffers now persist independently of open descriptions. */
 	controller->registered = true;
+	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P5 display node ready hdmi%u copy FIFO", display->port);
 
 	/* Succeeded: userspace can enumerate and lease the actual boot output. */
 	return 0;
@@ -250,7 +278,8 @@ bcm2711_display_register(
 
 /*
  * Waits, at most one bounded second, for a selected-PV frame without holding
- * the IRQ guard.
+ * the IRQ guard.  The self-test (rpi4gpu.selftest=1) counts the frames of the
+ * whole second instead.
  */
 static int
 observe_frames(
@@ -259,25 +288,134 @@ observe_frames(
 	struct bcm2711_flip_status before;
 	struct bcm2711_flip_status after;
 	uint32_t step;
+	uint32_t waited_ms;
+	bool selftest;
 
 	/* Leaves the native console visible while observing actual serviced frame sources. */
+	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P1 begin vblank observation");
+	selftest = bcm2711_stage_selftest();
 	bcm2711_display_flip_snapshot(display, &before);
 	after = before;
+	waited_ms = 0;
 	for (step = 0; step < 1000U; step++) {
 		/* Millisecond waits allow the selected PV IRQ to update its persistent counter. */
 		kern_usleep_range(1000, 1000);
+		waited_ms++;
 		bcm2711_display_flip_snapshot(display, &after);
-		if (after.frame_sequence != before.frame_sequence)
+		if (!selftest && after.frame_sequence != before.frame_sequence)
 			break;
 	}
 
-	/* Refuses an output whose frames never reached the driver. */
-	if (after.frame_sequence == before.frame_sequence) {
-		kern_logf("bcm2711: no frame interrupt within one second\n");
+	/* The captured cadence is evidence for the physical test, never an assumed 60 Hz. */
+	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P1 frames %llu in %u ms expected %u mHz",
+			   (unsigned long long)(after.frame_sequence - before.frame_sequence),
+			   waited_ms,
+			   display->refresh_millihz);
+	if (after.frame_sequence == before.frame_sequence)
 		return ETIMEDOUT;
-	}
 
 	/* Succeeded: at least one actual selected-PV frame arrived during observation. */
+	return 0;
+}
+
+/* Presents both owned targets and one translucent patch, retiring all DMA before return. */
+static int
+exercise_display(
+	struct display_device *controller)
+{
+	struct bcm2711_display *display;
+	struct drv_bcm2711_boot_screen frame;
+	uint8_t *console;
+	uint8_t *pixel;
+	uint32_t slot;
+	uint32_t row;
+	uint32_t column;
+	bool allowed;
+	int error;
+	int restored;
+
+	/* The diagnostics use the same CPU views and physical runs as subsequent copy presents. */
+	display = controller->native;
+	console = kern_pmem_to_kernel(display->screen.physical);
+	if (console == NULL)
+		return EFAULT;
+	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P2 begin two owned buffers");
+	bcm2711_stage_pause(BCM2711_FAMILY_DISPLAY, "P2");
+
+	/* Two distinct top stripes make consecutive frame adoption visible in a photograph. */
+	error = 0;
+	for (slot = 0; slot < 2U; slot++) {
+		/* A fresh console copy keeps lower text intact under an opaque primary. */
+		kern_memcpy(controller->copies[slot]->address, console, (size_t)display->screen.size);
+		for (row = 0; row < display->screen.height / 8U; row++) {
+			/* Uses green then purple, independent of the native red/blue byte order. */
+			pixel = (uint8_t *)controller->copies[slot]->address + (uint64_t)row * display->screen.pitch;
+			for (column = 0; column < display->screen.width; column++) {
+				/* The opaque stripe leaves the rest of the retained text view unchanged. */
+				pixel[column * 4U] = (uint8_t)(slot * 0xc0U);
+				pixel[column * 4U + 1U] = (uint8_t)((1U - slot) * 0xc0U);
+				pixel[column * 4U + 2U] = (uint8_t)(slot * 0xc0U);
+				pixel[column * 4U + 3U] = 0xff;
+			}
+		}
+
+		/* A submitted target stays immutable until a later confirmed list retires it. */
+		frame = display->screen;
+		frame.physical = controller->copies[slot]->memory.paddr;
+		error = bcm2711_display_flip_present(display, &frame);
+		if (error != 0)
+			break;
+		bcm2711_stage_pause(BCM2711_FAMILY_DISPLAY, "P2 adopted");
+	}
+
+	/* Console adoption, even after timeout, is the only permission to reuse both targets. */
+	restored = bcm2711_display_flip_restore(display);
+	if (restored != 0)
+		return restored;
+	if (error != 0)
+		return error;
+	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P2 two flips and console adopted");
+	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_DISPLAY, "P3");
+	if (!allowed)
+		return ECANCELED;
+
+	/* Places one compact premultiplied checker at the upper right without scaling. */
+	frame = display->screen;
+	if (frame.width > 256U)
+		frame.width = 256;
+	if (frame.height > 128U)
+		frame.height = 128;
+	frame.pitch = frame.width * 4U;
+	frame.size = (uint64_t)frame.pitch * frame.height;
+	frame.physical = controller->copies[0]->memory.paddr;
+	for (row = 0; row < frame.height; row++) {
+		/* All colors are premultiplied for half-opacity HVS pixel alpha. */
+		pixel = (uint8_t *)controller->copies[0]->address + (uint64_t)row * frame.pitch;
+		for (column = 0; column < frame.width; column++) {
+			/* Alternating white and green expose both blending and upper-plane positioning. */
+			pixel[column * 4U] = (uint8_t)(((column / 16U + row / 16U) & 1U) * 0x80U);
+			pixel[column * 4U + 1U] = 0x80;
+			pixel[column * 4U + 2U] = pixel[column * 4U];
+			pixel[column * 4U + 3U] = 0x80;
+		}
+	}
+
+	/* Actual two-plane composition uses a fresh console list and fresh upper contexts. */
+	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P3 begin premultiplied checker");
+	bcm2711_stage_pause(BCM2711_FAMILY_DISPLAY, "P3");
+	error = bcm2711_display_flip_compose(display, &frame, display->screen.width - frame.width, 0, true);
+	if (error == 0)
+		bcm2711_stage_pause(BCM2711_FAMILY_DISPLAY, "P3 adopted");
+
+	/* Any failed retirement preserves allocations in the permanent unpublished controller. */
+	restored = bcm2711_display_flip_restore(display);
+	if (restored != 0)
+		return restored;
+	if (error != 0)
+		return error;
+	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P3 composed frame and console adopted");
+
+	/* Succeeded: no diagnostic buffer remains in the active or pending HVS list. */
 	return 0;
 }
 
@@ -327,7 +465,7 @@ device_close(
 		cursor_reset(controller);
 		error = restore_console(controller);
 		if (error != 0)
-			kern_logf("bcm2711: lease close retains uncertain copy buffers (%d)\n", error);
+			bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "lease close retains uncertain copy buffers (%d)", error);
 		controller->owner = NULL;
 		session->lease = 0;
 		bcm2711_display_flip_disown(controller->native);
@@ -1163,15 +1301,23 @@ output_adoption_wait(
 	struct display_session *session;
 	struct bcm2711_flip_owner owner;
 	struct bcm2711_flip_status status;
+	uint64_t mark;
+	uint64_t wait_ticks;
 	int error;
 
 	/* Waits for a list showing the record, holding no lock or pin. */
 	controller = opaque;
 	session = private_session;
 	lease_owner(session, lease, &owner);
+	mark = clock_ticks();
 	error = bcm2711_display_flip_wait(controller->native, &owner, *sequence);
+	wait_ticks = clock_ticks() - mark;
 	if (error != 0)
 		return error;
+
+	/* The adoption is a cadence event and a flip of the report. */
+	bcm2711_display_flip_note(controller->native, BCM2711_FLIP_CADENCE_FLIP);
+	bcm2711_display_flip_report(controller->native, true, 0, 0, wait_ticks);
 
 	/* The highest adopted number, at least the record's own. */
 	if (adopted != NULL) {
@@ -1821,6 +1967,7 @@ output_cursor_set(
 	uint64_t span;
 	uint32_t index;
 	uint32_t row;
+	bool copied;
 	int same;
 	int error;
 
@@ -1895,8 +2042,10 @@ output_cursor_set(
 		mutex_unlock(&controller->plane_mutex);
 		return EBUSY;
 	}
+	copied = false;
 	if (target == NULL) {
 		target = controller->cursors[index];
+		copied = true;
 
 		/* A cacheable source may hold lines older than the device's writes; they go before the rows are read. */
 		if (!resource->buffer->uncached)
@@ -1912,6 +2061,9 @@ output_cursor_set(
 		kern_memcpy(&controller->keys[index], &key, sizeof(key));
 	}
 
+	/* The flip report counts the set, and whether it copied rows. */
+	bcm2711_display_flip_count_cursor(controller->native, copied);
+
 	/* The plane names the new image from now on, shown or not. */
 	cursor = controller->cursor;
 	cursor.physical = (uint32_t)target->memory.paddr;
@@ -1924,6 +2076,9 @@ output_cursor_set(
 	error = cursor_record(controller, private_session, request->lease, &cursor);
 
 	mutex_unlock(&controller->plane_mutex);
+
+	/* The cadence notes the set's time outside the mutex, as its report may log. */
+	bcm2711_display_flip_note(controller->native, BCM2711_FLIP_CADENCE_SET);
 
 	/* A refused record leaves the previous image whole while a list may name it. */
 	if (error != 0)
@@ -1964,6 +2119,9 @@ output_cursor_move(
 	error = cursor_record(controller, private_session, request->lease, &cursor);
 
 	mutex_unlock(&controller->plane_mutex);
+
+	/* The cadence notes the move's time outside the mutex, as its report may log. */
+	bcm2711_display_flip_note(controller->native, BCM2711_FLIP_CADENCE_MOVE);
 
 	/* Reports a refused record. */
 	if (error != 0)

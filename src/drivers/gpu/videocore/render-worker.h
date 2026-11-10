@@ -91,6 +91,9 @@ struct bcm2711_render_execution {
 	uint64_t bytes;
 	/* The execution uses a run the display holds (a frame, a present copy, the cursor): it runs first. */
 	bool display;
+	/* Diagnostic: the fine counter in nanoseconds when it was queued, and whether its first step began. */
+	uint64_t queued_ns;
+	bool started;
 	/*
 	 * Set by a failed step whose failure is the engine's (a launched pass,
 	 * translations that could not be published, uncertain retirement); a step
@@ -113,6 +116,9 @@ struct bcm2711_render_request {
 	uint32_t state;
 	int canceled;
 	bool supervised;
+	/* Diagnostic tick count, and fine counter in nanoseconds, when the request entered the FIFO. */
+	uint64_t queued_ticks;
+	uint64_t queued_ns;
 	/* A parked domain completion is released once its session has executed this many executions. */
 	uint64_t required;
 	/*
@@ -173,6 +179,13 @@ struct bcm2711_render_worker {
 	struct wait_queue window_queue;
 	/* Failure lines the kernel log has taken, bounded so a failing client cannot flood it; the controller mutex protects it. */
 	uint32_t failure_lines;
+	/*
+	 * Diagnostics of the executor's hold of the controller mutex: when it
+	 * last gave the mutex up inside a step, and the ticks it went without
+	 * it, which a step's hold excludes.  Only the executor touches them.
+	 */
+	uint64_t released_at;
+	uint64_t released_ticks;
 };
 
 void bcm2711_render_jobs_bind(struct drv_gpu_ops *operations);

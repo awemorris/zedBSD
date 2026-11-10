@@ -481,14 +481,24 @@ allocation_reply(
 	return;
 }
 
-/* Adds a charge to the budget in use. */
+/* Adds a charge to the budget in use, and to the diagnostic window's most. */
 static void
 budget_charge(
 	struct bcm2711_render_device *controller,
 	uint64_t bytes)
 {
+	struct bcm2711_v3d_perf *perf;
+
 	/* The budget the next declaration is checked against. */
 	controller->vulkan_memory_bytes += bytes;
+
+	/* The diagnostic copy, when the native device is there. */
+	if (controller->space.native == NULL)
+		return;
+	perf = &controller->space.native->hardware.perf;
+	perf->memory_bytes = controller->vulkan_memory_bytes;
+	if (perf->memory_bytes > perf->memory_max)
+		perf->memory_max = perf->memory_bytes;
 }
 
 /* Returns a charge to the budget. */
@@ -501,21 +511,30 @@ budget_return(
 	if (controller->vulkan_memory_bytes < bytes)
 		__builtin_trap();
 	controller->vulkan_memory_bytes -= bytes;
+
+	/* The diagnostic copy, when the native device is there. */
+	if (controller->space.native == NULL)
+		return;
+	controller->space.native->hardware.perf.memory_bytes = controller->vulkan_memory_bytes;
 }
 
-/* Logs an allocation the budget refused. */
+/* Counts an allocation the budget refused, for the diagnostic report. */
 static void
 budget_refused(
 	struct bcm2711_render_device *controller,
 	uint64_t bytes)
 {
+	struct bcm2711_v3d_perf *perf;
 	bool allowed;
 
-	/* Nothing to log without the native device, whose failure log bounds the lines. */
+	/* Nothing to count without the native device. */
 	if (controller->space.native == NULL)
 		return;
+	perf = &controller->space.native->hardware.perf;
+	perf->memory_refusals++;
+	perf->memory_refused_bytes = bytes;
 
-	/* The refusal goes to the bounded failure log, with what the budget held. */
+	/* The refusal also goes to the bounded failure log, with what the budget held. */
 	allowed = bcm2711_render_failure_line(controller);
 	if (allowed) {
 		kern_logf(

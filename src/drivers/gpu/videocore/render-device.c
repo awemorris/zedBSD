@@ -64,7 +64,7 @@ static void bind_render(struct bcm2711_render_device *controller);
 static int render_telemetry(void *context, struct gpu_telemetry_entry *entry);
 
 /*
- * Publishes the native renderer once the engine's power, MMU and interrupts are up.
+ * Publishes the native renderer only after V1 through V10 safely retire boot work.
  */
 int
 bcm2711_render_register(
@@ -74,7 +74,7 @@ bcm2711_render_register(
 	bool ready;
 	int error;
 
-	/* No userspace owner may inherit an uncertain MMU. */
+	/* No userspace owner may inherit failed diagnostic storage or an uncertain MMU. */
 	controller = &render_controller;
 	if (controller->registered || controller->space.native != NULL)
 		return EBUSY;
@@ -82,7 +82,7 @@ bcm2711_render_register(
 	controller->space.cache_limit = BCM2711_NATIVE_CACHE_BYTES;
 	controller->space.snapshot_limit = BCM2711_NATIVE_SNAPSHOT_BYTES;
 	ready = render_ready(controller);
-	if (!ready) {
+	if (!ready || engine->hardware.diagnostic != NULL) {
 		controller->space.native = NULL;
 		return ENODEV;
 	}
@@ -105,6 +105,7 @@ bcm2711_render_register(
 
 	/* Borrowed tables and the native translation owner persist after publication. */
 	controller->registered = true;
+	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "render node ready native Vulkan/strict queue");
 
 	/* Lists the engine in hw.gputelemetry, which only reads what the node keeps; a full list leaves it out. */
 	(void)kern_gpu_telemetry_register("v3d", render_telemetry, controller);

@@ -6,24 +6,47 @@
  */
 
 /*
- * The boot parameters of the BCM2711 and BCM2712 graphics drivers.
+ * Stage marks of the BCM2711 graphics driver, and its boot parameters.
+ *
+ * The driver is brought up on the board one stage at a time.  Each stage
+ * writes a line when it begins and when it ends, so a photograph of the
+ * firmware's framebuffer console shows how far the driver came even when a
+ * later stage blanks the screen.  Lines are cut to the console's width.
  *
  * The parameters are read from the raw boot command line, because the driver
  * attaches while the platform discovers its devices, before the kernel parses
  * the line:
  *
  *   rpi4gpu.off=1         the driver does not attach at all
+ *   rpi4gpu.selftest=1    the bring-up also runs the self-test: the
+ *                         engine's test jobs (the V9/V10 hang and reset
+ *                         among them), the display's test pictures (the
+ *                         moving square, the stripes and the checker), a
+ *                         whole second of frame counting and the pauses
+ *                         before dangerous writes; none of it runs by
+ *                         default
+ *   rpi4gpu.stop=<stage>  the display path stops before that stage
+ *   v3d.stop=<stage>      the V3D engine stops before that stage
  *   v3d.tfu=0             textures are converted by the CPU, never the
  *                         texture formatting unit; without it the unit
- *                         converts them
- *
- * The Raspberry Pi 5's rpi5gpu.start=hold is read by its attachment.
+ *                         converts them, or, under rpi4gpu.selftest=1,
+ *                         only once its self-test passed
+ *   v3d.perf=1            the engine logs its cost report every two seconds
+ *                         of work (none by default)
+ *   v3d.tfu_probe=1       the self-test (rpi4gpu.selftest=1) also tries
+ *                         the texture formatting unit's one- and two-byte
+ *                         texels and its YUV inputs, and logs what each
+ *                         wrote
  */
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 
 #include <kern/boot.h>
+#include <kern/clock.h>
+#include <kern/kcrt.h>
+#include <kern/klog.h>
 #include <kern/platform.h>
 
 #include "drivers/gpu/videocore/bcm2711-private.h"
@@ -34,8 +57,23 @@
 /* The whole token that keeps the driver from attaching. */
 #define STAGE_OFF_TOKEN			"rpi4gpu.off=1"
 
+/* The whole token that runs the driver's self-test during the bring-up. */
+#define STAGE_SELFTEST_TOKEN		"rpi4gpu.selftest=1"
+
 /* The whole token that keeps texture conversion off the texture formatting unit. */
 #define STAGE_TFU_OFF_TOKEN		"v3d.tfu=0"
+
+/* The whole token that turns the engine's periodic cost report on. */
+#define STAGE_PERF_ON_TOKEN		"v3d.perf=1"
+
+/* The whole token that runs the texture formatting unit's probe at boot. */
+#define STAGE_TFU_PROBE_TOKEN		"v3d.tfu_probe=1"
+
+/* The longest stop token: a family, ".stop=" and a stage name. */
+#define STAGE_TOKEN_CAPACITY		48U
+
+/* The step of the wait before a dangerous write, in microseconds. */
+#define STAGE_PAUSE_STEP_US		1000U
 
 static const char *stage_command_line(void);
 
@@ -60,6 +98,26 @@ bcm2711_stage_driver_off(
 }
 
 /*
+ * Reports whether the boot asked for the self-test during the bring-up.
+ */
+bool
+bcm2711_stage_selftest(
+	void)
+{
+	const char *line;
+	int present;
+
+	/* Looks for rpi4gpu.selftest=1 among the boot parameters. */
+	line = stage_command_line();
+	present = kern_boot_parameters_token_present(line, STAGE_SELFTEST_TOKEN);
+	if (present)
+		return true;
+
+	/* No self-test by default. */
+	return false;
+}
+
+/*
  * Reports whether the boot asked that textures never be converted by the texture formatting unit.
  */
 bool
@@ -77,6 +135,148 @@ bcm2711_stage_tfu_off(
 
 	/* The unit converts textures. */
 	return false;
+}
+
+/*
+ * Reports whether the boot asked for the engine's periodic cost report.
+ */
+bool
+bcm2711_stage_perf_on(
+	void)
+{
+	const char *line;
+	int present;
+
+	/* Looks for v3d.perf=1 among the boot parameters. */
+	line = stage_command_line();
+	present = kern_boot_parameters_token_present(line, STAGE_PERF_ON_TOKEN);
+	if (present)
+		return true;
+
+	/* No report by default. */
+	return false;
+}
+
+/*
+ * Reports whether the boot asked for the texture formatting unit's probe.
+ */
+bool
+bcm2711_stage_tfu_probe(
+	void)
+{
+	const char *line;
+	int present;
+
+	/* Looks for v3d.tfu_probe=1 among the boot parameters. */
+	line = stage_command_line();
+	present = kern_boot_parameters_token_present(line, STAGE_TFU_PROBE_TOKEN);
+	if (present)
+		return true;
+
+	/* No probe by default. */
+	return false;
+}
+
+/*
+ * Reports whether a stage may run.
+ *
+ * A stage may not run when the boot parameters hold <family>.stop=<stage>;
+ * the part then stops before that stage and every later one.
+ */
+bool
+bcm2711_stage_allowed(
+	const char *family,
+	const char *stage)
+{
+	char token[STAGE_TOKEN_CAPACITY];
+	const char *line;
+	int length;
+	int present;
+
+	/* Spells the stop token of this family and stage. */
+	length = kern_snprintf(token, sizeof(token), "%s.stop=%s", family, stage);
+	if (length < 0 || (size_t)length >= sizeof(token))
+		return false;
+
+	/* Looks for the token among the boot parameters. */
+	line = stage_command_line();
+	present = kern_boot_parameters_token_present(line, token);
+	if (present)
+		return false;
+
+	/* Succeeded: nothing stops the stage. */
+	return true;
+}
+
+/*
+ * Writes one stage-mark line, cut to the console's width.
+ *
+ * The line reads "<family>: <text>".  Whatever does not fit in
+ * BCM2711_STAGE_LINE_COLUMNS columns is dropped, so one mark never wraps and
+ * pushes the earlier marks off the 25-line console.
+ */
+void
+bcm2711_stage_mark(
+	const char *family,
+	const char *format,
+	...)
+{
+	char line[BCM2711_STAGE_LINE_COLUMNS + 1U];
+	va_list arguments;
+	int prefix;
+
+	/* Writes the family's prefix. */
+	prefix = kern_snprintf(line, sizeof(line), "%s: ", family);
+	if (prefix < 0)
+		return;
+
+	/* Leaves the prefix alone when it alone fills the line. */
+	if ((size_t)prefix >= sizeof(line) - 1U)
+		prefix = (int)(sizeof(line) - 1U);
+
+	/* Writes the text after the prefix; the formatter cuts what does not fit. */
+	va_start(arguments, format);
+	(void)kern_vsnprintf(line + prefix, sizeof(line) - (size_t)prefix, format, arguments);
+	va_end(arguments);
+
+	/* Publishes the line to the console and the kernel log. */
+	kern_logf("%s\n", line);
+
+	/* Succeeded: the bounded stage diagnostic has reached the kernel log. */
+	return;
+}
+
+/*
+ * Waits before a write that may blank the screen, during the self-test
+ * (rpi4gpu.selftest=1) only.
+ *
+ * The begin line briefly remains visible before the screen may go dark, for
+ * a photograph of the bring-up.  This observation pause does not replace
+ * hardware-specific settling or completion waits.  The sleep also works
+ * during early boot.
+ */
+void
+bcm2711_stage_pause(
+	const char *family,
+	const char *stage)
+{
+	unsigned waited_ms;
+	bool selftest;
+
+	/* The ordinary boot does not wait to be photographed. */
+	selftest = bcm2711_stage_selftest();
+	if (!selftest)
+		return;
+
+	/* Says on the screen that the next step is a dangerous one. */
+	bcm2711_stage_mark(family, "%s waits %u ms before writing", stage, BCM2711_STAGE_PAUSE_MS);
+
+	/* Waits out the pause one millisecond at a time. */
+	for (waited_ms = 0; waited_ms < BCM2711_STAGE_PAUSE_MS; waited_ms++)
+		kern_usleep_range(STAGE_PAUSE_STEP_US, STAGE_PAUSE_STEP_US);
+
+	/* Succeeded: the announced pre-write observation interval has ended. */
+	return;
 }
 
 /* Finds the raw boot command line, or NULL when the boot gave none. */

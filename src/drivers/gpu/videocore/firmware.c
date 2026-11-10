@@ -31,6 +31,9 @@
 /* Asks a clock's present rate, in hertz. */
 #define FIRMWARE_TAG_CLOCK_HZ		0x00030002U
 
+/* Asks the highest rate a clock may be set to, in hertz. */
+#define FIRMWARE_TAG_CLOCK_TOP_HZ	0x00030004U
+
 /* Supplies a usable rate before starting an initially stopped provider. */
 #define FIRMWARE_TAG_CLOCK_SET_HZ	0x00038002U
 
@@ -48,6 +51,23 @@
 
 /* The words of a clock question and of its answer: the clock number and one value. */
 #define FIRMWARE_CLOCK_WORDS		2U
+
+/*
+ * The board's state while frames run (Raspberry Pi firmware wiki, "Mailbox
+ * property interface"; Linux drivers/hwmon/raspberrypi-hwmon.c for the
+ * throttling flags): a clock's rate as the firmware measures it, the SoC's
+ * temperature in thousandths of a degree (sensor 0), and the throttling
+ * flags.  The flags' request word names the sticky bits to clear; zero keeps
+ * them, so bits 16 to 19 tell what happened since boot and bits 0 to 3 what
+ * holds now (under-voltage, the CPU clock capped, throttled, the soft
+ * temperature limit).
+ */
+#define FIRMWARE_TAG_CLOCK_MEASURED_HZ	0x00030047U
+#define FIRMWARE_TAG_TEMPERATURE	0x00030006U
+#define FIRMWARE_TAG_THROTTLED		0x00030046U
+#define FIRMWARE_CLOCK_ARM		3U
+#define FIRMWARE_CLOCK_V3D		5U
+#define FIRMWARE_TEMPERATURE_SOC	0U
 
 static int ask_clock(uint32_t tag, uint32_t clock_id, uint32_t *answer);
 
@@ -222,6 +242,59 @@ bcm2711_clock_prepare(
 	return 0;
 }
 
+/*
+ * Writes one stage-mark line with what the firmware says about a clock.
+ *
+ * The line names the clock, whether it runs, its present rate and its
+ * highest rate.  A question the firmware does not answer is shown with the
+ * error it gave, so the mark is written whatever happens.
+ */
+void
+bcm2711_clock_report(
+	const char *family,
+	const char *name,
+	uint32_t clock_id)
+{
+	uint32_t on_off;
+	uint32_t hz;
+	uint32_t top_hz;
+	int error;
+
+	/* Asks whether the clock exists and runs. */
+	error = ask_clock(FIRMWARE_TAG_CLOCK_ON_OFF, clock_id, &on_off);
+	if (error != 0) {
+		bcm2711_stage_mark(family, "clk %s (%u) no answer (%d)", name, (unsigned)clock_id, error);
+		return;
+	}
+
+	/* Reports a clock the firmware does not have. */
+	if ((on_off & FIRMWARE_CLOCK_ABSENT) != 0) {
+		bcm2711_stage_mark(family, "clk %s (%u) absent", name, (unsigned)clock_id);
+		return;
+	}
+
+	/* Asks the present rate; zero stands for an unanswered question. */
+	error = ask_clock(FIRMWARE_TAG_CLOCK_HZ, clock_id, &hz);
+	if (error != 0)
+		hz = 0;
+
+	/* Asks the highest rate; zero stands for an unanswered question. */
+	error = ask_clock(FIRMWARE_TAG_CLOCK_TOP_HZ, clock_id, &top_hz);
+	if (error != 0)
+		top_hz = 0;
+
+	/* Writes the clock's line. */
+	bcm2711_stage_mark(family, "clk %s (%u) %s now %u Hz top %u Hz",
+			   name,
+			   (unsigned)clock_id,
+			   (on_off & FIRMWARE_CLOCK_RUNNING) != 0 ? "on" : "off",
+			   (unsigned)hz,
+			   (unsigned)top_hz);
+
+	/* Succeeded: the firmware clock bounds and current state have been reported. */
+	return;
+}
+
 /* Sends one get tag about a clock and returns the value word of its answer. */
 static int
 ask_clock(
@@ -248,4 +321,37 @@ ask_clock(
 	/* Succeeded: the value word answers the question. */
 	*answer = values[1];
 	return 0;
+}
+
+/*
+ * Asks the firmware for the board's state; each question it does not
+ * answer leaves its field zero.
+ */
+void
+bcm2711_board_state_read(
+	struct bcm2711_board_state *state)
+{
+	uint32_t values[1];
+
+	/* Every field starts unanswered. */
+	kern_memset(state, 0, sizeof(*state));
+
+	/* The clocks: the CPU's as set and as measured, the core's and V3D's. */
+	if (ask_clock(FIRMWARE_TAG_CLOCK_HZ, FIRMWARE_CLOCK_ARM, &state->arm_hz) != 0)
+		state->arm_hz = 0U;
+	if (ask_clock(FIRMWARE_TAG_CLOCK_MEASURED_HZ, FIRMWARE_CLOCK_ARM, &state->arm_measured_hz) != 0)
+		state->arm_measured_hz = 0U;
+	if (ask_clock(FIRMWARE_TAG_CLOCK_HZ, FIRMWARE_CLOCK_CORE, &state->core_hz) != 0)
+		state->core_hz = 0U;
+	if (ask_clock(FIRMWARE_TAG_CLOCK_HZ, FIRMWARE_CLOCK_V3D, &state->v3d_hz) != 0)
+		state->v3d_hz = 0U;
+
+	/* The SoC's temperature. */
+	if (ask_clock(FIRMWARE_TAG_TEMPERATURE, FIRMWARE_TEMPERATURE_SOC, &state->milli_celsius) != 0)
+		state->milli_celsius = 0U;
+
+	/* The throttling flags, the sticky ones kept. */
+	values[0] = 0U;
+	if (bcm2711_firmware_get(FIRMWARE_TAG_THROTTLED, values, 1U, 1U) == 0)
+		state->throttled = values[0];
 }

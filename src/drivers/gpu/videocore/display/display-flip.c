@@ -34,7 +34,7 @@
 #include "drivers/gpu/videocore/buffer.h"
 #include "drivers/platform/rpi4/rpi4-firmware.h"
 
-/* The boot console list the initial scanout left in SRAM, and the empty pointer of the old submitter state. */
+/* The boot console list R0 left in SRAM, and the empty pointer of the old submitter state. */
 #define FLIP_CONSOLE_LIST 43U
 
 /*
@@ -63,9 +63,8 @@
 #define FLIP_SCALE_TPZ 2U
 
 /*
- * The resident scaling filter's first SRAM word (the initial scanout writes
- * it there for good, display-program.c), which a polyphase-scaled plane
- * points at.
+ * The resident scaling filter's first SRAM word (R0 writes it there for
+ * good, display-program.c), which a polyphase-scaled plane points at.
  */
 #define FLIP_FILTER_WORD 32U
 
@@ -102,6 +101,10 @@ static unsigned scale_mode(uint32_t source, uint32_t destination);
 static uint32_t polyphase_word(uint32_t source, uint32_t destination);
 static void trapezoid_words(uint32_t source, uint32_t destination, uint32_t *words);
 static bool overlay_scaled(const struct bcm2711_flip_overlay *overlay);
+static void note_locked(struct bcm2711_display *display, unsigned kind, uint64_t now);
+static void count_adoption_locked(struct bcm2711_display *display, uint32_t slot);
+static uint32_t take_times_locked(struct bcm2711_display *display, uint32_t *replaced);
+static void report_times(uint32_t count, uint32_t replaced);
 static int raise_clock(struct bcm2711_display *display, uint32_t required);
 static void lower_clock(struct bcm2711_display *display, uint32_t hz);
 static int request_clock(uint32_t hz);
@@ -117,6 +120,15 @@ static uint32_t cursor_words(const struct bcm2711_display *display, uint32_t *wo
 static void adopt_slot_locked(struct bcm2711_display *display, uint32_t index, uint32_t current);
 static void enable_underrun_locked(struct bcm2711_display *display);
 static int wait_console(struct bcm2711_display *display);
+static bool perf_enabled(struct bcm2711_display *display);
+static void report_cadence(uint64_t milliseconds);
+static void cadence_summary(struct bcm2711_flip_cadence *cadence, uint64_t milliseconds, uint64_t summary[4]);
+
+/* The window the note that ends it copies and prints, owned by the one caller that set cadence_reporting. */
+static struct bcm2711_flip_cadence cadence_copy[BCM2711_FLIP_CADENCE_KINDS];
+
+/* The settled overlay record times the report that took them prints, owned by the caller that set perf_reporting. */
+static struct bcm2711_flip_time times_copy[BCM2711_FLIP_TIMES];
 
 /*
  * Initializes persistent IRQ state before installing source callback owners.
@@ -159,7 +171,7 @@ bcm2711_display_flip_attach(
 	unsigned long enabled;
 	int error;
 
-	/* Refuses attachment until the initial scanout's actual IRQ/list completion was verified. */
+	/* Refuses attachment until R0's actual IRQ/list completion was verified. */
 	if (!display->flip.initialized || !display->scanout_started)
 		return ENODEV;
 	if (display->port >= BCM2711_TIMING_COUNT || display->channel != 0)
@@ -366,6 +378,9 @@ bcm2711_display_flip_record(
 	unsigned long enabled;
 	uint32_t required;
 	uint32_t attempt;
+	uint64_t mark;
+	uint64_t raise_ticks;
+	uint64_t clean_ticks;
 	void *mapping;
 	void *console_mapping;
 	bool console_shown;
@@ -391,7 +406,7 @@ bcm2711_display_flip_record(
 	console_shown = !console_hidden(display, primary);
 	console_mapping = NULL;
 	if (console_shown) {
-		/* The lower console may have received newer cached text since the initial scanout. */
+		/* The lower console may have received newer cached text since R0. */
 		console_mapping = kern_pmem_to_kernel(display->screen.physical);
 		if (console_mapping == NULL)
 			return EFAULT;
@@ -409,18 +424,24 @@ bcm2711_display_flip_record(
 
 	/* Computes the clock the new list needs and the cache work outside the guard. */
 	required = required_clock(display, primary, overlays);
+	raise_ticks = 0;
+	clean_ticks = 0;
 	for (attempt = 0; attempt < FLIP_CLOCK_ATTEMPTS; attempt++) {
 		/* Raises the clock before any list that needs it is written. */
+		mark = clock_ticks();
 		error = raise_clock(display, required);
+		raise_ticks += clock_ticks() - mark;
 		if (error != 0)
 			return error;
 
 		/* Publishes the console and frame bytes before the list can name them. */
+		mark = clock_ticks();
 		if (console_mapping != NULL)
 			kern_dcache_clean_range(console_mapping, (size_t)display->screen.size);
 		if (!primary->frame.uncached)
 			kern_dcache_clean_range(mapping, (size_t)primary->frame.size);
 		kern_io_write_barrier();
+		clean_ticks += clock_ticks() - mark;
 
 		/* Checks ownership and the hardware, then records the plane. */
 		enabled = spin_lock_irqsave(&display->flip.guard);
@@ -474,7 +495,11 @@ bcm2711_display_flip_record(
 		/* The new primary is the recorded one, with the caller's reference. */
 		display->flip.primary = *primary;
 		display->flip.primary.shown = true;
+		display->flip.plane_records[0] = display->flip.state_serial;
 		display->flip.planes_generation++;
+		display->flip.perf.primary_records++;
+		display->flip.perf.clean += clean_ticks;
+		display->flip.perf.raise += raise_ticks;
 		*serial = display->flip.state_serial;
 
 		/* The checked pipeline takes the list now, or the next adoption carries it. */
@@ -698,9 +723,12 @@ bcm2711_display_flip_commit(
 		/* Every recorded change gets the state's next number; dropped ones change nothing. */
 		recorded = false;
 		for (index = 0; index < count; index++) {
-			/* One recorded change is enough for a new state. */
-			if (changes[index].recorded)
+			/* One recorded change is enough for a new state; the others are counted as dropped. */
+			if (changes[index].recorded) {
 				recorded = true;
+			} else {
+				display->flip.perf.dropped++;
+			}
 		}
 
 		/* A commit with a recorded change is a new state, and a list goes out or waits for an adoption. */
@@ -715,6 +743,9 @@ bcm2711_display_flip_commit(
 		*adopted = display->flip.adopted_serial;
 
 		spin_unlock_irqrestore(&display->flip.guard, enabled);
+
+		/* A window of overlay changes is reported even while the primary does not change. */
+		bcm2711_display_flip_report(display, false, 0, 0, 0);
 
 		/* Succeeded: the planes show from the refresh boundary that adopts a list with them. */
 		return 0;
@@ -837,6 +868,8 @@ bcm2711_display_flip_compose(
 	struct bcm2711_flip_primary primary;
 	struct bcm2711_flip_owner owner;
 	uint64_t serial;
+	uint64_t mark;
+	uint64_t wait_ticks;
 	int error;
 
 	/* Refuses a missing frame before describing it. */
@@ -859,9 +892,15 @@ bcm2711_display_flip_compose(
 		return error;
 
 	/* Waits for the list's adoption. */
+	mark = clock_ticks();
 	error = bcm2711_display_flip_wait(display, &owner, serial);
+	wait_ticks = clock_ticks() - mark;
 	if (error != 0)
 		return error;
+
+	/* The adoption is a cadence event and a flip of the report. */
+	bcm2711_display_flip_note(display, BCM2711_FLIP_CADENCE_FLIP);
+	bcm2711_display_flip_report(display, true, 0, 0, wait_ticks);
 
 	/* Succeeded: a selected-PV frame adopted a list with the frame. */
 	return 0;
@@ -910,8 +949,10 @@ bcm2711_display_flip_cursor(
 	}
 
 	/* A change of a cursor hidden before and after shows nothing new and makes no list. */
-	if (cursor->shown || display->flip.cursor.shown)
+	if (cursor->shown || display->flip.cursor.shown) {
 		display->flip.state_serial++;
+		display->flip.perf.cursor_records++;
+	}
 
 	/* The newest cursor is the recorded one, shown or not. */
 	display->flip.cursor = *cursor;
@@ -1383,10 +1424,205 @@ bcm2711_display_flip_vblank_locked(
 	/* Settles the adopted list and every older one, and wakes the waiters. */
 	adopt_slot_locked(display, found, current);
 	display->flip.adopted_ticks = sched_ticks();
+	count_adoption_locked(display, display->flip.active_slot);
 	waitq_wake_all(&display->flip.adoption_waitq);
 
 	/* Changes made while two lists were out go in a list of their own now. */
 	(void)publish_locked(display);
+}
+
+/*
+ * Counts one cursor image set (GPU_DISPLAY_CURSOR_SET) for the next flip
+ * report: copied when its rows were written into a plane image, otherwise
+ * shown again from an image that holds the same unchanged rows.
+ */
+void
+bcm2711_display_flip_count_cursor(
+	struct bcm2711_display *display,
+	bool copied)
+{
+	/* The display device's plane mutex is not the guard, so the counts are atomic. */
+	__atomic_fetch_add(&display->flip.perf_cursor_sets, 1U, __ATOMIC_RELAXED);
+	if (copied)
+		__atomic_fetch_add(&display->flip.perf_cursor_copies, 1U, __ATOMIC_RELAXED);
+}
+
+/*
+ * Notes one display event of a cadence kind: its interval from the
+ * previous one of the kind, and every two seconds the window's report.
+ */
+void
+bcm2711_display_flip_note(
+	struct bcm2711_display *display,
+	unsigned kind)
+{
+	struct bcm2711_flip_cadence *cadence;
+	unsigned long enabled;
+	uint64_t milliseconds;
+	uint64_t interval;
+	uint64_t now;
+	uint32_t index;
+	bool report;
+	bool measured;
+
+	/* Nothing is kept without v3d.perf=1. */
+	measured = perf_enabled(display);
+	if (!measured || kind >= BCM2711_FLIP_CADENCE_KINDS)
+		return;
+
+	/* The interval joins the window's samples while they fit. */
+	now = clock_ticks();
+	report = false;
+	milliseconds = 0;
+	enabled = spin_lock_irqsave(&display->flip.guard);
+	cadence = &display->flip.cadence[kind];
+	if (cadence->last != 0 && cadence->stored < BCM2711_FLIP_CADENCE_SAMPLES) {
+		interval = kern_ticks_to_rate(now - cadence->last, 1000000U);
+		if (interval > UINT32_MAX)
+			interval = UINT32_MAX;
+		cadence->intervals[cadence->stored] = (uint32_t)interval;
+		cadence->stored++;
+	}
+	cadence->last = now;
+	cadence->count++;
+
+	/* The first event opens the window; one caller takes a window of two seconds or more to print. */
+	if (display->flip.cadence_start == 0)
+		display->flip.cadence_start = now;
+	milliseconds = kern_ticks_to_ms(now - display->flip.cadence_start);
+	if (milliseconds >= 2000U && !display->flip.cadence_reporting) {
+		display->flip.cadence_reporting = true;
+		for (index = 0; index < BCM2711_FLIP_CADENCE_KINDS; index++) {
+			/* The copy keeps the samples; the window starts empty, each kind keeping its last time. */
+			cadence_copy[index] = display->flip.cadence[index];
+			display->flip.cadence[index].count = 0;
+			display->flip.cadence[index].stored = 0;
+		}
+		display->flip.cadence_start = now;
+		report = true;
+	}
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
+
+	/* The copied window is sorted and printed without the guard. */
+	if (!report)
+		return;
+	report_cadence(milliseconds);
+	enabled = spin_lock_irqsave(&display->flip.guard);
+	display->flip.cadence_reporting = false;
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
+}
+
+/*
+ * Adds an event to the flip report and prints a window of two seconds or more (v3d.perf=1 only).
+ *
+ * flip says the caller saw an adopted primary flip, with clean and raise
+ * the record's stages when the caller measured them (zero when the record
+ * added them) and wait the adoption wait; a commit calls it with flip false
+ * so a window of overlay changes alone is printed too.
+ */
+void
+bcm2711_display_flip_report(
+	struct bcm2711_display *display,
+	bool flip,
+	uint64_t clean,
+	uint64_t raise,
+	uint64_t wait)
+{
+	struct bcm2711_flip_perf window;
+	unsigned long enabled;
+	uint64_t elapsed;
+	uint64_t now;
+	uint64_t underruns;
+	uint64_t sets;
+	uint64_t copies;
+	uint64_t count;
+	uint32_t times;
+	uint32_t replaced;
+	bool report;
+	bool measured;
+
+	/* Nothing is kept without v3d.perf=1. */
+	measured = perf_enabled(display);
+	if (!measured)
+		return;
+
+	/* Adds this flip, and takes a full window for one caller to print. */
+	now = clock_ticks();
+	report = false;
+	times = 0;
+	replaced = 0;
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
+	if (flip) {
+		display->flip.perf.flips++;
+		display->flip.perf.clean += clean;
+		display->flip.perf.raise += raise;
+		display->flip.perf.wait += wait;
+	}
+
+	/* The window's age, and whether it is full. */
+	elapsed = 0;
+	if (display->flip.perf.start != 0)
+		elapsed = kern_ticks_to_ms(now - display->flip.perf.start);
+	if (display->flip.perf.start == 0) {
+		/* The first event opens the window; underruns are counted from the total at its start. */
+		display->flip.perf.start = now;
+		display->flip.perf.underruns = display->underruns;
+	} else if (elapsed >= 2000U && !display->flip.perf_reporting) {
+		/* The window and its settled overlay times are copied; the window starts again empty. */
+		window = display->flip.perf;
+		kern_memset(&display->flip.perf, 0, sizeof(display->flip.perf));
+		display->flip.perf.start = now;
+		display->flip.perf.underruns = display->underruns;
+		display->flip.perf_reporting = true;
+		times = take_times_locked(display, &replaced);
+		report = true;
+	}
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
+
+	/* A window shorter than two seconds keeps accumulating. */
+	if (!report)
+		return;
+
+	/* The window's cursor images and underruns, taken with the window. */
+	sets = __atomic_exchange_n(&display->flip.perf_cursor_sets, 0, __ATOMIC_RELAXED);
+	copies = __atomic_exchange_n(&display->flip.perf_cursor_copies, 0, __ATOMIC_RELAXED);
+	underruns = display->underruns - window.underruns;
+
+	/* Prints microseconds per flip for each stage and the window's counts. */
+	count = window.flips;
+	if (count == 0)
+		count = 1;
+	kern_logf(
+		"bcm2711: flip perf ms=%llu flips=%llu avg_us clean=%llu raise=%llu wait=%llu cursor sets=%llu copies=%llu records primary=%llu cursor=%llu overlay=%llu dropped=%llu lists=%llu replaced=%llu coalesced=%llu underruns=%llu pair=%llu/%llu\n",
+		(unsigned long long)kern_ticks_to_ms(now - window.start),
+		(unsigned long long)window.flips,
+		(unsigned long long)(kern_ticks_to_rate(window.clean, 1000000U) / count),
+		(unsigned long long)(kern_ticks_to_rate(window.raise, 1000000U) / count),
+		(unsigned long long)(kern_ticks_to_rate(window.wait, 1000000U) / count),
+		(unsigned long long)sets,
+		(unsigned long long)copies,
+		(unsigned long long)window.primary_records,
+		(unsigned long long)window.cursor_records,
+		(unsigned long long)window.overlay_records,
+		(unsigned long long)window.dropped,
+		(unsigned long long)window.lists,
+		(unsigned long long)window.replaced,
+		(unsigned long long)window.coalesced,
+		(unsigned long long)underruns,
+		(unsigned long long)window.pair_both,
+		(unsigned long long)window.pair_window);
+
+	/* Prints the overlay records adopted in the window, and how many were replaced before any adoption. */
+	report_times(times, replaced);
+
+	/* Another caller may print the next window. */
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
+	display->flip.perf_reporting = false;
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
 }
 
 /* Checks that a primary plane fits the output unscaled, in an encodable buffer away from the console. */
@@ -1612,7 +1848,7 @@ raise_clock(
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);
 
-	/* The same temporary floor as the initial scanout, at least, and never below the clock already running. */
+	/* The same temporary floor as R0, at least, and never below the clock already running. */
 	hz = 500000000U;
 	if (hz < required)
 		hz = required;
@@ -1694,7 +1930,7 @@ request_clock(
 {
 	int error;
 
-	/* Leaves rounding to the same firmware provider used by the initial scanout and Linux. */
+	/* Leaves rounding to the same firmware provider used by R0 and Linux. */
 	error = drv_rpi4_firmware_core_clock(DRV_RPI4_FIRMWARE_CORE_DISPLAY, hz);
 	if (error != 0)
 		return error;
@@ -1826,7 +2062,7 @@ check_pipeline(
 	return 0;
 }
 
-/* Tests physical intervals already bounded below one GiB by preparation or the initial scanout. */
+/* Tests physical intervals already bounded below one GiB by preparation or R0. */
 static bool
 frames_overlap(
 	const struct drv_bcm2711_boot_screen *a,
@@ -1907,8 +2143,10 @@ publish_locked(
 		return 0;
 
 	/* Two lists are out: the next adoption carries the change. */
-	if (display->flip.pending_count == 2U)
+	if (display->flip.pending_count == 2U) {
+		display->flip.perf.coalesced++;
 		return 0;
+	}
 
 	/* The channel and the list pointers must still be ours. */
 	error = check_pipeline(display, false);
@@ -1935,6 +2173,7 @@ publish_locked(
 	if (display->flip.pending_count != 0) {
 		/* A replacement must not drop a vblank the list it replaces may still need. */
 		fresh = false;
+		display->flip.perf.replaced++;
 	}
 
 	/* The hardware follows the pointer at a coming frame start. */
@@ -1944,6 +2183,7 @@ publish_locked(
 	display->flip.pending[display->flip.pending_count] = slot;
 	display->flip.pending_count++;
 	display->flip.list_serial = display->flip.state_serial;
+	display->flip.perf.lists++;
 
 	/* Succeeded: the hardware takes the list at a coming frame start. */
 	return 0;
@@ -2023,6 +2263,15 @@ write_list_locked(
 	display->flip.slots[slot].cursor_image = 0;
 	if (cursor != 0)
 		display->flip.slots[slot].cursor_image = display->flip.cursor.physical;
+
+	/* The places and record numbers the adoption's counts compare. */
+	display->flip.slots[slot].window_shown = display->flip.overlays[0].shown;
+	display->flip.slots[slot].window_x = display->flip.overlays[0].dst_x;
+	display->flip.slots[slot].window_y = display->flip.overlays[0].dst_y;
+	display->flip.slots[slot].cursor_shown = display->flip.cursor.shown;
+	display->flip.slots[slot].cursor_x = display->flip.cursor.x;
+	display->flip.slots[slot].cursor_y = display->flip.cursor.y;
+	kern_memcpy(display->flip.slots[slot].records, display->flip.plane_records, sizeof(display->flip.slots[slot].records));
 
 	/* Succeeded: the complete list waits in its slot. */
 	return list;
@@ -2465,6 +2714,7 @@ apply_changes_locked(
 	const struct bcm2711_flip_overlay *overlays)
 {
 	struct bcm2711_buffer *old_hold;
+	struct bcm2711_flip_time *time;
 	uint32_t index;
 	uint32_t plane;
 
@@ -2483,8 +2733,30 @@ apply_changes_locked(
 			display->flip.retiring_count++;
 		}
 
-		/* The plane's serial: later commits with a serial at or below it are dropped. */
+		/*
+		 * The plane's serial: later commits with a serial at or below it are
+		 * dropped.  Its record number tells which record a list shows.
+		 */
 		display->flip.plane_serials[plane] = changes[index].serial;
+		display->flip.plane_records[plane] = display->flip.state_serial;
+
+		/* An overlay record's time joins the ring (v3d.perf=1 only). */
+		if (plane != 0 && display->flip.cadence_state == BCM2711_FLIP_CADENCE_ON) {
+			time = &display->flip.times[display->flip.times_next];
+			time->plane = plane;
+			time->plane_serial = changes[index].serial;
+			time->state_serial = display->flip.state_serial;
+			time->recorded = sched_ticks();
+			time->adopted = 0;
+			display->flip.times_next = (display->flip.times_next + 1U) % BCM2711_FLIP_TIMES;
+		}
+
+		/* The report counts the plane's record. */
+		if (plane == 0) {
+			display->flip.perf.primary_records++;
+		} else {
+			display->flip.perf.overlay_records++;
+		}
 	}
 
 	/* The view is the state now; another commit's view taken before is stale. */
@@ -2697,4 +2969,274 @@ overlay_scaled(
 
 	/* Succeeded: unscaled. */
 	return false;
+}
+
+/* Adds one event of a cadence kind to the window (v3d.perf=1 only); the caller holds the guard and prints nothing. */
+static void
+note_locked(
+	struct bcm2711_display *display,
+	unsigned kind,
+	uint64_t now)
+{
+	struct bcm2711_flip_cadence *cadence;
+	uint64_t interval;
+
+	/* The interval joins the window's samples while they fit. */
+	cadence = &display->flip.cadence[kind];
+	if (cadence->last != 0 && cadence->stored < BCM2711_FLIP_CADENCE_SAMPLES) {
+		interval = kern_ticks_to_rate(now - cadence->last, 1000000U);
+		if (interval > UINT32_MAX)
+			interval = UINT32_MAX;
+		cadence->intervals[cadence->stored] = (uint32_t)interval;
+		cadence->stored++;
+	}
+
+	/* The event is the kind's last, and one more of the window. */
+	cadence->last = now;
+	cadence->count++;
+
+	/* The first event opens the window. */
+	if (display->flip.cadence_start == 0)
+		display->flip.cadence_start = now;
+}
+
+/*
+ * Counts what an adopted list moved (v3d.perf=1 only); the caller holds the guard.
+ *
+ * A list that moved the first overlay counts for the overlay cadence and the
+ * pair, and as a pair too when it also moved the cursor; every overlay
+ * record the list shows gets its adoption time.
+ */
+static void
+count_adoption_locked(
+	struct bcm2711_display *display,
+	uint32_t slot)
+{
+	struct bcm2711_flip_slot *list;
+	struct bcm2711_flip_time *time;
+	uint64_t now;
+	uint32_t index;
+	bool window_moved;
+	bool cursor_moved;
+
+	/* Nothing is kept without v3d.perf=1 (read at the first note). */
+	if (display->flip.cadence_state != BCM2711_FLIP_CADENCE_ON)
+		return;
+
+	/* The first overlay's and the cursor's places against the last adopted list. */
+	list = &display->flip.slots[slot];
+	now = clock_ticks();
+	window_moved = false;
+	if (list->window_shown != display->flip.last_window_shown ||
+	    list->window_x != display->flip.last_window_x ||
+	    list->window_y != display->flip.last_window_y)
+		window_moved = true;
+	cursor_moved = false;
+	if (list->cursor_shown != display->flip.last_cursor_shown ||
+	    list->cursor_x != display->flip.last_cursor_x ||
+	    list->cursor_y != display->flip.last_cursor_y)
+		cursor_moved = true;
+
+	/* A moved window is an overlay adoption and a pair candidate. */
+	if (window_moved && list->window_shown) {
+		note_locked(display, BCM2711_FLIP_CADENCE_OVERLAY, now);
+		display->flip.perf.pair_window++;
+		if (cursor_moved)
+			display->flip.perf.pair_both++;
+	}
+
+	/* The places the next adoption compares with. */
+	display->flip.last_window_shown = list->window_shown;
+	display->flip.last_window_x = list->window_x;
+	display->flip.last_window_y = list->window_y;
+	display->flip.last_cursor_shown = list->cursor_shown;
+	display->flip.last_cursor_x = list->cursor_x;
+	display->flip.last_cursor_y = list->cursor_y;
+
+	/* The overlay records this list shows are adopted now. */
+	for (index = 0; index < BCM2711_FLIP_TIMES; index++) {
+		/* A record of a plane, shown by this list, not yet adopted. */
+		time = &display->flip.times[index];
+		if (time->plane == 0 || time->adopted != 0 || time->recorded == 0)
+			continue;
+		if (list->records[time->plane] != time->state_serial)
+			continue;
+		time->adopted = sched_ticks();
+	}
+}
+
+/*
+ * Copies the settled overlay record times out of the ring and frees their entries; the caller holds the guard.
+ *
+ * Settled is adopted, or replaced before any adoption (no time, and its
+ * number already adopted).  Returns how many adopted ones were copied to
+ * times_copy; replaced counts the others.
+ */
+static uint32_t
+take_times_locked(
+	struct bcm2711_display *display,
+	uint32_t *replaced)
+{
+	struct bcm2711_flip_time *time;
+	uint32_t index;
+	uint32_t copied;
+
+	/* Walks the whole ring once. */
+	copied = 0;
+	*replaced = 0;
+	for (index = 0; index < BCM2711_FLIP_TIMES; index++) {
+		/* An empty entry, or one whose record is still waiting. */
+		time = &display->flip.times[index];
+		if (time->recorded == 0)
+			continue;
+		if (time->adopted == 0 && time->state_serial > display->flip.adopted_serial)
+			continue;
+
+		/* A replaced record has no time to print; an adopted one is copied. */
+		if (time->adopted == 0) {
+			(*replaced)++;
+		} else {
+			times_copy[copied] = *time;
+			copied++;
+		}
+
+		/* The entry is free again. */
+		kern_memset(time, 0, sizeof(*time));
+	}
+
+	/* Succeeded: the number of adopted records copied. */
+	return copied;
+}
+
+/*
+ * Prints the copied overlay record times (v3d.perf=1 only): per record its
+ * plane, plane serial and milliseconds from record to adoption, sixteen to
+ * a line, after the count of records replaced before any adoption.
+ */
+static void
+report_times(
+	uint32_t count,
+	uint32_t replaced)
+{
+	char line[512];
+	uint32_t index;
+	uint32_t length;
+	int written;
+
+	/* A window without overlay records prints nothing. */
+	if (count == 0 && replaced == 0)
+		return;
+	kern_logf("bcm2711: overlay times adopted=%u replaced=%u\n", (unsigned)count, (unsigned)replaced);
+
+	/* Lines of plane:serial:milliseconds. */
+	length = 0;
+	for (index = 0; index < count; index++) {
+		/* One record. */
+		written = kern_snprintf(
+			line + length,
+			sizeof(line) - length,
+			" %u:%llu:%llu",
+			(unsigned)times_copy[index].plane,
+			(unsigned long long)times_copy[index].plane_serial,
+			(unsigned long long)kern_ticks_to_ms(times_copy[index].adopted - times_copy[index].recorded));
+		if (written > 0 && (uint32_t)written < sizeof(line) - length)
+			length += (uint32_t)written;
+
+		/* Sixteen records, or the last, end a line. */
+		if ((index + 1U) % 16U == 0 || index + 1U == count) {
+			kern_logf("bcm2711: overlay times%s\n", line);
+			length = 0;
+			line[0] = '\0';
+		}
+	}
+}
+
+/* Tells whether the flip report and the cadence are kept: the boot line is read at the first use. */
+static bool
+perf_enabled(
+	struct bcm2711_display *display)
+{
+	bool measured;
+
+	/* The boot line is read once. */
+	if (display->flip.cadence_state == BCM2711_FLIP_CADENCE_UNREAD) {
+		display->flip.cadence_state = BCM2711_FLIP_CADENCE_OFF;
+		measured = bcm2711_stage_perf_on();
+		if (measured)
+			display->flip.cadence_state = BCM2711_FLIP_CADENCE_ON;
+	}
+
+	/* Reports v3d.perf=1. */
+	if (display->flip.cadence_state != BCM2711_FLIP_CADENCE_ON)
+		return false;
+
+	/* Succeeded: the report is kept. */
+	return true;
+}
+
+/* Prints the copied cadence window: per kind, events per second and the interval minimum, median and maximum. */
+static void
+report_cadence(
+	uint64_t milliseconds)
+{
+	uint64_t set[4];
+	uint64_t move[4];
+	uint64_t flip[4];
+	uint64_t overlay[4];
+
+	/* Each kind's summary from its own samples. */
+	cadence_summary(&cadence_copy[BCM2711_FLIP_CADENCE_SET], milliseconds, set);
+	cadence_summary(&cadence_copy[BCM2711_FLIP_CADENCE_MOVE], milliseconds, move);
+	cadence_summary(&cadence_copy[BCM2711_FLIP_CADENCE_FLIP], milliseconds, flip);
+	cadence_summary(&cadence_copy[BCM2711_FLIP_CADENCE_OVERLAY], milliseconds, overlay);
+	kern_logf(
+		"bcm2711: cadence ms=%llu per_s/min/med/max_us set=%llu/%llu/%llu/%llu move=%llu/%llu/%llu/%llu flip=%llu/%llu/%llu/%llu overlay=%llu/%llu/%llu/%llu\n",
+		(unsigned long long)milliseconds,
+		(unsigned long long)set[0], (unsigned long long)set[1], (unsigned long long)set[2], (unsigned long long)set[3],
+		(unsigned long long)move[0], (unsigned long long)move[1], (unsigned long long)move[2], (unsigned long long)move[3],
+		(unsigned long long)flip[0], (unsigned long long)flip[1], (unsigned long long)flip[2], (unsigned long long)flip[3],
+		(unsigned long long)overlay[0], (unsigned long long)overlay[1], (unsigned long long)overlay[2], (unsigned long long)overlay[3]);
+}
+
+/*
+ * Summarizes one copied kind (summary: events per second, then the interval
+ * minimum, median and maximum in microseconds, zero without an interval).
+ * The samples are sorted in place.
+ */
+static void
+cadence_summary(
+	struct bcm2711_flip_cadence *cadence,
+	uint64_t milliseconds,
+	uint64_t summary[4])
+{
+	uint32_t *samples;
+	uint32_t value;
+	uint32_t index;
+	uint32_t position;
+
+	/* The rate counts every event of the window, sampled or not. */
+	summary[0] = 0;
+	if (milliseconds != 0)
+		summary[0] = (uint64_t)cadence->count * 1000U / milliseconds;
+	summary[1] = 0;
+	summary[2] = 0;
+	summary[3] = 0;
+	if (cadence->stored == 0)
+		return;
+
+	/* Insertion sort of at most the window's sample bound. */
+	samples = cadence->intervals;
+	for (index = 1; index < cadence->stored; index++) {
+		/* Moves each sample left past the larger ones. */
+		value = samples[index];
+		position = index;
+		while (position > 0 && samples[position - 1U] > value) {
+			samples[position] = samples[position - 1U];
+			position--;
+		}
+		samples[position] = value;
+	}
+	summary[1] = samples[0];
+	summary[2] = samples[cadence->stored / 2U];
+	summary[3] = samples[cadence->stored - 1U];
 }

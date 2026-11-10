@@ -118,6 +118,7 @@ bcm2711_v3d_power_start(
 	uint32_t current;
 	uint32_t id;
 	uint32_t revision;
+	bool allowed;
 	int error;
 
 	/* A partly executed startup may be retried only through explicit global reset. */
@@ -125,6 +126,9 @@ bcm2711_v3d_power_start(
 		return ENODEV;
 	if (v3d->power.attempted)
 		return EBUSY;
+	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V1");
+	if (!allowed)
+		return ECANCELED;
 
 	/* Uses the same emulator revision refusal as display readout before native PM access. */
 	revision = 0;
@@ -141,12 +145,18 @@ bcm2711_v3d_power_start(
 	id = kern_mmio_read32(v3d->power.bridge.mapped + POWER_BRIDGE_ID);
 	if (id != POWER_BRIDGE_SIGNATURE)
 		return ENODEV;
+	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 begin native PM clock/reset/bridges");
+	bcm2711_stage_pause(BCM2711_FAMILY_V3D, "V1");
 	v3d->power.attempted = true;
 
 	/* Establishes reset release and AXI access before touching any V3D register. */
 	error = connect_engine(v3d);
 	if (error != 0)
 		return error;
+	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1 native domain and bridges enabled");
+	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V2");
+	if (!allowed)
+		return ECANCELED;
 
 	/* Captures provider limits and current rate without reading a gated engine register. */
 	error = clock_value(0x00030007U, &minimum);
@@ -179,6 +189,7 @@ bcm2711_v3d_power_start(
 		return EIO;
 	v3d->power.ready = true;
 	v3d->clock_asked_hz = maximum;
+	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V2 ready clock %u min %u max %u", current, minimum, maximum);
 
 	/* Succeeded: the caller may now identify and initialize V3D registers. */
 	return 0;

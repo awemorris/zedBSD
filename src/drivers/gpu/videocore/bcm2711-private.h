@@ -8,9 +8,9 @@
 /*
  * What the parts of the BCM2711 graphics driver share.
  *
- * The display path and the V3D engine are kept apart: each has its own state
- * and its own GPU device, so that a fault of the render engine does not take
- * the display down.
+ * The display path and the V3D engine are kept apart: each has its own state,
+ * its own stage names (P for the display, V for V3D) and, later, its own GPU
+ * device, so that a fault of the render engine does not take the display down.
  */
 
 #ifndef KERN_DRIVERS_GPU_BCM2711_PRIVATE_H
@@ -24,6 +24,18 @@
 #include "drivers/gpu/videocore/bcm2711-gpu.h"
 #include "drivers/gpu/videocore/display/display-flip.h"
 #include "drivers/gpu/videocore/v3d-hardware.h"
+
+/* The stage-mark family of the display path, and its boot parameter prefix. */
+#define BCM2711_FAMILY_DISPLAY		"rpi4gpu"
+
+/* The stage-mark family of the V3D engine, and its boot parameter prefix. */
+#define BCM2711_FAMILY_V3D		"v3d"
+
+/* The longest stage-mark line, in columns; the console is 80 columns wide. */
+#define BCM2711_STAGE_LINE_COLUMNS	79U
+
+/* How long a stage waits before a write that may blank the screen, in ms. */
+#define BCM2711_STAGE_PAUSE_MS		100U
 
 /* The two timing generators that feed the HDMI ports: HDMI0 and HDMI1. */
 #define BCM2711_TIMING_COUNT		2U
@@ -208,7 +220,7 @@ struct bcm2711_display_irq_source {
  * The display path: the compositor, the two timing generators of the HDMI
  * ports and the HDMI encoders.
  *
- * One instance exists for the system, filled by discovery.  present is set
+ * One instance exists for the system, filled by the P0 stage.  present is set
  * when the compositor was found and mapped; the rest is meaningful only then.
  */
 struct bcm2711_display {
@@ -221,7 +233,7 @@ struct bcm2711_display {
 	uint32_t hdmi_window_count[BCM2711_HDMI_COUNT];
 
 	/*
-	 * What the readout read of the firmware's display, all zero before it.
+	 * What stage N0 read of the firmware's display, all zero before it.
 	 * port is the HDMI port the firmware's screen goes out of, channel the
 	 * compositor channel that feeds it (BCM2711_NO_CHANNEL when none), and
 	 * list the decoded display list the channel shows now.  screen_matches
@@ -233,7 +245,7 @@ struct bcm2711_display {
 	bool scanout_started;
 	uint32_t refresh_millihz;
 
-	/* The initial scanout captures the provider ceiling and the sole output bandwidth requirement. */
+	/* R0 captures the provider ceiling and the sole output bandwidth requirement. */
 	uint32_t max_core_hz;
 	uint32_t console_core_hz;
 
@@ -267,7 +279,7 @@ struct bcm2711_v3d_power {
 /*
  * The V3D 4.2 render engine.
  *
- * One instance exists for the system, filled by discovery.  present is set
+ * One instance exists for the system, filled by the V0 stage.  present is set
  * when the hub and the core windows were found and mapped.  No register of
  * the engine is read before its power and clock are up.
  */
@@ -286,9 +298,15 @@ struct bcm2711_v3d {
 	uint32_t clock_asked_hz;
 };
 
-/* The driver's boot parameters (stage.c). */
+/* Stage marks and the driver's boot parameters (stage.c). */
 bool bcm2711_stage_driver_off(void);
+bool bcm2711_stage_allowed(const char *family, const char *stage);
 bool bcm2711_stage_tfu_off(void);
+bool bcm2711_stage_perf_on(void);
+bool bcm2711_stage_tfu_probe(void);
+bool bcm2711_stage_selftest(void);
+void bcm2711_stage_mark(const char *family, const char *format, ...) __attribute__((format(printf, 2, 3)));
+void bcm2711_stage_pause(const char *family, const char *stage);
 
 /* Device tree helpers shared by both parts (fdt-util.c). */
 int bcm2711_fdt_find(const struct drv_fdt *fdt, const char *compatible, uint32_t *node);
@@ -308,6 +326,24 @@ void bcm2711_v3d_busy_add(struct bcm2711_v3d *engine, uint64_t started);
 int bcm2711_firmware_get(uint32_t tag, uint32_t *values, unsigned request_count, unsigned answer_words);
 int bcm2711_clock_hz(uint32_t clock_id, uint32_t *hz);
 int bcm2711_clock_prepare(uint32_t clock_id, uint32_t minimum_hz, uint32_t *hz);
+void bcm2711_clock_report(const char *family, const char *name, uint32_t clock_id);
+
+/*
+ * What the firmware says about the board while frames run: the CPU clock it
+ * set and the one it measures, the core and V3D clocks, the SoC's temperature
+ * and its throttling flags.  A question it did not answer leaves zero.
+ */
+struct bcm2711_board_state {
+	uint32_t arm_hz;
+	uint32_t arm_measured_hz;
+	uint32_t core_hz;
+	uint32_t v3d_hz;
+	uint32_t milli_celsius;
+	uint32_t throttled;
+};
+
+/* Asks the firmware for the board's state (firmware.c on the Pi 4, v3d71-firmware.c on the Pi 5). */
+void bcm2711_board_state_read(struct bcm2711_board_state *state);
 
 /* The decoding of a compositor display list (list.c). */
 void bcm2711_list_decode(const volatile uint32_t *memory, uint32_t start, struct bcm2711_list *list);
@@ -323,7 +359,7 @@ int bcm2711_v3d_pages_unmap(uint32_t *table, uint32_t address, uint64_t bytes);
 int bcm2711_v3d_noop_prepare(struct bcm2711_v3d_noop *job);
 int bcm2711_v3d_clear_prepare(struct bcm2711_v3d_clear *job);
 
-/* The bring-up steps of the two parts (display.c, v3d.c and their neighbours). */
+/* The stages of the two parts (display.c, v3d.c). */
 int bcm2711_display_discover(const struct drv_fdt *fdt, struct bcm2711_display *display);
 int bcm2711_display_readout(struct bcm2711_display *display, const struct drv_bcm2711_boot_screen *screen);
 int bcm2711_display_irq_prepare(struct bcm2711_display *display);

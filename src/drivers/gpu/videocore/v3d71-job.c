@@ -126,7 +126,7 @@ static void counters_prepare(struct bcm2711_v3d *engine);
 static void counters_select(struct bcm2711_v3d *engine, const uint8_t *sources);
 static void counters_read(struct bcm2711_v3d *engine, uint32_t *values);
 static int launch_admit_locked(struct bcm2711_v3d *engine);
-static void report_failure(const struct bcm2711_v3d_job *job, const struct bcm2711_v3d_job_result *result, int error);
+static void report_failure(struct bcm2711_v3d *engine, const struct bcm2711_v3d_job *job, const struct bcm2711_v3d_job_result *result, int error);
 
 /*
  * Runs one trusted job while its caller retains every mapped owner.
@@ -173,9 +173,9 @@ bcm2711_v3d_job_run(
 	/* The time the job ran, ended or failed, counts in the engine's busy time. */
 	bcm2711_v3d_busy_add(engine, started);
 
-	/* Records the failed job before masking or reset discards its state. */
+	/* Records the failed queues before masking or reset discards their state. */
 	if (error != 0)
-		report_failure(job, result, error);
+		report_failure(engine, job, result, error);
 
 	/* Only success or a refusal before the first launch proves DMA retirement. */
 	failed_dma = false;
@@ -793,22 +793,46 @@ launch_admit_locked(
 	return 0;
 }
 
-/* Logs a failed job's events before a reset discards them. */
+/* Logs a failed job's events and the queues' registers before a reset discards them. */
 static void
 report_failure(
+	struct bcm2711_v3d *engine,
 	const struct bcm2711_v3d_job *job,
 	const struct bcm2711_v3d_job_result *result,
 	int error)
 {
 	/* Names the job and what its IRQs said. */
-	kern_logf("v3d: job failed kind=%u error=%d retired=%u irq=%x/%x fault=%x:%x\n",
-		  (unsigned)job->kind,
-		  error,
-		  (unsigned)result->retired,
-		  result->core_events,
-		  result->hub_events,
-		  result->fault_client,
-		  result->fault_address);
+	bcm2711_stage_mark(
+		BCM2711_FAMILY_V3D,
+		"job failed kind=%u error=%d retired=%u irq=%x/%x fault=%x:%x",
+		(unsigned)job->kind,
+		error,
+		(unsigned)result->retired,
+		result->core_events,
+		result->hub_events,
+		result->fault_client,
+		result->fault_address);
+
+	/* Shows where each queue stood, unless the engine lost power. */
+	if (!engine->power.ready)
+		return;
+	bcm2711_stage_mark(
+		BCM2711_FAMILY_V3D,
+		"job queues bin=%x/%x render=%x/%x counters=%u/%u",
+		kern_mmio_read32(engine->core.mapped + CLE_CT0CA),
+		kern_mmio_read32(engine->core.mapped + CLE_CT0EA),
+		kern_mmio_read32(engine->core.mapped + CLE_CT1CA),
+		kern_mmio_read32(engine->core.mapped + CLE_CT1EA),
+		kern_mmio_read32(engine->core.mapped + CLE_BFC),
+		kern_mmio_read32(engine->core.mapped + CLE_RFC));
+	bcm2711_stage_mark(
+		BCM2711_FAMILY_V3D,
+		"job status bin=%x render=%x pipeline=%x tfu=%x csd=%x",
+		kern_mmio_read32(engine->core.mapped + CLE_CT0CS),
+		kern_mmio_read32(engine->core.mapped + CLE_CT1CS),
+		kern_mmio_read32(engine->core.mapped + CLE_PCS),
+		kern_mmio_read32(engine->hub.mapped + TFU_CS),
+		kern_mmio_read32(engine->core.mapped + CSD_STATUS));
 }
 
 /*

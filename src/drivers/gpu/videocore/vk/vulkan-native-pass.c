@@ -54,6 +54,8 @@ bcm2711_vulkan_native_pass_create(
 {
 	struct bcm2711_vulkan_native_pass *created;
 	const struct bcm2711_vulkan_prepared_event *following;
+	struct bcm2711_v3d_perf costs;
+	uint64_t started;
 	const char *stage;
 	uint64_t remaining;
 	int error;
@@ -85,6 +87,7 @@ bcm2711_vulkan_native_pass_create(
 	created->job.kind = BCM2711_V3D_JOB_CL;
 
 	/* Complete output ownership precedes every draw or command-storage allocation. */
+	started = clock_ticks();
 	stage = "target";
 	error = prepare_target(created, begin);
 
@@ -106,11 +109,19 @@ bcm2711_vulkan_native_pass_create(
 
 	/* Reports a refused preparation before teardown can replace its original failure. */
 	if (error != 0) {
-		kern_logf("v3d: pass prepare %s failed (%d) draws=%u bytes=%llu\n",
-			  stage,
-			  error,
-			  created->draws,
-			  (unsigned long long)created->bytes);
+		kern_memset(&costs, 0, sizeof(costs));
+		bcm2711_vulkan_native_pass_costs(created, &costs);
+		kern_logf(
+			"v3d: pass prepare stage=%s error=%d draws=%u bytes=%llu ms=%llu tex=%llu copy=%llu alloc=%llu map=%llu\n",
+			stage,
+			error,
+			created->draws,
+			(unsigned long long)created->bytes,
+			(unsigned long long)kern_ticks_to_ms(clock_ticks() - started),
+			(unsigned long long)kern_ticks_to_ms(costs.texture_ticks),
+			(unsigned long long)kern_ticks_to_ms(costs.texel_copy_ticks),
+			(unsigned long long)kern_ticks_to_ms(costs.allocation_ticks),
+			(unsigned long long)kern_ticks_to_ms(costs.mapping_ticks));
 	}
 
 	/* Preparation never launched DMA; each owner retires once even when a late translation teardown fails. */
@@ -237,6 +248,8 @@ bcm2711_vulkan_native_pass_release(
 	struct bcm2711_vulkan_native_pass *owned;
 	struct bcm2711_vulkan_native_draw *draw;
 	struct bcm2711_vulkan_native_draw *next;
+	struct bcm2711_v3d_perf *perf;
+	uint64_t started;
 	uint32_t index;
 	int first;
 	int error;
@@ -255,6 +268,8 @@ bcm2711_vulkan_native_pass_release(
 	/* The whole root is consumed once; failed mapping teardown is held independently by the native address space. */
 	*pass = NULL;
 	first = 0;
+	started = clock_ticks();
+	perf = &owned->space->native->hardware.perf;
 	draw = owned->first;
 	while (draw != NULL) {
 		/* Preserve the linked successor before consuming each complete independent draw. */
@@ -262,11 +277,13 @@ bcm2711_vulkan_native_pass_release(
 		error = bcm2711_vulkan_native_draw_release(&draw, true);
 		if (first == 0 && error != 0)
 			first = error;
+		perf->released_draws++;
 		draw = next;
 	}
 	error = bcm2711_vulkan_native_draw_pool_release(&owned->draw_pool);
 	if (first == 0 && error != 0)
 		first = error;
+	perf->release_draw_ticks += clock_ticks() - started;
 
 	/* Every command/tile/overflow owner retires even if an earlier draw teardown failed. */
 	for (index = 0; index < owned->count; index++) {
@@ -303,6 +320,58 @@ bcm2711_vulkan_native_pass_release(
 
 	/* Succeeded: all independent references of the complete pass have retired. */
 	return 0;
+}
+
+/*
+ * Adds the diagnostic preparation costs of every draw of one pass to a report.
+ *
+ * Only original owners count a shared texture's storage costs, so borrowed
+ * uploads are not counted twice.  The caller holds the controller mutex.
+ */
+void
+bcm2711_vulkan_native_pass_costs(
+	const struct bcm2711_vulkan_native_pass *pass,
+	struct bcm2711_v3d_perf *perf)
+{
+	const struct bcm2711_vulkan_native_draw *draw;
+	uint32_t index;
+
+	/* Totals the draws in their linked order without adding per-draw console output. */
+	for (draw = pass->first; draw != NULL; draw = draw->next) {
+		perf->texture_ticks += draw->texture_ticks;
+		perf->texel_copy_ticks += draw->copy_ticks;
+		perf->program_ticks += draw->program_ticks;
+		perf->record_ticks += draw->record_ticks;
+		perf->snapshot_hits += draw->snapshot_hits;
+		perf->snapshot_fills += draw->snapshot_fills;
+		perf->snapshot_updates += draw->snapshot_updates;
+		perf->mapped_textures += draw->mapped_textures;
+		perf->private_textures += draw->private_textures;
+		perf->mapped_bytes += draw->mapped_bytes;
+		if ((uint64_t)(draw->largest_size >> 16) * (draw->largest_size & 0xffffU) >
+		    (uint64_t)(perf->largest_size >> 16) * (perf->largest_size & 0xffffU)) {
+			perf->largest_size = draw->largest_size;
+			perf->largest_kind = draw->largest_kind;
+		}
+
+		/* Each storage owner reports its own allocation, translation and cache clean. */
+		for (index = 0; index < draw->count; index++) {
+			perf->allocation_ticks += draw->storage[index]->allocation_ticks;
+			perf->mapping_ticks += draw->storage[index]->mapping_ticks;
+			perf->clean_ticks += draw->storage[index]->clean_ticks;
+		}
+	}
+
+	/* Counts the pass's command, tile and overflow storage with the draws' inputs. */
+	for (index = 0; index < pass->count; index++) {
+		perf->allocation_ticks += pass->storage[index]->allocation_ticks;
+		perf->mapping_ticks += pass->storage[index]->mapping_ticks;
+		perf->clean_ticks += pass->storage[index]->clean_ticks;
+	}
+
+	/* Records the pass's draws and staged bytes. */
+	perf->draws += pass->draws;
+	perf->staged_bytes += pass->bytes;
 }
 
 /* Retains the actual coherent output view and copies immutable numerical area/lifecycle state without modifying any target sample. */
