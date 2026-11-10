@@ -20,8 +20,11 @@ Makefile と `userland/base/package.mk`）を書く時の規則。
    （ユーザーの決定）。
 6. make の `ifeq`・`ifneq`・`ifdef`・`ifndef` の block には、それぞれ何を決めるかの comment を付け、
    block と block の間は空行で分ける（2026-11-10 ユーザーの指示）。
-7. 1 つの package の Makefile で複数の program を作る時は、`USERLAND_PACKAGE` を program ごとに呼ぶ。
-   `package.mk` は呼び出しごとに target（`standalone-build-NAME` など）とその target だけに効く変数を作る。
+7. 1 つの package（1 つの directory と Makefile）は、複数の binary（program・library）を作ってよい。
+   選ぶ単位は package で、package の名前を選ぶと、その package が作る binary の全部が入る。
+   作る binary ごとに `USERLAND_PACKAGE` を 1 回呼ぶか、新しい書き方では `PROGS` に並べる。
+   `package.mk` は binary ごとに target（`standalone-build-NAME` など）と、名前の付いた変数を作る
+   （2026-11-10 ユーザーの決定）。
 
 ## B. 規則
 
