@@ -195,27 +195,17 @@ struct bcm2711_flip_state {
 	uint64_t frame_sequence;
 	uint64_t adopted_ticks;
 	uint32_t core_hz;
-	int clock_error;
 };
 
-/* A caller-owned copy of the state's progress and of what the lists name. */
+/* A caller-owned copy of the state's progress and of its primary plane. */
 struct bcm2711_flip_status {
-	bool attached;
 	bool uncertain;
-	bool restoring;
 	uint32_t active_list;
 	uint32_t pending_count;
-	uint32_t used_mask;
 	uint32_t retiring_count;
 	uint64_t frame_sequence;
-	uint64_t state_serial;
-	uint64_t list_serial;
 	uint64_t adopted_serial;
-	uint32_t core_hz;
-	int clock_error;
 	struct bcm2711_flip_primary primary;
-	struct bcm2711_flip_overlay overlays[BCM2711_FLIP_OVERLAYS];
-	struct drv_bcm2711_boot_screen frames[BCM2711_FLIP_SLOTS];
 };
 
 /* The driver keeps this owner and its mapped registers alive throughout use. */

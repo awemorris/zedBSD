@@ -1278,7 +1278,6 @@ bcm2711_display_flip_snapshot(
 	struct bcm2711_flip_status *status)
 {
 	unsigned long enabled;
-	uint32_t slot;
 
 	/* Clears the caller's result without dereferencing an uninitialized guard. */
 	kern_memset(status, 0, sizeof(*status));
@@ -1288,26 +1287,13 @@ bcm2711_display_flip_snapshot(
 	/* Copies one coherent observation under the guard. */
 	enabled = spin_lock_irqsave(&display->flip.guard);
 
-	status->attached = display->flip.attached;
 	status->uncertain = display->flip.uncertain;
-	status->restoring = display->flip.restoring;
 	status->active_list = display->flip.active_list;
 	status->pending_count = display->flip.pending_count;
 	status->retiring_count = display->flip.retiring_count;
 	status->frame_sequence = display->flip.frame_sequence;
-	status->state_serial = display->flip.state_serial;
-	status->list_serial = display->flip.list_serial;
 	status->adopted_serial = display->flip.adopted_serial;
-	status->core_hz = display->flip.core_hz;
-	status->clock_error = display->flip.clock_error;
 	status->primary = display->flip.primary;
-	kern_memcpy(status->overlays, display->flip.overlays, sizeof(status->overlays));
-	for (slot = 0; slot < BCM2711_FLIP_SLOTS; slot++) {
-		/* A slot's frame means something only while the slot is used. */
-		if (display->flip.slots[slot].used)
-			status->used_mask |= 1U << slot;
-		status->frames[slot] = display->flip.slots[slot].frame;
-	}
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);
 
@@ -1556,10 +1542,9 @@ raise_clock(
 	if (required == 0 || required > display->max_core_hz)
 		return ENOTSUP;
 
-	/* Publishes the rate for later records and the snapshot. */
+	/* Publishes the rate for later records. */
 	enabled = spin_lock_irqsave(&display->flip.guard);
 
-	display->flip.clock_error = 0;
 	display->flip.core_hz = display->max_core_hz;
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);
@@ -1579,7 +1564,6 @@ lower_clock(
 	/* Publishes the rate. */
 	enabled = spin_lock_irqsave(&display->flip.guard);
 
-	display->flip.clock_error = 0;
 	display->flip.core_hz = hz;
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);

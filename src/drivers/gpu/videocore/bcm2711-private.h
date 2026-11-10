@@ -206,7 +206,6 @@ struct bcm2711_display {
 	/* IRQ-written completion state; initialization arms only the new-mode frame. */
 	volatile bool adoption_armed;
 	volatile bool first_frame;
-	volatile uint64_t underruns;
 	struct bcm2711_display_irq_source compositor_source;
 	struct bcm2711_display_irq_source timing_source[BCM2711_TIMING_COUNT];
 	struct drv_bcm2711_boot_screen screen;

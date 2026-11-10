@@ -34,10 +34,6 @@ struct bcm2711_native_storage {
 	 */
 	bool device;
 	bool clean;
-	/* Diagnostic wall times belong to this owner and never control its lifetime. */
-	uint64_t allocation_ticks;
-	uint64_t mapping_ticks;
-	uint64_t clean_ticks;
 };
 
 /* The registered renderer keeps up to this many bytes of converted texture snapshots. */

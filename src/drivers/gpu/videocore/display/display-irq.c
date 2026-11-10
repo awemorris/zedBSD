@@ -42,7 +42,6 @@ bcm2711_display_irq_prepare(
 	bcm2711_display_flip_init(display);
 	display->adoption_armed = false;
 	display->first_frame = false;
-	display->underruns = 0;
 	display->compositor_source.display = display;
 	display->compositor_source.port = BCM2711_HDMI_COUNT;
 	display->compositor_irq.owner = &display->compositor_source;
@@ -225,7 +224,6 @@ service_compositor(
 			continue;
 		control &= ~bit;
 		kern_mmio_write32(display->compositor.mapped, control);
-		display->underruns++;
 	}
 
 	/* Retires device status before the common handler acknowledges the GIC. */

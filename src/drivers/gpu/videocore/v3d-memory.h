@@ -57,9 +57,8 @@ struct bcm2711_v3d_space {
 	uint64_t snapshot_bytes;
 	uint64_t snapshot_limit;
 	uint64_t snapshot_serial;
-	/* Whole and in-place partial conversions made by snapshot lookups, which diagnostics tell apart from reuses. */
+	/* Whole conversions made by snapshot lookups; a draw tells a fresh conversion from a reuse by its change. */
 	uint64_t snapshot_fills;
-	uint64_t snapshot_updates;
 	/*
 	 * The owner mark of the session whose job step is building native
 	 * work, set by that step around the creation only (zero otherwise).
