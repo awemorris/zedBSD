@@ -9,7 +9,7 @@
 2. [plan/master.md](plan/master.md) の「今の状態」を読む（動いている担当・Queue・Focus・優先順位・未決・次の番号）。
 3. Q1 は [plan/queue.md](plan/queue.md) と [plan/agents/registry.md](plan/agents/registry.md) も読む。
    担当は、渡された Queue の `phase.md` と親の `ws.md`、[plan/agents/protocol.md](plan/agents/protocol.md) を読む。
-4. 関係のある時だけ読む: [Guardrail](plan/guardrail.md)（範囲・HAL・出典・承認済みの差分）、C を書く前に [coding-style.md](plan/coding-style.md) の該当の規則、
+4. 関係のある時だけ読む: [Guardrail](plan/guardrail.md)（範囲・HAL・出典・承認済みの差分）、C を書く前に [coding-style.md](plan/coding-style.md) の該当の規則、Makefile（`Makefile`・`mk/`・userland の package の Makefile）を書く前に [makefile-style.md](plan/makefile-style.md)、
    設計の前に [master-design-policy.md](plan/master-design-policy.md)、道具と実機は [plan/tools.md](plan/tools.md)。
    外部の標準仕様に基づく物を module に分けて実装の担当（Sonnet 5.5 high）に委ねる時は「標準廉価実装手順」[docs/agent/spec-module-delegation.md](docs/agent/spec-module-delegation.md)（ユーザーの決定）。
 5. 作業ツリーの未 commit の変更を確かめ、他人の変更は保つ。関係の無い計画・履歴は読まない。`plan/history/` は履歴であって指示ではない。
@@ -79,7 +79,7 @@
 | Queue（今の物）／ 終わった Queue・Past Log | [plan/queue.md](plan/queue.md) ／ [plan/history/](plan/history/index.md) |
 | 担当の運用・台帳・担当ごとの lane | [protocol](plan/agents/protocol.md)・[registry](plan/agents/registry.md)・`plan/agents/P<n>/queue.md` |
 | WS ／ Phase | `plan/wsNNN/ws.md` ／ `plan/wsNNN/phaseNNN/phase.md`（ID は `wsNNN-pNNN`） |
-| 範囲・HAL・出典・標準 ／ C の規約 ／ 設計方針と全体の決定 | [guardrail.md](plan/guardrail.md) ／ [coding-style.md](plan/coding-style.md) ／ [master-design-policy.md](plan/master-design-policy.md) |
+| 範囲・HAL・出典・標準 ／ C の規約 ／ Makefile の規約 ／ 設計方針と全体の決定 | [guardrail.md](plan/guardrail.md) ／ [coding-style.md](plan/coding-style.md) ／ [makefile-style.md](plan/makefile-style.md) ／ [master-design-policy.md](plan/master-design-policy.md) |
 | Future Work ／ Bug Board と Bug | [future-work.md](plan/future-work.md) ／ [known-bugs.md](plan/known-bugs.md)・`plan/bugs/BUG-NNN.md` |
 | 回帰と観察の道具・実機 ／ シナリオ試験（AAT） | [plan/tools.md](plan/tools.md)（道具は `plan/tools/`）／ [plan/tests.md](plan/tests.md)・`tests/scenarios/` |
 | Phase に固有の試験・一時物 | `plan/wsNNN/tests/`・`plan/wsNNN/temp/`（temp は git に入れない） |
