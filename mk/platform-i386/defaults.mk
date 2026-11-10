@@ -208,6 +208,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	sleep \
 	sort \
 	split \
+	ssh \
 	stat \
 	strings \
 	stty \

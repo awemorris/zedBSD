@@ -8,8 +8,8 @@ CONFIG_GRAPHICAL_LOGIN            := y
 
 CONFIG_DRIVER_PCI                 := y
 CONFIG_DRIVER_USB                 := y
-CONFIG_DRIVER_PCI_NVME            := y
-CONFIG_DRIVER_PCI_AHCI            := y
+CONFIG_DRIVER_PCI_NVME            := n
+CONFIG_DRIVER_PCI_AHCI            := n
 CONFIG_DRIVER_LOOP                := y
 CONFIG_DRIVER_FS_UFS              := y
 CONFIG_DRIVER_FS_FAT              := y
@@ -19,42 +19,42 @@ CONFIG_KERN_NET_IPV4              := y
 CONFIG_KERN_NET_IPV6              := y
 CONFIG_KERN_NET_ETHERNET          := y
 CONFIG_KERN_NET_WIFI              := y
-CONFIG_DRIVER_USB_CDC_NCM         := y
-CONFIG_DRIVER_USB_CDC_ECM         := y
-CONFIG_DRIVER_USB_RTL815X         := y
+CONFIG_DRIVER_USB_CDC_NCM         := n
+CONFIG_DRIVER_USB_CDC_ECM         := n
+CONFIG_DRIVER_USB_RTL815X         := n
 CONFIG_DRIVER_RPI5_ETHERNET       := y
-CONFIG_DRIVER_USB_RTL8822BU       := y
+CONFIG_DRIVER_USB_RTL8822BU       := n
 CONFIG_DRIVER_RPI5_WIFI           := y
 CONFIG_DRIVER_GRAPHICS            := y
 CONFIG_DRIVER_GRAPHICS_BOOTLFB    := y
 CONFIG_DRIVER_GPU                 := y
-CONFIG_DRIVER_RPI5_GPU            := n
+CONFIG_DRIVER_RPI5_GPU            := y
 CONFIG_GPU_JOB_RESERVATION_MS     := 10000
 CONFIG_GPU_JOB_EXECUTION_MS       := 60000
 CONFIG_GPU_JOB_STOP_MS            := 10000
 CONFIG_GPU_CONTROL_MS             := 10000
-CONFIG_DRIVER_AUDIO               := y
-CONFIG_DRIVER_RPI5_AUDIO          := y
+CONFIG_DRIVER_AUDIO               := n
+CONFIG_DRIVER_RPI5_AUDIO          := n
 CONFIG_DRIVER_HID                 := y
-CONFIG_DRIVER_I2C_HID             := y
-CONFIG_DRIVER_PCI_EHCI            := y
+CONFIG_DRIVER_I2C_HID             := n
+CONFIG_DRIVER_PCI_EHCI            := n
 CONFIG_DRIVER_PCI_XHCI            := y
 CONFIG_DRIVER_USB_HUB             := y
 CONFIG_DRIVER_USB_HID             := y
 CONFIG_DRIVER_USB_STORAGE         := y
 CONFIG_DRIVER_USB_UASP            := y
-CONFIG_DRIVER_USB_CCID            := y
-CONFIG_DRIVER_USB_BT              := y
+CONFIG_DRIVER_USB_CCID            := n
+CONFIG_DRIVER_USB_BT              := n
 CONFIG_DRIVER_USB_UVC             := y
-CONFIG_DRIVER_BT                  := y
-CONFIG_DRIVER_INPUT_BRIDGE        := y
-CONFIG_DRIVER_RPI5_BT             := y
+CONFIG_DRIVER_BT                  := n
+CONFIG_DRIVER_INPUT_BRIDGE        := n
+CONFIG_DRIVER_RPI5_BT             := n
 CONFIG_DRIVER_RPI5_FAN            := y
 CONFIG_DRIVER_CPU_PERF            := y
 CONFIG_KERN_CPU_PERF              := y
 CONFIG_DRIVER_CAMERA              := y
-CONFIG_DRIVER_I2C                 := y
-CONFIG_DRIVER_GPIO                := y
+CONFIG_DRIVER_I2C                 := n
+CONFIG_DRIVER_GPIO                := n
 
 CONFIG_USERLAND_PROGRAMS          += \
 	account-admin \
@@ -201,6 +201,10 @@ CONFIG_USERLAND_PROGRAMS          += \
 	sleep \
 	sort \
 	split \
+	ssh \
+	sshd \
+	ssh-keygen \
+	sftp-server \
 	stat \
 	strings \
 	stty \
@@ -290,14 +294,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	wayland \
 	wallpapers \
 	xserver \
-	i915-firmware \
-	intelax211-firmware \
-	intelbt-firmware \
-	nvidia-gsp-firmware \
-	amd-navi-firmware \
-	rtl8822b-firmware \
 	bcm43455-firmware \
-	brcmbt-firmware \
 	hand-hershey \
 	noto-color-emoji \
 	ca-certificates \

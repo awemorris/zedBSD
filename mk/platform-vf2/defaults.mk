@@ -199,6 +199,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	sleep \
 	sort \
 	split \
+	ssh \
 	stat \
 	strings \
 	stty \
@@ -288,11 +289,6 @@ CONFIG_USERLAND_PROGRAMS          += \
 	wayland \
 	wallpapers \
 	xserver \
-	i915-firmware \
-	intelax211-firmware \
-	intelbt-firmware \
-	nvidia-gsp-firmware \
-	amd-navi-firmware \
 	rtl8822b-firmware \
 	powervr-firmware \
 	wave511-firmware \
