@@ -63,6 +63,7 @@
 #include "drivers/gpu/videocore/vk/vulkan-resource.h"
 #include "drivers/gpu/videocore/vk/vulkan-memory.h"
 #include "drivers/gpu/videocore/v3d-memory.h"
+#include "drivers/gpu/videocore/bcm2711-private.h"
 #include "drivers/gpu/videocore/buffer.h"
 #include "drivers/gpu/videocore/render-device.h"
 #include "drivers/gpu/videocore/render-worker.h"
@@ -4602,8 +4603,8 @@ note_decode(
 
 /*
  * Writes the cost line of the window when VIDEO_STATS_MS have passed since
- * it opened (the first VIDEO_STATS_REPORTS windows of a boot), and opens
- * the next.
+ * it opened (the first VIDEO_STATS_REPORTS windows of a boot, and only when
+ * the boot asked with v3d.videostats=1), and opens the next.
  */
 static void
 report_stats(
@@ -4623,8 +4624,8 @@ report_stats(
 	if (elapsed < VIDEO_STATS_MS)
 		return;
 
-	/* The averages of the window, while the boot's lines last. */
-	if (video_stats.reports < VIDEO_STATS_REPORTS) {
+	/* The averages of the window, when the boot asked for them and while its lines last. */
+	if (video_stats.reports < VIDEO_STATS_REPORTS && bcm2711_stage_video_stats()) {
 		kern_logf("v3d: video: %u decodes in %llu ms (%u skipped, %u pushes, %u steps, depth %llu.%llu); avg_us send %llu frame %llu place %llu, max_us frame %llu; readbacks %u cached avg_us %llu, %u uncached avg_us %llu; waits %u avg_us %llu\n",
 			  (unsigned)video_stats.decodes,
 			  (unsigned long long)elapsed,

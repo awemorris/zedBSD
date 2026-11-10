@@ -251,6 +251,7 @@ struct bcm2711_v3d {
 /* The driver's boot parameters (stage.c). */
 bool bcm2711_stage_driver_off(void);
 bool bcm2711_stage_tfu_off(void);
+bool bcm2711_stage_video_stats(void);
 
 /* Device tree helpers shared by both parts (fdt-util.c). */
 int bcm2711_fdt_find(const struct drv_fdt *fdt, const char *compatible, uint32_t *node);

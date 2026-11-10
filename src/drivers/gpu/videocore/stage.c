@@ -16,6 +16,8 @@
  *   v3d.tfu=0             textures are converted by the CPU, never the
  *                         texture formatting unit; without it the unit
  *                         converts them
+ *   v3d.videostats=1      while video is decoded, the cost of the decoding
+ *                         is logged every two seconds (none by default)
  *
  * The Raspberry Pi 5's rpi5gpu.start=hold is read by its attachment.
  */
@@ -36,6 +38,9 @@
 
 /* The whole token that keeps texture conversion off the texture formatting unit. */
 #define STAGE_TFU_OFF_TOKEN		"v3d.tfu=0"
+
+/* The whole token that logs the cost of video decoding. */
+#define STAGE_VIDEO_STATS_TOKEN		"v3d.videostats=1"
 
 static const char *stage_command_line(void);
 
@@ -76,6 +81,26 @@ bcm2711_stage_tfu_off(
 		return true;
 
 	/* The unit converts textures. */
+	return false;
+}
+
+/*
+ * Reports whether the boot asked for the cost of video decoding in the log.
+ */
+bool
+bcm2711_stage_video_stats(
+	void)
+{
+	const char *line;
+	int present;
+
+	/* Looks for v3d.videostats=1 among the boot parameters. */
+	line = stage_command_line();
+	present = kern_boot_parameters_token_present(line, STAGE_VIDEO_STATS_TOKEN);
+	if (present)
+		return true;
+
+	/* Nothing is logged by default. */
 	return false;
 }
 
