@@ -10,19 +10,16 @@
  * 7.1).
  *
  * The platform calls the driver once, late in device discovery.  At boot
- * the driver honors rpi4gpu.off=1, runs discovery (stage V0), which reads
- * nothing behind the engine's power domain, and then holds the engine:
- * nothing powers it until root writes hw.gpu.start=1.  The start then runs
- * the power-up (V1), identification, MMU and interrupts (V2-V4) and, when
- * the boot asked for the self-test (rpi4gpu.selftest=1), its jobs (V5-V9)
- * and test pictures on the writer's thread, logs one line per stage and
- * returns the first error.  A board where the engine hangs the bus is
- * therefore recovered by a power cycle, and the next boot comes up with the
- * engine untouched.
+ * the driver honors rpi4gpu.off=1, runs discovery, which reads nothing
+ * behind the engine's power domain, and then starts the display and the
+ * engine on the boot thread before user space, so that the graphical login
+ * finds the display and render nodes; a failure is logged and the boot
+ * goes on.
  *
- * The boot parameter rpi5gpu.start=boot runs the same start at once, on the
- * boot thread before user space, so the graphical login finds the display
- * and render nodes; a failure there is logged and the boot goes on.
+ * The boot parameter rpi5gpu.start=hold leaves the engine unpowered after
+ * discovery until root writes hw.gpu.start=1, which then runs the same
+ * start on the writer's thread.  An engine that hangs the bus is then
+ * recovered by a power cycle with the next boot leaving it untouched.
  */
 
 #include <stdbool.h>
@@ -53,8 +50,8 @@
  */
 #define ATTACH_FDT_READ_LIMIT	(2U * 1024U * 1024U)
 
-/* The whole token that starts the engine and the display at boot. */
-#define ATTACH_START_BOOT_TOKEN	"rpi5gpu.start=boot"
+/* The whole token that holds the engine and the display until root starts them. */
+#define ATTACH_HOLD_TOKEN	"rpi5gpu.start=hold"
 
 /*
  * The V3D 7.1 engine, as discovery found it.
@@ -96,7 +93,7 @@ static const struct kern_gpu_start_ops attach_start_ops = {
 };
 
 /*
- * Finds the V3D 7.1 engine and holds its bring-up for root.
+ * Finds the V3D 7.1 engine and starts it, unless the boot holds it for root.
  */
 int
 drv_bcm2712_gpu_attach(
@@ -109,7 +106,7 @@ drv_bcm2712_gpu_attach(
 	bool off;
 	int screen_error;
 	int display_error;
-	int start_at_boot;
+	int hold;
 	int error;
 
 	/* Stays out entirely when the boot asked for it. */
@@ -161,21 +158,20 @@ drv_bcm2712_gpu_attach(
 	/* Offers the start to root. */
 	kern_gpu_start_ops_set(&attach_start_ops);
 
-	/* Starts at once when the boot asked for it; the result is logged either way. */
+	/* Holds the bring-up until root asks for it when the boot says so. */
 	line = kern_boot_handoff("boot.command-line");
-	start_at_boot = kern_boot_parameters_token_present(line, ATTACH_START_BOOT_TOKEN);
-	if (start_at_boot) {
-		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "%s: starting at boot", ATTACH_START_BOOT_TOKEN);
-		error = start_engine();
-		if (error != 0)
-			bcm2711_stage_mark(BCM2711_FAMILY_V3D, "start at boot failed (%d); the boot goes on", error);
+	hold = kern_boot_parameters_token_present(line, ATTACH_HOLD_TOKEN);
+	if (hold) {
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "held; root starts it with: sysctl hw.gpu.start=1");
 		return 0;
 	}
 
-	/* Holds the bring-up until root asks for it. */
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "held; root starts it with: sysctl hw.gpu.start=1");
+	/* Starts at once; a failure is logged and the boot goes on. */
+	error = start_engine();
+	if (error != 0)
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "start at boot failed (%d); the boot goes on", error);
 
-	/* Succeeded: the engine was found and waits for its start. */
+	/* Succeeded: the engine was found. */
 	return 0;
 }
 
