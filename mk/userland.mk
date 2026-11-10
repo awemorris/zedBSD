@@ -34,7 +34,6 @@ pkg_aliases = $(strip $(1) \
 	$(if $(filter printd,$(1)),keiland-printd) \
 	$(if $(filter installer,$(1)),install-admin) \
 	$(if $(filter wallpapers,$(1)),wayland) \
-	$(if $(filter sshd ssh-keygen sftp-server,$(1)),ssh) \
 	$(1)-firmware $(1)-test)
 
 SELECTED_PROGRAM_MAKEFILES := $(foreach mf, $(ALL_PROGRAM_MAKEFILES), \
@@ -91,7 +90,7 @@ programs: libc $(PROGRAM_STAMPS)
 # Base dependencies
 $(BUILD)/packages/sh/.stamp $(BUILD)/packages/net/.stamp: $(BUILD)/packages/libedit/.stamp
 $(BUILD)/packages/curses/.stamp $(BUILD)/packages/vi/.stamp $(BUILD)/packages/terminfo-extra/.stamp: $(BUILD)/packages/terminfo/.stamp
-$(BUILD)/packages/fidoctl/.stamp $(BUILD)/packages/ssh/.stamp $(BUILD)/packages/sshd/.stamp $(BUILD)/packages/ssh-keygen/.stamp $(BUILD)/packages/sftp-server/.stamp $(BUILD)/packages/libssl-compat/.stamp: $(BUILD)/packages/libcrypto-compat/.stamp
+$(BUILD)/packages/fidoctl/.stamp $(BUILD)/packages/ssh/.stamp $(BUILD)/packages/libssl-compat/.stamp: $(BUILD)/packages/libcrypto-compat/.stamp
 $(BUILD)/packages/passkey-fido2/.stamp: $(BUILD)/packages/passkey/.stamp $(BUILD)/packages/libcrypto-compat/.stamp
 $(BUILD)/packages/noct/.stamp: $(BUILD)/packages/libegl/.stamp $(BUILD)/packages/libglesv2/.stamp
 

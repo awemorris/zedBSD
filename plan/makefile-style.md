@@ -18,6 +18,10 @@ Makefile と `userland/base/package.mk`）を書く時の規則。
    `KERN_CPPFLAGS += -DCONFIG_X=1` と `KERN_SOURCES += …` を並べる。
 5. CPU の architecture ごとにまとめる整理は、ボードが増えてからする。具体的な例から抽象化する
    （ユーザーの決定）。
+6. make の `ifeq`・`ifneq`・`ifdef`・`ifndef` の block には、それぞれ何を決めるかの comment を付け、
+   block と block の間は空行で分ける（2026-11-10 ユーザーの指示）。
+7. 1 つの package の Makefile で複数の program を作る時は、`USERLAND_PACKAGE` を program ごとに呼ぶ。
+   `package.mk` は呼び出しごとに target（`standalone-build-NAME` など）とその target だけに効く変数を作る。
 
 ## B. 規則
 

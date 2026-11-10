@@ -7,6 +7,7 @@
 # Common standalone package interface for userland/base.
 #
 
+# The package's own make only: the top-level build reads none of this.
 ifndef TOPLEVEL_BUILD
 
 .DEFAULT_GOAL := all
@@ -19,23 +20,33 @@ DESTDIR ?=
 INSTALL ?= install
 STANDALONE_CONFIG ?= $(REPO_ROOT)/config.mk
 
+# make's own default compiler is not the target's: the tree's clang takes its place.
 ifeq ($(origin CC),default)
 CC := $(REPO_ROOT)/build/llvm/bin/clang
 endif
+
+# A caller that passed an empty CC gets the tree's clang too.
 ifeq ($(strip $(CC)),)
 CC := $(REPO_ROOT)/build/llvm/bin/clang
 endif
+
+# make's own default nm is not the target's: the tree's llvm-nm takes its place.
 ifeq ($(origin NM),default)
 NM := $(REPO_ROOT)/build/llvm/bin/llvm-nm
 endif
+
+# A caller that passed an empty NM gets the tree's llvm-nm too.
 ifeq ($(strip $(NM)),)
 NM := $(REPO_ROOT)/build/llvm/bin/llvm-nm
 endif
+
 AR ?= $(REPO_ROOT)/build/llvm/bin/llvm-ar
 
 # Acquisition and patch preparation must also work in a freshly cloned source
 # tree, before menuconfig has produced config.mk.  Compilation and installation
-# retain the existing configured-target requirement.
+# retain the existing configured-target requirement: a make without goals
+# builds and needs the configuration, a make that only downloads or patches
+# goes on without one, and any other goal needs it.
 ifeq ($(strip $(MAKECMDGOALS)),)
 include $(STANDALONE_CONFIG)
 else ifeq ($(strip $(filter-out download patch,$(MAKECMDGOALS))),)
@@ -66,19 +77,30 @@ STANDALONE_BINDIR = $(strip $(if $(filter /,$(PREFIX)),\
 STANDALONE_TERMINFO_DIR = $(strip $(if $(filter /,$(PREFIX)),\
 	/lib/terminfo,$(patsubst %/,%,$(PREFIX))/share/terminfo))
 
+#
+# One program, library or data set of the package.  A Makefile may call it
+# more than once: each call makes the targets standalone-build-NAME,
+# standalone-install-NAME and standalone-clean-NAME, whose variables are
+# their own (target-specific), and build, install and clean depend on them.
+#
 define USERLAND_PACKAGE
-STANDALONE_NAME := $(1)
-STANDALONE_SO_NAME := $(if $(filter shared-library,$(12)),$(if $(2),$(2),$(1)),$(1))
-STANDALONE_CLASS := $(5)
-STANDALONE_SOURCES := $(6)
-STANDALONE_REQUIRE := $(10)
-STANDALONE_MODE := $(if $(11),$(11),0755)
-STANDALONE_TYPE := $(if $(12),$(12),$(if $(filter library,$(5)),library,$(if $(filter package,$(5)),package,program)))
-STANDALONE_DATA := $(13)
-STANDALONE_HEADERS := $(14)
-STANDALONE_INSTALL_DIR := $(if $(15),$(15),bin)
-ifneq ($$(filter package custom,$$(STANDALONE_TYPE)),)
-build: $(1)
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_NAME := $(strip $(1))
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_SO_NAME := $(if $(filter shared-library,$(12)),$(if $(2),$(2),$(strip $(1))),$(strip $(1)))
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_CLASS := $(5)
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_SOURCES := $(6)
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_REQUIRE := $(10)
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_MODE := $(if $(11),$(11),0755)
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_TYPE := $(if $(12),$(12),$(if $(filter library,$(5)),library,$(if $(filter package,$(5)),package,program)))
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_DATA := $(13)
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_HEADERS := $(14)
+standalone-build-$(strip $(1)) standalone-install-$(strip $(1)) standalone-clean-$(strip $(1)): STANDALONE_INSTALL_DIR := $(if $(15),$(15),bin)
+build: standalone-build-$(strip $(1))
+install: standalone-install-$(strip $(1))
+clean: standalone-clean-$(strip $(1))
+
+# A package or custom type's own target, which its Makefile defines, is built too.
+ifneq ($(filter package custom,$(if $(12),$(12),$(if $(filter library,$(5)),library,$(if $(filter package,$(5)),package,program)))),)
+build: $(strip $(1))
 endif
 endef
 
@@ -86,7 +108,10 @@ endef
 
 all: build
 
+# The sources are prepared before anything a call adds to build.
 build: patch
+
+standalone-build-%: patch
 	@set -e; \
 	dynamic_dir="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/dynamic"; \
 	sysroot="$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/sysroot"; \
@@ -222,7 +247,7 @@ build: patch
 		mkdir -p "$$curdir_stamp" && touch "$$curdir_stamp/.stamp"; \
 	fi
 
-install: build
+standalone-install-%: standalone-build-%
 	@if test "$(STANDALONE_TYPE)" = program; then \
 		$(INSTALL) -d "$(DESTDIR)$(STANDALONE_BINDIR)"; \
 		$(INSTALL) -m "$(STANDALONE_MODE)" \
@@ -261,7 +286,7 @@ install: build
 			"$(DESTDIR)$$destination"; \
 	done
 
-clean:
+standalone-clean-%:
 	@rm -f "$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$(STANDALONE_NAME)/.stamp" \
 		"$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)/packages/$${PWD##*/}/.stamp"
 
