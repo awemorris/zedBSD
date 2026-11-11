@@ -115,7 +115,8 @@
 - RTL8822B の `.inc` はライセンスを分けるために独立させており、別の file のまま保つ。
 - 外部 package（`userland/packages/`）は source tree に取り込まず、tarball を取得・検証して patch する。ライセンスを監査する。
 - `/home/awe/amaterrace-gpu`（Amaterrace GPU の RTL と GHCI の仕様 `docs/ghci.md`）: **Claude（Q1・全担当）は RTL を絶対に触らない**
-  （2026-11-11 ユーザーの決定。Claude の RTL を作る能力は極めて低い）。RTL・board・config の変更も、それを担当に頼む事もしない。
+  （2026-11-11 ユーザーの決定。理由: Gemini が書いた RTL と仕様の間に乖離があり、それを扱う Claude のセッションが混乱で汚染され、
+  作業を続けられない水準の rot を起こすため。Claude に RTL を書く能力が無いのではなく、ひとまず書かない事にした）。RTL・board・config の変更も、それを担当に頼む事もしない。
   GHCI の仕様や RTL への疑問・食い違いは、Claude が file（例 `plan/ws347/ghci-rtl-questions.md`）にまとめてユーザーの判断を仰ぐ。
   仕様（ghci.md）を Claude が書き換えるのは、ユーザーが中身を指示した時だけ。
   読む事と、ユーザーが指示した bitstream の書き込み（Vivado の JTAG）はよい。`/home/awe/amaterrace-worktrees` は片付けない。
