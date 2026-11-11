@@ -8,7 +8,7 @@
 - Gemini への依頼の文: [gemini-request-01.md](gemini-request-01.md)（A1〜A11 を T1〜T4 に。2026-11-11 作成、ユーザーが渡す）。
 - Gemini への質問の文: [gemini-questions-01.md](gemini-questions-01.md)（B4〜B10 の RTL の意図と事実。2026-11-11 作成、ユーザーが渡す）。1 次回答と Q1 の照合: [gemini-answers-01.md](gemini-answers-01.md)。2026-11-11 ユーザーが修正方針を承認し、依頼の文 [gemini-request-02.md](gemini-request-02.md)（W1〜W7）を作った。
 - Gemini の報告 02（ad23fe01）の監査: [audit-ad23fe01.md](audit-ad23fe01.md)。直しの依頼: [gemini-request-03.md](gemini-request-03.md)（C1〜C11、ring の回帰が最優先）。
-- C1・C2 だけの直し（8ebb2e2f）の監査: [audit-8ebb2e2f.md](audit-8ebb2e2f.md)（C1 ほぼ完了、C2 完了）。依頼 04（まとめ版、依頼 01〜03 を置き換え、R1〜R14）: [gemini-request-04.md](gemini-request-04.md)。
+- C1・C2 だけの直し（8ebb2e2f）の監査: [audit-8ebb2e2f.md](audit-8ebb2e2f.md)（C1 ほぼ完了、C2 完了）。依頼 04（まとめ版、R1〜R14）: [gemini-request-04.md](gemini-request-04.md)。その結果（eeed36ed）の監査: [audit-eeed36ed.md](audit-eeed36ed.md)。**今の依頼は 05（まとめ版、01〜04 を置き換え、S1〜S11）: [gemini-request-05.md](gemini-request-05.md)。**
 - 読んだ版: amaterrace-gpu main 50f13348（2026-11-11 15:28、Gemini の修正 5fb4ad16・1e80cfb6・50f13348 の後）。ghci.md は bace7d66 から VA_BITS_ENC の 2 行だけ違う。RTL は読んだだけで、sim・実機では確かめていない。監査の全文は [audit-50f13348.md](audit-50f13348.md)。
 
 ## A: RTL の修正依頼（Gemini へ）
@@ -43,6 +43,13 @@
 | B10 | `spec/gpu/cp/atg_cp.md` が CTRL 0x010・STATUS 0x014・SCRATCH 0x048 と書き ghci.md §3.1 と違う。`atg_cp_regs.md` は「GHCI 2.0」のまま | — | 方針はユーザーが承認（2026-11-11）、gemini-request-02 の W7 で依頼 |
 | B11 | DBG（EXTCAP の id 2）の指す先と register の窓が §4.1 に無い。KC705 は DBG を list に載せ、指す先は 0 | §4.1、`atg_cp_regs.v` の見出し | 判断待ち |
 | B12 | RING_BASE の整列: 仕様は 64 byte の整列を求めるが、hardware が下位 bit を mask するか fault にするかを書いていない（RTL は 32 byte で mask） | ghci.md §3.1 0x024、`atg_cp_ring.v` | 判断待ち |
+| B13 | CPFW の 11 個の register が §4.1 の CPFW の窓（PERF と共用の 0x160〜0x17F、32 byte）に入らない。RTL は 0x170 と 0x1A0〜0x1BC に置く | §4.1、`ghci_regs.vh` の CPFW_* | 判断待ち |
+| B14 | ring: RING_SIZE のリセット値（RTL は 4 KiB）、size を変えた時の WPTR・RPTR の扱い、RING_BASE_HI が fetch に効かない（RTL の ADDR_W 32）、RING_SIZE の不正な値（RTL は前の値を保って無視） | §3.1、§6 | 判断待ち |
+| B15 | TIMESTAMP の LO と HI の読みの原子性（LO を読んだ時に HI を latch するか） | §3.1 | 判断待ち |
+| B16 | VEND の VENDOR_ID が PCI の 0x10EE か "AMAT" か。PERF0〜3 の counter の置き場所が GHCI 1.0 の map に無い | §3.2.3、§4.1 | 判断待ち |
+| B17 | MEM_CACHE_CFG: [27:24] は 4 bit で TU 16 KB が入らない、minimal の値（L2 4 KB・2 way・TU 2 KB）が列挙の外 | §11 の MEM の表 | 判断待ち |
+| B18 | FMT_BUFFER の bit の並び（§4.1 は OPTIMAL・LINEAR の並びだけを書く） | §4.1 | 判断待ち |
+| B19 | §5 の「リセットで SESSION_ACTIVE を消す」と §6 の「session 0 は常に 1」の関係 | §5、§6 | 判断待ち |
 
 ## 決定済み
 
