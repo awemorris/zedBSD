@@ -46,3 +46,9 @@
 - FMT_BUFFER の bit の並び。
 - §5 の「リセットで SESSION_ACTIVE を消す」と §6 の「session 0 は常に 1」の関係。
 - CPFW の 11 個の register が §4.1 の CPFW の窓（PERF と共用の 0x160〜0x17F）に入らない。
+
+## Gemini の 1 次回答への照合（2026-11-12）
+
+- S1: Gemini の指摘どおり、仕様 ghci.md:349-358 に `[19:16] CP_STATE`（0 IDLE〜7 FAULT）と `[31:20]` 予約がある。上の A1 と依頼 05 初版の「他の bit は 0」は Q1 の誤り（:348 までしか読んでいなかった）。依頼 05 の S1 を改訂した。
+- 追加の A: RTL の CP_STATE の値（`GHCI_ST_*`: 1 RUNNING・2 HALTING・3 HALTED・4 FAULTED・5 RESETTING・6 BLIT・7 WAIT_FENCE、`atg_cp_ctl.v:186-188`）が仕様の列挙（0 IDLE・1 FETCH・2 DECODE・3 EXEC・4 WAIT_FENCE・5 WAIT_MEM・6 BLIT・7 FAULT）と違う。M10 は走行中に doorbell を待つ間も CP_STATE == 0 とする。S1 に足した。
+- S11: 止まった理由は `tools/vivado-build.sh` の既定 `VIVADO_TIMEOUT` 1800 秒（Q1 が script で確かめた。開始 04:47:30、log の終わり 05:14）。依頼 05 の S11 に timeout の延長か FROM_SYNTH を書いた。

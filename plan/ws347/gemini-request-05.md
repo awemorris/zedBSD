@@ -27,11 +27,12 @@
 
 ## 1. register の並び（最優先、driver が直に読む）
 
-### S1. STATUS（0x010）を §3.3 の並びに
+### S1. STATUS（0x010）を §3.3 の並びに（2026-11-12 改訂: 初版の「他の bit は 0」は Q1 の誤り、CP_STATE は残す）
 
-- 仕様（ghci.md:340-348）: [0] RUNNING、[1] HALTED、[2] FAULTED、[8] MC_IDLE、[11] RING_EMPTY、[12] MEM_READY、[13] AXI_STUCK、[14] QUIESCE。他の bit は 0。
-- 今（`atg_cp_ctl.v:769`）: [0] CP の busy、[7:1] 各 unit の busy、[9] faulted、[10] halted、[14] halt_int、[18:16] cp_state。
-- 直し方: 仕様の並びにする。RUNNING・HALTED・QUIESCE の意味は §3.3 の CTRL と状態（M10 の IDLE・RUNNING・HALTING・HALTED・FAULTED）どおり。unit ごとの busy や cp_state を見たいなら DIAG_CP_STATUS（0x078）など仕様にある場所へ。
+- 仕様（ghci.md:340-358）: [0] RUNNING、[1] HALTED、[2] FAULTED、[8] MC_IDLE、[11] RING_EMPTY、[12] MEM_READY、[13] AXI_STUCK、[14] QUIESCE、**[19:16] CP_STATE**、[31:20] 予約（0）。[7:3]・[10:9]・[15] は 0。
+- 今（`atg_cp_ctl.v:769`）: [0] CP の busy、[7:1] 各 unit の busy、[9] faulted、[10] halted、[14] halt_int。
+- 直し方: [2:0] を RUNNING・HALTED・FAULTED に、[7:3] を 0 に、[8]・[11]〜[14] を仕様の意味に。RUNNING・HALTED・QUIESCE の意味は §3.3 の CTRL と状態（M10 の IDLE・RUNNING・HALTING・HALTED・FAULTED）どおり。
+- **CP_STATE の値も仕様の列挙に**: 仕様は 0 IDLE（doorbell か RUN を待つ）、1 FETCH、2 DECODE、3 EXEC、4 WAIT_FENCE、5 WAIT_MEM、6 BLIT、7 FAULT。今の RTL（`atg_cp_ctl.v:186-188`、`ghci_regs.vh:332-339` の `GHCI_ST_*`）は lifecycle の値（1 RUNNING、2 HALTING、3 HALTED、4 FAULTED、5 RESETTING、6 BLIT、7 WAIT_FENCE）で、仕様と違う。M10 は「RUNNING でも doorbell を待つ間は CP_STATE == 0」と書くので、今の RTL（走行中は 1）だと driver の IDLE の判定が狂う。CP の実際の段（fetch・decode・exec・fence 待ち・memory 待ち・blit・fault）から仕様の値を出す。`GHCI_ST_*` の定義も仕様の列挙に合わせる。
 
 ### S2. FAULT_INFO（0x018）を §3.5 の並びに
 
@@ -86,7 +87,7 @@
 1. **preset ごとの compile の仕組み**を作る（`sim/run.sh` か Makefile の target で、`make preset-minimal` と `make preset-balanced` の `include/atg_config.vh` をそれぞれ作り、その構成で compile して流す）。手で preset を切り替える前提にしない。
 2. **DUT を KC705 の board と同じに**: `boards/kc705/atg_kc705_top.v` そのものか、同じ parameter の atg_top（S_ID_W、S_LEN_W、SU_GRP_W・SU_NREGS・SU_NWARPS、HAS_L2・L2_*、PROT_GRANTS などを board と同じに。minimal の SU_GRP_W は 3）。
 3. **期待値は仕様の式で**: 16 進の定数（RESIDENT_WARPS 0x00200004、FMT の 0xEF・0xED、EXTCAP の指す先）を、構成の値と §3・§4.1 の式から計算する形に。RTL の macro の写しにしない。
-4. **STATUS・FAULT_INFO**: S1・S2 の**仕様の位置**で照合（R2 の LOCKED_REG は FAULT_INFO[3:0] = 7、FAULTED は STATUS[2]）。
+4. **STATUS・FAULT_INFO**: S1・S2 の**仕様の位置**で照合（R2 の LOCKED_REG は FAULT_INFO[3:0] = 7、FAULTED は STATUS[2]、走行中に doorbell を待つ間は STATUS[19:16] = 0、packet の取り込み中は FETCH 以降の値）。
 5. **EXTCAP の全部の窓**: 見出しを辿り、PERF_SRC・CPFW・DISP2・MEM（MEM_CACHE_CFG を含む）・FMT・VEND を照合。DBG の指す先は 0。
 6. **ring**: IDLE で CTRL に RESET を書いても ring が動かない事。
 7. **TIMESTAMP_HI**: 内部の counter を force せず、LO の桁上がりで HI が進む事を確かめる（短い時間で済むよう、試験の時だけ counter の初期値を parameter で与えるのはよい）。
@@ -98,7 +99,8 @@
 
 ### S11. 配置・配線まで
 
-- 前回の build は place の Phase 2.4（05:14）で log が途切れ、route まで行っていない（Vivado の process も無い）。止まった理由を調べて報告し、minimal の KC705 で**route の後**の WNS ≥ 0・WHS ≥ 0 と bitstream まで通す。LUT は合成の後 98.34% で余裕が少ない。
+- 前回の build は `tools/vivado-build.sh` の既定の `VIVADO_TIMEOUT=1800`（30 分）で止まった（Gemini の 1 次回答。合成だけで約 20 分）。合成の dcp を `VIVADO_FROM_SYNTH` で使うか、`VIVADO_TIMEOUT=5400` 程度にして、minimal の KC705 で**route の後**の WNS ≥ 0・WHS ≥ 0 と bitstream まで通す。LUT は合成の後 98.34% で余裕が少ない。
+- 既定の 1800 秒が KC705 の build に足りない事が分かったので、`tools/vivado-build.sh` の既定を KC705 の build が通る長さにするか、使い方の comment に書く（どちらにしたか報告）。
 
 ## 今回触らない物（仕様の問いとしてユーザーに上げた）
 
