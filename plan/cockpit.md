@@ -7,8 +7,8 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | ラップアップ | WS335 p035 の途中まで main に（00:05）。残り: Windows の単体・ct・ct の組み合わせ・check-skeleton（BASE=b8c4adaf6c）・相互接続・limbo・fuzz の確かめ（phase035 の引き継ぎ）。次は p036 | — |
-| P2 | — | 待機 | WS343 p002（libcrypto-compat に passkey の OpenSSL の関数、link の差し替えだけで passkey-fido2・fidoctl が OpenSSL 無し）cleared、22:20 merge | — |
+| P1 | [WS347](ws347/ws.md) p006 | Amaterrace GPU の RTL | CAPS の 3 つの register を ghci.md の並びに、minimal を VA 32・SFU 有りに（amaterrace-gpu の worktree） | — |
+| P2 | [WS347](ws347/ws.md) p003 | GHCI の driver | 新しい CAP の bit（CLIP_POLY・BLT_SCALE・TU_BILINEAR・BLT_BLEND・BLT_TILE）と N79・N81 の追従、host 試験 | — |
 | P3 | — | 待機 | BUG-412 の締め（xHCI・再投入の直しと読み捨てを main に、debug を外した）、23:40 merge。Pi 5 は普段の kernel、ユーザーの click の確かめ待ち | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
@@ -26,6 +26,8 @@
 （2026-11-01 10:29 クリア。これより後の進捗をここに書く。各 WS の状態は [master.md](master.md) と各 ws.md）
 
 ### WS347 VF2＋KC705 の Amaterrace GPU
+
+- 2026-11-11 12:2x: 仕様の差を調べた（[spec-diff.md](ws347/spec-diff.md)）。ユーザーから amaterrace-gpu の全権を受け、仕様を正に RTL（P1、p006）と driver（P2、p003）を直し始めた。minimal は VA 32 bit・SFU 有りに（仕様の必須）。今の bitstream の build は書き込みの試験用に続ける。
 
 - 2026-11-11 12:0x: 立てた。Vivado の hw_manager で KC705（xc7k325t、Digilent の JTAG）が見え、未設定（DONE=0）。host にある bitstream は 11-07 の物（WNS −0.911 ns、200 MHz 未達）だけで、200 MHz で閉じた版は見つからない。
 

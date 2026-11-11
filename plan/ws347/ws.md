@@ -52,7 +52,9 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | KC705 への bitstream の書き込み（Vivado・JTAG）と VF2 からの PCIe の見え方 | in-progress | — |
-| [p002](phase002/phase.md) | 仕様の差の読み（WS290 の基準 → 最新の ghci.md）と driver の追従の設計 | planned | — |
+| [p002](phase002/phase.md) | 仕様の差の読み（WS290 の基準 → 最新の ghci.md）と driver の追従の設計 | cleared（2026-11-11、[spec-diff.md](spec-diff.md)） | — |
 | [p003](phase003/phase.md) | driver の追従の実装と host 試験（CAPS、Blitter 無しの shader blit ほか） | planned | p002 |
-| [p004](phase004/phase.md) | VF2＋KC705 での段ごとの動作確認とデバッグ（attach → ring・fence → 描画 → 表示） | planned | p001・p003 |
-| [p005](phase005/phase.md) | 規約の全文の見直し | planned | p003・p004 |
+| [p004](phase004/phase.md) | VF2＋KC705 での段ごとの動作確認とデバッグ（attach → ring・fence → 描画 → 表示） | planned | p001・p003・p007 |
+| [p006](phase006/phase.md) | Amaterrace GPU の RTL の CAPS を ghci.md に合わせる、minimal を VA 32・SFU 有りに | planned | p002 |
+| [p007](phase007/phase.md) | 直した RTL で bitstream を作り直し、CAPS を実機で照合 | planned | p006 |
+| [p005](phase005/phase.md) | 規約の全文の見直し | planned | p003・p004・p006 |
