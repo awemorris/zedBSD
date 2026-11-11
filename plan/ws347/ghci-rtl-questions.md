@@ -5,6 +5,7 @@
 - 役割分担（2026-11-11 ユーザーの決定、AGENTS.md §7）: Claude は仕様と RTL を読んで監査し、driver を書く。Gemini は Claude の指揮の下で RTL を実装する。
   `docs/ghci.md` が正。食い違いは A（仕様の文が明確で RTL が違う → Gemini への修正依頼）と B（仕様が黙っている・表せない・設計の意図が要る → ユーザーの判断）に分ける。迷ったら B。
 - この file が唯一の台帳。決定が変わったら行を書き換える（訂正を書き足さない）。担当は会話でなくこの file を読む。
+- Gemini への依頼の文: [gemini-request-01.md](gemini-request-01.md)（A1〜A11 を T1〜T4 に。2026-11-11 作成、ユーザーが渡す）。
 - 読んだ版: amaterrace-gpu main 50f13348（2026-11-11 15:28、Gemini の修正 5fb4ad16・1e80cfb6・50f13348 の後）。ghci.md は bace7d66 から VA_BITS_ENC の 2 行だけ違う。RTL は読んだだけで、sim・実機では確かめていない。監査の全文は [audit-50f13348.md](audit-50f13348.md)。
 
 ## A: RTL の修正依頼（Gemini へ）
