@@ -45,3 +45,5 @@ DEVICE_CAPS（RTL の並び）: [31] MSAA 0、[30] 1 固定、[29] BLT 0、[28:2
 - SFU（rcp・rsq・exp2・log2・sin・cos・fsqrt.s）は仕様上必須（一度入れた EXT_CAP_ISA は取り消し）。ただし RTL の SFU の部分はひとまず直さない: minimal の実機は SFU 無しのままで、これらの命令を含む shader は止まる見込み（試験で避ける）。
 - D1・D2・D3（VA_BITS_ENC を除く）・D5 は RTL を直す（p006）。D4（30 bit の符号化）は未決。
 - 2026-11-11 ユーザーの決定: EXT_CAP_FEATURE[3:0] VA_BITS_ENC は VA − 30（0x0 = 30 bit、0x2 = 32 bit、0xA = 40 bit）。page table の説明は変えない。amaterrace-gpu 6949b248。D4 は解決（RTL は P1、driver の decode は P2）。
+- 2026-11-11 Q1 の判断（P2 の問い）: flat（CAP_HW_WALKER=0）では VA_BITS は GPU の address を縛らない（§11.6 の flat physical、MEM の HOST_LIMIT の行の経路と PA_BITS）。KC705 は host の窓 [0, 0x8000_0000) を bus に 1:1、local は 0x8000_0000 から 1 GiB。VF2 では DRAM の 0x4000_0000〜0x7FFF_FFFF が GPU に届く。仕様は変えない。
+- 2026-11-11 P1 の発見: KC705 の board top は atg_top に SLIM_MMIO を渡さず既定 0（旧の map）。GHCI 1.0 の page 0（DEVICE_CAPS ほか）が host から見えない見込み（RTL を読んだだけ）。Q1 の判断で SLIM_MMIO=1 を p006 に足した。今 build 中の bitstream（bace7d66）は書き込みと PCIe の列挙の確かめにだけ使う。
