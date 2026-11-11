@@ -2,6 +2,8 @@
 
 # ws347-p002 仕様の差の読みと driver の追従の設計
 
+Status: cleared
+
 - 親: [WS347](../ws.md)。状態: planned。
 
 ## 範囲

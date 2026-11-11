@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Counts mismatches between the plan records: the WS tables (master.md, workstreams-closed.md) vs ws.md, ws.md Phase tables vs phase.md,
+# Counts mismatches between the plan records: the WS tables (workstreams-open.md, workstreams-closed.md) vs ws.md, ws.md Phase tables vs phase.md,
 # Phases without a Status line, completed WSs that still hold Phase directories or tests, and WSs still
 # planning/planned although a Phase ran.  Run from the repository root:
 #   python3 -I plan/tools/record-audit/status.py | awk "{print \$1}" | sort | uniq -c
@@ -20,8 +20,8 @@ def status_line(path):
         if i>60: break
     return None,None
 reg={}
-# The WS rows live in two tables: open WSs in plan/master.md, completed/canceled/closed WSs in plan/workstreams-closed.md.
-S=open('plan/master.md',encoding='utf-8').read().split('\n')+open('plan/workstreams-closed.md',encoding='utf-8').read().split('\n')
+# The WS rows live in two tables: open WSs in plan/workstreams-open.md, completed/canceled/closed WSs in plan/workstreams-closed.md.
+S=open('plan/workstreams-open.md',encoding='utf-8').read().split('\n')+open('plan/workstreams-closed.md',encoding='utf-8').read().split('\n')
 for l in S:
     m=re.match(r'^\| \[WS(\d+)\]\(ws(\d+)/ws\.md\) \| ([^|]*)\| ([^|]*)\| ([^|]*)\|',l)
     if m: reg.setdefault(m.group(1),[]).append(m.group(5).strip())

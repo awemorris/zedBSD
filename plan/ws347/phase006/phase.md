@@ -2,6 +2,8 @@
 
 # ws347-p006 Amaterrace GPU の RTL の CAPS を仕様（ghci.md）に合わせる
 
+Status: canceled
+
 - 親: [WS347](../ws.md)。状態: canceled（2026-11-11 12:37、ユーザーの決定: RTL は Gemini が Claude の監査の下で実装する）。repo: `/home/awe/amaterrace-gpu`（2026-11-11 から Q1 の物、その repo の AGENTS.md に従う）。
 - 根拠: [spec-diff.md](../spec-diff.md) の §2（D1〜D8）。2026-11-11 ユーザーから、仕様を正とし瑕疵が無ければ RTL を直す、という趣旨の指示を受けた。
 - Q1 の判断（2026-11-11）: D1〜D8 はどれも仕様の瑕疵ではない。超越関数（rcp・rsq・exp2・log2・sin・cos・fract）は §12.5 で CAPS の bit を持たない必須の命令、

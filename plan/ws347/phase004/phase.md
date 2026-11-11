@@ -2,6 +2,8 @@
 
 # ws347-p004 VF2＋KC705 での動作確認とデバッグ
 
+Status: planned
+
 - 親: [WS347](../ws.md)。状態: planned。依存: p001・p003。WS290 p014 を引き継ぐ。
 
 ## 範囲

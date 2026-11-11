@@ -305,6 +305,14 @@ WS に固有の決定はその ws.md にある。ここは複数の WS・OS 全�
 - **時間の単位**: tick 周期は `include/hal/arch/<arch>.h` の `HAL_TIMER_FREQUENCY`。時間の計算は `kern_ms_to_ticks()`・`kern_ticks_to_ms()`・
   `KERN_MS_TO_TICKS()` で行い、tick の数を数字で書かない（WS040）。
 
+- **OS の名前（2026-10-31）**: OS 名は zedBSD に決定（仮でない）。Keiland・libkeiland の名前は残す。変える時はユーザーが改めて伝える。
+- **H.265（2026-10-30）**: パテントプールへ支払う方針なので、HEVC の decode・encode を実装してよい（WS236 の「やらない」を置き換え）。
+- **firmware**: 全部 zedBSD-firmware（i915 の DMC、Mali の CSF、ODROID-C5 の公式の image を含む）から、固定の revision で取る。試験の image の build で firmware の license の確認が出たら、担当は自分の worktree で `yes | make firmware-licenses` で同意してよい（2026-10-30 ユーザー: 試験では全 license に同意済み）。
+- **Web の取得（2026-10-29）**: 担当と配下は WebFetch・WebSearch と、パラメータの無い GET（source の tarball など）を使ってよい。bot の確認・拒否に当たったら即やめて Q1 に報告し、User-Agent の変更や別の取り方で再試行しない。
+- **5330 への SSH（2026-10-30）**: 許可（ssh の別名 solaris10-man、10.0.30.3）。試験の前に uname で Debian か zedBSD かを確かめる。身元の分からない host には login しない。
+- **既定の構成（2026-11-01・02 ユーザー）**: Pi 4・Pi 5 の Bluetooth は n。Pi 5 の GPU は y で起動時に開始。Pi 4・Pi 5 は graphical login で kernel の message を画面に出さない（`kmsg=quiet`）。Pi 5 の fan は y。VF2 の PowerVR の debug は n。build system の作り直し（`mk/platform-<機種>/defaults.mk`）の後もこの既定を保つ。
+- **Amaterrace GPU と GHCI**: 役割分担と規則は [amaterrace.md](amaterrace.md)（2026-11-11）。
+
 ### 11.1 対象 platform
 
 `config/ci/` の config と `HAL_TIMER_FREQUENCY`（2026-10-27 の main）。位置付けの欄の「要確認」は 2026-10-27 の整理で Q1 がユーザーに確かめる物。

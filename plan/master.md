@@ -2,111 +2,78 @@
 
 # zedBSD Master
 
-[AGENTS.md](../AGENTS.md)（規則）· [Queue](queue.md) · [担当の台帳](agents/registry.md) · [運用](agents/protocol.md) · [完了した WS](workstreams-closed.md) · [Guardrail](guardrail.md) · [設計方針と全体の決定](master-design-policy.md) · [道具と実機](tools.md) · [Bug Board](known-bugs.md) · [Future Work](future-work.md) · [Past Log](history/index.md) · [設定](config.md) · [plan の地図](README.md)
+[AGENTS.md](../AGENTS.md)（規則）· [Q1 の運用](q1.md) · [Cockpit](cockpit.md) · [Queue](queue.md) · [担当の台帳](agents/registry.md) · [運用](agents/protocol.md) · [未完の WS](workstreams-open.md) · [完了した WS](workstreams-closed.md) · [Guardrail](guardrail.md) · [設計方針と全体の決定](master-design-policy.md) · [Amaterrace](amaterrace.md) · [道具と実機](tools.md) · [Bug Board](known-bugs.md) · [Future Work](future-work.md) · [Past Log](history/index.md) · [plan の地図](README.md)
 
 <!--
-  「今の状態」の各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい（今の事だけを書く。終わった事・経緯は書かない）。
-  置き換え: sed -i '/^<!-- master:agents:start/,/^<!-- master:agents:end/{//!d}' plan/master.md の後に sed -i '/^<!-- master:agents:start/r new.md' plan/master.md。
-  ユーザーの決定の日付の log は置かない（AGENTS.md §8）。
+  「今の状態」の各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい（今の事だけ。経緯・日付の log・ユーザーの発言の原文は書かない）。
+  全体に効く今も有効な決定は master-design-policy.md §11、Q1 の運用の決定は q1.md、WS の決定はその ws.md。
 -->
 
 ## 今の状態
 
 ### 動いている担当と Queue
 
-**Cockpit の運用（2026-10-30 ユーザー）**: [cockpit.md](cockpit.md) を Q1 が保つ。ユーザーの指示（原文）「plan/cockpit.md を作成します。P1-P8がそれぞれ今何をしているかを先頭に表で書きます。表には、取り組んでいるWS、その説明、作業予定が書かれています。その下、取り組んでいるWSごとの表があり、WSの説明とphaseの一覧、今の進捗が書かれます。進捗はセッションをまたぐので、クリアが指示されるまでは保持されます。長くなったらユーザに確認してクリアするか切り詰めてOKです。その下に、ユーザに判断してほしい事項が表にまとめられます。ユーザはこのファイルを監視して、タイムラインを遡らなくても状況を把握できるようにします。タイムラインへの出力も残し、これはユーザがスマートフォンで確認するときに使われます。」「この仕組みをmaster.mdに記録して、運用開始してください。」
-→ 解釈（Q1）: (1) 担当の起動・返却・Phase の cleared・merge・ユーザーの判断の発生と解決のたびに cockpit.md を直し、同じ時に commit する（強制終了に備える）。(2) WS ごとの進捗はセッションをまたいで残し、消すのはユーザーの指示か確認の後。(3) タイムライン（チャット）への報告も今までどおり続ける。(4) cockpit.md は写し: 状態の本体は各 ws.md・queue.md・registry.md で、食い違えば本体に合わせる。
-**判断を待つ事の書き方（2026-10-30 ユーザー）**: ユーザー（原文）「cockpit.mdのユーザの判断事項は、ユーザが判断できるように、背景から説明して、提案があるなら丁寧に説明して、専門用語があれば説明するように、master.mdを改善してください。つまり、cockpit.mdだけを見て、判断できるようになりたいです。…V2がどんなものが書いてないし、判断1～4も書かれていないです。…別のGPUというのがどういうシチュエーションなのかの背景が描かれておらず、companionというここでの用語の意味が示されていなくて、やはり理解できないです。…背景（WS074はCodexが実施している）が書かれていないと、思い出す労力や認知負荷が高いです。」
-→ cockpit.md の「ユーザーの判断を待つ事」は、一覧の表（番号・WS の番号と短い説明・一行の問い）の下に、項目ごとに次を全部書く（他の file を開かずに判断できること）: (1) 背景（どの WS か、何を作っていて、なぜ今この問いが出たか、関係する担当・セッション）、(2) 問いそのもの（選択肢が複数なら全部）、(3) 各選択肢の中身と得失（何が変わるか、費用、危険、後戻りのしやすさ）、(4) Q1 の推しと理由、(5) 用語の説明（その項目で使う専門語・このプロジェクトだけの語・略語の全部）、(6) 決まらない間に起きる事。参照の link は補いにとどめ、link 先を読まないと分からない書き方をしない。
-**判断が解決した時（2026-10-30 ユーザー「判断事項が解決されたらcockpit.mdをアップデートするようにmaster.mdに記録してください。」）**: ユーザーが答えたら、同じ turn のうちに cockpit.md を直して commit する。その項目を「ユーザーの判断を待つ事」から外し、「決まった事」の節へ一行（日付・WS・決定の要約・記録した ws.md か ticket の link）で移す。決定で変わった担当の予定・WS の進捗の表も同じ時に直す。「決まった事」の節もセッションをまたいで残し、消すのはユーザーの指示か確認の後。
-
 <!-- master:agents:start -->
-**ハンドオーバー（2026-11-02 23:52）**: ユーザーの指示で全担当をラップアップ中（各担当は区切りで commit し、phase.md に引き継ぎを書いて返す）。main は未 push（push はユーザーの指示で）。詳しい状況は [cockpit.md](cockpit.md)。
+（2026-11-11 22:10 の時点。詳しくは [cockpit.md](cockpit.md)）
 
-| 担当 | Queue | 中身（ラップアップの時点） |
+| 担当 | Queue | 中身 |
 | --- | --- | --- |
-| P1 | q1992 `p1-ws335` | [WS335](ws335/ws.md) p035（規約の全文の見直しと持ち越し）。library・試験の書き直しと動きの直しは main に。残り: P2 の file の書き直し・evp.h/err.h/rand.h の comment・design.md §5、最後の回帰。次は p036（Windows 版の切り替えの提案） |
-| P5 | q1995 `p5-ws345` | [WS345](ws345/ws.md) p010（origin ごとの agent、iframe の frame の item）。stage B の中心を commit（a6479c00c）、回帰は途中 |
-| P8 | q1996 `p8-ws345` | [WS345](ws345/ws.md) p014（応答しない頁の確かめ）。libbrowser・shell の側は main に（cbcdf4977）、QEMU・tsan・cross-build の結果待ち |
-| P6 | q1999 `p6-ws336` | [WS336](ws336/ws.md) p024（OpenSSH からの入れ替えの用意。config/ci は変えず WS343 に差分を渡す）。sshd の log を OpenSSH の形に直した |
-| Q1 | q2000 | [WS074](ws074/ws.md) [p263](ws074/phase263/phase.md)（実際の Web サイトでの UAT の指摘への対処、U1 は host で直った）。WS346 は completed（q2001〜q2008 cleared、既定 cache=on、4 サイト照合 0 差異） |
-| P2・P3・P4 | — | 待機 |
+| Q1 | [WS347](ws347/ws.md) | VF2＋KC705 の Amaterrace GPU。Gemini の RTL の修正（amaterrace-gpu ad23fe01）の監査を、読むだけの監査の担当に任せている。次は Gemini への依頼 03 |
+| Q1 | q2000 | [WS074](ws074/ws.md) [p263](ws074/phase263/phase.md)（実際の Web サイトの UAT の指摘、U1 は host で直った）。2026-11-03 から止まっている |
+| P1・P2 | q2010・q2011 | 2026-11-11 12:37 にユーザーの指示で止めた（uncleared）。P1 の amaterrace の worktree の RTL の変更は使わない（RTL は Gemini）。P2 の worktree `p2-ws347` に driver の未 commit の変更（未確認） |
+| 他 | — | 動いていない。2026-11-02 のラップアップの引き継ぎが phase.md に残る: [WS335](ws335/ws.md) p035、[WS345](ws345/ws.md) p010・p014（p014 の cleared の判断は Q1）、[WS336](ws336/ws.md) p024 |
 
-- BUG-412（Pi 5 の click）: 直しは main に。Pi 5 は main の普段の kernel。ユーザーの click の確かめで閉じる。Pi 5 の /boot/boot0 に試験の残り（*.aatold・*.q1967old・*.q1997old・cmdline.txt.ring・/bin/wayland.q1955old）を確かめの後に消す。
-- 5330 はユーザーが zedBSD（d00e071）で使用中。触らない。
+- main は未 push（push はユーザーの指示で、`git log origin/main..main` で数える）。
 <!-- master:agents:end -->
-
-**ユーザー不在の間の自律実行（2026-10-29 12:4x ユーザー「夜まで寝ます。しばらく質問に回答できないので、疑問で止まったphaseがあれば、質問はメッセージ表示だけしてクリック回答にはせず、別なphaseに移って作業を進めてください。」）**: 判断が要る Phase は uncleared・止めにして理由と要る判断を記録し、Q1 は問いをメッセージで書くだけ（クリックの問いにしない）。担当は別の Phase に移る。
-
-**手が空いた担当の進め方（2026-10-29 ユーザー「作業の手が空いてしまったら、テストなしで実装だけ進める戦略で、残っているWSのphaseをまんべんなく進めましょう。」）**: 手の空いた担当は、残っている WS の Phase を試験なしで実装だけ進める（build warning 0 と host の試験まで、実機・QEMU は無し）。Phase は「実装済み・試験未実施」と記録し cleared にしない。branch は試験の後に merge する（P6 の 2026-10-29 の運用と同じ、Q1 の解釈）。
-
-**記録の書き方（2026-10-30 ユーザーの決定）**: ユーザーの発言の原文を記録（plan・docs・commit・担当への依頼文）に載せない。公開の GitHub の repo に発言がそのまま出るのを避けるため。書き方は「（日付）ユーザーから○○という趣旨の指示を受けた」の形で、要点を自分の言葉で。既にある原文の扱いは未決（ユーザーに確認）。
-
-**WS291 の PowerVR の目標（2026-10-30 ユーザーの決定）**: Linux の PowerVR の driver は実用の水準でないので、Linux の基準に拘らない。Linux（NVK）の RTX 2070 で 50 fps だった scene-5000（qs40 × 5000、1920x1080）を、カタログの FP32 の比（約 392 倍、VF2 の GPU は 594 MHz）で割り、qs40 × 13・1920x1080 で 50 fps 以上を p020 の受け入れにする。
-
-**OS の名前（2026-10-31 ユーザーの決定）**: OS 名は zedBSD に決定（仮決めではない）。Keiland・libkeiland の名前は残す。変える時はユーザーが改めて伝える。
 
 ### 統合の注意
 
 <!-- master:merge:start -->
-- ブラウザの担当（2026-11-02 07:18 ユーザーの決定）: Windows 版のブラウザ（WS334）と libbrowser（WS074）の直しは当面 P8 が行う。ユーザーは主に Windows 版を操作して review の comment を出す。P7（BUG-398）と P4（BUG-397・399）は今の作業の後、ブラウザの関係の作業を P8 に寄せる。
-- WS074（2026-10-30 ユーザー「Codexは解約しました。WS074はClaudeの管理下に移ります。」）: Codex のセッションは終わった。WS074 は Q1 が管理し、Claude の担当（P1〜P8・B1・Sonnet）に割り当ててよい。main の checkout の WS074 の未 commit の変更は無い（2026-10-30 git status で確かめた）。
-- H.265（2026-10-30 ユーザー「H.265のパテントプールへの支払いは行う方針です。H.265の実装を行っていいです。」）: HEVC の decode・encode を実装してよい（WS236 の「HEVCはライセンスがないのでやらないです」を置き換え）。
-- 5330 への SSH（2026-10-30 ユーザー「5330へのSSHは許可します。」）: 権限の判定に止められた 5330（ssh の別名 solaris10-man、10.0.30.3）への SSH を許可。担当は試験の前に uname で 5330 の Debian か zedBSD かを確かめる。身元の分からない host には login しない。
-- firmware の license（2026-10-30 ユーザー「試験に関しては私はすべてのライセンスに同意しておりますので、自動でいいです」）: 試験の image の build で firmware の license の確認が出たら、担当は `yes | make firmware-licenses`（自分の worktree）で同意して続けてよい。
-- web の取得（2026-10-29）: 一度禁止（Fable の配下が bot の確認の回避で権限の判定に 3 回止められた件）、その後ユーザー「Webから取得してOKです。サブエージェントにWebの取得(GET)を許可して下さい。GETはパラメータなしなら安全と見なしていいです。」→ 担当と配下に web の GET を許す。条件: WebFetch・WebSearch の tool と、パラメータの無い GET の取得（BSD の source の tarball など）。bot の確認・拒否に当たったら即やめて Q1 に報告、User-Agent の変更・別の取り方の再試行はしない。
-- サブエージェントの起動は番号の小さい担当を優先（2026-10-29 ユーザー「P1,P2,..というふうに、数字の小さなエージェントに優先してサブエージェントを起動させてください。必要なら優先度の低いものを停止してください。」）。上限に当たったら Q1 が番号の大きい担当の配下を止める。今の枠: P5 の配下は同時 2 本、P6 は 1 本、P7 は 2 本（2026-10-29 ユーザー「WS313は調査、コード作成などで、2つまでサブエージェントを作って並列化し、効率化してください。」）。
-- 全担当の成果は main に merge 済み（上の Queue の作業中の物を除く）。`agent/p2-ws288-p006` は WS288 の終了で使わない。
-- 既定の config: Pi の BT は config-rpi4.mk・config-rpi5.mk で n（ユーザー）、Pi 5 の GPU（CONFIG_DRIVER_BCM2712_GPU）は CI で y と graphical login（2026-11-01 ユーザーの決定）、Pi 4・Pi 5 の CI は graphical login かつ kernel の message を画面に出さない（ZEDBSD_BOOT_KERNEL_MESSAGES n、cmdline.txt に kmsg=quiet、2026-11-02 ユーザーの決定）、
-  fan（CONFIG_DRIVER_RPI5_FAN）は y、CI の VF2 は CONFIG_POWERVR_DEBUG n。
-- firmware は全部 zedBSD-firmware（rev 43662bd、i915 の DMC 6 file、Mali の CSF、ODROID-C5 の公式の image（Amlogic の bootloader）を含む、push 済み）から取る。
+- build system は作り直した（top の Makefile と `mk/platform-<機種>/`、branch `refactor` は main に入った）。古い `platform/`・`config/ci/` の前提の道具・文書は追従が要る（[BUG-418](bugs/BUG-418.md)、noct の JIT は [BUG-419](bugs/BUG-419.md)）。Makefile・`mk/` の変更は概要と差分をユーザーに示してから（[makefile-style.md](makefile-style.md)）。
+- WS074（ブラウザ）は Q1 が管理し、Claude の担当に割り当ててよい（Codex とクラウドのセッションは終わった）。Windows 版のブラウザ（WS334）と libbrowser の直しは P8 に寄せる（2026-11-02 の割り振り）。
+- Amaterrace GPU（`~/amaterrace-gpu`）: Claude は仕様と RTL の監査と driver、RTL は Gemini（[amaterrace.md](amaterrace.md)）。
 <!-- master:merge:end -->
 
 ### Focus と優先順位
 
 <!-- master:focus:start -->
-- 公開は rev.5 まで（実質のベータ2）。次に何をやるかは Q1 とユーザーが整理中。「保留の WS」はその整理の対象。
-- 実装の進め方: 外部の標準仕様に基づく物と、手順に分けられる大きな仕事は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../docs/agent/spec-module-delegation.md)、Opus が設計、Sonnet 5.5 high が実装）。今の対象は WS326・WS327・WS009・WS328、次に WS296・WS297・WS329・WS330。
-- **ユーザーの不在の間（2026-10-31 未明〜昼）**: 2026-10-31 ユーザーから、設計だけ進められる WS は設計を、実装できる WS は実装だけでも、試験できるなら試験も進める、という趣旨の指示を受けた。
-- **文書**（[WS009](ws009/ws.md)）: /dev/gpu の UAPI の文書（DOC-54）は完成、残りは build・boot の再現だけ。
-- **GPU の描画の速さ**（[WS291](ws291/ws.md)）: RDNA は Linux と同等、NVIDIA は scene-5000 で NVK と同等（49.5〜49.7 fps）、50 fps を明らかに超える改善と desktop の測り直しが残り。
-- 達成: WS315（Realtek USB 2.5G、5330 で Linux 並み）、WS314（libkeiland の fd の除去）、WS243（NVDEC 1080p60）（2026-10-30）。fg021 ZYBO、fg020 VisionFive 2、fg019 ベータ2 など。
-- 実機の使い分け（2026-10-27 ユーザー）: デスクトップ（10.0.10.3）は GPU の driver、Keiland の app は VM で開発して VF2 で速さを詰める、5330 は Intel GPU・電源・Alder Lake と USB の NIC。
+- **今の Focus（2026-11-11 ユーザー）**: [WS347](ws347/ws.md) — VF2＋KC705 で Amaterrace GPU を動かす。順は bitstream の書き込み → driver を最新の ghci.md に追従 → FPGA の動作確認（疎通、SFU を使わない範囲）。並行して Gemini の RTL を監査し、依頼で直させる。
+- build system の作り直しの後始末（BUG-418・BUG-419）。
+- 実装の進め方: 外部の標準仕様に基づく物と手順に分けられる大きな仕事は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../docs/agent/spec-module-delegation.md)、Opus が設計、Sonnet 5.5 high が実装）。
+- 実機の使い分け: デスクトップ（10.0.10.3）は GPU の driver、Keiland の app は VM で作り VF2 で速さを詰める、5330 は Intel GPU・電源・Alder Lake と USB の NIC、VF2＋KC705 は GHCI。
 <!-- master:focus:end -->
 
 <!-- master:priority:start -->
-優先順位（依存による順とは別。Queue の権限は変えない）:
-1. 次のセッションの始めにする事（上の 1〜6）。
-2. 標準廉価実装手順の WS: WS326 → WS318 → WS329 → WS330、WS009 → WS296 → WS297、WS328 → WS074。
-3. WS309 p015（ゲームモードの V2）、WS291 の NVIDIA の段、WS307 の残り。
-4. WS221（Jumbo frame）・WS299（5330 の NVMe）: 担当の割り当ての時（P3 は停止中）。
-5. WS290・WS292・WS226: WS290 の再開の後。保留の WS: Q1 とユーザーの整理の後。
+優先順位（2026-11-02 の整理のまま。WS347 の他はユーザーと見直す。依存の順とは別で、Queue の権限は変えない）:
+1. 標準廉価実装手順の WS: WS326 → WS318 → WS329 → WS330、WS009 → WS296 → WS297、WS328 → WS074。
+2. WS309 p015（ゲームモードの V2）、WS291 の NVIDIA の段、WS307 の残り。
+3. WS221（Jumbo frame）・WS299（5330 の NVMe）: 担当の割り当ての時。
+4. WS290・WS292・WS226: WS347 の進み次第。保留の WS: Q1 とユーザーの整理の後。
 <!-- master:priority:end -->
 
 ### ユーザーの未決
 
 <!-- master:open-decisions:start -->
-- WS299 の継続（2026-10-31 ユーザー: 5330 が空いたらどの担当でもよいので割り当てる、q1744）（P1 の report: ws299/ws.md の「結果（2026-10-28 21:50）」）。担当の外で見つけた物の扱い（amd64 の idle・HWP・P/E core は 2026-10-31 に WS333 へ）: clock_gettime に vDSO が無く 1 ms 刻み、main から return した時に stdout が flush されない、libc の memcpy の続き（大きな copy・memset・build の flag -fno-builtin -Os）。
-- P4（q1660）が拾った候補: WS162 を canceled にするか（WS172 に吸収）、WS279 p009（ライセンスと類似性の監査）の担当、P4m の時々の失敗（T1-691）の Bug、nvrtx.disp.own の既定、pci-msi-qemu.c（CONFIG_KERNEL_TEST_CHECKPOINTS の唯一の config が消えた）を残すか、master-design-policy.md へ移す候補 約 25 件（各 WS の ws.md に原文）。retained の 41 WS は source の comment の掃除の Queue の後に片付ける。
-- WS282〜WS285: 実装を始める時期（ユーザー「設計だけ残してラップアップして、後日実装することにします。」）。再開の時に WS282 の試験の画面を出す PC（D11）と買う webcam（D12）。
-- BUG-345（Pi 5 の click が画面に出ない窓）: 再発したら再起動の前に Q1 に知らせてもらう。
-- 以前からの物: UEFI の loader の GOP の mode の選び方、WS153 U2〜U15（説明を cockpit に足した、2026-10-31）。BUG-222 は 2026-10-31 に試験を流して閉じる（q1747）。
+- [WS347](ws347/ws.md): GHCI の仕様の問い（台帳 [ghci-rtl-questions.md](ws347/ghci-rtl-questions.md) の B）。B2（flat の時の VA）と B3（LDS の文）が残る。
+- WS299 の継続（5330 が空いたら担当を割り当てる）。担当の外で見つけた物: clock_gettime に vDSO が無く 1 ms 刻み、main から return した時に stdout が flush されない、libc の memcpy の続き。
+- P4 が拾った候補: WS162 を canceled にするか（WS172 に吸収）、WS279 p009（ライセンスと類似性の監査）の担当、P4m の時々の失敗（T1-691）の Bug、nvrtx.disp.own の既定、pci-msi-qemu.c を残すか、master-design-policy.md へ移す候補 約 25 件。
+- WS282〜WS285: 実装を始める時期、再開の時の試験の PC（D11）と webcam（D12）。
+- BUG-412（Pi 5 の click）: ユーザーの click の確かめで閉じる。BUG-345（Pi 5 の click が出ない窓）は再発したら再起動の前に Q1 に知らせてもらう。
+- 以前からの物: UEFI の loader の GOP の mode の選び方、WS153 U2〜U15、記録に既にあるユーザーの発言の原文の扱い。
 <!-- master:open-decisions:end -->
 
 ### 止まっている物
 
 <!-- master:blocked:start -->
-- WS290 の実機の試験: VF2＋KC705（GHCI の bitstream はユーザーが書く）、VF2 の電源は SwitchBot のプラグミニ 2（14C19FA80F86）。WS290 自体が保留。
-- ユーザーが拾える試験（頼まない）: 5330 の USB 2.5G（RTL8156）を vendor mode の driver（WS315）で使っている間に、adapter の抜き差しと、switch 側の cable の抜き差し（link の上げ下げ）をして、ue0 が戻って ping が通るか（P3 は遠隔でできない）、RDNA の desktop で画面の途切れが無くなったか目で見る（WS291 b574fbf6a・7650291df、機械は今 q1661 の /bin/wayland）、5330 の物理の keyboard・mouse。
-- `plan/records.json`（GitHub の同期の対応）に消した Phase の path が 118 か所残る（同期は今使っていない）。
-- VF2 の zedbsd.cfg は login=graphical を外したまま（元は zedbsd.cfg.p044orig、戻さない）。
+- ユーザーが拾える試験（頼まない）は [cockpit.md](cockpit.md) の一覧。
+- `plan/records.json`（GitHub の同期の対応）に消した Phase の path が残る（同期は今使っていない）。
 - GitHub への公開は push の指示の時だけ。
 <!-- master:blocked:end -->
 
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-420 · q2010 · WS348 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯の進み具合、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-420 · q2012 · WS348 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -144,112 +111,4 @@ BUG-420 · q2010 · WS348 · KL_VERSION 110（106 は BUG-396 の reload、107 �
 
 ## 未完の WS
 
-状態の本体は各 ws.md、ここは写し。完了・取り下げは [workstreams-closed.md](workstreams-closed.md) へ移す。2026-10-27 に P3（q1608）が精査した（[ws-audit.md](agents/P3/ws-audit.md)）。
-
-### 進めている・次の WS
-
-| WS | Primary | 内容 | 状態 | 再開点 |
-| --- | --- | --- | --- | --- |
-| [WS299](ws299/ws.md) | MG004 | 5330 の NVMe の読み書きを速くする（512 MiB の崖、転送・queue・readahead）（2026-10-27 ユーザー） | incomplete | p001〜p003・p009 cleared（raw の読み 583 MB/s ≒ Debian の 50%）。受け入れは Debian の 95% 以上、HMB はやる（ユーザー）。q1634（P1）で p004 raw の先読み → p005〜p008 2026-10-30 ユーザー「WS299はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の後 |
-| [WS300](ws300/ws.md) | MG003 | NVMe と VMD の低電力（S0 idle の VMD の suspend・NVMe の状態、APST・ASPM・LTR）（2026-10-27 ユーザー） | incomplete（p001 cleared、p002〜p005 実装済み・試験未実施、branch agent/p6-ws300 は 5330 の試験の後に merge） | p006（5330、WS052 p014 と一緒）。Q300-6（_OSC 無しの ASPM）はユーザーの判断待ち |
-| [WS333](ws333/ws.md) | MG004 | /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）。WS301・WS303 を統合（2026-10-31 ユーザー） | incomplete（p001 設計済み・問い Q333-1〜7 は推しで進める、p002・p003 は main、p006 は回帰の確かめ中） | p001 統一の設計（P5）、p002 amd64 の idle の MWAIT（P1） |
-| [WS334](ws334/ws.md) | MG006 | libbrowser の Web ブラウザ OmniGrammaton を Windows に移植（libkeiland の Win32 の実装、.exe）（2026-10-31 ユーザー） | incomplete | 設計 p002〜p004 cleared、実装の第 1 群（p005・p009・p010・p013・p020） |
-| [WS335](ws335/ws.md) | MG002 | libssl-compat・libcrypto-compat: OpenSSL の libssl・libcrypto と互換の自前の TLS と暗号の library（libbrowser と自前の ssh が使う部分、標準廉価実装手順）（2026-11-01 ユーザー） | incomplete | p001 設計（P6 q1789） |
-| [WS336](ws336/ws.md) | MG005 | 自前の sshd・ssh（OpenSSH と互換の protocol、ed25519 と鍵の交換 1 つ、WS335 の暗号の口を使う、標準廉価実装手順）（2026-11-01 ユーザー） | incomplete | incomplete（p001 設計 cleared、p002 から実装） |
-| [WS337](ws337/ws.md) | MG002 | shangrila: RISC-V 64 で x86_64・arm64 の binary を動かす単体の repository の OSS（事前の変換と cache、interpreter の予備、binfmt。goal は Linux の商用 software と Windows の game、先に Linux で開発、zedBSD は package）（2026-11-01 ユーザー） | planning | ユーザーとの質疑の途中、p001（設計）はまだ |
-| [WS302](ws302/ws.md) | MG006 | デスクトップスレッドバランサ DTB（CONFIG_DTB、sched への hint）（2026-10-27 ユーザー） | planning | p001 設計済み（main 896d3e3db、問い Q302-1〜7 待ち）。実装は約 22 LW、WS333 p011・p013 に依る |
-| [WS304](ws304/ws.md) | MG003 | Raspberry Pi 5 の外の PCIe（pcie1、M.2）と NVMe（2026-10-27 ユーザー、実機の試験はまだ） | incomplete | p001・p002 cleared（e616b4128、host 試験・build のみ）、p003 の実機は新しい SwitchBot の後、HAT の型番をユーザーに確認 |
-| [WS305](ws305/ws.md) | MG006 | デスクトップの GPU の passthrough の試験環境（Linux＋VFIO＋QEMU、素の起動と使い分け）（2026-10-27 ユーザー） | incomplete（再開待ち） | P4 はラップアップ（2026-10-27）。script と guest の image は用意済み、host（10.0.10.3）では未着手。再開は ws.md の「状態と再開点」 |
-| [WS306](ws306/ws.md) | MG006 | GPU の driver の枠組みの「ゲーム最適化」の UAPI（ON/OFF と option の文字列、GPU の名前と driver の版の取得）（2026-10-27 ユーザー） | incomplete | p001 cleared（2026-11-01）、実装は担当の割当の後（Q306-7・9 は推しで決定） |
-| [WS052](ws052/ws.md) | MG003 | 電源管理（S0ix を 5330 で初めて動かす、modern standby、/dev/system） | incomplete | 再開点 p014（WS300 p002 の後）、並べて p015・p016、約 31 LW |
-| [WS068](ws068/ws.md) | MG006 | EGL と OpenGL ES（と desktop GL 3.0〜4.6）を Vulkan と display 拡張の上に実装する（Wayland とディスプレイ直接の両方）（2026-09-26・27 ユーザー指示） | incomplete・継続（空き時間だけ。受け入れは Venus のみ、2026-10-29 ユーザー） | 次は p045（sample shading、Venus の試験だけ）→ p047〜p068（GL 4.x を分けた物）→ p007 規約 |
-| [WS074](ws074/ws.md) | MG006 | zedBSD の Web ブラウザ `userland/base/zdesktop-browser`（HTML5 の layout engine → 最適化にこだわらない JavaScript engine の接続 → CSS の準拠と Chrome との比較で目標値を段階的に上げる。JS と Wasm の実行 engine を共通化。画像は libpng-compat・新しい libjpeg-compat、TLS は当面 OpenSSL）（2026-09-27 ユーザー指示） | incomplete・継続（Claude のクラウドのセッション、2026-11-01〜、成果は origin/browser を Q1 が merge） | phase260 の自走（WPT の固定の corpus で 3,125 / 3,472 前後、100% まで） |
-| [WS217](ws217/ws.md) | MG006 | 画面の回転（Settings の Display、縦長で Notes を使う）（2026-10-13 ユーザーの UAT） | incomplete（2026-10-28 ユーザー「WS217 を開き直す」） | p009-1（Intel の PRM）・p009〜p011（scanout の 180°）・p005（複数 head）・p006（pen・touch と display の結び付け）・p012（game の session）→ p007 確かめ・p008 規約。p002a・p002b・p003・p004 は済み |
-| [WS221](ws221/ws.md) | MG005 | Jumbo frame（Ethernet の L2 の大きな MTU、device ごとの上限、IP・TCP の MSS）（2026-10-13 ユーザー） | incomplete（すぐ取り組む物、2026-10-27 ユーザー「Jumbo Frameはすぐやるものの一つにします。」） | p001 の判断から（p008・p009 は WS220 の旧 p006 tcp_device_mss・p007 を移した物、2026-10-28 ユーザー「WS221 へ移す (推し)」） 2026-10-30 ユーザー「WS221はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の後 |
-| [WS223](ws223/ws.md) | MG006 | 全画面は compositor の合成、game mode は Wayland の拡張で求められた時だけ（Video Player は game mode をやめる）（2026-10-13 ユーザー） | planning（すぐ進める、2026-10-27 ユーザーの回答「推しで決めて実装」、D1〜D6 は推し） | p001 の D1〜D6 を推しで確定 → p002 |
-| [WS226](ws226/ws.md) | MG006 | Khronos の Vulkan 1.3 の header をそのまま使い、libvulkan で Vulkan 1.3 の API を実装しきる（不整合の整理）（2026-10-13 ユーザー） | planning（WS290 の後、全 GPU driver で Vulkan 1.3 相当を capability の flag とともに、2026-10-27 ユーザー） | WS290 の後に p001 |
-| [WS242](ws242/ws.md) | MG006 | nvrtx の RTX 20/30/40 の全モデル（2026-10-15 ユーザー） | incomplete（すぐ取り組む物、2026-10-27 ユーザー「すぐ取り組むものの一つです。」） | p001 の再開点 1〜4、GTX 16・RTX 30・40 の既定の有効（ユーザーの決定、未実装） |
-| [WS250](ws250/ws.md) | MG006 | nvrtx の終わらない GPU の仕事の取り消しと復帰、system は動き続ける（2026-10-15 ユーザー） | incomplete（すぐ取り組む物、2026-10-27 ユーザー「すぐ取り組むものの一つです。」） | p001 の設計（草稿は main 64f05b2c7） |
-| [WS290](ws290/ws.md) | MG006 | zedBSD の GHCI の driver を GHCI 1.0（amaterrace-gpu の docs/ghci.md 89529de）だけに書き直す。試験は host だけ | incomplete・保留（2026-10-28 ユーザー: FPGA 側の設計が終わるまで P3 終了、再開は明示の指示。p017 は実機待ち） | q1636（P3）で p001 の design 版 4 → p002〜（host 試験、実機は VF2＋KC705 の用意の後） |
-| [WS291](ws291/ws.md) | MG006 | GPU の driver の描画の速さ（desktop 60 fps・重い 3D の model 50 fps）: AMD RDNA（P2）→ NVIDIA（P2、GPU を入れ替え）→ PowerVR（VF2、P3） | incomplete・ラップアップ（2026-11-01 ユーザーの指示。p027 B-U は回帰の後に main に merge 済み。再開はユーザーの指示で） | q1635（P2）で p006 の続き → p008〜p009、Linux 以上の後に WS306 |
-| [WS309](ws309/ws.md) | MG006 | Keiland の compositor の thread の構成を整理し main loop が待たないようにする。ゲームモードは Vulkan display の仕様の中で | incomplete（p001〜p007・p019 cleared、P1 q1662-i05） | p008 の残り（fence 付きの task）から |
-| [WS310](ws310/ws.md) | MG004 | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる（WS301 の Q301-3、2026-10-29 ユーザー「最終的には呼ぶが、別なWSにして…今は呼ばない。」） | incomplete（p001 設計済み、問い Q310-1〜6 待ち） | p001（WS301 の後） |
-| [WS313](ws313/ws.md) | MG008 | ODROID-C5（Amlogic S905X5M）の BSP（bsp-s905x5m）と Mali の GPU で、起動して desktop を表示する（2026-10-29 ユーザー） | incomplete（全 block の code を揃えた、実装済み・実機未試験。2026-10-29 夜にユーザーが実機で試験） | 夜の試験（plan/ws313/tests/README.md）→ 直し、Mali の desktop（render pass の LOAD など） |
-| [WS316](ws316/ws.md) | MG003 | 5330 の USB4 と AQC の 10GbE（2026-10-30 ユーザー） | planning | p001 の調べ（5330 の Debian で CM・AQC の見え方・IOMMU） |
-| [WS317](ws317/ws.md) | MG005 | hotplugd: hot-plug の device（PCIe・USB・ディスク）の承認と driver の開始・終了、volumed を置き換え（2026-10-30 ユーザー） | planning（今は取り組まない、ユーザー） | p001 の設計から |
-| [WS318](ws318/ws.md) | MG006 | libmedia の作り直し: Vulkan の device の共有・codec の問い合わせと指定・encoder（H.264・H.265・AAC-LC）・カメラ・libavcodec の内部の fallback、app を libmedia だけに（2026-10-30 ユーザー） | planning | p001 設計から。2026-10-30 ユーザー「WS318はH.264デコーダのあとにすぐスケジュールします。」→ WS326 の completed の直後 |
-| [WS319](ws319/ws.md) | MG006 | i915（5330、Alder Lake） の Vulkan Video: H.264 encode（VDEnc、HuC の firmware）、H.265 decode・encode | incomplete | 2026-11-02 12:03: H.265 decode（HEVC_v1 Main の全部が正しい）と Video Player の H.264・H.265 の GPU の道（1080p30 late 0）を merge。残り: 1080p60 の late、encode |
-| [WS320](ws320/ws.md) | MG006 | Pi 4（BCM2711） の Vulkan Video: H.264 encode（VideoCore の MMAL video_encode を Vulkan Video の encode として、WS236 と同じ道）、H.265 decode（HEVC の block） | planning | WS318 の completed の後 |
-| [WS321](ws321/ws.md) | MG006 | Pi 5（BCM2712） の Vulkan Video: H.265 decode（HEVC の block を Vulkan Video として）。H.264 は hardware に無く libavcodec | incomplete | 2026-11-02 ユーザー: P3 が着手、Video Player の GPU の道の再生まで |
-| [WS322](ws322/ws.md) | MG006 | VisionFive 2（JH7110） の Vulkan Video: H.264・H.265 decode（Wave511）、H.265 encode（Wave420L）を PowerVR の Vulkan の executor の Vulkan Video として。H.264 encode は hardware に無く独自の software（WS329） | incomplete | p001・p002 cleared（設計、VF2 の実機で Wave511 の decode が ffmpeg と一致）、p003（P2 q1863）。2026-11-02 ユーザー: 今日は decode（p006）までで終了、encode は次に再開（incomplete） |
-| [WS323](ws323/ws.md) | MG006 | ODROID-C5（Amlogic S905X5M） の Vulkan Video: H.264・H.265 の decode と encode（Amlogic の VPU、encode は hardware の有無の確認から）を Mali の Vulkan の executor の Vulkan Video として | planning | WS318 の completed の後 |
-| [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | incomplete | p001 cleared（設計、約 213 LW）、p006a H.265 の解析の設計（P1 q1864）。NVENC の関門は上限なし、libmedia の確かめは WS318 へ（ユーザー）。2026-11-02 ユーザー: 今日は NVDEC（p007）までで終了、encode は次に再開（incomplete） |
-| [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
-| [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
-| [WS341](ws341/ws.md) | MG006 | 仮想 GPU の driver の枠組み（user の program が作る scanout だけの /dev/gpuN、他の GPU が描き、Vulkan Video で H.264・H.265 に encode して USB・network の遠隔の display・RDP へ）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
-| [WS342](ws342/ws.md) | MG006 | Windows 版の libvulkan（userland/desktop/libvulkan-win32、vulkan-1.dll への橋渡し、handle の共有）と Keiland の Windows の backend の compositor（userland/desktop/libkeiland-backend-win32、DWM の上）（2026-11-02 ユーザー） | planning | 着手しない（議論の後） |
-| [WS343](ws343/ws.md) | MG005 | base の TLS と ssh を自前に（CI の config から OpenSSH・OpenSSL・curl・libcurl を外し、base に自前の ssh・sshd・libssl.so・libcrypto.so、fetch の https、ca-certificates は packages に残す）（2026-11-02 ユーザー） | incomplete | p002（passkey の OpenSSL の関数を libcrypto-compat に、P2 q1990、20:46） |
-| [WS345](ws345/ws.md) | MG006 | ブラウザの thread の分け方: JavaScript を窓の event と別の thread に、通信を独立した thread に（2026-11-02 ユーザー） | incomplete | P8 が p001 の設計（q1959） |
-| [WS346](ws346/ws.md) | MG006 | libbrowser の style と layout の差分の再計算（layout cache）。DOM の変更の記録・style の無効化・layout の部分木の再利用、全体の作り直しとの照合（2026-11-03 ユーザー、設計は Q1、実装は Sonnet） | completed | 全 Phase (p001〜p009) cleared。Q1 が直に実装、既定 cache=on、bench 14〜17 倍、実サイト verify 差異 0、Windows cross-build PASS（[design.md](ws346/design.md)） |
-| [WS347](ws347/ws.md) | MG006 | VF2＋KC705 で Amaterrace GPU を試験・デバッグする。KC705 に minimal・200 MHz の bitstream を Vivado で書き、GHCI の driver を最新の ghci.md（CAPS の追加、Blitter 無しは shader で blit）に追従（2026-11-11 ユーザー） | incomplete（p001 in-progress、Q1 が直に） |
-| [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
-| [WS339](ws339/ws.md) | MG004 | x86 の PC の UEFI の起動の画面の解像度を monitor（EDID）に合わせる、標準の設定の video=640x480 を外す（2026-11-01 ユーザー） | planning | p001（担当の割当はユーザーの指示で） |
-| [WS338](ws338/ws.md) | MG006 | libmedia の H.264 の software の decoder の速さの続き（WS326 から分けた、2026-11-01 ユーザー） | planning | p001 設計（担当の割当はユーザーの指示で） |
-| [WS329](ws329/ws.md) | MG006 | libmedia の H.264 の software の encoder（標準廉価実装手順、decoder と共通化）（2026-10-30 ユーザー） | planning | WS326 の completed の後に p001 設計（Opus） |
-| [WS330](ws330/ws.md) | MG006 | libmedia の H.265 の software の decoder と encoder（標準廉価実装手順、H.264 と共通化）（2026-10-30 ユーザー） | planning | WS329 の completed の後に p001 設計（Opus） |
-| [WS292](ws292/ws.md) | MG006 | GHCI の session の保護（PROT）を zedBSD の driver に（WS290 の後） | planning | p001 設計（WS290 と G29 の回答の後） |
-| [WS295](ws295/ws.md) | MG006 | Intel の xe の driver（Meteor Lake 以降の iGPU と discrete の Arc、GuC の submission、i915 の使える所は写して重複） | planning | p001 調査（担当の起動はユーザーの指示の時） |
-| [WS296](ws296/ws.md) | MG001 | src/drivers（gpu/ を除く）の comment から開発の管理情報を消し、XXX の規約の当て直し（usb など 11 file） | planned | 18 LW、担当の起動はユーザーの指示の時 |
-
-### 保留の WS（何をやるかは Q1 とユーザーが整理中）
-
-「元:」は以前の段（ベータ3・4 などは取り消し）。
-
-| WS | Primary | 内容 | 状態 | 再開点 |
-| --- | --- | --- | --- | --- |
-| [WS001](ws001/ws.md) | MG002 | POSIX.1-2024 準拠 | incomplete・保留（元: ベータ3、段は取り消し・整理中） | p041〜p044 の guest 試験、p045 POSIX の header、p046〜p051、p040 mesg（BUG-067） |
-| [WS013](ws013/ws.md) | MG007 | CPAR（container 分割） | incomplete・保留（Future Work F-002） | F-002（runtime の隔離・CLI・service container） |
-| [WS026](ws026/ws.md) | MG001 | 試験資産の整理 | planning・保留（元: ベータ3、段は取り消し・整理中） | Phase 未定義 |
-| [WS080](ws080/ws.md) | MG002 | `ld.coff`: Win64 PE32+ の動的ローダ（PE/COFF の mapping・relocation・DLL・import/export・Microsoft x64 ABI・最小の TEB/PEB・GS base）。NT の loader は再現せず `AddressOfEntryPoint` へ直接。互換の DLL は上に積む（2026-09-28 ユーザーの仕様 [spec.md](ws080/spec.md)） | incomplete・保留 | p002 は agent/p1 の a06d5d75d・6c7c991b1（未 merge）、p003〜p012 |
-| [WS082](ws082/ws.md) | MG002 | Linux の `/dev/kvm` の移植の検討（eventfd 等の非 POSIX の fd の代わりに unix socket の message で MMIO・IRQ の通知。ioctl を直接の移植・別の仕組みでの代替・実装不能に分類）（2026-09-28 ユーザー） | planning・保留（要検討） | ユーザーの判断（study.md §10） |
-| [WS098](ws098/ws.md) | MG006 | IME の変換のニューラル化: 辞書で候補を作り、小型のモデル（15 MB 未満）で同音異義語の選択（語の番号の並び）とひらがな列の形態素解析（語の境界と品詞、BiLSTM か小型の Attention）を評価する（2026-09-29 夜 ユーザー、IME の最後の仕上げ） | planning・保留（要検討・ブロック） | p001 設計（WS095 の後、corpus と license はユーザー） |
-| [WS115](ws115/ws.md) | MG002 | upstream GTK4をzedBSD `packages/desktop/gtk4`へ移植し知見を記録 | incomplete・保留（元: ベータ3、段は取り消し・整理中） | p010（GTK の起動、ld.so の上限は WS140 で解決済み）、p003 |
-| [WS116](ws116/ws.md) | MG002 | upstream Qt6の範囲をGTK4移植後に検討し `packages/desktop/qt6`へ移植 | planning・保留（元: ベータ3、段は取り消し・整理中） | p001〜p005（WS117 の後） |
-| [WS117](ws117/ws.md) | MG006 | Linux の本物の Qt6 を調査し、素の Qt6 アプリが動くよう compositor を改良（WS115/116 の前） | planned・保留（元: ベータ3 以降、段は取り消し・整理中） | p001〜p006 |
-| [WS126](ws126/ws.md) | MG002 | Python 3 の package（fg019） | incomplete・保留（元: ベータ3、段は取り消し・整理中） | p005 の guest の受け入れ（test-wait）、p006 規約 |
-| [WS144](ws144/ws.md) | MG005 | VPN（bridge・tunnel などの汎用の network の基盤と、選んだ VPN の protocol、Settings の stub の VPN の頁の実体）。ベータ2 の実装の項目、時期は未定（2026-10-04 ユーザー） | planning・保留（元: ベータ4 以降、段は取り消し・整理中） | p001 から |
-| [WS146](ws146/ws.md) | MG006 | SSH を使う独自のオンラインストレージ（server に agent を転送、file の木と metadata の database、差分の同期、手元に本体の無い on-the-fly のアクセス、OneDrive のような機能）。「あとで」の要望（2026-10-04 ユーザー） | planning・保留（元: ベータ4 以降、段は取り消し・整理中） | p001 から（WS150 の後） |
-| [WS147](ws147/ws.md) | MG006 | Microsoft OneDrive の client（Settings の Sharing の頁から設定、OAuth・Graph の API・同期、on-the-fly は WS146 と共有）（2026-10-04 ユーザー「独立WSにします」） | planning・保留（元: ベータ4 以降、段は取り消し・整理中） | p001 から（WS150 の後） |
-| [WS150](ws150/ws.md) | MG004 | userland の file system の kernel の枠組み（FUSE に当たる物）。クラウドストレージ（WS146・WS147）の前提（2026-10-04 ユーザー） | planning・保留（要検討・ブロック） | p001 から |
-| [WS152](ws152/ws.md) | MG007 | system の更新（Settings の Updates の頁の実体）。ベータ3 の実装の項目、p001 は方式の検討（2026-10-04 ユーザー） | planning・保留（元: ベータ3、段は取り消し・整理中） | p001 の U1〜U12 の判断 |
-| [WS153](ws153/ws.md) | MG007 | Settings の Apps の頁と third-party の app の repository（userland/packages とは別）。p001 は package の仕組みの検討（2026-10-04 ユーザー） | incomplete・保留（ユーザーが検討中） | U2〜U15 の決定の後に p002 以降 |
-| [WS158](ws158/ws.md) | MG006 | Keiland 本体と Keiland の app の翻訳（英語が基準、日本語はベータ2、Settings の Languages の頁で選ぶ。F-068 を昇格）（2026-10-05 ユーザー） | incomplete・保留（元: ベータ3、段は取り消し・整理中） | p002〜p005 の T1・ユーザーの日本語の review、p006 |
-| [WS171](ws171/ws.md) | MG008 | hal.h の全ての関数に HAL v2 と同じ水準の契約の comment を書く（comment の差分もユーザーの review の後に当てる）（2026-10-05 ユーザー「このコメント、すべての関数につけてほしいです。今でなくていいので」） | incomplete・保留（優先度低め、ユーザーの review 待ち） | p002 のユーザーの review、p003 の適用 |
-| [WS172](ws172/ws.md) | MG006 | passkey の認証の枠組み: sessiond は外部の `/sbin/passkey`（base）で password・PIN・FIDO2（将来はセキュリティチップ）を確かめる、root だけの `/etc/passkey`、PIN の失敗の回数は sessiond の memory（2026-10-05 ユーザー） | incomplete・保留（元: 実装はベータ3、段は取り消し・整理中） | p004b の TPM の設計、p005 OpenSSL の置き換え、p007・p011 の試験、p006 規約 |
-| [WS176](ws176/ws.md) | MG006 | Canvas: pen と touch のイラスト制作・画像編集（layer・brush・素材集・CLIP STUDIO と PSD の互換）（2026-10-06 ユーザー、ベータ3） | planning・保留（元: ベータ3、段は取り消し・整理中） | p001 から |
-| [WS180](ws180/ws.md) | MG006 | Emacs の拡張 — Emacs をベースにしたグラフィカルなエディタ（エージェント開発のための次世代のエディタ） | planning・保留（元: ベータ3 以降、段は取り消し・整理中） | Phase 未定義 |
-| [WS184](ws184/ws.md) | MG006 | 左手デバイスの OSK（クリエイターモード: ダイヤル・ホイール・ボタン 2×5、左上の swipe で出す、ベータ2） | planning・保留（元: ベータ3、段は取り消し・整理中） | p001 設計から |
-| [WS185](ws185/ws.md) | MG006 | ゲームパッドの OSK とゲームコンソールモード（両上隅の同時 swipe、Xbox の pad を模す、段 1 は mview、ベータ2） | planning・保留（元: ベータ3、段は取り消し・整理中） | p001 設計から |
-| [WS186](ws186/ws.md) | MG003 | Realtek RTL8822CE（5320 の PCIe の WiFi、ベータ3、ベータ2 が早く終われば前倒し） | planning・保留（元: ベータ3、段は取り消し・整理中） | p001 調査と設計から |
-| [WS197](ws197/ws.md) | MG006 | Bluetooth のスマホ連携: MAP（SMS・MMS）・Integration（WS170）・PBAP・HFP（通話、SCO）。ベータ2 の必須（2026-10-10 ユーザー） | incomplete・保留（元: HFP はベータ3、段は取り消し・整理中） | p006・p007 HFP、p010 の MMS の送信、p014、p008 実機、p009 規約 |
-| [WS198](ws198/ws.md) | MG002 | zedBSD の上で zedBSD を self-build（host の clang、2026-10-09 ユーザー、優先度低、ベータ2 の見込み） | incomplete・保留（元: ベータ3、段は取り消し・整理中） | p001 の判定から |
-| [WS201](ws201/ws.md) | MG002 | /home の暗号化（UFS の先頭の key slot、FIDO2 の hmac-secret／PRF と回復のパスワード、master key は初回に /dev/random）（2026-10-10 ユーザー、ベータ3、今は検討しない） | planning・保留（元: ベータ3、段は取り消し・整理中） | p001 設計 |
-| [WS204](ws204/ws.md) | MG006 | HD Audio の録音（内蔵マイク）と HFP 通話の音（2026-10-11 ユーザー） | incomplete・保留（元: HFP はベータ3、段は取り消し・整理中） | p001 の U1・U2、p002〜p005 |
-| [WS205](ws205/ws.md) | MG006 | Bluetooth audio（A2DP の SBC・AAC、headset で HFP 通話、libmedia の encoder）（2026-10-11 ユーザー） | incomplete・保留（元: HFP はベータ3、段は取り消し・整理中） | p001 の D1〜D6、p004〜p011 |
-| [WS209](ws209/ws.md) | MG006 | audiod の音の endpoint と route（通話・Bluetooth・modem）（2026-10-11 ユーザー Q12） | incomplete・保留（元: HFP はベータ3、段は取り消し・整理中） | p001 の再 review、p004〜p006 |
-| [WS212](ws212/ws.md) | MG006 | Wiseview の作り直し: 仮想デスクトップ 3 枚の矩形と窓の一覧、drag で仮想デスクトップ・display をまたいで移動、multi display の縦の積み重ね、display のローテーション（タグ・Shift+Super+←/→、比率の保持）（2026-10-12 ユーザー） | planning・保留（着手はユーザーが決める） | p001〜p005 |
-| [WS222](ws222/ws.md) | MG006 | 画像・PDF・字形の library を menuconfig の Desktop へ戻す（PNG・PDF・JPEG・TrueType）（2026-10-13 ユーザー、今の作業が全部終わってから） | planned・保留（後日） | p001 |
-| [WS225](ws225/ws.md) | MG006 | Vulkan の header を仕様から導ける内容だけで書き直し、Khronos の著作権表示を外す（2026-10-13 ユーザー） | planning・保留（ブロック） | p001 |
-| [WS234](ws234/ws.md) | MG006 | libkeiland の DLL 版（zedBSD 用と Windows 用）で、同じ .exe が zedBSD と Windows の両方で動く | planning・保留 | p001 |
-| [WS240](ws240/ws.md) | MG006 | nvrtx の RTX 50（Blackwell）（2026-10-15 ユーザー） | planning・保留（開始しない） | — |
-| [WS251](ws251/ws.md) | MG001 | source の tree 全体から開発の管理情報を削除する（2026-10-15 ユーザー） | incomplete・保留（作業対象になった時） | p001 の棚卸し、drivers の外の群 |
-| [WS257](ws257/ws.md) | MG006 | i915 を Haswell・Broadwell（Gen7.5・Gen8）に対応（2026-10-18 ユーザー） | planning・保留（今は取り組まない） | — |
-| [WS273](ws273/ws.md) | MG008 | Anbernic RG350（JZ4770、MIPS32）の実機への移植（2026-10-19 ユーザー） | incomplete・保留 | 再開は ws273/phase003/phase.md、実機 U26 |
-| [WS275](ws275/ws.md) | MG008 | sun4u に /dev/graphics を実装し Xzed を動かす（2026-10-19 ユーザー） | incomplete・保留 | p006（BUG-337）、p007 |
-| [WS281](ws281/ws.md) | MG002 | libc の malloc を速くする（first fit・1 本の list・1 つの lock の作り直し）（2026-10-22 ユーザー） | planning・保留（後日） | — |
-| [WS282](ws282/ws.md) | MG006 | camera の driver の枠組み（/dev/camN）と USB Video Class の driver（CSI の rpicam は今回やらない） | incomplete・保留（設計だけ、実装は後日） | p002〜p011（設計 版 3 は済み） |
-| [WS283](ws283/ws.md) | MG006 | bcm2711 の Vulkan の compute（Pi 4・Pi 5） | incomplete・保留（設計だけ、実装は後日） | p002〜p014 |
-| [WS284](ws284/ws.md) | MG006 | YOLOX-Nano の推論（C と Vulkan compute、Apache-2.0） | incomplete・保留（設計だけ、実装は後日） | p002〜p008 |
-| [WS285](ws285/ws.md) | MG006 | camera の object detection の demo の app（WS282〜WS284 の上） | planning・保留（後日） | p001 設計 |
-| [WS287](ws287/ws.md) | MG008 | EHCI の full-speed・low-speed の device（split transaction、ZYBO の ChipIdea を含む） | planning・保留（後日） | — |
-| [WS297](ws297/ws.md) | MG001 | completed の WS に残った「規約の全文の見直し」を一括で（WS296 と同じ形、2026-10-27 ユーザーの回答「1 つの WS にまとめる」） | planned（時期は整理で） | p001 対象の確定（候補 101 Phase・89 WS） |
+一覧は [workstreams-open.md](workstreams-open.md)（ws.md の写し）。完了・取り下げは [workstreams-closed.md](workstreams-closed.md)。

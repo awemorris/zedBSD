@@ -28,6 +28,18 @@ Phase に固有の試験は各 WS の `tests/`、シナリオ試験（AAT）は 
 | Raspberry Pi 5 | `10.0.30.6`（DHCP、2026-10-27 の時点、Ethernet の MAC 98:fe:54:22:65:c3。2026-10-23 は 10.0.30.5） | 10.0.30.5 は 2026-10-27 にデスクトップの zedBSD が使った。電源は遠隔では切れない（止まったらユーザーに頼む） |
 | 実機の資格情報 | WiFi の試験の鍵は tree の `.wifi`（git に入れない、plan・log・commit に書き写さない） | SwitchBot の token は `~/.config/switchbot/credentials` だけ |
 
+## 判定の方法の例外（ユーザーの許可）
+
+原則は AGENTS.md §9（QEMU の console・serial の log を読んで判定しない、起動は boot-test.sh）。次だけ別の判定でよい。
+
+| 対象 | 判定 |
+| --- | --- |
+| Linux・FreeBSD の QEMU guest（WS105・WS108・WS109・WS131。Linux の backend は QEMU+KVM） | `127.0.0.1` の転送 port からの SSH の疎通と QMP の `screendump` の PNG |
+| ZYBO の QEMU `xilinx-zynq-a9` と実機（WS286） | 生きた serial を対話で読む（armv7 の QEMU `virt` は boot-test.sh） |
+| ZYBO の LAN（WS289） | `127.0.0.1` の転送 port から guest の SSH |
+| ODROID-C5 の実機（WS313） | 生きた serial を対話で読む（network と画面が出た後は SSH と画面の PNG） |
+| RG350 の実機（WS273） | ユーザーが画面・LED を目で見て写真で返した結果 |
+
 ## QEMU の解析
 
 起動しない・固まる・例外は、log を読まずに QEMU のデバッグ機能で解析する（AGENTS.md §9）:

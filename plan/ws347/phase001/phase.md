@@ -2,6 +2,8 @@
 
 # ws347-p001 KC705 への bitstream の書き込みと PCIe の見え方
 
+Status: in-progress
+
 - 親: [WS347](../ws.md)。状態: in-progress（q2009、Q1 が直に）。
 
 ## 範囲

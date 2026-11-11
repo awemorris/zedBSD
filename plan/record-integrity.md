@@ -39,7 +39,7 @@
 | 本体（owner） | 一緒に直す写し |
 | --- | --- |
 | phase.md の Status | ws.md の Phase の表の行、Queue Board と担当の lane の attempt の行 |
-| ws.md の Status・Resume point | master.md の未完の WS の行（完了・取り下げは workstreams-closed.md へ移す）。新しい WS は作った commit で行を足す |
+| ws.md の Status・Resume point | workstreams-open.md の行（完了・取り下げは workstreams-closed.md へ移す）。新しい WS は作った commit で行を足す |
 | Bug の ticket の先頭（再現・処理） | known-bugs.md の行 |
 | 担当への割当（Q1 の割当で進める時も） | queue.md の行（Queue ID を取る）、担当の lane、plan/agents/registry.md |
 | 担当の起動・終了・merge | master.md の agents・merge の block |

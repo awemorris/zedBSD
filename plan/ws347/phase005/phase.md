@@ -2,6 +2,8 @@
 
 # ws347-p005 規約の全文の見直し
 
+Status: planned
+
 - 親: [WS347](../ws.md)。状態: planned。依存: p003・p004。
 
 ## 範囲

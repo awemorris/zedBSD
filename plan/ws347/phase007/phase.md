@@ -2,6 +2,8 @@
 
 # ws347-p007 直した RTL で bitstream を作り直す
 
+Status: canceled
+
 - 親: [WS347](../ws.md)。状態: canceled（2026-11-11 12:37、RTL はユーザーが直す）。
 
 ## 範囲
