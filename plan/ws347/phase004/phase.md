@@ -19,3 +19,7 @@
 ## 受け入れ
 
 - 段ごとの要約。動かない段は原因の切り分け（driver か FPGA か）と次の手。
+
+## 試験の範囲（2026-11-11 ユーザーの決定）
+
+- 今回は疎通の確認の試験。minimal の実機は SFU 無しなので、compiler が SFU の命令（rcp・rsq・exp2・log2・sin・cos・fsqrt.s）を使わない範囲の shader で試験する。
