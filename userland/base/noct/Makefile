@@ -18,7 +18,8 @@ BUILD ?= $(REPO_ROOT)/build/$(PLATFORM)
 ARCH ?= $(strip \
 	$(if $(filter i386 pc98 pc9821 pc9801,$(PLATFORM)),i386,\
 	$(if $(filter arm64 rpi4 rpi5,$(PLATFORM)),arm64,\
-	x86_64)))
+	$(if $(filter riscv64 vf2,$(PLATFORM)),riscv64,\
+	x86_64))))
 
 ZEDBSD_LLVM_BIN ?= $(REPO_ROOT)/build/llvm/bin
 CLANG ?= $(ZEDBSD_LLVM_BIN)/clang
@@ -31,7 +32,8 @@ CC ?= $(CLANG)
 TARGET_TRIPLE ?= $(strip \
 	$(if $(filter i386,$(ARCH)),i386-unknown-zedbsd,\
 	$(if $(filter arm64,$(ARCH)),aarch64-unknown-zedbsd,\
-	x86_64-unknown-zedbsd)))
+	$(if $(filter riscv64,$(ARCH)),riscv64-unknown-zedbsd,\
+	x86_64-unknown-zedbsd))))
 
 CFLAGS ?= --target=$(TARGET_TRIPLE) --sysroot=$(BUILD)/sysroot
 CPPFLAGS ?= -D__ZEDBSD__
@@ -43,6 +45,10 @@ NOCT_CPPFLAGS := \
 	-isystem $(BUILD)/sysroot/usr/include \
 	$(CPPFLAGS)
 NOCT_CFLAGS := $(filter-out -Werror -fno-pic -fno-pie,$(CFLAGS)) -fPIE
+
+# The JIT needs __clear_cache, which compiler-rt implements for riscv64 only on
+# Linux and OpenBSD (elsewhere it aborts), so riscv64 runs the interpreter.
+NOCT_JIT := $(if $(filter riscv64,$(ARCH)),OFF,ON)
 
 NOCT_SRC := $(abspath $(NOCT_DIR)noct)
 NOCT_BUILD_DIR := $(NOCT_SRC)/build-zedbsd-$(ARCH)
@@ -64,7 +70,9 @@ PACKAGE_FILES += \
 	--file /usr/share/man/man1/noct.1=$(NOCT_MAN) \
 	--mode /usr/share/man/man1/noct.1=0644
 
-build: $(NOCT_BIN) $(NOCT_MAN)
+# The package's own target, which package.mk adds to build for a custom package.
+.PHONY: noct
+noct: $(NOCT_BIN) $(NOCT_MAN)
 
 patch: $(PATCH_STAMP)
 
@@ -111,7 +119,7 @@ $(NOCT_ARTIFACT): $(PATCH_STAMP)
 			-DNOCT_ENABLE_INSTALL=ON \
 			-DNOCT_ENABLE_STATIC=ON \
 			-DNOCT_ENABLE_SHARED=OFF \
-			-DNOCT_ENABLE_JIT=ON \
+			-DNOCT_ENABLE_JIT=$(NOCT_JIT) \
 			-DNOCT_ENABLE_OPTIMIZER=ON \
 			-DNOCT_ENABLE_MULTITHREAD=ON \
 			-DNOCT_ENABLE_ACCEL=ON \
