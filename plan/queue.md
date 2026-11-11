@@ -760,3 +760,9 @@
 | q2006 / q2006-i01 | Q1（直に、main の checkout） | [ws346-p007](ws346/phase007/phase.md) layout の再利用 B（構造共有） | 同上 | cleared（2026-11-03 12:5x、pages 7/7・verify 差異 0・bench class 9〜10 倍・append 11 倍） |
 | q2007 / q2007-i01 | Q1（直に、main の checkout） | [ws346-p008](ws346/phase008/phase.md) 統合の試験・速さの測定・既定の判定 | 同上 | cleared（2026-11-03 16:07 `916f831402`、bench 4 種 14〜17 倍、実サイト verify 4 件 0 差異、Windows cross-build PASS、既定 on に切り替え） |
 | q2008 / q2008-i01 | Q1（直に、main の checkout） | [ws346-p009](ws346/phase009/phase.md) 規約の全文の見直し | 同上 | cleared（2026-11-03、plan/coding-style.md 照合、タブ・空白・文言・C89 準拠、全試験 PASS） |
+
+## 2026-11-11: WS347 VF2＋KC705 の Amaterrace GPU（q2009）
+
+| Queue / attempt | 担当 | 対象 | 範囲・条件 | 状態 |
+| --- | --- | --- | --- | --- |
+| q2009 / q2009-i01 | Q1（直に、main の checkout） | [ws347-p001](ws347/phase001/phase.md) KC705 への bitstream の書き込みと PCIe の見え方 | 2026-11-11 ユーザーの指示（Vivado で JTAG から書く）。amaterrace-gpu は読むだけ | in-progress |

@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-03 16:10（Q1。WS346 完了、全 Phase cleared、既定 cache=on）。前の更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
+最終更新: 2026-11-11 12:0x（Q1。WS347 を立てた）。前の更新: 2026-11-03 16:10（Q1。WS346 完了、全 Phase cleared、既定 cache=on）。前の更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
-| Q1 | [WS074](ws074/ws.md) p263 | Web ブラウザ（libbrowser） | p263 U1（amazon.co.jp）は host で直した。WS346 は completed（全 Phase cleared、既定 cache=on、bench 14〜17 倍、実サイト verify 差異 0、Windows cross-build PASS） | [WS074](ws074/ws.md) p263 の残り |
+| Q1 | [WS347](ws347/ws.md) p001 | VF2＋KC705 の Amaterrace GPU | KC705 を JTAG で確かめた（未設定）。書く bitstream の所在をユーザーに確認中 | p002 仕様の差と driver の追従の設計 → p003 実装 → p004 実機 |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
@@ -24,6 +24,10 @@
 ## WS ごとの進捗
 
 （2026-11-01 10:29 クリア。これより後の進捗をここに書く。各 WS の状態は [master.md](master.md) と各 ws.md）
+
+### WS347 VF2＋KC705 の Amaterrace GPU
+
+- 2026-11-11 12:0x: 立てた。Vivado の hw_manager で KC705（xc7k325t、Digilent の JTAG）が見え、未設定（DONE=0）。host にある bitstream は 11-07 の物（WNS −0.911 ns、200 MHz 未達）だけで、200 MHz で閉じた版は見つからない。
 
 ### WS346 layout cache（style と layout の差分の再計算）
 
