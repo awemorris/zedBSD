@@ -1,10 +1,16 @@
-# The Linux build of the Keiland desktop (WS105, plan/ws105/design.md §3).  It shares no rule with the zedBSD build:
-# the host's compiler, headers and C library build every package listed in KEILAND_LINUX_PACKAGES, each with its
-# own Makefile.linux, into $(KEILAND_LINUX_BUILD), and install copies the result under $(DESTDIR)$(KEILAND_PREFIX).
+# zedBSD
+# Copyright (C) 2026 Awe Morris
 #
-#   make keiland-linux                       (from the top-level Makefile: make -f userland/desktop/keiland-linux.mk all)
-#   make keiland-linux-install DESTDIR=...   (install)
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+# SPDX-License-Identifier: Zlib
+
+# The Linux build of the Keiland desktop.  It shares no rule with the
+# zedBSD build: the host's compiler, headers and C library build every
+# package listed in KEILAND_LINUX_PACKAGES, each with its own
+# Makefile.linux, into $(KEILAND_LINUX_BUILD), and install copies the
+# result under $(DESTDIR)$(KEILAND_PREFIX).
+#
+#   make keiland-linux (from the top-level Makefile: make -f userland/desktop/keiland-linux.mk all)
+#   make keiland-linux-install DESTDIR=... (install)
 
 KEILAND_LINUX_BUILD ?= build/keiland-linux
 KEILAND_PREFIX ?= /opt/keiland

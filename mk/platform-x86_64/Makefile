@@ -1,0 +1,9 @@
+include mk/platform-x86_64/defaults.mk
+include mk/platform-x86_64/libc.mk
+include mk/platform-x86_64/sysroot.mk
+include mk/platform-x86_64/vmunix.mk
+include mk/platform-x86_64/firmware.mk
+include mk/platform-x86_64/bootloader.mk
+include mk/platform-x86_64/programs.mk
+include mk/platform-x86_64/rootfs.mk
+include mk/platform-x86_64/image.mk

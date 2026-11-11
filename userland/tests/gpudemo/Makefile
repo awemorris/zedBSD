@@ -7,4 +7,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 GPUDEMO_DATA := \
 	/usr/share/gpudemo/mix.nct=userland/tests/gpudemo/mix.nct \
 	/usr/share/gpudemo/s13.sh=userland/tests/gpudemo/s13.sh
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,gpudemo,GPU compute demonstration,amd64,n,package,,y,tests,tests/gpudemo,desktop/libegl desktop/libglesv2,,data,$(GPUDEMO_DATA),,))
+$(eval $(call USERLAND_PACKAGE,gpudemo,GPU compute demonstration,x86_64,n,package,,y,tests,tests/gpudemo,desktop/libegl desktop/libglesv2,,data,$(GPUDEMO_DATA),,))

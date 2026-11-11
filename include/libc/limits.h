@@ -26,6 +26,7 @@
 #define SCHAR_MIN (-128)
 #define SCHAR_MAX 127
 #define UCHAR_MAX 255U
+
 /*
  * A char promotes to int, so CHAR_MAX is an int even where char is
  * unsigned (ARM): an unsigned constant would turn a comparison with a
@@ -38,12 +39,14 @@
 #define CHAR_MIN SCHAR_MIN
 #define CHAR_MAX SCHAR_MAX
 #endif
+
 #define SHRT_MIN (-32767 - 1)
 #define SHRT_MAX 32767
 #define USHRT_MAX 65535U
 #define INT_MIN (-2147483647 - 1)
 #define INT_MAX 2147483647
 #define UINT_MAX 4294967295U
+
 #if __SIZEOF_LONG__ == 8
 #define LONG_MIN (-9223372036854775807L - 1L)
 #define LONG_MAX 9223372036854775807L
@@ -53,19 +56,21 @@
 #define LONG_MAX 2147483647L
 #define ULONG_MAX 4294967295UL
 #endif
+
 #define LLONG_MIN (-9223372036854775807LL - 1)
 #define LLONG_MAX 9223372036854775807LL
 #define ULLONG_MAX 18446744073709551615ULL
 
 /*
- * The widths of long and int in bits (XSI): long is as wide as a pointer on
- * the LP64 targets and 32 bits on i386.
+ * The widths of long and int in bits (XSI): long is as wide as a
+ * pointer on the LP64 targets and 32 bits on i386.
  */
 #if __SIZEOF_LONG__ == 8
 #define LONG_BIT 64
 #else
 #define LONG_BIT 32
 #endif
+
 #define WORD_BIT 32
 
 /*

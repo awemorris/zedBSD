@@ -1,6 +1,10 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent FreeBSD build of textedit; source membership mirrors the target package.
-KEILAND_FREEBSD_TEXTEDIT_SOURCES := userland/desktop/textedit/main.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_FREEBSD_TEXTEDIT_SOURCES := \
+	userland/desktop/textedit/main.c \
 	userland/desktop/textedit/queue.c \
 	userland/desktop/textedit/menu.c \
 	userland/desktop/textedit/glass.c \
@@ -15,4 +19,5 @@ KEILAND_FREEBSD_TEXTEDIT_SOURCES := userland/desktop/textedit/main.c \
 	userland/desktop/textedit/canvas.c \
 	userland/desktop/textedit/text.c \
 	userland/desktop/picture/color-glyph.c
+
 $(eval $(call KEILAND_FREEBSD_PROGRAM,textedit,bin,$(KEILAND_FREEBSD_TEXTEDIT_SOURCES),libkeiland.so libtruetype.so libpng-compat.so libz-compat.so libwayland-client.so libvulkan.so.1,-lm))

@@ -9,7 +9,7 @@
 # engineering): investigate the firmware only through its command replies
 # and register values.
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 # Each entry is CACHE-NAME|UPSTREAM-PATH|SIZE|SHA-256.
 override WAVE511_FIRMWARE_FIXTURE_GOAL := wave511-firmware-fixture-cache
@@ -51,7 +51,7 @@ override WAVE511_FIRMWARE_VERSION := 0002d46a
 override WAVE511_FIRMWARE_SHA256_COMMAND := sha256sum
 override WAVE511_FIRMWARE_FILE_COUNT := 2
 
-WAVE511_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/wave511
+WAVE511_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/wave511
 # The cache holds the file set of one revision.
 override WAVE511_FIRMWARE_CACHE_DIR := $(WAVE511_FIRMWARE_CACHE_ROOT)/$(WAVE511_FIRMWARE_REVISION)
 override WAVE511_FIRMWARE_CACHE_NAMES := $(foreach entry,$(WAVE511_FIRMWARE_FILES),$(word 1,$(subst |, ,$(entry))))
@@ -83,14 +83,14 @@ wave511-firmware-license:
 wave511-firmware-license-pending:
 	@if test ! -d '$(WAVE511_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(WAVE511_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,wave511-firmware,Chips&Media Wave511 video decoder firmware for VisionFive 2,*,n,package,,y,firmware,firmware/wave511,,,data,$(WAVE511_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,wave511-firmware,Chips&Media Wave511 video decoder firmware for VisionFive 2,*,n,package,,y,firmware,firmware/wave511,,,data,$(WAVE511_FIRMWARE_DATA),,))
 override USERLAND_wave511-firmware_DATA := $(WAVE511_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += wave511-firmware
 
 .PHONY: download wave511-firmware wave511-firmware-cache \
 	wave511-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: wave511-firmware
 endif
 

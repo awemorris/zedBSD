@@ -204,7 +204,20 @@ Linux DRM/KMS or Mesa, and it does not use user-space drivers or
 compilers.  Our JIT shader compiler is small and simple enough to fit
 in the kernel.
 
-Supported GPUs:
+**Syscall-level trust:** The driver inputs a SPIR-V byte array. The
+pointer is validated just like arguments in a standard syscall, and
+some bytecode checking. In Vulkan, there is no GLSL compiler inside
+the stack. Developers have to precompile GLSL shaders into SPIR-V in
+userland. In that compilation, the GLSL compiler already handles heavy
+optimizer passes such as CSE. So the kernel compiler does just a
+1-to-N opcode lowering with minimal template-based or peephole
+optimizations. No dynamic graph rewrites or complex passes in ring 0.
+
+**Hardware faults handled:** Bad shaders or infinite loops are caught
+by the GPU watchdog timer. The driver resets the engine and bubbles
+VK_ERROR_DEVICE_LOST back to the app.
+
+**Supported GPUs:**
 
 | Vendor         | IP                | Confirmed on            | Description                                  |
 |----------------|-------------------|-------------------------|----------------------------------------------|
@@ -213,6 +226,15 @@ Supported GPUs:
 | Intel          | GEN9 to GEN12     | 6th to 12th Intel Core  | Desktop-optimized                            |
 | NVIDIA         | Turing or later   | NVIDIA GeForce RTX 2070 | Modest yet                                   |
 | AMD            | RDNA or later     | AMD Radeon RX 5600 XT   | Desktop-optimized, now optimizing for gaming |
+
+**Is in-kernel compiler dangerous?:** No.  From my point of view,
+"GPUs need heavy compilers to be fast" and "compilers must stay in
+userland for safety" are just Mesa narratives defending the Linux
+stack.  Our working codebase proves neither is true, at least for the
+60-fps desktop.  Other OSes spent 20 years struggling to port the
+massive DRI/KMS architecture just to keep up.  In hindsight, wasn't
+that gap largely the result of the Linux camp successfully convincing
+everyone that their complex model was the only choice?
 
 ---
 

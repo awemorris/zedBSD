@@ -12,7 +12,7 @@
 # installed once and the driver maps each chip to the directories it reads
 # instead of carrying copies.
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 # Each entry is CACHE-NAME|UPSTREAM-PATH|SIZE|SHA-256.
 override NVIDIA_GSP_FIRMWARE_FIXTURE_GOAL := nvidia-gsp-firmware-fixture-cache
@@ -84,7 +84,7 @@ override NVIDIA_GSP_FIRMWARE_VERSION := 570.144
 override NVIDIA_GSP_FIRMWARE_SHA256_COMMAND := sha256sum
 override NVIDIA_GSP_FIRMWARE_FILE_COUNT := 16
 
-NVIDIA_GSP_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/nvidia-gsp
+NVIDIA_GSP_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/nvidia-gsp
 # The cache holds one file set of one revision.  The set grew from Turing's
 # seven files to sixteen (ws242-p001); a cache of the old set keeps its own
 # directory, so it is never mistaken for a broken cache of the new one.
@@ -138,14 +138,14 @@ nvidia-gsp-firmware-license:
 nvidia-gsp-firmware-license-pending:
 	@if test ! -d '$(NVIDIA_GSP_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(NVIDIA_GSP_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,nvidia-gsp-firmware,NVIDIA GSP firmware for Turing Ampere and Ada,amd64,n,package,,y,firmware,firmware/nvidia-gsp,,,data,$(NVIDIA_GSP_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,nvidia-gsp-firmware,NVIDIA GSP firmware for Turing Ampere and Ada,x86_64,n,package,,y,firmware,firmware/nvidia-gsp,,,data,$(NVIDIA_GSP_FIRMWARE_DATA),,))
 override USERLAND_nvidia-gsp-firmware_DATA := $(NVIDIA_GSP_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += nvidia-gsp-firmware
 
 .PHONY: download nvidia-gsp-firmware nvidia-gsp-firmware-cache \
 	nvidia-gsp-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: nvidia-gsp-firmware
 endif
 

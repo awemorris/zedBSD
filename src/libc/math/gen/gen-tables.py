@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""Generates the tables and constants of zedBSD's libm (WS076).
+"""Generates the tables and constants of zedBSD's libm.
 
-Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-
-    python3 src/libc/math/gen/gen-tables.py
+ python3 src/libc/math/gen/gen-tables.py
 
 writes src/libc/math/tables.c and src/libc/math/math-constants.h.  The
 output is committed; running this again must reproduce it exactly.
 
-Every value is computed with mpmath at 256 bits and rounded to the nearest
-double; a double-double is that double and the nearest double to the rest.
-Nothing here is taken from another library: the tables are values of
-elementary functions at chosen points, the constants are splittings of
-ln 2, pi and friends into pieces with a stated number of bits (the method
-of Cody and Waite), and the polynomial coefficients are Taylor coefficients
-(exact rationals rounded to the nearest double) unless a comment says
-otherwise.
+Every value is computed with mpmath at 256 bits and rounded to the
+nearest double; a double-double is that double and the nearest double
+to the rest.  Nothing here is taken from another library: the tables
+are values of elementary functions at chosen points, the constants are
+splittings of ln 2, pi and friends into pieces with a stated number of
+bits (the method of Cody and Waite), and the polynomial coefficients
+are Taylor coefficients (exact rationals rounded to the nearest
+double) unless a comment says otherwise.
+
+zedBSD
+Copyright (C) 2026 Awe Morris
+SPDX-License-Identifier: Zlib
 """
 from __future__ import annotations
 

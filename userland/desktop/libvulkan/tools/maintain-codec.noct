@@ -1,22 +1,52 @@
-// zedBSD; Copyright 2026 Awe Morris; SPDX-License-Identifier: Zlib.
-// Maintains original typed marshalling from API declarations and explicit length rules.
-// The build consumes codec.c and codec.h directly; no generator runs during a build.
-func starts(text, prefix) { return String.substring(text, 0, String.charCount(prefix)) == prefix; }
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
+
+func starts(text, prefix) {
+    return String.substring(text, 0, String.charCount(prefix)) == prefix;
+}
+
 func trim(text) {
     var first = 0; var last = String.charCount(text);
-    while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) { first = first + 1; }
-    while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t")) { last = last - 1; }
+    while (first < last && (String.charAt(text, first) == " " || String.charAt(text, first) == "\t")) {
+	first = first + 1;
+    }
+    while (last > first && (String.charAt(text, last - 1) == " " || String.charAt(text, last - 1) == "\t")) {
+	last = last - 1;
+    }
     return String.substring(text, first, last - first);
 }
+
 func lines(text) {
     var out = []; var begin = 0;
     for (i in 0..String.charCount(text)) {
-        if (String.charAt(text, i) == "\n") { Array.push(out, String.substring(text, begin, i - begin)); begin = i + 1; }
+        if (String.charAt(text, i) == "\n") {
+	    Array.push(out, String.substring(text, begin, i - begin));
+	    begin = i + 1;
+	}
     }
     return out;
 }
-func has(list, name) { for (i in 0..Array.size(list)) { if (list[i] == name) { return true; } } return false; }
-func findRecord(records, name) { for (i in 0..Array.size(records)) { if (records[i][0] == name) { return i; } } return -1; }
+
+func has(list, name) {
+    for (i in 0..Array.size(list)) {
+        if (list[i] == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+func findRecord(records, name) {
+    for (i in 0..Array.size(records)) {
+    	if (records[i][0] == name) {
+	    return i;
+	}
+    }
+    return -1;
+}
+
 func pointerRule(record, field) {
     var key = record + "." + field;
     var rules = [
@@ -77,6 +107,7 @@ func pointerRule(record, field) {
     for (i in 0..Array.size(rules)) { if (rules[i][0] == key) { return [rules[i][1], rules[i][2]]; } }
     System.error("unclassified pointer: " + key);
 }
+
 func scalar(records, handles, type, expression, indent, decode) {
     if (findRecord(records, type) >= 0) {
         if (decode) { return indent + "vulkan_decode_" + type + "(reader, &" + expression + ");\n"; }
@@ -100,6 +131,7 @@ func scalar(records, handles, type, expression, indent, decode) {
     if (type == "VkImageLayout") { return indent + "vulkan_write_u32(writer, vulkan_wire_image_layout(" + expression + "));\n"; }
     return indent + "vulkan_write_" + primitive + "(writer, " + expression + ");\n";
 }
+
 func canDecode(records, handles, record, depth) {
     if (depth > 20) { System.error("recursive by-value API structure"); }
     var fields = record[1];
@@ -111,6 +143,7 @@ func canDecode(records, handles, record, depth) {
     }
     return true;
 }
+
 func emit(records, handles, record, decode) {
     var name = record[0]; var fields = record[1]; var array = false; var wide = false;
     for (i in 0..Array.size(fields)) {
@@ -133,7 +166,7 @@ func emit(records, handles, record, decode) {
             } else if (!decode && name == "VkBufferCreateInfo") {
                 output = output + "\n\t/* Allocation sharing may request renderer-exportable buffer storage. */\n\tvulkan_encode_buffer_external(writer, record->pNext);\n";
             } else {
-            output = output + "\n\t/* No advertised core 1.0 extension adds a chain to this record. */\n\tvulkan_write_u64(writer, 0);\n";
+		output = output + "\n\t/* No advertised core 1.0 extension adds a chain to this record. */\n\tvulkan_write_u64(writer, 0);\n";
             }
             continue;
         }
@@ -196,6 +229,7 @@ func emit(records, handles, record, decode) {
     if (opening >= 0) { output = String.substring(output, 0, opening + 2) + String.substring(output, opening + 3, -1); }
     return output;
 }
+
 func main(args) {
     if (Array.size(args) != 3) { System.error("usage: maintain-codec.noct PUBLIC_HEADER OUTPUT_C OUTPUT_H"); }
     var input = lines(FileUtil.readText(args[0])); var records = []; var handles = []; var active = ""; var fields = [];

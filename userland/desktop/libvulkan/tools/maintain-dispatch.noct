@@ -1,5 +1,7 @@
-// zedBSD dispatch metadata maintenance; Copyright 2026 Awe Morris, Zlib.
-// Only the public API declarations are input data; the command numbers are uapi/gpu-op.h (ws167-p002).
+// zedBSD
+// Copyright (C) 2026 Awe Morris
+//
+// SPDX-License-Identifier: Zlib
 
 func trim(text) {
     var first = 0; var last = String.charCount(text);

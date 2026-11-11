@@ -432,7 +432,16 @@ drv_pci_bus_scan(
 		return EINVAL;
 	/* Process each element required by the operation. */
 	for (slot = 0; slot < 32U; slot++) {
+#ifdef PCI_INTEL_MID_QUIRKS
+		/*
+		 * The Intel Merrifield and Moorefield SoC devices have more
+		 * functions than their headers say, so every function is read;
+		 * an absent one answers all ones.
+		 */
+		functions = 8;
+#else
 		functions = 1;
+#endif
 		/* Process each element required by the operation. */
 		for (function = 0; function < functions; function++) {
 			struct drv_pci_address address = {
@@ -2184,7 +2193,22 @@ drv_pci_driver_match(
 		return DRV_PCI_MATCH_NONE;
 
 	/* Handles the score condition. */
+#ifdef PCI_INTEL_MID_QUIRKS
+	/* Without a match function, a more specific identity scores higher. */
+	if (r->match) {
+		score = r->match(d, i);
+	} else if (i->vendor != DRV_PCI_ANY_ID && i->device != DRV_PCI_ANY_ID) {
+		score = DRV_PCI_MATCH_EXACT;
+	} else if (i->vendor != DRV_PCI_ANY_ID) {
+		score = DRV_PCI_MATCH_VENDOR;
+	} else if (i->class_mask != 0) {
+		score = DRV_PCI_MATCH_CLASS;
+	} else {
+		score = DRV_PCI_MATCH_GENERIC;
+	}
+#else
 	score = r->match ? r->match(d, i) : DRV_PCI_MATCH_GENERIC;
+#endif
 	if (score > 0 && out)
 		*out = i;
 	/* Returns the computed result. */
@@ -2840,6 +2864,19 @@ read_device(
 	}
 
 	(void)cfg_write(device->bus, &device->address, PCI_COMMAND, 2, command);
+
+#ifdef PCI_INTEL_MID_QUIRKS
+	/*
+	 * Intel Merrifield/Moorefield internal SoC devices report a dummy 16-byte
+	 * BAR size in PCI config space, but ACPI _CRS and hardware require the
+	 * true aperture (e.g. 1 MiB for the DWC3 USB core).
+	 */
+	if (device->vendor == 0x8086U &&
+	    (device->product == 0x119eU || device->product == 0x119dU)) {
+		if (device->bar_count > 0 && device->bars[0].size < 0x100000U)
+			device->bars[0].size = 0x100000U;
+	}
+#endif
 
 	/* Handles the device condition. */
 	if ((device->header_type & 0x7fU) == 0U) {

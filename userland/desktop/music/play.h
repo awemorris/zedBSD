@@ -6,10 +6,10 @@
  */
 
 /*
- * The player of a song (play.c, ws120-p009), apart from music.h so that
- * the view and its host tests do not need Video Player's sound and
- * decoding: audio.c supplies the stream, libmedia supplies native codecs,
- * and media-app supplies the application's optional software fallback.
+ * The player of a song, apart from music.h so that the view and its
+ * host tests do not need Video Player's sound and decoding: audio.c
+ * supplies the stream, libmedia supplies native codecs, and media-app
+ * supplies the application's optional software fallback.
  */
 
 #ifndef MUSIC_PLAY_H
@@ -22,14 +22,15 @@
 #include <keiland/keiland_thread.h>
 
 /*
- * The player: the thread, the sound (libkeiland's stream), and under the lock
- * the state (MU_*), whether the song was played to its end (taken by
- * mu_player_state) and how far the end's draining went (0 not begun, 1
- * the decoder drained, 2 told), the song's length (seconds), the
- * position's anchor (the time at the stream's position heard), a seek asked
- * for, the end of the thread, why the last song could not be played
- * (MEDIA_PROBLEM_*, 0 for another reason or none), and why the song stopped
- * while it played (MU_FAIL_*, taken by mu_player_failure).
+ * The player: the thread, the sound (libkeiland's stream), and under
+ * the lock the state (MU_*), whether the song was played to its end
+ * (taken by mu_player_state) and how far the end's draining went (0
+ * not begun, 1 the decoder drained, 2 told), the song's length
+ * (seconds), the position's anchor (the time at the stream's position
+ * heard), a seek asked for, the end of the thread, why the last song
+ * could not be played (MEDIA_PROBLEM_*, 0 for another reason or
+ * none), and why the song stopped while it played (MU_FAIL_*, taken
+ * by mu_player_failure).
  */
 struct mu_player {
 	struct kl_thread *thread;

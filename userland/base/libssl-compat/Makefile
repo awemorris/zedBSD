@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))sources.mk
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
@@ -5,5 +10,5 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # OpenSSL code.  It is built on libcrypto-compat.  Off by default: a program that links it selects it.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-LIBSSL_COMPAT_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libssl-compat.so=$(BUILD)/dynamic/libssl-compat.so)
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libssl-compat,libssl-compat,*,n,library,$(LIBSSL_COMPAT_SOURCES),y,base,base/libssl-compat,base/libcrypto-compat,,shared-library,$(LIBSSL_COMPAT_IMAGE_DATA),,lib))
+LIBSSL_COMPAT_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libssl-compat.so=$(BUILD)/dynamic/libssl-compat.so)
+$(eval $(call USERLAND_PACKAGE,libssl-compat,libssl-compat,*,n,library,$(LIBSSL_COMPAT_SOURCES),y,base,base/libssl-compat,base/libcrypto-compat,,shared-library,$(LIBSSL_COMPAT_IMAGE_DATA),,lib))

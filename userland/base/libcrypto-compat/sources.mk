@@ -1,9 +1,16 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+#
 # The source lists of libcrypto-compat, read by its Makefile and by the builds of the other systems: the Windows
 # build (apps/browser-win32/Makefile) takes LIBCRYPTO_COMPAT_SOURCES and LIBCRYPTO_COMPAT_WIN32_SOURCES into one
 # static library, the zedBSD build takes LIBCRYPTO_COMPAT_SOURCES and LIBCRYPTO_COMPAT_POSIX_SOURCES into a shared one.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-
 # Every file that does not depend on the operating system.
+# The files that depend on the operating system, one per system.
+#
+
 LIBCRYPTO_COMPAT_SOURCES := \
 	userland/base/libcrypto-compat/api-err.c \
 	userland/base/libcrypto-compat/api-evp.c \
@@ -35,6 +42,5 @@ LIBCRYPTO_COMPAT_SOURCES := \
 	userland/base/libcrypto-compat/cryc-x25519.c \
 	userland/base/libcrypto-compat/cryc-x509.c
 
-# The files that depend on the operating system, one per system.
 LIBCRYPTO_COMPAT_POSIX_SOURCES := userland/base/libcrypto-compat/cryc-os-posix.c
 LIBCRYPTO_COMPAT_WIN32_SOURCES := userland/base/libcrypto-compat/cryc-os-win32.c

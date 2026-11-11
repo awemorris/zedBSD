@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef HAL_HAL_ARCH_AMD64_H
-#define HAL_HAL_ARCH_AMD64_H
+#ifndef HAL_HAL_ARCH_X86_64_H
+#define HAL_HAL_ARCH_X86_64_H
 
 /*
  * The periodic tick, in hertz.  Every time the kernel keeps is counted in

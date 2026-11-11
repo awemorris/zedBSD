@@ -1,5 +1,3 @@
-/* -*- mode: asm; tab-width: 8; -*- */
-
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris

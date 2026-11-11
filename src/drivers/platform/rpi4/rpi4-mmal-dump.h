@@ -7,7 +7,7 @@
 
 /*
  * The frame dump of the boot-time decoder probe (ws236), built only by
- * test kernels (CONFIG_DRIVER_BCM2711_VIDEO_PROBE).
+ * test kernels (CONFIG_DRIVER_RPI4_GPU_PROBE).
  *
  * The probe keeps copies of a few decoded frames; /dev/mmal-probe reads
  * them back as records, each a text header of DRV_RPI4_MMAL_DUMP_HEADER

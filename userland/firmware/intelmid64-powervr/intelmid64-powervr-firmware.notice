@@ -1,0 +1,24 @@
+Firmware: Intel Moorefield PowerVR Rogue G6430 GPU signed firmware (1.72.4.12)
+Hardware: PowerVR Series 6 Rogue G6430 of the Intel Atom Z3560 / Z3580 (Moorefield /
+          Anniedale, ASUS ZenFone 2 ZE550ML / ZE551ML, ASUS Nexus Player "fugu"),
+          used by CONFIG_DRIVER_INTELMID_POWERVR
+Files:    /lib/firmware/powervr/rgx.fw.signed.1.72.4.12
+          /lib/firmware/powervr/rgx.fw.signed
+          /lib/firmware/powervr/rgx.fw
+Source:   Google AOSP Nexus Player ("fugu") official driver binaries package
+          https://dl.google.com/dl/android/aosp/intel-fugu-opr2.170623.027-82108990.tgz
+          (60116819 bytes, SHA-256
+          114c20b8335f3c166c76d590c6d238153c463c2fa2dea3da56d1ce3ffd1ec6ed),
+          extracted from extract-intel-fugu.sh;
+          LICENSE.intel from Google AOSP device/asus/fugu repository
+          (self-extractors/intel/LICENSE, 14770 bytes, SHA-256
+          6966993d5b46d5b720b7765a7a3138c40c9bd3e4325dc78ce8802e0def2a2911).
+
+Copyright (c) Intel Corporation.
+
+Terms:
+This firmware and accompanying libraries are provided under the Intel Developer
+Software License Agreement (LICENSE.intel). Use of this software is subject to
+the terms and conditions of that agreement, for use with authorized devices
+powered by Intel hardware. Reverse engineering, decompilation, and disassembly
+are prohibited.

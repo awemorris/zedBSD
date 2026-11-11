@@ -1,5 +1,11 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+NEWGRP_SOURCES := \
+	userland/base/newgrp/main.c
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,newgrp,newgrp,*,y,basic,userland/base/newgrp/main.c,y,base,,,4755))
+$(eval $(call USERLAND_PACKAGE,newgrp,newgrp,*,y,basic,$(NEWGRP_SOURCES),y,base,,,4755))

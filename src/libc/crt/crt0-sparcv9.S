@@ -1,6 +1,7 @@
 /*
- * zedBSD SPARC V9 user entry and syscall veneer.
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
 

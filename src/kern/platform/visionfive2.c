@@ -69,12 +69,12 @@
 #include <drivers/generic/serial-console.h>
 #include <drivers/platform/visionfive2/vf2-crg.h>
 #include <drivers/platform/visionfive2/vf2-ethernet.h>
-#if CONFIG_DRIVER_POWERVR
+#if CONFIG_DRIVER_VF2_GPU_VPU
 #include <drivers/platform/visionfive2/vf2-gpu.h>
 #include <drivers/platform/visionfive2/vf2-pmu.h>
 #include "drivers/gpu/powervr/powervr.h"
 #endif
-#if CONFIG_DRIVER_VF2_VPU || CONFIG_DRIVER_VF2_VPU_PROBE
+#if CONFIG_DRIVER_VF2_GPU_VPU || CONFIG_DRIVER_VF2_VPU_PROBE
 #include "drivers/platform/visionfive2/vf2-vpu.h"
 #endif
 #include <drivers/platform/visionfive2/vf2-mmc.h>
@@ -128,7 +128,7 @@
 /* The SD card clock's number in the SYS clock generator. */
 #define VF2_SD_CARD_CLOCK	94U
 
-#if CONFIG_DRIVER_POWERVR
+#if CONFIG_DRIVER_VF2_GPU_VPU
 /*
  * Where the GPU core is: the board's device tree usually has no node for
  * it, so the board describes it itself.
@@ -147,7 +147,7 @@ static const struct drv_vf2_gpu_place vf2_gpu_builtin = {
 	82U
 };
 
-#if CONFIG_DRIVER_VF2_VPU || CONFIG_DRIVER_VF2_VPU_PROBE
+#if CONFIG_DRIVER_VF2_GPU_VPU || CONFIG_DRIVER_VF2_VPU_PROBE
 /*
  * Where the video decoder is: the vendor's device tree ships its node
  * disabled and mainline's has none, so the board describes it itself.
@@ -347,7 +347,7 @@ static void reveal_fatal(void);
 static void probe_console_uart(const struct drv_fdt *fdt);
 static void start_console(void);
 static void console_uart_putc(int character);
-#if CONFIG_DRIVER_POWERVR
+#if CONFIG_DRIVER_VF2_GPU_VPU
 static void probe_display_controller(const struct drv_fdt *fdt);
 static int check_display_clocks(void);
 static void light_display(const struct drv_powervr_dc_place *place);
@@ -786,7 +786,7 @@ probe_soc(
 	error = drv_vf2_pwmdac_attach(&fdt, VF2_DMA_DEFAULT_COHERENT);
 	if (error != 0 && error != ENODEV)
 		kern_logf("visionfive2: sound unavailable (%d)\n", error);
-#if CONFIG_DRIVER_POWERVR
+#if CONFIG_DRIVER_VF2_GPU_VPU
 
 	/* Brings the GPU core up as far as its identity; the board boots without it when it fails. */
 	error = drv_vf2_gpu_attach(&fdt, &vf2_gpu_builtin);
@@ -796,7 +796,7 @@ probe_soc(
 	/* Reads the display controller the loader left on and decides on its takeover. */
 	probe_display_controller(&fdt);
 #endif
-#if CONFIG_DRIVER_VF2_VPU || CONFIG_DRIVER_VF2_VPU_PROBE
+#if CONFIG_DRIVER_VF2_GPU_VPU || CONFIG_DRIVER_VF2_VPU_PROBE
 
 	/* Starts the video decoder's bring-up; the board boots without video when it fails. */
 	error = drv_vf2_vpu_attach(&fdt, &vf2_vpu_builtin);
@@ -1047,7 +1047,7 @@ describe_sd_partitions(
 			  kind);
 	}
 }
-#if CONFIG_DRIVER_POWERVR
+#if CONFIG_DRIVER_VF2_GPU_VPU
 
 /*
  * Reads the display controller the loader left on, from the tree's
@@ -1458,7 +1458,7 @@ static void
 reveal_fatal(
 	void)
 {
-#if CONFIG_DRIVER_POWERVR
+#if CONFIG_DRIVER_VF2_GPU_VPU
 	/* Takes the screen back when the display driver read the controller. */
 	if (vf2_fatal_display != NULL)
 		vf2_fatal_display();

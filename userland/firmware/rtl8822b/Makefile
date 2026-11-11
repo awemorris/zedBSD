@@ -1,7 +1,7 @@
 # zedBSD optional RTL8822B firmware package
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 override RTL8822B_FIRMWARE_FIXTURE_GOAL := rtl8822b-firmware-fixture-cache
 ifneq ($(filter $(RTL8822B_FIRMWARE_FIXTURE_GOAL),$(MAKECMDGOALS)),)
@@ -54,7 +54,7 @@ override RTL8822B_FIRMWARE_OFFICIAL_WHENCE_SHA256 := 34f954c7d068ec4fd5fcc216471
 
 RTL8822B_FIRMWARE_FETCH ?= curl --fail --location --silent --show-error --retry 3 --retry-all-errors --retry-delay 5
 override RTL8822B_FIRMWARE_SHA256_COMMAND := sha256sum
-RTL8822B_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/rtl8822b
+RTL8822B_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/rtl8822b
 override RTL8822B_FIRMWARE_CACHE_DIR := $(RTL8822B_FIRMWARE_CACHE_ROOT)/$(RTL8822B_FIRMWARE_MIRROR_REVISION)
 override RTL8822B_FIRMWARE_CACHE_BLOB := $(RTL8822B_FIRMWARE_CACHE_DIR)/rtw8822b_fw.bin
 override RTL8822B_FIRMWARE_CACHE_LICENSE := $(RTL8822B_FIRMWARE_CACHE_DIR)/LICENCE.rtlwifi_firmware.txt
@@ -83,14 +83,14 @@ rtl8822b-firmware-license:
 rtl8822b-firmware-license-pending:
 	@if test ! -d '$(RTL8822B_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(RTL8822B_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,rtl8822b-firmware,Realtek RTL8822B firmware,i386 pc98 amd64,n,package,,y,firmware,firmware/rtl8822b,,,data,$(RTL8822B_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,rtl8822b-firmware,Realtek RTL8822B firmware,i386 pc98 x86_64,n,package,,y,firmware,firmware/rtl8822b,,,data,$(RTL8822B_FIRMWARE_DATA),,))
 override USERLAND_rtl8822b-firmware_DATA := $(RTL8822B_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += rtl8822b-firmware
 
 .PHONY: download rtl8822b-firmware rtl8822b-firmware-cache \
 	rtl8822b-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: rtl8822b-firmware
 endif
 

@@ -1,7 +1,19 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KEILAND_LINUX_MEDIASTORAGE_SOURCES := userland/desktop/mediastorage/main.c userland/desktop/mediastorage/notify.c \
-	userland/desktop/mediastorage/database.c userland/desktop/mediastorage/json.c userland/desktop/photos/cache-folders.c userland/desktop/photos/import.c userland/desktop/photos/exif.c \
-	userland/desktop/photos/library.c userland/desktop/photos/snapshot.c \
-	userland/desktop/preview/client.c userland/desktop/preview/linux/spawn.c
-# ws157-p013: what a photo or video says of itself is read by keiland-preview --info (libexec, seccomp), never here.
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_MEDIASTORAGE_SOURCES := \
+	userland/desktop/mediastorage/main.c \
+	userland/desktop/mediastorage/notify.c \
+	userland/desktop/mediastorage/database.c \
+	userland/desktop/mediastorage/json.c \
+	userland/desktop/photos/cache-folders.c \
+	userland/desktop/photos/import.c \
+	userland/desktop/photos/exif.c \
+	userland/desktop/photos/library.c \
+	userland/desktop/photos/snapshot.c \
+	userland/desktop/preview/client.c \
+	userland/desktop/preview/linux/spawn.c
+
 $(eval $(call KEILAND_LINUX_PROGRAM,mediastorage,bin,$(KEILAND_LINUX_MEDIASTORAGE_SOURCES),libkeiland-compat.a libkeiland.so libwayland-client.so,))

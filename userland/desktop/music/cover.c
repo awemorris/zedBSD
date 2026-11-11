@@ -6,11 +6,10 @@
  */
 
 /*
- * The picture of an album's cover (ws120-p009): the JPEG (libjpeg-compat,
- * through the decoding Image Viewer and Files share, userland/desktop/picture)
- * or the PNG (libpng-compat) an m4a holds, decoded and made a square of a
- * side for the view to draw at any size: a cover that is not square gives
- * its middle square (ws177-p020), as a record sleeve shows it.
+ * The picture of an album's cover: the JPEG or the PNG an m4a holds,
+ * decoded and made a square of a side for the view to draw at any
+ * size: a cover that is not square gives its middle square, as a
+ * record sleeve shows it.
  */
 
 #include "music.h"
@@ -30,9 +29,10 @@ static int cover_jpeg(const unsigned char *data, size_t size, struct kl_image *i
 static int cover_png(const unsigned char *data, size_t size, struct kl_image *image);
 
 /*
- * Makes the picture of a cover: a square of a side, the cover's middle
- * square scaled into it.  Returns 0 (the image's pixels are the caller's, kl_image_release),
- * EINVAL for bytes that are not a JPEG or a PNG it reads, EFBIG, ENOMEM.
+ * Makes the picture of a cover: a square of a side, the cover's
+ * middle square scaled into it.  Returns 0 (the image's pixels are
+ * the caller's, kl_image_release), EINVAL for bytes that are not a
+ * JPEG or a PNG it reads, EFBIG, ENOMEM.
  */
 int
 mu_cover_picture(

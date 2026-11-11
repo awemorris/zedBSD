@@ -122,9 +122,9 @@ struct assign_state {
  * MCFG table gave (bsp-pcat/acpi.c) and the memory map the loader handed
  * over (bsp-pcat/boot.c).
  */
-extern int amd64_acpi_ecam_address(uint16_t segment, uint8_t bus, uint8_t device, uint8_t function, uint64_t *result);
-extern uint32_t bsp_mem_range_count(void);
-extern int bsp_mem_range(uint32_t index, uint64_t *base, uint64_t *size, uint32_t *type);
+extern int amd64_acpi_ecam_address(uint16_t segment, uint8_t bus, uint8_t device, uint8_t function, uint64_t *result) __attribute__((weak));
+extern uint32_t bsp_mem_range_count(void) __attribute__((weak));
+extern int bsp_mem_range(uint32_t index, uint64_t *base, uint64_t *size, uint32_t *type) __attribute__((weak));
 
 static int count_visit(struct drv_pci_device *device, void *argument);
 static int window_visit(const struct drv_acpi_resource *resource, void *argument);
@@ -192,9 +192,11 @@ assign_pass(
 
 	/* Reads the windows of the host bridge of segment 0, bus 0. */
 	error = drv_acpi_pci_root_resources_walk(0, 0, window_visit, state);
-	if (error != 0) {
-		kern_logf("pci: the host bridge's _CRS could not be read (%d); unassigned BARs stay at 0\n", error);
-		return;
+	if (error != 0 || state->window_count == 0) {
+		kern_logf("pci: the host bridge's _CRS could not be read (%d); using default window 0x80000000-0xefffffff\n", error);
+		state->windows[0].base = 0x80000000ULL;
+		state->windows[0].length = 0x70000000ULL;
+		state->window_count = 1;
 	}
 
 	/* Names the windows the BARs may take, for the log of the machine. */
@@ -388,6 +390,8 @@ ecam_busy_add(
 	int error;
 
 	/* A machine without ECAM for bus 0 has none to keep. */
+	if (amd64_acpi_ecam_address == NULL)
+		return;
 	error = amd64_acpi_ecam_address(0, 0, 0, 0, &first);
 	if (error != 0)
 		return;
@@ -419,6 +423,8 @@ memory_map_busy_add(
 	int valid;
 
 	/* Keeps each range the loader handed over. */
+	if (bsp_mem_range_count == NULL || bsp_mem_range == NULL)
+		return;
 	count = bsp_mem_range_count();
 	for (index = 0; index < count; index++) {
 		/* A range that cannot be read is passed over. */
@@ -740,7 +746,7 @@ drv_pci_pcat_grow_bar(
 		  (unsigned long long)state->new_window_limit);
 
 	/* The kernel's mapping of the boot framebuffer follows a BAR that moved. */
-#if defined(CONFIG_DRIVER_GRAPHICS) && CONFIG_DRIVER_GRAPHICS
+#if CONFIG_DRIVER_GRAPHICS_PCAT
 	if (state->new_base != state->old_base)
 		drv_pcat_graphics_framebuffer_moved(state->old_base, state->new_base, state->old_size);
 #endif

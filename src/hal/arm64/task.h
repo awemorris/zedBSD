@@ -1,3 +1,10 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef KERN_HAL_ARM64_TASK_H
 #define KERN_HAL_ARM64_TASK_H
 
@@ -50,6 +57,7 @@ struct arm64_task {
 	struct hal_debug_point debug_points[HAL_DEBUG_POINT_MAX];
 	unsigned debug_point_count;
 };
+
 void asm_task_dispatch(uintptr_t *save,const uintptr_t *load);
 void arm64_fp_save(void *state);
 void arm64_fp_restore(const void *state);

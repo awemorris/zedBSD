@@ -1,9 +1,11 @@
-# The Linux side of libkeiland-backend (WS131, plan/ws131/design.md section 3.6): a static library the
-# compositor links (and libkeiland, while it forwards its old network and sound calls here, until ws131-p011).
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# keiland-linux-sync: only userland/desktop/libkeiland-backend/* the shared backend sources (no zedBSD Makefile pair)
-# keiland-linux-sync: only userland/desktop/libkeiland-backend-linux/* the Linux backend (no zedBSD Makefile pair)
-KEILAND_LINUX_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c userland/desktop/libkeiland-backend/media/media.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_BACKEND_SOURCES := \
+	userland/desktop/libkeiland-backend/backend.c \
+	userland/desktop/libkeiland-backend/media/media.c \
 	userland/desktop/libkeiland-backend/print/print.c \
 	userland/desktop/libkeiland-backend/machine/machine.c \
 	userland/desktop/libkeiland-backend/machine/filesystems.c \
@@ -37,4 +39,5 @@ KEILAND_LINUX_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c u
 	userland/desktop/libkeiland-backend-linux/peer-linux.c \
 	userland/desktop/libkeiland-backend/dmabuf/gpu-dmabuf.c \
 	userland/desktop/libkeiland-backend-linux/sync-linux.c
+
 $(eval $(call KEILAND_LINUX_STATIC,keiland-backend,libkeiland-backend.a,$(KEILAND_LINUX_BACKEND_SOURCES)))

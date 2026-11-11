@@ -77,7 +77,7 @@
  */
 #define VFS_ROOT_READ_WRITE_TRIES 3U
 
-#if !defined(HAL_ARCH_I386) && !defined(HAL_ARCH_AMD64)
+#if !defined(HAL_ARCH_I386) && !defined(HAL_ARCH_X86_64)
 #define VFS_LEGACY_NULL_AUTOROOT 1
 #endif
 

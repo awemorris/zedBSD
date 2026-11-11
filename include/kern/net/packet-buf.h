@@ -44,7 +44,7 @@
  * standard packets on the 64-bit machines, for a build that holds two
  * hosts' packets in one pool.
  */
-#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64) || \
+#if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_ARM64) || \
     defined(HAL_ARCH_RISCV64)
 #if defined(CONFIG_PACKET_BUF_POOL_COUNT)
 #define PACKET_BUF_POOL_COUNT		CONFIG_PACKET_BUF_POOL_COUNT

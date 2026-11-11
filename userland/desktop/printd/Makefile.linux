@@ -1,9 +1,13 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent Linux build of keiland-printd (ws145-p005): the user's printer daemon, which libkeiland-backend
-# starts from $(KEILAND_PREFIX)/libexec with a socket on descriptor 3; source membership mirrors the target package.
-KEILAND_LINUX_PRINTD_SOURCES := userland/desktop/printd/main.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_PRINTD_SOURCES := \
+	userland/desktop/printd/main.c \
 	userland/desktop/printd/spool.c \
 	userland/desktop/printd/net.c \
 	userland/desktop/printd/ipp.c \
 	userland/desktop/printd/lpd.c
+
 $(eval $(call KEILAND_LINUX_PROGRAM,keiland-printd,libexec,$(KEILAND_LINUX_PRINTD_SOURCES),,-pthread))

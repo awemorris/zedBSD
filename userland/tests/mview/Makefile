@@ -10,4 +10,4 @@ MVIEW_TEXTURES := $(sort $(notdir $(wildcard $(MVIEW_PACKAGE_DIR)models/qs40/tex
 MVIEW_DATA := /usr/share/mview/qs40/model.txt=userland/tests/mview/models/qs40/model.txt \
 	$(foreach texture,$(MVIEW_TEXTURES),\
  /usr/share/mview/qs40/tex/$(texture)=userland/tests/mview/models/qs40/tex/$(texture))
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,mview,Wayland model viewer,amd64,y,basic,$(MVIEW_SOURCES),y,tests,tests/mview,desktop/libvulkan desktop/libwayland,0755,program,$(MVIEW_DATA),,bin))
+$(eval $(call USERLAND_PACKAGE,mview,Wayland model viewer,x86_64,y,basic,$(MVIEW_SOURCES),y,tests,tests/mview,desktop/libvulkan desktop/libwayland,0755,program,$(MVIEW_DATA),,bin))

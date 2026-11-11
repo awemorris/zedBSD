@@ -1,4 +1,12 @@
-/* Shared bounded fstab records. Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Shared bounded fstab records. */
+
 #ifndef KERN_COMMAND_FSTAB_H
 #define KERN_COMMAND_FSTAB_H
 

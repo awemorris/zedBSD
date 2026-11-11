@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 # Independent Wayland client library; protocol objects are maintained source.
@@ -27,9 +32,9 @@ LIBWAYLAND_SOURCES := userland/desktop/libwayland/client.c \
 
 # The public SONAME follows the standard client library spelling.  The .pc
 # file is for a program built on the system; the headers are the sysroot's.
-LIBWAYLAND_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libwayland-client.so=$(BUILD)/dynamic/libwayland-client.so \
+LIBWAYLAND_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libwayland-client.so=$(BUILD)/dynamic/libwayland-client.so \
 	/usr/lib/pkgconfig/wayland-client.pc=userland/desktop/libwayland/pkgconfig/wayland-client.pc)
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libwayland-client,libwayland-client,amd64,y,library,$(LIBWAYLAND_SOURCES),y,desktop,desktop/libwayland,,,shared-library,$(LIBWAYLAND_IMAGE_DATA),,lib))
+$(eval $(call USERLAND_PACKAGE,libwayland-client,libwayland-client,x86_64,y,library,$(LIBWAYLAND_SOURCES),y,desktop,desktop/libwayland,,,shared-library,$(LIBWAYLAND_IMAGE_DATA),,lib))
 
 # ------------------------------------------------- the stage for packages
 
@@ -39,13 +44,17 @@ $(eval $(call ZEDBSD_USERLAND_PACKAGE,libwayland-client,libwayland-client,amd64,
 # EGL window library and their .pc files there under the name wayland-client,
 # so such a package (GTK, WS115) depends on wayland-client like on any other.
 # The headers are the sysroot's.
-include userland/packages/external.mk
+include $(REPO_ROOT)/userland/packages/external.mk
 
-LIBWAYLAND_PC_DIR := userland/desktop/libwayland/pkgconfig
-LIBWAYLAND_STAGE := $(ZEDBSD_EXTERNAL_WORKROOT)/wayland-client/stage
+BUILD ?= $(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)
+LIBWAYLAND_PC_DIR := $(REPO_ROOT)/userland/desktop/libwayland/pkgconfig
+LIBWAYLAND_STAGE := $(EXTERNAL_WORKROOT)/wayland-client/stage
 LIBWAYLAND_STAGED := $(LIBWAYLAND_STAGE)/.zedbsd-staged
 LIBWAYLAND_STAGE_INPUTS := $(BUILD)/dynamic/libwayland-client.so $(BUILD)/dynamic/libwayland-egl.so \
 	$(LIBWAYLAND_PC_DIR)/wayland-client.pc $(LIBWAYLAND_PC_DIR)/wayland-egl.pc
+
+$(BUILD)/dynamic/libwayland-egl.so:
+	@$(MAKE) -C $(REPO_ROOT)/userland/desktop/libwayland-egl
 
 # Replaces the stage as a whole from the libraries just built.
 $(LIBWAYLAND_STAGED): $(LIBWAYLAND_STAGE_INPUTS)

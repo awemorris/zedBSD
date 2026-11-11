@@ -1,0 +1,4 @@
+PLATFORM := i386
+ARCHITECTURE := i386
+BOARD := pcat
+VARIANT := bios

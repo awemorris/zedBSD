@@ -343,6 +343,7 @@ struct xhci_controller {
 	unsigned dma_quiesced, hcd_registered, irq_allocated, quarantined;
 	unsigned legacy_offset, legacy_claimed;
 	uint32_t legacy_control;
+	unsigned is_dwc3;
 	struct xhci_controller *next;
 
 	/*
@@ -525,6 +526,7 @@ static uint32_t xhci_port_neutral(uint32_t status);
 static void xhci_port_link_set(struct xhci_controller *c, unsigned port, unsigned link);
 static int xhci_port_link_wait(struct xhci_controller *c, unsigned port, unsigned link);
 static void xhci_sleep_ms(unsigned milliseconds);
+static int xhci_dwc3_init_host(struct xhci_controller *c);
 static int xhci_device_quiesce(struct drv_usb_hcd *h, struct drv_usb_device *u);
 static uint32_t xhci_frame(struct drv_usb_hcd *h);
 static int xhci_root_status(struct drv_usb_hcd *h, void *b, size_t n, size_t *a);
@@ -582,18 +584,82 @@ static const struct drv_usb_hcd_ops xhci_ops = {
 	.root_port_reset = xhci_guarded_root_port_reset,
 	.hub_configure = xhci_hub_configure};
 
+#define PCI_VENDOR_INTEL 0x8086U
+#define PCI_DEVICE_INTEL_MRFLD_USB  0x119eU
+#define PCI_DEVICE_INTEL_MRFLD_USB2 0x119dU
+#define PCI_DEVICE_INTEL_BYT_USB    0x0f37U
+#define PCI_DEVICE_INTEL_BSW_USB    0x22b7U
+
+/*
+ * Synopsys DesignWare USB3 (DWC3) Global Registers
+ * Offset from BAR0: 0xc100 - 0xc5ff
+ */
+#define DWC3_GCTL 0xc110U
+#define DWC3_GCTL_PRTCAPDIR(n) (((uint32_t)(n) & 3U) << 12)
+#define DWC3_GCTL_PRTCAP_HOST 1U
+#define DWC3_GCTL_PRTCAP_DEVICE 2U
+#define DWC3_GCTL_PRTCAP_OTG 3U
+#define DWC3_GCTL_CORESOFTRESET (1U << 11)
+#define DWC3_GEVTEN 0xc114U
+
+#define DWC3_GSNPSID 0xc120U
+#define DWC3_GSNPSID_MASK 0xffff0000U
+#define DWC3_SYNOPSYS_ID 0x55330000U
+
+#define DWC3_GUSB2PHYCFG0 0xc200U
+#define DWC3_GUSB2PHYCFG_SUSPHY (1U << 6)
+
+#define DWC3_GUSB3PIPECTL0 0xc2c0U
+#define DWC3_GUSB3PIPECTL_SUSPHY (1U << 17)
+
+/* DWC3 Global Event Buffer Registers */
+#define DWC3_GEVNTSIZ0 0xc408U
+#define DWC3_GEVNTSIZ_INTMASK (1U << 31)
+#define DWC3_GEVNTCNT0 0xc40cU
+
+/* DWC3 Device Registers */
+#define DWC3_DCTL 0xc704U
+#define DWC3_DCTL_RUN_STOP (1U << 31)
+#define DWC3_DEVTEN 0xc70cU
+#define DWC3_DALEPENA 0xc720U
+
+/* DWC3 OTG Registers */
+#define DWC3_OCFG 0xcc00U
+#define DWC3_OEVT 0xcc08U
+#define DWC3_OEVTEN 0xcc0cU
+
 static const struct drv_pci_id ids[] = {
 	{
 		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
 		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
 		0x0c0330U, 0xffffffU, 0
+	},
+	{
+		PCI_VENDOR_INTEL, PCI_DEVICE_INTEL_MRFLD_USB,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0U, 0U, 0
+	},
+	{
+		PCI_VENDOR_INTEL, PCI_DEVICE_INTEL_MRFLD_USB2,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0U, 0U, 0
+	},
+	{
+		PCI_VENDOR_INTEL, PCI_DEVICE_INTEL_BYT_USB,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0U, 0U, 0
+	},
+	{
+		PCI_VENDOR_INTEL, PCI_DEVICE_INTEL_BSW_USB,
+		DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+		0U, 0U, 0
 	}
 };
 
 static struct drv_pci_driver driver = {
 	.name = "xhci",
 	.ids = ids,
-	.id_count = 1,
+	.id_count = sizeof(ids) / sizeof(ids[0]),
 	.attach = xhci_attach,
 	.detach = xhci_detach,
 	.suspend = xhci_suspend,
@@ -3421,10 +3487,19 @@ xhci_irq(
 	if (busy == UINT_MAX)
 		__builtin_trap();
 
+	if (c->is_dwc3 && c->mapping.address != NULL) {
+		uint32_t evntcnt = rd32(c->mapping.address, DWC3_GEVNTCNT0);
+		if (evntcnt > 0) {
+			wr32(c->mapping.address, DWC3_GEVNTCNT0, evntcnt);
+			handled = 1;
+		}
+	}
+
 	/* A halted or faulted controller cannot provide valid event DMA. */
 	suspend_state = __atomic_load_n(&c->suspend_state, __ATOMIC_ACQUIRE);
 	fault_status = __atomic_load_n(&c->irq_fault_status, __ATOMIC_ACQUIRE);
-	if (suspend_state != XHCI_SUSPEND_HALTED && fault_status == 0U) {
+	if (suspend_state != XHCI_SUSPEND_HALTED && fault_status == 0U &&
+	    c->operational != NULL) {
 		/* Tests fatal status before trusting any producer-owned descriptor. */
 		status = rd32(c->operational, XHCI_USBSTS);
 		if (status == UINT32_MAX ||
@@ -3510,6 +3585,11 @@ xhci_irq(
 			    __atomic_load_n(&c->command_busy, __ATOMIC_ACQUIRE);
 			if (busy == 0U)
 				xhci_completion_drain(c);
+		} else if (c->runtime != NULL && (rd32(c->runtime, 0x20U) & 1U) != 0U) {
+			event_lock(c);
+			xhci_interrupter_write_locked(c, 1U);
+			event_unlock(c);
+			handled = 1;
 		}
 	}
 
@@ -6648,6 +6728,109 @@ xhci_guarded_root_port_reset(
 	return 0;
 }
 
+/*
+ * Configures Synopsys DWC3 dual-role core into xHCI host mode.
+ */
+static int
+xhci_dwc3_init_host(
+	struct xhci_controller *c)
+{
+	uint32_t snpsid;
+	uint32_t gctl;
+	uint32_t phy2;
+	uint32_t pipe3;
+	unsigned cur_mode;
+
+	if (c->mapping.address == NULL || c->mapping.size < 0xc300U)
+		return EINVAL;
+
+	snpsid = rd32(c->mapping.address, DWC3_GSNPSID);
+	gctl = rd32(c->mapping.address, DWC3_GCTL);
+	cur_mode = (gctl >> 12) & 3U;
+
+	kern_logf("xhci: DWC3 core GSNPSID=%08x GCTL=%08x (mode=%u)\n",
+		  snpsid, gctl, cur_mode);
+
+	if ((snpsid & DWC3_GSNPSID_MASK) != DWC3_SYNOPSYS_ID) {
+		kern_logf("xhci: not a DWC3 core (SNPSID=%08x)\n", snpsid);
+		return ENODEV;
+	}
+
+	if (cur_mode != DWC3_GCTL_PRTCAP_HOST) {
+		/* Switch port capability to Host mode and issue core soft reset */
+		gctl &= ~DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_OTG);
+		gctl |= DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_HOST);
+		gctl |= DWC3_GCTL_CORESOFTRESET;
+		wr32(c->mapping.address, DWC3_GCTL, gctl);
+
+		xhci_sleep_ms(50U);
+
+		gctl = rd32(c->mapping.address, DWC3_GCTL);
+		gctl &= ~DWC3_GCTL_CORESOFTRESET;
+		wr32(c->mapping.address, DWC3_GCTL, gctl);
+
+		xhci_sleep_ms(20U);
+	}
+
+	/* Disable SusPhy quirks on USB2 PHY and USB3 PIPE */
+	if (c->mapping.size >= DWC3_GUSB2PHYCFG0 + 4U) {
+		phy2 = rd32(c->mapping.address, DWC3_GUSB2PHYCFG0);
+		phy2 &= ~DWC3_GUSB2PHYCFG_SUSPHY;
+		wr32(c->mapping.address, DWC3_GUSB2PHYCFG0, phy2);
+	}
+	if (c->mapping.size >= DWC3_GUSB3PIPECTL0 + 4U) {
+		pipe3 = rd32(c->mapping.address, DWC3_GUSB3PIPECTL0);
+		pipe3 &= ~DWC3_GUSB3PIPECTL_SUSPHY;
+		wr32(c->mapping.address, DWC3_GUSB3PIPECTL0, pipe3);
+	}
+
+	/* Disable global event generation */
+	if (c->mapping.size >= DWC3_GEVTEN + 4U) {
+		wr32(c->mapping.address, DWC3_GEVTEN, 0);
+	}
+
+	/* Stop device controller if active */
+	if (c->mapping.size >= DWC3_DCTL + 4U) {
+		uint32_t dctl = rd32(c->mapping.address, DWC3_DCTL);
+		wr32(c->mapping.address, DWC3_DCTL, dctl & ~DWC3_DCTL_RUN_STOP);
+	}
+
+	/* Disable all device logical endpoints */
+	if (c->mapping.size >= DWC3_DALEPENA + 4U) {
+		wr32(c->mapping.address, DWC3_DALEPENA, 0);
+	}
+
+	/* Disable all device mode event interrupts */
+	if (c->mapping.size >= DWC3_DEVTEN + 4U) {
+		wr32(c->mapping.address, DWC3_DEVTEN, 0);
+	}
+
+	/* Disable all OTG mode event interrupts and clear pending */
+	if (c->mapping.size >= DWC3_OEVTEN + 4U) {
+		wr32(c->mapping.address, DWC3_OEVTEN, 0);
+	}
+	if (c->mapping.size >= DWC3_OEVT + 4U) {
+		wr32(c->mapping.address, DWC3_OEVT, 0xffffffffU);
+	}
+
+	/* Mask global event buffer interrupts and clear event count */
+	if (c->mapping.size >= DWC3_GEVNTSIZ0 + 4U) {
+		uint32_t evntsiz = rd32(c->mapping.address, DWC3_GEVNTSIZ0);
+		wr32(c->mapping.address, DWC3_GEVNTSIZ0, evntsiz | DWC3_GEVNTSIZ_INTMASK);
+	}
+	if (c->mapping.size >= DWC3_GEVNTCNT0 + 4U) {
+		uint32_t evntcnt = rd32(c->mapping.address, DWC3_GEVNTCNT0);
+		if (evntcnt > 0)
+			wr32(c->mapping.address, DWC3_GEVNTCNT0, evntcnt);
+	}
+
+	gctl = rd32(c->mapping.address, DWC3_GCTL);
+	kern_logf("xhci: DWC3 host mode active: GCTL=%08x (mode=%u)\n",
+		  gctl, (gctl >> 12) & 3U);
+
+	return 0;
+}
+
 /* Brings up a controller the PCI bus has just matched. */
 static int
 xhci_attach(
@@ -6664,6 +6847,7 @@ xhci_attach(
 	uint32_t first, reasons, doorbell_offset, runtime_offset;
 	uint32_t original_low, original_high, mapped_low, mapped_high;
 	uint16_t command_before = 0xffffU, command_mapped, command_after;
+	uint16_t vendor, product;
 	const char *irq_type;
 	int cleanup_error, e;
 
@@ -6679,6 +6863,7 @@ xhci_attach(
 	c->pci = d;
 	xhci_pci_identity(d);
 	drv_pci_device_address(d, &address);
+	(void)drv_pci_device_set_power_state(d, DRV_PCI_D0);
 	stage = "BAR claim";
 
 	/* Handles the e condition. */
@@ -6785,6 +6970,29 @@ xhci_attach(
 
 	kern_io_barrier();
 
+	vendor = drv_pci_device_vendor(d);
+	product = drv_pci_device_product(d);
+	if (vendor == PCI_VENDOR_INTEL &&
+	    (product == PCI_DEVICE_INTEL_MRFLD_USB ||
+	     product == PCI_DEVICE_INTEL_MRFLD_USB2 ||
+	     product == PCI_DEVICE_INTEL_BYT_USB ||
+	     product == PCI_DEVICE_INTEL_BSW_USB)) {
+		/*
+		 * Only these Intel parts need their DWC3 core put into host
+		 * mode here.  Other DWC3 cores reached as xHCI (the RP1 of the
+		 * Raspberry Pi 5) are set up by their platform code, and their
+		 * interrupt lines are not level-triggered INTx.
+		 */
+		c->is_dwc3 = 1;
+	}
+
+	if (c->is_dwc3) {
+		stage = "DWC3 host init";
+		e = xhci_dwc3_init_host(c);
+		if (e != 0)
+			goto fail;
+	}
+
 	c->capability = c->mapping.address;
 	kern_memset(&snapshot, 0, sizeof(snapshot));
 	snapshot.mapping_size = c->mapping.size;
@@ -6853,30 +7061,55 @@ xhci_attach(
 	stage = "PCI bus master";
 	if ((e = drv_pci_device_set_bus_master(d, true)) != 0)
 		goto fail;
-	stage = "IRQ allocation";
-
 	/*
-	 * One vector is sufficient; use MSI-X when present, then MSI or INTx.
+	 * Try each interrupt mode in priority order (MSI-X -> MSI -> INTx).
 	 */
-	if ((e = drv_pci_device_allocate_irqs(d,
-					      DRV_PCI_IRQ_ALLOW_MSIX |
-						      DRV_PCI_IRQ_ALLOW_MSI |
-						      DRV_PCI_IRQ_ALLOW_INTX,
-					      1, 1, &c->irq, &count)) != 0)
-		goto fail;
-	c->irq_allocated = 1;
+	{
+		static const struct {
+			unsigned flag;
+			const char *name;
+		} irq_modes[] = {
+			{ DRV_PCI_IRQ_ALLOW_MSIX, "MSI-X" },
+			{ DRV_PCI_IRQ_ALLOW_MSI,  "MSI" },
+			{ DRV_PCI_IRQ_ALLOW_INTX, "INTx" },
+		};
+		unsigned mode_idx;
 
-	/* Checks the drv pci device establish irq result. */
-	stage = "IRQ establishment";
-	if ((e = drv_pci_device_establish_irq(d, &c->irq, xhci_irq, c, "xhci",
-					      &c->irq_cookie)) != 0)
-		goto fail;
+		e = ENODEV;
+		for (mode_idx = 0; mode_idx < sizeof(irq_modes) / sizeof(irq_modes[0]); mode_idx++) {
+			stage = "IRQ allocation";
+			if (drv_pci_device_allocate_irqs(d, irq_modes[mode_idx].flag, 1, 1, &c->irq, &count) != 0)
+				continue;
+			c->irq_allocated = 1;
+			break;
+		}
+		if (c->irq_allocated == 0)
+			goto fail;
+	}
 
 	/* Checks the drv usb hcd register result. */
 	stage = "controller start";
 	if ((e = drv_usb_hcd_register(&c->hcd, &c->bus)) != 0)
 		goto fail;
 	c->hcd_registered = 1;
+
+	/* Establish interrupt now that the controller and event ring are ready. */
+	stage = "IRQ establishment";
+	if (c->is_dwc3 && c->irq.type == DRV_PCI_IRQ_INTX) {
+		e = kern_irq_set_mode((int)c->irq.vector,
+				      KERN_IRQ_TRIGGER_LEVEL,
+				      KERN_IRQ_POLARITY_HIGH);
+		kern_logf("xhci: set dwc3 irq %u mode level/active-high: %d\n",
+			  c->irq.vector, e);
+	}
+	e = drv_pci_device_establish_irq(d, &c->irq, xhci_irq, c, "xhci", &c->irq_cookie);
+	if (e != 0)
+		goto fail;
+	kern_logf("xhci: using %s vector %u\n",
+		  c->irq.type == DRV_PCI_IRQ_MSIX ? "MSI-X" :
+		  c->irq.type == DRV_PCI_IRQ_MSI ? "MSI" : "INTx",
+		  c->irq.vector);
+
 	stage = "port worker";
 
 	/* Checks the xhci worker start result. */
@@ -7146,6 +7379,9 @@ xhci_resume(
 	c = drv_pci_device_driver_data(device);
 	if (c == NULL)
 		return ENODEV;
+
+	if (c->is_dwc3)
+		(void)xhci_dwc3_init_host(c);
 
 	/*
 	 * Brings the saved state back.  A controller whose state did not come

@@ -1,5 +1,17 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+#
+# su (ws160-p001), set-user-ID root.
+#
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-# su (ws160-p001), set-user-ID root.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,su,su,*,y,basic,userland/base/su/main.c userland/base/common/account.c userland/base/login/verify.c,y,base,,,4755))
+SU_SOURCES := \
+	userland/base/su/main.c \
+	userland/base/common/account.c \
+	userland/base/login/verify.c
+
+$(eval $(call USERLAND_PACKAGE,su,su,*,y,basic,$(SU_SOURCES),y,base,,,4755))

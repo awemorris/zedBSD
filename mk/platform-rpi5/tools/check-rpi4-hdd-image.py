@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Validate the Raspberry Pi 4 or 5 MBR/FAT32 image and boot payloads."""
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+import argparse
+import hashlib
+import struct
+import subprocess
+import tempfile
+from pathlib import Path
+
+SECTOR = 512
+PARTITION_LBA = 2048
+PARTITION_BLOCKS = 262144
+PARTITION_TYPE = 0x0C
+IMAGE_BLOCKS = 524288
+ROOT_LBA = 264192
+# The firmware files each board's boot partition must carry.
+BOOT_FILES = {
+    "rpi4": ("start4.elf", "fixup4.dat", "bcm2711-rpi-4-b.dtb",
+             "overlays/disable-bt.dtbo", "LICENCE.broadcom"),
+    "rpi5": ("bcm2712-rpi-5-b.dtb", "bcm2712d0-rpi-5-b.dtb", "COPYING.linux"),
+}
+
+
+def fail(message: str) -> None:
+    raise SystemExit("Raspberry Pi 4 image check: " + message)
+
+
+def extract(image: Path, name: str) -> bytes:
+    with tempfile.TemporaryDirectory(prefix="zedbsd-rpi4-check-") as work:
+        output = Path(work) / "payload"
+        subprocess.run(["mcopy", "-n", "-i",
+                        f"{image}@@{PARTITION_LBA * SECTOR}",
+                        f"::{name}", str(output)], check=True,
+                        stdout=subprocess.DEVNULL)
+        return output.read_bytes()
+
+
+def same_file(image: Path, name: str, source: Path) -> None:
+    if hashlib.sha256(extract(image, name)).digest() != \
+            hashlib.sha256(source.read_bytes()).digest():
+        fail(f"/{name} differs from {source}")
+
+
+def check(args: argparse.Namespace) -> None:
+    size = args.image.stat().st_size
+    expected_size = IMAGE_BLOCKS * SECTOR
+    root_blocks = 0
+    if args.ufs_root is not None:
+        root_size = args.ufs_root.stat().st_size
+        if root_size == 0 or root_size % SECTOR:
+            fail("invalid UFS root size")
+        root_blocks = root_size // SECTOR
+        expected_size = max(expected_size, (ROOT_LBA + root_blocks) * SECTOR)
+        if args.swap_image is not None:
+            swap_size = args.swap_image.stat().st_size
+            if swap_size == 0 or swap_size % SECTOR:
+                fail("invalid swap image size")
+            swap_blocks = swap_size // SECTOR
+            swap_lba = (ROOT_LBA + root_blocks + 2047) // 2048 * 2048
+            expected_size = max(expected_size, (swap_lba + swap_blocks) * SECTOR)
+    if size != expected_size:
+        fail(f"unexpected image size: expected {expected_size}, got {size}")
+    with args.image.open("rb") as stream:
+        mbr = stream.read(SECTOR)
+        if mbr[510:512] != b"\x55\xaa":
+            fail("missing MBR signature")
+        entry = struct.unpack_from("<B3sB3sII", mbr, 0x1BE)
+        if (entry[0], entry[2], entry[4], entry[5]) != \
+                (0x80, PARTITION_TYPE, PARTITION_LBA, PARTITION_BLOCKS):
+            fail("partition 1 is not the expected active FAT32 extent")
+        if args.ufs_root is None:
+            if any(mbr[0x1CE:0x1FE]):
+                fail("unexpected additional MBR partition")
+        else:
+            root = struct.unpack_from("<B3sB3sII", mbr, 0x1CE)
+            if (root[2], root[4], root[5]) != (0xA5, ROOT_LBA, root_blocks):
+                fail("partition 2 is not the expected UFS root extent")
+            stream.seek(ROOT_LBA * SECTOR)
+            with args.ufs_root.open("rb") as src:
+                while chunk := src.read(1024 * 1024):
+                    if stream.read(len(chunk)) != chunk:
+                        fail("partition 2 differs from the UFS root image")
+            if args.swap_image is None:
+                if any(mbr[0x1DE:0x1FE]):
+                    fail("unexpected additional MBR partition")
+            else:
+                swap = struct.unpack_from("<B3sB3sII", mbr, 0x1DE)
+                swap_blocks = args.swap_image.stat().st_size // SECTOR
+                swap_lba = (ROOT_LBA + root_blocks + 2047) // 2048 * 2048
+                if (swap[2], swap[4], swap[5]) != (0x82, swap_lba, swap_blocks):
+                    fail("partition 3 is not the expected swap extent")
+                if any(mbr[0x1EE:0x1FE]):
+                    fail("unexpected partition 4 in MBR")
+                stream.seek(swap_lba * SECTOR)
+                with args.swap_image.open("rb") as src:
+                    while chunk := src.read(1024 * 1024):
+                        if stream.read(len(chunk)) != chunk:
+                            fail("partition 3 differs from the swap image")
+        stream.seek(PARTITION_LBA * SECTOR)
+        bpb = stream.read(SECTOR)
+        # FAT32 has no fixed root directory and no 16-bit table size; its
+        # table size is the 32-bit field, and the type string says FAT32.
+        if struct.unpack_from("<H", bpb, 11)[0] != SECTOR or \
+                struct.unpack_from("<H", bpb, 17)[0] != 0 or \
+                struct.unpack_from("<H", bpb, 22)[0] != 0 or \
+                struct.unpack_from("<I", bpb, 36)[0] == 0 or \
+                bpb[82:90] != b"FAT32   " or bpb[510:512] != b"\x55\xaa":
+            fail("partition 1 is not FAT32")
+
+    same_file(args.image, "vmunix", args.kernel)
+    if args.arch_image is not None:
+        same_file(args.image, "rootfs.img", args.arch_image)
+    if args.data_image is not None:
+        same_file(args.image, "data.img", args.data_image)
+    if args.swapfile is not None:
+        same_file(args.image, "swapfile", args.swapfile)
+    same_file(args.image, "config.txt", args.config)
+    if args.cmdline is not None:
+        same_file(args.image, "cmdline.txt", args.cmdline)
+    for name in BOOT_FILES[args.board]:
+        if not extract(args.image, name):
+            fail(f"/{name} is missing or empty")
+    kernel = extract(args.image, "vmunix")
+    if len(kernel) < 64 or kernel[56:60] != b"ARM\x64":
+        fail("vmunix has no Linux arm64 Image header")
+    if args.arch_image is None:
+        print("Raspberry Pi 4 image check: PASS")
+        return
+    with tempfile.TemporaryDirectory(prefix="zedbsd-rpi4-root-check-") as work:
+        inner = Path(work) / "aarch64.img"
+        inner.write_bytes(extract(args.image, "rootfs.img"))
+        checker = Path(__file__).resolve().parents[3] / "tools/build/check-arch-overlay-image.py"
+        subprocess.run(["python3", str(checker), "--profile", "aarch64",
+                        "--image", str(inner)], check=True)
+    print("Raspberry Pi 4 image check: PASS")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--kernel", type=Path, required=True)
+    parser.add_argument("--arch-image", type=Path)
+    parser.add_argument("--ufs-root", type=Path)
+    parser.add_argument("--data-image", type=Path)
+    parser.add_argument("--swapfile", type=Path)
+    parser.add_argument("--swap-image", type=Path)
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--cmdline", type=Path)
+    parser.add_argument("--board", choices=sorted(BOOT_FILES), default="rpi4")
+    parser.add_argument("image", type=Path)
+    check(parser.parse_args())
+
+
+if __name__ == "__main__":
+    main()

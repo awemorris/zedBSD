@@ -10,7 +10,7 @@
 # HTML page, so the plain-text LICENCE.cypress comes from the official
 # linux-firmware tag 20260410 (the same blob, checked in ws215-p004).
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 # Each entry is CACHE-NAME|SOURCE|UPSTREAM-PATH|SIZE|SHA-256, where SOURCE is
 # bluez (RPi-Distro/bluez-firmware) or linux (linux-firmware).
@@ -60,7 +60,7 @@ override BRCMBT_FIRMWARE_LINUX_TAG := 20260410
 override BRCMBT_FIRMWARE_SHA256_COMMAND := sha256sum
 override BRCMBT_FIRMWARE_FILE_COUNT := 3
 
-BRCMBT_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/brcmbt
+BRCMBT_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/brcmbt
 override BRCMBT_FIRMWARE_CACHE_DIR := $(BRCMBT_FIRMWARE_CACHE_ROOT)/$(BRCMBT_FIRMWARE_BLUEZ_REVISION)-$(BRCMBT_FIRMWARE_LINUX_REVISION)
 override BRCMBT_FIRMWARE_CACHE_NAMES := $(foreach entry,$(BRCMBT_FIRMWARE_FILES),$(word 1,$(subst |, ,$(entry))))
 override BRCMBT_FIRMWARE_CACHE_FILES := $(addprefix $(BRCMBT_FIRMWARE_CACHE_DIR)/,$(BRCMBT_FIRMWARE_CACHE_NAMES))
@@ -94,14 +94,14 @@ brcmbt-firmware-license:
 brcmbt-firmware-license-pending:
 	@if test ! -d '$(BRCMBT_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(BRCMBT_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,brcmbt-firmware,Broadcom UART Bluetooth firmware,*,n,package,,y,firmware,firmware/brcmbt,,,data,$(BRCMBT_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,brcmbt-firmware,Broadcom UART Bluetooth firmware,*,n,package,,y,firmware,firmware/brcmbt,,,data,$(BRCMBT_FIRMWARE_DATA),,))
 override USERLAND_brcmbt-firmware_DATA := $(BRCMBT_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += brcmbt-firmware
 
 .PHONY: download brcmbt-firmware brcmbt-firmware-cache \
 	brcmbt-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: brcmbt-firmware
 endif
 

@@ -1,4 +1,0 @@
-# The compiled device trees (Linux v6.12 adc218676eef, dts.sources; DTC 1.7.2),
-# kept in the zedBSD firmware repository's visionfive2-dtb/: NAME SIZE SHA-256
-jh7110-starfive-visionfive-2-v1.2a.dtb 31655 e76b80a6ea4e3f1642865b0d7205ae20aa0195c1e218936150ba594e11fc39d0
-jh7110-starfive-visionfive-2-v1.3b.dtb 32040 1826e14d92c1ca336919f810f8f6c98102ed0065a9b9581087cf933b27f347ac

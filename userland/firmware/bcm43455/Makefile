@@ -13,7 +13,7 @@
 # official linux-firmware tag 20260410 beside the full debian/copyright and
 # the provenance manifest (ws206-p003, the user's answer E4 of 2026-10-13).
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 # Each entry is CACHE-NAME|SOURCE|UPSTREAM-PATH|SIZE|SHA-256, where SOURCE is
 # nonfree (RPi-Distro/firmware-nonfree) or linux (linux-firmware).
@@ -69,7 +69,7 @@ override BCM43455_FIRMWARE_LINUX_TAG := 20260410
 override BCM43455_FIRMWARE_SHA256_COMMAND := sha256sum
 override BCM43455_FIRMWARE_FILE_COUNT := 6
 
-BCM43455_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/bcm43455
+BCM43455_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/bcm43455
 override BCM43455_FIRMWARE_CACHE_DIR := $(BCM43455_FIRMWARE_CACHE_ROOT)/$(BCM43455_FIRMWARE_NONFREE_REVISION)-$(BCM43455_FIRMWARE_LINUX_REVISION)
 override BCM43455_FIRMWARE_CACHE_NAMES := $(foreach entry,$(BCM43455_FIRMWARE_FILES),$(word 1,$(subst |, ,$(entry))))
 override BCM43455_FIRMWARE_CACHE_FILES := $(addprefix $(BCM43455_FIRMWARE_CACHE_DIR)/,$(BCM43455_FIRMWARE_CACHE_NAMES))
@@ -105,14 +105,14 @@ bcm43455-firmware-license:
 bcm43455-firmware-license-pending:
 	@if test ! -d '$(BCM43455_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(BCM43455_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,bcm43455-firmware,Broadcom BCM43455 SDIO WiFi firmware,*,n,package,,y,firmware,firmware/bcm43455,,,data,$(BCM43455_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,bcm43455-firmware,Broadcom BCM43455 SDIO WiFi firmware,*,n,package,,y,firmware,firmware/bcm43455,,,data,$(BCM43455_FIRMWARE_DATA),,))
 override USERLAND_bcm43455-firmware_DATA := $(BCM43455_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += bcm43455-firmware
 
 .PHONY: download bcm43455-firmware bcm43455-firmware-cache \
 	bcm43455-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: bcm43455-firmware
 endif
 

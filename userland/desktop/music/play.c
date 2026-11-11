@@ -6,15 +6,14 @@
  */
 
 /*
- * The player of a song (ws120-p009): a thread reads the file's sound track
- * with mediafile, decodes it with Video Player's add-in of libavcodec
- * (codec.c, opened with dlopen) and writes it, converted to 16-bit stereo
- * at the stream's rate, into the stream's ring (audio.c, libkeiland's sound
- * stream), which paces the reading.  The position is the sound's: what the
- * stream has played since an anchor.  At the end of the file the thread waits for the ring to be
- * played out and says the song ended, for the window to go to the next.
- * Sound that does not decode (PLAY_BAD_MAX packets in a row) or a file
- * that cannot be read any more stops the song and says why (ws177-p021).
+ * The player of a song: a thread reads the file's sound track with
+ * mediafile, decodes it and writes it, converted to 16-bit stereo at
+ * the stream's rate, into the stream's ring, which paces the reading.
+ * The position is the sound's: what the stream has played since an
+ * anchor.  At the end of the file the thread waits for the ring to be
+ * played out and says the song ended, for the window to go to the
+ * next.  Sound that does not decode (PLAY_BAD_MAX packets in a row)
+ * or a file that cannot be read any more stops the song and says why.
  */
 
 #include "play.h"
@@ -34,9 +33,10 @@
 #define PLAY_BAD_MAX		16
 
 /*
- * What the thread holds: the player, the file, the decoder and its track,
- * the time before which what decodes is passed over (after a seek), and
- * the packets in a row that did not decode, and the converted sound.
+ * What the thread holds: the player, the file, the decoder and its
+ * track, the time before which what decodes is passed over (after a
+ * seek), and the packets in a row that did not decode, and the
+ * converted sound.
  */
 struct play_reader {
 	struct mu_player *player;
@@ -96,8 +96,9 @@ mu_player_release(
 
 /*
  * Opens a song and plays it from its start.  Returns 0, or an errno
- * value: ENODEV without sound, ENOTSUP when it has no sound the add-in
- * decodes (player->problem then says why, MEDIA_PROBLEM_*), or the file's.
+ * value: ENODEV without sound, ENOTSUP when it has no sound the
+ * add-in decodes (player->problem then says why, MEDIA_PROBLEM_*), or
+ * the file's.
  */
 int
 mu_player_open(
@@ -290,9 +291,9 @@ mu_player_seek(
 }
 
 /*
- * Reports the position (seconds): the sound read since the anchor while
- * playing, standing still otherwise.  Called with or without the lock (it
- * reads the anchors only).
+ * Reports the position (seconds): the sound read since the anchor
+ * while playing, standing still otherwise.  Called with or without
+ * the lock (it reads the anchors only).
  */
 double
 mu_player_position(
@@ -316,8 +317,8 @@ mu_player_position(
 }
 
 /*
- * Reports the state (MU_*), and takes the song's end: 1 once when it was
- * played to its end since the last call.
+ * Reports the state (MU_*), and takes the song's end: 1 once when it
+ * was played to its end since the last call.
  */
 unsigned
 mu_player_state(

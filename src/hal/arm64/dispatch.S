@@ -1,4 +1,11 @@
 /*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
  * The floating-point save and restore below needs the FP and SIMD
  * registers and the FPCR and FPSR system registers. The kernel compiles
  * its C with -mgeneral-regs-only so the compiler never emits FP of its

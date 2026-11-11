@@ -1,8 +1,13 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 # The Linux build of libyolox.so for the host tests; the zedBSD build remains in Makefile.
 # It is not in KEILAND_LINUX_PACKAGES: build it alone with
 #   make -f userland/desktop/keiland-linux.mk KEILAND_LINUX_PACKAGES=userland/desktop/libyolox/Makefile.linux \
 #        KEILAND_LINUX_BUILD=<dir> <dir>/lib/libyolox.so
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
 KEILAND_LINUX_YOLOX_SOURCES := userland/desktop/libyolox/model.c \
 	userland/desktop/libyolox/runner.c \
 	userland/desktop/libyolox/cpu.c \

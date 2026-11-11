@@ -1,0 +1,572 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * The self-contained C runtime subset used by the amd64 HAL.
+ *
+ * The HAL owns no heap: hal_malloc uses an allocator supplied by the
+ * embedding kernel. Console output passes through the BSP console.
+ * hal_printf implements the conversions used by the HAL sources.
+ */
+
+#include <hal/hal.h>
+#include "asm.h"
+#include "bsp.h"
+#include "smp.h"
+
+/* The most return addresses a fatal's line names (BUG-202). */
+#define FATAL_TRACE_MAX		12U
+
+/* The kernel's text (vmunix.ld): a word on the stack inside it may be a return address. */
+extern char __kernel_text_virt_start[];
+extern char __kernel_text_virt_end[];
+
+static volatile unsigned panic_in_progress;
+
+static void put_unsigned(uint64_t value, unsigned base, int upper, int width, int zero);
+static void fatal_trace(uintptr_t caller) __attribute__((noinline));
+
+/*
+ * Measures a terminated byte string.
+ */
+int
+hal_strlen(
+	const char *string)
+{
+	int length;
+
+	/* Counts every byte before the terminator. */
+	length = 0;
+	while (string[length] != '\0')
+		length++;
+
+	/* Returns the measured byte count. */
+	return length;
+}
+
+/*
+ * Fills a byte range with one value.
+ */
+void *
+hal_memset(
+	void *destination,
+	int value,
+	size_t size)
+{
+	void *cursor;
+	size_t remaining;
+
+	/*
+	 * Fills with the string store, which the processor runs as a fast
+	 * block operation: a page table or a page is cleared in a few hundred
+	 * cycles where a byte loop took a few thousand.
+	 */
+	cursor = destination;
+	remaining = size;
+	__asm__ volatile("cld; rep stosb"
+	    : "+D"(cursor), "+c"(remaining)
+	    : "a"((uint8_t)value)
+	    : "memory", "cc");
+
+	/* Returns the original destination. */
+	return destination;
+}
+
+/*
+ * Fills a 16-bit range with one value.
+ */
+void *
+hal_memset16(
+	uint16_t *destination,
+	uint16_t value,
+	size_t count)
+{
+	uint16_t *cursor;
+	size_t remaining;
+
+	/* Fills with the word store in ascending address order. */
+	cursor = destination;
+	remaining = count;
+	__asm__ volatile("cld; rep stosw"
+	    : "+D"(cursor), "+c"(remaining)
+	    : "a"(value)
+	    : "memory", "cc");
+
+	/* Returns the original destination. */
+	return destination;
+}
+
+/*
+ * Fills a 32-bit range with one value.
+ */
+void *
+hal_memset32(
+	uint32_t *destination,
+	uint32_t value,
+	size_t count)
+{
+	uint32_t *cursor;
+	size_t remaining;
+
+	/* Fills with the doubleword store in ascending address order. */
+	cursor = destination;
+	remaining = count;
+	__asm__ volatile("cld; rep stosl"
+	    : "+D"(cursor), "+c"(remaining)
+	    : "a"(value)
+	    : "memory", "cc");
+
+	/* Returns the original destination. */
+	return destination;
+}
+
+/*
+ * Copies a byte range without overlap handling.
+ */
+void *
+hal_memcpy(
+	void *destination,
+	const void *source,
+	size_t size)
+{
+	void *to;
+	const void *from;
+	size_t remaining;
+
+	/* Copies with the string move, a fast block operation on this CPU. */
+	to = destination;
+	from = source;
+	remaining = size;
+	__asm__ volatile("cld; rep movsb"
+	    : "+D"(to), "+S"(from), "+c"(remaining)
+	    :
+	    : "memory", "cc");
+
+	/* Returns the original destination. */
+	return destination;
+}
+
+/*
+ * Writes a terminated string through the console character path.
+ */
+static void
+cons_puts(
+	const char *string)
+{
+	/* Ignores a missing input string. */
+	if (string == NULL)
+		return;
+
+	/* Emits every byte in order. */
+	while (*string != '\0')
+		hal_putc((unsigned char)*string++);
+}
+
+/*
+ * Writes one character to the HAL console.
+ */
+int
+hal_putchar(
+	int character)
+{
+	/* Writes the character through the console backend. */
+	hal_putc(character);
+
+	/* Returns the written character. */
+	return character;
+}
+
+/*
+ * Writes one terminated string to the HAL console.
+ */
+int
+hal_puts(
+	const char *string)
+{
+	/* Writes the string without adding a terminator or newline. */
+	cons_puts(string);
+
+	/* Reports successful output. */
+	return 0;
+}
+
+/*
+ * Formats the HAL-supported conversions on the BSP console.
+ */
+int
+hal_printf(
+	const char *format,
+	...)
+{
+	__builtin_va_list arguments;
+	const char *position;
+	const char *string;
+	uint64_t output_token;
+	uint64_t unsigned_value;
+	int64_t signed_value;
+	int character;
+	int longs;
+	int zero;
+	int width;
+
+	/* Serializes this complete formatted console record. */
+	output_token = pcat_cons_output_begin();
+	__builtin_va_start(arguments, format);
+
+	/* Emits every literal byte or conversion in format order. */
+	for (position = format; *position != '\0'; position++) {
+		longs = 0;
+		zero = 0;
+		width = 0;
+
+		/* Emits literal bytes without conversion processing. */
+		if (*position != '%') {
+			hal_putc(*position);
+			continue;
+		}
+
+		/* Consumes the conversion marker and optional zero flag. */
+		position++;
+		if (*position == '0') {
+			zero = 1;
+			position++;
+		}
+
+		/* Decodes the optional decimal field width. */
+		while (*position >= '0' && *position <= '9') {
+			width = width * 10 + (*position - '0');
+			position++;
+		}
+
+		/* Counts the optional l and ll length modifiers. */
+		while (*position == 'l' && longs < 2) {
+			longs++;
+			position++;
+		}
+
+		/* Emits the selected supported conversion. */
+		switch (*position) {
+		case 'c':
+			character = __builtin_va_arg(arguments, int);
+			hal_putc(character);
+			break;
+		case 's':
+			string = __builtin_va_arg(arguments, const char *);
+
+			/* Substitutes a readable value for a null string. */
+			if (string == NULL)
+				string = "(null)";
+			cons_puts(string);
+			break;
+		case 'd':
+			/* Consumes the argument at its promoted width. */
+			if (longs == 0)
+				signed_value = __builtin_va_arg(arguments, int);
+			else if (longs == 1)
+				signed_value = __builtin_va_arg(arguments, long);
+			else
+				signed_value = __builtin_va_arg(arguments,
+				    long long);
+
+			/* Emits the sign before formatting the magnitude. */
+			unsigned_value = (uint64_t)signed_value;
+			if (signed_value < 0) {
+				hal_putc('-');
+				unsigned_value = 0U - unsigned_value;
+			}
+			put_unsigned(unsigned_value, 10, 0, width, zero);
+			break;
+		case 'u':
+		case 'x':
+		case 'X':
+			/* Consumes the argument at its promoted width. */
+			if (longs == 0)
+				unsigned_value = __builtin_va_arg(arguments,
+				    uint32_t);
+			else if (longs == 1)
+				unsigned_value = __builtin_va_arg(arguments,
+				    unsigned long);
+			else
+				unsigned_value = __builtin_va_arg(arguments,
+				    unsigned long long);
+			put_unsigned(
+				unsigned_value,
+				*position == 'u' ? 10 : 16,
+				*position == 'X',
+				width,
+				zero);
+			break;
+		case '%':
+			hal_putc('%');
+			break;
+		default:
+			hal_putc('%');
+
+			/* Restores any consumed length modifiers verbatim. */
+			while (longs-- > 0)
+				hal_putc('l');
+
+			/* Preserves an unknown conversion or trailing marker. */
+			if (*position != '\0')
+				hal_putc(*position);
+			else
+				position--;
+			break;
+		}
+	}
+
+	/* Releases the argument list and serialized output record. */
+	__builtin_va_end(arguments);
+	pcat_cons_output_end(output_token);
+
+	/* Reports successful formatting. */
+	return 0;
+}
+
+/*
+ * Reports an assertion failure and stops the CPU.
+ */
+void
+hal_assert(
+	const char *file,
+	int line,
+	const char *expression)
+{
+	/* Parks immediately when another CPU already owns panic output. */
+	if (__atomic_exchange_n(
+	    &panic_in_progress,
+	    1U,
+	    __ATOMIC_ACQ_REL) != 0) {
+		asm_cli();
+
+		/* Halts this CPU permanently. */
+		for (;;)
+			asm_hlt();
+	}
+
+	/* Reports the assertion through the serialized console path. */
+	hal_printf("\nassert: %s:%d: %s\n", file, line, expression);
+
+	/* Stops other CPUs only after SMP panic broadcast becomes safe. */
+	if (amd64_smp_panic_available())
+		hal_cpu_panic_all();
+
+	/* Halts the panic owner permanently with interrupts disabled. */
+	asm_cli();
+	for (;;)
+		asm_hlt();
+}
+
+/*
+ * Reports a fatal HAL condition and stops the CPU.
+ */
+void
+hal_fatal(
+	const char *file,
+	int line,
+	const char *message)
+{
+	uint64_t output_token;
+
+	/* Parks immediately when another CPU already owns panic output. */
+	if (__atomic_exchange_n(
+	    &panic_in_progress,
+	    1U,
+	    __ATOMIC_ACQ_REL) != 0) {
+		asm_cli();
+
+		/* Halts this CPU permanently. */
+		for (;;)
+			asm_hlt();
+	}
+
+	/*
+	 * Reports the fatal condition and, on one line, the caller and the
+	 * words on the stack that point into the kernel's text (BUG-202).  The
+	 * console stays this CPU's for the whole report, so no other CPU's
+	 * output lands inside it (BUG-321).
+	 */
+	output_token = pcat_cons_output_begin();
+	hal_printf("\nfatal: %s:%d: %s\n", file, line, message);
+	fatal_trace((uintptr_t)__builtin_return_address(0));
+	pcat_cons_output_end(output_token);
+
+	/* Stops other CPUs only after SMP panic broadcast becomes safe. */
+	if (amd64_smp_panic_available())
+		hal_cpu_panic_all();
+
+	/* Halts the panic owner permanently with interrupts disabled. */
+	asm_cli();
+	for (;;)
+		asm_hlt();
+}
+
+/*
+ * Fills a buffer from the processor random-number instruction.
+ */
+bool
+hal_entropy_fill(
+	void *buffer,
+	size_t size)
+{
+	uint8_t *bytes;
+	uint64_t value;
+	uint32_t eax;
+	uint32_t ebx;
+	uint32_t ecx;
+	uint32_t edx;
+	unsigned attempt;
+	unsigned char ready;
+	size_t chunk;
+
+	/* Queries processor support for the RDRAND instruction. */
+	bytes = buffer;
+	eax = 1;
+	__asm__ volatile("cpuid"
+	    : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
+	(void)ebx;
+	(void)edx;
+
+	/* Rejects processors without an architectural random source. */
+	if ((ecx & (1U << 30)) == 0U)
+		return false;
+
+	/* Fills the buffer from bounded successful RDRAND samples. */
+	while (size != 0U) {
+		value = 0;
+		ready = 0;
+
+		/* Retries a temporarily unavailable hardware sample. */
+		for (attempt = 0; attempt < 10U && ready == 0U; attempt++) {
+			__asm__ volatile("rdrand %0; setc %1"
+			    : "=r"(value), "=qm"(ready));
+		}
+
+		/* Reports failure after the bounded retry window. */
+		if (ready == 0U)
+			return false;
+
+		/* Copies the available part of this machine-word sample. */
+		if (size < sizeof(value))
+			chunk = size;
+		else
+			chunk = sizeof(value);
+		hal_memcpy(bytes, &value, chunk);
+		bytes += chunk;
+		size -= chunk;
+	}
+
+	/* Reports a completely filled buffer. */
+	return true;
+}
+
+/*
+ * Writes the line that names where a fatal came from: the address
+ * hal_fatal() was called from, then the words of the stack from here to
+ * the end of its page that fall in the kernel's text, at most
+ * FATAL_TRACE_MAX (most of them return addresses of the callers, some
+ * stale).  The kernel is built without frame pointers, so the stack is not
+ * walked by frames; the page holding the stack pointer is the only memory
+ * known to be mapped.  The addresses name functions with the unstripped
+ * vmunix (addr2line -f -e vmunix).
+ */
+static void
+fatal_trace(
+	uintptr_t caller)
+{
+	const uintptr_t *word;
+	const uintptr_t *end;
+	uintptr_t value;
+	uintptr_t stack;
+	unsigned count;
+
+	/* The caller first. */
+	hal_printf("fatal: caller %lx stack", (unsigned long)caller);
+
+	/* From the stack pointer to the end of its page. */
+	__asm__ volatile("movq %%rsp, %0" : "=r"(stack));
+	word = (const uintptr_t *)(stack & ~(uintptr_t)(sizeof(uintptr_t) - 1U));
+	end = (const uintptr_t *)((stack | 0xfffU) + 1U);
+	count = 0U;
+	while (word < end && count < FATAL_TRACE_MAX) {
+		value = *word;
+		word++;
+
+		/* A word outside the text is data. */
+		if (value < (uintptr_t)__kernel_text_virt_start)
+			continue;
+		if (value >= (uintptr_t)__kernel_text_virt_end)
+			continue;
+
+		/* One more address on the line. */
+		hal_printf(" %lx", (unsigned long)value);
+		count++;
+	}
+
+	/* The line's end. */
+	hal_printf("\n");
+}
+
+/* Emits an unsigned value with the requested base and padding. */
+static void
+put_unsigned(
+	uint64_t value,
+	unsigned base,
+	int upper,
+	int width,
+	int zero)
+{
+	char digits[24];
+	unsigned digit;
+	int length;
+
+	/* Builds the value in reverse order. */
+	length = 0;
+	do {
+		digit = (unsigned)(value % base);
+
+		/* Selects the requested alphabet for this digit. */
+		if (digit < 10)
+			digits[length++] = (char)('0' + digit);
+		else if (upper)
+			digits[length++] = (char)('A' + digit - 10);
+		else
+			digits[length++] = (char)('a' + digit - 10);
+		value /= base;
+	} while (value != 0);
+
+	/* Pads the output to the requested field width. */
+	while (width > length) {
+		/* Selects zero or space padding for this output position. */
+		if (zero)
+			hal_putc('0');
+		else
+			hal_putc(' ');
+		width--;
+	}
+
+	/* Emits the accumulated digits in display order. */
+	while (length > 0)
+		hal_putc(digits[--length]);
+}
+
+/*
+ * Makes a range of memory visible to instruction fetch.
+ *
+ * This processor keeps its instruction cache coherent with stores on its
+ * own, so what a debugger wrote into the text it is stopping is already
+ * what will be fetched.  The call exists because the machines that need
+ * to be told are the reason the caller asks at all.
+ */
+void
+hal_icache_invalidate_range(
+	uintptr_t address,
+	size_t size)
+{
+	(void)address;
+	(void)size;
+}

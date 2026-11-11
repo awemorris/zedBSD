@@ -1,3 +1,8 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -14,5 +19,5 @@ ZEDBSD_TERMINFO_DATA := userland/base/terminfo/ansi.zti \
 ZEDBSD_TERMINFO_INSTALL := $(foreach file,$(ZEDBSD_TERMINFO_DATA),\
 	/lib/terminfo/$(notdir $(file))=$(file))
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,terminfo,libcurses major terminal definitions,\
+$(eval $(call USERLAND_PACKAGE,terminfo,libcurses major terminal definitions,\
 	*,y,data,,y,base,base/terminfo,,,data,$(ZEDBSD_TERMINFO_INSTALL)))

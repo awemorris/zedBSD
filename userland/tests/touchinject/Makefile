@@ -6,4 +6,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 TOUCHINJECT_SOURCES := userland/tests/touchinject/main.c
 TOUCHINJECT_DATA := /usr/share/touchinject/two-fingers.touch=userland/tests/touchinject/two-fingers.touch
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,touchinject,test touch screen injector,*,n,basic,$(TOUCHINJECT_SOURCES),y,tests,tests/touchinject,,0755,program,$(TOUCHINJECT_DATA),,bin))
+$(eval $(call USERLAND_PACKAGE,touchinject,test touch screen injector,*,n,basic,$(TOUCHINJECT_SOURCES),y,tests,tests/touchinject,,0755,program,$(TOUCHINJECT_DATA),,bin))

@@ -1,6 +1,10 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent Linux build of imageview; source membership mirrors the target package.
-KEILAND_LINUX_IMAGEVIEW_SOURCES := userland/desktop/imageview/main.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_IMAGEVIEW_SOURCES := \
+	userland/desktop/imageview/main.c \
 	userland/desktop/imageview/present.c \
 	userland/desktop/imageview/menu.c \
 	userland/desktop/imageview/titlebar.c \
@@ -18,4 +22,5 @@ KEILAND_LINUX_IMAGEVIEW_SOURCES := userland/desktop/imageview/main.c \
 	userland/desktop/files/mounts.c \
 	userland/desktop/artwork/mark.c \
 	userland/desktop/picture/picture.c
+
 $(eval $(call KEILAND_LINUX_PROGRAM,imageview,bin,$(KEILAND_LINUX_IMAGEVIEW_SOURCES),libkeiland.so libtruetype.so libpng-compat.so libjpeg-compat.so libgif-compat.so libz-compat.so libwayland-client.so libvulkan.so.1,-lm))

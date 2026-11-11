@@ -20,7 +20,7 @@ its drivers are when the board is chosen; the licenses are still accepted
 when the image is built.
 
 The entries are `rtl8822b/`, `intelax211/`, `intelbt/`, `i915/`, `brcmbt/`,
-`bcm43455/`, `nvidia-gsp/`, `powervr/`, `wave511/`, `mali-csf/`, and `amlogic-s7d/`; future
+`bcm43455/`, `nvidia-gsp/`, `powervr/`, `intelmid64-powervr/`, `wave511/`, `mali-csf/`, and `amlogic-s7d/`; future
 RTL8822C support owns a separate `rtl8822c/` entry. RTL8822B uses its frozen GitHub
 acquisition mirror. AX211 uses the official `linux-firmware` tag `20260410`
 dereferenced commit and installs the exact `-89.ucode`, PNVM, complete Intel
@@ -109,6 +109,16 @@ row is added (plan/ws269, p004, on by default for the VisionFive 2), its
 Until then the package is chosen in the Firmware menu. The license is accepted
 when the image is built. The kernel reads the file from the root file system, which is built from the
 same tree for every root image.
+`intelmid64-powervr/` (package `intelmid64-powervr-firmware`) installs the Intel
+Moorefield PowerVR Rogue G6430 signed GPU firmware 1.72.4.12 for the Intel Atom
+Z3560 / Z3580 (ASUS ZenFone 2 ZE550ML / ZE551ML, ASUS Nexus Player "fugu"), which the
+Intel MID PowerVR driver loads (`CONFIG_DRIVER_INTELMID_POWERVR`):
+`powervr/rgx.fw.signed.1.72.4.12` (and symlinks `powervr/rgx.fw.signed` and `powervr/rgx.fw`),
+together with `LICENSE.intel` and the manifest. The upstream is Google's official
+AOSP Nexus Player device binary driver package `intel-fugu-opr2.170623.027-82108990.tgz`
+(SHA-256 `114c20b8335f3c166c76d590c6d238153c463c2fa2dea3da56d1ce3ffd1ec6ed`), with
+`LICENSE.intel` from Google AOSP's `device/asus/fugu` repository (`self-extractors/intel/LICENSE`).
+Selecting the `intelmid64` platform or the driver selects the package.
 `wave511/` (package `wave511-firmware`) installs the Chips&Media Wave511
 video decoder firmware of the VisionFive 2's StarFive JH7110 (revision
 0x0002d46a, which the decoder's identity query reports), which the Wave5

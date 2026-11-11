@@ -1,7 +1,7 @@
 # zedBSD optional Intel AX211 firmware package
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
-include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
+include $(if $(TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/userland/firmware)/zedbsd-firmware.mk
 
 override INTEL_AX211_FIRMWARE_FIXTURE_GOAL := intelax211-firmware-fixture-cache
 ifneq ($(filter $(INTEL_AX211_FIRMWARE_FIXTURE_GOAL),$(MAKECMDGOALS)),)
@@ -58,7 +58,7 @@ override INTEL_AX211_FIRMWARE_VERSION := 89.735b75a4.0
 override INTEL_AX211_FIRMWARE_WHENCE_VERSION := 86.735b75a4.0
 override INTEL_AX211_FIRMWARE_SHA256_COMMAND := sha256sum
 
-INTEL_AX211_FIRMWARE_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/intelax211
+INTEL_AX211_FIRMWARE_CACHE_ROOT ?= $(if $(TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/intelax211
 override INTEL_AX211_FIRMWARE_CACHE_DIR := $(INTEL_AX211_FIRMWARE_CACHE_ROOT)/$(INTEL_AX211_FIRMWARE_REVISION)
 override INTEL_AX211_FIRMWARE_CACHE_UCODE := $(INTEL_AX211_FIRMWARE_CACHE_DIR)/iwlwifi-so-a0-gf-a0-89.ucode
 override INTEL_AX211_FIRMWARE_CACHE_PNVM := $(INTEL_AX211_FIRMWARE_CACHE_DIR)/iwlwifi-so-a0-gf-a0.pnvm
@@ -90,14 +90,14 @@ intelax211-firmware-license:
 intelax211-firmware-license-pending:
 	@if test ! -d '$(INTEL_AX211_FIRMWARE_CACHE_DIR)'; then ZEDBSD_FIRMWARE_LICENSE_MODE=pending $(INTEL_AX211_FIRMWARE_LICENSE_COMMAND); fi
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,intelax211-firmware,Intel AX211 firmware,amd64,n,package,,y,firmware,firmware/intelax211,,,data,$(INTEL_AX211_FIRMWARE_DATA),,))
+$(eval $(call USERLAND_PACKAGE,intelax211-firmware,Intel AX211 firmware,x86_64,n,package,,y,firmware,firmware/intelax211,,,data,$(INTEL_AX211_FIRMWARE_DATA),,))
 override USERLAND_intelax211-firmware_DATA := $(INTEL_AX211_FIRMWARE_DATA)
 ZEDBSD_USERLAND_DOWNLOAD_TARGETS += intelax211-firmware
 
 .PHONY: download intelax211-firmware intelax211-firmware-cache \
 	intelax211-firmware-fixture-cache
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
+ifndef TOPLEVEL_BUILD
 download: intelax211-firmware
 endif
 

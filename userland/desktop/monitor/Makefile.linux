@@ -1,6 +1,10 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent Linux build of the System Monitor; source membership mirrors the target package.
-KEILAND_LINUX_MONITOR_SOURCES := userland/desktop/monitor/main.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_MONITOR_SOURCES := \
+	userland/desktop/monitor/main.c \
 	userland/desktop/monitor/source.c \
 	userland/desktop/monitor/history.c \
 	userland/desktop/monitor/rules.c \
@@ -12,4 +16,5 @@ KEILAND_LINUX_MONITOR_SOURCES := userland/desktop/monitor/main.c \
 	userland/desktop/monitor/interact.c \
 	userland/desktop/monitor/system-source.c \
 	userland/desktop/monitor/render.c
+
 $(eval $(call KEILAND_LINUX_PROGRAM,monitor,bin,$(KEILAND_LINUX_MONITOR_SOURCES),libkeiland.so libwayland-client.so libtruetype.so libvulkan.so.1 libkeiland-compat.a,-lm))

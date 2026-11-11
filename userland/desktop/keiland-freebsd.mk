@@ -1,6 +1,11 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 # Native FreeBSD Keiland build, independent of the Linux and zedBSD rules.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 # Builds real native libraries and the compositor with FreeBSD seat authority.
+
 .DEFAULT_GOAL := all
 
 KEILAND_FREEBSD_BUILD ?= build/keiland-freebsd

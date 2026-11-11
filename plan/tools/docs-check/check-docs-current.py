@@ -242,8 +242,7 @@ def check_build(root, noct):
                  "Noct release (ZEDBSD_NOCT_VERSION)")
     if llvm_text is not None:
         llvm = make_vars(llvm_text)
-        for key in ("ZEDBSD_LLVM_VERSION", "ZEDBSD_LLVM_CACHE_TAG",
-                    "ZEDBSD_LLVM_CACHE_ASSET"):
+        for key in ("LLVM_VERSION", "LLVM_CACHE_TAG", "LLVM_CACHE_ASSET"):
             if key in llvm:
                 need(rel, doc, llvm[key], key)
             else:

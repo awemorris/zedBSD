@@ -455,3 +455,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-415](bugs/BUG-415.md) | ブラウザ: 保たない頁を離れる時に pagehide（persisted false）が出ない | fixed（2026-11-02 P8 q1977-i01、cache に保たない頁と置き換わる頁は showing なら pagehide（persisted false）、次に unload。iframe も同じ。host-back-forward 25/25。host で確かめた、QEMU・実機は未実施） |
 | [BUG-416](bugs/BUG-416.md) | usb-net で長さが 64 byte の倍数の frame が届かない（xHCI の 0 長の packet の Short Packet） | fixed（2026-11-02 17:50 P3 q1978-i01、0 長の packet を別の TD にした。QEMU amd64 で 64 の倍数の frame の ping・fetch が通る、実機は未実施） |
 | [BUG-417](bugs/BUG-417.md) | ブラウザ: web platform の prelude の WebIDL の operation が constructor として呼べる | open（2026-11-02 17:16 Q1 が起票、P8） |
+| [BUG-418](bugs/BUG-418.md) | build system の作り直し（branch refactor）の後、rpi5 の kernel が起動しない・rpi4・vf2・i386・pc9821 は未試験 | open（2026-11-08 19:10 Q1 が起票、Q1 が直に、QEMU で確かめる） |

@@ -1,9 +1,5 @@
 # Keiland desktop environment
 
-Status: design (2026-10-03). This is the target design: the document comes
-first and the implementation follows it, so some of what it describes is not
-built yet.
-
 This document describes Keiland from the outside: what it is for, how it is
 divided, which interfaces are stable, and what a user and an application see.
 It does not describe internal implementation.
@@ -24,8 +20,11 @@ document:
   environments run as separate processes, such as the on-screen keyboard, are
   part of the compositor. The desktop is meant to feel like one thing.
 - **Portability is a design goal, not an afterthought.** Keiland runs as the
-  native desktop of zedBSD and also on Linux and FreeBSD. Everything that
-  differs between operating systems is kept behind defined boundaries.
+  native desktop of zedBSD and is also ported to Windows, Linux, and FreeBSD.
+  Everything that differs between operating systems is kept behind defined boundaries.
+  The client toolkit (`libkeiland`) is decoupled from the compositor, enabling
+  applications like the Keiland Browser to run natively on Windows as well as
+  Unix platforms.
 
 ## Desktop modes
 
@@ -46,6 +45,15 @@ the phone mode is planned.
 - Only one application is shown at a time, always maximized.
 - Several windows cannot be shown side by side.
 - There is a dock bar, but it is too narrow to show the application's menus.
+
+**Game mode** is for fullscreen games, emulators, and high-performance 3D applications.
+
+- The application renders directly via native **Vulkan**.
+- When fullscreen, the compositor engages **direct scanout**: the application's
+  Vulkan swapchain buffer is assigned directly to the display scanout hardware,
+  bypassing compositor rendering passes entirely.
+- Delivers zero compositing latency, optimal frame pacing, and hardware Variable
+  Refresh Rate (VRR) support.
 
 ### Application lifecycle messages
 
@@ -77,7 +85,7 @@ From an application to the compositor:
 | Keiland's own Wayland extensions | `keiland_*_v1` protocols spoken between libkeiland and the compositor | libkeiland only | **Internal**; may change at any time |
 | Keiland compositor | The Wayland compositor: windows, input, system bar, on-screen keyboard, input method host | — | — |
 | [libkeiland-backend](../../userland/desktop/libkeiland-backend/keiland-backend.h) | Everything in the compositor that differs between operating systems | The compositor only | Internal, compile-time interface |
-| Operating system | zedBSD, Linux or FreeBSD: kernel, GPU driver, network and sound services | The backend | — |
+| Operating system | zedBSD, Linux, FreeBSD, or Windows: kernel, GPU driver, network and sound services | The backend | — |
 
 ## Wayland compositor and protocols
 
@@ -314,5 +322,8 @@ socket.
 ## Related documents
 
 - [Kernel, HAL and driver boundaries](kernel-and-hal.md)
+- [Graphics and Wayland architecture](graphics-and-wayland.md): GPU capability handles, WSI, and `/bin/wayland` modes
+- [Session management and graphical login](session-management.md): `sessiond`, greeter, and console fallback
+- [Audio architecture and sound subsystem](audio.md): `audiod`, shared memory rings, and `libpulse`
 - [Keiland on Linux](../../userland/desktop/LINUX.md) and
   [on FreeBSD](../../userland/desktop/README.freebsd.md): build and launch

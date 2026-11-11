@@ -1,6 +1,10 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent Linux build of files; source membership mirrors the target package.
-KEILAND_LINUX_FILES_SOURCES := userland/desktop/files/main.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_LINUX_FILES_SOURCES := \
+	userland/desktop/files/main.c \
 	userland/desktop/files/window.c \
 	userland/desktop/files/dnd.c \
 	userland/desktop/files/present.c \
@@ -53,5 +57,5 @@ KEILAND_LINUX_FILES_SOURCES := userland/desktop/files/main.c \
 	userland/desktop/artwork/mark.c \
 	userland/desktop/preview/client.c \
 	userland/desktop/preview/linux/spawn.c
-# ws168-p004: the pictures are made by keiland-preview (libexec), which confines itself with seccomp.
+
 $(eval $(call KEILAND_LINUX_PROGRAM,files,bin,$(KEILAND_LINUX_FILES_SOURCES),libkeiland.so libwayland-client.so libtruetype.so libvulkan.so.1 libkeiland-compat.a,-lm))

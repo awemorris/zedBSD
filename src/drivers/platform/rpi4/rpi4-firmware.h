@@ -76,7 +76,7 @@ int drv_rpi4_firmware_property(
 	unsigned capacity,
 	uint32_t *answered);
 
-#if defined(CONFIG_DRIVER_BCM2711_VCHIQ) && CONFIG_DRIVER_BCM2711_VCHIQ
+#if defined(CONFIG_DRIVER_RPI4_GPU)
 /*
  * Posts one word to a mailbox channel other than the property channel.
  *

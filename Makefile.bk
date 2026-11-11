@@ -1,0 +1,3023 @@
+########################################################################
+# Variants
+########################################################################
+
+# Platform = CPU + BSP
+ZEDBSD_PLATFORM_TARGET_amd64 :=          amd64_pcat
+ZEDBSD_PLATFORM_TARGET_i386 :=           i386_pcat
+ZEDBSD_PLATFORM_TARGET_pc98 :=           i386_pc98
+ZEDBSD_PLATFORM_TARGET_rpi4 :=           arm64_rpi4
+ZEDBSD_PLATFORM_TARGET_rpi5 :=           arm64_rpi5
+ZEDBSD_PLATFORM_TARGET_odroid-c5 :=      arm64_odroid-c5
+ZEDBSD_PLATFORM_TARGET_riscv64-virt :=   riscv64_virt
+ZEDBSD_PLATFORM_TARGET_visionfive2 :=    riscv64_visionfive2
+ZEDBSD_PLATFORM_TARGET_riscv32-virt :=   riscv32_virt
+ZEDBSD_PLATFORM_TARGET_armv7-virt :=     armv7_virt
+ZEDBSD_PLATFORM_TARGET_zybo :=           armv7_zybo
+ZEDBSD_PLATFORM_TARGET_sun4u :=          parcv9_sun4u
+ZEDBSD_PLATFORM_TARGET_x68k :=           m68k_x68k
+ZEDBSD_PLATFORM_TARGET_m68k-virt :=      m68k_virt
+ZEDBSD_PLATFORM_TARGET_ppc64-pseries :=  ppc64_pseries
+ZEDBSD_PLATFORM_TARGET_ppc32-mac99 :=    ppc32_mac99
+ZEDBSD_PLATFORM_TARGET_mips64-malta :=   mips64_malta
+ZEDBSD_PLATFORM_TARGET_mips32-rg350 :=   mips32_rg350
+ZEDBSD_PLATFORM_TARGET_mips32-malta :=   mips32_malta
+
+# Variant = CPU + Board + Bootloader
+ZEDBSD_VARIANTS_amd64_pcat :=            uefi bios hybrid native
+ZEDBSD_VARIANTS_arm64_rpi4 :=            default
+ZEDBSD_VARIANTS_arm64_rpi5 :=            default
+ZEDBSD_VARIANTS_arm64_odroid-c5 :=       default
+ZEDBSD_VARIANTS_riscv64_visionfive2 :=   default
+ZEDBSD_VARIANTS_riscv64_virt :=          default
+ZEDBSD_VARIANTS_riscv32_virt :=          default
+ZEDBSD_VARIANTS_armv7_zybo :=            default
+ZEDBSD_VARIANTS_armv7_virt :=            default
+ZEDBSD_VARIANTS_i386_pcat :=             default
+ZEDBSD_VARIANTS_i386_pc98 :=             default
+ZEDBSD_VARIANTS_m68k_x68k :=             default
+ZEDBSD_VARIANTS_m68k_virt :=             default
+ZEDBSD_VARIANTS_sparcv9_sun4u :=         default
+ZEDBSD_VARIANTS_ppc64_pseries :=         default
+ZEDBSD_VARIANTS_ppc32_mac99 :=           default
+ZEDBSD_VARIANTS_mips64_malta :=          default
+ZEDBSD_VARIANTS_mips32_malta :=          default
+ZEDBSD_VARIANTS_mips32_rg350 :=          default
+
+# Determine the target variant key based on architecture and board
+# (e.g. "amd64_pcat" for architecture amd64 and board pcat)
+ZEDBSD_TARGET_VARIANT_KEY := $(ZEDBSD_ARCHITECTURE)_$(ZEDBSD_BOARD)
+
+# Determine the platform target based on the platform
+# (e.g. "arm64_rpi4" for platform arm64_rpi4)
+ZEDBSD_PLATFORM_TARGET := $(ZEDBSD_PLATFORM_TARGET_$(ZEDBSD_PLATFORM))
+
+# Determine the target variants based on the target variant key
+# (e.g. "uefi" for target variant key amd64_pcat)
+ZEDBSD_TARGET_VARIANTS := $(ZEDBSD_VARIANTS_$(ZEDBSD_TARGET_VARIANT_KEY))
+
+# Determine the default variant if none is specified.
+ifeq ($(origin ZEDBSD_VARIANT),undefined)
+ZEDBSD_VARIANT := $(firstword $(ZEDBSD_TARGET_VARIANTS))
+endif
+
+# Determine if the target hierarchy is valid based on platform, architecture, board, and platform target.
+# This ensures that the specified platform, architecture, board, and platform target are all defined and consistent.
+ZEDBSD_TARGET_HIERARCHY_VALID := \
+    $(and \
+	    $(filter 1,$(words $(ZEDBSD_PLATFORM))), \
+	    $(filter 1,$(words $(ZEDBSD_ARCHITECTURE))), \
+            $(filter 1,$(words $(ZEDBSD_BOARD))),\
+            $(strip $(ZEDBSD_PLATFORM_TARGET)), \
+        $(if $(filter-out $(ZEDBSD_PLATFORM_TARGET), \
+		     $(ZEDBSD_TARGET_VARIANT_KEY)),,yes) \
+    )
+
+# Determine if the specified variant is valid based on the target variants.
+ZEDBSD_VARIANT_VALID := $(and $(strip $(ZEDBSD_VARIANT)),\
+	$(filter 1,$(words $(ZEDBSD_VARIANT))),\
+	$(if $(filter-out $(ZEDBSD_TARGET_VARIANTS),$(ZEDBSD_VARIANT)),,yes))
+
+# Determine if an image target has been requested based on the make goals.
+ZEDBSD_IMAGE_REQUESTED := $(if $(strip $(MAKECMDGOALS)),$(filter disk-image check-disk-image validate-image-config %.img %.hd,$(MAKECMDGOALS)),default)
+
+# Validate the target hierarchy and variant if an image target has been requested.
+ifneq ($(strip $(ZEDBSD_IMAGE_REQUESTED)),)
+ifeq ($(strip $(ZEDBSD_TARGET_HIERARCHY_VALID)),)
+$(error Invalid target hierarchy ZEDBSD_PLATFORM='$(ZEDBSD_PLATFORM)' ZEDBSD_ARCHITECTURE='$(ZEDBSD_ARCHITECTURE)' ZEDBSD_BOARD='$(ZEDBSD_BOARD)')
+endif
+
+# Validate the variant if the target hierarchy is valid.
+ifeq ($(strip $(ZEDBSD_VARIANT_VALID)),)
+$(error Invalid ZEDBSD_VARIANT '$(ZEDBSD_VARIANT)' for Architecture '$(ZEDBSD_ARCHITECTURE)' Board '$(ZEDBSD_BOARD)'; expected one of: $(ZEDBSD_TARGET_VARIANTS))
+endif
+endif
+#
+# make installer-image makes itself again with the profile, which
+# chooses the selection while make reads the makefiles; the trees are
+# its own ($(BUILD)/installer), so an ordinary image of the same BUILD
+# is left alone.  It is for the native amd64 layout only, and alone on
+# the command line: another image's goal would want the configuration's
+# selection, which the profile replaces.
+#
+ZEDBSD_OTHER_IMAGE_GOALS := $(filter-out installer-image \
+	$(BUILD)/installer-image.img,$(filter disk-image run rootfs world \
+ check-disk-image %.img %.hd,$(MAKECMDGOALS)))
+ifneq ($(or $(filter installer-image,$(MAKECMDGOALS)),$(filter installer,$(ZEDBSD_IMAGE_PROFILE))),)
+ifneq ($(strip $(ZEDBSD_PLATFORM) $(ZEDBSD_VARIANT)),amd64 native)
+$(error make installer-image needs ZEDBSD_PLATFORM amd64 and ZEDBSD_VARIANT native \
+	(the configuration has '$(ZEDBSD_PLATFORM)' and '$(ZEDBSD_VARIANT)'))
+endif
+ifneq ($(strip $(ZEDBSD_OTHER_IMAGE_GOALS)),)
+$(error make installer-image cannot share the command line with $(ZEDBSD_OTHER_IMAGE_GOALS))
+endif
+endif
+ifneq ($(ZEDBSD_IMAGE_PROFILE),installer)
+.PHONY: installer-image
+installer-image:
+	+$(MAKE) ZEDBSD_IMAGE_PROFILE=installer $(BUILD)/installer-image.img
+endif
+
+#
+# The installer and its helper are the menu installer's: the installer's
+# image puts them in its own root (platform/amd64/installer-image.mk), and
+# no other image may carry them, for the helper writes disks as root
+# without asking for a password.  Their registrations are not selectable,
+# so menuconfig does not offer them; a configuration that names one
+# anyway is refused below, after the dependencies are expanded.
+#
+ZEDBSD_INSTALLER_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
+	$(if $(filter installer,$(USERLAND_$(program)_MENU)),$(program)))
+ifneq ($(strip $(foreach program,$(ZEDBSD_INSTALLER_PROGRAMS),\
+ $(filter-out n,$(USERLAND_$(program)_SELECTABLE)))),)
+$(error A program of the menu installer must not be selectable: \
+	$(foreach program,$(ZEDBSD_INSTALLER_PROGRAMS),\
+ $(if $(filter-out n,$(USERLAND_$(program)_SELECTABLE)),$(program))))
+endif
+
+#
+# Remove held package roots before dependency expansion. Otherwise a
+# stale configuration that still names a held application could retain
+# its dependencies even though the application itself is suppressed.
+# Nothing is held at present: a package named here is offered by the
+# menu and then quietly dropped, so a package that cannot be built
+# belongs out of the menu rather than in this list.
+#
+ZEDBSD_TARGET_PACKAGE_HOLD :=
+override ZEDBSD_USER_PROGRAMS := $(filter-out \
+	$(ZEDBSD_TARGET_PACKAGE_HOLD),$(ZEDBSD_USER_PROGRAMS))
+
+#
+# Noct built with its OpenGL ES accelerator (ZEDBSD_NOCT_ACCEL := y, an
+# amd64 option) links libEGL and libGLESv2, so with the option noct needs
+# both libraries in the image, and choosing noct (or Emacs, which runs on
+# it) chooses them.  The noct package's own registration does not name
+# them, for without the option it needs neither.
+#
+ifneq ($(and $(filter amd64,$(ZEDBSD_ARCHITECTURE)),$(filter y,$(ZEDBSD_NOCT_ACCEL))),)
+USERLAND_noct_REQUIRE += desktop/libegl desktop/libglesv2
+endif
+
+#
+# Package dependencies are named by their registered stable path (for
+# example, editors/remacs -> base/noct). Resolve those paths back to
+# program names even when config.mk was hand-edited.
+#
+user_program_dependency_names = $(strip $(foreach program,$(1),\
+	$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\
+ $(foreach candidate,$(USERLAND_PACKAGES),\
+ $(if $(filter $(requirement),$(USERLAND_$(candidate)_PACKAGE)),\
+ $(candidate))))))
+ZEDBSD_USER_PROGRAMS_DEPS_1 := $(sort $(ZEDBSD_USER_PROGRAMS) \
+	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS)))
+ZEDBSD_USER_PROGRAMS_DEPS_2 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_1) \
+	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_1)))
+ZEDBSD_USER_PROGRAMS_DEPS_3 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_2) \
+	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_2)))
+override ZEDBSD_USER_PROGRAMS := $(ZEDBSD_USER_PROGRAMS_DEPS_3)
+ifneq ($(strip $(filter $(ZEDBSD_INSTALLER_PROGRAMS),$(ZEDBSD_USER_PROGRAMS))),)
+$(error Only make installer-image builds the installer; the selection names \
+	$(filter $(ZEDBSD_INSTALLER_PROGRAMS),$(ZEDBSD_USER_PROGRAMS)))
+endif
+ifneq ($(strip $(ZEDBSD_TARGET_TRIPLE)),)
+override ZEDBSD_USER_PROGRAMS := $(sort \
+	$(ZEDBSD_USER_PROGRAMS) llvm-runtime-license)
+endif
+
+# Every image carries the project's own license first in its list (ws129-p002).
+override ZEDBSD_USER_PROGRAMS := $(sort \
+	$(ZEDBSD_USER_PROGRAMS) zedbsd-license)
+
+#
+# Preserve CPU-independent userland selections when changing
+# targets. Only platform-bound groups (tests and X11) discard
+# incompatible entries.
+#
+ZEDBSD_USER_PLATFORM := $(ZEDBSD_PLATFORM)
+override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
+	$(if $(filter * $(ZEDBSD_USER_PLATFORM),\
+ $(USERLAND_$(program)_PLATFORMS)),$(program)))
+
+#
+# Essential administrative tools are present even when an older
+# config.mk predates their package registration.  The commands the
+# base services run come with them: networkd configures interfaces
+# through /sbin/ifconfig, /sbin/route and /sbin/dhcpc, and the homes
+# service makes each home with mkdir and chown; a short program list
+# must not leave the loopback down.
+#
+override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) at batch \
+	blkid diskpart mkfs mkswap crontab getty gettext halt hostname init logger login lp lpr mailx msgfmt ngettext \
+	cron net networkd ntpdate poweroff reboot service shutdown swapoff swapon syslogd talk wifi \
+	chown dhcpc ifconfig mkdir route)
+
+#
+# The checker init runs on a read-only root, linked statically.  Only
+# the platforms whose build links the class static carry it.
+#
+
+ifneq ($(filter amd64 arm64,$(ZEDBSD_PLATFORM_DIR)),)
+override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) fsck)
+endif
+
+#
+# Xzed cannot operate without the kernel graphics character
+# device. Keep hand-edited and older saved configurations from
+# producing an unusable userland/kernel combination.
+#
+
+ifneq ($(filter Xzed,$(ZEDBSD_USER_PROGRAMS)),)
+override CONFIG_DRIVER_GRAPHICS := y
+endif
+
+#
+# PC/AT, PC-98, sun4u (the firmware framebuffer) and the Raspberry Pi 4,
+# the Raspberry Pi 5, the ODROID-C5 and the VisionFive 2 (the boot
+# framebuffer) provide a
+# /dev/graphics implementation.  Keep this derived capability internal: an
+# unsupported target may still carry an old CONFIG_DRIVER_GRAPHICS=y
+# setting without acquiring a generic node or an unresolved
+# registration symbol.
+#
+
+ZEDBSD_GRAPHICS_BACKEND := $(strip \
+	$(if $(filter pcat amd64,$(ZEDBSD_PLATFORM_DIR)),pcat,\
+	$(if $(filter pc98,$(ZEDBSD_PLATFORM_DIR)),pc98,\
+	$(if $(filter sparcv9,$(ZEDBSD_PLATFORM_DIR)),sun4u,\
+	$(if $(filter rpi4 rpi5 odroid-c5 visionfive2,$(ZEDBSD_PLATFORM)),bootfb)))))
+
+override CONFIG_DRIVER_GRAPHICS_DEVICE := $(if $(and \
+	$(filter y,$(CONFIG_DRIVER_GRAPHICS)),$(ZEDBSD_GRAPHICS_BACKEND)),y,n)
+
+#
+# Kernel object lists and preprocessor guards both depend on this derived
+# capability. Keep a content-stable stamp so changing either config.mk or a
+# command-line CONFIG_DRIVER_GRAPHICS override invalidates an existing BUILD
+# without forcing an otherwise unchanged kernel to rebuild every time.
+#
+
+ZEDBSD_GRAPHICS_CONFIG_STAMP := $(BUILD)/.graphics-device-config
+
+.PHONY: FORCE_ZEDBSD_GRAPHICS_CONFIG
+FORCE_ZEDBSD_GRAPHICS_CONFIG:
+
+$(ZEDBSD_GRAPHICS_CONFIG_STAMP): FORCE_ZEDBSD_GRAPHICS_CONFIG
+	@mkdir -p $(dir $@)
+	@value='CONFIG_DRIVER_GRAPHICS_DEVICE=$(CONFIG_DRIVER_GRAPHICS_DEVICE)'; \
+ if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+ printf '%s\n' "$$value" > $@.tmp; \
+ mv $@.tmp $@; \
+ fi
+ZEDBSD_MISSING_PACKAGE_REQUIREMENTS := $(sort \
+	$(foreach program,$(ZEDBSD_USER_PROGRAMS),\
+ $(foreach requirement,$(USERLAND_$(program)_REQUIRE),\
+ $(if $(filter $(requirement),\
+ $(foreach candidate,$(USERLAND_PACKAGES),\
+ $(USERLAND_$(candidate)_PACKAGE))),,\
+ $(requirement)))))
+ifneq ($(strip $(ZEDBSD_MISSING_PACKAGE_REQUIREMENTS)),)
+$(error Unknown userland package dependencies: \
+	$(ZEDBSD_MISSING_PACKAGE_REQUIREMENTS))
+endif
+
+USERLAND_SELECTED_BASIC_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
+	$(USERLAND_BASIC_PROGRAMS))
+USERLAND_SELECTED_NETWORK_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
+	$(USERLAND_NETWORK_PROGRAMS))
+zedbsd_userland_destination = /$(USERLAND_$(1)_INSTALL_DIR)/$(1)
+ZEDBSD_USERLAND_FILE_MODES = $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
+	$(if $(USERLAND_$(program)_MODE),\
+ --mode $(call zedbsd_userland_destination,$(program))=$(USERLAND_$(program)_MODE)))
+ZEDBSD_SELECTED_DATA_PACKAGES = $(foreach package,$(ZEDBSD_USER_PROGRAMS),\
+	$(if $(strip $(USERLAND_$(package)_DATA)),$(package)))
+ZEDBSD_USERLAND_DATA_INPUTS = $(foreach package,\
+	$(ZEDBSD_SELECTED_DATA_PACKAGES),$(foreach entry,\
+ $(USERLAND_$(package)_DATA),$(word 2,$(subst =, ,$(entry)))))
+ZEDBSD_USERLAND_DATA_FILES = $(foreach package,\
+	$(ZEDBSD_SELECTED_DATA_PACKAGES),$(foreach entry,\
+ $(USERLAND_$(package)_DATA),--file $(entry)))
+ZEDBSD_USERLAND_DATA_MODES = $(foreach package,\
+	$(ZEDBSD_SELECTED_DATA_PACKAGES),$(foreach entry,\
+ $(USERLAND_$(package)_DATA),\
+ --mode $(word 1,$(subst =, ,$(entry)))=0644))
+
+# $(1): object tree prefix, $(2): registered package name.
+define ZEDBSD_USERLAND_OBJECTS
+$(patsubst %.c,$(1)/%.o,$(filter %.c,$(USERLAND_$(2)_SOURCES))) \
+$(patsubst %.S,$(1)/%.o,$(filter %.S,$(USERLAND_$(2)_SOURCES)))
+endef
+
+.PHONY: list-user-programs
+list-user-programs:
+	@$(foreach program,$(ZEDBSD_ALL_USER_PROGRAMS),printf '%s|%s|%s|%s|%s|%s|%s\n' \
+ '$(program)' '$(USERLAND_$(program)_LABEL)' \
+ '$(USERLAND_$(program)_PLATFORMS)' \
+ '$(USERLAND_$(program)_DEFAULT)' \
+ '$(USERLAND_$(program)_MENU)' \
+ '$(USERLAND_$(program)_PACKAGE)' \
+ '$(USERLAND_$(program)_REQUIRE)';)
+
+.PHONY: menuconfig
+menuconfig:
+	@$(PYTHON) tools/menuconfig.py --output $(ZEDBSD_CONFIG)
+
+.PHONY: menuconfig-host-test
+menuconfig-host-test:
+	@$(PYTHON) plan/tools/menuconfig-target-host-test.py
+
+#
+# The wired policy takes no device and runs no command, so what it
+# decides can be put to it on the host, where a cable can be moved by
+# writing one.
+#
+
+.PHONY: managed-lan-host-test
+managed-lan-host-test:
+	@mkdir -p $(BUILD)/host-tests
+	@$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Iplan/ws033/tests/include -Iinclude -I. \
+	 userland/base/networkd/managed-lan.c \
+	 plan/ws033/tests/managed-lan-host-test.c \
+	 -o $(BUILD)/host-tests/managed-lan
+	@$(BUILD)/host-tests/managed-lan
+
+#
+# The Linux desktop has independent rules and uses only the host
+# compiler and headers, the host packages it needs are checked first
+# (asked before they are installed), and after a build that succeeded
+# the install is offered (asked before it runs). KEILAND_ASK=n asks
+# nothing and only prints.
+#
+
+KEILAND_ASK ?= y
+KEILAND_PREREQUISITES := KEILAND_ASK=$(KEILAND_ASK) sh tools/build/keiland-prerequisites.sh
+.PHONY: keiland-linux keiland-linux-install keiland-linux-install-session keiland-linux-clean
+keiland-linux:
+	@$(KEILAND_PREREQUISITES) check linux
+	$(MAKE) -f userland/desktop/keiland-linux.mk all
+	@$(KEILAND_PREREQUISITES) offer-install linux $(MAKE) -f userland/desktop/keiland-linux.mk install $(MAKEOVERRIDES)
+keiland-linux-install:
+	$(MAKE) -f userland/desktop/keiland-linux.mk install
+keiland-linux-install-session:
+	$(MAKE) -f userland/desktop/keiland-linux.mk install-session
+keiland-linux-clean:
+	$(MAKE) -f userland/desktop/keiland-linux.mk clean
+
+# OmniGrammaton for Windows, cross-built by apps/browser-win32/Makefile (which also runs alone, as on a
+# Windows host); config.mk is not needed.  LLVM_MINGW=<root of llvm-mingw> chooses the toolchain.
+.PHONY: browser-win64 browser-winarm64 browser-win64-clean browser-winarm64-clean browser-win64-zip browser-winarm64-zip
+browser-win64:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-win64)
+browser-winarm64:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=aarch64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-winarm64)
+browser-win64-clean:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-win64) clean
+browser-winarm64-clean:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=aarch64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-winarm64) clean
+browser-win64-zip:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-win64) all zip
+browser-winarm64-zip:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=aarch64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-winarm64) all zip
+
+# FreeBSD also has a BSD make entry; GNU make uses the same independent native rules.
+.PHONY: keiland-freebsd keiland-freebsd-install
+keiland-freebsd:
+	@$(KEILAND_PREREQUISITES) check freebsd
+	$(MAKE) -f userland/desktop/keiland-freebsd.mk all
+	@$(KEILAND_PREREQUISITES) offer-install freebsd $(MAKE) -f userland/desktop/keiland-freebsd.mk install $(MAKEOVERRIDES)
+keiland-freebsd-install:
+	$(MAKE) -f userland/desktop/keiland-freebsd.mk install
+
+# Distribution packages are built and installed in isolated native QEMU guests.
+.PHONY: keiland-linux-debian keiland-linux-ubuntu2604
+keiland-linux-debian:
+	$(PYTHON) tools/release/keiland-linux-deb/run.py debian13
+keiland-linux-ubuntu2604:
+	$(PYTHON) tools/release/keiland-linux-deb/run.py ubuntu2604
+
+#
+# The three debs: built natively in a throwaway target rootfs
+# (mmdebstrap), checked for their format and that apt resolves their
+# dependencies; no VM.
+#
+.PHONY: keiland-deb-amd64 keiland-deb-arm64 keiland-deb-rpi
+keiland-deb-amd64:
+	$(PYTHON) tools/release/keiland-linux-deb/rootfs.py deb13-amd64
+keiland-deb-arm64:
+	$(PYTHON) tools/release/keiland-linux-deb/rootfs.py deb13-arm64
+keiland-deb-rpi:
+	$(PYTHON) tools/release/keiland-linux-deb/rootfs.py rpios13-arm64
+
+.PHONY: validate-image-config
+validate-image-config:
+	@:
+
+.PHONY: help list-targets
+help:
+	@printf '%s\n' \
+ 'zedBSD build interface' \
+ '' \
+ ' [Main]' \
+ '  make menuconfig      Configure the build in config.mk' \
+ '  make disk-image      Build a disk image' \
+ '  make help            Show this summary' \
+ '' \
+ ' [Dedicated]' \
+ '  make world           Build vmunix and rootfs' \
+ '  make rootfs          Build rootfs' \
+ '  make vmunix          Build the kernel' \
+ '' \
+ ' [Packages]' \
+ '  make download        Acquire all declared external userland inputs' \
+ '  make patch           Extract and patch every declared external input' \
+ '' \
+ ' [Toolchain]' \
+ '  make toolchain       Build the toolchain' \
+ '  make toolchain-cache Build the toolchain (using cache)' \
+ '' \
+ ' [FreeBSD Keiland]' \
+ '  make keiland-freebsd' \
+ '  make keiland-freebsd-install' \
+ '' \
+ ' [Linux Keiland]' \
+ '  make keiland-linux' \
+ '  make keiland-linux-install' \
+ '  make keiland-linux-install-session' \
+ '  make keiland-linux-clean'
+
+list-targets:
+	@printf 'Primary targets:\n'; \
+ for target in $(ZEDBSD_PRIMARY_TARGETS); do printf ' %s\n' "$$target"; done
+	@printf 'Support targets:\n'; \
+ for target in $(ZEDBSD_SUPPORT_TARGETS); do printf ' %s\n' "$$target"; done
+	@printf 'Focused checks:\n'; \
+ for target in $(ZEDBSD_CHECK_TARGETS); do printf ' %s\n' "$$target"; done
+
+# The LLVM source is verified, and the host generators the clang
+# package's cross build runs are built from it, here: with the binary
+# cache nothing else does either before packages start using (and
+# patching) that source tree.
+
+toolchain: $(NOCT_HOST_BUILD_STAMP) llvm-toolchain \
+	sysroots $(ZEDBSD_LLVM_SOURCE_VERIFIED) $(ZEDBSD_LLVM_NATIVE_STAMP)
+
+.PHONY: download
+download: $(sort $(ZEDBSD_USERLAND_DOWNLOAD_TARGETS)) llvm-download
+
+#
+# Extracted and patched trees for every declared external input. Acquisition
+# and patch preparation stay separate so that a tree is prepared once and then
+# built repeatedly without consulting the network again.
+#
+
+.PHONY: patch
+patch: $(sort $(ZEDBSD_USERLAND_PATCH_TARGETS))
+
+
+$(ZEDBSD_IMAGE_HOST): tools/build/zedimage-host.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror $< -o $@
+
+ZEDBSD_CONFIG_CPPFLAGS := \
+	-DCONFIG_DRIVER_NE2000=$(if $(filter y,$(CONFIG_DRIVER_NE2000)),1,0) \
+	-DCONFIG_DRIVER_LGY98=$(if $(filter y,$(CONFIG_DRIVER_LGY98)),1,0) \
+	-DCONFIG_DRIVER_GRAPHICS=$(if $(filter y,$(CONFIG_DRIVER_GRAPHICS)),1,0) \
+	-DCONFIG_DRIVER_GRAPHICS_DEVICE=$(if $(filter y,$(CONFIG_DRIVER_GRAPHICS_DEVICE)),1,0) \
+	-DCONFIG_DRIVER_PCI_UHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_UHCI)),1,0) \
+	-DCONFIG_DRIVER_PCI_EHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_EHCI)),1,0) \
+	-DCONFIG_DRIVER_PCI_XHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_XHCI)),1,0) \
+	-DCONFIG_DRIVER_PCI_NVME=$(if $(filter y,$(CONFIG_DRIVER_PCI_NVME)),1,0) \
+	-DCONFIG_DRIVER_PCI_AHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_AHCI)),1,0) \
+	-DCONFIG_DRIVER_PCI_VMD=$(if $(filter y,$(CONFIG_DRIVER_PCI_VMD)),1,0) \
+	-DCONFIG_DRIVER_PCI_VENUS=$(if $(filter y,$(CONFIG_DRIVER_PCI_VENUS)),1,0) \
+	-DCONFIG_DRIVER_PCI_I915=$(if $(filter y,$(CONFIG_DRIVER_PCI_I915)),1,0) \
+	-DCONFIG_CPU_PERF=$(if $(filter y,$(CONFIG_CPU_PERF)),1,0) \
+	-DCONFIG_DELL_SMM_BOOST=$(if $(filter y,$(CONFIG_DELL_SMM_BOOST)),1,0) \
+	-DCONFIG_DRIVER_PCI_NVRTX=$(if $(filter y,$(CONFIG_DRIVER_PCI_NVRTX)),1,0) \
+	-DCONFIG_DRIVER_PCI_AMDRDNA=$(if $(filter y,$(CONFIG_DRIVER_PCI_AMDRDNA)),1,0) \
+	-DCONFIG_AMDRDNA_CONTROL=$(if $(filter y,$(CONFIG_AMDRDNA_CONTROL)),1,0) \
+	-DCONFIG_DRIVER_PCI_GHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_GHCI)),1,0) \
+	-DCONFIG_GHCI_POLL=$(if $(filter y,$(CONFIG_GHCI_POLL)),1,0) \
+	-DCONFIG_GHCI_HOST_UNCACHED=$(if $(filter y,$(CONFIG_GHCI_HOST_UNCACHED)),1,0) \
+	-DCONFIG_DRIVER_PCI_HDA=$(if $(filter y,$(CONFIG_DRIVER_PCI_HDA)),1,0) \
+	-DCONFIG_DRIVER_PCI_INTEL_AX211=$(if $(filter y,$(CONFIG_DRIVER_PCI_INTEL_AX211)),1,0) \
+	-DCONFIG_DRIVER_PCI_RTL8125=$(if $(filter y,$(CONFIG_DRIVER_PCI_RTL8125)),1,0) \
+	-DCONFIG_DRIVER_PCI_RTL8125_PROFILE=$(if $(filter y,$(CONFIG_DRIVER_PCI_RTL8125_PROFILE)),1,0) \
+	-DCONFIG_DRIVER_BCM2711_GENET=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_GENET)),1,0) \
+	-DCONFIG_DRIVER_BCM2711_GPU=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_GPU)),1,0) \
+	-DCONFIG_DRIVER_POWERVR=$(if $(filter y,$(CONFIG_DRIVER_POWERVR)),1,0) \
+	-DCONFIG_POWERVR_DEBUG=$(if $(filter y,$(CONFIG_POWERVR_DEBUG)),1,0) \
+	-DCONFIG_DRIVER_VF2_VPU=$(if $(filter y,$(CONFIG_DRIVER_VF2_VPU)),1,0) \
+	-DCONFIG_DRIVER_VF2_VPU_PROBE=$(if $(filter y,$(CONFIG_DRIVER_VF2_VPU_PROBE)),1,0) \
+	-DCONFIG_DRIVER_BCM2711_AUDIO=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_AUDIO)),1,0) \
+	-DCONFIG_DRIVER_BCM2711_WIFI=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_WIFI)),1,0) \
+	-DCONFIG_DRIVER_BCM2711_BT=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_BT)),1,0) \
+	-DCONFIG_DRIVER_BCM2711_VCHIQ=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_VCHIQ)),1,0) \
+	-DCONFIG_DRIVER_BCM2711_VIDEO=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_VIDEO)),1,0) \
+	-DCONFIG_DRIVER_BCM2711_VIDEO_PROBE=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_VIDEO_PROBE)),1,0) \
+	-DCONFIG_DRIVER_BCM2712_VIDEO=$(if $(filter y,$(CONFIG_DRIVER_BCM2712_VIDEO)),1,0) \
+	-DCONFIG_DRIVER_ACPI=$(if $(filter y,$(CONFIG_DRIVER_ACPI)),1,0) \
+	-DCONFIG_DRIVER_TYPEC=$(if $(filter y,$(CONFIG_DRIVER_TYPEC)),1,0) \
+	-DCONFIG_DRIVER_PCI_LPSS_I2C=$(if $(filter y,$(CONFIG_DRIVER_PCI_LPSS_I2C)),1,0) \
+	-DCONFIG_DRIVER_USB_STORAGE=$(if $(filter y,$(CONFIG_DRIVER_USB_STORAGE)),1,0) \
+	-DCONFIG_DRIVER_USB_CDC_NCM=$(if $(filter y,$(CONFIG_DRIVER_USB_CDC_NCM)),1,0) \
+	-DCONFIG_DRIVER_USB_CDC_ECM=$(if $(filter y,$(CONFIG_DRIVER_USB_CDC_ECM)),1,0) \
+	-DCONFIG_DRIVER_USB_RTL815X=$(if $(filter y,$(CONFIG_DRIVER_USB_RTL815X)),1,0) \
+	-DCONFIG_DRIVER_USB_HID=$(if $(filter y,$(CONFIG_DRIVER_USB_HID)),1,0) \
+	-DCONFIG_DRIVER_USB_HUB=$(if $(filter y,$(CONFIG_DRIVER_USB_HUB)),1,0) \
+	-DCONFIG_DRIVER_USB_CCID=$(if $(filter y,$(CONFIG_DRIVER_USB_CCID)),1,0) \
+	-DCONFIG_DRIVER_USB_BT=$(if $(filter y,$(CONFIG_DRIVER_USB_BT)),1,0) \
+	-DCONFIG_DRIVER_USB_UVC=$(if $(filter y,$(CONFIG_DRIVER_USB_UVC)),1,0) \
+	-DCONFIG_DRIVER_CAMERA=$(if $(filter y,$(CONFIG_DRIVER_CAMERA) $(CONFIG_DRIVER_USB_UVC)),1,0) \
+	-DCONFIG_DRIVER_USB_RTL8822BU=$(if $(filter y,$(CONFIG_DRIVER_USB_RTL8822BU)),1,0) \
+	-DCONFIG_KERNEL_USB_HID_CHECKPOINT=$(if $(filter y,$(CONFIG_KERNEL_USB_HID_CHECKPOINT)),1,0) \
+	-DCONFIG_BUF_CACHE_KIB=$(CONFIG_BUF_CACHE_KIB) \
+	-DCONFIG_GPU_JOB_RESERVATION_MS=$(CONFIG_GPU_JOB_RESERVATION_MS) \
+	-DCONFIG_GPU_JOB_EXECUTION_MS=$(CONFIG_GPU_JOB_EXECUTION_MS) \
+	-DCONFIG_GPU_JOB_STOP_MS=$(CONFIG_GPU_JOB_STOP_MS) \
+	-DCONFIG_GPU_CONTROL_MS=$(CONFIG_GPU_CONTROL_MS)
+ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DKERN_TEST_CHECKPOINTS
+endif
+ifeq ($(CONFIG_PCAT_SERIAL_MIRROR),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DPCAT_SERIAL_MIRROR
+endif
+ifeq ($(CONFIG_RPI4_SERIAL_CONSOLE),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DARM64_SERIAL_CONSOLE
+endif
+# The Pi 5 and the ODROID-C5 turn their consoles to the serial line by the same macro.
+ifeq ($(ZEDBSD_PLATFORM)$(CONFIG_RPI5_SERIAL_CONSOLE),rpi5y)
+ZEDBSD_CONFIG_CPPFLAGS += -DARM64_SERIAL_CONSOLE
+endif
+# (The ODROID-C5's debug UART is the console by default.)
+ifeq ($(ZEDBSD_PLATFORM)$(CONFIG_ODROID_C5_SERIAL_CONSOLE),odroid-c5y)
+ZEDBSD_CONFIG_CPPFLAGS += -DARM64_SERIAL_CONSOLE
+endif
+ifeq ($(CONFIG_INPUT_TEST_INJECT),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DINPUT_TEST_INJECT
+endif
+ifeq ($(CONFIG_SECURITY_KEY_TEST_LOOPBACK),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DSECURITY_KEY_TEST_LOOPBACK
+endif
+ifeq ($(CONFIG_BT_TEST_LOOPBACK),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DBT_TEST_LOOPBACK
+endif
+ifeq ($(CONFIG_INPUT_BRIDGE),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DCONFIG_INPUT_BRIDGE
+endif
+
+#
+# Private test builds may add compile-time fault injection without
+# replacing the configured feature macros above. Keep these flags last
+# so a disposable BUILD directory records the complete effective
+# configuration in its stamp.
+#
+
+ZEDBSD_TEST_CPPFLAGS ?=
+ZEDBSD_CONFIG_CPPFLAGS += $(strip $(ZEDBSD_TEST_CPPFLAGS))
+ZEDBSD_PLATFORM_CONFIG_STAMP := $(BUILD)/.platform-config
+.PHONY: FORCE_ZEDBSD_PLATFORM_CONFIG
+FORCE_ZEDBSD_PLATFORM_CONFIG:
+
+$(ZEDBSD_PLATFORM_CONFIG_STAMP): FORCE_ZEDBSD_PLATFORM_CONFIG
+	@mkdir -p $(dir $@)
+	@value='$(strip $(ZEDBSD_CONFIG_CPPFLAGS))'; \
+ if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+ printf '%s\n' "$$value" > $@.tmp; \
+ mv $@.tmp $@; \
+ fi
+
+BUILD_TOOLS_DIR := tools/build
+ZEDBSD_PRIMARY_TARGETS := menuconfig vmunix bootloader rootfs-bin rootfs-usr \
+	rootfs world disk-image run toolchain
+ZEDBSD_SUPPORT_TARGETS := help list-targets check clean distclean
+ZEDBSD_CHECK_TARGETS := check softfloat-host-test \
+	check-disk-image \
+	libc-opcode-check softfloat-opcode-check uapi-abi-layout-check \
+	hal-signal-frame-layout-check \
+	posix-header-check posix-api-matrix-check susv4-header-check \
+	posix2024-header-check posix2024-api-matrix-check \
+	posix2024-utility-matrix-check \
+	susv4-libc-host-test crypt-host-test gettext-catalog-host-test \
+	userland-command-host-test menuconfig-host-test \
+	managed-lan-host-test \
+	ufs-format-host-test ufs-format-python-test overlay-journal-format-host-test
+
+#
+# Scripts invoked from make receive the configured architecture and
+# build tree.
+#
+
+export ZEDBSD_ARCH := $(ZEDBSD_ARCHITECTURE)
+export ZEDBSD_BUILD_DIR := $(CURDIR)/$(BUILD)
+
+ifeq ($(ZEDBSD_ARCHITECTURE),amd64)
+ASFLAGS := -m64 -c
+else ifeq ($(ZEDBSD_ARCHITECTURE),arm64)
+ASFLAGS := -c
+else ifeq ($(ZEDBSD_ARCHITECTURE),riscv64)
+ASFLAGS := -c
+else ifeq ($(ZEDBSD_ARCHITECTURE),riscv32)
+ASFLAGS := -c
+else ifeq ($(ZEDBSD_ARCHITECTURE),armv7)
+ASFLAGS := -c
+else ifeq ($(ZEDBSD_ARCHITECTURE),ppc32)
+ASFLAGS := -c
+else ifeq ($(ZEDBSD_ARCHITECTURE),ppc64)
+ASFLAGS := -c
+else ifeq ($(ZEDBSD_ARCHITECTURE),mips32)
+ASFLAGS := -c
+else ifeq ($(ZEDBSD_ARCHITECTURE),mips64)
+ASFLAGS := -c
+else
+ASFLAGS := -m32 -c
+endif
+
+ifneq ($(strip $(ZEDBSD_TARGET_SYSROOT)),)
+ZEDBSD_CPPFLAGS := -nostdinc \
+	-isystem $(ZEDBSD_TARGET_SYSROOT)/usr/include \
+	-Iinclude -Isrc -I. -I$(BUILD) $(ZEDBSD_CONFIG_CPPFLAGS)
+else
+ZEDBSD_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
+	-I$(BUILD) -Iinclude/libc $(ZEDBSD_CONFIG_CPPFLAGS)
+endif
+
+ifeq ($(ZEDBSD_ARCHITECTURE),i386)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_I386 -DKERN_ATOMIC_SERIALIZED
+else ifeq ($(ZEDBSD_ARCHITECTURE),amd64)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_AMD64
+else ifeq ($(ZEDBSD_ARCHITECTURE),arm64)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_ARM64
+else ifeq ($(ZEDBSD_ARCHITECTURE),riscv64)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_RISCV64
+else ifeq ($(ZEDBSD_ARCHITECTURE),riscv32)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_RISCV32 -DKERN_ATOMIC_SERIALIZED
+else ifeq ($(ZEDBSD_ARCHITECTURE),armv7)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_ARMV7 -DKERN_USER_ABI_ARMV7
+else ifeq ($(ZEDBSD_ARCHITECTURE),ppc32)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_PPC32 -DKERN_ATOMIC_SERIALIZED
+else ifeq ($(ZEDBSD_ARCHITECTURE),ppc64)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_PPC64 -DKERN_ATOMIC_SERIALIZED
+else ifeq ($(ZEDBSD_ARCHITECTURE),mips32)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_MIPS32 -DKERN_ATOMIC_SERIALIZED
+else ifeq ($(ZEDBSD_ARCHITECTURE),mips64)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_MIPS64
+else ifeq ($(ZEDBSD_ARCHITECTURE),sparcv9)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_SPARCV9
+else ifeq ($(ZEDBSD_ARCHITECTURE),m68k)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_M68K -DKERN_ATOMIC_SERIALIZED
+endif
+
+ZEDBSD_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fno-pic -fno-pie \
+	-fno-stack-protector -fno-asynchronous-unwind-tables \
+	-fno-unwind-tables -ffunction-sections -fdata-sections \
+	-Wall -Wextra -Werror
+
+include src/libc/libc.mk
+include src/libc/softfloat.mk
+include toolchain/llvm/sysroot.mk
+ifneq ($(strip $(ZEDBSD_TARGET_SYSROOT)),)
+ZEDBSD_COMPILER_RT_OBJECTS := \
+	$(ZEDBSD_TARGET_SYSROOT)/usr/lib/libzedbsd-compiler-rt.o \
+	$(ZEDBSD_TARGET_SYSROOT)/usr/lib/libclang_rt.builtins.a
+ZEDBSD_SOFTFLOAT_OBJECTS := $(ZEDBSD_COMPILER_RT_OBJECTS)
+endif
+
+KERN_NET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_NET_SOURCES))
+
+KERN_VM_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_VM_SOURCES))
+
+KERN_BLOCK_IDENTITY_OBJS := $(patsubst %.c,$(BUILD)/%.o,\
+	$(KERN_BLOCK_IDENTITY_SOURCES))
+KERN_FAT_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_FAT_SOURCES))
+
+KERN_UFS_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_UFS_SOURCES))
+KERN_ACL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_ACL_SOURCES))
+KERN_QUOTA_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_QUOTA_SOURCES))
+KERN_BOOT_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_BOOT_SOURCES))
+
+#
+# GPU synchronization belongs to the framework selected by its
+# hardware backends.  Add future GPU backends to this dependency list;
+# generic fd support stays in kern.
+#
+
+KERN_GPU_BACKENDS := $(CONFIG_DRIVER_PCI_VENUS) $(CONFIG_DRIVER_PCI_I915) $(CONFIG_DRIVER_PCI_GHCI)
+KERN_GPU_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_GPU_SOURCES))
+
+#
+# - The audio framework is built only when an audio hardware backend
+#   selects it.
+# - Add audio backends to this list.  The VisionFive 2's
+#   headphone jack is part of that board's binding.
+#
+
+KERN_AUDIO_BACKENDS ?= $(CONFIG_DRIVER_PCI_HDA) $(CONFIG_DRIVER_BCM2711_AUDIO) \
+	$(if $(filter visionfive2,$(ZEDBSD_BOARD)),y,n)
+KERN_AUDIO_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_AUDIO_SOURCES))
+
+# ----------------------------------------------------------------------
+# Generic compile rules. Per-object flag overrides use target-specific
+# variables; header dependencies come from -MMD.
+
+OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
+OBJ_CC = $(CC)
+
+$(BUILD)/%.o: %.S
+	@mkdir -p $(dir $@)
+	$(AS) $(ASFLAGS) $< -o $@
+
+#
+# PC/AT and PC-98 keep their established driver object paths even
+# though the production source owner is src/drivers. Platform-specific
+# target flags are attached to these object names in their vmunix
+# makefiles. The layout stamp invalidates pre-move objects which have
+# the same output name but no dependency file; a source-only rename
+# can otherwise leave those ABI-stale objects newer than their new
+# src/drivers prerequisite.
+#
+
+DRIVER_SOURCE_LAYOUT_STAMP := $(BUILD)/.src-drivers-layout-v1
+
+$(DRIVER_SOURCE_LAYOUT_STAMP):
+	@mkdir -p $(dir $@)
+	@touch $@
+
+$(BUILD)/drivers/%.o: src/drivers/%.c $(DRIVER_SOURCE_LAYOUT_STAMP)
+	@mkdir -p $(dir $@)
+	$(OBJ_CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(OBJ_CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@
+
+$(ZEDBSD_LIBC_OBJECTS): OBJ_CC = $(ZEDBSD_LIBC_CC)
+$(ZEDBSD_LIBC_OBJECTS): OBJ_CPPFLAGS = $(ZEDBSD_LIBC_CPPFLAGS)
+$(ZEDBSD_LIBC_OBJECTS): OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
+
+# ----------------------------------------------------------------------
+
+#
+# Architecture-specific rules (artifacts, disk images, QEMU tests,
+# milestone verification chains).
+#
+
+#
+# Root filesystem assembly is Make-controlled. Format-specific encoders and
+# validators remain small standalone tools under tools/build; no normal build
+# target depends on the legacy scripts directory.
+
+ARCH_IMAGE_DIR := build/arch-images
+
+#
+# The root filesystem image is made from this build's root tree, so it lives
+# with the build.  In the shared directory above, a build whose tree had not
+# changed took whatever image another build (another configuration, or pcat
+# and pc98, which share i386) had written last, and booted that root instead
+# of its own.  Test images with fixed file lists stay in the shared directory.
+#
+
+ZEDBSD_ROOTFS_IMAGE_DIR := $(BUILD)/arch-images
+DATA_IMAGE := build/data.img
+SWAP_IMAGE := build/swapfile
+DATA_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-data-image.noct \
+	$(BUILD_TOOLS_DIR)/overlay_journal_format.noct \
+	$(BUILD_TOOLS_DIR)/ufs_format.noct $(ZEDBSD_IMAGE_HOST)
+ARCH_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-image.py \
+	$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py \
+	$(BUILD_TOOLS_DIR)/subtree_files.py
+ARCH_UFS_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
+	$(BUILD_TOOLS_DIR)/ufs_format.noct $(ZEDBSD_IMAGE_HOST)
+
+#
+# The release locks root: ZEDBSD_ROOT_LOCKED=y installs /etc/shadow
+# with root's password replaced by *, so that nobody logs in as root;
+# otherwise the tree's shadow goes in as it is.
+#
+
+ZEDBSD_ROOT_LOCKED ?= n
+
+ifeq ($(ZEDBSD_ROOT_LOCKED),y)
+ZEDBSD_SHADOW := $(BUILD)/gen/shadow
+else
+ZEDBSD_SHADOW := userland/base/etc/shadow
+endif
+
+#
+# The default user's first PIN, 0000, is in /etc/passkey (root's alone),
+# so that a machine without a keyboard can log in on the login screen's
+# keypad; Settings changes it.
+#
+
+ZEDBSD_ACCOUNT_INPUTS := userland/base/etc/passwd userland/base/etc/group \
+	$(ZEDBSD_SHADOW) userland/base/etc/passkey userland/base/etc/services userland/base/etc/hosts
+ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
+	--file /etc/group=userland/base/etc/group \
+	--file /etc/shadow=$(ZEDBSD_SHADOW) \
+	--file /etc/passkey=userland/base/etc/passkey \
+	--file /etc/services=userland/base/etc/services \
+	--file /etc/hosts=userland/base/etc/hosts \
+	--mode /etc/passwd=0644 --mode /etc/group=0644 \
+	--mode /etc/shadow=0400 --mode /etc/passkey=0600 --mode /etc/services=0644 \
+	--mode /etc/hosts=0644
+ZEDBSD_BASE_DATA_INPUTS := $(ZEDBSD_USERLAND_DATA_INPUTS)
+ZEDBSD_BASE_DATA_FILES := $(ZEDBSD_USERLAND_DATA_FILES) \
+	$(ZEDBSD_USERLAND_DATA_MODES)
+ZEDBSD_XZED_SESSION_INPUTS := userland/x11/session/startx \
+	userland/x11/session/Xzedrc userland/x11/session/zwm.conf
+ZEDBSD_XZED_SESSION_FILES := $(if $(filter zwm,$(ZEDBSD_USER_PROGRAMS)),\
+	--file /bin/startx=userland/x11/session/startx \
+	--file /etc/Xzed/Xzedrc=userland/x11/session/Xzedrc \
+	--file /etc/Xzed/zwm.conf=userland/x11/session/zwm.conf \
+	--mode /bin/startx=0755 --mode /etc/Xzed/Xzedrc=0755)
+ZEDBSD_PACKAGE_INPUTS += $(ZEDBSD_XZED_SESSION_INPUTS)
+ZEDBSD_PACKAGE_FILES += $(ZEDBSD_XZED_SESSION_FILES)
+
+#
+# The version: VERSION, at the top of the tree, is its one source.
+# The kernel's banner shows it (ZEDBSD_VERSION defined on cmain's
+# command line, so that the kernel reads no header from outside its
+# tree; the stamp $(BUILD)/gen/version, rewritten only when VERSION
+# changes, compiles it again, and a commit does not relink it).  Every
+# root carries /etc/os-release with the name, the version and, for
+# uname (libc reads the file), the release: the version itself in a
+# release build (ZEDBSD_RELEASE_BUILD=y, the release job's), the
+# version and the source's revision otherwise (1.0.0-beta2+g1a2b3c4;
+# +unknown without git).  Both files are rewritten only when their
+# text changes.
+#
+
+ZEDBSD_VERSION := $(strip $(shell cat VERSION 2>/dev/null))
+
+ifeq ($(shell printf '%s\n' '$(ZEDBSD_VERSION)' | grep -Ex '[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+(\.[a-z0-9]+)*)?'),)
+$(error VERSION must hold one version such as 1.0.0-beta2, not '$(ZEDBSD_VERSION)')
+endif
+
+ZEDBSD_RELEASE_BUILD ?= n
+ZEDBSD_SOURCE_REVISION := $(or $(shell git rev-parse --short=7 HEAD 2>/dev/null),unknown)
+ZEDBSD_SOURCE_DATE := $(or $(shell git log -1 --format=%cs 2>/dev/null),unknown)
+ZEDBSD_RELEASE := $(ZEDBSD_VERSION)$(if $(filter y,$(ZEDBSD_RELEASE_BUILD)),,+$(patsubst %,g%,$(filter-out unknown,$(ZEDBSD_SOURCE_REVISION)))$(filter unknown,$(ZEDBSD_SOURCE_REVISION)))
+ZEDBSD_VERSION_NAME := $(shell printf '%s\n' '$(ZEDBSD_VERSION)' | sed -e 's/-beta\([0-9][0-9]*\)/ Beta \1/' -e 's/-rc\([0-9][0-9]*\)/ RC \1/' -e 's/\.dev$$/ (development)/')
+ZEDBSD_VERSION_STAMP := $(BUILD)/gen/version
+ZEDBSD_OS_RELEASE := $(BUILD)/gen/os-release
+ZEDBSD_PACKAGE_INPUTS += $(ZEDBSD_OS_RELEASE)
+ZEDBSD_PACKAGE_FILES += --file /etc/os-release=$(ZEDBSD_OS_RELEASE) \
+	--mode /etc/os-release=0644
+
+.PHONY: FORCE_ZEDBSD_VERSION
+FORCE_ZEDBSD_VERSION:
+
+$(ZEDBSD_VERSION_STAMP): FORCE_ZEDBSD_VERSION
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(ZEDBSD_VERSION)' > $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; fi
+
+include config/os-name.mk
+
+$(ZEDBSD_OS_RELEASE): FORCE_ZEDBSD_VERSION
+	@mkdir -p $(dir $@)
+	@printf '%s\n' 'NAME="$(ZEDBSD_OS_NAME)"' 'ID=$(ZEDBSD_OS_ID)' \
+ 'VERSION="$(ZEDBSD_VERSION_NAME)"' 'VERSION_ID=$(ZEDBSD_VERSION)' \
+ 'PRETTY_NAME="$(ZEDBSD_OS_NAME) $(ZEDBSD_VERSION_NAME)"' \
+ 'BUILD_ID=$(ZEDBSD_SOURCE_REVISION)' 'ZEDBSD_RELEASE=$(ZEDBSD_RELEASE)' \
+ 'ZEDBSD_VERSION="zedBSD $(ZEDBSD_RELEASE) ($(ZEDBSD_SOURCE_REVISION) $(ZEDBSD_SOURCE_DATE))"' > $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; fi
+
+.PHONY: version
+version: $(ZEDBSD_VERSION_STAMP) $(ZEDBSD_OS_RELEASE)
+
+# The shadow of a release, root's password locked.
+$(BUILD)/gen/shadow: userland/base/etc/shadow
+	@mkdir -p $(dir $@)
+	@sed 's/^root:[^:]*:/root:*:/' $< > $@.tmp
+	@grep -q '^root:\*:' $@.tmp || { echo 'shadow: no root line to lock' >&2; rm -f $@.tmp; exit 1; }
+	@mv $@.tmp $@
+
+#
+# What the release workflow needs to know, as NAME=value lines
+# (.github/workflows/release.yml): the version, its name, and whether
+# the configuration's release carries the Windows zip.
+#
+
+.PHONY: release-info
+release-info:
+	@printf '%s\n' 'version=$(ZEDBSD_VERSION)' 'name=$(ZEDBSD_VERSION_NAME)' \
+ 'zip=$(if $(filter y,$(ZEDBSD_RELEASE_ZIP)),y,n)'
+
+#
+# Files a caller wants in this one image without declaring a package,
+# named on the command line (--file, --mode and --subtree, as a
+# package's). It exists so that a test can put a program in an image
+# and run it, and is empty in an ordinary build:
+#
+#   make ZEDBSD_EXTRA_INPUTS=/path/to/prog \
+#        ZEDBSD_EXTRA_FILES='--file /usr/bin/prog=/path/to/prog' disk-image
+#
+
+ZEDBSD_PACKAGE_INPUTS += $(ZEDBSD_EXTRA_INPUTS)
+ZEDBSD_PACKAGE_FILES += $(ZEDBSD_EXTRA_FILES)
+
+#
+# The rootfs output path is shared by successive menuconfig
+# selections. A source file timestamp cannot represent removal of a
+# program or the addition of an older cached data-only package, so
+# retain the complete resolved selection as a content-stable
+# prerequisite.
+#
+
+ZEDBSD_ROOTFS_CONFIG_STAMP := $(BUILD)/$(if $(filter installer,$(ZEDBSD_IMAGE_PROFILE)),installer/).rootfs-config
+ZEDBSD_ARCH_IMAGE_CONFIG_STAMP := \
+	$(ARCH_IMAGE_DIR)/.$(ZEDBSD_ARCHITECTURE)-rootfs-config
+.PHONY: FORCE_ZEDBSD_ROOTFS_CONFIG
+FORCE_ZEDBSD_ROOTFS_CONFIG:
+
+$(ZEDBSD_ROOTFS_CONFIG_STAMP) \
+$(ZEDBSD_ARCH_IMAGE_CONFIG_STAMP): FORCE_ZEDBSD_ROOTFS_CONFIG
+	@mkdir -p $(dir $@)
+	@platform='$(ZEDBSD_PLATFORM)'; \
+ architecture='$(ZEDBSD_ARCHITECTURE)'; \
+ board='$(ZEDBSD_BOARD)'; \
+ programs='$(strip $(ZEDBSD_USER_PROGRAMS))'; \
+ data='$(strip $(ZEDBSD_USERLAND_DATA_FILES))'; \
+ files='$(strip $(ZEDBSD_PACKAGE_FILES))'; \
+ platform_files='$(strip $(ZEDBSD_ROOTFS_FILES))'; \
+ modes='$(strip $(ZEDBSD_USERLAND_FILE_MODES))'; \
+ links='$(strip $(ZEDBSD_PACKAGE_LINKS))'; \
+ development='$(ZEDBSD_ROOTFS_DEVELOPMENT)'; \
+ value="platform=$$platform;architecture=$$architecture;board=$$board;programs=$$programs;data=$$data;files=$$files;platform_files=$$platform_files;modes=$$modes;links=$$links;development=$$development"; \
+ if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+ printf '%s\n' "$$value" > $@.tmp; \
+ mv $@.tmp $@; \
+ fi
+
+$(DATA_IMAGE): $(DATA_IMAGE_TOOLS)
+	@mkdir -p $(dir $@)
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) \
+ $(BUILD_TOOLS_DIR)/make-data-image.noct \
+ --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --output $@
+
+$(SWAP_IMAGE): $(BUILD_TOOLS_DIR)/make-swapfile.noct
+	@mkdir -p $(dir $@)
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-swapfile.noct --size-mib 64 --output $@
+
+# $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
+define ZEDBSD_ARCH_IMAGE_RULE
+$(1): $(ZEDBSD_ARCH_IMAGE_CONFIG_STAMP) $(3) $(ZEDBSD_PACKAGE_INPUTS) \
+	$(ARCH_IMAGE_TOOLS)
+	@mkdir -p $$(dir $$@)
+	$$(PYTHON) $$(BUILD_TOOLS_DIR)/make-arch-overlay-image.py --force \
+ --profile $(2) --output $$@ $(4) $(ZEDBSD_PACKAGE_FILES)
+
+$(1)-check: $(1)
+	$$(PYTHON) $$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py \
+ --profile $(2) --image $$< $(4) $(ZEDBSD_PACKAGE_FILES)
+endef
+
+# $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
+define ZEDBSD_ARCH_UFS_IMAGE_RULE
+$(1): $(ZEDBSD_ARCH_IMAGE_CONFIG_STAMP) $(3) $(ZEDBSD_PACKAGE_INPUTS) \
+	$(ARCH_UFS_IMAGE_TOOLS)
+	@mkdir -p $$(dir $$@)
+	$$(NOCT) --path=$$(BUILD_TOOLS_DIR) \
+ $$(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
+ --backend $$(abspath $$(ZEDBSD_IMAGE_HOST)) --force \
+ --profile $(2) --output $$@ $(4) $$(ZEDBSD_PACKAGE_FILES)
+
+$(1)-check: $(1)
+	PYTHONPATH=$$(BUILD_TOOLS_DIR) $$(PYTHON) \
+ $$(BUILD_TOOLS_DIR)/check-arch-overlay-ufs.py \
+ --profile $(2) --image $$< $(4) $(ZEDBSD_PACKAGE_FILES)
+endef
+
+# 
+# The directories every root carries, with the mode each must have.  A
+# directory is made with its mode rather than whatever the builder's
+# file creation mask leaves: a group-writable directory is refused by
+# anything that moves its root into the tree, because whoever is in
+# that group could have put something there.
+#
+
+ZEDBSD_ROOTFS_DIRECTORIES := bin sbin lib etc var root home dev boot run \
+	usr/bin usr/sbin usr/libexec var/empty etc/ssh
+ZEDBSD_ROOTFS_STICKY_DIRECTORIES := tmp shm
+
+#
+# $(1): profile, $(2): prerequisites, $(3): --file/--mode arguments,
+# $(4): the tree's directory ($(BUILD)/rootfs when it is not given).
+#
+# The staged tree is the root.  It is what the UFS image is made from,
+# so there is one description of what a root holds instead of two that
+# drift: a symbolic link, a directory mode, or anything a package adds
+# to the tree reaches the image because the image is that tree.
+#
+# Every directory but the sticky ones ends 0755: the ones made for a
+# package's files (/lib/firmware, /usr/share/licenses/...) would
+# otherwise take the builder's file creation mask.
+#
+# The files are written with the file creation mask 022, whatever the
+# builder's is: the image's inodes take the staged modes as they are
+# and belong to root:wheel, so a builder's mask of 002 would let the
+# wheel group rewrite /lib/libc.so and the rest of the system.  A
+# file's group and other write bits therefore come only from an
+# explicit --mode (the sticky directories are made 1777 by chmod), and
+# the package's directories are copied without -p so that the mask
+# applies to them too.
+#
+# The packages' files are expanded when the recipe runs, after the
+# packages have been staged, not when this rule is evaluated: a
+# package whose file list is read from its own stage has an empty list
+# while make parses a fresh build, and the first image would lack
+# those files.
+#
+# --subtree DEST=DIRECTORY puts a whole directory of a package's stage
+# at DEST: Python's standard library, vim's runtime and Emacs's lisp
+# are thousands of files, and a --file for each would make this
+# recipe, which is one argument of the shell, longer than the 128 KiB
+# the kernel allows one argument.  The files keep their modes less
+# the mask 022, and symbolic links stay links.  What the directory
+# holds is not part of the selection's stamp, so the package names a
+# stamp of its stage among ZEDBSD_PACKAGE_INPUTS, and the root is
+# staged again when the package is.
+#
+
+define ZEDBSD_ROOTFS_TREE_RULE
+$(call ZEDBSD_ROOTFS_TREE_RULE_AT,$(1),$(2),$(3),$(or $(4),$(BUILD)/rootfs))
+endef
+
+define ZEDBSD_ROOTFS_TREE_RULE_AT
+$(4)/.stamp: $(ZEDBSD_ROOTFS_CONFIG_STAMP) $(2) \
+	$(ZEDBSD_PACKAGE_INPUTS) $(ZEDBSD_ROOTFS_DEVELOPMENT_INPUTS)
+	@rm -rf $(4)
+	@umask 022; mkdir -p $(4) $(addprefix $(4)/,\
+ $(ZEDBSD_ROOTFS_DIRECTORIES) $(ZEDBSD_ROOTFS_STICKY_DIRECTORIES))
+	@chmod 0755 $(4) $(addprefix $(4)/,\
+ $(ZEDBSD_ROOTFS_DIRECTORIES))
+	@chmod 1777 $(addprefix $(4)/,\
+ $(ZEDBSD_ROOTFS_STICKY_DIRECTORIES))
+	@ln -s ../run $(4)/var/run
+	@umask 022; printf '%s\n' '$(1)' > $(4)/lib/arch.id
+	@umask 022; printf 'zedBSD ufs root v1\n' > $(4)/etc/zedbsd-root
+	@set -e; umask 022; for pass in file mode; do \
+ set -- $(3) $$(ZEDBSD_PACKAGE_FILES); while test $$$$# -gt 0; do \
+ option=$$$$1; specification=$$$$2; shift 2; \
+ path=$$$${specification%%=*}; value=$$$${specification#*=}; \
+ path=$$$${path#/}; destination=$(4)/$$$$path; \
+ case $$$$option in \
+ --file) test "$$$$pass" = file || continue; \
+ mkdir -p "$$$${destination%/*}"; cp -f "$$$$value" "$$$$destination" ;; \
+ --subtree) test "$$$$pass" = file || continue; \
+ test -d "$$$$value" || { \
+ echo "rootfs: --subtree names no directory: $$$$value" >&2; \
+ exit 2; }; \
+ mkdir -p "$$$$destination"; cp -RP "$$$$value/." "$$$$destination/" ;; \
+ --mode) test "$$$$pass" = mode || continue; \
+ test -e "$$$$destination" || { \
+ echo "rootfs: --mode names a file nothing installed: /$$$$path" >&2; \
+ exit 2; }; \
+ chmod "$$$$value" "$$$$destination" ;; \
+ *) echo "unknown rootfs option: $$$$option" >&2; exit 2 ;; \
+ esac; \
+ done; \
+	done
+	@set -e; umask 022; for specification in $(ZEDBSD_PACKAGE_LINKS); do \
+ path=$$$${specification%%=*}; target=$$$${specification#*=}; \
+ path=$$$${path#/}; destination=$(4)/$$$$path; \
+ mkdir -p "$$$${destination%/*}"; ln -sfn "$$$$target" "$$$$destination"; \
+ done
+	@$$(call ZEDBSD_ROOTFS_INSTALL_DEVELOPMENT,$(4))
+	@find $(4) \( -path $(4)/tmp -o -path $(4)/shm \) \
+ -prune -o -type d -exec chmod 0755 {} +
+	@umask 022; touch $$@
+endef
+
+#
+# Symbolic links a package puts in the root, as DEST=TARGET with
+# TARGET taken as written (usually relative, such as a library's
+# SONAME).  Only the root tree reads them; a library's file itself is
+# installed under its SONAME with --file, so the loader finds it
+# without following a link.
+#
+
+ZEDBSD_PACKAGE_LINKS ?=
+
+#
+# The files a program is built from on the target itself: the C
+# library headers and the link-time objects, and what packages add for
+# the same purpose (headers in /usr/include, pkg-config files, the
+# unversioned .so link a linker looks for, static archives).  They are
+# what makes the running system able to compile, so they are installed
+# by default; an embedded root that will never host a compiler sets
+# ZEDBSD_ROOTFS_DEVELOPMENT to n (the build menu's "Install
+# development files"), which removes them from the tree after the
+# packages are in.  A library itself is installed under its SONAME as
+# a regular file, so removing the .so links leaves the loader's names
+# intact.
+#
+
+ZEDBSD_ROOTFS_DEVELOPMENT ?= y
+
+#
+# The images boot fully graphically by default -- the loader's logo
+# (logo=), no kernel message on the screen (kmsg=quiet, dmesg keeps
+# them) and the graphical login (login=graphical).  n (the build
+# menu's "Graphical boot") is for kernel development: the messages on
+# the console and the console login.  It chooses the lines the amd64
+# native zedbsd.cfg gets; the same lines can be edited on a machine's
+# ESP afterwards (docs/reference/kernel-boot-parameters.md).
+
+ZEDBSD_GRAPHICAL_BOOT ?= y
+
+#
+# Whether the kernel's messages are shown on the screen at boot is a
+# build menu choice of its own ("Show kernel messages at boot").  n
+# writes kmsg=quiet (dmesg keeps them); y leaves them on the screen,
+# also under the graphical boot.  A config that does not name it keeps
+# the old behaviour: quiet with the graphical boot, shown without it.
+
+ZEDBSD_BOOT_KERNEL_MESSAGES ?= $(if $(filter y,$(ZEDBSD_GRAPHICAL_BOOT)),n,y)
+
+#
+# Whether the graphical login starts Keiland by itself
+# (login=graphical) is a menu choice of its own ("Graphical login"),
+# apart from the boot logo; by default it follows the graphical boot,
+# which is what it was part of before.
+#
+
+ZEDBSD_GRAPHICAL_LOGIN ?= $(ZEDBSD_GRAPHICAL_BOOT)
+
+# A target without a sysroot has no development files.
+ifeq ($(strip $(ZEDBSD_TARGET_SYSROOT)),)
+override ZEDBSD_ROOTFS_DEVELOPMENT := n
+endif
+ifeq ($(ZEDBSD_ROOTFS_DEVELOPMENT),y)
+ZEDBSD_ROOTFS_DEVELOPMENT_INPUTS := \
+	$(ZEDBSD_TARGET_SYSROOT)/.zedbsd-sysroot-complete
+define ZEDBSD_ROOTFS_INSTALL_DEVELOPMENT
+	umask 022; mkdir -p $(1)/usr/include $(1)/usr/lib
+	umask 022; cp -R $(ZEDBSD_TARGET_SYSROOT)/usr/include/. $(1)/usr/include/
+	umask 022; cp -R $(ZEDBSD_TARGET_SYSROOT)/usr/lib/. $(1)/usr/lib/
+	chmod -R u+w $(1)/usr/include $(1)/usr/lib
+endef
+else
+ZEDBSD_ROOTFS_DEVELOPMENT_INPUTS :=
+define ZEDBSD_ROOTFS_INSTALL_DEVELOPMENT
+	rm -rf $(1)/usr/include $(1)/usr/lib/pkgconfig $(1)/usr/share/pkgconfig
+	find $(1)/lib -maxdepth 1 \
+		\( \( -type l -name '*.so' \) -o \( -type f -name '*.a' \) \) \
+		-exec rm -f {} +
+	test ! -d $(1)/usr/lib || find $(1)/usr/lib -maxdepth 1 \
+		\( \( -type l -name '*.so' \) -o \( -type f -name '*.a' \) \) \
+		-exec rm -f {} +
+endef
+endif
+
+# $(1): output, $(2): profile.  The root is the staged tree.
+define ZEDBSD_ROOTFS_UFS_IMAGE_RULE
+$(1): $(BUILD)/rootfs/.stamp $(ARCH_UFS_IMAGE_TOOLS)
+	@mkdir -p $$(dir $$@)
+	$$(NOCT) --path=$$(BUILD_TOOLS_DIR) \
+ $$(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
+ --backend $$(abspath $$(ZEDBSD_IMAGE_HOST)) --force \
+ --profile $(2) --output $$@ --tree $(BUILD)/rootfs
+endef
+
+include platform/common/userland-runtime.mk
+
+ifneq ($(strip $(ZEDBSD_PLATFORM)),)
+include $(PLATFORM_MAKEFILE)
+endif
+
+# The kernels' banners show the version (ws129-p003).
+$(BUILD)/src/hal/amd64/cmain.o $(BUILD)/src/hal/i386/cmain.o: $(ZEDBSD_VERSION_STAMP)
+$(BUILD)/src/hal/amd64/cmain.o: AMD64_CPPFLAGS += -DZEDBSD_VERSION='"$(ZEDBSD_VERSION)"'
+$(BUILD)/src/hal/i386/cmain.o: HAL_CC += -DZEDBSD_VERSION='"$(ZEDBSD_VERSION)"'
+
+# And so does the kernel's log, its first line (main.c; the HAL's banner reaches only the console).
+$(BUILD)/kern64/src/kern/main.o $(BUILD)/src/kern/main.o: $(ZEDBSD_VERSION_STAMP)
+$(BUILD)/kern64/src/kern/main.o: AMD64_CPPFLAGS += -DZEDBSD_VERSION='"$(ZEDBSD_VERSION)"'
+$(BUILD)/src/kern/main.o: OBJ_CFLAGS += -DZEDBSD_VERSION='"$(ZEDBSD_VERSION)"'
+include tools/release/zedbsd-nightly.mk
+
+ifneq ($(strip $(ZEDBSD_TARGET_TRIPLE)),)
+
+# The kernel needs the target tools only: it reads no C library header, so
+# vmunix does not wait for the sysroot.  Everything built for user space does.
+.PHONY: zedbsd-target-tools-ready zedbsd-target-toolchain-ready
+zedbsd-target-tools-ready:
+	@for tool in clang ld.lld lld-link llvm-ar llvm-ranlib llvm-nm llvm-objcopy \
+ llvm-objdump llvm-readelf llvm-strip; do \
+ test -x "$(ZEDBSD_TARGET_LLVM_BIN)/$$tool" || { \
+ echo "Missing project target tool: $(ZEDBSD_TARGET_LLVM_BIN)/$$tool" >&2; \
+ echo "Run 'make toolchain-cache' first on x86_64 Linux, then run 'make toolchain'." >&2; \
+ echo "Alternatively run 'make toolchain' alone to build LLVM from source." >&2; \
+ exit 1; \
+ }; \
+	done
+
+zedbsd-target-toolchain-ready: zedbsd-target-tools-ready
+	@test -f "$(ZEDBSD_TARGET_SYSROOT)/.zedbsd-sysroot-complete" || { \
+ echo "Missing target sysroot: $(ZEDBSD_TARGET_SYSROOT)" >&2; \
+ echo "Run 'make toolchain' before building a target image." >&2; \
+ exit 1; \
+	}
+
+vmunix: | zedbsd-target-tools-ready
+rootfs world disk-image run: | zedbsd-target-toolchain-ready
+endif
+
+.PHONY: vmunix rootfs world
+world: vmunix rootfs
+
+clean:
+	rm -rf $(BUILD)
+
+# The Noct trees are extracted, one of them outside build/, so they are removed by name.
+distclean: noct-clean
+	rm -rf build
+
+ifneq ($(strip $(ZEDBSD_PLATFORM)),)
+-include $(filter-out $(BUILD)/rootfs/% $(BUILD)/installer/%,$(wildcard $(BUILD)/*.d \
+	$(BUILD)/*/*.d $(BUILD)/*/*/*.d $(BUILD)/*/*/*/*.d \
+	$(BUILD)/*/*/*/*/*.d $(BUILD)/*/*/*/*/*/*.d \
+	$(BUILD)/*/*/*/*/*/*/*.d \
+	$(BUILD)/*/*/*/*/*/*/*/*.d))
+endif
+
+.PHONY: clean distclean
+
+
+
+
+------------
+# zedBSD amd64/PC-AT bootstrap rules.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+AMD64_PLATFORM := platform/amd64
+BIOS_LOADER := bootloader/pcat
+UEFI_LOADER := bootloader/uefi
+AMD64_ZEDBSD_CONFIG := $(AMD64_PLATFORM)/zedbsd.cfg
+AMD64_NATIVE_ZEDBSD_CONFIG := $(AMD64_PLATFORM)/zedbsd-native.cfg
+AMD64_UEFI_CONFIGURED_IMAGES := \
+	$(BUILD)/bios-hdd-image.img \
+	$(BUILD)/bios-hdd-image-fragmented.img \
+	$(BUILD)/deferred-stub-qemu.img \
+	$(BUILD)/phase19-qemu.img \
+	$(BUILD)/phase20-qemu.img \
+	$(BUILD)/posix-phase2-qemu.img \
+	$(BUILD)/posix-phase3-qemu.img \
+	$(BUILD)/posix-phase4-qemu.img \
+	$(BUILD)/posix-phase5-qemu.img \
+	$(BUILD)/posix-phase6-qemu.img \
+	$(BUILD)/posix-phase7-qemu.img \
+	$(BUILD)/posix-phase8-qemu.img \
+	$(BUILD)/posix-phase85-qemu.img
+$(AMD64_UEFI_CONFIGURED_IMAGES): $(AMD64_ZEDBSD_CONFIG) \
+	$(ZEDBSD_IMAGE_HOST)
+.DELETE_ON_ERROR: $(AMD64_UEFI_CONFIGURED_IMAGES)
+.DELETE_ON_ERROR: $(BUILD)/ufs-root-hdd-image.img \
+	$(BUILD)/hdd-image.img
+
+# Variant is an image-composition input only. This content-stable stamp
+# invalidates a previously published hdd-image.img without leaking the
+# selection into kernel, userland, or loader compilation.
+AMD64_IMAGE_CONTRACT_STAMP := $(BUILD)/.disk-image-contract
+AMD64_IMAGE_STAGE1 := $(if $(filter bios,$(ZEDBSD_VARIANT)),\
+	$(BUILD)/bootloader/stage1-native.bin,$(BUILD)/bootloader/stage1.bin)
+.PHONY: FORCE_AMD64_IMAGE_CONTRACT
+FORCE_AMD64_IMAGE_CONTRACT:
+
+$(AMD64_IMAGE_CONTRACT_STAMP): FORCE_AMD64_IMAGE_CONTRACT
+	@mkdir -p $(dir $@)
+	@value='layout=$(ZEDBSD_VARIANT)'; \
+ if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+ printf '%s\n' "$$value" > $@.tmp; \
+ mv $@.tmp $@; \
+ fi
+
+define AMD64_VALIDATE_GPT_IMAGE
+	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-gpt-image.noct \
+ --layout $(ZEDBSD_VARIANT) \
+ --machine pcat --stage1 $(AMD64_IMAGE_STAGE1) \
+ --stage2 $(BUILD)/bootloader/stage2-chain.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $(1)
+endef
+EFI_CC := $(ZEDBSD_TARGET_LLVM_BIN)/clang \
+	--target=x86_64-unknown-windows
+EFI_LD := $(ZEDBSD_TARGET_LLVM_BIN)/lld-link
+EFI_NM := $(ZEDBSD_TARGET_LLVM_BIN)/llvm-nm
+EFI_CFLAGS := -std=c11 -ffreestanding -fshort-wchar -mno-red-zone \
+	-fno-stack-protector -fno-builtin -fno-asynchronous-unwind-tables \
+	-fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections \
+	-Os -Wall -Wextra -Werror -I.
+
+# The kernel and the HAL read the compiler's freestanding headers (stdint.h,
+# stddef.h, stdbool.h, stdarg.h, limits.h) and the tree's own include/ and
+# src/, never the C library: -nostdlibinc keeps only the compiler's resource
+# directory from the system search list, so the sysroot is not read.
+AMD64_CPPFLAGS := -nostdlibinc \
+	-Iinclude -Isrc -I. \
+	-DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
+	-DKERN_USER_ABI_LP64 \
+	-DPCAT_VGA_APERTURE_ADDRESS=0xffffffffc1400000ULL \
+	-DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL
+AMD64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
+AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
+	-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
+	-fno-asynchronous-unwind-tables -fno-unwind-tables \
+	-ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror \
+	-Wframe-larger-than=8192 -fno-builtin
+AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
+# Link-time optimization of vmunix (ws053): ZEDBSD_KERNEL_LTO_CFLAGS (from the
+# top Makefile) goes to every C object of the kernel, its drivers and the
+# HAL; the assembly stays native.
+AMD64_KERNEL_LTO_CFLAGS := $(ZEDBSD_KERNEL_LTO_CFLAGS)
+
+AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/x86/boot-parameters.c \
+	src/hal/x86/io.c \
+	src/hal/amd64/asm.c src/hal/amd64/lib.c \
+	src/hal/amd64/page.c src/hal/amd64/pmem-range.c \
+	src/hal/amd64/ram-map.c src/hal/amd64/framebuffer-map.c \
+	src/hal/amd64/space.c src/hal/amd64/image.c \
+	src/hal/amd64/acpi-window.c src/hal/amd64/cmain.c \
+	src/hal/amd64/descriptor.c src/hal/amd64/int.c src/hal/amd64/irq.c \
+	src/hal/amd64/msi-source.c \
+	src/hal/amd64/task.c src/hal/amd64/percpu.c src/hal/amd64/smp.c \
+	src/hal/amd64/bsp-pcat/boot.c \
+	src/hal/amd64/bsp-pcat/handoff-validation.c \
+	src/hal/amd64/bsp-pcat/cons.c \
+	src/hal/amd64/bsp-pcat/pic.c src/hal/amd64/bsp-pcat/clock.c \
+	src/hal/amd64/bsp-pcat/acpi.c src/hal/amd64/bsp-pcat/lapic.c \
+	src/hal/amd64/bsp-pcat/idle-suspend.c \
+	src/hal/amd64/bsp-pcat/early-init-policy.c \
+	src/hal/amd64/bsp-pcat/timecounter-policy.c \
+	src/hal/amd64/bsp-pcat/timecounter.c \
+	src/hal/amd64/bsp-pcat/mcfg.c \
+	src/hal/amd64/bsp-pcat/ioapic.c
+AMD64_HAL_ASM := src/hal/amd64/locore.S src/hal/amd64/trap.S \
+	src/hal/amd64/dispatch.S src/hal/amd64/ap-trampoline.S
+AMD64_HAL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AMD64_HAL_SOURCES)) \
+	$(patsubst %.S,$(BUILD)/%.o,$(AMD64_HAL_ASM))
+
+AMD64_USB_HCD_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_UHCI),y)
+AMD64_USB_HCD_SOURCES += src/drivers/pci/pci-uhci.c
+endif
+ifeq ($(CONFIG_DRIVER_PCI_EHCI),y)
+AMD64_USB_HCD_SOURCES += src/drivers/pci/pci-ehci.c
+endif
+ifeq ($(CONFIG_DRIVER_PCI_XHCI),y)
+AMD64_USB_HCD_SOURCES += src/drivers/pci/pci-xhci.c src/drivers/pci/pci-xhci-isoch.c
+endif
+AMD64_USB_CLASS_SOURCES :=
+ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-storage.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-uas.c src/drivers/usb/usb-uas-transport.c src/drivers/usb/usb-uas-disk.c
+endif
+AMD64_NVME_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
+AMD64_NVME_SOURCES += src/drivers/pci/pci-nvme.c
+endif
+ifeq ($(CONFIG_DRIVER_PCI_AHCI),y)
+AMD64_NVME_SOURCES += src/drivers/pci/pci-ahci.c
+endif
+# The Intel VMD driver (WS298) shows the NVMe disks a VMD hides (firmware storage mode RAID).
+# Its BAR placement uses pci-window.c, which the ACPI build already links.
+ifeq ($(CONFIG_DRIVER_PCI_VMD),y)
+AMD64_NVME_SOURCES += src/drivers/pci/pci-vmd.c src/drivers/pci/pci-vmd-plan.c
+ifneq ($(CONFIG_DRIVER_ACPI),y)
+AMD64_NVME_SOURCES += src/drivers/pci/pci-window.c
+endif
+endif
+AMD64_HDA_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_HDA),y)
+AMD64_HDA_SOURCES += src/drivers/pci/pci-hda.c
+endif
+AMD64_VENUS_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_VENUS),y)
+AMD64_VENUS_SOURCES += src/drivers/gpu/venus/transport.c \
+	src/drivers/gpu/venus/venus.c src/drivers/gpu/venus/display.c src/drivers/gpu/venus/share.c
+endif
+
+# The generic GHCI GPU driver (a PCIe GPU with the GPU Host Controller Interface 1.0): the device, the ring,
+# the fences, the interrupt, the recovery, the sessions and their GPU addresses, the resources, the display
+# (DISP2), the shader compiler and the Vulkan executor (with the shared wire codec of the i915 executor).
+AMD64_GHCI_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_GHCI),y)
+AMD64_GHCI_SOURCES += src/drivers/gpu/ghci/ghci.c src/drivers/gpu/ghci/pci-attach.c src/drivers/gpu/ghci/cp.c \
+	src/drivers/gpu/ghci/recover.c src/drivers/gpu/ghci/service.c src/drivers/gpu/ghci/memory.c \
+	src/drivers/gpu/ghci/check.c src/drivers/gpu/ghci/caps.c src/drivers/gpu/ghci/cmd.c \
+	src/drivers/gpu/ghci/vm.c src/drivers/gpu/ghci/range.c src/drivers/gpu/ghci/share.c \
+	src/drivers/gpu/ghci/isa.c src/drivers/gpu/ghci/compiler/gsi1-compile.c \
+	src/drivers/gpu/ghci/compiler/gsi1-encode.c src/drivers/gpu/ghci/compiler/gsi1-io.c \
+	src/drivers/gpu/ghci/compiler/gsi1-memory.c src/drivers/gpu/ghci/compiler/gsi1-texture.c \
+	src/drivers/gpu/ghci/compiler/gsi1-image.c src/drivers/gpu/ghci/compiler/gsi1-schedule.c \
+	src/drivers/gpu/ghci/compiler/gsi1-spill.c \
+	src/drivers/gpu/ghci/jobs.c src/drivers/gpu/ghci/capset.c \
+	src/drivers/gpu/ghci/display.c src/drivers/gpu/ghci/display-scan.c src/drivers/gpu/ghci/adv7511.c \
+	src/drivers/gpu/ghci/vk/vk-node.c src/drivers/gpu/ghci/vk/vk-stream.c src/drivers/gpu/ghci/vk/vk-dispatch.c \
+	src/drivers/gpu/ghci/vk/vk-object.c src/drivers/gpu/ghci/vk/vk-reply.c src/drivers/gpu/ghci/vk/vk-caps.c \
+	src/drivers/gpu/ghci/vk/vk-format.c src/drivers/gpu/ghci/vk/vk-device.c src/drivers/gpu/ghci/vk/vk-memory.c \
+	src/drivers/gpu/ghci/vk/vk-command.c src/drivers/gpu/ghci/vk/vk-queue.c \
+	src/drivers/gpu/ghci/vk/vk-layout.c src/drivers/gpu/ghci/vk/vk-pipeline.c src/drivers/gpu/ghci/vk/vk-pass.c src/drivers/gpu/ghci/vk/vk-execute.c \
+	src/drivers/gpu/ghci/vk/vk-meta.c \
+	$(filter-out $(AMD64_I915_SOURCES) $(AMD64_NVRTX_SOURCES) $(AMD64_AMDRDNA_COMPILER_SOURCES),src/drivers/gpu/compiler/spirv.c src/drivers/gpu/compiler/optimize.c) \
+	$(filter-out $(AMD64_I915_SOURCES) $(AMD64_NVRTX_SOURCES) $(AMD64_AMDRDNA_VK_SOURCES),src/drivers/gpu/i915/vk/vk-codec.c)
+endif
+# The i915 test build: checkpoints the production code calls through weak symbols.
+# The runner runs the scenario -DI915_TEST_SCENARIO=<name> (in ZEDBSD_TEST_CPPFLAGS) after the start;
+# I915_TEST_ORACLE=y also links the draw readback the pixel oracle reads (slow: it dumps a frame).
+# I915_TEST_SET chooses the scenarios the build links.  The test kernel with every scenario does not fit
+# AMD64_KERNEL_MAX_BYTES (q762, 2026-10-05: the kernel without tests is within about 450 KiB of it, and the tests add
+# 1.4 MiB), so each set links the runner and a part of them (the runner refers to every scenario weakly and says
+# "not linked" for one the set leaves out).  plan/ws031/tests/vkloop-hw.sh builds each scenario's own image and
+# picks its set when I915_TEST_SET is not given:
+#   vkx, vkc, vke1, vke2  that render scenario alone (vke2 with the compiler's boundary steps, ws031-p024,
+#                         -DI915_VKE2_BOUNDARY); "boundary" is vke2's name before q762, "render" vkx's
+#   execution             ktest eu draw r1 tex t3 bl
+#   compute               vkcs (ws101-p006)
+I915_TEST_SET ?= vke2
+AMD64_I915_TEST_SET_STAMP :=
+ifeq ($(I915_TESTS),y)
+ifeq ($(I915_TEST_ORACLE),y)
+AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/readback.c
+endif
+AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/execution/runner.c src/drivers/gpu/i915/tests/execution/firmware-override.c
+ifeq ($(I915_TEST_SET),compute)
+AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/compute.c
+else ifeq ($(I915_TEST_SET),execution)
+AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/execution/ktest.c src/drivers/gpu/i915/tests/execution/ktest-sync.c src/drivers/gpu/i915/tests/execution/ktest-gt.c src/drivers/gpu/i915/tests/execution/eu-test.c src/drivers/gpu/i915/tests/execution/ppgtt-walk.c src/drivers/gpu/i915/tests/execution/draw-test.c src/drivers/gpu/i915/tests/execution/fhd-render.c src/drivers/gpu/i915/tests/fixtures/draw-fixture.c
+else ifneq ($(filter display display_ktest display_ktest2,$(I915_TEST_SET)),)
+$(error I915_TEST_SET=$(I915_TEST_SET): the display scenarios and ktests ran the older modeset, which is gone; the display is tested by the xd host tests)
+else ifneq ($(filter vkx render,$(I915_TEST_SET)),)
+AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/executor.c
+else ifeq ($(I915_TEST_SET),vkc)
+AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/compiler.c
+else ifeq ($(I915_TEST_SET),vke1)
+AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/features.c
+else ifneq ($(filter vke2 boundary,$(I915_TEST_SET)),)
+AMD64_I915_SOURCES += src/drivers/gpu/i915/tests/render/generality.c
+AMD64_CPPFLAGS += -DI915_VKE2_BOUNDARY=1
+else
+$(error I915_TEST_SET=$(I915_TEST_SET) is not a test set: vkx, vkc, vke1, vke2, execution or compute)
+endif
+# The scenarios linked change with I915_TEST_SET: a content-stable stamp relinks an existing BUILD when it changes.
+AMD64_I915_TEST_SET_STAMP := $(BUILD)/.i915-test-set
+endif
+# The i915 test VBT (I915_TEST_VBT=y, the captured VBT of the 5330 for the QEMU passthrough guest) was removed on
+# 2026-10-14 (plan/ws233/phase001/phase.md); a caller that still asks for it is told so.
+ifeq ($(I915_TEST_VBT),y)
+$(error I915_TEST_VBT=y: the captured test VBT was removed (ws233-p001); drop the setting)
+endif
+# The i915 capture display: I915_TEST_CAPTURE=y leaves the display hardware alone (no modeset, no panel)
+# and captures every presentation into guest RAM that the QEMU host reads (display/capture.c).
+# Test builds only: the production kernel neither compiles nor links capture.c.
+ifeq ($(I915_TEST_CAPTURE),y)
+AMD64_CPPFLAGS += -DI915_TEST_CAPTURE=1
+AMD64_I915_SOURCES += src/drivers/gpu/i915/display/capture.c
+endif
+AMD64_ACPI_SOURCES :=
+ifeq ($(CONFIG_DRIVER_ACPI),y)
+AMD64_ACPI_SOURCES += $(sort $(wildcard src/drivers/acpi/*.c))
+# The PC/AT host places the BARs the firmware left unassigned in the _CRS windows (BUG-210).
+AMD64_ACPI_SOURCES += src/drivers/pci/pci-pcat-assign.c src/drivers/pci/pci-window.c
+# The USB-C connectors' UCSI driver (WS050) runs over the ACPI device USBC000.
+ifeq ($(CONFIG_DRIVER_TYPEC),y)
+AMD64_ACPI_SOURCES += $(sort $(wildcard src/drivers/typec/*.c))
+endif
+endif
+AMD64_I2C_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_LPSS_I2C),y)
+AMD64_I2C_SOURCES += src/drivers/i2c/i2c.c src/drivers/i2c/lpss-i2c.c
+# HID over I2C finds its devices in the ACPI namespace (WS159).
+ifeq ($(CONFIG_DRIVER_ACPI),y)
+AMD64_I2C_SOURCES += src/drivers/i2c/i2c-hid.c src/drivers/gpio/intel-gpio.c
+endif
+endif
+AMD64_RTL8125_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_RTL8125),y)
+AMD64_RTL8125_SOURCES += src/drivers/ethernet/rtl8125.c
+endif
+AMD64_INTEL_WLAN_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_INTEL_AX211),y)
+AMD64_INTEL_WLAN_SOURCES += src/drivers/wifi/intel-ax211/intel-ax211.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-pci.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-assoc.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-boot.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-bss.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-command.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-dma.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-firmware.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-init.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-mmio.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-pci-mmio.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-protocol.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-runtime.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-runtime-start.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-scan.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-scan-session.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-rx.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-key.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-tx.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-tx-ring.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-transport-backend.c \
+	src/drivers/wifi/intel-ax211/intel-ax211-transport.c \
+
+endif
+ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-ncm.c \
+	src/drivers/usb/usb-cdc-ncm-net.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_CDC_ECM),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-ecm.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_RTL815X),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-rtl815x.c \
+	src/drivers/usb/usb-rtl815x-frame.c
+endif
+# The CDC notification reader both network drivers share (BUG-222).
+ifneq ($(filter y,$(CONFIG_DRIVER_USB_CDC_NCM) $(CONFIG_DRIVER_USB_CDC_ECM)),)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-notification.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_HID),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid.c src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c
+endif
+# The HID report parser, the pen and touch state machines and the HID input glue
+# (ws143-p005) serve every HID transport (USB, I2C-HID) and the test injector
+# (ws159-p003).
+AMD64_HID_SOURCES :=
+ifneq ($(filter y,$(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_PCI_LPSS_I2C) $(CONFIG_INPUT_TEST_INJECT) $(CONFIG_INPUT_BRIDGE)),)
+AMD64_HID_SOURCES += src/drivers/generic/hid-report.c src/drivers/generic/hid-digitizer.c src/drivers/generic/hid-touch.c \
+	src/drivers/generic/hid-input.c
+endif
+# The USB CCID readers and the smart card slots' class (ws161-p003).
+ifeq ($(CONFIG_DRIVER_USB_CCID),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-ccid.c src/drivers/usb/usb-ccid-proto.c src/drivers/generic/smartcard.c
+endif
+# The USB Bluetooth controllers and the HCI class, /dev/bluetoothN (ws143-p002).
+ifeq ($(CONFIG_DRIVER_USB_BT),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-bt.c src/drivers/generic/bt-hci.c src/drivers/generic/bt-hci-proto.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_HUB),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hub.c
+endif
+# The USB Video Class cameras, on the camera framework.
+ifeq ($(CONFIG_DRIVER_USB_UVC),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-uvc.c src/drivers/usb/usb-uvc-desc.c src/drivers/usb/usb-uvc-stream.c src/drivers/usb/usb-uvc-payload.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_RTL8822BU),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/wifi/rtl8822b/rtl8822b.c \
+	src/drivers/wifi/rtl8822b/rtl8822b-security.c \
+	src/drivers/usb/usb-rtl8822bu.c
+endif
+ifeq ($(CONFIG_KERNEL_USB_HID_CHECKPOINT),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid-checkpoint.c
+endif
+
+AMD64_KERNEL_SOURCES := \
+	src/kern/main.c \
+	$(KERN_FAT_SOURCES) src/kern/inode.c src/kern/file.c \
+	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
+	src/kern/tmpfs.c src/kern/tmpfs-pages.c src/drivers/fs/overlayfs.c src/kern/vfs.c \
+	src/kern/backing-claim.c \
+ src/kern/buf.c src/kern/cache.c src/kern/readahead.c src/kern/writeback.c src/kern/io.c src/kern/sysctl.c src/kern/thermal.c src/kern/thermal-guard.c \
+	src/kern/resource.c src/kern/poll.c src/kern/usync.c \
+	src/kern/disk.c src/kern/partition.c \
+	src/drivers/generic/loop.c src/drivers/generic/dma.c src/drivers/pci/pci.c \
+	src/drivers/pci/pci-pcat.c src/drivers/pci/pci-power.c src/drivers/usb/usb.c $(AMD64_USB_HCD_SOURCES) \
+	$(AMD64_USB_CLASS_SOURCES) \
+	$(AMD64_HID_SOURCES) \
+	$(AMD64_NVME_SOURCES) \
+	$(AMD64_VENUS_SOURCES) \
+	$(AMD64_HDA_SOURCES) \
+	$(AMD64_I915_SOURCES) \
+	$(AMD64_NVRTX_SOURCES) \
+	$(AMD64_AMDRDNA_SOURCES) \
+	$(AMD64_AMDRDNA_COMPILER_SOURCES) \
+	$(AMD64_AMDRDNA_VK_SOURCES) \
+	$(AMD64_GHCI_SOURCES) \
+	$(AMD64_INTEL_WLAN_SOURCES) \
+	$(AMD64_RTL8125_SOURCES) \
+	$(AMD64_ACPI_SOURCES) \
+	$(AMD64_I2C_SOURCES) \
+	src/drivers/platform/pcat/pcat-ide.c src/drivers/platform/pcat/uefi-variables.c src/drivers/ethernet/dp8390.c \
+	src/drivers/isa/ne2000.c src/drivers/isa/ps2-8042.c \
+	src/drivers/disklabel/mbr.c src/drivers/disklabel/gpt.c \
+	src/drivers/disklabel/pcat.c src/kern/platform/pcat.c \
+	src/kern/panic.c src/kern/entry.c src/kern/heap.c src/kern/clock.c \
+	src/kern/timer.c src/kern/klog.c src/kern/kcrt.c \
+	src/kern/random.c src/kern/random-crypto.c \
+	src/kern/device-io.c src/kern/irq.c src/kern/pmem.c \
+	src/kern/test-checkpoint.c \
+	src/kern/lock.c src/kern/waitq.c \
+	src/kern/process.c src/kern/ptrace.c src/kern/thread.c src/kern/sched.c src/kern/sleep.c src/kern/cpuperf.c src/kern/freeze.c \
+ $(KERN_VM_SOURCES) \
+	src/kern/filedesc.c src/kern/handle.c src/kern/fd-object.c \
+	src/kern/record-lock.c \
+	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
+	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c src/kern/sandbox.c \
+	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
+	src/kern/cdev.c src/kern/devfs.c src/kern/text-display.c \
+	src/drivers/generic/console.c \
+	src/drivers/generic/input.c \
+	src/drivers/generic/backlight.c \
+	$(KERN_GPU_SOURCES) \
+	$(KERN_AUDIO_SOURCES) \
+	src/kern/tty.c src/kern/tty-csi.c \
+	src/drivers/generic/system-device.c src/kern/system-event.c src/drivers/generic/memory-device.c src/kern/shutdown.c \
+	src/drivers/platform/pcat/graphics/vgafont.c src/drivers/platform/pcat/graphics/splash.c src/kern/init.c
+ifeq ($(CONFIG_INPUT_TEST_INJECT),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/input-inject.c
+endif
+# The x86 processor driver and its decoders (pure functions over the CPUID and model-specific
+# register values the driver reads).  The CPUID part serves the topology in every kernel; the
+# register parts are built only with the CPU performance control.
+AMD64_KERNEL_SOURCES += src/drivers/platform/pcat/cpu-x86/cpux86.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c \
+	src/drivers/platform/pcat/cpu-x86/cpu-x86.c \
+	src/drivers/platform/pcat/cpu-x86/cpu-x86-insn.c
+ifeq ($(CONFIG_CPU_PERF),y)
+AMD64_KERNEL_SOURCES += src/drivers/platform/pcat/cpu-x86/cpux86-hwp.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-pstate.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-power.c \
+	src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c
+endif
+# /dev/input/bridge (ws143-p005): the Bluetooth daemon's HID devices, on the HID input glue; it refuses a FIDO descriptor
+# with hidraw-describe.c (built with usb-hid, or here without it).
+ifeq ($(CONFIG_INPUT_BRIDGE),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/input-bridge.c src/drivers/generic/input-bridge-setup.c
+ifneq ($(CONFIG_DRIVER_USB_HID),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/hidraw-describe.c
+endif
+endif
+# The test kernel's loopback security key and card (ws161-p002, p003), on the raw HID and the smart card classes
+# (built with usb-hid and usb-ccid, or here without them).
+# The test kernel's loopback Bluetooth controller (ws143-p002), on the HCI class (built with usb-bt, or here without it).
+ifeq ($(CONFIG_BT_TEST_LOOPBACK),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/bt-hci-loopback.c
+ifneq ($(CONFIG_DRIVER_USB_BT),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/bt-hci.c src/drivers/generic/bt-hci-proto.c
+endif
+endif
+ifeq ($(CONFIG_SECURITY_KEY_TEST_LOOPBACK),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/hidraw-loopback.c src/drivers/generic/smartcard-loopback.c
+ifneq ($(CONFIG_DRIVER_USB_HID),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c
+endif
+ifneq ($(CONFIG_DRIVER_USB_CCID),y)
+AMD64_KERNEL_SOURCES += src/drivers/generic/smartcard.c
+endif
+endif
+ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
+AMD64_KERNEL_SOURCES += \
+	src/drivers/platform/pcat/graphics/pcat-graphics.c \
+	src/drivers/platform/pcat/graphics/backend.c \
+	src/drivers/platform/pcat/graphics/font.c \
+	src/drivers/platform/pcat/graphics/text.c \
+	src/drivers/platform/pcat/serial-mirror.c
+endif
+# The camera framework, /dev/camN; the camera source drivers build on it.
+ifneq ($(filter y,$(CONFIG_DRIVER_CAMERA) $(CONFIG_DRIVER_USB_UVC)),)
+AMD64_KERNEL_SOURCES += src/drivers/camera/cam.c
+endif
+AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
+	$(KERN_UFS_SOURCES)
+AMD64_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
+ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
+AMD64_KERNEL_SOURCES += plan/ws004/tests/pci-msi-qemu.c
+endif
+AMD64_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
+AMD64_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
+AMD64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
+	$(AMD64_KERNEL_SOURCES))
+# The kernel links no C library object: kcrt (src/kern/kcrt.c) and the
+# kernel heap (src/kern/heap.c) supply what it used from libc.
+AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS)
+ifneq ($(strip $(ZEDBSD_CONFIG)),)
+$(AMD64_VMUNIX_OBJS): $(ZEDBSD_CONFIG)
+$(AMD64_VMUNIX_OBJS): platform/amd64/vmunix.mk
+endif
+$(AMD64_VMUNIX_OBJS): $(ZEDBSD_PLATFORM_CONFIG_STAMP)
+$(AMD64_VMUNIX_OBJS): $(ZEDBSD_KERNEL_LTO_STAMP)
+# The kernel reads no C library source or header (the sysroot is not a
+# prerequisite): no libc source may appear in the link list, and the link
+# recipe checks every object's -MMD dependencies (check-kernel-includes.noct).
+$(if $(filter libc/% src/libc/%,$(AMD64_KERNEL_SOURCES)),\
+	$(error a C library source is in the amd64 kernel link list: \
+	$(filter libc/% src/libc/%,$(AMD64_KERNEL_SOURCES))))
+$(BUILD)/kern64/src/kern/vfs.o \
+	$(BUILD)/kern64/src/kern/platform/pcat.o: \
+	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
+
+vmunix: $(BUILD)/vmunix
+
+# The i915 test build's scenario set (see I915_TEST_SET), rewritten only when it changes.
+.PHONY: FORCE_AMD64_I915_TEST_SET
+FORCE_AMD64_I915_TEST_SET:
+
+$(BUILD)/.i915-test-set: FORCE_AMD64_I915_TEST_SET
+	@mkdir -p $(dir $@)
+	@value='I915_TEST_SET=$(I915_TEST_SET)'; \
+ if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+ printf '%s\n' "$$value" > $@.tmp; \
+ mv $@.tmp $@; \
+ fi
+
+$(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.S
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -D_ASM_SRC_ -c $< -o $@
+
+$(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
+
+# Shared x86 HAL sources must use the amd64 flags as well. Without this
+# rule the generic i386 pattern can leave a 32-bit object in build/amd64.
+$(BUILD)/src/hal/x86/%.o: src/hal/x86/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/kern64/src/kern/%.o: src/kern/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/kern64/src/drivers/%.o: src/drivers/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/kern64/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_KERNEL_LIBC_CFLAGS) -fno-builtin \
+ -fno-strict-aliasing $(AMD64_KERNEL_LTO_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(ZEDBSD_GRAPHICS_CONFIG_STAMP) $(AMD64_I915_TEST_SET_STAMP) \
+	$(AMD64_PLATFORM)/vmunix.ld \
+	platform/amd64/tools/check-amd64-vmunix.noct \
+	platform/amd64/tools/check-kernel-includes.noct
+	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 \
+ -T $(AMD64_PLATFORM)/vmunix.ld -nostdlib -Map $@.map \
+ $(AMD64_VMUNIX_OBJS) -o $@
+	$(NOCT) --path=tools/build platform/amd64/tools/check-kernel-includes.noct \
+ $(wildcard $(AMD64_VMUNIX_OBJS:.o=.d)) || { rm -f $@; exit 1; }
+	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-vmunix.noct $@
+
+$(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -DZBL_STAGE2_LBA_OVERRIDE=34 \
+ -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/stage1.elf: $(BUILD)/bootloader/stage1.o \
+	$(BIOS_LOADER)/stage1.ld
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage1.ld $< -o $@
+
+$(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+	@test $$(stat -c%s $@) -eq 512
+
+# The GPT hybrid reserves LBA 34 for its chain sector. The separate native
+# BIOS image retains the legacy LBA-1 chain sector and therefore needs a
+# stage-1 artifact built without the GPT override.
+$(BUILD)/bootloader/stage1-native.o: $(BIOS_LOADER)/stage1.S \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/stage1-native.elf: $(BUILD)/bootloader/stage1-native.o \
+	$(BIOS_LOADER)/stage1.ld
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage1.ld $< -o $@
+
+$(BUILD)/bootloader/stage1-native.bin: $(BUILD)/bootloader/stage1-native.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+	@test $$(stat -c%s $@) -eq 512
+
+$(BUILD)/bootloader/stage2-chain.o: $(BIOS_LOADER)/stage2-chain.S \
+	bootloader/include/stage2-header.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/stage2-chain.elf: $(BUILD)/bootloader/stage2-chain.o \
+	$(BIOS_LOADER)/stage2.ld
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage2.ld $< -o $@
+
+$(BUILD)/bootloader/stage2-chain.raw: $(BUILD)/bootloader/stage2-chain.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+
+$(BUILD)/bootloader/stage2-chain.bin: $(BUILD)/bootloader/stage2-chain.raw \
+	tools/build/finalize-bios-stage2.noct
+	$(NOCT) --path=tools/build tools/build/finalize-bios-stage2.noct --machine pcat $< $@
+
+# Compatibility alias for focused fixtures that predate the chain-loader
+# name. Its new chain-specific prerequisite forces an incremental tree with
+# the retired direct-kernel stage2.o/bin to regenerate before use.
+$(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2-chain.bin
+	cp -f $< $@.tmp
+	mv -f $@.tmp $@
+
+$(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S \
+	bootloader/include/stage2-header.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/partition-pbr.elf: $(BUILD)/bootloader/partition-pbr.o
+	$(LD) -m elf_i386 --image-base=0 -Ttext=0 -e _start $< -o $@
+
+$(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+	@test $$(stat -c%s $@) -eq 2048
+
+$(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
+	$(BIOS_LOADER)/vbe.inc \
+	bootloader/bios/fat-directory.h bootloader/bios/logo.h bootloader/common/logo-path.h \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
+	bootloader/include/mbr.inc bootloader/include/fat16.inc \
+	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
+	bootloader/include/boot-parameter-handoff.h \
+	bootloader/include/boot-parameter-record.inc \
+	bootloader/uefi/zedbsd-config.h \
+	include/kern/boot.h
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/bios-zedbsd-config.i386.o: \
+	bootloader/uefi/zedbsd-config.c bootloader/uefi/zedbsd-config.h \
+	bootloader/include/boot-parameter-handoff.h include/kern/boot.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
+
+
+$(BUILD)/bootloader/bios-fat-directory.i386.o: \
+	bootloader/bios/fat-directory.c bootloader/bios/fat-directory.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
+
+$(BUILD)/bootloader/bios-logo.i386.o: bootloader/bios/logo.c bootloader/bios/logo.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
+$(BUILD)/bootloader/common-logo-path.i386.o: bootloader/common/logo-path.c bootloader/common/logo-path.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
+AMD64_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.i386.o \
+	$(BUILD)/bootloader/bios-logo.i386.o $(BUILD)/bootloader/common-logo-path.i386.o \
+	$(BUILD)/bootloader/bios-fat-directory.i386.o \
+	$(BUILD)/bootloader/bios-memory-map.i386.o $(BUILD)/bootloader/common-memory-map.i386.o
+
+$(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
+	$(AMD64_BOOTZBSD_HELPERS) $(BIOS_LOADER)/bootzbsd.ld
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/bootzbsd.ld \
+ $(filter %.o,$^) -o $@
+
+$(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+
+$(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw \
+	tools/build/finalize-bios-stage2.noct
+	$(NOCT) --path=tools/build tools/build/finalize-bios-stage2.noct --machine pcat $< $@
+
+$(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
+	tools/build/make-mz-exe.noct
+	$(NOCT) --path=tools/build tools/build/make-mz-exe.noct --entry 0x20 $< $@
+
+$(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
+	$(UEFI_LOADER)/include/uefi.h $(UEFI_LOADER)/elf64.h \
+	$(UEFI_LOADER)/framebuffer.h $(UEFI_LOADER)/video.h $(UEFI_LOADER)/logo.h $(UEFI_LOADER)/memory-map.h \
+	$(UEFI_LOADER)/volume-discovery.h \
+	$(UEFI_LOADER)/zedbsd-config.h $(UEFI_LOADER)/root-config.h \
+	bootloader/common/ufs-read.h \
+	$(UEFI_LOADER)/boot-keys.h bootloader/common/boot-override.h \
+	bootloader/include/amd64-handoff.h \
+	bootloader/include/amd64-kernel-image.h \
+	bootloader/include/boot-parameter-handoff.h \
+	include/kern/boot.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/volume-discovery.o: $(UEFI_LOADER)/volume-discovery.c \
+	$(UEFI_LOADER)/volume-discovery.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/framebuffer.o: $(UEFI_LOADER)/framebuffer.c \
+	$(UEFI_LOADER)/framebuffer.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/logo.o: $(UEFI_LOADER)/logo.c $(UEFI_LOADER)/logo.h \
+	bootloader/common/logo-path.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/common-logo-path.o: bootloader/common/logo-path.c bootloader/common/logo-path.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
+
+$(BUILD)/uefi/common-ufs-read.o: bootloader/common/ufs-read.c bootloader/common/ufs-read.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
+
+$(BUILD)/uefi/root-config.o: $(UEFI_LOADER)/root-config.c $(UEFI_LOADER)/root-config.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/common-boot-override.o: bootloader/common/boot-override.c bootloader/common/boot-override.h \
+	bootloader/include/boot-parameter-handoff.h include/kern/boot.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
+
+$(BUILD)/uefi/boot-keys.o: $(UEFI_LOADER)/boot-keys.c $(UEFI_LOADER)/boot-keys.h \
+	$(UEFI_LOADER)/include/uefi.h bootloader/common/boot-override.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/video.o: $(UEFI_LOADER)/video.c $(UEFI_LOADER)/video.h \
+	$(UEFI_LOADER)/include/uefi.h bootloader/include/boot-parameter-handoff.h \
+	include/kern/boot.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/zedbsd-config.o: $(UEFI_LOADER)/zedbsd-config.c \
+	$(UEFI_LOADER)/zedbsd-config.h \
+	bootloader/include/boot-parameter-handoff.h \
+	include/kern/boot.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/elf64.o: $(UEFI_LOADER)/elf64.c $(UEFI_LOADER)/elf64.h \
+	bootloader/include/amd64-kernel-image.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/memory-map.o: $(UEFI_LOADER)/memory-map.c \
+	$(UEFI_LOADER)/memory-map.h $(UEFI_LOADER)/include/uefi.h \
+	bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/src/hal/amd64/locore.o: bootloader/include/amd64-handoff.h \
+	bootloader/include/boot-parameter-handoff.h \
+	include/kern/boot.h
+
+$(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) -m64 -mno-red-zone -c $< -o $@
+
+$(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
+	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/framebuffer.o $(BUILD)/uefi/video.o $(BUILD)/uefi/logo.o $(BUILD)/uefi/common-logo-path.o \
+	$(BUILD)/uefi/common-boot-override.o $(BUILD)/uefi/boot-keys.o \
+	$(BUILD)/uefi/memory-map.o $(BUILD)/uefi/memory-map-v6.o $(BUILD)/uefi/common-memory-map.o \
+	$(BUILD)/uefi/volume-discovery.o $(BUILD)/uefi/zedbsd-config.o \
+	$(BUILD)/uefi/root-config.o $(BUILD)/uefi/common-ufs-read.o \
+	$(BUILD)/uefi/transition.o \
+	platform/amd64/tools/check-bootx64.noct
+	$(EFI_LD) /subsystem:efi_application /entry:efi_main /base:0 \
+ /fixed:no /timestamp:0 /nodefaultlib \
+ /out:$@ $(filter %.o,$^)
+	@test -z "$$($(EFI_NM) -u $@ | grep -Ev \
+ ' (__bss_start__|__bss_end__|__end__|___tls_start__|___tls_end__)$$')" \
+ || { $(EFI_NM) -u $@; exit 1; }
+	$(NOCT) --path=tools/build platform/amd64/tools/check-bootx64.noct $@
+
+AMD64_USER_CPPFLAGS := -nostdinc \
+	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
+	-Iinclude -Isrc -I. -DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64
+AMD64_USER_CFLAGS := -m64 -march=x86-64 -mno-red-zone -ffreestanding \
+	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
+	-fno-unwind-tables -fno-builtin -fno-common -ffunction-sections \
+	-fdata-sections -Os -Wall -Wextra -Werror
+AMD64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfcn.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
+	userland/base/libc/termios.c \
+	userland/base/libc/pthread.c \
+	userland/base/libc/timer.c \
+	userland/base/libc/shm.c \
+	userland/base/libc/semaphore.c \
+	userland/base/libc/mqueue.c \
+	userland/base/libc/socket.c userland/base/libc/resolver.c \
+	userland/base/libc/resolver-dns.c \
+	userland/base/libc/signal.c userland/base/libc/account.c userland/base/libc/crypt.c \
+	userland/base/libc/utmpx.c src/libc/heap.c src/libc/string.c src/libc/ctype.c \
+	src/libc/locale.c src/libc/wide.c \
+	src/libc/int64.c src/libc/strto.c src/libc/format.c src/libc/stdio.c \
+
+AMD64_USER_LIBC_OBJS := $(BUILD)/user64/src/libc/crt/crt0-amd64.o \
+	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
+# User programs consume the canonical target sysroot. The relocatable libc
+# bundle preserves the established whole-runtime static link semantics while
+# eliminating per-command recompilation of the same sources.
+AMD64_USER_LIBC_OBJS := \
+	$(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt0.o \
+	$(ZEDBSD_SYSROOT_AMD64)/usr/lib/libc.o
+AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS)
+AMD64_USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,sh)
+AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/base/libedit/readline.o
+AMD64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
+AMD64_USER_ELF_CHECK := tools/build/check-user-elf.noct
+
+# The base programs are position-independent executables that load
+# /lib/libc.so through /lib/ld.so; their objects are the -fPIC ones built
+# under $(BUILD)/dynamic/obj.  (The POSIX-R and other test ELF files below
+# stay static: they test the static runtime itself.)
+AMD64_APP_OBJ := $(BUILD)/dynamic/obj
+AMD64_APP_INPUTS := $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
+	$(BUILD)/dynamic/libc.so $(BUILD)/dynamic/ld.so \
+	tools/build/check-dynamic-elf.py
+AMD64_APP_LINK = $(CC) -m64 -nostdlib -pie -Wl,--no-relax -Wl,--gc-sections \
+ -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
+ -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o
+AMD64_APP_LIBS = -L$(BUILD)/dynamic -Wl,-rpath-link,$(BUILD)/dynamic -l:libc.so
+AMD64_APP_CHECK = $(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 \
+ --role application --needed libc.so
+AMD64_APP_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),sh) \
+	$(AMD64_APP_OBJ)/userland/base/libedit/readline.o
+$(AMD64_APP_SH_OBJS): DYNAMIC_CPPFLAGS += -Iuserland/base/libedit
+
+$(BUILD)/user64/%.o: %.c $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) \
+ -fno-strict-aliasing -MMD -MP -c $< -o $@
+
+$(BUILD)/user64/src/libc/crt/crt0-amd64.o: src/libc/crt/crt0-amd64.S \
+	include/hal/arch.h include/hal/arch/amd64.h
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) -c $< -o $@
+
+$(AMD64_USER_READLINE_OBJ): AMD64_USER_CPPFLAGS += -Iuserland/base/libedit
+$(AMD64_USER_SH_OBJS): AMD64_USER_CPPFLAGS += -Iuserland/base/libedit
+$(AMD64_USER_READLINE_LIB): $(AMD64_USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+# /lib/libcurses.a is what a program built on or for the target links, and
+# those programs are position independent, so the archive holds the
+# position-independent objects the shared libraries are built from.
+AMD64_USER_CURSES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,\
+	$(BUILD)/dynamic/obj,curses)
+$(BUILD)/lib/libcurses.a: $(AMD64_USER_CURSES_OBJS)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+$(BUILD)/POSIX-R1.ELF: $(AMD64_USER_LIBC_OBJS) \
+	$(BUILD)/user64/userland/tests/syscall-smoke.o $(AMD64_PLATFORM)/user.ld \
+	$(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld \
+ $(AMD64_USER_LIBC_OBJS) \
+ $(BUILD)/user64/userland/tests/syscall-smoke.o -o $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+$(BUILD)/POSIX-R2.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/tests/posix-r2.o $(AMD64_PLATFORM)/user.ld \
+	$(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/tests/posix-r2.o -o $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+$(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/tests/posix-r2-remaining.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/tests/posix-r2-remaining.o -o $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+$(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/tests/susv4-xsi.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/tests/susv4-xsi.o -o $@
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+susv4-xsi-user-test: $(BUILD)/SUSV4-XSI.ELF
+
+$(BUILD)/bin/sh: $(AMD64_APP_INPUTS) $(AMD64_APP_SH_OBJS)
+	@mkdir -p $(dir $@)
+	$(AMD64_APP_LINK) $(AMD64_APP_SH_OBJS) $(AMD64_APP_LIBS) -o $@
+	$(AMD64_APP_CHECK) $@
+
+$(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/tests/smp-resource-stress.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/tests/smp-resource-stress.o -o $@
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+AMD64_USER_SYSCTL_OBJ := $(AMD64_APP_OBJ)/userland/base/sysctl/main.o
+$(BUILD)/bin/sysctl: $(AMD64_APP_INPUTS) $(AMD64_USER_SYSCTL_OBJ)
+	@mkdir -p $(dir $@)
+	$(AMD64_APP_LINK) $(AMD64_USER_SYSCTL_OBJ) $(AMD64_APP_LIBS) -o $@
+	$(AMD64_APP_CHECK) $@
+
+AMD64_USER_MOUNT_OBJ := $(AMD64_APP_OBJ)/userland/base/mount/main.o
+$(BUILD)/bin/mount: $(AMD64_APP_INPUTS) $(AMD64_USER_MOUNT_OBJ)
+	@mkdir -p $(dir $@)
+	$(AMD64_APP_LINK) $(AMD64_USER_MOUNT_OBJ) $(AMD64_APP_LIBS) -o $@
+	$(AMD64_APP_CHECK) $@
+$(BUILD)/bin/umount: $(BUILD)/bin/mount
+	@mkdir -p $(dir $@)
+	cp -f $< $@
+
+
+
+USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
+USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
+AMD64_USER_NET_COMMON_OBJS := $(AMD64_APP_OBJ)/userland/base/net/netutil.o \
+	$(AMD64_APP_OBJ)/userland/base/net/dhcp.o
+
+define AMD64_USER_NET_COMMAND
+$(BUILD)/bin/$(1): $(AMD64_APP_INPUTS) $(AMD64_USER_NET_COMMON_OBJS) \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1))
+	@mkdir -p $$(dir $$@)
+	$(AMD64_APP_LINK) $(AMD64_USER_NET_COMMON_OBJS) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1)) $(AMD64_APP_LIBS) -o $$@
+	$(AMD64_APP_CHECK) $$@
+endef
+$(foreach command,$(USER_NET_COMMANDS),\
+	$(eval $(call AMD64_USER_NET_COMMAND,$(command))))
+USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAMS))
+USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
+AMD64_USER_BASIC_COMMON_OBJ := $(AMD64_APP_OBJ)/userland/base/common/command.o \
+	$(AMD64_APP_OBJ)/userland/base/common/pager.o
+
+define AMD64_USER_BASIC_COMMAND
+$(BUILD)/bin/$(1): $(AMD64_APP_INPUTS) $(AMD64_USER_BASIC_COMMON_OBJ) \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1))
+	@mkdir -p $$(dir $$@)
+	$(AMD64_APP_LINK) $(AMD64_USER_BASIC_COMMON_OBJ) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1)) $(AMD64_APP_LIBS) -o $$@
+	$(AMD64_APP_CHECK) $$@
+endef
+$(foreach command,$(filter-out camvk vkdemo vkcompute vkreset vkcoherency vkimage vkstage vkquad vkvideo-probe media-probe mediastorage display-events wltest wlshm mview wayland terminal files notes monitor pdfviewer settings imageview textedit videoplayer music photos phone calendar mailer kuidemo browser browser-probe xserver egltest glescompute glxtest zgears gpu-share-test gpu-fence-test acquire-fence-test gpu-forge-test menu-probe titlebar-probe popup-probe subsurface-probe seat-probe data-probe extras-probe tablet-probe keiland-ime ime-probe keiland-settings keiland-system keiland-notify printtest fidoctl passkey-fido2 ssh sshd ssh-keygen sftp-server,$(USER_BASIC_COMMANDS)),\
+	$(eval $(call AMD64_USER_BASIC_COMMAND,$(command))))
+# Static programs (the class static, ws168-p002): linked with the static C
+# library alone and no runtime linker, as a child that sandbox_spawn starts
+# needs (it opens no file, so it cannot load a shared library).
+USER_STATIC_COMMANDS := $(foreach program,$(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_PACKAGES)),\
+	$(if $(filter static,$(USERLAND_$(program)_CLASS)),$(program)))
+
+# A static program may link more objects than its package's (AMD64_USER_STATIC_EXTRA_<name>): keiland-preview
+# (ws168-p003) takes the C library's mathematics and its parsing of floating point numbers, which the static C
+# library does not have, compiled as the shared one's are (-mlong-double-64).
+AMD64_USER_FLOAT_DIR := $(BUILD)/user64-float
+AMD64_USER_FLOAT_OBJS := $(patsubst src/libc/%.c,$(AMD64_USER_FLOAT_DIR)/%.o,\
+	$(ZEDBSD_LIBM_SOURCES) src/libc/softfloat.c src/libc/float-parse.c)
+AMD64_USER_STATIC_EXTRA_keiland-preview := $(AMD64_USER_FLOAT_OBJS)
+
+$(AMD64_USER_FLOAT_OBJS): $(AMD64_USER_FLOAT_DIR)/%.o: src/libc/%.c $(ZEDBSD_LIBM_HEADERS) src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
+	@mkdir -p $(dir $@)
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. -DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64 $(AMD64_USER_CFLAGS) \
+ -mlong-double-64 -c $< -o $@
+
+define AMD64_USER_STATIC_COMMAND
+$(BUILD)/bin/$(1): $(AMD64_USER_LIBC_OBJS) $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) \
+	$(AMD64_USER_STATIC_EXTRA_$(1)) $(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	@mkdir -p $$(dir $$@)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) $(AMD64_USER_STATIC_EXTRA_$(1)) -o $$@
+	@test -z "$$$$($(NM) -u $$@)" || { $(NM) -u $$@; exit 1; }
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
+endef
+$(foreach command,$(USER_STATIC_COMMANDS),\
+	$(eval $(call AMD64_USER_STATIC_COMMAND,$(command))))
+# keiland-preview (ws168-p003) opens no file in its sandbox: its libpdf reads no substitute font file.
+$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,keiland-preview): AMD64_USER_CPPFLAGS += -DPDF_FONT_FILES=0
+# ELF64 runtime linker and shared libc.
+DYNAMIC_DIR := $(BUILD)/dynamic
+DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude \
+	-isystem $(ZEDBSD_SYSROOT_AMD64)/usr/include \
+	-DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64 -DKERN_DYNAMIC_LIBC
+# Unwind tables are kept in the dynamic objects.  A C++ program raises an
+# exception by walking the stack, and a frame with no unwind information stops
+# that walk, so the shared C library has to describe its own frames for an
+# exception to pass through a call it made.
+DYNAMIC_CFLAGS := -m64 -march=x86-64 -mno-red-zone -Os -ffreestanding \
+	-fPIC -fno-builtin -fno-stack-protector \
+	-fasynchronous-unwind-tables \
+	-ftls-model=global-dynamic -Wall -Wextra -Werror
+DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
+	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/timer.c userland/base/libc/shm.c \
+	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
+	userland/base/libc/socket.c userland/base/libc/resolver.c \
+	userland/base/libc/resolver-dns.c userland/base/libc/signal.c \
+	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c src/libc/heap.c \
+	src/libc/string.c src/libc/ctype.c src/libc/locale.c src/libc/wide.c src/libc/int64.c \
+	src/libc/strto.c src/libc/format.c \
+	src/libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
+DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
+	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o
+DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/src/rtld/entry.o \
+	$(DYNAMIC_DIR)/obj/src/rtld/tlsdesc.o \
+	$(DYNAMIC_DIR)/obj/src/rtld/rtld.o \
+	$(DYNAMIC_DIR)/obj/src/rtld/string.o
+DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
+DYNAMIC_LIBM_OBJS := $(patsubst src/libc/math/%.c,\
+	$(DYNAMIC_FLOAT_DIR)/math/%.o,$(ZEDBSD_LIBM_SOURCES))
+DYNAMIC_FLOAT_PARSE_OBJS := $(DYNAMIC_FLOAT_DIR)/softfloat.o \
+	$(DYNAMIC_FLOAT_DIR)/float-parse.o
+DYNAMIC_LIBC_OBJS += $(DYNAMIC_LIBM_OBJS) $(DYNAMIC_FLOAT_PARSE_OBJS)
+
+$(DYNAMIC_DIR)/obj/%.o: %.c $(ZEDBSD_SYSROOT_AMD64)/.zedbsd-sysroot-complete
+	@mkdir -p $(dir $@)
+	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: \
+	userland/base/libc/syscall-amd64.S include/hal/arch.h \
+	include/hal/arch/amd64.h
+	@mkdir -p $(dir $@)
+	$(CC) $(DYNAMIC_CPPFLAGS) -m64 -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/src/rtld/entry.o: src/rtld/entry-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/src/rtld/tlsdesc.o: src/rtld/tlsdesc-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialect=gnu2
+
+$(DYNAMIC_LIBM_OBJS): $(DYNAMIC_FLOAT_DIR)/math/%.o: src/libc/math/%.c \
+	$(ZEDBSD_LIBM_HEADERS)
+	@mkdir -p $(dir $@)
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. $(DYNAMIC_CFLAGS) \
+ -mlong-double-64 -c $< -o $@
+
+$(DYNAMIC_FLOAT_DIR)/softfloat.o: src/libc/softfloat.c \
+	src/libc/softfloat.h
+	@mkdir -p $(dir $@)
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. $(DYNAMIC_CFLAGS) \
+ -mlong-double-64 -c $< -o $@
+
+$(DYNAMIC_FLOAT_DIR)/float-parse.o: src/libc/float-parse.c \
+	src/libc/softfloat.h
+	@mkdir -p $(dir $@)
+	$(CC) -nostdinc -Iinclude/libc -Iinclude -I. $(DYNAMIC_CFLAGS) \
+ -mlong-double-64 -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/src/libc/crt/crt1.o: src/libc/crt/crt1-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
+	$(LD) -m elf_x86_64 -shared -Bsymbolic -e _rtld_start \
+ --hash-style=sysv -z now -z relro -z separate-code $^ -o $@
+
+# ws066-p002: -Bsymbolic-functions binds the library's calls to its own
+# functions at link time, which leaves the loader 19 symbol relocations of
+# libc.so instead of 515; the allocator and the functions that return its
+# memory stay replaceable (userland/base/libc/interpose.list).
+$(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS) userland/base/libc/interpose.list
+	$(LD) -m elf_x86_64 -shared -soname libc.so --hash-style=both \
+ -Bsymbolic-functions --export-dynamic-symbol-list=userland/base/libc/interpose.list \
+ -z now -z relro -z separate-code -z stack-size=0x100000 $(DYNAMIC_LIBC_OBJS) -o $@
+
+# Portable libraries and applications share their source/link dependency graph.
+DYNAMIC_SYSROOT := $(ZEDBSD_SYSROOT_AMD64)
+DYNAMIC_LINK_CFLAGS := -m64
+DYNAMIC_LINK_LDFLAGS := -m elf_x86_64
+DYNAMIC_ELF_MACHINE := amd64
+# libvulkan's thread-local variables through TLS descriptors, which ld.so resolves (src/rtld/tlsdesc-amd64.S).
+DYNAMIC_VULKAN_TLS_CFLAGS := -mtls-dialect=gnu2
+include platform/common/userland-dynamic.mk
+
+$(DYNAMIC_DIR)/alt/rpathdep.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_x86_64 -shared -soname rpathdep.so --hash-style=gnu \
+ -z now -z relro -z separate-code $< -o $@
+
+$(DYNAMIC_DIR)/tlstest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_x86_64 -shared -soname tlstest.so --hash-style=gnu \
+ -z now -z relro -z separate-code --enable-new-dtags \
+ -rpath '$$ORIGIN/alt' \
+ $(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+ -L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
+
+$(DYNAMIC_DIR)/rpathtest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/rpathtest.o \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_x86_64 -shared -soname rpthtest.so --hash-style=gnu \
+ -z now -z relro -z separate-code --disable-new-dtags \
+ -rpath '$$ORIGIN/alt' $< -L$(DYNAMIC_DIR)/alt \
+ -l:rpathdep.so -o $@
+
+$(DYNAMIC_DIR)/verstest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/versiontest.o \
+	userland/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_x86_64 -shared -soname verstest.so --hash-style=gnu \
+ -z now -z relro -z separate-code \
+ --version-script=userland/tests/versiontest.map $< -o $@
+
+$(DYNAMIC_DIR)/versuse.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/versionuse.o \
+	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_x86_64 -shared -soname versuse.so --hash-style=gnu \
+ -z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
+ -l:verstest.so -o $@
+
+$(DYNAMIC_DIR)/dyntest: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
+	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
+	$(DYNAMIC_DIR)/versuse.so
+	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
+ -Wl,--hash-style=sysv,-z,now,-z,relro,-z,separate-code \
+ -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
+ $(DYNAMIC_DIR)/obj/userland/tests/dyntest.o \
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
+ -l:libc.so -o $@
+
+dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so \
+	$(DYNAMIC_DIR)/rpathtest.so $(DYNAMIC_DIR)/verstest.so \
+	$(DYNAMIC_DIR)/versuse.so tools/build/check-dynamic-elf.py
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role interpreter $(DYNAMIC_DIR)/ld.so
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role libc $(DYNAMIC_DIR)/libc.so
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role module $(DYNAMIC_DIR)/tlstest.so
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role rpath-module $(DYNAMIC_DIR)/rpathtest.so
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role version-definition $(DYNAMIC_DIR)/verstest.so
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role version-consumer $(DYNAMIC_DIR)/versuse.so
+	$(PYTHON) tools/build/check-dynamic-elf.py --machine amd64 --role program $(DYNAMIC_DIR)/dyntest
+	@echo "zedBSD amd64 dynamic userland artifacts: PASS"
+.PHONY: dynamic-userland-check
+
+AMD64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/amd64.img
+include platform/common/userland-rootfs.mk
+AMD64_ARCH_INPUTS := $(ZEDBSD_ROOTFS_INPUTS)
+AMD64_ARCH_FILES := $(ZEDBSD_ROOTFS_FILES)
+# E-127: a test image may replace rc.conf and add files (a oneshot service) from the command line:
+#   make ... ZEDBSD_TEST_RC_CONF=plan/ws031/tests/vkprobe-rc.conf \
+#            ZEDBSD_TEST_EXTRA_FILES='--file /etc/service.d/vkprobe=plan/ws031/tests/vkprobe-service' \
+#            ZEDBSD_TEST_IMAGE_TAG=vkprobe   (required with the two above: its own cached rootfs image)
+ifneq ($(ZEDBSD_TEST_RC_CONF),)
+AMD64_ARCH_FILES := $(subst --file /etc/rc.conf=userland/base/etc/rc.conf,--file /etc/rc.conf=$(ZEDBSD_TEST_RC_CONF),$(AMD64_ARCH_FILES))
+endif
+AMD64_ARCH_FILES += $(ZEDBSD_TEST_EXTRA_FILES)
+# The test rootfs is cached like any other image, so the files it carries have to be
+# prerequisites of it.  $(wildcard) keeps only the words that name a file: an option name and
+# a --mode permission are not paths and drop out here.
+AMD64_ARCH_INPUTS += $(ZEDBSD_TEST_RC_CONF) \
+	$(wildcard $(foreach a,$(ZEDBSD_TEST_EXTRA_FILES),$(lastword $(subst =, ,$(a)))))
+$(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
+$(eval $(call ZEDBSD_ROOTFS_TREE_RULE,amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
+AMD64_ARCH_UFS_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64.ufs
+# E-127: a test rootfs gets its own cached image, apart from the build's own
+ifneq ($(ZEDBSD_TEST_IMAGE_TAG),)
+AMD64_ARCH_UFS_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-$(ZEDBSD_TEST_IMAGE_TAG).ufs
+endif
+$(eval $(call ZEDBSD_ROOTFS_UFS_IMAGE_RULE,$(AMD64_ARCH_UFS_IMAGE),amd64))
+rootfs: $(BUILD)/rootfs/.stamp
+
+
+# ws035-p096: the boot logo on the boot FAT (/logo.ppm: the ZEDBSD FAT32 partition of the native layout (WS238), the payload FAT of the BIOS image), drawn by the
+# UEFI and the BIOS loaders when zedbsd.cfg names it (logo=logo.ppm).  ws035-p107: it is the boot splash
+# (userland/desktop/artwork/zedbsd-boot-splash.png, 1920x1080 without its spinner, "fit=contain" since ws035-p112: the loaders draw it in the
+# middle over black bars, shrunk only when the screen is smaller, and the
+# kernel's quiet console draws the spinner, src/drivers/platform/pcat/graphics/splash.c).
+AMD64_BOOT_LOGO := $(BUILD)/boot-logo.ppm
+
+$(AMD64_BOOT_LOGO): tools/build/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-splash.png
+	@mkdir -p $(dir $@)
+	$(PYTHON) tools/build/make-boot-splash.py userland/desktop/artwork/zedbsd-boot-splash.png $@.tmp
+	mv -f $@.tmp $@
+
+# The BIOS image's zedbsd.cfg gets the graphical boot's lines too when ZEDBSD_GRAPHICAL_BOOT is y
+# (ws035-p099; the BIOS loader draws the logo on its VBE framebuffer).
+# WS193: the graphical login (login=graphical) is its own choice, ZEDBSD_GRAPHICAL_LOGIN, in the name as well.
+AMD64_BIOS_ZEDBSD_CONFIG := $(BUILD)/zedbsd-bios-graphical-$(ZEDBSD_GRAPHICAL_BOOT)-login-$(ZEDBSD_GRAPHICAL_LOGIN)-kmsg-$(ZEDBSD_BOOT_KERNEL_MESSAGES).cfg
+
+$(AMD64_BIOS_ZEDBSD_CONFIG): $(AMD64_ZEDBSD_CONFIG)
+	@mkdir -p $(dir $@)
+	cp $< $@.tmp
+	$(if $(filter y,$(ZEDBSD_GRAPHICAL_BOOT)),printf '%s\n' logo=logo.ppm >> $@.tmp)
+	$(if $(filter y,$(ZEDBSD_GRAPHICAL_LOGIN)),printf '%s\n' login=graphical >> $@.tmp)
+	$(if $(filter n,$(ZEDBSD_BOOT_KERNEL_MESSAGES)),printf '%s\n' kmsg=quiet >> $@.tmp)
+	mv -f $@.tmp $@
+
+$(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
+	$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI $(AMD64_BOOT_LOGO) $(AMD64_BIOS_ZEDBSD_CONFIG) \
+	tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2-chain.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_BIOS_ZEDBSD_CONFIG) --logo $(AMD64_BOOT_LOGO) \
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+$(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
+	$(BUILD_TOOLS_DIR)/make-ufs-root-image.py tools/build/ufs_format.py
+	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs-root-image.py --force \
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) $@
+
+$(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1-native.bin \
+	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(BUILD)/ufs-root.img \
+	$(AMD64_NATIVE_ZEDBSD_CONFIG) \
+	$(ZEDBSD_IMAGE_HOST) \
+	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
+	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
+ --checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
+ --checker-runner $(NOCT) \
+ --machine pcat --stage1 $(BUILD)/bootloader/stage1-native.bin \
+ --stage2 $(BUILD)/bootloader/stage2-chain.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --zedbsd-config $(AMD64_NATIVE_ZEDBSD_CONFIG) \
+ --ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
+
+$(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
+	$(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+ --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) \
+ --fragment-kernel $@
+
+ifeq ($(ZEDBSD_VARIANT),native)
+# WS062: the native layout.  WS238: the ESP carries only the UEFI loader; the
+# kernel, zedbsd.cfg and the logo are on a FAT32 partition of the Basic Data
+# type labelled ZEDBSD, which the loader finds by its zedbsd.cfg and makes
+# boot0 (/boot/boot0), and which Windows and macOS mount like any FAT volume;
+# the root is a UFS partition mounted read-write through rootpart=; swap is a
+# partition of its own.  Nothing is layered: a write
+# to the root goes to its partition, not through a loop device into a file
+# on FAT.  The root image is built from the same staged tree as the overlay
+# layout's rootfs.img, with room and inodes to be written to.  The root and
+# swap are 1 GiB each, a 2 GiB image that CI publishes gzip-compressed
+# (2026-09-26 user direction).
+# ws035-p098: the lines of the graphical boot are added when ZEDBSD_GRAPHICAL_BOOT is y (the value is in
+# the name, so switching it makes the image again).  ws035-p112: the graphical boot drops video= (640x480), so the UEFI
+# loader asks GOP for 1920x1080, the splash's size, and draws black bars where the mode is another.
+# ws075-p012: ZEDBSD_BOOT_EXTRA_LINES adds boot parameters of its own, one per word (for example
+# display=hdmi display.mode=1920x1080@60); the words are in the name too, so changing them makes the image again.
+AMD64_BOOT_EXTRA_EMPTY :=
+AMD64_BOOT_EXTRA_SPACE := $(AMD64_BOOT_EXTRA_EMPTY) $(AMD64_BOOT_EXTRA_EMPTY)
+AMD64_BOOT_EXTRA_TAG := $(if $(strip $(ZEDBSD_BOOT_EXTRA_LINES)),-$(subst $(AMD64_BOOT_EXTRA_SPACE),+,$(strip $(ZEDBSD_BOOT_EXTRA_LINES))))
+AMD64_NATIVE_UEFI_ZEDBSD_CONFIG := $(BUILD)/zedbsd-native-uefi-graphical-$(ZEDBSD_GRAPHICAL_BOOT)-login-$(ZEDBSD_GRAPHICAL_LOGIN)-kmsg-$(ZEDBSD_BOOT_KERNEL_MESSAGES)$(AMD64_BOOT_EXTRA_TAG).cfg
+AMD64_GRAPHICAL_BOOT_LINES := logo=logo.ppm
+AMD64_NATIVE_ROOT_MIB ?= 1024
+AMD64_NATIVE_ROOT_INODES ?= 65536
+AMD64_NATIVE_SWAP_MIB ?= 1024
+AMD64_NATIVE_BOOT_MIB ?= 256
+# The sizes are in the names, so that changing one makes the image again.
+AMD64_NATIVE_ROOT_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-native-root-$(AMD64_NATIVE_ROOT_MIB)m.ufs
+ifneq ($(ZEDBSD_TEST_IMAGE_TAG),)
+AMD64_NATIVE_ROOT_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/amd64-native-root-$(AMD64_NATIVE_ROOT_MIB)m-$(ZEDBSD_TEST_IMAGE_TAG).ufs
+endif
+AMD64_NATIVE_SWAP_IMAGE := $(BUILD)/native-swap-$(AMD64_NATIVE_SWAP_MIB)m.img
+
+$(AMD64_NATIVE_ROOT_IMAGE): $(BUILD)/rootfs/.stamp $(ARCH_UFS_IMAGE_TOOLS)
+	@mkdir -p $(dir $@)
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) \
+ $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
+ --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
+ --profile amd64 --output $@ --tree $(BUILD)/rootfs \
+ --size-mib $(AMD64_NATIVE_ROOT_MIB) --min-inodes $(AMD64_NATIVE_ROOT_INODES)
+
+$(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG): $(AMD64_PLATFORM)/zedbsd-native-uefi.cfg
+	@mkdir -p $(dir $@)
+	cp $< $@.tmp
+	$(if $(filter y,$(ZEDBSD_GRAPHICAL_BOOT)),grep -v '^video=' $< > $@.tmp)
+	$(if $(filter y,$(ZEDBSD_GRAPHICAL_BOOT)),printf '%s\n' $(AMD64_GRAPHICAL_BOOT_LINES) >> $@.tmp)
+	$(if $(filter y,$(ZEDBSD_GRAPHICAL_LOGIN)),printf '%s\n' login=graphical >> $@.tmp)
+	$(if $(filter n,$(ZEDBSD_BOOT_KERNEL_MESSAGES)),printf '%s\n' kmsg=quiet >> $@.tmp)
+	$(if $(strip $(ZEDBSD_BOOT_EXTRA_LINES)),printf '%s\n' $(ZEDBSD_BOOT_EXTRA_LINES) >> $@.tmp)
+	mv -f $@.tmp $@
+
+$(AMD64_NATIVE_SWAP_IMAGE): $(BUILD_TOOLS_DIR)/make-swapfile.noct
+	@mkdir -p $(dir $@)
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-swapfile.noct \
+ --size-mib $(AMD64_NATIVE_SWAP_MIB) --output $@
+
+$(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/uefi/BOOTX64.EFI \
+	$(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG) $(AMD64_NATIVE_ROOT_IMAGE) \
+	$(AMD64_NATIVE_SWAP_IMAGE) $(ZEDBSD_IMAGE_HOST) $(AMD64_BOOT_LOGO) \
+	$(AMD64_IMAGE_CONTRACT_STAMP) \
+	platform/amd64/tools/check-amd64-native-image.py
+	$(ZEDBSD_IMAGE_HOST) disk --machine pcat --layout native \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG) --logo $(AMD64_BOOT_LOGO) \
+ --ufs-root $(AMD64_NATIVE_ROOT_IMAGE) --swapfile $(AMD64_NATIVE_SWAP_IMAGE) \
+ --fat-size-mib $(AMD64_NATIVE_BOOT_MIB) $@.unchecked
+	$(PYTHON) platform/amd64/tools/check-amd64-native-image.py \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_NATIVE_UEFI_ZEDBSD_CONFIG) --logo $(AMD64_BOOT_LOGO) \
+ --ufs-root $(AMD64_NATIVE_ROOT_IMAGE) --swap $(AMD64_NATIVE_SWAP_IMAGE) \
+ $@.unchecked
+	mv -f $@.unchecked $@
+else
+$(BUILD)/hdd-image.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage1-native.bin \
+	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
+	$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
+	$(AMD64_ZEDBSD_CONFIG) $(ZEDBSD_IMAGE_HOST) \
+	$(AMD64_IMAGE_CONTRACT_STAMP) tools/build/make-bios-hdd-image.noct \
+	tools/build/zedbuild.noct tools/build/overlay_journal_format.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct \
+ --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat \
+ --layout $(ZEDBSD_VARIANT) \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(AMD64_IMAGE_STAGE1) \
+ --stage2 $(BUILD)/bootloader/stage2-chain.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+endif
+
+AMD64_DEFERRED_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-deferred-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_DEFERRED_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/deferred-stub-zinit.rc,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/deferred-stub-zinit.rc))
+
+$(BUILD)/deferred-stub-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_DEFERRED_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_DEFERRED_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+deferred-stub-qemu-test: $(BUILD)/deferred-stub-qemu.img \
+	tests/deferred-stub-qemu-test.py
+	$(PYTHON) tests/deferred-stub-qemu-test.py \
+ --qemu $(QEMU) --image $(BUILD)/deferred-stub-qemu.img
+
+AMD64_POSIX_PHASE2_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase2-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE2_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase2-zinit.rc \
+	tests/posix-phase2-input.txt tests/posix-phase2-tsort.txt \
+	tests/posix-phase2-uudecode.txt,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase2-zinit.rc \
+	--file /etc/posix-phase2-input=tests/posix-phase2-input.txt \
+	--file /etc/posix-phase2-tsort=tests/posix-phase2-tsort.txt \
+	--file /etc/posix-phase2-uudecode=tests/posix-phase2-uudecode.txt))
+
+$(BUILD)/posix-phase2-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE2_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE2_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+posix-phase2-qemu-test: $(BUILD)/posix-phase2-qemu.img \
+	tests/posix-phase2-qemu-test.py
+	$(PYTHON) tests/posix-phase2-qemu-test.py \
+ --qemu $(QEMU) --image $(BUILD)/posix-phase2-qemu.img
+
+AMD64_POSIX_PHASE3_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase3-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE3_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase3-zinit.rc \
+	tests/fixtures/phase3-messages.msg \
+	tests/fixtures/zed-test-locale.src tests/fixtures/UTF-8.charmap,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase3-zinit.rc \
+	--file /etc/phase3-messages.msg=tests/fixtures/phase3-messages.msg \
+	--file /etc/zed-test-locale.src=tests/fixtures/zed-test-locale.src \
+	--file /etc/UTF-8.charmap=tests/fixtures/UTF-8.charmap))
+
+$(BUILD)/posix-phase3-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE3_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE3_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+posix-phase3-qemu-test: $(BUILD)/posix-phase3-qemu.img \
+	tests/posix-phase3-qemu-test.py
+	$(PYTHON) tests/posix-phase3-qemu-test.py \
+ --qemu $(QEMU) --image $(BUILD)/posix-phase3-qemu.img
+
+AMD64_POSIX_PHASE4_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase4-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE4_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase4-zinit.rc \
+	tests/fixtures/phase4.m4 tests/fixtures/phase4-m4.expected \
+	tests/fixtures/phase4.ed,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase4-zinit.rc \
+	--file /etc/phase4.m4=tests/fixtures/phase4.m4 \
+	--file /etc/phase4-m4.expected=tests/fixtures/phase4-m4.expected \
+	--file /etc/phase4.ed=tests/fixtures/phase4.ed))
+
+$(BUILD)/posix-phase4-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE4_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE4_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+posix-phase4-qemu-test: $(BUILD)/posix-phase4-qemu.img \
+	tests/posix-phase4-qemu-test.py
+	$(PYTHON) tests/posix-phase4-qemu-test.py \
+ --qemu $(QEMU) --image $(BUILD)/posix-phase4-qemu.img
+
+$(BUILD)/bin/posix-phase5-helper: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/tests/posix-phase5-helper.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+ $(BUILD)/user64/userland/tests/posix-phase5-helper.o -o $@
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+AMD64_POSIX_PHASE5_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase5-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE5_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) $(BUILD)/bin/posix-phase5-helper \
+	tests/posix-phase5-zinit.rc,\
+	$(AMD64_ARCH_FILES) \
+	--file /bin/posix-phase5-helper=$(BUILD)/bin/posix-phase5-helper \
+	--file /etc/zinit.rc=tests/posix-phase5-zinit.rc))
+
+$(BUILD)/posix-phase5-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE5_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE5_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+posix-phase5-qemu-test: $(BUILD)/posix-phase5-qemu.img \
+	tests/posix-phase5-qemu-test.py
+	$(PYTHON) tests/posix-phase5-qemu-test.py \
+ --qemu $(QEMU) --image $(BUILD)/posix-phase5-qemu.img
+
+AMD64_POSIX_PHASE6_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase6-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE6_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase6-zinit.rc \
+	tests/fixtures/phase6-cflow.c \
+	$(BUILD)/user64/userland/base/cflow/main.o,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase6-zinit.rc \
+	--file /etc/phase6-cflow.c=tests/fixtures/phase6-cflow.c \
+	--file /etc/phase6-object.o=$(BUILD)/user64/userland/base/cflow/main.o))
+
+$(BUILD)/posix-phase6-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE6_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE6_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+posix-phase6-qemu-test: $(BUILD)/posix-phase6-qemu.img \
+	tests/posix-phase6-qemu-test.py
+	$(PYTHON) tests/posix-phase6-qemu-test.py \
+ --qemu $(QEMU) --image $(BUILD)/posix-phase6-qemu.img
+
+AMD64_POSIX_PHASE7_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase7-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE7_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase7-zinit.rc \
+	tests/fixtures/phase6-cflow.c,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase7-zinit.rc \
+	--file /etc/phase7-input=tests/fixtures/phase6-cflow.c))
+
+$(BUILD)/posix-phase7-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE7_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE7_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+posix-phase7-qemu-test: $(BUILD)/posix-phase7-qemu.img \
+	tests/posix-phase7-qemu-test.py
+	$(PYTHON) tests/posix-phase7-qemu-test.py \
+ --qemu $(QEMU) --image $(BUILD)/posix-phase7-qemu.img
+
+AMD64_POSIX_PHASE8_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase8-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE8_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase8-zinit.rc \
+	tests/fixtures/phase8-initial.txt tests/fixtures/phase8-second.txt,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase8-zinit.rc \
+	--file /etc/phase8-initial=tests/fixtures/phase8-initial.txt \
+	--file /etc/phase8-second=tests/fixtures/phase8-second.txt))
+
+$(BUILD)/posix-phase8-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE8_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE8_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+posix-phase8-qemu-test: $(BUILD)/posix-phase8-qemu.img \
+	tests/posix-phase8-qemu-test.py
+	$(PYTHON) tests/posix-phase8-qemu-test.py \
+ --qemu $(QEMU) --image $(BUILD)/posix-phase8-qemu.img
+
+AMD64_PHASE19_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-phase19-test.ufs
+AMD64_PHASE19_TEST_FILES := $(subst \
+	--file /etc/rc.conf=userland/base/etc/rc.conf,\
+	--file /etc/rc.conf=tests/phase19-rc.conf,$(AMD64_ARCH_FILES))
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_PHASE19_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/phase19-rc.conf tests/phase19-service \
+	tests/phase19-smoke.sh,\
+	$(AMD64_PHASE19_TEST_FILES) \
+	--file /etc/service.d/phase19_smoke=tests/phase19-service \
+	--file /etc/phase19-smoke.sh=tests/phase19-smoke.sh))
+
+$(BUILD)/phase19-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_PHASE19_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_PHASE19_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+phase19-qemu-test: $(BUILD)/phase19-qemu.img tests/phase19-qemu-test.py
+	$(PYTHON) tests/phase19-qemu-test.py \
+ --qemu qemu-system-x86_64 --image $(BUILD)/phase19-qemu.img
+
+AMD64_PHASE20_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-phase20-test.ufs
+AMD64_PHASE20_TEST_FILES := $(subst \
+	--file /etc/rc.conf=userland/base/etc/rc.conf,\
+	--file /etc/rc.conf=tests/phase20-rc.conf,$(AMD64_ARCH_FILES))
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_PHASE20_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/phase20-rc.conf tests/phase20-service \
+	tests/phase20-smoke.sh,\
+	$(AMD64_PHASE20_TEST_FILES) \
+	--file /etc/service.d/phase20_smoke=tests/phase20-service \
+	--file /etc/phase20-smoke.sh=tests/phase20-smoke.sh))
+
+$(BUILD)/phase20-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_PHASE20_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_PHASE20_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+.PHONY: phase20-qemu-test phase20-qemu-test-inner \
+	phase20-interactive-shell-qemu-test
+phase20-qemu-test:
+	$(MAKE) BUILD=build/amd64-phase20 CONFIG_DRIVER_NE2000=y \
+ phase20-qemu-test-inner
+
+phase20-qemu-test-inner: $(BUILD)/phase20-qemu.img \
+	tests/phase20-qemu-test.py
+	$(PYTHON) tests/phase20-qemu-test.py \
+ --qemu qemu-system-x86_64 --image $(BUILD)/phase20-qemu.img
+
+phase20-interactive-shell-qemu-test: $(BUILD)/hdd-image.img \
+	tests/phase20-interactive-shell-qemu-test.py
+	$(PYTHON) tests/phase20-interactive-shell-qemu-test.py \
+ --qemu qemu-system-x86_64 --image $(BUILD)/hdd-image.img
+
+AMD64_POSIX_PHASE85_CURSES_SOURCES := tests/posix-phase85-curses.c \
+	userland/base/curses/curses.c userland/base/common/terminfo.c
+AMD64_POSIX_PHASE85_CURSES_OBJS := $(patsubst %.c,\
+	$(BUILD)/user64/%.o,$(AMD64_POSIX_PHASE85_CURSES_SOURCES))
+$(BUILD)/bin/phase85-curses-test: $(AMD64_USER_LIBC_OBJS) \
+	$(AMD64_POSIX_PHASE85_CURSES_OBJS) $(AMD64_PLATFORM)/user.ld \
+	$(AMD64_USER_ELF_CHECK)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+ -z max-page-size=4096 -z stack-size=0x100000 \
+ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+ $(AMD64_POSIX_PHASE85_CURSES_OBJS) -o $@
+	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+AMD64_POSIX_PHASE85_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase85-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE85_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) $(BUILD)/bin/phase85-curses-test \
+	tests/posix-phase85-zinit.rc tests/fixtures/phase85-terminal.ti,\
+	$(AMD64_ARCH_FILES) \
+	--file /bin/phase85-curses-test=$(BUILD)/bin/phase85-curses-test \
+	--file /etc/zinit.rc=tests/posix-phase85-zinit.rc \
+	--file /etc/phase85-terminal.ti=tests/fixtures/phase85-terminal.ti))
+
+$(BUILD)/posix-phase85-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE85_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+ --checker platform/amd64/tools/check-amd64-gpt-image.noct \
+ --checker-runner $(NOCT) \
+ --stage1 $(BUILD)/bootloader/stage1.bin \
+ --stage2 $(BUILD)/bootloader/stage2.bin \
+ --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+ --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+ --kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+ --zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+ --arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE85_TEST_UFS) \
+ --arch-format ufs --data-image $(DATA_IMAGE) \
+ --swapfile $(SWAP_IMAGE) $@
+
+posix-phase85-qemu-test: $(BUILD)/posix-phase85-qemu.img \
+	tests/posix-phase85-qemu-test.py
+	$(PYTHON) tests/posix-phase85-qemu-test.py \
+ --qemu $(QEMU) --image $(BUILD)/posix-phase85-qemu.img
+
+posix-phase10-qemu-test: phase10-local-source-check posix-phase4-qemu-test
+	@echo "zedBSD POSIX Phase 10 local replacements amd64 QEMU test: PASS"
+
+amd64-hal-compile: $(AMD64_HAL_OBJS)
+	@echo "HAL amd64/PCAT compile check: PASS"
+CHECK_RUN_TARGETS += amd64-hal-compile
+
+.PHONY: amd64-hal-compile deferred-stub-qemu-test posix-phase2-qemu-test \
+	posix-phase3-qemu-test posix-phase4-qemu-test posix-phase5-qemu-test \
+	posix-phase6-qemu-test posix-phase7-qemu-test posix-phase8-qemu-test \
+	posix-phase85-qemu-test posix-phase10-qemu-test
+
+$(BUILD)/uefi/memory-map-v6.o: $(UEFI_LOADER)/memory-map-v6.c $(UEFI_LOADER)/memory-map.h bootloader/common/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
+
+$(BUILD)/uefi/common-memory-map.o: bootloader/common/memory-map.c bootloader/common/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -I. -c $< -o $@
+
+$(BUILD)/bootloader/bios-memory-map.i386.o: bootloader/bios/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
+
+$(BUILD)/bootloader/common-memory-map.i386.o: bootloader/common/memory-map.c bootloader/common/memory-map.h bootloader/bios/memory-map.h bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+ -fno-stack-protector -fno-asynchronous-unwind-tables \
+ -fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+ -c $< -o $@
+
+# The copied boot-source record is part of the UEFI producer ABI.
+$(BUILD)/uefi/bootx64.o $(BUILD)/uefi/volume-discovery.o: include/kern/boot.h
+
+# The installer's units and image (make installer-image), after the native image's variables it uses.
+include platform/amd64/installer-image.mk

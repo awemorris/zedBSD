@@ -1,0 +1,4 @@
+PLATFORM := pc98
+ARCHITECTURE := i386
+BOARD := pc98
+VARIANT := bios

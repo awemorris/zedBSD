@@ -565,6 +565,109 @@ hal_mmio_write8(
 	return;
 }
 
+/*
+ * Reads one 16-bit device register with the HAL I/O ordering guarantee.
+ */
+uint16_t
+hal_mmio_read16(
+	const volatile void *address)
+{
+	uint16_t contents;
+
+	contents = *(const volatile uint16_t *)address;
+	hal_io_rmb();
+	return contents;
+}
+
+/*
+ * Reads one 32-bit device register with the HAL I/O ordering guarantee.
+ */
+uint32_t
+hal_mmio_read32(
+	const volatile void *address)
+{
+	uint32_t contents;
+
+	contents = *(const volatile uint32_t *)address;
+	hal_io_rmb();
+	return contents;
+}
+
+/*
+ * Reads one 64-bit device register with the HAL I/O ordering guarantee.
+ */
+uint64_t
+hal_mmio_read64(
+	const volatile void *address)
+{
+	uint64_t contents;
+
+	contents = *(const volatile uint64_t *)address;
+	hal_io_rmb();
+	return contents;
+}
+
+/*
+ * Writes one 16-bit device register with the HAL I/O ordering guarantee.
+ */
+void
+hal_mmio_write16(
+	volatile void *address,
+	uint16_t contents)
+{
+	*(volatile uint16_t *)address = contents;
+	hal_io_wmb();
+}
+
+/*
+ * Writes one 32-bit device register with the HAL I/O ordering guarantee.
+ */
+void
+hal_mmio_write32(
+	volatile void *address,
+	uint32_t contents)
+{
+	*(volatile uint32_t *)address = contents;
+	hal_io_wmb();
+}
+
+/*
+ * Writes one 64-bit device register with the HAL I/O ordering guarantee.
+ */
+void
+hal_mmio_write64(
+	volatile void *address,
+	uint64_t contents)
+{
+	*(volatile uint64_t *)address = contents;
+	hal_io_wmb();
+}
+
+/*
+ * Uncached pmem mapping is unsupported on coherent x86.
+ */
+int
+hal_pmem_map_uncached(
+	hal_physaddr_t paddr,
+	size_t size,
+	void **vaddr)
+{
+	(void)paddr;
+	(void)size;
+	(void)vaddr;
+	return HAL_ERR_UNSUPPORTED;
+}
+
+int
+hal_pmem_unmap_uncached(
+	void *vaddr,
+	size_t size)
+{
+	(void)vaddr;
+	(void)size;
+	return HAL_ERR_UNSUPPORTED;
+}
+
 /* Writes one unsigned value in the requested base and field width. */
 static void
 put_unsigned(

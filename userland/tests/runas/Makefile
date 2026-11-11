@@ -5,4 +5,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # D5).  Only for test images.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 RUNAS_SOURCES := userland/tests/runas/main.c
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,runas,run a command as another user,*,n,basic,$(RUNAS_SOURCES),y,tests,tests/runas,,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,runas,run a command as another user,*,n,basic,$(RUNAS_SOURCES),y,tests,tests/runas,,0755,program,,,bin))

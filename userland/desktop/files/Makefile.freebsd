@@ -1,6 +1,10 @@
-# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The independent FreeBSD build of files; source membership mirrors the target package.
-KEILAND_FREEBSD_FILES_SOURCES := userland/desktop/files/main.c \
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
+KEILAND_FREEBSD_FILES_SOURCES := \
+	userland/desktop/files/main.c \
 	userland/desktop/files/window.c \
 	userland/desktop/files/dnd.c \
 	userland/desktop/files/present.c \
@@ -59,6 +63,5 @@ KEILAND_FREEBSD_FILES_SOURCES := userland/desktop/files/main.c \
 	userland/desktop/preview/scale.c \
 	userland/desktop/preview/info.c \
 	userland/desktop/photos/exif.c
-# ws168-p004: until keiland-preview confines itself with Capsicum, FreeBSD makes the pictures in this process (Q1,
-# 2026-10-07), with the decoders linked as before and libpdf for the first page of a PDF.
+
 $(eval $(call KEILAND_FREEBSD_PROGRAM,files,bin,$(KEILAND_FREEBSD_FILES_SOURCES),libkeiland.so libwayland-client.so libtruetype.so libpdf.so libpng-compat.so libjpeg-compat.so libgif-compat.so libz-compat.so libvulkan.so.1 libkeiland-compat.a,-lm))

@@ -1,5 +1,11 @@
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
-# zedBSD userland package
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,sleep,sleep,*,y,basic,userland/base/sleep/main.c,y,base,,))
+SLEEP_SOURCES := \
+	userland/base/sleep/main.c
+
+$(eval $(call USERLAND_PACKAGE,sleep,sleep,*,y,basic,$(SLEEP_SOURCES),y,base,))

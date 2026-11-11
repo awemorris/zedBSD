@@ -22,7 +22,7 @@ ime-dict-skk: $(ZEDBSD_IME_DICT_SKK)
 # ---------------------------------------------------------------- packaging
 
 # The input method (keiland-ime) requires it since WS154 p004, so every image with the input method has it.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,ime-dict-skk,ime-dict-skk - Dictionaries of the SKK input method,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,ime-dict-skk,ime-dict-skk - Dictionaries of the SKK input method,*,n,package,,y,\
 	desktop,desktop/ime/skk-dict,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter ime-dict-skk,$(ZEDBSD_USER_PROGRAMS)),\

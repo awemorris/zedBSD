@@ -1,0 +1,29 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=intelmid64-powervr-firmware
+package-version=1.72.4.12
+installed-firmware=/lib/firmware/powervr/rgx.fw.signed.1.72.4.12
+installed-license=/usr/share/licenses/intelmid64-powervr-firmware/LICENSE.intel
+
+acquisition-repository=https://dl.google.com/dl/android/aosp
+acquisition-archive=intel-fugu-opr2.170623.027-82108990.tgz
+acquisition-archive-size=60116819
+acquisition-archive-sha256=114c20b8335f3c166c76d590c6d238153c463c2fa2dea3da56d1ce3ffd1ec6ed
+acquisition-firmware-path=vendor/intel/fugu/proprietary/rgx.fw.signed.1.72.4.12
+acquisition-firmware-size=147456
+acquisition-firmware-sha256=a781d3ae3c03ac2001469acf5364b4a9d5e4afc73767151c52a6eb900233225f
+acquisition-license-path=self-extractors/intel/LICENSE
+acquisition-license-size=14770
+acquisition-license-sha256=6966993d5b46d5b720b7765a7a3138c40c9bd3e4325dc78ce8802e0def2a2911
+
+mirror-repository=https://github.com/awemorris/zedBSD-firmware.git
+mirror-path=intelmid64-powervr/
+
+hardware=Intel Atom Z3560 / Z3580 PowerVR Rogue G6430 (Moorefield)
+redistribution=restricted-intel-license
+redistribution-notice=Subject to Intel Developer Software License Agreement; personal authorized use only
+license=Intel Developer Software License Agreement (LICENSE.intel)
+reverse-engineering=forbidden
+source-tree-blob=absent
+runtime-network-fetch=forbidden

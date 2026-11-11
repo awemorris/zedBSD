@@ -6,19 +6,20 @@
  */
 
 /*
- * Music (WS120): Keiland's music player for the songs in ~/Music.
+ * Music: Keiland's music player for the songs in ~/Music.
  *
- * The songs are m4a files (AAC in MP4, plan/ws120/ws.md, the
- * 2026-10-07 user decision); their names, artists, albums and covers come
- * from the files' MP4 metadata (tags.c), and the collection groups them by
- * album (library.c).  Playing (play.c) reads the file with mediafile,
- * decodes the AAC with Video Player's add-in of libavcodec (codec.c, opened
- * with dlopen) and writes the sound to libkeiland's sound stream (audio.c).
+ * The songs are m4a files (AAC in MP4), their names, artists, albums
+ * and covers come from the files' MP4 metadata, and the collection
+ * groups them by album (library.c).  Playing (play.c) reads the file
+ * with mediafile, decodes the AAC with Video Player's add-in of
+ * libavcodec (codec.c, opened with dlopen) and writes the sound to
+ * libkeiland's sound stream (audio.c).
  *
- * The view (view.c) draws a frame with libkeiland's canvas and widgets and
- * knows nothing of the window or the player -- what the user asks it
- * queues as requests the window takes -- so that the host tests draw it
- * into pictures; the window (main.c) feeds it the input.
+ * The view (view.c) draws a frame with libkeiland's canvas and
+ * widgets and knows nothing of the window or the player -- what the
+ * user asks it queues as requests the window takes -- so that the
+ * host tests draw it into pictures, the window (main.c) feeds it the
+ * input.
  */
 
 #ifndef MUSIC_MUSIC_H
@@ -36,11 +37,11 @@
 #define MU_COVER_MAX		(8U * 1024U * 1024U)
 
 /*
- * What a song's file says of it: its title, artist, album's artist and
- * album, its number on the album (0 for none), its length, its cover (the
- * bytes of a JPEG or PNG, allocated; NULL for none; has_cover says the file
- * has one even where the bytes are not kept), and whether it has a track of
- * sound and one of pictures.
+ * What a song's file says of it: its title, artist, album's artist
+ * and album, its number on the album (0 for none), its length, its
+ * cover (the bytes of a JPEG or PNG, allocated; NULL for none;
+ * has_cover says the file has one even where the bytes are not kept),
+ * and whether it has a track of sound and one of pictures.
  */
 struct mu_tags {
 	char title[MU_TEXT_MAX];
@@ -57,9 +58,9 @@ struct mu_tags {
 };
 
 /*
- * One song of the collection: its file, title, artist, number, length,
- * and the album it is on (an index of the albums).  The strings are the
- * library's.
+ * One song of the collection: its file, title, artist, number,
+ * length, and the album it is on (an index of the albums).  The
+ * strings are the library's.
  */
 struct mu_song {
 	char *path;
@@ -71,13 +72,13 @@ struct mu_song {
 };
 
 /*
- * One album: its title and artist, the file of its first song with a cover
- * (NULL for none), the cover's bytes read from it when the album is first
- * drawn (mu_library_cover_load; NULL until then), and its picture made from
- * them (its pixels NULL until then, or when it cannot be made:
- * picture_tried says it was tried).  The library owns the strings and the
- * bytes; the view makes the picture and releases it (mu_view_release,
- * mu_view_forget_pictures).
+ * One album: its title and artist, the file of its first song with a
+ * cover (NULL for none), the cover's bytes read from it when the
+ * album is first drawn (mu_library_cover_load; NULL until then), and
+ * its picture made from them (its pixels NULL until then, or when it
+ * cannot be made: picture_tried says it was tried).  The library owns
+ * the strings and the bytes; the view makes the picture and releases
+ * it (mu_view_release, mu_view_forget_pictures).
  */
 struct mu_album {
 	char *title;
@@ -118,20 +119,21 @@ struct mu_request {
 /*
  * The view's state.
  *
- * What is shown: the album chosen (-1 for every song), the search, the
- * scrolls of the albums and of the songs, and the song chosen in the list
- * (-1 for none).
+ * What is shown: the album chosen (-1 for every song), the search,
+ * the scrolls of the albums and of the songs, and the song chosen in
+ * the list (-1 for none).
  *
  * What plays, as the window last told: the song (-1 for none), the
- * player's state (MU_*), its position and the song's length (seconds),
- * and why playing cannot be (empty for nothing).
+ * player's state (MU_*), its position and the song's length
+ * (seconds), and why playing cannot be (empty for nothing).
  *
- * The position's slider: its value, which follows the position except for
- * a while after the user moved it (until then), and a seek it asked that
- * is not yet sent with when the last one was.
+ * The position's slider: its value, which follows the position except
+ * for a while after the user moved it (until then), and a seek it
+ * asked that is not yet sent with when the last one was.
  *
  * The requests for the window, the notice at the bottom until a time,
- * whether the window stands on glass, and whether the program is to end.
+ * whether the window stands on glass, and whether the program is to
+ * end.
  */
 struct mu_view {
 	long album;
@@ -164,10 +166,11 @@ struct mu_view {
 	int cover_told;
 
 	/*
-	 * The bar's button last pressed (its widget id, 0 for none) and the
-	 * frame's time it was counted at: a double click on a button whose
-	 * first click was not counted just before came within one frame, which
-	 * the input keeps as one click, and is two presses (ws177-p021).
+	 * The bar's button last pressed (its widget id, 0 for none)
+	 * and the frame's time it was counted at: a double click on a
+	 * button whose first click was not counted just before came
+	 * within one frame, which the input keeps as one click, and
+	 * is two presses.
 	 */
 	uint32_t bar_pressed;
 	uint64_t bar_pressed_us;

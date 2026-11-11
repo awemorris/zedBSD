@@ -43,7 +43,7 @@
 
 #include <hal/arch/i386.h>
 
-#elif defined(HAL_ARCH_AMD64)
+#elif defined(HAL_ARCH_X86_64)
 
 #include <hal/arch/amd64.h>
 

@@ -6,24 +6,24 @@
 # 2D drawing library GTK draws its software path and its text with, for the
 # GTK port (WS115).  Provenance is in plan/ws034/package-inventory.md and
 # plan/ws115/port-contract.md.
-ZEDBSD_CAIRO_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-ZEDBSD_CAIRO_DIR := $(patsubst %/,%,$(dir $(ZEDBSD_CAIRO_MAKEFILE)))
-include $(ZEDBSD_CAIRO_DIR)/../../../base/package.mk
-include $(ZEDBSD_CAIRO_DIR)/../../external.mk
+CAIRO_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+CAIRO_DIR := $(patsubst %/,%,$(dir $(CAIRO_MAKEFILE)))
+include $(CAIRO_DIR)/../../../base/package.mk
+include $(CAIRO_DIR)/../../external.mk
 
 # 1.18.6 was the latest release when recorded.  Size and digest are the
 # upstream bytes as measured; they match the SHA-256 published beside the
 # archive (WS034 p001).
-ZEDBSD_EXT_cairo_VERSION := 1.18.6
-ZEDBSD_EXT_cairo_ROOT := cairo-1.18.6
-ZEDBSD_EXT_cairo_ARCHIVE := cairo-1.18.6.tar.xz
-ZEDBSD_EXT_cairo_URL := https://cairographics.org/releases/cairo-1.18.6.tar.xz
-ZEDBSD_EXT_cairo_SIZE := 32725456
-ZEDBSD_EXT_cairo_SHA256 := 1c767308174337a74694da0f3ec069c271452163a1ef4540964c50c301f157d4
-ZEDBSD_EXT_cairo_PATCH_LEVEL := zedbsd2
-ZEDBSD_EXT_cairo_PATCHES :=
+EXT_cairo_VERSION := 1.18.6
+EXT_cairo_ROOT := cairo-1.18.6
+EXT_cairo_ARCHIVE := cairo-1.18.6.tar.xz
+EXT_cairo_URL := https://cairographics.org/releases/cairo-1.18.6.tar.xz
+EXT_cairo_SIZE := 32725456
+EXT_cairo_SHA256 := 1c767308174337a74694da0f3ec069c271452163a1ef4540964c50c301f157d4
+EXT_cairo_PATCH_LEVEL := zedbsd2
+EXT_cairo_PATCHES :=
 
-$(eval $(call ZEDBSD_EXTERNAL_SOURCE,cairo))
+$(eval $(call EXTERNAL_SOURCE,cairo))
 
 # ---------------------------------------------------------------- build
 
@@ -37,55 +37,55 @@ $(eval $(call ZEDBSD_EXTERNAL_SOURCE,cairo))
 #   tests, gtk2-utils, gtk_doc
 # The SVG surface needs nothing more and stays, as cairo builds it.  The
 # alloca patch of WS115 p007 went when the C library gained <alloca.h>.
-ZEDBSD_EXT_cairo_MAKEFILE := $(ZEDBSD_CAIRO_MAKEFILE)
-ZEDBSD_EXT_cairo_DEPENDS := pixman freetype fontconfig libpng zlib glib
-ZEDBSD_EXT_cairo_HOST_TOOLS :=
-ZEDBSD_EXT_cairo_MESON_OPTIONS := \
+EXT_cairo_MAKEFILE := $(CAIRO_MAKEFILE)
+EXT_cairo_DEPENDS := pixman freetype fontconfig libpng zlib glib
+EXT_cairo_HOST_TOOLS :=
+EXT_cairo_MESON_OPTIONS := \
 	-Dfontconfig=enabled -Dfreetype=enabled -Dpng=enabled -Dglib=enabled \
 	-Dzlib=enabled -Ddwrite=disabled -Dquartz=disabled -Dtee=disabled \
 	-Dxcb=disabled -Dxlib=disabled -Dxlib-xcb=disabled -Dlzo=disabled \
 	-Dspectre=disabled -Dsymbol-lookup=disabled -Dtests=disabled \
 	-Dgtk2-utils=disabled -Dgtk_doc=false
 
-$(eval $(call ZEDBSD_EXTERNAL_MESON,cairo))
+$(eval $(call EXTERNAL_MESON,cairo))
 
-ZEDBSD_CAIRO_STAGED := $(ZEDBSD_EXT_cairo_STAGEDIR)/.zedbsd-staged
-ZEDBSD_CAIRO_CHECKED := $(ZEDBSD_EXT_cairo_STAGEDIR)/.zedbsd-checked
-ZEDBSD_CAIRO_LIBDIR := $(ZEDBSD_EXT_cairo_STAGEDIR)/usr/lib
-ZEDBSD_CAIRO_LICENSES := COPYING COPYING-LGPL-2.1 COPYING-MPL-1.1
+CAIRO_STAGED := $(EXT_cairo_STAGEDIR)/.zedbsd-staged
+CAIRO_CHECKED := $(EXT_cairo_STAGEDIR)/.zedbsd-checked
+CAIRO_LIBDIR := $(EXT_cairo_STAGEDIR)/usr/lib
+CAIRO_LICENSES := COPYING COPYING-LGPL-2.1 COPYING-MPL-1.1
 
 # The libraries, each under its SONAME, with the libraries it needs.  The
 # list is the dependency contract.  The file name carries upstream's
 # version (2.11806.6 for 1.18.6).
-ZEDBSD_CAIRO_LIBRARIES := cairo cairo-gobject cairo-script-interpreter
-ZEDBSD_CAIRO_SONAME_cairo := libcairo.so.2
-ZEDBSD_CAIRO_NEEDED_cairo := libz.so.1 libpng16.so.16 libfontconfig.so.1 libfreetype.so.6 libpixman-1.so.0 libc.so
+CAIRO_LIBRARIES := cairo cairo-gobject cairo-script-interpreter
+CAIRO_SONAME_cairo := libcairo.so.2
+CAIRO_NEEDED_cairo := libz.so.1 libpng16.so.16 libfontconfig.so.1 libfreetype.so.6 libpixman-1.so.0 libc.so
 # cairo-gobject calls nothing in the C library itself, so --as-needed leaves
 # libc.so out of it.
-ZEDBSD_CAIRO_SONAME_cairo-gobject := libcairo-gobject.so.2
-ZEDBSD_CAIRO_NEEDED_cairo-gobject := libcairo.so.2 libglib-2.0.so.0 libgobject-2.0.so.0
+CAIRO_SONAME_cairo-gobject := libcairo-gobject.so.2
+CAIRO_NEEDED_cairo-gobject := libcairo.so.2 libglib-2.0.so.0 libgobject-2.0.so.0
 # The script interpreter comes with zlib; GTK links it to replay recorded
 # drawing in its debugging tools.
-ZEDBSD_CAIRO_SONAME_cairo-script-interpreter := libcairo-script-interpreter.so.2
-ZEDBSD_CAIRO_NEEDED_cairo-script-interpreter := libcairo.so.2 libz.so.1 libfontconfig.so.1 libfreetype.so.6 libc.so
-ZEDBSD_CAIRO_REALNAME = $(ZEDBSD_CAIRO_LIBDIR)/$(ZEDBSD_CAIRO_SONAME_$(1)).11806.6
+CAIRO_SONAME_cairo-script-interpreter := libcairo-script-interpreter.so.2
+CAIRO_NEEDED_cairo-script-interpreter := libcairo.so.2 libz.so.1 libfontconfig.so.1 libfreetype.so.6 libc.so
+CAIRO_REALNAME = $(CAIRO_LIBDIR)/$(CAIRO_SONAME_$(1)).11806.6
 
 # Checks every library against its contract once the stage exists.
-$(ZEDBSD_CAIRO_CHECKED): $(ZEDBSD_CAIRO_STAGED)
-	@set -e; $(foreach library,$(ZEDBSD_CAIRO_LIBRARIES),\
-		$(PYTHON) '$(ZEDBSD_EXTERNAL_ROOT)/tools/build/check-dynamic-elf.py' \
-		--machine $(ZEDBSD_ARCHITECTURE) --role shared-library \
-		--soname $(ZEDBSD_CAIRO_SONAME_$(library)) \
-		$(foreach needed,$(ZEDBSD_CAIRO_NEEDED_$(library)),--needed $(needed)) \
-		'$(call ZEDBSD_CAIRO_REALNAME,$(library))';)
+$(CAIRO_CHECKED): $(CAIRO_STAGED)
+	@set -e; $(foreach library,$(CAIRO_LIBRARIES),\
+		$(PYTHON) '$(EXTERNAL_ROOT)/tools/build/check-dynamic-elf.py' \
+		--machine $(ARCHITECTURE) --role shared-library \
+		--soname $(CAIRO_SONAME_$(library)) \
+		$(foreach needed,$(CAIRO_NEEDED_$(library)),--needed $(needed)) \
+		'$(call CAIRO_REALNAME,$(library))';)
 	@touch '$@'
 
-$(foreach license,$(ZEDBSD_CAIRO_LICENSES),$(ZEDBSD_EXT_cairo_SRCDIR)/$(license)): \
-	$(ZEDBSD_EXT_cairo_SRCSTAMP)
+$(foreach license,$(CAIRO_LICENSES),$(EXT_cairo_SRCDIR)/$(license)): \
+	$(EXT_cairo_SRCSTAMP)
 	@test -f '$@'
 
 .PHONY: cairo
-cairo: $(ZEDBSD_CAIRO_CHECKED)
+cairo: $(CAIRO_CHECKED)
 	@:
 
 # ---------------------------------------------------------------- packaging
@@ -93,22 +93,22 @@ cairo: $(ZEDBSD_CAIRO_CHECKED)
 # Each library goes in under its SONAME, with the licence notice and both
 # licences it may be taken under.  The headers and the .pc files are the
 # development files below.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,cairo,2D graphics library,*,n,package,,y,\
+$(eval $(call USERLAND_PACKAGE,cairo,2D graphics library,*,n,package,,y,\
 	packages/libs,libs/cairo,libs/pixman libs/freetype libs/fontconfig libs/libpng libs/zlib libs/glib))
 
-ZEDBSD_PACKAGE_INPUTS += $(if $(filter cairo,$(ZEDBSD_USER_PROGRAMS)),\
-	$(ZEDBSD_CAIRO_CHECKED) \
-	$(foreach license,$(ZEDBSD_CAIRO_LICENSES),$(ZEDBSD_EXT_cairo_SRCDIR)/$(license)))
-ZEDBSD_PACKAGE_FILES += $(if $(filter cairo,$(ZEDBSD_USER_PROGRAMS)),\
-	$(foreach library,$(ZEDBSD_CAIRO_LIBRARIES),\
-		--file /usr/lib/$(ZEDBSD_CAIRO_SONAME_$(library))=$(call ZEDBSD_CAIRO_REALNAME,$(library))) \
-	$(foreach license,$(ZEDBSD_CAIRO_LICENSES),\
-		--file /usr/share/licenses/cairo/$(license)=$(ZEDBSD_EXT_cairo_SRCDIR)/$(license)))
+PACKAGE_INPUTS += $(if $(filter cairo,$(USER_PROGRAMS)),\
+	$(CAIRO_CHECKED) \
+	$(foreach license,$(CAIRO_LICENSES),$(EXT_cairo_SRCDIR)/$(license)))
+PACKAGE_FILES += $(if $(filter cairo,$(USER_PROGRAMS)),\
+	$(foreach library,$(CAIRO_LIBRARIES),\
+		--file /usr/lib/$(CAIRO_SONAME_$(library))=$(call CAIRO_REALNAME,$(library))) \
+	$(foreach license,$(CAIRO_LICENSES),\
+		--file /usr/share/licenses/cairo/$(license)=$(EXT_cairo_SRCDIR)/$(license)))
 
 # The development files: the headers, the .pc files and the unversioned names
 # of the libraries (external.mk).
-$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,cairo,$(ZEDBSD_EXT_cairo_STAGEDIR),\
+$(eval $(call EXTERNAL_DEVELOPMENT,cairo,$(EXT_cairo_STAGEDIR),\
 	$(addprefix lib/pkgconfig/,cairo.pc cairo-fc.pc cairo-ft.pc cairo-gobject.pc cairo-pdf.pc cairo-png.pc cairo-ps.pc \
 	cairo-script.pc cairo-script-interpreter.pc cairo-svg.pc),\
 	include/cairo,\
-	$(foreach library,$(ZEDBSD_CAIRO_LIBRARIES),$(ZEDBSD_CAIRO_SONAME_$(library)))))
+	$(foreach library,$(CAIRO_LIBRARIES),$(CAIRO_SONAME_$(library)))))

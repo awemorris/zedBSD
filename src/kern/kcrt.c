@@ -43,7 +43,7 @@
  * A host test of this file (KERN_KCRT_NATIVE) has no HAL and keeps the word
  * loop.
  */
-#if defined(HAL_ARCH_AMD64) && !defined(KERN_KCRT_NATIVE)
+#if defined(HAL_ARCH_X86_64) && !defined(KERN_KCRT_NATIVE)
 #define KCRT_STRING_MOVE 1
 #include <hal/hal.h>
 

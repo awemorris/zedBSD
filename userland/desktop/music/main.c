@@ -6,14 +6,12 @@
  */
 
 /*
- * Music's window (ws120-p009; music.h, play.h): a libkeiland application
- * with one window that shows the view (view.c), its menu (File: Quit;
- * Playback: Play or Pause, Next, Previous), and the view's input.  The
- * songs are ~/Music's (library.c) and the file named on the command line
- * (from Files), which plays at once.  The view's requests are carried out
- * here with the player (play.c); a song played to its end goes on to the
- * next.  Ctrl+Q quits.  What happens is logged on standard error as
- * "MUSIC" lines for the tests.
+ * Music's window: a libkeiland application with one window that shows
+ * the view, its menu, and the view's input.  The songs are ~/Music's
+ * and the file named on the command line (from Files), which plays at
+ * once.  The view's requests are carried out here with the player; a
+ * song played to its end goes on to the next.  Ctrl+Q quits.  What
+ * happens is logged on standard error as "MUSIC" lines for the tests.
  *
  *   music [--width=N] [--height=N] [--timeout-s=N] [FILE]
  */
@@ -37,8 +35,9 @@
 #define MU_MOVING_MS		10
 
 /*
- * How long a lost stream is tried again while the sound service starts
- * again, and how often (microseconds; T1-452: it answered EAGAIN at once).
+ * How long a lost stream is tried again while the sound service
+ * starts again, and how often (microseconds: it answered EAGAIN at
+ * once).
  */
 #define MU_REOPEN_US		10000000U
 #define MU_REOPEN_EVERY_US	500000U
@@ -58,16 +57,16 @@
 
 /*
  * The window's state: the application, the window and its input, the
- * frame (its pixels, size and canvas), the text and the style, the view,
- * the player, whether a frame is due, the window changed size, a widget
- * moves, the glass was decided, the last quarter of a second and the
- * last two seconds of the position told (for the frames and the log),
- * when the folder was last looked at for a change, a song to play at the
- * next round (-1 for none: the one after a song that could not go on), and
- * how many songs in a row could not go on (ws177-p021).  A song whose
- * stream was lost and could not be opened again at once is tried again:
- * the song, where it was, whether it was paused, until when and when next
- * (reopen_until 0 for none).
+ * frame (its pixels, size and canvas), the text and the style, the
+ * view, the player, whether a frame is due, the window changed size,
+ * a widget moves, the glass was decided, the last quarter of a second
+ * and the last two seconds of the position told (for the frames and
+ * the log), when the folder was last looked at for a change, a song
+ * to play at the next round (-1 for none: the one after a song that
+ * could not go on), and how many songs in a row could not go on.  A
+ * song whose stream was lost and could not be opened again at once is
+ * tried again: the song, where it was, whether it was paused, until
+ * when and when next (reopen_until 0 for none).
  */
 struct mu_window {
 	struct kl_app *app;

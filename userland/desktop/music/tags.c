@@ -6,15 +6,16 @@
  */
 
 /*
- * The tags of an m4a file (ws120-p008): what the MP4's movie box says of
- * the song.  The file's top-level boxes are walked with pread to find the
- * movie box (moov), which is read whole; in it, the movie header (mvhd)
- * gives the length, each track's handler (trak/mdia/hdlr) says whether it
- * is sound or pictures, and the iTunes-style list (udta/meta/ilst) gives
- * the title (the item ©nam), the artist (©ART), the album's artist (aART),
- * the album (©alb), the number on the album (trkn) and the cover (covr).
- * Each item holds its value in a data box: four bytes of version and type,
- * four of locale, then the value.
+ * The tags of an m4a file: what the MP4's movie box says of the song.
+ * The file's top-level boxes are walked with pread to find the movie
+ * box (moov), which is read whole; in it, the movie header (mvhd)
+ * gives the length, each track's handler (trak/mdia/hdlr) says
+ * whether it is sound or pictures, and the iTunes-style list
+ * (udta/meta/ilst) gives the title (the item ©nam), the artist
+ * (©ART), the album's artist (aART), the album (©alb), the number on
+ * the album (trkn) and the cover (covr).  Each item holds its value
+ * in a data box: four bytes of version and type, four of locale, then
+ * the value.
  */
 
 #include "music.h"

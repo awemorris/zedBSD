@@ -24,7 +24,7 @@
  * The status is 0 when the mode ran, 64 for an unknown mode.
  */
 
-#include "userland/base/libc/syscall.h"
+#include "src/libc/syscall.h"
 
 #include <errno.h>
 #include <pthread.h>

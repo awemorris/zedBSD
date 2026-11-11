@@ -1,13 +1,21 @@
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# The native FreeBSD libvulkan.so.1 puts our WSI in front of the system loader.
-# zedBSD continues to build its separate userland/desktop/libvulkan implementation.
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
+
 LIBVULKAN_COMPAT_DIR := userland/desktop/libvulkan-compat
 LIBVULKAN_COMPAT_GEN := $(KEILAND_FREEBSD_BUILD)/gen/libvulkan-compat
-LIBVULKAN_COMPAT_SOURCES := $(LIBVULKAN_COMPAT_DIR)/backend.c $(LIBVULKAN_COMPAT_DIR)/dispatch.c \
-	$(LIBVULKAN_COMPAT_DIR)/instance.c $(LIBVULKAN_COMPAT_DIR)/device.c \
-	$(LIBVULKAN_COMPAT_DIR)/wsi-wayland.c $(LIBVULKAN_COMPAT_DIR)/wsi-swapchain.c \
+
+LIBVULKAN_COMPAT_SOURCES := \
+	$(LIBVULKAN_COMPAT_DIR)/backend.c \
+	$(LIBVULKAN_COMPAT_DIR)/dispatch.c \
+	$(LIBVULKAN_COMPAT_DIR)/instance.c \
+	$(LIBVULKAN_COMPAT_DIR)/device.c \
+	$(LIBVULKAN_COMPAT_DIR)/wsi-wayland.c \
+	$(LIBVULKAN_COMPAT_DIR)/wsi-swapchain.c \
 	$(LIBVULKAN_COMPAT_DIR)/linux-dmabuf-v1-protocol.c \
-	$(LIBVULKAN_COMPAT_DIR)/kms.c $(LIBVULKAN_COMPAT_DIR)/wsi-display.c \
+	$(LIBVULKAN_COMPAT_DIR)/kms.c \
+	$(LIBVULKAN_COMPAT_DIR)/wsi-display.c \
 	$(LIBVULKAN_COMPAT_DIR)/freebsd/sync-freebsd.c
 
 $(LIBVULKAN_COMPAT_GEN)/forward.inc $(LIBVULKAN_COMPAT_GEN)/exports.map &: $(LIBVULKAN_COMPAT_DIR)/functions.tsv $(LIBVULKAN_COMPAT_DIR)/gen-forward.sh
@@ -15,8 +23,8 @@ $(LIBVULKAN_COMPAT_GEN)/forward.inc $(LIBVULKAN_COMPAT_GEN)/exports.map &: $(LIB
 	sh $(LIBVULKAN_COMPAT_DIR)/gen-forward.sh $(LIBVULKAN_COMPAT_DIR)/functions.tsv $(LIBVULKAN_COMPAT_GEN)
 
 # The generated forwarders are included by dispatch.c; every source sees the generated directory.
-KEILAND_FREEBSD_CPPFLAGS_userland_desktop_libvulkan-compat_ := -I$(LIBVULKAN_COMPAT_GEN) \
-	-DKEILAND_VULKAN_BACKEND_PATHS='"$(KEILAND_FREEBSD_LOCALBASE)/lib/libvulkan.so.1"'
+KEILAND_FREEBSD_CPPFLAGS_userland_desktop_libvulkan-compat_ := -I$(LIBVULKAN_COMPAT_GEN) -DKEILAND_VULKAN_BACKEND_PATHS='"$(KEILAND_FREEBSD_LOCALBASE)/lib/libvulkan.so.1"'
+
 $(patsubst %.c,$(KEILAND_FREEBSD_BUILD)/obj/%.o,$(LIBVULKAN_COMPAT_SOURCES)): $(LIBVULKAN_COMPAT_GEN)/forward.inc
 
 $(eval $(call KEILAND_FREEBSD_LIBRARY,vulkan-compat,libvulkan.so.1,$(LIBVULKAN_COMPAT_SOURCES),libwayland-client.so,-pthread,$(LIBVULKAN_COMPAT_GEN)/exports.map,-Wl$(comma)-Bsymbolic))
@@ -24,4 +32,5 @@ $(eval $(call KEILAND_FREEBSD_LIBRARY,vulkan-compat,libvulkan.so.1,$(LIBVULKAN_C
 # Our programs link -lvulkan; the build directory gets the development name (never installed).
 $(KEILAND_FREEBSD_BUILD)/lib/libvulkan.so: $(KEILAND_FREEBSD_BUILD)/lib/libvulkan.so.1
 	ln -sf libvulkan.so.1 $@
+
 KEILAND_FREEBSD_ALL += $(KEILAND_FREEBSD_BUILD)/lib/libvulkan.so

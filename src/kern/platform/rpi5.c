@@ -46,8 +46,8 @@
 #if CONFIG_DRIVER_RPI5_FAN
 #include "drivers/platform/rpi5/rpi5-fan.h"
 #endif
-#if CONFIG_DRIVER_BCM2712_GPU
-#include "drivers/gpu/bcm2711/bcm2712-gpu.h"
+#if CONFIG_DRIVER_RPI5_GPU
+#include "drivers/gpu/videocore/bcm2712-gpu.h"
 #endif
 #include <drivers/usb/usb-hid.h>
 
@@ -217,7 +217,7 @@ kern_platform_refresh_devices(
 	(void)drv_rpi5_bt_probe(rpi5_fdt_phys);
 #endif
 
-#if CONFIG_DRIVER_BCM2712_GPU
+#if CONFIG_DRIVER_RPI5_GPU
 	/*
 	 * Finds the V3D render engine and holds it for root's start (sysctl
 	 * hw.gpu.start=1); a board without it, or a boot with rpi4gpu.off=1,

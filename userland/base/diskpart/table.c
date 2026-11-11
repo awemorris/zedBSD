@@ -1,5 +1,14 @@
-/* Userspace GPT/MBR parser and metadata editor. No kernel-private interfaces.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Userspace GPT/MBR parser and metadata editor. No kernel-private interfaces.
+ */
+
 #include "table.h"
 #include <errno.h>
 #include <stdlib.h>

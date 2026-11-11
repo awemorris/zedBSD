@@ -15,6 +15,7 @@
  * program that describes the system it runs on reads NAME from
  * /etc/os-release at run time instead.
  */
+
 #ifndef KERN_OS_NAME_H
 #define KERN_OS_NAME_H
 

@@ -1,0 +1,324 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+#include "defs.h"
+
+.code64
+.text
+
+.macro SAVE_AND_CALL
+	pushq %rax
+	pushq %rbx
+	pushq %rcx
+	pushq %rdx
+	pushq %rsi
+	pushq %rdi
+	pushq %rbp
+	pushq %r8
+	pushq %r9
+	pushq %r10
+	pushq %r11
+	pushq %r12
+	pushq %r13
+	pushq %r14
+	pushq %r15
+	cld
+	movq %rsp, %rdi
+	movq %rsp, %rbx
+	andq $-16, %rsp
+	call int_handler
+	movq %rbx, %rsp
+
+	/* A system call entered by SYSCALL returns by SYSRET while marked so. */
+	cmpq $INT_SYSCALL_FAST, 120(%rsp)
+	je amd64_sysret
+	popq %r15
+	popq %r14
+	popq %r13
+	popq %r12
+	popq %r11
+	popq %r10
+	popq %r9
+	popq %r8
+	popq %rbp
+	popq %rdi
+	popq %rsi
+	popq %rdx
+	popq %rcx
+	popq %rbx
+	popq %rax
+	addq $16, %rsp
+	iretq
+.endm
+
+.global amd64_common_interrupt
+amd64_common_interrupt:
+	SAVE_AND_CALL
+
+/*
+ * Returns from a system call by SYSRET: rcx and r11 take the return
+ * address and flags (the SYSCALL ABI gives up their values), and the user
+ * stack is loaded with interrupts off, which SYSRET turns back on from r11.
+ */
+amd64_sysret:
+	popq %r15
+	popq %r14
+	popq %r13
+	popq %r12
+	addq $8, %rsp
+	popq %r10
+	popq %r9
+	popq %r8
+	popq %rbp
+	popq %rdi
+	popq %rsi
+	popq %rdx
+	addq $8, %rsp
+	popq %rbx
+	popq %rax
+	movq 16(%rsp), %rcx
+	movq 32(%rsp), %r11
+	cli
+	movq 40(%rsp), %rsp
+	sysretq
+
+/*
+ * Enters a system call made by SYSCALL: rcx holds the return address, r11
+ * the flags, and the stack is still the user's.  Switches to this CPU's
+ * kernel stack and builds the frame an interrupt gate would have, marked
+ * INT_SYSCALL_FAST, then joins the common path.  Interrupts stay off (the
+ * FMASK clears IF) until the frame is on the kernel stack.
+ */
+.global amd64_syscall_fast_entry
+amd64_syscall_fast_entry:
+	movq %rsp, %gs:AMD64_PERCPU_SYSCALL_SCRATCH
+	movq %gs:AMD64_PERCPU_SYSCALL_RSP, %rsp
+	pushq $(SEG_USER_DATA | 3)
+	pushq %gs:AMD64_PERCPU_SYSCALL_SCRATCH
+	pushq %r11
+	pushq $(SEG_USER_CODE | 3)
+	pushq %rcx
+	pushq $0
+	pushq $INT_SYSCALL_FAST
+	jmp amd64_common_interrupt
+
+.macro ISR_NOERR n
+.Lfault\n:
+	pushq $0
+	pushq $\n
+	jmp amd64_common_interrupt
+.endm
+
+.macro ISR_ERR n
+.Lfault\n:
+	pushq $\n
+	jmp amd64_common_interrupt
+.endm
+
+ISR_NOERR 0
+ISR_NOERR 1
+ISR_NOERR 2
+ISR_NOERR 3
+ISR_NOERR 4
+ISR_NOERR 5
+ISR_NOERR 6
+ISR_NOERR 7
+ISR_ERR   8
+ISR_NOERR 9
+ISR_ERR   10
+ISR_ERR   11
+ISR_ERR   12
+ISR_ERR   13
+ISR_ERR   14
+ISR_NOERR 15
+ISR_NOERR 16
+ISR_ERR   17
+ISR_NOERR 18
+ISR_NOERR 19
+ISR_NOERR 20
+ISR_ERR   21
+ISR_NOERR 22
+ISR_NOERR 23
+ISR_NOERR 24
+ISR_NOERR 25
+ISR_NOERR 26
+ISR_NOERR 27
+ISR_NOERR 28
+ISR_ERR   29
+ISR_ERR   30
+ISR_NOERR 31
+
+.macro IRQ n
+.Lirq\n:
+	pushq $0
+	pushq $(INT_IRQ_BASE + \n)
+	jmp amd64_common_interrupt
+.endm
+
+IRQ 0
+IRQ 1
+IRQ 2
+IRQ 3
+IRQ 4
+IRQ 5
+IRQ 6
+IRQ 7
+IRQ 8
+IRQ 9
+IRQ 10
+IRQ 11
+IRQ 12
+IRQ 13
+IRQ 14
+IRQ 15
+IRQ 16
+IRQ 17
+IRQ 18
+IRQ 19
+IRQ 20
+IRQ 21
+IRQ 22
+IRQ 23
+IRQ 24
+IRQ 25
+IRQ 26
+IRQ 27
+IRQ 28
+IRQ 29
+IRQ 30
+IRQ 31
+IRQ 32
+IRQ 33
+IRQ 34
+IRQ 35
+IRQ 36
+IRQ 37
+IRQ 38
+IRQ 39
+IRQ 40
+IRQ 41
+IRQ 42
+IRQ 43
+IRQ 44
+IRQ 45
+IRQ 46
+IRQ 47
+IRQ 48
+IRQ 49
+IRQ 50
+IRQ 51
+IRQ 52
+IRQ 53
+IRQ 54
+IRQ 55
+IRQ 56
+IRQ 57
+IRQ 58
+IRQ 59
+IRQ 60
+IRQ 61
+IRQ 62
+IRQ 63
+
+.macro MSI n
+.Lmsi\n:
+	pushq $0
+	pushq $(AMD64_VECTOR_MSI_BASE + \n)
+	jmp amd64_common_interrupt
+.endm
+
+MSI 0
+MSI 1
+MSI 2
+MSI 3
+MSI 4
+MSI 5
+MSI 6
+MSI 7
+MSI 8
+MSI 9
+MSI 10
+MSI 11
+MSI 12
+MSI 13
+MSI 14
+MSI 15
+
+.global amd64_notify_entry
+amd64_notify_entry:
+	pushq $0
+	pushq $AMD64_VECTOR_NOTIFY
+	jmp amd64_common_interrupt
+
+.global amd64_tlb_entry
+amd64_tlb_entry:
+	pushq $0
+	pushq $AMD64_VECTOR_TLB
+	jmp amd64_common_interrupt
+
+.global amd64_error_entry
+amd64_error_entry:
+	pushq $0
+	pushq $AMD64_VECTOR_ERROR
+	jmp amd64_common_interrupt
+
+.global amd64_spurious_entry
+amd64_spurious_entry:
+	pushq $0
+	pushq $AMD64_VECTOR_SPURIOUS
+	jmp amd64_common_interrupt
+
+.global amd64_syscall_entry
+amd64_syscall_entry:
+	pushq $0
+	pushq $INT_SYSCALL
+	jmp amd64_common_interrupt
+
+.global amd64_undefined_entry
+amd64_undefined_entry:
+	pushq $0
+	pushq $0xff
+	jmp amd64_common_interrupt
+
+.section .rodata
+.balign 8
+.global amd64_fault_table
+amd64_fault_table:
+	.quad .Lfault0, .Lfault1, .Lfault2, .Lfault3
+	.quad .Lfault4, .Lfault5, .Lfault6, .Lfault7
+	.quad .Lfault8, .Lfault9, .Lfault10, .Lfault11
+	.quad .Lfault12, .Lfault13, .Lfault14, .Lfault15
+	.quad .Lfault16, .Lfault17, .Lfault18, .Lfault19
+	.quad .Lfault20, .Lfault21, .Lfault22, .Lfault23
+	.quad .Lfault24, .Lfault25, .Lfault26, .Lfault27
+	.quad .Lfault28, .Lfault29, .Lfault30, .Lfault31
+
+.global amd64_irq_table
+amd64_irq_table:
+	.quad .Lirq0, .Lirq1, .Lirq2, .Lirq3
+	.quad .Lirq4, .Lirq5, .Lirq6, .Lirq7
+	.quad .Lirq8, .Lirq9, .Lirq10, .Lirq11
+	.quad .Lirq12, .Lirq13, .Lirq14, .Lirq15
+	.quad .Lirq16, .Lirq17, .Lirq18, .Lirq19
+	.quad .Lirq20, .Lirq21, .Lirq22, .Lirq23
+	.quad .Lirq24, .Lirq25, .Lirq26, .Lirq27
+	.quad .Lirq28, .Lirq29, .Lirq30, .Lirq31
+	.quad .Lirq32, .Lirq33, .Lirq34, .Lirq35
+	.quad .Lirq36, .Lirq37, .Lirq38, .Lirq39
+	.quad .Lirq40, .Lirq41, .Lirq42, .Lirq43
+	.quad .Lirq44, .Lirq45, .Lirq46, .Lirq47
+	.quad .Lirq48, .Lirq49, .Lirq50, .Lirq51
+	.quad .Lirq52, .Lirq53, .Lirq54, .Lirq55
+	.quad .Lirq56, .Lirq57, .Lirq58, .Lirq59
+	.quad .Lirq60, .Lirq61, .Lirq62, .Lirq63
+
+.global amd64_msi_table
+amd64_msi_table:
+	.quad .Lmsi0, .Lmsi1, .Lmsi2, .Lmsi3
+	.quad .Lmsi4, .Lmsi5, .Lmsi6, .Lmsi7
+	.quad .Lmsi8, .Lmsi9, .Lmsi10, .Lmsi11
+	.quad .Lmsi12, .Lmsi13, .Lmsi14, .Lmsi15

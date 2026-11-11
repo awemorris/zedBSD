@@ -1,414 +1,146 @@
-# Canonical Noct release acquisition and zedBSD target package.
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-
-ZEDBSD_NOCT_PACKAGE_MAKEFILE := $(lastword $(MAKEFILE_LIST))
-ZEDBSD_NOCT_PACKAGE_DIR := $(patsubst %/,%,$(dir $(ZEDBSD_NOCT_PACKAGE_MAKEFILE)))
-include $(ZEDBSD_NOCT_PACKAGE_DIR)/../package.mk
-include $(ZEDBSD_NOCT_PACKAGE_DIR)/version.mk
-include $(ZEDBSD_NOCT_PACKAGE_DIR)/../../../build-jobs.mk
-
-ZEDBSD_NOCT_ROOT := $(if $(ZEDBSD_TOPLEVEL_BUILD),$(CURDIR),$(ZEDBSD_REPO_ROOT))
-ZEDBSD_NOCT_PACKAGE_ROOT := $(abspath $(ZEDBSD_NOCT_ROOT)/userland/base/noct)
-ZEDBSD_NOCT_DISTDIR := $(ZEDBSD_NOCT_PACKAGE_ROOT)/distfiles
-ZEDBSD_NOCT_DISTFILE := $(ZEDBSD_NOCT_DISTDIR)/$(ZEDBSD_NOCT_ARCHIVE_NAME)
-# Only the cross-build wiring stays local; the rest is upstream now.
-ZEDBSD_NOCT_PATCHES := \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0001-connect-zedbsd-target-adapter.patch \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0002-use-project-llvm-sysroot.patch \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0003-sigaction-disposition-is-a-pointer.patch
-# ws101-p011: the zedBSD interpreter's tree has these on top: its OpenGL ES
-# accelerator backend.  The host interpreter's tree keeps ZEDBSD_NOCT_PATCHES
-# and ZEDBSD_NOCT_PATCH_LEVEL only, so these never rebuild build/NoctLang.
-ZEDBSD_NOCT_TARGET_PATCHES := $(ZEDBSD_NOCT_PATCHES) \
-	$(ZEDBSD_NOCT_PACKAGE_ROOT)/patches/0004-accel-opengles-on-zedbsd.patch
-ZEDBSD_NOCT_FETCH ?= curl --fail --location --silent --show-error
-ZEDBSD_NOCT_SHA256 ?= sha256sum
-
-NOCT_SOURCE_DIR := $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/base/noct/noct,$(abspath $(ZEDBSD_NOCT_ROOT)/userland/base/noct/noct))
-NOCT_SOURCE_STAMP := $(NOCT_SOURCE_DIR)/.zedbsd-source-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_TARGET_PATCH_LEVEL)
-NOCT_SOURCE_IDENTITY := $(NOCT_SOURCE_DIR)/.zedbsd-source-identity
-NOCT_SOURCE_MANIFEST := $(NOCT_SOURCE_DIR)/.zedbsd-source-manifest
-NOCT_HOST_SOURCE_DIR := $(if $(ZEDBSD_TOPLEVEL_BUILD),build/NoctLang,$(abspath $(ZEDBSD_NOCT_ROOT)/build/NoctLang))
-NOCT_HOST_SOURCE_STAMP := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)
-NOCT_HOST_SOURCE_IDENTITY := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-identity
-NOCT_HOST_SOURCE_MANIFEST := $(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-manifest
-
-# BUG-093: what an extracted tree records about its patches.  A tree whose
-# identity matches is the pinned release plus the current patches, however
-# old it is, so it is judged by these contents rather than by how its time
-# compares with the patch files': a new checkout gives the patches a new
-# time without changing a byte of them (toolchain/llvm/llvm.mk, BUG-089).
-ZEDBSD_NOCT_PATCHES_SHA256 := $(firstword $(shell cat $(ZEDBSD_NOCT_PATCHES) 2>/dev/null | sha256sum))
-ZEDBSD_NOCT_TARGET_PATCHES_SHA256 := $(firstword $(shell cat $(ZEDBSD_NOCT_TARGET_PATCHES) 2>/dev/null | sha256sum))
-ZEDBSD_NOCT_IDENTITY = \
-	'version=$(ZEDBSD_NOCT_VERSION)' \
-	'tag=$(ZEDBSD_NOCT_TAG)' \
-	'commit=$(ZEDBSD_NOCT_TAG_COMMIT)' \
-	'archive-sha256=$(ZEDBSD_NOCT_ARCHIVE_SHA256)' \
-	'patch-level=$(1)' \
-	'patches-sha256=$(2)'
-ZEDBSD_NOCT_ACCEPTED = $(strip $(shell \
-	if test -f '$(1)' && test -f '$(2)' && test ! -L '$(2)' && \
-	   test "$$(cat '$(2)')" = "$$(printf '%s\n' $(call ZEDBSD_NOCT_IDENTITY,$(3),$(4)))"; \
-	then echo yes; fi))
-NOCT_SOURCE_ACCEPTED := $(call ZEDBSD_NOCT_ACCEPTED,$(NOCT_SOURCE_STAMP),$(NOCT_SOURCE_IDENTITY),$(ZEDBSD_NOCT_TARGET_PATCH_LEVEL),$(ZEDBSD_NOCT_TARGET_PATCHES_SHA256))
-NOCT_HOST_SOURCE_ACCEPTED := $(call ZEDBSD_NOCT_ACCEPTED,$(NOCT_HOST_SOURCE_STAMP),$(NOCT_HOST_SOURCE_IDENTITY),$(ZEDBSD_NOCT_PATCH_LEVEL),$(ZEDBSD_NOCT_PATCHES_SHA256))
-
-# Records of the archive and source-tree checks, kept beside what each one
-# examined so that a build repeats a check only after that thing changes.
-ZEDBSD_NOCT_ARCHIVE_VERIFIED := \
-	$(ZEDBSD_NOCT_DISTDIR)/.zedbsd-archive-verified-$(ZEDBSD_NOCT_ARCHIVE_NAME)
-NOCT_SOURCE_VERIFIED := \
-	$(NOCT_SOURCE_DIR)/.zedbsd-source-verified-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_TARGET_PATCH_LEVEL)
-NOCT_HOST_SOURCE_VERIFIED := \
-	$(NOCT_HOST_SOURCE_DIR)/.zedbsd-source-verified-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)
-
-# The interpreter built for the build machine. The build's own scripts
-# run on it, so it exists before any target program does; $(NOCT) is how
-# the rest of the tree asks for it.
-NOCT_HOST_BUILD_DIR := $(NOCT_HOST_SOURCE_DIR)/build-static
-NOCT_HOST_ARTIFACT := $(NOCT_HOST_BUILD_DIR)/noct
-NOCT_HOST_STATE_DIR := $(if $(ZEDBSD_TOPLEVEL_BUILD),build/host-noct-state,\
-	$(abspath $(ZEDBSD_NOCT_ROOT)/build/host-noct-state))
-NOCT_HOST_BUILD_STAMP := \
-	$(NOCT_HOST_STATE_DIR)/built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_PATCH_LEVEL)-process
-NOCT_HOST_CMAKE_OPTIONS := -DNOCT_ENABLE_API_PROCESS=ON \
-	-DNOCT_VERSION=$(ZEDBSD_NOCT_VERSION)
-NOCT ?= $(abspath $(NOCT_HOST_ARTIFACT))
-
-NOCT_ZEDBSD_ARCH := $(if $(filter i386 arm64,$(ZEDBSD_ARCHITECTURE)),$(ZEDBSD_ARCHITECTURE),amd64)
-NOCT_ZEDBSD_SYSROOT = $(if $(filter i386,$(NOCT_ZEDBSD_ARCH)),$(ZEDBSD_SYSROOT_I386),$(if $(filter arm64,$(NOCT_ZEDBSD_ARCH)),$(ZEDBSD_SYSROOT_ARM64),$(ZEDBSD_SYSROOT_AMD64)))
-# amd64 uses the toolchain file the Noct release carries; the others use the
-# ones kept here.
-NOCT_ZEDBSD_TOOLCHAIN_FILE := $(if $(filter amd64,$(NOCT_ZEDBSD_ARCH)),,$(ZEDBSD_NOCT_PACKAGE_ROOT)/zedbsd-$(NOCT_ZEDBSD_ARCH).cmake)
-# ws101-p011: the OpenGL ES accelerator, for an amd64 configuration that sets
-# ZEDBSD_NOCT_ACCEL := y (and so builds libegl and libglesv2).  The option is
-# always given, so a build that turns it off does not keep an earlier ON from
-# CMake's cache.  Such an interpreter needs /lib/libEGL.so and libGLESv2.so.
-NOCT_ZEDBSD_ACCEL := $(and $(filter amd64,$(NOCT_ZEDBSD_ARCH)),$(filter y,$(ZEDBSD_NOCT_ACCEL)))
-NOCT_ZEDBSD_ACCEL_LIBRARIES := $(if $(NOCT_ZEDBSD_ACCEL),\
-	$(BUILD)/dynamic/libEGL.so $(BUILD)/dynamic/libGLESv2.so)
-NOCT_ZEDBSD_CMAKE_OPTIONS := $(if $(NOCT_ZEDBSD_TOOLCHAIN_FILE),--toolchain $(NOCT_ZEDBSD_TOOLCHAIN_FILE),) \
-	$(if $(filter i386,$(NOCT_ZEDBSD_ARCH)),-DNOCT_ENABLE_JIT=OFF,) \
-	-DNOCT_ENABLE_ACCEL=$(if $(NOCT_ZEDBSD_ACCEL),ON,OFF)
-NOCT_ZEDBSD_BUILD_DIR := $(NOCT_SOURCE_DIR)/build-zedbsd-$(NOCT_ZEDBSD_ARCH)
-NOCT_ZEDBSD_ARTIFACT := $(NOCT_ZEDBSD_BUILD_DIR)/noct
-
-# cmake leaves the interpreter's timestamp alone when it has nothing to
-# do, so the build records itself here instead of in its own output.
-NOCT_ZEDBSD_BUILD_STAMP := \
-	$(NOCT_ZEDBSD_BUILD_DIR)/.zedbsd-built-$(ZEDBSD_NOCT_VERSION)-$(ZEDBSD_NOCT_TARGET_PATCH_LEVEL)$(if $(NOCT_ZEDBSD_ACCEL),-accel)
-
-# The sysroot the interpreter links against, named by the stamp that says
-# it is complete. sysroot.mk is included after this package, so its own
-# variables are not available here yet; the top level settled the path for
-# the selected architecture before any package was read.
-NOCT_ZEDBSD_SYSROOT_STAMP := $(if $(ZEDBSD_TARGET_SYSROOT),\
-	$(ZEDBSD_TARGET_SYSROOT)/.zedbsd-sysroot-complete,)
-NOCT_PACKAGE_HOLORIS := $(NOCT_SOURCE_DIR)/resources/apps/holoris/holoris.noct
-
-# i386 uses the interpreter for the PC98 i486 baseline. Remacs stays held
-# independently until its own application acceptance is scheduled.
-# The menu files Noct with the base programs, beside Emacs that needs it, and
-# not under Packages (2026-10-09 user: "Noctはuserland/base/noct/にあるけど、
-# Baseメニューにないようなので、追加してください。", "PackagesメニューからNoctを
-# 削除してください。Baseに移動するためです。").  Only the menu group changed.
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,noct,amd64 i386 pc98 rpi4 rpi5,n,package,,y,\
-	base,base/noct,))
-
-ZEDBSD_PACKAGE_INPUTS += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
-	$(BUILD)/bin/noct $(NOCT_PACKAGE_HOLORIS))
-ZEDBSD_PACKAGE_FILES += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
-	--file /bin/noct=$(BUILD)/bin/noct \
-	--file $(ZEDBSD_PACKAGE_BINDIR)/holoris.nct=$(NOCT_PACKAGE_HOLORIS))
-
-define ZEDBSD_NOCT_VERIFY_ARCHIVE_COMMANDS
-	archive="$(1)"; \
-	if test ! -f "$$archive" || test -L "$$archive"; then \
-		echo "Noct: missing or unsafe archive: $$archive" >&2; \
-		exit 1; \
-	fi; \
-	actual_size=$$(wc -c < "$$archive" | tr -d '[:space:]'); \
-	if test "$$actual_size" != '$(ZEDBSD_NOCT_ARCHIVE_SIZE)'; then \
-		echo "Noct: archive size mismatch: expected $(ZEDBSD_NOCT_ARCHIVE_SIZE), got $$actual_size" >&2; \
-		exit 1; \
-	fi; \
-	actual_hash=$$('$(ZEDBSD_NOCT_SHA256)' "$$archive" | awk '{print $$1}'); \
-	if test "$$actual_hash" != '$(ZEDBSD_NOCT_ARCHIVE_SHA256)'; then \
-		echo "Noct: archive SHA-256 mismatch" >&2; \
-		exit 1; \
-	fi; \
-	bad_entry=$$(tar -tzf "$$archive" | awk -v root='$(ZEDBSD_NOCT_ARCHIVE_ROOT)' '\
-		$$0 != root && $$0 != root "/" && index($$0, root "/") != 1 { print; exit } \
-		$$0 ~ /(^|\/)\.\.($$|\/)/ { print; exit }'); \
-	if test -n "$$bad_entry"; then \
-		echo "Noct: unsafe archive member: $$bad_entry" >&2; \
-		exit 1; \
-	fi; \
-	bad_type=$$(tar -tvzf "$$archive" | awk 'substr($$0, 1, 1) != "-" && substr($$0, 1, 1) != "d" { print; exit }'); \
-	if test -n "$$bad_type"; then \
-		echo "Noct: unsupported archive member type: $$bad_type" >&2; \
-		exit 1; \
-	fi
-endef
-
-define ZEDBSD_NOCT_VERIFY_ARCHIVE
-	@set -eu; \
-	$(call ZEDBSD_NOCT_VERIFY_ARCHIVE_COMMANDS,$(ZEDBSD_NOCT_DISTFILE))
-endef
-
-$(ZEDBSD_NOCT_DISTFILE):
-	@set -eu; \
-	mkdir -p '$(ZEDBSD_NOCT_DISTDIR)'; \
-	lock='$@.lock'; \
-	temporary=; \
-	locked=0; \
-	cleanup() { \
-		if test -n "$$temporary" && test -f "$$temporary"; then rm -f -- "$$temporary"; fi; \
-		if test "$$locked" = 1 && test -d "$$lock"; then rmdir -- "$$lock"; fi; \
-	}; \
-	if ! mkdir "$$lock"; then \
-		echo "Noct: archive acquisition already in progress: $@" >&2; \
-		exit 1; \
-	fi; \
-	locked=1; \
-	trap cleanup EXIT HUP INT TERM; \
-	temporary=$$(mktemp '$(ZEDBSD_NOCT_DISTDIR)/.$(ZEDBSD_NOCT_ARCHIVE_NAME).XXXXXX'); \
-	$(ZEDBSD_NOCT_FETCH) --output "$$temporary" '$(ZEDBSD_NOCT_ARCHIVE_URL)'; \
-	$(call ZEDBSD_NOCT_VERIFY_ARCHIVE_COMMANDS,$$temporary); \
-	mv -- "$$temporary" '$@'; \
-	temporary=; \
-	rmdir -- "$$lock"; \
-	locked=0; \
-	trap - EXIT HUP INT TERM
-
-.PHONY: noct-download
-noct-download: $(ZEDBSD_NOCT_DISTFILE)
-	$(ZEDBSD_NOCT_VERIFY_ARCHIVE)
-	@touch '$(ZEDBSD_NOCT_ARCHIVE_VERIFIED)'
-
-$(ZEDBSD_NOCT_ARCHIVE_VERIFIED): $(ZEDBSD_NOCT_DISTFILE)
-	$(ZEDBSD_NOCT_VERIFY_ARCHIVE)
-	@touch '$@'
-
-ZEDBSD_USERLAND_DOWNLOAD_TARGETS += noct-download
-
-define ZEDBSD_NOCT_EXTRACT_SOURCE
-	@set -eu; \
-	source='$(1)'; \
-	parent=$${source%/*}; \
-	if test '$(4)' = replace && test -d "$$source" && test ! -L "$$source" && \
-	   test -f "$$source/.zedbsd-source-identity" && \
-	   { ! grep -qx 'commit=$(ZEDBSD_NOCT_TAG_COMMIT)' "$$source/.zedbsd-source-identity" || \
-	     ! grep -qx 'patch-level=$(3)' "$$source/.zedbsd-source-identity" || \
-	     ! grep -qx 'patches-sha256=$(5)' "$$source/.zedbsd-source-identity"; }; then \
-		echo "Noct: replacing the source tree of another release or other patches: $$source" >&2; \
-		rm -rf -- "$$source"; \
-	fi; \
-	if test -e "$$source"; then \
-		echo "Noct: refusing to replace existing source tree: $$source" >&2; \
-		echo "Noct: it does not hold the current patches; ask the owner of the shared tree to extract it again" >&2; \
-		exit 1; \
-	fi; \
-	mkdir -p "$$parent"; \
-	lock="$$source.lock"; \
-	temporary=; \
-	locked=0; \
-	cleanup() { \
-		if test -n "$$temporary" && test -d "$$temporary"; then rm -rf -- "$$temporary"; fi; \
-		if test "$$locked" = 1 && test -d "$$lock"; then rmdir -- "$$lock"; fi; \
-	}; \
-	if ! mkdir "$$lock"; then \
-		echo "Noct: source extraction already in progress: $$source" >&2; \
-		exit 1; \
-	fi; \
-	locked=1; \
-	trap cleanup EXIT HUP INT TERM; \
-	temporary=$$(mktemp -d "$$parent/.noct-$(ZEDBSD_NOCT_VERSION).XXXXXX"); \
-	tar -xzf '$(ZEDBSD_NOCT_DISTFILE)' -C "$$temporary"; \
-	tree="$$temporary/$(ZEDBSD_NOCT_ARCHIVE_ROOT)"; \
-	if test ! -d "$$tree" || test -L "$$tree"; then \
-		echo "Noct: expected archive root is missing" >&2; \
-		exit 1; \
-	fi; \
-	for patch_file in $(2); do \
-		(cd "$$tree" && patch --batch --forward --fuzz=0 -p1 < "$$patch_file"); \
-	done; \
-	printf '%s\n' $(call ZEDBSD_NOCT_IDENTITY,$(3),$(5)) \
-		> "$$tree/.zedbsd-source-identity"; \
-	(cd "$$tree" && \
-		find . -type f ! -path './build-*/*' ! -name '.zedbsd-source-*' -print | \
-		LC_ALL=C sort | while IFS= read -r file; do sha256sum "$$file"; done) \
-		> "$$tree/.zedbsd-source-manifest"; \
-	touch "$$tree/.zedbsd-source-$(ZEDBSD_NOCT_VERSION)-$(3)"; \
-	mv -- "$$tree" "$$source"; \
-	rmdir -- "$$temporary"; \
-	temporary=; \
-	rmdir -- "$$lock"; \
-	locked=0; \
-	trap - EXIT HUP INT TERM
-endef
-
-define ZEDBSD_NOCT_VERIFY_SOURCE
-	@set -eu; \
-	source='$(1)'; \
-	identity="$$source/.zedbsd-source-identity"; \
-	manifest="$$source/.zedbsd-source-manifest"; \
-	if test ! -f "$$identity" || test -L "$$identity" || \
-	   test ! -f "$$manifest" || test -L "$$manifest"; then \
-		echo "Noct: source identity is missing or unsafe: $$source" >&2; \
-		exit 1; \
-	fi; \
-	expected=$$(printf '%s\n' $(call ZEDBSD_NOCT_IDENTITY,$(2),$(3))); \
-	actual=$$(cat "$$identity"); \
-	if test "$$actual" != "$$expected"; then \
-		echo "Noct: source identity mismatch: $$source" >&2; \
-		exit 1; \
-	fi; \
-	parent=$${source%/*}; \
-	temporary=$$(mktemp "$$parent/.noct-manifest.XXXXXX"); \
-	trap 'rm -f -- "$$temporary"' EXIT HUP INT TERM; \
-	(cd "$$source" && \
-		find . -type f ! -path './build-*/*' ! -name '.zedbsd-source-*' -print | \
-		LC_ALL=C sort | while IFS= read -r file; do sha256sum "$$file"; done) \
-		> "$$temporary"; \
-	if ! cmp -s "$$manifest" "$$temporary"; then \
-		echo "Noct: extracted source differs from the verified release plus patch: $$source" >&2; \
-		exit 1; \
-	fi; \
-	rm -f -- "$$temporary"; \
-	trap - EXIT HUP INT TERM
-endef
-
-# An accepted tree is used as it is, whatever the patch files' times.  The
-# target's tree (in this checkout) is replaced when it holds another release or other patches;
-# the host's (shared) never is.
-ifeq ($(NOCT_SOURCE_ACCEPTED),yes)
-$(NOCT_SOURCE_STAMP):
-	@test -f '$@'
-else
-$(NOCT_SOURCE_STAMP): $(ZEDBSD_NOCT_TARGET_PATCHES) \
-		| $(ZEDBSD_NOCT_ARCHIVE_VERIFIED)
-	$(call ZEDBSD_NOCT_EXTRACT_SOURCE,$(NOCT_SOURCE_DIR),$(ZEDBSD_NOCT_TARGET_PATCHES),$(ZEDBSD_NOCT_TARGET_PATCH_LEVEL),replace,$(ZEDBSD_NOCT_TARGET_PATCHES_SHA256))
-endif
-
-ifeq ($(NOCT_HOST_SOURCE_ACCEPTED),yes)
-$(NOCT_HOST_SOURCE_STAMP):
-	@test -f '$@'
-else
-$(NOCT_HOST_SOURCE_STAMP): $(ZEDBSD_NOCT_PATCHES) \
-		| $(ZEDBSD_NOCT_ARCHIVE_VERIFIED)
-	$(call ZEDBSD_NOCT_EXTRACT_SOURCE,$(NOCT_HOST_SOURCE_DIR),$(ZEDBSD_NOCT_PATCHES),$(ZEDBSD_NOCT_PATCH_LEVEL),keep,$(ZEDBSD_NOCT_PATCHES_SHA256))
-endif
-
-.PHONY: noct-source noct-target-source-verify noct-host-source \
-	noct-host-source-verify noct-zedbsd
-noct-source: $(NOCT_SOURCE_STAMP)
-
-noct-target-source-verify: $(NOCT_SOURCE_STAMP)
-	$(call ZEDBSD_NOCT_VERIFY_SOURCE,$(NOCT_SOURCE_DIR),$(ZEDBSD_NOCT_TARGET_PATCH_LEVEL),$(ZEDBSD_NOCT_TARGET_PATCHES_SHA256))
-	@touch '$(NOCT_SOURCE_VERIFIED)'
-
-noct-host-source: $(NOCT_HOST_SOURCE_STAMP)
-
-noct-host-source-verify: $(NOCT_HOST_SOURCE_STAMP)
-	$(call ZEDBSD_NOCT_VERIFY_SOURCE,$(NOCT_HOST_SOURCE_DIR),$(ZEDBSD_NOCT_PATCH_LEVEL),$(ZEDBSD_NOCT_PATCHES_SHA256))
-	@touch '$(NOCT_HOST_SOURCE_VERIFIED)'
-
-$(NOCT_SOURCE_VERIFIED): $(NOCT_SOURCE_STAMP)
-	$(call ZEDBSD_NOCT_VERIFY_SOURCE,$(NOCT_SOURCE_DIR),$(ZEDBSD_NOCT_TARGET_PATCH_LEVEL),$(ZEDBSD_NOCT_TARGET_PATCHES_SHA256))
-	@touch '$@'
-
-$(NOCT_HOST_SOURCE_VERIFIED): $(NOCT_HOST_SOURCE_STAMP)
-	$(call ZEDBSD_NOCT_VERIFY_SOURCE,$(NOCT_HOST_SOURCE_DIR),$(ZEDBSD_NOCT_PATCH_LEVEL),$(ZEDBSD_NOCT_PATCHES_SHA256))
-	@touch '$@'
-
-ifndef ZEDBSD_TOPLEVEL_BUILD
-download: noct-download
-endif
-patch: noct-target-source-verify
-
-$(NOCT_PACKAGE_HOLORIS): | $(NOCT_SOURCE_VERIFIED)
-	@test -f '$@'
-
-# Entered only when the record of the last build is older than what the
-# interpreter is built from, so an unchanged tree costs nothing and
-# prints nothing.
-$(NOCT_ZEDBSD_BUILD_STAMP): $(NOCT_SOURCE_VERIFIED) \
-		$(ZEDBSD_NOCT_PACKAGE_MAKEFILE) $(NOCT_ZEDBSD_SYSROOT_STAMP) \
-		$(dir $(ZEDBSD_NOCT_PACKAGE_MAKEFILE))zedbsd.cmake \
-		$(NOCT_ZEDBSD_TOOLCHAIN_FILE) \
-		$(BUILD)/dynamic/libc.so $(BUILD)/dynamic/ld.so \
-		$(NOCT_ZEDBSD_ACCEL_LIBRARIES)
-	cd '$(NOCT_SOURCE_DIR)' && \
-		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
-		ZEDBSD_SYSROOT='$(NOCT_ZEDBSD_SYSROOT)' \
-		ZEDBSD_DYNAMIC_DIR='$(abspath $(BUILD))/dynamic' \
-		ZEDBSD_LLVM_BIN='$(ZEDBSD_LLVM_INSTALL)/bin' \
-		cmake --preset zedbsd-amd64 -B build-zedbsd-$(NOCT_ZEDBSD_ARCH) $(NOCT_ZEDBSD_CMAKE_OPTIONS) \
-		-DNOCT_VERSION='$(ZEDBSD_NOCT_VERSION)'
-	cd '$(NOCT_SOURCE_DIR)' && \
-		ZEDBSD_SOURCE_DIR='$(ZEDBSD_NOCT_ROOT)' \
-		ZEDBSD_SYSROOT='$(NOCT_ZEDBSD_SYSROOT)' \
-		ZEDBSD_DYNAMIC_DIR='$(abspath $(BUILD))/dynamic' \
-		ZEDBSD_LLVM_BIN='$(ZEDBSD_LLVM_INSTALL)/bin' \
-		cmake --build build-zedbsd-$(NOCT_ZEDBSD_ARCH) --parallel $(ZEDBSD_BUILD_JOBS)
-	@test -x '$(NOCT_ZEDBSD_ARTIFACT)'
-	@touch '$@'
-
-noct-zedbsd: $(NOCT_ZEDBSD_BUILD_STAMP)
-
-$(NOCT_HOST_ARTIFACT): $(NOCT_HOST_SOURCE_STAMP) \
-		| $(NOCT_HOST_SOURCE_VERIFIED)
-	@mkdir -p '$(NOCT_HOST_STATE_DIR)'
-	cd '$(NOCT_HOST_SOURCE_DIR)' && cmake --preset static \
-		$(NOCT_HOST_CMAKE_OPTIONS)
-	cd '$(NOCT_HOST_SOURCE_DIR)' && \
-		cmake --build --preset static --parallel $(ZEDBSD_BUILD_JOBS)
-	@test -x '$@'
-	@touch '$(NOCT_HOST_BUILD_STAMP)'
-
-$(NOCT_HOST_BUILD_STAMP): $(NOCT_HOST_ARTIFACT)
-	@test -x '$(NOCT_HOST_ARTIFACT)'
-	@mkdir -p '$(@D)'
-	@touch '$@'
+# zedBSD
+# Copyright (C) 2026 Awe Morris
+#
+# SPDX-License-Identifier: Zlib
 
 #
-# Removing what extraction created.  Extraction refuses to replace an existing tree, so a
-# changed patch level needs the old tree gone first; this is that step, named.
-# The distfiles stay: they are checksum-verified inputs, not build output.
+# Noct language runtime package for zedBSD.
 #
-.PHONY: noct-clean
-noct-clean:
-	rm -rf -- '$(NOCT_SOURCE_DIR)' '$(NOCT_HOST_SOURCE_DIR)' '$(NOCT_HOST_STATE_DIR)'
 
-# The target's tree only (ws101-p011): the shared host interpreter stays.
-.PHONY: noct-target-clean
-noct-target-clean:
-	rm -rf -- '$(NOCT_SOURCE_DIR)'
+NOCT_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+include $(NOCT_DIR)../package.mk
+include $(NOCT_DIR)../../../mk/build-jobs.mk
 
-.PHONY: noct-toolchain-smoke
-noct-toolchain-smoke: $(NOCT_HOST_BUILD_STAMP) \
-		tools/build/noct-toolchain-smoke.noct
-	$(NOCT) tools/build/noct-toolchain-smoke.noct \
-		$(abspath build/noct-toolchain-smoke.txt)
+REPO_ROOT ?= $(abspath $(NOCT_DIR)../..)
+REPO_HASH ?= d6f0f9b4f7debb4a3c8dd3ba0415665a94d561ae
+BUILD ?= $(REPO_ROOT)/build/$(PLATFORM)
 
-ifneq ($(filter amd64 i386 arm64,$(ZEDBSD_ARCHITECTURE)),)
-$(BUILD)/bin/noct: $(NOCT_ZEDBSD_BUILD_STAMP)
+ARCH ?= $(strip \
+	$(if $(filter i386 pc98 pc9821 pc9801,$(PLATFORM)),i386,\
+	$(if $(filter arm64 rpi4 rpi5,$(PLATFORM)),arm64,\
+	x86_64)))
+
+ZEDBSD_LLVM_BIN ?= $(REPO_ROOT)/build/llvm/bin
+CLANG ?= $(ZEDBSD_LLVM_BIN)/clang
+
+ifeq ($(origin CC),default)
+CC := $(CLANG)
+endif
+CC ?= $(CLANG)
+
+TARGET_TRIPLE ?= $(strip \
+	$(if $(filter i386,$(ARCH)),i386-unknown-zedbsd,\
+	$(if $(filter arm64,$(ARCH)),aarch64-unknown-zedbsd,\
+	x86_64-unknown-zedbsd)))
+
+CFLAGS ?= --target=$(TARGET_TRIPLE) --sysroot=$(BUILD)/sysroot
+CPPFLAGS ?= -D__ZEDBSD__
+
+NOCT_CPPFLAGS := \
+	-I$(REPO_ROOT)/include \
+	-I$(REPO_ROOT)/src \
+	-I$(REPO_ROOT) \
+	-isystem $(BUILD)/sysroot/usr/include \
+	$(CPPFLAGS)
+NOCT_CFLAGS := $(filter-out -Werror -fno-pic -fno-pie,$(CFLAGS)) -fPIE
+
+NOCT_SRC := $(abspath $(NOCT_DIR)noct)
+NOCT_BUILD_DIR := $(NOCT_SRC)/build-zedbsd-$(ARCH)
+NOCT_ARTIFACT := $(NOCT_BUILD_DIR)/noct
+
+NOCT_BIN := $(BUILD)/bin/noct
+NOCT_MAN := $(BUILD)/share/man/man1/noct.1
+
+DISTFILE := $(abspath $(NOCT_DIR)distfiles)/NoctLang-$(REPO_HASH).tar.gz
+PATCHES := $(sort $(wildcard $(abspath $(NOCT_DIR)patches)/*.patch))
+PATCH_STAMP := $(NOCT_SRC)/.patched
+
+$(eval $(call USERLAND_PACKAGE,noct,noct,*,n,package,,y,base,base/noct,desktop/libegl desktop/libglesv2,0755,custom))
+
+PACKAGE_INPUTS += $(NOCT_BIN) $(NOCT_MAN)
+PACKAGE_FILES += \
+	--file /bin/noct=$(NOCT_BIN) \
+	--mode /bin/noct=0755 \
+	--file /usr/share/man/man1/noct.1=$(NOCT_MAN) \
+	--mode /usr/share/man/man1/noct.1=0644
+
+build: $(NOCT_BIN) $(NOCT_MAN)
+
+patch: $(PATCH_STAMP)
+
+$(DISTFILE):
 	@mkdir -p $(dir $@)
-	cp -f '$(NOCT_ZEDBSD_ARTIFACT)' '$@'
-	@cmp -s '$(NOCT_ZEDBSD_ARTIFACT)' '$@' || { \
-		echo 'Installed Noct differs from the canonical CMake artifact' >&2; \
-		exit 1; \
-	}
-endif
+	curl --fail --location --output $@ "https://codeload.github.com/awemorris/NoctLang/tar.gz/$(REPO_HASH)"
 
-ifndef ZEDBSD_TOPLEVEL_BUILD
-.PHONY: noct-install-holoris
-install: noct-install-holoris
+$(PATCH_STAMP): $(DISTFILE) $(PATCHES)
+	@rm -rf $(NOCT_SRC)
+	@mkdir -p $(NOCT_SRC)
+	tar -xzf $(DISTFILE) --strip-components=1 -C $(NOCT_SRC)
+	@for p in $(PATCHES); do \
+		echo "Applying patch $$p..."; \
+		patch -d $(NOCT_SRC) -p1 < "$$p"; \
+	done
+	@touch $@
 
-noct-install-holoris: build
-	$(INSTALL) -d "$(DESTDIR)$(ZEDBSD_STANDALONE_BINDIR)"
-	$(INSTALL) -m 0644 "$(NOCT_PACKAGE_HOLORIS)" \
-		"$(DESTDIR)$(ZEDBSD_STANDALONE_BINDIR)/holoris.nct"
-endif
+$(NOCT_ARTIFACT): $(PATCH_STAMP)
+	@mkdir -p $(BUILD)/dynamic
+	@test -f $(BUILD)/dynamic/libEGL.so || $(MAKE) -C $(REPO_ROOT)/userland/desktop/libegl
+	@test -f $(BUILD)/dynamic/libGLESv2.so || $(MAKE) -C $(REPO_ROOT)/userland/desktop/libglesv2
+	@rm -rf $(NOCT_BUILD_DIR)
+	@mkdir -p $(NOCT_BUILD_DIR)
+	cd $(NOCT_SRC) && \
+		CC="$(CC)" \
+		CFLAGS="$(strip $(NOCT_CPPFLAGS) $(NOCT_CFLAGS))" \
+		CPPFLAGS="$(NOCT_CPPFLAGS)" \
+		ZEDBSD_SOURCE_DIR=$(REPO_ROOT) \
+		ZEDBSD_SYSROOT=$(BUILD)/sysroot \
+		ZEDBSD_LLVM_BIN=$(ZEDBSD_LLVM_BIN) \
+		ZEDBSD_DYNAMIC_DIR=$(BUILD)/dynamic \
+		cmake -B $(NOCT_BUILD_DIR) \
+			-DCMAKE_C_COMPILER="$(CC)" \
+			-DCMAKE_ASM_COMPILER="$(CC)" \
+			-DCMAKE_C_FLAGS="$(strip $(NOCT_CPPFLAGS) $(NOCT_CFLAGS))" \
+			-DCMAKE_ASM_FLAGS="$(strip $(NOCT_CPPFLAGS) $(NOCT_CFLAGS))" \
+			-DCMAKE_EXE_LINKER_FLAGS="-L$(BUILD)/dynamic" \
+			-DCMAKE_SHARED_LINKER_FLAGS="-L$(BUILD)/dynamic" \
+			-DCMAKE_MODULE_LINKER_FLAGS="-L$(BUILD)/dynamic" \
+			-DCMAKE_SYSROOT=$(BUILD)/sysroot \
+			-DCMAKE_FIND_ROOT_PATH=$(BUILD)/sysroot \
+			-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+			-DNOCT_TARGET_ZEDBSD=ON \
+			-DNOCT_ENABLE_INSTALL=ON \
+			-DNOCT_ENABLE_STATIC=ON \
+			-DNOCT_ENABLE_SHARED=OFF \
+			-DNOCT_ENABLE_JIT=ON \
+			-DNOCT_ENABLE_OPTIMIZER=ON \
+			-DNOCT_ENABLE_MULTITHREAD=ON \
+			-DNOCT_ENABLE_ACCEL=ON \
+			-DNOCT_ENABLE_CLI=ON \
+			-DNOCT_ENABLE_REPL=ON \
+			-DNOCT_ENABLE_BCBACKEND=ON \
+			-DNOCT_ENABLE_CBACKEND=ON \
+			-DNOCT_ENABLE_ELBACKEND=ON \
+			-DNOCT_ENABLE_SCMBACKEND=ON \
+			-DNOCT_ENABLE_I18N=ON \
+			-DNOCT_ENABLE_I18N_LIBINTL=ON \
+			-DNOCT_ENABLE_API=ON \
+			-DNOCT_ENABLE_API_SYSTEM=ON \
+			-DNOCT_ENABLE_API_CONSOLE=ON \
+			-DNOCT_ENABLE_API_FILE=ON \
+			-DNOCT_ENABLE_API_THREAD=ON \
+			-DNOCT_ENABLE_API_HTTPSERVER=ON \
+			-DNOCT_ENABLE_API_TERM=ON \
+			-DNOCT_ENABLE_API_BEUI=ON \
+			-DNOCT_ENABLE_API_PROCESS=ON
+	cd $(NOCT_SRC) && \
+		cmake --build $(NOCT_BUILD_DIR) --parallel $(ZEDBSD_BUILD_JOBS)
+
+$(NOCT_BIN): $(NOCT_ARTIFACT)
+	@mkdir -p $(dir $@)
+	cp -f $< $@
+	chmod 0755 $@
+
+$(NOCT_MAN): $(PATCH_STAMP)
+	@mkdir -p $(dir $@)
+	cp -f $(NOCT_SRC)/resources/man/noct.1.man $@
+	chmod 0644 $@

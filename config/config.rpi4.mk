@@ -1,0 +1,4 @@
+PLATFORM := rpi4
+ARCHITECTURE := arm64
+BOARD := rpi4
+VARIANT :=
