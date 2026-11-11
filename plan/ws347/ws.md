@@ -43,7 +43,7 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 
 ## Resume point
 
-- 2026-11-11 Q1: 立てた。p001 の JTAG の確認まで済み。書き込む bitstream の所在と、KC705 と VF2 の電源の関係をユーザーに確かめ中。
+- 2026-11-11 Q1: 立てた。p001 の JTAG の確認まで済み。minimal の bitstream を build 中（build/ws347/out/）。できたら WNS を見て書き込み、VF2 をプラグミニ 3 で入れ直して PCIe の見え方を確かめる。
 
 ## Phase
 

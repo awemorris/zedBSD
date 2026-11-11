@@ -15,7 +15,7 @@
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
-| Q1 | [WS347](ws347/ws.md) p001 | VF2＋KC705 の Amaterrace GPU | KC705 を JTAG で確かめた（未設定）。書く bitstream の所在をユーザーに確認中 | p002 仕様の差と driver の追従の設計 → p003 実装 → p004 実機 |
+| Q1 | [WS347](ws347/ws.md) p001 | VF2＋KC705 の Amaterrace GPU | KC705 を JTAG で確かめた（未設定）。minimal の bitstream を Vivado で build 中 | p002 仕様の差と driver の追従の設計 → p003 実装 → p004 実機 |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 

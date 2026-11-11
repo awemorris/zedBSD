@@ -11,7 +11,8 @@ Phase に固有の試験は各 WS の `tests/`、シナリオ試験（AAT）は 
 | --- | --- | --- |
 | デスクトップ（10.0.10.3、AMD RDNA か NVIDIA RTX を差し替えて排他で使う） | GPU の device driver の開発。今後は Linux（Debian）＋ VFIO の passthrough で使う方針 | SwitchBot のプラグミニ 1 `AC276E42B252` |
 | VisionFive 2 | Keiland の desktop の app の速さの最適化（一番遅い機械） | SwitchBot のプラグミニ 3 `AC276E432AE6`（2026-11-01〜。2026-10-28〜10-31 はプラグミニ 2） |
-| Raspberry Pi 4・Pi 5 | 各 platform（Pi 5 は NVMe の HAT を付けた、WS304） | SwitchBot のプラグミニ 2 `14C19FA80F86`（2026-10-31 は Pi 4、2026-11-01 から Pi 5） |
+| KC705（Amaterrace GPU の FPGA、VF2 の PCIe につなぐ、WS347） | GHCI の driver の実機の試験。bitstream は host の USB の JTAG（Digilent `210203368704A`）から Vivado で書く（揮発、電源を切ると消える） | SwitchBot のプラグミニ 2 `14C19FA80F86`（2026-11-11 ユーザー） |
+| Raspberry Pi 4・Pi 5 | 各 platform（Pi 5 は NVMe の HAT を付けた、WS304） | 遠隔の電源は無い（2026-11-11 からプラグミニ 2 は KC705。2026-10-31 は Pi 4、2026-11-01〜11-10 は Pi 5 がプラグミニ 2） |
 | Latitude 5330 | Intel GPU・電源管理・Alder Lake の platform の対応で、要る時に | 遠隔の電源は無い。2026-10-27 Q1: /etc/default/grub に GRUB_RECORDFAIL_TIMEOUT=5（不正な停止の後に GRUB の menu で止まらないように、元は /etc/default/grub.orig-q1） |
 | VM（QEMU） | Keiland の desktop の app の開発 | — |
 
@@ -21,7 +22,7 @@ Phase に固有の試験は各 WS の `tests/`、シナリオ試験（AAT）は 
 | 機械 | 接続 | 注意 |
 | --- | --- | --- |
 | Dell Latitude 5330（i915） | `10.0.30.3`（Debian、SSH）。zedBSD は NVMe（p4〜p6、`5330-run.sh --nvme-*`、`~/boot-zedbsd.sh`、grub の「zedBSD (NVMe)」） | 2026-10-27 から USB メモリは外した（特別な理由が無い限り使わない、ユーザー）。2026-10-28 ユーザーが USB の stick を挿し「自由に書き換えて起動していいです」（live OS で ext4 を縮める作業、WS299）。host key が焼き直しで変わる時は消して受け直してよい。遠隔の電源は無い |
-| VisionFive 2（riscv64） | `ssh kei@10.0.30.2`、serial `/dev/ttyUSB0` | 電源は SwitchBot のプラグミニ 3 `AC276E432AE6`（2026-11-01 ユーザーがつないだ。割り当てられた担当が自分で `switchbot.py cycle AC276E432AE6` してよい。2026-10-28〜10-31 はプラグミニ 2）。KC705 とのつなぎは 2026-11-01 の時点で未確認。`zedbsd.cfg` は login=graphical を外したまま |
+| VisionFive 2（riscv64） | `ssh kei@10.0.30.2`、serial `/dev/ttyUSB0` | 電源は SwitchBot のプラグミニ 3 `AC276E432AE6`（2026-11-01 ユーザーがつないだ。割り当てられた担当が自分で `switchbot.py cycle AC276E432AE6` してよい。2026-10-28〜10-31 はプラグミニ 2）。KC705 は PCIe でつながっている（2026-11-11 ユーザー、WS347）。KC705 を JTAG で書いた後は VF2 だけを入れ直して PCIe を走査させる。2026-11-11 の DHCP は 10.0.30.6。`zedbsd.cfg` は login=graphical を外したまま |
 | AMD RDNA の機械（RX 5600 XT） | `10.0.10.3`（Debian。2026-10-28 から zedBSD は NVMe の p4〜p6（zedBSD-nvme-boot 256 MiB・root 32 GiB・swap 1 GiB）、UEFI の entry Boot0004「zedBSD NVMe」に BootNext、loader は Debian の ESP の \EFI\zedbsd\BOOTX64.EFI。zedBSD は DHCP の 10.0.30.5。道具は plan/ws291/tests/rdna-nvme.sh・rdna-nvme-write.sh・rdna-live-usb.sh、区画の表は plan/ws291/phase006/phase.md「NVMe の zedBSD の区画」。USB の stick は SystemRescue） | 電源は SwitchBot のプラグ `AC276E42B252`（2026-10-27〜、UEFI で電源の復帰時に自動で on）。Q1 が `switchbot.py cycle AC276E42B252` で入れ直してよい（ユーザー、2026-10-27）。割り当てられた P2 も自分で入れ直してよい（2026-10-28 ユーザー）。2026-10-29 から、下の「RDNA 機の時間の枠」で lock を持つ担当（P1・P2・P3）が、持つ間だけ入れ直してよい。SSH は 1 本の接続を使い回す |
 | SV7 | `10.0.10.27` | 5330 と入れ替えで起動することがある |
 | Raspberry Pi 5 | `10.0.30.6`（DHCP、2026-10-27 の時点、Ethernet の MAC 98:fe:54:22:65:c3。2026-10-23 は 10.0.30.5） | 10.0.30.5 は 2026-10-27 にデスクトップの zedBSD が使った。電源は遠隔では切れない（止まったらユーザーに頼む） |

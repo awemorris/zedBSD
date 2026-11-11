@@ -20,3 +20,5 @@
 - 2026-11-11 11:5x Q1: hw_server に Digilent の target `210203368704A`、device `xc7k325t_0`（IDCODE 43651093）が見え、DONE=0。
 - 2026-11-11 Q1: host で見つかった bitstream は `~/amaterrace-gpu/build/vivado/atg_kc705_top/atg_kc705_top.bit`（2026-11-07 11:44）だけ。
   その build の log では WNS −0.911 ns（タイミング未達）で、README の 200 MHz の結果（WNS +0.019 ns）とは別の物。所在をユーザーに確かめ中。
+- 2026-11-11 Q1: ユーザーから、bitstream を作ってみる、minimal ならタイミングは閉じているはず、という趣旨の指示を受けた。電源は KC705 がプラグミニ 2 `14C19FA80F86`、VF2 がプラグミニ 3 `AC276E432AE6`（ユーザー）。
+- 2026-11-11 Q1: amaterrace-gpu main bace7d66 を `git archive` で `build/ws347/atg-bace7d66/` に取り出し、`config/minimal.mk` を config.mk にして `include/atg_config.vh` を作り（CFG_HAS_BLT 0・CFG_SU_NPHYS 4・CFG_MC_ENABLE_PROT 0）、IP の core（amaterrace-gpu の build/vivado/kc705_ip）を `build/ws347/kc705_ip/` に写して `tools/vivado-build.sh kc705 atg_kc705_top`（strategy Default、出力 `build/ws347/out/`）を流し始めた。
