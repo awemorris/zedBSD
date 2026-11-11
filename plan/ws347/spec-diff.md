@@ -44,3 +44,4 @@ DEVICE_CAPS（RTL の並び）: [31] MSAA 0、[30] 1 固定、[29] BLT 0、[28:2
 - 仕様の規則は「CAPS に無い命令は使ってはいけない」。VA は 30 bit 以上で決め打ちでない。
 - SFU（rcp・rsq・exp2・log2・sin・cos・fsqrt.s）は仕様上必須（一度入れた EXT_CAP_ISA は取り消し）。ただし RTL の SFU の部分はひとまず直さない: minimal の実機は SFU 無しのままで、これらの命令を含む shader は止まる見込み（試験で避ける）。
 - D1・D2・D3（VA_BITS_ENC を除く）・D5 は RTL を直す（p006）。D4（30 bit の符号化）は未決。
+- 2026-11-11 ユーザーの決定: EXT_CAP_FEATURE[3:0] VA_BITS_ENC は VA − 30（0x0 = 30 bit、0x2 = 32 bit、0xA = 40 bit）。page table の説明は変えない。amaterrace-gpu 6949b248。D4 は解決（RTL は P1、driver の decode は P2）。
