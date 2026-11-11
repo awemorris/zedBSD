@@ -45,5 +45,10 @@ $(EFI_DIR)/BOOTRISCV64.EFI: $(EFI_DIR)/bootriscv64.elf $(EFI_DIR)/bootriscv64.bi
 
 -include $(EFI_OBJS:.o=.d)
 
+# The boot script for a U-Boot that scans the partition for boot.scr.
+$(BUILD)/boot.scr: mk/platform-vf2/boot.cmd mk/platform-vf2/tools/make-uboot-script.py
+	@mkdir -p $(dir $@)
+	$(PYTHON) mk/platform-vf2/tools/make-uboot-script.py $< $@
+
 .PHONY: bootloader-platform
-bootloader-platform: $(EFI_DIR)/BOOTRISCV64.EFI
+bootloader-platform: $(EFI_DIR)/BOOTRISCV64.EFI $(BUILD)/boot.scr

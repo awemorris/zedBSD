@@ -46,7 +46,24 @@ $(BUILD)/zedbsd.cfg: FORCE_BOOT_FILES
 	$(if $(filter y,$(CONFIG_GRAPHICAL_LOGIN)),@printf '%s\n' 'login=graphical' >> $@.tmp)
 	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
 
+#
+# The files the vendor U-Boot reads from the EFI system partition (partition
+# 3).  StarFive's U-Boot 2021.10 imports vf2_uEnv.txt and runs boot2, and its
+# distro step imports uEnv.txt and runs distro_bootenv_nvme; both load the
+# loader and a device tree from dtb/.  boot.scr serves a U-Boot that scans for
+# boot scripts.
+#
+VF2_ESP_FILES := \
+	$(foreach dtb,$(VF2_DTBS),dtb/$(notdir $(dtb))=$(dtb) dtb/starfive/$(notdir $(dtb))=$(dtb)) \
+	dtb/LICENSE=mk/platform-vf2/dtb.LICENSE \
+	vf2_uEnv.txt=mk/platform-vf2/uEnv.txt \
+	uEnv.txt=mk/platform-vf2/uEnv.txt \
+	boot.scr=$(BUILD)/boot.scr
+
+VF2_ESP_INPUTS := $(VF2_DTBS) mk/platform-vf2/dtb.LICENSE mk/platform-vf2/uEnv.txt $(BUILD)/boot.scr
+
 $(DISK_IMAGE_ARTIFACT): $(BUILD)/uefi/BOOTRISCV64.EFI $(BUILD)/vmunix $(BUILD)/zedbsd.cfg \
+		$(VF2_ESP_INPUTS) \
 		$(ROOT_IMAGE) $(SWAP_IMAGE) \
 		mk/platform-vf2/tools/make-vf2-hdd-image.py \
 		mk/platform-vf2/tools/check-vf2-hdd-image.py
@@ -56,6 +73,7 @@ $(DISK_IMAGE_ARTIFACT): $(BUILD)/uefi/BOOTRISCV64.EFI $(BUILD)/vmunix $(BUILD)/z
 		--config $(BUILD)/zedbsd.cfg \
 		--ufs-root $(ROOT_IMAGE) \
 		--swap $(SWAP_IMAGE) \
+		$(addprefix --esp-file ,$(VF2_ESP_FILES)) \
 		$@
 
 .PHONY: disk-image check-disk-image image-platform image-vf2
