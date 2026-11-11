@@ -6,7 +6,7 @@
   `docs/ghci.md` が正。食い違いは A（仕様の文が明確で RTL が違う → Gemini への修正依頼）と B（仕様が黙っている・表せない・設計の意図が要る → ユーザーの判断）に分ける。迷ったら B。
 - この file が唯一の台帳。決定が変わったら行を書き換える（訂正を書き足さない）。担当は会話でなくこの file を読む。
 - Gemini への依頼の文: [gemini-request-01.md](gemini-request-01.md)（A1〜A11 を T1〜T4 に。2026-11-11 作成、ユーザーが渡す）。
-- Gemini への質問の文: [gemini-questions-01.md](gemini-questions-01.md)（B4〜B10 の RTL の意図と事実。2026-11-11 作成、ユーザーが渡す）。
+- Gemini への質問の文: [gemini-questions-01.md](gemini-questions-01.md)（B4〜B10 の RTL の意図と事実。2026-11-11 作成、ユーザーが渡す）。1 次回答と Q1 の照合: [gemini-answers-01.md](gemini-answers-01.md)。
 - 読んだ版: amaterrace-gpu main 50f13348（2026-11-11 15:28、Gemini の修正 5fb4ad16・1e80cfb6・50f13348 の後）。ghci.md は bace7d66 から VA_BITS_ENC の 2 行だけ違う。RTL は読んだだけで、sim・実機では確かめていない。監査の全文は [audit-50f13348.md](audit-50f13348.md)。
 
 ## A: RTL の修正依頼（Gemini へ）
@@ -32,13 +32,13 @@
 | B1 | `CAP_BLT_SCALE=0` の時、copy・1:1 の blit の src と dst の address に何 byte の揃えが要るか（RTL は `atg_blt_align` が外れ、line の中の位置がずれた copy は壊れる見込み） | §3.2.2 [31]、`atg_blt_2d.v`（P2 の読み） | 判断待ち（minimal は Blitter 無しで実機に影響しない） |
 | B2 | flat（`CAP_HW_WALKER=0`）の時、VA_BITS は GPU の出す address を縛るか。Q1 は「縛らない、host への到達は MEM の HOST_LIMIT と PA_BITS」と仮に P2 に伝えた（仕様は変えていない） | §11.6、§11 の MEM の表、KC705 の host の窓 [0, 0x8000_0000) | 判断待ち（Q1 の仮の判断の確認） |
 | B3 | minimal の LDS は 1 KiB、§3.2.2 の文は「KC705 は 4 KiB を報告」 | `config/minimal.mk`、§3.2.2 [27:20] | 判断待ち（文を直すか） |
-| B4 | CP_HEAP_BASE・LIMIT（0x050・0x054）は RTL で旧い APERTURE_BASE・LIMIT に行く。atg_cp_ctl には別に I_HEAP_BASE・LIMIT（index 0x2C・0x2D）がある。§11.2 の heap はどちらか | `atg_cp_regs.v` の hcr_reg_widx・ridx、`atg_cp_ctl.v:126-127` | 判断待ち |
-| B5 | EXT_CAP_FMT0[15:12]: 仕様は「8 を報告」と「EXT_CAP_FEATURE[19:16] を写す」の両方を書く。minimal（MRT 1）は 1 か 8 か | §3.2.2 | 判断待ち |
-| B6 | KC705 に FMT capability が無い（SU_VARY_WORDS 16 で CORE1=0）。仕様は FMT を 0x140 に挙げるが必須とは書かない。minimal に要るか | `atg_top.v:222-223`、kc705_top:352 | 判断待ち |
-| B7 | KC705 は HAS_CPU=1（RV32 の CP）だが minimal は `CONFIG_CP_USE_RV32_CORE=0` で DEVICE_CAPS[3]・[4]（INDIRECT・SECONDARY）は 0。報告すべきか | §3.2.1 | 判断待ち |
-| B8 | EXT_CAP_FEATURE[14] COLOR_LUT・[15] MRT_BLEND に対応する構成の値が仕様に無い | §3.2.2 | 判断待ち |
-| B9 | GCLK_HZ: 仕様 §3.2.3 は「KC705 は 100 MHz」、board top は 200 MHz | kc705_top:109-110 | 判断待ち（仕様の例を直すか） |
-| B10 | `spec/gpu/cp/atg_cp.md` が CTRL 0x010・STATUS 0x014・SCRATCH 0x048 と書き ghci.md §3.1 と違う。`atg_cp_regs.md` は「GHCI 2.0」のまま | — | 判断待ち（module の説明書きの直し） |
+| B4 | CP_HEAP_BASE・LIMIT（0x050・0x054）は RTL で旧い APERTURE_BASE・LIMIT に行く。atg_cp_ctl には別に I_HEAP_BASE・LIMIT（index 0x2C・0x2D）がある。§11.2 の heap はどちらか | `atg_cp_regs.v` の hcr_reg_widx・ridx、`atg_cp_ctl.v:126-127` | Gemini 回答済み（HEAP へ、仕様の変更不要）。ユーザーの承認待ち |
+| B5 | EXT_CAP_FMT0[15:12]: 仕様は「8 を報告」と「EXT_CAP_FEATURE[19:16] を写す」の両方を書く。minimal（MRT 1）は 1 か 8 か | §3.2.2 | Gemini 回答済み（MRT 数を写す）。仕様の 4 か所の文の変更がユーザーの判断待ち |
+| B6 | KC705 に FMT capability が無い（SU_VARY_WORDS 16 で CORE1=0）。仕様は FMT を 0x140 に挙げるが必須とは書かない。minimal に要るか | `atg_top.v:222-223`、kc705_top:352 | Gemini 回答済み（FMT を常に載せる、約 50 LUT）。ユーザーの承認待ち |
+| B7 | KC705 は HAS_CPU=1（RV32 の CP）だが minimal は `CONFIG_CP_USE_RV32_CORE=0` で DEVICE_CAPS[3]・[4]（INDIRECT・SECONDARY）は 0。報告すべきか | §3.2.1 | Gemini 回答済み（minimal は 0）。[3]・[4] の意味と HAS_CPU・CONFIG_CP_USE_RV32_CORE の整理がユーザーの判断待ち |
+| B8 | EXT_CAP_FEATURE[14] COLOR_LUT・[15] MRT_BLEND に対応する構成の値が仕様に無い | §3.2.2 | Gemini 回答済み（minimal は 0・0、仕様と整合）。ユーザーの承認待ち |
+| B9 | GCLK_HZ: 仕様 §3.2.3 は「KC705 は 100 MHz」、board top は 200 MHz | kc705_top:109-110 | Gemini 回答済み（200 MHz で確定）。仕様の 5 か所の例の直しがユーザーの判断待ち |
+| B10 | `spec/gpu/cp/atg_cp.md` が CTRL 0x010・STATUS 0x014・SCRATCH 0x048 と書き ghci.md §3.1 と違う。`atg_cp_regs.md` は「GHCI 2.0」のまま | — | Gemini 回答済み（spec/gpu/ を直す、回答の齟齬の一覧に誤りあり）。ユーザーの承認待ち |
 
 ## 決定済み
 
