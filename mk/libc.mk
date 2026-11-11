@@ -110,3 +110,9 @@ LIBM_SOURCES := \
 LIBM_HEADERS := \
 	src/libc/math/math-internal.h \
 	src/libc/math/math-constants.h
+
+# The compiler runtime is compiled from the LLVM source tree, which a build
+# that installed the cached toolchain has not extracted: a missing source
+# waits for the extraction (an existing one is used as it is).
+$(LLVM_SOURCE)/compiler-rt/lib/builtins/%: | $(LLVM_SOURCE)/.patched
+	@:
