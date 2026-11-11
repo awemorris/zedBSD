@@ -29,3 +29,10 @@
 
 - 3 つの register の値が、minimal と既定の構成で ghci.md の式と一致（tb で）。lint・arith-lint 0、関係の tb が PASS。
 - minimal で SFU と VA 32 の構成が elaborate・sim で通る。
+
+## 範囲の訂正（2026-11-11 ユーザーの決定、Q1）
+
+- ユーザーから、仕様の規則は「CAPS に無い命令は使わない」で、VA は 30 bit 以上（32・40 の決め打ちでない）、という趣旨の訂正を受けた。上の「Q1 の判断」の 2 文は誤り。
+- SFU: 一度、超越関数を CAPS の bit（EXT_CAP_ISA）で外せる形に仕様を直した（amaterrace-gpu 21f78ddc）が、ユーザーの決定で SFU は仕様上必須に戻した（aab26bb6 で revert）。ただし、ひとまず RTL の SFU の部分は直さない（minimal は SFU 0 のまま、SFU 無しの時の命令の扱いも変えない）。
+- VA: minimal は 30 bit のまま。EXT_CAP_FEATURE の VA_BITS_ENC（VA − 32）が 30 bit を表せない件は未決（仕様の符号化の変更の案: VA − 30）。
+- よって範囲 3（minimal.mk の変更）は取り下げ。範囲 1・2・4 のうち VA_BITS_ENC を除く物を進める。
