@@ -27,7 +27,10 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
   - 順: (1) bitstream の書き込みができることを確かめる → (2) GHCI の driver を最新の仕様に追従 → (3) FPGA の動作確認。
 - 2026-11-11 ユーザーから、amaterrace-gpu は他のセッションでの開発が終わったので Q1 に全権を委ね書き込みもよい、という趣旨の指示を受けた。
 - 2026-11-11 ユーザーから、仕様（ghci.md）を正とし、仕様に瑕疵が無さそうなら RTL を直す、driver は仕様に合わせて直す、という趣旨の指示を受けた
-  （食い違いの一覧は [spec-diff.md](spec-diff.md)）。
+  （食い違いの一覧は [spec-diff.md](spec-diff.md)）。→ 同日の下の決定で置き換え。
+- 2026-11-11 12:3x ユーザーの指示で全作業を止めた。ユーザーから、Claude は RTL を作る能力が極めて低いので RTL を絶対に触らない、
+  GHCI の仕様や RTL への疑問は file にまとめてユーザーの判断を仰ぐ、という趣旨の決定を受けた（[ghci-rtl-questions.md](ghci-rtl-questions.md)）。
+  amaterrace-gpu の全権の委譲は、この範囲（仕様はユーザーが中身を指示した時だけ書く、RTL は触らない）に狭まる。
 
 ## WS290 との関係（Q1 の判断）
 
@@ -45,16 +48,21 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 
 ## Resume point
 
-- 2026-11-11 Q1: 立てた。p001 の JTAG の確認まで済み。minimal の bitstream を build 中（build/ws347/out/）。できたら WNS を見て書き込み、VF2 をプラグミニ 3 で入れ直して PCIe の見え方を確かめる。
+- 2026-11-11 12:37 Q1: ユーザーの指示で全作業を止めた（P1・P2・Vivado の build）。再開はユーザーの指示で。
+  - P1 の worktree `/home/awe/amaterrace-worktrees/p1-ws347rtl`（branch ws347-rtl）に RTL の未 commit の変更 3 file（atg_cp.v・atg_cp_regs.v・atg_top.v）。Claude は RTL を触らないので、扱いはユーザーの判断。
+  - P2 の worktree `/home/awe/zedBSD-worktrees/p2-ws347`（branch agent/p2-ws347）に driver の未 commit の変更（中身は未確認）。
+  - bitstream の build（`build/ws347/out/`、bace7d66 の minimal）は placement の途中で止めた。bitstream は無い。
+  - 仕様は amaterrace-gpu main 6949b248（VA_BITS_ENC = VA − 30、ユーザーの承認）。
+  - 疑問は [ghci-rtl-questions.md](ghci-rtl-questions.md)。
 
 ## Phase
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | KC705 への bitstream の書き込み（Vivado・JTAG）と VF2 からの PCIe の見え方 | in-progress | — |
+| [p001](phase001/phase.md) | KC705 への bitstream の書き込み（Vivado・JTAG）と VF2 からの PCIe の見え方 | in-progress・止め（build を placement の途中で止めた） | — |
 | [p002](phase002/phase.md) | 仕様の差の読み（WS290 の基準 → 最新の ghci.md）と driver の追従の設計 | cleared（2026-11-11、[spec-diff.md](spec-diff.md)） | — |
-| [p003](phase003/phase.md) | driver の追従の実装と host 試験（CAPS、Blitter 無しの shader blit ほか） | planned | p002 |
+| [p003](phase003/phase.md) | driver の追従の実装と host 試験（CAPS、Blitter 無しの shader blit ほか） | in-progress・止め（2026-11-11 12:3x、P2 を止めた。未 commit の変更が worktree に） | p002 |
 | [p004](phase004/phase.md) | VF2＋KC705 での段ごとの動作確認とデバッグ（attach → ring・fence → 描画 → 表示） | planned | p001・p003・p007 |
-| [p006](phase006/phase.md) | Amaterrace GPU の RTL の CAPS を ghci.md に合わせる、minimal を VA 32・SFU 有りに | planned | p002 |
-| [p007](phase007/phase.md) | 直した RTL で bitstream を作り直し、CAPS を実機で照合 | planned | p006 |
+| [p006](phase006/phase.md) | Amaterrace GPU の RTL の CAPS を ghci.md に合わせる | canceled（2026-11-11、Claude は RTL を触らない） | p002 |
+| [p007](phase007/phase.md) | 直した RTL で bitstream を作り直し、CAPS を実機で照合 | canceled（2026-11-11、RTL はユーザーが直す） | — |
 | [p005](phase005/phase.md) | 規約の全文の見直し | planned | p003・p004・p006 |

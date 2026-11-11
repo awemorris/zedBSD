@@ -114,10 +114,12 @@
   main の checkout の `build/` は、読み取り専用の symlink か複写で使う。
 - RTL8822B の `.inc` はライセンスを分けるために独立させており、別の file のまま保つ。
 - 外部 package（`userland/packages/`）は source tree に取り込まず、tarball を取得・検証して patch する。ライセンスを監査する。
-- `/home/awe/amaterrace-gpu`（Amaterrace GPU の RTL と GHCI の仕様 `docs/ghci.md`）: 2026-11-11 ユーザーから、他のセッションでの開発が終わったので
-  Q1 に全権を委ね書き込みもよい、という趣旨の指示を受けた。作業はその repo の AGENTS.md（WIP の commit、Vivado の 1 process・2 thread、
-  sync、Verilog-2005、算術の演算子の隔離）に従う。仕様（ghci.md）を正とし、仕様に瑕疵が無ければ RTL を直す。
-  `/home/awe/amaterrace-worktrees` の古い worktree は片付けない（要る時は Q1 に）。zedBSD の計画の中で参照する時は `am-ws001` のように書く。
+- `/home/awe/amaterrace-gpu`（Amaterrace GPU の RTL と GHCI の仕様 `docs/ghci.md`）: **Claude（Q1・全担当）は RTL を絶対に触らない**
+  （2026-11-11 ユーザーの決定。Claude の RTL を作る能力は極めて低い）。RTL・board・config の変更も、それを担当に頼む事もしない。
+  GHCI の仕様や RTL への疑問・食い違いは、Claude が file（例 `plan/ws347/ghci-rtl-questions.md`）にまとめてユーザーの判断を仰ぐ。
+  仕様（ghci.md）を Claude が書き換えるのは、ユーザーが中身を指示した時だけ。
+  読む事と、ユーザーが指示した bitstream の書き込み（Vivado の JTAG）はよい。`/home/awe/amaterrace-worktrees` は片付けない。
+  zedBSD の計画の中で参照する時は `am-ws001` のように書く。
 - `config/ci/config-amd64-server.mk` はユーザーの物。変えない。
 - sudo はパスワード無しで使ってよい（package の導入、host の操作）。
 

@@ -765,6 +765,6 @@
 
 | Queue / attempt | 担当 | 対象 | 範囲・条件 | 状態 |
 | --- | --- | --- | --- | --- |
-| q2009 / q2009-i01 | Q1（直に、main の checkout） | [ws347-p001](ws347/phase001/phase.md) KC705 への bitstream の書き込みと PCIe の見え方 | 2026-11-11 ユーザーの指示（Vivado で JTAG から書く）。amaterrace-gpu は読むだけ | in-progress |
+| q2009 / q2009-i01 | Q1（直に、main の checkout） | [ws347-p001](ws347/phase001/phase.md) KC705 への bitstream の書き込みと PCIe の見え方 | 2026-11-11 ユーザーの指示（Vivado で JTAG から書く）。amaterrace-gpu は読むだけ | uncleared（2026-11-11 12:37 止めた。build は placement の途中） |
 | q2010 / q2010-i01 | P1（phase-runner-high、amaterrace-gpu の worktree `/home/awe/amaterrace-worktrees/p1-ws347rtl`・branch `ws347-rtl`、基点 amaterrace main bace7d66） | [ws347-p006](ws347/phase006/phase.md) RTL の CAPS を ghci.md に合わせる | 2026-11-11 ユーザー: 仕様を正に RTL を直す、amaterrace-gpu は Q1 の全権。Vivado は使わない | in-progress |
-| q2011 / q2011-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws347`・branch `agent/p2-ws347`、基点 main） | [ws347-p003](ws347/phase003/phase.md) driver を最新の ghci.md に合わせる | 2026-11-11 ユーザー: driver を仕様に合わせて直す。HAL・Makefile・mk/ は変えない、host 試験と build まで | in-progress |
+| q2011 / q2011-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws347`・branch `agent/p2-ws347`、基点 main） | [ws347-p003](ws347/phase003/phase.md) driver を最新の ghci.md に合わせる | 2026-11-11 ユーザー: driver を仕様に合わせて直す。HAL・Makefile・mk/ は変えない、host 試験と build まで | uncleared（2026-11-11 12:37 ユーザーの指示で止めた。未 commit の変更は worktree に） |

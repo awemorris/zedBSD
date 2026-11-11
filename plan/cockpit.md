@@ -7,15 +7,15 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS347](ws347/ws.md) p006 | Amaterrace GPU の RTL | CAPS の 3 つの register を ghci.md の並びに、minimal を VA 32・SFU 有りに（amaterrace-gpu の worktree） | — |
-| P2 | [WS347](ws347/ws.md) p003 | GHCI の driver | 新しい CAP の bit（CLIP_POLY・BLT_SCALE・TU_BILINEAR・BLT_BLEND・BLT_TILE）と N79・N81 の追従、host 試験 | — |
+| P1 | — | 停止 | WS347 p006（RTL）を 12:37 に止めた。p006 は canceled（Claude は RTL を触らない） | — |
+| P2 | — | 停止 | WS347 p003（driver）を 12:37 に止めた。未 commit の変更が worktree に | — |
 | P3 | — | 待機 | BUG-412 の締め（xHCI・再投入の直しと読み捨てを main に、debug を外した）、23:40 merge。Pi 5 は普段の kernel、ユーザーの click の確かめ待ち | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
-| Q1 | [WS347](ws347/ws.md) p001 | VF2＋KC705 の Amaterrace GPU | KC705 を JTAG で確かめた（未設定）。minimal の bitstream を Vivado で build 中 | p002 仕様の差と driver の追従の設計 → p003 実装 → p004 実機 |
+| Q1 | [WS347](ws347/ws.md) | VF2＋KC705 の Amaterrace GPU | 全作業を止めた（12:37）。疑問は [ghci-rtl-questions.md](ws347/ghci-rtl-questions.md) | ユーザーの指示待ち |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
@@ -26,6 +26,8 @@
 （2026-11-01 10:29 クリア。これより後の進捗をここに書く。各 WS の状態は [master.md](master.md) と各 ws.md）
 
 ### WS347 VF2＋KC705 の Amaterrace GPU
+
+- 2026-11-11 12:37: ユーザーの指示で全作業を止めた。ユーザーの決定: Claude は RTL を触らない、仕様・RTL の疑問は file にまとめて判断を仰ぐ（[ghci-rtl-questions.md](ws347/ghci-rtl-questions.md)、R1〜R10）。
 
 - 2026-11-11 12:2x: 仕様の差を調べた（[spec-diff.md](ws347/spec-diff.md)）。ユーザーから amaterrace-gpu の全権を受け、仕様を正に RTL（P1、p006）と driver（P2、p003）を直し始めた。minimal は VA 32 bit・SFU 有りに（仕様の必須）。今の bitstream の build は書き込みの試験用に続ける。
 
