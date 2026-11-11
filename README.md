@@ -282,7 +282,7 @@ stops. After a successful build, it offers to install Keiland
 immediately, which makes `make keiland-linux-install`
 unnecessary. With `KEILAND_ASK=n`, it asks nothing and only
 prints. The package names are in
-[userland/desktop/LINUX.md](userland/desktop/LINUX.md).
+[userland/desktop/README.linux.md](userland/desktop/README.linux.md).
 
 Then restart your display manager (e.g., GDM).
 
