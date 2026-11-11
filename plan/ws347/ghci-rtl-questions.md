@@ -8,6 +8,7 @@
 - Gemini への依頼の文: [gemini-request-01.md](gemini-request-01.md)（A1〜A11 を T1〜T4 に。2026-11-11 作成、ユーザーが渡す）。
 - Gemini への質問の文: [gemini-questions-01.md](gemini-questions-01.md)（B4〜B10 の RTL の意図と事実。2026-11-11 作成、ユーザーが渡す）。1 次回答と Q1 の照合: [gemini-answers-01.md](gemini-answers-01.md)。2026-11-11 ユーザーが修正方針を承認し、依頼の文 [gemini-request-02.md](gemini-request-02.md)（W1〜W7）を作った。
 - Gemini の報告 02（ad23fe01）の監査: [audit-ad23fe01.md](audit-ad23fe01.md)。直しの依頼: [gemini-request-03.md](gemini-request-03.md)（C1〜C11、ring の回帰が最優先）。
+- C1・C2 だけの直し（8ebb2e2f）の監査: [audit-8ebb2e2f.md](audit-8ebb2e2f.md)（C1 ほぼ完了、C2 完了）。仕上げの依頼: [gemini-request-04.md](gemini-request-04.md)（D1 RING_SIZE を byte で、D2 LOCKED_REG、D3 旧い名前、D4 tb、D5、D6 timing）。C3〜C11 はその後。
 - 読んだ版: amaterrace-gpu main 50f13348（2026-11-11 15:28、Gemini の修正 5fb4ad16・1e80cfb6・50f13348 の後）。ghci.md は bace7d66 から VA_BITS_ENC の 2 行だけ違う。RTL は読んだだけで、sim・実機では確かめていない。監査の全文は [audit-50f13348.md](audit-50f13348.md)。
 
 ## A: RTL の修正依頼（Gemini へ）
@@ -41,6 +42,7 @@
 | B9 | GCLK_HZ: 仕様 §3.2.3 は「KC705 は 100 MHz」、board top は 200 MHz | kc705_top:109-110 | 方針はユーザーが承認（2026-11-11）、gemini-request-02 の W6 で依頼 |
 | B10 | `spec/gpu/cp/atg_cp.md` が CTRL 0x010・STATUS 0x014・SCRATCH 0x048 と書き ghci.md §3.1 と違う。`atg_cp_regs.md` は「GHCI 2.0」のまま | — | 方針はユーザーが承認（2026-11-11）、gemini-request-02 の W7 で依頼 |
 | B11 | DBG（EXTCAP の id 2）の指す先と register の窓が §4.1 に無い。KC705 は DBG を list に載せ、指す先は 0 | §4.1、`atg_cp_regs.v` の見出し | 判断待ち |
+| B12 | RING_BASE の整列: 仕様は 64 byte の整列を求めるが、hardware が下位 bit を mask するか fault にするかを書いていない（RTL は 32 byte で mask） | ghci.md §3.1 0x024、`atg_cp_ring.v` | 判断待ち |
 
 ## 決定済み
 
