@@ -25,7 +25,9 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
   - GHCI の仕様は最近少し直った。KC705 に LUT が収まるよう多くの機能を option にして削り、CAPS（capability の bit）が増えた。
     例: Blitter が option になって外れ、CAP が無い時は shader で blit する。
   - 順: (1) bitstream の書き込みができることを確かめる → (2) GHCI の driver を最新の仕様に追従 → (3) FPGA の動作確認。
-- amaterrace-gpu は読み取り専用のまま（bitstream と ghci.md を読むだけ。git は log・show・diff だけ）。
+- 2026-11-11 ユーザーから、amaterrace-gpu は他のセッションでの開発が終わったので Q1 に全権を委ね書き込みもよい、という趣旨の指示を受けた。
+- 2026-11-11 ユーザーから、仕様（ghci.md）を正とし、仕様に瑕疵が無さそうなら RTL を直す、driver は仕様に合わせて直す、という趣旨の指示を受けた
+  （食い違いの一覧は [spec-diff.md](spec-diff.md)）。
 
 ## WS290 との関係（Q1 の判断）
 
