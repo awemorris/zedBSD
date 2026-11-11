@@ -114,13 +114,19 @@
   main の checkout の `build/` は、読み取り専用の symlink か複写で使う。
 - RTL8822B の `.inc` はライセンスを分けるために独立させており、別の file のまま保つ。
 - 外部 package（`userland/packages/`）は source tree に取り込まず、tarball を取得・検証して patch する。ライセンスを監査する。
-- `/home/awe/amaterrace-gpu`（Amaterrace GPU の RTL と GHCI の仕様 `docs/ghci.md`）: **Claude（Q1・全担当）は RTL を絶対に触らない**
-  （2026-11-11 ユーザーの決定。理由: Gemini が書いた RTL と仕様の間に乖離があり、それを扱う Claude のセッションが混乱で汚染され、
-  作業を続けられない水準の rot を起こすため。Claude に RTL を書く能力が無いのではなく、ひとまず書かない事にした）。RTL・board・config の変更も、それを担当に頼む事もしない。
-  GHCI の仕様や RTL への疑問・食い違いは、Claude が file（例 `plan/ws347/ghci-rtl-questions.md`）にまとめてユーザーの判断を仰ぐ。
-  仕様（ghci.md）を Claude が書き換えるのは、ユーザーが中身を指示した時だけ。
-  読む事と、ユーザーが指示した bitstream の書き込み（Vivado の JTAG）はよい。`/home/awe/amaterrace-worktrees` は片付けない。
-  zedBSD の計画の中で参照する時は `am-ws001` のように書く。
+- `/home/awe/amaterrace-gpu`（Amaterrace GPU の RTL と GHCI の仕様 `docs/ghci.md`）の役割分担（2026-11-11 ユーザーの決定）:
+  - **Claude は監査**: 仕様と RTL の実装を読み、食い違いを証拠つきで書き出し、driver（ソフトウェア）を実装する。RTL は書かない（担当にも書かせない）。
+    Claude は仕様・RTL を読む力とソフトウェアを実装する力が高く、RTL を実装する力はまだ未知数。
+  - **Gemini は実装**: Claude の指揮の下で RTL を直す・パイプライン化してタイミングを閉じる（その力が高い）。全体の仕様の整合を取る力に問題があるので、整合は Claude の監査で担保する。
+  - **信頼の順序**: `docs/ghci.md` が正。RTL は誤りの見込みが高い物として扱う。食い違いはまず RTL の誤りと見なす。
+  - **2 分類**: A（仕様の文が明確で RTL が違う）は Gemini への修正依頼として積む。B（仕様が黙っている・表せない・設計の意図が要る）は
+    ユーザーに判断を仰ぎ、推測で埋めない。迷ったら B。台帳は 1 つ（WS347 は [plan/ws347/ghci-rtl-questions.md](plan/ws347/ghci-rtl-questions.md)）で、
+    決定が変わったら行を書き換える（訂正を重ねない）。担当は会話でなく台帳を読む。
+  - 仕様（ghci.md）を Claude が書き換えるのは、ユーザーが中身を決めた時だけ。driver は仕様だけに従い、RTL の誤りを吸収しない
+    （疎通の試験のための回避はユーザーの承認の後、device の版で限定し台帳の行と対にする）。
+  - 前提が変わったら、動いている担当に訂正を重ねて送らず、止めて台帳を直し、台帳を参照させて起動し直す。
+  - 読む事と、ユーザーが指示した bitstream の書き込み（Vivado の JTAG）はよい。`/home/awe/amaterrace-worktrees` は片付けない。
+    zedBSD の計画の中で参照する時は `am-ws001` のように書く。
 - `config/ci/config-amd64-server.mk` はユーザーの物。変えない。
 - sudo はパスワード無しで使ってよい（package の導入、host の操作）。
 

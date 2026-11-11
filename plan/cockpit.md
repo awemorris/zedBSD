@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | 停止 | WS347 p006（RTL）を 12:37 に止めた。p006 は canceled（Claude は RTL を触らない） | — |
+| P1 | — | 停止 | WS347 p006（RTL）を 12:37 に止めた。p006 は canceled（RTL は Gemini が実装する役割分担） | — |
 | P2 | — | 停止 | WS347 p003（driver）を 12:37 に止めた。未 commit の変更が worktree に | — |
 | P3 | — | 待機 | BUG-412 の締め（xHCI・再投入の直しと読み捨てを main に、debug を外した）、23:40 merge。Pi 5 は普段の kernel、ユーザーの click の確かめ待ち | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
@@ -27,7 +27,7 @@
 
 ### WS347 VF2＋KC705 の Amaterrace GPU
 
-- 2026-11-11 12:37: ユーザーの指示で全作業を止めた。ユーザーの決定: Claude は RTL を触らない、仕様・RTL の疑問は file にまとめて判断を仰ぐ（[ghci-rtl-questions.md](ws347/ghci-rtl-questions.md)、R1〜R10）。
+- 2026-11-11 12:37: ユーザーの指示で全作業を止めた。ユーザーの決定: Claude は監査、Gemini が RTL を実装。食い違いは台帳で A（RTL の誤り）と B（仕様の問い）に分ける（[ghci-rtl-questions.md](ws347/ghci-rtl-questions.md)、R1〜R10）。
 
 - 2026-11-11 12:2x: 仕様の差を調べた（[spec-diff.md](ws347/spec-diff.md)）。ユーザーから amaterrace-gpu の全権を受け、仕様を正に RTL（P1、p006）と driver（P2、p003）を直し始めた。minimal は VA 32 bit・SFU 有りに（仕様の必須）。今の bitstream の build は書き込みの試験用に続ける。
 
