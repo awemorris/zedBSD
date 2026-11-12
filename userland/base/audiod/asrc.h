@@ -6,12 +6,12 @@
  */
 
 /*
- * audiod's adaptive rate converter (ws209-p003, design C2 and C3 of
- * plan/ws209/phase001/phase.md): a polyphase FIR (a Kaiser-windowed sinc,
- * stop band below -60 dB, pass band to 0.425 of the lower rate, 256 phases
- * with linear interpolation between them) between two rates whose ratio a
- * PI controller corrects by at most +-0.2% to keep a ring's fill at its
- * target.  Pure: no audiod state, built alone by the host test.
+ * audiod's adaptive rate converter: a polyphase FIR (a
+ * Kaiser-windowed sinc, stop band below -60 dB, pass band to 0.425 of
+ * the lower rate, 256 phases with linear interpolation between them)
+ * between two rates whose ratio a PI controller corrects by at most
+ * +-0.2% to keep a ring's fill at its target.  Pure: no audiod state,
+ * built alone by the host test.
  */
 
 #ifndef AUDIOD_ASRC_H
