@@ -1181,25 +1181,6 @@ scenario_two_packages(void)
 
 #endif
 
-/* Without the performance control: the description only, and not one register. */
-static void __attribute__((unused))
-scenario_without_control(void)
-{
-	uint32_t cpu;
-
-	machine_5330("without-control", "");
-	CHECK(run_init() == 0);
-	CHECK(reads == 0U && writes == 0U && faults == 0U);
-	CHECK(provider->start == NULL && provider->apply == NULL && provider->sample == NULL);
-	CHECK(provider->feedback == NULL && provider->idle_package == NULL && provider->idle_core == NULL);
-	for (cpu = 0; cpu < 12U; cpu++)
-		CHECK(levels[cpu].kind == 0U);
-	CHECK(topologies[0].core == topologies[1].core);
-	CHECK(topologies[4].module == topologies[7].module);
-	CHECK(topologies[4].core_class == KERN_CPUPERF_CORE_EFFICIENCY);
-	CHECK(meter_count == 0U && table_allocations == 0U);
-}
-
 struct scenario {
 	const char *name;
 	void (*run)(void);
@@ -1207,7 +1188,6 @@ struct scenario {
 
 static const struct scenario scenarios[] = {
 #if !CONFIG_CPU_PERF
-	{ "without-control", scenario_without_control },
 	{ "cpuperf-off", scenario_off },
 	{ "not-intel", scenario_not_intel },
 #else

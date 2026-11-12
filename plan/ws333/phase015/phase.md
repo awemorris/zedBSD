@@ -2,7 +2,7 @@
 
 # ws333-p015: amd64 の既定で MSR の道を有効にする（Q333-7 A）
 
-Status: planned（2026-11-12 P1 が design.md §9 から立てた）
+Status: canceled（2026-11-12: 既定の値は WS333 の扱いの外、作業は y で build する）
 Parent: [WS333](../ws.md)
 
 ## 目的
@@ -12,7 +12,7 @@ Q333-7 の答え A（2026-11-01）: p014 の 5330 の受け入れが通ったら
 ## 依存
 
 - p014（5330 の受け入れの PASS）。
-- 2026-11-12 の build（`mk/`）の名前の整理（design.md §16.2、[../proposed/mk-cpuperf-config.diff](../proposed/mk-cpuperf-config.diff) へのユーザーの答え）。今の mk は x86_64 の既定で既に MSR の道が有効（`CONFIG_DRIVER_CPU_PERF := y`）なので、この Phase の中身は答えに従って変わる。
+- 2026-11-12 の build（`mk/`）の名前の整理（design.md §16.2、（作り直しの前の mk の案、消した） へのユーザーの答え）。今の mk は x86_64 の既定で既に MSR の道が有効（`CONFIG_DRIVER_CPU_PERF := y`）なので、この Phase の中身は答えに従って変わる。
 - Makefile・`mk/` の変更はユーザーの確認が要る（案を示してから）。
 
 ## 受け入れ

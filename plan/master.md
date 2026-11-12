@@ -55,7 +55,7 @@
 ### ユーザーの未決
 
 <!-- master:open-decisions:start -->
-- [WS333](ws333/ws.md): p004 の UAPI の案の review（[uapi-proposal.md](ws333/phase004/uapi-proposal.md)、電力の読みを誰でも読めるか）、mk の案（[mk-cpuperf-config.diff](ws333/proposed/mk-cpuperf-config.diff): CPU_PERF と DELL_SMM_BOOST の既定 y を戻すか、MSR の道の切り替え）、共有の toolchain の tree の lock を戻すか、kernel の build が LLVM の source の展開に依る件（i386・pc9821）。
+- [WS333](ws333/ws.md): p004 の UAPI の案の review（[uapi-proposal.md](ws333/phase004/uapi-proposal.md)、電力の読みを誰でも読めるか）。
 - [WS347](ws347/ws.md): GHCI の仕様の問い（台帳 [ghci-rtl-questions.md](ws347/ghci-rtl-questions.md) の B）。B2（flat の時の VA）と B3（LDS の文）が残る。
 - WS299 の継続（5330 が空いたら担当を割り当てる）。担当の外で見つけた物: clock_gettime に vDSO が無く 1 ms 刻み、main から return した時に stdout が flush されない、libc の memcpy の続き。
 - P4 が拾った候補: WS162 を canceled にするか（WS172 に吸収）、WS279 p009（ライセンスと類似性の監査）の担当、P4m の時々の失敗（T1-691）の Bug、nvrtx.disp.own の既定、pci-msi-qemu.c を残すか、master-design-policy.md へ移す候補 約 25 件。

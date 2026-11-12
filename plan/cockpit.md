@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | 待機 | WS333 の再開（q2012）を返却。p001・p002・p012 cleared、UAPI の案と mk の案はユーザーの答え待ち | — |
+| P1 | — | 待機 | WS333 の再開（q2012）を返却。WS333 は p004 の UAPI の案の review 待ち | — |
 | P2 | — | 停止 | WS347 p003（driver）を 12:37 に止めた。未 commit の変更が worktree に | — |
 | P3 | — | 待機 | BUG-412 の締め（xHCI・再投入の直しと読み捨てを main に、debug を外した）、23:40 merge。Pi 5 は普段の kernel、ユーザーの click の確かめ待ち | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |

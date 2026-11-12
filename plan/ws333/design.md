@@ -82,7 +82,7 @@ WS303 の未回答の問い（Q303-15〜19）は Q333-1〜5 として聞き直�
 
 - kernel の core は「写しと方針の配り」、driver は「hardware の読み書き」。strategy の意味は core が定め、写し方は各 driver が決める（Q303-11）。
 - `CONFIG_CPU_PERF`（既定 n）は **MSR を読む・書く道だけ**を入れる。CPUID だけで分かる topology と core の種類は amd64 で常に入れる（§4.5）。熱の core は全 platform で常に入る（`hw.thermal` を置き換えるため）。既定を y にするかは Q333-7（答え A: p014 の後）。
-- 2026-11-12 の build（`mk/`）での名前: source が読む macro は `CONFIG_CPU_PERF`（と `cpu-x86-insn.h` だけが読む `CONFIG_KERN_CPU_PERF`）のまま。make の変数は `CONFIG_KERN_CPU_PERF`・`CONFIG_DRIVER_CPU_PERF`・`CONFIG_DRIVER_X86_POWER_CONTROL` の 3 つに分かれ、今の mk は「cpuperf.c を常に入れる」「MSR の道だけを switch に」を満たしていない（§16.2、案は [proposed/mk-cpuperf-config.diff](proposed/mk-cpuperf-config.diff)）。
+- build の前提は §16.2（2026-11-12 の作り直しの後）。
 
 ### 4.2 kernel の口の統一
 
@@ -777,16 +777,11 @@ p008〜p010 は p007 の merge の後に並べて走れる（`cpux86.c` は p007
 | §4.11 init の EMERGENCY_ACK | init の SIGUSR2 の処理と記録の file（`/var/log/thermal-emergency`）はある。ACK の ioctl は `/dev/thermal` の後（p005 後半） | p004 で番号を決める |
 | §2 の path | build system の作り直しで `src/hal/amd64/` → `src/hal/x86_64/`、`platform/amd64/vmunix.mk` → `mk/platform-x86_64/vmunix.mk`・`mk/kernel.mk`、`config/ci/*.mk` → `mk/platform-<機種>/defaults.mk`・`mk/config.mk` | §2 は第 2 版の基点の事実として読む |
 
-### 16.2 build（`mk/`）と設計の食い違い（2026-11-12 の build で確かめた。直しの案は [proposed/mk-cpuperf-config.diff](proposed/mk-cpuperf-config.diff)、当てていない）
+### 16.2 build の前提（2026-11-12、build system の作り直しの後）
 
-1. **`cpuperf.c` が常に入らない**: `mk/kernel.mk` は `CONFIG_KERN_CPU_PERF` か `CONFIG_DRIVER_CPU_PERF` が y の時だけ `src/kern/cpuperf.c` を入れるが、`src/kern/entry.c`（`kern_cpuperf_init`）・`src/kern/clock.c`（`kern_cpuperf_notify`）と x86 の `cpu-x86.c` は常に呼ぶ。設計（§13「cpuperf.c を n で外す」を選ばなかった）と旧 main（全 port で常に build）に反する。今は全機種の defaults.mk がどちらかを y にしているので link が通っている。
-2. **MSR の道が switch で外れない**: `mk/platform-x86_64/vmunix.mk`・`mk/platform-intelmid64/vmunix.mk` が `cpu-x86-control.c`・`cpux86-hwp.c`・`cpux86-pstate.c`・`cpux86-power.c` を無条件に入れる。`CONFIG_DRIVER_CPU_PERF=n CONFIG_KERN_CPU_PERF=n` では `cpu-x86-control.c` が RDMSR・WRMSR の宣言を持たず compile できない。`CONFIG_DRIVER_X86_POWER_CONTROL=y` では `mk/kernel.mk` が同じ 4 file を足して duplicate symbol（link の失敗）。
-3. **既定が設計・ユーザーの決定と違う**: x86_64・intelmid64 の defaults.mk の `CONFIG_DRIVER_CPU_PERF := y` で、既定の kernel が `-DCONFIG_CPU_PERF=1`（MSR の道が有効）。Q301-4（試験が通るまで既定で無効）と Q333-7 の答え A（p014 の 5330 の受け入れの後に有効）に反する。同じく `CONFIG_DRIVER_DELL_SMM_BOOST := y` で `-DCONFIG_DELL_SMM_BOOST=1`。p018 の 5330 の試験で boost は rpm が上がらず「無し」のまま（既定 n）と決めた。i386 の defaults.mk は `CONFIG_DRIVER_X86_POWER_CONTROL := y` も立てる（i386 は性能を考えない対象、§4.4・§13）。build system の作り直しの時にユーザーが意図して変えたかは未確認。
-4. **名前が 3 つ**: make の変数が `CONFIG_KERN_CPU_PERF`（`mk/config.mk` に説明あり）・`CONFIG_DRIVER_CPU_PERF`（defaults.mk だけ、説明なし）・`CONFIG_DRIVER_X86_POWER_CONTROL`（説明あり、定義する macro を source が読まない）。`CONFIG_DRIVER_DELL_SMM_BOOST` は `mk/config.mk` に項目が無い。
-5. **i386 の topology の file**: `mk/platform-i386/vmunix.mk` が `cpux86.c`・`cpux86-cpuid.c`・`cpu-x86.c`・`cpu-x86-insn.c` を入れる（旧 main の pcat は入れず、`pcat.c` の weak の `drv_cpu_x86_init()` は i386 で link されなかった）。i386 の vmunix の build は 2026-11-12 に止めた（toolchain の source の展開に依存するため、下の 6）ので、i386 で compile できるかは未確認。
-6. **kernel の build が toolchain の source に依存する（事実だけ）**: i386（と同じ形の pc9821）の vmunix の target が `mk/platform-i386/libc.mk` の compiler-rt の builtins（`$(REPO_ROOT)/build/llvm-source/compiler-rt/lib/builtins`）を通して `mk/llvm/llvm.mk` の `$(LLVM_SOURCE)/.patched` に依存し、worktree に LLVM の tarball が無いと取得して共有の `build/llvm-source` に展開し直す。また rpi4・rpi5・vf2 の vmunix.mk の include は `-I$(BUILD)/sysroot/usr/include`、x86_64 は `-Ibuild/x86_64/sysroot/usr/include` で、`BUILD` を変えた時の振る舞いが機種で違う。WS333 の範囲の外として記録だけにする（Q1）。
-
-案（[proposed/mk-cpuperf-config.diff](proposed/mk-cpuperf-config.diff)）の要点: `src/kern/cpuperf.c` を `mk/kernel.mk` の常の列（`thermal-guard.c` の隣）へ。`CONFIG_KERN_CPU_PERF`・`CONFIG_DRIVER_CPU_PERF` の make の変数を外し、MSR の道の switch を `CONFIG_DRIVER_X86_POWER_CONTROL` 1 つに（`-DCONFIG_CPU_PERF=1 -DCONFIG_KERN_CPU_PERF=1` と 4 file を足す、既定 n）。x86_64・intelmid64 の vmunix.mk から 4 file を外す。`CONFIG_DRIVER_DELL_SMM_BOOST ?= n` を `mk/config.mk` に置き、x86_64・intelmid64・i386 の defaults.mk の y を外す。i386 の `CONFIG_DRIVER_X86_POWER_CONTROL := y` を外す。rpi4・rpi5・vf2・pc9821 の defaults.mk の 2 つの変数を外す。i386 の vmunix.mk の topology の 4 file は触らない（5 は Q1 の判断）。
+- WS333 の作業・試験の build は `CONFIG_KERN_CPU_PERF=y` と `CONFIG_DRIVER_X86_POWER_CONTROL=y` で行う（2026-11-12 ユーザー）。既定の値は WS333 の扱いの外。
+- cpu-x86 の provider の登録と MSR の制御は `CONFIG_KERN_CPU_PERF && CONFIG_DRIVER_X86_POWER_CONTROL` の下（ae3df3c353）。枠組みの初期化（`entry.c`）と通知（`clock.c`）は `CONFIG_KERN_CPU_PERF` の下。
+- 作り直しの前の mk の食い違いと既定の議論（第 3 版の初めの §16.2、Q333-7 の「有効にする時期」）は、作り直しで意味を失ったので消した。
 
 ### 16.3 試験の道具の古さ
 

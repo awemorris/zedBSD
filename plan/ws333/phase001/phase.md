@@ -45,7 +45,7 @@ source と mk の照合: WS333 の C の file（`src/kern/thermal.c`・`thermal-
 
 ### mk の差分の案（当てていない、ユーザーの確認が要る）
 
-- 案の差分: [../proposed/mk-cpuperf-config.diff](../proposed/mk-cpuperf-config.diff)（11 file、`git apply --check` が通る）。要点は design.md §16.2 の末尾。
+- 案の差分: （作り直しの前の mk の案、消した）（11 file、`git apply --check` が通る）。要点は design.md §16.2 の末尾。
 - 確かめ: 案を当てた mk の写し（scratchpad の木、source は worktree への symlink）で、x86_64 既定・`CONFIG_DRIVER_X86_POWER_CONTROL=y`・`CONFIG_DRIVER_DELL_SMM_BOOST=y`、intelmid64・vf2・rpi5 の既定が rc 0・warning 0。x86_64 既定の vmunix は `kern_cpuperf_init` を持ち `drv_cpu_x86_control_probe`・`drv_cpu_x86_rdmsr` を持たない、POWER_CONTROL=y は両方を持つ（llvm-nm）。rpi5 の `kernel.elf` に `kern_cpuperf_init`。
 - この案を採ると、x86_64 の既定の kernel の MSR の道と Dell の boost が無効に戻る（旧 main と Q333-7 A・p018 の決定の形）。今の mk の既定の y がユーザーの意図なら、案の defaults.mk の部分を外し、1・2（常の cpuperf.c と 4 file の二重）だけを当てる。
 

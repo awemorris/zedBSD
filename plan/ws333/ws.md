@@ -3,8 +3,9 @@
 # WS333: /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）
 
 - Master: [plan/master.md](../master.md)（2026-10-31 作成）。Primary Milestone: MG004。
-- Status: incomplete（2026-11-12 Q1: p001・p002・p003・p006〜p010・p012・p016・p017・p021 cleared。p004 の UAPI はユーザーの review 待ち、mk の案（phase001・proposed/mk-cpuperf-config.diff）はユーザーの答え待ち）
+- Status: incomplete（2026-11-12 Q1: p001〜p003・p006〜p012・p016〜p018・p021 cleared、p015 canceled。次は p004 の UAPI のユーザーの review）
 - 目標: CPU の idle（C-state、MWAIT）・P-state（HWP と、HWP の無い CPU の driver の P-state）・P/E core の相対性能・熱の監視・fan・非常の停止を、1 つの device `/dev/thermal`（と `/sbin/thermal`）の下で統一して設計し、実装する。
+- **前提（2026-11-12）**: build system の作り直しの後、WS333 の作業と試験は `CONFIG_KERN_CPU_PERF=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y` で build する（ユーザー）。既定の値は扱わない。作り直しの前の build・既定の記述は過去の物で、従わない。
 - Resume point: 2026-11-12 P1（q2012-i01）: p001 の設計を main の実装と新しい build（`mk/`）に合わせ（design.md §16）、未登録の Phase（p004・p013・p014・p015・p020・p022・p024）を立てた。p004 の UAPI の案はユーザーの review 待ち。p002・p011・p012・p018 の判定の材料は各 phase.md の「判定の材料（2026-11-12）」。p023（§4.3.3 段 4 の設計）は p014 の数で要ると分かった時だけ立てる。
 
 ## ユーザーの決定（要点）
@@ -30,16 +31,16 @@
 | [p008](phase008/phase.md) | module: CPUID の解析（cpux86-cpuid.c） | cleared（2026-10-31 Q1、fae4a0d41。test-cpuid 3590873 checks、全 PASS・check-skeleton PASS、突然変異 44 のうち 43 を検出（残りは同値）） | p007 |
 | [p009](phase009/phase.md) | module: HWP の register と HFI の表（cpux86-hwp.c） | cleared（2026-10-31 Q1、9fb61c61e。test-hwp 12804888 checks、全 PASS・check-skeleton PASS、突然変異 24 を検出） | p007 |
 | [p010](phase010/phase.md) | module: 0xCE と、allow list・RAPL・C-state の滞在・0xE2（cpux86-pstate.c・cpux86-power.c）。`_PSS`・AMD・PERF_CTL は仕様未取得／使い道が無く外した | cleared（2026-10-31 Q1、35d5d4500。test-pstate 120186・test-power 275202 checks、全 PASS と check-skeleton を Q1 も流して PASS、突然変異 18 を検出） | p007 |
-| [p011](phase011/phase.md) | x86 の CPU の driver の統合: 関門（hypervisor・CPUID の bit・allow list・既定 n・`cpuperf=off`）、MSR の小さな file、probe、HWP の enable の順と既に 1 の道、Highest の MHz の測り、HFI の page、RAPL の meter・滞在の統計、provider の登録、起動の parameter の key（legacy の 0xCE の道は作らない、Q1） | in-progress（P7、q1770-i01。2026-10-31: host 試験 PASS（y 13 場面・n 3 場面、模擬の MSR の #GP 0）、amd64 の vmunix 既定と y の warning 0、全 20 port の vmunix warning 0、QEMU+KVM の y と既定の image で login と「関門で止まり MSR の道の provider が無い」を PASS（HMP）。2026-11-01 q1788 P1 の 5330: HWP の start・HFI・RAPL の meter 4 本・strategy 3 つ・`cpuperf=off` が動いた（試験だけの diag の patch で）。cleared は Q1 の判定） | p006、p008〜p010、p005 の前半 |
+| [p011](phase011/phase.md) | x86 の CPU の driver の統合: 関門（hypervisor・CPUID の bit・allow list・既定 n・`cpuperf=off`）、MSR の小さな file、probe、HWP の enable の順と既に 1 の道、Highest の MHz の測り、HFI の page、RAPL の meter・滞在の統計、provider の登録、起動の parameter の key（legacy の 0xCE の道は作らない、Q1） | cleared（2026-11-12 Q1 判定: 受け入れは済み、build の前提は ws.md の「前提」） | p006、p008〜p010、p005 の前半 |
 | [p012](phase012/phase.md) | tick の位相を揃える（amd64 の HAL の実装）: TSC-deadline の mode で全 CPU の期限を TSC の周期の倍数に、戻す macro `LAPIC_TICK_TSC_DEADLINE=0` | cleared（2026-11-12 Q1 判定: 5330 で idle の package 10.08 → 6.44 W、PC の滞在 0% と lock の取り合いは p014） | p002 |
 | [p013](phase013/phase.md) | CPU の ioctl・`/sbin/thermal` の CPU と電力の表示・strategy の保存と rc の restore（Q333-1 B） | planned | p004、p005 後半、p006 |
 | [p014](phase014/phase.md) | 5330 の CPU の受け入れ（design.md §8.4 の 1〜4、1 本の script）と §4.3.3 段 4 の数。p002・p011・p012・p018 の実機の残りを集める | planned（実機の割当が要る） | p011、p012、p013 |
-| [p015](phase015/phase.md) | amd64 の既定で MSR の道を有効に（Q333-7 A。今の mk の既定との食い違いは design.md §16.2） | planned | p014、mk の案の答え |
+| [p015](phase015/phase.md) | amd64 の既定で MSR の道を有効に（Q333-7 A。今の mk の既定との食い違いは design.md §16.2） | canceled（2026-11-12: 既定の値は WS333 の扱いの外、作業は y で build する） | p014、mk の案の答え |
 | [p016](phase016/phase.md) | 見張りと非常の停止（signal の disposition、init の SIGUSR2・上書きの禁止、REBOOT・HALT の hook、SLEEP の排他と `kern_thermal_resume`、停止の道の flag、sync の助け、`drv_acpi_poweroff_emergency`、水準の検査、記録の file） | cleared（2026-10-31 Q1、af8aaa5f6・6de483e15・f857f4647、main a57216e81。host 試験 22 場面、QEMU で温度の上がる SSDT から ACPI S5 の電源断まで。init の ACK と注入の ioctl は p005 後半へ持ち越し。`thermal.emergency=off` は作らない（ユーザーに聞く）） | p005 |
 | [p017](phase017/phase.md) | ACPI WMI の層（`_WDG` の解析の module と method・query の口）と AML の harness の `plan/tools/aml-host/` への移しと拡張 | cleared（2026-10-31 Q1、caff3950b〜93fb7eadd、main 809dfe329。WMI の試験 9 項目・SMI の書き 0・20 port の build・QEMU の起動。Q1 の判断: WMI の attach の試し直しは p018 の Dell の provider が自分の poll から行う） | p001 |
 | [p021](phase021/phase.md) | passive（見張り → poll の thread → 受け手の `limit`、5 秒ごとに 100‰、3 °C 下で戻す） | cleared（2026-10-31 Q1、main a57216e81。host 試験。cpuperf の受け手との実機の結合は p014） | p006、p016 |
 | [p019](phase019/phase.md) | sessiond の THERMAL の要求（strategy・boost、root か wheel） | in-progress（P4、q1777-i01。2026-10-31: 要求の口・権限の規則・答えの行と host 試験 PASS 113 checks。kernel への呼びは `/dev/thermal` の UAPI（p004）まで stub（ERROR unavailable）、保存（Q333-1 B）と QEMU は持ち越し） | p005（kernel への呼びは p004） |
 | [p020](phase020/phase.md) | Pi 5 の provider（fan の level・rpm、受け手、boost） | planned（実機の割当が要る） | p005、p016 |
-| [p018](phase018/phase.md) | Dell の provider（DDV の fan、BIOS の熱の mode の受け手、SMM の boost の確かめ、WMI の attach の試し直し）と 5330 の熱の試験 | in-progress（P7、q1776-i01。2026-10-31: host の harness まで実装、`plan/ws333/tests/dell/run.sh` 30 項目 PASS（5330 の表の SMI の数: attach・fan の読み 0、mode の変更 1、同じ mode 0、boost 3）、amd64 と全 20 port の vmunix warning 0、QEMU amd64 の login（Dell の WMI が無い道）PASS。boost は `CONFIG_DELL_SMM_BOOST`（既定 n）。2026-11-01 q1788 P1 の 5330: attach・4 つの mode の set（7 ms、error 0）・Debian の quiet の読み・起動の `\ODV0` が通った。boost は rpm が上がらず既定 n のまま） | p005、p017 |
+| [p018](phase018/phase.md) | Dell の provider（DDV の fan、BIOS の熱の mode の受け手、SMM の boost の確かめ、WMI の attach の試し直し）と 5330 の熱の試験 | cleared（2026-11-12 Q1 判定: 受け入れは満たした、boost は規則どおり無し） | p005、p017 |
 | [p022](phase022/phase.md) | sysctl の道具と Keiland の monitor を `/dev/thermal` に、`hw.thermal` を外す | planned | p005 後半、p013 |
 | [p024](phase024/phase.md) | 規約の全文の見直しと文書（`docs/architecture/power-management.md`） | planned | p005〜p022 |
