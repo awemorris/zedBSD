@@ -22,6 +22,14 @@ GHCI 1.0 の仕様（`docs/ghci.md`）と Amaterrace GPU の RTL は `/home/awe/
 4. Gemini が実装し、報告（`gemini-report-NN.md`）を返す。
 5. Claude が監査し（`audit-<SHA>.md`）、残りを次の依頼にする。旧い仕様の残り（水平展開の漏れ）を特に探す。
 
+## agy（Gemini）への直接の指示（2026-11-12 から）
+
+- Claude は agy に直接指示を送り、返事を受け取れる（ユーザーは Claude を UI にする）:
+  `cd /home/awe/amaterrace-gpu && agy --conversation <会話の ID> -p "<指示>"`
+- 会話の ID は `~/.gemini/antigravity-cli/cache/last_conversations.json`（作業の directory ごとの最後の会話）。詳しくは同じ所の `conversation_metadata.json`。
+- `-p` で送った往復は agy の対話の画面に出ない（2026-11-12 ユーザーが確かめた）。ユーザーに見せる事は Claude が報告する。
+- 長い作業は背景で待ち、時間の上限を付ける。指示は file の依頼（`gemini-request-NN.md`）を指して短く書き、file の変更の可否を明記する。
+
 ## 規則
 
 - `docs/ghci.md` が正。RTL は誤りの見込みが高い物として扱う。ただし Claude の指摘も 15% ほど誤りうるので、Gemini の反論は仕様の文で照らしてから受ける・返す。
