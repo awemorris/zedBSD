@@ -10,7 +10,7 @@
  *
  * The embedded controller runs the fan by itself; the operating system
  * reads the fans' speeds, picks the BIOS thermal mode, and, in a kernel
- * built with CONFIG_DELL_SMM_BOOST, raises a fan's state through the SMM
+ * built with CONFIG_DRIVER_DELL_SMM_BOOST, raises a fan's state through the SMM
  * fan call.  All of it goes through the firmware's AML: the provider makes
  * no port or memory access of its own, and only the mode call and the SMM
  * fan calls enter System Management Mode.
@@ -40,8 +40,8 @@
 #define UNUSED_PARAMETER(parameter)	((void)(parameter))
 
 /* Whether the fans' boost through the SMM fan call is built in. */
-#ifndef CONFIG_DELL_SMM_BOOST
-#define CONFIG_DELL_SMM_BOOST	0
+#ifndef CONFIG_DRIVER_DELL_SMM_BOOST
+#define CONFIG_DRIVER_DELL_SMM_BOOST	0
 #endif
 
 /*
@@ -179,7 +179,7 @@ static int dell_apply(void *context, const struct kern_thermal_strategy *strateg
 static void dell_poll(void *context);
 static int dell_firmware_name(void *context, char *name, size_t size);
 static int dell_fan_read(void *context, struct kern_thermal_fan_state *state);
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 static int dell_fan_boost(void *context, uint32_t level);
 #endif
 
@@ -197,7 +197,7 @@ static const struct kern_thermal_receiver_ops dell_receiver_ops = {
 /* What the provider does for the thermal core for each fan. */
 static const struct kern_thermal_fan_ops dell_fan_ops = {
 	.read = dell_fan_read,
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 	.boost = dell_fan_boost,
 #endif
 };
@@ -222,14 +222,14 @@ static uint32_t dell_probe(uint32_t pieces);
 static int dell_probe_descriptor(void);
 static int dell_probe_mode(void);
 static int dell_probe_fans(void);
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 static int dell_probe_smm(void);
 #endif
 static int dell_fans_read(struct drv_acpi_dell_fan *fans, unsigned *count);
 static int dell_ddv_call(uint32_t method, struct drv_acpi_object **result);
 static uint32_t dell_mode_read(void);
 static int dell_mode_set(uint32_t mode);
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 static int dell_smm_call(const uint8_t request[DRV_ACPI_DELL_SMM_SIZE], uint32_t *eax);
 static int dell_fan_state_get(struct dell_fan *fan, uint32_t *state);
 static int dell_fan_state_set(struct dell_fan *fan, uint32_t state);
@@ -248,7 +248,7 @@ static void dell_found_remove(uint32_t pieces);
  * descriptor.
  *
  * Reads the descriptor, then probes the thermal mode call, the DDV fans
- * and (with CONFIG_DELL_SMM_BOOST) the SMM fan calls, registers the fans
+ * and (with CONFIG_DRIVER_DELL_SMM_BOOST) the SMM fan calls, registers the fans
  * found, and registers the receiver of the strategy.  Nothing here enters
  * System Management Mode.  Thread context, after drv_acpi_wmi_attach().
  * Returns 0, or ENODEV on a machine without a Dell WMI descriptor.
@@ -270,7 +270,7 @@ drv_acpi_dell_attach(void)
 
 	/* Probes every piece; those that failed are probed again from the poll. */
 	pieces = PIECE_DESCRIPTOR | PIECE_MODE | PIECE_FANS;
-	if (CONFIG_DELL_SMM_BOOST)
+	if (CONFIG_DRIVER_DELL_SMM_BOOST)
 		pieces |= PIECE_SMM;
 	pieces = dell_probe(pieces);
 	__atomic_store_n(&dell.pending, pieces, __ATOMIC_RELEASE);
@@ -409,7 +409,7 @@ dell_fan_read(
 	struct dell_fan *fan;
 	unsigned count;
 	int error;
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 	uint32_t found;
 	uint32_t off;
 #endif
@@ -430,7 +430,7 @@ dell_fan_read(
 	state->flags = KERN_THERMAL_FAN_HAS_RPM;
 	state->rpm = fans[fan->index].rpm;
 	__atomic_store_n(&fan->last_rpm, state->rpm, __ATOMIC_RELAXED);
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 
 	/* Tells whether a boost still holds, and offers the SMM fan states while it can. */
 	dell_boost_watch(fan, state->rpm);
@@ -444,7 +444,7 @@ dell_fan_read(
 	return 0;
 }
 
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 /*
  * Sets a fan's boost through the SMM fan call (the strategy thread).
  *
@@ -593,7 +593,7 @@ dell_probe(
 		if (error == EAGAIN)
 			failed |= PIECE_FANS;
 	}
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 
 	/* Probes the SMM fan calls. */
 	if ((pieces & PIECE_SMM) != 0U) {
@@ -790,7 +790,7 @@ dell_probe_fans(void)
 	return 0;
 }
 
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 /*
  * Lists the SMM calls' block from the mapping device whose _WDG method
  * only returns data, and finds it.  Returns 0, ENOENT when the firmware
@@ -1026,7 +1026,7 @@ dell_mode_set(
 	return 0;
 }
 
-#if CONFIG_DELL_SMM_BOOST
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 /* Makes one SMM call through the SMM calls' block and checks its answer. */
 static int
 dell_smm_call(

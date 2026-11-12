@@ -1366,7 +1366,7 @@ endif
 
 # [Dell SMM performance boost]
 ifneq ($(filter y,$(CONFIG_DRIVER_DELL_SMM_BOOST)),)
-KERN_CPPFLAGS += -DCONFIG_DELL_SMM_BOOST=1
+KERN_CPPFLAGS += -DCONFIG_DRIVER_DELL_SMM_BOOST=1
 KERN_SOURCES += \
 	src/drivers/acpi/acpi-dell-codec.c \
 	src/drivers/acpi/acpi-dell.c
