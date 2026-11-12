@@ -2,7 +2,7 @@
 
 # ws347-p003 driver を最新の ghci.md に合わせる（実装と host 試験）
 
-Status: in-progress
+Status: in-progress（2026-11-13 Q1、q2025-i01 P4。11-11 の記述から乖離の確かめを先に）
 
 - 親: [WS347](../ws.md)。状態: planned。依存: p002（[spec-diff.md](../spec-diff.md)）。
 - 2026-11-11 ユーザーから、driver は仕様（ghci.md）に合わせて直す、という趣旨の指示を受けた。正本は amaterrace-gpu main の `docs/ghci.md`（a7f5ca47 以降、p006 で include の bit の定義が直る）。
