@@ -42,10 +42,6 @@
 #include "drivers/pci/pci.h"
 #include "drivers/acpi/dell.h"
 
-#if CONFIG_DRIVER_DELL_SMM_BOOST
-#include "drivers/acpi/dell.h"
-#endif
-
 #include "acpi-tables.h"
 #include "acpi-text.h"
 #include "aml-internal.h"
