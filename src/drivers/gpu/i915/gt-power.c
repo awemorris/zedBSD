@@ -325,6 +325,7 @@ drv_i915_rc6_residency_pause(
 	if (residency->readable)
 		i915_rc6_residency_sample_locked(residency, mmio);
 
+	/* Stops readers from touching the counter until the next resume. */
 	residency->readable = 0;
 	residency->holds = 0U;
 
@@ -397,6 +398,7 @@ drv_i915_rc6_residency_read(
 	if (readable)
 		i915_rc6_residency_sample_locked(residency, mmio);
 
+	/* Takes the total and the holds as they stand. */
 	*sleep_ns = residency->total_ns;
 	*holds = residency->holds;
 
@@ -1327,6 +1329,8 @@ i915_rps_move_to(
 	/* Keeps the GT awake for the writes; a GT that cannot wake keeps its frequency. */
 	if (rps->awake_get != NULL) {
 		error = rps->awake_get(rps->awake_context);
+
+		/* A GT that did not wake is counted, and its frequency stays. */
 		if (error != 0) {
 			rps->wake_failures++;
 			return;

@@ -2,7 +2,7 @@
 
 # ws333-p024: 規約の全文の見直しと文書
 
-Status: in-progress（2026-11-12 P1・q2016-i01: 規約の見直しと文書は済み、build・host 試験・QEMU amd64 の回帰 PASS。依存の p005・p013・p022 の cleared と、実機（p014・p018・p020）の後の見直しが残る。cleared の判定は Q1）
+Status: cleared（2026-11-13 Q1 判定: 2 回目で p025〜p029 と BUG-422 の C を規約の全文で見直し（書き方だけ）、power-management.md を今に。x86_64・rpi5 の kernel と /sbin/thermal warning 0、WS333 の host 試験 8 本 PASS。i915 の書き方の直しは build と host 試験だけ（5330 は次に実機を使う時に））
 Parent: [WS333](../ws.md)
 
 ## 目的
@@ -59,3 +59,43 @@ conformance-reviewer を 5 人、file の組ごとに並べて走らせた（同
 
 - `plan/tools/aml-host/Makefile` 37 行の `-DCONFIG_DELL_SMM_BOOST=1` を `-DCONFIG_DRIVER_DELL_SMM_BOOST=1` に（Makefile の変更なので案だけ。当てれば `dell/run.sh` が通る）。
 - 試験の `plan/tools.md` への登録の案（下の最後の報告に書いた）。
+
+## 2回目（2026-11-13 P1、q2038-i01、branch agent/p1-ws333k、基点 main ee74dc22ad）
+
+前回（c9a8c83d00）の後に WS333 で足した・変えた C を、`plan/coding-style.md` の全文と照らして読んだ（`git diff c9a8c83d00 HEAD` の差分を file ごとに全部。機械の検査は `plan/tools/style-check.py` を差分の行だけに絞って流した）。直したのは書き方だけ（動作・評価の順・error の値・log の文字列・UAPI・ABI は変えない）。
+
+対象と直した事（commit 0d048ba5d0）:
+
+| file | 直した事 |
+| --- | --- |
+| `src/kern/cpuperf.c` | 閉じ括弧の後の空行と comment（mutex の初期化）、古い言い回しの comment の訂正、`cpuperf_measure_cpu` の最後を失敗と成功の return に分けた |
+| `src/kern/sched.c` | `set_affinity_in_place` と `sched_set_cpu` の in-place の道の最後の return を失敗と成功に分け、critical section の中の `if` に comment |
+| `src/kern/platform/pcat.c` | 条件の中の `drv_intel_tco_pci_register()` を変数 `err` に取り（log に error の値を足した） |
+| `src/drivers/platform/pcat/cpu-x86/cpu-x86.c` | Boolean を式で作っていた `module_clock` を `if` に |
+| `src/drivers/platform/pcat/intel-tco.c` | `(void)device` を `UNUSED_PARAMETER` に、comment の無い `if` 5、閉じ括弧の後の空行と comment 2 |
+| `src/drivers/gpu/i915/device.c` | `awake_get/put`・park・unpark・start_publish・stop_gt の critical section の空行と段落の comment、comment の無い `if` 約 8、`worker_awake` の Boolean を `if` に、`i915_rps_awake_get` の直接の return を分けた |
+| `src/drivers/gpu/i915/worker.c` | 条件の中の `sched_ticks()` を変数 `now` に、comment の無い `if` 2、関数の comment の折り返し |
+| `src/drivers/gpu/i915/gt-power.c` | `i915_rps_move_to` の入れ子の `if` と RC6 の account の 2 段落に comment |
+| `src/drivers/gpu/i915/display/present.c` | include の順（text-display を最後に）、window の run の段落の comment |
+| `src/drivers/gpu/i915/tests/contracts/rps_contract_test.c` | 最初の文の comment |
+| `src/drivers/platform/rpi5/rpi5-fan.c` | p020 の分（前回の p024 の後）: 閉じ括弧の後の空行と comment 2、lock の中の分岐の comment 4 |
+
+直す所なしと読んだ file: `include/kern/sched.h`・`cpuperf.h`・`include/uapi/thermal.h`・`sysctl.h`・`boot.h`、`src/kern/boot.c`（`parameter_seconds`）、`src/drivers/gpu/i915/gt.h`・`mmio.c`・`mmio.h`・`gt-power.h`・`intel/gt-power.h`・`device.h`、`userland/base/thermal/main.c`、`userland/base/sysctl/main.c`（telemetry の列）、`include/hal/arch/amd64.h`。
+
+出典の block（guardrail）: 足した出典は `present.c`（Procedure referenced: Linux v6.8.12 i915_driver.c）・`gt-power.c`（Procedure referenced: gen11_rc6_enable）・`intel/gt-power.h`（Values referenced・Value referenced）・`intel-tco.c`（Values referenced 5 block）で、どれも該当の block の直前に複数行の comment で書かれ、file の上部の comment に参考の一覧は無い。開発の管理情報（WS・Phase・Queue・Bug の番号、plan/ への参照）を足した行は無い（`git diff c9a8c83d00 HEAD -- src | grep` で 0）。
+
+直さずに残した物（記録だけ）:
+- `src/kern/sched.c` の `sched_set_cpu` の先頭の `cpu_online(target)` を含む条件（前からの形）。
+- `mmio.c` の `forcewake_refusals++`・`forcewake_wakes++` の telemetry の counter に protocol の comment が無い（telemetry だけの数）。
+- 他の WS の code の既存の違反は今回の差分の外で、前回の記録のまま。
+
+文書: `docs/architecture/power-management.md` を今の形に合わせた（Status の「planned」を外し、Scope に watchdog と tick の周期（amd64 100 Hz）、「Graphics idle (i915)」の節（forcewake の参照の数・worker の 20 ms の rest・RC6 の residency・text console の止め）、performance domain（E-core は module の domain）と測りの thread の affinity（bound、3 回まで）、「Watchdog」の節（TCO、`watchdog=`・`watchdog.stop=`）、Verification の足し）。`mhz` の新しい値・共有の sample は前回の書き直しで入っていた。docs/ から plan/ への link と開発の管理情報は無い。
+
+確かめた事（worktree `/home/awe/zedBSD-worktrees/p1-ws333k`、`build/` は worktree の物、main の build/ は未使用）:
+- `make -j4 BUILD_JOBS=4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` rc 0。
+- x86_64（CONFIG_KERN_THERMAL=y CONFIG_DRIVER_X86_POWER_CONTROL=y）: `sysroot` rc 0、`build/x86_64/vmunix` rc 0 warning 0（cpuperf・sched・intel-tco・i915 の device・worker・gt-power・present を compile）、`userland/base/thermal` rc 0 warning 0。
+- rpi5: `sysroot` rc 0、`build/rpi5/vmunix` rc 0 warning 0（rpi5-fan・cpuperf・sched）。
+- host 試験: cpuperf-host PASS、cpu-x86-host PASS、thermal-host 30 scenarios 0 failed、thermal-tool-host PASS、tco-host PASS、rc6-host PASS、rpi5-fan-host PASS、`plan/bugs/BUG-422/sched-affinity-host.sh` 46 checks 0 failures PASS。
+- `git diff --check` clean。
+
+未実施: QEMU・実機の回帰（Q1 に頼む。i915 の critical section の整理と worker の `now` の変更は host の rc6 の試験と build だけ）、clang-format（host に無い）、他の platform の build（i386・pc9821・rpi4・vf2・intelmid64 は今回の差分が触る file の条件 compile の確認だけ未実施）、5330 の測定。

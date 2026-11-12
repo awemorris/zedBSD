@@ -1,6 +1,6 @@
 # Power management
 
-Status: current; the Raspberry Pi 5 fan's receiver and boost are planned
+Status: current
 
 This document describes how zedBSD saves power and keeps a machine within
 its thermal limits: how it puts a machine to sleep and wakes it, how an
@@ -24,7 +24,9 @@ Supported:
   cores' relative performance, and the processors' idle residency;
 - the thermal framework: temperature sensors, fans with a raised lower
   bound ("boost"), energy meters, one strategy for the whole machine,
-  passive cooling and an emergency stop at a critical temperature.
+  passive cooling and an emergency stop at a critical temperature;
+- a watchdog that resets a machine that stops (Intel TCO), armed by a boot
+  parameter.
 
 Not supported:
 
@@ -33,7 +35,8 @@ Not supported:
   sleep need;
 - writing power limits (the energy meters are read only);
 - stopping the tick of an idle processor (the tick is periodic on every
-  processor).
+  processor; its period is a per-architecture value, 100 Hz on amd64, so
+  an idle package can rest between ticks).
 
 ## Who decides
 
@@ -212,6 +215,26 @@ together, and the package can stay in its deep states between ticks.
 The idle residency counters (how long each core and each package spent in
 each C-state) are read through `/dev/thermal` (below).
 
+### Graphics idle (i915)
+
+The Intel graphics processor rests in RC6 only while no part of the driver
+holds a power (forcewake) domain awake. The driver therefore holds the GT
+awake by reference count: the first holder wakes every domain and the last
+gives them back. The request worker holds the GT while it has work and for
+20 ms after the last, longer than a frame at 60 Hz, so a running client
+keeps the GT awake and an idle desktop lets it rest; the frequency
+controller (RPS) takes its own hold around each frequency change. The
+driver enables RC6 with the hardware's own timers, as the GT does without
+a firmware controller, and adds up the RC6 time from the residency
+counter, which reads true only while the domains are held. A parked GT's
+time is added when it wakes, and a loss of power (suspend to D3hot) sets
+the counter's base again instead of counting the time without power. The
+sum, the domains held and the wakes are part of `hw.gputelemetry`.
+
+The kernel's text console stops painting when the driver takes the screen
+over: each of its lines repaints the boot framebuffer, which is mapped
+uncached, and would hold the driver's worker for seconds.
+
 ## The thermal framework
 
 ```
@@ -318,6 +341,24 @@ hypervisor, the topology is still there and the controls answer
 `EOPNOTSUPP`. On architectures without a provider every processor is its
 own core of unknown kind.
 
+A performance domain is a set of processors that run on one clock. The
+two threads of a core share one. The efficiency cores of a hybrid
+processor share one by module (four to a module on Alder Lake), so a
+request for one of them is a request for its module: the module's cores
+all run at the rate of the highest level any of them is held at. The
+topology says which processors share, and the processor driver reports a
+module's cores as one domain.
+
+A processor's delivered rate is measured by a thread that runs busy on
+that processor and reads the frequency counters before and after. The
+scheduler lets threads move: an idle processor takes a waiting thread
+from a busy processor's queue. A thread that must stay on one processor,
+such as the measuring thread and the watchdog's reloading threads, is
+bound to it before it first runs, and the scheduler passes over bound
+threads when it takes one. A measurement that finds its thread on
+another processor is discarded and tried again with a new thread, up to
+three times.
+
 The relative performance of the cores (for the scheduler) is measured from
 the frequency counters by default, or taken from the HFI or from the
 provider. A generation number changes whenever the topology, the
@@ -367,6 +408,29 @@ the device tree's critical level.
 
 After a sleep the guard restarts its staleness count, so the time asleep
 does not count as time without a reading.
+
+## Watchdog
+
+The Intel TCO watchdog resets a machine that stops. It is off unless the
+boot parameter `watchdog=<seconds>` (4 to 600) arms it; `watchdog=off`
+leaves it off. It supports the hubs from the 100 Series on (the TCO
+registers behind the SMBus function) and the ICH9 (which QEMU models), and
+is built into the amd64 PC kernel only.
+
+When armed, the driver programs the hub's counter so that the machine
+resets that many seconds after the last reload, and starts one thread on
+each processor, bound to it. Each thread stamps its turn a few times per
+timeout; the thread that finds every processor's stamp current reloads the
+counter. A processor that stops taking interrupts, a scheduler that stops,
+or a panic (which halts its processor with interrupts off) therefore lets
+the counter run out. The driver first checks that the counter counts (the
+hub's counter needs the ACPI timer, which the power management controller
+can stop, so the driver starts it) and refuses to arm otherwise. The
+counter is halted while the system sleeps to idle and armed again at wake.
+
+The boot parameter `watchdog.stop=<seconds>` stops every processor with
+interrupts off after that long once the watchdog is armed, to show on a
+machine that the watchdog resets it.
 
 ## Interface: `/dev/thermal`
 
@@ -483,6 +547,11 @@ the whole framework can be exercised on a machine without sensors.
   and others may not, the System Monitor's backend reads the processor's
   temperature, and a made-up zone at its critical level powers the machine
   off, both through `init` and directly.
+- On QEMU's ICH9, a machine armed with `watchdog=<seconds>` keeps running
+  while the threads reload the counter, and a machine started with
+  `watchdog.stop=<seconds>` is reset by the watchdog after it.
+- On the Latitude 5330, the GT's RC6 time grows while the desktop is idle,
+  and `hw.gputelemetry` shows the domains held and the wakes.
 - On the Latitude 5330, the idle package power falls with the deeper
   C-states and the aligned ticks, the strategies change the processors'
   requests and the firmware's thermal mode, and the meters and idle

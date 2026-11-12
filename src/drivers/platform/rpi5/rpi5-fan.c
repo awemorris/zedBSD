@@ -401,6 +401,8 @@ drv_rpi5_fan_start(
 			rpi5_fan.reading = milli_celsius;
 			rpi5_fan.auto_level = choose_level(milli_celsius);
 		}
+
+		/* Sets the channel to the trips' level, and lets the speed settle before it is said. */
 		rpi5_fan.level = rpi5_fan.auto_level;
 		set_level(rpi5_fan.level);
 		rpi5_fan.settle = RPI5_FAN_SETTLE_POLLS;
@@ -1310,18 +1312,24 @@ poll_once(
 	irq = spin_lock_irqsave(&rpi5_fan.lock);
 
 	if (error != 0) {
+		/* Without a reading the trips ask for the highest level. */
 		rpi5_fan.has_reading = 0;
 		rpi5_fan.auto_level = rpi5_fan.level_count - 1U;
 	} else {
+		/* Keeps the reading, which a change of strategy chooses the level from again. */
 		rpi5_fan.has_reading = 1;
 		rpi5_fan.reading = milli_celsius;
 		rpi5_fan.auto_level = choose_level(milli_celsius);
 	}
+
+	/* Sets the channel to the higher of the trips' level and the boost. */
 	drive_locked(&change);
 
 	/* Counts down to the poll the fan's speed has settled at. */
 	if (!change.changed && rpi5_fan.settle != 0U) {
 		rpi5_fan.settle--;
+
+		/* The speed has settled: reads it for the log. */
 		if (rpi5_fan.settle == 0U && rpi5_fan.has_rpm) {
 			settled = true;
 			rpm = read_rpm();

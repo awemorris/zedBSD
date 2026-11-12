@@ -2,7 +2,7 @@
 
 # ws333-p014: 5330 の CPU の受け入れ
 
-Status: uncleared（2026-11-13 Q1: 受け入れの 1（MWAIT < HLT）と 3（MHz が要求に従う、p025）は満たした。残り（package の C-state 0% の原因、2 の qs40、4 の S0 idle）を [p027](../phase027/phase.md) に移した）
+Status: cleared（2026-11-13 Q1 判定: 1（MWAIT < HLT）と 3（MHz が要求に従う）は p025、package の C-state の原因と直しは p027・p029、2（qs40）は p029 で回帰無し。4 の S0 idle は VMD の suspend が EBUSY で入れず [BUG-424](../../bugs/BUG-424.md) に移した）
 Parent: [WS333](../ws.md)
 
 ## 目的

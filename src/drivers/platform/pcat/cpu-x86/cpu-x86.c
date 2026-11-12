@@ -253,7 +253,9 @@ cpu_x86_topology(
 	 * the others at their efficient one, all ran at the first's rate under
 	 * load, while those of another module at their efficient level did not.
 	 */
-	state->module_clock = topology->core_class == KERN_CPUPERF_CORE_EFFICIENCY;
+	state->module_clock = false;
+	if (topology->core_class == KERN_CPUPERF_CORE_EFFICIENCY)
+		state->module_clock = true;
 
 #if CONFIG_KERN_THERMAL && CONFIG_DRIVER_X86_POWER_CONTROL
 	/* Reads what the CPU's control has before its first request. */

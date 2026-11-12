@@ -396,9 +396,10 @@ drv_i915_worker_create(
  * Publishes the GPU node, serves it until a stop is asked for, and withdraws it.
  *
  * Runs on the thread that brought the device up, which holds the GT awake
- * while it has work and lets it rest after I915_WORKER_REST_MS without.  Returns once the node was withdrawn, or the error of a
- * failed publication.  A withdrawal refused because sessions are still open
- * is logged and the call still returns 0, so the device stop runs anyway.
+ * while it has work and lets it rest after I915_WORKER_REST_MS without.
+ * Returns once the node was withdrawn, or the error of a failed publication.
+ * A withdrawal refused because sessions are still open is logged and the
+ * call still returns 0, so the device stop runs anyway.
  */
 int
 drv_i915_worker_serve(
@@ -1301,6 +1302,7 @@ i915_worker_loop(
 	uint64_t observed;
 	uint64_t idle_since;
 	uint64_t deadline;
+	uint64_t now;
 	unsigned long irq;
 	int awake;
 	int ready;
@@ -1352,12 +1354,15 @@ i915_worker_loop(
 				}
 			}
 
-			/* After a rest time without work the worker lets the GT go, so it can drop into RC6. */
+			/* Chooses how long to sleep: a worker that holds the GT sleeps only until its rest time ends. */
 			deadline = sched_ticks() + I915_WORKER_SLEEP_TICKS;
 			awake = drv_i915_device_worker_awake(device);
 			if (awake) {
 				deadline = idle_since + kern_ms_to_ticks(I915_WORKER_REST_MS);
-				if (sched_ticks() >= deadline) {
+
+				/* After a rest time without work the worker lets the GT go, so it can drop into RC6. */
+				now = sched_ticks();
+				if (now >= deadline) {
 					spin_unlock_irqrestore(&device->irq_lock, irq);
 					drv_i915_device_worker_rest(device);
 					irq = spin_lock_irqsave(&device->irq_lock);
@@ -1372,6 +1377,8 @@ i915_worker_loop(
 		/* Work to run wakes the GT first; a stop or a park leaves that to the stop and the park. */
 		if (worker->run_head != NULL || worker->sync_head != NULL) {
 			awake = drv_i915_device_worker_awake(device);
+
+			/* Wakes the GT with the IRQ lock dropped, as the rest does. */
 			if (!awake) {
 				spin_unlock_irqrestore(&device->irq_lock, irq);
 				drv_i915_device_worker_wake(device);

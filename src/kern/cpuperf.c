@@ -449,12 +449,14 @@ kern_cpuperf_init(void)
 		return;
 	}
 
-	/* Prepares the framework's mutex and the readers'. */
+	/* Prepares the framework's mutex. */
 	error = mutex_init(&cpuperf_mutex, LOCK_RANK_DEVICE, "cpuperf");
 	if (error != 0) {
 		kern_logf("cpuperf: lock initialization failed (%d); CPU performance is unavailable\n", error);
 		return;
 	}
+
+	/* Prepares the mutex that serializes the readers' measurements. */
 	error = mutex_init(&cpuperf_fresh_mutex, LOCK_RANK_DEVICE, "cpuperf-fresh");
 	if (error != 0) {
 		kern_logf("cpuperf: lock initialization failed (%d); CPU performance is unavailable\n", error);
@@ -691,7 +693,7 @@ kern_cpuperf_cpu(
 	if (cpu >= cpuperf_cpu_count)
 		return EINVAL;
 
-	/* Has the delivered rates measured again when the caller may wait and this one is old. */
+	/* Measures the delivered rates again for a caller that may wait, when this CPU's rate is old. */
 	provider = cpuperf_ops();
 	reading = false;
 	if ((flags & KERN_CPUPERF_READ_FRESH) != 0U &&
@@ -3536,8 +3538,12 @@ cpuperf_measure_cpu(
 			break;
 	}
 
-	/* Reports the last try. */
-	return error;
+	/* Reports why the last try did not measure. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: a thread stayed on the CPU and read its rate. */
+	return 0;
 }
 
 /*
