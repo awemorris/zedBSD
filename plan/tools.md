@@ -69,6 +69,8 @@ Phase に固有の試験は各 WS の `tests/`、シナリオ試験（AAT）は 
 
 ## 注意
 
+- **firmware の license**（2026-11-13 ユーザーの決定の要点）: 担当は自分の worktree で firmware の license に同意してよい（`yes | make CONFIGMK=<cfg> firmware-licenses`、[userland/firmware/README.md](../userland/firmware/README.md)）。同意の記録は worktree の `build/sources/firmware/<package>/license-accepted` に残る。QEMU だけの試験は firmware を外した一覧でもよい。
+
 注意（2026-10-09 P1 の所見）: BUG-274 の直しで `ps -o args` が command line の全体を出すようになった。guest の試験で `ps -A -o pid,args | grep <語>` で選んで kill する形は、その語が試験自身を走らせる shell の行にも出ると自分を kill する（ws172 の passkey の FAIL の原因）。新しく書く試験は `ps -A -o pid,comm` で選ぶ。既存の約 380 箇所は一斉に直さず、FAIL した時に追従する（試験の整理の基準を当てる）。
 
 - WS105 継続 fixture: `plan/tools/keiland-linux/dbus-wire.c` / `dbus-wire.py`（独立 wire / fd 境界、ordinary + ASan/UBSan）、`seat-fd.c`（guest の DRM master / caller fd 所有権）。[手順](tools/keiland-linux/README.md#logind-の-fd-と-d-bus-wire-の独立-fixture)。
