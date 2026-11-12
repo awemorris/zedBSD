@@ -2,7 +2,7 @@
 
 # ws333-p026: CPU の MHz を読み手の権限によらず新しい値で返す（UAPI の直し）
 
-Status: planned（2026-11-13 Q1。ユーザーの承認の後、BUG-422 と p025 の 5330 の後に着手）
+Status: in-progress（2026-11-13 Q1、q2027-i01 P1）
 Parent: [WS333](../ws.md)
 
 ## 目的
