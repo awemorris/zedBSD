@@ -2,7 +2,7 @@
 
 # ws335-p035: 規約の全文の見直しと header の持ち越しの直し
 
-Status: in-progress（2026-11-02 21:35 P1 q1992-i01。2026-11-02 23:59 ラップアップ: 実装済み。2026-11-12 22:50 P2 q2019-i01: 引き継ぎの 1〜4 を流し全部 PASS、実装済み・試験 PASS。cleared は Q1）
+Status: cleared（2026-11-12 Q1 判定: P2 q2019 で全試験 PASS（posix・win32 の unit 59 本ずつ、ct 19 本と matrix 76、interop host 139・win32 47、limbo 9,792 件、fuzz 11 target）、check-skeleton は許可した header の 18 file だけで FAIL。check-skeleton の BASE を 9e6a72f402 に移す）
 Parent: [WS335](../ws.md)。担当: conformance-reviewer（他に作業が無い時、Q1 が割り当てる）。
 
 - WS335 が足した C の全部（`userland/base/libcrypto-compat/`・`userland/base/libssl-compat/`・`include/libc/compat/crypto/`・`include/libc/compat/ssl/`・`plan/ws335/tests/`）を [coding-style.md](../../coding-style.md) の全文と照らし、書き方だけを直す（動作は変えない）。
@@ -95,3 +95,6 @@ worktree `p2-ws335a`（基点 main 4bdcf82fd6、P1 の p035 の commit は全部
 - p028 の結果から: ServerHello・HelloRetryRequest で、知っていてその message に指定の無い拡張は RFC 8446 4.2 どおり illegal_parameter、送っていない拡張は unsupported_extension に分ける（sslc-msg.c と header の comment）。`sslc_msg_write_client_hello` の EINVAL の一覧も header に足す。
 
 - （2026-11-02 11:50 Q1、p038 から）cryc-chain.h と cryc-chain.c: 知らない critical の拡張を持つ anchor を断る。run-unit.sh の 1 本あたりの timeout を 1200 秒に。
+
+
+- 2026-11-12 Q1: check-skeleton の BASE を 9e6a72f402（p035 の後の main）に移す。以後の照合は `BASE=9e6a72f402 sh plan/ws335/tests/check-skeleton.sh`。
