@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | 待機 | BUG-418: rpi5 の SD の image PASS。rpi4 は boot firmware の同意待ちで止めた | ユーザーの同意の後に rpi4 の image と QEMU |
+| P1 | q2038 | 作業中 | WS333 p024: 規約の全文の見直し（p025〜p029 の C）と power-management.md | rpi4 は同意待ち |
 | P2 | — | 待機 | BUG-418 C を当てた main の確かめ PASS | — |
 | P3 | — | 待機 | WS333 p027・p029 cleared（5330 の idle 4.3 W、PC2 86〜88 %、i915 の GT RC6 99.9 %） | agy の依頼 07 の監査（agy が終われば） |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
