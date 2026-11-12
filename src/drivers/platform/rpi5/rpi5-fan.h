@@ -13,7 +13,7 @@
 #define KERN_DRIVERS_PLATFORM_RPI5_RPI5_FAN_H
 
 /*
- * Starts reading the BCM2712's temperature (listed in sysctl hw.thermal)
+ * Starts reading the BCM2712's temperature (a sensor of the thermal core)
  * and driving the fan connector from it.  drv_rp1_init() must have
  * succeeded, and the scheduler must run threads.  Returns 0, or an errno
  * when neither the temperature nor the fan could be started.

@@ -45,5 +45,5 @@
 | [p019](phase019/phase.md) | sessiond の THERMAL の要求（strategy・boost、root か wheel） | canceled（2026-11-12 ユーザー: /dev/thermal は desktop の group が直に操作、sessiond は認証だけ） | p005（kernel への呼びは p004） |
 | [p020](phase020/phase.md) | Pi 5 の provider（fan の level・rpm、受け手、boost） | planned（実機の割当が要る） | p005、p016 |
 | [p018](phase018/phase.md) | Dell の provider（DDV の fan、BIOS の熱の mode の受け手、SMM の boost の確かめ、WMI の attach の試し直し）と 5330 の熱の試験 | cleared（2026-11-12 Q1 判定: 受け入れは満たした、boost は規則どおり無し） | p005、p017 |
-| [p022](phase022/phase.md) | sysctl の道具と Keiland の monitor を `/dev/thermal` に、`hw.thermal` を外す | planned | p005 後半、p013 |
+| [p022](phase022/phase.md) | sysctl の道具と Keiland の monitor を `/dev/thermal` に、`hw.thermal` を外す | in-progress（2026-11-12 P1・q2016-i01: `hw.thermal` を外し（source の grep 0）、sysctl の道具は温度を出さない（ユーザーの決定）、monitor は `/dev/thermal`。host 試験・build・QEMU amd64 の readers PASS。intelmid64 default は mk の案 D。cleared の判定は Q1） | p005 後半、p013 |
 | [p024](phase024/phase.md) | 規約の全文の見直しと文書（`docs/architecture/power-management.md`） | planned | p005〜p022 |

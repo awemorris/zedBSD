@@ -1146,7 +1146,7 @@ poll_once(
 	unsigned level;
 	int error;
 
-	/* The reading, kept for the sysctl. */
+	/* The reading, pushed to the thermal core. */
 	error = read_temperature(&milli_celsius, &status);
 	record_temperature(error, milli_celsius);
 

@@ -4,7 +4,7 @@
 # the test injection node) on q35 with its PS/2 keyboard, logs in as root on
 # the console, and reads every answer from the screen with the reader of
 # plan/tools/boot-test.py (no serial or console log is read).
-#   plan/ws333/tests/thermal-qemu/run.sh IMAGE OUTPUT [emergency|direct|group]
+#   plan/ws333/tests/thermal-qemu/run.sh IMAGE OUTPUT [emergency|direct|group|readers]
 # Without a mode: the status (balanced, which the boot's "thermal restore"
 # gave with nothing kept), a made-up sensor and receiver, the strategy
 # chosen, kept in /etc/thermal.conf and restored, manual, the CPUs, the power
@@ -21,6 +21,13 @@
 # kept in the file; "bob", added by useradd without the group, reads the
 # strategy but is refused a change (EPERM on the descriptor opened for
 # reading) and leaves the file as it was.
+# "readers" (the image also carries grep, sed and monitor-probe): the
+# readers of the temperatures.  A made-up sensor that follows
+# the processor at 45 degrees shows in "thermal sensors" and in the System
+# Monitor's backend (the image's monitor-probe, its sample cut to the valid
+# bits and the temperature by sed: the temperature's bit 0x100 and
+# cpu_mc=45000); the sysctl name of the old interface is gone (sysctl
+# fails on it, "sysctl -a" still succeeds).
 # The emulator's files go to a new directory under OUTPUT; nothing is removed.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
@@ -77,6 +84,22 @@ elif [ "$mode" = group ]; then
 		'--then-expect=strategy powersave generation=[0-9]+ result=ok'
 		'--then-expect=strategy powersave'
 		'--then-expect=bob-read-done')
+elif [ "$mode" = readers ]; then
+	old=hw.thermal
+	steps=("${login[@]}"
+		"--then-keys=monitor-probe 1 100 | grep SAMPLE | sed 's/.* valid=\\([^ ]*\\) .* cpu_mc=/probe valid=\\1 cpu_mc=/'"
+		'--then-expect=probe valid=0x[0-9a-f]+ cpu_mc=0([^0-9]|$)'
+		'--then-keys=thermal-inject sensor cpu0 zone 1 45000 80000 95000'
+		'--then-expect=thermal-inject: ok'
+		'--then-keys=thermal sensors'
+		'--then-expect=sensor 0 cpu0 kind=zone cpu=yes temperature=45.000 passive=80.000 critical=95.000'
+		"--then-keys=monitor-probe 1 100 | grep SAMPLE | sed 's/.* valid=\\([^ ]*\\) .* cpu_mc=/probe valid=\\1 cpu_mc=/'"
+		'--then-expect=probe valid=0x1[0-9a-f][0-9a-f] cpu_mc=45000([^0-9]|$)'
+		"--then-keys=sysctl $old; echo old-status=\$?"
+		"--then-expect=sysctl: $old: "
+		'--then-expect=old-status=1'
+		'--then-keys=sysctl -a > /dev/null; echo all-status=$?'
+		'--then-expect=all-status=0')
 else
 	steps=("${login[@]}"
 		'--then-keys=thermal'

@@ -9,8 +9,7 @@
  * The thermal core: the copy of every temperature sensor, fan and energy
  * meter the drivers registered, the strategy and the receivers that carry
  * it out, the boost of the fans, the events the readers of /dev/thermal
- * see, the ioctl ranges of that device, and sysctl hw.thermal, which it
- * fills from the copy.
+ * see, and the ioctl ranges of that device.
  *
  * The drivers push their sensors' readings and the core reads the fans and
  * the meters itself.  Three threads do the work that may wait: the
@@ -41,13 +40,11 @@
 #include <kern/lock.h>
 #include <kern/poll.h>
 #include <kern/sched.h>
-#include <kern/sysctl.h>
 #include <kern/thermal.h>
 #include <kern/thermal_private.h>
 #include <kern/thread.h>
 #include <kern/waitq.h>
 #include <uapi/errno.h>
-#include <uapi/sysctl.h>
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -109,10 +106,6 @@
 #define THERMAL_IOCTL_GROUP_SHIFT	8U
 #define THERMAL_IOCTL_BYTE_MASK		0xffUL
 #define THERMAL_IOCTL_NUMBER_MAX	255U
-
-/* The sensors one source of hw.thermal lists; the core lists two sources to cover its table. */
-#define THERMAL_SYSCTL_SOURCE_SENSORS	16U
-#define THERMAL_SYSCTL_SOURCES		(KERN_THERMAL_SENSOR_MAX / THERMAL_SYSCTL_SOURCE_SENSORS)
 
 /* How far the core's tables are prepared: not yet, being prepared by one caller, or ready. */
 #define THERMAL_STATE_NONE		0U
@@ -353,16 +346,6 @@ static uint32_t thermal_passive_permille = KERN_THERMAL_LIMIT_NONE;
 /* When the poll thread last moved the passive ceiling; only the poll thread reads and writes it. */
 static uint64_t thermal_passive_tick;
 
-/*
- * The first sensor each source of hw.thermal lists; the address of an
- * entry is the source's context, which the sysctl tells apart.  Never
- * written.
- */
-static unsigned thermal_sysctl_firsts[THERMAL_SYSCTL_SOURCES] = {
-	0U,
-	THERMAL_SYSCTL_SOURCE_SENSORS,
-};
-
 /* Set once kern_thermal_init() has started the threads; only the boot path reads and writes it. */
 static bool thermal_started;
 
@@ -401,22 +384,17 @@ static bool thermal_critical_armed(const struct kern_thermal_sensor *sensor);
 static void thermal_event_name(uint32_t type, uint32_t index, char *name);
 static int32_t thermal_level(int32_t millicelsius);
 static void thermal_ring_append(struct kern_thermal_reader *reader, const struct kern_thermal_record *record);
-static int thermal_sysctl_copy(void *context, struct thermal_entry *entries, unsigned capacity, unsigned *count);
 
 /*
  * Brings the thermal core up.
  *
- * Lists the copy's two halves in hw.thermal and starts the three
- * threads.  Registrations made before it are kept: the strategy thread
+ * Starts the three threads.  Registrations made before it are kept: the strategy thread
  * serves a strategy chosen later to every receiver, and the poll thread
  * reads every fan and meter in the table.  Called once from the boot path.
  */
 void
 kern_thermal_init(void)
 {
-	unsigned source;
-	int error;
-
 	/* Prepares the tables, unless a driver's registration already did. */
 	thermal_prepare();
 
@@ -424,13 +402,6 @@ kern_thermal_init(void)
 	if (thermal_started)
 		return;
 	thermal_started = true;
-
-	/* Lists the sensors' copy in hw.thermal, sixteen to a source. */
-	for (source = 0; source < THERMAL_SYSCTL_SOURCES; source++) {
-		error = kern_thermal_register(thermal_sysctl_copy, &thermal_sysctl_firsts[source]);
-		if (error != 0)
-			kern_logf("thermal: hw.thermal does not list sensors from %u (%d)\n", thermal_sysctl_firsts[source], error);
-	}
 
 	/* Starts the thread that calls the receivers and the fans' boost. */
 	thermal_start_thread(thermal_work_main, SCHED_PRIORITY_DEFAULT, "strategy");
@@ -2819,76 +2790,4 @@ thermal_ring_append(
 	slot = (reader->head + reader->count) % KERN_THERMAL_READER_RING;
 	reader->ring[slot] = *record;
 	reader->count++;
-}
-
-/*
- * Copies one half of the sensors' copy for hw.thermal (kern_thermal_read_t):
- * the context is the first sensor of the half.
- */
-static int
-thermal_sysctl_copy(
-	void *context,
-	struct thermal_entry *entries,
-	unsigned capacity,
-	unsigned *count)
-{
-	const struct kern_thermal_sensor *sensor;
-	struct thermal_entry *entry;
-	const unsigned *first;
-	unsigned long irq;
-	unsigned sensors;
-	unsigned filled;
-	unsigned index;
-
-	/* The half the context names, as far as the table and the room go. */
-	first = context;
-	sensors = atomic_load_acquire(&thermal_sensor_count);
-	filled = 0;
-
-	/* Turns each sensor of the half into an entry. */
-	irq = spin_lock_irqsave(&thermal_lock);
-
-	for (index = *first;
-	     index < sensors &&
-	     filled < capacity &&
-	     filled < THERMAL_SYSCTL_SOURCE_SENSORS;
-	     index++) {
-		sensor = &thermal_sensors[index];
-		entry = &entries[filled];
-		kern_memset(entry, 0, sizeof(*entry));
-		kern_memcpy(entry->name, sensor->name, sizeof(entry->name));
-		entry->name[sizeof(entry->name) - 1U] = '\0';
-
-		/* The kind and the processor's flag, in hw.thermal's values. */
-		entry->kind = THERMAL_KIND_DEVICE;
-		if (sensor->kind == KERN_THERMAL_KIND_ZONE)
-			entry->kind = THERMAL_KIND_ZONE;
-		if ((sensor->flags & KERN_THERMAL_SENSOR_CPU) != 0U)
-			entry->flags |= THERMAL_FLAG_CPU;
-
-		/* The temperature, with when it was taken, while the latest reading is valid. */
-		if (sensor->valid) {
-			entry->valid |= THERMAL_HAVE_TEMPERATURE;
-			entry->milli_celsius = sensor->millicelsius;
-			entry->time_ns = thermal_now_ns(sensor->taken_tick);
-		}
-
-		/* The levels the sensor has. */
-		if (sensor->passive != 0) {
-			entry->valid |= THERMAL_HAVE_PASSIVE;
-			entry->passive_milli_celsius = sensor->passive;
-		}
-		if (sensor->critical != 0) {
-			entry->valid |= THERMAL_HAVE_CRITICAL;
-			entry->critical_milli_celsius = sensor->critical;
-		}
-
-		filled++;
-	}
-
-	spin_unlock_irqrestore(&thermal_lock, irq);
-
-	/* Succeeded: how many entries were filled. */
-	*count = filled;
-	return 0;
 }

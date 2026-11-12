@@ -29,7 +29,6 @@
 static int show_cputimes(void);
 static int show_diskstats(void);
 static int show_gputelemetry(void);
-static int show_thermal(void);
 static int show_tcpstats(void);
 static void format_tcp_address(char *text, size_t size, uint32_t family, const uint8_t *address, uint16_t port);
 static int fetch_value(const char *name, unsigned char **buffer, size_t *length);
@@ -96,7 +95,6 @@ show_all(
 	    "hw.cputimes",
 	    "hw.diskstats",
 	    "hw.gputelemetry",
-	    "hw.thermal",
 	    "net.tcpstats",
 	    "net.tcp.congestion",
 	    "kern.boot.firmware_partition",
@@ -221,10 +219,6 @@ show_name(
 	/* Each GPU's work as its driver keeps it, a line a GPU. */
 	if (strcmp(name, "hw.gputelemetry") == 0)
 		return show_gputelemetry();
-
-	/* Each temperature sensor, a line a sensor. */
-	if (strcmp(name, "hw.thermal") == 0)
-		return show_thermal();
 
 	/* Each TCP socket's state and counts, a line a socket. */
 	if (strcmp(name, "net.tcpstats") == 0)
@@ -742,79 +736,6 @@ show_gputelemetry(
 	free(buffer);
 
 	/* Succeeded: every GPU is printed. */
-	return 0;
-}
-
-/*
- * Prints hw.thermal: the sensors, then a line a sensor with
- * its ACPI path, its kind, whether it is the processor's, and the values it
- * has (in thousandths of a degree Celsius) with the time it was read.
- * Returns 0, or -1 with errno set.
- */
-static int
-show_thermal(
-	void)
-{
-	const struct thermal_header *header;
-	const struct thermal_entry *entry;
-	unsigned char *buffer;
-	const char *kind;
-	size_t length;
-	uint32_t sensor;
-	int status;
-	int valid;
-
-	/* The value, whole. */
-	status = fetch_value("hw.thermal", &buffer, &length);
-	if (status != 0)
-		return -1;
-
-	/* A value of a layout this command does not know. */
-	header = (const struct thermal_header *)(void *)buffer;
-	valid = 1;
-	if (length < sizeof(*header)) {
-		valid = 0;
-	} else if (header->version != THERMAL_VERSION) {
-		valid = 0;
-	} else if (header->struct_size != sizeof(*header)) {
-		valid = 0;
-	} else if (header->element_size != sizeof(*entry)) {
-		valid = 0;
-	} else if (header->struct_size + (size_t)header->count * header->element_size != length) {
-		valid = 0;
-	}
-
-	/* Refuses what it cannot read. */
-	if (!valid) {
-		free(buffer);
-		errno = EINVAL;
-		return -1;
-	}
-
-	/* The sensors. */
-	printf("hw.thermal: sensors=%u\n", header->count);
-
-	/* A line a sensor, with the values it has. */
-	for (sensor = 0; sensor < header->count; sensor++) {
-		entry = (const struct thermal_entry *)(void *)(buffer + header->struct_size + (size_t)sensor * header->element_size);
-		kind = "device";
-		if (entry->kind == THERMAL_KIND_ZONE)
-			kind = "zone";
-		printf("hw.thermal: sensor=%u name=%.32s kind=%s cpu=%u", sensor, entry->name, kind,
-		       (entry->flags & THERMAL_FLAG_CPU) != 0U);
-		if ((entry->valid & THERMAL_HAVE_TEMPERATURE) != 0U)
-			printf(" temperature_mc=%d time_ns=%llu", entry->milli_celsius, (unsigned long long)entry->time_ns);
-		if ((entry->valid & THERMAL_HAVE_PASSIVE) != 0U)
-			printf(" passive_mc=%d", entry->passive_milli_celsius);
-		if ((entry->valid & THERMAL_HAVE_CRITICAL) != 0U)
-			printf(" critical_mc=%d", entry->critical_milli_celsius);
-		printf("\n");
-	}
-
-	/* The value is not needed any more. */
-	free(buffer);
-
-	/* Succeeded: every sensor is printed. */
 	return 0;
 }
 

@@ -7,7 +7,7 @@
 # The variants are "default" (the platform's defaults.mk), "thermal"
 # (CONFIG_KERN_THERMAL=y, and on x86 CONFIG_DRIVER_X86_POWER_CONTROL=y),
 # "nothermal" (CONFIG_KERN_THERMAL=n, on the platforms whose defaults have
-# it on) and, on x86_64, "inject" (the thermal build with
+# it on, with the drivers that depend on it off) and, on x86_64, "inject" (the thermal build with
 # CONFIG_THERMAL_TEST_INJECT=y).
 # Each platform builds in its own build/<platform> one variant after another
 # (the objects follow their flags), its sysroot first; each make has a
@@ -64,6 +64,7 @@ printf '%s\n' "$all" | grep . | while IFS=: read -r plat config; do
 			;;
 		nothermal)
 			flags="CONFIG_KERN_THERMAL=n"
+			test "$plat" = rpi5 && flags="$flags CONFIG_DRIVER_RPI5_FAN=n"
 			;;
 		esac
 		test "$v" = inject && flags="$flags CONFIG_THERMAL_TEST_INJECT=y"
