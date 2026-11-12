@@ -2,7 +2,7 @@
 
 # ws335-p035: 規約の全文の見直しと header の持ち越しの直し
 
-Status: in-progress（2026-11-02 21:35 P1 q1992-i01。2026-11-02 23:59 ラップアップ: 実装済み、残りは下の「引き継ぎ」）
+Status: in-progress（2026-11-02 21:35 P1 q1992-i01。2026-11-02 23:59 ラップアップ: 実装済み。2026-11-12 22:50 P2 q2019-i01: 引き継ぎの 1〜4 を流し全部 PASS、実装済み・試験 PASS。cleared は Q1）
 Parent: [WS335](../ws.md)。担当: conformance-reviewer（他に作業が無い時、Q1 が割り当てる）。
 
 - WS335 が足した C の全部（`userland/base/libcrypto-compat/`・`userland/base/libssl-compat/`・`include/libc/compat/crypto/`・`include/libc/compat/ssl/`・`plan/ws335/tests/`）を [coding-style.md](../../coding-style.md) の全文と照らし、書き方だけを直す（動作は変えない）。
@@ -61,6 +61,28 @@ p036 への申し送り:
 - 試験の小さな気付き（直していない）: test-api-passkey.c の `check_hkdf` の `memset(out, 0, sizeof(other))`（害は無い）、test-api-pkey.c の `test_ed25519_states` の使われない `length`、test-sha3.c の連鎖の試験の読まれない `expected`、win-store.c の `walk_registry` が Disallowed の key を開けない時 0 を返す事。
 - test-keysched.c と test-util.c の乱数の引数の評価の順が左から右に決まった（前は compiler 次第）。check の数は同じ。
 - 削除を頼む path（Q1）: `build/tmp/p035-base/`・`build/tmp/p035-reg/`・`build/tmp/p035-*`（scratch）・`build/tmp/style-*`（helper の作業場所）。
+
+## 結果（2026-11-12 P2、q2019-i01）
+
+worktree `p2-ws335a`（基点 main 4bdcf82fd6、P1 の p035 の commit は全部入っている）。source の変更は無し（直す物が無かった）。試験の data は共有の `build/sources/tls-vectors` が無くなっていたので、`sh plan/ws335/tests/fetch.sh specs`・`fetch.sh vectors` で worktree の `build/ws335-specs`・`build/ws335-vectors` に取り直した（両方 `fetch: PASS`、digest は script の表のとおり）。`check-skeleton.sh` の zedBSD の clang のために `make CONFIGMK=build/p035/config.mk llvm-toolchain-cached`（`PLATFORM := x86_64` だけの config）で `build/llvm` を入れた。試験の script は新しい build system の前提に触れない（host の cc・clang・llvm-mingw・Wine と `build/llvm/bin/clang` だけを使う）ので直していない。
+
+| 試験（command） | 結果 |
+| --- | --- |
+| `sh plan/ws335/tests/run-unit.sh all`（posix） | `run-unit: PASS`、59 本（test 40・ct 19）。件数は P1 の記録と同じ（test-msg 936799、test-name 255575、test-sigver 492861、test-api-x509 507799、test-buf 1559755、test-conn 164467、test-aes 28516、test-api-evp 190769、test-api-pkey 40701、test-api-passkey 24754） |
+| `sh plan/ws335/tests/run-unit.sh --win32 all`（Wine 10.0） | `run-unit: PASS`、59 本。posix と違う件数は Windows の分岐のある test-api-ssl 5785（posix 5342）・test-api-x509 507796・test-err 4587・test-os 1455 だけ（前の Phase の win32 の件数と同じ形） |
+| `sh plan/ws335/tests/run-ct.sh all` | `run-ct: PASS`、19 本 |
+| `sh plan/ws335/tests/run-ct-matrix.sh all`（cc・clang × -O2・-O3） | `run-ct-matrix: PASS (76 builds)`（19 × 4、FAIL 0） |
+| `BASE=b8c4adaf6c sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: FAIL`。FAILED は「headers or test tools changed since b8c4adaf6c」の 1 つだけで、18 file は上の「header の変更」の一覧と同じ（err.h・evp.h・rand.h・ssl.h・run-unit.sh・cryc-api.h・cryc-chain.h・cryc-err.h・cryc-gcm.h・cryc-hash.h・cryc-mlkem.h・cryc-os.h・cryc-sigver.h・cryc-x509.h・sslc-api.h・sslc-msg.h・sslc-record.h・sslc-tls.h）。他の検査（cc・clang の単独の compile、zedBSD の clang の x86_64・aarch64、llvm-mingw の x86_64・aarch64 と static link、層、名前空間）は FAILED の行が無い。BASE を移すのは Q1 |
+| `sh plan/ws335/tests/run-interop.sh`（host） | `run-interop: PASS (139 cases, 0 of them known limits)` |
+| `sh plan/ws335/tests/run-interop.sh --win32` | `run-interop: PASS (47 cases, 0 of them known limits)`（tls-client.exe と win-store.exe は x86_64・aarch64 で warning 無しに build、cert.pem と Disallowed の case を含む） |
+| `sh plan/ws335/tests/run-limbo.sh` | `run-limbo: PASS`。9,792 件のうち一致 9,733・理由つきの違い 59・理由の無い違い 0、limbo-api 294559 checks（P1 の記録と同じ） |
+| `FUZZ_SECONDS=300 sh plan/ws335/tests/run-fuzz.sh` | `run-fuzz: PASS`、11 target 全部 crash 0（例 conn 30717 runs、record 193026 runs、x509 24745909 runs）。11 target を並べて流した（Q1 の 4 thread の上限の指示の前に終わった） |
+
+- 持ち越し（Q1）の 2 点（cryc-hash.h の HKDF・HMAC の init の EINVAL の comment、cryc-chain の知らない critical の拡張を持つ anchor の拒否）は P1 の commit で main に入っていた。header の文と `cryc-chain.c` の分岐を読んで確かめ、試験は上の test-chain・test-hash・limbo の PASS。
+- Wine の prefix の持ち越し（p002）: この host（Wine 10.0、Debian 10.0~repack-6）で新しい prefix `build/tmp/ws335-wine` を `run-unit.sh --win32` が `wineboot -i` で作り、約 1 分で `.ws335-ready` が付いた（kernel32.dll の止まりは再現しない、P1 の所見と同じ）。script は直していない。再現した時の手当て（出来た prefix を写す手順）は、再現の後に決める。
+- 未実施: zedBSD の `libcrypto-compat.so`・`libssl-compat.so` の build と check-exports（新しい build system の target、sysroot が要る。今回の引き継ぎの範囲の外。zedBSD の header に対する compile は check-skeleton の zedBSD の clang の段で PASS）。QEMU の guest の interop。
+- cleared の材料: 受け入れの「style-check の違反 0」は P1 の 28 件（規約が許す物だけ）、run-unit all（posix・win32）・run-ct all・run-ct-matrix・interop（host・Wine）・limbo・fuzz が PASS で件数は前と同じ、check-skeleton は許可済みの header の差だけ。p035 は cleared にできると考える（判定は Q1）。
+- 試験の道具への案（直していない、check-skeleton の BASE の範囲の file なので Q1 に送る）: `run-fuzz.sh` は名を挙げた target を全部同時に流す。host の 4 thread の上限に合わせるなら、`FUZZ_JOBS`（既定 4）ずつ流す形にする。
 
 ## 持ち越し（Q1）
 
