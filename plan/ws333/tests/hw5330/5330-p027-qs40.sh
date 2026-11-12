@@ -6,14 +6,14 @@
 #   sh plan/ws333/tests/hw5330/5330-p027-qs40.sh IMG VMUNIX NAME [COPIES...]
 # IMG is a disk image of config-5330-qs40.mk; VMUNIX the kernel put on p4 after the image (the image's own when the
 # same).  COPIES defaults to "600 600".  The 5330 must be on Debian.
-#  1. The NVMe's zedBSD as it is now is kept once in ~/ws245/p027-nvme on Debian (p4's files, p5 and p6 whole with
+#  1. The NVMe's zedBSD as it is now is kept in ~/ws245/p027-nvme-NAME on Debian (p4's files, p5 and p6 whole with
 #     gzip, the ESP loader) with its sums (p4's files by cksum, p5 and p6 by sha256, the loader by cksum); a second
 #     run finds the copy and checks that the NVMe still matches it.  p4's vmunix and zedbsd.cfg must be the WS333 ones
 #     kept by 5330-p027.sh (~/ws245/*-p027-orig).
 #  2. The image to the NVMe (5330-nvme-write.sh image), VMUNIX on p4, watchdog=WATCHDOG (default 600) added to its
 #     zedbsd.cfg, zedBSD started once (UEFI BootNext): a zedBSD that stops is reset back to Debian.
 #  3. 5330-mview.sh run LOGS/run COPIES (mview in the session, 12 s each, direct scanout, hw.gputelemetry samples).
-#  4. Debian again; p4, p5, p6 and the loader written back from ~/ws245/p027-nvme and their sums compared with the
+#  4. Debian again; p4, p5, p6 and the loader written back from ~/ws245/p027-nvme-NAME and their sums compared with the
 #     kept ones; p4's vmunix and zedbsd.cfg from the p027 copies, their sha256 checked.
 # Nothing is removed on either machine.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -64,7 +64,7 @@ say "$NAME start $(date '+%F %T') on $(TO=15 lin 'uname -sr')"
 DH=$(TO=15 lin 'echo $HOME')
 TO=15 lin "test -f ws245/vmunix-p027-orig && test -f ws245/zedbsd.cfg-p027-orig" ||
 	{ say "FAIL: the p027 copies of p4 are missing"; exit 1; }
-BK=$DH/ws245/p027-nvme
+BK=$DH/ws245/p027-nvme-$NAME
 # The sums of the NVMe zedBSD as it is now, into LOGS/FILE.
 sums() {
 	TO=1800 locked timeout 1800 ssh -n -o BatchMode=yes "$HOST" "sudo -n sh -c 'mkdir -p /mnt/zb && { while mountpoint -q /mnt/zb; do umount /mnt/zb; done; } && mount -o ro $NV_BOOT /mnt/zb && (cd /mnt/zb && find . -type f | sort | xargs cksum); umount /mnt/zb; cksum /boot/efi/EFI/zedbsd/BOOTX64.EFI; for p in $NV_ROOT $NV_SWAP; do echo \$(sha256sum < \$p | cut -c1-16) \$(readlink -f \$p); done'" > "$LOGS/$1" 2>&1
@@ -103,6 +103,11 @@ sed 's/^/run: /' "$LOGS/run/summary.txt" 2> /dev/null | tee -a "$SUMMARY" > /dev
 T=60 timeout 60 ssh -i plan/tmp/guest/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@10.0.30.3 \
 	'uname -v; dmesg | grep -E "watchdog: armed|gt pm:|DC_STATE|rps: (started|fixed)"' > "$LOGS/zedbsd.txt" 2>&1 < /dev/null
 say "zedBSD: $(tr '\n' ';' < "$LOGS/zedbsd.txt")"
+for what in dmesg 'cat /run/user/1000/session.log'; do
+	T=60 timeout 60 ssh -i plan/tmp/guest/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@10.0.30.3 \
+		"$what" > "$LOGS/after-$(echo "$what" | tr -c 'a-z\n' '_' | cut -c1-12).txt" 2>&1 < /dev/null
+done
+say "kernel: $(grep -h -i -E 'forcewake domain asleep|did not wake|hang|reset|fault|lost|i915.*fail' "$LOGS"/after-dmesg*.txt | head -8 | tr '\n' ';')"
 
 # 4. Debian, the backup back, p4 as WS333 had it.
 timeout 600 sh "$MV" linux > "$LOGS/linux.txt" 2>&1
