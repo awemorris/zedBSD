@@ -22,6 +22,7 @@ struct thread {
 	void (*entry)(void *);
 	void *argument;
 	unsigned bound_cpu;
+	enum sched_cpu_affinity affinity;
 	int started;
 };
 

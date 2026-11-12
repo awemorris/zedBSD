@@ -73,6 +73,8 @@ static unsigned test_move_starts;
 static unsigned test_move_on_call;
 static bool test_in_measure;
 static unsigned test_measure_starts;
+/* Measuring threads started without being bound to their CPU. */
+static unsigned test_unbound_starts;
 static int test_steps;
 
 /* The governor's thread, which the test runs one pass at a time. */
@@ -292,9 +294,10 @@ thread_abort_new(struct thread *thread)
 }
 
 int
-sched_set_cpu(struct thread *thread, kern_cpu_id_t cpu)
+sched_set_cpu(struct thread *thread, kern_cpu_id_t cpu, enum sched_cpu_affinity affinity)
 {
 	thread->bound_cpu = cpu;
+	thread->affinity = affinity;
 	return 0;
 }
 
@@ -315,6 +318,8 @@ thread_start(struct thread *thread)
 	saved = test_current;
 	test_current = thread->bound_cpu;
 	test_measure_starts++;
+	if (thread->affinity != SCHED_CPU_BOUND)
+		test_unbound_starts++;
 	if (test_move_starts != 0U) {
 		test_move_starts--;
 		test_current = (thread->bound_cpu + 1U) % test_cpu_count;
@@ -1108,10 +1113,11 @@ scenario_ioctl(void)
 }
 
 /*
- * The measurement of the highest rates when the scheduler moves the
- * measuring thread: a thread that starts on another CPU, or moves during
- * its busy time, is replaced; one that never stays leaves the rate
- * unknown and the strategy in force.
+ * The measurement of the highest rates when a measuring thread runs on
+ * another CPU despite being bound to its own: a thread that starts on
+ * another CPU, or moves during its busy time, is replaced; one that never
+ * stays leaves the rate unknown and the strategy in force.  Every
+ * measuring thread is bound to its CPU before it starts.
  */
 static void
 scenario_measure_moved(void)
@@ -1126,6 +1132,7 @@ scenario_measure_moved(void)
 	CHECK(test_strategy(KERN_THERMAL_STRATEGY_BALANCED, 0, 0, &flags) == 0);
 	CHECK(test_move_starts == 0U);
 	CHECK(test_measure_starts == 4U);
+	CHECK(test_unbound_starts == 0U);
 	CHECK(test_wrong_cpu == 0U);
 	CHECK(kern_cpuperf_cpu(0, 0, &info) == 0);
 	CHECK(info.highest_mhz == 4388U);

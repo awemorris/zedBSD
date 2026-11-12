@@ -3341,10 +3341,11 @@ cpuperf_measure_domain(
  * Measures one CPU's delivered rate, with a new thread each time the last
  * one did not run on the CPU throughout.
  *
- * The thread is placed on the CPU before it first runs, but the scheduler
- * does not keep it there: an idle CPU takes a thread that has waited on
- * another CPU's queue since an earlier tick.  A thread that finds itself
- * elsewhere, before its busy time or after it, reports EAGAIN.
+ * The thread is bound to the CPU before it first runs, so no idle CPU
+ * takes it from that CPU's queue.  It still checks where it runs, before
+ * its busy time and after it, and reports EAGAIN when it finds itself
+ * elsewhere: a rate read from another CPU is never kept, and a later
+ * thread gets another try.
  *
  * Thread context; waits a bounded time.  Reports 0 or an errno.
  */
@@ -3371,7 +3372,7 @@ cpuperf_measure_cpu(
 }
 
 /*
- * Measures one CPU's delivered rate in a thread placed on that CPU, which
+ * Measures one CPU's delivered rate in a thread bound to that CPU, which
  * marks the start, runs busy and reads the rate.
  *
  * Thread context; waits a bounded time.  Reports 0, EAGAIN when the
@@ -3403,15 +3404,15 @@ cpuperf_measure_once(
 	measure->done = false;
 	measure->abandoned = false;
 
-	/* Creates the thread and places it on the CPU before it first runs. */
+	/* Creates the thread and binds it to the CPU before it first runs. */
 	error = kthread_create(cpuperf_measure_main, measure, SCHED_PRIORITY_DEFAULT, &thread);
 	if (error != 0) {
 		kern_free(measure);
 		return error;
 	}
 
-	/* Places the new thread on the CPU. */
-	error = sched_set_cpu(thread, cpu);
+	/* Binds the new thread to the CPU, where it stays until it ends. */
+	error = sched_set_cpu(thread, cpu, SCHED_CPU_BOUND);
 	if (error != 0) {
 		(void)thread_abort_new(thread);
 		kern_free(measure);
