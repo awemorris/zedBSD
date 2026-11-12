@@ -1,12 +1,20 @@
 /*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
  * The layout check of the proposed include/uapi/thermal.h: it compiles the
  * header with its _Static_asserts on the host (-m64 and -m32), next to the
  * kernel's headers whose values the device copies out, and checks that the
- * shared values agree.
+ * shared values agree.  (include/kern/thermal_private.h needs the kernel's
+ * lock headers and is compared by hand.)
  *   cc -m64 -std=c11 -Wall -Wextra -Werror -DKERN_UAPI_NATIVE \
  *      -Iplan/ws333/proposed/include -Iinclude plan/ws333/phase004/layout-test.c
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  */
+
 #include <stdio.h>
 #include <uapi/thermal.h>
 #include <kern/thermal.h>
@@ -34,6 +42,7 @@ _Static_assert(KERN_THERMAL_CPU_CORE_PERFORMANCE == KERN_CPUPERF_CORE_PERFORMANC
 _Static_assert(KERN_THERMAL_CPU_CORE_EFFICIENCY == KERN_CPUPERF_CORE_EFFICIENCY, "core");
 _Static_assert(KERN_THERMAL_CPU_IDLE_STATE_MAX == KERN_CPUPERF_IDLE_STATE_MAX, "idle");
 _Static_assert(KERN_THERMAL_UNKNOWN == KERN_CPUPERF_UNKNOWN, "unknown");
+_Static_assert(KERN_THERMAL_CPU_MAX == KERN_CPU_MAX, "cpu max");
 _Static_assert(sizeof(((struct thermal_cpu_domain *)0)->cpus) / 8U == KERN_CPU_MASK_WORDS, "cpu mask");
 _Static_assert(sizeof(((struct thermal_cpu_domain *)0)->steps) / 4U == KERN_CPUPERF_STEP_MAX, "steps");
 

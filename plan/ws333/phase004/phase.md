@@ -2,7 +2,7 @@
 
 # ws333-p004: `/dev/thermal` の UAPI の全文の案（ユーザーの review）
 
-Status: in-progress（2026-11-12 P1、q2012-i01: 案を書いた。ユーザーの review 待ち）
+Status: in-progress（2026-11-12 P1、q2012-i01: 案の第 2 版と design-reviewer の反映まで。ユーザーの review 待ち）
 Parent: [WS333](../ws.md)
 Queue: q2012-i01（P1）
 
@@ -27,3 +27,15 @@ design.md §4.10・§9 の p004: `include/uapi/thermal.h` の全文（ioctl の�
 - 案の header: [../proposed/include/uapi/thermal.h](../proposed/include/uapi/thermal.h)
 - 案の説明と `/sbin/thermal` の使い方: [uapi-proposal.md](uapi-proposal.md)
 - review: [uapi-review.md](uapi-review.md)
+
+## 進み（2026-11-12 P1）
+
+- 第 1 版（4b7f85a9d6）→ design-reviewer 1 回（blocker 0・major 7・minor 15、[uapi-review.md](uapi-review.md)）→ 第 2 版（m1 を除き全部反映、m1 は reviewer の読み違いと確かめた）。
+- layout: `gcc`・`clang` の -m64・-m32 で [layout-test.c](layout-test.c) PASS（status 80・sensor 96・fan 96・meter 80・strategy 48・receiver 64・event 128・cpu 128・domain 248・idle 128 byte、両方で同じ）。zedBSD の clang（`build/llvm/bin/clang`）の `-Wpadded -Werror` で armv7・riscv32・m68k・powerpc・mips・sparcv9・i386 の target が rc 0。
+- ユーザーに見てほしい点は [uapi-proposal.md](uapi-proposal.md) §7（ioctl と struct、`/sbin/thermal` の命令、電力の読みを誰に許すかの問い）。
+
+## 他の Phase への持ち越し（案が了承されたら）
+
+- p005 後半: `include/uapi/thermal.h` を置き、kernel の header が include して二重の定義を外す。proposal §6 の「kernel の側に足す事」。試験の注入の switch（`CONFIG_THERMAL_TEST_INJECT`）の mk の案。
+- p019: sessiond の strategy の要求は `/sbin/thermal strategy …` を実行する（保存の書き手を 1 つに）。
+- p013: CPU の ioctl（32〜38）と `/sbin/thermal` の CPU・電力・idle・保存と restore。

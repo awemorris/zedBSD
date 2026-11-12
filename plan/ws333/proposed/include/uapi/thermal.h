@@ -29,7 +29,22 @@
  *
  * Every structure has the same size and layout on ILP32 and LP64.  Fields
  * named reserved are written as zero by the caller and by the kernel; a SET
- * with a nonzero reserved field is refused with EINVAL.
+ * with a nonzero reserved field is refused with EINVAL.  Fields marked out
+ * are ignored on the way in.
+ *
+ * The rules every request follows:
+ *  - The kernel matches the whole request number (direction, size, group
+ *    and number); any other value is refused with ENOTTY, so a structure
+ *    that grows later gets a new number and an old program keeps working.
+ *  - A request that fails copies nothing out.  The few outcomes a caller
+ *    needs back are answered with 0 and a flag instead of an errno.
+ *  - An index (in) past the last one is refused with ENOENT; the counts are
+ *    in struct thermal_status, and every GET_* answers its count as well.
+ *  - /dev/thermal answers numbers 1..63 only; /dev/thermal-inject has its
+ *    own entry and answers 64.. only.
+ *  - Anyone may read the temperatures, fans, energy meters and CPUs, but a
+ *    request that wakes a CPU (KERN_THERMAL_CPU_READ_SAMPLE, GET_CPU_IDLE)
+ *    is the superuser's: it disturbs the very idle state it measures.
  */
 
 #ifndef KERN_UAPI_THERMAL_H
@@ -45,16 +60,15 @@ extern "C" {
 
 #define KERN_THERMAL_IOC_GROUP		'T'
 
-/* The device numbers of the two nodes. */
-#define KERN_THERMAL_DEVICE_NUMBER		0x00010008U
-#define KERN_THERMAL_INJECT_DEVICE_NUMBER	0x00010009U
-
 /* The lengths of the names, with the terminating NUL. */
 #define KERN_THERMAL_NAME_MAX			32U
 #define KERN_THERMAL_RECEIVER_NAME_MAX		16U
 #define KERN_THERMAL_FIRMWARE_NAME_MAX		16U
 
-/* The index that asks for every fan or every CPU domain at once. */
+/* The CPUs the CPU requests can name: struct thermal_cpu_domain's cpus holds this many bits. */
+#define KERN_THERMAL_CPU_MAX			512U
+
+/* The index that asks for every fan or every CPU domain at once, or an event about no one thing. */
 #define KERN_THERMAL_ALL			0xffffffffU
 
 /* A value the kernel does not know (a relative performance, an anchor). */
@@ -62,6 +76,9 @@ extern "C" {
 
 /* The records each open keeps before the oldest go. */
 #define KERN_THERMAL_EVENT_QUEUE		64U
+
+/* The opens that may subscribe at once; one more is refused with ENOSPC. */
+#define KERN_THERMAL_READER_MAX			16U
 
 /*
  * The strategies.  FIRMWARE is the state from boot until a strategy is
@@ -98,13 +115,14 @@ extern "C" {
 #define KERN_THERMAL_READING_PASSIVE		0x2U	/* the passive level is known */
 #define KERN_THERMAL_READING_CRITICAL		0x4U	/* the critical level is known */
 #define KERN_THERMAL_READING_STALE		0x8U	/* no reading came for 30 s */
+#define KERN_THERMAL_READING_ARMED		0x10U	/* the critical level passed the kernel's checks and stops the machine */
 
 /* What a fan has and how its last reading went (struct thermal_fan_info's flags). */
 #define KERN_THERMAL_FAN_HAS_RPM		0x1U	/* its speed can be read */
 #define KERN_THERMAL_FAN_HAS_LEVEL		0x2U	/* its automatic control has levels */
 #define KERN_THERMAL_FAN_KNOWN			0x10U	/* it has been read once */
 #define KERN_THERMAL_FAN_STALE			0x20U	/* the last read failed */
-#define KERN_THERMAL_FAN_STALLED		0x40U	/* it should turn and has not for 15 s */
+#define KERN_THERMAL_FAN_STALLED		0x40U	/* it should turn and has not in 3 readings (15 s) */
 #define KERN_THERMAL_FAN_CAN_BOOST		0x80U	/* SET_BOOST can raise it */
 
 /* The kinds of energy meter. */
@@ -123,26 +141,25 @@ extern "C" {
 
 /* The states of a thermal emergency (struct thermal_status's emergency). */
 #define KERN_THERMAL_EMERGENCY_NONE		0U
-#define KERN_THERMAL_EMERGENCY_SIGNALED		1U	/* init was sent SIGUSR2 and has not answered */
+#define KERN_THERMAL_EMERGENCY_SIGNALED		1U	/* it began; init is or is being told and has not answered */
 #define KERN_THERMAL_EMERGENCY_INIT		2U	/* init acknowledged and stops the machine */
 #define KERN_THERMAL_EMERGENCY_CUTTING		3U	/* the kernel cuts the power itself */
 #define KERN_THERMAL_EMERGENCY_HALTED		4U	/* the power stayed on; the machine halted */
 
-/* What the machine's thermal state says besides the counts (struct thermal_status's flags). */
-#define KERN_THERMAL_STATUS_EMERGENCY_OFF	0x1U	/* the emergency stop was turned off at boot */
-
 /*
  * The types of event; a subscription's mask has bit (1 << type) for each
- * type it takes.
+ * type it takes.  OVERFLOW comes whether or not it is in the mask; after it
+ * the reader asks for the present state again with the GET_* requests.
  */
-#define KERN_THERMAL_EVENT_STRATEGY		1U	/* a strategy's outcome; index: none, value: its flags */
+#define KERN_THERMAL_EVENT_STRATEGY		1U	/* the receivers answered; index: the strategy, value: its generation */
 #define KERN_THERMAL_EVENT_BOOST		2U	/* a boost took effect; index: fan, value: level */
 #define KERN_THERMAL_EVENT_PASSIVE		3U	/* index: sensor, value: 1 reached, 0 left 3 °C below */
 #define KERN_THERMAL_EVENT_CRITICAL		4U	/* index: sensor, value: 1 reached, 0 left 3 °C below */
-#define KERN_THERMAL_EVENT_EMERGENCY		5U	/* index: sensor, value: KERN_THERMAL_EMERGENCY_* */
-#define KERN_THERMAL_EVENT_FAN_STALLED		6U	/* index: fan, value: 1 stalled, 0 turns again */
-#define KERN_THERMAL_EVENT_CPU			7U	/* index: none, value: the CPUs' new generation */
-#define KERN_THERMAL_EVENT_OVERFLOW		8U	/* value: how many records went */
+#define KERN_THERMAL_EVENT_EMERGENCY		5U	/* once, when it begins; index: sensor, value: millicelsius */
+#define KERN_THERMAL_EVENT_FAN_STALLED		6U	/* once, when it stalls; index: fan, value: 0 */
+#define KERN_THERMAL_EVENT_CPU			7U	/* index: KERN_THERMAL_ALL, value: the CPUs' new generation */
+#define KERN_THERMAL_EVENT_OVERFLOW		8U	/* index: 0, value: how many records went */
+#define KERN_THERMAL_EVENT_MASK			0x1feU	/* the bits SUBSCRIBE takes; any other is EINVAL */
 
 /* The kinds of a CPU (struct thermal_cpu_info's core_class). */
 #define KERN_THERMAL_CPU_CORE_UNKNOWN		0U
@@ -158,6 +175,7 @@ extern "C" {
 #define KERN_THERMAL_CPU_LIMITED		0x4U	/* the thermal ceiling cuts the maximum */
 #define KERN_THERMAL_CPU_PLATFORM_LIMIT		0x8U	/* the platform holds the CPU below the request */
 #define KERN_THERMAL_CPU_CUSTOM			0x10U	/* a root's direct setting is in force */
+#define KERN_THERMAL_CPU_SAMPLE_TIMEOUT		0x20U	/* READ_SAMPLE: the CPU did not answer; the rest is filled */
 
 /* How a domain's levels are counted (struct thermal_cpu_domain's kind). */
 #define KERN_THERMAL_CPU_LEVELS_NONE		0U	/* the domain cannot be controlled */
@@ -201,10 +219,12 @@ extern "C" {
 /*
  * The machine's thermal state at a glance.
  *
- * The counts bound the indexes of GET_SENSOR, GET_FAN, GET_METER and
- * GET_RECEIVER; they only grow while the system runs.  The emergency fields
- * stay once an emergency began, so a reader that missed the event still
- * learns of it.
+ * The counts bound the indexes of GET_SENSOR, GET_FAN, GET_METER,
+ * GET_RECEIVER, GET_CPU and GET_CPU_DOMAIN; they only grow while the system
+ * runs.  strategy_error is the last strategy's outcome as SET_STRATEGY
+ * returned it (a strategy every receiver failed is still the one in force).
+ * The emergency fields stay once an emergency began, so a reader that
+ * missed the event still learns of it.
  */
 struct thermal_status {
 	uint32_t sensor_count;
@@ -218,18 +238,23 @@ struct thermal_status {
 	uint32_t emergency;		/* KERN_THERMAL_EMERGENCY_* */
 	uint32_t emergency_sensor;	/* the sensor that began it, while it is not NONE */
 	int32_t emergency_millicelsius;	/* that sensor's temperature then */
-	uint32_t flags;			/* KERN_THERMAL_STATUS_* */
+	int32_t strategy_error;		/* 0, EOPNOTSUPP or the first receiver's errno */
 	uint64_t emergency_time_ns;	/* when it began, CLOCK_MONOTONIC; 0: never */
-	uint32_t reserved[6];
+	uint32_t cpu_count;
+	uint32_t cpu_domain_count;
+	uint32_t cpu_package_count;
+	uint32_t cpu_generation;	/* changes with the CPUs' topology, capabilities or relative performance */
+	uint32_t reserved[2];
 };
 
 /*
  * One temperature sensor, asked for by index (in) and answered with the
  * number of sensors (count, so a reader can start at index 0 and walk).
  *
- * passive and critical are the levels the kernel acts on: above passive it
- * caps the CPUs, at critical twice in a row it stops the machine.  A level
- * is meaningful only when its READING_ bit is set.
+ * passive and critical are the sensor's levels, meaningful only when their
+ * READING_ bits are set.  The kernel caps the CPUs above passive only on a
+ * KERN_THERMAL_SENSOR_CPU sensor, and stops the machine only at the
+ * critical level of a ZONE that passed its checks (READING_ARMED).
  */
 struct thermal_sensor_info {
 	uint32_t index;			/* in */
@@ -292,12 +317,14 @@ struct thermal_meter_info {
  *
  * SET takes value and the three axes (each 0..100, nonzero only for
  * MANUAL; FIRMWARE is refused with EINVAL), hands them to every receiver
- * and waits for them for 5 s.  It answers flags and the generation of this
- * choice.  It returns EOPNOTSUPP when no receiver acts on a strategy here
- * (the strategy is still kept), the first receiver's error when all that act
- * on it failed, and 0 otherwise, with PARTIAL, PENDING or SUPERSEDED telling
- * what happened.  firmware_name is the firmware's present mode as the first
- * receiver that knows one names it ("Optimized"), empty when none does.
+ * and waits for them for 5 s.  The strategy is kept in force whatever the
+ * receivers answer.  SET returns EOPNOTSUPP when no receiver acts on a
+ * strategy here, the first receiver's error when all that act on it
+ * failed, and 0 otherwise, answering every out field with PARTIAL, PENDING
+ * or SUPERSEDED telling what happened.  After a failure GET_STRATEGY reads
+ * the generation and the error.  firmware_name is the firmware's present
+ * mode as the first receiver that knows one names it ("Optimized"), empty
+ * when none does.
  */
 struct thermal_strategy {
 	uint32_t value;			/* KERN_THERMAL_STRATEGY_* */
@@ -309,7 +336,8 @@ struct thermal_strategy {
 	uint32_t generation;		/* out */
 	char firmware_name[KERN_THERMAL_FIRMWARE_NAME_MAX];	/* out */
 	uint32_t receiver_count;	/* out */
-	uint32_t reserved[3];
+	int32_t error;			/* out: the outcome the last SET returned (GET) or 0 (SET) */
+	uint32_t reserved[2];
 };
 
 /*
@@ -330,9 +358,12 @@ struct thermal_receiver_info {
 
 /*
  * A fan's boost: a lower bound on its level, kept until it is set back to
- * 0, across strategy changes.  fan is an index or KERN_THERMAL_ALL.
- * Returns EINVAL for a level beyond the fan's boost_count, EOPNOTSUPP for a
- * fan that cannot be boosted, ENOENT for no such fan.
+ * 0, across strategy changes.  fan is an index or KERN_THERMAL_ALL (which
+ * skips the fans that cannot be boosted).  Returns EINVAL for a level
+ * beyond the fan's boost_count (0 until the fan has been read once),
+ * EOPNOTSUPP for a fan, or for ALL when no fan, that can be boosted, ENOENT
+ * for no such fan.  With PENDING the driver's later answer is not returned:
+ * the reader sees it in GET_FAN's boost and the BOOST event.
  */
 struct thermal_boost {
 	uint32_t fan;
@@ -341,7 +372,11 @@ struct thermal_boost {
 	uint32_t reserved;
 };
 
-/* The event types an open takes; replaces the previous mask. */
+/*
+ * The event types an open takes; replaces the previous mask.  A mask with a
+ * bit outside KERN_THERMAL_EVENT_MASK is refused with EINVAL; mask 0 stops
+ * the subscription, and read() is then refused with EINVAL.
+ */
 struct thermal_subscription {
 	uint32_t mask;			/* bit (1 << KERN_THERMAL_EVENT_*) */
 	uint32_t reserved[3];
@@ -350,20 +385,21 @@ struct thermal_subscription {
 /*
  * One event, as read() gives it.
  *
- * The head has the size and the place of struct system_event's (size, a
- * type, a value, a sequence and a time) so that one reader can take both.
- * name is the sensor's, fan's or receiver's name when index names one.
+ * The record has struct system_event's size, and its size, value, sequence
+ * and time at the same offsets (0, 12, 16, 24), so that one reader can take
+ * both.  sequence counts every event the kernel posted, so it skips the
+ * types an open does not take.  name is the sensor's or the fan's name when
+ * index names one, empty otherwise.
  */
 struct thermal_event {
 	uint32_t size;			/* sizeof(struct thermal_event) */
 	uint32_t type;			/* KERN_THERMAL_EVENT_* */
-	uint32_t index;			/* the sensor, fan or receiver; KERN_THERMAL_ALL: none */
-	uint32_t reserved0;
-	int64_t value;
-	uint64_t sequence;		/* one more for each event posted */
+	uint32_t index;			/* see KERN_THERMAL_EVENT_* */
+	int32_t value;			/* see KERN_THERMAL_EVENT_*; a generation is its bit pattern */
+	uint64_t sequence;
 	uint64_t time_ns;		/* when it was posted, CLOCK_MONOTONIC */
 	char name[KERN_THERMAL_NAME_MAX];
-	uint32_t reserved[14];
+	uint32_t reserved[16];
 };
 
 /*
@@ -372,8 +408,9 @@ struct thermal_event {
  * The topology and the core's class come from the processor itself and are
  * there on every machine the driver knows; the rest is KERN_THERMAL_UNKNOWN
  * (or 0 for an MHz) until the driver can read it.  A request with
- * READ_SAMPLE wakes the CPU to measure delivered_mhz and sleeps about
- * 100 ms; without it nothing is woken and delivered_mhz is the last sample.
+ * READ_SAMPLE (superuser only) wakes the CPU to measure delivered_mhz and
+ * sleeps about 100 ms; without it nothing is woken and delivered_mhz is the
+ * last sample.
  */
 struct thermal_cpu_info {
 	uint32_t cpu;			/* in */
@@ -399,7 +436,7 @@ struct thermal_cpu_info {
 	uint32_t highest_mhz;		/* estimate, 0: unknown */
 	uint32_t delivered_mhz;		/* estimate, 0: unknown */
 	uint32_t flags;			/* KERN_THERMAL_CPU_HAS_CONTROL and the others */
-	uint32_t reserved;
+	uint32_t reserved[9];
 };
 
 /*
@@ -413,7 +450,7 @@ struct thermal_cpu_info {
 struct thermal_cpu_domain {
 	uint32_t domain;		/* in */
 	uint32_t count;
-	uint64_t cpus[8];		/* CPU n is bit n % 64 of word n / 64 */
+	uint64_t cpus[KERN_THERMAL_CPU_MAX / 64U];	/* CPU n is bit n % 64 of word n / 64 */
 	uint32_t cpu_count;
 	uint32_t kind;			/* KERN_THERMAL_CPU_LEVELS_* */
 	uint32_t share;			/* KERN_THERMAL_CPU_SHARE_* */
@@ -431,9 +468,10 @@ struct thermal_cpu_domain {
 
 /*
  * A root's direct setting of one domain, or of every domain at once
- * (domain KERN_THERMAL_ALL, the values then in permille of each domain's
- * range).  It stays until the next strategy, and makes the strategy read
- * CUSTOM meanwhile.  A diagnostic, not a policy.
+ * (domain KERN_THERMAL_ALL: minimum, maximum and a nonzero desired are then
+ * permille of each domain's range; preference stays in its own 0..255).
+ * It stays until the next strategy, and makes the strategy read CUSTOM
+ * meanwhile.  A diagnostic, not a policy.
  */
 struct thermal_cpu_setting {
 	uint32_t domain;
@@ -453,8 +491,10 @@ struct thermal_cpu_relative {
 };
 
 /*
- * The idle residency of one CPU's core (GET_CPU_IDLE, target a CPU) or of
- * one package (GET_PACKAGE_IDLE, target a package).
+ * The idle residency of one CPU's core (GET_CPU_IDLE, superuser only,
+ * target a CPU; read on that CPU) or of one package (GET_PACKAGE_IDLE,
+ * target a package number as GET_CPU reports it; a number no CPU has is
+ * ENOENT, and count is then the number of CPUs, the bound to walk).
  *
  * Each of the state_count entries is a state number as the processor
  * counts it (6 for C6), where it is counted (scope) and the time spent in
@@ -476,7 +516,9 @@ struct thermal_cpu_idle {
 /*
  * A made-up sensor (/dev/thermal-inject).  The first injection of a name
  * registers the sensor; later ones with the same name update it, so a
- * test raises a temperature step by step.
+ * test raises a temperature step by step.  Sensors are never removed and
+ * share the 32 places of real ones (ENOSPC beyond).  An injected critical
+ * level goes through the same checks as a real one.
  */
 struct thermal_inject_sensor {
 	char name[KERN_THERMAL_NAME_MAX];
@@ -507,7 +549,12 @@ struct thermal_inject_path {
 	uint32_t reserved[3];
 };
 
-/* /dev/thermal: the machine's thermal state, sensors, fans, meters and the strategy (1..31). */
+/*
+ * /dev/thermal: the machine's thermal state, sensors, fans, meters and the
+ * strategy (1..31).  EMERGENCY_ACK is init's alone and only while the
+ * emergency is SIGNALED (EPERM, EINVAL otherwise); init opens /dev/thermal
+ * when it starts, so that it can answer within the kernel's 10 s.
+ */
 #define KERN_THERMAL_GET_STATUS \
 	_IOR(KERN_THERMAL_IOC_GROUP, 1, struct thermal_status)
 #define KERN_THERMAL_GET_SENSOR \
@@ -567,8 +614,10 @@ _Static_assert(offsetof(struct thermal_receiver_info, time_ns) == 40U, "thermal 
 _Static_assert(sizeof(struct thermal_boost) == 16U, "thermal ABI must be identical on ILP32 and LP64");
 _Static_assert(sizeof(struct thermal_subscription) == 16U, "thermal ABI must be identical on ILP32 and LP64");
 _Static_assert(sizeof(struct thermal_event) == 128U, "thermal ABI must be identical on ILP32 and LP64");
-_Static_assert(offsetof(struct thermal_event, value) == 16U, "thermal ABI must be identical on ILP32 and LP64");
-_Static_assert(sizeof(struct thermal_cpu_info) == 96U, "thermal ABI must be identical on ILP32 and LP64");
+_Static_assert(offsetof(struct thermal_event, value) == 12U, "thermal ABI must be identical on ILP32 and LP64");
+_Static_assert(offsetof(struct thermal_event, sequence) == 16U, "thermal ABI must be identical on ILP32 and LP64");
+_Static_assert(offsetof(struct thermal_event, time_ns) == 24U, "thermal ABI must be identical on ILP32 and LP64");
+_Static_assert(sizeof(struct thermal_cpu_info) == 128U, "thermal ABI must be identical on ILP32 and LP64");
 _Static_assert(sizeof(struct thermal_cpu_domain) == 248U, "thermal ABI must be identical on ILP32 and LP64");
 _Static_assert(offsetof(struct thermal_cpu_domain, cpus) == 8U, "thermal ABI must be identical on ILP32 and LP64");
 _Static_assert(sizeof(struct thermal_cpu_setting) == 32U, "thermal ABI must be identical on ILP32 and LP64");
