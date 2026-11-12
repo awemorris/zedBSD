@@ -1,0 +1,31 @@
+/dts-v1/;
+/include/ "zone.dtsi"
+/*
+ * A zone whose maps name no fan: the driver keeps the Pi 5's own trips
+ * (50, 60, 67.5 and 75 degrees) and takes the critical trip from the tree.
+ */
+/ {
+	fan: cooling_fan {
+		compatible = "pwm-fan";
+		#cooling-cells = <2>;
+		cooling-levels = <0 75 125 175 250>;
+		pwms = <&rp1_pwm1 3 41566 1>;
+		rpm-offset = <0x3c>;
+	};
+
+	thermal-zones {
+		cpu-thermal {
+			polling-delay = <1000>;
+			coefficients = <(-1000) 500000>;
+			thermal-sensors = <&thermal>;
+
+			trips {
+				cpu_crit: cpu-crit {
+					temperature = <105000>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+			};
+		};
+	};
+};
