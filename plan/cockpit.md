@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | q2027 | 作業中 | WS333 p026: CPU の MHz を読み手の権限によらず新しい値で返す（UAPI の直し） | 次: p027 は 5330 の危険の判断待ち、p024（規約の見直しと文書） |
 | P2 | q2026 | 作業中 | BUG-423: QEMU amd64 の USB keyboard が enumerate されない（回帰の見込み）の原因と直し | 次は WS335 p036（乖離の確かめから） |
-| P3 | — | 待機 | WS347 の監査（U1〜U9）を返却。依頼 07 の下書き [gemini-request-07.md](ws347/gemini-request-07.md) | — |
+| P3 | q2028 | 作業中 | WS333 p028: Intel TCO watchdog の driver（5330 を人手なしで戻せる起動、p027 の前提） | 次: WS347 の agy の依頼 07 の監査 |
 | P4 | q2025 | 作業中 | WS347 p003: GHCI の driver を最新の ghci.md に追従（乖離の確かめから） | 次は p004（VF2＋KC705 の実機） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
