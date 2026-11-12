@@ -8,7 +8,7 @@
 - Gemini への依頼の文: [gemini-request-01.md](gemini-request-01.md)（A1〜A11 を T1〜T4 に。2026-11-11 作成、ユーザーが渡す）。
 - Gemini への質問の文: [gemini-questions-01.md](gemini-questions-01.md)（B4〜B10 の RTL の意図と事実。2026-11-11 作成、ユーザーが渡す）。1 次回答と Q1 の照合: [gemini-answers-01.md](gemini-answers-01.md)。2026-11-11 ユーザーが修正方針を承認し、依頼の文 [gemini-request-02.md](gemini-request-02.md)（W1〜W7）を作った。
 - Gemini の報告 02（ad23fe01）の監査: [audit-ad23fe01.md](audit-ad23fe01.md)。直しの依頼: [gemini-request-03.md](gemini-request-03.md)（C1〜C11、ring の回帰が最優先）。
-- C1・C2 だけの直し（8ebb2e2f）の監査: [audit-8ebb2e2f.md](audit-8ebb2e2f.md)（C1 ほぼ完了、C2 完了）。依頼 04（まとめ版、R1〜R14）: [gemini-request-04.md](gemini-request-04.md)。その結果（eeed36ed）の監査: [audit-eeed36ed.md](audit-eeed36ed.md)。依頼 05（まとめ版、S1〜S11）: [gemini-request-05.md](gemini-request-05.md)。その結果（28a8d920）の監査: [audit-28a8d920.md](audit-28a8d920.md)。**次の依頼は 06（まとめ版、01〜05 を置き換え、U1〜U15、下書き。Gemini がまず 1 次回答）: [gemini-request-06.md](gemini-request-06.md)。**
+- C1・C2 だけの直し（8ebb2e2f）の監査: [audit-8ebb2e2f.md](audit-8ebb2e2f.md)（C1 ほぼ完了、C2 完了）。依頼 04（まとめ版、R1〜R14）: [gemini-request-04.md](gemini-request-04.md)。その結果（eeed36ed）の監査: [audit-eeed36ed.md](audit-eeed36ed.md)。依頼 05（まとめ版、S1〜S11）: [gemini-request-05.md](gemini-request-05.md)。その結果（28a8d920）の監査: [audit-28a8d920.md](audit-28a8d920.md)。依頼 06（まとめ版、U1〜U15）: [gemini-request-06.md](gemini-request-06.md)。その結果（b58d4edd、U1〜U9 だけを判定）の監査: [audit-b58d4edd.md](audit-b58d4edd.md)。**次の依頼は 07（まとめ版、01〜06 を置き換え、U1〜U9 の残りを V1〜V9 に、U10〜U15 は次に回す、下書き。Gemini がまず 1 次回答）: [gemini-request-07.md](gemini-request-07.md)。**
 - 読んだ版: amaterrace-gpu main 50f13348（2026-11-11 15:28、Gemini の修正 5fb4ad16・1e80cfb6・50f13348 の後）。ghci.md は bace7d66 から VA_BITS_ENC の 2 行だけ違う。RTL は読んだだけで、sim・実機では確かめていない。監査の全文は [audit-50f13348.md](audit-50f13348.md)。
 
 ## A: RTL の修正依頼（Gemini へ）
@@ -54,8 +54,10 @@
 | B21 | §3.1 の page 0 に無い offset（0x06C、0x070、0x07C、0x088〜0x0FC）は 0 を読み書きを捨てるべきか。RTL は 0x070 に旧い FENCE_LAST（host RW）を戻した。DISP2 には「other offsets read 0」があるが page 0 には無い | §3.1、ghci.md:2697、28a8d920 の `atg_cp_regs.v:415,432,587` | 判断待ち |
 | B22 | CAP_PROT = 1 の時、走行中の locked register への書き込み（kind 7）で STATUS.FAULTED を立てるか。§3.3 は PROT の時の FAULTED を AXI_STUCK・ring の framing・session 0 の不正・hang に限る（ONLY）が、host の MMIO の誤りは挙げていない。RTL と tb は両方の preset で FAULTED | §3.3 | 判断待ち |
 | B23 | ROP_PACK = 0 の時、Path 2 の format の BLEND と BLIT_DST も 0 にするか。§4.1 は COLOR_ATTACHMENT だけを書く。HAS_BLT = 1 なら blitter が書ける。RTL は両方 0 | §4.1、`atg_cp_fmt.v:63-65` | 判断待ち |
-| B24 | DISP2 の FLIP の不正（plane・base・record）の FAULT_INFO の KIND と UNIT。§3.5 の UNIT に display が無い（display_id の不正だけ kind 1 と書く）。RTL は kind 3・UNIT 0。MC の client の SA・DC の UNIT も同じ | §3.5、§7.3 CMD_FLIP、`atg_cp_disp.v:196` | 判断待ち |
-| B25 | MC の拒否と ring の読みの error の KIND: session の保護の拒否は 6（PROT_FAULT）か 10（PERM_FAULT）か、flat で HOST_LIMIT・local の外は 9（PAGE_FAULT）か、ring の読みの応答の error は 2（RING_OOB）か 5（AXI_ERROR）か。RTL は 10・9・2 | §3.5、`atg_cp_ctl.v:373-375`、`atg_cp_ring.v:1776,1787` | 判断待ち |
+| B24 | DISP2 の FLIP の不正（plane・base・record）の FAULT_INFO の KIND と UNIT。§3.5 の UNIT に display が無い（display_id の不正だけ kind 1 と書く）。RTL は kind 3・UNIT 0。MC の client の SA・DC の UNIT も同じ問い（b58d4edd の RTL は SA → 2（SU）、DC → 0（CP）、`atg_cp_ctl.v:254-272`） | §3.5、§7.3 CMD_FLIP、`atg_cp_disp.v:206` | 判断待ち |
+| B25 | MC の拒否と ring の読みの error の KIND: session の保護の拒否は 6（PROT_FAULT）か 10（PERM_FAULT）か、flat で HOST_LIMIT・local の外は 9（PAGE_FAULT）か、ring の読みの応答の error は 2（RING_OOB）か 5（AXI_ERROR）か。RTL（b58d4edd）は 10・9・5（ring の読みの error は 28a8d920 の 2 から依頼の外で 5 に変わった） | §3.5、`atg_cp_ctl.v:399-401,485-487`、`atg_cp_ring.v:1776,1787` | 判断待ち |
+| B27 | CP の firmware の core（RV32）の例外（PC の範囲外、不正な命令、不整列の jump）の FAULT_INFO の KIND と UNIT。§3.5 の KIND・UNIT は firmware の core の fault を挙げない。RTL は KIND 1（INVALID_OP）・UNIT 0（28a8d920 は KIND 4） | §3.5、`atg_cpu_core.v:373-380`、`atg_cp.v:612` | 判断待ち |
+| B28 | CMD_WAIT_FENCE の `fence_addr` の揃え。§7.3 は CMD_FENCE の `fence_addr` だけに「8-byte aligned」と書き、CMD_WAIT_FENCE には書かない。RTL は 4 byte に揃えて 32 bit を比べる。仕様の 64 bit の比較（依頼 07 の V2）で 8 byte を読むなら揃えが要る（V2 は仮に 8 byte） | §7.3 ghci.md:960-991、`atg_cp_fence.v` | 判断待ち |
 | B26 | §4.1 の PERF_SRC は「STATUS の busy の bit の番号（0 CP〜6 SU）」を数えるが、§3.3 の STATUS に busy の bit はもう無い。PERF_SRC の番号を何で定義するか | §4.1 PERF、§3.3 | 判断待ち |
 
 ## 決定済み
