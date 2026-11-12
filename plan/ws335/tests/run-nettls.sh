@@ -1,9 +1,10 @@
 #!/bin/sh
-# The host tests of the browser's net/tls.c with libssl-compat in place of OpenSSL.  net/tls.c opens libssl-compat.so
-# (with its libcrypto-compat.so) when it is there, else OpenSSL's libssl.so or libssl.so.3; the compat libraries are
-# built for the host as shared libraries (the host's cc, their exports.map) into one directory under their own names
-# only (no link named like OpenSSL's: the compat runs show that net/tls.c opens the compat names itself), and the
-# browser and host-loader (plan/ws074/tests/host-build.sh, unchanged) are run
+# The host tests of the browser's net/tls.c with libssl-compat in place of OpenSSL.  net/tls.c opens
+# libcrypto-compat.so and libssl-compat.so when it is built with WB_TLS_COMPAT (zedBSD's build), OpenSSL's libcrypto
+# and libssl otherwise.  The browser and host-loader are built twice with plan/ws074/tests/host-build.sh (unchanged):
+# as they are, and with -DWB_TLS_COMPAT (a compiler wrapper given as CC); the compat libraries are built for the host
+# as shared libraries (the host's cc, their exports.map) into one directory under their own names only (no link named
+# like OpenSSL's: the compat runs show that net/tls.c opens the compat names itself), and the programs are run
 # through a wrapper that sets LD_LIBRARY_PATH to that directory (only the browser gets it: the test server is Python
 # with the host's OpenSSL).  The WS074 runners run-http-tests.py and run-loader-tests.py go once with the host's
 # OpenSSL and once with compat; both must pass, with the same counts, and the dynamic loader's log must show the
@@ -11,7 +12,7 @@
 #   sh plan/ws335/tests/run-nettls.sh
 # The servers bind 127.0.0.1 on ports the kernel chose just before.  The browser build goes to
 # build/ws335-nettls-host (kept between runs, host-build.sh rebuilds what changed); the rest under
-# build/tmp/ws335-nettls (a fresh run directory).  The last line is run-nettls: PASS or run-nettls: FAIL.
+# build/tmp/ws335-nettls (a fresh run directory); the compat build to build/ws335-nettls-host-compat.  The last line is run-nettls: PASS or run-nettls: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
@@ -22,21 +23,46 @@ python=/usr/bin/python3
 . plan/tools/fresh-out.sh
 out=build/tmp/ws335-nettls
 fresh_out "$out"
-host=build/ws335-nettls-host
+host_openssl=build/ws335-nettls-host
+host_compat=build/ws335-nettls-host-compat
 status=0
 
-# 1. The browser and host-loader for the host.
-if ! BROWSER_HOST_BUILD=$host timeout 3000 sh plan/ws074/tests/host-build.sh plain > "$out/host-build.log" 2>&1; then
+# 1. The browser and host-loader for the host, as they are and with -DWB_TLS_COMPAT (the wrapper keeps its path, so
+# host-build.sh reuses the objects of the last run).
+mkdir -p "$host_compat"
+wrapper=$top/$host_compat/cc-compat
+printf '#!/bin/sh\nexec cc -DWB_TLS_COMPAT "$@"\n' > "$out/cc-compat"
+if ! cmp -s "$out/cc-compat" "$wrapper"; then
+	cp "$out/cc-compat" "$wrapper"
+	chmod 755 "$wrapper"
+fi
+if ! BROWSER_HOST_BUILD=$host_openssl timeout 3000 sh plan/ws074/tests/host-build.sh plain > "$out/host-build.log" 2>&1; then
 	tail -20 "$out/host-build.log"
 	echo "run-nettls: FAIL (host-build.sh; $out/host-build.log)"
 	exit 1
 fi
-for program in browser host-loader; do
-	if [ ! -x "$host/plain/$program" ]; then
-		echo "run-nettls: FAIL (no $host/plain/$program)"
-		exit 1
-	fi
+if ! CC=$wrapper BROWSER_HOST_BUILD=$host_compat timeout 3000 sh plan/ws074/tests/host-build.sh plain \
+    > "$out/host-build-compat.log" 2>&1; then
+	tail -20 "$out/host-build-compat.log"
+	echo "run-nettls: FAIL (host-build.sh with -DWB_TLS_COMPAT; $out/host-build-compat.log)"
+	exit 1
+fi
+for host in $host_openssl $host_compat; do
+	for program in browser host-loader; do
+		if [ ! -x "$host/plain/$program" ]; then
+			echo "run-nettls: FAIL (no $host/plain/$program)"
+			exit 1
+		fi
+	done
 done
+if ! strings "$host_compat/plain/libbrowser.so" | grep -q '^libssl-compat\.so$' || strings "$host_compat/plain/libbrowser.so" | grep -q '^libssl\.so$'; then
+	echo "nettls: the compat libbrowser.so does not name libssl-compat.so alone"
+	status=1
+fi
+if strings "$host_openssl/plain/libbrowser.so" | grep -q '^libssl-compat\.so$'; then
+	echo "nettls: the OpenSSL libbrowser.so names libssl-compat.so"
+	status=1
+fi
 
 # 2. The compat libraries as host shared libraries, under the names net/tls.c opens first.
 lib=$out/lib
@@ -75,6 +101,8 @@ echo "nettls: host libcrypto-compat.so and libssl-compat.so built ($(echo $crypt
 # 3. The wrappers: each runs the program with the dynamic loader's log of its libraries in its own files.
 for flavour in openssl compat; do
 	mkdir -p "$out/$flavour/ld"
+	host=$host_openssl
+	[ "$flavour" = compat ] && host=$host_compat
 	for program in browser host-loader; do
 		{
 			echo '#!/bin/sh'

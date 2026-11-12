@@ -11,11 +11,11 @@
  * links the library into the program (WB_TLS_STATIC, the Windows build,
  * whose tls-static file fills the table of functions) uses it as linked.
  * Any other build loads the libraries through the operating-system layer
- * the first time a page asks for https: libssl-compat.so and
- * libcrypto-compat.so when they are there (zedBSD's base), else OpenSSL's
- * (a host with OpenSSL, the OpenSSL package), so that the program does not
- * need them to start; without either every https fetch fails with
- * EPROTONOSUPPORT.
+ * the first time a page asks for https, so that the program does not need
+ * them to start: libssl-compat.so and libcrypto-compat.so in a build with
+ * WB_TLS_COMPAT (zedBSD's), OpenSSL's libssl and libcrypto otherwise (a
+ * host's tests).  Only the build's own choice is opened, never the other:
+ * without it every https fetch fails with EPROTONOSUPPORT.
  *
  * Only the functions of struct tls_library are used; their types are
  * opaque here and they are called through pointers, so no header of the
@@ -93,6 +93,13 @@
 /* The bundle's path below the program's data directory. */
 #define TLS_BUNDLE_NAME		"/certs/ca-certificates.pem"
 
+/* The libraries a build opens, named in a failure to load them. */
+#ifdef WB_TLS_COMPAT
+#define TLS_LIBRARY_NAMES	"libssl-compat.so and libcrypto-compat.so"
+#else
+#define TLS_LIBRARY_NAMES	"OpenSSL's libssl and libcrypto"
+#endif
+
 #ifndef WB_TLS_STATIC
 
 /*
@@ -147,28 +154,23 @@ static const struct tls_symbol tls_symbols[] = {
 	{ 1, 1, "X509_STORE_CTX_set_error", offsetof(struct tls_library, store_ctx_set_error) }
 };
 
-/*
- * One implementation of the interface: the names its libssl and its
- * libcrypto are looked for under, each list in order and NULL-terminated.
- */
-struct tls_names {
-	const char *const *ssl;
-	const char *const *crypto;
-};
+#ifdef WB_TLS_COMPAT
 
-/* zedBSD's libssl-compat and libcrypto-compat. */
-static const char *const tls_compat_ssl_names[] = { "libssl-compat.so", NULL };
-static const char *const tls_compat_crypto_names[] = { "libcrypto-compat.so", NULL };
+/* The names libcrypto is looked for under: zedBSD's libcrypto-compat. */
+static const char *const tls_crypto_names[] = { "libcrypto-compat.so", NULL };
 
-/* OpenSSL's libssl and libcrypto (the package's, then a host's versioned one). */
-static const char *const tls_openssl_ssl_names[] = { "libssl.so", "libssl.so.3", NULL };
-static const char *const tls_openssl_crypto_names[] = { "libcrypto.so", "libcrypto.so.3", NULL };
+/* The names libssl is looked for under: zedBSD's libssl-compat. */
+static const char *const tls_ssl_names[] = { "libssl-compat.so", NULL };
 
-/* The implementations tried, in order: the base's own first, then OpenSSL.  Constant for the life of the program. */
-static const struct tls_names tls_implementations[] = {
-	{ tls_compat_ssl_names, tls_compat_crypto_names },
-	{ tls_openssl_ssl_names, tls_openssl_crypto_names }
-};
+#else
+
+/* The names libcrypto is looked for under, in order (the package's, then a host's versioned one). */
+static const char *const tls_crypto_names[] = { "libcrypto.so", "libcrypto.so.3", NULL };
+
+/* The names libssl is looked for under, in the same order. */
+static const char *const tls_ssl_names[] = { "libssl.so", "libssl.so.3", NULL };
+
+#endif
 
 #endif
 
@@ -240,7 +242,6 @@ static void tls_add_bundle(void);
 static int tls_verify(int preverified, void *store_context);
 static void tls_set_reason(char *buffer, const char *format, ...) __attribute__((format(printf, 2, 3)));
 #ifndef WB_TLS_STATIC
-static int tls_open_pair(const struct tls_names *names, struct wb_os_library **ssl, struct wb_os_library **crypto);
 static int tls_find(struct wb_os_library *library, const char *name, void *pointer);
 static int tls_find_all(struct wb_os_library *ssl, struct wb_os_library *crypto);
 #endif
@@ -747,29 +748,21 @@ tls_bind_library(void)
 
 #else
 
-/*
- * Loads the first implementation that is there (tls_implementations) and
- * finds the functions; returns 0 or an errno value.
- */
+/* Loads libcrypto, then libssl (which needs it), and finds the functions; returns 0 or an errno value. */
 static int
 tls_bind_library(void)
 {
 	struct wb_os_library *ssl;
 	struct wb_os_library *crypto;
-	size_t index;
 	int error;
 
-	/* The base's own libraries, else OpenSSL's. */
+	/* libcrypto first (libssl needs it), then libssl. */
 	ssl = NULL;
-	crypto = NULL;
-	error = ENOENT;
-	for (index = 0; index < sizeof(tls_implementations) / sizeof(tls_implementations[0]); index++) {
-		error = tls_open_pair(&tls_implementations[index], &ssl, &crypto);
-		if (error == 0)
-			break;
-	}
+	error = wb_os_library_open(tls_crypto_names, &crypto);
+	if (error == 0)
+		error = wb_os_library_open(tls_ssl_names, &ssl);
 	if (error != 0) {
-		tls_set_reason(tls_load_reason, "cannot load the TLS libraries (libssl-compat.so or OpenSSL's libssl.so)");
+		tls_set_reason(tls_load_reason, "cannot load %s", TLS_LIBRARY_NAMES);
 		return EPROTONOSUPPORT;
 	}
 
@@ -779,37 +772,6 @@ tls_bind_library(void)
 		return error;
 
 	/* Succeeded: the functions are found. */
-	return 0;
-}
-
-/*
- * Loads one implementation's libssl, then its libcrypto.  libssl comes
- * first: the system loads the libcrypto it is linked with along with it, so
- * an implementation whose libssl is missing leaves nothing loaded, and the
- * libcrypto opened next is the one already there.  Returns 0 with both, or
- * ENOENT (or what the layer reported); a libssl that loaded stays loaded.
- */
-static int
-tls_open_pair(
-	const struct tls_names *names,
-	struct wb_os_library **ssl,
-	struct wb_os_library **crypto)
-{
-	int error;
-
-	/* libssl, with its libcrypto. */
-	*ssl = NULL;
-	*crypto = NULL;
-	error = wb_os_library_open(names->ssl, ssl);
-	if (error != 0)
-		return error;
-
-	/* The handle of libcrypto, where its functions are found. */
-	error = wb_os_library_open(names->crypto, crypto);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: both libraries are loaded. */
 	return 0;
 }
 
