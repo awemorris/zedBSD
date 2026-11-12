@@ -82,7 +82,7 @@ worktree `p2-ws335a`（基点 main 4bdcf82fd6、P1 の p035 の commit は全部
 - Wine の prefix の持ち越し（p002）: この host（Wine 10.0、Debian 10.0~repack-6）で新しい prefix `build/tmp/ws335-wine` を `run-unit.sh --win32` が `wineboot -i` で作り、約 1 分で `.ws335-ready` が付いた（kernel32.dll の止まりは再現しない、P1 の所見と同じ）。script は直していない。再現した時の手当て（出来た prefix を写す手順）は、再現の後に決める。
 - 未実施: zedBSD の `libcrypto-compat.so`・`libssl-compat.so` の build と check-exports（新しい build system の target、sysroot が要る。今回の引き継ぎの範囲の外。zedBSD の header に対する compile は check-skeleton の zedBSD の clang の段で PASS）。QEMU の guest の interop。
 - cleared の材料: 受け入れの「style-check の違反 0」は P1 の 28 件（規約が許す物だけ）、run-unit all（posix・win32）・run-ct all・run-ct-matrix・interop（host・Wine）・limbo・fuzz が PASS で件数は前と同じ、check-skeleton は許可済みの header の差だけ。p035 は cleared にできると考える（判定は Q1）。
-- 試験の道具: `run-fuzz.sh` は `FUZZ_JOBS`（既定 4、上限 4）本ずつ流す形にした（2026-11-12 q2021 P2、`FUZZ_SECONDS=30` で 11 target PASS、同時は最大 4 本）。check-skeleton の BASE はこの merge に移す。
+- 試験の道具: `run-fuzz.sh` は `FUZZ_JOBS`（既定 4、上限 4）本ずつ流す形にした（2026-11-12 q2021 P2、`FUZZ_SECONDS=30` で 11 target PASS、同時は最大 4 本）。check-skeleton の BASE は ceef1c6f88（その merge）に移す。
 
 ## 持ち越し（Q1）
 

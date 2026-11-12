@@ -121,4 +121,4 @@
 ## Q1 の判断（2026-11-02 22:20、WS343 p002 の merge）
 
 - check-skeleton の BASE を b8c4adaf6c に移す（WS343 p002 が公開の暗号の header と cryc-aes.h・cryc-api.h・cryc-err.h、check-skeleton.sh の名前の決まりを広げた）。p035 は design.md §5 と evp.h の範囲の note に passkey の部分集合（HMAC、EVP_KDF の HKDF、OSSL_PARAM、EC P-256 の PKEY、AES-256-CBC）を書き入れる。
-- 2026-11-12 Q1: `run-fuzz.sh` を同時 4 本までにした（q2021）。check-skeleton の BASE をこの merge に移す（BASE は `git log -1 --format=%h -- plan/ws335/tests/run-fuzz.sh` の merge）。
+- 2026-11-12 Q1: `run-fuzz.sh` を同時 4 本までにした（q2021）。check-skeleton の BASE を ceef1c6f88（その merge）に移す。
