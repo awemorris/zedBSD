@@ -10,7 +10,7 @@
 | P1 | q2027 | 作業中 | WS333 p026: CPU の MHz を読み手の権限によらず新しい値で返す（UAPI の直し） | 次: p027 は 5330 の危険の判断待ち、p024（規約の見直しと文書） |
 | P2 | q2029 | 作業中 | WS335 p036: net/tls.c を libssl-compat に切り替え（11-01 の提案、乖離の確かめから） | — |
 | P3 | q2028 | 作業中 | WS333 p028: Intel TCO watchdog の driver（5330 を人手なしで戻せる起動、p027 の前提） | 次: WS347 の agy の依頼 07 の監査 |
-| P4 | — | 待機 | WS347 p003（GHCI の driver を最新の仕様に）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
+| P4 | q2030 | 作業中 | WS347 p008: blitter の無い GPU で表示の写しを shader で | 次: p004（VF2＋KC705 の実機） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | — | 待機 | WS335 p038（limbo の照合）は cleared 済み | — |
