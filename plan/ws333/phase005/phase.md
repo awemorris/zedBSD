@@ -2,7 +2,7 @@
 
 # ws333-p005: 熱の core（前半: core・sensor の push・hw.thermal を写しから）
 
-Status: in-progress（前半は済み。後半は 2026-11-12 P1 が実装し host 試験と QEMU の試験まで済み。mk の案のユーザーの答え待ちで、main に入れると mk の変更なしでは link できない）
+Status: in-progress（前半・後半とも実装と試験は済み。2026-11-12 P1・q2016-i01: 新しい build の全 platform の vmunix と QEMU amd64 の 4 本をやり直した。残りは riscv64 virt の QEMU（新しい build に platform が無い）と intelmid64 の build（mk の重複）。cleared の判定は Q1）
 Parent: [WS333](../ws.md)
 Queue: q1762-i01（P6、前半）、q2013-i01（P1、後半）
 
@@ -70,7 +70,7 @@ design.md §9 の p005 の前半（p004 の UAPI に依らない所）: 熱の c
 - `userland/base/init/main.c`: 起動の時に `/dev/thermal` を開いておき（O_CLOEXEC）、SIGUSR2 の後の最初の `note_emergency()` で `KERN_THERMAL_EMERGENCY_ACK` を送る（p016 の持ち越し）。
 - `/sbin/thermal` の熱の表示（`userland/base/thermal/main.c`）は p013 と一緒に作った（下の p013 を見る）。
 
-### mk の案（ユーザーの確認待ち、当てていない）
+### mk の案（2026-11-12 の時点では当てていなかった。後に main に当たった、下の「締め」）
 
 Q1 に 2026-11-12 に送った。
 
@@ -96,3 +96,52 @@ Q1 に 2026-11-12 に送った。
 ### 気づいた事（main の build、WS333 の外）
 
 - `mk/platform-x86_64/bootloader.mk` が `tools/build/finalize-bios-stage2.noct` と `--path=tools/build` を使うが、file は `mk/old-tools/build/` に、`zedbuild.noct` は `mk/tools/` にある。`make disk` は bootloader で止まる。Q1 に報告した。
+
+## 締め（2026-11-12 P1、q2016-i01）
+
+mk の案は main に当たっていた（`mk/kernel.mk` の `CONFIG_KERN_THERMAL` の節に `thermal-device.c`、`mk/test-config.mk` の `CONFIG_THERMAL_TEST_INJECT`、`userland/base/thermal/Makefile`）。その上で確かめ直した。
+
+### 全 platform の vmunix
+
+`plan/ws333/tests/build-vmunix-all.sh <log dir> [platform...]` を新しい build（`PLATFORM=`・`CONFIGMK=`、`build/<platform>`）に書き直した。platform ごとに sysroot、次に variant を順に build する: default（defaults.mk のまま）、thermal（`CONFIG_KERN_THERMAL=y`、x86 は `CONFIG_DRIVER_X86_POWER_CONTROL=y` も）、x86_64 は inject（thermal に `CONFIG_THERMAL_TEST_INJECT=y`）、defaults が y の rpi4・rpi5・vf2 は nothermal（`CONFIG_KERN_THERMAL=n`）。
+
+| platform | default | thermal | 他 |
+| --- | --- | --- | --- |
+| x86_64 | rc=0 warning 0（MSR の道の symbol 0） | rc=0 warning 0（`cpux86_hwp*` 6） | inject rc=0 warning 0（`thermal_inject_*` あり） |
+| intelmid64 | **rc=2**（`cpu-x86-control.c` の compile: `drv_cpu_x86_wrmsr` が未宣言） | **rc=2**（`cpux86-*.c` の duplicate symbol） | 原因は mk、下の「mk の案」 |
+| i386 | rc=0 warning 0 | rc=0 warning 0 | |
+| pc9821 | rc=0 warning 0 | rc=0 warning 0 | |
+| rpi4 | rc=0 warning 0（defaults で y） | — | nothermal rc=0 warning 0 |
+| rpi5 | rc=0 warning 0（defaults で y） | — | **nothermal rc=2**（`rpi5-fan.c` の `kern_thermal_sensor_register`・`kern_thermal_sensor_levels` が未定義） |
+| vf2 | rc=0 warning 0（defaults で y） | — | nothermal rc=0 warning 0 |
+
+log は worktree の `build/tmp/all1/`・`build/tmp/all2/`（git の外）。sysroot は 7 platform とも rc=0 warning 0。旧い build の 20 port（armv7-virt・riscv64-virt・m68k ほか）は新しい build に platform が無いので build できない。
+
+### QEMU amd64（新しい build の正式な image）
+
+image: `make CONFIGMK=config/config.x86_64.mk CONFIG_KERN_THERMAL=y CONFIG_DRIVER_X86_POWER_CONTROL=y CONFIG_THERMAL_TEST_INJECT=y CONFIG_GRAPHICAL_LOGIN=n CONFIG_USERLAND_PROGRAMS="login passwd su useradd account-admin id ls cat thermal sync service passkey" programs` と同じ変数で `build/x86_64/hdd-image.img`（warning 0、`check-x86_64-hdd-image: PASS`）。`/sbin/thermal` と `/etc/service.d/thermal` は `userland/base/thermal/Makefile` が入れた（rootfs の staging に `etc/service.d/thermal` を確かめた）。`thermal-inject` だけは package の外なので、`build/tmp/tinj/` に `PROG := thermal-inject` の小さな Makefile（`userland/base/package.mk` を include）を置いて `make -C build/tmp/tinj PLATFORM=x86_64` で `build/x86_64/sbin/` に入れた。vmunix は上の inject の build。
+
+`plan/ws333/tests/thermal-qemu/run.sh build/tmp/img1/hdd-image.img build/tmp/q1 [mode]`（QEMU の名前を `p1-ws333f-thermal` に直した。画面の読み取り、console・serial の log は読まない）:
+
+- get-set: PASS。起動の時の service の `thermal restore` が balanced を generation 1 で渡した（`strategy balanced generation=1 result=unsupported`、受け手が 0 の時）。以後の保存と restore・manual・`thermal cpu`（4 CPU、core=P）・`power: no energy meter on this machine`・boost の拒み（Operation not supported）を画面 `build/tmp/q1/get-set-after.png` で見た。
+- emergency（init の道）: PASS。QEMU が自分で終わり、2 回目の起動で `emergency init sensor=0 temperature=92.000` と `/var/log/thermal-emergency` の行。
+- direct: PASS。`emergency cutting sensor=0 temperature=92.000`、QEMU が自分で終わる。
+- group: PASS（desktop の group の `user` は strategy を変えられ、group の外の `bob` は EPERM）。
+
+画面は worktree の `build/tmp/q1/*.png`。見えた事（WS333 の外）: 小さな image では `mk/rootfs.mk` が入れる bluetoothd・volumed・audiod の service が program の無いまま再起動を繰り返し、console に `init: exec /sbin/... No such file` が続く。
+
+### 未実施
+
+- riscv64 の virt の QEMU: 新しい build に riscv64 virt の platform が無い（`mk/platform-vf2` は `HAL_BOARD_VISIONFIVE2` 固定で、QEMU に VisionFive 2 の machine は無い）。mk に platform を足さないと build できない。riscv64 の `/sbin/thermal` は vf2 の sysroot で compile まで（p013 の記録）。
+- `thermal watch` の QEMU（host 試験の read の道だけ）。
+
+### cleared の材料
+
+- 受け入れ（design.md §9 の p005）: core の host 試験 PASS（29 scenario、q2015-i01）、全 platform の build は intelmid64 を除いて warning 0（intelmid64 は mk の重複で、WS333 の source の問題ではない）、QEMU の回帰（amd64 の 4 本）PASS。
+- 残る穴は build system の側（riscv64 virt の platform、intelmid64 の mk、rpi5 の n の組）。WS333 の source に直す所は見つかっていない。
+
+### mk の案（Q1 に送った、当てていない）
+
+1. `mk/platform-intelmid64/vmunix.mk` の KERN_SOURCES から `cpu-x86-control.c`・`cpux86-hwp.c`・`cpux86-power.c`・`cpux86-pstate.c` の 4 行を外す（`mk/platform-x86_64/vmunix.mk` と同じ形。これらは `mk/kernel.mk` の `CONFIG_DRIVER_X86_POWER_CONTROL` の節が入れる）。
+2. `mk/config.mk` の `CONFIG_DRIVER_RPI5_FAN` の注を `# [RPi5 fan and processor temperature] (/dev/thermal)` と `#  - Depends: CONFIG_KERN_THERMAL` に（hw.thermal は p022 で外れ、driver は熱の core に push する。n の組は link できない）。
+3. riscv64 virt の QEMU で試すなら、riscv64 virt の platform（`mk/platform-riscv64-virt/`）が要る。WS333 の範囲の外なので、要るかは Q1 とユーザー。

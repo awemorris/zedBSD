@@ -109,7 +109,7 @@ run_once()
 {
 	local status=0
 	local waited=0
-	qemu-system-x86_64 -name p1-ws333e-thermal -machine q35 -m 8G -smp 4 "${accel[@]}" \
+	qemu-system-x86_64 -name p1-ws333f-thermal -machine q35 -m 8G -smp 4 "${accel[@]}" \
 		-drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
 		-drive "if=pflash,format=raw,file=$work/vars.fd" \
 		-drive "if=none,id=boot,file=$work/disk.qcow2,format=qcow2" \

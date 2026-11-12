@@ -2,7 +2,7 @@
 
 # ws333-p013: CPU の ioctl・`/sbin/thermal` の CPU と電力の表示・strategy の保存と restore
 
-Status: in-progress（2026-11-12 P1、q2013-i01: 実装と host 試験・QEMU の一部まで。起動の時の restore の service と riscv64 の QEMU と全 port の build は mk の案の答えの後）
+Status: in-progress（2026-11-12 P1・q2016-i01: 新しい build の正式な image で起動の時の restore と QEMU amd64 を確かめ、全 platform の vmunix を build した。残りは riscv64 virt の QEMU（新しい build に platform が無い）。cleared の判定は Q1）
 Parent: [WS333](../ws.md)
 Queue: q2013-i01（P1）
 
@@ -35,3 +35,11 @@ design.md §9 の p013: p004 で決めた UAPI の CPU の範囲（32〜63）の
 - QEMU amd64: p005 の後半の get-set の試験で strategy の保存（`cat /etc/thermal.conf`）・`thermal restore`・manual・`thermal cpu`・`thermal power`・boost の拒みを画面で確かめた（[p005](../phase005/phase.md) の「確かめた事（後半）」）。
 - 2026-11-12 P1（q2015-i01、desktop の group）: image は `make CONFIGMK=<x86_64 の config> CONFIG_KERN_THERMAL=y CONFIG_DRIVER_X86_POWER_CONTROL=y CONFIG_THERMAL_TEST_INJECT=y CONFIG_GRAPHICAL_LOGIN=n CONFIG_USERLAND_PROGRAMS="login passwd su useradd account-admin id ls cat thermal sync service passkey" programs` の後に同じ変数で `build/x86_64/hdd-image.img`（x86_64 の `defaults.mk` が `CONFIG_KERN_THERMAL := n` を置くので y は command line で渡す）。`thermal-inject` は手で compile して `build/x86_64/sbin/` に置いた。QEMU amd64（`plan/ws333/tests/thermal-qemu/run.sh IMAGE OUT group`、画面の読み取り）: PASS。起動の時の service の `thermal restore` が `/etc/thermal.conf` を root:desktop 0664 で作り（`ls -l` で `/dev/thermal` も `crw-rw-r-- root desktop`）、`id user` に `45(desktop)`、`su user -c 'thermal strategy powersave'` が generation 2 で通り終了 0、file に `strategy powersave`、`useradd bob`（group の外）の `su bob -c 'thermal strategy balanced'` は `thermal: strategy: Operation not permitted` で終了 1、bob は strategy を読めて file は powersave のまま。get-set の試験も PASS（起動の時の restore が balanced の generation 1 を渡すので、後の世代を 1 つずつ進めた）。画面 `build/review/ws333-q2015/qemu-group.png`・`qemu-get-set.png`（P1 の worktree）。
 - 未実施: `/sbin/thermal` の strategy の保存と restore の host 試験（QEMU で代わりに確かめた）、MSR の道の無い amd64 の build（既定は扱わない、ws.md の前提）、全 port の vmunix、riscv64 の virt の QEMU、idle と power の実の値（5330 の p014）、Settings が作った利用者が desktop の group に入る事の QEMU（account-admin の host 試験は PASS、group の無い試験の file では入らない道）。
+
+## 締め（2026-11-12 P1、q2016-i01）
+
+- 起動の時の restore: 新しい build の正式な image（`userland/base/thermal/Makefile` が `/sbin/thermal` と `/etc/service.d/thermal` を入れた物、作り方は [p005](../phase005/phase.md) の「締め」）で、QEMU amd64 の get-set の試験の最初の `thermal` が `strategy balanced generation=1 result=unsupported`（起動の時の service が保存の無い conf から balanced を渡した）。group の試験で `/etc/thermal.conf` が root:desktop 0664 で作られている。4 本（get-set・emergency・direct・group）PASS。
+- amd64 の vmunix の MSR の道の有無の 2 通り: x86_64 の default（`CONFIG_KERN_THERMAL=n`、MSR の道の symbol 0）と thermal（`CONFIG_DRIVER_X86_POWER_CONTROL=y`、`cpux86_hwp*` 6）が rc=0 warning 0。`CONFIG_KERN_THERMAL=y` で MSR の道だけ n の組は build していない（前提の外）。
+- 全 platform の vmunix: [p005](../phase005/phase.md) の「締め」の表。intelmid64 は mk の重複で落ちる（mk の案 1）。
+- 未実施: riscv64 の virt の QEMU（新しい build に platform が無い）、`/sbin/thermal` の保存と restore の host 試験（QEMU で代わりに確かめた）。
+- cleared の材料: CPU の ioctl の host 試験 PASS（52 checks、q2013-i01）、amd64 の 2 通りの build、QEMU amd64 の sensor・fan 0・受け手（cpu は unsupported）・topology・起動の restore。受け入れの「riscv64 の virt でも `/sbin/thermal` が動く」だけが未達で、原因は build system（WS333 の source ではない）。Q1 がこの項を外すか、riscv64 の platform を待つかを決める。
