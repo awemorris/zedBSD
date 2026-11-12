@@ -1,7 +1,9 @@
 #!/bin/sh
 # ws333 p014: the CPU's acceptance on the bare Latitude 5330, end to end (deploy, boot, run, collect, summary), under
 # /tmp/i915-hw.lock, read through /dev/thermal with the tree's /sbin/thermal (copied to /tmp on zedBSD).
-#   sh plan/ws333/tests/hw5330/5330-p014.sh KDIR NAME
+#   sh plan/ws333/tests/hw5330/5330-p014.sh KDIR NAME [cpu]
+# With cpu, only one boot of the c6 kernel and the CPU part (each strategy and the direct maximum, the request the
+# domains show and the CPUs' MHz read four times while one process spins, then while every CPU is loaded).
 # KDIR holds the kernels of kbuild.sh: KDIR/hlt, c6, c10 and periodic (each DIR/vmunix); THERMAL (default
 # KDIR/static/thermal, made by thermal-static.sh: the NVMe's userland predates the tree's shared libc) is the program.  Each kernel goes to the NVMe's p4 (5330-nvme-write.sh kernel, the one
 # before kept as vmunix.old) and boots the NVMe's zedBSD (its userland is kept); after IDLE_SETTLE seconds (default
@@ -18,6 +20,7 @@
 set -u
 KDIR=${1:?KDIR}
 NAME=${2:?NAME}
+MODE=${3:-all}
 cd "$(dirname "$0")/../../../.."
 THERMAL=${THERMAL:-$KDIR/static/thermal}
 LOGS=${LOGS:-build/hw5330/ws333}/$NAME
@@ -115,19 +118,23 @@ window() {
 }
 # One spinning process for 20 s from an SSH session that stays open until it ends, in the background here.
 spin1() {
-	TO=40 zb "timeout 20 sh -c 'while :; do :; done' > /dev/null 2>&1 < /dev/null" > /dev/null 2>&1 &
+	TO=45 zb "timeout 25 sh -c 'while :; do :; done' > /dev/null 2>&1 < /dev/null" > /dev/null 2>&1 &
 }
 # A busy loop on every CPU for 20 s.
 loadall() {
 	TO=50 zb "n=\$(sysctl hw.ncpu | sed 's/.*: *//'); i=0; while [ \$i -lt \$n ]; do timeout 20 sh -c 'while :; do :; done' > /dev/null 2>&1 < /dev/null & i=\$((i + 1)); done; wait" > /dev/null 2>&1 &
 }
-# The CPUs while one process spins: each CPU's MHz, and the highest.
+# The CPUs while one process spins (25 s): each CPU's MHz read four times, 5 s apart, and the highest of each read.
 spun() {
 	spin1
-	sleep 10
-	th "cpu" "$1-cpu.txt"
+	highs=
+	for k in 1 2 3 4; do
+		sleep 5
+		th "cpu" "$1-cpu$k.txt"
+		highs="$highs $(sed -n 's/.* mhz=\([0-9]*\).*/\1/p' "$LOGS/$1-cpu$k.txt" | sort -n | tail -1)"
+	done
 	wait
-	say "$1: highest mhz $(sed -n 's/.* mhz=\([0-9]*\).*/\1/p' "$LOGS/$1-cpu.txt" | sort -n | tail -1), all $(sed -n 's/^cpu \([0-9]*\) .* mhz=\([0-9]*\).*/\1:\2/p' "$LOGS/$1-cpu.txt" | tr '\n' ' ')"
+	say "$1: highest mhz of each read:$highs; last read $(sed -n 's/^cpu \([0-9]*\) .* mhz=\([0-9]*\).*/\1:\2/p' "$LOGS/$1-cpu4.txt" | tr '\n' ' ')"
 }
 
 TO=60 timeout 60 scp -q plan/tools/hw5330/5330-nvme-write.sh plan/tools/hw5330/ufs-grow.py "$HOST:ws245/" || { echo "5330-p014: FAIL: copy of the helper"; exit 1; }
@@ -142,18 +149,21 @@ lin "test -f \$HOME/ws245/vmunix-p014-orig || { sudo -n mount $NV_BOOT /mnt/zb &
 say "p4's kernel before the run: $(TO=15 lin 'cksum < $HOME/ws245/vmunix-p014-orig') (Debian ~/ws245/vmunix-p014-orig; put back: 5330-nvme-write.sh kernel it)"
 
 # 1. Idle: each kernel, the window; c6 also under balanced, and the CPU part.
-for tag in hlt periodic c10 c6; do
+tags="hlt periodic c10 c6"
+[ "$MODE" = cpu ] && tags=c6
+for tag in $tags; do
 	kernel "$KDIR/$tag/vmunix"
 	to_zedbsd
-	sleep "${IDLE_SETTLE:-120}"
+	[ "$MODE" = cpu ] || sleep "${IDLE_SETTLE:-120}"
 	zb 'dmesg' > "$LOGS/$tag-boot.txt" 2>&1
-	say "$tag idle line: $(grep -h 'idle\|mwait\|MWAIT\|C-state' "$LOGS/$tag-boot.txt" | head -3 | tr '\n' ';')"
 	th "" "$tag-status.txt"
-	window "$tag"
+	[ "$MODE" = cpu ] || window "$tag"
 	if [ "$tag" = c6 ]; then
-		th "strategy balanced" c6-balanced-set.txt
-		sleep 30
-		window c6-balanced
+		if [ "$MODE" != cpu ]; then
+			th "strategy balanced" c6-balanced-set.txt
+			sleep 30
+			window c6-balanced
+		fi
 
 		# 3. The CPUs, the domains, the relative performance; each strategy with one process spinning.
 		th "cpu" cpu-idle.txt
@@ -167,6 +177,8 @@ for tag in hlt periodic c10 c6; do
 			tag2=$(echo "$s" | tr ' ' '-')
 			th "strategy $s" "strategy-$tag2.txt"
 			sleep 3
+			th "cpu domains" "strategy-$tag2-domains.txt"
+			say "strategy $s request: $(sed -n 's/^domain \([0-9]*\) .* min=\([0-9]*\) max=\([0-9]*\) desired=\([0-9]*\) epp=\([0-9]*\).*/d\1:\2-\3,d\4,e\5/p' "$LOGS/strategy-$tag2-domains.txt" | sort -u -t: -k2 | tr '\n' ' ')"
 			spun "strategy-$tag2"
 		done
 
@@ -191,12 +203,17 @@ for tag in hlt periodic c10 c6; do
 		sleep 12
 		th "cpu" cpu-loaded.txt
 		wait
-		say "loaded: $(sed -n 's/^cpu \([0-9]*\) core=\([a-z0-9-]*\) domain=\([0-9]*\) .* mhz=\([0-9]*\).*/\1:\2:d\3:\4/p' "$LOGS/cpu-loaded.txt" | tr '\n' ' ')"
+		say "loaded: $(sed -n 's/^cpu \([0-9]*\) core=\([A-Za-z0-9-]*\) domain=\([0-9]*\) .* mhz=\([0-9]*\).*/\1:\2:d\3:\4/p' "$LOGS/cpu-loaded.txt" | tr '\n' ' ')"
 		th "strategy balanced" strategy-end.txt
 		zb 'dmesg' > "$LOGS/c6-end.txt" 2>&1
 	fi
 	to_debian
 done
+
+if [ "$MODE" = cpu ]; then
+	say "done $(date '+%F %T')"
+	exit 0
+fi
 
 # 4. cpuperf.hwp=off on the c6 kernel.
 cfg_add cpuperf.hwp=off
