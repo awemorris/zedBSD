@@ -2334,8 +2334,11 @@ dispatch_request(
 	? INIT_ACTION_POWEROFF
 	: INIT_ACTION_HALT;
 
+		/* Answers the client that the action is scheduled. */
+		error = zsv1_server_send_ok_end_fd(client, "scheduled");
+
 		/* Schedules the action, unless the thermal emergency's power-off is under way. */
-		if (zsv1_server_send_ok_end_fd(client, "scheduled") == 0 && !emergency_requested)
+		if (error == 0 && !emergency_requested)
 			action_requested = action;
 
 		/* Returns the computed result. */
@@ -2541,6 +2544,8 @@ signal_handler(
 		action_requested = INIT_ACTION_POWEROFF;
 		return;
 	}
+
+	/* Once the emergency began, no other signal changes what init does. */
 	if (emergency_requested)
 		return;
 
@@ -2584,6 +2589,8 @@ note_emergency(
 	/* Only once, and only in an emergency. */
 	if (!emergency_requested || emergency_noted)
 		return;
+
+	/* Marks it written down, so a later call does nothing. */
 	emergency_noted = 1;
 
 	/* Tells the kernel first that init stops the machine; it waits ten seconds for the word. */
@@ -2608,6 +2615,8 @@ note_emergency(
 		fprintf(stderr, "init: %s: %s\n", EMERGENCY_PATH, strerror(errno));
 		return;
 	}
+
+	/* Writes the line out at once, since the power goes soon. */
 	(void)write(descriptor, line, (size_t)length);
 	(void)fsync(descriptor);
 	(void)close(descriptor);

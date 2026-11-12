@@ -239,8 +239,11 @@ kl_backend_monitor_close(
 	/* /dev/system, /dev/thermal, the buffer and the monitor. */
 	if (monitor->system >= 0)
 		(void)close(monitor->system);
+
+	/* The temperature source is optional too. */
 	if (monitor->thermal >= 0)
 		(void)close(monitor->thermal);
+
 	free(monitor->buffer);
 	free(monitor);
 }

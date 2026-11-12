@@ -388,9 +388,10 @@ static void thermal_ring_append(struct kern_thermal_reader *reader, const struct
 /*
  * Brings the thermal core up.
  *
- * Starts the three threads.  Registrations made before it are kept: the strategy thread
- * serves a strategy chosen later to every receiver, and the poll thread
- * reads every fan and meter in the table.  Called once from the boot path.
+ * Starts the three threads.  Registrations made before it are kept: the
+ * strategy thread serves a strategy chosen later to every receiver, and the
+ * poll thread reads every fan and meter in the table.  Called once from the
+ * boot path.
  */
 void
 kern_thermal_init(void)
@@ -626,6 +627,7 @@ kern_thermal_sensor_update(
 		if (distance < 0)
 			distance = -distance;
 
+		/* Tells a far jump, which is dropped once, from a reading that is taken. */
 		if (sensor->accepted &&
 		    distance >= THERMAL_READING_JUMP &&
 		    !sensor->jump_dropped) {
@@ -954,7 +956,7 @@ kern_thermal_sensor_get(
 	uint32_t reading;
 	bool armed;
 
-	/* Refuses a sensor past the table. */
+	/* Prepares the tables, then refuses a sensor past the table. */
 	thermal_prepare();
 	count = atomic_load_acquire(&thermal_sensor_count);
 	if (index >= count)
@@ -1005,7 +1007,7 @@ kern_thermal_fan_get(
 	unsigned long irq;
 	unsigned count;
 
-	/* Refuses a fan past the table. */
+	/* Prepares the tables, then refuses a fan past the table. */
 	thermal_prepare();
 	count = atomic_load_acquire(&thermal_fan_count);
 	if (index >= count)
@@ -1049,7 +1051,7 @@ kern_thermal_meter_get(
 	uint64_t energy;
 	uint64_t read_tick;
 
-	/* Refuses a meter past the table. */
+	/* Prepares the tables, then refuses a meter past the table. */
 	thermal_prepare();
 	count = atomic_load_acquire(&thermal_meter_count);
 	if (index >= count)
@@ -1068,6 +1070,8 @@ kern_thermal_meter_get(
 			atomic_spin_hint();
 			continue;
 		}
+
+		/* Reads the fields the sum is made of, and keeps them if the sequence did not move. */
 		copy = meter->copy;
 		energy = meter->energy_nj;
 		read_tick = meter->read_tick;
@@ -1099,7 +1103,7 @@ kern_thermal_receiver_get(
 	unsigned long irq;
 	unsigned count;
 
-	/* Refuses a receiver past the table. */
+	/* Prepares the tables, then refuses a receiver past the table. */
 	thermal_prepare();
 	count = atomic_load_acquire(&thermal_receiver_count);
 	if (index >= count)
@@ -1235,6 +1239,7 @@ kern_thermal_strategy_set(
 			break;
 		}
 
+		/* Gives way to a later choice that replaced this one. */
 		if (thermal_generation != generation) {
 			/* A later choice replaced this one before the receivers answered. */
 			error = 0;
@@ -1242,6 +1247,7 @@ kern_thermal_strategy_set(
 			break;
 		}
 
+		/* Stops waiting once the deadline has passed. */
 		now = sched_ticks();
 		if (now >= deadline) {
 			/* The receivers are still at work; the outcome comes as an event. */
@@ -1250,6 +1256,7 @@ kern_thermal_strategy_set(
 			break;
 		}
 
+		/* Sleeps until the strategy thread reports, or the deadline. */
 		observed = waitq_sequence(&thermal_done_queue);
 		(void)waitq_sleep(&thermal_done_queue, &thermal_lock, observed, deadline, 0U);
 	}
@@ -1307,7 +1314,7 @@ kern_thermal_boost_set(
 		last = fan + 1U;
 	}
 
-	/* Checks every fan named, then stamps the request on each and hands it to the strategy thread. */
+	/* Checks every fan named before any is changed, with the lock held so none changes meanwhile. */
 	deadline = sched_ticks() + thermal_period(THERMAL_ANSWER_WAIT_MS);
 	irq = spin_lock_irqsave(&thermal_lock);
 
@@ -1320,18 +1327,24 @@ kern_thermal_boost_set(
 			spin_unlock_irqrestore(&thermal_lock, irq);
 			return EINVAL;
 		}
+
+		/* Counts the fan as one the request reaches. */
 		targets++;
 	}
 
+	/* Refuses a request that reaches no fan, since none can be boosted. */
 	if (targets == 0U) {
 		spin_unlock_irqrestore(&thermal_lock, irq);
 		return EOPNOTSUPP;
 	}
 
+	/* Takes the next stamp for the request, skipping 0, which no request has. */
 	ticket = thermal_boost_ticket + 1U;
 	if (ticket == 0U)
 		ticket = 1U;
 	thermal_boost_ticket = ticket;
+
+	/* Stamps the level on every fan the request reaches. */
 	for (index = first; index < last; index++) {
 		entry = &thermal_fans[index];
 		if (entry->ops->boost == NULL)
@@ -1339,6 +1352,8 @@ kern_thermal_boost_set(
 		entry->boost_wanted = level;
 		entry->boost_ticket = ticket;
 	}
+
+	/* Hands the request to the strategy thread. */
 	thermal_post_work();
 
 	/* Waits for the strategy thread to pass this request, or for the deadline. */
@@ -1351,6 +1366,7 @@ kern_thermal_boost_set(
 			break;
 		}
 
+		/* Stops waiting once the deadline has passed. */
 		now = sched_ticks();
 		if (now >= deadline) {
 			/* A driver is still at work. */
@@ -1358,6 +1374,7 @@ kern_thermal_boost_set(
 			break;
 		}
 
+		/* Sleeps until the strategy thread reports, or the deadline. */
 		observed = waitq_sequence(&thermal_done_queue);
 		(void)waitq_sleep(&thermal_done_queue, &thermal_lock, observed, deadline, 0U);
 	}
@@ -1450,15 +1467,19 @@ kern_thermal_reader_attach(
 	/* Puts the open file on the list the events go to, while there is room. */
 	irq = spin_lock_irqsave(&thermal_event_lock);
 
+	/* Refuses an open file that is on the list already. */
 	if (reader->attached) {
 		spin_unlock_irqrestore(&thermal_event_lock, irq);
 		return EINVAL;
 	}
+
+	/* Refuses another open file once the list is full. */
 	if (thermal_reader_count >= KERN_THERMAL_READER_MAX) {
 		spin_unlock_irqrestore(&thermal_event_lock, irq);
 		return ENOSPC;
 	}
 
+	/* Starts the open file with an empty ring and puts it at the head of the list. */
 	reader->mask = mask;
 	reader->head = 0;
 	reader->count = 0;
@@ -1512,6 +1533,8 @@ kern_thermal_reader_detach(
 				break;
 			}
 		}
+
+		/* Marks the open file detached and wakes a read that sleeps on it. */
 		reader->next = NULL;
 		reader->attached = false;
 		thermal_reader_count--;
@@ -1601,6 +1624,7 @@ kern_thermal_reader_take(
 		moved++;
 	}
 
+	/* Moves the events behind it, oldest first, while there is room. */
 	while (moved < capacity && reader->count > 0U) {
 		records[moved] = reader->ring[reader->head];
 		reader->head = (reader->head + 1U) % KERN_THERMAL_READER_RING;
@@ -1663,6 +1687,8 @@ thermal_prepare(void)
 				break;
 			atomic_spin_hint();
 		}
+
+		/* The caller that claimed the preparation has finished it. */
 		return;
 	}
 
@@ -1699,8 +1725,10 @@ thermal_now_ns(
 {
 	uint64_t nanoseconds;
 
-	/* Succeeded: the tick's time. */
+	/* Converts the tick at the clock's rate. */
 	nanoseconds = kern_ticks_to_ns(tick);
+
+	/* Succeeded: the tick's time. */
 	return nanoseconds;
 }
 
@@ -1711,8 +1739,10 @@ thermal_period(
 {
 	uint64_t ticks;
 
-	/* Succeeded: at least one tick, as the conversion rounds up. */
+	/* Converts the period at the clock's rate, rounding up. */
 	ticks = kern_ms_to_ticks(milliseconds);
+
+	/* Succeeded: at least one tick. */
 	return ticks;
 }
 
@@ -1726,12 +1756,14 @@ thermal_start_thread(
 	struct thread *thread;
 	int error;
 
-	/* Creates the thread and lets it run. */
+	/* Creates the thread. */
 	error = kthread_create(entry, NULL, priority, &thread);
 	if (error != 0) {
 		kern_logf("thermal: the %s thread did not start (%d)\n", name, error);
 		return;
 	}
+
+	/* Lets the thread run. */
 	thread_start(thread);
 }
 
@@ -1852,6 +1884,7 @@ thermal_strategy_flags(void)
 	if (thermal_generation == 0U)
 		return flags;
 
+	/* Reports what the receivers answered, or that they have not all answered yet. */
 	if (thermal_summary_generation == thermal_generation) {
 		/* The receivers answered the choice in force. */
 		flags = thermal_summary_flags;
@@ -1918,6 +1951,8 @@ thermal_work_wait(void)
 		observed = waitq_sequence(&thermal_work_queue);
 		(void)waitq_sleep(&thermal_work_queue, &thermal_lock, observed, 0, 0U);
 	}
+
+	/* Takes every request present, so one made later brings another pass. */
 	thermal_work_seen = thermal_work_posted;
 
 	spin_unlock_irqrestore(&thermal_lock, irq);
@@ -2015,7 +2050,7 @@ thermal_strategy_summarize(
 	int first;
 	int error;
 
-	/* Counts the acting receivers of the generation and their failures. */
+	/* Reads the receivers' answers under the copy lock. */
 	count = atomic_load_acquire(&thermal_receiver_count);
 	irq = spin_lock_irqsave(&thermal_lock);
 
@@ -2026,6 +2061,7 @@ thermal_strategy_summarize(
 		return;
 	}
 
+	/* Counts the acting receivers of the generation and their failures. */
 	acting = 0;
 	failed = 0;
 	first = 0;
@@ -2146,6 +2182,7 @@ thermal_boost_pass(void)
 	irq = spin_lock_irqsave(&thermal_lock);
 
 	if (thermal_boost_done != latest) {
+		/* Finds the first errno among the fans that served the request. */
 		first = 0;
 		for (index = 0; index < count; index++) {
 			fan = &thermal_fans[index];
@@ -2154,6 +2191,8 @@ thermal_boost_pass(void)
 			if (fan->boost_error != 0 && first == 0)
 				first = fan->boost_error;
 		}
+
+		/* Records the outcome and wakes the requester waiting for it. */
 		thermal_boost_done = latest;
 		thermal_boost_error = first;
 		waitq_wake_all(&thermal_done_queue);
@@ -2301,6 +2340,7 @@ thermal_poll_passive(void)
 
 	spin_unlock_irqrestore(&thermal_lock, irq);
 
+	/* Notes when the step was taken, says so, and hands the ceiling on. */
 	thermal_passive_tick = now;
 	kern_logf("thermal: passive ceiling %u permille\n", next);
 	thermal_passive_apply(next);
@@ -2369,6 +2409,7 @@ thermal_meter_read(
 	/* Updates the copy inside an odd sequence. */
 	thermal_meter_write_begin(meter);
 
+	/* Takes the count into the sum unless the read failed or is the first one. */
 	if (error != 0) {
 		/* Keeps the sum and says the read failed. */
 		meter->copy |= KERN_THERMAL_METER_COPY_STALE;
@@ -2393,6 +2434,7 @@ thermal_meter_read(
 		meter->read_tick = now;
 	}
 
+	/* Makes the copy whole for a reader. */
 	thermal_meter_write_end(meter);
 }
 
@@ -2562,6 +2604,7 @@ thermal_guard_pass(void)
 		}
 	}
 
+	/* Tells the poll thread whether a sensor wants the passive ceiling. */
 	thermal_passive_wanted = passive;
 
 	spin_unlock_irqrestore(&thermal_lock, irq);

@@ -213,6 +213,7 @@ drv_cpu_x86_control_probe(
 	int present;
 	int error;
 
+	/* Selects the machine the probe fills. */
 	machine = &drv_cpu_x86_machine;
 
 	/* Reads which registers the allow list names for this model; another model has none. */
@@ -270,6 +271,8 @@ drv_cpu_x86_control_cpu(
 	error = cpux86_hwp_enabled(raw, &enabled);
 	if (error != 0 || enabled == 0U)
 		return;
+
+	/* Records that HWP is already on, so requests are accepted. */
 	state->hwp_enabled = true;
 
 	/* Keeps the capabilities the already running HWP reports. */
@@ -285,8 +288,10 @@ drv_cpu_x86_control_ops(
 	struct kern_cpuperf_provider_ops *ops)
 {
 	const struct cpu_x86_machine *machine;
+	uint32_t count;
 	bool residency;
 
+	/* Selects the machine whose gates decide the operations. */
 	machine = &drv_cpu_x86_machine;
 
 	/* Controls the CPUs through HWP. */
@@ -296,11 +301,15 @@ drv_cpu_x86_control_ops(
 	}
 
 	/* Samples the capabilities and the delivered rate where either can be read. */
-	if (machine->hwp || (machine->counters && machine->base_mhz != 0U))
+	if (machine->hwp ||
+	    (machine->counters &&
+	     machine->base_mhz != 0U))
 		ops->sample = cpu_x86_sample;
 
 	/* Measures the highest rate from the delivered-performance counters. */
-	if (machine->hwp && machine->counters && machine->base_mhz != 0U)
+	if (machine->hwp &&
+	    machine->counters &&
+	    machine->base_mhz != 0U)
 		ops->measure = cpu_x86_measure;
 
 	/* Copies the hardware feedback and offers it as a relative performance. */
@@ -314,12 +323,12 @@ drv_cpu_x86_control_ops(
 	/* Reads the idle residency where the model has the counters and their rate is known. */
 	if (machine->tsc_hz == 0U)
 		return;
-	residency = cpu_x86_has_residency(cpu_x86_package_residency,
-					  sizeof(cpu_x86_package_residency) / sizeof(cpu_x86_package_residency[0]));
+	count = sizeof(cpu_x86_package_residency) / sizeof(cpu_x86_package_residency[0]);
+	residency = cpu_x86_has_residency(cpu_x86_package_residency, count);
 	if (residency)
 		ops->idle_package = cpu_x86_idle_package;
-	residency = cpu_x86_has_residency(cpu_x86_core_residency,
-					  sizeof(cpu_x86_core_residency) / sizeof(cpu_x86_core_residency[0]));
+	count = sizeof(cpu_x86_core_residency) / sizeof(cpu_x86_core_residency[0]);
+	residency = cpu_x86_has_residency(cpu_x86_core_residency, count);
 	if (residency)
 		ops->idle_core = cpu_x86_idle_core;
 }
@@ -333,6 +342,7 @@ drv_cpu_x86_control_attach(void)
 {
 	const struct cpu_x86_machine *machine;
 
+	/* Selects the machine whose gates decide what is prepared. */
 	machine = &drv_cpu_x86_machine;
 
 	/* Gives every CPU its package's slot. */
@@ -405,6 +415,8 @@ cpu_x86_start(
 		if (error != 0 || enabled == 0U)
 			return EIO;
 	}
+
+	/* Records that HWP is on, so requests are accepted. */
 	state->hwp_enabled = true;
 
 	/*
@@ -540,8 +552,10 @@ cpu_x86_sample(
 	uint32_t events;
 	int error;
 
-	/* Refuses a CPU the driver has no record for. */
+	/* Reports no delivered rate until one is worked out. */
 	sample->delivered_mhz = 0U;
+
+	/* Refuses a CPU the driver has no record for. */
 	if (cpu >= drv_cpu_x86_cpu_count)
 		return;
 	state = &drv_cpu_x86_cpus[cpu];
@@ -574,7 +588,9 @@ cpu_x86_sample(
 		return;
 	mperf = drv_cpu_x86_rdmsr(CPUX86_MSR_MPERF);
 	aperf = drv_cpu_x86_rdmsr(CPUX86_MSR_APERF);
-	if (state->sample_marked && mperf > state->sample_mperf && aperf >= state->sample_aperf)
+	if (state->sample_marked &&
+	    mperf > state->sample_mperf &&
+	    aperf >= state->sample_aperf)
 		sample->delivered_mhz = cpu_x86_rate_mhz(aperf - state->sample_aperf, mperf - state->sample_mperf);
 
 	/* Keeps the counters for the next sample. */
@@ -687,8 +703,10 @@ cpu_x86_feedback(
 	unsigned feedback_state;
 	int error;
 
-	/* Finds the CPU's package. */
+	/* Reports no new copy until one is taken. */
 	*changed = false;
+
+	/* Finds the CPU's package. */
 	if (cpu >= drv_cpu_x86_cpu_count)
 		return EINVAL;
 	state = &drv_cpu_x86_cpus[cpu];
@@ -849,6 +867,7 @@ cpu_x86_probe_hwp(
 	uint32_t enabled;
 	int error;
 
+	/* Selects the machine the decision fills. */
 	machine = &drv_cpu_x86_machine;
 
 	/* Leaves a processor without HWP uncontrolled. */
@@ -865,6 +884,8 @@ cpu_x86_probe_hwp(
 		kern_logf("cpu-x86: IA32_PM_ENABLE reads 0x%llx; HWP is left alone\n", (unsigned long long)raw);
 		return;
 	}
+
+	/* Remembers whether something turned HWP on before the kernel did. */
 	machine->hwp_enabled_at_boot = enabled != 0U;
 
 	/* Honours cpuperf.hwp=off where HWP is still off. */
@@ -872,6 +893,8 @@ cpu_x86_probe_hwp(
 		kern_logf("cpu-x86: HWP turned off by cpuperf.hwp=off; the CPUs are described, not controlled\n");
 		return;
 	}
+
+	/* Warns that cpuperf.hwp=off is too late to take effect. */
 	if (hwp_off)
 		kern_logf("cpu-x86: HWP was on before the kernel started; cpuperf.hwp=off cannot turn it off\n");
 
@@ -892,6 +915,7 @@ cpu_x86_probe_feedback(
 	struct cpu_x86_machine *machine;
 	int error;
 
+	/* Selects the machine the decision fills. */
 	machine = &drv_cpu_x86_machine;
 
 	/* Leaves the interface off without HWP control or one of its registers. */
@@ -938,6 +962,7 @@ cpu_x86_probe_platform(void)
 	uint32_t mhz;
 	int error;
 
+	/* Selects the machine the reading fills. */
 	machine = &drv_cpu_x86_machine;
 
 	/* Knows no frequency off the allow list. */
@@ -1016,11 +1041,13 @@ cpu_x86_feedback_enable(
 	if (!claimed)
 		return;
 
-	/* Leaves a package without a table, or with an interface already on. */
+	/* Leaves a package without a table. */
 	if (package->copy == NULL) {
 		atomic_store_release(&package->state, CPU_X86_FEEDBACK_REFUSED);
 		return;
 	}
+
+	/* Leaves a package whose interface something else already enabled. */
 	config = drv_cpu_x86_rdmsr(CPUX86_MSR_HW_FEEDBACK_CONFIG);
 	enable_bit = cpux86_field64(config, 0U, 1U);
 	if (enable_bit != 0U) {
@@ -1083,14 +1110,28 @@ cpu_x86_feedback_cells(
 		before = atomic_load_acquire(&package->sequence);
 		if ((before & 1U) != 0U)
 			continue;
-		error = cpux86_feedback_cell(package->copy, cpu_x86_layout.table_size, &cpu_x86_layout,
-					     state->feedback_row, 0U, CPUX86_FEEDBACK_CAP_PERFORMANCE, performance);
+		error = cpux86_feedback_cell(package->copy,
+					     cpu_x86_layout.table_size,
+					     &cpu_x86_layout,
+					     state->feedback_row,
+					     0U,
+					     CPUX86_FEEDBACK_CAP_PERFORMANCE,
+					     performance);
 		if (error == 0) {
-			error = cpux86_feedback_cell(package->copy, cpu_x86_layout.table_size, &cpu_x86_layout,
-						     state->feedback_row, 0U, CPUX86_FEEDBACK_CAP_EFFICIENCY, efficiency);
+			error = cpux86_feedback_cell(package->copy,
+						     cpu_x86_layout.table_size,
+						     &cpu_x86_layout,
+						     state->feedback_row,
+						     0U,
+						     CPUX86_FEEDBACK_CAP_EFFICIENCY,
+						     efficiency);
 		}
+
+		/* Refuses a cell the decoder could not read. */
 		if (error != 0)
 			return error;
+
+		/* Accepts the cells only when the copy did not move while they were read. */
 		atomic_acquire_fence();
 		after = atomic_load_acquire(&package->sequence);
 		if (after == before)
@@ -1282,17 +1323,24 @@ cpu_x86_attach_tables(void)
 		package = &cpu_x86_packages[index];
 
 		/* Allocates the table, page aligned, and clears it. */
-		error = kern_pmem_alloc_limited(cpu_x86_layout.table_size, CPUX86_FEEDBACK_PAGE_SIZE, limit, 0U,
+		error = kern_pmem_alloc_limited(cpu_x86_layout.table_size,
+					       CPUX86_FEEDBACK_PAGE_SIZE,
+					       limit,
+					       0U,
 					       &package->memory);
 		if (error != 0) {
 			kern_logf("cpu-x86: no memory for package %u's feedback table (%d)\n", package->package, error);
 			continue;
 		}
+
+		/* Maps the table into the kernel, to clear it. */
 		mapped = kern_pmem_to_kernel(package->memory.paddr);
 		if (mapped == NULL) {
 			(void)kern_pmem_free(&package->memory);
 			continue;
 		}
+
+		/* Clears the table before the hardware writes it. */
 		kern_memset(mapped, 0, cpu_x86_layout.table_size);
 		package->table = mapped;
 
@@ -1340,6 +1388,8 @@ cpu_x86_attach_meters(void)
 		kern_logf("cpu-x86: the RAPL unit register reads 0x%llx; no energy meter\n", (unsigned long long)raw);
 		return;
 	}
+
+	/* Fills the operations every meter shares: the width and the unit. */
 	cpu_x86_meter_ops.count_bits = 32U;
 	cpu_x86_meter_ops.unit_numerator = CPU_X86_NANOJOULES_PER_JOULE;
 	cpu_x86_meter_ops.unit_denominator = (uint32_t)1U << units.energy_shift;
@@ -1357,15 +1407,21 @@ cpu_x86_attach_meters(void)
 			if (error != 0 || energy == 0U)
 				continue;
 		}
+
+		/* Offers the counter to the thermal core. */
 		error = kern_thermal_meter_register(meter->name, meter->kind, &cpu_x86_meter_ops, meter);
 		if (error != 0) {
 			kern_logf("cpu-x86: the thermal core refused the %s meter (%d)\n", meter->name, error);
 			continue;
 		}
+
+		/* Counts the meter for the report. */
 		count++;
 	}
 
 	/* Reports the meters. */
-	kern_logf("cpu-x86: %u energy meter%s, 1/2^%u J per count\n", count, count == 1U ? "" : "s",
+	kern_logf("cpu-x86: %u energy meter%s, 1/2^%u J per count\n",
+		  count,
+		  count == 1U ? "" : "s",
 		  units.energy_shift);
 }

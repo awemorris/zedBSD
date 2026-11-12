@@ -611,6 +611,7 @@ devfs_cdev_inode(
 	int gpu;
 	int thermal;
 	int thermal_match;
+	int thermal_inject_match;
 
 	/* Creates a generation-unique inode and gives it one cdev reference. */
 	number = cdev_generation(device);
@@ -648,10 +649,15 @@ devfs_cdev_inode(
 	bridge = bridge_name(device->name);
 	camera = camera_name(device->name);
 	gpu = gpu_name(device->name);
+
+	/* Recognizes the thermal node, which has its own mode and group, and the injection node. */
 	thermal = 0;
 	thermal_match = kern_strcmp(device->name, "thermal");
 	if (thermal_match == 0)
 		thermal = 1;
+	thermal_inject_match = kern_strcmp(device->name, "thermal-inject");
+
+	/* Chooses the mode of the node. */
 	if (event_name(device->name))
 		mode = 0640U;
 	else if (backlight)
@@ -660,7 +666,7 @@ devfs_cdev_inode(
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "input-inject") == 0)
 		mode = 0600U;
-	else if (kern_strcmp(device->name, "thermal-inject") == 0)
+	else if (thermal_inject_match == 0)
 		mode = 0600U;
 	else if (thermal)
 		mode = KERN_THERMAL_NODE_MODE;

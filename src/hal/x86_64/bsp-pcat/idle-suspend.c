@@ -30,7 +30,7 @@
  * sub-states for, when the CPU has MONITOR/MWAIT with the break on a masked
  * interrupt, its local APIC timer keeps running in every C-state (ARAT),
  * the TSC is invariant and no hypervisor is underneath (whose MWAIT may not
- * reach the hardware's C-states); otherwise it halts (C1) as before.  A C-state
+ * reach the hardware's C-states); otherwise it halts (C1).  A C-state
  * deeper than C1 lets the core power down, and a package whose cores all do
  * enter its own low-power states.
  */
@@ -66,8 +66,7 @@
  * The deepest C-state the ordinary idle enters, as CPUID leaf 5 counts
  * them (C0 is 0, an MWAIT hint's C-state field plus one).  The tick wakes
  * every CPU each millisecond, so a state whose exit costs a large part of
- * that is not taken.  1 keeps the ordinary idle halted (HLT), as a build
- * to compare against.
+ * that is not taken.  1 keeps the ordinary idle halted (HLT).
  */
 #ifndef IDLE_WAIT_DEEPEST_CSTATE
 #define IDLE_WAIT_DEEPEST_CSTATE	3U
@@ -77,12 +76,21 @@
 #define IDLE_LINE_BYTES			64U
 
 /*
- * The firmware's low-power S0 idle MWAIT hint, and whether the boot CPU
- * can enter it (MONITOR/MWAIT, the extensions and the hint's sub-state).
- * Both are written once on the boot CPU before any AP starts and read
- * afterwards by every CPU.
+ * The firmware's low-power S0 idle MWAIT hint.
+ *
+ * Written once on the boot CPU before any AP starts and read afterwards by
+ * every CPU; meaningful only while idle_cpu_ready is set.
  */
 static uint32_t idle_hint;
+
+/*
+ * Whether the boot CPU can enter the firmware's hint (MONITOR/MWAIT, the
+ * extensions and the hint's sub-state).
+ *
+ * Zero until the boot CPU has checked, and zero for good when the machine
+ * has no such state.  Written once on the boot CPU before any AP starts
+ * and read afterwards by every CPU.
+ */
 static unsigned idle_cpu_ready;
 
 /*
@@ -92,10 +100,19 @@ static unsigned idle_cpu_ready;
 static volatile uint8_t idle_lines[AMD64_SMP_MAX_CPUS][IDLE_LINE_BYTES] __attribute__((aligned(IDLE_LINE_BYTES)));
 
 /*
- * The ordinary idle's MWAIT hint, and whether the CPU can wait in it
- * (idle_wait_ready).  Written once on the boot CPU before any AP starts.
+ * The ordinary idle's MWAIT hint.
+ *
+ * Written once on the boot CPU before any AP starts; meaningful only while
+ * idle_wait_ready is set.
  */
 static uint32_t idle_wait_hint;
+
+/*
+ * Whether the CPU can wait in the ordinary idle's MWAIT hint.
+ *
+ * Zero means the ordinary idle halts.  Written once on the boot CPU before
+ * any AP starts and read afterwards by every CPU.
+ */
 static unsigned idle_wait_ready;
 
 static void idle_cpuid(uint32_t leaf, uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx);
@@ -216,9 +233,15 @@ bsp_cpu_idle(
 	void)
 {
 	volatile uint8_t *line;
+	bool invariant;
+
+	/* Asks whether the TSC counts through the state, only when there is a state. */
+	invariant = false;
+	if (idle_wait_ready)
+		invariant = amd64_timecounter_invariant();
 
 	/* Without the state, or without a TSC that counts through it, the CPU halts. */
-	if (!idle_wait_ready || !amd64_timecounter_invariant()) {
+	if (!invariant) {
 		__asm__ volatile("sti; hlt; cli" ::: "memory");
 		return;
 	}
@@ -250,42 +273,52 @@ idle_wait_init(
 	uint32_t cstate;
 	uint32_t substates;
 
-	/* MONITOR/MWAIT, the MWAIT leaf and the power leaf. */
+	/* Keeps the idle halting until every requirement below is met. */
 	idle_wait_ready = 0U;
+
+	/* Refuses a hypervisor, whose MWAIT may not reach the hardware's C-states. */
 	idle_cpuid(CPUID_LEAF_FEATURES, &eax, &ebx, &ecx, &edx);
 	if ((ecx & CPUID_FEATURE_HYPERVISOR) != 0U) {
 		hal_puts("A64 IDLE WAIT HLT reason=hypervisor\n");
 		return;
 	}
+
+	/* Refuses a CPU without MONITOR/MWAIT. */
 	if ((ecx & CPUID_FEATURE_MONITOR) == 0U) {
 		hal_puts("A64 IDLE WAIT HLT reason=monitor\n");
 		return;
 	}
+
+	/* Refuses a CPU that has no power leaf. */
 	idle_cpuid(0U, &eax, &ebx, &ecx, &edx);
 	if (eax < CPUID_LEAF_POWER) {
 		hal_puts("A64 IDLE WAIT HLT reason=leaf\n");
 		return;
 	}
 
-	/* The break on a masked interrupt, and the timer through the C-states. */
+	/* Refuses a CPU that cannot break out of MWAIT on a masked interrupt. */
 	idle_cpuid(CPUID_LEAF_MWAIT, &eax, &ebx, &ecx, &edx);
 	if ((ecx & CPUID_MWAIT_EXTENSIONS) == 0U || (ecx & CPUID_MWAIT_BREAK_ON_IRQ) == 0U) {
 		hal_puts("A64 IDLE WAIT HLT reason=break\n");
 		return;
 	}
+
+	/* Refuses a CPU whose local APIC timer stops in a C-state. */
 	idle_cpuid(CPUID_LEAF_POWER, &eax, &ebx, &ecx, &edx);
 	if ((eax & CPUID_POWER_ARAT) == 0U) {
 		hal_puts("A64 IDLE WAIT HLT reason=arat\n");
 		return;
 	}
 
-	/* The deepest C-state the CPU has sub-states for, past C1. */
+	/* Finds the deepest C-state the CPU has sub-states for, past C1. */
 	idle_cpuid(CPUID_LEAF_MWAIT, &eax, &ebx, &ecx, &edx);
 	for (cstate = IDLE_WAIT_DEEPEST_CSTATE; cstate >= 2U; cstate--) {
 		substates = (edx >> (cstate * 4U)) & MWAIT_HINT_FIELD_MASK;
 		if (substates != 0U)
 			break;
 	}
+
+	/* Refuses a CPU with no sub-state in any C-state past C1. */
 	if (cstate < 2U) {
 		hal_puts("A64 IDLE WAIT HLT reason=cstates\n");
 		return;

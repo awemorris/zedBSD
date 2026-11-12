@@ -93,8 +93,7 @@
  * CPU then takes its tick at the same moment and sleeps in the same gap,
  * so the package can stay in a deep state for most of the period; a
  * periodic timer started on each CPU at its own moment spreads the ticks
- * over the period instead.  0 keeps the periodic timer on every CPU, as a
- * build to compare against.
+ * over the period instead.  0 keeps the periodic timer on every CPU.
  */
 #ifndef LAPIC_TICK_TSC_DEADLINE
 #define LAPIC_TICK_TSC_DEADLINE       1
@@ -358,11 +357,16 @@ amd64_lapic_timer_stop(
 	void)
 {
 	/*
+	 * Stops arming deadlines from the tick on this CPU, so a tick still
+	 * pending does not write a deadline into a timer that is stopped.
+	 */
+	tick_deadline[hal_cpu_current()] = false;
+
+	/*
 	 * Masks the timer vector before clearing its initial count.  Leaving
 	 * the TSC-deadline mode also disarms a deadline, and a deadline write
 	 * from a tick still pending is ignored outside that mode.
 	 */
-	tick_deadline[hal_cpu_current()] = false;
 	write_reg(LAPIC_LVT_TIMER, LAPIC_MASKED | INT_IRQ_BASE);
 	write_reg(LAPIC_TIMER_INITIAL, 0);
 }
@@ -906,6 +910,7 @@ choose_tick_source(
 	uint64_t period;
 	bool invariant;
 	bool known;
+	bool has_mode;
 
 	/* Keeps the periodic timer when the build asks for it. */
 	tick_period_tsc = 0U;
@@ -920,7 +925,14 @@ choose_tick_source(
 	period = 0U;
 	if (invariant && known)
 		period = frequency / HAL_TIMER_FREQUENCY;
-	if (period == 0U || !cpu_has_tsc_deadline()) {
+
+	/* Asks this CPU for the mode only when there is a period to time. */
+	has_mode = false;
+	if (period != 0U)
+		has_mode = cpu_has_tsc_deadline();
+
+	/* Keeps the periodic timer when the period is unknown or this CPU lacks the mode. */
+	if (period == 0U || !has_mode) {
 		hal_puts("A64 TIMER TICK source=periodic\n");
 		return;
 	}

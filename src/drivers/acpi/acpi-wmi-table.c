@@ -74,23 +74,24 @@ drv_acpi_wmi_guid_parse(
 		/* A dash stands where the groups meet, and nowhere else. */
 		dash = guid_dash_position(position);
 		if (dash) {
+			/* Refuses a character other than a dash where the groups meet. */
 			if (text[position] != '-')
 				return EINVAL;
 			position++;
 			continue;
 		}
 
-		/* The byte's high digit. */
+		/* Reads the byte's high digit. */
 		error = hex_digit(text[position], &high);
 		if (error != 0)
 			return error;
 
-		/* Its low digit, which a dash never splits from the high one. */
+		/* Reads its low digit, which a dash never splits from the high one. */
 		error = hex_digit(text[position + 1U], &low);
 		if (error != 0)
 			return error;
 
-		/* The byte, in the text's order. */
+		/* Stores the byte, in the text's order. */
 		ordered[count] = (uint8_t)((high << 4) | low);
 		count++;
 		position += 2U;
@@ -168,7 +169,7 @@ drv_acpi_wmi_entries_parse(
 		entry->flags = source[ENTRY_FLAGS];
 	}
 
-	/* Says how many were decoded. */
+	/* Tells the caller how many were decoded. */
 	*count = index;
 
 	/* Reports the entries that did not fit. */

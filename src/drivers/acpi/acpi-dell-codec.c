@@ -170,7 +170,7 @@ const char *
 drv_acpi_dell_mode_name(
 	uint32_t mode)
 {
-	/* Names the mode. */
+	/* Maps the mode to the BIOS setup's name, and refuses one not known. */
 	switch (mode) {
 	case DRV_ACPI_DELL_MODE_OPTIMIZED:
 		return "Optimized";
@@ -220,9 +220,11 @@ drv_acpi_dell_fans_decode(
 	if (length == 0)
 		return 0;
 
-	/* Refuses a length that is not whole fans and the end mark, or that runs past the buffer. */
+	/* Refuses a length that is not whole fans and the end mark. */
 	if (length % FAN_BYTES != 1U)
 		return EINVAL;
+
+	/* Refuses a length that runs past the buffer. */
 	if (length > size)
 		return EINVAL;
 
@@ -238,8 +240,10 @@ drv_acpi_dell_fans_decode(
 		fans[index].rpm = (uint16_t)(bytes[offset + 1U] | ((uint16_t)bytes[offset + 2U] << 8));
 	}
 
-	/* Reports the fans taken, and that some were left. */
+	/* Tells the caller how many fans were taken. */
 	*count = index;
+
+	/* Reports that some fans were left. */
 	if (listed > capacity)
 		return E2BIG;
 
@@ -313,8 +317,10 @@ drv_acpi_dell_mode_answer(
 	if (untouched)
 		return ENXIO;
 
-	/* Reports a call that ran and failed. */
+	/* Takes output0, the call's own status. */
 	*status = read_le32(&answer[SMBIOS_OUTPUT]);
+
+	/* Reports a call that ran and failed. */
 	if (*status != SMBIOS_COMPLETED)
 		return EIO;
 

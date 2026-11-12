@@ -1003,13 +1003,15 @@ record_temperature(
 	int32_t critical;
 	bool valid;
 
-	/* The critical level the zone has, 0 for none. */
+	/* Takes the critical level the zone has, 0 for none. */
 	critical = 0;
 	if (rpi5_fan.has_critical)
 		critical = rpi5_fan.critical;
+
+	/* Pushes the levels first, so the reading is judged against them. */
 	kern_thermal_sensor_levels(rpi5_fan.core_sensor, 0, critical);
 
-	/* The reading, valid when the sensor answered. */
+	/* Pushes the reading, which is valid only when the sensor answered. */
 	valid = false;
 	if (error == 0)
 		valid = true;
