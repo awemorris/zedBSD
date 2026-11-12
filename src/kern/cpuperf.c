@@ -2047,7 +2047,7 @@ cpuperf_fresh_current(
 	if (!box->fresh_known)
 		return false;
 
-	/* A measurement that ended after now was read is as fresh as can be. */
+	/* A rate measured less than the window before now is fresh, and so is one measured after now was read. */
 	window = kern_ms_to_ticks(CPUPERF_FRESH_MS);
 	if (now < box->fresh_ticks + window)
 		return true;
@@ -2106,9 +2106,11 @@ cpuperf_fresh_measure(void)
 	kern_cpu_id_t cpu;
 	int error;
 
-	/* Starts every CPU's interval; a ticket of 0 marks a CPU that did not answer. */
+	/* Starts every CPU's interval with a first sample. */
 	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++)
 		cpuperf_fresh_tickets[cpu] = cpuperf_post(cpu, CPUPERF_WORK_SAMPLE, NULL);
+
+	/* Waits for each CPU against one deadline; a ticket of 0 marks a CPU that did not answer. */
 	deadline = cpuperf_deadline();
 	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
 		error = cpuperf_wait(cpu, cpuperf_fresh_tickets[cpu], deadline);
@@ -2124,9 +2126,9 @@ cpuperf_fresh_measure(void)
 		if (cpuperf_fresh_tickets[cpu] != 0U)
 			cpuperf_fresh_tickets[cpu] = cpuperf_post(cpu, CPUPERF_WORK_SAMPLE, NULL);
 	}
-	deadline = cpuperf_deadline();
 
-	/* Records each CPU's outcome. */
+	/* Waits for each CPU against one new deadline and records its outcome. */
+	deadline = cpuperf_deadline();
 	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
 		error = ETIMEDOUT;
 		if (cpuperf_fresh_tickets[cpu] != 0U)
@@ -2142,6 +2144,8 @@ cpuperf_fresh_measure(void)
 		box->fresh_error = error;
 		box->fresh_mhz = 0U;
 		box->fresh_flags = 0U;
+
+		/* Takes the rate and the platform's limit of a CPU that answered both samples. */
 		if (error == 0) {
 			box->fresh_mhz = box->read.delivered_mhz;
 			box->fresh_flags = box->read.flags & KERN_CPUPERF_SAMPLE_PLATFORM_LIMIT;

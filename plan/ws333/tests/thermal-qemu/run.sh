@@ -20,7 +20,8 @@
 # group's member "user" (not root) chooses powersave through su and it is
 # kept in the file; "bob", added by useradd without the group, reads the
 # strategy but is refused a change (EPERM on the descriptor opened for
-# reading) and leaves the file as it was.
+# reading) and leaves the file as it was; bob reads a CPU (its rate, which
+# any reader gets).
 # "readers" (the image also carries grep, sed and monitor-probe): the
 # readers of the temperatures.  A made-up sensor that follows
 # the processor at 45 degrees shows in "thermal sensors" and in the System
@@ -83,7 +84,10 @@ elif [ "$mode" = group ]; then
 		"--then-keys=su bob -c 'thermal strategy'; cat /etc/thermal.conf; echo bob-read-done"
 		'--then-expect=strategy powersave generation=[0-9]+ result=ok'
 		'--then-expect=strategy powersave'
-		'--then-expect=bob-read-done')
+		'--then-expect=bob-read-done'
+		"--then-keys=su bob -c 'thermal cpu 0'; echo bob-cpu-status=\$?"
+		'--then-expect=^delivered_mhz [0-9]+'
+		'--then-expect=bob-cpu-status=0')
 elif [ "$mode" = readers ]; then
 	old=hw.thermal
 	steps=("${login[@]}"
