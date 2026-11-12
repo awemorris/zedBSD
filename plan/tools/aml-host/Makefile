@@ -34,7 +34,7 @@ HEADERS := $(wildcard $(REPO)/src/drivers/acpi/*.h) \
 WARNINGS := -Wall -Wextra -Werror -Wdeclaration-after-statement \
 	-Wstrict-prototypes -Wmissing-prototypes -Wshadow
 # The Dell provider's boost is built in, so the harness reaches the SMM fan calls.
-CPPFLAGS := -I$(REPO)/include -I$(REPO)/src -DCONFIG_DELL_SMM_BOOST=1
+CPPFLAGS := -I$(REPO)/include -I$(REPO)/src -DCONFIG_DRIVER_DELL_SMM_BOOST=1
 SANITIZE := -fsanitize=address,undefined -fno-sanitize-recover=all \
 	-fno-omit-frame-pointer
 

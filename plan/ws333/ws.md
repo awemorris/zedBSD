@@ -10,6 +10,7 @@
 
 ## ユーザーの決定（要点）
 
+- 2026-11-13 ユーザーから、次の Makefile・mk の差分の承認を受けた: (1) `mk/platform-intelmid64/defaults.mk` の `CONFIG_DRIVER_DELL_SMM_BOOST` を n に（Dell の boost は熱の枠組みに依り、intelmid64 は `CONFIG_KERN_THERMAL` n で link できなかった）、`plan/tools/aml-host/Makefile` の macro を `CONFIG_DRIVER_DELL_SMM_BOOST` に（Q1 が当てた）。(2) `mk/platform-x86_64/vmunix.mk` の KERN_SOURCES に `src/drivers/platform/pcat/intel-tco.c` の 1 行（p028、P3 が当てる）。
 - 2026-11-13 ユーザーから、次の趣旨の決定を受けた: (1) CPU の domain は物理的に同じ clock で動く CPU の組にする。Alder Lake の E-core は module（4 つで 1 つ）を見込み、5330 の測定で確かめて直す（p025）。(2) CPU の MHz は読み手の権限によらず新しい値を返し、費用は共有の sample で抑える。`READ_SAMPLE` と書き込みの制限は外す（p026）。(3) affinity の無い thread は自由に CPU を移る。留まるのは affinity のある thread だけ（BUG-422）。
 
 - 2026-11-12 ユーザーから、次の趣旨の決定を受けた: `/dev/thermal` は desktop の group の利用者が操作できるようにし（video の group と GPU と同じ形）、sessiond を通さない。sessiond に委ねるのは認証だけ。→ 新しい group `desktop`、`/dev/thermal` は root:desktop 0664、設定の ioctl は書き込みで開いた fd に許す、`/etc/thermal.conf` は root:desktop 0664、sessiond の THERMAL の要求（p019）は取り下げ、`/sbin/thermal` は機種の選びで入れる（全 image ではない）。
