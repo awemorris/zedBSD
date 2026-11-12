@@ -69,7 +69,7 @@ Phase に固有の試験は各 WS の `tests/`、シナリオ試験（AAT）は 
 
 ## 注意
 
-- **firmware の license**（2026-11-13 ユーザーの決定の要点）: 担当は自分の worktree で firmware の license に同意してよい（`yes | make CONFIGMK=<cfg> firmware-licenses`、[userland/firmware/README.md](../userland/firmware/README.md)）。同意の記録は worktree の `build/sources/firmware/<package>/license-accepted` に残る。QEMU だけの試験は firmware を外した一覧でもよい。
+- **firmware の license**（2026-11-13 ユーザーの決定の要点）: 担当の同意は Claude Code の権限の判定で拒まれる（利用者の代わりの同意）。別の経路（main の記録を写す等）で同じ結果を作らない。QEMU の試験は firmware を外した一覧で進める。実機で firmware が要る時（例 5330 の i915 の DMC）だけ、Q1 が worktree の path と command（`make CONFIGMK=<cfg> firmware-licenses`、[userland/firmware/README.md](../userland/firmware/README.md)）をユーザーに示し、ユーザーが同意を打つ。
 
 注意（2026-10-09 P1 の所見）: BUG-274 の直しで `ps -o args` が command line の全体を出すようになった。guest の試験で `ps -A -o pid,args | grep <語>` で選んで kill する形は、その語が試験自身を走らせる shell の行にも出ると自分を kill する（ws172 の passkey の FAIL の原因）。新しく書く試験は `ps -A -o pid,comm` で選ぶ。既存の約 380 箇所は一斉に直さず、FAIL した時に追従する（試験の整理の基準を当てる）。
 
