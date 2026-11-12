@@ -20,6 +20,16 @@
 #include "include/libc/vulkan/vulkan_zedbsd.h"
 #include <uapi/gpu-op.h>
 
+#if __GCC_ATOMIC_LLONG_LOCK_FREE != 2
+/*
+ * Where an 8-byte atomic is not lock-free (i386), the C library's runtime
+ * serializes the library's 8-byte counters, serials and timelines under a
+ * lock.  Clang notes that such an operation is slower than a lock-free one,
+ * which that target accepts.  The counters stay within this process.
+ */
+#pragma clang diagnostic ignored "-Watomic-alignment"
+#endif
+
 /* The pinned renderer reserves ring zero and owns at most sixty-three device timelines. */
 #define VULKAN_QUEUE_TIMELINE_COUNT 64U
 

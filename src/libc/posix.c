@@ -97,6 +97,15 @@ extern void __pthread_fork_prepare(void) __attribute__((weak));
 extern void __pthread_fork_parent(void) __attribute__((weak));
 extern void __pthread_fork_child(void) __attribute__((weak));
 extern void __timer_sigev_thread_fork_child(void) __attribute__((weak));
+
+/*
+ * The atomic runtime's fork hooks (atomic-runtime.c).  They hold and give
+ * back the lock words a port's runtime keeps in the process (i386), and do
+ * nothing where the runtime keeps none.
+ */
+extern void __libc_atomic_fork_prepare(void);
+extern void __libc_atomic_fork_parent(void);
+extern void __libc_atomic_fork_child(void);
 extern void __pthread_initialize_main(void) __attribute__((weak));
 extern void __libc_environment_lock(void) __attribute__((weak));
 extern void __libc_environment_unlock(void) __attribute__((weak));
@@ -4132,7 +4141,19 @@ fork(
 	/* Handles the pthread fork prepare availability. */
 	if (__pthread_fork_prepare != NULL)
 		__pthread_fork_prepare();
+
+	/* Holds the atomic runtime's lock words last, after the handlers that may still use them. */
+	__libc_atomic_fork_prepare();
+
+	/* Copies the process; the child sees 0. */
 	result = (pid_t)call(KERN_SYS_fork, 0, 0, 0, 0, 0, 0);
+
+	/* Gives the lock words back first, before the handlers that may use them (a failed fork is the parent's). */
+	if (result == 0) {
+		__libc_atomic_fork_child();
+	} else {
+		__libc_atomic_fork_parent();
+	}
 
 	/* Checks the operation result. */
 	if (result == 0) {
