@@ -87,6 +87,7 @@
 
 ## 9. 検証
 
+- **重要な platform は x86_64・arm64・riscv64**（2026-11-13 ユーザー）。i386・pc9821 は参考で、変更ごとの build の確かめは要らない（崩れは定期の確かめでまとめて直す、[master-design-policy.md](plan/master-design-policy.md) §11.1）。
 - **細かい修正ごとに回帰試験を回さない**。自分で丁寧にレビューし、build（warning 0）と変えた所の短い host 試験まで。QEMU・実機は WS の最後か意味のまとまった単位で。
 - **試験は担当が自分で流す**（Q1 が割り当てた QEMU・実機）。計測・実機の回帰は 1 本の script（配置 → 起動 → 実行 → 回収 → 要約）、読むのは要約だけ。QEMU は担当ごとに名前・port・directory を分ける。実機は Q1 が一度に一人に割り当てる（電源は [tools.md](plan/tools.md) の「実機」）。
 - **起動の確認**は `plan/tools/boot-test.sh`（画面を撮って login prompt を読む）。
