@@ -59,6 +59,7 @@
 | B27 | CP の firmware の core（RV32）の例外（PC の範囲外、不正な命令、不整列の jump）の FAULT_INFO の KIND と UNIT。§3.5 の KIND・UNIT は firmware の core の fault を挙げない。RTL は KIND 1（INVALID_OP）・UNIT 0（28a8d920 は KIND 4） | §3.5、`atg_cpu_core.v:373-380`、`atg_cp.v:612` | 判断待ち |
 | B28 | CMD_WAIT_FENCE の `fence_addr` の揃え。§7.3 は CMD_FENCE の `fence_addr` だけに「8-byte aligned」と書き、CMD_WAIT_FENCE には書かない。RTL は 4 byte に揃えて 32 bit を比べる。仕様の 64 bit の比較（依頼 07 の V2）で 8 byte を読むなら揃えが要る（V2 は仮に 8 byte） | §7.3 ghci.md:960-991、`atg_cp_fence.v` | 判断待ち |
 | B26 | §4.1 の PERF_SRC は「STATUS の busy の bit の番号（0 CP〜6 SU）」を数えるが、§3.3 の STATUS に busy の bit はもう無い。PERF_SRC の番号を何で定義するか | §4.1 PERF、§3.3 | 判断待ち |
+| B29 | SU の FAULT_ADDR の単位: §3.5（ghci.md:450）の「stage の入口からの PC」は命令の番号（8 byte 単位、今の `sb_fault_pc`）か byte の offset か | ghci.md:450、`atg_su_sb.v:775` | 判断待ち |
 
 ## 決定済み
 

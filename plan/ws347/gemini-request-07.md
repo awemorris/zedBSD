@@ -70,12 +70,11 @@
 
 ## 2. U1〜U4 の残り
 
-### V3. HALTING の間の seq の停止（§5.2、確かめの依頼）
+### V3. HALTING の間の seq の停止（§5.2、1 次回答で確定）
 
 - 仕様（ghci.md:364）: HALTING は「CTRL.HALT == 1 だが CP は in-flight の packet・draw を終えている途中」。:570「current command が終わり memory の access が静まったら HALTED」。
-- 今: `atg_cp.v:924` の `s_seq_halt` = HALTING・HALTED・FAULTED・RESETTING。依頼 06 の U3 は「eeed36ed と同じ意味」（eeed36ed は FAULTED・RESETTING だけ、`s_cp_state == GHCI_ST_FAULTED || s_cp_state == GHCI_ST_RESETTING`）を求めた。seq は `halt` で payload の取り込みも止める（`atg_cp_seq.v:393-394,445-446`）。ctl は HALTING → HALTED を `mc_idle && !ring_busy` だけで決める（`atg_cp_ctl.v:754`）。ring も `go = run && !halt` で止まる（`atg_cp_ring.v:661`）。
-- 監査の側の見込み: 複数 dword の packet の payload の途中で CTRL.HALT を書くと、その packet が終わらないまま HALTED になる。HALT = 0 で続きから再開するなら害は小さいが、§5.2 の「終えてから HALTED」と違う。**監査の側の確信は低い**（ring が packet の境で止まるかを確かめていない）。
-- 求める物: (1) この見込みが正しいかを RTL で確かめて 1 次回答に。(2) 正しければ、HALTING の間は今の packet を最後まで取り込んで実行し、次の header を取らない形にする（`s_seq_halt` を FAULTED・RESETTING に戻し、HALTING・HALTED の停止は header の取り込みだけで行う、など）。
+- 今（1 次回答の解析で確定）: CTRL.HALT = 1 で `s_seq_halt`（`atg_cp.v:924`）が立ち、seq が `Q_PAY` でも `n_ready = 0`（`atg_cp_seq.v:393,445`）で payload を拒む。ring は `R_N` で止まり `ring_busy` が落ちず、`atg_cp_ctl.v:754` の HALTED への遷移が起きない。**packet の途中の HALT で HALTING のまま固まる。**
+- 直し方: `s_seq_halt` から HALTING を外し（HALTED・FAULTED・RESETTING だけ）、HALTING の間は今の packet の payload を取り込んで実行を終え、packet の境で次の header を取らない。
 - 期待値（tb）: CMD_FENCE（6 dword）の 3 dword 目を ring に置いた所で CTRL.HALT = 1、残りの 3 dword を置く → fence の値が memory に書かれてから STATUS.HALTED = 1。その後の packet は HALT = 0 まで実行されない。
 
 ### V4. FAULT_INFO の中身（§3.5）
@@ -85,7 +84,7 @@
   - (a) MC の client → UNIT（`atg_cp_ctl.v:254-272` の `mc_client_to_unit`）は固定の番号（0 CP、1 BLT、2 CPU、3 VF、4 TU、5 ROP、他は SU）。`atg_top.v:295-309` の番号は構成で動く（HAS_CPU = 0 なら VF が 2、HAS_TU = 0 なら ROP が 4）。`atg_top` の `C_CPU`・`C_VF`・`C_TU`・`C_ROP`・`C_ATOM`・`C_SA`・`C_DC`・`C_SU` を parameter で `atg_cp` → `atg_cp_ctl` に渡し、表をそれから作る。SA・DC の UNIT は B24 が決まるまで今の値（SA 2、DC 0）のまま。
   - (b) SU の STAGE は推測（`atg_cp.v:573-584` の `auto_su_stage`: `cs_kick` で CS、`draw_kick` で VS、VF が止まり RX・TU が動くと FS）。VS と FS の warp は同時に走るので、fault した warp の stage にならない。MS が出ない。`:587` は `x_fault_tag[11:8]` を見るが、これは source 7（他の block）の tag（`:617`）で SU の物でない。直し方: SU が fault した warp の stage を出し（warp ごとに stage を持つ）、`x_fault` の経路で運ぶ。推測の `auto_su_stage` と `:587` の式を消す。運べないなら理由を報告に。
   - (c) MC の経路の SU の client（D$・I$）の fault は STAGE が常に 0（`atg_cp_ctl.v:399,485` の `4'd0`）。UNIT = 2 の時は (b) の stage を入れる。
-  - (d) SU の fault の KIND と SESSION は `atg_top.v:678,680` で KIND 8 固定（→ INVALID_OP）と tag 0 固定。SU が区別できる fault（不正な命令、LDS の範囲外、不整列）を KIND 1・10 に分け、SESSION は fault した warp の session を入れる。SU が区別できない物は報告に。
+  - (d) SU の fault の KIND と SESSION は `atg_top.v:678,680` で KIND 8 固定（→ INVALID_OP）と tag 0 固定。**1 次回答で確定: 今の SU が検出するのは未定義の命令（`atg_su_sb.v:774` の `ill`）だけなので KIND 1。SESSION は SU が warp ごとに持たないので、CP が追っている今の session を入れる（Q1 の判断）。LDS の範囲外・不整列の検出（仕様 §12.6 は KIND 10）は今回は実装せず、検出の回路を足した時の LUT の見積りを報告に書く。** 以下は元の文:SU が区別できる fault（不正な命令、LDS の範囲外、不整列）を KIND 1・10 に分け、SESSION は fault した warp の session を入れる。SU が区別できない物は報告に。
   - (e) SU の FAULT_ADDR が stage の入口からの PC になっているかを確かめ、報告に。
   - CPU（CP の firmware の core）の fault の KIND（今 1）は B27、ring の読みの error の KIND（今 5）は B25 が決まるまで今のまま。
 - 期待値（top の tb、tb が kind・stage を与えない形で）: FS の shader に不正な命令 → FAULT_INFO の KIND 1・UNIT 2・STAGE 1、FAULT_ADDR = FS の入口からの PC。CS で同じ → STAGE 2。VS と FS が同時に走る draw で FS の warp が fault → STAGE 1。fence の書き込みに AXI の error → KIND 5・UNIT 0（source の fence から）。HAS_CPU = 0 の構成（tb）で VF の MC の拒否 → UNIT 1。
