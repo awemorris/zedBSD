@@ -2,7 +2,7 @@
 
 # ws333-p001: /dev/thermal で統一する電力・熱の設計
 
-Status: in-progress（2026-11-12 P1: 第 3 版で main の実装に合わせた。cleared は Q1 の判定、材料は下の「判定の材料」）
+Status: cleared（2026-11-12 Q1 判定: 第 3 版で main の実装と新しい build に合わせ、未登録の Phase を立てた。材料は下の「判定の材料」）
 Parent: [WS333](../ws.md)
 Queue: q1734（P5）、q2012-i01（P1、仕上げ）
 

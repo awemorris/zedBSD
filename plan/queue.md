@@ -773,5 +773,5 @@
 
 | Queue / attempt | 担当 | 対象 | 範囲・条件 | 状態 |
 | --- | --- | --- | --- | --- |
-| q2012 / q2012-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws333c`・branch `agent/p1-ws333c`、基点 main） | [WS333](ws333/ws.md) の再開: (1) build system の作り直しの後の確かめ、(2) p001 の仕上げと Phase の表、(3) p004 の UAPI の案（ユーザーの review 用）、(4) p002・p011・p012・p018 の判定の材料 | 2026-11-12 ユーザーの指示（WS333 を P1 で進める）。実機（5330）は使わない。Makefile・`mk/` の変更は案だけ（ユーザーの確認が要る）。HAL は変えない | in-progress |
+| q2012 / q2012-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws333c`・branch `agent/p1-ws333c`、基点 main） | [WS333](ws333/ws.md) の再開: (1) build system の作り直しの後の確かめ、(2) p001 の仕上げと Phase の表、(3) p004 の UAPI の案（ユーザーの review 用）、(4) p002・p011・p012・p018 の判定の材料 | 2026-11-12 ユーザーの指示（WS333 を P1 で進める）。実機（5330）は使わない。Makefile・`mk/` の変更は案だけ（ユーザーの確認が要る）。HAL は変えない | cleared（2026-11-12 Q1。P1 返却 ea64e3349f、merge c1d2505046。build 確かめ・host 試験 PASS、p001・p002・p012 cleared、p004 UAPI 案・mk の案はユーザーの答え待ち） |
 

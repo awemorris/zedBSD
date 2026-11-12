@@ -2,7 +2,7 @@
 
 # ws333-p018: Dell の provider（DDV・熱の mode・受け手・SMM の boost の確かめ）
 
-Status: in-progress（q1776-i01 の範囲（host の harness まで）を実装し確かめた。2026-11-01 q1788 の 5330: attach・4 つの mode・Debian の読み・起動の `\ODV0` は通り、boost は rpm が上がらず既定 n のまま。cleared は Q1 の判定）
+Status: in-progress（2026-11-12 Q1: 受け入れは満たした。今の mk の既定 BOOST=y がこの結論（n）と食い違うので、cleared はユーザーの答えの後）
 Parent: [WS333](../ws.md)
 Queue: q1776-i01（P7）
 

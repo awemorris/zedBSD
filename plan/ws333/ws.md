@@ -3,7 +3,7 @@
 # WS333: /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）
 
 - Master: [plan/master.md](../master.md)（2026-10-31 作成）。Primary Milestone: MG004。
-- Status: incomplete（2026-10-31 Q1: p001 設計済み、p002・p003 を main に、p006 を main に、p005・p007 を進行中）
+- Status: incomplete（2026-11-12 Q1: p001・p002・p003・p006〜p010・p012・p016・p017・p021 cleared。p004 の UAPI はユーザーの review 待ち、mk の案（phase001・proposed/mk-cpuperf-config.diff）はユーザーの答え待ち）
 - 目標: CPU の idle（C-state、MWAIT）・P-state（HWP と、HWP の無い CPU の driver の P-state）・P/E core の相対性能・熱の監視・fan・非常の停止を、1 つの device `/dev/thermal`（と `/sbin/thermal`）の下で統一して設計し、実装する。
 - Resume point: 2026-11-12 P1（q2012-i01）: p001 の設計を main の実装と新しい build（`mk/`）に合わせ（design.md §16）、未登録の Phase（p004・p013・p014・p015・p020・p022・p024）を立てた。p004 の UAPI の案はユーザーの review 待ち。p002・p011・p012・p018 の判定の材料は各 phase.md の「判定の材料（2026-11-12）」。p023（§4.3.3 段 4 の設計）は p014 の数で要ると分かった時だけ立てる。
 
@@ -20,8 +20,8 @@
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 統一の設計: /dev/thermal の UAPI（CPU の idle・P-state・P/E core・熱の zone・fan・strategy・非常の停止）、kernel の枠組みと driver の分け方、HAL の口で足りるか（足りないと主張する時は理由）、WS301・WS303 の設計からの引き継ぎと食い違いの整理、Phase の分け方。design-reviewer を通す | in-progress（P5、q1734） | — |
-| [p002](phase002/phase.md) | amd64 の CPU の idle を HLT から MWAIT の C-state に（5330 で idle の電力を下げ、i915 の GPU の電力の枠を空ける） | in-progress（P1、q1735。2026-10-31: MWAIT C6 を実装、5330 で idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps（GT 800 → 850〜900 MHz）。Linux の idle 3.2〜3.5 W にはまだ遠い） | — |
+| [p001](phase001/phase.md) | 統一の設計: /dev/thermal の UAPI（CPU の idle・P-state・P/E core・熱の zone・fan・strategy・非常の停止）、kernel の枠組みと driver の分け方、HAL の口で足りるか（足りないと主張する時は理由）、WS301・WS303 の設計からの引き継ぎと食い違いの整理、Phase の分け方。design-reviewer を通す | cleared（2026-11-12 Q1 判定: 第 3 版で main の実装と新しい build に合わせ、未登録の Phase を立てた。材料は下の「判定の材料」） | — |
+| [p002](phase002/phase.md) | amd64 の CPU の idle を HLT から MWAIT の C-state に（5330 で idle の電力を下げ、i915 の GPU の電力の枠を空ける） | cleared（2026-11-12 Q1 判定: 5330 で idle 13.00 → 11.70 W、MWAIT の路の直の観察は p014） | — |
 | [p003](phase003/phase.md) | kernel の口の header（include/kern/thermal.h・cpuperf.h、kern_cpu_count・KERN_CPU_MAX）、design-reviewer 1 回 | cleared（P7、q1754-i01。全 20 port の vmunix の build、warning 0） | p001 |
 | [p004](phase004/phase.md) | `/dev/thermal` の UAPI の全文の案（ioctl の番号と struct・事象・注入・`/sbin/thermal` の使い方）、design-reviewer、**ユーザーの review** | in-progress（P1、q2012-i01。2026-11-12 案と review の反映まで、ユーザーの答え待ち） | p001 |
 | [p005](phase005/phase.md) | 熱の core: 写し・sensor の push（acpi-thermal と rpi5-fan）・fan・meter・strategy と受け手（世代の 2 周目）・boost・3 つの thread・事象・ioctl の範囲の口・`hw.thermal` を写しから（2 source）。後半（p004 の後）: `/dev/thermal`・`/dev/thermal-inject`・`/sbin/thermal` の熱の表示 | in-progress（P6、q1762-i01。前半を実装: host 試験 13 scenario PASS、全 20 port の vmunix warning 0、QEMU amd64 の login と `sysctl hw.thermal` PASS。後半は p004 の後） | p003（後半は p004） |
@@ -31,7 +31,7 @@
 | [p009](phase009/phase.md) | module: HWP の register と HFI の表（cpux86-hwp.c） | cleared（2026-10-31 Q1、9fb61c61e。test-hwp 12804888 checks、全 PASS・check-skeleton PASS、突然変異 24 を検出） | p007 |
 | [p010](phase010/phase.md) | module: 0xCE と、allow list・RAPL・C-state の滞在・0xE2（cpux86-pstate.c・cpux86-power.c）。`_PSS`・AMD・PERF_CTL は仕様未取得／使い道が無く外した | cleared（2026-10-31 Q1、35d5d4500。test-pstate 120186・test-power 275202 checks、全 PASS と check-skeleton を Q1 も流して PASS、突然変異 18 を検出） | p007 |
 | [p011](phase011/phase.md) | x86 の CPU の driver の統合: 関門（hypervisor・CPUID の bit・allow list・既定 n・`cpuperf=off`）、MSR の小さな file、probe、HWP の enable の順と既に 1 の道、Highest の MHz の測り、HFI の page、RAPL の meter・滞在の統計、provider の登録、起動の parameter の key（legacy の 0xCE の道は作らない、Q1） | in-progress（P7、q1770-i01。2026-10-31: host 試験 PASS（y 13 場面・n 3 場面、模擬の MSR の #GP 0）、amd64 の vmunix 既定と y の warning 0、全 20 port の vmunix warning 0、QEMU+KVM の y と既定の image で login と「関門で止まり MSR の道の provider が無い」を PASS（HMP）。2026-11-01 q1788 P1 の 5330: HWP の start・HFI・RAPL の meter 4 本・strategy 3 つ・`cpuperf=off` が動いた（試験だけの diag の patch で）。cleared は Q1 の判定） | p006、p008〜p010、p005 の前半 |
-| [p012](phase012/phase.md) | tick の位相を揃える（amd64 の HAL の実装）: TSC-deadline の mode で全 CPU の期限を TSC の周期の倍数に、戻す macro `LAPIC_TICK_TSC_DEADLINE=0` | in-progress（P7、q1768-i01。2026-10-31: vmunix warning 0、QEMU+KVM の起動 PASS（periodic と tsc-deadline の両方、SMP 4）、tick 1000 Hz。2026-11-01 q1788 P1 の 5330: idle の package 10.08 W（periodic）→ 6.44 W（TSC-deadline）、PC2〜PC7 は両方 0%） | p002 |
+| [p012](phase012/phase.md) | tick の位相を揃える（amd64 の HAL の実装）: TSC-deadline の mode で全 CPU の期限を TSC の周期の倍数に、戻す macro `LAPIC_TICK_TSC_DEADLINE=0` | cleared（2026-11-12 Q1 判定: 5330 で idle の package 10.08 → 6.44 W、PC の滞在 0% と lock の取り合いは p014） | p002 |
 | [p013](phase013/phase.md) | CPU の ioctl・`/sbin/thermal` の CPU と電力の表示・strategy の保存と rc の restore（Q333-1 B） | planned | p004、p005 後半、p006 |
 | [p014](phase014/phase.md) | 5330 の CPU の受け入れ（design.md §8.4 の 1〜4、1 本の script）と §4.3.3 段 4 の数。p002・p011・p012・p018 の実機の残りを集める | planned（実機の割当が要る） | p011、p012、p013 |
 | [p015](phase015/phase.md) | amd64 の既定で MSR の道を有効に（Q333-7 A。今の mk の既定との食い違いは design.md §16.2） | planned | p014、mk の案の答え |

@@ -2,7 +2,7 @@
 
 # ws333-p011: x86 の CPU の driver の統合
 
-Status: in-progress（受け入れの確かめ（host 試験・amd64 の 2 通りの build・全 port の build・QEMU）は全部済み。2026-11-01 q1788 で 5330 の実機（HWP・HFI・RAPL・`cpuperf=off`）も動いた。cleared は Q1 の判定）
+Status: in-progress（2026-11-12 Q1: 受け入れは済み。cleared は mk の案（MSR の道の切り替えと既定）へのユーザーの答えの後）
 Parent: [WS333](../ws.md)
 Queue: q1770-i01（P7）
 

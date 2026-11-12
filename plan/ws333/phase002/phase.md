@@ -2,7 +2,7 @@
 
 # ws333-p002: amd64 の CPU の idle を HLT から MWAIT の C-state に（5330 で idle の電力を下げる）
 
-Status: in-progress
+Status: cleared（2026-11-12 Q1 判定: 5330 で idle 13.00 → 11.70 W、MWAIT の路の直の観察は p014）
 Parent: [WS333](../ws.md)
 Queue: q1735（P1）
 

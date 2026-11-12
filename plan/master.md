@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | Q1 | [WS347](ws347/ws.md) | VF2＋KC705 の Amaterrace GPU。Gemini の RTL の修正（amaterrace-gpu ad23fe01）の監査を、読むだけの監査の担当に任せている。次は Gemini への依頼 03 |
 | Q1 | q2000 | [WS074](ws074/ws.md) [p263](ws074/phase263/phase.md)（実際の Web サイトの UAT の指摘、U1 は host で直った）。2026-11-03 から止まっている |
-| P1 | q2012 | [WS333](ws333/ws.md)（/dev/thermal の電力・熱の枠組み）の再開: build の確かめ、p001 の仕上げ、p004 の UAPI の案（2026-11-12 から） |
+| P1 | — | 待機。q2012（[WS333](ws333/ws.md) の再開）は cleared、merge c1d2505046。WS333 はユーザーの答え（UAPI の review、mk の案）待ち |
 | P1・P2 | q2010・q2011 | 2026-11-11 12:37 にユーザーの指示で止めた（uncleared）。P1 の amaterrace の worktree の RTL の変更は使わない（RTL は Gemini）。P2 の worktree `p2-ws347` に driver の未 commit の変更（未確認） |
 | 他 | — | 動いていない。2026-11-02 のラップアップの引き継ぎが phase.md に残る: [WS335](ws335/ws.md) p035、[WS345](ws345/ws.md) p010・p014（p014 の cleared の判断は Q1）、[WS336](ws336/ws.md) p024 |
 
@@ -55,6 +55,7 @@
 ### ユーザーの未決
 
 <!-- master:open-decisions:start -->
+- [WS333](ws333/ws.md): p004 の UAPI の案の review（[uapi-proposal.md](ws333/phase004/uapi-proposal.md)、電力の読みを誰でも読めるか）、mk の案（[mk-cpuperf-config.diff](ws333/proposed/mk-cpuperf-config.diff): CPU_PERF と DELL_SMM_BOOST の既定 y を戻すか、MSR の道の切り替え）、共有の toolchain の tree の lock を戻すか、kernel の build が LLVM の source の展開に依る件（i386・pc9821）。
 - [WS347](ws347/ws.md): GHCI の仕様の問い（台帳 [ghci-rtl-questions.md](ws347/ghci-rtl-questions.md) の B）。B2（flat の時の VA）と B3（LDS の文）が残る。
 - WS299 の継続（5330 が空いたら担当を割り当てる）。担当の外で見つけた物: clock_gettime に vDSO が無く 1 ms 刻み、main から return した時に stdout が flush されない、libc の memcpy の続き。
 - P4 が拾った候補: WS162 を canceled にするか（WS172 に吸収）、WS279 p009（ライセンスと類似性の監査）の担当、P4m の時々の失敗（T1-691）の Bug、nvrtx.disp.own の既定、pci-msi-qemu.c を残すか、master-design-policy.md へ移す候補 約 25 件。

@@ -2,7 +2,7 @@
 
 # ws333-p012: tick の位相を揃える（amd64 の HAL の実装）
 
-Status: in-progress（実装と QEMU の確かめは済み。2026-11-01 q1788 の 5330: idle の package 10.08 → 6.44 W（periodic → TSC-deadline）。cleared は Q1 の判定）
+Status: cleared（2026-11-12 Q1 判定: 5330 で idle の package 10.08 → 6.44 W、PC の滞在 0% と lock の取り合いは p014）
 Parent: [WS333](../ws.md)
 Queue: q1768-i01（P7）
 
