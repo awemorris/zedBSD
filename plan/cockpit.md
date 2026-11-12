@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | — | 待機 | BUG-418 A（i386 の atomic）を merge。LLVM の案はユーザーへ | — |
-| P2 | q2035 | 作業中 | BUG-418 C の差分を当てた main で x86_64 の disk と QEMU を確かめ直す | — |
+| P2 | — | 待機 | BUG-418 C を当てた main の確かめ PASS | — |
 | P3 | q2032 | 作業中 | WS333 p027: 5330 の package の C-state 0% の原因（i915）、qs40、S0 idle（watchdog の下で） | agy の依頼 07 が終われば監査も |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
