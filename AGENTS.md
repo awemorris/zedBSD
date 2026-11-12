@@ -59,8 +59,8 @@
 
 - `.internal/` を読まない。集約の `make check` を走らせない。
 - **HAL の API**（`include/hal/hal.h` の宣言・契約・責務）の変更は差分ごとの事前承認。まず HAL を変えない形を探し、既存の HAL と driver・kernel の側で足りない理由を具体的に示した時だけ案にする。`src/hal/` の実装の修正は承認不要。承認済みの差分は [guardrail.md](plan/guardrail.md)。
-- **toolchain** は Q1 の許可なしに変更・build・install しない（`toolchain/`、`userland/base/noct/` の patch と規則、`userland/packages/lang/clang`・`devel/libcxx`、共有の `build/llvm`・`build/llvm-source`・`build/llvm-build`・`build/NoctLang`）。共有の tree は `plan/tools/toolchain-lock.sh` で読み取り専用。
-- **共有の `build/` を消さない**（`build/llvm`・`build/NoctLang`・`build/host-noct-state`・`build/sources`・`build/distfiles`・`build/<arch>` など）。main の `build/` は読み取り専用の symlink か複写で使う。
+- **toolchain** は Q1 の許可なしに変更・build・install しない（`toolchain/`、`userland/base/noct/` の patch と規則、`userland/packages/lang/clang`・`devel/libcxx`、共有の `build/llvm`・`build/llvm-source`・`build/llvm-build`・`build/NoctLang`）。worktree の `build/` に main の tree を symlink しない（[BUG-420](plan/bugs/BUG-420.md)）。
+- **main の checkout の `build/` を消さない・書かない**（担当は自分の worktree の `build/` だけを使う）。
 - **Makefile・`mk/` の変更**は概要と差分をユーザーに示し、返事の後に当てる（[makefile-style.md](plan/makefile-style.md)）。
 - RTL8822B の `.inc` は別の file のまま保つ（ライセンスを分けるため）。外部 package は source tree に取り込まず、tarball を取得・検証して patch し、ライセンスを監査する。
 - **Amaterrace GPU（`~/amaterrace-gpu`）の RTL は Claude が書かない**（担当にも書かせない）。Claude は仕様と RTL を監査し driver を書き、RTL は Gemini が実装し、両者が互いにレビューする（Claude の指摘も誤りうるので Gemini に妥当性を確かめてもらう）。`docs/ghci.md` が正。詳細は [plan/amaterrace.md](plan/amaterrace.md)。
