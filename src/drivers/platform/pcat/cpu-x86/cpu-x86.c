@@ -246,6 +246,15 @@ cpu_x86_topology(
 	/* Reads the kind of core. */
 	cpu_x86_read_kind(topology);
 
+	/*
+	 * Notes an efficient core of a hybrid processor, whose module runs on
+	 * one clock: on an Alder Lake-U processor (family 6, model 9AH) the
+	 * four efficient cores of a module, one held at its highest level and
+	 * the others at their efficient one, all ran at the first's rate under
+	 * load, while those of another module at their efficient level did not.
+	 */
+	state->module_clock = topology->core_class == KERN_CPUPERF_CORE_EFFICIENCY;
+
 #if CONFIG_KERN_THERMAL && CONFIG_DRIVER_X86_POWER_CONTROL
 	/* Reads what the CPU's control has before its first request. */
 	if (drv_cpu_x86_machine.msr)
@@ -265,7 +274,8 @@ cpu_x86_topology(
  *
  * A CPU under HWP offers a range of abstract units it starts reporting
  * once its control has started (or at once when HWP was already on);
- * the two threads of a core share one clock.  Any other CPU is described
+ * the two threads of a core share one clock, and the efficient cores of
+ * a hybrid processor's module share theirs.  Any other CPU is described
  * but not controlled.
  */
 static int
@@ -288,9 +298,11 @@ cpu_x86_describe(
 	if ((state->power_features & CPUX86_POWER_HWP) == 0U)
 		return 0;
 
-	/* Offers the HWP range, shared by the threads of a core. */
+	/* Offers the HWP range, shared by the threads of a core or the cores of a module. */
 	levels->kind = KERN_CPUPERF_LEVELS_RANGE;
 	levels->share = KERN_CPUPERF_SHARE_CORE;
+	if (state->module_clock)
+		levels->share = KERN_CPUPERF_SHARE_MODULE;
 
 	/* Gives the anchors HWP already reported; otherwise they come with the start. */
 	if (state->capabilities_known) {

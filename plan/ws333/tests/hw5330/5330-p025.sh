@@ -20,6 +20,8 @@
 #  3. NOI915=1 only: zedBSD without i915 (the display left as the firmware set it), 60 s of idle, to tell the
 #     display's part in the package C-state from the rest.  Opt-in: the 5330 has no remote power, and this kernel
 #     has not booted there before.
+# PARTS (default "debian strategies module load idle") picks the sections: debian is 1, the others the parts of 2.
+# Each ssh reads no input (-n): a command in a "while read" loop would otherwise eat the loop's list.
 # The last line is "5330-p025: done" or "5330-p025: FAIL ...".  Nothing is removed on either machine; p4 keeps
 # KDIR/c6 at the end; p014's ~/ws245/vmunix-p014-orig on Debian is the kernel from before p014.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -43,14 +45,21 @@ mkdir -p "$LOGS"
 SUMMARY=$LOGS/summary.txt
 : > "$SUMMARY"
 
+PARTS=${PARTS:-debian strategies module load idle}
+part() {
+	case " $PARTS " in
+	*" $1 "*) return 0 ;;
+	esac
+	return 1
+}
 say() {
 	echo "5330-p025: $*" | tee -a "$SUMMARY"
 }
 lin() {
-	timeout "${TO:-120}" ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$1"
+	timeout "${TO:-120}" ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$1"
 }
 zb() {
-	timeout "${TO:-60}" sshpass -p "$ZBU" ssh $SO "$ZBU@$ZB" "$1"
+	timeout "${TO:-60}" sshpass -p "$ZBU" ssh -n $SO "$ZBU@$ZB" "$1"
 }
 # As root on zedBSD.
 zr() {
@@ -173,10 +182,13 @@ window() {
 	TO=90 th "power -i 60" "$1-power.txt" &
 	TO=90 th "idle package 0 -i 60" "$1-idle-package.txt" &
 	TO=90 th "idle cpu 0 -i 60" "$1-idle-cpu0.txt" &
+	TO=100 zr "n=\$(sysctl hw.ncpu | sed \"s/.*: *//\"); i=0; while [ \$i -lt \$n ]; do $T idle cpu \$i | sed \"s/^/\$i /\"; i=\$((i + 1)); done; sleep 60; i=0; while [ \$i -lt \$n ]; do $T idle cpu \$i | sed \"s/^/\$i /\"; i=\$((i + 1)); done" > "$LOGS/$1-idle-cpus.txt" 2>&1 &
 	wait
 	say "$1 power: $(grep -h '^power' "$LOGS/$1-power.txt" | sed 's/^power [0-9]* //' | tr '\n' ';')"
 	say "$1 package: $(grep -h '^state' "$LOGS/$1-idle-package.txt" | sed 's/residency_ns=[0-9]* //' | tr '\n' ';')"
 	say "$1 cpu0: $(grep -h '^state' "$LOGS/$1-idle-cpu0.txt" | sed 's/residency_ns=[0-9]* //' | tr '\n' ';')"
+	# Each CPU's core states over the same 60 s, from two cumulative readings.
+	say "$1 cpus (core state % of 60 s): $(awk '$2 == "state" { split($4, kv, "="); k = $1 " " $3; if (k in a) printf "%s:%s=%.1f ", $1, $3, (kv[2] - a[k]) / 6e8; else a[k] = kv[2] }' "$LOGS/$1-idle-cpus.txt")"
 }
 
 TO=60 timeout 60 scp -q plan/tools/hw5330/5330-nvme-write.sh plan/tools/hw5330/ufs-grow.py plan/ws333/tests/hw5330/msr-debian.py "$HOST:ws245/" ||
@@ -186,29 +198,31 @@ flock 9
 say "$NAME start $(date '+%F %T')"
 
 # 1. Debian: the registers, the idle window and the loaded CPUs.
-debian_up
-say "p4's kernel kept from before p014: $(TO=15 lin 'cksum < $HOME/ws245/vmunix-p014-orig' 2>&1)"
-lin 'sudo -n modprobe msr' > /dev/null 2>&1 || { say "FAIL: modprobe msr on Debian"; exit 1; }
-dm info debian-info.txt
-say "debian: $(grep -v '^cpu' "$LOGS/debian-info.txt" | tr '\n' ';')"
-say "debian E2H: $(sed -n 's/^cpu \([0-9]*\) cst_config \(0x[0-9a-f]*\) \(.*\)/\1:\3/p' "$LOGS/debian-info.txt" | sort -t: -k2 -u | tr '\n' ';')"
-lin 'for d in /sys/class/powercap/intel-rapl:*; do [ -f $d/name ] || continue; for c in $d/constraint_*_name; do n=${c%_name}; echo "$(cat $d/name) $(cat $c) $(cat ${n}_power_limit_uw 2> /dev/null) uW"; done; done' > "$LOGS/debian-powercap.txt" 2>&1
-say "debian powercap: $(tr '\n' ';' < "$LOGS/debian-powercap.txt")"
-sleep "${IDLE_SETTLE:-60}"
-TO=120 dm "idle 60" debian-idle.txt
-say "debian idle: $(tr '\n' ';' < "$LOGS/debian-idle.txt")"
-lin 'cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2> /dev/null' > "$LOGS/debian-epp.txt" 2>&1
-for mode in default performance; do
-	if [ "$mode" = performance ]; then
-		lin 'for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo performance | sudo -n tee $f > /dev/null; done' > /dev/null 2>&1
-	fi
-	TO=60 lin 'n=$(nproc); i=0; while [ $i -lt $n ]; do timeout 25 sh -c "while :; do :; done" & i=$((i + 1)); done; wait' > /dev/null 2>&1 &
-	sleep 8
-	TO=60 dm "load 5" "debian-load-$mode.txt"
-	wait
-	say "debian load ($mode, EPP $(head -1 "$LOGS/debian-epp.txt") before): $(tr '\n' ' ' < "$LOGS/debian-load-$mode.txt")"
-done
-lin "for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo $(head -1 "$LOGS/debian-epp.txt") | sudo -n tee \$f > /dev/null; done" > /dev/null 2>&1
+if part debian; then
+	debian_up
+	say "p4's kernel kept from before p014: $(TO=15 lin 'cksum < $HOME/ws245/vmunix-p014-orig' 2>&1)"
+	lin 'sudo -n modprobe msr' > /dev/null 2>&1 || { say "FAIL: modprobe msr on Debian"; exit 1; }
+	dm info debian-info.txt
+	say "debian: $(grep -v '^cpu' "$LOGS/debian-info.txt" | tr '\n' ';')"
+	say "debian E2H: $(sed -n 's/^cpu \([0-9]*\) cst_config \(0x[0-9a-f]*\) \(.*\)/\1:\3/p' "$LOGS/debian-info.txt" | sort -t: -k2 -u | tr '\n' ';')"
+	lin 'for d in /sys/class/powercap/intel-rapl:*; do [ -f $d/name ] || continue; for c in $d/constraint_*_name; do n=${c%_name}; echo "$(cat $d/name) $(cat $c) $(cat ${n}_power_limit_uw 2> /dev/null) uW"; done; done' > "$LOGS/debian-powercap.txt" 2>&1
+	say "debian powercap: $(tr '\n' ';' < "$LOGS/debian-powercap.txt")"
+	sleep "${IDLE_SETTLE:-60}"
+	TO=120 dm "idle 60" debian-idle.txt
+	say "debian idle: $(tr '\n' ';' < "$LOGS/debian-idle.txt")"
+	lin 'cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2> /dev/null' > "$LOGS/debian-epp.txt" 2>&1
+	for mode in default performance; do
+		if [ "$mode" = performance ]; then
+			lin 'for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo performance | sudo -n tee $f > /dev/null; done' > /dev/null 2>&1
+		fi
+		TO=60 lin 'n=$(nproc); i=0; while [ $i -lt $n ]; do timeout 25 sh -c "while :; do :; done" & i=$((i + 1)); done; wait' > /dev/null 2>&1 &
+		sleep 8
+		TO=60 dm "load 5" "debian-load-$mode.txt"
+		wait
+		say "debian load ($mode, EPP $(head -1 "$LOGS/debian-epp.txt") before): $(tr '\n' ' ' < "$LOGS/debian-load-$mode.txt")"
+	done
+	lin "for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo $(head -1 "$LOGS/debian-epp.txt") | sudo -n tee \$f > /dev/null; done" > /dev/null 2>&1
+fi
 
 # 2. zedBSD with the diag kernel.
 kernel "$KDIR/diag/vmunix"
@@ -226,75 +240,88 @@ done
 say "modules: $(for f in "$LOGS"/cpu-[0-9]*.txt; do printf '%s:%s:%s ' "$(sed -n 's/^cpu //p' "$f")" "$(sed -n 's/^core_class //p' "$f")" "$(sed -n 's/^module //p' "$f")"; done)"
 
 # Each strategy with one process spinning.
-for s in performance balanced powersave "manual 100 50 50" "manual 0 50 50"; do
-	tag=$(echo "$s" | tr ' ' '-')
-	th "strategy $s" "strategy-$tag.txt"
-	sleep 3
-	spun "strategy-$tag"
-done
+if part strategies; then
+	for s in performance balanced powersave "manual 100 50 50" "manual 0 50 50"; do
+		tag=$(echo "$s" | tr ' ' '-')
+		th "strategy $s" "strategy-$tag.txt"
+		sleep 3
+		spun "strategy-$tag"
+	done
 
-# A direct max halfway along every domain's levels (500 permille), then the strategy again.
-th "strategy balanced" strategy-direct-base.txt
-sleep 2
-th "cpu set all max=500" direct-set.txt
-sleep 3
-say "direct all max=500: $(tr '\n' ' ' < "$LOGS/direct-set.txt")"
-spun direct-max500
+	# A direct max halfway along every domain's levels (500 permille), then the strategy again.
+	th "strategy balanced" strategy-direct-base.txt
+	sleep 2
+	th "cpu set all max=500" direct-set.txt
+	sleep 3
+	say "direct all max=500: $(tr '\n' ' ' < "$LOGS/direct-set.txt")"
+	spun direct-max500
+fi
 
 # The E-cores of one module: the first at its highest, the others at their efficient level, every CPU loaded.
-th "strategy balanced" strategy-module-base.txt
-sleep 2
-emod=
-for f in "$LOGS"/cpu-[0-9]*.txt; do
-	[ "$(sed -n 's/^core_class //p' "$f")" = E ] || continue
-	emod=$(sed -n 's/^module //p' "$f")
-	break
-done
-members=
-for f in "$LOGS"/cpu-[0-9]*.txt; do
-	[ "$(sed -n 's/^core_class //p' "$f")" = E ] || continue
-	[ "$(sed -n 's/^module //p' "$f")" = "$emod" ] && members="$members $(sed -n 's/^cpu //p' "$f")"
-done
-set -- $members
-if [ $# -ge 2 ]; then
-	target=$1
-	tdom=$(sed -n 's/^domain //p' "$LOGS/cpu-$target.txt")
+if part module; then
+	th "strategy balanced" strategy-module-base.txt
+	sleep 2
+	emod=
 	for f in "$LOGS"/cpu-[0-9]*.txt; do
-		d=$(sed -n 's/^domain //p' "$f")
-		if [ "$d" = "$tdom" ]; then
-			v=$(sed -n 's/^highest //p' "$f")
-		else
-			v=$(sed -n 's/^efficient //p' "$f")
-		fi
-		echo "$d $v"
-	done | sort -u -n > "$LOGS/module-max.txt"
-	while read -r d v; do
-		th "cpu set $d max=$v" "module-set-$d.txt"
-	done < "$LOGS/module-max.txt"
-	sleep 3
-	th "cpu domains" module-domains.txt
-	loadall
-	sleep 8
-	for n in $members; do
-		th "cpu $n sample" "module-cpu$n.txt"
+		[ "$(sed -n 's/^core_class //p' "$f")" = E ] || continue
+		emod=$(sed -n 's/^module //p' "$f")
+		break
 	done
-	wait
-	say "module $emod (cpus$members; cpu $target at its highest, the rest at efficient; every CPU loaded): $(for n in $members; do printf 'cpu%s:%s ' "$n" "$(sed -n 's/^delivered_mhz //p' "$LOGS/module-cpu$n.txt")"; done)"
-else
-	say "module: no E-core module of two CPUs found"
+	members=
+	for f in "$LOGS"/cpu-[0-9]*.txt; do
+		[ "$(sed -n 's/^core_class //p' "$f")" = E ] || continue
+		[ "$(sed -n 's/^module //p' "$f")" = "$emod" ] && members="$members $(sed -n 's/^cpu //p' "$f")"
+	done
+	set -- $members
+	if [ $# -ge 2 ]; then
+		target=$1
+		tdom=$(sed -n 's/^domain //p' "$LOGS/cpu-$target.txt")
+		for f in "$LOGS"/cpu-[0-9]*.txt; do
+			d=$(sed -n 's/^domain //p' "$f")
+			if [ "$d" = "$tdom" ]; then
+				v=$(sed -n 's/^highest //p' "$f")
+			else
+				v=$(sed -n 's/^efficient //p' "$f")
+			fi
+			echo "$d $v"
+		done | sort -u -n > "$LOGS/module-max.txt"
+		while read -r d v; do
+			th "cpu set $d max=$v" "module-set-$d.txt"
+		done < "$LOGS/module-max.txt"
+		sleep 3
+		th "cpu domains" module-domains.txt
+		loadall
+		sleep 8
+		ecpus=
+		for f in "$LOGS"/cpu-[0-9]*.txt; do
+			[ "$(sed -n 's/^core_class //p' "$f")" = E ] && ecpus="$ecpus $(sed -n 's/^cpu //p' "$f")"
+		done
+		for n in $ecpus; do
+			th "cpu $n sample" "module-cpu$n.txt"
+		done
+		wait
+		# The other modules' E-cores, all at efficient, are the reference for a CPU held at its own max.
+		say "module $emod (cpus$members; cpu $target at its highest, every other E-core at efficient; every CPU loaded): $(for n in $ecpus; do printf 'cpu%s(m%s,max %s):%s ' "$n" "$(sed -n 's/^module //p' "$LOGS/cpu-$n.txt")" "$(sed -n "s/^domain $(sed -n 's/^domain //p' "$LOGS/cpu-$n.txt") .* max=\([0-9]*\) .*/\1/p" "$LOGS/module-domains.txt")" "$(sed -n 's/^delivered_mhz //p' "$LOGS/module-cpu$n.txt")"; done)"
+	else
+		say "module: no E-core module of two CPUs found"
+	fi
 fi
 
 # Every CPU loaded under three strategies.
-for s in performance balanced powersave; do
-	loaded "$s"
-done
+if part load; then
+	for s in performance balanced powersave; do
+		loaded "$s"
+	done
+fi
 
 # Idle under balanced, with E2H as zedBSD reads it.
-th "strategy balanced" strategy-idle.txt
-sleep "${IDLE_SETTLE:-60}"
-window diag-balanced
-th "cpu 0 sample" idle-cpu0.txt
-say "zedBSD E2H on cpu 0: $(sed -n 's/^voltage_group //p' "$LOGS/idle-cpu0.txt") 64FH: $(sed -n 's/^firmware_id //p' "$LOGS/idle-cpu0.txt")"
+if part idle; then
+	th "strategy balanced" strategy-idle.txt
+	sleep "${IDLE_SETTLE:-60}"
+	window diag-balanced
+	th "cpu 0 sample" idle-cpu0.txt
+	say "zedBSD E2H on cpu 0: $(sed -n 's/^voltage_group //p' "$LOGS/idle-cpu0.txt") 64FH: $(sed -n 's/^firmware_id //p' "$LOGS/idle-cpu0.txt")"
+fi
 zb 'dmesg' > "$LOGS/diag-end.txt" 2>&1
 to_debian
 

@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | q2023 | 作業中 | WS333 p025 の 5330 の 1 回（HWP の読みの直しの確かめ、E-core の clock の共有、package の C-state 0% の理由） | 結果で p025・p014 を判定、次に p024 |
+| P1 | — | 待機 | WS333 p025 cleared（5330 で MHz の読み・E-core の module の domain を確かめた） | 次: p026（MHz を新しい値で返す UAPI）、p027 は 5330 の危険の判断待ち |
 | P2 | q2026 | 作業中 | BUG-423: QEMU amd64 の USB keyboard が enumerate されない（回帰の見込み）の原因と直し | 次は WS335 p036（乖離の確かめから） |
 | P3 | — | 待機 | WS347 の監査（U1〜U9）を返却。依頼 07 の下書き [gemini-request-07.md](ws347/gemini-request-07.md) | — |
 | P4 | q2025 | 作業中 | WS347 p003: GHCI の driver を最新の ghci.md に追従（乖離の確かめから） | 次は p004（VF2＋KC705 の実機） |
