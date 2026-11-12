@@ -99,7 +99,7 @@
 #define KERN_CPUPERF_SAMPLE_CAPABILITIES	0x2U	/* the four anchors are fresh */
 
 /* What a reader of a CPU asks for, as bits. */
-#define KERN_CPUPERF_READ_SAMPLE	0x1U	/* wake the CPU to measure its delivered rate */
+#define KERN_CPUPERF_READ_FRESH		0x1U	/* a delivered rate at most about a second old */
 
 /* What changed, as a provider reports it. */
 #define KERN_CPUPERF_CHANGED_CAPABILITIES	0x1U
@@ -210,7 +210,7 @@ struct kern_cpuperf_cpu {
 	uint32_t guaranteed;
 	uint32_t highest;
 	uint32_t highest_mhz;		/* estimate, 0 unknown */
-	uint32_t delivered_mhz;		/* the last sample's estimate, 0 unknown */
+	uint32_t delivered_mhz;		/* estimate at most about a second old, 0 unknown */
 	uint32_t flags;			/* KERN_CPUPERF_CPU_* */
 };
 
@@ -343,11 +343,15 @@ kern_cpuperf_notify(
 /*
  * Reports one CPU.
  *
- * Without KERN_CPUPERF_READ_SAMPLE: any context where a spinlock may be
- * taken with interrupts masked; no CPU is woken.  With it: thread context
- * only, sleeps about 100 ms between two samples of the CPU and at most a
- * second for each.  Returns 0, EINVAL for a CPU that does not exist, or
- * ETIMEDOUT when the CPU did not answer (the rest of the report is still
+ * The delivered rate is the one a reader's measurement took no more than
+ * about a second ago, and 0 when there is none.  Without
+ * KERN_CPUPERF_READ_FRESH: any context where a spinlock may be taken with
+ * interrupts masked; no CPU is woken.  With it: thread context only; when
+ * the CPU's rate is older, every CPU is sampled twice about 100 ms apart,
+ * each time given at most a second to answer, and a reader that comes
+ * while that runs waits for it and shares its rates.  Returns 0, EINVAL for a
+ * CPU that does not exist, or with KERN_CPUPERF_READ_FRESH ETIMEDOUT when
+ * the CPU did not answer (its rate is 0, the rest of the report is still
  * filled).
  */
 int

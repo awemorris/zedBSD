@@ -18,8 +18,12 @@
 
 struct process;
 
-/* A kernel thread as the core sees it: an entry, its argument, whether it runs and its process. */
+/*
+ * A kernel thread as the core and the CPU framework see it: an entry, its
+ * argument, whether it runs, its process and whether it was detached.
+ */
 struct thread {
+	unsigned detached;
 	void (*entry)(void *);
 	void *argument;
 	int started;
@@ -38,6 +42,10 @@ kthread_create(
 	void *arg,
 	int priority,
 	struct thread **result);
+
+int
+thread_abort_new(
+	struct thread *thread);
 
 void
 thread_start(

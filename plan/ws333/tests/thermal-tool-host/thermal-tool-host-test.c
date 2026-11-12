@@ -6,12 +6,13 @@
  */
 
 /*
- * Host test of /sbin/thermal's CPU list: "thermal cpu" samples every CPU
- * when /dev/thermal opens for writing, and shows the last samples when
- * the kernel refuses a sample on a descriptor opened for reading.  The
- * program is compiled in with open and ioctl replaced by a model of the
- * device: three CPUs, whose last sample reads 100 + n MHz and whose fresh
- * sample reads 3000 + n MHz.
+ * Host test of /sbin/thermal's CPU reads: "thermal cpu" and "thermal cpu
+ * <n>" show the kernel's fresh rate whether /dev/thermal opens for writing
+ * or for reading only, and ask for nothing beyond the CPU.  The program is
+ * compiled in with open and ioctl replaced by a model of the device as the
+ * kernel answers GET_CPU: three CPUs, one measurement of every CPU shared
+ * by the reads of a second, whose rate is 1000 * the measurement's number
+ * + n MHz, and a model second that passes between runs of the program.
  */
 
 #include <errno.h>
@@ -42,8 +43,12 @@ static bool model_writable;
 /* The descriptor's mode: true when it was opened for writing. */
 static bool model_opened_writable;
 
-/* The number of samples the model took. */
-static unsigned model_samples;
+/* The measurements of every CPU the model took, and whether the last one is still fresh. */
+static unsigned model_measurements;
+static bool model_fresh;
+
+/* The GET_CPU requests the model answered. */
+static unsigned model_requests;
 
 /* The number of failed checks. */
 static unsigned failures;
@@ -72,7 +77,7 @@ test_open(
 	return MODEL_DESCRIPTOR;
 }
 
-/* Answers GET_CPU as the kernel does for a sample and for the last sample. */
+/* Answers GET_CPU as the kernel does, on any descriptor. */
 int
 test_ioctl(
 	int descriptor,
@@ -93,9 +98,9 @@ test_ioctl(
 		return -1;
 	}
 
-	/* Refuses a sample on a descriptor opened for reading, before the CPU number. */
-	if ((cpu->request & KERN_THERMAL_CPU_READ_SAMPLE) != 0U && !model_opened_writable) {
-		errno = EPERM;
+	/* Refuses a reserved field that is not zero. */
+	if (cpu->reserved0 != 0U) {
+		errno = EINVAL;
 		return -1;
 	}
 
@@ -105,26 +110,30 @@ test_ioctl(
 		return -1;
 	}
 
-	/* Reports the fresh rate of a sample, else the last one. */
+	/* Measures every CPU when the last measurement is old, then reports the CPU's rate. */
+	model_requests++;
+	if (!model_fresh) {
+		model_measurements++;
+		model_fresh = true;
+	}
 	cpu->count = MODEL_CPUS;
 	cpu->core_class = KERN_THERMAL_CPU_CORE_PERFORMANCE;
 	cpu->relative = KERN_THERMAL_UNKNOWN;
-	cpu->delivered_mhz = 100U + cpu->cpu;
-	if ((cpu->request & KERN_THERMAL_CPU_READ_SAMPLE) != 0U) {
-		cpu->delivered_mhz = 3000U + cpu->cpu;
-		model_samples++;
-	}
+	cpu->delivered_mhz = 1000U * model_measurements + cpu->cpu;
 	return 0;
 }
 
-/* Runs "thermal cpu" and reads what it printed into text. */
+/* Runs "thermal cpu" with the arguments given (NULL for none) and reads what it printed into text. */
 static int
-run_list(
+run_cpu(
+	const char *argument,
+	const char *second,
 	const char *output,
 	char *text,
 	size_t size)
 {
-	char *argv[] = { "thermal", "cpu", NULL };
+	char *argv[] = { "thermal", "cpu", (char *)argument, (char *)second, NULL };
+	int count;
 	FILE *file;
 	size_t length;
 	int saved;
@@ -136,7 +145,10 @@ run_list(
 	file = freopen(output, "w", stdout);
 	if (file == NULL)
 		return -1;
-	status = thermal_main(2, argv);
+	count = 2;
+	if (argument != NULL)
+		count = second != NULL ? 4 : 3;
+	status = thermal_main(count, argv);
 	fflush(stdout);
 	dup2(saved, 1);
 	close(saved);
@@ -179,25 +191,41 @@ main(
 		return 2;
 	(void)snprintf(output, sizeof(output), "%s/list.txt", argv[1]);
 
-	/* A member of the group: every CPU is sampled. */
-	model_writable = true;
-	model_samples = 0U;
-	status = run_list(output, text, sizeof(text));
-	check(status == 0, "writable: exit 0");
-	check(model_samples == MODEL_CPUS, "writable: one sample per CPU");
-	check(strstr(text, "cpu 0 ") != NULL && strstr(text, "mhz=3000\n") != NULL, "writable: cpu 0 fresh");
-	check(strstr(text, "cpu 2 ") != NULL && strstr(text, "mhz=3002\n") != NULL, "writable: cpu 2 fresh");
-	check(strstr(text, "mhz=10") == NULL, "writable: no last sample");
-	check(strstr(text, "cpu 3 ") == NULL, "writable: three CPUs");
-
-	/* Outside the group: the last samples, without a failure. */
+	/* Outside the group: the open reads only, and the list has the fresh rates of one measurement. */
 	model_writable = false;
-	model_samples = 0U;
-	status = run_list(output, text, sizeof(text));
+	model_fresh = false;
+	status = run_cpu(NULL, NULL, output, text, sizeof(text));
 	check(status == 0, "read-only: exit 0");
-	check(model_samples == 0U, "read-only: no sample");
-	check(strstr(text, "mhz=100\n") != NULL && strstr(text, "mhz=102\n") != NULL, "read-only: last samples");
+	check(!model_opened_writable, "read-only: opened for reading");
+	check(model_measurements == 1U && model_requests == MODEL_CPUS, "read-only: one measurement for three CPUs");
+	check(strstr(text, "cpu 0 ") != NULL && strstr(text, "mhz=1000\n") != NULL, "read-only: cpu 0 fresh");
+	check(strstr(text, "cpu 2 ") != NULL && strstr(text, "mhz=1002\n") != NULL, "read-only: cpu 2 fresh");
 	check(strstr(text, "cpu 3 ") == NULL, "read-only: three CPUs");
+
+	/* Within the second, one CPU's fields share that measurement. */
+	status = run_cpu("1", NULL, output, text, sizeof(text));
+	check(status == 0, "read-only one CPU: exit 0");
+	check(model_measurements == 1U, "read-only one CPU: shared");
+	check(strstr(text, "delivered_mhz 1001\n") != NULL, "read-only one CPU: fresh");
+
+	/* A second later: measured again. */
+	model_fresh = false;
+	status = run_cpu("1", NULL, output, text, sizeof(text));
+	check(status == 0 && model_measurements == 2U, "a second later: measured again");
+	check(strstr(text, "delivered_mhz 2001\n") != NULL, "a second later: the new rate");
+
+	/* A member of the group reads the same way. */
+	model_writable = true;
+	model_fresh = false;
+	model_requests = 0U;
+	status = run_cpu(NULL, NULL, output, text, sizeof(text));
+	check(status == 0, "writable: exit 0");
+	check(model_measurements == 3U && model_requests == MODEL_CPUS, "writable: one measurement");
+	check(strstr(text, "mhz=3000\n") != NULL && strstr(text, "mhz=3002\n") != NULL, "writable: fresh");
+
+	/* The sample argument is gone. */
+	status = run_cpu("1", "sample", output, text, sizeof(text));
+	check(status == 2, "cpu 1 sample: usage");
 
 	/* Reports the result. */
 	if (failures != 0U) {

@@ -62,6 +62,8 @@ static unsigned test_wrong_cpu;
 static unsigned test_guaranteed_p = 21U;
 static bool test_feedback_changed;
 static unsigned test_measure_highest;
+static unsigned test_samples[TEST_CPU_MAX];
+static unsigned test_rate = 1000U;	/* a sample's delivered rate is this plus the CPU */
 
 /*
  * The scheduler's moves of a measuring thread: the next test_move_starts
@@ -497,7 +499,8 @@ mock_sample(kern_cpu_id_t cpu, struct kern_cpuperf_sample *sample)
 {
 	if (test_current != cpu)
 		test_wrong_cpu++;
-	sample->delivered_mhz = 1000U + cpu;
+	test_samples[cpu]++;
+	sample->delivered_mhz = test_rate + cpu;
 	if (!test_steps && test_started[cpu])
 		mock_capabilities(cpu, sample);
 }
@@ -903,11 +906,27 @@ scenario_range(void)
 	CHECK(test_notifications == notifications);
 	CHECK(kern_cpuperf_idle_package(1, &idle) == EINVAL);
 
-	/* The delivered rate, read on the CPU. */
-	CHECK(kern_cpuperf_cpu(3, KERN_CPUPERF_READ_SAMPLE, &info) == 0);
+	/* No measurement yet: a reader that does not wait gets no rate, not a sample of the strategy's. */
+	CHECK(kern_cpuperf_cpu(3, 0, &info) == 0);
+	CHECK(info.delivered_mhz == 0U);
+
+	/* The delivered rate, read on the CPU; a reader that does not wait then shares it. */
+	CHECK(kern_cpuperf_cpu(3, KERN_CPUPERF_READ_FRESH, &info) == 0);
 	CHECK(info.delivered_mhz == 1003U);
+	CHECK(kern_cpuperf_cpu(9, 0, &info) == 0);
+	CHECK(info.delivered_mhz == 1009U);
+
+	/* A second later the rate is too old for a reader that does not wait. */
+	test_ticks += 1000U;
+	CHECK(kern_cpuperf_cpu(9, 0, &info) == 0);
+	CHECK(info.delivered_mhz == 0U);
+
+	/* A CPU that does not answer has no rate; the others are measured. */
 	test_deaf[3] = true;
-	CHECK(kern_cpuperf_cpu(3, KERN_CPUPERF_READ_SAMPLE, &info) == ETIMEDOUT);
+	CHECK(kern_cpuperf_cpu(3, KERN_CPUPERF_READ_FRESH, &info) == ETIMEDOUT);
+	CHECK(info.delivered_mhz == 0U);
+	CHECK(kern_cpuperf_cpu(9, KERN_CPUPERF_READ_FRESH, &info) == 0);
+	CHECK(info.delivered_mhz == 1009U);
 	test_deaf[3] = false;
 	test_current = 0U;
 
@@ -996,6 +1015,8 @@ scenario_ioctl(void)
 	struct thermal_cpu_domain domain;
 	struct thermal_cpu_info cpu;
 	struct thermal_cpu_idle idle;
+	unsigned samples[TEST_CPU_MAX];
+	unsigned index;
 	uint32_t flags;
 
 	kern_cpuperf_init();
@@ -1008,8 +1029,12 @@ scenario_ioctl(void)
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU + (1UL << 16), &cpu) == ENOTTY);
 	CHECK(test_request_cpu(_IOR('T', 39, struct thermal_cpu_idle), &idle) == ENOTTY);
 
-	/* A CPU: topology, class, anchors and the measured rate; any open reads it. */
+	/*
+	 * A CPU: topology, class, anchors and a fresh rate, on an open for
+	 * reading as well.  The first read measures every CPU, twice each.
+	 */
 	test_file.f_flags = O_RDONLY;
+	memcpy(samples, test_samples, sizeof(samples));
 	memset(&cpu, 0, sizeof(cpu));
 	cpu.cpu = 3;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
@@ -1018,29 +1043,49 @@ scenario_ioctl(void)
 	CHECK(cpu.highest == 56U && cpu.guaranteed == 21U && cpu.highest_mhz == 4388U && cpu.relative == 100U);
 	CHECK((cpu.flags & KERN_THERMAL_CPU_HAS_CONTROL) != 0U);
 	CHECK((cpu.flags & KERN_THERMAL_CPU_SAMPLE_TIMEOUT) == 0U);
+	CHECK(cpu.delivered_mhz == 1003U && cpu.reserved0 == 0U);
+	for (index = 0; index < 12U; index++)
+		CHECK(test_samples[index] == samples[index] + 2U);
+
+	/* Within a second every reader shares that measurement: nothing is sampled. */
+	test_rate = 2000U;
 	cpu.cpu = 7;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
 	CHECK(cpu.core_class == KERN_THERMAL_CPU_CORE_EFFICIENCY && cpu.relative == 75U);
-
-	/* A sample needs an open for writing; past the last CPU is ENOENT; an unknown request bit is EINVAL. */
-	cpu.cpu = 2;
-	cpu.request = KERN_THERMAL_CPU_READ_SAMPLE;
-	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == EPERM);
+	CHECK(cpu.delivered_mhz == 1007U);
 	test_file.f_flags = O_RDWR;
+	cpu.cpu = 3;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
-	CHECK(cpu.delivered_mhz == 1002U && cpu.request == KERN_THERMAL_CPU_READ_SAMPLE);
-	cpu.request = 2;
+	CHECK(cpu.delivered_mhz == 1003U);
+	for (index = 0; index < 12U; index++)
+		CHECK(test_samples[index] == samples[index] + 2U);
+
+	/* A second later the next read measures every CPU again. */
+	test_ticks += 1000U;
+	test_file.f_flags = O_RDONLY;
+	cpu.cpu = 2;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
+	CHECK(cpu.delivered_mhz == 2002U);
+	for (index = 0; index < 12U; index++)
+		CHECK(test_samples[index] == samples[index] + 4U);
+
+	/* A reserved field that is not zero is EINVAL; past the last CPU is ENOENT. */
+	cpu.reserved0 = 1;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == EINVAL);
-	cpu.request = 0;
+	cpu.reserved0 = 0;
 	cpu.cpu = 12;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == ENOENT);
 
-	/* A CPU that does not answer the sample: 0 and SAMPLE_TIMEOUT with the rest filled. */
+	/* A CPU that does not answer the sample: no rate and SAMPLE_TIMEOUT with the rest filled. */
+	test_ticks += 1000U;
 	test_deaf[5] = true;
 	cpu.cpu = 5;
-	cpu.request = KERN_THERMAL_CPU_READ_SAMPLE;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
 	CHECK((cpu.flags & KERN_THERMAL_CPU_SAMPLE_TIMEOUT) != 0U && cpu.core_class == KERN_THERMAL_CPU_CORE_EFFICIENCY);
+	CHECK(cpu.delivered_mhz == 0U);
+	cpu.cpu = 6;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
+	CHECK((cpu.flags & KERN_THERMAL_CPU_SAMPLE_TIMEOUT) == 0U && cpu.delivered_mhz == 2006U);
 	test_deaf[5] = false;
 
 	/* A domain: members, a RANGE as its ends, the request; past the last is ENOENT. */
@@ -1238,6 +1283,8 @@ run(const char *name, void (*scenario)(void))
 	fflush(stdout);
 	child = fork();
 	if (child == 0) {
+		/* Counts this scenario's failures only, not the ones before it. */
+		test_failures = 0;
 		scenario();
 		printf("%s: %u checks, %u failures\n", name, test_checks, test_failures);
 		exit(test_failures == 0 ? 0 : 1);

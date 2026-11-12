@@ -16,6 +16,11 @@ void *
 kern_malloc(
 	size_t size);
 
+void *
+kern_calloc(
+	size_t count,
+	size_t size);
+
 void
 kern_free(
 	void *pointer);

@@ -377,9 +377,9 @@ anything:
 
 - anyone may open it for reading and read every state;
 - a change (the strategy, a boost, a direct setting of the processors, the
-  choice of the relative performance) and a read that wakes a processor
-  (a processor's sample, a core's idle residency) need a descriptor opened
-  for writing; on a descriptor opened for reading they fail with `EPERM`;
+  choice of the relative performance) and a read of a core's idle
+  residency, which wakes the core, need a descriptor opened for writing; on
+  a descriptor opened for reading they fail with `EPERM`;
 - root and the `desktop` group's members can open it for writing. The
   default user and the users Settings creates are members.
 
@@ -423,7 +423,7 @@ thermal sensors | fans | meters | receivers
 thermal strategy [performance | balanced | powersave | manual <speed> <noise> <gating>]
 thermal restore                           (the boot service)
 thermal boost <fan|all> <level>
-thermal cpu [<n> [sample] | domains | set <domain|all> [min=N] [max=N] [desired=N] [epp=N]]
+thermal cpu [<n> | domains | set <domain|all> [min=N] [max=N] [desired=N] [epp=N]]
 thermal cpu relative [frequency | feedback | provider]
 thermal idle [cpu <n> | package <n>] [-i <seconds>]
 thermal power [-i <seconds>]
@@ -435,12 +435,13 @@ did what it was asked, 1 when the kernel refused (with the reason), and 2
 for a command it does not know. A strategy that no part acts on is kept
 and reported, not treated as a failure.
 
-A processor's `mhz` is the average rate it ran at while not idle, over the
-interval between two of its samples. `thermal cpu` samples each processor
-for about 100 ms when its descriptor is open for writing, so the rate is
-the current one; otherwise, as `thermal cpu <n>` without `sample`, it shows
-the processor's last sample, which may be the one taken when the last
-strategy was applied and so cover the time under the strategy before it.
+A processor's `mhz` is the average rate it ran at while not idle, over
+about 100 ms that ended at most about a second ago, whoever reads it. A
+read that finds the rate older has the kernel sample every processor twice,
+about 100 ms apart, and every reader shares that measurement: a reader that
+comes while it runs waits for it, and the reads of the next second take its
+rates without waking a processor. A processor that does not answer within a
+second has `mhz` 0 and the flag `sample-timeout`.
 HWP's levels are abstract units, not a fixed number of MHz, and a
 performance core's unit and an efficiency core's unit differ; `highest_mhz`
 is measured once, after the first strategy, and is 0 before.

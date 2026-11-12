@@ -254,7 +254,7 @@ static int command_restore(void);
 static int command_boost(int argc, char **argv);
 static int command_cpu(int argc, char **argv);
 static int show_cpus(void);
-static int show_cpu(uint32_t cpu, bool sample);
+static int show_cpu(uint32_t cpu);
 static int show_domains(void);
 static int command_cpu_set(int argc, char **argv);
 static int command_relative(int argc, char **argv);
@@ -390,7 +390,7 @@ usage(void)
 		"       thermal strategy [performance | balanced | powersave | manual <speed> <noise> <gating>]\n"
 		"       thermal restore\n"
 		"       thermal boost <fan|all> <level>\n"
-		"       thermal cpu [<n> [sample] | domains | set <domain|all> [min=N] [max=N] [desired=N] [epp=N]]\n"
+		"       thermal cpu [<n> | domains | set <domain|all> [min=N] [max=N] [desired=N] [epp=N]]\n"
 		"       thermal cpu relative [frequency | feedback | provider]\n"
 		"       thermal idle [cpu <n> | package <n>] [-i <seconds>]\n"
 		"       thermal power [-i <seconds>]\n"
@@ -1287,7 +1287,6 @@ command_cpu(
 {
 	uint32_t cpu;
 	bool parsed;
-	bool sample;
 	int different;
 	int status;
 
@@ -1318,35 +1317,24 @@ command_cpu(
 		return status;
 	}
 
-	/* One CPU, sampled when asked. */
+	/* One CPU; refuses a number that is not one, and anything after it. */
 	parsed = parse_unsigned(argv[0], UINT32_MAX - 1U, &cpu);
-	sample = false;
-	if (argc == 2) {
-		different = strcmp(argv[1], "sample");
-		if (different == 0)
-			sample = true;
-	}
-
-	/* Refuses a number that is not one, and more than a sample request. */
-	if (!parsed ||
-	    argc > 2 ||
-	    (argc == 2 && !sample)) {
+	if (!parsed || argc > 1) {
 		usage();
 		return EXIT_USAGE;
 	}
 
 	/* Shows it. */
-	status = show_cpu(cpu, sample);
+	status = show_cpu(cpu);
 	return status;
 }
 
 /*
  * Shows one line per CPU: its kind, domain, relative performance and rate.
  *
- * The rate is the one the CPU delivers now: each CPU is sampled for about
- * 100 ms, which only an open for writing may ask for.  When the kernel
- * refuses the sample, the rate shown is the CPU's last sample, however
- * old it is.
+ * The rate is the one the kernel measured at most about a second ago,
+ * whoever reads it; the kernel measures every CPU at once when it is
+ * older, so the list waits about 100 ms at most once.
  */
 static int
 show_cpus(void)
@@ -1354,24 +1342,13 @@ show_cpus(void)
 	struct thermal_cpu_info cpu;
 	char relative[NUMBER_TEXT_MAX];
 	uint32_t index;
-	uint32_t request;
 	int error;
 
-	/* Walks the CPUs until the kernel says there are no more, sampling each while it lets. */
-	request = KERN_THERMAL_CPU_READ_SAMPLE;
+	/* Walks the CPUs until the kernel says there are no more. */
 	for (index = 0;; index++) {
 		memset(&cpu, 0, sizeof(cpu));
 		cpu.cpu = index;
-		cpu.request = request;
 		error = device_request(KERN_THERMAL_GET_CPU, &cpu);
-
-		/* Reads the last samples, of this CPU and the rest, once the kernel refuses to sample. */
-		if (error == EPERM && request != 0U) {
-			request = 0U;
-			memset(&cpu, 0, sizeof(cpu));
-			cpu.cpu = index;
-			error = device_request(KERN_THERMAL_GET_CPU, &cpu);
-		}
 		if (error == ENOENT)
 			break;
 		if (error != 0)
@@ -1390,21 +1367,18 @@ show_cpus(void)
 	return EXIT_DONE;
 }
 
-/* Shows every field of one CPU, sampling its rate when asked. */
+/* Shows every field of one CPU. */
 static int
 show_cpu(
-	uint32_t index,
-	bool sample)
+	uint32_t index)
 {
 	struct thermal_cpu_info cpu;
 	char flags[FLAGS_TEXT_MAX];
 	int error;
 
-	/* Reads the CPU; a sample wakes it, which only an open for writing may do. */
+	/* Reads the CPU, its rate at most about a second old. */
 	memset(&cpu, 0, sizeof(cpu));
 	cpu.cpu = index;
-	if (sample)
-		cpu.request = KERN_THERMAL_CPU_READ_SAMPLE;
 	error = device_request(KERN_THERMAL_GET_CPU, &cpu);
 	if (error != 0)
 		return refused("cpu", error);
