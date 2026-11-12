@@ -460,4 +460,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-420](bugs/BUG-420.md) | LLVM の source の展開が file の時刻で繰り返され、build が source を上書きする（worktree の i386 の vmunix が main の build/llvm-source を上書き） | fixed（2026-11-12 Q1、main と新しい worktree で確かめた） |
 | [BUG-421](bugs/BUG-421.md) | 新しい checkout で NoctLang の patch が取得した tarball に当たらず `make sysroot` が止まる（CMakeLists.txt の hunk） | fixed（2026-11-12 ユーザー 0958bc742e、Q1 が新しい worktree で確かめた） |
 | [BUG-422](bugs/BUG-422.md) | kernel に CPU の affinity が無く、cpuperf の測りの thread が work stealing で他の CPU に移る（E-core が測れない） | fixed（2026-11-13 Q1、P2 q2024。`sched_set_cpu` に FREE・BOUND の affinity、BOUND は盗まない。5330 の確かめは WS333 の次の測定） |
-| [BUG-423](bugs/BUG-423.md) | QEMU amd64 で USB の keyboard が enumerate されない（`port 6 enumeration failed (42)`、ETIMEDOUT） | open（2026-11-13 Q1 が起票、10-17 には動いていた回帰の見込み） |
+| [BUG-423](bugs/BUG-423.md) | QEMU amd64 で USB の keyboard が enumerate されない（`port 6 enumeration failed (42)`、ETIMEDOUT） | open（2026-11-13 Q1 が起票。P2 が原因を特定し直した: xHCI の IRQ の establish が IMAN.IE の後になっていた（04d899bb6a）、QEMU で -smp 1・4 の login と uname を確かめた。fixed は Q1） |

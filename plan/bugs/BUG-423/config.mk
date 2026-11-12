@@ -1,0 +1,4 @@
+PLATFORM := x86_64
+ARCHITECTURE := x86_64
+BOARD := pcat
+VARIANT := uefi

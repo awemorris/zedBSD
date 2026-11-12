@@ -6311,6 +6311,77 @@ xhci_stop_checked(
 	return function_result;
 }
 
+/*
+ * Takes the controller's interrupt, trying MSI-X, then MSI, then INTx, when
+ * the controller is reset and its event ring programmed but the interrupter
+ * not yet enabled.  The vector and the handler come before IMAN.IE: a
+ * controller may tie a message vector to the interrupter only when IE is
+ * written with message interrupts already on (QEMU's xHCI does, and sends
+ * none otherwise), and an event raised before them would go out as INTx.
+ * After the reset nothing stale is pending for the handler, which also
+ * covers the Intel DWC3 cores' level-triggered INTx.  A stop gives the
+ * handler back; the next start takes it again with the same allocation.
+ */
+static int
+xhci_irq_setup(
+	struct xhci_controller *c)
+{
+	static const struct {
+		unsigned flag;
+		const char *name;
+	} modes[] = {
+		{ DRV_PCI_IRQ_ALLOW_MSIX, "MSI-X" },
+		{ DRV_PCI_IRQ_ALLOW_MSI, "MSI" },
+		{ DRV_PCI_IRQ_ALLOW_INTX, "INTx" },
+	};
+	unsigned count, index;
+	int e;
+
+	/* Handles the irq cookie availability. */
+	if (c->irq_cookie != NULL)
+		return 0;
+
+	e = ENODEV;
+	for (index = 0; index < sizeof(modes) / sizeof(modes[0]); index++) {
+		/* A restart keeps the vector it had. */
+		if (!c->irq_allocated) {
+			if (drv_pci_device_allocate_irqs(c->pci, modes[index].flag,
+							 1, 1, &c->irq,
+							 &count) != 0)
+				continue;
+			c->irq_allocated = 1;
+		}
+		if (c->is_dwc3 && c->irq.type == DRV_PCI_IRQ_INTX) {
+			e = kern_irq_set_mode((int)c->irq.vector,
+					      KERN_IRQ_TRIGGER_LEVEL,
+					      KERN_IRQ_POLARITY_HIGH);
+			kern_logf("xhci: set dwc3 irq %u mode "
+				   "level/active-high: %d\n",
+				   c->irq.vector, e);
+		}
+		e = drv_pci_device_establish_irq(c->pci, &c->irq, xhci_irq, c,
+						 "xhci", &c->irq_cookie);
+		if (e == 0) {
+			kern_logf("xhci: using %s vector %u\n",
+				   c->irq.type == DRV_PCI_IRQ_MSIX  ? "MSI-X"
+				   : c->irq.type == DRV_PCI_IRQ_MSI ? "MSI"
+								     : "INTx",
+				   c->irq.vector);
+
+			/* Succeeded. */
+			return 0;
+		}
+		kern_logf("xhci: %s establish failed (%d), trying next IRQ "
+			   "type\n",
+			   modes[index].name, e);
+		drv_pci_device_free_irqs(c->pci, &c->irq, 1);
+		c->irq_allocated = 0;
+	}
+
+	/* Failed. */
+	return e;
+}
+
 /* Brings the controller into service. */
 static int
 xhci_start(
@@ -6434,6 +6505,12 @@ xhci_start(
 	wr64(c->runtime, 0x30U, c->erst_memory.device_address);
 	wr64(c->runtime, 0x38U, c->event_memory.device_address);
 	wr32(c->runtime, 0x24U, KERN_XHCI_IMOD);
+
+	/* The vector and its handler before the interrupter's enable. */
+	stage = "IRQ establishment";
+	e = xhci_irq_setup(c);
+	if (e != 0)
+		goto fail;
 	c->interrupter_enabled = 1U;
 	wr32(c->runtime, 0x20U, 2U);
 	wr32(c->operational, XHCI_CONFIG, c->max_slots);
@@ -6843,7 +6920,6 @@ xhci_attach(
 	struct drv_pci_address address;
 	struct drv_pci_bar mapped_bar;
 	const char *stage = "allocation";
-	unsigned count = 0;
 	uint32_t first, reasons, doorbell_offset, runtime_offset;
 	uint32_t original_low, original_high, mapped_low, mapped_high;
 	uint16_t command_before = 0xffffU, command_mapped, command_after;
@@ -7061,54 +7137,12 @@ xhci_attach(
 	stage = "PCI bus master";
 	if ((e = drv_pci_device_set_bus_master(d, true)) != 0)
 		goto fail;
-	/*
-	 * Try each interrupt mode in priority order (MSI-X -> MSI -> INTx).
-	 */
-	{
-		static const struct {
-			unsigned flag;
-			const char *name;
-		} irq_modes[] = {
-			{ DRV_PCI_IRQ_ALLOW_MSIX, "MSI-X" },
-			{ DRV_PCI_IRQ_ALLOW_MSI,  "MSI" },
-			{ DRV_PCI_IRQ_ALLOW_INTX, "INTx" },
-		};
-		unsigned mode_idx;
 
-		e = ENODEV;
-		for (mode_idx = 0; mode_idx < sizeof(irq_modes) / sizeof(irq_modes[0]); mode_idx++) {
-			stage = "IRQ allocation";
-			if (drv_pci_device_allocate_irqs(d, irq_modes[mode_idx].flag, 1, 1, &c->irq, &count) != 0)
-				continue;
-			c->irq_allocated = 1;
-			break;
-		}
-		if (c->irq_allocated == 0)
-			goto fail;
-	}
-
-	/* Checks the drv usb hcd register result. */
+	/* Registers and starts the controller, which also takes its interrupt. */
 	stage = "controller start";
 	if ((e = drv_usb_hcd_register(&c->hcd, &c->bus)) != 0)
 		goto fail;
 	c->hcd_registered = 1;
-
-	/* Establish interrupt now that the controller and event ring are ready. */
-	stage = "IRQ establishment";
-	if (c->is_dwc3 && c->irq.type == DRV_PCI_IRQ_INTX) {
-		e = kern_irq_set_mode((int)c->irq.vector,
-				      KERN_IRQ_TRIGGER_LEVEL,
-				      KERN_IRQ_POLARITY_HIGH);
-		kern_logf("xhci: set dwc3 irq %u mode level/active-high: %d\n",
-			  c->irq.vector, e);
-	}
-	e = drv_pci_device_establish_irq(d, &c->irq, xhci_irq, c, "xhci", &c->irq_cookie);
-	if (e != 0)
-		goto fail;
-	kern_logf("xhci: using %s vector %u\n",
-		  c->irq.type == DRV_PCI_IRQ_MSIX ? "MSI-X" :
-		  c->irq.type == DRV_PCI_IRQ_MSI ? "MSI" : "INTx",
-		  c->irq.vector);
 
 	stage = "port worker";
 
