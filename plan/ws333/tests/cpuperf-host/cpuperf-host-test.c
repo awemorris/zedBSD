@@ -62,6 +62,17 @@ static unsigned test_wrong_cpu;
 static unsigned test_guaranteed_p = 21U;
 static bool test_feedback_changed;
 static unsigned test_measure_highest;
+
+/*
+ * The scheduler's moves of a measuring thread: the next test_move_starts
+ * threads run on the CPU after the one they were placed on, and while
+ * test_move_on_call is nonzero the measuring thread's call of that number
+ * finds itself on that CPU (a move during its busy time).
+ */
+static unsigned test_move_starts;
+static unsigned test_move_on_call;
+static bool test_in_measure;
+static unsigned test_measure_starts;
 static int test_steps;
 
 /* The governor's thread, which the test runs one pass at a time. */
@@ -193,6 +204,11 @@ kern_cpu_count(void)
 unsigned
 kern_cpu_current(void)
 {
+	if (test_in_measure && test_move_on_call != 0U) {
+		test_move_on_call--;
+		if (test_move_on_call == 0U)
+			return (test_current + 1U) % test_cpu_count;
+	}
 	return test_current;
 }
 
@@ -298,7 +314,14 @@ thread_start(struct thread *thread)
 	}
 	saved = test_current;
 	test_current = thread->bound_cpu;
+	test_measure_starts++;
+	if (test_move_starts != 0U) {
+		test_move_starts--;
+		test_current = (thread->bound_cpu + 1U) % test_cpu_count;
+	}
+	test_in_measure = true;
 	thread->entry(thread->argument);
+	test_in_measure = false;
 	test_current = saved;
 	free(thread);
 }
@@ -1084,6 +1107,71 @@ scenario_ioctl(void)
 	CHECK(test_wrong_cpu == 0U);
 }
 
+/*
+ * The measurement of the highest rates when the scheduler moves the
+ * measuring thread: a thread that starts on another CPU, or moves during
+ * its busy time, is replaced; one that never stays leaves the rate
+ * unknown and the strategy in force.
+ */
+static void
+scenario_measure_moved(void)
+{
+	struct kern_cpuperf_cpu info;
+	uint32_t flags;
+
+	/* The P-core's first two threads start elsewhere: the third measures it. */
+	kern_cpuperf_init();
+	CHECK(kern_cpuperf_provider_register(&mock_ops) == 0);
+	test_move_starts = 2U;
+	CHECK(test_strategy(KERN_THERMAL_STRATEGY_BALANCED, 0, 0, &flags) == 0);
+	CHECK(test_move_starts == 0U);
+	CHECK(test_measure_starts == 4U);
+	CHECK(test_wrong_cpu == 0U);
+	CHECK(kern_cpuperf_cpu(0, 0, &info) == 0);
+	CHECK(info.highest_mhz == 4388U);
+	CHECK(kern_cpuperf_cpu(4, 0, &info) == 0);
+	CHECK(info.highest_mhz == 3292U);
+	CHECK(info.relative == 75U);
+}
+
+/* A measuring thread that moves during its busy time is not believed. */
+static void
+scenario_measure_moved_busy(void)
+{
+	struct kern_cpuperf_cpu info;
+	uint32_t flags;
+
+	/* The first thread finds itself elsewhere at its second look (after the busy time). */
+	kern_cpuperf_init();
+	CHECK(kern_cpuperf_provider_register(&mock_ops) == 0);
+	test_move_on_call = 2U;
+	CHECK(test_strategy(KERN_THERMAL_STRATEGY_BALANCED, 0, 0, &flags) == 0);
+	CHECK(test_measure_starts == 3U);
+	CHECK(kern_cpuperf_cpu(1, 0, &info) == 0);
+	CHECK(info.highest_mhz == 4388U);
+}
+
+/* Threads that never stay on the CPU: the rates stay unknown, the strategy holds. */
+static void
+scenario_measure_never(void)
+{
+	struct kern_cpuperf_cpu info;
+	uint32_t flags;
+
+	/* Every thread starts elsewhere. */
+	kern_cpuperf_init();
+	CHECK(kern_cpuperf_provider_register(&mock_ops) == 0);
+	test_move_starts = 1000U;
+	CHECK(test_strategy(KERN_THERMAL_STRATEGY_BALANCED, 0, 0, &flags) == 0);
+	CHECK(test_measure_starts == 6U);
+	CHECK(kern_cpuperf_cpu(0, 0, &info) == 0);
+	CHECK(info.highest_mhz == 0U);
+	CHECK(kern_cpuperf_cpu(11, 0, &info) == 0);
+	CHECK(info.highest_mhz == 0U);
+	EXPECT(0, 1, 56, 128);
+	EXPECT(4, 1, 33, 128);
+}
+
 static void
 run(const char *name, void (*scenario)(void))
 {
@@ -1114,6 +1202,9 @@ main(int argc, char **argv)
 	run("range", scenario_range);
 	run("steps", scenario_steps);
 	run("ioctl", scenario_ioctl);
+	run("measure-moved", scenario_measure_moved);
+	run("measure-moved-busy", scenario_measure_moved_busy);
+	run("measure-never", scenario_measure_never);
 	if (test_failures != 0) {
 		printf("cpuperf host test: FAIL\n");
 		return 1;

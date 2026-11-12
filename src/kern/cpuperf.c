@@ -90,6 +90,9 @@ _Static_assert(KERN_THERMAL_CPU_READ_SAMPLE == KERN_CPUPERF_READ_SAMPLE, "read r
 /* How long a CPU runs busy at its highest level to measure its rate, in milliseconds. */
 #define CPUPERF_MEASURE_MS		50U
 
+/* How many measuring threads a CPU gets before its rate is left unmeasured. */
+#define CPUPERF_MEASURE_TRIES		3U
+
 /* The governor's period, in milliseconds. */
 #define CPUPERF_GOVERNOR_PERIOD_MS	100U
 
@@ -358,6 +361,7 @@ static void cpuperf_publish_change(void);
 static void cpuperf_measure_all(void);
 static int cpuperf_measure_domain(kern_cpu_id_t cpu, uint32_t *mhz);
 static int cpuperf_measure_cpu(kern_cpu_id_t cpu, uint32_t *mhz);
+static int cpuperf_measure_once(kern_cpu_id_t cpu, uint32_t *mhz);
 static void cpuperf_measure_main(void *argument);
 static void cpuperf_governor_start(void);
 static void cpuperf_governor_main(void *argument);
@@ -3334,13 +3338,47 @@ cpuperf_measure_domain(
 }
 
 /*
- * Measures one CPU's delivered rate in a thread bound to that CPU, which
- * marks the start, runs busy and reads the rate.
+ * Measures one CPU's delivered rate, with a new thread each time the last
+ * one did not run on the CPU throughout.
+ *
+ * The thread is placed on the CPU before it first runs, but the scheduler
+ * does not keep it there: an idle CPU takes a thread that has waited on
+ * another CPU's queue since an earlier tick.  A thread that finds itself
+ * elsewhere, before its busy time or after it, reports EAGAIN.
  *
  * Thread context; waits a bounded time.  Reports 0 or an errno.
  */
 static int
 cpuperf_measure_cpu(
+	kern_cpu_id_t cpu,
+	uint32_t *mhz)
+{
+	uint32_t tries;
+	int error;
+
+	/* Measures until a thread stayed on the CPU, or the tries run out. */
+	error = EAGAIN;
+	for (tries = 0; tries < CPUPERF_MEASURE_TRIES; tries++) {
+		error = cpuperf_measure_once(cpu, mhz);
+
+		/* Stops on a measurement, or on a failure another try would repeat. */
+		if (error != EAGAIN)
+			break;
+	}
+
+	/* Reports the last try. */
+	return error;
+}
+
+/*
+ * Measures one CPU's delivered rate in a thread placed on that CPU, which
+ * marks the start, runs busy and reads the rate.
+ *
+ * Thread context; waits a bounded time.  Reports 0, EAGAIN when the
+ * thread did not run on the CPU throughout, or another errno.
+ */
+static int
+cpuperf_measure_once(
 	kern_cpu_id_t cpu,
 	uint32_t *mhz)
 {
@@ -3365,14 +3403,14 @@ cpuperf_measure_cpu(
 	measure->done = false;
 	measure->abandoned = false;
 
-	/* Creates the thread and binds it to the CPU before it first runs. */
+	/* Creates the thread and places it on the CPU before it first runs. */
 	error = kthread_create(cpuperf_measure_main, measure, SCHED_PRIORITY_DEFAULT, &thread);
 	if (error != 0) {
 		kern_free(measure);
 		return error;
 	}
 
-	/* Binds the new thread to the CPU. */
+	/* Places the new thread on the CPU. */
 	error = sched_set_cpu(thread, cpu);
 	if (error != 0) {
 		(void)thread_abort_new(thread);
@@ -3430,7 +3468,8 @@ cpuperf_measure_cpu(
 
 /*
  * Runs on the CPU being measured: marks the start, keeps the CPU busy
- * for the measuring time, then reads the rate.
+ * for the measuring time, then reads the rate.  Reports EAGAIN when it
+ * runs on another CPU at the start or at the end of the busy time.
  */
 static void
 cpuperf_measure_main(
@@ -3477,6 +3516,11 @@ cpuperf_measure_main(
 				break;
 			atomic_spin_hint();
 		}
+
+		/* Refuses a rate the CPU did not run busy for, after a move. */
+		current = kern_cpu_current();
+		if (current != cpu)
+			error = EAGAIN;
 	}
 
 	/* Reads the rate since the start. */
