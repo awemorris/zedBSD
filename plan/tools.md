@@ -12,7 +12,7 @@ Phase に固有の試験は各 WS の `tests/`、シナリオ試験（AAT）は 
 | デスクトップ（10.0.10.3、AMD RDNA か NVIDIA RTX を差し替えて排他で使う） | GPU の device driver の開発。今後は Linux（Debian）＋ VFIO の passthrough で使う方針 | SwitchBot のプラグミニ 1 `AC276E42B252` |
 | VisionFive 2 | Keiland の desktop の app の速さの最適化（一番遅い機械） | SwitchBot のプラグミニ 3 `AC276E432AE6`（2026-11-01〜。2026-10-28〜10-31 はプラグミニ 2） |
 | KC705（Amaterrace GPU の FPGA、VF2 の PCIe につなぐ、WS347） | GHCI の driver の実機の試験。bitstream は host の USB の JTAG（Digilent `210203368704A`）から Vivado で書く（揮発、電源を切ると消える） | SwitchBot のプラグミニ 2 `14C19FA80F86`（2026-11-11 ユーザー） |
-| Raspberry Pi 4・Pi 5 | 各 platform（Pi 5 は NVMe の HAT を付けた、WS304） | 遠隔の電源は無い（2026-11-11 からプラグミニ 2 は KC705。2026-10-31 は Pi 4、2026-11-01〜11-10 は Pi 5 がプラグミニ 2） |
+| Raspberry Pi 4・Pi 5 | 各 platform（Pi 5 は NVMe の HAT を付けた、WS304） | Pi 5 は SwitchBot のプラグミニ 1 `AC276E42B252`（2026-11-12 ユーザー。それまではデスクトップの機械）。Pi 4 は遠隔の電源無し |
 | Latitude 5330 | Intel GPU・電源管理・Alder Lake の platform の対応で、要る時に | 遠隔の電源は無い。2026-10-27 Q1: /etc/default/grub に GRUB_RECORDFAIL_TIMEOUT=5（不正な停止の後に GRUB の menu で止まらないように、元は /etc/default/grub.orig-q1） |
 | VM（QEMU） | Keiland の desktop の app の開発 | — |
 
