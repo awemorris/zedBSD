@@ -68,3 +68,11 @@ host の / の空きが少ないため build・image・QEMU は /tmp（`/tmp/p7-
 ## 残り
 
 - 5330 の計測（上、2026-11-01）を見て cleared の判定（Q1）。
+
+## 判定の材料（2026-11-12 P1、q2012-i01）
+
+- 受け入れ（design.md §9 の p012 の行）: QEMU の起動、5330 の前後の数（下がらなくても記録して cleared、方式の採否は数で決める）。
+- 済んだ事: TSC-deadline の方式、戻す macro、QEMU+KVM の periodic と tsc-deadline の両方の起動と tick 1000 Hz、5330 の idle の package 10.08 W（periodic）→ 6.44 W（TSC-deadline、−36%）を 2 つの器具で（差 0.02 W 以内）。方式の採否: 数で TSC-deadline を既定に採る。
+- 2026-11-12: 新しい mk では戻す build は `CONFIG_CPPFLAGS=-DLAPIC_TICK_TSC_DEADLINE=0`（`KERN_CPPFLAGS=` を command line に置くと全部の flag が消える）。x86_64 の vmunix がこの形で warning 0、`.kernel-flags` に入る事を確かめた。`plan/ws333/tests/hw5330/tick-periodic.patch` と `kbuild.sh` は旧 build の形（design.md §16.3、p014 で直す）。
+- 残り（p014 へ）: package の C-state（PC2〜PC7）が両方の形で 0% の理由、tick の位相が揃っている事の直の観察、全 CPU が同じ時刻に tick を処理する事の遅れ・lock の取り合い。古い Intel の TSC-deadline の erratum の除外は対象の機械が無く未実施。
+- P1 の見立て: cleared にしてよい（受け入れの物差しは「数を記録して cleared」で、数は取れ、効果も大きかった）。

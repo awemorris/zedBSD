@@ -85,3 +85,12 @@ design.md §9 の p011: [p006](../phase006/phase.md) の cpuperf の枠組みの
 - p014: 5330 で HWP の start・strategy の写し・HFI の表・meter・滞在を確かめる。E-core の 4 つ組が clock を共有するか（共有なら share を MODULE に）。
 - MC6（module の C6）の出し方: `kern_cpuperf_idle` に scope の欄を足すか、別の口（p004・p013 の UAPI の時）。
 - 0xE2 の package の C-state の上限: Q333-2 の答えと provider の口の追加（kernel の header）の後。
+
+## 判定の材料（2026-11-12 P1、q2012-i01）
+
+- 受け入れ（design.md §9 の p011 の行）: host 試験（模擬の CPUID・MSR）、amd64 の build、QEMU で provider 無し（関門で止まる）。
+- 済んだ事: host 試験（y 13 場面・n 3 場面、わざと壊す確かめ 15 個）、amd64 の既定と y の build、全 port の build、QEMU+KVM の y と既定で login と関門（HMP）、5330 の実機（HWP の start・HFI・RAPL の meter 4 本・strategy 3 つ・`cpuperf=off`）。
+- 2026-11-12 に流した事: `plan/ws333/tests/cpu-x86-host/run.sh` → 1 回目 FAIL（build の作り直しの 8016438f9b で `cpu-x86-insn.h` の guard が `CONFIG_KERN_CPU_PERF` に変わり、試験は `CONFIG_CPU_PERF` だけを定義）→ 試験が mk と同じく 2 つの macro を定義する形に直して PASS（16 場面、831 checks、0 failures、6443adad84）。新しい mk の x86_64 の vmunix（既定 = MSR の道が有効）は warning 0。
+- 新しい mk の食い違い（source の問題ではない、design.md §16.2）: MSR の道を外した amd64 の kernel が今の mk では compile できない（4 file を無条件に入れる）。`CONFIG_DRIVER_X86_POWER_CONTROL=y` は duplicate symbol。既定で MSR の道が有効（Q333-7 A は p014 の後）。案は [../proposed/mk-cpuperf-config.diff](../proposed/mk-cpuperf-config.diff)（当てた写しで既定・y とも warning 0）。
+- 残り（p014 へ）: 全 CPU の負荷で performance の P-core が 1.4 GHz に留まる理由（PLATFORM_LIMIT の印 0x8）、E-core の 4 つ組の clock の共有、MC6 の出し方（p004 の UAPI に scope の欄を置いた）、0xE2 の lock の bit。TCG・Intel Mac の起動は未実施。
+- P1 の見立て: cleared にしてよい（受け入れの 3 つは全部済み、実機でも動いた）。mk の食い違いは build の設定の問題として p015・mk の案で扱う。ただし mk の案が当たるまで「MSR の道の無い amd64 の kernel」は build できないので、cleared の記録にその旨を残す。
