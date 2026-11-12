@@ -10,6 +10,8 @@
 
 ## ユーザーの決定（要点）
 
+- 2026-11-12 ユーザーから、次の趣旨の決定を受けた: `/dev/thermal` は desktop の group の利用者が操作できるようにし（video の group と GPU と同じ形）、sessiond を通さない。sessiond に委ねるのは認証だけ。→ 新しい group `desktop`、`/dev/thermal` は root:desktop 0664、設定の ioctl は書き込みで開いた fd に許す、`/etc/thermal.conf` は root:desktop 0664、sessiond の THERMAL の要求（p019）は取り下げ、`/sbin/thermal` は機種の選びで入れる（全 image ではない）。
+
 - 2026-11-12 ユーザーから、p004 の UAPI の案を承認し P1 で進める、という趣旨の指示を受けた（電力の読みは推し A と Q1 が解釈）。
 
 - 2026-11-01 09:05 ユーザーから、設計の問い Q333-1〜7 を全部推しの案で決める、という趣旨の答えを受けた（Q333-4 の 0〜100 の向きは「どれも 100 = その物が多い」で確定）。
@@ -41,7 +43,7 @@
 | [p016](phase016/phase.md) | 見張りと非常の停止（signal の disposition、init の SIGUSR2・上書きの禁止、REBOOT・HALT の hook、SLEEP の排他と `kern_thermal_resume`、停止の道の flag、sync の助け、`drv_acpi_poweroff_emergency`、水準の検査、記録の file） | cleared（2026-10-31 Q1、af8aaa5f6・6de483e15・f857f4647、main a57216e81。host 試験 22 場面、QEMU で温度の上がる SSDT から ACPI S5 の電源断まで。init の ACK と注入の ioctl は p005 後半へ持ち越し。`thermal.emergency=off` は作らない（ユーザーに聞く）） | p005 |
 | [p017](phase017/phase.md) | ACPI WMI の層（`_WDG` の解析の module と method・query の口）と AML の harness の `plan/tools/aml-host/` への移しと拡張 | cleared（2026-10-31 Q1、caff3950b〜93fb7eadd、main 809dfe329。WMI の試験 9 項目・SMI の書き 0・20 port の build・QEMU の起動。Q1 の判断: WMI の attach の試し直しは p018 の Dell の provider が自分の poll から行う） | p001 |
 | [p021](phase021/phase.md) | passive（見張り → poll の thread → 受け手の `limit`、5 秒ごとに 100‰、3 °C 下で戻す） | cleared（2026-10-31 Q1、main a57216e81。host 試験。cpuperf の受け手との実機の結合は p014） | p006、p016 |
-| [p019](phase019/phase.md) | sessiond の THERMAL の要求（strategy・boost、root か wheel） | in-progress（2026-11-12 P1・q2013-i01: stub を `/sbin/thermal` の実行に替えた、host 試験 146 checks PASS。QEMU は未実施） | p005（kernel への呼びは p004） |
+| [p019](phase019/phase.md) | sessiond の THERMAL の要求（strategy・boost、root か wheel） | canceled（2026-11-12 ユーザー: /dev/thermal は desktop の group が直に操作、sessiond は認証だけ） | p005（kernel への呼びは p004） |
 | [p020](phase020/phase.md) | Pi 5 の provider（fan の level・rpm、受け手、boost） | planned（実機の割当が要る） | p005、p016 |
 | [p018](phase018/phase.md) | Dell の provider（DDV の fan、BIOS の熱の mode の受け手、SMM の boost の確かめ、WMI の attach の試し直し）と 5330 の熱の試験 | cleared（2026-11-12 Q1 判定: 受け入れは満たした、boost は規則どおり無し） | p005、p017 |
 | [p022](phase022/phase.md) | sysctl の道具と Keiland の monitor を `/dev/thermal` に、`hw.thermal` を外す | planned | p005 後半、p013 |

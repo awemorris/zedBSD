@@ -2,7 +2,7 @@
 
 # ws333-p019: sessiond の THERMAL の要求（strategy・boost、root か wheel）
 
-Status: in-progress（2026-11-12 P1、q2013-i01: stub を `/sbin/thermal` の実行に替え、host 試験 PASS。sessiond の QEMU の試験は未実施）
+Status: canceled（2026-11-12 ユーザー: /dev/thermal は desktop の group が直に操作し、sessiond は認証だけ。sessiond の thermal の code は q2015 で外す）
 Parent: [WS333](../ws.md)
 Queue: q1777-i01（P4）、q2013-i01（P1、持ち越しの 1・2）
 
