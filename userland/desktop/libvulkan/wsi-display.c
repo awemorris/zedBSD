@@ -108,7 +108,7 @@ struct wsi_display_plane {
 	struct wsi_display_image *front;
 	uint64_t identifier;
 	uint64_t display;
-	uint64_t frame;
+	_Alignas(8) uint64_t frame;
 	uint64_t completion_generation;
 	int completion_fd;
 	VkBool32 completion_used;
@@ -121,7 +121,7 @@ struct wsi_display_plane {
 	 * swapchain mutex); a held overlay change takes this plus one as its
 	 * min_primary.
 	 */
-	uint64_t primary_issued;
+	_Alignas(8) uint64_t primary_issued;
 	/* The highest record number the output reported adopted with every lower one (display_overlay_mutex). */
 	uint64_t adopted;
 	/* One refresh period of the claimed mode, in nanoseconds. */

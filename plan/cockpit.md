@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | q2031 | 作業中 | BUG-418: build system の作り直しの後の各機種の build と QEMU の起動（乖離の確かめから） | WS333 は p028（P3）と p027 の後に p024 |
+| P1 | — | 待機 | BUG-418 の確かめを返却（7 機種 build、3 機種 QEMU login）。mk の案はユーザーへ | — |
 | P2 | — | 待機 | WS335 p036 の source を merge（compat だけを開く build、Windows の static の表）。Makefile の案 A〜C はユーザーへ | — |
 | P3 | q2032 | 作業中 | WS333 p027: 5330 の package の C-state 0% の原因（i915）、qs40、S0 idle（watchdog の下で） | agy の依頼 07 が終われば監査も |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |

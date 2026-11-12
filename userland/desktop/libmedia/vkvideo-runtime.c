@@ -340,8 +340,12 @@ static struct media_os_library *vkvideo_library;
 /* Loader publication is immutable after one attempt and synchronized before any runtime uses it. */
 static pthread_once_t vkvideo_loader_once = PTHREAD_ONCE_INIT;
 
-/* The identities of the contexts whose pictures the GPU holds; each takes the next, from 1. */
-static uint64_t vkvideo_gpu_identity;
+/*
+ * The identities of the contexts whose pictures the GPU holds; each takes the
+ * next, from 1.  The counter is 32 bits so that its atomic increment is
+ * lock-free on every target, including 32-bit x86.
+ */
+static uint32_t vkvideo_gpu_identity;
 
 static void vkvideo_loader(void);
 static int vkvideo_runtime_open(const struct vkvideo_shape *shape, unsigned reorder, struct vkvideo_runtime **runtime);
@@ -1109,7 +1113,7 @@ vkvideo_resources(
 		video->gpu_slots = media_gpu_slots_create(video->slots);
 		if (video->gpu_slots == NULL)
 			return ENOMEM;
-		video->gpu_slots->identity = __atomic_add_fetch(&vkvideo_gpu_identity, 1U, __ATOMIC_RELAXED);
+		video->gpu_slots->identity = (uint64_t)__atomic_add_fetch(&vkvideo_gpu_identity, 1U, __ATOMIC_RELAXED);
 		video->gpu_slots->image_width = video->image_extent.width;
 		video->gpu_slots->image_height = video->image_extent.height;
 	}

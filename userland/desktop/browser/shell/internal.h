@@ -399,7 +399,7 @@ struct shell_latency {
 	struct kl_thread *thread;
 	int stop;
 	int waiting;
-	uint64_t sent_us;
+	_Alignas(8) uint64_t sent_us;
 	uint64_t started_us;
 	uint64_t longest_us;
 	unsigned long samples;

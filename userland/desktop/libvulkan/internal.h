@@ -152,7 +152,7 @@ struct VkDevice_T {
 	 * swapchain images this library could not name, so a presentation that
 	 * compares it with the value it saw at its last copy copies again.
 	 */
-	uint64_t content_epoch;
+	_Alignas(8) uint64_t content_epoch;
 };
 
 /* Retains one requested queue and serializes internal submission users. */
@@ -389,7 +389,7 @@ struct vulkan_image {
 	 * submission that writes it with a transfer command; a presentation
 	 * whose last copy saw the same value may show that copy again.
 	 */
-	uint64_t content_serial;
+	_Alignas(8) uint64_t content_serial;
 };
 
 /* Renderer external-storage declaration; never exposed as a guest fd ABI. */
@@ -520,7 +520,7 @@ struct vulkan_context {
 	VkBool32 mutex_ready;
 	pthread_mutex_t mutex;
 	VkResult error;
-	uint64_t queue_timelines;
+	_Alignas(8) uint64_t queue_timelines;
 	uint32_t wire_version;
 	uint32_t xml_version;
 	uint32_t external_memory_type;
@@ -555,8 +555,8 @@ struct vulkan_context {
 	 * the thread alone), both read atomically: a transaction waits until
 	 * the second reaches what the first was when it began (sender.c).
 	 */
-	uint64_t handoff_queued;
-	uint64_t handoff_sent;
+	_Alignas(8) uint64_t handoff_queued;
+	_Alignas(8) uint64_t handoff_sent;
 };
 
 /* Associates one composite public instance with one renderer instance. */

@@ -129,7 +129,7 @@ struct vm_agent {
 	uint64_t deadline_ns;
 	vm_lender lend;
 	void *lend_context;
-	uint64_t since;
+	_Alignas(8) uint64_t since;
 };
 
 /* What terminate holds while the running task has a deadline and nobody asked it to end: no task has this number. */
