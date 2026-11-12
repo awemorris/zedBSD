@@ -1,0 +1,49 @@
+ws333 p027, test only (kbuild.sh applies it for the build and takes it off after): with no device held for
+root's start, 'sysctl hw.gpu.start=1' parks the served i915 GT through the suspend's worker park (RPS stopped, every
+forcewake domain given back, the display left as it is) and the next one wakes it, so a 5330 run can compare the
+package C-states with the domains held and given back on one kernel.  Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+--- a/src/drivers/gpu/i915/device.c
++++ b/src/drivers/gpu/i915/device.c
+@@ -235,6 +235,8 @@
+ static int i915_start_publish(struct i915_device *device);
+ static void i915_stop_gt(struct i915_device *device);
+ static void i915_stop_hardware(struct i915_device *device);
++static struct i915_device *i915_test_park_device;
++static int i915_test_parked;
+ static int i915_gt_telemetry_read(void *context, struct gpu_telemetry_entry *entry);
+ static void i915_log_park_sleep(struct i915_gt *gt);
+ static int i915_forcewake_get_all(struct i915_gt *gt, unsigned *held);
+@@ -844,6 +846,23 @@
+ 
+ 	spin_unlock_irqrestore(&i915_start_registry.lock, enabled);
+ 
++	/* Test only: with nothing held, hw.gpu.start=1 parks the served GT, and the next one wakes it again. */
++	if (count == 0U && i915_test_park_device != NULL) {
++		if (!i915_test_parked) {
++			int park_error;
++
++			park_error = drv_i915_worker_park(i915_test_park_device, 5000U);
++			kern_logf("i915: test park: worker park %d\n", park_error);
++			if (park_error == 0)
++				i915_test_parked = 1;
++			return park_error;
++		}
++		drv_i915_worker_unpark(i915_test_park_device);
++		i915_test_parked = 0;
++		kern_logf("i915: test park: worker unparked\n");
++		return 0;
++	}
++
+ 	/* Refuses a start with nothing held. */
+ 	if (count == 0U) {
+ 		kern_logf("i915: hw.gpu.start: no device is held for root's start\n");
+@@ -1941,6 +1960,8 @@
+ 	if (error != 0)
+ 		return error;
+ 
++	i915_test_park_device = device;
++
+ 	/* The panel the node's display drives, over the objects the start built. */
+ 	drv_i915_display_resident_deps(device);
+ 
