@@ -2,7 +2,7 @@
 
 # ws333-p004: `/dev/thermal` の UAPI の全文の案（ユーザーの review）
 
-Status: in-progress（2026-11-12 P1、q2012-i01: 案の第 2 版と design-reviewer の反映まで。ユーザーの review 待ち）
+Status: in-progress（2026-11-12: ユーザーが案を承認（Q1 経由、電力の読みは A）。案のまま q2013-i01 で実装した。cleared の判定は Q1）
 Parent: [WS333](../ws.md)
 Queue: q2012-i01（P1）
 
