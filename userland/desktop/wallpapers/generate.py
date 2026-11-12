@@ -177,6 +177,8 @@ def enlarge(rows, width, height):
 def load_converter():
     """Loads ppm-to-png.py (its name has dashes, so it is loaded by path), which writes the PNG."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ppm-to-png.py')
+    # The build writes only into its build directory, not a __pycache__ beside the source.
+    sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location('ppm_to_png', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

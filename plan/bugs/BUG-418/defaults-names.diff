@@ -1,0 +1,222 @@
+--- a/mk/platform-i386/defaults.mk
++++ b/mk/platform-i386/defaults.mk
+@@ -260,10 +260,10 @@
+ 	calendar \
+ 	files \
+ 	imageview \
+-	keiland-ime \
+-	ime-dict-ja \
+-	ime-dict-skk \
+-	libgl \
++	ime \
++	dict \
++	skk-dict \
++	libGL \
+ 	libbrowser \
+ 	libcrypto-compat \
+ 	libssl-compat \
+@@ -278,7 +278,7 @@
+ 	libtruetype \
+ 	libvulkan \
+ 	libwayland-egl \
+-	libwayland-client \
++	libwayland \
+ 	mailer \
+ 	mediastorage \
+ 	monitor \
+@@ -287,8 +287,8 @@
+ 	pdfviewer \
+ 	phone \
+ 	photos \
+-	keiland-preview \
+-	keiland-printd \
++	preview \
++	printd \
+ 	sessiond \
+ 	settings \
+ 	terminal \
+--- a/mk/platform-pc9821/defaults.mk
++++ b/mk/platform-pc9821/defaults.mk
+@@ -221,10 +221,10 @@
+ 	calendar \
+ 	files \
+ 	imageview \
+-	keiland-ime \
+-	ime-dict-ja \
+-	ime-dict-skk \
+-	libgl \
++	ime \
++	dict \
++	skk-dict \
++	libGL \
+ 	libbrowser \
+ 	libcrypto-compat \
+ 	libssl-compat \
+@@ -239,7 +239,7 @@
+ 	libtruetype \
+ 	libvulkan \
+ 	libwayland-egl \
+-	libwayland-client \
++	libwayland \
+ 	mailer \
+ 	mediastorage \
+ 	monitor \
+@@ -248,8 +248,8 @@
+ 	pdfviewer \
+ 	phone \
+ 	photos \
+-	keiland-preview \
+-	keiland-printd \
++	preview \
++	printd \
+ 	sessiond \
+ 	settings \
+ 	terminal \
+--- a/mk/platform-rpi4/defaults.mk
++++ b/mk/platform-rpi4/defaults.mk
+@@ -254,10 +254,10 @@
+ 	calendar \
+ 	files \
+ 	imageview \
+-	keiland-ime \
+-	ime-dict-ja \
+-	ime-dict-skk \
+-	libgl \
++	ime \
++	dict \
++	skk-dict \
++	libGL \
+ 	libbrowser \
+ 	libcrypto-compat \
+ 	libssl-compat \
+@@ -272,7 +272,7 @@
+ 	libtruetype \
+ 	libvulkan \
+ 	libwayland-egl \
+-	libwayland-client \
++	libwayland \
+ 	mailer \
+ 	mediastorage \
+ 	monitor \
+@@ -281,8 +281,8 @@
+ 	pdfviewer \
+ 	phone \
+ 	photos \
+-	keiland-preview \
+-	keiland-printd \
++	preview \
++	printd \
+ 	sessiond \
+ 	settings \
+ 	terminal \
+--- a/mk/platform-rpi5/defaults.mk
++++ b/mk/platform-rpi5/defaults.mk
+@@ -255,10 +255,10 @@
+ 	calendar \
+ 	files \
+ 	imageview \
+-	keiland-ime \
+-	ime-dict-ja \
+-	ime-dict-skk \
+-	libgl \
++	ime \
++	dict \
++	skk-dict \
++	libGL \
+ 	libbrowser \
+ 	libcrypto-compat \
+ 	libssl-compat \
+@@ -273,7 +273,7 @@
+ 	libtruetype \
+ 	libvulkan \
+ 	libwayland-egl \
+-	libwayland-client \
++	libwayland \
+ 	mailer \
+ 	mediastorage \
+ 	monitor \
+@@ -282,8 +282,8 @@
+ 	pdfviewer \
+ 	phone \
+ 	photos \
+-	keiland-preview \
+-	keiland-printd \
++	preview \
++	printd \
+ 	sessiond \
+ 	settings \
+ 	terminal \
+--- a/mk/platform-vf2/defaults.mk
++++ b/mk/platform-vf2/defaults.mk
+@@ -253,10 +253,10 @@
+ 	calendar \
+ 	files \
+ 	imageview \
+-	keiland-ime \
+-	ime-dict-ja \
+-	ime-dict-skk \
+-	libgl \
++	ime \
++	dict \
++	skk-dict \
++	libGL \
+ 	libbrowser \
+ 	libcrypto-compat \
+ 	libssl-compat \
+@@ -271,7 +271,7 @@
+ 	libtruetype \
+ 	libvulkan \
+ 	libwayland-egl \
+-	libwayland-client \
++	libwayland \
+ 	mailer \
+ 	mediastorage \
+ 	monitor \
+@@ -280,8 +280,8 @@
+ 	pdfviewer \
+ 	phone \
+ 	photos \
+-	keiland-preview \
+-	keiland-printd \
++	preview \
++	printd \
+ 	sessiond \
+ 	settings \
+ 	terminal \
+--- a/mk/platform-x86_64/defaults.mk
++++ b/mk/platform-x86_64/defaults.mk
+@@ -263,10 +263,10 @@
+ 	calendar \
+ 	files \
+ 	imageview \
+-	keiland-ime \
+-	ime-dict-ja \
+-	ime-dict-skk \
+-	libgl \
++	ime \
++	dict \
++	skk-dict \
++	libGL \
+ 	libbrowser \
+ 	libcrypto-compat \
+ 	libssl-compat \
+@@ -281,7 +281,7 @@
+ 	libtruetype \
+ 	libvulkan \
+ 	libwayland-egl \
+-	libwayland-client \
++	libwayland \
+ 	mailer \
+ 	mediastorage \
+ 	monitor \
+@@ -290,8 +290,8 @@
+ 	pdfviewer \
+ 	phone \
+ 	photos \
+-	keiland-preview \
+-	keiland-printd \
++	preview \
++	printd \
+ 	sessiond \
+ 	settings \
+ 	terminal \
