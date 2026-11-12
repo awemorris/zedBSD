@@ -2,7 +2,7 @@
 
 # ws333-p027: 5330 の残り（package の C-state 0% の原因、i915 の qs40、S0 idle）
 
-Status: in-progress（2026-11-13 Q1、q2032-i01 P3。p028 の watchdog で人手なしに戻れる）
+Status: in-progress（2026-11-13 Q1、q2032-i01 P3。p028 の watchdog で人手なしに戻れる。結果は下、cleared の判定は Q1）
 Parent: [WS333](../ws.md)
 
 ## 目的
@@ -58,7 +58,7 @@ Debian の対照（p027c、`build/hw5330/ws333/p027c/`）: 既定（iGPU は vfi
 - held（forcewake を握ったまま）は 100 Hz でも PC2 0 %。直しの順は 1・2（i915）が先で、3（tick）は 1・2 の後でないと効きが見えない。
 - `i915.start=manual`（GT は firmware のまま、D0）は PC2 0 %。Debian の既定は iGPU が D3hot なので、zedBSD の manual とは比べられない（Linux の i915 の D0 との比べが上）。
 
-i915 の WS へ渡す物（i915 の直しはこの WS の範囲の外）: (1) node の公開の間の forcewake の常時の握りをやめ、register に触る間だけ持つ（idle で GT を手放す、park の仕組みは既にある）。(2) GuC を使わない時の RC_CONTROL を HW_ENABLE | EI_MODE(1) | RC6_ENABLE に。直しの効きは `hw.gputelemetry` の `sleep_ns`（RC6 の時間）と `awake_holds` で見える。
+i915 の WS へ渡す物（この時点の案。後で Q1 の依頼で forcewake の直しを p027 で実装した → §4）: (1) node の公開の間の forcewake の常時の握りをやめ、register に触る間だけ持つ（idle で GT を手放す、park の仕組みは既にある）。(2) GuC を使わない時の RC_CONTROL を HW_ENABLE | EI_MODE(1) | RC6_ENABLE に。直しの効きは `hw.gputelemetry` の `sleep_ns`（RC6 の時間）と `awake_holds` で見える。
 
 ### 2. tick を止めるか（p023 の数）
 
@@ -71,11 +71,47 @@ i915 の WS へ渡す物（i915 の直しはこの WS の範囲の外）: (1) no
 - 結果（p027s0b〜d）: **5330 は S0 idle に入らない**。(a) intel-ax211（00:14.3）が `EBUSY`: radio が on の時は設計どおり拒む（`intel-ax211-pci.c` `ax211_pci_suspend()`、sessiond の sleep が networkd に radio を落とさせてから眠る形、`sleepctl` はその道を通らない）。(b) radio を落とす（tree の static の `wifi wlan0 down` と `ifconfig wlan0 down`）と次に **VMD（00:0e.0）が `EBUSY`**: `src/drivers/pci/pci-vmd.c` `vmd_suspend()` は常に EBUSY（「The root ports behind the VMD have no driver to save and restore their bus numbers and windows across D3」）。5330 の NVMe（root の disk）は VMD の裏にある。NVMe・HDA・xHCI は suspend と resume をして戻った（`nvme: resumed epoch=2`、`xhci: resumed`）。
 - 眠りに入らないので、RTC の alarm で起きる事・resume の後の要求（GPU の要求、session）は未確認。tick を止める前の S0 idle は VMD の suspend（root port の保存と復元）が先に要る（VMD の WS へ）。
 
-### 4. qs40 × 600
+### 4. main の取り込みと i915 の直し（2026-11-13 Q1 の依頼: tick は amd64 で 100 Hz（ユーザーの決定、main d2c40ed07f）、tickless は設計しない。i915 の 2 つの直しを p027 の範囲で）
 
-（実行中、下に追記）
+- main を merge（b89f809636、e71d23e873。親は各 2 つを `git log -1 --format='%h %p'` で確かめた）、`HAL_TIMER_FREQUENCY` 100 を確かめ `make sysroot BUILD_JOBS=4` を流し直した（rc 0）。tick-100hz.patch はもう使わない。
+- **forcewake を参照の数で**（6e208bfd3b、`device.c`・`device.h`・`gt.h`・`worker.c`・`gt-power.c`・`gt-power.h`・`mmio.c`・`mmio.h`）: node の公開の間の常時の握りをやめた。`drv_i915_device_awake_get()`／`_put()`（`gt->awake_lock` の下の参照の数、最初の保持者が全 domain を起こし RC6 の account を始め、最後が account を止めて返す。公開から stop の間だけ起こせる `awake_open`）。worker は work を走らせる前に保持者になり（`drv_i915_device_worker_wake()`）、work が無くなって `I915_WORKER_REST_MS`（20 ms、60 Hz の 1 frame より長い）経つと返す（`drv_i915_device_worker_rest()`）。RPS は周波数を変える `i915_rps_move_to()` の間だけ hook（`struct i915_rps` の `awake_get`・`awake_put`）で保持する。park・unpark・stop は worker の保持で RPS を止めてから返す。`hw.gputelemetry` の RC6 の読みは一瞬保持して読む。held accessor が domain の寝た register を拒んだ数（`forcewake_refusals`）を数え、worker が返す時に増えていれば log に出す。
+- **RC_CONTROL**: GuC の無い時の HW_CONTROL（bit 31）| EVALUATION_MODE_1（bit 27）| RC6_ENABLE を一度入れた（6e208bfd3b、`intel/gt-power.h` に「Values referenced: Linux v6.8 … intel_gt_regs.h」、`gt-power.c` に「Procedure referenced: Linux v6.8 … intel_rc6.c (gen11_rc6_enable)」）が、下の qs40 で Vulkan の submit が失われるので **RC6_ENABLE だけに戻した**（ad49b417c3、define と理由の comment は残す）。
+- 確かめ: kernel（x86_64、THERMAL・X86_POWER_CONTROL、100 Hz）rc 0・warning 0（6e208bfd3b は 2a793cd488fbc9be、ad49b417c3 は 97c8f6f5d4be750c）。host 試験 `plan/ws333/tests/rc6-host/run.sh` PASS（81 checks、ordinary・ASan/UBSan）。i915 の他の contract 試験（`tests/contracts/run.sh`）は一時 directory を rm する script なので流していない（未実施）。
+- 5330（p027f、6e208bfd3b の kernel、普段の起動＝i915 を起動したまま、試験の patch 無し、watchdog=600）: GT RC6 99.9 %、PC2 85.3 %（Wi-Fi・audiod 込み）／88.5 %（quiet）、package 4.32〜4.36 W（直す前の held は 1000 Hz で 5.30〜5.53 W、100 Hz で 5.11 W）、読む時に握る domain 0、forcewake の wake は 1 分に約 25〜30 回、拒みの log 無し。**ただし HW_CONTROL 入りなので、qs40 の失敗で取り下げた形の数**。
+
+### 5. qs40 × 600（WS291 p022 の scene、5330、1920x1080、mailbox 4 images、12 s）
+
+- image: `plan/ws333/tests/hw5330/config-5330-qs40.mk`（新しい build system 用: platform の defaults を読んでから `CONFIG_USERLAND_PROGRAMS` を override で絞る、firmware の package と測りに使わない app を外す、mview・sysctl・keiland-shot、root の SSH の鍵と固定の host key を `X86_64_ARCH_FILES` に足す。ws291 の config-5330.mk は新しい build system では `ZEDBSD_USER_PROGRAMS`・`ZEDBSD_EXTRA_FILES` が効かず相対の include が nested make で解けない）、`make -j4 PLATFORM=x86_64 CONFIGMK=plan/ws333/tests/hw5330/config-5330-qs40.mk CONFIG_KERN_THERMAL=y CONFIG_DRIVER_X86_POWER_CONTROL=y CONFIG_BOOT_SPLASH=y BUILD_JOBS=4 disk`（logo が無いと 5330-nvme-write.sh が止まる）、check PASS、sha256 58f9cdd73ee3b5d7。
+- 道具: `5330-p027-qs40.sh IMG VMUNIX NAME COPIES...`（NVMe の zedBSD を run ごとに Debian の `~/ws245/p027-nvme-NAME` に保存（p4 の file・p5・p6 を gzip・ESP の loader と sum）→ image と kernel を書く → zedbsd.cfg に watchdog=600 → 一回だけの起動 → `plan/ws291/tests/5330-mview.sh run` → dmesg と session の log → Debian → 保存から書き戻して sum を比べる → p4 の vmunix と zedbsd.cfg を p027 の写しに戻して sha256）。
+- 結果:
+
+| run | kernel | c1 | c600 |
+| --- | --- | --- | --- |
+| p027q4 | 直し無し（e71d23e873 の i915、bbdfdd69a3b8667f） | 338.08 fps | **39.30 fps**（frame 25.2 ms、submit 24.2 ms） |
+| p027q3・q5 | 6e208bfd3b（forcewake＋HW_CONTROL、2a793cd488fbc9be） | `vkQueueSubmit` が VK_ERROR_DEVICE_LOST（libvulkan の decoder の status 42 = ETIMEDOUT） | 続く run は `mview_window_open` が ENOENT（compositor の socket が無い） |
+| p027q6 | forcewake だけ（＝ad49b417c3、97c8f6f5d4be750c） | 162.92 fps（present 2.92 ms） | **37.35 fps**（frame 26.6 ms） |
+
+- 直接の scanout: 各 run の KWL SCANOUT に direct=1 が 1 回（overlay の surface 8 は direct=0）。GT の実の周波数は `telemetry-sum.py` の出力が v2 の hw.gputelemetry で意味を持たず未取得。Linux の基準は WS291 p022 の 50.6 fps、前の zedBSD は 32.6 fps（受け入れは未達のまま）。
+- HW_CONTROL の失敗の原因は未解明: kernel の log に「did not complete」・forcewake の ack の失敗・拒みの log は無く、worker の run の timeout ではない。GT が RC6 に入った後に Vulkan の session の状態（RC6 で失われる非 context の register 等）が戻らない見込み（未確認）。GT を RC6 に入れるのは i915 の WS の続き（RC6 で失われる状態の確かめ、Linux の manual の形（park の時だけ RC_STATE に target を書く）を含む）。
+- c1 の 338 → 163 fps（present 0.04 → 2.92 ms）は forcewake を参照の数にした後の 1 回ずつの数で、原因も回帰かどうかも未確認（同じ条件の繰り返しは未実施）。c600 は 39.30 → 37.35 fps（約 5 %）。
+
+### 6. S0 idle の VMD（Bug の案、Q1 へ）
+
+- 症状: 5330 で `sleepctl s0idle`（Wi-Fi の radio を落とした後）が `result=17`（EBUSY）、`device=pci 0000:00:0e.0 vmd`。NVMe・HDA・xHCI の suspend は済み、VMD で止まって全部 resume した。
+- 原因: `src/drivers/pci/pci-vmd.c` `vmd_suspend()` が常に EBUSY を返す（comment「The root ports behind the VMD have no driver to save and restore their bus numbers and windows across D3, so a suspend would lose the disks」）。5330 の root の NVMe（10000:e1:00.0）は VMD（00:0e.0）の裏の root port（10000:e0:06.0）の先。
+- 要る物: VMD の suspend・resume（VMD の CFGBAR・MEMBAR の設定と、裏の root port の bus 番号・window・command の保存と D0 への復元、NVMe の resume の順）。それが入るまで 5330 は S0 idle に入れない。intel-ax211 の radio が on の時の EBUSY は設計どおり（sessiond の sleep が networkd に radio を落とさせる）。
+- 眠りに入らないので、RTC の alarm での起き・resume の後の要求は未確認。試験の道具（`5330-p027-s0.sh`、`s0idle-wake.patch`）は VMD の直しの後に使える。
+
+### 7. 判定の材料と残り
+
+- p014 の残り: 1（package の C-state）は原因が出た（GT が RC6 に入らない: forcewake の常時の握り（直した）と RC_CONTROL（HW_CONTROL で RC6 に入るが Vulkan が失われるので戻した）、1 ms の tick（main で 100 Hz に））。tree の今の形（ad49b417c3）では GT は RC6 に入らないので PC2 は 0 % のまま（未測定だが p027d・e の held と同じ理由）。2（qs40）は 37.35〜39.30 fps（50.6 に未達）。4（S0 idle）は VMD で入れない。
+- tick（p023）: 100 Hz で PC2 が出る事を数で示した（§2）。ユーザーの決定で tickless は設計しない。
+- 未実施: DMC 入りの image での DC state（firmware の license の同意の後）、HW_CONTROL の失敗の解析、c1 の fps の差の確かめ、S0 idle の起きと resume、i915 の contract 試験の全部。
+- 消してよい物（Q1 へ）: worktree の `build/p027/img`（壊れた出力）・`build/llvm-build`・`build/llvm-source`・`userland/base/emacs/build/`（image の build が source tree に作った物）、Debian の `~/ws245/p027-nvme-p027q*`（各 3.2 GB の NVMe の保存、書き戻しは済み）・`~/ws245/p027-nvme`・`~/ws245/vmunix-p027-*`（試験の kernel）・`~/ws245/p027-acpitmr.py`・`~/p1-p022/image.img`（書いた image の写し）。
 
 ### 実機の状態
 
 - 5330 は毎回 Debian（Linux 6.19.13+deb13-amd64）で始まり Debian に戻った。各 run の最後に p4 の vmunix 4c98d617279bf96b・zedbsd.cfg 1b33a395b0ff4bd7 に戻して sha256 を照合した（p027a・b・d・e・s0b・s0c・s0d）。p027s0（最初の S0 の run）は script の誤り（`sudo sh -c` の中の `$HOME` が /root になり、cfg の段で /mnt/zb を mount したまま止まった）で zedBSD を起動せずに失敗し、手で umount して p4 を戻し同じ sha256 を照合した。
 - 元の写し: Debian の `~/ws245/vmunix-p027-orig`・`zedbsd.cfg-p027-orig`。試験の kernel の写し `~/ws245/vmunix-p027-*`（消すのは Q1）。
+- qs40 の run（p027q〜q6）は p5・p6・ESP の loader を書いたので、各 run で保存から書き戻し、sum を比べた: p5・p6・loader は一致、p4 には zedBSD の起動の log の file（`log/boot-0002xx.txt`）が 1 つずつ増えた（消していない）。最初の p027q は image の logo が無く NVMe の書きが途中（p5 を書いた後）で止まり、保存から戻して一致を確かめた。p027q2 は保存と NVMe の食い違い（前の起動の log と p5）で始める前に止まった（何も書いていない）。
+- 最後の状態: 5330 は Debian（6.19.13+deb13-amd64）、p4 は vmunix 4c98d617279bf96b・zedbsd.cfg 1b33a395b0ff4bd7（p027q6 の後に照合）、iGPU は vfio-pci（D3hot）、ACPI_TMR_CTL は 0x2 に戻した。
