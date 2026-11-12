@@ -570,20 +570,7 @@ CONFIG_RPI5_SERIAL_CONSOLE        ?= n
 # Tests
 ################################################
 
-# [Kernel Test: Checkpoints]
-CONFIG_KERNEL_TEST_CHECKPOINTS    ?= n
-
-# [Kernel Test: Input Injection]
-CONFIG_INPUT_TEST_INJECT          ?= n
-
-# [Kernel Test: Security Key Loopback]
-CONFIG_SECURITY_KEY_TEST_LOOPBACK ?= n
-
-# [Kernel Test:: Bluetooth Loopback]
-CONFIG_BT_TEST_LOOPBACK           ?= n
-
-# [Kernel Test: USB HID Checkpoint]
-CONFIG_KERNEL_USB_HID_CHECKPOINT  ?= n
+include mk/test-config.mk
 
 ################################################
 # Userland Programs
