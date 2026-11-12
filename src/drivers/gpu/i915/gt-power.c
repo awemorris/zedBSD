@@ -10,10 +10,11 @@
  *
  * Every register access here goes through the held accessors: the device
  * start holds every GT forcewake domain across the GT initialization and
- * resume that call these functions, and for as long as the node is
- * published, which covers the RPS work and interrupts.  The
- * interrupt handler writes the PM mask with the raw accessor, as the rest of
- * the handler does.
+ * resume that call these functions, the RPS start and stop run while the
+ * serving thread holds the GT, and a frequency change of the work or the
+ * evaluations holds it through the device's awake hooks (struct i915_rps).
+ * The interrupt handler writes the PM mask with the raw accessor, as the
+ * rest of the handler does.
  */
 
 #include "i915.h"
@@ -193,8 +194,15 @@ drv_i915_rc6_enable(
 		drv_i915_write32(mmio, I915_GT_RING_MAX_IDLE(gt->engines[engine_index].mmio_base), I915_RC6_ENGINE_MAX_IDLE);
 	i915_rc6_write_all(mmio, i915_rc6_after_engines, I915_RC6_COUNT(i915_rc6_after_engines));
 
-	/* Without the GuC's RC6 the driver itself enables RC6. */
-	rc6->ctl_enable = I915_GT_GEN6_RC_CTL_RC6_ENABLE;
+	/*
+	 * The GuC does not run, so the hardware's own timers decide RC6 entry:
+	 * RC6_ENABLE alone is the GuC's setting, under which the hardware
+	 * never enters RC6 by itself.
+	 *
+	 * Procedure referenced: Linux v6.8
+	 * drivers/gpu/drm/i915/gt/intel_rc6.c (gen11_rc6_enable).
+	 */
+	rc6->ctl_enable = I915_GT_RC_CTL_HW_CONTROL | I915_GT_RC_CTL_EVALUATION_MODE_1 | I915_GT_GEN6_RC_CTL_RC6_ENABLE;
 
 	/* Render, media and media sampler power gating are always enabled. */
 	pg_enable = I915_GT_GEN9_RENDER_PG_ENABLE | I915_GT_GEN9_MEDIA_PG_ENABLE | I915_GT_GEN11_MEDIA_SAMPLER_PG_ENABLE;
@@ -502,6 +510,12 @@ drv_i915_rps_init(
 	rps->work_ready = 0;
 	rps->logged = 0U;
 
+	/* The caller holds the domains until the device says otherwise. */
+	rps->awake_get = NULL;
+	rps->awake_put = NULL;
+	rps->awake_context = NULL;
+	rps->wake_failures = 0U;
+
 	/* Graphics version 12 follows the engines' busy time. */
 	rps->use_timer = 1;
 	rps->fixed = 0;
@@ -607,7 +621,9 @@ drv_i915_rps_mask_all(
  * handler, the PM interrupts, and the request raised to the efficient
  * frequency.
  *
- * The caller holds every forcewake domain until drv_i915_rps_stop().  Returns
+ * The caller holds every forcewake domain during the call, and until
+ * drv_i915_rps_stop() unless rps->awake_get lets the work and the
+ * evaluations hold the GT themselves.  Returns
  * 0, or the error of the work queue's creation (RPS then stays at the
  * enable's request).
  */
@@ -1297,6 +1313,7 @@ i915_rps_move_to(
 	uint32_t freq)
 {
 	struct i915_mmio *mmio;
+	int error;
 
 	/* Within the soft limits. */
 	mmio = rps->mmio;
@@ -1304,6 +1321,15 @@ i915_rps_move_to(
 		freq = rps->min_softlimit;
 	if (freq > rps->max_softlimit)
 		freq = rps->max_softlimit;
+
+	/* Keeps the GT awake for the writes; a GT that cannot wake keeps its frequency. */
+	if (rps->awake_get != NULL) {
+		error = rps->awake_get(rps->awake_context);
+		if (error != 0) {
+			rps->wake_failures++;
+			return;
+		}
+	}
 
 	/* The request and its thresholds. */
 	i915_rps_request(rps, mmio, freq, 1);
@@ -1313,6 +1339,10 @@ i915_rps_move_to(
 		drv_i915_write32(mmio, I915_GT_GEN6_RP_INTERRUPT_LIMITS, drv_i915_rps_limits(rps, freq));
 		drv_i915_write32(mmio, I915_GT_GEN6_PMINTRMSK, drv_i915_rps_pm_mask(rps, freq));
 	}
+
+	/* The GT may rest again. */
+	if (rps->awake_put != NULL)
+		rps->awake_put(rps->awake_context);
 
 	/* The frequency the next decision starts from. */
 	rps->cur_freq = freq;

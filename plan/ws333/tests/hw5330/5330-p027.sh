@@ -18,7 +18,7 @@
 #  4. manual: zedBSD with i915.start=manual (i915 attached, never started: the GT as the firmware left it), the same
 #     window.  Then Debian.
 #  5. p4 gets the original vmunix and zedbsd.cfg back; their sha256 are checked.
-# QUIET=1 adds, while the GT is parked, a window with the Wi-Fi radios down and audiod stopped (STATIC/wifi needed).
+# NOPARK=1 is for a kernel without gt-park.patch (the second window repeats the first state).  QUIET=1 adds, while the GT is parked, a window with the Wi-Fi radios down and audiod stopped (STATIC/wifi needed).
 # PARTS (default "held manual") picks 2-3 (held) and 4 (manual).  Nothing is removed on either machine.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -189,7 +189,10 @@ if part held; then
 	th "strategy balanced" held-strategy.txt
 	sleep "$SETTLE"
 	window held
-	TO=30 zr "$SY hw.gpu.start=1" > "$LOGS/park.txt" 2>&1
+	# NOPARK=1: a kernel without gt-park.patch; the second window is the same state again.
+	if [ "${NOPARK:-0}" != 1 ]; then
+		TO=30 zr "$SY hw.gpu.start=1" > "$LOGS/park.txt" 2>&1
+	fi
 	sleep 10
 	window parked
 	# QUIET=1: still parked, the Wi-Fi radios down and audiod (the sound card's stream) stopped, the same window.
@@ -201,10 +204,12 @@ if part held; then
 		say "quiet: $(tr '\n' ' ' < "$LOGS/quiet.txt" | cut -c1-200)"
 		window quiet
 	fi
-	TO=30 zr "$SY hw.gpu.start=1" > "$LOGS/unpark.txt" 2>&1
+	if [ "${NOPARK:-0}" != 1 ]; then
+		TO=30 zr "$SY hw.gpu.start=1" > "$LOGS/unpark.txt" 2>&1
+	fi
 	sleep 3
 	zb 'dmesg' > "$LOGS/held-end.txt" 2>&1
-	say "park: $(grep -h 'i915: park:\|test park\|i915: unpark' "$LOGS/held-end.txt" | tr '\n' ';')"
+	say "park: $(grep -h 'i915: park:\|test park\|i915: unpark\|forcewake domain asleep\|did not wake' "$LOGS/held-end.txt" | tr '\n' ';')"
 	to_debian
 fi
 

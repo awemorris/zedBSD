@@ -236,6 +236,8 @@ static int i915_start_publish(struct i915_device *device);
 static void i915_stop_gt(struct i915_device *device);
 static void i915_stop_hardware(struct i915_device *device);
 static int i915_gt_telemetry_read(void *context, struct gpu_telemetry_entry *entry);
+static int i915_rps_awake_get(void *context);
+static void i915_rps_awake_put(void *context);
 static void i915_log_park_sleep(struct i915_gt *gt);
 static int i915_forcewake_get_all(struct i915_gt *gt, unsigned *held);
 static void i915_forcewake_put_all(struct i915_gt *gt, unsigned held);
@@ -529,34 +531,186 @@ drv_i915_device_stop(
  * Lets the GT go idle for a park of the request worker.
  *
  * The worker's thread calls it once it has nothing running: the RPS
- * evaluations stop and every forcewake domain the published node held is
- * given back, so that the GT can drop into RC6.  The domains held are kept
- * in gt->forcewake_parked for drv_i915_device_unpark_gt().
+ * evaluations stop (with the GT awake for their last writes) and the
+ * worker gives its hold on the GT back, so that nothing wakes the GT until
+ * drv_i915_device_unpark_gt().
  */
 void
 drv_i915_device_park_gt(
 	struct i915_device *device)
 {
 	struct i915_gt *gt;
-	unsigned held;
+	unsigned holds;
+	unsigned refs;
+	unsigned long flags;
 
 	/* The GT the device runs. */
 	gt = &device->gt;
 
-	/* Stops the RPS interrupts and work while the domains are still held. */
+	/* Stops the RPS interrupts and work with the GT awake for their writes. */
+	drv_i915_device_worker_wake(device);
 	drv_i915_rps_stop(&gt->init.rps);
 
-	/* Samples the RC6 time a last time while the domains are still held, and notes when the park began. */
-	drv_i915_rc6_residency_pause(&gt->rc6_residency, &gt->mmio);
-	(void)drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &gt->parked_sleep_ns, &held);
+	/* Notes when the park began and the RC6 time then. */
+	(void)drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &gt->parked_sleep_ns, &holds);
 	gt->parked_at_ns = drv_i915_perf_now();
 	gt->parked_forgets = drv_i915_rc6_residency_forgets(&gt->rc6_residency);
 
-	/* Gives the domains back; forcewake_parked says which to take again. */
-	gt->forcewake_parked = gt->forcewake_held;
-	i915_forcewake_put_all(gt, gt->forcewake_held);
-	gt->forcewake_held = 0U;
-	kern_logf("i915: park: the GT may idle (RPS stopped, %u forcewake domains given back)\n", gt->forcewake_parked);
+	/* Gives the worker's hold back; with the RPS stopped it was the last. */
+	drv_i915_device_worker_rest(device);
+	gt->forcewake_parked = 1U;
+	flags = spin_lock_irqsave(&gt->awake_lock);
+	refs = gt->awake_refs;
+	holds = gt->forcewake_held;
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
+	kern_logf("i915: park: the GT may idle (RPS stopped, %u holders, %u forcewake domains held)\n", refs, holds);
+}
+
+/*
+ * Holds the running GT awake: the first holder wakes every forcewake
+ * domain, so the held register accessors work until the matching
+ * drv_i915_device_awake_put().
+ *
+ * Returns 0, or the forcewake's error with nothing held.  Safe from any
+ * thread; it does not sleep.
+ */
+int
+drv_i915_device_awake_get(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned long flags;
+	unsigned held;
+	int error;
+
+	gt = &device->gt;
+
+	/* The first holder wakes the domains and lets the RC6 account read the counter. */
+	flags = spin_lock_irqsave(&gt->awake_lock);
+
+	/* Outside the running device's life there is no GT to wake. */
+	if (gt->awake_open == 0U) {
+		spin_unlock_irqrestore(&gt->awake_lock, flags);
+		return ENODEV;
+	}
+
+	if (gt->awake_refs == 0U && gt->forcewake_held == 0U) {
+		error = i915_forcewake_get_all(gt, &held);
+		if (error != 0) {
+			i915_forcewake_put_all(gt, held);
+			spin_unlock_irqrestore(&gt->awake_lock, flags);
+			return error;
+		}
+		gt->forcewake_held = held;
+		drv_i915_rc6_residency_resume(&gt->rc6_residency, &gt->mmio, held);
+	}
+	gt->awake_refs++;
+
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
+
+	/* Succeeded: the GT stays awake until the put. */
+	return 0;
+}
+
+/*
+ * Lets go of the running GT: the last holder samples the RC6 time and
+ * gives every forcewake domain back, so the GT can drop into RC6.
+ */
+void
+drv_i915_device_awake_put(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	unsigned long flags;
+
+	gt = &device->gt;
+
+	/* The last holder gives the domains back. */
+	flags = spin_lock_irqsave(&gt->awake_lock);
+
+	if (gt->awake_refs == 0U) {
+		spin_unlock_irqrestore(&gt->awake_lock, flags);
+		return;
+	}
+	gt->awake_refs--;
+	if (gt->awake_refs == 0U && gt->forcewake_held != 0U) {
+		drv_i915_rc6_residency_pause(&gt->rc6_residency, &gt->mmio);
+		i915_forcewake_put_all(gt, gt->forcewake_held);
+		gt->forcewake_held = 0U;
+	}
+
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
+}
+
+/*
+ * Reports whether the request worker holds the GT awake.  Only the
+ * worker's thread (which also starts and stops the device) asks.
+ */
+int
+drv_i915_device_worker_awake(
+	const struct i915_device *device)
+{
+	/* The worker's own flag. */
+	return device->gt.worker_awake != 0U;
+}
+
+/*
+ * Makes the request worker a holder of the GT before it runs work.  A GT
+ * that does not wake is logged; the work then finds its registers asleep.
+ */
+void
+drv_i915_device_worker_wake(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	int error;
+
+	gt = &device->gt;
+
+	/* Already a holder. */
+	if (gt->worker_awake != 0U)
+		return;
+
+	/* Wakes the GT for the worker; a device that never ran has nothing to wake. */
+	error = drv_i915_device_awake_get(device);
+	if (error == ENODEV)
+		return;
+	if (error != 0) {
+		kern_logf("i915: the GT did not wake for the worker (%d)\n", error);
+		return;
+	}
+	gt->worker_awake = 1U;
+}
+
+/*
+ * Ends the request worker's hold on the GT once it has had nothing to do
+ * for a while, and reports register accesses that found their domain
+ * asleep since the last report.
+ */
+void
+drv_i915_device_worker_rest(
+	struct i915_device *device)
+{
+	struct i915_gt *gt;
+	uint32_t refusals;
+
+	gt = &device->gt;
+
+	/* Not a holder. */
+	if (gt->worker_awake == 0U)
+		return;
+
+	/* Lets the GT rest unless the RPS holds it for a moment. */
+	gt->worker_awake = 0U;
+	drv_i915_device_awake_put(device);
+
+	/* Accesses a held accessor refused for want of a domain are a fault of the holds. */
+	refusals = gt->mmio.forcewake_refusals;
+	if (refusals != gt->refusals_reported) {
+		kern_logf("i915: %u register accesses found their forcewake domain asleep\n",
+		    (unsigned)(refusals - gt->refusals_reported));
+		gt->refusals_reported = refusals;
+	}
 }
 
 /*
@@ -575,17 +729,17 @@ drv_i915_device_unpark_gt(
 	/* The GT the device runs. */
 	gt = &device->gt;
 
-	/* Takes every domain again, as the published node held them. */
-	error = i915_forcewake_get_all(gt, &held);
-	gt->forcewake_held = held;
+	/* The worker holds the GT again. */
 	gt->forcewake_parked = 0U;
+	error = drv_i915_device_awake_get(device);
 	if (error != 0) {
-		kern_logf("i915: unpark: forcewake failed (%d, %u domains held)\n", error, held);
+		kern_logf("i915: unpark: forcewake failed (%d)\n", error);
 		return error;
 	}
+	gt->worker_awake = 1U;
+	held = gt->forcewake_held;
 
-	/* Adds the RC6 time of the park, and says how much of the park the GT slept. */
-	drv_i915_rc6_residency_resume(&gt->rc6_residency, &gt->mmio, held);
+	/* Says how much of the park the GT slept. */
 	i915_log_park_sleep(gt);
 
 	/* Lets the GT frequency follow the load again. */
@@ -1058,6 +1212,11 @@ i915_start_prepare(
 	drv_i915_trace_init(&gt->trace);
 	spin_init(&gt->uncore_lock, LOCK_RANK_DEVICE, "i915 uncore");
 	drv_i915_rc6_residency_init(&gt->rc6_residency);
+	spin_init(&gt->awake_lock, LOCK_RANK_DEVICE, "i915 gt awake");
+	gt->awake_refs = 0U;
+	gt->worker_awake = 0U;
+	gt->awake_open = 0U;
+	gt->refusals_reported = 0U;
 	(void)mutex_init(&gt->sb_lock, LOCK_RANK_DEVICE, "i915 sideband");
 
 	/* Refuses a kernel whose waits have no monotonic counter to measure time with. */
@@ -1900,40 +2059,43 @@ i915_start_pxp(
 }
 
 /*
- * Keeps the GT awake for the device's life and publishes the node.
+ * Makes the serving thread the GT's first holder and publishes the node.
  *
- * The render path holds every forcewake domain while it runs, the way the
- * hardware tests held it.
+ * The worker keeps the GT awake while it has work and lets it rest when
+ * idle (drv_i915_device_worker_rest()); the RPS holds it around each
+ * frequency change.
  */
 static int
 i915_start_publish(
 	struct i915_device *device)
 {
 	struct i915_gt *gt;
-	unsigned held;
+	unsigned long flags;
 	int error;
 
 	gt = &device->gt;
 
-	/* Holds every domain for as long as the node is published. */
+	/* The thread that serves the node holds the GT while it works; it rests the GT when idle. */
 	device->stage = "forcewake_resident";
-	error = i915_forcewake_get_all(gt, &held);
-	if (error != 0) {
-		i915_forcewake_put_all(gt, held);
+	flags = spin_lock_irqsave(&gt->awake_lock);
+	gt->awake_open = 1U;
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
+	error = drv_i915_device_awake_get(device);
+	if (error != 0)
 		return error;
-	}
+	gt->worker_awake = 1U;
 
-	gt->forcewake_held = held;
-
-	/* Starts the account of the RC6 time while the domains are held. */
-	drv_i915_rc6_residency_resume(&gt->rc6_residency, &gt->mmio, held);
+	/* The RPS holds the GT itself around each frequency change once the worker may rest. */
+	gt->init.rps.awake_get = i915_rps_awake_get;
+	gt->init.rps.awake_put = i915_rps_awake_put;
+	gt->init.rps.awake_context = device;
 
 	/* Lets the GT frequency follow the load from here on; without it the frequency stays requested. */
 	device->stage = "rps_start";
 	(void)drv_i915_rps_start(&gt->init.rps, &gt->irq, &gt->mmio);
 
 	/* Lists the GPU in hw.gputelemetry (what the RPS keeps, the RC6 time and the forcewake); a full list leaves it out. */
-	(void)kern_gpu_telemetry_register("i915", i915_gt_telemetry_read, gt);
+	(void)kern_gpu_telemetry_register("i915", i915_gt_telemetry_read, device);
 
 	/* Creates the request worker's state. */
 	device->stage = "worker_create";
@@ -1967,6 +2129,7 @@ i915_stop_gt(
 	struct i915_device *device)
 {
 	struct i915_gt *gt;
+	unsigned long flags;
 	unsigned held;
 	unsigned index;
 	int gpu_retained;
@@ -1974,13 +2137,17 @@ i915_stop_gt(
 
 	gt = &device->gt;
 
-	/* Stops the RPS interrupts and work while the domains are still held. */
+	/* Stops the RPS interrupts and work with the GT awake for their writes. */
+	drv_i915_device_worker_wake(device);
 	drv_i915_rps_stop(&gt->init.rps);
+	gt->init.rps.awake_get = NULL;
+	gt->init.rps.awake_put = NULL;
 
-	/* Gives back the domains the published node held, after the last RC6 sample. */
-	drv_i915_rc6_residency_pause(&gt->rc6_residency, &gt->mmio);
-	i915_forcewake_put_all(gt, gt->forcewake_held);
-	gt->forcewake_held = 0U;
+	/* Gives back the worker's hold, the last one, after the last RC6 sample; nothing wakes the GT from here on. */
+	drv_i915_device_worker_rest(device);
+	flags = spin_lock_irqsave(&gt->awake_lock);
+	gt->awake_open = 0U;
+	spin_unlock_irqrestore(&gt->awake_lock, flags);
 
 	/* Stops anything still scanned out and the hotplug path, and takes the display's references back. */
 	drv_i915_display_stop_serving(device);
@@ -2170,6 +2337,24 @@ i915_stop_hardware(
 	}
 }
 
+/* Holds the GT awake for a frequency change of the RPS. */
+static int
+i915_rps_awake_get(
+	void *context)
+{
+	/* The device is the context. */
+	return drv_i915_device_awake_get(context);
+}
+
+/* Lets go of the GT after a frequency change of the RPS. */
+static void
+i915_rps_awake_put(
+	void *context)
+{
+	/* The device is the context. */
+	drv_i915_device_awake_put(context);
+}
+
 /*
  * Fills one GPU's hw.gputelemetry entry: what the RPS keeps, the time the
  * GT spent in RC6 (while the running device holds its domains; a parked
@@ -2181,27 +2366,41 @@ i915_gt_telemetry_read(
 	void *context,
 	struct gpu_telemetry_entry *entry)
 {
+	struct i915_device *device;
 	struct i915_gt *gt;
 	uint64_t sleep_ns;
 	unsigned holds;
+	unsigned awake;
 	int error;
 
-	gt = context;
+	device = context;
+	gt = &device->gt;
 
 	/* The busy time and the frequencies. */
 	error = drv_i915_rps_telemetry_read(&gt->init.rps, entry);
 	if (error != 0)
 		return error;
 
-	/* The RC6 time, current only while the domains are held. */
-	error = drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &sleep_ns, &holds);
+	/* The domains the running device holds awake for its own work, before this read wakes the GT. */
+	(void)drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &sleep_ns, &holds);
+	entry->awake_holds = holds;
+
+	/*
+	 * The RC6 time, read with the GT held awake for the moment of the
+	 * read; a resting GT is woken briefly, which ends its RC6 for that
+	 * moment only.  A device that is not running has no GT to wake.
+	 */
+	error = drv_i915_device_awake_get(device);
 	if (error == 0) {
-		entry->sleep_ns = sleep_ns;
-		entry->valid |= GPU_TELEMETRY_SLEEP;
+		error = drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &sleep_ns, &awake);
+		drv_i915_device_awake_put(device);
+		if (error == 0) {
+			entry->sleep_ns = sleep_ns;
+			entry->valid |= GPU_TELEMETRY_SLEEP;
+		}
 	}
 
-	/* The domains the running device holds awake, and how many wakes the driver asked for. */
-	entry->awake_holds = holds;
+	/* How many wakes the driver asked for. */
 	entry->awake_wakes = gt->mmio.forcewake_wakes;
 	entry->valid |= GPU_TELEMETRY_AWAKE;
 

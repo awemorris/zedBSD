@@ -246,6 +246,18 @@ struct i915_rps {
 
 	/* How many frequency changes the log has reported (the first few only). */
 	unsigned logged;
+
+	/*
+	 * Keeps the GT's registers awake around a frequency change, for a
+	 * device whose forcewake domains are not held all the time: get
+	 * returns 0 once they are held, put lets them go.  NULL when the
+	 * caller holds the domains itself.  wake_failures counts the changes
+	 * dropped because the GT did not wake.
+	 */
+	int (*awake_get)(void *context);
+	void (*awake_put)(void *context);
+	void *awake_context;
+	volatile unsigned wake_failures;
 };
 
 void drv_i915_rc6_init(struct i915_rc6 *rc6, struct i915_mmio *mmio);

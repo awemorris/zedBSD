@@ -121,6 +121,9 @@ struct i915_mmio {
 	 */
 	volatile uint32_t forcewake_wakes;
 
+	/* How many held-accessor reads and writes found their domain asleep (refused); read like forcewake_wakes. */
+	volatile uint32_t forcewake_refusals;
+
 	/* Nonzero once a release without a matching hold was attempted. */
 	int forcewake_underflow;
 
