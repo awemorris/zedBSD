@@ -21,6 +21,7 @@
 | Q1 | [WS347](ws347/ws.md) | VF2＋KC705 の Amaterrace GPU。Gemini の RTL の修正（amaterrace-gpu ad23fe01）の監査を、読むだけの監査の担当に任せている。次は Gemini への依頼 03 |
 | Q1 | q2000 | [WS074](ws074/ws.md) [p263](ws074/phase263/phase.md)（実際の Web サイトの UAT の指摘、U1 は host で直った）。2026-11-03 から止まっている |
 | P1 | q2013 | [WS333](ws333/ws.md) の UAPI の実装（p005 後半・p013・p019）（2026-11-12 から） |
+| P2 | q2014 | [WS347](ws347/ws.md) Gemini の RTL の修正（依頼 05 の後）の監査（2026-11-12 から） |
 | P1・P2 | q2010・q2011 | 2026-11-11 12:37 にユーザーの指示で止めた（uncleared）。P1 の amaterrace の worktree の RTL の変更は使わない（RTL は Gemini）。P2 の worktree `p2-ws347` に driver の未 commit の変更（未確認） |
 | 他 | — | 動いていない。2026-11-02 のラップアップの引き継ぎが phase.md に残る: [WS335](ws335/ws.md) p035、[WS345](ws345/ws.md) p010・p014（p014 の cleared の判断は Q1）、[WS336](ws336/ws.md) p024 |
 
@@ -74,7 +75,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-422 · q2014 · WS348 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-422 · q2015 · WS348 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
