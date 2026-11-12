@@ -92,6 +92,7 @@ i915 の WS へ渡す物（この時点の案。後で Q1 の依頼で forcewake
 | p027q6 | forcewake だけ（＝ad49b417c3、97c8f6f5d4be750c） | 162.92 fps（present 2.92 ms） | **37.35 fps**（frame 26.6 ms） |
 
 - 直接の scanout: 各 run の KWL SCANOUT に direct=1 が 1 回（overlay の surface 8 は direct=0）。GT の実の周波数は `telemetry-sum.py` の出力が v2 の hw.gputelemetry で意味を持たず未取得。Linux の基準は WS291 p022 の 50.6 fps、前の zedBSD は 32.6 fps（受け入れは未達のまま）。
+- （2026-11-13 P3、p029 で訂正）原因は HW_CONTROL ではなかった: HW_CONTROL 無しでも再現し、起動直後の display の takeover が worker を約 14 s 塞いで GPU の job の予約の期限 10 s を越えた事による（[p029](../phase029/phase.md) §1）。以下は当時の記録。
 - HW_CONTROL の失敗の原因は未解明: kernel の log に「did not complete」・forcewake の ack の失敗・拒みの log は無く、worker の run の timeout ではない。GT が RC6 に入った後に Vulkan の session の状態（RC6 で失われる非 context の register 等）が戻らない見込み（未確認）。GT を RC6 に入れるのは i915 の WS の続き（RC6 で失われる状態の確かめ、Linux の manual の形（park の時だけ RC_STATE に target を書く）を含む）。
 - c1 の 338 → 163 fps（present 0.04 → 2.92 ms）は forcewake を参照の数にした後の 1 回ずつの数で、原因も回帰かどうかも未確認（同じ条件の繰り返しは未実施）。c600 は 39.30 → 37.35 fps（約 5 %）。
 
