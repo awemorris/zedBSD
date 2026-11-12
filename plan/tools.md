@@ -56,6 +56,8 @@ Phase に固有の試験は各 WS の `tests/`、シナリオ試験（AAT）は 
 
 ## 環境の作り直し（clone・host の入れ替えの後）
 
+- **新しい checkout・worktree の build の順**（2026-11-12）: `make CONFIGMK=<config> llvm-toolchain-cached`（compiler を入れる。kernel の build は自分では入れない、ユーザーの仕様）→ `make CONFIGMK=<config> sysroot`（libc と sysroot の header。kernel は `$(BUILD)/sysroot/usr/include` を読む）→ 個別の target（`$(BUILD)/vmunix` など）。worktree の `build/` に main の tree を symlink しない（[BUG-420](bugs/BUG-420.md)）。
+
 1. commit の hook: `cp plan/tools/git-hooks/commit-msg .git/hooks/ && chmod +x .git/hooks/commit-msg`。
 2. remote は `git@github.com:awemorris/zedBSD.git`、author は `Awe Morris`。
 3. 担当の worktree は Q1 が `git worktree add /home/awe/zedBSD-worktrees/<名前> -b agent/<名前>` で作る。

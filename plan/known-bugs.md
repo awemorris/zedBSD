@@ -458,4 +458,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-418](bugs/BUG-418.md) | build system の作り直し（branch refactor）の後、rpi5 の kernel が起動しない・rpi4・vf2・i386・pc9821 は未試験 | open（2026-11-08 19:10 Q1 が起票、Q1 が直に、QEMU で確かめる） |
 | [BUG-419](bugs/BUG-419.md) | riscv64 で noct の JIT が使えない（builtins が PIC でなく、`__clear_cache` に zedBSD の実装が無い） | open（2026-11-11 11:27 Q1 が起票、担当は未定） |
 | [BUG-420](bugs/BUG-420.md) | LLVM の source の展開が file の時刻で繰り返され、build が source を上書きする（worktree の i386 の vmunix が main の build/llvm-source を上書き） | fixed（2026-11-12 Q1、main と新しい worktree で確かめた） |
-| [BUG-421](bugs/BUG-421.md) | 新しい checkout で NoctLang の patch が取得した tarball に当たらず `make sysroot` が止まる（CMakeLists.txt の hunk） | open（2026-11-12 Q1 が起票、toolchain の扱い、ユーザーの判断待ち） |
+| [BUG-421](bugs/BUG-421.md) | 新しい checkout で NoctLang の patch が取得した tarball に当たらず `make sysroot` が止まる（CMakeLists.txt の hunk） | fixed（2026-11-12 ユーザー 0958bc742e、Q1 が新しい worktree で確かめた） |
