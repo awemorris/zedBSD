@@ -3158,7 +3158,12 @@ scene_display_copied(void)
 	expect(model.display.bad_writes == 0U, "display copied: no refused write");
 	end_scene("display copied");
 
-	/* Without a blitter: the processor copies through the window, which closes again. */
+	/*
+	 * Without a blitter and without the executor (this test links the
+	 * driver's core alone, as on a GPU without a shader unit), so without
+	 * the copy program: the processor copies through the window, which
+	 * closes again.
+	 */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
 	model.window[GHCI_REG_DEVICE_CAPS / 4U] &= ~GHCI_CAP_BLT;
 	error = start_device_window();
@@ -3174,7 +3179,7 @@ scene_display_copied(void)
 	    model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U] == 0U, "display copied: by the processor through the window");
 	device.ops.resource_destroy(&device, display_open, storage);
 	display_give_up();
-	end_scene("display copied: no blitter");
+	end_scene("display copied: no blitter, no executor");
 }
 
 /*

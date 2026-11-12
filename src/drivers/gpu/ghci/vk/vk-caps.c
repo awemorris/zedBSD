@@ -574,7 +574,6 @@ ghci_vk_caps_shortfalls(
 	uint32_t features;
 	int indirect;
 	int msaa;
-	int clip;
 	int bilinear;
 
 	/* The texture and sampler slots are shared by a pipeline's stages: 16, not Vulkan's 96. */
@@ -603,22 +602,15 @@ ghci_vk_caps_shortfalls(
 	}
 
 	/*
-	 * Without the polygon clipper the rasterizer has a guard band
-	 * alone: a primitive that crosses the near plane is rejected (the
-	 * driver has no clipping of its own), where Vulkan clips it.
 	 * Without the bilinear filter no format filters, where Vulkan
-	 * requires the linear filter of some.
+	 * requires the linear filter of some.  (A GPU without the polygon
+	 * clipper loses the primitives that cross the near plane; that is
+	 * the build's choice and is not listed.)
 	 *
 	 * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section
-	 * 3.2.2, EXT_CAP_FEATURE [30] CAP_CLIP_POLY and EXT_CAP_FMT0 [16]
-	 * CAP_TU_BILINEAR; section 12.10, the hardware polygon clipping).
+	 * 3.2.2, EXT_CAP_FMT0 [16] CAP_TU_BILINEAR).
 	 */
-	clip = ghci_caps_has(caps, GHCI_HAS_CLIP_POLY);
 	bilinear = ghci_caps_has(caps, GHCI_HAS_TU_BILINEAR);
-	if (!clip) {
-		found[count] = "clipping of primitives across the near plane (CAP_CLIP_POLY)";
-		count++;
-	}
 	if (!bilinear) {
 		found[count] = "linear texture filtering (CAP_TU_BILINEAR)";
 		count++;

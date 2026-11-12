@@ -271,6 +271,12 @@ enum ghci_vk_meta_kind {
 #define GHCI_VK_META_GROUP		64U
 #define GHCI_VK_META_GROUPS_MAX		65535U
 
+/* The most dwords one step of a transfer takes: its push constants (LOAD_CONST) and one DISPATCH. */
+#define GHCI_VK_META_STEP_DWORDS	(3U + GHCI_VK_META_PUSH_WORDS + GHCI_DW_DISPATCH)
+
+/* The dwords of a transfer's binds: its pipeline and its resource table. */
+#define GHCI_VK_META_BIND_DWORDS	(GHCI_DW_BIND_PIPELINE + GHCI_DW_BIND_DESCRIPTOR_TABLE)
+
 /*
  * One of the driver's transfer programs placed in a device's code heap:
  * its pipeline state record and code (one run, which goes with the
@@ -334,6 +340,25 @@ struct ghci_vk_meta_dispatch {
 };
 
 /*
+ * The driver's copy program placed in session 0 for the copies of rows
+ * the core of the driver asks for (the display's copied presents): one
+ * run of host memory mapped once into session 0, executable and read-only
+ * to the GPU, that holds the program's pipeline state record and code and,
+ * at table_at, the resource table each copy writes before it is placed
+ * (only the driver writes the run; the GPU only reads it).  memory is
+ * NULL until the first copy, and the run stays until the detach.  lock
+ * makes the placement, a copy's table and its packets in the ring one
+ * step.
+ */
+struct ghci_vk_rows {
+	struct mutex lock;
+	struct ghci_allocation *memory;
+	struct ghci_mapping *mapping;
+	uint32_t table_at;
+	struct ghci_vk_meta_pipeline pipeline;
+};
+
+/*
  * The Vulkan format features of each VkFormat on optimal and linear
  * tiling and in buffers, made once at the attach from the FMT block (or
  * the table of the specification without it) and not changed after.
@@ -360,7 +385,8 @@ struct ghci_vk_formats {
  * once, under the device's lock.  meta_refused marks a kind whose
  * program the compiler refused (or that does not fit its pipeline
  * state), set once under the device's lock, so that it is not compiled
- * again.
+ * again.  rows is the copy program placed in session 0 for the core's
+ * copies of rows.
  */
 struct ghci_vk {
 	struct ghci_device *device;
@@ -370,6 +396,7 @@ struct ghci_vk {
 	unsigned refusals;
 	struct ghci_gsi1_program *meta[GHCI_VK_META_KINDS][GHCI_VK_META_PROGRAMS];
 	int meta_refused[GHCI_VK_META_KINDS];
+	struct ghci_vk_rows rows;
 };
 
 /*
@@ -1105,6 +1132,11 @@ void ghci_vk_submission_written(struct ghci_vk_device *device, const struct ghci
 int ghci_vk_meta_compile(const struct ghci_caps *caps, enum ghci_vk_meta_kind kind, struct ghci_gsi1_program **programs);
 int ghci_vk_meta_pipeline(struct ghci_vk_session *session, struct ghci_vk_device *device, enum ghci_vk_meta_kind kind, const struct ghci_vk_meta_pipeline **pipeline);
 int ghci_vk_meta_copy(const struct ghci_vk_meta_copy *copy, struct ghci_vk_meta_dispatch *dispatch);
+void ghci_vk_meta_table(const struct ghci_vk_meta_pipeline *pipeline, const struct ghci_vk_meta_dispatch *dispatch, uint8_t *view);
+uint32_t ghci_vk_meta_bind(const struct ghci_vk_meta_pipeline *pipeline, uint64_t table, uint32_t *words);
+uint32_t ghci_vk_meta_step(const struct ghci_vk_meta_dispatch *dispatch, uint64_t *first, uint32_t *words);
+int ghci_vk_copy_rows(struct ghci_device *device, const struct ghci_rows *rows, struct ghci_ticket *ticket);
+void ghci_vk_rows_release(struct ghci_device *device);
 int ghci_vk_meta_query(uint64_t source, uint32_t count, uint64_t destination, uint32_t stride, uint32_t flags, struct ghci_vk_meta_dispatch *dispatch);
 
 /* vk-pipeline.c: what a shader module or a pipeline lets go of. */

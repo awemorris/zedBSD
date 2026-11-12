@@ -7,11 +7,6 @@
 include config/ci/config-visionfive2.mk
 
 CONFIG_DRIVER_PCI_GHCI := y
-CONFIG_GHCI_POLL := y
-# The VF2's PCIe DMA reaches host memory through the L2 (coherent): the GPU does not see
-# writes through the uncached alias (ws288-p044 step 2: fw-host-sum-other 0 of 1000), so the
-# driver uses the cached direct map, as VF2_DMA_DEFAULT_COHERENT says.
-CONFIG_GHCI_HOST_UNCACHED := n
 ZEDBSD_USER_PROGRAMS += ghcictl ghci-display sudo openssl openssh
 
 ZEDBSD_BOOT_KERNEL_MESSAGES := y

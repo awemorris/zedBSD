@@ -132,15 +132,6 @@
 #define INDIRECT_DISPATCH_BYTES		12U
 
 /*
- * The flags of a buffer descriptor the driver's transfer programs read
- * only.
- *
- * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 8.3,
- * GhciBufferDescriptor: flags [0] ReadOnly).
- */
-#define META_SOURCE_READ_ONLY		(1U << 0)
-
-/*
  * A draw's source texture descriptor: dimension 2D, and the components as
  * they are (R, G, B, A as 2 to 5 in the four 3-bit swizzle fields).
  *
@@ -3363,11 +3354,9 @@ meta_run(
 	const struct ghci_vk_meta_dispatch *dispatch)
 {
 	const struct ghci_vk_meta_pipeline *pipeline;
-	struct ghci_buffer_desc descriptor;
-	uint32_t words[3U + GHCI_CONST_LOAD_MAX];
-	uint32_t push[GHCI_VK_META_PUSH_WORDS];
+	uint32_t words[GHCI_VK_META_STEP_DWORDS];
+	uint32_t dwords;
 	uint64_t first;
-	uint64_t groups;
 	uint64_t va;
 	uint8_t *view;
 	int error;
@@ -3391,31 +3380,18 @@ meta_run(
 	error = temp_take(exec, pipeline->resource_bytes, TABLE_ALIGN, &va, &view);
 	if (error != 0)
 		return error;
-	kern_memset(&descriptor, 0, sizeof(descriptor));
-	descriptor.base = dispatch->source;
-	descriptor.bytes = dispatch->source_bytes;
-	descriptor.flags = META_SOURCE_READ_ONLY;
-	(void)ghci_buffer_desc_encode(view + pipeline->source_entry, &descriptor);
-	kern_memset(&descriptor, 0, sizeof(descriptor));
-	descriptor.base = dispatch->destination;
-	descriptor.bytes = dispatch->destination_bytes;
-	(void)ghci_buffer_desc_encode(view + pipeline->destination_entry, &descriptor);
+	ghci_vk_meta_table(pipeline, dispatch, view);
 
 	/* The program and its table. */
-	put(exec, words, ghci_cmd_bind_pipeline(words, pipeline->pso_va));
-	put(exec, words, ghci_cmd_bind_descriptor_table(words, GSI1_ABI_SET_RESOURCES, va, pipeline->resource_bytes / GSI1_ABI_RESOURCE_UNIT));
+	put(exec, words, ghci_vk_meta_bind(pipeline, va, words));
 
 	/* The dispatches, each with its first element in the push constants. */
-	kern_memcpy(push, dispatch->push, sizeof(push));
 	first = 0U;
-	while (first < dispatch->elements && exec->error == 0) {
-		groups = ((uint64_t)dispatch->elements - first + GHCI_VK_META_GROUP - 1U) / GHCI_VK_META_GROUP;
-		if (groups > GHCI_VK_META_GROUPS_MAX)
-			groups = GHCI_VK_META_GROUPS_MAX;
-		push[dispatch->first_word] = (uint32_t)first;
-		put(exec, words, ghci_cmd_load_const(words, GSI1_ABI_BANK_PUSH_LOW, dispatch->push_words, push));
-		put(exec, words, ghci_cmd_dispatch(words, (uint32_t)groups, 1U, 1U));
-		first += groups * GHCI_VK_META_GROUP;
+	while (exec->error == 0) {
+		dwords = ghci_vk_meta_step(dispatch, &first, words);
+		if (dwords == 0U)
+			break;
+		put(exec, words, dwords);
 	}
 
 	/* The command buffer's pipelines, tables, constants and state are placed again before they are used. */

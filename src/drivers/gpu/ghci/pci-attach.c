@@ -20,11 +20,10 @@
  * left on (a boot display may be scanning through the GPU) is left on.
  *
  * A host that offers no interrupt (the VisionFive 2's PLDA root complexes
- * take no message, and a function may have no INTx pin), or a kernel
- * built with CONFIG_GHCI_POLL, leaves the device polled.  A bus whose DMA
- * does not snoop the processor's caches, or a kernel built with
- * CONFIG_GHCI_HOST_UNCACHED, has the processor reach host memory through
- * uncached views.
+ * take no message, and a function may have no INTx pin) leaves the device
+ * polled.  A bus whose DMA does not snoop the processor's caches has the
+ * processor reach host memory through uncached views.  Both are found
+ * from the bus at the attach.
  *
  * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 15.2,
  * the PCIe binding: the class codes, BAR0, BAR2, the interrupt and bus
@@ -44,14 +43,6 @@
 #include <uapi/errno.h>
 
 #include "ghci.h"
-
-/* A kernel that names neither leaves the interrupt and the cached host view to the bus. */
-#ifndef CONFIG_GHCI_POLL
-#define CONFIG_GHCI_POLL		0
-#endif
-#ifndef CONFIG_GHCI_HOST_UNCACHED
-#define CONFIG_GHCI_HOST_UNCACHED	0
-#endif
 
 /*
  * The functions offered to the driver: base class 03h with subclass 02h
@@ -411,8 +402,7 @@ map_window(
 
 /*
  * Decides whether the processor reaches host memory through uncached
- * views: when the bus's DMA does not snoop the caches, or when the kernel
- * is built to.
+ * views: when the bus's DMA does not snoop the caches.
  */
 static void
 choose_host_view(
@@ -427,9 +417,9 @@ choose_host_view(
 	if (dma != NULL)
 		coherent = drv_dma_device_is_coherent(dma);
 
-	/* A coherent bus shares the direct map, unless the kernel says otherwise. */
+	/* A coherent bus shares the direct map. */
 	bus->device.host_uncached = 0;
-	if (!coherent || CONFIG_GHCI_HOST_UNCACHED)
+	if (!coherent)
 		bus->device.host_uncached = 1;
 
 	/* Says which view the processor uses. */
@@ -458,8 +448,7 @@ bus_master_found(
 
 /*
  * Takes one interrupt, a message where the function offers one, and puts
- * the handler on it; a host that offers none, or a kernel built to poll,
- * leaves the device polled.
+ * the handler on it; a host that offers none leaves the device polled.
  */
 static int
 interrupt_take(
@@ -468,16 +457,9 @@ interrupt_take(
 	struct ghci_pci *bus;
 	int error;
 
-	/* A kernel built to poll takes no interrupt. */
+	/* One vector: MSI-X, MSI, or the INTx pin. */
 	bus = device->bus;
 	device->polled = 0;
-	if (CONFIG_GHCI_POLL) {
-		kern_logf("ghci: %s: polled every %u ms (CONFIG_GHCI_POLL)\n", device->name, (unsigned)GHCI_POLL_MS);
-		device->polled = 1;
-		return 0;
-	}
-
-	/* One vector: MSI-X, MSI, or the INTx pin. */
 	error = drv_pci_device_allocate_irqs(bus->pci,
 	    DRV_PCI_IRQ_ALLOW_MSIX | DRV_PCI_IRQ_ALLOW_MSI | DRV_PCI_IRQ_ALLOW_INTX,
 	    1U,

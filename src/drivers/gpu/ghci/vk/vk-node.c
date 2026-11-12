@@ -91,7 +91,8 @@ static const struct ghci_executor_ops executor_operations = {
 	ghci_vk_session_close,
 	ghci_vk_memory_blob,
 	ghci_vk_service,
-	node_detach
+	node_detach,
+	ghci_vk_copy_rows
 };
 
 /*
@@ -115,6 +116,7 @@ ghci_vk_attach(
 		return ENOMEM;
 	vk->device = device;
 	waitq_init(&vk->completing_wake, "ghci vk completing");
+	(void)mutex_init(&vk->rows.lock, LOCK_RANK_DEVICE, "ghci vk rows");
 
 	/* The features of every format, read once. */
 	ghci_vk_formats_read(device, &vk->formats);
@@ -604,7 +606,8 @@ node_detach(
 	struct ghci_vk *vk;
 	unsigned kind;
 
-	/* The driver's transfer programs. */
+	/* The copy program's run in session 0, then the driver's transfer programs. */
+	ghci_vk_rows_release(device);
 	vk = device->vk;
 	for (kind = 0U; kind < GHCI_VK_META_KINDS; kind++) {
 		ghci_gsi1_program_free(vk->meta[kind][0]);

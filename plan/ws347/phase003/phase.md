@@ -23,7 +23,7 @@ Status: cleared（2026-11-13 Q1 判定: driver を ghci.md ad23fe01 に追従（
    - FFILT_FP32 0: 32 bit float の format の FILTER_LINEAR を報告しない（FMT の窓の無い GPU の表の道）。
    - BLT_SCALE 0: Vulkan の転送（copy・blit・fill・resolve）を blitter に出さず、blitter の無い GPU と同じ driver の program・描画の道にする（B1 が未決のため。下の「B に依る所」）。
    - BLT_BLEND 0・BLT_TILE 0: driver はどちらも使わない（下の根拠）ので動きは変わらない。decode と問い合わせだけ。
-   - CLIP_POLY 0: driver に software の clip は無い。attach の log の Vulkan 1.0 の shortfall に出す（下の案）。
+   - CLIP_POLY 0: driver に software の clip は無い。attach の log の Vulkan 1.0 の shortfall に出す（下の案）。（p008 で shortfall から外した: 2026-11-13 の決定）
 4. N79（attachment・MSAA の row_pitch_bytes）・N81（occlusion query の BEGIN・END を同じ流れに）・VS の属性の register の連続の割り当て・STATUS の CP_STATE [19:16] に今の code が合っているかを確かめる。
 5. host 試験（`plan/ws290/tests/`、phase の指定で WS290 の試験の道具を直す）に新しい bit の 0・1 と VA 30 bit の場面を足し、全部 PASS。riscv64（VF2、`CONFIG_DRIVER_PCI_GHCI=y`）と amd64 の kernel が warning 0。
 
@@ -79,25 +79,10 @@ Status: cleared（2026-11-13 Q1 判定: driver を ghci.md ad23fe01 に追従（
   B1 が決まったら、その揃えを満たす 1:1 の copy・fill だけを blitter に戻す（P2 の差分の `blit_takes` の形）。KC705 の minimal は blitter が無いので疎通には影響しない。
   display の frame の fill（local memory の時だけ、64 byte に揃った行の 1:1 の fill）は今のまま blitter。
 
-### 案（Q1 へ）
+### 案（Q1 へ）と、その決定
 
-- **CLIP_POLY = 0 の software の代替**: VS は GPU で走り、driver は clip 空間の座標を見ないので、近い面をまたぐ primitive を driver が切るには、VS を compute で先に回して clip し、結果を描く pass が要る（大きな作業）。
-  今回は attach の log の shortfall に出すだけにした（hardware は guard band の外を捨てるので、カメラの近くの三角形が欠ける）。代替を作るかは製品の判断。
-- **mk の 2 つの key**（Makefile・mk はユーザーの確認の後）: `pci-attach.c` が使う `CONFIG_GHCI_POLL`・`CONFIG_GHCI_HOST_UNCACHED` を今の mk は定義せず、main の GHCI の driver は build できなかった（未定義の識別子の error）。
-  source の側に既定 0 を足して build を通した（他の driver と同じ `#ifndef` の形。VF2 は PLDA が MSI を取らないので key が無くても polled に落ちる）。key で選べるようにするなら次の差分:
-  ```make
-  # mk/config.mk、CONFIG_DRIVER_PCI_GHCI の後
-  CONFIG_GHCI_POLL                  ?= n
-  CONFIG_GHCI_HOST_UNCACHED         ?= n
-
-  # mk/kernel.mk、# [GHCI GPU driver] の ifneq の中
-  ifneq ($(filter y,$(CONFIG_GHCI_POLL)),)
-  KERN_CPPFLAGS += -DCONFIG_GHCI_POLL=1
-  endif
-  ifneq ($(filter y,$(CONFIG_GHCI_HOST_UNCACHED)),)
-  KERN_CPPFLAGS += -DCONFIG_GHCI_HOST_UNCACHED=1
-  endif
-  ```
+- **CLIP_POLY = 0 の software の代替**: 2026-11-13 ユーザーの決定（Q1 経由）で作らない。clipper の無い GPU は何も言わずに欠けてよい（minimal は実用ではない）。attach の log の shortfall からも CLIP_POLY を外した（[p008](../phase008/phase.md) で実装）。
+- **mk の 2 つの key**: 2026-11-13 ユーザーの決定（Q1 経由）で案を取り下げた。割り込みの有無と DMA の coherent は driver が bus から調べて決める基本の機能なので、`CONFIG_GHCI_POLL`・`CONFIG_GHCI_HOST_UNCACHED` を source から外し、検出だけで決める（[p008](../phase008/phase.md) で実装）。
 
 ### 前の担当（P2、2026-11-11 に止めた worktree `p2-ws347`）の差分の扱い
 
@@ -113,8 +98,8 @@ Status: cleared（2026-11-13 Q1 判定: driver を ghci.md ad23fe01 に追従（
 - `caps.c`: VA = 30 + [3:0]、mirror の表に FFILT_FP16、`max_color`、`ghci_caps_has` の 6 つ（blitter の 3 つは CAP_BLT が無ければ 0、FFILT_FP32 は CAP_TEX_FFILT が無ければ 0）、`ghci_va_chunks`、`ghci_heap_device_bytes` の chunk の数。
 - `vm.c`: 配る chunk の終わりを VA の chunk の数から（`end_chunk`）。
 - `ghci.c`: mirror の食い違いの log に FMT0、MAX_MRT と FMT0[15:12] の食い違いの log、VA・PA・colour attachment・shared memory の log の行。
-- `pci-attach.c`: `CONFIG_GHCI_POLL`・`CONFIG_GHCI_HOST_UNCACHED` の既定 0。
-- `vk/vk-caps.c`・`vk.h`: `ghci_vk_caps_blitter`、shortfall に CLIP_POLY と TU_BILINEAR。
+- `pci-attach.c`: `CONFIG_GHCI_POLL`・`CONFIG_GHCI_HOST_UNCACHED` の既定 0（p008 で option ごと外した）。
+- `vk/vk-caps.c`・`vk.h`: `ghci_vk_caps_blitter`、shortfall に CLIP_POLY と TU_BILINEAR（CLIP_POLY は p008 で外した）。
 - `vk/vk-format.c`: TU_BILINEAR 0 で FILTER_LINEAR を落とす、FFILT_FP32、blit の報告は `ghci_vk_caps_blitter`。
 - `vk/vk-execute.c`: `has_blitter` と subpass の resolve を `ghci_vk_caps_blitter` に、TU_BILINEAR 0 で blit の filter を nearest に。
 - `vk/vk-layout.c`: TU_BILINEAR 0 で sampler の min・mag・mip を nearest に。
@@ -136,4 +121,4 @@ Status: cleared（2026-11-13 Q1 判定: driver を ghci.md ad23fe01 に追従（
 
 - 実機（VF2＋KC705）と QEMU での確かめは無い（p004）。attach の log の新しい行は host の stub でだけ通った。
 - 規約の全文の見直しは p005。
-- mk の 2 つの key は案のまま（ユーザーの確認待ち）。B1 が決まったら blitter の 1:1 の copy を戻す。
+- mk の 2 つの key の案は取り下げ（上の決定）。B1 が決まったら blitter の 1:1 の copy を戻す。
