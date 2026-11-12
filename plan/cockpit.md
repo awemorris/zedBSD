@@ -7,8 +7,8 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | 待機 | BUG-418 の確かめを返却（7 機種 build、3 機種 QEMU login）。mk の案はユーザーへ | — |
-| P2 | — | 待機 | WS335 p036 の source を merge（compat だけを開く build、Windows の static の表）。Makefile の案 A〜C はユーザーへ | — |
+| P1 | q2033 | 作業中 | BUG-418 A: i386 の userland で CMPXCHG 無しの atomic（-march=i386 のまま） | — |
+| P2 | q2034 | 作業中 | BUG-418 C: package の data が image に入らない件の mk の差分（確かめてユーザーへ） | — |
 | P3 | q2032 | 作業中 | WS333 p027: 5330 の package の C-state 0% の原因（i915）、qs40、S0 idle（watchdog の下で） | agy の依頼 07 が終われば監査も |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
