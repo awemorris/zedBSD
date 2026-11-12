@@ -7,8 +7,8 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | q2022 | 作業中 | WS333 p025: p014 の食い違い（HWP の読み・E-core・package の C-state）を code で解析し直す | 直しの後に 5330 で 1 回測る |
-| P2 | — | 待機 | WS335 の run-fuzz.sh を同時 4 本までにした（q2021、merge 済み） | WS335 の残りは p036（net/tls.c の切り替え） |
+| P1 | q2023 | 作業中 | WS333 p025 の 5330 の 1 回（HWP の読みの直しの確かめ、E-core の clock の共有、package の C-state 0% の理由） | 結果で p025・p014 を判定、次に p024 |
+| P2 | q2024 | 作業中 | BUG-422: kernel の thread の CPU の affinity（cpuperf の測りの thread が他の CPU に移る件） | 次は WS335 p036（2 日以上空いたので乖離の確かめから） |
 | P3 | — | 待機 | WS347 の監査（U1〜U9）を返却。依頼 07 の下書き [gemini-request-07.md](ws347/gemini-request-07.md) | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
