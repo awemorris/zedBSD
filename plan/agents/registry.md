@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P2 | phase-runner-high | ws347 Gemini の修正の監査 (q2014-i01) | `/home/awe/zedBSD-worktrees/p2-ws347a` / `agent/p2-ws347a` | 作業中（2026-11-12） | — |
+| P2 | phase-runner-high | ws347 Gemini の修正の監査 (q2014-i01) | `/home/awe/zedBSD-worktrees/p2-ws347a` / `agent/p2-ws347a` | 返却（2026-11-12） | 5f117d149e（merge b2ecd73d78） |
 | P1 | phase-runner-high | ws333 の UAPI の実装 (q2013-i01) | `/home/awe/zedBSD-worktrees/p1-ws333d` / `agent/p1-ws333d` | 作業中（2026-11-12） | — |
 | P1 | phase-runner-high | ws333 の再開 (q2012-i01) | `/home/awe/zedBSD-worktrees/p1-ws333c` / `agent/p1-ws333c` | 返却（2026-11-12） | ea64e3349f（merge c1d2505046） |
 | P1 | phase-runner-high | ws347 p006 RTL の CAPS (q2010-i01) | `/home/awe/amaterrace-worktrees/p1-ws347rtl` / `ws347-rtl`（amaterrace-gpu） | 停止（2026-11-11 12:37 ユーザーの指示、未 commit の RTL の変更あり、merge しない） | — |
