@@ -6,27 +6,33 @@
  */
 
 /*
- * TLS for https (plan/ws074/design.md §9, §17 D2): OpenSSL's libssl and
- * libcrypto.  A build that links OpenSSL into the program (WB_TLS_STATIC,
- * the Windows build, whose tls-static.c fills the table of functions)
- * uses it as linked.  Any other build loads the OpenSSL package's
- * libraries through the operating-system layer the first time a page asks
- * for https, so that the base build does not depend on the package; without
- * the package every https fetch fails with EPROTONOSUPPORT.
+ * TLS for https through OpenSSL's libssl and libcrypto interface: zedBSD's
+ * own libssl-compat and libcrypto-compat, or OpenSSL itself.  A build that
+ * links the library into the program (WB_TLS_STATIC, the Windows build,
+ * whose tls-static file fills the table of functions) uses it as linked.
+ * Any other build loads the libraries through the operating-system layer
+ * the first time a page asks for https, so that the program does not need
+ * them to start: libssl-compat.so and libcrypto-compat.so in a build with
+ * WB_TLS_COMPAT (zedBSD's), OpenSSL's libssl and libcrypto otherwise (a
+ * host's tests).  Only the build's own choice is opened, never the other:
+ * without it every https fetch fails with EPROTONOSUPPORT.
  *
  * Only the functions of struct tls_library are used; their types are
- * opaque here and they are called through pointers, so no OpenSSL header
- * is needed.  The values of the few constants are OpenSSL's (stable across
- * 1.1 and 3).  The members of the table marked "OpenSSL only" are not
- * needed for TLS to work: without them the program reads no configuration
- * file and does not refuse the certificates the system distrusts.
+ * opaque here and they are called through pointers, so no header of the
+ * library is needed.  The values of the few constants are OpenSSL's
+ * (stable across 1.1 and 3, and the same in libssl-compat).  The members of
+ * the table marked "OpenSSL only" are OpenSSL's alone: with OpenSSL the
+ * program says to read no configuration file and refuses the certificates
+ * the system distrusts itself; libssl-compat reads no configuration file
+ * and refuses them in its own verification.
  *
  * A connection is TLS 1.2 or later, verifies the server's chain against
- * the system's trusted roots (the operating-system layer hands them over
- * where the system keeps them itself; elsewhere the library's default
- * paths, the ca-certificates package's /etc/ssl/cert.pem), the bundle of
- * roots shipped with the program, and any file added with
- * net_tls_add_ca_file (the tests' own CA), refuses a certificate the
+ * the system's trusted roots (with OpenSSL, the operating-system layer
+ * hands them over where the system keeps them itself, elsewhere the
+ * library's default paths, the ca-certificates package's /etc/ssl/cert.pem;
+ * libssl-compat reads them itself through its default paths on every
+ * system), the bundle of roots shipped with the program, and any file added
+ * with net_tls_add_ca_file (the tests' own CA), refuses a certificate the
  * system distrusts anywhere in the chain, and checks the certificate's name
  * or address against the URL's host.  A failure is EPROTO, with its reason
  * kept in the caller's buffer (net_tls_open, net_tls_start) or in the
@@ -87,6 +93,13 @@
 /* The bundle's path below the program's data directory. */
 #define TLS_BUNDLE_NAME		"/certs/ca-certificates.pem"
 
+/* The libraries a build opens, named in a failure to load them. */
+#ifdef WB_TLS_COMPAT
+#define TLS_LIBRARY_NAMES	"libssl-compat.so and libcrypto-compat.so"
+#else
+#define TLS_LIBRARY_NAMES	"OpenSSL's libssl and libcrypto"
+#endif
+
 #ifndef WB_TLS_STATIC
 
 /*
@@ -141,11 +154,23 @@ static const struct tls_symbol tls_symbols[] = {
 	{ 1, 1, "X509_STORE_CTX_set_error", offsetof(struct tls_library, store_ctx_set_error) }
 };
 
+#ifdef WB_TLS_COMPAT
+
+/* The names libcrypto is looked for under: zedBSD's libcrypto-compat. */
+static const char *const tls_crypto_names[] = { "libcrypto-compat.so", NULL };
+
+/* The names libssl is looked for under: zedBSD's libssl-compat. */
+static const char *const tls_ssl_names[] = { "libssl-compat.so", NULL };
+
+#else
+
 /* The names libcrypto is looked for under, in order (the package's, then a host's versioned one). */
 static const char *const tls_crypto_names[] = { "libcrypto.so", "libcrypto.so.3", NULL };
 
 /* The names libssl is looked for under, in the same order. */
 static const char *const tls_ssl_names[] = { "libssl.so", "libssl.so.3", NULL };
+
+#endif
 
 #endif
 
@@ -209,6 +234,7 @@ static size_t tls_ca_file_count;
 static int tls_load(char *reason);
 static int tls_load_once(void);
 static int tls_bind_library(void);
+static int tls_refuses_distrusted(void);
 static int tls_add_roots(void);
 static int tls_add_roots_each(void *context, const unsigned char *der, size_t length, int distrusted);
 static int tls_remember_distrusted(const unsigned char *der, size_t length);
@@ -651,7 +677,7 @@ tls_load(
 	/* The first thread loads; the others wait for it and find the outcome. */
 	error = wb_static_mutex_lock(&tls_load_lock);
 	if (error != 0) {
-		tls_set_reason(reason, "cannot lock the loading of OpenSSL (error %d)", error);
+		tls_set_reason(reason, "cannot lock the loading of TLS (error %d)", error);
 		return error;
 	}
 
@@ -684,7 +710,7 @@ tls_load_once(void)
 	if (tls_loaded > 0)
 		return 0;
 	if (tls_loaded < 0) {
-		tls_set_reason(tls_load_reason, "cannot load the OpenSSL libraries");
+		tls_set_reason(tls_load_reason, "cannot load the TLS libraries");
 		return EPROTONOSUPPORT;
 	}
 
@@ -712,7 +738,7 @@ tls_bind_library(void)
 	/* Nothing to open: the functions are in the program. */
 	error = tls_static_library(&tls_library);
 	if (error != 0) {
-		tls_set_reason(tls_load_reason, "cannot bind the OpenSSL library");
+		tls_set_reason(tls_load_reason, "cannot bind the TLS library");
 		return error;
 	}
 
@@ -736,7 +762,7 @@ tls_bind_library(void)
 	if (error == 0)
 		error = wb_os_library_open(tls_ssl_names, &ssl);
 	if (error != 0) {
-		tls_set_reason(tls_load_reason, "cannot load the OpenSSL libraries");
+		tls_set_reason(tls_load_reason, "cannot load %s", TLS_LIBRARY_NAMES);
 		return EPROTONOSUPPORT;
 	}
 
@@ -761,7 +787,7 @@ tls_find(
 	/* The function. */
 	found = wb_os_library_symbol(library, name);
 	if (found == NULL) {
-		tls_set_reason(tls_load_reason, "OpenSSL has no %s", name);
+		tls_set_reason(tls_load_reason, "the TLS library has no %s", name);
 		return ENOENT;
 	}
 
@@ -817,7 +843,7 @@ tls_attach(
 	/* The socket's int. */
 	error = wb_os_socket_descriptor(socket, &descriptor);
 	if (error != 0) {
-		tls_set_reason(reason, "setup: the socket does not fit OpenSSL's descriptor (error %d)", error);
+		tls_set_reason(reason, "setup: the socket does not fit the TLS library's descriptor (error %d)", error);
 		return EPROTO;
 	}
 
@@ -858,14 +884,14 @@ tls_make_context(void)
 	/* The client context. */
 	tls_context = tls_library.ctx_new(tls_library.client_method());
 	if (tls_context == NULL) {
-		tls_set_reason(tls_load_reason, "cannot make an OpenSSL context");
+		tls_set_reason(tls_load_reason, "cannot make a TLS context");
 		return ENOMEM;
 	}
 
 	/* TLS 1.2 or later. */
 	set = tls_library.ctx_ctrl(tls_context, TLS_CTRL_SET_MIN_PROTO_VERSION, TLS_VERSION_1_2, NULL);
 	if (set != 1) {
-		tls_set_reason(tls_load_reason, "OpenSSL refuses TLS 1.2 as the least version");
+		tls_set_reason(tls_load_reason, "the TLS library refuses TLS 1.2 as the least version");
 		return EPROTO;
 	}
 
@@ -896,16 +922,56 @@ tls_make_context(void)
 }
 
 /*
- * Gives the context the roots the system hands over (tls_add_roots_each)
- * and remembers the certificates it distrusts.  A system that keeps its
- * roots where the library reads them itself hands over none, and then the
+ * Tells whether the program refuses the certificates the system distrusts
+ * itself: the library has OpenSSL's functions of a fingerprint and of the
+ * verification's state.  A library without them (libssl-compat) reads the
+ * system's stores and refuses those certificates in its default paths.
+ */
+static int
+tls_refuses_distrusted(void)
+{
+	/* The fingerprint of a certificate. */
+	if (tls_library.x509_digest == NULL)
+		return 0;
+	if (tls_library.evp_sha256 == NULL)
+		return 0;
+
+	/* The certificate a verification looks at, and its failure. */
+	if (tls_library.store_ctx_get_current_cert == NULL)
+		return 0;
+	if (tls_library.store_ctx_set_error == NULL)
+		return 0;
+
+	/* OpenSSL: the program does it. */
+	return 1;
+}
+
+/*
+ * Gives the context the system's roots.  A library that refuses the
+ * distrusted certificates itself reads the system's stores through its
+ * default paths, on every system.  Otherwise (OpenSSL) the roots the
+ * system hands over go into the store (tls_add_roots_each) and the
+ * certificates it distrusts are remembered; a system that keeps its roots
+ * where the library reads them itself hands over none, and then the
  * library's default paths are used (a missing file only leaves them empty).
  */
 static int
 tls_add_roots(void)
 {
 	struct tls_roots roots;
+	int result;
 	int error;
+
+	/* The library's own reading: its failure would leave out the system's refusals, so it fails the context. */
+	if (!tls_refuses_distrusted()) {
+		result = tls_library.ctx_set_default_verify_paths(tls_context);
+		if (result != 1) {
+			tls_library.err_clear_error();
+			tls_set_reason(tls_load_reason, "cannot read the system's trusted certificates");
+			return EPROTO;
+		}
+		return 0;
+	}
 
 	/* Each certificate the system trusts goes into the context's store. */
 	roots.store = tls_library.ctx_get_cert_store(tls_context);
@@ -973,11 +1039,10 @@ tls_add_roots_each(
 }
 
 /*
- * Remembers the SHA-256 fingerprint of a certificate the system distrusts.
- * Without a library that can take a fingerprint nothing is remembered (the
- * other implementation of the interface does its own refusing).  Returns 0,
- * or an errno value, which ends the enumeration and fails the context: a
- * list that cannot hold every distrusted certificate is not used.
+ * Remembers the SHA-256 fingerprint of a certificate the system distrusts
+ * (only with a library that can take one, tls_refuses_distrusted).
+ * Returns 0, or an errno value, which ends the enumeration and fails the
+ * context: a list that cannot hold every distrusted certificate is not used.
  */
 static int
 tls_remember_distrusted(
@@ -992,11 +1057,7 @@ tls_remember_distrusted(
 	void *certificate;
 	int done;
 
-	/* The functions of a fingerprint are OpenSSL's; without them there is nothing to do. */
-	if (tls_library.x509_digest == NULL || tls_library.evp_sha256 == NULL)
-		return 0;
-	if (tls_library.store_ctx_get_current_cert == NULL || tls_library.store_ctx_set_error == NULL)
-		return 0;
+	/* A certificate longer than the library's length can describe is not a certificate. */
 	if (length > (size_t)LONG_MAX)
 		return 0;
 
@@ -1212,7 +1273,7 @@ tls_fail(
 	kind = TLS_ERROR_SSL;
 	if (result <= 0)
 		kind = tls_library.get_error(ssl, result);
-	tls_set_reason(reason, "%s: failed (OpenSSL error %d)", what, kind);
+	tls_set_reason(reason, "%s: failed (TLS error %d)", what, kind);
 }
 
 /* Keeps the reason of a failure in a buffer of NET_TLS_REASON_MAX bytes (a reason that does not fit is cut; a NULL buffer keeps nothing). */

@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | q2031 | 作業中 | BUG-418: build system の作り直しの後の各機種の build と QEMU の起動（乖離の確かめから） | WS333 は p028（P3）と p027 の後に p024 |
-| P2 | q2029 | 作業中 | WS335 p036: net/tls.c を libssl-compat に切り替え（11-01 の提案、乖離の確かめから） | — |
+| P2 | — | 待機 | WS335 p036 の source を merge（compat だけを開く build、Windows の static の表）。Makefile の案 A〜C はユーザーへ | — |
 | P3 | q2028 | 作業中 | WS333 p028: Intel TCO watchdog の driver（5330 を人手なしで戻せる起動、p027 の前提） | 次: WS347 の agy の依頼 07 の監査 |
 | P4 | q2030 | 作業中 | WS347 p008: blitter の無い GPU で表示の写しを shader で | 次: p004（VF2＋KC705 の実機） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
