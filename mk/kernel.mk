@@ -1251,7 +1251,7 @@ endif
 # [Generic CPU performance monitoring driver] (/dev/thermal)
 #  - XXX: TODO: move this module to drivers/
 ifneq ($(filter y,$(CONFIG_KERN_CPU_PERF) $(CONFIG_DRIVER_CPU_PERF)),)
-KERN_CPPFLAGS += -DCONFIG_KERN_CPU_PERF=1 -DCONFIG_CPU_PERF=1
+KERN_CPPFLAGS += -DCONFIG_KERN_CPU_PERF=1
 KERN_SOURCES += \
 	src/kern/cpuperf.c
 endif

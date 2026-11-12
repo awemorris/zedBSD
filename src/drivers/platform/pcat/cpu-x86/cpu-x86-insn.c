@@ -44,7 +44,7 @@ drv_cpu_x86_cpuid(
 	regs->edx = edx;
 }
 
-#if CONFIG_CPU_PERF
+#if CONFIG_KERN_CPU_PERF
 
 /*
  * Reads one model-specific register of this logical processor.

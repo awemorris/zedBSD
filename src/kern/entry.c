@@ -378,7 +378,7 @@ kernel_entry(
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary CPU notification failed");
 
-#if CONFIG_DRIVER_CPU_PERF
+#if CONFIG_KERN_CPU_PERF
 	/* Builds the table of the CPUs' performance now that each takes notifications. */
 	kern_cpuperf_init();
 #endif
