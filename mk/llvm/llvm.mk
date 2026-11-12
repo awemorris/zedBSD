@@ -113,14 +113,34 @@ llvm-download: $(LLVM_DISTFILE)
 $(LLVM_DISTFILE):
 	@mkdir -p $(dir $@)
 	curl --fail --location --output $@ "$(ZEDBSD_LLVM_ARCHIVE_URL)"
+	@echo '$(ZEDBSD_LLVM_ARCHIVE_SHA256)  $@' | sha256sum -c -
 
 llvm-source: $(LLVM_SOURCE)/.patched
 
-$(LLVM_SOURCE)/.patched: $(LLVM_DISTFILE) $(LLVM_PATCH)
-	@mkdir -p $(LLVM_SOURCE)
-	tar -xf $(LLVM_DISTFILE) --strip-components=1 -C $(LLVM_SOURCE)
-	patch -d $(LLVM_SOURCE) -p1 < $(LLVM_PATCH)
-	@touch $@
+# The extracted source is named by the archive's hash and the patch's hash,
+# not by file times: a source that matches is used as it is, and the archive
+# is fetched only when the source has to be made again.  A new source is
+# extracted and patched beside the old one and then takes its place.
+LLVM_SOURCE_ID := $(ZEDBSD_LLVM_ARCHIVE_SHA256) $(firstword $(shell sha256sum $(LLVM_PATCH)))
+ifneq ($(shell cat $(LLVM_SOURCE)/.patched 2>/dev/null),$(LLVM_SOURCE_ID))
+$(LLVM_SOURCE)/.patched: llvm-source-stale
+endif
+.PHONY: llvm-source-stale
+llvm-source-stale:
+
+$(LLVM_SOURCE)/.patched:
+	@if [ ! -f $(LLVM_DISTFILE) ]; then \
+		mkdir -p $(LLVM_DISTDIR); \
+		curl --fail --location --output $(LLVM_DISTFILE) "$(ZEDBSD_LLVM_ARCHIVE_URL)"; \
+	fi
+	@echo '$(ZEDBSD_LLVM_ARCHIVE_SHA256)  $(LLVM_DISTFILE)' | sha256sum -c -
+	rm -rf $(LLVM_SOURCE).new
+	mkdir -p $(LLVM_SOURCE).new
+	tar -xf $(LLVM_DISTFILE) --strip-components=1 -C $(LLVM_SOURCE).new
+	patch -d $(LLVM_SOURCE).new -p1 < $(LLVM_PATCH)
+	echo '$(LLVM_SOURCE_ID)' > $(LLVM_SOURCE).new/.patched
+	rm -rf $(LLVM_SOURCE)
+	mv $(LLVM_SOURCE).new $(LLVM_SOURCE)
 
 $(LLVM_INSTALL)/bin/clang:
 	@if [ ! -x "$@" ]; then \
