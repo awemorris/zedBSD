@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | q2036 | 作業中 | BUG-418: rpi5・rpi4 の SD の image（boot firmware 入り）と rpi4 の QEMU の起動 | — |
+| P1 | — | 待機 | BUG-418: rpi5 の SD の image PASS。rpi4 は boot firmware の同意待ちで止めた | ユーザーの同意の後に rpi4 の image と QEMU |
 | P2 | — | 待機 | BUG-418 C を当てた main の確かめ PASS | — |
 | P3 | q2032 | 作業中 | WS333 p027: 5330 の package の C-state 0% の原因（i915）、qs40、S0 idle（watchdog の下で） | agy の依頼 07 が終われば監査も |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
@@ -97,7 +97,9 @@
 
 ## ユーザーの判断を待つ事
 
-（無し）
+- 2026-11-13 02:46（ユーザーは就寝、起きてから）: rpi4 の boot firmware（`LICENCE.broadcom`）の license の同意を、worktree `/home/awe/zedBSD-worktrees/p1-bug418e` で `make CONFIGMK=config/config.rpi4.mk firmware-licenses` で打つ（担当は打てない）。済めば P1 が rpi4 の SD の image と QEMU raspi4b の起動を確かめる（BUG-418）。
+
+
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
