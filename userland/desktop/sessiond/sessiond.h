@@ -140,7 +140,4 @@ void sessiond_sleep_forget(int control);
 /* A session's SERVICE request (service.c). */
 void sessiond_service(const struct sessiond_account *account, int control, const char *arguments);
 
-/* A session's THERMAL request: a strategy or a fan's boost (thermal.c). */
-void sessiond_thermal(const struct sessiond_account *account, int control, const char *arguments);
-
 #endif

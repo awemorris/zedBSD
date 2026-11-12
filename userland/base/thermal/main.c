@@ -7,14 +7,19 @@
 
 /*
  * The thermal command: shows the machine's temperatures, fans, energy
- * meters, CPUs and strategy from /dev/thermal, and lets root choose the
- * strategy, raise a fan, or set the CPUs directly.
+ * meters, CPUs and strategy from /dev/thermal, and lets root and the
+ * desktop group's members choose the strategy, raise a fan, or set the
+ * CPUs directly: the node's mode lets them open it for writing, and the
+ * kernel takes a change only on such an open.
  *
  * Every line it prints is one item: its kind, its number and name where it
  * has them, then key=value fields, so that a script reads it as easily as
  * a person.  A chosen strategy is kept in /etc/thermal.conf, which the
  * service at boot gives back to the kernel with "thermal restore"; this
- * command is the only writer of that file.
+ * command is the only writer of that file.  The file is root's and the
+ * desktop group's, mode 0664 (KERN_THERMAL_NODE_GROUP and _MODE), so that
+ * a member keeps a choice: root replaces it whole and makes it so when it
+ * is missing or not so, a member rewrites it in place.
  *
  * It exits 0 when it did what it was asked, 1 when the kernel refused
  * (the reason on one line), and 2 for a command it does not know.  A
@@ -31,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <uapi/thermal.h>
 
@@ -212,6 +218,9 @@ static int show_strategy(void);
 static int command_strategy(int argc, char **argv);
 static int strategy_choose(const struct thermal_strategy *wanted, bool keep);
 static void strategy_keep(const struct thermal_strategy *wanted);
+static void keep_replace(const char *line, size_t length);
+static void keep_in_place(const char *line, size_t length);
+static void conf_prepare(void);
 static int command_restore(void);
 static int command_boost(int argc, char **argv);
 static int command_cpu(int argc, char **argv);
@@ -299,14 +308,26 @@ usage(void)
 		"       thermal watch [strategy | boost | passive | critical | emergency | fan | cpu]...\n");
 }
 
-/* Opens /dev/thermal for the run. */
+/*
+ * Opens /dev/thermal for the run: for writing when the node's mode lets
+ * the caller (root and the desktop group), else for reading, on which the
+ * kernel refuses a change with EPERM.
+ */
 static int
 device_open(void)
 {
+	int reason;
+
 	/* Every request goes through the one descriptor. */
-	thermal_descriptor = open(THERMAL_DEVICE, O_RDONLY | O_CLOEXEC);
+	thermal_descriptor = open(THERMAL_DEVICE, O_RDWR | O_CLOEXEC);
+	reason = errno;
+	if (thermal_descriptor < 0 && reason == EACCES) {
+		/* Someone outside the group reads. */
+		thermal_descriptor = open(THERMAL_DEVICE, O_RDONLY | O_CLOEXEC);
+		reason = errno;
+	}
 	if (thermal_descriptor < 0) {
-		fprintf(stderr, "thermal: %s: %s\n", THERMAL_DEVICE, strerror(errno));
+		fprintf(stderr, "thermal: %s: %s\n", THERMAL_DEVICE, strerror(reason));
 		return EXIT_REFUSED;
 	}
 
@@ -847,20 +868,19 @@ strategy_choose(
 }
 
 /*
- * Writes the chosen strategy to /etc/thermal.conf, through a new file
- * renamed over the old one so a crash leaves one or the other whole.  A
- * file that cannot be written leaves the strategy in force and is said.
+ * Writes the chosen strategy to /etc/thermal.conf: root through a new file
+ * renamed over the old one, so a crash leaves one or the other whole; a
+ * member of the desktop group, who cannot make files in /etc, over the
+ * file's own contents.  A file that cannot be written leaves the strategy
+ * in force and is said.
  */
 static void
 strategy_keep(
 	const struct thermal_strategy *wanted)
 {
 	char line[CONF_LINE_MAX];
-	int descriptor;
 	int length;
-	ssize_t written;
-	int synced;
-	int renamed;
+	uid_t user;
 
 	/* The one line of the file. */
 	if (wanted->value == KERN_THERMAL_STRATEGY_MANUAL) {
@@ -872,16 +892,48 @@ strategy_keep(
 	if (length <= 0 || (size_t)length >= sizeof(line))
 		return;
 
-	/* Writes the new file and its contents out before it replaces the old one. */
-	descriptor = open(THERMAL_CONF_NEW, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+	/* Root replaces the file; anyone else rewrites the one there. */
+	user = geteuid();
+	if (user == 0) {
+		keep_replace(line, (size_t)length);
+	} else {
+		keep_in_place(line, (size_t)length);
+	}
+}
+
+/*
+ * Writes the line to a new file of the group and mode the file keeps, and
+ * puts it in place of the old one.
+ */
+static void
+keep_replace(
+	const char *line,
+	size_t length)
+{
+	int descriptor;
+	ssize_t written;
+	int owned;
+	int moded;
+	int synced;
+	int renamed;
+
+	/* Makes the new file, the desktop group's to write. */
+	descriptor = open(THERMAL_CONF_NEW, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, KERN_THERMAL_NODE_MODE);
 	if (descriptor < 0) {
 		fprintf(stderr, "thermal: warning: %s: %s; the strategy is not kept\n", THERMAL_CONF_NEW, strerror(errno));
 		return;
 	}
-	written = write(descriptor, line, (size_t)length);
+	owned = fchown(descriptor, 0, KERN_THERMAL_NODE_GROUP);
+	moded = fchmod(descriptor, KERN_THERMAL_NODE_MODE);
+
+	/* Writes its contents out before it replaces the old one. */
+	written = write(descriptor, line, length);
 	synced = fsync(descriptor);
 	(void)close(descriptor);
-	if (written != (ssize_t)length || synced != 0) {
+	if (owned != 0 ||
+	    moded != 0 ||
+	    written != (ssize_t)length ||
+	    synced != 0) {
 		fprintf(stderr, "thermal: warning: %s: not written; the strategy is not kept\n", THERMAL_CONF_NEW);
 		return;
 	}
@@ -893,8 +945,90 @@ strategy_keep(
 }
 
 /*
+ * Writes the line over the contents of the file that is there, and cuts
+ * what was longer.  The file root made is the group's to write; a missing
+ * one is root's to make, at boot by "thermal restore".
+ */
+static void
+keep_in_place(
+	const char *line,
+	size_t length)
+{
+	int descriptor;
+	ssize_t written;
+	int cut;
+	int synced;
+
+	/* Opens the file there without making one. */
+	descriptor = open(THERMAL_CONF, O_WRONLY | O_CLOEXEC);
+	if (descriptor < 0) {
+		fprintf(stderr, "thermal: warning: %s: %s; the strategy is not kept\n", THERMAL_CONF, strerror(errno));
+		return;
+	}
+
+	/* Writes the line from the start, ends the file there, and writes it out. */
+	written = write(descriptor, line, length);
+	cut = ftruncate(descriptor, (off_t)length);
+	synced = fsync(descriptor);
+	(void)close(descriptor);
+	if (written != (ssize_t)length ||
+	    cut != 0 ||
+	    synced != 0)
+		fprintf(stderr, "thermal: warning: %s: not written; the strategy is not kept\n", THERMAL_CONF);
+}
+
+/*
+ * Makes /etc/thermal.conf root's and the desktop group's, mode 0664, so
+ * that a member can keep a strategy: an empty one when there is none, and
+ * the group and mode on one that has others (an older system's).  Only
+ * root does this; a file that cannot be made so is said, and the strategy
+ * is restored all the same.
+ */
+static void
+conf_prepare(void)
+{
+	struct stat status;
+	uid_t user;
+	int descriptor;
+	int found;
+	int owned;
+	int moded;
+
+	/* Only root makes or changes the file. */
+	user = geteuid();
+	if (user != 0)
+		return;
+
+	/* Opens the file, made empty when there is none. */
+	descriptor = open(THERMAL_CONF, O_WRONLY | O_CREAT | O_CLOEXEC, KERN_THERMAL_NODE_MODE);
+	if (descriptor < 0) {
+		fprintf(stderr, "thermal: warning: %s: %s\n", THERMAL_CONF, strerror(errno));
+		return;
+	}
+
+	/* Gives it the group and the mode when it has others. */
+	owned = 0;
+	moded = 0;
+	found = fstat(descriptor, &status);
+	if (found == 0 &&
+	    (status.st_uid != 0 ||
+	     status.st_gid != KERN_THERMAL_NODE_GROUP))
+		owned = fchown(descriptor, 0, KERN_THERMAL_NODE_GROUP);
+	if (found == 0 && (status.st_mode & 07777) != KERN_THERMAL_NODE_MODE)
+		moded = fchmod(descriptor, KERN_THERMAL_NODE_MODE);
+	(void)close(descriptor);
+
+	/* A file left with others is said. */
+	if (found != 0 ||
+	    owned != 0 ||
+	    moded != 0)
+		fprintf(stderr, "thermal: warning: %s: not the desktop group's to write\n", THERMAL_CONF);
+}
+
+/*
  * Gives the kernel the strategy kept in /etc/thermal.conf, or balanced
- * when there is none or it cannot be read.  The file is not written.
+ * when there is none or it cannot be read.  The strategy is not written to
+ * the file; root makes the file the desktop group's first (conf_prepare).
  */
 static int
 command_restore(void)
@@ -911,6 +1045,9 @@ command_restore(void)
 	bool known;
 	int fields;
 	int status;
+
+	/* Makes the file one the desktop group can keep a strategy in. */
+	conf_prepare();
 
 	/* Balanced unless the file says otherwise. */
 	memset(&wanted, 0, sizeof(wanted));
@@ -1089,7 +1226,7 @@ show_cpu(
 	char flags[FLAGS_TEXT_MAX];
 	int error;
 
-	/* Reads the CPU; a sample wakes it, which only root may do. */
+	/* Reads the CPU; a sample wakes it, which only an open for writing may do. */
 	memset(&cpu, 0, sizeof(cpu));
 	cpu.cpu = index;
 	if (sample)
