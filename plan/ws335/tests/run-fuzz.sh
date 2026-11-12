@@ -1,7 +1,9 @@
 #!/bin/sh
 # The fuzz targets of libcrypto-compat and libssl-compat (plan/ws335/tests/fuzz/fuzz-*.c), built with the host's
-# clang and libFuzzer (-fsanitize=fuzzer,address,undefined) over the sources of both libraries, and run side by side
-# for FUZZ_SECONDS each (default 300).  Targets:
+# clang and libFuzzer (-fsanitize=fuzzer,address,undefined) over the sources of both libraries, and run for
+# FUZZ_SECONDS each (default 300), at most FUZZ_JOBS at a time (default 4, the most allowed): FUZZ_JOBS workers each
+# take every FUZZ_JOBS-th target in turn, so the whole run lasts about ceil(targets / FUZZ_JOBS) * FUZZ_SECONDS.
+# Targets:
 #   der x509 pem                  the DER reader, certificates (cryc_x509_parse, the name checks, d2i_X509), PEM
 #   server-hello encrypted-extensions certificate server-key-exchange msg-other   the handshake message parsers
 #   record                        record protection (plaintext, TLS 1.3 with a valid tag, TLS 1.2 round trip)
@@ -9,6 +11,7 @@
 #   mlkem                         ML-KEM-768 decapsulation and encapsulation-key import
 #   sh plan/ws335/tests/run-fuzz.sh [TARGET...]          (all when none is named)
 #   FUZZ_SECONDS=3600 sh plan/ws335/tests/run-fuzz.sh    (the hour of the review; long runs need the user's OK)
+#   FUZZ_JOBS=2 sh plan/ws335/tests/run-fuzz.sh          (two targets at a time)
 # The corpora are kept in build/tmp/ws335-fuzz-corpus/<target> (seeded by fuzz/seeds.py from
 # WS335_VECTORS/rec/limbo.vec, default build/ws335-vectors) and grow from run to run; each run's logs and any crash
 # input are in build/tmp/ws335-fuzz (a fresh run directory).  Each target prints "fuzz <target>: PASS (<runs>
@@ -24,6 +27,11 @@ out=build/tmp/ws335-fuzz
 fresh_out "$out"
 corpora=build/tmp/ws335-fuzz-corpus
 seconds=${FUZZ_SECONDS:-300}
+jobs=${FUZZ_JOBS:-4}
+case "$jobs" in
+'' | *[!0-9]* | 0) echo "run-fuzz: FAIL (FUZZ_JOBS=$jobs is not a count)"; exit 1 ;;
+esac
+[ "$jobs" -le 4 ] || jobs=4
 WS335_VECTORS=${WS335_VECTORS:-$top/build/ws335-vectors}
 mkdir -p "$out/include" "$corpora"
 ln -sfn "$top/include/libc/compat" "$out/include/compat"
@@ -84,14 +92,25 @@ for target in $targets; do
 	fi
 	mkdir -p "$corpora/$target" "$out/$target"
 done
-echo "fuzz: built $(echo $targets | wc -w) targets; each runs $seconds s"
+echo "fuzz: built $(echo $targets | wc -w) targets; each runs $seconds s, $jobs at a time"
 
-# 2. The runs, side by side.
-for target in $targets; do
-	(cd "$out/$target" && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
-	    timeout $((seconds + 600)) "$top/$out/fuzz-$target" -max_total_time="$seconds" -max_len=65536 \
-	    -rss_limit_mb=4096 -timeout=30 -print_final_stats=1 -artifact_prefix="$top/$out/$target/" \
-	    "$top/$corpora/$target" "$top/$out/seeds/$target") > "$out/$target.log" 2>&1 &
+# 2. The runs: worker w (0 to jobs - 1) runs targets w, w + jobs, w + 2 * jobs, ... one after another.
+run_target() {
+	(cd "$out/$1" && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+	    timeout $((seconds + 600)) "$top/$out/fuzz-$1" -max_total_time="$seconds" -max_len=65536 \
+	    -rss_limit_mb=4096 -timeout=30 -print_final_stats=1 -artifact_prefix="$top/$out/$1/" \
+	    "$top/$corpora/$1" "$top/$out/seeds/$1") > "$out/$1.log" 2>&1
+}
+worker=0
+while [ $worker -lt $jobs ]; do
+	(
+		index=0
+		for target in $targets; do
+			[ $((index % jobs)) -ne $worker ] || run_target "$target"
+			index=$((index + 1))
+		done
+	) &
+	worker=$((worker + 1))
 done
 wait
 
