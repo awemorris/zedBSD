@@ -1,0 +1,23 @@
+/dts-v1/;
+/include/ "zone.dtsi"
+/*
+ * A board with the sensor and no fan: only the temperature is the thermal
+ * core's.
+ */
+/ {
+	thermal-zones {
+		cpu-thermal {
+			polling-delay = <1000>;
+			coefficients = <(-1000) 500000>;
+			thermal-sensors = <&thermal>;
+
+			trips {
+				cpu_crit: cpu-crit {
+					temperature = <100000>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+			};
+		};
+	};
+};

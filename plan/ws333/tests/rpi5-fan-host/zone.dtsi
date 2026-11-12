@@ -1,0 +1,38 @@
+/*
+ * The parts every test tree shares: the AVS monitor with its sensor, RP1
+ * with its clock controller and PWM block, and the root's cells.  The trips
+ * and the fan come from each tree.
+ */
+/ {
+	#address-cells = <2>;
+	#size-cells = <1>;
+
+	avs-monitor@7d542000 {
+		compatible = "brcm,bcm2711-avs-monitor", "syscon", "simple-mfd";
+		reg = <0x0 0x7d542000 0xf00>;
+
+		thermal: thermal {
+			compatible = "brcm,bcm2711-thermal";
+			#thermal-sensor-cells = <0>;
+		};
+	};
+
+	rp1: rp1 {
+		compatible = "pci1de4,1";
+		#address-cells = <2>;
+		#size-cells = <2>;
+
+		rp1_clocks: clocks@c040018000 {
+			compatible = "raspberrypi,rp1-clocks";
+			reg = <0xc0 0x40018000 0x0 0x10038>;
+			#clock-cells = <1>;
+		};
+
+		rp1_pwm1: pwm@c04009c000 {
+			compatible = "raspberrypi,rp1-pwm";
+			reg = <0xc0 0x4009c000 0x0 0x100>;
+			clocks = <&rp1_clocks 18>;
+			#pwm-cells = <3>;
+		};
+	};
+};

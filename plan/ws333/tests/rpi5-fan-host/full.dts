@@ -1,0 +1,73 @@
+/dts-v1/;
+/include/ "zone.dtsi"
+/*
+ * A zone like the Pi 5's with other numbers: four active trips (40, 50, 60
+ * and 70 degrees, 4 degrees of hysteresis) mapped to fan levels 1 to 4, a
+ * critical trip at 100 degrees that no map names, and a conversion of one
+ * degree per code from 500 degrees.
+ */
+/ {
+	fan: cooling_fan {
+		compatible = "pwm-fan";
+		#cooling-cells = <2>;
+		cooling-levels = <0 75 125 175 250>;
+		pwms = <&rp1_pwm1 3 41566 1>;
+		rpm-offset = <0x3c>;
+	};
+
+	thermal-zones {
+		cpu-thermal {
+			polling-delay-passive = <1000>;
+			polling-delay = <1000>;
+			coefficients = <(-1000) 500000>;
+			thermal-sensors = <&thermal>;
+
+			trips {
+				cpu_crit: cpu-crit {
+					temperature = <100000>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+				tepid: cpu-tepid {
+					temperature = <40000>;
+					hysteresis = <4000>;
+					type = "active";
+				};
+				warm: cpu-warm {
+					temperature = <50000>;
+					hysteresis = <4000>;
+					type = "active";
+				};
+				hot: cpu-hot {
+					temperature = <60000>;
+					hysteresis = <4000>;
+					type = "active";
+				};
+				vhot: cpu-vhot {
+					temperature = <70000>;
+					hysteresis = <4000>;
+					type = "active";
+				};
+			};
+
+			cooling-maps {
+				tepid {
+					trip = <&tepid>;
+					cooling-device = <&fan 1 1>;
+				};
+				warm {
+					trip = <&warm>;
+					cooling-device = <&fan 2 2>;
+				};
+				hot {
+					trip = <&hot>;
+					cooling-device = <&fan 3 3>;
+				};
+				vhot {
+					trip = <&vhot>;
+					cooling-device = <&fan 4 4>;
+				};
+			};
+		};
+	};
+};

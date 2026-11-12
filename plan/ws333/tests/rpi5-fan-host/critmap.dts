@@ -1,0 +1,48 @@
+/dts-v1/;
+/include/ "zone.dtsi"
+/*
+ * One active trip at 40 degrees mapped to level 1 and the critical trip at
+ * 100 degrees mapped to level 4: the strategy must move the first and not
+ * the second.
+ */
+/ {
+	fan: cooling_fan {
+		compatible = "pwm-fan";
+		#cooling-cells = <2>;
+		cooling-levels = <0 75 125 175 250>;
+		pwms = <&rp1_pwm1 3 41566 1>;
+		rpm-offset = <0x3c>;
+	};
+
+	thermal-zones {
+		cpu-thermal {
+			polling-delay = <1000>;
+			coefficients = <(-1000) 500000>;
+			thermal-sensors = <&thermal>;
+
+			trips {
+				cpu_crit: cpu-crit {
+					temperature = <100000>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+				tepid: cpu-tepid {
+					temperature = <40000>;
+					hysteresis = <4000>;
+					type = "active";
+				};
+			};
+
+			cooling-maps {
+				tepid {
+					trip = <&tepid>;
+					cooling-device = <&fan 1 1>;
+				};
+				crit {
+					trip = <&cpu_crit>;
+					cooling-device = <&fan 4 4>;
+				};
+			};
+		};
+	};
+};

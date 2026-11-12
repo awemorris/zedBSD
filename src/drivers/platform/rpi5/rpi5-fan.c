@@ -17,6 +17,12 @@
  * level from the zone's active trip points and cooling maps, as Linux's
  * pwm-fan driver does with the same tree.  A temperature that cannot be
  * read runs the fan at its highest level.
+ *
+ * The fan is also the thermal core's: the core reads its level and speed,
+ * hands it the strategy, which chooses the set of trips, and its boost,
+ * a level the fan does not run below.  The fan turns at the higher of the
+ * trips' level and the boost.  No strategy sets a trip above the tree's,
+ * so the fan never turns slower than the tree asks for.
  */
 
 #include <drivers/generic/fdt.h>
@@ -27,13 +33,19 @@
 #include <kern/device-io.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
+#include <kern/lock.h>
 #include <kern/pmem.h>
 #include <kern/sched.h>
 #include <kern/thermal.h>
 #include <kern/thread.h>
 #include <uapi/errno.h>
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+
+/* Marks a parameter a callback of the thermal core or the thread does not use. */
+#define UNUSED_PARAMETER(parameter)	((void)(parameter))
 
 /*
  * The AVS monitor's temperature register: a 10-bit code, valid when
@@ -170,30 +182,53 @@
 /* The polls after a level change before the fan's speed is logged. */
 #define RPI5_FAN_SETTLE_POLLS		5U
 
-/* The name of the sensor in the thermal core. */
+/* The names of the sensor, the fan and the receiver in the thermal core. */
 #define RPI5_FAN_SENSOR_NAME		"bcm2712 cpu-thermal"
+#define RPI5_FAN_FAN_NAME		"rpi5-fan"
+#define RPI5_FAN_RECEIVER_NAME		"rpi5-fan"
 
 /*
- * One active trip of the zone: its node's phandle, the temperature that
- * crosses it and how far below that it must fall to be uncrossed, the fan
- * level it asks for, and whether the temperature has crossed it.
+ * The strategy's choice of trips: a manual strategy that lets the fan be
+ * loud (its noise axis at least RPI5_FAN_LOUD_NOISE) brings every active
+ * trip RPI5_FAN_LOUD_SHIFT thousandths of a degree lower, so the fan turns
+ * sooner; every other strategy keeps the tree's trips.  The critical trip
+ * never moves.
+ */
+#define RPI5_FAN_LOUD_NOISE		67U
+#define RPI5_FAN_LOUD_SHIFT		5000
+
+/*
+ * One trip of the zone that asks the fan for a level: its node's phandle,
+ * the temperature the tree gives it and how far below that the
+ * temperature must fall to uncross it, the fan level it asks for, whether
+ * it is the zone's critical trip (which the strategy never moves), and
+ * whether the temperature has crossed it.
  */
 struct rpi5_fan_trip {
 	uint32_t phandle;
 	int32_t temperature;
 	int32_t hysteresis;
 	unsigned level;
+	int critical;
 	int crossed;
 };
 
 /*
  * The temperature sensor and the fan.
  *
- * drv_rpi5_fan_start() fills everything before the thread starts; after
- * that only the thread changes the trips and the fan's level.  sensor is
- * NULL without a readable sensor, pwm NULL without a fan.  core_sensor is
- * the thermal core's handle the readings are pushed through, NULL when
- * the core refused the sensor.
+ * drv_rpi5_fan_start() fills everything before it registers the fan and
+ * starts the thread; the tree's part (the sensor, the conversion, the
+ * trips' temperatures and levels, the PWM channel and the fan's levels)
+ * stays as it is after that.  sensor is NULL without a readable sensor,
+ * pwm NULL without a fan.  core_sensor is the thermal core's handle the
+ * readings are pushed through, NULL when the core refused the sensor.
+ *
+ * lock covers what three threads share once the fan is the core's: the
+ * fan thread, the core's strategy thread (the strategy and the boost) and
+ * its poll thread (the fan's level and speed).  Under it are the trips'
+ * crossed states, trip_shift, the last reading, the trips' level
+ * (auto_level), boost, the level the channel is set to (level), settle,
+ * and every write to the PWM block.  sensor_failed is the fan thread's.
  */
 struct rpi5_fan_state {
 	volatile uint8_t *sensor;
@@ -215,10 +250,26 @@ struct rpi5_fan_state {
 	unsigned level_count;
 	int has_rpm;
 	uint32_t rpm_offset;
+	struct spinlock lock;
+	int32_t trip_shift;
+	int has_reading;
+	int32_t reading;
+	unsigned auto_level;
+	unsigned boost;
 	unsigned level;
 	unsigned settle;
 	int sensor_failed;
 	struct kern_thermal_sensor *core_sensor;
+};
+
+/*
+ * A change of the level the channel is set to, taken under the lock and
+ * logged after it: whether the level changed, and from what to what.
+ */
+struct rpi5_fan_change {
+	bool changed;
+	unsigned from;
+	unsigned to;
 };
 
 /*
@@ -261,9 +312,29 @@ static void record_temperature(int error, int32_t milli_celsius);
 static unsigned choose_level(int32_t milli_celsius);
 static uint32_t duty_count(unsigned level);
 static void set_level(unsigned level);
+static void drive_locked(struct rpi5_fan_change *change);
+static void log_change(const struct rpi5_fan_change *change, const char *why);
 static uint32_t read_rpm(void);
 static void poll_once(void);
 static void fan_thread(void *argument);
+static void register_fan(void);
+static int32_t strategy_shift(const struct kern_thermal_strategy *strategy);
+static int fan_apply(void *context, const struct kern_thermal_strategy *strategy, uint32_t *flags);
+static int fan_trips_name(void *context, char *name, size_t size);
+static int fan_read(void *context, struct kern_thermal_fan_state *state);
+static int fan_boost(void *context, uint32_t level);
+
+/* The fan as the thermal core's receiver of the strategy: it chooses the trips. */
+static const struct kern_thermal_receiver_ops rpi5_fan_receiver_ops = {
+	.apply = fan_apply,
+	.firmware_name = fan_trips_name,
+};
+
+/* The fan as the thermal core's fan: its level and speed, and its boost. */
+static const struct kern_thermal_fan_ops rpi5_fan_fan_ops = {
+	.read = fan_read,
+	.boost = fan_boost,
+};
 
 /*
  * Starts the temperature sensor and the fan.
@@ -288,6 +359,7 @@ drv_rpi5_fan_start(
 	}
 
 	/* The Pi 5's own zone and fan until the tree says otherwise. */
+	spin_init(&rpi5_fan.lock, LOCK_RANK_DEVICE, "rpi5 fan");
 	set_defaults();
 
 	/* Finds the fan, which tells the zone's maps which device is its. */
@@ -323,9 +395,13 @@ drv_rpi5_fan_start(
 	error = read_temperature(&milli_celsius, &status);
 	record_temperature(error, milli_celsius);
 	if (rpi5_fan.pwm != NULL) {
-		rpi5_fan.level = rpi5_fan.level_count - 1U;
-		if (error == 0)
-			rpi5_fan.level = choose_level(milli_celsius);
+		rpi5_fan.auto_level = rpi5_fan.level_count - 1U;
+		if (error == 0) {
+			rpi5_fan.has_reading = 1;
+			rpi5_fan.reading = milli_celsius;
+			rpi5_fan.auto_level = choose_level(milli_celsius);
+		}
+		rpi5_fan.level = rpi5_fan.auto_level;
 		set_level(rpi5_fan.level);
 		rpi5_fan.settle = RPI5_FAN_SETTLE_POLLS;
 	}
@@ -348,6 +424,10 @@ drv_rpi5_fan_start(
 			set_level(rpi5_fan.level_count - 1U);
 		return error;
 	}
+
+	/* Hands the fan to the thermal core, then lets the thread run it. */
+	if (rpi5_fan.pwm != NULL)
+		register_fan();
 	thread_start(thread);
 
 	/* Succeeded: the thread keeps the temperature and the fan. */
@@ -374,6 +454,7 @@ set_defaults(
 		rpi5_fan.trips[index].temperature = rpi5_fan_default_trips[index];
 		rpi5_fan.trips[index].hysteresis = RPI5_THERMAL_HYSTERESIS;
 		rpi5_fan.trips[index].level = index + 1U;
+		rpi5_fan.trips[index].critical = 0;
 		rpi5_fan.trips[index].crossed = 0;
 	}
 	rpi5_fan.trip_count = RPI5_FAN_LEVEL_COUNT - 1U;
@@ -636,6 +717,7 @@ read_trip(
 	uint32_t hysteresis;
 	uint32_t phandle;
 	unsigned index;
+	int critical;
 	int error;
 
 	/* A trip has a temperature and a phandle the maps name it by. */
@@ -652,10 +734,12 @@ read_trip(
 		hysteresis = 0;
 
 	/* A critical trip is also the sensor's critical point. */
+	critical = 0;
 	error = drv_fdt_string_index(fdt, node, "type", "critical", &index);
 	if (error == 0) {
 		rpi5_fan.has_critical = 1;
 		rpi5_fan.critical = (int32_t)temperature;
+		critical = 1;
 	}
 
 	/* Refuses a trip past the room. */
@@ -668,6 +752,7 @@ read_trip(
 	trip->temperature = (int32_t)temperature;
 	trip->hysteresis = (int32_t)hysteresis;
 	trip->level = 0;
+	trip->critical = critical;
 	trip->crossed = 0;
 	(*count)++;
 }
@@ -1022,12 +1107,15 @@ record_temperature(
  * Updates which trips the temperature has crossed and gives the level the
  * highest crossed trip asks for.  A trip is crossed at its temperature and
  * stays crossed until the temperature falls below it by its hysteresis.
+ * The strategy's shift brings every trip but the critical one lower.
+ * Called with the lock held.
  */
 static unsigned
 choose_level(
 	int32_t milli_celsius)
 {
 	struct rpi5_fan_trip *trip;
+	int32_t temperature;
 	unsigned level;
 	unsigned index;
 
@@ -1035,11 +1123,16 @@ choose_level(
 	level = 0;
 	for (index = 0; index < rpi5_fan.trip_count; index++) {
 		trip = &rpi5_fan.trips[index];
-		if (milli_celsius >= trip->temperature) {
-			/* Reached: crossed. */
+
+		/* The trip's temperature under the strategy; the critical one stays where the tree has it. */
+		temperature = trip->temperature;
+		if (!trip->critical)
+			temperature -= rpi5_fan.trip_shift;
+
+		/* Crossed at its temperature, uncrossed only past the hysteresis. */
+		if (milli_celsius >= temperature) {
 			trip->crossed = 1;
-		} else if (milli_celsius < trip->temperature - trip->hysteresis) {
-			/* Fallen past the hysteresis: no longer crossed. */
+		} else if (milli_celsius < temperature - trip->hysteresis) {
 			trip->crossed = 0;
 		}
 
@@ -1138,17 +1231,65 @@ read_rpm(
 	return rpm;
 }
 
-/* Reads the temperature once, keeps it, and sets the fan from it. */
+/*
+ * Sets the channel to the higher of the trips' level and the boost, unless
+ * it is already there, and says in *change what changed.  Called with the
+ * lock held.
+ */
+static void
+drive_locked(
+	struct rpi5_fan_change *change)
+{
+	unsigned level;
+
+	/* The level the fan turns at: the trips' or the boost, whichever is higher. */
+	level = rpi5_fan.auto_level;
+	if (rpi5_fan.boost > level)
+		level = rpi5_fan.boost;
+
+	/* Nothing to write when the channel is there already. */
+	change->changed = false;
+	change->from = rpi5_fan.level;
+	change->to = level;
+	if (level == rpi5_fan.level)
+		return;
+
+	/* Sets the channel, and waits a few polls before the speed is said again. */
+	set_level(level);
+	rpi5_fan.level = level;
+	rpi5_fan.settle = RPI5_FAN_SETTLE_POLLS;
+	change->changed = true;
+}
+
+/* Says a change of the fan's level and what made it, after the lock is let go. */
+static void
+log_change(
+	const struct rpi5_fan_change *change,
+	const char *why)
+{
+	/* Nothing to say about a level that stayed. */
+	if (!change->changed)
+		return;
+
+	/* Says the level, the duty it is set at, and why. */
+	kern_logf("rpi5-fan: %s, level %u to %u (duty %u of %u)\n", why, change->from, change->to,
+	    (unsigned)duty_count(change->to), (unsigned)rpi5_fan.range);
+}
+
+/* Reads the temperature once, pushes it, and sets the fan from it. */
 static void
 poll_once(
 	void)
 {
+	struct rpi5_fan_change change;
+	unsigned long irq;
 	int32_t milli_celsius;
 	uint32_t status;
-	unsigned level;
+	uint32_t rpm;
+	bool settled;
 	int error;
 
-	/* The reading, pushed to the thermal core. */
+	/* The reading, pushed to the thermal core with none of this file's locks held. */
 	error = read_temperature(&milli_celsius, &status);
 	record_temperature(error, milli_celsius);
 
@@ -1156,29 +1297,43 @@ poll_once(
 	if (rpi5_fan.pwm == NULL)
 		return;
 
-	/* The level: the highest when the temperature cannot be read. */
-	if (error != 0) {
-		level = rpi5_fan.level_count - 1U;
-		if (!rpi5_fan.sensor_failed)
-			kern_logf("rpi5-fan: temperature unreadable (%d, status %08x); fan full\n", error, (unsigned)status);
+	/* Says once that the temperature went unreadable, which runs the fan full. */
+	if (error != 0 && !rpi5_fan.sensor_failed)
+		kern_logf("rpi5-fan: temperature unreadable (%d, status %08x); fan full\n", error, (unsigned)status);
+	rpi5_fan.sensor_failed = 0;
+	if (error != 0)
 		rpi5_fan.sensor_failed = 1;
+
+	/* Takes the trips' level (the highest without a reading) and sets the fan to it or to the boost. */
+	settled = false;
+	rpm = 0;
+	irq = spin_lock_irqsave(&rpi5_fan.lock);
+
+	if (error != 0) {
+		rpi5_fan.has_reading = 0;
+		rpi5_fan.auto_level = rpi5_fan.level_count - 1U;
 	} else {
-		level = choose_level(milli_celsius);
-		rpi5_fan.sensor_failed = 0;
+		rpi5_fan.has_reading = 1;
+		rpi5_fan.reading = milli_celsius;
+		rpi5_fan.auto_level = choose_level(milli_celsius);
+	}
+	drive_locked(&change);
+
+	/* Counts down to the poll the fan's speed has settled at. */
+	if (!change.changed && rpi5_fan.settle != 0U) {
+		rpi5_fan.settle--;
+		if (rpi5_fan.settle == 0U && rpi5_fan.has_rpm) {
+			settled = true;
+			rpm = read_rpm();
+		}
 	}
 
-	/* A new level is set and said, and the speed said once it has settled. */
-	if (level != rpi5_fan.level) {
-		set_level(level);
-		kern_logf("rpi5-fan: %d mC, level %u to %u (duty %u of %u)\n", (int)milli_celsius, rpi5_fan.level, level,
-		    (unsigned)duty_count(level), (unsigned)rpi5_fan.range);
-		rpi5_fan.level = level;
-		rpi5_fan.settle = RPI5_FAN_SETTLE_POLLS;
-	} else if (rpi5_fan.settle != 0U) {
-		rpi5_fan.settle--;
-		if (rpi5_fan.settle == 0U && rpi5_fan.has_rpm)
-			kern_logf("rpi5-fan: level %u at %u rpm\n", rpi5_fan.level, (unsigned)read_rpm());
-	}
+	spin_unlock_irqrestore(&rpi5_fan.lock, irq);
+
+	/* Says a new level, and the speed once it has settled. */
+	log_change(&change, "temperature");
+	if (settled)
+		kern_logf("rpi5-fan: %d mC, level %u at %u rpm\n", (int)milli_celsius, change.to, (unsigned)rpm);
 }
 
 /* Reads the sensor and sets the fan every polling period, for as long as the kernel runs. */
@@ -1188,8 +1343,7 @@ fan_thread(
 {
 	uint64_t deadline;
 
-	/* No argument: the board has one sensor and one fan. */
-	(void)argument;
+	UNUSED_PARAMETER(argument);
 
 	/* For as long as the kernel runs. */
 	for (;;) {
@@ -1200,4 +1354,199 @@ fan_thread(
 		/* Reads and sets again. */
 		poll_once();
 	}
+}
+
+/*
+ * Registers the fan with the thermal core, and itself as the receiver of
+ * the strategy.  A refusal is said and leaves the fan on the tree's trips.
+ */
+static void
+register_fan(
+	void)
+{
+	int error;
+
+	/* The fan, whose level and speed the core reads and whose boost it sets. */
+	error = kern_thermal_fan_register(RPI5_FAN_FAN_NAME, 0, &rpi5_fan_fan_ops, &rpi5_fan);
+	if (error != 0)
+		kern_logf("rpi5-fan: the fan is not registered (%d)\n", error);
+
+	/* The receiver of the strategy, which chooses the trips. */
+	error = kern_thermal_receiver_register(RPI5_FAN_RECEIVER_NAME, &rpi5_fan_receiver_ops, &rpi5_fan);
+	if (error != 0)
+		kern_logf("rpi5-fan: the strategy's receiver is not registered (%d)\n", error);
+}
+
+/*
+ * Gives how far a strategy brings the active trips lower: a manual
+ * strategy that lets the fan be loud turns it sooner; every other keeps
+ * the tree's trips.
+ */
+static int32_t
+strategy_shift(
+	const struct kern_thermal_strategy *strategy)
+{
+	/* Only a manual strategy names how loud the fan may be. */
+	if (strategy->value != KERN_THERMAL_STRATEGY_MANUAL)
+		return 0;
+
+	/* A fan that must stay quiet keeps the tree's trips, which are as slow as it may go. */
+	if (strategy->noise < RPI5_FAN_LOUD_NOISE)
+		return 0;
+
+	/* Succeeded: the trips come lower by the loud shift. */
+	return RPI5_FAN_LOUD_SHIFT;
+}
+
+/*
+ * Chooses the trips for a strategy (the core's strategy thread) and sets
+ * the fan from the last reading at once.
+ */
+static int
+fan_apply(
+	void *context,
+	const struct kern_thermal_strategy *strategy,
+	uint32_t *flags)
+{
+	struct rpi5_fan_change change;
+	unsigned long irq;
+	int32_t shift;
+
+	UNUSED_PARAMETER(context);
+	UNUSED_PARAMETER(flags);
+
+	/* The firmware's state is the tree's trips, which the fan already has. */
+	if (strategy->value == KERN_THERMAL_STRATEGY_FIRMWARE)
+		return 0;
+
+	/* The trips the strategy asks for. */
+	shift = strategy_shift(strategy);
+
+	/* Moves the trips and sets the fan from the last reading; without one the fan stays full. */
+	irq = spin_lock_irqsave(&rpi5_fan.lock);
+
+	rpi5_fan.trip_shift = shift;
+	if (rpi5_fan.has_reading)
+		rpi5_fan.auto_level = choose_level(rpi5_fan.reading);
+	drive_locked(&change);
+
+	spin_unlock_irqrestore(&rpi5_fan.lock, irq);
+
+	/* Says the new trips and any new level. */
+	kern_logf("rpi5-fan: strategy %u, trips %d mC below the tree's\n", (unsigned)strategy->value, (int)shift);
+	log_change(&change, "strategy");
+
+	/* Succeeded: the trips are in force. */
+	return 0;
+}
+
+/*
+ * Names the trips in force, lowest and highest active one, in thousandths
+ * of a degree: the automatic control the strategy chose (a GET ioctl's
+ * thread).
+ */
+static int
+fan_trips_name(
+	void *context,
+	char *name,
+	size_t size)
+{
+	unsigned long irq;
+	int32_t temperature;
+	int32_t lowest;
+	int32_t highest;
+	unsigned index;
+	bool found;
+
+	UNUSED_PARAMETER(context);
+
+	/* The lowest and the highest active trip, as the strategy sets them. */
+	found = false;
+	lowest = 0;
+	highest = 0;
+	irq = spin_lock_irqsave(&rpi5_fan.lock);
+
+	for (index = 0; index < rpi5_fan.trip_count; index++) {
+		/* The critical trip is the zone's, not the fan's control. */
+		if (rpi5_fan.trips[index].critical)
+			continue;
+
+		/* Widens the range by this trip. */
+		temperature = rpi5_fan.trips[index].temperature - rpi5_fan.trip_shift;
+		if (!found || temperature < lowest)
+			lowest = temperature;
+		if (!found || temperature > highest)
+			highest = temperature;
+		found = true;
+	}
+
+	spin_unlock_irqrestore(&rpi5_fan.lock, irq);
+
+	/* A fan without an active trip has no automatic control to name. */
+	if (!found)
+		return ENOENT;
+
+	/* Succeeded: the name of the trips. */
+	kern_snprintf(name, size, "trips %d-%d mC", (int)lowest, (int)highest);
+	return 0;
+}
+
+/* Reads the fan's level and speed (the core's poll thread). */
+static int
+fan_read(
+	void *context,
+	struct kern_thermal_fan_state *state)
+{
+	unsigned long irq;
+
+	UNUSED_PARAMETER(context);
+
+	/* Copies the trips' level, the levels, the boost's range and the speed, as one. */
+	irq = spin_lock_irqsave(&rpi5_fan.lock);
+
+	state->flags = KERN_THERMAL_FAN_HAS_LEVEL;
+	if (rpi5_fan.has_rpm)
+		state->flags |= KERN_THERMAL_FAN_HAS_RPM;
+	state->rpm = read_rpm();
+	state->level = rpi5_fan.auto_level;
+	state->level_count = rpi5_fan.level_count;
+	state->boost_count = rpi5_fan.level_count - 1U;
+
+	spin_unlock_irqrestore(&rpi5_fan.lock, irq);
+
+	/* Succeeded: state holds the fan. */
+	return 0;
+}
+
+/*
+ * Sets the fan's boost, the level it does not run below (the core's
+ * strategy thread); 0 gives the fan back to the trips.
+ */
+static int
+fan_boost(
+	void *context,
+	uint32_t level)
+{
+	struct rpi5_fan_change change;
+	unsigned long irq;
+
+	UNUSED_PARAMETER(context);
+
+	/* Refuses a level the fan does not have. */
+	if (level >= rpi5_fan.level_count)
+		return EINVAL;
+
+	/* Keeps the boost and sets the fan to it or to the trips' level, whichever is higher. */
+	irq = spin_lock_irqsave(&rpi5_fan.lock);
+
+	rpi5_fan.boost = level;
+	drive_locked(&change);
+
+	spin_unlock_irqrestore(&rpi5_fan.lock, irq);
+
+	/* Says any new level. */
+	log_change(&change, "boost");
+
+	/* Succeeded: the fan turns at least at the boost. */
+	return 0;
 }
