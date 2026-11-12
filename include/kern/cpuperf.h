@@ -374,6 +374,13 @@ uint32_t
 kern_cpuperf_domain_count(void);
 
 /*
+ * Reports the number of packages the CPUs belong to, 0 before the
+ * framework is up.  Thread context.
+ */
+uint32_t
+kern_cpuperf_package_count(void);
+
+/*
  * Reports the generation of the CPUs' answers.
  *
  * Any context, no lock.  It changes whenever the topology, the domains,

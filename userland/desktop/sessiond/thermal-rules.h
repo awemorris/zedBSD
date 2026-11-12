@@ -46,6 +46,19 @@
 #define SESSIOND_THERMAL_REQUEST_MAX	64U
 #define SESSIOND_THERMAL_ANSWER_MAX	48U
 
+/* The program sessiond hands a request to; it is the one writer of the kept strategy. */
+#define SESSIOND_THERMAL_COMMAND	"/sbin/thermal"
+
+/* The most words of the command line, and the longest word with its end. */
+#define SESSIOND_THERMAL_COMMAND_WORDS	6U
+#define SESSIOND_THERMAL_WORD_MAX	16U
+
+/* The most of the command's output sessiond reads, with its end. */
+#define SESSIOND_THERMAL_OUTPUT_MAX	1024U
+
+/* The exit status of a child that could not run the command. */
+#define SESSIOND_THERMAL_NOT_RUN	127
+
 /*
  * A THERMAL request as decided: what it asks; for a strategy, its value
  * and the three axes (0 unless MANUAL); for a boost, the fan (or
@@ -61,7 +74,18 @@ struct sessiond_thermal_request {
 	uint32_t level;
 };
 
+/*
+ * The command line that carries a decided request out: the words and the
+ * argument vector that points at them, ended by a null pointer.
+ */
+struct sessiond_thermal_command {
+	char word[SESSIOND_THERMAL_COMMAND_WORDS][SESSIOND_THERMAL_WORD_MAX];
+	char *argv[SESSIOND_THERMAL_COMMAND_WORDS + 1U];
+};
+
 int sessiond_thermal_decide(const char *arguments, uid_t uid, int in_wheel, struct sessiond_thermal_request *request);
 int sessiond_thermal_answer(int error, unsigned flags, char *answer, size_t size);
+void sessiond_thermal_command(const struct sessiond_thermal_request *request, struct sessiond_thermal_command *command);
+int sessiond_thermal_outcome(int exit_code, const char *output, unsigned *flags);
 
 #endif

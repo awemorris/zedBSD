@@ -51,6 +51,10 @@ static void check(int passed, const char *what);
 static void case_decide(void);
 static void case_answer(void);
 static void check_answer(int error, unsigned flags, const char *expected);
+static void case_command(void);
+static void case_outcome(void);
+static void check_command(const char *arguments, const char *expected);
+static void check_outcome(int exit_code, const char *output, int error, unsigned flags);
 
 /* Runs every case and prints the verdict. */
 int
@@ -59,6 +63,8 @@ main(void)
 	/* The cases. */
 	case_decide();
 	case_answer();
+	case_command();
+	case_outcome();
 
 	/* Some check failed. */
 	if (failures != 0U) {
@@ -222,4 +228,105 @@ case_answer(void)
 	check(length == 0, "answer into 4 bytes is 0");
 	length = sessiond_thermal_answer(EINVAL, 0, small, sizeof(small));
 	check(length == 0, "error answer into 4 bytes is 0");
+}
+
+/* Checks the /sbin/thermal command line a decided request makes, words joined by spaces. */
+static void
+check_command(
+	const char *arguments,
+	const char *expected)
+{
+	struct sessiond_thermal_request request;
+	struct sessiond_thermal_command command;
+	char joined[128];
+	char what[200];
+	unsigned index;
+	int error;
+
+	/* Decides the request as root, then builds its command line. */
+	error = sessiond_thermal_decide(arguments, 0, 0, &request);
+	check(error == 0, arguments);
+	sessiond_thermal_command(&request, &command);
+
+	/* Joins the words up to the null pointer. */
+	joined[0] = '\0';
+	for (index = 0; command.argv[index] != NULL; index++) {
+		if (index != 0U)
+			(void)strncat(joined, " ", sizeof(joined) - strlen(joined) - 1U);
+		(void)strncat(joined, command.argv[index], sizeof(joined) - strlen(joined) - 1U);
+	}
+	(void)snprintf(what, sizeof(what), "command of \"%s\": \"%s\", expected \"%s\"", arguments, joined, expected);
+	check(strcmp(joined, expected) == 0, what);
+}
+
+/* Checks the command lines of every kind of request. */
+static void
+case_command(void)
+{
+	/* 5. the strategies, manual with its axes, and the boosts */
+	check_command("strategy performance", "thermal strategy performance");
+	check_command("strategy balanced", "thermal strategy balanced");
+	check_command("strategy powersave", "thermal strategy powersave");
+	check_command("strategy manual 70 20 5", "thermal strategy manual 70 20 5");
+	check_command("strategy manual 0 100 0", "thermal strategy manual 0 100 0");
+	check_command("boost all 2", "thermal boost all 2");
+	check_command("boost 0 0", "thermal boost 0 0");
+	check_command("boost 255 255", "thermal boost 255 255");
+}
+
+/* Checks one outcome of the command. */
+static void
+check_outcome(
+	int exit_code,
+	const char *output,
+	int error,
+	unsigned flags)
+{
+	unsigned got_flags;
+	char what[300];
+	int got;
+
+	/* The errno and the bits. */
+	got = sessiond_thermal_outcome(exit_code, output, &got_flags);
+	(void)snprintf(what, sizeof(what), "outcome %d \"%s\": errno %d flags %#x, expected %d %#x",
+		       exit_code, output, got, got_flags, error, flags);
+	check(got == error && got_flags == flags, what);
+}
+
+/* Checks how the command's exit and lines become the answer. */
+static void
+case_outcome(void)
+{
+	char line[160];
+
+	/* 6. success, with the bits on the strategy's line or the boost's */
+	check_outcome(0, "strategy balanced generation=3 flags=-\nreceiver 0 cpu result=ok generation=3\n", 0, 0);
+	check_outcome(0, "strategy balanced generation=3 flags=partial\n", 0, SESSIOND_THERMAL_PARTIAL);
+	check_outcome(0, "strategy powersave generation=4 flags=partial,pending\nreceiver 0 cpu result=ok\n", 0,
+		      SESSIOND_THERMAL_PARTIAL | SESSIOND_THERMAL_PENDING);
+	check_outcome(0, "strategy manual generation=5 flags=superseded\n", 0, SESSIOND_THERMAL_SUPERSEDED);
+	check_outcome(0, "strategy manual generation=5 flags=custom\n", 0, 0);
+	check_outcome(0, "boost level=2 pending=yes\n", 0, SESSIOND_THERMAL_PENDING);
+	check_outcome(0, "boost level=2 pending=no\n", 0, 0);
+
+	/* A strategy nothing acts on is kept and answered as unsupported. */
+	check_outcome(0, "strategy balanced result=unsupported kept=yes\n", EOPNOTSUPP, 0);
+
+	/* No command, a signal, a usage error. */
+	check_outcome(SESSIOND_THERMAL_NOT_RUN, "", ENODEV, 0);
+	check_outcome(-1, "", EIO, 0);
+	check_outcome(2, "usage: thermal\n", EINVAL, 0);
+
+	/* A refusal by its reason; the device missing is unavailable whatever its reason. */
+	(void)snprintf(line, sizeof(line), "thermal: boost: %s\n", strerror(ENOENT));
+	check_outcome(1, line, ENOENT, 0);
+	(void)snprintf(line, sizeof(line), "thermal: boost: %s\n", strerror(EOPNOTSUPP));
+	check_outcome(1, line, EOPNOTSUPP, 0);
+	(void)snprintf(line, sizeof(line), "thermal: strategy: %s\n", strerror(EINVAL));
+	check_outcome(1, line, EINVAL, 0);
+	(void)snprintf(line, sizeof(line), "receiver 0 cpu result=x\nthermal: strategy: %s\n", strerror(EIO));
+	check_outcome(1, line, EIO, 0);
+	(void)snprintf(line, sizeof(line), "thermal: /dev/thermal: %s\n", strerror(ENOENT));
+	check_outcome(1, line, ENODEV, 0);
+	check_outcome(1, "nothing said\n", EIO, 0);
 }
