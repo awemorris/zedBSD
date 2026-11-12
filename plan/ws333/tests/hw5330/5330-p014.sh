@@ -3,7 +3,7 @@
 # /tmp/i915-hw.lock, read through /dev/thermal with the tree's /sbin/thermal (copied to /tmp on zedBSD).
 #   sh plan/ws333/tests/hw5330/5330-p014.sh KDIR NAME
 # KDIR holds the kernels of kbuild.sh: KDIR/hlt, c6, c10 and periodic (each DIR/vmunix); THERMAL (default
-# build/x86_64/sbin/thermal) is the program.  Each kernel goes to the NVMe's p4 (5330-nvme-write.sh kernel, the one
+# KDIR/static/thermal, made by thermal-static.sh: the NVMe's userland predates the tree's shared libc) is the program.  Each kernel goes to the NVMe's p4 (5330-nvme-write.sh kernel, the one
 # before kept as vmunix.old) and boots the NVMe's zedBSD (its userland is kept); after IDLE_SETTLE seconds (default
 # 120) one window of 60 s reads at once the package power (thermal power), the package's and two CPUs' C-state
 # residency (thermal idle).  The c6 kernel's boot then measures the same window under strategy balanced, and runs the
@@ -19,7 +19,7 @@ set -u
 KDIR=${1:?KDIR}
 NAME=${2:?NAME}
 cd "$(dirname "$0")/../../../.."
-THERMAL=${THERMAL:-build/x86_64/sbin/thermal}
+THERMAL=${THERMAL:-$KDIR/static/thermal}
 LOGS=${LOGS:-build/hw5330/ws333}/$NAME
 HOST=solaris10-man
 ZB=10.0.30.3
