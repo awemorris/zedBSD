@@ -149,6 +149,7 @@ drv_cpu_x86_init(void)
 	 * have the registers its CPUID names.
 	 */
 	drv_cpu_x86_machine.msr = false;
+
 #if CONFIG_CPU_PERF && CONFIG_DRIVER_X86_POWER_CONTROL
 	hwp_off = kern_boot_parameters_token_present(line, CPU_X86_PARAMETER_HWP_OFF);
 	if ((drv_cpu_x86_machine.features.flags & CPUX86_FEATURE_HYPERVISOR) != 0U) {
@@ -162,11 +163,13 @@ drv_cpu_x86_init(void)
 	/* Fills the provider: the description, and the registers where allowed. */
 	cpu_x86_provider.topology = cpu_x86_topology;
 	cpu_x86_provider.describe = cpu_x86_describe;
+
 #if CONFIG_CPU_PERF && CONFIG_DRIVER_X86_POWER_CONTROL
 	if (drv_cpu_x86_machine.msr)
 		drv_cpu_x86_control_ops(&cpu_x86_provider);
 #endif
 
+#if CONFIG_CPU_PERF && CONFIG_DRIVER_X86_POWER_CONTROL
 	/* Registers the provider; every CPU reads its place before this returns. */
 	error = kern_cpuperf_provider_register(&cpu_x86_provider);
 	if (error != 0) {
@@ -178,6 +181,7 @@ drv_cpu_x86_init(void)
 		  drv_cpu_x86_machine.identity.display_model,
 		  count,
 		  drv_cpu_x86_machine.hybrid != 0U ? ", hybrid" : "");
+#endif
 
 #if CONFIG_CPU_PERF && CONFIG_DRIVER_X86_POWER_CONTROL
 	/* Prepares the feedback tables and the energy meters, which need the CPUs' places. */

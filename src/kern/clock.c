@@ -201,8 +201,10 @@ kernel_cpu_notify_handler(
 	if (cpu < HAL_CPU_MAX)
 		(void)atomic_raw_fetch_add_relaxed(&cpu_notify_count[cpu], 1U);
 
+#if CONFIG_DRIVER_CPU_PERF
 	/* Applies the CPU performance work posted for this CPU, if any. */
 	kern_cpuperf_notify(cpu);
+#endif
 
 	sched_cpu_notify(cpu);
 }

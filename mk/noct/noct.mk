@@ -18,8 +18,8 @@ NOCT_HOST_SRC      := $(REPO_ROOT)/build/NoctLang
 NOCT_HOST_BUILD    := $(NOCT_HOST_SRC)/build
 NOCT_HOST_BIN      := $(HOST_NOCT)
 
-NOCT_DISTFILE      ?= $(REPO_ROOT)/userland/base/noct/distfiles/NoctLang-d198b952dec90120c3d0e7987dd12af06911478e.tar.gz
-NOCT_PATCHES       := $(sort $(wildcard $(REPO_ROOT)/userland/base/noct/patches/*.patch))
+NOCT_DISTFILE      ?= $(REPO_ROOT)/build/NoctLang-d198b952dec90120c3d0e7987dd12af06911478e.tar.gz
+NOCT_PATCHES       := 
 NOCT_PATCH_STAMP   := $(NOCT_HOST_SRC)/.patched
 
 include $(REPO_ROOT)/mk/build-jobs.mk

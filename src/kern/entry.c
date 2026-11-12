@@ -378,8 +378,10 @@ kernel_entry(
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary CPU notification failed");
 
+#if CONFIG_DRIVER_CPU_PERF
 	/* Builds the table of the CPUs' performance now that each takes notifications. */
 	kern_cpuperf_init();
+#endif
 
 	/* Reads the length of one timer tick in milliseconds for the boot report. */
 	timer_ms = kern_clock_resolution_ns() / 1000000U;
