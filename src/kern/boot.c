@@ -59,6 +59,8 @@ static const struct parameter_name parameter_names[KERN_BOOT_PARAMETER_COUNT] = 
 	PARAMETER_NAME("mac0"),
 	PARAMETER_NAME("cpuperf"),
 	PARAMETER_NAME("cpuperf.hwp"),
+	PARAMETER_NAME("watchdog"),
+	PARAMETER_NAME("watchdog.stop"),
 };
 
 static char firmware_source[KERN_BOOT_SOURCE_SELECTOR_SIZE];
@@ -78,6 +80,7 @@ static void record_unknown(struct kern_boot_parameters *parameters, const char *
 static int parameter_separator(char character);
 static int parameter_word(enum kern_boot_parameter_key key, const char *value, size_t length);
 static int parameter_text_is(const char *value, size_t length, const char *word);
+static int parameter_seconds(enum kern_boot_parameter_key key, const char *value, size_t length);
 static int display_mode_number(const char *text, size_t length, size_t *position, uint32_t maximum, uint32_t *value);
 static size_t skip_separators(const char *text, size_t position, size_t length);
 static int selector_text(const char *text, size_t maximum, int device_name);
@@ -315,6 +318,16 @@ kern_boot_parameters_parse(
 			}
 		}
 
+		/* watchdog= and watchdog.stop= give a number of seconds. */
+		if (key == KERN_BOOT_PARAMETER_WATCHDOG ||
+		    key == KERN_BOOT_PARAMETER_WATCHDOG_STOP) {
+			error = parameter_seconds(key, parameters->storage + value_start, value_length);
+			if (error != 0) {
+				error = parse_error(parameters, error);
+				return error;
+			}
+		}
+
 		/* display.mode= is a mode written WxH or WxH@R. */
 		if (key == KERN_BOOT_PARAMETER_DISPLAY_MODE) {
 			error = kern_boot_display_mode_parse(parameters->storage + value_start, value_length, &mode_width, &mode_height, &mode_refresh);
@@ -473,6 +486,42 @@ parameter_word(
 		return EINVAL;
 
 	/* Succeeded: a word the parameter takes. */
+	return 0;
+}
+
+/*
+ * Checks the value of watchdog= (a number of seconds, or off) or
+ * watchdog.stop= (a number of seconds): one to six decimal digits.  The
+ * TCO watchdog reads them from the loader's line when it attaches, before
+ * this parse, and checks their range itself.
+ */
+static int
+parameter_seconds(
+	enum kern_boot_parameter_key key,
+	const char *value,
+	size_t length)
+{
+	size_t index;
+	int off;
+
+	/* watchdog= also takes off, which leaves the watchdog off. */
+	if (key == KERN_BOOT_PARAMETER_WATCHDOG) {
+		off = parameter_text_is(value, length, "off");
+		if (off)
+			return 0;
+	}
+
+	/* Refuses an empty value or one longer than six digits. */
+	if (length == 0U || length > 6U)
+		return EINVAL;
+
+	/* Refuses anything but decimal digits. */
+	for (index = 0; index < length; index++) {
+		if (value[index] < '0' || value[index] > '9')
+			return EINVAL;
+	}
+
+	/* Succeeded: a number of seconds. */
 	return 0;
 }
 

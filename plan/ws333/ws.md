@@ -53,4 +53,4 @@
 | [p025](phase025/phase.md) | p014 の食い違いの解析と直し（HWP の読みの古さ・E-core の MHz の換算・manual の上限・E-core の domain・package の C-state 0%）。考える Phase、実機は最後に 1 回 | cleared（2026-11-13 Q1、P1 q2022・q2023。読み方と測りの thread の直し、E-core を module の domain に。package の C-state 0% は p027） | p014 |
 | [p026](phase026/phase.md) | CPU の MHz を読み手の権限によらず新しい値で返す（`READ_SAMPLE` と書き込みの制限を外し、約 1 秒の共有の sample） | cleared（2026-11-13 Q1、P1 q2027。全 CPU を 100 ms で 2 回測る共有の sample を 1 秒ごと、READ_SAMPLE と書き込みの制限を外した。host 試験 3 本 PASS（直す前は FAIL）、x86_64・rpi5 warning 0、QEMU で群の外の利用者も読める。5330 の数は次の測定） | p025、BUG-422 |
 | [p027](phase027/phase.md) | 5330 の残り: package の C-state 0% の原因（i915 の RC6・DC state の A/B）、i915 の qs40、S0 idle | planned（p028 の watchdog の後、2026-11-13 ユーザーが進め方を承認） | p025、p028 |
-| [p028](phase028/phase.md) | 5330 を人手なしで戻せる起動: Intel TCO watchdog の driver（止まれば再起動）と UEFI の一回だけの起動 | in-progress（2026-11-13 Q1、q2028-i01 P3。ユーザーが進め方を承認） | — |
+| [p028](phase028/phase.md) | 5330 を人手なしで戻せる起動: Intel TCO watchdog の driver（止まれば再起動）と UEFI の一回だけの起動 | cleared（2026-11-13 Q1、P3 q2028。main に merge。5330 で人手なしに戻れる事を確かめた） | — |
