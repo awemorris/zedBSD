@@ -257,9 +257,9 @@ MAKE_ICO_SOURCES = apps/browser-win32/tools/make-ico.c apps/browser-win32/tools/
 # The trusted roots: the ca-certificates package's file (its release, size and SHA-256 read from the
 # package), from the shared downloads when they have it, else fetched; as share/certs/ca-certificates.pem.
 CA_CERTIFICATES_PACKAGE := userland/packages/security/ca-certificates/Makefile
-CA_CERTIFICATES_ARCHIVE := $(shell sed -n 's/^ZEDBSD_EXT_ca-certificates_ARCHIVE := //p' $(CA_CERTIFICATES_PACKAGE))
-CA_CERTIFICATES_URL := $(shell sed -n 's/^ZEDBSD_EXT_ca-certificates_URL := //p' $(CA_CERTIFICATES_PACKAGE))
-CA_CERTIFICATES_SHA256 := $(shell sed -n 's/^ZEDBSD_EXT_ca-certificates_SHA256 := //p' $(CA_CERTIFICATES_PACKAGE))
+CA_CERTIFICATES_ARCHIVE := $(shell sed -n 's/^EXT_ca-certificates_ARCHIVE := //p' $(CA_CERTIFICATES_PACKAGE))
+CA_CERTIFICATES_URL := $(shell sed -n 's/^EXT_ca-certificates_URL := //p' $(CA_CERTIFICATES_PACKAGE))
+CA_CERTIFICATES_SHA256 := $(shell sed -n 's/^EXT_ca-certificates_SHA256 := //p' $(CA_CERTIFICATES_PACKAGE))
 CA_CERTIFICATES_FILE := $(BROWSER_WIN32_SOURCES)/$(CA_CERTIFICATES_ARCHIVE)
 
 # The licences of what the program is made of (share/licenses, with a README.txt that lists them): the
