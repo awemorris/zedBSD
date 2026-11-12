@@ -459,4 +459,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-419](bugs/BUG-419.md) | riscv64 で noct の JIT が使えない（builtins が PIC でなく、`__clear_cache` に zedBSD の実装が無い） | open（2026-11-11 11:27 Q1 が起票、担当は未定） |
 | [BUG-420](bugs/BUG-420.md) | LLVM の source の展開が file の時刻で繰り返され、build が source を上書きする（worktree の i386 の vmunix が main の build/llvm-source を上書き） | fixed（2026-11-12 Q1、main と新しい worktree で確かめた） |
 | [BUG-421](bugs/BUG-421.md) | 新しい checkout で NoctLang の patch が取得した tarball に当たらず `make sysroot` が止まる（CMakeLists.txt の hunk） | fixed（2026-11-12 ユーザー 0958bc742e、Q1 が新しい worktree で確かめた） |
-| [BUG-422](bugs/BUG-422.md) | kernel に CPU の affinity が無く、cpuperf の測りの thread が work stealing で他の CPU に移る（E-core が測れない） | open（2026-11-12 Q1 が起票。当座は cpuperf の測り直し、直しは WS333 p025 の後） |
+| [BUG-422](bugs/BUG-422.md) | kernel に CPU の affinity が無く、cpuperf の測りの thread が work stealing で他の CPU に移る（E-core が測れない） | open（2026-11-12 Q1 が起票。2026-11-13 P2 が affinity（`sched_set_cpu` の `SCHED_CPU_BOUND`、盗みは BOUND を飛ばす）と cpuperf の BOUND を agent/p2-bug422 に commit。host 試験・x86_64 と rpi5 の build・QEMU -smp 4 の起動は済み、5330 は未確認） |
