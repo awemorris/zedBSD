@@ -40,6 +40,20 @@ enum sched_queue_kind {
 };
 
 /*
+ * Whether a thread may run on another CPU than the one it was placed on.
+ *
+ * A free thread goes wherever there is room: an idle CPU takes it from a
+ * busy CPU's queue.  A bound thread runs only on its CPU until it is moved
+ * again, for work that must happen on that CPU.
+ */
+enum sched_cpu_affinity {
+	/* The thread may move to any CPU; the default of every thread. */
+	SCHED_CPU_FREE = 0,
+	/* The thread stays on its CPU; no idle CPU takes it. */
+	SCHED_CPU_BOUND,
+};
+
+/*
  * The scheduler's state of one thread.
  *
  * It lives inside the thread, so it exists as long as the thread does.
@@ -80,6 +94,13 @@ struct sched {
 	uint64_t perf_switch_outs;
 	kern_cpu_id_t cpu;
 	kern_cpu_id_t last_cpu;
+	/*
+	 * Whether the thread stays on its CPU (enum sched_cpu_affinity).  Only
+	 * sched_set_cpu() changes it, under the lock of the CPU the thread is
+	 * on, and the CPU taking a thread from another reads it under that
+	 * lock.  Zero, the value of a new thread, leaves the thread free.
+	 */
+	unsigned affinity;
 	unsigned need_migrate;
 	struct thread *next;
 	struct thread *prev;
@@ -290,9 +311,20 @@ sched_cpu_time(
 int
 sched_has_runnable(void);
 
+/*
+ * Moves a thread that is not running to a CPU, and sets whether it stays
+ * there.
+ *
+ * SCHED_CPU_BOUND keeps the thread on the CPU until the next call, and
+ * SCHED_CPU_FREE lets it move again.  A thread already on the CPU only
+ * has its affinity set.  Reports 0, EINVAL for a running, finished or
+ * offline target, EBUSY while the thread is moving, or EIO; a failure
+ * leaves the thread's CPU and affinity as they were.
+ */
 int
 sched_set_cpu(
 	struct thread *thread,
-	kern_cpu_id_t cpu);
+	kern_cpu_id_t cpu,
+	enum sched_cpu_affinity affinity);
 
 #endif

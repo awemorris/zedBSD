@@ -9,8 +9,10 @@
  * The per-CPU run queue scheduler.
  *
  * Each CPU owns priority-ordered run queues, a sleep queue for timed
- * sleeps, an idle thread, and a lock.  Threads are pinned to a CPU and
- * migrate only through sched_set_cpu().  A thread sleeps by publishing
+ * sleeps, an idle thread, and a lock.  A thread runs on the CPU whose
+ * queue holds it, and threads move freely: an idle CPU takes a waiting
+ * thread from a busy CPU's queue.  Only a thread that sched_set_cpu()
+ * bound to its CPU stays there.  A thread sleeps by publishing
  * its sleeping state under the CPU lock and switching away without
  * enqueueing itself; wakeups and interrupts move it back to a run
  * queue.  The clock tick expires timed sleeps, accounts CPU time and
@@ -287,7 +289,9 @@ static hal_cpu_id_t choose_idle_cpu(hal_cpu_id_t except);
 static void idle_mask_set(hal_cpu_id_t cpu);
 static void idle_mask_clear(hal_cpu_id_t cpu);
 static void leave_idle(struct sched_cpu *cpu, const struct thread *current, hal_cpu_id_t id);
+static int set_affinity_in_place(struct sched_cpu *cpu, struct thread *thread, hal_cpu_id_t id, enum sched_cpu_affinity affinity);
 static struct thread *take_stealable_locked(struct sched_cpu *victim);
+static struct thread *first_free_thread(struct thread *head);
 static int steal_runnable(hal_cpu_id_t self);
 static void retarget_migrating(struct thread *thread, struct sched_cpu *old_cpu, hal_cpu_id_t target);
 static void charge_cpu_time(struct sched_cpu *cpu, const struct thread *thread);
@@ -1682,15 +1686,20 @@ sched_wait_others_online(
 }
 
 /*
- * Migrates a thread that is not running to another CPU.
+ * Migrates a thread that is not running to another CPU, and sets whether
+ * it stays there.
  *
  * A wakeup that arrives during the migration is applied on the new CPU,
- * or on the old one when the task transfer fails.
+ * or on the old one when the task transfer fails.  The affinity changes
+ * under the lock of the CPU that ends up holding the thread, the lock
+ * under which an idle CPU looks for a thread to take, so a bound thread
+ * is never taken.  A failure leaves the affinity as it was.
  */
 int
 sched_set_cpu(
 	struct thread *thread,
-	hal_cpu_id_t target)
+	hal_cpu_id_t target,
+	enum sched_cpu_affinity affinity)
 {
 	struct sched_cpu *old_cpu;
 	struct sched_cpu *new_cpu;
@@ -1708,14 +1717,24 @@ sched_set_cpu(
 	    thread->state == THREAD_ZOMBIE ||
 	    thread->state == THREAD_DEAD)
 		return EINVAL;
-	old = thread->sched.cpu;
-	if (old == target)
-		return 0;
-	if (old >= scheduler_cpu_count)
+
+	/* Only the two affinities are known. */
+	if (affinity != SCHED_CPU_FREE && affinity != SCHED_CPU_BOUND)
 		return EINVAL;
 
-	/* Takes the thread off its old CPU's queues and marks it migrating. */
+	/* The thread must be on a CPU of the scheduler. */
+	old = thread->sched.cpu;
+	if (old >= scheduler_cpu_count)
+		return EINVAL;
 	old_cpu = sched_cpu_state(old);
+
+	/* A thread already on the CPU only has its affinity set. */
+	if (old == target) {
+		error = set_affinity_in_place(old_cpu, thread, old, affinity);
+		return error;
+	}
+
+	/* Takes the thread off its old CPU's queues and marks it migrating. */
 	irq = spin_lock_irqsave(&old_cpu->lock);
 
 	if (thread->sched.cpu != old || thread->sched.need_migrate != 0) {
@@ -1762,6 +1781,7 @@ sched_set_cpu(
 
 	pending = thread->sched.need_migrate & SCHED_WAKE_PENDING;
 	thread->sched.last_cpu = old;
+	thread->sched.affinity = affinity;
 	thread->sched.need_migrate = 0;
 	if (pending && thread->state == THREAD_SLEEPING)
 		old_kind = SCHED_QUEUE_RUN;
@@ -2468,12 +2488,47 @@ leave_idle(
 }
 
 /*
+ * Sets the affinity of a thread already on the CPU it is to stay on.
+ *
+ * Reports 0, or EBUSY when the thread is moving to another CPU or has
+ * just left this one.
+ */
+static int
+set_affinity_in_place(
+	struct sched_cpu *cpu,
+	struct thread *thread,
+	hal_cpu_id_t id,
+	enum sched_cpu_affinity affinity)
+{
+	unsigned long irq;
+	int error;
+
+	/* Sets the affinity under the lock an idle CPU takes the thread under. */
+	irq = spin_lock_irqsave(&cpu->lock);
+
+	if (thread->sched.cpu != id || thread->sched.need_migrate != 0) {
+		/* The thread is on its way to another CPU. */
+		error = EBUSY;
+	} else {
+		/* The thread stays queued here, now with the new affinity. */
+		thread->sched.affinity = affinity;
+		error = 0;
+	}
+
+	spin_unlock_irqrestore(&cpu->lock, irq);
+
+	/* Reports whether the thread was still there to set. */
+	return error;
+}
+
+/*
  * Takes one queued thread off a CPU for another CPU to run; the caller
  * holds the victim's lock.
  *
  * The thread leaves the queue marked as migrating, as sched_set_cpu()
  * marks one, so a wakeup or an explicit migration meanwhile sees it in
- * transit.  The thread that would run next on the victim is taken first.
+ * transit.  The thread that would run next on the victim is taken first,
+ * passing over the threads bound to the victim, which stay there.
  */
 static struct thread *
 take_stealable_locked(
@@ -2486,9 +2541,10 @@ take_stealable_locked(
 	/* Searches the queues from the highest priority down. */
 	for (priority = SCHED_PRIOR_HIGH; priority <= SCHED_PRIOR_LOW;
 	     priority++) {
-		thread = victim->woken[priority].head;
+		/* Finds the first thread of this priority free to leave. */
+		thread = first_free_thread(victim->woken[priority].head);
 		if (thread == NULL)
-			thread = victim->run[priority].head;
+			thread = first_free_thread(victim->run[priority].head);
 		if (thread == NULL)
 			continue;
 
@@ -2517,6 +2573,33 @@ take_stealable_locked(
 	}
 
 	/* Nothing on the CPU can be taken. */
+	return NULL;
+}
+
+/*
+ * Finds the first thread of a queue that is free to move to another CPU.
+ *
+ * The bound threads are passed over, so a thread bound to a CPU neither
+ * leaves it nor keeps the free threads queued behind it from leaving.
+ * The caller holds the lock of the queue's CPU.
+ */
+static struct thread *
+first_free_thread(
+	struct thread *head)
+{
+	struct thread *thread;
+
+	/* Walks the queue in the order its threads would run. */
+	for (thread = head; thread != NULL; thread = thread->sched.next) {
+		/* Leaves a thread bound to its CPU where it is. */
+		if (thread->sched.affinity == SCHED_CPU_BOUND)
+			continue;
+
+		/* The first free thread is the one to take. */
+		return thread;
+	}
+
+	/* Every queued thread is bound, or none is queued. */
 	return NULL;
 }
 
