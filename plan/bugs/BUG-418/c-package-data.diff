@@ -1,0 +1,288 @@
+diff --git a/userland/base/emacs/Makefile b/userland/base/emacs/Makefile
+index 17d253f136..42dbdfb8a9 100644
+--- a/userland/base/emacs/Makefile
++++ b/userland/base/emacs/Makefile
+@@ -16,8 +16,6 @@ include $(REMACS_DIR)../../../mk/build-jobs.mk
+ include $(REMACS_DIR)../package.mk
+ include $(REMACS_DIR)../noct/version.mk
+ 
+-$(eval $(call USERLAND_PACKAGE,emacs,emacs,*,n,package,,y,base,base/emacs,$(REQUIRE),0755,emacs))
+-
+ REPO_ROOT ?= $(abspath $(REMACS_DIR)../..)
+ BUILD ?= $(REPO_ROOT)/build/$(PLATFORM)
+ 
+@@ -37,22 +35,9 @@ REMACS_BIN             := $(BUILD)/bin/emacs
+ REMACS_DICTIONARY      := $(REMACS_SOURCE_DIR)/dict/SKK-JISYO.remacs
+ REMACS_DICTIONARY_X    := $(REMACS_SOURCE_DIR)/dict/SKK-JISYO.X
+ 
+-PACKAGE_INPUTS += \
+-	$(if $(filter emacs,$(ZEDBSD_USER_PROGRAMS)), \
+-		$(REMACS_NAP) $(REMACS_BIN) $(REMACS_DICTIONARY) $(REMACS_DICTIONARY_X))
+-
+-PACKAGE_FILES += \
+-	$(if $(filter emacs,$(ZEDBSD_USER_PROGRAMS)),\
+-		--file /bin/emacs=$(REMACS_BIN) \
+-		--mode /bin/emacs=0755 \
+-		--file /usr/share/remacs/skkjisyo.dic=$(REMACS_DICTIONARY) \
+-		--mode /usr/share/remacs/skkjisyo.dic=0644 \
+-		--file /usr/share/remacs/skkjisyo-x.dic=$(REMACS_DICTIONARY_X) \
+-		--mode /usr/share/remacs/skkjisyo-x.dic=0644)
+-
+-PACKAGE_LINKS += \
+-	$(if $(filter emacs,$(ZEDBSD_USER_PROGRAMS)),\
+-		/usr/bin/noct=/bin/noct)
++$(eval $(call USERLAND_PACKAGE,emacs,emacs,*,n,package,,y,base,base/emacs,$(REQUIRE),0755,emacs,\
++	/usr/share/remacs/skkjisyo.dic=$(REMACS_DICTIONARY) \
++	/usr/share/remacs/skkjisyo-x.dic=$(REMACS_DICTIONARY_X)))
+ 
+ $(REMACS_NAP): $(REMACS_SOURCES)
+ 	@rm -rf $(REMACS_WORK_DIR)
+diff --git a/userland/base/package.mk b/userland/base/package.mk
+index fb2e9aafe2..cfb2c74240 100644
+--- a/userland/base/package.mk
++++ b/userland/base/package.mk
+@@ -404,7 +404,8 @@ endef
+ #
+ # One data file: (1) package, (2) destination, (3) source from the top of
+ # the tree or absolute.  It is copied into the build when its source
+-# changes.
++# changes, readable by everyone as install makes it (a fetched source
++# keeps the fetcher's private mode), and the root takes it from there.
+ #
+ define STANDALONE_DATA_RULE
+ STANDALONE_DATA_OUTPUTS_$(1) += $$(STANDALONE_BUILD_DIR)$(2)
+@@ -412,6 +413,7 @@ $$(STANDALONE_BUILD_DIR)$(2): $(if $(filter /%,$(3)),$(3),$$(REPO_ROOT)/$(3))
+ 	$$(call standalone_log,DATA,$(2))
+ 	$$(Q)mkdir -p "$$(@D)"
+ 	$$(Q)cp -f $$< $$@
++	$$(Q)chmod 0644 $$@
+ 
+ endef
+ 
+diff --git a/userland/desktop/ime/dict/Makefile b/userland/desktop/ime/dict/Makefile
+index c54fd1ea8d..bd417bb1bd 100644
+--- a/userland/desktop/ime/dict/Makefile
++++ b/userland/desktop/ime/dict/Makefile
+@@ -20,7 +20,7 @@ ZEDBSD_IME_DICT_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+ ZEDBSD_IME_DICT_DIR := $(patsubst %/,%,$(dir $(ZEDBSD_IME_DICT_MAKEFILE)))
+ include $(ZEDBSD_IME_DICT_DIR)/../../package.mk
+ 
+-ZEDBSD_IME_DICT_JA := $(ZEDBSD_IME_DICT_DIR)/SKK-JISYO.ja
++ZEDBSD_IME_DICT_JA := $(abspath $(ZEDBSD_IME_DICT_DIR)/SKK-JISYO.ja)
+ 
+ .PHONY: ime-dict-ja
+ ime-dict-ja: $(ZEDBSD_IME_DICT_JA)
+@@ -31,10 +31,5 @@ ime-dict-ja: $(ZEDBSD_IME_DICT_JA)
+ # Not chosen by default until the input method itself is a package (ws095-p004),
+ # which then requires this one.
+ $(eval $(call USERLAND_PACKAGE,ime-dict-ja,ime-dict-ja - Japanese dictionaries of the input method,*,n,package,,y,\
+-	desktop,desktop/ime/dict,))
+-
+-ZEDBSD_PACKAGE_INPUTS += $(if $(filter ime-dict-ja,$(ZEDBSD_USER_PROGRAMS)),\
+-	$(ZEDBSD_IME_DICT_JA))
+-ZEDBSD_PACKAGE_FILES += $(if $(filter ime-dict-ja,$(ZEDBSD_USER_PROGRAMS)),\
+-	--file /usr/share/keiland/ime/ja/SKK-JISYO.ja=$(ZEDBSD_IME_DICT_JA) \
+-	--mode /usr/share/keiland/ime/ja/SKK-JISYO.ja=0644)
++	desktop,desktop/ime/dict,,0644,package,\
++	/usr/share/keiland/ime/ja/SKK-JISYO.ja=$(ZEDBSD_IME_DICT_JA)))
+diff --git a/userland/desktop/ime/skk-dict/Makefile b/userland/desktop/ime/skk-dict/Makefile
+index b0c1fbb08f..3b83234934 100644
+--- a/userland/desktop/ime/skk-dict/Makefile
++++ b/userland/desktop/ime/skk-dict/Makefile
+@@ -23,12 +23,6 @@ ime-dict-skk: $(ZEDBSD_IME_DICT_SKK)
+ 
+ # The input method (keiland-ime) requires it since WS154 p004, so every image with the input method has it.
+ $(eval $(call USERLAND_PACKAGE,ime-dict-skk,ime-dict-skk - Dictionaries of the SKK input method,*,n,package,,y,\
+-	desktop,desktop/ime/skk-dict,))
+-
+-ZEDBSD_PACKAGE_INPUTS += $(if $(filter ime-dict-skk,$(ZEDBSD_USER_PROGRAMS)),\
+-	$(ZEDBSD_IME_DICT_SKK))
+-ZEDBSD_PACKAGE_FILES += $(if $(filter ime-dict-skk,$(ZEDBSD_USER_PROGRAMS)),\
+-	--file /usr/share/keiland/ime/skk/SKK-JISYO.X=$(ZEDBSD_IME_DICT_SKK_DIR)/SKK-JISYO.X \
+-	--mode /usr/share/keiland/ime/skk/SKK-JISYO.X=0644 \
+-	--file /usr/share/keiland/ime/skk/SKK-JISYO.remacs=$(ZEDBSD_IME_DICT_SKK_DIR)/SKK-JISYO.remacs \
+-	--mode /usr/share/keiland/ime/skk/SKK-JISYO.remacs=0644)
++	desktop,desktop/ime/skk-dict,,0644,package,\
++	/usr/share/keiland/ime/skk/SKK-JISYO.X=$(abspath $(ZEDBSD_IME_DICT_SKK_DIR)/SKK-JISYO.X) \
++	/usr/share/keiland/ime/skk/SKK-JISYO.remacs=$(abspath $(ZEDBSD_IME_DICT_SKK_DIR)/SKK-JISYO.remacs)))
+diff --git a/userland/desktop/libkeiland/Makefile b/userland/desktop/libkeiland/Makefile
+index d5a46b9e9e..7edcde9f38 100644
+--- a/userland/desktop/libkeiland/Makefile
++++ b/userland/desktop/libkeiland/Makefile
+@@ -11,8 +11,8 @@ include $(LIBKEILAND_MAKEFILE_DIR)../package.mk
+ 
+ LIBKEILAND_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libkeiland.so=$(BUILD)/dynamic/libkeiland.so)
+ 
+-LIBKEILAND_CATALOGS := $(sort $(wildcard userland/desktop/locale/*/*.tr))
++LIBKEILAND_CATALOGS := $(sort $(wildcard $(REPO_ROOT)/userland/desktop/locale/*/*.tr))
+ 
+-LIBKEILAND_IMAGE_DATA += $(foreach catalog,$(LIBKEILAND_CATALOGS),/usr/share/keiland/locale/$(patsubst userland/desktop/locale/%,%,$(catalog))=$(catalog))
++LIBKEILAND_IMAGE_DATA += $(foreach catalog,$(LIBKEILAND_CATALOGS),/usr/share/keiland/locale/$(patsubst $(REPO_ROOT)/userland/desktop/locale/%,%,$(catalog))=$(catalog))
+ 
+ $(eval $(call USERLAND_PACKAGE,libkeiland,libkeiland,x86_64,y,library,$(LIBKEILAND_SOURCES),y,desktop,desktop/libkeiland,desktop/libwayland desktop/libtruetype desktop/libvulkan desktop/libpng-compat base/libz-compat,,shared-library,$(LIBKEILAND_IMAGE_DATA),,lib))
+diff --git a/userland/desktop/wayland/Makefile b/userland/desktop/wayland/Makefile
+index a5314aba47..6d67527579 100644
+--- a/userland/desktop/wayland/Makefile
++++ b/userland/desktop/wayland/Makefile
+@@ -161,18 +161,8 @@ KEILAND_SOURCES := \
+ 	userland/desktop/picture/wallpaper.c
+ 
+ # App Home starts X11 applications through keiland-x11, which starts
+-# xserver when it is needed.
+-ZEDBSD_PACKAGE_INPUTS += userland/desktop/wayland/keiland-x11
+-
+-ZEDBSD_PACKAGE_FILES += $(if $(filter wayland,$(ZEDBSD_USER_PROGRAMS)),--file /usr/libexec/keiland-x11=userland/desktop/wayland/keiland-x11)
+-
+-# App Home's default list, unless the image brings its own (a test's
+-# or the demonstration's extra files, which would otherwise name the
+-# same destination twice).
+-ZEDBSD_PACKAGE_INPUTS += userland/desktop/wayland/apps.conf
+-
+-ZEDBSD_PACKAGE_FILES += $(if $(filter wayland,$(ZEDBSD_USER_PROGRAMS)),$(if $(findstring /etc/keiland/apps.conf=,$(ZEDBSD_TEST_EXTRA_FILES)),,\
+-	--file /etc/keiland/apps.conf=userland/desktop/wayland/apps.conf --mode /etc/keiland/apps.conf=0644))
++# xserver when it is needed; apps.conf is App Home's default list.  Both
++# are among the package's data below.
+ 
+ KEILAND_FONT_DATA := \
+ 	/usr/share/fonts/keiland.ttf=userland/desktop/fonts/Mahora-Regular.ttf \
+diff --git a/userland/packages/fonts/hand-hershey/Makefile b/userland/packages/fonts/hand-hershey/Makefile
+index d90640befb..1bd678588c 100644
+--- a/userland/packages/fonts/hand-hershey/Makefile
++++ b/userland/packages/fonts/hand-hershey/Makefile
+@@ -46,7 +46,7 @@ $(eval $(call EXTERNAL_FILE,hand-hershey-part5))
+ HAND_HERSHEY_PARTS := part2 part3 part4 part5
+ HAND_HERSHEY_WORK := $(EXTERNAL_WORKROOT)/hand-hershey
+ HAND_HERSHEY_TEMPLATES := $(HAND_HERSHEY_WORK)/hershey.txt
+-HAND_HERSHEY_NOTICE := $(HAND_HERSHEY_DIR)/NOTICE
++HAND_HERSHEY_NOTICE := $(abspath $(HAND_HERSHEY_DIR)/NOTICE)
+ 
+ # The parts uncompressed (as text, never run), then the templates.
+ $(HAND_HERSHEY_TEMPLATES): $(foreach part,$(HAND_HERSHEY_PARTS),$(EXT_hand-hershey-$(part)_ARCHIVE_VERIFIED)) \
+@@ -64,12 +64,6 @@ hand-hershey: $(HAND_HERSHEY_TEMPLATES)
+ # ---------------------------------------------------------------- packaging
+ 
+ $(eval $(call USERLAND_PACKAGE,hand-hershey,Handwriting templates,*,n,package,,y,\
+-	packages/fonts,fonts/hand-hershey,))
+-
+-PACKAGE_INPUTS += $(if $(filter hand-hershey,$(USER_PROGRAMS)),\
+-	$(HAND_HERSHEY_TEMPLATES) $(HAND_HERSHEY_NOTICE))
+-PACKAGE_FILES += $(if $(filter hand-hershey,$(USER_PROGRAMS)),\
+-	--file /usr/share/keiland/hand/hershey.txt=$(HAND_HERSHEY_TEMPLATES) \
+-	--file /usr/share/licenses/hand-hershey/NOTICE=$(HAND_HERSHEY_NOTICE) \
+-	--mode /usr/share/keiland/hand/hershey.txt=0644 \
+-	--mode /usr/share/licenses/hand-hershey/NOTICE=0644)
++	packages/fonts,fonts/hand-hershey,,0644,package,\
++	/usr/share/keiland/hand/hershey.txt=$(HAND_HERSHEY_TEMPLATES) \
++	/usr/share/licenses/hand-hershey/NOTICE=$(HAND_HERSHEY_NOTICE)))
+diff --git a/userland/packages/fonts/noto-color-emoji/Makefile b/userland/packages/fonts/noto-color-emoji/Makefile
+index 4afc6ec225..393505f1c3 100644
+--- a/userland/packages/fonts/noto-color-emoji/Makefile
++++ b/userland/packages/fonts/noto-color-emoji/Makefile
+@@ -32,7 +32,7 @@ EXT_noto-color-emoji_SHA256 := 39ee3c587e10e89669b9ff32703261d10d5f9c4dd5ad147b6
+ 
+ $(eval $(call EXTERNAL_FILE,noto-color-emoji))
+ 
+-NOTO_COLOR_EMOJI_LICENSE := $(NOTO_COLOR_EMOJI_DIR)/OFL-1.1.txt
++NOTO_COLOR_EMOJI_LICENSE := $(abspath $(NOTO_COLOR_EMOJI_DIR)/OFL-1.1.txt)
+ 
+ .PHONY: noto-color-emoji
+ noto-color-emoji: $(EXT_noto-color-emoji_ARCHIVE_VERIFIED)
+@@ -43,15 +43,10 @@ build: noto-color-emoji
+ # ---------------------------------------------------------------- packaging
+ 
+ $(eval $(call USERLAND_PACKAGE,noto-color-emoji,Colour emoji font,*,n,package,,y,\
+-	packages/fonts,fonts/noto-color-emoji,,0644,custom))
+-
+-# The verified record is the input, so the image waits for the check rather
+-# than for the bare download.  The download keeps the fetcher's private mode,
+-# so the modes are set: every program that draws text reads it.
+-PACKAGE_INPUTS += $(if $(filter noto-color-emoji,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
+-	$(EXT_noto-color-emoji_ARCHIVE_VERIFIED) $(NOTO_COLOR_EMOJI_LICENSE))
+-PACKAGE_FILES += $(if $(filter noto-color-emoji,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
+-	--file /usr/share/fonts/keiland-emoji.ttf=$(EXT_noto-color-emoji_DISTFILE) \
+-	--file /usr/share/licenses/noto-color-emoji/OFL-1.1.txt=$(NOTO_COLOR_EMOJI_LICENSE) \
+-	--mode /usr/share/fonts/keiland-emoji.ttf=0644 \
+-	--mode /usr/share/licenses/noto-color-emoji/OFL-1.1.txt=0644)
++	packages/fonts,fonts/noto-color-emoji,,0644,custom,\
++	/usr/share/fonts/keiland-emoji.ttf=$(EXT_noto-color-emoji_DISTFILE) \
++	/usr/share/licenses/noto-color-emoji/OFL-1.1.txt=$(NOTO_COLOR_EMOJI_LICENSE)))
++
++# The copy into the image waits for the check of the download, not for
++# the bare download.
++$(STANDALONE_BUILD_DIR)/usr/share/fonts/keiland-emoji.ttf: $(EXT_noto-color-emoji_ARCHIVE_VERIFIED)
+diff --git a/userland/packages/security/ca-certificates/Makefile b/userland/packages/security/ca-certificates/Makefile
+index 75cb0a3287..6379cc4418 100644
+--- a/userland/packages/security/ca-certificates/Makefile
++++ b/userland/packages/security/ca-certificates/Makefile
+@@ -36,7 +36,7 @@ EXT_ca-certificates_SHA256 := f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769
+ 
+ $(eval $(call EXTERNAL_FILE,ca-certificates))
+ 
+-CA_CERTIFICATES_LICENSE := $(CA_CERTIFICATES_DIR)/MPL-2.0.txt
++CA_CERTIFICATES_LICENSE := $(abspath $(CA_CERTIFICATES_DIR)/MPL-2.0.txt)
+ 
+ .PHONY: ca-certificates
+ ca-certificates: $(EXT_ca-certificates_ARCHIVE_VERIFIED)
+@@ -58,18 +58,12 @@ $(eval \
+ 		security/ca-certificates, \
+ 		, \
+ 		0644, \
+-		custom \
++		custom, \
++		/etc/ssl/cert.pem=$(EXT_ca-certificates_DISTFILE) \
++		/usr/share/licenses/ca-certificates/MPL-2.0.txt=$(CA_CERTIFICATES_LICENSE) \
+ 	)\
+ )
+ 
+-PACKAGE_INPUTS += \
+-	$(if $(filter ca-certificates,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
+-		$(EXT_ca-certificates_ARCHIVE_VERIFIED) \
+-		$(CA_CERTIFICATES_LICENSE))
+-
+-PACKAGE_FILES += \
+-	$(if $(filter ca-certificates,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
+-		--file /etc/ssl/cert.pem=$(EXT_ca-certificates_DISTFILE) \
+-		--file /usr/share/licenses/ca-certificates/MPL-2.0.txt=$(CA_CERTIFICATES_LICENSE) \
+-		--mode /etc/ssl/cert.pem=0644 \
+-		--mode /usr/share/licenses/ca-certificates/MPL-2.0.txt=0644)
++# The copy into the image waits for the check of the download, not for
++# the bare download.
++$(STANDALONE_BUILD_DIR)/etc/ssl/cert.pem: $(EXT_ca-certificates_ARCHIVE_VERIFIED)
+diff --git a/userland/x11/zterm/Makefile b/userland/x11/zterm/Makefile
+index cc9329838e..b594d7a980 100644
+--- a/userland/x11/zterm/Makefile
++++ b/userland/x11/zterm/Makefile
+@@ -5,7 +5,5 @@
+ 
+ include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
+ 
+-$(eval $(call USERLAND_PACKAGE,zterm,zterm,*,n,basic,userland/x11/zterm/main.c userland/x11/libX11/xlib.c,y,x11-applications,,))
+-
+-ZEDBSD_PACKAGE_INPUTS += userland/x11/zterm/app-icon.xpm
+-ZEDBSD_PACKAGE_FILES += $(if $(filter zterm,$(ZEDBSD_USER_PROGRAMS)),--file /usr/share/zterm/icons/app-icon.xpm=userland/x11/zterm/app-icon.xpm)
++$(eval $(call USERLAND_PACKAGE,zterm,zterm,*,n,basic,userland/x11/zterm/main.c userland/x11/libX11/xlib.c,y,x11-applications,,,,,\
++	/usr/share/zterm/icons/app-icon.xpm=userland/x11/zterm/app-icon.xpm))
+diff --git a/userland/x11/zwm/Makefile b/userland/x11/zwm/Makefile
+index d05ae2b99b..b708f59fbe 100644
+--- a/userland/x11/zwm/Makefile
++++ b/userland/x11/zwm/Makefile
+@@ -5,15 +5,7 @@
+ 
+ include $(dir $(lastword $(MAKEFILE_LIST)))../../base/package.mk
+ 
+-$(eval $(call USERLAND_PACKAGE,zwm,zwm,*,n,basic,userland/x11/zwm/main.c userland/x11/libX11/xlib.c,y,x11-applications,,))
+-
+-ZWM_BACKGROUNDS := userland/x11/zwm/backgrounds/640x480.ppm \
+-	userland/x11/zwm/backgrounds/800x600.ppm \
+-	userland/x11/zwm/backgrounds/1024x768.ppm
+-
+-ZEDBSD_PACKAGE_INPUTS += $(ZWM_BACKGROUNDS)
+-
+-ZEDBSD_PACKAGE_FILES += $(if $(filter zwm,$(ZEDBSD_USER_PROGRAMS)),\
+-	--file /usr/share/zwm/backgrounds/640x480.ppm=userland/x11/zwm/backgrounds/640x480.ppm \
+-	--file /usr/share/zwm/backgrounds/800x600.ppm=userland/x11/zwm/backgrounds/800x600.ppm \
+-	--file /usr/share/zwm/backgrounds/1024x768.ppm=userland/x11/zwm/backgrounds/1024x768.ppm)
++$(eval $(call USERLAND_PACKAGE,zwm,zwm,*,n,basic,userland/x11/zwm/main.c userland/x11/libX11/xlib.c,y,x11-applications,,,,,\
++	/usr/share/zwm/backgrounds/640x480.ppm=userland/x11/zwm/backgrounds/640x480.ppm \
++	/usr/share/zwm/backgrounds/800x600.ppm=userland/x11/zwm/backgrounds/800x600.ppm \
++	/usr/share/zwm/backgrounds/1024x768.ppm=userland/x11/zwm/backgrounds/1024x768.ppm))
