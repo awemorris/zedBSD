@@ -226,6 +226,8 @@ CONFIG_USERLAND_PROGRAMS          += \
 	ime-dict-skk \
 	libgl \
 	libbrowser \
+	libcrypto-compat \
+	libssl-compat \
 	libegl \
 	libgif-compat \
 	libglesv2 \

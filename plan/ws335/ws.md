@@ -13,6 +13,7 @@
 
 ## ユーザーの決定
 
+- 2026-11-13 ユーザーから、p036 の Makefile・mk の差分 A（libbrowser の `-DWB_TLS_COMPAT`）・B（`apps/browser-win32/Makefile` を compat の static link に、OpenSSL を外す）・C（7 つの platform の defaults.mk に compat の 2 つ）の承認を受けた（Q1 が当てた）。
 - （2026-11-02 10:52）ユーザーから、WS335 の完了の後に、Windows 版のブラウザ（WS334）の OpenSSL を libssl-compat・libcrypto-compat に切り替えて OpenSSL への依存を無くす、という趣旨の指示を受けた（p036 の切り替えを Windows にも、WS335 の後）。
 - （2026-11-02 10:07）ユーザーから、WS335 を completed まで進める、Sonnet なら 3 並列で実装してよい、という趣旨の指示を受けた。
 - 2026-11-01 ユーザーから、WS を立てて libssl-compat を実装する、標準廉価実装手順を使う、今 P6 で始める、という趣旨の指示を受けた。
