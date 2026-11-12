@@ -63,7 +63,7 @@
 - **共有の `build/` を消さない**（`build/llvm`・`build/NoctLang`・`build/host-noct-state`・`build/sources`・`build/distfiles`・`build/<arch>` など）。main の `build/` は読み取り専用の symlink か複写で使う。
 - **Makefile・`mk/` の変更**は概要と差分をユーザーに示し、返事の後に当てる（[makefile-style.md](plan/makefile-style.md)）。
 - RTL8822B の `.inc` は別の file のまま保つ（ライセンスを分けるため）。外部 package は source tree に取り込まず、tarball を取得・検証して patch し、ライセンスを監査する。
-- **Amaterrace GPU（`~/amaterrace-gpu`）の RTL は Claude が書かない**（担当にも書かせない）。Claude は仕様と RTL を読んで監査し driver を書き、RTL は Gemini が実装する。`docs/ghci.md` が正。詳細は [plan/amaterrace.md](plan/amaterrace.md)。
+- **Amaterrace GPU（`~/amaterrace-gpu`）の RTL は Claude が書かない**（担当にも書かせない）。Claude は仕様と RTL を監査し driver を書き、RTL は Gemini が実装し、両者が互いにレビューする（Claude の指摘も誤りうるので Gemini に妥当性を確かめてもらう）。`docs/ghci.md` が正。詳細は [plan/amaterrace.md](plan/amaterrace.md)。
 - `config/ci/config-amd64-server.mk` はユーザーの物（Q1 は許可を得て直してよい、担当は変えない）。sparcv9 の main の checkout の変更はユーザーの物（commit・revert しない）。
 - sudo はパスワード無しで使ってよい（package の導入、host の操作）。
 
