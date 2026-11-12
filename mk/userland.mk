@@ -38,8 +38,12 @@ PROGRAM_STAMPS := $(foreach d,$(PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsu
 
 # What every nested make is told, so that it reads the same configuration
 # file and builds for the same platform as this one (a platform entered at
-# the prompt or a CONFIGMK= given on the command line would not reach it).
-SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)"
+# the prompt or a CONFIGMK= given on the command line would not reach it),
+# and puts what it makes in the same build directory.  The directory is
+# absolute: a nested make runs in its package's directory, where a BUILD=
+# given on the command line as a relative path would name a directory in
+# the source tree.
+SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)" BUILD="$(abspath $(BUILD))"
 
 define PROGRAM_RULE
 _CHILD_DIRS_$(1) := $$(filter $(1)%/,$$(filter-out $(1),$$(ALL_PROGRAM_DIRS)))

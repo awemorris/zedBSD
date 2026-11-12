@@ -71,17 +71,18 @@ PLATFORM_DIR ?= $(if $(filter sun4u,$(PLATFORM)),sparcv9,\
 	$(PLATFORM))
 EXTERNAL_PLATFORM_DIR := $(strip \
 	$(if $(TOPLEVEL_BUILD),$(PLATFORM_DIR),$(STANDALONE_PLATFORM_DIR)))
-EXTERNAL_SYSROOT := \
-	$(abspath $(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)/sysroot)
-EXTERNAL_DYNAMIC := \
-	$(abspath $(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)/dynamic)
+# The platform's build directory: the top-level build's (BUILD), or
+# build/PLATFORM for a package made on its own.
+EXTERNAL_BUILD_DIR := \
+	$(abspath $(if $(BUILD),$(BUILD),$(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)))
+EXTERNAL_SYSROOT := $(EXTERNAL_BUILD_DIR)/sysroot
+EXTERNAL_DYNAMIC := $(EXTERNAL_BUILD_DIR)/dynamic
 
 # One generated set of entry points per configured target: the wrappers, a
 # CMake toolchain file with a platform description, an autoconf cross cache and
 # an environment file.  A package uses these instead of naming compiler flags
 # of its own, so the link contract lives in one place.
-EXTERNAL_CROSS_DIR := \
-	$(abspath $(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)/packages/toolchain)
+EXTERNAL_CROSS_DIR := $(EXTERNAL_BUILD_DIR)/packages/toolchain
 EXTERNAL_CROSS_ENV := $(EXTERNAL_CROSS_DIR)/environment.sh
 EXTERNAL_CROSS_STAMP := $(EXTERNAL_CROSS_DIR)/.zedbsd-cross-toolchain
 EXTERNAL_GEN_CROSS := $(EXTERNAL_TOOLS)/gen-cross-toolchain.sh

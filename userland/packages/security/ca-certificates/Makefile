@@ -36,7 +36,7 @@ EXT_ca-certificates_SHA256 := f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769
 
 $(eval $(call EXTERNAL_FILE,ca-certificates))
 
-CA_CERTIFICATES_LICENSE := $(CA_CERTIFICATES_DIR)/MPL-2.0.txt
+CA_CERTIFICATES_LICENSE := $(abspath $(CA_CERTIFICATES_DIR)/MPL-2.0.txt)
 
 .PHONY: ca-certificates
 ca-certificates: $(EXT_ca-certificates_ARCHIVE_VERIFIED)
@@ -58,18 +58,12 @@ $(eval \
 		security/ca-certificates, \
 		, \
 		0644, \
-		custom \
+		custom, \
+		/etc/ssl/cert.pem=$(EXT_ca-certificates_DISTFILE) \
+		/usr/share/licenses/ca-certificates/MPL-2.0.txt=$(CA_CERTIFICATES_LICENSE) \
 	)\
 )
 
-PACKAGE_INPUTS += \
-	$(if $(filter ca-certificates,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
-		$(EXT_ca-certificates_ARCHIVE_VERIFIED) \
-		$(CA_CERTIFICATES_LICENSE))
-
-PACKAGE_FILES += \
-	$(if $(filter ca-certificates,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
-		--file /etc/ssl/cert.pem=$(EXT_ca-certificates_DISTFILE) \
-		--file /usr/share/licenses/ca-certificates/MPL-2.0.txt=$(CA_CERTIFICATES_LICENSE) \
-		--mode /etc/ssl/cert.pem=0644 \
-		--mode /usr/share/licenses/ca-certificates/MPL-2.0.txt=0644)
+# The copy into the image waits for the check of the download, not for
+# the bare download.
+$(STANDALONE_BUILD_DIR)/etc/ssl/cert.pem: $(EXT_ca-certificates_ARCHIVE_VERIFIED)

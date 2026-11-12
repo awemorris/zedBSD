@@ -46,7 +46,7 @@ $(eval $(call EXTERNAL_FILE,hand-hershey-part5))
 HAND_HERSHEY_PARTS := part2 part3 part4 part5
 HAND_HERSHEY_WORK := $(EXTERNAL_WORKROOT)/hand-hershey
 HAND_HERSHEY_TEMPLATES := $(HAND_HERSHEY_WORK)/hershey.txt
-HAND_HERSHEY_NOTICE := $(HAND_HERSHEY_DIR)/NOTICE
+HAND_HERSHEY_NOTICE := $(abspath $(HAND_HERSHEY_DIR)/NOTICE)
 
 # The parts uncompressed (as text, never run), then the templates.
 $(HAND_HERSHEY_TEMPLATES): $(foreach part,$(HAND_HERSHEY_PARTS),$(EXT_hand-hershey-$(part)_ARCHIVE_VERIFIED)) \
@@ -64,12 +64,6 @@ hand-hershey: $(HAND_HERSHEY_TEMPLATES)
 # ---------------------------------------------------------------- packaging
 
 $(eval $(call USERLAND_PACKAGE,hand-hershey,Handwriting templates,*,n,package,,y,\
-	packages/fonts,fonts/hand-hershey,))
-
-PACKAGE_INPUTS += $(if $(filter hand-hershey,$(USER_PROGRAMS)),\
-	$(HAND_HERSHEY_TEMPLATES) $(HAND_HERSHEY_NOTICE))
-PACKAGE_FILES += $(if $(filter hand-hershey,$(USER_PROGRAMS)),\
-	--file /usr/share/keiland/hand/hershey.txt=$(HAND_HERSHEY_TEMPLATES) \
-	--file /usr/share/licenses/hand-hershey/NOTICE=$(HAND_HERSHEY_NOTICE) \
-	--mode /usr/share/keiland/hand/hershey.txt=0644 \
-	--mode /usr/share/licenses/hand-hershey/NOTICE=0644)
+	packages/fonts,fonts/hand-hershey,,0644,package,\
+	/usr/share/keiland/hand/hershey.txt=$(HAND_HERSHEY_TEMPLATES) \
+	/usr/share/licenses/hand-hershey/NOTICE=$(HAND_HERSHEY_NOTICE)))

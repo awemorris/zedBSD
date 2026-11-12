@@ -28,6 +28,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if __GCC_ATOMIC_LLONG_LOCK_FREE != 2
+/*
+ * Where an 8-byte atomic is not lock-free (i386), the C library's runtime
+ * serializes an agent's task word (since) under a lock.  Clang notes that
+ * such an operation is slower than a lock-free one, which that target
+ * accepts.  The word stays within this process.
+ */
+#pragma clang diagnostic ignored "-Watomic-alignment"
+#endif
+
 /* The least number of bytes allocated between two collections. */
 #define HEAP_MIN_THRESHOLD	(8U * 1024U * 1024U)
 

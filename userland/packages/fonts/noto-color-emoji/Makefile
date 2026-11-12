@@ -32,7 +32,7 @@ EXT_noto-color-emoji_SHA256 := 39ee3c587e10e89669b9ff32703261d10d5f9c4dd5ad147b6
 
 $(eval $(call EXTERNAL_FILE,noto-color-emoji))
 
-NOTO_COLOR_EMOJI_LICENSE := $(NOTO_COLOR_EMOJI_DIR)/OFL-1.1.txt
+NOTO_COLOR_EMOJI_LICENSE := $(abspath $(NOTO_COLOR_EMOJI_DIR)/OFL-1.1.txt)
 
 .PHONY: noto-color-emoji
 noto-color-emoji: $(EXT_noto-color-emoji_ARCHIVE_VERIFIED)
@@ -43,15 +43,10 @@ build: noto-color-emoji
 # ---------------------------------------------------------------- packaging
 
 $(eval $(call USERLAND_PACKAGE,noto-color-emoji,Colour emoji font,*,n,package,,y,\
-	packages/fonts,fonts/noto-color-emoji,,0644,custom))
+	packages/fonts,fonts/noto-color-emoji,,0644,custom,\
+	/usr/share/fonts/keiland-emoji.ttf=$(EXT_noto-color-emoji_DISTFILE) \
+	/usr/share/licenses/noto-color-emoji/OFL-1.1.txt=$(NOTO_COLOR_EMOJI_LICENSE)))
 
-# The verified record is the input, so the image waits for the check rather
-# than for the bare download.  The download keeps the fetcher's private mode,
-# so the modes are set: every program that draws text reads it.
-PACKAGE_INPUTS += $(if $(filter noto-color-emoji,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
-	$(EXT_noto-color-emoji_ARCHIVE_VERIFIED) $(NOTO_COLOR_EMOJI_LICENSE))
-PACKAGE_FILES += $(if $(filter noto-color-emoji,$(USERLAND_PROGRAMS) $(USER_PROGRAMS) $(ZEDBSD_USER_PROGRAMS)),\
-	--file /usr/share/fonts/keiland-emoji.ttf=$(EXT_noto-color-emoji_DISTFILE) \
-	--file /usr/share/licenses/noto-color-emoji/OFL-1.1.txt=$(NOTO_COLOR_EMOJI_LICENSE) \
-	--mode /usr/share/fonts/keiland-emoji.ttf=0644 \
-	--mode /usr/share/licenses/noto-color-emoji/OFL-1.1.txt=0644)
+# The copy into the image waits for the check of the download, not for
+# the bare download.
+$(STANDALONE_BUILD_DIR)/usr/share/fonts/keiland-emoji.ttf: $(EXT_noto-color-emoji_ARCHIVE_VERIFIED)

@@ -7,8 +7,8 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | q2033 | 作業中 | BUG-418 A: i386 の userland で CMPXCHG 無しの atomic（-march=i386 のまま） | — |
-| P2 | q2034 | 作業中 | BUG-418 C: package の data が image に入らない件の mk の差分（確かめてユーザーへ） | — |
+| P1 | — | 待機 | BUG-418: rpi5 の SD の image PASS。rpi4 は boot firmware の同意待ちで止めた | ユーザーの同意の後に rpi4 の image と QEMU |
+| P2 | — | 待機 | BUG-418 C を当てた main の確かめ PASS | — |
 | P3 | q2032 | 作業中 | WS333 p027: 5330 の package の C-state 0% の原因（i915）、qs40、S0 idle（watchdog の下で） | agy の依頼 07 が終われば監査も |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
@@ -97,12 +97,15 @@
 
 ## ユーザーの判断を待つ事
 
-（無し）
+- 2026-11-13 02:46（ユーザーは就寝、起きてから）: rpi4 の boot firmware（`LICENCE.broadcom`）の license の同意を、worktree `/home/awe/zedBSD-worktrees/p1-bug418e` で `make CONFIGMK=config/config.rpi4.mk firmware-licenses` で打つ（担当は打てない）。済めば P1 が rpi4 の SD の image と QEMU raspi4b の起動を確かめる（BUG-418）。
+
+
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
 （2026-11-01 10:29 クリア。手順は各 Bug の ticket にある）
 
+- BUG-418 C（package の data、2026-11-13 main）: desktop で日本語入力（keiland-ime）を起動し SKK の辞書で変換できるか、絵文字が出るか、https の公開の site が開けるか（/etc/ssl/cert.pem）。x86_64 以外（rpi5・vf2）の image でも同じ file があるか。
 - Pi 4 の GPU の回帰（WS291 p021 の直し 6d4ef0df9 は Pi 4 と Pi 5 で共有の code。Pi 4 は今 SwitchBot に繋がっておらず担当は遠隔で試せない）: Pi 4 に main の image を入れ、desktop と GPU の app（mview など）が前と同じに動くか。
 - VF2 の root（UFS 256 MB）の空き: 2026-11-01 の計測で 95%〜満杯になり、P4 の mview の texture の写しが ENOSPC で切れた。試験は /tmp（tmpfs）に置く形で回避した。板の古い物（~kei の p7・p15 など他の担当の置き物を含む）の整理か、SD の root の拡げをするか。
 - OmniGrammaton.exe（Windows 版のブラウザ）を本物の Windows で: main の build の zip（`make browser-win64-zip`）を展開して起動し、WS334 p032 の M1〜M8（描画・--no-gpu・https・location の欄・IME での日本語入力・cookie と localStorage の保持・暗い mode・snap の配置）。Wine では IME・snap・公開の site が確かめられない。

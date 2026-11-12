@@ -315,13 +315,17 @@ WS に固有の決定はその ws.md にある。ここは複数の WS・OS 全�
 
 ### 11.1 対象 platform
 
-- **i386 の CPU の下限**（2026-11-13 ユーザーの決定の要点）: i386（PC/AT と PC-98）の userland は `-march=i386` のまま（486・586・686 の命令は使わない）。CMPXCHG・CMPXCHG8B の無い CPU でも atomic が動く形を source に持つ。HAL の `src/hal/i386/atomic.c`（XCHG の guard で RMW と 64 bit を直列化）を参考にする。
+- **重要な platform と参考の platform**（2026-11-13 ユーザーの決定の要点）: 重要なのは x86_64・arm64・riscv64 だけで、直しはこれらを優先する。i386・pc9821 は参考までに動かしている platform で、build が崩れても後でまとめて直せばよい。変更ごとに i386・pc9821 の build を確かめない。定期的に build を確かめて直すだけにする。
+- **`make keiland-linux`・`make keiland-freebsd`**（Keiland の desktop を Linux・FreeBSD の host 向けに build する target、2026-11-13 ユーザー）: i386 と同じく、たまに直せばよく、普段は build が崩れていてよい。
+
+- **i386 の CPU の下限**（2026-11-13 ユーザーの決定の要点）: i386（PC/AT と PC-98）の userland は `-march=i386` のまま（486・586・686 の命令は使わない）。CMPXCHG・CMPXCHG8B の無い CPU でも atomic が動く形を source に持つ。HAL の `src/hal/i386/atomic.c`（XCHG の guard で RMW と 64 bit を直列化）を参考にする。LLVM が `-march=i386` でも inline に出す 486 の命令（4 byte 以下の `lock cmpxchg`・`xadd`、`bswap`）は、toolchain を直さずそのまま受け入れる（同日ユーザーの判断: 486 で動く今の形で閉じる。本当の 386 は対象にしない）。
+- **i386 と i686 は本来分けるべき**（2026-11-13 ユーザーの見方の要点）: 386 の機種（UP、Wayland は性能の上で動かない）と i686 の機種（SMP、desktop）は別の platform にするのが本来の形。今は本筋でないので対処しない（i386 の SMP・既定の desktop の package・userland の atomic の形は今のまま）。分ける時にこの項を見直す。
 
 `config/ci/` の config と `HAL_TIMER_FREQUENCY`（2026-10-27 の main）。位置付けの欄の「要確認」は 2026-10-27 の整理で Q1 がユーザーに確かめる物。
 
 | arch | config（config/ci/） | 位置付け | tick |
 | --- | --- | --- | --- |
-| amd64 | config-amd64.mk・config-amd64-server.mk（ユーザーの物）・config-intelmac.mk | 主対象（desktop・GPU・app） | 1000 Hz |
+| amd64 | config-amd64.mk・config-amd64-server.mk（ユーザーの物）・config-intelmac.mk | 主対象（desktop・GPU・app） | 100 Hz（2026-11-13 から一時的に、それまで 1000 Hz） |
 | aarch64 | config-rpi4.mk・config-rpi4-server.mk・config-rpi5.mk | 主対象 | 1000 Hz |
 | riscv64 | config-visionfive2.mk・config-visionfive2-keiland.mk・config-riscv64-virt.mk | VisionFive 2（fg020 は保留）。位置付けは要確認 | 1000 Hz |
 | armv7 | config-zybo.mk・config-armv7-virt.mk | ZYBO（fg021 達成）。位置付けは要確認 | 1000 Hz |

@@ -263,10 +263,10 @@ CONFIG_USERLAND_PROGRAMS          += \
 	calendar \
 	files \
 	imageview \
-	keiland-ime \
-	ime-dict-ja \
-	ime-dict-skk \
-	libgl \
+	ime \
+	dict \
+	skk-dict \
+	libGL \
 	libbrowser \
 	libcrypto-compat \
 	libssl-compat \
@@ -281,7 +281,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	libtruetype \
 	libvulkan \
 	libwayland-egl \
-	libwayland-client \
+	libwayland \
 	mailer \
 	mediastorage \
 	monitor \
@@ -290,8 +290,8 @@ CONFIG_USERLAND_PROGRAMS          += \
 	pdfviewer \
 	phone \
 	photos \
-	keiland-preview \
-	keiland-printd \
+	preview \
+	printd \
 	sessiond \
 	settings \
 	terminal \

@@ -98,9 +98,11 @@
  * The ring: a page of positions, then the frames.  Each offset is in
  * bytes from the start of the memory.  A position is a count of frames
  * that only grows; it is read with an 8-byte acquire load and written
- * with an 8-byte release store by its one writer.  The played position and
- * its time are one pair under the played sequence, a sequence lock: odd
- * while the server writes them.
+ * with an 8-byte release store by its one writer.  Where an 8-byte atomic
+ * is not lock-free (i386) a position is instead written as two 4-byte
+ * halves under its sequence, a sequence lock that is odd while its writer
+ * writes them.  The played position and its time are one pair under the
+ * played sequence, odd while the server writes them.
  */
 #define KL_AUDIO_RING_HEADER			4096U
 #define KL_AUDIO_RING_VERSION_VALUE		1U
@@ -113,9 +115,9 @@
 #define KL_AUDIO_RING_CAPACITY			24U
 #define KL_AUDIO_RING_PERIOD			28U
 #define KL_AUDIO_RING_WRITE_POSITION		64U	/* the client's */
-#define KL_AUDIO_RING_WRITE_SEQUENCE		72U	/* not used (audiod's, without an 8-byte atomic) */
+#define KL_AUDIO_RING_WRITE_SEQUENCE		72U	/* the client's, without a lock-free 8-byte atomic */
 #define KL_AUDIO_RING_READ_POSITION		128U	/* the server's: taken from the ring */
-#define KL_AUDIO_RING_READ_SEQUENCE		136U	/* not used */
+#define KL_AUDIO_RING_READ_SEQUENCE		136U	/* the server's, without a lock-free 8-byte atomic */
 #define KL_AUDIO_RING_PLAYED_POSITION		192U	/* the server's: heard, as it reckons */
 #define KL_AUDIO_RING_PLAYED_TIME		200U	/* the server's: CLOCK_MONOTONIC (ns) of that reckoning */
 #define KL_AUDIO_RING_PLAYED_SEQUENCE		208U	/* the server's: odd while the played pair is written */

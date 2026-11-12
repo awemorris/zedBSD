@@ -161,18 +161,8 @@ KEILAND_SOURCES := \
 	userland/desktop/picture/wallpaper.c
 
 # App Home starts X11 applications through keiland-x11, which starts
-# xserver when it is needed.
-ZEDBSD_PACKAGE_INPUTS += userland/desktop/wayland/keiland-x11
-
-ZEDBSD_PACKAGE_FILES += $(if $(filter wayland,$(ZEDBSD_USER_PROGRAMS)),--file /usr/libexec/keiland-x11=userland/desktop/wayland/keiland-x11)
-
-# App Home's default list, unless the image brings its own (a test's
-# or the demonstration's extra files, which would otherwise name the
-# same destination twice).
-ZEDBSD_PACKAGE_INPUTS += userland/desktop/wayland/apps.conf
-
-ZEDBSD_PACKAGE_FILES += $(if $(filter wayland,$(ZEDBSD_USER_PROGRAMS)),$(if $(findstring /etc/keiland/apps.conf=,$(ZEDBSD_TEST_EXTRA_FILES)),,\
-	--file /etc/keiland/apps.conf=userland/desktop/wayland/apps.conf --mode /etc/keiland/apps.conf=0644))
+# xserver when it is needed; apps.conf is App Home's default list.  Both
+# are among the package's data below.
 
 KEILAND_FONT_DATA := \
 	/usr/share/fonts/keiland.ttf=userland/desktop/fonts/Mahora-Regular.ttf \

@@ -19,6 +19,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if __GCC_ATOMIC_LLONG_LOCK_FREE != 2
+/*
+ * Where an 8-byte atomic is not lock-free (i386), the C library's runtime
+ * serializes the box serials under a lock.  Clang notes that such an
+ * operation is slower than a lock-free one, which that target accepts.  The
+ * serials stay within this process.
+ */
+#pragma clang diagnostic ignored "-Watomic-alignment"
+#endif
+
 /* The list markers of list-style-type, as UTF-16. */
 #define BOX_BULLET_DISC		0x2022U
 #define BOX_BULLET_CIRCLE	0x25e6U

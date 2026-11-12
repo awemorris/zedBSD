@@ -1,0 +1,63 @@
+diff --git a/mk/userland.mk b/mk/userland.mk
+index bf3bbf98ae..9b1733d9fa 100644
+--- a/mk/userland.mk
++++ b/mk/userland.mk
+@@ -38,8 +38,12 @@ PROGRAM_STAMPS := $(foreach d,$(PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsu
+ 
+ # What every nested make is told, so that it reads the same configuration
+ # file and builds for the same platform as this one (a platform entered at
+-# the prompt or a CONFIGMK= given on the command line would not reach it).
+-SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)"
++# the prompt or a CONFIGMK= given on the command line would not reach it),
++# and puts what it makes in the same build directory.  The directory is
++# absolute: a nested make runs in its package's directory, where a BUILD=
++# given on the command line as a relative path would name a directory in
++# the source tree.
++SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)" BUILD="$(abspath $(BUILD))"
+ 
+ define PROGRAM_RULE
+ _CHILD_DIRS_$(1) := $$(filter $(1)%/,$$(filter-out $(1),$$(ALL_PROGRAM_DIRS)))
+diff --git a/userland/packages/external.mk b/userland/packages/external.mk
+index 372d17b656..029e988048 100644
+--- a/userland/packages/external.mk
++++ b/userland/packages/external.mk
+@@ -71,17 +71,18 @@ PLATFORM_DIR ?= $(if $(filter sun4u,$(PLATFORM)),sparcv9,\
+ 	$(PLATFORM))
+ EXTERNAL_PLATFORM_DIR := $(strip \
+ 	$(if $(TOPLEVEL_BUILD),$(PLATFORM_DIR),$(STANDALONE_PLATFORM_DIR)))
+-EXTERNAL_SYSROOT := \
+-	$(abspath $(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)/sysroot)
+-EXTERNAL_DYNAMIC := \
+-	$(abspath $(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)/dynamic)
++# The platform's build directory: the top-level build's (BUILD), or
++# build/PLATFORM for a package made on its own.
++EXTERNAL_BUILD_DIR := \
++	$(abspath $(if $(BUILD),$(BUILD),$(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)))
++EXTERNAL_SYSROOT := $(EXTERNAL_BUILD_DIR)/sysroot
++EXTERNAL_DYNAMIC := $(EXTERNAL_BUILD_DIR)/dynamic
+ 
+ # One generated set of entry points per configured target: the wrappers, a
+ # CMake toolchain file with a platform description, an autoconf cross cache and
+ # an environment file.  A package uses these instead of naming compiler flags
+ # of its own, so the link contract lives in one place.
+-EXTERNAL_CROSS_DIR := \
+-	$(abspath $(EXTERNAL_ROOT)/build/$(EXTERNAL_PLATFORM_DIR)/packages/toolchain)
++EXTERNAL_CROSS_DIR := $(EXTERNAL_BUILD_DIR)/packages/toolchain
+ EXTERNAL_CROSS_ENV := $(EXTERNAL_CROSS_DIR)/environment.sh
+ EXTERNAL_CROSS_STAMP := $(EXTERNAL_CROSS_DIR)/.zedbsd-cross-toolchain
+ EXTERNAL_GEN_CROSS := $(EXTERNAL_TOOLS)/gen-cross-toolchain.sh
+diff --git a/userland/base/package.mk b/userland/base/package.mk
+--- a/userland/base/package.mk
++++ b/userland/base/package.mk
+@@ -120,8 +120,9 @@
+ 	$(if $(filter i386 pcat pc98 pc9821 pc9801,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-m32 -march=i386 -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32,\
+ 	-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64))))
+ 
+-# Where the platform's build puts what the packages make.
+-STANDALONE_BUILD_DIR = $(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)
++# Where the platform's build puts what the packages make: the top-level
++# build's directory (BUILD), or build/PLATFORM for a package made on its own.
++STANDALONE_BUILD_DIR = $(if $(BUILD),$(abspath $(BUILD)),$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR))
+ STANDALONE_SYSROOT = $(STANDALONE_BUILD_DIR)/sysroot
+ STANDALONE_DYNAMIC_DIR = $(STANDALONE_BUILD_DIR)/dynamic
+ STANDALONE_LIB_DIR = $(STANDALONE_BUILD_DIR)/lib

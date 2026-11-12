@@ -23,12 +23,6 @@ ime-dict-skk: $(ZEDBSD_IME_DICT_SKK)
 
 # The input method (keiland-ime) requires it since WS154 p004, so every image with the input method has it.
 $(eval $(call USERLAND_PACKAGE,ime-dict-skk,ime-dict-skk - Dictionaries of the SKK input method,*,n,package,,y,\
-	desktop,desktop/ime/skk-dict,))
-
-ZEDBSD_PACKAGE_INPUTS += $(if $(filter ime-dict-skk,$(ZEDBSD_USER_PROGRAMS)),\
-	$(ZEDBSD_IME_DICT_SKK))
-ZEDBSD_PACKAGE_FILES += $(if $(filter ime-dict-skk,$(ZEDBSD_USER_PROGRAMS)),\
-	--file /usr/share/keiland/ime/skk/SKK-JISYO.X=$(ZEDBSD_IME_DICT_SKK_DIR)/SKK-JISYO.X \
-	--mode /usr/share/keiland/ime/skk/SKK-JISYO.X=0644 \
-	--file /usr/share/keiland/ime/skk/SKK-JISYO.remacs=$(ZEDBSD_IME_DICT_SKK_DIR)/SKK-JISYO.remacs \
-	--mode /usr/share/keiland/ime/skk/SKK-JISYO.remacs=0644)
+	desktop,desktop/ime/skk-dict,,0644,package,\
+	/usr/share/keiland/ime/skk/SKK-JISYO.X=$(abspath $(ZEDBSD_IME_DICT_SKK_DIR)/SKK-JISYO.X) \
+	/usr/share/keiland/ime/skk/SKK-JISYO.remacs=$(abspath $(ZEDBSD_IME_DICT_SKK_DIR)/SKK-JISYO.remacs)))

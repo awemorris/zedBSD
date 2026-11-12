@@ -21,6 +21,7 @@
 #ifndef AUDIOD_PROTOCOL_H
 #define AUDIOD_PROTOCOL_H
 
+#include <sched.h>
 #include <stdint.h>
 
 #define AUDIOD_SOCKET_PATH	"/run/audiod.sock"
@@ -424,6 +425,13 @@ struct audiod_shm_header {
 #define AUDIOD_LOW_WORD 1
 #endif
 
+/*
+ * How many times a reader looks again at a position its writer, in another
+ * process, is in the middle of writing.  A writer that died there leaves the
+ * sequence odd, and the reader must not wait for it forever.
+ */
+#define AUDIOD_POSITION_RETRIES 1000U
+
 /* Reads the other side's position (acquire). */
 static inline uint64_t
 audiod_position_load(
@@ -439,15 +447,31 @@ audiod_position_load(
 	uint32_t after;
 	uint32_t low;
 	uint32_t high;
+	unsigned tries;
 
+	/*
+	 * Reads the halves until the writer was not in the middle of writing
+	 * them.  A writer caught there needs the processor to finish, so the
+	 * reader yields; a writer that died there leaves the sequence odd, and
+	 * the last halves read stand.
+	 */
 	word = (const uint32_t *)(const void *)position;
-	do {
+	tries = 0U;
+	for (;;) {
 		before = __atomic_load_n(sequence, __ATOMIC_ACQUIRE);
 		low = __atomic_load_n(&word[AUDIOD_LOW_WORD], __ATOMIC_RELAXED);
 		high = __atomic_load_n(&word[1 - AUDIOD_LOW_WORD], __ATOMIC_RELAXED);
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
 		after = __atomic_load_n(sequence, __ATOMIC_RELAXED);
-	} while ((before & 1U) != 0 || before != after);
+		tries++;
+		if ((before & 1U) == 0U && before == after)
+			break;
+		if (tries >= AUDIOD_POSITION_RETRIES)
+			break;
+		(void)sched_yield();
+	}
+
+	/* Succeeded: the position. */
 	return ((uint64_t)high << 32) | low;
 #endif
 }
