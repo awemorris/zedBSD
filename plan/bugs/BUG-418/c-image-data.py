@@ -18,6 +18,8 @@ import struct
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
+# No __pycache__ beside the reader in the source tree.
+sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location(
 	"check_ufs_image", ROOT / "mk/old-tools/build/check-ufs-image.py")
 checker = importlib.util.module_from_spec(spec)
