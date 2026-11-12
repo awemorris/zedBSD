@@ -26,7 +26,8 @@ GHCI 1.0 の仕様（`docs/ghci.md`）と Amaterrace GPU の RTL は `/home/awe/
 
 - Claude は agy に直接指示を送り、返事を受け取れる（ユーザーは Claude を UI にする）:
   `cd /home/awe/amaterrace-gpu && agy --conversation <会話の ID> -p "<指示>"`
-- 会話の ID は `~/.gemini/antigravity-cli/cache/last_conversations.json`（作業の directory ごとの最後の会話）。詳しくは同じ所の `conversation_metadata.json`。
+- **今の RTL の実装のセッション**: `00de1bda-f4cb-45eb-94a3-091c9e9bd964`（2026-11-12、依頼 06 を実装中）。指示はこの ID に送る: `agy --conversation 00de1bda-f4cb-45eb-94a3-091c9e9bd964 -p "..."`（作業の directory は `/home/awe/amaterrace-gpu`）。
+- 他の会話の ID は `~/.gemini/antigravity-cli/cache/last_conversations.json`（作業の directory ごとの最後の会話。実装中のセッションと違う事がある）と `conversation_metadata.json`。
 - `-p` で送った往復は agy の対話の画面に出ない（2026-11-12 ユーザーが確かめた）。ユーザーに見せる事は Claude が報告する。
 - 長い作業は背景で待ち、時間の上限を付ける。指示は file の依頼（`gemini-request-NN.md`）を指して短く書き、file の変更の可否を明記する。
 
