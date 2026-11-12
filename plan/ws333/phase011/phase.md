@@ -90,14 +90,14 @@ design.md §9 の p011: [p006](../phase006/phase.md) の cpuperf の枠組みの
 
 - 受け入れ（design.md §9 の p011 の行）: host 試験（模擬の CPUID・MSR）、amd64 の build、QEMU で provider 無し（関門で止まる）。
 - 済んだ事: host 試験（y 13 場面・n 3 場面、わざと壊す確かめ 15 個）、amd64 の既定と y の build、全 port の build、QEMU+KVM の y と既定で login と関門（HMP）、5330 の実機（HWP の start・HFI・RAPL の meter 4 本・strategy 3 つ・`cpuperf=off`）。
-- 2026-11-12 に流した事: `plan/ws333/tests/cpu-x86-host/run.sh` → 1 回目 FAIL（build の作り直しの 8016438f9b で `cpu-x86-insn.h` の guard が `CONFIG_KERN_CPU_PERF` に変わり、試験は `CONFIG_CPU_PERF` だけを定義）→ 試験が mk と同じく 2 つの macro を定義する形に直して PASS（16 場面、831 checks、0 failures、6443adad84）。新しい mk の x86_64 の vmunix（既定 = MSR の道が有効）は warning 0。
-- 2026-11-12 の作り直しの後、作業と試験は `CONFIG_KERN_CPU_PERF=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y` で build する（ws.md の「前提」）。古い mk の食い違いは意味を失った。
+- 2026-11-12 に流した事: `plan/ws333/tests/cpu-x86-host/run.sh` → 1 回目 FAIL（build の作り直しの 8016438f9b で `cpu-x86-insn.h` の guard が `CONFIG_KERN_THERMAL` に変わり、試験は `CONFIG_CPU_PERF` だけを定義）→ 試験が mk と同じく 2 つの macro を定義する形に直して PASS（16 場面、831 checks、0 failures、6443adad84）。新しい mk の x86_64 の vmunix（既定 = MSR の道が有効）は warning 0。
+- 2026-11-12 の作り直しの後、作業と試験は `CONFIG_KERN_THERMAL=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y` で build する（ws.md の「前提」）。古い mk の食い違いは意味を失った。
 - 残り（p014 へ）: 全 CPU の負荷で performance の P-core が 1.4 GHz に留まる理由（PLATFORM_LIMIT の印 0x8）、E-core の 4 つ組の clock の共有、MC6 の出し方（p004 の UAPI に scope の欄を置いた）、0xE2 の lock の bit。TCG・Intel Mac の起動は未実施。
 - P1 の見立て: cleared にしてよい（受け入れの 3 つは全部済み、実機でも動いた）。mk の食い違いは build の設定の問題として p015・mk の案で扱う。ただし mk の案が当たるまで「MSR の道の無い amd64 の kernel」は build できないので、cleared の記録にその旨を残す。
 
 ## 2026-11-12 ユーザーの手での直し（5db83e80ff）の Q1 の確かめ（x86_64 だけ）
 
 - 変更: `mk/platform-x86_64/vmunix.mk` から MSR の 4 file（cpu-x86-control.c・cpux86-hwp.c・cpux86-power.c・cpux86-pstate.c）を外し、`cpu-x86.c` の MSR の制御を `CONFIG_CPU_PERF && CONFIG_DRIVER_X86_POWER_CONTROL` の下に。4 file は `mk/kernel.mk` が `CONFIG_DRIVER_X86_POWER_CONTROL=y` の時だけ入れる。
-- build（`make CONFIGMK=<PLATFORM := x86_64> BUILD=build/q1hwp/<名> …/vmunix`）: 既定 rc 0・warning 0（`-DCONFIG_CPU_PERF=1 -DCONFIG_DELL_SMM_BOOST=1`、MSR の制御の symbol 0 個）、`CONFIG_DRIVER_X86_POWER_CONTROL=y` rc 0・warning 0（制御の symbol 10 個、二重の symbol は無くなった）、`CONFIG_DRIVER_DELL_SMM_BOOST=n` rc 0・warning 0、`CONFIG_DRIVER_CPU_PERF=n CONFIG_KERN_CPU_PERF=n` rc 2（link で `kern_cpuperf_init`（entry.c）・`kern_cpuperf_notify`（clock.c）・`kern_cpuperf_provider_register`（cpu-x86.c）が未定義）。
+- build（`make CONFIGMK=<PLATFORM := x86_64> BUILD=build/q1hwp/<名> …/vmunix`）: 既定 rc 0・warning 0（`-DCONFIG_CPU_PERF=1 -DCONFIG_DELL_SMM_BOOST=1`、MSR の制御の symbol 0 個）、`CONFIG_DRIVER_X86_POWER_CONTROL=y` rc 0・warning 0（制御の symbol 10 個、二重の symbol は無くなった）、`CONFIG_DRIVER_DELL_SMM_BOOST=n` rc 0・warning 0、`CONFIG_DRIVER_CPU_PERF=n CONFIG_KERN_THERMAL=n` rc 2（link で `kern_cpuperf_init`（entry.c）・`kern_cpuperf_notify`（clock.c）・`kern_cpuperf_provider_register`（cpu-x86.c）が未定義）。
 - host 試験 `plan/ws333/tests/cpu-x86-host/run.sh`: 制御の build に `-DCONFIG_DRIVER_X86_POWER_CONTROL=1` が無く 4 場面が FAIL → 試験を kernel の macro に合わせて直し PASS（制御あり 13 場面・無し 3 場面、失敗 0）。
 - 残り（ユーザーの判断）: `CONFIG_DRIVER_DELL_SMM_BOOST` の既定が y のまま（p018 の結論は n）。`CONFIG_DRIVER_CPU_PERF=n` は今も build できない（既定 y で使うなら問題ない）。

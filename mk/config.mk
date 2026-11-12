@@ -468,16 +468,20 @@ CONFIG_DRIVER_RPI5_BT             ?= n
 # Framework
 ########################
 
-# [Generic CPU performance monitoring driver] (/dev/thermal)
-CONFIG_KERN_CPU_PERF              ?= n
+# [Kernel Thermal core]
+CONFIG_KERN_THERMAL               ?= n
 
 # [x86 Power Control driver] (/dev/thermal)
-#  - Depends: CONFIG_KERN_CPU_PERF
+#  - Depends: CONFIG_KERN_THERMAL
 CONFIG_DRIVER_X86_POWER_CONTROL   ?= n
 
 # [RPi5 processor temperature] (sysctl hw.thermal)
 #  - TODO: need to port to /dev/thermal
 CONFIG_DRIVER_RPI5_FAN            ?= n
+
+# [Dell Laptop Thermal] (/dev/thermal)
+#  - Depends: CONFIG_KERN_THERMAL
+CONFIG_DRIVER_DELL_SMM_BOOST      ?= n
 
 ################################################
 # Camera and Capture

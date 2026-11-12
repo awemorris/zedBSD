@@ -3,7 +3,7 @@
 # (src/drivers/platform/pcat/cpu-x86/cpu-x86*.c) twice: with the performance
 # control (CONFIG_CPU_PERF=1, every scenario) and without it (the description
 # only; the build links no RDMSR or WRMSR, so a reference to one fails it).
-# The kernel's build defines CONFIG_KERN_CPU_PERF with CONFIG_CPU_PERF (and
+# The kernel's build defines CONFIG_KERN_THERMAL with CONFIG_CPU_PERF (and
 # cpu-x86-insn.h reads the former), and the MSR control only with
 # CONFIG_DRIVER_X86_POWER_CONTROL (mk/kernel.mk), so the test defines them the
 # same way: the control build has all three, the other one none of them.
@@ -20,7 +20,7 @@ src=${CPU_X86_SRC:-$repo/src/drivers/platform/pcat/cpu-x86}
 flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -DHAL_ARCH_AMD64 -I$repo/include -I$repo/src -I$src"
 status=0
 
-if ! $cc $flags -DCONFIG_CPU_PERF=1 -DCONFIG_KERN_CPU_PERF=1 -DCONFIG_DRIVER_X86_POWER_CONTROL=1 ${SANITIZE:-} -o "$out/cpu-x86-host-y" \
+if ! $cc $flags -DCONFIG_CPU_PERF=1 -DCONFIG_KERN_THERMAL=1 -DCONFIG_DRIVER_X86_POWER_CONTROL=1 ${SANITIZE:-} -o "$out/cpu-x86-host-y" \
 	"$src/cpu-x86.c" "$src/cpu-x86-control.c" "$src"/cpux86*.c "$here/cpu-x86-host-test.c" \
 	> "$out/build-y.log" 2>&1; then
 	echo "build with the control: FAILED"; head -30 "$out/build-y.log"; status=1
@@ -28,7 +28,7 @@ elif ! timeout 60 "$out/cpu-x86-host-y"; then
 	status=1
 fi
 
-if ! $cc $flags -DCONFIG_CPU_PERF=0 -DCONFIG_KERN_CPU_PERF=0 ${SANITIZE:-} -o "$out/cpu-x86-host-n" \
+if ! $cc $flags -DCONFIG_CPU_PERF=0 -DCONFIG_KERN_THERMAL=0 ${SANITIZE:-} -o "$out/cpu-x86-host-n" \
 	"$src/cpu-x86.c" "$src/cpux86.c" "$src/cpux86-cpuid.c" "$here/cpu-x86-host-test.c" \
 	> "$out/build-n.log" 2>&1; then
 	echo "build without the control: FAILED"; head -30 "$out/build-n.log"; status=1

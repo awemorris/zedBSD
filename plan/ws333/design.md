@@ -779,8 +779,8 @@ p008〜p010 は p007 の merge の後に並べて走れる（`cpux86.c` は p007
 
 ### 16.2 build の前提（2026-11-12、build system の作り直しの後）
 
-- WS333 の作業・試験の build は `CONFIG_KERN_CPU_PERF=y` と `CONFIG_DRIVER_X86_POWER_CONTROL=y` で行う（2026-11-12 ユーザー）。既定の値は WS333 の扱いの外。
-- cpu-x86 の provider の登録と MSR の制御は `CONFIG_KERN_CPU_PERF && CONFIG_DRIVER_X86_POWER_CONTROL` の下（ae3df3c353）。枠組みの初期化（`entry.c`）と通知（`clock.c`）は `CONFIG_KERN_CPU_PERF` の下。
+- WS333 の作業・試験の build は `CONFIG_KERN_THERMAL=y` と `CONFIG_DRIVER_X86_POWER_CONTROL=y` で行う（2026-11-12 ユーザー）。既定の値は WS333 の扱いの外。
+- cpu-x86 の provider の登録と MSR の制御は `CONFIG_KERN_THERMAL && CONFIG_DRIVER_X86_POWER_CONTROL` の下（ae3df3c353）。枠組みの初期化（`entry.c`）と通知（`clock.c`）は `CONFIG_KERN_THERMAL` の下。
 - 作り直しの前の mk の食い違いと既定の議論（第 3 版の初めの §16.2、Q333-7 の「有効にする時期」）は、作り直しで意味を失ったので消した。
 
 ### 16.3 試験の道具の古さ

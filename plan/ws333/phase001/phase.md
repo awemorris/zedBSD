@@ -31,17 +31,17 @@ ws.md の p001 の行のとおり。WS301・WS303 の design.md・user-questions
 
 | build | コマンドの要点 | 結果 |
 | --- | --- | --- |
-| x86_64 既定 | `make -j16 CONFIGMK=build/tmp/ws333/config-x86_64.mk BUILD=build/ws333/x86_64-def build/ws333/x86_64-def/vmunix` | rc 0、`warning:` 0。flag に `-DCONFIG_KERN_CPU_PERF=1 -DCONFIG_CPU_PERF=1 -DCONFIG_DELL_SMM_BOOST=1`（defaults.mk の `CONFIG_DRIVER_CPU_PERF := y`・`CONFIG_DRIVER_DELL_SMM_BOOST := y`） |
-| x86_64 `CONFIG_KERN_CPU_PERF=y` | 同じに変数を足す | rc 0、warning 0（既定と同じ flag） |
+| x86_64 既定 | `make -j16 CONFIGMK=build/tmp/ws333/config-x86_64.mk BUILD=build/ws333/x86_64-def build/ws333/x86_64-def/vmunix` | rc 0、`warning:` 0。flag に `-DCONFIG_KERN_THERMAL=1 -DCONFIG_CPU_PERF=1 -DCONFIG_DELL_SMM_BOOST=1`（defaults.mk の `CONFIG_DRIVER_CPU_PERF := y`・`CONFIG_DRIVER_DELL_SMM_BOOST := y`） |
+| x86_64 `CONFIG_KERN_THERMAL=y` | 同じに変数を足す | rc 0、warning 0（既定と同じ flag） |
 | x86_64 `CONFIG_DRIVER_DELL_SMM_BOOST=n` | 同じ | rc 0、warning 0 |
 | x86_64 tick を periodic に | `CONFIG_CPPFLAGS=-DLAPIC_TICK_TSC_DEADLINE=0`（`KERN_CPPFLAGS=` を command line に置くと全部の flag が消えて失敗する） | rc 0、warning 0 |
-| x86_64 `CONFIG_DRIVER_CPU_PERF=n CONFIG_KERN_CPU_PERF=n`（旧 main の既定 n に当たる形） | 同じ | **rc 2**: `cpu-x86-control.c` が `drv_cpu_x86_rdmsr`・`wrmsr` の宣言なしで error（21 件）。cpuperf.c も外れる（design.md §16.2 の 1・2） |
+| x86_64 `CONFIG_DRIVER_CPU_PERF=n CONFIG_KERN_THERMAL=n`（旧 main の既定 n に当たる形） | 同じ | **rc 2**: `cpu-x86-control.c` が `drv_cpu_x86_rdmsr`・`wrmsr` の宣言なしで error（21 件）。cpuperf.c も外れる（design.md §16.2 の 1・2） |
 | x86_64 `CONFIG_DRIVER_X86_POWER_CONTROL=y` | 同じ | **rc 2**: MSR の 4 file が二重で `duplicate symbol`（§16.2 の 2） |
 | intelmid64・vf2 既定 | 同じ形 | rc 0、warning 0 |
 | rpi4・rpi5 既定 | `make -j16 CONFIGMK=build/tmp/ws333/config-rpi5.mk build/rpi5/vmunix` | rc 0、warning 0（rpi5 は `-DCONFIG_DRIVER_RPI5_FAN=1`） |
 | i386・pc9821 | — | **止めた**。i386 の vmunix の target が compiler-rt の builtins を通して `build/llvm-source/.patched` に依存し、worktree に無い LLVM の tarball を取得して共有の `build/llvm-source` に展開し直した（中身は `patch -R --dry-run` が 14 file とも clean で前と同じ、mtime が変わった。Q1 に報告済み）。Q1 の指示で i386・pc9821 の build はしない |
 
-source と mk の照合: WS333 の C の file（`src/kern/thermal.c`・`thermal-guard.c`・`cpuperf.c`、`src/drivers/platform/pcat/cpu-x86/*.c`、`src/drivers/acpi/*.c`、`src/drivers/platform/rpi5/rpi5-fan.c`）は全部が `mk/kernel.mk` か機種の vmunix.mk に名前がある（`src/drivers/acpi/*.c` 32 file も。旧 build は wildcard）。source が読む config の macro（`CONFIG_CPU_PERF`・`CONFIG_KERN_CPU_PERF`・`CONFIG_DELL_SMM_BOOST`・`CONFIG_DRIVER_RPI5_FAN`・`CONFIG_DRIVER_ACPI`・`LAPIC_TICK_TSC_DEADLINE`・`IDLE_WAIT_DEEPEST_CSTATE`）は全部 mk が定義するか source に既定がある。食い違いは design.md §16.2 の 1〜6。
+source と mk の照合: WS333 の C の file（`src/kern/thermal.c`・`thermal-guard.c`・`cpuperf.c`、`src/drivers/platform/pcat/cpu-x86/*.c`、`src/drivers/acpi/*.c`、`src/drivers/platform/rpi5/rpi5-fan.c`）は全部が `mk/kernel.mk` か機種の vmunix.mk に名前がある（`src/drivers/acpi/*.c` 32 file も。旧 build は wildcard）。source が読む config の macro（`CONFIG_CPU_PERF`・`CONFIG_KERN_THERMAL`・`CONFIG_DELL_SMM_BOOST`・`CONFIG_DRIVER_RPI5_FAN`・`CONFIG_DRIVER_ACPI`・`LAPIC_TICK_TSC_DEADLINE`・`IDLE_WAIT_DEEPEST_CSTATE`）は全部 mk が定義するか source に既定がある。食い違いは design.md §16.2 の 1〜6。
 
 ### mk の差分の案（当てていない、ユーザーの確認が要る）
 
@@ -56,7 +56,7 @@ source と mk の照合: WS333 の C の file（`src/kern/thermal.c`・`thermal-
 | `sh plan/ws333/tests/cpux86/run-unit.sh all` | PASS（test-builders 21・cpuid 3590873・cpux86 4140・hwp 12804888・power 275202・pstate 120186 checks） |
 | `sh plan/ws333/tests/cpux86/check-skeleton.sh` | PASS |
 | `sh plan/ws333/tests/cpuperf-host/run.sh build/tmp/ws333/cpuperf-host` | PASS（196 checks、0 failures） |
-| `sh plan/ws333/tests/cpu-x86-host/run.sh build/tmp/ws333/cpu-x86-host2` | 1 回目 FAIL → 試験を直して PASS（y 13 場面・n 3 場面、計 831 checks、0 failures）。原因: build の作り直し（8016438f9b）で `cpu-x86-insn.h` の guard が `CONFIG_KERN_CPU_PERF` に変わり、試験は `CONFIG_CPU_PERF` だけを定義していた。source は変えず、試験が mk と同じく 2 つの macro を定義する形にした（6443adad84） |
+| `sh plan/ws333/tests/cpu-x86-host/run.sh build/tmp/ws333/cpu-x86-host2` | 1 回目 FAIL → 試験を直して PASS（y 13 場面・n 3 場面、計 831 checks、0 failures）。原因: build の作り直し（8016438f9b）で `cpu-x86-insn.h` の guard が `CONFIG_KERN_THERMAL` に変わり、試験は `CONFIG_CPU_PERF` だけを定義していた。source は変えず、試験が mk と同じく 2 つの macro を定義する形にした（6443adad84） |
 | `sh plan/ws333/tests/thermal-host/run.sh build/tmp/ws333/thermal-host` | 22 scenarios、0 failed |
 | `sh plan/ws333/tests/sessiond-thermal/run.sh build/tmp/ws333/sessiond` | PASS（113 checks、plain と ASan/UBSan） |
 | `sh plan/ws333/tests/wmi/run.sh` | PASS（9 項目と unit 79 checks） |

@@ -378,7 +378,7 @@ kernel_entry(
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary CPU notification failed");
 
-#if CONFIG_KERN_CPU_PERF
+#if CONFIG_KERN_THERMAL
 	/* Builds the table of the CPUs' performance now that each takes notifications. */
 	kern_cpuperf_init();
 #endif
@@ -403,8 +403,10 @@ kernel_entry(
 		hal_fatal(__FILE__, __LINE__,
 			  "network subsystem initialization failed");
 
+#if CONFIG_KERN_THERMAL
 	/* Starts the thermal core's threads; drivers that registered before keep their place. */
 	kern_thermal_init();
+#endif
 
 	/* Enables timer and device interrupts before the boot worker can wait. */
 	hal_irq_enable();

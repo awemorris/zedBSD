@@ -59,8 +59,6 @@ KERN_SOURCES := \
 	src/kern/quota.c \
 	src/kern/tty.c \
 	src/kern/tty-csi.c \
-	src/kern/thermal.c \
-	src/kern/thermal-guard.c \
 	src/kern/text-display.c \
 	src/kern/partition.c \
 	src/kern/klog.c \
@@ -1248,12 +1246,18 @@ KERN_SOURCES += \
 	src/drivers/platform/rpi-common/rpi-bt-link.c
 endif
 
-# [Generic CPU performance monitoring driver] (/dev/thermal)
-#  - XXX: TODO: move this module to drivers/
-ifneq ($(filter y,$(CONFIG_KERN_CPU_PERF) $(CONFIG_DRIVER_CPU_PERF)),)
-KERN_CPPFLAGS += -DCONFIG_KERN_CPU_PERF=1
+# [Kernel Thermal core]
+ifneq ($(filter y,$(CONFIG_KERN_THERMAL)),)
+KERN_CPPFLAGS += -DCONFIG_KERN_THERMAL=1
 KERN_SOURCES += \
-	src/kern/cpuperf.c
+	src/kern/cpuperf.c \
+	src/kern/thermal.c \
+	src/kern/thermal-guard.c \
+	src/kern/thermal-device.c
+ifneq ($(filter y,$(CONFIG_DRIVER_ACPI)),)
+KERN_SOURCES += \
+	src/drivers/acpi/acpi-thermal.c
+endif
 endif
 
 # [Smart Card driver] (/dev/smartcard)
@@ -1291,8 +1295,6 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_ACPI)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_ACPI=1
 KERN_SOURCES += \
-	src/drivers/acpi/acpi-dell-codec.c \
-	src/drivers/acpi/acpi-dell.c \
 	src/drivers/acpi/acpi-dev.c \
 	src/drivers/acpi/acpi-ec.c \
 	src/drivers/acpi/acpi-event.c \
@@ -1304,7 +1306,6 @@ KERN_SOURCES += \
 	src/drivers/acpi/acpi-sleep.c \
 	src/drivers/acpi/acpi-tables.c \
 	src/drivers/acpi/acpi-text.c \
-	src/drivers/acpi/acpi-thermal.c \
 	src/drivers/acpi/acpi-wmi-table.c \
 	src/drivers/acpi/acpi-wmi.c \
 	src/drivers/acpi/aml-define.c \
@@ -1363,17 +1364,20 @@ KERN_SOURCES += \
 	src/drivers/i2c/i2c-hid.c
 endif
 
+# [Dell SMM performance boost]
+ifneq ($(filter y,$(CONFIG_DRIVER_DELL_SMM_BOOST)),)
+KERN_CPPFLAGS += -DCONFIG_DELL_SMM_BOOST=1
+KERN_SOURCES += \
+	src/drivers/acpi/acpi-dell-codec.c \
+	src/drivers/acpi/acpi-dell.c
+endif
+
 #
 # Settings, debugging and tests
 #
 
 # [Kernel Buffer Cache Size]
 KERN_CPPFLAGS += -DCONFIG_BUF_CACHE_KIB=$(if $(strip $(CONFIG_BUF_CACHE_KIB)),$(CONFIG_BUF_CACHE_KIB),0)
-
-# [Dell SMM performance boost]
-ifneq ($(filter y,$(CONFIG_DRIVER_DELL_SMM_BOOST)),)
-KERN_CPPFLAGS += -DCONFIG_DELL_SMM_BOOST=1
-endif
 
 # [PC/AT serial mirror of the console]
 ifneq ($(filter y,$(CONFIG_PCAT_SERIAL_MIRROR)),)

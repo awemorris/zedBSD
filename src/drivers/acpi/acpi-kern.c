@@ -20,14 +20,7 @@
 
 #include <stdarg.h>
 
-#include <kern/kcrt.h>
 #include <uapi/errno.h>
-
-#include <drivers/acpi/acpi.h>
-#include <drivers/acpi/dell.h>
-#include <drivers/acpi/wmi.h>
-#include <kern/system-event.h>
-#include <drivers/pci/pci.h>
 
 #include "kern/clock.h"
 #include "kern/device-io.h"
@@ -41,6 +34,17 @@
 #include "kern/sleep.h"
 #include "kern/thread.h"
 #include "kern/waitq.h"
+#include "kern/kcrt.h"
+#include "kern/system-event.h"
+
+#include "drivers/acpi/acpi.h"
+#include "drivers/acpi/wmi.h"
+#include "drivers/pci/pci.h"
+#include "drivers/acpi/dell.h"
+
+#if CONFIG_DRIVER_DELL_SMM_BOOST
+#include "drivers/acpi/dell.h"
+#endif
 
 #include "acpi-tables.h"
 #include "acpi-text.h"
@@ -246,20 +250,24 @@ drv_acpi_attach(void)
 	if (error != 0 && error != ENODEV)
 		kern_logf("acpi: the power devices did not attach (error %d)\n", error);
 
+#if CONFIG_KERN_THERMAL
 	/* Reads the temperature sensors for the thermal core; a machine without one has none listed. */
 	error = drv_acpi_thermal_attach();
 	if (error != 0 && error != ENODEV)
 		kern_logf("acpi: the temperature sensors did not attach (error %d)\n", error);
+#endif
 
 	/* Lists the WMI blocks of the mapping devices whose _WDG is data; a machine without one has none. */
 	error = drv_acpi_wmi_attach();
 	if (error != 0 && error != ENODEV)
 		kern_logf("acpi: the WMI mapping devices did not attach (error %d)\n", error);
 
+#if CONFIG_DRIVER_DELL_SMM_BOOST
 	/* Serves a Dell laptop's fans and thermal mode to the thermal core; another machine has no Dell WMI. */
 	error = drv_acpi_dell_attach();
 	if (error != 0 && error != ENODEV)
 		kern_logf("acpi: the Dell thermal provider did not attach (error %d)\n", error);
+#endif
 
 	/* Finds the LPS0 device of S0 idle and its _DSM functions; a platform without one only lacks S0 idle. */
 	error = drv_acpi_lps0_attach();

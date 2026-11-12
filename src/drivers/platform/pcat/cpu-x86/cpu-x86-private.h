@@ -94,7 +94,7 @@ extern struct cpu_x86_cpu *drv_cpu_x86_cpus;
 /* The number of entries of drv_cpu_x86_cpus. */
 extern uint32_t drv_cpu_x86_cpu_count;
 
-#if CONFIG_KERN_CPU_PERF
+#if CONFIG_KERN_THERMAL
 
 /*
  * Decides which model-specific registers the driver may touch.

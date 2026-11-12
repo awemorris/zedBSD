@@ -5,7 +5,7 @@
 - Master: [plan/master.md](../master.md)（2026-10-31 作成）。Primary Milestone: MG004。
 - Status: incomplete（2026-11-12 Q1: p001〜p004・p006〜p012・p016〜p018・p021 cleared、p015 canceled。q2013（P1）で UAPI の実装: p005 後半・p013・p019）
 - 目標: CPU の idle（C-state、MWAIT）・P-state（HWP と、HWP の無い CPU の driver の P-state）・P/E core の相対性能・熱の監視・fan・非常の停止を、1 つの device `/dev/thermal`（と `/sbin/thermal`）の下で統一して設計し、実装する。
-- **前提（2026-11-12）**: build system の作り直しの後、WS333 の作業と試験は `CONFIG_KERN_CPU_PERF=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y` で build する（ユーザー）。既定の値は扱わない。作り直しの前の build・既定の記述は過去の物で、従わない。
+- **前提（2026-11-12）**: build system の作り直しの後、WS333 の作業と試験は `CONFIG_KERN_THERMAL=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y` で build する（ユーザー）。既定の値は扱わない。作り直しの前の build・既定の記述は過去の物で、従わない。
 - Resume point: 2026-11-12 P1（q2012-i01）: p001 の設計を main の実装と新しい build（`mk/`）に合わせ（design.md §16）、未登録の Phase（p004・p013・p014・p015・p020・p022・p024）を立てた。p004 の UAPI の案はユーザーの review 待ち。p002・p011・p012・p018 の判定の材料は各 phase.md の「判定の材料（2026-11-12）」。p023（§4.3.3 段 4 の設計）は p014 の数で要ると分かった時だけ立てる。
 
 ## ユーザーの決定（要点）

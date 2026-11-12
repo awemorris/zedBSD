@@ -167,8 +167,10 @@ kern_sleep_s0idle(
 	struct kern_sleep_outcome *outcome)
 {
 	unsigned reason;
-	bool emergency;
 	int status;
+#if CONFIG_KERN_THERMAL
+	bool emergency;
+#endif
 
 	/* Nothing yet. */
 	kern_memset(outcome, 0, sizeof(*outcome));
@@ -178,6 +180,7 @@ kern_sleep_s0idle(
 	/* The begin, before the user processes are frozen. */
 	sleep_post("sleep.begin", "");
 
+#if CONFIG_KERN_THERMAL
 	/* Gives up while the thermal emergency asks init to stop the machine. */
 	emergency = kern_thermal_emergency_active();
 	if (emergency) {
@@ -187,6 +190,7 @@ kern_sleep_s0idle(
 		sleep_post("sleep.failed", outcome->device);
 		return;
 	}
+#endif
 
 	/* Freezes the user processes. */
 	kern_logf("sleep: entering S0 idle\n");
@@ -214,8 +218,10 @@ kern_sleep_s0idle(
 		kern_logf("sleep: the LPS0 exit failed (error %d)\n", status);
 	outcome->resume_result = drv_pci_resume_all();
 
+#if CONFIG_KERN_THERMAL
 	/* The thermal guard counts the sensors' ages again from now. */
 	kern_thermal_resume();
+#endif
 
 	/* The user processes run again, and the end tells why the system woke. */
 	kern_thaw_user();

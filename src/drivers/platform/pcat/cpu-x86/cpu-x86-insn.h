@@ -29,7 +29,7 @@ drv_cpu_x86_cpuid(
 	uint32_t subleaf,
 	struct cpux86_cpuid_regs *regs);
 
-#if CONFIG_KERN_CPU_PERF
+#if CONFIG_KERN_THERMAL
 
 /* Reads one model-specific register of this logical processor. */
 uint64_t

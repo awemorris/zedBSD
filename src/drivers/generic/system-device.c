@@ -558,11 +558,13 @@ system_sleep(
 	struct kern_sleep_outcome outcome;
 	struct ucred *credential;
 	unsigned busy;
-	bool emergency;
 	int superuser;
 	int empty;
 	int supported;
 	int error;
+#if CONFIG_KERN_THERMAL
+	bool emergency;
+#endif
 
 	/* Refuses a caller that is not root. */
 	credential = cred_current_ref();
@@ -594,10 +596,12 @@ system_sleep(
 	if (!supported)
 		return EOPNOTSUPP;
 
+#if CONFIG_KERN_THERMAL
 	/* Refuses a sleep once the thermal emergency began: the power is about to go. */
 	emergency = kern_thermal_emergency_active();
 	if (emergency)
 		return EBUSY;
+#endif
 
 	/* Refuses a sleep while another is under way. */
 	busy = __atomic_exchange_n(&system_sleeping, 1U, __ATOMIC_ACQ_REL);
@@ -1247,13 +1251,16 @@ system_stop(
 	unsigned long request)
 {
 	const char *what;
-	bool emergency;
 	int error;
+#if CONFIG_KERN_THERMAL
+	bool emergency;
+#endif
 
 	/* Only init may stop the machine. */
 	if (curthread->proc->pid != 1)
 		return EPERM;
 
+#if CONFIG_KERN_THERMAL
 	/* Takes the one way of stopping the machine, unless the thermal guard has it. */
 	error = kern_thermal_shutdown_claim();
 	if (error != 0)
@@ -1265,6 +1272,7 @@ system_stop(
 		kern_logf("system: thermal emergency: turning the power off instead\n");
 		request = KERN_SYSTEM_POWEROFF;
 	}
+#endif
 
 	/* Names the request for the log. */
 	what = "halt";
@@ -1289,11 +1297,13 @@ system_stop(
 	/* A power-off returns only when the platform could not cut its power. */
 	error = kern_platform_poweroff();
 	if (error != 0) {
+#if CONFIG_KERN_THERMAL
 		/* In the emergency the machine halts at once rather than waiting for init. */
 		if (emergency) {
 			kern_logf("system: the power-off failed (error %d); halting\n", error);
 			kern_platform_halt();
 		}
+#endif
 
 		/* A platform that could not cut its power answers EOPNOTSUPP, so that init halts it. */
 		kern_logf("system: the power-off failed (error %d); halting instead\n", error);
