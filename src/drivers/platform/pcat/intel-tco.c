@@ -432,6 +432,8 @@ drv_intel_tco_start(void)
 	/* Tells the log what was armed. */
 	kern_logf("watchdog: armed, %u s from the last reload to the reset (TCO at 0x%x, count %u, %u CPUs)\n",
 		  tco.seconds, (unsigned)tco.base, tco.count, tco.cpu_count);
+
+	/* Tells the log when the machine is to stop on purpose. */
 	if (stop_seconds != 0U)
 		kern_logf("watchdog: every CPU stops in %u s, as %s asks\n", stop_seconds, TCO_PARAMETER_STOP);
 
@@ -1055,12 +1057,12 @@ tco_counting(void)
 	sched_sleep(sched_ticks() + kern_ms_to_ticks(TCO_COUNT_CHECK_MS));
 	after = (uint16_t)(tco_read16(TCO_RELOAD) & TCO_COUNT_MASK);
 
-	/* The count went down from the reload. */
-	if (after < before)
-		return 0;
+	/* A count that stood still has no clock. */
+	if (after >= before)
+		return EIO;
 
-	/* It stood still. */
-	return EIO;
+	/* Succeeded: the count went down from the reload. */
+	return 0;
 }
 
 /*
