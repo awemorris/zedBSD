@@ -65,7 +65,7 @@ struct atomic_lock {
  * one which uses this runtime while the thread it interrupted holds the same
  * word waits forever.
  */
-static struct atomic_lock atomic_locks[ATOMIC_LOCK_COUNT];
+static struct atomic_lock atomic_locks[ATOMIC_LOCK_COUNT] __attribute__((aligned(64)));
 #endif
 
 /*
