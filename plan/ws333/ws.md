@@ -3,12 +3,14 @@
 # WS333: /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）
 
 - Master: [plan/master.md](../master.md)（2026-10-31 作成）。Primary Milestone: MG004。
-- Status: incomplete（2026-11-12 Q1: p001〜p003・p006〜p012・p016〜p018・p021 cleared、p015 canceled。次は p004 の UAPI のユーザーの review）
+- Status: incomplete（2026-11-12 Q1: p001〜p004・p006〜p012・p016〜p018・p021 cleared、p015 canceled。q2013（P1）で UAPI の実装: p005 後半・p013・p019）
 - 目標: CPU の idle（C-state、MWAIT）・P-state（HWP と、HWP の無い CPU の driver の P-state）・P/E core の相対性能・熱の監視・fan・非常の停止を、1 つの device `/dev/thermal`（と `/sbin/thermal`）の下で統一して設計し、実装する。
 - **前提（2026-11-12）**: build system の作り直しの後、WS333 の作業と試験は `CONFIG_KERN_CPU_PERF=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y` で build する（ユーザー）。既定の値は扱わない。作り直しの前の build・既定の記述は過去の物で、従わない。
 - Resume point: 2026-11-12 P1（q2012-i01）: p001 の設計を main の実装と新しい build（`mk/`）に合わせ（design.md §16）、未登録の Phase（p004・p013・p014・p015・p020・p022・p024）を立てた。p004 の UAPI の案はユーザーの review 待ち。p002・p011・p012・p018 の判定の材料は各 phase.md の「判定の材料（2026-11-12）」。p023（§4.3.3 段 4 の設計）は p014 の数で要ると分かった時だけ立てる。
 
 ## ユーザーの決定（要点）
+
+- 2026-11-12 ユーザーから、p004 の UAPI の案を承認し P1 で進める、という趣旨の指示を受けた（電力の読みは推し A と Q1 が解釈）。
 
 - 2026-11-01 09:05 ユーザーから、設計の問い Q333-1〜7 を全部推しの案で決める、という趣旨の答えを受けた（Q333-4 の 0〜100 の向きは「どれも 100 = その物が多い」で確定）。
 
@@ -24,7 +26,7 @@
 | [p001](phase001/phase.md) | 統一の設計: /dev/thermal の UAPI（CPU の idle・P-state・P/E core・熱の zone・fan・strategy・非常の停止）、kernel の枠組みと driver の分け方、HAL の口で足りるか（足りないと主張する時は理由）、WS301・WS303 の設計からの引き継ぎと食い違いの整理、Phase の分け方。design-reviewer を通す | cleared（2026-11-12 Q1 判定: 第 3 版で main の実装と新しい build に合わせ、未登録の Phase を立てた。材料は下の「判定の材料」） | — |
 | [p002](phase002/phase.md) | amd64 の CPU の idle を HLT から MWAIT の C-state に（5330 で idle の電力を下げ、i915 の GPU の電力の枠を空ける） | cleared（2026-11-12 Q1 判定: 5330 で idle 13.00 → 11.70 W、MWAIT の路の直の観察は p014） | — |
 | [p003](phase003/phase.md) | kernel の口の header（include/kern/thermal.h・cpuperf.h、kern_cpu_count・KERN_CPU_MAX）、design-reviewer 1 回 | cleared（P7、q1754-i01。全 20 port の vmunix の build、warning 0） | p001 |
-| [p004](phase004/phase.md) | `/dev/thermal` の UAPI の全文の案（ioctl の番号と struct・事象・注入・`/sbin/thermal` の使い方）、design-reviewer、**ユーザーの review** | in-progress（P1、q2012-i01。2026-11-12 案と review の反映まで、ユーザーの答え待ち） | p001 |
+| [p004](phase004/phase.md) | `/dev/thermal` の UAPI の全文の案（ioctl の番号と struct・事象・注入・`/sbin/thermal` の使い方）、design-reviewer、**ユーザーの review** | cleared（2026-11-12 Q1 判定: ユーザーが UAPI の案を承認、電力の読みは推し A） | p001 |
 | [p005](phase005/phase.md) | 熱の core: 写し・sensor の push（acpi-thermal と rpi5-fan）・fan・meter・strategy と受け手（世代の 2 周目）・boost・3 つの thread・事象・ioctl の範囲の口・`hw.thermal` を写しから（2 source）。後半（p004 の後）: `/dev/thermal`・`/dev/thermal-inject`・`/sbin/thermal` の熱の表示 | in-progress（P6、q1762-i01。前半を実装: host 試験 13 scenario PASS、全 20 port の vmunix warning 0、QEMU amd64 の login と `sysctl hw.thermal` PASS。後半は p004 の後） | p003（後半は p004） |
 | [p006](phase006/phase.md) | cpuperf の枠組み（kernel）: topology・domain・箱と notify の道・provider の口・相対の性能・受け手「cpu」・strategy の写し・直の設定・上限・legacy の governor・idle の統計・WS302 の口 | cleared（2026-10-31 Q1、main b5c8e8f50。P7、q1754-i01・q1759-i01。host 試験 PASS 196 check、全 20 port の vmunix warning 0、QEMU の起動の回帰 amd64（login）・armv7-virt・riscv64-virt・raspi4b PASS。実機は未実施） | p003 |
 | [p007](phase007/phase.md) | x86 の decode の module の設計（標準廉価実装手順の設計の Phase）: SDM Vol. 4 の ADL の MSR の確かめ、header・骨格・試験の道具・p008〜p010 の phase.md、design-reviewer（design.md §15） | cleared（2026-10-31 Q1、39f4a5597・f45480c58。run-unit・check-skeleton を Q1 も流して PASS。Q1 の判断: legacy の 0xCE の比の道は SDM に根拠が無いので外す（p011 は HWP の道だけ）。P7、q1759-i01。header の基点 39f4a5597、design-reviewer 1 回 major 5・minor 12 を全部反映、`cpux86.c` は p007 で実装 4140 check。cleared は Q1 の判定の後） | p001 |
