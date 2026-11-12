@@ -120,7 +120,7 @@ struct wayland_lease {
 	struct wayland_image *images;
 	struct wayland_frame *frames;
 	uint64_t submitted;
-	uint64_t completed;
+	_Alignas(8) uint64_t completed;
 	/* Whether the swapchain's images carry premultiplied alpha the compositor blends by. */
 	VkBool32 premultiplied;
 

@@ -91,7 +91,7 @@ $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
 $(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/old-tools/build/finalize-bios-stage2.noct --machine pc98 $< $@
+	$(PYTHON) mk/platform-pc9821/tools/finalize-bios-stage2.py --machine pc98 $< $@
 
 $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/old-tools/build/make-mz-exe.noct --entry 0x20 $< $@
+	$(PYTHON) mk/platform-pc9821/tools/make-mz-exe.py --entry 0x20 $< $@

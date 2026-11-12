@@ -141,7 +141,7 @@ $(NOCT_ARTIFACT): $(PATCH_STAMP)
 			-DNOCT_ENABLE_API_BEUI=ON \
 			-DNOCT_ENABLE_API_PROCESS=ON
 	cd $(NOCT_SRC) && \
-		cmake --build $(NOCT_BUILD_DIR) --parallel $(ZEDBSD_BUILD_JOBS)
+		cmake --build $(NOCT_BUILD_DIR) --parallel $(BUILD_JOBS)
 
 $(NOCT_BIN): $(NOCT_ARTIFACT)
 	@mkdir -p $(dir $@)

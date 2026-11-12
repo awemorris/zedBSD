@@ -36,7 +36,6 @@ $(BUILD)/uefi/BOOTX32.EFI: $(BUILD)/uefi/bootx32.o \
 			   $(BUILD)/uefi/transition.o
 	$(EFI_LD) /subsystem:efi_application /entry:efi_main /base:0 /fixed:no /timestamp:0 /nodefaultlib /out:$@ $(filter %.o,$^)
 	@test -z "$$($(EFI_NM) -u $@ | grep -Ev ' (__bss_start__|__bss_end__|__end__|___tls_start__|___tls_end__)$$')" || { $(EFI_NM) -u $@; exit 1; }
-	$(NOCT) --path=tools/build mk/platform-i386/tools/check-bootx32.noct $@
 
 $(BUILD)/uefi/bootx32.o: $(UEFI_LOADER)/bootx32.c
 	@mkdir -p $(dir $@)
@@ -131,7 +130,7 @@ $(BUILD)/bootloader/stage1-native.o: $(BIOS_LOADER)/stage1.S
 
 # Stage2: Sectors after MBR. Loads the PBR.
 $(BUILD)/bootloader/stage2-chain.bin: $(BUILD)/bootloader/stage2-chain.raw
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/old-tools/build/finalize-bios-stage2.noct --machine pcat $< $@
+	$(PYTHON) mk/platform-i386/tools/finalize-bios-stage2.py --machine pcat $< $@
 
 $(BUILD)/bootloader/stage2-chain.raw: $(BUILD)/bootloader/stage2-chain.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -158,10 +157,10 @@ $(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S \
 
 # Final Stage: BIOS/DOS dual-purpose bootloader.
 $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/old-tools/build/make-mz-exe.noct --entry 0x20 $< $@
+	$(PYTHON) mk/platform-i386/tools/make-mz-exe.py --entry 0x20 $< $@
 
 $(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw
-	$(NOCT) --path=mk/tools:mk/old-tools/build mk/old-tools/build/finalize-bios-stage2.noct --machine pcat $< $@
+	$(PYTHON) mk/platform-i386/tools/finalize-bios-stage2.py --machine pcat $< $@
 
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@

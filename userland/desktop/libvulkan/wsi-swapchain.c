@@ -156,8 +156,8 @@ struct vulkan_swapchain {
 	 */
 	VkBool32 layout_slower;
 	/* With the chain log on: the presents of the chain's images, and those that copied them. */
-	uint64_t log_presents;
-	uint64_t log_copies;
+	_Alignas(8) uint64_t log_presents;
+	_Alignas(8) uint64_t log_copies;
 };
 
 /* The independently ordered workers of one queue: ordinary presents, the cursor plane's, and the overlay planes'. */

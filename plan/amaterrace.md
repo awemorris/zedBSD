@@ -26,7 +26,7 @@ GHCI 1.0 の仕様（`docs/ghci.md`）と Amaterrace GPU の RTL は `/home/awe/
 
 - **Claude がハーネス（指揮する側）になり、agy を配下のエージェントとして `-p` で起動する。** `agy -p` は Claude の子の process（subprocess）として動き、返事を Claude に返して終わるので、Claude の配下のエージェントと同じ形になる。 agy の会話は対話の画面で開かない（開いた process は `-p` の turn を知らず、文脈が 2 つに分かれる。同じ会話への `-p` はセッションを再起動し、動いている配下のエージェントを止める）。
 - 送り方: `cd /home/awe/amaterrace-gpu && agy --model gemini-3.8-flash-high --conversation <ID> -p "<指示>"`。**model は必ず指定する**（Flash、2026-11-12 ユーザー。指定しないと既定の別の model で動く）。**相手の会話の ID はユーザーが知らせる**（2026-11-12 ユーザーの決定。cache の file からは今の作業中の会話を正しく選べない）。知らされた ID が無い時は、新しい会話として `-p` だけで起動する（前の確かめをしてから）。
-- 1 回の `-p` で 1 つのまとまった作業を頼む。指示は依頼の file（`gemini-request-NN.md`）を指して短く書き、file の変更の可否と、返事に書く物（commit・試験・未実施）を明記する。agy は背景で起動し、時間の上限を付けない（2026-11-12 ユーザー。AGENTS.md §4 の「時間の上限」の例外）。返事を Claude が監査し、次の `-p` を送る。
+- 1 回の `-p` で 1 つのまとまった作業を頼む。指示は依頼の file（`gemini-request-NN.md`）を指して短く書き、file の変更の可否と、返事に書く物（commit・試験・未実施）を明記する。agy は背景で起動し、時間の上限を付けない（2026-11-12 ユーザー、2026-11-13 に重ねて: 丸一日かかる事もある。AGENTS.md §4 の「時間の上限」の例外）。Claude Code の Bash の背景の実行（`run_in_background`）は既定 30 分・最大 2 時間で止めるので使わない。`setsid nohup sh -c 'agy … > <log> 2>&1; echo "rc=$?" >> <log>; sync' … < /dev/null &` で切り離して起動し、log と `build/agy/<task>.md` を見て進みを知る。返事を Claude が監査し、次の `-p` を送る。
 - `-p` で起動した会話は agy の app（Web）の画面で見られる。指示と返事は毎回 Claude がユーザーに報告する。
 - agy は process が終わっても、Gemini の cache で同じ会話を続けられる。remote control の起動などで process が入れ替わると、同じ作業が別の process（別の会話の ID）で続く事がある（2026-11-12）。**起動の前に、amaterrace-gpu で動いている agy の process・作業ツリーの未 commit の変更・最近の commit を確かめ、他の agy が作業中なら起動しない**（同じ作業ツリーで 2 つが動くと壊れる）。続きは、前の会話を `--conversation` で再開して頼む方を優先する。
 

@@ -56,14 +56,15 @@ def main() -> int:
 		subprocess.run(["cp", "--sparse=always", str(image), str(disk)], check=True)
 		guest = guest_class(qemu, disk, directory)
 		try:
-			guest.wait(r"login: *$", 300)
+			# A daemon writing while the prompt is up lands on the prompt's line.
+			guest.wait(r"^(?:\S+ )?login: ?", 300)
 			save(guest.screen(), output / "login.png")
 			guest.send("root")
 			guest.wait(r"Password:", 30)
 			guest.send("root")
-			guest.wait(r"[#$] *$", 60)
+			guest.wait(r"root@\S*[#$]", 60)
 			guest.send("uname -a; echo WSDONE")
-			guest.wait(r"^WSDONE *$", 60)
+			guest.wait(r"^WSDONE", 60)
 			save(guest.screen(), output / "command.png")
 		finally:
 			guest.close()

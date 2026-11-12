@@ -14,26 +14,17 @@ endif
 override CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh init cron getty syslogd networkd mount fsck sysctl net)
 
 ALL_PROGRAM_MAKEFILES := $(sort \
+	$(wildcard userland/firmware/*/Makefile) \
 	$(wildcard userland/base/*/Makefile) \
 	$(wildcard userland/base/*/*/Makefile) \
 	$(wildcard userland/desktop/*/Makefile) \
 	$(wildcard userland/desktop/*/*/Makefile) \
 	$(wildcard userland/packages/*/*/Makefile) \
-	$(wildcard userland/firmware/*/Makefile) \
 	$(wildcard userland/x11/*/Makefile) \
 	$(wildcard userland/tests/*/Makefile))
 ALL_PROGRAM_MAKEFILES := $(filter-out %/build-%/Makefile,$(ALL_PROGRAM_MAKEFILES))
 
 pkg_aliases = $(strip $(1) \
-	$(if $(filter ime,$(1)),keiland-ime) \
-	$(if $(filter dict,$(1)),ime-dict-ja) \
-	$(if $(filter skk-dict,$(1)),ime-dict-skk) \
-	$(if $(filter libGL,$(1)),libgl) \
-	$(if $(filter libwayland,$(1)),libwayland-client) \
-	$(if $(filter preview,$(1)),keiland-preview) \
-	$(if $(filter printd,$(1)),keiland-printd) \
-	$(if $(filter installer,$(1)),install-admin) \
-	$(if $(filter wallpapers,$(1)),wayland) \
 	$(1)-firmware $(1)-test)
 
 SELECTED_PROGRAM_MAKEFILES := $(foreach mf, $(ALL_PROGRAM_MAKEFILES), \

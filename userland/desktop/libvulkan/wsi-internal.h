@@ -178,7 +178,7 @@ struct vulkan_surface {
 	 * replacement swapchains share it with the surface's lease, so a larger
 	 * ticket is always the later present.
 	 */
-	uint64_t cursor_ticket;
+	_Alignas(8) uint64_t cursor_ticket;
 };
 
 /*
