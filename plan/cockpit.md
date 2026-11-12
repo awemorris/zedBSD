@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | 待機 | BUG-418 A（i386 の atomic）を merge。LLVM の案はユーザーへ | — |
+| P1 | q2036 | 作業中 | BUG-418: rpi5・rpi4 の SD の image（boot firmware 入り）と rpi4 の QEMU の起動 | — |
 | P2 | — | 待機 | BUG-418 C を当てた main の確かめ PASS | — |
 | P3 | q2032 | 作業中 | WS333 p027: 5330 の package の C-state 0% の原因（i915）、qs40、S0 idle（watchdog の下で） | agy の依頼 07 が終われば監査も |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
