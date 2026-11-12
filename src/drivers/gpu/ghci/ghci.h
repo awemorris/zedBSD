@@ -448,17 +448,40 @@ struct ghci_session {
 };
 
 /*
+ * One copy of rows the core of the driver asks the executor to make in
+ * session 0 (a copied present's rows into a frame of the display): from
+ * source to destination, both GPU addresses of session 0, rows rows of
+ * bytes bytes (a multiple of 4), the rows of each side stride bytes
+ * apart.  It lives on the caller's stack for the call.
+ */
+struct ghci_rows {
+	uint64_t source;
+	uint32_t source_stride;
+	uint64_t destination;
+	uint32_t destination_stride;
+	uint32_t bytes;
+	uint32_t rows;
+};
+
+/*
  * What the core of the driver asks of the Vulkan executor, which binds
  * the table at the start and keeps it until the detach: the executor's
  * side of a session's open and close, the memory a blob of an executor's
- * VkDeviceMemory shows, the completions the service thread retires, and
- * the executor's own end at the detach.
+ * VkDeviceMemory shows, the completions the service thread retires, the
+ * executor's own end at the detach, and a copy of rows in session 0 by
+ * the driver's copy program.
  *
  *  - session_open fails only without memory and leaves nothing behind.
  *  - session_close cannot fail; it runs before the session's resources go.
  *  - memory_blob runs under the device's lock and returns the allocation
  *    of the session's VkDeviceMemory named by blob_id, or NULL.
  *  - service runs on the service thread and holds no lock of the device.
+ *  - copy_rows places the copy as the driver's own work and gives its
+ *    ticket, which the caller waits for before it lets go of either side;
+ *    the caller makes one copy at a time and holds no lock of the device.
+ *    It returns ENOTSUP, with nothing placed, when the copy program cannot
+ *    make the copy (the compiler refuses it, or a side lies at or above
+ *    4 GiB), ENOMEM, or EIO.
  */
 struct ghci_executor_ops {
 	int (*session_open)(struct ghci_device *device, struct ghci_session *session);
@@ -466,6 +489,7 @@ struct ghci_executor_ops {
 	struct ghci_allocation *(*memory_blob)(struct ghci_device *device, struct ghci_session *session, uint64_t blob_id);
 	void (*service)(struct ghci_device *device);
 	void (*detach)(struct ghci_device *device);
+	int (*copy_rows)(struct ghci_device *device, const struct ghci_rows *rows, struct ghci_ticket *ticket);
 };
 
 /*

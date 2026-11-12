@@ -2171,7 +2171,7 @@ buffers_give_back(
 	struct ghci_display *display;
 	unsigned index;
 
-	/* The mappings the blitter copied through. */
+	/* The mappings the blitter or the copy program copied through. */
 	display = &device->display;
 	for (index = 0U; index < 2U; index++) {
 		if (display->frame_maps[index] != NULL)

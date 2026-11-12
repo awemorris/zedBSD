@@ -12,8 +12,10 @@
  * capability flag, the format features from FMT and from the table, the
  * devices and their GHCI sessions (the sixteenth fails), memory, buffers
  * and images, the recording, fences, semaphores, events, the empty
- * submission, the job markers and frames, and the GPU core's recovery
- * calls (design section 14, the scenes of p007).
+ * submission, the job markers and frames, the GPU core's recovery
+ * calls (design section 14, the scenes of p007), and the display's
+ * copied presents by the driver's copy program on a GPU without the
+ * blitter.
  *
  * The executor is driven through the node's operations with frames of
  * the wire built by hand as libvulkan encodes them (uapi/gpu-op.h); the
@@ -36,6 +38,7 @@
 #include "uapi/errno.h"
 #include "uapi/gpu.h"
 #include "uapi/gpu-allocation.h"
+#include "uapi/gpu-display.h"
 #include "uapi/gpu-fence.h"
 #include "uapi/gpu-job.h"
 #include "uapi/gpu-op.h"
@@ -190,6 +193,14 @@ static void scene_discrete_clear(void);
 static void clear_hook(unsigned sleep, void *argument);
 static int allocate_typed(struct node *node, uint64_t handle, uint64_t bytes, uint32_t type, int exported, uint64_t memory, uint32_t *result);
 static int all_bytes(const uint8_t *bytes, uint64_t count, uint8_t value);
+static void scene_display_copy(void);
+static void display_copy_case(enum model_profile profile, uint32_t caps_clear, int window, const char *name);
+static int display_claim(void **open, uint64_t *lease, uint64_t *generation);
+static struct ghci_resource *display_storage(void *open, uint64_t bytes, uint32_t seed);
+static int display_send(void *open, uint64_t lease, uint64_t generation, struct ghci_resource *storage, uint32_t stride);
+static void display_end(void *open, uint64_t lease);
+static int display_holds(struct ghci_allocation *frame, struct ghci_resource *storage, uint32_t stride);
+static int display_dispatch_check(unsigned mark, uint32_t stride, const struct ghci_mapping *frame_map, const struct ghci_allocation *storage);
 
 /* The operations of the fake bus; they live as long as the test. */
 static const struct ghci_bus_ops fake_bus_ops = {
@@ -223,6 +234,7 @@ main(void)
 	scene_core_reset();
 	scene_discrete();
 	scene_discrete_clear();
+	scene_display_copy();
 	model_fini();
 
 	/* The counts. */
@@ -1405,7 +1417,7 @@ scene_flags(void)
 
 /*
  * The KC705's minimal build: no format filters, whatever FMT says; the
- * attach's list names the clipper and the filter; no blitter.  A blitter
+ * attach's list names the filter but not the clipper; no blitter.  A blitter
  * that does not scale is not used either.
  */
 static void
@@ -1437,7 +1449,7 @@ scene_optional(void)
 		if (strstr(names[index], "CAP_TU_BILINEAR") != NULL)
 			bilinear = 1;
 	}
-	expect(clip && bilinear, "optional: kc705-min names the clipper and the filter");
+	expect(!clip && bilinear, "optional: kc705-min names the filter, not the clipper");
 	filtered = 0;
 	for (index = 0U; index < GHCI_VK_FORMATS; index++) {
 		if (((vk->formats.optimal[index] | vk->formats.linear[index]) &
@@ -2745,4 +2757,404 @@ scene_discrete_clear(void)
 	ghci_service_step(&device, GHCI_WORK_RECLAIM);
 	expect(device.local_map.count == 0U, "clear: every run back");
 	stop("clear");
+}
+
+/* The size of the copied presents of the display scenes: 640 x 480 pixels of 4 bytes, rows 2560 bytes apart in a frame. */
+#define DISPLAY_WIDTH			640U
+#define DISPLAY_HEIGHT			480U
+#define DISPLAY_FRAME_STRIDE		2560U
+
+/*
+ * The display's copied presents: on the GPUs without the blitter (the
+ * KC705's minimal build, flat with host frames; no-blt, unified; the
+ * discrete KC705 without its blitter, with local frames) the copy is a
+ * dispatch of the driver's copy program in session 0, with neither the
+ * blitter's packet nor the processor's copy, and the frames are mapped
+ * into session 0; the dispatch, run here by hand from its table and
+ * constants, makes the frame.  A GPU with the blitter copies as before:
+ * the blitter into local frames, the processor into host ones; and a copy
+ * program the compiler refused leaves the copy to the processor.
+ */
+static void
+scene_display_copy(void)
+{
+	struct ghci_resource *storage;
+	struct ghci_vk *vk;
+	uint64_t lease;
+	uint64_t generation;
+	unsigned copies;
+	unsigned dispatches;
+	void *open;
+	int error;
+
+	/* The GPUs without the blitter: the copy program. */
+	display_copy_case(MODEL_KC705_MIN, 0U, 0, "display copy kc705-min");
+	display_copy_case(MODEL_NO_BLT, 0U, 0, "display copy no-blt");
+	display_copy_case(MODEL_KC705_DISCRETE, GHCI_CAP_BLT, 1, "display copy discrete without the blitter");
+
+	/* The discrete KC705 with the blitter: CMD_COPY_BUFFER into the local frame, no dispatch. */
+	test_window = 1;
+	error = start(MODEL_KC705_DISCRETE);
+	test_window = 0;
+	if (error == 0)
+		error = display_claim(&open, &lease, &generation);
+	expect(error == 0 && device.display.frame_maps[0] != NULL, "display copy blitter: claimed, frames mapped");
+	storage = display_storage(open, DISPLAY_FRAME_STRIDE * DISPLAY_HEIGHT, 21U);
+	copies = model_count_commands(GHCI_OP_COPY_BUFFER);
+	dispatches = model_count_commands(GHCI_OP_DISPATCH);
+	error = display_send(open, lease, generation, storage, DISPLAY_FRAME_STRIDE);
+	expect(error == 0 && model_count_commands(GHCI_OP_COPY_BUFFER) == copies + 1U &&
+	       model_count_commands(GHCI_OP_DISPATCH) == dispatches && display_holds(device.display.frames[0], storage, DISPLAY_FRAME_STRIDE),
+	       "display copy blitter: the blitter's copy, as before");
+	device.ops.resource_destroy(&device, open, storage);
+	display_end(open, lease);
+	stop("display copy blitter");
+
+	/* The unified KC705 with the blitter: the processor copies into the host frame, as before. */
+	error = start(MODEL_KC705_UMA);
+	if (error == 0)
+		error = display_claim(&open, &lease, &generation);
+	expect(error == 0 && device.display.frame_maps[0] == NULL, "display copy uma blitter: claimed, frames not mapped");
+	storage = display_storage(open, DISPLAY_FRAME_STRIDE * DISPLAY_HEIGHT, 23U);
+	copies = model_count_commands(GHCI_OP_COPY_BUFFER);
+	dispatches = model_count_commands(GHCI_OP_DISPATCH);
+	error = display_send(open, lease, generation, storage, DISPLAY_FRAME_STRIDE);
+	expect(error == 0 && model_count_commands(GHCI_OP_COPY_BUFFER) == copies && model_count_commands(GHCI_OP_DISPATCH) == dispatches &&
+	       display_holds(device.display.frames[0], storage, DISPLAY_FRAME_STRIDE), "display copy uma blitter: the processor's copy, as before");
+	device.ops.resource_destroy(&device, open, storage);
+	display_end(open, lease);
+	stop("display copy uma blitter");
+
+	/* A copy program the compiler refused: the processor copies, with no dispatch. */
+	error = start(MODEL_KC705_MIN);
+	vk = device.vk;
+	if (error == 0)
+		error = display_claim(&open, &lease, &generation);
+	expect(error == 0 && vk != NULL, "display copy refused: claimed");
+	if (vk != NULL)
+		vk->meta_refused[GHCI_VK_META_COPY] = 1;
+	storage = display_storage(open, DISPLAY_FRAME_STRIDE * DISPLAY_HEIGHT, 27U);
+	dispatches = model_count_commands(GHCI_OP_DISPATCH);
+	error = display_send(open, lease, generation, storage, DISPLAY_FRAME_STRIDE);
+	expect(error == 0 && model_count_commands(GHCI_OP_DISPATCH) == dispatches && vk != NULL && vk->rows.memory == NULL &&
+	       display_holds(device.display.frames[0], storage, DISPLAY_FRAME_STRIDE), "display copy refused: the processor's copy");
+	device.ops.resource_destroy(&device, open, storage);
+	display_end(open, lease);
+	stop("display copy refused");
+}
+
+/*
+ * One GPU without the blitter: a present of rows as the frame's and one
+ * of rows 4096 bytes apart into the other frame, each one dispatch of the
+ * copy program and nothing of the blitter or the processor.
+ */
+static void
+display_copy_case(
+	enum model_profile profile,
+	uint32_t caps_clear,
+	int window,
+	const char *name)
+{
+	struct ghci_resource *storage;
+	struct ghci_allocation *frame;
+	struct ghci_mapping *source;
+	char label[160];
+	uint64_t lease;
+	uint64_t generation;
+	unsigned copies;
+	unsigned dispatches;
+	unsigned mark;
+	void *open;
+	int error;
+
+	/* The device and the lease; the frames mapped into session 0. */
+	test_caps_clear = caps_clear;
+	test_window = window;
+	error = start(profile);
+	test_caps_clear = 0U;
+	test_window = 0;
+	if (error == 0)
+		error = display_claim(&open, &lease, &generation);
+	snprintf(label, sizeof(label), "%s: claimed, both frames mapped", name);
+	expect(error == 0 && device.executor_ops != NULL && !ghci_caps_has(&device.caps, GHCI_HAS_BLT) &&
+	       device.display.frame_maps[0] != NULL && device.display.frame_maps[1] != NULL, label);
+	if (error != 0 || device.display.frame_maps[0] == NULL) {
+		stop(name);
+		return;
+	}
+
+	/* Rows as the frame's: one dispatch, no COPY_BUFFER, the frame untouched by the processor. */
+	storage = display_storage(open, DISPLAY_FRAME_STRIDE * DISPLAY_HEIGHT, 31U);
+	copies = model_count_commands(GHCI_OP_COPY_BUFFER);
+	dispatches = model_count_commands(GHCI_OP_DISPATCH);
+	mark = model.command_count;
+	error = display_send(open, lease, generation, storage, DISPLAY_FRAME_STRIDE);
+	frame = device.display.frames[0];
+	snprintf(label, sizeof(label), "%s: one dispatch, no blitter, no processor", name);
+	expect(error == 0 && model_count_commands(GHCI_OP_COPY_BUFFER) == copies && model_count_commands(GHCI_OP_DISPATCH) == dispatches + 1U &&
+	       !display_holds(frame, storage, DISPLAY_FRAME_STRIDE) && device.vk != NULL && ((struct ghci_vk *)device.vk)->rows.memory != NULL, label);
+	snprintf(label, sizeof(label), "%s: the window not used", name);
+	expect(device.window_users == 0U && model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U] == 0U, label);
+
+	/* The dispatch's packets and table, and the frame it makes. */
+	source = NULL;
+	for (source = device.vm0.mappings; source != NULL; source = source->next) {
+		if (source->allocation == storage->allocation)
+			break;
+	}
+	snprintf(label, sizeof(label), "%s: the storage's mapping let go", name);
+	expect(source == NULL || source->state == GHCI_MAPPING_UNMAPPING, label);
+	snprintf(label, sizeof(label), "%s: the dispatch copies the rows", name);
+	expect(display_dispatch_check(mark, DISPLAY_FRAME_STRIDE, device.display.frame_maps[0], storage->allocation) &&
+	       display_holds(frame, storage, DISPLAY_FRAME_STRIDE), label);
+	device.ops.resource_destroy(&device, open, storage);
+
+	/* Rows 4096 bytes apart, into the other frame: one dispatch again, the program placed once. */
+	storage = display_storage(open, 4096U * DISPLAY_HEIGHT, 37U);
+	copies = model_count_commands(GHCI_OP_COPY_BUFFER);
+	dispatches = model_count_commands(GHCI_OP_DISPATCH);
+	mark = model.command_count;
+	error = display_send(open, lease, generation, storage, 4096U);
+	frame = device.display.frames[1];
+	snprintf(label, sizeof(label), "%s: another stride, the other frame", name);
+	expect(error == 0 && model_count_commands(GHCI_OP_COPY_BUFFER) == copies && model_count_commands(GHCI_OP_DISPATCH) == dispatches + 1U &&
+	       display_dispatch_check(mark, 4096U, device.display.frame_maps[1], storage->allocation) && display_holds(frame, storage, 4096U), label);
+	device.ops.resource_destroy(&device, open, storage);
+	display_end(open, lease);
+	stop(name);
+}
+
+/* Opens a session of the core and takes the display's lease.  Returns what the claim returned. */
+static int
+display_claim(
+	void **open,
+	uint64_t *lease,
+	uint64_t *generation)
+{
+	struct gpu_display_info info;
+	struct gpu_display_claim claim;
+	int error;
+
+	/* The open, and the output's generation. */
+	*open = NULL;
+	error = device.ops.open(&device, open);
+	if (error != 0)
+		return error;
+	memset(&info, 0, sizeof(info));
+	error = device.ops.display->query(&device, *open, &info);
+	if (error != 0)
+		return error;
+	*generation = info.generation;
+
+	/* The lease of plane 0. */
+	memset(&claim, 0, sizeof(claim));
+	claim.display_id = 1U;
+	claim.generation = *generation;
+	error = device.ops.display->claim(&device, *open, &claim);
+	*lease = claim.lease;
+	return error;
+}
+
+/* Makes ordinary storage of an open, filled with a pattern (each word its offset plus seed); NULL when it could not. */
+static struct ghci_resource *
+display_storage(
+	void *open,
+	uint64_t bytes,
+	uint32_t seed)
+{
+	struct gpu_resource_create create;
+	struct ghci_resource *storage;
+	uint32_t *words;
+	uint64_t index;
+	void *object;
+	int error;
+
+	/* The storage. */
+	memset(&create, 0, sizeof(create));
+	create.bytes = bytes;
+	create.usage = GPU_RESOURCE_USAGE_STORAGE;
+	error = device.ops.resource_create(&device, open, &create, &object);
+	if (error != 0)
+		return NULL;
+	storage = object;
+
+	/* The pattern. */
+	words = (uint32_t *)(void *)storage->allocation->view;
+	for (index = 0U; index < storage->allocation->bytes / 4U; index++)
+		words[index] = (uint32_t)index * 4U + seed;
+	return storage;
+}
+
+/* Presents storage of 640 x 480 pixels, its rows stride bytes apart, copied (FIFO).  Returns what the present returned. */
+static int
+display_send(
+	void *open,
+	uint64_t lease,
+	uint64_t generation,
+	struct ghci_resource *storage,
+	uint32_t stride)
+{
+	struct gpu_display_present request;
+
+	/* Ordinary storage is copied. */
+	if (storage == NULL)
+		return EINVAL;
+	memset(&request, 0, sizeof(request));
+	request.lease = lease;
+	request.generation = generation;
+	request.width = DISPLAY_WIDTH;
+	request.height = DISPLAY_HEIGHT;
+	request.stride = stride;
+	request.format = GPU_PIXEL_BGRA8888;
+	request.flags = GPU_DISPLAY_PRESENT_FIFO;
+	return device.ops.display->present(&device, open, storage, &request);
+}
+
+/* Lets the display's lease go and closes the open. */
+static void
+display_end(
+	void *open,
+	uint64_t lease)
+{
+	struct gpu_display_release release;
+
+	/* The release, then the close. */
+	memset(&release, 0, sizeof(release));
+	release.lease = lease;
+	(void)device.ops.display->release(&device, open, &release);
+	device.ops.close(&device, open);
+}
+
+/* Reports whether a frame holds the 640 x 480 pixels of storage, its rows stride bytes apart: 1 when it does. */
+static int
+display_holds(
+	struct ghci_allocation *frame,
+	struct ghci_resource *storage,
+	uint32_t stride)
+{
+	uint8_t *target;
+	uint32_t row;
+
+	/* The frame as the GPU's memory holds it. */
+	if (frame == NULL || storage == NULL)
+		return 0;
+	target = model_dma(frame->bus, (uint64_t)DISPLAY_FRAME_STRIDE * DISPLAY_HEIGHT);
+	if (target == NULL)
+		return 0;
+
+	/* Each row. */
+	for (row = 0U; row < DISPLAY_HEIGHT; row++) {
+		if (memcmp(target + (uint64_t)row * DISPLAY_FRAME_STRIDE, storage->allocation->view + (uint64_t)row * stride,
+			   DISPLAY_WIDTH * 4U) != 0)
+			return 0;
+	}
+	return 1;
+}
+
+/*
+ * Checks the copy program's packets after mark (in session 0: the head
+ * barrier, the program's pipeline, its resource table, its constants and
+ * one dispatch, the tail barrier), its table (the storage read only, the
+ * frame) and constants (the rows of 640 words, stride bytes apart in the
+ * storage and 2560 in the frame), and runs the dispatch by hand: each
+ * invocation copies its word, from the storage's memory to the frame's
+ * (the storage's mapping, whose address the table gives, is gone by
+ * now).  Returns 1 when everything is as it should be.
+ */
+static int
+display_dispatch_check(
+	unsigned mark,
+	uint32_t stride,
+	const struct ghci_mapping *frame_map,
+	const struct ghci_allocation *storage)
+{
+	const struct model_command *command;
+	const struct ghci_vk_rows *rows;
+	const uint32_t *push;
+	const uint8_t *table;
+	uint8_t *from;
+	uint8_t *to;
+	uint64_t source_base;
+	uint64_t destination_base;
+	uint64_t source_at;
+	uint64_t destination_at;
+	uint32_t source_bytes;
+	uint32_t destination_bytes;
+	uint8_t source_flags;
+	uint32_t groups;
+	uint32_t element;
+	uint32_t column;
+	uint32_t row;
+	unsigned order[6];
+	unsigned found;
+	unsigned index;
+
+	/* The packets in order, all in session 0. */
+	rows = &((struct ghci_vk *)device.vk)->rows;
+	order[0] = GHCI_OP_BARRIER;
+	order[1] = GHCI_OP_BIND_PIPELINE;
+	order[2] = GHCI_OP_BIND_DESCRIPTOR_TABLE;
+	order[3] = GHCI_OP_LOAD_CONST;
+	order[4] = GHCI_OP_DISPATCH;
+	order[5] = GHCI_OP_BARRIER;
+	found = 0U;
+	push = NULL;
+	groups = 0U;
+	for (index = mark; index < model.command_count && found < 6U; index++) {
+		command = &model.commands[index];
+		if (command->opcode != order[found])
+			continue;
+		if (command->session != 0U)
+			return 0;
+		if (found == 1U && (command->words[1] | ((uint64_t)command->words[2] << 32)) != rows->pipeline.pso_va)
+			return 0;
+		if (found == 2U && (command->words[1] | ((uint64_t)command->words[2] << 32)) != rows->mapping->va + rows->table_at)
+			return 0;
+		if (found == 3U)
+			push = &command->words[3];
+		if (found == 4U)
+			groups = command->words[1];
+		found++;
+	}
+	if (found != 6U || push == NULL)
+		return 0;
+
+	/* The table: the storage read only from its first word, the frame. */
+	table = rows->memory->view + rows->table_at;
+	memcpy(&source_base, table + rows->pipeline.source_entry + GSI1_ABI_BUFFER_BASE, 8U);
+	memcpy(&source_bytes, table + rows->pipeline.source_entry + GSI1_ABI_BUFFER_SIZE, 4U);
+	source_flags = table[rows->pipeline.source_entry + GHCI_BUFFER_FLAGS];
+	memcpy(&destination_base, table + rows->pipeline.destination_entry + GSI1_ABI_BUFFER_BASE, 8U);
+	memcpy(&destination_bytes, table + rows->pipeline.destination_entry + GSI1_ABI_BUFFER_SIZE, 4U);
+	if (source_base == 0U || frame_map == NULL || destination_base != frame_map->va || (source_flags & 1U) == 0U)
+		return 0;
+	if (source_bytes != stride * (DISPLAY_HEIGHT - 1U) + DISPLAY_WIDTH * 4U)
+		return 0;
+	if (destination_bytes != DISPLAY_FRAME_STRIDE * (DISPLAY_HEIGHT - 1U) + DISPLAY_WIDTH * 4U)
+		return 0;
+	/* The constants: the words, a row's, the rows, every byte, each side's steps, 4 bytes from element 0. */
+	if (push[GHCI_VK_META_COPY_COUNT] != DISPLAY_WIDTH * DISPLAY_HEIGHT || push[GHCI_VK_META_COPY_PER_ROW] != DISPLAY_WIDTH ||
+	    push[GHCI_VK_META_COPY_ROWS] != DISPLAY_HEIGHT || push[GHCI_VK_META_COPY_MASK] != 0xffffffffU)
+		return 0;
+	if (push[GHCI_VK_META_COPY_SOURCE] != 0U || push[GHCI_VK_META_COPY_SOURCE + 1U] != 4U ||
+	    push[GHCI_VK_META_COPY_SOURCE + 2U] != stride || push[GHCI_VK_META_COPY_DESTINATION] != 0U ||
+	    push[GHCI_VK_META_COPY_DESTINATION + 1U] != 4U || push[GHCI_VK_META_COPY_DESTINATION + 2U] != DISPLAY_FRAME_STRIDE ||
+	    push[GHCI_VK_META_COPY_BYTES] != 4U || push[GHCI_VK_META_COPY_FIRST] != 0U)
+		return 0;
+	if ((uint64_t)groups * GHCI_VK_META_GROUP < DISPLAY_WIDTH * DISPLAY_HEIGHT)
+		return 0;
+
+	/* The dispatch by hand: each element's word from the storage to the frame. */
+	from = model_dma(storage->bus, source_bytes);
+	to = model_dma(frame_map->allocation->bus, destination_bytes);
+	if (from == NULL || to == NULL)
+		return 0;
+	for (element = 0U; element < DISPLAY_WIDTH * DISPLAY_HEIGHT; element++) {
+		column = element % DISPLAY_WIDTH;
+		row = element / DISPLAY_WIDTH;
+		source_at = (uint64_t)column * 4U + (uint64_t)row * stride;
+		destination_at = (uint64_t)column * 4U + (uint64_t)row * DISPLAY_FRAME_STRIDE;
+		memcpy(to + destination_at, from + source_at, 4U);
+	}
+	return 1;
 }

@@ -97,6 +97,20 @@
 #define META_PSO_ALIGN			128U
 #define META_CODE_ALIGN			64U
 
+/*
+ * The flags of a buffer descriptor a transfer program only reads.
+ *
+ * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 8.3,
+ * GhciBufferDescriptor: flags [0] ReadOnly).
+ */
+#define META_READ_ONLY			(1U << 0)
+
+/*
+ * The alignment of the resource table placed after the copy program in
+ * session 0 (the 64 a descriptor table takes, as the executor's tables).
+ */
+#define META_TABLE_ALIGN		64U
+
 /* The bytes of a query's slot (the result, then the availability word). */
 #define META_QUERY_SLOT_BYTES		16U
 
@@ -150,10 +164,15 @@ static void ir_store(struct meta_builder *builder, uint32_t buffer, uint32_t off
 static void ir_atomic(struct meta_builder *builder, uint32_t operation, uint32_t buffer, uint32_t offset, uint32_t value, uint32_t predicate);
 static void ir_fence(struct meta_builder *builder, uint32_t fences);
 static int meta_place(struct ghci_vk_session *session, struct ghci_vk_device *device, struct ghci_gsi1_program *const *programs, struct ghci_vk_meta_pipeline *placed);
+static int meta_entries(struct ghci_gsi1_program *const *programs, struct ghci_vk_meta_pipeline *placed);
+static uint32_t meta_layout(struct ghci_gsi1_program *const *programs, uint32_t *code_at, uint32_t *fragment_at);
+static int meta_write(struct ghci_gsi1_program *const *programs, uint8_t *view, uint64_t base, uint32_t code_at, uint32_t fragment_at, struct ghci_vk_meta_pipeline *placed);
+static int rows_place(struct ghci_device *gpu, struct ghci_vk_rows *rows);
 static void meta_pso(struct ghci_gsi1_program *const *programs, uint64_t code, uint64_t fragment, struct ghci_pso *pso);
 static int meta_entry(const struct ghci_gsi1_program *program, uint32_t binding, uint32_t *offset);
 static int meta_span(uint64_t address, uint64_t bytes, uint64_t *base, uint32_t *size);
-static void meta_refuse(struct ghci_vk_session *session, enum ghci_vk_meta_kind kind);
+static int meta_programs(struct ghci_device *gpu, enum ghci_vk_meta_kind kind, struct ghci_gsi1_program **programs);
+static void meta_refuse(struct ghci_device *gpu, enum ghci_vk_meta_kind kind);
 
 /*
  * Compiles the programs of one of the driver's transfers for a device of
@@ -208,9 +227,6 @@ ghci_vk_meta_pipeline(
 	const struct ghci_vk_meta_pipeline **pipeline)
 {
 	struct ghci_gsi1_program *programs[GHCI_VK_META_PROGRAMS];
-	struct ghci_gsi1_program *compiled[GHCI_VK_META_PROGRAMS];
-	struct ghci_vk *vk;
-	int refused;
 	int error;
 
 	/* Placed for this device already. */
@@ -221,44 +237,15 @@ ghci_vk_meta_pipeline(
 		return 0;
 	}
 
-	/* The GPU's programs, compiled now when no session has before, unless the compiler refused them. */
-	vk = session->device->vk;
-	mutex_lock(&session->device->lock);
-
-	programs[0] = vk->meta[kind][0];
-	programs[1] = vk->meta[kind][1];
-	refused = vk->meta_refused[kind];
-
-	mutex_unlock(&session->device->lock);
-	if (refused)
-		return ENOTSUP;
-	if (programs[0] == NULL) {
-		error = ghci_vk_meta_compile(&session->device->caps, kind, compiled);
-		if (error == ENOTSUP)
-			meta_refuse(session, kind);
-		if (error != 0)
-			return error;
-
-		/* The first compile kept; another session's of the same time goes. */
-		mutex_lock(&session->device->lock);
-
-		if (vk->meta[kind][0] == NULL) {
-			vk->meta[kind][0] = compiled[0];
-			vk->meta[kind][1] = compiled[1];
-		} else {
-			ghci_gsi1_program_free(compiled[0]);
-			ghci_gsi1_program_free(compiled[1]);
-		}
-		programs[0] = vk->meta[kind][0];
-		programs[1] = vk->meta[kind][1];
-
-		mutex_unlock(&session->device->lock);
-	}
+	/* The GPU's programs, compiled at their first use. */
+	error = meta_programs(session->device, kind, programs);
+	if (error != 0)
+		return error;
 
 	/* The programs' place in the device's code heap. */
 	error = meta_place(session, device, programs, &device->meta[kind]);
 	if (error == ENOTSUP)
-		meta_refuse(session, kind);
+		meta_refuse(session->device, kind);
 	if (error != 0)
 		return error;
 
@@ -399,6 +386,218 @@ ghci_vk_meta_query(
 
 	/* Succeeded: the dispatch is planned. */
 	return 0;
+}
+
+/*
+ * Writes the resource table of a transfer through the host's view of it:
+ * the source's buffer descriptor (read only) and the destination's, at
+ * the offsets the program reads them from.
+ */
+void
+ghci_vk_meta_table(
+	const struct ghci_vk_meta_pipeline *pipeline,
+	const struct ghci_vk_meta_dispatch *dispatch,
+	uint8_t *view)
+{
+	struct ghci_buffer_desc descriptor;
+
+	/* The source, which the program only reads. */
+	kern_memset(&descriptor, 0, sizeof(descriptor));
+	descriptor.base = dispatch->source;
+	descriptor.bytes = dispatch->source_bytes;
+	descriptor.flags = META_READ_ONLY;
+	(void)ghci_buffer_desc_encode(view + pipeline->source_entry, &descriptor);
+
+	/* The destination. */
+	kern_memset(&descriptor, 0, sizeof(descriptor));
+	descriptor.base = dispatch->destination;
+	descriptor.bytes = dispatch->destination_bytes;
+	(void)ghci_buffer_desc_encode(view + pipeline->destination_entry, &descriptor);
+}
+
+/*
+ * Writes the binds of a transfer: its pipeline, and its resource table
+ * at the GPU address table.  Returns the dwords written
+ * (GHCI_VK_META_BIND_DWORDS).
+ */
+uint32_t
+ghci_vk_meta_bind(
+	const struct ghci_vk_meta_pipeline *pipeline,
+	uint64_t table,
+	uint32_t *words)
+{
+	uint32_t dwords;
+
+	/* The program, then its table of set 2. */
+	dwords = ghci_cmd_bind_pipeline(words, pipeline->pso_va);
+	dwords += ghci_cmd_bind_descriptor_table(&words[dwords], GSI1_ABI_SET_RESOURCES, table, pipeline->resource_bytes / GSI1_ABI_RESOURCE_UNIT);
+
+	/* Succeeded: the binds. */
+	return dwords;
+}
+
+/*
+ * Writes the next step of a transfer from its element *first: the push
+ * constants with that first element, and one dispatch of at most
+ * GHCI_VK_META_GROUPS_MAX workgroups of GHCI_VK_META_GROUP invocations;
+ * *first moves past the step's elements.  Returns the dwords written (at
+ * most GHCI_VK_META_STEP_DWORDS), or 0 once every element was dispatched.
+ */
+uint32_t
+ghci_vk_meta_step(
+	const struct ghci_vk_meta_dispatch *dispatch,
+	uint64_t *first,
+	uint32_t *words)
+{
+	uint32_t push[GHCI_VK_META_PUSH_WORDS];
+	uint64_t groups;
+	uint32_t dwords;
+
+	/* Every element dispatched. */
+	if (*first >= dispatch->elements)
+		return 0U;
+
+	/* The workgroups of the elements left, as many as one dispatch runs. */
+	groups = ((uint64_t)dispatch->elements - *first + GHCI_VK_META_GROUP - 1U) / GHCI_VK_META_GROUP;
+	if (groups > GHCI_VK_META_GROUPS_MAX)
+		groups = GHCI_VK_META_GROUPS_MAX;
+
+	/* The constants with the step's first element, and the dispatch. */
+	kern_memcpy(push, dispatch->push, sizeof(push));
+	push[dispatch->first_word] = (uint32_t)*first;
+	dwords = ghci_cmd_load_const(words, GSI1_ABI_BANK_PUSH_LOW, dispatch->push_words, push);
+	dwords += ghci_cmd_dispatch(&words[dwords], (uint32_t)groups, 1U, 1U);
+	*first += groups * GHCI_VK_META_GROUP;
+
+	/* Succeeded: the step. */
+	return dwords;
+}
+
+/*
+ * Copies rows in session 0 with the driver's copy program (the executor's
+ * copy_rows): the program placed in session 0 at the first copy, the
+ * resource table written, and the binds, the steps and the barriers
+ * around them placed in the ring as the driver's own work.  Returns 0
+ * with the ticket the caller waits for, ENOTSUP with nothing placed when
+ * the program cannot make the copy, ENOMEM, or EIO.
+ *
+ * Procedure referenced: amaterrace-gpu ad23fe01 docs/ghci.md (section
+ * 6.0, Session 0 Execution Context: the PSO, the descriptors and the
+ * buffers of session 0's compute work mapped into session 0; section
+ * 11.5, CMD_BARRIER: INVAL_DESCRIPTOR after the host rewrote a table,
+ * INVAL_ICACHE after it wrote code).
+ */
+int
+ghci_vk_copy_rows(
+	struct ghci_device *device,
+	const struct ghci_rows *rows,
+	struct ghci_ticket *ticket)
+{
+	struct ghci_vk_meta_dispatch dispatch;
+	struct ghci_vk_meta_copy copy;
+	struct ghci_vk_rows *placed;
+	struct ghci_vk *vk;
+	uint64_t steps;
+	uint64_t first;
+	uint64_t table;
+	uint32_t *packets;
+	uint32_t capacity;
+	uint32_t dwords;
+	uint32_t step;
+	int error;
+
+	/* The copy as the copy program makes it: words, a row of them at a time. */
+	kern_memset(&copy, 0, sizeof(copy));
+	copy.source = rows->source;
+	copy.destination = rows->destination;
+	copy.element_bytes = 4U;
+	copy.per_row = rows->bytes / 4U;
+	copy.rows = rows->rows;
+	copy.slices = 1U;
+	copy.source_step[0] = 4U;
+	copy.source_step[1] = rows->source_stride;
+	copy.destination_step[0] = 4U;
+	copy.destination_step[1] = rows->destination_stride;
+	if ((rows->bytes & 3U) != 0U)
+		return ENOTSUP;
+	error = ghci_vk_meta_copy(&copy, &dispatch);
+	if (error != 0)
+		return ENOTSUP;
+
+	/* The packets' room: the barriers, the binds and every step. */
+	steps = ((uint64_t)dispatch.elements + (uint64_t)GHCI_VK_META_GROUP * GHCI_VK_META_GROUPS_MAX - 1U) /
+	    ((uint64_t)GHCI_VK_META_GROUP * GHCI_VK_META_GROUPS_MAX);
+	capacity = 2U * GHCI_DW_BARRIER + GHCI_VK_META_BIND_DWORDS + (uint32_t)steps * GHCI_VK_META_STEP_DWORDS;
+	packets = kern_malloc((size_t)capacity * sizeof(*packets));
+	if (packets == NULL)
+		return ENOMEM;
+
+	/* The program in session 0, the table and the packets in the ring, one copy at a time. */
+	vk = device->vk;
+	placed = &vk->rows;
+	mutex_lock(&placed->lock);
+
+	error = 0;
+	if (placed->memory == NULL)
+		error = rows_place(device, placed);
+	if (error == 0) {
+		/* The table, after the code in the run. */
+		ghci_vk_meta_table(&placed->pipeline, &dispatch, placed->memory->view + placed->table_at);
+		table = placed->mapping->va + placed->table_at;
+
+		/* The head: the host's code and table seen; the binds and steps; the tail: the copy in memory. */
+		dwords = ghci_cmd_barrier(packets, 0U, 0U, GHCI_VK_HEAD_FLAGS);
+		dwords += ghci_vk_meta_bind(&placed->pipeline, table, &packets[dwords]);
+		first = 0U;
+		for (;;) {
+			step = ghci_vk_meta_step(&dispatch, &first, &packets[dwords]);
+			if (step == 0U)
+				break;
+			dwords += step;
+		}
+		dwords += ghci_cmd_barrier(&packets[dwords], 0U, 0U, GHCI_VK_TAIL_FLAGS);
+
+		/* The driver's own work, in session 0. */
+		error = ghci_cp_submit(device, NULL, packets, dwords, ticket);
+	}
+
+	mutex_unlock(&placed->lock);
+
+	/* Reports a copy that was not placed. */
+	kern_free(packets);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the copy is in the ring. */
+	return 0;
+}
+
+/*
+ * Lets the copy program's run in session 0 go at the detach: its mapping
+ * goes with the unmap's fence, and the run with the mapping.
+ */
+void
+ghci_vk_rows_release(
+	struct ghci_device *device)
+{
+	struct ghci_vk_rows *placed;
+	struct ghci_vk *vk;
+
+	/* Nothing placed. */
+	vk = device->vk;
+	placed = &vk->rows;
+	if (placed->memory == NULL)
+		return;
+
+	/* The mapping, then the run's hold. */
+	ghci_vm_unmap(device, placed->mapping);
+	mutex_lock(&device->lock);
+
+	ghci_memory_unhold(device, placed->memory);
+
+	mutex_unlock(&device->lock);
+	placed->mapping = NULL;
+	placed->memory = NULL;
 }
 
 /*
@@ -1361,44 +1560,127 @@ meta_place(
 	struct ghci_vk_meta_pipeline *placed)
 {
 	struct ghci_vk_heap_block *block;
-	struct ghci_pso pso;
 	uint32_t code_at;
 	uint32_t fragment_at;
 	uint32_t bytes;
 	uint32_t offset;
-	uint64_t base;
-	uint8_t *view;
 	int error;
 
-	/* A compute program's two buffers in its resource table; a draw's one texture and sampler. */
-	if (programs[1] == NULL) {
-		error = meta_entry(programs[0], 0U, &placed->source_entry);
-		if (error != 0)
-			return error;
-		error = meta_entry(programs[0], 1U, &placed->destination_entry);
-		if (error != 0)
-			return error;
-		placed->resource_bytes = programs[0]->bindings.resource_bytes;
-	} else if (programs[1]->bindings.texture_count != 1U || programs[1]->bindings.sampler_count != 1U ||
-		   programs[1]->bindings.resource_count != 0U) {
-		return ENOTSUP;
-	}
+	/* What the programs read. */
+	error = meta_entries(programs, placed);
+	if (error != 0)
+		return error;
 
-	/* The record, then the code of each program. */
-	code_at = (GHCI_PSO_BYTES + META_CODE_ALIGN - 1U) & ~(META_CODE_ALIGN - 1U);
-	bytes = code_at + programs[0]->word_count * 4U;
-	fragment_at = 0U;
-	if (programs[1] != NULL) {
-		fragment_at = (bytes + META_CODE_ALIGN - 1U) & ~(META_CODE_ALIGN - 1U);
-		bytes = fragment_at + programs[1]->word_count * 4U;
-	}
+	/* The run: the record, then the code of each program. */
+	bytes = meta_layout(programs, &code_at, &fragment_at);
 	error = ghci_vk_heap_take(session, device, GHCI_VK_HEAP_CODE, bytes, META_PSO_ALIGN, &block, &offset);
 	if (error == ENOMEM)
 		return ENOMEM;
 	if (error != 0)
 		return EIO;
-	view = block->allocation->view + offset;
-	base = block->mapping->va + offset;
+
+	/* The record and the code, written at the run's place in the device's session. */
+	error = meta_write(programs, block->allocation->view + offset, block->mapping->va + offset, code_at, fragment_at, placed);
+	if (error != 0) {
+		ghci_vk_heap_give(block, offset);
+		return error;
+	}
+	placed->block = block;
+	placed->offset = offset;
+
+	/* Succeeded: the programs run in the device's session. */
+	return 0;
+}
+
+/*
+ * Finds what the programs of a transfer read: a compute program's two
+ * buffers in its resource table (their offsets and the table's bytes go
+ * into placed), or a draw's one texture and sampler.  Returns 0, or
+ * ENOTSUP for programs that read something else.
+ */
+static int
+meta_entries(
+	struct ghci_gsi1_program *const *programs,
+	struct ghci_vk_meta_pipeline *placed)
+{
+	int error;
+
+	/* A draw reads texture and sampler slot 0, and no buffer. */
+	if (programs[1] != NULL) {
+		if (programs[1]->bindings.texture_count != 1U)
+			return ENOTSUP;
+		if (programs[1]->bindings.sampler_count != 1U)
+			return ENOTSUP;
+		if (programs[1]->bindings.resource_count != 0U)
+			return ENOTSUP;
+		return 0;
+	}
+
+	/* A compute program reads its source and writes its destination. */
+	error = meta_entry(programs[0], 0U, &placed->source_entry);
+	if (error != 0)
+		return error;
+	error = meta_entry(programs[0], 1U, &placed->destination_entry);
+	if (error != 0)
+		return error;
+	placed->resource_bytes = programs[0]->bindings.resource_bytes;
+
+	/* Succeeded: the entries are known. */
+	return 0;
+}
+
+/*
+ * Lays out the run of a transfer's programs: the pipeline state record at
+ * 0, the compute or vertex program's code at *code_at, and a draw's
+ * fragment program's at *fragment_at (0 for none).  Returns the run's
+ * bytes.
+ */
+static uint32_t
+meta_layout(
+	struct ghci_gsi1_program *const *programs,
+	uint32_t *code_at,
+	uint32_t *fragment_at)
+{
+	uint32_t bytes;
+
+	/* The record, then the first program's code. */
+	*code_at = (GHCI_PSO_BYTES + META_CODE_ALIGN - 1U) & ~(META_CODE_ALIGN - 1U);
+	bytes = *code_at + programs[0]->word_count * 4U;
+
+	/* A draw's fragment program after it. */
+	*fragment_at = 0U;
+	if (programs[1] != NULL) {
+		*fragment_at = (bytes + META_CODE_ALIGN - 1U) & ~(META_CODE_ALIGN - 1U);
+		bytes = *fragment_at + programs[1]->word_count * 4U;
+	}
+
+	/* Succeeded: the run's bytes. */
+	return bytes;
+}
+
+/*
+ * Writes a transfer's run (laid out by meta_layout) through the host's
+ * view of it, whose GPU address is base, and fills placed with the
+ * addresses.  Returns 0, or ENOTSUP when the pipeline state cannot hold
+ * the programs.
+ */
+static int
+meta_write(
+	struct ghci_gsi1_program *const *programs,
+	uint8_t *view,
+	uint64_t base,
+	uint32_t code_at,
+	uint32_t fragment_at,
+	struct ghci_vk_meta_pipeline *placed)
+{
+	struct ghci_pso pso;
+	uint32_t bytes;
+	int error;
+
+	/* The code of each program, the rest zero. */
+	bytes = code_at + programs[0]->word_count * 4U;
+	if (programs[1] != NULL)
+		bytes = fragment_at + programs[1]->word_count * 4U;
 	kern_memset(view, 0, bytes);
 	kern_memcpy(view + code_at, programs[0]->words, programs[0]->word_count * 4U);
 	if (programs[1] != NULL)
@@ -1407,18 +1689,14 @@ meta_place(
 	/* The pipeline state, and its blend word of colour attachment 0 (little endian). */
 	meta_pso(programs, base + code_at, base + fragment_at, &pso);
 	error = ghci_pso_encode(view, &pso);
-	if (error != 0) {
-		ghci_vk_heap_give(block, offset);
+	if (error != 0)
 		return ENOTSUP;
-	}
 	placed->blend_word = (uint32_t)view[GHCI_PSO_BLEND];
 	placed->blend_word |= (uint32_t)view[GHCI_PSO_BLEND + 1U] << 8;
 	placed->blend_word |= (uint32_t)view[GHCI_PSO_BLEND + 2U] << 16;
 	placed->blend_word |= (uint32_t)view[GHCI_PSO_BLEND + 3U] << 24;
 
 	/* The placed programs. */
-	placed->block = block;
-	placed->offset = offset;
 	placed->code_va = base + code_at;
 	placed->code_words = programs[0]->word_count;
 	if (programs[1] != NULL) {
@@ -1427,7 +1705,89 @@ meta_place(
 	}
 	placed->pso_va = base;
 
-	/* Succeeded: the programs run in the device's session. */
+	/* Succeeded: the run holds the programs. */
+	return 0;
+}
+
+/*
+ * Places the copy program in session 0 for the copies of rows: one run of
+ * host memory with the record, the code and the resource table after
+ * them, mapped executable and read-only to the GPU.  Returns 0, ENOMEM,
+ * EIO, or ENOTSUP for a program the compiler refuses or the pipeline
+ * state cannot hold.  The caller holds rows->lock.
+ */
+static int
+rows_place(
+	struct ghci_device *gpu,
+	struct ghci_vk_rows *rows)
+{
+	struct ghci_gsi1_program *programs[GHCI_VK_META_PROGRAMS];
+	struct ghci_vk_meta_pipeline pipeline;
+	struct ghci_allocation *memory;
+	struct ghci_mapping *mapping;
+	uint32_t code_at;
+	uint32_t fragment_at;
+	uint32_t table_at;
+	uint32_t bytes;
+	int error;
+
+	/* The GPU's copy program, and the buffers it reads. */
+	error = meta_programs(gpu, GHCI_VK_META_COPY, programs);
+	if (error != 0)
+		return error;
+	kern_memset(&pipeline, 0, sizeof(pipeline));
+	error = meta_entries(programs, &pipeline);
+	if (error != 0) {
+		meta_refuse(gpu, GHCI_VK_META_COPY);
+		return error;
+	}
+
+	/* The run: the record and the code, then the table on its own line. */
+	bytes = meta_layout(programs, &code_at, &fragment_at);
+	table_at = (bytes + META_TABLE_ALIGN - 1U) & ~(META_TABLE_ALIGN - 1U);
+	bytes = table_at + pipeline.resource_bytes;
+
+	/* The memory, held by the run. */
+	error = ghci_memory_alloc(gpu, bytes, 0U, &memory);
+	if (error != 0)
+		return error;
+	mutex_lock(&gpu->lock);
+
+	ghci_memory_hold(memory);
+
+	mutex_unlock(&gpu->lock);
+
+	/* Its mapping in session 0: executable, and only read by the GPU. */
+	error = ghci_vm_map(gpu, &gpu->vm0, memory, GHCI_VM_FLAG_EXEC | GHCI_VM_MAP_NO_WRITE, &mapping);
+	if (error != 0) {
+		mutex_lock(&gpu->lock);
+
+		ghci_memory_unhold(gpu, memory);
+
+		mutex_unlock(&gpu->lock);
+		return error;
+	}
+
+	/* The record and the code at the mapping's address, which the pipeline state may refuse. */
+	kern_memset(memory->view, 0, bytes);
+	error = meta_write(programs, memory->view, mapping->va, code_at, fragment_at, &pipeline);
+	if (error == ENOTSUP)
+		meta_refuse(gpu, GHCI_VK_META_COPY);
+	if (error != 0) {
+		ghci_vm_unmap(gpu, mapping);
+		mutex_lock(&gpu->lock);
+
+		ghci_memory_unhold(gpu, memory);
+
+		mutex_unlock(&gpu->lock);
+		return error;
+	}
+
+	/* Succeeded: the program runs in session 0. */
+	rows->memory = memory;
+	rows->mapping = mapping;
+	rows->table_at = table_at;
+	rows->pipeline = pipeline;
 	return 0;
 }
 
@@ -1524,19 +1884,76 @@ meta_span(
 	return 0;
 }
 
+/*
+ * Finds the GPU's programs of a transfer, compiling them now when no
+ * caller has before.  Returns 0 with the programs (kept to the detach),
+ * ENOMEM, or ENOTSUP for a kind the compiler refuses (the GPU remembers
+ * that, and the kind is not compiled again).
+ */
+static int
+meta_programs(
+	struct ghci_device *gpu,
+	enum ghci_vk_meta_kind kind,
+	struct ghci_gsi1_program **programs)
+{
+	struct ghci_gsi1_program *compiled[GHCI_VK_META_PROGRAMS];
+	struct ghci_vk *vk;
+	int refused;
+	int error;
+
+	/* The programs compiled before, unless the compiler refused them. */
+	vk = gpu->vk;
+	mutex_lock(&gpu->lock);
+
+	programs[0] = vk->meta[kind][0];
+	programs[1] = vk->meta[kind][1];
+	refused = vk->meta_refused[kind];
+
+	mutex_unlock(&gpu->lock);
+	if (refused)
+		return ENOTSUP;
+	if (programs[0] != NULL)
+		return 0;
+
+	/* The compile, outside the lock. */
+	error = ghci_vk_meta_compile(&gpu->caps, kind, compiled);
+	if (error == ENOTSUP)
+		meta_refuse(gpu, kind);
+	if (error != 0)
+		return error;
+
+	/* The first compile kept; another caller's of the same time goes. */
+	mutex_lock(&gpu->lock);
+
+	if (vk->meta[kind][0] == NULL) {
+		vk->meta[kind][0] = compiled[0];
+		vk->meta[kind][1] = compiled[1];
+	} else {
+		ghci_gsi1_program_free(compiled[0]);
+		ghci_gsi1_program_free(compiled[1]);
+	}
+	programs[0] = vk->meta[kind][0];
+	programs[1] = vk->meta[kind][1];
+
+	mutex_unlock(&gpu->lock);
+
+	/* Succeeded: the programs. */
+	return 0;
+}
+
 /* Marks a kind of the GPU's transfer programs as one the compiler refuses. */
 static void
 meta_refuse(
-	struct ghci_vk_session *session,
+	struct ghci_device *gpu,
 	enum ghci_vk_meta_kind kind)
 {
 	struct ghci_vk *vk;
 
 	/* Once, under the device's lock. */
-	vk = session->device->vk;
-	mutex_lock(&session->device->lock);
+	vk = gpu->vk;
+	mutex_lock(&gpu->lock);
 
 	vk->meta_refused[kind] = 1;
 
-	mutex_unlock(&session->device->lock);
+	mutex_unlock(&gpu->lock);
 }

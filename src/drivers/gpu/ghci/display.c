@@ -21,10 +21,14 @@
  *    the display holds until the controller no longer scans it;
  *  - copied (ordinary storage): the storage is copied into the one of the
  *    driver's two frames that is not on the screen, and is not borrowed
- *    past the call.  On a unified GPU the processor copies; on a discrete
- *    one the frames are local memory, which the blitter fills through
- *    session 0's mappings, or the processor through the local window when
- *    the GPU has no blitter.
+ *    past the call.  The GPU copies through session 0's mappings of the
+ *    storage and the frame: the blitter, when the GPU has one and the
+ *    frames are local memory, or else the driver's copy program (a
+ *    compute dispatch of the executor) on a GPU without the blitter.  The
+ *    processor copies on a GPU with the blitter whose frames are host
+ *    memory, on one without a shader unit, and when the copy program
+ *    cannot make the copy; it reaches local memory through the local
+ *    window.
  *
  * The frame's size picks the mode among the controller's modes; a frame
  * of another mode, format or stride than the one lit lights the
@@ -56,7 +60,7 @@
 /* The longest a display wait waits, in nanoseconds: one second. */
 #define WAIT_MAX_NS			1000000000ULL
 
-/* How long a copied present waits for the blitter's copy. */
+/* How long a copied present waits for the GPU's copy. */
 #define COPY_WAIT_MS			1000U
 
 /* The cursor's image: 64 x 64 pixels of 4 bytes, rows 256 bytes apart. */
@@ -69,6 +73,17 @@
 
 /* The 32-bit physical addresses the controller takes. */
 #define SCAN_LIMIT			0x100000000ULL
+
+/*
+ * What copies a copied present into a frame: the processor, the blitter,
+ * or the driver's copy program (the executor's copy_rows).  The blitter
+ * and the program reach the frames through their mappings into session 0.
+ */
+enum copy_engine {
+	COPY_PROCESSOR = 0,
+	COPY_BLITTER,
+	COPY_PROGRAM
+};
 
 static int display_query(void *private_data, void *opaque, struct gpu_display_info *request);
 static int display_mode(void *private_data, void *opaque, struct gpu_display_mode *request);
@@ -147,12 +162,14 @@ const struct drv_gpu_scanout_ops ghci_scanout_ops = {
 static int lease_check(struct ghci_display *display, void *opaque, uint64_t lease, uint64_t generation);
 static int find_mode(const struct ghci_display *display, uint32_t width, uint32_t height, unsigned *mode);
 static uint32_t display_formats(const struct ghci_display *display);
+static enum copy_engine copy_engine(struct ghci_device *device);
 static int buffer_take(struct ghci_device *device, struct ghci_allocation **slot, uint64_t bytes);
 static int buffers_take(struct ghci_device *device);
 static int present_shared(struct ghci_device *device, void *opaque, struct ghci_allocation *memory, unsigned mode, uint32_t format, struct gpu_display_present *request);
 static int present_copied(struct ghci_device *device, void *opaque, struct ghci_allocation *memory, unsigned mode, uint32_t format, struct gpu_display_present *request);
 static int copy_by_processor(struct ghci_device *device, struct ghci_allocation *memory, const struct gpu_display_present *request, struct ghci_allocation *frame);
 static int copy_by_blitter(struct ghci_device *device, struct ghci_allocation *memory, const struct gpu_display_present *request, const struct ghci_mapping *frame_map);
+static int copy_by_program(struct ghci_device *device, struct ghci_allocation *memory, const struct gpu_display_present *request, const struct ghci_mapping *frame_map);
 static void memory_let_go(struct ghci_device *device, struct ghci_allocation *memory);
 static int cursor_surface_free(const struct ghci_display *display);
 static int cursor_rows(struct ghci_device *device, struct ghci_allocation *memory, const struct gpu_display_cursor_image *request, uint8_t *staging);
@@ -907,6 +924,31 @@ display_formats(
 }
 
 /*
+ * Chooses what copies a copied present into a frame: the blitter when
+ * the GPU has one and the frames are local memory; the driver's copy
+ * program on a GPU without the blitter whose executor makes copies of
+ * rows (it runs on the shader unit); the processor otherwise.
+ */
+static enum copy_engine
+copy_engine(
+	struct ghci_device *device)
+{
+	/* A GPU with the blitter: the blitter fills local frames, the processor host ones. */
+	if (ghci_caps_has(&device->caps, GHCI_HAS_BLT)) {
+		if (device->local_ready)
+			return COPY_BLITTER;
+		return COPY_PROCESSOR;
+	}
+
+	/* Without the blitter: the copy program, where the executor runs it. */
+	if (device->executor_ops != NULL && device->executor_ops->copy_rows != NULL)
+		return COPY_PROGRAM;
+
+	/* Succeeded: no engine of the GPU copies; the processor does. */
+	return COPY_PROCESSOR;
+}
+
+/*
  * Fills one slot of the display's buffers with memory the controller
  * scans, unless it is filled already; a slot another claim filled
  * meanwhile keeps its memory.  The caller holds no lock of the device.
@@ -964,7 +1006,7 @@ buffer_take(
 /*
  * Takes the driver's buffers once: two frames any mode fits in that a
  * copied present fills (local memory on a discrete GPU, mapped into
- * session 0 when the blitter fills them), and, with a cursor plane, two
+ * session 0 when the GPU fills them), and, with a cursor plane, two
  * cursor surfaces.  They stay until the detach.  The caller holds no lock
  * of the device.
  */
@@ -976,7 +1018,7 @@ buffers_take(
 	struct ghci_mapping *mapping;
 	uint64_t bytes;
 	unsigned index;
-	int blitter;
+	int gpu;
 	int mapped;
 	int error;
 
@@ -989,9 +1031,11 @@ buffers_take(
 			return error;
 	}
 
-	/* Frames in local memory are mapped into session 0 for the blitter, which fills them. */
-	blitter = ghci_caps_has(&device->caps, GHCI_HAS_BLT);
-	for (index = 0U; index < 2U && blitter && device->local_ready; index++) {
+	/* Frames the blitter or the copy program fills are mapped into session 0. */
+	gpu = 0;
+	if (copy_engine(device) != COPY_PROCESSOR)
+		gpu = 1;
+	for (index = 0U; index < 2U && gpu; index++) {
 		mutex_lock(&device->display_lock);
 
 		mapped = 0;
@@ -1150,6 +1194,7 @@ present_copied(
 	struct ghci_display *display;
 	struct ghci_display_image image;
 	struct ghci_mapping *frame_map;
+	enum copy_engine engine;
 	uint64_t deadline;
 	uint64_t mark;
 	uint64_t now;
@@ -1201,10 +1246,19 @@ present_copied(
 	if (error != 0)
 		return error;
 
-	/* The copy into the frame, outside the display's lock: the blitter's, or the processor's. */
+	/* The copy into the frame, outside the display's lock: the blitter's, the copy program's, or the processor's. */
+	engine = COPY_PROCESSOR;
 	if (frame_map != NULL)
+		engine = copy_engine(device);
+	if (engine == COPY_BLITTER)
 		error = copy_by_blitter(device, memory, request, frame_map);
+	else if (engine == COPY_PROGRAM)
+		error = copy_by_program(device, memory, request, frame_map);
 	else
+		error = copy_by_processor(device, memory, request, display->frames[frame]);
+
+	/* A copy the program cannot make is the processor's. */
+	if (error == ENOTSUP && engine == COPY_PROGRAM)
 		error = copy_by_processor(device, memory, request, display->frames[frame]);
 
 	/* The frame is recorded while the lease is still the caller's. */
@@ -1366,6 +1420,56 @@ copy_by_blitter(
 	/* The copies as the driver's own work, and their fence, waited for with no lock held. */
 	error = ghci_cp_submit(device, NULL, packets, dwords, &ticket);
 	kern_free(packets);
+	if (error == 0)
+		error = ghci_cp_wait(device, &ticket, COPY_WAIT_MS);
+
+	/* The mapping goes once the GPU is done with it. */
+	ghci_vm_unmap(device, source);
+
+	/* Reports a copy that did not finish. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the rows are in the frame. */
+	return 0;
+}
+
+/*
+ * Copies a present's rows into a frame by the driver's copy program: the
+ * storage is mapped into session 0 for the copy, the executor places the
+ * program's dispatch, and its fence is waited for with no lock held.
+ * Returns 0, ENOTSUP when the program cannot make the copy (nothing was
+ * placed; the processor copies instead), EIO when a reset or the loss of
+ * the device ended the copy, ETIMEDOUT, or the mapping's error.
+ */
+static int
+copy_by_program(
+	struct ghci_device *device,
+	struct ghci_allocation *memory,
+	const struct gpu_display_present *request,
+	const struct ghci_mapping *frame_map)
+{
+	struct ghci_mapping *source;
+	struct ghci_ticket ticket;
+	struct ghci_rows rows;
+	int error;
+
+	/* The storage, readable in session 0 for the copy. */
+	error = ghci_vm_map(device, &device->vm0, memory, GHCI_VM_MAP_NO_WRITE, &source);
+	if (error != 0)
+		return error;
+
+	/* The rows, from the storage's stride to the frame's. */
+	kern_memset(&rows, 0, sizeof(rows));
+	rows.source = source->va + request->offset;
+	rows.source_stride = request->stride;
+	rows.destination = frame_map->va;
+	rows.destination_stride = ghci_scan_stride(request->width);
+	rows.bytes = request->width * GHCI_DISPLAY_PIXEL_BYTES;
+	rows.rows = request->height;
+
+	/* The copy as the driver's own work, and its fence, waited for with no lock held. */
+	error = device->executor_ops->copy_rows(device, &rows, &ticket);
 	if (error == 0)
 		error = ghci_cp_wait(device, &ticket, COPY_WAIT_MS);
 

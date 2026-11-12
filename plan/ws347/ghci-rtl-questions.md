@@ -63,6 +63,7 @@
 | B29 | SU の FAULT_ADDR の単位: §3.5（ghci.md:450）の「stage の入口からの PC」は命令の番号（8 byte 単位、今の `sb_fault_pc`）か byte の offset か | ghci.md:450、`atg_su_sb.v:775` | 判断待ち |
 | B30 | §11 の page table の walk は VA 32 bit と 40 bit だけを書く。30〜31・33〜39 bit の時の段数と root の大きさ。driver は VA ≤ 32 を 2 段、VA > 32 を 3 段とし、VA の中だけの address を渡す（どちらの答えでも安全） | §11、§3.2.2 | 判断待ち（Q1 の推し: VA ≤ 32 は 32 bit の walk の上位を 0、33〜40 は 40 bit の walk の上位を 0、と 1 文足す） |
 | B31 | FMT0[11] FFILT_FP32 = 0 で CAP_TEX_FFILT = 1 の時の意味（FP32 の format の linear の filter が無い、で良いか）。driver は「FP32 の linear の filter を報告しない」と読む（機能を減らす側だけ） | §3.2.2 の EXT_CAP_FMT0 | 判断待ち（Q1 の推し: driver の読みで良い。仕様に 1 文足す） |
+| B32 | flat（`CAP_HW_WALKER=0`）で discrete（`CAP_UMA=0`）の時、shader の load・store、descriptor、PSO、`CMD_COPY_*` の address が local memory と host のどちらへ行くか。§11.6 は「All addresses are flat physical」とだけ書き、local と host の振り分けは §7.3 の `CMD_FENCE` の `fence_addr`（N12: [LOCAL_BASE, LOCAL_BASE + LOCAL_SIZE) は local、他は host）にしか無い。driver は今、walker の無い GPU では local memory を使わない（KC705 の minimal は frame も Vulkan の memory も host memory に置き、表示の controller は host を PCIe 越しに読む） | §11.6、§7.3 CMD_FENCE（N12）、§13.2 の FB_BASE | 判断待ち（P4 の推し: flat でも全ての address を `CMD_FENCE` と同じ規則で振り分ける、と §11.6 に 1 文足す。決まれば driver は KC705 の minimal でも frame を local に置け、表示の読みと shader の写しの書きが PCIe から外れる） |
 
 ## 決定済み
 
