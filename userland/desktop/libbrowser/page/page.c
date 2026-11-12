@@ -22,6 +22,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if __GCC_ATOMIC_LLONG_LOCK_FREE != 2
+/*
+ * Where an 8-byte atomic is not lock-free (i386), the C library's runtime
+ * serializes the paint generations under a lock.  Clang notes that such an
+ * operation is slower than a lock-free one, which that target accepts.  The
+ * generations stay within this process.
+ */
+#pragma clang diagnostic ignored "-Watomic-alignment"
+#endif
+
 /* The most bytes of live cells a page's heap may hold. */
 #define PAGE_HEAP_LIMIT		((size_t)1024U * 1024U * 1024U)
 

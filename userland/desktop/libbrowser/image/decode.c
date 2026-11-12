@@ -17,6 +17,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if __GCC_ATOMIC_LLONG_LOCK_FREE != 2
+/*
+ * Where an 8-byte atomic is not lock-free (i386), the C library's runtime
+ * serializes the image serials under a lock.  Clang notes that such an
+ * operation is slower than a lock-free one, which that target accepts.  The
+ * serials stay within this process.
+ */
+#pragma clang diagnostic ignored "-Watomic-alignment"
+#endif
+
 /*
  * The serial the next bitmap made gets.  It only increases (from 1, so 0
  * is no bitmap), for the life of the program; any thread takes one with

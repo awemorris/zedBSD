@@ -30,6 +30,7 @@
 
 #include <errno.h>
 #include <poll.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,12 +39,42 @@
 #include <time.h>
 #include <unistd.h>
 
-/* The ring's positions are 8-byte atomics; a system without lock-free ones is not one the streams run on. */
-_Static_assert(__GCC_ATOMIC_LLONG_LOCK_FREE == 2, "8-byte atomics must be lock-free");
+/*
+ * Whether the ring's 8-byte positions are read and written as 8-byte atomics.
+ *
+ * The ring is shared with another process, so its positions must be updated
+ * without a lock that only one process sees.  Where an 8-byte atomic is not
+ * lock-free (i386) a position is written as two 4-byte halves inside its
+ * sequence word (KL_AUDIO_RING_WRITE_SEQUENCE, READ_SEQUENCE): its one
+ * writer makes the word odd, writes the halves, and makes it even again, and
+ * a reader takes the halves only between two equal even readings.  A 4-byte
+ * load and store is one plain move there, so neither side needs CMPXCHG.
+ */
+#if __GCC_ATOMIC_LLONG_LOCK_FREE == 2
+#define AUDIO_RING_ATOMIC64	1
+#else
+#define AUDIO_RING_ATOMIC64	0
+#endif
 
-/* The ring's 8-byte fields sit at multiples of 8 in its page; the i386 ABI aligns a plain 8-byte integer to 4 only. */
+/* Which 4-byte half of an 8-byte position holds its low bits. */
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define AUDIO_RING_LOW_WORD	0U
+#else
+#define AUDIO_RING_LOW_WORD	1U
+#endif
+
+#if !AUDIO_RING_ATOMIC64
+/*
+ * The stream's own 8-byte counters (written, flush_floor, the sink's) stay in
+ * this process, where the C library's runtime serializes them under a lock.
+ * Clang notes that such an operation is slower than a lock-free one, which a
+ * target without lock-free 8-byte atomics accepts.
+ */
+#pragma clang diagnostic ignored "-Watomic-alignment"
+#endif
+
+/* The ring's 8-byte fields sit at multiples of 8 in its page, which an 8-byte atomic of the ring is read as. */
 typedef uint64_t audio_ring_u64 __attribute__((aligned(8)));
-typedef int64_t audio_ring_s64 __attribute__((aligned(8)));
 
 /* The public formats are the wire's. */
 _Static_assert(KL_AUDIO_FORMAT_S16_LE == KL_AUDIO_WIRE_FORMAT_S16_LE, "S16_LE");
@@ -129,7 +160,9 @@ static int audio_read(struct kl_audio_stream *stream, int timeout_ms);
 static void audio_lose(struct kl_audio_stream *stream);
 static void audio_sink_anchor(struct kl_audio_stream *stream, unsigned running);
 static void audio_sink_read(const struct kl_audio_stream *stream, uint64_t *consumed, uint64_t *played, int64_t *time_ns);
-static uint64_t audio_ring_load(const struct kl_audio_stream *stream, unsigned offset);
+static uint64_t audio_ring_load(const struct kl_audio_stream *stream, unsigned offset, unsigned sequence_offset);
+static void audio_ring_store(struct kl_audio_stream *stream, unsigned offset, unsigned sequence_offset, uint64_t value);
+static uint64_t audio_ring_halves(const struct kl_audio_stream *stream, unsigned offset);
 static void audio_ring_played(const struct kl_audio_stream *stream, uint64_t *played, int64_t *time_ns);
 static int64_t audio_now_ns(void);
 static int audio_errno(uint32_t error);
@@ -405,7 +438,7 @@ kl_audio_stream_write(
 
 	/* The frames published: the device side may read them now. */
 	__atomic_store_n(&stream->written, stream->written + count, __ATOMIC_RELEASE);
-	__atomic_store_n((audio_ring_u64 *)(void *)(stream->ring + KL_AUDIO_RING_WRITE_POSITION), stream->written, __ATOMIC_RELEASE);
+	audio_ring_store(stream, KL_AUDIO_RING_WRITE_POSITION, KL_AUDIO_RING_WRITE_SEQUENCE, stream->written);
 
 	/* Succeeded: the frames written. */
 	return count;
@@ -446,7 +479,7 @@ kl_audio_stream_consumed(
 	}
 
 	/* The ring's read position. */
-	consumed = audio_ring_load(stream, KL_AUDIO_RING_READ_POSITION);
+	consumed = audio_ring_load(stream, KL_AUDIO_RING_READ_POSITION, KL_AUDIO_RING_READ_SEQUENCE);
 
 	/* Succeeded: the frames consumed. */
 	return consumed;
@@ -657,7 +690,7 @@ audio_map(
 	/* The stream's measures; nothing is written yet. */
 	stream->capacity = stream->ready_capacity;
 	stream->rate = format->rate;
-	stream->written = audio_ring_load(stream, KL_AUDIO_RING_WRITE_POSITION);
+	stream->written = audio_ring_load(stream, KL_AUDIO_RING_WRITE_POSITION, KL_AUDIO_RING_WRITE_SEQUENCE);
 
 	/* Succeeded: the ring is the stream's. */
 	return 0;
@@ -733,7 +766,7 @@ audio_control(
 		if (opcode == KL_AUDIO_STREAM_DRAIN)
 			stream->draining = 1U;
 		if (opcode == KL_AUDIO_STREAM_FLUSH) {
-			consumed = audio_ring_load(stream, KL_AUDIO_RING_READ_POSITION);
+			consumed = audio_ring_load(stream, KL_AUDIO_RING_READ_POSITION, KL_AUDIO_RING_READ_SEQUENCE);
 			__atomic_store_n(&stream->flush_floor, consumed, __ATOMIC_RELEASE);
 		}
 	}
@@ -919,7 +952,7 @@ audio_sink_anchor(
 	if (lost) {
 		audio_sink_read(stream, &consumed, &played, &when);
 	} else {
-		consumed = audio_ring_load(stream, KL_AUDIO_RING_READ_POSITION);
+		consumed = audio_ring_load(stream, KL_AUDIO_RING_READ_POSITION, KL_AUDIO_RING_READ_SEQUENCE);
 		audio_ring_played(stream, &played, &when);
 	}
 
@@ -998,19 +1031,121 @@ audio_sink_read(
 		*time_ns = now;
 }
 
-/* Reads one of the ring's 8-byte positions (acquire). */
+/* Reads one of the ring's 8-byte positions (acquire), as its writer's sequence word makes it one value. */
 static uint64_t
 audio_ring_load(
 	const struct kl_audio_stream *stream,
-	unsigned offset)
+	unsigned offset,
+	unsigned sequence_offset)
 {
+#if AUDIO_RING_ATOMIC64
 	uint64_t value;
 
-	/* The position. */
+	UNUSED_PARAMETER(sequence_offset);
+
+	/* The position, in one load. */
 	value = __atomic_load_n((const audio_ring_u64 *)(const void *)(stream->ring + offset), __ATOMIC_ACQUIRE);
 
 	/* Succeeded: the position. */
 	return value;
+#else
+	const uint32_t *sequence;
+	uint64_t value;
+	uint32_t before;
+	uint32_t after;
+	unsigned tries;
+
+	/* The position's sequence word in the ring's page. */
+	sequence = (const uint32_t *)(const void *)(stream->ring + sequence_offset);
+
+	/*
+	 * Reads the halves until the writer was not in the middle of writing
+	 * them.  A writer caught there needs the processor to finish, so the
+	 * reader yields; a writer that died there leaves the word odd, and the
+	 * last halves read stand.
+	 */
+	tries = 0U;
+	for (;;) {
+		before = __atomic_load_n(sequence, __ATOMIC_ACQUIRE);
+		value = audio_ring_halves(stream, offset);
+		__atomic_thread_fence(__ATOMIC_ACQUIRE);
+		after = __atomic_load_n(sequence, __ATOMIC_RELAXED);
+		tries++;
+		if ((before & 1U) == 0U && before == after)
+			break;
+		if (tries >= AUDIO_RETRIES)
+			break;
+		(void)sched_yield();
+	}
+
+	/* Succeeded: the position. */
+	return value;
+#endif
+}
+
+/* Publishes one of the ring's 8-byte positions (release); only its one writer, this side, calls it. */
+static void
+audio_ring_store(
+	struct kl_audio_stream *stream,
+	unsigned offset,
+	unsigned sequence_offset,
+	uint64_t value)
+{
+#if AUDIO_RING_ATOMIC64
+	UNUSED_PARAMETER(sequence_offset);
+
+	/* The position, in one store. */
+	__atomic_store_n((audio_ring_u64 *)(void *)(stream->ring + offset), value, __ATOMIC_RELEASE);
+#else
+	uint32_t *sequence;
+	uint32_t *word;
+	uint32_t current;
+
+	/* The position's halves and its sequence word in the ring's page. */
+	sequence = (uint32_t *)(void *)(stream->ring + sequence_offset);
+	word = (uint32_t *)(void *)(stream->ring + offset);
+
+	/* An odd sequence tells a reader that the halves are being written. */
+	current = __atomic_load_n(sequence, __ATOMIC_RELAXED);
+	__atomic_store_n(sequence, current + 1U, __ATOMIC_RELAXED);
+	__atomic_thread_fence(__ATOMIC_RELEASE);
+
+	/* The halves. */
+	__atomic_store_n(&word[AUDIO_RING_LOW_WORD], (uint32_t)value, __ATOMIC_RELAXED);
+	__atomic_store_n(&word[1U - AUDIO_RING_LOW_WORD], (uint32_t)(value >> 32), __ATOMIC_RELAXED);
+
+	/* The next even sequence publishes them. */
+	__atomic_store_n(sequence, current + 2U, __ATOMIC_RELEASE);
+#endif
+}
+
+/* Reads an 8-byte field of the ring without tearing it on its own: the caller's sequence word makes the result one value. */
+static uint64_t
+audio_ring_halves(
+	const struct kl_audio_stream *stream,
+	unsigned offset)
+{
+#if AUDIO_RING_ATOMIC64
+	uint64_t value;
+
+	/* The field, in one load. */
+	value = __atomic_load_n((const audio_ring_u64 *)(const void *)(stream->ring + offset), __ATOMIC_RELAXED);
+
+	/* Succeeded: the field. */
+	return value;
+#else
+	const uint32_t *word;
+	uint32_t low;
+	uint32_t high;
+
+	/* The field's two halves, each one 4-byte load. */
+	word = (const uint32_t *)(const void *)(stream->ring + offset);
+	low = __atomic_load_n(&word[AUDIO_RING_LOW_WORD], __ATOMIC_RELAXED);
+	high = __atomic_load_n(&word[1U - AUDIO_RING_LOW_WORD], __ATOMIC_RELAXED);
+
+	/* Succeeded: the field. */
+	return ((uint64_t)high << 32) | low;
+#endif
 }
 
 /* Reads the position heard and its time as one, under the ring's played sequence. */
@@ -1021,27 +1156,28 @@ audio_ring_played(
 	int64_t *time_ns)
 {
 	const uint32_t *sequence;
-	const audio_ring_u64 *position;
-	const audio_ring_s64 *when;
 	uint32_t before;
 	uint32_t after;
 	unsigned tries;
 
-	/* The pair and its sequence in the ring's page. */
+	/* The pair's sequence in the ring's page. */
 	sequence = (const uint32_t *)(const void *)(stream->ring + KL_AUDIO_RING_PLAYED_SEQUENCE);
-	position = (const audio_ring_u64 *)(const void *)(stream->ring + KL_AUDIO_RING_PLAYED_POSITION);
-	when = (const audio_ring_s64 *)(const void *)(stream->ring + KL_AUDIO_RING_PLAYED_TIME);
 
-	/* Read again until the server was not in the middle of writing it (a server that died there leaves it odd: the last values read stand). */
+	/* Read again until the server was not in the middle of writing it, yielding so that it can finish (a server that died there leaves it odd: the last values read stand). */
 	tries = 0U;
-	do {
+	for (;;) {
 		before = __atomic_load_n(sequence, __ATOMIC_ACQUIRE);
-		*played = __atomic_load_n(position, __ATOMIC_RELAXED);
-		*time_ns = __atomic_load_n(when, __ATOMIC_RELAXED);
+		*played = audio_ring_halves(stream, KL_AUDIO_RING_PLAYED_POSITION);
+		*time_ns = (int64_t)audio_ring_halves(stream, KL_AUDIO_RING_PLAYED_TIME);
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
 		after = __atomic_load_n(sequence, __ATOMIC_RELAXED);
 		tries++;
-	} while (((before & 1U) != 0U || before != after) && tries < AUDIO_RETRIES);
+		if ((before & 1U) == 0U && before == after)
+			break;
+		if (tries >= AUDIO_RETRIES)
+			break;
+		(void)sched_yield();
+	}
 }
 
 /* Gives the monotonic clock in nanoseconds. */
