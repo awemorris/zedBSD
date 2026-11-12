@@ -61,7 +61,7 @@
 - **HAL の API**（`include/hal/hal.h` の宣言・契約・責務）の変更は差分ごとの事前承認。まず HAL を変えない形を探し、既存の HAL と driver・kernel の側で足りない理由を具体的に示した時だけ案にする。`src/hal/` の実装の修正は承認不要。承認済みの差分は [guardrail.md](plan/guardrail.md)。
 - **toolchain** は Q1 の許可なしに変更・build・install しない（`toolchain/`、`userland/base/noct/` の patch と規則、`userland/packages/lang/clang`・`devel/libcxx`、共有の `build/llvm`・`build/llvm-source`・`build/llvm-build`・`build/NoctLang`）。worktree の `build/` に main の tree を symlink しない（[BUG-420](plan/bugs/BUG-420.md)）。
 - **main の checkout の `build/` を消さない・書かない**（担当は自分の worktree の `build/` だけを使う）。
-- **Makefile・`mk/` の変更**は概要と差分をユーザーに示し、返事の後に当てる（[makefile-style.md](plan/makefile-style.md)）。
+- **Makefile・`mk/` は Claude（Q1・担当）が変えない**（2026-11-12 ユーザー）。変更が要る時は HAL と同じく、差分の案をユーザーへの確認事項として出す（[makefile-style.md](plan/makefile-style.md)）。
 - RTL8822B の `.inc` は別の file のまま保つ（ライセンスを分けるため）。外部 package は source tree に取り込まず、tarball を取得・検証して patch し、ライセンスを監査する。
 - **Amaterrace GPU（`~/amaterrace-gpu`）の RTL は Claude が書かない**（担当にも書かせない）。Claude は仕様と RTL を監査し driver を書き、RTL は Gemini が実装し、両者が互いにレビューする（Claude の指摘も誤りうるので Gemini に妥当性を確かめてもらう）。`docs/ghci.md` が正。詳細は [plan/amaterrace.md](plan/amaterrace.md)。
 - `config/ci/config-amd64-server.mk` はユーザーの物（Q1 は許可を得て直してよい、担当は変えない）。sparcv9 の main の checkout の変更はユーザーの物（commit・revert しない）。
