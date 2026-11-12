@@ -1,0 +1,140 @@
+ws333 p027, test only (kbuild.sh applies it for the build and takes it off after): the next S0 idle is woken by
+the CMOS RTC alarm (seconds now + 40, minutes and hours do not care; RTC_EN through the ACPI fixed event), and the
+TCO watchdog keeps counting through the sleep, so a 5330 sleep that never ends resets the machine back to Debian.
+Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+--- a/src/drivers/acpi/acpi-kern.c
++++ b/src/drivers/acpi/acpi-kern.c
+@@ -145,6 +145,10 @@
+ static void sci_interrupt(int irq, kern_irq_ack_t acknowledge, void *argument);
+ static void event_thread(void *argument);
+ static void power_button(enum drv_acpi_fixed_event event, void *argument);
++static void test_rtc_alarm(enum drv_acpi_fixed_event event, void *argument);
++static uint8_t test_cmos_read(uint8_t index);
++static void test_cmos_write(uint8_t index, uint8_t value);
++void drv_acpi_test_wake_alarm(unsigned seconds);
+ static int read_physical(uint64_t address, void *buffer, size_t length, void *argument);
+ static int memory_handler(const struct drv_acpi_region_access *access, uint64_t *value, void *argument);
+ static int memory_bytes(const struct drv_acpi_region_access *access, uint64_t *value);
+@@ -876,6 +880,87 @@
+ 	kern_system_event_post(KERN_SYSTEM_EVENT_POWER, KERN_SYSTEM_EVENT_PRESS, 1, "power-button", "");
+ }
+ 
++/* Test only: the RTC alarm's fixed event, a wake from S0 idle. */
++static void
++test_rtc_alarm(
++	enum drv_acpi_fixed_event event,
++	void *argument)
++{
++	UNUSED_PARAMETER(event);
++	UNUSED_PARAMETER(argument);
++
++	/* Register C clears the alarm flag. */
++	(void)test_cmos_read(0x0cU);
++	kern_logf("acpi: test RTC alarm\n");
++	kern_sleep_note_wake(KERN_SLEEP_WAKE_TIMER);
++}
++
++/*
++ * Test only: arms the CMOS RTC alarm to ring when the seconds reach now
++ * plus SECONDS (minutes and hours do not care), with RTC_EN on, so the
++ * next S0 idle wakes by itself within a minute.
++ */
++void
++drv_acpi_test_wake_alarm(
++	unsigned seconds)
++{
++	uint8_t control;
++	uint8_t now;
++	uint8_t alarm;
++	unsigned poll;
++	int binary;
++	int error;
++
++	/* Waits for no update in progress, then reads the seconds. */
++	for (poll = 0U; poll < 100000U; poll++) {
++		if ((test_cmos_read(0x0aU) & 0x80U) == 0U)
++			break;
++	}
++	control = test_cmos_read(0x0bU);
++	binary = (control & 0x04U) != 0U;
++	now = test_cmos_read(0x00U);
++	if (!binary)
++		now = (uint8_t)((now >> 4) * 10U + (now & 0x0fU));
++
++	/* The alarm's seconds; minutes and hours 0xff do not care. */
++	alarm = (uint8_t)((now + seconds) % 60U);
++	if (!binary)
++		alarm = (uint8_t)(((alarm / 10U) << 4) | (alarm % 10U));
++	test_cmos_write(0x01U, alarm);
++	test_cmos_write(0x03U, 0xffU);
++	test_cmos_write(0x05U, 0xffU);
++
++	/* Clears an old flag, then lets the alarm raise its flag and RTC_STS. */
++	(void)test_cmos_read(0x0cU);
++	test_cmos_write(0x0bU, (uint8_t)(control | 0x20U));
++	error = drv_acpi_fixed_event_install(DRV_ACPI_EVENT_RTC, test_rtc_alarm, NULL);
++	kern_logf("acpi: test RTC alarm armed at second %u (now %u, control 0x%x, install %d)\n",
++	    (unsigned)((now + seconds) % 60U), (unsigned)now, (unsigned)control, error);
++}
++
++/* Test only: reads one CMOS register. */
++static uint8_t
++test_cmos_read(
++	uint8_t index)
++{
++	uint32_t value;
++
++	(void)drv_acpi_os_port_write(0x70U, 8U, index);
++	value = 0U;
++	(void)drv_acpi_os_port_read(0x71U, 8U, &value);
++	return (uint8_t)value;
++}
++
++/* Test only: writes one CMOS register. */
++static void
++test_cmos_write(
++	uint8_t index,
++	uint8_t value)
++{
++	(void)drv_acpi_os_port_write(0x70U, 8U, index);
++	(void)drv_acpi_os_port_write(0x71U, 8U, value);
++}
++
+ /*
+  * Reports whether the firmware says the platform idles in S0 at low
+  * power (the FADT's LOW_POWER_S0_IDLE_CAPABLE).  Returns 1 or
+--- a/src/kern/sleep.c
++++ b/src/kern/sleep.c
+@@ -78,6 +78,7 @@
+  */
+ struct drv_pci_device;
+ extern int drv_pci_suspend_all(struct drv_pci_device **failed) __attribute__((weak));
++extern void drv_acpi_test_wake_alarm(unsigned seconds) __attribute__((weak));
+ extern int drv_pci_resume_all(void) __attribute__((weak));
+ extern void drv_pci_device_name(struct drv_pci_device *device, char *text, size_t size) __attribute__((weak));
+ extern int drv_acpi_s0_idle_capable(void) __attribute__((weak));
+@@ -192,6 +193,10 @@
+ 	}
+ #endif
+ 
++	/* Test only: an RTC alarm wakes the sleep within a minute. */
++	if (drv_acpi_test_wake_alarm != NULL)
++		drv_acpi_test_wake_alarm(40U);
++
+ 	/* Freezes the user processes. */
+ 	kern_logf("sleep: entering S0 idle\n");
+ 	kern_freeze_user();
+--- a/src/drivers/platform/pcat/intel-tco.c
++++ b/src/drivers/platform/pcat/intel-tco.c
+@@ -507,8 +507,8 @@
+ 	if (!tco.running)
+ 		return 0;
+ 
+-	/* Halts the counter where it is. */
+-	tco_halt();
++	/* Test only: the counter runs on, so a sleep that never ends resets the machine. */
++	kern_logf("watchdog: test: the counter runs through the sleep\n");
+ 
+ 	/* Succeeded: the counter waits for the resume. */
+ 	return 0;

@@ -1,0 +1,16 @@
+ws333 p027, test only (kbuild.sh applies it for the build and takes it off after): RC_CONTROL with the hardware's
+own RC6 entry (HW_ENABLE bit 31 and EI_MODE(1) bit 27 beside RC6_ENABLE), the value a driver writes when no GuC
+controls RC6, instead of RC6_ENABLE alone (the GuC's value, under which the hardware timers never enter RC6).
+Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+--- a/src/drivers/gpu/i915/gt-power.c
++++ b/src/drivers/gpu/i915/gt-power.c
+@@ -194,7 +194,7 @@
+ 	i915_rc6_write_all(mmio, i915_rc6_after_engines, I915_RC6_COUNT(i915_rc6_after_engines));
+ 
+ 	/* Without the GuC's RC6 the driver itself enables RC6. */
+-	rc6->ctl_enable = I915_GT_GEN6_RC_CTL_RC6_ENABLE;
++	rc6->ctl_enable = I915_GT_GEN6_RC_CTL_RC6_ENABLE | (1U << 31) | (1U << 27);
+ 
+ 	/* Render, media and media sampler power gating are always enabled. */
+ 	pg_enable = I915_GT_GEN9_RENDER_PG_ENABLE | I915_GT_GEN9_MEDIA_PG_ENABLE | I915_GT_GEN11_MEDIA_SAMPLER_PG_ENABLE;

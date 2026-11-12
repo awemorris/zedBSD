@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | — | 待機 | BUG-418: rpi5 の SD の image PASS。rpi4 は boot firmware の同意待ちで止めた | ユーザーの同意の後に rpi4 の image と QEMU |
 | P2 | — | 待機 | BUG-418 C を当てた main の確かめ PASS | — |
-| P3 | q2037 | 作業中 | WS333 p029: i915 の GT を RC6 に（HW_CONTROL で DEVICE_LOST の原因、forcewake の性能）、5330 は watchdog の下 | — |
+| P3 | — | 待機 | WS333 p027・p029 cleared（5330 の idle 4.3 W、PC2 86〜88 %、i915 の GT RC6 99.9 %） | agy の依頼 07 の監査（agy が終われば） |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |

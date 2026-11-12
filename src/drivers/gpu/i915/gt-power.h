@@ -86,6 +86,47 @@ struct i915_rc6 {
 };
 
 /*
+ * The account of the time one GT spends in RC6.
+ *
+ * The hardware counts the RC6 time in a 32-bit register that wraps and
+ * that reads true only while a forcewake domain holds the GT awake.  The
+ * account samples it whenever the running device takes its domains, gives
+ * them back, or is asked, and adds each step to a 64-bit total, so the
+ * time the GT slept while parked is counted at the next wake.  A wrap is
+ * lost only when two samples lie more than one counter period apart.
+ *
+ * It lives inside the device from attach to detach; lock guards every
+ * other field and orders a reader's register access against the running
+ * device taking or giving back its domains.  It is taken with interrupts
+ * disabled.
+ */
+struct i915_rc6_residency {
+	struct spinlock lock;
+
+	/* Nonzero while the running device holds the domains, so the counter reads true. */
+	int readable;
+
+	/* Nonzero once the counter has been sampled at all. */
+	int sampled;
+
+	/* The counter at the last sample. */
+	uint32_t last_count;
+
+	/* The RC6 time added up since the first sample, in nanoseconds. */
+	uint64_t total_ns;
+
+	/* How many forcewake domains the running device holds now. */
+	unsigned holds;
+
+	/*
+	 * How many times the counter was given up because the GT lost its
+	 * power (a suspend to D3hot), after which the next sample only sets
+	 * the base again: the time without power is not RC6 time.
+	 */
+	unsigned forgets;
+};
+
+/*
  * The frequency limits and state of one GT, in 16.67 MHz units.
  *
  * It is built by the GT table construction, changed by the enable step of
@@ -205,11 +246,30 @@ struct i915_rps {
 
 	/* How many frequency changes the log has reported (the first few only). */
 	unsigned logged;
+
+	/*
+	 * Keeps the GT's registers awake around a frequency change, for a
+	 * device whose forcewake domains are not held all the time: get
+	 * returns 0 once they are held, put lets them go.  NULL when the
+	 * caller holds the domains itself.  wake_failures counts the changes
+	 * dropped because the GT did not wake.
+	 */
+	int (*awake_get)(void *context);
+	void (*awake_put)(void *context);
+	void *awake_context;
+	volatile unsigned wake_failures;
 };
 
 void drv_i915_rc6_init(struct i915_rc6 *rc6, struct i915_mmio *mmio);
 void drv_i915_rc6_enable(struct i915_rc6 *rc6, struct i915_mmio *mmio, const struct i915_gt_info *gt);
 void drv_i915_rc6_disable(struct i915_rc6 *rc6, struct i915_mmio *mmio);
+void drv_i915_rc6_residency_init(struct i915_rc6_residency *residency);
+void drv_i915_rc6_residency_resume(struct i915_rc6_residency *residency, struct i915_mmio *mmio, unsigned holds);
+void drv_i915_rc6_residency_pause(struct i915_rc6_residency *residency, struct i915_mmio *mmio);
+void drv_i915_rc6_residency_forget(struct i915_rc6_residency *residency);
+unsigned drv_i915_rc6_residency_forgets(struct i915_rc6_residency *residency);
+int drv_i915_rc6_residency_read(struct i915_rc6_residency *residency, struct i915_mmio *mmio, uint64_t *sleep_ns, unsigned *holds);
+uint64_t drv_i915_rc6_count_ns(uint32_t count);
 void drv_i915_rps_init(struct i915_rps *rps, struct mutex *sb_lock, struct i915_mmio *mmio);
 void drv_i915_rps_init_gen9(struct i915_rps *rps, struct i915_mmio *mmio);
 void drv_i915_rps_enable(struct i915_rps *rps, struct i915_mmio *mmio, uint32_t clock_frequency);

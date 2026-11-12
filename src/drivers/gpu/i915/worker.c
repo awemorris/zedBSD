@@ -104,6 +104,13 @@
 /* How long the worker sleeps before it looks again for work it was not woken for (one second). */
 #define I915_WORKER_SLEEP_TICKS		kern_ms_to_ticks(1000U)
 
+/*
+ * How long the worker keeps the GT awake after its last work, in
+ * milliseconds: longer than a frame at 60 Hz, so a running client keeps
+ * the GT awake, and short enough that an idle desktop lets it drop into RC6.
+ */
+#define I915_WORKER_REST_MS		20U
+
 /* The size of a context's timeline page. */
 #define I915_WORKER_TIMELINE_BYTES	4096U
 
@@ -388,8 +395,8 @@ drv_i915_worker_create(
 /*
  * Publishes the GPU node, serves it until a stop is asked for, and withdraws it.
  *
- * Runs on the thread that brought the device up, which holds forcewake for
- * the whole service.  Returns once the node was withdrawn, or the error of a
+ * Runs on the thread that brought the device up, which holds the GT awake
+ * while it has work and lets it rest after I915_WORKER_REST_MS without.  Returns once the node was withdrawn, or the error of a
  * failed publication.  A withdrawal refused because sessions are still open
  * is logged and the call still returns 0, so the device stop runs anyway.
  */
@@ -1292,7 +1299,10 @@ i915_worker_loop(
 	struct i915_worker_sync *item;
 	enum i915_park_action action;
 	uint64_t observed;
+	uint64_t idle_since;
+	uint64_t deadline;
 	unsigned long irq;
+	int awake;
 	int ready;
 	int holding;
 	int hold_over;
@@ -1328,6 +1338,7 @@ i915_worker_loop(
 		}
 
 		/* Sleeps in bounded steps until work arrives, a stop or a park is asked for. */
+		idle_since = sched_ticks();
 		while (worker->run_head == NULL &&
 		    worker->sync_head == NULL &&
 		    worker->stop == 0 &&
@@ -1341,8 +1352,31 @@ i915_worker_loop(
 				}
 			}
 
+			/* After a rest time without work the worker lets the GT go, so it can drop into RC6. */
+			deadline = sched_ticks() + I915_WORKER_SLEEP_TICKS;
+			awake = drv_i915_device_worker_awake(device);
+			if (awake) {
+				deadline = idle_since + kern_ms_to_ticks(I915_WORKER_REST_MS);
+				if (sched_ticks() >= deadline) {
+					spin_unlock_irqrestore(&device->irq_lock, irq);
+					drv_i915_device_worker_rest(device);
+					irq = spin_lock_irqsave(&device->irq_lock);
+					continue;
+				}
+			}
+
 			observed = waitq_sequence(&worker->work);
-			(void)waitq_sleep(&worker->work, &device->irq_lock, observed, sched_ticks() + I915_WORKER_SLEEP_TICKS, 0U);
+			(void)waitq_sleep(&worker->work, &device->irq_lock, observed, deadline, 0U);
+		}
+
+		/* Work to run wakes the GT first; a stop or a park leaves that to the stop and the park. */
+		if (worker->run_head != NULL || worker->sync_head != NULL) {
+			awake = drv_i915_device_worker_awake(device);
+			if (!awake) {
+				spin_unlock_irqrestore(&device->irq_lock, irq);
+				drv_i915_device_worker_wake(device);
+				irq = spin_lock_irqsave(&device->irq_lock);
+			}
 		}
 
 		/* A park asked for while the worker slept is decided at the top. */

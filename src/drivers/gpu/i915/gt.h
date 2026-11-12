@@ -147,11 +147,43 @@ struct i915_gt {
 	unsigned migrate_inited;
 	unsigned pxp_inited;
 
-	/* Nonzero while the start holds every forcewake domain for the running device. */
+	/*
+	 * How many forcewake domains the running device holds now: every
+	 * domain while it has a holder (awake_refs), none while it rests.
+	 * Changed only under awake_lock.
+	 */
 	unsigned forcewake_held;
 
-	/* The domains a park of the request worker gave back, which the unpark takes again. */
+	/* Nonzero while the request worker is parked for a suspend, between drv_i915_device_park_gt() and the unpark. */
 	unsigned forcewake_parked;
+
+	/*
+	 * The holders of the running GT: the request worker while it has work
+	 * or has just had it (worker_awake), and the RPS while it writes a
+	 * frequency.  The first holder wakes every forcewake domain and the
+	 * last gives them back, so the GT can drop into RC6 between them.
+	 * awake_lock guards awake_refs and forcewake_held; worker_awake is the
+	 * worker thread's own.
+	 */
+	struct spinlock awake_lock;
+	unsigned awake_refs;
+	unsigned worker_awake;
+
+	/* Nonzero from the node's publication to the stop: only then may a holder wake the GT (under awake_lock). */
+	unsigned awake_open;
+
+	/* How many held-accessor refusals of the register access the worker last reported. */
+	uint32_t refusals_reported;
+
+	/* The time the GT spent in RC6, sampled while the running device holds its domains. */
+	struct i915_rc6_residency rc6_residency;
+
+	/* When the last park gave the domains back and the RC6 time then, in nanoseconds, for the unpark's log. */
+	uint64_t parked_at_ns;
+	uint64_t parked_sleep_ns;
+
+	/* How many times the RC6 counter had been given up for a loss of power when the last park began. */
+	unsigned parked_forgets;
 };
 
 #endif

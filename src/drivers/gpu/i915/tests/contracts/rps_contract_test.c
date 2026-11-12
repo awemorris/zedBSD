@@ -18,7 +18,10 @@
  * the stop; and the busy-time way (graphics version 12, the default): the
  * evaluations that step up while the engines are busy and down while idle,
  * the park of an idle GT at the minimum and the unpark to the efficient
- * frequency.  The work queue's and the timer's threads never run on the
+ * frequency.  It also checks the account of the GT's RC6 time: the
+ * samples only while the domains are held, the time of a park added at the
+ * wake, a wrap of the 32-bit counter, and a loss of power that only sets
+ * the base again.  The work queue's and the timer's threads never run on the
  * host, so the checks run the callbacks themselves, on a clock of the
  * test's own.  It proves the contract, not the hardware.
  */
@@ -49,6 +52,7 @@
 #define RPS_GPM_MASK		0x1900ecU
 #define RPS_STATE_CAP		(0x140000U + 0x5998U)
 #define RPS_FREQ_INFO		(0x140000U + 0x5ef0U)
+#define RPS_GT_GFX_RC6		0x138108U
 
 /* The command streamer clock of the checks, 19.2 MHz as on Alder Lake-P. */
 #define RPS_CLOCK		19200000U
@@ -85,6 +89,7 @@ static void rps_check_stop(void);
 static void rps_check_interval(void);
 static void rps_run_work(void);
 static void rps_event(uint32_t events);
+static void rps_check_rc6_residency(void);
 
 /*
  * Runs the RPS contract checks.
@@ -116,6 +121,7 @@ main(void)
 	rps_check_stop();
 	rps_check_timer();
 	rps_check_interval();
+	rps_check_rc6_residency();
 
 	/* Reports whether every check held. */
 	status = contract_end();
@@ -490,4 +496,56 @@ rps_event(
 {
 	/* The handler the start registered. */
 	irq.pm_handler(irq.pm_context, events);
+}
+
+/* Checks the account of the RC6 time across holds, a park, a wrap and a loss of power. */
+static void
+rps_check_rc6_residency(void)
+{
+	static struct i915_rc6_residency residency;
+	uint64_t sleep_ns;
+	unsigned holds;
+	int error;
+
+	contract_section("RC6 time: held samples, park, wrap, loss of power");
+
+	/* Before the device holds its domains nothing is read. */
+	drv_i915_rc6_residency_init(&residency);
+	mock_mmio_preset(&mock, RPS_GT_GFX_RC6, 1000U);
+	error = drv_i915_rc6_residency_read(&residency, &mmio, &sleep_ns, &holds);
+	contract_check(error == EAGAIN && sleep_ns == 0U && holds == 0U, "without the domains the counter is not read");
+
+	/* The first hold only sets the base. */
+	drv_i915_rc6_residency_resume(&residency, &mmio, 5U);
+	error = drv_i915_rc6_residency_read(&residency, &mmio, &sleep_ns, &holds);
+	contract_check(error == 0 && sleep_ns == 0U && holds == 5U, "the first sample sets the base; five domains held");
+
+	/* While held, the counter's steps add up at 1.28 microseconds a count. */
+	mock_mmio_preset(&mock, RPS_GT_GFX_RC6, 1000U + 781250U);
+	error = drv_i915_rc6_residency_read(&residency, &mmio, &sleep_ns, &holds);
+	contract_check(error == 0 && sleep_ns == 1000000000U, "781250 counts are one second");
+
+	/* A park samples once more, then the counter is left alone. */
+	mock_mmio_preset(&mock, RPS_GT_GFX_RC6, 1000U + 781250U + 100U);
+	drv_i915_rc6_residency_pause(&residency, &mmio);
+	mock_mmio_preset(&mock, RPS_GT_GFX_RC6, 0xffffffffU);
+	error = drv_i915_rc6_residency_read(&residency, &mmio, &sleep_ns, &holds);
+	contract_check(error == EAGAIN && sleep_ns == 1000128000U && holds == 0U, "a park keeps the total and reads nothing");
+
+	/* The wake adds the time asleep, across a wrap of the counter. */
+	mock_mmio_preset(&mock, RPS_GT_GFX_RC6, 99U);
+	drv_i915_rc6_residency_resume(&residency, &mmio, 5U);
+	error = drv_i915_rc6_residency_read(&residency, &mmio, &sleep_ns, &holds);
+	contract_check(error == 0 && sleep_ns == 1000128000U + (uint64_t)(0x100000000ULL - 782350U + 99U) * 1280U, "the park's time is added at the wake, across the wrap");
+
+	/* A loss of power only sets the base again. */
+	drv_i915_rc6_residency_pause(&residency, &mmio);
+	drv_i915_rc6_residency_forget(&residency);
+	contract_check(drv_i915_rc6_residency_forgets(&residency) == 1U, "the loss of power is counted");
+	mock_mmio_preset(&mock, RPS_GT_GFX_RC6, 7U);
+	drv_i915_rc6_residency_resume(&residency, &mmio, 5U);
+	mock_mmio_preset(&mock, RPS_GT_GFX_RC6, 7U + 10U);
+	error = drv_i915_rc6_residency_read(&residency, &mmio, &sleep_ns, &holds);
+	contract_check(error == 0 && sleep_ns == 1000128000U + (uint64_t)(0x100000000ULL - 782350U + 99U) * 1280U + 12800U,
+	    "after the loss of power the counter starts from a new base");
 }

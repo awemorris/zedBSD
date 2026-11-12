@@ -190,12 +190,17 @@ _Static_assert(sizeof(struct disk_stats_entry) == 120U,
  * time_ns is the GPU's use.  The frequencies are in MHz: the one the
  * hardware runs at, the one the driver last asked for, and the range it
  * asks within.  objects_bytes is the memory the GPU's objects hold, of
- * objects_limit.
+ * objects_limit.  sleep_ns adds up the time the GPU spent in its
+ * power-down idle state (the i915's RC6), so the change of sleep_ns over
+ * the change of time_ns is the share of an interval the GPU slept.
+ * awake_holds is how many of the GPU's power domains the driver holds
+ * awake now, which keeps the GPU out of that state, and awake_wakes how
+ * many times the driver has woken a domain.
  */
 #define HW_GPUTELEMETRY	8
 
 /* The version of the hw.gputelemetry layout. */
-#define GPU_TELEMETRY_VERSION	1U
+#define GPU_TELEMETRY_VERSION	2U
 
 /* The fields a driver filled (struct gpu_telemetry_entry's valid). */
 #define GPU_TELEMETRY_BUSY	0x00000001U
@@ -203,6 +208,8 @@ _Static_assert(sizeof(struct disk_stats_entry) == 120U,
 #define GPU_TELEMETRY_REQ_MHZ	0x00000004U
 #define GPU_TELEMETRY_RANGE_MHZ	0x00000008U
 #define GPU_TELEMETRY_OBJECTS	0x00000010U
+#define GPU_TELEMETRY_SLEEP	0x00000020U
+#define GPU_TELEMETRY_AWAKE	0x00000040U
 
 /*
  * The head of hw.gputelemetry: the layout's version, the header's size,
@@ -230,11 +237,14 @@ struct gpu_telemetry_entry {
 	uint32_t req_mhz;
 	uint32_t min_mhz;
 	uint32_t max_mhz;
+	uint64_t sleep_ns;
+	uint32_t awake_holds;
+	uint32_t awake_wakes;
 };
 
 _Static_assert(sizeof(struct gpu_telemetry_header) == 24U,
     "hw.gputelemetry header ABI must be identical on ILP32 and LP64");
-_Static_assert(sizeof(struct gpu_telemetry_entry) == 72U,
+_Static_assert(sizeof(struct gpu_telemetry_entry) == 88U,
     "hw.gputelemetry entry ABI must be identical on ILP32 and LP64");
 
 /* CTL_HW 9 is retired (the temperatures are read from /dev/thermal); it is not reused. */

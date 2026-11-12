@@ -124,6 +124,8 @@ drv_i915_mmio_init(
 
 	/* Starts with clean failure counters and no steering section. */
 	mmio->forcewake_ack_timeouts = 0U;
+	mmio->forcewake_wakes = 0U;
+	mmio->forcewake_refusals = 0U;
 	mmio->forcewake_underflow = 0;
 	mmio->mcr_locked = 0;
 	mmio->mcr_steer = 0U;
@@ -243,8 +245,9 @@ drv_i915_forcewake_get(
 	if (mmio->forcewake_count[domain] > 1)
 		return 0;
 
-	/* Asks the domain to wake. */
+	/* Asks the domain to wake, and counts the wake. */
 	mmio->ops->forcewake_request(mmio->context, domain, 1);
+	mmio->forcewake_wakes++;
 
 	/* Waits for the domain to acknowledge. */
 	for (poll = 0U; poll < I915_FORCEWAKE_ACK_POLLS; poll++) {
@@ -337,6 +340,7 @@ drv_i915_read32(
 		held = drv_i915_forcewake_held(mmio, domain);
 		if (held == 0) {
 			i915_mmio_note(mmio, I915_TRACE_FAIL, "mmio_read_no_fw", offset, (uint64_t)domain);
+			mmio->forcewake_refusals++;
 			return I915_MMIO_UNREADABLE;
 		}
 	}
@@ -368,6 +372,7 @@ drv_i915_write32(
 		held = drv_i915_forcewake_held(mmio, domain);
 		if (held == 0) {
 			i915_mmio_note(mmio, I915_TRACE_FAIL, "mmio_write_no_fw", offset, (uint64_t)domain);
+			mmio->forcewake_refusals++;
 			return;
 		}
 	}
@@ -498,6 +503,7 @@ drv_i915_rmw32(
 		held = drv_i915_forcewake_held(mmio, domain);
 		if (held == 0) {
 			i915_mmio_note(mmio, I915_TRACE_FAIL, "mmio_rmw_no_fw", offset, (uint64_t)domain);
+			mmio->forcewake_refusals++;
 			return;
 		}
 	}
@@ -529,6 +535,7 @@ drv_i915_write32_masked(
 		held = drv_i915_forcewake_held(mmio, domain);
 		if (held == 0) {
 			i915_mmio_note(mmio, I915_TRACE_FAIL, "mmio_maskwrite_no_fw", offset, (uint64_t)domain);
+			mmio->forcewake_refusals++;
 			return;
 		}
 	}

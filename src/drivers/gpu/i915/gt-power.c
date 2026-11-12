@@ -10,10 +10,11 @@
  *
  * Every register access here goes through the held accessors: the device
  * start holds every GT forcewake domain across the GT initialization and
- * resume that call these functions, and for as long as the node is
- * published, which covers the RPS work and interrupts.  The
- * interrupt handler writes the PM mask with the raw accessor, as the rest of
- * the handler does.
+ * resume that call these functions, the RPS start and stop run while the
+ * serving thread holds the GT, and a frequency change of the work or the
+ * evaluations holds it through the device's awake hooks (struct i915_rps).
+ * The interrupt handler writes the PM mask with the raw accessor, as the
+ * rest of the handler does.
  */
 
 #include "i915.h"
@@ -27,6 +28,7 @@
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/sched.h>
+#include <uapi/errno.h>
 #include <uapi/sysctl.h>
 
 #include <stddef.h>
@@ -57,6 +59,13 @@
  * (BUSY_MAX_EI).
  */
 #define I915_RPS_BUSY_MAX_EI_MS			20U
+
+/*
+ * The time one count of the RC6 residency counter stands for, in
+ * nanoseconds: 1.28 microseconds on the GTs of graphics version 9 and 12
+ * this driver runs (a fully idle GT advances it 781250 times a second).
+ */
+#define I915_RC6_COUNT_NS			1280ULL
 
 /* How many frequency changes the log reports after the start. */
 #define I915_RPS_LOG_CHANGES			24U
@@ -118,6 +127,7 @@ static const struct i915_rc6_write i915_rc6_after_engines[] = {
 
 static void i915_rc6_write_all(struct i915_mmio *mmio, const struct i915_rc6_write *writes, unsigned count);
 
+static void i915_rc6_residency_sample_locked(struct i915_rc6_residency *residency, struct i915_mmio *mmio);
 static void i915_rps_write_imr(struct i915_rps *rps);
 static void i915_rps_write_ier(struct i915_rps *rps);
 static void i915_rps_mask_events_locked(struct i915_rps *rps, uint32_t events, uint32_t open);
@@ -184,8 +194,17 @@ drv_i915_rc6_enable(
 		drv_i915_write32(mmio, I915_GT_RING_MAX_IDLE(gt->engines[engine_index].mmio_base), I915_RC6_ENGINE_MAX_IDLE);
 	i915_rc6_write_all(mmio, i915_rc6_after_engines, I915_RC6_COUNT(i915_rc6_after_engines));
 
-	/* Without the GuC's RC6 the driver itself enables RC6. */
-	rc6->ctl_enable = I915_GT_GEN6_RC_CTL_RC6_ENABLE;
+	/*
+	 * The GuC does not run, so the hardware's own timers decide RC6 entry:
+	 * RC6_ENABLE alone is the GuC's setting, under which the hardware
+	 * never enters RC6 by itself.  The GT drops into RC6 whenever it is
+	 * idle and no forcewake domain is held, which the request worker
+	 * lets happen when it rests.
+	 *
+	 * Procedure referenced: Linux v6.8.12 drivers/gpu/drm/i915/gt/intel_rc6.c
+	 * (gen11_rc6_enable).
+	 */
+	rc6->ctl_enable = I915_GT_RC_CTL_HW_CONTROL | I915_GT_RC_CTL_EVALUATION_MODE_1 | I915_GT_GEN6_RC_CTL_RC6_ENABLE;
 
 	/* Render, media and media sampler power gating are always enabled. */
 	pg_enable = I915_GT_GEN9_RENDER_PG_ENABLE | I915_GT_GEN9_MEDIA_PG_ENABLE | I915_GT_GEN11_MEDIA_SAMPLER_PG_ENABLE;
@@ -241,6 +260,165 @@ drv_i915_rc6_disable(
 	drv_i915_write32(mmio, I915_GT_GEN9_PG_ENABLE, 0U);
 	drv_i915_write32(mmio, I915_GT_GEN6_RC_CONTROL, 0U);
 	drv_i915_write32(mmio, I915_GT_GEN6_RC_STATE, 0U);
+}
+
+/*
+ * Starts an empty RC6 account that cannot read the counter yet.
+ */
+void
+drv_i915_rc6_residency_init(
+	struct i915_rc6_residency *residency)
+{
+	/* The lock that orders the samples against the domains coming and going. */
+	spin_init(&residency->lock, LOCK_RANK_DEVICE, "i915 rc6 residency");
+
+	/* Nothing sampled, nothing held. */
+	residency->readable = 0;
+	residency->sampled = 0;
+	residency->last_count = 0U;
+	residency->total_ns = 0U;
+	residency->holds = 0U;
+	residency->forgets = 0U;
+}
+
+/*
+ * Notes that the running device has just taken its forcewake domains.
+ *
+ * The caller holds the domains; holds is how many.  The counter is
+ * sampled at once, which adds the RC6 time the GT spent since the domains
+ * were given back, and readers may sample it from now on.
+ */
+void
+drv_i915_rc6_residency_resume(
+	struct i915_rc6_residency *residency,
+	struct i915_mmio *mmio,
+	unsigned holds)
+{
+	unsigned long flags;
+
+	/* The counter reads true from here; the first sample sets the base. */
+	flags = spin_lock_irqsave(&residency->lock);
+
+	residency->readable = 1;
+	residency->holds = holds;
+	i915_rc6_residency_sample_locked(residency, mmio);
+
+	spin_unlock_irqrestore(&residency->lock, flags);
+}
+
+/*
+ * Notes that the running device is about to give its forcewake domains back.
+ *
+ * The caller still holds them.  The counter is sampled a last time, and
+ * readers leave it alone until the next resume.
+ */
+void
+drv_i915_rc6_residency_pause(
+	struct i915_rc6_residency *residency,
+	struct i915_mmio *mmio)
+{
+	unsigned long flags;
+
+	/* The last true sample, then no reader touches the counter. */
+	flags = spin_lock_irqsave(&residency->lock);
+
+	if (residency->readable)
+		i915_rc6_residency_sample_locked(residency, mmio);
+
+	residency->readable = 0;
+	residency->holds = 0U;
+
+	spin_unlock_irqrestore(&residency->lock, flags);
+}
+
+/*
+ * Gives the counter's last sample up before the GT loses its power.
+ *
+ * The counter starts again when the GT comes back, so the next sample
+ * only sets the base; the total keeps what was added before.
+ */
+void
+drv_i915_rc6_residency_forget(
+	struct i915_rc6_residency *residency)
+{
+	unsigned long flags;
+
+	/* The next sample is a first one again. */
+	flags = spin_lock_irqsave(&residency->lock);
+
+	residency->sampled = 0;
+	residency->forgets++;
+
+	spin_unlock_irqrestore(&residency->lock, flags);
+}
+
+/*
+ * Reports how many times the counter was given up for a loss of power.
+ */
+unsigned
+drv_i915_rc6_residency_forgets(
+	struct i915_rc6_residency *residency)
+{
+	unsigned long flags;
+	unsigned forgets;
+
+	/* Read under the lock the writer takes. */
+	flags = spin_lock_irqsave(&residency->lock);
+
+	forgets = residency->forgets;
+
+	spin_unlock_irqrestore(&residency->lock, flags);
+
+	/* The count. */
+	return forgets;
+}
+
+/*
+ * Reads the RC6 time added up so far and the forcewake domains held now.
+ *
+ * Returns 0 with *sleep_ns brought up to now, or EAGAIN while the
+ * running device holds no domain (the counter cannot be read then, and
+ * the time asleep is added at the next resume); *holds is set either way.
+ */
+int
+drv_i915_rc6_residency_read(
+	struct i915_rc6_residency *residency,
+	struct i915_mmio *mmio,
+	uint64_t *sleep_ns,
+	unsigned *holds)
+{
+	unsigned long flags;
+	int readable;
+
+	/* A fresh sample while the domains are held, the total as it stands otherwise. */
+	flags = spin_lock_irqsave(&residency->lock);
+
+	readable = residency->readable;
+	if (readable)
+		i915_rc6_residency_sample_locked(residency, mmio);
+
+	*sleep_ns = residency->total_ns;
+	*holds = residency->holds;
+
+	spin_unlock_irqrestore(&residency->lock, flags);
+
+	/* Without the domains the total is not current. */
+	if (!readable)
+		return EAGAIN;
+
+	/* Succeeded: the total is current. */
+	return 0;
+}
+
+/*
+ * Converts counts of the RC6 residency counter to nanoseconds.
+ */
+uint64_t
+drv_i915_rc6_count_ns(
+	uint32_t count)
+{
+	/* Each count is one fixed slice of time. */
+	return (uint64_t)count * I915_RC6_COUNT_NS;
 }
 
 /*
@@ -333,6 +511,12 @@ drv_i915_rps_init(
 	rps->waiters = 0U;
 	rps->work_ready = 0;
 	rps->logged = 0U;
+
+	/* The caller holds the domains until the device says otherwise. */
+	rps->awake_get = NULL;
+	rps->awake_put = NULL;
+	rps->awake_context = NULL;
+	rps->wake_failures = 0U;
 
 	/* Graphics version 12 follows the engines' busy time. */
 	rps->use_timer = 1;
@@ -439,7 +623,9 @@ drv_i915_rps_mask_all(
  * handler, the PM interrupts, and the request raised to the efficient
  * frequency.
  *
- * The caller holds every forcewake domain until drv_i915_rps_stop().  Returns
+ * The caller holds every forcewake domain during the call, and until
+ * drv_i915_rps_stop() unless rps->awake_get lets the work and the
+ * evaluations hold the GT themselves.  Returns
  * 0, or the error of the work queue's creation (RPS then stays at the
  * enable's request).
  */
@@ -1129,6 +1315,7 @@ i915_rps_move_to(
 	uint32_t freq)
 {
 	struct i915_mmio *mmio;
+	int error;
 
 	/* Within the soft limits. */
 	mmio = rps->mmio;
@@ -1136,6 +1323,15 @@ i915_rps_move_to(
 		freq = rps->min_softlimit;
 	if (freq > rps->max_softlimit)
 		freq = rps->max_softlimit;
+
+	/* Keeps the GT awake for the writes; a GT that cannot wake keeps its frequency. */
+	if (rps->awake_get != NULL) {
+		error = rps->awake_get(rps->awake_context);
+		if (error != 0) {
+			rps->wake_failures++;
+			return;
+		}
+	}
 
 	/* The request and its thresholds. */
 	i915_rps_request(rps, mmio, freq, 1);
@@ -1145,6 +1341,10 @@ i915_rps_move_to(
 		drv_i915_write32(mmio, I915_GT_GEN6_RP_INTERRUPT_LIMITS, drv_i915_rps_limits(rps, freq));
 		drv_i915_write32(mmio, I915_GT_GEN6_PMINTRMSK, drv_i915_rps_pm_mask(rps, freq));
 	}
+
+	/* The GT may rest again. */
+	if (rps->awake_put != NULL)
+		rps->awake_put(rps->awake_context);
 
 	/* The frequency the next decision starts from. */
 	rps->cur_freq = freq;
@@ -1440,4 +1640,36 @@ i915_rps_log(
 	    rps->up_events,
 	    rps->down_events,
 	    rps->boosts);
+}
+
+/*
+ * Samples the RC6 residency counter and adds the step since the last
+ * sample to the total; the caller holds the account's lock and the
+ * running device holds the forcewake domains.
+ *
+ * The counter is read raw: the domains are the running device's, which
+ * the lock keeps from being given back during the read.
+ */
+static void
+i915_rc6_residency_sample_locked(
+	struct i915_rc6_residency *residency,
+	struct i915_mmio *mmio)
+{
+	uint32_t count;
+	uint32_t step;
+
+	/* The counter now. */
+	count = drv_i915_raw_read32(mmio, I915_GT_GEN6_GT_GFX_RC6);
+
+	/* The first sample only sets the base. */
+	if (!residency->sampled) {
+		residency->last_count = count;
+		residency->sampled = 1;
+		return;
+	}
+
+	/* The step since the last sample, across one wrap of the 32-bit counter. */
+	step = count - residency->last_count;
+	residency->last_count = count;
+	residency->total_ns += drv_i915_rc6_count_ns(step);
 }

@@ -1,0 +1,16 @@
+ws333 p027, test only (kbuild.sh applies it for the build and takes it off after; never in the tree): the amd64 tick at
+100 Hz instead of 1000 Hz, to see whether the 1 ms tick keeps the 5330's package out of PC2 (a measurement of the
+design.md section 4.3.3 step 4 question, not a proposal for the HAL).
+Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+--- a/include/hal/arch/amd64.h
++++ b/include/hal/arch/amd64.h
+@@ -13,7 +13,7 @@
+  * these ticks, and every conversion to and from milliseconds uses this value.
+  * Vulkan rendering on the desktop wants a millisecond tick.
+  */
+-#define HAL_TIMER_FREQUENCY	(1000U)
++#define HAL_TIMER_FREQUENCY	(100U)
+ 
+ /*
+  * Signal Frame
