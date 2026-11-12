@@ -6,14 +6,15 @@
 #   sh plan/ws333/tests/hw5330/5330-p027-qs40.sh IMG VMUNIX NAME [COPIES...]
 # IMG is a disk image of config-5330-qs40.mk; VMUNIX the kernel put on p4 after the image (the image's own when the
 # same).  COPIES defaults to "600 600".  The 5330 must be on Debian.
-#  1. The NVMe's p5, p6 and the ESP loader must still be what ~/p1-p022/orig (5330-mview.sh backup, 2026-10-31)
-#     holds, so 5330-mview.sh restore brings them back; p4's vmunix and zedbsd.cfg are the WS333 ones kept by
-#     5330-p027.sh (~/ws245/*-p027-orig).
+#  1. The NVMe's zedBSD as it is now is kept once in ~/ws245/p027-nvme on Debian (p4's files, p5 and p6 whole with
+#     gzip, the ESP loader) with its sums (p4's files by cksum, p5 and p6 by sha256, the loader by cksum); a second
+#     run finds the copy and checks that the NVMe still matches it.  p4's vmunix and zedbsd.cfg must be the WS333 ones
+#     kept by 5330-p027.sh (~/ws245/*-p027-orig).
 #  2. The image to the NVMe (5330-nvme-write.sh image), VMUNIX on p4, watchdog=WATCHDOG (default 600) added to its
 #     zedbsd.cfg, zedBSD started once (UEFI BootNext): a zedBSD that stops is reset back to Debian.
 #  3. 5330-mview.sh run LOGS/run COPIES (mview in the session, 12 s each, direct scanout, hw.gputelemetry samples).
-#  4. Debian again; 5330-mview.sh restore (p4, p5, p6 and the loader from the backup, their sums compared); p4's
-#     vmunix and zedbsd.cfg from the p027 copies, their sha256 checked.
+#  4. Debian again; p4, p5, p6 and the loader written back from ~/ws245/p027-nvme and their sums compared with the
+#     kept ones; p4's vmunix and zedbsd.cfg from the p027 copies, their sha256 checked.
 # Nothing is removed on either machine.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -43,6 +44,16 @@ lin() {
 locked() {
 	flock -w 3600 /tmp/i915-hw.lock "$@"
 }
+# Writes the kept NVMe zedBSD back and compares its sums with the kept ones.
+nvme_restore() {
+	TO=1800 locked timeout 1800 ssh -n -o BatchMode=yes "$HOST" "sudo -n sh -c 'set -e; gzip -dc $BK/p5.gz | dd of=$NV_ROOT bs=4M conv=fsync status=none; gzip -dc $BK/p6.gz | dd of=$NV_SWAP bs=4M conv=fsync status=none; mkdir -p /mnt/zb; while mountpoint -q /mnt/zb; do umount /mnt/zb; done; mount $NV_BOOT /mnt/zb; cp -r --preserve=timestamps $BK/p4/. /mnt/zb/; sync; umount /mnt/zb; cp --preserve=timestamps $BK/BOOTX64.EFI /boot/efi/EFI/zedbsd/BOOTX64.EFI; sync'" > "$LOGS/restore.txt" 2>&1
+	sums sums-after.txt
+	if cmp -s "$LOGS/sums-now.txt" "$LOGS/sums-after.txt"; then
+		say "restore: the NVMe is the kept copy again ($(grep -c . "$LOGS/sums-after.txt") sums)"
+	else
+		say "restore: differs (p4 may hold files of the image, not removed): $(diff "$LOGS/sums-now.txt" "$LOGS/sums-after.txt" | tr '\n' ' ' | cut -c1-400)"
+	fi
+}
 p4_restore() {
 	TO=300 lin "sudo -n sh -c 'mkdir -p /mnt/zb && { while mountpoint -q /mnt/zb; do umount /mnt/zb; done; } && mount $NV_BOOT /mnt/zb && cp $DH/ws245/vmunix-p027-orig /mnt/zb/vmunix && cp $DH/ws245/zedbsd.cfg-p027-orig /mnt/zb/zedbsd.cfg && sync && sha256sum /mnt/zb/vmunix /mnt/zb/zedbsd.cfg && umount /mnt/zb'" > "$LOGS/p4-restore.txt" 2>&1
 	say "p4: $(awk '{ printf "%s %s ", substr($1, 1, 16), $2 }' "$LOGS/p4-restore.txt")"
@@ -51,24 +62,37 @@ p4_restore() {
 TO=15 lin 'uname -sr' | grep -q Linux || { say "FAIL: the 5330 is not on Debian"; exit 1; }
 say "$NAME start $(date '+%F %T') on $(TO=15 lin 'uname -sr')"
 DH=$(TO=15 lin 'echo $HOME')
-TO=15 lin "test -f ws245/vmunix-p027-orig && test -f ws245/zedbsd.cfg-p027-orig && test -f p1-p022/orig/sums.txt" ||
-	{ say "FAIL: the p027 copies or the p022 backup are missing"; exit 1; }
+TO=15 lin "test -f ws245/vmunix-p027-orig && test -f ws245/zedbsd.cfg-p027-orig" ||
+	{ say "FAIL: the p027 copies of p4 are missing"; exit 1; }
+BK=$DH/ws245/p027-nvme
+# The sums of the NVMe zedBSD as it is now, into LOGS/FILE.
+sums() {
+	TO=1800 locked timeout 1800 ssh -n -o BatchMode=yes "$HOST" "sudo -n sh -c 'mkdir -p /mnt/zb && { while mountpoint -q /mnt/zb; do umount /mnt/zb; done; } && mount -o ro $NV_BOOT /mnt/zb && (cd /mnt/zb && find . -type f | sort | xargs cksum); umount /mnt/zb; cksum /boot/efi/EFI/zedbsd/BOOTX64.EFI; for p in $NV_ROOT $NV_SWAP; do echo \$(sha256sum < \$p | cut -c1-16) \$(readlink -f \$p); done'" > "$LOGS/$1" 2>&1
+}
 
-# 1. p5, p6 and the loader as the backup holds them.
-TO=1200 locked sh -c "timeout 1200 ssh -n -o BatchMode=yes $HOST \"sudo -n sh -c 'cksum /boot/efi/EFI/zedbsd/BOOTX64.EFI; for p in $NV_ROOT $NV_SWAP; do echo \\\$(sha256sum < \\\$p | cut -c1-16) \\\$(readlink -f \\\$p); done'\"" > "$LOGS/sums-now.txt" 2>&1
-TO=15 lin 'cat p1-p022/orig/sums.txt' > "$LOGS/sums-orig.txt"
-if ! grep -F -x -f "$LOGS/sums-now.txt" "$LOGS/sums-orig.txt" | grep -c . | grep -qx 3; then
-	say "FAIL: p5, p6 or the loader differ from the p022 backup (now: $(tr '\n' ' ' < "$LOGS/sums-now.txt"))"
-	exit 1
+# 1. The NVMe zedBSD kept once, or checked against the copy kept before.
+sums sums-now.txt
+if TO=15 lin "test -f $BK/sums.txt"; then
+	TO=15 lin "cat $BK/sums.txt" > "$LOGS/sums-kept.txt"
+	if ! cmp -s "$LOGS/sums-kept.txt" "$LOGS/sums-now.txt"; then
+		say "FAIL: the NVMe differs from the copy kept in $BK ($(diff "$LOGS/sums-kept.txt" "$LOGS/sums-now.txt" | tr '\n' ' ' | cut -c1-300))"
+		exit 1
+	fi
+	say "the NVMe matches the copy kept in $BK"
+else
+	TO=1800 locked timeout 1800 ssh -n -o BatchMode=yes "$HOST" "set -e; mkdir -p $BK/p4; sudo -n sh -c 'mount -o ro $NV_BOOT /mnt/zb && cp -r --preserve=timestamps /mnt/zb/. $BK/p4/ && umount /mnt/zb; cp --preserve=timestamps /boot/efi/EFI/zedbsd/BOOTX64.EFI $BK/BOOTX64.EFI; dd if=$NV_ROOT bs=4M status=none | gzip -1 > $BK/p5.gz; dd if=$NV_SWAP bs=4M status=none | gzip -1 > $BK/p6.gz; sync'" > "$LOGS/backup.txt" 2>&1 ||
+		{ say "FAIL: the backup ($LOGS/backup.txt)"; exit 1; }
+	TO=60 timeout 60 scp -q "$LOGS/sums-now.txt" "$HOST:$BK/sums.txt" || exit 1
+	say "the NVMe kept in $BK: $(TO=15 lin "du -sh $BK/p5.gz $BK/p6.gz" | tr '\n' ' ')"
 fi
-say "p5, p6 and the loader are the p022 backup's: $(tr '\n' ' ' < "$LOGS/sums-now.txt")"
+say "sums: $(grep -c . "$LOGS/sums-now.txt") lines, $(tail -3 "$LOGS/sums-now.txt" | tr '\n' ' ')"
 
 # 2. The image, the kernel, the watchdog, zedBSD once.
 TO=1200 timeout 1200 scp -q "$IMG" "$HOST:p1-p022/image.img" || { say "FAIL: copy of the image"; exit 1; }
 TO=60 timeout 60 scp -q plan/tools/hw5330/5330-nvme-write.sh plan/tools/hw5330/ufs-grow.py "$HOST:ws245/" || exit 1
 TO=120 timeout 120 scp -q "$VMUNIX" "$HOST:ws245/vmunix-p027-$NAME" || { say "FAIL: copy of the kernel"; exit 1; }
 TO=1500 locked sh -c "timeout 1500 ssh -n -o BatchMode=yes $HOST 'sudo -n sh \$HOME/ws245/5330-nvme-write.sh image \$HOME/p1-p022/image.img && sudo -n sh \$HOME/ws245/5330-nvme-write.sh kernel \$HOME/ws245/vmunix-p027-$NAME'" > "$LOGS/write.txt" 2>&1 ||
-	{ say "FAIL: the NVMe write ($LOGS/write.txt)"; TO=1800 sh "$MV" restore >> "$LOGS/restore.txt" 2>&1; p4_restore; exit 1; }
+	{ say "FAIL: the NVMe write ($LOGS/write.txt)"; nvme_restore; p4_restore; exit 1; }
 TO=120 lin "sudo -n sh -c 'mkdir -p /mnt/zb && { while mountpoint -q /mnt/zb; do umount /mnt/zb; done; } && mount $NV_BOOT /mnt/zb && echo watchdog=$WATCHDOG >> /mnt/zb/zedbsd.cfg && cat /mnt/zb/zedbsd.cfg && sync && umount /mnt/zb'" > "$LOGS/cfg.txt" 2>&1
 say "image $(sha256sum "$IMG" | cut -c1-16) and kernel $(sha256sum "$VMUNIX" | cut -c1-16) on the NVMe; $(grep -c watchdog "$LOGS/cfg.txt") watchdog line"
 
@@ -83,8 +107,6 @@ say "zedBSD: $(tr '\n' ';' < "$LOGS/zedbsd.txt")"
 # 4. Debian, the backup back, p4 as WS333 had it.
 timeout 600 sh "$MV" linux > "$LOGS/linux.txt" 2>&1
 TO=15 lin 'uname -sr' | grep -q Linux || { say "FAIL: Debian did not come back; the watchdog should reset zedBSD within ${WATCHDOG} s"; exit 2; }
-timeout 1800 sh "$MV" restore > "$LOGS/restore.txt" 2>&1
-say "restore: $(grep 'restore:' "$LOGS/restore.txt" | tr '\n' ' ')"
-locked true
+nvme_restore
 p4_restore
 say "done $(date '+%F %T')"
