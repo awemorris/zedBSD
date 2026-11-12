@@ -1,7 +1,12 @@
 zedBSD and Keiland
 ==================
 
-It's changing "the way computing is."
+<div align="center">
+Gonna change the way computing is,<br>
+to reshape the world,
+into a whole new nature,<br>
+by the power of Open-Source!
+</div>
 
 ---
 
