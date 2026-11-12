@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS333](ws333/ws.md) | /dev/thermal の電力・熱の枠組み | p020 Pi 5 の provider と実機の確かめ（q2017、Pi 5 を割り当て） | p014（5330）は 5330 の空きの後 |
-| P2 | — | 待機 | WS347 の監査（q2014）を返却。依頼 06 の下書き [gemini-request-06.md](ws347/gemini-request-06.md)（U1〜U15）、新しい B20〜B26 | — |
+| P2 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | p035 の残りの試験（q2019） | p036（net/tls.c の切り替え）は p035 の後 |
 | P3 | — | 待機 | BUG-412 の締め（xHCI・再投入の直しと読み捨てを main に、debug を外した）、23:40 merge。Pi 5 は普段の kernel、ユーザーの click の確かめ待ち | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
