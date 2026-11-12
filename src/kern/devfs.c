@@ -629,7 +629,9 @@ devfs_cdev_inode(
 	 * the hardware.  A camera is root's until sessiond gives it
 	 * to the seat's user: whoever opens it sees the room.  The ACPI
 	 * namespace node is root's: a write evaluates any AML method, and
-	 * methods write the embedded controller and raise SMIs.  A GPU is
+	 * methods write the embedded controller and raise SMIs.  A test
+	 * kernel's thermal injection node is root's: a made-up sensor can
+	 * stop the machine.  A GPU is
 	 * root's and the video group's until sessiond gives it to the seat's
 	 * user: a member of that group starts a desktop from the text
 	 * console.
@@ -648,6 +650,8 @@ devfs_cdev_inode(
 	else if (raw || smartcard || bluetooth || bridge || camera)
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "input-inject") == 0)
+		mode = 0600U;
+	else if (kern_strcmp(device->name, "thermal-inject") == 0)
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "fpga0") == 0)
 		mode = 0600U;

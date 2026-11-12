@@ -25,11 +25,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* The longest names the copies carry, with the terminating zero. */
-#define KERN_THERMAL_NAME_MAX			32U
-#define KERN_THERMAL_RECEIVER_NAME_MAX		16U
-#define KERN_THERMAL_FIRMWARE_NAME_MAX		16U
-
 /* The most of each thing the core keeps. */
 #define KERN_THERMAL_RECEIVER_MAX		16U
 #define KERN_THERMAL_IOCTL_RANGE_MAX		4U
@@ -38,19 +33,7 @@
 #define KERN_THERMAL_METER_MAX			8U
 
 /* The fan argument of a boost that stands for every fan. */
-#define KERN_THERMAL_FAN_ALL			0xffffffffU
-
-/* What the strategy's copy says beyond its value, as bits. */
-#define KERN_THERMAL_STRATEGY_CUSTOM		0x1U	/* a root's direct setting is in force */
-#define KERN_THERMAL_STRATEGY_PARTIAL		0x2U	/* some receivers failed */
-#define KERN_THERMAL_STRATEGY_PENDING		0x4U	/* the receivers have not all answered */
-#define KERN_THERMAL_STRATEGY_SUPERSEDED	0x8U	/* a later choice replaced this one */
-
-/* What a sensor's copy says beyond its numbers, as bits. */
-#define KERN_THERMAL_READING_VALID		0x1U	/* the temperature is a reading */
-#define KERN_THERMAL_READING_PASSIVE		0x2U	/* the passive level is known */
-#define KERN_THERMAL_READING_CRITICAL		0x4U	/* the critical level is known */
-#define KERN_THERMAL_READING_STALE		0x8U	/* no reading came for a while */
+#define KERN_THERMAL_FAN_ALL			KERN_THERMAL_ALL
 
 /* What a fan's copy says beyond its numbers, as bits. */
 #define KERN_THERMAL_FAN_COPY_KNOWN		0x1U	/* the fan has been read once */
@@ -62,24 +45,19 @@
 #define KERN_THERMAL_METER_COPY_KNOWN		0x1U	/* the counter has been read once */
 #define KERN_THERMAL_METER_COPY_STALE		0x2U	/* the last read failed */
 
-/* What a boost request reports beyond its errno, as bits. */
-#define KERN_THERMAL_BOOST_PENDING		0x1U	/* the fan's driver has not answered yet */
-
 /*
- * How far the thermal emergency went.  It only moves forward: from NONE to
- * SIGNALED when init has a handler for SIGUSR2 and to CUTTING when it has
- * none; from SIGNALED to INIT at init's acknowledgement and to CUTTING when
- * none comes; from INIT to CUTTING when the power is still on two minutes
- * after the signal; from CUTTING to HALTED when the power stayed on.
+ * The names' lengths, the strategy's, a sensor's reading's and a boost's
+ * flags and the emergency's states are the ones the readers of
+ * /dev/thermal see (<uapi/thermal.h>).  The emergency only moves forward:
+ * from NONE to SIGNALED when init has a handler for SIGUSR2 and to CUTTING
+ * when it has none; from SIGNALED to INIT at init's acknowledgement and to
+ * CUTTING when none comes; from INIT to CUTTING when the power is still on
+ * two minutes after the signal; from CUTTING to HALTED when the power
+ * stayed on.
  */
-#define KERN_THERMAL_EMERGENCY_NONE		0U
-#define KERN_THERMAL_EMERGENCY_SIGNALED		1U	/* init was sent SIGUSR2 and has not answered */
-#define KERN_THERMAL_EMERGENCY_INIT		2U	/* init acknowledged and stops the machine */
-#define KERN_THERMAL_EMERGENCY_CUTTING		3U	/* the kernel cuts the power itself */
-#define KERN_THERMAL_EMERGENCY_HALTED		4U	/* the power stayed on; the machine halted */
 
 /* The events one open file holds before the oldest are dropped. */
-#define KERN_THERMAL_READER_RING		64U
+#define KERN_THERMAL_READER_RING		KERN_THERMAL_EVENT_QUEUE
 
 /* The core's counts and the strategy in short. */
 struct kern_thermal_status {
@@ -94,6 +72,8 @@ struct kern_thermal_status {
 	uint32_t emergency;		/* KERN_THERMAL_EMERGENCY_* */
 	uint32_t emergency_sensor;	/* the sensor that began it, while it is not NONE */
 	int32_t emergency_millicelsius;	/* that sensor's temperature then */
+	int32_t strategy_error;		/* the outcome of the choice in force: 0, EOPNOTSUPP or an errno */
+	uint64_t emergency_time_ns;	/* when the emergency began, 0: never */
 };
 
 /* One temperature sensor as the core last saw it. */
@@ -132,6 +112,8 @@ struct kern_thermal_strategy_info {
 	struct kern_thermal_strategy strategy;
 	uint32_t flags;			/* KERN_THERMAL_STRATEGY_CUSTOM and the others */
 	uint32_t generation;
+	int32_t error;			/* the outcome of the choice in force: 0, EOPNOTSUPP or an errno */
+	uint32_t receiver_count;
 	char firmware_name[KERN_THERMAL_FIRMWARE_NAME_MAX];
 };
 
@@ -145,23 +127,31 @@ struct kern_thermal_receiver_info {
 	uint64_t time_ns;		/* when its last apply ended, 0: never */
 };
 
-/* One event as an open file receives it. */
+/*
+ * One event as an open file receives it.  sequence counts every event the
+ * core posted, so a reader of some types sees it skip; name is the
+ * sensor's or the fan's when the event names one, empty otherwise.
+ */
 struct kern_thermal_record {
 	uint32_t type;			/* KERN_THERMAL_EVENT_* */
 	uint32_t index;
 	int64_t value;
+	uint64_t sequence;
 	uint64_t time_ns;
+	char name[KERN_THERMAL_NAME_MAX];
 };
 
 /*
  * The events of one open file of /dev/thermal.
  *
- * The device embeds one in what it keeps for the open file, attaches it
- * at open and detaches it before freeing it.  While it is attached the
- * core appends the events its mask chooses, dropping the oldest when the
- * ring is full and counting them; the next take reports the drop as one
- * OVERFLOW event.  queue is woken at every event appended; its condition
- * lock is the core's event lock, which the take and the ready test take.
+ * The device embeds one in what it keeps for the open file, prepares it
+ * at open, attaches it at the open's first subscription and detaches it
+ * when the subscription stops or before freeing it.  While it is attached
+ * the core appends the events its mask chooses, dropping the oldest when
+ * the ring is full and counting them; the next take reports the drop as
+ * one OVERFLOW event.  queue is woken at every event appended and at the
+ * detach; its condition lock is the core's event lock, which the take,
+ * the wait and the ready test take.
  */
 struct kern_thermal_reader {
 	struct kern_thermal_reader *next;
@@ -173,6 +163,14 @@ struct kern_thermal_reader {
 	struct wait_queue queue;
 	struct kern_thermal_record ring[KERN_THERMAL_READER_RING];
 };
+
+/*
+ * Publishes /dev/thermal, and /dev/thermal-inject in a kernel built for
+ * tests, and takes the core's ioctl numbers.  Thread context, once, after
+ * kern_thermal_init().  Returns 0 or the errno of the registration.
+ */
+int
+kern_thermal_device_register(void);
 
 /* Reports the counts and the strategy in short.  Thread context. */
 void
@@ -218,12 +216,14 @@ kern_thermal_strategy_get(
  * EINVAL for FIRMWARE, an unknown value or axes that do not fit the
  * value; EOPNOTSUPP when no receiver acts on it (it is kept all the
  * same); the first errno when every receiver that acts on it failed;
- * otherwise 0, with *flags telling PARTIAL, PENDING or SUPERSEDED.
+ * otherwise 0, with *flags telling PARTIAL, PENDING or SUPERSEDED and
+ * *generation the choice's generation.
  */
 int
 kern_thermal_strategy_set(
 	const struct kern_thermal_strategy *strategy,
-	uint32_t *flags);
+	uint32_t *flags,
+	uint32_t *generation);
 
 /*
  * Sets the boost level of one fan or of KERN_THERMAL_FAN_ALL and waits up
@@ -251,8 +251,17 @@ kern_thermal_ioctl_dispatch(
 	unsigned long request,
 	uintptr_t argument);
 
-/* Starts taking the events a mask chooses for an open file.  Thread context. */
+/* Prepares an open file's events, not attached yet.  Thread context. */
 void
+kern_thermal_reader_init(
+	struct kern_thermal_reader *reader);
+
+/*
+ * Starts taking the events a mask chooses for a prepared open file, with
+ * an empty ring.  Thread context.  Returns 0, or ENOSPC when
+ * KERN_THERMAL_READER_MAX open files take events already.
+ */
+int
 kern_thermal_reader_attach(
 	struct kern_thermal_reader *reader,
 	uint32_t mask);
@@ -263,7 +272,11 @@ kern_thermal_reader_subscribe(
 	struct kern_thermal_reader *reader,
 	uint32_t mask);
 
-/* Stops taking events for an open file before it is freed.  Thread context. */
+/*
+ * Stops taking events for an open file, when its subscription stops or
+ * before it is freed, and wakes a read that waits on it.  Thread context;
+ * an open file that is not attached is left alone.
+ */
 void
 kern_thermal_reader_detach(
 	struct kern_thermal_reader *reader);
@@ -278,6 +291,18 @@ kern_thermal_reader_take(
 	struct kern_thermal_reader *reader,
 	struct kern_thermal_record *records,
 	unsigned capacity);
+
+/*
+ * Waits until an open file has an event to take.
+ *
+ * Thread context.  Returns 0 when one waits, EAGAIN when none does and
+ * nonblock is set, EINVAL when the open file is not attached (any more),
+ * or EINTR when a signal ends the wait.
+ */
+int
+kern_thermal_reader_wait(
+	struct kern_thermal_reader *reader,
+	bool nonblock);
 
 /* Tells whether an open file has an event to take.  Thread context. */
 bool
@@ -311,6 +336,16 @@ void
 kern_thermal_emergency_run(
 	uint32_t sensor,
 	int32_t millicelsius);
+
+/*
+ * Chooses how the next thermal emergency stops a machine under test: true
+ * skips init and has the guard write the volumes out and cut the power
+ * itself, false asks init first as on a real machine.  Only the test
+ * injection device calls it.  Any context; one atomic store.
+ */
+void
+kern_thermal_emergency_direct(
+	bool direct);
 
 /* Copies the emergency's state into a status.  Thread context. */
 void

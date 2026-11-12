@@ -34,6 +34,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <uapi/system.h>
+#include <uapi/thermal.h>
 
 #define SERVICE_MAX 32
 #define ARGUMENT_MAX 16
@@ -176,6 +177,14 @@ static volatile sig_atomic_t action_requested;
 static volatile sig_atomic_t emergency_requested;
 static int emergency_noted;
 
+/*
+ * /dev/thermal, opened when init starts and kept for its life (-1 when
+ * the kernel has no such node).  Init answers the emergency through it at
+ * once, so the kernel gives init its two minutes instead of cutting the
+ * power after ten seconds; opening it then could wait on a disk.
+ */
+static int thermal_descriptor = -1;
+
 /* Set when the system is being stopped: a replaced service is not started then. */
 static int services_stopping;
 
@@ -316,6 +325,9 @@ main(
 	(void)signal(SIGTERM, signal_handler);
 	(void)signal(SIGUSR2, signal_handler);
 	(void)signal(SIGCHLD, SIG_DFL);
+
+	/* Keeps the node the thermal emergency is answered through; the services do not inherit it. */
+	thermal_descriptor = open("/dev/thermal", O_RDONLY | O_CLOEXEC);
 
 	/* A root the kernel could only mount read-only is checked before anything else. */
 	root_check();
@@ -2555,8 +2567,9 @@ stop_grace_ms(
 }
 
 /*
- * Says once that the kernel reported a thermal emergency, on the console
- * and in its record file, written out at once since the power goes soon.
+ * Says once that the kernel reported a thermal emergency: to the kernel,
+ * which then gives init its two minutes, on the console and in its record
+ * file, written out at once since the power goes soon.
  */
 static void
 note_emergency(
@@ -2572,6 +2585,10 @@ note_emergency(
 	if (!emergency_requested || emergency_noted)
 		return;
 	emergency_noted = 1;
+
+	/* Tells the kernel first that init stops the machine; it waits ten seconds for the word. */
+	if (thermal_descriptor >= 0)
+		(void)ioctl(thermal_descriptor, KERN_THERMAL_EMERGENCY_ACK);
 
 	/* Tells the console. */
 	fprintf(stderr, "init: thermal emergency: turning the power off\n");

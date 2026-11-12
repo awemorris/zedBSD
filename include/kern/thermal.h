@@ -28,60 +28,24 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <uapi/thermal.h>
 
 struct file;
 struct kern_thermal_sensor;
 
 /*
- * The strategies, with the values the readers of /dev/thermal see.
- * FIRMWARE is the state from boot until the first choice and is never
- * chosen; a receiver given it writes nothing.
+ * The strategies, the kinds of sensor and of meter, a sensor's and a
+ * fan's flags, the receivers' answer and the kinds of event are the ones
+ * the readers of /dev/thermal see (<uapi/thermal.h>).  FIRMWARE is the
+ * state from boot until the first choice and is never chosen; a receiver
+ * given it writes nothing.
  */
-#define KERN_THERMAL_STRATEGY_FIRMWARE		0U
-#define KERN_THERMAL_STRATEGY_PERFORMANCE	1U
-#define KERN_THERMAL_STRATEGY_BALANCED		2U
-#define KERN_THERMAL_STRATEGY_POWERSAVE		3U
-#define KERN_THERMAL_STRATEGY_MANUAL		4U
-
-/* The largest value of a manual axis. */
-#define KERN_THERMAL_AXIS_MAX			100U
-
-/* What a receiver's apply adds to its answer, as bits. */
-#define KERN_THERMAL_APPLY_UNCONFIRMED		0x1U	/* asked for, not yet confirmed in force */
 
 /* The domain argument of a ceiling that stands for every domain. */
 #define KERN_THERMAL_DOMAIN_ALL			0xffffffffU
 
 /* A ceiling, in permille, that does not cut anything. */
 #define KERN_THERMAL_LIMIT_NONE			1000U
-
-/* The kinds of temperature sensor. */
-#define KERN_THERMAL_KIND_ZONE			1U	/* a firmware thermal zone with trip points */
-#define KERN_THERMAL_KIND_DEVICE		2U	/* a device's own reading */
-
-/* What a sensor stands for, as bits. */
-#define KERN_THERMAL_SENSOR_CPU			0x1U
-
-/* What a fan reports, as bits. */
-#define KERN_THERMAL_FAN_HAS_RPM		0x1U
-#define KERN_THERMAL_FAN_HAS_LEVEL		0x2U
-
-/* The kinds of energy meter. */
-#define KERN_THERMAL_METER_PACKAGE		1U
-#define KERN_THERMAL_METER_CORES		2U
-#define KERN_THERMAL_METER_GRAPHICS		3U
-#define KERN_THERMAL_METER_PLATFORM		4U
-#define KERN_THERMAL_METER_DRAM			5U
-
-/* The kinds of event, with the values the readers of /dev/thermal see. */
-#define KERN_THERMAL_EVENT_STRATEGY		1U
-#define KERN_THERMAL_EVENT_BOOST		2U
-#define KERN_THERMAL_EVENT_PASSIVE		3U
-#define KERN_THERMAL_EVENT_CRITICAL		4U
-#define KERN_THERMAL_EVENT_EMERGENCY		5U
-#define KERN_THERMAL_EVENT_FAN_STALLED		6U
-#define KERN_THERMAL_EVENT_CPU			7U
-#define KERN_THERMAL_EVENT_OVERFLOW		8U
 
 /* The ioctl numbers each part of /dev/thermal owns. */
 #define KERN_THERMAL_IOCTL_CORE_FIRST		1U

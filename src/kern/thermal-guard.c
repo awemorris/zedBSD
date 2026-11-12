@@ -79,9 +79,20 @@ static volatile unsigned thermal_emergency_state;
  */
 static volatile unsigned thermal_emergency_prepared;
 
-/* The sensor that began the emergency and its temperature then; written once, before the state leaves NONE. */
+/*
+ * The sensor that began the emergency, its temperature then and the tick
+ * it began at; written once, before the state leaves NONE.
+ */
 static uint32_t thermal_emergency_sensor;
 static int32_t thermal_emergency_millicelsius;
+static uint64_t thermal_emergency_tick;
+
+/*
+ * Whether the next emergency skips init, which only a test chooses
+ * (kern_thermal_emergency_direct()); 0 asks init first, as on a real
+ * machine.  The guard reads it once, when the emergency begins.
+ */
+static volatile unsigned thermal_emergency_skip_init;
 
 /*
  * Who holds the one way of stopping the machine, THERMAL_STOP_*.  It
@@ -206,15 +217,17 @@ kern_thermal_emergency_run(
 	uint64_t ack_deadline;
 	uint64_t init_deadline;
 	unsigned state;
+	unsigned skip_init;
 	bool signaled;
 	bool advanced;
 
 	/* Prepares the lock and the queue the answer wakes. */
 	thermal_emergency_prepare();
 
-	/* Notes what began it, for GET_STATUS, before anyone can see it began. */
+	/* Notes what began it and when, for GET_STATUS, before anyone can see it began. */
 	thermal_emergency_sensor = sensor;
 	thermal_emergency_millicelsius = millicelsius;
+	thermal_emergency_tick = sched_ticks();
 
 	/*
 	 * Begins it, waiting for init's answer from the first moment, so that
@@ -233,11 +246,22 @@ kern_thermal_emergency_run(
 	signal_tick = sched_ticks();
 	ack_deadline = signal_tick + kern_ms_to_ticks(THERMAL_ACK_WAIT_MS);
 	init_deadline = signal_tick + kern_ms_to_ticks(THERMAL_INIT_WAIT_MS);
-	signaled = thermal_signal_init();
+	skip_init = atomic_raw_load_acquire(&thermal_emergency_skip_init);
+	signaled = false;
+	if (skip_init == 0U)
+		signaled = thermal_signal_init();
+
+	/* Init cannot be asked, or a test passes it over: the guard cuts the power, after init stopping on its own. */
 	if (!signaled) {
-		/* Init cannot be asked: the guard cuts the power, after init stopping on its own. */
 		(void)thermal_state_advance(KERN_THERMAL_EMERGENCY_SIGNALED, KERN_THERMAL_EMERGENCY_CUTTING);
-		kern_logf("thermal: init has no handler for the emergency; cutting the power\n");
+
+		/* Says why init was not asked. */
+		if (skip_init == 0U) {
+			kern_logf("thermal: init has no handler for the emergency; cutting the power\n");
+		} else {
+			kern_logf("thermal: the test path skips init; cutting the power\n");
+		}
+
 		thermal_wait_for_init_stop(init_deadline);
 		thermal_cut_power();
 		return;
@@ -274,6 +298,22 @@ kern_thermal_emergency_run(
 }
 
 /*
+ * Chooses how the next thermal emergency stops a machine under test.
+ */
+void
+kern_thermal_emergency_direct(
+	bool direct)
+{
+	unsigned skip_init;
+
+	/* The guard reads the choice when the emergency begins. */
+	skip_init = 0;
+	if (direct)
+		skip_init = 1;
+	atomic_raw_store_release(&thermal_emergency_skip_init, skip_init);
+}
+
+/*
  * Copies the emergency's state into a status.
  */
 void
@@ -287,9 +327,11 @@ kern_thermal_emergency_get(
 	status->emergency = state;
 	status->emergency_sensor = 0;
 	status->emergency_millicelsius = 0;
+	status->emergency_time_ns = 0;
 	if (state != KERN_THERMAL_EMERGENCY_NONE) {
 		status->emergency_sensor = thermal_emergency_sensor;
 		status->emergency_millicelsius = thermal_emergency_millicelsius;
+		status->emergency_time_ns = kern_ticks_to_ns(thermal_emergency_tick);
 	}
 }
 

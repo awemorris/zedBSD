@@ -16,12 +16,21 @@
 
 #include <kern/sched.h>
 
-/* A kernel thread as the core sees it: an entry, its argument and whether it runs. */
+struct process;
+
+/* A kernel thread as the core sees it: an entry, its argument, whether it runs and its process. */
 struct thread {
 	void (*entry)(void *);
 	void *argument;
 	int started;
+	struct process *proc;
 };
+
+/* The calling thread, whose process the test sets. */
+#define curthread	(thread_current())
+
+struct thread *
+thread_current(void);
 
 int
 kthread_create(
