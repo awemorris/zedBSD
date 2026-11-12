@@ -10,6 +10,8 @@
 
 ## ユーザーの決定（要点）
 
+- 2026-11-13 ユーザーから、次の趣旨の決定を受けた: (1) CPU の domain は物理的に同じ clock で動く CPU の組にする。Alder Lake の E-core は module（4 つで 1 つ）を見込み、5330 の測定で確かめて直す（p025）。(2) CPU の MHz は読み手の権限によらず新しい値を返し、費用は共有の sample で抑える。`READ_SAMPLE` と書き込みの制限は外す（p026）。(3) affinity の無い thread は自由に CPU を移る。留まるのは affinity のある thread だけ（BUG-422）。
+
 - 2026-11-12 ユーザーから、次の趣旨の決定を受けた: `/dev/thermal` は desktop の group の利用者が操作できるようにし（video の group と GPU と同じ形）、sessiond を通さない。sessiond に委ねるのは認証だけ。→ 新しい group `desktop`、`/dev/thermal` は root:desktop 0664、設定の ioctl は書き込みで開いた fd に許す、`/etc/thermal.conf` は root:desktop 0664、sessiond の THERMAL の要求（p019）は取り下げ、`/sbin/thermal` は機種の選びで入れる（全 image ではない）。
 - 2026-11-12 ユーザーから、p004 の UAPI の案を承認し P1 で進める、という趣旨の指示を受けた（電力の読みは推し A と Q1 が解釈）。
 
@@ -48,3 +50,4 @@
 | [p022](phase022/phase.md) | sysctl の道具と Keiland の monitor を `/dev/thermal` に、`hw.thermal` を外す | cleared（2026-11-12 Q1 判定: hw.thermal を外し、/sbin/thermal と monitor を /dev/thermal で QEMU で確かめた） | p005 後半、p013 |
 | [p024](phase024/phase.md) | 規約の全文の見直しと文書（`docs/architecture/power-management.md`） | in-progress（2026-11-12 P1・q2016-i01: 規約の見直し（5 つの組、書き方だけ）と文書を済ませ、全 platform の build（intelmid64 default は mk の案 D）・host 試験・QEMU amd64 の 5 本 PASS。実機の後の見直しが残る。cleared の判定は Q1） | p005〜p022 |
 | [p025](phase025/phase.md) | p014 の食い違いの解析と直し（HWP の読みの古さ・E-core の MHz の換算・manual の上限・E-core の domain・package の C-state 0%）。考える Phase、実機は最後に 1 回 | in-progress（2026-11-13 P1、q2022-i01: 読みの古さ・E-core の上限超え・manual の 1192 MHz は p014 の読み方（一覧が最後の sample、1 つ前の strategy の期間の値）が原因で `thermal cpu` を sample に直した。E-core の highest_mhz 0 は測りの thread が scheduler の steal で移る不具合で測り直しを足した。E-core の domain は設計どおり（共有は書く試験で確かめる）。package の C-state・全負荷の 1.4 GHz は kernel の外の候補（i915 の DC state・tick・PL1）で、決める数は 5330 の script。5330 で流す準備ができた。cleared は Q1） | p014 |
+| [p026](phase026/phase.md) | CPU の MHz を読み手の権限によらず新しい値で返す（`READ_SAMPLE` と書き込みの制限を外し、約 1 秒の共有の sample） | planned（2026-11-13 ユーザー承認） | p025、BUG-422 |
