@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | q2031 | 作業中 | BUG-418: build system の作り直しの後の各機種の build と QEMU の起動（乖離の確かめから） | WS333 は p028（P3）と p027 の後に p024 |
 | P2 | — | 待機 | WS335 p036 の source を merge（compat だけを開く build、Windows の static の表）。Makefile の案 A〜C はユーザーへ | — |
-| P3 | — | 待機 | WS333 p028（Intel TCO watchdog）cleared、5330 は人手なしで戻れる | 次: WS347 の agy の依頼 07 の監査（agy が終わったら） |
+| P3 | q2032 | 作業中 | WS333 p027: 5330 の package の C-state 0% の原因（i915）、qs40、S0 idle（watchdog の下で） | agy の依頼 07 が終われば監査も |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |

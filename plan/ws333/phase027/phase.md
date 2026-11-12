@@ -2,7 +2,7 @@
 
 # ws333-p027: 5330 の残り（package の C-state 0% の原因、i915 の qs40、S0 idle）
 
-Status: planned（2026-11-13 Q1。p014 の残りを移した。2026-11-13 ユーザーが承認: 危ない起動は p028 で人手なしに戻れる形（一回だけの起動と watchdog）を作ってから流す）
+Status: in-progress（2026-11-13 Q1、q2032-i01 P3。p028 の watchdog で人手なしに戻れる）
 Parent: [WS333](../ws.md)
 
 ## 目的
