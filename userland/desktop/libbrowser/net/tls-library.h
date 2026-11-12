@@ -7,10 +7,11 @@
 
 /*
  * The table of the TLS library's functions that tls.c calls, shared with
- * tls-static.c, which fills it from a library linked into the program.
- * The types are opaque (void pointers) so that tls.c needs no OpenSSL
- * header; a function that takes a callback takes one of the function pointer
- * types below.
+ * the tls-static file of a build that links the library into the program
+ * (tls-static-compat.c for libssl-compat and libcrypto-compat,
+ * tls-static.c for OpenSSL), which fills it.  The types are opaque (void
+ * pointers) so that tls.c needs no header of the library; a function that
+ * takes a callback takes one of the function pointer types below.
  */
 
 #ifndef KEILAND_BROWSER_NET_TLS_LIBRARY_H
@@ -31,10 +32,11 @@ typedef int (*tls_verify_callback)(int preverified, void *store_context);
 /*
  * The library's functions, looked up in the loaded libraries or taken from
  * the static library.  The pointers are set once, when the library is
- * bound, and never change after.  A member marked "OpenSSL only" is one the
- * other implementation of the interface need not have: when it is NULL, the
- * feature that uses it (reading no configuration file, refusing the
- * certificates the system distrusts) is not used and TLS works without it.
+ * bound, and never change after.  A member marked "OpenSSL only" is one
+ * libssl-compat and libcrypto-compat do not have, and NULL with them: they
+ * read no configuration file, and they read the system's stores and refuse
+ * the certificates the system distrusts in their default paths, so tls.c
+ * does neither itself when the members are NULL.
  */
 struct tls_library {
 	const void *(*client_method)(void);
@@ -80,10 +82,10 @@ struct tls_library {
 };
 
 /*
- * Fills a table from the TLS library linked into the program (tls-static.c,
- * which a build that links the library statically compiles in place of
- * opening shared libraries).  Returns 0, or an errno value when the table
- * cannot be filled.
+ * Fills a table from the TLS library linked into the program (the
+ * tls-static file, which a build that links the library statically
+ * compiles in place of opening shared libraries).  Returns 0, or an errno
+ * value when the table cannot be filled.
  */
 int tls_static_library(struct tls_library *library);
 

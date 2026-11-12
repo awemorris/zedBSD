@@ -1,8 +1,9 @@
 #!/bin/sh
-# The host tests of the browser's net/tls.c with libssl-compat in place of OpenSSL.  net/tls.c opens libcrypto and
-# libssl by name ("libcrypto.so", then "libcrypto.so.3"; the same for libssl); the compat libraries are built for the
-# host as shared libraries (the host's cc, their exports.map) into one directory with the names net/tls.c looks for
-# as symbolic links to them, and the browser and host-loader (plan/ws074/tests/host-build.sh, unchanged) are run
+# The host tests of the browser's net/tls.c with libssl-compat in place of OpenSSL.  net/tls.c opens libssl-compat.so
+# (with its libcrypto-compat.so) when it is there, else OpenSSL's libssl.so or libssl.so.3; the compat libraries are
+# built for the host as shared libraries (the host's cc, their exports.map) into one directory under their own names
+# only (no link named like OpenSSL's: the compat runs show that net/tls.c opens the compat names itself), and the
+# browser and host-loader (plan/ws074/tests/host-build.sh, unchanged) are run
 # through a wrapper that sets LD_LIBRARY_PATH to that directory (only the browser gets it: the test server is Python
 # with the host's OpenSSL).  The WS074 runners run-http-tests.py and run-loader-tests.py go once with the host's
 # OpenSSL and once with compat; both must pass, with the same counts, and the dynamic loader's log must show the
@@ -37,7 +38,7 @@ for program in browser host-loader; do
 	fi
 done
 
-# 2. The compat libraries as host shared libraries, and the names net/tls.c opens.
+# 2. The compat libraries as host shared libraries, under the names net/tls.c opens first.
 lib=$out/lib
 mkdir -p "$lib/include" "$lib/obj"
 ln -sfn "$top/include/libc/compat" "$lib/include/compat"
@@ -69,8 +70,6 @@ if [ -s "$lib/build.log" ]; then
 	echo "run-nettls: FAIL (warnings in the library build; $lib/build.log)"
 	exit 1
 fi
-for name in libcrypto.so libcrypto.so.3; do ln -sfn libcrypto-compat.so "$lib/$name"; done
-for name in libssl.so libssl.so.3; do ln -sfn libssl-compat.so "$lib/$name"; done
 echo "nettls: host libcrypto-compat.so and libssl-compat.so built ($(echo $crypto_sources | wc -w) and $(echo $ssl_sources | wc -w) sources), no warning"
 
 # 3. The wrappers: each runs the program with the dynamic loader's log of its libraries in its own files.
@@ -123,7 +122,7 @@ done
 
 # 5. Which libraries were loaded (the dynamic loader names each by the path it opened): in the compat runs libssl
 # from the compat directory and never another, in the OpenSSL runs never one from that directory.
-compat_loads=$(cat "$out"/compat/ld/* 2> /dev/null | grep -c "calling init: $top/$lib/libssl")
+compat_loads=$(cat "$out"/compat/ld/* 2> /dev/null | grep -c "calling init: $top/$lib/libssl-compat\.so")
 compat_system=$(cat "$out"/compat/ld/* 2> /dev/null | grep 'calling init: .*/libssl[.-]' | grep -vc "calling init: $top/$lib/")
 openssl_loads=$(cat "$out"/openssl/ld/* 2> /dev/null | grep -c 'calling init: .*/libssl\.so')
 openssl_compat=$(cat "$out"/openssl/ld/* 2> /dev/null | grep -c "$top/$lib/")
