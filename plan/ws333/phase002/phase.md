@@ -35,3 +35,11 @@ Queue: q1735（P1）
 - 未実施: QEMU（MONITOR の無い CPU で HLT に戻る路）の起動の確かめ、AMD の CPU。
 - **残り**: idle は Linux（3.2〜3.5 W）にまだ遠い（11.6 W）。core の C-state だけでは package が深い状態に入れていない見込み（1 kHz の tick の全 CPU の起床、P-state（HWP 無し）、PCIe の ASPM・display の PSR などの package C-state の妨げ、未調査）。P-state は p001 の設計の後。
 - 追い（2026-10-31、WS333 の設計の review の条件、Q1 経由）: hypervisor の下（CPUID leaf 1 ECX bit 31）は HLT のまま（`reason=hypervisor`）、file の先頭の comment から開発の管理情報を消した、`IDLE_WAIT_DEEPEST_CSTATE` を 1 にすると HLT に戻る事を macro の comment に。build（warning 0）だけ、5330 の再計測はしていない。
+
+## 判定の材料（2026-11-12 P1、q2012-i01）
+
+- 受け入れ（design.md §9 の p002 の行・この phase.md の範囲）: amd64 の idle を MWAIT の C-state にし（HAL の実装、hal.h は不変）、5330 で idle の package の電力と WS291 p022 の fps を前後で測る。
+- 済んだ事: 実装（MWAIT・hint の選び・HLT への戻り・hypervisor の下は HLT・`IDLE_WAIT_DEEPEST_CSTATE=1` で HLT・開発の管理情報の comment を消した）。5330 で idle 13.00 → 11.70 W、c600 30.5〜30.7 → 32.6〜34.9 fps。design.md §4.3.1 の条件 1〜7 は全部「実装済み」か p014 の測りへ。2026-11-12: 新しい build（`mk/`）の x86_64 の vmunix に `src/hal/x86_64/bsp-pcat/idle-suspend.c` が入り warning 0、file に開発の管理情報が無い（grep）。
+- 間接に通った事: p011・p012 の QEMU+KVM の起動（hypervisor の bit が立つ CPU）は、この code の hypervisor → HLT の道で login まで進んだ（道を通った事の直の観察ではない）。
+- 残り（実機が要る物は p014 へ）: MWAIT の路を通った事の直の観察（C-state の滞在）→ p014。QEMU の TCG（MONITOR の無い CPU）の起動、AMD の CPU → 未実施（対象の機械が無い）。
+- P1 の見立て: cleared にしてよい。目的（idle を MWAIT に、電力を下げる）は数で示され、残りは観察の確かめで p014 に移した。

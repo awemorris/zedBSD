@@ -121,3 +121,12 @@ design.md §9 の p018（WS303 design §4.2・§4.5 と WS333 design §4.7・§4
 - 熱の core の後半（p004 の UAPI・`/dev/thermal`・`/sbin/thermal`）が来るまで、受け手と fan は kernel の中だけで、user から読む口は無い（p005 の後半）。
 - [plan/tools.md](../../tools.md) の aml-host の行に、option `--dell`・`--dell-apply`・`--dell-poll`・`--dell-fan`・`--dell-boost` と `--smi-memory` の値の列を足す事（tools.md は Q1 の file）。
 - 規約の全文の見直しは p024。
+
+## 判定の材料（2026-11-12 P1、q2012-i01）
+
+- 受け入れ（design.md §9 の p018 の行）: WS303 §6.3 の 5330 の 1〜4（v5 M8 の前の確かめ、合否と記録の分け）。boost は (a)(b) が両方通れば既定を y に、どちらかが通らなければ「無し」のまま、という規則。
+- 済んだ事: 前の確かめ（mode が再起動で残る、daemon を mask）、(1) attach、(2) 4 つの mode の set（error 0、7 ms）、(3) Debian で Quiet を読む、起動の時の `\ODV0` が BIOS の mode を映す、記録（mode ごとの rpm・温度）。boost は (a) が通らず（rpm が上がらない）規則どおり「無し」（既定 n）。
+- 2026-11-12 に流した事: `sh plan/ws333/tests/dell/run.sh` PASS（28 項目と unit 49 checks）、`sh plan/ws333/tests/wmi/run.sh` PASS。
+- **新しい mk の食い違い**: x86_64・intelmid64・i386 の defaults.mk が `CONFIG_DRIVER_DELL_SMM_BOOST := y` で、既定の kernel が `-DCONFIG_DELL_SMM_BOOST=1`（`.kernel-flags` で確かめた）。この Phase の結論（boost は既定 n）と食い違う。案は [../proposed/mk-cpuperf-config.diff](../proposed/mk-cpuperf-config.diff)（`CONFIG_DRIVER_DELL_SMM_BOOST ?= n` を `mk/config.mk` に、defaults の y を外す）。
+- 残り: SMI の数の実機での数え（未確認）、boost の (b)（(a) が通らないので見ていない）→ p014 で扱うかは Q1。[plan/tools.md](../../tools.md) の aml-host の行への option の追記（Q1 の file）。
+- P1 の見立て: 受け入れは満たした（boost は規則どおり「無し」）ので cleared にしてよい。ただし既定の boost の y がユーザーの意図でなければ mk の直しが要る（ユーザーの確認）。

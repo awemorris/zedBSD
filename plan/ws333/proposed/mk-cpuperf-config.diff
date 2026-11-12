@@ -1,0 +1,181 @@
+diff --git a/mk/config.mk b/mk/config.mk
+--- a/mk/config.mk
++++ b/mk/config.mk
+@@ -468,13 +468,20 @@
+ # Framework
+ ########################
+ 
+-# [Generic CPU performance monitoring driver] (/dev/thermal)
+-CONFIG_KERN_CPU_PERF              ?= n
+-
+ # [x86 Power Control driver] (/dev/thermal)
+-#  - Depends: CONFIG_KERN_CPU_PERF
++#  - The model-specific registers of the x86 processor driver: HWP, the
++#    hardware feedback, the energy meters and the idle residency.
++#  - The CPU performance framework (src/kern/cpuperf.c) and the driver's
++#    CPUID part are always built; this switch adds only the MSR path.
++#  - Off until the acceptance on a real machine has passed.
+ CONFIG_DRIVER_X86_POWER_CONTROL   ?= n
+ 
++# [Dell SMM fan boost]
++#  - Raises a Dell laptop fan's state through the SMM fan call.
++#  - Off: a raised state did not lift the fan on the machine tried.
++#  - Depends: CONFIG_DRIVER_ACPI
++CONFIG_DRIVER_DELL_SMM_BOOST      ?= n
++
+ # [RPi5 processor temperature] (sysctl hw.thermal)
+ #  - TODO: need to port to /dev/thermal
+ CONFIG_DRIVER_RPI5_FAN            ?= n
+diff --git a/mk/kernel.mk b/mk/kernel.mk
+--- a/mk/kernel.mk
++++ b/mk/kernel.mk
+@@ -61,6 +61,7 @@
+ 	src/kern/tty-csi.c \
+ 	src/kern/thermal.c \
+ 	src/kern/thermal-guard.c \
++	src/kern/cpuperf.c \
+ 	src/kern/text-display.c \
+ 	src/kern/partition.c \
+ 	src/kern/klog.c \
+@@ -1248,14 +1249,6 @@
+ 	src/drivers/platform/rpi-common/rpi-bt-link.c
+ endif
+ 
+-# [Generic CPU performance monitoring driver] (/dev/thermal)
+-#  - XXX: TODO: move this module to drivers/
+-ifneq ($(filter y,$(CONFIG_KERN_CPU_PERF) $(CONFIG_DRIVER_CPU_PERF)),)
+-KERN_CPPFLAGS += -DCONFIG_KERN_CPU_PERF=1 -DCONFIG_CPU_PERF=1
+-KERN_SOURCES += \
+-	src/kern/cpuperf.c
+-endif
+-
+ # [Smart Card driver] (/dev/smartcard)
+ ifneq ($(filter y,$(CONFIG_DRIVER_SMARTCARD) $(CONFIG_DRIVER_USB_CCID)),)
+ KERN_CPPFLAGS += -DCONFIG_DRIVER_SMARTCARD=1
+@@ -1264,8 +1257,9 @@
+ endif
+ 
+ # [x86 Power Control driver]
++#  - The sources read CONFIG_CPU_PERF (cpu-x86-insn.h reads CONFIG_KERN_CPU_PERF).
+ ifneq ($(filter y,$(CONFIG_DRIVER_X86_POWER_CONTROL)),)
+-KERN_CPPFLAGS += -DCONFIG_DRIVER_X86_POWER_CONTROL=1
++KERN_CPPFLAGS += -DCONFIG_DRIVER_X86_POWER_CONTROL=1 -DCONFIG_CPU_PERF=1 -DCONFIG_KERN_CPU_PERF=1
+ KERN_SOURCES += \
+ 	src/drivers/platform/pcat/cpu-x86/cpux86-hwp.c \
+ 	src/drivers/platform/pcat/cpu-x86/cpux86-pstate.c \
+diff --git a/mk/platform-i386/defaults.mk b/mk/platform-i386/defaults.mk
+--- a/mk/platform-i386/defaults.mk
++++ b/mk/platform-i386/defaults.mk
+@@ -52,9 +52,6 @@
+ CONFIG_DRIVER_USB_UVC             := y
+ CONFIG_DRIVER_BT                  := y
+ CONFIG_DRIVER_INPUT_BRIDGE        := y
+-CONFIG_DRIVER_CPU_PERF            := y
+-CONFIG_DRIVER_X86_POWER_CONTROL   := y
+-CONFIG_DRIVER_DELL_SMM_BOOST      := y
+ CONFIG_DRIVER_CAMERA              := y
+ CONFIG_DRIVER_ACPI                := y
+ CONFIG_DRIVER_I2C                 := y
+diff --git a/mk/platform-intelmid64/defaults.mk b/mk/platform-intelmid64/defaults.mk
+--- a/mk/platform-intelmid64/defaults.mk
++++ b/mk/platform-intelmid64/defaults.mk
+@@ -49,8 +49,6 @@
+ CONFIG_DRIVER_USB_UVC             := y
+ CONFIG_DRIVER_BT                  := y
+ CONFIG_DRIVER_INPUT_BRIDGE        := y
+-CONFIG_DRIVER_CPU_PERF            := y
+-CONFIG_DRIVER_DELL_SMM_BOOST      := y
+ CONFIG_DRIVER_CAMERA              := y
+ CONFIG_DRIVER_ACPI                := y
+ CONFIG_DRIVER_ACPI_SDHCI          := y
+diff --git a/mk/platform-intelmid64/vmunix.mk b/mk/platform-intelmid64/vmunix.mk
+--- a/mk/platform-intelmid64/vmunix.mk
++++ b/mk/platform-intelmid64/vmunix.mk
+@@ -95,12 +95,8 @@
+ 	src/drivers/platform/pcat/pcat-ide.c \
+ 	src/drivers/platform/pcat/cpu-x86/cpu-x86.c \
+ 	src/drivers/platform/pcat/cpu-x86/cpu-x86-insn.c \
+-	src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c \
+ 	src/drivers/platform/pcat/cpu-x86/cpux86.c \
+ 	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c \
+-	src/drivers/platform/pcat/cpu-x86/cpux86-hwp.c \
+-	src/drivers/platform/pcat/cpu-x86/cpux86-power.c \
+-	src/drivers/platform/pcat/cpu-x86/cpux86-pstate.c \
+ 	src/drivers/disklabel/mbr.c \
+ 	src/drivers/disklabel/gpt.c \
+ 	src/drivers/disklabel/pcat.c \
+diff --git a/mk/platform-pc9821/defaults.mk b/mk/platform-pc9821/defaults.mk
+--- a/mk/platform-pc9821/defaults.mk
++++ b/mk/platform-pc9821/defaults.mk
+@@ -16,7 +16,6 @@
+ CONFIG_KERN_NET_ETHERNET          := y
+ CONFIG_KERN_NET_WIFI              := y
+ CONFIG_DRIVER_HID                 := y
+-CONFIG_DRIVER_CPU_PERF            := y
+ CONFIG_DRIVER_GRAPHICS            := y
+ CONFIG_DRIVER_GRAPHICS_PC98       := y
+ CONFIG_DRIVER_LGY98               := y
+diff --git a/mk/platform-rpi4/defaults.mk b/mk/platform-rpi4/defaults.mk
+--- a/mk/platform-rpi4/defaults.mk
++++ b/mk/platform-rpi4/defaults.mk
+@@ -48,8 +48,6 @@
+ CONFIG_DRIVER_BT                  := y
+ CONFIG_DRIVER_INPUT_BRIDGE        := y
+ CONFIG_DRIVER_RPI4_BT             := y
+-CONFIG_DRIVER_CPU_PERF            := y
+-CONFIG_KERN_CPU_PERF              := y
+ CONFIG_DRIVER_RPI4_BT             := y
+ CONFIG_DRIVER_CAMERA              := y
+ CONFIG_DRIVER_I2C                 := y
+diff --git a/mk/platform-rpi5/defaults.mk b/mk/platform-rpi5/defaults.mk
+--- a/mk/platform-rpi5/defaults.mk
++++ b/mk/platform-rpi5/defaults.mk
+@@ -50,8 +50,6 @@
+ CONFIG_DRIVER_INPUT_BRIDGE        := n
+ CONFIG_DRIVER_RPI5_BT             := n
+ CONFIG_DRIVER_RPI5_FAN            := y
+-CONFIG_DRIVER_CPU_PERF            := y
+-CONFIG_KERN_CPU_PERF              := y
+ CONFIG_DRIVER_CAMERA              := y
+ CONFIG_DRIVER_I2C                 := n
+ CONFIG_DRIVER_GPIO                := n
+diff --git a/mk/platform-vf2/defaults.mk b/mk/platform-vf2/defaults.mk
+--- a/mk/platform-vf2/defaults.mk
++++ b/mk/platform-vf2/defaults.mk
+@@ -48,8 +48,6 @@
+ CONFIG_DRIVER_USB_UVC             := y
+ CONFIG_DRIVER_BT                  := n
+ CONFIG_DRIVER_INPUT_BRIDGE        := n
+-CONFIG_DRIVER_CPU_PERF            := n
+-CONFIG_KERN_CPU_PERF              := y
+ CONFIG_DRIVER_CAMERA              := y
+ CONFIG_DRIVER_I2C                 := n
+ CONFIG_DRIVER_GPIO                := y
+diff --git a/mk/platform-x86_64/defaults.mk b/mk/platform-x86_64/defaults.mk
+--- a/mk/platform-x86_64/defaults.mk
++++ b/mk/platform-x86_64/defaults.mk
+@@ -52,8 +52,6 @@
+ CONFIG_DRIVER_USB_UVC             := y
+ CONFIG_DRIVER_BT                  := y
+ CONFIG_DRIVER_INPUT_BRIDGE        := y
+-CONFIG_DRIVER_CPU_PERF            := y
+-CONFIG_DRIVER_DELL_SMM_BOOST      := y
+ CONFIG_DRIVER_CAMERA              := y
+ CONFIG_DRIVER_ACPI                := y
+ CONFIG_DRIVER_ACPI_SDHCI          := y
+diff --git a/mk/platform-x86_64/vmunix.mk b/mk/platform-x86_64/vmunix.mk
+--- a/mk/platform-x86_64/vmunix.mk
++++ b/mk/platform-x86_64/vmunix.mk
+@@ -94,12 +94,8 @@
+ 	src/drivers/platform/pcat/pcat-ide.c \
+ 	src/drivers/platform/pcat/cpu-x86/cpu-x86.c \
+ 	src/drivers/platform/pcat/cpu-x86/cpu-x86-insn.c \
+-	src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c \
+ 	src/drivers/platform/pcat/cpu-x86/cpux86.c \
+ 	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c \
+-	src/drivers/platform/pcat/cpu-x86/cpux86-hwp.c \
+-	src/drivers/platform/pcat/cpu-x86/cpux86-power.c \
+-	src/drivers/platform/pcat/cpu-x86/cpux86-pstate.c \
+ 	src/drivers/disklabel/mbr.c \
+ 	src/drivers/disklabel/gpt.c \
+ 	src/drivers/disklabel/pcat.c \

@@ -2,7 +2,7 @@
 
 # WS333 設計: /dev/thermal で統一する電力・熱の枠組み（CPU の idle・P-state・P/E core、熱・fan・strategy・非常の停止）
 
-- 版: **第 2 版**（2026-10-31 P5、q1734-i01）。§15（x86 の decode の module、p007）は 2026-10-31 P7（q1759-i01）が足した。第 1 版（500061ba1）に design-reviewer の指摘（[design-review.md](design-review.md)、blocker 0・major 8・minor 24）と、main に merge された p002 の結果（f740839e5）を反映した。行き先は §14。
+- 版: **第 3 版**（2026-11-12 P1、q2012-i01: main 3a073a7e62 の実装と 2026-11-08〜11 の build system の作り直し（`mk/`）に合わせた。照合の表は §16。§2 の file:行 は第 2 版の基点の物のまま）。第 2 版（2026-10-31 P5、q1734-i01）。§15（x86 の decode の module、p007）は 2026-10-31 P7（q1759-i01）が足した。第 1 版（500061ba1）に design-reviewer の指摘（[design-review.md](design-review.md)、blocker 0・major 8・minor 24）と、main に merge された p002 の結果（f740839e5）を反映した。行き先は §14。
 - 入力: WS301 の design.md 第 3 版の改訂 3（CPU の DVFS と P/E core）と WS303 の design.md 第 5 版（熱と fan）。WS303 第 5 版の review（[../ws303/design-v5-review.md](../ws303/design-v5-review.md)、WS303 では未反映）はこの設計に反映した（§8.3）。
 - 基点: worktree `p5-ws333`（branch `agent/p5-ws333`、main aa112273a）。p002 の実装は main f740839e5 で読んだ。引用の file:行 は基点の物（WS301・WS303 の引用は main 68ee65381 の物で、その後に変わった file は §2 で読み直した）。code は書いていない。
 - 読んだ物: WS301 の ws.md・design.md・user-questions.md・hal-review.md・design-v3-review.md、WS303 の ws.md・design.md・user-questions.md・design-v5-review.md、WS302 の ws.md、WS299 の ws.md の結果（2026-10-28）、WS291 p022 の phase.md、WS332 の ws.md・design.md §5、WS331 の ws.md、p002 の phase.md（main）、`plan/guardrail.md`、`plan/master-design-policy.md`、`docs/agent/spec-module-delegation.md`、`include/hal/hal.h`、source（§2）。
@@ -75,13 +75,14 @@ WS303 の未回答の問い（Q303-15〜19）は Q333-1〜5 として聞き直�
          src/kern/cpuperf.c（CPU: topology の表・domain・要求の箱と notify の道・相対の性能・strategy の写し・governor・受け手の 1 つ・CPU の ioctl）
                  ^ 登録（kern_* の口だけ）
  driver: src/drivers/platform/pcat/cpu-x86/（CPUID・MSR、HWP・legacy・HFI・RAPL・C-state の滞在、amd64）
-         src/drivers/acpi/acpi-thermal.c（sensor の push）  src/drivers/acpi/acpi-wmi.c ＋ src/drivers/platform/pcat/dell-wmi.c（fan・Dell の mode・boost）
+         src/drivers/acpi/acpi-thermal.c（sensor の push）  src/drivers/acpi/acpi-wmi.c・acpi-wmi-table.c ＋ src/drivers/acpi/acpi-dell.c・acpi-dell-codec.c（fan・Dell の mode・boost、p018 で置き場所を変えた）
          src/drivers/platform/rpi5/rpi5-fan.c（sensor・fan・受け手・boost）
  HAL:    hal.h は変えない。idle の状態の選び（p002）と tick の位相（p012）は HAL の実装。hal_cpu_notify() を呼ぶのは kernel の cpuperf.c だけ
 ```
 
 - kernel の core は「写しと方針の配り」、driver は「hardware の読み書き」。strategy の意味は core が定め、写し方は各 driver が決める（Q303-11）。
-- `CONFIG_CPU_PERF`（既定 n）は **MSR を読む・書く道だけ**を入れる。CPUID だけで分かる topology と core の種類は amd64 で常に入れる（§4.5）。熱の core は全 platform で常に入る（`hw.thermal` を置き換えるため）。既定を y にするかは Q333-7。
+- `CONFIG_CPU_PERF`（既定 n）は **MSR を読む・書く道だけ**を入れる。CPUID だけで分かる topology と core の種類は amd64 で常に入れる（§4.5）。熱の core は全 platform で常に入る（`hw.thermal` を置き換えるため）。既定を y にするかは Q333-7（答え A: p014 の後）。
+- 2026-11-12 の build（`mk/`）での名前: source が読む macro は `CONFIG_CPU_PERF`（と `cpu-x86-insn.h` だけが読む `CONFIG_KERN_CPU_PERF`）のまま。make の変数は `CONFIG_KERN_CPU_PERF`・`CONFIG_DRIVER_CPU_PERF`・`CONFIG_DRIVER_X86_POWER_CONTROL` の 3 つに分かれ、今の mk は「cpuperf.c を常に入れる」「MSR の道だけを switch に」を満たしていない（§16.2、案は [proposed/mk-cpuperf-config.diff](proposed/mk-cpuperf-config.diff)）。
 
 ### 4.2 kernel の口の統一
 
@@ -390,7 +391,7 @@ WS301 §4.11 と WS303 §4.13 を引き継ぐ。足す・変える物:
 | `hal_poweroff()` | kernel の platform（rpi5 の非常の切り） | 電源断 |
 | `hal_cpu_idle_suspend()` | 試験の build だけ（§4.3.3 の段 4 の見積もり） | 製品の code にしない |
 
-driver（`cpu-x86/`・`dell-wmi.c`・`acpi-wmi.c`・`rpi5-fan.c`）は `kern_*` だけを使う。
+driver（`cpu-x86/`・`acpi-dell.c`・`acpi-wmi.c`・`rpi5-fan.c`）は `kern_*` だけを使う。
 
 ### 6.2 足りるか
 
@@ -501,7 +502,7 @@ CPU の省電力を先にする。CPU の道は p003 → p006 → p011 → p014 
 | p012 | tick の位相を揃える（amd64 の HAL の実装、承認不要）: 方式（周期の始めを揃える／TSC-deadline）の選び、今の形に戻す build の macro、5330 の前後の電力と PC の滞在（器具は p002 と同じ診断の patch か、p011 の後なら meter） | p002 | 3 | QEMU の起動、5330 の前後の数（下がらなくても記録して cleared、方式の採否は数で決める） | Opus（phase-runner-high） |
 | p013 | CPU の ioctl・`/sbin/thermal` の CPU と電力の表示・strategy の保存と rc の restore（Q333-1 の推し B） | p004、p005、p006 | 3 | ioctl の host 試験、QEMU | Opus |
 | p014 | 5330 の CPU の受け入れ（§8.4 の 5330 の 1〜4、1 本の script）。§4.3.3 の段 4 の判断の数 | p011、p012、p013（p004 が遅れる時は p005 の注入の口で） | 4 | §8.4 の PASS | Opus＋Q1 の実機の割当 |
-| p015 | 既定の config の変更（Q333-7 の答えに従い `config/ci/config-amd64.mk` などの `CONFIG_CPU_PERF`、server の config は除く） | p014、Q333-7 | 1 | 全 platform の build、QEMU の回帰 | phase-runner |
+| p015 | 既定の config の変更（Q333-7 の答えに従い amd64 の既定の MSR の道を有効に。2026-11-12 の build では `mk/platform-x86_64/defaults.mk` などの switch、§16.2。server の config は除く） | p014、Q333-7 | 1 | 全 platform の build、QEMU の回帰 | phase-runner |
 | p016 | 見張りと非常の停止（signal の disposition の口、init の SIGUSR2・ACK・上書きの禁止、REBOOT・HALT の hook、SLEEP の排他と `kern_thermal_resume`、停止の道の flag、sync の助けの thread、`drv_acpi_poweroff_emergency`・platform の既定・halt、水準の検査、記録の file） | p005 | 6 | 非常の host 試験、QEMU の非常の 2 本、zone を持つ amd64 の機械の確かめ（無ければ未実施と記録） | Opus |
 | p017 | ACPI WMI の層（`_WDG` の解析は Microsoft の文書に基づく 1 module にしてよい）と AML の harness の `plan/tools/aml-host/` への移し | p001 | 6 | WMI の host 試験、SMI を起こさない、amd64 の build | Opus |
 | p018 | Dell の provider（DDV・mode・受け手・SMM の boost の確かめ）と 5330 の熱の試験 | p005、p017 | 7 | WS303 §6.3 の 5330 の 1〜4（v5 M8 の前の確かめ、合否と記録の分け） | Opus |
@@ -750,3 +751,43 @@ p008〜p010 は p007 の merge の後に並べて走れる（`cpux86.c` は p007
 | m10 p009・p010 が p008 の 4 関数だけに依る | 反映: `cpux86.c` を p007 で実装、p008〜p010 は並べて走れる（§15.6） |
 | m11 p011 への注意（MAXPHYADDR と TME、TSC の近似、valid の bit の関門、MC6） | 反映（§15.7） |
 | m12 check-skeleton の clang 無しと `<BASE>`、頁の番号、PDF の置き場所 | 反映: clang 無しと BASE が commit でない時は FAIL、§11.9.4 は PDF 356、Q1-a の推しに「phase.md の path を直してから起動」 |
+
+## 16. 今の main の実装との照合（第 3 版、2026-11-12 P1、q2012-i01、main 3a073a7e62）
+
+設計の本文（§4〜§9）は第 2 版の意味のまま残し、実装で形が決まった所・変わった所をここに集める。本文の 4 か所（§4.1 の図の Dell の file、§4.1 の config の名前、§6.1 の driver の名前、§9 の p015 の config の置き場所）はこの照合に合わせて直した。
+
+### 16.1 設計と実装の差（意味は保たれ、形が決まった物）
+
+| 設計の所 | 実装（main） | 扱い |
+| --- | --- | --- |
+| §4.1 図: Dell の provider `src/drivers/platform/pcat/dell-wmi.c` | `src/drivers/acpi/acpi-dell.c`・`acpi-dell-codec.c`、header `include/drivers/acpi/dell.h`（p018。全部を firmware の AML 経由で行う ACPI の WMI の使い手なので ACPI の層に置き、host の harness で kernel と同じに動く） | 図を直した。受け手の名前は "dell-wmi" のまま |
+| §4.2 受け手の口 | `struct kern_thermal_receiver_ops` に `poll(context)`（poll の thread が毎秒呼ぶ、WMI の attach の試し直しと Dell の rpm の推しに使う）が足された。他の 4 つ（apply・limit・is_custom・firmware_name）は設計のまま | 設計の追加として採る |
+| §4.2 `kern_fan_register` | `kern_thermal_fan_register(name, rpm_max, ops, context)`、`struct kern_thermal_fan_ops`（read・boost）と `struct kern_thermal_fan_state` | 名前だけの差 |
+| §4.2 meter | `struct kern_thermal_meter_ops` は `count_bits`・単位の分数（`unit_numerator`/`unit_denominator`、nJ）・`read` で、一周の補いと nJ への換算は core（driver は生の計数を返す）。UAPI（p004 の案）も nJ | §4.6 の「poll の thread が 60 秒ごとに 64 bit に積む」は「毎秒の poll で積む」になった（p005） |
+| §4.2 非常の口 | `kern_thermal_emergency_active()`（sleep.c・system-device.c が読む）・`kern_thermal_shutdown_claim()`（停止の道の flag、system-device.c）が kernel の口に足された（p016）。`kern_platform_poweroff_emergency()` は `include/kern/platform.h` の weak、pcat は `drv_acpi_poweroff_emergency()` | §4.11 の設計のとおり |
+| §4.2 kernel の中の読みの口 | `include/kern/thermal_private.h`（GET の写し・strategy の SET/GET・boost・受け手の結果・事象の reader・ioctl の振り分け・非常の ACK）。UAPI（p004）の device はこれを写す | p004 の UAPI の struct はこの写しの形に合わせる |
+| §4.4 provider の口 | `struct kern_cpuperf_provider_ops` は全部の callback が `kern_cpu_id_t cpu` を引数に持ち（target の CPU の上で呼ぶ物も）、`start`（HWP の enable、最初の要求の前）・`measure`（Highest の MHz の測り）・`feedback_read`（HFI の写しの読み）が足された。`idle_package`・`idle_core` は cpu を引数に取る | 設計の追加として採る |
+| §4.4 legacy（HWP の無い CPU）の P-state | driver の道は作らない（SDM に 0xCE の比を PERF_CTL に書く根拠が無い、Q1 の判断、§15.7・§15.8）。HWP の無い Intel は describe だけ。framework の governor（cpuperf.c）は STEPS の provider が来た時の物として残る | 本文の legacy の記述は「今の provider には無い」と読む |
+| §4.4 起動の parameter | `cpuperf=off|on`・`cpuperf.hwp=off|on` が `include/kern/boot.h` の enum と `src/kern/boot.c` の名前の表にある。driver は `kern_boot_parameters_token_present()` で attach の前に読む | 設計のとおり |
+| §4.3.1 p002 の条件 4・6・7 | hypervisor の下は HLT、`IDLE_WAIT_DEEPEST_CSTATE=1` で HLT、開発の管理情報の comment は無い（`src/hal/x86_64/bsp-pcat/idle-suspend.c`、2026-11-12 grep） | 済み |
+| §4.3.3 段 1（p012） | 方式 (b) TSC-deadline、既定 `LAPIC_TICK_TSC_DEADLINE 1`、戻す build は `CONFIG_CPPFLAGS=-DLAPIC_TICK_TSC_DEADLINE=0`（新しい mk の口。2026-11-12 build で確かめた） | 5330 の数は p012 の phase.md |
+| §4.3.2 MC6（module の C6） | `kern_cpuperf_idle` に scope の欄が無く出していない | p004 で UAPI の欄を決める時に扱う（p004 の phase.md） |
+| §4.8 strategy の mutex | 置いていない（世代の進めと写しは写しの spinlock の 1 つの操作で、受け手を呼ぶ間はどの lock も持たない、p005） | 設計の意味（世代・2 周目・SUPERSEDED）は保たれる |
+| §4.11 `thermal.emergency=off` | 作っていない（p016、§11.2 の 6 は未決のまま） | p004 の UAPI の GET_STATUS の「off の印」は今は常に 0 |
+| §4.11 init の EMERGENCY_ACK | init の SIGUSR2 の処理と記録の file（`/var/log/thermal-emergency`）はある。ACK の ioctl は `/dev/thermal` の後（p005 後半） | p004 で番号を決める |
+| §2 の path | build system の作り直しで `src/hal/amd64/` → `src/hal/x86_64/`、`platform/amd64/vmunix.mk` → `mk/platform-x86_64/vmunix.mk`・`mk/kernel.mk`、`config/ci/*.mk` → `mk/platform-<機種>/defaults.mk`・`mk/config.mk` | §2 は第 2 版の基点の事実として読む |
+
+### 16.2 build（`mk/`）と設計の食い違い（2026-11-12 の build で確かめた。直しの案は [proposed/mk-cpuperf-config.diff](proposed/mk-cpuperf-config.diff)、当てていない）
+
+1. **`cpuperf.c` が常に入らない**: `mk/kernel.mk` は `CONFIG_KERN_CPU_PERF` か `CONFIG_DRIVER_CPU_PERF` が y の時だけ `src/kern/cpuperf.c` を入れるが、`src/kern/entry.c`（`kern_cpuperf_init`）・`src/kern/clock.c`（`kern_cpuperf_notify`）と x86 の `cpu-x86.c` は常に呼ぶ。設計（§13「cpuperf.c を n で外す」を選ばなかった）と旧 main（全 port で常に build）に反する。今は全機種の defaults.mk がどちらかを y にしているので link が通っている。
+2. **MSR の道が switch で外れない**: `mk/platform-x86_64/vmunix.mk`・`mk/platform-intelmid64/vmunix.mk` が `cpu-x86-control.c`・`cpux86-hwp.c`・`cpux86-pstate.c`・`cpux86-power.c` を無条件に入れる。`CONFIG_DRIVER_CPU_PERF=n CONFIG_KERN_CPU_PERF=n` では `cpu-x86-control.c` が RDMSR・WRMSR の宣言を持たず compile できない。`CONFIG_DRIVER_X86_POWER_CONTROL=y` では `mk/kernel.mk` が同じ 4 file を足して duplicate symbol（link の失敗）。
+3. **既定が設計・ユーザーの決定と違う**: x86_64・intelmid64 の defaults.mk の `CONFIG_DRIVER_CPU_PERF := y` で、既定の kernel が `-DCONFIG_CPU_PERF=1`（MSR の道が有効）。Q301-4（試験が通るまで既定で無効）と Q333-7 の答え A（p014 の 5330 の受け入れの後に有効）に反する。同じく `CONFIG_DRIVER_DELL_SMM_BOOST := y` で `-DCONFIG_DELL_SMM_BOOST=1`。p018 の 5330 の試験で boost は rpm が上がらず「無し」のまま（既定 n）と決めた。i386 の defaults.mk は `CONFIG_DRIVER_X86_POWER_CONTROL := y` も立てる（i386 は性能を考えない対象、§4.4・§13）。build system の作り直しの時にユーザーが意図して変えたかは未確認。
+4. **名前が 3 つ**: make の変数が `CONFIG_KERN_CPU_PERF`（`mk/config.mk` に説明あり）・`CONFIG_DRIVER_CPU_PERF`（defaults.mk だけ、説明なし）・`CONFIG_DRIVER_X86_POWER_CONTROL`（説明あり、定義する macro を source が読まない）。`CONFIG_DRIVER_DELL_SMM_BOOST` は `mk/config.mk` に項目が無い。
+5. **i386 の topology の file**: `mk/platform-i386/vmunix.mk` が `cpux86.c`・`cpux86-cpuid.c`・`cpu-x86.c`・`cpu-x86-insn.c` を入れる（旧 main の pcat は入れず、`pcat.c` の weak の `drv_cpu_x86_init()` は i386 で link されなかった）。i386 の vmunix の build は 2026-11-12 に止めた（toolchain の source の展開に依存するため、下の 6）ので、i386 で compile できるかは未確認。
+6. **kernel の build が toolchain の source に依存する（事実だけ）**: i386（と同じ形の pc9821）の vmunix の target が `mk/platform-i386/libc.mk` の compiler-rt の builtins（`$(REPO_ROOT)/build/llvm-source/compiler-rt/lib/builtins`）を通して `mk/llvm/llvm.mk` の `$(LLVM_SOURCE)/.patched` に依存し、worktree に LLVM の tarball が無いと取得して共有の `build/llvm-source` に展開し直す。また rpi4・rpi5・vf2 の vmunix.mk の include は `-I$(BUILD)/sysroot/usr/include`、x86_64 は `-Ibuild/x86_64/sysroot/usr/include` で、`BUILD` を変えた時の振る舞いが機種で違う。WS333 の範囲の外として記録だけにする（Q1）。
+
+案（[proposed/mk-cpuperf-config.diff](proposed/mk-cpuperf-config.diff)）の要点: `src/kern/cpuperf.c` を `mk/kernel.mk` の常の列（`thermal-guard.c` の隣）へ。`CONFIG_KERN_CPU_PERF`・`CONFIG_DRIVER_CPU_PERF` の make の変数を外し、MSR の道の switch を `CONFIG_DRIVER_X86_POWER_CONTROL` 1 つに（`-DCONFIG_CPU_PERF=1 -DCONFIG_KERN_CPU_PERF=1` と 4 file を足す、既定 n）。x86_64・intelmid64 の vmunix.mk から 4 file を外す。`CONFIG_DRIVER_DELL_SMM_BOOST ?= n` を `mk/config.mk` に置き、x86_64・intelmid64・i386 の defaults.mk の y を外す。i386 の `CONFIG_DRIVER_X86_POWER_CONTROL := y` を外す。rpi4・rpi5・vf2・pc9821 の defaults.mk の 2 つの変数を外す。i386 の vmunix.mk の topology の 4 file は触らない（5 は Q1 の判断）。
+
+### 16.3 試験の道具の古さ
+
+`plan/ws333/tests/` の `build-vmunix-all.sh`・`config-amd64-boot.mk`・`config-amd64-cpuperf.mk`・`config-amd64-cpu-x86.mk`・`cpu-x86-qemu.sh`・`hw5330/kbuild.sh` は旧 build（`ZEDBSD_CONFIG=`・`ZEDBSD_PLATFORM`・`disk-image`・`CONFIG_CPU_PERF`・`plan/tools/ports/build-vmunix-all.sh`）を前提にしている。新しい mk の変数の名前が決まってから（16.2 の案の答えの後）、p013・p014 の着手の時に直す。host 試験（cpux86・cpuperf-host・cpu-x86-host・thermal-host・sessiond-thermal・wmi・dell）は make に依らず、2026-11-12 に全部 PASS（cpu-x86-host は mk と同じく 2 つの macro を定義するように直した）。
