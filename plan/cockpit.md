@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、書き方は [q1.md](q1.md) §3）。書き手は Q1 だけ。
-最終更新: 2026-11-11 12:0x（Q1。WS347 を立てた）。前の更新: 2026-11-03 16:10（Q1。WS346 完了、全 Phase cleared、既定 cache=on）。前の更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
+最終更新: 2026-11-12 23:42（Q1。master.md の「今の状態」を自律で回す形に書き直した、P1 に WS333 p025）。前の更新: 2026-11-11 12:0x（Q1。WS347 を立てた）。前の更新: 2026-11-03 16:10（Q1。WS346 完了、全 Phase cleared、既定 cache=on）。前の更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
 
 ## 担当（P1〜P8）
 
@@ -13,9 +13,9 @@
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
-| P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
+| P7 | — | 待機 | WS335 p038（limbo の照合）は cleared 済み | — |
 | P8 | — | ラップアップ | WS345 p014（応答しない頁の確かめ）は実装と試験済み、main に（00:05）。cleared の判断は次の Q1 | — |
-| Q1 | [WS347](ws347/ws.md) | VF2＋KC705 の Amaterrace GPU | 全作業を止めた（12:37）。疑問は [ghci-rtl-questions.md](ws347/ghci-rtl-questions.md) | ユーザーの指示待ち |
+| Q1 | [WS347](ws347/ws.md) | VF2＋KC705 の Amaterrace GPU | agy（Gemini）が依頼 07 を実装中、終われば監査 | 自律で回す（[master.md](master.md) の「回し方」） |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 

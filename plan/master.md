@@ -11,64 +11,86 @@
 
 ## 今の状態
 
+### 回し方
+
+<!-- master:loop:start -->
+- **Awesome Plan の原則で自律的に回す**（2026-11-12 ユーザー）。Q1 は Queue を立て、担当に渡し、返却を確かめて merge し、次の Phase を立てる、を止めずに繰り返す。
+- Phase の結果に未解析・食い違い・FAIL が残れば、ユーザーに聞かずに**考える Phase**（code と仕様で原因を突き止めて直す。実機は最後に 1 回）を立てて回す。測る Phase と考える Phase を分けて切る。
+- 範囲の中の技術の判断（実装の形・試験の形・Phase の切り方・担当の割り当て・実機の順番・小さな直し）は Q1 と担当が決め、ws.md の「Q1 の判断」に残す。
+- ユーザーに上げるのは次だけ: 製品の方向、危険の受け入れ、範囲の拡大・取り下げ、Makefile・`mk/` と HAL の API の差分、GHCI の仕様の決定、考える Phase でも解けなかった事。上げる時は Q1 の推しを付けて一度にまとめる（[q1.md](q1.md) §2）。
+- ユーザーには試験を頼まない（拾える試験は [cockpit.md](cockpit.md) に置く）。
+<!-- master:loop:end -->
+
 ### 動いている担当と Queue
 
 <!-- master:agents:start -->
-（2026-11-11 22:10 の時点。詳しくは [cockpit.md](cockpit.md)）
+（2026-11-12 23:42。詳しくは [cockpit.md](cockpit.md)）
 
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
-| Q1 | [WS347](ws347/ws.md) | VF2＋KC705 の Amaterrace GPU。Gemini の RTL の修正（amaterrace-gpu ad23fe01）の監査を、読むだけの監査の担当に任せている。次は Gemini への依頼 03 |
-| Q1 | q2000 | [WS074](ws074/ws.md) [p263](ws074/phase263/phase.md)（実際の Web サイトの UAT の指摘、U1 は host で直った）。2026-11-03 から止まっている |
-| P1 | q2013 | [WS333](ws333/ws.md) の UAPI の実装（p005 後半・p013・p019）（2026-11-12 から） |
-| P2 | q2014 | [WS347](ws347/ws.md) Gemini の RTL の修正（依頼 05 の後）の監査（2026-11-12 から） |
-| P2 | q2019 | [WS335](ws335/ws.md) p035 の残りの試験（2026-11-12 から） |
-| P1・P2 | q2010・q2011 | 2026-11-11 12:37 にユーザーの指示で止めた（uncleared）。P1 の amaterrace の worktree の RTL の変更は使わない（RTL は Gemini）。P2 の worktree `p2-ws347` に driver の未 commit の変更（未確認） |
-| 他 | — | 動いていない。2026-11-02 のラップアップの引き継ぎが phase.md に残る: [WS335](ws335/ws.md) p035、[WS345](ws345/ws.md) p010・p014（p014 の cleared の判断は Q1）、[WS336](ws336/ws.md) p024 |
+| P1 | q2022 | [WS333](ws333/ws.md) [p025](ws333/phase025/phase.md): p014（5330 の CPU の受け入れ）の食い違いを code と SDM で解析して直す。5330 は最後に 1 回 |
+| Gemini（agy） | — | [WS347](ws347/ws.md) 依頼 07（[gemini-request-07.md](ws347/gemini-request-07.md)、V1〜V9）の RTL の実装。V1 は amaterrace-gpu 77d6f219、V2 から続き。終われば Q1 か P3 が監査 |
+| P2〜P8 | — | 動いていない。P5・P6・P8 は 2026-11-02 のラップアップの引き継ぎが phase.md に残る（[WS345](ws345/ws.md) p010・p014、[WS336](ws336/ws.md) p024） |
 
 - main は未 push（push はユーザーの指示で、`git log origin/main..main` で数える）。
 <!-- master:agents:end -->
 
+### Q1 が次に回す事
+
+<!-- master:next-actions:start -->
+上から順に、空いた担当へ。終われば次の Phase を Q1 が立てる。
+
+1. [WS347](ws347/ws.md) Amaterrace GPU: agy の依頼 07 の監査 → 次の依頼。driver を最新の ghci.md に追従し、KC705 の minimal の bitstream で VF2 から疎通（SFU を使わない範囲）。
+2. [WS333](ws333/ws.md) 電力・熱: p025 → 5330 で 1 回測る → p014 の判定 → p024（規約の見直しと文書）。i915 の qs40 と S0 idle は 5330 の image と遠隔の電源の都合で、測れる形を Q1 が決めて Phase にする。
+3. [WS335](ws335/ws.md) TLS ライブラリ: p036（`net/tls.c` を新しいライブラリに切り替える）を P2 に。
+4. ラップアップの残り: [WS345](ws345/ws.md) p010・p014、[WS336](ws336/ws.md) p024 を新しい起動で片付け、cleared を判定する。
+5. build system の作り直しの後始末（[BUG-418](bugs/BUG-418.md) 古い前提の道具・文書、[BUG-419](bugs/BUG-419.md) noct の JIT）。
+6. 下の優先順位の WS を、空いた担当へ。
+<!-- master:next-actions:end -->
+
 ### 統合の注意
 
 <!-- master:merge:start -->
-- build system は作り直した（top の Makefile と `mk/platform-<機種>/`、branch `refactor` は main に入った）。古い `platform/`・`config/ci/` の前提の道具・文書は追従が要る（[BUG-418](bugs/BUG-418.md)、noct の JIT は [BUG-419](bugs/BUG-419.md)）。Makefile・`mk/` の変更は概要と差分をユーザーに示してから（[makefile-style.md](makefile-style.md)）。
-- WS074（ブラウザ）は Q1 が管理し、Claude の担当に割り当ててよい（Codex とクラウドのセッションは終わった）。Windows 版のブラウザ（WS334）と libbrowser の直しは P8 に寄せる（2026-11-02 の割り振り）。
-- Amaterrace GPU（`~/amaterrace-gpu`）: Claude は仕様と RTL の監査と driver、RTL は Gemini（[amaterrace.md](amaterrace.md)）。
+- build system は作り直した（top の Makefile と `mk/platform-<機種>/`）。順は `make CONFIGMK=<cfg> llvm-toolchain-cached` → `make sysroot` → 個別の target。include/ を変えたら `make sysroot` を流し直す（[tools.md](tools.md)）。
+- 担当の worktree は main から新しく作り、`build/` に main の tree を symlink しない（[BUG-420](bugs/BUG-420.md)）。試験と build は 4 thread まで。
+- Makefile・`mk/` は Claude が変えない（`mk/test-config.mk` だけは Q1 が変えてよい）。要る時は差分の案をユーザーへ（[makefile-style.md](makefile-style.md)）。
+- WS074（ブラウザ）は Q1 が管理し、Claude の担当に割り当ててよい。Windows 版のブラウザ（WS334）と libbrowser の直しは P8 に寄せる。
+- Amaterrace GPU（`~/amaterrace-gpu`）: Claude は仕様と RTL の監査と driver、RTL は Gemini（agy）。互いにレビューする（[amaterrace.md](amaterrace.md)）。
 <!-- master:merge:end -->
 
-### Focus と優先順位
-
-<!-- master:focus:start -->
-- **今の Focus（2026-11-11 ユーザー）**: [WS347](ws347/ws.md) — VF2＋KC705 で Amaterrace GPU を動かす。順は bitstream の書き込み → driver を最新の ghci.md に追従 → FPGA の動作確認（疎通、SFU を使わない範囲）。並行して Gemini の RTL を監査し、依頼で直させる。
-- build system の作り直しの後始末（BUG-418・BUG-419）。
-- 実装の進め方: 外部の標準仕様に基づく物と手順に分けられる大きな仕事は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../docs/agent/spec-module-delegation.md)、Opus が設計、Sonnet 5.5 high が実装）。
-- 実機の使い分け: デスクトップ（10.0.10.3）は GPU の driver、Keiland の app は VM で作り VF2 で速さを詰める、5330 は Intel GPU・電源・Alder Lake と USB の NIC、VF2＋KC705 は GHCI。
-<!-- master:focus:end -->
+### 優先順位
 
 <!-- master:priority:start -->
-優先順位（2026-11-02 の整理のまま。WS347 の他はユーザーと見直す。依存の順とは別で、Queue の権限は変えない）:
-1. 標準廉価実装手順の WS: WS326 → WS318 → WS329 → WS330、WS009 → WS296 → WS297、WS328 → WS074。
-2. WS309 p015（ゲームモードの V2）、WS291 の NVIDIA の段、WS307 の残り。
-3. WS221（Jumbo frame）・WS299（5330 の NVMe）: 担当の割り当ての時。
-4. WS290・WS292・WS226: WS347 の進み次第。保留の WS: Q1 とユーザーの整理の後。
+今の Focus は [WS347](ws347/ws.md)（VF2＋KC705 の Amaterrace GPU）。その他は依存と担当の空きで Q1 が回す（Queue の権限は変えない）:
+1. WS333（電力・熱）・WS335（TLS）の締め。
+2. 標準廉価実装手順の WS（[spec-module-delegation.md](../docs/agent/spec-module-delegation.md)、Opus が設計・Sonnet が実装）: WS326 → WS318 → WS329 → WS330、WS009 → WS296 → WS297、WS328 → WS074。
+3. WS309 p015（ゲームモードの V2）、WS291 の NVIDIA の段、WS307 の残り。
+4. WS299（5330 の NVMe。5330 が空いた時）、WS221（Jumbo frame）。
+5. WS290・WS292・WS226 は WS347 の進み次第。
+
+実機の使い分け: デスクトップ（10.0.10.3）は GPU の driver、Keiland の app は VM で作り VF2 で速さを詰める、5330 は Intel GPU・電源・Alder Lake と USB の NIC、VF2＋KC705 は GHCI、Pi 5 は熱と fan（[tools.md](tools.md)）。
 <!-- master:priority:end -->
 
-### ユーザーの未決
+### ユーザーの判断が要る事
 
 <!-- master:open-decisions:start -->
-- [WS347](ws347/ws.md): GHCI の仕様の問い（台帳 [ghci-rtl-questions.md](ws347/ghci-rtl-questions.md) の B）。B2（flat の時の VA）と B3（LDS の文）が残る。
-- WS299 の継続（5330 が空いたら担当を割り当てる）。担当の外で見つけた物: clock_gettime に vDSO が無く 1 ms 刻み、main から return した時に stdout が flush されない、libc の memcpy の続き。
-- P4 が拾った候補: WS162 を canceled にするか（WS172 に吸収）、WS279 p009（ライセンスと類似性の監査）の担当、P4m の時々の失敗（T1-691）の Bug、nvrtx.disp.own の既定、pci-msi-qemu.c を残すか、master-design-policy.md へ移す候補 約 25 件。
-- WS282〜WS285: 実装を始める時期、再開の時の試験の PC（D11）と webcam（D12）。
-- BUG-412（Pi 5 の click）: ユーザーの click の確かめで閉じる。BUG-345（Pi 5 の click が出ない窓）は再発したら再起動の前に Q1 に知らせてもらう。
-- 以前からの物: UEFI の loader の GOP の mode の選び方、WS153 U2〜U15、記録に既にあるユーザーの発言の原文の扱い。
+決めるまで、その部分を使わない形で他を進める。
+
+- **GHCI の仕様**（[ghci-rtl-questions.md](ws347/ghci-rtl-questions.md) の B）: 判断待ちの B を、Q1 の推しを付けてまとめて上げる。決まるまで RTL は今の振る舞い、driver はどちらでも動く形。
+- **Makefile・`mk/` の差分の案**: intelmid64 の `CONFIG_DRIVER_DELL_SMM_BOOST` の既定を n に（既定の kernel が link できない）、`plan/tools/aml-host/Makefile` の Dell の macro の名前、x86_64 の defaults を `?=` に、VF2 の config の PLATFORM の名前。
+- **範囲**: WS162 を canceled にするか（WS172 に吸収）、WS282〜WS285 を始める時期。
 <!-- master:open-decisions:end -->
+
+### Q1 が決める事（ユーザーに聞かない）
+
+<!-- master:q1-decides:start -->
+以前ユーザーの未決に置いていたが、範囲の中の技術の判断なので Q1 が決めて ws.md・Bug に残す: nvrtx.disp.own の既定、pci-msi-qemu.c を残すか、P4m の時々の失敗（T1-691）の Bug 化、master-design-policy.md へ移す候補、WS279 p009（ライセンスと類似性の監査）の担当、WS299 の担当の割り当てと見つけた物（vDSO の無い clock_gettime、return の時の stdout の flush、memcpy）の Bug 化、UEFI の loader の GOP の mode の選び方。
+<!-- master:q1-decides:end -->
 
 ### 止まっている物
 
 <!-- master:blocked:start -->
-- ユーザーが拾える試験（頼まない）は [cockpit.md](cockpit.md) の一覧。
+- 5330 は遠隔の電源が無く、S0 idle のように戻らない恐れのある試験は流せない（形を Q1 が考える）。
 - `plan/records.json`（GitHub の同期の対応）に消した Phase の path が残る（同期は今使っていない）。
 - GitHub への公開は push の指示の時だけ。
 <!-- master:blocked:end -->
