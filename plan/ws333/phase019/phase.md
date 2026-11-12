@@ -57,3 +57,5 @@ design.md §9 の p019 と §4.10 の権限: Keiland の app（session）が ses
 - `thermal.c`: `thermal_carry()` が pipe と fork・execv で実行し、出力（1023 byte まで）を読み、waitpid で終わりを待って outcome に渡す。stub を外した。
 - 試験: `sh plan/ws333/tests/sessiond-thermal/run.sh <out>` PASS 146 checks（素と ASan/UBSan、+33 は command line 8 種と outcome 17 種）。`thermal.c`・`thermal-rules.c` は x86_64・arm64・riscv64 の zedBSD の clang で `-Wall -Wextra -Werror` の compile が通る。sessiond 全体の link は未実施（desktop の package が要る）。
 - 未実施: QEMU（wheel の session から strategy が届き、wheel でない user が拒まれる事。desktop の image と注入の build が要る）。
+
+- 2026-11-12 ユーザーが sessiond の Makefile の差分（`thermal.c`・`thermal-rules.c` の 2 行を外す）を承認した。sessiond の他の file がまだ thermal を呼ぶので、Q1 が q2015 の P1 の branch の merge と同じ commit で当てる。
