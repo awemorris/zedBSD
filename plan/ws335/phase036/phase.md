@@ -2,7 +2,7 @@
 
 # ws335-p036: libbrowser の net/tls.c の libssl-compat・libcrypto-compat への切り替え
 
-Status: in-progress（2026-11-13 P2 q2029-i01。source の実装・host の試験・Wine の試験・zedBSD の build は済み。Makefile・mk/ の 3 つの差分は案（ユーザーの確認待ち）。QEMU の画面の確かめは下の「結果」。cleared は Q1）
+Status: in-progress（2026-11-13 P2 q2029-i01。実装済み、受け入れの試験は全部 PASS（案 A・B を command line・Makefile の写しで与えて）。Makefile・mk/ の 3 つの差分 A〜C は案（ユーザーの確認待ち）。cleared は Q1）
 Parent: [WS335](../ws.md)。担当: P2（q2029-i01、worktree `p2-ws335c`）。依存: p033（cleared）、WS334 の p022・p030（cleared）。
 
 前の版（2026-11-01 p001 の提案、Status planning）を 2026-11-13 に今の main（500159a81d）と照らして書き直した。前の版の §1〜§3 の要点は下の「形」と「乖離の確かめ」に入れた。
@@ -49,6 +49,7 @@ Parent: [WS335](../ws.md)。担当: P2（q2029-i01、worktree `p2-ws335c`）。�
 - **B. `apps/browser-win32/Makefile`**（[browser-win32-Makefile.diff](browser-win32-Makefile.diff)）: 2 つの `sources.mk` の include と static library `libssl-compat.a`・`libcrypto-compat.a`（`WIN32_STATIC_LIBRARY`、warning 0 の flag）、`tls-static.c` を `tls-static-compat.c` に、OpenSSL の archive・`openssl` の target（`tls` に）・`openssl-windows.sh` の規則・OpenSSL の許諾の文の同梱を外す。`-lbcrypt -lcrypt32 -lws2_32` は今の `WIN32_SYSTEM_LDFLAGS` にある。tree の Zlib の許諾は既に `zedBSD-LICENSE.txt`。
   一緒に直す物（Makefile でないが B と同時でないと食い違う。WS334 の file）: `apps/browser-win32/resources/licenses-README.txt` の OpenSSL の 2 行、`plan/ws334/tests/zip-contents.txt` の `share/licenses/OpenSSL-LICENSE.txt`、`plan/ws334/tests/cross-build.sh:116` の OpenSSL の archive、`plan/ws334/tests/tls-wine.sh`（openssldir の確かめは OpenSSL だけの物。`tls-wine-compat.sh` の `COMPAT_BY_MAKEFILE=1` が置き換え）。B の後、`tls-static.c`・`openssl-windows.sh`・`openssl-conf/` は使われない（削除は Q1）。
   当てた後の確かめ: `COMPAT_BY_MAKEFILE=1 sh plan/ws335/tests/tls-wine-compat.sh`、`sh plan/ws334/tests/cross-build.sh`（上の直しの後）、`llvm-objdump -p build/browser-win64/OmniGrammaton.exe` の import に OpenSSL の DLL が無い事。
+- **B の外の既存の欠陥**: §結果の「見つけた欠陥」の 3（`ZEDBSD_EXT_ca-certificates_*` → `EXT_ca-certificates_*` の 3 行の sed）。B と一緒に直すとよい（案に含めていない）。
 - **C. `mk/platform-*/defaults.mk`**（[defaults.diff](defaults.diff)）: libbrowser を持つ 7 つの platform の `CONFIG_USERLAND_PROGRAMS` の `libbrowser` の後に `libcrypto-compat`・`libssl-compat`。A と同時に当てないと、image の browser は https ができない（A だけだと compat が image に無い）。`openssl` の package は curl・openssh・mailer が使うので残す（外すかは製品の判断）。
   注意: compat の build が確かめられているのは amd64・aarch64・riscv64（p033・p039）。i386（`i386`・`pc9821`）は未確認なので、その 2 つを外して当てる手もある（推し: 7 つとも当て、i386 の build は当てた後に確かめる）。
   当てた後の確かめ: `make CONFIGMK=config/config.x86_64.mk BUILD_JOBS=4 disk` の warning 0、`sh plan/ws335/tests/run-browser-guest.sh`。
@@ -68,6 +69,31 @@ Parent: [WS335](../ws.md)。担当: P2（q2029-i01、worktree `p2-ws335c`）。�
 | `sh plan/ws335/tests/check-exports.sh build/x86_64/dynamic/libcrypto-compat.so build/x86_64/dynamic/libssl-compat.so` | `check-exports: PASS` |
 | `make CONFIGMK=plan/ws335/tests/config-p036-guest.mk CONFIG_GRAPHICAL_LOGIN=n BUILD_JOBS=4 '<A の変数>' disk` → `sh plan/ws335/tests/run-browser-guest.sh` | `run-browser-guest: PASS`、PNG |
 
-## 結果
+## 結果（2026-11-13 P2 q2029-i01、branch `agent/p2-ws335c`、基点 500159a81d）
 
-（記入中）
+| 確かめ | コマンド | 結果 |
+| --- | --- | --- |
+| host の net/tls.c（WS074 の http・loader の runner） | `sh plan/ws335/tests/run-nettls.sh` | `run-nettls: PASS (http 15 cases, loader 11 cases, each with OpenSSL and compat)`。compat の run は `-DWB_TLS_COMPAT` の libbrowser.so（`libssl-compat.so`・`libcrypto-compat.so` だけを名指す、strings で確かめた）で、OpenSSL の名前の symlink 無し。ld.so の log: compat の run は compat の dir の libssl-compat.so を 7 回 init、他の libssl 0 回 |
+| zedBSD の build（x86_64、案 A を command line で） | §6 の 3 行目、`CONFIGMK=plan/ws335/tests/config-p036.mk` | libcrypto-compat.so・libssl-compat.so・libbrowser.so、warning 0。`.flags` に `-DWB_TLS_COMPAT`、libbrowser.so の文字列は compat の 2 つの名前だけ |
+| export | `sh plan/ws335/tests/check-exports.sh build/x86_64/dynamic/libcrypto-compat.so build/x86_64/dynamic/libssl-compat.so` | `check-exports: PASS`（public 78＋cryc_ 190、ssl public 22）。net/tls.c の表の必須の 29 名は全部 export にある。無いのは OpenSSL only の 4 名（`OPENSSL_init_ssl`・`X509_digest`・`X509_STORE_CTX_get_current_cert`・`X509_STORE_CTX_set_error`、`EVP_sha256` は libcrypto-compat にある） |
+| zedBSD の image（x86_64） | `make CONFIGMK=plan/ws335/tests/config-p036-guest.mk BUILD_JOBS=4 CONFIG_GRAPHICAL_LOGIN=n "CONFIG_USERLAND_PROGRAMS=<既定から *-firmware を除き compat の 2 つを足した一覧>" '<案 A の変数>' disk` | `check-x86_64-hdd-image: PASS`、自分の file の warning 0（noct の 3 件は toolchain 側の既存）。firmware は許諾の問いが出るので一覧から外した（許諾には答えていない）。下の「見つけた欠陥」の 1 の 3 file は同じ recipe を正しい path で手で流した |
+| QEMU の zedBSD でブラウザが https の頁を開く | `sh plan/ws335/tests/run-browser-guest.sh` | `run-browser-guest: PASS`。guest の libbrowser.so は `libcrypto-compat.so libssl-compat.so` だけを名指す。local（host の s_server、試験の CA を --ca-file）: 描けた、PNG（640×360、guest の cksum と一致）`build/tmp/ws335-browser-guest.run.IvI6Xx/local.png`（青地に黄の見出し「https over libssl-compat」と本文、目で確かめた）。untrusted: `certificate verify failed: unable to get local issuer certificate`。site（https://example.com/）: handshake は実在の server と進み、image に `/etc/ssl/cert.pem` が無いため `unable to get local issuer certificate`（下の 2）。guest の画面の QMP の PNG は `screen.png`（同じ dir、目では未確認） |
+| Windows（Wine、案 B を Makefile の写しに当てて） | `sh plan/ws335/tests/tls-wine-compat.sh` | `tls-wine-compat: PASS`: a〜f と g（.exe の隣の cert.pem）。d は `certificate rejected`（net/tls.c の §1 の 3 の直しが無いと Disallowed は拒まれない形）。tls-tool.exe の import に OpenSSL の DLL 無し、OpenSSL だけの名前無し、`sslc_` あり。make の warning 0 |
+| OmniGrammaton.exe（案 B の写し、x86_64） | `make -f <案 B の写し> ... program` | build、warning 0。import は system の DLL と UCRT だけ（OpenSSL の DLL 無し）、`sslc_`・`cryc_` の名前 269、`OPENSSL_init_ssl` 0。`dist` は下の 3 で失敗（案 B と関係無い既存の欠陥） |
+
+未実施: aarch64 の Windows の program の build と Wine（compat の .a の aarch64 の compile は p033 の run-interop で確かめ済み、tls-static-compat.c の aarch64 の compile は確かめた）、i386・pc9821・Pi・VF2 の image、実機、site の case を system の根で（下の 2 が直ってから）、案 A〜C を当てた tree での流し直し（§4 の各「当てた後の確かめ」）。
+
+### 見つけた欠陥（範囲の外、Q1 へ。どれも Makefile・mk/ でユーザーの物）
+
+1. `mk/platform-x86_64/bootloader.mk:155・182・185`（と `:60` の `--path=mk/tools:tools/build`、`mk/foreign.mk` の `tools/build/keiland-prerequisites.sh`）が無い `tools/build/` を指す。今は `mk/old-tools/build/` にあり、module `zedbuild` は `mk/tools/`。素の tree で `make disk`（x86_64）は `stage2-chain.bin` で止まる。手で流した形: `noct --path=mk/tools:mk/old-tools/build mk/old-tools/build/finalize-bios-stage2.noct ...`。
+2. `userland/packages/security/ca-certificates/Makefile` の `PACKAGE_FILES`（`/etc/ssl/cert.pem`）は旧い変数（`USERLAND_PROGRAMS`・`USER_PROGRAMS`・`ZEDBSD_USER_PROGRAMS`）で選ばれ、新しい build（`CONFIG_USERLAND_PROGRAMS`）の image に `/etc/ssl/cert.pem` が入らない。zedBSD の https は（compat でも OpenSSL でも）公開の site を確かめられない。
+3. `apps/browser-win32/Makefile` は `ZEDBSD_EXT_ca-certificates_ARCHIVE` などを ca-certificates の Makefile から sed で読むが、今の名前は `EXT_ca-certificates_ARCHIVE`。値が空になり `dist` の `share/certs/ca-certificates.pem` が失敗する（`cp: -r not specified; omitting directory`）。
+4. `plan/tools/guest/test-image.sh`・`plan/ws335/tests/run-image.sh`・`run-guest.sh` は旧い build の変数（`ZEDBSD_CONFIG`・`BUILD=`）のまま。新しい build は試験の file を image に足す口を持たない。
+5. `userland/desktop/mailer/tls.c` も OpenSSL を名前で開く（OpenSSL への依存を無くすなら同じ切り替えが要る）。
+
+### 消してほしい path（worktree `p2-ws335c` の中、Q1 の pipeline で）
+
+- `build/p036-guest`（15 MB、`BUILD=` を変えて始めて止めた build。package は `build/<platform>` に出るので使えない）
+- `build/tmp/ws335-*.run.*` の古い run（symlink が指さない物）と `build/tmp/p036`（log）、`build/tmp/ws335-tls-build`・`build/tmp/ws334-win32-sources`・`build/tmp/ws335-tls-wine-prefix`（Wine の build と prefix）
+- `build/ws335-nettls-host`・`build/ws335-nettls-host-compat`（host の build、各 1.2 GB）、`build/x86_64`（image 込み 3.3 GB）、`build/ws074-tls`・`build/ws074-images`（WS074 の runner の出力）
+- 案 B が当たった後: `userland/desktop/libbrowser/net/tls-static.c`、`plan/ws334/tests/openssl-windows.sh`・`plan/ws334/tests/openssl-conf/`（使われなくなる）

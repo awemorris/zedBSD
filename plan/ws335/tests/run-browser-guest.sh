@@ -105,9 +105,10 @@ grep -q 'inet 10\.0\.2\.' "$out/ifconfig.txt" || fail "no DHCP address on ue0, $
 echo "run-browser-guest: ue0 $(grep -o 'inet 10\.0\.2\.[0-9]*' "$out/ifconfig.txt")"
 
 # 5. What the guest has: the libraries, and the names libbrowser.so opens.
-$serial run 'uname -a; ls -l /lib/libssl-compat.so /lib/libcrypto-compat.so /lib/libbrowser.so /etc/ssl/cert.pem' \
+$serial run 'uname -a; ls -l /lib/libssl-compat.so /lib/libcrypto-compat.so /lib/libbrowser.so' \
     > "$out/files.txt" 2>&1 || { cat "$out/files.txt"; fail "the files in the guest"; }
 cat "$out/files.txt"
+$serial run 'ls -l /etc/ssl/cert.pem' > "$out/cert-pem.txt" 2>&1 || echo "run-browser-guest: the image has no /etc/ssl/cert.pem (the site case cannot verify)"
 $serial run "strings /lib/libbrowser.so | grep '^lib.*\.so'" > "$out/strings.txt" 2>&1
 tr -d '\r' < "$out/strings.txt" | grep -x 'lib\(ssl\|crypto\)\(-compat\)\{0,1\}\.so\(\.3\)\{0,1\}' > "$out/names.txt"
 echo "run-browser-guest: libbrowser.so opens: $(tr '\n' ' ' < "$out/names.txt")"
