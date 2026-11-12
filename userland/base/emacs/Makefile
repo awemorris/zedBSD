@@ -16,8 +16,6 @@ include $(REMACS_DIR)../../../mk/build-jobs.mk
 include $(REMACS_DIR)../package.mk
 include $(REMACS_DIR)../noct/version.mk
 
-$(eval $(call USERLAND_PACKAGE,emacs,emacs,*,n,package,,y,base,base/emacs,$(REQUIRE),0755,emacs))
-
 REPO_ROOT ?= $(abspath $(REMACS_DIR)../..)
 BUILD ?= $(REPO_ROOT)/build/$(PLATFORM)
 
@@ -37,22 +35,9 @@ REMACS_BIN             := $(BUILD)/bin/emacs
 REMACS_DICTIONARY      := $(REMACS_SOURCE_DIR)/dict/SKK-JISYO.remacs
 REMACS_DICTIONARY_X    := $(REMACS_SOURCE_DIR)/dict/SKK-JISYO.X
 
-PACKAGE_INPUTS += \
-	$(if $(filter emacs,$(ZEDBSD_USER_PROGRAMS)), \
-		$(REMACS_NAP) $(REMACS_BIN) $(REMACS_DICTIONARY) $(REMACS_DICTIONARY_X))
-
-PACKAGE_FILES += \
-	$(if $(filter emacs,$(ZEDBSD_USER_PROGRAMS)),\
-		--file /bin/emacs=$(REMACS_BIN) \
-		--mode /bin/emacs=0755 \
-		--file /usr/share/remacs/skkjisyo.dic=$(REMACS_DICTIONARY) \
-		--mode /usr/share/remacs/skkjisyo.dic=0644 \
-		--file /usr/share/remacs/skkjisyo-x.dic=$(REMACS_DICTIONARY_X) \
-		--mode /usr/share/remacs/skkjisyo-x.dic=0644)
-
-PACKAGE_LINKS += \
-	$(if $(filter emacs,$(ZEDBSD_USER_PROGRAMS)),\
-		/usr/bin/noct=/bin/noct)
+$(eval $(call USERLAND_PACKAGE,emacs,emacs,*,n,package,,y,base,base/emacs,$(REQUIRE),0755,emacs,\
+	/usr/share/remacs/skkjisyo.dic=$(REMACS_DICTIONARY) \
+	/usr/share/remacs/skkjisyo-x.dic=$(REMACS_DICTIONARY_X)))
 
 $(REMACS_NAP): $(REMACS_SOURCES)
 	@rm -rf $(REMACS_WORK_DIR)

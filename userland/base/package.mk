@@ -120,8 +120,9 @@ STANDALONE_ARCH_CFLAGS = $(strip \
 	$(if $(filter i386 pcat pc98 pc9821 pc9801,$(PLATFORM) $(STANDALONE_PLATFORM_DIR)),-m32 -march=i386 -DHAL_ARCH_I386 -DKERN_USER_ABI_ILP32,\
 	-m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64))))
 
-# Where the platform's build puts what the packages make.
-STANDALONE_BUILD_DIR = $(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR)
+# Where the platform's build puts what the packages make: the top-level
+# build's directory (BUILD), or build/PLATFORM for a package made on its own.
+STANDALONE_BUILD_DIR = $(if $(BUILD),$(abspath $(BUILD)),$(REPO_ROOT)/build/$(STANDALONE_PLATFORM_DIR))
 STANDALONE_SYSROOT = $(STANDALONE_BUILD_DIR)/sysroot
 STANDALONE_DYNAMIC_DIR = $(STANDALONE_BUILD_DIR)/dynamic
 STANDALONE_LIB_DIR = $(STANDALONE_BUILD_DIR)/lib
@@ -404,7 +405,8 @@ endef
 #
 # One data file: (1) package, (2) destination, (3) source from the top of
 # the tree or absolute.  It is copied into the build when its source
-# changes.
+# changes, readable by everyone as install makes it (a fetched source
+# keeps the fetcher's private mode), and the root takes it from there.
 #
 define STANDALONE_DATA_RULE
 STANDALONE_DATA_OUTPUTS_$(1) += $$(STANDALONE_BUILD_DIR)$(2)
@@ -412,6 +414,7 @@ $$(STANDALONE_BUILD_DIR)$(2): $(if $(filter /%,$(3)),$(3),$$(REPO_ROOT)/$(3))
 	$$(call standalone_log,DATA,$(2))
 	$$(Q)mkdir -p "$$(@D)"
 	$$(Q)cp -f $$< $$@
+	$$(Q)chmod 0644 $$@
 
 endef
 

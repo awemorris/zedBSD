@@ -20,7 +20,7 @@ ZEDBSD_IME_DICT_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 ZEDBSD_IME_DICT_DIR := $(patsubst %/,%,$(dir $(ZEDBSD_IME_DICT_MAKEFILE)))
 include $(ZEDBSD_IME_DICT_DIR)/../../package.mk
 
-ZEDBSD_IME_DICT_JA := $(ZEDBSD_IME_DICT_DIR)/SKK-JISYO.ja
+ZEDBSD_IME_DICT_JA := $(abspath $(ZEDBSD_IME_DICT_DIR)/SKK-JISYO.ja)
 
 .PHONY: ime-dict-ja
 ime-dict-ja: $(ZEDBSD_IME_DICT_JA)
@@ -31,10 +31,5 @@ ime-dict-ja: $(ZEDBSD_IME_DICT_JA)
 # Not chosen by default until the input method itself is a package (ws095-p004),
 # which then requires this one.
 $(eval $(call USERLAND_PACKAGE,ime-dict-ja,ime-dict-ja - Japanese dictionaries of the input method,*,n,package,,y,\
-	desktop,desktop/ime/dict,))
-
-ZEDBSD_PACKAGE_INPUTS += $(if $(filter ime-dict-ja,$(ZEDBSD_USER_PROGRAMS)),\
-	$(ZEDBSD_IME_DICT_JA))
-ZEDBSD_PACKAGE_FILES += $(if $(filter ime-dict-ja,$(ZEDBSD_USER_PROGRAMS)),\
-	--file /usr/share/keiland/ime/ja/SKK-JISYO.ja=$(ZEDBSD_IME_DICT_JA) \
-	--mode /usr/share/keiland/ime/ja/SKK-JISYO.ja=0644)
+	desktop,desktop/ime/dict,,0644,package,\
+	/usr/share/keiland/ime/ja/SKK-JISYO.ja=$(ZEDBSD_IME_DICT_JA)))
