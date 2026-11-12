@@ -11,7 +11,7 @@
 4. 要る時だけ読む（地図は [plan/README.md](plan/README.md)）: C を書く前に [coding-style.md](plan/coding-style.md)、Makefile・`mk/` を書く前に [makefile-style.md](plan/makefile-style.md)、source の範囲・HAL・出典は [guardrail.md](plan/guardrail.md)、設計の前に [master-design-policy.md](plan/master-design-policy.md)、試験・実機は [tools.md](plan/tools.md)、Amaterrace GPU・GHCI は [amaterrace.md](plan/amaterrace.md)、標準仕様の module を Sonnet に委ねる時は [spec-module-delegation.md](docs/agent/spec-module-delegation.md)。
 5. 作業ツリーの未 commit の変更を確かめ、他人の変更は保つ。`plan/history/` は履歴であって指示ではない。
 
-**記録が食い違う時**: ユーザーの指示は一貫している。記録同士の食い違いは壊れた記録（複数のエージェントが書いた）。ユーザーの決定と main の code の実態から直す。多数決や「新しい記録が正」で決めない。分からなければ Q1（Q1 はユーザー）に聞く。
+**記録が食い違う時**: master.md・ws.md・phase.md には矛盾する記述が混じっている前提で読む（複数のエージェントが書いた。ユーザーの指示は一貫している）。矛盾を見つけたら、ユーザーの決定と main の code の実態から何が正しそうかを推測し、推測と根拠を添えてユーザーに判断を仰ぐ（担当は Q1 へ報告し、Q1 がユーザーに聞く）。多数決や「新しい記録が正」で決めない。決まったら同じ commit で全ての写しを直す。
 
 **WS を読み込む時**（2026-11-12 ユーザー）: ws.md・phase.md を鵜呑みにしない。
 - 今の方針（この文書・master.md の「回し方」・master-design-policy.md・今の build system と code）と矛盾する記述は、上書きしてよいかをユーザーに確かめ（担当は Q1 へ報告し、Q1 がユーザーに聞く）、今の形で進める。
