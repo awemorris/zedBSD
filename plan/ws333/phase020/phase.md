@@ -2,7 +2,7 @@
 
 # ws333-p020: Pi 5 の provider（fan の level・rpm、受け手、boost）
 
-Status: in-progress（2026-11-12 P1・q2017-i01: 実装・host 試験・Pi 5 の実機の受け入れの 3 項を満たした。画面の PNG と QEMU raspi4b は未実施。cleared の判定は Q1）
+Status: cleared（2026-11-12 Q1 判定: Pi 5 の実機で fan の rpm・level、strategy で trip の組が変わる、boost で level が上がる、を確かめた。host 試験 19838 check。QEMU raspi4b は rpi4 の firmware の notice の欠けで未実施）
 Parent: [WS333](../ws.md)
 
 ## 目的

@@ -2,7 +2,7 @@
 
 # ws333-p014: 5330 の CPU の受け入れ
 
-Status: in-progress（2026-11-12 P1・q2018-i01: 1（idle の電力）と 4 の hwp=off・相対の性能は取れた、3 は一部、2（i915）と S0 idle は未実施。cleared の判定は Q1）
+Status: uncleared（2026-11-12 Q1: 5330 で MWAIT の電力が HLT より低い（c6 6.386 W < hlt 7.701 W）、HWP の要求は strategy どおり。残り: HWP の読みの食い違い（古い写し・E-core の上限超え・manual 100 で 1192 MHz）、E-core の domain、package の C-state 0%、i915 qs40、S0 idle）
 Parent: [WS333](../ws.md)
 
 ## 目的

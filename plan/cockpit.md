@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS333](ws333/ws.md) | /dev/thermal の電力・熱の枠組み | p020 Pi 5 の provider と実機の確かめ（q2017、Pi 5 を割り当て） | p014（5330）は 5330 の空きの後 |
+| P1 | — | 待機 | WS333 p020（Pi 5）cleared、p014（5330）は一部で uncleared | p014 の残り（HWP の読みの食い違いほか） |
 | P2 | — | 待機 | WS335 p035 の残りの試験を返却、全 PASS、p035 cleared | WS335 の残りは p036（net/tls.c の切り替え） |
 | P3 | — | 待機 | WS347 の監査（U1〜U9）を返却。依頼 07 の下書き [gemini-request-07.md](ws347/gemini-request-07.md) | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
