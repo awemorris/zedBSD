@@ -22,14 +22,12 @@ GHCI 1.0 の仕様（`docs/ghci.md`）と Amaterrace GPU の RTL は `/home/awe/
 4. Gemini が実装し、報告（`gemini-report-NN.md`）を返す。
 5. Claude が監査し（`audit-<SHA>.md`）、残りを次の依頼にする。旧い仕様の残り（水平展開の漏れ）を特に探す。
 
-## agy（Gemini）への直接の指示（2026-11-12 から）
+## agy（Gemini）を Claude の配下として動かす（2026-11-12 ユーザーの決定）
 
-- Claude は agy に直接指示を送り、返事を受け取れる（ユーザーは Claude を UI にする）:
-  `cd /home/awe/amaterrace-gpu && agy --conversation <会話の ID> -p "<指示>"`
-- **今の RTL の実装のセッション**: `00de1bda-f4cb-45eb-94a3-091c9e9bd964`（2026-11-12、依頼 06 を実装中）。指示はこの ID に送る: `agy --conversation 00de1bda-f4cb-45eb-94a3-091c9e9bd964 -p "..."`（作業の directory は `/home/awe/amaterrace-gpu`）。
-- 他の会話の ID は `~/.gemini/antigravity-cli/cache/last_conversations.json`（作業の directory ごとの最後の会話。実装中のセッションと違う事がある）と `conversation_metadata.json`。
-- `-p` で送った往復は agy の対話の画面に出ない（2026-11-12 ユーザーが確かめた）。ユーザーに見せる事は Claude が報告する。
-- 長い作業は背景で待ち、時間の上限を付ける。指示は file の依頼（`gemini-request-NN.md`）を指して短く書き、file の変更の可否を明記する。
+- **Claude がハーネス（指揮する側）になり、agy を配下のエージェントとして `-p` で起動する。** agy の会話は対話の画面で開かない（開いた process は `-p` の turn を知らず、文脈が 2 つに分かれる。同じ会話への `-p` はセッションを再起動し、動いている配下のエージェントを止める）。
+- 送り方: `cd /home/awe/amaterrace-gpu && agy --conversation <ID> -p "<指示>"`。今の RTL の実装のセッションは `00de1bda-f4cb-45eb-94a3-091c9e9bd964`（依頼 06 を実装中）。他の会話の ID は `~/.gemini/antigravity-cli/cache/last_conversations.json`（作業の directory ごとの最後の会話。実装中のセッションと違う事がある）。
+- 1 回の `-p` で 1 つのまとまった作業を頼む。指示は依頼の file（`gemini-request-NN.md`）を指して短く書き、file の変更の可否と、返事に書く物（commit・試験・未実施）を明記する。長い作業は背景で待ち、時間の上限を付ける。返事を Claude が監査し、次の `-p` を送る。
+- `-p` の往復は agy の画面に出ないので、指示と返事は毎回 Claude がユーザーに報告する。
 
 ## 規則
 
