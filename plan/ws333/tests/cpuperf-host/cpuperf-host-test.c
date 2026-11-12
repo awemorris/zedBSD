@@ -74,6 +74,7 @@ static unsigned test_move_on_call;
 static bool test_in_measure;
 static unsigned test_measure_starts;
 static int test_steps;
+static int test_module_share;	/* the E-cores of a module share one clock */
 
 /* The governor's thread, which the test runs one pass at a time. */
 static struct thread *test_governor;
@@ -454,6 +455,8 @@ mock_describe(kern_cpu_id_t cpu, struct kern_cpuperf_levels *levels)
 	/* A RANGE CPU hides its anchors until its control starts. */
 	levels->kind = KERN_CPUPERF_LEVELS_RANGE;
 	levels->share = KERN_CPUPERF_SHARE_CORE;
+	if (test_module_share && !mock_performance_core(cpu))
+		levels->share = KERN_CPUPERF_SHARE_MODULE;
 	return 0;
 }
 
@@ -1172,6 +1175,53 @@ scenario_measure_never(void)
 	EXPECT(4, 1, 33, 128);
 }
 
+/* E-cores described as sharing their module's clock: one domain per module, every member written. */
+static void
+scenario_module_share(void)
+{
+	struct kern_cpuperf_domain domain;
+	struct kern_cpuperf_setting setting;
+	struct kern_cpuperf_cpu info;
+	uint32_t flags;
+	unsigned cpu;
+
+	test_module_share = 1;
+	kern_cpuperf_init();
+	CHECK(kern_cpuperf_provider_register(&mock_ops) == 0);
+
+	/* The two P-cores' thread pairs and the two E-core modules. */
+	CHECK(kern_cpuperf_domain_count() == 4U);
+	CHECK(kern_cpuperf_domain(0, &domain) == 0);
+	CHECK(domain.cpus[0] == 0x3U);
+	CHECK(kern_cpuperf_domain(1, &domain) == 0);
+	CHECK(domain.cpus[0] == 0xcU);
+	CHECK(kern_cpuperf_domain(2, &domain) == 0);
+	CHECK(domain.cpus[0] == 0xf0U);
+	CHECK(kern_cpuperf_domain(3, &domain) == 0);
+	CHECK(domain.cpus[0] == 0xf00U);
+	CHECK(kern_cpuperf_domain(4, &domain) == EINVAL);
+	CHECK(kern_cpuperf_cpu(9, 0, &info) == 0);
+	CHECK(info.domain == 3U);
+
+	/* A strategy reaches every E-core. */
+	CHECK(test_strategy(KERN_THERMAL_STRATEGY_BALANCED, 0, 0, &flags) == 0);
+	CHECK(flags == 0U);
+	for (cpu = 4; cpu < 12U; cpu++)
+		EXPECT(cpu, 1, 33, 128);
+
+	/* A direct setting of one module writes each of its four cores and no other. */
+	memset(&setting, 0, sizeof(setting));
+	setting.fields = KERN_CPUPERF_SET_MAXIMUM;
+	setting.maximum = 12U;
+	CHECK(kern_cpuperf_domain_set(3, &setting) == 0);
+	for (cpu = 8; cpu < 12U; cpu++)
+		EXPECT(cpu, 1, 12, 128);
+	for (cpu = 4; cpu < 8U; cpu++)
+		EXPECT(cpu, 1, 33, 128);
+	EXPECT(0, 1, 56, 128);
+	CHECK(test_wrong_cpu == 0U);
+}
+
 static void
 run(const char *name, void (*scenario)(void))
 {
@@ -1205,6 +1255,7 @@ main(int argc, char **argv)
 	run("measure-moved", scenario_measure_moved);
 	run("measure-moved-busy", scenario_measure_moved_busy);
 	run("measure-never", scenario_measure_never);
+	run("module-share", scenario_module_share);
 	if (test_failures != 0) {
 		printf("cpuperf host test: FAIL\n");
 		return 1;

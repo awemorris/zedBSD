@@ -68,6 +68,7 @@ struct cpu_x86_cpu {
 	uint32_t feedback_row;		/* this CPU's row of the feedback table */
 	struct cpux86_mwait mwait;
 	bool mwait_known;
+	bool module_clock;		/* the cores of this CPU's module share one clock */
 	uint32_t package_index;		/* the driver's package slot, CPU_X86_PACKAGE_NONE */
 	bool hwp_enabled;		/* HWP_ENABLE was seen set on this CPU */
 	bool capabilities_known;

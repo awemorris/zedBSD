@@ -803,9 +803,12 @@ scenario_5330_topology(void)
 			CHECK(topologies[cpu].core_class == KERN_CPUPERF_CORE_EFFICIENCY);
 			CHECK(topologies[cpu].core_type == 0x20U);
 		}
-		/* A RANGE CPU shared by the threads of a core, anchors unknown until the start. */
+		/*
+		 * A RANGE CPU shared by the threads of a P-core or the E-cores of
+		 * a module, anchors unknown until the start.
+		 */
 		CHECK(levels[cpu].kind == KERN_CPUPERF_LEVELS_RANGE);
-		CHECK(levels[cpu].share == KERN_CPUPERF_SHARE_CORE);
+		CHECK(levels[cpu].share == (cpu < 4U ? KERN_CPUPERF_SHARE_CORE : KERN_CPUPERF_SHARE_MODULE));
 		CHECK(levels[cpu].highest == KERN_CPUPERF_UNKNOWN);
 		CHECK(levels[cpu].lowest == KERN_CPUPERF_UNKNOWN);
 	}
@@ -1119,6 +1122,24 @@ scenario_no_hwp(void)
 	CHECK(meter_count == 3U);
 }
 
+/* A processor of one kind with HWP: every core keeps its own clock, whatever its L2 groups. */
+static void
+scenario_one_kind(void)
+{
+	uint32_t cpu;
+
+	machine_5330("one-kind", "");
+	machine.hybrid = false;
+	CHECK(run_init() == 0);
+	CHECK(faults == 0U && writes == 0U);
+	CHECK(topologies[4].module == topologies[7].module);
+	for (cpu = 0; cpu < 12U; cpu++) {
+		CHECK(topologies[cpu].core_class == KERN_CPUPERF_CORE_PERFORMANCE);
+		CHECK(levels[cpu].kind == KERN_CPUPERF_LEVELS_RANGE);
+		CHECK(levels[cpu].share == KERN_CPUPERF_SHARE_CORE);
+	}
+}
+
 /* HWP without EPP: the preference field is written as 0. */
 static void
 scenario_no_epp(void)
@@ -1201,6 +1222,7 @@ static const struct scenario scenarios[] = {
 	{ "not-intel", scenario_not_intel },
 	{ "unlisted", scenario_unlisted },
 	{ "no-hwp", scenario_no_hwp },
+	{ "one-kind", scenario_one_kind },
 	{ "no-epp", scenario_no_epp },
 	{ "hfi-on-at-boot", scenario_hfi_on_at_boot },
 	{ "two-packages", scenario_two_packages },
