@@ -435,6 +435,16 @@ did what it was asked, 1 when the kernel refused (with the reason), and 2
 for a command it does not know. A strategy that no part acts on is kept
 and reported, not treated as a failure.
 
+A processor's `mhz` is the average rate it ran at while not idle, over the
+interval between two of its samples. `thermal cpu` samples each processor
+for about 100 ms when its descriptor is open for writing, so the rate is
+the current one; otherwise, as `thermal cpu <n>` without `sample`, it shows
+the processor's last sample, which may be the one taken when the last
+strategy was applied and so cover the time under the strategy before it.
+HWP's levels are abstract units, not a fixed number of MHz, and a
+performance core's unit and an efficiency core's unit differ; `highest_mhz`
+is measured once, after the first strategy, and is 0 before.
+
 A chosen strategy is kept in `/etc/thermal.conf` (one line, root and the
 `desktop` group, mode 0664), which `/sbin/thermal` alone writes.
 

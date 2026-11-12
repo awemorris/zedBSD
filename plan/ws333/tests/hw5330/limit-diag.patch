@@ -1,0 +1,49 @@
+Test only (ws333 p025, 5330): MSR_CORE_PERF_LIMIT_REASONS (64FH, Intel SDM Vol. 4 Table 2-39) and
+MSR_PKG_CST_CONFIG_CONTROL (E2H, Table 2-35) read in each CPU sample on a model of the allow list, shown by
+"thermal cpu <n> sample" as firmware_id (64FH[31:0]) and voltage_group (E2H[31:0]).  Applied by kbuild.sh only.
+
+diff --git a/include/kern/cpuperf.h b/include/kern/cpuperf.h
+index 5a52195cbe..bfd3c8e3f0 100644
+--- a/include/kern/cpuperf.h
++++ b/include/kern/cpuperf.h
+@@ -176,6 +176,8 @@ struct kern_cpuperf_sample {
+ 	uint32_t guaranteed;
+ 	uint32_t highest;
+ 	uint32_t delivered_mhz;		/* estimate, 0 unknown */
++	uint32_t diag_limit_reasons;	/* test only: MSR_CORE_PERF_LIMIT_REASONS[31:0] */
++	uint32_t diag_cst_config;	/* test only: MSR_PKG_CST_CONFIG_CONTROL[31:0] */
+ };
+ 
+ /*
+diff --git a/src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c b/src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c
+index de818fc700..b233570c73 100644
+--- a/src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c
++++ b/src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c
+@@ -583,6 +583,12 @@ cpu_x86_sample(
+ 		}
+ 	}
+ 
++	/* Test only: why the processor clips the cores, and the package C-state control. */
++	if ((drv_cpu_x86_machine.model_registers & CPUX86_MODEL_PLATFORM_INFO) != 0U) {
++		sample->diag_limit_reasons = (uint32_t)drv_cpu_x86_rdmsr(0x64FU);
++		sample->diag_cst_config = (uint32_t)drv_cpu_x86_rdmsr(CPUX86_MSR_PKG_CST_CONFIG);
++	}
++
+ 	/* Reads the delivered rate where the counters and their reference are known. */
+ 	if (!drv_cpu_x86_machine.counters || drv_cpu_x86_machine.base_mhz == 0U)
+ 		return;
+diff --git a/src/kern/cpuperf.c b/src/kern/cpuperf.c
+index 89f98942b8..a755e37964 100644
+--- a/src/kern/cpuperf.c
++++ b/src/kern/cpuperf.c
+@@ -707,6 +707,10 @@ kern_cpuperf_cpu(
+ 	info->highest = levels.highest;
+ 	info->highest_mhz = levels.highest_mhz;
+ 
++	/* Test only: the provider's diagnostic registers in two fields x86 leaves unknown. */
++	info->topology.firmware_id = box->sample.diag_limit_reasons;
++	info->voltage_group = box->sample.diag_cst_config;
++
+ 	/* Prefers the measured highest rate to the provider's estimate. */
+ 	if (measured != 0U)
+ 		info->highest_mhz = measured;

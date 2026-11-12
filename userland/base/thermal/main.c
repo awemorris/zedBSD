@@ -1340,20 +1340,38 @@ command_cpu(
 	return status;
 }
 
-/* Shows one line per CPU: its kind, domain, relative performance and rate. */
+/*
+ * Shows one line per CPU: its kind, domain, relative performance and rate.
+ *
+ * The rate is the one the CPU delivers now: each CPU is sampled for about
+ * 100 ms, which only an open for writing may ask for.  When the kernel
+ * refuses the sample, the rate shown is the CPU's last sample, however
+ * old it is.
+ */
 static int
 show_cpus(void)
 {
 	struct thermal_cpu_info cpu;
 	char relative[NUMBER_TEXT_MAX];
 	uint32_t index;
+	uint32_t request;
 	int error;
 
-	/* Walks the CPUs until the kernel says there are no more. */
+	/* Walks the CPUs until the kernel says there are no more, sampling each while it lets. */
+	request = KERN_THERMAL_CPU_READ_SAMPLE;
 	for (index = 0;; index++) {
 		memset(&cpu, 0, sizeof(cpu));
 		cpu.cpu = index;
+		cpu.request = request;
 		error = device_request(KERN_THERMAL_GET_CPU, &cpu);
+
+		/* Reads the last samples, of this CPU and the rest, once the kernel refuses to sample. */
+		if (error == EPERM && request != 0U) {
+			request = 0U;
+			memset(&cpu, 0, sizeof(cpu));
+			cpu.cpu = index;
+			error = device_request(KERN_THERMAL_GET_CPU, &cpu);
+		}
 		if (error == ENOENT)
 			break;
 		if (error != 0)
