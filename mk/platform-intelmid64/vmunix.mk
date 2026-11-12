@@ -95,12 +95,8 @@ KERN_SOURCES += \
 	src/drivers/platform/pcat/pcat-ide.c \
 	src/drivers/platform/pcat/cpu-x86/cpu-x86.c \
 	src/drivers/platform/pcat/cpu-x86/cpu-x86-insn.c \
-	src/drivers/platform/pcat/cpu-x86/cpu-x86-control.c \
 	src/drivers/platform/pcat/cpu-x86/cpux86.c \
 	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86-hwp.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86-power.c \
-	src/drivers/platform/pcat/cpu-x86/cpux86-pstate.c \
 	src/drivers/disklabel/mbr.c \
 	src/drivers/disklabel/gpt.c \
 	src/drivers/disklabel/pcat.c \

@@ -475,8 +475,8 @@ CONFIG_KERN_THERMAL               ?= n
 #  - Depends: CONFIG_KERN_THERMAL
 CONFIG_DRIVER_X86_POWER_CONTROL   ?= n
 
-# [RPi5 processor temperature] (sysctl hw.thermal)
-#  - TODO: need to port to /dev/thermal
+# [RPi5 processor temperature and fan] (/dev/thermal)
+#  - Depends: CONFIG_KERN_THERMAL
 CONFIG_DRIVER_RPI5_FAN            ?= n
 
 # [Dell Laptop Thermal] (/dev/thermal)
