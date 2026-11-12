@@ -325,7 +325,7 @@ WS に固有の決定はその ws.md にある。ここは複数の WS・OS 全�
 
 | arch | config（config/ci/） | 位置付け | tick |
 | --- | --- | --- | --- |
-| amd64 | config-amd64.mk・config-amd64-server.mk（ユーザーの物）・config-intelmac.mk | 主対象（desktop・GPU・app） | 1000 Hz |
+| amd64 | config-amd64.mk・config-amd64-server.mk（ユーザーの物）・config-intelmac.mk | 主対象（desktop・GPU・app） | 100 Hz（2026-11-13 から一時的に、それまで 1000 Hz） |
 | aarch64 | config-rpi4.mk・config-rpi4-server.mk・config-rpi5.mk | 主対象 | 1000 Hz |
 | riscv64 | config-visionfive2.mk・config-visionfive2-keiland.mk・config-riscv64-virt.mk | VisionFive 2（fg020 は保留）。位置付けは要確認 | 1000 Hz |
 | armv7 | config-zybo.mk・config-armv7-virt.mk | ZYBO（fg021 達成）。位置付けは要確認 | 1000 Hz |

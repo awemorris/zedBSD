@@ -11,9 +11,10 @@
 /*
  * The periodic tick, in hertz.  Every time the kernel keeps is counted in
  * these ticks, and every conversion to and from milliseconds uses this value.
- * Vulkan rendering on the desktop wants a millisecond tick.
+ * A slower tick lets idle packages reach their deep power states; a finer one
+ * suits frame pacing on the desktop.
  */
-#define HAL_TIMER_FREQUENCY	(1000U)
+#define HAL_TIMER_FREQUENCY	(100U)
 
 /*
  * Signal Frame
