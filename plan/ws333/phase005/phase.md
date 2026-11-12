@@ -2,7 +2,7 @@
 
 # ws333-p005: 熱の core（前半: core・sensor の push・hw.thermal を写しから）
 
-Status: in-progress（前半・後半とも実装と試験は済み。2026-11-12 P1・q2016-i01: 新しい build の全 platform の vmunix と QEMU amd64 の 4 本をやり直した。残りは riscv64 virt の QEMU（新しい build に platform が無い）と intelmid64 の build（mk の重複）。cleared の判定は Q1）
+Status: cleared（2026-11-12 Q1 判定: core の host 試験・全 platform の build・QEMU の回帰を満たした。riscv64 virt は新しい build に無く取り下げ）
 Parent: [WS333](../ws.md)
 Queue: q1762-i01（P6、前半）、q2013-i01（P1、後半）
 

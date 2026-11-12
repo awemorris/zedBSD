@@ -2,7 +2,7 @@
 
 # ws333-p013: CPU の ioctl・`/sbin/thermal` の CPU と電力の表示・strategy の保存と restore
 
-Status: in-progress（2026-11-12 P1・q2016-i01: 新しい build の正式な image で起動の時の restore と QEMU amd64 を確かめ、全 platform の vmunix を build した。残りは riscv64 virt の QEMU（新しい build に platform が無い）。cleared の判定は Q1）
+Status: cleared（2026-11-12 Q1 判定: CPU の ioctl の host 試験、MSR の道の有無の build、QEMU の起動の restore。riscv64 は取り下げ）
 Parent: [WS333](../ws.md)
 Queue: q2013-i01（P1）
 

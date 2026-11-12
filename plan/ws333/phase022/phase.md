@@ -2,7 +2,7 @@
 
 # ws333-p022: sysctl の道具と Keiland の monitor を `/dev/thermal` に、`hw.thermal` を外す
 
-Status: in-progress（2026-11-12 P1・q2016-i01: 実装と build・host 試験・QEMU amd64 まで済み。cleared の判定は Q1）
+Status: cleared（2026-11-12 Q1 判定: hw.thermal を外し、/sbin/thermal と monitor を /dev/thermal で QEMU で確かめた）
 Parent: [WS333](../ws.md)
 
 ## 目的
