@@ -92,6 +92,7 @@ KERN_SOURCES += \
 	src/kern/platform/pcat.c \
 	src/drivers/platform/pcat/uefi-variables.c \
 	src/drivers/platform/pcat/pcat-ide.c \
+	src/drivers/platform/pcat/intel-tco.c \
 	src/drivers/platform/pcat/cpu-x86/cpu-x86.c \
 	src/drivers/platform/pcat/cpu-x86/cpu-x86-insn.c \
 	src/drivers/platform/pcat/cpu-x86/cpux86.c \

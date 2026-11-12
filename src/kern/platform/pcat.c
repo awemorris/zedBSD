@@ -150,6 +150,13 @@ extern int drv_pcat_uefi_variables_init(void) __attribute__((weak));
 extern int drv_cpu_x86_init(void) __attribute__((weak));
 
 /*
+ * The Intel TCO watchdog.  Only the amd64 kernel links it, so the i386
+ * PC kernel finds both null and has no watchdog.
+ */
+extern int drv_intel_tco_pci_register(void) __attribute__((weak));
+extern int drv_intel_tco_start(void) __attribute__((weak));
+
+/*
  * The SDHCI ACPI driver (e.g. Intel Atom Moorefield / Bay Trail PNP0D40).
  */
 extern int drv_sdhci_acpi_probe(void) __attribute__((weak));
@@ -265,6 +272,12 @@ kern_platform_init(
 		kern_logf("graphics: PCI driver registration failed\n");
 #endif
 
+	/* Lets the TCO watchdog bind its function, which it does only when the boot parameter asks. */
+	if (drv_intel_tco_pci_register != NULL) {
+		if (drv_intel_tco_pci_register() != 0)
+			kern_logf("watchdog: PCI driver registration failed\n");
+	}
+
 	/* Probes the host bridge, which binds the registered drivers. */
 	if (drv_pci_pcat_init() != 0)
 		kern_logf("pci: PC/AT host initialization failed\n");
@@ -330,6 +343,14 @@ kern_platform_init(
 	 */
 	if (drv_cpu_x86_init != NULL)
 		(void)drv_cpu_x86_init();
+
+	/*
+	 * Arms the TCO watchdog the boot parameter asked for, once the
+	 * namespace that may name the power management controller is
+	 * attached; from here a kernel that stops is reset.
+	 */
+	if (drv_intel_tco_start != NULL)
+		(void)drv_intel_tco_start();
 
 	/* Lists every BIOS IDE unit as a boot device. */
 	(void)drv_pcat_ide_init();
