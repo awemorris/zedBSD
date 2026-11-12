@@ -8,7 +8,7 @@
 /*
  * The CPU performance framework.
  *
- * Each CPU has a box: the latest intent for it (the strategy, a root's
+ * Each CPU has a box: the latest intent for it (the strategy, a
  * direct setting, the thermal ceiling and the step the governor chose),
  * the work waiting for it, and what it last reported.  A thread that
  * wants something done on a CPU puts the work in that CPU's box and
@@ -33,7 +33,7 @@
 #include <kern/thermal.h>
 #include <kern/atomic.h>
 #include <kern/clock.h>
-#include <kern/cred.h>
+#include <kern/file.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
@@ -44,6 +44,7 @@
 #include <kern/waitq.h>
 #include <hal/hal.h>
 #include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <uapi/thermal.h>
 
 #include <stdbool.h>
@@ -130,7 +131,7 @@ _Static_assert(KERN_THERMAL_CPU_READ_SAMPLE == KERN_CPUPERF_READ_SAMPLE, "read r
  * The intent for one domain, as the threads that set policy leave it.
  *
  * The strategy and its axes come from the thermal core, the direct
- * fields from a root, the ceiling from the passive cooling, the governor
+ * fields from SET_CPU_DOMAIN, the ceiling from the passive cooling, the governor
  * step from the governor and the measuring mark from the measurement of
  * the highest rate.  A field that nobody set holds its neutral value:
  * FIRMWARE, no direct field, KERN_THERMAL_LIMIT_NONE, KERN_CPUPERF_UNKNOWN
@@ -278,7 +279,7 @@ static bool cpuperf_measured;
 static atomic_uint_t cpuperf_generation_count;
 
 /*
- * Nonzero while a root's direct setting is in force anywhere.  The thermal
+ * Nonzero while a direct setting is in force anywhere.  The thermal
  * core reads it without a lock to mark its strategy CUSTOM; the next
  * strategy clears it.
  */
@@ -364,13 +365,13 @@ static bool cpuperf_governor_pass(void);
 static uint32_t cpuperf_busy_percent(kern_cpu_id_t cpu);
 static bool cpuperf_any_control(void);
 static int cpuperf_ioctl(struct file *file, unsigned long request, uintptr_t argument);
-static bool cpuperf_superuser(void);
-static int cpuperf_ioctl_cpu(uintptr_t argument);
+static bool cpuperf_writable(const struct file *file);
+static int cpuperf_ioctl_cpu(struct file *file, uintptr_t argument);
 static int cpuperf_ioctl_domain(uintptr_t argument);
-static int cpuperf_ioctl_domain_set(uintptr_t argument);
+static int cpuperf_ioctl_domain_set(struct file *file, uintptr_t argument);
 static int cpuperf_ioctl_relative_get(uintptr_t argument);
-static int cpuperf_ioctl_relative_set(uintptr_t argument);
-static int cpuperf_ioctl_idle(uintptr_t argument, bool package);
+static int cpuperf_ioctl_relative_set(struct file *file, uintptr_t argument);
+static int cpuperf_ioctl_idle(struct file *file, uintptr_t argument, bool package);
 
 /*
  * Brings the framework up once every CPU takes notifications.
@@ -699,7 +700,7 @@ kern_cpuperf_cpu(
 	if (info->delivered_mhz != 0U)
 		info->flags |= KERN_CPUPERF_CPU_ESTIMATED_MHZ;
 
-	/* Marks a root's direct setting in force. */
+	/* Marks a direct setting in force. */
 	custom = atomic_load_acquire(&cpuperf_custom);
 	if (custom != 0U)
 		info->flags |= KERN_CPUPERF_CPU_CUSTOM;
@@ -775,7 +776,7 @@ kern_cpuperf_domain(
 		info->flags |= KERN_CPUPERF_DOMAIN_LIMITED;
 	}
 
-	/* Marks a root's direct setting in force. */
+	/* Marks a direct setting in force. */
 	if (entry->intent.direct_fields != 0U)
 		info->flags |= KERN_CPUPERF_DOMAIN_CUSTOM;
 
@@ -877,7 +878,7 @@ kern_cpuperf_generation(void)
 }
 
 /*
- * Applies a root's direct setting to one domain or to every domain.
+ * Applies a direct setting to one domain or to every domain.
  *
  * The fields named in the setting replace the strategy's in each domain
  * it reaches until the next strategy.
@@ -970,7 +971,7 @@ kern_cpuperf_domain_set(
 
 	/*
 	 * Stores the setting and posts it.  CUSTOM tells the thermal core
-	 * that a root's setting overrides its strategy until the next one.
+	 * that a direct setting overrides its strategy until the next one.
 	 */
 	for (index = first; index < last; index++) {
 		if (!cpuperf_domains[index].control)
@@ -1405,7 +1406,7 @@ cpuperf_receiver_poll(
 		cpuperf_publish_change();
 }
 
-/* Reports, without a lock, whether a root's direct setting is in force. */
+/* Reports, without a lock, whether a direct setting is in force. */
 static bool
 cpuperf_receiver_is_custom(
 	void *context)
@@ -2246,7 +2247,7 @@ cpuperf_compute(
 	else
 		cpuperf_compute_range(intent, levels, request);
 
-	/* Lets a root's direct setting replace what the strategy chose. */
+	/* Lets a direct setting replace what the strategy chose. */
 	cpuperf_compute_direct(intent, levels, request, &flags);
 
 	/* Fits the bounds to the levels and the ceiling. */
@@ -2401,7 +2402,7 @@ cpuperf_compute_steps(
 }
 
 /*
- * Lets a root's direct setting replace the fields the strategy chose,
+ * Lets a direct setting replace the fields the strategy chose,
  * turning permille of the range into units first when the setting was
  * given for every domain.
  */
@@ -2434,7 +2435,7 @@ cpuperf_compute_direct(
 	if ((intent->direct_fields & KERN_CPUPERF_SET_PREFERENCE) != 0U)
 		request->preference = intent->direct_preference;
 
-	/* Replaces desired, which then stays where the root put it. */
+	/* Replaces desired, which then stays where the direct setting put it. */
 	if ((intent->direct_fields & KERN_CPUPERF_SET_DESIRED) != 0U) {
 		value = intent->direct_desired;
 		if (intent->direct_permille && value != 0U)
@@ -2598,7 +2599,7 @@ cpuperf_governed(
 	if (levels->kind != KERN_CPUPERF_LEVELS_STEPS)
 		return false;
 
-	/* A root's desired step is not the governor's to change. */
+	/* A directly set desired step is not the governor's to change. */
 	if ((intent->direct_fields & KERN_CPUPERF_SET_DESIRED) != 0U)
 		return false;
 
@@ -2669,7 +2670,7 @@ cpuperf_setting_check(
 
 /*
  * Stores a checked direct setting in a domain's intent, on top of the
- * fields a root set before.
+ * fields set directly before.
  */
 static void
 cpuperf_setting_store(
@@ -2696,7 +2697,7 @@ cpuperf_setting_store(
 	if ((setting->fields & KERN_CPUPERF_SET_PREFERENCE) != 0U)
 		intent->direct_preference = setting->preference;
 
-	/* Remembers which fields a root set. */
+	/* Remembers which fields were set directly. */
 	intent->direct_fields |= setting->fields;
 }
 
@@ -3524,30 +3525,28 @@ cpuperf_ioctl(
 {
 	int error;
 
-	UNUSED_PARAMETER(file);
-
 	/* Carries out the request the whole number names. */
 	switch (request) {
 	case KERN_THERMAL_GET_CPU:
-		error = cpuperf_ioctl_cpu(argument);
+		error = cpuperf_ioctl_cpu(file, argument);
 		break;
 	case KERN_THERMAL_GET_CPU_DOMAIN:
 		error = cpuperf_ioctl_domain(argument);
 		break;
 	case KERN_THERMAL_SET_CPU_DOMAIN:
-		error = cpuperf_ioctl_domain_set(argument);
+		error = cpuperf_ioctl_domain_set(file, argument);
 		break;
 	case KERN_THERMAL_GET_CPU_RELATIVE:
 		error = cpuperf_ioctl_relative_get(argument);
 		break;
 	case KERN_THERMAL_SET_CPU_RELATIVE:
-		error = cpuperf_ioctl_relative_set(argument);
+		error = cpuperf_ioctl_relative_set(file, argument);
 		break;
 	case KERN_THERMAL_GET_CPU_IDLE:
-		error = cpuperf_ioctl_idle(argument, false);
+		error = cpuperf_ioctl_idle(file, argument, false);
 		break;
 	case KERN_THERMAL_GET_PACKAGE_IDLE:
-		error = cpuperf_ioctl_idle(argument, true);
+		error = cpuperf_ioctl_idle(file, argument, true);
 		break;
 	default:
 		error = ENOTTY;
@@ -3562,38 +3561,41 @@ cpuperf_ioctl(
 	return 0;
 }
 
-/* Tells whether the calling process is the superuser's. */
+/*
+ * Tells whether an open of /dev/thermal may change the CPUs or wake one:
+ * opened for writing, which the node's mode and group allow.
+ */
 static bool
-cpuperf_superuser(void)
+cpuperf_writable(
+	const struct file *file)
 {
-	struct ucred *credential;
-	int superuser;
+	int access;
 
-	/* Asks the caller's credentials. */
-	credential = cred_current_ref();
-	superuser = cred_is_superuser(credential);
-	cred_release(credential);
-	if (!superuser)
+	/* The node's mode decided at the open who may write. */
+	access = file_status_flags_get(file) & O_ACCMODE;
+	if (access == O_RDONLY)
 		return false;
 
-	/* Succeeded: the caller is root. */
+	/* Succeeded: the open writes. */
 	return true;
 }
 
 /*
  * Copies out one CPU and the number of CPUs.  A request to sample the CPU
- * is root's, since it wakes the CPU; a CPU that does not answer the
- * sample is reported with SAMPLE_TIMEOUT and the rest of its fields.
+ * needs an open for writing, since it wakes the CPU; a CPU that does not
+ * answer the sample is reported with SAMPLE_TIMEOUT and the rest of its
+ * fields.
  */
 static int
 cpuperf_ioctl_cpu(
+	struct file *file,
 	uintptr_t argument)
 {
 	struct thermal_cpu_info answer;
 	struct kern_cpuperf_cpu info;
 	uint32_t request;
 	uint32_t cpu;
-	bool superuser;
+	bool writable;
 	bool timed_out;
 	int error;
 
@@ -3604,12 +3606,12 @@ cpuperf_ioctl_cpu(
 	cpu = answer.cpu;
 	request = answer.request;
 
-	/* Refuses an unknown request, and a sample from anyone but root. */
+	/* Refuses an unknown request, and a sample on an open for reading only. */
 	if ((request & ~KERN_THERMAL_CPU_READ_SAMPLE) != 0U)
 		return EINVAL;
 	if ((request & KERN_THERMAL_CPU_READ_SAMPLE) != 0U) {
-		superuser = cpuperf_superuser();
-		if (!superuser)
+		writable = cpuperf_writable(file);
+		if (!writable)
 			return EPERM;
 	}
 
@@ -3738,22 +3740,23 @@ cpuperf_ioctl_domain(
 }
 
 /*
- * Applies a root's direct setting to one domain or to every domain.  A
- * setting the CPUs did not confirm in time stays and answers ETIMEDOUT.
+ * Applies a direct setting to one domain or to every domain.  A setting
+ * the CPUs did not confirm in time stays and answers ETIMEDOUT.
  */
 static int
 cpuperf_ioctl_domain_set(
+	struct file *file,
 	uintptr_t argument)
 {
 	struct thermal_cpu_setting request;
 	struct kern_cpuperf_setting setting;
 	uint32_t total;
-	bool superuser;
+	bool writable;
 	int error;
 
-	/* Only root sets the CPUs directly. */
-	superuser = cpuperf_superuser();
-	if (!superuser)
+	/* Only an open for writing sets the CPUs directly. */
+	writable = cpuperf_writable(file);
+	if (!writable)
 		return EPERM;
 
 	/* Reads the setting and refuses unknown fields or reserved words that are not zero. */
@@ -3810,18 +3813,19 @@ cpuperf_ioctl_relative_get(
 	return 0;
 }
 
-/* Chooses the way the relative performance is measured, for root. */
+/* Chooses the way the relative performance is measured, for an open for writing. */
 static int
 cpuperf_ioctl_relative_set(
+	struct file *file,
 	uintptr_t argument)
 {
 	struct thermal_cpu_relative request;
-	bool superuser;
+	bool writable;
 	int error;
 
-	/* Only root chooses. */
-	superuser = cpuperf_superuser();
-	if (!superuser)
+	/* Only an open for writing chooses. */
+	writable = cpuperf_writable(file);
+	if (!writable)
 		return EPERM;
 
 	/* Reads the way and refuses reserved words that are not zero. */
@@ -3841,11 +3845,12 @@ cpuperf_ioctl_relative_set(
 }
 
 /*
- * Copies out the idle residency of one CPU's core (root's, since it is
- * read on that CPU) or of one package.
+ * Copies out the idle residency of one CPU's core (for an open for
+ * writing, since it is read on that CPU) or of one package.
  */
 static int
 cpuperf_ioctl_idle(
+	struct file *file,
 	uintptr_t argument,
 	bool package)
 {
@@ -3855,13 +3860,13 @@ cpuperf_ioctl_idle(
 	uint32_t target;
 	uint32_t index;
 	uint8_t scope;
-	bool superuser;
+	bool writable;
 	int error;
 
-	/* Reading a core wakes its CPU, which only root may do. */
+	/* Reading a core wakes its CPU, which only an open for writing may do. */
 	if (!package) {
-		superuser = cpuperf_superuser();
-		if (!superuser)
+		writable = cpuperf_writable(file);
+		if (!writable)
 			return EPERM;
 	}
 

@@ -7,7 +7,7 @@ Parent: [WS333](../ws.md)
 
 ## 目的
 
-code を作る WS の最後の Phase（AGENTS.md §2）: WS333 が変えた C（`src/kern/thermal*.c`・`cpuperf.c`、`src/drivers/platform/pcat/cpu-x86/`、`src/drivers/acpi/acpi-dell*.c`・`acpi-wmi*.c`・`acpi-thermal.c`、`src/drivers/platform/rpi5/rpi5-fan.c`、`src/hal/x86_64/bsp-pcat/idle-suspend.c`・`lapic.c`・`clock.c` の WS333 の部分、`userland/desktop/sessiond/thermal-rules.c`、`/sbin/thermal`）を `plan/coding-style.md` の全文と照らして書き方だけ直す（conformance-reviewer）。`docs/architecture/power-management.md` を書く（document-writer）。
+code を作る WS の最後の Phase（AGENTS.md §2）: WS333 が変えた C（`src/kern/thermal*.c`・`cpuperf.c`、`src/drivers/platform/pcat/cpu-x86/`、`src/drivers/acpi/acpi-dell*.c`・`acpi-wmi*.c`・`acpi-thermal.c`、`src/drivers/platform/rpi5/rpi5-fan.c`、`src/hal/x86_64/bsp-pcat/idle-suspend.c`・`lapic.c`・`clock.c` の WS333 の部分、`/sbin/thermal`）を `plan/coding-style.md` の全文と照らして書き方だけ直す（conformance-reviewer）。`docs/architecture/power-management.md` を書く（document-writer）。
 
 ## 依存
 

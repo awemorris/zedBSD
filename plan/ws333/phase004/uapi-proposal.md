@@ -34,10 +34,10 @@ WS333 は、CPU の休み方（C-state）・CPU の速さ（P-state、HWP）・P
 
 | 項目 | 案 |
 | --- | --- |
-| node | `/dev/thermal`（cdev 0x00010008、mode 0666）、`/dev/thermal-inject`（0x00010009、mode 0600、試験の build だけ）。2026-11-12 の grep で両方とも空き |
+| node | `/dev/thermal`（cdev 0x00010008、root:desktop の mode 0664。desktop の group は gid 45、`KERN_THERMAL_NODE_GROUP`・`KERN_THERMAL_NODE_MODE`）、`/dev/thermal-inject`（0x00010009、mode 0600、試験の build だけ）。2026-11-12 の grep で両方とも空き |
 | ioctl の group | `'T'`（空き） |
 | 番号の範囲 | 1〜31 熱の core（`src/kern/thermal.c`）、32〜63 CPU（`src/kern/cpuperf.c` が `kern_thermal_ioctl_range_register` で登録）、64〜 試験の注入。登録の無い番号は ENOTTY |
-| 権限 | GET・SUBSCRIBE・read は誰でも（ただし CPU を起こす READ_SAMPLE と GET_CPU_IDLE は root、電力の読みは §7 の問い）。SET_* は root（ioctl の中で判定、他は EPERM）。sessiond は root か wheel の利用者に代わって strategy と boost だけを行う（p019）。EMERGENCY_ACK は pid 1 だけ、非常の状態が SIGNALED の時だけ（他は EPERM・EINVAL）。init は起動の時に `/dev/thermal` を開いておく（ACK の 10 秒の門のため） |
+| 権限 | 誰に変更を許すかは node の mode と group が決める（root と desktop の group の利用者が書き込みで開ける、group の外の書き込みの open は EACCES）。GET・SUBSCRIBE・read は読みだけの fd でもよい。SET_* と CPU を起こす読み（READ_SAMPLE・GET_CPU_IDLE）は書き込みで開いた fd だけ（ioctl の中で判定、読みだけの fd は EPERM）。sessiond は通さない。EMERGENCY_ACK は pid 1 だけ、非常の状態が SIGNALED の時だけ（他は EPERM・EINVAL）。init は起動の時に `/dev/thermal` を開いておく（ACK の 10 秒の門のため） |
 | 共通の規則 | kernel は request の値の全体（向き・大きさ・group・番号）で照合し、違えば ENOTTY（struct を大きくする時は新しい番号）。失敗した request は何も写さない。範囲外の index は全部 ENOENT（数は GET_STATUS と各 GET の count）。`/dev/thermal` は 1〜63 だけ、`/dev/thermal-inject` は自分の入口で 64〜 だけを受ける。購読する open は 16 まで（超えると SUBSCRIBE が ENOSPC） |
 | 注入の build | `/dev/thermal-inject` は試験の build の switch（設計の名前 `CONFIG_THERMAL_TEST_INJECT`、`mk/config.mk` の Tests の節の `CONFIG_INPUT_TEST_INJECT` と同じ形、既定 n）がある時だけ。mk への追加は実装の Phase で案を出しユーザーの確認を得る |
 
@@ -50,17 +50,17 @@ WS333 は、CPU の休み方（C-state）・CPU の速さ（P-state、HWP）・P
 | 3 | `KERN_THERMAL_GET_FAN` | 入出 `thermal_fan_info`（96） | index → 名前・rpm・rpm の最大・自動の段・boost の段・段の数・状態（KNOWN・STALE・STALLED・CAN_BOOST） |
 | 4 | `KERN_THERMAL_GET_METER` | 入出 `thermal_meter_info`（80） | index → 名前・種類（PACKAGE・CORES・GRAPHICS・PLATFORM・DRAM）・積算の energy（nJ、64 bit）・時刻 |
 | 5 | `KERN_THERMAL_GET_STRATEGY` | 出 `thermal_strategy`（48） | 値・3 軸（MANUAL の時だけ非 0）・flag（CUSTOM・PARTIAL・PENDING）・世代・最後の結果の errno・BIOS の mode の名前・受け手の数 |
-| 6 | `KERN_THERMAL_SET_STRATEGY` | 入出 `thermal_strategy` | root。値と 3 軸を入れ（out の欄は無視）、0 の時は flag と世代を返す。strategy は受け手の答えに依らず記録する。戻り: 受け手が無い・全部が対応外 → EOPNOTSUPP、対応する受け手が全部失敗 → 最初の errno（どちらも何も写さない。世代と結果は GET_STRATEGY で）、他は 0 で flag が PARTIAL・PENDING（5 秒）・SUPERSEDED。FIRMWARE・未知の値・MANUAL でない時の非 0 の軸・101 以上の軸・reserved の非 0 → EINVAL |
+| 6 | `KERN_THERMAL_SET_STRATEGY` | 入出 `thermal_strategy` | 書き込みの fd。値と 3 軸を入れ（out の欄は無視）、0 の時は flag と世代を返す。strategy は受け手の答えに依らず記録する。戻り: 受け手が無い・全部が対応外 → EOPNOTSUPP、対応する受け手が全部失敗 → 最初の errno（どちらも何も写さない。世代と結果は GET_STRATEGY で）、他は 0 で flag が PARTIAL・PENDING（5 秒）・SUPERSEDED。FIRMWARE・未知の値・MANUAL でない時の非 0 の軸・101 以上の軸・reserved の非 0 → EINVAL |
 | 7 | `KERN_THERMAL_GET_RECEIVER` | 入出 `thermal_receiver_info`（64） | index → 受け手の名前・最後の結果（errno・UNCONFIRMED・適用した世代・かかった ms・時刻） |
-| 8 | `KERN_THERMAL_SET_BOOST` | 入出 `thermal_boost`（16） | root。fan（index か ALL、ALL は boost の無い fan を飛ばす）と段。fan の driver を 5 秒待つ（PENDING、後の結果は GET_FAN と事象 BOOST で）。段が boost_count（最初の読みの前は 0）を超える → EINVAL、boost の無い fan（ALL なら全部が無い時）→ EOPNOTSUPP、fan が無い → ENOENT |
+| 8 | `KERN_THERMAL_SET_BOOST` | 入出 `thermal_boost`（16） | 書き込みの fd。fan（index か ALL、ALL は boost の無い fan を飛ばす）と段。fan の driver を 5 秒待つ（PENDING、後の結果は GET_FAN と事象 BOOST で）。段が boost_count（最初の読みの前は 0）を超える → EINVAL、boost の無い fan（ALL なら全部が無い時）→ EOPNOTSUPP、fan が無い → ENOENT |
 | 9 | `KERN_THERMAL_SUBSCRIBE` | 入 `thermal_subscription`（16） | 事象の種類の mask（前の mask を置き換える。`KERN_THERMAL_EVENT_MASK` の外の bit は EINVAL、0 は購読を止め read は EINVAL。購読の open は 16 まで、超えると ENOSPC） |
 | 10 | `KERN_THERMAL_EMERGENCY_ACK` | なし | pid 1 だけ。init が非常の停止を始めた印 |
-| 32 | `KERN_THERMAL_GET_CPU` | 入出 `thermal_cpu_info`（128） | cpu → topology（package・die・module・core・thread）・core の種類（P・E）・domain・相対の速さ（0〜100）・HFI の値（0〜255）・HWP の 4 つの anchor・Highest と今の MHz の推定・flag。request に READ_SAMPLE（root）を立てると CPU を起こして今の MHz を測る（約 100 ms 眠る。CPU が答えなければ 0 と flag SAMPLE_TIMEOUT） |
+| 32 | `KERN_THERMAL_GET_CPU` | 入出 `thermal_cpu_info`（128） | cpu → topology（package・die・module・core・thread）・core の種類（P・E）・domain・相対の速さ（0〜100）・HFI の値（0〜255）・HWP の 4 つの anchor・Highest と今の MHz の推定・flag。request に READ_SAMPLE（書き込みの fd）を立てると CPU を起こして今の MHz を測る（約 100 ms 眠る。CPU が答えなければ 0 と flag SAMPLE_TIMEOUT） |
 | 33 | `KERN_THERMAL_GET_CPU_DOMAIN` | 入出 `thermal_cpu_domain`（248） | domain → 所属の CPU の bit・段の形（RANGE・STEPS）・共有の単位・今の要求（min・max・desired・EPP）・熱の上限・flag |
-| 34 | `KERN_THERMAL_SET_CPU_DOMAIN` | 入 `thermal_cpu_setting`（32） | root、診断。1 つの domain か全部（全部の時は min・max・0 でない desired が各 domain の範囲の ‰、EPP は 0〜255 のまま）に直の値。次の strategy で消える。戻り: EINVAL・EOPNOTSUPP・ETIMEDOUT（要求は残り、後で効く） |
+| 34 | `KERN_THERMAL_SET_CPU_DOMAIN` | 入 `thermal_cpu_setting`（32） | 書き込みの fd、診断。1 つの domain か全部（全部の時は min・max・0 でない desired が各 domain の範囲の ‰、EPP は 0〜255 のまま）に直の値。次の strategy で消える。戻り: EINVAL・EOPNOTSUPP・ETIMEDOUT（要求は残り、後で効く） |
 | 35 | `KERN_THERMAL_GET_CPU_RELATIVE` | 出 `thermal_cpu_relative`（16） | 相対の速さの測り方の候補（FREQUENCY・FEEDBACK・PROVIDER）と今の物 |
-| 36 | `KERN_THERMAL_SET_CPU_RELATIVE` | 入 `thermal_cpu_relative` | root。測り方を選ぶ（次の起動まで）。測れない物は EOPNOTSUPP |
-| 37 | `KERN_THERMAL_GET_CPU_IDLE` | 入出 `thermal_cpu_idle`（128） | root。cpu → その core（と module）の C-state の滞在（状態の番号・数える所・ns）。その CPU の上で読むので最大 1 秒眠る |
+| 36 | `KERN_THERMAL_SET_CPU_RELATIVE` | 入 `thermal_cpu_relative` | 書き込みの fd。測り方を選ぶ（次の起動まで）。測れない物は EOPNOTSUPP |
+| 37 | `KERN_THERMAL_GET_CPU_IDLE` | 入出 `thermal_cpu_idle`（128） | 書き込みの fd。cpu → その core（と module）の C-state の滞在（状態の番号・数える所・ns）。その CPU の上で読むので最大 1 秒眠る |
 | 38 | `KERN_THERMAL_GET_PACKAGE_IDLE` | 入出 `thermal_cpu_idle` | package の番号（GET_CPU の package、疎でありうる。無い番号は ENOENT）→ package の C-state の滞在（PC2・PC3・PC6・PC7） |
 | 64 | `KERN_THERMAL_INJECT_SENSOR` | 入 `thermal_inject_sensor`（64） | 試験の sensor を足す・値を変える（同じ名前は同じ sensor） |
 | 65 | `KERN_THERMAL_INJECT_RECEIVER` | 入 `thermal_inject_receiver`（48） | 試験の受け手（決まった errno を決まった ms の後に返す） |
@@ -82,7 +82,7 @@ open ごとに 64 件の ring、溢れたら古い物を捨て、次の read の
 
 ## 5. `/sbin/thermal` の使い方の案
 
-誰でも読める（`cpu <n> sample` と `idle cpu` は root）。`*` は root。wheel の利用者は shell からは sudo で、desktop からは sessiond を経て strategy と boost を選ぶ。
+誰でも読める（`cpu <n> sample` と `idle cpu` は root と desktop の group）。`*` は root と desktop の group の利用者（`/dev/thermal` を書き込みで開き、開けなければ読みだけで開く。変更は kernel が EPERM で拒む）。desktop からも同じ命令を直に使う（sessiond は通さない）。
 
 ```
 thermal                          要約（strategy、温度の一覧、fan、電力、非常の状態）
@@ -104,9 +104,9 @@ thermal watch [<種類>...]        事象を 1 行ずつ（strategy・boost・pa
 
 - 出力は 1 行 1 項目の「key value」の形を基本にし、表示の道具（Keiland の monitor、p022）と試験の script が読める形にする（詳細は p005 後半・p013 で決める）。
 - 終了の値: 0 成功、1 kernel が拒んだ（errno を 1 行で出す）、2 使い方の誤り。strategy の PARTIAL・PENDING は 0 で、受け手ごとの結果を出す。EOPNOTSUPP（VM や MSR の道の無い kernel で、受け手が無い・対応外）は 0 と 1 行の知らせ（毎回の起動で rc の失敗に見せない）。
-- **保存の書き手は `/sbin/thermal` だけ**（Q333-1 B を desktop の選びにも効かせる）: `strategy` の命令は kernel の SET の後（EOPNOTSUPP でも。strategy は記録されている）に `/etc/thermal.conf` を一時 file と rename で書き直す。sessiond（p019）は strategy の要求を受けたら自分で ioctl を呼ばず `/sbin/thermal strategy …` を実行する。boost は保存しない。
-- `/etc/thermal.conf`: 1 行 `strategy <名前> [<speed> <noise> <gating>]`。書けない時は strategy の SET 自体は成功のまま警告を出す。`restore` は conf を読んで SET するだけで書き直さない。無い・壊れている時は balanced（壊れていれば警告）。
-- SET は受け手を最大 5 秒待つ（rc の起動と sessiond の要求の答えがその分遅れうる）。
+- **保存の書き手は `/sbin/thermal` だけ**（Q333-1 B を desktop の選びにも効かせる）: `strategy` の命令は kernel の SET の後（EOPNOTSUPP でも。strategy は記録されている）に `/etc/thermal.conf`（root:desktop 0664）に書く。root は一時 file を同じ group と mode にして rename、desktop の group の利用者は今ある file を上書きする。boost は保存しない。
+- `/etc/thermal.conf`: 1 行 `strategy <名前> [<speed> <noise> <gating>]`。書けない時は strategy の SET 自体は成功のまま警告を出す。`restore`（root、起動の時）は conf が無ければ空で作り、group と mode を root:desktop 0664 に揃え、conf を読んで SET する（strategy を書き直さない）。無い・壊れている時は balanced（壊れていれば警告）。
+- SET は受け手を最大 5 秒待つ（rc の起動と `/sbin/thermal strategy` の答えがその分遅れうる）。
 
 ## 6. 設計（design.md §4.10）からの差と、kernel の側に要る事
 
@@ -132,6 +132,6 @@ kernel の側に足す事（実装の Phase、p005 後半・p013）: 非常の�
 3. **電力の読み（GET_METER）を誰に許すか**。背景: Linux では温度と CPU の周波数は誰でも読めるが、Intel の CPU の電力の積算（RAPL、powercap の `energy_uj`）は、細かい電力の変化から暗号の鍵を推せる攻撃（PLATYPUS、CVE-2020-8694、2020 年）の後に root だけになった（担当の記憶による。出典は手元で確かめていない）。zedBSD の写しは kernel が 1 秒に 1 回読んだ値で、user の要求で MSR を読まないので、攻撃に要る細かさは無いと見る（推測、確かめていない）。
    - (A, 推し) 誰でも読める（1 秒の粒度の写しだけを出す事を UAPI の約束にする）。Keiland の monitor（p022）が一般の利用者のまま電力を出せる。
    - (B) GET_METER は root だけ（EPERM）。monitor は sessiond を経て読む形にする。
-   - 温度・fan・CPU の topology・速さの要約は誰でも読める（Linux と同じ）。CPU を起こす読み（READ_SAMPLE・GET_CPU_IDLE）は root だけにした（idle の測りを他の利用者が乱せないように）。
+   - 温度・fan・CPU の topology・速さの要約は誰でも読める（Linux と同じ）。CPU を起こす読み（READ_SAMPLE・GET_CPU_IDLE）は書き込みで開いた fd だけにした（idle の測りを他の利用者が乱せないように）。
 
 （技術の判断は担当と Q1 が決めた: 番号の並び、nJ、struct の大きさ、事象の形。）

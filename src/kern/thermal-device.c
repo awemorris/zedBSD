@@ -7,8 +7,8 @@
 
 /*
  * The thermal devices: /dev/thermal, through which a process reads the
- * thermal core's copies and a root chooses the strategy and the fans'
- * boost, and /dev/thermal-inject, which a kernel built for tests adds so
+ * thermal core's copies and an open for writing chooses the strategy and
+ * the fans' boost, and /dev/thermal-inject, which a kernel built for tests adds so
  * that a virtual machine can make up sensors and receivers and choose how
  * an emergency stops it.
  *
@@ -17,6 +17,11 @@
  * 1..31; the CPU framework registers 32..63 with the core and the core's
  * dispatch hands those on.  The injection device has an entry of its own
  * and answers its numbers, 64 and up, only there.
+ *
+ * Who may change the strategy or a fan's boost is the node's mode and
+ * group (root and the desktop group open it for writing): a change is
+ * served on a descriptor opened for writing and refused with EPERM on one
+ * opened for reading only.
  *
  * An open that subscribes to events gets a ring in the core at its first
  * subscription; the open's own lock serializes its subscriptions, so two
@@ -154,21 +159,22 @@ static unsigned thermal_inject_receiver_count;
 #endif
 
 static int thermal_core_ioctl(struct file *file, unsigned long request, uintptr_t argument);
-static bool thermal_superuser(void);
+static bool thermal_writable(const struct file *file);
 static bool thermal_words_zero(const uint32_t *words, size_t count);
 static int thermal_get_status(uintptr_t argument);
 static int thermal_get_sensor(uintptr_t argument);
 static int thermal_get_fan(uintptr_t argument);
 static int thermal_get_meter(uintptr_t argument);
 static int thermal_get_strategy(uintptr_t argument);
-static int thermal_set_strategy(uintptr_t argument);
+static int thermal_set_strategy(struct file *file, uintptr_t argument);
 static int thermal_get_receiver(uintptr_t argument);
-static int thermal_set_boost(uintptr_t argument);
+static int thermal_set_boost(struct file *file, uintptr_t argument);
 static int thermal_subscribe(struct file *file, uintptr_t argument);
 static int thermal_emergency_answer(void);
 static void thermal_event_fill(const struct kern_thermal_record *record, struct thermal_event *event);
 static uint32_t thermal_fan_flags(const struct kern_thermal_fan_info *fan);
 #ifdef CONFIG_THERMAL_TEST_INJECT
+static bool thermal_superuser(void);
 static bool thermal_name_valid(const char *name, size_t size);
 static int thermal_inject_sensor(uintptr_t argument);
 static int thermal_inject_receiver(uintptr_t argument);
@@ -389,13 +395,13 @@ thermal_core_ioctl(
 		error = thermal_get_strategy(argument);
 		break;
 	case KERN_THERMAL_SET_STRATEGY:
-		error = thermal_set_strategy(argument);
+		error = thermal_set_strategy(file, argument);
 		break;
 	case KERN_THERMAL_GET_RECEIVER:
 		error = thermal_get_receiver(argument);
 		break;
 	case KERN_THERMAL_SET_BOOST:
-		error = thermal_set_boost(argument);
+		error = thermal_set_boost(file, argument);
 		break;
 	case KERN_THERMAL_SUBSCRIBE:
 		error = thermal_subscribe(file, argument);
@@ -416,21 +422,19 @@ thermal_core_ioctl(
 	return 0;
 }
 
-/* Tells whether the calling process is the superuser's. */
+/* Tells whether an open of /dev/thermal may change things: opened for writing. */
 static bool
-thermal_superuser(void)
+thermal_writable(
+	const struct file *file)
 {
-	struct ucred *credential;
-	int superuser;
+	int access;
 
-	/* Asks the caller's credentials. */
-	credential = cred_current_ref();
-	superuser = cred_is_superuser(credential);
-	cred_release(credential);
-	if (!superuser)
+	/* The node's mode decided at the open who may write. */
+	access = file_status_flags_get(file) & O_ACCMODE;
+	if (access == O_RDONLY)
 		return false;
 
-	/* Succeeded: the caller is root. */
+	/* Succeeded: the open writes. */
 	return true;
 }
 
@@ -678,11 +682,12 @@ thermal_get_strategy(
 }
 
 /*
- * Chooses a strategy for a root and answers how far the receivers carried
- * it out.  A refused choice copies nothing out.
+ * Chooses a strategy for an open for writing and answers how far the
+ * receivers carried it out.  A refused choice copies nothing out.
  */
 static int
 thermal_set_strategy(
+	struct file *file,
 	uintptr_t argument)
 {
 	struct kern_thermal_strategy_info info;
@@ -690,13 +695,13 @@ thermal_set_strategy(
 	struct thermal_strategy request;
 	uint32_t generation;
 	uint32_t flags;
-	bool superuser;
+	bool writable;
 	bool zero;
 	int error;
 
-	/* Only root chooses. */
-	superuser = thermal_superuser();
-	if (!superuser)
+	/* Only an open for writing chooses. */
+	writable = thermal_writable(file);
+	if (!writable)
 		return EPERM;
 
 	/* Reads the choice and refuses reserved fields that are not zero. */
@@ -777,19 +782,20 @@ thermal_get_receiver(
 	return 0;
 }
 
-/* Sets a fan's boost for a root and answers whether its driver took it in time. */
+/* Sets a fan's boost for an open for writing and answers whether its driver took it in time. */
 static int
 thermal_set_boost(
+	struct file *file,
 	uintptr_t argument)
 {
 	struct thermal_boost request;
 	uint32_t flags;
-	bool superuser;
+	bool writable;
 	int error;
 
-	/* Only root raises a fan. */
-	superuser = thermal_superuser();
-	if (!superuser)
+	/* Only an open for writing raises a fan. */
+	writable = thermal_writable(file);
+	if (!writable)
 		return EPERM;
 
 	/* Reads the request and refuses a reserved field that is not zero. */
@@ -917,7 +923,7 @@ thermal_fan_flags(
 	if ((fan->copy & KERN_THERMAL_FAN_COPY_STALLED) != 0U)
 		flags |= KERN_THERMAL_FAN_STALLED;
 
-	/* Whether a root can raise it. */
+	/* Whether SET_BOOST can raise it. */
 	if ((fan->copy & KERN_THERMAL_FAN_COPY_BOOST) != 0U)
 		flags |= KERN_THERMAL_FAN_CAN_BOOST;
 
@@ -926,6 +932,24 @@ thermal_fan_flags(
 }
 
 #ifdef CONFIG_THERMAL_TEST_INJECT
+/* Tells whether the calling process is the superuser's. */
+static bool
+thermal_superuser(void)
+{
+	struct ucred *credential;
+	int superuser;
+
+	/* Asks the caller's credentials. */
+	credential = cred_current_ref();
+	superuser = cred_is_superuser(credential);
+	cred_release(credential);
+	if (!superuser)
+		return false;
+
+	/* Succeeded: the caller is root. */
+	return true;
+}
+
 /* Tells whether a name is not empty and ends within its room. */
 static bool
 thermal_name_valid(

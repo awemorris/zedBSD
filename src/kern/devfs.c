@@ -49,6 +49,7 @@
 #include <uapi/errno.h>
 #include <uapi/fcntl.h>
 #include <uapi/gpu.h>
+#include <uapi/thermal.h>
 #include <limits.h>
 #include <stdint.h>
 #include <uapi/statvfs.h>
@@ -608,6 +609,8 @@ devfs_cdev_inode(
 	int bridge;
 	int camera;
 	int gpu;
+	int thermal;
+	int thermal_match;
 
 	/* Creates a generation-unique inode and gives it one cdev reference. */
 	number = cdev_generation(device);
@@ -631,7 +634,9 @@ devfs_cdev_inode(
 	 * namespace node is root's: a write evaluates any AML method, and
 	 * methods write the embedded controller and raise SMIs.  A test
 	 * kernel's thermal injection node is root's: a made-up sensor can
-	 * stop the machine.  A GPU is
+	 * stop the machine.  The thermal node is read by anyone and opened
+	 * for writing by root and the desktop group, whose members choose
+	 * the machine's heat and power strategy.  A GPU is
 	 * root's and the video group's until sessiond gives it to the seat's
 	 * user: a member of that group starts a desktop from the text
 	 * console.
@@ -643,6 +648,10 @@ devfs_cdev_inode(
 	bridge = bridge_name(device->name);
 	camera = camera_name(device->name);
 	gpu = gpu_name(device->name);
+	thermal = 0;
+	thermal_match = kern_strcmp(device->name, "thermal");
+	if (thermal_match == 0)
+		thermal = 1;
 	if (event_name(device->name))
 		mode = 0640U;
 	else if (backlight)
@@ -653,6 +662,8 @@ devfs_cdev_inode(
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "thermal-inject") == 0)
 		mode = 0600U;
+	else if (thermal)
+		mode = KERN_THERMAL_NODE_MODE;
 	else if (kern_strcmp(device->name, "fpga0") == 0)
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "acpi") == 0)
@@ -662,10 +673,15 @@ devfs_cdev_inode(
 	else
 		mode = 0666U;
 
-	/* A GPU's group is the video group; every other node's is wheel. */
+	/*
+	 * A GPU's group is the video group, the thermal node's the desktop
+	 * group; every other node's is wheel.
+	 */
 	group = 0;
 	if (gpu)
 		group = GPU_NODE_GROUP;
+	else if (thermal)
+		group = KERN_THERMAL_NODE_GROUP;
 
 	/* Describes the device; the inode starts dead until it is published. */
 	cdev_ref(device);

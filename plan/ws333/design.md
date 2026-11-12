@@ -13,13 +13,14 @@
 
 | 日付 | 要点 | この設計での扱い |
 | --- | --- | --- |
+| 2026-11-12 | `/dev/thermal` は desktop の group（gid 45）の利用者が直に操作する（video の group と GPU の node と同じ形）。sessiond は通さず、sessiond に委ねるのは認証だけ | §4.1・§4.8・§4.10 |
 | 2026-10-31 | WS301 と WS303 を廃止して統合し新しい WS にする。/dev/thermal という統一の device を検討の途中で想定するようになったので、統一して設計し直す | この文書。2 つの WS の口を 1 つの kernel の口にまとめる（§4.2） |
 | 2026-10-31 | CPU の省電力（idle の C-state・P-state）を先に直す。amd64 の idle（MWAIT）は p002 で先に実装する | CPU の道を先にする Phase の順（§9）。idle の状態の選びは HAL の実装（§4.3） |
 | 2026-10-29（WS301 Q301-1・Q301-8） | HAL は変えず、driver の確かめで守る。HWP の無い CPU も P-state を driver で操作する | §4.4・§6 |
 | 2026-10-29（WS301 Q301-2） | 相対の性能の既定は最大の周波数の比で、後で写し方を変えられる口にする | §4.5 |
-| 2026-10-29（WS301 Q301-3・4・5・7） | `_OSC` は呼ばない（WS310）、`CONFIG_CPU_PERF` は試験が通るまで既定で無効、arm64・riscv64 は枠だけ、CPU の速さの側は自分の policy と起動の parameter を持たない（直の値は root の診断だけ） | §4.4、Q333-7 |
+| 2026-10-29（WS301 Q301-3・4・5・7） | `_OSC` は呼ばない（WS310）、`CONFIG_CPU_PERF` は試験が通るまで既定で無効、arm64・riscv64 は枠だけ、CPU の速さの側は自分の policy と起動の parameter を持たない（直の値は診断だけ） | §4.4、Q333-7 |
 | 2026-10-29（WS301、Q1 の中継） | CPU の速さの UAPI は /dev/system でなく /dev/thermal | §4.10 |
-| 2026-10-29（WS303 Q303-1〜14） | `/dev/thermal`、変更は root と sessiond 経由（root か wheel）、`/sbin/thermal` が strategy を選ぶ、fan は上げる段だけで温度に必要な回転数を下回らせない、非常の水準で電源を落とす、制御できない機械は firmware に任せ strategy だけを伝える、passive を入れる、strategy は 4 つ（manual は 3 軸 0〜100、写し方は driver が決める）、`hw.thermal` は monitor を移した後に外す、Dell の SMM の値は GPL の file から出典つきで、非常の水準は zone の critical だけ、passive は仕組みと host 試験まで | §4.6〜§4.11 |
+| 2026-10-29（WS303 Q303-1〜14） | `/dev/thermal`、`/sbin/thermal` が strategy を選ぶ、fan は上げる段だけで温度に必要な回転数を下回らせない、非常の水準で電源を落とす、制御できない機械は firmware に任せ strategy だけを伝える、passive を入れる、strategy は 4 つ（manual は 3 軸 0〜100、写し方は driver が決める）、`hw.thermal` は monitor を移した後に外す、Dell の SMM の値は GPL の file から出典つきで、非常の水準は zone の critical だけ、passive は仕組みと host 試験まで | §4.6〜§4.11 |
 
 WS303 の未回答の問い（Q303-15〜19）は Q333-1〜5 として聞き直す。新しい問いは Q333-6・7（§11、[user-questions.md](user-questions.md)）。
 
@@ -66,9 +67,9 @@ WS303 の未回答の問い（Q303-15〜19）は Q333-1〜5 として聞き直�
 ### 4.1 全体の形
 
 ```
- user:   /sbin/thermal（表示・root の設定・保存した strategy を rc から）   sessiond（root か wheel の利用者）   Keiland の monitor（p022 から）
+ user:   /sbin/thermal（表示・root と desktop の group の設定・保存した strategy を rc から）   Keiland の monitor（p022 から）
                  \                                  |                                             /
- UAPI:                      /dev/thermal（0666、SET は ioctl の中で root）   /dev/thermal-inject（0600、試験の build だけ）
+ UAPI:                      /dev/thermal（root:desktop 0664、SET は書き込みで開いた fd だけ）   /dev/thermal-inject（0600、試験の build だけ）
                                                     |
  kernel: src/kern/thermal.c（core: 写し・strategy・受け手・meter・事象・ioctl の振り分け・thread）
          src/kern/thermal-guard.c（見張りの thread・非常の停止）
@@ -127,7 +128,7 @@ unsigned kern_cpu_count(void);
 - `kern_fan_ops`・sensor の値の規則・fan の写しは WS303 design §4.3・§5.1 のまま。STALLED は「実際の段 = max(自動, boost) > 0 で rpm 0 が 3 周期」（v5 m9）。
 - 表は static（受け手 16、ioctl の範囲 4、sensor 32、fan 8、meter 8）で外さない。登録と振り分けの公開は release・acquire の順（v5 m20）。
 - 受け手は apply の中で thermal の関数を呼ばない。例外は `kern_thermal_event`（事象の ring の葉の lock だけを取る、§4.12）。thermal は受け手を lock を持たずに呼ぶ。
-- ioctl の範囲: core 1〜31、CPU（`cpuperf.c`）32〜63、64〜 は予備。登録の無い番号は ENOTTY。SET の root の判定は各 handler の中。
+- ioctl の範囲: core 1〜31、CPU（`cpuperf.c`）32〜63、64〜 は予備。登録の無い番号は ENOTTY。SET（と CPU を起こす読み）の判定は各 handler の中で、fd が書き込みで開かれたか（`O_ACCMODE` が `O_RDONLY` でない）。
 - 名前: UAPI の struct の接頭辞は `thermal_`、ただし `hw.thermal` の `thermal_header`・`thermal_entry`（p022 まで残る）とぶつけない（`sysctl.c` が両方の header を読む）。macro は `KERN_THERMAL_*`（v5 m7・review m10）。
 
 ### 4.3 CPU の idle（C-state）
@@ -255,9 +256,9 @@ WS303 design §4.1（ACPI WMI）・§4.2（Dell）・§4.3（registry）・§4.5
 - **SET の手順**（v5 M1）: (1) 引数の検査。(2) strategy の mutex の下で世代 g を進め写しを置き、mutex を離す。(3) strategy の thread に依頼し 5 秒まで待つ。(4) thread は受け手を登録の順に lock を持たずに呼ぶ。**1 周の後に最新の世代が今の周と違えば、全部の受け手にもう 1 周する**。受け手ごとの「適用済みの世代」を写しに置き GET_RECEIVER に出す。
 - **ioctl の戻り**（review m9 で一意にした）: 受け手が 0 か、全部の受け手が EOPNOTSUPP → EOPNOTSUPP（strategy の値は記録する）。EOPNOTSUPP でない受け手が全部失敗 → 最初の errno。一部が失敗 → 0 と PARTIAL。自分の世代が上書きされた → 0 と SUPERSEDED。5 秒で終わらない → 0 と PENDING。EOPNOTSUPP と UNCONFIRMED は失敗に数えない。
 - **速さの制限は受け手の中で**: Dell の 1 秒に 1 回の制限は EBUSY を返さず、受け手が次の窓まで眠ってから書く。
-- **CUSTOM**: root の直の設定が効いている間、GET は strategy を変えずに CUSTOM の flag。次の SET で直の設定は消える（Q333-3）。
+- **CUSTOM**: 直の設定が効いている間、GET は strategy を変えずに CUSTOM の flag。次の SET で直の設定は消える（Q333-3）。
 - **後から登録された受け手**: 今が FIRMWARE でなければ今の世代を渡す。
-- **保存と起動の時**（Q333-1 の推し B、p013）: `/sbin/thermal strategy <値>` は成功の後に `/etc/thermal.conf`（1 行、strategy と manual の 3 軸）に書く。rc は起動の時に `/sbin/thermal restore` を走らせ、保存が無ければ balanced。Dell の受け手は、起動の時の `ODV0` が渡された mode と同じなら書かない（`ODV0` は SMI より前に AML が書く値で確かめにはならないが、ここでは書きを省くかの判断だけに使う。p018 で起動の時の `ODV0` が埋まるかを確かめ、埋まらなければ起動ごとに 1 回書く）。
+- **保存と起動の時**（Q333-1 の推し B、p013）: `/sbin/thermal strategy <値>` は成功の後に `/etc/thermal.conf`（1 行、strategy と manual の 3 軸、root:desktop 0664）に書く。root は新しい file を同じ group と mode で作って rename で置き換え、desktop の group の利用者（`/etc` に file を作れない）は今ある file を上書きする。rc は起動の時に root で `/sbin/thermal restore` を走らせ、file が無ければ空で作り、group と mode が違えば root:desktop 0664 に直してから、保存の strategy を渡す（保存が無ければ balanced）。Dell の受け手は、起動の時の `ODV0` が渡された mode と同じなら書かない（`ODV0` は SMI より前に AML が書く値で確かめにはならないが、ここでは書きを省くかの判断だけに使う。p018 で起動の時の `ODV0` が埋まるかを確かめ、埋まらなければ起動ごとに 1 回書く）。
 
 ### 4.9 passive（WS303 §4.7）
 
@@ -266,8 +267,8 @@ WS303 design §4.1（ACPI WMI）・§4.2（Dell）・§4.3（registry）・§4.5
 
 ### 4.10 UAPI `/dev/thermal`
 
-- cdev `/dev/thermal`（0x00010008、node 0666）。試験の注入は `/dev/thermal-inject`（0600、`CONFIG_THERMAL_TEST_INJECT`、amd64・arm64）。ioctl の group 'T'。
-- 権限: GET は誰でも。SET は root（sessiond 経由の strategy・boost は、root か wheel の利用者に代わって root の sessiond が呼ぶ）。EMERGENCY_ACK は pid 1 だけで、非常の状態が SIGNALED の時だけ受ける（他は EPERM・EINVAL、review M6）。
+- cdev `/dev/thermal`（0x00010008、node root:desktop 0664。`KERN_THERMAL_NODE_GROUP` 45・`KERN_THERMAL_NODE_MODE`、GPU の node の video の group と同じ形）。試験の注入は `/dev/thermal-inject`（0600、`CONFIG_THERMAL_TEST_INJECT`、amd64・arm64）。ioctl の group 'T'。
+- 権限: 誰に変更を許すかは node の mode と group が決める。誰でも読みで開いて GET できる。SET（strategy・boost・CPU の直の設定・相対の性能の選び）と CPU を起こす読み（`KERN_THERMAL_CPU_READ_SAMPLE`・GET_CPU_IDLE）は書き込みで開いた fd だけで、読みだけの fd では EPERM。書き込みで開けるのは root と desktop の group（gid 45）の利用者で、group の外は open が EACCES。sessiond は通さない（sessiond の役は認証だけ）。desktop の group には既定の利用者 `user`（`/etc/group`）と Settings が作る利用者（account-admin）が入る。EMERGENCY_ACK は pid 1 だけで、非常の状態が SIGNALED の時だけ受ける（他は EPERM・EINVAL、review M6）。
 - ioctl の一覧（番号は p004 で確定）:
 
 | 範囲 | ioctl | 中身 | 出典 |
@@ -333,7 +334,7 @@ WS303 design §4.1（ACPI WMI）・§4.2（Dell）・§4.3（registry）・§4.5
 
 ```
 strategy:   FIRMWARE --SET(s)--> s（世代 g、受け手ごとの適用済みの世代、全部／PARTIAL／PENDING／SUPERSEDED）--SET(s')--> s'
-            s --root の直の設定--> s + CUSTOM --SET--> CUSTOM は消える
+            s --直の設定--> s + CUSTOM --SET--> CUSTOM は消える
 CPU（x86）: ABSENT（MSR の道: hypervisor・CONFIG_CPU_PERF=n・どの bit も無い。topology は出す）
             PROBED --最初の要求--> RUNNING(HWP)（ここで PM_ENABLE）/ RUNNING(LEGACY)   （WS301 §4.8 の HWP_ENABLED を起動の時に置かない）
 idle:       HAL の実装の中（kernel は状態を持たない）
@@ -472,7 +473,7 @@ driver（`cpu-x86/`・`acpi-dell.c`・`acpi-wmi.c`・`rpi5-fan.c`）は `kern_*`
 ### 8.4 試験の計画
 
 - **host 試験**（`plan/ws333/tests/`）: WS301 §6.1 と WS303 §6.1 の全部、加えて: 世代の 2 周目と SUPERSEDED、全部 EOPNOTSUPP の戻り、UNCONFIRMED、Dell の窓の眠り、`limit` の domain、meter の 32 bit の一周と seq、C-state の滞在の decode、ACK の道（pid 1 でない ACK・SIGNALED の前の ACK・10 秒・120 秒）、REBOOT との競合と停止の途中の SIGUSR2、init の POWEROFF が進行中の時の待ち、sync が返らない時の 10 秒、水準の検査、S0 idle の跳ぶ時計と `kern_thermal_resume` の置き直し、UAPI の layout（-m64・-m32）、strategy の保存と restore。x86 の decode の module（p008〜p010）は標準廉価実装手順の単体試験。
-- **QEMU**（amd64 q35、ssh・QMP・時間で判定）: `/sbin/thermal` が sensor・fan 0・受け手の結果（cpu は「対応外」、hypervisor の関門）・topology を出す、`boot-test.sh` の回帰、riscv64 の virt でも `/sbin/thermal` が動く、非常の init の道と直の切りの道（ACK の道を含む）、sessiond（p019）。
+- **QEMU**（amd64 q35、ssh・QMP・時間で判定）: `/sbin/thermal` が sensor・fan 0・受け手の結果（cpu は「対応外」、hypervisor の関門）・topology を出す、`boot-test.sh` の回帰、riscv64 の virt でも `/sbin/thermal` が動く、非常の init の道と直の切りの道（ACK の道を含む）、desktop の group の利用者（root でない）の `/sbin/thermal strategy` が通り保存され、group の外の利用者は EPERM か EACCES。
 - **5330**（1 本の script、Q1 の割当。p014）:
   1. idle の電力: 同じ image で kernel を替えて、HLT（`IDLE_WAIT_DEEPEST_CSTATE=1`）・MWAIT C6（既定）・C10・C6 ＋ tick の位相を揃えた build（p012）・それに strategy BALANCED、の 5 つ。desktop の session の idle で 60 秒ずつ、package の電力（meter）と package・core の C-state の滞在の率。同じ日に Linux の値（RAPL と cpuidle）。（可能なら）§4.3.3 の段 4 の見積もりの試験の build。
   2. i915: WS291 p022 の qs40 × 600 の fps と GT の周波数。
@@ -785,4 +786,4 @@ p008〜p010 は p007 の merge の後に並べて走れる（`cpux86.c` は p007
 
 ### 16.3 試験の道具の古さ
 
-`plan/ws333/tests/` の `build-vmunix-all.sh`・`config-amd64-boot.mk`・`config-amd64-cpuperf.mk`・`config-amd64-cpu-x86.mk`・`cpu-x86-qemu.sh`・`hw5330/kbuild.sh` は旧 build（`ZEDBSD_CONFIG=`・`ZEDBSD_PLATFORM`・`disk-image`・`CONFIG_CPU_PERF`・`plan/tools/ports/build-vmunix-all.sh`）を前提にしている。新しい mk の変数の名前が決まってから（16.2 の案の答えの後）、p013・p014 の着手の時に直す。host 試験（cpux86・cpuperf-host・cpu-x86-host・thermal-host・sessiond-thermal・wmi・dell）は make に依らず、2026-11-12 に全部 PASS（cpu-x86-host は mk と同じく 2 つの macro を定義するように直した）。
+`plan/ws333/tests/` の `build-vmunix-all.sh`・`config-amd64-boot.mk`・`config-amd64-cpuperf.mk`・`config-amd64-cpu-x86.mk`・`cpu-x86-qemu.sh`・`hw5330/kbuild.sh` は旧 build（`ZEDBSD_CONFIG=`・`ZEDBSD_PLATFORM`・`disk-image`・`CONFIG_CPU_PERF`・`plan/tools/ports/build-vmunix-all.sh`）を前提にしている。新しい mk の変数の名前が決まってから（16.2 の案の答えの後）、p013・p014 の着手の時に直す。host 試験（cpux86・cpuperf-host・cpu-x86-host・thermal-host・wmi・dell）は make に依らず、2026-11-12 に全部 PASS（cpu-x86-host は mk と同じく 2 つの macro を定義するように直した）。

@@ -8,11 +8,14 @@
 /*
  * /dev/thermal and /dev/thermal-inject
  *
- * /dev/thermal (node 0666) shows the machine's temperatures, fans, energy
+ * /dev/thermal (node root:desktop 0664, KERN_THERMAL_NODE_GROUP and
+ * KERN_THERMAL_NODE_MODE) shows the machine's temperatures, fans, energy
  * meters and CPUs, and takes the strategy that every part of the machine
  * follows (the CPUs' requests, a laptop's firmware mode, a fan's curve).
- * Anyone may read; a change (SET_*) is refused with EPERM unless the caller
- * is the superuser.  EMERGENCY_ACK is taken only from init.
+ * Anyone may open it for reading and read; a change (SET_*) is refused
+ * with EPERM unless the descriptor was opened for writing, which the
+ * node's mode allows root and the desktop group's members.
+ * EMERGENCY_ACK is taken only from init.
  *
  * read() gives whole struct thermal_event records of the types the open
  * subscribed to (KERN_THERMAL_SUBSCRIBE; an open that has not subscribed is
@@ -44,7 +47,8 @@
  *    own entry and answers 64.. only.
  *  - Anyone may read the temperatures, fans, energy meters and CPUs, but a
  *    request that wakes a CPU (KERN_THERMAL_CPU_READ_SAMPLE, GET_CPU_IDLE)
- *    is the superuser's: it disturbs the very idle state it measures.
+ *    needs a descriptor opened for writing, as a change does: it disturbs
+ *    the very idle state it measures.
  */
 
 #ifndef KERN_UAPI_THERMAL_H
@@ -59,6 +63,15 @@ extern "C" {
 #include <uapi/ioctl.h>
 
 #define KERN_THERMAL_IOC_GROUP		'T'
+
+/*
+ * The group /dev/thermal belongs to, the desktop group of /etc/group, and
+ * the node's mode: root and the group's members open it for writing,
+ * anyone for reading.  /etc/thermal.conf, where /sbin/thermal keeps the
+ * chosen strategy, has the same group and mode.
+ */
+#define KERN_THERMAL_NODE_GROUP			45U
+#define KERN_THERMAL_NODE_MODE			0664U
 
 /* The lengths of the names, with the terminating NUL. */
 #define KERN_THERMAL_NAME_MAX			32U
@@ -95,7 +108,7 @@ extern "C" {
 #define KERN_THERMAL_AXIS_MAX			100U
 
 /* What a strategy's outcome says (struct thermal_strategy's flags). */
-#define KERN_THERMAL_STRATEGY_CUSTOM		0x1U	/* a root's direct CPU setting is in force */
+#define KERN_THERMAL_STRATEGY_CUSTOM		0x1U	/* a direct CPU setting is in force */
 #define KERN_THERMAL_STRATEGY_PARTIAL		0x2U	/* some receivers failed */
 #define KERN_THERMAL_STRATEGY_PENDING		0x4U	/* the receivers have not all answered in 5 s */
 #define KERN_THERMAL_STRATEGY_SUPERSEDED	0x8U	/* a later choice replaced this one */
@@ -174,7 +187,7 @@ extern "C" {
 #define KERN_THERMAL_CPU_ESTIMATED_MHZ		0x2U	/* the MHz fields are estimates */
 #define KERN_THERMAL_CPU_LIMITED		0x4U	/* the thermal ceiling cuts the maximum */
 #define KERN_THERMAL_CPU_PLATFORM_LIMIT		0x8U	/* the platform holds the CPU below the request */
-#define KERN_THERMAL_CPU_CUSTOM			0x10U	/* a root's direct setting is in force */
+#define KERN_THERMAL_CPU_CUSTOM			0x10U	/* a direct setting is in force */
 #define KERN_THERMAL_CPU_SAMPLE_TIMEOUT		0x20U	/* READ_SAMPLE: the CPU did not answer; the rest is filled */
 
 /* How a domain's levels are counted (struct thermal_cpu_domain's kind). */
@@ -189,7 +202,7 @@ extern "C" {
 #define KERN_THERMAL_CPU_SHARE_PACKAGE		4U
 
 /* What a domain's request says (struct thermal_cpu_domain's flags). */
-#define KERN_THERMAL_CPU_DOMAIN_CUSTOM		0x1U	/* a root's direct setting is in force */
+#define KERN_THERMAL_CPU_DOMAIN_CUSTOM		0x1U	/* a direct setting is in force */
 #define KERN_THERMAL_CPU_DOMAIN_LIMITED		0x2U	/* the thermal ceiling cuts the maximum */
 #define KERN_THERMAL_CPU_DOMAIN_PENDING		0x4U	/* a member has not confirmed the request */
 
@@ -274,7 +287,7 @@ struct thermal_sensor_info {
  * One fan, asked for by index.
  *
  * level is where the firmware's or the driver's automatic control has it,
- * boost the lower bound root asked for; the fan turns at the higher of the
+ * boost the lower bound SET_BOOST asked for; the fan turns at the higher of the
  * two.  A fan without levels reports 0 for both counts.
  */
 struct thermal_fan_info {
@@ -408,9 +421,9 @@ struct thermal_event {
  * The topology and the core's class come from the processor itself and are
  * there on every machine the driver knows; the rest is KERN_THERMAL_UNKNOWN
  * (or 0 for an MHz) until the driver can read it.  A request with
- * READ_SAMPLE (superuser only) wakes the CPU to measure delivered_mhz and
- * sleeps about 100 ms; without it nothing is woken and delivered_mhz is the
- * last sample.
+ * READ_SAMPLE (on a descriptor opened for writing only) wakes the CPU to
+ * measure delivered_mhz and sleeps about 100 ms; without it nothing is
+ * woken and delivered_mhz is the last sample.
  */
 struct thermal_cpu_info {
 	uint32_t cpu;			/* in */
@@ -467,7 +480,7 @@ struct thermal_cpu_domain {
 };
 
 /*
- * A root's direct setting of one domain, or of every domain at once
+ * A direct setting of one domain, or of every domain at once
  * (domain KERN_THERMAL_ALL: minimum, maximum and a nonzero desired are then
  * permille of each domain's range; preference stays in its own 0..255).
  * It stays until the next strategy, and makes the strategy read CUSTOM
@@ -491,10 +504,11 @@ struct thermal_cpu_relative {
 };
 
 /*
- * The idle residency of one CPU's core (GET_CPU_IDLE, superuser only,
- * target a CPU; read on that CPU) or of one package (GET_PACKAGE_IDLE,
- * target a package number as GET_CPU reports it; a number no CPU has is
- * ENOENT, and count is then the number of CPUs, the bound to walk).
+ * The idle residency of one CPU's core (GET_CPU_IDLE, on a descriptor
+ * opened for writing only, target a CPU; read on that CPU) or of one
+ * package (GET_PACKAGE_IDLE, target a package number as GET_CPU reports
+ * it; a number no CPU has is ENOENT, and count is then the number of CPUs,
+ * the bound to walk).
  *
  * Each of the state_count entries is a state number as the processor
  * counts it (6 for C6), where it is counted (scope) and the time spent in

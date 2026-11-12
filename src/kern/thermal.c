@@ -1893,7 +1893,7 @@ thermal_strategy_flags(void)
 	return flags;
 }
 
-/* Tells whether a receiver has a root's direct setting in force, reading each without a lock. */
+/* Tells whether a receiver has a direct setting in force, reading each without a lock. */
 static bool
 thermal_custom(void)
 {

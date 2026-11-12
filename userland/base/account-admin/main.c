@@ -80,8 +80,13 @@
 #endif
 #define ADMIN_SHELL		"/bin/sh"
 
-/* The group whose members may open the GPU's nodes, which Settings' new person joins. */
+/*
+ * The groups Settings' new person joins: the one whose members may open the
+ * GPU's nodes, and the one whose members may choose the machine's heat and
+ * power strategy through /dev/thermal.
+ */
 #define ADMIN_GPU_GROUP		"video"
+#define ADMIN_DESKTOP_GROUP	"desktop"
 
 /*
  * The system's language, the login screen's (ws158-p004; the compositor's
@@ -882,7 +887,7 @@ admin_add(
 
 /*
  * Edits a new user's lines into the new texts: its private group, the
- * groups asked for (Settings' wheel and video, root's list), its passwd
+ * groups asked for (Settings' wheel, video and desktop, root's list), its passwd
  * line, and its shadow line (Settings' password's hash, or root's lock:
  * the password is set with passwd).  Returns ADMIN_OK or a reason.
  */
@@ -927,11 +932,18 @@ admin_add_lines(
 
 	/*
 	 * Settings' person, in the GPU's group so that a console login can
-	 * start the desktop; root's useradd puts only the groups it lists.  A
-	 * system without the group adds the user without it.
+	 * start the desktop, and in the desktop group so that the person's
+	 * session can choose the heat and power strategy; root's useradd puts
+	 * only the groups it lists.  A system without a group adds the user
+	 * without it.
 	 */
 	if (!request->by_root) {
 		error = admin_member_set(text->text, text->length, ADMIN_GPU_GROUP, request->name, 1, files->scratch, ADMIN_OUTPUT_MAX, &written);
+		if (error != 0 && error != ENOENT)
+			return ADMIN_FAILED;
+		if (error == 0)
+			admin_take(files, ADMIN_FILE_GROUP, written);
+		error = admin_member_set(text->text, text->length, ADMIN_DESKTOP_GROUP, request->name, 1, files->scratch, ADMIN_OUTPUT_MAX, &written);
 		if (error != 0 && error != ENOENT)
 			return ADMIN_FAILED;
 		if (error == 0)

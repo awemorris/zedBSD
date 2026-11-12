@@ -24,9 +24,10 @@
 #include <kern/thread.h>
 #include <kern/waitq.h>
 #include <kern/clock.h>
-#include <kern/cred.h>
+#include <kern/file.h>
 #include <hal/hal.h>
 #include <uapi/errno.h>
+#include <uapi/fcntl.h>
 #include <uapi/thermal.h>
 
 #include <setjmp.h>
@@ -334,8 +335,7 @@ kern_thermal_event(uint32_t type, uint32_t index, int64_t value)
 static kern_thermal_ioctl_t test_ioctl;
 static unsigned test_ioctl_first;
 static unsigned test_ioctl_last;
-static struct ucred test_credential;
-static bool test_root = true;
+static struct file test_file = { O_RDWR };
 
 int
 kern_thermal_ioctl_range_register(unsigned first, unsigned last, kern_thermal_ioctl_t handler)
@@ -346,23 +346,10 @@ kern_thermal_ioctl_range_register(unsigned first, unsigned last, kern_thermal_io
 	return 0;
 }
 
-struct ucred *
-cred_current_ref(void)
-{
-	return &test_credential;
-}
-
 int
-cred_is_superuser(const struct ucred *cred)
+file_status_flags_get(const struct file *file)
 {
-	(void)cred;
-	return test_root ? 1 : 0;
-}
-
-void
-cred_release(struct ucred *cred)
-{
-	(void)cred;
+	return file->f_flags;
 }
 
 int
@@ -386,7 +373,7 @@ copyout(const void *source, uintptr_t destination, size_t size)
 static int
 test_request_cpu(unsigned long request, void *argument)
 {
-	return test_ioctl(NULL, request, (uintptr_t)argument);
+	return test_ioctl(&test_file, request, (uintptr_t)argument);
 }
 
 /* The mock provider. */
@@ -990,8 +977,8 @@ scenario_ioctl(void)
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU + (1UL << 16), &cpu) == ENOTTY);
 	CHECK(test_request_cpu(_IOR('T', 39, struct thermal_cpu_idle), &idle) == ENOTTY);
 
-	/* A CPU: topology, class, anchors and the measured rate; anyone may read it. */
-	test_root = false;
+	/* A CPU: topology, class, anchors and the measured rate; any open reads it. */
+	test_file.f_flags = O_RDONLY;
 	memset(&cpu, 0, sizeof(cpu));
 	cpu.cpu = 3;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
@@ -1004,11 +991,11 @@ scenario_ioctl(void)
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
 	CHECK(cpu.core_class == KERN_THERMAL_CPU_CORE_EFFICIENCY && cpu.relative == 75U);
 
-	/* A sample is root's; past the last CPU is ENOENT; an unknown request bit is EINVAL. */
+	/* A sample needs an open for writing; past the last CPU is ENOENT; an unknown request bit is EINVAL. */
 	cpu.cpu = 2;
 	cpu.request = KERN_THERMAL_CPU_READ_SAMPLE;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == EPERM);
-	test_root = true;
+	test_file.f_flags = O_RDWR;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
 	CHECK(cpu.delivered_mhz == 1002U && cpu.request == KERN_THERMAL_CPU_READ_SAMPLE);
 	cpu.request = 2;
@@ -1036,14 +1023,14 @@ scenario_ioctl(void)
 	domain.domain = 10;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_DOMAIN, &domain) == ENOENT);
 
-	/* The direct setting: root's, known fields only, a domain or ALL; CUSTOM follows. */
+	/* The direct setting: an open for writing's, known fields only, a domain or ALL; CUSTOM follows. */
 	memset(&setting, 0, sizeof(setting));
 	setting.domain = 0;
 	setting.fields = KERN_THERMAL_CPU_SET_MAXIMUM;
 	setting.maximum = 40;
-	test_root = false;
+	test_file.f_flags = O_RDONLY;
 	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_DOMAIN, &setting) == EPERM);
-	test_root = true;
+	test_file.f_flags = O_RDWR;
 	setting.fields = 0x10;
 	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_DOMAIN, &setting) == EINVAL);
 	setting.fields = KERN_THERMAL_CPU_SET_MAXIMUM;
@@ -1062,14 +1049,14 @@ scenario_ioctl(void)
 	setting.maximum = 500;
 	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_DOMAIN, &setting) == 0);
 
-	/* The relative ways: read by anyone, chosen by root. */
+	/* The relative ways: read on any open, chosen on an open for writing. */
 	memset(&relative, 0, sizeof(relative));
-	test_root = false;
+	test_file.f_flags = O_RDONLY;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_RELATIVE, &relative) == 0);
 	CHECK(relative.available == (KERN_THERMAL_CPU_RELATIVE_FREQUENCY | KERN_THERMAL_CPU_RELATIVE_FEEDBACK));
 	relative.source = KERN_THERMAL_CPU_RELATIVE_FEEDBACK;
 	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_RELATIVE, &relative) == EPERM);
-	test_root = true;
+	test_file.f_flags = O_RDWR;
 	relative.source = KERN_THERMAL_CPU_RELATIVE_PROVIDER;
 	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_RELATIVE, &relative) == EOPNOTSUPP);
 	relative.source = KERN_THERMAL_CPU_RELATIVE_FEEDBACK;
@@ -1077,18 +1064,18 @@ scenario_ioctl(void)
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_RELATIVE, &relative) == 0);
 	CHECK(relative.source == KERN_THERMAL_CPU_RELATIVE_FEEDBACK);
 
-	/* The idle residency: a core is root's, a package anyone's; numbers nobody has are ENOENT. */
+	/* The idle residency: a core needs an open for writing, a package any open; numbers nobody has are ENOENT. */
 	memset(&idle, 0, sizeof(idle));
 	idle.target = 4;
-	test_root = false;
+	test_file.f_flags = O_RDONLY;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_IDLE, &idle) == EPERM);
-	test_root = true;
+	test_file.f_flags = O_RDWR;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_IDLE, &idle) == 0);
 	CHECK(idle.target == 4U && idle.count == 12U && idle.state_count == 1U && idle.available == 0x4cU);
 	CHECK(idle.state[0] == 6U && idle.residency_ns[0] == 5004U && idle.scope[0] == KERN_THERMAL_CPU_IDLE_CORE);
 	idle.target = 12;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_IDLE, &idle) == ENOENT);
-	test_root = false;
+	test_file.f_flags = O_RDONLY;
 	idle.target = 0;
 	CHECK(test_request_cpu(KERN_THERMAL_GET_PACKAGE_IDLE, &idle) == 0);
 	CHECK(idle.state_count == 1U && idle.scope[0] == KERN_THERMAL_CPU_IDLE_PACKAGE);

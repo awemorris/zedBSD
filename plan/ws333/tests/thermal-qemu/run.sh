@@ -4,8 +4,9 @@
 # the test injection node) on q35 with its PS/2 keyboard, logs in as root on
 # the console, and reads every answer from the screen with the reader of
 # plan/tools/boot-test.py (no serial or console log is read).
-#   plan/ws333/tests/thermal-qemu/run.sh IMAGE OUTPUT [emergency|direct]
-# Without a mode: the status, a made-up sensor and receiver, the strategy
+#   plan/ws333/tests/thermal-qemu/run.sh IMAGE OUTPUT [emergency|direct|group]
+# Without a mode: the status (balanced, which the boot's "thermal restore"
+# gave with nothing kept), a made-up sensor and receiver, the strategy
 # chosen, kept in /etc/thermal.conf and restored, manual, the CPUs, the power
 # and a refused boost.  "emergency": a made-up zone at its critical level on
 # the init path: QEMU must end by itself (checked from the host), and a
@@ -14,6 +15,12 @@
 # /var/log/thermal-emergency.  "direct": the test path that skips init; the
 # kept status reads "cutting".  The machine may end before the screen shows
 # the emergency's line, so that line's screen is not required.
+# "group": who may change the strategy.  /dev/thermal and /etc/thermal.conf
+# (made by the boot's "thermal restore") are root:desktop 0664; the desktop
+# group's member "user" (not root) chooses powersave through su and it is
+# kept in the file; "bob", added by useradd without the group, reads the
+# strategy but is refused a change (EPERM on the descriptor opened for
+# reading) and leaves the file as it was.
 # The emulator's files go to a new directory under OUTPUT; nothing is removed.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
@@ -47,22 +54,45 @@ if [ "$mode" = emergency ] || [ "$mode" = direct ]; then
 			'--then-keys=cat /var/log/thermal-emergency'
 			'--then-expect=thermal emergency at [0-9]+, [0-9]+ ms after init started')
 	fi
+elif [ "$mode" = group ]; then
+	steps=("${login[@]}"
+		'--then-keys=thermal-inject receiver test 0 0'
+		'--then-expect=thermal-inject: ok'
+		'--then-keys=ls -l /dev/thermal /etc/thermal.conf'
+		'--then-expect=crw-rw-r-- +[0-9]+ +root +desktop .*/dev/thermal'
+		'--then-expect=-rw-rw-r-- +[0-9]+ +root +desktop .*/etc/thermal.conf'
+		'--then-keys=id user'
+		'--then-expect=45\(desktop\)'
+		"--then-keys=su user -c 'thermal strategy powersave'; echo user-status=\$?"
+		'--then-expect=strategy powersave generation=[0-9]+ flags='
+		'--then-expect=user-status=0'
+		'--then-keys=cat /etc/thermal.conf'
+		'--then-expect=^strategy powersave'
+		'--then-keys=useradd bob; id bob'
+		'--then-expect=uid=[0-9]+\(bob\)'
+		"--then-keys=su bob -c 'thermal strategy balanced'; echo bob-status=\$?"
+		'--then-expect=thermal: strategy: Operation not permitted'
+		'--then-expect=bob-status=1'
+		"--then-keys=su bob -c 'thermal strategy'; cat /etc/thermal.conf; echo bob-read-done"
+		'--then-expect=strategy powersave generation=[0-9]+ result=ok'
+		'--then-expect=strategy powersave'
+		'--then-expect=bob-read-done')
 else
 	steps=("${login[@]}"
 		'--then-keys=thermal'
-		'--then-expect=strategy firmware generation=0 result=ok'
+		'--then-expect=strategy balanced generation=1 result=unsupported'
 		'--then-expect=emergency none'
 		'--then-keys=thermal-inject receiver test 0 0; thermal-inject sensor zone0 zone 1 45000 80000 95000'
 		'--then-expect=thermal-inject: ok'
 		'--then-keys=thermal sensors'
 		'--then-expect=sensor 0 zone0 kind=zone cpu=yes temperature=45.000 passive=80.000 critical=95.000 flags=valid,armed'
 		'--then-keys=thermal strategy powersave'
-		'--then-expect=strategy powersave generation=1 flags=-'
-		'--then-expect=receiver 1 test result=ok generation=1'
-		'--then-keys=cat /etc/thermal.conf; thermal restore'
 		'--then-expect=strategy powersave generation=2 flags=-'
+		'--then-expect=receiver 1 test result=ok generation=2'
+		'--then-keys=cat /etc/thermal.conf; thermal restore'
+		'--then-expect=strategy powersave generation=3 flags=-'
 		'--then-keys=thermal strategy manual 30 20 10; thermal strategy'
-		'--then-expect=strategy manual speed=30 noise=20 gating=10 generation=3 result=ok'
+		'--then-expect=strategy manual speed=30 noise=20 gating=10 generation=4 result=ok'
 		'--then-keys=cat /etc/thermal.conf'
 		'--then-expect=strategy manual 30 20 10'
 		'--then-keys=thermal cpu; thermal power; thermal fans'
@@ -79,7 +109,7 @@ run_once()
 {
 	local status=0
 	local waited=0
-	qemu-system-x86_64 -name p1-ws333d-thermal -machine q35 -m 8G -smp 4 "${accel[@]}" \
+	qemu-system-x86_64 -name p1-ws333e-thermal -machine q35 -m 8G -smp 4 "${accel[@]}" \
 		-drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
 		-drive "if=pflash,format=raw,file=$work/vars.fd" \
 		-drive "if=none,id=boot,file=$work/disk.qcow2,format=qcow2" \

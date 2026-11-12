@@ -24,8 +24,6 @@ SESSIOND_SOURCES := \
 	userland/desktop/sessiond/sleep-rules.c \
 	userland/desktop/sessiond/service.c \
 	userland/desktop/sessiond/service-rules.c \
-	userland/desktop/sessiond/thermal.c \
-	userland/desktop/sessiond/thermal-rules.c \
 	userland/desktop/sessiond/fallback-rules.c \
 	userland/base/common/account.c \
 	userland/base/service/rcconf.c \
