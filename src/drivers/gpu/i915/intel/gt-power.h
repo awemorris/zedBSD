@@ -42,7 +42,7 @@
  * RC_CONTROL's hardware control of RC6 entry, and its evaluation mode:
  * the hardware itself enters RC6 when the GT idles past the thresholds.
  *
- * Values referenced: Linux v6.8 drivers/gpu/drm/i915/gt/intel_gt_regs.h
+ * Values referenced: Linux v6.8.12 drivers/gpu/drm/i915/gt/intel_gt_regs.h
  * (GEN6_RC_CTL_HW_ENABLE, GEN6_RC_CTL_EI_MODE).
  */
 #define I915_GT_RC_CTL_HW_CONTROL			(1U << 31)

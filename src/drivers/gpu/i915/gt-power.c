@@ -195,15 +195,16 @@ drv_i915_rc6_enable(
 	i915_rc6_write_all(mmio, i915_rc6_after_engines, I915_RC6_COUNT(i915_rc6_after_engines));
 
 	/*
-	 * RC6_ENABLE alone: the hardware's timers never enter RC6 by
-	 * themselves, so the GT stays out of RC6.  Without the GuC a driver
-	 * would add the hardware control and evaluation mode bits
-	 * (I915_GT_RC_CTL_HW_CONTROL, I915_GT_RC_CTL_EVALUATION_MODE_1) to let
-	 * the GT drop into RC6 when idle; with them the GT does, but a Vulkan
-	 * session's submissions then fail as lost (a GT state that does not
-	 * survive RC6 here is not yet found), so they stay off.
+	 * The GuC does not run, so the hardware's own timers decide RC6 entry:
+	 * RC6_ENABLE alone is the GuC's setting, under which the hardware
+	 * never enters RC6 by itself.  The GT drops into RC6 whenever it is
+	 * idle and no forcewake domain is held, which the request worker
+	 * lets happen when it rests.
+	 *
+	 * Procedure referenced: Linux v6.8.12 drivers/gpu/drm/i915/gt/intel_rc6.c
+	 * (gen11_rc6_enable).
 	 */
-	rc6->ctl_enable = I915_GT_GEN6_RC_CTL_RC6_ENABLE;
+	rc6->ctl_enable = I915_GT_RC_CTL_HW_CONTROL | I915_GT_RC_CTL_EVALUATION_MODE_1 | I915_GT_GEN6_RC_CTL_RC6_ENABLE;
 
 	/* Render, media and media sampler power gating are always enabled. */
 	pg_enable = I915_GT_GEN9_RENDER_PG_ENABLE | I915_GT_GEN9_MEDIA_PG_ENABLE | I915_GT_GEN11_MEDIA_SAMPLER_PG_ENABLE;

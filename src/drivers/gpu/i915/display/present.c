@@ -73,6 +73,7 @@
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
+#include <kern/text-display.h>
 #include <kern/pmem.h>
 #include <kern/sched.h>
 
@@ -756,6 +757,21 @@ drv_i915_present_window(
 	 */
 	moved = drv_i915_display_output_moved(display);
 	spared = 0;
+
+	/*
+	 * The kernel's text console stops painting before the driver takes
+	 * the screen over: from the takeover on, its picture is not shown,
+	 * and each line it paints is a whole-screen repaint of the boot
+	 * framebuffer, which is mapped uncached, so a run that logs as it
+	 * lights the panel would hold the worker, and every request behind
+	 * it, for seconds.  The console ends for good with the first flip
+	 * the node accepts.
+	 *
+	 * Procedure referenced: Linux v6.8.12 drivers/gpu/drm/i915/i915_driver.c
+	 * (i915_driver_hw_probe: the firmware framebuffer's console is
+	 * removed before the driver programs the display).
+	 */
+	kern_text_suspend();
 	error = drv_i915_resident_run(display, display->rctx.lcd, i915_present_window_serve, display);
 	unplugged = i915_present_unplug_take(display);
 	retry = 0;
@@ -838,6 +854,10 @@ drv_i915_present_window(
 		display->window.display_failed = 1;
 		kern_logf("i915: resident display: the firmware's output did not come up (or did not stop cleanly); presentation fails from now on\n");
 	}
+
+	/* The firmware's output that failed may still show the console: it paints again, unless a flip ended it. */
+	if (error != 0 && !moved)
+		kern_text_resume();
 }
 
 /*
