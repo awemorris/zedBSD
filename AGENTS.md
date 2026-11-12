@@ -36,6 +36,7 @@
 - **削除しない**: rm・rmdir・unlink・`find -delete`・`shutil.rmtree`・`os.remove` を直にも script でも走らせない。消す物は path と理由を Q1 へ（Q1 が `plan/tools/q1-clean.sh` などで消す）。例外: make の規則が自分の worktree の `build/` の自分の出力を消す事、guest の中、[tools.md](plan/tools.md) に登録した guest の道具が自分の `build/` の一時の file を消す事。`git mv`・`git rm` は一覧を Q1 に送り OK の後。
 - **権限・security の判定で止められたら**、別の経路で同じ結果を作らず止まって Q1 に返す。Q1 も回避せずユーザーに聞く（回避はアカウントの停止につながる）。
 - build は個別の target を名指す。target 無しの make・disk image は image が要る試験の時だけ。使い捨ての出力は `BUILD=build/<phase>/`。
+- **host の負荷: 試験と build は 4 thread まで**（make は `-j4` まで、試験の並列も 4 まで。2026-11-12 ユーザー）。
 - 同じ条件の再試行は 3 回まで。各コマンドと VM に時間の上限を付ける。
 - **大きな I/O の後は `sync`**（QEMU の終了、disk image・大きな tarball・大きな build の後）。cache に溜まったまま host が止まると file が空になる。
 - 結果は、実行したコマンド・結果・成果物の path・未実施・残りを具体的に。観測していない事を成功と書かない。QEMU と実機の証拠を分ける。
