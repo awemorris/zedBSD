@@ -3,7 +3,7 @@ zedBSD and Keiland
 
 <div align="center">
 Gonna change the way computing is,<br>
-to reshape the world,
+to reshape the planet,
 into a whole new nature,<br>
 by the power of Open-Source!
 </div>
