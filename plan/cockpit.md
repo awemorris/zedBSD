@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS333](ws333/ws.md) | /dev/thermal の電力・熱の枠組み | p020 Pi 5 の provider と実機の確かめ（q2017、Pi 5 を割り当て） | p014（5330）は 5330 の空きの後 |
 | P2 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | p035 の残りの試験（q2019） | p036（net/tls.c の切り替え）は p035 の後 |
-| P3 | [WS347](ws347/ws.md) | VF2＋KC705 の Amaterrace GPU | agy の依頼 06 の作業（b58d4edd まで）の監査と次の依頼の下書き（q2020） | — |
+| P3 | — | 待機 | WS347 の監査（U1〜U9）を返却。依頼 07 の下書き [gemini-request-07.md](ws347/gemini-request-07.md) | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
