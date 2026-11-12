@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS333](ws333/ws.md) | /dev/thermal の電力・熱の枠組み | UAPI の実装（q2013）: p005 後半（/dev/thermal）→ p013（CPU の ioctl・/sbin/thermal・保存）→ p019（sessiond） | p014（5330 の受け入れ）は 5330 の空きを確かめてから |
+| P1 | — | 待機 | WS333: UAPI の実装と desktop の group の権限を main に（b1ade10787） | 次は p014（5330 の実機の受け入れ） |
 | P2 | — | 待機 | WS347 の監査（q2014）を返却。依頼 06 の下書き [gemini-request-06.md](ws347/gemini-request-06.md)（U1〜U15）、新しい B20〜B26 | — |
 | P3 | — | 待機 | BUG-412 の締め（xHCI・再投入の直しと読み捨てを main に、debug を外した）、23:40 merge。Pi 5 は普段の kernel、ユーザーの click の確かめ待ち | — |
 | P4 | — | 待機 | WS345 p013（libkeiland の resize の hook、KL_VERSION 109）cleared、17:29 merge | — |
