@@ -75,7 +75,6 @@ _Static_assert(KERN_THERMAL_CPU_SET_PREFERENCE == KERN_CPUPERF_SET_PREFERENCE, "
 _Static_assert(KERN_THERMAL_CPU_HAS_CONTROL == KERN_CPUPERF_CPU_HAS_CONTROL, "CPU flags differ");
 _Static_assert(KERN_THERMAL_CPU_CUSTOM == KERN_CPUPERF_CPU_CUSTOM, "CPU flags differ");
 _Static_assert(KERN_THERMAL_CPU_DOMAIN_PENDING == KERN_CPUPERF_DOMAIN_PENDING, "domain flags differ");
-_Static_assert(KERN_THERMAL_CPU_READ_SAMPLE == KERN_CPUPERF_READ_SAMPLE, "read requests differ");
 
 /* The setting fields a direct setting may name. */
 #define CPUPERF_SET_FIELDS		(KERN_CPUPERF_SET_MINIMUM | KERN_CPUPERF_SET_MAXIMUM | \
@@ -86,6 +85,9 @@ _Static_assert(KERN_THERMAL_CPU_READ_SAMPLE == KERN_CPUPERF_READ_SAMPLE, "read r
 
 /* The gap between the two samples of a delivered rate, in milliseconds. */
 #define CPUPERF_SAMPLE_GAP_MS		100U
+
+/* How old a delivered rate may be before a reader has it measured again, in milliseconds. */
+#define CPUPERF_FRESH_MS		1000U
 
 /* How long a CPU runs busy at its highest level to measure its rate, in milliseconds. */
 #define CPUPERF_MEASURE_MS		50U
@@ -165,7 +167,10 @@ struct cpuperf_intent {
  * pending is set after work is added and lets the handler skip the lock
  * when nothing was posted.  posted counts the posts and completed the
  * posts the handler has served; a poster waits until completed reaches
- * the count its post made.
+ * the count its post made.  sample is the CPU's latest sample, whoever
+ * asked for it, and read the latest one a reader's measurement asked for;
+ * the fresh fields are the outcome of the last such measurement, taken at
+ * fresh_ticks.
  */
 struct cpuperf_box {
 	struct spinlock lock;
@@ -185,6 +190,12 @@ struct cpuperf_box {
 	uint32_t request_flags;
 	int apply_error;
 	struct kern_cpuperf_sample sample;
+	struct kern_cpuperf_sample read;
+	bool fresh_known;
+	uint64_t fresh_ticks;
+	uint32_t fresh_mhz;
+	uint32_t fresh_flags;
+	int fresh_error;
 	struct kern_cpuperf_idle idle;
 	int idle_error;
 	bool feedback_changed;
@@ -245,6 +256,16 @@ static const struct kern_cpuperf_provider_ops *cpuperf_provider;
 
 /* Nonzero once cpuperf_provider is set; stored with release order. */
 static atomic_uint_t cpuperf_provider_ready;
+
+/*
+ * Serializes the readers' measurements of the delivered rates.  The first
+ * reader that finds a CPU's rate older than CPUPERF_FRESH_MS measures
+ * every CPU while holding it; a reader that comes meanwhile waits for it
+ * and then takes the rates it left.  The tickets of a measurement, one
+ * per CPU, are guarded by it as well.
+ */
+static struct mutex cpuperf_fresh_mutex;
+static uint64_t *cpuperf_fresh_tickets;
 
 /*
  * The number of CPUs the framework serves, fixed by kern_cpuperf_init().
@@ -333,6 +354,9 @@ static void cpuperf_deliver(kern_cpu_id_t cpu);
 static int cpuperf_wait(kern_cpu_id_t cpu, uint64_t ticket, uint64_t deadline);
 static uint64_t cpuperf_deadline(void);
 static void cpuperf_sleep_ms(uint32_t milliseconds);
+static bool cpuperf_fresh_current(const struct cpuperf_box *box, uint64_t now);
+static void cpuperf_fresh_ensure(kern_cpu_id_t cpu);
+static void cpuperf_fresh_measure(void);
 static kern_cpu_id_t cpuperf_package_cpu(uint32_t package);
 static kern_cpu_id_t cpuperf_package_first(uint32_t package);
 static void cpuperf_domain_post(uint32_t domain, uint64_t *tickets);
@@ -370,7 +394,7 @@ static uint32_t cpuperf_busy_percent(kern_cpu_id_t cpu);
 static bool cpuperf_any_control(void);
 static int cpuperf_ioctl(struct file *file, unsigned long request, uintptr_t argument);
 static bool cpuperf_writable(const struct file *file);
-static int cpuperf_ioctl_cpu(struct file *file, uintptr_t argument);
+static int cpuperf_ioctl_cpu(uintptr_t argument);
 static int cpuperf_ioctl_domain(uintptr_t argument);
 static int cpuperf_ioctl_domain_set(struct file *file, uintptr_t argument);
 static int cpuperf_ioctl_relative_get(uintptr_t argument);
@@ -418,8 +442,20 @@ kern_cpuperf_init(void)
 		return;
 	}
 
-	/* Prepares the framework's mutex. */
+	/* Allocates the tickets of the readers' measurements. */
+	cpuperf_fresh_tickets = kern_calloc(count, sizeof(*cpuperf_fresh_tickets));
+	if (cpuperf_fresh_tickets == NULL) {
+		kern_logf("cpuperf: no memory for the rate readers; CPU performance is unavailable\n");
+		return;
+	}
+
+	/* Prepares the framework's mutex and the readers'. */
 	error = mutex_init(&cpuperf_mutex, LOCK_RANK_DEVICE, "cpuperf");
+	if (error != 0) {
+		kern_logf("cpuperf: lock initialization failed (%d); CPU performance is unavailable\n", error);
+		return;
+	}
+	error = mutex_init(&cpuperf_fresh_mutex, LOCK_RANK_DEVICE, "cpuperf-fresh");
 	if (error != 0) {
 		kern_logf("cpuperf: lock initialization failed (%d); CPU performance is unavailable\n", error);
 		return;
@@ -642,10 +678,11 @@ kern_cpuperf_cpu(
 	struct cpuperf_box *box;
 	struct kern_cpuperf_levels levels;
 	unsigned long enabled;
-	uint64_t ticket;
-	uint64_t deadline;
+	uint64_t now;
 	uint32_t measured;
 	uint32_t custom;
+	bool fresh;
+	bool reading;
 	int error;
 
 	/* Refuses a CPU that does not exist. */
@@ -654,29 +691,20 @@ kern_cpuperf_cpu(
 	if (cpu >= cpuperf_cpu_count)
 		return EINVAL;
 
-	/*
-	 * Samples the CPU twice, a short gap apart, when the caller asked for
-	 * the rate it delivers: the second sample reports the rate over the
-	 * gap, whoever sampled the CPU before.
-	 */
-	error = 0;
+	/* Has the delivered rates measured again when the caller may wait and this one is old. */
 	provider = cpuperf_ops();
-	if ((flags & KERN_CPUPERF_READ_SAMPLE) != 0U &&
+	reading = false;
+	if ((flags & KERN_CPUPERF_READ_FRESH) != 0U &&
 	    provider != NULL &&
 	    provider->sample != NULL) {
-		ticket = cpuperf_post(cpu, CPUPERF_WORK_SAMPLE, NULL);
-		deadline = cpuperf_deadline();
-		error = cpuperf_wait(cpu, ticket, deadline);
-		if (error == 0) {
-			cpuperf_sleep_ms(CPUPERF_SAMPLE_GAP_MS);
-			ticket = cpuperf_post(cpu, CPUPERF_WORK_SAMPLE, NULL);
-			deadline = cpuperf_deadline();
-			error = cpuperf_wait(cpu, ticket, deadline);
-		}
+		reading = true;
+		cpuperf_fresh_ensure(cpu);
 	}
 
 	/* Copies the CPU's report out of its box. */
 	box = &cpuperf_boxes[cpu];
+	error = 0;
+	now = sched_ticks();
 	enabled = spin_lock_irqsave(&box->lock);
 
 	info->topology = box->topology;
@@ -686,7 +714,7 @@ kern_cpuperf_cpu(
 	info->relative = box->relative;
 	info->available = box->available;
 	info->efficiency = box->efficiency;
-	info->delivered_mhz = box->sample.delivered_mhz;
+	info->delivered_mhz = 0U;
 	info->flags = 0U;
 
 	/* Marks a CPU the framework can control. */
@@ -697,9 +725,23 @@ kern_cpuperf_cpu(
 	if ((box->request_flags & CPUPERF_REQUEST_LIMITED) != 0U)
 		info->flags |= KERN_CPUPERF_CPU_LIMITED;
 
-	/* Marks a CPU the platform holds below its request. */
-	if ((box->sample.flags & KERN_CPUPERF_SAMPLE_PLATFORM_LIMIT) != 0U)
-		info->flags |= KERN_CPUPERF_CPU_PLATFORM_LIMIT;
+	/*
+	 * Takes the rate of the last measurement while it is fresh.  A
+	 * caller that waited for one takes it whatever its age now, since
+	 * only a newer measurement can have replaced it.
+	 */
+	fresh = cpuperf_fresh_current(box, now);
+	if (fresh || (reading && box->fresh_known)) {
+		info->delivered_mhz = box->fresh_mhz;
+
+		/* Marks a CPU the platform held below its request during the measurement. */
+		if ((box->fresh_flags & KERN_CPUPERF_SAMPLE_PLATFORM_LIMIT) != 0U)
+			info->flags |= KERN_CPUPERF_CPU_PLATFORM_LIMIT;
+
+		/* Reports a CPU that did not answer the measurement to the caller that waited for it. */
+		if (reading)
+			error = box->fresh_error;
+	}
 
 	spin_unlock_irqrestore(&box->lock, enabled);
 
@@ -1991,6 +2033,129 @@ cpuperf_sleep_ms(
 }
 
 /*
+ * Reports whether a CPU's last measured rate is younger than
+ * CPUPERF_FRESH_MS at the tick now.  Called with the box locked.
+ */
+static bool
+cpuperf_fresh_current(
+	const struct cpuperf_box *box,
+	uint64_t now)
+{
+	uint64_t window;
+
+	/* A CPU never measured has no rate. */
+	if (!box->fresh_known)
+		return false;
+
+	/* A rate measured less than the window before now is fresh, and so is one measured after now was read. */
+	window = kern_ms_to_ticks(CPUPERF_FRESH_MS);
+	if (now < box->fresh_ticks + window)
+		return true;
+
+	/* The rate is too old. */
+	return false;
+}
+
+/*
+ * Makes sure a CPU's measured rate is fresh: measures every CPU when it is
+ * not, or waits for the measurement another reader is running and takes
+ * that one.  Thread context only.
+ */
+static void
+cpuperf_fresh_ensure(
+	kern_cpu_id_t cpu)
+{
+	struct cpuperf_box *box;
+	unsigned long enabled;
+	uint64_t now;
+	bool fresh;
+
+	/* Waits for a measurement that is running and keeps the next one out. */
+	mutex_lock(&cpuperf_fresh_mutex);
+
+	/* Looks whether a measurement, perhaps the one waited for, left a fresh rate. */
+	box = &cpuperf_boxes[cpu];
+	now = sched_ticks();
+	enabled = spin_lock_irqsave(&box->lock);
+
+	fresh = cpuperf_fresh_current(box, now);
+
+	spin_unlock_irqrestore(&box->lock, enabled);
+
+	/* Measures every CPU when the rate is old. */
+	if (!fresh)
+		cpuperf_fresh_measure();
+
+	mutex_unlock(&cpuperf_fresh_mutex);
+}
+
+/*
+ * Measures the rate every CPU delivers: samples each CPU, waits the gap
+ * and samples each again, so the second sample covers about the gap
+ * whoever sampled the CPU before.  A CPU that does not answer either
+ * sample in time is recorded with ETIMEDOUT and no rate.  Called with the
+ * readers' mutex held.
+ */
+static void
+cpuperf_fresh_measure(void)
+{
+	struct cpuperf_box *box;
+	unsigned long enabled;
+	uint64_t deadline;
+	uint64_t now;
+	kern_cpu_id_t cpu;
+	int error;
+
+	/* Starts every CPU's interval with a first sample. */
+	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++)
+		cpuperf_fresh_tickets[cpu] = cpuperf_post(cpu, CPUPERF_WORK_SAMPLE, NULL);
+
+	/* Waits for each CPU against one deadline; a ticket of 0 marks a CPU that did not answer. */
+	deadline = cpuperf_deadline();
+	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
+		error = cpuperf_wait(cpu, cpuperf_fresh_tickets[cpu], deadline);
+		if (error != 0)
+			cpuperf_fresh_tickets[cpu] = 0U;
+	}
+
+	/* Lets the CPUs run for the gap. */
+	cpuperf_sleep_ms(CPUPERF_SAMPLE_GAP_MS);
+
+	/* Ends the interval of every CPU that started it. */
+	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
+		if (cpuperf_fresh_tickets[cpu] != 0U)
+			cpuperf_fresh_tickets[cpu] = cpuperf_post(cpu, CPUPERF_WORK_SAMPLE, NULL);
+	}
+
+	/* Waits for each CPU against one new deadline and records its outcome. */
+	deadline = cpuperf_deadline();
+	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
+		error = ETIMEDOUT;
+		if (cpuperf_fresh_tickets[cpu] != 0U)
+			error = cpuperf_wait(cpu, cpuperf_fresh_tickets[cpu], deadline);
+
+		/* Keeps the rate of the second sample, or none for a CPU that did not answer. */
+		box = &cpuperf_boxes[cpu];
+		now = sched_ticks();
+		enabled = spin_lock_irqsave(&box->lock);
+
+		box->fresh_known = true;
+		box->fresh_ticks = now;
+		box->fresh_error = error;
+		box->fresh_mhz = 0U;
+		box->fresh_flags = 0U;
+
+		/* Takes the rate and the platform's limit of a CPU that answered both samples. */
+		if (error == 0) {
+			box->fresh_mhz = box->read.delivered_mhz;
+			box->fresh_flags = box->read.flags & KERN_CPUPERF_SAMPLE_PLATFORM_LIMIT;
+		}
+
+		spin_unlock_irqrestore(&box->lock, enabled);
+	}
+}
+
+/*
  * Reports a CPU of a package: the calling CPU when it belongs to it,
  * otherwise the package's first CPU, or KERN_CPUPERF_UNKNOWN when no CPU
  * does.  The caller may have moved by the time it posts; that only costs
@@ -2147,12 +2312,16 @@ cpuperf_run(
 			cpuperf_topology_default(cpu, &box->topology);
 	}
 
-	/* Samples the CPU for a reader. */
+	/*
+	 * Samples the CPU for a reader before the intent is applied, so an
+	 * intent posted with it, which samples the CPU again, does not cut
+	 * the interval this sample ends.
+	 */
 	if ((work & CPUPERF_WORK_SAMPLE) != 0U &&
-	    (work & CPUPERF_WORK_APPLY) == 0U &&
 	    provider->sample != NULL) {
 		box->sample.flags = 0U;
 		provider->sample(cpu, &box->sample);
+		box->read = box->sample;
 
 		/* Takes the fresh anchors into the levels. */
 		if ((box->sample.flags & KERN_CPUPERF_SAMPLE_CAPABILITIES) != 0U)
@@ -3811,7 +3980,7 @@ cpuperf_ioctl(
 	/* Carries out the request the whole number names. */
 	switch (request) {
 	case KERN_THERMAL_GET_CPU:
-		error = cpuperf_ioctl_cpu(file, argument);
+		error = cpuperf_ioctl_cpu(argument);
 		break;
 	case KERN_THERMAL_GET_CPU_DOMAIN:
 		error = cpuperf_ioctl_domain(argument);
@@ -3845,8 +4014,9 @@ cpuperf_ioctl(
 }
 
 /*
- * Tells whether an open of /dev/thermal may change the CPUs or wake one:
- * opened for writing, which the node's mode and group allow.
+ * Tells whether an open of /dev/thermal may change the CPUs or read their
+ * idle residency: opened for writing, which the node's mode and group
+ * allow.
  */
 static bool
 cpuperf_writable(
@@ -3864,41 +4034,30 @@ cpuperf_writable(
 }
 
 /*
- * Copies out one CPU and the number of CPUs.  A request to sample the CPU
- * needs an open for writing, since it wakes the CPU; a CPU that does not
- * answer the sample is reported with SAMPLE_TIMEOUT and the rest of its
+ * Copies out one CPU and the number of CPUs, with a delivered rate at most
+ * about a second old whoever reads it.  A CPU that does not answer its
+ * sample is reported with SAMPLE_TIMEOUT, no rate and the rest of its
  * fields.
  */
 static int
 cpuperf_ioctl_cpu(
-	struct file *file,
 	uintptr_t argument)
 {
 	struct thermal_cpu_info answer;
 	struct kern_cpuperf_cpu info;
-	uint32_t request;
 	uint32_t cpu;
-	bool writable;
 	bool timed_out;
 	int error;
 
-	/* Reads which CPU is asked for and how. */
+	/* Reads which CPU is asked for. */
 	error = copyin(argument, &answer, sizeof(answer));
 	if (error != 0)
 		return error;
 	cpu = answer.cpu;
-	request = answer.request;
 
-	/* Refuses an unknown request. */
-	if ((request & ~KERN_THERMAL_CPU_READ_SAMPLE) != 0U)
+	/* Refuses a reserved field that is not zero. */
+	if (answer.reserved0 != 0U)
 		return EINVAL;
-
-	/* Refuses a sample on an open for reading only. */
-	if ((request & KERN_THERMAL_CPU_READ_SAMPLE) != 0U) {
-		writable = cpuperf_writable(file);
-		if (!writable)
-			return EPERM;
-	}
 
 	/* Refuses a CPU past the last. */
 	if (cpu >= cpuperf_cpu_count)
@@ -3907,7 +4066,7 @@ cpuperf_ioctl_cpu(
 	/* Reports the CPU; a sample the CPU did not confirm still fills the rest. */
 	kern_memset(&info, 0, sizeof(info));
 	timed_out = false;
-	error = kern_cpuperf_cpu(cpu, request, &info);
+	error = kern_cpuperf_cpu(cpu, KERN_CPUPERF_READ_FRESH, &info);
 	if (error == ETIMEDOUT) {
 		timed_out = true;
 	} else if (error == EINVAL) {
@@ -3920,7 +4079,6 @@ cpuperf_ioctl_cpu(
 	kern_memset(&answer, 0, sizeof(answer));
 	answer.cpu = cpu;
 	answer.count = cpuperf_cpu_count;
-	answer.request = request;
 	answer.package = info.topology.package;
 	answer.die = info.topology.die;
 	answer.module = info.topology.module;

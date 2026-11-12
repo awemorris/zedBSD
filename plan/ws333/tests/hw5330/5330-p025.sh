@@ -15,7 +15,7 @@
 #     domain's max gives (max x highest_mhz / highest: HWP's levels are abstract units, a P-core's and an E-core's
 #     differ); a direct max of 500 permille of every domain ("cpu set all" takes permille; p014 gave it units);
 #     the E-cores of one module with different maxima under load (a shared clock makes them equal); every CPU
-#     loaded under performance, balanced and powersave with 64FH (firmware_id of "thermal cpu 0 sample") and the
+#     loaded under performance, balanced and powersave with 64FH (firmware_id of "thermal cpu 0") and the
 #     package power; 60 s of idle with E2H as zedBSD sees it (voltage_group).
 #  3. NOI915=1 only: zedBSD without i915 (the display left as the firmware set it), 60 s of idle, to tell the
 #     display's part in the package C-state from the rest.  Opt-in: the 5330 has no remote power, and this kernel
@@ -171,7 +171,7 @@ loaded() {
 	loadall
 	sleep 6
 	TO=30 th "power -i 5" "load-$1-power.txt" &
-	th "cpu 0 sample" "load-$1-cpu0.txt"
+	th "cpu 0" "load-$1-cpu0.txt"
 	th "cpu" "load-$1-cpu.txt"
 	wait
 	say "load $1: $(sed -n 's/^cpu \([0-9]*\) core=\([A-Z]*\) .* mhz=\([0-9]*\).*/\1:\2:\3/p' "$LOGS/load-$1-cpu.txt" | tr '\n' ' ')"
@@ -319,7 +319,7 @@ if part idle; then
 	th "strategy balanced" strategy-idle.txt
 	sleep "${IDLE_SETTLE:-60}"
 	window diag-balanced
-	th "cpu 0 sample" idle-cpu0.txt
+	th "cpu 0" idle-cpu0.txt
 	say "zedBSD E2H on cpu 0: $(sed -n 's/^voltage_group //p' "$LOGS/idle-cpu0.txt") 64FH: $(sed -n 's/^firmware_id //p' "$LOGS/idle-cpu0.txt")"
 fi
 zb 'dmesg' > "$LOGS/diag-end.txt" 2>&1

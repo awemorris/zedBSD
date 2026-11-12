@@ -22,6 +22,11 @@
  * it was sent), of the sync of the volumes (which may hang) and of the
  * platform's power-off (which blocks for ever, as a machine whose power
  * went, or fails) and halt (which blocks for ever).
+ *
+ * The CPU requests of /dev/thermal run through the CPU performance
+ * framework (src/kern/cpuperf.c) with a mock provider: a host thread runs
+ * as one of the four CPUs while it serves a notification, which it does
+ * at once and in the thread that sent it.
  */
 
 /* The kernel's sched_yield() is not the host's; the kernel's is renamed while its headers are read. */
@@ -36,6 +41,8 @@
 #include <kern/cdev.h>
 #include <kern/cred.h>
 #include <kern/file.h>
+#include <kern/cpuperf.h>
+#include <hal/hal.h>
 #include <uapi/errno.h>
 #include <uapi/thermal.h>
 #undef sched_yield
@@ -532,6 +539,78 @@ unsigned
 kern_cpu_count(void)
 {
 	return 4U;
+}
+
+/* ---- The CPUs the CPU framework reaches. ---- */
+
+/* The CPU a host thread runs as while it serves a notification; none otherwise. */
+static __thread unsigned test_cpu_here = 1000U;
+
+void *
+kern_calloc(size_t count, size_t size)
+{
+	return calloc(count, size);
+}
+
+int
+thread_abort_new(struct thread *thread)
+{
+	free(thread);
+	return 0;
+}
+
+int
+sched_set_cpu(struct thread *thread, kern_cpu_id_t cpu, enum sched_cpu_affinity affinity)
+{
+	(void)thread;
+	(void)cpu;
+	(void)affinity;
+	return 0;
+}
+
+int
+sched_cpu_time(kern_cpu_id_t cpu, struct sched_cpu_time *time)
+{
+	(void)cpu;
+	memset(time, 0, sizeof(*time));
+	return 0;
+}
+
+unsigned
+kern_cpu_current(void)
+{
+	return test_cpu_here;
+}
+
+hal_cpu_id_t
+hal_cpu_current(void)
+{
+	return test_cpu_here;
+}
+
+bool
+hal_irq_disable(void)
+{
+	return false;
+}
+
+void
+hal_irq_enable(void)
+{
+}
+
+int
+hal_cpu_notify(hal_cpu_id_t cpu)
+{
+	unsigned saved;
+
+	if (cpu >= 4U)
+		return HAL_ERR_INVALID;
+	saved = test_cpu_here;
+	test_cpu_here = cpu;
+	kern_cpuperf_notify(cpu);
+	test_cpu_here = saved;
+	return HAL_OK;
 }
 
 void
@@ -2557,6 +2636,156 @@ struct test_scenario {
 	void (*run)(void);
 };
 
+/* ---- The CPU requests: a fresh rate for any reader, shared by the readers of a second. ---- */
+
+/* What the mock CPU provider saw: the samples of each CPU, and the rate the next ones report. */
+static unsigned test_cpu_samples[4];
+static unsigned test_cpu_rate = 1000U;
+static bool test_cpu_slow;
+static bool test_cpu_wrong;
+
+static int
+test_cpu_topology(kern_cpu_id_t cpu, struct kern_cpuperf_topology *topology)
+{
+	if (test_cpu_here != cpu)
+		test_cpu_wrong = true;
+	memset(topology, 0, sizeof(*topology));
+	topology->core = cpu;
+	topology->module = cpu;
+	topology->firmware_id = KERN_CPUPERF_UNKNOWN;
+	topology->core_class = KERN_CPUPERF_CORE_PERFORMANCE;
+	return 0;
+}
+
+static int
+test_cpu_describe(kern_cpu_id_t cpu, struct kern_cpuperf_levels *levels)
+{
+	(void)cpu;
+	levels->kind = KERN_CPUPERF_LEVELS_RANGE;
+	levels->share = KERN_CPUPERF_SHARE_CORE;
+	return 0;
+}
+
+/*
+ * Samples a CPU.  The first sample of a slow measurement takes 50 real
+ * milliseconds, so that a second reader comes while it runs.
+ */
+static void
+test_cpu_sample(kern_cpu_id_t cpu, struct kern_cpuperf_sample *sample)
+{
+	unsigned count;
+
+	if (test_cpu_here != cpu)
+		test_cpu_wrong = true;
+	count = __atomic_add_fetch(&test_cpu_samples[cpu], 1U, __ATOMIC_SEQ_CST);
+	if (test_cpu_slow && cpu == 0U && count == 1U)
+		test_sleep_ms(50U);
+	sample->delivered_mhz = __atomic_load_n(&test_cpu_rate, __ATOMIC_SEQ_CST) + cpu;
+}
+
+static struct kern_cpuperf_provider_ops test_cpu_ops;
+
+/* A reader on its own host thread: the CPU it asks for, its descriptor, and what it got. */
+struct test_cpu_reader {
+	struct test_open *thermal;
+	struct thermal_cpu_info info;
+	int error;
+	uint64_t begin;
+	uint64_t end;
+};
+
+static void *
+test_cpu_reader_main(void *argument)
+{
+	struct test_cpu_reader *reader;
+
+	reader = argument;
+	reader->begin = sched_ticks();
+	reader->error = test_request(reader->thermal, KERN_THERMAL_GET_CPU, &reader->info);
+	reader->end = sched_ticks();
+	return NULL;
+}
+
+static unsigned
+test_cpu_sample_total(void)
+{
+	unsigned total;
+	unsigned cpu;
+
+	total = 0;
+	for (cpu = 0; cpu < 4U; cpu++)
+		total += __atomic_load_n(&test_cpu_samples[cpu], __ATOMIC_SEQ_CST);
+	return total;
+}
+
+static void
+scenario_device_cpu_fresh(void)
+{
+	struct test_cpu_reader first;
+	struct test_cpu_reader second;
+	struct thermal_cpu_info info;
+	struct test_open thermal;
+	pthread_t first_thread;
+	pthread_t second_thread;
+	unsigned cpu;
+
+	test_devices_up();
+	kern_cpuperf_init();
+	test_cpu_ops.topology = test_cpu_topology;
+	test_cpu_ops.describe = test_cpu_describe;
+	test_cpu_ops.sample = test_cpu_sample;
+	CHECK(kern_cpuperf_provider_register(&test_cpu_ops) == 0);
+
+	/* Outside the group: the open reads only. */
+	test_credential.superuser = 0;
+	test_open_device(&thermal, "thermal", O_RDONLY);
+
+	/*
+	 * Two readers at once: the first finds no rate and measures every CPU
+	 * twice; the second comes while that runs, waits for it and shares
+	 * it.
+	 */
+	test_cpu_slow = true;
+	memset(&first, 0, sizeof(first));
+	memset(&second, 0, sizeof(second));
+	first.thermal = &thermal;
+	first.info.cpu = 1;
+	second.thermal = &thermal;
+	second.info.cpu = 3;
+	pthread_create(&first_thread, NULL, test_cpu_reader_main, &first);
+	WAIT_FOR(__atomic_load_n(&test_cpu_samples[0], __ATOMIC_SEQ_CST) != 0U);
+	pthread_create(&second_thread, NULL, test_cpu_reader_main, &second);
+	pthread_join(first_thread, NULL);
+	pthread_join(second_thread, NULL);
+	test_cpu_slow = false;
+	CHECK(first.error == 0 && first.info.delivered_mhz == 1001U);
+	CHECK(second.error == 0 && second.info.delivered_mhz == 1003U);
+	CHECK(second.begin < first.end);
+	for (cpu = 0; cpu < 4U; cpu++)
+		CHECK(test_cpu_samples[cpu] == 2U);
+	CHECK((first.info.flags & KERN_THERMAL_CPU_SAMPLE_TIMEOUT) == 0U);
+
+	/* Within the second: shared, nothing sampled, though the CPUs now run faster. */
+	__atomic_store_n(&test_cpu_rate, 2000U, __ATOMIC_SEQ_CST);
+	memset(&info, 0, sizeof(info));
+	info.cpu = 2;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_CPU, &info) == 0);
+	CHECK(info.delivered_mhz == 1002U && test_cpu_sample_total() == 8U);
+
+	/* A kernel second later: the next read measures every CPU again. */
+	test_sleep_ms(1000U / TEST_SPEEDUP + 10U);
+	memset(&info, 0, sizeof(info));
+	info.cpu = 2;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_CPU, &info) == 0);
+	CHECK(info.delivered_mhz == 2002U && test_cpu_sample_total() == 16U);
+
+	/* A reserved field that is not zero is refused. */
+	info.reserved0 = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_CPU, &info) == EINVAL);
+	CHECK(!test_cpu_wrong);
+	test_close_device(&thermal);
+}
+
 static const struct test_scenario test_scenarios[] = {
 	{ "registration", scenario_registration },
 	{ "strategy-checks", scenario_strategy_checks },
@@ -2587,6 +2816,7 @@ static const struct test_scenario test_scenarios[] = {
 	{ "device-events", scenario_device_events },
 	{ "device-emergency", scenario_device_emergency },
 	{ "device-ack", scenario_device_ack },
+	{ "device-cpu-fresh", scenario_device_cpu_fresh },
 };
 
 int

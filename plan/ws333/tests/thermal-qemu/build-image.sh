@@ -20,8 +20,8 @@ config="CONFIGMK=config/config.x86_64.mk CONFIG_KERN_THERMAL=y CONFIG_DRIVER_X86
 programs="login passwd su useradd account-admin id ls cat grep sed thermal sync service passkey monitor-probe"
 
 # The kernel and the userland the image carries.
-timeout 1800 make -j16 $config build/x86_64/vmunix >"$output/vmunix.log" 2>&1 </dev/null
-timeout 1800 make -j16 $config CONFIG_USERLAND_PROGRAMS="$programs" programs >"$output/programs.log" 2>&1 </dev/null
+timeout 1800 make -j4 BUILD_JOBS=4 $config build/x86_64/vmunix >"$output/vmunix.log" 2>&1 </dev/null
+timeout 1800 make -j4 BUILD_JOBS=4 $config CONFIG_USERLAND_PROGRAMS="$programs" programs >"$output/programs.log" 2>&1 </dev/null
 
 # thermal-inject, put in build/x86_64/sbin by the package rules.
 cp plan/ws333/tests/thermal-qemu/thermal-inject.c "$output/thermal-inject/main.c"
@@ -29,7 +29,7 @@ printf 'PROG := thermal-inject\nSRCS := main.c\nINSTALL_DIR := sbin\ninclude %s/
 timeout 600 make -C "$output/thermal-inject" PLATFORM=x86_64 STANDALONE_CONFIG="$repo/config/config.x86_64.mk" >"$output/thermal-inject.log" 2>&1 </dev/null
 
 # The image, one build at a time across the agents.
-flock /tmp/zedbsd-image-build.lock timeout 1800 make -j16 $config CONFIG_USERLAND_PROGRAMS="$programs" build/x86_64/hdd-image.img >"$output/image.log" 2>&1 </dev/null
+flock /tmp/zedbsd-image-build.lock timeout 1800 make -j4 BUILD_JOBS=4 $config CONFIG_USERLAND_PROGRAMS="$programs" build/x86_64/hdd-image.img >"$output/image.log" 2>&1 </dev/null
 cp build/x86_64/hdd-image.img "$output/hdd-image.img"
 sync
 echo "build-image: $output/hdd-image.img warnings=$(cat "$output"/*.log | grep -c 'warning:')"

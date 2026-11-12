@@ -268,7 +268,7 @@ WS303 design §4.1（ACPI WMI）・§4.2（Dell）・§4.3（registry）・§4.5
 ### 4.10 UAPI `/dev/thermal`
 
 - cdev `/dev/thermal`（0x00010008、node root:desktop 0664。`KERN_THERMAL_NODE_GROUP` 45・`KERN_THERMAL_NODE_MODE`、GPU の node の video の group と同じ形）。試験の注入は `/dev/thermal-inject`（0600、`CONFIG_THERMAL_TEST_INJECT`、amd64・arm64）。ioctl の group 'T'。
-- 権限: 誰に変更を許すかは node の mode と group が決める。誰でも読みで開いて GET できる。SET（strategy・boost・CPU の直の設定・相対の性能の選び）と CPU を起こす読み（`KERN_THERMAL_CPU_READ_SAMPLE`・GET_CPU_IDLE）は書き込みで開いた fd だけで、読みだけの fd では EPERM。書き込みで開けるのは root と desktop の group（gid 45）の利用者で、group の外は open が EACCES。sessiond は通さない（sessiond の役は認証だけ）。desktop の group には既定の利用者 `user`（`/etc/group`）と Settings が作る利用者（account-admin）が入る。EMERGENCY_ACK は pid 1 だけで、非常の状態が SIGNALED の時だけ受ける（他は EPERM・EINVAL、review M6）。
+- 権限: 誰に変更を許すかは node の mode と group が決める。誰でも読みで開いて GET できる。SET（strategy・boost・CPU の直の設定・相対の性能の選び）と GET_CPU_IDLE（CPU を起こす）は書き込みで開いた fd だけで、読みだけの fd では EPERM。GET_CPU の `delivered_mhz` は読み手の権限によらず約 1 秒以内の新しい値で、古ければ kernel が全 CPU を約 100 ms で測り直し、その測りを全ての読み手で共有する（同時の読み手は進行中の 1 回を待つ。p026、2026-11-13 ユーザーの決定。`READ_SAMPLE` は外し、`request` の欄は `reserved0`）。書き込みで開けるのは root と desktop の group（gid 45）の利用者で、group の外は open が EACCES。sessiond は通さない（sessiond の役は認証だけ）。desktop の group には既定の利用者 `user`（`/etc/group`）と Settings が作る利用者（account-admin）が入る。EMERGENCY_ACK は pid 1 だけで、非常の状態が SIGNALED の時だけ受ける（他は EPERM・EINVAL、review M6）。
 - ioctl の一覧（番号は p004 で確定）:
 
 | 範囲 | ioctl | 中身 | 出典 |

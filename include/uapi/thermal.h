@@ -45,8 +45,11 @@
  *    in struct thermal_status, and every GET_* answers its count as well.
  *  - /dev/thermal answers numbers 1..63 only; /dev/thermal-inject has its
  *    own entry and answers 64.. only.
- *  - Anyone may read the temperatures, fans, energy meters and CPUs, but a
- *    request that wakes a CPU (KERN_THERMAL_CPU_READ_SAMPLE, GET_CPU_IDLE)
+ *  - Anyone may read the temperatures, fans, energy meters and CPUs.  A
+ *    CPU's delivered rate is at most about a second old whoever reads it:
+ *    a read that finds it older has the kernel sample every CPU again
+ *    (about 100 ms), and every reader shares that sample, so more readers
+ *    do not add to its cost.  GET_CPU_IDLE wakes a CPU at every read and
  *    needs a descriptor opened for writing, as a change does: it disturbs
  *    the very idle state it measures.
  */
@@ -180,16 +183,13 @@ extern "C" {
 #define KERN_THERMAL_CPU_CORE_PERFORMANCE	1U
 #define KERN_THERMAL_CPU_CORE_EFFICIENCY	2U
 
-/* What a CPU report should do (struct thermal_cpu_info's request). */
-#define KERN_THERMAL_CPU_READ_SAMPLE		0x1U	/* wake the CPU to measure its delivered rate */
-
 /* What a CPU has (struct thermal_cpu_info's flags). */
 #define KERN_THERMAL_CPU_HAS_CONTROL		0x1U	/* a request can be written */
 #define KERN_THERMAL_CPU_ESTIMATED_MHZ		0x2U	/* the MHz fields are estimates */
 #define KERN_THERMAL_CPU_LIMITED		0x4U	/* the thermal ceiling cuts the maximum */
 #define KERN_THERMAL_CPU_PLATFORM_LIMIT		0x8U	/* the platform holds the CPU below the request */
 #define KERN_THERMAL_CPU_CUSTOM			0x10U	/* a direct setting is in force */
-#define KERN_THERMAL_CPU_SAMPLE_TIMEOUT		0x20U	/* READ_SAMPLE: the CPU did not answer; the rest is filled */
+#define KERN_THERMAL_CPU_SAMPLE_TIMEOUT		0x20U	/* the CPU did not answer its sample: delivered_mhz is 0, the rest is filled */
 
 /* How a domain's levels are counted (struct thermal_cpu_domain's kind). */
 #define KERN_THERMAL_CPU_LEVELS_NONE		0U	/* the domain cannot be controlled */
@@ -421,15 +421,17 @@ struct thermal_event {
  *
  * The topology and the core's class come from the processor itself and are
  * there on every machine the driver knows; the rest is KERN_THERMAL_UNKNOWN
- * (or 0 for an MHz) until the driver can read it.  A request with
- * READ_SAMPLE (on a descriptor opened for writing only) wakes the CPU to
- * measure delivered_mhz and sleeps about 100 ms; without it nothing is
- * woken and delivered_mhz is the last sample.
+ * (or 0 for an MHz) until the driver can read it.  delivered_mhz is the
+ * rate the CPU ran at while not idle over about 100 ms that ended at most
+ * about a second ago: when the last sample is older, the request samples
+ * every CPU again and sleeps about 100 ms, and a request that comes
+ * meanwhile waits for that sample and shares it.  reserved0 is written as
+ * zero; anything else is refused with EINVAL.
  */
 struct thermal_cpu_info {
 	uint32_t cpu;			/* in */
 	uint32_t count;
-	uint32_t request;		/* in: KERN_THERMAL_CPU_READ_SAMPLE */
+	uint32_t reserved0;		/* in: 0 */
 	uint32_t package;
 	uint32_t die;
 	uint32_t module;		/* cores that share a cache or a clock */
