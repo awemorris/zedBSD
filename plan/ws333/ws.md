@@ -6,10 +6,11 @@
 - Status: incomplete（2026-11-12 Q1: p001〜p004・p006〜p012・p016〜p018・p021 cleared、p015 canceled。q2013（P1）で UAPI の実装: p005 後半・p013・p019）
 - 目標: CPU の idle（C-state、MWAIT）・P-state（HWP と、HWP の無い CPU の driver の P-state）・P/E core の相対性能・熱の監視・fan・非常の停止を、1 つの device `/dev/thermal`（と `/sbin/thermal`）の下で統一して設計し、実装する。
 - **前提（2026-11-12）**: build system の作り直しの後、WS333 の作業と試験は `CONFIG_KERN_THERMAL=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y` で build する（ユーザー）。既定の値は扱わない。作り直しの前の build・既定の記述は過去の物で、従わない。
-- Resume point: 2026-11-12 P1（q2013-i01）: p004 の UAPI を案のまま実装した（p005 後半・p013・p019、branch agent/p1-ws333d の 4901dd5691・efaa31cc5f と記録の commit）。mk の案（[p005](phase005/phase.md) の「mk の案」）のユーザーの答えが要る: 答えの後に mk を当て、正式な image で起動の時の restore・riscv64・全 port の build を確かめる。その前の記録 2026-11-12 P1（q2012-i01）: p001 の設計を main の実装と新しい build（`mk/`）に合わせ（design.md §16）、未登録の Phase（p004・p013・p014・p015・p020・p022・p024）を立てた。p004 の UAPI の案はユーザーの review 待ち。p002・p011・p012・p018 の判定の材料は各 phase.md の「判定の材料（2026-11-12）」。p023（§4.3.3 段 4 の設計）は p014 の数で要ると分かった時だけ立てる。
+- Resume point: 2026-11-12 P1（q2015-i01）: `/dev/thermal` の権限を desktop の group に移し、sessiond の thermal を外した（branch agent/p1-ws333e）。sessiond の Makefile の 2 行（thermal.c・thermal-rules.c）は Q1 が merge と同じ commit で外す。p019（sessiond の THERMAL の要求）の扱いは Q1 が決める。その前の記録 2026-11-12 P1（q2013-i01）: p004 の UAPI を案のまま実装した（p005 後半・p013・p019、branch agent/p1-ws333d の 4901dd5691・efaa31cc5f と記録の commit）。mk の案（[p005](phase005/phase.md) の「mk の案」）のユーザーの答えが要る: 答えの後に mk を当て、正式な image で起動の時の restore・riscv64・全 port の build を確かめる。その前の記録 2026-11-12 P1（q2012-i01）: p001 の設計を main の実装と新しい build（`mk/`）に合わせ（design.md §16）、未登録の Phase（p004・p013・p014・p015・p020・p022・p024）を立てた。p004 の UAPI の案はユーザーの review 待ち。p002・p011・p012・p018 の判定の材料は各 phase.md の「判定の材料（2026-11-12）」。p023（§4.3.3 段 4 の設計）は p014 の数で要ると分かった時だけ立てる。
 
 ## ユーザーの決定（要点）
 
+- 2026-11-12 ユーザーから、`/dev/thermal` は desktop の group の利用者が操作できるようにし（video の group と GPU の node と同じ形）、sessiond は通さず、sessiond に委ねるのは認証だけにする、という趣旨の指示を受けた。→ q2015（P1）: group `desktop`（gid 45）、node root:desktop 0664、変更は書き込みで開いた fd だけ、`/etc/thermal.conf` も root:desktop 0664、sessiond の THERMAL の要求を外した。
 - 2026-11-12 ユーザーから、p004 の UAPI の案を承認し P1 で進める、という趣旨の指示を受けた（電力の読みは推し A と Q1 が解釈）。
 
 - 2026-11-01 09:05 ユーザーから、設計の問い Q333-1〜7 を全部推しの案で決める、という趣旨の答えを受けた（Q333-4 の 0〜100 の向きは「どれも 100 = その物が多い」で確定）。

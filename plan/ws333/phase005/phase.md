@@ -59,14 +59,14 @@ design.md §9 の p005 の前半（p004 の UAPI に依らない所）: 熱の c
 
 ## 後半（2026-11-12 P1、q2013-i01）
 
-2026-11-12 ユーザーが p004 の UAPI の案を承認した（Q1 経由、電力の読みは案の推し A: kernel の 1 秒の写しを誰でも読め、CPU を起こす読みは root だけ）。その案のとおりに実装した。
+2026-11-12 ユーザーが p004 の UAPI の案を承認した（Q1 経由、電力の読みは案の推し A: kernel の 1 秒の写しを誰でも読め、CPU を起こす読みは書き込みで開いた fd だけ）。その案のとおりに実装した。
 
 ### 作った物
 
 - `include/uapi/thermal.h`: 案（`plan/ws333/proposed/include/uapi/thermal.h`）のまま置いた。`include/kern/thermal.h` と `thermal_private.h` がそれを include し、同じ名前の macro（strategy・種類・flag・事象・名前の長さ・非常の状態）の二重の定義を外した。`KERN_THERMAL_FAN_ALL` は `KERN_THERMAL_ALL`、`KERN_THERMAL_READER_RING` は `KERN_THERMAL_EVENT_QUEUE` を指す。
-- `src/kern/thermal-device.c`（新）: `/dev/thermal`（cdev 0x00010008、node 0666）と、`CONFIG_THERMAL_TEST_INJECT` の build だけの `/dev/thermal-inject`（0x00010009、node 0600、open は root だけ）。core の範囲 1〜31 の handler（request の値の全体で照合、他は ENOTTY）、kernel の写しから UAPI の record への写し、SET の root の判定、reserved の検査、SUBSCRIBE（open ごとの mutex、mask 0 で外す）、read（blocking と O_NONBLOCK、128 byte の record）、poll、EMERGENCY_ACK（呼び手の pid）。注入: 同じ名前の sensor は更新（core の 32 の表を共有）、受け手は 4 つまで（決まった errno を決まった ms の後）、非常の道（init・direct）。`kern_thermal_device_register()` を `src/kern/entry.c` が `kern_thermal_init()` の後に呼ぶ。
+- `src/kern/thermal-device.c`（新）: `/dev/thermal`（cdev 0x00010008、node root:desktop 0664）と、`CONFIG_THERMAL_TEST_INJECT` の build だけの `/dev/thermal-inject`（0x00010009、node 0600、open は root だけ）。core の範囲 1〜31 の handler（request の値の全体で照合、他は ENOTTY）、kernel の写しから UAPI の record への写し、SET の判定（書き込みで開いた fd だけ。誰が書き込みで開けるかは node の mode と group）、reserved の検査、SUBSCRIBE（open ごとの mutex、mask 0 で外す）、read（blocking と O_NONBLOCK、128 byte の record）、poll、EMERGENCY_ACK（呼び手の pid）。注入: 同じ名前の sensor は更新（core の 32 の表を共有）、受け手は 4 つまで（決まった errno を決まった ms の後）、非常の道（init・direct）。`kern_thermal_device_register()` を `src/kern/entry.c` が `kern_thermal_init()` の後に呼ぶ。
 - core（`src/kern/thermal.c`・`thermal-guard.c`）に proposal §6 の「kernel の側に足す事」: 事象の通し番号（全事象を数える）と sensor・fan の名前の写し、配った事象で `poll_notify()`、購読の open の上限 16（`kern_thermal_reader_attach` が ENOSPC、`kern_thermal_reader_init` を分けた）、blocking の read の待ち（`kern_thermal_reader_wait`、detach で起こす）、`READING_ARMED`（zone の critical が水準の検査を通った）、strategy の最後の結果（status と GET_STRATEGY の error、受け手の数）、`kern_thermal_strategy_set` が世代を返す、非常の始まりの時刻、試験の直の道（`kern_thermal_emergency_direct`）。
-- `src/kern/devfs.c`: `thermal-inject` を 0600 に。
+- `src/kern/devfs.c`: `thermal-inject` を 0600 に、`thermal` を root:desktop（`KERN_THERMAL_NODE_GROUP` 45）の `KERN_THERMAL_NODE_MODE` 0664 に（GPU の node の video の group と同じ形）。desktop の group は `userland/base/etc/group`（既定の利用者 `user`）と、Settings が作る利用者を入れる account-admin。
 - `userland/base/init/main.c`: 起動の時に `/dev/thermal` を開いておき（O_CLOEXEC）、SIGUSR2 の後の最初の `note_emergency()` で `KERN_THERMAL_EMERGENCY_ACK` を送る（p016 の持ち越し）。
 - `/sbin/thermal` の熱の表示（`userland/base/thermal/main.c`）は p013 と一緒に作った（下の p013 を見る）。
 
@@ -84,13 +84,14 @@ Q1 に 2026-11-12 に送った。
 
 ### 確かめた事（後半）
 
-- host 試験 `plan/ws333/tests/thermal-host/run.sh <out>`（thermal-device.c を `-DCONFIG_THERMAL_TEST_INJECT=1` で足した）: 29 scenario 全部 PASS（前半の 22 と新しい device の 7: node と番号と照合、sensor と ARMED と ENOENT で何も写さない事、strategy の root・EOPNOTSUPP・PARTIAL・最初の errno・PENDING・受け手の一覧、fan と meter と boost、事象の購読・record・poll・通し番号の飛び・OVERFLOW・16 の上限・blocking の read と detach で EINVAL、非常の直の道と時刻、init の ACK）。3 回続けて PASS、ASan・UBSan の build でも PASS。
+- host 試験 `plan/ws333/tests/thermal-host/run.sh <out>`（thermal-device.c を `-DCONFIG_THERMAL_TEST_INJECT=1` で足した）: 29 scenario 全部 PASS（前半の 22 と新しい device の 7: node と番号と照合、sensor と ARMED と ENOENT で何も写さない事、strategy の書き込みの fd（読みだけの fd は root でも EPERM、書き込みの fd は root でなくても通る）・EOPNOTSUPP・PARTIAL・最初の errno・PENDING・受け手の一覧、fan と meter と boost（読みだけの fd は EPERM）、事象の購読・record・poll・通し番号の飛び・OVERFLOW・16 の上限・blocking の read と detach で EINVAL、非常の直の道と時刻、init の ACK）。3 回続けて PASS、ASan・UBSan の build でも PASS。
 - build（y の config: `CONFIG_KERN_CPU_PERF=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y`）: x86_64 の全 object を warning 0 で compile。`kern_thermal_device_register` の未定義の 1 つで link が止まる（mk の 1 が無いため）。thermal-device.c を同じ flag で手で compile（inject の有無の 2 通り、warning 0）し、link の command に足して手で link した vmunix に未定義の strong の symbol は無い。rpi5（arm64）と vf2（riscv64）の既定の config でも同じ（object は warning 0、手の link で未定義なし）。他の port は未実施。
 - QEMU amd64（q35・KVM・OVMF・NVMe、PS/2 の keyboard。`plan/ws333/tests/thermal-qemu/run.sh IMAGE OUT [emergency|direct]`、画面は `plan/tools/boot-test.py` の読み取り、console・serial の log は読まない）。image は `make CONFIGMK=<y の config、CONFIG_USERLAND_PROGRAMS を小さく> rootfs` と `build/x86_64/hdd-image.img` の target で作り、vmunix は上の手の link（inject あり）、`/sbin/thermal` と `thermal-inject` は手で build して `build/x86_64/sbin/` に置いた（mk を変えないため。正式な image の作り方は mk の答えの後）:
   - get-set: PASS。`thermal` が `strategy firmware generation=0`・`emergency none`、注入の sensor が `sensor 0 zone0 kind=zone cpu=yes temperature=45.000 passive=80.000 critical=95.000 flags=valid,armed`、`thermal strategy powersave` が `generation=1 flags=-`（受け手 cpu は hypervisor の関門で unsupported、注入の受け手は ok）、`/etc/thermal.conf` に保存、`thermal restore` が generation 2、manual の 3 軸、`thermal cpu`（4 CPU、core=P）、`power: no energy meter`、boost の拒み。画面 `build/review/ws333-p005/qemu-get-set.png`。
   - emergency（init の道）: PASS。注入の zone を critical に 2 回 → guest の中で status を読み続け、SIGNALED の後の状態 `emergency init sensor=0 temperature=92.000`（init の ACK）を disk に残す → QEMU が自分で終わる → 同じ disk で起動し直し、その status と init の記録 `/var/log/thermal-emergency`（`thermal emergency at …, … ms after init started`）を画面で読んだ。画面 `build/review/ws333-p005/qemu-emergency-init.png`。
   - direct（試験の直の道）: PASS。残した status が `emergency cutting`、QEMU が自分で終わる。画面 `build/review/ws333-p005/qemu-emergency-direct.png`。
-- 未実施: 起動の時の service（`thermal restore`）の実際の起動（service の file を image に入れるのは mk の 3・5 の後）、riscv64 の virt の QEMU、`thermal watch` の QEMU（host 試験の read の道だけ）、全 20 port の build。
+- 2026-11-12 P1（q2015-i01、desktop の group）: `thermal-host` を書き込みの fd の判定に書き直して 29 scenario（745 checks）PASS、6 回続けて PASS、ASan・UBSan の build でも PASS。fan の最初の読みの check が core の thread の速さで落ちる事が 1 回あった（読まれる前の flags を前提にしていた）ので、読まれた後の値も受けるように直した。x86_64（`CONFIG_KERN_THERMAL=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y`、inject の有無の 2 通り）と vf2 の既定の vmunix が warning 0。QEMU は [p013](../phase013/phase.md) の「確かめた事」。
+- 未実施: riscv64 の virt の QEMU、`thermal watch` の QEMU（host 試験の read の道だけ）、全 20 port の build。
 
 ### 気づいた事（main の build、WS333 の外）
 

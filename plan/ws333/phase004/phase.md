@@ -37,7 +37,6 @@ design.md §4.10・§9 の p004: `include/uapi/thermal.h` の全文（ioctl の�
 ## 他の Phase への持ち越し（案が了承されたら）
 
 - p005 後半: `include/uapi/thermal.h` を置き、kernel の header が include して二重の定義を外す。proposal §6 の「kernel の側に足す事」。試験の注入の switch（`CONFIG_THERMAL_TEST_INJECT`）の mk の案。
-- p019: sessiond の strategy の要求は `/sbin/thermal strategy …` を実行する（保存の書き手を 1 つに）。
 - p013: CPU の ioctl（32〜38）と `/sbin/thermal` の CPU・電力・idle・保存と restore。
 
 ## ユーザーの決定
