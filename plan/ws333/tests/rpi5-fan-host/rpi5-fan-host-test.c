@@ -484,7 +484,7 @@ test_apply(uint32_t value, uint8_t speed, uint8_t noise)
 static const char *
 test_trips_name(void)
 {
-	static char name[KERN_THERMAL_NAME_MAX];
+	static char name[KERN_THERMAL_FIRMWARE_NAME_MAX];
 	int error;
 
 	memset(name, 0, sizeof(name));
@@ -606,7 +606,7 @@ scenario_start(void)
 	CHECK(state.level == 0U);
 	CHECK(state.level_count == TEST_LEVELS);
 	CHECK(state.boost_count == TEST_LEVELS - 1U);
-	CHECK(strcmp(test_trips_name(), "trips 40000-70000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 40.0-70.0") == 0);
 }
 
 /* The trips: up and down with the hysteresis, the channel and the read follow. */
@@ -667,12 +667,12 @@ scenario_strategy(void)
 	error = test_apply(KERN_THERMAL_STRATEGY_BALANCED, 0, 0);
 	CHECK(error == 0);
 	CHECK(test_channel_level() == 0);
-	CHECK(strcmp(test_trips_name(), "trips 40000-70000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 40.0-70.0") == 0);
 
 	/* A loud manual strategy brings the trips 5 degrees lower and the fan turns at once. */
 	error = test_apply(KERN_THERMAL_STRATEGY_MANUAL, 50, 80);
 	CHECK(error == 0);
-	CHECK(strcmp(test_trips_name(), "trips 35000-65000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 35.0-65.0") == 0);
 	CHECK(test_channel_level() == 1);
 	CHECK(test_read().level == 1U);
 	test_poll(46000);
@@ -681,30 +681,30 @@ scenario_strategy(void)
 	/* The edge of loud: 67 moves the trips, 66 does not. */
 	error = test_apply(KERN_THERMAL_STRATEGY_MANUAL, 50, 66);
 	CHECK(error == 0);
-	CHECK(strcmp(test_trips_name(), "trips 40000-70000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 40.0-70.0") == 0);
 	error = test_apply(KERN_THERMAL_STRATEGY_MANUAL, 50, 67);
 	CHECK(error == 0);
-	CHECK(strcmp(test_trips_name(), "trips 35000-65000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 35.0-65.0") == 0);
 
 	/* Performance, powersave and a quiet manual strategy are the tree's trips; the fan slows by the hysteresis. */
 	error = test_apply(KERN_THERMAL_STRATEGY_PERFORMANCE, 0, 0);
 	CHECK(error == 0);
-	CHECK(strcmp(test_trips_name(), "trips 40000-70000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 40.0-70.0") == 0);
 	test_poll(45000);
 	CHECK(test_channel_level() == 1);
 	error = test_apply(KERN_THERMAL_STRATEGY_POWERSAVE, 0, 0);
 	CHECK(error == 0);
-	CHECK(strcmp(test_trips_name(), "trips 40000-70000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 40.0-70.0") == 0);
 	error = test_apply(KERN_THERMAL_STRATEGY_MANUAL, 0, 0);
 	CHECK(error == 0);
-	CHECK(strcmp(test_trips_name(), "trips 40000-70000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 40.0-70.0") == 0);
 
 	/* The firmware's state writes nothing: a shift in force stays. */
 	error = test_apply(KERN_THERMAL_STRATEGY_MANUAL, 0, 100);
 	CHECK(error == 0);
 	error = test_apply(KERN_THERMAL_STRATEGY_FIRMWARE, 0, 0);
 	CHECK(error == 0);
-	CHECK(strcmp(test_trips_name(), "trips 35000-65000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 35.0-65.0") == 0);
 
 	/* The critical level the guard watches is the tree's whatever the strategy. */
 	test_poll(50000);
@@ -868,11 +868,11 @@ scenario_critical_mapped(void)
 
 	test_start("critmap", 30000);
 	CHECK(rpi5_fan.trip_count == 2U);
-	CHECK(strcmp(test_trips_name(), "trips 40000-40000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 40.0-40.0") == 0);
 
 	error = test_apply(KERN_THERMAL_STRATEGY_MANUAL, 0, 100);
 	CHECK(error == 0);
-	CHECK(strcmp(test_trips_name(), "trips 35000-35000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 35.0-35.0") == 0);
 	test_poll(36000);
 	CHECK(test_channel_level() == 1);
 	test_poll(96000);
@@ -894,7 +894,7 @@ scenario_builtin_trips(void)
 	CHECK(rpi5_fan.trips_from_tree == 0);
 	CHECK(rpi5_fan.trip_count == 4U);
 	CHECK(test_sensor_critical == 105000);
-	CHECK(strcmp(test_trips_name(), "trips 50000-75000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 50.0-75.0") == 0);
 	test_poll(67000);
 	CHECK(test_channel_level() == 2);
 	test_poll(68000);
@@ -902,7 +902,7 @@ scenario_builtin_trips(void)
 
 	error = test_apply(KERN_THERMAL_STRATEGY_MANUAL, 0, 90);
 	CHECK(error == 0);
-	CHECK(strcmp(test_trips_name(), "trips 45000-70000 mC") == 0);
+	CHECK(strcmp(test_trips_name(), "trips 45.0-70.0") == 0);
 	CHECK(test_channel_level() == 3);
 	test_poll(70000);
 	CHECK(test_channel_level() == 4);

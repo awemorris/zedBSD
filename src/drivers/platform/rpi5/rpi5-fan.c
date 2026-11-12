@@ -1441,9 +1441,11 @@ fan_apply(
 }
 
 /*
- * Names the trips in force, lowest and highest active one, in thousandths
- * of a degree: the automatic control the strategy chose (a GET ioctl's
- * thread).
+ * Names the trips in force, lowest and highest active one, in degrees to
+ * a tenth: the automatic control the strategy chose (a GET ioctl's
+ * thread).  The name fits the firmware's name in the strategy's report
+ * (KERN_THERMAL_FIRMWARE_NAME_MAX) for trips below 100 degrees; a trip
+ * below 0 is named 0.
  */
 static int
 fan_trips_name(
@@ -1486,8 +1488,15 @@ fan_trips_name(
 	if (!found)
 		return ENOENT;
 
+	/* Names a trip below 0 as 0, so the tenths need no sign. */
+	if (lowest < 0)
+		lowest = 0;
+	if (highest < 0)
+		highest = 0;
+
 	/* Succeeded: the name of the trips. */
-	kern_snprintf(name, size, "trips %d-%d mC", (int)lowest, (int)highest);
+	kern_snprintf(name, size, "trips %d.%d-%d.%d", (int)(lowest / 1000), (int)(lowest % 1000 / 100),
+	    (int)(highest / 1000), (int)(highest % 1000 / 100));
 	return 0;
 }
 

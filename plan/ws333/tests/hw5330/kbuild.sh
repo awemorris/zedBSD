@@ -22,10 +22,10 @@ base="PLATFORM=x86_64 CONFIGMK=config/config.x86_64.mk CONFIG_KERN_THERMAL=y CON
 : > "$out.log"
 if [ ! -d build/x86_64/sysroot/usr/include ]; then
 	# shellcheck disable=SC2086
-	timeout 3600 make -j16 $base sysroot >> "$out.log" 2>&1 < /dev/null
+	timeout 3600 make -j4 $base sysroot >> "$out.log" 2>&1 < /dev/null
 fi
 # shellcheck disable=SC2086
-timeout 3600 make -j16 $base $vars build/x86_64/vmunix >> "$out.log" 2>&1 < /dev/null
+timeout 3600 make -j4 $base $vars build/x86_64/vmunix >> "$out.log" 2>&1 < /dev/null
 rc=$?
 for q in $applied; do
 	git apply -R "$q" || echo "kbuild: FAIL unapply $q"
