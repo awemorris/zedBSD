@@ -73,9 +73,9 @@
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
-#include <kern/text-display.h>
 #include <kern/pmem.h>
 #include <kern/sched.h>
+#include <kern/text-display.h>
 
 #include <uapi/errno.h>
 #include <stddef.h>
@@ -772,6 +772,8 @@ drv_i915_present_window(
 	 * removed before the driver programs the display).
 	 */
 	kern_text_suspend();
+
+	/* Runs the window: the resident output serves presentations until it is left. */
 	error = drv_i915_resident_run(display, display->rctx.lcd, i915_present_window_serve, display);
 	unplugged = i915_present_unplug_take(display);
 	retry = 0;

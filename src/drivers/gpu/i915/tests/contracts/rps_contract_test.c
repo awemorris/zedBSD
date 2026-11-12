@@ -507,6 +507,7 @@ rps_check_rc6_residency(void)
 	unsigned holds;
 	int error;
 
+	/* Names the section of the checks. */
 	contract_section("RC6 time: held samples, park, wrap, loss of power");
 
 	/* Before the device holds its domains nothing is read. */

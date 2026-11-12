@@ -274,8 +274,10 @@ kern_platform_init(
 
 	/* Lets the TCO watchdog bind its function, which it does only when the boot parameter asks. */
 	if (drv_intel_tco_pci_register != NULL) {
-		if (drv_intel_tco_pci_register() != 0)
-			kern_logf("watchdog: PCI driver registration failed\n");
+		/* Registers the watchdog's driver with the PCI core. */
+		err = drv_intel_tco_pci_register();
+		if (err != 0)
+			kern_logf("watchdog: PCI driver registration failed (%d)\n", err);
 	}
 
 	/* Probes the host bridge, which binds the registered drivers. */

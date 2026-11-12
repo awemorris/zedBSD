@@ -56,6 +56,9 @@
 #include <drivers/acpi/acpi.h>
 #endif
 
+/* Marks a parameter of a driver callback that is not used. */
+#define UNUSED_PARAMETER(parameter)	((void)(parameter))
+
 /* The boot parameters that arm the watchdog and that stop the machine on purpose. */
 #define TCO_PARAMETER_SECONDS		"watchdog="
 #define TCO_PARAMETER_STOP		"watchdog.stop="
@@ -501,7 +504,7 @@ static int
 tco_suspend(
 	struct drv_pci_device *device)
 {
-	(void)device;
+	UNUSED_PARAMETER(device);
 
 	/* A watchdog that was never armed has nothing to halt. */
 	if (!tco.running)
@@ -523,7 +526,7 @@ tco_resume(
 {
 	int error;
 
-	(void)device;
+	UNUSED_PARAMETER(device);
 
 	/* A watchdog that was never armed stays off. */
 	if (!tco.running)
@@ -609,6 +612,8 @@ tco_parameter_seconds(
 		if (value[index] != TCO_PARAMETER_OFF[index])
 			break;
 	}
+
+	/* The whole word matched: the value is off when the end or a blank follows it. */
 	if (TCO_PARAMETER_OFF[index] == '\0') {
 		if (value[index] == '\0' ||
 		    value[index] == ' ' ||
@@ -629,6 +634,8 @@ tco_parameter_seconds(
 	/* Refuses a value without digits or with something after them. */
 	if (digits == 0U)
 		return EINVAL;
+
+	/* Refuses a number followed by anything but the end of the word. */
 	if (*cursor != '\0' &&
 	    *cursor != ' ' &&
 	    *cursor != '\t')
@@ -698,6 +705,8 @@ tco_locate_hub(
 		kern_logf("watchdog: the firmware left the TCO registers undecoded\n");
 		return ENODEV;
 	}
+
+	/* A decoded base of zero names no register. */
 	if ((base & TCO_SMBUS_BASE_MASK) == 0U) {
 		kern_logf("watchdog: the firmware gave the TCO registers no base\n");
 		return ENODEV;
@@ -736,6 +745,8 @@ tco_locate_ich9(
 		kern_logf("watchdog: the firmware left the ACPI I/O space undecoded\n");
 		return ENODEV;
 	}
+
+	/* A decoded base of zero names no register. */
 	if ((acpi_base & TCO_ICH9_ACPI_BASE_MASK) == 0U) {
 		kern_logf("watchdog: the firmware gave the ACPI I/O space no base\n");
 		return ENODEV;
@@ -864,6 +875,8 @@ tco_pmc_base(
 	/* Refuses a value that cannot be the controller's 8 KiB of memory. */
 	if (published == 0U)
 		return ENODEV;
+
+	/* Refuses a value that is not aligned to the controller's memory. */
 	if ((published & ~(uint64_t)TCO_PMC_BAR_MASK) != 0U)
 		return EINVAL;
 
@@ -1099,6 +1112,7 @@ tco_threads_start(void)
 
 	/* Takes back the threads made before a failure. */
 	if (error != 0) {
+		/* Aborts each thread that was made and never started. */
 		for (cpu = 0U; cpu < made; cpu++)
 			(void)thread_abort_new(tco_threads[cpu]);
 		return error;

@@ -1731,7 +1731,11 @@ sched_set_cpu(
 	/* A thread already on the CPU only has its affinity set. */
 	if (old == target) {
 		error = set_affinity_in_place(old_cpu, thread, old, affinity);
-		return error;
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the thread stays and has the affinity. */
+		return 0;
 	}
 
 	/* Takes the thread off its old CPU's queues and marks it migrating. */
@@ -2506,6 +2510,7 @@ set_affinity_in_place(
 	/* Sets the affinity under the lock an idle CPU takes the thread under. */
 	irq = spin_lock_irqsave(&cpu->lock);
 
+	/* Refuses a thread that has left, or sets its affinity. */
 	if (thread->sched.cpu != id || thread->sched.need_migrate != 0) {
 		/* The thread is on its way to another CPU. */
 		error = EBUSY;
@@ -2517,8 +2522,12 @@ set_affinity_in_place(
 
 	spin_unlock_irqrestore(&cpu->lock, irq);
 
-	/* Reports whether the thread was still there to set. */
-	return error;
+	/* Reports a thread that was no longer there to set. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the thread has the affinity. */
+	return 0;
 }
 
 /*
