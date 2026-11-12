@@ -69,6 +69,7 @@ static void scene_x_binds(void);
 static void scene_x_indirect(void);
 static void scene_x_barriers(void);
 static void scene_x_transfers(void);
+static void scene_x_plain_blitter(void);
 static void scene_x_queries(void);
 static void scene_x_clears(void);
 static void scene_x_large(void);
@@ -134,6 +135,7 @@ execute_main(
 	scene_x_indirect();
 	scene_x_barriers();
 	scene_x_transfers();
+	scene_x_plain_blitter();
 	scene_x_queries();
 	scene_x_clears();
 	scene_x_large();
@@ -1063,6 +1065,118 @@ scene_x_indirect(void)
 		node_close(&node);
 		stop("indirect");
 	}
+}
+
+/*
+ * Transfers on a device whose blitter neither scales, blends nor tiles,
+ * without the bilinear filter: a copy of buffers, a fill, an image copy
+ * and a linear blit are the driver's programs and draws, and no packet
+ * goes to the blitter.
+ */
+static void
+scene_x_plain_blitter(void)
+{
+	static const uint32_t blitter_ops[] = {
+		GHCI_OP_COPY_BUFFER, GHCI_OP_COPY_IMAGE, GHCI_OP_BLIT, GHCI_OP_FILL_BUFFER, GHCI_OP_RESOLVE_IMAGE,
+		GHCI_OP_COPY_BUFFER_TO_IMAGE, GHCI_OP_COPY_IMAGE_TO_BUFFER
+	};
+	unsigned before[7];
+	unsigned draws;
+	unsigned dispatches;
+	unsigned index;
+	struct node node;
+	int same;
+	int error;
+
+	/* The recording: a copy of 256 bytes, a fill, an image copy and a blit to half the size. */
+	error = x_open(&node, MODEL_BLT_MIN);
+	x_record(&node, ID_X_COMMANDS);
+	x_command(GPU_OP_CMD_COPY_BUFFER, ID_X_COMMANDS);
+	put64(ID_BUFFER);
+	put64(ID_BUFFER);
+	put32(1U);
+	put64(1U);
+	put64(0U);
+	put64(4096U);
+	put64(256U);
+	x_command(GPU_OP_CMD_FILL_BUFFER, ID_X_COMMANDS);
+	put64(ID_BUFFER);
+	put64(64U);
+	put64(256U);
+	put32(0xdeadbeefU);
+	x_command(GPU_OP_CMD_COPY_IMAGE, ID_X_COMMANDS);
+	put64(ID_IMAGE);
+	put32(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	put64(ID_X_IMAGE);
+	put32(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	put32(1U);
+	put64(1U);
+	put32(VK_IMAGE_ASPECT_COLOR_BIT);
+	put32(0U);
+	put32(0U);
+	put32(1U);
+	put32(0U);
+	put32(0U);
+	put32(0U);
+	put32(VK_IMAGE_ASPECT_COLOR_BIT);
+	put32(0U);
+	put32(0U);
+	put32(1U);
+	put32(4U);
+	put32(4U);
+	put32(0U);
+	put32(16U);
+	put32(16U);
+	put32(1U);
+	x_command(GPU_OP_CMD_BLIT_IMAGE, ID_X_COMMANDS);
+	put64(ID_IMAGE);
+	put32(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	put64(ID_X_IMAGE);
+	put32(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	put32(1U);
+	put64(1U);
+	put32(VK_IMAGE_ASPECT_COLOR_BIT);
+	put32(0U);
+	put32(0U);
+	put32(1U);
+	put64(2U);
+	put32(0U);
+	put32(0U);
+	put32(0U);
+	put32(64U);
+	put32(32U);
+	put32(1U);
+	put32(VK_IMAGE_ASPECT_COLOR_BIT);
+	put32(0U);
+	put32(0U);
+	put32(1U);
+	put64(2U);
+	put32(0U);
+	put32(0U);
+	put32(0U);
+	put32(32U);
+	put32(16U);
+	put32(1U);
+	put32(VK_FILTER_LINEAR);
+	error |= x_end(&node, ID_X_COMMANDS);
+	expect(error == 0 && reply32(&node, 4U) == 0U, "plain blitter: recorded");
+
+	/* The submission: no blitter packet; the copies and the fill dispatches, the blit a draw. */
+	for (index = 0U; index < 7U; index++)
+		before[index] = model_count_commands(blitter_ops[index]);
+	draws = model_count_commands(GHCI_OP_DRAW);
+	dispatches = model_count_commands(GHCI_OP_DISPATCH);
+	error = x_submit(&node, ID_X_COMMANDS, 0U);
+	same = 1;
+	for (index = 0U; index < 7U; index++) {
+		if (model_count_commands(blitter_ops[index]) != before[index])
+			same = 0;
+	}
+	expect(error == 0 && same && model.faults == 0U, "plain blitter: nothing for the blitter");
+	expect(model_count_commands(GHCI_OP_DISPATCH) >= dispatches + 3U && model_count_commands(GHCI_OP_DRAW) >= draws + 1U,
+	       "plain blitter: the copies and the fill dispatched, the blit drawn");
+	node_close(&node);
+	stop("plain blitter");
 }
 
 /*

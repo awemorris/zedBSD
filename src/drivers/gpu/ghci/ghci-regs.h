@@ -118,6 +118,29 @@
 #define GHCI_FMT0_SRGB			(1U << 9)
 
 /*
+ * The VA width is VA_BITS_ENC + 30, the float filters of EXT_CAP_FMT0,
+ * its copy of the colour attachment count, and the blocks a
+ * configuration may leave out: the polygon clipper, the blitter's
+ * scaling, blending and tiling, and the texture unit's bilinear filter.
+ *
+ * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section 3.2.2,
+ * EXT_CAP_FEATURE [3:0] VA_BITS_ENC (VA - 30), [30] CAP_CLIP_POLY and
+ * [31] CAP_BLT_SCALE; EXT_CAP_FMT0 [10] CAP_FFILT_FP16, [11]
+ * CAP_FFILT_FP32, [15:12] MAX_COLOR_ATTACHMENTS, [16] CAP_TU_BILINEAR,
+ * [17] CAP_BLT_BLEND and [18] CAP_BLT_TILE).
+ */
+#define GHCI_FEATURE_VA_BITS_BASE	30U
+#define GHCI_FEATURE_CLIP_POLY		(1U << 30)
+#define GHCI_FEATURE_BLT_SCALE		(1U << 31)
+#define GHCI_FMT0_FFILT_FP16		(1U << 10)
+#define GHCI_FMT0_FFILT_FP32		(1U << 11)
+#define GHCI_FMT0_MAX_COLOR_SHIFT	12U
+#define GHCI_FMT0_MAX_COLOR_MASK	0xFU
+#define GHCI_FMT0_TU_BILINEAR		(1U << 16)
+#define GHCI_FMT0_BLT_BLEND		(1U << 17)
+#define GHCI_FMT0_BLT_TILE		(1U << 18)
+
+/*
  * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
  * (section 3.3, CTRL and STATUS).
  */
@@ -332,15 +355,17 @@
 /* The sessions of a GPU: 0 is the driver's, 1 to 15 are clients'. */
 #define GHCI_SESSIONS			16U
 
-/* The 2 MiB chunks of the 32-bit GPU address range the driver uses. */
+/* The 2 MiB chunks of the 32-bit GPU address range, the most the driver uses. */
 #define GHCI_CHUNKS			2048U
 
 /*
  * What one device can do, read once at attach and not changed after.
  *
- * DEVICE_CAPS is the authority; the mirrors in EXT_CAP_FEATURE only fill
- * in what DEVICE_CAPS does not hold, and a mirror that disagrees is kept
- * in mismatches for the log.  A block the list does not name has offset 0.
+ * DEVICE_CAPS is the authority; the mirrors in EXT_CAP_FEATURE and
+ * EXT_CAP_FMT0 only fill in what DEVICE_CAPS does not hold, and a mirror
+ * that disagrees is kept in mismatches for the log.  MAX_MRT is the
+ * authority on the colour attachments; max_color is EXT_CAP_FMT0's copy,
+ * for the log.  A block the list does not name has offset 0.
  */
 struct ghci_caps {
 	uint32_t device_caps;
@@ -354,6 +379,7 @@ struct ghci_caps {
 	uint32_t va_bits;
 	uint32_t pa_bits;
 	uint32_t max_mrt;
+	uint32_t max_color;
 	uint32_t lds_bytes;
 	uint32_t blocks;
 	uint32_t block_offset[GHCI_EXTCAP_IDS];
@@ -390,7 +416,13 @@ enum ghci_caps_flag {
 	GHCI_HAS_HW_CURSOR,
 	GHCI_HAS_ETC2,
 	GHCI_HAS_SRGB,
-	GHCI_HAS_DISCRETE
+	GHCI_HAS_DISCRETE,
+	GHCI_HAS_FFILT_FP32,
+	GHCI_HAS_CLIP_POLY,
+	GHCI_HAS_TU_BILINEAR,
+	GHCI_HAS_BLT_SCALE,
+	GHCI_HAS_BLT_BLEND,
+	GHCI_HAS_BLT_TILE
 };
 
 int ghci_caps_identify(const uint32_t *window);
@@ -399,6 +431,7 @@ int ghci_caps_has(const struct ghci_caps *caps, enum ghci_caps_flag flag);
 int ghci_extcap_walk(const uint32_t *window, uint32_t *offsets, uint32_t *versions, uint32_t *found);
 uint32_t ghci_heap_session_bytes(uint32_t va_bits);
 uint64_t ghci_heap_device_bytes(uint32_t va_bits);
+uint32_t ghci_va_chunks(uint32_t va_bits);
 uint32_t ghci_watchdog_cycles(uint32_t gclk_hz, uint32_t milliseconds);
 uint32_t ghci_reset_wait_ms(uint32_t gclk_hz, uint32_t wdt_cycles);
 

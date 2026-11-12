@@ -2743,7 +2743,7 @@ subpass_end(
 
 	/* The resolves of colours 1 to 7. */
 	references = &exec->pass.pass->references[exec->pass.subpass];
-	has = ghci_caps_has(&exec->session->device->caps, GHCI_HAS_BLT);
+	has = has_blitter(exec);
 	for (index = 1U; index < references->color_count; index++) {
 		if (references->resolve[index] == VK_ATTACHMENT_UNUSED || references->color[index] == VK_ATTACHMENT_UNUSED)
 			continue;
@@ -3331,15 +3331,15 @@ transfer_allowed(
 	return 1;
 }
 
-/* Reports whether the device has the blit engine (without it, the driver's programs make the transfers). */
+/* Reports whether the executor uses the blit engine (without it, the driver's programs make the transfers). */
 static int
 has_blitter(
 	struct exec *exec)
 {
 	int has;
 
-	/* CAP_BLT. */
-	has = ghci_caps_has(&exec->session->device->caps, GHCI_HAS_BLT);
+	/* A blit engine the executor gives transfers to. */
+	has = ghci_vk_caps_blitter(&exec->session->device->caps);
 	if (!has)
 		return 0;
 
@@ -3780,6 +3780,7 @@ copy_image(
 	int source_3d;
 	int destination_3d;
 	int blitter;
+	int bilinear;
 	int one_aspect;
 	int error;
 
@@ -3818,10 +3819,17 @@ copy_image(
 	if (reader->error != 0)
 		return;
 
-	/* A blit's filter, then the regions again. */
+	/*
+	 * A blit's filter, then the regions again.  Without the texture
+	 * unit's bilinear filter no format has FILTER_LINEAR, so a linear
+	 * blit is the nearest one.
+	 */
 	filter = 0U;
 	if (number == GPU_OP_CMD_BLIT_IMAGE && read32(reader) == (uint32_t)VK_FILTER_LINEAR)
 		filter = 1U;
+	bilinear = ghci_caps_has(&exec->session->device->caps, GHCI_HAS_TU_BILINEAR);
+	if (!bilinear)
+		filter = 0U;
 	end = reader->offset;
 	reader->offset = regions;
 

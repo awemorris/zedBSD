@@ -457,6 +457,7 @@ create_sampler(
 	uint64_t present;
 	uint64_t identity;
 	uint32_t result;
+	int bilinear;
 	int error;
 
 	/* The device, the create info and the tail. */
@@ -497,6 +498,24 @@ create_sampler(
 	desc.max_anisotropy = 1U;
 	desc.border_type = (uint32_t)info.borderColor / 2U;
 	desc.unnormalized = info.unnormalizedCoordinates != VK_FALSE ? 1U : 0U;
+
+	/*
+	 * Without the texture unit's bilinear filter no format has
+	 * FILTER_LINEAR, which a linear filter or mip mode needs, so the
+	 * sampler takes the nearest texel of the nearest level.
+	 *
+	 * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section
+	 * 3.2.2, EXT_CAP_FMT0 [16] CAP_TU_BILINEAR).
+	 */
+	bilinear = ghci_caps_has(&session->device->caps, GHCI_HAS_TU_BILINEAR);
+	if (!bilinear) {
+		if (desc.min_filter == (uint32_t)VK_FILTER_LINEAR)
+			desc.min_filter = (uint32_t)VK_FILTER_NEAREST;
+		if (desc.mag_filter == (uint32_t)VK_FILTER_LINEAR)
+			desc.mag_filter = (uint32_t)VK_FILTER_NEAREST;
+		if (desc.mipmap_mode == (uint32_t)VK_SAMPLER_MIPMAP_MODE_LINEAR)
+			desc.mipmap_mode = (uint32_t)VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	}
 
 	/* Anisotropy is a feature the device lacks; a field the descriptor cannot hold is refused. */
 	result = (uint32_t)VK_SUCCESS;

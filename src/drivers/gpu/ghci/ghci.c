@@ -578,11 +578,24 @@ read_caps(
 		return error;
 	}
 
-	/* A mirror that disagrees with DEVICE_CAPS is only logged. */
+	/* A mirror that disagrees with DEVICE_CAPS or MAX_MRT is only logged. */
 	if (device->caps.mismatches != 0U)
-		kern_logf("ghci: %s: EXT_CAP_FEATURE disagrees with DEVICE_CAPS (bits %08x); DEVICE_CAPS used\n",
+		kern_logf("ghci: %s: EXT_CAP_FEATURE or EXT_CAP_FMT0 disagrees with DEVICE_CAPS (bits %08x); DEVICE_CAPS used\n",
 		    device->name,
 		    (unsigned)device->caps.mismatches);
+	if (device->caps.max_color != device->caps.max_mrt)
+		kern_logf("ghci: %s: EXT_CAP_FMT0 says %u colour attachments, MAX_MRT %u; MAX_MRT used\n",
+		    device->name,
+		    (unsigned)device->caps.max_color,
+		    (unsigned)device->caps.max_mrt);
+
+	/* The address widths, the colour attachments and the shared memory. */
+	kern_logf("ghci: %s: VA %u bits, PA %u bits, %u colour attachments, %u KiB of shared memory\n",
+	    device->name,
+	    (unsigned)device->caps.va_bits,
+	    (unsigned)device->caps.pa_bits,
+	    (unsigned)device->caps.max_mrt,
+	    (unsigned)(device->caps.lds_bytes / 1024U));
 
 	/* The GPU's own identification, when it has the VEND block. */
 	if (device->caps.vendor[0] != 0U || device->caps.vendor[1] != 0U)

@@ -89,7 +89,8 @@ struct format_row {
  * The formats the hardware takes and the features the table gives them,
  * before the capability flags narrow them: CAP_ROP_PACK the colour
  * attachments of integer and 32-bit float formats, CAP_TEX_FFILT the
- * linear filter of 16- and 32-bit float formats.  A8B8G8R8 (51, 52, 55,
+ * linear filter of 16- and 32-bit float formats (CAP_FFILT_FP32 too for
+ * the 32-bit ones).  A8B8G8R8 (51, 52, 55,
  * 56, 57) is taken as R8G8B8A8 (37, 38, 41, 42, 43) is.
  *
  * Values referenced: amaterrace-gpu d9252e4 docs/ghci.md (section 8.5.1,
@@ -310,10 +311,11 @@ ghci_vk_formats_table(
  * Makes one format's Vulkan features from FMT's bits for optimal and
  * linear tiling and for buffers, and drops what the driver cannot do: a
  * format outside the table, an sRGB format without EXT_CAP_FMT0's bit, a
- * storage image the table does not give, and a blit the driver's shaders
- * replace on a device without the blit engine.  The driver lays every
- * image out in linear rows, so an image made with optimal tiling is a
- * linear one: optimal tiling has only what both tilings have.
+ * storage image the table does not give, the linear filter of a texture
+ * unit without the bilinear filter, and a blit the driver's shaders
+ * replace where the executor does not use the blit engine.  The driver
+ * lays every image out in linear rows, so an image made with optimal
+ * tiling is a linear one: optimal tiling has only what both tilings have.
  */
 void
 ghci_vk_formats_from_bits(
@@ -330,6 +332,7 @@ ghci_vk_formats_from_bits(
 	uint32_t texel;
 	unsigned index;
 	int blitter;
+	int bilinear;
 	int srgb;
 
 	/* A format the driver cannot write into a descriptor has no feature. */
@@ -346,11 +349,23 @@ ghci_vk_formats_from_bits(
 	driver = ~(uint32_t)HW_STORAGE_IMAGE;
 	if ((row->features & HW_STORAGE_IMAGE) != 0U)
 		driver = ~0U;
-	blitter = ghci_caps_has(caps, GHCI_HAS_BLT);
+	blitter = ghci_vk_caps_blitter(caps);
 	tilings[0] = optimal & linear & driver;
 	tilings[1] = linear & driver;
 
-	/* Without the blit engine the blits are the driver's draws: a sampled source, a colour destination. */
+	/*
+	 * Without the bilinear filter the texture unit samples the nearest
+	 * texel only, so no format filters, whatever FMT says.
+	 *
+	 * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section
+	 * 3.2.2, EXT_CAP_FMT0 [16] CAP_TU_BILINEAR; section 4.1, FMT_OPTIMAL
+	 * and FMT_LINEAR report no FILTER_LINEAR without it).
+	 */
+	bilinear = ghci_caps_has(caps, GHCI_HAS_TU_BILINEAR);
+	for (index = 0U; index < 2U && !bilinear; index++)
+		tilings[index] &= ~(uint32_t)HW_FILTER_LINEAR;
+
+	/* Without the executor's blit engine the blits are the driver's draws: a sampled source, a colour destination. */
 	for (index = 0U; index < 2U && !blitter; index++) {
 		tilings[index] &= ~(HW_BLIT_SRC | HW_BLIT_DST);
 		if ((tilings[index] & HW_SAMPLE) != 0U && (row->kind & ROW_DEPTH) == 0U)
@@ -451,6 +466,7 @@ table_bits(
 	uint32_t bits;
 	int etc2;
 	int filter;
+	int filter32;
 	int packer;
 
 	/* A BC or ETC2 format needs its bit of EXT_CAP_FMT0. */
@@ -460,10 +476,20 @@ table_bits(
 	if (row->guard < GUARD_ETC2 && (caps->fmt0 & (1U << row->guard)) == 0U)
 		return 0U;
 
-	/* Without the float filter, no linear filter of a float format. */
+	/*
+	 * Without the float filter, no linear filter of a float format;
+	 * without the filter of 32-bit floats as well, none of a 32-bit one.
+	 *
+	 * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section
+	 * 3.2.1, DEVICE_CAPS [25] CAP_TEX_FFILT; section 3.2.2, EXT_CAP_FMT0
+	 * [11] CAP_FFILT_FP32).
+	 */
 	bits = row->features;
 	filter = ghci_caps_has(caps, GHCI_HAS_TEX_FFILT);
+	filter32 = ghci_caps_has(caps, GHCI_HAS_FFILT_FP32);
 	if ((row->kind & ROW_FLOAT) != 0U && !filter)
+		bits &= ~HW_FILTER_LINEAR;
+	if ((row->kind & ROW_FLOAT32) != 0U && !filter32)
 		bits &= ~HW_FILTER_LINEAR;
 
 	/* Without the packer, no integer and no 32-bit float colour attachment. */

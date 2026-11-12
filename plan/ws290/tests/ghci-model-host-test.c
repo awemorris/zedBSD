@@ -350,7 +350,10 @@ scene_identify(void)
 		/* Every profile is a GHCI 1.0 GPU with a good list. */
 		error = ghci_caps_decode(window, &caps);
 		expect(error == 0, "identify: decodes");
-		expect(caps.va_bits == 32U, "identify: 32-bit VA");
+		if (profile == MODEL_KC705_MIN || profile == MODEL_VA30)
+			expect(caps.va_bits == 30U, "identify: 30-bit VA");
+		else
+			expect(caps.va_bits == 32U, "identify: 32-bit VA");
 
 		/* Picks the profile's own checks. */
 		switch (profile) {
@@ -389,6 +392,19 @@ scene_identify(void)
 			break;
 		case MODEL_MISMATCH:
 			expect(caps.mismatches == (GHCI_CAP_FP16 | GHCI_CAP_DUAL_SOURCE), "identify: mismatched mirrors");
+			break;
+		case MODEL_KC705_MIN:
+			has = ghci_caps_has(&caps, GHCI_HAS_HW_WALKER) || ghci_caps_has(&caps, GHCI_HAS_UMA) ||
+			    ghci_caps_has(&caps, GHCI_HAS_BLT) || ghci_caps_has(&caps, GHCI_HAS_CLIP_POLY) ||
+			    ghci_caps_has(&caps, GHCI_HAS_TU_BILINEAR);
+			expect(!has, "identify: kc705-min is discrete and flat, without the blitter, the clipper and the filter");
+			expect(caps.max_mrt == 1U && caps.max_color == 1U && caps.lds_bytes == 1024U && caps.pa_bits == 40U &&
+			       caps.mismatches == 0U, "identify: kc705-min has one attachment and 1 KiB");
+			break;
+		case MODEL_BLT_MIN:
+			has = ghci_caps_has(&caps, GHCI_HAS_BLT_SCALE) || ghci_caps_has(&caps, GHCI_HAS_BLT_BLEND) ||
+			    ghci_caps_has(&caps, GHCI_HAS_BLT_TILE) || ghci_caps_has(&caps, GHCI_HAS_TU_BILINEAR);
+			expect(ghci_caps_has(&caps, GHCI_HAS_BLT) && !has, "identify: blt-min has a plain blitter");
 			break;
 		default:
 			break;

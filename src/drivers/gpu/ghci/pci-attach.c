@@ -45,6 +45,14 @@
 
 #include "ghci.h"
 
+/* A kernel that names neither leaves the interrupt and the cached host view to the bus. */
+#ifndef CONFIG_GHCI_POLL
+#define CONFIG_GHCI_POLL		0
+#endif
+#ifndef CONFIG_GHCI_HOST_UNCACHED
+#define CONFIG_GHCI_HOST_UNCACHED	0
+#endif
+
 /*
  * The functions offered to the driver: base class 03h with subclass 02h
  * (3D controller) or 80h (another display controller), any vendor.

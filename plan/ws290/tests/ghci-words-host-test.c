@@ -726,12 +726,12 @@ test_caps(void)
 
 	/*
 	 * A device with HW_WALKER, GSI1, one shader unit, BLT, DISP and MSAA;
-	 * FEATURE: VA 40 (8), PA 48 (8 << 4), MRT_BLEND, MAX_MRT 8, LDS 4 KiB,
-	 * and FP16 set in the mirror only.
+	 * FEATURE: VA 40 (0xA), PA 48 (8 << 4), MRT_BLEND, MAX_MRT 8, LDS 4
+	 * KiB, and FP16 set in the mirror only.
 	 */
 	window_reset();
 	window[GHCI_REG_DEVICE_CAPS / 4U] = 0xE0010084U;
-	window[GHCI_REG_EXT_CAP_FEATURE / 4U] = 0x10488088U;
+	window[GHCI_REG_EXT_CAP_FEATURE / 4U] = 0x1048808AU;
 	window[GHCI_REG_RESIDENT_WARPS / 4U] = 0x003F0010U;
 	window[GHCI_REG_GCLK_HZ / 4U] = 100000000U;
 	error = ghci_caps_decode(window, &caps);
@@ -757,7 +757,7 @@ test_caps(void)
 	window[0x1E4U / 4U] = 0x40000000U;
 	window[0x1E8U / 4U] = 0x01000000U;
 	error = ghci_caps_decode(window, &caps);
-	expect(error == 0 && caps.max_mrt == 1U && caps.va_bits == 32U && caps.pa_bits == 40U, "caps zero feature");
+	expect(error == 0 && caps.max_mrt == 1U && caps.va_bits == 30U && caps.pa_bits == 40U, "caps zero feature");
 	expect(caps.local_base == 0x80000000U && caps.local_bytes == 0x40000000U && caps.window_bytes == 0x01000000U, "caps mem block");
 	expect(ghci_caps_has(&caps, GHCI_HAS_DISCRETE) == 1 && ghci_caps_has(&caps, GHCI_HAS_DISPLAY) == 1, "caps discrete display");
 
@@ -765,6 +765,48 @@ test_caps(void)
 	window[0x108U / 4U] = 0xFFFE010BU;
 	error = ghci_caps_decode(window, &caps);
 	expect(error == 0 && caps.blocks == 0U && ghci_caps_has(&caps, GHCI_HAS_DISCRETE) == 0, "caps malformed list");
+
+	/*
+	 * VA_BITS_ENC is VA - 30: 0 is 30 bits, 2 is 32, 0xA is 40, 0xF 45
+	 * (section 3.2.2).
+	 */
+	window_reset();
+	window[GHCI_REG_EXT_CAP_FEATURE / 4U] = 0x00000002U;
+	error = ghci_caps_decode(window, &caps);
+	expect(error == 0 && caps.va_bits == 32U, "caps VA 32");
+	window[GHCI_REG_EXT_CAP_FEATURE / 4U] = 0x0000000FU;
+	error = ghci_caps_decode(window, &caps);
+	expect(error == 0 && caps.va_bits == 45U, "caps VA 45");
+
+	/*
+	 * The optional blocks: CLIP_POLY [30] and BLT_SCALE [31] of FEATURE;
+	 * FFILT_FP32 [11], MAX_COLOR [15:12], TU_BILINEAR [16], BLT_BLEND
+	 * [17] and BLT_TILE [18] of FMT0.  The blitter's bits read 0 without
+	 * CAP_BLT, FFILT_FP32 without CAP_TEX_FFILT; FMT0's FFILT_FP16 [10]
+	 * mirrors CAP_TEX_FFILT.
+	 */
+	window_reset();
+	window[GHCI_REG_DEVICE_CAPS / 4U] = GHCI_CAP_BLT | GHCI_CAP_TEX_FFILT;
+	window[GHCI_REG_EXT_CAP_FEATURE / 4U] = 0xC0000000U;
+	window[GHCI_REG_EXT_CAP_FMT0 / 4U] = 0x00073C00U;
+	error = ghci_caps_decode(window, &caps);
+	expect(error == 0 && caps.max_color == 3U && caps.mismatches == 0U, "caps FMT0 colour attachments, FFILT mirror");
+	expect(ghci_caps_has(&caps, GHCI_HAS_CLIP_POLY) == 1 && ghci_caps_has(&caps, GHCI_HAS_BLT_SCALE) == 1 &&
+	       ghci_caps_has(&caps, GHCI_HAS_TU_BILINEAR) == 1 && ghci_caps_has(&caps, GHCI_HAS_BLT_BLEND) == 1 &&
+	       ghci_caps_has(&caps, GHCI_HAS_BLT_TILE) == 1 && ghci_caps_has(&caps, GHCI_HAS_FFILT_FP32) == 1,
+	       "caps optional blocks present");
+	window[GHCI_REG_DEVICE_CAPS / 4U] = 0U;
+	error = ghci_caps_decode(window, &caps);
+	expect(error == 0 && caps.mismatches == GHCI_CAP_TEX_FFILT, "caps FFILT_FP16 without CAP_TEX_FFILT");
+	expect(ghci_caps_has(&caps, GHCI_HAS_CLIP_POLY) == 1 && ghci_caps_has(&caps, GHCI_HAS_TU_BILINEAR) == 1 &&
+	       ghci_caps_has(&caps, GHCI_HAS_BLT_SCALE) == 0 && ghci_caps_has(&caps, GHCI_HAS_BLT_BLEND) == 0 &&
+	       ghci_caps_has(&caps, GHCI_HAS_BLT_TILE) == 0 && ghci_caps_has(&caps, GHCI_HAS_FFILT_FP32) == 0,
+	       "caps blitter bits without CAP_BLT, FP32 filter without CAP_TEX_FFILT");
+	window[GHCI_REG_EXT_CAP_FEATURE / 4U] = 0U;
+	window[GHCI_REG_EXT_CAP_FMT0 / 4U] = 0U;
+	error = ghci_caps_decode(window, &caps);
+	expect(error == 0 && ghci_caps_has(&caps, GHCI_HAS_CLIP_POLY) == 0 && ghci_caps_has(&caps, GHCI_HAS_TU_BILINEAR) == 0,
+	       "caps no clipper, no bilinear filter");
 }
 
 /* Tests the page table heap, watchdog and reset wait sizes. */
@@ -778,6 +820,12 @@ test_sizes(void)
 	/* 16 sessions, 2048 level 0 tables and 64 KiB spare. */
 	expect(ghci_heap_device_bytes(32U) == 16U * 16384U + 2048U * 4096U + 65536U, "heap device 32");
 	expect(ghci_heap_device_bytes(40U) == 16U * 24576U + 2048U * 4096U + 65536U, "heap device 40");
+
+	/* A 30-bit VA: the 2-level root, and the 512 chunks of 1 GiB. */
+	expect(ghci_heap_session_bytes(30U) == 16384U, "heap session 30");
+	expect(ghci_va_chunks(30U) == 512U && ghci_va_chunks(31U) == 1024U && ghci_va_chunks(32U) == 2048U &&
+	       ghci_va_chunks(40U) == 2048U, "VA chunks");
+	expect(ghci_heap_device_bytes(30U) == 16U * 16384U + 512U * 4096U + 65536U, "heap device 30");
 
 	/* Two seconds at 100 MHz; an unknown clock; a time the register cannot hold. */
 	expect(ghci_watchdog_cycles(100000000U, 2000U) == 200000000U, "watchdog 2 s");

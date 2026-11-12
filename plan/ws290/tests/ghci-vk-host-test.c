@@ -175,6 +175,7 @@ static void scene_profiles(void);
 static void scene_profile(enum model_profile profile, const char *name, const unsigned *features, unsigned feature_count, uint32_t device_type, uint32_t attachments, uint32_t shared, uint32_t samples);
 static void scene_formats(void);
 static void scene_flags(void);
+static void scene_optional(void);
 static void flag_case(const char *name, uint32_t device_caps, uint32_t feature, uint32_t fmt0, uint32_t max_mrt, uint32_t lds, const unsigned *features, unsigned feature_count, const size_t *limits, unsigned limit_count, const uint32_t *formats, unsigned format_count, uint32_t lost);
 static void scene_devices(void);
 static void scene_memory(void);
@@ -1329,6 +1330,12 @@ scene_flags(void)
 		103U, 107U, 108U, 109U
 	};
 	static const uint32_t blit_formats[] = { 124U, 126U, 129U, 130U };
+	static const uint32_t bilinear_formats[] = {
+		9U, 10U, 16U, 17U, 37U, 38U, 43U, 44U, 50U, 51U, 52U, 57U, 64U, 70U, 71U, 76U, 77U, 78U, 83U, 84U,
+		86U, 91U, 92U, 97U, 100U, 103U, 109U, 122U, 131U, 133U, 135U, 137U, 139U, 141U, 145U, 147U, 148U,
+		149U, 150U, 151U, 152U, 153U, 154U, 155U, 156U
+	};
+	static const uint32_t filter32_formats[] = { 100U, 103U, 109U };
 	uint32_t caps;
 	uint32_t feature;
 	uint32_t fmt0;
@@ -1371,7 +1378,84 @@ scene_flags(void)
 	    NULL, 0U, NULL, 0U, blit_formats, 4U, VK_FORMAT_FEATURE_BLIT_SRC_BIT);
 	flag_case("PROT", caps & ~GHCI_CAP_PROT, feature, fmt0, 8U, 16384U,
 	    NULL, 0U, NULL, 0U, NULL, 0U, 0U);
+
+	/*
+	 * The optional blocks: without the bilinear filter no format
+	 * filters; without the filter of 32-bit floats those do not; a
+	 * blitter without scaling is not used, as without the blitter; the
+	 * clipper, the blitter's blending and tiling change no answer.
+	 */
+	flag_case("TU_BILINEAR", caps, feature, fmt0 & ~GHCI_FMT0_TU_BILINEAR, 8U, 16384U,
+	    NULL, 0U, NULL, 0U, bilinear_formats, 45U, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+	flag_case("FFILT_FP32", caps, feature, fmt0 & ~GHCI_FMT0_FFILT_FP32, 8U, 16384U,
+	    NULL, 0U, NULL, 0U, filter32_formats, 3U, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+	flag_case("BLT_SCALE", caps, feature & ~GHCI_FEATURE_BLT_SCALE, fmt0, 8U, 16384U,
+	    NULL, 0U, NULL, 0U, blit_formats, 4U, VK_FORMAT_FEATURE_BLIT_SRC_BIT);
+	flag_case("CLIP_POLY", caps, feature & ~GHCI_FEATURE_CLIP_POLY, fmt0, 8U, 16384U,
+	    NULL, 0U, NULL, 0U, NULL, 0U, 0U);
+	flag_case("BLT_BLEND", caps, feature, fmt0 & ~GHCI_FMT0_BLT_BLEND, 8U, 16384U,
+	    NULL, 0U, NULL, 0U, NULL, 0U, 0U);
+	flag_case("BLT_TILE", caps, feature, fmt0 & ~GHCI_FMT0_BLT_TILE, 8U, 16384U,
+	    NULL, 0U, NULL, 0U, NULL, 0U, 0U);
 	stop("flags");
+
+	/* The KC705's minimal build and a blitter without its options. */
+	scene_optional();
+}
+
+/*
+ * The KC705's minimal build: no format filters, whatever FMT says; the
+ * attach's list names the clipper and the filter; no blitter.  A blitter
+ * that does not scale is not used either.
+ */
+static void
+scene_optional(void)
+{
+	const char *names[8];
+	struct ghci_vk *vk;
+	unsigned count;
+	unsigned index;
+	int clip;
+	int bilinear;
+	int filtered;
+	int error;
+
+	/* kc705-min: the shortfalls and the formats. */
+	error = start(MODEL_KC705_MIN);
+	vk = device.vk;
+	expect(error == 0 && vk != NULL, "optional: start kc705-min");
+	if (error != 0 || vk == NULL) {
+		stop("optional kc705-min");
+		return;
+	}
+	count = ghci_vk_caps_shortfalls(&device.caps, &vk->formats, names, 8U);
+	clip = 0;
+	bilinear = 0;
+	for (index = 0U; index < count; index++) {
+		if (strstr(names[index], "CAP_CLIP_POLY") != NULL)
+			clip = 1;
+		if (strstr(names[index], "CAP_TU_BILINEAR") != NULL)
+			bilinear = 1;
+	}
+	expect(clip && bilinear, "optional: kc705-min names the clipper and the filter");
+	filtered = 0;
+	for (index = 0U; index < GHCI_VK_FORMATS; index++) {
+		if (((vk->formats.optimal[index] | vk->formats.linear[index]) &
+		     VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0U)
+			filtered = 1;
+	}
+	expect(!filtered && vk->formats.optimal[37] != 0U, "optional: kc705-min filters no format");
+	expect(ghci_vk_caps_blitter(&device.caps) == 0, "optional: kc705-min has no blitter");
+	stop("optional kc705-min");
+
+	/* blt-min: the blitter is there, but not used; the full profile's is. */
+	error = start(MODEL_BLT_MIN);
+	expect(error == 0 && ghci_caps_has(&device.caps, GHCI_HAS_BLT) && ghci_vk_caps_blitter(&device.caps) == 0,
+	       "optional: blt-min's blitter not used");
+	stop("optional blt-min");
+	error = start(MODEL_FULL);
+	expect(error == 0 && ghci_vk_caps_blitter(&device.caps) == 1, "optional: full's blitter used");
+	stop("optional full");
 }
 
 /*

@@ -71,11 +71,11 @@ fi
 # The files the kernel builds of the driver, and the headers they include, name nothing of the
 # interface before GHCI 1.0 (the 128 KiB registers, the firmware, the native command, the aperture,
 # the packets of class 0 to 2 and their job tags).
-built=$(sed -n '/^AMD64_GHCI_SOURCES :=/,/^endif/p' "$repo/platform/amd64/vmunix.mk" | grep -o 'src/drivers/gpu/ghci/[a-z0-9/-]*\.c')
+built=$(sed -n '/^# \[GHCI GPU driver\]/,/^endif/p' "$repo/mk/kernel.mk" | grep -o 'src/drivers/gpu/ghci/[a-z0-9/-]*\.c' || true)
 headers="$ghci/ghci.h $ghci/ghci-regs.h $ghci/ghci-cmd.h $ghci/ghci-words.h"
 old_names='hcr\.h|packets\.h|frame\.h|GPU_OP_GHCI|CONFIG_GHCI_NATIVE|ghci_native|ghci_packet_|ghci_blit|ghci_firmware|firmware\.c|aperture|APERTURE|GHCI_CAPS_CP|GHCI_XCAP_|GHCI_CPFW|GHCI_TAG_|job tag'
 if [ -z "$built" ]; then
-	echo "FAIL ghci-old-names: no GHCI sources in platform/amd64/vmunix.mk"
+	echo "FAIL ghci-old-names: no GHCI sources in mk/kernel.mk"
 	status=1
 elif (cd "$repo" && grep -nE "$old_names" $built) || grep -nE "$old_names" $headers; then
 	echo "FAIL ghci-old-names: the files above name the interface before GHCI 1.0"

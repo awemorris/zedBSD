@@ -1984,6 +1984,38 @@ scene_descriptors(void)
 	expect(error == 0 && reply32(&node, 4U) == 0U && object != NULL && memcmp(object->as.sampler.descriptor, sampler_bytes, 16U) == 0,
 	       "descriptors: the sampler's 16 bytes");
 
+	/* The same sampler on a texture unit without the bilinear filter: NEAREST, NEAREST, mip NEAREST. */
+	session_of(&node)->device->caps.fmt0 &= ~GHCI_FMT0_TU_BILINEAR;
+	begin(&node, GPU_OP_CREATE_SAMPLER);
+	put64(ID_DEVICE);
+	put64(1U);
+	put32(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO);
+	put64(0U);
+	put32(0U);
+	put32(VK_FILTER_LINEAR);
+	put32(VK_FILTER_LINEAR);
+	put32(VK_SAMPLER_MIPMAP_MODE_LINEAR);
+	put32(VK_SAMPLER_ADDRESS_MODE_REPEAT);
+	put32(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+	put32(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER);
+	put32(0x3fc00000U);
+	put32(0U);
+	put32(0x3f800000U);
+	put32(0U);
+	put32(VK_COMPARE_OP_NEVER);
+	put32(0x3f000000U);
+	put32(0x447a0000U);
+	put32(VK_BORDER_COLOR_INT_OPAQUE_WHITE);
+	put32(0U);
+	tail(ID_SAMPLER + 1U);
+	error = run(&node);
+	session_of(&node)->device->caps.fmt0 |= GHCI_FMT0_TU_BILINEAR;
+	object = ghci_vk_object_find(session_of(&node), GHCI_VK_SAMPLER, ID_SAMPLER + 1U);
+	expect(error == 0 && reply32(&node, 4U) == 0U && object != NULL && object->as.sampler.descriptor[0] == 0U &&
+	       object->as.sampler.descriptor[1] == 0U && object->as.sampler.descriptor[2] == 0U &&
+	       memcmp(object->as.sampler.descriptor + 3U, sampler_bytes + 3U, 13U) == 0,
+	       "descriptors: without the bilinear filter the sampler is the nearest one");
+
 	/*
 	 * An image view: 2D array of layer 1 alone, levels 1 and 2, swizzle
 	 * B, G, R, ONE (4, 3, 2, 1: 0x29c).  Level 1 is 32 x 16 (rows of
