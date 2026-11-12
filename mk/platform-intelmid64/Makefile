@@ -1,9 +1,0 @@
-include mk/platform-intelmid64/defaults.mk
-include mk/platform-intelmid64/libc.mk
-include mk/platform-intelmid64/sysroot.mk
-include mk/platform-intelmid64/vmunix.mk
-include mk/platform-intelmid64/firmware.mk
-include mk/platform-intelmid64/bootloader.mk
-include mk/platform-intelmid64/programs.mk
-include mk/platform-intelmid64/rootfs.mk
-include mk/platform-intelmid64/image.mk
