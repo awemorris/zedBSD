@@ -12,11 +12,10 @@
 #   g. connect when the CA is cert.pem beside the .exe (libssl-compat's default paths on Windows);
 # and the program must import no DLL of OpenSSL and hold none of OpenSSL's names, and hold libssl-compat's.
 #
-# apps/browser-win32/Makefile links OpenSSL today.  Until it lists the compat libraries itself, this script
-# gives make on its command line what that change would: libbrowser's list with net/tls-static-compat.c in
-# place of net/tls-static.c (LIBBROWSER_CORE_SOURCES), and the two compat archives, built here from their
-# sources.mk with the build's flags, in place of OpenSSL's (WIN32_OPENSSL_ARCHIVES).  The Makefile is not
-# changed.  With COMPAT_BY_MAKEFILE=1 (once the Makefile links the compat libraries) make runs without them.
+# apps/browser-win32/Makefile links OpenSSL today.  Until it links the compat libraries itself, the program is built
+# with the proposed change (plan/ws335/phase036/browser-win32-Makefile.diff) applied to a copy of the Makefile in the
+# run directory (make -f that copy, from the top of the tree); the tree's Makefile is not changed.  With
+# COMPAT_BY_MAKEFILE=1 (once the Makefile has the change) the tree's Makefile is used.
 #   sh plan/ws335/tests/tls-wine-compat.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
 # WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws335-tls-wine-prefix); PORT=<n> the server's port (18453).
@@ -38,71 +37,41 @@ wcc=$LLVM_MINGW/bin/x86_64-w64-mingw32-clang
 mkdir -p "$sources"
 status=0
 
-# 1. The compat archives, from their sources.mk, with the flags the Windows build compiles its own files with.
-make_args=
+# 1. The Makefile: the tree's, or a copy with the proposed change.
+makefile=apps/browser-win32/Makefile
 if [ "${COMPAT_BY_MAKEFILE:-0}" != 1 ]; then
-	lib=$out/compat
-	mkdir -p "$lib/include"
-	ln -sfn "$top/include/libc/compat" "$lib/include/compat"
-	cflags="-std=gnu11 -O2 -g -Wall -Wextra -Werror -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE -I$lib/include -I."
-	crypto_sources=$(grep -v '^#' userland/base/libcrypto-compat/sources.mk | grep -o 'userland/base/libcrypto-compat/[a-z0-9-]*\.c' | grep -v -- '-posix\.c')
-	ssl_sources=$(grep -v '^#' userland/base/libssl-compat/sources.mk | grep -o 'userland/base/libssl-compat/[a-z0-9-]*\.c')
-	: > "$lib/build.log"
-	for file in $crypto_sources $ssl_sources; do
-		case "$file" in
-		userland/base/libcrypto-compat/*) object=$lib/crypto-$(basename "$file" .c).o ;;
-		*) object=$lib/ssl-$(basename "$file" .c).o ;;
-		esac
-		if ! timeout 300 "$wcc" $cflags -c "$file" -o "$object" >> "$lib/build.log" 2>&1; then
-			tail -20 "$lib/build.log"
-			echo "tls-wine-compat: $file did not compile"
-			echo "tls-wine-compat: FAIL"
-			exit 1
-		fi
-	done
-	if [ -s "$lib/build.log" ]; then
-		head -20 "$lib/build.log"
-		echo "tls-wine-compat: the compat libraries have warnings (log $lib/build.log)"
+	makefile=$out/Makefile
+	cp apps/browser-win32/Makefile "$makefile"
+	if ! patch -s "$makefile" < plan/ws335/phase036/browser-win32-Makefile.diff > "$out/patch.log" 2>&1; then
+		cat "$out/patch.log"
+		echo "tls-wine-compat: the proposed change does not apply to apps/browser-win32/Makefile"
 		echo "tls-wine-compat: FAIL"
 		exit 1
 	fi
-	"$LLVM_MINGW/bin/llvm-ar" rcs "$lib/libcrypto-compat.a" "$lib"/crypto-*.o
-	"$LLVM_MINGW/bin/llvm-ar" rcs "$lib/libssl-compat.a" "$lib"/ssl-*.o
-	echo "tls-wine-compat: libssl-compat.a and libcrypto-compat.a built ($(echo $crypto_sources $ssl_sources | wc -w) sources), no warning"
-
-	# libbrowser's list as the build has it, with the compat table in place of OpenSSL's.
-	objects=$(make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 LLVM_MINGW="$LLVM_MINGW" \
-	    BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" flags | sed -n 's/^LIBBROWSER_CORE_OBJECTS=//p')
-	core=$(for object in $objects; do echo "$object"; done | sed "s|^$build/obj/||; s|\.o\$|.c|; s|net/tls-static\.c\$|net/tls-static-compat.c|")
-	if ! echo "$core" | grep -qx 'userland/desktop/libbrowser/net/tls-static-compat.c'; then
-		echo "tls-wine-compat: libbrowser's list has no net/tls-static.c to replace"
-		echo "tls-wine-compat: FAIL"
-		exit 1
-	fi
-	make_args=compat
+fi
+if grep -qi 'openssl' "$makefile"; then
+	echo "tls-wine-compat: $makefile still names OpenSSL"
+	status=1
 fi
 
-# 2. The program.
-if [ -n "$make_args" ]; then
-	timeout 3300 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 \
-	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j4 \
-	    "LIBBROWSER_CORE_SOURCES=$(echo $core)" "WIN32_OPENSSL_ARCHIVES=$top/$lib/libssl-compat.a $top/$lib/libcrypto-compat.a" \
-	    test-program TEST_PROGRAM=tls-tool TEST_PROGRAM_SOURCES="plan/ws334/tests/tls-main.c" > "$out/make.log" 2>&1
-	made=$?
-else
-	timeout 3300 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 \
-	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j4 \
-	    test-program TEST_PROGRAM=tls-tool TEST_PROGRAM_SOURCES="plan/ws334/tests/tls-main.c" > "$out/make.log" 2>&1
-	made=$?
-fi
-if [ "$made" != 0 ] || grep -q 'warning:' "$out/make.log"; then
+# 2. The program, and the two compat archives the Makefile makes for it.
+if ! timeout 3300 make --no-print-directory -f "$makefile" WIN32_ARCH=x86_64 LLVM_MINGW="$LLVM_MINGW" \
+    BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j4 \
+    test-program TEST_PROGRAM=tls-tool TEST_PROGRAM_SOURCES="plan/ws334/tests/tls-main.c" > "$out/make.log" 2>&1 ||
+    grep -q 'warning:' "$out/make.log"; then
 	echo "tls-wine-compat: the program did not build cleanly (log $out/make.log)"
 	tail -10 "$out/make.log"
 	echo "tls-wine-compat: FAIL"
 	exit 1
 fi
+for archive in libssl-compat.a libcrypto-compat.a; do
+	if [ ! -f "$build/obj/$archive" ]; then
+		echo "tls-wine-compat: the build made no $archive"
+		status=1
+	fi
+done
 program=$build/tests/tls-tool.exe
-if ! grep -q 'net/tls-static-compat\.o' "$out/make.log" && [ ! -f "$build/obj/userland/desktop/libbrowser/net/tls-static-compat.o" ]; then
+if [ ! -f "$build/obj/userland/desktop/libbrowser/net/tls-static-compat.o" ]; then
 	echo "tls-wine-compat: the program was not built with net/tls-static-compat.c"
 	status=1
 fi
