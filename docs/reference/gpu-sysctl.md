@@ -59,31 +59,33 @@ The MIB macros are these constants, all of them the second component of a name w
 
 ## Telemetry
 
-The value of `hw.gputelemetry` is a `struct gpu_telemetry_header` of 24 bytes followed by `count` `struct gpu_telemetry_entry` of 72 bytes each. It lists one entry for each GPU whose driver reports telemetry, in the order in which the drivers registered them, and at most 8 GPUs are listed. A GPU whose driver reports nothing has no entry, and a driver that keeps nothing (venus, amdrdna, ghci, mali and nvrtx) never has one, so the value may be only the header with `count` 0. A GPU whose driver fails to produce its entry when the value is read is left out of that read.
+The value of `hw.gputelemetry` is a `struct gpu_telemetry_header` of 24 bytes followed by `count` `struct gpu_telemetry_entry` of 88 bytes each. It lists one entry for each GPU whose driver reports telemetry, in the order in which the drivers registered them, and at most 8 GPUs are listed. A GPU whose driver reports nothing has no entry, and a driver that keeps nothing (venus, amdrdna, ghci, mali and nvrtx) never has one, so the value may be only the header with `count` 0. A GPU whose driver fails to produce its entry when the value is read is left out of that read.
 
 A reader sizes a buffer by asking for the length first; that length covers every listed GPU, and a successful read stores the length of the entries that are present. It then checks that `version` is `GPU_TELEMETRY_VERSION`, that `struct_size` and `element_size` are the sizes of the structures it was built with, and that `struct_size` plus `count` times `element_size` equals the length it got. Entry number `n` starts at `struct_size` plus `n` times `element_size`. The `sysctl hw.gputelemetry` command does exactly this check and prints one line for each GPU. The fields are 32-bit and 64-bit throughout, so the layout is the same for 32-bit and 64-bit processes.
 
-`valid` says which fields the driver filled; a field whose bit is not set is 0 and means nothing. `time_ns` and `busy_ns` are in nanoseconds. `busy_ns` adds up the time during which any engine ran a request, up to `time_ns`, which is the driver's own monotonic clock when the entry was read (0 if the kernel has no such clock). The change of `busy_ns` between two reads, divided by the change of `time_ns`, is the use of the GPU in that interval. The frequencies are in MHz: `cur_mhz` is the one the hardware runs at, `req_mhz` the one the driver last asked for, and `min_mhz` and `max_mhz` the range that the driver asks within. `objects_bytes` is the memory that the GPU's objects hold, in bytes, and `objects_limit` is the limit it counts against.
+`valid` says which fields the driver filled; a field whose bit is not set is 0 and means nothing. `time_ns` and `busy_ns` are in nanoseconds. `busy_ns` adds up the time during which any engine ran a request, up to `time_ns`, which is the driver's own monotonic clock when the entry was read (0 if the kernel has no such clock). The change of `busy_ns` between two reads, divided by the change of `time_ns`, is the use of the GPU in that interval. The frequencies are in MHz: `cur_mhz` is the one the hardware runs at, `req_mhz` the one the driver last asked for, and `min_mhz` and `max_mhz` the range that the driver asks within. `objects_bytes` is the memory that the GPU's objects hold, in bytes, and `objects_limit` is the limit it counts against. `sleep_ns` adds up the time in nanoseconds that the GPU spent in its power-down idle state; its change between two reads, divided by the change of `time_ns`, is the share of that interval the GPU slept. `awake_holds` is how many of the GPU's power domains the driver holds awake when the entry is read, which keeps the GPU out of that state, and `awake_wakes` how many times the driver has woken a domain.
 
 The three drivers that report telemetry fill different fields:
 
 | Driver | `driver` field | Fields filled |
 | --- | --- | --- |
-| i915 | `i915` | `GPU_TELEMETRY_BUSY`. `GPU_TELEMETRY_REQ_MHZ` while the driver's frequency control runs and has written a frequency. `GPU_TELEMETRY_RANGE_MHZ` once the limits of that control are known. Not `GPU_TELEMETRY_CUR_MHZ` or `GPU_TELEMETRY_OBJECTS`. |
+| i915 | `i915` | `GPU_TELEMETRY_BUSY`. `GPU_TELEMETRY_REQ_MHZ` while the driver's frequency control runs and has written a frequency. `GPU_TELEMETRY_RANGE_MHZ` once the limits of that control are known. `GPU_TELEMETRY_SLEEP` while the running device holds its forcewake domains: `sleep_ns` is the GT's RC6 time, and the time of a park (the GT given back for a suspend) is added when the GT wakes; a power-down to D3hot is not counted. `GPU_TELEMETRY_AWAKE` always: `awake_holds` is the forcewake domains the running device holds, `awake_wakes` the times a domain was woken. Not `GPU_TELEMETRY_CUR_MHZ` or `GPU_TELEMETRY_OBJECTS`. |
 | powervr | `powervr` | `GPU_TELEMETRY_BUSY`, which counts the time from a submission's kick to its delivery. `GPU_TELEMETRY_CUR_MHZ`, `GPU_TELEMETRY_REQ_MHZ` and `GPU_TELEMETRY_RANGE_MHZ` with the same value, the core clock, when it is known: the core has no frequency scaling. `GPU_TELEMETRY_OBJECTS`: the render buffers in use, not counting those kept for reuse, against 256 MiB. |
 | bcm2711 (V3D) | `v3d` | `GPU_TELEMETRY_BUSY`, which counts the time the jobs ran. `GPU_TELEMETRY_REQ_MHZ` and `GPU_TELEMETRY_RANGE_MHZ` with the same value, the clock the driver asked for, when it is known. `GPU_TELEMETRY_OBJECTS`: the Vulkan allocations that the sessions hold, against 512 MiB. Not `GPU_TELEMETRY_CUR_MHZ`. |
 
-Sources: the readers are `drv_i915_rps_telemetry_read` in [gt-power.c](../../src/drivers/gpu/i915/gt-power.c), `render_telemetry` in [render.c](../../src/drivers/gpu/powervr/render.c) and `render_telemetry` in [render-device.c](../../src/drivers/gpu/bcm2711/render-device.c); the list and the value are `kern_gpu_telemetry_register` and `sysctl_gputelemetry` in [sysctl.c](../../src/kern/sysctl.c).
+Sources: the readers are `i915_gt_telemetry_read` in [device.c](../../src/drivers/gpu/i915/device.c) with `drv_i915_rps_telemetry_read` and `drv_i915_rc6_residency_read` in [gt-power.c](../../src/drivers/gpu/i915/gt-power.c), `render_telemetry` in [render.c](../../src/drivers/gpu/powervr/render.c) and `render_telemetry` in [render-device.c](../../src/drivers/gpu/bcm2711/render-device.c); the list and the value are `kern_gpu_telemetry_register` and `sysctl_gputelemetry` in [sysctl.c](../../src/kern/sysctl.c).
 
 
 | Name | Value | Meaning |
 | --- | ---: | --- |
-| `GPU_TELEMETRY_VERSION` | 1 | The version of the `hw.gputelemetry` layout, stored in `version` of the header. |
+| `GPU_TELEMETRY_VERSION` | 2 | The version of the `hw.gputelemetry` layout, stored in `version` of the header. |
 | `GPU_TELEMETRY_BUSY` | 1 | `valid` bit: `busy_ns` and `time_ns` are filled. |
 | `GPU_TELEMETRY_CUR_MHZ` | 2 | `valid` bit: `cur_mhz` is filled. |
 | `GPU_TELEMETRY_REQ_MHZ` | 4 | `valid` bit: `req_mhz` is filled. |
 | `GPU_TELEMETRY_RANGE_MHZ` | 8 | `valid` bit: `min_mhz` and `max_mhz` are filled. |
 | `GPU_TELEMETRY_OBJECTS` | 16 | `valid` bit: `objects_bytes` and `objects_limit` are filled. |
+| `GPU_TELEMETRY_SLEEP` | 32 | `valid` bit: `sleep_ns` is filled. |
+| `GPU_TELEMETRY_AWAKE` | 64 | `valid` bit: `awake_holds` and `awake_wakes` are filled. |
 
 ## Structures
 
@@ -93,7 +95,7 @@ Sources: the readers are `drv_i915_rps_telemetry_read` in [gt-power.c](../../src
 | ---: | ---: | --- | --- | --- | --- |
 | 0 | 4 | `uint32_t` | `version` | out | The layout version, `GPU_TELEMETRY_VERSION`. |
 | 4 | 4 | `uint32_t` | `struct_size` | out | The size of this header in bytes, 24. Entries start at this offset. |
-| 8 | 4 | `uint32_t` | `element_size` | out | The size of one entry in bytes, 72. |
+| 8 | 4 | `uint32_t` | `element_size` | out | The size of one entry in bytes, 88. |
 | 12 | 4 | `uint32_t` | `count` | out | The number of entries that follow. 0 when no driver reports telemetry. |
 | 16 | 8 | `uint32_t[2]` | `reserved` | out | Written as zero. |
 
@@ -102,7 +104,7 @@ Sources: the readers are `drv_i915_rps_telemetry_read` in [gt-power.c](../../src
 | Offset | Bytes | Type | Field | Direction | Meaning |
 | ---: | ---: | --- | --- | --- | --- |
 | 0 | 16 | `char[16]` | `driver` | out | The name of the driver that reports this GPU, NUL-terminated. A longer name is cut to 15 characters. |
-| 16 | 4 | `uint32_t` | `valid` | out | A set of `GPU_TELEMETRY_BUSY`, `GPU_TELEMETRY_CUR_MHZ`, `GPU_TELEMETRY_REQ_MHZ`, `GPU_TELEMETRY_RANGE_MHZ` and `GPU_TELEMETRY_OBJECTS`: the fields below that the driver filled. A field whose bit is clear is 0. |
+| 16 | 4 | `uint32_t` | `valid` | out | A set of `GPU_TELEMETRY_BUSY`, `GPU_TELEMETRY_CUR_MHZ`, `GPU_TELEMETRY_REQ_MHZ`, `GPU_TELEMETRY_RANGE_MHZ`, `GPU_TELEMETRY_OBJECTS`, `GPU_TELEMETRY_SLEEP` and `GPU_TELEMETRY_AWAKE`: the fields below that the driver filled. A field whose bit is clear is 0. |
 | 20 | 4 | `uint32_t` | `reserved` | out | Written as zero. |
 | 24 | 8 | `uint64_t` | `time_ns` | out | The driver's monotonic clock in nanoseconds when the entry was read. 0 when the kernel has no such clock. Valid with `GPU_TELEMETRY_BUSY`. |
 | 32 | 8 | `uint64_t` | `busy_ns` | out | The time in nanoseconds during which any engine ran a request, up to `time_ns`. Valid with `GPU_TELEMETRY_BUSY`. |
@@ -112,3 +114,6 @@ Sources: the readers are `drv_i915_rps_telemetry_read` in [gt-power.c](../../src
 | 60 | 4 | `uint32_t` | `req_mhz` | out | The frequency in MHz that the driver last asked for. Valid with `GPU_TELEMETRY_REQ_MHZ`. |
 | 64 | 4 | `uint32_t` | `min_mhz` | out | The lowest frequency in MHz that the driver asks within. Valid with `GPU_TELEMETRY_RANGE_MHZ`. |
 | 68 | 4 | `uint32_t` | `max_mhz` | out | The highest frequency in MHz that the driver asks within. Valid with `GPU_TELEMETRY_RANGE_MHZ`. |
+| 72 | 8 | `uint64_t` | `sleep_ns` | out | The time in nanoseconds that the GPU spent in its power-down idle state. Valid with `GPU_TELEMETRY_SLEEP`. |
+| 80 | 4 | `uint32_t` | `awake_holds` | out | How many of the GPU's power domains the driver holds awake now. Valid with `GPU_TELEMETRY_AWAKE`. |
+| 84 | 4 | `uint32_t` | `awake_wakes` | out | How many times the driver has woken a power domain. Valid with `GPU_TELEMETRY_AWAKE`. |

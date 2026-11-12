@@ -152,6 +152,16 @@ struct i915_gt {
 
 	/* The domains a park of the request worker gave back, which the unpark takes again. */
 	unsigned forcewake_parked;
+
+	/* The time the GT spent in RC6, sampled while the running device holds its domains. */
+	struct i915_rc6_residency rc6_residency;
+
+	/* When the last park gave the domains back and the RC6 time then, in nanoseconds, for the unpark's log. */
+	uint64_t parked_at_ns;
+	uint64_t parked_sleep_ns;
+
+	/* How many times the RC6 counter had been given up for a loss of power when the last park began. */
+	unsigned parked_forgets;
 };
 
 #endif

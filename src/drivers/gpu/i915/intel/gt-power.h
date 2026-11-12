@@ -41,6 +41,16 @@
 #define I915_GT_RING_MAX_IDLE(base)			((base) + 0x54U)
 
 /*
+ * The GT's RC6 residency counter: the time the GT has spent in RC6, a
+ * 32-bit count that wraps.  It lies in the GT forcewake domain.
+ *
+ * Value referenced: Intel Iris Xe Graphics PRM for DG1, Volume 13
+ * (General Assets), the table of registers a non-privileged batch may
+ * read (GFXREG_GT_GFX_RC6, 138108h).
+ */
+#define I915_GT_GEN6_GT_GFX_RC6				0x138108U
+
+/*
  * Coarse power gating.
  *
  * Values referenced: Linux v6.8.12 drivers/gpu/drm/i915/gt/intel_gt_regs.h

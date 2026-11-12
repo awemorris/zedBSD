@@ -26,6 +26,8 @@
 #include "worker.h"
 #include "engine.h"
 #include "irq.h"
+#include "gt-power.h"
+#include "perf.h"
 #include "display/display.h"
 #include "display/run-log.h"
 #include "display/xd9-flip.h"
@@ -45,6 +47,7 @@
 #include <kern/thread.h>
 
 #include <uapi/errno.h>
+#include <uapi/sysctl.h>
 #include <stddef.h>
 
 #include "intel/gt-regs.h"
@@ -232,6 +235,8 @@ static void i915_start_pxp(struct i915_device *device);
 static int i915_start_publish(struct i915_device *device);
 static void i915_stop_gt(struct i915_device *device);
 static void i915_stop_hardware(struct i915_device *device);
+static int i915_gt_telemetry_read(void *context, struct gpu_telemetry_entry *entry);
+static void i915_log_park_sleep(struct i915_gt *gt);
 static int i915_forcewake_get_all(struct i915_gt *gt, unsigned *held);
 static void i915_forcewake_put_all(struct i915_gt *gt, unsigned held);
 static void i915_start_dump_trace(struct i915_gt *gt);
@@ -533,12 +538,19 @@ drv_i915_device_park_gt(
 	struct i915_device *device)
 {
 	struct i915_gt *gt;
+	unsigned held;
 
 	/* The GT the device runs. */
 	gt = &device->gt;
 
 	/* Stops the RPS interrupts and work while the domains are still held. */
 	drv_i915_rps_stop(&gt->init.rps);
+
+	/* Samples the RC6 time a last time while the domains are still held, and notes when the park began. */
+	drv_i915_rc6_residency_pause(&gt->rc6_residency, &gt->mmio);
+	(void)drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &gt->parked_sleep_ns, &held);
+	gt->parked_at_ns = drv_i915_perf_now();
+	gt->parked_forgets = drv_i915_rc6_residency_forgets(&gt->rc6_residency);
 
 	/* Gives the domains back; forcewake_parked says which to take again. */
 	gt->forcewake_parked = gt->forcewake_held;
@@ -571,6 +583,10 @@ drv_i915_device_unpark_gt(
 		kern_logf("i915: unpark: forcewake failed (%d, %u domains held)\n", error, held);
 		return error;
 	}
+
+	/* Adds the RC6 time of the park, and says how much of the park the GT slept. */
+	drv_i915_rc6_residency_resume(&gt->rc6_residency, &gt->mmio, held);
+	i915_log_park_sleep(gt);
 
 	/* Lets the GT frequency follow the load again. */
 	(void)drv_i915_rps_start(&gt->init.rps, &gt->irq, &gt->mmio);
@@ -623,6 +639,9 @@ drv_i915_device_suspend_hw(
 		kern_logf("i915: suspend: the display did not go down (%d); the device runs on\n", error);
 		return error;
 	}
+
+	/* The GT loses its power in D3hot, and the RC6 counter with it. */
+	drv_i915_rc6_residency_forget(&gt->rc6_residency);
 
 	/* Succeeded: the device may go to D3hot. */
 	kern_logf("i915: suspend: the hardware is down (interrupts off, display in DC9)\n");
@@ -1038,6 +1057,7 @@ i915_start_prepare(
 	/* Starts an empty trace and the device-owned locks. */
 	drv_i915_trace_init(&gt->trace);
 	spin_init(&gt->uncore_lock, LOCK_RANK_DEVICE, "i915 uncore");
+	drv_i915_rc6_residency_init(&gt->rc6_residency);
 	(void)mutex_init(&gt->sb_lock, LOCK_RANK_DEVICE, "i915 sideband");
 
 	/* Refuses a kernel whose waits have no monotonic counter to measure time with. */
@@ -1905,12 +1925,15 @@ i915_start_publish(
 
 	gt->forcewake_held = held;
 
+	/* Starts the account of the RC6 time while the domains are held. */
+	drv_i915_rc6_residency_resume(&gt->rc6_residency, &gt->mmio, held);
+
 	/* Lets the GT frequency follow the load from here on; without it the frequency stays requested. */
 	device->stage = "rps_start";
 	(void)drv_i915_rps_start(&gt->init.rps, &gt->irq, &gt->mmio);
 
-	/* Lists the GPU in hw.gputelemetry, which only reads what the RPS keeps; a full list leaves it out. */
-	(void)kern_gpu_telemetry_register("i915", drv_i915_rps_telemetry_read, &gt->init.rps);
+	/* Lists the GPU in hw.gputelemetry (what the RPS keeps, the RC6 time and the forcewake); a full list leaves it out. */
+	(void)kern_gpu_telemetry_register("i915", i915_gt_telemetry_read, gt);
 
 	/* Creates the request worker's state. */
 	device->stage = "worker_create";
@@ -1954,7 +1977,8 @@ i915_stop_gt(
 	/* Stops the RPS interrupts and work while the domains are still held. */
 	drv_i915_rps_stop(&gt->init.rps);
 
-	/* Gives back the domains the published node held. */
+	/* Gives back the domains the published node held, after the last RC6 sample. */
+	drv_i915_rc6_residency_pause(&gt->rc6_residency, &gt->mmio);
 	i915_forcewake_put_all(gt, gt->forcewake_held);
 	gt->forcewake_held = 0U;
 
@@ -2144,6 +2168,79 @@ i915_stop_hardware(
 		gt->probe_pm_held = 0U;
 		kern_logf("i915: stop: PCI probe runtime PM released (usage=%d)\n", drv_i915_rpm_usage(&gt->probe_pm));
 	}
+}
+
+/*
+ * Fills one GPU's hw.gputelemetry entry: what the RPS keeps, the time the
+ * GT spent in RC6 (while the running device holds its domains; a parked
+ * GT's time is added when it wakes), and the forcewake domains held now
+ * and woken so far.
+ */
+static int
+i915_gt_telemetry_read(
+	void *context,
+	struct gpu_telemetry_entry *entry)
+{
+	struct i915_gt *gt;
+	uint64_t sleep_ns;
+	unsigned holds;
+	int error;
+
+	gt = context;
+
+	/* The busy time and the frequencies. */
+	error = drv_i915_rps_telemetry_read(&gt->init.rps, entry);
+	if (error != 0)
+		return error;
+
+	/* The RC6 time, current only while the domains are held. */
+	error = drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &sleep_ns, &holds);
+	if (error == 0) {
+		entry->sleep_ns = sleep_ns;
+		entry->valid |= GPU_TELEMETRY_SLEEP;
+	}
+
+	/* The domains the running device holds awake, and how many wakes the driver asked for. */
+	entry->awake_holds = holds;
+	entry->awake_wakes = gt->mmio.forcewake_wakes;
+	entry->valid |= GPU_TELEMETRY_AWAKE;
+
+	/* Succeeded: the entry is filled. */
+	return 0;
+}
+
+/* Logs how long the park that just ended lasted and how much of it the GT spent in RC6. */
+static void
+i915_log_park_sleep(
+	struct i915_gt *gt)
+{
+	uint64_t now;
+	uint64_t parked_ns;
+	uint64_t sleep_ns;
+	unsigned holds;
+	unsigned forgets;
+
+	/* The length of the park, by the driver's clock. */
+	now = drv_i915_perf_now();
+	parked_ns = 0U;
+	if (now > gt->parked_at_ns)
+		parked_ns = now - gt->parked_at_ns;
+
+	/* A park across a loss of power has no RC6 time to tell. */
+	forgets = drv_i915_rc6_residency_forgets(&gt->rc6_residency);
+	if (forgets != gt->parked_forgets) {
+		kern_logf("i915: unpark: the GT was parked %llu ms and powered down, which the RC6 time does not count\n",
+		    (unsigned long long)(parked_ns / 1000000U));
+		return;
+	}
+
+	/* The RC6 time the resume added. */
+	(void)drv_i915_rc6_residency_read(&gt->rc6_residency, &gt->mmio, &sleep_ns, &holds);
+	sleep_ns -= gt->parked_sleep_ns;
+
+	/* In milliseconds, which a park of seconds reads well in. */
+	kern_logf("i915: unpark: the GT was parked %llu ms and in RC6 %llu ms of it\n",
+	    (unsigned long long)(parked_ns / 1000000U), (unsigned long long)(sleep_ns / 1000000U));
 }
 
 /* Wakes every forcewake domain in order and reports how many are held. */

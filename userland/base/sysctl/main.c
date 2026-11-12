@@ -677,7 +677,8 @@ show_diskstats(
 /*
  * Prints hw.gputelemetry: the GPUs, then a line a GPU with its
  * driver, the fields it filled (valid), its busy time at the driver's
- * clock, its frequencies and its objects' memory.  Returns 0, or -1 with
+ * clock, its frequencies, its objects' memory, its time asleep and the
+ * power domains its driver holds awake.  Returns 0, or -1 with
  * errno set.
  */
 static int
@@ -726,10 +727,11 @@ show_gputelemetry(
 	for (gpu = 0; gpu < header->count; gpu++) {
 		entry = (const struct gpu_telemetry_entry *)(void *)(buffer + header->struct_size + (size_t)gpu * header->element_size);
 		printf("hw.gputelemetry: gpu=%u driver=%.16s valid=0x%x time_ns=%llu busy_ns=%llu cur_mhz=%u req_mhz=%u min_mhz=%u max_mhz=%u "
-		       "objects_bytes=%llu objects_limit=%llu\n",
+		       "objects_bytes=%llu objects_limit=%llu sleep_ns=%llu awake_holds=%u awake_wakes=%u\n",
 		       gpu, entry->driver, entry->valid, (unsigned long long)entry->time_ns, (unsigned long long)entry->busy_ns,
 		       entry->cur_mhz, entry->req_mhz, entry->min_mhz, entry->max_mhz,
-		       (unsigned long long)entry->objects_bytes, (unsigned long long)entry->objects_limit);
+		       (unsigned long long)entry->objects_bytes, (unsigned long long)entry->objects_limit,
+		       (unsigned long long)entry->sleep_ns, entry->awake_holds, entry->awake_wakes);
 	}
 
 	/* The value is not needed any more. */

@@ -114,6 +114,13 @@ struct i915_mmio {
 	/* How many wake requests were never acknowledged. */
 	uint32_t forcewake_ack_timeouts;
 
+	/*
+	 * How many times a domain was woken (its count left zero), for the
+	 * telemetry, which reads it from another thread without the caller's
+	 * protection; a reader may see a value one wake old.
+	 */
+	volatile uint32_t forcewake_wakes;
+
 	/* Nonzero once a release without a matching hold was attempted. */
 	int forcewake_underflow;
 

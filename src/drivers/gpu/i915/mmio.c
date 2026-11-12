@@ -124,6 +124,7 @@ drv_i915_mmio_init(
 
 	/* Starts with clean failure counters and no steering section. */
 	mmio->forcewake_ack_timeouts = 0U;
+	mmio->forcewake_wakes = 0U;
 	mmio->forcewake_underflow = 0;
 	mmio->mcr_locked = 0;
 	mmio->mcr_steer = 0U;
@@ -243,8 +244,9 @@ drv_i915_forcewake_get(
 	if (mmio->forcewake_count[domain] > 1)
 		return 0;
 
-	/* Asks the domain to wake. */
+	/* Asks the domain to wake, and counts the wake. */
 	mmio->ops->forcewake_request(mmio->context, domain, 1);
+	mmio->forcewake_wakes++;
 
 	/* Waits for the domain to acknowledge. */
 	for (poll = 0U; poll < I915_FORCEWAKE_ACK_POLLS; poll++) {
