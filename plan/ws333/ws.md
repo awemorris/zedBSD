@@ -56,3 +56,4 @@
 | [p027](phase027/phase.md) | 5330 の残り: package の C-state 0% の原因（i915 の RC6・DC state の A/B）、i915 の qs40、S0 idle | cleared（2026-11-13 Q1。直しは p029 と共に main に merge。S0 idle は VMD の Bug の案） | p025、p028 |
 | [p028](phase028/phase.md) | 5330 を人手なしで戻せる起動: Intel TCO watchdog の driver（止まれば再起動）と UEFI の一回だけの起動 | cleared（2026-11-13 Q1、P3 q2028。main に merge。5330 で人手なしに戻れる事を確かめた） | — |
 | [p029](phase029/phase.md) | i915 の GT を RC6 に入れる: HW_CONTROL で DEVICE_LOST の原因、forcewake の参照の数の性能。考える Phase、実機は最後 | cleared（2026-11-13 Q1、P3 q2037。main に merge） | p027 |
+- 2026-11-13 Q1: p029 の後の残り（範囲の外の手掛かり）: (1) amd64 を 100 Hz にしたので、ms で書いた待ち（例 i915 の `I915_WORKER_WAIT_MS` は 1 ms のつもりが 10 ms、c600 で 5 s に 190〜460 回の期限切れ）が 10 ms に丸まる。性能への影響は未確かめ。(2) i915 の単一の worker と GPU の job の 10 秒の期限の構造（待たされた時間も期限に数える）。(3) uncached の boot framebuffer の text console が 1 行 約 270 ms。(4) S0 idle は [BUG-424](../bugs/BUG-424.md)。

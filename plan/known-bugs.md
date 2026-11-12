@@ -461,3 +461,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-421](bugs/BUG-421.md) | 新しい checkout で NoctLang の patch が取得した tarball に当たらず `make sysroot` が止まる（CMakeLists.txt の hunk） | fixed（2026-11-12 ユーザー 0958bc742e、Q1 が新しい worktree で確かめた） |
 | [BUG-422](bugs/BUG-422.md) | kernel に CPU の affinity が無く、cpuperf の測りの thread が work stealing で他の CPU に移る（E-core が測れない） | fixed（2026-11-13 Q1、P2 q2024。`sched_set_cpu` に FREE・BOUND の affinity、BOUND は盗まない。5330 の確かめは WS333 の次の測定） |
 | [BUG-423](bugs/BUG-423.md) | QEMU amd64 で USB の keyboard が enumerate されない（`port 6 enumeration failed (42)`、ETIMEDOUT） | fixed（2026-11-13 Q1、P2 q2026。IRQ の establish を IMAN.IE の前に、全 controller 同じ順。実機の DWC3 は未確かめ） |
+| [BUG-424](bugs/BUG-424.md) | VMD の裏の disk がある機械（5330）が S0 idle に入れない（`vmd_suspend()` が常に EBUSY） | open（2026-11-13 Q1 が起票、WS333 p027 から） |
