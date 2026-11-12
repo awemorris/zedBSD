@@ -16,13 +16,14 @@
  * one of 1 to 15 and gives it back only once the session is retired (its
  * close's fence passed, or a reset ended the close).
  *
- * Addresses.  The driver uses the low 4 GiB of GPU addresses, cut into
- * 2 MiB chunks.  A chunk belongs to one session at a time, so that no two
- * sessions' mappings ever meet, even in the page table every session
- * shares on a GPU without PROT, and a level 0 table of the walker serves
- * one session only.  A session's mappings lie in arenas, runs of the
- * chunks it owns; an arena goes back when its last mapping's unmap has
- * passed.  The first and the last chunk are never used.
+ * Addresses.  The driver uses the low 4 GiB of GPU addresses (all of a
+ * narrower VA), cut into 2 MiB chunks.  A chunk belongs to one session at
+ * a time, so that no two sessions' mappings ever meet, even in the page
+ * table every session shares on a GPU without PROT, and a level 0 table
+ * of the walker serves one session only.  A session's mappings lie in
+ * arenas, runs of the chunks it owns; an arena goes back when its last
+ * mapping's unmap has passed.  The first and the last chunk of that range
+ * are never used.
  *
  * CP_HEAP.  The command processor takes its page tables from CP_HEAP on
  * its own; the driver cannot see what it took and counts the bound
@@ -59,9 +60,8 @@
 /* The mappings one arena holds at once; a full arena sends a mapping to the next. */
 #define ARENA_EXTENTS			64U
 
-/* The chunks the driver hands out: every one but the first and the last. */
+/* The first chunk the driver hands out; the last one is end_chunk's. */
 #define FIRST_CHUNK			1U
-#define END_CHUNK			(GHCI_CHUNKS - 1U)
 
 /* The access every mapping of host memory has; the GPU keeps it coherent with the processor. */
 #define HOST_MAP_FLAGS			(GHCI_VM_FLAG_READ | GHCI_VM_FLAG_WRITE | GHCI_VM_FLAG_COHERENT)
@@ -99,6 +99,7 @@ static unsigned marks_count(const uint8_t *marks);
 static int va_take(struct ghci_device *device, struct ghci_vm *vm, uint64_t bytes, uint64_t *va, struct ghci_arena **result);
 static void va_give(struct ghci_device *device, struct ghci_vm *vm, struct ghci_arena *arena, uint64_t va);
 static int run_find(const struct ghci_device *device, uint32_t chunks, uint32_t *first);
+static uint32_t end_chunk(const struct ghci_device *device);
 static void mapping_drop(struct ghci_device *device, struct ghci_mapping *mapping);
 static void vm_retire(struct ghci_device *device, struct ghci_vm *vm);
 static void vm_fault(struct ghci_device *device, struct ghci_vm *vm);
@@ -1257,10 +1258,12 @@ va_take(
 	uint32_t chunks;
 	uint32_t first;
 	uint32_t chunk;
+	uint32_t end;
 	int error;
 
-	/* A mapping of one chunk or less shares an arena of one chunk. */
-	if (bytes == 0U || bytes > (uint64_t)(END_CHUNK - FIRST_CHUNK) * GHCI_L0_SPAN_BYTES)
+	/* A mapping within the chunks handed out; one of a chunk or less shares an arena of one chunk. */
+	end = end_chunk(device);
+	if (bytes == 0U || bytes > (uint64_t)(end - FIRST_CHUNK) * GHCI_L0_SPAN_BYTES)
 		return ENOMEM;
 	if (bytes <= GHCI_L0_SPAN_BYTES) {
 		for (arena = vm->arenas; arena != NULL; arena = arena->next) {
@@ -1362,10 +1365,12 @@ run_find(
 {
 	uint32_t chunk;
 	uint32_t length;
+	uint32_t end;
 
 	/* First fit over the chunks the driver hands out. */
+	end = end_chunk(device);
 	length = 0U;
-	for (chunk = FIRST_CHUNK; chunk < END_CHUNK; chunk++) {
+	for (chunk = FIRST_CHUNK; chunk < end; chunk++) {
 		if (device->chunk_owner[chunk] != NULL) {
 			length = 0U;
 			continue;
@@ -1379,6 +1384,27 @@ run_find(
 
 	/* No run is long enough. */
 	return ENOMEM;
+}
+
+/*
+ * Reports the end of the chunks the driver hands out: the last chunk of
+ * the GPU's VA, or of the low 4 GiB of a wider one, is never used.
+ */
+static uint32_t
+end_chunk(
+	const struct ghci_device *device)
+{
+	uint32_t chunks;
+
+	/* The chunks the VA holds. */
+	chunks = ghci_va_chunks(device->caps.va_bits);
+
+	/* A VA too narrow for a chunk between the first and the last has none to hand out. */
+	if (chunks <= FIRST_CHUNK + 1U)
+		return FIRST_CHUNK;
+
+	/* Succeeded: the last chunk of the VA. */
+	return chunks - 1U;
 }
 
 /*

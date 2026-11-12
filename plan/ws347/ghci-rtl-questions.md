@@ -26,6 +26,7 @@
 | A9 | FAULT_INFO 0x018 の W1C が効かない（`hcr_we_ok` に無い）。TIMESTAMP_HI が 0 固定で counter が 32 bit | §3.1 | `atg_cp_regs.v`、`:571` | W1C、64 bit の timestamp | 未着手 → 依頼 04 の R3・R5 |
 | A10 | EXTCAP の配置: 見出しの 3 つ目以降を 0x180 から置き仕様の VEND と重なる。FMT 0x160（仕様 0x140）、PERF 0x110、CPFW 0x120、VEND 0xC0（仕様 0x180）。MEM 0x1E0・DISP2 0x200 は一致。NATIVE_ISA_ID の定数が .h・.vh に無い | §4.1 | `atg_cp_regs.v:507-523`、`atg_cp.v:481` | 仕様の配置 | 一部 → 依頼 04 の R4・R5 |
 | A11 | `` `elsif defined(...) ``（Verilog の前処理として不正）。macro が無い時に CLIP_POLY・HAS_BLT・TU_BILINEAR が「有り」に倒れる（Makefile を通らない sim・lint で誤る） | — | `atg_cp_regs.v:50,94,136-164` | 正しい前処理、無い時の既定は「無し」か必須の定義 | 未着手・悪化 → 依頼 04 の R9 |
+| A12 | `include/ghci_regs.h:193` の comment が VA_BITS を「(32..40)」のまま（仕様は VA_BITS_ENC = VA − 30、VA は 30 bit 以上） | §3.2.2 | `include/ghci_regs.h:193` | comment だけ | 未依頼（2026-11-13 P4 の p003 で見つけた） |
 
 ## B: 仕様の問い（ユーザーへ）
 
@@ -60,6 +61,8 @@
 | B28 | CMD_WAIT_FENCE の `fence_addr` の揃え。§7.3 は CMD_FENCE の `fence_addr` だけに「8-byte aligned」と書き、CMD_WAIT_FENCE には書かない。RTL は 4 byte に揃えて 32 bit を比べる。仕様の 64 bit の比較（依頼 07 の V2）で 8 byte を読むなら揃えが要る（V2 は仮に 8 byte） | §7.3 ghci.md:960-991、`atg_cp_fence.v` | 判断待ち |
 | B26 | §4.1 の PERF_SRC は「STATUS の busy の bit の番号（0 CP〜6 SU）」を数えるが、§3.3 の STATUS に busy の bit はもう無い。PERF_SRC の番号を何で定義するか | §4.1 PERF、§3.3 | 判断待ち |
 | B29 | SU の FAULT_ADDR の単位: §3.5（ghci.md:450）の「stage の入口からの PC」は命令の番号（8 byte 単位、今の `sb_fault_pc`）か byte の offset か | ghci.md:450、`atg_su_sb.v:775` | 判断待ち |
+| B30 | §11 の page table の walk は VA 32 bit と 40 bit だけを書く。30〜31・33〜39 bit の時の段数と root の大きさ。driver は VA ≤ 32 を 2 段、VA > 32 を 3 段とし、VA の中だけの address を渡す（どちらの答えでも安全） | §11、§3.2.2 | 判断待ち（Q1 の推し: VA ≤ 32 は 32 bit の walk の上位を 0、33〜40 は 40 bit の walk の上位を 0、と 1 文足す） |
+| B31 | FMT0[11] FFILT_FP32 = 0 で CAP_TEX_FFILT = 1 の時の意味（FP32 の format の linear の filter が無い、で良いか）。driver は「FP32 の linear の filter を報告しない」と読む（機能を減らす側だけ） | §3.2.2 の EXT_CAP_FMT0 | 判断待ち（Q1 の推し: driver の読みで良い。仕様に 1 文足す） |
 
 ## 決定済み
 

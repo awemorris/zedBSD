@@ -19,12 +19,11 @@
 
 #include "ghci-regs.h"
 
-/* The bits of DEVICE_CAPS that EXT_CAP_FEATURE mirrors, and the mirror bits, in pairs. */
-#define MIRROR_PAIRS			2U
+/* The bits of DEVICE_CAPS that EXT_CAP_FEATURE and EXT_CAP_FMT0 mirror. */
+#define MIRROR_PAIRS			3U
 
-/* The VA_BITS the driver accepts: 32 and 40. */
+/* The VA_BITS of the 2-level walk; a wider VA has the 3-level walk. */
 #define VA_BITS_32			32U
-#define VA_BITS_40			40U
 
 /* The address range of the GPU the driver uses: the low 4 GiB. */
 #define DRIVER_VA_BYTES			0x100000000ULL
@@ -39,15 +38,24 @@
 /* How many watchdog periods quiesce may take before AXI_STUCK. */
 #define QUIESCE_PERIODS			4U
 
+/* A DEVICE_CAPS bit, the register that mirrors it and the mirror bit. */
+struct caps_mirror {
+	uint32_t device_bit;
+	uint32_t reg;
+	uint32_t mirror_bit;
+};
+
 /*
- * The DEVICE_CAPS bits and their mirrors in EXT_CAP_FEATURE.
+ * The DEVICE_CAPS bits and their mirrors.
  *
- * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
- * (section 3.2.2, CAP_DUAL_SOURCE [8] and CAP_FP16 [28]).
+ * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section 3.2.2,
+ * EXT_CAP_FEATURE CAP_DUAL_SOURCE [8] and CAP_FP16 [28]; EXT_CAP_FMT0
+ * CAP_FFILT_FP16 [10], which is CAP_TEX_FFILT).
  */
-static const uint32_t caps_mirrors[MIRROR_PAIRS][2] = {
-	{ GHCI_CAP_DUAL_SOURCE, GHCI_FEATURE_DUAL_SOURCE },
-	{ GHCI_CAP_FP16, GHCI_FEATURE_FP16 }
+static const struct caps_mirror caps_mirrors[MIRROR_PAIRS] = {
+	{ GHCI_CAP_DUAL_SOURCE, GHCI_REG_EXT_CAP_FEATURE, GHCI_FEATURE_DUAL_SOURCE },
+	{ GHCI_CAP_FP16, GHCI_REG_EXT_CAP_FEATURE, GHCI_FEATURE_FP16 },
+	{ GHCI_CAP_TEX_FFILT, GHCI_REG_EXT_CAP_FMT0, GHCI_FMT0_FFILT_FP16 }
 };
 
 static uint32_t window_word(const uint32_t *window, uint32_t offset);
@@ -90,7 +98,8 @@ ghci_caps_decode(
 {
 	uint32_t resident;
 	uint32_t in_caps;
-	uint32_t in_feature;
+	uint32_t in_mirror;
+	uint32_t mirror;
 	uint32_t found;
 	uint32_t pair;
 	int error;
@@ -119,10 +128,10 @@ ghci_caps_decode(
 	caps->num_su = (caps->device_caps >> GHCI_CAP_NUM_SU_SHIFT) & 0xFFU;
 
 	/*
-	 * Values referenced: amaterrace-gpu cb937e6 docs/ghci.md
-	 * (section 3.2.2, VA_BITS = 32 + [3:0], PA_BITS = 40 + [7:4]).
+	 * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md
+	 * (section 3.2.2, VA_BITS = 30 + [3:0], PA_BITS = 40 + [7:4]).
 	 */
-	caps->va_bits = 32U + (caps->feature & GHCI_FEATURE_VA_BITS_MASK);
+	caps->va_bits = GHCI_FEATURE_VA_BITS_BASE + (caps->feature & GHCI_FEATURE_VA_BITS_MASK);
 	caps->pa_bits = 40U + ((caps->feature >> GHCI_FEATURE_PA_BITS_SHIFT) & 0xFU);
 
 	/* A MAX_MRT of 0 reads as one colour attachment. */
@@ -130,15 +139,21 @@ ghci_caps_decode(
 	if (caps->max_mrt == 0U)
 		caps->max_mrt = 1U;
 
+	/* EXT_CAP_FMT0's copy of the colour attachments, for the log; MAX_MRT stays the authority. */
+	caps->max_color = (caps->fmt0 >> GHCI_FMT0_MAX_COLOR_SHIFT) & GHCI_FMT0_MAX_COLOR_MASK;
+
 	/* The shared memory of a shader unit, in KiB in the register. */
 	caps->lds_bytes = ((caps->feature >> GHCI_FEATURE_LDS_KB_SHIFT) & 0xFFU) * 1024U;
 
 	/* Records each mirror that disagrees with DEVICE_CAPS, which stays the authority. */
 	for (pair = 0U; pair < MIRROR_PAIRS; pair++) {
-		in_caps = caps->device_caps & caps_mirrors[pair][0];
-		in_feature = caps->feature & caps_mirrors[pair][1];
-		if ((in_caps != 0U) != (in_feature != 0U))
-			caps->mismatches |= caps_mirrors[pair][0];
+		mirror = caps->feature;
+		if (caps_mirrors[pair].reg == GHCI_REG_EXT_CAP_FMT0)
+			mirror = caps->fmt0;
+		in_caps = caps->device_caps & caps_mirrors[pair].device_bit;
+		in_mirror = mirror & caps_mirrors[pair].mirror_bit;
+		if ((in_caps != 0U) != (in_mirror != 0U))
+			caps->mismatches |= caps_mirrors[pair].device_bit;
 	}
 
 	/* Walks the extended capability list; a malformed list leaves no blocks. */
@@ -230,6 +245,34 @@ ghci_caps_has(
 		bit = 0U;
 		if ((caps->device_caps & GHCI_CAP_UMA) == 0U && caps->local_bytes != 0U)
 			bit = 1U;
+		break;
+	case GHCI_HAS_FFILT_FP32:
+		/* The filter of 32-bit floats needs the float filter of DEVICE_CAPS and its own bit. */
+		bit = caps->fmt0 & GHCI_FMT0_FFILT_FP32;
+		if ((caps->device_caps & GHCI_CAP_TEX_FFILT) == 0U)
+			bit = 0U;
+		break;
+	case GHCI_HAS_CLIP_POLY:
+		bit = caps->feature & GHCI_FEATURE_CLIP_POLY;
+		break;
+	case GHCI_HAS_TU_BILINEAR:
+		bit = caps->fmt0 & GHCI_FMT0_TU_BILINEAR;
+		break;
+	case GHCI_HAS_BLT_SCALE:
+		/* The blitter's own abilities need the blitter. */
+		bit = caps->feature & GHCI_FEATURE_BLT_SCALE;
+		if ((caps->device_caps & GHCI_CAP_BLT) == 0U)
+			bit = 0U;
+		break;
+	case GHCI_HAS_BLT_BLEND:
+		bit = caps->fmt0 & GHCI_FMT0_BLT_BLEND;
+		if ((caps->device_caps & GHCI_CAP_BLT) == 0U)
+			bit = 0U;
+		break;
+	case GHCI_HAS_BLT_TILE:
+		bit = caps->fmt0 & GHCI_FMT0_BLT_TILE;
+		if ((caps->device_caps & GHCI_CAP_BLT) == 0U)
+			bit = 0U;
 		break;
 	default:
 		bit = 0U;
@@ -346,7 +389,9 @@ ghci_heap_session_bytes(
  * Reports the CP_HEAP bytes a device needs for every session and chunk.
  *
  * Every session's root and upper tables, a level 0 table for every 2 MiB
- * chunk of the low 4 GiB, and the spare the specification adds.
+ * chunk the driver may use (the low 4 GiB, or all of a narrower VA), and
+ * the spare the specification adds.  A VA narrower than 32 bits is
+ * counted with the root of the 2-level walk, the largest it may have.
  */
 uint64_t
 ghci_heap_device_bytes(
@@ -357,11 +402,27 @@ ghci_heap_device_bytes(
 	/* Adds the roots and upper tables of all sixteen sessions. */
 	bytes = (uint64_t)GHCI_SESSIONS * ghci_heap_session_bytes(va_bits);
 
-	/* Adds a level 0 table for each chunk; a chunk belongs to one session. */
-	bytes += (uint64_t)GHCI_CHUNKS * GHCI_TABLE_BYTES;
+	/* Adds a level 0 table for each chunk the VA holds; a chunk belongs to one session. */
+	bytes += (uint64_t)ghci_va_chunks(va_bits) * GHCI_TABLE_BYTES;
 
 	/* Succeeded: adds the spare the specification's sizing rule keeps. */
 	return bytes + GHCI_HEAP_SPARE_BYTES;
+}
+
+/*
+ * Reports the 2 MiB chunks of GPU addresses the driver may use: those of
+ * the low 4 GiB, or of the whole VA when it is narrower.
+ */
+uint32_t
+ghci_va_chunks(
+	uint32_t va_bits)
+{
+	/* A VA of 32 bits or more: the low 4 GiB. */
+	if (va_bits >= VA_BITS_32)
+		return GHCI_CHUNKS;
+
+	/* Succeeded: the chunks of the narrower VA. */
+	return (uint32_t)((1ULL << va_bits) / GHCI_L0_SPAN_BYTES);
 }
 
 /*

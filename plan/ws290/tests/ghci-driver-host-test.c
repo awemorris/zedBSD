@@ -168,6 +168,7 @@ static void action_unhold(void);
 static void scene_versions(void);
 static void scene_attach_checks(void);
 static void scene_attach_policy(void);
+static void scene_va30_chunks(void);
 static void scene_submit(void);
 static void scene_polled(void);
 static void scene_device_fault(void);
@@ -814,6 +815,73 @@ scene_attach_policy(void)
 	error = start_scene(MODEL_PROT, NULL);
 	expect(error == 0 && device.executor == 1, "policy: prot executor");
 	end_scene("policy: prot");
+
+	/* A 30-bit VA: CP_HEAP for the 512 chunks of 1 GiB; the mappings stay below 1 GiB. */
+	error = start_scene(MODEL_VA30, NULL);
+	expect(error == 0 && device.caps.va_bits == 30U, "policy: va30 started");
+	expect(heap_bytes() == 16U * 16384U + 512U * 4096U + 65536U, "policy: va30 CP_HEAP");
+	end_scene("policy: va30");
+	scene_va30_chunks();
+
+	/* The KC705's minimal build: flat and discrete, its local memory not used, the executor all the same. */
+	error = start_scene(MODEL_KC705_MIN, NULL);
+	expect(error == 0 && device.executor == 1 && device.local_ready == 0, "policy: kc705-min executor, host memory");
+	expect(heap_bytes() == 16384U, "policy: kc705-min CP_HEAP 16 KiB");
+	end_scene("policy: kc705-min");
+}
+
+/*
+ * The chunks of a 30-bit VA: with chunks 1 to 509 taken, a mapping of
+ * two chunks finds no room, and one of 64 KiB gets chunk 510, the last
+ * below 1 GiB but one.
+ */
+static void
+scene_va30_chunks(void)
+{
+	struct ghci_allocation *memory;
+	struct ghci_allocation *wide;
+	struct ghci_mapping *mapping;
+	struct ghci_vm *vm;
+	struct ghci_vm *taken;
+	uint32_t chunk;
+	int error;
+
+	/* A session, and chunks 1 to 509 marked as another's. */
+	error = start_scene(MODEL_VA30, NULL);
+	memory = host_memory(64U * 1024U);
+	wide = host_memory(4U * 1024U * 1024U);
+	if (error == 0 && memory != NULL && wide != NULL)
+		error = ghci_vm_open(&device, &owner_token, &vm);
+	expect(error == 0 && memory != NULL && wide != NULL, "va30: session");
+	if (error != 0 || memory == NULL || wide == NULL) {
+		end_scene("va30");
+		return;
+	}
+	taken = (struct ghci_vm *)(void *)&owner_token;
+	for (chunk = 1U; chunk < 510U; chunk++)
+		device.chunk_owner[chunk] = taken;
+
+	/* Two chunks do not fit in chunk 510 alone. */
+	error = ghci_vm_map(&device, vm, wide, 0U, &mapping);
+	expect(error == ENOMEM, "va30: no two chunks past 509");
+
+	/* 64 KiB takes chunk 510. */
+	error = ghci_vm_map(&device, vm, memory, 0U, &mapping);
+	expect(error == 0 && (mapping->va >> 21) == 510U && mapping->va + mapping->bytes <= (1ULL << 30) && model.faults == 0U,
+	       "va30: the mapping below 1 GiB");
+	if (error == 0) {
+		ghci_vm_unmap(&device, mapping);
+		reclaim();
+	}
+	for (chunk = 1U; chunk < 510U; chunk++)
+		device.chunk_owner[chunk] = NULL;
+
+	/* The close and the end. */
+	ghci_vm_close(&device, vm);
+	reclaim();
+	memory_done(memory);
+	memory_done(wide);
+	end_scene("va30");
 }
 
 /* Submissions, fences and the interrupt; the ring wraps, and a submission larger than the ring. */

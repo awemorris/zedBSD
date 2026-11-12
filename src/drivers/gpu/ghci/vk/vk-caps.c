@@ -96,6 +96,9 @@
 #define F32_32768_NEGATIVE		0xc7000000U
 #define F32_32767			0x46fffe00U
 
+/* The shortfalls the list can name: every one at once. */
+#define SHORTFALLS_MAX			8U
+
 /* The nanoseconds of a second, for the timestamp's period. */
 #define NANOSECONDS			1000000000U
 
@@ -564,13 +567,15 @@ ghci_vk_caps_shortfalls(
 	const char **names,
 	unsigned capacity)
 {
-	const char *found[8];
+	const char *found[SHORTFALLS_MAX];
 	unsigned count;
 	unsigned index;
 	size_t row;
 	uint32_t features;
 	int indirect;
 	int msaa;
+	int clip;
+	int bilinear;
 
 	/* The texture and sampler slots are shared by a pipeline's stages: 16, not Vulkan's 96. */
 	count = 0U;
@@ -597,6 +602,28 @@ ghci_vk_caps_shortfalls(
 		count++;
 	}
 
+	/*
+	 * Without the polygon clipper the rasterizer has a guard band
+	 * alone: a primitive that crosses the near plane is rejected (the
+	 * driver has no clipping of its own), where Vulkan clips it.
+	 * Without the bilinear filter no format filters, where Vulkan
+	 * requires the linear filter of some.
+	 *
+	 * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section
+	 * 3.2.2, EXT_CAP_FEATURE [30] CAP_CLIP_POLY and EXT_CAP_FMT0 [16]
+	 * CAP_TU_BILINEAR; section 12.10, the hardware polygon clipping).
+	 */
+	clip = ghci_caps_has(caps, GHCI_HAS_CLIP_POLY);
+	bilinear = ghci_caps_has(caps, GHCI_HAS_TU_BILINEAR);
+	if (!clip) {
+		found[count] = "clipping of primitives across the near plane (CAP_CLIP_POLY)";
+		count++;
+	}
+	if (!bilinear) {
+		found[count] = "linear texture filtering (CAP_TU_BILINEAR)";
+		count++;
+	}
+
 	/* A required format without a required feature. */
 	for (row = 0U; row < sizeof(required_formats) / sizeof(required_formats[0]); row++) {
 		features = formats->optimal[required_formats[row].format];
@@ -613,6 +640,33 @@ ghci_vk_caps_shortfalls(
 
 	/* Succeeded: the number written. */
 	return index;
+}
+
+/*
+ * Reports whether the executor gives the blitter its transfers: only a
+ * blitter that scales.  The specification does not say what alignment a
+ * blitter without scaling needs of a copy's addresses, so on one the
+ * copies, blits, fills and resolves are the driver's programs, as on a
+ * device without the blitter.
+ *
+ * Values referenced: amaterrace-gpu ad23fe0 docs/ghci.md (section 3.2.1,
+ * DEVICE_CAPS [29] CAP_BLT; section 3.2.2, EXT_CAP_FEATURE [31]
+ * CAP_BLT_SCALE, without it 1:1 copies and fills only and no unaligned
+ * byte window).
+ */
+int
+ghci_vk_caps_blitter(
+	const struct ghci_caps *caps)
+{
+	int scale;
+
+	/* A blitter with scaling; CAP_BLT_SCALE reads 0 without CAP_BLT. */
+	scale = ghci_caps_has(caps, GHCI_HAS_BLT_SCALE);
+	if (!scale)
+		return 0;
+
+	/* Succeeded: the blitter takes the transfers. */
+	return 1;
 }
 
 /*
