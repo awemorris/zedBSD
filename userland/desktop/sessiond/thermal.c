@@ -9,10 +9,14 @@
  * A session's THERMAL request: "THERMAL strategy ..." or "THERMAL boost
  * ..." on the session's socket, decided by thermal-rules.c (the words,
  * root or wheel), then carried out on the user's behalf by sessiond, which
- * runs as root, through the kernel's /dev/thermal.  The answer is the
- * line thermal-rules.c makes: OK with what the kernel reported, FAIL
- * wheel, or ERROR and a word.  Every request is logged to the
- * authentication log.
+ * runs as root, through /sbin/thermal and the kernel's /dev/thermal.  The
+ * answer is the line thermal-rules.c makes: OK with what the kernel
+ * reported, FAIL wheel, or ERROR and a word.  Every request is logged to
+ * the authentication log.
+ *
+ * sessiond carries a request out by running /sbin/thermal, so that a
+ * strategy a session chooses is kept for the next boot by the one program
+ * that keeps it.
  */
 
 #include "sessiond.h"
@@ -22,6 +26,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <syslog.h>
 #include <unistd.h>
 
@@ -73,21 +78,85 @@ sessiond_thermal(
 }
 
 /*
- * Hands a decided request to the kernel and reports, as
- * SESSIOND_THERMAL_* bits, what it said beyond its errno.
- *
- * The kernel's /dev/thermal has not yet published the ioctls that choose
- * a strategy or a boost, so every request finds the device unavailable
- * (ENODEV, answered "ERROR unavailable") until they are.
+ * Hands a decided request to /sbin/thermal, which asks the kernel and
+ * keeps a chosen strategy for the next boot, and reports its errno and,
+ * as SESSIOND_THERMAL_* bits, what the kernel said beyond it.  sessiond
+ * waits for the command, which waits for the drivers up to five seconds.
  */
 static int
 thermal_carry(
 	const struct sessiond_thermal_request *request,
 	unsigned *flags)
 {
-	(void)request;
+	struct sessiond_thermal_command command;
+	char output[SESSIOND_THERMAL_OUTPUT_MAX];
+	size_t filled;
+	ssize_t got;
+	pid_t child;
+	pid_t waited;
+	int channel[2];
+	int exit_code;
+	int status;
+	int error;
 
-	/* No device to hand the request to yet. */
+	/* The command line, and a pipe for what it prints. */
 	*flags = 0;
-	return ENODEV;
+	sessiond_thermal_command(request, &command);
+	error = pipe(channel);
+	if (error != 0)
+		return EIO;
+
+	/* Starts the child that runs the command. */
+	child = fork();
+	if (child < 0) {
+		(void)close(channel[0]);
+		(void)close(channel[1]);
+		return EIO;
+	}
+
+	/* The child runs the command with both its outputs on the pipe. */
+	if (child == 0) {
+		(void)dup2(channel[1], STDOUT_FILENO);
+		(void)dup2(channel[1], STDERR_FILENO);
+		(void)close(channel[0]);
+		(void)close(channel[1]);
+		(void)execv(SESSIOND_THERMAL_COMMAND, command.argv);
+		_exit(SESSIOND_THERMAL_NOT_RUN);
+	}
+
+	/* Only the child writes the pipe, so its end closes when the command ends. */
+	(void)close(channel[1]);
+
+	/* Reads what it prints, as much as fits, until it closes the pipe. */
+	filled = 0;
+	for (;;) {
+		got = read(channel[0], output + filled, sizeof(output) - 1U - filled);
+		if (got < 0 && errno == EINTR)
+			continue;
+		if (got <= 0)
+			break;
+		filled += (size_t)got;
+		if (filled == sizeof(output) - 1U)
+			break;
+	}
+
+	/* The output read so far, as text. */
+	output[filled] = '\0';
+	(void)close(channel[0]);
+
+	/* Waits for it to end; a command ended by a signal said nothing of how it went. */
+	do {
+		waited = waitpid(child, &status, 0);
+	} while (waited < 0 && errno == EINTR);
+	exit_code = -1;
+	if (waited == child && WIFEXITED(status))
+		exit_code = WEXITSTATUS(status);
+
+	/* Reads the outcome from how it ended and what it printed. */
+	error = sessiond_thermal_outcome(exit_code, output, flags);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the kernel took the request. */
+	return 0;
 }

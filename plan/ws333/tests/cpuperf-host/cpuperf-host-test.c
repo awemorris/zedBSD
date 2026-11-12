@@ -24,8 +24,10 @@
 #include <kern/thread.h>
 #include <kern/waitq.h>
 #include <kern/clock.h>
+#include <kern/cred.h>
 #include <hal/hal.h>
 #include <uapi/errno.h>
+#include <uapi/thermal.h>
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -325,6 +327,66 @@ kern_thermal_event(uint32_t type, uint32_t index, int64_t value)
 	(void)value;
 	if (type == KERN_THERMAL_EVENT_CPU)
 		test_events++;
+}
+
+/* The CPU requests of /dev/thermal: the handler the framework registers, the caller and the copies. */
+
+static kern_thermal_ioctl_t test_ioctl;
+static unsigned test_ioctl_first;
+static unsigned test_ioctl_last;
+static struct ucred test_credential;
+static bool test_root = true;
+
+int
+kern_thermal_ioctl_range_register(unsigned first, unsigned last, kern_thermal_ioctl_t handler)
+{
+	test_ioctl_first = first;
+	test_ioctl_last = last;
+	test_ioctl = handler;
+	return 0;
+}
+
+struct ucred *
+cred_current_ref(void)
+{
+	return &test_credential;
+}
+
+int
+cred_is_superuser(const struct ucred *cred)
+{
+	(void)cred;
+	return test_root ? 1 : 0;
+}
+
+void
+cred_release(struct ucred *cred)
+{
+	(void)cred;
+}
+
+int
+copyin(uintptr_t source, void *destination, size_t size)
+{
+	if (source == 0U)
+		return EFAULT;
+	memcpy(destination, (const void *)source, size);
+	return 0;
+}
+
+int
+copyout(const void *source, uintptr_t destination, size_t size)
+{
+	if (destination == 0U)
+		return EFAULT;
+	memcpy((void *)destination, source, size);
+	return 0;
+}
+
+static int
+test_request_cpu(unsigned long request, void *argument)
+{
+	return test_ioctl(NULL, request, (uintptr_t)argument);
 }
 
 /* The mock provider. */
@@ -907,6 +969,134 @@ scenario_steps(void)
 	CHECK(test_wrong_cpu == 0U);
 }
 
+/* The CPU requests of /dev/thermal on the hybrid machine. */
+static void
+scenario_ioctl(void)
+{
+	struct thermal_cpu_relative relative;
+	struct thermal_cpu_setting setting;
+	struct thermal_cpu_domain domain;
+	struct thermal_cpu_info cpu;
+	struct thermal_cpu_idle idle;
+	uint32_t flags;
+
+	kern_cpuperf_init();
+	CHECK(test_ioctl != NULL && test_ioctl_first == 32U && test_ioctl_last == 63U);
+	CHECK(kern_cpuperf_provider_register(&mock_ops) == 0);
+	CHECK(test_strategy(KERN_THERMAL_STRATEGY_PERFORMANCE, 0, 0, &flags) == 0);
+	CHECK(kern_cpuperf_package_count() == 1U);
+
+	/* Another size of a known number, and a number nobody has. */
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU + (1UL << 16), &cpu) == ENOTTY);
+	CHECK(test_request_cpu(_IOR('T', 39, struct thermal_cpu_idle), &idle) == ENOTTY);
+
+	/* A CPU: topology, class, anchors and the measured rate; anyone may read it. */
+	test_root = false;
+	memset(&cpu, 0, sizeof(cpu));
+	cpu.cpu = 3;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
+	CHECK(cpu.cpu == 3U && cpu.count == 12U && cpu.thread == 1U && cpu.core == 1U && cpu.domain == 1U);
+	CHECK(cpu.core_class == KERN_THERMAL_CPU_CORE_PERFORMANCE && cpu.core_type == 0x40U);
+	CHECK(cpu.highest == 56U && cpu.guaranteed == 21U && cpu.highest_mhz == 4388U && cpu.relative == 100U);
+	CHECK((cpu.flags & KERN_THERMAL_CPU_HAS_CONTROL) != 0U);
+	CHECK((cpu.flags & KERN_THERMAL_CPU_SAMPLE_TIMEOUT) == 0U);
+	cpu.cpu = 7;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
+	CHECK(cpu.core_class == KERN_THERMAL_CPU_CORE_EFFICIENCY && cpu.relative == 75U);
+
+	/* A sample is root's; past the last CPU is ENOENT; an unknown request bit is EINVAL. */
+	cpu.cpu = 2;
+	cpu.request = KERN_THERMAL_CPU_READ_SAMPLE;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == EPERM);
+	test_root = true;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
+	CHECK(cpu.delivered_mhz == 1002U && cpu.request == KERN_THERMAL_CPU_READ_SAMPLE);
+	cpu.request = 2;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == EINVAL);
+	cpu.request = 0;
+	cpu.cpu = 12;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == ENOENT);
+
+	/* A CPU that does not answer the sample: 0 and SAMPLE_TIMEOUT with the rest filled. */
+	test_deaf[5] = true;
+	cpu.cpu = 5;
+	cpu.request = KERN_THERMAL_CPU_READ_SAMPLE;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU, &cpu) == 0);
+	CHECK((cpu.flags & KERN_THERMAL_CPU_SAMPLE_TIMEOUT) != 0U && cpu.core_class == KERN_THERMAL_CPU_CORE_EFFICIENCY);
+	test_deaf[5] = false;
+
+	/* A domain: members, a RANGE as its ends, the request; past the last is ENOENT. */
+	memset(&domain, 0, sizeof(domain));
+	domain.domain = 1;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_DOMAIN, &domain) == 0);
+	CHECK(domain.count == 10U && domain.cpu_count == 2U && domain.cpus[0] == 0xcU);
+	CHECK(domain.kind == KERN_THERMAL_CPU_LEVELS_RANGE && domain.share == KERN_THERMAL_CPU_SHARE_CORE);
+	CHECK(domain.step_count == 2U && domain.steps[0] == 1U && domain.steps[1] == 56U);
+	CHECK(domain.minimum == 21U && domain.maximum == 56U && domain.limit == KERN_THERMAL_UNKNOWN);
+	domain.domain = 10;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_DOMAIN, &domain) == ENOENT);
+
+	/* The direct setting: root's, known fields only, a domain or ALL; CUSTOM follows. */
+	memset(&setting, 0, sizeof(setting));
+	setting.domain = 0;
+	setting.fields = KERN_THERMAL_CPU_SET_MAXIMUM;
+	setting.maximum = 40;
+	test_root = false;
+	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_DOMAIN, &setting) == EPERM);
+	test_root = true;
+	setting.fields = 0x10;
+	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_DOMAIN, &setting) == EINVAL);
+	setting.fields = KERN_THERMAL_CPU_SET_MAXIMUM;
+	setting.reserved[1] = 1;
+	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_DOMAIN, &setting) == EINVAL);
+	setting.reserved[1] = 0;
+	setting.domain = 10;
+	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_DOMAIN, &setting) == ENOENT);
+	setting.domain = 0;
+	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_DOMAIN, &setting) == 0);
+	CHECK(test_request[0].maximum == 40U);
+	domain.domain = 0;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_DOMAIN, &domain) == 0);
+	CHECK((domain.flags & KERN_THERMAL_CPU_DOMAIN_CUSTOM) != 0U && domain.maximum == 40U);
+	setting.domain = KERN_THERMAL_ALL;
+	setting.maximum = 500;
+	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_DOMAIN, &setting) == 0);
+
+	/* The relative ways: read by anyone, chosen by root. */
+	memset(&relative, 0, sizeof(relative));
+	test_root = false;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_RELATIVE, &relative) == 0);
+	CHECK(relative.available == (KERN_THERMAL_CPU_RELATIVE_FREQUENCY | KERN_THERMAL_CPU_RELATIVE_FEEDBACK));
+	relative.source = KERN_THERMAL_CPU_RELATIVE_FEEDBACK;
+	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_RELATIVE, &relative) == EPERM);
+	test_root = true;
+	relative.source = KERN_THERMAL_CPU_RELATIVE_PROVIDER;
+	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_RELATIVE, &relative) == EOPNOTSUPP);
+	relative.source = KERN_THERMAL_CPU_RELATIVE_FEEDBACK;
+	CHECK(test_request_cpu(KERN_THERMAL_SET_CPU_RELATIVE, &relative) == 0);
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_RELATIVE, &relative) == 0);
+	CHECK(relative.source == KERN_THERMAL_CPU_RELATIVE_FEEDBACK);
+
+	/* The idle residency: a core is root's, a package anyone's; numbers nobody has are ENOENT. */
+	memset(&idle, 0, sizeof(idle));
+	idle.target = 4;
+	test_root = false;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_IDLE, &idle) == EPERM);
+	test_root = true;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_IDLE, &idle) == 0);
+	CHECK(idle.target == 4U && idle.count == 12U && idle.state_count == 1U && idle.available == 0x4cU);
+	CHECK(idle.state[0] == 6U && idle.residency_ns[0] == 5004U && idle.scope[0] == KERN_THERMAL_CPU_IDLE_CORE);
+	idle.target = 12;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_CPU_IDLE, &idle) == ENOENT);
+	test_root = false;
+	idle.target = 0;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_PACKAGE_IDLE, &idle) == 0);
+	CHECK(idle.state_count == 1U && idle.scope[0] == KERN_THERMAL_CPU_IDLE_PACKAGE);
+	idle.target = 1;
+	CHECK(test_request_cpu(KERN_THERMAL_GET_PACKAGE_IDLE, &idle) == ENOENT);
+	CHECK(test_wrong_cpu == 0U);
+}
+
 static void
 run(const char *name, void (*scenario)(void))
 {
@@ -936,6 +1126,7 @@ main(int argc, char **argv)
 	run("describe-only", scenario_describe_only);
 	run("range", scenario_range);
 	run("steps", scenario_steps);
+	run("ioctl", scenario_ioctl);
 	if (test_failures != 0) {
 		printf("cpuperf host test: FAIL\n");
 		return 1;

@@ -39,6 +39,7 @@
 #include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
+#include <kern/poll.h>
 #include <kern/sched.h>
 #include <kern/sysctl.h>
 #include <kern/thermal.h>
@@ -326,8 +327,19 @@ static struct wait_queue thermal_done_queue;
 static struct wait_queue thermal_poll_queue;
 static struct wait_queue thermal_guard_queue;
 
-/* The open files that take events, under the event lock. */
+/*
+ * The open files that take events and how many they are, under the event
+ * lock.  The count bounds the open files a subscription may attach.
+ */
 static struct kern_thermal_reader *thermal_readers;
+static unsigned thermal_reader_count;
+
+/*
+ * The number the next event posted takes, under the event lock.  It
+ * counts every event, whether an open file takes it or not, so a reader
+ * of some types sees it skip.
+ */
+static uint64_t thermal_event_sequence;
 
 /*
  * The passive ceiling, under the copy lock: whether the guard found a
@@ -385,6 +397,8 @@ static void thermal_guard_pass(void);
 static void thermal_guard_sensor(struct kern_thermal_sensor *sensor, uint32_t index, uint64_t now, uint64_t stale_after);
 static bool thermal_guard_emergency(struct kern_thermal_sensor *sensor);
 static bool thermal_critical_trusted(struct kern_thermal_sensor *sensor);
+static bool thermal_critical_armed(const struct kern_thermal_sensor *sensor);
+static void thermal_event_name(uint32_t type, uint32_t index, char *name);
 static int32_t thermal_level(int32_t millicelsius);
 static void thermal_ring_append(struct kern_thermal_reader *reader, const struct kern_thermal_record *record);
 static int thermal_sysctl_copy(void *context, struct thermal_entry *entries, unsigned capacity, unsigned *count);
@@ -827,8 +841,9 @@ kern_thermal_meter_register(
  * Posts an event to the readers of /dev/thermal.
  *
  * Every attached open file whose mask takes the type gets a copy with the
- * time; a full ring drops its oldest event.  A type past the mask's bits
- * is ignored.
+ * time, the event's number and the name of the sensor or the fan it is
+ * about; a full ring drops its oldest event.  A type past the mask's bits
+ * is ignored.  The waiting polls look again when an open file got it.
  */
 void
 kern_thermal_event(
@@ -839,6 +854,7 @@ kern_thermal_event(
 	struct kern_thermal_reader *reader;
 	struct kern_thermal_record record;
 	unsigned long irq;
+	bool delivered;
 
 	/* Ignores a type no mask can choose. */
 	if (type == 0U || type >= 32U)
@@ -848,22 +864,32 @@ kern_thermal_event(
 	thermal_prepare();
 
 	/* Builds the record once for every reader. */
+	kern_memset(&record, 0, sizeof(record));
 	record.type = type;
 	record.index = index;
 	record.value = value;
 	record.time_ns = thermal_now_ns(sched_ticks());
+	thermal_event_name(type, index, record.name);
 
-	/* Appends it to every ring that takes the type and wakes the reader. */
+	/* Numbers the event and appends it to every ring that takes the type, waking the reader. */
+	delivered = false;
 	irq = spin_lock_irqsave(&thermal_event_lock);
 
+	record.sequence = thermal_event_sequence;
+	thermal_event_sequence++;
 	for (reader = thermal_readers; reader != NULL; reader = reader->next) {
 		if ((reader->mask & (1U << type)) == 0U)
 			continue;
 		thermal_ring_append(reader, &record);
 		waitq_wake_all(&reader->queue);
+		delivered = true;
 	}
 
 	spin_unlock_irqrestore(&thermal_event_lock, irq);
+
+	/* Has a poll that waits on an open file look again. */
+	if (delivered)
+		poll_notify();
 }
 
 /*
@@ -929,6 +955,8 @@ kern_thermal_status_get(
 	status->generation = thermal_generation;
 	status->passive_permille = thermal_passive_permille;
 	flags = thermal_strategy_flags();
+	if (thermal_generation != 0U && thermal_summary_generation == thermal_generation)
+		status->strategy_error = thermal_summary_error;
 
 	spin_unlock_irqrestore(&thermal_lock, irq);
 
@@ -953,6 +981,7 @@ kern_thermal_sensor_get(
 	unsigned long irq;
 	unsigned count;
 	uint32_t reading;
+	bool armed;
 
 	/* Refuses a sensor past the table. */
 	thermal_prepare();
@@ -977,6 +1006,9 @@ kern_thermal_sensor_get(
 		reading |= KERN_THERMAL_READING_CRITICAL;
 	if (sensor->stale)
 		reading |= KERN_THERMAL_READING_STALE;
+	armed = thermal_critical_armed(sensor);
+	if (armed)
+		reading |= KERN_THERMAL_READING_ARMED;
 	info->reading = reading;
 	info->millicelsius = sensor->millicelsius;
 	info->passive = sensor->passive;
@@ -1153,6 +1185,8 @@ kern_thermal_strategy_get(
 	info->strategy = thermal_strategy;
 	info->generation = thermal_generation;
 	flags = thermal_strategy_flags();
+	if (thermal_generation != 0U && thermal_summary_generation == thermal_generation)
+		info->error = thermal_summary_error;
 
 	spin_unlock_irqrestore(&thermal_lock, irq);
 
@@ -1163,6 +1197,7 @@ kern_thermal_strategy_get(
 
 	/* Asks the receivers, in order, for the name of the firmware's mode. */
 	count = atomic_load_acquire(&thermal_receiver_count);
+	info->receiver_count = count;
 	for (index = 0; index < count; index++) {
 		receiver = &thermal_receivers[index];
 		if (receiver->ops->firmware_name == NULL)
@@ -1188,7 +1223,8 @@ kern_thermal_strategy_get(
 int
 kern_thermal_strategy_set(
 	const struct kern_thermal_strategy *strategy,
-	uint32_t *flags)
+	uint32_t *flags,
+	uint32_t *chosen)
 {
 	unsigned long irq;
 	uint32_t generation;
@@ -1199,6 +1235,7 @@ kern_thermal_strategy_set(
 
 	/* Refuses a strategy that cannot be chosen. */
 	*flags = 0;
+	*chosen = 0;
 	error = thermal_strategy_check(strategy);
 	if (error != 0)
 		return error;
@@ -1216,6 +1253,7 @@ kern_thermal_strategy_set(
 	thermal_generation = generation;
 	thermal_strategy = *strategy;
 	thermal_post_work();
+	*chosen = generation;
 
 	/* Waits for this generation's outcome, a later choice, or the deadline. */
 	for (;;) {
@@ -1412,31 +1450,57 @@ kern_thermal_ioctl_dispatch(
 }
 
 /*
- * Starts taking the events a mask chooses for an open file.
+ * Prepares an open file's events, not attached yet.
  */
 void
+kern_thermal_reader_init(
+	struct kern_thermal_reader *reader)
+{
+	/* Prepares the tables, so the event lock is ready. */
+	thermal_prepare();
+
+	/* Starts with an empty ring and the queue a read waits on. */
+	kern_memset(reader, 0, sizeof(*reader));
+	waitq_init(&reader->queue, "thermal reader");
+}
+
+/*
+ * Starts taking the events a mask chooses for a prepared open file.
+ *
+ * The ring starts empty, also for an open file that took events before.
+ */
+int
 kern_thermal_reader_attach(
 	struct kern_thermal_reader *reader,
 	uint32_t mask)
 {
 	unsigned long irq;
 
-	/* Prepares the tables, so the event lock is ready. */
-	thermal_prepare();
-
-	/* Starts with an empty ring. */
-	kern_memset(reader, 0, sizeof(*reader));
-	reader->mask = mask;
-	waitq_init(&reader->queue, "thermal reader");
-
-	/* Puts the open file on the list the events go to. */
+	/* Puts the open file on the list the events go to, while there is room. */
 	irq = spin_lock_irqsave(&thermal_event_lock);
 
+	if (reader->attached) {
+		spin_unlock_irqrestore(&thermal_event_lock, irq);
+		return EINVAL;
+	}
+	if (thermal_reader_count >= KERN_THERMAL_READER_MAX) {
+		spin_unlock_irqrestore(&thermal_event_lock, irq);
+		return ENOSPC;
+	}
+
+	reader->mask = mask;
+	reader->head = 0;
+	reader->count = 0;
+	reader->dropped = 0;
 	reader->next = thermal_readers;
 	thermal_readers = reader;
 	reader->attached = true;
+	thermal_reader_count++;
 
 	spin_unlock_irqrestore(&thermal_event_lock, irq);
+
+	/* Succeeded: the events the mask chooses reach the open file. */
+	return 0;
 }
 
 /*
@@ -1458,7 +1522,7 @@ kern_thermal_reader_subscribe(
 }
 
 /*
- * Stops taking events for an open file before it is freed.
+ * Stops taking events for an open file.
  */
 void
 kern_thermal_reader_detach(
@@ -1467,19 +1531,70 @@ kern_thermal_reader_detach(
 	struct kern_thermal_reader **link;
 	unsigned long irq;
 
-	/* Takes the open file off the list, so no event reaches it again. */
+	/* Takes the open file off the list, so no event reaches it again, and wakes its read. */
 	irq = spin_lock_irqsave(&thermal_event_lock);
 
-	for (link = &thermal_readers; *link != NULL; link = &(*link)->next) {
-		if (*link == reader) {
-			*link = reader->next;
-			break;
+	if (reader->attached) {
+		for (link = &thermal_readers; *link != NULL; link = &(*link)->next) {
+			if (*link == reader) {
+				*link = reader->next;
+				break;
+			}
 		}
+		reader->next = NULL;
+		reader->attached = false;
+		thermal_reader_count--;
+		waitq_wake_all(&reader->queue);
 	}
-	reader->next = NULL;
-	reader->attached = false;
 
 	spin_unlock_irqrestore(&thermal_event_lock, irq);
+}
+
+/*
+ * Waits until an open file has an event to take.
+ */
+int
+kern_thermal_reader_wait(
+	struct kern_thermal_reader *reader,
+	bool nonblock)
+{
+	unsigned long irq;
+	uint64_t observed;
+	int error;
+
+	/* Sleeps until an event or a drop waits, the open file is detached, or a signal comes. */
+	irq = spin_lock_irqsave(&thermal_event_lock);
+
+	for (;;) {
+		/* An open file that takes no events has nothing to wait for. */
+		if (!reader->attached) {
+			spin_unlock_irqrestore(&thermal_event_lock, irq);
+			return EINVAL;
+		}
+
+		/* Something to take. */
+		if (reader->count > 0U || reader->dropped != 0U)
+			break;
+
+		/* Nothing, and the reader does not wait. */
+		if (nonblock) {
+			spin_unlock_irqrestore(&thermal_event_lock, irq);
+			return EAGAIN;
+		}
+
+		/* Sleeps until an event or the detach wakes it, or a signal ends the wait. */
+		observed = waitq_sequence(&reader->queue);
+		error = waitq_sleep(&reader->queue, &thermal_event_lock, observed, 0, WAITQ_INTERRUPTIBLE);
+		if (error == EINTR) {
+			spin_unlock_irqrestore(&thermal_event_lock, irq);
+			return EINTR;
+		}
+	}
+
+	spin_unlock_irqrestore(&thermal_event_lock, irq);
+
+	/* Succeeded: a take moves at least one record. */
+	return 0;
 }
 
 /*
@@ -1505,9 +1620,11 @@ kern_thermal_reader_take(
 
 	if (reader->dropped != 0U) {
 		record = &records[moved];
+		kern_memset(record, 0, sizeof(*record));
 		record->type = KERN_THERMAL_EVENT_OVERFLOW;
 		record->index = 0;
 		record->value = (int64_t)reader->dropped;
+		record->sequence = thermal_event_sequence;
 		record->time_ns = thermal_now_ns(sched_ticks());
 		reader->dropped = 0;
 		moved++;
@@ -2591,9 +2708,11 @@ static bool
 thermal_critical_trusted(
 	struct kern_thermal_sensor *sensor)
 {
+	bool armed;
+
 	/* A level at least as high as both floors is trusted. */
-	if (sensor->critical >= THERMAL_CRITICAL_LOWEST &&
-	    sensor->critical >= sensor->first_millicelsius + THERMAL_CRITICAL_MARGIN)
+	armed = thermal_critical_armed(sensor);
+	if (armed)
 		return true;
 
 	/* Says once that the level counts as none. */
@@ -2605,6 +2724,62 @@ thermal_critical_trusted(
 
 	/* Succeeded: the level is not trusted. */
 	return false;
+}
+
+/*
+ * Tells whether a sensor's critical level stops the machine: a firmware
+ * zone's level that a reading was taken against, 50 degrees or more and
+ * five or more above the first reading.  The caller holds the copy lock.
+ */
+static bool
+thermal_critical_armed(
+	const struct kern_thermal_sensor *sensor)
+{
+	/* Only a firmware zone's level, once the zone has been read. */
+	if (sensor->kind != KERN_THERMAL_KIND_ZONE)
+		return false;
+	if (sensor->critical == 0 || !sensor->accepted)
+		return false;
+
+	/* A level below either floor counts as none. */
+	if (sensor->critical < THERMAL_CRITICAL_LOWEST)
+		return false;
+	if (sensor->critical < sensor->first_millicelsius + THERMAL_CRITICAL_MARGIN)
+		return false;
+
+	/* Succeeded: the level stops the machine. */
+	return true;
+}
+
+/*
+ * Copies the name of the sensor or the fan an event is about, or leaves
+ * the name empty.  The names are fixed at registration and the counts are
+ * published with release, so no lock is needed.
+ */
+static void
+thermal_event_name(
+	uint32_t type,
+	uint32_t index,
+	char *name)
+{
+	unsigned count;
+
+	/* The temperature events are about a sensor. */
+	if (type == KERN_THERMAL_EVENT_PASSIVE ||
+	    type == KERN_THERMAL_EVENT_CRITICAL ||
+	    type == KERN_THERMAL_EVENT_EMERGENCY) {
+		count = atomic_load_acquire(&thermal_sensor_count);
+		if (index < count)
+			kern_memcpy(name, thermal_sensors[index].name, KERN_THERMAL_NAME_MAX);
+		return;
+	}
+
+	/* The fan events are about a fan. */
+	if (type == KERN_THERMAL_EVENT_BOOST || type == KERN_THERMAL_EVENT_FAN_STALLED) {
+		count = atomic_load_acquire(&thermal_fan_count);
+		if (index < count)
+			kern_memcpy(name, thermal_fans[index].name, KERN_THERMAL_NAME_MAX);
+	}
 }
 
 /* Turns a passive or critical level that means none into 0. */

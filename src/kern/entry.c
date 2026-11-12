@@ -42,6 +42,7 @@
 #include "kern/syscall.h"
 #include "kern/sysctl.h"
 #include "kern/thermal.h"
+#include "kern/thermal_private.h"
 #include "kern/thread.h"
 #include "kern/thread_private.h"
 
@@ -318,6 +319,9 @@ kernel_entry(
 	const struct kern_boot_handoff *h;
 	uint64_t timer_ms;
 	int quiet;
+#if CONFIG_KERN_THERMAL
+	int error;
+#endif
 
 	/* Refuses a handoff that is missing, foreign, or truncated. */
 	h = handoff;
@@ -406,6 +410,11 @@ kernel_entry(
 #if CONFIG_KERN_THERMAL
 	/* Starts the thermal core's threads; drivers that registered before keep their place. */
 	kern_thermal_init();
+
+	/* Publishes /dev/thermal; without it the core still guards the machine but nobody reads it. */
+	error = kern_thermal_device_register();
+	if (error != 0)
+		kern_logf("thermal: /dev/thermal is not published (%d)\n", error);
 #endif
 
 	/* Enables timer and device interrupts before the boot worker can wait. */

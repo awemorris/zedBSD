@@ -437,7 +437,7 @@ msr_allowed(
 	}
 }
 
-#if CONFIG_CPU_PERF
+#if CONFIG_KERN_THERMAL
 
 uint64_t
 drv_cpu_x86_rdmsr(
@@ -767,7 +767,7 @@ scenario_not_intel(void)
 	CHECK(provider == NULL && reads == 0U);
 }
 
-#if CONFIG_CPU_PERF
+#if CONFIG_KERN_THERMAL
 
 /* The processor's identity, gates and topology on a 5330. */
 static void
@@ -1187,7 +1187,7 @@ struct scenario {
 };
 
 static const struct scenario scenarios[] = {
-#if !CONFIG_CPU_PERF
+#if !CONFIG_KERN_THERMAL
 	{ "cpuperf-off", scenario_off },
 	{ "not-intel", scenario_not_intel },
 #else

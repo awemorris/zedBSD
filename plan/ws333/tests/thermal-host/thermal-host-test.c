@@ -34,8 +34,12 @@
 #include <kern/sysctl.h>
 #include <kern/thread.h>
 #include <kern/waitq.h>
+#include <kern/cdev.h>
+#include <kern/cred.h>
+#include <kern/file.h>
 #include <uapi/errno.h>
 #include <uapi/sysctl.h>
+#include <uapi/thermal.h>
 #undef sched_yield
 
 #include <pthread.h>
@@ -46,12 +50,17 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 
 /* A kernel second in real milliseconds. */
 #define TEST_SPEEDUP		20U
 
 static bool test_verbose;
+
+/* The generation a choice of strategy reports, which most scenarios do not look at. */
+static uint32_t test_generation_out;
 static unsigned test_failures;
 static unsigned test_checks;
 
@@ -205,6 +214,15 @@ waitq_sleep(struct wait_queue *queue, struct spinlock *lock, uint64_t observed, 
 	pthread_mutex_unlock(&test_wait_mutex);
 	pthread_mutex_lock(test_mutex(lock));
 	return error;
+}
+
+/* The polls an event woke, which the device's poll answers again. */
+static unsigned test_poll_notifies;
+
+void
+poll_notify(void)
+{
+	__atomic_fetch_add(&test_poll_notifies, 1U, __ATOMIC_SEQ_CST);
 }
 
 uint64_t
@@ -399,6 +417,144 @@ kern_platform_halt(void)
 	__atomic_fetch_add(&test_halts, 1U, __ATOMIC_SEQ_CST);
 	for (;;)
 		sleep(60);
+}
+
+/* ---- The devices (thermal-device.c): the file layer, the caller and the copies. ---- */
+
+/* The devices the core published, by name. */
+#define TEST_DEVICES	4U
+
+static struct {
+	char name[32];
+	dev_t rdev;
+	const struct cdev_ops *ops;
+} test_devices[TEST_DEVICES];
+static unsigned test_device_count;
+
+int
+cdev_register(const char *name, dev_t rdev, const struct cdev_ops *ops, void *data)
+{
+	(void)data;
+	if (test_device_count >= TEST_DEVICES)
+		return ENOSPC;
+	snprintf(test_devices[test_device_count].name, sizeof(test_devices[0].name), "%s", name);
+	test_devices[test_device_count].rdev = rdev;
+	test_devices[test_device_count].ops = ops;
+	test_device_count++;
+	return 0;
+}
+
+static const struct cdev_ops *
+test_device(const char *name, dev_t *rdev)
+{
+	unsigned index;
+
+	for (index = 0; index < test_device_count; index++) {
+		if (strcmp(test_devices[index].name, name) == 0) {
+			if (rdev != NULL)
+				*rdev = test_devices[index].rdev;
+			return test_devices[index].ops;
+		}
+	}
+	return NULL;
+}
+
+/* Whether the caller is root, and its process. */
+static struct ucred test_credential;
+static struct process test_caller = { 100 };
+static struct thread test_caller_thread;
+
+struct ucred *
+cred_current_ref(void)
+{
+	return &test_credential;
+}
+
+int
+cred_is_superuser(const struct ucred *credential)
+{
+	return credential->superuser;
+}
+
+void
+cred_release(struct ucred *credential)
+{
+	(void)credential;
+}
+
+struct thread *
+thread_current(void)
+{
+	test_caller_thread.proc = &test_caller;
+	return &test_caller_thread;
+}
+
+int
+file_status_flags_get(const struct file *file)
+{
+	return file->f_flags;
+}
+
+void *
+kern_malloc(size_t size)
+{
+	return malloc(size);
+}
+
+void
+kern_free(void *pointer)
+{
+	free(pointer);
+}
+
+int
+copyin(uintptr_t source, void *destination, size_t size)
+{
+	if (source == 0U)
+		return EFAULT;
+	memcpy(destination, (const void *)source, size);
+	return 0;
+}
+
+int
+copyout(const void *source, uintptr_t destination, size_t size)
+{
+	if (destination == 0U)
+		return EFAULT;
+	memcpy((void *)destination, source, size);
+	return 0;
+}
+
+int
+mutex_init(struct mutex *mutex, enum lock_rank rank, const char *name)
+{
+	spin_init(&mutex->guard, rank, name);
+	return 0;
+}
+
+void
+mutex_lock(struct mutex *mutex)
+{
+	pthread_mutex_lock(test_mutex(&mutex->guard));
+}
+
+void
+mutex_unlock(struct mutex *mutex)
+{
+	pthread_mutex_unlock(test_mutex(&mutex->guard));
+}
+
+unsigned
+kern_cpu_count(void)
+{
+	return 4U;
+}
+
+void
+kern_usleep_range(unsigned min_us, unsigned max_us)
+{
+	(void)max_us;
+	usleep(min_us / TEST_SPEEDUP);
 }
 
 /* ---- Helpers. ---- */
@@ -698,18 +854,18 @@ scenario_strategy_checks(void)
 	kern_thermal_init();
 
 	strategy = test_strategy(KERN_THERMAL_STRATEGY_FIRMWARE);
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == EINVAL);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == EINVAL);
 	strategy = test_strategy(5U);
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == EINVAL);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == EINVAL);
 	strategy = test_strategy(KERN_THERMAL_STRATEGY_BALANCED);
 	strategy.speed = 10;
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == EINVAL);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == EINVAL);
 	strategy = test_strategy(KERN_THERMAL_STRATEGY_BALANCED);
 	strategy.reserved = 1;
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == EINVAL);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == EINVAL);
 	strategy = test_strategy(KERN_THERMAL_STRATEGY_MANUAL);
 	strategy.noise = 101;
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == EINVAL);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == EINVAL);
 	kern_thermal_strategy_get(&info);
 	CHECK(info.generation == 0U);
 
@@ -718,7 +874,7 @@ scenario_strategy_checks(void)
 	strategy.speed = 100;
 	strategy.noise = 0;
 	strategy.gating = 50;
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == EOPNOTSUPP);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == EOPNOTSUPP);
 	CHECK(flags == 0U);
 	kern_thermal_strategy_get(&info);
 	CHECK(info.strategy.value == KERN_THERMAL_STRATEGY_MANUAL);
@@ -745,7 +901,7 @@ scenario_strategy_answers(void)
 
 	/* Both carry it out. */
 	strategy = test_strategy(KERN_THERMAL_STRATEGY_PERFORMANCE);
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == 0);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == 0);
 	CHECK(flags == 0U);
 	CHECK(first.calls == 1U && second.calls == 1U);
 	CHECK(first.values[0] == KERN_THERMAL_STRATEGY_PERFORMANCE);
@@ -755,28 +911,28 @@ scenario_strategy_answers(void)
 	first.answer = EOPNOTSUPP;
 	second.answer = EOPNOTSUPP;
 	strategy = test_strategy(KERN_THERMAL_STRATEGY_BALANCED);
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == EOPNOTSUPP);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == EOPNOTSUPP);
 
 	/* One does not apply, one carries it out. */
 	second.answer = 0;
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == 0);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == 0);
 	CHECK(flags == 0U);
 
 	/* Every acting receiver fails: the first errno. */
 	first.answer = EIO;
 	second.answer = EBUSY;
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == EIO);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == EIO);
 	CHECK(flags == 0U);
 
 	/* One does not apply, the other fails: that one's errno. */
 	first.answer = EOPNOTSUPP;
 	second.answer = EBUSY;
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == EBUSY);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == EBUSY);
 
 	/* One fails, one carries it out: PARTIAL. */
 	first.answer = EIO;
 	second.answer = 0;
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == 0);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == 0);
 	CHECK(flags == KERN_THERMAL_STRATEGY_PARTIAL);
 	kern_thermal_strategy_get(&strategy_info);
 	CHECK(strategy_info.flags == KERN_THERMAL_STRATEGY_PARTIAL);
@@ -787,7 +943,7 @@ scenario_strategy_answers(void)
 	first.answer = 0;
 	first.flags = KERN_THERMAL_APPLY_UNCONFIRMED;
 	second.answer = 0;
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == 0);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == 0);
 	CHECK(flags == 0U);
 	CHECK(kern_thermal_receiver_get(0, &info) == 0);
 	CHECK(info.flags == KERN_THERMAL_APPLY_UNCONFIRMED);
@@ -808,13 +964,14 @@ scenario_strategy_pending(void)
 	unsigned taken;
 
 	kern_thermal_init();
-	kern_thermal_reader_attach(&reader, 1U << KERN_THERMAL_EVENT_STRATEGY);
+	kern_thermal_reader_init(&reader);
+	CHECK(kern_thermal_reader_attach(&reader, 1U << KERN_THERMAL_EVENT_STRATEGY) == 0);
 	slow.delay_ms = 600;		/* past the five kernel seconds (250 ms) */
 	slow.slow_calls = 1;
 	CHECK(kern_thermal_receiver_register("slow", &test_receiver_plain, &slow) == 0);
 
 	strategy = test_strategy(KERN_THERMAL_STRATEGY_POWERSAVE);
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == 0);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == 0);
 	CHECK(flags == KERN_THERMAL_STRATEGY_PENDING);
 	kern_thermal_strategy_get(&info);
 	CHECK(info.flags == KERN_THERMAL_STRATEGY_PENDING);
@@ -846,7 +1003,7 @@ test_choose(void *argument)
 
 	chooser = argument;
 	strategy = test_strategy(chooser->value);
-	chooser->error = kern_thermal_strategy_set(&strategy, &chooser->flags);
+	chooser->error = kern_thermal_strategy_set(&strategy, &chooser->flags, &test_generation_out);
 	return NULL;
 }
 
@@ -904,7 +1061,7 @@ scenario_strategy_late_and_custom(void)
 	early.firmware_error = ENOENT;
 	CHECK(kern_thermal_receiver_register("early", &test_receiver_ops, &early) == 0);
 	strategy = test_strategy(KERN_THERMAL_STRATEGY_BALANCED);
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == 0);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == 0);
 
 	/* Late registration is handed the strategy in force. */
 	CHECK(kern_thermal_receiver_register("late", &test_receiver_plain, &late) == 0);
@@ -944,7 +1101,7 @@ scenario_before_init(void)
 
 	CHECK(kern_thermal_receiver_register("before", &test_receiver_plain, &receiver) == 0);
 	strategy = test_strategy(KERN_THERMAL_STRATEGY_PERFORMANCE);
-	CHECK(kern_thermal_strategy_set(&strategy, &flags) == 0);
+	CHECK(kern_thermal_strategy_set(&strategy, &flags, &test_generation_out) == 0);
 	CHECK(flags == KERN_THERMAL_STRATEGY_PENDING);
 	CHECK(receiver.calls == 0U);
 	kern_thermal_init();
@@ -1049,7 +1206,8 @@ scenario_guard(void)
 	unsigned taken;
 
 	kern_thermal_init();
-	kern_thermal_reader_attach(&reader, (1U << KERN_THERMAL_EVENT_CRITICAL) | (1U << KERN_THERMAL_EVENT_PASSIVE));
+	kern_thermal_reader_init(&reader);
+	CHECK(kern_thermal_reader_attach(&reader, (1U << KERN_THERMAL_EVENT_CRITICAL) | (1U << KERN_THERMAL_EVENT_PASSIVE)) == 0);
 	CHECK(kern_thermal_sensor_register("zone", KERN_THERMAL_KIND_ZONE, 0, &zone) == 0);
 	CHECK(kern_thermal_sensor_register("device", KERN_THERMAL_KIND_DEVICE, 0, &device) == 0);
 	CHECK(kern_thermal_sensor_register("cpu", KERN_THERMAL_KIND_DEVICE, KERN_THERMAL_SENSOR_CPU, &cpu) == 0);
@@ -1122,7 +1280,8 @@ scenario_fans(void)
 	uint32_t flags;
 	unsigned taken;
 
-	kern_thermal_reader_attach(&reader, (1U << KERN_THERMAL_EVENT_FAN_STALLED) | (1U << KERN_THERMAL_EVENT_BOOST));
+	kern_thermal_reader_init(&reader);
+	CHECK(kern_thermal_reader_attach(&reader, (1U << KERN_THERMAL_EVENT_FAN_STALLED) | (1U << KERN_THERMAL_EVENT_BOOST)) == 0);
 	pi.state.flags = KERN_THERMAL_FAN_HAS_RPM | KERN_THERMAL_FAN_HAS_LEVEL;
 	pi.state.level = 2;
 	pi.state.level_count = 5;
@@ -1362,8 +1521,10 @@ scenario_events(void)
 	unsigned index;
 
 	kern_thermal_init();
-	kern_thermal_reader_attach(&strategy_reader, 1U << KERN_THERMAL_EVENT_STRATEGY);
-	kern_thermal_reader_attach(&all_reader, 0xffffffffU);
+	kern_thermal_reader_init(&strategy_reader);
+	CHECK(kern_thermal_reader_attach(&strategy_reader, 1U << KERN_THERMAL_EVENT_STRATEGY) == 0);
+	kern_thermal_reader_init(&all_reader);
+	CHECK(kern_thermal_reader_attach(&all_reader, 0xffffffffU) == 0);
 	CHECK(kern_thermal_reader_take(&strategy_reader, records, 0) == 0U);
 
 	/* Types outside the mask's bits are ignored. */
@@ -1451,7 +1612,8 @@ scenario_emergency_no_handler(void)
 	test_init_present = true;
 	test_init_disposition = 0;
 	kern_thermal_init();
-	kern_thermal_reader_attach(&reader, 1U << KERN_THERMAL_EVENT_EMERGENCY);
+	kern_thermal_reader_init(&reader);
+	CHECK(kern_thermal_reader_attach(&reader, 1U << KERN_THERMAL_EVENT_EMERGENCY) == 0);
 	(void)test_zone("cool", 90000, 40000);
 	zone = test_zone("zone", 90000, 80000);
 	CHECK(!kern_thermal_emergency_active());
@@ -1791,6 +1953,612 @@ scenario_passive(void)
 	CHECK(!kern_thermal_emergency_active());
 }
 
+/* ---- The devices: /dev/thermal and /dev/thermal-inject. ---- */
+
+/* One open of a device, as the file layer keeps it. */
+struct test_open {
+	const struct cdev_ops *ops;
+	struct file file;
+};
+
+static void
+test_open_device(struct test_open *open_file, const char *name, int flags)
+{
+	memset(open_file, 0, sizeof(*open_file));
+	open_file->ops = test_device(name, NULL);
+	open_file->file.f_flags = flags;
+	CHECK(open_file->ops != NULL);
+	if (open_file->ops->open != NULL)
+		CHECK(open_file->ops->open(&open_file->file) == 0);
+}
+
+static void
+test_close_device(struct test_open *open_file)
+{
+	if (open_file->ops->close != NULL)
+		CHECK(open_file->ops->close(&open_file->file) == 0);
+}
+
+static int
+test_request(struct test_open *open_file, unsigned long request, void *argument)
+{
+	return open_file->ops->ioctl(&open_file->file, request, (uintptr_t)argument);
+}
+
+/* Brings the core and the devices up as the boot path does. */
+static void
+test_devices_up(void)
+{
+	kern_thermal_init();
+	CHECK(kern_thermal_device_register() == 0);
+	test_credential.superuser = 1;
+	test_caller.pid = 100;
+}
+
+/* Makes up a sensor through /dev/thermal-inject. */
+static int
+test_inject_sensor(struct test_open *inject, const char *name, uint32_t kind, uint32_t flags,
+    int32_t millicelsius, int32_t passive, int32_t critical)
+{
+	struct thermal_inject_sensor request;
+
+	memset(&request, 0, sizeof(request));
+	snprintf(request.name, sizeof(request.name), "%s", name);
+	request.kind = kind;
+	request.flags = flags;
+	request.millicelsius = millicelsius;
+	request.passive = passive;
+	request.critical = critical;
+	request.valid = 1;
+	return test_request(inject, KERN_THERMAL_INJECT_SENSOR, &request);
+}
+
+/* Makes up a receiver through /dev/thermal-inject. */
+static int
+test_inject_receiver(struct test_open *inject, const char *name, int error, uint32_t delay_ms)
+{
+	struct thermal_inject_receiver request;
+
+	memset(&request, 0, sizeof(request));
+	snprintf(request.name, sizeof(request.name), "%s", name);
+	request.error = error;
+	request.delay_ms = delay_ms;
+	return test_request(inject, KERN_THERMAL_INJECT_RECEIVER, &request);
+}
+
+/* The nodes, their numbers and the matching of the whole request number. */
+static void
+scenario_device_nodes(void)
+{
+	struct thermal_status status;
+	struct test_open thermal;
+	struct test_open inject;
+	dev_t rdev;
+	short revents;
+
+	test_devices_up();
+	CHECK(test_device("thermal", &rdev) != NULL && rdev == 0x00010008U);
+	CHECK(test_device("thermal-inject", &rdev) != NULL && rdev == 0x00010009U);
+	test_open_device(&thermal, "thermal", 0);
+
+	/* The status of a machine with nothing registered. */
+	memset(&status, 0xa5, sizeof(status));
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0);
+	CHECK(status.sensor_count == 0U && status.fan_count == 0U && status.meter_count == 0U);
+	CHECK(status.receiver_count == 0U && status.strategy == KERN_THERMAL_STRATEGY_FIRMWARE);
+	CHECK(status.strategy_flags == 0U && status.generation == 0U && status.strategy_error == 0);
+	CHECK(status.passive_permille == 1000U && status.emergency == KERN_THERMAL_EMERGENCY_NONE);
+	CHECK(status.emergency_time_ns == 0U && status.cpu_count == 4U);
+	CHECK(status.cpu_domain_count == 0U && status.cpu_package_count == 0U && status.cpu_generation == 0U);
+	CHECK(status.reserved[0] == 0U && status.reserved[1] == 0U);
+
+	/* Another size, another group, a CPU number without the framework, an injection number: ENOTTY. */
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS + (1UL << 16), &status) == ENOTTY);
+	CHECK(test_request(&thermal, _IOR('S', 1, struct thermal_status), &status) == ENOTTY);
+	CHECK(test_request(&thermal, _IOR('T', 11, struct thermal_status), &status) == ENOTTY);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_CPU, &status) == ENOTTY);
+	CHECK(test_request(&thermal, KERN_THERMAL_INJECT_PATH, &status) == ENOTTY);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, NULL) == EFAULT);
+
+	/* A read before a subscription is refused; the poll says nothing waits. */
+	{
+		char buffer[256];
+
+		CHECK(thermal.ops->read(&thermal.file, buffer, sizeof(buffer)) == -EINVAL);
+	}
+	revents = 0;
+	CHECK(thermal.ops->poll(&thermal.file, POLLIN, &revents) == 0 && revents == 0);
+
+	/* The injection node is root's, and answers its own numbers only. */
+	test_credential.superuser = 0;
+	memset(&inject, 0, sizeof(inject));
+	inject.ops = test_device("thermal-inject", NULL);
+	CHECK(inject.ops->open(&inject.file) == EPERM);
+	test_credential.superuser = 1;
+	test_open_device(&inject, "thermal-inject", 0);
+	CHECK(test_request(&inject, KERN_THERMAL_GET_STATUS, &status) == ENOTTY);
+	CHECK(test_request(&inject, KERN_THERMAL_INJECT_SENSOR + (1UL << 16), &status) == ENOTTY);
+	test_close_device(&inject);
+	test_close_device(&thermal);
+}
+
+/* The sensors: made up through the injection node and read through /dev/thermal. */
+static void
+scenario_device_sensors(void)
+{
+	struct thermal_sensor_info sensor;
+	struct thermal_inject_sensor bad;
+	struct thermal_status status;
+	struct test_open thermal;
+	struct test_open inject;
+
+	test_devices_up();
+	test_open_device(&thermal, "thermal", 0);
+	test_open_device(&inject, "thermal-inject", 0);
+
+	/* A zone with trusted levels is ARMED; a level too low for the machine is not. */
+	CHECK(test_inject_sensor(&inject, "zone0", KERN_THERMAL_KIND_ZONE, KERN_THERMAL_SENSOR_CPU, 45000, 80000, 95000) == 0);
+	CHECK(test_inject_sensor(&inject, "low", KERN_THERMAL_KIND_ZONE, 0, 45000, 0, 40000) == 0);
+	CHECK(test_inject_sensor(&inject, "nvme", KERN_THERMAL_KIND_DEVICE, 0, 38000, 0, 0) == 0);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0 && status.sensor_count == 3U);
+
+	memset(&sensor, 0, sizeof(sensor));
+	sensor.index = 0;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_SENSOR, &sensor) == 0);
+	CHECK(sensor.index == 0U && sensor.count == 3U && strcmp(sensor.name, "zone0") == 0);
+	CHECK(sensor.kind == KERN_THERMAL_KIND_ZONE && sensor.flags == KERN_THERMAL_SENSOR_CPU);
+	CHECK(sensor.reading == (KERN_THERMAL_READING_VALID | KERN_THERMAL_READING_PASSIVE |
+	    KERN_THERMAL_READING_CRITICAL | KERN_THERMAL_READING_ARMED));
+	CHECK(sensor.millicelsius == 45000 && sensor.passive == 80000 && sensor.critical == 95000);
+	CHECK(sensor.time_ns != 0U);
+
+	sensor.index = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_SENSOR, &sensor) == 0);
+	CHECK(strcmp(sensor.name, "low") == 0);
+	CHECK(sensor.reading == (KERN_THERMAL_READING_VALID | KERN_THERMAL_READING_CRITICAL));
+
+	sensor.index = 2;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_SENSOR, &sensor) == 0);
+	CHECK(sensor.kind == KERN_THERMAL_KIND_DEVICE && sensor.reading == KERN_THERMAL_READING_VALID);
+
+	/* One past the last copies nothing. */
+	memset(&sensor, 0x5a, sizeof(sensor));
+	sensor.index = 3;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_SENSOR, &sensor) == ENOENT);
+	CHECK(sensor.count == 0x5a5a5a5aU);
+
+	/* The same name updates the sensor; an invalid reading clears VALID. */
+	CHECK(test_inject_sensor(&inject, "zone0", KERN_THERMAL_KIND_ZONE, KERN_THERMAL_SENSOR_CPU, 50000, 80000, 95000) == 0);
+	memset(&bad, 0, sizeof(bad));
+	snprintf(bad.name, sizeof(bad.name), "nvme");
+	bad.kind = KERN_THERMAL_KIND_DEVICE;
+	bad.valid = 0;
+	CHECK(test_request(&inject, KERN_THERMAL_INJECT_SENSOR, &bad) == 0);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0 && status.sensor_count == 3U);
+	sensor.index = 0;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_SENSOR, &sensor) == 0 && sensor.millicelsius == 50000);
+	sensor.index = 2;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_SENSOR, &sensor) == 0);
+	CHECK((sensor.reading & KERN_THERMAL_READING_VALID) == 0U);
+
+	/* A bad made-up sensor is refused. */
+	CHECK(test_inject_sensor(&inject, "", KERN_THERMAL_KIND_ZONE, 0, 1, 0, 0) == EINVAL);
+	CHECK(test_inject_sensor(&inject, "x", 3, 0, 1, 0, 0) == EINVAL);
+	CHECK(test_inject_sensor(&inject, "x", KERN_THERMAL_KIND_ZONE, 2, 1, 0, 0) == EINVAL);
+	memset(&bad, 0, sizeof(bad));
+	snprintf(bad.name, sizeof(bad.name), "x");
+	bad.kind = KERN_THERMAL_KIND_ZONE;
+	bad.reserved[1] = 1;
+	CHECK(test_request(&inject, KERN_THERMAL_INJECT_SENSOR, &bad) == EINVAL);
+	memset(&bad, 'a', sizeof(bad.name));
+	bad.kind = KERN_THERMAL_KIND_ZONE;
+	bad.reserved[1] = 0;
+	CHECK(test_request(&inject, KERN_THERMAL_INJECT_SENSOR, &bad) == EINVAL);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0 && status.sensor_count == 3U);
+	test_close_device(&inject);
+	test_close_device(&thermal);
+}
+
+/* The strategy: root alone chooses, the outcome is answered and kept, and the receivers are listed. */
+static void
+scenario_device_strategy(void)
+{
+	struct thermal_receiver_info receiver;
+	struct thermal_strategy strategy;
+	struct thermal_strategy saved;
+	struct thermal_status status;
+	struct test_open thermal;
+	struct test_open inject;
+
+	test_devices_up();
+	test_open_device(&thermal, "thermal", 0);
+	test_open_device(&inject, "thermal-inject", 0);
+
+	/* From boot: FIRMWARE, no receivers. */
+	memset(&strategy, 0xa5, sizeof(strategy));
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STRATEGY, &strategy) == 0);
+	CHECK(strategy.value == KERN_THERMAL_STRATEGY_FIRMWARE && strategy.generation == 0U);
+	CHECK(strategy.receiver_count == 0U && strategy.error == 0 && strategy.firmware_name[0] == '\0');
+
+	/* Only root chooses. */
+	test_credential.superuser = 0;
+	memset(&strategy, 0, sizeof(strategy));
+	strategy.value = KERN_THERMAL_STRATEGY_BALANCED;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == EPERM);
+	test_credential.superuser = 1;
+
+	/* With no receiver the choice is EOPNOTSUPP, copies nothing out, and is kept. */
+	strategy.generation = 77U;
+	saved = strategy;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == EOPNOTSUPP);
+	CHECK(memcmp(&strategy, &saved, sizeof(strategy)) == 0);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STRATEGY, &strategy) == 0);
+	CHECK(strategy.value == KERN_THERMAL_STRATEGY_BALANCED && strategy.generation == 1U);
+	CHECK(strategy.error == EOPNOTSUPP);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0 && status.strategy_error == EOPNOTSUPP);
+
+	/* Refused choices: FIRMWARE, axes outside MANUAL, an axis past 100, a reserved field. */
+	memset(&strategy, 0, sizeof(strategy));
+	strategy.value = KERN_THERMAL_STRATEGY_FIRMWARE;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == EINVAL);
+	strategy.value = KERN_THERMAL_STRATEGY_PERFORMANCE;
+	strategy.speed = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == EINVAL);
+	strategy.value = KERN_THERMAL_STRATEGY_MANUAL;
+	strategy.speed = 101;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == EINVAL);
+	strategy.speed = 50;
+	strategy.reserved0 = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == EINVAL);
+	strategy.reserved0 = 0;
+	strategy.reserved[1] = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == EINVAL);
+
+	/* A receiver that takes it: 0, the generation, the receivers' count. */
+	CHECK(test_inject_receiver(&inject, "ok", 0, 0) == 0);
+	memset(&strategy, 0, sizeof(strategy));
+	strategy.value = KERN_THERMAL_STRATEGY_MANUAL;
+	strategy.speed = 30;
+	strategy.noise = 20;
+	strategy.gating = 10;
+	strategy.flags = 0xffU;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == 0);
+	CHECK(strategy.flags == 0U && strategy.generation == 2U && strategy.receiver_count == 1U && strategy.error == 0);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STRATEGY, &strategy) == 0);
+	CHECK(strategy.value == KERN_THERMAL_STRATEGY_MANUAL && strategy.speed == 30 && strategy.noise == 20);
+	CHECK(strategy.gating == 10 && strategy.error == 0 && strategy.flags == 0U);
+
+	/* A second receiver that fails: PARTIAL. */
+	CHECK(test_inject_receiver(&inject, "bad", EIO, 0) == 0);
+	WAIT_FOR(test_receiver_generation(1) == 2U);
+	memset(&strategy, 0, sizeof(strategy));
+	strategy.value = KERN_THERMAL_STRATEGY_POWERSAVE;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == 0);
+	CHECK(strategy.flags == KERN_THERMAL_STRATEGY_PARTIAL && strategy.receiver_count == 2U);
+
+	/* Both fail: the first errno, kept for GET. */
+	CHECK(test_inject_receiver(&inject, "ok", EBUSY, 0) == 0);
+	memset(&strategy, 0, sizeof(strategy));
+	strategy.value = KERN_THERMAL_STRATEGY_PERFORMANCE;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == EBUSY);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STRATEGY, &strategy) == 0);
+	CHECK(strategy.value == KERN_THERMAL_STRATEGY_PERFORMANCE && strategy.error == EBUSY);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0);
+	CHECK(status.strategy_error == EBUSY && status.receiver_count == 2U);
+
+	/* The receivers and their last answers. */
+	memset(&receiver, 0, sizeof(receiver));
+	receiver.index = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_RECEIVER, &receiver) == 0);
+	CHECK(receiver.count == 2U && strcmp(receiver.name, "bad") == 0 && receiver.error == EIO);
+	CHECK(receiver.generation == strategy.generation && receiver.time_ns != 0U);
+	receiver.index = 2;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_RECEIVER, &receiver) == ENOENT);
+
+	/* A receiver slower than five seconds: PENDING, then the STRATEGY event. */
+	CHECK(test_inject_receiver(&inject, "ok", 0, 7000) == 0);
+	CHECK(test_inject_receiver(&inject, "bad", 0, 0) == 0);
+	memset(&strategy, 0, sizeof(strategy));
+	strategy.value = KERN_THERMAL_STRATEGY_BALANCED;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_STRATEGY, &strategy) == 0);
+	CHECK(strategy.flags == KERN_THERMAL_STRATEGY_PENDING);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0);
+	CHECK((status.strategy_flags & KERN_THERMAL_STRATEGY_PENDING) != 0U);
+
+	/* A bad made-up receiver is refused. */
+	CHECK(test_inject_receiver(&inject, "", 0, 0) == EINVAL);
+	CHECK(test_inject_receiver(&inject, "x", -1, 0) == EINVAL);
+	CHECK(test_inject_receiver(&inject, "x", 0, 60001) == EINVAL);
+	test_close_device(&inject);
+	test_close_device(&thermal);
+}
+
+/* The fans, the meters and the boost. */
+static void
+scenario_device_fans(void)
+{
+	static struct test_fan fan;
+	static struct test_meter meter;
+	static struct kern_thermal_meter_ops meter_ops;
+	struct thermal_meter_info meter_info;
+	struct thermal_fan_info fan_info;
+	struct thermal_boost boost;
+	struct test_open thermal;
+
+	fan.state.flags = KERN_THERMAL_FAN_HAS_RPM | KERN_THERMAL_FAN_HAS_LEVEL;
+	fan.state.rpm = 2400;
+	fan.state.level = 1;
+	fan.state.level_count = 3;
+	fan.state.boost_count = 2;
+	meter_ops.count_bits = 32;
+	meter_ops.unit_numerator = 1000;
+	meter_ops.unit_denominator = 1;
+	meter_ops.read = test_meter_read;
+	meter.count = 100;
+	test_devices_up();
+	CHECK(kern_thermal_fan_register("fan0", 5000, &test_fan_ops, &fan) == 0);
+	CHECK(kern_thermal_meter_register("package", KERN_THERMAL_METER_PACKAGE, &meter_ops, &meter) == 0);
+	test_open_device(&thermal, "thermal", 0);
+
+	/* A fan before it is read, then after. */
+	memset(&fan_info, 0, sizeof(fan_info));
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_FAN, &fan_info) == 0);
+	CHECK(fan_info.count == 1U && strcmp(fan_info.name, "fan0") == 0 && fan_info.rpm_max == 5000U);
+	CHECK(fan_info.flags == KERN_THERMAL_FAN_CAN_BOOST && fan_info.time_ns == 0U);
+	WAIT_FOR(test_request(&thermal, KERN_THERMAL_GET_FAN, &fan_info) == 0 &&
+	    (fan_info.flags & KERN_THERMAL_FAN_KNOWN) != 0U);
+	CHECK(fan_info.flags == (KERN_THERMAL_FAN_HAS_RPM | KERN_THERMAL_FAN_HAS_LEVEL |
+	    KERN_THERMAL_FAN_KNOWN | KERN_THERMAL_FAN_CAN_BOOST));
+	CHECK(fan_info.rpm == 2400U && fan_info.level == 1U && fan_info.level_count == 3U);
+	CHECK(fan_info.boost == 0U && fan_info.boost_count == 2U && fan_info.time_ns != 0U);
+	fan_info.index = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_FAN, &fan_info) == ENOENT);
+
+	/* The boost: root alone, a level within the fan's, ALL. */
+	memset(&boost, 0, sizeof(boost));
+	boost.fan = 0;
+	boost.level = 2;
+	test_credential.superuser = 0;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_BOOST, &boost) == EPERM);
+	test_credential.superuser = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_BOOST, &boost) == 0 && boost.flags == 0U);
+	CHECK(fan.boosted == 2U);
+	fan_info.index = 0;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_FAN, &fan_info) == 0 && fan_info.boost == 2U);
+	boost.level = 3;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_BOOST, &boost) == EINVAL);
+	boost.fan = 1;
+	boost.level = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_BOOST, &boost) == ENOENT);
+	boost.fan = KERN_THERMAL_ALL;
+	boost.level = 0;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_BOOST, &boost) == 0 && fan.boosted == 0U);
+	boost.reserved = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_SET_BOOST, &boost) == EINVAL);
+
+	/* The meter, for anyone: the energy grows and the flags say it was read. */
+	test_credential.superuser = 0;
+	memset(&meter_info, 0, sizeof(meter_info));
+	WAIT_FOR(test_request(&thermal, KERN_THERMAL_GET_METER, &meter_info) == 0 &&
+	    (meter_info.flags & KERN_THERMAL_METER_KNOWN) != 0U);
+	CHECK(meter_info.count == 1U && strcmp(meter_info.name, "package") == 0);
+	CHECK(meter_info.kind == KERN_THERMAL_METER_PACKAGE && meter_info.flags == KERN_THERMAL_METER_KNOWN);
+	meter.count = 1100;
+	WAIT_FOR(test_request(&thermal, KERN_THERMAL_GET_METER, &meter_info) == 0 && meter_info.energy_nj != 0U);
+	CHECK(meter_info.energy_nj == 1000000U && meter_info.time_ns != 0U);
+	meter_info.index = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_METER, &meter_info) == ENOENT);
+	test_close_device(&thermal);
+}
+
+struct test_blocked_read {
+	struct test_open *open_file;
+	struct thermal_event events[2];
+	ssize_t result;
+	bool done;
+};
+
+static void *
+test_blocked_read_main(void *argument)
+{
+	struct test_blocked_read *blocked;
+
+	blocked = argument;
+	blocked->result = blocked->open_file->ops->read(&blocked->open_file->file, blocked->events, sizeof(blocked->events));
+	__atomic_store_n(&blocked->done, true, __ATOMIC_SEQ_CST);
+	return NULL;
+}
+
+/* The events: the subscription, the records, the poll, the bound on the subscribers, a blocked read. */
+static void
+scenario_device_events(void)
+{
+	static struct test_open opens[KERN_THERMAL_READER_MAX + 1U];
+	struct thermal_subscription subscription;
+	struct thermal_event events[4];
+	struct test_blocked_read blocked;
+	struct test_open thermal;
+	struct test_open waiter;
+	struct test_open inject;
+	pthread_t host;
+	unsigned index;
+	ssize_t got;
+	short revents;
+
+	test_devices_up();
+	test_open_device(&thermal, "thermal", O_NONBLOCK);
+	test_open_device(&inject, "thermal-inject", 0);
+
+	/* A mask with a bit no event has, or a reserved word, is refused. */
+	memset(&subscription, 0, sizeof(subscription));
+	subscription.mask = 1U;
+	CHECK(test_request(&thermal, KERN_THERMAL_SUBSCRIBE, &subscription) == EINVAL);
+	subscription.mask = 1U << 9;
+	CHECK(test_request(&thermal, KERN_THERMAL_SUBSCRIBE, &subscription) == EINVAL);
+	subscription.mask = 1U << KERN_THERMAL_EVENT_PASSIVE;
+	subscription.reserved[2] = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_SUBSCRIBE, &subscription) == EINVAL);
+	subscription.reserved[2] = 0;
+	subscription.mask = (1U << KERN_THERMAL_EVENT_PASSIVE) | (1U << KERN_THERMAL_EVENT_CRITICAL);
+	CHECK(test_request(&thermal, KERN_THERMAL_SUBSCRIBE, &subscription) == 0);
+
+	/* Nothing yet: EAGAIN, not readable; a buffer smaller than a record is refused. */
+	CHECK(thermal.ops->read(&thermal.file, events, sizeof(events)) == -EAGAIN);
+	CHECK(thermal.ops->read(&thermal.file, events, sizeof(events[0]) - 1U) == -EINVAL);
+	revents = 0;
+	CHECK(thermal.ops->poll(&thermal.file, POLLIN, &revents) == 0 && revents == 0);
+
+	/* A sensor that crosses its passive level: one PASSIVE record with the sensor's name. */
+	CHECK(test_inject_sensor(&inject, "zone0", KERN_THERMAL_KIND_ZONE, KERN_THERMAL_SENSOR_CPU, 50000, 60000, 99000) == 0);
+	CHECK(test_inject_sensor(&inject, "zone0", KERN_THERMAL_KIND_ZONE, KERN_THERMAL_SENSOR_CPU, 61000, 60000, 99000) == 0);
+	WAIT_FOR(thermal.ops->poll(&thermal.file, POLLIN, &revents) == 0 && revents != 0);
+	CHECK(revents == POLLIN);
+	CHECK(test_poll_notifies > 0U);
+	memset(events, 0, sizeof(events));
+	got = thermal.ops->read(&thermal.file, events, sizeof(events));
+	CHECK(got == (ssize_t)sizeof(struct thermal_event));
+	CHECK(events[0].size == sizeof(struct thermal_event) && events[0].type == KERN_THERMAL_EVENT_PASSIVE);
+	CHECK(events[0].index == 0U && events[0].value == 1 && strcmp(events[0].name, "zone0") == 0);
+	CHECK(events[0].time_ns != 0U);
+
+	/* A boost event (not subscribed) moves the sequence; a later one shows the skip. */
+	kern_thermal_event(KERN_THERMAL_EVENT_BOOST, 0, 1);
+	kern_thermal_event(KERN_THERMAL_EVENT_CRITICAL, 0, 1);
+	got = thermal.ops->read(&thermal.file, events + 1, sizeof(events[0]));
+	CHECK(got == (ssize_t)sizeof(struct thermal_event));
+	CHECK(events[1].type == KERN_THERMAL_EVENT_CRITICAL && events[1].sequence == events[0].sequence + 2U);
+
+	/* Overflow: 70 events into a ring of 64 give an OVERFLOW of 6 first. */
+	for (index = 0; index < 70U; index++)
+		kern_thermal_event(KERN_THERMAL_EVENT_PASSIVE, 0, (int64_t)index);
+	got = thermal.ops->read(&thermal.file, events, sizeof(events[0]) * 2U);
+	CHECK(got == (ssize_t)(2U * sizeof(struct thermal_event)));
+	CHECK(events[0].type == KERN_THERMAL_EVENT_OVERFLOW && events[0].value == 6);
+	CHECK(events[1].type == KERN_THERMAL_EVENT_PASSIVE && events[1].value == 6);
+	while (thermal.ops->read(&thermal.file, events, sizeof(events)) > 0)
+		;
+
+	/* Mask 0 stops the subscription: reads are refused again. */
+	subscription.mask = 0;
+	CHECK(test_request(&thermal, KERN_THERMAL_SUBSCRIBE, &subscription) == 0);
+	CHECK(thermal.ops->read(&thermal.file, events, sizeof(events)) == -EINVAL);
+
+	/* Sixteen opens may subscribe at once; the seventeenth is ENOSPC until one closes. */
+	subscription.mask = 1U << KERN_THERMAL_EVENT_STRATEGY;
+	for (index = 0; index <= KERN_THERMAL_READER_MAX; index++) {
+		test_open_device(&opens[index], "thermal", O_NONBLOCK);
+		if (index < KERN_THERMAL_READER_MAX)
+			CHECK(test_request(&opens[index], KERN_THERMAL_SUBSCRIBE, &subscription) == 0);
+	}
+	CHECK(test_request(&opens[KERN_THERMAL_READER_MAX], KERN_THERMAL_SUBSCRIBE, &subscription) == ENOSPC);
+	CHECK(test_request(&opens[0], KERN_THERMAL_SUBSCRIBE, &subscription) == 0);
+	test_close_device(&opens[0]);
+	CHECK(test_request(&opens[KERN_THERMAL_READER_MAX], KERN_THERMAL_SUBSCRIBE, &subscription) == 0);
+	for (index = 1; index <= KERN_THERMAL_READER_MAX; index++)
+		test_close_device(&opens[index]);
+
+	/* A blocking read waits for the event and wakes with it. */
+	test_open_device(&waiter, "thermal", 0);
+	subscription.mask = 1U << KERN_THERMAL_EVENT_CPU;
+	CHECK(test_request(&waiter, KERN_THERMAL_SUBSCRIBE, &subscription) == 0);
+	memset(&blocked, 0, sizeof(blocked));
+	blocked.open_file = &waiter;
+	pthread_create(&host, NULL, test_blocked_read_main, &blocked);
+	test_sleep_ms(100);
+	CHECK(!__atomic_load_n(&blocked.done, __ATOMIC_SEQ_CST));
+	kern_thermal_event(KERN_THERMAL_EVENT_CPU, KERN_THERMAL_ALL, 5);
+	WAIT_FOR(__atomic_load_n(&blocked.done, __ATOMIC_SEQ_CST));
+	pthread_join(host, NULL);
+	CHECK(blocked.result == (ssize_t)sizeof(struct thermal_event));
+	CHECK(blocked.events[0].type == KERN_THERMAL_EVENT_CPU && blocked.events[0].index == KERN_THERMAL_ALL);
+	CHECK(blocked.events[0].value == 5 && blocked.events[0].name[0] == '\0');
+
+	/* A blocked read ends with EINVAL when the subscription stops under it. */
+	memset(&blocked, 0, sizeof(blocked));
+	blocked.open_file = &waiter;
+	pthread_create(&host, NULL, test_blocked_read_main, &blocked);
+	test_sleep_ms(100);
+	subscription.mask = 0;
+	CHECK(test_request(&waiter, KERN_THERMAL_SUBSCRIBE, &subscription) == 0);
+	WAIT_FOR(__atomic_load_n(&blocked.done, __ATOMIC_SEQ_CST));
+	pthread_join(host, NULL);
+	CHECK(blocked.result == -EINVAL);
+	test_close_device(&waiter);
+	test_close_device(&inject);
+	test_close_device(&thermal);
+}
+
+/* The emergency through the devices: init's answer, and the direct path a test chooses. */
+static void
+scenario_device_emergency(void)
+{
+	struct thermal_inject_path path;
+	struct thermal_status status;
+	struct test_open thermal;
+	struct test_open inject;
+
+	test_init_present = true;
+	test_init_disposition = TEST_INIT_HANDLER;
+	test_devices_up();
+	test_open_device(&thermal, "thermal", 0);
+	test_open_device(&inject, "thermal-inject", 0);
+
+	/* An answer nothing waits for: EINVAL from init, EPERM from anyone else. */
+	test_caller.pid = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_EMERGENCY_ACK, NULL) == EINVAL);
+	test_caller.pid = 100;
+	CHECK(test_request(&thermal, KERN_THERMAL_EMERGENCY_ACK, NULL) == EPERM);
+
+	/* The direct path: init has a handler but is not asked. */
+	memset(&path, 0, sizeof(path));
+	path.path = 2;
+	CHECK(test_request(&inject, KERN_THERMAL_INJECT_PATH, &path) == EINVAL);
+	path.path = KERN_THERMAL_INJECT_PATH_DIRECT;
+	path.reserved[0] = 1;
+	CHECK(test_request(&inject, KERN_THERMAL_INJECT_PATH, &path) == EINVAL);
+	path.reserved[0] = 0;
+	CHECK(test_request(&inject, KERN_THERMAL_INJECT_PATH, &path) == 0);
+	CHECK(test_inject_sensor(&inject, "hot", KERN_THERMAL_KIND_ZONE, 0, 60000, 0, 90000) == 0);
+	CHECK(test_inject_sensor(&inject, "hot", KERN_THERMAL_KIND_ZONE, 0, 91000, 0, 90000) == 0);
+	CHECK(test_inject_sensor(&inject, "hot", KERN_THERMAL_KIND_ZONE, 0, 92000, 0, 90000) == 0);
+	CHECK(test_wait_count(&test_poweroffs, 1U, 2000U));
+	CHECK(test_init_signals == 0U && test_syncs == 1U);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0);
+	CHECK(status.emergency == KERN_THERMAL_EMERGENCY_CUTTING && status.emergency_sensor == 0U);
+	CHECK(status.emergency_millicelsius == 92000 && status.emergency_time_ns != 0U);
+	test_caller.pid = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_EMERGENCY_ACK, NULL) == EINVAL);
+}
+
+/* The emergency through the devices on the init path: init answers with EMERGENCY_ACK. */
+static void
+scenario_device_ack(void)
+{
+	struct thermal_status status;
+	struct test_open thermal;
+	struct test_open inject;
+
+	test_init_present = true;
+	test_init_disposition = TEST_INIT_HANDLER;
+	test_devices_up();
+	test_open_device(&thermal, "thermal", 0);
+	test_open_device(&inject, "thermal-inject", 0);
+	CHECK(test_inject_sensor(&inject, "hot", KERN_THERMAL_KIND_ZONE, 0, 60000, 0, 90000) == 0);
+	CHECK(test_inject_sensor(&inject, "hot", KERN_THERMAL_KIND_ZONE, 0, 91000, 0, 90000) == 0);
+	CHECK(test_inject_sensor(&inject, "hot", KERN_THERMAL_KIND_ZONE, 0, 92000, 0, 90000) == 0);
+	CHECK(test_wait_count(&test_init_signals, 1U, 2000U));
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0);
+	CHECK(status.emergency == KERN_THERMAL_EMERGENCY_SIGNALED);
+	test_caller.pid = 100;
+	CHECK(test_request(&thermal, KERN_THERMAL_EMERGENCY_ACK, NULL) == EPERM);
+	test_caller.pid = 1;
+	CHECK(test_request(&thermal, KERN_THERMAL_EMERGENCY_ACK, NULL) == 0);
+	CHECK(test_request(&thermal, KERN_THERMAL_GET_STATUS, &status) == 0);
+	CHECK(status.emergency == KERN_THERMAL_EMERGENCY_INIT);
+	CHECK(test_request(&thermal, KERN_THERMAL_EMERGENCY_ACK, NULL) == EINVAL);
+	CHECK(test_poweroffs == 0U);
+}
+
 struct test_scenario {
 	const char *name;
 	void (*run)(void);
@@ -1819,6 +2587,13 @@ static const struct test_scenario test_scenarios[] = {
 	{ "emergency-stale", scenario_emergency_stale },
 	{ "emergency-resume", scenario_emergency_resume },
 	{ "passive", scenario_passive },
+	{ "device-nodes", scenario_device_nodes },
+	{ "device-sensors", scenario_device_sensors },
+	{ "device-strategy", scenario_device_strategy },
+	{ "device-fans", scenario_device_fans },
+	{ "device-events", scenario_device_events },
+	{ "device-emergency", scenario_device_emergency },
+	{ "device-ack", scenario_device_ack },
 };
 
 int

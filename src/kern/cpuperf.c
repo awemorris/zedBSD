@@ -33,20 +33,52 @@
 #include <kern/thermal.h>
 #include <kern/atomic.h>
 #include <kern/clock.h>
+#include <kern/cred.h>
+#include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
+#include <kern/uaccess.h>
 #include <kern/waitq.h>
 #include <hal/hal.h>
 #include <uapi/errno.h>
+#include <uapi/thermal.h>
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #define UNUSED_PARAMETER(parameter)	((void)(parameter))
+
+/*
+ * The CPU requests of /dev/thermal copy the framework's codes into the
+ * records a process reads; the two sets of names carry the same values.
+ */
+_Static_assert(KERN_THERMAL_CPU_MAX == KERN_CPU_MAX, "the CPU mask of a domain record and of the kernel differ");
+_Static_assert(KERN_THERMAL_CPU_IDLE_STATE_MAX == KERN_CPUPERF_IDLE_STATE_MAX, "idle state counts differ");
+_Static_assert(KERN_THERMAL_ALL == KERN_CPUPERF_ALL, "the every-domain value differs");
+_Static_assert(KERN_THERMAL_UNKNOWN == KERN_CPUPERF_UNKNOWN, "the unknown value differs");
+_Static_assert(KERN_THERMAL_CPU_CORE_PERFORMANCE == KERN_CPUPERF_CORE_PERFORMANCE, "core classes differ");
+_Static_assert(KERN_THERMAL_CPU_CORE_EFFICIENCY == KERN_CPUPERF_CORE_EFFICIENCY, "core classes differ");
+_Static_assert(KERN_THERMAL_CPU_SHARE_THREAD == KERN_CPUPERF_SHARE_THREAD, "sharing codes differ");
+_Static_assert(KERN_THERMAL_CPU_SHARE_PACKAGE == KERN_CPUPERF_SHARE_PACKAGE, "sharing codes differ");
+_Static_assert(KERN_THERMAL_CPU_LEVELS_RANGE == KERN_CPUPERF_LEVELS_RANGE, "level shapes differ");
+_Static_assert(KERN_THERMAL_CPU_LEVELS_STEPS == KERN_CPUPERF_LEVELS_STEPS, "level shapes differ");
+_Static_assert(KERN_THERMAL_CPU_RELATIVE_FREQUENCY == KERN_CPUPERF_RELATIVE_FREQUENCY, "relative ways differ");
+_Static_assert(KERN_THERMAL_CPU_RELATIVE_FEEDBACK == KERN_CPUPERF_RELATIVE_FEEDBACK, "relative ways differ");
+_Static_assert(KERN_THERMAL_CPU_RELATIVE_PROVIDER == KERN_CPUPERF_RELATIVE_PROVIDER, "relative ways differ");
+_Static_assert(KERN_THERMAL_CPU_SET_MINIMUM == KERN_CPUPERF_SET_MINIMUM, "setting fields differ");
+_Static_assert(KERN_THERMAL_CPU_SET_PREFERENCE == KERN_CPUPERF_SET_PREFERENCE, "setting fields differ");
+_Static_assert(KERN_THERMAL_CPU_HAS_CONTROL == KERN_CPUPERF_CPU_HAS_CONTROL, "CPU flags differ");
+_Static_assert(KERN_THERMAL_CPU_CUSTOM == KERN_CPUPERF_CPU_CUSTOM, "CPU flags differ");
+_Static_assert(KERN_THERMAL_CPU_DOMAIN_PENDING == KERN_CPUPERF_DOMAIN_PENDING, "domain flags differ");
+_Static_assert(KERN_THERMAL_CPU_READ_SAMPLE == KERN_CPUPERF_READ_SAMPLE, "read requests differ");
+
+/* The setting fields a direct setting may name. */
+#define CPUPERF_SET_FIELDS		(KERN_CPUPERF_SET_MINIMUM | KERN_CPUPERF_SET_MAXIMUM | \
+					 KERN_CPUPERF_SET_DESIRED | KERN_CPUPERF_SET_PREFERENCE)
 
 /* How long a thread waits for a CPU to confirm work, in milliseconds. */
 #define CPUPERF_CONFIRM_MS		1000U
@@ -298,6 +330,7 @@ static int cpuperf_wait(kern_cpu_id_t cpu, uint64_t ticket, uint64_t deadline);
 static uint64_t cpuperf_deadline(void);
 static void cpuperf_sleep_ms(uint32_t milliseconds);
 static kern_cpu_id_t cpuperf_package_cpu(uint32_t package);
+static kern_cpu_id_t cpuperf_package_first(uint32_t package);
 static void cpuperf_domain_post(uint32_t domain, uint64_t *tickets);
 static int cpuperf_domain_wait(uint32_t domain, const uint64_t *tickets, uint64_t deadline, int *apply_error);
 static void cpuperf_run(struct cpuperf_box *box, kern_cpu_id_t cpu, uint32_t work);
@@ -330,6 +363,14 @@ static void cpuperf_governor_main(void *argument);
 static bool cpuperf_governor_pass(void);
 static uint32_t cpuperf_busy_percent(kern_cpu_id_t cpu);
 static bool cpuperf_any_control(void);
+static int cpuperf_ioctl(struct file *file, unsigned long request, uintptr_t argument);
+static bool cpuperf_superuser(void);
+static int cpuperf_ioctl_cpu(uintptr_t argument);
+static int cpuperf_ioctl_domain(uintptr_t argument);
+static int cpuperf_ioctl_domain_set(uintptr_t argument);
+static int cpuperf_ioctl_relative_get(uintptr_t argument);
+static int cpuperf_ioctl_relative_set(uintptr_t argument);
+static int cpuperf_ioctl_idle(uintptr_t argument, bool package);
 
 /*
  * Brings the framework up once every CPU takes notifications.
@@ -414,6 +455,11 @@ kern_cpuperf_init(void)
 	error = kern_thermal_receiver_register("cpu", &cpuperf_receiver, NULL);
 	if (error != 0)
 		kern_logf("cpuperf: the thermal core refused the receiver (%d)\n", error);
+
+	/* Answers the CPU requests of /dev/thermal. */
+	error = kern_thermal_ioctl_range_register(KERN_THERMAL_IOCTL_CPU_FIRST, KERN_THERMAL_IOCTL_CPU_LAST, cpuperf_ioctl);
+	if (error != 0)
+		kern_logf("cpuperf: the thermal core refused the CPU requests (%d)\n", error);
 }
 
 /*
@@ -780,6 +826,39 @@ kern_cpuperf_domain_count(void)
 
 	/* Reports the number of domains. */
 	return total;
+}
+
+/*
+ * Reports the number of packages the CPUs belong to.
+ */
+uint32_t
+kern_cpuperf_package_count(void)
+{
+	struct cpuperf_box *box;
+	unsigned long enabled;
+	kern_cpu_id_t cpu;
+	kern_cpu_id_t first;
+	uint32_t package;
+	uint32_t count;
+
+	/* Counts each CPU whose package no earlier CPU has. */
+	count = 0;
+	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
+		box = &cpuperf_boxes[cpu];
+		enabled = spin_lock_irqsave(&box->lock);
+
+		package = box->topology.package;
+
+		spin_unlock_irqrestore(&box->lock, enabled);
+
+		/* The first CPU of the package is the one that counts it. */
+		first = cpuperf_package_first(package);
+		if (first == cpu)
+			count++;
+	}
+
+	/* Succeeded: the number of packages, 0 before the framework is up. */
+	return count;
 }
 
 /*
@@ -1829,7 +1908,7 @@ cpuperf_package_cpu(
 	struct cpuperf_box *box;
 	unsigned long enabled;
 	kern_cpu_id_t current;
-	kern_cpu_id_t cpu;
+	kern_cpu_id_t first;
 	uint32_t member;
 
 	/* Prefers the CPU the caller runs on. */
@@ -1846,7 +1925,22 @@ cpuperf_package_cpu(
 			return current;
 	}
 
-	/* Finds the package's first CPU. */
+	/* Falls back to the package's first CPU, or to none. */
+	first = cpuperf_package_first(package);
+	return first;
+}
+
+/* Finds the first CPU of a package, or KERN_CPUPERF_UNKNOWN when no CPU belongs to it. */
+static kern_cpu_id_t
+cpuperf_package_first(
+	uint32_t package)
+{
+	struct cpuperf_box *box;
+	unsigned long enabled;
+	kern_cpu_id_t cpu;
+	uint32_t member;
+
+	/* Walks the CPUs in order until one is in the package. */
 	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
 		box = &cpuperf_boxes[cpu];
 		enabled = spin_lock_irqsave(&box->lock);
@@ -3416,4 +3510,410 @@ cpuperf_any_control(void)
 	}
 
 	return false;
+}
+
+/*
+ * Serves the CPU requests of /dev/thermal (32..63), which the thermal
+ * core's dispatch hands here, matched on the whole request number.
+ */
+static int
+cpuperf_ioctl(
+	struct file *file,
+	unsigned long request,
+	uintptr_t argument)
+{
+	int error;
+
+	UNUSED_PARAMETER(file);
+
+	/* Carries out the request the whole number names. */
+	switch (request) {
+	case KERN_THERMAL_GET_CPU:
+		error = cpuperf_ioctl_cpu(argument);
+		break;
+	case KERN_THERMAL_GET_CPU_DOMAIN:
+		error = cpuperf_ioctl_domain(argument);
+		break;
+	case KERN_THERMAL_SET_CPU_DOMAIN:
+		error = cpuperf_ioctl_domain_set(argument);
+		break;
+	case KERN_THERMAL_GET_CPU_RELATIVE:
+		error = cpuperf_ioctl_relative_get(argument);
+		break;
+	case KERN_THERMAL_SET_CPU_RELATIVE:
+		error = cpuperf_ioctl_relative_set(argument);
+		break;
+	case KERN_THERMAL_GET_CPU_IDLE:
+		error = cpuperf_ioctl_idle(argument, false);
+		break;
+	case KERN_THERMAL_GET_PACKAGE_IDLE:
+		error = cpuperf_ioctl_idle(argument, true);
+		break;
+	default:
+		error = ENOTTY;
+		break;
+	}
+
+	/* Reports why the request was refused. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the request was served. */
+	return 0;
+}
+
+/* Tells whether the calling process is the superuser's. */
+static bool
+cpuperf_superuser(void)
+{
+	struct ucred *credential;
+	int superuser;
+
+	/* Asks the caller's credentials. */
+	credential = cred_current_ref();
+	superuser = cred_is_superuser(credential);
+	cred_release(credential);
+	if (!superuser)
+		return false;
+
+	/* Succeeded: the caller is root. */
+	return true;
+}
+
+/*
+ * Copies out one CPU and the number of CPUs.  A request to sample the CPU
+ * is root's, since it wakes the CPU; a CPU that does not answer the
+ * sample is reported with SAMPLE_TIMEOUT and the rest of its fields.
+ */
+static int
+cpuperf_ioctl_cpu(
+	uintptr_t argument)
+{
+	struct thermal_cpu_info answer;
+	struct kern_cpuperf_cpu info;
+	uint32_t request;
+	uint32_t cpu;
+	bool superuser;
+	bool timed_out;
+	int error;
+
+	/* Reads which CPU is asked for and how. */
+	error = copyin(argument, &answer, sizeof(answer));
+	if (error != 0)
+		return error;
+	cpu = answer.cpu;
+	request = answer.request;
+
+	/* Refuses an unknown request, and a sample from anyone but root. */
+	if ((request & ~KERN_THERMAL_CPU_READ_SAMPLE) != 0U)
+		return EINVAL;
+	if ((request & KERN_THERMAL_CPU_READ_SAMPLE) != 0U) {
+		superuser = cpuperf_superuser();
+		if (!superuser)
+			return EPERM;
+	}
+
+	/* Refuses a CPU past the last. */
+	if (cpu >= cpuperf_cpu_count)
+		return ENOENT;
+
+	/* Reports the CPU; a sample the CPU did not confirm still fills the rest. */
+	kern_memset(&info, 0, sizeof(info));
+	timed_out = false;
+	error = kern_cpuperf_cpu(cpu, request, &info);
+	if (error == ETIMEDOUT) {
+		timed_out = true;
+	} else if (error == EINVAL) {
+		return ENOENT;
+	} else if (error != 0) {
+		return error;
+	}
+
+	/* Turns the report into the interface's record. */
+	kern_memset(&answer, 0, sizeof(answer));
+	answer.cpu = cpu;
+	answer.count = cpuperf_cpu_count;
+	answer.request = request;
+	answer.package = info.topology.package;
+	answer.die = info.topology.die;
+	answer.module = info.topology.module;
+	answer.core = info.topology.core;
+	answer.thread = info.topology.thread;
+	answer.core_class = info.topology.core_class;
+	answer.core_type = info.topology.core_type;
+	answer.firmware_id = info.topology.firmware_id;
+	answer.domain = info.domain;
+	answer.voltage_group = info.voltage_group;
+	answer.relative = info.relative;
+	answer.available = info.available;
+	answer.efficiency = info.efficiency;
+	answer.lowest = info.lowest;
+	answer.efficient = info.efficient;
+	answer.guaranteed = info.guaranteed;
+	answer.highest = info.highest;
+	answer.highest_mhz = info.highest_mhz;
+	answer.delivered_mhz = info.delivered_mhz;
+	answer.flags = info.flags;
+	if (timed_out)
+		answer.flags |= KERN_THERMAL_CPU_SAMPLE_TIMEOUT;
+
+	/* Hands the record to the caller. */
+	error = copyout(&answer, argument, sizeof(answer));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller has the CPU. */
+	return 0;
+}
+
+/* Copies out one domain and the number of domains. */
+static int
+cpuperf_ioctl_domain(
+	uintptr_t argument)
+{
+	struct thermal_cpu_domain answer;
+	struct kern_cpuperf_domain info;
+	uint32_t domain;
+	uint32_t total;
+	uint32_t index;
+	int error;
+
+	/* Reads which domain is asked for. */
+	error = copyin(argument, &answer, sizeof(answer));
+	if (error != 0)
+		return error;
+	domain = answer.domain;
+
+	/* Refuses a domain past the last. */
+	total = kern_cpuperf_domain_count();
+	if (domain >= total)
+		return ENOENT;
+
+	/* Reports the domain. */
+	kern_memset(&info, 0, sizeof(info));
+	error = kern_cpuperf_domain(domain, &info);
+	if (error == EINVAL)
+		return ENOENT;
+	if (error != 0)
+		return error;
+
+	/* Turns the members and the request into the interface's record. */
+	kern_memset(&answer, 0, sizeof(answer));
+	answer.domain = domain;
+	answer.count = info.count;
+	for (index = 0; index < KERN_CPU_MASK_WORDS; index++)
+		answer.cpus[index] = info.cpus[index];
+	answer.cpu_count = info.cpu_count;
+	answer.kind = info.levels.kind;
+	answer.share = info.levels.share;
+	answer.minimum = info.request.minimum;
+	answer.maximum = info.request.maximum;
+	answer.desired = info.request.desired;
+	answer.preference = info.request.preference;
+	answer.limit = info.limit;
+	answer.flags = info.flags;
+
+	/* A RANGE is its two ends; STEPS are the list itself. */
+	if (info.levels.kind == KERN_CPUPERF_LEVELS_RANGE) {
+		answer.step_count = 2;
+		answer.steps[0] = info.levels.lowest;
+		answer.steps[1] = info.levels.highest;
+	} else if (info.levels.kind == KERN_CPUPERF_LEVELS_STEPS) {
+		answer.step_count = info.levels.step_count;
+		if (answer.step_count > KERN_CPUPERF_STEP_MAX)
+			answer.step_count = KERN_CPUPERF_STEP_MAX;
+		for (index = 0; index < answer.step_count; index++) {
+			answer.steps[index] = info.levels.steps[index];
+			answer.step_mhz[index] = info.levels.step_mhz[index];
+		}
+	}
+
+	/* Hands the record to the caller. */
+	error = copyout(&answer, argument, sizeof(answer));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller has the domain. */
+	return 0;
+}
+
+/*
+ * Applies a root's direct setting to one domain or to every domain.  A
+ * setting the CPUs did not confirm in time stays and answers ETIMEDOUT.
+ */
+static int
+cpuperf_ioctl_domain_set(
+	uintptr_t argument)
+{
+	struct thermal_cpu_setting request;
+	struct kern_cpuperf_setting setting;
+	uint32_t total;
+	bool superuser;
+	int error;
+
+	/* Only root sets the CPUs directly. */
+	superuser = cpuperf_superuser();
+	if (!superuser)
+		return EPERM;
+
+	/* Reads the setting and refuses unknown fields or reserved words that are not zero. */
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+	if ((request.fields & ~CPUPERF_SET_FIELDS) != 0U)
+		return EINVAL;
+	if (request.reserved[0] != 0U || request.reserved[1] != 0U)
+		return EINVAL;
+
+	/* Refuses a domain past the last. */
+	total = kern_cpuperf_domain_count();
+	if (request.domain != KERN_CPUPERF_ALL && request.domain >= total)
+		return ENOENT;
+
+	/* Hands the setting to the framework. */
+	kern_memset(&setting, 0, sizeof(setting));
+	setting.fields = request.fields;
+	setting.minimum = request.minimum;
+	setting.maximum = request.maximum;
+	setting.desired = request.desired;
+	setting.preference = request.preference;
+	error = kern_cpuperf_domain_set(request.domain, &setting);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the setting is in force until the next strategy. */
+	return 0;
+}
+
+/* Copies out the ways the relative performance can be measured and the one in force. */
+static int
+cpuperf_ioctl_relative_get(
+	uintptr_t argument)
+{
+	struct thermal_cpu_relative answer;
+	uint32_t available;
+	uint32_t source;
+	int error;
+
+	/* Reads the ways from the framework. */
+	kern_cpuperf_relative_get(&available, &source);
+
+	/* Hands them to the caller. */
+	kern_memset(&answer, 0, sizeof(answer));
+	answer.available = available;
+	answer.source = source;
+	error = copyout(&answer, argument, sizeof(answer));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller has the ways. */
+	return 0;
+}
+
+/* Chooses the way the relative performance is measured, for root. */
+static int
+cpuperf_ioctl_relative_set(
+	uintptr_t argument)
+{
+	struct thermal_cpu_relative request;
+	bool superuser;
+	int error;
+
+	/* Only root chooses. */
+	superuser = cpuperf_superuser();
+	if (!superuser)
+		return EPERM;
+
+	/* Reads the way and refuses reserved words that are not zero. */
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+	if (request.reserved[0] != 0U || request.reserved[1] != 0U)
+		return EINVAL;
+
+	/* Has the framework measure the CPUs again by that way. */
+	error = kern_cpuperf_relative_select(request.source);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the way is in force until the next boot. */
+	return 0;
+}
+
+/*
+ * Copies out the idle residency of one CPU's core (root's, since it is
+ * read on that CPU) or of one package.
+ */
+static int
+cpuperf_ioctl_idle(
+	uintptr_t argument,
+	bool package)
+{
+	struct thermal_cpu_idle answer;
+	struct kern_cpuperf_idle idle;
+	kern_cpu_id_t first;
+	uint32_t target;
+	uint32_t index;
+	uint8_t scope;
+	bool superuser;
+	int error;
+
+	/* Reading a core wakes its CPU, which only root may do. */
+	if (!package) {
+		superuser = cpuperf_superuser();
+		if (!superuser)
+			return EPERM;
+	}
+
+	/* Reads which CPU or package is asked for. */
+	error = copyin(argument, &answer, sizeof(answer));
+	if (error != 0)
+		return error;
+	target = answer.target;
+
+	/* Refuses a CPU past the last, or a package no CPU belongs to. */
+	if (!package && target >= cpuperf_cpu_count)
+		return ENOENT;
+	if (package) {
+		first = cpuperf_package_first(target);
+		if (first == KERN_CPUPERF_UNKNOWN)
+			return ENOENT;
+	}
+
+	/* Reads the counters where they are counted. */
+	kern_memset(&idle, 0, sizeof(idle));
+	scope = KERN_THERMAL_CPU_IDLE_CORE;
+	if (package) {
+		scope = KERN_THERMAL_CPU_IDLE_PACKAGE;
+		error = kern_cpuperf_idle_package(target, &idle);
+	} else {
+		error = kern_cpuperf_idle_cpu(target, &idle);
+	}
+	if (error == EINVAL)
+		return ENOENT;
+	if (error != 0)
+		return error;
+
+	/* Turns the residency into the interface's record. */
+	kern_memset(&answer, 0, sizeof(answer));
+	answer.target = target;
+	answer.count = cpuperf_cpu_count;
+	answer.state_count = idle.count;
+	if (answer.state_count > KERN_CPUPERF_IDLE_STATE_MAX)
+		answer.state_count = KERN_CPUPERF_IDLE_STATE_MAX;
+	answer.available = idle.available;
+	for (index = 0; index < answer.state_count; index++) {
+		answer.state[index] = idle.state[index];
+		answer.residency_ns[index] = idle.residency_ns[index];
+		answer.scope[index] = scope;
+	}
+	answer.time_ns = idle.time_ns;
+
+	/* Hands the record to the caller. */
+	error = copyout(&answer, argument, sizeof(answer));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller has the residency. */
+	return 0;
 }

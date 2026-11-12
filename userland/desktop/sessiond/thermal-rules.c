@@ -25,6 +25,13 @@
  * superseded for what the kernel reported beyond its success; FAIL wheel;
  * or ERROR and a word for the failure (invalid, unsupported, nofan,
  * unavailable, failed).
+ *
+ * sessiond carries a request out by running /sbin/thermal with the same
+ * words, so that the strategy a session chooses is kept by the one program
+ * that keeps it.  What the kernel answered comes back as the command's
+ * exit status and its lines: "result=unsupported" and "flags=" on the
+ * strategy's line, "pending=" on the boost's, and on a refusal one line
+ * "thermal: WHAT: REASON" with the C library's text for the errno.
  */
 
 #include "thermal-rules.h"
@@ -54,6 +61,9 @@ static int rules_number(const char *word, unsigned max, unsigned *value);
 static int rules_strategy(const struct rules_words *words, struct sessiond_thermal_request *request);
 static int rules_boost(const struct rules_words *words, struct sessiond_thermal_request *request);
 static const char *rules_failure(int error);
+static int rules_refusal(const char *output);
+static unsigned rules_flags(const char *output);
+static int rules_has_word(const char *field, size_t length, const char *word);
 
 /*
  * Decides a THERMAL request's arguments (the line after "THERMAL ") for a
@@ -153,6 +163,224 @@ sessiond_thermal_answer(
 
 	/* Succeeded: the success line. */
 	return length;
+}
+
+/*
+ * Builds the /sbin/thermal command line that carries a decided request
+ * out: "strategy NAME", "strategy manual SPEED NOISE GATING" or "boost
+ * all|FAN LEVEL".
+ */
+void
+sessiond_thermal_command(
+	const struct sessiond_thermal_request *request,
+	struct sessiond_thermal_command *command)
+{
+	static const char *names[] = { "", "performance", "balanced", "powersave", "manual" };
+	unsigned count;
+	unsigned index;
+
+	/* The program's own name first. */
+	memset(command, 0, sizeof(*command));
+	(void)snprintf(command->word[0], SESSIOND_THERMAL_WORD_MAX, "thermal");
+	count = 1;
+
+	/* The words after it, as the request asks. */
+	if (request->kind == SESSIOND_THERMAL_STRATEGY) {
+		/* A strategy by its name, with the axes for manual. */
+		(void)snprintf(command->word[1], SESSIOND_THERMAL_WORD_MAX, "strategy");
+		(void)snprintf(command->word[2], SESSIOND_THERMAL_WORD_MAX, "%s", names[request->strategy]);
+		count = 3;
+		if (request->strategy == SESSIOND_THERMAL_MANUAL) {
+			(void)snprintf(command->word[3], SESSIOND_THERMAL_WORD_MAX, "%u", request->speed);
+			(void)snprintf(command->word[4], SESSIOND_THERMAL_WORD_MAX, "%u", request->noise);
+			(void)snprintf(command->word[5], SESSIOND_THERMAL_WORD_MAX, "%u", request->gating);
+			count = 6;
+		}
+	} else {
+		/* A boost of one fan or of all, and its level. */
+		(void)snprintf(command->word[1], SESSIOND_THERMAL_WORD_MAX, "boost");
+		if (request->fan == SESSIOND_THERMAL_FAN_ALL) {
+			(void)snprintf(command->word[2], SESSIOND_THERMAL_WORD_MAX, "all");
+		} else {
+			(void)snprintf(command->word[2], SESSIOND_THERMAL_WORD_MAX, "%u", (unsigned)request->fan);
+		}
+		(void)snprintf(command->word[3], SESSIOND_THERMAL_WORD_MAX, "%u", (unsigned)request->level);
+		count = 4;
+	}
+
+	/* The vector points at the words and ends with a null pointer. */
+	for (index = 0; index < count; index++)
+		command->argv[index] = command->word[index];
+	command->argv[count] = NULL;
+}
+
+/*
+ * Turns how /sbin/thermal ended and what it printed into the errno of the
+ * request and, on success, the SESSIOND_THERMAL_* bits.  exit_code is the
+ * command's exit status, SESSIOND_THERMAL_NOT_RUN when it could not be
+ * run, or negative when a signal ended it.
+ */
+int
+sessiond_thermal_outcome(
+	int exit_code,
+	const char *output,
+	unsigned *flags)
+{
+	const char *unsupported;
+	int error;
+
+	/* No command, or no device behind it: unavailable. */
+	*flags = 0;
+	if (exit_code == SESSIOND_THERMAL_NOT_RUN)
+		return ENODEV;
+
+	/* A command ended by a signal did not say how the request went. */
+	if (exit_code < 0)
+		return EIO;
+
+	/* Words the command did not take. */
+	if (exit_code == 2)
+		return EINVAL;
+
+	/* The kernel refused: its reason is on the command's refusal line. */
+	if (exit_code != 0) {
+		error = rules_refusal(output);
+		return error;
+	}
+
+	/* A strategy nothing here acts on is kept, and answered as unsupported. */
+	unsupported = strstr(output, "result=unsupported");
+	if (unsupported != NULL)
+		return EOPNOTSUPP;
+
+	/* Succeeded: what the kernel reported beyond its success. */
+	*flags = rules_flags(output);
+	return 0;
+}
+
+/*
+ * Finds the errno of the command's refusal line "thermal: WHAT: REASON"
+ * by the C library's text for it; EIO when the reason is none the answer
+ * tells apart.
+ */
+static int
+rules_refusal(
+	const char *output)
+{
+	static const int known[] = { EINVAL, EOPNOTSUPP, ENOENT, ENODEV, EPERM };
+	const char *line;
+	const char *reason;
+	const char *text;
+	size_t length;
+	unsigned index;
+	int differs;
+
+	/* The refusal's line. */
+	line = strstr(output, "thermal: ");
+	if (line == NULL)
+		return EIO;
+
+	/* A device that could not be opened is the device that is not there. */
+	differs = strncmp(line, "thermal: /dev/thermal:", 22);
+	if (differs == 0)
+		return ENODEV;
+
+	/* The reason follows the second colon. */
+	reason = strstr(line + 9, ": ");
+	if (reason == NULL)
+		return EIO;
+	reason += 2;
+
+	/* Compares it with the text of each errno the answer tells apart. */
+	for (index = 0; index < sizeof(known) / sizeof(known[0]); index++) {
+		text = strerror(known[index]);
+		length = strlen(text);
+		differs = strncmp(reason, text, length);
+		if (differs != 0)
+			continue;
+		if (reason[length] == '\n' || reason[length] == '\0')
+			return known[index];
+	}
+
+	/* Any other failure. */
+	return EIO;
+}
+
+/*
+ * Reads the bits of a successful command: the words partial, pending and
+ * superseded after "flags=" on the strategy's line, or "pending=yes" on
+ * the boost's.
+ */
+static unsigned
+rules_flags(
+	const char *output)
+{
+	const char *field;
+	const char *end;
+	unsigned flags;
+	size_t length;
+	int present;
+
+	/* The boost's line says whether a driver was still at work. */
+	flags = 0;
+	field = strstr(output, "pending=yes");
+	if (field != NULL)
+		flags |= SESSIOND_THERMAL_PENDING;
+
+	/* The strategy's flags field, up to the end of its line. */
+	field = strstr(output, "flags=");
+	if (field == NULL)
+		return flags;
+	field += 6;
+	end = strchr(field, '\n');
+	length = strlen(field);
+	if (end != NULL)
+		length = (size_t)(end - field);
+
+	/* Each word that is there is one bit. */
+	present = rules_has_word(field, length, "partial");
+	if (present)
+		flags |= SESSIOND_THERMAL_PARTIAL;
+	present = rules_has_word(field, length, "pending");
+	if (present)
+		flags |= SESSIOND_THERMAL_PENDING;
+	present = rules_has_word(field, length, "superseded");
+	if (present)
+		flags |= SESSIOND_THERMAL_SUPERSEDED;
+
+	/* Succeeded: the bits. */
+	return flags;
+}
+
+/* Tells whether a comma-separated field of a given length holds a word. */
+static int
+rules_has_word(
+	const char *field,
+	size_t length,
+	const char *word)
+{
+	size_t start;
+	size_t stop;
+	size_t size;
+	int differs;
+
+	/* Walks the words between the commas. */
+	size = strlen(word);
+	start = 0;
+	while (start < length) {
+		stop = start;
+		while (stop < length && field[stop] != ',')
+			stop++;
+		if (stop - start == size) {
+			differs = strncmp(field + start, word, size);
+			if (differs == 0)
+				return 1;
+		}
+		start = stop + 1U;
+	}
+
+	/* The word is not there. */
+	return 0;
 }
 
 /*

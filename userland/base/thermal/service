@@ -1,0 +1,7 @@
+type=oneshot
+command=/sbin/thermal
+arguments=restore
+after=syslogd
+restart=no
+required=NO
+late=yes
