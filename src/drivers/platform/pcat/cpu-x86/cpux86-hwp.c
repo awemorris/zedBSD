@@ -322,7 +322,6 @@ cpux86_hwp_window_encode(
 			best_field = (exponent << HWP_WINDOW_MANTISSA_WIDTH) | mantissa;
 		}
 
-
 		/* Moves on to the next power of ten. */
 		scale = scale * 10U;
 	}

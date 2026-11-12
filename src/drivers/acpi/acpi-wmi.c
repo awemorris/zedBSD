@@ -33,6 +33,9 @@
 
 #include "aml-os.h"
 
+/* Marks a parameter that the function does not use. */
+#define UNUSED_PARAMETER(parameter)	((void)(parameter))
+
 /* The most blocks and mapping devices the layer keeps. */
 #define WMI_BLOCKS_MAX		48U
 #define WMI_DEVICES_MAX		16U
@@ -70,8 +73,9 @@ static struct drv_acpi_wmi_block wmi_blocks[WMI_BLOCKS_MAX];
 static unsigned wmi_block_count;
 
 /*
- * The devices whose _WDG is in the table, so that a second attach skips
- * them.  Read and written only by an attach holding the interpreter lock.
+ * The devices whose _WDG is in the table, and their number, so that a second
+ * attach skips them.  Read and written only by an attach holding the
+ * interpreter lock.
  */
 static struct drv_acpi_node *wmi_devices[WMI_DEVICES_MAX];
 static unsigned wmi_device_count;
@@ -240,13 +244,17 @@ drv_acpi_wmi_find(
 			continue;
 		}
 
-		/* Lends the nth. */
+		/* Stops at the nth. */
 		*block = &wmi_blocks[index];
-		return 0;
+		break;
 	}
 
 	/* Reports that fewer blocks carry the GUID. */
-	return ENOENT;
+	if (*block == NULL)
+		return ENOENT;
+
+	/* Succeeded: the caller may use the nth block with the GUID. */
+	return 0;
 }
 
 /*
@@ -379,6 +387,8 @@ drv_acpi_wmi_query(
 	expensive = false;
 	if ((block->entry.flags & DRV_ACPI_WMI_FLAG_EXPENSIVE) != 0U)
 		expensive = true;
+
+	/* Enables the collection of an expensive block. */
 	if (expensive)
 		wmi_collection(block, 1U);
 
@@ -421,8 +431,9 @@ wmi_visitor(
 	bool mapping;
 	bool present;
 
-	/* The depth does not matter. */
-	(void)depth;
+	UNUSED_PARAMETER(depth);
+
+	/* Takes the scan the walk fills. */
 	scan = argument;
 
 	/* Only a device can be a mapping device. */
@@ -430,10 +441,12 @@ wmi_visitor(
 	if (type != DRV_ACPI_TYPE_DEVICE)
 		return 0;
 
-	/* A device whose _HID is PNP0C14, and present. */
+	/* Skips a device whose _HID is not PNP0C14. */
 	mapping = wmi_is_mapping_device(node);
 	if (!mapping)
 		return 0;
+
+	/* Skips a device that is not present. */
 	present = wmi_present(node);
 	if (!present)
 		return 0;
@@ -444,7 +457,7 @@ wmi_visitor(
 		return -1;
 	}
 
-	/* The scan holds it. */
+	/* Adds the device to the scan. */
 	scan->devices[scan->count] = node;
 	scan->count++;
 
@@ -473,7 +486,7 @@ wmi_is_mapping_device(
 	if (hid == NULL)
 		return false;
 
-	/* Compares it in its form. */
+	/* Compares it in the form it came in, an integer or a string. */
 	matched = false;
 	type = drv_acpi_object_type(hid);
 	if (type == DRV_ACPI_TYPE_INTEGER) {
@@ -487,7 +500,7 @@ wmi_is_mapping_device(
 			matched = true;
 	}
 
-	/* The _HID is no longer needed. */
+	/* Gives the _HID back. */
 	drv_acpi_object_release(hid);
 
 	/* Reports whether the _HID named PNP0C14. */
@@ -507,9 +520,11 @@ wmi_present(
 	if (error != 0)
 		return true;
 
-	/* Succeeded: its present bit. */
+	/* Reports a device whose present bit is clear as absent. */
 	if ((status & WMI_STATUS_PRESENT) == 0U)
 		return false;
+
+	/* Succeeded: the present bit is set. */
 	return true;
 }
 
@@ -586,11 +601,14 @@ wmi_attach_device(
 
 	/* Reports the outcome in the log. */
 	if (error == EEXIST) {
+		/* The device was listed before; nothing more to say. */
 		return 0;
 	} else if (error == E2BIG) {
+		/* The entries that fitted are published, so the attach stands. */
 		drv_acpi_os_log("acpi: WMI %s: %u blocks listed, the table is full\n", path, added);
 		return 0;
 	} else if (error != 0) {
+		/* The _WDG could not be listed. */
 		drv_acpi_os_log("acpi: WMI %s: _WDG of %u bytes is refused (error %d)\n", path, (unsigned)length, error);
 		return error;
 	}
@@ -722,14 +740,14 @@ wmi_method_arguments(
 	if (arguments[0] == NULL)
 		return ENOMEM;
 
-	/* The method ID. */
+	/* Makes the method ID, the method's second argument. */
 	arguments[1] = drv_acpi_object_integer_new(method_id);
 	if (arguments[1] == NULL) {
 		drv_acpi_object_release(arguments[0]);
 		return ENOMEM;
 	}
 
-	/* The input, copied: the AML may change its argument. */
+	/* Makes the input buffer, copied: the AML may change its argument. */
 	arguments[2] = drv_acpi_object_buffer_new(input, size);
 	if (arguments[2] == NULL) {
 		drv_acpi_object_release(arguments[1]);
@@ -765,6 +783,8 @@ wmi_collection(
 	/* Runs WCxx; a device without one needs none. */
 	ignored = NULL;
 	error = drv_acpi_evaluate(block->device, name, &argument, 1U, &ignored);
+
+	/* Gives back what WCxx returned, which nothing uses. */
 	if (error == 0 && ignored != NULL)
 		drv_acpi_object_release(ignored);
 
@@ -780,13 +800,13 @@ wmi_device_path(
 {
 	int error;
 
-	/* The path, or a mark when it cannot be written. */
+	/* Writes the path, or a mark when it cannot be written. */
 	error = drv_acpi_node_path(device, path, WMI_PATH_MAX);
 	if (error != 0) {
 		path[0] = '?';
 		path[1] = '\0';
 	}
 
-	/* A path cut at the room still ends. */
+	/* Ends a path cut at the room. */
 	path[WMI_PATH_MAX - 1U] = '\0';
 }

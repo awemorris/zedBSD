@@ -94,6 +94,7 @@ cpux86_cpuid_identity(
 	if (family == 0x0FU)
 		display_family = extended_family + family;
 
+	/* Starts from the raw model and folds the extended model in below. */
 	display_model = model;
 	if (family == 0x06U) {
 		display_model = (extended_model << 4) + model;
@@ -167,6 +168,7 @@ cpux86_cpuid_has_leaf(
 		if (leaf <= identity->max_basic_leaf)
 			return 1;
 
+		/* The leaf lies beyond the basic maximum. */
 		return 0;
 	}
 
@@ -734,6 +736,7 @@ cpux86_cpuid_topology(
 			if (type <= highest_known)
 				return EINVAL;
 
+			/* Records the domain and the bits it owns. */
 			placed.present |= (uint32_t)1U << type;
 			placed.low[type] = previous_shift;
 			placed.high[type] = level.shift;
@@ -748,6 +751,7 @@ cpux86_cpuid_topology(
 			placed.high[last_known] = level.shift;
 		}
 
+		/* Starts the next domain where this one ends. */
 		previous_shift = level.shift;
 	}
 
@@ -770,10 +774,12 @@ cpux86_cpuid_topology(
 		if ((placed.present & ((uint32_t)1U << domain)) == 0U)
 			continue;
 
+		/* Cuts the domain's own field out of the ID. */
 		width = placed.high[domain] - placed.low[domain];
 		placed.id[domain] = cpux86_field32(x2apic_id, placed.low[domain], width);
 	}
 
+	/* Names the package by the bits above the last domain. */
 	placed.x2apic_id = x2apic_id;
 	placed.package_shift = previous_shift;
 	placed.package = x2apic_id >> previous_shift;
@@ -853,6 +859,7 @@ cpux86_cpuid_topology_type_known(
 		if (type <= CPUX86_TOPOLOGY_V1_LAST_TYPE)
 			return 1;
 
+		/* A type leaf 0BH does not define. */
 		return 0;
 	}
 

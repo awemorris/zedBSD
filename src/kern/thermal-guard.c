@@ -195,8 +195,10 @@ kern_thermal_emergency_ack(
 	if (!advanced)
 		return EINVAL;
 
-	/* Succeeded: the guard now gives init its two minutes. */
+	/* Says that init's answer was taken. */
 	kern_logf("thermal: init acknowledged the emergency\n");
+
+	/* Succeeded: the guard now gives init its two minutes. */
 	return 0;
 }
 
@@ -236,6 +238,8 @@ kern_thermal_emergency_run(
 	advanced = thermal_state_advance(KERN_THERMAL_EMERGENCY_NONE, KERN_THERMAL_EMERGENCY_SIGNALED);
 	if (!advanced)
 		return;
+
+	/* Says which sensor began the emergency, to whoever reads the log. */
 	kern_logf("thermal: emergency: sensor %u at %d mC reached its critical level; turning the power off\n",
 		  sensor, millicelsius);
 
@@ -262,6 +266,7 @@ kern_thermal_emergency_run(
 			kern_logf("thermal: the test path skips init; cutting the power\n");
 		}
 
+		/* Takes the way of stopping the machine, then cuts the power. */
 		thermal_wait_for_init_stop(init_deadline);
 		thermal_cut_power();
 		return;
@@ -280,6 +285,8 @@ kern_thermal_emergency_run(
 	/* An init that did not answer is frozen or stuck: the guard cuts the power. */
 	if (advanced) {
 		kern_logf("thermal: init did not acknowledge the emergency; cutting the power\n");
+
+		/* Takes the way of stopping the machine, then cuts the power. */
 		thermal_wait_for_init_stop(init_deadline);
 		thermal_cut_power();
 		return;
@@ -288,10 +295,12 @@ kern_thermal_emergency_run(
 	/* Init answered: the power should go within two minutes of the signal. */
 	thermal_wait_until(init_deadline, KERN_THERMAL_EMERGENCY_INIT);
 
-	/* The power is still on: the guard takes the way of stopping the machine from init and cuts it. */
+	/* Says that init did not stop the machine in time. */
 	state = atomic_raw_load_acquire(&thermal_emergency_state);
 	if (state == KERN_THERMAL_EMERGENCY_INIT)
 		kern_logf("thermal: the power is still on two minutes into the emergency; cutting it\n");
+
+	/* The power is still on: the guard takes the way of stopping the machine from init and cuts it. */
 	(void)thermal_state_advance(KERN_THERMAL_EMERGENCY_INIT, KERN_THERMAL_EMERGENCY_CUTTING);
 	thermal_wait_for_init_stop(init_deadline);
 	thermal_cut_power();
@@ -518,19 +527,22 @@ thermal_sync_volumes(void)
 		kern_logf("thermal: the volumes are not written out: no sync thread (%d)\n", error);
 		return;
 	}
+
+	/* Lets the helper run. */
 	thread_start(thread);
 
 	/* Waits for it up to the limit. */
 	deadline = sched_ticks() + kern_ms_to_ticks(THERMAL_SYNC_WAIT_MS);
 	thermal_wait_until(deadline, KERN_THERMAL_EMERGENCY_NONE);
 
-	/* Says when it did not finish. */
+	/* Reads whether the helper finished. */
 	irq = spin_lock_irqsave(&thermal_emergency_lock);
 
 	done = thermal_sync_done;
 
 	spin_unlock_irqrestore(&thermal_emergency_lock, irq);
 
+	/* Says when it did not finish. */
 	if (!done)
 		kern_logf("thermal: the volumes were not written out in time; cutting the power anyway\n");
 }
@@ -572,8 +584,10 @@ thermal_cut_power(void)
 	/* Writes the volumes out, for as long as the limit allows. */
 	thermal_sync_volumes();
 
-	/* Turns the power off the platform's quickest way, which does not return when it works. */
+	/* Says the power is going off. */
 	kern_logf("thermal: emergency power-off\n");
+
+	/* Turns the power off the platform's quickest way, which does not return when it works. */
 	if (kern_platform_poweroff_emergency != NULL)
 		error = kern_platform_poweroff_emergency();
 	else

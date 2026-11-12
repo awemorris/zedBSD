@@ -239,6 +239,8 @@ thermal_open_file(
 		kern_free(state);
 		return error;
 	}
+
+	/* Prepares the ring, not attached to the core until the open subscribes. */
 	kern_thermal_reader_init(&state->reader);
 
 	/* Succeeded: the file holds the state until it closes. */
@@ -523,6 +525,8 @@ thermal_get_sensor(
 	error = kern_thermal_sensor_get(index, &info);
 	if (error != 0)
 		return error;
+
+	/* Reads the number of sensors the answer carries. */
 	kern_thermal_status_get(&status);
 
 	/* Turns it into the interface's record. */
@@ -568,6 +572,8 @@ thermal_get_fan(
 	error = kern_thermal_fan_get(index, &info);
 	if (error != 0)
 		return error;
+
+	/* Reads the number of fans the answer carries. */
 	kern_thermal_status_get(&status);
 
 	/* Turns it into the interface's record. */
@@ -620,6 +626,8 @@ thermal_get_meter(
 	error = kern_thermal_meter_get(index, &info);
 	if (error != 0)
 		return error;
+
+	/* Reads the number of meters the answer carries. */
 	kern_thermal_status_get(&status);
 
 	/* Says whether it has been read and whether the last read failed. */
@@ -760,6 +768,8 @@ thermal_get_receiver(
 	error = kern_thermal_receiver_get(index, &info);
 	if (error != 0)
 		return error;
+
+	/* Reads the number of receivers the answer carries. */
 	kern_thermal_status_get(&status);
 
 	/* Turns it into the interface's record. */
@@ -1039,6 +1049,7 @@ thermal_inject_sensor(
 	bool named;
 	bool valid;
 	bool zero;
+	int comparison;
 	int error;
 
 	/* Reads the sensor and checks its name, kind, flags and reserved words. */
@@ -1063,11 +1074,16 @@ thermal_inject_sensor(
 
 	for (index = 0; index < thermal_inject_sensor_count; index++) {
 		entry = &thermal_inject_sensors[index];
-		if (kern_strcmp(entry->name, request.name) == 0) {
+
+		/* Takes the sensor already made up under the name. */
+		comparison = kern_strcmp(entry->name, request.name);
+		if (comparison == 0) {
 			sensor = entry->sensor;
 			break;
 		}
 	}
+
+	/* Registers a sensor for a name no made-up sensor has, and remembers it. */
 	if (sensor == NULL) {
 		error = kern_thermal_sensor_register(request.name, request.kind, request.flags, &sensor);
 		if (error == 0) {
@@ -1109,6 +1125,7 @@ thermal_inject_receiver(
 	bool register_entry;
 	bool named;
 	bool zero;
+	int comparison;
 	int error;
 
 	/* Reads the answer and checks its name, flags, wait and reserved words. */
@@ -1132,17 +1149,24 @@ thermal_inject_receiver(
 	mutex_lock(&thermal_inject_lock);
 
 	for (index = 0; index < thermal_inject_receiver_count; index++) {
-		if (kern_strcmp(thermal_inject_receivers[index].name, request.name) == 0) {
+
+		/* Takes the receiver already made up under the name. */
+		comparison = kern_strcmp(thermal_inject_receivers[index].name, request.name);
+		if (comparison == 0) {
 			entry = &thermal_inject_receivers[index];
 			break;
 		}
 	}
+
+	/* Takes a new entry for a name no made-up receiver has, while there is room. */
 	if (entry == NULL && thermal_inject_receiver_count < THERMAL_INJECT_RECEIVER_MAX) {
 		entry = &thermal_inject_receivers[thermal_inject_receiver_count];
 		kern_memcpy(entry->name, request.name, sizeof(entry->name));
 		thermal_inject_receiver_count++;
 		register_entry = true;
 	}
+
+	/* Stores the answer the receiver gives from now on. */
 	if (entry != NULL) {
 		entry->error = request.error;
 		entry->flags = request.flags;

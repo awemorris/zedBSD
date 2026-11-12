@@ -520,7 +520,7 @@ drv_acpi_pci_power_attach(void);
 int
 drv_acpi_power_attach(void);
 
-/* The thermal zones and the devices with a _TMP, in sysctl hw.thermal (acpi-thermal.c, ws134-p009). */
+/* The thermal zones and the devices with a _TMP, as sensors of the thermal core (acpi-thermal.c). */
 int
 drv_acpi_thermal_attach(void);
 

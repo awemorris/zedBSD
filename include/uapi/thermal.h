@@ -62,6 +62,7 @@ extern "C" {
 #include <stdint.h>
 #include <uapi/ioctl.h>
 
+/* The group letter that every ioctl of /dev/thermal and /dev/thermal-inject carries. */
 #define KERN_THERMAL_IOC_GROUP		'T'
 
 /*
@@ -287,8 +288,8 @@ struct thermal_sensor_info {
  * One fan, asked for by index.
  *
  * level is where the firmware's or the driver's automatic control has it,
- * boost the lower bound SET_BOOST asked for; the fan turns at the higher of the
- * two.  A fan without levels reports 0 for both counts.
+ * boost the lower bound SET_BOOST asked for; the fan turns at the higher of
+ * the two.  A fan without levels reports 0 for both counts.
  */
 struct thermal_fan_info {
 	uint32_t index;			/* in */
@@ -614,6 +615,7 @@ struct thermal_inject_path {
 #define KERN_THERMAL_INJECT_PATH \
 	_IOW(KERN_THERMAL_IOC_GROUP, 66, struct thermal_inject_path)
 
+/* Pins the size and the field offsets every process relies on, the same on ILP32 and LP64. */
 _Static_assert(sizeof(struct thermal_status) == 80U, "thermal ABI must be identical on ILP32 and LP64");
 _Static_assert(offsetof(struct thermal_status, emergency_time_ns) == 48U, "thermal ABI must be identical on ILP32 and LP64");
 _Static_assert(sizeof(struct thermal_sensor_info) == 96U, "thermal ABI must be identical on ILP32 and LP64");

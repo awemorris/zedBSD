@@ -66,6 +66,19 @@
 /* The text of a list of flags, with its terminator. */
 #define FLAGS_TEXT_MAX			96U
 
+/* The commands, by the number the table below gives each name. */
+#define COMMAND_SENSORS			1U
+#define COMMAND_FANS			2U
+#define COMMAND_METERS			3U
+#define COMMAND_RECEIVERS		4U
+#define COMMAND_STRATEGY		5U
+#define COMMAND_RESTORE			6U
+#define COMMAND_BOOST			7U
+#define COMMAND_CPU			8U
+#define COMMAND_IDLE			9U
+#define COMMAND_POWER			10U
+#define COMMAND_WATCH			11U
+
 /* One name of a value the kernel uses: a strategy, an event type, a kind. */
 struct value_name {
 	const char *name;
@@ -76,6 +89,22 @@ struct value_name {
 struct flag_name {
 	uint32_t bit;
 	const char *name;
+};
+
+/* The commands by name. */
+static const struct value_name command_names[] = {
+	{ "sensors", COMMAND_SENSORS },
+	{ "fans", COMMAND_FANS },
+	{ "meters", COMMAND_METERS },
+	{ "receivers", COMMAND_RECEIVERS },
+	{ "strategy", COMMAND_STRATEGY },
+	{ "restore", COMMAND_RESTORE },
+	{ "boost", COMMAND_BOOST },
+	{ "cpu", COMMAND_CPU },
+	{ "idle", COMMAND_IDLE },
+	{ "power", COMMAND_POWER },
+	{ "watch", COMMAND_WATCH },
+	{ NULL, 0 }
 };
 
 /* The strategies by name; FIRMWARE is shown but never chosen. */
@@ -245,6 +274,9 @@ main(
 	char **argv)
 {
 	const char *command;
+	uint32_t number;
+	bool known;
+	bool accepted;
 	int status;
 
 	/* Opens the device every command reads. */
@@ -258,31 +290,88 @@ main(
 		return status;
 	}
 
-	/* Hands the command its own arguments. */
+	/* Finds which command was named. */
 	command = argv[1];
-	if (strcmp(command, "sensors") == 0 && argc == 2) {
+	known = value_find(command_names, command, &number);
+	if (!known) {
+		usage();
+		return EXIT_USAGE;
+	}
+
+	/* Hands the command its own arguments; the commands that take none refuse any. */
+	accepted = true;
+	status = EXIT_DONE;
+	switch (number) {
+	case COMMAND_SENSORS:
+		if (argc != 2) {
+			accepted = false;
+			break;
+		}
+
+		/* Shows every sensor. */
 		status = show_sensors();
-	} else if (strcmp(command, "fans") == 0 && argc == 2) {
+		break;
+	case COMMAND_FANS:
+		if (argc != 2) {
+			accepted = false;
+			break;
+		}
+
+		/* Shows every fan. */
 		status = show_fans();
-	} else if (strcmp(command, "meters") == 0 && argc == 2) {
+		break;
+	case COMMAND_METERS:
+		if (argc != 2) {
+			accepted = false;
+			break;
+		}
+
+		/* Shows every meter. */
 		status = show_meters();
-	} else if (strcmp(command, "receivers") == 0 && argc == 2) {
+		break;
+	case COMMAND_RECEIVERS:
+		if (argc != 2) {
+			accepted = false;
+			break;
+		}
+
+		/* Shows every receiver. */
 		status = show_receivers();
-	} else if (strcmp(command, "strategy") == 0) {
+		break;
+	case COMMAND_STRATEGY:
 		status = command_strategy(argc - 2, argv + 2);
-	} else if (strcmp(command, "restore") == 0 && argc == 2) {
+		break;
+	case COMMAND_RESTORE:
+		if (argc != 2) {
+			accepted = false;
+			break;
+		}
+
+		/* Restores the kept strategy. */
 		status = command_restore();
-	} else if (strcmp(command, "boost") == 0) {
+		break;
+	case COMMAND_BOOST:
 		status = command_boost(argc - 2, argv + 2);
-	} else if (strcmp(command, "cpu") == 0) {
+		break;
+	case COMMAND_CPU:
 		status = command_cpu(argc - 2, argv + 2);
-	} else if (strcmp(command, "idle") == 0) {
+		break;
+	case COMMAND_IDLE:
 		status = command_idle(argc - 2, argv + 2);
-	} else if (strcmp(command, "power") == 0) {
+		break;
+	case COMMAND_POWER:
 		status = command_power(argc - 2, argv + 2);
-	} else if (strcmp(command, "watch") == 0) {
+		break;
+	case COMMAND_WATCH:
 		status = command_watch(argc - 2, argv + 2);
-	} else {
+		break;
+	default:
+		accepted = false;
+		break;
+	}
+
+	/* A command given arguments it does not take is a misuse. */
+	if (!accepted) {
 		usage();
 		status = EXIT_USAGE;
 	}
@@ -326,6 +415,8 @@ device_open(void)
 		thermal_descriptor = open(THERMAL_DEVICE, O_RDONLY | O_CLOEXEC);
 		reason = errno;
 	}
+
+	/* Says why the device could not be opened. */
 	if (thermal_descriptor < 0) {
 		fprintf(stderr, "thermal: %s: %s\n", THERMAL_DEVICE, strerror(reason));
 		return EXIT_REFUSED;
@@ -405,11 +496,15 @@ parse_interval(
 {
 	uint32_t value;
 	bool parsed;
+	int differs;
 
 	/* Without the option, the default interval. */
 	*used = 0;
 	*seconds = INTERVAL_DEFAULT;
-	if (argc < 1 || strcmp(argv[0], "-i") != 0)
+	if (argc < 1)
+		return true;
+	differs = strcmp(argv[0], "-i");
+	if (differs != 0)
 		return true;
 
 	/* The option takes one positive number of seconds. */
@@ -451,10 +546,12 @@ value_find(
 	uint32_t *value)
 {
 	unsigned index;
+	int differs;
 
 	/* Finds the name in the table. */
 	for (index = 0; names[index].name != NULL; index++) {
-		if (strcmp(names[index].name, name) == 0) {
+		differs = strcmp(names[index].name, name);
+		if (differs == 0) {
 			*value = names[index].value;
 			return true;
 		}
@@ -481,11 +578,15 @@ flags_text(
 	for (index = 0; names[index].name != NULL; index++) {
 		if ((flags & names[index].bit) == 0U)
 			continue;
+
+		/* Separates the name from the one before it, when there is room. */
 		if (length != 0U && length + 1U < size) {
 			text[length] = ',';
 			length++;
 			text[length] = '\0';
 		}
+
+		/* Appends the name. */
 		(void)snprintf(text + length, size - length, "%s", names[index].name);
 		length = strlen(text);
 	}
@@ -549,10 +650,12 @@ show_summary(void)
 	if (error != 0)
 		return refused("status", error);
 
-	/* The strategy, then the emergency and the passive ceiling. */
+	/* The strategy in force. */
 	result = show_strategy();
 	if (result != EXIT_DONE)
 		return result;
+
+	/* The emergency, with the sensor that caused it. */
 	if (status.emergency == KERN_THERMAL_EMERGENCY_NONE) {
 		printf("emergency none\n");
 	} else {
@@ -560,6 +663,8 @@ show_summary(void)
 		printf("emergency %s sensor=%u temperature=%s\n",
 		       value_text(emergency_names, status.emergency), status.emergency_sensor, temperature);
 	}
+
+	/* The passive ceiling. */
 	printf("passive permille=%u\n", status.passive_permille);
 
 	/* Every sensor, fan and meter. */
@@ -587,6 +692,7 @@ show_sensors(void)
 	char critical[NUMBER_TEXT_MAX];
 	char flags[FLAGS_TEXT_MAX];
 	const char *kind;
+	const char *cpu_text;
 	uint32_t index;
 	int error;
 
@@ -614,9 +720,11 @@ show_sensors(void)
 		kind = "device";
 		if (sensor.kind == KERN_THERMAL_KIND_ZONE)
 			kind = "zone";
+		cpu_text = "no";
+		if ((sensor.flags & KERN_THERMAL_SENSOR_CPU) != 0U)
+			cpu_text = "yes";
 		printf("sensor %u %s kind=%s cpu=%s temperature=%s passive=%s critical=%s flags=%s\n",
-		       index, sensor.name, kind,
-		       (sensor.flags & KERN_THERMAL_SENSOR_CPU) != 0U ? "yes" : "no",
+		       index, sensor.name, kind, cpu_text,
 		       temperature, passive, critical, flags);
 	}
 
@@ -691,6 +799,7 @@ show_receivers(void)
 {
 	struct thermal_receiver_info receiver;
 	char outcome[FLAGS_TEXT_MAX];
+	const char *unconfirmed;
 	uint32_t index;
 	int error;
 
@@ -709,10 +818,15 @@ show_receivers(void)
 			printf("receiver %u %s result=- generation=0\n", index, receiver.name);
 			continue;
 		}
+
+		/* The outcome of its last strategy, and whether the receiver confirmed it. */
 		outcome_text(receiver.error, outcome, sizeof(outcome));
+		unconfirmed = "no";
+		if ((receiver.flags & KERN_THERMAL_APPLY_UNCONFIRMED) != 0U)
+			unconfirmed = "yes";
 		printf("receiver %u %s result=%s generation=%u duration_ms=%u unconfirmed=%s\n",
 		       index, receiver.name, outcome, receiver.generation, receiver.duration_ms,
-		       (receiver.flags & KERN_THERMAL_APPLY_UNCONFIRMED) != 0U ? "yes" : "no");
+		       unconfirmed);
 	}
 
 	/* Succeeded: every receiver is out. */
@@ -795,6 +909,8 @@ command_strategy(
 			usage();
 			return EXIT_USAGE;
 		}
+
+		/* Reads the three axes, each a number up to the largest the kernel takes. */
 		parsed = parse_unsigned(argv[1], KERN_THERMAL_AXIS_MAX, &speed);
 		if (parsed)
 			parsed = parse_unsigned(argv[2], KERN_THERMAL_AXIS_MAX, &noise);
@@ -804,6 +920,8 @@ command_strategy(
 			usage();
 			return EXIT_USAGE;
 		}
+
+		/* Keeps them in the strategy to choose. */
 		wanted.speed = (uint8_t)speed;
 		wanted.noise = (uint8_t)noise;
 		wanted.gating = (uint8_t)gating;
@@ -836,7 +954,10 @@ strategy_choose(
 	error = device_request(KERN_THERMAL_SET_STRATEGY, &strategy);
 
 	/* A choice the kernel did not take in force is neither kept nor shown. */
-	if (error == EPERM || error == EINVAL || error == ENOTTY || error == EFAULT)
+	if (error == EPERM ||
+	    error == EINVAL ||
+	    error == ENOTTY ||
+	    error == EFAULT)
 		return refused("strategy", error);
 
 	/* The kernel keeps the strategy whatever the receivers answered; so does the file. */
@@ -889,6 +1010,8 @@ strategy_keep(
 	} else {
 		length = snprintf(line, sizeof(line), "strategy %s\n", value_text(strategy_names, wanted->value));
 	}
+
+	/* A line that did not fit is not kept. */
 	if (length <= 0 || (size_t)length >= sizeof(line))
 		return;
 
@@ -923,6 +1046,8 @@ keep_replace(
 		fprintf(stderr, "thermal: warning: %s: %s; the strategy is not kept\n", THERMAL_CONF_NEW, strerror(errno));
 		return;
 	}
+
+	/* Gives the new file the group and the mode the file keeps. */
 	owned = fchown(descriptor, 0, KERN_THERMAL_NODE_GROUP);
 	moded = fchmod(descriptor, KERN_THERMAL_NODE_MODE);
 
@@ -1070,6 +1195,8 @@ command_restore(void)
 		known = false;
 		if (fields >= 1)
 			known = value_find(strategy_names, name, &value);
+
+		/* MANUAL needs its three axes in range, the others none. */
 		if (known && value == KERN_THERMAL_STRATEGY_MANUAL) {
 			if (fields != 4 ||
 			    speed > KERN_THERMAL_AXIS_MAX ||
@@ -1079,6 +1206,8 @@ command_restore(void)
 		} else if (known && (fields != 1 || value == KERN_THERMAL_STRATEGY_FIRMWARE)) {
 			known = false;
 		}
+
+		/* Takes the strategy, or says the line is not one. */
 		if (known) {
 			wanted.value = value;
 			wanted.speed = (uint8_t)speed;
@@ -1103,7 +1232,9 @@ command_boost(
 	struct thermal_boost boost;
 	uint32_t fan;
 	uint32_t level;
+	const char *pending;
 	bool parsed;
+	int different;
 	int error;
 
 	/* The fan, or all, and the level. */
@@ -1111,14 +1242,19 @@ command_boost(
 		usage();
 		return EXIT_USAGE;
 	}
+
+	/* Reads the fan: every fan, or one by its number. */
 	fan = KERN_THERMAL_ALL;
-	if (strcmp(argv[0], "all") != 0) {
+	different = strcmp(argv[0], "all");
+	if (different != 0) {
 		parsed = parse_unsigned(argv[0], UINT32_MAX - 1U, &fan);
 		if (!parsed) {
 			usage();
 			return EXIT_USAGE;
 		}
 	}
+
+	/* Reads the level. */
 	parsed = parse_unsigned(argv[1], UINT32_MAX, &level);
 	if (!parsed) {
 		usage();
@@ -1134,7 +1270,10 @@ command_boost(
 		return refused("boost", error);
 
 	/* Says whether a driver was still at work. */
-	printf("boost level=%u pending=%s\n", level, (boost.flags & KERN_THERMAL_BOOST_PENDING) != 0U ? "yes" : "no");
+	pending = "no";
+	if ((boost.flags & KERN_THERMAL_BOOST_PENDING) != 0U)
+		pending = "yes";
+	printf("boost level=%u pending=%s\n", level, pending);
 
 	/* Succeeded: the fans are at the level, or will be. */
 	return EXIT_DONE;
@@ -1149,6 +1288,7 @@ command_cpu(
 	uint32_t cpu;
 	bool parsed;
 	bool sample;
+	int different;
 	int status;
 
 	/* Without arguments, one line per CPU. */
@@ -1157,16 +1297,23 @@ command_cpu(
 		return status;
 	}
 
-	/* The domains, a direct setting, or the relative performance. */
-	if (strcmp(argv[0], "domains") == 0 && argc == 1) {
+	/* The domains, which take no further argument. */
+	different = strcmp(argv[0], "domains");
+	if (different == 0 && argc == 1) {
 		status = show_domains();
 		return status;
 	}
-	if (strcmp(argv[0], "set") == 0) {
+
+	/* A direct setting. */
+	different = strcmp(argv[0], "set");
+	if (different == 0) {
 		status = command_cpu_set(argc - 1, argv + 1);
 		return status;
 	}
-	if (strcmp(argv[0], "relative") == 0) {
+
+	/* The relative performance. */
+	different = strcmp(argv[0], "relative");
+	if (different == 0) {
 		status = command_relative(argc - 1, argv + 1);
 		return status;
 	}
@@ -1174,12 +1321,21 @@ command_cpu(
 	/* One CPU, sampled when asked. */
 	parsed = parse_unsigned(argv[0], UINT32_MAX - 1U, &cpu);
 	sample = false;
-	if (argc == 2 && strcmp(argv[1], "sample") == 0)
-		sample = true;
-	if (!parsed || argc > 2 || (argc == 2 && !sample)) {
+	if (argc == 2) {
+		different = strcmp(argv[1], "sample");
+		if (different == 0)
+			sample = true;
+	}
+
+	/* Refuses a number that is not one, and more than a sample request. */
+	if (!parsed ||
+	    argc > 2 ||
+	    (argc == 2 && !sample)) {
 		usage();
 		return EXIT_USAGE;
 	}
+
+	/* Shows it. */
 	status = show_cpu(cpu, sample);
 	return status;
 }
@@ -1297,6 +1453,8 @@ show_domains(void)
 		} else {
 			printf(" levels=-");
 		}
+
+		/* The request and the ceiling. */
 		printf(" min=%u max=%u desired=%u epp=%u limit=%s flags=%s\n",
 		       domain.minimum, domain.maximum, domain.desired, domain.preference, limit, flags);
 	}
@@ -1315,6 +1473,11 @@ command_cpu_set(
 	const char *equal;
 	uint32_t value;
 	bool parsed;
+	int different;
+	int min_differs;
+	int max_differs;
+	int desired_differs;
+	int epp_differs;
 	int index;
 	int error;
 
@@ -1323,9 +1486,12 @@ command_cpu_set(
 		usage();
 		return EXIT_USAGE;
 	}
+
+	/* Reads the domain: every domain, or one by its number. */
 	memset(&setting, 0, sizeof(setting));
 	setting.domain = KERN_THERMAL_ALL;
-	if (strcmp(argv[0], "all") != 0) {
+	different = strcmp(argv[0], "all");
+	if (different != 0) {
 		parsed = parse_unsigned(argv[0], UINT32_MAX - 1U, &setting.domain);
 		if (!parsed) {
 			usage();
@@ -1343,16 +1509,22 @@ command_cpu_set(
 			usage();
 			return EXIT_USAGE;
 		}
-		if (strncmp(argv[index], "min=", 4) == 0) {
+
+		/* Records the field the argument names. */
+		min_differs = strncmp(argv[index], "min=", 4);
+		max_differs = strncmp(argv[index], "max=", 4);
+		desired_differs = strncmp(argv[index], "desired=", 8);
+		epp_differs = strncmp(argv[index], "epp=", 4);
+		if (min_differs == 0) {
 			setting.fields |= KERN_THERMAL_CPU_SET_MINIMUM;
 			setting.minimum = value;
-		} else if (strncmp(argv[index], "max=", 4) == 0) {
+		} else if (max_differs == 0) {
 			setting.fields |= KERN_THERMAL_CPU_SET_MAXIMUM;
 			setting.maximum = value;
-		} else if (strncmp(argv[index], "desired=", 8) == 0) {
+		} else if (desired_differs == 0) {
 			setting.fields |= KERN_THERMAL_CPU_SET_DESIRED;
 			setting.desired = value;
-		} else if (strncmp(argv[index], "epp=", 4) == 0) {
+		} else if (epp_differs == 0) {
 			setting.fields |= KERN_THERMAL_CPU_SET_PREFERENCE;
 			setting.preference = value;
 		} else {
@@ -1367,6 +1539,8 @@ command_cpu_set(
 		printf("cpu set: not confirmed yet; it takes effect at the CPUs' next chance\n");
 		return EXIT_DONE;
 	}
+
+	/* Any other refusal is said. */
 	if (error != 0)
 		return refused("cpu set", error);
 
@@ -1398,12 +1572,16 @@ command_relative(
 		usage();
 		return EXIT_USAGE;
 	}
+
+	/* Hands the way named to the kernel. */
 	if (argc == 1) {
 		known = value_find(relative_names, argv[0], &source);
 		if (!known) {
 			usage();
 			return EXIT_USAGE;
 		}
+
+		/* Chooses it. */
 		memset(&relative, 0, sizeof(relative));
 		relative.source = source;
 		error = device_request(KERN_THERMAL_SET_CPU_RELATIVE, &relative);
@@ -1439,20 +1617,32 @@ command_idle(
 	bool package;
 	bool parsed;
 	bool interval;
+	int cpu_differs;
+	int package_differs;
 	int used;
 	int error;
 
 	/* The CPU or the package. */
 	package = true;
 	target = 0;
-	if (argc >= 2 && (strcmp(argv[0], "cpu") == 0 || strcmp(argv[0], "package") == 0)) {
-		if (strcmp(argv[0], "cpu") == 0)
+	cpu_differs = 1;
+	package_differs = 1;
+	if (argc >= 2) {
+		cpu_differs = strcmp(argv[0], "cpu");
+		package_differs = strcmp(argv[0], "package");
+	}
+
+	/* Takes the kind and the number it names. */
+	if (cpu_differs == 0 || package_differs == 0) {
+		if (cpu_differs == 0)
 			package = false;
 		parsed = parse_unsigned(argv[1], UINT32_MAX - 1U, &target);
 		if (!parsed) {
 			usage();
 			return EXIT_USAGE;
 		}
+
+		/* Takes the two arguments off. */
 		argc -= 2;
 		argv += 2;
 	}
@@ -1473,6 +1663,8 @@ command_idle(
 		idle_print(package, &first, NULL);
 		return EXIT_DONE;
 	}
+
+	/* Waits the interval and reads again. */
 	(void)sleep(seconds);
 	error = idle_read(package, target, &second);
 	if (error != 0)
@@ -1518,6 +1710,7 @@ idle_print(
 	const struct thermal_cpu_idle *second)
 {
 	const char *prefix;
+	const char *scope;
 	uint64_t elapsed;
 	uint64_t spent;
 	uint32_t index;
@@ -1526,7 +1719,10 @@ idle_print(
 	prefix = "C";
 	if (package)
 		prefix = "PC";
-	printf("idle %s %u states=%u\n", package ? "package" : "cpu", first->target, first->state_count);
+	scope = "cpu";
+	if (package)
+		scope = "package";
+	printf("idle %s %u states=%u\n", scope, first->target, first->state_count);
 
 	/* Each state's time, and its share of the interval. */
 	elapsed = 0;
@@ -1538,6 +1734,8 @@ idle_print(
 			       (unsigned long long)first->residency_ns[index]);
 			continue;
 		}
+
+		/* The time spent in the state between the two readings. */
 		spent = 0;
 		if (second->residency_ns[index] > first->residency_ns[index])
 			spent = second->residency_ns[index] - first->residency_ns[index];
@@ -1609,6 +1807,8 @@ command_power(
 			printf("power %u %s kind=%s watts=-\n", index, second.name, value_text(meter_names, second.kind));
 			continue;
 		}
+
+		/* The power in milliwatts, shown in watts. */
 		milliwatts = energy * 1000U / elapsed;
 		printf("power %u %s kind=%s watts=%llu.%03llu\n", index, second.name,
 		       value_text(meter_names, second.kind),
@@ -1634,6 +1834,7 @@ command_watch(
 	ssize_t got;
 	size_t count;
 	size_t index;
+	const char *name;
 	bool known;
 	int argument;
 	int error;
@@ -1646,8 +1847,12 @@ command_watch(
 			usage();
 			return EXIT_USAGE;
 		}
+
+		/* Adds the type to the subscription. */
 		subscription.mask |= 1U << type;
 	}
+
+	/* Without names, every type except the overflow marker. */
 	if (subscription.mask == 0U)
 		subscription.mask = KERN_THERMAL_EVENT_MASK & ~(1U << KERN_THERMAL_EVENT_OVERFLOW);
 
@@ -1670,10 +1875,13 @@ command_watch(
 			return refused("watch", errno);
 		count = (size_t)got / sizeof(events[0]);
 		for (index = 0; index < count; index++) {
+			name = "-";
+			if (events[index].name[0] != '\0')
+				name = events[index].name;
 			printf("event %llu %s index=%u value=%d name=%s\n",
 			       (unsigned long long)events[index].sequence,
 			       value_text(event_names, events[index].type), events[index].index,
-			       events[index].value, events[index].name[0] != '\0' ? events[index].name : "-");
+			       events[index].value, name);
 		}
 	}
 

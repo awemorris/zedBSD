@@ -176,6 +176,8 @@ drv_cpu_x86_init(void)
 		kern_logf("cpu-x86: the performance framework refused the provider (%d)\n", error);
 		return error;
 	}
+
+	/* Tells the log what was found and how many CPUs the description covers. */
 	kern_logf("cpu-x86: family %02xH model %02xH, %u CPUs described%s\n",
 		  drv_cpu_x86_machine.identity.display_family,
 		  drv_cpu_x86_machine.identity.display_model,
@@ -214,6 +216,8 @@ cpu_x86_topology(
 	/* Refuses a CPU the driver has no record for. */
 	if (cpu >= drv_cpu_x86_cpu_count)
 		return EINVAL;
+
+	/* Selects the record of the CPU. */
 	state = &drv_cpu_x86_cpus[cpu];
 
 	/* Keeps the leaves that differ from CPU to CPU. */
@@ -274,6 +278,8 @@ cpu_x86_describe(
 	/* Refuses a CPU the driver has no record for. */
 	if (cpu >= drv_cpu_x86_cpu_count)
 		return EINVAL;
+
+	/* Selects the record of the CPU. */
 	state = &drv_cpu_x86_cpus[cpu];
 
 	/* Leaves a CPU without HWP control as the framework's uncontrolled one. */
@@ -318,6 +324,7 @@ cpu_x86_identify(void)
 	int present;
 	int error;
 
+	/* Selects the machine the reading fills. */
 	machine = &drv_cpu_x86_machine;
 
 	/* Reads the vendor and the model. */
@@ -346,19 +353,23 @@ cpu_x86_identify(void)
 	if (error != 0)
 		return ENODEV;
 
-	/* Reads the invariant TSC and the physical address width where the leaves exist. */
+	/* Reads the invariant TSC where the leaf exists. */
 	invariant = NULL;
 	present = cpux86_cpuid_has_leaf(&machine->identity, CPU_X86_LEAF_INVARIANT_TSC);
 	if (present) {
 		drv_cpu_x86_cpuid(CPU_X86_LEAF_INVARIANT_TSC, 0U, &extended7);
 		invariant = &extended7;
 	}
+
+	/* Reads the physical address width where the leaf exists. */
 	address = NULL;
 	present = cpux86_cpuid_has_leaf(&machine->identity, CPU_X86_LEAF_ADDRESS_SIZE);
 	if (present) {
 		drv_cpu_x86_cpuid(CPU_X86_LEAF_ADDRESS_SIZE, 0U, &extended8);
 		address = &extended8;
 	}
+
+	/* Decodes the two leaves that were read. */
 	error = cpux86_cpuid_extended(invariant, address, &machine->extended);
 	if (error != 0)
 		return ENODEV;

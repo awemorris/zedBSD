@@ -1,34 +1,30 @@
 #!/bin/sh
-# Builds the kernel of every port and prints one line per port:
-#   <port> rc=<make status> warnings=<count> <log>
-# Usage: build-vmunix-all.sh <out-dir under build/> [port...]
-# The ports run four at a time, each with make -j16, and each make has a
-# 30-minute limit.
+# Builds the kernel of every platform of the build system, once with the
+# platform's defaults and once with the thermal core on, and prints one line
+# per build:
+#   <platform> <variant> rc=<make status> warnings=<count> <log>
+# Usage: build-vmunix-all.sh <log dir> [platform...]
+# The variants are "default" (the platform's defaults.mk), "thermal"
+# (CONFIG_KERN_THERMAL=y, and on x86 CONFIG_DRIVER_X86_POWER_CONTROL=y),
+# "nothermal" (CONFIG_KERN_THERMAL=n, on the platforms whose defaults have
+# it on, with the drivers that depend on it off) and, on x86_64, "inject" (the thermal build with
+# CONFIG_THERMAL_TEST_INJECT=y).
+# Each platform builds in its own build/<platform> one variant after another
+# (the objects follow their flags), its sysroot first; each make has a
+# 30-minute limit.  The kernel of each variant is copied to
+# <log dir>/<platform>-<variant>.vmunix.
 set -u
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
-out=${1:?out dir}
+out=${1:?log dir}
 shift
 cd "$repo" || exit 1
-all="amd64:config/ci/config-amd64.mk
-intelmac:config/ci/config-intelmac.mk
-pcat:config/ci/config-pcat.mk
-pc98:config/ci/config-pc98.mk
-rpi4:config/ci/config-rpi4.mk
-rpi5:config/ci/config-rpi5.mk
-odroid-c5:config/ci/config-odroid-c5.mk
-visionfive2:config/ci/config-visionfive2.mk
-zybo:config/ci/config-zybo.mk
-armv7-virt:config/ci/config-armv7-virt.mk
-riscv64-virt:config/ci/config-riscv64-virt.mk
-riscv32-virt:config/ci/config-riscv32-virt.mk
-m68k-virt:config/ci/config-m68k-virt.mk
-ppc32-mac99:config/ci/config-ppc32-mac99.mk
-ppc64-pseries:config/ci/config-ppc64-pseries.mk
-mips32-malta:plan/tools/ports/config-mips32-malta.mk
-mips64-malta:plan/tools/ports/config-mips64-malta.mk
-mips32-rg350:plan/ws273/tests/config-mips32-rg350.mk
-sun4u:plan/tools/ports/config-sun4u.mk
-x68k:plan/tools/ports/config-x68k.mk"
+all="x86_64:config/config.x86_64.mk
+intelmid64:config/config.x86_64.mk
+i386:config/config.i386.mk
+pc9821:config/config.pc98.mk
+rpi4:config/config.rpi4.mk
+rpi5:config/config.rpi5.mk
+vf2:config/config.visionfive2.mk"
 if [ $# -gt 0 ]; then
 	sel=""
 	for p in "$@"; do
@@ -38,11 +34,45 @@ if [ $# -gt 0 ]; then
 	all=$sel
 fi
 mkdir -p "$out"
-printf '%s\n' "$all" | grep . | xargs -P4 -I{} sh -c '
-	port=${1%%:*}; config=${1#*:}; out=$2
-	log=$out/$port.log
-	timeout 1800 make -j16 ZEDBSD_CONFIG=$config BUILD=$out/$port $out/$port/vmunix >"$log" 2>&1
+printf '%s\n' "$all" | grep . | while IFS=: read -r plat config; do
+	vars="PLATFORM=$plat CONFIGMK=$config"
+	log=$out/$plat-sysroot.log
+	timeout 1800 make -j16 $vars sysroot >"$log" 2>&1 </dev/null
 	rc=$?
-	warnings=$(grep -c "warning:" "$log")
-	echo "$port rc=$rc warnings=$warnings $log"
-' sh {} "$out" | sort
+	echo "$plat sysroot rc=$rc warnings=$(grep -c 'warning:' "$log") $log"
+	case $plat in
+	rpi4|rpi5|vf2)
+		variants="default nothermal"
+		;;
+	x86_64)
+		variants="default thermal inject"
+		;;
+	*)
+		variants="default thermal"
+		;;
+	esac
+	for v in $variants; do
+		flags=
+		case $v in
+		thermal|inject)
+			flags="CONFIG_KERN_THERMAL=y"
+			case $plat in
+			x86_64|intelmid64|i386)
+				flags="$flags CONFIG_DRIVER_X86_POWER_CONTROL=y"
+				;;
+			esac
+			;;
+		nothermal)
+			flags="CONFIG_KERN_THERMAL=n"
+			test "$plat" = rpi5 && flags="$flags CONFIG_DRIVER_RPI5_FAN=n"
+			;;
+		esac
+		test "$v" = inject && flags="$flags CONFIG_THERMAL_TEST_INJECT=y"
+		log=$out/$plat-$v.log
+		timeout 1800 make -j16 $vars $flags "build/$plat/vmunix" \
+		    >"$log" 2>&1 </dev/null
+		rc=$?
+		test "$rc" = 0 && cp "build/$plat/vmunix" "$out/$plat-$v.vmunix"
+		echo "$plat $v rc=$rc warnings=$(grep -c 'warning:' "$log") $log"
+	done
+done

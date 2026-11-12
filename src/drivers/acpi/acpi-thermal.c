@@ -30,6 +30,9 @@
 
 #include <stdbool.h>
 
+/* Marks a parameter that the function does not use. */
+#define UNUSED_PARAMETER(parameter)	((void)(parameter))
+
 /* The most sensors taken, and how often they are read. */
 #define THERMAL_SENSORS_MAX	16U
 #define THERMAL_PERIOD_MS	5000U
@@ -100,27 +103,35 @@ drv_acpi_thermal_attach(void)
 	spin_init(&thermal_lock, LOCK_RANK_DEVICE, "acpi thermal");
 	waitq_init(&thermal_waitq, "acpi thermal");
 
-	/* The sensors. */
+	/* Collects the thermal zones and the devices with a _TMP, and refuses a machine with none. */
 	(void)drv_acpi_walk(NULL, thermal_visitor, NULL);
 	if (thermal_sensor_count == 0U)
 		return ENODEV;
 
-	/* Each sensor registered with the core, read now, and said in the log. */
+	/* Registers each sensor with the core, reads it now, and says so in the log. */
 	for (index = 0; index < thermal_sensor_count; index++) {
 		sensor = &thermal_sensors[index];
+
+		/* Hands the sensor to the thermal core; a refused one keeps no handle. */
 		error = kern_thermal_sensor_register(sensor->name, sensor->kind, sensor->flags, &sensor->handle);
 		if (error != 0) {
 			kern_logf("acpi: temperature sensor %s is not registered (%d)\n", sensor->name, error);
 			sensor->handle = NULL;
 		}
+
+		/* Reads the sensor once and pushes the reading to the core. */
 		thermal_refresh(sensor, &milli_celsius);
+
+		/* Says what the sensor reads. */
 		kern_logf("acpi: temperature sensor %s flags 0x%x %d mC\n", sensor->name, sensor->flags, milli_celsius);
 	}
 
-	/* The thread that reads them again. */
+	/* Creates the thread that reads the sensors again. */
 	error = kthread_create(thermal_thread, NULL, SCHED_PRIORITY_DEFAULT, &thread);
 	if (error != 0)
 		return error;
+
+	/* Lets the thread run. */
 	thread_start(thread);
 
 	/* Succeeded: registered and read. */
@@ -142,9 +153,8 @@ thermal_visitor(
 	bool processor;
 	int error;
 
-	/* The depth and the argument do not matter. */
-	(void)depth;
-	(void)argument;
+	UNUSED_PARAMETER(depth);
+	UNUSED_PARAMETER(argument);
 
 	/* A thermal zone or a device. */
 	type = drv_acpi_node_type(node);
@@ -155,11 +165,13 @@ thermal_visitor(
 	else
 		return 0;
 
-	/* With a _TMP, and present. */
+	/* Skips a node that has no _TMP. */
 	child = NULL;
 	error = drv_acpi_lookup(node, "_TMP", &child);
 	if (error != 0 || child == NULL)
 		return 0;
+
+	/* Skips a node that is not present. */
 	present = thermal_present(node);
 	if (!present)
 		return 0;
@@ -168,13 +180,15 @@ thermal_visitor(
 	if (thermal_sensor_count >= THERMAL_SENSORS_MAX)
 		return -1;
 
-	/* The sensor, its path (cut to the name's room), kind and flags. */
+	/* Fills the next free slot with the node, its path (cut to the name's room) and kind. */
 	sensor = &thermal_sensors[thermal_sensor_count];
 	kern_memset(sensor, 0, sizeof(*sensor));
 	sensor->node = node;
 	(void)drv_acpi_node_path(node, sensor->name, sizeof(sensor->name));
 	sensor->name[sizeof(sensor->name) - 1U] = '\0';
 	sensor->kind = kind;
+
+	/* Marks the processor's participant, whose reading drives the processor's thermal policy. */
 	processor = thermal_processor(sensor->name);
 	if (processor)
 		sensor->flags |= KERN_THERMAL_SENSOR_CPU;
@@ -199,9 +213,11 @@ thermal_present(
 	if (error != 0)
 		return true;
 
-	/* Succeeded: its present bit. */
+	/* Reports a node whose present bit is clear as absent. */
 	if ((status & THERMAL_STATUS_PRESENT) == 0U)
 		return false;
+
+	/* Succeeded: the present bit is set. */
 	return true;
 }
 
@@ -213,18 +229,22 @@ thermal_processor(
 	size_t length;
 	int same;
 
-	/* The last segment of four. */
+	/* Refuses a path too short to end in a four-character segment. */
 	length = kern_strlen(path);
 	if (length < 4U)
 		return false;
+
+	/* Accepts a path ending in TCPU. */
 	same = kern_strncmp(path + length - 4U, "TCPU", 4U);
 	if (same == 0)
 		return true;
+
+	/* Accepts a path ending in B0D4. */
 	same = kern_strncmp(path + length - 4U, "B0D4", 4U);
 	if (same == 0)
 		return true;
 
-	/* Another sensor. */
+	/* Reports any other sensor as not the processor's. */
 	return false;
 }
 
@@ -241,8 +261,7 @@ thermal_thread(
 	unsigned index;
 	int error;
 
-	/* No argument. */
-	(void)argument;
+	UNUSED_PARAMETER(argument);
 
 	/* For as long as the kernel runs. */
 	for (;;) {
@@ -250,10 +269,14 @@ thermal_thread(
 		deadline = sched_ticks() + kern_ms_to_ticks(THERMAL_PERIOD_MS);
 		irq = spin_lock_irqsave(&thermal_lock);
 
+		/* Sleeps until the deadline, however often the sleep is cut short. */
 		for (;;) {
+			/* Ends the sleep once the period is over. */
 			now = sched_ticks();
 			if (now >= deadline)
 				break;
+
+			/* Sleeps on the queue, which nothing wakes, until the deadline. */
 			observed = waitq_sequence(&thermal_waitq);
 			error = waitq_sleep(&thermal_waitq, &thermal_lock, observed, deadline, 0U);
 			(void)error;
@@ -261,7 +284,7 @@ thermal_thread(
 
 		spin_unlock_irqrestore(&thermal_lock, irq);
 
-		/* Each sensor read again. */
+		/* Reads each sensor again. */
 		for (index = 0; index < thermal_sensor_count; index++)
 			thermal_refresh(&thermal_sensors[index], &milli_celsius);
 	}
@@ -282,12 +305,12 @@ thermal_refresh(
 	int32_t critical;
 	bool read;
 
-	/* The levels first, so a reading past a new level is judged against it. */
+	/* Pushes the levels first, so a reading past a new level is judged against it. */
 	(void)thermal_read(sensor->node, "_PSV", &passive);
 	(void)thermal_read(sensor->node, "_CRT", &critical);
 	kern_thermal_sensor_levels(sensor->handle, passive, critical);
 
-	/* The temperature, or the lack of one. */
+	/* Pushes the temperature, or the lack of one, and hands it to the caller for the log. */
 	read = thermal_read(sensor->node, "_TMP", &temperature);
 	kern_thermal_sensor_update(sensor->handle, temperature, read);
 	*milli_celsius = temperature;
@@ -307,11 +330,13 @@ thermal_read(
 	uint64_t decikelvin;
 	int error;
 
-	/* The value (0 until it is read). */
+	/* Evaluates the method; the value stays 0 until it is read. */
 	*milli_celsius = 0;
 	error = drv_acpi_evaluate_integer(node, method, &decikelvin);
 	if (error != 0)
 		return false;
+
+	/* Refuses a value that cannot be a temperature (an unread sensor answers 0, a missing one all ones). */
 	if (decikelvin < THERMAL_DECIKELVIN_LOW || decikelvin > THERMAL_DECIKELVIN_HIGH)
 		return false;
 

@@ -414,13 +414,14 @@ kern_cpuperf_init(void)
 		return;
 	}
 
-	/* Prepares the locks and the governor's queue. */
+	/* Prepares the framework's mutex. */
 	error = mutex_init(&cpuperf_mutex, LOCK_RANK_DEVICE, "cpuperf");
 	if (error != 0) {
 		kern_logf("cpuperf: lock initialization failed (%d); CPU performance is unavailable\n", error);
 		return;
 	}
 
+	/* Prepares the governor's lock and queue. */
 	spin_init(&cpuperf_governor_lock, LOCK_RANK_DEVICE, "cpuperf-governor");
 	waitq_init(&cpuperf_governor_queue, "cpuperf-governor");
 
@@ -493,12 +494,12 @@ kern_cpuperf_provider_register(
 	if (cpuperf_cpu_count == 0U)
 		return ENODEV;
 
+	/* Serializes the registration against other changes of policy. */
 	mutex_lock(&cpuperf_mutex);
 
 	/* Refuses a second provider. */
 	if (cpuperf_provider != NULL) {
 		mutex_unlock(&cpuperf_mutex);
-
 		return EBUSY;
 	}
 
@@ -530,6 +531,7 @@ kern_cpuperf_provider_register(
 	/* Tells the readers the CPUs changed. */
 	cpuperf_publish_change();
 
+	/* Reports how many CPUs answered and how many domains they form. */
 	kern_logf("cpuperf: provider registered; %u of %u CPUs answered, %u domains\n",
 		  answered, cpuperf_cpu_count, cpuperf_domain_total);
 
@@ -554,6 +556,7 @@ kern_cpuperf_provider_changed(
 	if (provider == NULL)
 		return;
 
+	/* Takes the provider's changed answers into the CPUs. */
 	mutex_lock(&cpuperf_mutex);
 
 	/* Takes the new capabilities into the CPUs; the domains keep their members. */
@@ -606,10 +609,15 @@ kern_cpuperf_notify(
 	/* Serves whatever was posted for this CPU and wakes the posters. */
 	enabled = spin_lock_irqsave(&box->lock);
 
+	/* Takes the posted work, leaving the box empty. */
 	work = box->work;
 	box->work = 0U;
+
+	/* Runs the work when there is some and a provider to run it on. */
 	if (work != 0U && cpuperf_provider != NULL)
 		cpuperf_run(box, cpu, work);
+
+	/* Records that every post made so far is served and wakes the posters. */
 	box->completed = box->posted;
 	waitq_wake_all(&box->done);
 
@@ -631,9 +639,10 @@ kern_cpuperf_cpu(
 	struct kern_cpuperf_levels levels;
 	unsigned long enabled;
 	uint64_t ticket;
+	uint64_t deadline;
 	uint32_t measured;
-	int error;
 	uint32_t custom;
+	int error;
 
 	/* Refuses a CPU that does not exist. */
 	if (info == NULL)
@@ -652,11 +661,13 @@ kern_cpuperf_cpu(
 	    provider != NULL &&
 	    provider->sample != NULL) {
 		ticket = cpuperf_post(cpu, CPUPERF_WORK_SAMPLE, NULL);
-		error = cpuperf_wait(cpu, ticket, cpuperf_deadline());
+		deadline = cpuperf_deadline();
+		error = cpuperf_wait(cpu, ticket, deadline);
 		if (error == 0) {
 			cpuperf_sleep_ms(CPUPERF_SAMPLE_GAP_MS);
 			ticket = cpuperf_post(cpu, CPUPERF_WORK_SAMPLE, NULL);
-			error = cpuperf_wait(cpu, ticket, cpuperf_deadline());
+			deadline = cpuperf_deadline();
+			error = cpuperf_wait(cpu, ticket, deadline);
 		}
 	}
 
@@ -673,10 +684,16 @@ kern_cpuperf_cpu(
 	info->efficiency = box->efficiency;
 	info->delivered_mhz = box->sample.delivered_mhz;
 	info->flags = 0U;
+
+	/* Marks a CPU the framework can control. */
 	if (box->control)
 		info->flags |= KERN_CPUPERF_CPU_HAS_CONTROL;
+
+	/* Marks a CPU whose maximum the thermal ceiling cut. */
 	if ((box->request_flags & CPUPERF_REQUEST_LIMITED) != 0U)
 		info->flags |= KERN_CPUPERF_CPU_LIMITED;
+
+	/* Marks a CPU the platform holds below its request. */
 	if ((box->sample.flags & KERN_CPUPERF_SAMPLE_PLATFORM_LIMIT) != 0U)
 		info->flags |= KERN_CPUPERF_CPU_PLATFORM_LIMIT;
 
@@ -738,22 +755,22 @@ kern_cpuperf_domain(
 	if (cpuperf_cpu_count == 0U)
 		return EINVAL;
 
+	/* Reads the domain under the mutex that groups the domains. */
 	mutex_lock(&cpuperf_mutex);
 
 	/* Refuses a domain that does not exist. */
 	if (domain >= cpuperf_domain_total) {
 		mutex_unlock(&cpuperf_mutex);
-
 		return EINVAL;
 	}
 
-	/* Copies the members. */
+	/* Copies the count of members and the mask that names them. */
 	entry = &cpuperf_domains[domain];
 	info->count = cpuperf_domain_total;
 	info->cpu_count = entry->cpu_count;
+	info->flags = 0U;
 	for (word = 0; word < KERN_CPU_MASK_WORDS; word++)
 		info->cpus[word] = entry->cpus[word];
-	info->flags = 0U;
 
 	/* Copies the levels the first member knows now. */
 	box = &cpuperf_boxes[entry->first_cpu];
@@ -771,7 +788,9 @@ kern_cpuperf_domain(
 	/* Reports the ceiling in units when one is set and the anchors are known. */
 	info->limit = KERN_CPUPERF_UNKNOWN;
 	known = cpuperf_anchors_known(&info->levels);
-	if (entry->control && known && entry->intent.limit_permille < KERN_THERMAL_LIMIT_NONE) {
+	if (entry->control &&
+	    known &&
+	    entry->intent.limit_permille < KERN_THERMAL_LIMIT_NONE) {
 		info->limit = cpuperf_ceiling(&info->levels, entry->intent.limit_permille);
 		info->flags |= KERN_CPUPERF_DOMAIN_LIMITED;
 	}
@@ -783,13 +802,14 @@ kern_cpuperf_domain(
 	/* Finds a member that has not confirmed its latest request. */
 	pending = false;
 	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
+		/* Skips a CPU that is not a member. */
 		member = cpuperf_domain_has(entry, cpu);
 		if (!member)
 			continue;
-
 		box = &cpuperf_boxes[cpu];
 		enabled = spin_lock_irqsave(&box->lock);
 
+		/* Notes a post the CPU has not served yet. */
 		if (box->completed < box->posted)
 			pending = true;
 
@@ -925,6 +945,7 @@ kern_cpuperf_domain_set(
 	if (tickets == NULL)
 		return ENOMEM;
 
+	/* Holds the domains still while the setting is checked and stored. */
 	mutex_lock(&cpuperf_mutex);
 
 	/* Picks the domains the setting reaches. */
@@ -949,9 +970,9 @@ kern_cpuperf_domain_set(
 
 	/* Checks the values against every domain they reach before changing any. */
 	for (index = first; error == 0 && index < last; index++) {
+		/* Skips a domain with nothing to control. */
 		if (!cpuperf_domains[index].control)
 			continue;
-
 		box = &cpuperf_boxes[cpuperf_domains[index].first_cpu];
 		enabled = spin_lock_irqsave(&box->lock);
 
@@ -959,13 +980,14 @@ kern_cpuperf_domain_set(
 
 		spin_unlock_irqrestore(&box->lock, enabled);
 
+		/* Checks the setting against this domain's levels. */
 		error = cpuperf_setting_check(&levels, setting, every);
 	}
 
+	/* Refuses a setting that does not fit a domain it reaches. */
 	if (error != 0) {
 		mutex_unlock(&cpuperf_mutex);
 		kern_free(tickets);
-
 		return error;
 	}
 
@@ -974,11 +996,14 @@ kern_cpuperf_domain_set(
 	 * that a direct setting overrides its strategy until the next one.
 	 */
 	for (index = first; index < last; index++) {
+		/* Skips a domain with nothing to control. */
 		if (!cpuperf_domains[index].control)
 			continue;
 		cpuperf_setting_store(&cpuperf_domains[index].intent, setting, every);
 		cpuperf_domain_post(index, tickets);
 	}
+
+	/* Marks the direct setting in force and makes sure the governor runs. */
 	atomic_store_release(&cpuperf_custom, 1U);
 	cpuperf_governor_start();
 
@@ -989,10 +1014,13 @@ kern_cpuperf_domain_set(
 	apply_error = 0;
 	error = 0;
 	for (index = first; error == 0 && index < last; index++) {
+		/* Skips a domain with nothing to control. */
 		if (!cpuperf_domains[index].control)
 			continue;
 		error = cpuperf_domain_wait(index, tickets, deadline, &apply_error);
 	}
+
+	/* Releases the tickets. */
 	kern_free(tickets);
 
 	/* Reports a CPU that did not confirm in time; the setting stays. */
@@ -1079,6 +1107,8 @@ kern_cpuperf_idle_cpu(
 	struct cpuperf_box *box;
 	unsigned long enabled;
 	uint64_t ticket;
+	uint64_t deadline;
+	uint64_t ticks;
 	int error;
 
 	/* Refuses a CPU that does not exist or a provider without the counters. */
@@ -1094,7 +1124,8 @@ kern_cpuperf_idle_cpu(
 
 	/* Reads the counters on the CPU. */
 	ticket = cpuperf_post(cpu, CPUPERF_WORK_IDLE_CORE, NULL);
-	error = cpuperf_wait(cpu, ticket, cpuperf_deadline());
+	deadline = cpuperf_deadline();
+	error = cpuperf_wait(cpu, ticket, deadline);
 	if (error != 0)
 		return error;
 
@@ -1112,7 +1143,8 @@ kern_cpuperf_idle_cpu(
 		return error;
 
 	/* Stamps the read with the kernel's tick time. */
-	idle->time_ns = kern_ticks_to_ns(sched_ticks());
+	ticks = sched_ticks();
+	idle->time_ns = kern_ticks_to_ns(ticks);
 
 	/* Succeeded: the residency of the core. */
 	return 0;
@@ -1133,6 +1165,8 @@ kern_cpuperf_idle_package(
 	unsigned long enabled;
 	kern_cpu_id_t target;
 	uint64_t ticket;
+	uint64_t deadline;
+	uint64_t ticks;
 	int error;
 
 	/* Refuses a provider without the counters. */
@@ -1151,7 +1185,8 @@ kern_cpuperf_idle_package(
 
 	/* Reads the counters on that CPU. */
 	ticket = cpuperf_post(target, CPUPERF_WORK_IDLE_PACKAGE, NULL);
-	error = cpuperf_wait(target, ticket, cpuperf_deadline());
+	deadline = cpuperf_deadline();
+	error = cpuperf_wait(target, ticket, deadline);
 	if (error != 0)
 		return error;
 
@@ -1169,7 +1204,8 @@ kern_cpuperf_idle_package(
 		return error;
 
 	/* Stamps the read with the kernel's tick time. */
-	idle->time_ns = kern_ticks_to_ns(sched_ticks());
+	ticks = sched_ticks();
+	idle->time_ns = kern_ticks_to_ns(ticks);
 
 	/* Succeeded: the residency of the package. */
 	return 0;
@@ -1227,6 +1263,7 @@ cpuperf_receiver_apply(
 	if (tickets == NULL)
 		return ENOMEM;
 
+	/* Holds the domains still while the strategy is stored. */
 	mutex_lock(&cpuperf_mutex);
 
 	/* Refuses a machine where no domain can be controlled. */
@@ -1234,7 +1271,6 @@ cpuperf_receiver_apply(
 	if (!any) {
 		mutex_unlock(&cpuperf_mutex);
 		kern_free(tickets);
-
 		return EOPNOTSUPP;
 	}
 
@@ -1243,21 +1279,28 @@ cpuperf_receiver_apply(
 	 * new strategy ends any direct setting, so CUSTOM is cleared.
 	 */
 	for (index = 0; index < cpuperf_domain_total; index++) {
+		/* Skips a domain with nothing to control. */
 		if (!cpuperf_domains[index].control)
 			continue;
 		intent = &cpuperf_domains[index].intent;
 		intent->strategy = strategy->value;
 		intent->speed = 0U;
 		intent->noise = 0U;
+
+		/* Takes the manual axes only for the manual strategy. */
 		if (strategy->value == KERN_THERMAL_STRATEGY_MANUAL) {
 			intent->speed = strategy->speed;
 			intent->noise = strategy->noise;
 		}
+
+		/* Ends any direct setting the domain carried. */
 		intent->direct_fields = 0U;
 		intent->direct_permille = false;
 		intent->governor_desired = KERN_CPUPERF_UNKNOWN;
 		cpuperf_domain_post(index, tickets);
 	}
+
+	/* Clears the direct-setting mark and makes sure the governor runs. */
 	atomic_store_release(&cpuperf_custom, 0U);
 	cpuperf_governor_start();
 
@@ -1268,10 +1311,13 @@ cpuperf_receiver_apply(
 	apply_error = 0;
 	error = 0;
 	for (index = 0; error == 0 && index < cpuperf_domain_total; index++) {
+		/* Skips a domain with nothing to control. */
 		if (!cpuperf_domains[index].control)
 			continue;
 		error = cpuperf_domain_wait(index, tickets, deadline, &apply_error);
 	}
+
+	/* Releases the tickets. */
 	kern_free(tickets);
 
 	/*
@@ -1296,6 +1342,7 @@ cpuperf_receiver_apply(
 	measure = false;
 	mutex_lock(&cpuperf_mutex);
 
+	/* Claims the measurement for this strategy when nobody has run it. */
 	if (!cpuperf_measured && provider->measure != NULL) {
 		cpuperf_measured = true;
 		measure = true;
@@ -1303,6 +1350,7 @@ cpuperf_receiver_apply(
 
 	mutex_unlock(&cpuperf_mutex);
 
+	/* Measures the highest rates, without the mutex. */
 	if (measure)
 		cpuperf_measure_all();
 
@@ -1344,20 +1392,23 @@ cpuperf_receiver_limit(
 	if (tickets == NULL)
 		return ENOMEM;
 
+	/* Holds the domains still while the ceiling is stored. */
 	mutex_lock(&cpuperf_mutex);
 
 	/* Refuses a domain that does not exist. */
 	if (domain != KERN_THERMAL_DOMAIN_ALL && domain >= cpuperf_domain_total) {
 		mutex_unlock(&cpuperf_mutex);
 		kern_free(tickets);
-
 		return EINVAL;
 	}
 
 	/* Stores the ceiling in the domains it reaches and posts it. */
 	for (index = 0; index < cpuperf_domain_total; index++) {
+		/* Skips a domain the ceiling does not name. */
 		if (domain != KERN_THERMAL_DOMAIN_ALL && index != domain)
 			continue;
+
+		/* Skips a domain with nothing to control. */
 		if (!cpuperf_domains[index].control)
 			continue;
 		cpuperf_domains[index].intent.limit_permille = permille;
@@ -1365,6 +1416,8 @@ cpuperf_receiver_limit(
 	}
 
 	mutex_unlock(&cpuperf_mutex);
+
+	/* Releases the tickets. */
 	kern_free(tickets);
 
 	/* Succeeded: the ceiling is on its way to the CPUs. */
@@ -1420,6 +1473,7 @@ cpuperf_receiver_is_custom(
 	if (custom != 0U)
 		return true;
 
+	/* No direct setting is in force. */
 	return false;
 }
 
@@ -1494,10 +1548,14 @@ cpuperf_levels_none(
 	levels->guaranteed = KERN_CPUPERF_UNKNOWN;
 	levels->highest = KERN_CPUPERF_UNKNOWN;
 	levels->step_count = 0U;
+
+	/* Empties the list of steps. */
 	for (index = 0; index < KERN_CPUPERF_STEP_MAX; index++) {
 		levels->steps[index] = 0U;
 		levels->step_mhz[index] = 0U;
 	}
+
+	/* Leaves the rate and the voltage group unknown. */
 	levels->highest_mhz = 0U;
 	levels->voltage_group = KERN_CPUPERF_UNKNOWN;
 	levels->firmware_id = KERN_CPUPERF_UNKNOWN;
@@ -1518,6 +1576,7 @@ cpuperf_anchors_known(
 	if (levels->highest == KERN_CPUPERF_UNKNOWN)
 		return false;
 
+	/* Succeeded: all four anchors are known. */
 	return true;
 }
 
@@ -1536,6 +1595,7 @@ cpuperf_anchors_unknown(
 	if (levels->highest != KERN_CPUPERF_UNKNOWN)
 		return false;
 
+	/* Succeeded: all four anchors are unknown. */
 	return true;
 }
 
@@ -1569,11 +1629,13 @@ cpuperf_levels_usable(
 		if (levels->step_count == 0U || levels->step_count > KERN_CPUPERF_STEP_MAX)
 			return false;
 
+		/* Refuses a step that does not rise above the one before it. */
 		for (index = 1; index < levels->step_count; index++) {
 			if (levels->steps[index] <= levels->steps[index - 1U])
 				return false;
 		}
 
+		/* Takes the ends of the list as the lowest and the highest level. */
 		levels->lowest = levels->steps[0];
 		levels->highest = levels->steps[levels->step_count - 1U];
 	}
@@ -1592,11 +1654,13 @@ cpuperf_levels_usable(
 	if (levels->lowest > levels->highest)
 		return false;
 
-	/* Pulls the inner anchors into the range. */
+	/* Pulls the guaranteed anchor into the range. */
 	if (levels->guaranteed < levels->lowest)
 		levels->guaranteed = levels->lowest;
 	if (levels->guaranteed > levels->highest)
 		levels->guaranteed = levels->highest;
+
+	/* Pulls the efficient anchor into the range. */
 	if (levels->efficient < levels->lowest)
 		levels->efficient = levels->lowest;
 	if (levels->efficient > levels->highest)
@@ -1608,6 +1672,7 @@ cpuperf_levels_usable(
 		levels->efficient = cpuperf_step_floor(levels, levels->efficient);
 	}
 
+	/* Succeeded: the CPU can be controlled with these levels. */
 	return true;
 }
 
@@ -1634,6 +1699,7 @@ cpuperf_shares(
 	if (share == KERN_CPUPERF_SHARE_CORE && first->core == other->core)
 		return true;
 
+	/* The two CPUs do not share a frequency. */
 	return false;
 }
 
@@ -1670,6 +1736,8 @@ cpuperf_domains_build(void)
 		for (index = 0; index < cpuperf_domain_total; index++) {
 			entry = &cpuperf_domains[index];
 			first = &cpuperf_boxes[entry->first_cpu];
+
+			/* Skips a domain whose first member differs in sharing, kind or control. */
 			if (first->levels.share != box->levels.share)
 				continue;
 			if (first->levels.kind != box->levels.kind)
@@ -1677,6 +1745,8 @@ cpuperf_domains_build(void)
 			if (first->control != box->control)
 				continue;
 			joined = cpuperf_shares(&first->topology, &box->topology, box->levels.share);
+
+			/* Joins the domain whose first member shares with this CPU. */
 			if (joined) {
 				cpuperf_domain_add(index, cpu);
 				break;
@@ -1687,8 +1757,12 @@ cpuperf_domains_build(void)
 		if (!joined) {
 			index = cpuperf_domain_total;
 			entry = &cpuperf_domains[index];
+
+			/* Empties the new domain's member mask. */
 			for (word = 0; word < KERN_CPU_MASK_WORDS; word++)
 				entry->cpus[word] = 0U;
+
+			/* Starts the new domain empty and gives it its first member's state. */
 			entry->cpu_count = 0U;
 			entry->first_cpu = cpu;
 			entry->levels = box->levels;
@@ -1734,6 +1808,7 @@ cpuperf_domain_has(
 	if ((domain->cpus[cpu / 64U] & ((uint64_t)1U << (cpu % 64U))) != 0U)
 		return true;
 
+	/* The CPU is not a member. */
 	return false;
 }
 
@@ -1758,8 +1833,12 @@ cpuperf_post(
 	enabled = spin_lock_irqsave(&box->lock);
 
 	box->work |= work;
+
+	/* Replaces the box's intent with the newest one. */
 	if (intent != NULL)
 		box->intent = *intent;
+
+	/* Counts the post; the poster waits until the CPU has served this count. */
 	box->posted++;
 	ticket = box->posted;
 
@@ -1798,11 +1877,16 @@ cpuperf_deliver(
 	current = hal_cpu_current();
 	if (current == cpu) {
 		kern_cpuperf_notify(cpu);
+
+		/* Restores the interrupt state the caller had. */
 		if (enabled)
 			hal_irq_enable();
+
+		/* Succeeded: the box was served on this CPU, so no notification is needed. */
 		return;
 	}
 
+	/* Restores the interrupt state the caller had. */
 	if (enabled)
 		hal_irq_enable();
 
@@ -1836,10 +1920,14 @@ cpuperf_wait(
 
 	while (box->completed < ticket) {
 		now = sched_ticks();
+
+		/* Gives up once the deadline has passed. */
 		if (now >= deadline) {
 			error = ETIMEDOUT;
 			break;
 		}
+
+		/* Sleeps until the CPU serves the box or the deadline passes. */
 		observed = waitq_sequence(&box->done);
 		(void)waitq_sleep(&box->done, &box->lock, observed, deadline, 0U);
 	}
@@ -1887,6 +1975,8 @@ cpuperf_sleep_ms(
 
 	for (;;) {
 		now = sched_ticks();
+
+		/* Wakes once the deadline has passed. */
 		if (now >= deadline)
 			break;
 		observed = waitq_sequence(&queue);
@@ -1922,6 +2012,7 @@ cpuperf_package_cpu(
 
 		spin_unlock_irqrestore(&box->lock, enabled);
 
+		/* Takes the calling CPU when it belongs to the package. */
 		if (member == package)
 			return current;
 	}
@@ -1950,6 +2041,7 @@ cpuperf_package_first(
 
 		spin_unlock_irqrestore(&box->lock, enabled);
 
+		/* Takes the first CPU that belongs to the package. */
 		if (member == package)
 			return cpu;
 	}
@@ -1971,6 +2063,7 @@ cpuperf_domain_post(
 	/* Leaves the same intent with every member. */
 	entry = &cpuperf_domains[domain];
 	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
+		/* Skips a CPU that is not a member. */
 		member = cpuperf_domain_has(entry, cpu);
 		if (!member)
 			continue;
@@ -2001,10 +2094,12 @@ cpuperf_domain_wait(
 	/* Waits for each member in turn against the one deadline. */
 	entry = &cpuperf_domains[domain];
 	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
+		/* Skips a CPU that is not a member. */
 		member = cpuperf_domain_has(entry, cpu);
 		if (!member)
 			continue;
 
+		/* Reports a member that did not confirm in time. */
 		error = cpuperf_wait(cpu, tickets[cpu], deadline);
 		if (error != 0)
 			return error;
@@ -2013,6 +2108,7 @@ cpuperf_domain_wait(
 		box = &cpuperf_boxes[cpu];
 		enabled = spin_lock_irqsave(&box->lock);
 
+		/* Remembers the first refusal only. */
 		if (*apply_error == 0)
 			*apply_error = box->apply_error;
 
@@ -2035,11 +2131,14 @@ cpuperf_run(
 {
 	const struct kern_cpuperf_provider_ops *provider;
 
+	/* Takes the provider the box lock keeps from changing. */
 	provider = cpuperf_provider;
 
 	/* Reads where this CPU sits in the machine. */
 	if ((work & CPUPERF_WORK_TOPOLOGY) != 0U) {
 		box->topology_error = provider->topology(cpu, &box->topology);
+
+		/* Falls back to the default place when the provider cannot say. */
 		if (box->topology_error != 0)
 			cpuperf_topology_default(cpu, &box->topology);
 	}
@@ -2050,6 +2149,8 @@ cpuperf_run(
 	    provider->sample != NULL) {
 		box->sample.flags = 0U;
 		provider->sample(cpu, &box->sample);
+
+		/* Takes the fresh anchors into the levels. */
 		if ((box->sample.flags & KERN_CPUPERF_SAMPLE_CAPABILITIES) != 0U)
 			cpuperf_caps_refresh(&box->levels, &box->sample);
 	}
@@ -2061,6 +2162,8 @@ cpuperf_run(
 	/* Marks the start of a measurement of the delivered rate. */
 	if ((work & CPUPERF_WORK_MEASURE_BEGIN) != 0U) {
 		box->measure_error = EOPNOTSUPP;
+
+		/* Starts the measurement when the provider can. */
 		if (provider->measure != NULL)
 			box->measure_error = provider->measure(cpu, true, &box->measured_mhz);
 	}
@@ -2068,8 +2171,12 @@ cpuperf_run(
 	/* Ends the measurement and keeps the rate. */
 	if ((work & CPUPERF_WORK_MEASURE_END) != 0U) {
 		box->measure_error = EOPNOTSUPP;
+
+		/* Ends the measurement when the provider can. */
 		if (provider->measure != NULL)
 			box->measure_error = provider->measure(cpu, false, &box->measured_mhz);
+
+		/* Drops the rate of a measurement that failed. */
 		if (box->measure_error != 0)
 			box->measured_mhz = 0U;
 	}
@@ -2078,6 +2185,8 @@ cpuperf_run(
 	if ((work & CPUPERF_WORK_FEEDBACK) != 0U) {
 		box->feedback_changed = false;
 		box->feedback_error = EOPNOTSUPP;
+
+		/* Copies the feedback when the provider keeps one. */
 		if (provider->feedback != NULL)
 			box->feedback_error = provider->feedback(cpu, &box->feedback_changed);
 	}
@@ -2085,6 +2194,8 @@ cpuperf_run(
 	/* Reads the residency of the core. */
 	if ((work & CPUPERF_WORK_IDLE_CORE) != 0U) {
 		box->idle_error = EOPNOTSUPP;
+
+		/* Reads the counters when the provider has them. */
 		if (provider->idle_core != NULL)
 			box->idle_error = provider->idle_core(cpu, &box->idle);
 	}
@@ -2092,6 +2203,8 @@ cpuperf_run(
 	/* Reads the residency of the package. */
 	if ((work & CPUPERF_WORK_IDLE_PACKAGE) != 0U) {
 		box->idle_error = EOPNOTSUPP;
+
+		/* Reads the counters when the provider has them. */
 		if (provider->idle_package != NULL)
 			box->idle_error = provider->idle_package(cpu, &box->idle);
 	}
@@ -2130,19 +2243,27 @@ cpuperf_run_apply(
 	if (!box->started && provider->start != NULL) {
 		started.flags = 0U;
 		error = provider->start(cpu, &started);
+
+		/* Reports a control that would not start. */
 		if (error != 0) {
 			box->apply_error = error;
 			return;
 		}
+
+		/* Takes the anchors the start reported into the levels. */
 		if ((started.flags & KERN_CPUPERF_SAMPLE_CAPABILITIES) != 0U)
 			cpuperf_caps_refresh(&box->levels, &started);
 	}
+
+	/* Remembers that the control has started. */
 	box->started = true;
 
 	/* Samples the CPU, which also refreshes its anchors. */
 	if (provider->sample != NULL) {
 		box->sample.flags = 0U;
 		provider->sample(cpu, &box->sample);
+
+		/* Takes the fresh anchors into the levels. */
 		if ((box->sample.flags & KERN_CPUPERF_SAMPLE_CAPABILITIES) != 0U)
 			cpuperf_caps_refresh(&box->levels, &box->sample);
 	}
@@ -2157,6 +2278,8 @@ cpuperf_run_apply(
 	/* Writes the request against the anchors just read. */
 	request_flags = cpuperf_compute(&box->intent, &box->levels, &request);
 	box->apply_error = provider->apply(cpu, &request);
+
+	/* Keeps the request the CPU accepted. */
 	if (box->apply_error == 0) {
 		box->request = request;
 		box->request_flags = request_flags;
@@ -2190,6 +2313,8 @@ cpuperf_caps_refresh(
 	known = cpuperf_anchors_known(&fresh);
 	if (!known)
 		return;
+
+	/* Takes the sample's anchors when they make a usable range. */
 	usable = cpuperf_levels_usable(&fresh);
 	if (usable)
 		*levels = fresh;
@@ -2319,8 +2444,12 @@ cpuperf_compute_range(
 					    intent->noise, KERN_THERMAL_AXIS_MAX);
 		request->minimum = levels->lowest;
 		request->maximum = speed_bound;
+
+		/* Lets the lower of the two bounds win. */
 		if (noise_bound < request->maximum)
 			request->maximum = noise_bound;
+
+		/* Spreads the preference from energy to performance with the speed. */
 		request->preference = CPUPERF_PREFERENCE_MAX * (KERN_THERMAL_AXIS_MAX - intent->speed) / KERN_THERMAL_AXIS_MAX;
 		break;
 
@@ -2377,8 +2506,12 @@ cpuperf_compute_steps(
 		 * speed how far up the allowed steps the governor may go.
 		 */
 		top = levels->guaranteed;
+
+		/* Allows the turbo steps from the manual noise that permits them. */
 		if (intent->noise >= CPUPERF_STEPS_TURBO_NOISE)
 			top = levels->highest;
+
+		/* Bounds the steps and leaves the choice to the governor. */
 		request->minimum = levels->lowest;
 		request->maximum = cpuperf_scale(levels->lowest, top,
 						 intent->speed, KERN_THERMAL_AXIS_MAX);
@@ -2418,6 +2551,8 @@ cpuperf_compute_direct(
 	/* Replaces the minimum. */
 	if ((intent->direct_fields & KERN_CPUPERF_SET_MINIMUM) != 0U) {
 		value = intent->direct_minimum;
+
+		/* Turns a permille of the range into units. */
 		if (intent->direct_permille)
 			value = cpuperf_scale(levels->lowest, levels->highest, value, CPUPERF_PERMILLE_MAX);
 		request->minimum = value;
@@ -2426,6 +2561,8 @@ cpuperf_compute_direct(
 	/* Replaces the maximum. */
 	if ((intent->direct_fields & KERN_CPUPERF_SET_MAXIMUM) != 0U) {
 		value = intent->direct_maximum;
+
+		/* Turns a permille of the range into units. */
 		if (intent->direct_permille)
 			value = cpuperf_scale(levels->lowest, levels->highest, value, CPUPERF_PERMILLE_MAX);
 		request->maximum = value;
@@ -2438,8 +2575,12 @@ cpuperf_compute_direct(
 	/* Replaces desired, which then stays where the direct setting put it. */
 	if ((intent->direct_fields & KERN_CPUPERF_SET_DESIRED) != 0U) {
 		value = intent->direct_desired;
+
+		/* Turns a permille of the range into units; 0 hands the choice back. */
 		if (intent->direct_permille && value != 0U)
 			value = cpuperf_scale(levels->lowest, levels->highest, value, CPUPERF_PERMILLE_MAX);
+
+		/* Stores the desired value and takes the step out of the governor's hands. */
 		request->desired = value;
 		*flags &= ~CPUPERF_REQUEST_GOVERNED;
 	}
@@ -2459,17 +2600,21 @@ cpuperf_compute_bounds(
 {
 	uint32_t ceiling;
 
-	/* Keeps the bounds inside the levels. */
+	/* Keeps the maximum inside the levels. */
 	if (request->maximum > levels->highest)
 		request->maximum = levels->highest;
 	if (request->maximum < levels->lowest)
 		request->maximum = levels->lowest;
+
+	/* Keeps the minimum inside the levels. */
 	if (request->minimum < levels->lowest)
 		request->minimum = levels->lowest;
 
 	/* Cuts the maximum to the thermal ceiling. */
 	if (intent->limit_permille < KERN_THERMAL_LIMIT_NONE) {
 		ceiling = cpuperf_ceiling(levels, intent->limit_permille);
+
+		/* Marks a maximum the ceiling cut. */
 		if (request->maximum > ceiling) {
 			request->maximum = ceiling;
 			*flags |= CPUPERF_REQUEST_LIMITED;
@@ -2484,6 +2629,8 @@ cpuperf_compute_bounds(
 	if (levels->kind == KERN_CPUPERF_LEVELS_STEPS) {
 		request->minimum = cpuperf_step_floor(levels, request->minimum);
 		request->maximum = cpuperf_step_floor(levels, request->maximum);
+
+		/* Lands an explicit desired value too. */
 		if (request->desired != 0U)
 			request->desired = cpuperf_step_floor(levels, request->desired);
 	}
@@ -2491,6 +2638,8 @@ cpuperf_compute_bounds(
 	/* Keeps an explicit desired value inside the bounds. */
 	if (request->desired != 0U && request->desired < request->minimum)
 		request->desired = request->minimum;
+
+	/* Keeps desired from rising above the maximum. */
 	if (request->desired > request->maximum)
 		request->desired = request->maximum;
 
@@ -2518,6 +2667,8 @@ cpuperf_ceiling(
 
 	/* Scales the range and keeps the guaranteed level. */
 	ceiling = cpuperf_scale(levels->lowest, levels->highest, permille, CPUPERF_PERMILLE_MAX);
+
+	/* Never goes below the guaranteed level. */
 	if (ceiling < levels->guaranteed)
 		ceiling = levels->guaranteed;
 
@@ -2611,6 +2762,7 @@ cpuperf_governed(
 	if (intent->strategy == KERN_THERMAL_STRATEGY_MANUAL)
 		return true;
 
+	/* The other strategies name the step themselves. */
 	return false;
 }
 
@@ -2645,10 +2797,12 @@ cpuperf_setting_check(
 		high = KERN_CPUPERF_UNKNOWN - 1U;
 	}
 
-	/* Refuses bounds outside the range. */
+	/* Refuses a minimum outside the range. */
 	if ((setting->fields & KERN_CPUPERF_SET_MINIMUM) != 0U &&
 	    (setting->minimum < low || setting->minimum > high))
 		return EINVAL;
+
+	/* Refuses a maximum outside the range. */
 	if ((setting->fields & KERN_CPUPERF_SET_MAXIMUM) != 0U &&
 	    (setting->maximum < low || setting->maximum > high))
 		return EINVAL;
@@ -2665,6 +2819,7 @@ cpuperf_setting_check(
 	    (setting->desired < low || setting->desired > high))
 		return EINVAL;
 
+	/* Succeeded: the setting fits the levels. */
 	return 0;
 }
 
@@ -2687,13 +2842,19 @@ cpuperf_setting_store(
 		intent->direct_fields = 0U;
 	intent->direct_permille = permille;
 
-	/* Stores each field the setting names. */
+	/* Stores the minimum when the setting names it. */
 	if ((setting->fields & KERN_CPUPERF_SET_MINIMUM) != 0U)
 		intent->direct_minimum = setting->minimum;
+
+	/* Stores the maximum when the setting names it. */
 	if ((setting->fields & KERN_CPUPERF_SET_MAXIMUM) != 0U)
 		intent->direct_maximum = setting->maximum;
+
+	/* Stores the desired value when the setting names it. */
 	if ((setting->fields & KERN_CPUPERF_SET_DESIRED) != 0U)
 		intent->direct_desired = setting->desired;
+
+	/* Stores the preference when the setting names it. */
 	if ((setting->fields & KERN_CPUPERF_SET_PREFERENCE) != 0U)
 		intent->direct_preference = setting->preference;
 
@@ -2730,6 +2891,8 @@ cpuperf_relative_refresh(void)
 	largest = 0U;
 	for (cpu = 0; known && cpu < cpuperf_cpu_count; cpu++) {
 		error = cpuperf_relative_raw(provider, cpu, &raw);
+
+		/* Gives up the scale on a CPU that cannot be measured; keeps the largest otherwise. */
 		if (error != 0)
 			known = false;
 		else if (raw > largest)
@@ -2743,12 +2906,17 @@ cpuperf_relative_refresh(void)
 	/* Scales each CPU to the fastest, rounding to the nearest. */
 	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
 		scaled = KERN_CPUPERF_UNKNOWN;
+
+		/* Leaves the value unknown unless the whole machine has a scale. */
 		if (known) {
 			error = cpuperf_relative_raw(provider, cpu, &raw);
+
+			/* Leaves the value unknown for a CPU that cannot be measured. */
 			if (error == 0)
 				scaled = (uint32_t)(((uint64_t)raw * CPUPERF_RELATIVE_MAX + largest / 2U) / largest);
 		}
 
+		/* Stores the value in the CPU's box. */
 		box = &cpuperf_boxes[cpu];
 		enabled = spin_lock_irqsave(&box->lock);
 
@@ -2790,6 +2958,8 @@ cpuperf_relative_raw(
 		/* A CPU not measured yet has no value. */
 		if (*raw == 0U)
 			return ENODATA;
+
+		/* Succeeded: the measured rate is the raw value. */
 		return 0;
 	}
 
@@ -2826,6 +2996,7 @@ cpuperf_feedback_copy(void)
 	kern_cpu_id_t cpu;
 	kern_cpu_id_t first;
 	uint64_t ticket;
+	uint64_t deadline;
 	uint32_t package;
 	bool changed;
 	bool moved;
@@ -2854,15 +3025,20 @@ cpuperf_feedback_copy(void)
 				break;
 			}
 		}
+
+		/* Moves on when an earlier CPU already copied the package. */
 		if (seen)
 			continue;
 
-		/* Copies the package's table on one of its CPUs. */
+		/* Picks a CPU of the package to copy on; a package without CPUs is skipped. */
 		target = cpuperf_package_cpu(package);
 		if (target == KERN_CPUPERF_UNKNOWN)
 			continue;
+
+		/* Copies the package's table on that CPU and skips a CPU that did not answer. */
 		ticket = cpuperf_post(target, CPUPERF_WORK_FEEDBACK, NULL);
-		error = cpuperf_wait(target, ticket, cpuperf_deadline());
+		deadline = cpuperf_deadline();
+		error = cpuperf_wait(target, ticket, deadline);
 		if (error != 0)
 			continue;
 
@@ -2909,17 +3085,20 @@ cpuperf_feedback_store(
 	/* Reads each CPU's row of the copy. */
 	provider = cpuperf_provider;
 	for (cpu = first; cpu < cpuperf_cpu_count; cpu++) {
+		/* Skips a CPU of another package. */
 		if (cpuperf_boxes[cpu].topology.package != package)
 			continue;
-
 		available = KERN_CPUPERF_UNKNOWN;
 		efficiency = KERN_CPUPERF_UNKNOWN;
 		error = provider->feedback_read(cpu, &available, &efficiency);
+
+		/* Leaves the values unknown for a row the provider cannot read. */
 		if (error != 0) {
 			available = KERN_CPUPERF_UNKNOWN;
 			efficiency = KERN_CPUPERF_UNKNOWN;
 		}
 
+		/* Stores the row in the CPU's box. */
 		box = &cpuperf_boxes[cpu];
 		enabled = spin_lock_irqsave(&box->lock);
 
@@ -2956,12 +3135,17 @@ cpuperf_describe_all(void)
 		usable = false;
 		if (error == 0)
 			usable = cpuperf_levels_usable(&levels);
+
+		/* Strips the kind and the sharing from a CPU that is not controlled. */
 		if (!usable) {
 			levels.kind = 0U;
 			levels.share = KERN_CPUPERF_SHARE_THREAD;
 		}
+
+		/* Notes whether the provider gave no anchors. */
 		unknown = cpuperf_anchors_unknown(&levels);
 
+		/* Stores the description in the CPU's box. */
 		box = &cpuperf_boxes[cpu];
 		enabled = spin_lock_irqsave(&box->lock);
 
@@ -2972,10 +3156,16 @@ cpuperf_describe_all(void)
 			levels.guaranteed = box->levels.guaranteed;
 			levels.highest = box->levels.highest;
 		}
+
+		/* Stores the levels and the control that goes with them. */
 		box->levels = levels;
 		box->control = usable;
+
+		/* Controls nothing when the provider cannot write a request. */
 		if (provider->apply == NULL)
 			box->control = false;
+
+		/* Takes the firmware's name for the CPU when the provider gave one. */
 		if (levels.firmware_id != KERN_CPUPERF_UNKNOWN)
 			box->topology.firmware_id = levels.firmware_id;
 
@@ -3021,6 +3211,7 @@ cpuperf_measure_all(void)
 	/* Measures the first controllable CPU of each kind. */
 	measured = 0U;
 	for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
+		/* Skips a CPU that cannot be controlled. */
 		box = &cpuperf_boxes[cpu];
 		if (!box->control)
 			continue;
@@ -3035,12 +3226,16 @@ cpuperf_measure_all(void)
 				break;
 			}
 		}
+
+		/* Moves on when an earlier CPU of the kind was measured. */
 		if (seen)
 			continue;
 
 		/* Measures the CPU at its highest level. */
 		mhz = 0U;
 		error = cpuperf_measure_domain(cpu, &mhz);
+
+		/* Reports a CPU that could not be measured and goes on to the next. */
 		if (error != 0) {
 			kern_logf("cpuperf: cpu %u not measured (%d)\n", cpu, error);
 			continue;
@@ -3051,11 +3246,14 @@ cpuperf_measure_all(void)
 			box = &cpuperf_boxes[other];
 			enabled = spin_lock_irqsave(&box->lock);
 
+			/* Gives the rate to a CPU of the same kind. */
 			if (box->topology.core_class == kind)
 				box->measured_mhz = mhz;
 
 			spin_unlock_irqrestore(&box->lock, enabled);
 		}
+
+		/* Counts the kind and reports its rate. */
 		measured++;
 		kern_logf("cpuperf: cpu %u (kind %u) runs at most about %u MHz\n", cpu, kind, mhz);
 	}
@@ -3082,6 +3280,7 @@ cpuperf_measure_domain(
 	uint32_t *mhz)
 {
 	uint64_t *tickets;
+	uint64_t deadline;
 	uint32_t domain;
 	int apply_error;
 	int error;
@@ -3100,8 +3299,10 @@ cpuperf_measure_domain(
 
 	mutex_unlock(&cpuperf_mutex);
 
+	/* Waits for every member of the domain to confirm, without the mutex. */
 	apply_error = 0;
-	error = cpuperf_domain_wait(domain, tickets, cpuperf_deadline(), &apply_error);
+	deadline = cpuperf_deadline();
+	error = cpuperf_domain_wait(domain, tickets, deadline, &apply_error);
 	if (error == 0)
 		error = apply_error;
 
@@ -3116,11 +3317,15 @@ cpuperf_measure_domain(
 	cpuperf_domain_post(domain, tickets);
 
 	mutex_unlock(&cpuperf_mutex);
+
+	/* Releases the tickets. */
 	kern_free(tickets);
 
 	/* Reports a measurement that did not complete. */
 	if (error != 0)
 		return error;
+
+	/* Reports a measurement that read no rate. */
 	if (*mhz == 0U)
 		return ENODATA;
 
@@ -3153,6 +3358,7 @@ cpuperf_measure_cpu(
 	if (measure == NULL)
 		return ENOMEM;
 
+	/* Prepares the record for the thread that will fill it. */
 	measure->cpu = cpu;
 	spin_init(&measure->lock, LOCK_RANK_DEVICE, "cpuperf-measure");
 	waitq_init(&measure->queue, "cpuperf-measure");
@@ -3166,6 +3372,7 @@ cpuperf_measure_cpu(
 		return error;
 	}
 
+	/* Binds the new thread to the CPU. */
 	error = sched_set_cpu(thread, cpu);
 	if (error != 0) {
 		(void)thread_abort_new(thread);
@@ -3173,6 +3380,7 @@ cpuperf_measure_cpu(
 		return error;
 	}
 
+	/* Lets the thread release itself when it ends, and starts it. */
 	thread->detached = 1;
 	thread_start(thread);
 
@@ -3186,12 +3394,18 @@ cpuperf_measure_cpu(
 
 	while (!measure->done) {
 		now = sched_ticks();
+
+		/* Gives up once the deadline has passed. */
 		if (now >= deadline)
 			break;
 		observed = waitq_sequence(&measure->queue);
 		(void)waitq_sleep(&measure->queue, &measure->lock, observed, deadline, 0U);
 	}
+
+	/* Notes whether the thread finished. */
 	done = measure->done;
+
+	/* Leaves the record to the thread, which frees it when it ends. */
 	if (!done)
 		measure->abandoned = true;
 	error = measure->error;
@@ -3226,6 +3440,7 @@ cpuperf_measure_main(
 	struct cpuperf_box *box;
 	unsigned long enabled;
 	uint64_t ticket;
+	uint64_t deadline;
 	uint64_t end;
 	uint64_t now;
 	kern_cpu_id_t cpu;
@@ -3234,6 +3449,7 @@ cpuperf_measure_main(
 	bool abandoned;
 	int error;
 
+	/* Takes the record the waiter handed over. */
 	measure = argument;
 	cpu = measure->cpu;
 
@@ -3246,7 +3462,8 @@ cpuperf_measure_main(
 	/* Marks the start on this CPU. */
 	if (error == 0) {
 		ticket = cpuperf_post(cpu, CPUPERF_WORK_MEASURE_BEGIN, NULL);
-		error = cpuperf_wait(cpu, ticket, cpuperf_deadline());
+		deadline = cpuperf_deadline();
+		error = cpuperf_wait(cpu, ticket, deadline);
 	}
 
 	/* Keeps the CPU busy so it runs at the level it was given. */
@@ -3254,6 +3471,8 @@ cpuperf_measure_main(
 		end = sched_ticks() + kern_ms_to_ticks(CPUPERF_MEASURE_MS);
 		for (;;) {
 			now = sched_ticks();
+
+			/* Stops once the measuring time has passed. */
 			if (now >= end)
 				break;
 			atomic_spin_hint();
@@ -3263,13 +3482,15 @@ cpuperf_measure_main(
 	/* Reads the rate since the start. */
 	if (error == 0) {
 		ticket = cpuperf_post(cpu, CPUPERF_WORK_MEASURE_END, NULL);
-		error = cpuperf_wait(cpu, ticket, cpuperf_deadline());
+		deadline = cpuperf_deadline();
+		error = cpuperf_wait(cpu, ticket, deadline);
 	}
 
 	/* Takes the answer out of the box. */
 	box = &cpuperf_boxes[cpu];
 	enabled = spin_lock_irqsave(&box->lock);
 
+	/* Keeps the provider's failure when nothing failed before. */
 	if (error == 0)
 		error = box->measure_error;
 	mhz = box->measured_mhz;
@@ -3308,12 +3529,17 @@ cpuperf_governor_start(void)
 	/* Looks for a domain whose step the governor picks. */
 	needed = false;
 	for (index = 0; index < cpuperf_domain_total; index++) {
+		/* Skips a domain with nothing to control. */
 		if (!cpuperf_domains[index].control)
 			continue;
 		needed = cpuperf_governed(&cpuperf_domains[index].intent, &cpuperf_domains[index].levels);
+
+		/* Stops at the first domain the governor serves. */
 		if (needed)
 			break;
 	}
+
+	/* Leaves the governor alone when no domain needs it. */
 	if (!needed)
 		return;
 
@@ -3324,9 +3550,13 @@ cpuperf_governor_start(void)
 			kern_logf("cpuperf: the governor did not start (%d); steps stay where they are\n", error);
 			return;
 		}
+
+		/* Records the thread, lets it release itself when it ends, and starts it. */
 		cpuperf_governor_thread = thread;
 		thread->detached = 1;
 		thread_start(thread);
+
+		/* Succeeded: a new governor runs its first pass. */
 		return;
 	}
 
@@ -3415,9 +3645,12 @@ cpuperf_governor_pass(void)
 	/* Looks at every governed domain. */
 	active = false;
 	for (index = 0; index < cpuperf_domain_total; index++) {
+		/* Skips a domain with nothing to control. */
 		entry = &cpuperf_domains[index];
 		if (!entry->control)
 			continue;
+
+		/* Skips a domain whose step the governor does not pick. */
 		governed = cpuperf_governed(&entry->intent, &entry->levels);
 		if (!governed)
 			continue;
@@ -3426,10 +3659,13 @@ cpuperf_governor_pass(void)
 		/* Finds the busiest member since the last pass. */
 		busiest = 0U;
 		for (cpu = 0; cpu < cpuperf_cpu_count; cpu++) {
+			/* Skips a CPU that is not a member. */
 			member = cpuperf_domain_has(entry, cpu);
 			if (!member)
 				continue;
 			busy = cpuperf_busy_percent(cpu);
+
+			/* Keeps the busiest member's share. */
 			if (busy > busiest)
 				busiest = busy;
 		}
@@ -3454,6 +3690,7 @@ cpuperf_governor_pass(void)
 		}
 	}
 
+	/* Releases the tickets. */
 	kern_free(tickets);
 
 	/* Reports whether the governor is still needed. */
@@ -3510,6 +3747,7 @@ cpuperf_any_control(void)
 			return true;
 	}
 
+	/* No domain can be controlled. */
 	return false;
 }
 
@@ -3606,9 +3844,11 @@ cpuperf_ioctl_cpu(
 	cpu = answer.cpu;
 	request = answer.request;
 
-	/* Refuses an unknown request, and a sample on an open for reading only. */
+	/* Refuses an unknown request. */
 	if ((request & ~KERN_THERMAL_CPU_READ_SAMPLE) != 0U)
 		return EINVAL;
+
+	/* Refuses a sample on an open for reading only. */
 	if ((request & KERN_THERMAL_CPU_READ_SAMPLE) != 0U) {
 		writable = cpuperf_writable(file);
 		if (!writable)
@@ -3656,6 +3896,8 @@ cpuperf_ioctl_cpu(
 	answer.highest_mhz = info.highest_mhz;
 	answer.delivered_mhz = info.delivered_mhz;
 	answer.flags = info.flags;
+
+	/* Marks a sample the CPU did not confirm in time. */
 	if (timed_out)
 		answer.flags |= KERN_THERMAL_CPU_SAMPLE_TIMEOUT;
 
@@ -3703,8 +3945,6 @@ cpuperf_ioctl_domain(
 	kern_memset(&answer, 0, sizeof(answer));
 	answer.domain = domain;
 	answer.count = info.count;
-	for (index = 0; index < KERN_CPU_MASK_WORDS; index++)
-		answer.cpus[index] = info.cpus[index];
 	answer.cpu_count = info.cpu_count;
 	answer.kind = info.levels.kind;
 	answer.share = info.levels.share;
@@ -3715,6 +3955,10 @@ cpuperf_ioctl_domain(
 	answer.limit = info.limit;
 	answer.flags = info.flags;
 
+	/* Copies the mask of members. */
+	for (index = 0; index < KERN_CPU_MASK_WORDS; index++)
+		answer.cpus[index] = info.cpus[index];
+
 	/* A RANGE is its two ends; STEPS are the list itself. */
 	if (info.levels.kind == KERN_CPUPERF_LEVELS_RANGE) {
 		answer.step_count = 2;
@@ -3722,8 +3966,12 @@ cpuperf_ioctl_domain(
 		answer.steps[1] = info.levels.highest;
 	} else if (info.levels.kind == KERN_CPUPERF_LEVELS_STEPS) {
 		answer.step_count = info.levels.step_count;
+
+		/* Keeps the count inside the record's list. */
 		if (answer.step_count > KERN_CPUPERF_STEP_MAX)
 			answer.step_count = KERN_CPUPERF_STEP_MAX;
+
+		/* Copies each step and its rate. */
 		for (index = 0; index < answer.step_count; index++) {
 			answer.steps[index] = info.levels.steps[index];
 			answer.step_mhz[index] = info.levels.step_mhz[index];
@@ -3765,6 +4013,8 @@ cpuperf_ioctl_domain_set(
 		return error;
 	if ((request.fields & ~CPUPERF_SET_FIELDS) != 0U)
 		return EINVAL;
+
+	/* Refuses reserved words that are not zero. */
 	if (request.reserved[0] != 0U || request.reserved[1] != 0U)
 		return EINVAL;
 
@@ -3780,6 +4030,8 @@ cpuperf_ioctl_domain_set(
 	setting.maximum = request.maximum;
 	setting.desired = request.desired;
 	setting.preference = request.preference;
+
+	/* Applies the setting. */
 	error = kern_cpuperf_domain_set(request.domain, &setting);
 	if (error != 0)
 		return error;
@@ -3805,6 +4057,8 @@ cpuperf_ioctl_relative_get(
 	kern_memset(&answer, 0, sizeof(answer));
 	answer.available = available;
 	answer.source = source;
+
+	/* Copies the record out. */
 	error = copyout(&answer, argument, sizeof(answer));
 	if (error != 0)
 		return error;
@@ -3876,9 +4130,11 @@ cpuperf_ioctl_idle(
 		return error;
 	target = answer.target;
 
-	/* Refuses a CPU past the last, or a package no CPU belongs to. */
+	/* Refuses a CPU past the last. */
 	if (!package && target >= cpuperf_cpu_count)
 		return ENOENT;
+
+	/* Refuses a package no CPU belongs to. */
 	if (package) {
 		first = cpuperf_package_first(target);
 		if (first == KERN_CPUPERF_UNKNOWN)
@@ -3894,8 +4150,12 @@ cpuperf_ioctl_idle(
 	} else {
 		error = kern_cpuperf_idle_cpu(target, &idle);
 	}
+
+	/* Reports a target that vanished as absent. */
 	if (error == EINVAL)
 		return ENOENT;
+
+	/* Reports counters that could not be read. */
 	if (error != 0)
 		return error;
 
@@ -3904,14 +4164,20 @@ cpuperf_ioctl_idle(
 	answer.target = target;
 	answer.count = cpuperf_cpu_count;
 	answer.state_count = idle.count;
+	answer.available = idle.available;
+
+	/* Keeps the count inside the record's list. */
 	if (answer.state_count > KERN_CPUPERF_IDLE_STATE_MAX)
 		answer.state_count = KERN_CPUPERF_IDLE_STATE_MAX;
-	answer.available = idle.available;
+
+	/* Copies each state with the scope it was read at. */
 	for (index = 0; index < answer.state_count; index++) {
 		answer.state[index] = idle.state[index];
 		answer.residency_ns[index] = idle.residency_ns[index];
 		answer.scope[index] = scope;
 	}
+
+	/* Stamps the record with the time of the read. */
 	answer.time_ns = idle.time_ns;
 
 	/* Hands the record to the caller. */

@@ -18,7 +18,10 @@ the target design; the implementation follows ([rules](../style.md)).
   Board Support Package (BSP).
 - [Power management](power-management.md):
   S0 low-power idle (S0ix), who decides what, entry and exit sequences,
-  device suspension, and the `/dev/system` sleep interface.
+  device suspension, and the `/dev/system` sleep interface; processor idle
+  states; the thermal framework of `/dev/thermal` (sensors, fans, energy
+  meters, the strategy, processor performance, passive cooling and the
+  emergency stop) and `/sbin/thermal`.
 
 ---
 

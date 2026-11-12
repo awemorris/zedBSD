@@ -31,14 +31,12 @@
 #include <kern/clock.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
-#include <kern/sysctl.h>
 #include <kern/thread.h>
 #include <kern/waitq.h>
 #include <kern/cdev.h>
 #include <kern/cred.h>
 #include <kern/file.h>
 #include <uapi/errno.h>
-#include <uapi/sysctl.h>
 #include <uapi/thermal.h>
 #undef sched_yield
 
@@ -294,20 +292,6 @@ kern_logf(const char *format, ...)
 	va_start(arguments, format);
 	vprintf(format, arguments);
 	va_end(arguments);
-}
-
-/* hw.thermal's sources, as the sysctl would keep them. */
-static kern_thermal_read_t test_sysctl_read[4];
-static void *test_sysctl_context[4];
-static unsigned test_sysctl_count;
-
-int
-kern_thermal_register(kern_thermal_read_t read, void *context)
-{
-	test_sysctl_read[test_sysctl_count] = read;
-	test_sysctl_context[test_sysctl_count] = context;
-	test_sysctl_count++;
-	return 0;
 }
 
 /* ---- The model of init, the sync and the platform for the emergency. ---- */
@@ -840,7 +824,6 @@ scenario_registration(void)
 	CHECK(status.generation == 0U);
 	CHECK(status.strategy_flags == 0U);
 	CHECK(test_threads == 3U);
-	CHECK(test_sysctl_count == 2U);
 }
 
 /* The checks of a strategy, and the answer with no receiver. */
@@ -1111,14 +1094,12 @@ scenario_before_init(void)
 	CHECK(status.strategy_flags == 0U);
 }
 
-/* Sensor readings: range, the jump, levels, hw.thermal's two halves. */
+/* Sensor readings: range, the jump, levels, and the copy a reader of the device gets. */
 static void
 scenario_sensors(void)
 {
 	struct kern_thermal_sensor *sensors[20];
 	struct kern_thermal_sensor_info info;
-	struct thermal_entry entries[16];
-	unsigned filled;
 	unsigned index;
 	char name[64];
 
@@ -1171,26 +1152,21 @@ scenario_sensors(void)
 	kern_thermal_sensor_levels(sensors[1], 0, 105000);
 	kern_thermal_sensor_update(sensors[1], 50000, true);
 
-	/* hw.thermal: two halves of sixteen. */
-	CHECK(test_sysctl_count == 2U);
-	CHECK(test_sysctl_read[0](test_sysctl_context[0], entries, 16, &filled) == 0);
-	CHECK(filled == 16U);
-	CHECK(strcmp(entries[0].name, "\\_SB_.PC00.TCPU") == 0);
-	CHECK(entries[0].kind == THERMAL_KIND_DEVICE);
-	CHECK(entries[0].flags == THERMAL_FLAG_CPU);
-	CHECK(entries[0].valid == (THERMAL_HAVE_TEMPERATURE | THERMAL_HAVE_PASSIVE));
-	CHECK(entries[0].milli_celsius == 77000);
-	CHECK(entries[0].passive_milli_celsius == 110000);
-	CHECK(entries[0].time_ns != 0U);
-	CHECK(entries[1].kind == THERMAL_KIND_ZONE);
-	CHECK(entries[1].valid == (THERMAL_HAVE_TEMPERATURE | THERMAL_HAVE_CRITICAL));
-	CHECK(entries[1].critical_milli_celsius == 105000);
-	CHECK(entries[2].valid == 0U && entries[2].time_ns == 0U);
-	CHECK(test_sysctl_read[1](test_sysctl_context[1], entries, 16, &filled) == 0);
-	CHECK(filled == 4U);
-	CHECK(strncmp(entries[0].name, "z16-sensor-with-a-name-longer-t", 32) == 0);
-	CHECK(test_sysctl_read[0](test_sysctl_context[0], entries, 3, &filled) == 0);
-	CHECK(filled == 3U);
+	/* The copy: kind, flags, the reading and the levels each sensor has, every one of the twenty. */
+	CHECK(kern_thermal_sensor_get(0, &info) == 0);
+	CHECK(info.kind == KERN_THERMAL_KIND_DEVICE);
+	CHECK(info.flags == KERN_THERMAL_SENSOR_CPU);
+	CHECK(info.millicelsius == 77000 && info.passive == 110000);
+	CHECK(info.time_ns != 0U);
+	CHECK(kern_thermal_sensor_get(1, &info) == 0);
+	CHECK(info.kind == KERN_THERMAL_KIND_ZONE && info.flags == 0U);
+	CHECK((info.reading & (KERN_THERMAL_READING_VALID | KERN_THERMAL_READING_CRITICAL)) ==
+	      (KERN_THERMAL_READING_VALID | KERN_THERMAL_READING_CRITICAL));
+	CHECK(info.critical == 105000);
+	CHECK(kern_thermal_sensor_get(2, &info) == 0);
+	CHECK(info.reading == 0U && info.time_ns == 0U);
+	CHECK(kern_thermal_sensor_get(19, &info) == 0);
+	CHECK(strncmp(info.name, "z19-sensor-with-a-name-longer-t", 32) == 0);
 }
 
 /* The guard: CRITICAL of a zone, PASSIVE of the processor, with hysteresis; stale and resume. */

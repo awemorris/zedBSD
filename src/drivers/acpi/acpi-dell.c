@@ -265,13 +265,17 @@ drv_acpi_dell_attach(void)
 	error = drv_acpi_wmi_find(DELL_GUID_DESCRIPTOR, 0, &descriptor);
 	if (error != 0)
 		return ENODEV;
+
+	/* Keeps the descriptor, and starts with no thermal mode known. */
 	dell.descriptor = descriptor;
 	dell.mode = DRV_ACPI_DELL_MODE_NONE;
 
-	/* Probes every piece; those that failed are probed again from the poll. */
+	/* Names the pieces to probe; the SMM fan calls only in a kernel built with the boost. */
 	pieces = PIECE_DESCRIPTOR | PIECE_MODE | PIECE_FANS;
 	if (CONFIG_DRIVER_DELL_SMM_BOOST)
 		pieces |= PIECE_SMM;
+
+	/* Probes every piece; those that failed are probed again from the poll. */
 	pieces = dell_probe(pieces);
 	__atomic_store_n(&dell.pending, pieces, __ATOMIC_RELEASE);
 
@@ -312,13 +316,16 @@ dell_apply(
 	/* Answers "not yet" while the probe of the mode call is retried, and "nothing here" after. */
 	found = dell_found();
 	if ((found & PIECE_MODE) == 0U) {
+		/* Tells a probe that is still retried from one that gave up. */
 		pending = __atomic_load_n(&dell.pending, __ATOMIC_ACQUIRE);
 		if ((pending & (PIECE_DESCRIPTOR | PIECE_MODE)) != 0U)
 			return EAGAIN;
+
+		/* The mode call is not offered by this firmware. */
 		return EOPNOTSUPP;
 	}
 
-	/* FIRMWARE writes nothing. */
+	/* Picks the mode; FIRMWARE writes nothing. */
 	mode = drv_acpi_dell_mode_for(strategy);
 	if (mode == DRV_ACPI_DELL_MODE_NONE)
 		return 0;
@@ -332,6 +339,8 @@ dell_apply(
 	dell_smi_wait();
 	error = dell_mode_set(mode);
 	dell_smi_done();
+
+	/* Reports a mode the firmware did not take. */
 	if (error != 0)
 		return error;
 
@@ -348,7 +357,7 @@ dell_poll(
 
 	UNUSED_PARAMETER(context);
 
-	/* Nothing to probe, or the retries are spent. */
+	/* Returns when there is nothing to probe or the retries are spent. */
 	pending = __atomic_load_n(&dell.pending, __ATOMIC_ACQUIRE);
 	if (pending == 0U)
 		return;
@@ -470,18 +479,23 @@ dell_fan_boost(
 	/* The fan the context names. */
 	fan = context;
 
-	/* Refuses a machine without the SMM fan calls, and a level past the highest state. */
+	/* Refuses a machine without the SMM fan calls. */
 	found = dell_found();
 	if ((found & PIECE_SMM) == 0U)
 		return EOPNOTSUPP;
+
+	/* Refuses a level past the highest state. */
 	if (level > DRV_ACPI_DELL_FAN_STATE_HIGH)
 		return EINVAL;
 
 	/* A fan found not to hold a boost takes none. */
 	off = __atomic_load_n(&fan->boost_off, __ATOMIC_RELAXED);
 	if (off != 0U) {
+		/* Putting back needs nothing: the fan was never left raised. */
 		if (level == 0U)
 			return 0;
+
+		/* A raise is refused. */
 		return EOPNOTSUPP;
 	}
 
@@ -496,6 +510,8 @@ dell_fan_boost(
 	if (level == 0U) {
 		error = dell_fan_state_set(fan, fan->before);
 		dell_smi_done();
+
+		/* Refuses to boost the fan again when the state could not be put back. */
 		if (error != 0) {
 			dell_boost_refuse(fan, "could not be put back", error);
 			return error;
@@ -508,6 +524,7 @@ dell_fan_boost(
 
 	/* A fan not raised yet: reads the state the firmware chose. */
 	if (!fan->raised) {
+		/* Reads the state; a fan whose state cannot be read is boosted no more. */
 		error = dell_fan_state_get(fan, &state);
 		if (error != 0) {
 			dell_smi_done();
@@ -530,11 +547,15 @@ dell_fan_boost(
 	if (fan->before > target)
 		target = fan->before;
 
-	/* Sets it and reads it back. */
+	/* Sets it and, when it was set, reads it back. */
 	error = dell_fan_state_set(fan, target);
 	if (error == 0)
 		error = dell_fan_state_get(fan, &state);
+
+	/* Ends the change, which entered the SMM at most once a second. */
 	dell_smi_done();
+
+	/* Refuses to boost a fan whose state could not be set or read back. */
 	if (error != 0) {
 		dell_boost_refuse(fan, "state could not be set", error);
 		return error;
@@ -574,8 +595,12 @@ dell_probe(
 	failed = 0;
 	if ((pieces & PIECE_DESCRIPTOR) != 0U) {
 		error = dell_probe_descriptor();
+
+		/* Probes everything again once the descriptor can be read. */
 		if (error == EAGAIN)
 			return pieces;
+
+		/* Probes nothing when the descriptor is not Dell's. */
 		if (error != 0)
 			return 0;
 	}
@@ -646,12 +671,16 @@ dell_probe_descriptor(void)
 		return ENODEV;
 	}
 
-	/* Takes the signature and the largest buffer, then gives the answer back. */
+	/* Compares the signature with Dell's. */
 	compared = kern_memcmp(bytes, DESCRIPTOR_SIGNATURE, DESCRIPTOR_SIGNATURE_LENGTH);
+
+	/* Takes the largest buffer the WMI methods accept. */
 	room = (uint32_t)bytes[DESCRIPTOR_BUFFER_SIZE];
 	room |= (uint32_t)bytes[DESCRIPTOR_BUFFER_SIZE + 1U] << 8;
 	room |= (uint32_t)bytes[DESCRIPTOR_BUFFER_SIZE + 2U] << 16;
 	room |= (uint32_t)bytes[DESCRIPTOR_BUFFER_SIZE + 3U] << 24;
+
+	/* Gives the answer back. */
 	drv_acpi_object_release(result);
 
 	/* Refuses another vendor's descriptor. */
@@ -664,8 +693,10 @@ dell_probe_descriptor(void)
 		return ENODEV;
 	}
 
-	/* Succeeded: the descriptor is Dell's. */
+	/* Publishes the descriptor as found. */
 	dell_found_add(PIECE_DESCRIPTOR);
+
+	/* Succeeded: the descriptor is Dell's. */
 	return 0;
 }
 
@@ -678,6 +709,7 @@ static int
 dell_probe_mode(void)
 {
 	const struct drv_acpi_wmi_block *block;
+	const char *name;
 	uint32_t mode;
 	int error;
 
@@ -703,7 +735,8 @@ dell_probe_mode(void)
 	if (mode == DRV_ACPI_DELL_MODE_NONE) {
 		drv_acpi_os_log("dell: thermal mode not known\n");
 	} else {
-		drv_acpi_os_log("dell: thermal mode %s\n", drv_acpi_dell_mode_name(mode));
+		name = drv_acpi_dell_mode_name(mode);
+		drv_acpi_os_log("dell: thermal mode %s\n", name);
 	}
 
 	/* Succeeded: the mode call can be made. */
@@ -731,6 +764,8 @@ dell_probe_fans(void)
 	error = drv_acpi_wmi_find(DELL_GUID_DDV, 0, &block);
 	if (error != 0)
 		return ENOENT;
+
+	/* Keeps the block for the calls that follow. */
 	dell.ddv = block;
 
 	/* Reads the interface's version. */
@@ -744,6 +779,7 @@ dell_probe_fans(void)
 	/* Takes the version from the answer, then gives the answer back. */
 	version = 0;
 	if (result != NULL) {
+		/* Takes the version only from an integer. */
 		type = drv_acpi_object_type(result);
 		if (type == DRV_ACPI_TYPE_INTEGER)
 			version = drv_acpi_object_integer(result);
@@ -760,6 +796,8 @@ dell_probe_fans(void)
 	error = dell_fans_read(fans, &count);
 	if (error == EAGAIN)
 		return EAGAIN;
+
+	/* Refuses fan information that the decoder refused. */
 	if (error != 0) {
 		drv_acpi_os_log("dell: the DDV fan information is refused (error %d)\n", error);
 		return ENOENT;
@@ -784,9 +822,11 @@ dell_probe_fans(void)
 		dell.fan_count++;
 	}
 
-	/* Succeeded: the fans are read from now on. */
+	/* Publishes the fans as found, and says how many the core reads. */
 	dell_found_add(PIECE_FANS);
 	drv_acpi_os_log("dell: %u fans, fan 0 at %u rpm\n", dell.fan_count, (unsigned)fans[0].rpm);
+
+	/* Succeeded: the fans are read from now on. */
 	return 0;
 }
 
@@ -806,6 +846,8 @@ dell_probe_smm(void)
 	error = drv_acpi_wmi_attach_path(DELL_SMM_DEVICE);
 	if (error == ENOENT || error == ENODEV)
 		return ENOENT;
+
+	/* Probes again later when the device could not be read. */
 	if (error != 0) {
 		drv_acpi_os_log("dell: the SMM call device could not be read (error %d)\n", error);
 		return EAGAIN;
@@ -816,9 +858,11 @@ dell_probe_smm(void)
 	if (error != 0)
 		return ENOENT;
 
-	/* Succeeded: the fans' boost is offered. */
+	/* Keeps the block and publishes the SMM fan calls as found. */
 	dell.smm = block;
 	dell_found_add(PIECE_SMM);
+
+	/* Succeeded: the fans' boost is offered. */
 	return 0;
 }
 #endif
@@ -858,6 +902,8 @@ dell_fans_read(
 	error = drv_acpi_evaluate_integer(NULL, DELL_EC_READY, &ready);
 	if (error != 0 && error != ENOENT)
 		return EAGAIN;
+
+	/* Refuses to read while the firmware says the controller is not ready. */
 	if (ready == 0U)
 		return EAGAIN;
 
@@ -866,6 +912,8 @@ dell_fans_read(
 	error = dell_ddv_call(DDV_FANS, &result);
 	if (error != 0)
 		return EAGAIN;
+
+	/* Refuses a call that answered nothing. */
 	if (result == NULL)
 		return EINVAL;
 
@@ -908,6 +956,8 @@ dell_fans_read(
 	/* Takes the first fans of a list longer than the provider keeps. */
 	if (error == E2BIG)
 		error = 0;
+
+	/* Reports information the decoder refused. */
 	if (error != 0)
 		return error;
 
@@ -972,6 +1022,7 @@ dell_mode_set(
 	struct drv_acpi_object *result;
 	const uint8_t *answer;
 	enum drv_acpi_type type;
+	const char *name;
 	uint32_t mirrored;
 	uint32_t status;
 	size_t size;
@@ -980,7 +1031,7 @@ dell_mode_set(
 	/* Forgets the mode until the firmware confirms the new one. */
 	__atomic_store_n(&dell.mode, DRV_ACPI_DELL_MODE_NONE, __ATOMIC_RELAXED);
 
-	/* Makes the call. */
+	/* Makes the call, with the buffer that asks for the mode. */
 	drv_acpi_dell_mode_request(mode, request);
 	result = NULL;
 	error = drv_acpi_wmi_method(dell.smbios, 0, SMBIOS_METHOD, request, sizeof(request), &result);
@@ -993,6 +1044,7 @@ dell_mode_set(
 	error = EINVAL;
 	status = 0;
 	if (result != NULL) {
+		/* Checks the answer only when it is a buffer. */
 		type = drv_acpi_object_type(result);
 		if (type == DRV_ACPI_TYPE_BUFFER) {
 			answer = drv_acpi_object_buffer(result, &size);
@@ -1019,8 +1071,10 @@ dell_mode_set(
 	/* Remembers the mode, and says so when the firmware's variable shows another. */
 	__atomic_store_n(&dell.mode, mode, __ATOMIC_RELAXED);
 	mirrored = dell_mode_read();
-	if (mirrored != mode)
-		drv_acpi_os_log("dell: thermal mode %s set, the firmware shows %u\n", drv_acpi_dell_mode_name(mode), (unsigned)mirrored);
+	if (mirrored != mode) {
+		name = drv_acpi_dell_mode_name(mode);
+		drv_acpi_os_log("dell: thermal mode %s set, the firmware shows %u\n", name, (unsigned)mirrored);
+	}
 
 	/* Succeeded: the firmware took the mode. */
 	return 0;
@@ -1045,6 +1099,8 @@ dell_smm_call(
 	error = drv_acpi_wmi_method(dell.smm, 0, SMM_METHOD, request, DRV_ACPI_DELL_SMM_SIZE, &result);
 	if (error != 0)
 		return EIO;
+
+	/* Refuses a call that answered nothing. */
 	if (result == NULL)
 		return EIO;
 
@@ -1056,8 +1112,10 @@ dell_smm_call(
 		error = drv_acpi_dell_smm_answer(answer, size, request, eax);
 	}
 
-	/* Gives the answer back, and reports a call that did not run or was refused. */
+	/* Gives the answer back. */
 	drv_acpi_object_release(result);
+
+	/* Reports a call that did not run or was refused. */
 	if (error != 0)
 		return EIO;
 
@@ -1080,6 +1138,8 @@ dell_fan_state_get(
 	error = dell_smm_call(request, &eax);
 	if (error != 0)
 		return error;
+
+	/* Takes the state out of EAX. */
 	*state = eax & 0xffU;
 
 	/* Succeeded: state holds the fan's state. */
@@ -1120,11 +1180,13 @@ dell_boost_publish(
 	uint32_t boosted;
 	uint32_t rpm;
 
-	/* Keeps the speed before the change and whether it is a raise. */
+	/* Keeps whether the fan is raised, as the flag the poll thread watches for. */
 	fan->raised = raised;
 	boosted = 0;
 	if (raised)
 		boosted = 1;
+
+	/* Keeps the speed before the change, which the raise is watched against. */
 	rpm = __atomic_load_n(&fan->last_rpm, __ATOMIC_RELAXED);
 	__atomic_store_n(&fan->rpm_before, rpm, __ATOMIC_RELAXED);
 	__atomic_store_n(&fan->boosted, boosted, __ATOMIC_RELAXED);
@@ -1144,6 +1206,8 @@ dell_boost_refuse(
 	/* Marks the fan; its reads offer no boost from now on. */
 	__atomic_store_n(&fan->boost_off, 1U, __ATOMIC_RELAXED);
 	fan->raised = false;
+
+	/* Says why the fan is boosted no more. */
 	drv_acpi_os_log("dell: fan %u: the SMM fan %s (error %d), no boost\n", fan->index, why, error);
 }
 
@@ -1208,8 +1272,12 @@ dell_smi_wait(void)
 	/* Sleeps out what is left of the second since the last call. */
 	now = drv_acpi_os_timer();
 	passed = now - dell.last_smi;
+
+	/* Returns when the second has passed already. */
 	if (passed >= SMI_SPACING)
 		return;
+
+	/* Sleeps the rest of the second, rounded up to a millisecond. */
 	left = (SMI_SPACING - passed) / (SMI_SPACING / SMI_SPACING_MS) + 1U;
 	drv_acpi_os_log("dell: waits %u ms before the next firmware call\n", (unsigned)left);
 	drv_acpi_os_sleep(left);
@@ -1221,10 +1289,12 @@ dell_smi_done(void)
 {
 	uint64_t now;
 
-	/* Stamps the time; a clock that reads 0 still counts as a call. */
+	/* Reads the time; a clock that reads 0 still counts as a call. */
 	now = drv_acpi_os_timer();
 	if (now == 0U)
 		now = 1U;
+
+	/* Stamps the call. */
 	dell.last_smi = now;
 }
 
