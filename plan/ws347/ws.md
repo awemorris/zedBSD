@@ -18,6 +18,7 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 
 ## ユーザーの決定（要点）
 
+- 2026-11-13 ユーザーから、次の趣旨の決定を受けた: (1) 割り込みの有無で polling にする事と、DMA が coherent でない時に uncached で使う事は driver の基本の機能なので build の option にしない（`CONFIG_GHCI_POLL`・`CONFIG_GHCI_HOST_UNCACHED` を外し、検出だけで決める。mk の案は取り下げ）。(2) clipper の無い GPU（CLIP_POLY 0）は何も言わずに欠けてよい（minimal は実用ではない。software の clip は作らない）。両方 [p008](phase008/phase.md) で P4 が直す。
 - 2026-11-13 ユーザーから、次の趣旨の決定を受けた: blitter（CAP_BLT）が無い時は、Vulkan の転送だけでなく表示の写しも shader で行う（[p008](phase008/phase.md)）。
 - 2026-11-11 ユーザーから、次の趣旨の指示を受けた:
   - Amaterrace GPU の試験とデバッグを VF2 で行う WS を立てる。VF2 には PCIe で KC705 がつながっている。
