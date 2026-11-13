@@ -1,0 +1,47 @@
+diff --git a/src/kern/clock.c b/src/kern/clock.c
+index b45077ba28..afe3b423a8 100644
+--- a/src/kern/clock.c
++++ b/src/kern/clock.c
+@@ -39,6 +39,7 @@
+ #include "kern/usync.h"
+ #include "kern/waitq.h"
+ #include "kern/lock.h"
++#include "kern/klog.h"
+ 
+ #include <uapi/errno.h>
+ #include <hal/hal.h>
+@@ -103,6 +104,9 @@ static volatile uint64_t global_next = UINT64_MAX;
+ static volatile unsigned tick_lowered[HAL_CPU_MAX];
+ 
+ static volatile uint32_t cpu_notify_count[HAL_CPU_MAX];
++static volatile uint64_t tickdiag_count[64];
++static uint64_t tickdiag_last[64];
++static uint64_t tickdiag_next = 10000U;
+ static struct kern_timespec realtime_offset = {
+ 	KERN_REALTIME_EPOCH_2026, 0
+ };
+@@ -170,6 +174,24 @@ kernel_timer_handler(
+ 	/* The time now. */
+ 	now = clock_ticks();
+ 
++	/* Test only: each CPU's interrupts, logged by CPU 0 every 10 s. */
++	if (cpu < 64U)
++		(void)atomic_u64_fetch_add_relaxed(&tickdiag_count[cpu], 1U);
++	if (cpu == 0 && now >= tickdiag_next) {
++		unsigned i;
++
++		for (i = 0; i < hal_cpu_count() && i < 64U; i++) {
++			uint64_t count = atomic_u64_load_acquire(&tickdiag_count[i]);
++
++			kern_logf("tickdiag: t=%llu cpu %u ticks %llu lowered %u\n",
++			    (unsigned long long)now, i,
++			    (unsigned long long)(count - tickdiag_last[i]),
++			    (unsigned)tick_lowered[i]);
++			tickdiag_last[i] = count;
++		}
++		tickdiag_next = now + 10000U;
++	}
++
+ 	/*
+ 	 * CPU 0 starts the nearest deadline of its timers over, then lowers it
+ 	 * with the process timers and, in the scheduler, ITIMER_REAL.  A timer
