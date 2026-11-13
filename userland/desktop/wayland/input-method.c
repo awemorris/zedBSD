@@ -304,6 +304,12 @@ kwl_ime_tick(
 		printf("KWL IME bypass after_ms=%u\n", IME_ANSWER_MS);
 	}
 
+	/* The start again and the answer's time are due on the clock (a death wakes the loop with SIGCHLD). */
+	if (ime->client == NULL && !ime->given_up && ime->restart_ms != 0U)
+		kwl_due(server, ime->restart_ms);
+	if (ime->watching)
+		kwl_due(server, ime->watch_ms + IME_ANSWER_MS);
+
 	/* The lock screen and App Home take the keys; the input method follows them. */
 	kwl_ime_update(server, NULL);
 }

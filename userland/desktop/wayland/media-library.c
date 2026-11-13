@@ -16,6 +16,9 @@
 /* Matches the backend's bounded helper queue; results remain owned during backpressure. */
 #define MEDIA_PENDING_MAX 16U
 
+/* The helpers' pipes one pass of the event loop waits on at most (more come back on the loop's own deadline). */
+#define MEDIA_WATCH_MAX 4U
+
 /* One client request keeps its completed snapshot until the event queue accepts it. */
 struct media_pending {
 	struct kwl_object *object;
@@ -36,11 +39,21 @@ static struct {
 	int opened;
 } media_state;
 
+/*
+ * The timer of the helpers' time limits: armed while a helper runs, for the
+ * second its limit passes (the pass it wakes lets the backend kill it).
+ * Kept apart from media_state, which the close clears, because an armed
+ * timer stays in the server's heap.  Readied by the first tick.
+ */
+static struct kwl_timer media_limit;
+
 static uint32_t media_word(const unsigned char *bytes, size_t offset);
 static int media_argument(const unsigned char *bytes, size_t size, const char **argument);
 static void media_answers(struct kwl_server *server);
 static void media_deliver(struct media_pending *pending);
 static void media_watchers(struct kwl_server *server);
+static void media_wait(struct kwl_server *server);
+static void media_limit_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Creates the media object version supported by the bound manager.
@@ -208,6 +221,9 @@ kwl_media_library_tick(
 	/* Completes pending operations before publishing the latest generation. */
 	media_answers(server);
 	media_watchers(server);
+
+	/* Helpers still running: the loop waits on their pipes, their ends and their limits. */
+	media_wait(server);
 }
 
 /*
@@ -415,4 +431,61 @@ media_watchers(
 				object->media_generation = media_state.generation;
 		}
 	}
+}
+
+/*
+ * Makes the event loop's next wait end for the running helpers: their
+ * pipes in the poll, their ends by SIGCHLD (which wakes the loop), and the
+ * earliest time limit on the timer.  Nothing when none runs.
+ */
+static void
+media_wait(
+	struct kwl_server *server)
+{
+	struct pollfd descriptors[MEDIA_WATCH_MAX];
+	size_t count;
+	size_t index;
+	long left;
+	uint64_t now;
+	int error;
+
+	/* The timer is readied once. */
+	if (media_limit.fire == NULL)
+		kwl_timer_init(&media_limit, "media", media_limit_fired);
+
+	/* The pipes and the limit of what runs now. */
+	count = kl_backend_media_poll(media_state.backend, descriptors, MEDIA_WATCH_MAX, &left);
+
+	/* Each pipe ends the next wait when it is ready. */
+	for (index = 0U; index < count && index < MEDIA_WATCH_MAX; index++)
+		kwl_watch(server, descriptors[index].fd, descriptors[index].events);
+
+	/* More pipes than one wait takes: the loop comes back soon for the rest. */
+	if (count > MEDIA_WATCH_MAX)
+		kwl_due_soon(server);
+
+	/* None runs: no limit to wait for. */
+	if (left < 0) {
+		kwl_timer_disarm(&server->timers, &media_limit);
+		return;
+	}
+
+	/* The earliest limit; without room in the timers, the loop's own deadline. */
+	now = kwl_milliseconds();
+	error = kwl_timer_arm(&server->timers, &media_limit, now + (uint64_t)left * 1000U);
+	if (error != 0)
+		kwl_due(server, now + (uint64_t)left * 1000U);
+}
+
+/*
+ * A helper's limit has passed: nothing to do here, since the pass the
+ * timer's wake brings lets the backend kill it (kwl_media_library_tick).
+ */
+static void
+media_limit_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	(void)context;
+	(void)timer;
 }

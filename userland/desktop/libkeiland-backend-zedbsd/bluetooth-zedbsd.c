@@ -257,6 +257,7 @@ struct bt_op {
 };
 
 static void bt_step(void *owner);
+static int bt_scan_may_start(const struct bt_follow *bluetooth);
 static size_t bt_poll_fill(void *owner, struct pollfd *descriptors, size_t capacity, int *timeout);
 static int bt_publish(void *owner);
 
@@ -709,18 +710,26 @@ bt_step(
 	}
 
 	/* A scan, while one is wanted and nothing stops it (Bluetooth off, a pairing, a request going on). */
-	if (bluetooth->scanning &&
+	if (bt_scan_may_start(bluetooth) && now >= bluetooth->scan_due_ms) {
+		error = bt_connect(&bluetooth->scan, "SCAN 6\n");
+		if (error != 0)
+			bluetooth->scan_due_ms = now + BT_SCAN_FAILED_MS;
+	}
+}
+
+/* Tells whether a scan is wanted and nothing stops it (Bluetooth off, a pairing, a request going on). */
+static int
+bt_scan_may_start(
+	const struct bt_follow *bluetooth)
+{
+	/* Wanted, not going on, and nothing holds it back. */
+	return bluetooth->scanning &&
 	    bluetooth->scan.socket < 0 &&
 	    bluetooth->state.reachable &&
 	    bluetooth->state.state == KL_BACKEND_BT_ON &&
 	    !bluetooth->state.pairing &&
 	    bluetooth->request.socket < 0 &&
-	    !bluetooth->waiting &&
-	    now >= bluetooth->scan_due_ms) {
-		error = bt_connect(&bluetooth->scan, "SCAN 6\n");
-		if (error != 0)
-			bluetooth->scan_due_ms = now + BT_SCAN_FAILED_MS;
-	}
+	    !bluetooth->waiting;
 }
 
 /* Gives the connections to wait for, and the wait until the next reading, agent or scan is due. */
@@ -750,10 +759,10 @@ bt_poll_fill(
 		due = bluetooth->due_ms;
 	if (bluetooth->agent.socket < 0 && bluetooth->state.reachable && bluetooth->agent_due_ms < due)
 		due = bluetooth->agent_due_ms;
-	if (bluetooth->scanning && bluetooth->scan.socket < 0 && bluetooth->scan_due_ms < due)
+	if (bt_scan_may_start(bluetooth) && bluetooth->scan_due_ms < due)
 		due = bluetooth->scan_due_ms;
 
-	/* Lowers the wait to what is due (a scan held back by something else is looked at each tick). */
+	/* Lowers the wait to what is due (a scan held back by something else waits for what lets it go, which comes on a connection or as an operation). */
 	if (due <= now) {
 		*timeout = 0;
 	} else if (due - now < (uint64_t)*timeout) {

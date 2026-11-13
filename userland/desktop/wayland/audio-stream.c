@@ -226,9 +226,9 @@ kwl_audio_tick(
 	struct kl_backend_audio_stream_report report;
 	struct audio_stream *stream;
 	unsigned index;
+	short events;
+	int descriptor;
 	int taken;
-
-	UNUSED_PARAMETER(server);
 
 	/* Each stream with a backend's stream, until nothing more came. */
 	for (index = 0U; index < AUDIO_SLOTS; index++) {
@@ -241,6 +241,15 @@ kwl_audio_tick(
 				break;
 			audio_take(stream, &report);
 		}
+
+		/* What brings its next reports wakes the loop; without a descriptor the loop looks again soon. */
+		if (stream->object == NULL || stream->backend == NULL)
+			continue;
+		descriptor = kl_backend_audio_stream_descriptor(stream->backend, &events);
+		if (descriptor >= 0)
+			kwl_watch(server, descriptor, events);
+		else if (descriptor == KL_BACKEND_AUDIO_STREAM_UNWAITED)
+			kwl_due_soon(server);
 	}
 
 	/* The pump threads of closed streams. */

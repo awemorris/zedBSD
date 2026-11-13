@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 struct file;
+struct filedesc;
 struct process;
 
 void
@@ -19,14 +20,18 @@ poll_init(void);
 void
 poll_notify(void);
 
-uint64_t
-poll_sequence(void);
+void
+poll_notify_object(
+	const void *object);
 
-int
-poll_wait(
-	uint64_t observed,
-	uint64_t deadline,
-	unsigned flags);
+void
+poll_wait_object(
+	const void *object);
+
+const void *
+poll_slot_key(
+	const struct filedesc *table,
+	int descriptor);
 
 int
 file_poll(

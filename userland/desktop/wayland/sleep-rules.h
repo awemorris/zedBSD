@@ -154,8 +154,13 @@ struct kwl_sleep {
 	uint32_t notified;
 	/* The last input the rules saw (kwl_sleep_input). */
 	uint64_t seen_input_ms;
-	/* The last tick a fullscreen window was in front: the time without input counts from it too (N7). */
+	/*
+	 * The last tick a fullscreen window was in front, or the tick that found
+	 * it gone: the time without input counts from it too (N7); and whether
+	 * one was in front at the last tick.
+	 */
 	uint64_t inhibited_ms;
+	unsigned inhibiting;
 };
 
 uint64_t kwl_sleep_idle_limit_ms(unsigned source, int ac_minutes, int battery_minutes);

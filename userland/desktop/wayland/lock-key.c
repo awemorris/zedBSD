@@ -127,6 +127,25 @@ kwl_key_owner_due(
 }
 
 /*
+ * Tells when KEYOWNER may be asked next on the clock (kwl_milliseconds'
+ * clock): the second after the last one, while it is wanted and nothing
+ * else holds it back; UINT64_MAX when the clock does not hold it.
+ */
+uint64_t
+kwl_key_owner_next(
+	const struct kwl_key_mode *mode)
+{
+	/* Not wanted, under way, or after an attempt's answer. */
+	if (!mode->owner_wanted || mode->owner_asked || kwl_key_attempting(mode))
+		return UINT64_MAX;
+
+	/* A second after the last one. */
+	if (mode->owner_ms == 0U)
+		return 0U;
+	return mode->owner_ms + KWL_KEY_OWNER_MS;
+}
+
+/*
  * Notes KEYOWNER was asked (error 0), refused for a busy backend (EBUSY:
  * asked again later) or could not be asked (another error: not again
  * until a key moves).
@@ -344,6 +363,22 @@ kwl_key_tick(
 	mode->granted = 0U;
 	mode->step = KWL_KEY_OFF;
 	return KWL_KEY_GRANTED;
+}
+
+/*
+ * Tells when a grant held back for "Checking" is due (kwl_milliseconds'
+ * clock), or UINT64_MAX when none is held back.
+ */
+uint64_t
+kwl_key_next(
+	const struct kwl_key_mode *mode)
+{
+	/* Nothing held back. */
+	if (!mode->granted)
+		return UINT64_MAX;
+
+	/* Its time. */
+	return mode->checking_ms + KWL_KEY_CHECKING_MS;
 }
 
 /* Takes "Try again": the owner's step again (KWL_KEY_ENTER), or KWL_KEY_NOTHING when nothing was to try again. */

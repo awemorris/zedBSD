@@ -231,6 +231,14 @@ kwl_sysmon_tick(
 		sysmon_scan(server);
 	}
 
+	/*
+	 * While objects are there, they are counted again now and then (a
+	 * client that goes takes its objects without a request); without any,
+	 * a new one asks for the count itself.
+	 */
+	if (sysmon_state.subscribers != 0U)
+		kwl_due(server, sysmon_state.scanned_ms + SYSMON_SCAN_MS);
+
 	/* The next sample, at the period, once the last is taken. */
 	if (sysmon_state.running &&
 	    !sysmon_state.sampling &&
@@ -238,6 +246,8 @@ kwl_sysmon_tick(
 		sysmon_state.next_ms = now + sysmon_state.period_ms;
 		sysmon_give(server, 0U);
 	}
+	if (sysmon_state.running && !sysmon_state.sampling)
+		kwl_due(server, sysmon_state.next_ms);
 }
 
 /*

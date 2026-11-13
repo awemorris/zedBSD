@@ -470,8 +470,10 @@ kwl_cursor_plane_update(
 	fixed = plane_fixed(server, image);
 	if (!fixed) {
 		shown_image = plane_copy(server, plane, image);
-		if (shown_image == NULL)
+		if (shown_image == NULL) {
+			/* The cursor thread wakes the event loop when it lets a copy go. */
 			return;
+		}
 	}
 
 	/* The box shows it from the cursor thread's next look. */
@@ -853,9 +855,17 @@ plane_copy(
 		break;
 	}
 
+	/*
+	 * Both in use: the cursor thread wakes the event loop when it lets go
+	 * of a copy, and that pass writes it.
+	 */
+	server->cursor_box.copy_wanted = 0U;
+	if (chosen == KWL_CURSOR_COPIES)
+		server->cursor_box.copy_wanted = 1U;
+
 	pthread_mutex_unlock(&server->cursor_box.lock);
 
-	/* Both are in use: the next pass. */
+	/* Both are in use: the pass after the cursor thread's wake. */
 	if (chosen == KWL_CURSOR_COPIES)
 		return NULL;
 

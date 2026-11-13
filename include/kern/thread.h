@@ -21,6 +21,7 @@
 #include <uapi/types.h>
 #include <stdint.h>
 
+struct poll_waiter;
 struct process;
 struct ucred;
 
@@ -178,6 +179,13 @@ struct thread {
 	uint64_t syscall_wait_deadline;
 
 	unsigned syscall_wait_deadline_valid;
+
+	/*
+	 * The poll this thread is scanning for, while it scans: the objects
+	 * whose changes are to wake it (poll_wait_object).  Only the thread
+	 * itself reads and writes it.
+	 */
+	struct poll_waiter *poll_waiter;
 
 	/*
 	 * Set when an interruptible kernel wait unwinds solely to acknowledge a

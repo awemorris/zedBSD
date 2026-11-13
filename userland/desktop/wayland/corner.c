@@ -467,6 +467,12 @@ kwl_corner_tick(
 		corner.launching = 0;
 		printf("KWL CORNER launch expired\n");
 	}
+
+	/* A contact and the hint are looked at closely while they last; the start of Notes on the clock. */
+	if (corner.contact.active || corner.settling)
+		kwl_due_soon(server);
+	if (corner.launching)
+		kwl_due(server, corner.launch_ms + CORNER_LAUNCH_WAIT_MS + 1U);
 }
 
 /*

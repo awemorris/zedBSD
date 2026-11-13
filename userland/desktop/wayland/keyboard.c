@@ -1060,12 +1060,18 @@ kwl_keyboard_tick(
 	unfinished = keyboard_slide_unfinished(now);
 	if (now - keyboard.slide_ms < KEYBOARD_SLIDE_MS) {
 		server->dirty = 1;
+		kwl_due_soon(server);
 	} else if (unfinished) {
 		server->dirty = 1;
+		kwl_due_soon(server);
 	} else if (keyboard.leaving != PANEL_NONE) {
 		keyboard.leaving = PANEL_NONE;
 		server->dirty = 1;
 	}
+
+	/* A contact and the windows' move are looked at closely while they last. */
+	if (keyboard.contact.active || keyboard.moving)
+		kwl_due_soon(server);
 
 	/* A reading whose field no longer has the keyboard (disabled, or another field) is gone with its preedit. */
 	input = kwl_text_input_current(server);
@@ -1099,13 +1105,16 @@ kwl_keyboard_tick(
 		return;
 	}
 
-	/* The handwriting's ink is recognized a while after its last stroke. */
+	/* The handwriting's ink is recognized a while after its last stroke (on the clock). */
 	if (keyboard.hand &&
 	    !keyboard.writing &&
 	    !keyboard.recognized &&
-	    keyboard_ink.count > 0U &&
-	    now - keyboard.stroke_end_ms >= KEYBOARD_HAND_WAIT_MS)
-		keyboard_hand_recognize(server);
+	    keyboard_ink.count > 0U) {
+		if (now - keyboard.stroke_end_ms >= KEYBOARD_HAND_WAIT_MS)
+			keyboard_hand_recognize(server);
+		else
+			kwl_due(server, keyboard.stroke_end_ms + KEYBOARD_HAND_WAIT_MS);
+	}
 
 	/* The open panel's place for the screen's size now. */
 	keyboard_place(server, keyboard.open, rect);

@@ -619,3 +619,30 @@ seat_disable_finish(
 	if (error != 0)
 		seat_failed = 1;
 }
+
+/*
+ * Tells whether the backend wakes the compositor by itself: no, FreeBSD's
+ * areas (the bus, the sound card's controls, the wireless daemon, the
+ * playback pumps) are read without waiting each pass.
+ */
+int
+kl_backend_wakes(
+	const struct kl_backend *backend)
+{
+	/* The compositor comes back soon instead. */
+	(void)backend;
+	return 0;
+}
+
+/*
+ * Tells whether the backend tells every input device that comes or goes:
+ * no, FreeBSD's devices are found by the compositor's own scans.
+ */
+int
+kl_backend_input_events(
+	const struct kl_backend *backend)
+{
+	/* The compositor scans on its own. */
+	(void)backend;
+	return 0;
+}

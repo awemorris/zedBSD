@@ -854,7 +854,7 @@ drv_input_device_unregister(
 
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 
-	poll_notify();
+	poll_notify_object(device);
 
 	/* The desktop hears the device go. */
 	post_device_event(device, KERN_SYSTEM_EVENT_REMOVE);
@@ -950,7 +950,7 @@ drv_input_device_emit_at(
 
 	/* Handles the published condition. */
 	if (published)
-		poll_notify();
+		poll_notify_object(device);
 }
 
 /*
@@ -1085,7 +1085,7 @@ drv_input_device_emit_key_event(
 
 	/* Handles the published condition. */
 	if (published)
-		poll_notify();
+		poll_notify_object(device);
 }
 
 /*
@@ -2059,6 +2059,9 @@ input_poll(
 		return 0;
 	}
 
+	/* The device's changes wake the poll. */
+	poll_wait_object(device);
+
 	irq = spin_lock_irqsave(&device->lock);
 
 	/* Checks the drv input queue readable result. */
@@ -2461,7 +2464,7 @@ input_ioctl(
 
 	/* Checks the operation status. */
 	if (error == 0)
-		poll_notify();
+		poll_notify_object(device);
 
 	/* Reports the failure. */
 	if (error != 0)
@@ -2621,7 +2624,7 @@ input_device_resync_end(
 
 	/* Handles the published condition. */
 	if (published)
-		poll_notify();
+		poll_notify_object(device);
 }
 
 /* Tries to retain an input generation across concurrent terminal removal. */

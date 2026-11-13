@@ -120,10 +120,20 @@ kwl_input_scan(
 	/* The next rescan is due one period from now. */
 	server->input_scan_time = kwl_milliseconds();
 
-	/* The device I/O thread opens them; a finding under way already will do. */
+	/* The device I/O thread opens them. */
 	error = kwl_io_input_find(server);
-	if (error == 0 || error == EBUSY)
+	if (error == 0)
 		return;
+
+	/*
+	 * A finding under way began before what asked for this scan: the scan
+	 * stays asked, and the pass that takes that finding (its end wakes the
+	 * event loop) asks again.
+	 */
+	if (error == EBUSY) {
+		server->input_scan_time = 0U;
+		return;
+	}
 
 	/* Without the thread (or memory for its job) the backend finds, opens and offers the devices here. */
 	kl_backend_input_scan(server->backend);

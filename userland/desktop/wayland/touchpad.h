@@ -226,6 +226,7 @@ void kwl_touchpad_set_down(struct kwl_touchpad *pad, int32_t on);
 void kwl_touchpad_event(struct kwl_touchpad *pad, uint16_t type, uint16_t code, int32_t value);
 void kwl_touchpad_frame(struct kwl_touchpad *pad, uint64_t now_ms, struct kwl_touchpad_actions *actions);
 void kwl_touchpad_tick(struct kwl_touchpad *pad, uint64_t now_ms, struct kwl_touchpad_actions *actions);
+uint64_t kwl_touchpad_due(const struct kwl_touchpad *pad);
 void kwl_touchpad_release_all(struct kwl_touchpad *pad, struct kwl_touchpad_actions *actions);
 
 #endif

@@ -819,10 +819,12 @@ desktop_start(
 	if (desk.pid > 0 || desk.starting || desk.limited)
 		return;
 
-	/* Not before two seconds after the last one ended. */
+	/* Not before two seconds after the last one ended (the loop comes back then). */
 	now = kwl_milliseconds();
-	if (desk.gone_ms != 0U && now - desk.gone_ms < DESKTOP_RESTART_MS)
+	if (desk.gone_ms != 0U && now - desk.gone_ms < DESKTOP_RESTART_MS) {
+		kwl_due(server, desk.gone_ms + DESKTOP_RESTART_MS);
 		return;
+	}
 
 	/* A new minute of starts, or one more in this minute; too many stop the starts. */
 	if (desk.starts == 0U || now - desk.starts_ms >= DESKTOP_STARTS_MS) {

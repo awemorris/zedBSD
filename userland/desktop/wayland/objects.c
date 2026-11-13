@@ -63,6 +63,7 @@ static struct kwl_server *cleanup_retire_server;
 static void object_free(struct kwl_object *object);
 static void object_release(struct kwl_server *server, struct kwl_object *object);
 static void object_retire(struct kwl_server *server, struct kwl_object *object);
+static void retire_due_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Finds a live identity only within its originating client namespace.
@@ -776,6 +777,105 @@ kwl_retire_ready(
 	return 1;
 }
 
+/*
+ * Gives the earliest time at which a gone client's buffer may be released
+ * when nothing but the time changes (kwl_retire_ready would then say 1),
+ * or UINT64_MAX when none waits or the list waits for the frame in flight,
+ * whose completion is an event of its own.
+ */
+uint64_t
+kwl_retire_due(
+	const struct kwl_server *server)
+{
+	uint64_t since;
+	uint64_t starve;
+	uint64_t quiet;
+	uint64_t due;
+
+	/* Nothing waits. */
+	if (server->retiring == NULL)
+		return UINT64_MAX;
+
+	/* A frame in flight finishes first: its completion is looked at, not the clock. */
+	if (server->compose != NULL && server->compose->in_flight)
+		return UINT64_MAX;
+
+	/* The list's limit, counted from its last release (or from its start). */
+	since = server->retire_last_ms;
+	if (since == 0U)
+		since = server->retire_started_ms;
+	starve = since + RETIRE_STARVE_MS;
+
+	/*
+	 * Nothing to draw: the input's quiet or the limit, whichever comes
+	 * first; something to draw holds the release until the limit (its
+	 * drawing is an event of its own that may end the hold sooner).
+	 */
+	due = starve;
+	quiet = server->lock_input_ms + RETIRE_INPUT_QUIET_MS;
+	if (server->dirty == 0U && quiet < starve)
+		due = quiet;
+
+	/* Never before the last release's own time has passed. */
+	if (due < server->retire_next_ms)
+		due = server->retire_next_ms;
+
+	/* Reports the earliest time of a release. */
+	return due;
+}
+
+/*
+ * Readies the timer of the gone clients' releases (once, with the
+ * server's timers).
+ */
+void
+kwl_retire_init(
+	struct kwl_server *server)
+{
+	/* Not armed until a list waits for a time. */
+	kwl_timer_init(&server->retire_timer, "retire", retire_due_fired);
+}
+
+/*
+ * Paces the gone clients' releases at the end of a pass of the event
+ * loop: when another may go at once, the loop wakes itself for one more
+ * pass (which looks at the input first); when one may go only at a time
+ * to come, the timer is armed for it; otherwise (the list empty, or a
+ * frame in flight whose completion wakes the loop) nothing waits on the
+ * clock.  The loop never wakes itself while no release may go, which
+ * would keep it from sleeping.
+ */
+void
+kwl_retire_pace(
+	struct kwl_server *server)
+{
+	uint64_t now;
+	uint64_t due;
+	int ready;
+	int error;
+
+	/* One may go now: the next pass releases it. */
+	now = kwl_milliseconds();
+	ready = kwl_retire_ready(server, now);
+	if (ready) {
+		kwl_timer_disarm(&server->timers, &server->retire_timer);
+		kwl_thread_wake(server->wake[1]);
+		return;
+	}
+
+	/* Nothing waits for a time. */
+	due = kwl_retire_due(server);
+	if (due == UINT64_MAX) {
+		kwl_timer_disarm(&server->timers, &server->retire_timer);
+		return;
+	}
+
+	/* The timer wakes the loop when one may go; without room, the loop's own deadline does. */
+	error = kwl_timer_arm(&server->timers, &server->retire_timer, due);
+	if (error != 0)
+		kwl_due(server, due);
+}
+
 /* Releases every buffer still waiting in the retiring list (before the Vulkan device goes). */
 void
 kwl_retire_flush(
@@ -902,3 +1002,15 @@ object_retire(
 	server->retiring_count++;
 }
 
+/*
+ * The retire timer is due: nothing to do here, since the pass its wake
+ * brings releases a buffer at its end (kwl_retire_pace) after the input.
+ */
+static void
+retire_due_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	(void)context;
+	(void)timer;
+}

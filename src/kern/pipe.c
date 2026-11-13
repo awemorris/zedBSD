@@ -231,7 +231,7 @@ pipe_read_file(
 		}
 
 		waitq_wake_all(&pipe->write_waitq);
-		poll_notify();
+		poll_notify_object(pipe);
 
 		/* Reports what was read, or end of file without writers. */
 		if (done != 0 || pipe->writers == 0) {
@@ -324,7 +324,7 @@ pipe_write_file(
 		}
 
 		waitq_wake_all(&pipe->read_waitq);
-		poll_notify();
+		poll_notify_object(pipe);
 
 		/* Reports a complete write. */
 		if (done == length) {
@@ -377,7 +377,7 @@ pipe_close_file(
 		if (pipe->readers != 0)
 			pipe->readers--;
 		waitq_wake_all(&pipe->write_waitq);
-		poll_notify();
+		poll_notify_object(pipe);
 	}
 
 	/* Retires the writer side of the file. */
@@ -386,7 +386,7 @@ pipe_close_file(
 		if (pipe->writers != 0)
 			pipe->writers--;
 		waitq_wake_all(&pipe->read_waitq);
-		poll_notify();
+		poll_notify_object(pipe);
 	}
 
 	/* Empties the ring once nobody is left on either side. */
@@ -429,6 +429,9 @@ pipe_poll_file(
 	/* Rejects a missing pipe or result. */
 	if (pipe == NULL || revents == NULL)
 		return EINVAL;
+
+	/* The pipe's changes wake the poll. */
+	poll_wait_object(pipe);
 
 	irq = spin_lock_irqsave(&pipe->lock);
 
@@ -569,7 +572,7 @@ fifo_open_file(
 
 	spin_unlock_irqrestore(&pipe->lock, irq);
 
-	poll_notify();
+	poll_notify_object(pipe);
 
 	/* Reports the opened FIFO. */
 	return 0;
@@ -588,7 +591,7 @@ fail_locked:
 
 	file->f_data = NULL;
 	pipe_release(pipe);
-	poll_notify();
+	poll_notify_object(pipe);
 
 	/* Reports the failed open. */
 	if (error != 0)

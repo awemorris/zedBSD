@@ -27,6 +27,7 @@
 #ifndef KL_BACKEND_H
 #define KL_BACKEND_H
 
+#include <poll.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -168,6 +169,29 @@ void kl_backend_poll_done(struct kl_backend *backend, const struct pollfd *descr
  * descriptor (now_ms is the compositor's monotonic clock).
  */
 void kl_backend_tick(struct kl_backend *backend, uint64_t now_ms);
+
+/*
+ * Tells what kl_backend_tick waits for: returns the descriptor whose lines
+ * it reads (-1 for none), to be waited for readable, and sets *due_ms to
+ * when its time-bound work is due next (UINT64_MAX for none).
+ */
+int kl_backend_wait(const struct kl_backend *backend, uint64_t *due_ms);
+
+/*
+ * Tells whether every area of the backend wakes the host when it has
+ * something (its threads write the wake descriptor, its descriptors are in
+ * the poll), so that the host may wait for events alone: 1, or 0 when some
+ * area is read without waiting each pass (the host then comes back soon,
+ * every few milliseconds).
+ */
+int kl_backend_wakes(const struct kl_backend *backend);
+
+/*
+ * Tells whether the backend tells the host every input device that comes
+ * or goes (the host's input_changed callback): 1, or 0 when it does not
+ * (the host then scans the devices on its own every few seconds).
+ */
+int kl_backend_input_events(const struct kl_backend *backend);
 
 /*
  * The network (ws035-p013).
@@ -637,6 +661,16 @@ int kl_backend_audio_stream_control(struct kl_backend_audio_stream *stream, unsi
  * 1 with *report filled, or 0 when nothing more has come.
  */
 int kl_backend_audio_stream_next(struct kl_backend_audio_stream *stream, struct kl_backend_audio_stream_report *report);
+
+/*
+ * The descriptor whose events bring the stream's next reports, for the
+ * host's wait, with in *events what to wait for; -1 when nothing more
+ * comes of the stream, KL_BACKEND_AUDIO_STREAM_UNWAITED when its reports
+ * come without an event (the host then looks for them soon, as long as the
+ * stream lives).
+ */
+#define KL_BACKEND_AUDIO_STREAM_UNWAITED	(-2)
+int kl_backend_audio_stream_descriptor(const struct kl_backend_audio_stream *stream, short *events);
 
 /*
  * Ends a stream without waiting (a pump thread is let go and joined later);
@@ -1281,6 +1315,13 @@ int kl_backend_print_can(struct kl_backend_print *print);
  * bits.  Returns 0.
  */
 int kl_backend_print_update(struct kl_backend_print *print, unsigned *changed);
+
+/*
+ * The descriptor kl_backend_print_update reads and writes, for the host's
+ * wait, and in *events what it waits for (POLLIN, and POLLOUT while lines
+ * wait to be sent); -1 without a daemon's connection.
+ */
+int kl_backend_print_descriptor(const struct kl_backend_print *print, short *events);
 
 /*
  * The settings file's writes and checks on a thread of the host's (the
@@ -2268,6 +2309,22 @@ int kl_backend_media_child(struct kl_backend_media *media, int64_t child, int st
 void kl_backend_media_close(struct kl_backend_media *media);
 int kl_backend_media_request(struct kl_backend_media *media, unsigned command, const char *argument, int descriptor, uint32_t *id);
 void kl_backend_media_update(struct kl_backend_media *media);
+
+/*
+ * Tells whether helpers are running: kl_backend_media_update then has
+ * their pipes to move and their ends to reap, and wants calling soon.
+ */
+int kl_backend_media_busy(const struct kl_backend_media *media);
+
+/*
+ * Gives the running helpers' pipes for the host's poll, at most capacity
+ * of them (a request still being written: its stdin for POLLOUT; every
+ * answer: its stdout for POLLIN), and reports how many there are, also
+ * beyond capacity; *left_seconds is how many seconds from now the earliest
+ * helper's time limit passes (-1: no helper runs).  A helper's end also
+ * comes as SIGCHLD; kl_backend_media_update then has something to do.
+ */
+size_t kl_backend_media_poll(const struct kl_backend_media *media, struct pollfd *descriptors, size_t capacity, long *left_seconds);
 int kl_backend_media_take(struct kl_backend_media *media, uint32_t *id, int *error, int *descriptor);
 
 /*

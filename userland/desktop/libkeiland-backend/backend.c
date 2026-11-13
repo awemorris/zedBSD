@@ -204,3 +204,21 @@ kl_backend_tick(
 	/* The session manager's lines and the Log Out's deadline (ws131-p006). */
 	kl_backend_session_tick(backend, now_ms);
 }
+
+/*
+ * Tells what kl_backend_tick waits for: the session manager's descriptor
+ * and the Log Out's deadline.
+ */
+int
+kl_backend_wait(
+	const struct kl_backend *backend,
+	uint64_t *due_ms)
+{
+	/* A compositor whose backend did not open waits for nothing here. */
+	*due_ms = UINT64_MAX;
+	if (backend == NULL)
+		return -1;
+
+	/* The session manager's. */
+	return kl_backend_session_wait(backend, due_ms);
+}

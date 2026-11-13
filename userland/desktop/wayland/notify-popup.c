@@ -174,8 +174,10 @@ kwl_notify_popup_tick(
 
 	/* A board on the screen moves every frame. */
 	moving = kwl_notify_flow_moving(&popup.flow);
-	if (moving)
+	if (moving) {
 		server->dirty = 1;
+		kwl_due_soon(server);
+	}
 
 	/* The log's board closes after a while untouched (notify-log.c). */
 	kwl_notify_log_tick(server);

@@ -2554,6 +2554,17 @@ gpu_poll(
 		return 0;
 	}
 
+	/*
+	 * A poll for the display changes alone follows this open by name, so
+	 * that the other files' changes do not wake it.  Every change this
+	 * answer reads (a topology event, the device going or failing) wakes
+	 * all polls (poll_notify), so the name loses none of them.  A poll for
+	 * the completions follows every change: their readiness is shared with
+	 * the fences and the handles.
+	 */
+	if ((events & ~POLLPRI) == 0)
+		poll_wait_object(session);
+
 	/* Device failure is independent of the caller's selected event mask. */
 	irq = spin_lock_irqsave(&gpu_registry_lock);
 

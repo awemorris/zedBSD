@@ -106,6 +106,23 @@ kl_backend_events_open(
 	printf("KL EVENTS subscribed classes=0x%x\n", (unsigned)EVENTS_CLASSES);
 }
 
+/*
+ * Tells whether the backend tells every input device that comes or goes:
+ * yes while /dev/system's events are heard (a kernel without them, or a
+ * failed read, leaves the compositor's own scans).
+ */
+int
+kl_backend_input_events(
+	const struct kl_backend *backend)
+{
+	/* Nothing heard without the subscription. */
+	if (backend == NULL || backend->events_descriptor < 0)
+		return 0;
+
+	/* Succeeded: INPUT and OVERFLOW call input_changed. */
+	return 1;
+}
+
 /* Closes the events' descriptor. */
 void
 kl_backend_events_close(

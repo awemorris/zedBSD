@@ -321,7 +321,7 @@ drv_bt_hci_input(
 
 	/* The reader waiting, and the pollers. */
 	waitq_wake_all(&hci->waitq);
-	poll_notify();
+	poll_notify_object(hci);
 
 	/* Reports a packet the ring had no room for. */
 	if (error != 0)
@@ -375,7 +375,7 @@ drv_bt_hci_notice(
 
 	/* The reader waiting, and the pollers. */
 	waitq_wake_all(&hci->waitq);
-	poll_notify();
+	poll_notify_object(hci);
 }
 
 /*
@@ -427,7 +427,7 @@ drv_bt_hci_withdraw(
 
 	/* The reader and the pollers see it now. */
 	waitq_wake_all(&hci->waitq);
-	poll_notify();
+	poll_notify_object(hci);
 
 	/* Takes the transport away after the operation running now, if any. */
 	mutex_lock(&hci->op_lock);
@@ -805,6 +805,9 @@ bt_hci_poll(
 		*returned = POLLERR | POLLHUP;
 		return 0;
 	}
+
+	/* The controller's changes wake the poll. */
+	poll_wait_object(hci);
 
 	/* A packet waiting, a controller that takes packets, or one that is gone. */
 	result = 0;
@@ -1314,7 +1317,7 @@ drv_bt_hci_sco_input(
 
 	/* The reader and the pollers. */
 	waitq_wake_all(&hci->waitq);
-	poll_notify();
+	poll_notify_object(hci);
 }
 
 /* Adds the transport's SCO packets lost and sets the bytes its send queue holds now. */

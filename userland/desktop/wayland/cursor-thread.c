@@ -22,7 +22,9 @@
  */
 
 #include "cursor-thread.h"
+#include "threads.h"
 
+#include <signal.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -78,6 +80,8 @@ int
 kwl_cursor_thread_start(
 	struct kwl_cursor_thread *cursor)
 {
+	sigset_t signals_all;
+	sigset_t signals_before;
 	unsigned index;
 	int error;
 
@@ -86,7 +90,11 @@ kwl_cursor_thread_start(
 		cursor->pinned[index] = -1;
 
 	/* The thread presents from now on. */
+	/* The thread blocks every signal: the stops and a child's end go to the event loop's thread. */
+	(void)sigfillset(&signals_all);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_all, &signals_before);
 	error = pthread_create(&cursor->thread, NULL, cursor_main, cursor);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_before, NULL);
 	if (error != 0)
 		return error;
 
@@ -734,16 +742,30 @@ cursor_unpin(
 	struct kwl_cursor_thread *cursor,
 	int copy)
 {
+	unsigned wake;
+
 	/* No pin. */
 	if (copy < 0 || copy >= (int)KWL_CURSOR_COPIES)
 		return;
 
-	/* One reader fewer; at zero the main thread may write the copy again. */
+	/*
+	 * One reader fewer; at zero the main thread may write the copy again,
+	 * and is woken for it when it found both copies in use.
+	 */
 	pthread_mutex_lock(&cursor->box->lock);
 
 	cursor->box->pins[copy]--;
+	wake = 0U;
+	if (cursor->box->pins[copy] == 0U && cursor->box->copy_wanted) {
+		cursor->box->copy_wanted = 0U;
+		wake = 1U;
+	}
 
 	pthread_mutex_unlock(&cursor->box->lock);
+
+	/* The main thread's poll returns, with no lock held. */
+	if (wake)
+		kwl_thread_wake(cursor->wake_main);
 }
 
 /*
