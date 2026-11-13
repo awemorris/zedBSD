@@ -314,7 +314,7 @@ Explore の補助の報告のうち、設計が頼る次の行を P7 が grep �
 | path と URL | `wb_os_path_from_url(path_bytes)`・`wb_os_url_path(local)` | そのまま | `/C:/x` ↔ `C:\x`、UNC |
 | library | `wb_os_library_open(names[])`・`_symbol`・`_close` | dlopen | `LoadLibraryExW(LOAD_LIBRARY_SEARCH_APPLICATION_DIR \| LOAD_LIBRARY_SEARCH_SYSTEM32)`（DLL の乗っ取りを避ける）。.exe の始めに `SetDefaultDllDirectories` を同じ flag で（依存の DLL の探索も狭める） |
 | 場所 | `wb_os_data_directory`（既定の font） | `KEILAND_DATADIR`（今と同じ） | .exe の directory + `\share`（`GetModuleFileNameW`） |
-| 根の証明書 | `wb_os_trust_roots(each, context)`（DER を 1 つずつ渡す） | 何もしない（OpenSSL の既定の path） | `CertOpenSystemStoreW("ROOT")`・`CertEnumCertificatesInStore`（§6.6） |
+| 根の証明書 | `wb_os_trust_roots(each, context)`（DER を 1 つずつ渡す）（注: 2026-11-13 WS335 p042 で compat を直に link する形に置き換え、p045 で消した。根は compat の `SSL_CTX_set_default_verify_paths` が読む） | 何もしない（OpenSSL の既定の path） | `CertOpenSystemStoreW("ROOT")`・`CertEnumCertificatesInStore`（§6.6） |
 | 名前 | `wb_os_platform_name`（navigator.platform）、`wb_os_user_agent_os`（UA の括弧の中） | "zedBSD x86_64"・"X11; Linux x86_64"（今と同じ値） | "Win32"・"Windows NT 10.0; Win64; x64" |
 
 - thread の基本（`pthread_create`・mutex・cond・key・once）は書き換えない。Windows では mingw-w64 の winpthreads を静的に link する（§6.1）。
@@ -724,6 +724,7 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
 | 案 | 中身 | 推し |
 | --- | --- | --- |
 | S-A | OpenSSL 3.5.8（`userland/packages/security/openssl/Makefile` と同じ版・SHA-256）を同じ toolchain で cross build（`./Configure mingw64`、`no-shared`。arm64 の target 名は未確かめ）し、static library を .exe に link（2026-11-01 に DLL の同梱から改めた、§6.2）。根は Windows の ROOT の store の写しと同梱の Mozilla の根（S-B）を合わせて `X509_STORE` に入れ、Windows の `Disallowed` の store の証明書は拒む（`wb_os_trust_roots`、`SSL_CTX_get_cert_store`・`d2i_X509`・`X509_STORE_add_cert`・`X509_free` を `net/tls.c` の symbol の表に）。**`SSL_CTX_set_default_verify_paths` は Windows では呼ばない**、OpenSSL は `--openssldir` を利用者が書けない path にし、設定の file を自動で読まない（`OPENSSL_INIT_NO_LOAD_CONFIG`。利用者が作れる path の `openssl.cnf` を読む類の弱さを避ける、レビュー #10） | ○（第 1 段） |
+| （注） | 2026-11-13 WS335 p042 で S-A（OpenSSL の static link と `wb_os_trust_roots`）を libssl-compat・libcrypto-compat を直に static link する形に置き換えた（[WS335 design.md](../ws335/design.md) §4.2・D29） | |
 | S-B | S-A の根を Mozilla の `cacert.pem`（`ca-certificates` の package と同じ、MPL-2.0）にして同梱 | 予備（Windows の store が読めない時に `--ca-file` で） |
 | S-C | SChannel（Windows の TLS、SSPI）で `net_tls_*`（`net/net.h:176-188`）の別の実装 `net/tls-schannel.c` | 将来の案。OpenSSL が要らず、OS の失効の確かめ・根の更新が効く。code が大きく（`InitializeSecurityContextW` の loop）、zedBSD と TLS の挙動が分かれる |
 

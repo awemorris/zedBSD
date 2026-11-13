@@ -46,7 +46,7 @@
 
 ### 2.1 範囲の中
 
-- **libbrowser `userland/desktop/libbrowser/net/tls.c`**: OpenSSL の header を使わず、`dlopen` で `libcrypto.so`・`libssl.so`（無ければ `.so.3`）を開き（`:45-48`・`:653-656`・`:687-698`）、
+- **libbrowser `userland/desktop/libbrowser/net/tls.c`**（2026-11-01 の形。2026-11-13 の p043 の後は `<compat/ssl/ssl.h>` を include して同じ関数を直に呼び、`dlopen`・名前の表・自前の定数は無い: §4.2・D29。下の行の番号は 2026-11-01 の物）: OpenSSL の header を使わず、`dlopen` で `libcrypto.so`・`libssl.so`（無ければ `.so.3`）を開き（`:45-48`・`:653-656`・`:687-698`）、
   `dlsym` で 25 個の関数を引く（表 `:114-138`）。定数は自前の `#define`（`:51-62`、値は OpenSSL の物）。使い方:
   - context: `TLS_client_method`・`SSL_CTX_new`（`:761`）、`SSL_CTX_ctrl(…, 123 = SET_MIN_PROTO_VERSION, TLS1_2_VERSION)`（`:768`）、`SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL)`（`:775`）、
     `SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF)`（`:776`）、`SSL_CTX_set_default_verify_paths`（`:779`）、`SSL_CTX_load_verify_locations(ctx, file, NULL)`（`:781`、試験の CA）。
@@ -74,7 +74,7 @@
 | python3（`.../lang/python3/Makefile:60-126`）・`openssl` の command | ssl・hashlib | package は本家のまま |
 | base の `fetch`（`userland/base/fetch/main.c:357`「https is not supported」） | — | 後の候補（libssl-compat が base に入れば https が持てる） |
 
-## 3. 範囲と決定（D1〜D28）
+## 3. 範囲と決定（D1〜D29）
 
 | # | 決定 | 理由 | 選ばなかった案 |
 | --- | --- | --- | --- |
@@ -104,8 +104,9 @@
 | D24 | **Windows の Disallowed は鎖の全部で拒む**: `cryc_os_system_roots` が Disallowed の証明書を `add_distrusted` に渡し、store は SHA-256 の印だけを持つ（`cryc_store_add_distrusted`）。印は tbsCertificate の SHA-256（parse できない DER は全体の SHA-256）で、鎖の証明書の tbsCertificate と DER の両方の SHA-256 と照らす（ECDSA の署名は (r, n − s) に書き換えても有効なので、DER の全体の印では署名を書き換えた写しが通る。2026-11-02 Q1 の p034 の判断）。完全な path の確かめの最初に（署名の前、仕事に数えない）leaf から上へ印を探し、あれば一番下の深さで `CRYC_VERIFY_REJECTED`（`X509_V_ERR_CERT_REJECTED` 28）、探索は次の path へ。ROOT の列挙の時には Disallowed と照らさない（同じ根が ROOT と cert.pem のどちらから来ても同じ REJECTED になる）。ROOT のうち拡張鍵用途の property が serverAuth を持たない物（「全部の目的で無効」を含む）は入れない | WS334 の OpenSSL の形（p030）は検証の callback で鎖の全部の証明書を Disallowed と照らす。compat に切り替えた時にこの守りを失わない（Disallowed には盗まれた中間の CA が入る）。ROOT から除くだけでは、`cert.pem` の同じ根や、信頼する根の下の Disallowed の中間を通してしまう | ROOT から除くだけ（前の形）。OpenSSL と同じく callback に毎回の証明書を渡す（`X509_STORE_CTX_get_current_cert` などの API が増え、net/tls.c に Windows だけの code が残る） |
 | D25 | **名前の約束**: static でない関数・object の名前は、公開の部分集合の名前か `cryc_`（libcrypto-compat）・`sslc_`（libssl-compat）で始まる物だけ（cryc.h の冒頭）。check-skeleton の 7 が `nm` で照合する | Windows の .a は program の名前の空間を共有する（version script が無い）。補助の名前（例 `hex_encode`）が program や他の static library と衝突しない | Windows で `-fvisibility` や objcopy で名前を隠す（COFF の static library では効かない・build が複雑） |
 | D26 | **Windows の build の規則は使う側に置く**: WS335 は `sources.mk`（変数だけ）を渡し、使う側（OmniGrammaton の `apps/browser-win32/Makefile`）がそれを include して `lib<名前>.a` を作る（png・jpeg・gif・z の compat と同じ形）。WS335 の試験の Windows の build は試験の script（run-unit.sh `--win32`、check-skeleton の 6、run-interop.sh `--win32`）の中 | WS334 の toolchain の探し方（`WIN32_CC`・`LLVM_MINGW`）と flag を 2 か所に持たない。前例と同じ | WS335 に `make libssl-compat-win64` の target（toolchain の探し方の重複、一番上の Makefile の変更） |
-| D28 | **OpenSSL だけの関数は compat に作らない**: WS334 p030 が OpenSSL のために net/tls.c に足す `OPENSSL_init_ssl`・`X509_digest`・`X509_STORE_CTX_get_current_cert`・`X509_STORE_CTX_set_error` と証明書ごとの検証の callback は、compat では要らない（D14・D24 が同じ守りを持つ）。net/tls.c の側で「OpenSSL だけ」の印を付けて compat では引かず使わない（§4.2） | compat の範囲を net/tls.c の今の要る物に保つ（ユーザーの決定 2）。callback に証明書ごとの X509_STORE_CTX を渡すと path の確かめの中身が API に出る | 4 つを compat に足す（`OPENSSL_init_ssl` の 1 を返すだけの物は安いが、残りの 3 つと callback の意味が大きい） |
+| D28 | **OpenSSL だけの関数は compat に作らない**（2026-11-13 の p042 で net/tls.c の「OpenSSL だけ」の印は D29 に置き換えた。`X509_digest` は p041 で mailer の指紋のために compat に足した）: WS334 p030 が OpenSSL のために net/tls.c に足す `OPENSSL_init_ssl`・`X509_digest`・`X509_STORE_CTX_get_current_cert`・`X509_STORE_CTX_set_error` と証明書ごとの検証の callback は、compat では要らない（D14・D24 が同じ守りを持つ）。net/tls.c の側で「OpenSSL だけ」の印を付けて compat では引かず使わない（§4.2） | compat の範囲を net/tls.c の今の要る物に保つ（ユーザーの決定 2）。callback に証明書ごとの X509_STORE_CTX を渡すと path の確かめの中身が API に出る | 4 つを compat に足す（`OPENSSL_init_ssl` の 1 を返すだけの物は安いが、残りの 3 つと callback の意味が大きい） |
 | D27 | **libcrypto-compat.so を先に作る Phase（p039）**: zedBSD の .so の規則・exports・package の登録だけを、p023・p024 の後に。libssl-compat.so は p033 | WS336 の zedBSD の Phase（p021〜p024）が TLS の全部と統合を待たずに .so へ link できる（2026-11-01 Q1 の決め、P5 の案 B） | p033 で両方（WS336 が TLS の完成まで待つ） |
+| D29 | **TLS を使う program は compat を直に呼ぶ**: libbrowser の `net/tls.c` と mailer の `tls.c` は `<compat/ssl/ssl.h>`（要る時 `<compat/crypto/evp.h>`）を include し、zedBSD は `libssl-compat.so`・`libcrypto-compat.so` を link（DT_NEEDED）、Windows は `libssl-compat.a`・`libcrypto-compat.a` を .exe に static link する。名前で開く表・`dlopen`・`WB_TLS_COMPAT`・`WB_TLS_STATIC`・`ML_TLS_COMPAT` の macro・OpenSSL への落ち（`libssl.so`・`.so.3` を開く道）は無い。OpenSSL・OpenSSH は利用者が明示した時だけ build に入る外部の package | 2026-11-13 のユーザーの決定（p042）。TLS は選べる機能でなく system の部分で、OpenSSL と切り替える口を持たない | 名前で開いて本家と compat を切り替える（前の U2 の A と D28 の印。p042 で置き換えた） |
 
 ## 4. 構成
 
@@ -136,23 +137,18 @@ ML-KEM-768（`"ML-KEM-768"`、keygen・encapsulate・decapsulate）、ChaCha20�
 `RAND_bytes`・`OPENSSL_cleanse`・`CRYPTO_memcmp`。中の module は `cryc-sha2`・`cryc-ed25519`・`cryc-x25519`・`cryc-f25519`・`cryc-mlkem`・`cryc-sha3`・`cryc-chacha`（`cryc_chacha20_xor64`）・`cryc-os`。
 primitive の header に TLS の型は無い（TLS の型は libssl-compat の `sslc-*.h` だけ）。
 
-### 4.2 net/tls.c の本家と compat の切り替え（U2 の答え: A、Windows は static link）
+### 4.2 net/tls.c と mailer の tls.c は compat を直に呼ぶ（D29）
 
-**2026-11-13 の注**: この節の切り替え（名前で開く表・`WB_TLS_COMPAT`・Windows の表）は、ユーザーの決定で compat を直に呼ぶ形に置き換える（[p042](phase042/phase.md) の §2、実装は p043〜p045。本文の直しと D29 は p046）。
+U2 の答えの A（名前で開いて本家と compat を切り替える、Windows は表を static link の wrapper で満たす）と D28 の「OpenSSL だけ」の印は、2026-11-13 のユーザーの決定で置き換えた（[p042](phase042/phase.md) §2、実装は p043〜p045）。今の形:
 
-net/tls.c は今 header を使わず `dlopen` で名前を開く（§2.1。WS334 p022 の後は `wb_os_library_open`）。
-
-- **zedBSD（A）**: libbrowser の Makefile が `-DWB_TLS_COMPAT` を付けた build では、開く名前を `libcrypto-compat.so`・`libssl-compat.so` にする。関数の名前・signature・定数は同じなので、それ以外の code は変わらない。
-  zedBSD の base の build は compat、Linux の host の試験（WS074 の host-build、本家の OpenSSL が入っている）は既定で本家、`-DWB_TLS_COMPAT` と `LD_LIBRARY_PATH` で compat も試せる。
-- **Windows（D23）**: 何も開かない。net/tls.c の関数の表を、static link した関数で満たす（Windows の build だけが compile する小さな file が `<compat/ssl/ssl.h>` を include し、表の member と同じ型の 1 行の wrapper を表に入れる。関数 pointer の型の変換をしない）。
-  library が無い時の EPROTONOSUPPORT の道は Windows では通らない。
-- compat の下での net/tls.c の変更（D28。WS334 p030 の後の net/tls.c に対して。「開く名前だけ」では済まない）:
-  1. 関数の表の各行に「OpenSSL だけ」の印を足し、`WB_TLS_COMPAT` の build ではその行を引かない（`OPENSSL_init_ssl`・`X509_digest`・`EVP_sha256`（指紋のため）・`X509_STORE_CTX_get_current_cert`・`X509_STORE_CTX_set_error`）。引く名前は全部 §5 の部分集合にある。
-  2. compat では `OPENSSL_init_ssl` を呼ばない（compat は設定の file を読まない）。
-  3. compat では OS に依らず `SSL_CTX_set_default_verify_paths` を呼び、`wb_os_trust_roots` の DER を入れる loop と、Disallowed の指紋の一覧と、証明書ごとの検証の callback を使わない（`SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL)`、今の zedBSD の形）。
-  4. Windows の static の build は 1 の表を link した関数の wrapper で満たす（上の Windows の項）。
-  Q1 への頼み: WS334 p030 を始める前に、p030 の担当（P7）に 1 の印（OpenSSL だけの行が無くても TLS が動く形）を入れてもらうと、p036 の変更は 2・3 の `#ifdef` だけになる。
-- 切り替えの変更は net/tls.c（WS074 の所有）と WS334 の build に入るので、**切り替え自体は WS335 の最後の提案の Phase（p036、WS074・WS334 との調整の後）**。WS334 の build は WS334 の担当（P7）が直す。
+- **source**: `userland/desktop/libbrowser/net/tls.c` と `userland/desktop/mailer/tls.c` は `<compat/ssl/ssl.h>`（mailer は指紋のため `<compat/crypto/evp.h>` も）を include し、`SSL_*`・`X509_*`・`ERR_*`・`EVP_sha256` を直に呼ぶ。関数 pointer の表・名前の表・`dlopen`（`wb_os_library_open`）・macro は無い。OpenSSL の header も使わない。
+- **zedBSD**: libbrowser.so と `/bin/mailer` の DT_NEEDED に `libssl-compat.so`・`libcrypto-compat.so`。package の requirement と `mk/userland.mk` の stamp の順で、libbrowser・mailer を build すれば 2 つの .so も作られる。
+- **Windows（D23）**: `libssl-compat.a`・`libcrypto-compat.a` を OmniGrammaton.exe に static link（`apps/browser-win32/Makefile` の `WIN32_TLS_ARCHIVES`）。net/tls.c は zedBSD と同じ source で `#ifdef` が無い。
+- **残した振る舞い**: TLS 1.2 以上、`SSL_VERIFY_PEER`、`SSL_OP_IGNORE_UNEXPECTED_EOF`、名前は SNI と `SSL_set1_host` で照合（libbrowser は address の時 `X509_VERIFY_PARAM_set1_ip_asc` だけで SNI 無し）、試験の CA の file、誤りの文（`<what>: certificate verify failed: <X509_verify_cert_error_string>` ほか）。
+  根は `SSL_CTX_set_default_verify_paths`（zedBSD は `/etc/ssl/cert.pem`、Windows は ROOT から Disallowed を除いた物と .exe の隣の `cert.pem`、Disallowed は鎖のどこでも拒む: D14・D24）。libbrowser はその失敗を context の失敗とし、続けて program の束（`<data>/certs/ca-certificates.pem`）を読む。
+  `wb_os_trust_roots` の DER を入れる loop、Disallowed の指紋の一覧、証明書ごとの検証の callback、`OPENSSL_init_ssl` は無い（`wb_os_trust_roots` は p045 で消した）。mailer は自己署名の pin のため、検証が通らない時に `SSL_get1_peer_certificate` と `X509_digest(EVP_sha256())` で指紋を取る。
+  `EPROTONOSUPPORT` は「この process では TLS の context が作れない」の意味だけ（library が無い事は link の時に解ける）。
+- **試験**: host は compat を host の cc で build して link する（`plan/tools/tls/host-compat-libs.sh`、`plan/ws074/tests/host-build.sh`）。zedBSD の QEMU は `plan/ws335/tests/run-browser-guest.sh`・`run-mailer-guest.sh`（名前の照合と SNI の case を含む）、Windows は `plan/ws334/tests/tls-wine.sh`。
 
 ### 4.3 build
 
@@ -182,10 +178,10 @@ WS334 の file は WS334 の担当が直す。WS335 が渡し、約束する物�
 2. 公開の header（`include/libc/compat/crypto/*.h`・`include/libc/compat/ssl/ssl.h`）。export・import・visibility の macro は無い（cryc.h の冒頭）。
 3. 名前の約束（D25）: .a が定義する外の名前は、公開の部分集合の名前と `cryc_`・`sslc_` だけ（check-skeleton の 7）。program の名前と衝突しない。
 4. 根の扱い: `SSL_CTX_set_default_verify_paths` が Windows の ROOT（Disallowed を除く）と、実行された .exe の隣の `cert.pem`（packages の ca-certificates の束を、この名前で .exe の隣に置く）を読み、Disallowed の証明書は鎖のどこでも拒む（D14・D24）。
-   OpenSSL の時の `OPENSSL_init_ssl`・`X509_digest`・`X509_STORE_CTX_get_current_cert`・`X509_STORE_CTX_set_error` と検証の callback での Disallowed の照合は要らない（compat はこれらの関数を持たない）。
+   使う側は `OPENSSL_init_ssl`・`X509_STORE_CTX_get_current_cert`・`X509_STORE_CTX_set_error` と検証の callback での Disallowed の照合を持たない（compat はこれらの関数を持たない。`X509_digest` は p041 で mailer の指紋のために足した）。
 5. 試験の道具: `run-unit.sh --win32`（.exe に static link して Wine で。flag は `-std=c89 -O1` と UBSan の trap）と run-interop.sh `--win32`（p033）。使う側の flag（`-std=gnu11 -O2`）での compile は check-skeleton の 6 が確かめるが、その flag での実行の試験は使う側の試験（WS334 の Wine の https）に残る。
-6. 切り替えの時に WS334 の側で要る事（参考。決めるのは WS334 の担当）: 2 つの `sources.mk` の include と static library の追加、.exe の link への `-lbcrypt -lcrypt32 -lws2_32`、OpenSSL の DLL と `openssl` の target と Apache-2.0 の許諾の文の同梱を外す、
-   ca-certificates の束を `cert.pem` として .exe の隣に（今の `share/certs/ca-certificates.pem` の読み込みを残してもよい）、net/tls.c の変更（§4.2 の 1〜4、p036）、`WSAStartup`（今の os-net の層が呼んでいる事の確かめ）。zlib の許諾の文（WS335 の source は zedBSD の Zlib）を同梱の許諾の一覧に足す。
+6. WS334 の側の形（2026-11-13 の p043〜p045 で済んだ。D29）: `apps/browser-win32/Makefile` が 2 つの `sources.mk` を include して static library を作り、.exe の link に `-lbcrypt -lcrypt32 -lws2_32`。OpenSSL の DLL は配らない。
+   net/tls.c は zedBSD と同じ source（§4.2）で、表の file（`tls-static.c`・`tls-static-compat.c`）と `-DWB_TLS_STATIC` は無い。ca-certificates の束は `share/certs/ca-certificates.pem`（libbrowser の program の束）として配る。zlib の許諾の文の同梱は WS334 の範囲。
 
 ## 5. 公開の API の部分集合（全部、OpenSSL 3.5 の signature）
 
@@ -231,7 +227,7 @@ WS334 の file は WS334 の担当が直す。WS335 が渡し、約束する物�
 | 単体（各 Phase） | [run-unit.sh](tests/run-unit.sh)（ASan・UBSan、`-std=c89`）。期待の値は仕様の表・付録と公式の vector（CAVP・Wycheproof・RFC の付録・RFC 8448・x509-limbo）と手の計算だけ。他の実装の出力は使わない。逆向きの独立の道具: [derwriter.h](tests/unit/derwriter.h)（DER の組み立て）、record・handshake の相手の bytes は RFC 8448 の値 | host |
 | 定数時間 | [run-ct.sh](tests/run-ct.sh)（`ct-<名前>.c`） | host |
 | 骨格 | [check-skeleton.sh](tests/check-skeleton.sh)（header の単独の compile、cc・clang・zedBSD の clang・llvm-mingw の 2 arch、層の照合、`BASE=`） | host |
-| 統合（p033） | (1) RFC 8448 の値（record・鍵・message）は p026〜p028 で照合済み、(2) x509-limbo の全件は p038、(3) host の OpenSSL `s_server` との相互（1.2・1.3 × suite × x25519/P-256（HRR）× ECDSA/RSA × 断片化・非 blocking）、(4) net/tls.c の host の試験（`plan/ws074/tests/host-loader.c` の系）を `-DWB_TLS_COMPAT` 相当（試験用の名前の symlink。net/tls.c は無印の `libssl.so`・`libcrypto.so` を先に開くので、`.so.3` と無印の両方を置く。`run-nettls.sh`）で compat に通す、(5) 実の site の一覧（Let's Encrypt の RSA と ECDSA、P-384 の中間、Google・Cloudflare・GitHub ほか 20、host から） | host |
+| 統合（p033） | (1) RFC 8448 の値（record・鍵・message）は p026〜p028 で照合済み、(2) x509-limbo の全件は p038、(3) host の OpenSSL `s_server` との相互（1.2・1.3 × suite × x25519/P-256（HRR）× ECDSA/RSA × 断片化・非 blocking）、(4) net/tls.c の host の試験（`plan/ws074/tests/host-loader.c` の系）を（p033 の時の形。p043 の後は host-build.sh が compat を直に link し、名前の symlink は要らない: §4.2）`-DWB_TLS_COMPAT` 相当（試験用の名前の symlink。net/tls.c は無印の `libssl.so`・`libcrypto.so` を先に開くので、`.so.3` と無印の両方を置く。`run-nettls.sh`）で compat に通す、(5) 実の site の一覧（Let's Encrypt の RSA と ECDSA、P-384 の中間、Google・Cloudflare・GitHub ほか 20、host から） | host |
 | 統合（p033） | zedBSD の image で `fetch`…は無いので試験の program（`plan/ws335/tests/tls-client.c`）を QEMU の guest で走らせ、host の `s_server` に繋ぐ（serial の対話で操作、user network の USB の adapter で host は 10.0.2.2、log で判定しない。`run-guest.sh`） | QEMU（Q1 の割当） |
 | 各 Phase | `run-unit.sh --win32 <名前>`: 同じ単体試験を llvm-mingw の x86_64 で 2 つの static library に link した .exe にし、Wine で走らせる（UBSan の trap。LLP64 の `long` の誤り、Windows の OS の層） | host の Wine |
 | 骨格 | check-skeleton の 6・7: x86_64・aarch64 の static library と、全部の object を取り込む .exe の link、`nm` で名前の範囲 | cross |
@@ -282,7 +278,7 @@ WS334 の file は WS334 の担当が直す。WS335 が渡し、約束する物�
 | p035 | 規約の全文の見直しと header の持ち越しの直し | style-check、全試験が前と同じ | p034 | conformance-reviewer |
 | p037 | 試験の道具: tlspeer.h（scripted な TLS 1.3/1.2 server、試験の側の ECDSA の署名器、ClientHello の parser） | test-tlspeer | p025・p026・p027・p011・p008 | Opus |
 | p038 | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類 | test-limbo | p020 | Opus |
-| p036（提案。U2 は A で答え済み、起動は調整の後） | net/tls.c の切り替え（§4.2）: zedBSD は開く名前、Windows は static link の表。WS074・WS334 と調整 | WS074 の host 試験、QEMU の browser の https、WS334 の Wine の https | p033、WS334 の p022・p030 | 未定 |
+| p036（提案。U2 は A で答え済み、起動は調整の後） | net/tls.c の切り替え: zedBSD は開く名前、Windows は static link の表。WS074・WS334 と調整（注: この名前で開く形は 2026-11-13 の p042〜p045 で compat を直に link する形に置き換えた、§4.2・D29） | WS074 の host 試験、QEMU の browser の https、WS334 の Wine の https | p033、WS334 の p022・p030 | 未定 |
 
 - 起動の順（依存が満ちた物から、Q1 の目安の 3〜5 ずつ並べる）:
   1. p002
