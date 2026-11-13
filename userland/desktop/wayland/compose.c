@@ -81,6 +81,7 @@ static int compose_region_since(struct kwl_server *server, uint64_t frame, uint6
 static void compose_walk_timed(struct kwl_server *server, uint64_t walk, uint64_t replay, unsigned quiet);
 static void compose_want(struct kwl_server *server, enum kwl_render_kind kind);
 static void compose_stalled(struct kwl_server *server);
+static void compose_render_counts(const struct kwl_render_thread *render);
 static void compose_message(struct kwl_server *server, const struct kwl_render_message *message);
 static void compose_completed(struct kwl_server *server, const struct kwl_render_message *message);
 static void compose_frame_presented(struct kwl_server *server, const struct kwl_render_outcome *outcome, uint64_t number);
@@ -1073,6 +1074,7 @@ kwl_compose_close(
 	if (compose->render_started) {
 		kwl_render_stop(&compose->render);
 		kwl_compose_poll(server);
+		compose_render_counts(&compose->render);
 		kwl_render_destroy(&compose->render);
 		compose->render_started = 0U;
 	}
@@ -4751,9 +4753,12 @@ compose_task_done(
 
 /*
  * Ends the frame (or the layer's picture) in flight after the render
- * thread completed it: the outcome of its presents, then the buffers it
- * sampled are released (when nothing else holds them) and the frame
- * callbacks of the surfaces it showed are sent.
+ * thread saw its fence signalled: the outcome of its presents, then the
+ * buffers it sampled are released (when nothing else holds them) and the
+ * frame callbacks of the surfaces it showed are sent.  The thread waits
+ * for every job in flight even when nothing more is asked of it, so this
+ * comes for a layer's picture, for a frame whose present failed and for
+ * the last frames before the compositor goes quiet too.
  */
 static void
 compose_completed(
@@ -4865,6 +4870,7 @@ compose_frame_presented(
 		printf("KWL LAT recorded frame=%llu at_us=%llu\n", (unsigned long long)number, (unsigned long long)outcome->recorded_us);
 		printf("KWL LAT queued frame=%llu at_us=%llu\n", (unsigned long long)number, (unsigned long long)outcome->queued_us);
 		printf("KWL LAT submit frame=%llu at_us=%llu\n", (unsigned long long)number, (unsigned long long)outcome->presented_us);
+		printf("KWL LAT completed frame=%llu at_us=%llu\n", (unsigned long long)number, (unsigned long long)outcome->completed_us);
 	}
 
 	/*
@@ -4916,9 +4922,34 @@ compose_frame_presented(
 }
 
 /*
- * Acquires the output's next image for the render thread, waiting at most
- * timeout_ns, with the acquire's time.  The output's swapchain and its
- * acquisition semaphore change only while the thread is parked.
+ * Tells what the render thread did, once it has ended (KWL RENDER
+ * stopped): the jobs and tasks completed, its waits for their fences, its
+ * acquires of the output's image, and its sleeps for the main thread.
+ */
+static void
+compose_render_counts(
+	const struct kwl_render_thread *render)
+{
+	/* One line, read after the thread's end (its counts are its own until then). */
+	printf(
+		"KWL RENDER stopped jobs=%llu tasks=%llu fence_waits=%llu task_waits=%llu"
+		" acquires_waiting=%llu acquires_now=%llu acquires_missed=%llu sleeps=%llu\n",
+		(unsigned long long)render->counts.jobs,
+		(unsigned long long)render->counts.tasks,
+		(unsigned long long)render->counts.fence_waits,
+		(unsigned long long)render->counts.task_waits,
+		(unsigned long long)render->counts.acquires_waiting,
+		(unsigned long long)render->counts.acquires_now,
+		(unsigned long long)render->counts.acquires_missed,
+		(unsigned long long)render->counts.sleeps);
+}
+
+/*
+ * Acquires the output's next image for the render thread, with the
+ * acquire's time: without waiting (timeout_ns 0) while the thread has
+ * something in flight, until one is free (UINT64_MAX) when it has
+ * nothing.  The output's swapchain and its acquisition semaphore change
+ * only while the thread is parked.
  */
 static VkResult
 compose_op_acquire_output(
@@ -5116,8 +5147,10 @@ compose_op_run(
 }
 
 /*
- * Waits at most timeout_ns for the fence of the job in a slot, for the
- * render thread; a signalled fence is reset for the slot's next job.
+ * Waits for the fence of the job in a slot, for the render thread (which
+ * gives timeout_ns UINT64_MAX: the oldest job in flight, however long it
+ * runs); a signalled fence is reset for the slot's next job, by this
+ * thread only.
  */
 static VkResult
 compose_op_wait(
@@ -5176,7 +5209,7 @@ compose_op_submit_task(
 	return VK_SUCCESS;
 }
 
-/* Waits at most timeout_ns for a task's fence, for the render thread (VK_TIMEOUT while it runs). */
+/* Waits for a task's fence, for the render thread (which gives timeout_ns UINT64_MAX: the oldest task in flight, however long it runs). */
 static VkResult
 compose_op_wait_task(
 	void *context,

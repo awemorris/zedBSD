@@ -21,9 +21,20 @@
  * takes the want down at once (a want raised after it is a new one), or a
  * cancel (the want changed meanwhile): the images stay held for a later
  * frame.  With the list the render thread records it into the command
- * buffers, submits, presents the output's and the heads' images, waits for
- * the frame's fence and tells the main thread it completed; only then does
- * it look for the next want, so one frame is in flight at most.
+ * buffers, submits, presents the output's and the heads' images, and tells
+ * the main thread the job completed once it has seen the job's fence
+ * signalled.  As many jobs may be in flight as there are slots.
+ *
+ * The thread waits for one thing at a time and never with a timeout: it
+ * looks at the main thread's requests first and does what it can; with
+ * nothing it can do and a job or a task in flight it waits for the oldest
+ * one's fence, however long that takes, and tells its completion (so every
+ * completion reaches the main thread before the thread sleeps, which the
+ * main thread needs to draw again); with nothing in flight it waits for
+ * the main thread's next change.  The output's image is acquired without
+ * waiting while anything is in flight (the fence is waited for instead),
+ * and only with nothing in flight does the acquire block until an image is
+ * free.
  *
  * Every message to the main thread goes through one ordered queue: a
  * frame's completion always comes before the ready that follows it.  A
@@ -59,18 +70,11 @@
 /* The heads (other displays) a frame may draw, as compose.h's KWL_HEADS. */
 #define KWL_RENDER_HEADS	7U
 
-/* How long one acquire of the output's image and one wait for a frame's fence last before the thread looks at its requests, in nanoseconds. */
-#define KWL_RENDER_ACQUIRE_NS	50000000ULL
-#define KWL_RENDER_FENCE_NS	100000000ULL
-
 /*
- * How many jobs may be submitted before the oldest completes (each has its
- * own command buffers and fence, a slot of the owner's), and how long the
- * thread waits at a time for the oldest's fence while it also looks for
- * the main thread's want and answer.
+ * How many jobs may be submitted before the oldest completes: each has its
+ * own command buffers and fence, a slot of the owner's.
  */
 #define KWL_RENDER_FLIGHTS	2U
-#define KWL_RENDER_POLL_NS	1000000ULL
 
 /* What the main thread may draw. */
 enum kwl_render_kind {
@@ -93,7 +97,7 @@ enum kwl_render_answer {
 
 /* What one step of the render thread came to. */
 enum kwl_render_step {
-	/* Did some work (or a bounded wait ran out): step again. */
+	/* Did some work (or waited for a fence and told its completion): step again. */
 	KWL_RENDER_STEP_WORKED = 1,
 	/* Waits for the main thread: a want, an answer, the end of a park. */
 	KWL_RENDER_STEP_BLOCKED,
@@ -115,7 +119,7 @@ enum kwl_render_message_kind {
 	KWL_RENDER_READY = 1,
 	/* The output's image could not be acquired: the want went down. */
 	KWL_RENDER_ACQUIRE_FAILED,
-	/* A frame or a layer's picture completed (or failed). */
+	/* A frame or a layer's picture completed (its fence seen signalled), or failed. */
 	KWL_RENDER_COMPLETED,
 	/* A task completed (or its submission or its fence failed). */
 	KWL_RENDER_TASK_DONE,
@@ -168,8 +172,9 @@ struct kwl_render_job {
  * submission's result (any failure is the compositor's), the output's
  * present (a display gone is not), each head's present by slot (heads
  * says which were presented), the recording's time in cycles, and the
- * times of the end of the recording, of the submission and of the
- * present (kwl_microseconds).
+ * times of the end of the recording, of the submission, of the present
+ * and of the render thread's seeing the fence signalled
+ * (kwl_microseconds).
  */
 struct kwl_render_outcome {
 	VkResult result;
@@ -196,7 +201,9 @@ struct kwl_render_outcome {
  * allocates it, the main thread frees it.  number is the want's (or the
  * job's); held is what a ready holds; result an acquire's failure;
  * outcome a completion's; acquired_us when a ready's output image was
- * acquired and acquire_cycles how long that took.
+ * acquired and acquire_cycles how long that took; serial, for a job or a
+ * task the thread submitted, the order it was submitted in (from 1 up),
+ * by which the oldest in flight is waited for first.
  *
  * A task's message is the main thread's instead: it allocates it with the
  * task (number, task_command, task_fence), the thread submits and watches
@@ -215,6 +222,7 @@ struct kwl_render_message {
 	struct kwl_render_outcome outcome;
 	uint64_t acquired_us;
 	uint64_t acquire_cycles;
+	uint64_t serial;
 	VkCommandBuffer task_command;
 	VkFence task_fence;
 };
@@ -242,16 +250,36 @@ struct kwl_render_status {
 };
 
 /*
+ * What the render thread did, counted by the thread alone and read once
+ * it has ended (the line the compositor writes when it stops it): the jobs
+ * and the tasks told complete, the waits for a job's and for a task's
+ * fence (one each for those submitted: no fence is looked at again and
+ * again), the acquires of the output's image that waited until one was
+ * free and those that did not wait (taken ahead included) and found none,
+ * and the times the thread slept for the main thread's next change.
+ */
+struct kwl_render_counts {
+	uint64_t jobs;
+	uint64_t tasks;
+	uint64_t fence_waits;
+	uint64_t task_waits;
+	uint64_t acquires_waiting;
+	uint64_t acquires_now;
+	uint64_t acquires_missed;
+	uint64_t sleeps;
+};
+
+/*
  * The Vulkan work the thread does through its owner: acquire the output's
- * next image (waiting at most timeout_ns; it gives how long it took in
- * cycles and when it ended, for the main thread's lines), acquire a head's
- * next image
- * without waiting, record and submit and present a job, and wait for the
- * job's fence (at most timeout_ns; VK_TIMEOUT to be asked again), and
- * the clock of the main thread's lines in microseconds (NULL for the
- * monotonic clock); and submit a task's command buffer with its fence
- * and wait for that fence (at most timeout_ns; VK_TIMEOUT to be asked
- * again).
+ * next image (timeout_ns is 0, not waiting, or UINT64_MAX, until one is
+ * free; it gives how long it took in cycles and when it ended, for the
+ * main thread's lines), acquire a head's next image without waiting,
+ * record and submit and present a job, and wait for the job's fence (and
+ * reset it for the slot's next job), and the clock of the main thread's
+ * lines in microseconds (NULL for the monotonic clock); and submit a
+ * task's command buffer with its fence and wait for that fence.  The
+ * thread waits for a fence only with timeout_ns UINT64_MAX: any result but
+ * VK_SUCCESS is the fence's failure.
  */
 struct kwl_render_ops {
 	VkResult (*acquire_output)(void *context, uint64_t timeout_ns, uint32_t *image, uint64_t *cycles, uint64_t *at_us);
@@ -283,7 +311,8 @@ struct kwl_render_ops {
  * completion message of the next job (made before the job is taken, so
  * that a completion is never lost), the completions of the jobs in flight,
  * oldest first (flight_count of them; busy says any is, or a job runs),
- * the tasks submitted and not seen complete, oldest first, and the main
+ * the tasks submitted and not seen complete, oldest first, the serial of
+ * the last job or task submitted, what it did (counts), and the main
  * thread's wake pipe.
  */
 struct kwl_render_thread {
@@ -320,6 +349,8 @@ struct kwl_render_thread {
 	unsigned flight_count;
 	struct kwl_render_message *task_flights;
 	struct kwl_render_message *task_flights_tail;
+	uint64_t submitted;
+	struct kwl_render_counts counts;
 	uint64_t seen_sequence;
 	int wake_main;
 	pthread_t thread;

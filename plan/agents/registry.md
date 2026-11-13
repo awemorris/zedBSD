@@ -5,12 +5,13 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
+| P2 | phase-runner-high | ws353 p010 shown・client の buffer (q2073-i01) | `/home/awe/zedBSD-worktrees/p2-ws353e` / `agent/p2-ws353e` | 動いている（2026-11-14） | — |
 | P1 | phase-runner-high | ws353 p018 入力と sessiond (q2072-i01) | `/home/awe/zedBSD-worktrees/p1-ws353i` / `agent/p1-ws353i` | 動いている（2026-11-14） | — |
 | P3 | conformance-reviewer | ws335 p047 規約の見直し (q2071-i01) | `/home/awe/zedBSD-worktrees/p3-ws335p047` / `agent/p3-ws335p047` | 返却（2026-11-14、cleared） | a681a1e68f |
 | P4 | phase-runner | BUG-430 Makefile の案 (q2070-i01) | `/home/awe/zedBSD-worktrees/p4-bug430` / `agent/p4-bug430` | 返却（2026-11-14） | 57ab1210b3 |
 | P3 | phase-runner | ws335 p046 統合 (q2069-i01) | `/home/awe/zedBSD-worktrees/p3-ws335p046` / `agent/p3-ws335p046` | 返却（2026-11-14、cleared） | 9730bb1c22（merge 2f0b7eed5f） |
 | P1 | phase-runner-high | ws353 p008 main の poll -1 (q2068-i01) | `/home/awe/zedBSD-worktrees/p1-ws353h` / `agent/p1-ws353h` | 返却（2026-11-14、cleared） | 4f4112c981（merge d795c0b9a4） |
-| P2 | phase-runner-high | ws353 p011 render の slot (q2067-i01) | `/home/awe/zedBSD-worktrees/p2-ws353d` / `agent/p2-ws353d` | 動いている（2026-11-14） | — |
+| P2 | phase-runner-high | ws353 p011 render の slot (q2067-i01) | `/home/awe/zedBSD-worktrees/p2-ws353d` / `agent/p2-ws353d` | 返却（2026-11-14、cleared） | 1a9c8d8901 |
 | P2 | phase-runner-high | ws353 p015 network・WSI (q2066-i01) | `/home/awe/zedBSD-worktrees/p2-ws353c` / `agent/p2-ws353c` | 返却（2026-11-14、cleared） | afbbfeed48 |
 | P1 | phase-runner-high | ws353 p007 締め切り B (q2065-i01) | `/home/awe/zedBSD-worktrees/p1-ws353g` / `agent/p1-ws353g` | 返却（2026-11-14、cleared） | a6eafe010b |
 | P2 | phase-runner-high | ws353 p014 refresh の fence (q2064-i01) | `/home/awe/zedBSD-worktrees/p2-ws353b` / `agent/p2-ws353b` | 返却（2026-11-14、cleared） | f3c6bb3e9a（merge 2498bc8853） |
