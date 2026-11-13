@@ -467,3 +467,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-427](bugs/BUG-427.md) | Wi-Fi の PIN の設定中に ARM64 SError が 1 回出た（Pi 500、bcm43455） | fixed（2026-11-13 P1: Pi 5 で毎起動に再現。D0 の pinctrl の report が実装の外の 0x1c を読んでいた。PINCTRL_D0_BYTES を 0x1c に、Pi 5 で SError 0 を確認、Pi 500 は未実施） |
 | [BUG-428](bugs/BUG-428.md) | S0 idle の devices の往復で xHCI の port 3 が resume で戻らず、USB の NIC（ue0）の受信が止まる（5330） | open（2026-11-13 Q1 が起票、BUG-424 から） |
 | [BUG-429](bugs/BUG-429.md) | TCO の watchdog が sleep の suspend の途中の停止を捕まえない（PCI の順の早い所で counter を halt する） | open（2026-11-13 Q1 が起票、BUG-424 から） |
+| [BUG-430](bugs/BUG-430.md) | 作り直した build system で、試験の image を別の BUILD に作れない（sysroot が固定）・vmunix と userland の並列で依存が抜ける・sysroot が -j16・test-image.sh が古い | open（2026-11-13 Q1 が起票、WS353 p002 の P1 の報告） |
