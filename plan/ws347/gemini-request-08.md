@@ -158,3 +158,4 @@
 ## 訂正（2026-11-13 Q1、ユーザーの訂正を受けて）
 
 X3 と B35 の前提に誤解があった。host が BAR の local memory の窓から GPU の local memory に書いてよいのは GOP の VRAM（firmware の boot の framebuffer）だけで、ring・vertex・fence など host と GPU が分け合う物は全部 host memory に置き、GPU が DMA で読み書きする。だから窓と L2 の一貫性の問題は起きない。依頼の送り文で頼んだ ghci.md §6.3・§11 の 1 文（「driver が command で一貫させる」）は、「窓は GOP の VRAM のため（host はそれ以外の local memory を読み書きしない。host と GPU が分け合う物は host memory に置く）」に直す。agy の今の作業が終わった後に、この訂正を送る。
+- 追加（同日）: §13.2・§11.3 の比べの表の「discrete の scan-out は local だけ」を直す。discrete でも scan-out は host memory を読める（§6.0・§11.3 の HOST_LIMIT と RTL どおり）。GOP の framebuffer が host memory か板の VRAM かは host（または板の UEFI）の firmware による。窓の 1 文も「窓は、GOP が板の VRAM にある時の GOP の framebuffer のため」とする。
