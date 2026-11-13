@@ -48,6 +48,7 @@
 #include "kern/net/socket.h"
 #include "kern/vmspace.h"
 #include "kern/mount.h"
+#include "kern/poll.h"
 #include <uapi/system.h>
 #include <uapi/process.h>
 #include <kern/clock.h>
@@ -459,12 +460,13 @@ system_poll(
 	if (returned == NULL)
 		return EINVAL;
 
-	/* An open that did not subscribe has nothing to read. */
+	/* An open that did not subscribe has nothing to read (its poll follows every change: it may subscribe meanwhile). */
 	*returned = 0;
 	if (file->f_data == NULL)
 		return 0;
 
-	/* Readable while a record waits. */
+	/* Readable while a record waits; the subscriber's records wake the poll. */
+	poll_wait_object(file->f_data);
 	readable = kern_system_event_readable(file->f_data);
 	if (readable)
 		*returned = (short)(requested & (POLLIN | POLLRDNORM));

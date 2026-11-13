@@ -31,7 +31,6 @@
 #include <kern/waitq.h>
 #include <uapi/errno.h>
 
-#include <stdbool.h>
 
 /*
  * One subscriber: the classes it wants, its ring (the oldest record at
@@ -39,6 +38,9 @@
  * the queue its blocked reads sleep on.  It is linked into the subscriber
  * list from open to close; event_lock protects every field but the queue.
  */
+/* The subscribers one event's polls are woken for by name; past them every poll is woken. */
+#define EVENT_NOTIFY_MAX	16U
+
 struct kern_system_subscriber {
 	struct kern_system_subscriber *next;
 	uint32_t classes;
@@ -77,10 +79,12 @@ kern_system_event_post(
 	const char *subject,
 	const char *detail)
 {
+	struct kern_system_subscriber *told[EVENT_NOTIFY_MAX];
 	struct kern_system_subscriber *subscriber;
 	struct system_event event;
 	unsigned long irq;
-	bool delivered;
+	unsigned delivered;
+	unsigned index;
 
 	/* The record, but for its sequence number. */
 	kern_memset(&event, 0, sizeof(event));
@@ -98,7 +102,7 @@ kern_system_event_post(
 
 	event.sequence = next_sequence;
 	next_sequence++;
-	delivered = false;
+	delivered = 0U;
 	for (subscriber = subscribers; subscriber != NULL; subscriber = subscriber->next) {
 		/* A subscriber of other classes does not hear it. */
 		if ((subscriber->classes & class_bit) == 0U)
@@ -107,14 +111,20 @@ kern_system_event_post(
 		/* Its ring takes the record, and its reads wake. */
 		ring_push(subscriber, &event);
 		waitq_wake_all(&subscriber->waitq);
-		delivered = true;
+		if (delivered < EVENT_NOTIFY_MAX)
+			told[delivered] = subscriber;
+		delivered++;
 	}
 
 	spin_unlock_irqrestore(&event_lock, irq);
 
-	/* Waiting polls look again. */
-	if (delivered)
+	/* The polls waiting for those subscribers look again (all polls, past what the list holds). */
+	if (delivered > EVENT_NOTIFY_MAX) {
 		poll_notify();
+		return;
+	}
+	for (index = 0; index < delivered; index++)
+		poll_notify_object(told[index]);
 }
 
 /*
