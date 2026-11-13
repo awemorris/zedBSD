@@ -58,7 +58,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計（design.md）と移行の計画（実装の Phase の表と各 phase.md）、Fable の敵対的レビューの反映 | cleared（2026-11-13 ユーザーの承認、main 73f38d7cb5） | — |
-| [p002](phase002/phase.md) | kernel: display の topology の事象の fence（HOTPLUG、`GPU_DISPLAY_FENCE`、driver の push `drv_gpu_display_changed`） | uncleared（2026-11-14 Q1 判定。P1 q2057 8cf85a7102、main に merge 879c02d83d。3 機種の build warning 0、i915 host 31 本、QEMU 7 step のうち 6 PASS。latency は venus が抜き差しを番号に出さない既存の BUG-431 で FAIL。BUG-431 を直して流し直す） | p001 |
+| [p002](phase002/phase.md) | kernel: display の topology の事象の fence（HOTPLUG、`GPU_DISPLAY_FENCE`、driver の push `drv_gpu_display_changed`） | cleared（2026-11-14 Q1 判定。P1 q2057 8cf85a7102（merge 879c02d83d）。latency の FAIL は試験の harness の止まりと venus の events_clear の欠けで、BUG-431（P2）で直し、同じ試験の 2 回が全 step PASS、latency 266・255 ms） | p001 |
 | [p003](phase003/phase.md) | libvulkan: hotplug の fence を kernel の fence に、未提出の fence の待ち（1 ms を消す） | planned（q2059、P1） | p002 |
 | [p004](phase004/phase.md) | compositor: hotplug の thread、`kwl_output_tick` の 250 ms を消し出力の追従を事象で | planned | p003 |
 | [p005](phase005/phase.md) | compositor: timer の thread、thread の結果の flag を wake に、入力の scan を事象だけに、去った client の buffer の解放の歩調を timer と事象に | planned | p004、WS352 p002 の merge（推し） |
