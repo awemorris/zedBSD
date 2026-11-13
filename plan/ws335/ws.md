@@ -13,6 +13,7 @@
 
 ## ユーザーの決定
 
+- 2026-11-13 ユーザーから、mailer・libbrowser・browser-win32 の TLS を選べる機能でなく compat（libssl-compat・libcrypto-compat）を前提に書き換え、`ML_TLS_COMPAT`・`WB_TLS_COMPAT` の macro と名前で開く表を無くす、Makefile もその前提にする、OpenSSL・OpenSSH は利用者が明示しない限り build に入らない完全に外部の package として扱い source tree にも明記する、標準廉価実装手順で進める、という趣旨の決定を受けた（p042 の設計 → p043〜 の実装）。p041 の後の WS335 の完了はこの後に。
 - 2026-11-13 ユーザーから、mailer の compat 化を WS335 の Phase（p041）として足し、終わってから WS335 を完了にする、という趣旨の決定を受けた。Q1 の判断: 凍結の header に SSL_get1_peer_certificate・X509_digest を足す事を承認。
 - 2026-11-13 ユーザーから、p036 の Makefile・mk の差分 A（libbrowser の `-DWB_TLS_COMPAT`）・B（`apps/browser-win32/Makefile` を compat の static link に、OpenSSL を外す）・C（7 つの platform の defaults.mk に compat の 2 つ）の承認を受けた（Q1 が当てた）。
 - （2026-11-02 10:52）ユーザーから、WS335 の完了の後に、Windows 版のブラウザ（WS334）の OpenSSL を libssl-compat・libcrypto-compat に切り替えて OpenSSL への依存を無くす、という趣旨の指示を受けた（p036 の切り替えを Windows にも、WS335 の後）。
@@ -27,6 +28,7 @@
 
 ## Resume point
 
+- 2026-11-13: p001〜p041 は cleared。ユーザーの決定で p042（compat を前提に書き換える設計、P2 q2051）を足した。実装は p042 が置く p043〜（Sonnet）。その後に WS335 を完了にする。
 - p001（設計）を P6 が q1789 で進めている。
 - 2026-11-01 P6: 設計を [design.md](design.md)、問い U1〜U6 を [user-questions.md](user-questions.md) に書いた。header（libcrypto-compat 24＋公開 6、libssl-compat 8＋公開 1）・.c の骨格（29＋10）・試験の道具（[tests/](tests/)）を置いた。
   実装の Phase p002〜p038（提案の p036 を含む）の phase.md を置いた。design-reviewer の 27 件を全部反映した（[design-review.md](design-review.md)）。
@@ -81,6 +83,7 @@
 | [p039](phase039/phase.md) | zedBSD の libcrypto-compat.so（build の規則・exports・package と image の登録、`sources.mk`）。TLS は無し。WS336 の zedBSD の Phase が待つ | cleared（2026-11-02 10:21 Q1、main で libcrypto-compat.so の build warning 0・check-exports PASS。version node は置かない（Q1、p035 で design.md を直す）。dlclose の NODELETE は BUG-409）。実装済み・試験 PASS（2026-11-02 10:20 Sonnet 5.5 q1925-i01。amd64・aarch64・riscv64 の libcrypto-compat.so が warning 0 で build、check-dynamic-elf と check-exports PASS、QEMU の serial で crypto-smoke 47 checks PASS、run-unit all・check-skeleton PASS。map は version node 無し（Q1 承認）。ld.so が NODELETE を守らない件は phase039 の結果に。cleared は Q1） | p023、p024 |
 | [p040](phase040/phase.md) | secp384r1 の group: supported_groups で申し出る（x25519・secp256r1 の後）、TLS 1.2 の ServerKeyExchange の P-384 の ECDHE、TLS 1.3 の HRR の後の P-384 の key share、共有の秘密 48 byte（凍結の header の変更は Q1 の承認の後）。p033 の 8 件の known limit を繋がる側に戻す | cleared（2026-11-02 18:41 Q1、ddc678f69 を main に merge 4535e4137、main で test-hs13・hs12・api-ssl PASS、check-skeleton は BASE=ddc678f69 に移して PASS）。実装済み・試験 PASS（2026-11-02 18:30 P1 q1981-i01。run-unit all・--win32 all（57 本）・run-ct all PASS、run-interop host 139 件・Wine 47 件が known limit 0 で PASS、run-limbo PASS、ecc384.badssl.com が繋がる、zedBSD の .so warning 0・check-exports PASS、check-skeleton（BASE=4eae22020）は承認済みの sslc-hs.h・sslc-keysched.h の差だけで FAIL。cleared は Q1） | p033（p034 の前） |
 | [p041](phase041/phase.md) | mailer の TLS を compat に（compat に SSL_get1_peer_certificate・X509_digest を足す） | cleared（2026-11-13 Q1、P2 q2048。main に merge） | p036 |
+| [p042](phase042/phase.md) | TLS を compat を前提に書き換える設計（mailer・libbrowser・browser-win32、macro と名前の表を無くす）、OpenSSL・OpenSSH を外部の package に（標準廉価実装手順の設計、Opus） | planned（q2051、P2） | p041 |
 
 - 2026-11-02 03:56 Q1: check-skeleton の BASE は 641a2f195 に移す（p015 で Q1 が run-unit.sh に Wine の LC_ALL=C.UTF-8 を足したため。header と道具はこの commit で固定）。
 

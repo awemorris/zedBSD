@@ -313,6 +313,8 @@ WS に固有の決定はその ws.md にある。ここは複数の WS・OS 全�
 - **既定の構成（2026-11-01・02 ユーザー）**: Pi 4・Pi 5 の Bluetooth は n。Pi 5 の GPU は y で起動時に開始。Pi 4・Pi 5 は graphical login で kernel の message を画面に出さない（`kmsg=quiet`）。Pi 5 の fan は y。VF2 の PowerVR の debug は n。build system の作り直し（`mk/platform-<機種>/defaults.mk`）の後もこの既定を保つ。
 - **Amaterrace GPU と GHCI**: 役割分担と規則は [amaterrace.md](amaterrace.md)（2026-11-11）。
 
+- **OpenSSL・OpenSSH は外部の package（2026-11-13）**: ユーザーの決定の要点: OpenSSL・OpenSSH は利用者が明示的に指定しない限り build に入らない、完全に外部の package として扱う。zedBSD の program（mailer・libbrowser・browser-win32 など）の TLS と暗号は libssl-compat・libcrypto-compat（WS335）を前提にし、OpenSSL を選ぶ道や macro を持たない（WS335 p042〜）。
+
 ### 11.1 対象 platform
 
 - **重要な platform と参考の platform**（2026-11-13 ユーザーの決定の要点）: 重要なのは x86_64・arm64・riscv64 だけで、直しはこれらを優先する。i386・pc9821 は参考までに動かしている platform で、build が崩れても後でまとめて直せばよい。変更ごとに i386・pc9821 の build を確かめない。定期的に build を確かめて直すだけにする。

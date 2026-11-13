@@ -5,6 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
+| P2 | phase-runner | ws335 p042 compat を前提の設計 (q2051-i01) | `/home/awe/zedBSD-worktrees/p2-ws335f` / `agent/p2-ws335f` | 動いている（2026-11-13 21:0x） | — |
 | P1 | phase-runner-high | ws333 thermal の権限 (q2015-i01) | `/home/awe/zedBSD-worktrees/p1-ws333e` / `agent/p1-ws333e` | 返却（2026-11-12） | 03f66fffcf（merge b1ade10787） |
 | P2 | phase-runner-high | ws347 Gemini の修正の監査 (q2014-i01) | `/home/awe/zedBSD-worktrees/p2-ws347a` / `agent/p2-ws347a` | 返却（2026-11-12） | 5f117d149e（merge b2ecd73d78） |
 | P1 | phase-runner-high | ws333 の UAPI の実装 (q2013-i01) | `/home/awe/zedBSD-worktrees/p1-ws333d` / `agent/p1-ws333d` | 返却（2026-11-12） | 54ae40fb23（merge 10f86ae6e8） |
