@@ -21,6 +21,6 @@ desktop が何もしていない時に、compositor（`/bin/wayland`）・input 
 
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| p001 | 解析: idle の時に起きる thread と timeout の一覧（compositor・input・client・daemon）、各々が何を待つべきか（事象・期限）、本来の形（事象が来るまで block、期限は本当に要る時だけ）。WS351 の wake-reason.patch で数える | planned | — |
-| p002 | 直しと試験（host・QEMU・5330 で idle の package・PC2 が WS333 p029 と同等、入力・描画・animation の応答が変わらない） | planned | p001 |
+| p001 | 解析: idle の時に起きる thread と timeout の一覧（compositor・input・client・daemon）、各々が何を待つべきか（事象・期限）、本来の形（事象が来るまで block、期限は本当に要る時だけ）。WS351 の wake-reason.patch で数える | in-progress（一覧の確かめ済み、ユーザーの判断待ち） | — |
+| p002 | 直しと試験（host・QEMU・5330 で idle の package・PC2 が WS333 p029 と同等、入力・描画・animation の応答が変わらない） | in-progress（直しの一部が branch に、試験は未完） | p001 |
 | p003 | 規約の全文の見直し | planned | p002 |

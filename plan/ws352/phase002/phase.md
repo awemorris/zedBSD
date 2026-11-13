@@ -14,13 +14,15 @@ Parent: [WS352](../ws.md)。解析は [p001](../phase001/phase.md)。
   - pipe（`src/kern/pipe.c`）: pipe。読み・書き・reader/writer の増減（FIFO の open を含む）の 6 箇所。
   - socket（`socket.c`・`socket-file.c`）: socket。enqueue・error・close・release・setsockopt の buffer・`socket_poll_notify`。unix socket（`unix-socket.c`）: poll は自分と peer（connection の相手、datagram の peer）を名指しし、送り（peer）・受けの完了（自分。送り手は自分を peer として待つ）・shutdown（自分と peer）・connect（自分と listener）・close（peer）を名指し。
   - evdev（`src/drivers/generic/input.c`）: device。emit・key・unregister・grab・resync の 5 箇所。
-  - descriptor table（`src/kern/filedesc.c`）: table。fd の close・差し替えは、その table を scan する poll だけを起こす（以前は全員）。
+  - descriptor table（`src/kern/filedesc.c`）: table。fd の close・差し替えは、その table を scan する poll だけを起こす（以前は全員）。さらに fd の番号ごと（`poll_slot_key`、508c992109）。
   - /dev/system の event（`src/kern/system-event.c`・`src/drivers/generic/system-device.c`）: subscriber。届けた subscriber ごとに名指し（16 を超えたら全員）。購読していない open の poll は every。
   - audio の dsp（`src/drivers/audio/audio.c`）: device。period の割り込み・stop。
+  - bt-hci（`src/drivers/generic/bt-hci.c`、839faa674c）: controller。input・notice・withdraw・SCO の 4 箇所（bluetoothd の poll が system の全部の名指しの通知で起きていた）。
+  - GPU の POLLPRI だけの poll（`gpu.c` の `gpu_poll`、839faa674c）: session を名指し。GPU の通知は名指し無しのままなので取りこぼさない。
 - 名指ししない（従来どおり全員を起こす）物とその理由:
   - GPU（`gpu.c` 13 箇所・`gpu-fence.c`）: readiness が descriptor・imported fence の alias・completion の observer の間で共有され（「Descriptor and imported-fence observers receive the same terminal state」）、1 つの変化が複数の file・handle の答えを変える。どの object を名指しすれば全部の poller に届くかの対応表を作らないと取りこぼす。idle では GPU の通知は 0 回（下の測り）。
   - tty（`tty.c` 15 箇所）・console・pty: master/slave・controlling terminal・vt の間で状態が共有される。terminal は idle の wake の源ではない。
-  - 他（tcp・route socket・bt-hci・hidraw・smartcard・cam・thermal・venus・i915 の hpd・amdrdna・ghci）: idle の源でない。名指し無しは正しさを保つ（全員を起こすので取りこぼさない）。
+  - 他（tcp・route socket・hidraw・smartcard・cam・thermal・venus・i915 の hpd・amdrdna・ghci）: idle の源でない。名指し無しは正しさを保つ（全員を起こすので取りこぼさない）。
 - 取りこぼしが無い根拠:
   1. poll は scan の前に sequence を読み、channel の lock の下で sequence が同じ時だけ waiter を繋いで眠る（繋ぐのと確かめるのが同じ critical section）。全部の通知が lock の下で sequence を進めるので、scan が始まった後の変化は眠りを止める。
   2. 繋がった後の object X の変化は、X を名指しした waiter と every の waiter を起こす。X を名指しするのは、X の状態を読んで答える poll op だけ。
