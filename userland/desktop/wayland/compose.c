@@ -4870,6 +4870,7 @@ compose_frame_presented(
 		printf("KWL LAT recorded frame=%llu at_us=%llu\n", (unsigned long long)number, (unsigned long long)outcome->recorded_us);
 		printf("KWL LAT queued frame=%llu at_us=%llu\n", (unsigned long long)number, (unsigned long long)outcome->queued_us);
 		printf("KWL LAT submit frame=%llu at_us=%llu\n", (unsigned long long)number, (unsigned long long)outcome->presented_us);
+		printf("KWL LAT completed frame=%llu at_us=%llu\n", (unsigned long long)number, (unsigned long long)outcome->completed_us);
 	}
 
 	/*

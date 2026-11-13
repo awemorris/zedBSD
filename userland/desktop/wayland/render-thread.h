@@ -172,8 +172,9 @@ struct kwl_render_job {
  * submission's result (any failure is the compositor's), the output's
  * present (a display gone is not), each head's present by slot (heads
  * says which were presented), the recording's time in cycles, and the
- * times of the end of the recording, of the submission and of the
- * present (kwl_microseconds).
+ * times of the end of the recording, of the submission, of the present
+ * and of the render thread's seeing the fence signalled
+ * (kwl_microseconds).
  */
 struct kwl_render_outcome {
 	VkResult result;

@@ -968,11 +968,12 @@ render_reap(
 	unsigned index;
 	VkResult result;
 
-	/* The oldest's fence, waited for once (counted with the job). */
+	/* The oldest's fence, waited for once (counted with the job), and when the wait returned. */
 	completion = render->flights[0];
 	result = render->ops.wait(render->context, completion->job.slot, UINT64_MAX);
 	render->counts.fence_waits++;
 	render->counts.jobs++;
+	completion->outcome.completed_us = render_now_us(render);
 
 	/* Done, or its wait failed (the compositor's failure): the others move up. */
 	if (result != VK_SUCCESS)
