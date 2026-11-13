@@ -11,7 +11,7 @@
 #include "aac-huffman.h"
 
 #include <errno.h>
-#include <pthread.h>
+#include "media-os.h"
 #include <string.h>
 
 /* A full binary prefix tree with at most 289 leaves uses at most 577 nodes. */
@@ -23,11 +23,11 @@ struct aac_tree_node {
 	int16_t symbol;
 };
 
-/* Original lookup storage; pthread_once publishes all books before any reader traverses them. */
+/* Original lookup storage; the once publishes all books before any reader traverses them. */
 static struct aac_tree_node aac_trees[12][AAC_TREE_NODES];
 
 /* Initialize immutable trees once, shared by decoder threads without per-frame allocation. */
-static pthread_once_t aac_tree_once = PTHREAD_ONCE_INIT;
+static struct media_os_once aac_tree_once = MEDIA_OS_ONCE_INIT;
 
 /* A failed normative-table validation remains visible after once initialization finishes. */
 static int aac_tree_error;
@@ -59,7 +59,7 @@ media_aac_huffman_symbol(
 		return EINVAL;
 
 	/* Publish the original trees before reading any of their nodes. */
-	error = pthread_once(&aac_tree_once, aac_tree_initialize);
+	error = media_os_once(&aac_tree_once, aac_tree_initialize);
 	if (error != 0)
 		return error;
 
@@ -267,7 +267,7 @@ aac_tree_initialize(
 		}
 	}
 
-	/* Succeeded: pthread_once publishes every initialized book to subsequent readers. */
+	/* Succeeded: the once publishes every initialized book to subsequent readers. */
 	return;
 }
 

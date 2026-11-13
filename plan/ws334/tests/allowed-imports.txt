@@ -1,8 +1,8 @@
 # The symbols the Windows build's libraries may leave undefined, one a line (cross-build.sh compares the
 # output of nm -u with it, a __imp_ prefix taken off).  Each is a function of the Windows C runtime (UCRT,
 # under the names mingw-w64's import libraries give it), of the toolchain's runtime, or of kernel32,
-# ws2_32, bcrypt or crypt32, or of winpthreads (linked statically).  A new name goes here with the
-# library it comes from.
+# ws2_32, bcrypt or crypt32 (no POSIX thread layer: winpthreads is not linked).  A new name goes here
+# with the library it comes from.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 # The toolchain's runtime (compiler-rt): the stack probe of a large frame (___chkstk_ms on x86_64).
@@ -210,25 +210,6 @@ _time64
 _wassert
 longjmp
 
-# winpthreads (linked statically): the once, and the network's and TLS's locks, conditions, threads and
-# thread keys (the loader's threads; each thread's reason of its last TLS failure).
-pthread_once
-pthread_cond_broadcast
-pthread_cond_destroy
-pthread_cond_init
-pthread_cond_signal
-pthread_cond_timedwait64
-pthread_cond_wait
-pthread_create
-pthread_getspecific
-pthread_join
-pthread_key_create
-pthread_mutex_destroy
-pthread_mutex_init
-pthread_mutex_lock
-pthread_mutex_unlock
-pthread_setspecific
-
 # UCRT: the wall clock of the loader's timed waits (timespec_get).
 _timespec64_get
 
@@ -242,10 +223,6 @@ MultiByteToWideChar
 # UCRT: the maths of the sound's decoders.
 exp2
 lrint
-
-# winpthreads (linked statically): the clock and the sleep of <pthread_time.h> (the engine's clock and waits).
-clock_gettime64
-nanosleep64
 
 # What libkeiland (libkeiland.a: its common files, its Windows backend, its threads and sockets and the
 # stubs) and the browser's user interface (libbrowser-ui.a) leave undefined beyond the above

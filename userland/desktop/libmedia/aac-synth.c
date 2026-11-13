@@ -9,7 +9,7 @@
 #include "aac-synth.h"
 #include <errno.h>
 #include <math.h>
-#include <pthread.h>
+#include "media-os.h"
 #include <string.h>
 
 #define AAC_PI 3.14159265358979323846264338327950288
@@ -39,7 +39,7 @@ static float synth_post_cos[2][1024];
 static float synth_post_sin[2][1024];
 
 /* Publish all mathematical tables exactly once across simultaneous decoder threads. */
-static pthread_once_t synth_once = PTHREAD_ONCE_INIT;
+static struct media_os_once synth_once = MEDIA_OS_ONCE_INIT;
 
 static void synth_initialize(void);
 static double synth_bessel(double argument);
@@ -65,7 +65,7 @@ media_aac_reconstruct(
 		return EINVAL;
 
 	/* Generate mathematical facts independently of any external decoder implementation. */
-	error = pthread_once(&synth_once, synth_initialize);
+	error = media_os_once(&synth_once, synth_initialize);
 	if (error != 0)
 		return error;
 
@@ -123,7 +123,7 @@ media_aac_synthesize(
 		return EINVAL;
 
 	/* Even direct synthesis callers must observe initialized mathematical windows. */
-	error = pthread_once(&synth_once, synth_initialize);
+	error = media_os_once(&synth_once, synth_initialize);
 	if (error != 0)
 		return error;
 	previous = history->shape;
@@ -263,7 +263,7 @@ synth_initialize(
 		}
 	}
 
-	/* Succeeded: pthread_once publishes all immutable mathematical facts. */
+	/* Succeeded: the once publishes all immutable mathematical facts. */
 	return;
 }
 

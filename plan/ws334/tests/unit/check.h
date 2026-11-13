@@ -11,21 +11,47 @@
  * "test-<name>: FAIL (<n> of <m>)".  The same file builds on the host and
  * with llvm-mingw for Windows.  CHECK and CHECK_EQ may be used from any
  * thread; check_finish is called once, by the main thread, after the
- * other threads were joined.
+ * other threads were joined.  The counters' lock is a spin lock of atomic
+ * operations, so a test needs no thread library of the system's (on
+ * Windows no POSIX thread layer is linked).
  */
 
 #ifndef WS334_TEST_CHECK_H
 #define WS334_TEST_CHECK_H
 
-#include <pthread.h>
 #include <stdio.h>
 
 /* The checks made so far and the ones that failed, for the summary line (under check_lock). */
 static unsigned check_count;
 static unsigned check_failures;
 
-/* The lock of the counters and the output: a test may check from several threads. */
-static pthread_mutex_t check_lock = PTHREAD_MUTEX_INITIALIZER;
+/*
+ * The lock of the counters and the output: a test may check from several
+ * threads.  0 free, 1 held; read and written only with atomic operations.
+ */
+static int check_lock;
+
+/* Takes the lock of the counters, spinning while another thread holds it (a check is short). */
+static __inline void
+check_lock_take(void)
+{
+	int held;
+
+	/* Spins until this thread turned the lock from free to held. */
+	for (;;) {
+		held = __atomic_exchange_n(&check_lock, 1, __ATOMIC_ACQUIRE);
+		if (held == 0)
+			break;
+	}
+}
+
+/* Gives back the lock of the counters. */
+static __inline void
+check_lock_give(void)
+{
+	/* Publishes the counters to the next thread that takes the lock. */
+	__atomic_store_n(&check_lock, 0, __ATOMIC_RELEASE);
+}
 
 /*
  * Records one check; a failure prints the condition and where it is.
@@ -37,7 +63,7 @@ check_report(
 	const char *file,
 	int line)
 {
-	pthread_mutex_lock(&check_lock);
+	check_lock_take();
 
 	/* Every check counts; a failure names the condition so the log alone says what broke. */
 	check_count++;
@@ -47,7 +73,7 @@ check_report(
 		fflush(stdout);
 	}
 
-	pthread_mutex_unlock(&check_lock);
+	check_lock_give();
 }
 
 /* Checks a condition, recording the source text of the condition. */
@@ -67,7 +93,7 @@ check_equal(
 	const char *file,
 	int line)
 {
-	pthread_mutex_lock(&check_lock);
+	check_lock_take();
 
 	/* Every check counts; a failure names the expression and both values. */
 	check_count++;
@@ -77,7 +103,7 @@ check_equal(
 		fflush(stdout);
 	}
 
-	pthread_mutex_unlock(&check_lock);
+	check_lock_give();
 }
 
 /*

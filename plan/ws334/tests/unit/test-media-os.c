@@ -7,7 +7,8 @@
 
 /*
  * Unit test of libmedia's operating-system layer: loading the Vulkan
- * loader, and opening and reading files at any offset.  Every expected
+ * loader, opening and reading files at any offset, and the threads,
+ * mutexes, conditions, once calls, clock and sleep.  Every expected
  * value comes from the contract in media-os.h and from hand arithmetic.
  */
 
@@ -38,8 +39,28 @@
 /* The name "動画.mp4" in UTF-8, spelled in bytes so that the encoding of this source does not matter. */
 #define TEST_UNICODE_NAME "\xe5\x8b\x95\xe7\x94\xbb.mp4"
 
+/* The threads that race on one mutex, and how many times each adds one under it. */
+#define TEST_THREADS 4U
+#define TEST_ROUNDS 20000U
+
 /* Which system the harness runs the test on ("posix" or "win32"). */
 static const char *test_system;
+
+/*
+ * What the threads of test_threads share: the mutex and the condition,
+ * the sum the threads add to and the number of them that ended (under the
+ * mutex).
+ */
+struct test_shared {
+	struct media_os_mutex mutex;
+	struct media_os_cond cond;
+	unsigned long sum;
+	unsigned ended;
+};
+
+/* The once of test_threads, and how many times its call was made (only by the call). */
+static struct media_os_once test_once = MEDIA_OS_ONCE_INIT;
+static unsigned test_once_calls;
 
 static unsigned char test_pattern(uint64_t index);
 static FILE *test_fopen(const char *name, const char *mode);
@@ -55,6 +76,10 @@ static void test_sharing(void);
 static void test_descriptor(void);
 static void test_device(void);
 static void test_access(void);
+static void test_threads(void);
+static void test_clock(void);
+static void test_once_call(void);
+static void test_thread_run(void *argument);
 
 /*
  * Runs every group of checks on the system the harness named.
@@ -81,6 +106,8 @@ main(
 	test_descriptor();
 	test_device();
 	test_access();
+	test_threads();
+	test_clock();
 
 	/* Reports the result. */
 	return check_finish("media-os");
@@ -809,4 +836,132 @@ test_access(void)
 	CHECK_EQ(size, 0);
 	chmod("locked.bin", 0600);
 #endif
+}
+
+/*
+ * Checks the threads, the mutex, the condition and the once: threads that
+ * each add to one sum under the mutex leave the whole sum, every thread
+ * passes the once and its call is made once, and the main thread waits on
+ * the condition until every thread said it ended.
+ */
+static void
+test_threads(void)
+{
+	struct media_os_thread threads[TEST_THREADS];
+	struct test_shared shared;
+	unsigned started;
+	unsigned index;
+	uint64_t before;
+	uint64_t after;
+	int error;
+
+	/* The shared state. */
+	memset(&shared, 0, sizeof(shared));
+	error = media_os_mutex_init(&shared.mutex);
+	CHECK_EQ(error, 0);
+	error = media_os_cond_init(&shared.cond);
+	CHECK_EQ(error, 0);
+
+	/* The threads, each running the same work. */
+	started = 0;
+	for (index = 0; index < TEST_THREADS; index++) {
+		error = media_os_thread_start(&threads[index], test_thread_run, &shared);
+		CHECK_EQ(error, 0);
+		if (error != 0)
+			break;
+		started++;
+	}
+
+	/* Waits, a little at a time, until every thread said it ended. */
+	media_os_mutex_lock(&shared.mutex);
+	while (shared.ended < started)
+		media_os_cond_wait_for(&shared.cond, &shared.mutex, 50U);
+	media_os_mutex_unlock(&shared.mutex);
+
+	/* Each thread's end, then the whole sum and one call of the once. */
+	for (index = 0; index < started; index++)
+		media_os_thread_join(&threads[index]);
+	CHECK_EQ(started, TEST_THREADS);
+	CHECK_EQ(shared.sum, (unsigned long)TEST_THREADS * TEST_ROUNDS);
+	CHECK_EQ(test_once_calls, 1);
+
+	/* A once passed again makes no call. */
+	error = media_os_once(&test_once, test_once_call);
+	CHECK_EQ(error, 0);
+	CHECK_EQ(test_once_calls, 1);
+
+	/* A wait that nobody ends lasts about its milliseconds (at least most of them, at most a few seconds). */
+	media_os_mutex_lock(&shared.mutex);
+	before = media_os_clock_ns();
+	media_os_cond_wait_for(&shared.cond, &shared.mutex, 100U);
+	after = media_os_clock_ns();
+	media_os_mutex_unlock(&shared.mutex);
+	CHECK(after - before >= 80000000ULL);
+	CHECK(after - before < 5000000000ULL);
+
+	/* The broadcast with nobody waiting does nothing; the mutex and the condition go. */
+	media_os_cond_broadcast(&shared.cond);
+	media_os_cond_destroy(&shared.cond);
+	media_os_mutex_destroy(&shared.mutex);
+}
+
+/* Checks the monotonic clock and the sleep: the clock moves forward, by about the time slept. */
+static void
+test_clock(void)
+{
+	uint64_t first;
+	uint64_t second;
+	uint64_t third;
+
+	/* Two readings in a row never go back. */
+	first = media_os_clock_ns();
+	second = media_os_clock_ns();
+	CHECK(first != 0U);
+	CHECK(second >= first);
+
+	/* A sleep of 50 ms moves the clock by at least most of it and at most a few seconds. */
+	media_os_sleep_ms(50U);
+	third = media_os_clock_ns();
+	CHECK(third - second >= 40000000ULL);
+	CHECK(third - second < 5000000000ULL);
+
+	/* A sleep of nothing returns. */
+	media_os_sleep_ms(0U);
+}
+
+/* Counts a call of the once (made by exactly one thread). */
+static void
+test_once_call(void)
+{
+	/* The count, which the once publishes to every thread that passes it. */
+	test_once_calls++;
+}
+
+/* A thread of test_threads: passes the once, adds to the sum under the mutex, then says it ended. */
+static void
+test_thread_run(
+	void *argument)
+{
+	struct test_shared *shared;
+	unsigned round;
+	int error;
+
+	/* The once, which every thread passes. */
+	shared = argument;
+	error = media_os_once(&test_once, test_once_call);
+	CHECK_EQ(error, 0);
+	CHECK_EQ(test_once_calls, 1);
+
+	/* Adds one at a time, each under the mutex. */
+	for (round = 0; round < TEST_ROUNDS; round++) {
+		media_os_mutex_lock(&shared->mutex);
+		shared->sum++;
+		media_os_mutex_unlock(&shared->mutex);
+	}
+
+	/* Says it ended, waking the main thread. */
+	media_os_mutex_lock(&shared->mutex);
+	shared->ended++;
+	media_os_cond_broadcast(&shared->cond);
+	media_os_mutex_unlock(&shared->mutex);
 }

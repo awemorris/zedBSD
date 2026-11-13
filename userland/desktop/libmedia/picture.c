@@ -10,13 +10,12 @@
 #include "media-decoder.h"
 #include "media-os.h"
 #include <errno.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* One decoder's reusable picture storage; live includes checked-out pictures and its idle list. */
 struct media_picture_pool {
-	pthread_mutex_t lock;
+	struct media_os_mutex lock;
 	struct media_picture *idle;
 	uint32_t width;
 	uint32_t height;
@@ -42,7 +41,7 @@ struct picture_scaler {
 static int32_t picture_colours[3][2][5][256];
 
 /* Publishes mathematical colour coefficients before any picture is scaled. */
-static pthread_once_t picture_once = PTHREAD_ONCE_INIT;
+static struct media_os_once picture_once = MEDIA_OS_ONCE_INIT;
 
 static void picture_initialize(void);
 static void picture_release(struct media_picture *picture);
@@ -73,7 +72,7 @@ media_picture_pool_create(
 	pool = calloc(1U, sizeof(*pool));
 	if (pool == NULL)
 		return NULL;
-	error = pthread_mutex_init(&pool->lock, NULL);
+	error = media_os_mutex_init(&pool->lock);
 	if (error != 0) {
 		free(pool);
 		return NULL;
@@ -120,9 +119,9 @@ media_picture_pool_get(
 	size_t chroma;
 
 	/* The decoder owns the pool while get is permitted; close ends that right. */
-	pthread_mutex_lock(&pool->lock);
+	media_os_mutex_lock(&pool->lock);
 	if (pool->closed != 0) {
-		pthread_mutex_unlock(&pool->lock);
+		media_os_mutex_unlock(&pool->lock);
 		return NULL;
 	}
 
@@ -135,7 +134,7 @@ media_picture_pool_get(
 		/* Fresh storage is checked out under the pool lock, keeping live accounting exact. */
 		picture = calloc(1U, sizeof(*picture));
 		if (picture == NULL) {
-			pthread_mutex_unlock(&pool->lock);
+			media_os_mutex_unlock(&pool->lock);
 			return NULL;
 		}
 
@@ -146,7 +145,7 @@ media_picture_pool_get(
 			picture->luma = malloc(luma + chroma);
 			if (picture->luma == NULL) {
 				free(picture);
-				pthread_mutex_unlock(&pool->lock);
+				media_os_mutex_unlock(&pool->lock);
 				return NULL;
 			}
 
@@ -169,7 +168,7 @@ media_picture_pool_get(
 	picture->aspect_den = 1U;
 	picture->colour = MEDIA_COLOUR_601;
 	picture->full_range = 0;
-	pthread_mutex_unlock(&pool->lock);
+	media_os_mutex_unlock(&pool->lock);
 	return picture;
 }
 
@@ -187,7 +186,7 @@ media_picture_pool_close(
 	/* A failed decoder open may have made no pool. */
 	if (pool == NULL)
 		return;
-	pthread_mutex_lock(&pool->lock);
+	media_os_mutex_lock(&pool->lock);
 	pool->closed = 1;
 	picture = pool->idle;
 	pool->idle = NULL;
@@ -203,7 +202,7 @@ media_picture_pool_close(
 
 	/* Snapshot remaining live storage before releasing the pool lock. */
 	live = pool->live;
-	pthread_mutex_unlock(&pool->lock);
+	media_os_mutex_unlock(&pool->lock);
 
 	/* The last outstanding picture will destroy a pool that still has live storage. */
 	if (live == 0U)
@@ -218,9 +217,9 @@ void
 media_picture_ref(
 	struct media_picture *picture)
 {
-	pthread_mutex_lock(&picture->pool->lock);
+	media_os_mutex_lock(&picture->pool->lock);
 	picture->refs++;
-	pthread_mutex_unlock(&picture->pool->lock);
+	media_os_mutex_unlock(&picture->pool->lock);
 	return;
 }
 
@@ -243,10 +242,10 @@ media_picture_unref(
 		return;
 	pool = picture->pool;
 	destroy = 0;
-	pthread_mutex_lock(&pool->lock);
+	media_os_mutex_lock(&pool->lock);
 	picture->refs--;
 	if (picture->refs != 0U) {
-		pthread_mutex_unlock(&pool->lock);
+		media_os_mutex_unlock(&pool->lock);
 		return;
 	}
 
@@ -268,7 +267,7 @@ media_picture_unref(
 	}
 
 	/* Release the pool lock before destroying its final allocation. */
-	pthread_mutex_unlock(&pool->lock);
+	media_os_mutex_unlock(&pool->lock);
 
 	/* The context may decode into the image again. */
 	if (slots != NULL)
@@ -343,7 +342,7 @@ media_gpu_slots_create(
 	slots = calloc(1U, sizeof(*slots));
 	if (slots == NULL)
 		return NULL;
-	error = pthread_mutex_init(&slots->lock, NULL);
+	error = media_os_mutex_init(&slots->lock);
 	if (error != 0) {
 		free(slots);
 		return NULL;
@@ -372,12 +371,12 @@ media_gpu_slots_hold(
 	uint32_t y)
 {
 	/* The image is held, and the record stays while the picture does. */
-	pthread_mutex_lock(&slots->lock);
+	media_os_mutex_lock(&slots->lock);
 
 	slots->held |= 1U << slot;
 	slots->refs++;
 
-	pthread_mutex_unlock(&slots->lock);
+	media_os_mutex_unlock(&slots->lock);
 
 	/* The picture names the image and its window's corner. */
 	picture->gpu = slots;
@@ -400,11 +399,11 @@ media_gpu_slots_held(
 		return 0U;
 
 	/* The mask, as the pictures leave it. */
-	pthread_mutex_lock(&slots->lock);
+	media_os_mutex_lock(&slots->lock);
 
 	held = slots->held;
 
-	pthread_mutex_unlock(&slots->lock);
+	media_os_mutex_unlock(&slots->lock);
 
 	/* Succeeded: the held images. */
 	return held;
@@ -425,12 +424,12 @@ media_gpu_slots_unref(
 		return;
 
 	/* One reference fewer. */
-	pthread_mutex_lock(&slots->lock);
+	media_os_mutex_lock(&slots->lock);
 
 	slots->refs--;
 	refs = slots->refs;
 
-	pthread_mutex_unlock(&slots->lock);
+	media_os_mutex_unlock(&slots->lock);
 
 	/* Others still use the record. */
 	if (refs != 0U)
@@ -441,7 +440,7 @@ media_gpu_slots_unref(
 		media_os_close_descriptor(slots->fd[index]);
 
 	/* The record itself. */
-	pthread_mutex_destroy(&slots->lock);
+	media_os_mutex_destroy(&slots->lock);
 	free(slots);
 }
 
@@ -525,7 +524,7 @@ media_picture_scale(
 	/* A picture the GPU holds has no pixels for the CPU to scale. */
 	if (picture->luma == NULL)
 		return ENOTSUP;
-	error = pthread_once(&picture_once, picture_initialize);
+	error = media_os_once(&picture_once, picture_initialize);
 	if (error != 0)
 		return error;
 
@@ -684,11 +683,11 @@ gpu_slots_release(
 	unsigned slot)
 {
 	/* The image is free. */
-	pthread_mutex_lock(&slots->lock);
+	media_os_mutex_lock(&slots->lock);
 
 	slots->held &= ~(1U << slot);
 
-	pthread_mutex_unlock(&slots->lock);
+	media_os_mutex_unlock(&slots->lock);
 
 	/* The picture's reference goes. */
 	media_gpu_slots_unref(slots);
@@ -699,7 +698,7 @@ static void
 picture_pool_destroy(
 	struct media_picture_pool *pool)
 {
-	pthread_mutex_destroy(&pool->lock);
+	media_os_mutex_destroy(&pool->lock);
 	free(pool);
 	return;
 }

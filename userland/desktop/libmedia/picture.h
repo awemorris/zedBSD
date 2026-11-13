@@ -7,7 +7,7 @@
 
 #ifndef LIBMEDIA_PICTURE_H
 #define LIBMEDIA_PICTURE_H
-#include <pthread.h>
+#include "media-os.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -33,7 +33,7 @@ struct media_gpu_picture;
  * does not decode into until they are freed.
  */
 struct media_gpu_slots {
-	pthread_mutex_t lock;
+	struct media_os_mutex lock;
 	unsigned refs;
 	uint32_t held;
 	uint64_t identity;

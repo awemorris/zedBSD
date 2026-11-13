@@ -24,7 +24,7 @@ status=0
 
 # The program.
 if ! timeout 1800 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 \
-    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j8 \
+    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j4 \
     test-program TEST_PROGRAM=fetch-tool \
     TEST_PROGRAM_SOURCES="plan/ws334/tests/fetch-main.c" \
     > "$out/make.log" 2>&1 || grep -q 'warning:' "$out/make.log"; then

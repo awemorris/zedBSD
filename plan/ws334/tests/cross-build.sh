@@ -12,15 +12,18 @@
 #     every public function of libkeiland (its own, a common file's, or a stub);
 #  4. the Vulkan loader is an ordinary import: OmniGrammaton.exe has vulkan-1.dll in its import table and
 #     no delay-import table (the browser needs Vulkan to start);
-#  5. libkeiland's Windows files (libkeiland.a) refer to no POSIX thread name (pthread_*): the Windows
-#     port uses the system's threads and locks;
+#  5. no POSIX thread layer: the static libraries (libbrowser, libmedia, libkeiland, the user interface, the
+#     compat and TLS libraries) refer to no POSIX thread name (pthread_*, nor winpthreads' clock_gettime
+#     and nanosleep), and OmniGrammaton.exe (its copy with symbols) holds no winpthreads name: every
+#     library uses the system's threads and locks;
 #  6a. OmniGrammaton.exe imports only Windows' own DLLs, the UCRT's and vulkan-1.dll;
 #  7. the zip (make -f apps/browser-win32/Makefile WIN32_ARCH=<arch> zip): it holds what
 #     plan/ws334/tests/zip-contents.txt lists, is the same bytes when made again, and its icon has 8 images
 #     (ImageMagick's identify);
 #  6. one .exe of static libraries: plan/ws334/tests/script-tool-main.c linked by the build's
 #     test-program with every static library imports only Windows' own DLLs, the UCRT's and at most
-#     vulkan-1.dll, none delayed (no DLL of this tree, no libwinpthread-1.dll); on x86_64 under Wine it
+#     vulkan-1.dll, none delayed (no DLL of this tree, no libwinpthread-1.dll), and holds no winpthreads
+#     name either; on x86_64 under Wine it
 #     prints 16 random bytes and runs a script that reads the clock (arm64: linked only).
 #   sh plan/ws334/tests/cross-build.sh                               x86_64
 #   WIN32_ARCH=aarch64 sh plan/ws334/tests/cross-build.sh            arm64 only
@@ -217,18 +220,24 @@ for arch in ${WIN32_ARCH:-x86_64}; do
 		echo "$name: vulkan-1.dll is an ordinary import of OmniGrammaton.exe"
 	fi
 
-	# 5. No POSIX thread name in libkeiland's Windows files.
-	"${WIN32_TOOL_PREFIX}nm" -u "$build/obj/libkeiland.a" 2> /dev/null |
+	# 5. No POSIX thread layer: no POSIX thread name in the static libraries, no winpthreads in the program.
+	"${WIN32_TOOL_PREFIX}nm" -u $core "$media" "$build/obj/libkeiland.a" "$interface" $archives \
+	    "$build/obj/libssl-compat.a" "$build/obj/libcrypto-compat.a" 2> /dev/null |
 	    awk 'NF == 2 { print $2 } NF == 1 && $1 !~ /:$/ { print $1 }' | sed 's/^__imp_//' |
-	    sort -u > "$out/keiland-undefined-$name.txt"
-	if [ ! -s "$out/keiland-undefined-$name.txt" ]; then
-		echo "FAILED $name: nm found no undefined symbol in libkeiland.a (no archive?)"
+	    sort -u > "$out/threads-undefined-$name.txt"
+	"${WIN32_TOOL_PREFIX}nm" "$build/obj/OmniGrammaton-full.exe" 2> /dev/null | awk '{ print $NF }' |
+	    sort -u > "$out/omnigrammaton-symbols-$name.txt"
+	if [ ! -s "$out/threads-undefined-$name.txt" ] || [ ! -s "$out/omnigrammaton-symbols-$name.txt" ]; then
+		echo "FAILED $name: nm found no undefined symbol in the static libraries or no symbol in OmniGrammaton-full.exe"
 		status=1
-	elif grep -n '^_*pthread_' "$out/keiland-undefined-$name.txt"; then
-		echo "FAILED $name: libkeiland.a refers to the POSIX thread names above"
+	elif grep -n -E '^_*(pthread_|clock_gettime|nanosleep)' "$out/threads-undefined-$name.txt"; then
+		echo "FAILED $name: the static libraries refer to the POSIX thread names above"
+		status=1
+	elif grep -n -i -E 'pthread|winpthread' "$out/omnigrammaton-symbols-$name.txt"; then
+		echo "FAILED $name: OmniGrammaton.exe holds the winpthreads names above"
 		status=1
 	else
-		echo "$name: libkeiland.a refers to no pthread_ name"
+		echo "$name: the static libraries refer to no pthread_ name; OmniGrammaton.exe holds no winpthreads name ($(wc -l < "$out/omnigrammaton-symbols-$name.txt") symbols)"
 	fi
 
 	# 6a. OmniGrammaton.exe: the system's DLLs, the UCRT's and vulkan-1.dll only.
@@ -295,6 +304,9 @@ for arch in ${WIN32_ARCH:-x86_64}; do
 		status=1
 	elif [ -n "$foreign" ] || grep -q '^DelayImport {' "$out/program-$name.imports"; then
 		echo "FAILED $name: $program imports DLLs that are not Windows' own, or delays one: $foreign"
+		status=1
+	elif "${WIN32_TOOL_PREFIX}nm" "$program" 2> /dev/null | grep -i -E 'pthread|winpthread'; then
+		echo "FAILED $name: $program holds the winpthreads names above"
 		status=1
 	else
 		echo "$name: one .exe, imports only the system's DLLs ($(wc -l < "$out/program-dlls-$name.txt"))"
