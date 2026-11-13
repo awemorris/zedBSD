@@ -2,7 +2,7 @@
 
 # WS350: Raspberry Pi 500 を動作の確かめた機種として記録する
 
-Status: planned
+Status: incomplete
 Primary Milestone: MG003
 Parent: [Master](../master.md)
 Owner: Q1
@@ -19,9 +19,10 @@ Owner: Q1
 ## Resume point
 
 - 2026-11-13 Q1 が立てた。P1 が処理する。
+- 2026-11-13 P1: p001 cleared（[phase.md](phase001/phase.md)）。返信用の一覧は [reply-links.md](reply-links.md)。
 
 ## Phase
 
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | docs の対応機種と plan/tools.md の機種の表に Pi 500（BCM2712 D0、8 GB）を「外部の報告で動作、2026-11-03 の source、dtb を足して起動」として載せる。分かっている事（HDMI の音が無い、WS349）と WS348 の後は dtb を足さずに起動する事を書く | planned | — |
+| [p001](phase001/phase.md) | docs の対応機種と plan/tools.md の機種の表に Pi 500（BCM2712 D0、8 GB）を「外部の報告で動作、2026-11-03 の source、dtb を足して起動」として載せる。分かっている事（HDMI の音が無い、WS349）と WS348 の後は dtb を足さずに起動する事を書く | cleared（2026-11-13 P1。README と plan/tools.md） | — |

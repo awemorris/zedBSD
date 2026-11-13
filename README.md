@@ -35,8 +35,17 @@ Ourt current targets are the following:
 |-------------------------|------------------|-------------|------------------|----------------|------------------|
 | StarFive                | Vision Five 2    | RISC-V 64   | StarFive JH7110  | PowerVR        | IMG BXE-4-32 MC1 |
 | Raspberry Pi Foundation | Raspberry Pi 5   | Arm64       | Arm Cortex-A76   | VideoCore      | VideoCore VII    |
+| Raspberry Pi Foundation | Raspberry Pi 500 | Arm64       | Arm Cortex-A76   | VideoCore      | VideoCore VII    |
 | Raspberry Pi Foundation | Raspberry Pi 4   | Arm64       | Arm Cortex-A72   | VideoCore      | VideoCore VI     |
 | PC                      | Any              | x86_64      | Any              | Any            | Intel/NVIDIA/AMD |
+
+The Raspberry Pi 500 runs the Raspberry Pi 5 image.  A user reported it
+working on a Pi 500 (BCM2712 D0, 8 GB) with the source of 2026-11-03 after
+adding the Pi 500's device tree to the boot partition: the desktop, Japanese
+input, Wi-Fi, Ethernet, the browser, SSH and shutdown.  The image now carries
+that device tree, so it is expected to boot without changes (not yet
+confirmed on a Pi 500).  HDMI audio is not supported on the Pi 5 and the
+Pi 500 yet.
 
 Intel GPU driver is tested on:
 
@@ -256,8 +265,10 @@ Supported hardware:
     - Bluetooth: USB Bluetooth
     - USB: USB 3.0, USB-C DisplayPort Alt Mode
 
-- Raspberry Pi 4/5
+- Raspberry Pi 4/5/500
     - GPU, USB, Wi-Fi, and Ethernet are supported
+    - The Raspberry Pi 500 uses the Raspberry Pi 5 image
+    - HDMI audio is not supported on the Raspberry Pi 5 and 500 yet
     - The onboard Bluetooth driver is still being debugged and will be merged soon
 
 - Vision Five 2
@@ -414,28 +425,20 @@ how Windows and macOS work, and it is something Linux lacks.
 
 ## Building
 
-Host prerequisites, configuration, image layout, and the QEMU procedure are in
-the build-from-source guide.
-
-On amd64, the default disk image uses the native layout: a GPT disk whose ESP
-holds the UEFI loader and the kernel, a read-write UFS root partition, and a
-swap partition. `make run` starts QEMU with OVMF and an NVMe disk. Hybrid (UEFI and
-BIOS), UEFI-only, and BIOS-only layouts are chosen by setting `ZEDBSD_VARIANT`
-(`hybrid`, `uefi`, `bios`) in `config.mk`; `make menuconfig` keeps the value it
-reads.
+Host prerequisites, the configurations, the firmware licenses and the image
+layout are in the build-from-source guide (`docs/howto/build-from-source.md`).
+A build reads one configuration file of `config/`, named with `CONFIGMK=` (or
+copied to `config.mk`).  For the Raspberry Pi 5 and the Raspberry Pi 500:
 
 ```sh
-make                   # same as disk-image
-make menuconfig        # write config.mk
-make disk-image        # build a disk image
-make world             # build vmunix and rootfs
-make rootfs            # build rootfs
-make vmunix            # build the vmunix kernel
-make run               # build a disk image and start QEMU
-make toolchain-cache   # install the pinned rev-0 LLVM cache (x86_64 Linux)
-make toolchain         # build a toolchain
-make help              # short command summary
+make CONFIGMK=config/config.rpi5.mk llvm-toolchain-cached  # prebuilt LLVM (x86_64 Linux)
+make CONFIGMK=config/config.rpi5.mk sysroot                # libc and headers
+make CONFIGMK=config/config.rpi5.mk firmware-licenses      # read and accept the firmware licenses
+make CONFIGMK=config/config.rpi5.mk -j8 disk               # build/rpi5/hdd-image.img
 ```
+
+Other targets: `vmunix` (the kernel), `userland`, `rootfs`, `bootloader`,
+`toolchain` (LLVM built from source) and `help`.
 
 ---
 

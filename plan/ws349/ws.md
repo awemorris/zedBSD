@@ -2,7 +2,7 @@
 
 # WS349: Raspberry Pi 5 の HDMI の音
 
-Status: planned
+Status: incomplete
 Primary Milestone: MG006
 Parent: [Master](../master.md)
 Owner: Q1
@@ -19,9 +19,10 @@ Pi 5（と Pi 500）は `/dev` に音の device が無く HDMI の音が出な�
 ## Resume point
 
 - 2026-11-13 Q1 が立てた。P1 が処理する。
+- 2026-11-13 P1: p001 の設計の第一版（[phase.md](phase001/phase.md)）。次: design-reviewer、未確定の出典の確かめ（p002 の案）、実装の Phase を Q1 が立てる。
 
 ## Phase
 
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計: BCM2712 の HDMI audio の経路（HDMI の controller・DMA・audiod の device の口）と、Pi 4 の vc4 の HDMI audio との違い、出典（guardrail の値の規則）。設計の後に実装の Phase を立てる | planned | — |
+| [p001](phase001/phase.md) | 設計: BCM2712 の HDMI audio の経路（HDMI の controller・DMA・audiod の device の口）と、Pi 4 の vc4 の HDMI audio との違い、出典（guardrail の値の規則）。設計の後に実装の Phase を立てる | cleared（2026-11-13 P1。設計の第一版、design-reviewer は未実施） | — |

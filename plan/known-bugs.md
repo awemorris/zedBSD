@@ -462,6 +462,6 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-422](bugs/BUG-422.md) | kernel に CPU の affinity が無く、cpuperf の測りの thread が work stealing で他の CPU に移る（E-core が測れない） | fixed（2026-11-13 Q1、P2 q2024。`sched_set_cpu` に FREE・BOUND の affinity、BOUND は盗まない。5330 の確かめは WS333 の次の測定） |
 | [BUG-423](bugs/BUG-423.md) | QEMU amd64 で USB の keyboard が enumerate されない（`port 6 enumeration failed (42)`、ETIMEDOUT） | fixed（2026-11-13 Q1、P2 q2026。IRQ の establish を IMAN.IE の前に、全 controller 同じ順。実機の DWC3 は未確かめ） |
 | [BUG-424](bugs/BUG-424.md) | VMD の裏の disk がある機械（5330）が S0 idle に入れない（`vmd_suspend()` が常に EBUSY） | open（2026-11-13 Q1 が起票、WS333 p027 から） |
-| [BUG-425](bugs/BUG-425.md) | Raspberry Pi 500（と Pi 5）の設定アプリに有線 LAN の項目が出ない | open（2026-11-13 Q1 が起票、Pi 500 の外部の報告、修正済みの疑い） |
-| [BUG-426](bugs/BUG-426.md) | 初回の起動の時だけ、カレンダー以外のアプリが click に反応しない事がある（Pi 500） | open（2026-11-13 Q1 が起票、Pi 500 の外部の報告、修正済みの疑い） |
-| [BUG-427](bugs/BUG-427.md) | Wi-Fi の PIN の設定中に ARM64 SError が 1 回出た（Pi 500、bcm43455） | open（2026-11-13 Q1 が起票、Pi 500 の外部の報告、修正済みの疑い） |
+| [BUG-425](bugs/BUG-425.md) | Raspberry Pi 500（と Pi 5）の設定アプリに有線 LAN の項目が出ない | closed（2026-11-13 Q1。今の main の Pi 5 で再現せず、設定の Network・Ethernet の page に en0 が出る。radio のある機械の初期設定の network の段は Wi-Fi の page だけを出す設計で、報告はそこを見た見込み） |
+| [BUG-426](bugs/BUG-426.md) | 初回の起動の時だけ、カレンダー以外のアプリが click に反応しない事がある（Pi 500） | closed（2026-11-13 Q1。今の main の Pi 5 で再現せず。関係する直しは BUG-412 の Logitech の vendor の report を捨てる直し（82f7aba10a、報告の source にも入っていた）。再発したら受信機の型と log を報告者に頼む） |
+| [BUG-427](bugs/BUG-427.md) | Wi-Fi の PIN の設定中に ARM64 SError が 1 回出た（Pi 500、bcm43455） | fixed（2026-11-13 P1: Pi 5 で毎起動に再現。D0 の pinctrl の report が実装の外の 0x1c を読んでいた。PINCTRL_D0_BYTES を 0x1c に、Pi 5 で SError 0 を確認、Pi 500 は未実施） |
