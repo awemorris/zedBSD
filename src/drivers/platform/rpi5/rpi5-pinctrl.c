@@ -51,9 +51,22 @@
 /* The bytes of the controller's registers the module maps: the larger, C0, block. */
 #define PINCTRL_REGISTER_BYTES	0x30U
 
-/* The bytes each stepping's controller has. */
+/*
+ * The bytes each stepping's controller has.
+ *
+ * The D0 controller implements seven registers, 0x00 to 0x18: four of
+ * function selectors and three of pulls.  The device trees give its block
+ * as 0x20 bytes, but a read of the eighth word (0x1c) on a D0 chip raises
+ * an SError, so nothing past 0x18 is touched.
+ *
+ * Values referenced: Raspberry Pi Linux rpi-6.12.y
+ * drivers/pinctrl/bcm/pinctrl-bcm2712.c (bcm2712_d0_gpio_pin_regs: the
+ * pull registers of the D0 pins below end at 0x18), and a Raspberry Pi 5
+ * with a D0 chip (reads of 0x00 to 0x18 leave no SError pending; a read
+ * of 0x1c leaves one).
+ */
 #define PINCTRL_C0_BYTES	0x30U
-#define PINCTRL_D0_BYTES	0x20U
+#define PINCTRL_D0_BYTES	0x1cU
 
 /*
  * The boot flash's pins (GPIO 1 to 4) on its SPI function (vc_spi0), as
