@@ -1537,8 +1537,6 @@ sync_fences_wait(
 	uint64_t first_sequence;
 	VkBool32 missing;
 	VkBool32 first_pending;
-	VkBool32 hotplug_only;
-	uint64_t hotplug_cursor;
 	struct vulkan_sync *sync;
 	struct vulkan_sync *first_external;
 	struct vulkan_notification *notification;
@@ -1570,8 +1568,6 @@ sync_fences_wait(
 		first_external = NULL;
 		first_pending = VK_TRUE;
 		missing = VK_FALSE;
-		hotplug_only = VK_TRUE;
-		hotplug_cursor = UINT64_MAX;
 		descriptor_count = 1;
 		for (index = 0; index < count; index++) {
 			/* Pin before observing status, closing the observe-to-poll consumption race. */
@@ -1613,16 +1609,6 @@ sync_fences_wait(
 
 				sync = vulkan_sync_object((uint64_t)(uintptr_t)fences[index]);
 				sequence = sync->notification;
-
-				/* A pending hotplug fence with a cursor waits for the display nodes' next change. */
-				if (sync->external == NULL &&
-				    sync->event == VULKAN_SYNC_EVENT_HOTPLUG &&
-				    sync->event_based) {
-					if (sync->event_cursor < hotplug_cursor)
-						hotplug_cursor = sync->event_cursor;
-				} else {
-					hotplug_only = VK_FALSE;
-				}
 				external_pending = VK_FALSE;
 				if (sync->external != NULL) {
 					external_pending = VK_TRUE;
@@ -1693,13 +1679,6 @@ sync_fences_wait(
 			status = sync_notification_wait(device->object.context, first_sequence, delay);
 		} else if (!all && !missing) {
 			status = sync_notification_poll(device->object.context, delay, descriptors, descriptor_count);
-		} else if (hotplug_only && hotplug_cursor != UINT64_MAX) {
-			/*
-			 * Only hotplug fences pend: the display nodes' next change wakes
-			 * the wait (each pending fence's cursor is at least the topology
-			 * now, so a change above the lowest completes one of them).
-			 */
-			status = vulkan_wsi_display_node_topology_wait(device->physical, hotplug_cursor, delay);
 		} else {
 			/* A never-submitted ordinary fence has no admitted K job and needs bounded native observation. */
 			if (delay > VULKAN_SYNC_POLL_NS)

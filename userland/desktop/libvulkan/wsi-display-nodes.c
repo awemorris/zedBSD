@@ -10,14 +10,11 @@
  */
 
 #include "wsi-internal.h"
-#include "sync-internal.h"
 
 #include <uapi/gpu-scanout.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
-#include <poll.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -39,9 +36,6 @@ struct wsi_display_inventory {
 	struct vulkan_allocator allocator;
 	struct wsi_display_node *nodes;
 };
-
-/* The display nodes one hotplug wait polls at most. */
-#define WSI_TOPOLOGY_WAIT_NODES	8U
 
 /* Immutable inventories are published together and removed only during external instance teardown. */
 static struct wsi_display_inventory *inventories;
@@ -244,110 +238,6 @@ vulkan_wsi_display_node_topology(
 
 	/* Succeeded: the caller compares this sum with an earlier one. */
 	*sequence = total;
-	return VK_SUCCESS;
-}
-
-/*
- * Waits until the topology of the display nodes assigned to this renderer
- * may have moved above cursor (a sum of vulkan_wsi_display_node_topology),
- * or timeout_ns passes (UINT64_MAX: no bound); the caller observes its
- * fences again after it.  Each node's sequence now is acknowledged on its
- * discovery open, which then turns ready with POLLPRI at the node's next
- * change; a sum above cursor already returns at once.  Only the hotplug
- * waits use the discovery opens' acknowledgement.  More nodes than one
- * poll holds are looked at again after a short pause.
- */
-VkResult
-vulkan_wsi_display_node_topology_wait(
-	struct VkPhysicalDevice_T *physical,
-	uint64_t cursor,
-	uint64_t timeout_ns)
-{
-	struct wsi_display_inventory *inventory;
-	struct wsi_display_node *node;
-	struct gpu_display_events request;
-	struct pollfd descriptors[WSI_TOPOLOGY_WAIT_NODES];
-	uint64_t renderer;
-	uint64_t sequence;
-	uint64_t total;
-	uint64_t milliseconds;
-	VkResult error;
-	nfds_t count;
-	int timeout;
-	int status;
-
-	/* The cached inventory names the nodes and their discovery opens. */
-	error = inventory_get(physical->instance, &inventory);
-	if (error != VK_SUCCESS)
-		return error;
-
-	/* Each display node of this renderer: its sequence now, acknowledged, and its open polled for the next. */
-	renderer = renderer_identity(inventory, physical);
-	total = 0U;
-	count = 0U;
-	for (node = inventory->nodes; node != NULL; node = node->next) {
-		/* Another renderer's outputs and render-only nodes have no hotplug for this device. */
-		if (renderer == 0U ||
-		    node->renderer != renderer ||
-		    (node->info.roles & GPU_DEVICE_DISPLAY) == 0U)
-			continue;
-
-		/* The sequence now, observed on this open (the acknowledgement may name only an observed one). */
-		memset(&request, 0, sizeof(request));
-		request.version = GPU_ABI_VERSION;
-		request.size = sizeof(request);
-		status = node_ioctl(node, GPU_DISPLAY_EVENTS, &request);
-		if (status != 0) {
-			/* A node without topology events never reports a hotplug. */
-			if (errno == EOPNOTSUPP)
-				continue;
-
-			/* A failed node cannot say whether its topology changed. */
-			return VK_ERROR_SURFACE_LOST_KHR;
-		}
-		sequence = request.sequence;
-		total += sequence;
-
-		/* Acknowledged: the open is ready again only at a later change. */
-		memset(&request, 0, sizeof(request));
-		request.version = GPU_ABI_VERSION;
-		request.size = sizeof(request);
-		request.flags = GPU_DISPLAY_EVENT_ACK;
-		request.ack_sequence = sequence;
-		status = node_ioctl(node, GPU_DISPLAY_EVENTS, &request);
-		if (status != 0)
-			return VK_ERROR_SURFACE_LOST_KHR;
-
-		/* A node past what one poll holds is looked at after a pause instead. */
-		if (count == WSI_TOPOLOGY_WAIT_NODES)
-			return vulkan_sync_pause(timeout_ns);
-		descriptors[count].fd = node->fd;
-		descriptors[count].events = POLLPRI;
-		descriptors[count].revents = 0;
-		count++;
-	}
-
-	/* The topology moved already. */
-	if (total > cursor)
-		return VK_SUCCESS;
-
-	/* The bound in whole milliseconds, rounded up; none without one. */
-	timeout = -1;
-	if (timeout_ns != UINT64_MAX) {
-		milliseconds = timeout_ns / UINT64_C(1000000);
-		if (timeout_ns % UINT64_C(1000000) != 0U)
-			milliseconds++;
-		timeout = INT_MAX;
-		if (milliseconds < (uint64_t)INT_MAX)
-			timeout = (int)milliseconds;
-	}
-
-	/* The next change of a node, or the bound (a signal ends it early: the caller looks again). */
-	status = poll(descriptors, count, timeout);
-	if (status < 0 && errno != EINTR)
-		return VK_ERROR_SURFACE_LOST_KHR;
-
-	/* Succeeded: a node changed, or the bound passed. */
 	return VK_SUCCESS;
 }
 
