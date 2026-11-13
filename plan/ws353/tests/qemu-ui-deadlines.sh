@@ -16,8 +16,8 @@
 # from them they close (via=leave), each on the bar's timer; the output turned to 90 and back with keiland-system
 # (two KWL OUTPUT rotate lines with the rotation; the old frames held for Settings' window and how they ended, from
 # KWL OUTPUT rotate shown, are recorded); 30 s idle with Settings open (recorded: the timers by
-# name, the printers' check among them while Settings holds a printers object, printd being in the image); Settings
-# ended and 30 s idle again (as the first: the printers' check stopped with the object); the on-screen keyboard's handwriting
+# name; Settings holds a printers object, printd being in the image, and no printers timer runs for it, see
+# qemu-printers.sh); Settings ended and 30 s idle again (as the first); the on-screen keyboard's handwriting
 # face: three strokes are recognized 600 ms after the last (KWL OSK hand recognize strokes=3, the recognition's
 # timer); SIGTERM; no KWL FAILED.
 #
@@ -351,11 +351,11 @@ if wait_count 'KWL APPS icon app=' 1 60 && wait_count 'KWL TITLEBAR control clie
 	fi
 	sleep 5
 
-	# Idle with Settings open: recorded (the printers' check runs while it holds a printers object).
+	# Idle with Settings open: recorded (Settings holds a printers object; nothing about it runs on the clock).
 	say "settings-printers: $(count 'KWL PRINTERS object') printers objects made"
 	idle idle-settings-30 30
 
-	# Settings ended: the printers' check stops with its object, and the idle is as before.
+	# Settings ended: the idle is as before.
 	serial 'for p in $(ps -A -o pid,args | grep "[/]bin/settings" | while read a b; do echo $a; done); do kill $p; done' > /dev/null 2>&1 || true
 	sleep 3
 	idle idle-after-settings-30 30 2 0
