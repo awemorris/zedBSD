@@ -40,7 +40,7 @@
 #include <uapi/fcntl.h>
 
 /* The objects one poll follows by name; a poll with more is woken by every change. */
-#define POLL_OBJECTS	16U
+#define POLL_OBJECTS	32U
 
 /*
  * One sleeping poll: its own wait queue, and the objects whose changes wake
@@ -136,6 +136,23 @@ poll_notify_object(
 	}
 
 	spin_unlock_irqrestore(&channel.lock, irq);
+}
+
+/*
+ * Gives the name a descriptor number of a table goes by for the polls: an
+ * odd value (an object's address is even), so it names no object; two
+ * numbers of two tables may share one, which only wakes a poll more.
+ */
+const void *
+poll_slot_key(
+	const struct filedesc *table,
+	int descriptor)
+{
+	uintptr_t key;
+
+	/* The table's address made odd, the number folded in above the lowest bit. */
+	key = ((uintptr_t)table | 1U) ^ ((uintptr_t)(unsigned)descriptor << 1);
+	return (const void *)key;
 }
 
 /*
@@ -453,7 +470,7 @@ poll_scan(
 		else
 			thread->poll_waiter = waiter;
 
-		/* A change to the descriptor table (a descriptor closed or reused) wakes the poll too. */
+		/* A change to the descriptor table (its end, an exec) wakes the poll too. */
 		poll_wait_object(process->fd);
 	}
 
@@ -462,6 +479,12 @@ poll_scan(
 	for (i = 0; i < count; i++) {
 		if (waiter != NULL)
 			waiter->noted = 0;
+
+		/* The number polled: its slot taken away or replaced wakes the poll (not the object's own name). */
+		if (waiter != NULL && fds[i].fd >= 0) {
+			poll_wait_object(poll_slot_key(process->fd, fds[i].fd));
+			waiter->noted = 0;
+		}
 		/* Negative poll entries intentionally carry no descriptor ownership. */
 		revents = 0;
 		fds[i].revents = 0;

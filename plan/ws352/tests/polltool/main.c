@@ -24,6 +24,9 @@
  *   dgram-out    a full datagram queue drained by the peer
  *   other        a poll of an idle pipe while another pipe changes 200
  *                times: it stays asleep until its own pipe is written
+ *   close        the polled number closed by another thread while a
+ *                duplicate keeps the pipe open: the poll answers POLLNVAL at once
+ *                (zedBSD; Linux keeps waiting on the open file)
  * Prints one line a case and "polltool: PASS" or "polltool: FAIL n".
  *
  *   polltool [case...]
@@ -350,6 +353,13 @@ main(
 		(void)close(pair[1]);
 		(void)close(other[0]);
 		(void)close(other[1]);
+	}
+	if (wanted(count, names, "close")) {
+		(void)pipe(pair);
+		other[0] = dup(pair[0]);
+		expect("close", pair[0], POLLIN, POLLNVAL, change_close, &pair[0]);
+		(void)close(other[0]);
+		(void)close(pair[1]);
 	}
 	if (failures != 0) {
 		printf("polltool: FAIL %d\n", failures);
