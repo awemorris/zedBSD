@@ -8,8 +8,8 @@
 /*
  * The unit test of the system services of the operating-system layer
  * (base/os-system.h): aligned memory, random bytes, thread names, loading a
- * library, the platform names, the data directory and the trusted
- * certificates.  It runs on POSIX and on Windows; argv[1] says which.
+ * library, the platform names and the data directory.  It runs on POSIX and
+ * on Windows; argv[1] says which.
  *
  * The expected values come from the header's contracts, from the C library
  * and the Windows API used separately from the module, and from hand
@@ -28,7 +28,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <wincrypt.h>
 #else
 #include <sys/utsname.h>
 #include "include/kern/os-name.h"
@@ -458,139 +457,6 @@ test_data_directory(
 #endif
 }
 
-/*
- * What the certificate callback counts: how many certificates of each kind
- * it was given and whether anything it was given was wrong.
- */
-struct trust_context {
-	unsigned roots;
-	unsigned disallowed;
-	unsigned bad;
-	unsigned calls;
-	unsigned stop_at;
-};
-
-/* The callback: counts, checks each certificate, and stops at the call named by stop_at. */
-static int
-trust_each(
-	void *context,
-	const unsigned char *der,
-	size_t length,
-	int distrusted)
-{
-	struct trust_context *counts;
-
-	counts = (struct trust_context *)context;
-	counts->calls++;
-	if (length < 1U || der[0] != 0x30)
-		counts->bad++;
-	if (distrusted != 0 && distrusted != 1)
-		counts->bad++;
-	if (distrusted == 0 && counts->disallowed != 0)
-		counts->bad++;
-	if (distrusted == 0)
-		counts->roots++;
-	else
-		counts->disallowed++;
-	if (counts->stop_at != 0 && counts->calls == counts->stop_at)
-		return 77;
-
-	return 0;
-}
-
-#ifdef _WIN32
-/* Counts the certificates of one system store with the system's own calls, as an oracle; 0 when it does not exist. */
-static unsigned
-count_store(
-	const wchar_t *name,
-	DWORD location)
-{
-	HCERTSTORE store;
-	PCCERT_CONTEXT certificate;
-	PCCERT_CONTEXT next;
-	unsigned count;
-
-	store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
-	    location | CERT_STORE_READONLY_FLAG | CERT_STORE_OPEN_EXISTING_FLAG, name);
-	if (store == NULL)
-		return 0;
-	count = 0;
-	certificate = NULL;
-	for (;;) {
-		next = CertEnumCertificatesInStore(store, certificate);
-		if (next == NULL)
-			break;
-		certificate = next;
-		if ((certificate->dwCertEncodingType & X509_ASN_ENCODING) != 0 && certificate->cbCertEncoded > 0)
-			count++;
-	}
-	CertCloseStore(store, 0);
-
-	return count;
-}
-#endif
-
-/* Checks wb_os_trust_roots. */
-static void
-test_trust_roots(
-	void)
-{
-	struct trust_context counts;
-	int error;
-#ifdef _WIN32
-	unsigned total;
-#endif
-
-	/* No function to call is EINVAL. */
-	error = wb_os_trust_roots(NULL, NULL);
-	CHECK_EQ(error, EINVAL);
-
-	/* Hand over everything. */
-	memset(&counts, 0, sizeof(counts));
-	error = wb_os_trust_roots(trust_each, &counts);
-	CHECK_EQ(error, 0);
-	CHECK_EQ(counts.bad, 0);
-
-	if (!is_win32) {
-		/* The POSIX system hands nothing over: OpenSSL reads the system's file itself. */
-		CHECK_EQ(counts.calls, 0);
-		memset(&counts, 0, sizeof(counts));
-		counts.stop_at = 1;
-		error = wb_os_trust_roots(trust_each, &counts);
-		CHECK_EQ(error, 0);
-		CHECK_EQ(counts.calls, 0);
-		return;
-	}
-
-#ifdef _WIN32
-	/* The counts match what the system's own enumeration finds in the stores. */
-	CHECK_EQ(counts.roots, count_store(L"ROOT", CERT_SYSTEM_STORE_CURRENT_USER) +
-	    count_store(L"ROOT", CERT_SYSTEM_STORE_LOCAL_MACHINE));
-	CHECK_EQ(counts.disallowed, count_store(L"Disallowed", CERT_SYSTEM_STORE_CURRENT_USER) +
-	    count_store(L"Disallowed", CERT_SYSTEM_STORE_LOCAL_MACHINE));
-	total = counts.calls;
-	printf("note: %u roots and %u disallowed certificates\n", counts.roots, counts.disallowed);
-
-	/* A callback that answers 77 stops the walk at once and 77 is the result. */
-	if (total >= 1U) {
-		memset(&counts, 0, sizeof(counts));
-		counts.stop_at = 1;
-		error = wb_os_trust_roots(trust_each, &counts);
-		CHECK_EQ(error, 77);
-		CHECK_EQ(counts.calls, 1);
-	} else {
-		printf("note: no certificate in the stores, the stop check is skipped\n");
-	}
-	if (total >= 3U) {
-		memset(&counts, 0, sizeof(counts));
-		counts.stop_at = 3;
-		error = wb_os_trust_roots(trust_each, &counts);
-		CHECK_EQ(error, 77);
-		CHECK_EQ(counts.calls, 3);
-	}
-#endif
-}
-
 /* Runs the checks. */
 int
 main(
@@ -609,7 +475,6 @@ main(
 	test_library();
 	test_names();
 	test_data_directory();
-	test_trust_roots();
 
 	return check_finish("os-system");
 }

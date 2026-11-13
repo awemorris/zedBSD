@@ -9,8 +9,7 @@
  * The system services of the operating-system layer that are neither
  * files, sockets nor clocks: aligned memory, the system's random bytes,
  * thread names, loading a shared library at run time, the names the engine
- * gives the system to web pages, where the bundled data lives, and the
- * system's trusted certificates.
+ * gives the system to web pages, and where the bundled data lives.
  *
  * os-system-posix.c and os-system-win32.c implement it; the conventions are
  * those of os.h.
@@ -36,21 +35,6 @@ struct wb_os_library;
  * pointer type, not void *, because ISO C does not convert between the two.
  */
 typedef void (*wb_os_function)(void);
-
-/*
- * Called once for each certificate wb_os_trust_roots finds.
- *
- * context:     the caller's pointer, passed through.
- * der:         the certificate in DER, valid only during the call.
- * length:      bytes at der (more than 0).
- * distrusted:  0 for a certificate the system trusts as a root, 1 for one
- *              the system says never to trust (Windows' "Disallowed"
- *              store), which the caller must reject even when it also
- *              appears as a root.
- * Returns 0 to go on, or an errno value to stop the enumeration;
- * wb_os_trust_roots then returns that value.
- */
-typedef int (*wb_os_trust_each)(void *context, const unsigned char *der, size_t length, int distrusted);
 
 /*
  * Allocates memory whose address is a multiple of alignment.
@@ -150,25 +134,5 @@ const char *wb_os_user_agent_system(void);
  * followed by "\\share".
  */
 int wb_os_data_directory(char *buffer, size_t size);
-
-/*
- * Hands each certificate of the system's trust stores to each.
- *
- * each:    called once per certificate; not NULL.
- * context: passed to each.
- * Returns 0 when every certificate was handed over (also when the system
- * has none or keeps them where the TLS library reads them itself), the
- * value each returned to stop, EINVAL (each NULL), EIO (a store that exists
- * could not be read).  A store the system does not have is skipped, not an
- * error (opened with CERT_STORE_OPEN_EXISTING_FLAG; its failure to open is
- * a missing store).
- * POSIX: calls each for nothing and returns 0 (OpenSSL reads the system's
- * file itself).  Windows: every certificate of the current user's and the
- * machine's "ROOT" stores with distrusted 0, then every certificate of
- * their "Disallowed" stores with distrusted 1 (CertOpenStore with
- * CERT_STORE_PROV_SYSTEM_W, read-only, and CertEnumCertificatesInStore);
- * a certificate whose encoding is not X.509 ASN.1 is skipped.
- */
-int wb_os_trust_roots(wb_os_trust_each each, void *context);
 
 #endif

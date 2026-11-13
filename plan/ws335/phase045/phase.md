@@ -2,7 +2,7 @@
 
 # ws335-p045: Windows（OmniGrammaton）の TLS を表の無い net/tls.c で確かめ、使われなくなった wb_os_trust_roots を消す
 
-Status: planned
+Status: 実装済み・試験 PASS（2026-11-13 Sonnet q2055-i01、branch `agent/s-ws335-p045`、基点 main b8c77135f8。cleared は Q1）
 Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.1・§1.3・§2 の 3・§4 の C・問い Q4）。実装の担当: phase-runner-low（Sonnet 5.5 high）、1 回の起動。依存: p043 の merge。p044 と並べてよい。makefile.diff の C は、この Phase の merge と同じ commit に Q1 が当てる（p042 の問い Q7）ので、この Phase は C を当てた写しの Makefile で確かめる。
 
 ## 0. 何をするか（要約）
@@ -75,6 +75,50 @@ Q4 が B の時: `os-system.h:165-166` の「(OpenSSL reads the system's file it
 - commit: `git commit -m WIP -- plan/ws334/tests/tls-wine.sh plan/ws335/phase045/phase.md plan/ws335/ws.md`、Q4 が A なら `userland/desktop/libbrowser/base/os-system.h userland/desktop/libbrowser/base/os-system-posix.c userland/desktop/libbrowser/base/os-system-win32.c plan/ws334/tests/unit/test-os-system.c` も、直したなら `plan/ws334/tests/cross-build.sh`・`net-ring-test.sh` も。push しない。
 - 結果の節: コマンドと最後の行、自分で決めた点、未実施（aarch64 の Wine での実行など）、消してほしい path。ws.md の行は「実装済み・試験 PASS」。
 
-## 結果
+## 結果（2026-11-13 Sonnet q2055-i01、branch `agent/s-ws335-p045`、基点 main b8c77135f8）
 
-（実装の担当が書く）
+### 変えた物
+
+- `plan/ws334/tests/tls-wine.sh`: 先頭の comment を「net/tls.c calls them directly」に。1 の確かめを「`net/` に `tls-static-compat.o`・`tls-static.o` が無い」と「`llvm-nm net/tls.o` に `U SSL_connect`・`U SSL_CTX_set_default_verify_paths` があり `tls_static_library` が無い」に替えた。2 の OpenSSL の名前の確かめから `X509_digest` を外した（残りは `OPENSSL_init_ssl`・`X509_STORE_CTX_set_error`）。a〜g は変えていない。
+- `userland/desktop/libbrowser/base/os-system.h`・`os-system-posix.c`・`os-system-win32.c`: Q4 の判断 A に従い `wb_os_trust_roots`・`wb_os_trust_each`・Windows の store の表・`os_trust_store_read`・`OS_NO_MORE_CERTIFICATES`・`<wincrypt.h>` の include を外した。POSIX は `UNUSED_PARAMETER` だけが使っていた `base/base.h` の include も外した。`wb_os_library_*`・`wb_os_data_directory` は残した。header の先頭の comment から「trusted certificates」を外した。
+- `plan/ws334/tests/unit/test-os-system.c`: `trust_context`・`trust_each`・`count_store`・`test_trust_roots` と呼び出し・`<wincrypt.h>`、先頭の comment の「trusted certificates」を外した。
+- 変えていない: `cross-build.sh`（`tls-static`・`WB_TLS` の記述が無い）、`net-ring-test.sh`（`tls-static.c`・`tls-static-compat.c` の file が残っているので `grep -v` も残した）、Makefile・`mk/`・header（compat）・`net/tls.c`・mailer。
+
+### 確かめ
+
+Makefile の C は、`git archive HEAD` の写し（scratchpad の `c/`、変えた 5 file を重ねた物）に `git apply -v --include=apps/browser-win32/Makefile plan/ws335/phase042/makefile.diff` で当て（`Applied patch apps/browser-win32/Makefile cleanly`、`grep -c 'tls-static\|WB_TLS_STATIC'` は 0）、その写しで 1・2 を流した。tree の Makefile は変えていない。
+
+| # | コマンド | 結果 |
+| --- | --- | --- |
+| 1 | 写しで `sh plan/ws334/tests/tls-wine.sh` | 最後の行 `tls-wine: PASS`。a〜g の全部で blocking・loader が 200 と 20907 byte、b は `certificate verify failed`、d は `certificate rejected`。import は crypt32・UCRT・kernel32・ws2_32・bcrypt だけ（ssl・crypto の DLL 無し）。`net/` に tls-static*.o 無し、`tls.o` に `U SSL_connect`・`U SSL_CTX_set_default_verify_paths`・`tls_static_library` 無し。make.log の `warning:` 0 |
+| 2 | 素の main（基点の `git archive` の写し）で `WIN32_ARCH="x86_64 aarch64" sh plan/ws334/tests/cross-build.sh` | `cross-build: PASS`（zip の許諾の欠けは今の main では無かった）。比較の基準 |
+| 2' | 変えた物と C の写しで同じコマンド | `cross-build: PASS`。基準との差は、x86_64 の libbrowser.a の imports 147 → 142、arm64 143 → 138、zip の hash（tls-static-compat.o 分の差）、一つの .exe の import の DLL 数 13 → 12 だけ。OmniGrammaton.exe の import は system の DLL と vulkan-1.dll だけ（25）。warning は cross-build.sh が数えて通った |
+| 3 | worktree で `sh plan/ws334/tests/run-unit.sh all` | `run-unit: FAIL`。`test-os-system: PASS (211 checks) (posix)`・`PASS (219 checks) (win32)`（trust の case が無くなった分）。FAIL は `files`・`os-file`・`queue` の **win32 の build** だけ（`vulkan/vulkan.h` が無い）。基点の写しで `run-unit.sh --win32 files os-file queue` も同じく FAIL（今回の変更に依らない。worktree に Vulkan の header の写しが無い環境の問題と見る。未調査） |
+| 4 | `BROWSER_HOST_BUILD=build/tmp/p045/host-plain sh plan/ws074/tests/host-build.sh plain` | exit 0、`warning:` 0 行（`-Werror`） |
+| 5 | `git diff --check` | 出力無し（rc 0） |
+| 6 | `git grep -n 'wb_os_trust\|trust_each\|trust_context' -- userland plan/ws334 plan/ws074 plan/ws335/tests plan/tools` | source・試験には 0 件。残るのは WS334 の過去の記録（`plan/ws334/design.md:317・726`、`phase005`・`phase030` の phase.md）だけ |
+
+### わざと壊す確かめ（写し `d/`、git の外、commit しない）
+
+`net/tls.c` の `tls_add_roots` の `SSL_CTX_set_default_verify_paths(tls_context)` の行を `result = 1;` に替えた写し（C を当てた）で `tls-wine.sh`: `tls-wine: net/tls.o does not call libssl-compat directly`（新しい nm の確かめが捕まえた）、`c-root` の blocking・loader が FAIL、`d-disallowed: the failure is not the certificate being rejected`、`g-cert-pem` の blocking・loader が FAIL、最後の行 `tls-wine: FAIL`。a・b・e・f は通った（default paths に頼らない）。d は ROOT・Disallowed を default paths が読むので壊れる。
+
+### 自分で決めた点
+
+- C の確かめは tree の Makefile を一時に書き換えず、写し（scratchpad）に当てた。cross-build.sh は top の Makefile 経由なので、tree 全体の写しを使った。
+- `tls-static.o` も無い事の確かめ（phase.md のとおり）と、`tls.o` の nm の確かめを分けて 2 つの if にした。
+- POSIX の `os-system-posix.c` の `base/base.h` の include は、使っていた唯一の物（`UNUSED_PARAMETER`）が消えたので外した。
+
+### 食い違い・Q1 への問い
+
+- `plan/ws335/tests/tls-wine-compat.sh`（p036 の物）は `tls-static-compat.o` が build にある事を確かめるので、C の後は FAIL する。`tls-wine.sh` が同じ a〜g を持つ。p036 の結果の節も消す候補としている。この Phase の指示に名指しが無いので変えていない。消すか直すかは Q1。
+- `plan/ws334/design.md`・`phase005`・`phase030` に `wb_os_trust_roots` の記述が残る（WS334 の過去の設計・記録。範囲外なので変えていない）。
+
+### 未実施
+
+aarch64 の Wine での実行（arm64 Wine が無い）、`net-ring-test.sh` の再実行（変えていない）、zedBSD の guest・QEMU、`run-unit.sh` の win32 の `files`・`os-file`・`queue`（上のとおり基点でも FAIL）。
+
+### 消してほしい path
+
+- `build/tmp/p045-cross-base.log`、`build/tmp/p045-host-build.log`、`build/tmp/p045`、`build/tmp/ws334-unit`、`build/tmp/ws334-cross.run.*`、`build/tmp/ws334-cross`、`build/tmp/ws334-win32-sources`、`build/tmp/ws334-wine`（この worktree の出力。Q1 が見た後に）。
+- `plan/ws335/tests/tls-wine-compat.sh`（上の問い。消すなら）。
+- scratchpad の写し `base/`・`c/`・`d/`（`/tmp/claude-1000/-home-awe-zedBSD-claude1--claude-worktrees-bridge-cse-01JKZGr9VeEnz96f7A6qkRro/791268f1-1d48-50fa-8542-d1de6d65cf67/scratchpad/` の下。cross-build と Wine の出力を含む）。
