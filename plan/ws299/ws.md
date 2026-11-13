@@ -3,7 +3,7 @@
 # WS299 5330 の NVMe の読み書きを速くする
 
 - Master: [plan/master.md](../master.md)（2026-10-27 作成、q1615 P1 の計画）。Primary Milestone: MG004。Related: MG003（[WS298](../ws298/ws.md) VMD の driver、q1612 NVMe から起動）。
-- Status: incomplete（p001・p002・p003・p009 cleared。p004 は Q1 の判定待ち（材料は下の「2026-11-13」）。p005・p006・p010 in-progress、p007・p008 planned。2026-11-13 q2044（P2）: 電力制御（WS333・BUG-424）が main に入った後の乖離の確かめと測り直し、下の「今の前提」と「2026-11-13」）
+- Status: incomplete（p001・p002・p003・p009 cleared。p004 は Q1 の判定待ち（2026-11-13 に乱読みの後の連続の読みの直しを足した）。p005・p006・p010 in-progress（p006 は受け入れ 3 を満たした）、p007・p008 planned。2026-11-13 q2044（P2）の乖離の確かめと測り直しは下の「今の前提」と「2026-11-13」。95% に未達は direct の読み 4 MiB（92%）・1 MiB（94〜95%）と、p6 の raw の 256 MiB ×4 の形（82%、同じ形なら 104〜117%））
 - 出典: 2026-10-27 ユーザー「5330でNVMeの最適化（速度向上）をWSを立ててやってほしいです。（あとで順番にやってほしいです）」「新規WSはまず計画を広く進めて、全体の依存関係を見ましょう。」
 - 全体の依存と着手の順: [plan/agents/P1/pm-plan.md](../agents/P1/pm-plan.md)。
 
@@ -87,10 +87,10 @@ Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRA
 | [p001](phase001/phase.md) | 調査と設計: 測定の script（5330 の Debian と zedBSD で同じ大きさ・位置、counter を前後で取る）、Debian の基準、H1〜H4 の確かめ（`CONFIG_BUF_CACHE_KIB` を小さくして崖が動くか、`alloc_metadata` の時間）、直しの順と受け入れの数、design-reviewer | WS298（済） | 4 | cleared（2026-10-28 Q1 判定。H1 を確かめ、数はユーザー「Debianの95%以上」、HMB は「やる」） |
 | [p002](phase002/phase.md) | buffer cache: header の確保を O(1)（空きの list）にし、irq を止める区間を短く。evict を run 単位に。host 試験で計算量 | p001 | 4 | cleared（2026-10-27 11:41） |
 | [p003](phase003/phase.md) | NVMe の大きな転送: MDTS に合わせた command、PRP list（bounce を使わず page に直接、使う所だけ bounce）、BIO の上限を上げる（`d_max_transfer_blocks`） | p001・p002 | 6 | cleared（2026-10-27、Q1 判定。raw の読み中央値 583 MB/s = p002 の後の 1.52 倍、書き 1.5 倍） |
-| [p004](phase004/phase.md) | raw の block device の先読み（buffer cache の worker で device の待ちと CPU の仕事を重ねる）。複数の queue・VMD の vector は p007 の乱読みの測定の後に要否（2026-10-28 Q1） | p003 | 6 | in-progress（実装・QEMU・5330 済み、raw の読み 4 GiB 中央値 1917 MB/s。Q1 の判定待ち、q1634。2026-11-13 の測り直しの材料は下の「2026-11-13」） |
-| [p005](phase005/phase.md) | 連続の読み書き: UFS の file の readahead の窓と cluster の読み書き、書きの合流（raw の先読みは p004 へ、2026-10-28 Q1） | p002・p004 | 4 | in-progress（raw 書き 119%・raw 読み 150%・UFS 読み 126%、UFS 書き 55% で未達、2026-10-28 P1。2026-10-31 q1744: 書き手の CPU の直し 3a4e64353。2026-11-01 q1788 の 5330: file の書き p7 90%・root の UFS の上書き 108%・新しく 96%・file の読み 112%、file の書き p7 は 95% に未達） |
-| [p006](phase006/phase.md) | HMB（DRAM-less の BG5） | p003 | 4 | in-progress（実装・5330 で動作、QD1 98%。QD32 は 44% で未達、2026-10-28 P1） |
-| [p010](phase010/phase.md) | block device の O_DIRECT（2026-10-28 ユーザー「O_DIRECT を UAPI に足す」、Q1 が p010 に確定、p007 の前） | p004・p005 | 4 | in-progress（2026-10-28 q1657: direct 書き 88%（59% は道具の fill の libc memcpy だった）、読み 1 MiB 103%・4 MiB 91%、QD32 99%。下の「結果」。継続は 2026-10-31 のユーザーの指示で決まった） |
+| [p004](phase004/phase.md) | raw の block device の先読み（buffer cache の worker で device の待ちと CPU の仕事を重ねる）。複数の queue・VMD の vector は p007 の乱読みの測定の後に要否（2026-10-28 Q1） | p003 | 6 | in-progress（実装・QEMU・5330 済み、raw の読み 4 GiB 中央値 1917 MB/s。Q1 の判定待ち、q1634。2026-11-13 q2044: 乱読みの後の連続の読みで run が切れる件を直した 35b527f23c（1 GiB 1471 MB/s = Debian の 97%、cksum 一致）、QEMU は未実施） |
+| [p005](phase005/phase.md) | 連続の読み書き: UFS の file の readahead の窓と cluster の読み書き、書きの合流（raw の先読みは p004 へ、2026-10-28 Q1） | p002・p004 | 4 | in-progress（raw 書き 119%・raw 読み 150%・UFS 読み 126%、UFS 書き 55% で未達、2026-10-28 P1。2026-10-31 q1744: 書き手の CPU の直し 3a4e64353。2026-11-01 q1788 の 5330: file の書き p7 90%・root の UFS の上書き 108%・新しく 96%・file の読み 112%、file の書き p7 は 95% に未達。2026-11-13 q2044: file の書き p7 99%・読み 117%、root の UFS の上書き 105%・新しく 101%、p6 の raw の書き 1 GiB は同じ形で 104〜117%、256 MiB ×4 の形は 82%（基準の形を直す案を Q1 へ）） |
+| [p006](phase006/phase.md) | HMB（DRAM-less の BG5） | p003 | 4 | in-progress（実装・5330 で動作、QD1 98%。QD32 は 44% で未達、2026-10-28 P1。2026-11-13 q2044: QD1 104%、QD32 direct 97%・cache 経由 107%、受け入れ 3 を満たした。cleared は Q1 の判定） |
+| [p010](phase010/phase.md) | block device の O_DIRECT（2026-10-28 ユーザー「O_DIRECT を UAPI に足す」、Q1 が p010 に確定、p007 の前） | p004・p005 | 4 | in-progress（2026-10-28 q1657: direct 書き 88%（59% は道具の fill の libc memcpy だった）、読み 1 MiB 103%・4 MiB 91%、QD32 99%。下の「結果」。継続は 2026-10-31 のユーザーの指示で決まった。2026-11-13 q2044: direct の書き 96%、読み 1 MiB 94〜95%・4 MiB 92〜93% が未達、command の大きさ・C-state・pin の region の探しは効かなかった） |
 | p007 | 5330 の測定の受け入れと回帰（QEMU の nvme・USB の起動は T、5330 は 1 本の script）。QEMU の image の作り方を今の build system（`make CONFIGMK=… disk`）に直す所から（2026-11-13） | p002〜p006・p010 | 2 | planned |
 | p008 | 規約の全文の見直し | p007 | 2 | planned |
 | [p009](phase009/phase.md) | 5330 の NVMe の root を p5 いっぱいに（`ufs-grow.py`、UFS の群の探しを O(1)）と、大きな file の sync の 2 乗の直し（reboot が止まった） | p002 | 2 | cleared（2026-10-28 Q1 判定: 受け入れ 3 点を QEMU・5330 で確かめた。xattr・msync の道を狙う試験は未実施のまま） |
@@ -208,8 +208,45 @@ Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRA
 | 同じ、最初の 900 MiB（bs64k・bs1m・bs4m・chunk0・chunk1） | 0.6〜1.7 GB/s | 320〜671 | 22〜53% | 21〜44% |
 
 - 見立て: q1744 の書き手の CPU の直しで file の書きは 52% → 90%、root の UFS の書きは 82%/62% → 108%/96%。95% に届かない項目は file の書き p7（90%）、p6 の raw の書き（84%）、乱読み QD32（82〜83%）、read mode の最初の 900 MiB（前と同じ形）。CPU の idle・P-state（WS333）が入る前の測り（HWP なし）。乱読み QD32 の比が前（99%）より下がった理由は未確認（前の数は notime の形で、同じ道具の形どうしの比べではない）。
-- 再開点: p007（受け入れと回帰）の前に、残る 4 項目のどれを追うかを Q1 が決める。WS333 の HWP・C-state が main に入った後にもう 1 度測ると、CPU が律速の項目の差が分かる。
+- 再開点: p007（受け入れと回帰）の前に、残る 4 項目のどれを追うかを Q1 が決める。WS333 の HWP・C-state が main に入った後にもう 1 度測ると、CPU が律速の項目の差が分かる。（2026-11-13 に測り直した、下の「2026-11-13」）
+
+## 2026-11-13（q2044、P2）: 電力制御の後の測り直し
+
+- 条件: main fe6ea0f967 の kernel（x86_64、`CONFIG_KERN_THERMAL=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y`、build rc 0・warning 0、sha256 先頭 87db0203ada98f6d）を p4 に、`zedbsd.cfg` は元の物に `watchdog=600` を足して（TCO の watchdog の armed を毎回の dmesg で確かめた）。p5 の userland は d00e071（2026-11-02）の image のまま。道具は `plan/ws299/tests/measure-5330.sh`（Debian の mode → zedBSD の mode を `~/boot-zedbsd.sh` の一回だけの起動で → p4 を戻して sha256 を照合 → `compare.py`）。Debian（q2044a-D）は 11:45〜11:59、zedBSD（q2044a-Z）は 11:59〜12:23。log は worktree の `build/hw5330/ws299/`（git の外）。毎回の終わりに p4 を vmunix 4c98d617279bf96b・zedbsd.cfg 1b33a395b0ff4bd7 に戻し、sha256 で確かめた。
+- 時計の刻み: 100 Hz で zedBSD の dd の時間（/bin/time の real）は 10 ms 刻み。256 MiB の段（0.1〜0.2 秒）は ±5〜8 % ぶれるので、curve は中央値で見る。4 GiB の項目は ±0.5 %。
+
+| 項目（5330） | Debian | zedBSD | 比 | 11-01 の比 |
+| --- | --- | --- | --- | --- |
+| raw の書き p7 4 GiB（fsync まで） | 1346 MB/s | 1804 | 134% | 100% |
+| raw の冷えた読み p7 4 GiB（cache 経由） | 1206 | 1775 | 147% | 141% |
+| file の書き p7 4 GiB（ext4 / UFS、fsync まで） | 1798 | 1774 | **99%** | 90% |
+| file の冷えた読み p7 4 GiB | 1217 | 1427 | 117% | 112% |
+| direct の書き 1 MiB | 1575 | 1512 | 96% | 96% |
+| direct の読み 1 MiB | 2750 | 2603 | 95% | 101% |
+| direct の読み 4 MiB | 3112 | 2863 | **92%** | 93% |
+| data 範囲の direct の読み 1 MiB | 1586 | 1562 | 98% | 103% |
+| 乱読み 4 KiB direct QD1 | 55.8 | 58.1 | 104% | 104% |
+| 乱読み 4 KiB direct QD32 | 930.3 | 902.4（thread ごとの open 881.3） | 97%（95%） | 83% |
+| 乱読み 4 KiB QD32（zedBSD は cache 経由、Debian は direct） | 930.3 | 996.4 | 107% | 82% |
+| root の file 1 GiB の上書き / 新しく（ext4 / UFS、sync まで） | 1619 | 1704 / 1627 | 105% / 101% | 108% / 96% |
+| p6 の raw の書き 1 GiB（zedBSD は 256 MiB の dd 4 回、各 close で書き切る） | 1690（dd 1 回 conv=fsync） | 1395 | **82%** | 84% |
+| p6 の raw の書き 1 GiB（両方 1 回の dd と sync、q2044c） | 1505（同じ時間帯）、1690（q2044a） | 1760 | 117%（104%） | — |
+| data 範囲の raw の連続の読み chunk2〜15 の中央値（cache 経由） | 1511 | 2339 | 155% | 120% 以上 |
+| 同じ範囲、乱読みの後の最初の 900 MiB（bs 64 KiB・1 MiB・4 MiB、chunk0・1） | 1490〜1543 | 327〜671 | **22〜44%** | 22〜53% |
+| 同じ、乱読みの前（seqcold、新しい mode）の bs と chunk0〜15 の中央値 | 1490〜1543 / 1511 | 1491〜1917 / 1790 | 100〜124% / 118% | — |
+
+- 見立て: 電力制御（HWP・C-state）の後、CPU が律速だった項目が上がった（file の書き p7 90 → 99%、乱読み QD32 82〜83 → 97〜107%）。95% に届かないのは 3 つ。
+  1. **乱読みの後の連続の読み**: 測りの形の違い（Debian は b- の段の前に page cache を捨てる、zedBSD の read mode は乱読みの 4 KiB の line で満ちた cache のまま読む）が主。同じ形（seqcold）では 100〜124%。ただし zedBSD の遅さそのものは本物で、cache に散った line で readahead の run が切れ、command が平均 37 KiB（bs の段で drv_rd 10545 / 384 MiB、乱読みの前は 256 KiB）になっていた。→ readahead の run が cache にある line を 1 page の bucket に読み飛ばして run を切らない直し（35b527f23c、[phase004](phase004/phase.md) の「2026-11-13」）。kernel ea880d69a7b53468（q2044b）: 乱読み QD32 の直後の 1 GiB の連続の読み 1471 MB/s（Debian の cache を捨てた後の 1511 の 97%）、その 1 GiB の cksum は Debian で読んだ同じ block と一致。read mode の bs・chunk0・1 は 1491〜2684。
+  2. **p6 の raw の 256 MiB ×4**: zedBSD は dd ごとの close で dirty を書き切る形、Debian の基準は 1 回の dd conv=fsync で形が違う。同じ形（rawone、新しい mode）では 104〜117%。256 MiB ごとの遅さは、dirty が上限（cache の 1/4 ≈ 246 MiB）の半分に達するまで device が書き始めない（約 65 ms）のと、close の書き切りの待ちと見る（未確認）。p005 の受け入れ（各 256 MiB を Debian の direct の d-w の中央値と比べる）は、buffered と direct の比べで同じ条件ではない。基準を同じ形（rawone 対 b-w1m）に直す案を Q1 に出した。
+  3. **direct の読み 4 MiB（92〜93%）・1 MiB（94〜95%）**: 差は 1 MiB あたり約 25 µs。試して効かなかった物: command を 128 KiB×32 にする（q2044c、4 MiB 2807）、ordinary idle を HLT だけにする（`IDLE_WAIT_DEEPEST_CSTATE=1`、q2044d、2826）、pin の region の線形の探しを page ごとにしない（q2044e、2826、変更は戻した）。残る候補は 1 request の 16 command の完了の割り込み（VMD の 1 vector）と起床、request の間の隙間。未確認。
+- 範囲の外の気づき（Q1 へ）: tick 100 Hz で `clock_gettime` が 10 ms 刻みになり、計測の道具（dd の real、randread の時間）の分解能が落ちた。vDSO の無い `clock_gettime` は master.md の Bug 化の候補にある物と同じ根。
+
+### 再開点（2026-11-13、P2、q2044）
+
+- 最後の commit: 下の q2044 の返却の SHA（agent/p2-ws299）。kernel の変更は buf.c の bucket の読み飛ばしだけ（35b527f23c）。
+- 5330: p4 は vmunix 4c98d617279bf96b・zedbsd.cfg 1b33a395b0ff4bd7 に戻してある（sha256 で照合）。p7 は p7direct の後の中身、p6 は zedBSD の swap の頭を戻した状態。
+- 次: (1) direct の読み 4 MiB の残りの差（1 request の 16 command の完了と起床、request の間の隙間を TSC で測る）、(2) p005 の raw の 256 MiB の受け入れの形の判断（Q1）と、要れば dirty の上限の半分より前に連続の書き手の cluster を書き始める直し、(3) p007: QEMU の image の作り方を今の build system に直して回帰（bucket の直しは QEMU で未試験）、他機種の build、`5330-run.sh` の素の起動、(4) p008。
 
 ## 日程（2026-10-30 ユーザー、原文）
 
-「WS299はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の completed の後
+「WS299はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の completed の後（WS315 は 2026-10-30 に completed。2026-11-13 に q2044 で再開）
