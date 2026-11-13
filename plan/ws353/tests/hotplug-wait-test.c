@@ -220,7 +220,7 @@ test_setup(
 	int before[TEST_FD_MAX];
 	int after[TEST_FD_MAX];
 	const char *instance_names[3];
-	const char *device_names[1];
+	const char *device_names[2];
 	uint32_t count;
 	float priority;
 	int fd;
@@ -256,19 +256,20 @@ test_setup(
 		return 11;
 	}
 
-	/* Family 0 has a queue that takes empty submissions. */
+	/* Family 0 has a queue that takes empty submissions; display control needs the swapchain. */
 	priority = 1.0f;
 	memset(&queue_create, 0, sizeof(queue_create));
 	queue_create.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	queue_create.queueFamilyIndex = 0U;
 	queue_create.queueCount = 1U;
 	queue_create.pQueuePriorities = &priority;
-	device_names[0] = VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME;
+	device_names[0] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+	device_names[1] = VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME;
 	memset(&device_create, 0, sizeof(device_create));
 	device_create.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	device_create.queueCreateInfoCount = 1U;
 	device_create.pQueueCreateInfos = &queue_create;
-	device_create.enabledExtensionCount = 1U;
+	device_create.enabledExtensionCount = 2U;
 	device_create.ppEnabledExtensionNames = device_names;
 	error = vkCreateDevice(state->physical, &device_create, NULL, &state->device);
 	if (error != VK_SUCCESS) {
