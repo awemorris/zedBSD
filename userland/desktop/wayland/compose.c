@@ -5165,9 +5165,9 @@ compose_told_flush(
 
 /*
  * Starts the shown thread (registered as "shown") when the device has
- * present fences, and gives the render thread its fences; without them
- * the render thread tells the presents with the frames' completions.
- * Returns 0, or the error of starting it.
+ * present fences, and gives the render thread its fences; without them,
+ * or when the thread cannot be started, the render thread tells the
+ * presents with the frames' completions.  Returns 0.
  */
 static int
 compose_shown_start(
@@ -5190,14 +5190,17 @@ compose_shown_start(
 	ops.status = compose_op_fence_status;
 	ops.reset = compose_op_fence_reset;
 	error = kwl_shown_init(&compose->shown, &ops, compose, &compose->render);
-	if (error != 0)
-		return error;
+	if (error != 0) {
+		printf("KWL SHOWN unavailable errno=%d\n", error);
+		return 0;
+	}
 
-	/* The thread, in the register. */
+	/* The thread, in the register; without it the presents are told with the frames' completions. */
 	error = kwl_thread_start(&compose->shown_thread, "shown", kwl_shown_main, &compose->shown);
 	if (error != 0) {
 		kwl_shown_destroy(&compose->shown);
-		return error;
+		printf("KWL SHOWN unavailable errno=%d\n", error);
+		return 0;
 	}
 
 	/* Succeeded: the render thread's frames present with fences from now on. */
