@@ -2,7 +2,7 @@
 
 # ws335-p044: mailer の TLS を libssl-compat・libcrypto-compat を直に呼ぶ形に（dlopen・名前の表・ML_TLS_COMPAT を無くす）
 
-Status: planned
+Status: 実装済み・試験 PASS（2026-11-13 Sonnet 5.5 q2054-i01。cleared は Q1）
 Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.2・§1.3・§2・§4）。実装の担当: phase-runner-low（Sonnet 5.5 high）、1 回の起動。依存: p043 の merge（`plan/tools/tls/host-compat-libs.sh`）。
 
 ## 0. 何をするか（要約）
@@ -96,4 +96,34 @@ header に不備を見つけたら直さずに止め、Q1 に返す。
 
 ## 結果
 
-（実装の担当が書く）
+2026-11-13（host の `date`: 22:15 JST）。担当: Sonnet 5.5（q2054-i01）、worktree `/home/awe/zedBSD-worktrees/s-ws335-p044`（基点 main b8c77135f8）。
+
+実装: `userland/desktop/mailer/tls.c` を `<compat/ssl/ssl.h>`・`<compat/crypto/evp.h>` を直に呼ぶ形に書き換えた（`dlfcn.h`・名前の表・`tls_library`・`tls_open_library`・`tls_find_all`・`tls_find_peer_certificate`・`ML_TLS_COMPAT`・OpenSSL 1.1 の名前への落ちを削除。`tls_verify_later` は `SSL_verify_cb` の型のまま直に渡す）。
+`mail.h`（9-11・190 行の comment）、`sync.c`（comment 4 か所、利用者に見える文を `"TLS cannot be set up"` に）、`imap.c`・`smtp.c`（comment）を直した。
+試験の道具: `plan/ws335/tests/run-mailer-tls.sh`・`mailer-tls.c`（noload の mode を外した）、`plan/tools/mail/run-host-mail-backend.sh`。
+
+確かめ（§3）:
+
+| # | コマンドと結果 |
+| --- | --- |
+| 1 | `grep -n 'dlopen\|dlsym\|dlfcn\|ML_TLS\|tls_library\|tls_symbol\|"libssl\|"libcrypto\|libssl\.so\|libcrypto\.so\|SSL_get_peer_certificate' userland/desktop/mailer/tls.c` → 出力なし |
+| 2 | `grep -rn 'OpenSSL' userland/desktop/mailer` → tls.c:10（「OpenSSL 3.5's API」）と `userland/desktop/mailer/Makefile:9` の comment（`# OpenSSL is never used.`、p036 で入った。Makefile は変えない決まりなので残した。Q1 の問い 1） |
+| 3 | `sh plan/ws335/tests/run-mailer-tls.sh` → `run-mailer-tls: PASS (8 cases)`（6 秒。自己署名 1.3・1.2 RSA の pin 無し・その pin・他の pin、CA の file あり・無し。指紋は openssl の値と一致。`SSL_connect` defined 1、NEEDED の libssl/libcrypto 0、library 名の文字列 0） |
+| 4 | `sh plan/tools/mail/run-host-mail-backend.sh`: 今の main（tls.c 変更前）で 1 回（PASS 62 行、最後の行 `host-mail-sync: PASS`、exit 0）、変更後で 3 回（初回は host の `python3` の wrapper（~/.local/bin、同時 3 本の制限）が先の run の残りの fake-mail-server で詰まって sync 側の server が起動せず失敗。残りを止めて `PATH=/usr/bin:/bin:$PATH` で再実行 2 回: どちらも PASS 62 行、最後の行 `host-mail-sync: PASS`、exit 0。件数と最後の行が一致） |
+| 5 | `make CONFIGMK=config/config.x86_64.mk BUILD_JOBS=4 -j4 build/x86_64/packages/libcrypto-compat/.stamp build/x86_64/packages/libssl-compat/.stamp` と `.../packages/mailer/.stamp` → exit 0、log に warning 0。`build/llvm/bin/llvm-readelf -d build/x86_64/bin/mailer` の NEEDED: libvulkan・libwayland-client・libkeiland・libtruetype・libssl-compat.so・libcrypto-compat.so・libm・libc。`build/x86_64/packages/mailer/.flags` に `ML_TLS` 無し（toolchain は `llvm-toolchain-cached` と `sysroot` をこの worktree の build/ に入れた。makefile.diff の B・D は main に当たっていて、command line の上書きは不要） |
+| 6 | `llvm-nm -D --undefined-only build/x86_64/bin/mailer` の `SSL_`・`X509_`・`ERR_`・`EVP_`・`TLS_` は 27 名、全て `build/x86_64/dynamic/libssl-compat.so`・`libcrypto-compat.so` の defined にある（`comm -23` で未解決 0） |
+| 7 | `git diff --check` → 出力なし |
+
+わざと壊す確かめ（tls.c をコピーに保ってから書き換え、戻した後 `git diff --quiet -- userland` と全 case 再実行で戻りを確認）:
+(a) `same = strcmp(...)` を `same = 1` にした（pin を比べない）→ 「its pin」の 2 case が FAIL（`ml_tls_open failed`）。
+(b) hex の上位と下位を入れ替えた → 全ての指紋の case が FAIL（`another fingerprint`、pin の case は `ml_tls_open failed`）。
+(c) `tls_verify_later` を 0 にした → pin 無しの case が `not ML_ERROR_UNTRUSTED`（指紋が取れず空）で FAIL、pin の case も FAIL。
+
+自分で決めた点: `tls_make_context` の失敗は `tls_load_locked` で `EPROTONOSUPPORT` に（理由は `tls_reason`）、設計どおり。`ml_tls_read`・`ml_tls_write`・`ml_tls_pending`・`ml_tls_close` は公開の `void *tls` を局所の `SSL *ssl`（pending は `const SSL *`）に受けた。
+`run-mailer-tls.sh` の compat の archive は fresh の出力の外（`build/tmp/ws335-mailer-tls-compat`）に置いて object を再利用する。
+
+未実施: QEMU の guest の試験（p046）。`plan/ws335/tests/run-mailer-guest.sh` は `-DML_TLS_COMPAT` を前提にしたまま（名指しされていない file なので変えていない。p046 で直す、Q1 の問い 2）。aarch64・riscv64 の build（p046）。
+
+消してほしい path: 無し（`build/tmp/p044-*` は worktree の使い捨ての出力で、worktree ごと消えるなら不要）。
+
+Q1 への問い: 1. `userland/desktop/mailer/Makefile:9` の「OpenSSL is never used.」を §3 の確かめ 2 の期待に合わせるなら、Makefile の comment の差分の案（Makefile は変えない決まり）。2. `run-mailer-guest.sh` の扱い（p046 か）。
