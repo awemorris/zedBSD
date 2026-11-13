@@ -234,11 +234,15 @@ find bin sbin lib usr -type f | while read -r f; do
 	if [ -x "$f" ]; then chmod 755 "/$f.ws352-new"; else chmod 644 "/$f.ws352-new"; fi
 	mv "/$f.ws352-new" "/$f" || exit 1
 done
-find bin sbin lib usr -type l | while read -r f; do ln -sf "$(readlink "$f")" "/$f"; done
+sh /tmp/ws352-tree-links.sh
 sync
-echo laid $(find bin sbin lib usr -type f | wc -l)
+echo laid $(find bin sbin lib usr -type f | wc -l) files and $(grep -c . /tmp/ws352-tree-links.sh) links
 EOS
-	(cd "$TREE" && tar --format=ustar -cf - bin sbin lib usr) > "$LOGS/tree.tar" || fail "tree tar"
+	# The tree's directories and files go in the tar; its links are made again by commands.
+	(cd "$TREE" && find bin sbin lib usr ! -type l) | sort > "$LOGS/tree-list.txt"
+	(cd "$TREE" && find bin sbin lib usr -type l | sort | while read -r f; do echo "ln -sf $(readlink "$f") /$f"; done) > "$LOGS/tree-links.sh"
+	(cd "$TREE" && tar --format=ustar --no-recursion -cf - -T "$OLDPWD/$LOGS/tree-list.txt") > "$LOGS/tree.tar" || fail "tree tar"
+	zput "$LOGS/tree-links.sh" /tmp/ws352-tree-links.sh || fail "copy of the links"
 	TO=600 timeout 600 sshpass -p "$ZBU" scp $SO -q "$LOGS/tree.tar" "$ZBU@$ZB:/tmp/ws352-tree.tar" || fail "copy of the tree"
 	zput "$LOGS/lay.sh" /tmp/ws352-lay.sh || fail "copy of the lay helper"
 	TO=300 zb 'mkdir -p /tmp/ws352-tree && cd /tmp/ws352-tree && pax -r < /tmp/ws352-tree.tar' > "$LOGS/tree-unpack.txt" 2>&1 ||

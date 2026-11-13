@@ -1,0 +1,407 @@
+diff --git a/include/kern/poll.h b/include/kern/poll.h
+index 6e62d72336..00ea0f444c 100644
+--- a/include/kern/poll.h
++++ b/include/kern/poll.h
+@@ -42,4 +42,8 @@ kern_poll_wait(
+ 	int immediate,
+ 	int *ready);
+ 
++/* Test only. */
++void poll_diag_note(nfds_t count, uint64_t span, int immediate, int timed_out, const uintptr_t ret[4]);
++void poll_diag_dump(void);
++
+ #endif
+diff --git a/src/kern/clock.c b/src/kern/clock.c
+index b45077ba28..93e5b9231e 100644
+--- a/src/kern/clock.c
++++ b/src/kern/clock.c
+@@ -39,6 +39,7 @@
+ #include "kern/usync.h"
+ #include "kern/waitq.h"
+ #include "kern/lock.h"
++#include "kern/klog.h"
+ 
+ #include <uapi/errno.h>
+ #include <hal/hal.h>
+@@ -103,6 +104,12 @@ static volatile uint64_t global_next = UINT64_MAX;
+ static volatile unsigned tick_lowered[HAL_CPU_MAX];
+ 
+ static volatile uint32_t cpu_notify_count[HAL_CPU_MAX];
++static volatile uint64_t tickdiag_count[64];
++static uint64_t tickdiag_last[64];
++static uint64_t tickdiag_next = 10000U;
++static uint64_t tickdiag_global_fast;
++void sched_diag_near_dump(void);
++void poll_diag_dump(void);
+ static struct kern_timespec realtime_offset = {
+ 	KERN_REALTIME_EPOCH_2026, 0
+ };
+@@ -170,6 +177,30 @@ kernel_timer_handler(
+ 	/* The time now. */
+ 	now = clock_ticks();
+ 
++	/* Test only: each CPU's interrupts, logged by CPU 0 every 10 s. */
++	if (cpu < 64U)
++		(void)atomic_u64_fetch_add_relaxed(&tickdiag_count[cpu], 1U);
++	if (cpu == 0 && now >= tickdiag_next) {
++		unsigned i;
++
++		for (i = 0; i < hal_cpu_count() && i < 64U; i++) {
++			uint64_t count = atomic_u64_load_acquire(&tickdiag_count[i]);
++
++			kern_logf("tickdiag: t=%llu cpu %u ticks %llu lowered %u\n",
++			    (unsigned long long)now, i,
++			    (unsigned long long)(count - tickdiag_last[i]),
++			    (unsigned)tick_lowered[i]);
++			tickdiag_last[i] = count;
++		}
++		kern_logf("tickdiag: t=%llu global-fast %llu global-next-in %lld\n",
++		    (unsigned long long)now, (unsigned long long)tickdiag_global_fast,
++		    (long long)(atomic_u64_load_acquire(&global_next) - now));
++		tickdiag_global_fast = 0U;
++		sched_diag_near_dump();
++		poll_diag_dump();
++		tickdiag_next = now + 10000U;
++	}
++
+ 	/*
+ 	 * CPU 0 starts the nearest deadline of its timers over, then lowers it
+ 	 * with the process timers and, in the scheduler, ITIMER_REAL.  A timer
+@@ -225,6 +256,8 @@ kern_clock_tick_idle(
+ 
+ 	/* Slows down when nothing falls due within the margin. */
+ 	lower = tick_far(now, next);
++	if (cpu == 0 && !lower && global == next)
++		tickdiag_global_fast++;
+ 
+ 	/* The HAL is asked only for a change. */
+ 	lowered = atomic_raw_load_acquire(&tick_lowered[cpu]);
+diff --git a/src/kern/poll.c b/src/kern/poll.c
+index d5b9077c55..473211d3f1 100644
+--- a/src/kern/poll.c
++++ b/src/kern/poll.c
+@@ -33,6 +33,7 @@
+ #include "kern/thread.h"
+ #include "kern/waitq.h"
+ #include <kern/kcrt.h>
++#include "kern/klog.h"
+ 
+ #include <uapi/errno.h>
+ #include <uapi/fcntl.h>
+@@ -55,6 +56,26 @@ struct poll_waiter {
+ 	unsigned noted;
+ };
+ 
++/* Test only: each thread's polls, timeouts, wakes and requested waits, logged every 10 s. */
++struct poll_diag {
++	uint64_t key;
++	uint32_t calls;
++	uint32_t timeouts;
++	uint32_t rescans;
++	uint32_t immediates;
++	uint32_t nfds;
++	uint32_t every;
++	uint64_t shortest;
++	uint64_t longest;
++	uintptr_t ret[4];
++};
++static struct spinlock poll_diag_lock;
++static struct poll_diag poll_diag_table[64];
++static struct poll_diag poll_diag_copy[64];
++static uint32_t poll_diag_notifies;
++static uint32_t poll_diag_named;
++static uint32_t poll_diag_woken;
++
+ /* The sleeping polls, and the count of the changes so far, under the lock. */
+ struct poll_channel {
+ 	struct spinlock lock;
+@@ -68,6 +89,7 @@ static atomic_uint_t channel_ready;
+ static int poll_scan(struct process *process, struct pollfd *fds, nfds_t count, struct poll_waiter *waiter, int *ready);
+ static int poll_follows(const struct poll_waiter *waiter, const void *object);
+ static uint64_t poll_sequence(void);
++static void poll_diag_rescan(unsigned every);
+ static int poll_sleep(struct poll_waiter *waiter, uint64_t observed, uint64_t deadline, unsigned flags);
+ static int poll_wait_ready(struct process *process, struct pollfd *fds, nfds_t count, uint64_t deadline, int immediate, int *ready);
+ 
+@@ -80,6 +102,7 @@ poll_init(
+ {
+ 	/* Publishes the channel only after its lock exists. */
+ 	spin_init(&channel.lock, LOCK_RANK_POLL, "poll event channel");
++	spin_init(&poll_diag_lock, LOCK_RANK_RANDOM, "poll diag");
+ 	channel.waiters = NULL;
+ 	channel.sequence = 0;
+ 	atomic_store_release(&channel_ready, 1U);
+@@ -103,8 +126,11 @@ poll_notify(
+ 	irq = spin_lock_irqsave(&channel.lock);
+ 
+ 	channel.sequence++;
+-	for (waiter = channel.waiters; waiter != NULL; waiter = waiter->next)
++	poll_diag_notifies++;
++	for (waiter = channel.waiters; waiter != NULL; waiter = waiter->next) {
++		poll_diag_woken++;
+ 		waitq_wake_all(&waiter->waitq);
++	}
+ 
+ 	spin_unlock_irqrestore(&channel.lock, irq);
+ }
+@@ -128,9 +154,12 @@ poll_notify_object(
+ 	irq = spin_lock_irqsave(&channel.lock);
+ 
+ 	channel.sequence++;
++	poll_diag_named++;
+ 	for (waiter = channel.waiters; waiter != NULL; waiter = waiter->next) {
+-		if (waiter->every || poll_follows(waiter, object))
++		if (waiter->every || poll_follows(waiter, object)) {
++			poll_diag_woken++;
+ 			waitq_wake_all(&waiter->waitq);
++		}
+ 	}
+ 
+ 	spin_unlock_irqrestore(&channel.lock, irq);
+@@ -412,6 +441,8 @@ poll_wait_ready(
+ 		/* Another failure of the sleep ends the poll. */
+ 		if (error != 0 && error != EAGAIN)
+ 			return error;
++		if (error == 0)
++			poll_diag_rescan(waiter.every);
+ 
+ 		/* The same for a deadline that passed while the wake was on its way. */
+ 		now = sched_ticks();
+@@ -508,3 +539,116 @@ poll_scan(
+ 	/* Succeeded: the caller receives this scan's readiness count. */
+ 	return 0;
+ }
++
++static struct poll_diag *
++poll_diag_slot(
++	struct thread *thread)
++{
++	uint64_t key;
++	unsigned i;
++
++	key = ((thread->proc != NULL ? (uint64_t)thread->proc->pid : 0U) << 32) | (uint64_t)(uint32_t)thread->tid;
++	for (i = 0; i < 64U; i++) {
++		if (poll_diag_table[i].key == key && poll_diag_table[i].calls + poll_diag_table[i].rescans != 0U)
++			return &poll_diag_table[i];
++		if (poll_diag_table[i].calls + poll_diag_table[i].rescans == 0U) {
++			kern_memset(&poll_diag_table[i], 0, sizeof(poll_diag_table[i]));
++			poll_diag_table[i].key = key;
++			return &poll_diag_table[i];
++		}
++	}
++	return NULL;
++}
++
++/* Test only: notes one poll of the current thread. */
++void
++poll_diag_note(
++	nfds_t count,
++	uint64_t span,
++	int immediate,
++	int timed_out,
++	const uintptr_t ret[4])
++{
++	struct poll_diag *slot;
++	struct thread *thread;
++	unsigned long irq;
++
++	thread = thread_current();
++	if (thread == NULL || atomic_load_acquire(&channel_ready) == 0)
++		return;
++	irq = spin_lock_irqsave(&poll_diag_lock);
++	slot = poll_diag_slot(thread);
++	if (slot != NULL) {
++		if (slot->calls == 0U || span < slot->shortest)
++			slot->shortest = span;
++		if (slot->calls == 0U || span > slot->longest)
++			slot->longest = span;
++		slot->calls++;
++		if (immediate)
++			slot->immediates++;
++		if (timed_out)
++			slot->timeouts++;
++		slot->nfds = (uint32_t)count;
++		kern_memcpy(slot->ret, ret, sizeof(slot->ret));
++	}
++	spin_unlock_irqrestore(&poll_diag_lock, irq);
++}
++
++/* Test only: notes a wake of a poll that found nothing (every: it followed every change). */
++static void
++poll_diag_rescan(
++	unsigned every)
++{
++	struct poll_diag *slot;
++	struct thread *thread;
++	unsigned long irq;
++
++	thread = thread_current();
++	if (thread == NULL)
++		return;
++	irq = spin_lock_irqsave(&poll_diag_lock);
++	slot = poll_diag_slot(thread);
++	if (slot != NULL) {
++		slot->rescans++;
++		if (every)
++			slot->every++;
++	}
++	spin_unlock_irqrestore(&poll_diag_lock, irq);
++}
++
++/* Test only: logs and clears the table (the timer's 10 s report). */
++void
++poll_diag_dump(void)
++{
++	unsigned long irq;
++	uint32_t notifies;
++	uint32_t named;
++	uint32_t woken;
++	unsigned i;
++
++	if (atomic_load_acquire(&channel_ready) == 0)
++		return;
++	irq = spin_lock_irqsave(&poll_diag_lock);
++	kern_memcpy(poll_diag_copy, poll_diag_table, sizeof(poll_diag_copy));
++	kern_memset(poll_diag_table, 0, sizeof(poll_diag_table));
++	notifies = poll_diag_notifies;
++	named = poll_diag_named;
++	woken = poll_diag_woken;
++	poll_diag_notifies = 0U;
++	poll_diag_named = 0U;
++	poll_diag_woken = 0U;
++	spin_unlock_irqrestore(&poll_diag_lock, irq);
++	kern_logf("polldiag: notifies %u named %u woken %u\n", (unsigned)notifies, (unsigned)named, (unsigned)woken);
++	for (i = 0; i < 64U; i++) {
++		if (poll_diag_copy[i].calls + poll_diag_copy[i].rescans == 0U)
++			continue;
++		kern_logf("polldiag: pid %u tid %u calls %u timeouts %u immediate %u rescans %u nfds %u wait %llu-%llu every %u ret %llx %llx\n",
++		    (unsigned)(poll_diag_copy[i].key >> 32), (unsigned)(uint32_t)poll_diag_copy[i].key,
++		    (unsigned)poll_diag_copy[i].calls, (unsigned)poll_diag_copy[i].timeouts,
++		    (unsigned)poll_diag_copy[i].immediates, (unsigned)poll_diag_copy[i].rescans,
++		    (unsigned)poll_diag_copy[i].nfds,
++		    (unsigned long long)poll_diag_copy[i].shortest, (unsigned long long)poll_diag_copy[i].longest,
++		    (unsigned)poll_diag_copy[i].every,
++		    (unsigned long long)poll_diag_copy[i].ret[0], (unsigned long long)poll_diag_copy[i].ret[1]);
++	}
++}
+diff --git a/src/kern/sched.c b/src/kern/sched.c
+index 62a82ddf1f..85abbe05ec 100644
+--- a/src/kern/sched.c
++++ b/src/kern/sched.c
+@@ -2506,12 +2506,71 @@ idle_mask_clear(
+  * or UINT64_MAX when none has one.  Only the CPU itself calls it, from its
+  * idle loop with interrupts disabled.
+  */
++/* Test only: which sleepers kept an idle CPU at the busy rate. */
++struct sched_diag_near {
++	uint64_t key;
++	const char *queue;
++	uint64_t count;
++	uintptr_t entry;
++	uint64_t shortest;
++	uint64_t longest;
++};
++struct sched_diag_near sched_diag_near_table[48];
++
++static void
++sched_diag_near_note(
++	struct thread *thread)
++{
++	uint64_t key;
++	const char *queue;
++	uint64_t span;
++	unsigned i;
++
++	key = ((thread->proc != NULL ? (uint64_t)thread->proc->pid : 0U) << 32) | (uint64_t)(uint32_t)thread->tid;
++	queue = thread->wait_token.queue != NULL ? thread->wait_token.queue->name : NULL;
++	for (i = 0; i < 48U; i++) {
++		if (sched_diag_near_table[i].count == 0U || sched_diag_near_table[i].key == key) {
++			span = thread->sched.wakeup_tick - thread->sched.queued_tick;
++			if (sched_diag_near_table[i].count == 0U || span < sched_diag_near_table[i].shortest)
++				sched_diag_near_table[i].shortest = span;
++			if (sched_diag_near_table[i].count == 0U || span > sched_diag_near_table[i].longest)
++				sched_diag_near_table[i].longest = span;
++			sched_diag_near_table[i].key = key;
++			sched_diag_near_table[i].queue = queue;
++			sched_diag_near_table[i].entry = (uintptr_t)thread->kernel_entry;
++			sched_diag_near_table[i].count++;
++			break;
++		}
++	}
++}
++
++void
++sched_diag_near_dump(void)
++{
++	unsigned i;
++
++	for (i = 0; i < 48U; i++) {
++		if (sched_diag_near_table[i].count == 0U)
++			continue;
++		kern_logf("neardiag: count %llu pid %u tid %u entry %llx span %llu-%llu queue %s\n",
++		    (unsigned long long)sched_diag_near_table[i].count,
++		    (unsigned)(sched_diag_near_table[i].key >> 32), (unsigned)(uint32_t)sched_diag_near_table[i].key,
++		    (unsigned long long)sched_diag_near_table[i].entry,
++		    (unsigned long long)sched_diag_near_table[i].shortest,
++		    (unsigned long long)sched_diag_near_table[i].longest,
++		    sched_diag_near_table[i].queue != NULL ? sched_diag_near_table[i].queue : "-");
++		sched_diag_near_table[i].count = 0U;
++		sched_diag_near_table[i].key = 0U;
++	}
++}
++
+ static uint64_t
+ next_deadline(
+ 	hal_cpu_id_t id)
+ {
+ 	struct sched_cpu *cpu;
+ 	struct thread *thread;
++	struct thread *near;
+ 	unsigned long irq;
+ 	uint64_t next;
+ 
+@@ -2520,11 +2579,16 @@ next_deadline(
+ 	next = UINT64_MAX;
+ 	irq = spin_lock_irqsave(&cpu->lock);
+ 
++	near = NULL;
+ 	for (thread = cpu->sleep.head; thread != NULL; thread = thread->sched.next) {
+ 		if (thread->sched.wakeup_tick != 0 &&
+-		    thread->sched.wakeup_tick < next)
++		    thread->sched.wakeup_tick < next) {
+ 			next = thread->sched.wakeup_tick;
++			near = thread;
++		}
+ 	}
++	if (near != NULL && next > clock_ticks() && next - clock_ticks() < 12U)
++		sched_diag_near_note(near);
+ 
+ 	spin_unlock_irqrestore(&cpu->lock, irq);
+ 
+diff --git a/src/kern/syscall.c b/src/kern/syscall.c
+index 37a8c7e8de..fca3b49f5b 100644
+--- a/src/kern/syscall.c
++++ b/src/kern/syscall.c
+@@ -786,9 +786,21 @@ sys_ppoll_call(
+ 	error = poll_timeout(args[2], &deadline, &immediate);
+ 	if (error == 0)
+ 		error = poll_mask_enter(args[3], &guard);
+-	if (error == 0)
++	if (error == 0) {
++		uintptr_t diag_ret[4];
++		uint64_t diag_start;
++		uintptr_t diag_sp;
++
++		kern_memset(diag_ret, 0, sizeof(diag_ret));
++		diag_sp = hal_task_get_user_stack();
++		if (diag_sp != 0)
++			(void)copyin(diag_sp, diag_ret, sizeof(diag_ret));
++		diag_start = clock_ticks();
+ 		error = kern_poll_wait(process, fds, count, deadline, immediate,
+ 		    &ready);
++		poll_diag_note(count, deadline != 0 ? deadline - diag_start : 0U,
++		    immediate, error == 0 && ready == 0 && !immediate && deadline != 0, diag_ret);
++	}
+ 	if (args[3] != 0)
+ 		poll_mask_leave(&guard, poll_mask_defer_restore(&guard, error));
+ 	if (error == 0 && bytes != 0)
