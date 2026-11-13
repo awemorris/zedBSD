@@ -1371,8 +1371,7 @@ announce_tablet(
 	/* The server-made object the event carries. */
 	tablet = kwl_create_server(seat->client, KWL_TABLET, seat->version);
 	if (tablet == NULL) {
-		seat->client->fatal = 1;
-		seat->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(seat->client);
 		return;
 	}
 
@@ -1414,8 +1413,7 @@ announce_tool(
 	/* The server-made object the event carries. */
 	object = kwl_create_server(seat->client, KWL_TABLET_TOOL, seat->version);
 	if (object == NULL) {
-		seat->client->fatal = 1;
-		seat->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(seat->client);
 		return;
 	}
 
@@ -1602,8 +1600,7 @@ emit(
 	/* A client that stopped reading loses its connection rather than compositor memory. */
 	error = kwl_emit(client, id, opcode, payload, size);
 	if (error != 0) {
-		client->fatal = 1;
-		client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(client);
 		return;
 	}
 

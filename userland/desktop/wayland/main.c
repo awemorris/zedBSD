@@ -40,6 +40,12 @@
 #include <string.h>
 #include <syslog.h>
 
+/* How long a failed client's events still wait to be sent before the client is retired anyway, in milliseconds. */
+#define KWL_FATAL_FLUSH_MS	2000U
+
+/* Marks a parameter a function takes for its type's sake and does not use. */
+#define UNUSED_PARAMETER(name)	((void)(name))
+
 /* Signal handlers only request ordinary event-loop cleanup, they own no GPU state. */
 static volatile sig_atomic_t stop_requested;
 
@@ -75,6 +81,8 @@ static void wake_drain(struct kwl_server *server);
 static void input_scan_pace(struct kwl_server *server, uint64_t now);
 static void service_cleanup(struct kwl_server *server);
 static uint64_t startup_step(const char *step, uint64_t since);
+static void fatal_due_fired(void *context, struct kwl_timer *timer);
+static void timeout_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Runs one bounded fullscreen compositor instance and cleans up its own resources.
@@ -260,6 +268,10 @@ main(
 	/* The gone clients' releases have their timer from the start. */
 	kwl_retire_init(&server);
 
+	/* The failed clients' last flush and the run's bound have their timers from the start too. */
+	kwl_timer_init(&server.fatal_timer, "fatal", fatal_due_fired);
+	kwl_timer_init(&server.timeout_timer, "timeout", timeout_fired);
+
 	/*
 	 * A child's end wakes the event loop, which reaps it (the desktop's
 	 * program, the input method, App Home's programs) and starts it again
@@ -393,6 +405,10 @@ main(
 		if (!locked)
 			printf("KWL LOCK restart refused\n");
 	}
+
+	/* An unlocked session's lock after a time without input waits from now (shell.c). */
+	if (error == 0)
+		kwl_lock_idle_pace(&server);
 
 	/* READY appears only after the hardware contract and socket namespace are both usable. */
 	if (error == 0) {
@@ -1026,6 +1042,10 @@ event_loop(
 	if (started == UINT64_MAX)
 		return EIO;
 
+	/* A bounded run ends when its timer fires; an unbounded one (or a bound past the clock's range) has none. */
+	if (server->timeout_ms != UINT64_MAX && server->timeout_ms <= UINT64_MAX - started)
+		kwl_timer_set(server, &server->timeout_timer, started + server->timeout_ms);
+
 	/* Each pass rebuilds the descriptor generation snapshot after prior cleanup. */
 	while (!stop_requested && !server->failed) {
 		/* Clock failure must not turn the configured service deadline into an endless run. */
@@ -1035,8 +1055,8 @@ event_loop(
 			return EIO;
 		}
 
-		/* The optional frame bound counts only completed hardware selections. */
-		if (now - started >= server->timeout_ms ||
+		/* The run's bound has come (its timer), or the optional frame bound, which counts only completed hardware selections. */
+		if (server->time_up ||
 		    (server->max_frames != 0 && server->frame >= server->max_frames))
 			break;
 
@@ -1045,9 +1065,6 @@ event_loop(
 
 		/* Evdev nodes that appeared since the last scan join the seat. */
 		input_scan_pace(server, now);
-
-		/* A client that has left a ping unanswered too long is not responding (toplevel.c). */
-		kwl_ping_check(server, now);
 
 		/* The windows hear new bounds when the space for bodies changed (the glass look given up, protocol.c). */
 		kwl_window_bounds_refresh(server);
@@ -1137,12 +1154,6 @@ event_loop(
 			if (client->output_head != NULL)
 				descriptors[index].events |= POLLOUT;
 
-			/* A fully flushed fatal connection can be retired immediately, one that is not when its time is up. */
-			if (client->fatal && client->output_head == NULL)
-				kwl_due(server, 0U);
-			if (client->fatal && client->output_head != NULL)
-				kwl_due(server, client->fatal_time + 2000U);
-
 			/* Each slot and pointer now describe one live connection generation. */
 			index++;
 		}
@@ -1182,12 +1193,10 @@ event_loop(
 		kwl_compose_give_tasks(server);
 
 		/*
-		 * The wait ends with an event, or when work without one is due; a
-		 * service with a bound ends at the bound.  A backend that reads some
-		 * of its areas without waiting has them looked at soon.
+		 * The wait ends with an event (the timers' thread's among them), or
+		 * when work without one is due.  A backend that reads some of its
+		 * areas without waiting has them looked at soon.
 		 */
-		if (server->timeout_ms != UINT64_MAX)
-			kwl_due(server, started + server->timeout_ms);
 		if (!kl_backend_wakes(server->backend))
 			kwl_due_soon(server);
 
@@ -1327,7 +1336,7 @@ event_loop(
 			/* Protocol errors get a bounded final flush before their namespace is destroyed. */
 			if (client->fatal &&
 			    (client->output_head == NULL ||
-			     (now >= client->fatal_time && now - client->fatal_time >= 2000U))) {
+			     (now >= client->fatal_time && now - client->fatal_time >= KWL_FATAL_FLUSH_MS))) {
 				remove = 1;
 				why = "error";
 			}
@@ -1386,10 +1395,8 @@ event_loop(
 			if (client->fatal)
 				continue;
 			flushed = kwl_flush(client);
-			if (flushed != 0) {
-				client->fatal = 1;
-				client->fatal_time = kwl_milliseconds();
-			}
+			if (flushed != 0)
+				kwl_client_fail(client);
 		}
 
 		/* The last flush's part (KWL PERF main). */
@@ -1590,6 +1597,55 @@ kwl_due_next_minute(
 	/* The rest of it, and a little more so that the minute has turned. */
 	left = 60000U - into;
 	kwl_due(server, kwl_milliseconds() + left + KWL_MINUTE_LATE_MS);
+}
+
+/*
+ * Arms a part's timer for at_ms (kwl_milliseconds' clock; a time past fires
+ * at the next pass), or disarms it for UINT64_MAX.  The timer was readied
+ * with kwl_timer_init.  A heap without room (more timers than
+ * KWL_TIMERS_MAX, a fault of the program) is said in the log and leaves
+ * the time to this pass's own deadline.
+ */
+void
+kwl_timer_set(
+	struct kwl_server *server,
+	struct kwl_timer *timer,
+	uint64_t at_ms)
+{
+	int error;
+
+	/* No time: nothing waits for it. */
+	if (at_ms == UINT64_MAX) {
+		kwl_timer_disarm(&server->timers, timer);
+		return;
+	}
+
+	/* The timer wakes the loop at its time. */
+	error = kwl_timer_arm(&server->timers, timer, at_ms);
+	if (error != 0) {
+		printf("KWL TIMER full name=%s errno=%d\n", timer->name, error);
+		kwl_due(server, at_ms);
+	}
+}
+
+/*
+ * Fails a client's connection: no request of it is read any more, and it
+ * is retired once its events were sent, or KWL_FATAL_FLUSH_MS from now
+ * (the timer wakes the event loop's pass that retires it).
+ */
+void
+kwl_client_fail(
+	struct kwl_client *client)
+{
+	struct kwl_server *server;
+
+	/* Failed from now; the time its last events have starts again. */
+	server = client->server;
+	client->fatal = 1;
+	client->fatal_time = kwl_milliseconds();
+
+	/* The next pass retires it when nothing waits to be sent, or arms the time of what waits. */
+	kwl_timer_set(server, &server->fatal_timer, client->fatal_time);
 }
 
 /*
@@ -2276,4 +2332,62 @@ compose_unavailable_reason(
 	/* The log's line, and the sentence on the terminal the desktop was started from. */
 	printf("KWL COMPOSE reason=\"%s\"\n", reason);
 	fprintf(stderr, "wayland: the desktop cannot start: %s\n", reason);
+}
+
+/*
+ * The failed clients' timer is due: a failed client with nothing left to
+ * send is retired by this pass of the event loop, and so is one whose
+ * time ran out; the timer is armed again for the earliest end of a time
+ * still running.
+ */
+static void
+fatal_due_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	struct kwl_client *client;
+	uint64_t now;
+	uint64_t due;
+	uint64_t earliest;
+
+	UNUSED_PARAMETER(timer);
+
+	/* The earliest end among the failed clients whose events still wait and whose time runs on. */
+	server = context;
+	now = kwl_milliseconds();
+	earliest = UINT64_MAX;
+	for (client = server->clients; client != NULL; client = client->next) {
+		/* Only a failed client with events still to send. */
+		if (!client->fatal || client->output_head == NULL)
+			continue;
+
+		/* One whose time ran out goes in this pass. */
+		due = client->fatal_time + KWL_FATAL_FLUSH_MS;
+		if (due <= now)
+			continue;
+
+		/* The earliest of the others. */
+		if (due < earliest)
+			earliest = due;
+	}
+
+	/* The next end, if any. */
+	kwl_timer_set(server, &server->fatal_timer, earliest);
+}
+
+/*
+ * The run's bound has come: the event loop ends before its next wait.
+ */
+static void
+timeout_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+
+	/* The loop's next turn ends it (late_ms: how long after its time the timer fired). */
+	server = context;
+	server->time_up = 1U;
+	printf("KWL TIMEOUT after_ms=%llu late_ms=%llu\n", (unsigned long long)server->timeout_ms, (unsigned long long)(kwl_milliseconds() - timer->due_ms));
 }

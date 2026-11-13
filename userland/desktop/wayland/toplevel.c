@@ -85,6 +85,8 @@ static void move_anchor(struct kwl_server *server, struct kwl_object *surface);
 static void resize_anchor(struct kwl_server *server);
 static int32_t window_lowest(struct kwl_server *server, const struct kwl_object *surface);
 static uint32_t toplevel_word(const unsigned char *bytes, size_t offset);
+static void ping_pace(struct kwl_server *server);
+static void ping_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Carries out an xdg_toplevel request of the window manager: set_parent,
@@ -447,9 +449,10 @@ kwl_ping_send(
 	if (error != 0)
 		return;
 
-	/* The ping is out from now. */
+	/* The ping is out from now, and the pings' timer covers the end of its time. */
 	client->ping_serial = serial;
 	client->ping_ms = kwl_milliseconds();
+	ping_pace(client->server);
 }
 
 /*
@@ -474,36 +477,6 @@ kwl_ping_pong(
 		client->unresponsive = 0;
 		client->server->dirty = 1;
 		printf("KWL PING responsive client=%llu\n", (unsigned long long)client->number);
-	}
-}
-
-/*
- * Finds the clients whose ping has gone unanswered for PING_TIMEOUT_MS:
- * they are not responding until they answer.
- */
-void
-kwl_ping_check(
-	struct kwl_server *server,
-	uint64_t now)
-{
-	struct kwl_client *client;
-
-	/* Every client with a ping out. */
-	for (client = server->clients; client != NULL; client = client->next) {
-		/* A failed client, one without a ping out, or one already known not to respond. */
-		if (client->fatal || client->ping_serial == 0U || client->unresponsive)
-			continue;
-
-		/* A ping still within its time: the loop looks again when it runs out. */
-		if (now < client->ping_ms || now - client->ping_ms < PING_TIMEOUT_MS) {
-			kwl_due(server, client->ping_ms + PING_TIMEOUT_MS);
-			continue;
-		}
-
-		/* It is not responding; its title bars say so. */
-		client->unresponsive = 1;
-		server->dirty = 1;
-		printf("KWL PING unresponsive client=%llu\n", (unsigned long long)client->number);
 	}
 }
 
@@ -957,4 +930,77 @@ toplevel_word(
 
 	/* Succeeded: the word. */
 	return word;
+}
+
+/*
+ * Arms the pings' timer for the earliest end of a ping's time among the
+ * clients with a ping out that are still taken to respond, or disarms it
+ * when there is none.
+ */
+static void
+ping_pace(
+	struct kwl_server *server)
+{
+	struct kwl_client *client;
+	uint64_t earliest;
+	uint64_t due;
+
+	/* The timer is readied once. */
+	if (server->ping_timer.fire == NULL)
+		kwl_timer_init(&server->ping_timer, "ping", ping_fired);
+
+	/* Every client with a ping out that is not known not to respond. */
+	earliest = UINT64_MAX;
+	for (client = server->clients; client != NULL; client = client->next) {
+		/* A failed client, one without a ping out, or one already known not to respond. */
+		if (client->fatal || client->ping_serial == 0U || client->unresponsive)
+			continue;
+
+		/* The end of its time, the earliest of all. */
+		due = client->ping_ms + PING_TIMEOUT_MS;
+		if (due < earliest)
+			earliest = due;
+	}
+
+	/* The timer follows the earliest, or waits for nothing. */
+	kwl_timer_set(server, &server->ping_timer, earliest);
+}
+
+/*
+ * The pings' timer is due: the clients whose ping has gone unanswered for
+ * PING_TIMEOUT_MS are not responding until they answer, and the timer
+ * moves on to the next ping's end.
+ */
+static void
+ping_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	struct kwl_client *client;
+	uint64_t now;
+
+	/* Only the server's timer comes here. */
+	(void)timer;
+
+	/* Every client with a ping out. */
+	server = context;
+	now = kwl_milliseconds();
+	for (client = server->clients; client != NULL; client = client->next) {
+		/* A failed client, one without a ping out, or one already known not to respond. */
+		if (client->fatal || client->ping_serial == 0U || client->unresponsive)
+			continue;
+
+		/* A ping still within its time (a clock that went back counts as within). */
+		if (now < client->ping_ms || now - client->ping_ms < PING_TIMEOUT_MS)
+			continue;
+
+		/* It is not responding; its title bars say so. */
+		client->unresponsive = 1;
+		server->dirty = 1;
+		printf("KWL PING unresponsive client=%llu\n", (unsigned long long)client->number);
+	}
+
+	/* The next ping's end. */
+	ping_pace(server);
 }

@@ -123,6 +123,14 @@ struct shot_send {
 /* The sending under way, while the stage is SHOT_SENDING. */
 static struct shot_send shot_sending;
 
+/*
+ * The timer of a request whose frame does not come: armed for
+ * SHOT_WAIT_MS after the request while a connection waits for its frame,
+ * disarmed when the request ends or its sending starts.  Readied by the
+ * first request.
+ */
+static struct kwl_timer shot_wait_timer;
+
 static void shot_answer(int connection, const char *line);
 static int shot_displays_request(const char *line);
 static void shot_displays(struct kwl_server *server, int connection, const char *line);
@@ -130,6 +138,7 @@ static void shot_policy(struct kwl_server *server, int connection, const char *w
 static void shot_rotate(struct kwl_server *server, int connection, const char *number);
 static void shot_pointer(struct kwl_server *server, int connection);
 static void shot_finish(struct kwl_server *server, const char *error);
+static void shot_wait_fired(void *context, struct kwl_timer *timer);
 static int shot_buffer(struct kwl_compose *compose);
 static void shot_buffer_free(struct kwl_compose *compose);
 static int shot_send_start(int connection, const char *header, const void *pixels, size_t size, int wake);
@@ -263,7 +272,6 @@ kwl_shot_tick(
 {
 	struct timeval timeout;
 	char line[128];
-	uint64_t now;
 	ssize_t count;
 	int connection;
 	int active;
@@ -276,15 +284,6 @@ kwl_shot_tick(
 	sending = shot_send_end(server, 0U);
 	if (sending)
 		return;
-
-	/* A request whose frame did not come (its frame wakes the loop; its time runs out on the clock). */
-	now = kwl_milliseconds();
-	if (shot.client >= 0 && now - shot.asked_ms > SHOT_WAIT_MS) {
-		shot_finish(server, "timeout");
-		return;
-	}
-	if (shot.client >= 0)
-		kwl_due(server, shot.asked_ms + SHOT_WAIT_MS + 1U);
 
 	/* A new connection, one at a time (one that comes wakes the loop). */
 	if (shot.listener < 0 || shot.client >= 0)
@@ -390,6 +389,9 @@ kwl_shot_tick(
 	shot.client = connection;
 	shot.stage = SHOT_REQUESTED;
 	shot.asked_ms = kwl_milliseconds();
+	if (shot_wait_timer.fire == NULL)
+		kwl_timer_init(&shot_wait_timer, "shot-wait", shot_wait_fired);
+	kwl_timer_set(server, &shot_wait_timer, shot.asked_ms + SHOT_WAIT_MS + 1U);
 	match = strncmp(line, "SHOT partial", 12U);
 	if (match != 0)
 		server->dirty = 1;
@@ -502,6 +504,7 @@ kwl_shot_complete(
 	if (error == 0) {
 		vkUnmapMemory(server->compose->device, shot.memory);
 		shot.client = -1;
+		kwl_timer_disarm(&server->timers, &shot_wait_timer);
 		shot.stage = SHOT_SENDING;
 		if (!server->compose->in_flight)
 			shot_buffer_free(server->compose);
@@ -552,10 +555,11 @@ shot_finish(
 		printf("KWL SHOT error=%s\n", error);
 	}
 
-	/* The connection and the buffer. */
+	/* The connection and the buffer; no frame is waited for any more. */
 	if (shot.client >= 0)
 		(void)close(shot.client);
 	shot.client = -1;
+	kwl_timer_disarm(&server->timers, &shot_wait_timer);
 	shot.stage = SHOT_IDLE;
 	if (server->compose != NULL && !server->compose->in_flight)
 		shot_buffer_free(server->compose);
@@ -991,4 +995,24 @@ shot_send_end(
 
 	/* Succeeded: no sending is under way. */
 	return 0;
+}
+
+/*
+ * A request's frame did not come within SHOT_WAIT_MS: the request ends
+ * with the timeout's error.
+ */
+static void
+shot_wait_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	/* Only the capture's timer comes here. */
+	(void)timer;
+
+	/* Only a connection still waiting for its frame. */
+	if (shot.client < 0)
+		return;
+
+	/* Succeeded: the request ends. */
+	shot_finish(context, "timeout");
 }

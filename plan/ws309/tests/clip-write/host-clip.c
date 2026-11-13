@@ -12,7 +12,8 @@
  * offer must return at once (no wait for the reader), the rest must follow
  * in the passes (kwl_clipboard_poll) as the reader reads, and every byte
  * must arrive.  A reader that never reads is given up after the write's
- * time; the lock's clear ends a write under way.
+ * time (by the clipboard's timer, which the test's passes fire when due);
+ * the lock's clear ends a write under way.
  */
 
 #include "userland/desktop/wayland/data.h"
@@ -35,11 +36,16 @@
 static char text_source[TEXT_SIZE];
 static unsigned failures;
 
+/* The clipboard's timer as the fake timers keep it (NULL: none armed), and its time. */
+static struct kwl_timer *test_timer;
+static uint64_t test_timer_due;
+
 static void check(int condition, const char *what);
 static uint64_t now_ms(void);
 static void sleep_ms(unsigned milliseconds);
 static void fill_history(struct kwl_server *server);
 static size_t drain(int descriptor, char *into, size_t capacity);
+static void test_pass(struct kwl_server *server);
 
 /* The compositor's clock, as the event loop has it. */
 uint64_t
@@ -47,6 +53,52 @@ kwl_milliseconds(void)
 {
 	/* The host's monotonic clock. */
 	return now_ms();
+}
+
+/* The event loop's wait for a descriptor: the test's passes come on their own. */
+void
+kwl_watch(
+	struct kwl_server *server,
+	int descriptor,
+	short events)
+{
+	/* Nothing. */
+	(void)server;
+	(void)descriptor;
+	(void)events;
+}
+
+/* Readies a timer (threads.c's): not armed, with its handler. */
+void
+kwl_timer_init(
+	struct kwl_timer *timer,
+	const char *name,
+	kwl_timer_fire_fn *fire)
+{
+	/* Not armed. */
+	memset(timer, 0, sizeof(*timer));
+	timer->name = name;
+	timer->fire = fire;
+}
+
+/* Arms the clipboard's one timer for at_ms, or disarms it (main.c's); test_pass fires it. */
+void
+kwl_timer_set(
+	struct kwl_server *server,
+	struct kwl_timer *timer,
+	uint64_t at_ms)
+{
+	/* Disarmed. */
+	(void)server;
+	if (at_ms == UINT64_MAX) {
+		if (test_timer == timer)
+			test_timer = NULL;
+		return;
+	}
+
+	/* Armed. */
+	test_timer = timer;
+	test_timer_due = at_ms;
 }
 
 /* The source's send: the test's text into the pipe, then its end. */
@@ -123,7 +175,7 @@ main(void)
 	(void)fcntl(pipes[1], F_SETPIPE_SZ, READER_PIPE);
 	(void)fcntl(pipes[0], F_SETFL, O_NONBLOCK);
 	started = now_ms();
-	kwl_clipboard_offer_write(pipes[1]);
+	kwl_clipboard_offer_write(server, pipes[1]);
 	took = now_ms() - started;
 	check(took < 20U, "the offer does not wait");
 
@@ -132,12 +184,14 @@ main(void)
 	check(total < sizeof(text_source), "the first offer wrote a part");
 	started = now_ms();
 	while (total < sizeof(received) && now_ms() - started < 3000U) {
-		kwl_clipboard_poll(server);
+		test_pass(server);
 		got = drain(pipes[0], received + total, sizeof(received) - total);
 		total += got;
 		sleep_ms(1U);
 	}
-	kwl_clipboard_poll(server);
+
+	/* One more pass ends the write. */
+	test_pass(server);
 	check(total == sizeof(text_source), "every byte arrived");
 	check(memcmp(received, text_source, sizeof(text_source)) == 0, "the bytes are the text");
 	(void)fcntl(pipes[0], F_SETFL, 0);
@@ -148,10 +202,10 @@ main(void)
 	error = pipe(pipes);
 	check(error == 0, "pipe 2");
 	(void)fcntl(pipes[1], F_SETPIPE_SZ, READER_PIPE);
-	kwl_clipboard_offer_write(pipes[1]);
+	kwl_clipboard_offer_write(server, pipes[1]);
 	started = now_ms();
 	while (now_ms() - started < 2600U) {
-		kwl_clipboard_poll(server);
+		test_pass(server);
 		sleep_ms(10U);
 	}
 	(void)fcntl(pipes[0], F_SETFL, O_NONBLOCK);
@@ -166,7 +220,7 @@ main(void)
 	check(error == 0, "pipe 3");
 	(void)fcntl(pipes[1], F_SETPIPE_SZ, READER_PIPE);
 	(void)fcntl(pipes[0], F_SETFL, O_NONBLOCK);
-	kwl_clipboard_offer_write(pipes[1]);
+	kwl_clipboard_offer_write(server, pipes[1]);
 	kwl_clipboard_history_clear(server, "lock");
 	got = drain(pipes[0], received, sizeof(received));
 	(void)fcntl(pipes[0], F_SETFL, 0);
@@ -241,9 +295,29 @@ fill_history(
 	/* The selection; the stub has written all of it before returning, as a pipe would let a reader take. */
 	kwl_clipboard_selected(server, source);
 	for (pass = 0U; pass < 10U; pass++)
-		kwl_clipboard_poll(server);
+		test_pass(server);
 	free(source);
 	free(client);
+}
+
+/* One pass of the event loop as the clipboard sees it: its timer fires when due, then the pipes are looked at. */
+static void
+test_pass(
+	struct kwl_server *server)
+{
+	struct kwl_timer *timer;
+	uint64_t now;
+
+	/* The timer, taken out before its handler (which may arm it again). */
+	now = now_ms();
+	if (test_timer != NULL && now >= test_timer_due) {
+		timer = test_timer;
+		test_timer = NULL;
+		timer->fire(server, timer);
+	}
+
+	/* The pipes. */
+	kwl_clipboard_poll(server);
 }
 
 /* Reads what a non-blocking pipe has now, up to capacity; returns how much. */

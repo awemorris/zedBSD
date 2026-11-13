@@ -16,7 +16,7 @@
  * statistics may wait on a lock: the event loop never does either): the
  * event loop gives it a sample's job at the shortest period asked, one at
  * a time, the info read every few samples, and tells every monitor object
- * the sample and a new info when the job is taken (kwl_sysmon_tick).  The
+ * the sample and a new info when the job is taken (sysmon_done).  The
  * backend's monitor is the device I/O thread's: opened by the first job,
  * closed by a job after the last object went (or at the compositor's end,
  * after the thread).
@@ -58,7 +58,10 @@
  * read with every SYSMON_INFO_EVERY-th), whether the backend's monitor may
  * be open on the device I/O thread, the latest sample and info with their
  * serials (0: none yet), the serials told last, when it last looked for
- * the objects, and how many there were.  One per process.
+ * the objects (0: to look at once), and how many there were.  timer wakes
+ * the event loop for the next look and the next sample: armed while
+ * objects are there or a look is asked, disarmed otherwise.  One per
+ * process.
  */
 struct sysmon_state {
 	unsigned running;
@@ -75,6 +78,7 @@ struct sysmon_state {
 	uint32_t taken_info;
 	uint64_t scanned_ms;
 	unsigned subscribers;
+	struct kwl_timer timer;
 };
 
 /*
@@ -107,6 +111,8 @@ static unsigned sysmon_have_info;
 static struct sysmon_state sysmon_state;
 
 static void sysmon_give(struct kwl_server *server, unsigned close);
+static void sysmon_pace(struct kwl_server *server);
+static void sysmon_fired(void *context, struct kwl_timer *timer);
 static void sysmon_run(struct kwl_lane_job *job);
 static void sysmon_done(void *context, struct kwl_lane_job *job);
 static void sysmon_drop(struct kwl_lane_job *job);
@@ -165,6 +171,7 @@ kwl_sysmon_create(
 
 	/* The sampling starts at the next pass, at the shortest period asked. */
 	sysmon_state.scanned_ms = 0;
+	sysmon_pace(manager->client->server);
 
 	/* Succeeded: the object is the client's. */
 	return 0;
@@ -182,14 +189,17 @@ kwl_sysmon_request(
 	const unsigned char *bytes,
 	size_t size)
 {
+	struct kwl_server *server;
 	uint32_t serial;
 
 	/* The object goes; the sampling stops at a later pass when it was the last. */
+	server = object->client->server;
 	if (opcode == KL_SYSTEM_MONITOR_DESTROY) {
 		if (size != 0U)
 			return EPROTO;
 		kwl_object_destroy(object);
 		sysmon_state.scanned_ms = 0;
+		sysmon_pace(server);
 		return 0;
 	}
 
@@ -208,46 +218,10 @@ kwl_sysmon_request(
 		return EPROTO;
 	object->monitor_period = sysmon_period(sysmon_word(bytes, 0U));
 	sysmon_state.scanned_ms = 0;
+	sysmon_pace(server);
 
 	/* Succeeded: the request is carried out. */
 	return 0;
-}
-
-/*
- * Looks after the monitor once a pass: the objects counted now and then
- * (the sampling started for the first, stopped after the last, at the
- * shortest period asked), and the next sample's job given when it is due.
- */
-void
-kwl_sysmon_tick(
-	struct kwl_server *server)
-{
-	uint64_t now;
-
-	/* The objects, every SYSMON_SCAN_MS or after one came or went. */
-	now = kwl_milliseconds();
-	if (sysmon_state.scanned_ms == 0U || now >= sysmon_state.scanned_ms + SYSMON_SCAN_MS) {
-		sysmon_state.scanned_ms = now;
-		sysmon_scan(server);
-	}
-
-	/*
-	 * While objects are there, they are counted again now and then (a
-	 * client that goes takes its objects without a request); without any,
-	 * a new one asks for the count itself.
-	 */
-	if (sysmon_state.subscribers != 0U)
-		kwl_due(server, sysmon_state.scanned_ms + SYSMON_SCAN_MS);
-
-	/* The next sample, at the period, once the last is taken. */
-	if (sysmon_state.running &&
-	    !sysmon_state.sampling &&
-	    now >= sysmon_state.next_ms) {
-		sysmon_state.next_ms = now + sysmon_state.period_ms;
-		sysmon_give(server, 0U);
-	}
-	if (sysmon_state.running && !sysmon_state.sampling)
-		kwl_due(server, sysmon_state.next_ms);
 }
 
 /*
@@ -390,6 +364,9 @@ sysmon_done(
 	/* Told to every object that may hear it, while the sampling runs. */
 	if (sysmon_state.running)
 		sysmon_tell(context);
+
+	/* The next sample's time, now that this one is taken. */
+	sysmon_pace(context);
 }
 
 /* Frees a job that did not run (the thread stopped at the end; the close then comes from kwl_sysmon_close). */
@@ -757,4 +734,74 @@ sysmon_word(
 
 	/* Succeeded: the word. */
 	return word;
+}
+
+/*
+ * Arms the monitor's timer for the next look at the objects (at once when
+ * one was asked, every SYSMON_SCAN_MS while objects are there: a client
+ * that goes takes its objects without a request) and the next sample's job
+ * (at the period, once the last is taken), the earlier of the two; without
+ * either nothing waits.
+ */
+static void
+sysmon_pace(
+	struct kwl_server *server)
+{
+	uint64_t due;
+
+	/* The timer is readied once. */
+	if (sysmon_state.timer.fire == NULL)
+		kwl_timer_init(&sysmon_state.timer, "sysmon", sysmon_fired);
+
+	/* The next look: asked now, or the next while objects are there. */
+	due = UINT64_MAX;
+	if (sysmon_state.scanned_ms == 0U) {
+		due = 0U;
+	} else if (sysmon_state.subscribers != 0U) {
+		due = sysmon_state.scanned_ms + SYSMON_SCAN_MS;
+	}
+
+	/* The next sample, at the period, once the last is taken. */
+	if (sysmon_state.running && !sysmon_state.sampling && sysmon_state.next_ms < due)
+		due = sysmon_state.next_ms;
+
+	/* The timer follows the earlier, or waits for nothing. */
+	kwl_timer_set(server, &sysmon_state.timer, due);
+}
+
+/*
+ * The monitor's timer is due: the objects are counted when their look is
+ * due (the sampling started for the first, stopped after the last, at the
+ * shortest period asked), and the next sample's job is given when it is
+ * due; then the timer is armed for what comes next.
+ */
+static void
+sysmon_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	uint64_t now;
+
+	/* Only the monitor's timer comes here. */
+	(void)timer;
+
+	/* The objects, when asked or SYSMON_SCAN_MS after the last look. */
+	server = context;
+	now = kwl_milliseconds();
+	if (sysmon_state.scanned_ms == 0U || now >= sysmon_state.scanned_ms + SYSMON_SCAN_MS) {
+		sysmon_state.scanned_ms = now;
+		sysmon_scan(server);
+	}
+
+	/* The next sample, at the period, once the last is taken. */
+	if (sysmon_state.running &&
+	    !sysmon_state.sampling &&
+	    now >= sysmon_state.next_ms) {
+		sysmon_state.next_ms = now + sysmon_state.period_ms;
+		sysmon_give(server, 0U);
+	}
+
+	/* What comes next. */
+	sysmon_pace(server);
 }

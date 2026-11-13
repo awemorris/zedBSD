@@ -110,7 +110,16 @@ static struct clipboard_write {
 	{ -1, NULL, 0U, 0U, 0U }, { -1, NULL, 0U, 0U, 0U }, { -1, NULL, 0U, 0U, 0U }, { -1, NULL, 0U, 0U, 0U }
 };
 
+/*
+ * The timer of the read's and the writes' time limits: armed while one is
+ * under way, for the earliest end of a time; the event loop's alone.
+ * Readied by the first that starts.
+ */
+static struct kwl_timer clipboard_timer;
+
 static void clipboard_read_end(int keep);
+static void clipboard_pace(struct kwl_server *server);
+static void clipboard_due_fired(void *context, struct kwl_timer *timer);
 static void clipboard_read_step(void);
 static void clipboard_write_step(struct clipboard_write *write_job);
 static void clipboard_write_end(struct clipboard_write *write_job);
@@ -136,7 +145,6 @@ kwl_clipboard_selected(
 	int same;
 
 	/* A read still under way is given up: the new selection replaces it. */
-	(void)server;
 	if (clipboard_read.fd >= 0)
 		clipboard_read_end(0);
 
@@ -188,15 +196,18 @@ kwl_clipboard_selected(
 		return;
 	}
 
+	/* The read's time limit is the timer's. */
+	clipboard_pace(server);
+
 	/* Succeeded: the text comes through the pipe. */
 	printf("KWL CLIP read client=%llu mime=%s\n", (unsigned long long)source->client->number, type);
 }
 
 /*
  * Reads what the source wrote so far (the pipe was readable); at the end
- * of the text it joins the history.  A read that takes too long is given
- * up (called each pass of the event loop, which also waits for the pipes
- * and for the time a read or a write is given up).
+ * of the text it joins the history.  Called each pass of the event loop,
+ * which also waits for the pipes; a read or a write that takes too long is
+ * given up by the timer (clipboard_due_fired).
  */
 void
 kwl_clipboard_poll(
@@ -211,17 +222,16 @@ kwl_clipboard_poll(
 	}
 	clipboard_read_step();
 
-	/* What is still under way wakes the loop with its pipe, or at its time. */
+	/* What is still under way wakes the loop with its pipe (its time is the timer's). */
 	for (index = 0U; index < CLIPBOARD_WRITES; index++) {
 		if (clipboard_writes[index].fd < 0)
 			continue;
 		kwl_watch(server, clipboard_writes[index].fd, POLLOUT);
-		kwl_due(server, clipboard_writes[index].started + CLIPBOARD_WRITE_MS + 1U);
 	}
-	if (clipboard_read.fd >= 0) {
+
+	/* The read under way, likewise. */
+	if (clipboard_read.fd >= 0)
 		kwl_watch(server, clipboard_read.fd, POLLIN);
-		kwl_due(server, clipboard_read.started + CLIPBOARD_READ_MS + 1U);
-	}
 }
 
 /* Reads what the source of the read under way wrote so far. */
@@ -241,14 +251,9 @@ clipboard_read_step(
 	for (;;) {
 		got = read(clipboard_read.fd, chunk, sizeof(chunk));
 
-		/* Nothing more for now: another pass, unless it has taken too long. */
-		if (got < 0 && (errno == EAGAIN || errno == EINTR)) {
-			if (kwl_milliseconds() - clipboard_read.started > CLIPBOARD_READ_MS) {
-				printf("KWL CLIP skip reason=timeout\n");
-				clipboard_read_end(0);
-			}
+		/* Nothing more for now: another pass (the timer gives up one that takes too long). */
+		if (got < 0 && (errno == EAGAIN || errno == EINTR))
 			return;
-		}
 
 		/* A failed read gives up. */
 		if (got < 0) {
@@ -371,6 +376,7 @@ kwl_clipboard_history_paste(
  */
 void
 kwl_clipboard_offer_write(
+	struct kwl_server *server,
 	int descriptor)
 {
 	struct clipboard_write *write_job;
@@ -408,6 +414,10 @@ kwl_clipboard_offer_write(
 	clipboard_write_step(write_job);
 	if (write_job == &spare && write_job->fd >= 0)
 		clipboard_write_end(write_job);
+
+	/* A write still under way has its time limit on the timer. */
+	if (write_job->fd >= 0)
+		clipboard_pace(server);
 }
 
 /*
@@ -498,7 +508,6 @@ clipboard_write_step(
 	struct clipboard_write *write_job)
 {
 	ssize_t count;
-	uint64_t now;
 
 	/* As much as the descriptor takes now. */
 	while (write_job->written < write_job->length) {
@@ -508,13 +517,9 @@ clipboard_write_step(
 			continue;
 		}
 
-		/* Full for now: another pass, unless it has taken too long. */
-		if (count < 0 && (errno == EAGAIN || errno == EINTR)) {
-			now = kwl_milliseconds();
-			if (now - write_job->started > CLIPBOARD_WRITE_MS)
-				break;
+		/* Full for now: another pass (the timer gives up one that takes too long). */
+		if (count < 0 && (errno == EAGAIN || errno == EINTR))
 			return;
-		}
 
 		/* The reader is gone. */
 		break;
@@ -622,4 +627,84 @@ clipboard_sum(
 
 	/* Succeeded: the checksum. */
 	return sum;
+}
+
+/*
+ * Arms the timer for the earliest end of the time the read and the writes
+ * under way have, or disarms it when none is under way.
+ */
+static void
+clipboard_pace(
+	struct kwl_server *server)
+{
+	uint64_t earliest;
+	uint64_t due;
+	unsigned index;
+
+	/* The timer is readied once. */
+	if (clipboard_timer.fire == NULL)
+		kwl_timer_init(&clipboard_timer, "clipboard", clipboard_due_fired);
+
+	/* Each write under way: its time ends a millisecond after CLIPBOARD_WRITE_MS. */
+	earliest = UINT64_MAX;
+	for (index = 0U; index < CLIPBOARD_WRITES; index++) {
+		if (clipboard_writes[index].fd < 0)
+			continue;
+		due = clipboard_writes[index].started + CLIPBOARD_WRITE_MS + 1U;
+		if (due < earliest)
+			earliest = due;
+	}
+
+	/* The read under way: its time ends a millisecond after CLIPBOARD_READ_MS. */
+	if (clipboard_read.fd >= 0) {
+		due = clipboard_read.started + CLIPBOARD_READ_MS + 1U;
+		if (due < earliest)
+			earliest = due;
+	}
+
+	/* The timer follows the earliest, or waits for nothing. */
+	kwl_timer_set(server, &clipboard_timer, earliest);
+}
+
+/*
+ * The clipboard's timer is due: a write the reader has not taken within
+ * CLIPBOARD_WRITE_MS ends with what fitted, a read the source has not
+ * finished within CLIPBOARD_READ_MS is given up, and the timer moves on.
+ */
+static void
+clipboard_due_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	uint64_t now;
+	unsigned index;
+
+	/* Only the clipboard's timer comes here. */
+	(void)timer;
+
+	/* Each write under way whose time ran out writes what fits now, and ends. */
+	server = context;
+	now = kwl_milliseconds();
+	for (index = 0U; index < CLIPBOARD_WRITES; index++) {
+		if (clipboard_writes[index].fd < 0)
+			continue;
+		if (now - clipboard_writes[index].started <= CLIPBOARD_WRITE_MS)
+			continue;
+		clipboard_write_step(&clipboard_writes[index]);
+		if (clipboard_writes[index].fd >= 0)
+			clipboard_write_end(&clipboard_writes[index]);
+	}
+
+	/* The read under way, when its time ran out, takes what came and is given up if the text has not ended. */
+	if (clipboard_read.fd >= 0 && now - clipboard_read.started > CLIPBOARD_READ_MS) {
+		clipboard_read_step();
+		if (clipboard_read.fd >= 0) {
+			printf("KWL CLIP skip reason=timeout\n");
+			clipboard_read_end(0);
+		}
+	}
+
+	/* The next end of a time. */
+	clipboard_pace(server);
 }

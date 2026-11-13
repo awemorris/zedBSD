@@ -94,6 +94,7 @@
 #include "layout.h"
 #include "edge.h"
 #include "arrange.h"
+#include "userland/desktop/libkeiland-backend/keiland-backend.h"
 
 #include <keiland/keiland.h>
 
@@ -610,6 +611,16 @@ static struct {
 	int done;
 	int32_t start_y;
 } unfullscreen_swipe;
+
+/*
+ * The timer of the lock after a time without input: armed while a managed
+ * session is unlocked and lock_idle_ms is set, for lock_input_ms and
+ * lock_idle_ms as they were when it was armed.  Input meanwhile only moves
+ * lock_input_ms: the timer that fires early arms itself again for the new
+ * end.  Readied by the first pace; only the event loop touches it.
+ */
+static struct kwl_timer lock_idle_timer;
+
 static struct kwl_object *fullscreen_top(struct kwl_server *server);
 static int fullscreen_whole(struct kwl_server *server, float home);
 static int unfullscreen_press(struct kwl_server *server, uint32_t button, uint32_t state);
@@ -621,6 +632,7 @@ static unsigned desktop_windows(struct kwl_server *server, unsigned desktop);
 static void draw_home_picture(struct kwl_server *server, struct kwl_list *command, float home, const float (*under)[4], unsigned under_count);
 static unsigned home_under_layer(struct kwl_server *server, float home, float (*under)[4]);
 static void draw_layer_animated(struct kwl_server *server, struct kwl_list *command, struct kwl_object **windows, unsigned count, float home, const struct shell_bar *bar);
+static void lock_idle_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Draws the wallpaper, the windows from the bottom with their shadows and
@@ -3362,6 +3374,40 @@ kwl_glass_key(
 }
 
 /*
+ * Arms the lock after a time without input (ws035-p102) for the end of
+ * the time from the last input, while a session a session manager started
+ * is unlocked and the time is set; otherwise nothing waits for it.  Called
+ * when the session starts, when it is unlocked, and when the time is set.
+ */
+void
+kwl_lock_idle_pace(
+	struct kwl_server *server)
+{
+	int managed;
+
+	/* Before the backend opens (the settings read at the start) nothing can lock; the start arms it. */
+	if (server->backend == NULL)
+		return;
+
+	/* The timer is readied once. */
+	if (lock_idle_timer.fire == NULL)
+		kwl_timer_init(&lock_idle_timer, "lock-idle", lock_idle_fired);
+
+	/* Only an unlocked session that can lock, with a time set. */
+	managed = kl_backend_session_managed(server->backend);
+	if (server->greeter ||
+	    server->locked ||
+	    !managed ||
+	    server->lock_idle_ms == 0U) {
+		kwl_timer_set(server, &lock_idle_timer, UINT64_MAX);
+		return;
+	}
+
+	/* The end of the time from the last input. */
+	kwl_timer_set(server, &lock_idle_timer, server->lock_input_ms + server->lock_idle_ms);
+}
+
+/*
  * Keeps the output being redrawn: every frame while the dock animation runs
  * (ending it after DOCK_MS), and when the clock shows a new minute.
  */
@@ -3370,7 +3416,6 @@ kwl_glass_tick(
 	struct kwl_server *server)
 {
 	uint64_t elapsed;
-	uint64_t idle;
 	float progress;
 	time_t now;
 
@@ -3392,13 +3437,6 @@ kwl_glass_tick(
 		kwl_greeter_tick(server);
 		return;
 	}
-
-	/* A session left without input for long enough locks (ws035-p102); the loop comes back when it would. */
-	idle = kwl_milliseconds() - server->lock_input_ms;
-	if (server->lock_idle_ms != 0U && idle >= server->lock_idle_ms)
-		(void)kwl_lock(server, "idle");
-	else if (server->lock_idle_ms != 0U)
-		kwl_due(server, server->lock_input_ms + server->lock_idle_ms);
 
 	/* The sheets where their parents are (ws090-p014). */
 	sheet_place(server);
@@ -11337,4 +11375,36 @@ cover_window_holes(
 
 	/* Succeeded: the title bar's hole and the body's. */
 	return count;
+}
+
+/*
+ * The time without input may have run out: a session left without input
+ * for lock_idle_ms locks; one that had input meanwhile arms the timer
+ * again for the new end.
+ */
+static void
+lock_idle_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	uint64_t now;
+
+	/* Only the lock's timer comes here. */
+	(void)timer;
+
+	/* Nothing to do for a session that is locked, cannot lock, or has no time (an unlock or a new time arms it again). */
+	server = context;
+	if (server->greeter || server->locked || server->lock_idle_ms == 0U)
+		return;
+
+	/* Input came meanwhile: the timer waits for the new end. */
+	now = kwl_milliseconds();
+	if (now < server->lock_input_ms || now - server->lock_input_ms < server->lock_idle_ms) {
+		kwl_lock_idle_pace(server);
+		return;
+	}
+
+	/* Succeeded: the session locks (a session that cannot lock is not armed again). */
+	(void)kwl_lock(server, "idle");
 }

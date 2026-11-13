@@ -183,7 +183,11 @@ struct network_row {
  * state has said it is reachable: until then, for NETWORK_START_GRACE_MS,
  * a daemon still starting (or busy joining the network it knows) is said
  * to be starting, not unavailable (BUG-176); grace_over is 1 once that
- * time has passed and the menu was drawn again.
+ * time has passed and the menu was drawn again, which grace_timer (armed
+ * when the watch is made) does.
+ *
+ * switch_until is when the switch shows the state again after the answer
+ * to its request (0 before the answer), switch_timer armed for it.
  *
  * scan_holders counts who asks for scans (ws089-p021): the open menu and
  * each network object of the system extension that asked (system.c); while
@@ -193,7 +197,8 @@ struct network_row {
  * "Looking for networks..." until the first one comes.
  *
  * The details (ws099-p032): info_open while they show, when they were
- * last asked to be read (info_asked_ms, kwl_milliseconds' clock), their
+ * last asked to be read (info_asked_ms, kwl_milliseconds' clock; info_timer
+ * asks again NETWORK_INFO_REFRESH_MS later while they show), their
  * height, their rows as last worked out (info_rows, info_count), and the
  * sample of the last reading for the rates (info_sample).  They take the
  * menu's place (menu_x, menu_y).
@@ -207,6 +212,7 @@ struct network_view {
 	uint64_t opened_ms;
 	unsigned heard;
 	unsigned grace_over;
+	struct kwl_timer grace_timer;
 	struct kl_backend_network_state state;
 	struct kl_backend_network_ap scan[KL_BACKEND_NETWORK_SCAN_MAX];
 	size_t scan_count;
@@ -225,6 +231,7 @@ struct network_view {
 	char failure[192];
 	unsigned switch_wanted;
 	uint64_t switch_until;
+	struct kwl_timer switch_timer;
 	char joining[KL_BACKEND_NETWORK_SSID_MAX];
 	unsigned key_open;
 	char key_ssid[KL_BACKEND_NETWORK_SSID_MAX];
@@ -239,6 +246,7 @@ struct network_view {
 	unsigned scan_fresh;
 	unsigned info_open;
 	uint64_t info_asked_ms;
+	struct kwl_timer info_timer;
 	int32_t info_height;
 	struct kwl_network_info_row info_rows[KWL_NETWORK_INFO_ROWS];
 	unsigned info_count;
@@ -284,7 +292,11 @@ static const struct network_row *network_row_at(int32_t x, int32_t y, int32_t *t
 static int network_in_icon(unsigned slot, int32_t x, int32_t y);
 static void network_log_state(void);
 static unsigned network_switch_on(void);
-static void network_switch_settle(struct kwl_server *server);
+static void network_switch_settle(struct kwl_server *server, int expired);
+static void network_timer_set(struct kwl_server *server, struct kwl_timer *timer, uint64_t at_ms);
+static void network_grace_fired(void *context, struct kwl_timer *timer);
+static void network_switch_fired(void *context, struct kwl_timer *timer);
+static void network_info_fired(void *context, struct kwl_timer *timer);
 static void network_log_layout(void);
 static void network_draw_bars(struct kwl_server *server, struct kwl_list *command, int32_t x, int32_t bottom, unsigned lit, const float *ink, float faint);
 static void network_draw_fan(struct kwl_server *server, struct kwl_list *command, int32_t x, int32_t middle, unsigned lit, const float *ink, float faint);
@@ -326,38 +338,17 @@ kwl_network_tick(
 {
 	unsigned changed;
 	unsigned request;
-	uint64_t now;
 	int owned;
 	int error;
 
-	/* The watch, once (libkeiland-backend connects to the daemon when it can); holders before it are told to it. */
+	/* The watch, once (libkeiland-backend connects to the daemon when it can); holders before it are told to it, and the start's grace begins. */
 	if (!network_view.opened) {
 		network_view.opened = 1;
 		network_view.opened_ms = kwl_milliseconds();
+		network_timer_set(server, &network_view.grace_timer, network_view.opened_ms + NETWORK_START_GRACE_MS);
 		network_view.watch = kl_backend_network_open();
 		if (network_view.watch != NULL && network_view.scan_holders != 0U)
 			(void)kl_backend_network_set_scanning(network_view.watch, 1U);
-	}
-
-	/* The details, read again each second while they show. */
-	if (network_view.info_open) {
-		now = kwl_milliseconds();
-		if (now - network_view.info_asked_ms >= NETWORK_INFO_REFRESH_MS) {
-			network_view.info_asked_ms = now;
-			kwl_system_bar_saved(server);
-		}
-		kwl_due(server, network_view.info_asked_ms + NETWORK_INFO_REFRESH_MS);
-	}
-
-	/* The start's grace ran out with the daemon still silent: the menu says it is unavailable now. */
-	if (!network_view.heard && !network_view.grace_over) {
-		now = kwl_milliseconds();
-		if (now - network_view.opened_ms >= NETWORK_START_GRACE_MS) {
-			network_view.grace_over = 1U;
-			server->dirty = 1;
-		} else {
-			kwl_due(server, network_view.opened_ms + NETWORK_START_GRACE_MS);
-		}
 	}
 
 	/* No watch could be made (no memory): the icon stays pale. */
@@ -367,7 +358,7 @@ kwl_network_tick(
 	/* What arrived; with nothing, the switch may still have waited long enough. */
 	(void)kl_backend_network_update(network_view.watch, &changed);
 	if (changed == 0) {
-		network_switch_settle(server);
+		network_switch_settle(server, 0);
 		return;
 	}
 
@@ -380,7 +371,7 @@ kwl_network_tick(
 	}
 
 	/* The switch follows the new state. */
-	network_switch_settle(server);
+	network_switch_settle(server, 0);
 
 	/* A new scan redraws the menu's networks. */
 	if ((changed & KL_BACKEND_NETWORK_CHANGED_SCAN) != 0) {
@@ -1281,6 +1272,7 @@ network_act(
 
 		/* Held until the answer, then a few seconds more. */
 		network_view.switch_until = 0U;
+		network_timer_set(server, &network_view.switch_timer, UINT64_MAX);
 		network_request(server, wanted, NULL);
 		break;
 	case NETWORK_ROW_AP:
@@ -1837,12 +1829,16 @@ network_strength(
 	return 1;
 }
 
-/* Lets the switch show the state again once it agrees with what was asked, or a while after the answer (BUG-183). */
+/*
+ * Lets the switch show the state again once it agrees with what was asked,
+ * or a while after the answer (BUG-183; expired says that while has passed,
+ * from the switch's timer).
+ */
 static void
 network_switch_settle(
-	struct kwl_server *server)
+	struct kwl_server *server,
+	int expired)
 {
-	uint64_t now;
 	int agrees;
 
 	/* Nothing asked. */
@@ -1853,18 +1849,15 @@ network_switch_settle(
 	agrees = 0;
 	if ((network_view.switch_wanted == 2U) == (network_view.state.wifi != KL_BACKEND_WIFI_OFF))
 		agrees = 1;
-	now = kwl_milliseconds();
-	if (network_view.switch_until != 0U && now >= network_view.switch_until)
+	if (expired && network_view.switch_until != 0U)
 		agrees = 1;
-	if (!agrees) {
-		if (network_view.switch_until != 0U)
-			kwl_due(server, network_view.switch_until);
+	if (!agrees)
 		return;
-	}
 
 	/* The state again. */
 	network_view.switch_wanted = 0U;
 	network_view.switch_until = 0U;
+	network_timer_set(server, &network_view.switch_timer, UINT64_MAX);
 	server->dirty = 1;
 	printf("KWL NETWORK switch settled wifi=%u\n", network_view.state.wifi);
 }
@@ -2191,6 +2184,7 @@ network_finished(
 	/* The switch's answer: a failure puts it back at once, a success leaves the state a few seconds to agree. */
 	if (request == KL_BACKEND_NETWORK_REQUEST_WIFI_ON || request == KL_BACKEND_NETWORK_REQUEST_WIFI_OFF) {
 		network_view.switch_until = kwl_milliseconds() + NETWORK_SWITCH_HOLD_MS;
+		network_timer_set(server, &network_view.switch_timer, network_view.switch_until);
 		if (error != 0)
 			network_view.switch_wanted = 0U;
 		server->dirty = 1;
@@ -2425,9 +2419,10 @@ network_info_open(
 	server->dirty = 1;
 	printf("KWL NETWORK info open\n");
 
-	/* The first reading. */
+	/* The first reading, and the next each NETWORK_INFO_REFRESH_MS while they show. */
 	network_view.info_asked_ms = kwl_milliseconds();
 	kwl_system_bar_saved(server);
+	network_timer_set(server, &network_view.info_timer, network_view.info_asked_ms + NETWORK_INFO_REFRESH_MS);
 }
 
 /* Closes the details. */
@@ -2436,8 +2431,9 @@ network_info_close(
 	struct kwl_server *server,
 	const char *via)
 {
-	/* Gone. */
+	/* Gone, and no more readings. */
 	network_view.info_open = 0U;
+	network_timer_set(server, &network_view.info_timer, UINT64_MAX);
 	server->dirty = 1;
 	printf("KWL NETWORK info close via=%s\n", via);
 }
@@ -2526,4 +2522,87 @@ network_info_draw(
 		glass_draw_text(server, command, SIZE_BAR, value_x, baseline, value, right - value_x, dark);
 		baseline += NETWORK_INFO_ROW;
 	}
+}
+
+/*
+ * The start's grace ran out: a daemon still silent is said to be
+ * unavailable from now (the menu is drawn again).
+ */
+static void
+network_grace_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+
+	/* Only the network's timer comes here. */
+	(void)timer;
+
+	/* A daemon heard from meanwhile needs nothing. */
+	server = context;
+	if (network_view.heard || network_view.grace_over)
+		return;
+
+	/* Unavailable from now. */
+	network_view.grace_over = 1U;
+	server->dirty = 1;
+}
+
+/*
+ * The while after the switch's answer has passed: the switch shows the
+ * state again, whether or not it agrees.
+ */
+static void
+network_switch_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	/* Only the network's timer comes here. */
+	(void)timer;
+
+	/* The settle, its time run out. */
+	network_switch_settle(context, 1);
+}
+
+/*
+ * The details are read again, each NETWORK_INFO_REFRESH_MS while they
+ * show.
+ */
+static void
+network_info_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+
+	/* Only the network's timer comes here. */
+	(void)timer;
+
+	/* Closed meanwhile: no reading. */
+	server = context;
+	if (!network_view.info_open)
+		return;
+
+	/* The reading, and the next. */
+	network_view.info_asked_ms = kwl_milliseconds();
+	kwl_system_bar_saved(server);
+	network_timer_set(server, &network_view.info_timer, network_view.info_asked_ms + NETWORK_INFO_REFRESH_MS);
+}
+
+/* Arms one of the view's timers for at_ms (UINT64_MAX: disarms it), the three readied the first time. */
+static void
+network_timer_set(
+	struct kwl_server *server,
+	struct kwl_timer *timer,
+	uint64_t at_ms)
+{
+	/* The timers are readied once. */
+	if (network_view.grace_timer.fire == NULL) {
+		kwl_timer_init(&network_view.grace_timer, "network-grace", network_grace_fired);
+		kwl_timer_init(&network_view.switch_timer, "network-switch", network_switch_fired);
+		kwl_timer_init(&network_view.info_timer, "network-info", network_info_fired);
+	}
+
+	/* The timer follows the time. */
+	kwl_timer_set(server, timer, at_ms);
 }

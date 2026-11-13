@@ -780,8 +780,9 @@ settings_apply_lock(
 	if (minutes < 0)
 		minutes = 0;
 
-	/* From the next tick on (shell.c). */
+	/* From now on: the lock's timer follows the new time (shell.c). */
 	server->lock_idle_ms = (uint64_t)minutes * 60000U;
+	kwl_lock_idle_pace(server);
 }
 
 /* Tells the keyboards bound already the repeat again (nothing is bound before the look is made). */

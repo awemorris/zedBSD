@@ -42,10 +42,20 @@
 #include <stdio.h>
 #include <string.h>
 
+/*
+ * The timer of the time without input's steps (the screen out, the end of
+ * a pause, the rest after a wake, the sleep): armed by each tick for the
+ * earliest that waits, disarmed while none does (or a sleep is under way).
+ * Readied by the first tick that arms it.
+ */
+static struct kwl_timer sleep_timer;
+
 static int sleep_possible(struct kwl_server *server);
 static int sleep_owns_screen(struct kwl_server *server);
 static uint64_t sleep_quiet_since(struct kwl_server *server, uint64_t now_ms);
-static void sleep_idle(struct kwl_server *server, uint64_t now_ms);
+static void sleep_idle(struct kwl_server *server, uint64_t now_ms, uint64_t *due_ms);
+static void sleep_due_lower(uint64_t *due_ms, uint64_t at_ms);
+static void sleep_due_fired(void *context, struct kwl_timer *timer);
 static void sleep_begin(struct kwl_server *server, enum kwl_sleep_via via, uint64_t now_ms);
 static void sleep_pending(struct kwl_server *server, uint64_t now_ms);
 static void sleep_fail(struct kwl_server *server, const char *why, uint64_t now_ms);
@@ -64,12 +74,18 @@ kwl_sleep_tick(
 {
 	struct kwl_sleep *sleep;
 	uint64_t now;
+	uint64_t due;
 	int answers;
 
 	/* Only a backend whose session manager answers a sleep takes part. */
 	answers = kwl_sleep_answers(server);
 	if (!answers)
 		return;
+
+	/* The timer is readied once; nothing waits on it until the steps below say so. */
+	if (sleep_timer.fire == NULL)
+		kwl_timer_init(&sleep_timer, "sleep", sleep_due_fired);
+	due = UINT64_MAX;
 
 	/* The lid's level, read once from the backend (a machine started with it closed). */
 	sleep = &server->sleep;
@@ -90,6 +106,7 @@ kwl_sleep_tick(
 
 	/* A pending request goes on (its frames, and its time looked at closely); one waiting for its answer has nothing to do. */
 	if (sleep->state == KWL_SLEEP_PENDING) {
+		kwl_timer_set(server, &sleep_timer, UINT64_MAX);
 		sleep_pending(server, now);
 		if (sleep->state == KWL_SLEEP_PENDING)
 			kwl_due_soon(server);
@@ -97,11 +114,18 @@ kwl_sleep_tick(
 	}
 
 	/* One waiting for its answer has nothing to do until it comes. */
-	if (sleep->state == KWL_SLEEP_WAITING)
+	if (sleep->state == KWL_SLEEP_WAITING) {
+		kwl_timer_set(server, &sleep_timer, UINT64_MAX);
 		return;
+	}
 
-	/* The screen out at half the time without input, whether or not the machine can sleep. */
-	sleep_idle(server, now);
+	/* The screen out at half the time without input, whether or not the machine can sleep; the timer for the next step. */
+	sleep_idle(server, now, &due);
+
+	/* A sleep that began here waits for its frames and its answer, not for the time without input. */
+	if (sleep->state != KWL_SLEEP_IDLE)
+		due = UINT64_MAX;
+	kwl_timer_set(server, &sleep_timer, due);
 }
 
 /*
@@ -434,7 +458,8 @@ sleep_quiet_since(
 static void
 sleep_idle(
 	struct kwl_server *server,
-	uint64_t now_ms)
+	uint64_t now_ms,
+	uint64_t *due_ms)
 {
 	struct kwl_sleep *sleep;
 	uint64_t limit;
@@ -461,7 +486,7 @@ sleep_idle(
 		printf("KWL SLEEP screen off via=idle quiet_ms=%llu\n", (unsigned long long)quiet);
 	}
 	if (limit != 0U && !server->screen_off)
-		kwl_due(server, since + limit / 2U);
+		sleep_due_lower(due_ms, since + limit / 2U);
 
 	/* The sleeps need a machine that can sleep, and no pause (looked at again when the pause ends). */
 	possible = sleep_possible(server);
@@ -470,7 +495,7 @@ sleep_idle(
 	may = kwl_sleep_may_begin(sleep, now_ms);
 	if (!may) {
 		if (sleep->state == KWL_SLEEP_IDLE && !sleep->unsupported)
-			kwl_due(server, sleep->pause_until_ms);
+			sleep_due_lower(due_ms, sleep->pause_until_ms);
 		return;
 	}
 
@@ -490,7 +515,7 @@ sleep_idle(
 		return;
 	}
 	if (sleep->resting)
-		kwl_due(server, since + KWL_SLEEP_REST_MS);
+		sleep_due_lower(due_ms, since + KWL_SLEEP_REST_MS);
 
 	/* The whole time without input, unless a failed idle sleep waits for new input. */
 	allowed = kwl_sleep_idle_allowed(sleep, server->lock_input_ms);
@@ -499,7 +524,7 @@ sleep_idle(
 		return;
 	}
 	if (limit != 0U && allowed)
-		kwl_due(server, since + limit);
+		sleep_due_lower(due_ms, since + limit);
 }
 
 /* Begins a sleep: the session locked (and the lid's black kept), the request sent once that was drawn. */
@@ -728,4 +753,30 @@ sleep_say(
 	/* The notification, once for the reason. */
 	if (notify)
 		(void)kwl_notify_post_system(server, kl_tr("Sleep"), text, 0U);
+}
+
+/* Lowers the time the next step of the time without input waits for to at_ms, when that is earlier. */
+static void
+sleep_due_lower(
+	uint64_t *due_ms,
+	uint64_t at_ms)
+{
+	/* The earliest wins. */
+	if (at_ms < *due_ms)
+		*due_ms = at_ms;
+}
+
+/*
+ * A step of the time without input is due: nothing to do here, since the
+ * pass the timer's wake brings runs the sleep's tick (kwl_schedule), which
+ * takes the step and arms the timer for the next.
+ */
+static void
+sleep_due_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	/* The tick of the pass does the work. */
+	(void)context;
+	(void)timer;
 }

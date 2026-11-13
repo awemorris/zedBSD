@@ -109,8 +109,10 @@
  * (NULL: none), token the token it is given (fixed says --desktop-token
  * chose it), pid the program running (0: none), starting that its start
  * is asked of the file I/O thread and its process ID has not come back
- * (spawn.c), gone_ms when it ended,
- * starts and starts_ms how many starts the minute since starts_ms has had.
+ * (spawn.c), gone_ms when it ended, and restart the timer of the start
+ * again, armed for DESKTOP_RESTART_MS after gone_ms (no start before it
+ * fires), starts and starts_ms how many starts the minute since starts_ms
+ * has had.
  * drawn says the program's first image was drawn since its start (logged
  * once with its time, ws094-p009).
  */
@@ -131,6 +133,7 @@ struct desktop_state {
 	pid_t pid;
 	int starting;
 	uint64_t gone_ms;
+	struct kwl_timer restart;
 	unsigned starts;
 	uint64_t starts_ms;
 	int limited;
@@ -172,6 +175,8 @@ static void desktop_welcome_started(struct kwl_server *server, pid_t pid, int er
 static int desktop_switched_off(void);
 static void desktop_new_token(void);
 static uint32_t desktop_word(const unsigned char *bytes, size_t offset);
+static void desktop_gone(struct kwl_server *server);
+static void desktop_restart_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Takes a command-line option of the desktop: --desktop-client=COMMAND
@@ -798,6 +803,7 @@ desktop_start(
 {
 	char line[DESKTOP_LINE_MAX];
 	uint64_t now;
+	int waiting;
 	int error;
 	int off;
 
@@ -819,14 +825,13 @@ desktop_start(
 	if (desk.pid > 0 || desk.starting || desk.limited)
 		return;
 
-	/* Not before two seconds after the last one ended (the loop comes back then). */
-	now = kwl_milliseconds();
-	if (desk.gone_ms != 0U && now - desk.gone_ms < DESKTOP_RESTART_MS) {
-		kwl_due(server, desk.gone_ms + DESKTOP_RESTART_MS);
+	/* Not before two seconds after the last one ended (its timer starts it then). */
+	waiting = kwl_timer_armed(&desk.restart);
+	if (waiting)
 		return;
-	}
 
 	/* A new minute of starts, or one more in this minute; too many stop the starts. */
+	now = kwl_milliseconds();
 	if (desk.starts == 0U || now - desk.starts_ms >= DESKTOP_STARTS_MS) {
 		desk.starts = 0U;
 		desk.starts_ms = now;
@@ -865,13 +870,12 @@ desktop_started(
 	void *context)
 {
 	/* Failed: started again after a while. */
-	(void)server;
 	(void)context;
 	desk.starting = 0;
 	if (error != 0) {
 		printf("KWL DESKTOP start-failed errno=%d\n", error);
 		desk.pid = 0;
-		desk.gone_ms = kwl_milliseconds();
+		desktop_gone(server);
 		return;
 	}
 
@@ -973,8 +977,6 @@ desktop_watch(
 	pid_t ended;
 	int status;
 
-	UNUSED_PARAMETER(server);
-
 	/* No program running. */
 	if (desk.pid <= 0)
 		return;
@@ -989,9 +991,9 @@ desktop_watch(
 		return;
 
 	/* The program is gone; it is started again after a while. */
-	printf("KWL DESKTOP exited pid=%d\n", (int)desk.pid);
+	desktop_gone(server);
+	printf("KWL DESKTOP exited pid=%d at_ms=%llu\n", (int)desk.pid, (unsigned long long)desk.gone_ms);
 	desk.pid = 0;
-	desk.gone_ms = kwl_milliseconds();
 
 	/* Succeeded: the end is noted. */
 	return;
@@ -1139,4 +1141,37 @@ desktop_set_drawn(
 	/* Succeeded: applied with the next commit. */
 	desk.pending_parts_set = 1U;
 	return 0;
+}
+
+/*
+ * Notes that the desktop program is gone (it ended, or its start failed):
+ * it is started again DESKTOP_RESTART_MS later, by its timer.
+ */
+static void
+desktop_gone(
+	struct kwl_server *server)
+{
+	/* The timer is readied once. */
+	if (desk.restart.fire == NULL)
+		kwl_timer_init(&desk.restart, "desktop-restart", desktop_restart_fired);
+
+	/* When it went, and the start again's time. */
+	desk.gone_ms = kwl_milliseconds();
+	kwl_timer_set(server, &desk.restart, desk.gone_ms + DESKTOP_RESTART_MS);
+}
+
+/*
+ * The time after the desktop program ended has passed: it is started
+ * again (when one is still wanted, and the minute's starts allow).
+ */
+static void
+desktop_restart_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	/* Only the desktop's timer comes here. */
+	(void)timer;
+
+	/* The start, as the pass would make it. */
+	desktop_start(context);
 }

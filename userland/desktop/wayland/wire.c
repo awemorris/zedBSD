@@ -411,8 +411,7 @@ kwl_error(
 	memcpy(payload + 8, &word, 4);
 	memcpy(payload + 12, reason, bytes);
 	error = kwl_emit(client, 1, 0, payload, 12U + ((bytes + 4U) & ~(size_t)3U));
-	client->fatal = 1;
-	client->fatal_time = kwl_milliseconds();
+	kwl_client_fail(client);
 	printf("KWL ERROR client=%llu object=%u reason=%s emit=%d\n", (unsigned long long)client->number, object, reason, error);
 
 	/* Succeeded: EPROTO directs the loop to flush this terminal error before disconnect. */
@@ -458,8 +457,7 @@ kwl_error_code(
 
 	/* The event goes out before the connection is closed; nothing more is taken from it. */
 	error = kwl_emit(client, 1, 0, payload, 12U + ((bytes + 4U) & ~(size_t)3U));
-	client->fatal = 1;
-	client->fatal_time = kwl_milliseconds();
+	kwl_client_fail(client);
 	printf("KWL ERROR client=%llu object=%u code=%u reason=%s emit=%d\n", (unsigned long long)client->number, object, code, reason, error);
 
 	/* Succeeded: EPROTO makes the loop flush the error before it disconnects. */
@@ -505,8 +503,7 @@ kwl_delete_id(
 	/* The client may reuse the ID only after this ordered event is received. */
 	error = kwl_emit(client, 1, 1, &id, sizeof(id));
 	if (error != 0) {
-		client->fatal = 1;
-		client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(client);
 	}
 
 	/* Succeeded: the retired identity is queued for ordered client reuse. */

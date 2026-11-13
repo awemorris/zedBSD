@@ -28,6 +28,7 @@ void kwl_fatal(const char *format, ...);
 long kl_backend_gpu_resource_free(void);
 long kwl_audio_object_gone(void);
 long kwl_bluetooth_gone(void);
+long kwl_client_fail(void);
 long kwl_compose_client_gone(void);
 long kwl_content_type_object_gone(void);
 long kwl_cursor_default(void);
@@ -234,6 +235,15 @@ kwl_displays_object_gone(
 /* Does nothing in the test. */
 long
 kwl_edit_object_gone(
+	void)
+{
+	/* Nothing done. */
+	return 0;
+}
+
+/* Does nothing in the test. */
+long
+kwl_client_fail(
 	void)
 {
 	/* Nothing done. */

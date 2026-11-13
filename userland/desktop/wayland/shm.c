@@ -750,8 +750,7 @@ surface_upload(
 		if (!buffer->dead && !buffer->client->fatal) {
 			error = kwl_emit(buffer->client, buffer->id, 0, NULL, 0);
 			if (error != 0) {
-				buffer->client->fatal = 1;
-				buffer->client->fatal_time = kwl_milliseconds();
+				kwl_client_fail(buffer->client);
 			}
 		}
 	}

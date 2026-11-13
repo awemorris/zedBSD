@@ -88,13 +88,15 @@ struct machine_job {
 
 /*
  * The computer's readings of the compositor: the queries waiting, the
- * reading under way (NULL when none) and when it began.  The event loop's
- * alone.
+ * reading under way (NULL when none), when it began, and the timer that
+ * gives it up MACHINE_STALL_MS later (armed while it is under way).  The
+ * event loop's alone.
  */
 static struct {
 	struct kwl_machine_wait wait;
 	struct machine_job *job;
 	uint64_t started_ms;
+	struct kwl_timer stall;
 } machine_state;
 
 /*
@@ -107,6 +109,7 @@ static unsigned machine_given_up;
 
 static void *machine_run(void *argument);
 static void machine_begin(struct kwl_server *server);
+static void machine_stall_fired(void *context, struct kwl_timer *timer);
 static void machine_answer_all(struct kwl_server *server, const struct machine_job *job, uint32_t applied);
 static void machine_answer(struct kwl_server *server, const struct kwl_machine_query *query, const struct machine_job *job, uint32_t applied);
 static size_t machine_answer_bytes(const struct machine_job *job, uint32_t what);
@@ -213,15 +216,14 @@ kwl_machine_request(
 }
 
 /*
- * Answers the queries of a reading that ended, gives up one that took too
- * long, and starts the next.
+ * Answers the queries of a reading that ended, and starts the next (one
+ * that takes too long is given up by its timer, machine_stall_fired).
  */
 void
 kwl_machine_tick(
 	struct kwl_server *server)
 {
 	struct machine_job *job;
-	uint64_t now;
 	unsigned done;
 
 	/* No reading: one starts when a query waits. */
@@ -236,37 +238,14 @@ kwl_machine_tick(
 	done = job->done;
 	(void)pthread_mutex_unlock(&machine_lock);
 
-	/* Done: its queries are answered, the job goes, and the next reading starts. */
+	/* Done: its queries are answered, the job goes, its time is not waited for, and the next reading starts. */
 	if (done) {
 		machine_answer_all(server, job, KL_SYSTEM_RESULT_OK);
 		machine_state.job = NULL;
 		free(job);
+		kwl_timer_disarm(&server->timers, &machine_state.stall);
 		machine_begin(server);
-		return;
 	}
-
-	/* Still within its time: looked at again when it runs out. */
-	now = kwl_milliseconds();
-	if (now - machine_state.started_ms < MACHINE_STALL_MS) {
-		kwl_due(server, machine_state.started_ms + MACHINE_STALL_MS);
-		return;
-	}
-
-	/*
-	 * Given up: the thread frees the job when it ends (the job is not
-	 * touched after the lock is let go); until then no reading starts.
-	 */
-	printf("KWL SYSTEM machine stalled what=%u\n", job->what);
-	(void)pthread_mutex_lock(&machine_lock);
-	job->given_up = 1U;
-	machine_given_up++;
-	(void)pthread_mutex_unlock(&machine_lock);
-	machine_state.job = NULL;
-
-	/* Its queries and those waiting behind it are answered failed. */
-	machine_answer_all(server, NULL, KL_SYSTEM_RESULT_FAILED);
-	(void)kwl_machine_wait_start(&machine_state.wait);
-	machine_answer_all(server, NULL, KL_SYSTEM_RESULT_FAILED);
 }
 
 /*
@@ -350,9 +329,12 @@ machine_begin(
 		return;
 	}
 
-	/* The reading is under way from now. */
+	/* The reading is under way from now, and given up MACHINE_STALL_MS later. */
 	machine_state.job = job;
 	machine_state.started_ms = kwl_milliseconds();
+	if (machine_state.stall.fire == NULL)
+		kwl_timer_init(&machine_state.stall, "machine-stall", machine_stall_fired);
+	kwl_timer_set(server, &machine_state.stall, machine_state.started_ms + MACHINE_STALL_MS);
 }
 
 /* The reading's thread: reads the parts asked, then says so (or frees the job when it was given up). */
@@ -748,4 +730,55 @@ machine_word(
 
 	/* Succeeded: the word. */
 	return word;
+}
+
+/*
+ * The reading under way took MACHINE_STALL_MS: it is given up, and its
+ * queries and those waiting behind it are answered failed (a reading that
+ * ended meanwhile is answered as the tick would).
+ */
+static void
+machine_stall_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	struct machine_job *job;
+	unsigned done;
+
+	/* Only the reading's timer comes here. */
+	(void)timer;
+
+	/* No reading under way: nothing to give up. */
+	server = context;
+	job = machine_state.job;
+	if (job == NULL)
+		return;
+
+	/* Whether the thread has read everything. */
+	(void)pthread_mutex_lock(&machine_lock);
+	done = job->done;
+	(void)pthread_mutex_unlock(&machine_lock);
+
+	/* Ended just in time: answered by the tick. */
+	if (done) {
+		kwl_machine_tick(server);
+		return;
+	}
+
+	/*
+	 * Given up: the thread frees the job when it ends (the job is not
+	 * touched after the lock is let go); until then no reading starts.
+	 */
+	printf("KWL SYSTEM machine stalled what=%u\n", job->what);
+	(void)pthread_mutex_lock(&machine_lock);
+	job->given_up = 1U;
+	machine_given_up++;
+	(void)pthread_mutex_unlock(&machine_lock);
+	machine_state.job = NULL;
+
+	/* Its queries and those waiting behind it are answered failed. */
+	machine_answer_all(server, NULL, KL_SYSTEM_RESULT_FAILED);
+	(void)kwl_machine_wait_start(&machine_state.wait);
+	machine_answer_all(server, NULL, KL_SYSTEM_RESULT_FAILED);
 }
