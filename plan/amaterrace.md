@@ -30,6 +30,10 @@ GHCI 1.0 の仕様（`docs/ghci.md`）と Amaterrace GPU の RTL は `/home/awe/
 - `-p` で起動した会話は agy の app（Web）の画面で見られる。指示と返事は毎回 Claude がユーザーに報告する。
 - agy は process が終わっても、Gemini の cache で同じ会話を続けられる。remote control の起動などで process が入れ替わると、同じ作業が別の process（別の会話の ID）で続く事がある（2026-11-12）。**起動の前に、amaterrace-gpu で動いている agy の process・作業ツリーの未 commit の変更・最近の commit を確かめ、他の agy が作業中なら起動しない**（同じ作業ツリーで 2 つが動くと壊れる）。続きは、前の会話を `--conversation` で再開して頼む方を優先する。
 
+- **1 回の `-p` は実装の 1 段だけ**（2026-11-13 ユーザーの決定。155 本の testbench を途中の報告なしに数時間流した事を受けて）。依頼の文は段ごとに分け（例: X1 だけ）、1 段が終わったら agy は止まって返す。次の段は Claude が返事を確かめてから頼む。
+- **testbench は agy が流さない**。agy は返事に「流してほしい testbench の名前（と plusarg）と、その理由」を書いて止まる。Claude がそれを `sim/run.sh NAME...` で流し（並列は 4 まで、各々に時間の上限、background）、PASS・FAIL の要約と FAIL の log の該当の行を agy に返す。agy に許すのは compile の確かめ（iverilog の構文・elaboration）まで。全体の回帰（全 testbench）は Claude が節目で流す。
+- Claude は agy の process の出力（stream-json）を見て、指示に無い長い実行（`sim/run.sh` の全体など）を始めたら止める。
+
 ## 規則
 
 - `docs/ghci.md` が正。RTL は誤りの見込みが高い物として扱う。ただし Claude の指摘も 15% ほど誤りうるので、Gemini の反論は仕様の文で照らしてから受ける・返す。
