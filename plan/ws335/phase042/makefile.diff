@@ -80,21 +80,22 @@ diff --git a/userland/base/libssl-compat/Makefile b/userland/base/libssl-compat/
  
  # libssl-compat: zedBSD's own TLS client with the part of OpenSSL's libssl interface that the browser uses; no
 -# OpenSSL code.  It is built on libcrypto-compat.  Off by default: a program that links it selects it.
-+# OpenSSL code.  It is built on libcrypto-compat.  libbrowser and mailer link it, so a configuration that selects
-+# either selects it too (the platforms' default lists name it).
++# OpenSSL code.  It is built on libcrypto-compat.  libbrowser and mailer link it: a build that makes either
++# makes it first, and the image takes every shared library the build made.
  # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  
  LIBSSL_COMPAT_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libssl-compat.so=$(BUILD)/dynamic/libssl-compat.so)
 diff --git a/userland/base/libcrypto-compat/Makefile b/userland/base/libcrypto-compat/Makefile
 --- a/userland/base/libcrypto-compat/Makefile
 +++ b/userland/base/libcrypto-compat/Makefile
-@@ -7,7 +7,8 @@
+@@ -7,7 +7,9 @@
  include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
  
  # libcrypto-compat: zedBSD's own libcrypto interface (the part of OpenSSL's libcrypto that the TLS library, the
 -# browser and the SSH programs use); no OpenSSL code.  Off by default: a program that links it selects it.
 +# browser, Mail and the SSH programs use); no OpenSSL code.  libssl-compat, libbrowser, mailer, ssh, fidoctl and
-+# passkey-fido2 link it, so a configuration that selects one of them selects it too (the platforms' default lists name it).
++# passkey-fido2 link it: a build that makes one of them makes it first, and the image takes every shared library
++# the build made.
  # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  
  LIBCRYPTO_COMPAT_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libcrypto-compat.so=$(BUILD)/dynamic/libcrypto-compat.so)
@@ -106,11 +107,11 @@ diff --git a/userland/packages/security/openssl/Makefile b/userland/packages/sec
  # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  #
 +# An external package, never part of the system: it is built and put in an
-+# image only when the configuration names it (the package openssl, or a
-+# package that requires it, such as curl, python3 or openssh).  Nothing of
-+# the system needs it; the system's own TLS and cryptography are
-+# libssl-compat and libcrypto-compat (userland/base/), which the browser,
-+# Mail and ssh use.
++# image only when the configuration names the package openssl (curl,
++# python3 and openssh need it, so a configuration that names them names it
++# too).  Nothing of the system needs it; the system's own TLS and
++# cryptography are libssl-compat and libcrypto-compat (userland/base/),
++# which the browser, Mail and ssh use.
 +#
  # OpenSSL itself is Apache-2.0 and stays outside the source tree: only this
  # Makefile, the patches beside it and the recorded archive identity live here.
@@ -121,15 +122,24 @@ diff --git a/userland/packages/security/openssl/Makefile b/userland/packages/sec
  OPENSSL_MAKEFILE := $(lastword $(MAKEFILE_LIST))
  OPENSSL_DIR := $(patsubst %/,%,$(dir $(OPENSSL_MAKEFILE)))
  include $(OPENSSL_DIR)/../../../base/package.mk
+@@ -52,7 +55,6 @@
+ # The deprecated interfaces are kept.  They were left out while the zedBSD
+ # libc had no gethostbyname, which some of them reach for; the libc has it
+ # now, and OpenSSH is written against EC_KEY, which is among them.
+-# See plan/ws032/phase006/results.md for the rest.
+ OPENSSL_CONFIGURE_OPTIONS := \
+ 	--prefix=/usr --openssldir=/etc/ssl --libdir=lib \
+ 	no-asm no-tests no-docs no-engine no-dso no-module \
 diff --git a/userland/packages/network/openssh/Makefile b/userland/packages/network/openssh/Makefile
 --- a/userland/packages/network/openssh/Makefile
 +++ b/userland/packages/network/openssh/Makefile
-@@ -1,12 +1,13 @@
+@@ -1,12 +1,14 @@
  # zedBSD userland package: OpenSSH portable (external release tarball).
  # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  #
 +# An external package, never part of the system: it is built and put in an
-+# image only when the configuration names it, and it brings OpenSSL with it.
++# image only when the configuration names it, and it needs OpenSSL, which the
++# configuration names as well.
 +# The system's own ssh, sshd, ssh-keygen and sftp-server are userland/base/ssh
 +# (on libcrypto-compat).
 +#

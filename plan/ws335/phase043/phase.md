@@ -50,8 +50,8 @@ Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.1・§1.3
    - 使い方: `sh plan/tools/tls/host-compat-libs.sh <outdir>`。環境の `HOST_COMPAT_CFLAGS` を compile の flag に足す（既定は空。sanitizer を渡す口）。
    - 作る物: `<outdir>/include/compat`（`$(pwd)/include/libc/compat` への symlink、`ln -sfn`）、`<outdir>/obj/<library>-<name>.o`、`<outdir>/libcrypto-compat.a`・`<outdir>/libssl-compat.a`。
    - source の一覧: `userland/base/libcrypto-compat/sources.mk` の common と POSIX（`grep -v '^#' … | grep -o 'userland/base/libcrypto-compat/[a-z0-9-]*\.c' | grep -v -- '-win32\.c'`）、`userland/base/libssl-compat/sources.mk`（run-nettls.sh の今の 2 行と同じ）。
-   - compile: `cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fPIC -I<outdir>/include -I. $HOST_COMPAT_CFLAGS -c`（run-nettls.sh の今の flag と同じ。`-fPIC` は libbrowser.so 等の shared object に入れられるように）。object が source・`<outdir>/flags`（flag の文字列、変わった時だけ書き直す）より新しければ compile しない。各 compile に `timeout 300`。
-   - archive: 一時の名前（`mktemp "<outdir>/libX.a.XXXXXX"` で作り、`ar rcs` で埋める）を作って `mv -f` で置き換える（**rm を使わない**。mktemp の空の file に `ar rcs` は追記なので、mktemp の直後の file は空で問題ない）。
+   - compile: `cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fPIC -I<outdir>/include -I. $HOST_COMPAT_CFLAGS -c`（run-nettls.sh の今の flag と同じ。`-fPIC` は libbrowser.so 等の shared object に入れられるように）。object が source・`<outdir>/flags`（flag の文字列、変わった時だけ書き直す）より新しく、`find userland/base/libcrypto-compat userland/base/libssl-compat include/libc/compat -name '*.h' -newer <object>` が空なら compile しない（host-build.sh の engine の loop と同じ考え）。各 compile に `timeout 300`。
+   - archive: 決まった名前 `<outdir>/libX.a.new` に `printf '!<arch>\n' > <outdir>/libX.a.new` で空の archive の見出しを書き（中身の無い file に GNU ar は追記できない: `file format not recognized`）、`ar rcs <outdir>/libX.a.new <objects>`、`mv -f <outdir>/libX.a.new <outdir>/libX.a`。**rm を使わない**。mktemp は使わない（失敗の時に 0600 の file が残る）。
    - 出力の最後の行: `host-compat-libs: <outdir> (<N> crypto, <M> ssl sources)`。失敗は stderr に理由、exit 1。
    - 使う側の link: `-I<outdir>/include` と `<outdir>/libssl-compat.a <outdir>/libcrypto-compat.a -lpthread`（この順）。`-Iinclude/libc` は使わない（host の libc の header を隠す）。
 2. `plan/ws074/tests/host-build.sh`: 画像の compat の library の loop（`userland/desktop/libjpeg-compat/*.c …`）の後に、compat の TLS の loop を足す: 同じ source の一覧（上の 2 つの sources.mk から）を `$out/obj/<library>-<name>.o`（`library` は `libcrypto-compat`・`libssl-compat`）に `"$cc" $flags -c` で compile し、`engine` と `objects` に足す（画像の library と同じ形。`$base/include/compat` は既にある）。**`-Wno-error` は付けない**。warning が出たら止めて、file と文を Q1 に返す（compat の source はこの Phase の範囲の外）。
@@ -69,12 +69,12 @@ Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.1・§1.3
 
 | # | 確かめ | 期待 |
 | --- | --- | --- |
-| 1 | `grep -n 'WB_TLS_COMPAT\|WB_TLS_STATIC\|tls_library\|tls-library\|wb_os_library\|wb_os_trust_roots\|OPENSSL\|libssl\.so\|libcrypto' userland/desktop/libbrowser/net/tls.c` | 何も出ない |
+| 1 | `grep -n 'WB_TLS\|tls_library\|tls-library\|wb_os_library\|wb_os_trust_roots\|OPENSSL\|"libssl\|"libcrypto\|libssl\.so\|libcrypto\.so' userland/desktop/libbrowser/net/tls.c`（名前で開く物と表。comment の「libssl-compat and libcrypto-compat」は当たらない） | 何も出ない |
 | 2 | `grep -rn 'OpenSSL' userland/desktop/libbrowser/net/tls.c userland/desktop/libbrowser/net/net.h userland/desktop/libbrowser/net/http.c userland/desktop/libbrowser/base/os-net.h` | 「OpenSSL 3.5 と同じ API」の 1 か所の他に無い |
 | 3 | `sh plan/tools/tls/host-compat-libs.sh build/tmp/p043/compat` を 2 回 | 2 回目は compile 0（object を作り直さない）、最後の行が `host-compat-libs: …`、warning 0 |
 | 4 | `sh plan/ws335/tests/run-nettls.sh` | `run-nettls: PASS (http 15 cases, loader 11 cases, …)` |
 | 5 | `sh plan/ws334/tests/net-ring-test.sh plain` | `net-ring-test: PASS`（前提: host-build.sh plain が `build/ws074-host/include` を作っている事。無ければ `sh plan/ws074/tests/host-build.sh plain` を先に） |
-| 6 | `sh plan/ws074/tests/host-build.sh asan`（BROWSER_HOST_BUILD は既定） | build が通る（warning 0）。compat の object は asan の flag で compile される |
+| 6 | `BROWSER_HOST_BUILD=build/tmp/p043/asan-host sh plan/ws074/tests/host-build.sh asan`、続けてその browser で `run-http-tests.py` を 1 回（引数は run-nettls.sh と同じ、`ASAN_OPTIONS=detect_stack_use_after_return=0`） | build が通る（warning 0）、http 15 件が PASS、ASan・UBSan の報告 0（compat の object も asan の flag で compile される） |
 | 7 | zedBSD の build（x86_64、§4 の 1・2） | exit 0、warning 0、`readelf -d build/x86_64/dynamic/libbrowser.so` の NEEDED に `libssl-compat.so`・`libcrypto-compat.so`、`.flags` に `WB_TLS_COMPAT` が無い |
 | 8 | zedBSD の libbrowser.so の未定義の名前が compat で解ける | `llvm-nm -D --undefined-only build/x86_64/dynamic/libbrowser.so` の `SSL_`・`X509_`・`ERR_`・`TLS_` の名前が全部 `llvm-nm -D --defined-only` の libssl-compat.so か libcrypto-compat.so にある（script で突き合わせ、件数を書く） |
 | 9 | Windows の core の compile（§4 の 3） | exit 0、warning 0。`net/tls.o` の `llvm-nm` に `U SSL_connect`、`tls_static_library` の名前が無い |
@@ -86,8 +86,8 @@ Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.1・§1.3
 2. libbrowser（差分 A と同じ値を command line で。makefile.diff が main に当たった後なら上書き無し）:
    `make CONFIGMK=config/config.x86_64.mk BUILD_JOBS=4 'STANDALONE_CFLAGS_libbrowser=$(STANDALONE_SHLIB_CFLAGS)' 'STANDALONE_SO_LIST_libbrowser=libtruetype.so libvulkan.so libmedia.so libjpeg-compat.so libpng-compat.so libz-compat.so libgif-compat.so libwebp-compat.so libssl-compat.so libcrypto-compat.so' build/x86_64/packages/libbrowser/.stamp`
    toolchain の用意は p041 の結果と `plan/tools.md` に従う（担当は toolchain を build・install しない。無ければ Q1 に返す）。
-3. Windows: `mkdir -p build/tmp/p043/tree/apps/browser-win32 && cp apps/browser-win32/Makefile build/tmp/p043/tree/apps/browser-win32/Makefile && git apply --include=apps/browser-win32/Makefile --directory=build/tmp/p043/tree plan/ws335/phase042/makefile.diff`、`grep -c 'tls-static\|WB_TLS_STATIC' build/tmp/p043/tree/apps/browser-win32/Makefile` が 0 を確かめ、
-   `make -f build/tmp/p043/tree/apps/browser-win32/Makefile WIN32_ARCH=x86_64 BROWSER_WIN32_BUILD=build/tmp/p043/win64 -j4 libbrowser-core`（llvm-mingw の場所は `plan/ws334/tests/cross-build.sh` が渡す `LLVM_MINGW` と同じ。git apply が `--directory` で通らなければ、`patch -p1 -d build/tmp/p043/tree` に Makefile の hunk だけを与える）。makefile.diff が main に当たった後なら素の `apps/browser-win32/Makefile`。
+3. Windows: `mkdir -p build/tmp/p043/tree/apps/browser-win32 && cp apps/browser-win32/Makefile build/tmp/p043/tree/apps/browser-win32/Makefile && git apply -v --include=build/tmp/p043/tree/apps/browser-win32/Makefile --directory=build/tmp/p043/tree plan/ws335/phase042/makefile.diff`（`--include` は `--directory` を付けた後の path と照合される。`apps/...` と書くと全部 Skipped のまま exit 0 になる）、`grep -c 'tls-static\|WB_TLS_STATIC' build/tmp/p043/tree/apps/browser-win32/Makefile` が 0 を確かめ（0 でなければ当たっていない。`-v` の出力を見て直す）、
+   `make -f build/tmp/p043/tree/apps/browser-win32/Makefile WIN32_ARCH=x86_64 BROWSER_WIN32_BUILD=build/tmp/p043/win64 -j4 libbrowser-core`（llvm-mingw の場所は `plan/ws334/tests/cross-build.sh` が渡す `LLVM_MINGW` と同じ）。差分 C は p045 の merge で当たるので、この Phase では写しで確かめる。
 4. `git diff --check`。
 
 各コマンドに時間の上限（make は `timeout 3600`、試験は script の上限）。make は `-j4` まで。大きな build の後は `sync`。
@@ -99,6 +99,8 @@ Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.1・§1.3
 - `SSL_get_error` の SYSCALL の時、compat は errno を戻す（ssl.h）。今の code は `wb_os_socket_last_error()` を読むので、それを残す（Windows の socket の誤りは errno ではない）。
 - compat の `SSL_set1_host` は IP の文字列も受けるが、今の code は IP の時 `X509_VERIFY_PARAM_set1_ip_asc` を使い SNI を送らない。この形を残す（SNI に IP を送らない、RFC 6066 3）。
 - 関数 pointer の型の変換をしない。`(void *)` への cast で警告を消さない。
+- host（Linux）の compat の default paths は `/etc/ssl/cert.pem` だけで、Debian の host の根を読まない（p042 の問い Q9）。試験は local の CA だけを使うので影響しない。Q9 が A なら host-build.sh の comment に「公開の site には `--ca-file /etc/ssl/certs/ca-certificates.crt`」を 1 行書く。
+- zedBSD の package の compile の flag には `-Wall` が無いので、型の誤りは host の build（`-Werror`）で捕まえる。
 - host-build.sh は多くの WS の試験が使う。flag・出力の置き場所・`obj/` の名前の形を変えない（compat の object を足すだけ）。
 - source の comment に開発の管理情報を書かない（AGENTS.md §10）。
 
@@ -110,9 +112,9 @@ header に不備を見つけたら直さずに止め、どの header のどの�
 ## 7. 終わりの条件
 
 - §3 の 1〜10 が全部期待どおり（出力を自分で読む）。`plan/coding-style.md` の checklist で自分の diff を見直した。
-- わざと壊す確かめ（git の外で、終わったら `git diff` で戻った事を確かめる）: (a) `SSL_CTX_set_verify` の mode を `SSL_VERIFY_NONE` に → run-http-tests の誤った証明書の case が FAIL、(b) `tls_set_host` で SNI を送らない → 名前の case が FAIL、(c) `tls_add_roots` の失敗を無視 → 変化が無い事を記録（default paths が成功する host では観測できない）。結果を結果の節に。
+- わざと壊す確かめ（git の外で、終わったら `git diff` で戻った事を確かめる）: (a) `SSL_CTX_set_verify` の mode を `SSL_VERIFY_NONE` に → run-http-tests の誤った証明書の case が FAIL、(b) `tls_set_host` で `SSL_set1_host` を呼ばない → 名前の違う証明書の case が FAIL（試験の server は SNI を見ないので、SNI を外す壊しは観測できない）、(c) `tls_add_roots` の失敗を無視 → 変化が無い事を記録（default paths が成功する host では観測できない）。結果を結果の節に。
 - commit: `git add plan/tools/tls/host-compat-libs.sh` の後、`git commit -m WIP -- userland/desktop/libbrowser/net/tls.c userland/desktop/libbrowser/net/net.h userland/desktop/libbrowser/net/http.c userland/desktop/libbrowser/base/os-net.h plan/tools/tls/host-compat-libs.sh plan/ws074/tests/host-build.sh plan/ws334/tests/net-ring-test.sh plan/ws335/tests/run-nettls.sh plan/ws335/phase043/phase.md plan/ws335/ws.md`。push しない。
-- 結果の節（日付は host の `date`）: 実行したコマンドと最後の行、件数、自分で決めた点、未実施、消してほしい path（`build/tmp/p043` など、理由付き）。ws.md の行は「実装済み・試験 PASS」（cleared は Q1）。
+- 結果の節（日付は host の `date`）: 実行したコマンドと最後の行、件数、自分で決めた点、未実施、消してほしい path（`build/tmp/p043`、使われなくなった `build/ws335-nettls-host-compat`（compat の wrapper の build）など、理由付き）。ws.md の行は「実装済み・試験 PASS」（cleared は Q1）。
 - Q1 への報告: commit の SHA、上の要約。
 
 ## 結果

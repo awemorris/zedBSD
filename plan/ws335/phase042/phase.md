@@ -62,14 +62,15 @@ Parent: [WS335](../ws.md)
 | 場所 | 中身 | 新しい形での扱い |
 | --- | --- | --- |
 | `tls.c:8-35` | file の comment（dlopen、`ML_TLS_COMPAT`、印の無い build は OpenSSL） | 書き直す |
-| `tls.c:39` | `#include <dlfcn.h>` | 消す |
+| `tls.c:40` | `#include <dlfcn.h>` | 消す |
 | `tls.c:49-53` | `#ifdef ML_TLS_COMPAT` の `TLS_LIBRARY_NAMES` | 消す |
-| `tls.c:55-66` | OpenSSL の定数の写し | compat の名前に |
-| `tls.c:74-104` | 表 `struct tls_library`（27 member） | 消す |
-| `tls.c:106-158` | `struct tls_symbol`、名前の表（`ML_TLS_COMPAT` で compat、**else OpenSSL `libcrypto.so`・`.so.3`・`libssl.so`・`.so.3`: OpenSSL へ落ちる道 3**）、`tls_symbols[]` 26 行 | 消す |
-| `tls.c:437-528` | `tls_load_locked` の dlopen、`tls_open_library`（`dlopen`・`dlerror`）、`tls_find_all`（`dlsym`） | `tls_load_locked` は context を作るだけに。他は消す |
+| `tls.c:56-67` | OpenSSL の定数の写し | compat の名前に |
+| `tls.c:75-107` | 表 `struct tls_library`（27 member） | 消す |
+| `tls.c:109-165` | `struct tls_symbol`、名前の表（`ML_TLS_COMPAT` で compat、**else OpenSSL `libcrypto.so`・`.so.3`・`libssl.so`・`.so.3`: OpenSSL へ落ちる道 3**）、`tls_symbols[]` 26 行 | 消す |
+| `tls.c:442-571` | `tls_load_locked` の dlopen、`tls_open_library`（`dlopen`・`dlerror`）、`tls_find_all`（`dlsym`） | `tls_load_locked` は context を作るだけに。他は消す |
 | `tls.c:694-716` | `tls_find_peer_certificate`（`SSL_get1_peer_certificate`、無ければ **OpenSSL 1.1 の `SSL_get_peer_certificate`: OpenSSL へ落ちる道 4**） | 消す（`SSL_get1_peer_certificate` を直に） |
 | `tls.c:677-686` | `tls_verify_later(int, void *)` | `SSL_verify_cb` の型 `(int, X509_STORE_CTX *)` に（関数 pointer の型の変換を無くす） |
+| `mail.h:9-11` | file の comment「plain or TLS (the OpenSSL package loaded when first needed)」 | 直す |
 | `mail.h:190` | comment「The TLS of the OpenSSL package」 | 直す |
 | `sync.c:993・1032・1042・1048` | comment「OpenSSL's words」 | 「the TLS library's words」に |
 | `sync.c:1076-1077` | `EPROTONOSUPPORT` の文「TLS is not available (the OpenSSL package is not installed)」 | 「TLS cannot be set up」に（§2 の 4） |
@@ -97,7 +98,7 @@ Parent: [WS335](../ws.md)
 0. **library**: 今の libssl-compat・libcrypto-compat（公開の header は `include/libc/compat/ssl/ssl.h`・`include/libc/compat/crypto/*.h`、OpenSSL 3.5 の signature）。新しい library・header・exports は作らない。凍結の header は変えない（使う関数は全部、今の exports.map にある: §2 の 6）。
 1. **source**: `net/tls.c` と mailer の `tls.c` は `<compat/ssl/ssl.h>`（と要る時 `<compat/crypto/evp.h>`）を include し、`SSL_*`・`X509_*`・`ERR_*`・`EVP_sha256` を直に呼ぶ。関数 pointer の表・名前の表・`dlopen`・`WB_TLS_COMPAT`・`WB_TLS_STATIC`・`ML_TLS_COMPAT` は無い。OpenSSL の header（`<openssl/...>`）も、`openssl-names/` の転送の header も使わない（OpenSSL と切り替える口は作らない: ユーザーの決定 1・2）。
 2. **zedBSD**: libbrowser.so と `/bin/mailer` は `libssl-compat.so`・`libcrypto-compat.so` を link する（DT_NEEDED）。package の requirement（`USERLAND_PACKAGE` の 10 番目の引数）に `base/libssl-compat base/libcrypto-compat`、`mk/userland.mk` の stamp の順に 2 つの stamp（差分 A・B・D）。image に入るかは今までどおり `CONFIG_USERLAND_PROGRAMS` で決まり、6 つの platform の既定の一覧には既に 2 つがある（p036 の差分 C）。
-   帰結: library が無い image では browser・mailer が起動しない（今は起動して https だけ失敗）。ssh・fidoctl が libcrypto-compat を要るのと同じ扱い（問い Q6）。
+   帰結: libbrowser・mailer を build すれば、requirement と stamp の順で 2 つの .so も必ず `build/<platform>/dynamic/` に作られ、`mk/rootfs.mk:163` は `dynamic/*` を選択に依らず全部 `/lib` に写すので、今の build では image から欠けない。欠けるのは rootfs の写し方が選択に従う形に変わった時だけ（問い Q6）。
 3. **Windows**: 今と同じ `libssl-compat.a`・`libcrypto-compat.a` を OmniGrammaton.exe に static link（`WIN32_TLS_ARCHIVES`、D23）。tls.c は zedBSD と同じ source（`#ifdef` 無し）、`tls-static-compat.c` と `-DWB_TLS_STATIC` を外す（差分 C）。archive の順（tree → compat → TLS）は今のままで、libbrowser の参照は後ろの libssl-compat.a・libcrypto-compat.a で解ける。compat の header は今も `$(BROWSER_WIN32_OBJ)/include/compat/` に写され、core の object はその写しを order-only で待つ（tls-static-compat.c が今それで compile できている）。
 4. **残す振る舞い**（両方）: TLS 1.2 以上、`SSL_VERIFY_PEER`、`SSL_OP_IGNORE_UNEXPECTED_EOF`、SNI と名前・address の照合（libbrowser は IP の時 `X509_VERIFY_PARAM_set1_ip_asc` で SNI 無し、mailer は名前だけ）、試験の CA の file（`net_tls_add_ca_file`・`ml_tls_add_ca_file`、4 つまで）、誤りの文（`<what>: certificate verify failed: <X509_verify_cert_error_string>`、`<what>: <ERR_error_string_n>`、`<what>: failed (TLS error N)`、mailer は `(SSL error N)`）、errno の約束（成功 0、`ENOMEM`、`EPROTO`、mailer の `ML_ERROR_UNTRUSTED`、context が作れない時の `EPROTONOSUPPORT`）、thread（1 度だけ lock の下で context を作り、失敗も覚える）、`SSL_read`・`SSL_write` に渡す長さを `INT_MAX` で切る事。
    - libbrowser: 根は `SSL_CTX_set_default_verify_paths`（zedBSD は `/etc/ssl/cert.pem`、Windows は ROOT から Disallowed を除いた物と .exe の隣の `cert.pem`、Disallowed は鎖のどこでも拒む: compat の約束）、**失敗は context の失敗**（p036 の決定）。続けて program の束（`<data>/certs/ca-certificates.pem`、無ければ黙る）、試験の CA の file。
@@ -105,19 +106,19 @@ Parent: [WS335](../ws.md)
    - `EPROTONOSUPPORT` の意味: 「この process では TLS を始められない（context が作れない）」。library が無い事はもう起きない（link の時に解ける）。文は理由の buffer に入れた物（「cannot make a TLS context」など）。sync.c の文は「TLS cannot be set up」に。
 5. **host（Linux）の試験**: host の OpenSSL を使わない。compat を host の cc で build して link する。
    - libbrowser: `plan/ws074/tests/host-build.sh` が compat の sources（`sources.mk` の common・POSIX・ssl）を `$out/obj/libcrypto-compat-*.o`・`libssl-compat-*.o` に compile して `$engine` に入れる（image の compat の library と同じ形。`obj/*.o` を拾う WS345 の試験はそのまま動く）。
+   - host の system の根: compat の POSIX の default paths は `/etc/ssl/cert.pem` だけ（`api-ssl.c`）。Debian の host には無く（`/etc/ssl/certs/ca-certificates.crt` だけ）、host の browser・mailer の道具は公開の site を検証できなくなる（今は host の OpenSSL が Debian の根を読む）。local の試験の CA を使う試験（http 15・loader 11、mailer の 8 case）には効かない。扱いは問い Q9。
    - 他（mailer の試験・net-ring-test）: 新しい共有の道具 `plan/tools/tls/host-compat-libs.sh <outdir>` が `<outdir>/libcrypto-compat.a`・`libssl-compat.a` と `<outdir>/include/compat`（`include/libc/compat` への symlink）を作る。使う側は `-I<outdir>/include` と `<outdir>/libssl-compat.a <outdir>/libcrypto-compat.a -lpthread`。`-Iinclude/libc` は host の libc の header を隠すので使わない。
 6. **使う関数が compat にある事**（exports.map、p041 の後）: libssl-compat の `TLS_client_method`・`SSL_CTX_new`・`SSL_CTX_set_verify`・`SSL_CTX_load_verify_locations`・`SSL_CTX_set_default_verify_paths`・`SSL_CTX_set_options`・`SSL_CTX_ctrl`・`SSL_new`・`SSL_free`・`SSL_set_fd`・`SSL_ctrl`・`SSL_set1_host`・`SSL_get0_param`・`SSL_connect`・`SSL_read`・`SSL_write`・`SSL_get_error`・`SSL_pending`・`SSL_shutdown`・`SSL_get_verify_result`・`SSL_get1_peer_certificate`、libcrypto-compat の `X509_VERIFY_PARAM_set1_ip_asc`・`X509_verify_cert_error_string`・`ERR_get_error`・`ERR_error_string_n`・`ERR_clear_error`・`X509_digest`・`EVP_sha256`・`X509_free`。`SSL_CTX_get_cert_store`・`d2i_X509`・`X509_STORE_add_cert` は使わなくなる（compat に残る）。
 
 ## 3. OpenSSL・OpenSSH を外部の package に
 
 - **今の事実**: 2 つとも `USERLAND_PACKAGE` の既定は `n`、6 つの platform の既定の一覧（`mk/platform-*/defaults.mk`）に無い。build に入るのは `CONFIG_USERLAND_PROGRAMS` で名指した時だけ（`openssh`・`curl`・`python3` の requirement に `security/openssl`）。source は tree に無く、tarball を取得・照合して patch する（`userland/packages/external.mk`）。
-- **source tree に書く案**（makefile.diff の E・F。Makefile の先頭の comment）: 「外部の package。設定が名指した時（その package か、それを要る curl・python3・openssh）だけ build され image に入る。system の何もこれを要らない。system の TLS と暗号は libssl-compat・libcrypto-compat、ssh は `userland/base/ssh`」。今の comment の「Provenance … plan/ws032/provenance.md」（source の comment に plan/ への参照、AGENTS.md §10）と「Registration as a selectable package … land with the build work」（済んで古い）を外す。
-  併せて libssl-compat・libcrypto-compat の Makefile の「Off by default: a program that links it selects it」を「libbrowser・mailer（libcrypto-compat は ssh・fidoctl・passkey-fido2 も）が link するので、それを選ぶ設定は 2 つも選ぶ（platform の既定の一覧に入っている）」に（G）。
+- **source tree に書く案**（makefile.diff の E・F。Makefile の先頭の comment）: 「外部の package。設定が package openssl を名指した時だけ build され image に入る（curl・python3・openssh はそれを要るので、それらを名指す設定は openssl も名指す。requirement から自動で作る規則は無い: `standalone_required_so` は `security/openssl` に .so を返さない）。system の何もこれを要らない。system の TLS と暗号は libssl-compat・libcrypto-compat、ssh は `userland/base/ssh`」。今の comment の「Provenance … plan/ws032/provenance.md」（source の comment に plan/ への参照、AGENTS.md §10）と「Registration as a selectable package … land with the build work」（済んで古い）を外す。
+  併せて libssl-compat・libcrypto-compat の Makefile の「Off by default: a program that links it selects it」を「libbrowser・mailer（libcrypto-compat は ssh・fidoctl・passkey-fido2 も）が link する。それを作る build は先に 2 つを作り、image は build が作った shared library を全部取る」に（G）。openssl の Makefile の中ほどの `See plan/ws032/phase006/results.md` も外す（E）。
 - **見つけた事（問いへ）**:
   - `config/ci/*.mk`（ユーザーの `config-amd64-server.mk` を含む 9 file）の `ZEDBSD_USER_PROGRAMS` に `openssl`・`openssh`・`curl` がある（amd64・amd64-server・odroid-c5 の 2 つ・rpi4・rpi4-server・rpi5・visionfive2-keiland・zybo。zybo は curl 無し）。ただしこれは build の作り直し（2026-11-06）の前の変数で、今の build（`CONFIG_USERLAND_PROGRAMS`）は読まない（`.github/workflows/ci.yml` も旧い出力の path `build/amd64/hdd-image.img` と旧い target `firmware-licenses` を使う）。今は選ばれていないので食い違いは起きていないが、今の形に直す時に外すかが問い Q1。libssl-compat・libcrypto-compat も CI の一覧には無い。
   - `docs/reference/installer.md:140-141`（と `docs/howto/boot-and-storage.md:256`）は installer の既定で OpenSSH・「OpenSSL and CA certificates」を on とする。ユーザーの決定 3 と食い違う（問い Q2）。
   - openssl・openssh・curl・python3 の Makefile の `PACKAGE_FILES` は旧い変数 `USER_PROGRAMS`（`external.mk:39`、`USERLAND_PROGRAMS` から）で選ばれる。ca-certificates で直った BUG-418 C と同じ形で、今の build で名指しても image に入らない疑いがある（未確認、範囲の外）。
-  - openssl の Makefile の中ほどの `See plan/ws032/phase006/results.md` も plan/ への参照。案には含めていない（先頭の comment だけ）。
 
 ## 4. Makefile・`mk/` の差分の案（[makefile.diff](makefile.diff)、`git apply --check` が基点の tree に通る）
 
@@ -127,14 +128,17 @@ Parent: [WS335](../ws.md)
 | B | `userland/desktop/mailer/Makefile` | requirement に同じ 2 つ、comment 2 行（p036 の差分 D は要らなくなる） |
 | C | `apps/browser-win32/Makefile` | `LIBBROWSER_CORE_SOURCES += …/net/tls-static-compat.c` と `…/net/tls.o: WIN32_CFLAGS += -DWB_TLS_STATIC` の 2 行を外す |
 | D | `mk/userland.mk` | libbrowser と mailer の stamp に libssl-compat・libcrypto-compat の stamp（top の並行の build で .so が先にできる。ssh・fidoctl の行と同じ形） |
-| E | `userland/packages/security/openssl/Makefile` | 先頭の comment（§3） |
+| E | `userland/packages/security/openssl/Makefile` | 先頭の comment（§3）と中ほどの plan/ への参照の 1 行 |
 | F | `userland/packages/network/openssh/Makefile` | 先頭の comment（§3） |
 | G | `userland/base/libssl-compat/Makefile`・`userland/base/libcrypto-compat/Makefile` | 「Off by default」の comment（§3） |
 
-- **当てる時期**: ユーザーの承認の後、Q1 が **p043 の merge と同じ時に全部**を当てる（問い Q7）。理由: A の requirement が無いまま p043 の tls.c が入ると、libbrowser.so に DT_NEEDED が無く、`-z now` の browser は起動で落ちる（package.mk は link の時に無い .so を黙って外し、shared library の link は `-z defs` ではない）。逆に A を先に当てて `-DWB_TLS_COMPAT` を外すと、今の tls.c は OpenSSL の名前を開いて zedBSD の https が止まる。C も同じ（今の tls.c は `WB_TLS_STATIC` が無いと Windows で OpenSSL の名前を開く）。B・D・E・F・G はいつ当てても害は無い。
-- **当てる前の確かめ（実装の Phase）**: zedBSD は make の command line で同じ値を与える（p041 と同じやり方）: `'STANDALONE_CFLAGS_libbrowser=$(STANDALONE_SHLIB_CFLAGS)'`、`'STANDALONE_SO_LIST_libbrowser=libtruetype.so libvulkan.so libmedia.so libjpeg-compat.so libpng-compat.so libz-compat.so libgif-compat.so libwebp-compat.so libssl-compat.so libcrypto-compat.so'`、`'STANDALONE_SO_LIST_mailer=libvulkan.so libwayland-client.so libkeiland.so libtruetype.so libssl-compat.so libcrypto-compat.so'`（package.mk の `standalone_required_so` を当てた値。link の recipe は `$$(STANDALONE_SO_LIST_<名前>)` を後で展開し、command line の変数は入れ子の make にも渡るので効く。compat の 2 つの stamp は前の make で先に作る。`readelf -d` の NEEDED で効いた事を確かめる）。Windows は `apps/browser-win32/Makefile` の写しに C を当てて `make -f <写し>`（p036 と同じ）。
+- **当てる時期**（問い Q7）: ユーザーの承認の後、Q1 が **A・B・D・E・F・G を p043 の merge と同じ commit（か merge の直前）に**、**C を p045 の merge と同じ commit に**当てる。merge と差分を別の commit にして間の main を残さない。
+  理由: A の requirement が無いまま p043 の tls.c が入ると、libbrowser.so に DT_NEEDED が無く、`-z now` の browser は起動で落ちる（package.mk は link の時に無い .so を黙って外し、shared library の link は `-z defs` ではない）。逆に A を先に当てて `-DWB_TLS_COMPAT` を外すと、今の tls.c は OpenSSL の名前を開いて zedBSD の https が止まる。
+  C は急がない: p043 の後の tls.c は `WB_TLS_STATIC` を見ないので、C の前も Windows の build は `tls-static-compat.o` を作って参照しないだけで動く。C を p043 と同時に当てると、`plan/ws334/tests/tls-wine.sh` の「tls-static-compat.o がある」の確かめが p045 まで main で FAIL するので、p045 の tls-wine.sh の直しと同時にする。B・D・E・F・G は単独でも害は無い。
+- **当てる前の確かめ（実装の Phase）**: zedBSD は make の command line で同じ値を与える（p041 と同じやり方）: `'STANDALONE_CFLAGS_libbrowser=$(STANDALONE_SHLIB_CFLAGS)'`、`'STANDALONE_SO_LIST_libbrowser=libtruetype.so libvulkan.so libmedia.so libjpeg-compat.so libpng-compat.so libz-compat.so libgif-compat.so libwebp-compat.so libssl-compat.so libcrypto-compat.so'`、`'STANDALONE_SO_LIST_mailer=libvulkan.so libwayland-client.so libkeiland.so libtruetype.so libssl-compat.so libcrypto-compat.so'`（package.mk の `standalone_required_so` を当てた値。link の recipe は `$$(STANDALONE_SO_LIST_<名前>)` を後で展開し、command line の変数は入れ子の make にも渡るので効く。compat の 2 つの stamp は前の make で先に作る。`readelf -d` の NEEDED で効いた事を確かめる）。Windows は `apps/browser-win32/Makefile` の写しに C を当てて `make -f <写し>`（p036 と同じ。`git apply` の `--include` は `--directory` を付けた後の path と照合される）。
+- zedBSD の package の compile の flag には `-Wall` が無い（`package.mk:143-165`）ので「warning 0」は弱い確かめ。型の誤りは host の build（`-Wall -Wextra -Werror`）が捕まえる。
 - **当てた後の確かめ**: p046 が素の main で（command line の上書き無し）。
-- 当てた後に Q1 に消してもらう物: `userland/desktop/libbrowser/net/tls-library.h`・`tls-static.c`・`tls-static-compat.c`（差分 C の後、どこからも compile されない。p043 の後の tls.c は include しない）、`plan/ws334/tests/openssl-windows.sh`・`plan/ws334/tests/openssl-conf/`（p036 の記録のとおり既に使われない）、`plan/ws335/phase036/mailer-Makefile.diff`（B が置き換える）。
+- C を当てた後に Q1 に消してもらう物: `userland/desktop/libbrowser/net/tls-library.h`・`tls-static.c`・`tls-static-compat.c`（どこからも compile されない。p043 の後の tls.c は include しない）、`plan/ws334/tests/openssl-windows.sh`・`plan/ws334/tests/openssl-conf/`（p036 の記録のとおり既に使われない）、`plan/ws335/phase036/mailer-Makefile.diff`（B が置き換える）。
 
 ## 5. 実装の Phase
 
@@ -142,7 +146,7 @@ Parent: [WS335](../ws.md)
 | --- | --- | --- | --- | --- |
 | [p043](../phase043/phase.md) | libbrowser の net/tls.c を compat を直に呼ぶ形に。host の道具（`plan/tools/tls/host-compat-libs.sh` 新、host-build.sh、net-ring-test.sh、run-nettls.sh）。zedBSD の build（command line の上書き）と、Windows の core の compile（写しの Makefile） | phase-runner-low（Sonnet 5.5 high） | p042（Q1 の判定・問いの答え・makefile.diff の承認） | `net/tls.c`・`net/net.h`・`net/http.c`・`base/os-net.h` |
 | [p044](../phase044/phase.md) | mailer の tls.c を compat を直に呼ぶ形に。mail.h・sync.c・imap.c・smtp.c の文。host の試験（run-mailer-tls.sh・mailer-tls.c・plan/tools/mail/run-host-mail-backend.sh）。zedBSD の build（上書きか当てた後の Makefile） | phase-runner-low | p043 の merge（host-compat-libs.sh） | `mailer/tls.c` ほか |
-| [p045](../phase045/phase.md) | Windows: OmniGrammaton と試験の program の build、tls-wine.sh、cross-build.sh。Q4 が A なら `wb_os_trust_roots` を消す | phase-runner-low | p043 の merge と差分 C | `plan/ws334/tests/tls-wine.sh`、`base/os-system*` |
+| [p045](../phase045/phase.md) | Windows: OmniGrammaton と試験の program の build（差分 C の写し）、tls-wine.sh、cross-build.sh。Q4 が A なら `wb_os_trust_roots` を消す。merge と同時に Q1 が C を当てる | phase-runner-low | p043 の merge | `plan/ws334/tests/tls-wine.sh`、`base/os-system*` |
 | [p046](../phase046/phase.md) | 統合（Q1 が makefile.diff を当て、tls-static などを消した後の素の main）: x86_64 の image で browser と mailer の guest の試験、aarch64・riscv64 の build と NEEDED、tree に macro・OpenSSL の名前が残っていない事、design.md の直し、消す試験の一覧 | phase-runner（Opus） | p043・p044・p045 の merge | `run-browser-guest.sh`・`run-mailer-guest.sh`、design.md |
 | [p047](../phase047/phase.md) | 規約の全文の見直し（p043〜p045 が変えた C） | conformance-reviewer | p046 | 変えた .c・.h |
 
@@ -151,7 +155,7 @@ Parent: [WS335](../ws.md)
 
 ## 6. design-reviewer
 
-2026-11-13 に 1 回起動した。指摘と扱いは [design-review.md](design-review.md) の「p042」の節。
+2026-11-13 に 1 回起動した（重大 1・中 8・軽 8）。指摘と扱いは [design-review.md](design-review.md) の「p042 の design-reviewer」の節。全部を反映した。
 
 ## 7. Q1 への問い（推しを付けて）
 
@@ -161,14 +165,15 @@ Parent: [WS335](../ws.md)
 | Q2 | installer の既定（docs/reference/installer.md の表、howto の文）で OpenSSH・「OpenSSL and CA certificates」が on | A: OpenSSH・OpenSSL を off に、CA certificates を別の item で on（docs を直す。installer の実装は今の build に無い）。B: 今のまま | A（ユーザーの決定 3。CA certificates は compat の default paths が読む） |
 | Q3 | curl・python3 は OpenSSL を要る（requirement `security/openssl`） | A: そのまま。curl・python3 を選ぶ事を「明示の指定」とみなし、OpenSSL の Makefile の comment にそう書く（案 E のとおり）。B: curl・python3 を compat に移す（別の WS。curl は libssl の広い API を使う） | A |
 | Q4 | `wb_os_trust_roots`（`base/os-system.h`、POSIX と Windows の実装、WS334 の test-os-system の case）は書き換えの後どこからも使われない | A: p045 で消す（Windows の ROOT・Disallowed の列挙は compat の cryc-os-win32 が持つ）。B: 残す | A（使われない OS の層の code と試験を残さない） |
-| Q5 | 他の WS の試験の道具を WS335 の Phase が直す事: `plan/ws074/tests/host-build.sh`（WS074）、`plan/ws334/tests/net-ring-test.sh`・`tls-wine.sh`・`unit/test-os-system.c`（WS334）、`plan/tools/mail/run-host-mail-backend.sh`（登録の道具）、新しい `plan/tools/tls/host-compat-libs.sh`（tools.md への登録は Q1） | A: p043〜p045 の範囲に入れる（直さないと host の build が `-z defs` で落ちる）。B: 各 WS に頼む | A |
-| Q6 | link にしたので、libssl-compat・libcrypto-compat の無い image では browser・mailer が起動しない（今は起動して https だけ失敗） | A: 受け入れる（ssh・fidoctl と同じ。既定の一覧に 2 つはある）。B: mk に「選んだ package の requirement を一覧に足す」規則を作る（mk の変更、全 package に効く） | A |
-| Q7 | makefile.diff を当てる時期 | A: ユーザーの承認の後、p043 の merge と同じ時に全部。B: 承認の時に B・D・E・F・G だけ、A・C は p043 の merge の時 | A（1 回で済み、どちらでも中間の壊れは無い） |
-| Q8 | 見つけた事（範囲の外）: (1) 今の zedBSD の mailer は `-DML_TLS_COMPAT` が無く OpenSSL の名前を開くので、既定の image で Mail の TLS は全部失敗するはず（p044 と差分 B で直る）。(2) openssl・openssh・curl・python3 の `PACKAGE_FILES` が旧い `USER_PROGRAMS` で選ばれる（BUG-418 C と同じ形の疑い、未確認） | (1) は p044 で直す。(2) は Bug の候補 | (2) を Bug Board に（担当は書かない） |
+| Q5 | 他の WS の file を WS335 の Phase が直す事: `plan/ws074/tests/host-build.sh`（WS074）、`plan/ws334/tests/net-ring-test.sh`・`tls-wine.sh`・`unit/test-os-system.c`（WS334）、`plan/tools/mail/run-host-mail-backend.sh`（登録の道具）、新しい `plan/tools/tls/host-compat-libs.sh`（tools.md への登録は Q1）。記録の写し `plan/ws074/design.md:270-275`（D2: OpenSSL を dlopen）・`plan/ws334/design.md:317・726`（`wb_os_trust_roots`、S-A）の注 | A: 試験の道具は p043〜p045、記録の写しの注は p046 の範囲に入れる（道具を直さないと host の build が `-z defs` で落ちる）。B: 各 WS に頼む | A |
+| Q6 | link にしたので browser・mailer は 2 つの .so が無いと起動しない。今の build では requirement と stamp の順で .so が作られ、`mk/rootfs.mk:163` が `dynamic/*` を全部 `/lib` に写すので欠けない。rootfs が選択に従う形に変われば欠けうる | A: 受け入れる（ssh・fidoctl と同じ。既定の一覧にも 2 つはある）。B: mk に「選んだ package の requirement を一覧に足す」規則を作る（mk の変更、全 package に効く） | A |
+| Q7 | makefile.diff を当てる時期 | A: A・B・D・E・F・G を p043 の merge と同じ commit に、C を p045 の merge と同じ commit に（`git apply --include=<path>` で分ける）。B: 全部を p043 の merge の時（p045 まで main の tls-wine.sh が FAIL） | A（どの時点の main も build と試験が通る） |
+| Q9 | host（Linux）の試験の道具は compat を link するので、system の根は `/etc/ssl/cert.pem` だけになり、Debian の host（`/etc/ssl/certs/ca-certificates.crt`）の根を読まない。local の試験の CA の試験には効かない | A: 受け入れ、host で公開の site を見る時は `--ca-file /etc/ssl/certs/ca-certificates.crt` を渡すと道具の comment に書く。B: compat の POSIX の default paths に Debian の path を足す（凍結の header の約束の変更、zedBSD には無い path） | A |
+| Q8 | 見つけた事（範囲の外）: (1) 今の zedBSD の mailer は `-DML_TLS_COMPAT` が無く OpenSSL の名前を開くので、既定の image で Mail の TLS は全部失敗するはず（p044 と差分 B で直る）。(2) openssl・openssh・curl・python3 の `PACKAGE_FILES` が旧い `USER_PROGRAMS` で選ばれる（BUG-418 C と同じ形の疑い、未確認）。(3) `plan/ws074/tests/guest-build.sh` は旧い build の形で engine の object を link する（書き換えの後は compat も要る。既に動かない道具なので消す候補）。(4) `plan/tools/guest/config-amd64-ssh.mk` ほか `plan/tools/` の旧い config にも `openssl` がある（今の build は読まない） | (1) は p044 で直す。(2) は Bug の候補 | (2) を Bug Board に（担当は書かない） |
 
 ## 結果（2026-11-13 P2 q2051-i01）
 
 - 置いた物: この phase.md、[makefile.diff](makefile.diff)、[design-review.md](design-review.md) の「p042」の節、[p043](../phase043/phase.md)〜[p047](../phase047/phase.md) の phase.md、[ws.md](../ws.md) の表の行、[design.md](../design.md) §4.2 の注。
-- 確かめた事: `git apply --check plan/ws335/phase042/makefile.diff`（基点の tree に通る）。一覧の行番号は基点の tree で読んだ。
+- 確かめた事: `git apply --check plan/ws335/phase042/makefile.diff`（基点の tree に通る）。一覧の行番号は基点の tree で読み、design-reviewer の指摘で mailer の行を直した。
 - source（.c・.h）・Makefile・`mk/` は変えていない。
 - 未実施: build・試験（この Phase は設計だけ）。command line の上書きの値（§4）は package.mk を読んで作った物で、make で流してはいない（p043・p044 の最初の確かめ）。

@@ -3,7 +3,7 @@
 # ws335-p045: Windows（OmniGrammaton）の TLS を表の無い net/tls.c で確かめ、使われなくなった wb_os_trust_roots を消す
 
 Status: planned
-Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.1・§1.3・§2 の 3・§4 の C・問い Q4）。実装の担当: phase-runner-low（Sonnet 5.5 high）、1 回の起動。依存: p043 の merge（と makefile.diff の C。当たっていなければ写しで）。p044 と並べてよい。
+Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.1・§1.3・§2 の 3・§4 の C・問い Q4）。実装の担当: phase-runner-low（Sonnet 5.5 high）、1 回の起動。依存: p043 の merge。p044 と並べてよい。makefile.diff の C は、この Phase の merge と同じ commit に Q1 が当てる（p042 の問い Q7）ので、この Phase は C を当てた写しの Makefile で確かめる。
 
 ## 0. 何をするか（要約）
 
@@ -46,7 +46,7 @@ Q4 が B の時: `os-system.h:165-166` の「(OpenSSL reads the system's file it
 
 | # | 確かめ | 期待 |
 | --- | --- | --- |
-| 1 | `sh plan/ws334/tests/tls-wine.sh`（makefile.diff の C が main に当たった後の素の Makefile。当たっていなければ下の §4 の 2） | `tls-wine: PASS`（a〜g、import に ssl・crypto の DLL 無し、`SSL_connect` と `sslc_` がある） |
+| 1 | `sh plan/ws334/tests/tls-wine.sh`（C を当てた写しの Makefile で、§4 の 2） | `tls-wine: PASS`（a〜g、import に ssl・crypto の DLL 無し、`SSL_connect` と `sslc_` がある） |
 | 2 | `WIN32_ARCH="x86_64 aarch64" sh plan/ws334/tests/cross-build.sh` | 今の main と同じ結果（p041 の時点では zip の許諾の 5 file の欠けだけで FAIL。流す前に今の main で 1 回流して比べる）。warning 0、OmniGrammaton.exe の import に ssl・crypto の DLL 無し |
 | 3 | `sh plan/ws334/tests/run-unit.sh`（`os-system` の単体試験を含む。posix と Wine） | PASS（Q4 が A なら trust の case が無い） |
 | 4 | `sh plan/ws074/tests/host-build.sh plain` | build が通る（POSIX の os-system の変更の確かめ） |
@@ -54,8 +54,8 @@ Q4 が B の時: `os-system.h:165-166` の「(OpenSSL reads the system's file it
 
 ## 4. 確かめのコマンド
 
-1. 素の Makefile（C が当たった後）: 上の表のとおり。
-2. C が当たっていない時: p043 の phase.md §4 の 3 と同じに写しを作り、`tls-wine.sh` が使う make の `-f` を写しに替えて流す（`tls-wine.sh` に Makefile の path を渡す変数が無ければ、script の写しを `build/tmp/p045/` に置いて 1 行だけ替える。commit しない）。
+1. cross-build.sh は素の main（C の前）で流してよい（C の前も tls-static-compat.o は作られるが参照されない）。C の後の形は 2 で確かめる。
+2. p043 の phase.md §4 の 3 と同じに写しを作り（`--include` は `--directory` を付けた後の path）、`tls-wine.sh` が使う make の `-f` を写しに替えて流す（`tls-wine.sh` に Makefile の path を渡す変数が無ければ、script の写しを `build/tmp/p045/` に置いて 1 行だけ替える。commit しない）。
 3. llvm-mingw・Wine の場所は `cross-build.sh`・`tls-wine.sh` が使う物（p036 の結果）。各コマンドに時間の上限、`-j4` まで、大きな build の後に `sync`。
 
 ## 5. 注意

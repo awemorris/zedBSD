@@ -36,6 +36,7 @@ Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.2・§1.3
 
 ### 2.2 他の mailer の file（文と comment）
 
+- `mail.h:9-11`: file の comment の「plain or TLS (the OpenSSL package loaded when first needed)」→「plain or TLS (libssl-compat and libcrypto-compat)」の形に。
 - `mail.h:190`: 「/* The TLS of the OpenSSL package (tls.c). */」→「/* TLS (tls.c): libssl-compat and libcrypto-compat. */」の形に。
 - `sync.c:993・1032・1042・1048`: 「OpenSSL's words」→「the TLS library's words」。
 - `sync.c:1077`: `"TLS is not available (the OpenSSL package is not installed)"` → `"TLS cannot be set up"`（`EPROTONOSUPPORT` の意味は p042 §2 の 4）。この文は利用者に見える。他の言語の表（`userland/desktop/locale/` など）にこの文があれば、同じ commit で直す（無ければ「無い」と結果に書く: `grep -rn 'OpenSSL package is not installed' userland`）。
@@ -55,8 +56,8 @@ Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.2・§1.3
 
 | # | 確かめ | 期待 |
 | --- | --- | --- |
-| 1 | `grep -n 'dlopen\|dlsym\|dlfcn\|ML_TLS_COMPAT\|tls_library\|tls_symbol\|libssl\.so\|libcrypto\|SSL_get_peer_certificate\|OpenSSL' userland/desktop/mailer/tls.c` | 「OpenSSL 3.5 と同じ API」の 1 か所の他に無い |
-| 2 | `grep -rn 'OpenSSL' userland/desktop/mailer` | 1 の 1 か所の他に無い |
+| 1 | `grep -n 'dlopen\|dlsym\|dlfcn\|ML_TLS\|tls_library\|tls_symbol\|"libssl\|"libcrypto\|libssl\.so\|libcrypto\.so\|SSL_get_peer_certificate' userland/desktop/mailer/tls.c` | 何も出ない |
+| 2 | `grep -rn 'OpenSSL' userland/desktop/mailer` | tls.c の「OpenSSL 3.5 と同じ API」の 1 か所の他に無い |
 | 3 | `sh plan/ws335/tests/run-mailer-tls.sh` | `run-mailer-tls: PASS (8 cases)` |
 | 4 | `sh plan/tools/mail/run-host-mail-backend.sh` | 今と同じ最後の行（流す前に今の main で 1 回流し、件数と最後の行を控えて比べる） |
 | 5 | zedBSD の build（x86_64、§4） | exit 0、warning 0。`readelf -d build/x86_64/bin/mailer`（出力の場所は `build/x86_64/packages/mailer/` と package.mk の `STANDALONE_OUTPUT_mailer` で確かめる）の NEEDED に `libssl-compat.so`・`libcrypto-compat.so`、`.flags` に `ML_TLS_COMPAT` が無い |
@@ -66,7 +67,7 @@ Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.2・§1.3
 ## 4. 確かめのコマンド
 
 1. `make CONFIGMK=config/config.x86_64.mk BUILD_JOBS=4 build/x86_64/packages/libcrypto-compat/.stamp build/x86_64/packages/libssl-compat/.stamp`
-2. makefile.diff が main に当たっていれば: `make CONFIGMK=config/config.x86_64.mk BUILD_JOBS=4 build/x86_64/packages/mailer/.stamp`。
+2. makefile.diff の B が main に当たっていれば（p043 の merge で当たる案）: `make CONFIGMK=config/config.x86_64.mk BUILD_JOBS=4 build/x86_64/packages/mailer/.stamp`。
    当たっていなければ差分 B と同じ値を command line で: `make CONFIGMK=config/config.x86_64.mk BUILD_JOBS=4 'STANDALONE_SO_LIST_mailer=libvulkan.so libwayland-client.so libkeiland.so libtruetype.so libssl-compat.so libcrypto-compat.so' build/x86_64/packages/mailer/.stamp`。
    toolchain の用意は p041 の結果と `plan/tools.md` に従う（担当は toolchain を build・install しない）。
 3. `git diff --check`。
@@ -83,7 +84,7 @@ Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.2・§1.3
 
 ## 6. 変えてはいけない物
 
-全ての header（compat）、compat の .c、libbrowser（p043・p045）、`mail.h` の関数の宣言と定数（comment の 1 行だけは変える）、Makefile・`mk/`、HAL・toolchain・共有の `build/`、`plan/tools/tls/host-compat-libs.sh`（p043 の物。不具合は Q1 に返す）、§2.3 に名指していない他の WS の file。
+全ての header（compat）、compat の .c、libbrowser（p043・p045）、`mail.h` の関数の宣言と定数（comment の 2 か所、9-11 行と 190 行だけは変える）、Makefile・`mk/`、HAL・toolchain・共有の `build/`、`plan/tools/tls/host-compat-libs.sh`（p043 の物。不具合は Q1 に返す）、§2.3 に名指していない他の WS の file。
 header に不備を見つけたら直さずに止め、Q1 に返す。
 
 ## 7. 終わりの条件
