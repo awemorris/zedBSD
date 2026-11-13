@@ -244,8 +244,12 @@ drv_gpu_fence_reset(
 
 	spin_unlock_irqrestore(&fence->lock, irq);
 
-	/* Notify descriptor observers only after the payload lock has been released. */
-	poll_notify();
+	/*
+	 * Wakes the polls that read this payload, only after its lock has been
+	 * released.  Every descriptor and imported alias of the fence answers from
+	 * this same payload, so naming it reaches all of them.
+	 */
+	poll_notify_object(fence);
 
 	/* Succeeded: old references remain valid capabilities for the new generation. */
 	return 0;
@@ -396,15 +400,24 @@ drv_gpu_fence_signal(
 	void *owner,
 	int status)
 {
+	struct drv_gpu_fence *fence;
 	int error;
 
-	/* Payload state and waiter registration change together before global readiness notification. */
+	/* Payload state and waiter registration change together before the readiness notification. */
 	error = drv_gpu_fence_signal_deferred(handle, generation, owner, status);
 	if (error != 0)
 		return error;
 
-	/* Notify descriptor observers only after the payload lock has been released. */
-	poll_notify();
+	/* Resolves the payload the signal changed; the signal above already accepted the handle. */
+	error = fence_resolve(handle, &fence);
+	if (error != 0)
+		return error;
+
+	/*
+	 * Wakes the polls that read this payload, only after its lock has been
+	 * released.  Every descriptor and imported alias answers from this payload.
+	 */
+	poll_notify_object(fence);
 
 	/* Succeeded: both payload waiters and descriptor pollers can observe completion. */
 	return 0;
@@ -554,6 +567,14 @@ fence_poll(
 	/* Descriptor lookup retains this payload while the readiness snapshot is taken. */
 	fence = object;
 	result = 0;
+
+	/*
+	 * A sleeping poll follows this payload by name, so the changes of other
+	 * descriptors do not wake it.
+	 */
+	poll_wait_object(fence);
+
+	/* Reads the payload's state. */
 	irq = spin_lock_irqsave(&fence->lock);
 
 	if (fence->state != DRV_GPU_FENCE_PENDING)
