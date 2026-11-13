@@ -5,6 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
+| Sonnet | phase-runner-low | ws335 p043 (q2053-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p043` / `agent/s-ws335-p043` | 動いている（2026-11-13 22:3x） | — |
 | P1 | phase-runner-high | ws352 p001 の仕上げ (q2046-i02) | `/home/awe/zedBSD-worktrees/p1-ws352` / `agent/p1-ws352` | 返却（2026-11-13 22:1x、未 merge） | — |
 | P3 | phase-runner-high | ws334 p040 winpthreads を外す (q2052-i01) | `/home/awe/zedBSD-worktrees/p3-ws334c` / `agent/p3-ws334c` | 返却（2026-11-13 22:2x、cleared） | bf80fa75b3（merge 4688966210） |
 | P2 | phase-runner | ws335 p042 compat を前提の設計 (q2051-i01) | `/home/awe/zedBSD-worktrees/p2-ws335f` / `agent/p2-ws335f` | 返却（2026-11-13 22:0x） | f4b46e6251（merge 2ae171867d） |
