@@ -206,6 +206,7 @@ OMNIGRAMMATON_LICENSES = \
 	Mahora-LICENSE.txt=userland/desktop/fonts/Mahora-LICENSE.txt \
 	JetBrainsMono-OFL.txt=userland/desktop/fonts/JetBrainsMono-OFL.txt \
 	DroidSansFallback-LICENSE.txt=userland/desktop/fonts/DroidSansFallback-LICENSE.txt \
+	Apache-2.0.txt=userland/desktop/fonts/Apache-2.0.txt \
 	WHATWG-entities.txt=userland/base/licenses/browser/WHATWG-entities \
 	Unicode-License-V3.txt=userland/base/licenses/browser/Unicode-License-V3 \
 	ca-certificates-MPL-2.0.txt=userland/packages/security/ca-certificates/MPL-2.0.txt
