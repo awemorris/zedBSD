@@ -40,13 +40,35 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 - timer を 1 本の thread で持つか、締め切りを持つ各 thread が自分で timed wait するか。
 - main が client の socket を自分で poll するか、それも thread に出すか。
 - client の buffer の GPU の同期の方式。
+- （2026-11-13 P1 の案と推し、[design.md](design.md) §8）: 1 は C（main の締め切りは timer の thread、他の thread は自分の待ちに期限）。2 は A（main が client の socket・wake・backend の事象の fd・acquire fence を timeout 無しで poll。合意した形の「socket と wake だけ」との違いを確かめたい）。3 は明示の同期（release fence）を目標、前提（全 render の backend の `GPU_CAP_FENCE`）が揃うまでは表示の完了（present wait）の serial で返す。
+
+## 設計
+
+- [design.md](design.md)（2026-11-13 P1、q2056-i01。kernel・libvulkan・compositor・WSI の待ち方、WS352 の 91 件の対応表 §12、未決の案 §8）。
 
 ## Phase
 
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計（design.md）と移行の計画（実装の Phase の表と各 phase.md）、Fable の敵対的レビューの反映 | planned（q2056、P1） | — |
+| [p001](phase001/phase.md) | 設計（design.md）と移行の計画（実装の Phase の表と各 phase.md）、Fable の敵対的レビューの反映 | in-progress（q2056-i01 P1: [design.md](design.md) と p002〜p017 の phase.md を置いた。Fable のレビュー待ち） | — |
+| [p002](phase002/phase.md) | kernel: display の topology の事象の fence（HOTPLUG、`GPU_DISPLAY_EVENT_FENCE`、driver の push `drv_gpu_display_changed`） | planned | p001 |
+| [p003](phase003/phase.md) | libvulkan: hotplug の fence を kernel の fence に、未提出の fence の待ち（1 ms を消す） | planned | p002 |
+| [p004](phase004/phase.md) | compositor: hotplug の thread、`kwl_output_tick` の 250 ms を消し出力の追従を事象で | planned | p003 |
+| [p005](phase005/phase.md) | compositor: timer の thread、thread の結果の flag を wake に、入力の scan を事象だけに | planned | p004、WS352 p002 の merge（推し） |
+| [p006](phase006/phase.md) | compositor: 締め切り A（session・system・protocol）を timer へ | planned | p005 |
+| [p007](phase007/phase.md) | compositor: 締め切り B（UI）を timer へ | planned | p005 |
+| [p008](phase008/phase.md) | compositor: animation・frame の pacing・時計、main の poll を -1 に | planned | p006・p007 |
+| [p009](phase009/phase.md) | libvulkan: `VK_KHR_present_id`・`VK_KHR_present_wait`（display の swapchain） | planned | p003 |
+| [p010](phase010/phase.md) | compositor: present の thread（T4）が表示の完了を待ち、callback・animation・client の buffer の返しをそこから（slot から外す） | planned | p008・p009 |
+| [p011](phase011/phase.md) | compositor: render は合成の buffer を slot の数で回す（足りない時だけ最古の fence、acquire は block、1 ms を消す） | planned | p010 |
+| [p012](phase012/phase.md) | compositor: cursor の thread（acquire を先に block、copy の fence をすぐ待つ） | planned | p011 |
+| [p013](phase013/phase.md) | client の buffer の明示の同期（release fence、全 render の backend の `GPU_CAP_FENCE`、protocol rev 4、WSI） | planned（未決 3 の決定の後） | p010、未決 3 |
+| [p014](phase014/phase.md) | kernel・libvulkan: refresh の事象の fence、`VULKAN_SYNC_POLL_NS` を消す | planned | p003 |
+| [p015](phase015/phase.md) | backend と WSI の小さな直し（network の答えの fd、WSI の 50 ms の slice） | planned | p005 |
+| [p016](phase016/phase.md) | 試験: QEMU の回帰と 5330 の idle（電力・PC2・thread ごとの起床） | planned | p002〜p015 |
+| [p017](phase017/phase.md) | 規約の全文の見直し | planned | p016 |
 
 ## Resume point
 
+- 2026-11-13 22:5x P1（q2056-i01、branch `agent/p1-ws353`）: [design.md](design.md) と p002〜p017 の phase.md を置いた（source は変えていない）。HAL・Makefile の変更は要らない形にした。未決 3 つの案と推しは design.md §8。WS352 の branch は b05187933a を除いて merge を推す（§7）。次は Q1 の Fable の敵対的レビューの反映（p001 の残り）。
 - 2026-11-13 Q1: 立てた。p001 を P1（Opus 5.5 high）に。

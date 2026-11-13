@@ -2,7 +2,7 @@
 
 # ws353-p001: 設計と移行の計画
 
-Status: planned
+Status: in-progress（2026-11-13 q2056-i01 P1: design.md と p002〜p017 の phase.md を置いた。Fable の敵対的レビューの反映が残り）
 Parent: [WS353](../ws.md)
 
 ## 目的
