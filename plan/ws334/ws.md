@@ -11,6 +11,7 @@
 
 ## ユーザーの決定
 
+- 2026-11-13 ユーザーから、winpthreads は要らない、thread は包んで Windows では Win32 の API を使い winpthreads を link から外す、という趣旨の決定を受けた（p040）。また、mingw-w64・LLVM の C runtime（MinGW-w64 runtime・winpthreads・compiler-rt）は link の例外があり、一般に CRT の許諾を表示しないので、zip にその許諾の文を入れない、という趣旨の決定も受けた（zip には自分たちと第三者の library・font・data の許諾だけを入れる）。
 - 2026-11-13 ユーザーから、次の趣旨の指示を受けた: GitHub の CI で、top で `make browser-win32` と 1 文字も違わない command だけで build が通るようにする（script で包まない、変数も渡さない）。CI の compiler は mingw-w64（gcc）。既定で build するのは x86_64（arm64 は llvm-mingw の時に WIN32_ARCH=aarch64）。
 - 2026-11-13: 上の決定は、下の 11（mingw-w64 か llvm-mingw）・17（llvm-mingw を host に入れた、x86_64・aarch64）の読み方を上書きする。CI と素の `make browser-win32` は mingw-w64 の gcc で x86_64 だけ。llvm-mingw と arm64 は任意の道（`WIN32_ARCH=aarch64`）。`apps/browser-win32/Makefile` と `plan/ws334/tests/cross-build.sh` の先頭の comment（top の `browser-win64`・`browser-winarm64`、両 arch）は古い。
 - 2026-11-13 ユーザーから、次の趣旨の決定を受けた: vulkan-1.dll の遅延の読み込み（`--delayload`）は要らない。libbrowser は Vulkan の宣言を使うので `--no-gpu`（Vulkan 無しの描画）はできない。software の描画が要るなら自前の software の Vulkan を作る形だが、それはやらない。素の checkout の `make browser-win32` のため既定の config.mk を commit し、clang 用に `-Wno-unknown-warning-option` を足した（ユーザー）。
@@ -103,3 +104,4 @@
 | [p036](phase036/phase.md) | build（Opus）: 1 つの .exe（DLL を作らない static link。libbrowser・libmedia・libkeiland・compat・winpthreads・当面の OpenSSL、vulkan-1.dll は遅延の import）の形と design §6 の直し、libkeiland の Windows の pthread 無し（SRWLOCK・CreateThread） | cleared（2026-11-01 09:04 Q1、main 8970a6e96）。in-progress（実装済み・試験 PASS。2026-11-01 q1808-i02、P7: run-unit.sh all PASS（34 本）、cross-build PASS（libkeiland.a に pthread の名前なし、script-tool.exe の import は system の DLL と UCRT だけ）、zedBSD amd64 libkeiland.so と Linux の Keiland warning 0） | p016・p020・p021 |
 | [p035](phase035/phase.md) | 規約の全文の見直し（旧 p018）と header の持ち越しの直し | planned | p033・p034・p036 |
 | [p039](phase039/phase.md) | 素の tree の `make browser-win32` が build できない件（gcc の未初期化の error、top の入口）: 原因の解析と Makefile の差分の案 | cleared（2026-11-13 Q1: ユーザーが make browser-win32 を素で通るように直し、古い comment を消した。P3 の解析: gcc の maybe-uninitialized の 93 か所は全部誤検出、GitHub の Ubuntu の runner に UCRT の mingw-w64 の gcc は無い） | — |
+| [p040](phase040/phase.md) | Windows 版から winpthreads を外す（thread は各 library の OS の層で Win32 の API に、`-lpthread` を外す Makefile の案） | planned（q2052、P3） | — |

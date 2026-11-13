@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、書き方は [q1.md](q1.md) §3）。書き手は Q1 だけ。
-最終更新: 2026-11-13 21:05（Q1。P2 に WS335 p042）。前の更新: 2026-11-12 23:42（Q1。master.md の「今の状態」を自律で回す形に書き直した、P1 に WS333 p025）。前の更新: 2026-11-11 12:0x（Q1。WS347 を立てた）。前の更新: 2026-11-03 16:10（Q1。WS346 完了、全 Phase cleared、既定 cache=on）。前の更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
+最終更新: 2026-11-13 21:15（Q1。P3 に WS334 p040、P2 に WS335 p042）。前の更新: 2026-11-12 23:42（Q1。master.md の「今の状態」を自律で回す形に書き直した、P1 に WS333 p025）。前の更新: 2026-11-11 12:0x（Q1。WS347 を立てた）。前の更新: 2026-11-03 16:10（Q1。WS346 完了、全 Phase cleared、既定 cache=on）。前の更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
 
 ## 担当（P1〜P8）
 
@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | q2046 | 作業中 | WS352: desktop の idle の短い poll を無くす（compositor・input・client） | 5330 の idle を WS333 p029 と同等に |
 | P2 | [WS335](ws335/ws.md) | 自前の TLS・暗号の library | q2051: p042 compat を前提に書き換える設計（mailer・libbrowser・browser-win32、macro を無くす、OpenSSL・OpenSSH を外部に） | 実装は p043〜 を Sonnet に、その後 WS335 を完了 |
-| P3 | — | 待機 | WS334 p039 は ユーザーが直して cleared | agy の依頼 08 の監査（agy が終われば） |
+| P3 | [WS334](ws334/ws.md) | Windows 版のブラウザ | q2052: p040 winpthreads を外す（Windows の thread を Win32 の API に） | Makefile の案（`-lpthread` を外す）をユーザーへ |
 | P4 | — | 待機 | WS347 p009 cleared（host は local memory に GOP 以外触れない） | p004（VF2＋KC705 の実機） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
