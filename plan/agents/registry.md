@@ -7,7 +7,7 @@
 | --- | --- | --- | --- | --- | --- |
 | P1 | phase-runner-high | ws352 p001 の仕上げ (q2046-i02) | `/home/awe/zedBSD-worktrees/p1-ws352` / `agent/p1-ws352` | 動いている（2026-11-13 21:4x） | — |
 | P3 | phase-runner-high | ws334 p040 winpthreads を外す (q2052-i01) | `/home/awe/zedBSD-worktrees/p3-ws334c` / `agent/p3-ws334c` | 動いている（2026-11-13 21:1x） | — |
-| P2 | phase-runner | ws335 p042 compat を前提の設計 (q2051-i01) | `/home/awe/zedBSD-worktrees/p2-ws335f` / `agent/p2-ws335f` | 動いている（2026-11-13 21:0x） | — |
+| P2 | phase-runner | ws335 p042 compat を前提の設計 (q2051-i01) | `/home/awe/zedBSD-worktrees/p2-ws335f` / `agent/p2-ws335f` | 返却（2026-11-13 22:0x） | f4b46e6251（merge 2ae171867d） |
 | P1 | phase-runner-high | ws333 thermal の権限 (q2015-i01) | `/home/awe/zedBSD-worktrees/p1-ws333e` / `agent/p1-ws333e` | 返却（2026-11-12） | 03f66fffcf（merge b1ade10787） |
 | P2 | phase-runner-high | ws347 Gemini の修正の監査 (q2014-i01) | `/home/awe/zedBSD-worktrees/p2-ws347a` / `agent/p2-ws347a` | 返却（2026-11-12） | 5f117d149e（merge b2ecd73d78） |
 | P1 | phase-runner-high | ws333 の UAPI の実装 (q2013-i01) | `/home/awe/zedBSD-worktrees/p1-ws333d` / `agent/p1-ws333d` | 返却（2026-11-12） | 54ae40fb23（merge 10f86ae6e8） |

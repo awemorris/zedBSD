@@ -13,6 +13,7 @@
 
 ## ユーザーの決定
 
+- 2026-11-13 Q1 の判断（p042 §7 の問い）: Q1 config/ci は今は触らない（旧い変数で今の build は読まない、CI を直す時に外す）。Q2 installer の既定で OpenSSH・OpenSSL を off、CA certificates は別の項で on（ユーザーの決定に沿う）。Q3 curl・python3 はそのまま（選ぶ事が明示の指定）。Q4 `wb_os_trust_roots` は p045 で消す。Q5 他の WS の試験・道具を WS335 の Phase が直してよい。Q6 .so に link する形を受け入れる。Q7 当てる時期は案のとおり（A・B・D〜G は p043、C は p045 の merge と同じ commit）。Q9 host の試験の根は /etc/ssl/cert.pem、公開の site は --ca-file。Q8 (2) は Bug の候補として後で確かめる。Makefile の差分はユーザーの承認待ち。
 - 2026-11-13 ユーザーから、mailer・libbrowser・browser-win32 の TLS を選べる機能でなく compat（libssl-compat・libcrypto-compat）を前提に書き換え、`ML_TLS_COMPAT`・`WB_TLS_COMPAT` の macro と名前で開く表を無くす、Makefile もその前提にする、OpenSSL・OpenSSH は利用者が明示しない限り build に入らない完全に外部の package として扱い source tree にも明記する、標準廉価実装手順で進める、という趣旨の決定を受けた（p042 の設計 → p043〜 の実装）。p041 の後の WS335 の完了はこの後に。
 - 2026-11-13 ユーザーから、mailer の compat 化を WS335 の Phase（p041）として足し、終わってから WS335 を完了にする、という趣旨の決定を受けた。Q1 の判断: 凍結の header に SSL_get1_peer_certificate・X509_digest を足す事を承認。
 - 2026-11-13 ユーザーから、p036 の Makefile・mk の差分 A（libbrowser の `-DWB_TLS_COMPAT`）・B（`apps/browser-win32/Makefile` を compat の static link に、OpenSSL を外す）・C（7 つの platform の defaults.mk に compat の 2 つ）の承認を受けた（Q1 が当てた）。
