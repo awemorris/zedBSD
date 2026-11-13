@@ -1,58 +1,59 @@
 {
-  "title": "zedBSD 作業地図",
-  "subtitle": "Objective → Milestone → WS → Phase → 担当（Queue）を 1 枚に。今動いている・今日動いた WS と Bug だけを Phase まで開き、他は Milestone ごとの未完の WS の数で示す。",
-  "asof": "2026-11-14 時点の記録（plan/master.md・cockpit.md・queue.md・各 ws.md）から",
+  "title": "zedBSD Work Map",
+  "subtitle": "Objective → Milestone → WS → Phase → Owner (Queue) on one page. Only WSs and Bugs that are running or moved today open down to their Phases; the rest show as the count of open WSs per Milestone.",
+  "asof": "As of 2026-11-14, from plan/master.md, cockpit.md, queue.md and each ws.md",
   "objectives": [
-    ["O1", "UNIX 互換・企業が使える"],
-    ["O2", "様々な規模で動く"],
-    ["O3", "サービスの再実装"],
-    ["O4", "最小の HAL"],
-    ["O5", "AI 活用 OSS の知見"]
+    ["O1", "UNIX-compatible, business-friendly"],
+    ["O2", "Runs at every scale"],
+    ["O3", "Services, reimplemented"],
+    ["O4", "A minimal HAL"],
+    ["O5", "Lessons from AI-built OSS"]
   ],
   "milestones": [
-    ["MG001", "継続開発の基盤", 4],
-    ["MG002", "UNIX app の実行基盤", 10],
-    ["MG003", "対象機へ導入・単独起動", 7],
-    ["MG004", "データ保持・メモリ・ストレージ", 5],
-    ["MG005", "network・service 管理", 5],
-    ["MG006", "グラフィカルな操作環境", 61],
-    ["MG007", "用途別のディストリビューション", 3],
-    ["MG008", "最小 HAL と異種機", 5]
+    ["MG001", "Foundation for ongoing work", 4],
+    ["MG002", "Runtime for UNIX apps", 10],
+    ["MG003", "Install and boot on targets", 7],
+    ["MG004", "Data, memory and storage", 5],
+    ["MG005", "Network and service management", 5],
+    ["MG006", "Graphical environment", 61],
+    ["MG007", "Distributions per use", 3],
+    ["MG008", "Minimal HAL, varied machines", 5]
   ],
   "groups": [
-    {"ms": "MG002", "id": "WS335", "name": "自前の TLS（libssl-compat）", "state": "done",
-     "phases": [["完了", "今日 completed（p042〜p047）", "done", null]]},
-    {"ms": "MG006", "id": "WS353", "name": "待ち方の作り直し（push・周期なし）", "state": "run",
+    {"ms": "MG002", "id": "WS335", "name": "Own TLS (libssl-compat)", "state": "done",
+     "phases": [["Done", "completed today (p042–p047)", "done", null]]},
+    {"ms": "MG006", "id": "WS353", "name": "Event-driven waits (push, no polling)", "state": "run",
      "phases": [
-       ["p002〜p009", "fence・timer・main の poll -1 ほか 8 つ", "done", null],
-       ["p014・p015", "refresh の fence・network・WSI", "done", null],
-       ["p011", "render を slot の数で回す", "run", ["P2", "q2067"]],
-       ["p018", "入力の device を sessiond に開かせる", "run", ["P1", "q2072"]],
-       ["p010・p012", "shown の thread・cursor", "plan", null],
-       ["p019", "printers の 1 s を消す", "plan", null],
-       ["p016", "QEMU の回帰と 5330 の idle", "plan", null]
+       ["p002–p009", "fences, timers, main poll at -1 and more", "done", null],
+       ["p011", "render cycles the output slots", "done", null],
+       ["p014, p015", "refresh fence, network, WSI", "done", null],
+       ["p010", "shown thread, client buffers off the slots", "run", ["P2", "q2073"]],
+       ["p018", "sessiond opens input devices", "run", ["P1", "q2072"]],
+       ["p012", "cursor thread", "plan", null],
+       ["p019", "drop the printers 1 s check", "plan", null],
+       ["p016", "QEMU regression, 5330 idle", "plan", null]
      ]},
-    {"ms": "MG006", "id": "WS334", "name": "Windows 版のブラウザ", "state": "run",
-     "phases": [["p040", "winpthreads を外す", "done", null]]},
-    {"ms": "MG006", "id": "WS347", "name": "Amaterrace GPU（VF2＋KC705）", "state": "run",
+    {"ms": "MG006", "id": "WS334", "name": "Windows browser", "state": "run",
+     "phases": [["p040", "winpthreads removed", "done", null]]},
+    {"ms": "MG006", "id": "WS347", "name": "Amaterrace GPU (VF2 + KC705)", "state": "run",
      "phases": [
-       ["依頼 08", "X1〜X4 確認済み、X5〜X9 は次", "run", ["agy", "Gemini"]],
-       ["描画", "画素を書かない原因 4 つを特定", "run", ["P5", "解析"]],
-       ["次", "4 つの修正の依頼を agy へ", "plan", null]
+       ["Req 08", "X1–X4 checked, X5–X9 next", "run", ["agy", "Gemini"]],
+       ["Drawing", "4 causes of no pixels found", "run", ["P5", "analysis"]],
+       ["Next", "send the 4 fixes to agy", "plan", null]
      ]},
-    {"ms": "MG001", "id": "BUG-430", "name": "build system の不具合", "state": "done",
-     "phases": [["fixed", "Makefile の差分を当てた", "done", null]]},
-    {"ms": "MG006", "id": "BUG-431", "name": "venus の display の事象", "state": "done",
-     "phases": [["fixed", "events_clear・試験の道具", "done", null]]},
-    {"ms": "MG002", "id": "BUG-432", "name": "static の stdout の flush", "state": "bug",
-     "phases": [["open", "libc の exit の flush", "bug", null]]},
-    {"ms": "MG001", "id": "BUG-433", "name": "WS131 の host 試験が link しない", "state": "bug",
-     "phases": [["open", "偽物を 1 file に分ける", "bug", null]]}
+    {"ms": "MG001", "id": "BUG-430", "name": "Build system defects", "state": "done",
+     "phases": [["fixed", "Makefile diff applied", "done", null]]},
+    {"ms": "MG006", "id": "BUG-431", "name": "Venus display events", "state": "done",
+     "phases": [["fixed", "events_clear, test harness", "done", null]]},
+    {"ms": "MG002", "id": "BUG-432", "name": "Static stdout not flushed", "state": "bug",
+     "phases": [["open", "libc exit flush", "bug", null]]},
+    {"ms": "MG001", "id": "BUG-433", "name": "WS131 host test won't link", "state": "bug",
+     "phases": [["open", "move stubs into one file", "bug", null]]}
   ],
-  "idle": [["P3", "待機"], ["P4", "待機"], ["Q1", "merge・Queue・判断の振り分け"]],
+  "idle": [["P3", "idle"], ["P4", "idle"], ["Q1", "merge, queue, triage"]],
   "panels": [
-    ["ユーザーの判断待ち", ["無し（2026-11-14 の分は全部決まった）"]],
-    ["今日 閉じた物", ["WS335 TLS completed", "WS353 p002〜p009・p014・p015 cleared", "BUG-430・431 fixed、WS334 p040"]],
-    ["次に Q1 が回す事", ["Amaterrace の描画の修正を agy に依頼", "WS353 p011・p018 の返却 → p010・p012", "p019（printers）、BUG-432・433"]]
+    ["Waiting on the user", ["Nothing (today's questions are all answered)"]],
+    ["Closed today", ["WS335 TLS completed", "WS353 p002–p009, p011, p014, p015 cleared", "BUG-430, 431 fixed; WS334 p040"]],
+    ["Q1's next steps", ["Send the drawing fixes to agy", "WS353 p010, p018 back → p012", "p019 (printers), BUG-432, 433"]]
   ]
 }

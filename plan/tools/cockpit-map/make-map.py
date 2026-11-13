@@ -131,15 +131,15 @@ def main():
 	out.append(text(40, 100, data["subtitle"], 16, 400, "#3a3a3c"))
 	out.append(text(40, 134, data["asof"], 13, 400, "#6e6e73", MONO))
 	lx = 40
-	for key, label in (("done", "cleared・fixed・completed"), ("run", "in-progress"),
-			("plan", "planned・次"), ("bug", "open の Bug"), ("agy", "Gemini（agy）")):
+	for key, label in (("done", "cleared / fixed / completed"), ("run", "in progress"),
+			("plan", "planned / next"), ("bug", "open bug"), ("agy", "Gemini (agy)")):
 		out.append(dot(lx + 6, 170, COLOURS[key]))
 		out.append(text(lx + 18, 175, label, 14, 400, "#3a3a3c"))
-		lx += 40 + len(label) * 12
+		lx += 50 + len(label) * 8
 
 	out.append(glass(24, top - 30, W - 48, body_bottom - top + 50, r=22))
-	for x, label in ((COL_OBJ + 20, "OBJECTIVE"), (COL_MS, "MILESTONE（未完の WS の数）"),
-			(COL_WS, "WS・BUG"), (COL_PH, "PHASE"), (COL_OWN, "担当・QUEUE")):
+	for x, label in ((COL_OBJ + 20, "OBJECTIVE"), (COL_MS, "MILESTONE (OPEN WSs)"),
+			(COL_WS, "WS / BUG"), (COL_PH, "PHASE"), (COL_OWN, "OWNER / QUEUE")):
 		out.append(text(x, top + 10, label, 13, 700, "#6e6e73", MONO))
 
 	# Objectives.
@@ -173,7 +173,7 @@ def main():
 			out.append(glass(COL_PH, py, PH_W, CARD_H, r=12))
 			out.append(dot(COL_PH + 16, py + 16, colour))
 			out.append(text(COL_PH + 30, py + 21, pid, 13, 700, "#1d1d1f", MONO))
-			out.append(text(COL_PH + 30 + 9 * max(6, len(pid)) + 10, py + 21, pname, 13, 400, "#3a3a3c"))
+			out.append(text(COL_PH + 30 + 8 * max(7, len(pid)) + 12, py + 21, pname, 13, 400, "#3a3a3c"))
 			if owner:
 				who, what = owner
 				oc = COLOURS["agy"] if who == "agy" else colour

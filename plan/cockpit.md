@@ -1,6 +1,6 @@
 # Cockpit
 
-![zedBSD 作業地図](cockpit-map.svg)
+![zedBSD Work Map](cockpit-map.svg)
 
 作業地図は `plan/tools/cockpit-map/map.json` を直して `python3 -I plan/tools/cockpit-map/make-map.py` で描き直す（白の背景、すりガラスの card）。
 
