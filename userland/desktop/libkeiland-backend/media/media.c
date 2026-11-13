@@ -305,6 +305,8 @@ kl_backend_media_poll(
 				descriptors[count].events = POLLOUT;
 				descriptors[count].revents = 0;
 			}
+
+			/* Counted also beyond the room, so the caller knows there are more. */
 			count++;
 		}
 
@@ -315,6 +317,8 @@ kl_backend_media_poll(
 				descriptors[count].events = POLLIN;
 				descriptors[count].revents = 0;
 			}
+
+			/* Counted also beyond the room. */
 			count++;
 		}
 

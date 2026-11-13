@@ -478,6 +478,8 @@ kwl_timer_arm(
 		index = timer->place - 1U;
 		was = timer->due_ms;
 		timer->due_ms = due_ms;
+
+		/* Earlier: towards the top; later (or the same): towards the bottom. */
 		if (due_ms < was) {
 			heap_up(timers, index);
 		} else {

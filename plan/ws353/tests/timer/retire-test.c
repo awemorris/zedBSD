@@ -59,6 +59,8 @@ main(
 		printf("retire-test: FAIL (memory)\n");
 		return 1;
 	}
+
+	/* The compose, the wake pipe and the timers of the server. */
 	server->compose = compose;
 	error = pipe(descriptors);
 	check(error == 0, "pipe");
@@ -245,6 +247,8 @@ list_add(
 			server->retire_last_ms = 0U;
 			server->retire_next_ms = 0U;
 		}
+
+		/* The new end, counted. */
 		server->retiring_tail = object;
 		server->retiring_count++;
 	}

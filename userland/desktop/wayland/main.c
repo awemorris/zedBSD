@@ -256,6 +256,8 @@ main(
 	} else {
 		printf("KWL TIMER unavailable errno=%d\n", timers_error);
 	}
+
+	/* The gone clients' releases have their timer from the start. */
 	kwl_retire_init(&server);
 
 	/*
@@ -1122,6 +1124,7 @@ event_loop(
 		descriptors[0].fd = server->listener;
 		descriptors[0].events = POLLIN;
 
+		/* Each client's connection after the listener. */
 		index = 1;
 		for (client = server->clients; client != NULL; client = client->next) {
 			/* Retain the snapshot identity while suppressing new input on fatal connections. */

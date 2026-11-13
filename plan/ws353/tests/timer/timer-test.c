@@ -170,6 +170,8 @@ test_order(void)
 		error = kwl_timer_arm(&timers, &timers_array[index], 1000U + (uint64_t)((index * 37U) % TEST_TIMERS) * 10U);
 		check(error == 0, "order: arm");
 	}
+
+	/* All armed, the earliest first. */
 	check(timers.count == TEST_TIMERS, "order: count");
 	check(kwl_timers_next(&timers) == 1000U, "order: earliest");
 
@@ -190,6 +192,8 @@ test_order(void)
 		if (log.order[index - 1U]->due_ms > log.order[index]->due_ms)
 			in_order = 0U;
 	}
+
+	/* Earliest first, and nothing left. */
 	check(in_order, "order: by time");
 	check(timers.count == 0U, "order: heap empty");
 	check(kwl_timers_next(&timers) == UINT64_MAX, "order: none next");
@@ -288,6 +292,8 @@ test_again_and_full(void)
 		error = kwl_timer_arm(&timers, &many[index], (uint64_t)index);
 		check(error == 0, "full: arm");
 	}
+
+	/* One more does not fit. */
 	kwl_timer_init(&many[KWL_TIMERS_MAX], "one more", fired);
 	error = kwl_timer_arm(&timers, &many[KWL_TIMERS_MAX], 1U);
 	check(error == ENOSPC, "full: refused");
