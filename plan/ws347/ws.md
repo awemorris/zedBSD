@@ -18,6 +18,7 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 
 ## ユーザーの決定（要点）
 
+- 2026-11-13 ユーザーから、次の趣旨の訂正を受けた: host が GPU の local memory に書いてよいのは GOP の VRAM だけ（B35 の前提の誤解の訂正）。GOP を残して使う事はまず無いので、blitter の無い discrete の GPU で CPU が local の窓を通して frame に書く予備の道（`display.c` の `copy_by_processor`）は削除する。
 - 2026-11-13 ユーザーから、依頼 08（X1〜X9）は全部実装し、B35（host の BAR の local の窓と L2 の一貫性）は driver が command で守る、という趣旨の決定を受けた。
 - 2026-11-13 ユーザーから、次の趣旨の決定を受けた: (1) 割り込みの有無で polling にする事と、DMA が coherent でない時に uncached で使う事は driver の基本の機能なので build の option にしない（`CONFIG_GHCI_POLL`・`CONFIG_GHCI_HOST_UNCACHED` を外し、検出だけで決める。mk の案は取り下げ）。(2) clipper の無い GPU（CLIP_POLY 0）は何も言わずに欠けてよい（minimal は実用ではない。software の clip は作らない）。両方 [p008](phase008/phase.md) で P4 が直す。
 - 2026-11-13 ユーザーから、次の趣旨の決定を受けた: blitter（CAP_BLT）が無い時は、Vulkan の転送だけでなく表示の写しも shader で行う（[p008](phase008/phase.md)）。
@@ -70,3 +71,4 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 | [p007](phase007/phase.md) | 直した RTL で bitstream を作り直し、CAPS を実機で照合 | canceled（2026-11-11、RTL はユーザーが直す） | — |
 | [p005](phase005/phase.md) | 規約の全文の見直し | planned | p003・p004・p006 |
 | [p008](phase008/phase.md) | blitter の無い GPU で表示の copy の present を shader で写す（今は CPU が写す）。2026-11-13 の決定で CONFIG_GHCI_POLL・HOST_UNCACHED を外し、CLIP_POLY の shortfall を外す事を足した | cleared（2026-11-13 Q1、P4 q2030。main に merge） | p003 |
+| [p009](phase009/phase.md) | host が local memory に GOP の VRAM 以外を書かない形に: `copy_by_processor` の削除と、driver の local の窓の使い方の点検 | in-progress（2026-11-13 Q1、q2043-i01 P4） | p008 |
