@@ -38,9 +38,6 @@
 #include "ghci-model.h"
 #include "ghci-stubs.h"
 
-/* Where the scenes with a local window say BAR2 is placed. */
-#define TEST_WINDOW_PHYSICAL		0xe0000000ULL
-
 /* The NOP dwords of one ordinary submission of the scenes. */
 #define TEST_SUBMIT_DWORDS		200U
 
@@ -117,7 +114,6 @@ static void expect(int held, const char *name);
 static int start_scene(enum model_profile profile, const struct model_switches *switches);
 static void prepare_scene(enum model_profile profile, const struct model_switches *switches);
 static int start_device(void);
-static int start_device_window(void);
 static void end_scene(const char *name);
 static void check_locks(const char *name);
 static void model_irq(void *argument);
@@ -136,6 +132,7 @@ static uint32_t dc_read(uint32_t reg);
 static void display_round(void);
 static int display_take(void);
 static struct ghci_resource *display_storage(uint64_t bytes, int blob);
+static uint32_t display_routes(void);
 static int display_present(struct ghci_resource *storage, uint32_t width, uint32_t height, uint32_t stride, uint64_t offset, uint32_t flags, int wait, uint64_t *sequence);
 static void display_pattern(struct ghci_resource *storage, uint32_t seed);
 static int display_frame_holds(uint64_t frame, uint32_t frame_stride, struct ghci_resource *storage, uint32_t width, uint32_t height, uint32_t stride);
@@ -406,34 +403,6 @@ start_device(void)
 	device.pci_device = TEST_PCI_DEVICE;
 	device.bus_master_found = test_master_found;
 	device.ring_bytes = test_ring_bytes;
-
-	/* Starts it. */
-	error = ghci_device_start(&device);
-	return error;
-}
-
-/*
- * Starts the device of the prepared scene with a local window as BAR2
- * gives it: the model's local memory, all of it.  Returns what the start
- * returned.
- */
-static int
-start_device_window(void)
-{
-	int error;
-
-	/* The device as the bus glue leaves it, with the window. */
-	memset(&device, 0, sizeof(device));
-	device.registers = stub_bar0();
-	device.register_bytes = 4096U;
-	device.bus_ops = &fake_bus_ops;
-	device.pci_vendor = TEST_PCI_VENDOR;
-	device.pci_device = TEST_PCI_DEVICE;
-	device.bus_master_found = test_master_found;
-	device.ring_bytes = test_ring_bytes;
-	device.window = model.local;
-	device.window_physical = TEST_WINDOW_PHYSICAL;
-	device.window_bytes = MODEL_LOCAL_BYTES;
 
 	/* Starts it. */
 	error = ghci_device_start(&device);
@@ -2299,10 +2268,6 @@ quarantined_local(void)
 static void
 scene_local(void)
 {
-	static const uint8_t pattern[16] = {
-		1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U, 15U, 16U
-	};
-	uint8_t read_back[16];
 	struct ghci_allocation *first;
 	struct ghci_allocation *second;
 	struct ghci_allocation *third;
@@ -2396,63 +2361,19 @@ scene_local(void)
 
 	/*
 	 * A discrete device with a window and no boot framebuffer: the window
-	 * closes at once, and opens only while the driver holds it for an
-	 * access of its own.
+	 * closes at once, and a run of local memory has no view of the
+	 * processor, which never reads or writes local memory.
 	 */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
-	error = start_device_window();
+	error = start_device();
 	ctrl = model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U];
-	expect(error == 0 && !device.boot_reserved && ctrl == 0U && !device.window_open, "local: unused window closed at the start");
+	expect(error == 0 && !device.boot_reserved && ctrl == 0U && !device.window_open && device.window_users == 0U,
+	    "local: unused window closed at the start");
 	first = local_memory(0x2000U);
-	expect(first != NULL && first->view == (uint8_t *)model.local, "local: the window shows the run");
-	error = ghci_memory_window_hold(&device);
-	ctrl = model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U];
-	expect(error == 0 && ctrl == 1U && device.window_users == 1U, "local: a hold opens the window");
-	error = ghci_memory_window_hold(&device);
-	ghci_memory_window_unhold(&device);
-	ctrl = model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U];
-	expect(error == 0 && ctrl == 1U && device.window_users == 1U, "local: the window stays open while held");
-	ghci_memory_window_unhold(&device);
-	ctrl = model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U];
-	expect(ctrl == 0U && device.window_users == 0U, "local: the last unhold closes the window");
-	ghci_memory_window_unhold(&device);
-	expect(device.window_users == 0U && !device.window_open, "local: an unhold too many changes nothing");
-	if (first != NULL) {
-		error = ghci_memory_local_write(&device, first, 0x10U, pattern, sizeof(pattern));
-		ctrl = model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U];
-		expect(error == 0 && memcmp(model.local + 0x10U, pattern, sizeof(pattern)) == 0 && ctrl == 0U,
-		    "local: the driver writes through the window, closed after");
-		memset(read_back, 0, sizeof(read_back));
-		error = ghci_memory_local_read(&device, first, 0x10U, read_back, sizeof(read_back));
-		ctrl = model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U];
-		expect(error == 0 && memcmp(read_back, pattern, sizeof(pattern)) == 0 && ctrl == 0U,
-		    "local: the driver reads through the window, closed after");
-		error = ghci_memory_local_read(&device, first, 0x2000U - 8U, read_back, sizeof(read_back));
-		expect(error == EINVAL, "local: a read past the run refused");
-		error = ghci_memory_local_write(&device, first, 0x4000U, pattern, sizeof(pattern));
-		expect(error == EINVAL, "local: a write past the run refused");
-		memory_done(first);
-	}
-	host = host_memory(4096U);
-	error = host != NULL ? ghci_memory_local_read(&device, host, 0U, read_back, sizeof(read_back)) : 0;
-	expect(error == EINVAL && device.window_users == 0U, "local: host memory is not read through the window");
-	if (host != NULL)
-		memory_done(host);
-	end_scene("local: window");
-
-	/* Without the window's mapping, a hold and the driver's accesses are refused. */
-	error = start_scene(MODEL_KC705_DISCRETE, NULL);
-	first = local_memory(0x2000U);
-	expect(error == 0 && first != NULL && first->view == NULL, "local: no view without the window");
-	error = ghci_memory_window_hold(&device);
-	expect(error == ENOTSUP && device.window_users == 0U, "local: no hold without the window");
-	error = first != NULL ? ghci_memory_local_read(&device, first, 0U, read_back, sizeof(read_back)) : 0;
-	expect(error == ENOTSUP, "local: no read without the window");
-	error = first != NULL ? ghci_memory_local_write(&device, first, 0U, pattern, sizeof(pattern)) : 0;
-	expect(error == ENOTSUP, "local: no write without the window");
+	expect(first != NULL && first->kind == GHCI_MEMORY_LOCAL && first->view == NULL, "local: no view of a run");
 	if (first != NULL)
 		memory_done(first);
-	end_scene("local: no window");
+	end_scene("local: window");
 
 	/* A unified device hands out no local memory, and leaves no window to manage. */
 	error = start_scene(MODEL_KC705_UMA, NULL);
@@ -2823,6 +2744,23 @@ display_take(void)
 	return error;
 }
 
+/* Reports the routes the scan-out query offers for the output now (GPU_SCANOUT_*), or 0 when the query fails. */
+static uint32_t
+display_routes(void)
+{
+	struct gpu_scanout_constraints constraints;
+	int error;
+
+	/* The query of the one output's generation. */
+	memset(&constraints, 0, sizeof(constraints));
+	constraints.display_id = 1U;
+	constraints.generation = display_generation;
+	error = device.ops.scanout->constraints(&device, display_open, &constraints);
+	if (error != 0)
+		return 0U;
+	return constraints.flags;
+}
+
 /* Makes storage (a blob when asked) of the scenes' open; NULL when it could not. */
 static struct ghci_resource *
 display_storage(
@@ -3027,7 +2965,9 @@ scene_display_modes(void)
 	expect(model_count_commands(GHCI_OP_DISP_SET) >= 3U && model_count_commands(GHCI_OP_FLIP) == 1U &&
 	    model.display.bad_writes == 0U && model.display.idle_waits_lit == 0U && model.display.flip_waits == 0U,
 	    "display modes: DISP_SET and FLIP, no refused write");
-	expect(display_frame_holds(device.display.frames[0]->bus, 2560U, storage, 640U, 480U, 2560U), "display modes: copied by the processor");
+	expect(model_count_commands(GHCI_OP_COPY_BUFFER) == 1U && device.display.frame_maps[0] != NULL &&
+	    display_frame_holds(device.display.frames[0]->bus, 2560U, storage, 640U, 480U, 2560U),
+	    "display modes: copied by the blitter into the host frame");
 
 	/* The release turns the controller dark. */
 	device.ops.resource_destroy(&device, display_open, storage);
@@ -3115,8 +3055,9 @@ scene_display_present(void)
 
 /*
  * Copied presents of a discrete GPU: into frames of local memory by the
- * blitter through session 0's mappings, and by the processor through the
- * local window on a GPU without a blitter.
+ * blitter through session 0's mappings; a GPU without a blitter and
+ * without the copy program offers no copied route (the processor never
+ * copies a frame), and its shared presents go on.
  */
 static void
 scene_display_copied(void)
@@ -3129,11 +3070,12 @@ scene_display_copied(void)
 
 	/* With the blitter: the frames are local memory, mapped into session 0. */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
-	error = start_device_window();
+	error = start_device();
 	if (error == 0)
 		error = display_take();
 	expect(error == 0 && device.display.frames[0]->kind == GHCI_MEMORY_LOCAL && device.display.frame_maps[0] != NULL &&
 	    device.display.frame_maps[1] != NULL, "display copied: local frames mapped");
+	expect(display_routes() == (GPU_SCANOUT_SHARED | GPU_SCANOUT_COPY), "display copied: both routes offered");
 	storage = display_storage(2560U * 480U, 0);
 	display_pattern(storage, 11U);
 	copies = model_count_commands(GHCI_OP_COPY_BUFFER);
@@ -3161,22 +3103,30 @@ scene_display_copied(void)
 	/*
 	 * Without a blitter and without the executor (this test links the
 	 * driver's core alone, as on a GPU without a shader unit), so without
-	 * the copy program: the processor copies through the window, which
-	 * closes again.
+	 * the copy program: only the shared route is offered, there are no
+	 * frames, a copied present is refused with nothing written or placed,
+	 * and a shared present is shown.
 	 */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
 	model.window[GHCI_REG_DEVICE_CAPS / 4U] &= ~GHCI_CAP_BLT;
-	error = start_device_window();
+	error = start_device();
 	if (error == 0)
 		error = display_take();
-	expect(error == 0 && device.display.frame_maps[0] == NULL, "display copied: no blitter, no mapping");
+	expect(error == 0 && device.display.frames[0] == NULL && device.display.frame_maps[0] == NULL &&
+	    device.display.surfaces[0] != NULL, "display copied: no blitter, no frames");
+	expect(display_routes() == GPU_SCANOUT_SHARED, "display copied: no blitter, the shared route only");
 	storage = display_storage(2560U * 480U, 0);
 	display_pattern(storage, 17U);
+	copies = model.command_count;
 	error = display_present(storage, 640U, 480U, 2560U, 0U, GPU_DISPLAY_PRESENT_FIFO, 1, &sequence);
-	frame = device.display.frames[0];
-	expect(error == 0 && model_count_commands(GHCI_OP_COPY_BUFFER) == 0U &&
-	    display_frame_holds(frame->bus, 2560U, storage, 640U, 480U, 2560U) && device.window_users == 0U &&
-	    model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U] == 0U, "display copied: by the processor through the window");
+	expect(error == ENOTSUP && model.command_count == copies && model_count_commands(GHCI_OP_COPY_BUFFER) == 0U &&
+	    device.display.sequence == 0U && device.window_users == 0U &&
+	    model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U] == 0U, "display copied: no blitter, a copied present refused");
+	device.ops.resource_destroy(&device, display_open, storage);
+	storage = display_storage(2560U * 480U, 1);
+	error = display_present(storage, 640U, 480U, 2560U, 0U, GPU_DISPLAY_PRESENT_BLOB | GPU_DISPLAY_PRESENT_FIFO, 1, &sequence);
+	expect(error == 0 && sequence == 1U && dc_read(GHCI_DC_FB_BASE) == (uint32_t)storage->allocation->bus,
+	    "display copied: no blitter, a shared present shown");
 	device.ops.resource_destroy(&device, display_open, storage);
 	display_give_up();
 	end_scene("display copied: no blitter, no executor");
@@ -3184,8 +3134,10 @@ scene_display_copied(void)
 
 /*
  * The cursor plane: an image set (converted from RGBA8 to BGRA8, the rest
- * cleared) and flipped to plane 1, moved and hidden by the host; a
- * controller without the plane, or a GPU without HW_CURSOR, offers none.
+ * cleared) and flipped to plane 1, moved and hidden by the host; on a
+ * discrete GPU the surfaces are host memory and an image in local memory
+ * is refused; a controller without the plane, or a GPU without
+ * HW_CURSOR, offers none.
  */
 static void
 scene_display_cursor(void)
@@ -3196,6 +3148,7 @@ scene_display_cursor(void)
 	struct gpu_display_info info;
 	struct ghci_resource *frame;
 	struct ghci_resource *storage;
+	struct ghci_resource local_storage;
 	uint8_t *surface;
 	uint8_t *pixels;
 	uint64_t sequence;
@@ -3268,6 +3221,47 @@ scene_display_cursor(void)
 	device.ops.resource_destroy(&device, display_open, frame);
 	display_give_up();
 	end_scene("display cursor");
+
+	/*
+	 * A discrete GPU: the frames are local memory, the cursor's surfaces
+	 * host memory the processor writes and the controller reads; an
+	 * image in local memory is refused, as the processor never reads it.
+	 */
+	prepare_scene(MODEL_KC705_DISCRETE, NULL);
+	error = start_device();
+	if (error == 0)
+		error = display_take();
+	frame = display_storage(2560U * 480U, 0);
+	if (error == 0)
+		error = display_present(frame, 640U, 480U, 2560U, 0U, GPU_DISPLAY_PRESENT_FIFO, 1, &sequence);
+	expect(error == 0 && device.display.frames[0]->kind == GHCI_MEMORY_LOCAL &&
+	    device.display.surfaces[0]->kind == GHCI_MEMORY_HOST && device.display.surfaces[1]->kind == GHCI_MEMORY_HOST,
+	    "display cursor: discrete, local frames and host surfaces");
+	storage = display_storage(4096U, 0);
+	pixels = storage->allocation->view;
+	pixels[0] = 0x11U;
+	pixels[1] = 0x22U;
+	pixels[2] = 0x33U;
+	pixels[3] = 0x44U;
+	image.lease = display_lease;
+	image.generation = display_generation;
+	error = device.ops.display->cursor_set(&device, display_open, storage, &image);
+	ghci_sleep_ms(30U);
+	display_round();
+	surface = model_dma(device.display.surfaces[0]->bus, 256U * 64U);
+	expect(error == 0 && surface != NULL && surface[0] == 0x33U && surface[2] == 0x11U && surface[3] == 0x44U &&
+	    dc_read(GHCI_DC_CURSOR_BASE) == (uint32_t)device.display.surfaces[0]->bus && device.window_users == 0U,
+	    "display cursor: discrete, set in host memory and flipped");
+	memset(&local_storage, 0, sizeof(local_storage));
+	local_storage.allocation = local_memory(4096U);
+	error = local_storage.allocation != NULL ? device.ops.display->cursor_set(&device, display_open, &local_storage, &image) : 0;
+	expect(error == ENOTSUP && device.window_users == 0U, "display cursor: discrete, an image in local memory refused");
+	if (local_storage.allocation != NULL)
+		memory_done(local_storage.allocation);
+	device.ops.resource_destroy(&device, display_open, storage);
+	device.ops.resource_destroy(&device, display_open, frame);
+	display_give_up();
+	end_scene("display cursor: discrete");
 
 	/* A controller without the plane. */
 	prepare_scene(MODEL_KC705_UMA, NULL);
@@ -3491,7 +3485,7 @@ scene_display_boot_end(void)
 	/* Told and left: the range goes back, once, and the detach turns the controller dark. */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
 	boot_display(GHCI_DC_CTRL_ENABLE, MODEL_LOCAL_BASE + 0x100000U, 4096U, 256U);
-	error = start_device_window();
+	error = start_device();
 	boot_end_bars();
 	stub.text_end_result = 0;
 	if (error == 0)
@@ -3519,7 +3513,7 @@ scene_display_boot_end(void)
 	/* Refused (the board cannot stop, or something stays mapped in the BARs): the range is kept. */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
 	boot_display(GHCI_DC_CTRL_ENABLE, MODEL_LOCAL_BASE + 0x100000U, 4096U, 256U);
-	error = start_device_window();
+	error = start_device();
 	boot_end_bars();
 	stub.text_end_result = EBUSY;
 	if (error == 0)
@@ -3540,7 +3534,7 @@ scene_display_boot_end(void)
 	/* No BARs: not told, kept. */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
 	boot_display(GHCI_DC_CTRL_ENABLE, MODEL_LOCAL_BASE + 0x100000U, 4096U, 256U);
-	error = start_device_window();
+	error = start_device();
 	device.bar_count = 0U;
 	stub.text_end_result = 0;
 	if (error == 0)
@@ -3557,7 +3551,7 @@ scene_display_boot_end(void)
 	/* The boot image lit again while the console was told: left, but kept until the next own image. */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
 	boot_display(GHCI_DC_CTRL_ENABLE, MODEL_LOCAL_BASE + 0x100000U, 4096U, 256U);
-	error = start_device_window();
+	error = start_device();
 	boot_end_bars();
 	stub.text_end_result = 0;
 	stub.text_end_hook = boot_end_relight;
@@ -3616,7 +3610,7 @@ scene_display_boot(void)
 	/* A boot display in local memory, which the console may still draw to. */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
 	boot_display(GHCI_DC_CTRL_ENABLE, MODEL_LOCAL_BASE + 0x100000U, 4096U, 256U);
-	error = start_device_window();
+	error = start_device();
 	expect(error == 0 && device.display.boot_scanning && device.display.boot_kept && device.boot_reserved &&
 	    model.display.resets == 0U && (dc_read(GHCI_DC_CTRL) & GHCI_DC_CTRL_ENABLE) != 0U, "display boot: kept scanning");
 
@@ -3644,7 +3638,7 @@ scene_display_boot(void)
 	/* Nothing draws to it: the range goes back after the first flip, and the detach turns the controller dark. */
 	prepare_scene(MODEL_KC705_DISCRETE, NULL);
 	boot_display(GHCI_DC_CTRL_ENABLE, MODEL_LOCAL_BASE + 0x100000U, 4096U, 256U);
-	error = start_device_window();
+	error = start_device();
 	device.display.boot_console = 0;
 	if (error == 0)
 		error = display_take();

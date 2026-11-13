@@ -474,10 +474,44 @@ ghci_vk_meta_step(
 }
 
 /*
+ * Reports whether the driver's copy program makes copies of rows in
+ * session 0 (the executor's copy_ready): the program is compiled and
+ * placed in session 0 at the first check or copy, and stays.  Returns 0,
+ * ENOTSUP for a program the compiler or the pipeline state refuses (the
+ * refusal is kept, so a later check answers at once), ENOMEM, or EIO.
+ */
+int
+ghci_vk_copy_ready(
+	struct ghci_device *device)
+{
+	struct ghci_vk_rows *placed;
+	struct ghci_vk *vk;
+	int error;
+
+	/* The program in session 0, placed once. */
+	vk = device->vk;
+	placed = &vk->rows;
+	mutex_lock(&placed->lock);
+
+	error = 0;
+	if (placed->memory == NULL)
+		error = rows_place(device, placed);
+
+	mutex_unlock(&placed->lock);
+
+	/* Reports a program that cannot be placed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: copies of rows can be made. */
+	return 0;
+}
+
+/*
  * Copies rows in session 0 with the driver's copy program (the executor's
- * copy_rows): the program placed in session 0 at the first copy, the
- * resource table written, and the binds, the steps and the barriers
- * around them placed in the ring as the driver's own work.  Returns 0
+ * copy_rows): the program placed in session 0 at the first check or
+ * copy, the resource table written, and the binds, the steps and the
+ * barriers around them placed in the ring as the driver's own work.  Returns 0
  * with the ticket the caller waits for, ENOTSUP with nothing placed when
  * the program cannot make the copy, ENOMEM, or EIO.
  *

@@ -51,9 +51,6 @@
 #define TEST_PCI_VENDOR			0x10eeU
 #define TEST_PCI_DEVICE			0x7024U
 
-/* Where the scenes with a local window say BAR2 is placed. */
-#define TEST_WINDOW_PHYSICAL		0xe0000000ULL
-
 /* The reply blob: its bytes, and where the trailer (the version probe's 20 bytes) goes. */
 #define REPLY_BYTES			4096U
 #define TRAILER_AT			(REPLY_BYTES - 20U)
@@ -106,12 +103,10 @@ static int service_auto;
 static int service_running;
 
 /*
- * What the next start gives the device besides the profile: a local
- * window over the model's local memory (test_window), and capability
+ * What the next start gives the device besides the profile: capability
  * bits taken out of DEVICE_CAPS (test_caps_clear, for a variant of a
  * profile).
  */
-static int test_window;
 static uint32_t test_caps_clear;
 
 /* The completions the scenes hand the executor: distinct addresses the stub counts. */
@@ -194,7 +189,8 @@ static void clear_hook(unsigned sleep, void *argument);
 static int allocate_typed(struct node *node, uint64_t handle, uint64_t bytes, uint32_t type, int exported, uint64_t memory, uint32_t *result);
 static int all_bytes(const uint8_t *bytes, uint64_t count, uint8_t value);
 static void scene_display_copy(void);
-static void display_copy_case(enum model_profile profile, uint32_t caps_clear, int window, const char *name);
+static void display_copy_case(enum model_profile profile, uint32_t caps_clear, const char *name);
+static uint32_t display_routes(void *open, uint64_t generation);
 static int display_claim(void **open, uint64_t *lease, uint64_t *generation);
 static struct ghci_resource *display_storage(void *open, uint64_t bytes, uint32_t seed);
 static int display_send(void *open, uint64_t lease, uint64_t generation, struct ghci_resource *storage, uint32_t stride);
@@ -314,11 +310,6 @@ start(
 	device.bus_ops = &fake_bus_ops;
 	device.pci_vendor = TEST_PCI_VENDOR;
 	device.pci_device = TEST_PCI_DEVICE;
-	if (test_window) {
-		device.window = model.local;
-		device.window_physical = TEST_WINDOW_PHYSICAL;
-		device.window_bytes = MODEL_LOCAL_BYTES;
-	}
 	error = ghci_device_start(&device);
 	return error;
 }
@@ -2421,8 +2412,8 @@ all_bytes(
  * memory in local memory too and its importer's mapping with
  * VM_FLAG_LOCAL, host-visible memory in host memory, buffers that take
  * both types, a client's read, write and mapping of local memory refused
- * and the driver's own accesses through the window, a local heap that
- * runs out, and the runs going back to the allocator.
+ * and no view of it for the processor, a local heap that runs out, and
+ * the runs going back to the allocator.
  */
 static void
 scene_discrete(void)
@@ -2450,10 +2441,8 @@ scene_discrete(void)
 	void *blob;
 	int error;
 
-	/* A discrete device with a window; local memory holds what an earlier client left. */
-	test_window = 1;
+	/* A discrete device; local memory holds what an earlier client left. */
 	error = start(MODEL_KC705_DISCRETE);
-	test_window = 0;
 	if (error == 0)
 		error = node_open(&node);
 	if (error == 0)
@@ -2542,7 +2531,7 @@ scene_discrete(void)
 		error = run(&node, &frame);
 	expect(error == 0 && reply32(&node, 28U) == 3U, "discrete: buffer memory types");
 
-	/* A client neither reads, writes nor maps local memory, though the window shows it; the window stays closed. */
+	/* A client neither reads, writes nor maps local memory; the window stays closed. */
 	memset(&request, 0, sizeof(request));
 	request.bytes = 65536U;
 	request.blob_id = ID_MEMORY;
@@ -2562,14 +2551,8 @@ scene_discrete(void)
 	}
 	expect(model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U] == 0U, "discrete: the window stays closed");
 
-	/* The driver's own accesses go through the window, open only meanwhile. */
-	error = allocation != NULL ? ghci_memory_local_write(&device, allocation, 64U, written, sizeof(written)) : EINVAL;
-	expect(error == 0 && memcmp(model.local + offset + 64U, written, sizeof(written)) == 0 &&
-	       model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U] == 0U, "discrete: the driver writes through the window");
-	memset(read_back, 0, sizeof(read_back));
-	error = allocation != NULL ? ghci_memory_local_read(&device, allocation, 64U, read_back, sizeof(read_back)) : EINVAL;
-	expect(error == 0 && memcmp(read_back, written, sizeof(written)) == 0 &&
-	       model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U] == 0U, "discrete: the driver reads through the window");
+	/* The processor has no view of local memory: the GPU alone reads and writes it. */
+	expect(allocation != NULL && allocation->view == NULL && device.window_users == 0U, "discrete: no view of local memory");
 
 	/* The local heap runs out: more than local memory has. */
 	error = allocate_typed(&node, ID_DEVICE, MODEL_LOCAL_BYTES + 65536U, 0U, 0, ID_MEMORY + 4U, &result);
@@ -2587,34 +2570,6 @@ scene_discrete(void)
 	expect(device.local_map.count == 0U, "discrete: freed local memory back in the allocator");
 	node_close(&node);
 	stop("discrete");
-
-	/* Without a window, local memory has no view: the readback, the upload and the mapping are refused. */
-	error = start(MODEL_KC705_DISCRETE);
-	if (error == 0)
-		error = node_open(&node);
-	if (error == 0)
-		error = create_device(&node, ID_DEVICE, NULL, &result);
-	if (error == 0)
-		error = allocate_typed(&node, ID_DEVICE, 65536U, 0U, 0, ID_MEMORY, &result);
-	expect(error == 0 && result == 0U && model.window[(MODEL_MEM_BLOCK + GHCI_MEM_WINDOW_CTRL) / 4U] == 0U,
-	       "discrete without window: allocated, window closed");
-	memset(&request, 0, sizeof(request));
-	request.bytes = 65536U;
-	request.blob_id = ID_MEMORY;
-	request.flags = GPU_BLOB_MAPPABLE;
-	blob = NULL;
-	error = device.ops.blob_create(&device, node.session, &request, &blob, &resource_id);
-	if (error == 0) {
-		error = device.ops.resource_read(&device, node.session, blob, 0U, read_back, sizeof(read_back));
-		expect(error == ENOTSUP, "discrete without window: readback refused");
-		error = device.ops.resource_write(&device, node.session, blob, 0U, written, sizeof(written));
-		expect(error == ENOTSUP, "discrete without window: upload refused");
-		error = device.ops.resource_map(&device, node.session, blob, &view);
-		expect(error == ENOTSUP, "discrete without window: mapping refused");
-		device.ops.resource_destroy(&device, node.session, blob);
-	}
-	node_close(&node);
-	stop("discrete without window");
 
 	/* Without the blitter, the driver's copy program clears local memory: a dispatch, no FILL_BUFFER. */
 	test_caps_clear = GHCI_CAP_BLT;
@@ -2771,9 +2726,11 @@ scene_discrete_clear(void)
  * dispatch of the driver's copy program in session 0, with neither the
  * blitter's packet nor the processor's copy, and the frames are mapped
  * into session 0; the dispatch, run here by hand from its table and
- * constants, makes the frame.  A GPU with the blitter copies as before:
- * the blitter into local frames, the processor into host ones; and a copy
- * program the compiler refused leaves the copy to the processor.
+ * constants, makes the frame.  A GPU with the blitter copies with the
+ * blitter into local and host frames alike.  A copy program the compiler
+ * refused leaves the GPU without a copied route: the scan-out query
+ * offers the shared route only and a copied present is refused, as the
+ * processor never copies a frame.
  */
 static void
 scene_display_copy(void)
@@ -2788,14 +2745,12 @@ scene_display_copy(void)
 	int error;
 
 	/* The GPUs without the blitter: the copy program. */
-	display_copy_case(MODEL_KC705_MIN, 0U, 0, "display copy kc705-min");
-	display_copy_case(MODEL_NO_BLT, 0U, 0, "display copy no-blt");
-	display_copy_case(MODEL_KC705_DISCRETE, GHCI_CAP_BLT, 1, "display copy discrete without the blitter");
+	display_copy_case(MODEL_KC705_MIN, 0U, "display copy kc705-min");
+	display_copy_case(MODEL_NO_BLT, 0U, "display copy no-blt");
+	display_copy_case(MODEL_KC705_DISCRETE, GHCI_CAP_BLT, "display copy discrete without the blitter");
 
 	/* The discrete KC705 with the blitter: CMD_COPY_BUFFER into the local frame, no dispatch. */
-	test_window = 1;
 	error = start(MODEL_KC705_DISCRETE);
-	test_window = 0;
 	if (error == 0)
 		error = display_claim(&open, &lease, &generation);
 	expect(error == 0 && device.display.frame_maps[0] != NULL, "display copy blitter: claimed, frames mapped");
@@ -2810,34 +2765,38 @@ scene_display_copy(void)
 	display_end(open, lease);
 	stop("display copy blitter");
 
-	/* The unified KC705 with the blitter: the processor copies into the host frame, as before. */
+	/* The unified KC705 with the blitter: CMD_COPY_BUFFER into the host frame, mapped into session 0, no dispatch. */
 	error = start(MODEL_KC705_UMA);
 	if (error == 0)
 		error = display_claim(&open, &lease, &generation);
-	expect(error == 0 && device.display.frame_maps[0] == NULL, "display copy uma blitter: claimed, frames not mapped");
+	expect(error == 0 && device.display.frames[0] != NULL && device.display.frames[0]->kind == GHCI_MEMORY_HOST &&
+	       device.display.frame_maps[0] != NULL && device.display.frame_maps[1] != NULL, "display copy uma blitter: claimed, host frames mapped");
 	storage = display_storage(open, DISPLAY_FRAME_STRIDE * DISPLAY_HEIGHT, 23U);
 	copies = model_count_commands(GHCI_OP_COPY_BUFFER);
 	dispatches = model_count_commands(GHCI_OP_DISPATCH);
 	error = display_send(open, lease, generation, storage, DISPLAY_FRAME_STRIDE);
-	expect(error == 0 && model_count_commands(GHCI_OP_COPY_BUFFER) == copies && model_count_commands(GHCI_OP_DISPATCH) == dispatches &&
-	       display_holds(device.display.frames[0], storage, DISPLAY_FRAME_STRIDE), "display copy uma blitter: the processor's copy, as before");
+	expect(error == 0 && model_count_commands(GHCI_OP_COPY_BUFFER) == copies + 1U && model_count_commands(GHCI_OP_DISPATCH) == dispatches &&
+	       display_holds(device.display.frames[0], storage, DISPLAY_FRAME_STRIDE), "display copy uma blitter: the blitter's copy");
 	device.ops.resource_destroy(&device, open, storage);
 	display_end(open, lease);
 	stop("display copy uma blitter");
 
-	/* A copy program the compiler refused: the processor copies, with no dispatch. */
+	/* A copy program the compiler refused: no copied route, no frames, a copied present refused with nothing placed. */
 	error = start(MODEL_KC705_MIN);
 	vk = device.vk;
-	if (error == 0)
-		error = display_claim(&open, &lease, &generation);
-	expect(error == 0 && vk != NULL, "display copy refused: claimed");
 	if (vk != NULL)
 		vk->meta_refused[GHCI_VK_META_COPY] = 1;
+	if (error == 0)
+		error = display_claim(&open, &lease, &generation);
+	expect(error == 0 && vk != NULL && vk->rows.memory == NULL && device.display.frames[0] == NULL &&
+	       device.display.frame_maps[0] == NULL, "display copy refused: claimed, no frames");
+	expect(display_routes(open, generation) == GPU_SCANOUT_SHARED, "display copy refused: the shared route only");
 	storage = display_storage(open, DISPLAY_FRAME_STRIDE * DISPLAY_HEIGHT, 27U);
 	dispatches = model_count_commands(GHCI_OP_DISPATCH);
+	copies = model.command_count;
 	error = display_send(open, lease, generation, storage, DISPLAY_FRAME_STRIDE);
-	expect(error == 0 && model_count_commands(GHCI_OP_DISPATCH) == dispatches && vk != NULL && vk->rows.memory == NULL &&
-	       display_holds(device.display.frames[0], storage, DISPLAY_FRAME_STRIDE), "display copy refused: the processor's copy");
+	expect(error == ENOTSUP && model_count_commands(GHCI_OP_DISPATCH) == dispatches && model.command_count == copies &&
+	       vk != NULL && vk->rows.memory == NULL && device.window_users == 0U, "display copy refused: a copied present refused");
 	device.ops.resource_destroy(&device, open, storage);
 	display_end(open, lease);
 	stop("display copy refused");
@@ -2852,7 +2811,6 @@ static void
 display_copy_case(
 	enum model_profile profile,
 	uint32_t caps_clear,
-	int window,
 	const char *name)
 {
 	struct ghci_resource *storage;
@@ -2869,15 +2827,15 @@ display_copy_case(
 
 	/* The device and the lease; the frames mapped into session 0. */
 	test_caps_clear = caps_clear;
-	test_window = window;
 	error = start(profile);
 	test_caps_clear = 0U;
-	test_window = 0;
 	if (error == 0)
 		error = display_claim(&open, &lease, &generation);
 	snprintf(label, sizeof(label), "%s: claimed, both frames mapped", name);
 	expect(error == 0 && device.executor_ops != NULL && !ghci_caps_has(&device.caps, GHCI_HAS_BLT) &&
 	       device.display.frame_maps[0] != NULL && device.display.frame_maps[1] != NULL, label);
+	snprintf(label, sizeof(label), "%s: both routes offered", name);
+	expect(display_routes(open, generation) == (GPU_SCANOUT_SHARED | GPU_SCANOUT_COPY), label);
 	if (error != 0 || device.display.frame_maps[0] == NULL) {
 		stop(name);
 		return;
@@ -2922,6 +2880,25 @@ display_copy_case(
 	device.ops.resource_destroy(&device, open, storage);
 	display_end(open, lease);
 	stop(name);
+}
+
+/* Reports the routes the scan-out query offers for the output's generation (GPU_SCANOUT_*), or 0 when the query fails. */
+static uint32_t
+display_routes(
+	void *open,
+	uint64_t generation)
+{
+	struct gpu_scanout_constraints constraints;
+	int error;
+
+	/* The query of the one output. */
+	memset(&constraints, 0, sizeof(constraints));
+	constraints.display_id = 1U;
+	constraints.generation = generation;
+	error = device.ops.scanout->constraints(&device, open, &constraints);
+	if (error != 0)
+		return 0U;
+	return constraints.flags;
 }
 
 /* Opens a session of the core and takes the display's lease.  Returns what the claim returned. */

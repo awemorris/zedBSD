@@ -25,15 +25,21 @@
  * LOCAL_BASE + LOCAL_SIZE) of its physical addresses.  The driver hands
  * out runs of it by their offsets from LOCAL_BASE with a first-fit
  * allocator; a run's GPU address is its local address.  The processor
- * reaches local memory only through the local window (BAR2), and only
- * for the driver's own uses: the window is open while the boot console
- * may write a kept boot framebuffer through it or the driver holds it
- * for an access of its own, and closed otherwise; a client never reads,
- * writes or maps local memory.  What a boot display the firmware left
- * running reads of local memory is kept out of the allocator until the
- * driver's own first flip has been taken.  Nothing of local memory is
- * cleared here: the caller clears a new run with the GPU before any
- * client sees it.
+ * never reads or writes local memory: the GPU reaches it, and copies to
+ * and from it, and everything the host and the GPU share (the ring,
+ * fences, tables, programs, what a client maps) is host memory the GPU
+ * reaches by DMA.  The local window (BAR2) is for a boot framebuffer the
+ * firmware left alone: it is open while the boot console may write a
+ * kept boot framebuffer through it, and closed otherwise.  What a boot
+ * display the firmware left running reads of local memory is kept out of
+ * the allocator until the driver's own first flip has been taken.
+ * Nothing of local memory is cleared here: the caller clears a new run
+ * with the GPU before any client sees it.
+ *
+ * Procedure referenced: amaterrace-gpu fe6431b1 docs/ghci.md (section
+ * 11.1, the local window for the framebuffer only, and every other
+ * access to memory made by the GPU; section 11.3, the ring, command
+ * buffers and fences in host memory on a discrete GPU).
  */
 
 #include <stddef.h>
@@ -110,7 +116,6 @@ static void boot_ranges(struct ghci_device *device);
 static int boot_range(struct ghci_device *device, uint64_t address, uint64_t bytes, uint32_t *offset, uint32_t *length);
 static void boot_add(struct ghci_device *device, uint32_t offset, uint32_t bytes);
 static int local_reserve(struct ghci_device *device);
-static int local_span(const struct ghci_allocation *allocation, uint64_t offset, uint64_t bytes);
 static void window_users_change(struct ghci_device *device, int change);
 
 /*
@@ -375,7 +380,6 @@ ghci_memory_alloc_local(
 	struct ghci_allocation **result)
 {
 	struct ghci_allocation *allocation;
-	uint64_t shown;
 	uint32_t offset;
 	int error;
 
@@ -406,17 +410,11 @@ ghci_memory_alloc_local(
 		return ENOMEM;
 	}
 
-	/* The GPU's address of it is its local address. */
+	/* The GPU's address of it is its local address; the processor has no view of it. */
 	allocation->kind = GHCI_MEMORY_LOCAL;
 	allocation->bus = device->caps.local_base + offset;
 	allocation->bytes = bytes;
-
-	/* The driver's own accesses see it through the local window, when the window shows all of it. */
-	shown = device->caps.window_bytes;
-	if (device->window_bytes < shown)
-		shown = device->window_bytes;
-	if (device->window != NULL && (uint64_t)offset + bytes <= shown)
-		allocation->view = (uint8_t *)(uintptr_t)(device->window + offset);
+	allocation->view = NULL;
 
 	/* Succeeded: the run is the caller's. */
 	*result = allocation;
@@ -433,8 +431,7 @@ ghci_memory_alloc_local(
  * discrete, whose LOCAL_BASE is not on a page, or whose allocator cannot
  * be made keeps everything in host memory.  The local window stays open
  * while the boot console may write a kept boot framebuffer through it,
- * and is closed otherwise (the driver opens it again for an access of
- * its own).  The caller owns the device alone.  Returns 0; a failure
+ * and is closed otherwise.  The caller owns the device alone.  Returns 0; a failure
  * only leaves the device unified.
  */
 int
@@ -562,7 +559,7 @@ ghci_memory_local_bytes(
 /*
  * Gives what the boot display read of local memory back to the allocator
  * once the driver's own first flip has been taken, and closes the local
- * window when nothing else of the driver uses it.
+ * window, which nothing else uses.
  *
  * The caller holds no lock: the function takes the device's lock, and
  * the interrupt's for the window.  It is called once nothing draws to the
@@ -606,129 +603,6 @@ ghci_memory_boot_release(
 	/* Succeeded: the boot console no longer uses the window. */
 	if (released)
 		window_users_change(device, -1);
-}
-
-/*
- * Holds the local window open for an access of the driver's own (the
- * display's copy of an image without a blitter, or the accesses below).
- * Every hold is ended by ghci_memory_window_unhold().  The caller may hold
- * any lock but the interrupt's.
- *
- * Returns 0 with the window open, or ENOTSUP on a device without a local
- * window the driver can reach.
- */
-int
-ghci_memory_window_hold(
-	struct ghci_device *device)
-{
-	uint32_t block;
-
-	/* A device without a window, or without its mapping. */
-	block = device->caps.block_offset[GHCI_EXTCAP_ID_MEM];
-	if (block == 0U || device->caps.window_bytes == 0U || device->window == NULL)
-		return ENOTSUP;
-
-	/* Succeeded: one more user, and the window open. */
-	window_users_change(device, 1);
-	return 0;
-}
-
-/*
- * Ends one hold of the local window; the last user closes it.  The
- * caller may hold any lock but the interrupt's.
- */
-void
-ghci_memory_window_unhold(
-	struct ghci_device *device)
-{
-	/* One fewer user. */
-	window_users_change(device, -1);
-}
-
-/*
- * Copies bytes out of a run of local memory through the local window,
- * for the driver's own use; clients never read local memory.  The caller
- * keeps the allocation alive and may hold any lock but the interrupt's.
- *
- * Returns 0, EINVAL for a range outside the run or a run of host memory,
- * or ENOTSUP when the window does not show the run.
- */
-int
-ghci_memory_local_read(
-	struct ghci_device *device,
-	const struct ghci_allocation *allocation,
-	uint64_t offset,
-	void *buffer,
-	uint64_t bytes)
-{
-	int error;
-
-	/* A range the window shows. */
-	error = local_span(allocation, offset, bytes);
-	if (error != 0)
-		return error;
-
-	/* The window open for the copy. */
-	error = ghci_memory_window_hold(device);
-	if (error != 0)
-		return error;
-
-	/* The bytes, then the window as the other users leave it. */
-	kern_memcpy(buffer, allocation->view + offset, (size_t)bytes);
-	ghci_memory_window_unhold(device);
-
-	/* Succeeded: the bytes are copied. */
-	return 0;
-}
-
-/*
- * Copies bytes into a run of local memory through the local window, for
- * the driver's own use; clients never write local memory.  The caller
- * keeps the allocation alive and may hold any lock but the interrupt's.
- *
- * Returns 0, EINVAL for a range outside the run or a run of host memory,
- * or ENOTSUP when the window does not show the run.
- */
-int
-ghci_memory_local_write(
-	struct ghci_device *device,
-	const struct ghci_allocation *allocation,
-	uint64_t offset,
-	const void *buffer,
-	uint64_t bytes)
-{
-	uint64_t last;
-	int error;
-
-	/* A range the window shows. */
-	error = local_span(allocation, offset, bytes);
-	if (error != 0)
-		return error;
-
-	/* The window open for the copy. */
-	error = ghci_memory_window_hold(device);
-	if (error != 0)
-		return error;
-
-	/* The bytes. */
-	kern_memcpy(allocation->view + offset, buffer, (size_t)bytes);
-
-	/*
-	 * The word holding the last byte is read back, so that the write has
-	 * reached local memory before the window closes and before a later
-	 * doorbell.
-	 *
-	 * Procedure referenced: amaterrace-gpu d9252e4 docs/ghci.md (section
-	 * 11.1, the read-back of the last word written through the window).
-	 */
-	if (bytes != 0U) {
-		last = (offset + bytes - 1U) & ~(uint64_t)3U;
-		(void)*(volatile uint32_t *)(void *)(allocation->view + last);
-	}
-
-	/* Succeeded: the bytes are in local memory, and the window as the other users leave it. */
-	ghci_memory_window_unhold(device);
-	return 0;
 }
 
 /*
@@ -1084,40 +958,12 @@ local_reserve(
 }
 
 /*
- * Checks a range of a run of local memory for the driver's own access
- * through the local window.  Returns 0, EINVAL for a run of host memory
- * or a range outside the run, or ENOTSUP when the window does not show
- * the run.
- */
-static int
-local_span(
-	const struct ghci_allocation *allocation,
-	uint64_t offset,
-	uint64_t bytes)
-{
-	/* Local memory only. */
-	if (allocation == NULL || allocation->kind != GHCI_MEMORY_LOCAL)
-		return EINVAL;
-
-	/* A range inside the run. */
-	if (offset > allocation->bytes || bytes > allocation->bytes - offset)
-		return EINVAL;
-
-	/* A run the window shows. */
-	if (allocation->view == NULL)
-		return ENOTSUP;
-
-	/* Succeeded: the range can be reached. */
-	return 0;
-}
-
-/*
  * Changes the count of the local window's users by change (1, -1, or 0
  * to write the state again) and writes WINDOW_CTRL.ENABLE: open while
- * anything of the driver uses the window, closed otherwise.  The write
- * is read back, so that an open has reached the device before the
- * caller's first access through the window.  A device without a window
- * has nothing to write.  Takes the interrupt's lock.
+ * the kept boot framebuffer uses the window, closed otherwise.  The write
+ * is read back, so that it has reached the device before the caller goes
+ * on.  A device without a window has nothing to write.  Takes the
+ * interrupt's lock.
  */
 static void
 window_users_change(

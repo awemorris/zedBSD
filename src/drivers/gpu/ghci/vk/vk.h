@@ -346,7 +346,8 @@ struct ghci_vk_meta_dispatch {
  * to the GPU, that holds the program's pipeline state record and code and,
  * at table_at, the resource table each copy writes before it is placed
  * (only the driver writes the run; the GPU only reads it).  memory is
- * NULL until the first copy, and the run stays until the detach.  lock
+ * NULL until the check or the first copy, and the run stays until the
+ * detach.  lock
  * makes the placement, a copy's table and its packets in the ring one
  * step.
  */
@@ -1135,6 +1136,7 @@ int ghci_vk_meta_copy(const struct ghci_vk_meta_copy *copy, struct ghci_vk_meta_
 void ghci_vk_meta_table(const struct ghci_vk_meta_pipeline *pipeline, const struct ghci_vk_meta_dispatch *dispatch, uint8_t *view);
 uint32_t ghci_vk_meta_bind(const struct ghci_vk_meta_pipeline *pipeline, uint64_t table, uint32_t *words);
 uint32_t ghci_vk_meta_step(const struct ghci_vk_meta_dispatch *dispatch, uint64_t *first, uint32_t *words);
+int ghci_vk_copy_ready(struct ghci_device *device);
 int ghci_vk_copy_rows(struct ghci_device *device, const struct ghci_rows *rows, struct ghci_ticket *ticket);
 void ghci_vk_rows_release(struct ghci_device *device);
 int ghci_vk_meta_query(uint64_t source, uint32_t count, uint64_t destination, uint32_t stride, uint32_t flags, struct ghci_vk_meta_dispatch *dispatch);
