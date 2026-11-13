@@ -1,0 +1,36 @@
+diff --git a/src/kern/sched.c b/src/kern/sched.c
+index 62a82ddf1f..a79cd1272a 100644
+--- a/src/kern/sched.c
++++ b/src/kern/sched.c
+@@ -2506,6 +2506,11 @@ idle_mask_clear(
+  * or UINT64_MAX when none has one.  Only the CPU itself calls it, from its
+  * idle loop with interrupts disabled.
+  */
++uint64_t sched_diag_near_tid[16];
++uint64_t sched_diag_near_pid[16];
++volatile uint64_t sched_diag_near_last[16];
++volatile uint64_t sched_diag_near_count[16];
++
+ static uint64_t
+ next_deadline(
+ 	hal_cpu_id_t id)
+@@ -2522,8 +2527,18 @@ next_deadline(
+ 
+ 	for (thread = cpu->sleep.head; thread != NULL; thread = thread->sched.next) {
+ 		if (thread->sched.wakeup_tick != 0 &&
+-		    thread->sched.wakeup_tick < next)
++		    thread->sched.wakeup_tick < next) {
+ 			next = thread->sched.wakeup_tick;
++			if (id < 16U) {
++				sched_diag_near_tid[id] = (uint64_t)thread->tid;
++				sched_diag_near_pid[id] = thread->proc != NULL ? (uint64_t)thread->proc->pid : 0U;
++			}
++		}
++	}
++	if (id < 16U && next != UINT64_MAX && next > clock_ticks() &&
++	    next - clock_ticks() < 12U) {
++		sched_diag_near_count[id]++;
++		sched_diag_near_last[id] = (sched_diag_near_pid[id] << 32) | sched_diag_near_tid[id];
+ 	}
+ 
+ 	spin_unlock_irqrestore(&cpu->lock, irq);

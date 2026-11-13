@@ -13,7 +13,8 @@
  *  - the first CPU 0 tick at which the counter reads takes it up, at the
  *    unit's multiple before it, and the time goes on from the counted
  *    units without a step back;
- *  - clock_ticks(), the monotonic nanoseconds and the resolutions;
+ *  - clock_ticks(), clock_ticks_ceil(), the monotonic nanoseconds and the
+ *    resolutions;
  *  - a counter that changes its frequency is not used;
  *  - the idle rate: slowed down only when the nearest deadline is at least
  *    the margin off, the HAL asked only on a change, CPU 0's own timers
@@ -31,6 +32,7 @@
 void kern_clock_init(void);
 void kernel_timer_handler(uint32_t cpu, uintptr_t acknowledge);
 uint64_t clock_ticks(void);
+uint64_t clock_ticks_ceil(void);
 uint64_t kern_ms_to_ticks(uint64_t milliseconds);
 uint64_t kern_ticks_to_ms(uint64_t ticks);
 uint64_t kern_clock_resolution_ns(void);
@@ -171,6 +173,7 @@ test_interrupt_mode(void)
 	for (i = 0; i < 5U; i++)
 		tick(0);
 	CHECK(clock_ticks() == 50U, "100 Hz: 5 interrupts give %llu", (unsigned long long)clock_ticks());
+	CHECK(clock_ticks_ceil() == 60U, "100 Hz: rounded up %llu", (unsigned long long)clock_ticks_ceil());
 	CHECK(kern_clock_resolution_ns() == 10000000U, "100 Hz resolution %llu", (unsigned long long)kern_clock_resolution_ns());
 	(void)kern_clock_getres(ZB_CLOCK_MONOTONIC, &res);
 	CHECK(res.tv_sec == 0 && res.tv_nsec == 10000000L, "100 Hz getres %ld", res.tv_nsec);
@@ -214,6 +217,7 @@ test_counter_mode(void)
 	 */
 	counter_value += 24000U * 7U + 7999U;
 	CHECK(clock_ticks() == base + 7U, "7.99 ms later %llu", (unsigned long long)(clock_ticks() - base));
+	CHECK(clock_ticks_ceil() == base + 8U, "7.99 ms later rounded up %llu", (unsigned long long)(clock_ticks_ceil() - base));
 	(void)kern_clock_gettime(ZB_CLOCK_MONOTONIC, &now);
 	ns = (uint64_t)now.tv_sec * 1000000000U + (uint64_t)now.tv_nsec;
 	CHECK(ns == base * 1000000U + 7999958U, "monotonic ns %llu", (unsigned long long)(ns - base * 1000000U));

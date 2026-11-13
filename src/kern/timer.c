@@ -379,7 +379,7 @@ process_timer_settime(
 		if ((flags & TIMER_ABSTIME) != 0)
 			deadline = value;
 		else
-			error = kern_deadline_after(now_ticks, value, &deadline);
+			error = kern_deadline_after(clock_ticks_ceil(), value, &deadline);
 	}
 
 	if (error != 0) {

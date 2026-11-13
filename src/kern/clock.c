@@ -424,6 +424,46 @@ clock_ticks(
 }
 
 /*
+ * Reads the monotonic time in units, rounded up to the next whole unit
+ * when it is between two.
+ *
+ * clock_ticks() rounds down, so a deadline made from it by adding a
+ * duration can fall due up to a unit early.  A wait that must not end
+ * early (nanosleep(), a relative timer) adds its duration to this instead.
+ * Without the counter the time between two interrupts is not known, and
+ * it is the count plus one interrupt period.
+ */
+uint64_t
+clock_ticks_ceil(
+	void)
+{
+	uint64_t elapsed;
+	uint64_t frequency;
+	uint64_t ticks;
+	uint32_t hz;
+	bool counted;
+
+	/* The counter's time, rounded up. */
+	counted = counter_elapsed(&elapsed, &frequency);
+	if (counted) {
+		ticks = base_units + elapsed / base_period;
+		if (elapsed % base_period != 0U)
+			ticks++;
+		return ticks;
+	}
+
+	/* The count, and the period no interrupt has counted yet. */
+	ticks = atomic_u64_load_acquire(&kernel_ticks);
+	hz = hal_rtc_get_tick_hz();
+	if (hz == 0U)
+		hz = 1U;
+	ticks += (unit_rate + hz - 1U) / hz;
+
+	/* Reports the time rounded up. */
+	return ticks;
+}
+
+/*
  * Reads the monotonic clock in milliseconds for callback-style users.
  */
 uint64_t

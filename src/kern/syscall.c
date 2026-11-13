@@ -4596,7 +4596,7 @@ sys_nanosleep_call(
 
 	process = current_process();
 
-	/* Converts the request into a deadline. */
+	/* Converts the request into a deadline, from the time rounded up so that the sleep never ends early. */
 	error = copyin(args[0], &request, sizeof(request));
 	if (process == NULL || curthread == NULL)
 		return -EINVAL;
@@ -4607,7 +4607,7 @@ sys_nanosleep_call(
 		return -error;
 	if (ticks == 0)
 		return 0;
-	error = kern_deadline_after(sched_ticks(), ticks, &deadline);
+	error = kern_deadline_after(clock_ticks_ceil(), ticks, &deadline);
 	if (error != 0)
 		return -error;
 

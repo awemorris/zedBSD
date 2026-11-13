@@ -85,6 +85,9 @@ uint64_t
 clock_ticks(void);
 
 uint64_t
+clock_ticks_ceil(void);
+
+uint64_t
 clock_milliseconds(
 	void *context);
 

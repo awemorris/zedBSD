@@ -2178,7 +2178,7 @@ process_itimer_set(
 	if (old_interval != NULL)
 		*old_interval = atomic_u64_load_acquire(
 		    &process->itimer_interval[which]);
-	now = clock_ticks();
+	now = clock_ticks_ceil();
 	atomic_u64_store_release(&process->itimer_interval[which], interval);
 	atomic_u64_store_release(&process->itimer_remaining[which], remaining);
 	if (which == 0)
