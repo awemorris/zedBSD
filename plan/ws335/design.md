@@ -138,6 +138,8 @@ primitive の header に TLS の型は無い（TLS の型は libssl-compat の `
 
 ### 4.2 net/tls.c の本家と compat の切り替え（U2 の答え: A、Windows は static link）
 
+**2026-11-13 の注**: この節の切り替え（名前で開く表・`WB_TLS_COMPAT`・Windows の表）は、ユーザーの決定で compat を直に呼ぶ形に置き換える（[p042](phase042/phase.md) の §2、実装は p043〜p045。本文の直しと D29 は p046）。
+
 net/tls.c は今 header を使わず `dlopen` で名前を開く（§2.1。WS334 p022 の後は `wb_os_library_open`）。
 
 - **zedBSD（A）**: libbrowser の Makefile が `-DWB_TLS_COMPAT` を付けた build では、開く名前を `libcrypto-compat.so`・`libssl-compat.so` にする。関数の名前・signature・定数は同じなので、それ以外の code は変わらない。
