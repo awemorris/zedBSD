@@ -52,7 +52,7 @@ static VkBool32 node_is_renderer(struct wsi_display_inventory *inventory, struct
 static VkBool32 node_name(const char *name);
 static uint64_t renderer_identity(struct wsi_display_inventory *inventory, struct VkPhysicalDevice_T *physical);
 static int node_hotplug_register(struct wsi_display_node *node, int *fd);
-static void node_hotplug_cancel(struct wsi_display_node *node, int fd);
+static void node_fence_cancel(struct wsi_display_node *node, int fd);
 static VkBool32 node_is_display(struct wsi_display_node *node, uint64_t renderer);
 
 /*
@@ -302,7 +302,7 @@ vulkan_wsi_display_node_hotplug(
 	/* A failure withdraws and closes what was registered, so no node keeps a registration for nothing. */
 	if (error != VK_SUCCESS) {
 		for (index = 0U; index < registered; index++) {
-			vulkan_wsi_display_node_hotplug_cancel(physical, entries[index].node, entries[index].fd);
+			vulkan_wsi_display_node_fence_cancel(physical, entries[index].node, entries[index].fd);
 			close(entries[index].fd);
 		}
 		return error;
@@ -314,14 +314,14 @@ vulkan_wsi_display_node_hotplug(
 }
 
 /*
- * Withdraws one hotplug registration from the node that made it.
+ * Withdraws one display-event registration (hotplug or refresh) from the node that made it.
  *
  * The descriptor stays open and belongs to the caller.  A registration the
  * kernel has already signaled and forgotten, or a node that is gone, has
  * nothing left to withdraw.
  */
 void
-vulkan_wsi_display_node_hotplug_cancel(
+vulkan_wsi_display_node_fence_cancel(
 	struct VkPhysicalDevice_T *physical,
 	uint64_t node_identity,
 	int fd)
@@ -347,7 +347,7 @@ vulkan_wsi_display_node_hotplug_cancel(
 		return;
 
 	/* Withdraws the registration from the node's open. */
-	node_hotplug_cancel(node, fd);
+	node_fence_cancel(node, fd);
 
 	/* Succeeded: the kernel no longer signals the descriptor. */
 	return;
@@ -798,7 +798,7 @@ node_hotplug_register(
 
 /* Withdraws one registration from a node's discovery open, ignoring one already forgotten. */
 static void
-node_hotplug_cancel(
+node_fence_cancel(
 	struct wsi_display_node *node,
 	int fd)
 {

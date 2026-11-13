@@ -566,6 +566,16 @@ struct amdrdna_display {
 	uint64_t refresh_time_ns;
 	uint64_t topology;
 	bool connected;
+
+	/*
+	 * Whether a frame's start publishes the refresh count to the GPU core
+	 * (a refresh registration of the display is armed), and the number of
+	 * arms so far.  The interrupt thread stops publishing when the core
+	 * reports no registration left, unless an arm came since it looked:
+	 * the epoch tells it.  The lock protects both.
+	 */
+	bool refresh_armed;
+	uint32_t refresh_arm_epoch;
 };
 
 /*
@@ -1665,6 +1675,16 @@ int
 amdrdna_display_flip_wait(
 	struct amdrdna_device *device,
 	uint64_t address);
+
+void
+amdrdna_display_refresh_arm(
+	struct amdrdna_device *device,
+	bool on);
+
+unsigned
+amdrdna_present_refreshed(
+	struct amdrdna_device *device,
+	uint64_t count);
 
 void
 amdrdna_display_refresh_sample(

@@ -221,6 +221,22 @@ void drv_gpu_capacity_changed(struct drv_gpu_device *device);
 void drv_gpu_display_changed(struct drv_gpu_device *device, uint64_t sequence);
 
 /*
+ * Publishes a refresh boundary of one output of the device.
+ *
+ * The backend calls it, while the output is armed (the display refresh_arm
+ * operation), with the output's ID and generation and the refresh count that
+ * the display refresh operation reports for the boundary.  It signals every
+ * GPU_DISPLAY_FENCE refresh registration of the output whose count is older,
+ * ends the ones of another generation with ESTALE, and returns how many of
+ * the output's registrations are left armed (zero: the backend may stop
+ * watching).  Like drv_gpu_display_changed it takes only the core's registry
+ * lock and the fences' IRQ-safe locks, so it may run in an interrupt handler
+ * or a thread, but never under a lock the refresh operation takes.  The
+ * caller retains the wrapper; a NULL one has no registrations.
+ */
+unsigned drv_gpu_display_refreshed(struct drv_gpu_device *device, uint32_t display_id, uint64_t generation, uint64_t sequence);
+
+/*
  * Says and clears the GPU ioctl timing's sums (a build with -DGPU_IOCTL_TIMING=1;
  * nothing otherwise), from a backend's timing thread.
  */

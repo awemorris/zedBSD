@@ -85,7 +85,7 @@
 
 /* gpu_display_fence.event: what signals the fence. */
 #define GPU_DISPLAY_FENCE_HOTPLUG	1U	/* the display topology changes after the registration */
-#define GPU_DISPLAY_FENCE_REFRESH	2U	/* one display refreshes (not offered yet: EOPNOTSUPP) */
+#define GPU_DISPLAY_FENCE_REFRESH	2U	/* one display passes a refresh boundary after the registration */
 
 /* The registrations one open may hold unsignaled at once. */
 #define GPU_DISPLAY_FENCE_MAX		16U
@@ -425,17 +425,28 @@ struct gpu_display_commit {
 
 /*
  * One display event the kernel signals a fence for (GPU_DISPLAY_FENCE), from a
- * readable open of a node with GPU_CAP_DISPLAY_EVENTS.
+ * readable open.
  *
- * Inputs are version, size, flags (GPU_HANDLE_CLOEXEC, GPU_HANDLE_CLOFORK) and
- * event; fd is -1 and every other field zero.  The kernel reads the node's
- * topology sequence at the registration and signals the returned fence once
- * the sequence moves past it, also when the move raced the registration.  The
- * fence is the payload of GPU_FENCE_*: poll its fd for POLLIN.  The device's
- * withdrawal or failure, or the open's final close, signal it with ENODEV
- * (POLLIN and POLLERR).  A signaled registration needs no cancel; an open holds
- * at most GPU_DISPLAY_FENCE_MAX unsignaled ones (ENOSPC beyond them).
- * display_id and generation are reserved for GPU_DISPLAY_FENCE_REFRESH.
+ * Inputs are version, size, flags (GPU_HANDLE_CLOEXEC, GPU_HANDLE_CLOFORK),
+ * event, and for a refresh display_id and generation; fd is -1 and every
+ * other field zero.  The fence is the payload of GPU_FENCE_*: poll its fd for
+ * POLLIN.  The device's withdrawal or failure, or the open's final close,
+ * signal it with ENODEV (POLLIN and POLLERR).  A signaled registration needs
+ * no cancel; an open holds at most GPU_DISPLAY_FENCE_MAX unsignaled ones
+ * (ENOSPC beyond them).
+ *
+ * HOTPLUG needs GPU_CAP_DISPLAY_EVENTS and names no display: the kernel reads
+ * the node's topology sequence at the registration and signals the fence once
+ * the sequence moves past it, also when the move raced the registration.
+ *
+ * REFRESH needs GPU_CAP_DISPLAY_CONTROL and names an output of a generation:
+ * the kernel reads the output's refresh count at the registration (the
+ * registration fails as GPU_DISPLAY_REFRESH would: ENOENT, ESTALE, ENXIO) and
+ * signals the fence at the first boundary the driver reports after it.  An
+ * output that does not scan out makes no boundary, so its fence stays
+ * unsignaled until it is cancelled.  The output's change to another
+ * generation ends the fence with ESTALE.  Only while a refresh registration
+ * is armed does the driver watch the output's boundaries.
  */
 struct gpu_display_fence {
 	uint32_t version;

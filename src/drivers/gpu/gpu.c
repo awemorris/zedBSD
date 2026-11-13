@@ -137,6 +137,22 @@ struct drv_gpu_device {
 	 */
 	unsigned monitor_asleep;
 	uint64_t monitor_until;
+
+	/*
+	 * The refresh watcher of a device whose display has no refresh_arm: a
+	 * thread made at the first refresh registration, which waits with the
+	 * display refresh operation for the boundary of one armed registration
+	 * at a time and sleeps on refresh_waitq while none is armed; unregister
+	 * stops it.  refresh_lock (a mutex) serializes its creation and stop and
+	 * every refresh_arm call.  The registry lock protects refresh_stopping
+	 * and refresh_turn, the output the watcher waited for last, which lets
+	 * the next wait go to another output first.
+	 */
+	struct wait_queue refresh_waitq;
+	struct mutex refresh_lock;
+	struct thread *refresh_watcher;
+	unsigned refresh_stopping;
+	uint32_t refresh_turn;
 };
 
 /* The display commit ABI's sizes are the same for every userspace word size. */
@@ -237,12 +253,18 @@ struct gpu_fence_binding {
  * The registry lock protects every field.  The slot's address is the fence's
  * producer, so only an armed slot can signal its payload.  A signaled slot keeps
  * its payload reference until a thread reclaims it: the signal may run in an
- * interrupt handler, where the last reference must not be dropped.
+ * interrupt handler, where the last reference must not be dropped.  event says
+ * what ends the registration; sequence is the topology sequence (HOTPLUG) or
+ * the output's refresh count (REFRESH) read at the registration, and a
+ * REFRESH slot names its output by display_id and generation.
  */
 struct gpu_event_fence {
 	struct kernel_handle *handle;
 	uint64_t sequence;
 	enum gpu_event_fence_state state;
+	uint32_t event;
+	uint32_t display_id;
+	uint64_t generation;
 };
 
 /*
@@ -371,6 +393,17 @@ static struct spinlock gpu_registry_lock = {
 /* The longest command stream whose kernel copy an open keeps for the next one. */
 #define GPU_STREAM_KEPT_BYTES	16384U
 
+/*
+ * How many refresh boundaries the backends have published
+ * (drv_gpu_display_refreshed), and how many waits the refresh watchers have
+ * made with the display refresh operation, since boot.  A diagnostic read
+ * with a debugger: both stay still while no refresh registration is armed.
+ * Both only ever grow, by an atomic add, and nothing in the kernel reads
+ * them.
+ */
+static uint64_t gpu_refresh_pushes;
+static uint64_t gpu_refresh_waits;
+
 /* The threads and the pairs of requests the timing keeps apart. */
 #define GPU_TIMING_THREADS	32U
 #define GPU_TIMING_EDGES	512U
@@ -463,6 +496,13 @@ static int gpu_event_fence_reserve(struct gpu_session *session, struct gpu_event
 static void gpu_event_fence_abandon(struct gpu_event_fence *slot, struct kernel_handle *handle);
 static void gpu_event_fence_signal_locked(struct gpu_event_fence *slot, int status);
 static void gpu_event_fence_release(struct gpu_session *session);
+static int gpu_refresh_cursor(struct gpu_session *session, const struct gpu_display_fence *request, uint64_t *cursor);
+static int gpu_refresh_arm_update(struct drv_gpu_device *device, uint32_t display_id);
+static int gpu_refresh_watcher_start(struct drv_gpu_device *device);
+static int gpu_refresh_watcher_stop(struct drv_gpu_device *device);
+static void gpu_refresh_watcher(void *argument);
+static unsigned gpu_refresh_watcher_pick(struct drv_gpu_device *device, uint32_t *display_id, uint64_t *generation, uint64_t *cursor);
+static void gpu_refresh_fail(struct drv_gpu_device *device, uint32_t display_id, uint64_t generation, int error);
 static int gpu_create_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_destroy_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_handle_allocate(uint64_t *handle);
@@ -821,10 +861,19 @@ drv_gpu_register(
 	device->capacity_sequence = 1U;
 	waitq_init(&device->capacity_waitq, "GPU submission capacity");
 	waitq_init(&device->monitor_waitq, "GPU job supervision");
+	waitq_init(&device->refresh_waitq, "GPU refresh registrations");
 	refcount_init(&device->references, 1);
 
 	/* A failed monitor gate cannot publish a partially initialized device. */
 	error = mutex_init(&device->monitor_lock, LOCK_RANK_DEVICE, "GPU monitor lifetime");
+	if (error != 0) {
+		gpu_device_release(device);
+		atomic_store_release(&gpu_lifecycle, 0);
+		return error;
+	}
+
+	/* The refresh watcher's lifetime and the refresh_arm calls have a gate of their own. */
+	error = mutex_init(&device->refresh_lock, LOCK_RANK_DEVICE, "GPU refresh watcher");
 	if (error != 0) {
 		gpu_device_release(device);
 		atomic_store_release(&gpu_lifecycle, 0);
@@ -944,6 +993,13 @@ drv_gpu_unregister(
 		return error;
 	}
 
+	/* Ends the refresh watcher, which calls the backend's refresh operation, for the same reason. */
+	error = gpu_refresh_watcher_stop(device);
+	if (error != 0) {
+		atomic_store_release(&gpu_lifecycle, 0);
+		return error;
+	}
+
 	/* Releases registration ownership and makes this number reusable. */
 	*position = device->next;
 	device->next = NULL;
@@ -1022,10 +1078,15 @@ drv_gpu_display_changed(
 
 	session = device->open_sessions;
 	while (session != NULL) {
-		/* Each armed registration remembers the sequence it was read against. */
+		/* Each armed hotplug registration remembers the sequence it was read against. */
 		for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+			/* Only the armed hotplug registrations hear topology changes. */
 			slot = &session->event_fences[index];
-			if (slot->state == GPU_EVENT_FENCE_ARMED && sequence > slot->sequence)
+			if (slot->state != GPU_EVENT_FENCE_ARMED || slot->event != GPU_DISPLAY_FENCE_HOTPLUG)
+				continue;
+
+			/* A sequence past the one read at the registration is the change it waits for. */
+			if (sequence > slot->sequence)
 				gpu_event_fence_signal_locked(slot, 0);
 		}
 
@@ -1040,6 +1101,78 @@ drv_gpu_display_changed(
 
 	/* Succeeded: no registration of an older sequence is left armed. */
 	return;
+}
+
+/*
+ * Signals the refresh registrations of an output that a boundary passed.
+ *
+ * Each armed registration of the output and generation whose count is older
+ * than the boundary's ends now; one of another generation names an output
+ * that is gone, so it ends with ESTALE.  The rest stay armed, and their
+ * number tells the backend whether it still needs to watch the output.
+ */
+unsigned
+drv_gpu_display_refreshed(
+	struct drv_gpu_device *device,
+	uint32_t display_id,
+	uint64_t generation,
+	uint64_t sequence)
+{
+	struct gpu_session *session;
+	struct gpu_event_fence *slot;
+	unsigned remaining;
+	unsigned signaled;
+	unsigned index;
+	unsigned long irq;
+
+	/* A backend before publication or after withdrawal has no registrations. */
+	if (device == NULL)
+		return 0U;
+
+	/* Ends the registrations the boundary passed, in every open of the device. */
+	remaining = 0U;
+	signaled = 0U;
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	(void)__atomic_add_fetch(&gpu_refresh_pushes, 1U, __ATOMIC_RELAXED);
+	session = device->open_sessions;
+	while (session != NULL) {
+		/* Each armed refresh registration of the output remembers the count it was read against. */
+		for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+			/* Only the output's armed refresh registrations hear its boundaries. */
+			slot = &session->event_fences[index];
+			if (slot->state != GPU_EVENT_FENCE_ARMED ||
+			    slot->event != GPU_DISPLAY_FENCE_REFRESH ||
+			    slot->display_id != display_id)
+				continue;
+
+			/* Decides what the boundary means to the registration. */
+			if (slot->generation != generation) {
+				/* The registration's generation of the output will make no boundary any more. */
+				gpu_event_fence_signal_locked(slot, ESTALE);
+				signaled = 1U;
+			} else if (sequence > slot->sequence) {
+				/* The first boundary after the registration: the event it waits for. */
+				gpu_event_fence_signal_locked(slot, 0);
+				signaled = 1U;
+			} else {
+				/* A registration made after this boundary waits for the next one. */
+				remaining++;
+			}
+		}
+
+		/* Each linked session stays allocated while the registry lock is held. */
+		session = session->next_open;
+	}
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The fence descriptors observe the signals. */
+	if (signaled != 0U)
+		poll_notify();
+
+	/* Succeeded: reports how many of the output's registrations still wait. */
+	return remaining;
 }
 
 /*
@@ -1456,7 +1589,9 @@ gpu_ops_validate(
 			return EINVAL;
 	} else if (ops->display != NULL) {
 		/* Hidden callbacks must not contradict the published capability mask. */
-		if (ops->display->power != NULL || ops->display->refresh != NULL)
+		if (ops->display->power != NULL ||
+		    ops->display->refresh != NULL ||
+		    ops->display->refresh_arm != NULL)
 			return EINVAL;
 	}
 
@@ -2741,7 +2876,10 @@ gpu_events_ioctl(
 	return 0;
 }
 
-/* Registers a display-event fence the kernel signals at the next topology change (GPU_DISPLAY_FENCE). */
+/*
+ * Registers a display-event fence the kernel signals at the event (GPU_DISPLAY_FENCE):
+ * the node's next topology change, or an output's next refresh boundary.
+ */
 static int
 gpu_display_fence_ioctl(
 	struct gpu_session *session,
@@ -2750,17 +2888,22 @@ gpu_display_fence_ioctl(
 	struct gpu_display_fence request;
 	struct gpu_event_fence *slot;
 	struct kernel_handle *handle;
+	struct drv_gpu_device *device;
+	uint32_t capabilities;
 	uint64_t cursor;
 	uint64_t sequence;
+	unsigned watched;
 	unsigned signaled;
 	unsigned long irq;
 	int error;
 
-	/* A registration reads the event state only a node that offers it has. */
-	if ((session->device->ops->capabilities & GPU_CAP_DISPLAY_EVENTS) == 0U)
+	/* A registration needs a node that reports topology changes or refresh boundaries. */
+	device = session->device;
+	capabilities = device->ops->capabilities;
+	if ((capabilities & (GPU_CAP_DISPLAY_EVENTS | GPU_CAP_DISPLAY_CONTROL)) == 0U)
 		return EOPNOTSUPP;
 
-	/* Watching the topology, like the snapshot, needs read access and nothing more. */
+	/* Watching a display, like the snapshot, needs read access and nothing more. */
 	if (session->readable == 0U)
 		return EACCES;
 
@@ -2780,32 +2923,60 @@ gpu_display_fence_ioctl(
 	    request.reserved2 != 0U)
 		return EINVAL;
 
-	/* A refresh registration is not offered yet. */
-	if (request.event == GPU_DISPLAY_FENCE_REFRESH)
-		return EOPNOTSUPP;
+	/* Each event needs its capability and names a display or none. */
+	if (request.event == GPU_DISPLAY_FENCE_REFRESH) {
+		/* Refresh boundaries are what the display control reports. */
+		if ((capabilities & GPU_CAP_DISPLAY_CONTROL) == 0U)
+			return EOPNOTSUPP;
 
-	/* Any other event than the hotplug one is unknown. */
-	if (request.event != GPU_DISPLAY_FENCE_HOTPLUG)
-		return EINVAL;
+		/* A refresh registration names an output of a generation. */
+		if (request.display_id == 0U || request.generation == 0U)
+			return EINVAL;
+	} else if (request.event == GPU_DISPLAY_FENCE_HOTPLUG) {
+		/* Topology changes are what the display events report. */
+		if ((capabilities & GPU_CAP_DISPLAY_EVENTS) == 0U)
+			return EOPNOTSUPP;
 
-	/* A hotplug registration watches the whole node, so it names no display. */
-	if (request.display_id != 0U || request.generation != 0U)
+		/* A hotplug registration watches the whole node, so it names no display. */
+		if (request.display_id != 0U || request.generation != 0U)
+			return EINVAL;
+	} else {
+		/* Any other event is unknown. */
 		return EINVAL;
+	}
 
 	/* Takes a free slot of this open, or reports that it holds the most it may. */
 	error = gpu_event_fence_reserve(session, &slot);
 	if (error != 0)
 		return error;
 
-	/* The sequence now is the one the registration waits to see passed. */
-	error = gpu_events_snapshot(session, &cursor);
+	/* The sequence or the count now is the one the registration waits to see passed. */
+	if (request.event == GPU_DISPLAY_FENCE_REFRESH) {
+		error = gpu_refresh_cursor(session, &request, &cursor);
+	} else {
+		error = gpu_events_snapshot(session, &cursor);
+	}
+
+	/* A cursor that cannot be read refuses the registration. */
 	if (error != 0) {
 		gpu_event_fence_abandon(slot, NULL);
 		return error;
 	}
 
+	/* A driver that cannot push boundaries has them waited for by the device's refresh watcher. */
+	watched = 0U;
+	if (request.event == GPU_DISPLAY_FENCE_REFRESH && device->ops->display->refresh_arm == NULL) {
+		error = gpu_refresh_watcher_start(device);
+		if (error != 0) {
+			gpu_event_fence_abandon(slot, NULL);
+			return error;
+		}
+
+		watched = 1U;
+	}
+
 	/* An unsignaled payload of this node; the caller's descriptor will own this reference. */
-	error = drv_gpu_fence_create(session->device->identity, 0U, &handle);
+	error = drv_gpu_fence_create(device->identity, 0U, &handle);
 	if (error != 0) {
 		gpu_event_fence_abandon(slot, NULL);
 		return error;
@@ -2822,37 +2993,63 @@ gpu_display_fence_ioctl(
 	/* The slot keeps its own reference, so it can signal after the descriptor is closed. */
 	handle_get(handle);
 
-	/* Arms the slot: from now on a topology change past the cursor signals it. */
+	/*
+	 * Arms the slot: from now on a topology change past the cursor, or a
+	 * boundary of the output after it, signals it.  The watcher, if the
+	 * registration has one, wakes to wait for the boundary.
+	 */
 	irq = spin_lock_irqsave(&gpu_registry_lock);
 
 	slot->handle = handle;
 	slot->sequence = cursor;
+	slot->event = request.event;
+	slot->display_id = request.display_id;
+	slot->generation = request.generation;
 	slot->state = GPU_EVENT_FENCE_ARMED;
+	if (watched != 0U)
+		waitq_wake_all(&device->refresh_waitq);
 
 	spin_unlock_irqrestore(&gpu_registry_lock, irq);
 
-	/* Reads the sequence again: a change between the first read and the arming had nobody to signal. */
-	error = gpu_events_snapshot(session, &sequence);
-
-	/* Signals at once for a change that raced the arming, or ends a registration that can no longer be read. */
-	signaled = 0U;
-	irq = spin_lock_irqsave(&gpu_registry_lock);
-
-	if (slot->state == GPU_EVENT_FENCE_ARMED) {
-		if (error != 0) {
-			gpu_event_fence_signal_locked(slot, error);
-			signaled = 1U;
-		} else if (sequence > cursor) {
-			gpu_event_fence_signal_locked(slot, 0);
-			signaled = 1U;
+	/* A refresh registration arms a pushing driver; a hotplug one looks at the sequence again. */
+	if (request.event == GPU_DISPLAY_FENCE_REFRESH) {
+		/*
+		 * A driver that pushes boundaries is armed only now, after the slot:
+		 * a boundary it pushes before the arm finds the slot, and one that
+		 * raced the cursor's read has a count past it, so it signals at once.
+		 */
+		if (watched == 0U) {
+			error = gpu_refresh_arm_update(device, request.display_id);
+			if (error != 0) {
+				gpu_event_fence_abandon(slot, handle);
+				handle_put(handle);
+				return error;
+			}
 		}
+	} else {
+		/* Reads the sequence again: a change between the first read and the arming had nobody to signal. */
+		error = gpu_events_snapshot(session, &sequence);
+
+		/* Signals at once for a change that raced the arming, or ends a registration that can no longer be read. */
+		signaled = 0U;
+		irq = spin_lock_irqsave(&gpu_registry_lock);
+
+		if (slot->state == GPU_EVENT_FENCE_ARMED) {
+			if (error != 0) {
+				gpu_event_fence_signal_locked(slot, error);
+				signaled = 1U;
+			} else if (sequence > cursor) {
+				gpu_event_fence_signal_locked(slot, 0);
+				signaled = 1U;
+			}
+		}
+
+		spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+		/* A fence signaled here is observed by the pollers like one a change signals. */
+		if (signaled != 0U)
+			poll_notify();
 	}
-
-	spin_unlock_irqrestore(&gpu_registry_lock, irq);
-
-	/* A fence signaled here is observed by the pollers like one a change signals. */
-	if (signaled != 0U)
-		poll_notify();
 
 	/* Publishes the descriptor only after a complete copy of the reply. */
 	error = gpu_export_install(handle, &request, sizeof(request), request.flags, &request.fd, argument);
@@ -2875,13 +3072,15 @@ gpu_display_fence_cancel_ioctl(
 	struct gpu_display_fence_cancel request;
 	struct gpu_event_fence *slot;
 	struct kernel_handle *handle;
+	uint32_t display_id;
+	unsigned refresh;
 	unsigned found;
 	unsigned index;
 	unsigned long irq;
 	int error;
 
-	/* Only a node that offers display events has registrations. */
-	if ((session->device->ops->capabilities & GPU_CAP_DISPLAY_EVENTS) == 0U)
+	/* Only a node that offers display events or refresh boundaries has registrations. */
+	if ((session->device->ops->capabilities & (GPU_CAP_DISPLAY_EVENTS | GPU_CAP_DISPLAY_CONTROL)) == 0U)
 		return EOPNOTSUPP;
 
 	/* Cancel needs the read access a registration needed. */
@@ -2908,6 +3107,8 @@ gpu_display_fence_cancel_ioctl(
 
 	/* Finds the slot that holds the payload and frees it; an armed one gives up its producer authority. */
 	found = 0U;
+	refresh = 0U;
+	display_id = 0U;
 	irq = spin_lock_irqsave(&gpu_registry_lock);
 
 	for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
@@ -2919,8 +3120,17 @@ gpu_display_fence_cancel_ioctl(
 		if (slot->state == GPU_EVENT_FENCE_ARMED)
 			(void)drv_gpu_fence_unbind(handle, 1U, slot);
 
+		/* A refresh registration's output may now have none left. */
+		if (slot->event == GPU_DISPLAY_FENCE_REFRESH) {
+			refresh = 1U;
+			display_id = slot->display_id;
+		}
+
 		slot->handle = NULL;
 		slot->sequence = 0U;
+		slot->event = 0U;
+		slot->display_id = 0U;
+		slot->generation = 0U;
 		slot->state = GPU_EVENT_FENCE_FREE;
 		found = 1U;
 		break;
@@ -2934,6 +3144,10 @@ gpu_display_fence_cancel_ioctl(
 
 	/* The lookup's reference goes too. */
 	handle_put(handle);
+
+	/* A driver that pushes the output's boundaries stops when no registration of it is left. */
+	if (refresh != 0U && session->device->ops->display->refresh_arm != NULL)
+		(void)gpu_refresh_arm_update(session->device, display_id);
 
 	/* A fence this open never registered, or one already forgotten, has nothing to withdraw. */
 	if (found == 0U)
@@ -2969,6 +3183,9 @@ gpu_event_fence_reserve(
 			reclaimed_count++;
 			slot->handle = NULL;
 			slot->sequence = 0U;
+			slot->event = 0U;
+			slot->display_id = 0U;
+			slot->generation = 0U;
 			slot->state = GPU_EVENT_FENCE_FREE;
 		}
 
@@ -3010,6 +3227,9 @@ gpu_event_fence_abandon(
 		owned = 1U;
 		slot->handle = NULL;
 		slot->sequence = 0U;
+		slot->event = 0U;
+		slot->display_id = 0U;
+		slot->generation = 0U;
 		slot->state = GPU_EVENT_FENCE_FREE;
 	}
 
@@ -3061,6 +3281,402 @@ gpu_event_fence_release(
 	}
 
 	/* Succeeded: no payload reference is left in the open. */
+	return;
+}
+
+/* Reads an output's refresh count now, the cursor a refresh registration waits to see passed. */
+static int
+gpu_refresh_cursor(
+	struct gpu_session *session,
+	const struct gpu_display_fence *request,
+	uint64_t *cursor)
+{
+	struct gpu_display_refresh refresh;
+	struct drv_gpu_device *device;
+	unsigned long irq;
+	int error;
+
+	/* An offline or failed instance has no authoritative refresh count. */
+	device = session->device;
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	error = gpu_session_error_locked(session);
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* Reports the offline device or the failed open. */
+	if (error != 0)
+		return error;
+
+	/* A cursor of zero asks the backend for the count at once; it checks the output and its generation. */
+	kern_memset(&refresh, 0, sizeof(refresh));
+	refresh.version = GPU_ABI_VERSION;
+	refresh.size = sizeof(refresh);
+	refresh.display_id = request->display_id;
+	refresh.generation = request->generation;
+	refresh.cursor = 0U;
+	refresh.timeout_ns = 0U;
+	error = device->ops->display->refresh(device->private_data, session->backend, &refresh);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the count the next boundary of the output moves past. */
+	*cursor = refresh.sequence;
+	return 0;
+}
+
+/*
+ * Tells a driver that pushes refresh boundaries whether an output has a
+ * registration armed now.  The answer is read and given under the device's
+ * refresh lock, so the last of two racing calls gives the driver the state
+ * that holds after both.
+ */
+static int
+gpu_refresh_arm_update(
+	struct drv_gpu_device *device,
+	uint32_t display_id)
+{
+	struct gpu_session *session;
+	struct gpu_event_fence *slot;
+	unsigned armed;
+	unsigned index;
+	unsigned long irq;
+	int error;
+
+	/* Serializes the decision and the call with every other arm of the device. */
+	mutex_lock(&device->refresh_lock);
+
+	/* Whether any open has an armed refresh registration of the output. */
+	armed = 0U;
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	session = device->open_sessions;
+	while (session != NULL) {
+		/* One armed registration of the output is enough. */
+		for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+			/* An armed refresh registration of the output keeps the driver pushing. */
+			slot = &session->event_fences[index];
+			if (slot->state == GPU_EVENT_FENCE_ARMED &&
+			    slot->event == GPU_DISPLAY_FENCE_REFRESH &&
+			    slot->display_id == display_id)
+				armed = 1U;
+		}
+
+		/* Each linked session stays allocated while the registry lock is held. */
+		session = session->next_open;
+	}
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The driver starts or stops pushing the output's boundaries. */
+	error = device->ops->display->refresh_arm(device->private_data, display_id, armed);
+
+	mutex_unlock(&device->refresh_lock);
+
+	/* Reports why the driver cannot push the output's boundaries. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the driver watches the output exactly while it has a registration. */
+	return 0;
+}
+
+/* Starts the device's refresh watcher before its first refresh registration is armed. */
+static int
+gpu_refresh_watcher_start(
+	struct drv_gpu_device *device)
+{
+	struct thread *watcher;
+	int error;
+
+	/* Serializes the creation with another registration and with unregister. */
+	mutex_lock(&device->refresh_lock);
+
+	/* One watcher serves every refresh registration of the device. */
+	if (device->refresh_watcher != NULL) {
+		mutex_unlock(&device->refresh_lock);
+		return 0;
+	}
+
+	/* A withdrawn device does not get a watcher again. */
+	if (device->refresh_stopping != 0U) {
+		mutex_unlock(&device->refresh_lock);
+		return ENODEV;
+	}
+
+	/* The thread holds the device wrapper until unregister reaps it. */
+	error = kthread_create(gpu_refresh_watcher, device, SCHED_PRIORITY_DEFAULT, &watcher);
+	if (error != 0) {
+		mutex_unlock(&device->refresh_lock);
+		return error;
+	}
+
+	/* Makes it runnable: kthread_create leaves a new thread stopped. */
+	device->refresh_watcher = watcher;
+	thread_start(watcher);
+
+	mutex_unlock(&device->refresh_lock);
+
+	/* Succeeded: armed refresh registrations of the device have a watcher. */
+	return 0;
+}
+
+/* Reaps the refresh watcher before unregister releases the backend it calls. */
+static int
+gpu_refresh_watcher_stop(
+	struct drv_gpu_device *device)
+{
+	struct thread *watcher;
+	uint64_t deadline;
+	uint64_t now;
+	unsigned long irq;
+	int error;
+
+	/* Creation cannot race the transition to permanent teardown. */
+	mutex_lock(&device->refresh_lock);
+
+	/* The sleeping watcher sees the withdrawal; a waiting one sees it after its wait. */
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	device->refresh_stopping = 1U;
+	waitq_wake_all(&device->refresh_waitq);
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* A device that never had a refresh registration without a push has no thread. */
+	watcher = device->refresh_watcher;
+	if (watcher == NULL) {
+		mutex_unlock(&device->refresh_lock);
+		return 0;
+	}
+
+	/* A wait of the backend ends within its bound; a stalled one keeps the backend retained. */
+	deadline = gpu_monitor_deadline(15000U);
+	while (1) {
+		error = thread_wait(watcher, NULL);
+		if (error == 0)
+			break;
+
+		/* Only a still-running watcher permits a finite teardown retry. */
+		if (error != EBUSY) {
+			mutex_unlock(&device->refresh_lock);
+			return error;
+		}
+
+		/* Failure leaves the registration and thread references available for retry. */
+		now = sched_ticks();
+		if (now >= deadline) {
+			mutex_unlock(&device->refresh_lock);
+			return ETIMEDOUT;
+		}
+
+		/* Lets the woken watcher leave its wait. */
+		sched_sleep(now + kern_ms_to_ticks(GPU_WORKER_EXIT_POLL_MS));
+	}
+
+	/* Successful reap consumes the creator's retained thread reference. */
+	device->refresh_watcher = NULL;
+
+	mutex_unlock(&device->refresh_lock);
+
+	/* Succeeded: no watcher can call the withdrawn backend again. */
+	return 0;
+}
+
+/*
+ * Waits for the refresh boundaries of a device whose driver cannot push them.
+ *
+ * While no refresh registration is armed the thread sleeps without a
+ * deadline; an armed registration wakes it.  Then it waits with the display
+ * refresh operation for the next boundary of one output and publishes it as
+ * a driver would; a wait that ends without a boundary is made again, and an
+ * output that has gone ends its registrations with the error.
+ */
+static void
+gpu_refresh_watcher(
+	void *argument)
+{
+	struct gpu_display_refresh request;
+	struct drv_gpu_device *device;
+	uint64_t generation;
+	uint64_t cursor;
+	uint64_t observed;
+	uint32_t display_id;
+	unsigned found;
+	unsigned long irq;
+	int error;
+
+	/* Registration and the explicit reap retain this device wrapper. */
+	device = argument;
+	while (1) {
+		/* The registration to wait for, or a sleep until one is armed. */
+		irq = spin_lock_irqsave(&gpu_registry_lock);
+
+		/* Unregister owns the only transition which stops the watcher. */
+		if (device->refresh_stopping != 0U) {
+			spin_unlock_irqrestore(&gpu_registry_lock, irq);
+			break;
+		}
+
+		/* Nothing armed: sleeps until a registration or unregister wakes the queue. */
+		found = gpu_refresh_watcher_pick(device, &display_id, &generation, &cursor);
+		if (found == 0U) {
+			observed = waitq_sequence(&device->refresh_waitq);
+			(void)waitq_sleep(&device->refresh_waitq, &gpu_registry_lock, observed, 0U, 0U);
+			spin_unlock_irqrestore(&gpu_registry_lock, irq);
+			continue;
+		}
+
+		/* The next pick goes to another output first. */
+		device->refresh_turn = display_id;
+
+		spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+		/* A cursor of zero would ask the backend for the count at once, so the wait is for a count past one. */
+		if (cursor == 0U)
+			cursor = 1U;
+
+		/* Waits for the output's boundary after the cursor, at most the bound of one GPU_DISPLAY_REFRESH call. */
+		kern_memset(&request, 0, sizeof(request));
+		request.version = GPU_ABI_VERSION;
+		request.size = sizeof(request);
+		request.display_id = display_id;
+		request.generation = generation;
+		request.cursor = cursor;
+		request.timeout_ns = GPU_DISPLAY_REFRESH_TIMEOUT_NS;
+		(void)__atomic_add_fetch(&gpu_refresh_waits, 1U, __ATOMIC_RELAXED);
+		error = device->ops->display->refresh(device->private_data, NULL, &request);
+
+		/* Publishes the boundary, waits again after a wait that saw none, or gives the output up. */
+		if (error == 0) {
+			/* A boundary came: it ends the registrations it passed. */
+			(void)drv_gpu_display_refreshed(device, display_id, generation, request.sequence);
+		} else if (error != ETIMEDOUT && error != EINTR) {
+			/* The output is gone or cannot be read: its registrations will see no boundary. */
+			gpu_refresh_fail(device, display_id, generation, error);
+		}
+	}
+
+	/* Succeeded: the thread trampoline publishes exit for the unregister reaper. */
+	return;
+}
+
+/*
+ * Chooses the refresh registration the watcher waits for next, under the
+ * registry lock: an armed one of another output than the last wait's if
+ * there is one, and the oldest count of that output and generation.
+ * Returns 0 when none is armed.
+ */
+static unsigned
+gpu_refresh_watcher_pick(
+	struct drv_gpu_device *device,
+	uint32_t *display_id,
+	uint64_t *generation,
+	uint64_t *cursor)
+{
+	struct gpu_session *session;
+	struct gpu_event_fence *slot;
+	unsigned found;
+	unsigned index;
+
+	/* The first armed refresh registration, preferring an output the last wait did not serve. */
+	found = 0U;
+	session = device->open_sessions;
+	while (session != NULL) {
+		/* Each open's armed refresh registrations. */
+		for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+			/* Only an armed refresh registration waits for a boundary. */
+			slot = &session->event_fences[index];
+			if (slot->state != GPU_EVENT_FENCE_ARMED || slot->event != GPU_DISPLAY_FENCE_REFRESH)
+				continue;
+
+			/* Takes the first one, and replaces it once with one of another output than the last wait's. */
+			if (found == 0U ||
+			    (*display_id == device->refresh_turn && slot->display_id != device->refresh_turn)) {
+				*display_id = slot->display_id;
+				*generation = slot->generation;
+				*cursor = slot->sequence;
+				found = 1U;
+			}
+		}
+
+		/* Each linked session stays allocated while the registry lock is held. */
+		session = session->next_open;
+	}
+
+	/* Nothing to wait for. */
+	if (found == 0U)
+		return 0U;
+
+	/* The oldest count of the chosen output and generation, so its earliest registration ends first. */
+	session = device->open_sessions;
+	while (session != NULL) {
+		/* Each open's armed refresh registrations of the chosen output. */
+		for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+			/* An older count of the same output and generation is waited for first. */
+			slot = &session->event_fences[index];
+			if (slot->state == GPU_EVENT_FENCE_ARMED &&
+			    slot->event == GPU_DISPLAY_FENCE_REFRESH &&
+			    slot->display_id == *display_id &&
+			    slot->generation == *generation &&
+			    slot->sequence < *cursor)
+				*cursor = slot->sequence;
+		}
+
+		/* Each linked session stays allocated while the registry lock is held. */
+		session = session->next_open;
+	}
+
+	/* Succeeded: a registration to wait for. */
+	return 1U;
+}
+
+/* Ends every armed refresh registration of an output's generation with an error. */
+static void
+gpu_refresh_fail(
+	struct drv_gpu_device *device,
+	uint32_t display_id,
+	uint64_t generation,
+	int error)
+{
+	struct gpu_session *session;
+	struct gpu_event_fence *slot;
+	unsigned signaled;
+	unsigned index;
+	unsigned long irq;
+
+	/* Signals each one with the error, in every open of the device. */
+	signaled = 0U;
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	session = device->open_sessions;
+	while (session != NULL) {
+		/* Each armed refresh registration of the output's generation. */
+		for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+			/* Only the armed refresh registrations of the output's generation end. */
+			slot = &session->event_fences[index];
+			if (slot->state != GPU_EVENT_FENCE_ARMED ||
+			    slot->event != GPU_DISPLAY_FENCE_REFRESH ||
+			    slot->display_id != display_id ||
+			    slot->generation != generation)
+				continue;
+
+			/* The waiters see the error with the signal. */
+			gpu_event_fence_signal_locked(slot, error);
+			signaled = 1U;
+		}
+
+		/* Each linked session stays allocated while the registry lock is held. */
+		session = session->next_open;
+	}
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The fence descriptors observe the signals. */
+	if (signaled != 0U)
+		poll_notify();
+
+	/* Succeeded: no registration of the output's generation is left armed. */
 	return;
 }
 

@@ -70,7 +70,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | [p011](phase011/phase.md) | compositor: render は合成の buffer を slot の数で回す（飛んでいる間は最古の fence を無期限で REAPED、無ければ cond、acquire は timeout 0 と何も飛んでいない時だけ block、1 ms を消す） | planned | p004 |
 | [p012](phase012/phase.md) | compositor: cursor の thread（acquire は変化の後だけ、copy の fence をすぐ待つ） | planned | p011 |
 | [p013](phase013/phase.md) | client の buffer の明示の同期（release fence、全 render の backend の `GPU_CAP_FENCE`、protocol rev 4、WSI） | planned（未決 3 の決定の後。推しは要る理由が出るまで着手しない） | p010、未決 3 |
-| [p014](phase014/phase.md) | kernel・libvulkan: refresh の事象の fence、`VULKAN_SYNC_POLL_NS` を消す | planned（q2064、P2） | p003 |
+| [p014](phase014/phase.md) | kernel・libvulkan: refresh の事象の fence、`VULKAN_SYNC_POLL_NS` を消す | cleared（2026-11-14 P2 q2064、Q1 の確認待ち。branch `agent/p2-ws353b`、66b803a706・bc77e214ab。3 機種の build warning 0、QEMU（Venus）の refresh-fence 試験 2 回 PASS（100 個が登録から 1 周期以内、間隔は周期の整数倍、1 fence に poll 1 回、登録の無い 8 s は kernel の push・待ち 0）。vblank の割り込みの push は amdrdna だけ、venus・i915・nvrtx は kernel の refresh watcher が driver の refresh op で待つ（i915・nvrtx は登録の間 kernel に 1 ms の見回りが残る。登録するのは今は試験だけ）。実機は未実施） | p003 |
 | [p015](phase015/phase.md) | backend と WSI の小さな直し（network の答えの fd、WSI の 50 ms の slice） | planned | p001（独立） |
 | [p016](phase016/phase.md) | 試験: QEMU の回帰と 5330 の idle（電力・PC2・thread ごとの起床） | planned | p002〜p015 |
 | [p017](phase017/phase.md) | 規約の全文の見直し | planned | p016 |
@@ -81,6 +81,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 
 ## Resume point
 
+- 2026-11-14 P2（q2064-i01、branch `agent/p2-ws353b`）: p014 を実装（kernel の REFRESH の登録、`drv_gpu_display_refreshed`、任意の `refresh_arm` op、push の無い device の refresh watcher、amdrdna の frame 割り込みの push、libvulkan の refresh fence を kernel の fence に、`VULKAN_SYNC_POLL_NS` を消した）。3 機種の build warning 0、QEMU（`plan/ws353/tests/qemu-refresh-fence.sh`）2 回 PASS（[phase014](phase014/phase.md) の結果）。i915 の vblank の割り込みの push は Q1 が後の Phase か Bug に（要る物は phase014 の「Q1 の問いへの答え」）。
 - 2026-11-14 04:01 P2（q2063-i01、branch `agent/p2-ws353a`）: p009 を実装（宣言は固定の v1.3.269 から `maintain-external.noct` で `vulkan_external.h` に、dispatch 200 件、present の fence は job の retire で signal、swapchain の wake は chain ごと）。x86_64・arm64・riscv64 の build は warning 0、QEMU（`plan/ws353/tests/qemu-present-fence.sh`）2 回 PASS（[phase009](phase009/phase.md) の結果）。Venus では 1 present が refresh 3 つ分（40 ms）で、fence の間隔はそれと同じ。次は p010（T17）。Wayland の swapchain の fence は未実施。
 - 2026-11-14 04:1x P1（q2062-i01、branch `agent/p1-ws353f`）: p006 を実装（対象の期限を機能ごとの timer に、fatal client は `kwl_client_fail`、sleep と handoff は tick を残し期限だけ timer）。3 機種の build は warning 0、host 試験 PASS、QEMU（`plan/ws353/tests/qemu-deadlines.sh`）は 3 回目で全 step PASS（[phase006](phase006/phase.md) の結果）。ws131 の host-system.sh は基点で壊れていて、別の Phase で直す事を推す。次は p007・p011。
 - 2026-11-14 03:2x P1（q2061-i01、branch `agent/p1-ws353e`）: WS352 の branch を b05187933a を除いて merge（3e9c426f74）、kernel の fence の poll を名指しに（56a43ffd37）、p005 を実装（timer の thread と heap、去った client の解放の歩調、名残りの 7 つを wake・事象・timer に、zedBSD の入力の scan は事象だけ）。3 機種の build は warning 0、host 試験（`plan/ws353/tests/timer/run.sh`）と QEMU（`plan/ws353/tests/qemu-main-wake.sh`）PASS、p002・p003 の QEMU も PASS（[phase005](phase005/phase.md) の結果）。2-03 の 100 ms の settle は残し、push の形（sessiond が seat を与えた事を知らせる）は Q1 が後の Phase に足す。次は p006・p007・p011。

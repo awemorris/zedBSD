@@ -21,9 +21,11 @@
  * fence has registrations of its own, so one client's observation never
  * consumes another's, and no request acknowledges the topology on any open.
  *
- * A refresh fence keeps a cursor of the display's refresh count: each
- * observation asks the kernel once, without waiting, whether a boundary
- * came after it, and a wait on it uses the fence wait's bounded polling.
+ * A refresh fence holds one kernel fence of the display's node
+ * (GPU_DISPLAY_FENCE, REFRESH): the kernel reads the display's refresh count
+ * at the registration and signals the fence at the first boundary the driver
+ * reports after it.  The fence is observed and waited for like a hotplug
+ * fence's registrations.
  */
 
 #include "wsi-internal.h"
@@ -35,9 +37,7 @@
 #include <unistd.h>
 
 static VkResult event_fence_create(VkDevice device_handle, const VkAllocationCallbacks *allocator, VkFence *fence, struct vulkan_sync **sync);
-static VkBool32 event_hotplug_poll(struct VkDevice_T *device, struct vulkan_sync *sync);
-static VkBool32 event_refresh_poll(struct VkDevice_T *device, struct vulkan_sync *sync);
-static void event_refresh_base(struct VkPhysicalDevice_T *physical, struct vulkan_sync *sync, const struct vulkan_wsi_output *output);
+static VkResult event_refresh_register(struct VkPhysicalDevice_T *physical, struct vulkan_display *display, int *fd, uint64_t *node);
 
 /*
  * Retrieves a surface's capabilities together with its counters.
@@ -182,9 +182,8 @@ vkRegisterDeviceEventEXT(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* No other thread knows the fence yet, so the fields need no lock. */
+	/* No other thread knows the fence yet, so the field needs no lock. */
 	sync->event = VULKAN_SYNC_EVENT_HOTPLUG;
-	sync->event_based = VK_FALSE;
 
 	/* A renderer without display nodes has no registration to hold. */
 	if (capacity == 0U)
@@ -224,11 +223,11 @@ vkRegisterDeviceEventEXT(
 /*
  * Registers a fence signaled by a display's next refresh boundary.
  *
- * The first-pixel-out event is the first boundary after the registration.
- * A display that does not scan out makes no boundary, and a display of an
- * old generation takes a new cursor once its snapshot is current again, so
- * a reconnected display signals at its next real boundary, never at the
- * reconnection itself.
+ * The first-pixel-out event is the first boundary after the registration,
+ * which the kernel signals on the display's node.  A display that does not
+ * scan out makes no boundary.  A display whose node reports no boundaries,
+ * or one that is gone, gets a fence nothing signals, as a renderer without
+ * display nodes gets for a hotplug.
  */
 VKAPI_ATTR VkResult VKAPI_CALL
 vkRegisterDisplayEventEXT(
@@ -241,8 +240,10 @@ vkRegisterDisplayEventEXT(
 	struct VkDevice_T *owner;
 	struct vulkan_display *target;
 	struct vulkan_sync *sync;
-	struct vulkan_wsi_output output;
+	struct vulkan_sync_event_fence *entry;
+	uint64_t node;
 	VkResult error;
+	int fd;
 
 	/* Resolves the device and the display the event belongs to. */
 	owner = vulkan_device(device);
@@ -264,15 +265,36 @@ vkRegisterDisplayEventEXT(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* No other thread knows the fence yet, so the fields need no lock. */
+	/* No other thread knows the fence yet, so the field needs no lock. */
 	sync->event = VULKAN_SYNC_EVENT_REFRESH;
-	sync->event_based = VK_FALSE;
-	sync->event_display = target;
 
-	/* Takes the cursor now when the display's current generation answers. */
-	error = vulkan_wsi_display_snapshot(target, &output);
-	if (error == VK_SUCCESS)
-		event_refresh_base(owner->physical, sync, &output);
+	/* Asks the display's node for a fence its next boundary signals. */
+	error = event_refresh_register(owner->physical, target, &fd, &node);
+	if (error != VK_SUCCESS) {
+		vkDestroyFence(device, *pFence, pAllocator);
+		*pFence = VK_NULL_HANDLE;
+		return error;
+	}
+
+	/* A display that reports no boundary: the fence holds nothing. */
+	if (fd < 0)
+		return VK_SUCCESS;
+
+	/* The registration's storage follows the fence's allocation policy and lifetime. */
+	entry = vulkan_allocate(&sync->object.allocator, sizeof(*entry), sizeof(uint64_t), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (entry == NULL) {
+		vulkan_wsi_display_node_fence_cancel(owner->physical, node, fd);
+		close(fd);
+		vkDestroyFence(device, *pFence, pAllocator);
+		*pFence = VK_NULL_HANDLE;
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	/* The fence owns the registration until it is destroyed. */
+	entry->node = node;
+	entry->fd = fd;
+	sync->event_fences = entry;
+	sync->event_fence_count = 1U;
 
 	/* Succeeded: the caller owns a fence the display's next boundary signals. */
 	return VK_SUCCESS;
@@ -302,39 +324,52 @@ vkGetSwapchainCounterEXT(
 }
 
 /*
- * Reports whether a pending display-event fence's event has happened.
+ * Reports whether the kernel has signaled one of a display-event fence's
+ * registrations.
  *
- * The caller owns the device mutex.  The kernel is asked once without waiting.
+ * Each descriptor is looked at without waiting: the kernel is not asked
+ * anything.  POLLIN is the signal; POLLERR comes with it when the node was
+ * withdrawn or failed, or when the display of a refresh fence changed its
+ * generation, which also ends the wait: the client enumerates the displays
+ * again and sees the change.  The registrations stay fixed while the fence
+ * lives, so no lock is needed.
  */
 VkBool32
-vulkan_display_event_poll(
-	struct VkDevice_T *device,
+vulkan_display_event_signaled(
 	struct vulkan_sync *sync)
 {
-	VkBool32 fired;
+	struct pollfd descriptor;
+	uint32_t index;
+	int ready;
 
-	/* Asks the kernel in the way the fence's event needs. */
-	fired = VK_FALSE;
-	if (sync->event == VULKAN_SYNC_EVENT_HOTPLUG) {
-		fired = event_hotplug_poll(device, sync);
-	} else if (sync->event == VULKAN_SYNC_EVENT_REFRESH) {
-		fired = event_refresh_poll(device, sync);
+	/* Looks at each registration without waiting. */
+	for (index = 0U; index < sync->event_fence_count; index++) {
+		descriptor.fd = sync->event_fences[index].fd;
+		descriptor.events = POLLIN;
+		descriptor.revents = 0;
+		ready = poll(&descriptor, 1U, 0);
+		if (ready <= 0)
+			continue;
+
+		/* Any readiness of the descriptor is the end of the registration. */
+		if (descriptor.revents != 0)
+			return VK_TRUE;
 	}
 
-	/* Succeeded: reports whether the event happened after the fence's cursor. */
-	return fired;
+	/* Succeeded: no registration of the fence has been signaled. */
+	return VK_FALSE;
 }
 
 /*
  * Retires a display-event fence's observation as vkResetFences resets it.
  *
- * The caller owns the device mutex.  A hotplug fence whose event has
+ * The caller owns the device mutex.  A display-event fence whose event has
  * happened -- observed already, or signaled by the kernel and not observed
  * yet -- is spent: it observes nothing again, and its registrations are
- * withdrawn from the kernel.  A pending hotplug fence is unsignaled
- * already, so its reset changes nothing and it keeps waiting for the
- * event.  The descriptors stay open until the fence is destroyed, because
- * a wait on another thread may be polling them.
+ * withdrawn from the kernel.  A pending one is unsignaled already, so its
+ * reset changes nothing and it keeps waiting for the event.  The
+ * descriptors stay open until the fence is destroyed, because a wait on
+ * another thread may be polling them.
  */
 void
 vulkan_display_event_reset_locked(
@@ -348,20 +383,18 @@ vulkan_display_event_reset_locked(
 	if (sync->event == VULKAN_SYNC_EVENT_NONE || sync->event == VULKAN_SYNC_EVENT_SPENT)
 		return;
 
-	/* An unobserved hotplug the kernel has signaled makes the fence signaled at the reset. */
+	/* An unobserved event the kernel has signaled makes the fence signaled at the reset. */
 	fired = sync->software_signaled;
-	if (!fired && sync->event == VULKAN_SYNC_EVENT_HOTPLUG)
-		fired = event_hotplug_poll(device, sync);
+	if (!fired)
+		fired = vulkan_display_event_signaled(sync);
 
 	/* A pending event fence keeps observing; the reset leaves it as it was. */
 	if (!fired)
 		return;
 
-	/* Withdraws the hotplug registrations a node has not signaled yet. */
-	if (sync->event == VULKAN_SYNC_EVENT_HOTPLUG) {
-		for (index = 0U; index < sync->event_fence_count; index++)
-			vulkan_wsi_display_node_hotplug_cancel(device->physical, sync->event_fences[index].node, sync->event_fences[index].fd);
-	}
+	/* Withdraws the registrations a node has not signaled yet. */
+	for (index = 0U; index < sync->event_fence_count; index++)
+		vulkan_wsi_display_node_fence_cancel(device->physical, sync->event_fences[index].node, sync->event_fences[index].fd);
 
 	/* The signaled event is not replayed after the reset. */
 	sync->event = VULKAN_SYNC_EVENT_SPENT;
@@ -371,7 +404,7 @@ vulkan_display_event_reset_locked(
 }
 
 /*
- * Releases a hotplug fence's registrations as the fence is destroyed.
+ * Releases a display-event fence's registrations as the fence is destroyed.
  *
  * Each registration is withdrawn from its node, so the node's limit of
  * registrations is not held for a fence nobody can wait on, and its
@@ -391,7 +424,7 @@ vulkan_display_event_finish(
 	/* Withdraws and closes every registration; a spent fence's withdrawals answer that nothing is left. */
 	device = (struct VkDevice_T *)sync->object.parent;
 	for (index = 0U; index < sync->event_fence_count; index++) {
-		vulkan_wsi_display_node_hotplug_cancel(device->physical, sync->event_fences[index].node, sync->event_fences[index].fd);
+		vulkan_wsi_display_node_fence_cancel(device->physical, sync->event_fences[index].node, sync->event_fences[index].fd);
 		close(sync->event_fences[index].fd);
 	}
 
@@ -429,139 +462,82 @@ event_fence_create(
 	return VK_SUCCESS;
 }
 
-/* Reports whether the kernel has signaled one of the hotplug fence's registrations. */
-static VkBool32
-event_hotplug_poll(
-	struct VkDevice_T *device,
-	struct vulkan_sync *sync)
-{
-	struct pollfd descriptor;
-	uint32_t index;
-	int ready;
-
-	(void)device;
-
-	/*
-	 * Looks at each registration without waiting.  POLLIN is the signal;
-	 * POLLERR comes with it when the node was withdrawn or failed, which
-	 * also ends the wait: the client enumerates the displays again and
-	 * sees the change.
-	 */
-	for (index = 0U; index < sync->event_fence_count; index++) {
-		descriptor.fd = sync->event_fences[index].fd;
-		descriptor.events = POLLIN;
-		descriptor.revents = 0;
-		ready = poll(&descriptor, 1U, 0);
-		if (ready <= 0)
-			continue;
-
-		/* Any readiness of the descriptor is the end of the registration. */
-		if (descriptor.revents != 0)
-			return VK_TRUE;
-	}
-
-	/* Succeeded: no display node has changed its topology since the registration. */
-	return VK_FALSE;
-}
-
-/* Reports whether the fence's display passed a refresh boundary after the cursor. */
-static VkBool32
-event_refresh_poll(
-	struct VkDevice_T *device,
-	struct vulkan_sync *sync)
+/*
+ * Registers a refresh fence with the display's node: fd gets the kernel's
+ * fence, or -1 when the display reports no boundaries (its node has no
+ * display control, or the display is gone or not connected).  An old
+ * snapshot is refreshed and the registration made once more.
+ */
+static VkResult
+event_refresh_register(
+	struct VkPhysicalDevice_T *physical,
+	struct vulkan_display *display,
+	int *fd,
+	uint64_t *node)
 {
 	struct vulkan_wsi_output output;
-	struct gpu_display_refresh request;
+	struct gpu_display_fence request;
+	unsigned attempt;
 	VkResult error;
 	int status;
 	int native_error;
 
-	/* The display's current identity and generation name the output to the kernel. */
-	error = vulkan_wsi_display_snapshot(sync->event_display, &output);
-	if (error != VK_SUCCESS)
-		return VK_FALSE;
+	/* Nothing is registered until the node answers. */
+	*fd = -1;
+	*node = 0U;
 
-	/* A cursor not taken yet, or taken in another generation, is taken again: no boundary yet. */
-	if (!sync->event_based || sync->event_generation != output.generation) {
-		event_refresh_base(device->physical, sync, &output);
-		return VK_FALSE;
-	}
+	/* At most one more try after an old generation's snapshot was refreshed. */
+	native_error = 0;
+	for (attempt = 0U; attempt < 2U; attempt++) {
+		/* The display's current identity and generation name the output to the kernel. */
+		error = vulkan_wsi_display_snapshot(display, &output);
+		if (error != VK_SUCCESS)
+			return VK_SUCCESS;
 
-	/*
-	 * Asks for a boundary after the cursor without waiting.  A cursor of
-	 * zero asks for the count at once, which is a boundary when it is above
-	 * zero.
-	 */
-	memset(&request, 0, sizeof(request));
-	request.version = GPU_ABI_VERSION;
-	request.size = sizeof(request);
-	request.display_id = (uint32_t)output.identifier;
-	request.generation = output.generation;
-	request.cursor = sync->event_cursor;
-	request.timeout_ns = 0U;
-	status = vulkan_wsi_display_node_ioctl(device->physical, &output, GPU_DISPLAY_REFRESH, &request);
-	native_error = errno;
-	if (status != 0) {
-		/* An old generation: the snapshot is refreshed and a later observation takes a new cursor. */
-		if (native_error == ESTALE) {
-			error = vulkan_wsi_display_refresh(sync->event_display);
-			(void)error;
-			sync->event_based = VK_FALSE;
+		/* A fence the display's next boundary signals; the descriptor is not inherited by a new program. */
+		memset(&request, 0, sizeof(request));
+		request.version = GPU_ABI_VERSION;
+		request.size = sizeof(request);
+		request.flags = GPU_HANDLE_CLOEXEC;
+		request.event = GPU_DISPLAY_FENCE_REFRESH;
+		request.display_id = (uint32_t)output.identifier;
+		request.generation = output.generation;
+		request.fd = -1;
+		status = vulkan_wsi_display_node_ioctl(physical, &output, GPU_DISPLAY_FENCE, &request);
+		native_error = errno;
+		if (status == 0) {
+			/* Succeeded: the caller owns the kernel's fence of the display's node. */
+			*fd = request.fd;
+			*node = output.device_identifier;
+			return VK_SUCCESS;
 		}
 
-		/* No boundary came, or the output does not scan out now. */
-		return VK_FALSE;
+		/* Anything but an old generation is decided below. */
+		if (native_error != ESTALE)
+			break;
+
+		/* An old generation: the snapshot is refreshed and the registration made again. */
+		error = vulkan_wsi_display_refresh(display);
+		if (error != VK_SUCCESS)
+			return VK_SUCCESS;
 	}
 
-	/* The count has not moved past the cursor. */
-	if (request.sequence <= sync->event_cursor)
-		return VK_FALSE;
-
-	/* Succeeded: the display passed a refresh boundary after the registration. */
-	return VK_TRUE;
-}
-
-/* Takes the display's current refresh count as the fence's cursor. */
-static void
-event_refresh_base(
-	struct VkPhysicalDevice_T *physical,
-	struct vulkan_sync *sync,
-	const struct vulkan_wsi_output *output)
-{
-	struct gpu_display_refresh request;
-	VkResult error;
-	int status;
-	int native_error;
-
-	/* A cursor of zero reports the current count at once. */
-	memset(&request, 0, sizeof(request));
-	request.version = GPU_ABI_VERSION;
-	request.size = sizeof(request);
-	request.display_id = (uint32_t)output->identifier;
-	request.generation = output->generation;
-	request.cursor = 0U;
-	request.timeout_ns = 0U;
-	status = vulkan_wsi_display_node_ioctl(physical, output, GPU_DISPLAY_REFRESH, &request);
-	native_error = errno;
-	if (status != 0) {
-		/* An old generation refreshes the snapshot; the fence stays without a cursor. */
-		if (native_error == ESTALE) {
-			error = vulkan_wsi_display_refresh(sync->event_display);
-			(void)error;
-		}
-
-		/* The fence keeps observing without a cursor. */
-		return;
+	/* Tells a shortage of memory from a display that reports no boundaries. */
+	if (native_error == ENOSPC ||
+	    native_error == ENOMEM ||
+	    native_error == EMFILE ||
+	    native_error == ENFILE) {
+		/* The open's registrations or the process's descriptors ran out. */
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	} else if (native_error == EOPNOTSUPP ||
+		   native_error == ENOENT ||
+		   native_error == ENXIO ||
+		   native_error == ENODEV ||
+		   native_error == ESTALE) {
+		/* A display that reports no boundaries now, or one that is gone: no registration. */
+		return VK_SUCCESS;
 	}
 
-	/*
-	 * The count and its generation are the cursor: a boundary of this
-	 * generation above the count signals the fence.
-	 */
-	sync->event_cursor = request.sequence;
-	sync->event_generation = output->generation;
-	sync->event_based = VK_TRUE;
-
-	/* Succeeded: the fence has a cursor in the display's current generation. */
-	return;
+	/* Any other refusal leaves the display unable to report its boundaries. */
+	return VK_ERROR_UNKNOWN;
 }
