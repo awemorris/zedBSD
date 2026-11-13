@@ -312,6 +312,15 @@ static unsigned home_content_rising;
 static unsigned home_neutral;
 
 /*
+ * The timer of a launch's wait (server->home_launching): armed for
+ * HOME_LAUNCH_FORGET_MS after the launch, when a launch whose window never
+ * came is forgotten.  A launch ended meanwhile leaves it armed; it then
+ * fires once and finds none.  Readied by the first launch; the event
+ * loop's thread only.
+ */
+static struct kwl_timer home_launch_timer;
+
+/*
  * The character each key types into the search (lower case), by evdev code; 0 for none.
  */
 static const char home_characters[HOME_KEYS] = {
@@ -371,6 +380,7 @@ static void home_draw_dots(struct kwl_server *server, struct kwl_list *command, 
 static void home_select(struct kwl_server *server, int selected);
 static void home_rise_release(struct kwl_server *server);
 static void home_page_follow(struct kwl_server *server, int32_t dx, int32_t dy);
+static void home_launch_fired(void *context, struct kwl_timer *timer);
 
 /* The operations of a read of the list on the file I/O thread. */
 static const struct kwl_lane_ops home_read_ops = {
@@ -1526,12 +1536,6 @@ kwl_home_tick(
 		if (!coming)
 			home_content_rising = 0U;
 	}
-
-	/* A launch whose window never came is forgotten (on the clock). */
-	if (server->home_launching && now - server->home_launch_ms > HOME_LAUNCH_FORGET_MS)
-		server->home_launching = 0;
-	if (server->home_launching)
-		kwl_due(server, server->home_launch_ms + HOME_LAUNCH_FORGET_MS + 1U);
 
 	/* The page turn, the icons coming and the animation are looked at closely until they end. */
 	if (server->home_page_moving || home_content_rising || server->home_moving)
@@ -2777,6 +2781,11 @@ home_launch(
 		server->home_launch_rect[1] = home_icon_y[slot];
 		server->home_launch_rect[2] = HOME_ICON;
 		server->home_launch_rect[3] = HOME_ICON;
+
+		/* A window that never comes is forgotten on the timer. */
+		if (home_launch_timer.fire == NULL)
+			kwl_timer_init(&home_launch_timer, "home-launch", home_launch_fired);
+		kwl_timer_set(server, &home_launch_timer, server->home_launch_ms + HOME_LAUNCH_FORGET_MS + 1U);
 	}
 
 	/* Succeeded: the application is starting (home_launched logs it). */
@@ -3369,4 +3378,32 @@ kwl_home_picture_key(
 
 	/* Succeeded: the key. */
 	return hash;
+}
+
+/* Forgets a launch whose window never came within HOME_LAUNCH_FORGET_MS. */
+static void
+home_launch_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	uint64_t now;
+
+	/* Only this part's own timer comes here. */
+	(void)timer;
+
+	/* Only a launch still waited for. */
+	server = context;
+	if (!server->home_launching)
+		return;
+
+	/* A later launch's time is not over yet: the timer comes back then. */
+	now = kwl_milliseconds();
+	if (now - server->home_launch_ms <= HOME_LAUNCH_FORGET_MS) {
+		kwl_timer_set(server, &home_launch_timer, server->home_launch_ms + HOME_LAUNCH_FORGET_MS + 1U);
+		return;
+	}
+
+	/* Forgotten: its window is not waited for any more. */
+	server->home_launching = 0;
 }

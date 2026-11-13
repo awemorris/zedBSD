@@ -621,6 +621,16 @@ static struct keyboard_state keyboard;
 static float keyboard_blue[4];
 static float keyboard_on_blue[4];
 
+/*
+ * The timer of the handwriting's recognition: armed at the end of each
+ * stroke for KEYBOARD_HAND_WAIT_MS later, when the ink is recognized
+ * unless another stroke began.  A stroke begun, a face changed or a panel
+ * closed meanwhile leaves it armed; it then fires once and finds nothing
+ * to recognize.  Readied by the first stroke's end; the event loop's
+ * thread alone uses it.
+ */
+static struct kwl_timer keyboard_hand_timer;
+
 static int keyboard_contact_begin(struct kwl_server *server, int32_t x, int32_t y, uint32_t time);
 static int keyboard_contact_move(struct kwl_server *server, int32_t x, int32_t y, uint32_t time);
 static int keyboard_contact_end(struct kwl_server *server, int32_t x, int32_t y, uint32_t time);
@@ -664,6 +674,7 @@ static void keyboard_hand_point(struct kwl_server *server, int32_t x, int32_t y,
 static void keyboard_hand_release(struct kwl_server *server);
 static void keyboard_hand_key_release(struct kwl_server *server);
 static void keyboard_hand_recognize(struct kwl_server *server);
+static void keyboard_hand_fired(void *context, struct kwl_timer *timer);
 static void keyboard_hand_show(struct kwl_server *server, const struct kwl_hand_ink *ink);
 static void keyboard_hand_answer(void *context, const struct kwl_hand_answer *answer);
 static void keyboard_draw_hand(struct kwl_server *server, struct kwl_list *command);
@@ -1103,17 +1114,6 @@ kwl_keyboard_tick(
 	} else if (server->wiseview > 0.0f || server->wiseview_gesture || server->wiseview_moving) {
 		keyboard_put_away(server, "wiseview");
 		return;
-	}
-
-	/* The handwriting's ink is recognized a while after its last stroke (on the clock). */
-	if (keyboard.hand &&
-	    !keyboard.writing &&
-	    !keyboard.recognized &&
-	    keyboard_ink.count > 0U) {
-		if (now - keyboard.stroke_end_ms >= KEYBOARD_HAND_WAIT_MS)
-			keyboard_hand_recognize(server);
-		else
-			kwl_due(server, keyboard.stroke_end_ms + KEYBOARD_HAND_WAIT_MS);
 	}
 
 	/* The open panel's place for the screen's size now. */
@@ -3749,6 +3749,59 @@ keyboard_hand_release(
 	keyboard.stroke_end_ms = kwl_milliseconds();
 	server->dirty = 1;
 	printf("KWL OSK hand stroke-end strokes=%u points=%u\n", keyboard_ink.count, kwl_hand_points(&keyboard_ink));
+
+	/* The ink is recognized a while after its last stroke, on the timer. */
+	if (keyboard_hand_timer.fire == NULL)
+		kwl_timer_init(&keyboard_hand_timer, "osk-hand", keyboard_hand_fired);
+	kwl_timer_set(server, &keyboard_hand_timer, keyboard.stroke_end_ms + KEYBOARD_HAND_WAIT_MS);
+}
+
+/*
+ * Recognizes the handwriting's ink once KEYBOARD_HAND_WAIT_MS passed after
+ * its last stroke without another, while the handwriting face is open on
+ * the desktop (the login and lock screens, App Home and Wiseview close
+ * the panel or put it away instead).
+ */
+static void
+keyboard_hand_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	uint64_t now;
+	float home;
+
+	/* Only this part's own timer comes here. */
+	(void)timer;
+
+	/* Only ink not recognized yet, with no stroke being written. */
+	server = context;
+	if (!keyboard.hand ||
+	    keyboard.writing ||
+	    keyboard.recognized ||
+	    keyboard_ink.count == 0U)
+		return;
+
+	/* Only an open panel on the desktop, not one about to close or be put away (kwl_keyboard_tick). */
+	home = kwl_home_progress(server);
+	if (keyboard.open == PANEL_NONE)
+		return;
+	if (server->greeter || server->locked)
+		return;
+	if (home > 0.0f || server->home_to > 0.0f)
+		return;
+	if (server->wiseview > 0.0f || server->wiseview_gesture || server->wiseview_moving)
+		return;
+
+	/* Not yet the time after the last stroke (one ended after the timer was armed): the timer comes back then. */
+	now = kwl_milliseconds();
+	if (now - keyboard.stroke_end_ms < KEYBOARD_HAND_WAIT_MS) {
+		kwl_timer_set(server, &keyboard_hand_timer, keyboard.stroke_end_ms + KEYBOARD_HAND_WAIT_MS);
+		return;
+	}
+
+	/* The ink is recognized. */
+	keyboard_hand_recognize(server);
 }
 
 /*

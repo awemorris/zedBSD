@@ -337,6 +337,15 @@ struct shell_titlebar {
  */
 static struct shell_titlebar shell_titlebar;
 
+/*
+ * The timer of the field's held key: armed for the next press again while
+ * a key repeats (shell_repeat_start, then each press for the next).  A
+ * repeat that ended meanwhile leaves it armed; it then fires once and
+ * finds nothing held.  Readied by the first repeat; the event loop's
+ * thread's alone.
+ */
+static struct kwl_timer shell_repeat_timer;
+
 static unsigned shell_mode(struct kwl_object *surface, struct kwl_titlebar_model **model, struct kwl_object **titlebar);
 static unsigned shell_layout(struct kwl_server *server, struct kwl_object *surface, const struct kwl_titlebar_state *state, unsigned docked, const struct kwl_menu_area *area, unsigned has_menu, struct shell_item *items, int32_t *crumb_width, unsigned *overflow, unsigned *compact_search);
 static int32_t shell_controls_need(struct kwl_server *server, struct kwl_object *surface, const struct kwl_titlebar_model *model);
@@ -377,6 +386,7 @@ static void shell_field_done(struct kwl_server *server, uint32_t how);
 static int shell_field_press(struct kwl_server *server, uint32_t key);
 static void shell_repeat_start(struct kwl_server *server, uint32_t key);
 static void shell_repeat_stop(void);
+static void shell_repeat_fired(void *context, struct kwl_timer *timer);
 static unsigned shell_key_modifier(uint32_t key);
 static unsigned shell_key_repeats(uint32_t key);
 static void shell_field_changed(struct kwl_server *server);
@@ -681,7 +691,7 @@ kwl_titlebar_motion(
  * Esc and Tab end it, and Down without suggestions ends it and goes on to
  * the window.  Keys with Alt or Super, and Ctrl keys other than the
  * editing ones, go on (to the compositor's shortcuts and the menus).  A key
- * the field took repeats while it is held (kwl_titlebar_tick).  Returns 1
+ * the field took repeats while it is held (shell_repeat_fired).  Returns 1
  * when the key was the field's.
  */
 int
@@ -742,67 +752,6 @@ kwl_titlebar_key_released(
 
 	/* The hold is over. */
 	shell_repeat_stop();
-}
-
-/*
- * Presses the key held in the field with the keyboard again when its next
- * press is due (ws074-p229): after the keyboards' delay, then at their
- * rate, as wl_keyboard.repeat_info tells the applications to repeat.  The
- * main loop calls it once a pass, and its wait ends when the next press
- * is due.
- */
-void
-kwl_titlebar_tick(
-	struct kwl_server *server,
-	uint64_t now)
-{
-	struct kwl_object *surface;
-	uint64_t interval;
-	int taken;
-
-	/* Nothing is held. */
-	if (shell_titlebar.repeat_key == 0U)
-		return;
-
-	/*
-	 * A field that lost the keyboard (or the lock screen, the login screen
-	 * or App Home took the keys), or a repeat the settings turned off,
-	 * ends the repeat.
-	 */
-	surface = kwl_titlebar_field_surface(server);
-	if (surface == NULL || server->repeat_rate <= 0) {
-		shell_repeat_stop();
-		return;
-	}
-
-	/* Not due yet: the loop comes back then. */
-	if (now < shell_titlebar.repeat_next) {
-		kwl_due(server, shell_titlebar.repeat_next);
-		return;
-	}
-
-	/*
-	 * The next press an interval after this one was due, from now when the
-	 * loop fell a whole interval behind (as the input method repeats,
-	 * BUG-172), so that a late pass does not type a burst.
-	 */
-	interval = 1000U / (uint64_t)server->repeat_rate;
-	if (interval == 0U)
-		interval = 1U;
-	shell_titlebar.repeat_next += interval;
-	if (shell_titlebar.repeat_next <= now)
-		shell_titlebar.repeat_next = now + interval;
-
-	/* The press again; a key the field no longer takes (with Alt held now) ends the repeat. */
-	shell_titlebar.repeat_count++;
-	taken = shell_field_press(server, shell_titlebar.repeat_key);
-	if (taken == 0) {
-		shell_repeat_stop();
-		return;
-	}
-
-	/* The next press. */
-	kwl_due(server, shell_titlebar.repeat_next);
 }
 
 /*
@@ -3595,7 +3544,7 @@ shell_field_press(
 
 /*
  * Starts the repeat of a key the field took while it is held: its first
- * press again comes after the keyboards' delay (kwl_titlebar_tick).
+ * press again comes after the keyboards' delay (shell_repeat_fired).
  */
 static void
 shell_repeat_start(
@@ -3623,6 +3572,78 @@ shell_repeat_start(
 	if (server->repeat_delay_ms > 0)
 		shell_titlebar.repeat_next += (uint64_t)server->repeat_delay_ms;
 	shell_titlebar.repeat_count = 0;
+
+	/* The first press again comes on its timer. */
+	if (shell_repeat_timer.fire == NULL)
+		kwl_timer_init(&shell_repeat_timer, "titlebar-repeat", shell_repeat_fired);
+	kwl_timer_set(server, &shell_repeat_timer, shell_titlebar.repeat_next);
+}
+
+/*
+ * Presses the key held in the field with the keyboard again when its next
+ * press is due (ws074-p229): after the keyboards' delay, then at their
+ * rate, as wl_keyboard.repeat_info tells the applications to repeat.  Each
+ * press arms the timer for the next one.
+ */
+static void
+shell_repeat_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	struct kwl_object *surface;
+	uint64_t interval;
+	uint64_t now;
+	int taken;
+
+	/* Only this part's own timer comes here. */
+	(void)timer;
+
+	/* Nothing is held (the hold ended after the timer was armed). */
+	server = context;
+	if (shell_titlebar.repeat_key == 0U)
+		return;
+
+	/*
+	 * A field that lost the keyboard (or the lock screen, the login screen
+	 * or App Home took the keys), or a repeat the settings turned off,
+	 * ends the repeat.
+	 */
+	surface = kwl_titlebar_field_surface(server);
+	if (surface == NULL || server->repeat_rate <= 0) {
+		shell_repeat_stop();
+		return;
+	}
+
+	/* Not due yet (a hold started again after the timer was armed): the timer comes back then. */
+	now = kwl_milliseconds();
+	if (now < shell_titlebar.repeat_next) {
+		kwl_timer_set(server, &shell_repeat_timer, shell_titlebar.repeat_next);
+		return;
+	}
+
+	/*
+	 * The next press an interval after this one was due, from now when the
+	 * loop fell a whole interval behind (as the input method repeats,
+	 * BUG-172), so that a late pass does not type a burst.
+	 */
+	interval = 1000U / (uint64_t)server->repeat_rate;
+	if (interval == 0U)
+		interval = 1U;
+	shell_titlebar.repeat_next += interval;
+	if (shell_titlebar.repeat_next <= now)
+		shell_titlebar.repeat_next = now + interval;
+
+	/* The press again; a key the field no longer takes (with Alt held now) ends the repeat. */
+	shell_titlebar.repeat_count++;
+	taken = shell_field_press(server, shell_titlebar.repeat_key);
+	if (taken == 0) {
+		shell_repeat_stop();
+		return;
+	}
+
+	/* The next press. */
+	kwl_timer_set(server, &shell_repeat_timer, shell_titlebar.repeat_next);
 }
 
 /* Ends the repeat of a held key; a hold that repeated is logged (the tests read how often). */

@@ -170,7 +170,6 @@ int kwl_titlebar_button(struct kwl_server *server, uint32_t button, uint32_t sta
 int kwl_titlebar_motion(struct kwl_server *server);
 int kwl_titlebar_key(struct kwl_server *server, uint32_t key, uint32_t state);
 void kwl_titlebar_key_released(uint32_t key);
-void kwl_titlebar_tick(struct kwl_server *server, uint64_t now);
 int kwl_titlebar_tab_key(struct kwl_server *server, uint32_t key, uint32_t state);
 int kwl_titlebar_axis(struct kwl_server *server, int32_t vertical, int32_t horizontal);
 void kwl_titlebar_overflow_chosen(struct kwl_server *server, struct kwl_object *surface, uint32_t id);

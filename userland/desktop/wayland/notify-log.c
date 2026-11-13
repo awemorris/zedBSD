@@ -80,6 +80,15 @@ static struct {
 	int32_t width;
 } log_view;
 
+/*
+ * The timer of the board's time without input: armed when the board opens,
+ * for LOG_IDLE_MS after it was last used.  Input meanwhile only moves
+ * used_ms: the timer that fires early arms itself again for the new end,
+ * and one that fires after the board closed does nothing.  Readied by the
+ * first opening; only the main loop touches it.
+ */
+static struct kwl_timer log_idle_timer;
+
 static void log_open(struct kwl_server *server);
 static void log_close(struct kwl_server *server, const char *why);
 static void log_move(struct kwl_server *server, int step);
@@ -88,6 +97,7 @@ static size_t log_count(void);
 static const struct kwl_notification *log_item(size_t place);
 static unsigned log_part(const struct kwl_server *server);
 static void log_draw_arrow(struct kwl_server *server, struct kwl_list *command, int32_t x, int32_t y, unsigned icon, float opacity);
+static void log_idle_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Takes a key for the log: Super+N opens or closes the board; while it is
@@ -142,7 +152,7 @@ kwl_notify_log_key(
 	}
 }
 
-/* Closes the board after 10 s without input, and keeps its fade drawn. */
+/* Keeps the open board's fade drawn (its timer closes it after LOG_IDLE_MS without input). */
 void
 kwl_notify_log_tick(
 	struct kwl_server *server)
@@ -153,19 +163,12 @@ kwl_notify_log_tick(
 	if (!log_view.open)
 		return;
 
-	/* Long without input: it closes. */
+	/* Its fade needs frames. */
 	now = kwl_milliseconds();
-	if (now - log_view.used_ms >= LOG_IDLE_MS) {
-		log_close(server, "idle");
-		return;
-	}
-
-	/* Its fade needs frames; it closes on the clock. */
 	if (now - log_view.opened_ms < LOG_FADE_MS) {
 		server->dirty = 1;
 		kwl_due_soon(server);
 	}
-	kwl_due(server, log_view.used_ms + LOG_IDLE_MS);
 }
 
 /*
@@ -348,6 +351,11 @@ log_open(
 		log_view.place = 1U;
 	server->dirty = 1;
 	printf("KWL NOTIFY log open count=%lu\n", (unsigned long)count);
+
+	/* It closes after a time without input, on its timer. */
+	if (log_idle_timer.fire == NULL)
+		kwl_timer_init(&log_idle_timer, "notify-log", log_idle_fired);
+	kwl_timer_set(server, &log_idle_timer, log_view.used_ms + LOG_IDLE_MS);
 }
 
 /* Closes the board, saying why. */
@@ -511,4 +519,35 @@ log_draw_arrow(
 	memcpy(ink, dark, sizeof(ink));
 	ink[3] = opacity;
 	glass_draw_icon(server, command, icon, x + 4, y + 4, (unsigned)(LOG_ARROW - 8), ink);
+}
+
+/*
+ * Closes the board after LOG_IDLE_MS without input; one used meanwhile
+ * waits for the new end.
+ */
+static void
+log_idle_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	uint64_t now;
+
+	/* Only this part's own timer comes here. */
+	(void)timer;
+
+	/* Only an open board. */
+	server = context;
+	if (!log_view.open)
+		return;
+
+	/* Used since the timer was armed: the timer comes back at the new end. */
+	now = kwl_milliseconds();
+	if (now - log_view.used_ms < LOG_IDLE_MS) {
+		kwl_timer_set(server, &log_idle_timer, log_view.used_ms + LOG_IDLE_MS);
+		return;
+	}
+
+	/* Long without input: it closes. */
+	log_close(server, "idle");
 }

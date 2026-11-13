@@ -311,6 +311,18 @@ static unsigned greeter_touch;
 static struct kwl_key_mode greeter_key;
 static struct kwl_keypad greeter_keypad;
 
+/*
+ * The timers of the screen's waits: the lock screen's card left alone
+ * (GREETER_CARD_IDLE_MS after the last input), and the security key's
+ * (a grant held back for "Checking", and the next asking of whose a key
+ * is).  The pass a timer wakes looks at the time (kwl_greeter_tick); a
+ * wait that ended meanwhile leaves its timer armed, and it then fires
+ * once for nothing.  Readied by the first wait; only the event loop
+ * touches them.
+ */
+static struct kwl_timer greeter_card_timer;
+static struct kwl_timer greeter_key_timer;
+
 /* An attempt a sleep cancelled: its answer (a timeout) is not said on the screen the wake shows. */
 static unsigned greeter_answer_quiet;
 
@@ -396,6 +408,8 @@ static void greeter_keypad_press(struct kwl_server *server, const struct greeter
 static void greeter_type_character(struct kwl_server *server, char character);
 static int greeter_key_listening(struct kwl_server *server);
 static void greeter_key_tick(struct kwl_server *server);
+static void greeter_wait(struct kwl_server *server, struct kwl_timer *timer, const char *name, uint64_t at_ms);
+static void greeter_wait_fired(void *context, struct kwl_timer *timer);
 static void greeter_key_owner_taken(struct kwl_server *server, int error);
 static void greeter_key_enter(struct kwl_server *server, unsigned user);
 static void greeter_key_granted(struct kwl_server *server);
@@ -1024,7 +1038,7 @@ kwl_greeter_tick(
 			server->dirty = 1;
 			printf("KWL LOCK card hidden\n");
 		} else {
-			kwl_due(server, server->lock_input_ms + GREETER_CARD_IDLE_MS);
+			greeter_wait(server, &greeter_card_timer, "lock-card", server->lock_input_ms + GREETER_CARD_IDLE_MS);
 		}
 	}
 
@@ -2743,26 +2757,38 @@ greeter_key_tick(
 {
 	enum kwl_key_action action;
 	uint64_t now_ms;
+	uint64_t next_ms;
+	uint64_t owner_ms;
 	int listening;
 	int due;
 	int error;
 
-	/* A grant held back that is due. */
+	/* A grant held back that is due; the timer waits for one still held back. */
 	now_ms = kwl_milliseconds();
 	action = kwl_key_tick(&greeter_key, now_ms);
 	if (action == KWL_KEY_GRANTED)
 		greeter_key_granted(server);
-	kwl_due(server, kwl_key_next(&greeter_key));
+	next_ms = kwl_key_next(&greeter_key);
 
 	/* Whose a key is, once it may be asked (on the clock: a second after the last asking). */
 	listening = greeter_key_listening(server);
-	if (!listening || greeter_waiting || greeter_styles_asked || greeter_styles_wanted || greeter_submit_pending || !server->handed_over)
-		return;
-	due = kwl_key_owner_due(&greeter_key, now_ms);
-	if (!due) {
-		kwl_due(server, kwl_key_owner_next(&greeter_key));
+	if (!listening || greeter_waiting || greeter_styles_asked || greeter_styles_wanted || greeter_submit_pending || !server->handed_over) {
+		greeter_wait(server, &greeter_key_timer, "lock-key", next_ms);
 		return;
 	}
+
+	/* Not a second since the last asking: the timer waits for the earlier of the two times. */
+	due = kwl_key_owner_due(&greeter_key, now_ms);
+	if (!due) {
+		owner_ms = kwl_key_owner_next(&greeter_key);
+		if (owner_ms < next_ms)
+			next_ms = owner_ms;
+		greeter_wait(server, &greeter_key_timer, "lock-key", next_ms);
+		return;
+	}
+
+	/* The timer waits for a grant held back; the answer to the asking moves the mode on. */
+	greeter_wait(server, &greeter_key_timer, "lock-key", next_ms);
 
 	/* Asked. */
 	error = kl_backend_session_key_owner(server->backend);
@@ -3065,4 +3091,37 @@ greeter_places_report(
 
 	/* The styles' lines, when they moved. */
 	greeter_places_log(&layout);
+}
+
+/*
+ * Arms one of the screen's timers for at_ms (UINT64_MAX: no wait), whose
+ * pass looks at the time again (kwl_greeter_tick).
+ */
+static void
+greeter_wait(
+	struct kwl_server *server,
+	struct kwl_timer *timer,
+	const char *name,
+	uint64_t at_ms)
+{
+	/* The timer, readied once. */
+	if (timer->fire == NULL)
+		kwl_timer_init(timer, name, greeter_wait_fired);
+
+	/* The pass at that time moves the screen's wait on. */
+	kwl_timer_set(server, timer, at_ms);
+}
+
+/*
+ * Ends a wait of the screen: the pass the timer woke hides the card left
+ * alone, shows a grant held back, or asks whose a key is
+ * (kwl_greeter_tick looks at the time and at the screen's state).
+ */
+static void
+greeter_wait_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	UNUSED_PARAMETER(context);
+	UNUSED_PARAMETER(timer);
 }

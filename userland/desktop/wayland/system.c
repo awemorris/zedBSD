@@ -276,6 +276,16 @@ struct system_state {
 /* The one state of the process, zero until the first use; the event loop's thread's (see struct system_state). */
 static struct system_state system_state;
 
+/*
+ * The timer of the network objects' askings for scans: armed while any
+ * object asks, for the earliest end of an asking (network_scanning_until),
+ * when one not asked again within its minute is let go.  An asking made
+ * again or ended meanwhile leaves it armed for the old end: it then arms
+ * itself for the earliest end left, or for none.  Readied by the first
+ * asking; the event loop's thread's.
+ */
+static struct kwl_timer system_scan_timer;
+
 static int system_manager_request(struct kwl_object *manager, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int system_sharing_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static void system_sharing_state(struct kwl_object *object);
@@ -311,6 +321,7 @@ static int system_network_wired(struct kwl_object *object, const unsigned char *
 static uint32_t system_network_wired_send(struct kwl_object *object, uint32_t number, const struct kl_backend_wired_config *config);
 static void system_network_scanning(struct kwl_object *object, uint32_t on);
 static void system_scanning_expire(struct kwl_server *server);
+static void system_scan_fired(void *context, struct kwl_timer *timer);
 static void system_network_step(struct kwl_server *server, unsigned request);
 static void system_network_snapshot(struct kwl_object *object);
 static void system_network_change(struct kwl_object *object);
@@ -554,9 +565,6 @@ kwl_system_tick(
 		system_state.power_again = 0U;
 		system_power_read(server);
 	}
-
-	/* An asking for scans not asked again for a minute ends (ws089-p021). */
-	system_scanning_expire(server);
 
 	/* What the user has enrolled, asked of sessiond when it is wanted (ws172-p002). */
 	system_enrolled_tick(server);
@@ -1511,12 +1519,21 @@ system_network_scanning(
 	uint32_t on)
 {
 	unsigned asked;
+	int armed;
 
 	/* The object's asking, as 1 or 0; an asking holds for a minute from now. */
 	asked = 0U;
 	if (on != 0U) {
 		asked = 1U;
 		object->network_scanning_until = kwl_milliseconds() + SYSTEM_SCAN_MS;
+	}
+
+	/* An asking ends on the timer unless it is asked again (the timer waits for the earliest end). */
+	armed = kwl_timer_armed(&system_scan_timer);
+	if (asked && !armed) {
+		if (system_scan_timer.fire == NULL)
+			kwl_timer_init(&system_scan_timer, "system-scan", system_scan_fired);
+		kwl_timer_set(object->client->server, &system_scan_timer, object->network_scanning_until);
 	}
 
 	/* No change: an object is counted once however often it asks. */
@@ -1532,17 +1549,22 @@ system_network_scanning(
 	printf("KWL SYSTEM scanning client=%llu id=%u on=%u\n", (unsigned long long)object->client->number, object->id, asked);
 }
 
-/* Lets go of each network object's asking for scans that was not asked again within its minute. */
+/*
+ * Lets go of each network object's asking for scans that was not asked
+ * again within its minute, and arms the timer for the earliest end left.
+ */
 static void
 system_scanning_expire(
 	struct kwl_server *server)
 {
 	struct kwl_client *client;
 	struct kwl_object *object;
+	uint64_t earliest;
 	uint64_t now;
 
-	/* The time once for the whole walk. */
+	/* The time once for the whole walk; no end found yet. */
 	now = kwl_milliseconds();
+	earliest = UINT64_MAX;
 
 	/* Every live network object that asks, of every client. */
 	for (client = server->clients; client != NULL; client = client->next) {
@@ -1552,7 +1574,8 @@ system_scanning_expire(
 			if (object->network_scanning == 0U)
 				continue;
 			if (now < object->network_scanning_until) {
-				kwl_due(server, object->network_scanning_until);
+				if (object->network_scanning_until < earliest)
+					earliest = object->network_scanning_until;
 				continue;
 			}
 
@@ -1561,6 +1584,21 @@ system_scanning_expire(
 			system_network_scanning(object, 0U);
 		}
 	}
+
+	/* The timer waits for the earliest end left, or for none. */
+	kwl_timer_set(server, &system_scan_timer, earliest);
+}
+
+/* Lets the askings for scans whose minute ran out go (the timer of the earliest end fired). */
+static void
+system_scan_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	UNUSED_PARAMETER(timer);
+
+	/* The askings that ran out go; the timer waits for the next end. */
+	system_scanning_expire(context);
 }
 
 /* Carries out a request of a sound object. */
