@@ -7,9 +7,9 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | 待機 | WS333 p024（規約の見直しと文書）cleared。WS333 は全 Phase が cleared か canceled、完了の判定はユーザーへ | rpi4 は同意待ち |
-| P2 | — | 待機 | BUG-418 C を当てた main の確かめ PASS | — |
-| P3 | — | 待機 | WS333 p027・p029 cleared（5330 の idle 4.3 W、PC2 86〜88 %、i915 の GT RC6 99.9 %） | agy の依頼 07 の監査（agy が終われば） |
+| P1 | q2039 | 作業中 | BUG-418: rpi4 の SD の image と QEMU raspi4b の起動（同意の記録あり） | — |
+| P2 | q2041 | 作業中 | BUG-424: VMD の suspend・resume、5330 で S0 idle | — |
+| P3 | q2040 | 作業中 | WS347: agy の依頼 07（V1〜V9）の監査、次の依頼の下書き | — |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
@@ -97,7 +97,6 @@
 
 ## ユーザーの判断を待つ事
 
-- 2026-11-13 02:46（ユーザーは就寝、起きてから）: rpi4 の boot firmware（`LICENCE.broadcom`）の license の同意を、worktree `/home/awe/zedBSD-worktrees/p1-bug418e` で `make CONFIGMK=config/config.rpi4.mk firmware-licenses` で打つ（担当は打てない）。済めば P1 が rpi4 の SD の image と QEMU raspi4b の起動を確かめる（BUG-418）。
 
 
 
