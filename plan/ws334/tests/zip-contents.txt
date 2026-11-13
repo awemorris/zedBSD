@@ -10,16 +10,11 @@ share/fonts/keiland-fallback-mono.ttf
 share/fonts/keiland-fallback.ttf
 share/fonts/keiland-mono.ttf
 share/fonts/keiland.ttf
-share/licenses/Apache-2.0.txt
 share/licenses/DroidSansFallback-LICENSE.txt
 share/licenses/JetBrainsMono-OFL.txt
-share/licenses/LLVM-LICENSE.txt
 share/licenses/Mahora-LICENSE.txt
-share/licenses/MinGW-w64-runtime.txt
 share/licenses/README.txt
 share/licenses/Unicode-License-V3.txt
 share/licenses/WHATWG-entities.txt
 share/licenses/ca-certificates-MPL-2.0.txt
-share/licenses/libwebp-COPYING.txt
-share/licenses/winpthreads.txt
 share/licenses/zedBSD-LICENSE.txt

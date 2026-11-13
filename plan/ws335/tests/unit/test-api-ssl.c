@@ -31,6 +31,7 @@
 #include "check.h"
 #include "tlspeer.h"
 
+#include <compat/crypto/evp.h>
 #include <compat/ssl/ssl.h>
 
 #include "userland/base/libcrypto-compat/cryc-api.h"
@@ -512,6 +513,12 @@ static void test_verify(void);
 
 /* The verify callback: when it is called, what it is told, and how its answer decides. */
 static void test_callback(void);
+
+/* Checks a certificate SSL_get1_peer_certificate gave: the leaf's DER, its references and its SHA-256 fingerprint. */
+static void check_peer_leaf(X509 *certificate, const struct tlspeer_pki *pki, long references);
+
+/* The server's certificate (SSL_get1_peer_certificate) before, after and beyond the handshake and the SSL. */
+static void test_peer_certificate(void);
 
 /* The version bounds and options: what the ClientHello offers, and the failures of a range with nothing left. */
 static void test_versions(void);
@@ -1756,6 +1763,158 @@ test_callback(void)
 	rig_close(rig);
 }
 
+/*
+ * Checks a certificate SSL_get1_peer_certificate gave: the leaf's DER as
+ * the peer sent it, references as many as expected, and its SHA-256
+ * fingerprint (X509_digest) the digest of that DER.
+ */
+static void
+check_peer_leaf(
+	X509 *certificate,
+	const struct tlspeer_pki *pki,
+	long references)
+{
+	unsigned char digest[EVP_MAX_MD_SIZE];
+	unsigned char expected[EVP_MAX_MD_SIZE];
+	unsigned int length;
+	unsigned int expected_length;
+
+	/* The object holds the leaf, not the root. */
+	CHECK(certificate != NULL);
+	if (certificate == NULL)
+		return;
+	CHECK(certificate->der_size == pki->leaf_size);
+	if (certificate->der_size == pki->leaf_size)
+		CHECK(memcmp(certificate->der, pki->leaf, pki->leaf_size) == 0);
+	CHECK(certificate->references == references);
+
+	/* The fingerprint is the digest of the DER (the program's pin). */
+	length = 0U;
+	expected_length = 0U;
+	CHECK(X509_digest(certificate, EVP_sha256(), digest, &length) == 1);
+	CHECK(EVP_Digest(pki->leaf, pki->leaf_size, expected, &expected_length, EVP_sha256(), NULL) == 1);
+	CHECK(length == 32U);
+	CHECK(expected_length == 32U);
+	CHECK(memcmp(digest, expected, 32U) == 0);
+	expect_no_error();
+}
+
+/*
+ * The server's certificate (SSL_get1_peer_certificate): none before the
+ * handshake ends; the leaf with a reference for each caller after it, also
+ * when the verify callback let an untrusted chain through, after an
+ * implicit handshake, after the connection failed or was shut down, and
+ * beyond SSL_free while a caller holds it; none when the handshake was
+ * refused.
+ */
+static void
+test_peer_certificate(void)
+{
+	struct tlspeer_config config;
+	struct rig *rig;
+	X509 *first;
+	X509 *second;
+	unsigned tries;
+	int result;
+	int error;
+	int version;
+	uint16_t peer_version;
+
+	/* A missing SSL has none, and nothing is queued. */
+	CHECK(SSL_get1_peer_certificate(NULL) == NULL);
+	expect_no_error();
+
+	/* Both versions, with the P-256 and the P-384 chains. */
+	for (version = 0; version < 2; version++) {
+		peer_version = SSLC_TLS12;
+		if (version == 0)
+			peer_version = SSLC_TLS13;
+
+		/* Before the handshake and while it waits: none. */
+		peer_config(&config, peer_version, &pki256);
+		rig = rig_open(&config, &pki256, RIG_STD);
+		CHECK(SSL_get1_peer_certificate(rig->ssl) == NULL);
+		CHECK(SSL_connect(rig->ssl) == -1);
+		CHECK(SSL_get_error(rig->ssl, -1) == SSL_ERROR_WANT_READ);
+		CHECK(SSL_get1_peer_certificate(rig->ssl) == NULL);
+		expect_no_error();
+
+		/* After it: the leaf, one reference for the SSL and one for each caller (the same object). */
+		rig_up(rig);
+		first = SSL_get1_peer_certificate(rig->ssl);
+		check_peer_leaf(first, &pki256, 2L);
+		second = SSL_get1_peer_certificate(rig->ssl);
+		CHECK(second == first);
+		CHECK(first->references == 3L);
+		X509_free(second);
+		CHECK(first->references == 2L);
+
+		/* A connection that failed later (a fatal alert) still has it. */
+		CHECK(tlspeer_send_alert(rig->peer, 2U, A_HANDSHAKE_FAILURE) == 0);
+		result = -1;
+		for (tries = 0; tries < TRIES; tries++) {
+			result = SSL_read(rig->ssl, big_buffer, 10);
+			error = SSL_ERROR_NONE;
+			if (result == -1)
+				error = SSL_get_error(rig->ssl, result);
+			if (result != -1 || error != SSL_ERROR_WANT_READ)
+				break;
+			rig_pump(rig);
+		}
+		CHECK(result == -1);
+		CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_SSL);
+		expect_error(L_SSL, 1000 + (int)A_HANDSHAKE_FAILURE);
+		second = SSL_get1_peer_certificate(rig->ssl);
+		CHECK(second == first);
+		X509_free(second);
+
+		/* The caller's reference outlives the SSL. */
+		rig_close(rig);
+		check_peer_leaf(first, &pki256, 1L);
+		X509_free(first);
+
+		/* An untrusted chain the verify callback lets through (a self-signed server the user pins): the leaf, and the verification's code. */
+		peer_config(&config, peer_version, &pki384);
+		rig = rig_open(&config, &pki384, RIG_NAMES | RIG_PEER);
+		callback_calls = 0;
+		callback_answer = 1;
+		SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
+		rig_renew(rig);
+		rig_up(rig);
+		CHECK(SSL_get_verify_result(rig->ssl) == V_UNABLE_TO_GET_ISSUER_LOCALLY);
+		first = SSL_get1_peer_certificate(rig->ssl);
+		check_peer_leaf(first, &pki384, 2L);
+
+		/* After a clean shutdown it is still there. */
+		result = SSL_shutdown(rig->ssl);
+		CHECK(result == 0);
+		second = SSL_get1_peer_certificate(rig->ssl);
+		CHECK(second == first);
+		X509_free(second);
+		X509_free(first);
+		rig_close(rig);
+
+		/* An implicit handshake (the first SSL_write) keeps it as well. */
+		peer_config(&config, peer_version, &pki256);
+		rig = rig_open(&config, &pki256, RIG_STD);
+		CHECK(rig_send(rig, 10UL) == 10);
+		first = SSL_get1_peer_certificate(rig->ssl);
+		check_peer_leaf(first, &pki256, 2L);
+		X509_free(first);
+		rig_close(rig);
+
+		/* A refused chain fails the handshake, and there is no certificate. */
+		peer_config(&config, peer_version, &pki256);
+		rig = rig_open(&config, &pki256, RIG_NAMES | RIG_PEER);
+		result = rig_connect(rig);
+		CHECK(result == -1);
+		expect_error(L_SSL, R_CERTIFICATE_VERIFY_FAILED);
+		CHECK(SSL_get1_peer_certificate(rig->ssl) == NULL);
+		expect_no_error();
+		rig_close(rig);
+	}
+}
+
 /* The version bounds and options: what the ClientHello offers, and the failures of a range with nothing left. */
 static void
 test_versions(void)
@@ -2706,6 +2865,7 @@ main(
 	test_handshake();
 	test_verify();
 	test_callback();
+	test_peer_certificate();
 	test_versions();
 	test_write();
 	test_write_wait();

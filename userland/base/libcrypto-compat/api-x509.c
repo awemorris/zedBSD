@@ -382,6 +382,34 @@ X509_free(
 }
 
 /*
+ * Writes the digest of a certificate's whole DER encoding with type (only
+ * SHA-256) into md, and its size into *length when length is not NULL.
+ */
+int
+X509_digest(
+	const X509 *certificate,
+	const EVP_MD *type,
+	unsigned char *md,
+	unsigned int *length)
+{
+	int result;
+
+	/* Refuses a missing certificate (EVP_Digest checks the rest). */
+	if (certificate == NULL) {
+		x509_fail(CRYC_R_PASSED_NULL_PARAMETER);
+		return 0;
+	}
+
+	/* Hashes the DER the object holds, as received; EVP_Digest refuses a missing output and every digest but SHA-256. */
+	result = EVP_Digest(certificate->der, certificate->der_size, md, length, type, NULL);
+	if (result != 1)
+		return 0;
+
+	/* Succeeded: md holds the fingerprint. */
+	return 1;
+}
+
+/*
  * Adds a certificate to a store as a trust anchor (the store takes its own
  * copy; the caller still frees certificate).
  */

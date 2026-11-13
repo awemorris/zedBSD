@@ -87,6 +87,7 @@
 		RAND_bytes;
 		d2i_X509;
 		X509_free;
+		X509_digest;
 		X509_STORE_add_cert;
 		X509_VERIFY_PARAM_set1_host;
 		X509_VERIFY_PARAM_set1_ip_asc;

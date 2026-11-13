@@ -1,6 +1,6 @@
 #!/bin/sh
-# The Windows cross build, for x86_64 and arm64, through both entries (make browser-win64 and
-# browser-winarm64 from the top Makefile, then apps/browser-win32/Makefile alone on the same output):
+# The Windows cross build, for x86_64 (the CI's; aarch64 when asked, below), through both entries (make browser-win32
+# WIN32_ARCH=<arch> from the top Makefile, then apps/browser-win32/Makefile alone on the same output):
 #  1. the files written for the Windows build (the operating-system layers) compile with warning 0;
 #  2. the warnings of libtruetype and the compat libraries (compiled without -Werror) are counted;
 #  3. what those libraries leave undefined (nm -u less what they define) is in allowed-imports.txt, and
@@ -10,20 +10,21 @@
 #     libbrowser's exports.map matches a defined function (the API of the one .exe); libkeiland.a and the
 #     user interface's libbrowser-ui.a leave undefined only what the table has, and libkeiland.a defines
 #     every public function of libkeiland (its own, a common file's, or a stub);
-#  4. the Vulkan loader's delayed import: plan/ws334/tests/delay-load.c, linked as the build links a
-#     program that calls Vulkan, has vulkan-1.dll in its delay-import table and not in its import table;
-#     on x86_64 under Wine it prints the loader's version with vulkan-1.dll, and with the DLL disabled
-#     (WINEDLLOVERRIDES=vulkan-1=d) it starts, finds no loader and calls no vk* (arm64: linked only);
+#  4. the Vulkan loader is an ordinary import: OmniGrammaton.exe has vulkan-1.dll in its import table and
+#     no delay-import table (the browser needs Vulkan to start);
 #  5. libkeiland's Windows files (libkeiland.a) refer to no POSIX thread name (pthread_*): the Windows
 #     port uses the system's threads and locks;
-#  6a. OmniGrammaton.exe imports only Windows' own DLLs and the UCRT's, vulkan-1.dll delayed;
-#  7. make browser-win64-zip (-winarm64-zip): the zip holds what plan/ws334/tests/zip-contents.txt lists, is
-#     the same bytes when made again, and its icon has 8 images (ImageMagick's identify);
+#  6a. OmniGrammaton.exe imports only Windows' own DLLs, the UCRT's and vulkan-1.dll;
+#  7. the zip (make -f apps/browser-win32/Makefile WIN32_ARCH=<arch> zip): it holds what
+#     plan/ws334/tests/zip-contents.txt lists, is the same bytes when made again, and its icon has 8 images
+#     (ImageMagick's identify);
 #  6. one .exe of static libraries: plan/ws334/tests/script-tool-main.c linked by the build's
-#     test-program with every static library imports only Windows' own DLLs and the UCRT's (no DLL of
-#     this tree, no libwinpthread-1.dll; vulkan-1.dll only as a delayed import); on x86_64 under Wine
-#     it prints 16 random bytes and runs a script that reads the clock (arm64: linked only).
-#   sh plan/ws334/tests/cross-build.sh
+#     test-program with every static library imports only Windows' own DLLs, the UCRT's and at most
+#     vulkan-1.dll, none delayed (no DLL of this tree, no libwinpthread-1.dll); on x86_64 under Wine it
+#     prints 16 random bytes and runs a script that reads the clock (arm64: linked only).
+#   sh plan/ws334/tests/cross-build.sh                               x86_64
+#   WIN32_ARCH=aarch64 sh plan/ws334/tests/cross-build.sh            arm64 only
+#   WIN32_ARCH="x86_64 aarch64" sh plan/ws334/tests/cross-build.sh   both
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
 # WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-wine).  The fetched tarballs are kept in
 # build/tmp/ws334-win32-sources between runs.
@@ -42,18 +43,19 @@ mkdir -p "$sources"
 allowed=plan/ws334/tests/allowed-imports.txt
 status=0
 
-for name in win64 winarm64; do
-	case "$name" in
-	win64) arch=x86_64 ;;
-	winarm64) arch=aarch64 ;;
+for arch in ${WIN32_ARCH:-x86_64}; do
+	case "$arch" in
+	x86_64) name=win64 ;;
+	aarch64) name=winarm64 ;;
+	*) echo "FAILED WIN32_ARCH: $arch is not x86_64 or aarch64"; status=1; continue ;;
 	esac
 	build=$out/browser-$name
 	log=$out/make-$name.log
 
 	# The build, from the top Makefile and then from its own.
-	if ! timeout 900 make --no-print-directory browser-$name LLVM_MINGW="$LLVM_MINGW" \
-	    BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" > "$log" 2>&1; then
-		echo "FAILED make browser-$name (log $log)"
+	if ! timeout 900 make --no-print-directory browser-win32 WIN32_ARCH=$arch \
+	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" > "$log" 2>&1; then
+		echo "FAILED make browser-win32 WIN32_ARCH=$arch (log $log)"
 		tail -10 "$log"
 		status=1
 		continue
@@ -69,7 +71,7 @@ for name in win64 winarm64; do
 
 	# 1. The layers' warnings (the compat libraries' are in their own logs, not in the make output).
 	if grep -n 'warning:' "$log"; then
-		echo "FAILED make browser-$name warned (above)"
+		echo "FAILED make browser-win32 WIN32_ARCH=$arch warned (above)"
 		status=1
 	fi
 
@@ -203,24 +205,16 @@ for name in win64 winarm64; do
 		echo "$name: libbrowser.a defines the $(wc -l < "$out/api-declared-$name.txt") functions of the public headers, exports.map's $(wc -l < "$out/api-exports-$name.txt") names all match"
 	fi
 
-	# 4. The delayed import of the Vulkan loader.
-	exe=$out/delay-load-$name.exe
-	if ! $WIN32_CC $WIN32_CFLAGS plan/ws334/tests/delay-load.c -o "$exe" $WIN32_VULKAN_LDFLAGS \
-	    > "$out/delay-load-$name.log" 2>&1 || [ -s "$out/delay-load-$name.log" ]; then
-		echo "FAILED $name: delay-load.c did not link cleanly"
-		head -10 "$out/delay-load-$name.log"
+	# 4. The Vulkan loader, an ordinary import of OmniGrammaton.exe (no delay-import table).
+	"$LLVM_MINGW/bin/llvm-readobj" --coff-imports "$build/OmniGrammaton.exe" > "$out/omnigrammaton-$name.imports" 2>&1
+	if ! grep -A1 '^Import {' "$out/omnigrammaton-$name.imports" | grep -q 'Name: vulkan-1.dll'; then
+		echo "FAILED $name: vulkan-1.dll is not an import of OmniGrammaton.exe"
 		status=1
-		continue
-	fi
-	"$LLVM_MINGW/bin/llvm-readobj" --coff-imports "$exe" > "$out/delay-load-$name.imports"
-	if ! grep -A1 '^DelayImport {' "$out/delay-load-$name.imports" | grep -q 'Name: vulkan-1.dll'; then
-		echo "FAILED $name: vulkan-1.dll is not a delayed import"
-		status=1
-	elif grep -A1 '^Import {' "$out/delay-load-$name.imports" | grep -q 'Name: vulkan-1.dll'; then
-		echo "FAILED $name: vulkan-1.dll is also an ordinary import"
+	elif grep -q '^DelayImport {' "$out/omnigrammaton-$name.imports"; then
+		echo "FAILED $name: OmniGrammaton.exe has delayed imports"
 		status=1
 	else
-		echo "$name: vulkan-1.dll is a delayed import"
+		echo "$name: vulkan-1.dll is an ordinary import of OmniGrammaton.exe"
 	fi
 
 	# 5. No POSIX thread name in libkeiland's Windows files.
@@ -237,29 +231,28 @@ for name in win64 winarm64; do
 		echo "$name: libkeiland.a refers to no pthread_ name"
 	fi
 
-	# 6a. OmniGrammaton.exe: the system's DLLs and the UCRT's only, vulkan-1.dll delayed.
-	"$LLVM_MINGW/bin/llvm-readobj" --coff-imports "$build/OmniGrammaton.exe" > "$out/omnigrammaton-$name.imports" 2>&1
+	# 6a. OmniGrammaton.exe: the system's DLLs, the UCRT's and vulkan-1.dll only.
 	sed -n '/^Import {/,/^}/s/^ *Name: //p' "$out/omnigrammaton-$name.imports" | sort -u > "$out/omnigrammaton-dlls-$name.txt"
-	sed -n '/^DelayImport {/,/^}/s/^ *Name: //p' "$out/omnigrammaton-$name.imports" | sort -u > "$out/omnigrammaton-delayed-$name.txt"
-	foreign=$(grep -v -i -x -E 'api-ms-win-crt-[a-z0-9-]+\.dll|(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|crypt32|bcrypt|ws2_32|iphlpapi|imm32|dwmapi|shcore|uiautomationcore|uxtheme)\.dll' \
+	foreign=$(grep -v -i -x -E 'api-ms-win-crt-[a-z0-9-]+\.dll|(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|crypt32|bcrypt|ws2_32|iphlpapi|imm32|dwmapi|shcore|uiautomationcore|uxtheme|vulkan-1)\.dll' \
 	    "$out/omnigrammaton-dlls-$name.txt")
-	delayed=$(grep -v -i -x 'vulkan-1\.dll' "$out/omnigrammaton-delayed-$name.txt")
 	if [ ! -s "$out/omnigrammaton-dlls-$name.txt" ]; then
 		echo "FAILED $name: llvm-readobj found no import in OmniGrammaton.exe"
 		status=1
-	elif [ -n "$foreign" ] || [ -n "$delayed" ]; then
-		echo "FAILED $name: OmniGrammaton.exe imports DLLs that are not Windows' own: $foreign $delayed"
+	elif [ -n "$foreign" ]; then
+		echo "FAILED $name: OmniGrammaton.exe imports DLLs that are not Windows' own: $foreign"
 		status=1
 	else
-		echo "$name: OmniGrammaton.exe imports only the system's DLLs ($(wc -l < "$out/omnigrammaton-dlls-$name.txt")), vulkan-1.dll delayed: $(cat "$out/omnigrammaton-delayed-$name.txt")"
+		echo "$name: OmniGrammaton.exe imports only the system's DLLs and vulkan-1.dll ($(wc -l < "$out/omnigrammaton-dlls-$name.txt"))"
 	fi
 
-	# 7. The zip (make browser-<name>-zip): what it holds is plan/ws334/tests/zip-contents.txt, the same bytes
-	# when it is made again from the same directory, and the icon of 8 images (ImageMagick's identify).
+	# 7. The zip (apps/browser-win32/Makefile's zip target): what it holds is plan/ws334/tests/zip-contents.txt,
+	# the same bytes when it is made again from the same directory, and the icon of 8 images (ImageMagick's
+	# identify).
 	zip=$build/OmniGrammaton-$(sed -n 's/^OMNIGRAMMATON_VERSION := //p' apps/browser-win32/version.mk)-$name.zip
-	if ! timeout 900 make --no-print-directory browser-$name-zip LLVM_MINGW="$LLVM_MINGW" \
-	    BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" > "$out/zip-$name.log" 2>&1 || [ ! -f "$zip" ]; then
-		echo "FAILED $name: make browser-$name-zip (log $out/zip-$name.log)"
+	if ! timeout 900 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=$arch zip \
+	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" \
+	    > "$out/zip-$name.log" 2>&1 || [ ! -f "$zip" ]; then
+		echo "FAILED $name: make -f apps/browser-win32/Makefile WIN32_ARCH=$arch zip (log $out/zip-$name.log)"
 		tail -5 "$out/zip-$name.log"
 		status=1
 	else
@@ -295,43 +288,22 @@ for name in win64 winarm64; do
 	fi
 	"$LLVM_MINGW/bin/llvm-readobj" --coff-imports "$program" > "$out/program-$name.imports"
 	sed -n '/^Import {/,/^}/s/^ *Name: //p' "$out/program-$name.imports" | sort -u > "$out/program-dlls-$name.txt"
-	sed -n '/^DelayImport {/,/^}/s/^ *Name: //p' "$out/program-$name.imports" | sort -u > "$out/program-delayed-$name.txt"
-	foreign=$(grep -v -i -x -E 'api-ms-win-crt-[a-z0-9-]+\.dll|(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|crypt32|bcrypt|ws2_32|iphlpapi|imm32|dwmapi|shcore|uiautomationcore|uxtheme)\.dll' \
+	foreign=$(grep -v -i -x -E 'api-ms-win-crt-[a-z0-9-]+\.dll|(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|crypt32|bcrypt|ws2_32|iphlpapi|imm32|dwmapi|shcore|uiautomationcore|uxtheme|vulkan-1)\.dll' \
 	    "$out/program-dlls-$name.txt")
-	delayed=$(grep -v -i -x 'vulkan-1\.dll' "$out/program-delayed-$name.txt")
 	if [ ! -s "$out/program-dlls-$name.txt" ]; then
 		echo "FAILED $name: llvm-readobj found no import in $program"
 		status=1
-	elif [ -n "$foreign" ] || [ -n "$delayed" ]; then
-		echo "FAILED $name: $program imports DLLs that are not Windows' own: $foreign $delayed"
+	elif [ -n "$foreign" ] || grep -q '^DelayImport {' "$out/program-$name.imports"; then
+		echo "FAILED $name: $program imports DLLs that are not Windows' own, or delays one: $foreign"
 		status=1
 	else
 		echo "$name: one .exe, imports only the system's DLLs ($(wc -l < "$out/program-dlls-$name.txt"))"
 	fi
 	[ "$arch" = x86_64 ] || continue
 	if ! command -v wine > /dev/null 2>&1; then
-		echo "FAILED wine is not installed (the delayed import is not run)"
+		echo "FAILED wine is not installed (the test program is not run)"
 		status=1
 		continue
-	fi
-	WINEDEBUG=-all timeout 120 wine "$exe" > "$out/wine-with.out" 2> "$out/wine-with.log"
-	code=$?
-	with=$(tr -d '\r' < "$out/wine-with.out")
-	if [ "$code" != 0 ] || ! echo "$with" | grep -q '^delay-load: Vulkan [0-9]*\.[0-9]*$'; then
-		echo "FAILED $name under Wine with vulkan-1.dll: exit $code, '$with'"
-		status=1
-	else
-		echo "$name under Wine with vulkan-1.dll: $with"
-	fi
-	WINEDEBUG=-all WINEDLLOVERRIDES=vulkan-1=d timeout 120 wine "$exe" > "$out/wine-without.out" \
-	    2> "$out/wine-without.log"
-	code=$?
-	without=$(tr -d '\r' < "$out/wine-without.out")
-	if [ "$code" != 0 ] || [ "$without" != 'delay-load: no vulkan-1.dll, no Vulkan call' ]; then
-		echo "FAILED $name under Wine without vulkan-1.dll: exit $code, '$without'"
-		status=1
-	else
-		echo "$name under Wine without vulkan-1.dll: $without"
 	fi
 
 	# 6 under Wine: the random bytes, and a script that reads the clock.

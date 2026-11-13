@@ -268,6 +268,16 @@ int SSL_shutdown(SSL *ssl);
 /* Returns the X509_V_ result of the last handshake's verification (X509_V_OK before one). */
 long SSL_get_verify_result(const SSL *ssl);
 
+/*
+ * Returns the server's certificate (the leaf of the chain it sent) with
+ * one more reference, which the caller drops with X509_free; NULL before
+ * a handshake is complete.  The SSL keeps the certificate from the end of
+ * the handshake until it is freed, also after the connection is shut down
+ * or fails, and also when its verification failed and the verify
+ * callback let the handshake go on.  Nothing is queued for NULL.
+ */
+X509 *SSL_get1_peer_certificate(const SSL *ssl);
+
 #ifdef __cplusplus
 }
 #endif
