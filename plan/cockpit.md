@@ -107,7 +107,7 @@
 - BUG-418 C（package の data、2026-11-13 main）: desktop で日本語入力（keiland-ime）を起動し SKK の辞書で変換できるか、絵文字が出るか、https の公開の site が開けるか（/etc/ssl/cert.pem）。x86_64 以外（rpi5・vf2）の image でも同じ file があるか。
 - Pi 4 の GPU の回帰（WS291 p021 の直し 6d4ef0df9 は Pi 4 と Pi 5 で共有の code。Pi 4 は今 SwitchBot に繋がっておらず担当は遠隔で試せない）: Pi 4 に main の image を入れ、desktop と GPU の app（mview など）が前と同じに動くか。
 - VF2 の root（UFS 256 MB）の空き: 2026-11-01 の計測で 95%〜満杯になり、P4 の mview の texture の写しが ENOSPC で切れた。試験は /tmp（tmpfs）に置く形で回避した。板の古い物（~kei の p7・p15 など他の担当の置き物を含む）の整理か、SD の root の拡げをするか。
-- OmniGrammaton.exe（Windows 版のブラウザ）を本物の Windows で: main の build（`make browser-win32`、zip は apps/browser-win32/Makefile の zip の target）を展開して起動し、WS334 p032 の M1〜M8（描画・--no-gpu・https・location の欄・IME での日本語入力・cookie と localStorage の保持・暗い mode・snap の配置）。Wine では IME・snap・公開の site が確かめられない。
+- OmniGrammaton.exe（Windows 版のブラウザ）を本物の Windows で: main の build（`make browser-win32`、zip は apps/browser-win32/Makefile の zip の target）を展開して起動し、WS334 p032 の M1〜M8（描画・https・location の欄・IME での日本語入力・cookie と localStorage の保持・暗い mode・snap の配置）。Wine では IME・snap・公開の site が確かめられない。（--no-gpu は 2026-11-13 に不可と決まり外した）
 - Pi 5 で BUG-391・392: desktop で compositor を kill -9 して desktop から戻るか、Super+L の後の kill で lock 画面から戻り PIN 0000 で開くか、login 画面で PIN 0000 が既定で出るか（QEMU では確認済み、Pi 5 で 1 s 後に GPU が使えるかは未確認）。
 - Pi 5 で BUG-412（click）: Pi 5 は普段の kernel（main、config-rpi5）と元の compositor・起動の option。Settings の左の欄の短い click が効くかを見る。効けば BUG-412 を閉じる。
 - Pi 5 の HDMI: 今の capture の板は、host で開いている間だけ hotplug・EDID を出す。Pi の電源を入れる前に capture を開けば 1920x1080 60 Hz で desktop が出る（P3 が確かめた）。
