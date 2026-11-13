@@ -59,7 +59,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計（design.md）と移行の計画（実装の Phase の表と各 phase.md）、Fable の敵対的レビューの反映 | cleared（2026-11-13 ユーザーの承認、main 73f38d7cb5） | — |
 | [p002](phase002/phase.md) | kernel: display の topology の事象の fence（HOTPLUG、`GPU_DISPLAY_FENCE`、driver の push `drv_gpu_display_changed`） | cleared（2026-11-14 Q1 判定。P1 q2057 8cf85a7102（merge 879c02d83d）。latency の FAIL は試験の harness の止まりと venus の events_clear の欠けで、BUG-431（P2）で直し、同じ試験の 2 回が全 step PASS、latency 266・255 ms） | p001 |
-| [p003](phase003/phase.md) | libvulkan: hotplug の fence を kernel の fence に、未提出の fence の待ち（1 ms を消す） | planned（q2059、P1） | p002 |
+| [p003](phase003/phase.md) | libvulkan: hotplug の fence を kernel の fence に、未提出の fence の待ち（1 ms を消す） | cleared（2026-11-14 P1 q2059、Q1 の確認待ち。branch `agent/p1-ws353c`、libvulkan f93eb33fab・c44b5ba42c。3 機種の build warning 0、QEMU の 13 step PASS（30 s の idle は poll 1 回、別の fence の 200 回の submit で起きない、300 回の競いで取りこぼし 0、16 の上限、plug ≤983 ms・unplug ≤214 ms は kernel の fence と同時、device lost で返る）。any-wait の空回り（既存）も直した） | p002 |
 | [p004](phase004/phase.md) | compositor: hotplug の thread、`kwl_output_tick` の 250 ms を消し出力の追従を事象で | planned | p003 |
 | [p005](phase005/phase.md) | compositor: timer の thread、thread の結果の flag を wake に、入力の scan を事象だけに、去った client の buffer の解放の歩調を timer と事象に | planned | p004、WS352 p002 の merge（推し） |
 | [p006](phase006/phase.md) | compositor: 締め切り A（session・system・protocol）を timer へ | planned | p005 |
@@ -77,6 +77,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 
 ## Resume point
 
+- 2026-11-14 02:05 P1（q2059-i01、branch `agent/p1-ws353c`）: p003 を実装（libvulkan の hotplug fence は node ごとの kernel の fence の fd、未提出の fence の待ちは fence を名指す wake の token、眠る前の reap）。x86_64・arm64・riscv64 の build は warning 0、QEMU（`plan/ws353/tests/qemu-hotplug-wait.sh`、host の renderer は `build-venus-renderer.sh` で作る）は全 step PASS（[phase003](phase003/phase.md) の結果）。次は p004（compositor の hotplug の thread）。QEMU の plug の latency が 1 s に近い（kernel の fence も同時なので libvulkan より下、原因は未調査）。
 - 2026-11-14 00:46 P1（q2057-i01、branch `agent/p1-ws353b`）: p002 の kernel を実装（`GPU_DISPLAY_FENCE`＝'G' 54・`GPU_DISPLAY_FENCE_CANCEL`＝55、`drv_gpu_display_changed`、venus・i915・amdrdna・ghci の push）。x86_64・arm64・riscv64 の build は warning 0、i915 の host 試験 31 本 PASS、QEMU は idle・wait・cancel・limit・race が PASS、latency は venus の driver が idle の間の head の変化を見ない既存の問題で FAIL（[phase002](phase002/phase.md) の結果）。次は Q1 の判断（venus の Bug、p002 の受け入れ）。
 - 2026-11-13 23:2x P1（q2056-i02、branch `agent/p1-ws353`）: Fable の敵対的レビュー（[design-review.md](design-review.md)）の 25 件を code で確かめて design.md と phase.md に反映した（扱いの表は design-review.md の「反映」）。主な変更: render は飛んでいる間は最古の fence を待つ（S1）、表示の完了は present の fence を新しい thread shown が待つ（S2、present wait の外部同期）、client の buffer は REAPED の serial で返す、未決 3 の推しの変更、Phase の依存（p011 は p004 の後、p010 は p011 の後、p015 は独立）。source は変えていない。次はユーザーのレビュー（未決 1〜3 と上の確かめたい点）、その後 p002。
 - 2026-11-13 22:5x P1（q2056-i01、branch `agent/p1-ws353`）: [design.md](design.md) と p002〜p017 の phase.md を置いた（source は変えていない）。HAL・Makefile の変更は要らない形にした。未決 3 つの案と推しは design.md §8。WS352 の branch は b05187933a を除いて merge を推す（§7）。次は Q1 の Fable の敵対的レビューの反映（p001 の残り）。
