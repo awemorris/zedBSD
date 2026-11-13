@@ -116,6 +116,7 @@ static int present_wait(void *private_data, void *session, struct gpu_display_wa
 static int present_events(void *private_data, void *session, uint64_t *sequence);
 static int present_power(void *private_data, void *session, const struct gpu_display_power *request);
 static int present_refresh(void *private_data, void *session, struct gpu_display_refresh *request);
+static int present_refresh_arm(void *private_data, uint32_t display_id, unsigned on);
 static int present_cursor_set(void *private_data, void *session, void *object, const struct gpu_display_cursor_image *request);
 static int present_cursor_move(void *private_data, void *session, const struct gpu_display_cursor_move *request);
 static int present_cursor_hide(void *private_data, void *session, const struct gpu_display_cursor_hide *request);
@@ -125,9 +126,10 @@ static int present_constraints(void *private_data, void *session, struct gpu_sca
 /*
  * The display operations of the amdrdna GPU device: query, mode, claim,
  * release, present and wait, the topology sequence, power and refresh
- * (the display control), and the cursor plane.  Presentations wait under
- * the open's admission (no ungated flag, no adoption wait); no overlay
- * planes.  Shared by every node; immutable.
+ * (the display control, whose boundaries the frame interrupt pushes), and
+ * the cursor plane.  Presentations wait under the open's admission (no
+ * ungated flag, no adoption wait); no overlay planes.  Shared by every
+ * node; immutable.
  */
 static const struct drv_gpu_display_ops present_display_ops = {
 	present_query,
@@ -145,7 +147,8 @@ static const struct drv_gpu_display_ops present_display_ops = {
 	NULL,
 	0U,
 	NULL,
-	NULL
+	NULL,
+	present_refresh_arm
 };
 
 /*
@@ -171,6 +174,34 @@ static void present_console_paint(struct amdrdna_node *node);
 static void present_rest_watch(void *argument);
 static int present_cursor_check(struct amdrdna_node *node, void *session, uint64_t lease, uint64_t generation);
 static void present_cursor_copy(struct amdrdna_node *node, const struct amdrdna_resource *resource, const struct gpu_display_cursor_image *request, unsigned slot);
+
+/*
+ * Publishes a refresh boundary of the display to the GPU core, from the
+ * interrupt thread, with the count the display refresh operation reports.
+ *
+ * Returns how many refresh registrations of the display are left armed.
+ */
+unsigned
+amdrdna_present_refreshed(
+	struct amdrdna_device *device,
+	uint64_t count)
+{
+	struct amdrdna_node *node;
+	struct drv_gpu_device *gpu;
+	unsigned remaining;
+
+	/* Without a registered device no registration exists. */
+	gpu = NULL;
+	node = device->node;
+	if (node != NULL)
+		gpu = node->gpu;
+
+	/* The core signals the registrations the boundary passed. */
+	remaining = drv_gpu_display_refreshed(gpu, PRESENT_DISPLAY_ID, PRESENT_GENERATION, count);
+
+	/* Succeeded: the registrations still waiting. */
+	return remaining;
+}
 
 /*
  * Runs stage A8: gives the GPU device the display's operations and
@@ -929,6 +960,46 @@ present_refresh(
 	request->sequence = count;
 	request->time_ns = time_ns;
 	request->flags = 0U;
+	return 0;
+}
+
+/*
+ * Starts or stops pushing the display's refresh boundaries (the display
+ * refresh_arm operation): the frame interrupt then publishes each one.
+ * Returns ENOENT for another display, EOPNOTSUPP while the driver does not
+ * own the display (no frame interrupt comes then).
+ */
+static int
+present_refresh_arm(
+	void *private_data,
+	uint32_t display_id,
+	unsigned on)
+{
+	struct amdrdna_node *node;
+	bool interrupts_on;
+
+	/* The node the core passed in. */
+	node = private_data;
+
+	/* Only the one display exists. */
+	if (display_id != PRESENT_DISPLAY_ID)
+		return ENOENT;
+
+	/* Stopping never fails. */
+	if (on == 0U) {
+		amdrdna_display_refresh_arm(node->device, false);
+		return 0;
+	}
+
+	/* A display the firmware keeps sends no frame interrupt to push from. */
+	interrupts_on = node->device->display.interrupts_on;
+	if (!interrupts_on)
+		return EOPNOTSUPP;
+
+	/* The frame interrupt publishes from its next boundary. */
+	amdrdna_display_refresh_arm(node->device, true);
+
+	/* Succeeded: the display's boundaries reach the core. */
 	return 0;
 }
 

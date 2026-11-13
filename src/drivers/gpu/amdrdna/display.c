@@ -658,8 +658,12 @@ amdrdna_display_interrupt(
 {
 	struct amdrdna_display *display;
 	unsigned long irq;
+	uint64_t count;
+	uint32_t epoch;
 	uint32_t word;
 	unsigned which;
+	unsigned remaining;
+	bool publish;
 
 	/* Before the takeover the display's events are not the driver's. */
 	display = &device->display;
@@ -681,8 +685,30 @@ amdrdna_display_interrupt(
 		display->frame_signals++;
 		display_sample_locked(device);
 		waitq_wake_all(&display->waitq);
+		publish = display->refresh_armed;
+		count = display->refresh_count;
+		epoch = display->refresh_arm_epoch;
 
 		spin_unlock_irqrestore(&display->lock, irq);
+
+		/* Without an armed refresh registration the frame is not the core's business. */
+		if (!publish)
+			return;
+
+		/* The core ends the refresh registrations this boundary passed. */
+		remaining = amdrdna_present_refreshed(device, count);
+
+		/* None left: stops publishing, unless another registration armed the display meanwhile. */
+		if (remaining == 0U) {
+			irq = spin_lock_irqsave(&display->lock);
+
+			if (display->refresh_arm_epoch == epoch)
+				display->refresh_armed = false;
+
+			spin_unlock_irqrestore(&display->lock, irq);
+		}
+
+		/* Succeeded: the frame is counted and published. */
 		return;
 	}
 
@@ -849,6 +875,30 @@ amdrdna_display_flip_wait(
 
 	/* Succeeded: the plane reads the surface. */
 	return 0;
+}
+
+/*
+ * Starts or stops publishing each frame's refresh count to the GPU core
+ * (a refresh registration of the display is armed or none is).  The frame
+ * interrupts themselves are on from the takeover either way.  Any context:
+ * takes only the display's IRQ-safe lock.
+ */
+void
+amdrdna_display_refresh_arm(
+	struct amdrdna_device *device,
+	bool on)
+{
+	struct amdrdna_display *display;
+	unsigned long irq;
+
+	/* The interrupt thread reads both under the same lock; the epoch tells it an arm came. */
+	display = &device->display;
+	irq = spin_lock_irqsave(&display->lock);
+
+	display->refresh_armed = on;
+	display->refresh_arm_epoch++;
+
+	spin_unlock_irqrestore(&display->lock, irq);
 }
 
 /*

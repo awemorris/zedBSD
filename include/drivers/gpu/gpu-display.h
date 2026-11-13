@@ -44,7 +44,10 @@ struct drv_gpu_display_ops {
 	 * GPU_CAP_DISPLAY_CONTROL: both, or neither.  power gets a checked request
 	 * (state ON, OFF or SUSPEND, reserved zero) from a writable open, inside the
 	 * ordinary admission; refresh gets one from a readable open outside it, with
-	 * timeout_ns bounded by the core, and may sleep that long.
+	 * timeout_ns bounded by the core, and may sleep that long.  When the driver
+	 * has no refresh_arm, refresh is also called by the core's refresh watcher,
+	 * a thread of the device, with a NULL session, to wait for the boundaries
+	 * that end GPU_DISPLAY_FENCE refresh registrations.
 	 */
 	int (*power)(void *, void *, const struct gpu_display_power *);
 	int (*refresh)(void *, void *, struct gpu_display_refresh *);
@@ -93,6 +96,19 @@ struct drv_gpu_display_ops {
 	 */
 	int (*commit)(void *, void *, void *const *, struct gpu_display_commit *);
 	int (*overlay_info)(void *, void *, struct gpu_display_overlay_info *);
+
+	/*
+	 * Optional push of refresh boundaries, with GPU_CAP_DISPLAY_CONTROL.  The
+	 * core calls refresh_arm(private, display_id, 1) in a thread, without its
+	 * locks, after a refresh registration of the output is armed, and
+	 * refresh_arm(private, display_id, 0) after a cancel leaves the output
+	 * none; calls for one device do not overlap.  While armed, the driver calls
+	 * drv_gpu_display_refreshed() at each boundary of the output, with the
+	 * count refresh reports; when that returns zero the driver may stop until
+	 * the next arm.  A nonzero return from an arm refuses the registration.
+	 * Without refresh_arm the core waits for the boundaries with refresh.
+	 */
+	int (*refresh_arm)(void *, uint32_t, unsigned);
 };
 
 /* drv_gpu_display_ops.flags: presentation and the cursor bypass the open's admission. */

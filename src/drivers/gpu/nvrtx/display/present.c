@@ -121,6 +121,7 @@ const struct drv_gpu_display_ops nvrtx_display_ops = {
 	NULL,
 	0U,
 	NULL,
+	NULL,
 	NULL
 };
 

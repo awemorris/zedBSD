@@ -125,6 +125,7 @@ const struct drv_gpu_display_ops ghci_display_ops = {
 	display_adoption_wait,
 	DRV_GPU_DISPLAY_UNGATED,
 	NULL,
+	NULL,
 	NULL
 };
 
@@ -147,6 +148,7 @@ const struct drv_gpu_display_ops ghci_display_cursor_ops = {
 	display_cursor_hide,
 	display_adoption_wait,
 	DRV_GPU_DISPLAY_UNGATED,
+	NULL,
 	NULL,
 	NULL
 };

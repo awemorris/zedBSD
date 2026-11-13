@@ -20,8 +20,6 @@
 #include <uapi/gpu-job.h>
 #include "sync-internal.h"
 
-#define VULKAN_SYNC_POLL_NS UINT64_C(1000000)
-
 /* How often the submission timing says its sums, in nanoseconds, and the environment variable that turns it on. */
 #define VULKAN_TIMING_REPORT_NS UINT64_C(5000000000)
 #define VULKAN_TIMING_VARIABLE "VULKAN_ZEDBSD_SUBMIT_TIMING"
@@ -836,7 +834,7 @@ vulkan_fences_wait(
 
 	/*
 	 * The descriptors a sleeping pass polls: the context, one external
-	 * payload per fence, the wake and every hotplug registration.
+	 * payload per fence, the wake and every display-event registration.
 	 */
 	if (count != 0) {
 		status = sync_wait_capacity(count, fences, &descriptor_count);
@@ -854,7 +852,7 @@ vulkan_fences_wait(
 
 	/*
 	 * The wake is registered only by a pass that finds a fence nothing
-	 * else signals to this wait: an unsubmitted one, or a hotplug one.
+	 * else signals to this wait: an unsubmitted one, or a display-event one.
 	 */
 	memset(&wake, 0, sizeof(wake));
 	wake.read_fd = -1;
@@ -1033,7 +1031,10 @@ vulkan_sync_clock(
 }
 
 /*
- * Yields between nonblocking observations while leaving all Vulkan locks free.
+ * Sleeps between two nonblocking observations while leaving all Vulkan locks free.
+ *
+ * Only a wait for query results uses it: the renderer tells nobody when a
+ * query becomes available, so the wait asks again after the pause.
  */
 VkResult
 vulkan_sync_pause(
@@ -1042,13 +1043,9 @@ vulkan_sync_pause(
 	struct timespec delay;
 	int error;
 
-	/* Polling delays never exceed one quantum, even for indefinite Vulkan waits. */
-	if (nanoseconds > VULKAN_SYNC_POLL_NS)
-		nanoseconds = VULKAN_SYNC_POLL_NS;
-
 	/* Let an interrupt shorten this pause because the caller rechecks its deadline. */
-	delay.tv_sec = 0;
-	delay.tv_nsec = (long)nanoseconds;
+	delay.tv_sec = (time_t)(nanoseconds / UINT64_C(1000000000));
+	delay.tv_nsec = (long)(nanoseconds % UINT64_C(1000000000));
 	error = nanosleep(&delay, NULL);
 	if (error != 0) {
 		/* An ordinary signal is an opportunity to observe completion again. */
@@ -1465,12 +1462,13 @@ sync_fence_status(
 
 	status = vulkan_sync_device_status_locked(owner);
 	if (status == VK_SUCCESS) {
-		/* Observes a pending display event of the fence's permanent payload. */
+		/* Observes a pending display event of the fence's permanent payload; a spent one has none. */
 		fired = VK_FALSE;
 		if (sync->external == NULL &&
 		    !sync->software_signaled &&
-		    sync->event != VULKAN_SYNC_EVENT_NONE)
-			fired = vulkan_display_event_poll(owner, sync);
+		    (sync->event == VULKAN_SYNC_EVENT_HOTPLUG ||
+		     sync->event == VULKAN_SYNC_EVENT_REFRESH))
+			fired = vulkan_display_event_signaled(sync);
 
 		/* An observed display event stays signaled until the fence is reset. */
 		if (fired)
@@ -1543,14 +1541,13 @@ sync_fence_native_status(
  * Observes native payloads while retaining any-wait notification ownership.
  *
  * Each pass observes every fence and then sleeps on what can change the
- * pending ones: a queue marker, an external payload, a hotplug fence's
- * kernel registrations, or the wake that a submission, reset, import or
- * acquisition of a pending unsubmitted fence arms (and that the device's
- * and the context's errors arm too).  The wake is registered before the
- * observation the pass sleeps after, and drained before each observation,
- * so a change between the two leaves its token and is not lost.  Only a
- * pending refresh fence, which nothing signals to the wait, is observed
- * again after a bounded pause.
+ * pending ones: a queue marker, an external payload, a display-event
+ * fence's kernel registrations, or the wake that a submission, reset,
+ * import or acquisition of a pending unsubmitted fence arms (and that the
+ * device's and the context's errors arm too).  The wake is registered
+ * before the observation the pass sleeps after, and drained before each
+ * observation, so a change between the two leaves its token and is not
+ * lost.  No pass sleeps for a fixed time: each sleep ends on one of those.
  */
 static VkResult
 sync_fences_wait(
@@ -1572,8 +1569,7 @@ sync_fences_wait(
 	uint32_t descriptor_count;
 	uint32_t checked_count;
 	VkBool32 external_pending;
-	VkBool32 hotplug_pending;
-	VkBool32 refresh_pending;
+	VkBool32 event_pending;
 	VkBool32 woken;
 	uint64_t sequence;
 	uint64_t first_sequence;
@@ -1584,7 +1580,7 @@ sync_fences_wait(
 	VkBool32 completions;
 	struct vulkan_sync *sync;
 	struct vulkan_sync *first_external;
-	struct vulkan_sync *first_hotplug;
+	struct vulkan_sync *first_event;
 	struct vulkan_notification *notification;
 	struct vulkan_context *context;
 	VkResult status;
@@ -1616,7 +1612,7 @@ sync_fences_wait(
 		completed = 0;
 		first_sequence = 0;
 		first_external = NULL;
-		first_hotplug = NULL;
+		first_event = NULL;
 		first_woken = VK_FALSE;
 		first_pending = VK_TRUE;
 		missing = VK_FALSE;
@@ -1664,8 +1660,7 @@ sync_fences_wait(
 				sync = vulkan_sync_object((uint64_t)(uintptr_t)fences[index]);
 				sequence = sync->notification;
 				external_pending = VK_FALSE;
-				hotplug_pending = VK_FALSE;
-				refresh_pending = VK_FALSE;
+				event_pending = VK_FALSE;
 				if (sync->external != NULL) {
 					/* The shared payload's descriptor signals it. */
 					external_pending = VK_TRUE;
@@ -1675,28 +1670,24 @@ sync_fences_wait(
 						descriptors[descriptor_count].revents = 0;
 						descriptor_count++;
 					}
-				} else if (sync->event == VULKAN_SYNC_EVENT_HOTPLUG) {
+				} else if (sync->event == VULKAN_SYNC_EVENT_HOTPLUG ||
+					   sync->event == VULKAN_SYNC_EVENT_REFRESH) {
 					/* The kernel registrations signal it. */
-					hotplug_pending = VK_TRUE;
-				} else if (sync->event == VULKAN_SYNC_EVENT_REFRESH) {
-					/* Only an observation sees a refresh boundary. */
-					refresh_pending = VK_TRUE;
+					event_pending = VK_TRUE;
 				}
 
 				pthread_mutex_unlock(&device->mutex);
 
 				/*
 				 * The wake is what reaches the wait for a fence no queue
-				 * holds, and for a hotplug fence (which also sleeps on its
-				 * registrations): a later submission, reset, import or
-				 * acquisition arms it, and so does a device error.
+				 * holds, and for a display-event fence (which also sleeps
+				 * on its registrations): a later submission, reset, import
+				 * or acquisition arms it, and so does a device error.
 				 */
 				woken = VK_FALSE;
-				if (hotplug_pending) {
+				if (event_pending) {
 					woken = VK_TRUE;
-				} else if (sequence == 0 &&
-					   !external_pending &&
-					   !refresh_pending) {
+				} else if (sequence == 0 && !external_pending) {
 					woken = VK_TRUE;
 				}
 
@@ -1706,8 +1697,8 @@ sync_fences_wait(
 					if (external_pending)
 						first_external = sync;
 
-					if (hotplug_pending)
-						first_hotplug = sync;
+					if (event_pending)
+						first_event = sync;
 
 					first_woken = woken;
 					first_pending = VK_FALSE;
@@ -1723,11 +1714,12 @@ sync_fences_wait(
 					if (woken)
 						wake_needed = VK_TRUE;
 
-					/* A refresh fence no queue holds is seen only by observing it again. */
-					if (refresh_pending && sequence == 0)
-						missing = VK_TRUE;
-
-					/* Without a retained record, bounded native observation is the safe fallback. */
+					/*
+					 * A queue marker the pin did not find was submitted
+					 * between the pin and the observation (a consumed
+					 * record would have been observed complete): the next
+					 * pass pins its record before it sleeps.
+					 */
 					if (pins[index] == NULL &&
 					    sequence != 0 &&
 					    !external_pending)
@@ -1799,8 +1791,8 @@ sync_fences_wait(
 			descriptors[descriptor_count].events = POLLIN;
 			descriptors[descriptor_count].revents = 0;
 			descriptor_count++;
-			if (first_hotplug != NULL)
-				descriptor_count = sync_wait_events(descriptors, descriptor_count, first_hotplug);
+			if (first_event != NULL)
+				descriptor_count = sync_wait_events(descriptors, descriptor_count, first_event);
 
 			status = sync_notification_poll(device->object.context, delay, descriptors, descriptor_count, 1U, VK_FALSE);
 		} else if (!all && !missing) {
@@ -1817,29 +1809,28 @@ sync_fences_wait(
 				descriptor_count++;
 			}
 
-			/* Every pending hotplug fence's registrations; an any-wait reaching here observed all fences pending. */
+			/* Every pending display-event fence's registrations; an any-wait reaching here observed all fences pending. */
 			for (index = 0; index < count; index++) {
 				pthread_mutex_lock(&device->mutex);
 
 				sync = vulkan_sync_object((uint64_t)(uintptr_t)fences[index]);
-				hotplug_pending = VK_FALSE;
-				if (sync->external == NULL && sync->event == VULKAN_SYNC_EVENT_HOTPLUG)
-					hotplug_pending = VK_TRUE;
+				event_pending = VK_FALSE;
+				if (sync->external == NULL &&
+				    (sync->event == VULKAN_SYNC_EVENT_HOTPLUG ||
+				     sync->event == VULKAN_SYNC_EVENT_REFRESH))
+					event_pending = VK_TRUE;
 
 				pthread_mutex_unlock(&device->mutex);
 
 				/* The registrations never change while the fence lives. */
-				if (hotplug_pending)
+				if (event_pending)
 					descriptor_count = sync_wait_events(descriptors, descriptor_count, sync);
 			}
 
 			status = sync_notification_poll(device->object.context, delay, descriptors, descriptor_count, checked_count, completions);
 		} else {
-			/* A refresh fence no queue holds, or a marker no record retains, needs bounded native observation. */
-			if (delay > VULKAN_SYNC_POLL_NS)
-				delay = VULKAN_SYNC_POLL_NS;
-
-			status = vulkan_sync_pause(delay);
+			/* A marker the pin missed is pinned by the next pass at once: it does not sleep. */
+			status = VK_SUCCESS;
 		}
 
 		/* A transport wake never bypasses the next actual VkFenceStatus/error observation. */
@@ -1854,7 +1845,7 @@ sync_fences_wait(
 /*
  * Sizes the descriptors a sleeping pass of a fence wait may poll: the
  * context, one shared payload for each fence, the wake, and every
- * registration of the hotplug fences.
+ * registration of the display-event fences.
  */
 static VkResult
 sync_wait_capacity(
@@ -1869,7 +1860,7 @@ sync_wait_capacity(
 	/* The context, the wake, and at most one shared payload for each fence. */
 	total = (size_t)count + 2U;
 
-	/* Each fence's hotplug registrations, which stay fixed while the fence lives. */
+	/* Each fence's display-event registrations, which stay fixed while the fence lives. */
 	for (index = 0; index < count; index++) {
 		sync = vulkan_sync_object((uint64_t)(uintptr_t)fences[index]);
 		if (sync->event_fence_count > SIZE_MAX / sizeof(struct pollfd) - total)
@@ -1883,7 +1874,7 @@ sync_wait_capacity(
 	return VK_SUCCESS;
 }
 
-/* Appends a hotplug fence's registrations to a wait's descriptors; returns the new count. */
+/* Appends a display-event fence's registrations to a wait's descriptors; returns the new count. */
 static uint32_t
 sync_wait_events(
 	struct pollfd *descriptors,
@@ -1892,7 +1883,7 @@ sync_wait_events(
 {
 	uint32_t index;
 
-	/* The kernel makes each descriptor readable when its node's topology changes. */
+	/* The kernel makes each descriptor readable at its event (a topology change or a refresh boundary). */
 	for (index = 0; index < sync->event_fence_count; index++) {
 		descriptors[descriptor_count].fd = sync->event_fences[index].fd;
 		descriptors[descriptor_count].events = POLLIN;
@@ -2240,7 +2231,7 @@ sync_notification_wait(
  * The context's descriptor is the first one: with completions it wakes the
  * wait at a completed record of this open, without them only at the
  * context's loss.  An error on one of the first checked descriptors is a
- * loss; the descriptors after them (the wake, the hotplug registrations)
+ * loss; the descriptors after them (the wake, the display-event registrations)
  * only ask for another observation, whatever they report.
  */
 static VkResult
@@ -2341,7 +2332,7 @@ sync_release_storage(
 	sync = (struct vulkan_sync *)object;
 	vulkan_external_fence_finish(sync);
 
-	/* A hotplug fence's kernel registrations go with it. */
+	/* A display-event fence's kernel registrations go with it. */
 	vulkan_display_event_finish(sync);
 	if (sync->notification == 0)
 		return;

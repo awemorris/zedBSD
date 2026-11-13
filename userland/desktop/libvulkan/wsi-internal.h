@@ -335,7 +335,7 @@ void vulkan_wsi_display_nodes_finish(struct VkInstance_T *instance);
 struct vulkan_sync_event_fence;
 VkResult vulkan_wsi_display_node_count(struct VkPhysicalDevice_T *physical, uint32_t *count);
 VkResult vulkan_wsi_display_node_hotplug(struct VkPhysicalDevice_T *physical, uint32_t capacity, struct vulkan_sync_event_fence *entries, uint32_t *count);
-void vulkan_wsi_display_node_hotplug_cancel(struct VkPhysicalDevice_T *physical, uint64_t node_identity, int fd);
+void vulkan_wsi_display_node_fence_cancel(struct VkPhysicalDevice_T *physical, uint64_t node_identity, int fd);
 
 /* Reads a monotonic nanosecond clock fine enough for the cursor log's lengths. */
 uint64_t vulkan_wsi_cursor_clock(void);
