@@ -5,6 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
+| P1 | phase-runner-high | ws352 p001 の仕上げ (q2046-i02) | `/home/awe/zedBSD-worktrees/p1-ws352` / `agent/p1-ws352` | 動いている（2026-11-13 21:4x） | — |
 | P3 | phase-runner-high | ws334 p040 winpthreads を外す (q2052-i01) | `/home/awe/zedBSD-worktrees/p3-ws334c` / `agent/p3-ws334c` | 動いている（2026-11-13 21:1x） | — |
 | P2 | phase-runner | ws335 p042 compat を前提の設計 (q2051-i01) | `/home/awe/zedBSD-worktrees/p2-ws335f` / `agent/p2-ws335f` | 動いている（2026-11-13 21:0x） | — |
 | P1 | phase-runner-high | ws333 thermal の権限 (q2015-i01) | `/home/awe/zedBSD-worktrees/p1-ws333e` / `agent/p1-ws333e` | 返却（2026-11-12） | 03f66fffcf（merge b1ade10787） |

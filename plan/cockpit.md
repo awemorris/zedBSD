@@ -1,13 +1,13 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、書き方は [q1.md](q1.md) §3）。書き手は Q1 だけ。
-最終更新: 2026-11-13 21:15（Q1。P3 に WS334 p040、P2 に WS335 p042）。前の更新: 2026-11-12 23:42（Q1。master.md の「今の状態」を自律で回す形に書き直した、P1 に WS333 p025）。前の更新: 2026-11-11 12:0x（Q1。WS347 を立てた）。前の更新: 2026-11-03 16:10（Q1。WS346 完了、全 Phase cleared、既定 cache=on）。前の更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
+最終更新: 2026-11-13 21:45（Q1。P1 に WS352 p001 の仕上げ）。前の更新: 2026-11-13 21:15（Q1。P3 に WS334 p040、P2 に WS335 p042）。前の更新: 2026-11-12 23:42（Q1。master.md の「今の状態」を自律で回す形に書き直した、P1 に WS333 p025）。前の更新: 2026-11-11 12:0x（Q1。WS347 を立てた）。前の更新: 2026-11-03 16:10（Q1。WS346 完了、全 Phase cleared、既定 cache=on）。前の更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | q2046 | 作業中 | WS352: desktop の idle の短い poll を無くす（compositor・input・client） | 5330 の idle を WS333 p029 と同等に |
+| P1 | [WS352](ws352/ws.md) | desktop の idle の短い poll を無くす | q2046-i02: poll の timeout を使う所の一覧と、thread 化・事象で要らなくなったかの確かめ（直しは進めない） | 一覧をユーザーへ、直す範囲はその後に決める |
 | P2 | [WS335](ws335/ws.md) | 自前の TLS・暗号の library | q2051: p042 compat を前提に書き換える設計（mailer・libbrowser・browser-win32、macro を無くす、OpenSSL・OpenSSH を外部に） | 実装は p043〜 を Sonnet に、その後 WS335 を完了 |
 | P3 | [WS334](ws334/ws.md) | Windows 版のブラウザ | q2052: p040 winpthreads を外す（Windows の thread を Win32 の API に） | Makefile の案（`-lpthread` を外す）をユーザーへ |
 | P4 | — | 待機 | WS347 p009 cleared（host は local memory に GOP 以外触れない） | p004（VF2＋KC705 の実機） |
