@@ -5,7 +5,9 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner-high | ws353 p005 timer ほか (q2061-i01) | `/home/awe/zedBSD-worktrees/p1-ws353e` / `agent/p1-ws353e` | 動いている（2026-11-14） | — |
+| P1 | phase-runner-high | ws353 p006 締め切り A (q2062-i01) | `/home/awe/zedBSD-worktrees/p1-ws353f` / `agent/p1-ws353f` | 動いている（2026-11-14） | — |
+| P2 | phase-runner-high | ws353 p009 present の fence (q2063-i01) | `/home/awe/zedBSD-worktrees/p2-ws353a` / `agent/p2-ws353a` | 動いている（2026-11-14） | — |
+| P1 | phase-runner-high | ws353 p005 timer ほか (q2061-i01) | `/home/awe/zedBSD-worktrees/p1-ws353e` / `agent/p1-ws353e` | 返却（2026-11-14、cleared） | cff19670bf（merge 6b1c2de16a） |
 | P1 | phase-runner-high | ws353 p004 hotplug の thread (q2060-i01) | `/home/awe/zedBSD-worktrees/p1-ws353d` / `agent/p1-ws353d` | 返却（2026-11-14、cleared） | e7584e6425 |
 | P1 | phase-runner-high | ws353 p003 libvulkan (q2059-i01) | `/home/awe/zedBSD-worktrees/p1-ws353c` / `agent/p1-ws353c` | 返却（2026-11-14、cleared） | e5039925e0 |
 | P2 | phase-runner-high | BUG-431 venus の display の事象 (q2058-i01) | `/home/awe/zedBSD-worktrees/p2-bug431` / `agent/p2-bug431` | 返却（2026-11-14、fixed） | 5ca7945a36 |

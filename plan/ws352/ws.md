@@ -19,6 +19,8 @@ desktop が何もしていない時に、compositor（`/bin/wayland`）・input 
 
 - 2026-11-13: ユーザーの決定で、待ち方の根本の作り直しを [WS353](../ws353/ws.md) で設計する。p002 は WS353 の設計を待つ。
 
+- 2026-11-14: branch `agent/p1-ws352`（b05187933a を除く）は WS353 p005 で main に取り込んだ（merge 6b1c2de16a の中の 3e9c426f74）。p002 の残りは WS353 の各 Phase が引き継ぐ。
+
 ## Phase
 
 | Phase | 中身 | 状態 | 依存 |

@@ -2,7 +2,7 @@
 
 # ws353-p002: kernel の display の事象の fence（HOTPLUG）
 
-Status: uncleared（2026-11-14 00:46 P1、q2057-i01。kernel の実装・3 機種の build・i915 の host 試験・QEMU の 7 step 中 6 は PASS。QEMU の latency の step だけ FAIL: venus の driver が idle の間の head の変化を見ない既存の事象の取りこぼしで、fence の側ではない。下の「結果」）
+Status: cleared（2026-11-14 Q1 判定、BUG-431 の直しで latency PASS）。前: uncleared（2026-11-14 00:46 P1、q2057-i01。kernel の実装・3 機種の build・i915 の host 試験・QEMU の 7 step 中 6 は PASS。QEMU の latency の step だけ FAIL: venus の driver が idle の間の head の変化を見ない既存の事象の取りこぼしで、fence の側ではない。下の「結果」）
 Parent: [WS353](../ws.md)。設計 [design.md](../design.md) §2.1・§3。
 
 ## 目的
