@@ -1447,6 +1447,11 @@ amdrdna_node_device_failed(
 	struct amdrdna_device *device,
 	int error);
 
+void
+amdrdna_node_display_changed(
+	struct amdrdna_device *device,
+	uint64_t topology);
+
 /* sessions.c: stage A5s. */
 int
 amdrdna_a5s_sessions(

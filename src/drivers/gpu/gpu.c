@@ -87,6 +87,14 @@ enum gpu_stop_state {
 	GPU_STOP_QUARANTINED
 };
 
+/* One display-event registration slot advances from reserved to armed, then signaled, then free again. */
+enum gpu_event_fence_state {
+	GPU_EVENT_FENCE_FREE,
+	GPU_EVENT_FENCE_RESERVED,
+	GPU_EVENT_FENCE_ARMED,
+	GPU_EVENT_FENCE_SIGNALED
+};
+
 /*
  * One registered GPU, retained by its owner and every cdev generation.
  *
@@ -224,6 +232,20 @@ struct gpu_fence_binding {
 };
 
 /*
+ * One display-event fence an open registered (GPU_DISPLAY_FENCE).
+ *
+ * The registry lock protects every field.  The slot's address is the fence's
+ * producer, so only an armed slot can signal its payload.  A signaled slot keeps
+ * its payload reference until a thread reclaims it: the signal may run in an
+ * interrupt handler, where the last reference must not be dropped.
+ */
+struct gpu_event_fence {
+	struct kernel_handle *handle;
+	uint64_t sequence;
+	enum gpu_event_fence_state state;
+};
+
+/*
  * One open file description shared by dup/fork until its final close.
  *
  *  - Device session ownership keeps backend state alive.
@@ -267,6 +289,13 @@ struct gpu_session {
 	/* The registry lock protects per-open observation and successful acknowledgement. */
 	uint64_t topology_observed;
 	uint64_t topology_acknowledged;
+
+	/*
+	 * The display-event fences of this open; the registry lock protects them.
+	 * A topology change signals the armed ones it passed, failure and the
+	 * final close signal the rest with ENODEV, and the final close drops them.
+	 */
+	struct gpu_event_fence event_fences[GPU_DISPLAY_FENCE_MAX];
 
 	/*
 	 * Whether a poll asked this open for readable records since its
@@ -428,6 +457,12 @@ static int gpu_info_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_events_snapshot(struct gpu_session *session, uint64_t *sequence);
 static int gpu_events_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_refresh_ioctl(struct gpu_session *session, uintptr_t argument);
+static int gpu_display_fence_ioctl(struct gpu_session *session, uintptr_t argument);
+static int gpu_display_fence_cancel_ioctl(struct gpu_session *session, uintptr_t argument);
+static int gpu_event_fence_reserve(struct gpu_session *session, struct gpu_event_fence **result);
+static void gpu_event_fence_abandon(struct gpu_event_fence *slot, struct kernel_handle *handle);
+static void gpu_event_fence_signal_locked(struct gpu_event_fence *slot, int status);
+static void gpu_event_fence_release(struct gpu_session *session);
 static int gpu_create_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_destroy_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_handle_allocate(uint64_t *handle);
@@ -956,6 +991,54 @@ drv_gpu_report_session_error(
 	poll_notify();
 
 	/* Succeeded: logical error is visible without claiming that DMA has stopped. */
+	return;
+}
+
+/*
+ * Signals the display-event fences that a new topology sequence passed.
+ *
+ * Every open of the device shares the sequence, so each armed hotplug
+ * registration whose sequence is older ends now; the poll wake that follows
+ * also reaches the opens waiting for POLLPRI.
+ */
+void
+drv_gpu_display_changed(
+	struct drv_gpu_device *device,
+	uint64_t sequence)
+{
+	struct gpu_session *session;
+	struct gpu_event_fence *slot;
+	unsigned index;
+	unsigned long irq;
+
+	/* A backend before publication or after withdrawal has no registrations, only pollers. */
+	if (device == NULL) {
+		poll_notify();
+		return;
+	}
+
+	/* Ends every registration the new sequence passed, in every open of the device. */
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	session = device->open_sessions;
+	while (session != NULL) {
+		/* Each armed registration remembers the sequence it was read against. */
+		for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+			slot = &session->event_fences[index];
+			if (slot->state == GPU_EVENT_FENCE_ARMED && sequence > slot->sequence)
+				gpu_event_fence_signal_locked(slot, 0);
+		}
+
+		/* Each linked session stays allocated while the registry lock is held. */
+		session = session->next_open;
+	}
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The fence descriptors and the opens waiting for POLLPRI observe the change. */
+	poll_notify();
+
+	/* Succeeded: no registration of an older sequence is left armed. */
 	return;
 }
 
@@ -1772,6 +1855,9 @@ gpu_session_drop(
 
 	spin_unlock_irqrestore(&gpu_registry_lock, irq);
 
+	/* No topology change reaches the unlinked open, so its display-event payload references go. */
+	gpu_event_fence_release(session);
+
 	/* Frees per-open memory while its device still has a withdrawal barrier. */
 	kern_free(session->stream);
 	kern_free(session);
@@ -2254,6 +2340,26 @@ gpu_ioctl_body(
 		return 0;
 	}
 
+	/* A display-event registration, like the event snapshot, never holds table admission. */
+	if (command == GPU_DISPLAY_FENCE) {
+		error = gpu_display_fence_ioctl(session, argument);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the caller owns a fence the next topology change signals. */
+		return 0;
+	}
+
+	/* Withdrawing a registration only touches this open's registration slots. */
+	if (command == GPU_DISPLAY_FENCE_CANCEL) {
+		error = gpu_display_fence_cancel_ioctl(session, argument);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the kernel no longer signals the named fence. */
+		return 0;
+	}
+
 	/* Shared completion state must progress while another thread waits before hardware submission. */
 	if (command == GPU_FENCE_CREATE ||
 	    command == GPU_FENCE_QUERY ||
@@ -2622,6 +2728,329 @@ gpu_events_ioctl(
 
 	/* Succeeded: only the successfully returned observation and requested ACK were committed. */
 	return 0;
+}
+
+/* Registers a display-event fence the kernel signals at the next topology change (GPU_DISPLAY_FENCE). */
+static int
+gpu_display_fence_ioctl(
+	struct gpu_session *session,
+	uintptr_t argument)
+{
+	struct gpu_display_fence request;
+	struct gpu_event_fence *slot;
+	struct kernel_handle *handle;
+	uint64_t cursor;
+	uint64_t sequence;
+	unsigned signaled;
+	unsigned long irq;
+	int error;
+
+	/* A registration reads the event state only a node that offers it has. */
+	if ((session->device->ops->capabilities & GPU_CAP_DISPLAY_EVENTS) == 0U)
+		return EOPNOTSUPP;
+
+	/* Watching the topology, like the snapshot, needs read access and nothing more. */
+	if (session->readable == 0U)
+		return EACCES;
+
+	/* The whole request is input except the descriptor the kernel returns. */
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+
+	/* Versioned fixed-width framing must agree before any state is created. */
+	if (request.version != GPU_ABI_VERSION || request.size != sizeof(request))
+		return EINVAL;
+
+	/* Unknown descriptor policy, a filled output and reserved fields carry no meaning yet. */
+	if ((request.flags & ~(GPU_HANDLE_CLOEXEC | GPU_HANDLE_CLOFORK)) != 0U ||
+	    request.fd != -1 ||
+	    request.reserved != 0U ||
+	    request.reserved2 != 0U)
+		return EINVAL;
+
+	/* A refresh registration is not offered yet. */
+	if (request.event == GPU_DISPLAY_FENCE_REFRESH)
+		return EOPNOTSUPP;
+
+	/* Any other event than the hotplug one is unknown. */
+	if (request.event != GPU_DISPLAY_FENCE_HOTPLUG)
+		return EINVAL;
+
+	/* A hotplug registration watches the whole node, so it names no display. */
+	if (request.display_id != 0U || request.generation != 0U)
+		return EINVAL;
+
+	/* Takes a free slot of this open, or reports that it holds the most it may. */
+	error = gpu_event_fence_reserve(session, &slot);
+	if (error != 0)
+		return error;
+
+	/* The sequence now is the one the registration waits to see passed. */
+	error = gpu_events_snapshot(session, &cursor);
+	if (error != 0) {
+		gpu_event_fence_abandon(slot, NULL);
+		return error;
+	}
+
+	/* An unsignaled payload of this node; the caller's descriptor will own this reference. */
+	error = drv_gpu_fence_create(session->device->identity, 0U, &handle);
+	if (error != 0) {
+		gpu_event_fence_abandon(slot, NULL);
+		return error;
+	}
+
+	/* The slot becomes the only producer that can signal the payload. */
+	error = drv_gpu_fence_bind(handle, 1U, slot);
+	if (error != 0) {
+		gpu_event_fence_abandon(slot, NULL);
+		handle_put(handle);
+		return error;
+	}
+
+	/* The slot keeps its own reference, so it can signal after the descriptor is closed. */
+	handle_get(handle);
+
+	/* Arms the slot: from now on a topology change past the cursor signals it. */
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	slot->handle = handle;
+	slot->sequence = cursor;
+	slot->state = GPU_EVENT_FENCE_ARMED;
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* Reads the sequence again: a change between the first read and the arming had nobody to signal. */
+	error = gpu_events_snapshot(session, &sequence);
+
+	/* Signals at once for a change that raced the arming, or ends a registration that can no longer be read. */
+	signaled = 0U;
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	if (slot->state == GPU_EVENT_FENCE_ARMED) {
+		if (error != 0) {
+			gpu_event_fence_signal_locked(slot, error);
+			signaled = 1U;
+		} else if (sequence > cursor) {
+			gpu_event_fence_signal_locked(slot, 0);
+			signaled = 1U;
+		}
+	}
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* A fence signaled here is observed by the pollers like one a change signals. */
+	if (signaled != 0U)
+		poll_notify();
+
+	/* Publishes the descriptor only after a complete copy of the reply. */
+	error = gpu_export_install(handle, &request, sizeof(request), request.flags, &request.fd, argument);
+	if (error != 0) {
+		gpu_event_fence_abandon(slot, handle);
+		handle_put(handle);
+		return error;
+	}
+
+	/* Succeeded: the descriptor and the armed or signaled slot each own a payload reference. */
+	return 0;
+}
+
+/* Withdraws one display-event registration of this open (GPU_DISPLAY_FENCE_CANCEL). */
+static int
+gpu_display_fence_cancel_ioctl(
+	struct gpu_session *session,
+	uintptr_t argument)
+{
+	struct gpu_display_fence_cancel request;
+	struct gpu_event_fence *slot;
+	struct kernel_handle *handle;
+	unsigned found;
+	unsigned index;
+	unsigned long irq;
+	int error;
+
+	/* Only a node that offers display events has registrations. */
+	if ((session->device->ops->capabilities & GPU_CAP_DISPLAY_EVENTS) == 0U)
+		return EOPNOTSUPP;
+
+	/* Cancel needs the read access a registration needed. */
+	if (session->readable == 0U)
+		return EACCES;
+
+	/* The request names the fence and nothing else. */
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+
+	/* Versioned fixed-width framing must agree before the descriptor is looked up. */
+	if (request.version != GPU_ABI_VERSION || request.size != sizeof(request))
+		return EINVAL;
+
+	/* The reserved field carries no meaning yet. */
+	if (request.reserved != 0U)
+		return EINVAL;
+
+	/* The descriptor's payload, retained across the search. */
+	handle = handle_fd_get(request.fd, KERNEL_HANDLE_DRIVER);
+	if (handle == NULL)
+		return EBADF;
+
+	/* Finds the slot that holds the payload and frees it; an armed one gives up its producer authority. */
+	found = 0U;
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+		slot = &session->event_fences[index];
+		if (slot->handle != handle)
+			continue;
+
+		/* An armed payload stays unsignaled and no producer can signal it any more. */
+		if (slot->state == GPU_EVENT_FENCE_ARMED)
+			(void)drv_gpu_fence_unbind(handle, 1U, slot);
+
+		slot->handle = NULL;
+		slot->sequence = 0U;
+		slot->state = GPU_EVENT_FENCE_FREE;
+		found = 1U;
+		break;
+	}
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The freed slot's reference goes outside the lock. */
+	if (found != 0U)
+		handle_put(handle);
+
+	/* The lookup's reference goes too. */
+	handle_put(handle);
+
+	/* A fence this open never registered, or one already forgotten, has nothing to withdraw. */
+	if (found == 0U)
+		return ENOENT;
+
+	/* Succeeded: the kernel no longer holds the registration. */
+	return 0;
+}
+
+/* Reserves a free registration slot, first reclaiming the signaled ones; ENOSPC when every slot is armed. */
+static int
+gpu_event_fence_reserve(
+	struct gpu_session *session,
+	struct gpu_event_fence **result)
+{
+	struct kernel_handle *reclaimed[GPU_DISPLAY_FENCE_MAX];
+	struct gpu_event_fence *slot;
+	unsigned reclaimed_count;
+	unsigned index;
+	unsigned long irq;
+
+	/* Frees the signaled slots and takes the first free one. */
+	*result = NULL;
+	reclaimed_count = 0U;
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+		slot = &session->event_fences[index];
+
+		/* A signaled slot's payload is the descriptor's alone once the slot lets go. */
+		if (slot->state == GPU_EVENT_FENCE_SIGNALED) {
+			reclaimed[reclaimed_count] = slot->handle;
+			reclaimed_count++;
+			slot->handle = NULL;
+			slot->sequence = 0U;
+			slot->state = GPU_EVENT_FENCE_FREE;
+		}
+
+		/* The first free slot is reserved, so a concurrent registration cannot take it. */
+		if (slot->state == GPU_EVENT_FENCE_FREE && *result == NULL) {
+			slot->state = GPU_EVENT_FENCE_RESERVED;
+			*result = slot;
+		}
+	}
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The reclaimed references are dropped outside the lock, where a payload may be freed. */
+	for (index = 0U; index < reclaimed_count; index++)
+		handle_put(reclaimed[index]);
+
+	/* Every slot holds an unsignaled registration. */
+	if (*result == NULL)
+		return ENOSPC;
+
+	/* Succeeded: the caller owns the reserved slot. */
+	return 0;
+}
+
+/* Frees a slot the registration could not finish; with a handle, drops the slot's reference too. */
+static void
+gpu_event_fence_abandon(
+	struct gpu_event_fence *slot,
+	struct kernel_handle *handle)
+{
+	unsigned owned;
+	unsigned long irq;
+
+	/* The slot still holds the payload unless a concurrent registration reclaimed it after a signal. */
+	owned = 0U;
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	if (handle == NULL || slot->handle == handle) {
+		owned = 1U;
+		slot->handle = NULL;
+		slot->sequence = 0U;
+		slot->state = GPU_EVENT_FENCE_FREE;
+	}
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The slot's own reference goes with the slot; the caller drops its own. */
+	if (owned != 0U && handle != NULL)
+		handle_put(handle);
+
+	/* Succeeded: the slot no longer names the payload. */
+	return;
+}
+
+/* Signals one armed registration's payload under the registry lock; the caller wakes the pollers after it. */
+static void
+gpu_event_fence_signal_locked(
+	struct gpu_event_fence *slot,
+	int status)
+{
+	/* The armed slot is the bound producer of generation one, so the signal cannot be refused. */
+	(void)drv_gpu_fence_signal_deferred(slot->handle, 1U, slot, status);
+
+	/* SIGNALED keeps the reference until a thread reclaims the slot. */
+	slot->state = GPU_EVENT_FENCE_SIGNALED;
+
+	/* Succeeded: every alias of the payload observes the terminal state. */
+	return;
+}
+
+/* Drops every payload reference of an open that no topology change can reach any more. */
+static void
+gpu_event_fence_release(
+	struct gpu_session *session)
+{
+	struct gpu_event_fence *slot;
+	unsigned index;
+
+	/* The final close signaled every armed slot, so each held payload is only referenced here. */
+	for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+		slot = &session->event_fences[index];
+
+		/* A held payload loses the slot's reference; the descriptor may keep it alive. */
+		if (slot->handle != NULL)
+			handle_put(slot->handle);
+
+		/* The slot is empty, though the open is about to be freed. */
+		slot->handle = NULL;
+		slot->state = GPU_EVENT_FENCE_FREE;
+	}
+
+	/* Succeeded: no payload reference is left in the open. */
+	return;
 }
 
 /*
@@ -8249,6 +8678,12 @@ gpu_session_fail_locked(
 			binding->generation,
 			session,
 			session->error);
+	}
+
+	/* A failed or closing open can no longer read the topology, so its display-event waiters learn it now. */
+	for (index = 0U; index < GPU_DISPLAY_FENCE_MAX; index++) {
+		if (session->event_fences[index].state == GPU_EVENT_FENCE_ARMED)
+			gpu_event_fence_signal_locked(&session->event_fences[index], ENODEV);
 	}
 
 	/* Admission, record observers and reclamation loops all see the same error. */

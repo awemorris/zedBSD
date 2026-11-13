@@ -71,7 +71,7 @@ static int venus_wait_expired(uint64_t started);
 
 
 /*
- * Publishes an inventory invalidation without borrowing a common GPU registration.
+ * Publishes an inventory invalidation through a retained snapshot of the GPU registration.
  *
  * Both IRQ delivery and a query that clears a pending configuration event call
  * this helper. Duplicate invalidations are harmless; no hardware event may be
@@ -81,6 +81,8 @@ void
 drv_venus_transport_display_changed(
 	struct venus_transport *transport)
 {
+	struct drv_gpu_device *gpu;
+	uint64_t sequence;
 	unsigned long irq;
 
 	/* Saturation is a persistent error rather than reuse of an acknowledged sequence. */
@@ -91,10 +93,19 @@ drv_venus_transport_display_changed(
 	else
 		transport->topology_sequence++;
 
+	/* The published wrapper is retained, as a fault snapshot does, until the core has heard of the change. */
+	sequence = transport->topology_sequence;
+	gpu = transport->gpu;
+	if (gpu != NULL)
+		drv_gpu_retain(gpu);
+
 	spin_unlock_irqrestore(&transport->queue_lock, irq);
 
-	/* Pollers may re-enter the backend only after its event lock is released. */
-	poll_notify();
+	/* Display-event fences and pollers may re-enter the backend only after its event lock is released. */
+	drv_gpu_display_changed(gpu, sequence);
+
+	/* The snapshot's reference goes once the core is done with the wrapper. */
+	drv_gpu_release(gpu);
 
 	/* Succeeded: transport ownership, independent from sessions, bounds IRQ access. */
 	return;

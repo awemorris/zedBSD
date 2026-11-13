@@ -33,8 +33,10 @@ struct drv_gpu_display_ops {
 	 * It neither sleeps, allocates, clears events nor issues hardware commands.
 	 * The file retains the backend session even when unregister makes it offline.
 	 * A driver-owned sequence starts at one and never wraps; overflow is terminal
-	 * EOVERFLOW. Event publication calls poll_notify() outside its short lock,
-	 * without dereferencing a borrowed common registration handle.
+	 * EOVERFLOW. The sequence belongs to the device, the same for every open.
+	 * Event publication calls drv_gpu_display_changed() with the new sequence
+	 * outside its short lock, through a registration handle that its teardown
+	 * keeps alive until the publication can no longer run.
 	 */
 	int (*events)(void *, void *, uint64_t *);
 

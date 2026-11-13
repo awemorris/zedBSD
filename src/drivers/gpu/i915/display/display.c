@@ -2548,6 +2548,39 @@ drv_i915_display_events(
 }
 
 /*
+ * Tells the GPU core that the display topology's sequence moved.
+ *
+ * The sequence passed on is the one the node's events operation reports now,
+ * whichever variant (panel, boot framebuffer, capture) the node was bound
+ * with, so the core compares registrations against the number they read.
+ * Called from the hotplug works after their sequence lock is released.
+ */
+void
+drv_i915_display_changed(
+	struct i915_device *device)
+{
+	const struct drv_gpu_display_ops *display;
+	uint64_t sequence;
+	int error;
+
+	/* No sequence passes a registration when the node reports no events. */
+	sequence = 0U;
+	display = device->gpu_ops.display;
+	if (display != NULL && display->events != NULL) {
+		/* The sequence of the variant the node was bound with; the session is not read. */
+		error = display->events(device, NULL, &sequence);
+		if (error != 0)
+			sequence = 0U;
+	}
+
+	/* The core signals the fences the sequence passed and wakes the pollers. */
+	drv_gpu_display_changed(device->gpu, sequence);
+
+	/* Succeeded: the core heard of the change. */
+	return;
+}
+
+/*
  * Finds the hotplug path's connector of the resident output: the HDMI
  * connector when it drives HDMI, the eDP connector otherwise; -1 when the
  * path has none.

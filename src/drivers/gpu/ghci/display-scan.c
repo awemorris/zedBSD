@@ -60,7 +60,6 @@
 #include <kern/clock.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
-#include <kern/poll.h>
 #include <kern/text-display.h>
 #include <uapi/errno.h>
 
@@ -442,6 +441,7 @@ ghci_display_service(
 	struct ghci_display *display;
 	unsigned long irq;
 	uint64_t adopted;
+	uint64_t topology;
 	uint32_t events;
 	int changed;
 	int locked;
@@ -494,10 +494,22 @@ ghci_display_service(
 
 	mutex_unlock(&device->display_lock);
 
-	/* The memory let go of when the locks are free, and the waiters on the display's events. */
+	/* The memory let go of when the locks are free. */
 	scan_flush(device, 1);
-	if (changed)
-		poll_notify();
+
+	/* A round that changed nothing has nobody to tell. */
+	if (!changed)
+		return;
+
+	/* The sequence the display-event fences are compared against, read as the events operation reads it. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	topology = display->topology;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	/* The display-event fences the sequence passed, and the waiters on the display's events. */
+	drv_gpu_display_changed(device->gpu, topology);
 }
 
 /*

@@ -58,7 +58,6 @@
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
-#include <kern/poll.h>
 #include <kern/sched.h>
 
 #include <uapi/errno.h>
@@ -1092,8 +1091,8 @@ i915_xd9_node_bump(
 
 	spin_unlock_irqrestore(&node->sequence_lock, enabled);
 
-	/* Succeeded: the sessions hear of it. */
-	poll_notify();
+	/* The display-event fences and the sessions waiting for the change hear of it. */
+	drv_i915_display_changed(node->device);
 }
 
 /* Finds the output of an external display id: 0, or ENOENT. */

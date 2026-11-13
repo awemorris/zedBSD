@@ -254,6 +254,32 @@ amdrdna_node_device_failed(
 }
 
 /*
+ * Tells the GPU core that the display's topology sequence moved to topology:
+ * the display-event fences it passed are signaled and the pollers woken.
+ * Called after the display's lock is released.
+ */
+void
+amdrdna_node_display_changed(
+	struct amdrdna_device *device,
+	uint64_t topology)
+{
+	struct amdrdna_node *node;
+	struct drv_gpu_device *gpu;
+
+	/* Without a registered device only the pollers are woken. */
+	gpu = NULL;
+	node = device->node;
+	if (node != NULL)
+		gpu = node->gpu;
+
+	/* The core signals the fences the sequence passed and wakes the pollers. */
+	drv_gpu_display_changed(gpu, topology);
+
+	/* Succeeded: the core heard of the change. */
+	return;
+}
+
+/*
  * Opens a session of the node: its record and its address space.  The
  * core's open and the driver's own checks open sessions the same way.
  *
