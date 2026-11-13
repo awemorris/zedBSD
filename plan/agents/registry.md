@@ -5,8 +5,9 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner-high | ws353 p003 libvulkan (q2059-i01) | `/home/awe/zedBSD-worktrees/p1-ws353c` / `agent/p1-ws353c` | 動いている（2026-11-14） | — |
-| P2 | phase-runner-high | BUG-431 venus の display の事象 (q2058-i01) | `/home/awe/zedBSD-worktrees/p2-bug431` / `agent/p2-bug431` | 動いている（2026-11-14） | — |
+| P1 | phase-runner-high | ws353 p004 hotplug の thread (q2060-i01) | `/home/awe/zedBSD-worktrees/p1-ws353d` / `agent/p1-ws353d` | 動いている（2026-11-14） | — |
+| P1 | phase-runner-high | ws353 p003 libvulkan (q2059-i01) | `/home/awe/zedBSD-worktrees/p1-ws353c` / `agent/p1-ws353c` | 返却（2026-11-14、cleared） | e5039925e0 |
+| P2 | phase-runner-high | BUG-431 venus の display の事象 (q2058-i01) | `/home/awe/zedBSD-worktrees/p2-bug431` / `agent/p2-bug431` | 返却（2026-11-14、fixed） | 5ca7945a36 |
 | P1 | phase-runner-high | ws353 p002 kernel の hotplug の fence (q2057-i01) | `/home/awe/zedBSD-worktrees/p1-ws353b` / `agent/p1-ws353b` | 動いている（2026-11-13） | — |
 | P1 | phase-runner-high | ws353 p001 設計 (q2056-i01) | `/home/awe/zedBSD-worktrees/p1-ws353` / `agent/p1-ws353` | 動いている（2026-11-13 22:2x） | — |
 | Sonnet | phase-runner-low | ws335 p043 (q2053-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p043` / `agent/s-ws335-p043` | 動いている（2026-11-13 22:3x） | — |
