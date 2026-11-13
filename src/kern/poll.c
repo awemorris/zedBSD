@@ -12,9 +12,11 @@
  * device; poll_notify_object), and wakes only the polls that wait for that
  * object.  A poll learns the objects it waits for while it scans: each
  * file type's poll operation names the objects its answer reads
- * (poll_wait_object).  A descriptor whose operation names none, and a poll
- * that follows more objects than it can hold, are woken by every change, as
- * are all polls by a change that names no object (poll_notify).
+ * (poll_wait_object), and every poll follows its process's descriptor
+ * table (a descriptor closed or reused).  A descriptor whose operation
+ * names none, and a poll that follows more objects than it can hold, are
+ * woken by every change, as are all polls by a change that names no object
+ * (poll_notify).
  *
  * Every change counts the channel's sequence.  A poll observes the
  * sequence before its scan and sleeps only when it is unchanged, so a
@@ -450,6 +452,9 @@ poll_scan(
 			waiter->every = 1U;
 		else
 			thread->poll_waiter = waiter;
+
+		/* A change to the descriptor table (a descriptor closed or reused) wakes the poll too. */
+		poll_wait_object(process->fd);
 	}
 
 	/* Count only descriptors whose requested or terminal readiness is observable. */

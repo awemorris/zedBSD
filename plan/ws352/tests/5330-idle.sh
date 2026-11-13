@@ -43,7 +43,7 @@ NV_BOOT=/dev/disk/by-partuuid/d4dbe962-cc37-4f27-8529-bb7446730178
 NV_ROOT=/dev/disk/by-partuuid/24c59452-7bc3-42e7-b532-5653d935c325
 T=/tmp/ws352-thermal
 SY=/tmp/ws352-sysctl
-for f in "$VMUNIX" "$STATIC/sysctl" "$STATIC/thermal" "$STATIC/wifi"; do
+for f in "$VMUNIX" "$STATIC/sysctl" "$STATIC/thermal" "$STATIC/wifi" "$STATIC/laytool"; do
 	[ -f "$f" ] || { echo "5330-idle: FAIL: no $f"; exit 1; }
 done
 if [ -n "$TREE" ]; then
@@ -221,34 +221,19 @@ fi
 install "$VMUNIX"
 to_zedbsd first
 if [ -n "$TREE" ]; then
-	# The helper on zedBSD: each file written beside its place and renamed over it (a running program keeps its
-	# old file), each link made again; then the files' sums.
-	cat > "$LOGS/lay.sh" <<'EOS'
-set -u
-cd /tmp/ws352-tree || exit 1
-find bin sbin lib usr -type d | while read -r d; do mkdir -p "/$d"; done
-find bin sbin lib usr -type f | while read -r f; do
-	# A set-user or set-group program (sudo, su, passwd) keeps the NVMe's: its owner and mode come from the image.
-	if [ -u "/$f" ] || [ -g "/$f" ]; then echo "kept /$f"; continue; fi
-	cp "$f" "/$f.ws352-new" || exit 1
-	if [ -x "$f" ]; then chmod 755 "/$f.ws352-new"; else chmod 644 "/$f.ws352-new"; fi
-	mv "/$f.ws352-new" "/$f" || exit 1
-done
-sh /tmp/ws352-tree-links.sh
-sync
-echo laid $(find bin sbin lib usr -type f | wc -l) files and $(grep -c . /tmp/ws352-tree-links.sh) links
-EOS
-	# The tree's directories and files go in the tar; its links are made again by commands.
+	# The tree's directories and files go in the tar; its links are made in the copy on zedBSD by the system's
+	# own ln before anything is laid; laytool (static) lays it all and reads it back.
 	(cd "$TREE" && find bin sbin lib usr ! -type l) | sort > "$LOGS/tree-list.txt"
-	(cd "$TREE" && find bin sbin lib usr -type l | sort | while read -r f; do echo "ln -sf $(readlink "$f") /$f"; done) > "$LOGS/tree-links.sh"
+	(cd "$TREE" && find bin sbin lib usr -type l | sort | while read -r f; do echo "ln -sf $(readlink "$f") $f"; done) > "$LOGS/tree-links.sh"
 	(cd "$TREE" && tar --format=ustar --no-recursion -cf - -T "$OLDPWD/$LOGS/tree-list.txt") > "$LOGS/tree.tar" || fail "tree tar"
-	zput "$LOGS/tree-links.sh" /tmp/ws352-tree-links.sh || fail "copy of the links"
 	TO=600 timeout 600 sshpass -p "$ZBU" scp $SO -q "$LOGS/tree.tar" "$ZBU@$ZB:/tmp/ws352-tree.tar" || fail "copy of the tree"
-	zput "$LOGS/lay.sh" /tmp/ws352-lay.sh || fail "copy of the lay helper"
-	TO=300 zb 'mkdir -p /tmp/ws352-tree && cd /tmp/ws352-tree && pax -r < /tmp/ws352-tree.tar' > "$LOGS/tree-unpack.txt" 2>&1 ||
-		fail "tree unpack ($LOGS/tree-unpack.txt)"
-	TO=900 zr "sh /tmp/ws352-lay.sh" > "$LOGS/lay.txt" 2>&1 || fail "lay ($LOGS/lay.txt)"
-	say "tree: $(tail -n 1 "$LOGS/lay.txt"), $(grep -c '^kept' "$LOGS/lay.txt") set-id programs kept"
+	zput "$LOGS/tree-links.sh" /tmp/ws352-tree-links.sh || fail "copy of the links"
+	zput "$STATIC/laytool" /tmp/ws352-laytool || fail "copy of laytool"
+	TO=300 zb 'chmod 755 /tmp/ws352-laytool; mkdir -p /tmp/ws352-tree && cd /tmp/ws352-tree && { pax -r < /tmp/ws352-tree.tar; sh /tmp/ws352-tree-links.sh; ls -l usr/lib/libz.so; }' \
+		> "$LOGS/tree-unpack.txt" 2>&1
+	TO=900 zb "echo $ZBU | sudo -S /tmp/ws352-laytool /tmp/ws352-tree > /tmp/ws352-lay.log 2>&1; cat /tmp/ws352-lay.log" > "$LOGS/lay.txt" 2>&1
+	grep -q 'laytool: checked' "$LOGS/lay.txt" && ! grep -q 'laytool: FAIL' "$LOGS/lay.txt" || fail "lay ($LOGS/lay.txt)"
+	say "tree: $(grep -h 'laytool: laid\|laytool: checked' "$LOGS/lay.txt" | tr '\n' ';')"
 	to_debian
 	to_zedbsd second
 fi

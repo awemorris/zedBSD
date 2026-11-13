@@ -1394,8 +1394,9 @@ filedesc_poll_end(
  * A descriptor number's meaning matters only to a poll scanning this table;
  * a change to what an object is ready for is announced by the object's own
  * code.  So a table no poll is scanning, such as a short-lived child's,
- * wakes nobody.  The fence orders the change, already published under the
- * table lock, before the count is read.
+ * wakes nobody, and a table's change wakes only the polls that scan it
+ * (they follow the table, kern_poll_wait).  The fence orders the change,
+ * already published under the table lock, before the count is read.
  */
 static void
 notify_table_pollers(
@@ -1407,7 +1408,7 @@ notify_table_pollers(
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 	pollers = __atomic_load_n(&fd->pollers, __ATOMIC_SEQ_CST);
 	if (pollers != 0)
-		poll_notify();
+		poll_notify_object(fd);
 }
 
 /* Marks a slot free. */
