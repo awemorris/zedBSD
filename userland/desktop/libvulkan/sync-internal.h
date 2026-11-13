@@ -72,6 +72,9 @@ void vulkan_sync_quiesce(struct vulkan_sync *sync);
 /* Display events; the caller owns the fence's device mutex. */
 VkBool32 vulkan_display_event_poll(struct VkDevice_T *device, struct vulkan_sync *sync);
 
+/* Blocks for the next display topology change above cursor; no device lock is held. */
+VkResult vulkan_wsi_display_node_topology_wait(struct VkPhysicalDevice_T *physical, uint64_t cursor, uint64_t timeout_ns);
+
 /* Shared reference payloads retain native completion proof and caller-owned synchronization. */
 VkResult vulkan_external_fence_create(struct VkDevice_T *device, struct vulkan_sync *sync, const VkFenceCreateInfo *create);
 VkResult vulkan_external_fence_status_locked(struct VkDevice_T *device, struct vulkan_sync *sync);
