@@ -24,6 +24,18 @@ dynamic=$PWD/build/x86_64/dynamic
 program_dir=build/ws353-p003-prog
 image=build/x86_64/hdd-image.img
 export GUEST_RUNTIME=$PWD/build/ws353-p003-run
+# The host's Venus renderer: the strict-queue build plan/ws035/tests/zdesktop-guest.sh names (libvulkan enumerates no
+# physical device on the stock Debian one), on Lavapipe with zink for QEMU's GL.  VENUS_RENDERER names another copy.
+VENUS_RENDERER=${VENUS_RENDERER:-$PWD/build/ws035-sq-venus/install}
+export LIBGL_ALWAYS_SOFTWARE=1
+export MESA_LOADER_DRIVER_OVERRIDE=zink
+export VK_DRIVER_FILES="${VK_DRIVER_FILES:-/usr/share/vulkan/icd.d/lvp_icd.json}"
+export RENDER_SERVER_EXEC_PATH="${RENDER_SERVER_EXEC_PATH:-$VENUS_RENDERER/libexec/virgl_render_server}"
+export LD_LIBRARY_PATH="$VENUS_RENDERER/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+if [ ! -x "$RENDER_SERVER_EXEC_PATH" ]; then
+	echo "qemu-hotplug-wait: FAIL no Venus renderer at $RENDER_SERVER_EXEC_PATH (see plan/ws035/tests/zdesktop-guest.sh)" >&2
+	exit 1
+fi
 . plan/tools/guest/venus-hostmem.sh
 . plan/tools/fresh-out.sh
 fresh_out "$out"
@@ -143,7 +155,7 @@ until serial 'cat /tmp/p3/result.txt' > "$out/result-raw.txt" 2>&1; do
 done
 grep -E '^[a-z-]+: ' "$out/result-raw.txt" | grep -v '^serial:' | tee -a "$summary" || true
 serial 'cat /tmp/p3/out.txt' > "$out/program-out.txt" 2>&1 || true
-serial 'dmesg | grep -i -e venus -e gpu | tail -40' > "$out/dmesg-gpu.txt" 2>&1 || true
+serial 'dmesg | grep -i -e venus -e gpu' > "$out/dmesg-gpu.txt" 2>&1 || true
 
 # The wake after each change: the program's time from its marker, less the host's time from seeing the marker to
 # starting the change, bounds the delay after the change began (the marker was made before the host saw it).

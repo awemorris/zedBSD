@@ -243,14 +243,18 @@ test_setup(
 	instance_create.enabledExtensionCount = 3U;
 	instance_create.ppEnabledExtensionNames = instance_names;
 	error = vkCreateInstance(&instance_create, NULL, &state->instance);
-	if (error != VK_SUCCESS)
+	if (error != VK_SUCCESS) {
+		test_say(state, "setup: instance error=%d", (int)error);
 		return 10;
+	}
 
 	/* The first physical device. */
 	count = 1U;
 	error = vkEnumeratePhysicalDevices(state->instance, &count, &state->physical);
-	if ((error != VK_SUCCESS && error != VK_INCOMPLETE) || count == 0U)
+	if ((error != VK_SUCCESS && error != VK_INCOMPLETE) || count == 0U) {
+		test_say(state, "setup: physical devices error=%d count=%u", (int)error, count);
 		return 11;
+	}
 
 	/* Family 0 has a queue that takes empty submissions. */
 	priority = 1.0f;
@@ -267,8 +271,10 @@ test_setup(
 	device_create.enabledExtensionCount = 1U;
 	device_create.ppEnabledExtensionNames = device_names;
 	error = vkCreateDevice(state->physical, &device_create, NULL, &state->device);
-	if (error != VK_SUCCESS)
+	if (error != VK_SUCCESS) {
+		test_say(state, "setup: device error=%d", (int)error);
 		return 12;
+	}
 	vkGetDeviceQueue(state->device, 0U, 0U, &state->queue);
 
 	/* The hotplug fence's entry point. */
