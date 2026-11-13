@@ -3532,12 +3532,6 @@ kwl_glass_tick(
 		}
 	}
 
-	/*
-	 * The slides and animations step with the frames: each one drawn while
-	 * they move asks for the next, whose pass comes with the frame's
-	 * completion.
-	 */
-
 	/* The minute of the clock: its timer wakes the pass at the next while the screen shows it. */
 	kwl_clock_follow(server, kwl_clock_shown(server));
 	now = time(NULL);

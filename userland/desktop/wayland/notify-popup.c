@@ -161,12 +161,12 @@ kwl_notify_popup_tick(
 	/* A board that started to leave is done with: its notification goes to the log. */
 	if (events.started_leaving != 0U) {
 		kwl_notify_hide_shown(server);
-		printf("KWL NOTIFY hide id=%u\n", events.started_leaving);
+		printf("KWL NOTIFY hide id=%u at_ms=%llu\n", events.started_leaving, (unsigned long long)now);
 	}
 
 	/* One that has left the screen. */
 	if (events.left != 0U)
-		printf("KWL NOTIFY gone id=%u\n", events.left);
+		printf("KWL NOTIFY gone id=%u at_ms=%llu\n", events.left, (unsigned long long)now);
 
 	/* The next one, when the board is free. */
 	if (events.show_next)
@@ -402,11 +402,12 @@ popup_show_next(
 		route = popup_route(server, item);
 		if (route == 0) {
 			kwl_notify_flow_show(&popup.flow, id, (item->flags & KWL_NOTIFY_URGENT) != 0U, now);
-			printf("KWL NOTIFY show id=%u client=%llu urgent=%u title=\"%.40s\"\n",
+			printf("KWL NOTIFY show id=%u client=%llu urgent=%u title=\"%.40s\" at_ms=%llu\n",
 			       id,
 			       (unsigned long long)item->client,
 			       (item->flags & KWL_NOTIFY_URGENT) != 0U,
-			       item->title);
+			       item->title,
+			       (unsigned long long)now);
 			server->dirty = 1;
 			return;
 		}
