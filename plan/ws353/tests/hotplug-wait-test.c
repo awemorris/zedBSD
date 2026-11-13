@@ -11,21 +11,22 @@
  * runs the steps in order, writing one result line a step to DIR/result.txt
  * and a marker file DIR/NAME.armed when the host must change a head:
  *
- *   hotplug-wait-test DIR [hotplug-partner]
+ *   hotplug-wait-test DIR
  *
  *   idle-h     a wait on a hotplug fence alone sleeps 30 s in one poll
  *   idle-f     an any-wait on two unsubmitted fences sleeps 30 s in one poll
  *   submit-f   it returns when another thread submits the second fence
  *   narrow-f   it sleeps through another fence's 200 submissions, then returns at its own
  *   race-f     300 such waits whose fence is submitted just as they start, each with a 5 s limit
+ *   idle-h2, submit-h, narrow-h, race-h
+ *              the same any-waits with a hotplug fence as the first fence
+ *   limit      destroyed fences leave no registration: 16 live ones fill the node, the 17th is refused
  *   plug       a hotplug fence wakes when the host plugs head 1; a reset fence stays spent
  *   unplug     a new fence wakes when the host unplugs head 1
  *   lost       a context failure ends a wait on a hotplug fence alone and an any-wait on two
  *              unsubmitted fences with VK_ERROR_DEVICE_LOST
  *
- * With hotplug-partner, idle-h2, submit-h, narrow-h and race-h run the same any-waits with a
- * hotplug fence as the first fence, and limit checks that destroyed fences leave no registration
- * (the node's 16).  These need a GPU driver that changes its topology number only at a real
+ * The steps with a hotplug fence need a GPU driver whose topology number moves only at a real
  * change: a renderer request between the registration and the change must not signal the fence.
  *
  * How often a wait slept is counted by this program's own poll(): libvulkan
@@ -162,8 +163,8 @@ main(
 	int status;
 
 	/* The result directory. */
-	if (argc != 2 && argc != 3) {
-		fprintf(stderr, "usage: hotplug-wait-test DIR [hotplug-partner]\n");
+	if (argc != 2) {
+		fprintf(stderr, "usage: hotplug-wait-test DIR\n");
 		return 2;
 	}
 	memset(&state, 0, sizeof(state));
@@ -208,20 +209,18 @@ main(
 	step_race(&state, "race-f", partner);
 	vkDestroyFence(state.device, partner, NULL);
 
-	/* A hotplug fence with an unsubmitted one, when the driver's topology number is trustworthy. */
-	if (argc == 3 && strcmp(argv[2], "hotplug-partner") == 0) {
-		error = test_hotplug(&state, &hotplug);
-		if (error == VK_SUCCESS) {
-			step_idle(&state, "idle-h2", hotplug, 0);
-			step_submit(&state, "submit-h", hotplug);
-			step_narrow(&state, "narrow-h", hotplug);
-			step_race(&state, "race-h", hotplug);
-			vkDestroyFence(state.device, hotplug, NULL);
-		} else {
-			test_say(&state, "idle-h2: FAIL register %d", (int)error);
-		}
-		step_limit(&state);
+	/* A hotplug fence with an unsubmitted one. */
+	error = test_hotplug(&state, &hotplug);
+	if (error == VK_SUCCESS) {
+		step_idle(&state, "idle-h2", hotplug, 0);
+		step_submit(&state, "submit-h", hotplug);
+		step_narrow(&state, "narrow-h", hotplug);
+		step_race(&state, "race-h", hotplug);
+		vkDestroyFence(state.device, hotplug, NULL);
+	} else {
+		test_say(&state, "idle-h2: FAIL register %d", (int)error);
 	}
+	step_limit(&state);
 
 	/* The head changes, then the destructive step last. */
 	step_plug(&state);

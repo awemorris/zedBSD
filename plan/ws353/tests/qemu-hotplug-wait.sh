@@ -13,9 +13,9 @@
 # OUT (default build/ws353-p003-qemu) gets summary.txt, the result lines and the host's timings.  The guest's
 # runtime is build/ws353-p003-run (P1's own).  The image is build/x86_64/hdd-image.img: the build keeps the x86_64
 # sysroot in build/x86_64 whatever BUILD says, so the image is built there, one target after the other.
-# Steps (hotplug-wait-test.c): idle-h, idle-f, submit-f, narrow-f, race-f, plug, unplug, lost; with HOTPLUG_PARTNER=1
-# also idle-h2, submit-h, narrow-h, race-h and limit, which need a GPU driver whose topology number moves only at a
-# real change (on Venus, after BUG-431: before it, a renderer request signals a pending hotplug fence).
+# Steps (hotplug-wait-test.c): idle-h, idle-f, submit-f, narrow-f, race-f, idle-h2, submit-h, narrow-h, race-h, limit,
+# plug, unplug, lost.  The hotplug steps need a GPU driver whose topology number moves only at a real change (Venus
+# from BUG-431's fix: before it, a renderer request signaled a pending hotplug fence).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
 cd "$(dirname -- "$0")/../../.."
@@ -124,9 +124,7 @@ guest_file() {
 }
 
 # The program, in the background; its output and results stay in /tmp/p3 on the guest.
-partner=
-[ "${HOTPLUG_PARTNER:-0}" = 1 ] && partner=' hotplug-partner'
-serial "rm -rf /tmp/p3; mkdir -p /tmp/p3; /root/hotplug-wait-test /tmp/p3$partner > /tmp/p3/out.txt 2>&1 < /dev/null &" \
+serial "rm -rf /tmp/p3; mkdir -p /tmp/p3; /root/hotplug-wait-test /tmp/p3 > /tmp/p3/out.txt 2>&1 < /dev/null &" \
     > "$out/program-start.txt" 2>&1 || true
 sleep 8
 
