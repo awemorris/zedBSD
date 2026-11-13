@@ -24,9 +24,14 @@
  * (print's job) and the result.  The backend numbers its requests; a table
  * pairs them with the client's.  Titles and hosts are not logged.
  *
- * The settings file is written, and checked once a second for another
- * session's change, on the compositor's file I/O thread (io.c): the
- * backend is given to it when the first printers object is made.
+ * The settings file is written, and checked for another session's change,
+ * on the compositor's file I/O thread (io.c), or in the event loop when
+ * that thread does not run.  Nothing is followed on the clock: the file is
+ * checked once when a printers object is made (a client is about to show
+ * the printers, as they are then; another session's later change is seen
+ * by the next object or with this compositor's next change); the daemon's
+ * lines come on its socket, which the loop waits on; and a daemon shut for
+ * writing is given up by a timer at the end of its time.
  */
 
 #include "kwl.h"
@@ -40,6 +45,9 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Marks a parameter a callback's signature has and this file does not use. */
+#define UNUSED_PARAMETER(name)	((void)(name))
+
 /* The longest host, path, title and name a request carries, with their NULs. */
 #define PRINTERS_HOST_MAX	64U
 #define PRINTERS_PATH_MAX	64U
@@ -51,9 +59,6 @@
 
 /* The most requests waiting for the backend's answer. */
 #define PRINTERS_WAITING_MAX	16U
-
-/* How often the settings file is checked for another session's change (ms). */
-#define PRINTERS_CHECK_MS	1000U
 
 /*
  * A request waiting: the backend's number, the client (by its number) and
@@ -81,9 +86,9 @@ struct printers_file_job {
 
 /*
  * The printers of the compositor: the backend (opened once), whether its
- * file is the file I/O thread's (hosted), a write or a check given and
- * not taken yet, when the file was last checked, and the requests
- * waiting.  Only the event loop's thread touches it.
+ * file's writes and checks are the compositor's (hosted), a write or a
+ * check given and not taken yet, a check asked for and not given yet, and
+ * the requests waiting.  Only the event loop's thread touches it.
  */
 static struct {
 	struct kl_backend_print *backend;
@@ -91,27 +96,25 @@ static struct {
 	int hosted;
 	int writing;
 	int checking;
-	uint64_t checked_ms;
+	int check_wanted;
 	struct printers_waiting waiting[PRINTERS_WAITING_MAX];
 	uint32_t serial;
 } printers_state;
 
 /*
- * The timer of the settings file's check: armed while a printers object is
- * there or the daemon's connection is open, PRINTERS_CHECK_MS after the
- * last check, when the file is checked for another session's change (a
- * daemon that did not end in its time is looked at in that pass too).
- * One that finds neither is not armed again; a new object arms it.
- * Readied by the first object; only the event loop's thread touches it.
+ * The timer of a daemon shut for writing (it broke the protocol): armed
+ * for the end of the time it is given to end (kl_backend_print_due), when
+ * the pass's update closes its socket; disarmed once the daemon has gone.
+ * Readied by the first tick that has the backend; only the event loop's
+ * thread touches it.
  */
-static struct kwl_timer printers_check_timer;
+static struct kwl_timer printers_shut_timer;
 
 static struct kl_backend_print *printers_backend(void);
-static void printers_host(struct kwl_server *server);
+static void printers_host(void);
 static void printers_file(struct kwl_server *server);
 static void printers_check(struct kwl_server *server);
-static int printers_wanted(struct kwl_server *server);
-static void printers_check_fired(void *context, struct kwl_timer *timer);
+static void printers_shut_fired(void *context, struct kwl_timer *timer);
 static int printers_file_give(struct kwl_server *server, struct kl_backend_print_check *check);
 static void printers_file_run(struct kwl_lane_job *job);
 static void printers_file_done(void *context, struct kwl_lane_job *job);
@@ -142,8 +145,8 @@ static const struct kwl_lane_ops printers_file_ops = {
 /*
  * Opens the printers at the start, before the clients come (the event
  * loop reads no file for them later): the settings file read, the
- * daemon's program looked at, and the file's work given to the file I/O
- * thread from now on.
+ * daemon's program looked at, and the file's work the compositor's from
+ * now on (its file I/O thread's when it runs).
  */
 void
 kwl_printers_prepare(
@@ -153,8 +156,8 @@ kwl_printers_prepare(
 	int opened;
 	int can;
 
-	/* The backend open and hosted when it can be. */
-	printers_host(server);
+	/* The backend open and hosted. */
+	printers_host();
 
 	/* The log says what the clients will be told. */
 	backend = printers_backend();
@@ -192,7 +195,6 @@ kwl_printers_create(
 {
 	struct kwl_object *created;
 	uint32_t id;
-	int armed;
 
 	/* The new object's ID. */
 	if (size != 4U)
@@ -204,15 +206,15 @@ kwl_printers_create(
 	if (created == NULL)
 		return EPROTO;
 
-	/* The backend's file goes to the file I/O thread before any change is asked. */
-	printers_host(manager->client->server);
+	/* The backend's file is the compositor's before any change is asked. */
+	printers_host();
 
-	/* The file is checked while the object is there, at once when the last check is a second old. */
-	if (printers_check_timer.fire == NULL)
-		kwl_timer_init(&printers_check_timer, "printers-check", printers_check_fired);
-	armed = kwl_timer_armed(&printers_check_timer);
-	if (!armed)
-		kwl_timer_set(manager->client->server, &printers_check_timer, printers_state.checked_ms + PRINTERS_CHECK_MS);
+	/*
+	 * A client is about to show the printers: the file is checked for
+	 * another session's change by the next tick, and a change found is
+	 * told to this object too.
+	 */
+	printers_state.check_wanted = 1;
 
 	/* Its first state. */
 	printers_state_to(manager->client, id);
@@ -256,24 +258,27 @@ kwl_printers_request(
 }
 
 /*
- * Looks after the printers once a pass: the daemon's lines, a new state
- * to every printers object, and the answers to the clients that asked.
+ * Looks after the printers once a pass: the settings file's writes and
+ * the checks asked for, the daemon's lines, a new state to every printers
+ * object, the answers to the clients that asked, and the wait for the
+ * daemon's socket and for a shut daemon's time.
  */
 void
 kwl_printers_tick(
 	struct kwl_server *server)
 {
 	unsigned changed;
+	uint64_t due;
 	short events;
 	int descriptor;
-	int armed;
 
 	/* Nothing before the first printers object. */
 	if (printers_state.backend == NULL)
 		return;
 
-	/* The settings file's writes and checks given to the file I/O thread. */
+	/* The settings file's writes, and a check asked for, given to the file I/O thread. */
 	printers_file(server);
+	printers_check(server);
 
 	/* What came. */
 	changed = 0;
@@ -289,19 +294,15 @@ kwl_printers_tick(
 	if ((changed & KL_BACKEND_PRINT_CHANGED_RESULT) != 0U)
 		printers_answers(server);
 
-	/*
-	 * The daemon's connection wakes the loop with what comes; while it is
-	 * open the check's timer runs too, so that a daemon that did not end in
-	 * its time is looked at.
-	 */
+	/* The daemon's connection wakes the loop with what the daemon says. */
 	descriptor = kl_backend_print_descriptor(printers_state.backend, &events);
 	kwl_watch(server, descriptor, events);
-	armed = kwl_timer_armed(&printers_check_timer);
-	if (descriptor >= 0 && !armed) {
-		if (printers_check_timer.fire == NULL)
-			kwl_timer_init(&printers_check_timer, "printers-check", printers_check_fired);
-		kwl_timer_set(server, &printers_check_timer, kwl_milliseconds() + PRINTERS_CHECK_MS);
-	}
+
+	/* A daemon shut for writing is given up at the end of its time: the timer wakes the pass whose update does it. */
+	if (printers_shut_timer.fire == NULL)
+		kwl_timer_init(&printers_shut_timer, "printers-shut", printers_shut_fired);
+	due = kl_backend_print_due(printers_state.backend);
+	kwl_timer_set(server, &printers_shut_timer, due);
 }
 
 /* Opens the backend once: the user's settings file and the daemon's program. */
@@ -909,22 +910,22 @@ printers_word(
 }
 
 /*
- * Gives the backend's settings file to the file I/O thread, once, when it
- * runs (without it the backend writes on its own thread and checks the
- * file in its update).
+ * Makes the backend's settings file the compositor's, once: its writes and
+ * checks run on the file I/O thread, or in the event loop when the thread
+ * does not run (the backend's own writer thread would not wake the loop
+ * with what it wrote).
  */
 static void
-printers_host(
-	struct kwl_server *server)
+printers_host(void)
 {
 	struct kl_backend_print *backend;
 
-	/* Once, with the backend open and the thread running. */
+	/* Once, with the backend open. */
 	backend = printers_backend();
-	if (backend == NULL || printers_state.hosted || !server->io_file_started)
+	if (backend == NULL || printers_state.hosted)
 		return;
 
-	/* Succeeded: the thread writes and checks the file from now on. */
+	/* Succeeded: the compositor writes and checks the file from now on. */
 	kl_backend_print_host(backend);
 	printers_state.hosted = 1;
 }
@@ -946,16 +947,23 @@ printers_file(
 
 	/* The changes waiting, when no write is under way. */
 	wanted = kl_backend_print_write_wanted(printers_state.backend);
-	if (wanted && !printers_state.writing) {
-		error = printers_file_give(server, NULL);
-		if (error == 0)
-			printers_state.writing = 1;
-	}
+	if (!wanted || printers_state.writing)
+		return;
+
+	/*
+	 * Under way until its done clears it, which a write run in the loop
+	 * itself reaches before the give returns.
+	 */
+	printers_state.writing = 1;
+	error = printers_file_give(server, NULL);
+	if (error != 0)
+		printers_state.writing = 0;
 }
 
 /*
- * Gives the file I/O thread a check of the settings file for another
- * session's change, when the backend is hosted and no check is under way.
+ * Gives the file I/O thread the check of the settings file for another
+ * session's change that was asked for, when no check is under way (one
+ * asked meanwhile is given by the tick after it).
  */
 static void
 printers_check(
@@ -964,30 +972,33 @@ printers_check(
 	struct kl_backend_print_check *check;
 	int error;
 
-	/* Only a hosted backend, one check at a time. */
-	if (!printers_state.hosted || printers_state.checking)
+	/* Only a hosted backend, a check asked for, one check at a time. */
+	if (!printers_state.hosted || !printers_state.check_wanted || printers_state.checking)
 		return;
-	printers_state.checked_ms = kwl_milliseconds();
 
-	/* What the file was when last read. */
+	/* What the file was when last read; the ask is taken by this check. */
+	printers_state.check_wanted = 0;
 	check = kl_backend_print_check_begin(printers_state.backend);
 	if (check == NULL)
 		return;
 
-	/* The thread reads the file when another session changed it. */
+	/*
+	 * Under way until its done clears it, which a check run in the loop
+	 * itself reaches before the give returns.  A check not given is freed
+	 * without being applied (it read nothing).
+	 */
+	printers_state.checking = 1;
 	error = printers_file_give(server, check);
 	if (error != 0) {
-		kl_backend_print_check_end(printers_state.backend, check);
-		return;
+		printers_state.checking = 0;
+		kl_backend_print_check_end(NULL, check);
 	}
-
-	/* Succeeded: the check is under way. */
-	printers_state.checking = 1;
 }
 
 /*
  * Gives the file I/O thread a write (check NULL) or a check of the
- * settings file.  Returns 0, ENOMEM, or ENOTSUP without the thread.
+ * settings file; without the thread it runs in the loop here and is done
+ * at once.  Returns 0, or ENOMEM.
  */
 static int
 printers_file_give(
@@ -1004,14 +1015,14 @@ printers_file_give(
 	job->backend = printers_state.backend;
 	job->check = check;
 
-	/* The thread's from here, or freed. */
+	/* The thread's from here; without the thread it runs here and is taken as done (which frees the record). */
 	error = kwl_io_file_submit(server, &job->lane, &printers_file_ops, 0U);
 	if (error != 0) {
-		free(job);
-		return error;
+		printers_file_run(&job->lane);
+		printers_file_done(server, &job->lane);
 	}
 
-	/* Succeeded: given. */
+	/* Succeeded: given to the thread, or written or checked in the loop. */
 	return 0;
 }
 
@@ -1042,7 +1053,7 @@ printers_file_done(
 {
 	struct printers_file_job *job;
 
-	(void)context;
+	UNUSED_PARAMETER(context);
 
 	/* The next write or check may be given; a check's table applied. */
 	job = (struct printers_file_job *)lane_job;
@@ -1072,62 +1083,14 @@ printers_file_drop(
 }
 
 /*
- * Tells whether the printers are looked after on the clock: a live
- * printers object is there, or the daemon's connection is open.
- */
-static int
-printers_wanted(
-	struct kwl_server *server)
-{
-	struct kwl_client *client;
-	struct kwl_object *object;
-	short events;
-	int descriptor;
-
-	/* The daemon's connection, open while it runs. */
-	descriptor = kl_backend_print_descriptor(printers_state.backend, &events);
-	if (descriptor >= 0)
-		return 1;
-
-	/* A live printers object of a client that is not failing. */
-	for (client = server->clients; client != NULL; client = client->next) {
-		if (client->fatal)
-			continue;
-		for (object = client->objects; object != NULL; object = object->next) {
-			if (object->kind == KWL_SYSTEM_PRINTERS && !object->dead)
-				return 1;
-		}
-	}
-
-	/* Nothing to look after. */
-	return 0;
-}
-
-/*
- * Checks the settings file once a second while the printers are looked
- * after: the check is given to the file I/O thread (a backend that is not
- * hosted reads the file in the update of the pass the timer woke), and the
- * timer is armed for the next one.  With no printers object left and the
- * daemon gone it is not armed again.
+ * Ends the wait for a daemon shut for writing: the pass the timer woke
+ * gives it up (kwl_printers_tick's update looks at its time).
  */
 static void
-printers_check_fired(
+printers_shut_fired(
 	void *context,
 	struct kwl_timer *timer)
 {
-	struct kwl_server *server;
-	int wanted;
-
-	/* Only this part's own timer comes here. */
-	(void)timer;
-
-	/* Nothing is looked after any more: no next check. */
-	server = context;
-	wanted = printers_wanted(server);
-	if (!wanted)
-		return;
-
-	/* The check, and the next one a second from now. */
-	printers_check(server);
-	kwl_timer_set(server, &printers_check_timer, kwl_milliseconds() + PRINTERS_CHECK_MS);
+	UNUSED_PARAMETER(context);
+	UNUSED_PARAMETER(timer);
 }

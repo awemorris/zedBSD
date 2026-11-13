@@ -268,6 +268,7 @@ static int print_program_can(const char *program);
 static void print_write_one(struct kl_backend_print *print, struct print_change *change);
 static struct print_change *print_next_change(struct kl_backend_print *print, int wait);
 static int print_save(const char *config, struct print_table *table);
+static void print_make_folders(const char *file);
 static int print_lock(const char *config);
 static void print_unlock(int fd);
 static struct kl_backend_printer *print_printer(struct print_table *table, uint32_t id);
@@ -465,6 +466,33 @@ kl_backend_print_descriptor(
 	if (print->queue_count > 0U)
 		*events |= POLLOUT;
 	return print->socket;
+}
+
+/*
+ * Gives the time the update is to run again without an event on the
+ * descriptor: a daemon shut for writing given up at the end of its time.
+ */
+uint64_t
+kl_backend_print_due(
+	const struct kl_backend_print *print)
+{
+	uint64_t due;
+
+	/* Nothing open, or no daemon shut for writing: nothing waits for a time. */
+	if (print == NULL)
+		return UINT64_MAX;
+	if (print->socket < 0 || print->shut_until == 0)
+		return UINT64_MAX;
+
+	/*
+	 * The update gives the daemon up once print_now reaches shut_until,
+	 * that is from the start of the monotonic second shut_until - 1
+	 * (print_now counts one past the clock's seconds).
+	 */
+	due = (uint64_t)(print->shut_until - 1) * 1000U;
+
+	/* Succeeded: the end of the shut daemon's time. */
+	return due;
 }
 
 /*
@@ -1076,9 +1104,7 @@ print_save(
 {
 	struct stat status;
 	char temporary[600];
-	char directory[512];
 	const char *protocol;
-	char *slash;
 	FILE *file;
 	size_t index;
 	int flushed;
@@ -1086,13 +1112,8 @@ print_save(
 	int closed;
 	int error;
 
-	/* The folder, made when it is not there. */
-	print_copy(directory, sizeof(directory), config);
-	slash = strrchr(directory, '/');
-	if (slash != NULL) {
-		*slash = '\0';
-		(void)mkdir(directory, 0700);
-	}
+	/* Its folder and those above it (~/.config first), made when they are not there. */
+	print_make_folders(config);
 
 	/* The new file. */
 	(void)snprintf(temporary, sizeof(temporary), "%s.new", config);
@@ -1137,6 +1158,33 @@ print_save(
 	return 0;
 }
 
+/*
+ * Makes the folders a file's path goes through that are not there, from
+ * the top down, each closed to others; one there already (or one that
+ * cannot be made) is passed by, and the file's open says what failed.
+ */
+static void
+print_make_folders(
+	const char *file)
+{
+	char path[512];
+	size_t length;
+	size_t index;
+
+	/* A copy to cut at each slash. */
+	print_copy(path, sizeof(path), file);
+	length = strlen(path);
+
+	/* Each folder, at the slash that ends it (the root's slash is passed by, the file's name is not a folder). */
+	for (index = 1; index < length; index++) {
+		if (path[index] != '/')
+			continue;
+		path[index] = '\0';
+		(void)mkdir(path, 0700);
+		path[index] = '/';
+	}
+}
+
 /* Takes the settings file's lock (the file beside it); the descriptor, or -1. */
 static int
 print_lock(
@@ -1144,6 +1192,9 @@ print_lock(
 {
 	char path[600];
 	int fd;
+
+	/* The folders it lives in, made when they are not there (the first change of a new home). */
+	print_make_folders(config);
 
 	/* The lock file, held. */
 	(void)snprintf(path, sizeof(path), "%s.lock", config);

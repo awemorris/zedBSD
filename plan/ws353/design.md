@@ -404,7 +404,7 @@
 | 2-01 | output-switch.c の hotplug 250 ms（と出力を失った時の 10 ms） | 道 | 消: kernel が signal する fence と hotplug の thread（§3・§4.1・§5.3・§5.4） | p002〜p004 |
 | 2-02 | 入力の scan 2 s（zedBSD） | 名 | 消: /dev/system の INPUT の事象だけ（Linux・FreeBSD は数えない行で残す） | p005 |
 | 2-03 | 事象の後 2 s の 100 ms の scan | 道 | 消: compositor の devices の thread が /dev/system の INPUT の ADD で node を開く。sessiond が起こした compositor は seat の socket（`--seat-fd`）で sessiond に OPEN を 1 回頼み、sessiond が root で開いた fd を SCM_RIGHTS で受ける（chown を待たない）。`KWL_INPUT_SETTLE_*`・`input_settle_until` を消した（2026-11-14 p018） | p005（調べ）・p018 |
-| 2-04 | printers-shell の 1 s | 道 | 外: printd が設定を持ち変化を push する（daemon）か、file の変化の通知（kernel）。それまで printers の object か printd の接続がある間の 1 s の timer として残す（2026-11-14 p007）。libkeiland の `kl_system_open` は printd がある時 printers の object を必ず作るので、kl_system を開く app（Settings・Files・Photos・Monitor・pdfviewer など）が開いている間 1 s の起床が残る（QEMU で Settings を開いて 30 s に 30 回、閉じて 0）。使う時だけ作る形（libkeiland）でも狭められる | p007（timer へ）・外 |
+| 2-04 | printers-shell の 1 s | 道 | 消（2026-11-14 p019）: 周期の check を無くし、変化を追わない。一覧は設定の file から、printers の object を作った時（Settings などが表示する時）に io-file の thread で 1 回 check して読む（表示した時点の一覧。別の session の後の変更は次の object か、この compositor の次の変更で入る）。printd の状態（印刷中の job）は printd の socket の push（printd は spool の間だけ起動、前から）。printd を打ち切る 10 s は `kl_backend_print_due` の期限の timer（protocol を破った printd の間だけ）。kernel・printd・libkeiland は変えない | p007（timer へ）・p019（消） |
 | 2-05 | network.c の詳細の 1 s | 道 | 外: networkd が詳細の変化を push する。それまで view がある間の timer | p006（timer へ）・外 |
 | 2-06 | sysmon の 250 ms | 締 | 残: 購読がある間の timer | p006 |
 | 2-07 | cursor-plane.c の 10 ms | 名 | 消: cursor の thread が手放しで wake | p005 |
@@ -498,13 +498,13 @@
 
 | 行き先 | 表 1 | 表 2 | 表 4 | 表 5 | 表 6 | 表 7 | 計 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 消（352 で済む物を含む） | 10 | 9 | 1 | 0 | 0 | 0 | 20 |
+| 消（352 で済む物を含む） | 10 | 10 | 1 | 0 | 0 | 0 | 21 |
 | 形 | 2 | 4 | 0 | 0 | 0 | 0 | 6 |
 | 残 | 7 | 29 | 0 | 6 | 5 | 2 | 49 |
-| 外 | 0 | 2 | 0 | 3 | 8 | 3 | 16 |
+| 外 | 0 | 1 | 0 | 3 | 8 | 3 | 15 |
 | 計 | 19 | 44 | 1 | 9 | 13 | 5 | 91 |
 
-- 表 2 の 2-04・2-05 は「外」に数えた（compositor の側は timer に移すが、周期の読み直しが消えるのは daemon の push の後）。
+- 表 2 の 2-05 は「外」に数えた（compositor の側は timer に移すが、周期の読み直しが消えるのは daemon の push の後）。2-04 は p019 で「消」に移した（2026-11-14、外 16 → 15、消 20 → 21）。
 - 1-13 はレビュー（L7）で「残」から「形」に直した（件数の計は変わらない）。
 - 「残」の 49 は全部、予定がある間だけの締め切り（idle で arm されている物は、消灯・lock の予定と、購読がある間の sysmon など）。
 
