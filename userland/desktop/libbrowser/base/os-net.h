@@ -166,17 +166,17 @@ int wb_os_socket_receive(wb_os_socket socket, void *bytes, size_t length, size_t
 void wb_os_socket_close(wb_os_socket socket);
 
 /*
- * Gives the socket as the int OpenSSL's SSL_set_fd takes.
+ * Gives the socket as the int the TLS library's SSL_set_fd takes.
  *
  * Returns 0 and writes descriptor, EINVAL (WB_OS_SOCKET_NONE), ERANGE (the
  * value does not fit an int; a Windows SOCKET is a handle that in practice
- * does, and OpenSSL on Windows takes it this way).
+ * does, and the TLS library on Windows takes it this way).
  */
 int wb_os_socket_descriptor(wb_os_socket socket, int *descriptor);
 
 /*
  * Reports the calling thread's last socket error as the layer's errno
- * value, for a library (OpenSSL's SSL_ERROR_SYSCALL) that failed inside a
+ * value, for a library (the TLS library's SSL_ERROR_SYSCALL) that failed inside a
  * socket call the layer did not make.  POSIX: errno.  Windows:
  * WSAGetLastError mapped by wb_os_error_from_socket.  0 when there is none.
  */

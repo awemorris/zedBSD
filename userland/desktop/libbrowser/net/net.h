@@ -185,7 +185,7 @@ int net_http_is_redirect(int status);
 int net_http_is_web(const char *scheme);
 void net_response_release(struct net_response *response);
 
-/* TLS for https (tls.c): the OpenSSL package's library, loaded when first needed. */
+/* TLS for https (tls.c): libssl-compat and libcrypto-compat, linked. */
 struct net_tls;
 int net_tls_add_ca_file(const char *path);
 int net_tls_open(wb_os_socket socket, const char *host, char *reason, struct net_tls **tls);
