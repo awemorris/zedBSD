@@ -3,7 +3,7 @@
 # ws299-p005 UFS の file の連続の読み書き（先読みの窓・大きな request・書きの合流）
 
 - 親: [WS299](../ws.md)。Queue: q1634 / q1634-i01（調べ）→ q1640 / q1640-i01（設計・実装、担当 P1）。前提: p002・p004（raw の先読み）。
-- Status: in-progress（2026-11-01 P1 q1788: 5330 で file の書き p7 90%（52% から）、root の UFS の上書き 108%・新しく 96%、file の冷えた読み 112%。file の書き p7 は 95% に未達。2026-10-31 P1 q1744: 書き手の CPU の直し 3a4e64353（LRU の回し・束の書き・1 MiB の run・memcpy）、QEMU で確かめ）
+- Status: in-progress（2026-11-13 q2044 P2: file の書き p7 99%・読み 117%、root の UFS の上書き 105%・新しく 101%。p6 の raw の書きは同じ形（dd 1 回と sync）で 104〜117%、256 MiB ×4 の形は 82%。下の「2026-11-13」）
 - Disposition: normal
 
 ## 調べた事実（2026-10-28、読みだけの調べ、tree は agent/p1-ws299 36d0d7b5d）
@@ -156,3 +156,10 @@
 - main 82c6ef325 の image（config-5330.mk）で Debian と zedBSD を同じ夜に測った。表と条件・道具の直しは [ws.md](../ws.md) の「2026-11-01」。
 - この Phase の項目: file の書き p7（4 GiB、fsync まで）Debian 1925 MB/s・zedBSD 1724（sync の前 1918）= 90%、file の冷えた読み 1250・1399 = 112%、root の UFS の 1 GiB 上書き 1760・新しく 1556（ext4 1628 MB/s に 108%・96%）。
 - 受け入れ（Debian の 95% 以上）: file の書き p7 が 90% で未達。cleared にしない。
+
+## 2026-11-13（q2044、P2）: 電力制御の後の測り
+
+- main fe6ea0f967 の kernel で（表は [ws.md](../ws.md) の「2026-11-13」）: file の書き p7 4 GiB 1774 / Debian 1798 = 99%（write 2180 ms + sync 240 ms）、file の冷えた読み 1427 / 1217 = 117%、root の UFS の 1 GiB 上書き 1704・新しく 1627（ext4 1619 に 105%・101%）、raw の書き p7 4 GiB 1804 / 1346 = 134%。
+- p6 の raw の書き: 256 MiB の dd 4 回（各 close で書き切る）と sync は 1395 MB/s で、Debian の 1 回の dd conv=fsync（b-w1m 1690）の 82%。各 256 MiB は 1342〜1491 MB/s（10 ms 刻みで ±5%）、Debian の direct の 256 MiB（d-w）の中央値は約 1.8 GB/s。同じ形で比べる mode `rawone`（1 回の dd 1 GiB と sync）を足した: zedBSD 1760 MB/s、同じ時間帯の Debian の b-w1m 1505（117%）、q2044a の 1690（104%）。
+- 見立て（未確かめ）: 256 MiB ごとの遅さは、dirty が上限（cache の 1/4 ≈ 246 MiB）の半分に達するまで worker が書き始めない（約 123 MiB を写す約 65 ms は device が休む）のと、close で残りを書き切る待ち。1 回の大きな書きではこの頭の休みが全体に薄まる。
+- 受け入れ 1 の「各 256 MiB が d-w の中央値の 95% 以上」は buffered（close で書き切る）と direct の比べで、同じ条件ではない。案（Q1 へ）: p6 の raw の書きは同じ形（rawone 対 b-w1m）と raw の書き p7 4 GiB（patwrite、両方同じ道具）で判定する。256 MiB の形も 95% にするなら、連続の書き手には上限の半分を待たず cluster ができた所から worker に書かせる直しが要る（UFS の書きにも効くので、その時は UFS の書きを測り直す）。

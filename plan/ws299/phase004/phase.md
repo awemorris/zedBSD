@@ -3,7 +3,7 @@
 # ws299-p004 待ちを重ねる: 連続の読みの先読みを非同期の worker で（raw の block device）
 
 - 親: [WS299](../ws.md)。Queue: q1617 / q1617-i01（担当 P1、2026-10-27）。前提: p003（cleared 2026-10-27、main be47a24df）。
-- Status: in-progress（2026-10-28 Q1 の判定: 実装・review・QEMU・5330 の読みは受け入れを満たす。main bce0883be で visionfive2・rpi4 の vmunix も rc 0・warning 0（Q1、build/q1-p004-*）。残りの 2 点は 2026-10-28 P1 が確かめた（下の「残りの確かめ」）: 書きの後半の低下は drive の状態、乱読みは HMB off の Debian と同じ。Q1 の判定待ち）
+- Status: in-progress（2026-10-28 Q1 の判定待ち。2026-11-13 q2044 P2: 乱読みの後の連続の読みで run が cache の line で切れる件を直した、下の「2026-11-13」。QEMU は未実施）
 - Disposition: normal
 
 ## 測った事（2026-10-27、5330、kernel は main be47a24df ＋ 下の測る口、`nvme-bench-5330.sh zedbsd zb-p004m … read`）
@@ -150,3 +150,12 @@
 - 未実施: 上の設計（D1〜D3）の design-reviewer、Q1 への範囲の変更の案（p004 = raw の先読み、複数の queue・VMD の vector は後へ）の判断、実装、QEMU・5330 の試験。測る口の QEMU の回帰も未実施（5330 の起動と読みだけで確かめた）。
 - 次の一手: Q1 に範囲の変更の案を出す → design-reviewer → D1・D2 の実装 → host 試験（流れの検出）→ QEMU（boot・nvme-shapes・grow-reboot）→ 5330 で `nvme-bench-5330.sh zedbsd zb-p004a <vmunix> read write`。
 - 5330 の使い方: `plan/tools/hw5330/README.md`。NVMe の kernel だけの差し替えは `nvme-bench-5330.sh zedbsd NAME VMUNIX read|write`（`/tmp/i915-hw.lock` を自分で取る、Debian から BootNext で 1 回 zedBSD を起動して戻る）。image ごとは `5330-run.sh --nvme-image IMG NAME`（root は `ufs-grow.py` で p5 いっぱいに広がる）。遠隔の電源は無い（止まったら Q1 → ユーザー）。2026-10-27 の終わりの時点で 5330 の NVMe の p4 の kernel は `build/p1-p004m/vmunix`（測る口入り）。
+
+## 2026-11-13（q2044、P2）: 乱読みの後の連続の読み
+
+- 測った事（main fe6ea0f967 の kernel、[ws.md](../ws.md) の「2026-11-13」）: read mode の乱読み（cache 経由の QD32 15 秒で cache の約 1 GiB が 4 KiB の line で満ちる、範囲 8064 MiB の約 1/8）の直後の連続の読みは、最初の約 900 MiB が 327〜671 MB/s（Debian の page cache を捨てた後の 1.5 GB/s の 22〜44%）。bs の段の 384 MiB で drv_rd 10545（平均 37 KiB）、乱読みの line が LRU から追い出された chunk2 からは 1 run 256 KiB（1024 / 256 MiB）で 1.8〜2.7 GB/s。乱読みの前に同じ読みをした seqcold は 1491〜1917 MB/s、chunk0〜15 の中央値 1790（Debian の 118%）、最初と最後の比 1.00。
+- 原因: `transfer_run_lines` の run は最初の cache の hit の前で終わる。readahead の job（64 line、256 KiB）は散った line ごとに約 7 line の小さな command に切れ、worker 4 本の同期の読みでは device が遅い。
+- 直し（35b527f23c、`src/kern/buf.c`）: prefetch（readahead の worker）が page list で読む時、run の中にある cache の line（2 本目から、run の半分まで）は ref を落として slot を NULL にし、その block の device の bytes は 1 page の bucket（`readahead_bucket`、workers を作る時に `kern_pmem_alloc` で 1 度、取れなければ前と同じ動き）に読ませて捨てる。cache の line には触らない（dirty でも clean でもそのまま）。NULL の slot は busy を取らず、状態の更新・完了・`release_run` で飛ばす。run の末尾の NULL は切る。prefetch でない読み、page list でない読み、書きは前と同じ。ついでに page list の名付けで 1 page でない line を見た時に `pages` を NULL にした後も `pages[index]` に書く形だったのを、そこで止めるようにした。
+- 確かめ（kernel ea880d69a7b53468、q2044b、5330）: 乱読み QD32（987 MB/s）の直後の 1 GiB の連続の読み 1471 MB/s（Debian の cache を捨てた後の chunk の中央値 1511 の 97%）。その 1 GiB を zedBSD で読んだ cksum（260050290 1073741824）が Debian で同じ block を読んだ cksum と一致。read mode の bs 64 KiB・1 MiB・4 MiB は 1917・2684・1491、chunk0・1 は 2237・2065（Debian の 97〜177%、256 MiB の段は 10 ms 刻みで ±8%）。seqcold の chunk の中央値 2065、乱読み QD1 57.6・QD32 1004.9（main の kernel の q2044a は 1790・57.6・996.4、chunk は 10 ms 刻みのぶれの内）。build（x86_64）rc 0・warning 0。
+- 未実施: QEMU の回帰（試験の image の作り方が今の build system に合っていない、p007）、他の機種の build、file system の prefetch（`buf_prefetch`）の道での確かめ（同じ関数を通るが測っていない）。
+- 受け入れ 1 の材料: 乱読みの前（seqcold）の最初と最後の 256 MiB の比 1.00（main の kernel）、乱読みの後（read mode、bucket の kernel）0.92。

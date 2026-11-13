@@ -7,8 +7,8 @@
 # p1 to p5 are never discarded.
 # debian: runs bench-debian.sh on the 5330's Debian.
 # zedbsd: puts VMUNIX on the NVMe's p4 (5330-nvme-write.sh kernel; "-" keeps the kernel there), then for each mode
-#   boots zedBSD once from the NVMe (UEFI BootNext of "zedBSD NVMe"), runs bench-zedbsd.sh MODE as root, and reboots
-#   to Debian.
+#   boots zedBSD once from the NVMe (~/boot-zedbsd.sh, UEFI BootNext of "zedBSD NVMe"), runs bench-zedbsd.sh MODE as
+#   root, and reboots to Debian.  The lock is taken here unless WS299_LOCKED says the caller holds it.
 # randread (build-randread.sh) is built into RANDREAD_DIR when it is not there, and copied to both systems.
 # Output: LOGS (default build/hw5330/ws299) NAME-MODE.txt for each run, then the summary of summary.py.  The last line
 # is "nvme-bench: done|FAIL ...".  Nothing is removed on either machine.
@@ -68,8 +68,11 @@ debian_up() {
 	done
 }
 
-exec 9> /tmp/i915-hw.lock
-flock 9
+# measure-5330.sh holds the lock for the whole run and sets WS299_LOCKED.
+if [ -z "${WS299_LOCKED:-}" ]; then
+	exec 9> /tmp/i915-hw.lock
+	flock 9
+fi
 debian_up
 TO=60 timeout 60 scp -q $T/bench-debian.sh "$RANDREAD_DIR/randread-linux" "$RANDREAD_DIR/patwrite-linux" "$RANDREAD_DIR/directio-linux" \
     "$RANDREAD_DIR/cpuloop-linux" plan/tools/hw5330/5330-nvme-write.sh plan/tools/hw5330/ufs-grow.py "$HOST:ws245/" ||
@@ -103,11 +106,10 @@ if [ "$KERNEL" != - ]; then
 	lin "sudo -n sh \$HOME/ws245/5330-nvme-write.sh kernel \$HOME/ws245/vmunix-$NAME" > /dev/null || { say "FAIL: kernel install"; exit 1; }
 	say "kernel installed ($(sha256sum "$KERNEL" | cut -c1-16))"
 fi
-entry=$(lin "sudo -n efibootmgr -v" | grep -i 08ab575f-f718-4eff-a3c9-10d80b1217ea | grep -i 'zedbsd.BOOTX64' | sed -n 's/^Boot\([0-9A-F]\{4\}\).*/\1/p' | head -1)
-[ -n "$entry" ] || { say "FAIL: no UEFI entry zedBSD NVMe"; exit 1; }
+lin 'test -x $HOME/boot-zedbsd.sh' || { say "FAIL: no ~/boot-zedbsd.sh on Debian"; exit 1; }
 
 for mode in $MODES; do
-	[ "$mode" = write ] && p6fresh
+	case "$mode" in write | rawone) p6fresh ;; esac
 	run=$mode
 	envrun=$ENVS
 	case "$mode" in
@@ -121,7 +123,8 @@ for mode in $MODES; do
 		envrun="$ENVS MKFS=0" ;;
 	esac
 	settle
-	lin "sudo -n efibootmgr -n $entry > /dev/null && sudo -n systemctl reboot" > /dev/null 2>&1
+	# One start of zedBSD (UEFI BootNext); the start after it is Debian again.
+	lin '$HOME/boot-zedbsd.sh' > /dev/null 2>&1
 	sleep 20
 	start=$(date +%s)
 	until zb 'uname -s' 2> /dev/null | grep -qi zedbsd; do
@@ -143,7 +146,7 @@ for mode in $MODES; do
 	zb 'dmesg' > "$LOGS/$NAME-$mode-dmesg.txt" 2>&1
 	zb "echo $ZBU | sudo -S reboot" > /dev/null 2>&1
 	debian_up
-	[ "$mode" = write ] && p6fresh
+	case "$mode" in write | rawone) p6fresh ;; esac
 done
 python3 -I $T/summary.py "$LOGS" "$NAME"
 say done

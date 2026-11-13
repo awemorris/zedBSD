@@ -3,7 +3,7 @@
 # ws299-p006 NVMe の HMB（Host Memory Buffer）を BG5 に渡す
 
 - 親: [WS299](../ws.md)。Queue: q1640 / q1640-i01（担当 P1）。前提: p003（NVMe の大きな転送）。
-- Status: in-progress（2026-10-28 P1: 設計（kernel-and-driver-designer の案を P1 が決めた）、実装へ）
+- Status: cleared（2026-11-13 Q1 判定: q2044 で QD1 104 %、QD32 direct 97 %・cache 経由 107 %）
 - Disposition: normal
 - 出典: 2026-10-27 ユーザー「Debianの95%以上をゴールにします。」と HMB は「やる」（ws.md）。
 
@@ -55,3 +55,8 @@
 ## 再開点（2026-10-28、P1）
 
 - 設計・実装・5330 の QD1 は済み。QD32 の 95% は未達。
+
+## 2026-11-13（q2044、P2）: 電力制御の後の測り
+
+- main fe6ea0f967 の kernel、5330（[ws.md](../ws.md) の「2026-11-13」）: dmesg に毎回 `nvme: host memory buffer 64 MiB in 4 chunks`。乱読み 4 KiB direct QD1 58.1 MB/s（Debian の HMB on 55.8 の 104%）、QD32 902.4（930.3 の 97%、thread ごとの open 881.3 = 95%）、cache 経由の QD32 996.4（107%）。WS308 の lock の直しと電力制御の後、受け入れ 3 の乱読みは満たす。連続の読み書きも下がっていない（ws.md の表）。
+- 未実施: recovery・resume での再有効化（5330 で起こしていない）、QEMU の log に host memory の行が無い事の確かめ、他の機種の build（今日は x86_64 だけ）。

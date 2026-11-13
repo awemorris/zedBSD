@@ -414,6 +414,15 @@ static unsigned readahead_ready;
 static atomic_uint_t readahead_started;
 
 /*
+ * The page a read-ahead run reads the blocks of lines already in the cache
+ * into, so that a few cached lines do not cut the run into small commands.
+ * What lands there is never read.  Made with the workers, before any job;
+ * readahead_bucket_ready says it is there, and it is never freed.
+ */
+static struct kern_pmem readahead_bucket;
+static unsigned readahead_bucket_ready;
+
+/*
  * Whether the workers are asked to write the oldest dirty lines back, and
  * whether a thread is gathering a cluster (others wait on
  * readahead_changed, so that two do not split one run); readahead_lock.
@@ -3256,8 +3265,14 @@ release_run(
 {
 	unsigned index;
 
-	/* Releases acquired lines and then the references without ownership. */
+	/*
+	 * Releases acquired lines and then the references without ownership.
+	 * A NULL slot is a cached line a prefetch reads into the bucket page;
+	 * the run holds nothing of it.
+	 */
 	for (index = 0; index < count; index++) {
+		if (lines[index] == NULL)
+			continue;
 		if (index < busy)
 			buf_release(lines[index]);
 		else
@@ -3380,7 +3395,10 @@ transfer_run(
  * A prefetch reads missing lines into the cache for a reader to come: it
  * has no caller storage (data is NULL), goes only as a page list, starts
  * only at a missing line, leaves a line it could not read missing rather
- * than failed, and records nothing in the I/O statistics.
+ * than failed, and records nothing in the I/O statistics.  With the bucket
+ * page it reads over lines already in the cache inside its run (their slots
+ * are NULL and their blocks go to the bucket page), so that cached lines
+ * scattered by random reads do not cut it into small commands.
  */
 static int
 transfer_run_lines(
@@ -3403,9 +3421,12 @@ transfer_run_lines(
 	unsigned count;
 	unsigned index;
 	unsigned acquired;
+	unsigned skipped;
+	unsigned skip_max;
 	unsigned long irq;
 	int error;
 	int line_error;
+	int bucket;
 	uint8_t *bytes;
 	uint64_t started_ns;
 	uint64_t sent_ns;
@@ -3443,6 +3464,18 @@ transfer_run_lines(
 	count = (unsigned)(remaining / line_blocks > limit ?
 	    limit : remaining / line_blocks);
 
+	/*
+	 * A prefetch reads over cached lines inside its run, up to half of it,
+	 * into the bucket page: one command for the run costs the device less
+	 * than one for each gap between them.  The first line stays a missing
+	 * one, as a prefetch starts only there.
+	 */
+	bucket = 0;
+	if (prefetch && !write && pages != NULL && readahead_bucket_ready)
+		bucket = 1;
+	skipped = 0;
+	skip_max = count / 2U;
+
 	/* Pins and allocates all lines before acquiring any busy ownership. */
 	for (index = 0; index < count; index++) {
 		error = reference_line(
@@ -3469,11 +3502,23 @@ transfer_run_lines(
 			spin_unlock_irqrestore(&lines[index]->b_lock, irq);
 			if (line_error) {
 				drop_caller_reference(lines[index]);
+
+				/* Reads a cached line inside the run into the bucket page. */
+				if (bucket && index != 0U && skipped < skip_max) {
+					lines[index] = NULL;
+					skipped++;
+					continue;
+				}
+
 				count = index;
 				break;
 			}
 		}
 	}
+
+	/* Ends the run at its last line to read, not at a cached one. */
+	while (count != 0U && lines[count - 1U] == NULL)
+		count--;
 
 	/*
 	 * Never waits for another line while owning one.  A read that already
@@ -3482,6 +3527,12 @@ transfer_run_lines(
 	 */
 	acquired = 0;
 	for (index = 0; index < count; index++) {
+		/* A cached line read into the bucket page is not taken; its slot counts as held. */
+		if (lines[index] == NULL) {
+			acquired++;
+			continue;
+		}
+
 		irq = spin_lock_irqsave(&lines[index]->b_lock);
 		if ((lines[index]->b_busy || lines[index]->b_io_inflight) &&
 		    !write && index >= 2U) {
@@ -3512,6 +3563,12 @@ transfer_run_lines(
 		spin_unlock_irqrestore(&lines[index]->b_lock, irq);
 	}
 
+	/* Ends a run shortened above at its last line to read again. */
+	while (count != 0U && lines[count - 1U] == NULL)
+		count--;
+	if (acquired > count)
+		acquired = count;
+
 	if (count < 2U) {
 		release_run(lines, count, acquired);
 		run_record(prefetch, IO_BUF_SINGLE_HIT, 0);
@@ -3521,6 +3578,10 @@ transfer_run_lines(
 	/* Copies accepted writes into their durable retry owner before submitting. */
 	bytes = data;
 	for (index = 0; index < count; index++) {
+		/* A line read into the bucket page keeps its state. */
+		if (lines[index] == NULL)
+			continue;
+
 		if (write) {
 			kern_memcpy_ram(lines[index]->b_data, bytes + index * line_bytes, (size_t)line_bytes);
 			buf_mark_dirty(lines[index]);
@@ -3536,17 +3597,25 @@ transfer_run_lines(
 	/* Names each line's own page, when the run goes as a page list. */
 	if (pages != NULL) {
 		for (index = 0; index < count; index++) {
-			if (lines[index]->b_memory.size != KERN_PAGE_SIZE)
+			if (lines[index] == NULL) {
+				/* The device's bytes for a cached line go to the bucket page. */
+				pages[index] = readahead_bucket.paddr;
+			} else if (lines[index]->b_memory.size != KERN_PAGE_SIZE) {
+				/* A line not of one page cannot go as a page list. */
 				pages = NULL;
-			else
+				break;
+			} else {
 				pages[index] = lines[index]->b_memory.paddr;
+			}
 		}
 	}
 
 	/* A prefetch that cannot go as a page list leaves its lines missing. */
 	if (prefetch && pages == NULL) {
-		for (index = 0; index < count; index++)
-			finish_unread_line(lines[index]);
+		for (index = 0; index < count; index++) {
+			if (lines[index] != NULL)
+				finish_unread_line(lines[index]);
+		}
 		release_run(lines, count, count);
 		return 0;
 	}
@@ -3590,6 +3659,10 @@ transfer_run_lines(
 	 * lines.
 	 */
 	for (index = 0; index < count; index++) {
+		/* The bucket page's bytes are nobody's. */
+		if (lines[index] == NULL)
+			continue;
+
 		line_error = error;
 		if ((index + 1U) * line_blocks <= completed) {
 			line_error = 0;
@@ -5413,6 +5486,14 @@ readahead_start(
 			return ENOMEM;
 		return 0;
 	}
+
+	/*
+	 * Takes the page that cached lines inside a run are read into; without
+	 * it a run ends at its first cached line, as it always did.
+	 */
+	error = kern_pmem_alloc(KERN_PAGE_SIZE, KERN_PAGE_SIZE, &readahead_bucket);
+	if (error == 0)
+		readahead_bucket_ready = 1;
 
 	/* Makes each worker; one that cannot be made is simply not there. */
 	for (index = 0; index < BUF_READAHEAD_WORKERS; index++) {

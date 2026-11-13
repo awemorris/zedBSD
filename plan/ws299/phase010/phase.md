@@ -3,7 +3,7 @@
 # ws299-p010 block device の O_DIRECT
 
 - 親: [WS299](../ws.md)。Queue: q1640 / q1640-i01（担当 P1）。番号は P1 の仮（Q1 が表と依存を決める）。
-- Status: in-progress（2026-10-28 P1、q1646 paused: 実装・host・QEMU・5330 の測定まで。direct の書き 59%・QD32 48% が未達、WS308 の後に戻る）
+- Status: in-progress（2026-11-13 q2044 P2: direct の書き 96%、読み 1 MiB 94〜95%・4 MiB 92〜93% が未達。下の「2026-11-13」）
 - 出典: 2026-10-28 ユーザー（Q1 経由）「raw の冷えた読み 4 GiBは、zedBSDではpage cache経由なのか、directなのか。zedBSDでもどちらの経路でも読めるなら、両方でLinuxと同等以上の性能にチューニングしたいです。」、P1 の案 B に対しユーザーのクリック「O_DIRECT を UAPI に足す」。Q1: block device の open に O_DIRECT（Linux と同じ意味: cache を通らず、重なる dirty の line は先に書き戻して無効にする）、揃わない offset・長さの扱いも Linux に合わせて決めて記録、regular file は EINVAL か無視かを決めて記録、受け入れに direct の読み・書き（Debian の direct 2.1 GB/s 以上、書きも Debian の direct と比べる）。
 
 ## 今の事実
@@ -117,3 +117,17 @@
 ## 2026-10-28 夜（q1657、P1）
 
 - direct の書き 59% の差は、道具 directio の fill（長さを変数にした memcpy を 8 byte ごとに呼び、zedBSD の libc の memcpy が遅い）だった。kernel の 1 MiB の書きは約 0.47 ms で、I/O の時間は Debian と同じ程度。fill を直し、NVMe の 1 request を 4 MiB・同時 16 command にした（c9468203a）。5330: direct の書き 1384 / 1579 MB/s（88%）、読み 1 MiB 2554 / 2486（103%）、4 MiB 2809 / 3101（91%）。表と見立ては [ws.md](../ws.md) の「結果（2026-10-28 21:50）」。
+
+## 2026-11-13（q2044、P2）: 電力制御の後の測りと読みの差の切り分け
+
+- main fe6ea0f967 の kernel、5330（q2044a、[ws.md](../ws.md) の「2026-11-13」）: direct の書き 1 MiB 1512 / Debian 1575 = 96%、読み 1 MiB 2603 / 2750 = 95%、4 MiB 2863 / 3112 = 92%、data 範囲の読み 1 MiB 1562 / 1586 = 98%。
+- 4 MiB の読みの差は 1 request（4 MiB）あたり約 100 µs、1 MiB では約 25 µs で、大きさに比例する。試した物（各回 Debian を同じ時間帯に測り直した）:
+
+| 試した形 | kernel | zedBSD 4 MiB / 1 MiB | Debian 4 MiB / 1 MiB | 結果 |
+| --- | --- | --- | --- | --- |
+| command を 128 KiB ×32（`NVME_IO_PAGE_COMMAND_BYTES`、深さの上限 32、試験だけ） | 1be3b959fdb9f1c0（q2044c） | 2807 / 2572 | 3046 / 2721 | 効かない（92% / 95%）。この回は読み手が E-core に載った（pcore 0/1024） |
+| ordinary idle を HLT だけ（`IDLE_WAIT_DEEPEST_CSTATE=1`、試験だけ） | 399d9300fa0e9da1（q2044d） | 2826 / 2572 | 3026 / 2742 | 効かない（93% / 94%） |
+| pin が page ごとに region の list を頭から歩くのを、前の page の region から（`vmspace_pin_user_pages`、試験だけ、戻した） | 20ac3a4020731369（q2044e） | 2826 / 1900 | 3074 / 2592 | 4 MiB は効かない（92%）。1 MiB の 1900 は直前の書きの後の drive の状態と見る（未確認） |
+
+- 残る候補（未確認）: 1 request の 16 command の完了ごとの割り込み（VMD の 1 vector）と待つ thread の起床の回数、request の間の隙間（完了 → user → 次の pin・post）。次は TSC で request の中の区間（pin・post・最後の完了・起床・unpin）を測る。
+- 乱読み direct QD1 104%・QD32 97%（[phase006](../phase006/phase.md)）。
