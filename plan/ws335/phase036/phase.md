@@ -140,7 +140,7 @@ Parent: [WS335](../ws.md)。担当: P2（q2029-i01 worktree `p2-ws335c`、q2047-
 
 mailer: §4 の「mailer の tls.c」の案（compat に 2 つの関数が足りないので、この Phase では source を変えない。差分 D は案）。
 
-未実施: `run-nettls.sh`（host、source は q2029 から変えていない）、aarch64 の Windows の program の Wine での実行（cross-build は arm64 を link まで）、i386・pc9821 の compat の build（参考の platform、Q1 の指示で確かめない）、rpi4・rpi5・vf2・intelmid64 の image、実機。
+未実施: `run-nettls.sh`（host、source は q2029 から変えていない）、`net-ring-test.sh` の実行（前提の WS074 の host の build `build/ws074-host/include` がこの worktree に無く zlib の header で止まる。除外の式は `ls net/*.c` の結果で tls.c だけが残る事を確かめた）、aarch64 の Windows の program の Wine での実行（cross-build は arm64 を link まで）、i386・pc9821 の compat の build（参考の platform、Q1 の指示で確かめない）、rpi4・rpi5・vf2・intelmid64 の image、実機。
 
 ### 旧い試験の道具（item 4）
 
