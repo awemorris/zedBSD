@@ -75,6 +75,11 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | [p016](phase016/phase.md) | 試験: QEMU の回帰と 5330 の idle（電力・PC2・thread ごとの起床） | planned | p002〜p015 |
 | [p017](phase017/phase.md) | 規約の全文の見直し | planned | p016 |
 
+## ユーザーの決定（続き）
+
+- 2026-11-14 ユーザーから次の趣旨の決定を受けた: printd は常駐でなく印刷の spool の間だけ起動する。printd が起動している間は、pipe で printd に接続して push を受けるのが理想。kernel に機能（file の変化の通知など）は足さない（kernel を簡素に保ち、POSIX の中核から離れないため）。Settings は spool の中身を見る時だけ printd と通信すればよく、printer の一覧を得るのに printd と通信する必要は無い。→ 2-04（printers の 1 s）の本来の形はこの方針で後の Phase に。
+- 2026-11-14 ユーザーから、10.0.10.25（WS014 の Venus の renderer の server）を試験に使ってよい、今は起動していないので使う時は知らせる、Pi 5 と入れ替える予定（SwitchBot が 3 つのため）、という趣旨の連絡を受けた。
+
 ## Q1 の判断
 
 - 2026-11-14（p005、P1 の問い）: 入力の device の追加の後の 100 ms の settle の scan は、kernel の順の問題ではなく（`src/drivers/generic/input.c:362〜376` は node の登録の後に ADD の事象）、sessiond が同じ ADD の事象で node を利用者へ chown する前は開けない（BUG-264）ため。p005 では 2 s の周期の scan だけ消し、settle は事象の後だけの物として残す。本来の形（sessiond が seat を与えた事を session の control の fd で push し、compositor はそれで scan）は、後の Phase として足す（p018 の候補、p005 の申し送りを見て Q1 が立てる）。
