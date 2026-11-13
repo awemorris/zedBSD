@@ -246,6 +246,9 @@ kwl_compose_open(
 	/* The display thread, which changes the output's swapchain from now on (without it the changes run here). */
 	kwl_display_start(server);
 
+	/* The hotplug thread, which tells of the displays plugged and unplugged from now on. */
+	kwl_output_hotplug_start(server);
+
 	/* Succeeded: window mode can open its output. */
 	return 0;
 }
@@ -547,9 +550,10 @@ kwl_compose_output_take(
 	printf("KWL STARTUP step=output-targets ms=%llu\n", (unsigned long long)(kwl_milliseconds() - started));
 	memset(compose->image_frames, 0, sizeof(compose->image_frames));
 
-	/* The displays' choice (read once), and the heads brought in line at the next look. */
+	/* The displays' choice (read once), and the heads brought in line by the follow after this change. */
 	kwl_heads_config_load(server);
 	compose->heads_stale = 1U;
+	kwl_output_follow_later(server);
 
 	/* The cursor plane, when the output has one (it borrows the output's claim). */
 	if (cursor != NULL)
@@ -1071,6 +1075,9 @@ kwl_compose_close(
 	if (compose == NULL)
 		return;
 
+	/* The hotplug thread stops first: what it would tell is followed by nobody any more. */
+	kwl_output_hotplug_stop(server);
+
 	/* A change of the display running ends, and the display thread stops (the output's close runs here). */
 	kwl_display_stop(server);
 
@@ -1127,7 +1134,6 @@ kwl_compose_close(
 		vkDestroySemaphore(compose->device, compose->acquired, NULL);
 		for (index = 0U; index < KWL_FRAME_SLOTS; index++)
 			vkDestroyFence(compose->device, compose->slots[index].fence, NULL);
-		vkDestroyFence(compose->device, compose->hotplug, NULL);
 		vkDestroyCommandPool(compose->device, compose->pool, NULL);
 		vkDestroyCommandPool(compose->device, compose->task_pool, NULL);
 		vkDestroyDevice(compose->device, NULL);
@@ -4663,6 +4669,7 @@ compose_message(
 			if (!compose->output_lost) {
 				printf("KWL OUTPUT lost operation=acquire result=%d\n", (int)result);
 				compose->output_lost = 1U;
+				kwl_output_follow_later(server);
 			}
 
 			/* No failure. */
@@ -4888,8 +4895,10 @@ compose_frame_presented(
 		printf("KWL OUTPUT switch unshown name=%s result=%d\n", compose->display_name, (int)result);
 		compose->switch_proving = 0U;
 		compose->switch_failed = 1U;
-		if (!compose->output_lost)
+		if (!compose->output_lost) {
 			compose->output_lost = 1U;
+			kwl_output_follow_later(server);
+		}
 		result = VK_SUCCESS;
 	}
 
@@ -4902,8 +4911,10 @@ compose_frame_presented(
 	/* The display went: the output moves. */
 	if (result == VK_ERROR_SURFACE_LOST_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
 		printf("KWL OUTPUT lost operation=present result=%d\n", (int)result);
-		if (!compose->output_lost)
+		if (!compose->output_lost) {
 			compose->output_lost = 1U;
+			kwl_output_follow_later(server);
+		}
 		result = VK_SUCCESS;
 	}
 

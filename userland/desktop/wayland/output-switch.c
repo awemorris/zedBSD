@@ -10,12 +10,20 @@
  * (ws113-p004a; the design is plan/ws113/phase004/phase.md, "p004a").
  *
  * The compositor shows one display at a time.  It follows the displays
- * through the hotplug fence of VK_EXT_display_control (ws113-p003): when
- * the fence signals, a new fence is registered first, the displays are
- * enumerated again, and the old fence goes.  The output moves when it is
- * asked to (kwl_output_use_external and kwl_output_use_internal, for the
- * lid's choice of ws052-p012), and by itself when the display it shows is
- * gone: to the machine's own display first, else to any other.  A move
+ * through the hotplug fence of VK_EXT_display_control (ws113-p003), which
+ * a thread of its own (the hotplug thread) waits for with no time limit:
+ * when the fence signals, the thread registers a new fence first, lets the
+ * old one go, and tells the main thread, which enumerates the displays
+ * again.  Nothing looks at the displays on a period: the follow of the
+ * displays runs when an event asks for it (the hotplug thread's note, the
+ * output or a head losing its display, the heads to be brought in line),
+ * and one asked for outside window mode, during a change of the display
+ * or while the list is being read is held until that ends.
+ *
+ * The output moves when it is asked to (kwl_output_use_external and
+ * kwl_output_use_internal, for the lid's choice of ws052-p012), and by
+ * itself when the display it shows is gone: to the machine's own display
+ * first, else to any other.  A move
  * closes the swapchain and gives the display back, opens a swapchain on
  * the other display at its native size, and fits the desktop to that size
  * (the look's images, the windows, the clients' wl_output).  A display
@@ -42,9 +50,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* How often the hotplug fence is looked at (ms): each look is a request to the display node. */
-#define OUTPUT_HOTPLUG_MS	250U
-
 /* A move to an external display (kwl_output_use_external): what was kept off before, and what goes on with the result. */
 struct output_use {
 	VkDisplayKHR previous;
@@ -52,7 +57,7 @@ struct output_use {
 	void *context;
 };
 
-/* The looks at the displays the hotplug's tick makes (output_listed). */
+/* The looks at the displays the follow makes (output_listed). */
 #define OUTPUT_LOOK_FIRST	1U
 #define OUTPUT_LOOK_SIGNAL	2U
 #define OUTPUT_LOOK_HEADS	3U
@@ -116,7 +121,11 @@ static void output_listed(struct kwl_server *server, int error, void *context);
 static void output_recover_listed(struct kwl_server *server, VkResult listed);
 static int output_internal(const struct kwl_compose *compose, unsigned index);
 static int output_index(const struct kwl_compose *compose, VkDisplayKHR display);
-static void output_hotplug_register(struct kwl_server *server);
+static void *output_hotplug_run(void *argument);
+static VkResult output_hotplug_register(struct kwl_hotplug *hotplug, VkFence *fence);
+static void output_hotplug_note(struct kwl_hotplug *hotplug, unsigned notes, VkResult result);
+static void output_hotplug_without(struct kwl_server *server);
+static int output_follow_held(struct kwl_server *server);
 static void output_recover(struct kwl_server *server);
 static void output_used_external(struct kwl_server *server, int error, void *context);
 static void output_heads_sync(struct kwl_server *server);
@@ -136,56 +145,243 @@ static void output_pointer_clamp(const void *context, const struct kwl_plane_rec
 static void output_pointer_turn(const void *context, const struct kwl_plane_rect *outputs, int32_t *x, int32_t *y, unsigned *output);
 
 /*
- * Follows the displays once each pass of the event loop (at most every
- * OUTPUT_HOTPLUG_MS): the hotplug fence's signal, and a display gone from
- * under the output.  The displays are read by the display thread (the
- * backend may probe the connectors); output_listed goes on with the list.
+ * Starts the hotplug thread once the device and the threads' wake pipe are
+ * there: it registers the first hotplug fence and tells of it, then waits.
+ * Without the display control (a renderer without it) nothing is followed;
+ * without the thread the displays are still read once, at window mode.
  */
 void
-kwl_output_tick(
+kwl_output_hotplug_start(
 	struct kwl_server *server)
 {
 	struct kwl_compose *compose;
-	VkFence previous;
-	VkResult status;
-	uint64_t now;
-	int lost;
+	struct kwl_hotplug *hotplug;
+	VkFenceCreateInfo info;
+	VkResult result;
+	int error;
 
-	/* A displays result held back too long is answered (displays-shell.c, BUG-266). */
-	now = kwl_milliseconds();
-	kwl_displays_pending_tick(server, now);
-
-	/* Only a device that follows the hotplug, while window mode runs, the display does not change and no list is being read. */
+	/* Only a device that follows the hotplug. */
 	compose = server->compose;
-	if (compose == NULL || compose->register_device_event == NULL || !server->windowed)
-		return;
-	if (kwl_display_busy(server) || compose->listing)
+	if (compose == NULL || compose->register_device_event == NULL)
 		return;
 
-	/* Not too often. */
-	if (compose->hotplug != VK_NULL_HANDLE && now - compose->hotplug_checked_ms < OUTPUT_HOTPLUG_MS && compose->output_lost != 1U)
+	/* Once. */
+	hotplug = &compose->hotplug;
+	if (hotplug->started)
 		return;
-	compose->hotplug_checked_ms = now;
 
-	/* The first look: a fence, then the displays as they are, and their heads. */
-	if (compose->hotplug == VK_NULL_HANDLE) {
-		output_hotplug_register(server);
-		output_list_later(server, OUTPUT_LOOK_FIRST);
+	/* The stop fence, which the end submits empty to end the thread's wait. */
+	memset(&info, 0, sizeof(info));
+	info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	result = vkCreateFence(compose->device, &info, NULL, &hotplug->stop);
+	if (result != VK_SUCCESS) {
+		hotplug->stop = VK_NULL_HANDLE;
+		printf("KWL OUTPUT hotplug unavailable operation=stop-fence result=%d\n", (int)result);
+		output_hotplug_without(server);
 		return;
 	}
 
-	/* A signal: a new fence first, so that a change during the enumeration is not missed. */
-	status = vkGetFenceStatus(compose->device, compose->hotplug);
-	if (status == VK_SUCCESS) {
-		previous = compose->hotplug;
-		compose->hotplug = VK_NULL_HANDLE;
-		output_hotplug_register(server);
-		vkDestroyFence(compose->device, previous, NULL);
+	/* The notes' lock. */
+	error = pthread_mutex_init(&hotplug->lock, NULL);
+	if (error != 0) {
+		vkDestroyFence(compose->device, hotplug->stop, NULL);
+		hotplug->stop = VK_NULL_HANDLE;
+		printf("KWL OUTPUT hotplug unavailable operation=lock errno=%d\n", error);
+		output_hotplug_without(server);
+		return;
+	}
 
-		/* The displays now; a display refused before, or whose move failed, is tried again. */
+	/* What the thread reads, set before it runs. */
+	hotplug->notes = 0U;
+	hotplug->result = VK_SUCCESS;
+	hotplug->wakes = 0U;
+	hotplug->main_woken = 0U;
+	hotplug->device = compose->device;
+	hotplug->register_device_event = compose->register_device_event;
+	hotplug->wake_main = server->wake[1];
+
+	/* The thread. */
+	error = kwl_thread_start(&hotplug->thread, "hotplug", output_hotplug_run, hotplug);
+	if (error != 0) {
+		(void)pthread_mutex_destroy(&hotplug->lock);
+		vkDestroyFence(compose->device, hotplug->stop, NULL);
+		hotplug->stop = VK_NULL_HANDLE;
+		printf("KWL OUTPUT hotplug unavailable operation=thread errno=%d\n", error);
+		output_hotplug_without(server);
+		return;
+	}
+
+	/* Succeeded: the thread runs until kwl_output_hotplug_stop. */
+	hotplug->started = 1U;
+}
+
+/*
+ * Stops the hotplug thread at the end, before the device goes: the stop
+ * fence is submitted empty (under the queue's lock), which ends the
+ * thread's wait, and the thread is joined.  A device lost refuses the
+ * submit, and then ends the thread's wait itself (the wait reports the
+ * device lost).
+ */
+void
+kwl_output_hotplug_stop(
+	struct kwl_server *server)
+{
+	struct kwl_compose *compose;
+	struct kwl_hotplug *hotplug;
+	VkResult submitted;
+	unsigned wakes;
+
+	/* Only a thread that runs. */
+	compose = server->compose;
+	if (compose == NULL || !compose->hotplug.started)
+		return;
+
+	/* The stop fence signaled by an empty submit. */
+	hotplug = &compose->hotplug;
+	kwl_queue_lock(compose);
+
+	submitted = vkQueueSubmit(compose->queue, 0U, NULL, hotplug->stop);
+
+	kwl_queue_unlock(compose);
+
+	/* A refused submit is logged: the thread's wait returns on the device's loss instead. */
+	if (submitted != VK_SUCCESS)
+		printf("KWL OUTPUT hotplug stop submit result=%d\n", (int)submitted);
+
+	/* The thread ends once its wait returns. */
+	kwl_thread_join(&hotplug->thread);
+	hotplug->started = 0U;
+
+	/* How often the thread woke: once for each hotplug and once for the stop. */
+	pthread_mutex_lock(&hotplug->lock);
+
+	wakes = hotplug->wakes;
+
+	pthread_mutex_unlock(&hotplug->lock);
+
+	/* The line the tests read, with the readings of the displays the follow asked for. */
+	printf("KWL OUTPUT hotplug stopped wakes=%u looks=%u\n", wakes, compose->looks);
+
+	/* The stop fence and the lock go; notes not taken are followed by nobody now. */
+	vkDestroyFence(compose->device, hotplug->stop, NULL);
+	hotplug->stop = VK_NULL_HANDLE;
+	(void)pthread_mutex_destroy(&hotplug->lock);
+}
+
+/*
+ * Takes the hotplug thread's notes after the wake pipe, then runs the
+ * follow of the displays owed (theirs, and what the frames and the
+ * display thread asked for in this pass).
+ */
+void
+kwl_output_hotplug_take(
+	struct kwl_server *server)
+{
+	struct kwl_compose *compose;
+	struct kwl_hotplug *hotplug;
+	VkResult result;
+	unsigned notes;
+	unsigned wakes;
+
+	/* Nothing without the device. */
+	compose = server->compose;
+	if (compose == NULL)
+		return;
+
+	/* The notes, emptied (none without the thread): the next note wakes the main thread again. */
+	hotplug = &compose->hotplug;
+	notes = 0U;
+	result = VK_SUCCESS;
+	wakes = 0U;
+	if (hotplug->started) {
+		pthread_mutex_lock(&hotplug->lock);
+
+		notes = hotplug->notes;
+		result = hotplug->result;
+		wakes = hotplug->wakes;
+		hotplug->notes = 0U;
+		hotplug->main_woken = 0U;
+
+		pthread_mutex_unlock(&hotplug->lock);
+	}
+
+	/* The first fence registered: the displays as they are (unless a signal's reading is owed already). */
+	if ((notes & KWL_HOTPLUG_NOTE_FIRST) != 0U) {
+		printf("KWL OUTPUT hotplug first wakes=%u\n", wakes);
+		if (compose->follow_look == 0U)
+			compose->follow_look = OUTPUT_LOOK_FIRST;
+		compose->follow_pending = 1U;
+	}
+
+	/* A hotplug: the displays read again, and what was refused since the last one tried again. */
+	if ((notes & KWL_HOTPLUG_NOTE_SIGNAL) != 0U) {
+		printf("KWL OUTPUT hotplug signal wakes=%u\n", wakes);
+		compose->follow_look = OUTPUT_LOOK_SIGNAL;
+		compose->follow_pending = 1U;
+	}
+
+	/* The thread ended on a failure (a registration refused, the device lost): no hotplug is followed from now on. */
+	if ((notes & KWL_HOTPLUG_NOTE_UNAVAILABLE) != 0U)
+		printf("KWL OUTPUT hotplug unavailable result=%d wakes=%u\n", (int)result, wakes);
+
+	/* Succeeded: the follow owed runs now (the notes made it owed without a wake of their own). */
+	kwl_output_follow(server);
+}
+
+/*
+ * Runs the follow of the displays an event asked for (kwl_output_follow_later),
+ * once it can: in window mode, no change of the display running and no list
+ * being read (else it stays owed, and the end of what held it wakes the
+ * loop, kwl_output_follow_wake).  In the order the reading of the list owed
+ * by the hotplug thread (its first look, or a signal: the displays refused
+ * since the last hotplug are tried again), a lost output's move, then the
+ * heads brought in line after the output opened again and when a head lost
+ * its display.  The displays are read by the display thread (the backend
+ * may probe the connectors); output_listed goes on with the list.
+ */
+void
+kwl_output_follow(
+	struct kwl_server *server)
+{
+	struct kwl_compose *compose;
+	unsigned look;
+	int held;
+	int lost;
+
+	/* Only a follow owed. */
+	compose = server->compose;
+	if (compose == NULL || !compose->follow_pending)
+		return;
+
+	/* A device without the hotplug (a renderer without the display control) follows nothing. */
+	if (compose->register_device_event == NULL) {
+		compose->follow_pending = 0U;
+		return;
+	}
+
+	/* Not now: kept owed. */
+	held = output_follow_held(server);
+	if (held)
+		return;
+
+	/* It runs now, and is owed no more. */
+	compose->follow_pending = 0U;
+
+	/* The reading the hotplug thread asked for. */
+	look = compose->follow_look;
+	compose->follow_look = 0U;
+	if (look == OUTPUT_LOOK_SIGNAL) {
 		compose->limited = 0U;
 		compose->move_failed = 0U;
 		output_list_later(server, OUTPUT_LOOK_SIGNAL);
+		return;
+	}
+
+	/* The first look: the displays as they are, and their heads; a lost output is moved after it. */
+	if (look == OUTPUT_LOOK_FIRST) {
+		output_list_later(server, OUTPUT_LOOK_FIRST);
+		if (compose->output_lost == 1U)
+			compose->follow_pending = 1U;
 		return;
 	}
 
@@ -206,8 +402,50 @@ kwl_output_tick(
 }
 
 /*
+ * Asks for the follow of the displays after an event (the output or a
+ * head lost its display, the heads to be brought in line, the hotplug
+ * thread's note): it runs after the threads' results of the pass are
+ * taken.  The loop is woken once, when the follow becomes owed.
+ */
+void
+kwl_output_follow_later(
+	struct kwl_server *server)
+{
+	struct kwl_compose *compose;
+
+	/* Owed already: the wake for it is on its way, or what holds it will wake the loop. */
+	compose = server->compose;
+	if (compose == NULL || compose->follow_pending)
+		return;
+
+	/* Succeeded: owed, and the next pass takes it. */
+	compose->follow_pending = 1U;
+	kwl_thread_wake(server->wake[1]);
+}
+
+/*
+ * Wakes the loop for a follow of the displays owed, at the end of what held
+ * it back (window mode entered, a change of the display ended, a list read).
+ */
+void
+kwl_output_follow_wake(
+	struct kwl_server *server)
+{
+	struct kwl_compose *compose;
+
+	/* Nothing owed. */
+	compose = server->compose;
+	if (compose == NULL || !compose->follow_pending)
+		return;
+
+	/* Succeeded: the next pass runs it. */
+	kwl_thread_wake(server->wake[1]);
+}
+
+/*
  * Reads the displays on the display thread for a look (OUTPUT_LOOK_*);
- * output_listed goes on.  Without memory the look is tried again later.
+ * output_listed goes on.  Without memory the follow stays owed, and is
+ * tried again at the next pass an event brings.
  */
 static void
 output_list_later(
@@ -216,12 +454,19 @@ output_list_later(
 {
 	struct output_list *list;
 
-	/* The record, then the reading. */
+	/* The record; without it the follow stays owed, with the reading the hotplug thread asked for. */
 	list = calloc(1, sizeof(*list));
-	if (list == NULL)
+	if (list == NULL) {
+		if (look == OUTPUT_LOOK_FIRST || look == OUTPUT_LOOK_SIGNAL)
+			server->compose->follow_look = look;
+		server->compose->follow_pending = 1U;
 		return;
+	}
+
+	/* The reading (counted for the log). */
 	list->look = look;
 	server->compose->listing = 1U;
+	server->compose->looks++;
 	kwl_display_enumerate(server, &list->list, output_listed, list);
 }
 
@@ -244,11 +489,12 @@ output_listed(
 	int moving;
 	int index;
 
-	/* The list taken in. */
+	/* The list taken in; a follow held back by the reading runs at the next pass. */
 	(void)error;
 	list = context;
 	compose = server->compose;
 	compose->listing = 0U;
+	kwl_output_follow_wake(server);
 	listed = output_list_apply(server, &list->list);
 	look = list->look;
 	free(list);
@@ -309,10 +555,12 @@ output_heads_sync(
 {
 	int error;
 
-	/* The change, or a later look. */
+	/* The change, or a later look: after the change running (EBUSY), else at the next event that asks for the follow. */
 	error = kwl_heads_sync_later(server);
 	if (error != 0)
 		server->compose->heads_stale = 1U;
+	if (error == EBUSY)
+		kwl_output_follow_later(server);
 }
 
 /*
@@ -1166,25 +1414,186 @@ output_index(
 	return -1;
 }
 
-/* Registers the next hotplug fence; a failure leaves the hotplug unfollowed until the next look. */
-static void
-output_hotplug_register(
-	struct kwl_server *server)
+/*
+ * Runs the hotplug thread: it registers the first hotplug fence and tells
+ * of it, then waits with no time limit for that fence or the stop fence.
+ * At a signal it registers the next fence first (a change during the main
+ * thread's enumeration signals that one), lets the signaled one go, and
+ * tells of the hotplug.  It ends at the stop fence, or on a failure of a
+ * registration or of the wait (the device lost), which it tells.  It
+ * touches no state of the compositor's: the device's fences and its notes.
+ */
+static void *
+output_hotplug_run(
+	void *argument)
 {
-	struct kwl_compose *compose;
+	struct kwl_hotplug *hotplug;
+	VkFence fences[2];
+	VkFence fence;
+	VkFence next;
+	VkResult result;
+	VkResult stopped;
+	VkResult signaled;
+
+	/* The first fence; without it the thread ends, and the displays are read once all the same. */
+	hotplug = argument;
+	result = output_hotplug_register(hotplug, &fence);
+	if (result != VK_SUCCESS) {
+		output_hotplug_note(hotplug, KWL_HOTPLUG_NOTE_FIRST | KWL_HOTPLUG_NOTE_UNAVAILABLE, result);
+		return NULL;
+	}
+
+	/* The first fence told: the main thread reads the displays as they are now. */
+	output_hotplug_note(hotplug, KWL_HOTPLUG_NOTE_FIRST, VK_SUCCESS);
+
+	/* Each wait, until the stop or a failure. */
+	for (;;) {
+		/* The hotplug fence or the stop fence, whichever signals first, with no time limit. */
+		fences[0] = fence;
+		fences[1] = hotplug->stop;
+		result = vkWaitForFences(hotplug->device, 2U, fences, VK_FALSE, UINT64_MAX);
+
+		/* Counted for the tests: the thread wakes only for a hotplug and the stop. */
+		pthread_mutex_lock(&hotplug->lock);
+
+		hotplug->wakes++;
+
+		pthread_mutex_unlock(&hotplug->lock);
+
+		/* A failed wait (the device lost) ends the thread. */
+		if (result != VK_SUCCESS && result != VK_TIMEOUT) {
+			output_hotplug_note(hotplug, KWL_HOTPLUG_NOTE_UNAVAILABLE, result);
+			break;
+		}
+
+		/* The stop. */
+		stopped = vkGetFenceStatus(hotplug->device, hotplug->stop);
+		if (stopped == VK_SUCCESS)
+			break;
+
+		/* Not the hotplug either: the wait again. */
+		signaled = vkGetFenceStatus(hotplug->device, fence);
+		if (signaled != VK_SUCCESS)
+			continue;
+
+		/* A signal: the next fence first, so that a change during the enumeration is not missed, then the signaled one goes. */
+		result = output_hotplug_register(hotplug, &next);
+		vkDestroyFence(hotplug->device, fence, NULL);
+		fence = next;
+
+		/* Without the next fence the hotplug is told and the thread ends. */
+		if (result != VK_SUCCESS) {
+			output_hotplug_note(hotplug, KWL_HOTPLUG_NOTE_SIGNAL | KWL_HOTPLUG_NOTE_UNAVAILABLE, result);
+			return NULL;
+		}
+
+		/* The hotplug told, the next fence waited for. */
+		output_hotplug_note(hotplug, KWL_HOTPLUG_NOTE_SIGNAL, VK_SUCCESS);
+	}
+
+	/* Succeeded: the last fence goes with the thread. */
+	vkDestroyFence(hotplug->device, fence, NULL);
+	return NULL;
+}
+
+/*
+ * Registers a hotplug fence of the device (VK_EXT_display_control).
+ * Returns the registration's result; fence is VK_NULL_HANDLE on a failure.
+ */
+static VkResult
+output_hotplug_register(
+	struct kwl_hotplug *hotplug,
+	VkFence *fence)
+{
 	VkDeviceEventInfoEXT event;
 	VkResult result;
 
 	/* The display hotplug event. */
-	compose = server->compose;
 	memset(&event, 0, sizeof(event));
 	event.sType = VK_STRUCTURE_TYPE_DEVICE_EVENT_INFO_EXT;
 	event.deviceEvent = VK_DEVICE_EVENT_TYPE_DISPLAY_HOTPLUG_EXT;
-	result = compose->register_device_event(compose->device, &event, NULL, &compose->hotplug);
+	*fence = VK_NULL_HANDLE;
+	result = hotplug->register_device_event(hotplug->device, &event, NULL, fence);
 	if (result != VK_SUCCESS) {
-		compose->hotplug = VK_NULL_HANDLE;
-		printf("KWL OUTPUT hotplug unavailable result=%d\n", (int)result);
+		*fence = VK_NULL_HANDLE;
+		return result;
 	}
+
+	/* Succeeded: the fence signals at the next change of the displays. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Leaves notes of the hotplug thread for the main thread (with the result
+ * of a failure), and wakes it when the notes go from none to some.
+ */
+static void
+output_hotplug_note(
+	struct kwl_hotplug *hotplug,
+	unsigned notes,
+	VkResult result)
+{
+	int wake;
+
+	/* The notes join those not taken yet; the main thread is woken once for them. */
+	pthread_mutex_lock(&hotplug->lock);
+
+	hotplug->notes |= notes;
+	if ((notes & KWL_HOTPLUG_NOTE_UNAVAILABLE) != 0U)
+		hotplug->result = result;
+	wake = 0;
+	if (!hotplug->main_woken) {
+		hotplug->main_woken = 1U;
+		wake = 1;
+	}
+
+	pthread_mutex_unlock(&hotplug->lock);
+
+	/* The byte, outside the lock. */
+	if (wake)
+		kwl_thread_wake(hotplug->wake_main);
+}
+
+/*
+ * Owes the first look at the displays without the hotplug thread: they are
+ * read once at window mode (and the heads brought in line), as with a
+ * thread whose first registration failed.
+ */
+static void
+output_hotplug_without(
+	struct kwl_server *server)
+{
+	/* Succeeded: the first look owed. */
+	server->compose->follow_look = OUTPUT_LOOK_FIRST;
+	kwl_output_follow_later(server);
+}
+
+/*
+ * Tells whether the follow of the displays must wait: outside window mode
+ * (the start, the game mode, a seat's pause), while a change of the
+ * display runs, or while the list is being read.
+ */
+static int
+output_follow_held(
+	struct kwl_server *server)
+{
+	int busy;
+
+	/* Outside window mode. */
+	if (server->os_paused != 0 || !server->windowed)
+		return 1;
+
+	/* A change of the display running. */
+	busy = kwl_display_busy(server);
+	if (busy)
+		return 1;
+
+	/* A list being read. */
+	if (server->compose->listing)
+		return 1;
+
+	/* Succeeded: the follow may run. */
+	return 0;
 }
 
 /*

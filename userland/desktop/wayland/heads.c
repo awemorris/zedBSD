@@ -576,8 +576,9 @@ kwl_heads_close_all(
 		changed = 1U;
 	}
 
-	/* The output opened again brings them back at the next look. */
+	/* The output opened again brings them back: the follow after this change. */
 	compose->heads_stale = 1U;
+	kwl_output_follow_later(server);
 	if (changed)
 		heads_changed(server);
 }
@@ -690,9 +691,10 @@ kwl_heads_take(
 			continue;
 		}
 
-		/* The display went (or another failure of its swapchain): the head is closed at the next look. */
+		/* The display went (or another failure of its swapchain): the follow of the displays closes the head. */
 		printf("KWL OUTPUT head lost operation=acquire name=%s result=%d\n", head->name, (int)result);
 		head->lost = 1U;
+		kwl_output_follow_later(server);
 	}
 
 	/* Succeeded: how many missed it. */
@@ -761,9 +763,10 @@ kwl_heads_presented(
 			continue;
 		}
 
-		/* The display went: the head is closed at the next look. */
+		/* The display went: the follow of the displays closes the head. */
 		printf("KWL OUTPUT head lost operation=present name=%s result=%d\n", head->name, (int)result);
 		head->lost = 1U;
+		kwl_output_follow_later(server);
 	}
 }
 

@@ -127,10 +127,7 @@ kwl_schedule(
 	/* The sleep's causes and its course (sleep.c, ws052-p012), before the lock screen's own tick. */
 	kwl_sleep_tick(server);
 
-	/* The displays followed, and the output moved from one that is gone (output-switch.c, ws113-p004a). */
-	kwl_output_tick(server);
-
-	/* The light a session keeps, once its first frame is up (displays-shell.c, ws113-p005). */
+	/* A displays result held back too long, and the light a session keeps once its first frame is up (displays-shell.c, ws113-p005). */
 	kwl_displays_tick(server);
 
 	/* The glass look's clock turns over. */
@@ -678,9 +675,12 @@ window_mode_opened(
 		return;
 	}
 
-	/* Succeeded: the next pass draws a frame. */
+	/* Window mode runs: the next pass draws a frame. */
 	server->windowed = 1;
 	server->dirty = 1;
 	server->mode_switch_ms = kwl_milliseconds() - server->mode_start_ms;
 	printf("KWL MODE window switch_ms=%llu at_ms=%llu\n", (unsigned long long)server->mode_switch_ms, (unsigned long long)kwl_milliseconds());
+
+	/* Succeeded: a follow of the displays held back outside window mode (a hotplug, the first look) runs at the next pass. */
+	kwl_output_follow_wake(server);
 }

@@ -386,7 +386,8 @@ kwl_displays_key(
 }
 
 /*
- * Sets the light displays.conf keeps once a session's first frame is up
+ * Answers a displays result held back too long (BUG-266), and sets the
+ * light displays.conf keeps once a session's first frame is up
  * (D-BRIGHT-BOOT: the panel is not lit by the driver before it); a light
  * not kept stays as the firmware left it.
  */
@@ -395,7 +396,12 @@ kwl_displays_tick(
 	struct kwl_server *server)
 {
 	struct kwl_compose *compose;
+	uint64_t now;
 	int error;
+
+	/* A result whose move's first frame never came is settled after its time. */
+	now = kwl_milliseconds();
+	kwl_displays_pending_tick(server, now);
 
 	/* Once, in a session, after its first frame. */
 	if (displays_state.boot_light_done || server->greeter)

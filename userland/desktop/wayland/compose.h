@@ -587,6 +587,40 @@ struct kwl_frame_slot {
 	unsigned flying;
 };
 
+/*
+ * The hotplug thread (output-switch.c): it waits with no time limit for the
+ * hotplug fence it registered and for the stop fence, and tells the main
+ * thread of the display hotplug.  One instance lives in the compositor's
+ * state from the device's opening to its close.
+ *
+ * Under lock: the notes not taken yet (KWL_HOTPLUG_NOTE_*), the result of
+ * a registration or a wait that ended the thread, how many times the
+ * thread's wait returned, and whether the main thread was woken for the
+ * notes and has not taken them yet (the wake pipe gets one byte only when
+ * the notes go from none to some).  The thread's own fences are its
+ * locals; the device, the registration's entry point, the stop fence and
+ * the wake pipe's write end are set before it starts and only read by it.
+ * started says the thread runs (and is to be stopped and joined).
+ */
+struct kwl_hotplug {
+	pthread_mutex_t lock;
+	unsigned notes;
+	VkResult result;
+	unsigned wakes;
+	unsigned main_woken;
+	VkDevice device;
+	PFN_vkRegisterDeviceEventEXT register_device_event;
+	VkFence stop;
+	int wake_main;
+	struct kwl_thread thread;
+	unsigned started;
+};
+
+/* The hotplug thread's notes: the first fence registered, a hotplug signaled (the next fence registered first), and its end on a failure. */
+#define KWL_HOTPLUG_NOTE_FIRST		1U
+#define KWL_HOTPLUG_NOTE_SIGNAL		2U
+#define KWL_HOTPLUG_NOTE_UNAVAILABLE	4U
+
 struct kwl_compose {
 	VkInstance instance;
 	VkPhysicalDevice physical;
@@ -813,20 +847,32 @@ struct kwl_compose {
 	PFN_vkRegisterDeviceEventEXT register_device_event;
 	/*
 	 * The displays followed (output-switch.c, ws113-p004a): the hotplug
-	 * fence registered last (VK_NULL_HANDLE: none), when it was last looked
-	 * at; the display the compositor started on (the machine's own when no
-	 * name says which is built in); and the displays connected at the last
-	 * enumeration with their names and, as bits by their place, those whose
-	 * swapchain was refused for the limit of outputs shown at once (tried
-	 * again after the next hotplug).
+	 * thread, which tells of the hotplug fence's signal; the display the
+	 * compositor started on (the machine's own when no name says which is
+	 * built in); and the displays connected at the last enumeration with
+	 * their names and, as bits by their place, those whose swapchain was
+	 * refused for the limit of outputs shown at once (tried again after
+	 * the next hotplug).
 	 */
-	VkFence hotplug;
-	uint64_t hotplug_checked_ms;
+	struct kwl_hotplug hotplug;
 	VkDisplayKHR boot_display;
 	VkDisplayKHR displays[KWL_COMPOSE_DISPLAYS];
 	char display_names[KWL_COMPOSE_DISPLAYS][KWL_COMPOSE_NAME];
-	/* The displays are being read by the display thread for a look of the hotplug's tick (output-switch.c). */
+	/* The displays are being read by the display thread for a look of the follow (output-switch.c). */
 	unsigned listing;
+	/*
+	 * The follow of the displays owed to an event (output-switch.c): set
+	 * when the hotplug thread tells of its fence, when the output or a
+	 * head loses its display, and when the heads are to be brought in line;
+	 * kept while it cannot run (outside window mode, during a change of
+	 * the display or a reading of the list), and run after the threads'
+	 * results are taken.  follow_look is the reading of the list it owes
+	 * first (0, or OUTPUT_LOOK_FIRST or _SIGNAL of output-switch.c);
+	 * looks counts the readings asked for, for the log.
+	 */
+	unsigned follow_pending;
+	unsigned follow_look;
+	unsigned looks;
 	unsigned display_count;
 	uint32_t limited;
 	/*

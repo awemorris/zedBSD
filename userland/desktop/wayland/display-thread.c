@@ -424,6 +424,9 @@ kwl_display_end(
 	compose->display_busy = 0U;
 	server->dirty = 1;
 	printf("KWL DISPLAY change ms=%llu\n", (unsigned long long)(kwl_milliseconds() - compose->display_began_ms));
+
+	/* A follow of the displays held back by the change runs at the next pass (output-switch.c). */
+	kwl_output_follow_wake(server);
 }
 
 /*

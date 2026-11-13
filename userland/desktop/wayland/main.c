@@ -1172,6 +1172,12 @@ event_loop(
 		server->perf.frame_done_cycles += kwl_cycles() - part;
 
 		/*
+		 * The hotplug thread's notes, then the follow of the displays they,
+		 * the frames' results and the display thread's ask for (output-switch.c).
+		 */
+		kwl_output_hotplug_take(server);
+
+		/*
 		 * The input thread's reports are applied before clients are flushed,
 		 * so they leave in this pass, in the order the devices made them.
 		 */
