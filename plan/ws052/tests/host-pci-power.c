@@ -52,10 +52,12 @@
 #define FUNCTIONS		5U
 
 /*
- * One simulated bus: its parent, NULL for the root.
+ * One simulated bus: its parent and the bridge that presents it, NULL for
+ * the root.
  */
 struct drv_pci_bus {
 	struct drv_pci_bus *parent;
+	struct drv_pci_device *bridge;
 };
 
 /*
@@ -167,7 +169,9 @@ reset_world(void)
 {
 	/* The buses. */
 	root_bus.parent = NULL;
+	root_bus.bridge = NULL;
 	child_bus.parent = &root_bus;
+	child_bus.bridge = &functions[1];
 
 	/* The functions: A a display, B a bridge without a driver, C a USB controller, E without a driver, D a disk behind B. */
 	set_function(&functions[0], "A", 0, 0x02, &root_bus, &test_driver);
@@ -672,13 +676,13 @@ drv_pci_device_bus(
 	return device->bus;
 }
 
-/* Reports a bus's parent. */
-struct drv_pci_bus *
-drv_pci_bus_parent(
-	const struct drv_pci_bus *bus)
+/* Reports the function above a function: the bridge of its bus. */
+struct drv_pci_device *
+drv_pci_device_upstream(
+	const struct drv_pci_device *device)
 {
 	/* Reports it. */
-	return bus->parent;
+	return device->bus->bridge;
 }
 
 /* Reports a function's address. */
@@ -878,6 +882,15 @@ sched_ticks(void)
 {
 	/* Reports it. */
 	return 0;
+}
+
+/* Milliseconds as ticks: one each, which the sleep ignores. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	/* Reports it. */
+	return milliseconds;
 }
 
 /* A sleep returns at once. */

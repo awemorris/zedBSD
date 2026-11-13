@@ -382,6 +382,10 @@ struct drv_pci_device *
 drv_pci_bus_bridge(
 	const struct drv_pci_bus *b);
 int
+drv_pci_bus_set_host_function(
+	struct drv_pci_bus *bus,
+	struct drv_pci_device *function);
+int
 drv_pci_bus_foreach_device(
 	struct drv_pci_bus *b,
 	drv_pci_device_iterator_t fn,
@@ -409,6 +413,9 @@ drv_pci_device_bus(
 struct drv_pci_bus *
 drv_pci_device_subordinate_bus(
 	const struct drv_pci_device *d);
+struct drv_pci_device *
+drv_pci_device_upstream(
+	const struct drv_pci_device *device);
 void
 drv_pci_device_address(
 	const struct drv_pci_device *d,
@@ -724,18 +731,23 @@ drv_pci_dump(void);
 #define DRV_PCI_D0		0U
 #define DRV_PCI_D3_HOT		3U
 
-/* The PCI Express and other extended registers a saved state keeps. */
-#define DRV_PCI_SAVED_PCIE	4U
+/*
+ * The PCI Express control registers a saved state keeps: device, link,
+ * device 2, link 2, slot and root.
+ */
+#define DRV_PCI_SAVED_PCIE	6U
 
 /*
  * The configuration of one function, saved before it goes to D3hot and
  * written back after it returns to D0, because a function without
  * No_Soft_Reset loses it there.  It keeps the first 64 bytes of the
  * configuration space, the MSI capability, the PCI Express control
- * registers, the LTR latencies and the L1 PM Substates controls, and the
- * whole MSI-X table, which drv_pci_device_save_state() allocates and
- * drv_pci_device_restore_state() or drv_pci_device_discard_state() frees.
- * A zero offset means the function lacks that capability.
+ * registers (pcie_flags is the capability's own register, which says
+ * whether the slot and root controls exist), the LTR latencies and the L1
+ * PM Substates controls, and the whole MSI-X table, which
+ * drv_pci_device_save_state() allocates and drv_pci_device_restore_state()
+ * or drv_pci_device_discard_state() frees.  A zero offset means the
+ * function lacks that capability.
  */
 struct drv_pci_saved_state {
 	uint32_t header[16];
@@ -749,6 +761,7 @@ struct drv_pci_saved_state {
 	uint16_t msi_offset;
 	uint16_t msix_offset;
 	uint16_t pcie_offset;
+	uint16_t pcie_flags;
 	uint16_t ltr_offset;
 	uint16_t l1ss_offset;
 	uint8_t saved;

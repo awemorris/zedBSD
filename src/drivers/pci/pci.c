@@ -97,6 +97,13 @@ struct drv_pci_bus {
 	struct drv_pci_bus *parent, *next;
 	struct drv_pci_device *bridge, *devices;
 	/*
+	 * On a root bus that a PCI function presents (a VMD), that function:
+	 * the bus is behind it as a secondary bus is behind its bridge.  NULL
+	 * on a root bus of the platform's host bridge and on every other bus.
+	 * Set once before the bus is scanned and only read afterwards.
+	 */
+	struct drv_pci_device *host_function;
+	/*
 	 * Nonzero on a root bus whose host asked for defer_unassigned, until
 	 * drv_pci_probe_deferred() ends the wait: while it is set, a function
 	 * with an unassigned memory BAR is not attached (BUG-210).
@@ -662,6 +669,56 @@ drv_pci_bus_bridge(
 {
 	/* Returns the computed result. */
 	return b ? b->bridge : NULL;
+}
+
+/*
+ * Records the PCI function that presents a root bus.
+ *
+ * A host driver that is itself a PCI function (a VMD) calls it after
+ * drv_pci_bus_create_root() and before the scan, so that the power code
+ * suspends the functions behind the bus before the function and resumes
+ * them after it.  It reports EINVAL for a bus behind a bridge.
+ */
+int
+drv_pci_bus_set_host_function(
+	struct drv_pci_bus *bus,
+	struct drv_pci_device *function)
+{
+	/* Refuses no bus, no function, and a bus that a bridge presents. */
+	if (bus == NULL || function == NULL)
+		return EINVAL;
+	if (bus->parent != NULL)
+		return EINVAL;
+
+	/* Keeps the function for the walks up the tree. */
+	bus->host_function = function;
+
+	/* Succeeded: the bus is behind the function. */
+	return 0;
+}
+
+/*
+ * Reports the function directly above a function: the bridge of its bus,
+ * the function that presents its root bus, or NULL on a root bus of the
+ * platform's host bridge.
+ */
+struct drv_pci_device *
+drv_pci_device_upstream(
+	const struct drv_pci_device *device)
+{
+	struct drv_pci_bus *bus;
+
+	/* A function without a bus has nothing above it. */
+	if (device == NULL || device->bus == NULL)
+		return NULL;
+
+	/* A secondary bus hangs from its bridge. */
+	bus = device->bus;
+	if (bus->bridge != NULL)
+		return bus->bridge;
+
+	/* A root bus hangs from the function that presents it, if any. */
+	return bus->host_function;
 }
 
 /*
