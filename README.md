@@ -26,6 +26,8 @@ computers with touch displays.
 
 ## Current Work Map
 
+Powered by [Awesome Plan](https://github.com/awemorris/AwesomePlan/)
+
 ![Work Map](plan/cockpit-map.svg)
 
 ---
