@@ -16,13 +16,11 @@
 #include "userland/desktop/libwayland/keiland-game-v1-client-protocol.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-/* The longest one sleep on the connection lasts while waiting for frame progress, in milliseconds. */
-#define WAYLAND_WAIT_SLICE_MS	50
 
 /*
  * How long a FIFO present waits for the frame before it to be shown, in
@@ -573,6 +571,7 @@ wayland_wait(
 	struct timespec now;
 	uint64_t elapsed;
 	uint64_t completed;
+	uint64_t left_ms;
 	VkResult error;
 	int remaining;
 	int status;
@@ -607,13 +606,19 @@ wayland_wait(
 			return VK_TIMEOUT;
 
 		/*
-		 * Sleeps until the compositor writes to the connection, or for a bounded
-		 * slice of the remaining deadline.  A timed sleep would round up to the
-		 * scheduler tick (10 ms), far longer than one frame takes.
+		 * Sleeps until the compositor writes to the connection or another
+		 * thread runs the frame callback (the progress pipe), at most until the
+		 * deadline: the frame callback always wakes the sleep, so nothing
+		 * else needs looking at meanwhile.  The deadline is taken a
+		 * millisecond late so that the sleep never ends before it.
 		 */
-		remaining = WAYLAND_WAIT_SLICE_MS;
-		if (timeout != UINT64_MAX && (timeout - elapsed) / 1000000ULL < (uint64_t)remaining)
-			remaining = (int)((timeout - elapsed) / 1000000ULL) + 1;
+		remaining = -1;
+		if (timeout != UINT64_MAX) {
+			left_ms = (timeout - elapsed) / 1000000ULL + 1ULL;
+			remaining = INT_MAX;
+			if (left_ms < (uint64_t)INT_MAX)
+				remaining = (int)left_ms;
+		}
 		error = wayland_sleep(lease->surface, remaining);
 		if (error != VK_SUCCESS)
 			return error;
@@ -1136,14 +1141,14 @@ wayland_dispatch(
 }
 
 /*
- * Sleeps on the connection for at most `milliseconds` with a read of the
- * surface's queue prepared through the sleep, or until a frame callback
- * another thread ran writes the progress pipe, then reads what came and
- * runs the queue's callbacks.  Another thread that reads the connection
- * meanwhile (the application's own queue, an acquire) cannot take the
- * compositor's answer away from this sleep: while this read is prepared,
- * that thread's read waits for this one, which then takes the bytes and
- * queues each event for its owner.
+ * Sleeps on the connection for at most `milliseconds` (-1: without a
+ * limit) with a read of the surface's queue prepared through the sleep, or
+ * until a frame callback another thread ran writes the progress pipe, then
+ * reads what came and runs the queue's callbacks.  Another thread that
+ * reads the connection meanwhile (the application's own queue, an acquire)
+ * cannot take the compositor's answer away from this sleep: while this read
+ * is prepared, that thread's read waits for this one, which then takes the
+ * bytes and queues each event for its owner.
  *
  * Returns VK_SUCCESS, or VK_ERROR_SURFACE_LOST_KHR for a broken connection
  * or a lost surface.

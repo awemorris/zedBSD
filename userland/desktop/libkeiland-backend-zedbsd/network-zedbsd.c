@@ -17,8 +17,9 @@
  * A request (a scan, a join, a disconnect, the Wi-Fi switch) is one more
  * connection that carries one frame each way, as "net wifi ..." sends it.
  * The frame is written at once and the connection kept until the answer is
- * readable; the updates look at both connections without waiting, so the
- * caller's loop never stops for the daemon.
+ * readable; the link's thread waits on every connection and the updates
+ * take what it found without waiting, so the caller's loop never stops for
+ * the daemon.
  *
  * Fresh scans (ws089-p021) go on a third connection of their own, one
  * frame each way like a request but beside it, so that a person's request
@@ -65,9 +66,6 @@
 
 /* How long the daemon may take to answer a frame of the scans' connection before it is given up. */
 #define NETWORK_SCAN_ANSWER_MS 15000U
-
-/* How often the thread looks for an answer awaited, in milliseconds. */
-#define NETWORK_ANSWER_LOOK_MS 10
 
 /*
  * One watch of the network: the SUBSCRIBE connection, the state it last
@@ -611,10 +609,10 @@ network_step(
 }
 
 /*
- * Gives the watch to wait for, and the wait until what is due next: the
- * watch's next try, the scans' next frame, or soon while an answer is
- * awaited (a request's connection is not polled: zedBSD's poll reports its
- * own shut-down side at once, network_readable).
+ * Gives the connections to wait for -- the watch, the request outstanding
+ * and the scans' frame outstanding, each of which wakes the thread when its
+ * daemon writes -- and the wait until what is due next: the watch's next
+ * try, the scans' next frame, or the scans' frame given up.
  */
 static size_t
 network_poll_fill(
@@ -634,10 +632,6 @@ network_poll_fill(
 	network = &record->inner;
 	now = network_milliseconds();
 
-	/* An answer awaited is looked for every few milliseconds, as the event loop's passes did. */
-	if (network->request_fd >= 0 || network->scan_fd >= 0)
-		*timeout = NETWORK_ANSWER_LOOK_MS;
-
 	/* The next try of a lost watch, and the scans' next frame while they are asked for. */
 	due = UINT64_MAX;
 	if (network->watch < 0)
@@ -648,6 +642,10 @@ network_poll_fill(
 		if (network->scan_list_ms < due)
 			due = network->scan_list_ms;
 	}
+
+	/* A frame of the scans that the daemon has not answered is given up when its time is over. */
+	if (network->scan_fd >= 0 && network->scan_given_up_ms < due)
+		due = network->scan_given_up_ms;
 
 	/* The scans' stop is told at the next step. */
 	if (network->scan_wanted == 0U && network->scan_leased != 0U && network->scan_fd < 0)
@@ -662,11 +660,31 @@ network_poll_fill(
 
 	/* The watch wakes the thread with each state. */
 	count = 0U;
-	if (network->watch >= 0 && capacity > 0U) {
-		descriptors[0].fd = network->watch;
-		descriptors[0].events = POLLIN;
-		descriptors[0].revents = 0;
-		count = 1U;
+	if (network->watch >= 0 && count < capacity) {
+		descriptors[count].fd = network->watch;
+		descriptors[count].events = POLLIN;
+		descriptors[count].revents = 0;
+		count++;
+	}
+
+	/*
+	 * The request's connection wakes the thread when its answer arrives.
+	 * This side's shutdown for writing does not wake it: a poll reports
+	 * only the answer, the daemon's end or an error on it.
+	 */
+	if (network->request_fd >= 0 && count < capacity) {
+		descriptors[count].fd = network->request_fd;
+		descriptors[count].events = POLLIN;
+		descriptors[count].revents = 0;
+		count++;
+	}
+
+	/* The scans' connection wakes the thread when its frame's answer arrives. */
+	if (network->scan_fd >= 0 && count < capacity) {
+		descriptors[count].fd = network->scan_fd;
+		descriptors[count].events = POLLIN;
+		descriptors[count].revents = 0;
+		count++;
 	}
 
 	/* Succeeded: the descriptors to wait for. */
@@ -1076,40 +1094,18 @@ network_readable(
 	int descriptor)
 {
 	struct pollfd poll_descriptor;
-	unsigned char byte;
-	ssize_t peeked;
 	int ready;
-	int error;
 
-	/* A look without waiting. */
+	/*
+	 * A look without waiting.  A request's connection shut down for writing
+	 * is not readable until the answer, the daemon's end or an error.
+	 */
 	poll_descriptor.fd = descriptor;
 	poll_descriptor.events = POLLIN;
 	poll_descriptor.revents = 0;
 	ready = poll(&poll_descriptor, 1, 0);
 	if (ready <= 0)
 		return 0;
-
-	/*
-	 * Asks the socket itself whether a byte or the end has arrived.  A request's
-	 * connection is shut down for writing once the request is sent, and zedBSD's
-	 * poll reports that shutdown of our own side as POLLERR at once: without this
-	 * look the answer's timed read would start before the answer and run out
-	 * (every join longer than its two seconds failed with EIO).
-	 */
-	peeked = recv(descriptor, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
-	if (peeked < 0) {
-		error = errno;
-
-		/* Nothing has arrived yet: the poll only saw our own shutdown. */
-		if (error == EAGAIN || error == EINTR)
-			return 0;
-#if EWOULDBLOCK != EAGAIN
-
-		/* The same answer under its other name, where it has one. */
-		if (error == EWOULDBLOCK)
-			return 0;
-#endif
-	}
 
 	/* Succeeded: a byte, the end, or a failure the read will report is there. */
 	return 1;
