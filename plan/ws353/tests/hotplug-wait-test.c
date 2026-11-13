@@ -11,16 +11,22 @@
  * runs the steps in order, writing one result line a step to DIR/result.txt
  * and a marker file DIR/NAME.armed when the host must change a head:
  *
- *   hotplug-wait-test DIR
+ *   hotplug-wait-test DIR [hotplug-partner]
  *
- *   idle     an any-wait on a hotplug fence and an unsubmitted fence sleeps 30 s
- *   submit   the same wait returns when another thread submits the unsubmitted fence
- *   narrow   it sleeps through another fence's 200 submissions, then returns at its own
- *   race     300 waits whose fence is submitted just as they start, each with a 5 s limit
- *   limit    registrations a destroyed fence leaves behind would run out the node's 16
- *   plug     a hotplug fence wakes when the host plugs head 1; a reset fence stays spent
- *   unplug   a new fence wakes when the host unplugs head 1
- *   lost     a context failure ends the any-wait with VK_ERROR_DEVICE_LOST
+ *   idle-h     a wait on a hotplug fence alone sleeps 30 s in one poll
+ *   idle-f     an any-wait on two unsubmitted fences sleeps 30 s in one poll
+ *   submit-f   it returns when another thread submits the second fence
+ *   narrow-f   it sleeps through another fence's 200 submissions, then returns at its own
+ *   race-f     300 such waits whose fence is submitted just as they start, each with a 5 s limit
+ *   plug       a hotplug fence wakes when the host plugs head 1; a reset fence stays spent
+ *   unplug     a new fence wakes when the host unplugs head 1
+ *   lost       a context failure ends a wait on a hotplug fence alone and an any-wait on two
+ *              unsubmitted fences with VK_ERROR_DEVICE_LOST
+ *
+ * With hotplug-partner, idle-h2, submit-h, narrow-h and race-h run the same any-waits with a
+ * hotplug fence as the first fence, and limit checks that destroyed fences leave no registration
+ * (the node's 16).  These need a GPU driver that changes its topology number only at a real
+ * change: a renderer request between the registration and the change must not signal the fence.
  *
  * How often a wait slept is counted by this program's own poll(): libvulkan
  * calls poll() through the dynamic linker, which looks in the program first.
@@ -76,6 +82,7 @@ struct test_state {
 struct test_wait {
 	struct test_state *state;
 	VkFence fences[2];
+	uint32_t count;
 	uint64_t timeout;
 	VkResult result;
 	uint64_t returned_ms;
@@ -101,10 +108,10 @@ static VkResult test_submit(struct test_state *state, VkFence fence);
 static void *test_waiter(void *argument);
 static int test_wait_start(struct test_wait *wait, pthread_t *thread);
 static void test_open_fds(int *open_fds);
-static void step_idle(struct test_state *state, VkFence hotplug);
-static void step_submit(struct test_state *state, VkFence hotplug);
-static void step_narrow(struct test_state *state, VkFence hotplug);
-static void step_race(struct test_state *state, VkFence hotplug);
+static void step_idle(struct test_state *state, const char *name, VkFence partner, int alone);
+static void step_submit(struct test_state *state, const char *name, VkFence partner);
+static void step_narrow(struct test_state *state, const char *name, VkFence partner);
+static void step_race(struct test_state *state, const char *name, VkFence partner);
 static void step_limit(struct test_state *state);
 static void step_plug(struct test_state *state);
 static void step_lost(struct test_state *state);
@@ -150,12 +157,13 @@ main(
 	char path[256];
 	FILE *done;
 	VkFence hotplug;
+	VkFence partner;
 	VkResult error;
 	int status;
 
 	/* The result directory. */
-	if (argc != 2) {
-		fprintf(stderr, "usage: hotplug-wait-test DIR\n");
+	if (argc != 2 && argc != 3) {
+		fprintf(stderr, "usage: hotplug-wait-test DIR [hotplug-partner]\n");
 		return 2;
 	}
 	memset(&state, 0, sizeof(state));
@@ -177,21 +185,45 @@ main(
 		return 1;
 	}
 
-	/* One hotplug fence the waits share while the heads do not change. */
+	/* A hotplug fence alone: no renderer request is made while it waits. */
 	error = test_hotplug(&state, &hotplug);
 	if (error != VK_SUCCESS) {
 		test_say(&state, "setup: FAIL register %d", (int)error);
 		test_say(&state, "hotplug-wait-test: FAIL");
 		return 1;
 	}
-
-	/* The steps, the destructive one last. */
-	step_idle(&state, hotplug);
-	step_submit(&state, hotplug);
-	step_narrow(&state, hotplug);
-	step_race(&state, hotplug);
+	step_idle(&state, "idle-h", hotplug, 1);
 	vkDestroyFence(state.device, hotplug, NULL);
-	step_limit(&state);
+
+	/* Two unsubmitted fences: the waits sleep on the wake alone. */
+	error = test_fence(&state, &partner);
+	if (error != VK_SUCCESS) {
+		test_say(&state, "setup: FAIL fence %d", (int)error);
+		test_say(&state, "hotplug-wait-test: FAIL");
+		return 1;
+	}
+	step_idle(&state, "idle-f", partner, 0);
+	step_submit(&state, "submit-f", partner);
+	step_narrow(&state, "narrow-f", partner);
+	step_race(&state, "race-f", partner);
+	vkDestroyFence(state.device, partner, NULL);
+
+	/* A hotplug fence with an unsubmitted one, when the driver's topology number is trustworthy. */
+	if (argc == 3 && strcmp(argv[2], "hotplug-partner") == 0) {
+		error = test_hotplug(&state, &hotplug);
+		if (error == VK_SUCCESS) {
+			step_idle(&state, "idle-h2", hotplug, 0);
+			step_submit(&state, "submit-h", hotplug);
+			step_narrow(&state, "narrow-h", hotplug);
+			step_race(&state, "race-h", hotplug);
+			vkDestroyFence(state.device, hotplug, NULL);
+		} else {
+			test_say(&state, "idle-h2: FAIL register %d", (int)error);
+		}
+		step_limit(&state);
+	}
+
+	/* The head changes, then the destructive step last. */
 	step_plug(&state);
 	step_lost(&state);
 
@@ -414,7 +446,7 @@ test_waiter(
 	__atomic_store_n(&counting, 1, __ATOMIC_RELEASE);
 
 	/* Waits for either fence. */
-	wait->result = vkWaitForFences(wait->state->device, 2U, wait->fences, VK_FALSE, wait->timeout);
+	wait->result = vkWaitForFences(wait->state->device, wait->count, wait->fences, VK_FALSE, wait->timeout);
 	wait->returned_ms = test_now_ms();
 	__atomic_store_n(&counting, 0, __ATOMIC_RELEASE);
 	__atomic_store_n(&wait->done, 1, __ATOMIC_RELEASE);
@@ -464,7 +496,9 @@ test_open_fds(
 static void
 step_idle(
 	struct test_state *state,
-	VkFence hotplug)
+	const char *name,
+	VkFence partner,
+	int alone)
 {
 	struct test_wait wait;
 	pthread_t thread;
@@ -472,15 +506,19 @@ step_idle(
 	uint64_t started;
 	unsigned polls;
 
-	/* An unsubmitted fence and the hotplug fence, 30 s. */
-	if (test_fence(state, &fence) != VK_SUCCESS) {
-		test_say(state, "idle: FAIL fence");
+	/* The partner alone, or with an unsubmitted fence, 30 s. */
+	fence = VK_NULL_HANDLE;
+	if (!alone && test_fence(state, &fence) != VK_SUCCESS) {
+		test_say(state, "%s: FAIL fence", name);
 		return;
 	}
 	memset(&wait, 0, sizeof(wait));
 	wait.state = state;
-	wait.fences[0] = hotplug;
+	wait.fences[0] = partner;
 	wait.fences[1] = fence;
+	wait.count = 2U;
+	if (alone)
+		wait.count = 1U;
 	wait.timeout = 30U * TEST_SECOND_NS;
 	started = test_now_ms();
 	test_wait_start(&wait, &thread);
@@ -489,10 +527,10 @@ step_idle(
 
 	/* One blocking poll for the whole wait, and a timeout at its end. */
 	if (wait.result == VK_TIMEOUT && polls == 1U && wait.returned_ms - started >= 29000U) {
-		test_say(state, "idle: PASS result=%d polls=%u ms=%llu", (int)wait.result, polls,
+		test_say(state, "%s: PASS result=%d polls=%u ms=%llu", name, (int)wait.result, polls,
 		    (unsigned long long)(wait.returned_ms - started));
 	} else {
-		test_say(state, "idle: FAIL result=%d polls=%u ms=%llu", (int)wait.result, polls,
+		test_say(state, "%s: FAIL result=%d polls=%u ms=%llu", name, (int)wait.result, polls,
 		    (unsigned long long)(wait.returned_ms - started));
 	}
 	vkDestroyFence(state->device, fence, NULL);
@@ -502,7 +540,8 @@ step_idle(
 static void
 step_submit(
 	struct test_state *state,
-	VkFence hotplug)
+	const char *name,
+	VkFence partner)
 {
 	struct test_wait wait;
 	pthread_t thread;
@@ -515,13 +554,14 @@ step_submit(
 
 	/* The waiter sleeps on both fences. */
 	if (test_fence(state, &fence) != VK_SUCCESS) {
-		test_say(state, "submit: FAIL fence");
+		test_say(state, "%s: FAIL fence", name);
 		return;
 	}
 	memset(&wait, 0, sizeof(wait));
 	wait.state = state;
-	wait.fences[0] = hotplug;
+	wait.fences[0] = partner;
 	wait.fences[1] = fence;
+	wait.count = 2U;
 	wait.timeout = UINT64_MAX;
 	test_wait_start(&wait, &thread);
 
@@ -532,7 +572,7 @@ step_submit(
 	pthread_join(thread, NULL);
 	polls = __atomic_load_n(&counted_polls, __ATOMIC_RELAXED);
 	fence_status = vkGetFenceStatus(state->device, fence);
-	hotplug_status = vkGetFenceStatus(state->device, hotplug);
+	hotplug_status = vkGetFenceStatus(state->device, partner);
 
 	/* The wait returned soon after the submission, with the submitted fence signaled. */
 	if (submitted == VK_SUCCESS &&
@@ -540,9 +580,9 @@ step_submit(
 	    fence_status == VK_SUCCESS &&
 	    hotplug_status == VK_NOT_READY &&
 	    wait.returned_ms - at < 200U) {
-		test_say(state, "submit: PASS ms=%llu polls=%u", (unsigned long long)(wait.returned_ms - at), polls);
+		test_say(state, "%s: PASS ms=%llu polls=%u", name, (unsigned long long)(wait.returned_ms - at), polls);
 	} else {
-		test_say(state, "submit: FAIL submit=%d result=%d fence=%d hotplug=%d ms=%llu polls=%u", (int)submitted,
+		test_say(state, "%s: FAIL submit=%d result=%d fence=%d hotplug=%d ms=%llu polls=%u", name, (int)submitted,
 		    (int)wait.result, (int)fence_status, (int)hotplug_status, (unsigned long long)(wait.returned_ms - at), polls);
 	}
 	vkDestroyFence(state->device, fence, NULL);
@@ -552,7 +592,8 @@ step_submit(
 static void
 step_narrow(
 	struct test_state *state,
-	VkFence hotplug)
+	const char *name,
+	VkFence partner)
 {
 	struct test_wait wait;
 	pthread_t thread;
@@ -565,13 +606,14 @@ step_narrow(
 
 	/* The waited fence and the other one. */
 	if (test_fence(state, &fence) != VK_SUCCESS || test_fence(state, &other) != VK_SUCCESS) {
-		test_say(state, "narrow: FAIL fence");
+		test_say(state, "%s: FAIL fence", name);
 		return;
 	}
 	memset(&wait, 0, sizeof(wait));
 	wait.state = state;
-	wait.fences[0] = hotplug;
+	wait.fences[0] = partner;
 	wait.fences[1] = fence;
+	wait.count = 2U;
 	wait.timeout = UINT64_MAX;
 	test_wait_start(&wait, &thread);
 	test_sleep_ms(200U);
@@ -596,9 +638,9 @@ step_narrow(
 
 	/* The wait slept once through all of the other fence's rounds. */
 	if (error == VK_SUCCESS && wait.result == VK_SUCCESS && during <= 1U) {
-		test_say(state, "narrow: PASS rounds=%u polls-during=%u polls=%u", round, during, polls);
+		test_say(state, "%s: PASS rounds=%u polls-during=%u polls=%u", name, round, during, polls);
 	} else {
-		test_say(state, "narrow: FAIL error=%d result=%d rounds=%u polls-during=%u polls=%u", (int)error, (int)wait.result,
+		test_say(state, "%s: FAIL error=%d result=%d rounds=%u polls-during=%u polls=%u", name, (int)error, (int)wait.result,
 		    round, during, polls);
 	}
 	vkDestroyFence(state->device, fence, NULL);
@@ -609,7 +651,8 @@ step_narrow(
 static void
 step_race(
 	struct test_state *state,
-	VkFence hotplug)
+	const char *name,
+	VkFence partner)
 {
 	struct test_wait wait;
 	pthread_t thread;
@@ -625,7 +668,7 @@ step_race(
 
 	/* The raced fence and another one submitted around it. */
 	if (test_fence(state, &fence) != VK_SUCCESS || test_fence(state, &other) != VK_SUCCESS) {
-		test_say(state, "race: FAIL fence");
+		test_say(state, "%s: FAIL fence", name);
 		return;
 	}
 	missed = 0U;
@@ -635,9 +678,10 @@ step_race(
 		/* A fresh wait on the unsignaled fence. */
 		memset(&wait, 0, sizeof(wait));
 		wait.state = state;
-		wait.fences[0] = hotplug;
+		wait.fences[0] = partner;
 		wait.fences[1] = fence;
-		wait.timeout = 5U * TEST_SECOND_NS;
+		wait.count = 2U;
+	wait.timeout = 5U * TEST_SECOND_NS;
 		test_wait_start(&wait, &thread);
 
 		/* A short random spin, other submissions, then the fence. */
@@ -670,9 +714,9 @@ step_race(
 
 	/* Every wait returned with its fence. */
 	if (missed == 0U && failed == 0U) {
-		test_say(state, "race: PASS rounds=%u", TEST_RACE_ROUNDS);
+		test_say(state, "%s: PASS rounds=%u", name, TEST_RACE_ROUNDS);
 	} else {
-		test_say(state, "race: FAIL rounds=%u missed=%u failed=%u", TEST_RACE_ROUNDS, missed, failed);
+		test_say(state, "%s: FAIL rounds=%u missed=%u failed=%u", name, TEST_RACE_ROUNDS, missed, failed);
 	}
 	vkDestroyFence(state->device, fence, NULL);
 	vkDestroyFence(state->device, other, NULL);
@@ -804,61 +848,95 @@ step_plug(
 	vkDestroyFence(state->device, unplugged, NULL);
 }
 
-/* lost: the renderer's context fails under the wait; the wait ends with VK_ERROR_DEVICE_LOST. */
+/*
+ * lost: the renderer's context fails under two waits, one on a hotplug
+ * fence alone and an any-wait on two unsubmitted fences; both end with
+ * VK_ERROR_DEVICE_LOST.  The hotplug fence is registered after the other
+ * fences, and its wait makes no renderer request, so only the failure ends it.
+ */
 static void
 step_lost(
 	struct test_state *state)
 {
-	struct test_wait wait;
-	pthread_t thread;
+	struct test_wait hotplug_wait;
+	struct test_wait fence_wait;
+	pthread_t hotplug_thread;
+	pthread_t fence_thread;
 	VkFence hotplug;
-	VkFence fence;
+	VkFence first;
+	VkFence second;
 	VkFence other;
 	VkResult submitted;
 	unsigned tries;
 	int null_fd;
 	int index;
+	int done;
 
-	/* The wait on a hotplug fence and an unsubmitted fence. */
+	/* The fences, the hotplug one last. */
 	if (state->context_count == 0) {
 		test_say(state, "lost: FAIL no context descriptor");
 		return;
 	}
-	if (test_hotplug(state, &hotplug) != VK_SUCCESS ||
-	    test_fence(state, &fence) != VK_SUCCESS ||
-	    test_fence(state, &other) != VK_SUCCESS) {
+	if (test_fence(state, &first) != VK_SUCCESS ||
+	    test_fence(state, &second) != VK_SUCCESS ||
+	    test_fence(state, &other) != VK_SUCCESS ||
+	    test_hotplug(state, &hotplug) != VK_SUCCESS) {
 		test_say(state, "lost: FAIL fence");
 		return;
 	}
-	memset(&wait, 0, sizeof(wait));
-	wait.state = state;
-	wait.fences[0] = hotplug;
-	wait.fences[1] = fence;
-	wait.timeout = UINT64_MAX;
-	test_wait_start(&wait, &thread);
+
+	/* The two waits. */
+	memset(&hotplug_wait, 0, sizeof(hotplug_wait));
+	hotplug_wait.state = state;
+	hotplug_wait.fences[0] = hotplug;
+	hotplug_wait.count = 1U;
+	hotplug_wait.timeout = UINT64_MAX;
+	memset(&fence_wait, 0, sizeof(fence_wait));
+	fence_wait.state = state;
+	fence_wait.fences[0] = first;
+	fence_wait.fences[1] = second;
+	fence_wait.count = 2U;
+	fence_wait.timeout = UINT64_MAX;
+	test_wait_start(&hotplug_wait, &hotplug_thread);
+	test_wait_start(&fence_wait, &fence_thread);
 	test_sleep_ms(500U);
+
+	/* Neither wait may have ended before the failure. */
+	if (__atomic_load_n(&hotplug_wait.done, __ATOMIC_ACQUIRE) != 0 ||
+	    __atomic_load_n(&fence_wait.done, __ATOMIC_ACQUIRE) != 0) {
+		test_say(state, "lost: FAIL a wait ended early hotplug=%d fences=%d", (int)hotplug_wait.result, (int)fence_wait.result);
+		return;
+	}
 
 	/*
 	 * The context's descriptor now names /dev/null: the next submission's
-	 * request fails as a lost renderer's would, and the poll the wait
-	 * sleeps in sees nothing of it.
+	 * request fails as a lost renderer's would, and the poll the waits
+	 * sleep in sees nothing of it.
 	 */
 	null_fd = open("/dev/null", O_RDWR);
 	for (index = 0; index < state->context_count; index++)
 		dup2(null_fd, state->context_fds[index]);
 	submitted = test_submit(state, other);
 
-	/* The wait ends within 5 s. */
-	for (tries = 0U; tries < 50U && __atomic_load_n(&wait.done, __ATOMIC_ACQUIRE) == 0; tries++)
+	/* Both waits end within 5 s. */
+	done = 0;
+	for (tries = 0U; tries < 50U && done == 0; tries++) {
 		test_sleep_ms(100U);
-	if (__atomic_load_n(&wait.done, __ATOMIC_ACQUIRE) == 0) {
-		test_say(state, "lost: FAIL the wait did not return submit=%d", (int)submitted);
+		if (__atomic_load_n(&hotplug_wait.done, __ATOMIC_ACQUIRE) != 0 &&
+		    __atomic_load_n(&fence_wait.done, __ATOMIC_ACQUIRE) != 0)
+			done = 1;
+	}
+	if (done == 0) {
+		test_say(state, "lost: FAIL a wait did not return submit=%d hotplug-done=%d fences-done=%d", (int)submitted,
+		    hotplug_wait.done, fence_wait.done);
 		return;
 	}
-	pthread_join(thread, NULL);
-	if (wait.result == VK_ERROR_DEVICE_LOST) {
+	pthread_join(hotplug_thread, NULL);
+	pthread_join(fence_thread, NULL);
+	if (hotplug_wait.result == VK_ERROR_DEVICE_LOST && fence_wait.result == VK_ERROR_DEVICE_LOST) {
 		test_say(state, "lost: PASS submit=%d", (int)submitted);
 	} else {
-		test_say(state, "lost: FAIL result=%d submit=%d", (int)wait.result, (int)submitted);
+		test_say(state, "lost: FAIL hotplug=%d fences=%d submit=%d", (int)hotplug_wait.result, (int)fence_wait.result,
+		    (int)submitted);
 	}
 }
