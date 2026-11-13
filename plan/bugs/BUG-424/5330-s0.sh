@@ -13,7 +13,10 @@
 #     GT's RC6): "idle1", "idle2", then the Wi-Fi radio down and audiod stopped, "quiet".
 #  3. The sleeps of SEQ in turn (default "devices devices devices s0idle s0idle s0idle": sleepctl devices suspends
 #     and resumes the devices without S0 idle, sleepctl s0idle sleeps), each detached and read back from a file, with
-#     networkd's SLEEP_PREPARE before (netsleep, the Wi-Fi radios off as sessiond's sleep has them) and SLEEP_END after.
+#     the Wi-Fi radios off and kept off: networkd's SLEEP_PREPARE (netsleep, as sessiond's sleep asks it) and, for a
+#     networkd that does not know it, networkd stopped and the radio taken down; SLEEP_END and networkd again after.
+#     A reboot is set for DEADMAN s (default 2400) after zedBSD is up, so a zedBSD that is up but unreachable comes back
+#     to Debian without a person.
 #     For each, the package energy and C-state counters just before and just after, zedBSD's clock around it, the
 #     kernel's new lines; then
 #     the root disk (a file written and synced, 64 MiB read raw from the NVMe), the GPU (hw.gputelemetry, i915's
@@ -30,6 +33,7 @@ LOGS=${LOGS:-build/hw5330/bug424}/$NAME
 WATCHDOG=${WATCHDOG:-600}
 SETTLE=${SETTLE:-60}
 SEQ=${SEQ:-devices devices devices s0idle s0idle s0idle}
+DEADMAN=${DEADMAN:-2400}
 ORIG_SHA=4c98d617279bf96b
 HOST=solaris10-man
 ZB=10.0.30.3
@@ -149,6 +153,9 @@ for t in sleepctl sysctl thermal wifi netsleep; do
 	TO=60 timeout 60 sshpass -p "$ZBU" scp $SO -q "$STATIC/$t" "$ZBU@$ZB:/tmp/b424-$t" || fail "copy of $t"
 done
 zb 'chmod 755 /tmp/b424-sleepctl /tmp/b424-sysctl /tmp/b424-thermal /tmp/b424-wifi /tmp/b424-netsleep'
+TO=20 zr "nohup sh -c \"sleep $DEADMAN; reboot\" > /dev/null 2>&1 < /dev/null &" > /dev/null 2>&1
+say "reboot set for $DEADMAN s from now"
+
 zb 'dmesg' > "$LOGS/boot.txt" 2>&1
 say "boot: $(grep -h 'watchdog: armed' "$LOGS/boot.txt" | head -1)"
 say "boot: $(grep -h 'vmd: root port\|vmd: .*resumed' "$LOGS/boot.txt" | head -3 | tr '\n' ';')"
@@ -177,7 +184,11 @@ n=1
 for mode in $SEQ; do
 	lines=$(TO=20 zb 'dmesg | wc -l' | tr -d ' ')
 	say "sleep $n: sleepctl $mode at $(date '+%T')"
-	TO=20 zr "rm -f /tmp/b424-s$n.txt; nohup sh -c \"/tmp/b424-netsleep prepare; sync; sleep 2; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0; /tmp/b424-sleepctl $mode; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0; /tmp/b424-netsleep end\" > /tmp/b424-s$n.txt 2>&1 < /dev/null &" > /dev/null 2>&1
+	down=
+	for w in $(grep -o '^wlan[0-9]*' "$LOGS/ifconfig.txt" | sort -u); do
+		down="$down /tmp/b424-wifi $w down; ifconfig $w down;"
+	done
+	TO=20 zr "rm -f /tmp/b424-s$n.txt; nohup sh -c \"/tmp/b424-netsleep prepare || { service stop networkd; $down }; sync; sleep 2; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0; /tmp/b424-sleepctl $mode; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0; /tmp/b424-netsleep end || service start networkd\" > /tmp/b424-s$n.txt 2>&1 < /dev/null &" > /dev/null 2>&1
 	began=$(date +%s)
 	sleep 15
 	outcome=
