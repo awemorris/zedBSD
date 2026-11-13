@@ -2,7 +2,7 @@
 
 # ws334-p040: Windows 版から winpthreads を外す（thread は Win32 の API で）
 
-Status: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-13 q2052-i01、P3。Makefile の案は未適用）
+Status: cleared（2026-11-13 Q1 判定、Makefile の差分はユーザーの承認の後 main に当てた）。前: in-progress（実装済み・試験 PASS、q2052-i01、P3）
 Parent: [WS334](../ws.md)
 
 ## 目的
