@@ -468,3 +468,5 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-428](bugs/BUG-428.md) | S0 idle の devices の往復で xHCI の port 3 が resume で戻らず、USB の NIC（ue0）の受信が止まる（5330） | open（2026-11-13 Q1 が起票、BUG-424 から） |
 | [BUG-429](bugs/BUG-429.md) | TCO の watchdog が sleep の suspend の途中の停止を捕まえない（PCI の順の早い所で counter を halt する） | open（2026-11-13 Q1 が起票、BUG-424 から） |
 | [BUG-430](bugs/BUG-430.md) | 作り直した build system で、試験の image を別の BUILD に作れない（sysroot が固定）・vmunix と userland の並列で依存が抜ける・sysroot が -j16・test-image.sh が古い | open（2026-11-13 Q1 が起票、WS353 p002 の P1 の報告） |
+| [BUG-431](bugs/BUG-431.md) | venus の display の事象を取りこぼす（idle の間の head の抜き差しが topology の番号に出ない）、IRQ の経路が事象を clear しない | open（2026-11-14 Q1 が起票、WS353 p002） |
+| [BUG-432](bugs/BUG-432.md) | 静的に link した program の stdout が file への出力の時に exit で flush されない | open（2026-11-14 Q1 が起票） |
