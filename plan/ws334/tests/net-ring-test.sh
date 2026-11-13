@@ -19,8 +19,9 @@ out=build/tmp/ws334-net-ring/$variant
 mkdir -p "$out"
 src=userland/desktop/libbrowser
 base=$(ls $src/base/*.c | grep -v -e '-win32\.c$')
-# The network's sources but the static OpenSSL's binding (tls-static.c, the Windows build's).
-net=$(ls $src/net/*.c | grep -v -e '/tls-static\.c$')
+# The network's sources but the bindings of the TLS libraries linked statically (tls-static.c for OpenSSL,
+# tls-static-compat.c for libssl-compat; the Windows build's).
+net=$(ls $src/net/*.c | grep -v -e '/tls-static\.c$' -e '/tls-static-compat\.c$')
 cc $sanitize -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I$src -I. -Iuserland/desktop/include -Ibuild/ws074-host/include \
 	$net $src/storage/queue.c $src/storage/records.c $base userland/base/libz-compat/*.c \
 	plan/ws334/tests/net-ring-test.c userland/tests/browser-threads/threads-posix.c \

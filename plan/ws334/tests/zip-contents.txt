@@ -16,7 +16,6 @@ share/licenses/JetBrainsMono-OFL.txt
 share/licenses/LLVM-LICENSE.txt
 share/licenses/Mahora-LICENSE.txt
 share/licenses/MinGW-w64-runtime.txt
-share/licenses/OpenSSL-LICENSE.txt
 share/licenses/README.txt
 share/licenses/Unicode-License-V3.txt
 share/licenses/WHATWG-entities.txt
