@@ -1,0 +1,282 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1840" height="1264" viewBox="0 0 1840 1264">
+<defs>
+<linearGradient id="glassFill" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#ffffff" stop-opacity="0.78"/>
+  <stop offset="1" stop-color="#ffffff" stop-opacity="0.52"/>
+</linearGradient>
+<linearGradient id="glassRim" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#ffffff" stop-opacity="1"/>
+  <stop offset="1" stop-color="#c7cbd6" stop-opacity="0.7"/>
+</linearGradient>
+<linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"/>
+  <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+</linearGradient>
+<filter id="shadow" x="-10%" y="-30%" width="120%" height="170%">
+  <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#5b6478" flood-opacity="0.14"/>
+</filter>
+<filter id="blur"><feGaussianBlur stdDeviation="70"/></filter>
+</defs>
+<rect width="1840" height="1264" fill="#ffffff"/>
+<g filter="url(#blur)" opacity="0.55"><circle cx="300" cy="420" r="260" fill="#bfe3ff"/><circle cx="1000" cy="300" r="300" fill="#e3d9ff"/><circle cx="1550" cy="700" r="280" fill="#ffe2c4"/><circle cx="700" cy="964" r="300" fill="#c9f2dc"/></g>
+<text x="40" y="62" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="32" font-weight="700" fill="#1d1d1f" text-anchor="start">zedBSD 作業地図</text>
+<text x="40" y="100" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="16" font-weight="400" fill="#3a3a3c" text-anchor="start">Objective → Milestone → WS → Phase → 担当（Queue）を 1 枚に。今動いている・今日動いた WS と Bug だけを Phase まで開き、他は Milestone ごとの未完の WS の数で示す。</text>
+<text x="40" y="134" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="400" fill="#6e6e73" text-anchor="start">2026-11-14 時点の記録（plan/master.md・cockpit.md・queue.md・各 ws.md）から</text>
+<circle cx="46" cy="170" r="5" fill="#30b45a"/>
+<text x="58" y="175" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="400" fill="#3a3a3c" text-anchor="start">cleared・fixed・completed</text>
+<circle cx="362" cy="170" r="5" fill="#f29a0c"/>
+<text x="374" y="175" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="400" fill="#3a3a3c" text-anchor="start">in-progress</text>
+<circle cx="534" cy="170" r="5" fill="#8e8e93"/>
+<text x="546" y="175" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="400" fill="#3a3a3c" text-anchor="start">planned・次</text>
+<circle cx="682" cy="170" r="5" fill="#ff453a"/>
+<text x="694" y="175" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="400" fill="#3a3a3c" text-anchor="start">open の Bug</text>
+<circle cx="842" cy="170" r="5" fill="#6a5cff"/>
+<text x="854" y="175" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="400" fill="#3a3a3c" text-anchor="start">Gemini（agy）</text>
+<rect x="24" y="220" width="1792" height="804" rx="22" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="25" y="221" width="1790" height="402.0" rx="21" fill="url(#sheen)"/>
+<text x="60" y="260" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#6e6e73" text-anchor="start">OBJECTIVE</text>
+<text x="300" y="260" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#6e6e73" text-anchor="start">MILESTONE（未完の WS の数）</text>
+<text x="660" y="260" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#6e6e73" text-anchor="start">WS・BUG</text>
+<text x="1060" y="260" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#6e6e73" text-anchor="start">PHASE</text>
+<text x="1500" y="260" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#6e6e73" text-anchor="start">担当・QUEUE</text>
+<rect x="60" y="300" width="220" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="61" y="301" width="218" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="74" y="321" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">O1</text>
+<text x="74" y="340" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">UNIX 互換・企業が使える</text>
+<path d="M280,325 C290.0,325 290.0,325.0 300,325.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,325 C290.0,325 290.0,413.0 300,413.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,325 C290.0,325 290.0,501.0 300,501.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,325 C290.0,325 290.0,589.0 300,589.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,325 C290.0,325 290.0,677.0 300,677.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,325 C290.0,325 290.0,765.0 300,765.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,325 C290.0,325 290.0,853.0 300,853.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,325 C290.0,325 290.0,941.0 300,941.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="60" y="366" width="220" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="61" y="367" width="218" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="74" y="387" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">O2</text>
+<text x="74" y="406" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">様々な規模で動く</text>
+<path d="M280,391 C290.0,391 290.0,325.0 300,325.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,391 C290.0,391 290.0,413.0 300,413.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,391 C290.0,391 290.0,501.0 300,501.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,391 C290.0,391 290.0,589.0 300,589.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,391 C290.0,391 290.0,677.0 300,677.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,391 C290.0,391 290.0,765.0 300,765.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,391 C290.0,391 290.0,853.0 300,853.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,391 C290.0,391 290.0,941.0 300,941.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="60" y="432" width="220" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="61" y="433" width="218" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="74" y="453" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">O3</text>
+<text x="74" y="472" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">サービスの再実装</text>
+<path d="M280,457 C290.0,457 290.0,325.0 300,325.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,457 C290.0,457 290.0,413.0 300,413.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,457 C290.0,457 290.0,501.0 300,501.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,457 C290.0,457 290.0,589.0 300,589.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,457 C290.0,457 290.0,677.0 300,677.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,457 C290.0,457 290.0,765.0 300,765.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,457 C290.0,457 290.0,853.0 300,853.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,457 C290.0,457 290.0,941.0 300,941.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="60" y="498" width="220" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="61" y="499" width="218" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="74" y="519" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">O4</text>
+<text x="74" y="538" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">最小の HAL</text>
+<path d="M280,523 C290.0,523 290.0,325.0 300,325.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,523 C290.0,523 290.0,413.0 300,413.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,523 C290.0,523 290.0,501.0 300,501.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,523 C290.0,523 290.0,589.0 300,589.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,523 C290.0,523 290.0,677.0 300,677.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,523 C290.0,523 290.0,765.0 300,765.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,523 C290.0,523 290.0,853.0 300,853.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,523 C290.0,523 290.0,941.0 300,941.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="60" y="564" width="220" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="61" y="565" width="218" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="74" y="585" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">O5</text>
+<text x="74" y="604" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">AI 活用 OSS の知見</text>
+<path d="M280,589 C290.0,589 290.0,325.0 300,325.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,589 C290.0,589 290.0,413.0 300,413.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,589 C290.0,589 290.0,501.0 300,501.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,589 C290.0,589 290.0,589.0 300,589.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,589 C290.0,589 290.0,677.0 300,677.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,589 C290.0,589 290.0,765.0 300,765.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,589 C290.0,589 290.0,853.0 300,853.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<path d="M280,589 C290.0,589 290.0,941.0 300,941.0" fill="none" stroke="#b8bcc8" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="300" y="300.0" width="320" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="301" y="301.0" width="318" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="314" y="321.0" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">MG001</text>
+<text x="314" y="340.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">継続開発の基盤</text>
+<text x="606" y="322.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="600" fill="#1d1d1f" text-anchor="end">4</text>
+<rect x="300" y="388.0" width="320" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="301" y="389.0" width="318" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="314" y="409.0" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">MG002</text>
+<text x="314" y="428.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">UNIX app の実行基盤</text>
+<text x="606" y="410.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="600" fill="#1d1d1f" text-anchor="end">10</text>
+<rect x="300" y="476.0" width="320" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="301" y="477.0" width="318" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="314" y="497.0" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">MG003</text>
+<text x="314" y="516.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">対象機へ導入・単独起動</text>
+<text x="606" y="498.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="600" fill="#1d1d1f" text-anchor="end">7</text>
+<rect x="300" y="564.0" width="320" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="301" y="565.0" width="318" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="314" y="585.0" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">MG004</text>
+<text x="314" y="604.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">データ保持・メモリ・ストレージ</text>
+<text x="606" y="586.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="600" fill="#1d1d1f" text-anchor="end">5</text>
+<rect x="300" y="652.0" width="320" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="301" y="653.0" width="318" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="314" y="673.0" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">MG005</text>
+<text x="314" y="692.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">network・service 管理</text>
+<text x="606" y="674.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="600" fill="#1d1d1f" text-anchor="end">5</text>
+<rect x="300" y="740.0" width="320" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="301" y="741.0" width="318" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="314" y="761.0" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">MG006</text>
+<text x="314" y="780.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">グラフィカルな操作環境</text>
+<text x="606" y="762.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="600" fill="#1d1d1f" text-anchor="end">61</text>
+<rect x="300" y="828.0" width="320" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="301" y="829.0" width="318" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="314" y="849.0" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">MG007</text>
+<text x="314" y="868.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">用途別のディストリビューション</text>
+<text x="606" y="850.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="600" fill="#1d1d1f" text-anchor="end">3</text>
+<rect x="300" y="916.0" width="320" height="50" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="301" y="917.0" width="318" height="25.0" rx="13" fill="url(#sheen)"/>
+<text x="314" y="937.0" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">MG008</text>
+<text x="314" y="956.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">最小 HAL と異種機</text>
+<text x="606" y="938.0" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="14" font-weight="600" fill="#1d1d1f" text-anchor="end">5</text>
+<path d="M620,413.0 C640.0,413.0 640.0,316.0 660,316.0" fill="none" stroke="#30b45a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="660" y="300" width="340" height="32" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="661" y="301" width="338" height="16.0" rx="13" fill="url(#sheen)"/><rect x="666" y="307" width="4" height="18" rx="2" fill="#30b45a"/>
+<text x="680" y="321" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="14" font-weight="700" fill="#1d1d1f" text-anchor="start">WS335</text>
+<text x="772" y="321" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">自前の TLS（libssl-compat）</text>
+<path d="M1000,316 C1030.0,316 1030.0,316 1060,316" fill="none" stroke="#30b45a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="300" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="301" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="316" r="5" fill="#30b45a"/>
+<text x="1090" y="321" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">完了</text>
+<text x="1154" y="321" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">今日 completed（p042〜p047）</text>
+<path d="M620,765.0 C640.0,765.0 640.0,484.0 660,484.0" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="660" y="348" width="340" height="272" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="661" y="349" width="338" height="136.0" rx="13" fill="url(#sheen)"/><rect x="666" y="355" width="4" height="258" rx="2" fill="#f29a0c"/>
+<text x="680" y="369" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="14" font-weight="700" fill="#1d1d1f" text-anchor="start">WS353</text>
+<text x="772" y="369" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">待ち方の作り直し（push・周期なし）</text>
+<path d="M1000,364 C1030.0,364 1030.0,364 1060,364" fill="none" stroke="#30b45a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="348" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="349" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="364" r="5" fill="#30b45a"/>
+<text x="1090" y="369" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">p002〜p009</text>
+<text x="1181" y="369" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">fence・timer・main の poll -1 ほか 8 つ</text>
+<path d="M1000,364 C1030.0,364 1030.0,404 1060,404" fill="none" stroke="#30b45a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="388" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="389" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="404" r="5" fill="#30b45a"/>
+<text x="1090" y="409" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">p014・p015</text>
+<text x="1181" y="409" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">refresh の fence・network・WSI</text>
+<path d="M1000,364 C1030.0,364 1030.0,444 1060,444" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="428" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="429" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="444" r="5" fill="#f29a0c"/>
+<text x="1090" y="449" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">p011</text>
+<text x="1154" y="449" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">render を slot の数で回す</text>
+<path d="M1450,444 C1475.0,444 1475.0,444 1500,444" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1500" y="428" width="290" height="32" rx="16" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1501" y="429" width="288" height="16.0" rx="15" fill="url(#sheen)"/>
+<circle cx="1516" cy="444" r="5" fill="#f29a0c"/>
+<text x="1530" y="449" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">P2</text>
+<text x="1580" y="449" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">q2067</text>
+<path d="M1000,364 C1030.0,364 1030.0,484 1060,484" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="468" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="469" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="484" r="5" fill="#f29a0c"/>
+<text x="1090" y="489" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">p018</text>
+<text x="1154" y="489" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">入力の device を sessiond に開かせる</text>
+<path d="M1450,484 C1475.0,484 1475.0,484 1500,484" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1500" y="468" width="290" height="32" rx="16" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1501" y="469" width="288" height="16.0" rx="15" fill="url(#sheen)"/>
+<circle cx="1516" cy="484" r="5" fill="#f29a0c"/>
+<text x="1530" y="489" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">P1</text>
+<text x="1580" y="489" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">q2072</text>
+<path d="M1000,364 C1030.0,364 1030.0,524 1060,524" fill="none" stroke="#8e8e93" stroke-opacity="0.55" stroke-width="1.6" stroke-dasharray="4 4"/>
+<rect x="1060" y="508" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="509" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="524" r="5" fill="#8e8e93"/>
+<text x="1090" y="529" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">p010・p012</text>
+<text x="1181" y="529" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">shown の thread・cursor</text>
+<path d="M1000,364 C1030.0,364 1030.0,564 1060,564" fill="none" stroke="#8e8e93" stroke-opacity="0.55" stroke-width="1.6" stroke-dasharray="4 4"/>
+<rect x="1060" y="548" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="549" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="564" r="5" fill="#8e8e93"/>
+<text x="1090" y="569" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">p019</text>
+<text x="1154" y="569" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">printers の 1 s を消す</text>
+<path d="M1000,364 C1030.0,364 1030.0,604 1060,604" fill="none" stroke="#8e8e93" stroke-opacity="0.55" stroke-width="1.6" stroke-dasharray="4 4"/>
+<rect x="1060" y="588" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="589" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="604" r="5" fill="#8e8e93"/>
+<text x="1090" y="609" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">p016</text>
+<text x="1154" y="609" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">QEMU の回帰と 5330 の idle</text>
+<path d="M620,765.0 C640.0,765.0 640.0,652.0 660,652.0" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="660" y="636" width="340" height="32" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="661" y="637" width="338" height="16.0" rx="13" fill="url(#sheen)"/><rect x="666" y="643" width="4" height="18" rx="2" fill="#f29a0c"/>
+<text x="680" y="657" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="14" font-weight="700" fill="#1d1d1f" text-anchor="start">WS334</text>
+<text x="772" y="657" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">Windows 版のブラウザ</text>
+<path d="M1000,652 C1030.0,652 1030.0,652 1060,652" fill="none" stroke="#30b45a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="636" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="637" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="652" r="5" fill="#30b45a"/>
+<text x="1090" y="657" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">p040</text>
+<text x="1154" y="657" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">winpthreads を外す</text>
+<path d="M620,765.0 C640.0,765.0 640.0,740.0 660,740.0" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="660" y="684" width="340" height="112" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="661" y="685" width="338" height="56.0" rx="13" fill="url(#sheen)"/><rect x="666" y="691" width="4" height="98" rx="2" fill="#f29a0c"/>
+<text x="680" y="705" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="14" font-weight="700" fill="#1d1d1f" text-anchor="start">WS347</text>
+<text x="772" y="705" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">Amaterrace GPU（VF2＋KC705）</text>
+<path d="M1000,700 C1030.0,700 1030.0,700 1060,700" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="684" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="685" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="700" r="5" fill="#f29a0c"/>
+<text x="1090" y="705" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">依頼 08</text>
+<text x="1154" y="705" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">X1〜X4 確認済み、X5〜X9 は次</text>
+<path d="M1450,700 C1475.0,700 1475.0,700 1500,700" fill="none" stroke="#6a5cff" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1500" y="684" width="290" height="32" rx="16" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1501" y="685" width="288" height="16.0" rx="15" fill="url(#sheen)"/>
+<circle cx="1516" cy="700" r="5" fill="#6a5cff"/>
+<text x="1530" y="705" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">agy</text>
+<text x="1580" y="705" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">Gemini</text>
+<path d="M1000,700 C1030.0,700 1030.0,740 1060,740" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="724" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="725" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="740" r="5" fill="#f29a0c"/>
+<text x="1090" y="745" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">描画</text>
+<text x="1154" y="745" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">画素を書かない原因 4 つを特定</text>
+<path d="M1450,740 C1475.0,740 1475.0,740 1500,740" fill="none" stroke="#f29a0c" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1500" y="724" width="290" height="32" rx="16" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1501" y="725" width="288" height="16.0" rx="15" fill="url(#sheen)"/>
+<circle cx="1516" cy="740" r="5" fill="#f29a0c"/>
+<text x="1530" y="745" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">P5</text>
+<text x="1580" y="745" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">解析</text>
+<path d="M1000,700 C1030.0,700 1030.0,780 1060,780" fill="none" stroke="#8e8e93" stroke-opacity="0.55" stroke-width="1.6" stroke-dasharray="4 4"/>
+<rect x="1060" y="764" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="765" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="780" r="5" fill="#8e8e93"/>
+<text x="1090" y="785" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">次</text>
+<text x="1154" y="785" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">4 つの修正の依頼を agy へ</text>
+<path d="M620,325.0 C640.0,325.0 640.0,828.0 660,828.0" fill="none" stroke="#30b45a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="660" y="812" width="340" height="32" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="661" y="813" width="338" height="16.0" rx="13" fill="url(#sheen)"/><rect x="666" y="819" width="4" height="18" rx="2" fill="#30b45a"/>
+<text x="680" y="833" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="14" font-weight="700" fill="#1d1d1f" text-anchor="start">BUG-430</text>
+<text x="772" y="833" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">build system の不具合</text>
+<path d="M1000,828 C1030.0,828 1030.0,828 1060,828" fill="none" stroke="#30b45a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="812" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="813" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="828" r="5" fill="#30b45a"/>
+<text x="1090" y="833" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">fixed</text>
+<text x="1154" y="833" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">Makefile の差分を当てた</text>
+<path d="M620,765.0 C640.0,765.0 640.0,876.0 660,876.0" fill="none" stroke="#30b45a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="660" y="860" width="340" height="32" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="661" y="861" width="338" height="16.0" rx="13" fill="url(#sheen)"/><rect x="666" y="867" width="4" height="18" rx="2" fill="#30b45a"/>
+<text x="680" y="881" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="14" font-weight="700" fill="#1d1d1f" text-anchor="start">BUG-431</text>
+<text x="772" y="881" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">venus の display の事象</text>
+<path d="M1000,876 C1030.0,876 1030.0,876 1060,876" fill="none" stroke="#30b45a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="860" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="861" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="876" r="5" fill="#30b45a"/>
+<text x="1090" y="881" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">fixed</text>
+<text x="1154" y="881" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">events_clear・試験の道具</text>
+<path d="M620,413.0 C640.0,413.0 640.0,924.0 660,924.0" fill="none" stroke="#ff453a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="660" y="908" width="340" height="32" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="661" y="909" width="338" height="16.0" rx="13" fill="url(#sheen)"/><rect x="666" y="915" width="4" height="18" rx="2" fill="#ff453a"/>
+<text x="680" y="929" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="14" font-weight="700" fill="#1d1d1f" text-anchor="start">BUG-432</text>
+<text x="772" y="929" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">static の stdout の flush</text>
+<path d="M1000,924 C1030.0,924 1030.0,924 1060,924" fill="none" stroke="#ff453a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="908" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="909" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="924" r="5" fill="#ff453a"/>
+<text x="1090" y="929" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">open</text>
+<text x="1154" y="929" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">libc の exit の flush</text>
+<path d="M620,325.0 C640.0,325.0 640.0,972.0 660,972.0" fill="none" stroke="#ff453a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="660" y="956" width="340" height="32" rx="14" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="661" y="957" width="338" height="16.0" rx="13" fill="url(#sheen)"/><rect x="666" y="963" width="4" height="18" rx="2" fill="#ff453a"/>
+<text x="680" y="977" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="14" font-weight="700" fill="#1d1d1f" text-anchor="start">BUG-433</text>
+<text x="772" y="977" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">WS131 の host 試験が link しない</text>
+<path d="M1000,972 C1030.0,972 1030.0,972 1060,972" fill="none" stroke="#ff453a" stroke-opacity="0.55" stroke-width="1.6"/>
+<rect x="1060" y="956" width="390" height="32" rx="12" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1061" y="957" width="388" height="16.0" rx="11" fill="url(#sheen)"/>
+<circle cx="1076" cy="972" r="5" fill="#ff453a"/>
+<text x="1090" y="977" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#1d1d1f" text-anchor="start">open</text>
+<text x="1154" y="977" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#3a3a3c" text-anchor="start">偽物を 1 file に分ける</text>
+<rect x="1500" y="844" width="290" height="32" rx="16" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1501" y="845" width="288" height="16.0" rx="15" fill="url(#sheen)"/>
+<text x="1516" y="865" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#6e6e73" text-anchor="start">P3</text>
+<text x="1560" y="865" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#6e6e73" text-anchor="start">待機</text>
+<rect x="1500" y="884" width="290" height="32" rx="16" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1501" y="885" width="288" height="16.0" rx="15" fill="url(#sheen)"/>
+<text x="1516" y="905" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#6e6e73" text-anchor="start">P4</text>
+<text x="1560" y="905" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#6e6e73" text-anchor="start">待機</text>
+<rect x="1500" y="924" width="290" height="32" rx="16" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1501" y="925" width="288" height="16.0" rx="15" fill="url(#sheen)"/>
+<text x="1516" y="945" font-family="'SF Mono','JetBrains Mono','Noto Sans Mono',monospace" font-size="13" font-weight="700" fill="#6e6e73" text-anchor="start">Q1</text>
+<text x="1560" y="945" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="13" font-weight="400" fill="#6e6e73" text-anchor="start">merge・Queue・判断の振り分け</text>
+<rect x="24.0" y="1044" width="584.0" height="170" rx="20" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="25.0" y="1045" width="582.0" height="85.0" rx="19" fill="url(#sheen)"/>
+<text x="46.0" y="1078" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="700" fill="#1d1d1f" text-anchor="start">ユーザーの判断待ち</text>
+<text x="54.0" y="1112" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="400" fill="#3a3a3c" text-anchor="start">• 無し（2026-11-14 の分は全部決まった）</text>
+<rect x="628.0" y="1044" width="584.0" height="170" rx="20" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="629.0" y="1045" width="582.0" height="85.0" rx="19" fill="url(#sheen)"/>
+<text x="650.0" y="1078" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="700" fill="#1d1d1f" text-anchor="start">今日 閉じた物</text>
+<text x="658.0" y="1112" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="400" fill="#3a3a3c" text-anchor="start">• WS335 TLS completed</text>
+<text x="658.0" y="1142" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="400" fill="#3a3a3c" text-anchor="start">• WS353 p002〜p009・p014・p015 cleared</text>
+<text x="658.0" y="1172" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="400" fill="#3a3a3c" text-anchor="start">• BUG-430・431 fixed、WS334 p040</text>
+<rect x="1232.0" y="1044" width="584.0" height="170" rx="20" fill="url(#glassFill)" stroke="url(#glassRim)" stroke-width="1.2" filter="url(#shadow)"/><rect x="1233.0" y="1045" width="582.0" height="85.0" rx="19" fill="url(#sheen)"/>
+<text x="1254.0" y="1078" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="700" fill="#1d1d1f" text-anchor="start">次に Q1 が回す事</text>
+<text x="1262.0" y="1112" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="400" fill="#3a3a3c" text-anchor="start">• Amaterrace の描画の修正を agy に依頼</text>
+<text x="1262.0" y="1142" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="400" fill="#3a3a3c" text-anchor="start">• WS353 p011・p018 の返却 → p010・p012</text>
+<text x="1262.0" y="1172" font-family="'Hiragino Sans','Noto Sans CJK JP','Noto Sans JP','Yu Gothic',sans-serif" font-size="15" font-weight="400" fill="#3a3a3c" text-anchor="start">• p019（printers）、BUG-432・433</text>
+</svg>
