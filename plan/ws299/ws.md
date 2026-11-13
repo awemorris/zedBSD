@@ -3,7 +3,7 @@
 # WS299 5330 の NVMe の読み書きを速くする
 
 - Master: [plan/master.md](../master.md)（2026-10-27 作成、q1615 P1 の計画）。Primary Milestone: MG004。Related: MG003（[WS298](../ws298/ws.md) VMD の driver、q1612 NVMe から起動）。
-- Status: incomplete（p001・p002・p003・p009 cleared。p004 は実装と試験が済み Q1 の判定待ち。p005・p006・p010 in-progress。2026-10-31 q1744 は下の「2026-10-31」、2026-11-01 q1788 の 5330 の測りは下の「2026-11-01」）
+- Status: incomplete（p001・p002・p003・p009 cleared。p004 は Q1 の判定待ち（材料は下の「2026-11-13」）。p005・p006・p010 in-progress、p007・p008 planned。2026-11-13 q2044（P2）: 電力制御（WS333・BUG-424）が main に入った後の乖離の確かめと測り直し、下の「今の前提」と「2026-11-13」）
 - 出典: 2026-10-27 ユーザー「5330でNVMeの最適化（速度向上）をWSを立ててやってほしいです。（あとで順番にやってほしいです）」「新規WSはまず計画を広く進めて、全体の依存関係を見ましょう。」
 - 全体の依存と着手の順: [plan/agents/P1/pm-plan.md](../agents/P1/pm-plan.md)。
 
@@ -16,7 +16,18 @@
 Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRAM-less、PCIe）で、zedBSD の NVMe の連続の読み書きが、量に依らず一定の速さで、
 同じ機械の Debian の測定の 95% 以上に届く（2026-10-27 ユーザー）。今の「512 MiB を超えると 10〜3.6 MB/s に落ちる」崖を無くす。
 
-## 今の事実（2026-10-27 の調べ、根拠は file:行）
+## 今の前提（2026-11-13、q2044、P2 が main fe6ea0f967 と照らした。下の 2026-10〜11-01 の記録より優先）
+
+- 止まっていた理由: 2026-11-01 の測りの後、CPU の idle・P-state が無い（`sti; hlt` だけ・HWP なし）事が CPU 律速の項目の差の見立てに残り、電力制御の実装待ちになっていた（2026-11-13 ユーザーの見方）。その電力制御は 2026-11-13 に main に入った: [WS333](../ws333/ws.md)（completed。MWAIT の C-state、HWP の strategy、E-core の domain、TCO の watchdog、amd64 の tick を 1000 Hz から 100 Hz に）と [BUG-424](../bugs/BUG-424.md)（PCI の電源の枠組み、VMD の隠れた root port の save・restore）。
+- WS299 の code は全部 main にある（ded5ae2e9・36d0d7b5d・1e0ac531a（p004）、28ad3e40e（p006 HMB）、b809c70d1・c9468203a（p010 O_DIRECT と 4 MiB の request）、42d5d4943（libc の memcpy）、114f6d405、3a4e64353・4e7b2a827（q1744 の書き手の CPU）、609295cd0 が main の祖先である事を `git merge-base --is-ancestor` で確かめた）。2026-11-01 の後に WS299 の道を変えた commit は `pci-vmd.c`（BUG-424 の suspend・resume、debec3781b・295eea4623）と `devfs.c` の小さな物だけで、`pci-nvme.c`・`buf.c`・`ufs.c` は変わっていない。
+- tick 100 Hz: zedBSD の `clock_gettime` は tick の数え（`kern_clock_gettime`、src/kern/clock.c）なので、刻みが 1 ms から 10 ms になった。測る道具の時間（patwrite・directio の ms、dd の /bin/time の real）は 2 秒以上の測りで ±0.5 % ほどの誤差。randread の `mean_us`・`max_us` は zedBSD では意味が無い（MB/s は全体の時間なので使える）。buffer cache・readahead・writeback の待ちは waitq の起こしで、tick には依らない（buf.c の `BUF_FLUSH_INTERVAL` の周期の flusher だけが tick の刻み）。
+- WS300 との関係: BUG-424 の案のとおり WS300 p002（VMD の suspend）は BUG-424 で置き換え、p003（HMB を SHN の前に止める）・p004（ASPM）・p005（APST）は WS300 に残って main の上で作り直す（[BUG-424](../bugs/BUG-424.md)「WS300 との比べ」）。WS299 の範囲（速さ）は変わらない。APST・ASPM は既定 off の案なので、WS299 の測りの条件は WS300 が入っても既定では同じ。
+- build: top の Makefile と `mk/` に作り直された。kernel は `make PLATFORM=x86_64 CONFIGMK=config/config.x86_64.mk CONFIG_KERN_THERMAL=y CONFIG_DRIVER_X86_POWER_CONTROL=y build/x86_64/vmunix`（`llvm-toolchain-cached` → `sysroot` の後）。`make ZEDBSD_CONFIG=… disk-image` と `build/amd64/` は無い。このため `plan/ws299/tests/` の QEMU の image の作り方（`config-qemu-cache128.mk`・`config-qemu-cache32.mk`・`config-5330-cache128.mk` の先頭の使い方、`qemu-suite.sh` の前提の image）は古く、p007 で今の `make CONFIGMK=… disk` の形に直す。`build-randread.sh` は 2026-11-13 に `build/x86_64/sysroot` に直した（main の build/ を読む fallback も外した）。
+- 5330 の実機: zedBSD は p4〜p6（p7 は測定用の 32 GiB）。p4 の普段の kernel と `zedbsd.cfg` は Debian の `~/ws245/vmunix-p027-orig`（sha256 先頭 4c98d617279bf96b）・`zedbsd.cfg-p027-orig`（1b33a395b0ff4bd7）で、測りの後はそれに戻す。zedBSD の起動は一回だけ（`~/boot-zedbsd.sh`、UEFI の BootNext）と `watchdog=600`（止まれば TCO の watchdog で Debian に戻る）。S0 idle・sleepctl は使わない（BUG-428・429 の前）。p5 の userland は前の image のままで、kernel だけを差し替えて測る。
+- 測りの道具: `plan/ws299/tests/measure-5330.sh NAME VMUNIX`（1 本: lock → Debian の mode → p4 に kernel と watchdog → zedBSD の mode → p4 を戻して sha を照合 → `compare.py` で Debian と並べた表）。
+- 記録の直し: p010 の「ユーザーの継続の判断待ち」（2026-10-28）は、2026-10-31 のユーザーの指示（5330 が空いたら担当を問わず進める）で継続が決まっていたので外した。
+
+## 今の事実（2026-10-27 の調べ、根拠は file:行。当時の記録で、今は上の「今の前提」が優先）
 
 - 測定（[ws298 p002](../ws298/ws.md):46-51、kernel f0effe7ad、`/dev/nvme0n1` を dd）: 1・16・64・256 MiB は 0〜1 秒、512 MiB は 5 秒、1024 MiB は 52 秒、
   195 GiB の位置の 256 MiB は 71 秒（約 3.6 MB/s）。遅さは位置ではなく boot からの読みの量に依る。nvme の timeout・回復の行は無い。dd の script は git に無い（`5330-run.sh` の EXTRA）。
@@ -76,11 +87,11 @@ Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRA
 | [p001](phase001/phase.md) | 調査と設計: 測定の script（5330 の Debian と zedBSD で同じ大きさ・位置、counter を前後で取る）、Debian の基準、H1〜H4 の確かめ（`CONFIG_BUF_CACHE_KIB` を小さくして崖が動くか、`alloc_metadata` の時間）、直しの順と受け入れの数、design-reviewer | WS298（済） | 4 | cleared（2026-10-28 Q1 判定。H1 を確かめ、数はユーザー「Debianの95%以上」、HMB は「やる」） |
 | [p002](phase002/phase.md) | buffer cache: header の確保を O(1)（空きの list）にし、irq を止める区間を短く。evict を run 単位に。host 試験で計算量 | p001 | 4 | cleared（2026-10-27 11:41） |
 | [p003](phase003/phase.md) | NVMe の大きな転送: MDTS に合わせた command、PRP list（bounce を使わず page に直接、使う所だけ bounce）、BIO の上限を上げる（`d_max_transfer_blocks`） | p001・p002 | 6 | cleared（2026-10-27、Q1 判定。raw の読み中央値 583 MB/s = p002 の後の 1.52 倍、書き 1.5 倍） |
-| [p004](phase004/phase.md) | raw の block device の先読み（buffer cache の worker で device の待ちと CPU の仕事を重ねる）。複数の queue・VMD の vector は p007 の乱読みの測定の後に要否（2026-10-28 Q1） | p003 | 6 | in-progress（実装・QEMU・5330 済み、raw の読み 4 GiB 中央値 1917 MB/s。Q1 の判定待ち、q1634） |
+| [p004](phase004/phase.md) | raw の block device の先読み（buffer cache の worker で device の待ちと CPU の仕事を重ねる）。複数の queue・VMD の vector は p007 の乱読みの測定の後に要否（2026-10-28 Q1） | p003 | 6 | in-progress（実装・QEMU・5330 済み、raw の読み 4 GiB 中央値 1917 MB/s。Q1 の判定待ち、q1634。2026-11-13 の測り直しの材料は下の「2026-11-13」） |
 | [p005](phase005/phase.md) | 連続の読み書き: UFS の file の readahead の窓と cluster の読み書き、書きの合流（raw の先読みは p004 へ、2026-10-28 Q1） | p002・p004 | 4 | in-progress（raw 書き 119%・raw 読み 150%・UFS 読み 126%、UFS 書き 55% で未達、2026-10-28 P1。2026-10-31 q1744: 書き手の CPU の直し 3a4e64353。2026-11-01 q1788 の 5330: file の書き p7 90%・root の UFS の上書き 108%・新しく 96%・file の読み 112%、file の書き p7 は 95% に未達） |
 | [p006](phase006/phase.md) | HMB（DRAM-less の BG5） | p003 | 4 | in-progress（実装・5330 で動作、QD1 98%。QD32 は 44% で未達、2026-10-28 P1） |
-| [p010](phase010/phase.md) | block device の O_DIRECT（2026-10-28 ユーザー「O_DIRECT を UAPI に足す」、Q1 が p010 に確定、p007 の前） | p004・p005 | 4 | in-progress（2026-10-28 q1657: direct 書き 88%（59% は道具の fill の libc memcpy だった）、読み 1 MiB 103%・4 MiB 91%、QD32 99%。下の「結果」、ユーザーの継続の判断待ち） |
-| p007 | 5330 の測定の受け入れと回帰（QEMU の nvme・USB の起動は T、5330 は 1 本の script） | p002〜p006・p010 | 2 | planned |
+| [p010](phase010/phase.md) | block device の O_DIRECT（2026-10-28 ユーザー「O_DIRECT を UAPI に足す」、Q1 が p010 に確定、p007 の前） | p004・p005 | 4 | in-progress（2026-10-28 q1657: direct 書き 88%（59% は道具の fill の libc memcpy だった）、読み 1 MiB 103%・4 MiB 91%、QD32 99%。下の「結果」。継続は 2026-10-31 のユーザーの指示で決まった） |
+| p007 | 5330 の測定の受け入れと回帰（QEMU の nvme・USB の起動は T、5330 は 1 本の script）。QEMU の image の作り方を今の build system（`make CONFIGMK=… disk`）に直す所から（2026-11-13） | p002〜p006・p010 | 2 | planned |
 | p008 | 規約の全文の見直し | p007 | 2 | planned |
 | [p009](phase009/phase.md) | 5330 の NVMe の root を p5 いっぱいに（`ufs-grow.py`、UFS の群の探しを O(1)）と、大きな file の sync の 2 乗の直し（reboot が止まった） | p002 | 2 | cleared（2026-10-28 Q1 判定: 受け入れ 3 点を QEMU・5330 で確かめた。xattr・msync の道を狙う試験は未実施のまま） |
 
