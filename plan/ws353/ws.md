@@ -78,7 +78,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 ## ユーザーの決定（続き）
 
 - 2026-11-14 ユーザーから次の趣旨の連絡と決定を受けた: printd は常駐でなく印刷の spool の間だけ起動する（新しい決定ではなく、前からの実装の振る舞い）。printd が起動している間は、pipe で printd に接続して push を受けるのが理想。kernel に機能（file の変化の通知など）は足さない（kernel を簡素に保ち、POSIX の中核から離れないため）。Settings は spool の中身を見る時だけ printd と通信すればよく、printer の一覧を得るのに printd と通信する必要は無い。→ 2-04（printers の 1 s）の本来の形はこの方針で後の Phase に。
-- 2026-11-14 ユーザーから次の趣旨の決定を受けた（入力の device の hotplug と seat）: compositor は device 全般の hotplug を見張る thread を 1 本持つ（監視の対象は入力の device だけではないので、この thread は残す）。sessiond 経由で起動している時は、入力の device を開くのを sessiond に要求してよい（sessiond が開いて fd を渡す形。chown の追い越しの 100 ms の再試行を無くす）。sessiond 経由で起動していない時は、hotplug の thread が入力の device を自分で open する。→ 2-03 の本来の形として後の Phase に。
+- 2026-11-14 ユーザーから次の趣旨の決定を受けた（入力の device の hotplug と seat）: compositor は device 全般の hotplug を見張る thread を 1 本持つ（監視の対象は入力の device だけではないので、この thread は残す）。sessiond 経由で compositor が動いている時は、compositor の hotplug の thread が /dev/system を見張り、入力の device の追加を見たら sessiond に開く事を要求する（sessiond が開いて fd を渡す形。chown の追い越しの 100 ms の再試行を無くす）。sessiond 経由で起動していない時は、hotplug の thread が入力の device を自分で open する。（同日のユーザーの訂正を反映: /dev/system を見張るのは sessiond 経由の時も compositor）→ 2-03 の本来の形として後の Phase に。
 - 2026-11-14: 10.0.10.25 は記録（plan/tools/hw5330/README.md、plan/ws029/i915-design.md）では Dell Latitude 5330 の以前の IP（ssh の alias `solaris10-man`、hostname chaos、Debian 13）で、今の 10.0.30.3 と同じ機械。WS014 の Venus の renderer はこの 5330 の Linux で build された物。Q1 は別の server と取り違えていた（ユーザーに訂正を伝えた）。
 
 ## Q1 の判断
