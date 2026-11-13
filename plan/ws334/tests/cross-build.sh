@@ -1,6 +1,6 @@
 #!/bin/sh
-# The Windows cross build, for x86_64 and arm64, through both entries (make browser-win32 WIN32_ARCH=<arch>
-# from the top Makefile, then apps/browser-win32/Makefile alone on the same output):
+# The Windows cross build, for x86_64 (the CI's; aarch64 when asked, below), through both entries (make browser-win32
+# WIN32_ARCH=<arch> from the top Makefile, then apps/browser-win32/Makefile alone on the same output):
 #  1. the files written for the Windows build (the operating-system layers) compile with warning 0;
 #  2. the warnings of libtruetype and the compat libraries (compiled without -Werror) are counted;
 #  3. what those libraries leave undefined (nm -u less what they define) is in allowed-imports.txt, and
@@ -24,9 +24,12 @@
 #     test-program with every static library imports only Windows' own DLLs and the UCRT's (no DLL of
 #     this tree, no libwinpthread-1.dll; vulkan-1.dll only as a delayed import); on x86_64 under Wine
 #     it prints 16 random bytes and runs a script that reads the clock (arm64: linked only).
-#   sh plan/ws334/tests/cross-build.sh
-# The top Makefile reads a configuration before any target; the Windows build uses none of it, so the script gives
-# it CONFIGMK (default config/config.x86_64.mk, a checkout needs no config.mk of its own).
+#   sh plan/ws334/tests/cross-build.sh                               x86_64
+#   WIN32_ARCH=aarch64 sh plan/ws334/tests/cross-build.sh            arm64 only
+#   WIN32_ARCH="x86_64 aarch64" sh plan/ws334/tests/cross-build.sh   both
+# The top Makefile reads a configuration before any target (without one it asks for PLATFORM on the terminal); the
+# Windows build uses none of it, so a checkout without config.mk is given CONFIGMK (default
+# config/config.x86_64.mk), and one with config.mk uses its own.
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
 # WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-wine).  The fetched tarballs are kept in
 # build/tmp/ws334-win32-sources between runs.
@@ -38,7 +41,10 @@ cd "$(dirname -- "$0")/../../.."
 out=build/tmp/ws334-cross
 fresh_out "$out"
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
-CONFIGMK=${CONFIGMK:-config/config.x86_64.mk}
+configmk=
+if [ -n "${CONFIGMK:-}" ] || [ ! -f config.mk ]; then
+	configmk=CONFIGMK=${CONFIGMK:-config/config.x86_64.mk}
+fi
 WINEPREFIX=${WINEPREFIX:-$(pwd)/build/tmp/ws334-wine}
 export WINEPREFIX
 sources=build/tmp/ws334-win32-sources
@@ -46,16 +52,17 @@ mkdir -p "$sources"
 allowed=plan/ws334/tests/allowed-imports.txt
 status=0
 
-for name in win64 winarm64; do
-	case "$name" in
-	win64) arch=x86_64 ;;
-	winarm64) arch=aarch64 ;;
+for arch in ${WIN32_ARCH:-x86_64}; do
+	case "$arch" in
+	x86_64) name=win64 ;;
+	aarch64) name=winarm64 ;;
+	*) echo "FAILED WIN32_ARCH: $arch is not x86_64 or aarch64"; status=1; continue ;;
 	esac
 	build=$out/browser-$name
 	log=$out/make-$name.log
 
 	# The build, from the top Makefile and then from its own.
-	if ! timeout 900 make --no-print-directory CONFIGMK="$CONFIGMK" browser-win32 WIN32_ARCH=$arch \
+	if ! timeout 900 make --no-print-directory $configmk browser-win32 WIN32_ARCH=$arch \
 	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" > "$log" 2>&1; then
 		echo "FAILED make browser-win32 WIN32_ARCH=$arch (log $log)"
 		tail -10 "$log"
