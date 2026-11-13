@@ -2658,7 +2658,6 @@ int kwl_printers_available(void);
 int kwl_printers_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
 int kwl_printers_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 void kwl_printers_tick(struct kwl_server *server);
-void kwl_printers_resumed(void);
 
 /* The system extension's displays and the panel's light (displays-shell.c, ws113-p005). */
 int kwl_displays_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);

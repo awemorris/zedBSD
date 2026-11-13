@@ -1344,8 +1344,8 @@ uint64_t kl_backend_print_due(const struct kl_backend_print *print);
  * calls kl_backend_print_write on its thread when
  * kl_backend_print_write_wanted says changes wait (the update answers them
  * once made), and checks the file for another session's change when it
- * has a reason to (a new reader of the printers, the session back in
- * front): kl_backend_print_check_begin and _end on its own thread,
+ * has a reason to (a new reader of the printers):
+ * kl_backend_print_check_begin and _end on its own thread,
  * kl_backend_print_check_run between them on the other.  The close makes
  * the changes still waiting.
  */

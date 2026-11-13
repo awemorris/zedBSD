@@ -254,7 +254,7 @@ idle_no_printers() {
 }
 
 # The compositor, in the background, its log in a guest file; no desktop program.
-serial "rm -rf $dir; mkdir -p $dir/home; XDG_RUNTIME_DIR=$dir HOME=$dir/home /bin/wayland --testing --glass --log-frames --width=1280 --height=800 --timeout=3000 --desktop-client=none > $log 2>&1 < /dev/null &" \
+serial "rm -rf $dir; mkdir -p $dir/home/.config/keiland; chmod 700 $dir; XDG_RUNTIME_DIR=$dir HOME=$dir/home /bin/wayland --testing --glass --log-frames --width=1280 --height=800 --timeout=3000 --desktop-client=none > $log 2>&1 < /dev/null &" \
     > "$out/compositor-start.txt" 2>&1 || true
 
 # The start: window mode, the timer thread, the capture listening, the printers prepared with the daemon's program.
@@ -298,7 +298,7 @@ fi
 changed=$(settings_count 'PRINTERS changed')
 serial "echo '%PDF-1.4' > $dir/doc.pdf; echo '%%EOF' >> $dir/doc.pdf" > /dev/null 2>&1 || true
 serial "WAYLAND_DISPLAY=/tmp/wayland-0 XDG_RUNTIME_DIR=$dir HOME=$dir/home printtest --timeout-s=60 print --printer=$printer $dir/doc.pdf p019 > $dir/print.txt 2>&1; echo status=\$? >> $dir/print.txt" > /dev/null 2>&1 || true
-wait_in 'status=' 1 90 "$dir/print.txt"
+wait_in 'status=' 1 90 "$dir/print.txt" || true
 serial "cat $dir/print.txt" > "$out/print.txt" 2>&1 || true
 done_lines=$(count "KWL PRINTERS job=[0-9]* printer=$printer state=4")
 if grep -q 'status=0' "$out/print.txt" && [ "$done_lines" -ge 1 ] && grep -q 'job queue=lp' "$lpd_log" &&
@@ -337,7 +337,7 @@ sleep 10
 quiet=$(settings_count 'PRINTERS changed')
 # A new printers object (a client about to show the printers) has the file read; Settings hears the change.
 serial "WAYLAND_DISPLAY=/tmp/wayland-0 XDG_RUNTIME_DIR=$dir HOME=$dir/home printtest list > $dir/list1.txt 2>&1" > /dev/null 2>&1 || true
-wait_in 'PRINTERS changed' $((changed + 1)) 10 "$dir/settings.log"
+wait_in 'PRINTERS changed' $((changed + 1)) 10 "$dir/settings.log" || true
 heard=$(settings_count 'PRINTERS changed')
 serial "WAYLAND_DISPLAY=/tmp/wayland-0 XDG_RUNTIME_DIR=$dir HOME=$dir/home printtest list > $dir/list2.txt 2>&1" > /dev/null 2>&1 || true
 serial "cat $dir/list2.txt" > "$out/list2.txt" 2>&1 || true

@@ -26,12 +26,12 @@
  *
  * The settings file is written, and checked for another session's change,
  * on the compositor's file I/O thread (io.c), or in the event loop when
- * that thread does not run.  Nothing is looked at on the clock: the file
- * is checked when a printers object is made (a client is about to show
- * the printers) and when the session comes back in front (another session
- * of the user may have changed it meanwhile); the daemon's lines come on
- * its socket, which the loop waits on; and a daemon shut for writing is
- * given up by a timer at the end of its time.
+ * that thread does not run.  Nothing is followed on the clock: the file is
+ * checked once when a printers object is made (a client is about to show
+ * the printers, as they are then; another session's later change is seen
+ * by the next object or with this compositor's next change); the daemon's
+ * lines come on its socket, which the loop waits on; and a daemon shut for
+ * writing is given up by a timer at the end of its time.
  */
 
 #include "kwl.h"
@@ -255,21 +255,6 @@ kwl_printers_request(
 	else
 		error = EPROTO;
 	return error;
-}
-
-/*
- * Asks for a check of the settings file when the session comes back in
- * front: another session of the user may have changed it meanwhile.
- */
-void
-kwl_printers_resumed(void)
-{
-	/* Nothing open, nothing to check. */
-	if (printers_state.backend == NULL)
-		return;
-
-	/* The next tick gives the check. */
-	printers_state.check_wanted = 1;
 }
 
 /*
