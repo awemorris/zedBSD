@@ -8,8 +8,9 @@
 #   local    the host's `openssl s_server` with a test CA made here (a server certificate for 10.0.2.2), the CA
 #            given with --ca-file (written into the guest over the serial line): the page is drawn;
 #   untrusted the same page without --ca-file: the browser says the certificate did not verify;
-#   site     https://example.com/ against the system's roots (ca-certificates' /etc/ssl/cert.pem, which
-#            libssl-compat reads through its default paths): the page is drawn (needs the host's way out).
+#   site     a public site (SITE=<url>, default https://example.com/) against the system's roots
+#            (ca-certificates' /etc/ssl/cert.pem, which libssl-compat reads through its default paths): the page is
+#            drawn (needs the host's way out to the site).  The image must hold /etc/ssl/cert.pem.
 # Each picture comes back over the serial line in base64, is checked against the guest's cksum and is written as a
 # PNG; the screen of the guest (QMP screendump) is kept as a PNG too.  The guest's libbrowser.so must name
 # libssl-compat.so and no OpenSSL library (the image also has the OpenSSL package for its other programs).
@@ -30,6 +31,7 @@ out=build/tmp/ws335-browser-guest
 fresh_out "$out"
 python=/usr/bin/python3
 port=${PORT:-18463}
+site=${SITE:-https://example.com/}
 status=0
 fail() {
 	echo "run-browser-guest: FAIL ($1)"
@@ -108,7 +110,12 @@ echo "run-browser-guest: ue0 $(grep -o 'inet 10\.0\.2\.[0-9]*' "$out/ifconfig.tx
 $serial run 'uname -a; ls -l /lib/libssl-compat.so /lib/libcrypto-compat.so /lib/libbrowser.so' \
     > "$out/files.txt" 2>&1 || { cat "$out/files.txt"; fail "the files in the guest"; }
 cat "$out/files.txt"
-$serial run 'ls -l /etc/ssl/cert.pem' > "$out/cert-pem.txt" 2>&1 || echo "run-browser-guest: the image has no /etc/ssl/cert.pem (the site case cannot verify)"
+if $serial run 'ls -l /etc/ssl/cert.pem' > "$out/cert-pem.txt" 2>&1; then
+	echo "run-browser-guest: $(tr -d '\r' < "$out/cert-pem.txt" | grep cert.pem)"
+else
+	echo "run-browser-guest: the image has no /etc/ssl/cert.pem"
+	status=1
+fi
 $serial run "strings /lib/libbrowser.so | grep '^lib.*\.so'" > "$out/strings.txt" 2>&1
 tr -d '\r' < "$out/strings.txt" | grep -x 'lib\(ssl\|crypto\)\(-compat\)\{0,1\}\.so\(\.3\)\{0,1\}' > "$out/names.txt"
 echo "run-browser-guest: libbrowser.so opens: $(tr '\n' ' ' < "$out/names.txt")"
@@ -137,12 +144,16 @@ draw() {
 	cat "$out/$name.clean.txt"
 }
 
-# Brings a picture back and writes it as a PNG; fetch <name>.
+# Brings a picture back and writes it as a PNG; fetch <name>.  The console is mirrored to the same serial line, so
+# a message of the system (a daemon's line) can fall into the base64 text; the copy is then taken again, up to three
+# times, until it matches the guest's cksum.
 fetch() {
 	name=$1
 	$serial run "cksum /root/$name.ppm" > "$out/$name.cksum.txt" 2>&1
-	$serial run "base64 /root/$name.ppm" > "$out/$name.b64" 2>&1
-	if ! "$python" -I - "$out/$name.b64" "$out/$name.ppm" "$out/$name.png" <<'EOF'
+	attempt=1
+	while [ $attempt -le 3 ]; do
+		$serial run "base64 /root/$name.ppm" > "$out/$name.b64" 2>&1
+		if ! "$python" -I - "$out/$name.b64" "$out/$name.ppm" "$out/$name.png" <<'EOF'
 import base64, sys
 from PIL import Image
 text = open(sys.argv[1], encoding="ascii", errors="replace").read()
@@ -151,17 +162,17 @@ data = base64.b64decode("".join(line for line in lines if line and not line.star
 open(sys.argv[2], "wb").write(data)
 Image.open(sys.argv[2]).save(sys.argv[3])
 EOF
-	then
-		echo "run-browser-guest: $name: the picture did not come back"
-		status=1
-		return
-	fi
-	if [ "$(tr -d '\r' < "$out/$name.cksum.txt" | awk '{print $1, $2}')" != "$(cksum < "$out/$name.ppm" | awk '{print $1, $2}')" ]; then
-		echo "run-browser-guest: $name: the picture differs from the guest's"
-		status=1
-		return
-	fi
-	echo "run-browser-guest: $name: $out/$name.png"
+		then
+			echo "run-browser-guest: $name: the picture did not come back (copy $attempt)"
+		elif [ "$(tr -d '\r' < "$out/$name.cksum.txt" | awk '{print $1, $2}')" = "$(cksum < "$out/$name.ppm" | awk '{print $1, $2}')" ]; then
+			echo "run-browser-guest: $name: $out/$name.png (copy $attempt)"
+			return
+		else
+			echo "run-browser-guest: $name: the picture differs from the guest's (copy $attempt)"
+		fi
+		attempt=$((attempt + 1))
+	done
+	status=1
 }
 
 # 7. local: the test CA given, the page is drawn.
@@ -180,12 +191,13 @@ if ! grep -q 'certificate verify failed' "$out/untrusted.clean.txt"; then
 	status=1
 fi
 
-# 9. site: a public site against the system's roots (reported, not required: it needs the host's way out).
-draw site "https://example.com/"
+# 9. site: a public site against the system's roots alone (no CA given), the page is drawn.
+draw site "$site"
 if grep -qx 'exit=0' "$out/site.clean.txt"; then
 	fetch site
 else
-	echo "run-browser-guest: site: not drawn (see $out/site.clean.txt)"
+	echo "run-browser-guest: site: the browser did not draw $site"
+	status=1
 fi
 
 # 10. The guest's screen.
