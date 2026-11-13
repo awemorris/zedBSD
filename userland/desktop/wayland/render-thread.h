@@ -249,6 +249,26 @@ struct kwl_render_status {
 };
 
 /*
+ * What the render thread did, counted by the thread alone and read once
+ * it has ended (the line the compositor writes when it stops it): the jobs
+ * and the tasks told complete, the waits for a job's and for a task's
+ * fence (one each for those submitted: no fence is looked at again and
+ * again), the acquires of the output's image that waited until one was
+ * free and those that did not wait (taken ahead included) and found none,
+ * and the times the thread slept for the main thread's next change.
+ */
+struct kwl_render_counts {
+	uint64_t jobs;
+	uint64_t tasks;
+	uint64_t fence_waits;
+	uint64_t task_waits;
+	uint64_t acquires_waiting;
+	uint64_t acquires_now;
+	uint64_t acquires_missed;
+	uint64_t sleeps;
+};
+
+/*
  * The Vulkan work the thread does through its owner: acquire the output's
  * next image (timeout_ns is 0, not waiting, or UINT64_MAX, until one is
  * free; it gives how long it took in cycles and when it ended, for the
@@ -291,7 +311,8 @@ struct kwl_render_ops {
  * that a completion is never lost), the completions of the jobs in flight,
  * oldest first (flight_count of them; busy says any is, or a job runs),
  * the tasks submitted and not seen complete, oldest first, the serial of
- * the last job or task submitted, and the main thread's wake pipe.
+ * the last job or task submitted, what it did (counts), and the main
+ * thread's wake pipe.
  */
 struct kwl_render_thread {
 	pthread_mutex_t lock;
@@ -328,6 +349,7 @@ struct kwl_render_thread {
 	struct kwl_render_message *task_flights;
 	struct kwl_render_message *task_flights_tail;
 	uint64_t submitted;
+	struct kwl_render_counts counts;
 	uint64_t seen_sequence;
 	int wake_main;
 	pthread_t thread;

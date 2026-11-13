@@ -81,6 +81,7 @@ static int compose_region_since(struct kwl_server *server, uint64_t frame, uint6
 static void compose_walk_timed(struct kwl_server *server, uint64_t walk, uint64_t replay, unsigned quiet);
 static void compose_want(struct kwl_server *server, enum kwl_render_kind kind);
 static void compose_stalled(struct kwl_server *server);
+static void compose_render_counts(const struct kwl_render_thread *render);
 static void compose_message(struct kwl_server *server, const struct kwl_render_message *message);
 static void compose_completed(struct kwl_server *server, const struct kwl_render_message *message);
 static void compose_frame_presented(struct kwl_server *server, const struct kwl_render_outcome *outcome, uint64_t number);
@@ -1073,6 +1074,7 @@ kwl_compose_close(
 	if (compose->render_started) {
 		kwl_render_stop(&compose->render);
 		kwl_compose_poll(server);
+		compose_render_counts(&compose->render);
 		kwl_render_destroy(&compose->render);
 		compose->render_started = 0U;
 	}
@@ -4916,6 +4918,29 @@ compose_frame_presented(
 		kwl_fatal("KWL FAILED site=compose_draw errno=%d operation=present result=%d", EIO, (int)result);
 		server->failed = 1;
 	}
+}
+
+/*
+ * Tells what the render thread did, once it has ended (KWL RENDER
+ * stopped): the jobs and tasks completed, its waits for their fences, its
+ * acquires of the output's image, and its sleeps for the main thread.
+ */
+static void
+compose_render_counts(
+	const struct kwl_render_thread *render)
+{
+	/* One line, read after the thread's end (its counts are its own until then). */
+	printf(
+		"KWL RENDER stopped jobs=%llu tasks=%llu fence_waits=%llu task_waits=%llu"
+		" acquires_waiting=%llu acquires_now=%llu acquires_missed=%llu sleeps=%llu\n",
+		(unsigned long long)render->counts.jobs,
+		(unsigned long long)render->counts.tasks,
+		(unsigned long long)render->counts.fence_waits,
+		(unsigned long long)render->counts.task_waits,
+		(unsigned long long)render->counts.acquires_waiting,
+		(unsigned long long)render->counts.acquires_now,
+		(unsigned long long)render->counts.acquires_missed,
+		(unsigned long long)render->counts.sleeps);
 }
 
 /*

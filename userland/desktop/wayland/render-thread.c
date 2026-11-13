@@ -642,11 +642,13 @@ render_main(
 		/*
 		 * Blocked: the next change the main thread makes (every change
 		 * signals; a job or a task in flight is never blocked, its fence
-		 * is waited for in the steps).  An image taken ahead that was not
-		 * free is taken with the next frame's want instead.
+		 * is waited for in the steps), counted as a sleep.  An image taken
+		 * ahead that was not free is taken with the next frame's want
+		 * instead.
 		 */
 		pthread_mutex_lock(&render->lock);
 
+		render->counts.sleeps++;
 		while (render->sequence == render->seen_sequence)
 			(void)pthread_cond_wait(&render->changed, &render->lock);
 
@@ -711,6 +713,11 @@ render_idle(
 	acquire_cycles = 0U;
 	if (want.kind == KWL_RENDER_FRAME && !held) {
 		result = render->ops.acquire_output(render->context, timeout_ns, &image, &acquire_cycles, &acquired_us);
+		if (timeout_ns == UINT64_MAX) {
+			render->counts.acquires_waiting++;
+		} else {
+			render->counts.acquires_now++;
+		}
 
 		/*
 		 * None free: the fence in flight is waited for, and the acquire is
@@ -719,6 +726,7 @@ render_idle(
 		 * change rather than try again at once.
 		 */
 		if (result == VK_TIMEOUT || result == VK_NOT_READY) {
+			render->counts.acquires_missed++;
 			free(message);
 			return KWL_RENDER_STEP_BLOCKED;
 		}
@@ -893,6 +901,7 @@ render_answer(
 	if (completion->outcome.result != VK_SUCCESS) {
 		while (render->flight_count > 0U)
 			render_reap(render);
+		render->counts.jobs++;
 		pthread_mutex_lock(&render->lock);
 
 		render->busy = 0U;
@@ -959,9 +968,11 @@ render_reap(
 	unsigned index;
 	VkResult result;
 
-	/* The oldest's fence. */
+	/* The oldest's fence, waited for once (counted with the job). */
 	completion = render->flights[0];
 	result = render->ops.wait(render->context, completion->job.slot, UINT64_MAX);
+	render->counts.fence_waits++;
+	render->counts.jobs++;
 
 	/* Done, or its wait failed (the compositor's failure): the others move up. */
 	if (result != VK_SUCCESS)
@@ -1029,12 +1040,14 @@ render_tasks_reap(
 	struct kwl_render_message *task;
 	VkResult result;
 
-	/* A submitted task's fence. */
+	/* A submitted task's fence, waited for once (counted with the task). */
 	task = render->task_flights;
 	if (task->result == VK_SUCCESS) {
 		result = render->ops.wait_task(render->context, task->task_fence, UINT64_MAX);
 		task->result = result;
+		render->counts.task_waits++;
 	}
+	render->counts.tasks++;
 
 	/* Out of the flights. */
 	render->task_flights = task->next;
@@ -1138,8 +1151,11 @@ render_ahead(
 	if (held || !ahead)
 		return KWL_RENDER_STEP_BLOCKED;
 
-	/* The next image if one is free now. */
+	/* The next image if one is free now (counted with the acquires that do not wait). */
 	result = render->ops.acquire_output(render->context, 0U, &image, &cycles, &at_us);
+	render->counts.acquires_now++;
+	if (result == VK_TIMEOUT || result == VK_NOT_READY)
+		render->counts.acquires_missed++;
 
 	/* Held, or not taken. */
 	pthread_mutex_lock(&render->lock);
