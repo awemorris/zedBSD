@@ -6,101 +6,109 @@
  */
 
 /*
- * The Web browser engine as a component: libbrowser (ws074-p057,
- * plan/ws074/design.md §19).
+ * The Web browser engine as a component: libbrowser.
  *
  * The engine holds HTML, CSS, the layout, JavaScript, the DOM, the
- * network, the images and the drawing.  A program uses it through a view:
- * one browsing context (a tab's content), an opaque handle.  The program
- * owns the window (if it has one), the Vulkan device, the main loop and
- * the user interface around the content; the engine knows nothing of
- * Wayland or of windows.  /bin/browser is one such program (its window and
- * titlebar); a System Settings window or a widget can be another.
+ * network, the images and the drawing.  A program uses it through a
+ * view: one browsing context (a tab's content), an opaque handle.
+ * The program owns the window (if it has one), the Vulkan device, the
+ * main loop and the user interface around the content; the engine
+ * knows nothing of Wayland or of windows.  /bin/browser is one such
+ * program (its window and titlebar); a System Settings window or a
+ * widget can be another.
  *
- * A view owns the page shown, the page being fetched, the session history,
- * the scroll, the page's clock and the loader of the network.  The program
- * makes it, gives it a size, loads a location, calls browser_view_process
- * when the view wakes it or its timeout passes, and hears of what happened
- * through callbacks.
+ * A view owns the page shown, the page being fetched, the session
+ * history, the scroll, the page's clock and the loader of the
+ * network.  The program makes it, gives it a size, loads a location,
+ * calls browser_view_process when the view wakes it or its timeout
+ * passes, and hears of what happened through callbacks.
  *
- * The network runs on the view's own threads, in the library (version 3):
- * the program never sees a socket or a descriptor.  When the network (or
- * a media engine) has news, the library calls the program's wake function
- * from one of its threads, once until the program has called
- * browser_view_process; the program only arranges for that call to come
- * soon from its own thread (a Keiland program posts an event to its
- * application).
+ * The network runs on the view's own threads, in the library (version
+ * 3): the program never sees a socket or a descriptor.  When the
+ * network (or a media engine) has news, the library calls the
+ * program's wake function from one of its threads, once until the
+ * program has called browser_view_process; the program only arranges
+ * for that call to come soon from its own thread (a Keiland program
+ * posts an event to its application).
  *
- * The page is laid out when something needs its boxes (a drawing, a dump
- * of the layout, the scroll, a click), not when it changes, so a view that
- * is only asked for its DOM never opens its fonts.  A program without a
- * window settles a view (browser_view_settle), then draws it with the CPU
- * (browser_view_draw_pixels) or dumps it (browser_view_dump).
+ * The page is laid out when something needs its boxes (a drawing, a
+ * dump of the layout, the scroll, a click), not when it changes, so a
+ * view that is only asked for its DOM never opens its fonts.  A
+ * program without a window settles a view (browser_view_settle), then
+ * draws it with the CPU (browser_view_draw_pixels) or dumps it
+ * (browser_view_dump).
  *
  * With the GPU, the program lends the view its Vulkan device
- * (browser_view_set_gpu) and names an image of its own to draw into (a
- * browser_target: a swapchain image of a window, an offscreen image).  The
- * view either submits the drawing itself and waits for it
- * (browser_view_draw), or records it into the program's command buffer
- * (browser_view_record), which the program submits.  The view makes and
- * keeps a framebuffer for each image view it is given; the program tells
- * it to forget them (browser_view_release_targets) before it destroys the
- * images.  A program without a window can make an offscreen image of the
- * engine's (browser_offscreen) and read the drawing back.
+ * (browser_view_set_gpu) and names an image of its own to draw into
+ * (a browser_target: a swapchain image of a window, an offscreen
+ * image).  The view either submits the drawing itself and waits for
+ * it (browser_view_draw), or records it into the program's command
+ * buffer (browser_view_record), which the program submits.  The view
+ * makes and keeps a framebuffer for each image view it is given; the
+ * program tells it to forget them (browser_view_release_targets)
+ * before it destroys the images.  A program without a window can make
+ * an offscreen image of the engine's (browser_offscreen) and read the
+ * drawing back.
  *
- * Input: the program sends the pointer, the wheel, the keys and its own
- * focus in the view's pixels and the DOM's names of the keys
- * (browser_view_pointer_*, _wheel, _key, _focus); it turns its device's
- * codes into those names and keeps only its own shortcuts.  The page's
- * scripts get the events first; unless they cancel them, the view does
- * the default actions: the wheel and the keys scroll (the arrows, Page Up
- * and Down, Space, Home, End), a click or Enter on a link follows it, Tab
- * moves the focus with its ring and scrolls it into view, Alt+Left and
- * Alt+Right (and the back and forward keys and buttons) step through the
- * history, F5 and Ctrl+R reload, and Escape stops a load.
+ * Input: the program sends the pointer, the wheel, the keys and its
+ * own focus in the view's pixels and the DOM's names of the keys
+ * (browser_view_pointer_*, _wheel, _key, _focus); it turns its
+ * device's codes into those names and keeps only its own shortcuts.
+ * The page's scripts get the events first; unless they cancel them,
+ * the view does the default actions: the wheel and the keys scroll
+ * (the arrows, Page Up and Down, Space, Home, End), a click or Enter
+ * on a link follows it, Tab moves the focus with its ring and scrolls
+ * it into view, Alt+Left and Alt+Right (and the back and forward keys
+ * and buttons) step through the history, F5 and Ctrl+R reload, and
+ * Escape stops a load.
  *
- * A view is used from the thread that made it.  Callbacks run synchronously
- * inside the call that caused them; the wake function alone is called from
- * the library's threads.  A callback may inspect browser_view_url,
- * browser_view_title, browser_view_can_go, browser_view_scroll_y,
- * browser_view_gpu_failure and browser_view_timeout.
- * It may operate on another view.  Changing, drawing, laying out, processing
- * or destroying the same view must wait until the outer call has returned;
- * browser_view_document_height and browser_view_scroll_range may lay it out.
- * Callback strings and query strings are borrowed: copy them before keeping
- * them beyond the callback or a later state-changing call.  Fonts' paths and
- * stack_base outlive the view; callback/options structures are copied.
+ * A view is used from the thread that made it.  Callbacks run
+ * synchronously inside the call that caused them; the wake function
+ * alone is called from the library's threads.  A callback may inspect
+ * browser_view_url, browser_view_title, browser_view_can_go,
+ * browser_view_scroll_y, browser_view_gpu_failure and
+ * browser_view_timeout.  It may operate on another view.  Changing,
+ * drawing, laying out, processing or destroying the same view must
+ * wait until the outer call has returned;
+ * browser_view_document_height and browser_view_scroll_range may lay
+ * it out.  Callback strings and query strings are borrowed: copy them
+ * before keeping them beyond the callback or a later state-changing
+ * call.  Fonts' paths and stack_base outlive the view;
+ * callback/options structures are copied.
  *
- * Dimensions must be nonzero and fit INT_MAX.  Creation refuses missing
- * output/options or an unknown fetch policy with EINVAL and leaves a valid
- * output slot NULL.  Pixel drawing/readback require non-NULL storage, a stride
- * large enough for a full row and a representable complete row span (EINVAL
- * otherwise); the caller owns enough bytes for that span.  GPU targets require
- * non-NULL image/image-view handles, a defined format and valid dimensions.
- * Complete recorded GPU work before changing pages, releasing targets or
- * reusing a view's renderer.  Destroy/set_gpu wait for the old device's work.
+ * Dimensions must be nonzero and fit INT_MAX.  Creation refuses
+ * missing output/options or an unknown fetch policy with EINVAL and
+ * leaves a valid output slot NULL.  Pixel drawing/readback require
+ * non-NULL storage, a stride large enough for a full row and a
+ * representable complete row span (EINVAL otherwise); the caller owns
+ * enough bytes for that span.  GPU targets require non-NULL
+ * image/image-view handles, a defined format and valid dimensions.
+ * Complete recorded GPU work before changing pages, releasing targets
+ * or reusing a view's renderer.  Destroy/set_gpu wait for the old
+ * device's work.
  *
  * Every call that can fail
  * reports 0 or an errno value.
  *
- * Instances (version 4): a view belongs to an instance of the engine
+ * Instances: a view belongs to an instance of the engine
  * (browser_instance), which holds what its views share and what it
- * remembers: the cookies, the HTTP cache and Web Storage.  The program
- * makes an instance with a storage backend (<browser/storage.h>; the
- * engine's files backend, or its own) to keep them across runs, or
- * without one to keep nothing; a view made without an instance uses the
- * process's default instance, which keeps nothing beyond the process.  An
- * instance and its views are used from the thread that made the instance
- * (the default instance's views from one thread at a time).  Before any of
- * it the program gives the engine its threads (browser_threads_set).
- * Two instances share nothing.  Memory the engine hands to the program
- * (a dump's text) is freed with browser_free, so a program built with
- * another C runtime than the engine's frees it in the engine's.
+ * remembers: the cookies, the HTTP cache and Web Storage.  The
+ * program makes an instance with a storage backend
+ * (<browser/storage.h>; the engine's files backend, or its own) to
+ * keep them across runs, or without one to keep nothing; a view made
+ * without an instance uses the process's default instance, which
+ * keeps nothing beyond the process.  An instance and its views are
+ * used from the thread that made the instance (the default instance's
+ * views from one thread at a time).  Before any of it the program
+ * gives the engine its threads (browser_threads_set).  Two instances
+ * share nothing.  Memory the engine hands to the program (a dump's
+ * text) is freed with browser_free, so a program built with another C
+ * runtime than the engine's frees it in the engine's.
  *
  * A program that uses the engine keeps the LC_NUMERIC category of its
- * locale "C" (as a program starts): the engine reads and writes numbers
- * (CSS, JavaScript, the dumps) with the C library's functions, which
- * follow it.
+ * locale "C" (as a program starts): the engine reads and writes
+ * numbers (CSS, JavaScript, the dumps) with the C library's
+ * functions, which follow it.
  */
 
 #ifndef _BROWSER_H_
@@ -560,34 +568,35 @@ void browser_view_process(struct browser_view *view);
 double browser_view_scroll_y(const struct browser_view *view);
 
 /*
- * The scroll placed by the program (version 2, ws081-p006: a touch
- * screen's scroller that glides after a flick and stretches past an end).
- * browser_view_scroll_to places the scroll at a point of the document in
- * pixels, kept inside the document, with no wheel event to the page (the
- * page gets no scroll event yet, as for the wheel and the keys);
- * browser_view_scroll_range reports how far the page scrolls at most, the
- * document as it is laid out now less the view; browser_view_set_overscroll
- * draws the content shifted by a distance (positive down) without moving
- * the scroll, the gap showing the page's canvas color, at most the view's
- * height either way; the pointer's places do not follow the shift, and a
- * new page starts without it.  The page does not scroll sideways yet: x
- * and dx are not used and the sideways range is 0.  A change calls the
- * redraw callback.  The first two report ENOENT when no page is shown.
+ * The scroll placed by the program.  browser_view_scroll_to places
+ * the scroll at a point of the document in pixels, kept inside the
+ * document, with no wheel event to the page (the page gets no scroll
+ * event yet, as for the wheel and the keys);
+ * browser_view_scroll_range reports how far the page scrolls at most,
+ * the document as it is laid out now less the view;
+ * browser_view_set_overscroll draws the content shifted by a distance
+ * (positive down) without moving the scroll, the gap showing the
+ * page's canvas color, at most the view's height either way; the
+ * pointer's places do not follow the shift, and a new page starts
+ * without it.  The page does not scroll sideways yet: x and dx are
+ * not used and the sideways range is 0.  A change calls the redraw
+ * callback.  The first two report ENOENT when no page is shown.
  */
 int browser_view_scroll_to(struct browser_view *view, double x, double y);
 int browser_view_scroll_range(struct browser_view *view, double *largest_x, double *largest_y);
 int browser_view_set_overscroll(struct browser_view *view, double dx, double dy);
 
 /*
- * Input, in the view's pixels from its top left, with the modifiers held
- * (BROWSER_MOD_*).  The pointer moves, a button (BROWSER_BUTTON_*) is
- * pressed or let go (a press and a release at nearly the same place are a
- * click), the pointer leaves the view, and the wheel turns (distances in
- * pixels, positive is down and right).  A key is pressed (repeat when it
- * is held) or let go: key and code as the DOM names them ("a" and "KeyA",
- * "Enter", "ArrowDown", " " and "Space"), and the UTF-8 text it types
- * ("" when none).  The program gains or loses the focus.  Each reports 0,
- * or an errno value when the page's scripts or its layout failed.
+ * Input, in the view's pixels from its top left, with the modifiers
+ * held (BROWSER_MOD_*).  The pointer moves, a button
+ * (BROWSER_BUTTON_*) is pressed or let go (a press and a release at
+ * nearly the same place are a click), the pointer leaves the view,
+ * and the wheel turns (distances in pixels, positive is down and
+ * right).  A key is pressed (repeat when it is held) or let go: key
+ * and code as the DOM names them ("a" and "KeyA", "Enter",
+ * "ArrowDown", " " and "Space"), and the UTF-8 text it types ("" when
+ * none).  The program gains or loses the focus.  Each reports 0, or
+ * an errno value when the page's scripts or its layout failed.
  */
 int browser_view_pointer_move(struct browser_view *view, float x, float y, uint32_t modifiers);
 int browser_view_pointer_button(struct browser_view *view, float x, float y, int button, int pressed, uint32_t modifiers);
@@ -597,41 +606,44 @@ int browser_view_key(struct browser_view *view, const char *key, const char *cod
 int browser_view_focus(struct browser_view *view, int focused);
 
 /*
- * An input method (ws090-p025): whether the focused element takes its text
- * (a text field or a textarea; a password field takes keys only), with the
- * caret's rectangle in the view's pixels (x, y, width, height) for the
- * program's text input; the text it is composing, shown at the caret
- * underlined without changing the value (empty when it goes; begin and
- * end are its cursor's byte offsets, -1 when hidden); and the text it
- * commits, after delete_before and delete_after bytes of UTF-8 around the
- * caret are deleted, which fires input.  Each reports 0, or an errno value
- * when the page's scripts failed.
+ * An input method: whether the focused element takes its text (a text
+ * field or a textarea; a password field takes keys only), with the
+ * caret's rectangle in the view's pixels (x, y, width, height) for
+ * the program's text input; the text it is composing, shown at the
+ * caret underlined without changing the value (empty when it goes;
+ * begin and end are its cursor's byte offsets, -1 when hidden); and
+ * the text it commits, after delete_before and delete_after bytes of
+ * UTF-8 around the caret are deleted, which fires input.  Each
+ * reports 0, or an errno value when the page's scripts failed.
  */
 int browser_view_text_target(struct browser_view *view, float caret[4]);
 
 /*
- * A field by its purpose (ws177-p017): the focus moves, with its ring, to
- * the first control in the document's order that takes text (a text or
+ * A field by its purpose: the focus moves, with its ring, to the
+ * first control in the document's order that takes text (a text or
  * password field, a textarea), can be focused, is drawn, and whose
- * autocomplete attribute holds the token (ASCII, any case; for example
- * "one-time-code"), and the view scrolls it into view, as Tab would.  The
- * page's focus events fire.  Reports 0 when one has the focus, ENOENT
- * when there is none (the focus stays where it was), or an errno value
- * when the page's scripts or its layout failed.  It is a mutation of the
- * view, not to be called from within one of its callbacks.
+ * autocomplete attribute holds the token (ASCII, any case; for
+ * example "one-time-code"), and the view scrolls it into view, as Tab
+ * would.  The page's focus events fire.  Reports 0 when one has the
+ * focus, ENOENT when there is none (the focus stays where it was), or
+ * an errno value when the page's scripts or its layout failed.  It is
+ * a mutation of the view, not to be called from within one of its
+ * callbacks.
  */
 int browser_view_focus_field(struct browser_view *view, const char *autocomplete);
 
 /*
- * What an input method reads around the caret (ws177-p019): when the
- * focused element takes its text (as browser_view_text_target says), its
- * value as UTF-8 into text (a NUL-ended room of size bytes; a longer value
- * is cut to a part around the caret, at characters' starts), the caret's
- * byte offset in it, what the control is for (BROWSER_TEXT_PURPOSE_*: by
- * its inputmode, else its type) and its hints (BROWSER_TEXT_HINT_*).  The
- * numbers are text-input-v3's.  Returns 1 with them, 0 when the focus
- * takes no text (or there was no memory).
+ * What an input method reads around the caret: when the focused
+ * element takes its text (as browser_view_text_target says), its
+ * value as UTF-8 into text (a NUL-ended room of size bytes; a longer
+ * value is cut to a part around the caret, at characters' starts),
+ * the caret's byte offset in it, what the control is for
+ * (BROWSER_TEXT_PURPOSE_*: by its inputmode, else its type) and its
+ * hints (BROWSER_TEXT_HINT_*).  The numbers are text-input-v3's.
+ * Returns 1 with them, 0 when the focus takes no text (or there was
+ * no memory).
  */
+
 #define BROWSER_TEXT_PURPOSE_NORMAL	0
 #define BROWSER_TEXT_PURPOSE_DIGITS	2
 #define BROWSER_TEXT_PURPOSE_NUMBER	3
@@ -639,17 +651,18 @@ int browser_view_focus_field(struct browser_view *view, const char *autocomplete
 #define BROWSER_TEXT_PURPOSE_URL	5
 #define BROWSER_TEXT_PURPOSE_EMAIL	6
 #define BROWSER_TEXT_HINT_MULTILINE	0x200U
+
 int browser_view_text_context(struct browser_view *view, char *text, size_t size, size_t *cursor, int *purpose, unsigned *hints);
 int browser_view_compose(struct browser_view *view, const char *preedit, int begin, int end);
 int browser_view_commit_text(struct browser_view *view, const char *text, uint32_t delete_before, uint32_t delete_after);
 
 /*
- * The text input's session (ws177-p019): a number that changes when the
- * focus moves to another element, when another page is shown, and when
- * the page itself ended what an input method was composing (a click puts
- * it into the value, a script's value drops it).  The program starts its
- * input method's text input again when it changes, so that the input
- * method drops what it was composing too.  A pure query.
+ * The text input's session: a number that changes when the focus
+ * moves to another element, when another page is shown, and when the
+ * page itself ended what an input method was composing (a click puts
+ * it into the value, a script's value drops it).  The program starts
+ * its input method's text input again when it changes, so that the
+ * input method drops what it was composing too.  A pure query.
  */
 uint64_t browser_view_text_session(const struct browser_view *view);
 
@@ -666,21 +679,21 @@ int browser_view_draw_pixels(struct browser_view *view, uint32_t *pixels, unsign
 int browser_view_dump(struct browser_view *view, enum browser_dump kind, char **text, size_t *length);
 
 /*
- * The GPU side: the device the view draws with from now on (NULL to let
- * the old one go: the view releases what it made on it, and the program
- * may then destroy it), the framebuffers the view keeps for the program's
- * images forgotten (before the program destroys those images, once the
- * drawing into them has finished), and the page laid out now (so that a
- * frame begun cannot fail on the layout).
+ * The GPU side: the device the view draws with from now on (NULL to
+ * let the old one go: the view releases what it made on it, and the
+ * program may then destroy it), the framebuffers the view keeps for
+ * the program's images forgotten (before the program destroys those
+ * images, once the drawing into them has finished), and the page laid
+ * out now (so that a frame begun cannot fail on the layout).
  *
- * Drawing into a target, the view scrolled as it is: submitted by the view
- * after wait and signalling signal (VK_NULL_HANDLE for none), waited for;
- * or recorded, render pass and all, into a command buffer the program
- * began, which the program submits.  Before the view draws or records
- * again, the work it recorded must have finished (the program waits for
- * its fence).  Both report 0, ENOENT when no page is shown, ENODEV without
- * a GPU, a layout's error, or EIO when a Vulkan call failed
- * (browser_view_gpu_failure says which).
+ * Drawing into a target, the view scrolled as it is: submitted by the
+ * view after wait and signalling signal (VK_NULL_HANDLE for none),
+ * waited for; or recorded, render pass and all, into a command buffer
+ * the program began, which the program submits.  Before the view
+ * draws or records again, the work it recorded must have finished
+ * (the program waits for its fence).  Both report 0, ENOENT when no
+ * page is shown, ENODEV without a GPU, a layout's error, or EIO when
+ * a Vulkan call failed (browser_view_gpu_failure says which).
  */
 void browser_view_set_gpu(struct browser_view *view, const struct browser_gpu *gpu);
 void browser_view_release_targets(struct browser_view *view);
@@ -690,13 +703,13 @@ int browser_view_record(struct browser_view *view, const struct browser_target *
 void browser_view_gpu_failure(const struct browser_view *view, struct browser_gpu_failure *failure);
 
 /*
- * An image of the page shown (ws189-p003, a picture dragged out of the
- * browser): its pixels, premultiplied 0xAARRGGBB words, width by height
- * without padding, and the absolute URL of its source (empty when its
- * element has none).  browser_view_image_at copies the image at a place
- * of the view (0, ENOENT when none is there, or ENOMEM), and
- * browser_view_image_release frees what it gave.  The view's options and
- * BROWSER_API_VERSION are unchanged (a call added).
+ * An image of the page shown: its pixels, premultiplied 0xAARRGGBB
+ * words, width by height without padding, and the absolute URL of its
+ * source (empty when its element has none).  browser_view_image_at
+ * copies the image at a place of the view (0, ENOENT when none is
+ * there, or ENOMEM), and browser_view_image_release frees what it
+ * gave.  The view's options and BROWSER_API_VERSION are unchanged (a
+ * call added).
  */
 struct browser_image {
 	uint32_t *pixels;
@@ -709,12 +722,12 @@ int browser_view_image_at(struct browser_view *view, float x, float y, struct br
 void browser_view_image_release(struct browser_image *image);
 
 /*
- * An offscreen image of the engine's own, for a program without a window:
- * a device of its own with one image of a size, the GPU and the target to
- * give a view, and the image read back into 0xAARRGGBB pixels (rows stride
- * bytes apart) once a view has drawn into it.  The view lets the
- * offscreen's GPU go before the offscreen is destroyed.  A failure is EIO
- * with the Vulkan call in *failure.
+ * An offscreen image of the engine's own, for a program without a
+ * window: a device of its own with one image of a size, the GPU and
+ * the target to give a view, and the image read back into 0xAARRGGBB
+ * pixels (rows stride bytes apart) once a view has drawn into it.
+ * The view lets the offscreen's GPU go before the offscreen is
+ * destroyed.  A failure is EIO with the Vulkan call in *failure.
  */
 int browser_offscreen_create(unsigned width, unsigned height, struct browser_offscreen **offscreen, struct browser_gpu_failure *failure);
 void browser_offscreen_target(const struct browser_offscreen *offscreen, struct browser_gpu *gpu, struct browser_target *target);
@@ -726,13 +739,13 @@ int browser_add_ca_file(const char *path);
 
 /*
  * The script tools of the test suites (the /bin/browser modes --js,
- * --dump=ast and --dump=code): a JavaScript file run in a realm of its own
- * with print, or its syntax tree or its compiled code written to standard
- * output, as strict code or a module when the flags say so.  A syntax
- * error, what the engine does not support yet, or an uncaught exception
- * is written to standard error.  stack_base is the caller's outermost
- * frame, as for a view.  Returns the program's exit status: 0, 1 for a
- * script that failed, 2 for a misuse.
+ * --dump=ast and --dump=code): a JavaScript file run in a realm of
+ * its own with print, or its syntax tree or its compiled code written
+ * to standard output, as strict code or a module when the flags say
+ * so.  A syntax error, what the engine does not support yet, or an
+ * uncaught exception is written to standard error.  stack_base is the
+ * caller's outermost frame, as for a view.  Returns the program's
+ * exit status: 0, 1 for a script that failed, 2 for a misuse.
  */
 #define BROWSER_SCRIPT_STRICT		0x01U
 #define BROWSER_SCRIPT_MODULE		0x02U
