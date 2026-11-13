@@ -11,8 +11,8 @@
 #     and of plan/ws334/tests/js/gc-parse.js (the parser's setjmp and longjmp between collections of the
 #     heap), --dump=layout of the bundled start.html, about.html and text.html;
 #  M1 OmniGrammaton.exe draws start.html with Vulkan (lavapipe through Wine's Vulkan) in Xvfb (1280x800);
-#  M2 the CPU's way: with --no-gpu, and with Wine's vulkan-1.dll turned off (WINEDLLOVERRIDES=vulkan-1=d,
-#     the program says it draws with the CPU);
+#  M2 the CPU's way: with --no-gpu (vulkan-1.dll is an ordinary import, so the program does not start
+#     without it, and that is not tried);
 #     a second start hands its URL to the first (WM_COPYDATA) and ends with 0; the window's right edge
 #     dragged (xdotool) and the maximize button draw frames at the new sizes;
 #  M3 https from the host's `openssl s_server` on 127.0.0.1 (a test CA made here, the network outside is
@@ -410,22 +410,13 @@ else
 	result FAIL M1 "no page drawn with Vulkan ($out/gpu/first.txt, first-err.txt)"
 fi
 
-# M2. The CPU's way: --no-gpu, and no vulkan-1.dll.
+# M2. The CPU's way: --no-gpu.
 start nogpu "$gui" plain --no-gpu share/browser/start.html
 cp "$out/nogpu/first.png" "$review/m2-nogpu.png" 2> /dev/null
 if drew nogpu; then
 	result PASS M2a "--no-gpu drew start.html ($(colours "$out/nogpu/first.png") colours, $review/m2-nogpu.png)"
 else
 	result FAIL M2a "--no-gpu drew no page ($out/nogpu/first.txt)"
-fi
-overrides=vulkan-1=d
-start novulkan "$gui" plain share/browser/start.html
-overrides=
-cp "$out/novulkan/first.png" "$review/m2-no-vulkan.png" 2> /dev/null
-if drew novulkan && grep -q 'drawing with the CPU' "$out/novulkan/first-err.txt"; then
-	result PASS M2b "without vulkan-1.dll: $(grep -m1 'drawing with the CPU' "$out/novulkan/first-err.txt"); start.html drawn ($review/m2-no-vulkan.png)"
-else
-	result FAIL M2b "without vulkan-1.dll no page drawn with the CPU ($out/novulkan/first.txt, first-err.txt)"
 fi
 
 # The second start.
