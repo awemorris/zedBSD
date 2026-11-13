@@ -62,7 +62,12 @@ TOPLEVEL_BUILD := 1
 include mk/config.mk
 
 # Import the current developer configuration.
+MAKEFILES_BEFORE_CONFIG := $(MAKEFILE_LIST)
 include $(CONFIGMK)
+
+# The configuration file and every file it includes, which the packages'
+# stamps follow (mk/userland.mk).
+CONFIGMK_FILES := $(filter-out $(MAKEFILES_BEFORE_CONFIG),$(MAKEFILE_LIST))
 
 # The same configuration file as an absolute path, for the nested makes
 # (they run in other directories).

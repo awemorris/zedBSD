@@ -15,7 +15,7 @@ KEILAND_WALLPAPER_NAMES     := $(filter-out $(KEILAND_WALLPAPER_DEFAULT),$(KEILA
 KEILAND_WALLPAPER_FILES     := $(addprefix $(BUILD)/wallpapers/,$(addsuffix .png,$(KEILAND_WALLPAPER_GENERATED)))
 
 # The pictures as DESTINATION=SOURCE, and those the image takes: all
-# of them, less any a test's extra files name.
+# of them, less any the root's extra files (ROOTFS_EXTRA_FILES) name.
 KEILAND_WALLPAPER_DATA := \
 	/usr/share/keiland/wallpaper.png=$(BUILD)/wallpapers/$(KEILAND_WALLPAPER_DEFAULT).png \
 	/usr/share/keiland/wallpapers/Birch-Lake.png=$(WALLPAPERS_DIR)Birch-Lake.png \
@@ -25,7 +25,7 @@ KEILAND_WALLPAPER_DATA := \
 KEILAND_WALLPAPER_TAKEN := \
 	$(if $(filter y,$(KEILAND_WALLPAPERS)), \
 		$(foreach item,$(KEILAND_WALLPAPER_DATA),\
-			$(if $(findstring $(firstword $(subst =, ,$(item)))=,$(TEST_EXTRA_FILES) $(ZEDBSD_TEST_EXTRA_FILES)), \
+			$(if $(findstring $(firstword $(subst =, ,$(item)))=,$(ROOTFS_EXTRA_FILES)), \
 				,$(item) \
 			) \
 		) \

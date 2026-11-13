@@ -10,7 +10,8 @@
 PLATFORM_RPI5_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT         ?= $(abspath $(PLATFORM_RPI5_DIR)/../..)
 
-SYSROOT     := $(REPO_ROOT)/build/rpi5/sysroot
+# The sysroot is in the build directory, where the packages look for it.
+SYSROOT     := $(abspath $(BUILD))/sysroot
 SYSROOT_INC := $(SYSROOT)/usr/include
 SYSROOT_LIB := $(SYSROOT)/usr/lib
 

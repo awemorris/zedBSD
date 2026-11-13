@@ -10,7 +10,8 @@
 PLATFORM_X86_64_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT ?= $(abspath $(PLATFORM_X86_64_DIR)/../..)
 
-SYSROOT     := $(REPO_ROOT)/build/x86_64/sysroot
+# The sysroot is in the build directory, where the packages look for it.
+SYSROOT     := $(abspath $(BUILD))/sysroot
 SYSROOT_INC := $(SYSROOT)/usr/include
 SYSROOT_LIB := $(SYSROOT)/usr/lib
 

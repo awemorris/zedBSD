@@ -5,9 +5,11 @@
 # instead.  Keeping the answer in one place stops the number from being
 # written differently in each of them.
 #
-# It is 16, or the machine's count when that is smaller, unless the caller
-# says otherwise (2026-10-03: several builds run at once on the 64-thread
-# build machine, and 64 jobs each filled its disk's write-back):
+# It is the number the caller gave make with -j, so that "make -j4" keeps
+# every nested build tool to 4 jobs as well.  Without a number it is 16, or
+# the machine's count when that is smaller (2026-10-03: several builds run
+# at once on the 64-thread build machine, and 64 jobs each filled its disk's
+# write-back).  The caller may also name it:
 #
 #   make BUILD_JOBS=8 toolchain
 #
@@ -17,6 +19,15 @@
 
 ifndef BUILD_JOBS_MK
 BUILD_JOBS_MK := 1
+
+# The number given with -j, if any (make puts it in MAKEFLAGS before it
+# reads the makefiles, and passes it on to the nested makes).
+BUILD_JOBS_FROM_MAKE := $(lastword $(patsubst -j%,%,$(filter -j%,$(MAKEFLAGS))))
+
+# The caller's -j decides the jobs of the nested build tools when it has a number.
+ifneq ($(BUILD_JOBS_FROM_MAKE),)
+BUILD_JOBS ?= $(BUILD_JOBS_FROM_MAKE)
+endif
 
 BUILD_JOBS ?= $(shell n=$$(nproc 2>/dev/null || echo 4); if test "$$n" -gt 16; then n=16; fi; echo "$$n")
 BUILD_LINK_JOBS ?= $(shell \

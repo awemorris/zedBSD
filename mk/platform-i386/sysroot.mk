@@ -10,7 +10,8 @@
 PLATFORM_I386_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 REPO_ROOT ?= $(abspath $(PLATFORM_I386_DIR)/../..)
 
-SYSROOT     := $(REPO_ROOT)/build/i386/sysroot
+# The sysroot is in the build directory, where the packages look for it.
+SYSROOT     := $(abspath $(BUILD))/sysroot
 SYSROOT_INC := $(SYSROOT)/usr/include
 SYSROOT_LIB := $(SYSROOT)/usr/lib
 

@@ -292,10 +292,19 @@ $$(STANDALONE_FLAGS_STAMP_$(1)): FORCE
 
 -include $$(STANDALONE_OBJECTS_$(1):.o=.d)
 
+# The objects the output is made of, replaced only when the list changes: a
+# source the configuration takes in or leaves out makes the output again
+# even when every object is older than it.
+STANDALONE_OBJECTS_STAMP_$(1) = $$(STANDALONE_WORK_DIR_$(1))/.objects
+$$(STANDALONE_OBJECTS_STAMP_$(1)): FORCE
+	$$(Q)mkdir -p "$$(@D)"
+	$$(Q)printf '%s\n' '$$(STANDALONE_OBJECTS_$(1))' > $$@.tmp
+	$$(Q)if cmp -s $$@.tmp $$@; then rm -f $$@.tmp; else mv -f $$@.tmp $$@; fi
+
 # A program: linked against libc.so, with its mode recorded for the root.
 ifeq ($(7),program)
 STANDALONE_OUTPUT_$(1) = $$(STANDALONE_BUILD_DIR)/$(10)/$(1)
-$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
+$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
 	$$(call standalone_log,LD,$(10)/$(1))
 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_WORK_DIR_$(1))"
 	$$(Q)$$(CC) $$(STANDALONE_PROGRAM_LDFLAGS) \
@@ -310,7 +319,7 @@ endif
 # A shared library: in the dynamic directory, and a copy among the libraries.
 ifeq ($(7),shared-library)
 STANDALONE_OUTPUT_$(1) = $$(STANDALONE_DYNAMIC_DIR)/$(2).so
-$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(wildcard exports.map) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
+$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) $$(wildcard exports.map) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
 	$$(call standalone_log,SHLIB,$(2).so)
 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_LIB_DIR)"
 	$$(Q)$$(CC) $$(STANDALONE_SHLIB_LDFLAGS) \
@@ -326,7 +335,7 @@ endif
 # A static library, when it has sources.
 ifeq ($(7)$(if $(strip $(4)),y),libraryy)
 STANDALONE_OUTPUT_$(1) = $$(STANDALONE_LIB_DIR)/lib$(1).a
-$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1))
+$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1))
 	$$(call standalone_log,AR,lib$(1).a)
 	$$(Q)mkdir -p "$$(@D)"
 	$$(Q)rm -f $$@

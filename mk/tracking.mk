@@ -62,3 +62,15 @@ $(LIBC_TRACKED_OBJS): $(LIBC_FLAGS_STAMP)
 $(LIBC_TRACKED_OBJS): CC += -MMD -MP
 
 -include $(LIBC_TRACKED_OBJS:.o=.d)
+
+################################################
+# Packages
+################################################
+
+# The packages compile against the sysroot (its headers and libraries), so
+# none of them starts before the sysroot is complete, however the build
+# was asked for: "programs", a package's stamp (also one another package
+# needs, which is not among the selected ones) or a package's own target.
+ALL_PROGRAM_STAMPS := $(foreach d,$(ALL_PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsubst %/,%,$(d)))/.stamp)
+
+$(ALL_PROGRAM_STAMPS) $(ALL_PROGRAM_DIRS) $(patsubst %/,%,$(ALL_PROGRAM_DIRS)): | $(SYSROOT_COMPLETE_STAMP)

@@ -8,7 +8,7 @@
 KERN_CPPFLAGS := \
 	-nostdlib \
 	-nostdinc \
-	-Ibuild/x86_64/sysroot/usr/include \
+	-I$(BUILD)/sysroot/usr/include \
 	-Iinclude \
 	-Isrc \
 	-I. \

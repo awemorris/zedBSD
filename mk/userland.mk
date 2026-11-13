@@ -11,7 +11,9 @@ ifeq ($(strip $(CONFIG_USERLAND_PROGRAMS)),)
 CONFIG_USERLAND_PROGRAMS := $(USERLAND_PROGRAMS)
 endif
 
-override CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh init cron getty syslogd networkd mount fsck sysctl net)
+# The programs every image has.  networkd runs ifconfig, route and dhcpc
+# to configure an interface, so they come with it.
+override CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh init cron getty syslogd networkd mount fsck sysctl net ifconfig route dhcpc)
 
 ALL_PROGRAM_MAKEFILES := $(sort \
 	$(wildcard userland/firmware/*/Makefile) \
@@ -45,6 +47,22 @@ PROGRAM_STAMPS := $(foreach d,$(PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsu
 # the source tree.
 SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)" BUILD="$(abspath $(BUILD))"
 
+# The configuration the packages were made with: its files and the
+# variables given on the command line.  A package reads the configuration
+# itself (a value such as ZEDBSD_TEST_SCREEN_CAPTURE chooses its sources),
+# so a change of it runs every package's make again, which then makes
+# again only what the change touches.  The stamp is written every time and
+# replaced only when the configuration changes.
+PACKAGE_CONFIG_STAMP := $(BUILD)/.package-config
+
+.PHONY: FORCE_PACKAGE_CONFIG
+FORCE_PACKAGE_CONFIG:
+$(PACKAGE_CONFIG_STAMP): FORCE_PACKAGE_CONFIG
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(subst ','\'',$(MAKEOVERRIDES))' > $@.tmp
+	@for f in $(sort $(abspath $(CONFIGMK_FILES))); do cat "$$f"; done >> $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
+
 define PROGRAM_RULE
 _CHILD_DIRS_$(1) := $$(filter $(1)%/,$$(filter-out $(1),$$(ALL_PROGRAM_DIRS)))
 _CHILD_SRCS_$(1) := $$(foreach c,$$(_CHILD_DIRS_$(1)),$$(wildcard $$(c)* $$(c)*/* $$(c)*/*/*) $$(patsubst %/,%,$$(c)))
@@ -52,7 +70,7 @@ _ALL_SRCS_$(1) := $$(wildcard $(1)* $(1)*/* $(1)*/*/*)
 _DIR_NAMES_$(1) := $$(patsubst %/.,%,$$(wildcard $$(addsuffix /.,$$(_ALL_SRCS_$(1)))))
 _PKG_SRCS_$(1) := $$(filter-out $$(_CHILD_SRCS_$(1)) $$(_DIR_NAMES_$(1)),$$(_ALL_SRCS_$(1)))
 
-$$(BUILD)/packages/$(notdir $(patsubst %/,%,$(1)))/.stamp: $$(_PKG_SRCS_$(1)) userland/base/package.mk
+$$(BUILD)/packages/$(notdir $(patsubst %/,%,$(1)))/.stamp: $$(_PKG_SRCS_$(1)) userland/base/package.mk $$(PACKAGE_CONFIG_STAMP)
 	@case "$(1)" in \
 		userland/packages/*) \
 			$$(MAKE) -C $(1) $$(SUBMAKE_CONFIG) ;; \

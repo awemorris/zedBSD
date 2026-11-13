@@ -83,6 +83,14 @@ include userland/desktop/wallpapers/Makefile
 ROOTFS_CONFIG_STAMP := \
 	$(BUILD)/.rootfs-config
 
+# Files a configuration or a test puts into the root besides the platform's
+# and the packages', as --file DESTINATION=SOURCE and --mode DESTINATION=MODE
+# pairs.  They are put in last, so they take the place of a file of the
+# same name, and the root is made again when one of their sources changes.
+ROOTFS_EXTRA_FILES ?=
+ROOTFS_EXTRA_INPUTS := $(foreach item,$(ROOTFS_EXTRA_FILES),\
+	$(if $(findstring =,$(item)),$(wildcard $(lastword $(subst =, ,$(item))))))
+
 ROOTFS_TARGET_SYSROOT ?= \
 	$(BUILD)/sysroot
 
@@ -119,7 +127,7 @@ endef
 
 define ROOTFS_TREE_RULE_AT
 $(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) mk/rootfs.mk \
-	$(PACKAGE_INPUTS) $(PROGRAM_STAMPS) $(ROOTFS_DEVELOPMENT_INPUTS)
+	$(PACKAGE_INPUTS) $(PROGRAM_STAMPS) $(ROOTFS_DEVELOPMENT_INPUTS) $(ROOTFS_EXTRA_INPUTS)
 	@rm -rf $(4)
 	@umask 022; mkdir -p $(4) $(addprefix $(4)/,\
  $(ROOTFS_DIRECTORIES) $(ROOTFS_STICKY_DIRECTORIES))
@@ -130,13 +138,42 @@ $(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) mk/rootfs.mk \
 	@ln -s ../run $(4)/var/run
 	@umask 022; printf '%s\n' '$(1)' > $(4)/lib/arch.id
 	@umask 022; printf 'zedBSD ufs root v1\n' > $(4)/etc/zedbsd-root
+# What the packages installed in the build directory comes first, and the
+# files and modes the lists name come after it, so that a list (the
+# platform's, a package's or ROOTFS_EXTRA_FILES) decides a file both name.
+	@set -e; umask 022; \
+		test -d $(BUILD)/bin && cp -f $(BUILD)/bin/* $(4)/bin/ 2>/dev/null || true; \
+		test -d $(BUILD)/sbin && cp -f $(BUILD)/sbin/* $(4)/sbin/ 2>/dev/null || true; \
+		if test -d $(BUILD)/usr/bin; then mkdir -p $(4)/usr/bin && cp -f $(BUILD)/usr/bin/* $(4)/usr/bin/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/usr/sbin; then mkdir -p $(4)/usr/sbin && cp -f $(BUILD)/usr/sbin/* $(4)/usr/sbin/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/usr/libexec; then mkdir -p $(4)/usr/libexec && cp -f $(BUILD)/usr/libexec/* $(4)/usr/libexec/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/dynamic; then mkdir -p $(4)/lib && cp -f $(BUILD)/dynamic/* $(4)/lib/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/lib/firmware; then mkdir -p $(4)/lib/firmware && cp -RP $(BUILD)/lib/firmware/. $(4)/lib/firmware/; fi; \
+		if test -d $(BUILD)/usr/share; then mkdir -p $(4)/usr/share && cp -RP $(BUILD)/usr/share/. $(4)/usr/share/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/share; then mkdir -p $(4)/share && cp -RP $(BUILD)/share/. $(4)/share/ 2>/dev/null || true; fi; \
+		if test -d $(BUILD)/etc; then mkdir -p $(4)/etc && cp -RP $(BUILD)/etc/. $(4)/etc/ 2>/dev/null || true; fi; \
+		chmod 0755 $(4)/bin/* $(4)/sbin/* 2>/dev/null || true; \
+		test -d $(4)/usr/bin && chmod 0755 $(4)/usr/bin/* 2>/dev/null || true; \
+		test -d $(4)/usr/sbin && chmod 0755 $(4)/usr/sbin/* 2>/dev/null || true; \
+		test -d $(4)/usr/libexec && chmod 0755 $(4)/usr/libexec/* 2>/dev/null || true; \
+		chmod 0755 $(4)/lib/*.so* 2>/dev/null || true; \
+		test -f $(4)/lib/ld.so && chmod 0755 $(4)/lib/ld.so || true; \
+		for record in $(BUILD)/packages/*/mode; do \
+			test -f "$$$$record" || continue; \
+			read -r path mode < "$$$$record"; \
+			test -f "$(4)$$$$path" && chmod "$$$$mode" "$(4)$$$$path"; \
+		done; true
+# Every directory is 0755 (but the sticky ones) before the lists' modes,
+# so that a --mode a list gives a directory stays.
+	@find $(4) \( -path $(4)/tmp -o -path $(4)/shm \) \
+		-prune -o -type d -exec chmod 0755 {} +
 	@set -e; umask 022; \
 		cfg_items=""; \
 		if [ -f "$$(ROOTFS_CONFIG_STAMP)" ]; then \
 			cfg_items="$$$$($$(PYTHON) -c 'with open("$$(ROOTFS_CONFIG_STAMP)") as f: d=dict(p.split("=",1) for p in f.read().strip().split(";") if "=" in p); print(d.get("data","") + " " + d.get("files","") + " " + d.get("platform_files",""))')"; \
 		fi; \
 		for pass in file mode; do \
-			set -- $$$$cfg_items $(3) $$(PACKAGE_FILES); while test $$$$# -gt 0; do \
+			set -- $$$$cfg_items $(3) $$(PACKAGE_FILES) $$(ROOTFS_EXTRA_FILES); while test $$$$# -gt 0; do \
 				option=$$$$1; specification=$$$$2; shift 2; \
 				path=$$$${specification%%=*}; value=$$$${specification#*=}; \
 				path=$$$${path#/}; \
@@ -160,28 +197,6 @@ $(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) mk/rootfs.mk \
 			done; \
 		done
 	@set -e; umask 022; \
-		test -d $(BUILD)/bin && cp -f $(BUILD)/bin/* $(4)/bin/ 2>/dev/null || true; \
-		test -d $(BUILD)/sbin && cp -f $(BUILD)/sbin/* $(4)/sbin/ 2>/dev/null || true; \
-		if test -d $(BUILD)/usr/bin; then mkdir -p $(4)/usr/bin && cp -f $(BUILD)/usr/bin/* $(4)/usr/bin/ 2>/dev/null || true; fi; \
-		if test -d $(BUILD)/usr/sbin; then mkdir -p $(4)/usr/sbin && cp -f $(BUILD)/usr/sbin/* $(4)/usr/sbin/ 2>/dev/null || true; fi; \
-		if test -d $(BUILD)/usr/libexec; then mkdir -p $(4)/usr/libexec && cp -f $(BUILD)/usr/libexec/* $(4)/usr/libexec/ 2>/dev/null || true; fi; \
-		if test -d $(BUILD)/dynamic; then mkdir -p $(4)/lib && cp -f $(BUILD)/dynamic/* $(4)/lib/ 2>/dev/null || true; fi; \
-		if test -d $(BUILD)/lib/firmware; then mkdir -p $(4)/lib/firmware && cp -RP $(BUILD)/lib/firmware/. $(4)/lib/firmware/; fi; \
-		if test -d $(BUILD)/usr/share; then mkdir -p $(4)/usr/share && cp -RP $(BUILD)/usr/share/. $(4)/usr/share/ 2>/dev/null || true; fi; \
-		if test -d $(BUILD)/share; then mkdir -p $(4)/share && cp -RP $(BUILD)/share/. $(4)/share/ 2>/dev/null || true; fi; \
-		if test -d $(BUILD)/etc; then mkdir -p $(4)/etc && cp -RP $(BUILD)/etc/. $(4)/etc/ 2>/dev/null || true; fi; \
-		chmod 0755 $(4)/bin/* $(4)/sbin/* 2>/dev/null || true; \
-		test -d $(4)/usr/bin && chmod 0755 $(4)/usr/bin/* 2>/dev/null || true; \
-		test -d $(4)/usr/sbin && chmod 0755 $(4)/usr/sbin/* 2>/dev/null || true; \
-		test -d $(4)/usr/libexec && chmod 0755 $(4)/usr/libexec/* 2>/dev/null || true; \
-		chmod 0755 $(4)/lib/*.so* 2>/dev/null || true; \
-		test -f $(4)/lib/ld.so && chmod 0755 $(4)/lib/ld.so || true; \
-		for record in $(BUILD)/packages/*/mode; do \
-			test -f "$$$$record" || continue; \
-			read -r path mode < "$$$$record"; \
-			test -f "$(4)$$$$path" && chmod "$$$$mode" "$(4)$$$$path"; \
-		done; true
-	@set -e; umask 022; \
 		links=""; \
 		if [ -f "$$(ROOTFS_CONFIG_STAMP)" ]; then \
 			links="$$$$($$(PYTHON) -c 'with open("$$(ROOTFS_CONFIG_STAMP)") as f: d=dict(p.split("=",1) for p in f.read().strip().split(";") if "=" in p); print(d.get("links",""))')"; \
@@ -195,8 +210,6 @@ $(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) mk/rootfs.mk \
 			mkdir -p "$$$${destination%/*}"; ln -sfn "$$$$target" "$$$$destination"; \
 		done
 	@$$(call ROOTFS_INSTALL_DEVELOPMENT,$(4))
-	@find $(4) \( -path $(4)/tmp -o -path $(4)/shm \) \
-		-prune -o -type d -exec chmod 0755 {} +
 	@umask 022; touch $$@
 endef
 
@@ -209,7 +222,8 @@ $(ROOTFS_CONFIG_STAMP): FORCE_ROOTFS_CONFIG
 	architecture='$(ARCHITECTURE)'; \
 	board='$(BOARD)'; \
 	programs='$(strip $(USERLAND_PROGRAMS))'; \
-	value="platform=$$platform;architecture=$$architecture;board=$$board;programs=$$programs"; \
+	extra='$(strip $(ROOTFS_EXTRA_FILES))'; \
+	value="platform=$$platform;architecture=$$architecture;board=$$board;programs=$$programs;extra=$$extra"; \
 	if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
 		printf '%s\n' "$$value" > $@.tmp; \
 		mv $@.tmp $@; \

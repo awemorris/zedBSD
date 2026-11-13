@@ -467,7 +467,7 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-427](bugs/BUG-427.md) | Wi-Fi の PIN の設定中に ARM64 SError が 1 回出た（Pi 500、bcm43455） | fixed（2026-11-13 P1: Pi 5 で毎起動に再現。D0 の pinctrl の report が実装の外の 0x1c を読んでいた。PINCTRL_D0_BYTES を 0x1c に、Pi 5 で SError 0 を確認、Pi 500 は未実施） |
 | [BUG-428](bugs/BUG-428.md) | S0 idle の devices の往復で xHCI の port 3 が resume で戻らず、USB の NIC（ue0）の受信が止まる（5330） | open（2026-11-13 Q1 が起票、BUG-424 から） |
 | [BUG-429](bugs/BUG-429.md) | TCO の watchdog が sleep の suspend の途中の停止を捕まえない（PCI の順の早い所で counter を halt する） | open（2026-11-13 Q1 が起票、BUG-424 から） |
-| [BUG-430](bugs/BUG-430.md) | 作り直した build system で、試験の image を別の BUILD に作れない（sysroot が固定）・vmunix と userland の並列で依存が抜ける・sysroot が -j16・test-image.sh が古い | open（2026-11-14 Q1。P4 が 7 項目を確かめ、試験の道具を直した。Makefile・mk の差分の案（plan/bugs/BUG-430-makefile.diff）はユーザーの確認待ち） |
+| [BUG-430](bugs/BUG-430.md) | 作り直した build system で、試験の image を別の BUILD に作れない（sysroot が固定）・vmunix と userland の並列で依存が抜ける・sysroot が -j16・test-image.sh が古い | fixed（2026-11-14 Q1。ユーザーの承認の差分を main に当てた。QEMU・x86_64 以外の build は未実施） |
 | [BUG-431](bugs/BUG-431.md) | venus の display の事象を取りこぼす（idle の間の head の抜き差しが topology の番号に出ない）、IRQ の経路が事象を clear しない | fixed（2026-11-14 Q1。P2 q2058 5ca7945a36、main に merge。抜き差しが番号に出ない件は試験の harness（serial の印に kernel の行が混ざる）、driver は events_clear の欠け。QEMU 2 回 PASS、latency 266・255 ms） |
 | [BUG-432](bugs/BUG-432.md) | 静的に link した program の stdout が file への出力の時に exit で flush されない | open（2026-11-14 Q1 が起票） |
 | [BUG-433](bugs/BUG-433.md) | WS131 の system の host の回帰試験（host-system.sh）が link できない（40 余りの偽物が無い） | open（2026-11-14 Q1 が起票、WS353 p006） |
