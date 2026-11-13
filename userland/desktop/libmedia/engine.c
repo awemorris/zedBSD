@@ -23,14 +23,13 @@
 
 #include "media.h"
 #include "media-private.h"
+#include "media-os.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 /* How many decoded pictures wait at most. */
 #define ENGINE_PICTURES		4U
@@ -60,7 +59,7 @@
  * of the thread), and the number of the latest picture taken.
  */
 struct media_engine {
-	pthread_t thread;
+	struct media_os_thread thread;
 	int thread_started;
 	struct media_threads threads;
 	int threads_given;
@@ -83,8 +82,8 @@ struct media_engine {
 	int scaled_width;
 	int scaled_height;
 
-	pthread_mutex_t lock;
-	pthread_cond_t ready;
+	struct media_os_mutex lock;
+	struct media_os_cond ready;
 	unsigned state;
 	int error;
 	int problem;
@@ -109,8 +108,7 @@ struct media_engine {
 static void (*engine_log_function)(void *context, const char *line);
 static void *engine_log_context;
 
-static void *engine_run(void *argument);
-static void engine_run_given(void *argument);
+static void engine_run(void *argument);
 static int engine_open_file(struct media_engine *engine);
 static int engine_decoder(struct media_engine *engine, unsigned kind, struct media_decoder **result, unsigned *track);
 static int engine_feed(struct media_engine *engine, struct media_decoder *decoder, const struct media_packet *packet);
@@ -124,7 +122,6 @@ static void engine_drop_pictures(struct media_engine *engine);
 static int engine_stopping(struct media_engine *engine);
 static void engine_wake(struct media_engine *engine);
 static uint64_t engine_now_us(void);
-static void engine_sleep_ms(unsigned ms);
 
 /*
  * Sets where the library's log lines go (NULL: nowhere).
@@ -194,8 +191,8 @@ media_engine_open(
 	made->wake_context = wake_context;
 	made->flags = flags;
 	made->state = MEDIA_OPENING;
-	(void)pthread_mutex_init(&made->lock, NULL);
-	(void)pthread_cond_init(&made->ready, NULL);
+	(void)media_os_mutex_init(&made->lock);
+	(void)media_os_cond_init(&made->ready);
 
 	/* The path, or the source. */
 	if (path != NULL) {
@@ -212,9 +209,9 @@ media_engine_open(
 	if (threads != NULL) {
 		made->threads = *threads;
 		made->threads_given = 1;
-		error = made->threads.start(made->threads.context, made->threads.name, engine_run_given, made, &made->threads_handle);
+		error = made->threads.start(made->threads.context, made->threads.name, engine_run, made, &made->threads_handle);
 	} else {
-		error = pthread_create(&made->thread, NULL, engine_run, made);
+		error = media_os_thread_start(&made->thread, engine_run, made);
 	}
 	if (error != 0) {
 		media_engine_close(made);
@@ -237,7 +234,7 @@ media_engine_status(
 {
 	/* The state, under the lock. */
 	memset(status, 0, sizeof(*status));
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	status->state = engine->state;
 	status->error = engine->error;
 	status->problem = engine->problem;
@@ -248,7 +245,7 @@ media_engine_status(
 	status->duration = engine->duration;
 	status->position = engine_clock(engine);
 	status->picture = engine->taken;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 }
 
 /*
@@ -261,21 +258,21 @@ media_engine_play(
 	unsigned state;
 
 	/* Only an open file. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	state = engine->state;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 	if (state == MEDIA_ENDED)
 		media_engine_seek(engine, 0.0);
 	if (state != MEDIA_PAUSED && state != MEDIA_ENDED)
 		return;
 
 	/* The clock goes on from where it stood. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	engine->clock_time = engine_clock(engine);
 	engine->clock_us = engine_now_us();
 	engine->state = MEDIA_PLAYING;
-	(void)pthread_cond_broadcast(&engine->ready);
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_cond_broadcast(&engine->ready);
+	media_os_mutex_unlock(&engine->lock);
 	media_log("MEDIA play position_ms=%lld", (long long)(engine->clock_time * 1000.0));
 	engine_wake(engine);
 }
@@ -290,9 +287,9 @@ media_engine_pause(
 	double now;
 
 	/* Only while playing. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	if (engine->state != MEDIA_PLAYING) {
-		(void)pthread_mutex_unlock(&engine->lock);
+		media_os_mutex_unlock(&engine->lock);
 		return;
 	}
 
@@ -300,7 +297,7 @@ media_engine_pause(
 	now = engine_clock(engine);
 	engine->state = MEDIA_PAUSED;
 	engine->clock_time = now;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 	media_log("MEDIA pause position_ms=%lld", (long long)(now * 1000.0));
 	engine_wake(engine);
 }
@@ -318,7 +315,7 @@ media_engine_seek(
 		seconds = 0.0;
 
 	/* The request; the clock stands at the time sought until the thread starts it again. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	if (engine->duration > 0.0 && seconds > engine->duration)
 		seconds = engine->duration;
 	engine->seek_wanted = 1;
@@ -328,8 +325,8 @@ media_engine_seek(
 	if (engine->state == MEDIA_ENDED)
 		engine->state = MEDIA_PAUSED;
 	engine_drop_pictures(engine);
-	(void)pthread_cond_broadcast(&engine->ready);
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_cond_broadcast(&engine->ready);
+	media_os_mutex_unlock(&engine->lock);
 }
 
 /*
@@ -359,7 +356,7 @@ media_engine_picture(
 	/* The latest due: it replaces the ones before it. */
 	taken = NULL;
 	*next = -1.0;
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	clock = engine_clock(engine);
 	while (engine->picture_count > 0U) {
 		/* Not due yet: when the next is. */
@@ -380,8 +377,8 @@ media_engine_picture(
 	/* A new one is counted; the thread may decode on. */
 	if (taken != NULL)
 		engine->taken++;
-	(void)pthread_cond_broadcast(&engine->ready);
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_cond_broadcast(&engine->ready);
+	media_os_mutex_unlock(&engine->lock);
 
 	/* A new picture is kept for drawing again. */
 	if (taken != NULL) {
@@ -449,14 +446,14 @@ media_engine_close(
 
 	/* The thread. */
 	if (engine->thread_started) {
-		(void)pthread_mutex_lock(&engine->lock);
+		media_os_mutex_lock(&engine->lock);
 		engine->quit = 1;
-		(void)pthread_cond_broadcast(&engine->ready);
-		(void)pthread_mutex_unlock(&engine->lock);
+		media_os_cond_broadcast(&engine->ready);
+		media_os_mutex_unlock(&engine->lock);
 		if (engine->threads_given)
 			engine->threads.join(engine->threads.context, engine->threads_handle);
 		else
-			(void)pthread_join(engine->thread, NULL);
+			media_os_thread_join(&engine->thread);
 	}
 
 	/* What the caller held, and the pictures waiting. */
@@ -465,23 +462,14 @@ media_engine_close(
 	engine_drop_pictures(engine);
 
 	/* The lock, the path, the engine. */
-	(void)pthread_cond_destroy(&engine->ready);
-	(void)pthread_mutex_destroy(&engine->lock);
+	media_os_cond_destroy(&engine->ready);
+	media_os_mutex_destroy(&engine->lock);
 	free(engine->path);
 	free(engine);
 }
 
-/* The thread the caller made: the engine's thread as engine_run runs it. */
+/* The thread (the caller's or the system's): opens the file, then reads, decodes and queues until it is told to end. */
 static void
-engine_run_given(
-	void *argument)
-{
-	/* The same work as on a thread of the system's. */
-	(void)engine_run(argument);
-}
-
-/* The thread: opens the file, then reads, decodes and queues until it is told to end. */
-static void *
 engine_run(
 	void *argument)
 {
@@ -496,13 +484,13 @@ engine_run(
 	/* The file and its decoder. */
 	engine = argument;
 	status = engine_open_file(engine);
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	engine->error = status;
 	engine->state = MEDIA_PAUSED;
 	if (status != 0)
 		engine->state = MEDIA_FAILED;
 	engine->clock_us = engine_now_us();
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 	engine_wake(engine);
 
 	/* Each round until told to end (a file that failed waits for that). */
@@ -512,7 +500,7 @@ engine_run(
 		if (stop)
 			break;
 		if (status != 0) {
-			engine_sleep_ms(ENGINE_WAIT_MS * 5);
+			media_os_sleep_ms(ENGINE_WAIT_MS * 5);
 			continue;
 		}
 
@@ -522,13 +510,13 @@ engine_run(
 			continue;
 
 		/* A decode failure waits for a seek without treating an interrupted feed as failure. */
-		(void)pthread_mutex_lock(&engine->lock);
+		media_os_mutex_lock(&engine->lock);
 		stop = 0;
 		if (engine->state == MEDIA_FAILED)
 			stop = 1;
-		(void)pthread_mutex_unlock(&engine->lock);
+		media_os_mutex_unlock(&engine->lock);
 		if (stop) {
-			engine_sleep_ms(ENGINE_WAIT_MS * 5);
+			media_os_sleep_ms(ENGINE_WAIT_MS * 5);
 			continue;
 		}
 
@@ -563,7 +551,6 @@ engine_run(
 	if (engine->file != NULL)
 		media_file_close(engine->file);
 	engine->file = NULL;
-	return NULL;
 }
 
 /*
@@ -624,13 +611,13 @@ engine_open_file(
 	}
 
 	/* What is known of the file. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	if (engine->video != NULL) {
 		track = media_file_track(engine->file, engine->video_track);
 		engine->width = (int)track->width;
 		engine->height = (int)track->height;
 		if (engine->width > ENGINE_SIDE_MAX || engine->height > ENGINE_SIDE_MAX) {
-			(void)pthread_mutex_unlock(&engine->lock);
+			media_os_mutex_unlock(&engine->lock);
 			return EFBIG;
 		}
 	}
@@ -640,7 +627,7 @@ engine_open_file(
 	if (length_us > 0)
 		engine->duration = (double)length_us / 1000000.0;
 	engine->has_audio = engine->sound != NULL;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 
 	/* Succeeded: the log line the tests read. */
 	media_log("MEDIA open width=%d height=%d duration_ms=%lld video=%s audio=%s container=%s", engine->width, engine->height,
@@ -761,7 +748,6 @@ engine_picture(
 	struct media_frame *picture,
 	double time)
 {
-	struct timespec until;
 	unsigned slot;
 
 	/* A picture before the time sought is passed over. */
@@ -771,22 +757,15 @@ engine_picture(
 	}
 
 	/* Room in the ring, unless a seek or the end comes first. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	while (engine->picture_count == ENGINE_PICTURES && !engine->quit && !engine->seek_wanted) {
-		(void)clock_gettime(CLOCK_REALTIME, &until);
-		until.tv_nsec += ENGINE_WAIT_MS * 1000000L;
-		if (until.tv_nsec >= 1000000000L) {
-			until.tv_sec++;
-			until.tv_nsec -= 1000000000L;
-		}
-
 		/* Woken by a picture taken or a request, or after the wait. */
-		(void)pthread_cond_timedwait(&engine->ready, &engine->lock, &until);
+		media_os_cond_wait_for(&engine->ready, &engine->lock, ENGINE_WAIT_MS);
 	}
 
 	/* Interrupted. */
 	if (engine->quit || engine->seek_wanted) {
-		(void)pthread_mutex_unlock(&engine->lock);
+		media_os_mutex_unlock(&engine->lock);
 		media_frame_free(&picture);
 		return 1;
 	}
@@ -796,7 +775,7 @@ engine_picture(
 	engine->pictures[slot] = picture;
 	engine->picture_times[slot] = time;
 	engine->picture_count++;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 	engine_wake(engine);
 	return 0;
 }
@@ -815,19 +794,19 @@ engine_seek(
 	int error;
 
 	/* A seek asked for. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	wanted = engine->seek_wanted;
 	seconds = engine->seek_to;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 	if (!wanted)
 		return 0;
 
 	/* The file at the key frame before it, the decoders and the sound emptied. */
 	error = media_file_seek(engine->file, (int64_t)(seconds * 1000000.0));
 	if (error != 0) {
-		(void)pthread_mutex_lock(&engine->lock);
+		media_os_mutex_lock(&engine->lock);
 		engine->seek_wanted = 0;
-		(void)pthread_mutex_unlock(&engine->lock);
+		media_os_mutex_unlock(&engine->lock);
 		engine_fail(engine, error);
 		return 1;
 	}
@@ -842,7 +821,7 @@ engine_seek(
 	engine->skip_before = seconds;
 
 	/* The clock anchored at the time sought; the pictures dropped again (some may have come meanwhile). */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	engine_drop_pictures(engine);
 	engine->clock_time = seconds;
 	engine->clock_us = engine_now_us();
@@ -851,7 +830,7 @@ engine_seek(
 	if (engine->state == MEDIA_FAILED)
 		engine->state = MEDIA_PAUSED;
 	engine->seek_wanted = 0;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 	media_log("MEDIA seek to_ms=%lld", (long long)(seconds * 1000.0));
 	engine_wake(engine);
 
@@ -874,9 +853,9 @@ engine_end(
 	int status;
 
 	/* The decoders' last pictures and sound, once. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	drained = engine->eof;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 	if (!drained) {
 		status = 0;
 		if (engine->video != NULL)
@@ -887,14 +866,14 @@ engine_end(
 			engine_fail(engine, -status);
 		if (status != 0)
 			return;
-		(void)pthread_mutex_lock(&engine->lock);
+		media_os_mutex_lock(&engine->lock);
 		engine->eof = 1;
-		(void)pthread_mutex_unlock(&engine->lock);
+		media_os_mutex_unlock(&engine->lock);
 	}
 
 	/* Played out: no picture waits, and the clock reached the length. */
 	ended = 0;
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	clock = engine_clock(engine);
 	if (engine->state == MEDIA_PLAYING && engine->picture_count == 0U &&
 	    (engine->duration <= 0.0 || clock >= engine->duration - 0.05)) {
@@ -904,7 +883,7 @@ engine_end(
 	}
 
 	/* The state is let go. */
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 
 	/* The end told once. */
 	if (ended) {
@@ -914,7 +893,7 @@ engine_end(
 	}
 
 	/* A little wait before the next look. */
-	engine_sleep_ms(ENGINE_WAIT_MS * 5);
+	media_os_sleep_ms(ENGINE_WAIT_MS * 5);
 }
 
 /* Publishes a failed read or decode and leaves the reader available for a later seek. */
@@ -924,11 +903,11 @@ engine_fail(
 	int error)
 {
 	/* Runtime errors use errno; decoder admission separately records MEDIA_PROBLEM_* values. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	engine->error = error;
 	engine->problem = 0;
 	engine->state = MEDIA_FAILED;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 	engine_wake(engine);
 }
 
@@ -981,9 +960,9 @@ engine_stopping(
 	int quit;
 
 	/* Read under the lock. */
-	(void)pthread_mutex_lock(&engine->lock);
+	media_os_mutex_lock(&engine->lock);
 	quit = engine->quit;
-	(void)pthread_mutex_unlock(&engine->lock);
+	media_os_mutex_unlock(&engine->lock);
 	return quit;
 }
 
@@ -1001,22 +980,9 @@ engine_wake(
 static uint64_t
 engine_now_us(void)
 {
-	struct timespec now;
+	uint64_t now;
 
 	/* The clock. */
-	(void)clock_gettime(CLOCK_MONOTONIC, &now);
-	return (uint64_t)now.tv_sec * 1000000U + (uint64_t)now.tv_nsec / 1000U;
-}
-
-/* Sleeps a number of milliseconds. */
-static void
-engine_sleep_ms(
-	unsigned ms)
-{
-	struct timespec wait;
-
-	/* The wait. */
-	wait.tv_sec = ms / 1000U;
-	wait.tv_nsec = (long)(ms % 1000U) * 1000000L;
-	(void)nanosleep(&wait, NULL);
+	now = media_os_clock_ns();
+	return now / 1000U;
 }

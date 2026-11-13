@@ -6,19 +6,30 @@
  */
 
 /*
- * What libmedia asks of Windows: the Vulkan loader and reading media files.
+ * What libmedia asks of Windows: the Vulkan loader, reading media files, and
+ * the system's own threads, slim reader-writer locks taken exclusively,
+ * condition variables and one-time initializations (no POSIX thread layer).
  * Paths are converted from UTF-8 to UTF-16 and only the W functions are called.
  */
 
 #include "media-os.h"
 
 #include <windows.h>
+#include <process.h>
 
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* The rooms media-os.h gives hold the system's objects (each is one pointer). */
+_Static_assert(sizeof(SRWLOCK) <= sizeof(((struct media_os_mutex *)NULL)->room), "a lock fits its room");
+_Static_assert(_Alignof(SRWLOCK) <= _Alignof(struct media_os_mutex), "a lock is aligned in its room");
+_Static_assert(sizeof(CONDITION_VARIABLE) <= sizeof(((struct media_os_cond *)NULL)->room), "a condition fits its room");
+_Static_assert(_Alignof(CONDITION_VARIABLE) <= _Alignof(struct media_os_cond), "a condition is aligned in its room");
+_Static_assert(sizeof(INIT_ONCE) <= sizeof(((struct media_os_once *)NULL)->room), "a once fits its room");
+_Static_assert(_Alignof(INIT_ONCE) <= _Alignof(struct media_os_once), "a once is aligned in its room");
 
 /* The most bytes one ReadFile asks for; a larger request is read in pieces of this size. */
 #define MEDIA_OS_READ_PIECE ((size_t)1 << 30)
@@ -34,10 +45,23 @@ struct media_os_file {
 	HANDLE handle;
 };
 
+/*
+ * The function a once runs, carried to the system's callback in a record
+ * on the caller's stack (a function pointer does not travel in a data
+ * pointer).
+ */
+struct media_os_once_call {
+	void (*run)(void);
+};
+
 static int media_os_win32_widen(const char *path, wchar_t **wide);
 static int media_os_win32_error(DWORD code);
 static int media_os_win32_is_directory(const wchar_t *wide);
 static int media_os_win32_measure(HANDLE handle, uint64_t *size);
+static SRWLOCK *media_os_win32_lock(struct media_os_mutex *mutex);
+static CONDITION_VARIABLE *media_os_win32_condition(struct media_os_cond *cond);
+static BOOL CALLBACK media_os_win32_once_run(PINIT_ONCE once, PVOID parameter, PVOID *context);
+static unsigned __stdcall media_os_win32_thread_main(void *argument);
 
 /*
  * Loads the system's Vulkan loader from the system directory only.
@@ -306,6 +330,236 @@ media_os_close_descriptor(
 	(void)descriptor;
 }
 
+/* Makes a mutex: a slim reader-writer lock, taken exclusively. */
+int
+media_os_mutex_init(
+	struct media_os_mutex *mutex)
+{
+	SRWLOCK *lock;
+
+	/* The lock in the mutex's room; making it cannot fail. */
+	lock = media_os_win32_lock(mutex);
+	InitializeSRWLock(lock);
+
+	/* Succeeded: the mutex can be taken. */
+	return 0;
+}
+
+/* Lets a mutex go. */
+void
+media_os_mutex_destroy(
+	struct media_os_mutex *mutex)
+{
+	/* A slim reader-writer lock needs no ending. */
+	(void)mutex;
+}
+
+/* Takes a mutex. */
+void
+media_os_mutex_lock(
+	struct media_os_mutex *mutex)
+{
+	SRWLOCK *lock;
+
+	/* Waits while another thread holds it. */
+	lock = media_os_win32_lock(mutex);
+	AcquireSRWLockExclusive(lock);
+}
+
+/* Gives back a mutex. */
+void
+media_os_mutex_unlock(
+	struct media_os_mutex *mutex)
+{
+	SRWLOCK *lock;
+
+	/* Another thread may take it now. */
+	lock = media_os_win32_lock(mutex);
+	ReleaseSRWLockExclusive(lock);
+}
+
+/* Makes a condition: a condition variable. */
+int
+media_os_cond_init(
+	struct media_os_cond *cond)
+{
+	CONDITION_VARIABLE *condition;
+
+	/* The condition variable in the condition's room; making it cannot fail. */
+	condition = media_os_win32_condition(cond);
+	InitializeConditionVariable(condition);
+
+	/* Succeeded: the condition can be waited on. */
+	return 0;
+}
+
+/* Lets a condition go. */
+void
+media_os_cond_destroy(
+	struct media_os_cond *cond)
+{
+	/* A condition variable needs no ending. */
+	(void)cond;
+}
+
+/*
+ * Waits on a condition at most a number of milliseconds.
+ *
+ * The system counts the wait from now, so a change of the date does not
+ * move it.
+ */
+void
+media_os_cond_wait_for(
+	struct media_os_cond *cond,
+	struct media_os_mutex *mutex,
+	unsigned milliseconds)
+{
+	CONDITION_VARIABLE *condition;
+	SRWLOCK *lock;
+	DWORD wait;
+
+	/* The wait in milliseconds; INFINITE is not a wait of milliseconds, so one less. */
+	wait = (DWORD)milliseconds;
+	if (wait == INFINITE)
+		wait = INFINITE - 1UL;
+
+	/* Woken, timed out or for nothing, with the lock held again (taken exclusively: no flags). */
+	condition = media_os_win32_condition(cond);
+	lock = media_os_win32_lock(mutex);
+	(void)SleepConditionVariableSRW(condition, lock, wait, 0UL);
+}
+
+/* Wakes every waiter of a condition. */
+void
+media_os_cond_broadcast(
+	struct media_os_cond *cond)
+{
+	CONDITION_VARIABLE *condition;
+
+	/* Every waiting thread runs again. */
+	condition = media_os_win32_condition(cond);
+	WakeAllConditionVariable(condition);
+}
+
+/*
+ * Makes a call once in the process.
+ *
+ * MEDIA_OS_ONCE_INIT's null pointer is INIT_ONCE_STATIC_INIT, a call not
+ * made yet.
+ */
+int
+media_os_once(
+	struct media_os_once *once,
+	void (*run)(void))
+{
+	struct media_os_once_call call;
+	INIT_ONCE *room;
+	BOOL made;
+
+	/* The function the system's callback runs. */
+	call.run = run;
+
+	/* Run by the first caller; the others wait for it to return. */
+	room = (INIT_ONCE *)(void *)&once->room;
+	made = InitOnceExecuteOnce(room, media_os_win32_once_run, &call, NULL);
+	if (made == FALSE)
+		return EIO;
+
+	/* Succeeded: the call was made, by this caller or an earlier one. */
+	return 0;
+}
+
+/*
+ * Starts a thread.
+ *
+ * The thread is made with the C runtime's _beginthreadex (not
+ * CreateThread), so that the runtime is set up for it.
+ */
+int
+media_os_thread_start(
+	struct media_os_thread *thread,
+	void (*run)(void *argument),
+	void *argument)
+{
+	uintptr_t created;
+
+	/* What the thread runs, read by the thread itself. */
+	thread->run = run;
+	thread->argument = argument;
+	thread->handle = NULL;
+
+	/* The system's thread, with the default stack. */
+	created = _beginthreadex(NULL, 0U, media_os_win32_thread_main, thread, 0U, NULL);
+	if (created == 0U)
+		return EAGAIN;
+
+	/* Succeeded: the thread runs; its handle is waited on by the join. */
+	thread->handle = (void *)created;
+	return 0;
+}
+
+/* Waits for a thread to end and closes its handle. */
+void
+media_os_thread_join(
+	struct media_os_thread *thread)
+{
+	/* No thread was started. */
+	if (thread->handle == NULL)
+		return;
+
+	/* The thread's end, then its handle given back. */
+	(void)WaitForSingleObject((HANDLE)thread->handle, INFINITE);
+	(void)CloseHandle((HANDLE)thread->handle);
+	thread->handle = NULL;
+}
+
+/*
+ * Reads the monotonic clock in nanoseconds.
+ *
+ * The counter is turned into nanoseconds in whole seconds and the rest,
+ * so that the product does not overflow 64 bits.
+ */
+uint64_t
+media_os_clock_ns(void)
+{
+	LARGE_INTEGER frequency;
+	LARGE_INTEGER counter;
+	uint64_t ticks;
+	uint64_t rate;
+	BOOL read;
+
+	/* The counter's rate; one that cannot be read counts as zero. */
+	read = QueryPerformanceFrequency(&frequency);
+	if (read == FALSE || frequency.QuadPart <= 0)
+		return 0U;
+
+	/* The counter. */
+	read = QueryPerformanceCounter(&counter);
+	if (read == FALSE || counter.QuadPart < 0)
+		return 0U;
+
+	/* Succeeded: the time. */
+	ticks = (uint64_t)counter.QuadPart;
+	rate = (uint64_t)frequency.QuadPart;
+	return (ticks / rate) * 1000000000ULL + (ticks % rate) * 1000000000ULL / rate;
+}
+
+/* Sleeps a number of milliseconds. */
+void
+media_os_sleep_ms(
+	unsigned milliseconds)
+{
+	DWORD wait;
+
+	/* INFINITE is not a sleep of milliseconds, so one less. */
+	wait = (DWORD)milliseconds;
+	if (wait == INFINITE)
+		wait = INFINITE - 1UL;
+
+	/* The sleep. */
+	Sleep(wait);
+}
+
 /*
  * Converts a UTF-8 path to a UTF-16 string allocated with malloc.
  *
@@ -452,4 +706,58 @@ media_os_win32_measure(
 
 	/* Succeeded: the size is known. */
 	return 0;
+}
+
+/* The slim reader-writer lock in a mutex's room. */
+static SRWLOCK *
+media_os_win32_lock(
+	struct media_os_mutex *mutex)
+{
+	/* The room itself. */
+	return (SRWLOCK *)(void *)&mutex->room;
+}
+
+/* The condition variable in a condition's room. */
+static CONDITION_VARIABLE *
+media_os_win32_condition(
+	struct media_os_cond *cond)
+{
+	/* The room itself. */
+	return (CONDITION_VARIABLE *)(void *)&cond->room;
+}
+
+/* Runs a once's function (the system's callback for InitOnceExecuteOnce). */
+static BOOL CALLBACK
+media_os_win32_once_run(
+	PINIT_ONCE once,
+	PVOID parameter,
+	PVOID *context)
+{
+	struct media_os_once_call *call;
+
+	/* The system's own arguments are not needed. */
+	(void)once;
+	(void)context;
+
+	/* The function media_os_once was given. */
+	call = parameter;
+	call->run();
+
+	/* Succeeded: the once is made. */
+	return TRUE;
+}
+
+/* Runs what a thread was started for (the C runtime's start routine). */
+static unsigned __stdcall
+media_os_win32_thread_main(
+	void *argument)
+{
+	struct media_os_thread *thread;
+
+	/* The record media_os_thread_start filled. */
+	thread = argument;
+	thread->run(thread->argument);
+
+	/* Succeeded: the thread's exit code is 0. */
+	return 0U;
 }

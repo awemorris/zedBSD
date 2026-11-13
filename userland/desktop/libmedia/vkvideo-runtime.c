@@ -23,11 +23,9 @@
 #include "media-os.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #define VKVIDEO_BINDINGS 32U
 #define VKVIDEO_FAMILIES 64U
@@ -338,7 +336,7 @@ static const struct vkvideo_symbol vkvideo_symbols[] = {
 static struct media_os_library *vkvideo_library;
 
 /* Loader publication is immutable after one attempt and synchronized before any runtime uses it. */
-static pthread_once_t vkvideo_loader_once = PTHREAD_ONCE_INIT;
+static struct media_os_once vkvideo_loader_once = MEDIA_OS_ONCE_INIT;
 
 /*
  * The identities of the contexts whose pictures the GPU holds; each takes the
@@ -444,7 +442,7 @@ vkvideo_runtime_open(
 
 	/* The loader is optional; native media reports unavailable video without loading FFmpeg. */
 	*runtime = NULL;
-	pthread_once(&vkvideo_loader_once, vkvideo_loader);
+	(void)media_os_once(&vkvideo_loader_once, vkvideo_loader);
 	if (vkvideo_library == NULL) {
 		media_log("Vulkan Video: no Vulkan loader");
 		return MEDIA_PROBLEM_DEVICE;
@@ -3007,16 +3005,11 @@ static uint64_t
 vkvideo_now_ns(
 	void)
 {
-	struct timespec now;
-	int error;
+	uint64_t now;
 
 	/* The clock; one that cannot be read counts as zero. */
-	error = clock_gettime(CLOCK_MONOTONIC, &now);
-	if (error != 0)
-		return 0U;
-
-	/* Succeeded: the time. */
-	return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+	now = media_os_clock_ns();
+	return now;
 }
 
 /*
