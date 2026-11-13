@@ -171,6 +171,12 @@ for step in plug unplug; do
 			say "$step-latency: FAIL more than 1 s"
 			latency_failed=1
 		fi
+		# What libvulkan adds: the Vulkan wait's wake after the kernel fence's of the program's own.
+		later=$(sed -n "s/^$step-kernel: .* vulkan-later-ms=\(-*[0-9]*\) .*/\1/p" "$out/result-raw.txt" | tail -1)
+		if [ -n "$later" ] && [ "$later" -gt 50 ]; then
+			say "$step-vulkan: FAIL the Vulkan wait woke ${later} ms after the kernel fence"
+			latency_failed=1
+		fi
 	else
 		say "$step-latency: FAIL no time"
 		latency_failed=1

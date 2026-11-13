@@ -49,7 +49,11 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
+
+#include <uapi/gpu.h>
+#include <uapi/gpu-display.h>
 
 /* One second of a Vulkan timeout. */
 #define TEST_SECOND_NS		UINT64_C(1000000000)
@@ -91,6 +95,18 @@ struct test_wait {
 };
 
 /*
+ * A kernel hotplug registration of the program's own (GPU_DISPLAY_FENCE on
+ * an open of /dev/gpu0), waited for on its own thread: when it wakes is the
+ * kernel's time, which the Vulkan fence's time is compared with.
+ */
+struct test_raw {
+	int node;
+	int fence;
+	int status;
+	uint64_t woke_ms;
+};
+
+/*
  * The thread whose blocking polls are counted, and the count.  The
  * thread sets itself before it waits; relaxed atomics, read after a join.
  */
@@ -109,6 +125,8 @@ static VkResult test_submit(struct test_state *state, VkFence fence);
 static void *test_waiter(void *argument);
 static int test_wait_start(struct test_wait *wait, pthread_t *thread);
 static void test_open_fds(int *open_fds);
+static int test_raw_arm(struct test_raw *raw);
+static void *test_raw_wait(void *argument);
 static void step_idle(struct test_state *state, const char *name, VkFence partner, int alone);
 static void step_submit(struct test_state *state, const char *name, VkFence partner);
 static void step_narrow(struct test_state *state, const char *name, VkFence partner);
@@ -491,6 +509,56 @@ test_open_fds(
 	}
 }
 
+/* Registers the program's own kernel hotplug fence on /dev/gpu0. */
+static int
+test_raw_arm(
+	struct test_raw *raw)
+{
+	struct gpu_display_fence request;
+	int error;
+
+	/* A readable open of the display node. */
+	memset(raw, 0, sizeof(*raw));
+	raw->fence = -1;
+	raw->node = open("/dev/gpu0", O_RDONLY | O_CLOEXEC);
+	if (raw->node < 0)
+		return errno;
+
+	/* The hotplug registration. */
+	memset(&request, 0, sizeof(request));
+	request.version = GPU_ABI_VERSION;
+	request.size = sizeof(request);
+	request.flags = GPU_HANDLE_CLOEXEC;
+	request.event = GPU_DISPLAY_FENCE_HOTPLUG;
+	request.fd = -1;
+	error = ioctl(raw->node, GPU_DISPLAY_FENCE, &request);
+	if (error != 0)
+		return errno;
+	raw->fence = request.fd;
+	return 0;
+}
+
+/* Waits for the program's own kernel fence, at most 30 s, and notes when it woke. */
+static void *
+test_raw_wait(
+	void *argument)
+{
+	struct test_raw *raw;
+	struct pollfd descriptor;
+	struct timespec limit;
+
+	/* ppoll directly, so the wait is not counted as the Vulkan wait's. */
+	raw = argument;
+	descriptor.fd = raw->fence;
+	descriptor.events = POLLIN;
+	descriptor.revents = 0;
+	limit.tv_sec = 30;
+	limit.tv_nsec = 0;
+	raw->status = ppoll(&descriptor, 1U, &limit, NULL);
+	raw->woke_ms = test_now_ms();
+	return NULL;
+}
+
 /* idle: the wait sleeps once for 30 s and times out. */
 static void
 step_idle(
@@ -796,16 +864,22 @@ step_plug(
 	VkResult error;
 	VkResult after_reset;
 	VkResult after_unplug;
+	struct test_raw raw;
+	pthread_t raw_thread;
 	uint64_t armed;
 	uint64_t woke;
 	unsigned polls;
+	int raw_error;
 
-	/* Waits for the plug on this thread, counting its sleeps. */
+	/* Waits for the plug on this thread, counting its sleeps; the kernel's own fence beside it. */
 	error = test_hotplug(state, &plugged);
 	if (error != VK_SUCCESS) {
 		test_say(state, "plug: FAIL register %d", (int)error);
 		return;
 	}
+	raw_error = test_raw_arm(&raw);
+	if (raw_error == 0)
+		pthread_create(&raw_thread, NULL, test_raw_wait, &raw);
 	counted_thread = pthread_self();
 	__atomic_store_n(&counted_polls, 0U, __ATOMIC_RELAXED);
 	__atomic_store_n(&counting, 1, __ATOMIC_RELEASE);
@@ -815,6 +889,17 @@ step_plug(
 	woke = test_now_ms();
 	__atomic_store_n(&counting, 0, __ATOMIC_RELEASE);
 	polls = __atomic_load_n(&counted_polls, __ATOMIC_RELAXED);
+
+	/* The kernel's own fence's time: the Vulkan wait adds little to it. */
+	if (raw_error == 0) {
+		pthread_join(raw_thread, NULL);
+		test_say(state, "plug-kernel: raw-ms=%llu vulkan-later-ms=%lld raw-status=%d",
+		    (unsigned long long)(raw.woke_ms - armed), (long long)woke - (long long)raw.woke_ms, raw.status);
+		close(raw.fence);
+		close(raw.node);
+	} else {
+		test_say(state, "plug-kernel: no raw registration errno=%d", raw_error);
+	}
 
 	/* A signaled fence that is reset is spent: no later change signals it. */
 	vkResetFences(state->device, 1U, &plugged);
@@ -833,10 +918,20 @@ step_plug(
 		vkDestroyFence(state->device, plugged, NULL);
 		return;
 	}
+	raw_error = test_raw_arm(&raw);
+	if (raw_error == 0)
+		pthread_create(&raw_thread, NULL, test_raw_wait, &raw);
 	test_marker(state, "unplug");
 	armed = test_now_ms();
 	error = vkWaitForFences(state->device, 1U, &unplugged, VK_TRUE, 30U * TEST_SECOND_NS);
 	woke = test_now_ms();
+	if (raw_error == 0) {
+		pthread_join(raw_thread, NULL);
+		test_say(state, "unplug-kernel: raw-ms=%llu vulkan-later-ms=%lld raw-status=%d",
+		    (unsigned long long)(raw.woke_ms - armed), (long long)woke - (long long)raw.woke_ms, raw.status);
+		close(raw.fence);
+		close(raw.node);
+	}
 	after_unplug = vkGetFenceStatus(state->device, plugged);
 	if (error == VK_SUCCESS && after_unplug == VK_NOT_READY) {
 		test_say(state, "unplug: PASS ms=%llu spent=%d", (unsigned long long)(woke - armed), (int)after_unplug);
