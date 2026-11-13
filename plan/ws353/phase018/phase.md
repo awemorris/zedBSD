@@ -2,7 +2,7 @@
 
 # ws353-p018: 入力の device の hotplug を sessiond に開かせる（100 ms の settle の scan を消す）
 
-Status: planned
+Status: cleared（2026-11-14 P1 q2072-i01、Q1 の確認待ち）
 Parent: [WS353](../ws.md)
 
 ## 目的
@@ -57,3 +57,38 @@ Parent: [WS353](../ws.md)
 7. **誤り**: sessiond の `FAIL`・socket の終わりの node は開かない（再試行しない。次の事象か finding で）。log は `KL SEAT open node=eventN error=E`。devices の thread の /dev/system の read の失敗は thread を終え（`KWL DEVICES unavailable`）、main の購読を戻す。batch の malloc の失敗は開いた fd を閉じ、OVERFLOW と同じに finding を頼む。
 8. **API**（userland、HAL ではない）: `keiland-backend.h` の `kl_backend_options` に `seat_descriptor`、`keiland-backend-evdev.h` に `struct kl_backend_device_batch` と `kl_backend_devices_start`・`_wait`・`_take`・`_stop`・`kl_backend_input_cancel`。Linux・FreeBSD（`evdev/input-evdev.c`）は ENOTSUP と何もしない stub。Makefile・`sources.mk`・mk/ は変えない（既存の file に置く）。kernel・HAL・toolchain は変えない。
 9. **試験**: build（x86_64・arm64・riscv64、warning 0）、style-check。QEMU（Venus、新しい `plan/ws353/tests/qemu-seat-hotplug.sh`、graphical login の自動 login の session）: login の後に挿した USB の keyboard・mouse が 1 回の OPEN で取られる（sessiond の log の OPEN が 1 回、settle の scan が無い = `KWL EVENT input changed` が出ない）、抜くと閉じる、idle の起床が増えない（devices の thread は事象の時だけ）、`--testing`（sessiond 無し）でも挿した keyboard が使える。
+
+## 結果（2026-11-14 P1、q2072-i01、branch `agent/p1-ws353i`、基点 268de0e7cc）
+
+### 変えた物
+
+- sessiond: `seat.c`（seat の socket の表・holder・`OPEN eventN` の答え・SCM_RIGHTS）、`sessiond.h`（`SESSIOND_SEAT_FD` 4・`SESSIOND_SEAT_SOCKETS` 4・API）、`greeter.c`・`session.c`（socket を作り子に fd 4 と `--seat-fd=4`、holder を移す、loop の poll に seat の socket を足す）、`session.sh`（comment だけ）。
+- backend: `keiland-backend.h`（`kl_backend_options.seat_descriptor`。-1 と 0 は「無し」）、`keiland-backend-evdev.h`（`struct kl_backend_device_batch`、`kl_backend_devices_start`・`_wait`・`_take`・`_stop`、`kl_backend_input_cancel`）、`backend-private.h`（devices の fd・取り消しの pipe・seat の lock・`seat_gone`、`kl_backend_input_open`）、`events-zedbsd.c`（devices の購読と待ち、main の購読から INPUT・USB を外し止めで戻す）、`input-zedbsd.c`（sessiond への OPEN と答えの受け取り、finding も sessiond 経由）、`evdev/input-evdev.c`（Linux・FreeBSD の stub）。
+- compositor: `io.c`（devices の thread、batch の列、take・止め）、`main.c`（`--seat-fd`、`input_scan_pace` の settle の枝を消した）、`kwl.h`（`KWL_INPUT_SETTLE_MS`・`KWL_INPUT_SETTLE_SCAN_MS`・`input_settle_until` を消した、devices の field）、`backend-host.c`（`kwl_backend_input_changed` は次の pass の scan だけ）。
+- 試験: `plan/ws353/tests/seat-host.sh`・`seat-host-test.c`（host）、`qemu-seat-hotplug.sh`・`config-amd64-seat.mk`（QEMU）。`plan/tools/system-events/run-host-events.sh` の cc の行に `input-zedbsd.c`（Q1 の許可）。`design.md` の 2-03 と §4 の入力の scan・§9 の残りの記述。
+- HAL・Makefile・mk/・`sources.mk`・kernel・toolchain は変えていない。
+
+### commit
+
+048974e412（設計）、bc24f7d0b8（実装）、9b5a290b8e（規約の直し・QEMU の試験）、f0a8576f6f・41ab86a4af（QEMU の試験の判定の直し）、c0c7f44be5（design.md）、と記録の commit。
+
+### 確かめ
+
+- build（package の規則は -Wall -Wextra -Werror）: x86_64 `make -j4 BUILD_JOBS=4 CONFIGMK=plan/ws353/tests/config-amd64-seat.mk build/x86_64/packages/wayland/.stamp build/x86_64/packages/sessiond/.stamp` rc 0・warning 0。arm64・riscv64 は `CONFIGMK=config/config.rpi4.mk`・`config/config.vf2.mk` で `sysroot` の後に同じ 2 つの stamp、rc 0・warning 0。QEMU の image の build（seat・mainwake の config の userland と disk）も noct の外の warning 0。toolchain と Venus の renderer は p1-ws353h の build から写した（symlink ではない）。
+- host: `sh plan/ws353/tests/seat-host.sh` → `seat-host: PASS 53 checks`（ASan・UBSan。sessiond の答え: 名前の検査・無い node の FAIL 2・holder でない FAIL 1・2 回に分かれた要求・終わった socket の片付け。backend: OPEN の行、FAIL の errno と socket を保つ、OK の fd を受ける、socket の終わりで EPIPE、取り消しで ECANCELED。devices の待ち: ADD・FIDO・smart card・OVERFLOW・取り消し、take の callback）。`sh plan/tools/system-events/run-host-events.sh` → `host-events: 54 checks passed`。`plan/tools/style-check.py` で変えた行の指摘 0（seat.c の 192〜238 行の既存の 3 件は触っていない）。
+- QEMU（Venus、`sh plan/ws353/tests/qemu-seat-hotplug.sh`、3 回目 build/p018/qemu-3 で全 step PASS）: 自動 login の session の compositor が `--seat-fd` で devices の thread を起こし、boot の 3 device を sessiond の OPEN で開いた。login の後に挿した usb-kbd と usb-mouse は、sessiond の OPEN 1 回（要求 1・許可 1、sessiond の log で open が chown より先）で devices の thread が開き、compositor が取った（ssh の確かめの分解能で約 2.35 s）。挿した後の scan（`KWL EVENT input changed`）は 0、抜くと閉じた。idle の 2 つの窓（20 s）は timeout 0（前 1 pass/25.5 s、後 4 pass/26.7 s、timer の発火 0。後の 3 pass の出所は未調査。devices の thread の起床は全体で 4 回 = 挿し 2・抜き 2 で、idle の間は 0）。session の compositor を SIGTERM で終えると `KWL DEVICES stopped wakes=4`、続く greeter は自分の seat の socket で event0〜2 を sessiond に開かせた（holder の移り）。sessiond の refused OPEN・lost answer は 0。1・2 回目の FAIL は試験の script の判定（node 名の取り出し、idle の窓の区切り、厳しすぎた pass の比べ）で、直して 3 回目。
+- QEMU（sessiond 無し、`--testing`、`sh plan/ws353/tests/qemu-main-wake.sh`）を 3 回: 挿した usb-kbd は 3 回とも取られ（184〜200 ms）、抜くと閉じ、挿した後の idle は 1 pass/21 s・timeout 0。全 step の PASS は 1 度も揃わなかった: 1 回目 idle-30（起動の pass が窓に入った。KWL MODE window が遅い）、2 回目 start（window mode まで 120 s を越えた、at_ms=70734）、3 回目 stop（SIGTERM から 20 s の内に KWL EXIT を見なかったが、記録の log には `KWL TIMER stopped`・`KWL EXIT` が出ている）。どれも host の負荷（load 4〜7）の時間の境で、p008 の記録でも KWL MODE window の at_ms は 62〜148 s とばらつく。この Phase の変えた所（挿した device、idle の起床）の step は 3 回とも PASS。
+
+### 設計からの変更
+
+- devices の thread の起床の数え（`KWL DEVICES stopped wakes=N`）を足した（試験の判定に使う）。
+- `kl_backend_input_events` は devices の thread が動く時も 1（devices が事象で開くので、周期の scan は要らない）。
+- devices の thread が誤りで終わった時は、取り消し（for good）をせずに join だけして main の購読を戻す（finding の sessiond への要求は使い続ける）。
+
+### 未実施・残り
+
+- Log Out の handoff（session → 新しい greeter の holder の移り）は QEMU で流していない（SIGTERM で終えた後の greeter は確かめた）。login 画面から password での login（greeter → session）も未実施。
+- 実機（5330 など）は未実施。
+- idle の後の窓の 3 pass（timer 0・timeout 0）の出所は未調査（devices の thread の起床ではない）。
+- 開いた fd の強制の取り上げは kernel の機能（revoke）が要り範囲の外（Q1 確認済み）。chown（`sessiond_seat_give`）はそのまま。sessiond 経由の compositor は chown 無しでも開けるので、event の node を利用者に chown しない形（他の利用者が鍵入力を読めなくなる）は別の判断として残る。
+- `qemu-main-wake.sh` の start・stop の時間の境（120 s・20 s）は負荷の高い host で足りない事がある（試験の道具の問題、直していない）。

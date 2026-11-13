@@ -74,7 +74,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | [p015](phase015/phase.md) | backend と WSI の小さな直し（network の答えの fd、WSI の 50 ms の slice） | cleared（2026-11-14 P2 q2066、Q1 の確認待ち。branch `agent/p2-ws353c`、a7f8bb3f34・3fabe10acb。3 機種の build warning 0、host の daemon-link 試験 PASS、QEMU（Venus）の `qemu-answer-wake.sh` 全 step PASS（network の link の待ちは idle 3 s で 0・3 s の join で 2、POLLERR 0、答えは 0〜1 ms で取れる。WSI は短い timeout の待ち 0、compositor を止めた間は 1 s の pace で進む）。MSG_PEEK の回避も消した。settings の画面の操作は未実施） | p001（独立） |
 | [p016](phase016/phase.md) | 試験: QEMU の回帰と 5330 の idle（電力・PC2・thread ごとの起床） | planned | p002〜p015 |
 | [p017](phase017/phase.md) | 規約の全文の見直し | planned | p016 |
-| [p018](phase018/phase.md) | 入力の device の hotplug を sessiond に開かせる（fd の受け渡し、100 ms の settle の scan を消す） | planned（q2072、P1） | p008 |
+| [p018](phase018/phase.md) | 入力の device の hotplug を sessiond に開かせる（fd の受け渡し、100 ms の settle の scan を消す） | cleared（2026-11-14 P1 q2072、Q1 の確認待ち。branch `agent/p1-ws353i`、048974e412（設計）・bc24f7d0b8・9b5a290b8e と試験・記録の commit。sessiond の seat の socket（fd 4、`--seat-fd`、OPEN eventN → SCM_RIGHTS、holder だけ許す）、compositor の devices の thread（/dev/system の INPUT・USB）、settle を消した。3 機種の build warning 0、host 試験 2 本 PASS、QEMU の `qemu-seat-hotplug.sh` 全 step PASS（挿した keyboard・mouse は sessiond の OPEN 1 回、scan 0、devices の thread の起床は挿し抜きの 4 回だけ、後の greeter も自分の socket）。sessiond 無しの `qemu-main-wake.sh` は挿した keyboard が 3 回とも PASS、全 step は負荷の時間の境で揃わず。Log Out の handoff・実機は未実施） | p008 |
 | [p019](phase019/phase.md) | printers の 1 s の見回りを消す（printd の push、一覧は設定から、libkeiland は使う時だけ作る） | planned | p008 |
 
 ## ユーザーの決定（続き）
@@ -91,6 +91,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 
 ## Resume point
 
+- 2026-11-14 07:4x P1（q2072-i01、branch `agent/p1-ws353i`）: p018 を実装（sessiond の seat の socket で入力の device を開かせる、compositor の devices の thread、settle の scan を消した）。3 機種の build warning 0、host 試験 PASS、QEMU の `qemu-seat-hotplug.sh` PASS（[phase018](phase018/phase.md) の結果）。Log Out の handoff の QEMU と実機は未実施。
 - 2026-11-14 06:2x P1（q2068-i01、branch `agent/p1-ws353h`）: p008 を実装（`kwl_due`・`due_ms` を消し poll は -1、animation は frame の完了で、期限・pacing・入力の scan・時計は timer、子の回収は SIGCHLD の後、network・phone・machine の取り込みは wake の後）。3 機種の build warning 0、host 試験 PASS、QEMU（新しい `plan/ws353/tests/qemu-animation.sh`、idle の閾値を timeout 0 にした main-wake・deadlines・ui-deadlines）PASS（[phase008](phase008/phase.md) の結果）。状態に追従する tick が毎 pass に残る点は Q1 の判断待ち。次は p010（p009・p011 の後）。
 - 2026-11-14 05:03 P2（q2066-i01、branch `agent/p2-ws353c`）: p015 を実装（network の link の poll に要求と scan の答えの fd を入れ 10 ms と MSG_PEEK の回避を消す、scan の打ち切りを期限に。WSI の 50 ms の slice を消し期限まで眠る、1 s の pace は残す）。3 機種の build warning 0、host 試験と QEMU（`plan/ws353/tests/qemu-answer-wake.sh`）PASS（[phase015](phase015/phase.md) の結果）。
 - 2026-11-14 P2（q2064-i01、branch `agent/p2-ws353b`）: p014 を実装（kernel の REFRESH の登録、`drv_gpu_display_refreshed`、任意の `refresh_arm` op、push の無い device の refresh watcher、amdrdna の frame 割り込みの push、libvulkan の refresh fence を kernel の fence に、`VULKAN_SYNC_POLL_NS` を消した）。3 機種の build warning 0、QEMU（`plan/ws353/tests/qemu-refresh-fence.sh`）2 回 PASS（[phase014](phase014/phase.md) の結果）。i915 の vblank の割り込みの push は Q1 が後の Phase か Bug に（要る物は phase014 の「Q1 の問いへの答え」）。
