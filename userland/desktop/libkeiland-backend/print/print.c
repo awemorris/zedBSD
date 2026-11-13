@@ -468,6 +468,33 @@ kl_backend_print_descriptor(
 }
 
 /*
+ * Gives the time the update is to run again without an event on the
+ * descriptor: a daemon shut for writing given up at the end of its time.
+ */
+uint64_t
+kl_backend_print_due(
+	const struct kl_backend_print *print)
+{
+	uint64_t due;
+
+	/* Nothing open, or no daemon shut for writing: nothing waits for a time. */
+	if (print == NULL)
+		return UINT64_MAX;
+	if (print->socket < 0 || print->shut_until == 0)
+		return UINT64_MAX;
+
+	/*
+	 * The update gives the daemon up once print_now reaches shut_until,
+	 * that is from the start of the monotonic second shut_until - 1
+	 * (print_now counts one past the clock's seconds).
+	 */
+	due = (uint64_t)(print->shut_until - 1) * 1000U;
+
+	/* Succeeded: the end of the shut daemon's time. */
+	return due;
+}
+
+/*
  * Gives the writes and the checks of the settings file to the host, which
  * runs them on a thread of its own from now on: no writer thread is
  * started, and the update does not look at the file.

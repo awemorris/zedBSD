@@ -93,6 +93,9 @@ kwl_backend_session_resumed(
 
 	/* The devices the pause let go of whose descriptors the seat left open are read again (ws213-p004). */
 	kwl_input_attach_all(server);
+
+	/* Another session of the user may have changed the printers meanwhile: their file is checked. */
+	kwl_printers_resumed();
 	printf("KWL SEAT resumed\n");
 }
 

@@ -1330,13 +1330,22 @@ int kl_backend_print_update(struct kl_backend_print *print, unsigned *changed);
 int kl_backend_print_descriptor(const struct kl_backend_print *print, short *events);
 
 /*
+ * The time (CLOCK_MONOTONIC milliseconds) by which kl_backend_print_update
+ * is to be called again even when nothing comes on the descriptor: a
+ * daemon shut for writing is given up then.  UINT64_MAX when nothing waits
+ * for a time.
+ */
+uint64_t kl_backend_print_due(const struct kl_backend_print *print);
+
+/*
  * The settings file's writes and checks on a thread of the host's (the
  * compositor's file I/O thread), so that its own thread neither starts a
  * writer nor looks at the file: after kl_backend_print_host, the host
  * calls kl_backend_print_write on its thread when
  * kl_backend_print_write_wanted says changes wait (the update answers them
- * once made), and checks the file for another session's change from time
- * to time: kl_backend_print_check_begin and _end on its own thread,
+ * once made), and checks the file for another session's change when it
+ * has a reason to (a new reader of the printers, the session back in
+ * front): kl_backend_print_check_begin and _end on its own thread,
  * kl_backend_print_check_run between them on the other.  The close makes
  * the changes still waiting.
  */
