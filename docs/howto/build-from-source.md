@@ -1,287 +1,156 @@
 # Build zedBSD from source
 
-Status: current for the 2026-10-30 build and image interface
+Status: current for the build system of 2026-11-13 (the top-level `Makefile`
+and `mk/`)
 
-This guide builds a zedBSD disk image from a source checkout and starts the
-supported x86 QEMU targets. Commands are run from the repository root.
+This guide builds a zedBSD disk image from a source checkout.  Commands are
+run from the repository root.  The Raspberry Pi 5 is used as the example;
+the other platforms differ in the configuration file and the image they
+write.
 
 ## 1. Host prerequisites
 
-The normal build expects a POSIX-like host with:
+The build expects a POSIX-like host (x86_64 Linux for the prebuilt LLVM of
+section 3) with:
 
-- GNU Make, CMake, Ninja, a host C/C++ compiler, `patch`, `curl`, `tar`,
-  `gzip`, `sha256sum`, and a POSIX shell; Git is required for development;
-- Python 3 for the interactive `make menuconfig` frontend;
-- `qemu-system-x86_64` for amd64 and `qemu-system-i386` for PC/AT i386;
-- enough free space for `build/`, extracted Noct source, downloaded external
-  inputs, and disk images.
+- GNU Make 4.4 or later (the `Makefile` uses `.WAIT`), a host C/C++
+  compiler, CMake, `patch`, `curl`, `tar`, `gzip`, `xz`, `sha256sum` and a
+  POSIX shell; Git for development;
+- Python 3 (the image tools);
+- `mtools` (`mformat`, `mcopy`, `mmd`) for the FAT partition of the
+  Raspberry Pi images;
+- enough free space for `build/` (the toolchain, the downloaded sources and
+  the images).
 
-PC-98 requires a QEMU build that supplies the non-upstream `pc9821` machine.
-Ordinary upstream `qemu-system-i386` is sufficient for PC/AT, but not PC-98.
+No host installation prefix is modified: the toolchain, the downloaded
+sources and every output stay below `build/`.
 
-No host installation prefix is modified. Host tools, including the verified
-Noct release extraction, remain below `build/`.
+## 2. Choose a configuration
 
-## 2. Obtain and build the host toolchain
+A build reads one configuration file, `config.mk` by default.  The tree
+carries one per platform in `config/`:
 
-On an x86_64 Linux host, install the permanent, digest-pinned LLVM 23.1.0
-binary cache from release `rev-0` before the normal toolchain target:
-
-```sh
-make toolchain-cache
-make -j16 toolchain
-```
-
-`make toolchain-cache` is an explicit acceleration path. It verifies the
-tracked SHA-256, validates archive paths, installed identity, required tools,
-versions and license, then installs below `build/llvm/`. It does not silently
-fall back to unverified bytes. The following command remains the source-build
-path on every supported host, and is used automatically when no accepted cache
-was installed:
-
-```sh
-make -j16 toolchain
-```
-
-A build does not need `make download`: when a configured package is built, its
-own Makefile fetches and verifies the inputs it needs, so only the packages the
-configuration selects are fetched (CI builds this way too).  The top-level
-`make download` is for something else: it fetches every declared source and
-firmware input, selected or not, to make a complete source tree that can be
-frozen and kept on safe media.  To make that tree, run:
-
-```sh
-make download
-```
-
-This verifies the pinned upstream Noct source archive and the optional
-firmware inputs even when those firmware packages are not selected. Downloaded
-bytes are ignored by Git but remain inside the working tree, allowing the
-post-download tree to be packed as a multi-license source distribution.
-
-Both host and target Noct come from upstream release `v2.0.3`, the commit
-`f6efa83a8ccb9262ce7f802c0e89e23a39c31c5a`. The tracked archive identity is
-2,529,835 bytes with SHA-256
-`b46863cecfc885a98d3d84e8ff892d0205408e47cf08be024f5e0d502ac0006c`.
-Acquisition checks the size, digest, archive paths, member types, strict
-zero-fuzz patches, and a complete extracted-source manifest before publication.
-It never substitutes a Git checkout for that pinned archive.
-
-The toolchain target verifies and extracts Noct below `build/NoctLang`, builds
-the host interpreter with the host compiler, installs or accepts the patched
-project LLVM under `build/llvm/`, constructs amd64/i386 target sysroots, and
-runs focused smoke checks. A second invocation is incremental and must also
-succeed:
-
-```sh
-make toolchain
-test -x build/NoctLang/build-static/noct
-```
-
-The build ownership boundary is:
-
-| Artifact | Builder and location | Role |
+| Platform | Configuration | Output directory |
 | --- | --- | --- |
-| Host Noct | Host C/C++ compiler; `build/NoctLang/build-static/noct` | Runs repository-owned build, image, and validation scripts |
-| Project LLVM | Host C/C++ compiler or verified `rev-0` cache; `build/llvm/` | Builds every maintained x86 zedBSD target artifact |
-| amd64 sysroot | Project LLVM inputs under `build/amd64/sysroot/` | Public headers, startup objects, libc, builtins, and linker inputs for `x86_64-unknown-zedbsd` |
-| i386 sysroot | Project LLVM inputs under `build/i386/sysroot/` | Shared PC/AT and PC-98 boundary for `i386-unknown-zedbsd` |
-| Target Noct | Project LLVM, LLD, and amd64 sysroot; installed as `/usr/bin/noct` when selected | Runs inside zedBSD; does not replace host Noct |
+| PC (x86_64) | `config/config.x86_64.mk` | `build/x86_64/` |
+| Raspberry Pi 5 and Raspberry Pi 500 | `config/config.rpi5.mk` | `build/rpi5/` |
+| Raspberry Pi 4 | `config/config.rpi4.mk` | `build/rpi4/` |
+| PC/AT (i386) | `config/config.i386.mk` | `build/i386/` |
 
-The x86_64 Linux cache is an asset of release `rev-0` named after the LLVM
-version and the zedBSD patch level, currently
-`zedbsd-llvm-23.1.0-zedbsd11-x86_64-linux.tar.gz`; its SHA-256 is tracked in
-`toolchain/llvm/version.mk`.
-`make toolchain-cache` validates the archive, installed identity, tool set,
-versions, and license. `make -j16 toolchain` remains the authoritative
-source-build path and uses the official LLVM `23.1.0` source plus the tracked
-zedBSD target patch when no accepted cache is installed.
+The other files of `config/` (`config.pc98.mk`, `config.visionfive2.mk`,
+`config.odroidc5.mk`) name platforms the new `Makefile` does not build yet.
+The files below `config/ci/` belong to the build system that was replaced and
+are not read by this `Makefile`.
 
-Network access is needed only when a required verified release archive is
-absent.
-Each userland item also accepts `make download`, `make patch`, `make build`,
-and `make install` from its own directory. In-tree items use no-op acquisition
-and patch stages.
-
-## 3. Select a target
-
-Create or replace `config.mk` with the menu:
+Either name the file on every command with `CONFIGMK=`:
 
 ```sh
-make menuconfig
+make CONFIGMK=config/config.rpi5.mk <target>
 ```
 
-The main menu has these entries:
-
-| Entry | What it sets |
-| --- | --- |
-| **CPU / Board** | The CPU and the board it boots on: `x86_64` (UEFI + ACPI PCs), `arm64` (Raspberry Pi 4 or ODROID-C5), `i386` (PC-9800 or PC/AT), `RISC-V 64` (QEMU virt or StarFive VisionFive 2) or `RISC-V 32` (QEMU virt). Choosing a CPU selects its first board. |
-| **Boot Option** | Graphical boot (no kernel messages on the boot console), graphical login (starts Keiland by itself), and mirroring the kernel messages to the serial port. |
-| **Drivers** | The kernel's device drivers, by group (Disk, Input, GPU, Audio, Ethernet, WiFi, Bluetooth, USB, Platform). |
-| **Development** | Whether the image carries the development files (`/usr/include`, the `.so` links, `.pc` and `.a` files). |
-| **Base** | The base programs (`/bin`, `/sbin`) and the compilers, by group. |
-| **Retro** | The X11 programs `Xzed`, `zwm`, `zshell` and `zterm`, on every CPU. |
-| **Desktop** | Keiland and its applications (shown only for the CPUs the desktop is built for). |
-| **Packages** | The third-party packages of `userland/packages/`, one submenu per directory (Languages, Development, Libraries, Multimedia, Fonts, Network, Security, ...). |
-| **Firmware** | The device firmware packages (Intel graphics, Wi-Fi and Bluetooth, Realtek Wi-Fi). |
-| **Build boot image** | Saves `config.mk` and builds the disk image (see below). |
-| **Exit** | Saves `config.mk` and leaves. |
-
-The build adds the programs a selected program depends on. `config.mk` is the
-sole selected-target input; normal build targets reject a missing or invalid
-file.
-
-Some settings are not in the menu and are written in `config.mk` by hand: the
-disk layout (`ZEDBSD_VARIANT`), the kernel's options, the X11 programs other
-than Retro's, the test programs and hooks, and Noct's GPU accelerator. The menu
-reads the values such a `config.mk` holds and writes them back unchanged.
-
-**Build boot image** asks for confirmation, saves `config.mk` and runs the
-`disk-image` build with as many jobs as the machine has processors
-(`ZEDBSD_JOBS` in the environment overrides it). It shows a progress bar of
-the targets built against those to build and the target being built now, and
-writes make's output to `build/<target>/menuconfig-build.log` (for example
-`build/amd64/menuconfig-build.log`). At the end it shows whether the build
-succeeded, and the end of the log when it failed. The same build without the
-menu is `make -j16 disk-image` (section 4).
-
-On amd64 `ZEDBSD_VARIANT` chooses the disk image's layout:
-
-| Value | Menu label | Image boot paths | Expected firmware behavior |
-| --- | --- | --- | --- |
-| `native` (default) | `UEFI, UFS root partition (for PC/AT)` | GPT: ESP with only the UEFI loader; a FAT32 partition of the Basic Data type labelled `ZEDBSD` with `vmunix`, `zedbsd.cfg` and the logo (shown at `/boot/boot0`, mountable by Windows and macOS); a UFS root partition mounted read-write; a swap partition. The running system shows the ESP at `/boot/efi` | Boots with OVMF; does not boot with SeaBIOS |
-| `hybrid` | `UEFI + BIOS (for PC/AT)` | Complete GPT/ESP plus compatibility BIOS path | Boots with OVMF and SeaBIOS |
-| `uefi` | `UEFI (for Apple)` | Pure Protective MBR, primary GPT, ESP, and payload FAT32; no BIOS payload (for Apple computers) | Boots with OVMF; does not boot with SeaBIOS |
-| `bios` | `BIOS (for PC/AT)` | Legacy MBR and BIOS payload; no GPT or ESP | Boots with SeaBIOS; does not boot with OVMF |
-
-The variant describes disk-image composition only; it does not change the
-kernel, target triple, or compiled BIOS/UEFI loader artifacts. Disk capacity is
-not a build setting. Each amd64 variant publishes its image at
-`build/amd64/hdd-image.img`, so preserve a copy elsewhere if several outputs
-are needed at once.
-
-The i386 targets (PC/AT and NEC PC-98) are chosen under **CPU / Board** as the
-`i386` CPU with the `PC/AT` or `PC-9800` board.
-
-The maintained x86 output directories are:
-
-| Selection | Build directory | Disk image | Emulator |
-| --- | --- | --- | --- |
-| PC/AT amd64 | `build/amd64/` | `build/amd64/hdd-image.img` | `qemu-system-x86_64` |
-| PC/AT i386 | `build/pcat/` | `build/pcat/hdd-image.img` | `qemu-system-i386` |
-| NEC PC-98 i386 | `build/pc98/` | `build/pc98/hdd-image.img` | PC-98-capable `qemu-system-i386` |
-
-Changing target requires rerunning `make menuconfig`; artifacts for other
-targets may coexist below `build/`.
-
-## 4. Build
-
-Build the selected disk image with the supported parallel build:
+or copy it to `config.mk` once and leave `CONFIGMK=` out:
 
 ```sh
-make -j16 disk-image
+cp config/config.rpi5.mk config.mk
 ```
 
-The default target is identical:
+The file sets `PLATFORM` (with `ARCHITECTURE` and `BOARD`); the platform's
+defaults, `mk/platform-<platform>/defaults.mk`, choose its drivers and
+programs, and `mk/config.mk` lists every setting with its description.
+
+## 3. Install the toolchain
+
+On an x86_64 Linux host, install the prebuilt LLVM below `build/llvm/`:
 
 ```sh
-make -j16
+make CONFIGMK=config/config.rpi5.mk llvm-toolchain-cached
 ```
 
-Useful narrower targets are:
+It downloads the archive of release `rev-0` of the zedBSD repository (the
+asset named in `mk/llvm/version.mk`) once to `build/releases/` and unpacks it;
+when `build/llvm/bin/clang` is already there it does nothing.  On other hosts,
+or to build LLVM yourself from the official LLVM 23.1.0 source and the zedBSD
+patch in `mk/llvm/patches/`, run `make CONFIGMK=... toolchain` instead; it
+takes much longer.  The host Noct interpreter that runs the image scripts is
+built from source below `build/NoctLang/` by the first build that needs it
+(`make CONFIGMK=... toolchain-cached` does both at once).
+
+## 4. Build the sysroot
+
+The C library and the headers the kernel and the programs are compiled
+against:
 
 ```sh
-make -j16 vmunix      # kernel only
-make -j16 rootfs      # selected root filesystem
-make -j16 world       # kernel and root filesystem
-make -j16 bootloader  # selected bootloader
+make CONFIGMK=config/config.rpi5.mk sysroot
 ```
 
-A successful disk-image build runs the target's structural validators. The
-project does not use `make check` as the acceptance interface.
+Run it again after the headers in `include/` change: the kernel reads
+`build/<platform>/sysroot/usr/include` before the tree's `include/`.
 
-## 5. Start QEMU
+## 5. Accept the firmware licenses
 
-For a selected BIOS-capable profile, the simplest launch is:
+Some platforms need firmware that is not part of zedBSD and carries its own
+license.  The Raspberry Pi 5 image needs the boot device trees (Raspberry
+Pi's firmware repository, `COPYING.linux`) and the firmware of its BCM43455
+Wi-Fi chip (the Cypress licence).  Each one is fetched, checked against its
+recorded size and SHA-256, and used only after you have read and accepted its
+license.  Settle them before the build, since a parallel build cannot ask:
 
 ```sh
-make run
+make CONFIGMK=config/config.rpi5.mk firmware-licenses
 ```
 
-On amd64 with the default `native` profile, `make run` boots the image through
-OVMF (`OVMF_CODE`, `OVMF_VARS`, by default under `/usr/share/OVMF/`) from an
-NVMe disk, with a copy of the variables file under the build directory. For the
-other profiles it uses the default QEMU PC machine and SeaBIOS, which suits
-`hybrid` and `bios`; a correctly built `uefi` image is expected not to boot
-through that command. Use an OVMF launch (below) for the UEFI path; give every run a disposable
-writable OVMF variables file and never let firmware modify the source image
-used as retained evidence.
+Each license is shown in full and asked about once; the answer is kept in
+`build/sources/firmware/<package>/license-accepted` and not asked again.
+Answering no stops the build.  `yes | make CONFIGMK=... firmware-licenses`
+accepts every license without reading it; use it only when you have read
+them.
 
-For amd64 `native` (and `uefi`), the equivalent explicit command is:
+## 6. Build the image
 
 ```sh
-cp /usr/share/OVMF/OVMF_VARS_4M.fd build/amd64/run-ovmf-vars.fd
-qemu-system-x86_64 -machine q35 -m 8192 -smp 4 \
-  -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
-  -drive if=pflash,format=raw,file="$(pwd)/build/amd64/run-ovmf-vars.fd" \
-  -drive file="$(pwd)/build/amd64/hdd-image.img",format=raw,if=none,id=boot \
-  -device nvme,drive=boot,serial=zedbsd
+make CONFIGMK=config/config.rpi5.mk -j8 disk
 ```
 
-For amd64 `hybrid` and `bios` through SeaBIOS:
+`disk` (also the default target) builds the kernel, the programs, the root
+file system, the firmware and the boot files, then the image.  For the
+Raspberry Pi 5 the image is `build/rpi5/hdd-image.img`: an MBR disk whose
+FAT32 partition holds `config.txt`, `cmdline.txt`, `vmunix`, the device trees
+of the Pi 5 and the Pi 500 and their license, followed by the UFS root.  The
+bootloader in the board's EEPROM picks the device tree that matches the
+board.  Write the image to a microSD card (replace `/dev/sdX` with the card,
+not a disk you use):
 
 ```sh
-qemu-system-x86_64 -machine pc -m 512 -smp 4 \
-  -drive file="$(pwd)/build/amd64/hdd-image.img",format=raw,if=ide \
-  -boot c
+sudo dd if=build/rpi5/hdd-image.img of=/dev/sdX bs=4M conv=fsync
 ```
 
-For PC/AT i386:
+Narrower targets:
 
 ```sh
-qemu-system-i386 -machine pc -m 128 \
-  -drive file="$(pwd)/build/pcat/hdd-image.img",format=raw,if=ide \
-  -boot c
+make CONFIGMK=config/config.rpi5.mk vmunix      # the kernel, build/rpi5/vmunix
+make CONFIGMK=config/config.rpi5.mk userland    # the programs
+make CONFIGMK=config/config.rpi5.mk rootfs      # the root file system
+make CONFIGMK=config/config.rpi5.mk bootloader  # the files of the FAT partition
 ```
 
-For PC-98, point `QEMU` at the compatible binary if it is not on `PATH`:
+`make help` shows the main targets.  Tools that run their own parallel builds
+(the CMake builds) use `BUILD_JOBS` jobs, 16 or the machine's processor count
+when that is smaller: `make BUILD_JOBS=4 ...`.
 
-```sh
-make QEMU=/path/to/qemu-system-i386 run
-```
+## 7. Diagnostics
 
-The initial success marker for the maintained x86 images is an init sequence
-followed by `login:`. With the menu's default graphical login the greeter starts
-first; when it finds no display it can use (as under the QEMU commands above),
-it ends and the console login takes over, so the screen still ends with
-`login:`. Exit QEMU normally with its UI or monitor controls; do
-not write to a real disk device when following this guide.
-
-The `UEFI (for Apple)` label describes a portable, UEFI-only disk-image layout;
-it does not make QEMU emulate Apple hardware. That layout and its relocated-GPT
-handling have passed the Intel Mac physical boot boundary. The separate Apple
-`05ac:8406` Internal Memory Card Reader can attach with no medium and does not
-publish a disk; media-insertion polling and later disk publication for that
-reader are not implemented. The accepted boot used a separate USB Mass Storage
-device, so the reader limitation is not a boot dependency.
-
-## 6. Diagnostics
-
-- `config.mk is missing or invalid`: run `make menuconfig` and save a target.
-- A UEFI-only amd64 image appears not to boot under `make run`: this is the
-  expected SeaBIOS-negative profile; use the OVMF launch of section 5.
-- Noct download/build failure: verify network access, `curl`, `tar`, `patch`,
-  CMake, and the host C compiler, then rerun `make toolchain`; do not replace the recorded archive with unverified bytes.
-- `Missing project target tool` or `Missing target sysroot`: on x86_64 Linux,
-  run `make toolchain-cache` and then `make toolchain`; otherwise run
-  `make toolchain` to bootstrap LLVM from verified source.
-- QEMU command not found: install the appropriate system emulator or pass
-  `QEMU=/absolute/path/to/qemu-system-*` to `make run`.
-- PC-98 reports that the machine is unavailable: use the documented custom
-  PC-98-capable QEMU; upstream QEMU does not implement this target.
-- To see the authoritative target list and build summary, run `make help` and
-  `make list-targets`.
-
-Build outputs are disposable, but `make clean`/`make distclean` removal scope
-should be reviewed before use in a workspace containing locally valuable
-artifacts.
+- `config.mk: No such file or directory`: give `CONFIGMK=` or copy a file of
+  `config/` to `config.mk` (section 2).
+- `No rule to make target 'mk/platform-<name>/Makefile'`: the configuration
+  names a platform this `Makefile` does not build (section 2).
+- `PLATFORM is not set` followed by a prompt: the configuration file does not
+  set `PLATFORM`; start from a file of `config/`.
+- A missing `clang` or sysroot: run sections 3 and 4.
+- `rpi5-boot-firmware: cache must contain exactly 4 entries`: the boot files
+  in `build/sources/firmware/rpi5-boot/<revision>/` were fetched by an older
+  tree that listed three (before the Pi 500's device tree was added).  Remove
+  that `<revision>` directory and build again: the four files are fetched and
+  checked, and the license already accepted is not asked again.
+- A firmware license was declined: run `make CONFIGMK=... firmware-licenses`
+  again and accept it.
