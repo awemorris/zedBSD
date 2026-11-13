@@ -81,7 +81,7 @@ ml_smtp_send(
 	error_text[0] = '\0';
 	error = ml_conn_open(&session.conn, &account->smtp);
 	if (error != 0) {
-		/* OpenSSL's words for a failure of TLS (another failure's are the errno value's). */
+		/* The TLS library's words for a failure of TLS (another failure's are the errno value's). */
 		if (error == EPROTO || error == ML_ERROR_UNTRUSTED || error == EPROTONOSUPPORT)
 			(void)snprintf(error_text, size, "%s", ml_tls_error());
 		return error;

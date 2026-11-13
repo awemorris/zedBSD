@@ -1,7 +1,7 @@
 #!/bin/sh
 # ws169-p003, p004: builds and runs the host tests of Mail's backend (host-mail-backend.c with
-# userland/desktop/mailer/{tls,conn,imap,smtp,mime,compose,code}.c, the host's OpenSSL loaded as Mail loads the
-# package's) and of its thread (host-mail-sync.c with sync.c) under ASan and UBSan, each against a fresh
+# userland/desktop/mailer/{tls,conn,imap,smtp,mime,compose,code}.c, libssl-compat and libcrypto-compat built for the
+# host and linked) and of its thread (host-mail-sync.c with sync.c) under ASan and UBSan, each against a fresh
 # fake-mail-server.py with a CA and a certificate for localhost made here.
 #   sh plan/tools/mail/run-host-mail-backend.sh [OUTDIR]   (default build/ws169/host-mail-backend; a fresh run
 #   directory under it each time, which Q1's cleaning removes)
@@ -12,16 +12,18 @@ base=${1:-build/ws169/host-mail-backend}
 mkdir -p "$base"
 out=$(mktemp -d "$base/run.XXXXXX")
 M=userland/desktop/mailer
+sh plan/tools/tls/host-compat-libs.sh "$base/compat"
+compat=$base/compat
 ${CC:-cc} -std=gnu17 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -pthread \
-	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I. -Iuserland/desktop/include \
+	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I. -Iuserland/desktop/include -I"$compat/include" \
 	plan/tools/mail/host-mail-backend.c $M/tls.c $M/conn.c $M/imap.c $M/smtp.c $M/mime.c $M/jis.c $M/structure.c $M/compose.c $M/code.c \
 	userland/desktop/libkeiland/platform/thread-posix.c userland/desktop/libkeiland/platform/socket-posix.c \
-	-ldl -o "$out/host-mail-backend"
+	"$compat/libssl-compat.a" "$compat/libcrypto-compat.a" -lpthread -o "$out/host-mail-backend"
 ${CC:-cc} -std=gnu17 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -pthread \
-	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I. -Iuserland/desktop/include \
+	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I. -Iuserland/desktop/include -I"$compat/include" \
 	plan/tools/mail/host-mail-sync.c $M/sync.c $M/tls.c $M/conn.c $M/imap.c $M/smtp.c $M/mime.c $M/jis.c $M/structure.c $M/compose.c $M/code.c \
 	userland/desktop/libkeiland/platform/thread-posix.c userland/desktop/libkeiland/platform/socket-posix.c \
-	-ldl -o "$out/host-mail-sync"
+	"$compat/libssl-compat.a" "$compat/libcrypto-compat.a" -lpthread -o "$out/host-mail-sync"
 # The tests' CA and the server's certificate for localhost.
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=ws169-test-ca -keyout "$out/ca.key" -out "$out/ca.pem" \
 	-addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign >/dev/null 2>&1

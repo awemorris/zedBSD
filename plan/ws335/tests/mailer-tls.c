@@ -7,17 +7,14 @@
 
 /*
  * One connection of Mail's TLS (userland/desktop/mailer/tls.c) to a test
- * server, for run-mailer-tls.sh: the program is built once against the
- * host's OpenSSL and once with ML_TLS_COMPAT (libssl-compat and
- * libcrypto-compat), and each case is one run.
+ * server, for run-mailer-tls.sh: the program is built with libssl-compat
+ * and libcrypto-compat (host static archives), and each case is one run.
  *
  *   mailer-tls <ca.pem|-> <port> <pin|-> ok
  *       the connection is made; "hello" sent, the server's reversed line
  *       ("olleh", openssl s_server -rev) read back
  *   mailer-tls <ca.pem|-> <port> <pin|-> untrusted <fingerprint>
  *       ML_ERROR_UNTRUSTED, and ml_tls_fingerprint is the given one
- *   mailer-tls - <port> - noload <text>
- *       EPROTONOSUPPORT, and ml_tls_error contains the text
  *
  * The host name is always localhost; the server is at 127.0.0.1, or at the
  * IPv4 address in MAILER_TLS_ADDRESS (the host as a QEMU guest sees it).
@@ -129,7 +126,7 @@ main(
 
 	/* The arguments. */
 	if (argc < 5) {
-		printf("usage: mailer-tls <ca.pem|-> <port> <pin|-> ok|untrusted <fingerprint>|noload <text>\n");
+		printf("usage: mailer-tls <ca.pem|-> <port> <pin|-> ok|untrusted <fingerprint>\n");
 		return EXIT_FAILURE;
 	}
 	pin = argv[3];
@@ -145,19 +142,6 @@ main(
 		return fail("cannot connect");
 	tls = NULL;
 	error = ml_tls_open(descriptor, "localhost", pin, &tls);
-
-	/* A build whose library is missing says so. */
-	if (strcmp(expect, "noload") == 0) {
-		close(descriptor);
-		if (argc < 6)
-			return fail("no text given");
-		if (error != EPROTONOSUPPORT)
-			return fail("not EPROTONOSUPPORT");
-		if (strstr(ml_tls_error(), argv[5]) == NULL)
-			return fail("the reason does not name the library");
-		printf("mailer-tls: PASS noload: %s\n", ml_tls_error());
-		return EXIT_SUCCESS;
-	}
 
 	/* A certificate that is not trusted, with its fingerprint. */
 	if (strcmp(expect, "untrusted") == 0) {

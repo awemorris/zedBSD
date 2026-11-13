@@ -7,8 +7,8 @@
 
 /*
  * Mail's backend: a
- * connection to a mail server, plain or TLS (the OpenSSL package loaded
- * when first needed), IMAP4rev1 to read the folders, SMTP to send, the
+ * connection to a mail server, plain or TLS (libssl-compat and
+ * libcrypto-compat), IMAP4rev1 to read the folders, SMTP to send, the
  * reading and the writing of a message (RFC 5322 and MIME), and the
  * search for a sign-in code.  Nothing here knows the window or libkeiland,
  * so that the host tests build it alone against their own servers.
@@ -187,7 +187,7 @@ struct ml_structure {
 /* What a FETCH gives for each message: its UID, its ML_* flags, its size, and its bytes (up to ML_FETCH_BYTES). */
 typedef void (*ml_imap_fetched_fn)(void *data, uint32_t uid, unsigned flags, size_t size, const char *raw, size_t length);
 
-/* The TLS of the OpenSSL package (tls.c). */
+/* TLS (tls.c): libssl-compat and libcrypto-compat. */
 int ml_tls_add_ca_file(const char *path);
 int ml_tls_open(intptr_t socket, const char *host, const char *pin, void **tls);
 int ml_tls_read(void *tls, unsigned char *bytes, size_t length, size_t *received);

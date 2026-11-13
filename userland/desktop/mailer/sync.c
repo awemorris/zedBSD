@@ -990,7 +990,7 @@ sync_idle_stop_all(
 
 /*
  * Tells the window that something failed, in words: what could not be
- * done on which server, and why (the server's or OpenSSL's words, or the
+ * done on which server, and why (the server's or the TLS library's words, or the
  * failure's meaning).  An untrusted certificate's fingerprint goes with
  * it, and whether the server is the account's SMTP one.
  */
@@ -1029,7 +1029,7 @@ sync_failed(
 	sync_post(sync, result);
 }
 
-/* Says why something failed: the server's or OpenSSL's words when there are any, else the failure's meaning. */
+/* Says why something failed: the server's or the TLS library's words when there are any, else the failure's meaning. */
 static void
 sync_reason(
 	int error,
@@ -1039,13 +1039,13 @@ sync_reason(
 {
 	const char *meaning;
 
-	/* An untrusted certificate, with OpenSSL's words. */
+	/* An untrusted certificate, with the TLS library's words. */
 	if (error == ML_ERROR_UNTRUSTED) {
 		(void)snprintf(text, size, "its certificate is not trusted (%.120s)", words);
 		return;
 	}
 
-	/* The words of the server or of OpenSSL. */
+	/* The words of the server or of the TLS library. */
 	if (words != NULL && words[0] != '\0') {
 		(void)snprintf(text, size, "%s", words);
 		return;
@@ -1074,7 +1074,7 @@ sync_reason(
 		meaning = "the server closed the connection";
 		break;
 	case EPROTONOSUPPORT:
-		meaning = "TLS is not available (the OpenSSL package is not installed)";
+		meaning = "TLS cannot be set up";
 		break;
 	case EACCES:
 		meaning = "the server refused the user name or the password";
