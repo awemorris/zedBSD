@@ -14,5 +14,5 @@ keiland-freebsd:
 keiland-freebsd-install:
 	$(MAKE) -f userland/desktop/keiland-freebsd.mk install
 
-browser-win64:
+browser-win32:
 	$(MAKE) -f apps/browser-win32/Makefile
