@@ -2,7 +2,7 @@
 
 # ws335-p042: TLS を libssl-compat・libcrypto-compat を前提に書き換える設計（mailer・libbrowser・browser-win32）と OpenSSL・OpenSSH を外部の package にする
 
-Status: 実装の Phase の設計済み、Q1 の判定待ち（2026-11-13 P2 q2051-i01、branch `agent/p2-ws335f`、基点 main 70a3204e59）
+Status: cleared（2026-11-13 Q1 判定。問いの判断は ws.md、makefile.diff はユーザーの承認待ち）。前: 実装の Phase の設計済み、Q1 の判定待ち（2026-11-13 P2 q2051-i01、branch `agent/p2-ws335f`、基点 main 70a3204e59）
 Parent: [WS335](../ws.md)
 
 ## 目的
