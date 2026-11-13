@@ -74,8 +74,8 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | [p015](phase015/phase.md) | backend と WSI の小さな直し（network の答えの fd、WSI の 50 ms の slice） | cleared（2026-11-14 P2 q2066、Q1 の確認待ち。branch `agent/p2-ws353c`、a7f8bb3f34・3fabe10acb。3 機種の build warning 0、host の daemon-link 試験 PASS、QEMU（Venus）の `qemu-answer-wake.sh` 全 step PASS（network の link の待ちは idle 3 s で 0・3 s の join で 2、POLLERR 0、答えは 0〜1 ms で取れる。WSI は短い timeout の待ち 0、compositor を止めた間は 1 s の pace で進む）。MSG_PEEK の回避も消した。settings の画面の操作は未実施） | p001（独立） |
 | [p016](phase016/phase.md) | 試験: QEMU の回帰と 5330 の idle（電力・PC2・thread ごとの起床） | planned | p002〜p015 |
 | [p017](phase017/phase.md) | 規約の全文の見直し | planned | p016 |
-| [p018](phase018/phase.md) | 入力の device の hotplug を sessiond に開かせる（fd の受け渡し、100 ms の settle の scan を消す） | cleared（2026-11-14 P1 q2072、Q1 の確認待ち。branch `agent/p1-ws353i`、048974e412（設計）・bc24f7d0b8・9b5a290b8e と試験・記録の commit。sessiond の seat の socket（fd 4、`--seat-fd`、OPEN eventN → SCM_RIGHTS、holder だけ許す）、compositor の devices の thread（/dev/system の INPUT・USB）、settle を消した。3 機種の build warning 0、host 試験 2 本 PASS、QEMU の `qemu-seat-hotplug.sh` 全 step PASS（挿した keyboard・mouse は sessiond の OPEN 1 回、scan 0、devices の thread の起床は挿し抜きの 4 回だけ、後の greeter も自分の socket）。sessiond 無しの `qemu-main-wake.sh` は挿した keyboard が 3 回とも PASS、全 step は負荷の時間の境で揃わず。Log Out の handoff・実機は未実施） | p008 |
-| [p019](phase019/phase.md) | printers の 1 s の見回りを消す（printd の push、一覧は設定から、libkeiland は使う時だけ作る） | planned | p008 |
+| [p018](phase018/phase.md) | 入力の device の hotplug を sessiond に開かせる（fd の受け渡し、100 ms の settle の scan を消す） | cleared（2026-11-14 Q1 判定。P1 q2072 e8b9a14a0d、main に merge f4d831e0ea。sessiond が seat の socket で OPEN に fd を渡す、compositor の devices の thread、settle の scan を消した。QEMU の seat-hotplug 3 回目 全 PASS（挿した keyboard・mouse は sessiond の OPEN 1 回、scan 0、idle の timeout 0）。sessiond 無しの道は挿す step が 3 回とも PASS、他の step は host の負荷で時間切れ。Log Out・password の login の QEMU は未実施） | p008 |
+| [p019](phase019/phase.md) | printers の 1 s の見回りを消す（printd の push、一覧は設定から、libkeiland は使う時だけ作る） | planned（q2074、P1） | p008 |
 
 ## ユーザーの決定（続き）
 
