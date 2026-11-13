@@ -663,6 +663,9 @@ test_shell(
 	other.next = &second;
 	server.clients = &app;
 	test_phone_server = &server;
+
+	/* The fake backend's changes are taken on every pass, as after a wake (its link thread writes the pipe). */
+	server.woken = 1U;
 	test_surface(&app, 100U, "phone");
 	test_surface(&other, 100U, "mailer");
 	test_surface(&second, 100U, "phone");
