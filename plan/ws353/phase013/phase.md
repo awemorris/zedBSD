@@ -2,12 +2,12 @@
 
 # ws353-p013: client の buffer の明示の同期（release fence）
 
-Status: planned（未決 3 の推しがユーザーに決まってから着手）
+Status: planned（未決 3 の決定の後。2026-11-13 q2056-i02 で推しを「完了を見てから返す（REAPED の serial）を当面の正の形、この Phase は要る理由が出てから」に変えた。設計 §8 の未決 3）
 Parent: [WS353](../ws.md)。設計 [design.md](../design.md) §2.3・§2.4・§8 の未決 3。
 
 ## 目的
 
-compositor が client の buffer の読みの終わりを待たずに返す形にする: 置き換わった buffer にすぐ `wl_buffer.release` と release fence（最後に読んだ job の fence の export）を送り、client（WSI）は fence を待ってから描く。p010 の返し待ちの list は、release fence を出せない時の道としてだけ残る（全 render の backend で出せれば消す）。
+compositor が client の buffer の読みの終わりを待たずに返す形にする: 置き換わった buffer にすぐ `wl_buffer.release` と release fence（最後に読んだ job の fence の export）を送り、client（WSI）は fence を待ってから描く。p010 の返し待ちの list（REAPED の serial）は、release fence を出せない時の道としてだけ残る（全 render の backend で出せれば消す）。得は release が読みの GPU の時間（一つの frame の合成）だけ早く出る事。前提の kernel の作業（5 つの backend の `GPU_CAP_FENCE`）が大きいので、測った理由が出るまで着手しない事を推す。
 
 ## 手順
 

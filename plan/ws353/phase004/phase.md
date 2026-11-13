@@ -14,9 +14,9 @@ hotplug の fence を名前の付いた thread が無期限に待ち、signal �
 - `userland/desktop/wayland/output-switch.c`: hotplug の thread（設計 §5.3 の流れ、停止の fence）、`kwl_output_follow`（今の tick の後半）、`follow_pending`。`OUTPUT_HOTPLUG_MS`・`hotplug_checked_ms` を消す。
 - `compose.h`・`kwl.h`: hotplug の thread の状態と出口、`follow_pending`。
 - `display.c`: `kwl_schedule` から `kwl_output_tick` を外す。
-- `compose.c`・`heads.c`・`output-switch.c`: `output_lost`・`heads_stale`・head の `lost` を立てる所（compose.c:552・4665・4892・4906、heads.c:580・695・766）で `kwl_output_follow` を求める。`kwl_display_take` の完了と `output_listed` の終わりで `follow_pending` を見る。
+- `compose.c`・`heads.c`・`output-switch.c`: `output_lost`・`heads_stale`・head の `lost` を立てる所（compose.c:552・4665・4892・4906、heads.c:580・695・766）で `kwl_output_follow` を求める。`kwl_display_take` の完了と `output_listed` の終わり、window mode に入った時（`enter_window_mode` の後）で `follow_pending` を見る。window mode でない間（起動の直後、game mode）・display が busy・列挙の途中に来た FIRST・HOTPLUG・lost は `follow_pending` に覚えるだけ（今の tick の条件、output-switch.c:158〜163。設計 §5.4、レビュー M5）。
 - `displays-shell.c`: `kwl_displays_pending_tick` を今の期限の仕組みのまま `kwl_displays_tick` 側へ（timer は p006）。
-- `main.c`: wake の後の take に hotplug の出口を足す。終了で停止の fence の empty submit（queue の lock の下）と join（`threads.c` の台帳、`KWL THREADS` に `hotplug`）。
+- `main.c`: wake の後の take に hotplug の出口を足す。終了で停止の fence の empty submit（queue の lock の下）と join（`threads.c` の台帳、`KWL THREADS` に `hotplug`）。submit が `VK_ERROR_DEVICE_LOST` で失敗しても join してよい（thread の待ちは device の error で返る、p003 の (7)。設計 §5.3、レビュー M3）。
 
 ## 残す振る舞い
 
@@ -26,7 +26,7 @@ hotplug の fence を名前の付いた thread が無期限に待ち、signal �
 ## 確かめ
 
 - build: compositor（x86_64・arm64・riscv64）warning 0。
-- QEMU（Venus、VENUS_DISPLAY=dbus）: 1 本の script で、head の抜き差し（venus-head.sh）→ 出力の移動・head の追従（`KWL OUTPUT` の行を guest の log の file から）、表示中の display を抜いた時の移動、抜き差しの無い 60 s の main の `KWL PERF` の `timeouts` に hotplug の分が無い（main の 10 ms の pass が残る間は、hotplug の look の回数が 0 である事を数える）、終了で hotplug の thread が join される。
+- QEMU（Venus、VENUS_DISPLAY=dbus）: 1 本の script で、head の抜き差し（venus-head.sh）→ 出力の移動・head の追従（`KWL OUTPUT` の行を guest の log の file から）、表示中の display を抜いた時の移動、抜き差しの無い 60 s の hotplug の look の回数が 0（main の 10 ms の pass が残る間は `timeouts` では区別できないので数えない。レビュー L12）、game mode の間の抜き差しは window mode に戻った時に追う（M5）、終了で hotplug の thread が join される。
 - 回帰: WS113 の出力の移動の試験（plan/tools/guest/ の該当、Q1 の割当）。
 
 ## 受け入れ

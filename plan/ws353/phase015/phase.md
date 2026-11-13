@@ -24,4 +24,4 @@ daemon link の network の答えの 10 ms と、Wayland の WSI の 50 ms の s
 
 ## 依存
 
-- p005。
+- p001 だけ（別の file・別の thread で、main loop の Phase に依らない。いつでも並べて進めてよい。レビュー L11）。

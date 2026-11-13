@@ -191,3 +191,47 @@ HAL（`include/hal/hal.h`）の変更は要らないという判断は正しい�
 - `vulkan_device_error` が、事象の fence だけを待つ poll を起こすか（M3）。
 - libvulkan の display node の open の数（L12）。
 - wsi-wayland.c の acquire fence の無い device の経路（§2.4、読んでいない）。
+
+## 6. 反映（2026-11-13 P1、q2056-i02）
+
+- 全 25 件を worktree `p1-ws353`（0a3632f05c、source は 483bec3718 と同じ）の code と、Vulkan の仕様（host の `/usr/share/vulkan/registry/vk.xml` 1.4.309、Khronos Vulkan-Docs の main の `xml/vk.xml`・`chapters/VK_KHR_surface/wsi.adoc`）で確かめた。直した所は [design.md](design.md)、phase002〜005・008〜016 の phase.md、[ws.md](ws.md)。source は変えていない。
+- 件数: 反映 24、一部 1（S4、推測の部分を退けた）、退け 0。反映のうち S2 は直し方を変え（下の N1）、L7 は細部を直した。
+- 要約の「いずれも設計の形を変えずに直せる」は S2 では成り立たなかった: window mode の present の完了を別の thread で `vkWaitForPresentKHR` で待つ形そのものが仕様に反する（N1）ので、待つ物を present の fence に変えた。
+
+| 指摘 | 扱い | 確かめ・理由 | 直した所 |
+| --- | --- | --- | --- |
+| S1 render が idle で完了を見ない → main と deadlock | 反映（案 A） | compose.c:4356〜4396（`compose_may_draw` が `in_flight`・`copies`・`bake` を見る）、4770〜4840（COMPLETED で `in_flight`・`bake`・scene・shot を進める）、881〜884（`kwl_compose_complete`）、render-thread.c:186〜320・656〜672 で確かめた。render は飛んでいる slot・task があれば最古の fence を無期限に待って REAPED、無ければ cond。依頼は待つ前に見る。output の acquire は timeout 0 の一回で、取れず何も飛んでいない時だけ block（image が空いている時の重なりを残す） | design §1 原則 3、§5.1 T1、§5.6、§10、§12 1-06。p011（step・host 試験に「焼きの後」「2 frame の後」「present の失敗の後」・quiesce）、ws.md の p011 の依存（p010 → p004） |
+| S2 window mode の present wait を T4 の lane に載せる → display thread・終了の hang | 反映（直し方を変えた） | scanout.c:282・329〜340、lane.c、display-thread.c:904 で確かめた。分ける案は採った（新しい thread shown、T17）。ただし `vkWaitForPresentKHR` は swapchain を externsync に取り（vk.xml 1.4.309:16183、Vulkan-Docs main でも同じ、`vkWaitForPresent2KHR` も同じ）、acquire・present も同じ（13627・13636）ので、render が使う swapchain を T17 が待つ事自体が仕様に反する（N1）。T17 は `VK_EXT_swapchain_maintenance1` の present の fence を待つ。fence は worker が成功・失敗・破棄のどれでも signal し、`vkDestroySwapchainKHR` は worker の job の終わりを待つ（wsi-swapchain.c:1634）ので、終了と出力の作り直しに waiter を起こす口は要らない | design §2.5、§4.3、§5.1（T4 は game mode だけ、T17、17 本）、§5.9、§9。p009 を present id・present wait から maintenance1 に書き直し、p010 を T17 に |
+| S3 去った client の buffer の解放の自分への wake が busy loop | 反映 | objects.c:742〜781（時刻と状態の条件）、main.c:1047〜1049 で確かめた。時刻の条件は list がある間だけ timer、状態の条件は REAPED と描き終わり、自分への wake は今すぐ出来て 1 pass の数を越えた時だけ | design §5.2、§12 2-12（p005・p010）。p005 |
+| S4 display が止まる間の無期限の acquire → park の打ち切りで落ちる | 一部（直し方 1・3 を採り、推測の部分を退けた） | 採った: 先回りの acquire は block しない（render は今の `render_ahead` と同じ timeout 0 の一回、render-thread.c:1110〜1137。cursor は変化の後だけ acquire）。render の block の acquire は何も飛んでいない時だけ。退けた推測: (1) i915 の flip の待ちは打ち切りがある: `drv_i915_xd_picture_flip_wait` は 100 ms（xd-picture.c:35・1107）で EIO、worker は `chain->error` を立て（wsi-swapchain.c:4325〜4338）、acquire の待ちは `chain->error` を見て返る（4592〜4603）。(2) cursor の park の上限は 100 ms ではなく 2 s（`PLANE_PARK_WAIT_MS`、cursor-plane.c:54・502）。100 ms は停止の copy の fence の待ち（cursor-thread.h:37、cursor-thread.c:295）。残り: i915 以外の driver の present が表示の止まりで返るかは p011 の「先に確かめる事」 | design §5.6、§5.7、§12 の「poll-report に無く」の ahead の行、§13。p011・p012 |
+| M1 fence の signal に owner の bind が要る | 反映 | gpu-fence.c:258〜300（bind）、417〜466（signal_deferred の owner の照合 441〜444）、393〜413（`drv_gpu_fence_signal` は中で `poll_notify`）で確かめた | design §3.1。p002 |
+| M2 名指しの無い fence の poll は WS352 の poll.c で全部の変化に起きる | 反映 | gpu-fence.c:545〜575（`poll_wait_object` 無し）、248・407（名指し無しの `poll_notify`）、branch 82d2a01458 の poll.c（`every`）で確かめた | design §3.1。p002（変える file と判定の条件） |
+| M3 device lost の後に停止の fence を出せない | 反映（推測は確かめた） | `vulkan_device_error`（libvulkan objects.c:698〜707）は device の全 token を起こすので、事象の fence の待ちも token を登録すれば `VK_ERROR_DEVICE_LOST` で返る。書き方の抜けだった | design §4.1、§4.2、§5.3。p003 の (7)、p004 |
+| M4 `vulkan_wake_notify` の全員起こし | 反映 | objects.c:612〜640（device・context の一致だけ）、wsi-swapchain.c:4835（`NULL, NULL`）で確かめた。token に待つ物（fence の集合・swapchain）を持たせ、submit・reset・import はその fence を待つ token だけ、swapchain の遷移はその swapchain の token だけ、error は今のまま | design §4.2。p003（fence）、p009（swapchain） |
+| M5 window mode の外で FIRST・HOTPLUG の列挙が走る | 反映 | output-switch.c:158〜163（`!server->windowed`・busy・listing で止める）、scanout.c:751・display.c:682 で確かめた | design §5.3・§5.4。p004 |
+| M6 present の完了は表示の完了ではない | 反映 | i915 present.c:36〜41 で確かめた。present の fence の意味（仕様は「参照を取った後」、zedBSD は kernel の present の返り）として書いた | design §4.3、§5.9 |
+| M7 時計の分は実時刻 | 反映 | 時計の timer だけ実時刻の次の分までの長さを monotonic に直して arm、handler で読み直す | design §5.5、§12 2-17。p008 |
+| M8 `drv_gpu_display_ops` の位置の初期化 | 反映 | venus display.c:165〜172、i915 display.c:181〜 が位置で初期化している事を確かめた。op は struct の最後、全 driver の初期化を読む | design §3.2。p014 |
+| M9 i915 の hpd から `drv_gpu_device` が見えるか | 反映（推測は確かめた） | `struct i915_display` の `device`（display/internal.h:1168）、`struct i915_device` の `gpu`（i915.h:128）、`drv_gpu_register` は i915.c:211 の 1 回。bootfb・capture に呼ぶ所は無い | design §3.2。p002 |
+| L1 uapi の名前と ioctl の番号 | 反映 | gpu-display.h:21〜22、'G' の最大 50（gpu-job.h:30）を確かめた。`GPU_DISPLAY_FENCE`・`GPU_DISPLAY_FENCE_CANCEL`（別の ioctl）・`GPU_DISPLAY_FENCE_HOTPLUG/REFRESH` | design §3.1・§4。p002 |
+| L2 直ちに失敗した present の SHOWN | 反映（仕様で細かくした） | 仕様（wsi.adoc の vkQueuePresentKHR の失敗の節）: OOM は積まれず fence は変わらない、OUT_OF_DATE・SURFACE_LOST は積まれたと見なされ fence は signal する。OOM の時だけ render が SHOWN を自分で積む | design §2.5・§4.3・§5.9。p009・p010 |
+| L3 wake の登録の順 | 反映 | sync.c:1600〜1630 で確かめた | design §4.2。p003 の (6) |
+| L4 遅い head が output の SHOWN を遅らせる | 反映 | T17 は swapchain ごとの最古の fence を any で一つの呼び出しで待つ | design §5.9。p010 |
+| L5 `frame_fd` は使われない | 反映 | main.c:91・994・1076、kwl.h:1565 で確かめた | design §5.2、§12。p005 |
+| L6 cursor の停止の 100 ms | 反映 | cursor-thread.c:276〜299（finish）と 477（present の経路）を分けた | design §5.7・§5.10、§12 1-12。p012 |
+| L7 対応表 1-13 の行き先 | 反映（細部を直した） | 「残」→「形」。ただし compose.c:5194 は acquire ではなく task の fence の待ちで、output の acquire は 4941。どれも render が timeout を渡す | design §12（件数: 表 1 の形 2・残 7、計 形 6・残 49）。p011 |
+| L8 2-12 の行き先 | 反映 | S3 と同じ | design §12 |
+| L9 hold の数に scanout の hold | 反映 | kwl.h:494〜497、scanout.c:420〜425（`kwl_buffer_get`）で確かめた | design §5.8。p010 |
+| L10 header の出典 | 反映（対象を変えた） | `API-PROVENANCE.md` は v1.3.269 を固定（同 file の先頭）。足す宣言は maintenance1 とその依存に変わった | design §4.3・§9。p009 |
+| L11 Phase の依存 | 反映 | p015 は p001 だけ（network-zedbsd.c・wsi-wayland.c は main loop と別）。p014 に videocore・ghci の display の `GPU_CAP_DISPLAY_CONTROL` の確かめ。p011 の host 試験に S1 の場面 | ws.md の表、p011・p014・p015 |
+| L12 細かな食い違い | 反映 | 17 本（S2）。§2.6 は正しいので変えない。§2.4 は確かめた（wsi-wayland.c:792〜815、wsi-swapchain.c:4290〜4318）。display node の open の数は p003 で確かめる。p004 の判定は look の回数だけに | design §2.4・§4.1・§5.1。p003・p004 |
+
+### レビューに無く、反映の途中で見つけた物
+
+| # | 中身 | 直した所 |
+| --- | --- | --- |
+| N1 | `vkWaitForPresentKHR`・`vkWaitForPresent2KHR`・`vkAcquireNextImageKHR`・`vkQueuePresentKHR` は swapchain を externsync に取る（vk.xml）。render が acquire・present する swapchain の present を別の thread が待つ形（前の版の T4 の window mode の仕事）は仕様に反する。別の thread から待てる標準の口は `VK_EXT_swapchain_maintenance1` の present の fence | design §2.5・§4.3（退けた案も）・§5.9、p009・p010 |
+| N2 | `VK_EXT_swapchain_maintenance1` は `VK_EXT_surface_maintenance1` に、それは `VK_KHR_get_surface_capabilities2` に依る（vk.xml の depends）。libvulkan にあるのは `vkGetPhysicalDeviceSurfaceCapabilities2EXT`（surface counter）だけ（api-commands.tsv:194） | design §4.3・§9、p009 |
+| N3 | S1 の直しで REAPED が GPU の完了の直後に来るので、client の buffer の返しは REAPED の serial だけで決められる（前の版の SHOWN と「GPU の job が出した順に終わる」前提は要らない）。未決 3 の推しを「完了を見てから返す」を当面の正の形に変えた | design §5.8・§8 未決 3・§13、ws.md の未決、p010・p013 |
+| N4 | p011 は p010 に依らなくなった（前の版の「render が完了を覗くのをやめる前に callback と release を表示の完了へ」は、S1 で render が完了を待つので要らない） | design §10、ws.md の表 |
+| N5 | S1 の形の代わりに、render が fence を待つ間に来た依頼は、その fence が返るまで（その job の GPU の時間）見られない。output の image が空いている時の重なりは timeout 0 の acquire で残す | design §5.6 |
