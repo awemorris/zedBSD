@@ -12,7 +12,7 @@ override CONFIG_ROOTFS_DEVELOPMENT := n
 override CONFIG_PCAT_SERIAL_MIRROR := y
 override CONFIG_USERLAND_PROGRAMS := sh init cron getty syslogd networkd mount fsck sysctl net \
 	login dhcpc ssh libcrypto-compat libz-compat etc ls cat echo sleep test true false mkdir rm touch \
-	kill ps dmesg sync poweroff halt reboot service env id uname date timeout chmod chown
+	kill ps dmesg sync poweroff halt reboot service env id uname date timeout chmod chown grep
 
 # The guest harness (plan/tools/guest/guest.py extra-files): root's authorized key, the host keys and DHCP on ue0.
 WS353_GUEST_KEYS := $(WS353_TREE)/plan/tmp/guest
