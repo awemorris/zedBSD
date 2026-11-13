@@ -9,13 +9,6 @@
 #define HAL_HAL_ARCH_MIPS64_H
 
 /*
- * The periodic tick, in hertz.  As on the other ports the kernel keeps a
- * millisecond tick; the coprocessor 0 counter runs at a rate the board
- * knows, and the HAL derives the interval from this value.
- */
-#define HAL_TIMER_FREQUENCY	(1000U)
-
-/*
  * Signal Frame
  */
 

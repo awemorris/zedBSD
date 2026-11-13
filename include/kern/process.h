@@ -130,6 +130,7 @@ struct process {
 	uint64_t itimer_remaining[3];
 	uint64_t itimer_interval[3];
 	volatile unsigned itimer_sequence[3];
+	uint64_t itimer_real_armed;	/* clock_ticks() when ITIMER_REAL was last set */
 	int exit_status;
 	int wait_status;
 	unsigned wait_stopped;
@@ -491,10 +492,12 @@ process_itimer_set(
 int
 process_itimer_tick(
 	struct process *process,
-	int which);
+	int which,
+	uint64_t elapsed);
 
-void
-process_itimer_real_tick_all(void);
+uint64_t
+process_itimer_real_tick_all(
+	uint64_t now);
 
 void
 process_thread_retired(

@@ -165,11 +165,8 @@ uint32_t
 mips_board_timer_init(
 	uint32_t hz)
 {
-	/* No timer is set up; the rate is the requested tick's. */
-	UNUSED_PARAMETER(hz);
-
-	/* Succeeded: a nonzero rate, as the HAL requires. */
-	return HAL_TIMER_FREQUENCY;
+	/* No timer is set up; the counter's nominal rate is the requested tick's, nonzero as the HAL requires. */
+	return hz;
 }
 
 /*

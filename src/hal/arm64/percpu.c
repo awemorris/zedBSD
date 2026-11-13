@@ -49,6 +49,7 @@ arm64_percpu_bootstrap(
 	record->active_ack = HAL_IRQ_ACK_NONE;
 	record->timer_deadline = 0;
 	record->timer_ticks = 0;
+	record->timer_divisor = 0;
 	record->debug_points_loaded = 0;
 
 	/* Starts the stall watch's view empty: no tick yet, interrupts as the caller has them. */

@@ -9,13 +9,6 @@
 #define HAL_HAL_ARCH_RISCV64_H
 
 /*
- * The periodic tick, in hertz.  As on the other 64-bit ports the kernel
- * keeps a millisecond tick; the counter runs at the timebase the device
- * tree reports, and the HAL derives the interval from this value.
- */
-#define HAL_TIMER_FREQUENCY	(1000U)
-
-/*
  * Signal Frame
  */
 

@@ -379,7 +379,7 @@ process_timer_settime(
 		if ((flags & TIMER_ABSTIME) != 0)
 			deadline = value;
 		else
-			error = kern_deadline_after(now_ticks, value, &deadline);
+			error = kern_deadline_after(clock_ticks_ceil(), value, &deadline);
 	}
 
 	if (error != 0) {
@@ -412,6 +412,12 @@ process_timer_settime(
 		*previous = old_snapshot;
 
 	spin_unlock_irqrestore(&process_timer_lock, irq);
+
+	/* CPU 0, whose tick expires the timer, looks at it in time; a realtime one soon. */
+	if (value != 0 && realtime_absolute)
+		kern_clock_timer_armed(0U);
+	else if (value != 0)
+		kern_clock_timer_armed(deadline);
 
 	/* Reports the armed or disarmed timer. */
 	return 0;
@@ -452,13 +458,14 @@ process_timer_getoverrun(
 }
 
 /*
- * Expires timers on the clock tick and sends their signals.
+ * Expires timers on the clock tick and sends their signals, reporting the
+ * nearest deadline of the timers still armed, in ticks, or UINT64_MAX.
  *
  * Expiries are accumulated as overruns while a notification is
  * outstanding, and a notification that could not be sent is retried on a
- * later tick.
+ * later tick, which counts as a deadline at the next tick.
  */
-void
+uint64_t
 process_timer_tick(
 	uint64_t now_ticks)
 {
@@ -466,6 +473,8 @@ process_timer_tick(
 	struct process_timer *timer;
 	uint64_t now_realtime;
 	uint64_t now;
+	uint64_t next;
+	uint64_t due;
 	uint64_t missed;
 	unsigned cursor;
 	unsigned count;
@@ -476,6 +485,7 @@ process_timer_tick(
 
 	now_realtime = 0;
 	cursor = 0;
+	next = UINT64_MAX;
 
 	(void)realtime_units(&now_realtime);
 
@@ -516,6 +526,22 @@ process_timer_tick(
 						timer->expiry += missed * timer->interval;
 				}
 			}
+
+			/* The timer's next expiry in ticks, a realtime one from the nanoseconds left; one without notification wakes nobody. */
+			if (timer->armed && timer->event.sigev_notify != SIGEV_NONE) {
+				if (!timer->realtime_absolute)
+					due = timer->expiry;
+				else if (timer->expiry <= now_realtime)
+					due = now_ticks;
+				else
+					due = now_ticks + kern_ns_to_ticks(timer->expiry - now_realtime);
+				if (due < next)
+					next = due;
+			}
+
+			/* A notification to retry wants the next tick. */
+			if (timer->notification_retry && now_ticks + 1U < next)
+				next = now_ticks + 1U;
 
 			/* A timer without notification only re-arms. */
 			if (timer->event.sigev_notify == SIGEV_NONE)
@@ -568,6 +594,9 @@ process_timer_tick(
 			process_release(notifications[index].owner);
 		}
 	}
+
+	/* Reports the nearest deadline. */
+	return next;
 }
 
 /*
@@ -632,6 +661,9 @@ process_timer_notification_failed(
 	}
 
 	spin_unlock_irqrestore(&process_timer_lock, irq);
+
+	/* The retry wants CPU 0's next tick. */
+	kern_clock_timer_armed(0U);
 }
 
 /*

@@ -65,6 +65,13 @@ struct arm64_percpu {
 	/* How many scheduling ticks this CPU has taken. */
 	uint64_t timer_ticks;
 
+	/*
+	 * How many periods of the fastest tick one of this CPU's ticks spans
+	 * (hal_rtc_set_tick_hz()); 0 before its tick starts, which counts as 1.
+	 * Only the CPU itself writes it, with interrupts off.
+	 */
+	uint64_t timer_divisor;
+
 	/* Whether this CPU's breakpoint and watchpoint registers hold a task's points. */
 	int debug_points_loaded;
 

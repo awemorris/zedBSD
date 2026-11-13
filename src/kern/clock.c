@@ -8,12 +8,24 @@
 /*
  * Kernel time.
  *
- * CPU 0's timer interrupt advances the monotonic tick counter that every
- * deadline in the kernel uses.  The realtime clock is that monotonic time
- * plus an offset seeded from the RTC and adjusted by clock_settime(); the
- * offset is published through a sequence lock so that readers never see a
- * torn value.  The remaining functions are the timespec arithmetic shared
- * by the timer and sleep paths.
+ * The kernel counts its time in units of one millisecond: clock_ticks()
+ * and every deadline are in these units, whatever rate the timer
+ * interrupts come at.  Where the HAL has a counter of a fixed frequency
+ * (hal_rtc_read_counter()), the units and the monotonic nanoseconds are
+ * read from it each time, and the timer interrupt is only what wakes a CPU
+ * to look at its deadlines.  Without one, CPU 0's interrupts count the
+ * units, and the interrupt rate is never changed.
+ *
+ * Each CPU's interrupt rate follows what it does: the busy rate while it
+ * runs threads, the idle rate while it idles and no deadline it watches is
+ * near.  CPU 0 also watches the process timers and ITIMER_REAL, which only
+ * its tick advances.
+ *
+ * The realtime clock is the monotonic time plus an offset seeded from the
+ * RTC and adjusted by clock_settime(); the offset is published through a
+ * sequence lock so that readers never see a torn value.  The remaining
+ * functions are the timespec arithmetic shared by the timer and sleep
+ * paths.
  */
 
 #include "kern/random.h"
@@ -34,24 +46,62 @@
 
 #define KERN_REALTIME_EPOCH_2026 1767225600LL
 
+/* The units in a second: one unit is a millisecond. */
+#define CLOCK_UNIT_RATE		1000U
+
+/* The interrupt rate a CPU asks for while it runs threads, and while it idles. */
+#define CLOCK_TICK_BUSY_HZ	1000U
+#define CLOCK_TICK_IDLE_HZ	100U
+
+/*
+ * How far off the nearest deadline must be for an idle CPU to slow down,
+ * in units: one slow period, in which the CPU may not look, and two fast
+ * ones, the first tick after it speeds up again and a tick a HAL may leave
+ * armed at the old rate.
+ */
+#define CLOCK_TICK_IDLE_MARGIN	\
+	((CLOCK_UNIT_RATE + CLOCK_TICK_IDLE_HZ - 1U) / CLOCK_TICK_IDLE_HZ + \
+	 2U * ((CLOCK_UNIT_RATE + CLOCK_TICK_BUSY_HZ - 1U) / CLOCK_TICK_BUSY_HZ))
+
+/*
+ * The units in a second.  Only this file reads it: everything else asks
+ * the functions below to convert.
+ */
+static const uint32_t unit_rate = CLOCK_UNIT_RATE;
+
+/*
+ * The units, as CPU 0's tick last saw them.  Before the counter is in use
+ * CPU 0's interrupts count them, carrying the part of a unit an interrupt
+ * is short of in interrupt_carry; afterwards CPU 0's tick stores the
+ * counter's value.  Only CPU 0 writes either.
+ */
 static volatile uint64_t kernel_ticks;
+static uint32_t interrupt_carry;
 
 /*
- * The ticks in a second.  It is the rate the HAL runs the periodic timer
- * at, and only this file reads it: everything else asks the functions
- * below to convert.  It is at most one tick per nanosecond.
+ * The counter's value and frequency, the counts of one unit and the units,
+ * at the moment CPU 0's tick took the counter up.  The base is put back to
+ * a multiple of the unit's counts, where the HALs put their ticks, so that
+ * a tick a little late still reads its own unit.  CPU 0 writes them once,
+ * before it sets counter_mode with release; a reader that sees
+ * counter_mode set with acquire reads them as written.
  */
-static const uint32_t tick_rate = HAL_TIMER_FREQUENCY;
+static uint64_t base_counter;
+static uint64_t base_frequency;
+static uint64_t base_period;
+static uint64_t base_units;
+static volatile unsigned counter_mode;
 
 /*
- * The counter's value when CPU 0 last entered suspend-to-idle, and the
- * counts left over from the ticks it brought forward.  Only
- * CPU 0's idle loop touches them, around hal_cpu_idle_suspend(); begun is
- * 1 between the two halves.
+ * The nearest deadline of the timers CPU 0's tick advances, in units:
+ * UINT64_MAX for none, 0 when one was armed since CPU 0 last looked.
+ * CPU 0's tick sets it anew each time; any CPU lowers it.
  */
-static uint64_t suspend_counter;
-static uint64_t suspend_remainder;
-static unsigned suspend_begun;
+static volatile uint64_t global_next = UINT64_MAX;
+
+/* Whether each CPU asked the HAL for the idle rate.  Only the CPU itself writes its entry. */
+static volatile unsigned tick_lowered[HAL_CPU_MAX];
+
 static volatile uint32_t cpu_notify_count[HAL_CPU_MAX];
 static struct kern_timespec realtime_offset = {
 	KERN_REALTIME_EPOCH_2026, 0
@@ -60,6 +110,10 @@ static int realtime_synchronized;
 static volatile unsigned realtime_sequence;
 static atomic_uint_t realtime_writer;
 
+static void tick_cpu0(void);
+static unsigned tick_far(uint64_t now, uint64_t next);
+static bool counter_elapsed(uint64_t *elapsed, uint64_t *frequency);
+static uint64_t global_next_swap(uint64_t value);
 static void realtime_write_begin(void);
 static void realtime_write_end(void);
 static uint64_t scale_floor(uint64_t value, uint64_t multiplier, uint64_t divisor);
@@ -96,8 +150,8 @@ kern_clock_init(
 /*
  * Handles the periodic timer interrupt on one CPU.
  *
- * Only CPU 0 advances the tick counter and the process timers; every CPU
- * feeds the current tick to its scheduler.
+ * CPU 0 keeps the units and advances the process timers, noting how soon
+ * they next fall due; every CPU feeds the time to its scheduler.
  */
 void
 kernel_timer_handler(
@@ -105,17 +159,27 @@ kernel_timer_handler(
 	hal_irq_ack_t acknowledge)
 {
 	uint64_t now;
+	uint64_t next;
 
 	hal_irq_send_eoi(acknowledge);
 
-	/* Advances the shared tick from the boot CPU only. */
+	/* CPU 0 counts the interrupt, or takes the counter up. */
 	if (cpu == 0)
-		(void)atomic_u64_fetch_add_relaxed(&kernel_ticks, 1U);
+		tick_cpu0();
 
-	/* Expires process timers from the boot CPU only. */
-	now = atomic_u64_load_acquire(&kernel_ticks);
-	if (cpu == 0)
-		process_timer_tick(now);
+	/* The time now. */
+	now = clock_ticks();
+
+	/*
+	 * CPU 0 starts the nearest deadline of its timers over, then lowers it
+	 * with the process timers and, in the scheduler, ITIMER_REAL.  A timer
+	 * armed meanwhile lowers it after the swap, and stays.
+	 */
+	if (cpu == 0) {
+		(void)global_next_swap(UINT64_MAX);
+		next = process_timer_tick(now);
+		kern_clock_timer_due(next);
+	}
 
 	sched_clock_cpu(cpu, now);
 
@@ -124,67 +188,140 @@ kernel_timer_handler(
 }
 
 /*
- * Notes the counter as CPU 0 enters suspend-to-idle, whose tick stops
- * until it returns.  Only CPU 0 calls it, from its idle loop.
+ * Chooses the current CPU's interrupt rate as its idle loop halts, with
+ * interrupts disabled.
+ *
+ * next is the nearest deadline this CPU watches, in units, or UINT64_MAX;
+ * CPU 0 adds its timers' own.  The CPU slows down when that deadline is at
+ * least CLOCK_TICK_IDLE_MARGIN off, and speeds up again when it is not:
+ * the idle loop calls this at every slow tick, so the last slow tick
+ * before a deadline brings the fast one back in time for it.  Without the
+ * counter nothing changes.
  */
 void
-kern_clock_idle_suspend_begin(
-	void)
+kern_clock_tick_idle(
+	unsigned cpu,
+	uint64_t next)
 {
-	uint64_t counter;
-	uint64_t frequency;
-	bool counted;
+	uint64_t now;
+	uint64_t global;
+	unsigned lower;
+	unsigned lowered;
 
-	/* The counter now; without one no time can be brought forward. */
-	suspend_begun = 0U;
-	counted = hal_rtc_read_counter(&counter, &frequency);
-	if (!counted)
+	/* Only a counted time lets the interrupts slow down. */
+	if (cpu >= HAL_CPU_MAX)
+		return;
+	if (atomic_raw_load_acquire(&counter_mode) == 0U)
 		return;
 
-	/* Kept for the end. */
-	suspend_counter = counter;
-	suspend_begun = 1U;
+	/* The nearest deadline, CPU 0's timers included. */
+	now = clock_ticks();
+	global = UINT64_MAX;
+	if (cpu == 0) {
+		global = atomic_u64_load_acquire(&global_next);
+		if (global < next)
+			next = global;
+	}
+
+	/* Slows down when nothing falls due within the margin. */
+	lower = tick_far(now, next);
+
+	/* The HAL is asked only for a change. */
+	lowered = atomic_raw_load_acquire(&tick_lowered[cpu]);
+	if (lower == lowered)
+		return;
+	if (!lower) {
+		(void)hal_rtc_set_tick_hz(CLOCK_TICK_BUSY_HZ);
+		atomic_raw_store_release(&tick_lowered[cpu], 0U);
+		return;
+	}
+	(void)hal_rtc_set_tick_hz(CLOCK_TICK_IDLE_HZ);
+	atomic_raw_store_release(&tick_lowered[cpu], 1U);
+
+	/*
+	 * CPU 0 confirms the deadline it slowed down for with an exchange on
+	 * it, after it published the slowdown.  A timer armed meanwhile either
+	 * changed the deadline, which fails the exchange and is looked at
+	 * here, or comes after the exchange and sees the slowdown, and wakes
+	 * this CPU if its timer is near.
+	 */
+	if (cpu != 0 || atomic_u64_compare_exchange(&global_next, &global, global))
+		return;
+	if (global < next)
+		next = global;
+	if (tick_far(now, next))
+		return;
+	(void)hal_rtc_set_tick_hz(CLOCK_TICK_BUSY_HZ);
+	atomic_raw_store_release(&tick_lowered[cpu], 0U);
 }
 
 /*
- * Brings kernel_ticks forward by the time CPU 0 spent in suspend-to-idle,
- * from the counter that kept running, carrying the counts short of a tick
- * to the next time.  Only CPU 0 calls it, from its idle loop.
+ * Brings the current CPU's interrupt rate back to the busy rate as it
+ * leaves its idle thread for another, with interrupts disabled.
+ *
+ * Returns true when the CPU had slowed down, so that the scheduler can
+ * account the idle time up to now.
+ */
+bool
+kern_clock_tick_busy(
+	unsigned cpu)
+{
+	unsigned lowered;
+
+	/* Nothing to bring back. */
+	if (cpu >= HAL_CPU_MAX)
+		return false;
+	lowered = atomic_raw_load_acquire(&tick_lowered[cpu]);
+	if (lowered == 0U)
+		return false;
+
+	/* Succeeded: the busy rate again. */
+	(void)hal_rtc_set_tick_hz(CLOCK_TICK_BUSY_HZ);
+	atomic_raw_store_release(&tick_lowered[cpu], 0U);
+	return true;
+}
+
+/*
+ * Notes a deadline of the timers CPU 0's tick advances, in units, or
+ * UINT64_MAX for none.  The nearest one counts.
  */
 void
-kern_clock_idle_suspend_end(
-	void)
+kern_clock_timer_due(
+	uint64_t deadline)
 {
-	uint64_t counter;
-	uint64_t frequency;
-	uint64_t elapsed;
-	uint64_t per_tick;
-	uint64_t ticks;
-	bool counted;
+	uint64_t seen;
 
-	/* Nothing began. */
-	if (!suspend_begun)
+	/* Lowers the nearest deadline, never raises it. */
+	seen = atomic_u64_load_acquire(&global_next);
+	while (deadline < seen) {
+		if (atomic_u64_compare_exchange(&global_next, &seen, deadline))
+			break;
+	}
+}
+
+/*
+ * Notes that a timer CPU 0's tick advances was armed or moved, with its
+ * deadline in ticks, or 0 when it is not known (a realtime one): then it
+ * counts as due now, until CPU 0's next tick has looked at every timer
+ * again.  A CPU 0 that slowed down is woken when the deadline is near; a
+ * far one it sees at a later slow tick.  The caller has published the
+ * timer before it calls this.
+ */
+void
+kern_clock_timer_armed(
+	uint64_t deadline)
+{
+	unsigned lowered;
+
+	/* The nearest deadline, lowered with an exchange (kern_clock_tick_idle()). */
+	kern_clock_timer_due(deadline);
+
+	/* Wakes a slow CPU 0 to choose its rate again. */
+	lowered = atomic_raw_load_acquire(&tick_lowered[0]);
+	if (lowered == 0U || hal_cpu_current() == 0)
 		return;
-	suspend_begun = 0U;
-
-	/* The counter now. */
-	counted = hal_rtc_read_counter(&counter, &frequency);
-	if (!counted)
-		return;
-
-	/* The counts of one tick; a counter slower than the tick cannot measure it. */
-	per_tick = frequency / tick_rate;
-	if (per_tick == 0U)
-		return;
-
-	/* The whole ticks the CPU slept, the rest kept for next time. */
-	elapsed = counter - suspend_counter + suspend_remainder;
-	ticks = elapsed / per_tick;
-	suspend_remainder = elapsed % per_tick;
-
-	/* The shared tick count forward; the deadlines compare with <= and take the jump. */
-	if (ticks != 0U)
-		(void)atomic_u64_fetch_add_relaxed(&kernel_ticks, ticks);
+	if (!tick_far(clock_ticks(), deadline))
+		(void)hal_cpu_notify(0);
 }
 
 /*
@@ -257,18 +394,72 @@ kern_cpu_notify_probe(
 }
 
 /*
- * Reads the monotonic tick counter.
+ * Reads the monotonic time in units.
+ *
+ * With the counter it is read now, so that a deadline made from it is not
+ * made early by a tick that has not come yet; without one it is the count
+ * of CPU 0's interrupts.
  */
 uint64_t
 clock_ticks(
 	void)
 {
+	uint64_t elapsed;
+	uint64_t frequency;
 	uint64_t ticks;
+	bool counted;
 
-	/* Reads the counter with acquire ordering. */
+	/* The counter's time since CPU 0 took it up. */
+	counted = counter_elapsed(&elapsed, &frequency);
+	if (counted) {
+		ticks = base_units + elapsed / base_period;
+		return ticks;
+	}
+
+	/* Reads the counted units with acquire ordering. */
 	ticks = atomic_u64_load_acquire(&kernel_ticks);
 
-	/* Reports the current tick. */
+	/* Reports the current time. */
+	return ticks;
+}
+
+/*
+ * Reads the monotonic time in units, rounded up to the next whole unit
+ * when it is between two.
+ *
+ * clock_ticks() rounds down, so a deadline made from it by adding a
+ * duration can fall due up to a unit early.  A wait that must not end
+ * early (nanosleep(), a relative timer) adds its duration to this instead.
+ * Without the counter the time between two interrupts is not known, and
+ * it is the count plus one interrupt period.
+ */
+uint64_t
+clock_ticks_ceil(
+	void)
+{
+	uint64_t elapsed;
+	uint64_t frequency;
+	uint64_t ticks;
+	uint32_t hz;
+	bool counted;
+
+	/* The counter's time, rounded up. */
+	counted = counter_elapsed(&elapsed, &frequency);
+	if (counted) {
+		ticks = base_units + elapsed / base_period;
+		if (elapsed % base_period != 0U)
+			ticks++;
+		return ticks;
+	}
+
+	/* The count, and the period no interrupt has counted yet. */
+	ticks = atomic_u64_load_acquire(&kernel_ticks);
+	hz = hal_rtc_get_tick_hz();
+	if (hz == 0U)
+		hz = 1U;
+	ticks += (unit_rate + hz - 1U) / hz;
+
+	/* Reports the time rounded up. */
 	return ticks;
 }
 
@@ -305,7 +496,7 @@ kern_ms_to_ticks(
 	uint64_t ticks;
 
 	/* Rounds the time up to the ticks that cover it. */
-	ticks = scale_ceil(milliseconds, tick_rate, 1000U);
+	ticks = scale_ceil(milliseconds, unit_rate, 1000U);
 
 	/* Reports the ticks that cover the time. */
 	return ticks;
@@ -321,7 +512,7 @@ kern_us_to_ticks(
 	uint64_t ticks;
 
 	/* Rounds the time up to the ticks that cover it. */
-	ticks = scale_ceil(microseconds, tick_rate, 1000000U);
+	ticks = scale_ceil(microseconds, unit_rate, 1000000U);
 
 	/* Reports the ticks that cover the time. */
 	return ticks;
@@ -337,7 +528,7 @@ kern_ns_to_ticks(
 	uint64_t ticks;
 
 	/* Rounds the time up to the ticks that cover it. */
-	ticks = scale_ceil(nanoseconds, tick_rate, KERN_NSEC_PER_SEC);
+	ticks = scale_ceil(nanoseconds, unit_rate, KERN_NSEC_PER_SEC);
 
 	/* Reports the ticks that cover the time. */
 	return ticks;
@@ -353,7 +544,7 @@ kern_ticks_to_ms(
 	uint64_t milliseconds;
 
 	/* Rounds the ticks down to whole milliseconds. */
-	milliseconds = scale_floor(ticks, 1000U, tick_rate);
+	milliseconds = scale_floor(ticks, 1000U, unit_rate);
 
 	/* Reports no more time than the ticks have counted. */
 	return milliseconds;
@@ -369,7 +560,7 @@ kern_ticks_to_us(
 	uint64_t microseconds;
 
 	/* Rounds the ticks down to whole microseconds. */
-	microseconds = scale_floor(ticks, 1000000U, tick_rate);
+	microseconds = scale_floor(ticks, 1000000U, unit_rate);
 
 	/* Reports no more time than the ticks have counted. */
 	return microseconds;
@@ -385,7 +576,7 @@ kern_ticks_to_ns(
 	uint64_t nanoseconds;
 
 	/* Rounds the ticks down to whole nanoseconds. */
-	nanoseconds = scale_floor(ticks, KERN_NSEC_PER_SEC, tick_rate);
+	nanoseconds = scale_floor(ticks, KERN_NSEC_PER_SEC, unit_rate);
 
 	/* Reports no more time than the ticks have counted. */
 	return nanoseconds;
@@ -406,7 +597,7 @@ kern_ticks_to_rate(
 	uint64_t count;
 
 	/* Rounds the ticks down to whole counts at the other rate. */
-	count = scale_floor(ticks, rate, tick_rate);
+	count = scale_floor(ticks, rate, unit_rate);
 
 	/* Reports the whole counts the ticks have reached. */
 	return count;
@@ -423,41 +614,55 @@ kern_ticks_to_timespec(
 	uint64_t fraction;
 
 	/* Whole seconds apart from the rest, so the product cannot overflow. */
-	fraction = ticks % tick_rate;
-	result->tv_sec = (time_t)(ticks / tick_rate);
-	result->tv_nsec = (long)(fraction * KERN_NSEC_PER_SEC / tick_rate);
+	fraction = ticks % unit_rate;
+	result->tv_sec = (time_t)(ticks / unit_rate);
+	result->tv_nsec = (long)(fraction * KERN_NSEC_PER_SEC / unit_rate);
 }
 
 /*
- * Reports the time between two ticks, in nanoseconds, rounded up.
- *
- * It is the finest step clock_ticks() takes, and the longest a deadline
- * can wait past its time before it is noticed.  Like the rate, it is
- * asked for each time and never kept as a constant.
+ * Reports how long a deadline may wait past its time before a busy CPU
+ * notices it, in nanoseconds, rounded up: the longer of one tick and the
+ * calling CPU's timer interrupt period.  A caller asks while it runs, at
+ * the busy rate.  It is asked for each time and never kept as a constant.
  */
 uint64_t
 kern_clock_resolution_ns(
 	void)
 {
-	/* Reports one tick, rounded up so it is never shorter than it is. */
-	return (KERN_NSEC_PER_SEC + tick_rate - 1U) / tick_rate;
+	uint64_t unit;
+	uint64_t period;
+	uint32_t hz;
+
+	/* One tick, rounded up so it is never shorter than it is. */
+	unit = (KERN_NSEC_PER_SEC + unit_rate - 1U) / unit_rate;
+
+	/* The interrupt period, when it is longer. */
+	hz = hal_rtc_get_tick_hz();
+	if (hz == 0U)
+		return unit;
+	period = (KERN_NSEC_PER_SEC + hz - 1U) / hz;
+	if (period > unit)
+		return period;
+
+	/* Reports one tick. */
+	return unit;
 }
 
 /*
- * Reports the ticks in a second.
+ * Reports the units in a second.
  *
  * Only a report whose ABI states its unit as a rate (hw.cputimes), or
- * arithmetic that must stay in whole ticks, asks for it; a time is
- * converted with the functions above instead.  The rate is fixed at boot
- * today, but a caller asks each time it needs it and never keeps it as a
- * constant.
+ * arithmetic that must stay in whole units, asks for it; a time is
+ * converted with the functions above instead.  It is not the timer
+ * interrupt's rate, which changes as the CPUs idle.  A caller asks each
+ * time it needs it and never keeps it as a constant.
  */
 uint32_t
 kern_clock_tick_rate(
 	void)
 {
 	/* Reports the rate the tick counter advances at. */
-	return tick_rate;
+	return unit_rate;
 }
 
 /*
@@ -621,18 +826,18 @@ kern_duration_to_ticks_ceil(
 
 	/* Rejects whole seconds that would overflow the tick count. */
 	seconds = (uint64_t)duration->tv_sec;
-	if (seconds > UINT64_MAX / tick_rate)
+	if (seconds > UINT64_MAX / unit_rate)
 		return EOVERFLOW;
 
 	/* Rounds the nanosecond fraction up to whole ticks. */
-	fraction = ((uint64_t)duration->tv_nsec * tick_rate +
+	fraction = ((uint64_t)duration->tv_nsec * unit_rate +
 	    KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
 
 	/* Rejects a total that would overflow the tick count. */
-	if (seconds * tick_rate > UINT64_MAX - fraction)
+	if (seconds * unit_rate > UINT64_MAX - fraction)
 		return EOVERFLOW;
 
-	*ticks = seconds * tick_rate + fraction;
+	*ticks = seconds * unit_rate + fraction;
 
 	/* Reports the converted tick count. */
 	return 0;
@@ -689,9 +894,13 @@ kern_clock_gettime(
 	struct kern_timespec value;
 	struct kern_timespec offset;
 	struct timespec uptime;
+	uint64_t elapsed;
+	uint64_t frequency;
+	uint64_t nanoseconds;
 	uint64_t ticks;
 	unsigned before;
 	unsigned after;
+	bool counted;
 	int error;
 
 	/* Rejects a missing result or an unsupported clock. */
@@ -700,9 +909,17 @@ kern_clock_gettime(
 	if (clock != CLOCK_MONOTONIC && clock != CLOCK_REALTIME)
 		return EINVAL;
 
-	/* Converts the tick counter to monotonic time. */
-	ticks = clock_ticks();
-	kern_ticks_to_timespec(ticks, &uptime);
+	/* The monotonic time from the counter, to its own step; without one, from the units. */
+	counted = counter_elapsed(&elapsed, &frequency);
+	if (counted) {
+		nanoseconds = base_units * (KERN_NSEC_PER_SEC / unit_rate) +
+		    scale_floor(elapsed, KERN_NSEC_PER_SEC, frequency);
+		uptime.tv_sec = (time_t)(nanoseconds / KERN_NSEC_PER_SEC);
+		uptime.tv_nsec = (long)(nanoseconds % KERN_NSEC_PER_SEC);
+	} else {
+		ticks = clock_ticks();
+		kern_ticks_to_timespec(ticks, &uptime);
+	}
 	monotonic.tv_sec = (int64_t)uptime.tv_sec;
 	monotonic.tv_nsec = (int32_t)uptime.tv_nsec;
 	value = monotonic;
@@ -733,21 +950,30 @@ kern_clock_gettime(
 }
 
 /*
- * Reports the resolution of the monotonic and realtime clocks.
+ * Reports the resolution of the monotonic and realtime clocks: one step of
+ * the counter, rounded up, or without one the step of the units.
  */
 int
 kern_clock_getres(
 	clockid_t clock,
 	struct timespec *result)
 {
+	uint64_t step;
+
 	/* Rejects an unsupported clock. */
 	if (clock != CLOCK_MONOTONIC && clock != CLOCK_REALTIME)
 		return EINVAL;
 
-	/* Reports one tick when a result is wanted. */
+	/* The step the clocks are read to. */
+	if (atomic_raw_load_acquire(&counter_mode) != 0U)
+		step = (KERN_NSEC_PER_SEC + base_frequency - 1U) / base_frequency;
+	else
+		step = kern_clock_resolution_ns();
+
+	/* Reports the step when a result is wanted. */
 	if (result != NULL) {
-		result->tv_sec = 0;
-		result->tv_nsec = (long)kern_clock_resolution_ns();
+		result->tv_sec = (time_t)(step / KERN_NSEC_PER_SEC);
+		result->tv_nsec = (long)(step % KERN_NSEC_PER_SEC);
 	}
 
 	/* Reports a supported clock. */
@@ -802,9 +1028,11 @@ kern_clock_settime(
 		atomic_raw_store_release((volatile unsigned *)&realtime_synchronized, 1);
 	realtime_write_end();
 
-	/* Wakes absolute-time waiters after a successful change. */
-	if (error == 0)
+	/* Wakes absolute-time waiters, and has CPU 0 look at its realtime timers again, after a successful change. */
+	if (error == 0) {
 		usync_realtime_changed();
+		kern_clock_timer_armed(0U);
+	}
 
 	/* Reports why the change failed. */
 	if (error != 0)
@@ -931,6 +1159,127 @@ kern_usleep_range(
 
 		spin_unlock_irqrestore(&lock, enabled);
 	}
+}
+
+/*
+ * Advances the units at CPU 0's interrupt.
+ *
+ * The first interrupt at which the counter reads takes it up: the units
+ * counted so far become the base the counter's time is added to, so the
+ * time goes on from where the count left it.  From then on the units are
+ * the counter's, which this stores for a reader the counter fails.  Before
+ * then, and whenever the counter fails, each interrupt adds the units of
+ * one period at the current rate, carrying the rest.
+ */
+static void
+tick_cpu0(
+	void)
+{
+	uint64_t counter;
+	uint64_t frequency;
+	uint64_t elapsed;
+	uint64_t units;
+	uint32_t hz;
+	bool counted;
+
+	/* The counter's units, once taken up. */
+	if (atomic_raw_load_acquire(&counter_mode) != 0U) {
+		counted = counter_elapsed(&elapsed, &frequency);
+		if (counted) {
+			atomic_u64_store_release(&kernel_ticks,
+			    base_units + elapsed / base_period);
+			return;
+		}
+	}
+
+	/* Takes the counter up when it reads, at the unit's multiple before now. */
+	if (atomic_raw_load_acquire(&counter_mode) == 0U) {
+		counted = hal_rtc_read_counter(&counter, &frequency);
+		if (counted && frequency != 0U) {
+			base_period = frequency / unit_rate;
+			if (base_period == 0U)
+				base_period = 1U;
+			base_counter = counter - counter % base_period;
+			base_frequency = frequency;
+			base_units = atomic_u64_load_acquire(&kernel_ticks);
+			atomic_raw_store_release(&counter_mode, 1U);
+			return;
+		}
+	}
+
+	/* One period of units, at least one interrupt a second assumed. */
+	hz = hal_rtc_get_tick_hz();
+	if (hz == 0U)
+		hz = 1U;
+	interrupt_carry += unit_rate;
+	units = interrupt_carry / hz;
+	interrupt_carry %= hz;
+	(void)atomic_u64_fetch_add_relaxed(&kernel_ticks, units);
+}
+
+/*
+ * Reads the counter's time since CPU 0 took it up, in counts, and its
+ * frequency.  Returns false before then, and when the counter does not
+ * read or reads at another frequency than the one it was taken up at.
+ */
+static bool
+counter_elapsed(
+	uint64_t *elapsed,
+	uint64_t *frequency)
+{
+	uint64_t counter;
+	uint64_t rate;
+	bool counted;
+
+	/* Not taken up yet. */
+	if (atomic_raw_load_acquire(&counter_mode) == 0U)
+		return false;
+
+	/* The counter now, at the frequency it was taken up at. */
+	counted = hal_rtc_read_counter(&counter, &rate);
+	if (!counted)
+		return false;
+	if (rate != base_frequency)
+		return false;
+
+	/* Succeeded: the counts since the base. */
+	*elapsed = counter - base_counter;
+	*frequency = rate;
+	return true;
+}
+
+/* Reports 1 when a deadline is at least the margin off, so that a CPU may slow down. */
+static unsigned
+tick_far(
+	uint64_t now,
+	uint64_t next)
+{
+	/* None at all. */
+	if (next == UINT64_MAX)
+		return 1U;
+
+	/* Due, overdue, or near. */
+	if (next <= now || next - now < CLOCK_TICK_IDLE_MARGIN)
+		return 0U;
+
+	/* Succeeded: far enough. */
+	return 1U;
+}
+
+/* Replaces the nearest deadline of CPU 0's timers, reporting the one it had. */
+static uint64_t
+global_next_swap(
+	uint64_t value)
+{
+	uint64_t seen;
+
+	/* An exchange, so that a deadline lowered meanwhile is ordered against it. */
+	seen = atomic_u64_load_acquire(&global_next);
+	while (!atomic_u64_compare_exchange(&global_next, &seen, value))
+		hal_compiler_barrier();
+
+	/* Succeeded: the deadline replaced. */
+	return seen;
 }
 
 /* Enters the realtime offset write side of the sequence lock. */

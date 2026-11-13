@@ -373,8 +373,11 @@ syscall_restart_deadline_rearm(
 	if (deadline == NULL)
 		return EINVAL;
 
-	/* Records the new deadline so a restart can reuse it. */
-	error = kern_deadline_after(sched_ticks(), ticks, deadline);
+	/*
+	 * Records the new deadline so a restart can reuse it, from the time
+	 * rounded up so that the wait never ends early.
+	 */
+	error = kern_deadline_after(clock_ticks_ceil(), ticks, deadline);
 	if (error == 0 && thread != NULL) {
 		thread->syscall_wait_deadline = *deadline;
 		thread->syscall_wait_deadline_valid = 1;
@@ -4596,7 +4599,7 @@ sys_nanosleep_call(
 
 	process = current_process();
 
-	/* Converts the request into a deadline. */
+	/* Converts the request into a deadline, from the time rounded up so that the sleep never ends early. */
 	error = copyin(args[0], &request, sizeof(request));
 	if (process == NULL || curthread == NULL)
 		return -EINVAL;
@@ -4607,7 +4610,7 @@ sys_nanosleep_call(
 		return -error;
 	if (ticks == 0)
 		return 0;
-	error = kern_deadline_after(sched_ticks(), ticks, &deadline);
+	error = kern_deadline_after(clock_ticks_ceil(), ticks, &deadline);
 	if (error != 0)
 		return -error;
 
@@ -8154,7 +8157,7 @@ sys_usync_call(
 
 				/* Takes the deadline, reusing the one a stop interrupted. */
 				if (error == 0)
-					error = kern_deadline_after(clock_ticks(), ticks,
+					error = kern_deadline_after(clock_ticks_ceil(), ticks,
 					    &deadline);
 			} else if (curthread != NULL &&
 			    curthread->syscall_stop_redispatch &&

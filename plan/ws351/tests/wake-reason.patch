@@ -1,0 +1,157 @@
+diff --git a/src/kern/clock.c b/src/kern/clock.c
+index b45077ba28..c2c382e8aa 100644
+--- a/src/kern/clock.c
++++ b/src/kern/clock.c
+@@ -39,6 +39,7 @@
+ #include "kern/usync.h"
+ #include "kern/waitq.h"
+ #include "kern/lock.h"
++#include "kern/klog.h"
+ 
+ #include <uapi/errno.h>
+ #include <hal/hal.h>
+@@ -103,6 +104,11 @@ static volatile uint64_t global_next = UINT64_MAX;
+ static volatile unsigned tick_lowered[HAL_CPU_MAX];
+ 
+ static volatile uint32_t cpu_notify_count[HAL_CPU_MAX];
++static volatile uint64_t tickdiag_count[64];
++static uint64_t tickdiag_last[64];
++static uint64_t tickdiag_next = 10000U;
++static uint64_t tickdiag_global_fast;
++void sched_diag_near_dump(void);
+ static struct kern_timespec realtime_offset = {
+ 	KERN_REALTIME_EPOCH_2026, 0
+ };
+@@ -170,6 +176,29 @@ kernel_timer_handler(
+ 	/* The time now. */
+ 	now = clock_ticks();
+ 
++	/* Test only: each CPU's interrupts, logged by CPU 0 every 10 s. */
++	if (cpu < 64U)
++		(void)atomic_u64_fetch_add_relaxed(&tickdiag_count[cpu], 1U);
++	if (cpu == 0 && now >= tickdiag_next) {
++		unsigned i;
++
++		for (i = 0; i < hal_cpu_count() && i < 64U; i++) {
++			uint64_t count = atomic_u64_load_acquire(&tickdiag_count[i]);
++
++			kern_logf("tickdiag: t=%llu cpu %u ticks %llu lowered %u\n",
++			    (unsigned long long)now, i,
++			    (unsigned long long)(count - tickdiag_last[i]),
++			    (unsigned)tick_lowered[i]);
++			tickdiag_last[i] = count;
++		}
++		kern_logf("tickdiag: t=%llu global-fast %llu global-next-in %lld\n",
++		    (unsigned long long)now, (unsigned long long)tickdiag_global_fast,
++		    (long long)(atomic_u64_load_acquire(&global_next) - now));
++		tickdiag_global_fast = 0U;
++		sched_diag_near_dump();
++		tickdiag_next = now + 10000U;
++	}
++
+ 	/*
+ 	 * CPU 0 starts the nearest deadline of its timers over, then lowers it
+ 	 * with the process timers and, in the scheduler, ITIMER_REAL.  A timer
+@@ -225,6 +254,8 @@ kern_clock_tick_idle(
+ 
+ 	/* Slows down when nothing falls due within the margin. */
+ 	lower = tick_far(now, next);
++	if (cpu == 0 && !lower && global == next)
++		tickdiag_global_fast++;
+ 
+ 	/* The HAL is asked only for a change. */
+ 	lowered = atomic_raw_load_acquire(&tick_lowered[cpu]);
+diff --git a/src/kern/sched.c b/src/kern/sched.c
+index 62a82ddf1f..85abbe05ec 100644
+--- a/src/kern/sched.c
++++ b/src/kern/sched.c
+@@ -2506,12 +2506,71 @@ idle_mask_clear(
+  * or UINT64_MAX when none has one.  Only the CPU itself calls it, from its
+  * idle loop with interrupts disabled.
+  */
++/* Test only: which sleepers kept an idle CPU at the busy rate. */
++struct sched_diag_near {
++	uint64_t key;
++	const char *queue;
++	uint64_t count;
++	uintptr_t entry;
++	uint64_t shortest;
++	uint64_t longest;
++};
++struct sched_diag_near sched_diag_near_table[48];
++
++static void
++sched_diag_near_note(
++	struct thread *thread)
++{
++	uint64_t key;
++	const char *queue;
++	uint64_t span;
++	unsigned i;
++
++	key = ((thread->proc != NULL ? (uint64_t)thread->proc->pid : 0U) << 32) | (uint64_t)(uint32_t)thread->tid;
++	queue = thread->wait_token.queue != NULL ? thread->wait_token.queue->name : NULL;
++	for (i = 0; i < 48U; i++) {
++		if (sched_diag_near_table[i].count == 0U || sched_diag_near_table[i].key == key) {
++			span = thread->sched.wakeup_tick - thread->sched.queued_tick;
++			if (sched_diag_near_table[i].count == 0U || span < sched_diag_near_table[i].shortest)
++				sched_diag_near_table[i].shortest = span;
++			if (sched_diag_near_table[i].count == 0U || span > sched_diag_near_table[i].longest)
++				sched_diag_near_table[i].longest = span;
++			sched_diag_near_table[i].key = key;
++			sched_diag_near_table[i].queue = queue;
++			sched_diag_near_table[i].entry = (uintptr_t)thread->kernel_entry;
++			sched_diag_near_table[i].count++;
++			break;
++		}
++	}
++}
++
++void
++sched_diag_near_dump(void)
++{
++	unsigned i;
++
++	for (i = 0; i < 48U; i++) {
++		if (sched_diag_near_table[i].count == 0U)
++			continue;
++		kern_logf("neardiag: count %llu pid %u tid %u entry %llx span %llu-%llu queue %s\n",
++		    (unsigned long long)sched_diag_near_table[i].count,
++		    (unsigned)(sched_diag_near_table[i].key >> 32), (unsigned)(uint32_t)sched_diag_near_table[i].key,
++		    (unsigned long long)sched_diag_near_table[i].entry,
++		    (unsigned long long)sched_diag_near_table[i].shortest,
++		    (unsigned long long)sched_diag_near_table[i].longest,
++		    sched_diag_near_table[i].queue != NULL ? sched_diag_near_table[i].queue : "-");
++		sched_diag_near_table[i].count = 0U;
++		sched_diag_near_table[i].key = 0U;
++	}
++}
++
+ static uint64_t
+ next_deadline(
+ 	hal_cpu_id_t id)
+ {
+ 	struct sched_cpu *cpu;
+ 	struct thread *thread;
++	struct thread *near;
+ 	unsigned long irq;
+ 	uint64_t next;
+ 
+@@ -2520,11 +2579,16 @@ next_deadline(
+ 	next = UINT64_MAX;
+ 	irq = spin_lock_irqsave(&cpu->lock);
+ 
++	near = NULL;
+ 	for (thread = cpu->sleep.head; thread != NULL; thread = thread->sched.next) {
+ 		if (thread->sched.wakeup_tick != 0 &&
+-		    thread->sched.wakeup_tick < next)
++		    thread->sched.wakeup_tick < next) {
+ 			next = thread->sched.wakeup_tick;
++			near = thread;
++		}
+ 	}
++	if (near != NULL && next > clock_ticks() && next - clock_ticks() < 12U)
++		sched_diag_near_note(near);
+ 
+ 	spin_unlock_irqrestore(&cpu->lock, irq);
+ 

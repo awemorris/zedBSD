@@ -17,6 +17,9 @@
 #include "../percpu.h"
 #include "bsp.h"
 
+/* The tick's rate, in hertz, which never changes. */
+#define CLOCK_TICK_HZ	100U
+
 /* The time base's rate and the counts of one tick; zero before the clock starts. */
 static uint64_t timebase_frequency;
 static uint64_t tick_interval;
@@ -37,7 +40,7 @@ pseries_clock_init(
 	timebase_frequency = pseries_board()->timebase_frequency;
 	if (timebase_frequency == 0)
 		HAL_FATAL("ppc64 firmware reports no time base rate");
-	tick_interval = timebase_frequency / HAL_TIMER_FREQUENCY;
+	tick_interval = timebase_frequency / CLOCK_TICK_HZ;
 
 	/* The first tick one interval from now. */
 	next_deadline = ppc64_read_timebase() + tick_interval;
@@ -108,6 +111,31 @@ pseries_clock_ticked(
 
 	/* Failed: no tick in the time allowed. */
 	return false;
+}
+
+/*
+ * Reports the tick's rate, which this timer runs at from boot and never
+ * changes.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	/* The rate the timer is programmed at. */
+	return CLOCK_TICK_HZ;
+}
+
+/*
+ * Keeps the tick's rate, which this timer cannot change, and reports it.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	UNUSED_PARAMETER(hz);
+
+	/* The rate the timer stays at. */
+	return CLOCK_TICK_HZ;
 }
 
 /*

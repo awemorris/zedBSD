@@ -50,7 +50,7 @@ process_timer_getoverrun(
 	timer_t id,
 	int *result);
 
-void
+uint64_t
 process_timer_tick(
 	uint64_t now_ticks);
 

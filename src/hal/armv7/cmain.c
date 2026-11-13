@@ -307,7 +307,7 @@ wait_for_ticks(
 	read = armv7_clock_read(&start, &frequency);
 	if (!read || frequency == 0)
 		HAL_FATAL("armv7 board counter unreadable");
-	limit = frequency / HAL_TIMER_FREQUENCY * CMAIN_TICK_WAIT_FACTOR * CMAIN_TICKS_WANTED;
+	limit = frequency / ARMV7_TICK_HZ * CMAIN_TICK_WAIT_FACTOR * CMAIN_TICKS_WANTED;
 
 	/* Waits with interrupts unmasked until enough ticks came, or the time is up. */
 	__asm__ volatile("cpsie i" : : : "memory");
@@ -360,7 +360,7 @@ time_ten_seconds(
 		return;
 
 	/* The ticks of ten seconds, waited for at most twice as long by the counter. */
-	wanted = (unsigned long)CMAIN_TIMER_CHECK_SECONDS * HAL_TIMER_FREQUENCY;
+	wanted = (unsigned long)CMAIN_TIMER_CHECK_SECONDS * ARMV7_TICK_HZ;
 	(void)armv7_clock_read(&start, &frequency);
 	limit = frequency * CMAIN_TIMER_CHECK_SECONDS * 2U;
 	first_tick = armv7_clock_ticks();

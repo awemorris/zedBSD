@@ -9,14 +9,6 @@
 #define HAL_HAL_ARCH_ARMV7_H
 
 /*
- * The periodic tick, in hertz.  As on the other ports the kernel keeps a
- * millisecond tick; the board's timer (the generic timer on the
- * emulator's virt board, the Cortex-A9 private timer on the ZYBO) is
- * programmed from it, and the counter's own rate belongs to the board.
- */
-#define HAL_TIMER_FREQUENCY	(1000U)
-
-/*
  * Signal Frame
  */
 

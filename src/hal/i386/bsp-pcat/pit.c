@@ -32,8 +32,8 @@ bsp_timer_init(
 	uint16_t divisor;
 
 	/* Programs channel zero for the fixed 100 Hz periodic rate. */
-	divisor = (uint16_t)((1193182U + HAL_TIMER_FREQUENCY / 2U) /
-	    HAL_TIMER_FREQUENCY);
+	divisor = (uint16_t)((1193182U + I386_TICK_HZ / 2U) /
+	    I386_TICK_HZ);
 	asm_outb(0x43U, 0x34U);
 	asm_outb(0x40U, (uint8_t)divisor);
 	asm_outb(0x40U, (uint8_t)(divisor >> 8));
@@ -50,6 +50,31 @@ clock_handler(
 	void)
 {
 	/* The generic timer path owns all work for this tick. */
+}
+
+/*
+ * Reports the tick's rate, which this timer runs at from boot and never
+ * changes.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	/* The rate the timer is programmed at. */
+	return I386_TICK_HZ;
+}
+
+/*
+ * Keeps the tick's rate, which this timer cannot change, and reports it.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	UNUSED_PARAMETER(hz);
+
+	/* The rate the timer stays at. */
+	return I386_TICK_HZ;
 }
 
 /*

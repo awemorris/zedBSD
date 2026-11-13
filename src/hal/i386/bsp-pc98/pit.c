@@ -47,8 +47,8 @@ bsp_timer_init(
 		clock = PC98_PIT_CLOCK_5MHZ;
 
 	/* Programs channel zero for the HAL tick. */
-	interval = (uint16_t)((clock + HAL_TIMER_FREQUENCY / 2U) /
-	    HAL_TIMER_FREQUENCY);
+	interval = (uint16_t)((clock + I386_TICK_HZ / 2U) /
+	    I386_TICK_HZ);
 	asm_outb(0x77, 0x34);
 	asm_outb(0x71, (uint8_t)(interval & 0xff));
 	asm_outb(0x71, (uint8_t)(interval >> 8));
@@ -65,6 +65,31 @@ clock_handler(
 	void)
 {
 	/* The generic timer path owns all work for this tick. */
+}
+
+/*
+ * Reports the tick's rate, which this timer runs at from boot and never
+ * changes.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	/* The rate the timer is programmed at. */
+	return I386_TICK_HZ;
+}
+
+/*
+ * Keeps the tick's rate, which this timer cannot change, and reports it.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	UNUSED_PARAMETER(hz);
+
+	/* The rate the timer stays at. */
+	return I386_TICK_HZ;
 }
 
 /*

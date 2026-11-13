@@ -9,12 +9,6 @@
 #define HAL_HAL_ARCH_PPC32_H
 
 /*
- * The periodic tick, in hertz.  The decrementer runs at the timebase the
- * firmware reports, and the HAL derives the interval from this value.
- */
-#define HAL_TIMER_FREQUENCY	(100U)
-
-/*
  * Signal Frame
  */
 

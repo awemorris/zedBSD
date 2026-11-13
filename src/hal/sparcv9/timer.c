@@ -20,6 +20,9 @@
 #include "irq.h"
 #include "timer.h"
 
+/* The tick's rate, in hertz, which never changes. */
+#define TIMER_TICK_HZ	100U
+
 /*
  * The counter's rate, the counts in one tick, and the count of the next
  * tick.  The first two are set once by sparcv9_timer_init(); the deadline
@@ -52,7 +55,7 @@ sparcv9_timer_init(
 
 	/* Divides the counter's rate into ticks, never fewer than one count. */
 	tick_frequency = frequency;
-	tick_interval = tick_frequency / HAL_TIMER_FREQUENCY;
+	tick_interval = tick_frequency / TIMER_TICK_HZ;
 	if (tick_interval == 0)
 		tick_interval = 1;
 
@@ -102,6 +105,31 @@ sparcv9_timer_interrupt(
 		acknowledge = sparcv9_irq_begin(0);
 		kernel_timer_handler(0, acknowledge);
 	}
+}
+
+/*
+ * Reports the tick's rate, which this timer runs at from boot and never
+ * changes.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	/* The rate the timer is programmed at. */
+	return TIMER_TICK_HZ;
+}
+
+/*
+ * Keeps the tick's rate, which this timer cannot change, and reports it.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	UNUSED_PARAMETER(hz);
+
+	/* The rate the timer stays at. */
+	return TIMER_TICK_HZ;
 }
 
 /*

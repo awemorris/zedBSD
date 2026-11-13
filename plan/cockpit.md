@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | q2045 | 作業中 | WS351: 可変の tick（普段 1000 Hz、idle で 100 Hz）、HAL_TIMER_FREQUENCY の廃止 | — |
+| P1 | — | 待機 | WS351 を merge（可変の tick、clock 1 ns）。5330 の idle の電力は未達（compositor の短い poll） | 対処はユーザーの判断待ち |
 | P2 | — | 待機 | WS299 を測り直し（direct 4 MiB の読み 92 % だけ未達）、p006 cleared | p007（QEMU の image の作り方）、p004 の残り、4 MiB の読みの解析 |
 | P3 | — | 待機 | WS347 依頼 07 の監査を返却（A15・B3）、依頼 08 を agy へ | agy の依頼 08 の 1 次回答の後に確かめ |
 | P4 | — | 待機 | WS347 p009 cleared（host は local memory に GOP 以外触れない） | p004（VF2＋KC705 の実機） |

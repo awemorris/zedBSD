@@ -208,6 +208,13 @@ struct sched_cpu {
 	volatile uint64_t times[SCHED_TIMES];
 
 	/*
+	 * The time the CPU's ticks were last charged up to, in ticks.  A tick
+	 * charges the time since, which is one tick at the busy rate and more
+	 * at the idle one.  Under the lock.
+	 */
+	uint64_t tick_last;
+
+	/*
 	 * The latency diagnostic's window, and the CPU's switches to another
 	 * thread since boot, which a waiting thread's stamp is compared with
 	 * to tell how many ran before it.  Both only with the diagnostic on.
@@ -219,7 +226,6 @@ struct sched_cpu {
 static struct sched_cpu *scheduler_cpus;
 static unsigned scheduler_cpu_count;
 static struct hal_cpu_mask scheduler_online_mask;
-static volatile uint64_t scheduler_ticks;
 static volatile unsigned scheduler_round_robin;
 
 /*
@@ -289,12 +295,13 @@ static hal_cpu_id_t choose_idle_cpu(hal_cpu_id_t except);
 static void idle_mask_set(hal_cpu_id_t cpu);
 static void idle_mask_clear(hal_cpu_id_t cpu);
 static void leave_idle(struct sched_cpu *cpu, const struct thread *current, hal_cpu_id_t id);
+static uint64_t next_deadline(hal_cpu_id_t id);
 static int set_affinity_in_place(struct sched_cpu *cpu, struct thread *thread, hal_cpu_id_t id, enum sched_cpu_affinity affinity);
 static struct thread *take_stealable_locked(struct sched_cpu *victim);
 static struct thread *first_free_thread(struct thread *head);
 static int steal_runnable(hal_cpu_id_t self);
 static void retarget_migrating(struct thread *thread, struct sched_cpu *old_cpu, hal_cpu_id_t target);
-static void charge_cpu_time(struct sched_cpu *cpu, const struct thread *thread);
+static void charge_cpu_time(struct sched_cpu *cpu, const struct thread *thread, uint64_t ticks);
 static void perf_init(void);
 static void perf_mark_runnable_locked(struct sched_cpu *cpu, struct thread *thread, unsigned kind);
 static void perf_switch_locked(struct sched_cpu *cpu, struct thread *current, struct thread *next);
@@ -389,7 +396,7 @@ sched_init(
 	thread0.sched.cpu = 0;
 	thread0.sched.last_cpu = 0;
 	thread0.sched.quantum = SCHED_QUANTUM_TICKS;
-	atomic_u64_store_release(&scheduler_ticks, 0);
+	scheduler_cpus[0].tick_last = clock_ticks();
 
 	/* Turns the latency diagnostic on when the boot line asks for it. */
 	perf_init();
@@ -1005,9 +1012,9 @@ sched_exit_current(
  * Handles the clock tick on a CPU.
  *
  * Timed sleeps that expired become runnable, the running user thread is
- * charged a tick of CPU time and its interval timers advanced, and an
- * exhausted quantum yields.  CPU 0 also keeps the global tick count and
- * the real-time interval timers.
+ * charged the ticks since the last one as CPU time and its interval timers
+ * advanced, and an exhausted quantum yields.  CPU 0 also advances the
+ * real-time interval timers and reports their nearest expiry.
  */
 void
 sched_clock_cpu(
@@ -1020,6 +1027,7 @@ sched_clock_cpu(
 	struct process *expired_process;
 	struct process *accounted_process;
 	uint64_t accounted_ticks;
+	uint64_t elapsed;
 	unsigned expired_signals;
 	unsigned long irq;
 	hal_cpu_id_t helper;
@@ -1038,12 +1046,16 @@ sched_clock_cpu(
 	/* Only the CPU itself handles its tick, and only once online. */
 	if (id != hal_cpu_current() || !cpu_online(id))
 		return;
-	if (id == 0)
-		atomic_u64_store_release(&scheduler_ticks, now);
 
 	/* Wakes the timed sleepers whose deadline passed. */
 	cpu = sched_cpu_state(id);
 	irq = spin_lock_irqsave(&cpu->lock);
+
+	/* The ticks since the last charge: one at the busy rate, more at the idle one. */
+	elapsed = 0U;
+	if (now > cpu->tick_last)
+		elapsed = now - cpu->tick_last;
+	cpu->tick_last = now;
 
 	thread = cpu->sleep.head;
 	while (thread != NULL) {
@@ -1059,9 +1071,9 @@ sched_clock_cpu(
 		thread = next;
 	}
 
-	/* Charges the tick to what the CPU was doing (hw.cputimes). */
+	/* Charges the ticks to what the CPU was doing (hw.cputimes). */
 	thread = curthread;
-	charge_cpu_time(cpu, thread);
+	charge_cpu_time(cpu, thread, elapsed);
 
 	/* Charges the running thread and decides on preemption. */
 	if (thread != NULL && thread->state == THREAD_RUNNING) {
@@ -1070,13 +1082,13 @@ sched_clock_cpu(
 		    thread->proc != &process0) {
 			kernel = thread->accounting_kernel_depth != 0;
 			accounted_ticks = atomic_u64_fetch_add_relaxed(
-			    &thread->proc->cpu_ticks, 1U) + 1U;
+			    &thread->proc->cpu_ticks, elapsed) + elapsed;
 			if (kernel)
 				(void)atomic_u64_fetch_add_relaxed(
-				    &thread->proc->system_ticks, 1U);
+				    &thread->proc->system_ticks, elapsed);
 			else
 				(void)atomic_u64_fetch_add_relaxed(
-				    &thread->proc->user_ticks, 1U);
+				    &thread->proc->user_ticks, elapsed);
 			accounted_process = thread->proc;
 
 			/*
@@ -1084,9 +1096,9 @@ sched_clock_cpu(
 			 * ITIMER_PROF measures the complete user+system CPU
 			 * time of the process.
 			 */
-			if (!kernel && process_itimer_tick(thread->proc, 1))
+			if (!kernel && process_itimer_tick(thread->proc, 1, elapsed))
 				expired_signals |= 1U << 1;
-			if (process_itimer_tick(thread->proc, 2))
+			if (process_itimer_tick(thread->proc, 2, elapsed))
 				expired_signals |= 1U << 2;
 			if (expired_signals != 0)
 				expired_process = thread->proc;
@@ -1096,7 +1108,10 @@ sched_clock_cpu(
 		if ((thread->flags & THREAD_FLAG_IDLE) != 0) {
 			preempt = cpu->need_resched != 0;
 		} else if (thread->sched.quantum != 0) {
-			thread->sched.quantum--;
+			if (thread->sched.quantum <= elapsed)
+				thread->sched.quantum = 0;
+			else
+				thread->sched.quantum -= (uint32_t)elapsed;
 			if (thread->sched.quantum == 0)
 				preempt = 1;
 		}
@@ -1157,7 +1172,7 @@ sched_clock_cpu(
 	 * in one registry pass rather than repeatedly searching by PID.
 	 */
 	if (id == 0)
-		process_itimer_real_tick_all();
+		kern_clock_timer_due(process_itimer_real_tick_all(now));
 	if (preempt)
 		sched_yield();
 	else if (wanted)
@@ -1505,7 +1520,8 @@ sched_ticks(
 {
 	uint64_t ticks;
 
-	ticks = atomic_u64_load_acquire(&scheduler_ticks);
+	/* The clock's time, read now. */
+	ticks = clock_ticks();
 
 	/* Reports the tick count. */
 	return ticks;
@@ -1610,8 +1626,13 @@ sched_idle(
 			continue;
 		}
 
-		/* Halts as a CPU that others may hand work to (suspended to idle during a system sleep). */
+		/*
+		 * Halts as a CPU that others may hand work to (suspended to idle
+		 * during a system sleep), its tick slowed down while no deadline
+		 * it watches is near.
+		 */
 		idle_mask_set(cpu);
+		kern_clock_tick_idle(cpu, next_deadline(cpu));
 		kern_sleep_idle(cpu);
 		idle_mask_clear(cpu);
 		sched_switch();
@@ -1645,6 +1666,7 @@ sched_secondary_init(
 		HAL_FATAL("secondary scheduler initialized twice");
 	cpu->idle = idle;
 	cpu->current = idle;
+	cpu->tick_last = clock_ticks();
 	atomic_raw_store_release(&cpu->online, 1U);
 	(void)atomic_u64_fetch_or_release(
 	    &scheduler_online_mask.bits[id / 64U],
@@ -1707,6 +1729,7 @@ sched_set_cpu(
 	unsigned old_kind;
 	unsigned pending;
 	unsigned long irq;
+	int timed;
 	int error;
 
 	/* Only a non-running live thread can move to an online CPU. */
@@ -1769,8 +1792,13 @@ sched_set_cpu(
 		} else if (old_kind == SCHED_QUEUE_SLEEP) {
 			queue_append(&old_cpu->sleep, thread, SCHED_QUEUE_SLEEP);
 		}
+		timed = old_kind == SCHED_QUEUE_SLEEP && thread->sched.wakeup_tick != 0;
 
 		spin_unlock_irqrestore(&old_cpu->lock, irq);
+
+		/* The deadline is back on a CPU whose idle tick may have slowed down without it. */
+		if (timed)
+			notify_cpu(old);
 		if (error == HAL_ERR_BUSY)
 			return EBUSY;
 		return EIO;
@@ -1797,10 +1825,12 @@ sched_set_cpu(
 	} else if (old_kind == SCHED_QUEUE_SLEEP) {
 		queue_append(&new_cpu->sleep, thread, SCHED_QUEUE_SLEEP);
 	}
+	timed = old_kind == SCHED_QUEUE_SLEEP && thread->sched.wakeup_tick != 0;
 
 	spin_unlock_irqrestore(&new_cpu->lock, irq);
 
-	if (old_kind == SCHED_QUEUE_RUN)
+	/* A runnable thread, or a deadline the new CPU's idle tick may not be watching, wakes it. */
+	if (old_kind == SCHED_QUEUE_RUN || timed)
 		notify_cpu(target);
 
 	/* Reports the migrated thread. */
@@ -1972,7 +2002,7 @@ send_itimer_signal(
 }
 
 /*
- * Charges a CPU's tick to what it was doing: its idle thread, a user
+ * Charges a CPU's ticks to what it was doing: its idle thread, a user
  * thread in user mode, a thread in the kernel or a kernel thread (process0's
  * or none), or neither (no thread, or one that is not running: it is going
  * to sleep or leaving).  An interrupt is the time of the thread it stopped.
@@ -1980,7 +2010,8 @@ send_itimer_signal(
 static void
 charge_cpu_time(
 	struct sched_cpu *cpu,
-	const struct thread *thread)
+	const struct thread *thread,
+	uint64_t ticks)
 {
 	unsigned kind;
 
@@ -2005,8 +2036,8 @@ charge_cpu_time(
 		kind = SCHED_TIME_USER;
 	}
 
-	/* One more tick of that kind; only this CPU writes its counts. */
-	(void)atomic_u64_fetch_add_relaxed(&cpu->times[kind], 1U);
+	/* The ticks to that kind; only this CPU writes its counts. */
+	(void)atomic_u64_fetch_add_relaxed(&cpu->times[kind], ticks);
 }
 
 /* Finds the state of a CPU, which must exist. */
@@ -2037,7 +2068,7 @@ queue_append(
 		queue->head = thread;
 	queue->tail = thread;
 	queue->count++;
-	thread->sched.queued_tick = atomic_u64_load_acquire(&scheduler_ticks);
+	thread->sched.queued_tick = clock_ticks();
 	thread->sched.queue_kind = kind;
 }
 
@@ -2056,7 +2087,7 @@ queue_prepend(
 		queue->tail = thread;
 	queue->head = thread;
 	queue->count++;
-	thread->sched.queued_tick = atomic_u64_load_acquire(&scheduler_ticks);
+	thread->sched.queued_tick = clock_ticks();
 	thread->sched.queue_kind = kind;
 }
 
@@ -2471,7 +2502,39 @@ idle_mask_clear(
 }
 
 /*
- * Withdraws a CPU from the idle mask when its idle thread gives up the CPU.
+ * Reports the nearest deadline of the timed sleepers on a CPU, in ticks,
+ * or UINT64_MAX when none has one.  Only the CPU itself calls it, from its
+ * idle loop with interrupts disabled.
+ */
+static uint64_t
+next_deadline(
+	hal_cpu_id_t id)
+{
+	struct sched_cpu *cpu;
+	struct thread *thread;
+	unsigned long irq;
+	uint64_t next;
+
+	/* Walks the sleepers, as the tick does. */
+	cpu = sched_cpu_state(id);
+	next = UINT64_MAX;
+	irq = spin_lock_irqsave(&cpu->lock);
+
+	for (thread = cpu->sleep.head; thread != NULL; thread = thread->sched.next) {
+		if (thread->sched.wakeup_tick != 0 &&
+		    thread->sched.wakeup_tick < next)
+			next = thread->sched.wakeup_tick;
+	}
+
+	spin_unlock_irqrestore(&cpu->lock, irq);
+
+	/* Reports the nearest. */
+	return next;
+}
+
+/*
+ * Withdraws a CPU from the idle mask when its idle thread gives up the CPU,
+ * and brings its tick back to the busy rate.
  *
  * A notification that arrives while the idle thread halts may switch away
  * from inside the interrupt, before sched_idle() clears the bit itself;
@@ -2483,12 +2546,30 @@ leave_idle(
 	const struct thread *current,
 	hal_cpu_id_t id)
 {
+	uint64_t now;
+	bool slowed;
+
 	/* Only the idle thread's departure changes the mask. */
 	if (current == NULL || current != cpu->idle)
 		return;
 
 	/* The CPU is busy from here on, whatever sched_idle() has not yet cleared. */
 	idle_mask_clear(id);
+
+	/*
+	 * The busy rate again.  A CPU that idled at the slow one charges the
+	 * time it idled now, so that the thread it runs is not charged it at
+	 * its first tick.
+	 */
+	slowed = kern_clock_tick_busy(id);
+	if (!slowed)
+		return;
+	now = clock_ticks();
+	if (now > cpu->tick_last) {
+		(void)atomic_u64_fetch_add_relaxed(&cpu->times[SCHED_TIME_IDLE],
+		    now - cpu->tick_last);
+		cpu->tick_last = now;
+	}
 }
 
 /*
@@ -2571,7 +2652,7 @@ take_stealable_locked(
 		 * and leave the parent's CPU to halt and be woken again.  A
 		 * thread still queued at the next tick has waited long enough.
 		 */
-		now = atomic_u64_load_acquire(&scheduler_ticks);
+		now = clock_ticks();
 		if (thread->sched.queued_tick >= now)
 			continue;
 

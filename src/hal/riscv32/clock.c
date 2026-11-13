@@ -21,6 +21,9 @@
 #include "percpu.h"
 #include "sbi.h"
 
+/* The tick's rate, in hertz, which never changes. */
+#define CLOCK_TICK_HZ	1000U
+
 /* The time riscv32_clock_ticked() allows the first tick, as a fraction of a second. */
 #define CLOCK_TICK_WAIT_DIVISOR	10U
 
@@ -47,7 +50,7 @@ riscv32_clock_init(
 		timer_frequency = riscv32_boot_fdt()->timebase_frequency;
 		if (timer_frequency == 0)
 			HAL_FATAL("riscv32 device tree gives no timebase");
-		timer_interval = timer_frequency / HAL_TIMER_FREQUENCY;
+		timer_interval = timer_frequency / CLOCK_TICK_HZ;
 		if (timer_interval == 0)
 			timer_interval = 1;
 	}
@@ -137,6 +140,31 @@ riscv32_clock_ticked(
 
 	/* Failed: the boot hart saw no tick in the time allowed. */
 	return false;
+}
+
+/*
+ * Reports the tick's rate, which this timer runs at from boot and never
+ * changes.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	/* The rate the timer is programmed at. */
+	return CLOCK_TICK_HZ;
+}
+
+/*
+ * Keeps the tick's rate, which this timer cannot change, and reports it.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	UNUSED_PARAMETER(hz);
+
+	/* The rate the timer stays at. */
+	return CLOCK_TICK_HZ;
 }
 
 /*
