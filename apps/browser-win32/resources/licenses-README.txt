@@ -31,11 +31,6 @@ Unicode-License-V3.txt
     The Unicode data in the browser's engine (the case mappings, and the
     time zones' names from CLDR): the Unicode License v3.
 
-libwebp-COPYING.txt
-    The constants of the WebP decoder's colour conversion, values of
-    libwebp 1.5.0 (no libwebp code is in the program): the BSD 3-Clause
-    licence.  Copyright (c) 2010, Google Inc.
-
 ca-certificates-MPL-2.0.txt
     The trusted roots in share/certs/ca-certificates.pem, Mozilla's: the
     Mozilla Public License 2.0.

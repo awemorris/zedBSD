@@ -315,6 +315,7 @@ WS に固有の決定はその ws.md にある。ここは複数の WS・OS 全�
 
 - **OpenSSL・OpenSSH は外部の package（2026-11-13）**: ユーザーの決定の要点: OpenSSL・OpenSSH は利用者が明示的に指定しない限り build に入らない、完全に外部の package として扱う。zedBSD の program（mailer・libbrowser・browser-win32 など）の TLS と暗号は libssl-compat・libcrypto-compat（WS335）を前提にし、OpenSSL を選ぶ道や macro を持たない（WS335 p042〜）。
 - **配布物の許諾の文（2026-11-13）**: ユーザーの決定の要点: compiler の C runtime（mingw-w64 の runtime・LLVM の compiler-rt など、link の例外を持つ物）の許諾は配布物に表示しない（一般の慣行）。表示するのは自分たちと第三者の library・font・data の許諾。Windows では winpthreads を使わず thread は Win32 の API（WS334 p040）。
+- **libwebp の値（2026-11-13）**: ユーザーの決定の要点: libwebp-compat の YUV→RGB の定数などは引用であり、libwebp の著作権の表示は要らない。zip にも zedBSD の package にも libwebp の許諾を入れない（出典の comment は残す）。
 
 ### 11.1 対象 platform
 
