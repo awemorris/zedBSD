@@ -172,8 +172,7 @@ KEILAND_FONT_DATA := \
 	/usr/share/fonts/keiland-fallback.ttf=userland/desktop/fonts/DroidSansFallbackFull.ttf \
 	/usr/share/licenses/keiland-fonts/Mahora-LICENSE.txt=userland/desktop/fonts/Mahora-LICENSE.txt \
 	/usr/share/licenses/keiland-fonts/JetBrainsMono-OFL.txt=userland/desktop/fonts/JetBrainsMono-OFL.txt \
-	/usr/share/licenses/keiland-fonts/DroidSansFallback-LICENSE.txt=userland/desktop/fonts/DroidSansFallback-LICENSE.txt \
-	/usr/share/licenses/keiland-fonts/Apache-2.0.txt=userland/desktop/fonts/Apache-2.0.txt
+	/usr/share/licenses/keiland-fonts/DroidSansFallback-LICENSE.txt=userland/desktop/fonts/DroidSansFallback-LICENSE.txt
 
 KEILAND_DATA := $(KEILAND_FONT_DATA) \
 	/usr/libexec/keiland-x11=userland/desktop/wayland/keiland-x11 \

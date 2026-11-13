@@ -18,9 +18,10 @@ JetBrainsMono-OFL.txt
     JetBrains Mono (share/fonts/keiland-fallback-mono.ttf): the SIL Open
     Font License 1.1.
 
-DroidSansFallback-LICENSE.txt, Apache-2.0.txt
+DroidSansFallback-LICENSE.txt
     Droid Sans Fallback (share/fonts/keiland-fallback.ttf): the Apache
-    License 2.0.
+    License 2.0, with Google's copyright notice and the licence's full
+    text.
 
 WHATWG-entities.txt
     The table of HTML's named character references in the browser's
@@ -29,16 +30,6 @@ WHATWG-entities.txt
 Unicode-License-V3.txt
     The Unicode data in the browser's engine (the case mappings, and the
     time zones' names from CLDR): the Unicode License v3.
-
-libwebp-COPYING.txt
-    The constants of the WebP decoder's colour conversion, values of
-    libwebp 1.5.0 (no libwebp code is in the program): the BSD 3-Clause
-    licence.  Copyright (c) 2010, Google Inc.
-
-MinGW-w64-runtime.txt, winpthreads.txt, LLVM-LICENSE.txt
-    The parts of the toolchain (llvm-mingw) linked into the program: the
-    MinGW-w64 runtime's start-up code, its POSIX threads (winpthreads) and
-    LLVM's compiler runtime.
 
 ca-certificates-MPL-2.0.txt
     The trusted roots in share/certs/ca-certificates.pem, Mozilla's: the
