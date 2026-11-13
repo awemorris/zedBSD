@@ -991,9 +991,9 @@ desktop_watch(
 		return;
 
 	/* The program is gone; it is started again after a while. */
-	printf("KWL DESKTOP exited pid=%d\n", (int)desk.pid);
-	desk.pid = 0;
 	desktop_gone(server);
+	printf("KWL DESKTOP exited pid=%d at_ms=%llu\n", (int)desk.pid, (unsigned long long)desk.gone_ms);
+	desk.pid = 0;
 
 	/* Succeeded: the end is noted. */
 	return;

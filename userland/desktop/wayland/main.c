@@ -2386,10 +2386,8 @@ timeout_fired(
 {
 	struct kwl_server *server;
 
-	UNUSED_PARAMETER(timer);
-
-	/* The loop's next turn ends it. */
+	/* The loop's next turn ends it (late_ms: how long after its time the timer fired). */
 	server = context;
 	server->time_up = 1U;
-	printf("KWL TIMEOUT after_ms=%llu\n", (unsigned long long)server->timeout_ms);
+	printf("KWL TIMEOUT after_ms=%llu late_ms=%llu\n", (unsigned long long)server->timeout_ms, (unsigned long long)(kwl_milliseconds() - timer->due_ms));
 }
