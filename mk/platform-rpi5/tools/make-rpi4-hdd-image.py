@@ -23,7 +23,7 @@ FIRMWARE_FILES = {
     "rpi4": ("start4.elf", "fixup4.dat", "bcm2711-rpi-4-b.dtb",
              "LICENCE.broadcom"),
     "rpi5": ("bcm2712-rpi-5-b.dtb", "bcm2712d0-rpi-5-b.dtb",
-             "COPYING.linux"),
+             "bcm2712-rpi-500.dtb", "COPYING.linux"),
 }
 OVERLAYS = {
     "rpi4": ("disable-bt.dtbo",),

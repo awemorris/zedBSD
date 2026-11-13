@@ -13,6 +13,7 @@ Owner: Q1
 
 ## ユーザーの決定（要点）
 
+- 2026-11-13 ユーザーから、firmware は zedBSD-firmware の repository に入れてそこから取る、Q1 が zedBSD-firmware を push してよい、という趣旨の指示を受けた。→ Q1 が `rpi5-boot/bcm2712-rpi-500.dtb` と `source/…/bcm2712-rpi-500.dts`（raspberrypi/linux 89586905、既存の source に足して cpp と dtc 1.7.2 で byte 単位で同じ dtb を作れる事を確かめた）・README・SHA256SUMS を足して zedBSD-firmware 2670dc1 を push。`userland/firmware/zedbsd-firmware.mk` の REVISION をそれに、`mk/platform-rpi5/firmware.mk`（dtb の行、数 3→4、comment）と `mk/platform-rpi5/tools/` の image の作成・検査の表に dtb を足した（担当の変更は権限の判定で拒まれたので、ユーザーの承認の下で Q1 が当てた）。
 - 2026-11-13 に外部の利用者から Raspberry Pi 500（BCM2712 D0、8 GB）で zedBSD（c4cede8、2026-11-03 の source）が起動したという報告を受けた（Pi 500 の dtb を FAT に足して起動、desktop・日本語入力・Wi-Fi・有線・ブラウザ・SSH・shutdown は動作、HDMI の音は無し）。
 - 2026-11-13 ユーザーから、Pi 500 の報告の #1・#6・#7 をそれぞれ WS に、#2・#3・#4 を Bug に（修正済みの疑いが強い）、#5（起動の直後の時計）は仕様、#8（build の手順）は見直して誤りがあれば直す、という趣旨の指示を受けた。
 

@@ -19,7 +19,8 @@ ROOT_LBA = 264192
 BOOT_FILES = {
     "rpi4": ("start4.elf", "fixup4.dat", "bcm2711-rpi-4-b.dtb",
              "overlays/disable-bt.dtbo", "LICENCE.broadcom"),
-    "rpi5": ("bcm2712-rpi-5-b.dtb", "bcm2712d0-rpi-5-b.dtb", "COPYING.linux"),
+    "rpi5": ("bcm2712-rpi-5-b.dtb", "bcm2712d0-rpi-5-b.dtb", "bcm2712-rpi-500.dtb",
+             "COPYING.linux"),
 }
 
 

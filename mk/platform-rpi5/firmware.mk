@@ -4,12 +4,13 @@
 # SPDX-License-Identifier: Zlib
 
 #
-# Raspberry Pi 5 boot firmware
+# Raspberry Pi 5 and Pi 500 boot firmware
 #
-# The Pi 5's bootloader is in the board's EEPROM and reads config.txt,
-# the kernel and the device tree from the SD card's FAT partition, no
-# GPU firmware goes there.  The partition carries the two device trees
-# the bootloader picks from by the chip's stepping and their license,
+# The board's bootloader is in its EEPROM and reads config.txt, the
+# kernel and the device tree from the SD card's FAT partition, no GPU
+# firmware goes there.  The partition carries the Pi 5's two device
+# trees, which the bootloader picks from by the chip's stepping, the
+# Pi 500's device tree, and their license,
 # fetched file by file from the same raspberrypi/firmware commit as
 # the Pi 4's.
 #
@@ -26,6 +27,7 @@ override RPI5_BOOT_FIRMWARE_REVISION := \
 override RPI5_BOOT_FIRMWARE_FILES := \
 	bcm2712-rpi-5-b.dtb|boot/bcm2712-rpi-5-b.dtb|78703|40a2fbe9c29e8b9a4912cf726a943068defb779fc052ec38e457a79c58abca00 \
 	bcm2712d0-rpi-5-b.dtb|boot/bcm2712d0-rpi-5-b.dtb|78707|03d80fc8196bfd113f86534c60ee2cb35ba95ae182e34a42f66caf7fa15f48ba \
+	bcm2712-rpi-500.dtb|boot/bcm2712-rpi-500.dtb|78659|dd98c7c3780e4c88148401c95d2222ccb4e585ed4bfbe2b5c67531b0a06958b5 \
 	COPYING.linux|boot/COPYING.linux|18693|af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7
 
 override RPI5_BOOT_FIRMWARE_ZEDBSD_URL := \
@@ -38,8 +40,8 @@ override RPI5_BOOT_FIRMWARE_FETCH := \
 
 override RPI5_BOOT_FIRMWARE_SHA256_COMMAND := sha256sum
 
-# Three files.
-override RPI5_BOOT_FIRMWARE_ENTRY_COUNT := 3
+# Four files.
+override RPI5_BOOT_FIRMWARE_ENTRY_COUNT := 4
 
 RPI5_BOOT_FIRMWARE_CACHE_ROOT ?= build/sources/firmware/rpi5-boot
 override RPI5_BOOT_FIRMWARE_DIR := $(RPI5_BOOT_FIRMWARE_CACHE_ROOT)/$(RPI5_BOOT_FIRMWARE_REVISION)
