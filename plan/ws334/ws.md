@@ -13,6 +13,7 @@
 
 - 2026-11-13 ユーザーから、次の趣旨の指示を受けた: GitHub の CI で、top で `make browser-win32` と 1 文字も違わない command だけで build が通るようにする（script で包まない、変数も渡さない）。CI の compiler は mingw-w64（gcc）。既定で build するのは x86_64（arm64 は llvm-mingw の時に WIN32_ARCH=aarch64）。
 - 2026-11-13: 上の決定は、下の 11（mingw-w64 か llvm-mingw）・17（llvm-mingw を host に入れた、x86_64・aarch64）の読み方を上書きする。CI と素の `make browser-win32` は mingw-w64 の gcc で x86_64 だけ。llvm-mingw と arm64 は任意の道（`WIN32_ARCH=aarch64`）。`apps/browser-win32/Makefile` と `plan/ws334/tests/cross-build.sh` の先頭の comment（top の `browser-win64`・`browser-winarm64`、両 arch）は古い。
+- 2026-11-13 ユーザーから、次の趣旨の決定を受けた: vulkan-1.dll の遅延の読み込み（`--delayload`）は要らない。libbrowser は Vulkan の宣言を使うので `--no-gpu`（Vulkan 無しの描画）はできない。software の描画が要るなら自前の software の Vulkan を作る形だが、それはやらない。素の checkout の `make browser-win32` のため既定の config.mk を commit し、clang 用に `-Wno-unknown-warning-option` を足した（ユーザー）。
 
 - （2026-11-02 10:52）ユーザーから、WS335 の完了の後に、Windows 版のブラウザの OpenSSL を libssl-compat・libcrypto-compat（static link）に切り替え、OpenSSL への依存を無くす、という趣旨の指示を受けた。
 - 2026-10-31 ユーザーから、次の趣旨の指示を受けた。
