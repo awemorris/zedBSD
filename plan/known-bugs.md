@@ -455,7 +455,7 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-415](bugs/BUG-415.md) | ブラウザ: 保たない頁を離れる時に pagehide（persisted false）が出ない | fixed（2026-11-02 P8 q1977-i01、cache に保たない頁と置き換わる頁は showing なら pagehide（persisted false）、次に unload。iframe も同じ。host-back-forward 25/25。host で確かめた、QEMU・実機は未実施） |
 | [BUG-416](bugs/BUG-416.md) | usb-net で長さが 64 byte の倍数の frame が届かない（xHCI の 0 長の packet の Short Packet） | fixed（2026-11-02 17:50 P3 q1978-i01、0 長の packet を別の TD にした。QEMU amd64 で 64 の倍数の frame の ping・fetch が通る、実機は未実施） |
 | [BUG-417](bugs/BUG-417.md) | ブラウザ: web platform の prelude の WebIDL の operation が constructor として呼べる | open（2026-11-02 17:16 Q1 が起票、P8） |
-| [BUG-418](bugs/BUG-418.md) | build system の作り直し（branch refactor）の後、rpi5 の kernel が起動しない・rpi4・vf2・i386・pc9821 は未試験 | open（2026-11-13: A は 486 で動く形で閉じ、C は cleared（UAT で残りを確かめる）、E は直した。残り D・firmware の同意の image・build/ の外の出力） |
+| [BUG-418](bugs/BUG-418.md) | build system の作り直し（branch refactor）の後、rpi5 の kernel が起動しない・rpi4・vf2・i386・pc9821 は未試験 | fixed（2026-11-13 Q1。7 機種の build、QEMU の起動（i386・pc9821・x86_64 login、rpi4 login prompt）、A は 486 で閉じ、C・D・E は直した） |
 | [BUG-419](bugs/BUG-419.md) | riscv64 で noct の JIT が使えない（builtins が PIC でなく、`__clear_cache` に zedBSD の実装が無い） | open（2026-11-11 11:27 Q1 が起票、担当は未定） |
 | [BUG-420](bugs/BUG-420.md) | LLVM の source の展開が file の時刻で繰り返され、build が source を上書きする（worktree の i386 の vmunix が main の build/llvm-source を上書き） | fixed（2026-11-12 Q1、main と新しい worktree で確かめた） |
 | [BUG-421](bugs/BUG-421.md) | 新しい checkout で NoctLang の patch が取得した tarball に当たらず `make sysroot` が止まる（CMakeLists.txt の hunk） | fixed（2026-11-12 ユーザー 0958bc742e、Q1 が新しい worktree で確かめた） |

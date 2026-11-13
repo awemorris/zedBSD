@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | q2039 | 作業中 | BUG-418: rpi4 の SD の image と QEMU raspi4b の起動（同意の記録あり） | — |
+| P1 | — | 待機 | BUG-418 fixed（rpi4 の image と QEMU も確かめた） | — |
 | P2 | q2041 | 作業中 | BUG-424: VMD の suspend・resume、5330 で S0 idle | — |
 | P3 | q2040 | 作業中 | WS347: agy の依頼 07（V1〜V9）の監査、次の依頼の下書き | — |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |
