@@ -173,3 +173,23 @@ zedBSD の x86_64 の build と `readelf`・`llvm-nm` の確かめ（7・8）、
 - `build/ws335-nettls-host`（run-nettls の host build の置き場。続けて使うなら残す）
 - 古い `build/ws335-nettls-host-compat` はこの worktree には作っていない（main の checkout の分は Q1 の判断）。
 - `plan/ws335/tests/` の compat の wrapper の build に頼る他の道具は無い（`run-nettls.sh` が唯一だった）。
+
+## 追記（2026-11-13 Sonnet q2053-i02、基点 4b6d77f136）: 確かめ 7・8（zedBSD x86_64 の build）
+
+makefile.diff の A・B・D〜G は当たった後。この worktree の `build/` に toolchain を入れた（`build/llvm`、Q1 の許可）。source は変えていない。
+
+| コマンド | 結果 |
+| --- | --- |
+| `make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` | exit 0（3.6 s、cache `zedbsd-llvm-23.1.0-zedbsd11-x86_64-linux.tar.gz` を取得して展開） |
+| `make -j4 CONFIGMK=config/config.x86_64.mk sysroot` | exit 0（19 s、`build/x86_64/sysroot/smoke.elf` まで link。`-Werror` 付きで build、warning 無し） |
+| §4 の 1: `make CONFIGMK=config/config.x86_64.mk BUILD_JOBS=4 build/x86_64/packages/libcrypto-compat/.stamp build/x86_64/packages/libssl-compat/.stamp`（`-j4`） | exit 0、`CC` 40 件、`warning` 0 行 |
+| §4 の 2: libbrowser（`STANDALONE_CFLAGS_libbrowser`・`STANDALONE_SO_LIST_libbrowser` は command line で上書き。Makefile・`mk/` には無かった。`mk/userland.mk` の依存には libssl-compat・libcrypto-compat が入っている） | exit 0（6 s）、`CC` 377 件、`SHLIB libbrowser.so`、`warning` 0 行 |
+| mailer: `make -j4 CONFIGMK=config/config.x86_64.mk BUILD_JOBS=4 build/x86_64/packages/mailer/.stamp` | exit 0、`LD bin/mailer`、`warning` 0 行 |
+
+確かめ 7: `llvm-readelf -d build/x86_64/dynamic/libbrowser.so` の NEEDED は libtruetype・libvulkan・libmedia・libjpeg-compat・libpng-compat・libz-compat・libgif-compat・libwebp-compat・**libssl-compat.so・libcrypto-compat.so**・libc・libm。OpenSSL の名前（libssl.so・libcrypto.so）は無い。`strings` で `openssl`（大小無視）・`libssl.so`・`libcrypto.so`・`WB_TLS` は 0 件。`build/x86_64/packages/libbrowser/.flags` に `WB_TLS` は 0 件。
+
+確かめ 8: `llvm-nm -D --undefined-only` の `SSL_`・`X509_`・`ERR_`・`TLS_` の名前は 25 個（ERR_clear_error ERR_error_string_n ERR_get_error SSL_CTX_ctrl SSL_CTX_load_verify_locations SSL_CTX_new SSL_CTX_set_default_verify_paths SSL_CTX_set_options SSL_CTX_set_verify SSL_connect SSL_ctrl SSL_free SSL_get0_param SSL_get_error SSL_get_verify_result SSL_new SSL_pending SSL_read SSL_set1_host SSL_set_fd SSL_shutdown SSL_write TLS_client_method X509_VERIFY_PARAM_set1_ip_asc X509_verify_cert_error_string）。`libssl-compat.so`・`libcrypto-compat.so` の `--defined-only`（T・D・B・R・W）の合計 292 個と `comm -23` で突き合わせ、解けない名前は 0。この 25 個の他に OpenSSL 系（`ssl`・`SSL`・`EVP_`・`CRYPTO` を含む）の未定義の名前も無い。host の `tls.o` での 25 名の確かめと同じ集合。
+
+未実施: arm64・riscv64 の build、QEMU・実機での TLS の実行（p046）、disk image。sub-make が -j16 を強いる事は無かった（`-j4` で通った）。
+
+消してほしい path: 無し（この worktree の `build/llvm`・`build/x86_64` は残す。出力 log は scratchpad の外の `/tmp/claude-1000/*.log` のみ、Q1 が不要なら消す）。
