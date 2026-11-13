@@ -5,13 +5,17 @@
 #   sh plan/bugs/BUG-424/5330-s0.sh VMUNIX STATIC NAME
 # VMUNIX is a kernel of this tree with plan/ws333/tests/hw5330/s0idle-wake.patch (kbuild.sh): each sleep is woken
 # by the CMOS RTC alarm about 40 s after it begins, and the TCO watchdog counts through it.  STATIC holds this tree's
-# static sleepctl, sysctl, thermal and wifi (plan/ws333/tests/hw5330/static-tool.sh, thermal-static.sh).  The 5330
+# static sleepctl, sysctl, thermal and wifi (plan/ws333/tests/hw5330/static-tool.sh, thermal-static.sh) and netsleep
+# (plan/bugs/BUG-424/netsleep/build.sh).  The 5330
 # must be on Debian with p4's original kernel and zedbsd.cfg kept as ~/ws245/*-p027-orig (5330-p027.sh made them).
 #  1. VMUNIX on p4, zedbsd.cfg with watchdog=WATCHDOG (default 600), zedBSD started once (UEFI BootNext).
 #  2. The usual idle as WS333 p029 measured it: after SETTLE s, 60 s windows (package power, package C-states, the
 #     GT's RC6): "idle1", "idle2", then the Wi-Fi radio down and audiod stopped, "quiet".
-#  3. SLEEPS (default 3) S0 idles in a row (sleepctl s0idle, detached, read back from a file).  For each, the package
-#     energy and C-state counters just before and just after, zedBSD's clock around it, the kernel's new lines; then
+#  3. The sleeps of SEQ in turn (default "devices devices devices s0idle s0idle s0idle": sleepctl devices suspends
+#     and resumes the devices without S0 idle, sleepctl s0idle sleeps), each detached and read back from a file, with
+#     networkd's SLEEP_PREPARE before (netsleep, the Wi-Fi radios off as sessiond's sleep has them) and SLEEP_END after.
+#     For each, the package energy and C-state counters just before and just after, zedBSD's clock around it, the
+#     kernel's new lines; then
 #     the root disk (a file written and synced, 64 MiB read raw from the NVMe), the GPU (hw.gputelemetry, i915's
 #     lines), the session (sessiond, keiland).  A 5330 back on Debian instead means the watchdog reset it: FAIL.
 #  4. "after": a 60 s window after the sleeps, then Debian, p4 as it was, sha256 checked.
@@ -25,7 +29,7 @@ cd "$(dirname "$0")/../../.."
 LOGS=${LOGS:-build/hw5330/bug424}/$NAME
 WATCHDOG=${WATCHDOG:-600}
 SETTLE=${SETTLE:-60}
-SLEEPS=${SLEEPS:-3}
+SEQ=${SEQ:-devices devices devices s0idle s0idle s0idle}
 ORIG_SHA=4c98d617279bf96b
 HOST=solaris10-man
 ZB=10.0.30.3
@@ -34,7 +38,7 @@ SO='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeou
 NV_BOOT=/dev/disk/by-partuuid/d4dbe962-cc37-4f27-8529-bb7446730178
 T=/tmp/b424-thermal
 SY=/tmp/b424-sysctl
-for f in "$VMUNIX" "$STATIC/sleepctl" "$STATIC/sysctl" "$STATIC/thermal" "$STATIC/wifi"; do
+for f in "$VMUNIX" "$STATIC/sleepctl" "$STATIC/sysctl" "$STATIC/thermal" "$STATIC/wifi" "$STATIC/netsleep"; do
 	[ -f "$f" ] || { echo "5330-s0: FAIL: no $f"; exit 1; }
 done
 mkdir -p "$LOGS"
@@ -141,10 +145,10 @@ until is_zedbsd; do
 	sleep 5
 done
 say "zedBSD up after $(($(date +%s) - start + 20)) s"
-for t in sleepctl sysctl thermal wifi; do
+for t in sleepctl sysctl thermal wifi netsleep; do
 	TO=60 timeout 60 sshpass -p "$ZBU" scp $SO -q "$STATIC/$t" "$ZBU@$ZB:/tmp/b424-$t" || fail "copy of $t"
 done
-zb 'chmod 755 /tmp/b424-sleepctl /tmp/b424-sysctl /tmp/b424-thermal /tmp/b424-wifi'
+zb 'chmod 755 /tmp/b424-sleepctl /tmp/b424-sysctl /tmp/b424-thermal /tmp/b424-wifi /tmp/b424-netsleep'
 zb 'dmesg' > "$LOGS/boot.txt" 2>&1
 say "boot: $(grep -h 'watchdog: armed' "$LOGS/boot.txt" | head -1)"
 say "boot: $(grep -h 'vmd: root port\|vmd: .*resumed' "$LOGS/boot.txt" | head -3 | tr '\n' ';')"
@@ -170,14 +174,10 @@ window quiet
 # 3. The sleeps.
 TO=20 zb 'ps -A' > "$LOGS/ps-before.txt" 2>&1
 n=1
-while [ "$n" -le "$SLEEPS" ]; do
+for mode in $SEQ; do
 	lines=$(TO=20 zb 'dmesg | wc -l' | tr -d ' ')
-	# The radio goes down right before the sleep: networkd may have opened it again since.
-	down=
-	for w in $(grep -o '^wlan[0-9]*' "$LOGS/ifconfig.txt" | sort -u); do
-		down="$down /tmp/b424-wifi $w down; ifconfig $w down;"
-	done
-	TO=20 zr "rm -f /tmp/b424-s$n.txt; nohup sh -c \"$down sleep 2; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0; /tmp/b424-sleepctl s0idle; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0\" > /tmp/b424-s$n.txt 2>&1 < /dev/null &" > /dev/null 2>&1
+	say "sleep $n: sleepctl $mode at $(date '+%T')"
+	TO=20 zr "rm -f /tmp/b424-s$n.txt; nohup sh -c \"/tmp/b424-netsleep prepare; sync; sleep 2; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0; /tmp/b424-sleepctl $mode; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0; /tmp/b424-netsleep end\" > /tmp/b424-s$n.txt 2>&1 < /dev/null &" > /dev/null 2>&1
 	began=$(date +%s)
 	sleep 15
 	outcome=
@@ -193,7 +193,10 @@ while [ "$n" -le "$SLEEPS" ]; do
 		sleep 5
 	done
 	case $outcome in
-	zedbsd) ;;
+	zedbsd)
+		sleep 5
+		TO=8 zb "cat /tmp/b424-s$n.txt" > "$LOGS/s$n.txt" 2> /dev/null
+		;;
 	debian)
 		say "FAIL: sleep $n: back on Debian $(($(date +%s) - began)) s after the request (the watchdog reset the 5330)"
 		restore
@@ -207,7 +210,7 @@ while [ "$n" -le "$SLEEPS" ]; do
 		;;
 	esac
 	TO=30 zb "dmesg | tail -n +$((lines + 1))" > "$LOGS/s$n-dmesg.txt" 2>&1
-	say "sleep $n: $(grep -h '^sleep' "$LOGS/s$n.txt")"
+	say "sleep $n: $(grep -h '^sleep\|^netsleep' "$LOGS/s$n.txt" | tr '\n' ' ')"
 	say "sleep $n kernel: $(grep -E 'sleep:|vmd:|pci:|nvme:|intel-ax211|i915: (suspend|resume|unpark|park)|watchdog|fault|panic|trap|acpi: test' "$LOGS/s$n-dmesg.txt" | head -40 | tr '\n' ';')"
 	# The package's energy and C-state residency over the sleep, by zedBSD's clock around it.
 	say "sleep $n package: $(awk '
