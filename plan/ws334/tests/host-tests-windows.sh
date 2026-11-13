@@ -65,7 +65,7 @@ wants() {
 win32_make() {
 	log=$1
 	shift
-	timeout 3000 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 -j8 \
+	timeout 3000 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 -j4 \
 	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" "$@" > "$log" 2>&1 &&
 	    ! grep -q 'warning:' "$log"
 }

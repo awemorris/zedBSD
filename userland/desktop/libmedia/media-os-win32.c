@@ -526,6 +526,7 @@ media_os_clock_ns(void)
 	LARGE_INTEGER counter;
 	uint64_t ticks;
 	uint64_t rate;
+	uint64_t now;
 	BOOL read;
 
 	/* The counter's rate; one that cannot be read counts as zero. */
@@ -538,10 +539,13 @@ media_os_clock_ns(void)
 	if (read == FALSE || counter.QuadPart < 0)
 		return 0U;
 
-	/* Succeeded: the time. */
+	/* The counter in nanoseconds: the whole seconds, then the rest of a second. */
 	ticks = (uint64_t)counter.QuadPart;
 	rate = (uint64_t)frequency.QuadPart;
-	return (ticks / rate) * 1000000000ULL + (ticks % rate) * 1000000000ULL / rate;
+	now = (ticks / rate) * 1000000000ULL + (ticks % rate) * 1000000000ULL / rate;
+
+	/* Succeeded: the time. */
+	return now;
 }
 
 /* Sleeps a number of milliseconds. */

@@ -63,7 +63,7 @@ main(
 	test_thread = pthread_self();
 
 	/* Opened with a wake: it rings from the engine's thread once the file is open. */
-	error = media_engine_open(argv[1], NULL, 0U, wake, &wake_tag, &engine);
+	error = media_engine_open(argv[1], NULL, 0U, NULL, wake, &wake_tag, &engine);
 	check(error == 0, "open with a wake");
 	if (error != 0)
 		return 1;
@@ -97,7 +97,7 @@ main(
 	check(wake_count() == before, "close: no wake after");
 
 	/* Opened without a wake: it opens and closes all the same. */
-	error = media_engine_open(argv[1], NULL, 0U, NULL, NULL, &engine);
+	error = media_engine_open(argv[1], NULL, 0U, NULL, NULL, NULL, &engine);
 	check(error == 0, "open without a wake");
 	if (error == 0) {
 		before = wake_count();

@@ -982,7 +982,7 @@ engine_now_us(void)
 {
 	uint64_t now;
 
-	/* The clock. */
+	/* The clock, in microseconds. */
 	now = media_os_clock_ns();
 	return now / 1000U;
 }

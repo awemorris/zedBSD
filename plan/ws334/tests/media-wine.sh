@@ -7,7 +7,7 @@
 # an MP4 by the host's ffmpeg without coding it again.  Neither the host's Vulkan (llvmpipe) nor Wine's
 # decodes video, so both use the software H.264; the Windows run must still find the Vulkan loader
 # (vulkan-1.dll, through media-os) and ask it for the devices, and the .exe imports only Windows' own
-# DLLs and the UCRT's.  Wine runs under flock /tmp/zedbsd-wine.lock.
+# DLLs and the UCRT's and holds no winpthreads name.  Wine runs under flock /tmp/zedbsd-wine.lock.
 #   sh plan/ws334/tests/media-wine.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
 # WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-wine).
@@ -48,7 +48,7 @@ fi
 
 # The Windows program.
 if ! timeout 1800 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 \
-    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j8 \
+    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j4 \
     test-program TEST_PROGRAM=media-tool TEST_PROGRAM_SOURCES="plan/ws334/tests/media-main.c" \
     > "$out/make.log" 2>&1 || grep -q 'warning:' "$out/make.log"; then
 	echo "media-wine: the Windows program did not build cleanly (log $out/make.log)"
@@ -68,6 +68,18 @@ if [ ! -s "$out/dlls.txt" ] || [ -n "$foreign" ]; then
 	status=1
 else
 	echo "media-wine: media-tool.exe imports only the system's DLLs ($(wc -l < "$out/dlls.txt"))"
+fi
+
+# No POSIX thread layer linked into the .exe (winpthreads' names; libmedia uses the system's threads).
+"$LLVM_MINGW/bin/llvm-nm" "$program" > "$out/symbols.txt" 2> /dev/null
+if [ ! -s "$out/symbols.txt" ]; then
+	echo "media-wine: llvm-nm found no symbol in media-tool.exe"
+	status=1
+elif grep -i -E 'pthread|winpthread' "$out/symbols.txt" | head -5 | grep .; then
+	echo "media-wine: media-tool.exe holds the winpthreads names above"
+	status=1
+else
+	echo "media-wine: media-tool.exe holds no winpthreads name ($(wc -l < "$out/symbols.txt") symbols)"
 fi
 
 # The two runs.

@@ -30,7 +30,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <time.h>
+#endif
 
 /* The pictures of the decoder layer hashed and printed. */
 #define MEDIA_TOOL_PICTURES	8U
@@ -218,7 +222,7 @@ media_tool_engine(
 	int error;
 
 	/* Opened on the engine's thread, without a wake (the program asks). */
-	error = media_engine_open(path, NULL, 0U, NULL, NULL, &engine);
+	error = media_engine_open(path, NULL, 0U, NULL, NULL, NULL, &engine);
 	if (error != 0) {
 		printf("media-tool: engine open failed (%d)\n", error);
 		return 1;
@@ -289,13 +293,17 @@ media_tool_log(
 	fprintf(stderr, "%s\n", line);
 }
 
-/* Waits 10 ms. */
+/* Waits 10 ms (Sleep on Windows: no POSIX thread layer there). */
 static void
 media_tool_pause(void)
 {
+#ifdef _WIN32
+	Sleep(10);
+#else
 	struct timespec wait;
 
 	wait.tv_sec = 0;
 	wait.tv_nsec = 10000000L;
 	nanosleep(&wait, NULL);
+#endif
 }
