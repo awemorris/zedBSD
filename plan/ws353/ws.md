@@ -71,13 +71,15 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | [p012](phase012/phase.md) | compositor: cursor の thread（acquire は変化の後だけ、copy の fence をすぐ待つ） | planned | p011 |
 | [p013](phase013/phase.md) | client の buffer の明示の同期（release fence、全 render の backend の `GPU_CAP_FENCE`、protocol rev 4、WSI） | planned（未決 3 の決定の後。推しは要る理由が出るまで着手しない） | p010、未決 3 |
 | [p014](phase014/phase.md) | kernel・libvulkan: refresh の事象の fence、`VULKAN_SYNC_POLL_NS` を消す | cleared（2026-11-14 P2 q2064、Q1 の確認待ち。branch `agent/p2-ws353b`、66b803a706・bc77e214ab。3 機種の build warning 0、QEMU（Venus）の refresh-fence 試験 2 回 PASS（100 個が登録から 1 周期以内、間隔は周期の整数倍、1 fence に poll 1 回、登録の無い 8 s は kernel の push・待ち 0）。vblank の割り込みの push は amdrdna だけ、venus・i915・nvrtx は kernel の refresh watcher が driver の refresh op で待つ（i915・nvrtx は登録の間 kernel に 1 ms の見回りが残る。登録するのは今は試験だけ）。実機は未実施） | p003 |
-| [p015](phase015/phase.md) | backend と WSI の小さな直し（network の答えの fd、WSI の 50 ms の slice） | planned | p001（独立） |
+| [p015](phase015/phase.md) | backend と WSI の小さな直し（network の答えの fd、WSI の 50 ms の slice） | planned（q2066、P2） | p001（独立） |
 | [p016](phase016/phase.md) | 試験: QEMU の回帰と 5330 の idle（電力・PC2・thread ごとの起床） | planned | p002〜p015 |
 | [p017](phase017/phase.md) | 規約の全文の見直し | planned | p016 |
 
 ## Q1 の判断
 
 - 2026-11-14（p005、P1 の問い）: 入力の device の追加の後の 100 ms の settle の scan は、kernel の順の問題ではなく（`src/drivers/generic/input.c:362〜376` は node の登録の後に ADD の事象）、sessiond が同じ ADD の事象で node を利用者へ chown する前は開けない（BUG-264）ため。p005 では 2 s の周期の scan だけ消し、settle は事象の後だけの物として残す。本来の形（sessiond が seat を与えた事を session の control の fd で push し、compositor はそれで scan）は、後の Phase として足す（p018 の候補、p005 の申し送りを見て Q1 が立てる）。
+
+- 2026-11-14（p014 の返却）: refresh の fence は amdrdna だけが vblank の割り込みで push、i915・nvrtx は登録がある間 kernel の watcher が 1 ms で見る。今は compositor 等が refresh の fence を登録しないので idle に効かない。本来の形（i915 の vblank の push）は Future Work F-WS353-i915-vblank-push に置いた。
 
 ## Resume point
 
