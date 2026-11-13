@@ -242,14 +242,14 @@ kwl_audio_tick(
 			audio_take(stream, &report);
 		}
 
-		/* What brings its next reports wakes the loop; without a descriptor the loop looks again soon. */
+		/* What brings its next reports wakes the loop; without a descriptor the soon timer brings the next look. */
 		if (stream->object == NULL || stream->backend == NULL)
 			continue;
 		descriptor = kl_backend_audio_stream_descriptor(stream->backend, &events);
 		if (descriptor >= 0)
 			kwl_watch(server, descriptor, events);
 		else if (descriptor == KL_BACKEND_AUDIO_STREAM_UNWAITED)
-			kwl_due_soon(server);
+			kwl_soon(server);
 	}
 
 	/* The pump threads of closed streams. */

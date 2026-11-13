@@ -272,6 +272,7 @@
 - animation: 動いている間だけ「描く → output の SHOWN で一歩進めて次を描く」。描かずに時刻だけで進む物（sleep の保留、spring の判断など）は timer。
 - frame の pacing（display.c:255 `frame_done + frame_wait`、client の commit を少し待つ）: timer。
 - 時計: 次の分の timer は、時計が見える時（画面が点いていて時計の面がある）だけ arm（消灯の間は arm しない）。実時刻の扱いは §5.5。
+- 2026-11-14 p008 の実装（p010 の前の段階）: animation は「描いた frame の完了（render の COMPLETED、p011 の後は REAPED）の pass で tick が一歩進めて dirty」。期限は wake だけの timer（`kwl_timer_wake_at`、判定は tick）。時計は `kwl_clock_follow`（見える間だけ、timer の pass が実時刻を読み直して次を arm）。例外: touch の指の追従（`follow_step`、cursor の plane だけが動き frame が出ない）は指がある間 10 ms の timer、Linux・FreeBSD の audio の pump（descriptor が無い）と `kwl_watch` の溢れは `kwl_soon`（10 ms の timer）。p010 で COMPLETED を T17 の SHOWN に替える。
 - p009（present の fence）と p010 より前の段階では、callback と animation は render の COMPLETED（p011 の後は REAPED、§5.6 で GPU の完了の直後に来る）から（今の GPU の完了の時と同じ意味）。順は §10。
 
 ### 5.10 打ち切りとして残す待ち

@@ -193,6 +193,7 @@ void kwl_text_input_deliver(struct kwl_text_input *input, const char *preedit, i
 /* input-method.c */
 void kwl_ime_start(struct kwl_server *server);
 void kwl_ime_tick(struct kwl_server *server, uint64_t now);
+int kwl_ime_child_ended(struct kwl_server *server, long child);
 int kwl_ime_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 void kwl_ime_object_gone(struct kwl_object *object);
 void kwl_ime_client_gone(struct kwl_client *client);

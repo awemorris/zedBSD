@@ -21,6 +21,7 @@ int kwl_desktop_option(struct kwl_server *server, const char *argument);
 int kwl_desktop_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 void kwl_desktop_object_gone(struct kwl_object *object);
 void kwl_desktop_tick(struct kwl_server *server);
+int kwl_desktop_child_ended(struct kwl_server *server, long child);
 void kwl_desktop_draw(struct kwl_server *server, struct kwl_list *command);
 void kwl_desktop_commit(struct kwl_object *surface);
 struct kwl_object *kwl_desktop_surface(struct kwl_server *server);

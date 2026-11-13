@@ -86,6 +86,28 @@ static uint32_t word_at(const unsigned char *bytes, size_t offset);
 
 /* ------------------------------------------------- the compositor's services */
 
+/* The event loop's wait: the test's loop calls the tick itself, so nothing is waited for. */
+void
+kwl_watch(struct kwl_server *server, int descriptor, short events)
+{
+	(void)server;
+	(void)descriptor;
+	(void)events;
+}
+
+void
+kwl_soon(struct kwl_server *server)
+{
+	(void)server;
+}
+
+/* A failed client is only marked (the test reads the mark). */
+void
+kwl_client_fail(struct kwl_client *client)
+{
+	client->fatal = 1;
+}
+
 uint64_t
 kwl_milliseconds(void)
 {
@@ -295,6 +317,15 @@ kl_backend_audio_stream_close(struct kl_backend_audio_stream *stream)
 	if (stream->fd >= 0)
 		close(stream->fd);
 	free(stream);
+}
+
+/* The stand-in's reports come without a descriptor (the test's loop looks for them itself). */
+int
+kl_backend_audio_stream_descriptor(const struct kl_backend_audio_stream *stream, short *events)
+{
+	(void)stream;
+	*events = 0;
+	return KL_BACKEND_AUDIO_STREAM_UNWAITED;
 }
 
 void

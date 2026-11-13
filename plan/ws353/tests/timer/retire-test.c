@@ -28,13 +28,37 @@
 /* The number of failed checks. */
 static unsigned test_failures;
 
-/* How often objects.c fell back to the event loop's own deadline (retire-stubs.c). */
-extern unsigned retire_stub_due_calls;
+/* How often a timer found the heap full (kwl_timer_set). */
+static unsigned timer_full_calls;
 
 static void check(int condition, const char *what);
 static unsigned pipe_bytes(int descriptor, int wait_ms);
 static void list_add(struct kwl_server *server, unsigned count);
 static void pass_end(struct kwl_server *server);
+
+/*
+ * Arms a timer as main.c's kwl_timer_set does (UINT64_MAX disarms it), and
+ * counts a full heap.
+ */
+void
+kwl_timer_set(
+	struct kwl_server *server,
+	struct kwl_timer *timer,
+	uint64_t at_ms)
+{
+	int error;
+
+	/* No time: nothing waits for it. */
+	if (at_ms == UINT64_MAX) {
+		kwl_timer_disarm(&server->timers, timer);
+		return;
+	}
+
+	/* The timer wakes the loop at its time; a full heap is counted. */
+	error = kwl_timer_arm(&server->timers, timer, at_ms);
+	if (error != 0)
+		timer_full_calls++;
+}
 
 /*
  * Runs the pace's checks with a server of its own and says PASS or how
@@ -154,7 +178,7 @@ main(
 	check(!kwl_timer_armed(&server->retire_timer), "drained: not armed");
 	bytes = pipe_bytes(server->wake[0], 300);
 	check(bytes == 0U, "drained: no wake");
-	check(retire_stub_due_calls == 0U, "no fallback to the loop's deadline");
+	check(timer_full_calls == 0U, "no timer lost to a full heap");
 
 	/* The thread ends; it woke the loop twice (the quiet and the limit). */
 	kwl_timers_stop(&server->timers);

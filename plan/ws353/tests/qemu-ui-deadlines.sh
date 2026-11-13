@@ -7,7 +7,7 @@
 # wakes the compositor once the input has stopped, so the line that follows shows the timer working.
 #
 # Steps: the start; Home's picture drawn in the quiet after the start (KWL LAYER baked what=home inband=0, the quiet's
-# timer); 30 s idle (the KWL PERF windows: at most two passes and one timeout in ten seconds; the timers fired, by
+# timer); 30 s idle (the KWL PERF windows: at most two passes in ten seconds and no timeout; the timers fired, by
 # name, are recorded); the notifications' log opened with Super+N and closed by its timer after 10 s without input
 # (8 to 14 s to the serial checks' resolution); a finger held 1.2 s in the top edge's band is a long press (KWL EDGE
 # band hold ms between 500 and 700, the band's timer); Settings started: its window's search field takes the keyboard
@@ -244,8 +244,8 @@ else
 fi
 sleep 5
 
-# Idle: two passes and one timeout in ten seconds at most (the PING's pass, and the clock's minute).
-idle idle-30 30 2 1
+# Idle: two passes in ten seconds at most and no timeout (the PING's pass, and the clock's minute on its timer).
+idle idle-30 30 2 0
 
 # The notifications' log: opened with Super+N, closed by its timer after 10 s without input.
 aat key super+n
@@ -358,7 +358,7 @@ if wait_count 'KWL APPS icon app=' 1 60 && wait_count 'KWL TITLEBAR control clie
 	# Settings ended: the printers' check stops with its object, and the idle is as before.
 	serial 'for p in $(ps -A -o pid,args | grep "[/]bin/settings" | while read a b; do echo $a; done); do kill $p; done' > /dev/null 2>&1 || true
 	sleep 3
-	idle idle-after-settings-30 30 2 1
+	idle idle-after-settings-30 30 2 0
 else
 	fail_step settings-window "no titlebar's controls or bar icon (see $out/kwl.log)"
 fi

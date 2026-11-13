@@ -87,6 +87,15 @@
  */
 static struct kwl_timer apps_bar_timer;
 
+/*
+ * The timer of a drag and drop's rest (spring-loading): armed while the
+ * drag rests on an icon or on a preview, for SPRING_MS after the rest
+ * began.  A wake-only timer (kwl_timer_wake_at) whose pass spring_tick
+ * judges; a rest that ended meanwhile leaves it armed, and it then fires
+ * once for nothing.
+ */
+static struct kwl_timer spring_timer;
+
 static int slot_at(const struct apps_view *view, int32_t x, int32_t y);
 static void slot_rect(const struct apps_view *view, unsigned slot, struct apps_rect *rect);
 static int panel_build(struct kwl_server *server, const struct apps_view *view, const char *key, struct apps_panel *panel);
@@ -95,6 +104,7 @@ static int view_collect_on(struct kwl_server *server, unsigned slot, int every, 
 static void draw_more(struct kwl_server *server, struct kwl_list *command, const struct apps_rect *rect, unsigned hidden, float light);
 static void draw_light(struct kwl_server *server, struct kwl_list *command, const struct apps_rect *rect, float strength);
 static void spring_tick(struct kwl_server *server);
+static void spring_wait(struct kwl_server *server);
 static void apps_bar_wait(struct kwl_server *server, uint64_t at_ms);
 static void apps_bar_fired(void *context, struct kwl_timer *timer);
 
@@ -671,11 +681,11 @@ kwl_apps_bar_tick(
 	uint64_t now;
 	int built;
 
-	/* A drag and drop's rest on the icons or the previews (spring-loading), looked at closely while the drag lasts. */
+	/* A drag and drop's rest on the icons or the previews (spring-loading): judged now, and its time waited for. */
 	state = &server->apps_bar;
 	if (server->dnd_active) {
 		spring_tick(server);
-		kwl_due_soon(server);
+		spring_wait(server);
 	}
 
 	/* Nothing waits while idle. */
@@ -1488,6 +1498,31 @@ spring_tick(
 	printf("KWL APPS spring app=%s surface=%u\n", state->key, surface->id);
 	kwl_apps_bar_hide(server, "spring");
 	kwl_glass_switch_to(server, surface, "spring");
+}
+
+/*
+ * Arms the timer of a drag and drop's rest for the end of the rest that
+ * waits (on an icon not answered yet, or on a preview a rest showed); the
+ * icon's light grows with the frames meanwhile (spring_tick).
+ */
+static void
+spring_wait(
+	struct kwl_server *server)
+{
+	struct kwl_apps_bar *state;
+
+	/* A rest on an icon not answered yet. */
+	state = &server->apps_bar;
+	if (state->spring_key[0] != '\0' && !state->spring_done) {
+		kwl_timer_wake_at(server, &spring_timer, "spring", state->spring_since_ms + SPRING_MS);
+		return;
+	}
+
+	/* A rest on a preview a rest showed. */
+	if (state->state == KWL_APPS_SHOWN &&
+	    state->via == KWL_APPS_VIA_SPRING &&
+	    state->spring_tile >= 0)
+		kwl_timer_wake_at(server, &spring_timer, "spring", state->spring_tile_since_ms + SPRING_MS);
 }
 
 /* Arms the timer of the previews' rest or absence, whose pass looks at the time again. */

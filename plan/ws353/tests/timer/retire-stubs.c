@@ -10,20 +10,17 @@
  * host test of the pace of the gone clients' releases (retire-test.c).  They
  * are declared here without kwl.h: each does nothing and gives 0, except the
  * clocks (the real monotonic clock in milliseconds, so the timer thread and
- * the releases count on one clock) and kwl_due, which counts its calls.
+ * the releases count on one clock).  kwl_timer_set, which arms the real
+ * timers, is retire-test.c's.
  */
 
 #include "threads.h"
 
 #include <stdint.h>
 
-/* How often objects.c fell back to the event loop's own deadline. */
-unsigned retire_stub_due_calls;
-
 uint64_t kwl_milliseconds(void);
 uint64_t kwl_microseconds(void);
 uint64_t kwl_cycles(void);
-void kwl_due(void *server, uint64_t at_ms);
 void kwl_fatal(const char *format, ...);
 long kl_backend_gpu_resource_free(void);
 long kwl_audio_object_gone(void);
@@ -100,18 +97,6 @@ kwl_cycles(
 {
 	/* Nothing counted. */
 	return 0U;
-}
-
-/* Counts a fallback to the event loop's own deadline. */
-void
-kwl_due(
-	void *server,
-	uint64_t at_ms)
-{
-	/* Only the count matters. */
-	(void)server;
-	(void)at_ms;
-	retire_stub_due_calls++;
 }
 
 /* A fatal line goes nowhere in the test. */

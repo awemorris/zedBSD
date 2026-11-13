@@ -45,7 +45,10 @@
 /*
  * The timer of the time without input's steps (the screen out, the end of
  * a pause, the rest after a wake, the sleep): armed by each tick for the
- * earliest that waits, disarmed while none does (or a sleep is under way).
+ * earliest that waits, disarmed while none does.  While a sleep's request
+ * is pending it is armed for the end of the request's wait instead (the
+ * frames not come in KWL_SLEEP_LOCK_MS, or sessiond busy for
+ * KWL_SLEEP_SEND_MS); while one waits for its answer, not at all.
  * Readied by the first tick that arms it.
  */
 static struct kwl_timer sleep_timer;
@@ -104,12 +107,25 @@ kwl_sleep_tick(
 		}
 	}
 
-	/* A pending request goes on (its frames, and its time looked at closely); one waiting for its answer has nothing to do. */
+	/*
+	 * A pending request goes on: its frames come (each asks for the next),
+	 * and the end of its wait is the timer's.
+	 */
 	if (sleep->state == KWL_SLEEP_PENDING) {
-		kwl_timer_set(server, &sleep_timer, UINT64_MAX);
 		sleep_pending(server, now);
-		if (sleep->state == KWL_SLEEP_PENDING)
-			kwl_due_soon(server);
+		if (sleep->state != KWL_SLEEP_PENDING) {
+			kwl_timer_set(server, &sleep_timer, UINT64_MAX);
+			return;
+		}
+
+		/* A request sessiond refused as busy is asked again until KWL_SLEEP_SEND_MS; frames not come give up after KWL_SLEEP_LOCK_MS. */
+		if (sleep->refused_ms != 0U) {
+			kwl_timer_set(server, &sleep_timer, sleep->refused_ms + KWL_SLEEP_SEND_MS + 1U);
+		} else {
+			kwl_timer_set(server, &sleep_timer, sleep->pending_ms + KWL_SLEEP_LOCK_MS + 1U);
+		}
+
+		/* The request goes on with its frames and its timer. */
 		return;
 	}
 

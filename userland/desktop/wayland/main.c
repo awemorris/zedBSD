@@ -25,6 +25,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <poll.h>
 #include <signal.h>
 #include <fcntl.h>
@@ -51,6 +52,16 @@ static volatile sig_atomic_t stop_requested;
 
 /* The write end of the threads' wake pipe for the signal handlers (-1 until it is open). */
 static volatile sig_atomic_t signal_wake = -1;
+
+/*
+ * Whether a child may have ended since the event loop last collected the
+ * ended ones: the SIGCHLD handler sets it before it wakes the loop, and
+ * the pass clears it before it collects (children_reap), so that a child
+ * ending meanwhile is collected then or by the next pass.  1 at the start,
+ * so that the first pass collects whatever ended before the handler was
+ * installed.
+ */
+static volatile sig_atomic_t child_signal = 1;
 
 static void stop_service(int signal_number);
 static void child_ended(int signal_number);
@@ -79,6 +90,8 @@ static int event_loop(struct kwl_server *server);
 static int loop_timeout(struct kwl_server *server);
 static void wake_drain(struct kwl_server *server);
 static void input_scan_pace(struct kwl_server *server, uint64_t now);
+static void children_reap(struct kwl_server *server);
+static void timer_wakes(void *context, struct kwl_timer *timer);
 static void service_cleanup(struct kwl_server *server);
 static uint64_t startup_step(const char *step, uint64_t since);
 static void fatal_due_fired(void *context, struct kwl_timer *timer);
@@ -510,8 +523,9 @@ static void
 child_ended(
 	int signal_number)
 {
-	/* Only the wake; the reaping is the loop's. */
+	/* The note that a child ended, then the wake; the reaping is the loop's. */
 	(void)signal_number;
+	child_signal = 1;
 	signal_wake_loop();
 }
 
@@ -1190,20 +1204,17 @@ event_loop(
 		kwl_compose_give_tasks(server);
 
 		/*
-		 * The wait ends with an event (the timers' thread's among them), or
-		 * when work without one is due.  A backend that reads some of its
-		 * areas without waiting has them looked at soon.
+		 * A change to draw made since the scheduler ran (by a part outside
+		 * it) is drawn by the next pass at once: the loop wakes itself, as
+		 * the scheduler waits for nothing else to draw it.
 		 */
-		if (!kl_backend_wakes(server->backend))
-			kwl_due_soon(server);
-
-		/* Without the timer thread the earliest timer is the loop's own deadline. */
-		if (!server->timers.running)
-			kwl_due(server, kwl_timers_next(&server->timers));
-
-		/* A change to draw made since the scheduler ran is drawn at once (the scheduler waits for nothing else it). */
 		if ((server->dirty || server->damaged) && !server->schedule_left)
-			kwl_due(server, 0U);
+			kwl_thread_wake(server->wake[1]);
+
+		/* The threads' results taken above were the last wake's; a later one is told by its own wake. */
+		server->woken = 0U;
+
+		/* The wait ends with an event, the timers' thread's among them (loop_timeout). */
 		timeout = loop_timeout(server);
 
 		/* Poll sees sockets only; typed image fds are consumed immediately during import. */
@@ -1212,9 +1223,8 @@ event_loop(
 		server->perf.poll_cycles += kwl_cycles() - mark;
 		mark = kwl_cycles();
 
-		/* The pass's work comes from now on: its time, and the work without an event it leaves for later. */
+		/* The pass's work comes from now on: its time, and the descriptors its parts watch for the next wait. */
 		now = kwl_milliseconds();
-		server->due_ms = UINT64_MAX;
 		server->watched_count = 0;
 
 		/* The pass's work starts now; its parts are told apart at its end if it runs long. */
@@ -1243,6 +1253,24 @@ event_loop(
 		 */
 		if (descriptors[wake_slot].revents != 0)
 			wake_drain(server);
+
+		/*
+		 * A backend that does not wake the loop has its areas read on every
+		 * pass, as if each pass were woken.
+		 */
+		if (!kl_backend_wakes(server->backend))
+			server->woken = 1U;
+
+		/*
+		 * The children that ended are collected after their SIGCHLD, before
+		 * the parts whose children they were go on (children_reap).  The
+		 * note is cleared first, so that a child ending meanwhile is told
+		 * again.
+		 */
+		if (child_signal) {
+			child_signal = 0;
+			children_reap(server);
+		}
 
 		/* Accept at most one client per pass so existing streams retain service opportunity. */
 		error = 0;
@@ -1543,65 +1571,94 @@ kwl_perf_vk_outside(
 }
 
 /*
- * Lowers the time the event loop's wait ends at the latest to at_ms
- * (kwl_milliseconds' clock; 0 or a time past: at once).  A part of the
- * compositor whose work comes with time, not with an event, calls it on
- * every pass while the work waits.
+ * Arms a timer whose firing only wakes the event loop, for at_ms
+ * (kwl_milliseconds' clock), or disarms it for UINT64_MAX: the part that
+ * armed it looks at the time again on the pass the wake brings.  The
+ * timer is readied with its name the first time.
  */
 void
-kwl_due(
+kwl_timer_wake_at(
 	struct kwl_server *server,
+	struct kwl_timer *timer,
+	const char *name,
 	uint64_t at_ms)
 {
-	/* The earliest wins. */
-	if (at_ms < server->due_ms)
-		server->due_ms = at_ms;
+	/* Readied once, with the handler that does nothing but let the pass come. */
+	if (timer->fire == NULL)
+		kwl_timer_init(timer, name, timer_wakes);
+
+	/* The pass at that time, or none. */
+	kwl_timer_set(server, timer, at_ms);
 }
 
 /*
- * Asks for the next pass within KWL_DUE_SOON_MS: for work that follows
- * time closely (a state looked at again and again while it lasts), as the
- * loop's passes always came before.
+ * Asks for a pass within KWL_SOON_MS, for a part read without an event
+ * while it lasts (a backend's reports that come without a descriptor, more
+ * descriptors than one wait takes).  Each pass that asks moves the timer
+ * on, so it fires only when no other pass came meanwhile.
  */
 void
-kwl_due_soon(
+kwl_soon(
 	struct kwl_server *server)
 {
-	/* One step of the old pace. */
-	kwl_due(server, kwl_milliseconds() + KWL_DUE_SOON_MS);
+	/* One step of the old pace, on the timer. */
+	kwl_timer_wake_at(server, &server->soon_timer, "soon", kwl_milliseconds() + KWL_SOON_MS);
 }
 
 /*
- * Asks for a pass just after the wall clock's next minute (a clock shown
- * turns over then): the time to it is taken from the real-time clock and
- * counted on kwl_milliseconds' clock.
+ * Keeps the clock's timer while a clock is shown: armed for just after the
+ * wall clock's next minute, the time to it read from the real-time clock
+ * and counted on kwl_milliseconds' clock.  The pass it wakes reads the wall
+ * clock again (the clock's face turns over) and the timer is armed anew,
+ * so a change of the time (a step of the clock, another zone) is caught up
+ * with at the next firing.  Without a clock shown (shown 0: the screen out,
+ * no clock's face) nothing waits for the minute.
  */
 void
-kwl_due_next_minute(
-	struct kwl_server *server)
+kwl_clock_follow(
+	struct kwl_server *server,
+	int shown)
 {
 	struct timespec wall;
 	uint64_t into;
 	uint64_t left;
+	int armed;
+	int error;
 
-	/* The milliseconds into the present minute. */
-	if (clock_gettime(CLOCK_REALTIME, &wall) != 0) {
-		kwl_due(server, kwl_milliseconds() + 1000U);
+	/* No clock shown: no timer. */
+	if (!shown) {
+		kwl_timer_set(server, &server->clock_timer, UINT64_MAX);
+		return;
+	}
+
+	/* Armed already for the coming minute. */
+	armed = kwl_timer_armed(&server->clock_timer);
+	if (armed)
+		return;
+
+	/* The milliseconds into the present minute; a wall clock that cannot be read is asked again in a second. */
+	error = clock_gettime(CLOCK_REALTIME, &wall);
+	if (error != 0) {
+		kwl_timer_wake_at(server, &server->clock_timer, "clock", kwl_milliseconds() + 1000U);
 		return;
 	}
 	into = (uint64_t)(wall.tv_sec % 60) * 1000U + (uint64_t)wall.tv_nsec / 1000000U;
 
 	/* The rest of it, and a little more so that the minute has turned. */
 	left = 60000U - into;
-	kwl_due(server, kwl_milliseconds() + left + KWL_MINUTE_LATE_MS);
+	kwl_timer_wake_at(server, &server->clock_timer, "clock", kwl_milliseconds() + left + KWL_MINUTE_LATE_MS);
+
+	/* Where in its minute the wall clock was when the timer was armed (a test reads the line). */
+	if (server->log_frames)
+		printf("KWL CLOCK arm into_ms=%llu left_ms=%llu\n", (unsigned long long)into, (unsigned long long)(left + KWL_MINUTE_LATE_MS));
 }
 
 /*
  * Arms a part's timer for at_ms (kwl_milliseconds' clock; a time past fires
  * at the next pass), or disarms it for UINT64_MAX.  The timer was readied
  * with kwl_timer_init.  A heap without room (more timers than
- * KWL_TIMERS_MAX, a fault of the program) is said in the log and leaves
- * the time to this pass's own deadline.
+ * KWL_TIMERS_MAX, a fault of the program: every feature has its own one
+ * timer) is said in the log, and the timer does not fire.
  */
 void
 kwl_timer_set(
@@ -1610,6 +1667,7 @@ kwl_timer_set(
 	uint64_t at_ms)
 {
 	int error;
+	int armed;
 
 	/* No time: nothing waits for it. */
 	if (at_ms == UINT64_MAX) {
@@ -1617,12 +1675,15 @@ kwl_timer_set(
 		return;
 	}
 
+	/* Armed for that time already (a part that arms on every pass while it waits): nothing changes. */
+	armed = kwl_timer_armed(timer);
+	if (armed && timer->due_ms == at_ms)
+		return;
+
 	/* The timer wakes the loop at its time. */
 	error = kwl_timer_arm(&server->timers, timer, at_ms);
-	if (error != 0) {
+	if (error != 0)
 		printf("KWL TIMER full name=%s errno=%d\n", timer->name, error);
-		kwl_due(server, at_ms);
-	}
 }
 
 /*
@@ -1660,9 +1721,9 @@ kwl_watch(
 	if (descriptor < 0 || events == 0)
 		return;
 
-	/* No room: the old pace instead. */
+	/* No room: the old pace instead, on the timer. */
 	if (server->watched_count >= KWL_WATCH_MAX) {
-		kwl_due_soon(server);
+		kwl_soon(server);
 		return;
 	}
 
@@ -1674,27 +1735,48 @@ kwl_watch(
 }
 
 /*
- * Works out the event loop's wait (milliseconds for poll, -1 for none)
- * from the time its work without an event is due, rounded up so that the
- * work is due when the wait ends.
+ * Works out the event loop's wait (milliseconds for poll, -1 for none).
+ * Every work is told by an event or by the timer thread's wake, so the
+ * wait has no end of its own; but without the timer thread the earliest
+ * timer ends it, and a backend that does not wake the loop has its areas
+ * read every KWL_SOON_MS.
  */
 static int
 loop_timeout(
 	struct kwl_server *server)
 {
+	uint64_t next;
 	uint64_t now;
+	int timeout;
+	int wakes;
 
-	/* Nothing due: the wait lasts until an event. */
-	if (server->due_ms == UINT64_MAX)
-		return -1;
+	/* The timer thread wakes the loop at the earliest timer. */
+	timeout = -1;
 
-	/* Due already: no wait; later: until then. */
-	now = kwl_milliseconds();
-	if (server->due_ms <= now)
-		return 0;
-	if (server->due_ms - now > (uint64_t)INT_MAX)
-		return INT_MAX;
-	return (int)(server->due_ms - now);
+	/* Without it, the earliest timer ends the wait, rounded up so that it is due then. */
+	if (!server->timers.running) {
+		next = kwl_timers_next(&server->timers);
+		now = kwl_milliseconds();
+		if (next == UINT64_MAX) {
+			timeout = -1;
+		} else if (next <= now) {
+			timeout = 0;
+		} else if (next - now > (uint64_t)INT_MAX) {
+			timeout = INT_MAX;
+		} else {
+			timeout = (int)(next - now);
+		}
+	}
+
+	/* A backend that does not wake the loop: its areas are read at the old pace. */
+	wakes = kl_backend_wakes(server->backend);
+	if (!wakes) {
+		if (timeout < 0 || timeout > (int)KWL_SOON_MS)
+			timeout = (int)KWL_SOON_MS;
+	}
+
+	/* Succeeded: the wait's end, -1 for an event only. */
+	return timeout;
 }
 
 /*
@@ -1704,7 +1786,8 @@ loop_timeout(
  * event, because sessiond gives the new node to the seat's user on the same
  * event and the compositor cannot open it before.  Only a backend
  * that does not tell the devices' comings has them looked for every
- * KWL_INPUT_SCAN_MS as well.
+ * KWL_INPUT_SCAN_MS as well.  The next scan's time is the input scan's
+ * timer.
  */
 static void
 input_scan_pace(
@@ -1714,8 +1797,10 @@ input_scan_pace(
 	int told;
 
 	/* A paused seat reads no device; its resume asks for the scan. */
-	if (server->os_paused != 0)
+	if (server->os_paused != 0) {
+		kwl_timer_set(server, &server->input_scan_timer, UINT64_MAX);
 		return;
+	}
 
 	/*
 	 * An asked scan goes now, or the quick scan after a device's event once
@@ -1734,18 +1819,78 @@ input_scan_pace(
 	}
 
 	/* A finding under way keeps the scan asked: its end wakes the loop, not the clock. */
-	if (server->input_scan_time == 0U)
-		return;
-
-	/* The quick scans' next while the event's time lasts. */
-	if (now < server->input_settle_until) {
-		kwl_due(server, server->input_scan_time + KWL_INPUT_SETTLE_SCAN_MS);
+	if (server->input_scan_time == 0U) {
+		kwl_timer_set(server, &server->input_scan_timer, UINT64_MAX);
 		return;
 	}
 
-	/* The ordinary scan's next, for a backend that does not tell the devices' comings. */
-	if (!told)
-		kwl_due(server, server->input_scan_time + KWL_INPUT_SCAN_MS);
+	/* The quick scans' next while the event's time lasts. */
+	if (now < server->input_settle_until) {
+		kwl_timer_wake_at(server, &server->input_scan_timer, "input-scan", server->input_scan_time + KWL_INPUT_SETTLE_SCAN_MS);
+		return;
+	}
+
+	/* The ordinary scan's next, for a backend that does not tell the devices' comings; none for one that does. */
+	if (!told) {
+		kwl_timer_wake_at(server, &server->input_scan_timer, "input-scan", server->input_scan_time + KWL_INPUT_SCAN_MS);
+		return;
+	}
+	kwl_timer_set(server, &server->input_scan_timer, UINT64_MAX);
+}
+
+/*
+ * Collects every child that ended and tells the part it belonged to: the
+ * input method's process, the desktop's program, the media library's
+ * helper, or (any other: the programs App Home and the shell start) only
+ * the log.  One collector for all of them, so that none takes another's.
+ */
+static void
+children_reap(
+	struct kwl_server *server)
+{
+	pid_t child;
+	int status;
+	int taken;
+
+	/* Each ended child, until none is left (or the process has no child). */
+	for (;;) {
+		child = waitpid(-1, &status, WNOHANG);
+		if (child < 0 && errno == EINTR)
+			continue;
+		if (child <= 0)
+			break;
+
+		/* The input method's process, which is started again after a while (input-method.c). */
+		taken = kwl_ime_child_ended(server, (long)child);
+		if (taken)
+			continue;
+
+		/* The desktop's program, which is started again after a while (desktop.c). */
+		taken = kwl_desktop_child_ended(server, (long)child);
+		if (taken)
+			continue;
+
+		/* A media helper, whose answer its queue owns (media-library.c). */
+		taken = kwl_media_library_child((int64_t)child, status);
+		if (taken)
+			continue;
+
+		/* Any other program the shell started. */
+		printf("KWL HOME ended pid=%d status=%d\n", (int)child, status);
+	}
+}
+
+/*
+ * Does nothing when a wake-only timer fires: the pass its wake brings is
+ * the work (kwl_timer_wake_at).
+ */
+static void
+timer_wakes(
+	void *context,
+	struct kwl_timer *timer)
+{
+	UNUSED_PARAMETER(context);
+	UNUSED_PARAMETER(timer);
 }
 
 /* Prints the loop's timing every five seconds and starts a new window. */
@@ -2037,7 +2182,8 @@ log_append(
 
 /*
  * Empties the pipe the compositor's threads wake the event loop with; what
- * they queued is taken after, so a later queue wakes the next poll.
+ * they queued is taken after, so a later queue wakes the next poll.  The
+ * pass is marked woken.
  */
 static void
 wake_drain(
@@ -2050,6 +2196,9 @@ wake_drain(
 	do {
 		got = read(server->wake[0], bytes, sizeof(bytes));
 	} while (got > 0 || (got < 0 && errno == EINTR));
+
+	/* The parts that take a thread's results only after a wake take them on this pass (woken). */
+	server->woken = 1U;
 }
 
 /*

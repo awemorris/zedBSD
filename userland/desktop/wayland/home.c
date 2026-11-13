@@ -1474,8 +1474,10 @@ home_erase_bytes(
 }
 
 /*
- * Keeps Home's animation drawing until it settles, and collects the
- * applications Home started that have ended.
+ * Keeps Home's animation drawing until it settles: each of its frames
+ * asks for the next while it moves, so it steps with the frames'
+ * completions.  (The applications Home started are collected by the
+ * event loop after their SIGCHLD, main.c.)
  */
 void
 kwl_home_tick(
@@ -1484,10 +1486,7 @@ kwl_home_tick(
 	uint64_t elapsed;
 	uint64_t length;
 	uint64_t now;
-	pid_t child;
-	int status;
 	int coming;
-	int media_child;
 
 	/*
 	 * The applications' list is read ahead once the output shows
@@ -1497,18 +1496,6 @@ kwl_home_tick(
 	if (server->windowed) {
 		home_read_apps(server);
 		home_prepare(server);
-	}
-
-	/* Every ended child is collected, so none is left a zombie. */
-	for (;;) {
-		child = waitpid(-1, &status, WNOHANG);
-		if (child <= 0)
-			break;
-		/* The media queue owns its helper response even when this general collector reaps it. */
-		media_child = kwl_media_library_child((int64_t)child, status);
-		if (media_child)
-			continue;
-		printf("KWL HOME ended pid=%d status=%d\n", (int)child, status);
 	}
 
 	/* A page turn draws every frame until it is done; then where the icons are is logged. */
@@ -1536,10 +1523,6 @@ kwl_home_tick(
 		if (!coming)
 			home_content_rising = 0U;
 	}
-
-	/* The page turn, the icons coming and the animation are looked at closely until they end. */
-	if (server->home_page_moving || home_content_rising || server->home_moving)
-		kwl_due_soon(server);
 
 	/* No animation: nothing to draw. */
 	if (!server->home_moving)

@@ -323,6 +323,15 @@ static struct kwl_keypad greeter_keypad;
 static struct kwl_timer greeter_card_timer;
 static struct kwl_timer greeter_key_timer;
 
+/*
+ * The timer of a power request's longest wait for its picture
+ * (GREETER_POWER_MS after the press, greeter_power_send): armed while the
+ * request waits, so that it goes then even when no frame came.  A
+ * wake-only timer (kwl_timer_wake_at); one left armed after the request
+ * went fires once for nothing.
+ */
+static struct kwl_timer greeter_power_timer;
+
 /* An attempt a sleep cancelled: its answer (a timeout) is not said on the screen the wake shows. */
 static unsigned greeter_answer_quiet;
 
@@ -1001,13 +1010,13 @@ kwl_greeter_tick(
 	uint64_t now_ms;
 	int64_t minute;
 
-	/* The clock shows a new minute (the loop comes back at the next). */
+	/* The clock shows a new minute (its timer wakes the pass at the next while the screen shows it). */
 	minute = (int64_t)(time(NULL) / 60);
 	if (minute != server->clock_minute) {
 		server->clock_minute = minute;
 		server->dirty = 1;
 	}
-	kwl_due_next_minute(server);
+	kwl_clock_follow(server, kwl_clock_shown(server));
 
 	/*
 	 * The styles of the selected user, asked once no other answer is
@@ -1046,11 +1055,16 @@ kwl_greeter_tick(
 	if (!server->greeter)
 		return;
 
-	/* Shutting down: the spinner turns, and the request goes once its picture is shown. */
+	/*
+	 * Shutting down: the spinner turns with the frames, and the request
+	 * goes once its picture is shown (two frames, or GREETER_POWER_MS,
+	 * whose end the timer wakes for).
+	 */
 	if (greeter_powering[0] != '\0') {
 		server->dirty = 1;
 		greeter_power_send(server);
-		kwl_due_soon(server);
+		if (!greeter_power_sent)
+			kwl_timer_wake_at(server, &greeter_power_timer, "greeter-power", greeter_power_ms + GREETER_POWER_MS);
 	}
 }
 

@@ -318,6 +318,19 @@ static struct touch_title title;
  */
 static struct touch_group group;
 
+/*
+ * The timers of the fingers' times, both wake-only (kwl_timer_wake_at)
+ * and judged by kwl_touch_tick on the pass they wake.  follow_timer steps
+ * the pointer after the fingers the shell has (KWL_SOON_MS while one is
+ * followed: the motion's point moves between the reports, and the pointer
+ * draws no frame of its own); title_timer is armed for the title bar's
+ * next time (a single finger's wait for a second one, two fingers' time to
+ * flick).  One left armed after its fingers lifted fires once for
+ * nothing.
+ */
+static struct kwl_timer follow_timer;
+static struct kwl_timer title_timer;
+
 static struct touch_screen *screen_of(struct kwl_input_device *input);
 static int read_axes(struct touch_screen *screen);
 static void read_quirk(struct touch_screen *screen);
@@ -608,12 +621,15 @@ kwl_touch_tick(
 {
 	struct touch_screen *screen;
 	uint64_t now;
+	uint64_t due;
 	uint32_t time;
 	unsigned index;
 	unsigned slot;
+	unsigned followed;
 
 	/* The pointer follows each finger the shell has to where its motion says it is now. */
 	now = kwl_milliseconds();
+	followed = 0U;
 	for (index = 0; index < TOUCH_SCREENS; index++) {
 		screen = &screens[index];
 		if (screen->input == NULL)
@@ -622,14 +638,31 @@ kwl_touch_tick(
 			if (!screen->contacts[slot].following)
 				continue;
 			follow_step(server, screen, slot, (uint32_t)now);
-			kwl_due_soon(server);
+			followed++;
 		}
 	}
 
-	/* Only fingers on a title bar wait for anything (looked at closely while they do). */
+	/* The next step while a finger is followed. */
+	if (followed != 0U)
+		kwl_timer_wake_at(server, &follow_timer, "touch-follow", now + KWL_SOON_MS);
+
+	/* Only fingers on a title bar wait for anything. */
 	if (title.state != TITLE_HELD && title.state != TITLE_PAIR)
 		return;
-	kwl_due_soon(server);
+
+	/*
+	 * Their next time: a single finger's wait for a second one, or the two
+	 * fingers' time to flick (counted from the second's event, on the
+	 * first finger's clock).
+	 */
+	if (title.state == TITLE_HELD) {
+		due = title.first_clock + TITLE_PAIR_MS + 1U;
+	} else {
+		due = title.first_clock + (uint64_t)(uint32_t)(title.pair_time - title.first_time) + TITLE_FLICK_MS + 1U;
+	}
+
+	/* The pass at that time judges them again. */
+	kwl_timer_wake_at(server, &title_timer, "touch-title", due);
 
 	/* The time an event would carry now, counted on from the first finger's. */
 	time = title.first_time + (uint32_t)(now - title.first_clock);

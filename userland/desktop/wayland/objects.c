@@ -850,7 +850,6 @@ kwl_retire_pace(
 	uint64_t now;
 	uint64_t due;
 	int ready;
-	int error;
 
 	/* One may go now: the next pass releases it. */
 	now = kwl_milliseconds();
@@ -868,10 +867,8 @@ kwl_retire_pace(
 		return;
 	}
 
-	/* The timer wakes the loop when one may go; without room, the loop's own deadline does. */
-	error = kwl_timer_arm(&server->timers, &server->retire_timer, due);
-	if (error != 0)
-		kwl_due(server, due);
+	/* The timer wakes the loop when one may go. */
+	kwl_timer_set(server, &server->retire_timer, due);
 }
 
 /* Releases every buffer still waiting in the retiring list (before the Vulkan device goes). */

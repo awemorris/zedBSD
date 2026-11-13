@@ -117,13 +117,13 @@
 #define KWL_SEAT_OUTPUT_CLOSED	2U
 
 /*
- * The event loop's step for work that follows time closely (kwl_due_soon),
- * in milliseconds: the pace its passes came at before they waited for
- * events.
+ * The step of a part read without an event while it lasts (kwl_soon, and a
+ * backend that does not wake the event loop), in milliseconds: the pace
+ * the loop's passes came at before they waited for events.
  */
-#define KWL_DUE_SOON_MS	10U
+#define KWL_SOON_MS	10U
 
-/* How long after the wall clock's minute turns kwl_due_next_minute's pass comes, in milliseconds. */
+/* How long after the wall clock's minute turns the clock's timer fires (kwl_clock_follow), in milliseconds. */
 #define KWL_MINUTE_LATE_MS	20U
 
 /* The descriptors kwl_watch adds to one wait at most. */
@@ -2234,28 +2234,57 @@ struct kwl_server {
 	unsigned timers_ready;
 
 	/*
-	 * The earliest time the event loop has work that no descriptor and no
-	 * thread's wake announces (kwl_milliseconds' clock; UINT64_MAX: none):
-	 * a timer, an animation's step, a state another part reads without an
-	 * event.  Each pass starts it again after its wait, and every part with
-	 * such work lowers it (kwl_due) while the work waits; the wait ends
-	 * then at the latest.
+	 * The timer of the parts read without an event while they last
+	 * (kwl_soon): moved on by each pass that asks, it fires KWL_SOON_MS
+	 * after the last of them when no other pass came.
 	 */
-	uint64_t due_ms;
+	struct kwl_timer soon_timer;
+
+	/*
+	 * The timer of the clock's minute (kwl_clock_follow): armed while a
+	 * clock is shown, for just after the wall clock's next minute; not
+	 * armed while the screen is out or no clock's face is drawn.
+	 */
+	struct kwl_timer clock_timer;
+
+	/*
+	 * The timer of the evdev nodes' next scan (main.c's input_scan_pace):
+	 * armed while the quick scans after a device's event last, or for the
+	 * ordinary scan of a backend that does not tell the devices' comings.
+	 */
+	struct kwl_timer input_scan_timer;
+
+	/*
+	 * The timer of the frame pacing (display.c): armed while a frame to
+	 * draw waits for the windows the last frame told, for the end of that
+	 * wait.
+	 */
+	struct kwl_timer pace_timer;
+
+	/*
+	 * Whether the threads' wake pipe was emptied since the event loop last
+	 * took the results some parts take only after a wake (the network's,
+	 * the phone's and the machine reading's threads, which write the pipe
+	 * when they have queued something): set by the drain (and on every
+	 * pass for a backend that does not wake the loop), cleared before the
+	 * loop waits again.
+	 */
+	unsigned woken;
 
 	/*
 	 * Descriptors a part reads without waiting on every pass (kwl_watch),
-	 * which the event loop's next wait also waits for; started again with
-	 * due_ms.  One that does not fit makes the loop come back soon instead.
+	 * which the event loop's next wait also waits for; started again after
+	 * each wait.  One that does not fit has the soon timer step instead.
 	 */
 	struct pollfd watched[KWL_WATCH_MAX];
 	unsigned watched_count;
 
 	/*
 	 * Whether a change was left to draw when the scheduler last ran (it
-	 * waits then for what lets it draw, which wakes the loop or is due); a
-	 * change made after it, by a part outside the scheduler, has the next
-	 * pass come at once.
+	 * waits then for what lets it draw, which wakes the loop: a frame's
+	 * completion, a thread's result, a timer); a change made after it, by a
+	 * part outside the scheduler, has the loop wake itself for the next
+	 * pass.
 	 */
 	unsigned schedule_left;
 };
@@ -2269,9 +2298,10 @@ typedef void kwl_display_fn(struct kwl_server *server, int error, void *context)
 void kwl_display_settle(struct kwl_server *server);
 
 uint64_t kwl_milliseconds(void);
-void kwl_due(struct kwl_server *server, uint64_t at_ms);
-void kwl_due_soon(struct kwl_server *server);
-void kwl_due_next_minute(struct kwl_server *server);
+void kwl_timer_wake_at(struct kwl_server *server, struct kwl_timer *timer, const char *name, uint64_t at_ms);
+void kwl_soon(struct kwl_server *server);
+void kwl_clock_follow(struct kwl_server *server, int shown);
+int kwl_clock_shown(const struct kwl_server *server);
 void kwl_timer_set(struct kwl_server *server, struct kwl_timer *timer, uint64_t at_ms);
 void kwl_client_fail(struct kwl_client *client);
 void kwl_watch(struct kwl_server *server, int descriptor, short events);
