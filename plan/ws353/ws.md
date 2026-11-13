@@ -24,6 +24,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 4. render thread は、合成用の buffer の数で数える形（swapchain の image・frame の slot の数。足りなければ fence で空きを待つ）。一般の作法。
 5. client の buffer の管理と、compositor の合成用の buffer の管理は別物。分けて設計する。
 6. 設計は Opus 5.5 high の担当が作り、敵対的レビューは Fable の medium で行う。
+7. 設計ができたらユーザーがレビューし、OK なら実装に進む（実装の Phase はユーザーの OK まで起動しない）。
 
 ## 合意した形（設計の前提。設計の担当はこれを具体にする）
 
