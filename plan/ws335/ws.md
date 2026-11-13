@@ -91,7 +91,7 @@
 | [p044](phase044/phase.md) | mailer の tls.c を compat を直に呼ぶ形に（dlopen・ML_TLS_COMPAT を外す）、mailer の文、host の試験（run-mailer-tls.sh、run-host-mail-backend.sh） | cleared（2026-11-13 Q1 判定。Sonnet q2054 692571db78、main に merge。host の run-mailer-tls 8・mail の backend 62 PASS、x86_64 の mailer の build warning 0、NEEDED は compat の 2 つ、未解決の名前 0。Makefile:9 の「OpenSSL is never used」は承認の差分 B の意図した comment。run-mailer-guest.sh の ML_TLS_COMPAT の前提は p046 で直す） | p043 |
 | [p045](phase045/phase.md) | Windows の確かめ（tls-wine.sh・cross-build.sh を表の無い形に）、使われなくなった wb_os_trust_roots を消す（問い Q4）。merge と同時に Q1 が makefile.diff の C を当てる | cleared（2026-11-13 Q1 判定。Sonnet q2055 00ea50658e、main に merge、makefile.diff の C を同じ commit で当てた。tls-wine（a〜g）・cross-build x86_64・aarch64 PASS、wb_os_trust_roots を消した。arm64 の Wine は未実施。tls-static 系 3 file と重複の tls-wine-compat.sh を Q1 が消した） | p043 |
 | [p046](phase046/phase.md) | 統合（Opus）: makefile.diff の後の素の main で x86_64 の browser・mailer の guest の試験、aarch64・riscv64 の build、残りの掃除、design.md の D29 | cleared（2026-11-14 Q1 判定。P3 q2069 9730bb1c22、main に merge 2f0b7eed5f。§3 の 8 項目 PASS: 3 機種 build warning 0・NEEDED は compat、run-mailer-guest 9・run-browser-guest（名前の SNI と hostname mismatch を含む）・run-nettls・run-mailer-tls・check-exports・boot-test。古い build の形の試験と当て終えた差分は Q1 が消した） | p043・p044・p045 |
-| [p047](phase047/phase.md) | 規約の全文の見直し（p043〜p045 が変えた C） | planned（q2071、P3） | p046 |
+| [p047](phase047/phase.md) | 規約の全文の見直し（p043〜p045 が変えた C） | 実装済み・試験 PASS（q2071、P3、2026-11-14。cleared は Q1） | p046 |
 
 - 2026-11-02 03:56 Q1: check-skeleton の BASE は 641a2f195 に移す（p015 で Q1 が run-unit.sh に Wine の LC_ALL=C.UTF-8 を足したため。header と道具はこの commit で固定）。
 
