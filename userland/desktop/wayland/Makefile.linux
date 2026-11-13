@@ -156,7 +156,6 @@ $(eval $(call KEILAND_LINUX_DATA,share/fonts/keiland-fallback.ttf,userland/deskt
 $(eval $(call KEILAND_LINUX_DATA,share/licenses/keiland-fonts/Mahora-LICENSE.txt,userland/desktop/fonts/Mahora-LICENSE.txt))
 $(eval $(call KEILAND_LINUX_DATA,share/licenses/keiland-fonts/JetBrainsMono-OFL.txt,userland/desktop/fonts/JetBrainsMono-OFL.txt))
 $(eval $(call KEILAND_LINUX_DATA,share/licenses/keiland-fonts/DroidSansFallback-LICENSE.txt,userland/desktop/fonts/DroidSansFallback-LICENSE.txt))
-$(eval $(call KEILAND_LINUX_DATA,share/licenses/keiland-fonts/Apache-2.0.txt,userland/desktop/fonts/Apache-2.0.txt))
 
 # Reuses the pinned, independently hash-verified external font without importing target build rules.
 KEILAND_LINUX_EMOJI := build/distfiles/NotoColorEmoji-2.047.ttf

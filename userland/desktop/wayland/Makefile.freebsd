@@ -154,7 +154,6 @@ $(eval $(call KEILAND_FREEBSD_DATA,share/fonts/keiland-fallback.ttf,userland/des
 $(eval $(call KEILAND_FREEBSD_DATA,share/licenses/keiland-fonts/Mahora-LICENSE.txt,userland/desktop/fonts/Mahora-LICENSE.txt))
 $(eval $(call KEILAND_FREEBSD_DATA,share/licenses/keiland-fonts/JetBrainsMono-OFL.txt,userland/desktop/fonts/JetBrainsMono-OFL.txt))
 $(eval $(call KEILAND_FREEBSD_DATA,share/licenses/keiland-fonts/DroidSansFallback-LICENSE.txt,userland/desktop/fonts/DroidSansFallback-LICENSE.txt))
-$(eval $(call KEILAND_FREEBSD_DATA,share/licenses/keiland-fonts/Apache-2.0.txt,userland/desktop/fonts/Apache-2.0.txt))
 
 # Verify the pinned external font on both initial download and installation into the build tree.
 KEILAND_FREEBSD_EMOJI := build/distfiles/NotoColorEmoji-2.047.ttf
