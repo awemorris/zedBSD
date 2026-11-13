@@ -558,7 +558,7 @@ hal_rtc_get_tick_hz(void);
  * Set the scheduling tick resolution of the local CPU.  Note that
  * this is not a guarantee that the tick will be delivered at that
  * rate and delivered immediate, only that the HAL will try to deliver
- * it at around that rate on the next timer interrupt.  The retuned
+ * it at around that rate on the next timer interrupt.  The returned
  * value is the actual tick rate that the HAL will try to deliver.
  */
 uint32_t

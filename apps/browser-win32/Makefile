@@ -1,34 +1,46 @@
-# OmniGrammaton for Windows: the cross build of libbrowser, libmedia, libkeiland and the browser's user
-# interface into Windows programs.  Run from the top of the tree:
-#   make -f apps/browser-win32/Makefile WIN32_ARCH=x86_64    (or aarch64)
-# or through the top Makefile: make browser-win64, make browser-winarm64.
-# Output under $(BROWSER_WIN32_BUILD) (build/browser-win64 or build/browser-winarm64 by default).
+# OmniGrammaton for Windows: the cross build of libbrowser, libmedia,
+# libkeiland and the browser's user interface into Windows programs.
+# Run from the top of the tree: make -f apps/browser-win32/Makefile
+# WIN32_ARCH=x86_64 (or aarch64) or through the top Makefile: make
+# browser-win64, make browser-winarm64.  Output under
+# $(BROWSER_WIN32_BUILD) (build/browser-win64 or
+# build/browser-winarm64 by default).
 #
-# Windows gets no DLL of this tree: every library is a static library, and a program links them all
-# into one .exe that imports only Windows' own DLLs, the C runtime's (UCRT) and, delayed, the Vulkan
-# loader.  The threads of libbrowser and libmedia are winpthreads', linked statically; libkeiland's
-# Windows files use the system's threads and locks directly.
+# Windows gets no DLL of this tree: every library is a static library,
+# and a program links them all into one .exe that imports only
+# Windows' own DLLs, the C runtime's (UCRT) and, delayed, the Vulkan
+# loader.  The threads of libbrowser and libmedia are winpthreads',
+# linked statically; libkeiland's Windows files use the system's
+# threads and locks directly.
 #
-# What it builds so far: the files of the operating-system layers (libbrowser's base/os-*, its storage,
-# libmedia's media-os, libkeiland's Windows files), compiled with the Windows compiler and its warnings;
-# the static libraries: libbrowser.a (all of libbrowser, with its Windows layer), libmedia.a (all of
-# libmedia and its container reader, with media-os-win32.c), libkeiland.a (its Windows files so far), libtruetype and the png, jpeg, gif, webp and z compat libraries
-# (from the same source lists as the zedBSD build); the Vulkan headers and the import library of the
-# Vulkan loader, and zedBSD's TLS (libssl-compat.a and libcrypto-compat.a, from their sources.mk; libbrowser's
-# net/tls.c uses them through net/tls-static-compat.c).
-# A test's program links with them all (test-program); the
-# browser's program and its resources join later, linked the same way (WIN32_PROGRAM).  Apart from those:
-# libbrowser-script.a, the script core alone with its Windows layer, and script-core.exe over it.
+# What it builds so far: the files of the operating-system layers
+# (libbrowser's base/os-*, its storage, libmedia's media-os,
+# libkeiland's Windows files), compiled with the Windows compiler and
+# its warnings; the static libraries: libbrowser.a (all of libbrowser,
+# with its Windows layer), libmedia.a (all of libmedia and its
+# container reader, with media-os-win32.c), libkeiland.a (its Windows
+# files so far), libtruetype and the png, jpeg, gif, webp and z compat
+# libraries (from the same source lists as the zedBSD build); the
+# Vulkan headers and the import library of the Vulkan loader, and
+# zedBSD's TLS (libssl-compat.a and libcrypto-compat.a, from their
+# sources.mk; libbrowser's net/tls.c uses them through
+# net/tls-static-compat.c).  A test's program links with them all
+# (test-program); the browser's program and its resources join later,
+# linked the same way (WIN32_PROGRAM).  Apart from those:
+# libbrowser-script.a, the script core alone with its Windows layer,
+# and script-core.exe over it.
 #
 # The toolchain, first found wins:
 #   1. WIN32_CC=<compiler>
 #   2. LLVM_MINGW=<root of llvm-mingw>: $(LLVM_MINGW)/bin/<triple>-clang
 #   3. <triple>-clang on PATH
 #   4. x86_64 only: x86_64-w64-mingw32ucrt-gcc on PATH (Debian's UCRT mingw-w64)
-# where <triple> is x86_64-w64-mingw32 or aarch64-w64-mingw32.  The msvcrt mingw-w64 gcc
-# (x86_64-w64-mingw32-gcc) is never used: the build targets the UCRT.
-# Recipes run under a POSIX sh (also on a Windows host: Git for Windows' or MSYS2's).
-# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+#
+# where <triple> is x86_64-w64-mingw32 or aarch64-w64-mingw32.  The
+# msvcrt mingw-w64 gcc (x86_64-w64-mingw32-gcc) is never used: the
+# build targets the UCRT.  Recipes run under a POSIX sh (also on a
+# Windows host: Git for Windows' or MSYS2's).  Copyright (C) 2026 Awe
+# Morris; SPDX-License-Identifier: Zlib
 
 WIN32_ARCH ?= x86_64
 ifeq ($(WIN32_ARCH),x86_64)
