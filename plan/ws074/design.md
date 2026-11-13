@@ -273,6 +273,7 @@ page の変更 → 次の frame callback（`wl_surface.frame`）で rAF → styl
   不透明な型と関数 pointer として宣言し、`net/tls.c` の中に閉じる。証明書は ca-certificates の `/etc/ssl/cert.pem`（OpenSSL の既定）。
   TLS 1.2 以上、hostname の照合、失敗は error の page（例外の許可は無し）。将来の base の libssl・libcrypto の互換品は同じ API の部分
   集合を実装し、`net/tls.c` は読む library の名前の順（base の互換品 → package）を変えるだけにする。
+  （注: 2026-11-13 WS335 p042 で、`net/tls.c` は `dlopen` をやめ libssl-compat・libcrypto-compat を直に link する形に置き換えた。[WS335 design.md](../ws335/design.md) §4.2・D29）
 - **cookie**: RFC 6265bis の部分（Domain・Path・Expires・Max-Age・Secure・HttpOnly・SameSite（既定 Lax））。保存は
   `~/.local/share/browser/cookies`。
 - **cache**: 最初は memory の cache（`Cache-Control: max-age`、`no-store`）。disk の cache と再検証（ETag・Last-Modified）は後。
