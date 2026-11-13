@@ -125,10 +125,19 @@ struct volume_view {
  */
 static struct volume_view volume_view;
 
+/*
+ * The timer of a volume a drag held back (send_waiting): armed for
+ * VOLUME_SEND_MS after the last send, when the volume shown is sent;
+ * disarmed by a send.  Readied by the first hold; only the event loop's
+ * thread touches it.
+ */
+static struct kwl_timer volume_send_timer;
+
 static void volume_open_popup(struct kwl_server *server, unsigned slot);
 static void volume_close_popup(struct kwl_server *server, const char *via);
 static void volume_set(struct kwl_server *server, unsigned value, unsigned muted, const char *via, unsigned final);
 static void volume_send(struct kwl_server *server);
+static void volume_send_fired(void *context, struct kwl_timer *timer);
 static void volume_restore(struct kwl_server *server);
 static int volume_sound(void);
 static int volume_in_icon(unsigned slot, int32_t x, int32_t y);
@@ -139,15 +148,15 @@ static int32_t volume_mute_top(void);
 static void volume_draw_switch(struct kwl_server *server, struct kwl_list *command, int32_t right, int32_t middle, unsigned on, float fade);
 
 /*
- * Reads what audiod has reported since the last tick, and sends a volume a
- * drag held back.  The link is made on the desktop's first tick.
+ * Reads what audiod has reported since the last tick (a volume a drag held
+ * back is sent on its timer).  The link is made on the desktop's first
+ * tick.
  */
 void
 kwl_volume_tick(
 	struct kwl_server *server)
 {
 	unsigned changed;
-	uint64_t now;
 
 	/* The link, once (the backend connects to audiod when it can). */
 	if (!volume_view.opened) {
@@ -186,12 +195,6 @@ kwl_volume_tick(
 		}
 	}
 
-	/* A volume a drag held back (sent on the clock). */
-	now = kwl_milliseconds();
-	if (volume_view.send_waiting && now - volume_view.sent_ms >= VOLUME_SEND_MS)
-		volume_send(server);
-	if (volume_view.send_waiting)
-		kwl_due(server, volume_view.sent_ms + VOLUME_SEND_MS);
 }
 
 /*
@@ -891,10 +894,15 @@ volume_set(
 	server->dirty = 1;
 	printf("KWL VOLUME set value=%u muted=%u via=%s final=%u at_ms=%llu\n", value, muted, via, final, (unsigned long long)kwl_milliseconds());
 
-	/* Sent now when final, or when a drag's wait is over (audiod holds it; nothing is written). */
+	/* Sent now when final, or when a drag's wait is over (audiod holds it; nothing is written); else on the timer. */
 	now = kwl_milliseconds();
-	if (final || now - volume_view.sent_ms >= VOLUME_SEND_MS)
+	if (final || now - volume_view.sent_ms >= VOLUME_SEND_MS) {
 		volume_send(server);
+	} else {
+		if (volume_send_timer.fire == NULL)
+			kwl_timer_init(&volume_send_timer, "volume-send", volume_send_fired);
+		kwl_timer_set(server, &volume_send_timer, volume_view.sent_ms + VOLUME_SEND_MS);
+	}
 
 	/* A drag's steps and switching mute on play no sound. */
 	if (!final || muted)
@@ -912,10 +920,11 @@ volume_send(
 {
 	int error;
 
-	UNUSED_PARAMETER(server);
+	/* Nothing waits to be sent any more. */
+	volume_view.send_waiting = 0U;
+	kwl_timer_set(server, &volume_send_timer, UINT64_MAX);
 
 	/* The request; one that cannot go is logged and dropped (the next report shows audiod's). */
-	volume_view.send_waiting = 0U;
 	volume_view.sent_ms = kwl_milliseconds();
 	error = kl_backend_audio_set_volume(volume_view.audio, volume_view.value, volume_view.value, volume_view.muted);
 	if (error != 0)
@@ -1107,4 +1116,23 @@ volume_draw_switch(
 		glass_draw_solid(server, command, (float)(x + 2), (float)(middle - 8), 16.0f, 16.0f, 8.0f, white);
 	}
 	kwl_accent_done(server, kept);
+}
+
+/* Sends a volume a drag held back once VOLUME_SEND_MS passed since the last send. */
+static void
+volume_send_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+
+	UNUSED_PARAMETER(timer);
+
+	/* Only a volume still held back, with the link. */
+	server = context;
+	if (!volume_view.send_waiting || volume_view.audio == NULL)
+		return;
+
+	/* Sent. */
+	volume_send(server);
 }

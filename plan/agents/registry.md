@@ -5,9 +5,10 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
+| P1 | phase-runner-high | ws353 p008 main の poll -1 (q2068-i01) | `/home/awe/zedBSD-worktrees/p1-ws353h` / `agent/p1-ws353h` | 動いている（2026-11-14） | — |
 | P2 | phase-runner-high | ws353 p011 render の slot (q2067-i01) | `/home/awe/zedBSD-worktrees/p2-ws353d` / `agent/p2-ws353d` | 動いている（2026-11-14） | — |
 | P2 | phase-runner-high | ws353 p015 network・WSI (q2066-i01) | `/home/awe/zedBSD-worktrees/p2-ws353c` / `agent/p2-ws353c` | 返却（2026-11-14、cleared） | afbbfeed48 |
-| P1 | phase-runner-high | ws353 p007 締め切り B (q2065-i01) | `/home/awe/zedBSD-worktrees/p1-ws353g` / `agent/p1-ws353g` | 動いている（2026-11-14） | — |
+| P1 | phase-runner-high | ws353 p007 締め切り B (q2065-i01) | `/home/awe/zedBSD-worktrees/p1-ws353g` / `agent/p1-ws353g` | 返却（2026-11-14、cleared） | a6eafe010b |
 | P2 | phase-runner-high | ws353 p014 refresh の fence (q2064-i01) | `/home/awe/zedBSD-worktrees/p2-ws353b` / `agent/p2-ws353b` | 返却（2026-11-14、cleared） | f3c6bb3e9a（merge 2498bc8853） |
 | P1 | phase-runner-high | ws353 p006 締め切り A (q2062-i01) | `/home/awe/zedBSD-worktrees/p1-ws353f` / `agent/p1-ws353f` | 返却（2026-11-14、cleared） | d375b9db1b |
 | P2 | phase-runner-high | ws353 p009 present の fence (q2063-i01) | `/home/awe/zedBSD-worktrees/p2-ws353a` / `agent/p2-ws353a` | 返却（2026-11-14、cleared） | 8a7503373a |

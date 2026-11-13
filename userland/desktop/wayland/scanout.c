@@ -130,6 +130,8 @@ static void scanout_refuse(struct kwl_server *server, struct kwl_object *top, in
 static void scanout_let_go(struct kwl_game_chain *chain, struct kwl_client *client);
 static void scanout_callbacks(struct kwl_server *server, struct kwl_object *shown);
 static void scanout_note(struct kwl_server *server, struct kwl_object *top, unsigned reason);
+static void scanout_wait(struct kwl_server *server, struct kwl_timer *timer, const char *name, uint64_t at_ms);
+static void scanout_wait_fired(void *context, struct kwl_timer *timer);
 
 /* The present thread's jobs. */
 static const struct kwl_lane_ops scanout_present_ops = {
@@ -159,6 +161,18 @@ static uint32_t scanout_serial;
  */
 static const struct kwl_object *scanout_lend_noted;
 static const char *scanout_lend_why;
+
+/*
+ * The timers of the game mode's two waits: the pointer's rest over a
+ * window that would be shown straight (KWL_SCANOUT_POINTER_IDLE_MS after
+ * its last motion), and a lend the client has not taken
+ * (SCANOUT_ADOPT_MS after it was lent).  The scheduler's pass a timer
+ * wakes looks at the time (kwl_scanout_pass); a wait that ended meanwhile
+ * leaves its timer armed, and it then fires once for nothing.  Readied by
+ * the first wait; on the event loop's thread.
+ */
+static struct kwl_timer scanout_still_timer;
+static struct kwl_timer scanout_lend_timer;
 
 /*
  * Runs the game mode's part of a pass, after the commits were taken.
@@ -196,7 +210,7 @@ kwl_scanout_pass(
 	if (reason != KWL_SCANOUT_DIRECT) {
 		scanout_note(server, top, reason);
 		if (reason == KWL_SCANOUT_POINTER)
-			kwl_due(server, server->scanout_motion_ms + KWL_SCANOUT_POINTER_IDLE_MS);
+			scanout_wait(server, &scanout_still_timer, "scanout-still", server->scanout_motion_ms + KWL_SCANOUT_POINTER_IDLE_MS);
 		return 0;
 	}
 
@@ -916,7 +930,7 @@ scanout_frame(
 		return;
 	}
 	if (chain->shown == 0U && chain->flight < 0)
-		kwl_due(server, chain->lent_ms + SCANOUT_ADOPT_MS + 1U);
+		scanout_wait(server, &scanout_lend_timer, "scanout-lend", chain->lent_ms + SCANOUT_ADOPT_MS + 1U);
 
 	/* Only a new image. */
 	buffer = top->current;
@@ -1289,4 +1303,34 @@ scanout_note(
 	server->scanout_noted = top;
 	server->scanout_reason = reason;
 	printf("KWL SCANOUT direct=0 reason=%s surface=%u frames=0\n", kwl_scanout_reason_name(reason), top->id);
+}
+
+/* Arms one of the game mode's timers for at_ms, whose scheduler's pass looks at the time again. */
+static void
+scanout_wait(
+	struct kwl_server *server,
+	struct kwl_timer *timer,
+	const char *name,
+	uint64_t at_ms)
+{
+	/* The timer, readied once. */
+	if (timer->fire == NULL)
+		kwl_timer_init(timer, name, scanout_wait_fired);
+
+	/* The pass at that time decides again. */
+	kwl_timer_set(server, timer, at_ms);
+}
+
+/*
+ * Ends a wait of the game mode: the scheduler's pass the timer woke shows
+ * the window straight once the pointer rests, or composes a client that
+ * did not take its lend (kwl_scanout_pass looks at the time).
+ */
+static void
+scanout_wait_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	(void)context;
+	(void)timer;
 }

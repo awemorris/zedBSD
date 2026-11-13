@@ -43,6 +43,9 @@ struct kwl_thread {
 /* The most timers armed at once: every timer is one feature's own record, so this is the program's count of them. */
 #define KWL_TIMERS_MAX		128U
 
+/* The most timers told apart by name in one window of the fired timers' counts (KWL PERF timers); the rest are "other". */
+#define KWL_TIMERS_TOLD		8U
+
 struct kwl_timer;
 
 /*
@@ -81,6 +84,11 @@ struct kwl_timer {
  * firings), stop ends the thread, and wakes counts the bytes the thread
  * wrote.  wake is the main thread's wake pipe; running says the thread was
  * started and not yet stopped.
+ *
+ * told_names and told_counts count the timers fired since the last report
+ * (kwl_timers_report), by name, the first KWL_TIMERS_TOLD names apart and
+ * the rest in told_other; told_total counts them all.  The main thread's
+ * alone.
  */
 struct kwl_timers {
 	struct kwl_timer *heap[KWL_TIMERS_MAX];
@@ -97,6 +105,11 @@ struct kwl_timers {
 	unsigned ready;
 	unsigned running;
 	struct kwl_thread thread;
+	const char *told_names[KWL_TIMERS_TOLD];
+	unsigned told_counts[KWL_TIMERS_TOLD];
+	unsigned told_kinds;
+	unsigned told_other;
+	unsigned told_total;
 };
 
 int kwl_thread_start(struct kwl_thread *thread, const char *name, void *(*run)(void *), void *argument);
@@ -119,5 +132,6 @@ void kwl_timer_disarm(struct kwl_timers *timers, struct kwl_timer *timer);
 unsigned kwl_timers_take(struct kwl_timers *timers, uint64_t now_ms, void *context);
 uint64_t kwl_timers_next(const struct kwl_timers *timers);
 uint64_t kwl_timers_now(void);
+void kwl_timers_report(struct kwl_timers *timers);
 
 #endif

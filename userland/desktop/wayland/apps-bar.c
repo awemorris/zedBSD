@@ -77,6 +77,16 @@
 #define SLOT_NONE		(-1)
 #define SLOT_MORE		(-2)
 
+/*
+ * The timer of the previews' rest and absence: armed while the pointer
+ * rests on an icon (for HOVER_MS after it came) or is away from the
+ * previews a rest showed (for LEAVE_MS after it left).  Its pass looks
+ * at the time (kwl_apps_bar_tick); a wait that ended meanwhile leaves it
+ * armed, and it then fires once for nothing.  Readied by the first wait;
+ * only the event loop touches it.
+ */
+static struct kwl_timer apps_bar_timer;
+
 static int slot_at(const struct apps_view *view, int32_t x, int32_t y);
 static void slot_rect(const struct apps_view *view, unsigned slot, struct apps_rect *rect);
 static int panel_build(struct kwl_server *server, const struct apps_view *view, const char *key, struct apps_panel *panel);
@@ -85,6 +95,8 @@ static int view_collect_on(struct kwl_server *server, unsigned slot, int every, 
 static void draw_more(struct kwl_server *server, struct kwl_list *command, const struct apps_rect *rect, unsigned hidden, float light);
 static void draw_light(struct kwl_server *server, struct kwl_list *command, const struct apps_rect *rect, float strength);
 static void spring_tick(struct kwl_server *server);
+static void apps_bar_wait(struct kwl_server *server, uint64_t at_ms);
+static void apps_bar_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Draws the applications' icons in an output's bar (draw_system_bar, or a
@@ -684,7 +696,7 @@ kwl_apps_bar_tick(
 		return;
 	}
 	if (state->state == KWL_APPS_ARMED)
-		kwl_due(server, state->since_ms + HOVER_MS);
+		apps_bar_wait(server, state->since_ms + HOVER_MS);
 
 	/* The absence from the icons and the panel hides what the rest showed (a click's previews stay). */
 	if (state->state == KWL_APPS_SHOWN &&
@@ -693,7 +705,7 @@ kwl_apps_bar_tick(
 		if (now - state->since_ms >= LEAVE_MS)
 			kwl_apps_bar_hide(server, "leave");
 		else
-			kwl_due(server, state->since_ms + LEAVE_MS);
+			apps_bar_wait(server, state->since_ms + LEAVE_MS);
 	}
 }
 
@@ -1476,4 +1488,32 @@ spring_tick(
 	printf("KWL APPS spring app=%s surface=%u\n", state->key, surface->id);
 	kwl_apps_bar_hide(server, "spring");
 	kwl_glass_switch_to(server, surface, "spring");
+}
+
+/* Arms the timer of the previews' rest or absence, whose pass looks at the time again. */
+static void
+apps_bar_wait(
+	struct kwl_server *server,
+	uint64_t at_ms)
+{
+	/* The timer, readied once. */
+	if (apps_bar_timer.fire == NULL)
+		kwl_timer_init(&apps_bar_timer, "apps-bar", apps_bar_fired);
+
+	/* The pass at that time shows or hides the previews. */
+	kwl_timer_set(server, &apps_bar_timer, at_ms);
+}
+
+/*
+ * Ends the wait for the previews' rest or absence: the pass the timer
+ * woke shows or hides them (kwl_apps_bar_tick looks at the time and at
+ * what the pointer is over).
+ */
+static void
+apps_bar_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	UNUSED_PARAMETER(context);
+	UNUSED_PARAMETER(timer);
 }

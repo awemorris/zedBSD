@@ -71,6 +71,16 @@
 /* The generations of the outputs' pictures (one each time an output opens). */
 static uint64_t layers_generations;
 
+/*
+ * The timer of the quiet before Home's picture is drawn on its own: armed
+ * while a picture is due and the quiet has not begun, for the time it
+ * begins, when the scheduler's pass looks again (kwl_layers_tick).  Input,
+ * a commit or a frame meanwhile moves the quiet later: the pass that
+ * timer wakes arms it again.  Readied by the first wait; the event loop's
+ * thread's.
+ */
+static struct kwl_timer layers_quiet_timer;
+
 static VkResult layers_pass(struct kwl_compose *compose);
 static VkResult layers_image(struct kwl_compose *compose, struct kwl_layer_image *target);
 static void layers_image_destroy(struct kwl_compose *compose, struct kwl_layer_image *target);
@@ -78,6 +88,7 @@ static void layers_destroy(struct kwl_compose *compose);
 static void layers_record_pass(struct kwl_server *server, struct kwl_list *command, unsigned which, struct kwl_object **windows, unsigned count);
 static int layers_home_current(struct kwl_server *server);
 static int layers_animating(struct kwl_server *server);
+static void layers_quiet_fired(void *context, struct kwl_timer *timer);
 static void layers_log_use(struct kwl_layers *layers);
 static const char *layers_name(unsigned which);
 
@@ -245,7 +256,9 @@ kwl_layers_tick(
 	if (layers->bake_times[0] != 0U && layers->bake_times[0] + LAYER_TURN_MS > quiet)
 		quiet = layers->bake_times[0] + LAYER_TURN_MS;
 	if (now < quiet) {
-		kwl_due(server, quiet);
+		if (layers_quiet_timer.fire == NULL)
+			kwl_timer_init(&layers_quiet_timer, "layer-quiet", layers_quiet_fired);
+		kwl_timer_set(server, &layers_quiet_timer, quiet);
 		return 0;
 	}
 
@@ -1085,4 +1098,18 @@ layers_name(
 
 	/* Succeeded: the window's. */
 	return "window";
+}
+
+/*
+ * Ends the wait for the quiet: the scheduler's pass the timer woke draws
+ * Home's picture when nothing broke the quiet (kwl_layers_tick looks at the
+ * time).
+ */
+static void
+layers_quiet_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	(void)context;
+	(void)timer;
 }

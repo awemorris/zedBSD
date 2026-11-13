@@ -8,10 +8,10 @@
 # Steps: the start (the timer thread in KWL THREADS); the desktop program ("sleep 1") started again by its timer
 # (the times the log gives, worked out by the guest's awk: from each end to the next start at least 2000 ms and at
 # most 2600 ms, four starts, then the minute's limit); the input method lost and started again by its timer until it
-# is given up (three starts); 30 s idle (at most five passes and two timeouts a second: what this phase moved leaves
-# no pace behind); the system monitor followed for 5 s (its samples at the period from the timer) and the objects' count dropping to 0
+# is given up (three starts); 30 s idle (at most two passes and one timeout in ten seconds: no deadline leaves a
+# pace behind); the system monitor followed for 5 s (its samples at the period from the timer) and the objects' count dropping to 0
 # after the client went (the 250 ms look, on the timer while objects are there); 20 s idle again (that look stopped:
-# at most two timeouts a second); a partial capture whose frame never comes, ended by its timer with the timeout's
+# the same bounds as the first idle); a partial capture whose frame never comes, ended by its timer with the timeout's
 # error; SIGTERM; then a second compositor with --timeout=10 that ends by its timer (KWL TIMEOUT, KWL EXIT, not before
 # 10 s, the timer late by at most 100 ms); no KWL FAILED.
 #
@@ -177,9 +177,15 @@ rate() {
 }
 
 # An idle stretch of SECONDS: its KWL PERF windows (printed by the pass a capture's PING brings after it) hold at most
-# five passes and two timeouts a second (a 10 ms pace makes a hundred of each).
+# two passes and one timeout in ten seconds (the PING's pass, and the clock's minute; a 10 ms pace makes a thousand
+# of each).  The window under way is ended first (a PING's pass, five seconds after it began), so that the windows
+# summed hold only the idle stretch; they cover it but for the last one when a pass printed a window less than five
+# seconds before the last PING.
 idle() {
 	name=$1
+	sleep 6
+	serial "keiland-shot --socket $dir/keiland-shot.sock --request PING > $dir/ping.txt 2>&1" > /dev/null 2>&1 || true
+	sleep 1
 	from=$(count '')
 	sleep "$2"
 	serial "keiland-shot --socket $dir/keiland-shot.sock --request PING > $dir/ping.txt 2>&1" > /dev/null 2>&1 || true
@@ -188,10 +194,10 @@ idle() {
 	ms=$(echo "$numbers" | sed 's/^ms=\([0-9]*\) .*/\1/')
 	passes=$(echo "$numbers" | sed 's/.* passes=\([0-9]*\) .*/\1/')
 	timeouts=$(echo "$numbers" | sed 's/.* timeouts=\([0-9]*\) .*/\1/')
-	if [ "$ms" -ge $(( $2 * 1000 )) ] && [ $(( passes * 1000 )) -le $(( ms * 5 )) ] && [ $(( timeouts * 1000 )) -le $(( ms * 2 )) ]; then
+	if [ "$ms" -ge $(( ($2 - 5) * 1000 )) ] && [ $(( passes * 10000 )) -le $(( ms * 2 )) ] && [ $(( timeouts * 10000 )) -le $(( ms * 1 )) ]; then
 		say "$name: PASS $numbers"
 	else
-		fail_step "$name" "$numbers (wanted ms>=$(( $2 * 1000 )), passes<=5/s, timeouts<=2/s)"
+		fail_step "$name" "$numbers (wanted ms>=$(( ($2 - 5) * 1000 )), passes<=2 and timeouts<=1 in 10 s)"
 	fi
 }
 

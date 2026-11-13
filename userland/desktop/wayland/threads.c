@@ -49,6 +49,7 @@ static void heap_remove(struct kwl_timers *timers, struct kwl_timer *timer);
 static void timers_publish(struct kwl_timers *timers, unsigned always);
 static void *timer_run(void *argument);
 static void timer_deadline(uint64_t due_ms, struct timespec *deadline);
+static void timers_tell(struct kwl_timers *timers, const char *name);
 
 /*
  * Starts a thread of the compositor's own under a name, with every signal
@@ -564,6 +565,7 @@ kwl_timers_take(
 		heap_remove(timers, timer);
 		timer->taken = timers->take;
 		fired++;
+		timers_tell(timers, timer->name);
 		timer->fire(context, timer);
 	}
 
@@ -607,6 +609,32 @@ kwl_timers_now(
 
 	/* Succeeded: whole milliseconds since the clock's start. */
 	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+}
+
+/*
+ * Prints the timers fired since the last report, by name, as one line
+ * ("KWL PERF timers fired=N name=count ... other=M"), and starts the
+ * counts again.  Called on the main thread with the event loop's other
+ * KWL PERF lines.
+ */
+void
+kwl_timers_report(
+	struct kwl_timers *timers)
+{
+	unsigned index;
+
+	/* The line: the total, each name told apart, then the rest. */
+	printf("KWL PERF timers fired=%u", timers->told_total);
+	for (index = 0U; index < timers->told_kinds; index++)
+		printf(" %s=%u", timers->told_names[index], timers->told_counts[index]);
+	printf(" other=%u\n", timers->told_other);
+
+	/* The next window counts from none. */
+	memset(timers->told_names, 0, sizeof(timers->told_names));
+	memset(timers->told_counts, 0, sizeof(timers->told_counts));
+	timers->told_kinds = 0U;
+	timers->told_other = 0U;
+	timers->told_total = 0U;
 }
 
 /* Puts a thread's name in a free slot of the register (a full register leaves it out). */
@@ -853,4 +881,35 @@ timer_deadline(
 	/* Whole seconds, and the rest in nanoseconds. */
 	deadline->tv_sec = (time_t)(due_ms / 1000U);
 	deadline->tv_nsec = (long)((due_ms % 1000U) * 1000000U);
+}
+
+/* Counts a timer that fired under its name for the next report (kwl_timers_report). */
+static void
+timers_tell(
+	struct kwl_timers *timers,
+	const char *name)
+{
+	unsigned index;
+	int same;
+
+	/* One more fired in the window. */
+	timers->told_total++;
+
+	/* A name counted already in the window. */
+	for (index = 0U; index < timers->told_kinds; index++) {
+		same = strcmp(timers->told_names[index], name);
+		if (same == 0) {
+			timers->told_counts[index]++;
+			return;
+		}
+	}
+
+	/* A new name, while there is room; the rest are counted together. */
+	if (timers->told_kinds < KWL_TIMERS_TOLD) {
+		timers->told_names[timers->told_kinds] = name;
+		timers->told_counts[timers->told_kinds] = 1U;
+		timers->told_kinds++;
+		return;
+	}
+	timers->told_other++;
 }

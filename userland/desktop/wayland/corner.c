@@ -154,6 +154,15 @@ struct corner_state {
  */
 static struct corner_state corner;
 
+/*
+ * The timer of a start of Notes (corner.launching): armed for
+ * CORNER_LAUNCH_WAIT_MS after the start, when a start whose window did not
+ * come may be tried again.  A start ended meanwhile leaves it armed; it
+ * then fires once and finds none.  Readied by the first start; only the
+ * event loop touches it.
+ */
+static struct kwl_timer corner_launch_timer;
+
 static int corner_in_zone(struct kwl_server *server, int32_t x, int32_t y);
 static void corner_sample(int32_t x, int32_t y, uint32_t time);
 static float corner_speed(void);
@@ -165,6 +174,7 @@ static struct kwl_object *corner_find_notes(struct kwl_server *server);
 static float corner_radius(void);
 static float corner_ease(float t);
 static const char *corner_source_name(enum kwl_contact_source source);
+static void corner_launch_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Starts following a contact that begins in the top-right corner.
@@ -416,8 +426,8 @@ kwl_corner_motion(
 
 /*
  * Keeps the gesture's time: a contact that does not arm in time is let go,
- * the settling hint draws until it is done, and a start of Notes whose
- * window never came is forgotten.
+ * and the settling hint draws until it is done (a start of Notes whose
+ * window never came is forgotten on its timer).
  */
 void
 kwl_corner_tick(
@@ -462,17 +472,9 @@ kwl_corner_tick(
 			corner.settling = 0;
 	}
 
-	/* A start of Notes whose window did not come in time may be tried again. */
-	if (corner.launching && now - corner.launch_ms > CORNER_LAUNCH_WAIT_MS) {
-		corner.launching = 0;
-		printf("KWL CORNER launch expired\n");
-	}
-
-	/* A contact and the hint are looked at closely while they last; the start of Notes on the clock. */
+	/* A contact and the hint are looked at closely while they last. */
 	if (corner.contact.active || corner.settling)
 		kwl_due_soon(server);
-	if (corner.launching)
-		kwl_due(server, corner.launch_ms + CORNER_LAUNCH_WAIT_MS + 1U);
 }
 
 /*
@@ -832,6 +834,11 @@ corner_act(
 		printf("KWL CORNER notes launch error=%d\n", error);
 		return;
 	}
+
+	/* A window that does not come in time lets Notes be started again, on the timer. */
+	if (corner_launch_timer.fire == NULL)
+		kwl_timer_init(&corner_launch_timer, "corner-launch", corner_launch_fired);
+	kwl_timer_set(server, &corner_launch_timer, corner.launch_ms + CORNER_LAUNCH_WAIT_MS + 1U);
 }
 
 /* Hears Notes' start: its process ID logged, or the failure (no window is waited for then). */
@@ -949,4 +956,33 @@ corner_source_name(
 	default:
 		return "pointer";
 	}
+}
+
+/* Lets a start of Notes whose window did not come within CORNER_LAUNCH_WAIT_MS be tried again. */
+static void
+corner_launch_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	uint64_t now;
+
+	/* Only this part's own timer comes here. */
+	(void)timer;
+
+	/* Only a start still waited for. */
+	server = context;
+	if (!corner.launching)
+		return;
+
+	/* A later start's time is not over yet: the timer comes back then. */
+	now = kwl_milliseconds();
+	if (now - corner.launch_ms <= CORNER_LAUNCH_WAIT_MS) {
+		kwl_timer_set(server, &corner_launch_timer, corner.launch_ms + CORNER_LAUNCH_WAIT_MS + 1U);
+		return;
+	}
+
+	/* Expired: the corner may start Notes again. */
+	corner.launching = 0;
+	printf("KWL CORNER launch expired\n");
 }

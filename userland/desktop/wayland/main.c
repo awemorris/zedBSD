@@ -1077,9 +1077,6 @@ event_loop(
 
 		/* The input method is looked after: started again, passed by when it does not answer (input-method.c). */
 		kwl_ime_tick(server, now);
-
-		/* A key held in a titlebar's field is pressed again when its repeat is due (titlebar-shell.c). */
-		kwl_titlebar_tick(server, now);
 		server->perf.tick_cycles += kwl_cycles() - part;
 
 		/* Allocate exactly enough poll storage for the presently live client and device set. */
@@ -1799,6 +1796,9 @@ kwl_perf_report(
 	    perf->timeouts,
 	    100.0 * (double)perf->poll_cycles / (double)cycles,
 	    100.0 * (double)perf->work_cycles / (double)cycles);
+
+	/* The timers that fired in the window, by name (the passes they woke are among the passes above). */
+	kwl_timers_report(&server->timers);
 
 	/* Window mode's frames: how many, the CPU time to record and submit one, and the time until its fence. */
 	if (perf->compose_frames != 0) {

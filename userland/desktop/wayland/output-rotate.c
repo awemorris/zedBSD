@@ -86,6 +86,16 @@ struct output_rotate_work {
 	unsigned reuse;
 };
 
+/*
+ * The timer of the old frame's hold after a turn (server->rotate_hold_ms):
+ * armed while the hold waits for windows, for KWL_ROTATE_HOLD_MS after it
+ * began, when the scheduler's pass shows the new size anyway
+ * (kwl_output_rotate_held looks at the time).  A hold ended meanwhile
+ * leaves it armed; it then fires once for nothing.  Readied by the first
+ * hold; only the event loop touches it.
+ */
+static struct kwl_timer output_rotate_hold_timer;
+
 static int output_rotate_turn_begin(struct kwl_server *server, const struct kwl_rotate_state *after, struct output_rotate_clock *clock, struct output_rotate_work *work);
 static void output_rotate_turn_end(struct kwl_server *server, struct output_rotate_work *work, struct output_rotate_clock *clock);
 static void output_rotate_flush(struct kwl_server *server);
@@ -95,6 +105,7 @@ static const char *output_rotate_mode_name(unsigned mode);
 static void output_rotate_times(const struct output_rotate_clock *clock);
 static void output_rotate_clock_fill(struct output_rotate_clock *clock, uint64_t now);
 static int output_rotate_waits(struct kwl_server *server, const struct kwl_object *surface);
+static void output_rotate_hold_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Takes the user's choice of an output's angle: refused outside the
@@ -636,7 +647,9 @@ kwl_output_rotate_held(
 	now = kwl_milliseconds();
 	holding = kwl_rotate_holding(waiting, server->rotate_hold_ms, now);
 	if (holding) {
-		kwl_due(server, server->rotate_hold_ms + KWL_ROTATE_HOLD_MS);
+		if (output_rotate_hold_timer.fire == NULL)
+			kwl_timer_init(&output_rotate_hold_timer, "rotate-hold", output_rotate_hold_fired);
+		kwl_timer_set(server, &output_rotate_hold_timer, server->rotate_hold_ms + KWL_ROTATE_HOLD_MS);
 		return 1;
 	}
 
@@ -992,4 +1005,18 @@ output_rotate_waits(
 
 	/* Succeeded: the window is told the new bounds and draws them. */
 	return 1;
+}
+
+/*
+ * Ends the old frame's hold after a turn: the scheduler's pass the timer
+ * woke shows the new size (kwl_output_rotate_held looks at the time and at
+ * the windows still waited for).
+ */
+static void
+output_rotate_hold_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	(void)context;
+	(void)timer;
 }

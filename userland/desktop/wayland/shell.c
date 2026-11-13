@@ -555,7 +555,7 @@ static int band_button(struct kwl_server *server, uint32_t button, uint32_t stat
 static int band_motion(struct kwl_server *server, int replays);
 static int32_t band_depth(struct kwl_server *server);
 static void band_replay(struct kwl_server *server, int release);
-static void band_tick(struct kwl_server *server);
+static void band_hold_fired(void *context, struct kwl_timer *timer);
 static void band_handback(struct kwl_server *server, int lifted);
 static void draw_desktop_layer(struct kwl_server *server, struct kwl_list *command, struct kwl_object **windows, unsigned count, float home, const struct shell_bar *bar);
 static unsigned cover_holes(struct kwl_server *server, struct kwl_object **windows, unsigned count, float (*holes)[4], int *levels);
@@ -620,6 +620,15 @@ static struct {
  * end.  Readied by the first pace; only the event loop touches it.
  */
 static struct kwl_timer lock_idle_timer;
+
+/*
+ * The timer of a press held in the top edge's band: armed for
+ * KWL_EDGE_BAND_HOLD_MS after the press, when it becomes a long press.  A
+ * press released or moved into a swipe meanwhile leaves it armed; it then
+ * fires once and finds no press held.  Readied by the first press; only
+ * the event loop touches it.
+ */
+static struct kwl_timer band_hold_timer;
 
 static struct kwl_object *fullscreen_top(struct kwl_server *server);
 static int fullscreen_whole(struct kwl_server *server, float home);
@@ -3457,9 +3466,6 @@ kwl_glass_tick(
 	/* The arrangements: a window gone, minimized, resized or fullscreen ends its desktop's (WS181). */
 	kwl_arrange_tick(server);
 
-	/* A press held in the top edge's band that rests becomes a long press (ws177-p033). */
-	band_tick(server);
-
 	/* The previews of the bar's applications show and hide in time (apps-bar.c), and the switcher goes when it may not show. */
 	kwl_apps_bar_tick(server);
 	kwl_switch_tick(server);
@@ -3467,7 +3473,7 @@ kwl_glass_tick(
 	/* App Home's animation, and the applications it started that have ended. */
 	kwl_home_tick(server);
 
-	/* The top-right corner's swipe: its time limit, its hint settling, and Notes being waited for (corner.c). */
+	/* The top-right corner's swipe: its time limit and its hint settling (corner.c). */
 	kwl_corner_tick(server);
 
 	/* The on-screen keyboard's swipe and its panel's place (keyboard.c). */
@@ -3485,7 +3491,7 @@ kwl_glass_tick(
 	/* Bluetooth's menu: the answer to its request, and its end with the lock (bluetooth-bar.c, ws143-p006). */
 	kwl_bluetooth_bar_tick(server);
 
-	/* What audiod reported, and the volume's sends held back (volume.c). */
+	/* What audiod reported (volume.c). */
 	kwl_volume_tick(server);
 
 	/* The bar's daemons' connections, each with its thread, are open from the first tick on: the register is told once more. */
@@ -8096,6 +8102,11 @@ band_button(
 		server->band_fullscreen = 1U;
 	printf("KWL EDGE band press x=%d y=%d\n", server->pointer_x, server->pointer_y);
 
+	/* A press that rests is a long press on its timer. */
+	if (band_hold_timer.fire == NULL)
+		kwl_timer_init(&band_hold_timer, "band-hold", band_hold_fired);
+	kwl_timer_set(server, &band_hold_timer, server->band_since_ms + KWL_EDGE_BAND_HOLD_MS);
+
 	/* Succeeded: the press is the band's for now. */
 	return 1;
 }
@@ -8176,27 +8187,36 @@ band_motion(
 
 /*
  * Follows a press held in the top edge's band without a motion
- * (ws177-p033): resting KWL_EDGE_BAND_HOLD_MS where it touched, it is a
- * long press of what is under it, given again there as a press that is
- * still down (the bar's applications show their previews); over a
- * fullscreen window its client has the finger from then.
+ * (ws177-p033), when its timer fires: resting KWL_EDGE_BAND_HOLD_MS where
+ * it touched, it is a long press of what is under it, given again there
+ * as a press that is still down (the bar's applications show their
+ * previews); over a fullscreen window its client has the finger from
+ * then.  The login and lock screens take no long press.
  */
 static void
-band_tick(
-	struct kwl_server *server)
+band_hold_fired(
+	void *context,
+	struct kwl_timer *timer)
 {
+	struct kwl_server *server;
 	uint64_t held_ms;
 	int held;
 
-	/* Only a held press. */
+	/* Only this part's own timer comes here. */
+	(void)timer;
+
+	/* Only a held press, on the desktop. */
+	server = context;
 	if (!server->band_press)
 		return;
+	if (server->greeter || server->locked)
+		return;
 
-	/* Not yet long enough (looked at closely while the finger rests). */
+	/* Not yet long enough (a press again after the timer was armed): the timer comes back then. */
 	held_ms = kwl_milliseconds() - server->band_since_ms;
 	held = kwl_edge_band_held(held_ms);
 	if (!held) {
-		kwl_due_soon(server);
+		kwl_timer_set(server, &band_hold_timer, server->band_since_ms + KWL_EDGE_BAND_HOLD_MS);
 		return;
 	}
 	server->band_press = 0;

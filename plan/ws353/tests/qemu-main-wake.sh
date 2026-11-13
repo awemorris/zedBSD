@@ -5,8 +5,8 @@
 # console's text is never read for the verdict).
 #
 # Steps: the start (the timer thread in KWL THREADS, the capture listening); 30 s idle (the KWL PERF windows over it:
-# at most five passes and two timeouts a second, where a 10 ms pace makes a hundred of each; the deadlines this
-# phase leaves, such as the printers' file looked at each second, make about two passes and one timeout); the
+# at most two passes and one timeout in ten seconds, where a 10 ms pace makes a thousand of each: the PING's pass
+# and the clock's minute); the
 # wallpaper changed twice with keiland-settings (the loader's end wakes the loop: each picture shown within 30 s);
 # two captures with keiland-shot at once (the second waits for the first's sending, whose end wakes the loop: both
 # written within 30 s); 20 s idle again; a USB keyboard plugged with QMP (taken from the system's event, the time from
@@ -174,9 +174,15 @@ rate() {
 }
 
 # An idle stretch of SECONDS: its KWL PERF windows (printed by the pass a capture's PING brings after it) hold at most
-# five passes and two timeouts a second (a 10 ms pace makes a hundred of each).
+# two passes and one timeout in ten seconds (the PING's pass, and the clock's minute; a 10 ms pace makes a thousand
+# of each).  The window under way is ended first (a PING's pass, five seconds after it began), so that the windows
+# summed hold only the idle stretch; they cover it but for the last one when a pass printed a window less than five
+# seconds before the last PING.
 idle() {
 	name=$1
+	sleep 6
+	serial "keiland-shot --socket $dir/keiland-shot.sock --request PING > $dir/ping.txt 2>&1" > /dev/null 2>&1 || true
+	sleep 1
 	from=$(count '')
 	sleep "$2"
 	serial "keiland-shot --socket $dir/keiland-shot.sock --request PING > $dir/ping.txt 2>&1" > /dev/null 2>&1 || true
@@ -185,10 +191,10 @@ idle() {
 	ms=$(echo "$numbers" | sed 's/^ms=\([0-9]*\) .*/\1/')
 	passes=$(echo "$numbers" | sed 's/.* passes=\([0-9]*\) .*/\1/')
 	timeouts=$(echo "$numbers" | sed 's/.* timeouts=\([0-9]*\) .*/\1/')
-	if [ "$ms" -ge $(( $2 * 1000 )) ] && [ $(( passes * 1000 )) -le $(( ms * 5 )) ] && [ $(( timeouts * 1000 )) -le $(( ms * 2 )) ]; then
+	if [ "$ms" -ge $(( ($2 - 5) * 1000 )) ] && [ $(( passes * 10000 )) -le $(( ms * 2 )) ] && [ $(( timeouts * 10000 )) -le $(( ms * 1 )) ]; then
 		say "$name: PASS $numbers"
 	else
-		fail_step "$name" "$numbers (wanted ms>=$(( $2 * 1000 )), passes<=5/s, timeouts<=2/s)"
+		fail_step "$name" "$numbers (wanted ms>=$(( ($2 - 5) * 1000 )), passes<=2 and timeouts<=1 in 10 s)"
 	fi
 }
 

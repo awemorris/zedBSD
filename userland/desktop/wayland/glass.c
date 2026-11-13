@@ -462,6 +462,7 @@ static int prefetch_take(const char *path, struct wallpaper_picture *picture);
 static void prefetch_drop(void);
 static void glass_dark_color(const float *color, float *dark);
 static void glass_shape_glass_constants(float *constants);
+static void glass_blur_hold_fired(void *context, struct kwl_timer *timer);
 
 /* The wallpaper read ahead, when kwl_glass_prefetch started it (only the main thread starts and takes it). */
 static struct glass_prefetch glass_prefetch;
@@ -485,6 +486,16 @@ static unsigned glass_blur_running;
 static struct glass_blur_job *glass_blur_held;
 static uint64_t glass_blur_held_ms;
 static struct glass_answer glass_answer;
+
+/*
+ * The timer of a drawing held for a pass where the images may be written:
+ * armed while one is held and the images may not be, for
+ * GLASS_BLUR_HOLD_MS after it was held, when the pass shows it in new
+ * images (kwl_glass_blur_take looks at the time).  A drawing shown
+ * meanwhile leaves it armed; it then fires once for nothing.  Readied by
+ * the first hold; the event loop's thread's.
+ */
+static struct kwl_timer glass_blur_hold_timer;
 
 /* Whether glass_loader's lock has been made (once, by the first begin). */
 static int glass_loader_ready;
@@ -887,7 +898,9 @@ kwl_glass_blur_take(
 	if (!writable) {
 		now = kwl_milliseconds();
 		if (now - glass_blur_held_ms < GLASS_BLUR_HOLD_MS) {
-			kwl_due(server, glass_blur_held_ms + GLASS_BLUR_HOLD_MS);
+			if (glass_blur_hold_timer.fire == NULL)
+				kwl_timer_init(&glass_blur_hold_timer, "glass-blur-hold", glass_blur_hold_fired);
+			kwl_timer_set(server, &glass_blur_hold_timer, glass_blur_held_ms + GLASS_BLUR_HOLD_MS);
 			return;
 		}
 	}
@@ -5535,4 +5548,17 @@ glass_draw_crossfade(
 	kwl_list_push_constants(command, compose->panel_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0U, sizeof(constants), constants);
 	kwl_compose_clip_draw(server, command, 0.0f, 0.0f, width, height, KWL_QUAD_VERTICES);
 	kwl_compose_count_commands(server, 1U, 1U);
+}
+
+/*
+ * Ends the wait of a drawing held for writable images: the pass the timer
+ * woke shows it in new images (kwl_glass_blur_take looks at the time).
+ */
+static void
+glass_blur_hold_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	(void)context;
+	(void)timer;
 }
