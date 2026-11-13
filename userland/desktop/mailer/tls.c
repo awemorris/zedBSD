@@ -6,10 +6,16 @@
  */
 
 /*
- * Mail's TLS (mail.h): the OpenSSL package's libssl and
- * libcrypto, loaded with dlopen the first time a server is reached, as
+ * Mail's TLS (mail.h): a library with OpenSSL's libssl and libcrypto
+ * interface, loaded with dlopen the first time a server is reached, as
  * the browser does (libbrowser's net/tls.c), so that Mail builds without
- * the package.  Without it every connection fails with EPROTONOSUPPORT.
+ * it: libssl-compat.so and libcrypto-compat.so in a build with
+ * ML_TLS_COMPAT (zedBSD's), OpenSSL's libssl and libcrypto otherwise (a
+ * host's tests).  Only the build's own choice is opened, never the other:
+ * without it every connection fails with EPROTONOSUPPORT.  The functions
+ * are called through pointers with opaque types, so no header of the
+ * library is needed; the values of the few constants are OpenSSL's (the
+ * same in libssl-compat).
  *
  * A connection is TLS 1.2 or later and verifies the server's chain
  * against the default roots (the ca-certificates package) and any file
@@ -40,11 +46,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The names the libraries are looked for under, in order (the package's, then a host's versioned one). */
-#define TLS_LIBSSL		"libssl.so"
-#define TLS_LIBSSL_VERSIONED	"libssl.so.3"
-#define TLS_LIBCRYPTO		"libcrypto.so"
-#define TLS_LIBCRYPTO_VERSIONED	"libcrypto.so.3"
+/* The libraries a build opens, named in a failure to load them. */
+#ifdef ML_TLS_COMPAT
+#define TLS_LIBRARY_NAMES	"libssl-compat.so and libcrypto-compat.so"
+#else
+#define TLS_LIBRARY_NAMES	"OpenSSL's libssl and libcrypto"
+#endif
 
 /* OpenSSL's constants that are used (ssl.h, tls1.h, x509_vfy.h); stable across 1.1 and 3. */
 #define TLS_VERIFY_PEER			1
@@ -109,6 +116,24 @@ struct tls_symbol {
 	size_t offset;
 };
 
+#ifdef ML_TLS_COMPAT
+
+/* The names libcrypto is looked for under: zedBSD's libcrypto-compat. */
+static const char *const tls_crypto_names[] = { "libcrypto-compat.so", NULL };
+
+/* The names libssl is looked for under: zedBSD's libssl-compat. */
+static const char *const tls_ssl_names[] = { "libssl-compat.so", NULL };
+
+#else
+
+/* The names libcrypto is looked for under, in order (the package's, then a host's versioned one). */
+static const char *const tls_crypto_names[] = { "libcrypto.so", "libcrypto.so.3", NULL };
+
+/* The names libssl is looked for under, in the same order. */
+static const char *const tls_ssl_names[] = { "libssl.so", "libssl.so.3", NULL };
+
+#endif
+
 /* The functions of struct tls_library, in its order.  The table is constant for the life of the program. */
 static const struct tls_symbol tls_symbols[] = {
 	{ 0, "TLS_client_method", offsetof(struct tls_library, client_method) },
@@ -170,7 +195,7 @@ static struct kl_mutex tls_lock = KL_MUTEX_INIT;
 
 static int tls_load(void);
 static int tls_load_locked(void);
-static void *tls_open_library(const char *name, const char *versioned, int flags);
+static void *tls_open_library(const char *const *names, int flags);
 static int tls_find_all(void *ssl, void *crypto);
 static int tls_make_context(void);
 static int tls_set_host(void *ssl, const char *host);
@@ -367,7 +392,7 @@ ml_tls_pending(
 {
 	int pending;
 
-	/* The bytes OpenSSL holds. */
+	/* The bytes the library holds. */
 	pending = tls_library.pending(tls);
 	if (pending > 0)
 		return 1;
@@ -449,18 +474,18 @@ tls_load_locked(void)
 
 	/* Already known to be impossible. */
 	if (tls_loaded < 0) {
-		snprintf(tls_reason, sizeof(tls_reason), "the OpenSSL package is not installed");
+		snprintf(tls_reason, sizeof(tls_reason), "cannot load %s", TLS_LIBRARY_NAMES);
 		return EPROTONOSUPPORT;
 	}
 
 	/* libcrypto first (libssl needs it). */
 	tls_loaded = -1;
-	crypto = tls_open_library(TLS_LIBCRYPTO, TLS_LIBCRYPTO_VERSIONED, RTLD_NOW | RTLD_GLOBAL);
+	crypto = tls_open_library(tls_crypto_names, RTLD_NOW | RTLD_GLOBAL);
 	if (crypto == NULL)
 		return EPROTONOSUPPORT;
 
 	/* Then libssl. */
-	ssl = tls_open_library(TLS_LIBSSL, TLS_LIBSSL_VERSIONED, RTLD_NOW);
+	ssl = tls_open_library(tls_ssl_names, RTLD_NOW);
 	if (ssl == NULL)
 		return EPROTONOSUPPORT;
 
@@ -480,33 +505,30 @@ tls_load_locked(void)
 }
 
 /*
- * Opens a library by its name, or else by its versioned name; when neither
- * opens, keeps the loader's reason and returns NULL.
+ * Opens a library by the first of its names (a list ended by NULL) that
+ * opens; when none does, keeps the loader's reason and returns NULL.
  */
 static void *
 tls_open_library(
-	const char *name,
-	const char *versioned,
+	const char *const *names,
 	int flags)
 {
 	const char *reason;
 	void *library;
+	size_t index;
 
-	/* The package's name. */
-	library = dlopen(name, flags);
-	if (library != NULL)
-		return library;
+	/* Each name in order. */
+	for (index = 0; names[index] != NULL; index++) {
+		library = dlopen(names[index], flags);
+		if (library != NULL)
+			return library;
+	}
 
-	/* A host's versioned name. */
-	library = dlopen(versioned, flags);
-	if (library != NULL)
-		return library;
-
-	/* Neither: the package is missing or cannot load. */
+	/* None: the library is missing or cannot load. */
 	reason = dlerror();
 	if (reason == NULL)
 		reason = "not found";
-	snprintf(tls_reason, sizeof(tls_reason), "cannot load the OpenSSL package's %s: %s", name, reason);
+	snprintf(tls_reason, sizeof(tls_reason), "cannot load %s (%s): %s", TLS_LIBRARY_NAMES, names[0], reason);
 	return NULL;
 }
 
@@ -531,7 +553,7 @@ tls_find_all(
 		/* The symbol. */
 		found = dlsym(library, tls_symbols[index].name);
 		if (found == NULL) {
-			snprintf(tls_reason, sizeof(tls_reason), "OpenSSL has no %s", tls_symbols[index].name);
+			snprintf(tls_reason, sizeof(tls_reason), "%s have no %s", TLS_LIBRARY_NAMES, tls_symbols[index].name);
 			return ENOENT;
 		}
 
@@ -539,7 +561,7 @@ tls_find_all(
 		memcpy((char *)&tls_library + tls_symbols[index].offset, &found, sizeof(found));
 	}
 
-	/* The peer's certificate, by OpenSSL 3's name or 1.1's. */
+	/* The peer's certificate, by OpenSSL 3's (and libssl-compat's) name or 1.1's. */
 	error = tls_find_peer_certificate(ssl);
 	if (error != 0)
 		return error;
@@ -561,14 +583,14 @@ tls_make_context(void)
 	method = tls_library.client_method();
 	tls_context = tls_library.ctx_new(method);
 	if (tls_context == NULL) {
-		snprintf(tls_reason, sizeof(tls_reason), "cannot make an OpenSSL context");
+		snprintf(tls_reason, sizeof(tls_reason), "cannot make a TLS context");
 		return ENOMEM;
 	}
 
 	/* TLS 1.2 or later. */
 	set = tls_library.ctx_ctrl(tls_context, TLS_CTRL_SET_MIN_PROTO_VERSION, TLS_VERSION_1_2, NULL);
 	if (set != 1) {
-		snprintf(tls_reason, sizeof(tls_reason), "OpenSSL refuses TLS 1.2 as the least version");
+		snprintf(tls_reason, sizeof(tls_reason), "the TLS library refuses TLS 1.2 as the least version");
 		return EPROTO;
 	}
 
@@ -615,7 +637,7 @@ tls_set_host(
 	return 0;
 }
 
-/* Keeps the reason of a failure: the certificate's verification, or OpenSSL's error queue. */
+/* Keeps the reason of a failure: the certificate's verification, or the library's error queue. */
 static void
 tls_fail(
 	const char *what,
@@ -648,12 +670,12 @@ tls_fail(
 
 	/* No queued error: the connection ended or failed underneath. */
 	reason = tls_library.get_error(ssl, result);
-	snprintf(tls_reason, sizeof(tls_reason), "%s: failed (OpenSSL error %d)", what, reason);
+	snprintf(tls_reason, sizeof(tls_reason), "%s: failed (SSL error %d)", what, reason);
 }
 
 /*
  * Lets the handshake go on whatever the verification of the chain says:
- * the outcome, kept by OpenSSL, is decided after it (tls_decide), so that
+ * the outcome, kept by the library, is decided after it (tls_decide), so that
  * the certificate of a server that does not verify can be shown.
  */
 static int
@@ -668,7 +690,7 @@ tls_verify_later(
 	return 1;
 }
 
-/* Finds the function that gives the peer's certificate: OpenSSL 3's SSL_get1_peer_certificate, or 1.1's name. */
+/* Finds the function that gives the peer's certificate: SSL_get1_peer_certificate (OpenSSL 3's and libssl-compat's), or OpenSSL 1.1's name. */
 static int
 tls_find_peer_certificate(
 	void *ssl)
@@ -682,7 +704,7 @@ tls_find_peer_certificate(
 	if (found == NULL)
 		found = dlsym(ssl, "SSL_get_peer_certificate");
 	if (found == NULL) {
-		snprintf(tls_reason, sizeof(tls_reason), "OpenSSL has no SSL_get1_peer_certificate");
+		snprintf(tls_reason, sizeof(tls_reason), "%s have no SSL_get1_peer_certificate", TLS_LIBRARY_NAMES);
 		return ENOENT;
 	}
 

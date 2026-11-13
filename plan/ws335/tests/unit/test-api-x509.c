@@ -7,10 +7,10 @@
 
 /*
  * Checks the public X509, X509_STORE and X509_VERIFY_PARAM functions
- * (api-x509.c): d2i_X509 and its conventions, the certificate and store
- * objects with their reference counts, X509_STORE_add_cert,
- * X509_VERIFY_PARAM_set1_host and set1_ip_asc, the verdict-to-X509_V_
- * mapping and X509_verify_cert_error_string.
+ * (api-x509.c): d2i_X509 and its conventions, X509_digest, the
+ * certificate and store objects with their reference counts,
+ * X509_STORE_add_cert, X509_VERIFY_PARAM_set1_host and set1_ip_asc, the
+ * verdict-to-X509_V_ mapping and X509_verify_cert_error_string.
  *
  * The certificates are built here from RFC 5280 4.1 and 4.2.1.6 with the
  * DER writer of derwriter.h (the signature is a placeholder: nothing in
@@ -43,6 +43,7 @@
 #include "userland/base/libcrypto-compat/cryc-pem.h"
 
 #include <compat/crypto/err.h>
+#include <compat/crypto/evp.h>
 #include <compat/crypto/x509.h>
 
 #ifdef _WIN32
@@ -63,6 +64,8 @@
 #define CODE_UNSUPPORTED	0x0588010cUL
 #define CODE_WRONG_TAG		0x068000a8UL
 #define CODE_HEADER_TOO_LONG	0x0680007bUL
+#define CODE_EVP_NULL_PARAMETER	0x030c0102UL
+#define CODE_EVP_UNSUPPORTED	0x0300009cUL
 
 /* The most certificates a store holds, and the host name limits (RFC 1035 2.3.4). */
 #define STORE_MAX		4096U
@@ -196,6 +199,9 @@ static void test_d2i_sizes(void);
 
 /* cryc_x509_from_der. */
 static void test_from_der(void);
+
+/* X509_digest: the SHA-256 of the whole DER, the length argument, and the refusals. */
+static void test_digest(void);
 
 /* The reference counts of certificates and stores. */
 static void test_references(void);
@@ -1435,6 +1441,64 @@ test_from_der(void)
 	}
 
 	/* Releases the certificate encoding. */
+	free(der);
+}
+
+/* X509_digest: the SHA-256 of the whole DER, the length argument, and the refusals. */
+static void
+test_digest(void)
+{
+	/* A digest object that is not the library's SHA-256 (another algorithm as far as the interface goes). */
+	static const struct evp_md_st other_md = { CRYC_HASH_SHA256, 32 };
+	unsigned char digest[EVP_MAX_MD_SIZE];
+	unsigned char expected[32];
+	unsigned char *der;
+	unsigned int length;
+	size_t size;
+	X509 *certificate;
+	int index;
+
+	/* A certificate, and the digest of its DER computed apart from the object. */
+	der = simple_cert(41U, &size);
+	certificate = make_cert(der, size);
+	CHECK(cryc_hash_digest(CRYC_HASH_SHA256, der, size, expected) == 0);
+	if (certificate == NULL) {
+		free(der);
+		return;
+	}
+
+	/* The digest and its size; the bytes after it are not written. */
+	memset(digest, 0x5a, sizeof(digest));
+	length = 0U;
+	CHECK(X509_digest(certificate, EVP_sha256(), digest, &length) == 1);
+	CHECK(no_error());
+	CHECK(length == 32U);
+	CHECK_BYTES(digest, expected, 32U);
+	for (index = 32; index < EVP_MAX_MD_SIZE; index++)
+		CHECK(digest[index] == 0x5aU);
+
+	/* Without the length argument, and twice in a row: the same bytes, the object unchanged. */
+	memset(digest, 0, sizeof(digest));
+	CHECK(X509_digest(certificate, EVP_sha256(), digest, NULL) == 1);
+	CHECK(no_error());
+	CHECK_BYTES(digest, expected, 32U);
+	CHECK(certificate->references == 1L);
+	CHECK(certificate->der_size == size);
+
+	/* A missing certificate, digest or output, and a digest that is not SHA-256: 0 with one error, the length untouched. */
+	length = 77U;
+	CHECK(X509_digest(NULL, EVP_sha256(), digest, &length) == 0);
+	CHECK(one_error(CODE_NULL_PARAMETER));
+	CHECK(X509_digest(certificate, NULL, digest, &length) == 0);
+	CHECK(one_error(CODE_EVP_NULL_PARAMETER));
+	CHECK(X509_digest(certificate, EVP_sha256(), NULL, &length) == 0);
+	CHECK(one_error(CODE_EVP_NULL_PARAMETER));
+	CHECK(X509_digest(certificate, &other_md, digest, &length) == 0);
+	CHECK(one_error(CODE_EVP_UNSUPPORTED));
+	CHECK(length == 77U);
+
+	/* Releases the certificate and its encoding. */
+	X509_free(certificate);
 	free(der);
 }
 
@@ -2781,6 +2845,7 @@ main(void)
 	test_d2i_hostile();
 	test_d2i_sizes();
 	test_from_der();
+	test_digest();
 	test_references();
 	test_store();
 	test_store_limit();

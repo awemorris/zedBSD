@@ -211,6 +211,9 @@ static int ssl_start(SSL *ssl);
 /* Works out the version range of a handshake from the settings; returns 1, or 0 when no version is left. */
 static int ssl_versions(const SSL *ssl, uint16_t *minimum, uint16_t *maximum);
 
+/* Runs the handshake when it is not done and keeps the server's certificate; returns 0 when connected, else -1 with the public return value in *result. */
+static int ssl_handshake(SSL *ssl, enum ssl_operation operation, int *result);
+
 /* Classifies the failure or wait that a connection call reported; returns the public return value. */
 static int ssl_finish(SSL *ssl, enum ssl_operation operation, int error, unsigned wants, int was_failed);
 
@@ -567,6 +570,9 @@ SSL_free(
 	if (ssl->started)
 		sslc_conn_free(&ssl->conn);
 
+	/* Gives up the SSL's reference to the server's certificate (a caller of SSL_get1_peer_certificate may still hold one). */
+	X509_free(ssl->peer_certificate);
+
 	/* Frees the object, then gives up its reference to the context. */
 	ctx = ssl->ctx;
 	free(ssl);
@@ -737,8 +743,6 @@ int
 SSL_connect(
 	SSL *ssl)
 {
-	unsigned wants;
-	int was_failed;
 	int error;
 	int result;
 
@@ -747,31 +751,23 @@ SSL_connect(
 	if (error != 0)
 		return -1;
 
-	/* A handshake that is already done is done, unless the connection failed since (then it is shut down). */
-	if (ssl->started &&
-	    (ssl->conn.flags & SSLC_CONN_CONNECTED) != 0U &&
-	    (ssl->conn.flags & SSLC_CONN_FAILED) == 0U)
-		return 1;
-
 	/* Makes the connection at the first call. */
 	error = ssl_start(ssl);
 	if (error != 0)
 		return -1;
 
-	/* Runs the handshake as far as the socket lets it go. */
-	was_failed = 0;
-	if ((ssl->conn.flags & SSLC_CONN_FAILED) != 0U)
-		was_failed = 1;
-	wants = 0;
-	error = sslc_conn_handshake(&ssl->conn, &wants);
-	if (error == 0)
-		return 1;
+	/*
+	 * Runs the handshake as far as the socket lets it go (a handshake
+	 * already done is done, unless the connection failed since: then it is
+	 * shut down).
+	 */
+	result = 0;
+	error = ssl_handshake(ssl, SSL_OPERATION_HANDSHAKE, &result);
+	if (error != 0)
+		return result;
 
-	/* Classifies why it stopped. */
-	result = ssl_finish(ssl, SSL_OPERATION_HANDSHAKE, error, wants, was_failed);
-
-	/* Reports -1 for a failure or a wait, 0 for a peer that closed. */
-	return result;
+	/* Succeeded: the handshake is complete. */
+	return 1;
 }
 
 /*
@@ -816,7 +812,13 @@ SSL_read(
 	if (error != 0)
 		return -1;
 
-	/* Reads the application data, running the handshake first when needed. */
+	/* Runs the handshake first when it is not done. */
+	result = 0;
+	error = ssl_handshake(ssl, SSL_OPERATION_READ, &result);
+	if (error != 0)
+		return result;
+
+	/* Reads the application data. */
 	was_failed = 0;
 	if ((ssl->conn.flags & SSLC_CONN_FAILED) != 0U)
 		was_failed = 1;
@@ -882,7 +884,13 @@ SSL_write(
 	if (error != 0)
 		return -1;
 
-	/* Writes the application data, running the handshake first when needed. */
+	/* Runs the handshake first when it is not done. */
+	result = 0;
+	error = ssl_handshake(ssl, SSL_OPERATION_WRITE, &result);
+	if (error != 0)
+		return result;
+
+	/* Writes the application data. */
 	was_failed = 0;
 	if ((ssl->conn.flags & SSLC_CONN_FAILED) != 0U)
 		was_failed = 1;
@@ -1034,6 +1042,32 @@ SSL_get_verify_result(
 
 	/* Reports the result. */
 	return code;
+}
+
+/*
+ * Returns the server's leaf certificate with one more reference (the
+ * caller frees it with X509_free), or NULL before a handshake is complete.
+ */
+X509 *
+SSL_get1_peer_certificate(
+	const SSL *ssl)
+{
+	X509 *certificate;
+
+	/* A missing SSL has no peer. */
+	if (ssl == NULL)
+		return NULL;
+
+	/* Before the end of a handshake there is no certificate kept. */
+	certificate = ssl->peer_certificate;
+	if (certificate == NULL)
+		return NULL;
+
+	/* The caller's own reference; the SSL keeps its one. */
+	cryc_os_atomic_add(&certificate->references, 1L);
+
+	/* Succeeded: the certificate, with a reference for the caller. */
+	return certificate;
 }
 
 /*
@@ -1355,6 +1389,58 @@ ssl_versions(
 
 	/* Succeeded: at least one version is usable. */
 	return 1;
+}
+
+/*
+ * Runs the handshake when it is not done (or the connection failed: the
+ * handshake then answers EPROTO), and once it is done keeps the server's
+ * leaf certificate for SSL_get1_peer_certificate.  Returns 0 when
+ * connected; else -1 with the public return value of the call in *result
+ * (ssl_finish's for a wait or a failure of the handshake; -1 with
+ * SSL_ERROR_SSL and one error queued when the certificate object cannot
+ * be made, which a repeated call tries again).
+ */
+static int
+ssl_handshake(
+	SSL *ssl,
+	enum ssl_operation operation,
+	int *result)
+{
+	struct sslc_hs *hs;
+	unsigned wants;
+	uint32_t flags;
+	int was_failed;
+	int error;
+
+	/* Runs the handshake unless it is done on a connection that has not failed. */
+	flags = ssl->conn.flags;
+	if ((flags & SSLC_CONN_CONNECTED) == 0U || (flags & SSLC_CONN_FAILED) != 0U) {
+		was_failed = 0;
+		if ((flags & SSLC_CONN_FAILED) != 0U)
+			was_failed = 1;
+		wants = 0;
+		error = sslc_conn_handshake(&ssl->conn, &wants);
+		if (error != 0) {
+			*result = ssl_finish(ssl, operation, error, wants, was_failed);
+			return -1;
+		}
+	}
+
+	/* The certificate is kept once (the handshake read at least the leaf: a server always sends one). */
+	hs = &ssl->conn.hs;
+	if (ssl->peer_certificate != NULL || hs->peer_count == 0U)
+		return 0;
+
+	/* An object of its own from the leaf's DER, which outlives the handshake's copies (cryc_x509_from_der queues its own error). */
+	ssl->peer_certificate = cryc_x509_from_der(hs->peer_der[0], hs->peer_der_size[0]);
+	if (ssl->peer_certificate == NULL) {
+		ssl->last_error = SSL_ERROR_SSL;
+		*result = -1;
+		return -1;
+	}
+
+	/* Succeeded: the connection is up and the certificate kept. */
+	return 0;
 }
 
 /*

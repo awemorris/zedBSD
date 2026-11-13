@@ -63,7 +63,10 @@ struct ssl_ctx_st {
  * last_error is the SSL_ERROR_ value SSL_get_error gives for a failing
  * call, set by every public call; last_errno the errno saved for
  * SSL_ERROR_SYSCALL.  verify_result the X509_V_ code of the handshake.
- * store_ctx is what the verify callback is given.  min_version,
+ * store_ctx is what the verify callback is given.  peer_certificate
+ * holds one reference to the server's leaf certificate from the end of
+ * the handshake until the SSL is freed (NULL before; SSL_get1_peer_certificate).
+ * min_version,
  * max_version, options, verify_mode and verify_callback are the SSL's own
  * settings: copied from the context by SSL_new, the version bounds then
  * changed by SSL_ctrl until the handshake starts.
@@ -84,6 +87,7 @@ struct ssl_st {
 	int last_errno;
 	long verify_result;
 	X509_STORE_CTX store_ctx;
+	X509 *peer_certificate;
 };
 
 /*

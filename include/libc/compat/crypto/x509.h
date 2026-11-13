@@ -11,8 +11,8 @@
  * parameters, and the verification result codes (X509_V_*).
  *
  * The subset: making a certificate from DER and adding it to a store,
- * the host and address a connection must match, and the text of a
- * verification result.
+ * its SHA-256 fingerprint, the host and address a connection must match,
+ * and the text of a verification result.
  */
 
 #ifndef KERN_COMPAT_CRYPTO_X509_H
@@ -72,6 +72,16 @@ X509 *d2i_X509(X509 **out, const unsigned char **in, long length);
 
 /* Drops one reference to a certificate and frees it at the last; NULL is ignored. */
 void X509_free(X509 *certificate);
+
+/*
+ * Writes the digest of a certificate's whole DER encoding (its
+ * fingerprint) with type into md, which has room for EVP_MAX_MD_SIZE
+ * bytes, and the digest's size into *length when length is not NULL.
+ * type must be EVP_sha256(), the one digest of this library: another
+ * fails.  Returns 1, or 0 with an error queued (a NULL certificate, type
+ * or md, or a digest the library does not have).
+ */
+int X509_digest(const X509 *certificate, const EVP_MD *type, unsigned char *md, unsigned int *length);
 
 /*
  * Adds a certificate to a store as a trust anchor (the store takes its
