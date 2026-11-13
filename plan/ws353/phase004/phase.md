@@ -2,7 +2,7 @@
 
 # ws353-p004: compositor の hotplug の thread（250 ms の tick を消す）
 
-Status: cleared（2026-11-14 02:45 P1、q2060-i01。build 3 機種 warning 0、host 試験 PASS、QEMU の follow 試験 2 回 PASS（下の「結果」）。Q1 の確認待ち）
+Status: cleared（2026-11-14 02:32 P1、q2060-i01。build 3 機種 warning 0、host 試験 PASS、QEMU の follow 試験 2 回 PASS（下の「結果」）。Q1 の確認待ち）
 Parent: [WS353](../ws.md)。設計 [design.md](../design.md) §5.3・§5.4。
 
 ## 目的
