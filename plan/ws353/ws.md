@@ -2,7 +2,7 @@
 
 # WS353: compositor・libvulkan・kernel の待ち方の作り直し（事象は push、周期で見ない、合成と client の buffer の管理を分ける）
 
-Status: planning
+Status: incomplete（2026-11-13 p001 の設計をユーザーが承認、p002 から実装）
 Primary Milestone: MG006
 Related Milestones: MG004
 Parent: [Master](../master.md)
@@ -25,6 +25,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 5. client の buffer の管理と、compositor の合成用の buffer の管理は別物。分けて設計する。
 6. 設計は Opus 5.5 high の担当が作り、敵対的レビューは Fable の medium で行う。
 7. 設計ができたらユーザーがレビューし、OK なら実装に進む（実装の Phase はユーザーの OK まで起動しない）。
+8. 2026-11-13 ユーザーが設計（design.md、Fable のレビューの反映の後、main 73f38d7cb5）を承認した。Q1 の推しのとおり: 未決 1 は C（main の締め切りは timer の thread、他の thread は自分の待ちに締め切り）、未決 2 は A（main は client の socket・wake pipe に加え client の acquire の fence と backend の事象の fd 3 つも timeout 無しで待つ）、未決 3 は当面「完了（REAPED の serial）を見てから返す」を正とし、明示の同期（p013）は WS353 の完了の条件から外す。合意した形からの変更 (a) render は slot が飛んでいる間は最古の fence を待つ、(b) 表示の完了は present の fence（shown の thread）で待つ、も承認。
 
 ## 合意した形（設計の前提。設計の担当はこれを具体にする）
 
@@ -56,8 +57,8 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計（design.md）と移行の計画（実装の Phase の表と各 phase.md）、Fable の敵対的レビューの反映 | in-progress（設計とレビューの反映済み、ユーザーのレビュー待ち。q2056-i01 P1 が設計、q2056-i02 P1 が [design-review.md](design-review.md) を反映） | — |
-| [p002](phase002/phase.md) | kernel: display の topology の事象の fence（HOTPLUG、`GPU_DISPLAY_FENCE`、driver の push `drv_gpu_display_changed`） | planned | p001 |
+| [p001](phase001/phase.md) | 設計（design.md）と移行の計画（実装の Phase の表と各 phase.md）、Fable の敵対的レビューの反映 | cleared（2026-11-13 ユーザーの承認、main 73f38d7cb5） | — |
+| [p002](phase002/phase.md) | kernel: display の topology の事象の fence（HOTPLUG、`GPU_DISPLAY_FENCE`、driver の push `drv_gpu_display_changed`） | planned（q2057、P1） | p001 |
 | [p003](phase003/phase.md) | libvulkan: hotplug の fence を kernel の fence に、未提出の fence の待ち（1 ms を消す） | planned | p002 |
 | [p004](phase004/phase.md) | compositor: hotplug の thread、`kwl_output_tick` の 250 ms を消し出力の追従を事象で | planned | p003 |
 | [p005](phase005/phase.md) | compositor: timer の thread、thread の結果の flag を wake に、入力の scan を事象だけに、去った client の buffer の解放の歩調を timer と事象に | planned | p004、WS352 p002 の merge（推し） |

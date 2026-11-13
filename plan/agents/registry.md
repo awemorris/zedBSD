@@ -5,6 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
+| P1 | phase-runner-high | ws353 p002 kernel の hotplug の fence (q2057-i01) | `/home/awe/zedBSD-worktrees/p1-ws353b` / `agent/p1-ws353b` | 動いている（2026-11-13） | — |
 | P1 | phase-runner-high | ws353 p001 設計 (q2056-i01) | `/home/awe/zedBSD-worktrees/p1-ws353` / `agent/p1-ws353` | 動いている（2026-11-13 22:2x） | — |
 | Sonnet | phase-runner-low | ws335 p043 (q2053-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p043` / `agent/s-ws335-p043` | 動いている（2026-11-13 22:3x） | — |
 | P1 | phase-runner-high | ws352 p001 の仕上げ (q2046-i02) | `/home/awe/zedBSD-worktrees/p1-ws352` / `agent/p1-ws352` | 返却（2026-11-13 22:1x、未 merge） | — |
