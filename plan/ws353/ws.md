@@ -70,7 +70,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | [p011](phase011/phase.md) | compositor: render は合成の buffer を slot の数で回す（飛んでいる間は最古の fence を無期限で REAPED、無ければ cond、acquire は timeout 0 と何も飛んでいない時だけ block、1 ms を消す） | planned | p004 |
 | [p012](phase012/phase.md) | compositor: cursor の thread（acquire は変化の後だけ、copy の fence をすぐ待つ） | planned | p011 |
 | [p013](phase013/phase.md) | client の buffer の明示の同期（release fence、全 render の backend の `GPU_CAP_FENCE`、protocol rev 4、WSI） | planned（未決 3 の決定の後。推しは要る理由が出るまで着手しない） | p010、未決 3 |
-| [p014](phase014/phase.md) | kernel・libvulkan: refresh の事象の fence、`VULKAN_SYNC_POLL_NS` を消す | planned | p003 |
+| [p014](phase014/phase.md) | kernel・libvulkan: refresh の事象の fence、`VULKAN_SYNC_POLL_NS` を消す | planned（q2064、P2） | p003 |
 | [p015](phase015/phase.md) | backend と WSI の小さな直し（network の答えの fd、WSI の 50 ms の slice） | planned | p001（独立） |
 | [p016](phase016/phase.md) | 試験: QEMU の回帰と 5330 の idle（電力・PC2・thread ごとの起床） | planned | p002〜p015 |
 | [p017](phase017/phase.md) | 規約の全文の見直し | planned | p016 |
