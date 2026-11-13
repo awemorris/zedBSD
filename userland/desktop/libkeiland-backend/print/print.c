@@ -268,6 +268,7 @@ static int print_program_can(const char *program);
 static void print_write_one(struct kl_backend_print *print, struct print_change *change);
 static struct print_change *print_next_change(struct kl_backend_print *print, int wait);
 static int print_save(const char *config, struct print_table *table);
+static void print_make_folders(const char *file);
 static int print_lock(const char *config);
 static void print_unlock(int fd);
 static struct kl_backend_printer *print_printer(struct print_table *table, uint32_t id);
@@ -1103,9 +1104,7 @@ print_save(
 {
 	struct stat status;
 	char temporary[600];
-	char directory[512];
 	const char *protocol;
-	char *slash;
 	FILE *file;
 	size_t index;
 	int flushed;
@@ -1113,13 +1112,8 @@ print_save(
 	int closed;
 	int error;
 
-	/* The folder, made when it is not there. */
-	print_copy(directory, sizeof(directory), config);
-	slash = strrchr(directory, '/');
-	if (slash != NULL) {
-		*slash = '\0';
-		(void)mkdir(directory, 0700);
-	}
+	/* Its folder and those above it (~/.config first), made when they are not there. */
+	print_make_folders(config);
 
 	/* The new file. */
 	(void)snprintf(temporary, sizeof(temporary), "%s.new", config);
@@ -1164,6 +1158,33 @@ print_save(
 	return 0;
 }
 
+/*
+ * Makes the folders a file's path goes through that are not there, from
+ * the top down, each closed to others; one there already (or one that
+ * cannot be made) is passed by, and the file's open says what failed.
+ */
+static void
+print_make_folders(
+	const char *file)
+{
+	char path[512];
+	size_t length;
+	size_t index;
+
+	/* A copy to cut at each slash. */
+	print_copy(path, sizeof(path), file);
+	length = strlen(path);
+
+	/* Each folder, at the slash that ends it (the root's slash is passed by, the file's name is not a folder). */
+	for (index = 1; index < length; index++) {
+		if (path[index] != '/')
+			continue;
+		path[index] = '\0';
+		(void)mkdir(path, 0700);
+		path[index] = '/';
+	}
+}
+
 /* Takes the settings file's lock (the file beside it); the descriptor, or -1. */
 static int
 print_lock(
@@ -1171,6 +1192,9 @@ print_lock(
 {
 	char path[600];
 	int fd;
+
+	/* The folders it lives in, made when they are not there (the first change of a new home). */
+	print_make_folders(config);
 
 	/* The lock file, held. */
 	(void)snprintf(path, sizeof(path), "%s.lock", config);

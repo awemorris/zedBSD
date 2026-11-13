@@ -5,10 +5,10 @@
 # log in a guest file, and judges by counting lines in the guest's files with commands on the serial line (the
 # console's text is never read for the verdict).
 #
-# Steps: the start (the printers prepared with the daemon's program); 30 s idle (at most two passes in ten seconds, no
+# Steps: the start (the printers prepared with the daemon's program; the home has no ~/.config); 30 s idle (at most two passes in ten seconds, no
 # timeout); Settings opened on its Printers page holds a printers object, and 30 s idle with it open fires no printers
-# timer (the KWL PERF timers lines name none; the passes are recorded); printtest adds the host's LPD printer and
-# Settings hears the change (ZSETTINGS PRINTERS changed); printtest prints a PDF to it: the job ends done, the
+# timer (the KWL PERF timers lines name none; the passes are recorded); printtest adds the host's LPD printer, which is
+# saved in ~/.config/keiland/printers.conf (the folders made), and Settings hears the change (ZSETTINGS PRINTERS changed); printtest prints a PDF to it: the job ends done, the
 # compositor told its states (KWL PRINTERS job= ... state=4) and Settings heard them, the host's printer took the job;
 # 20 s idle while the daemon still runs fires no printers timer; the daemon ends by itself (IDLE after a minute, then
 # BYE); the settings file changed behind the compositor's back (as another session would) is not looked at by itself
@@ -253,8 +253,9 @@ idle_no_printers() {
 	fi
 }
 
-# The compositor, in the background, its log in a guest file; no desktop program.
-serial "rm -rf $dir; mkdir -p $dir/home/.config/keiland; chmod 700 $dir; XDG_RUNTIME_DIR=$dir HOME=$dir/home /bin/wayland --testing --glass --log-frames --width=1280 --height=800 --timeout=3000 --desktop-client=none > $log 2>&1 < /dev/null &" \
+# The compositor, in the background, its log in a guest file; no desktop program.  Its runtime directory is closed to
+# others (the printers' daemon spools there only then); its home has no ~/.config yet, as a new user's.
+serial "rm -rf $dir; mkdir -p $dir/home; chmod 700 $dir; XDG_RUNTIME_DIR=$dir HOME=$dir/home /bin/wayland --testing --glass --log-frames --width=1280 --height=800 --timeout=3000 --desktop-client=none > $log 2>&1 < /dev/null &" \
     > "$out/compositor-start.txt" 2>&1 || true
 
 # The start: window mode, the timer thread, the capture listening, the printers prepared with the daemon's program.
@@ -288,10 +289,12 @@ changed=$(settings_count 'PRINTERS changed')
 serial "WAYLAND_DISPLAY=/tmp/wayland-0 XDG_RUNTIME_DIR=$dir HOME=$dir/home printtest add lpd 10.0.2.2 $lpd_port lp > $dir/add.txt 2>&1" > /dev/null 2>&1 || true
 serial "cat $dir/add.txt" > "$out/add.txt" 2>&1 || true
 printer=$(tr -d '\r' < "$out/add.txt" | sed -n "s/^PRINTTEST printer id=\([0-9]*\) .*host=10.0.2.2 port=$lpd_port .*/\1/p" | sed -n 1p)
-if grep -q 'PRINTTEST result error=0' "$out/add.txt" && [ -n "$printer" ] && wait_in 'PRINTERS changed' $((changed + 1)) 10 "$dir/settings.log"; then
-	say "add: PASS printer $printer added; Settings heard it ($(settings_count 'PRINTERS changed') changes)"
+saved=$(count_in "^printer $printer lpd 10.0.2.2 $lpd_port lp " "$dir/home/.config/keiland/printers.conf")
+if grep -q 'PRINTTEST result error=0' "$out/add.txt" && [ -n "$printer" ] && [ "$saved" -eq 1 ] &&
+    wait_in 'PRINTERS changed' $((changed + 1)) 10 "$dir/settings.log"; then
+	say "add: PASS printer $printer added and saved in the new home's ~/.config/keiland; Settings heard it ($(settings_count 'PRINTERS changed') changes)"
 else
-	fail_step add "printer '$printer', Settings' changes $(settings_count 'PRINTERS changed') (was $changed; see $out/add.txt)"
+	fail_step add "printer '$printer', saved lines $saved, Settings' changes $(settings_count 'PRINTERS changed') (was $changed; see $out/add.txt)"
 fi
 
 # Print a PDF to it: the job ends done; the compositor and Settings hear its states; the host's printer took it.
