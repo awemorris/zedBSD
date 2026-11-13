@@ -1,6 +1,6 @@
 #!/bin/sh
-# The Windows cross build, for x86_64 and arm64, through both entries (make browser-win64 and
-# browser-winarm64 from the top Makefile, then apps/browser-win32/Makefile alone on the same output):
+# The Windows cross build, for x86_64 and arm64, through both entries (make browser-win32 WIN32_ARCH=<arch>
+# from the top Makefile, then apps/browser-win32/Makefile alone on the same output):
 #  1. the files written for the Windows build (the operating-system layers) compile with warning 0;
 #  2. the warnings of libtruetype and the compat libraries (compiled without -Werror) are counted;
 #  3. what those libraries leave undefined (nm -u less what they define) is in allowed-imports.txt, and
@@ -17,13 +17,16 @@
 #  5. libkeiland's Windows files (libkeiland.a) refer to no POSIX thread name (pthread_*): the Windows
 #     port uses the system's threads and locks;
 #  6a. OmniGrammaton.exe imports only Windows' own DLLs and the UCRT's, vulkan-1.dll delayed;
-#  7. make browser-win64-zip (-winarm64-zip): the zip holds what plan/ws334/tests/zip-contents.txt lists, is
-#     the same bytes when made again, and its icon has 8 images (ImageMagick's identify);
+#  7. the zip (make -f apps/browser-win32/Makefile WIN32_ARCH=<arch> zip): it holds what
+#     plan/ws334/tests/zip-contents.txt lists, is the same bytes when made again, and its icon has 8 images
+#     (ImageMagick's identify);
 #  6. one .exe of static libraries: plan/ws334/tests/script-tool-main.c linked by the build's
 #     test-program with every static library imports only Windows' own DLLs and the UCRT's (no DLL of
 #     this tree, no libwinpthread-1.dll; vulkan-1.dll only as a delayed import); on x86_64 under Wine
 #     it prints 16 random bytes and runs a script that reads the clock (arm64: linked only).
 #   sh plan/ws334/tests/cross-build.sh
+# The top Makefile reads a configuration before any target; the Windows build uses none of it, so the script gives
+# it CONFIGMK (default config/config.x86_64.mk, a checkout needs no config.mk of its own).
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
 # WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-wine).  The fetched tarballs are kept in
 # build/tmp/ws334-win32-sources between runs.
@@ -35,6 +38,7 @@ cd "$(dirname -- "$0")/../../.."
 out=build/tmp/ws334-cross
 fresh_out "$out"
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
+CONFIGMK=${CONFIGMK:-config/config.x86_64.mk}
 WINEPREFIX=${WINEPREFIX:-$(pwd)/build/tmp/ws334-wine}
 export WINEPREFIX
 sources=build/tmp/ws334-win32-sources
@@ -51,9 +55,9 @@ for name in win64 winarm64; do
 	log=$out/make-$name.log
 
 	# The build, from the top Makefile and then from its own.
-	if ! timeout 900 make --no-print-directory browser-$name LLVM_MINGW="$LLVM_MINGW" \
-	    BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" > "$log" 2>&1; then
-		echo "FAILED make browser-$name (log $log)"
+	if ! timeout 900 make --no-print-directory CONFIGMK="$CONFIGMK" browser-win32 WIN32_ARCH=$arch \
+	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" > "$log" 2>&1; then
+		echo "FAILED make browser-win32 WIN32_ARCH=$arch (log $log)"
 		tail -10 "$log"
 		status=1
 		continue
@@ -69,7 +73,7 @@ for name in win64 winarm64; do
 
 	# 1. The layers' warnings (the compat libraries' are in their own logs, not in the make output).
 	if grep -n 'warning:' "$log"; then
-		echo "FAILED make browser-$name warned (above)"
+		echo "FAILED make browser-win32 WIN32_ARCH=$arch warned (above)"
 		status=1
 	fi
 
@@ -254,12 +258,14 @@ for name in win64 winarm64; do
 		echo "$name: OmniGrammaton.exe imports only the system's DLLs ($(wc -l < "$out/omnigrammaton-dlls-$name.txt")), vulkan-1.dll delayed: $(cat "$out/omnigrammaton-delayed-$name.txt")"
 	fi
 
-	# 7. The zip (make browser-<name>-zip): what it holds is plan/ws334/tests/zip-contents.txt, the same bytes
-	# when it is made again from the same directory, and the icon of 8 images (ImageMagick's identify).
+	# 7. The zip (apps/browser-win32/Makefile's zip target): what it holds is plan/ws334/tests/zip-contents.txt,
+	# the same bytes when it is made again from the same directory, and the icon of 8 images (ImageMagick's
+	# identify).
 	zip=$build/OmniGrammaton-$(sed -n 's/^OMNIGRAMMATON_VERSION := //p' apps/browser-win32/version.mk)-$name.zip
-	if ! timeout 900 make --no-print-directory browser-$name-zip LLVM_MINGW="$LLVM_MINGW" \
-	    BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" > "$out/zip-$name.log" 2>&1 || [ ! -f "$zip" ]; then
-		echo "FAILED $name: make browser-$name-zip (log $out/zip-$name.log)"
+	if ! timeout 900 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=$arch zip \
+	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" \
+	    > "$out/zip-$name.log" 2>&1 || [ ! -f "$zip" ]; then
+		echo "FAILED $name: make -f apps/browser-win32/Makefile WIN32_ARCH=$arch zip (log $out/zip-$name.log)"
 		tail -5 "$out/zip-$name.log"
 		status=1
 	else
