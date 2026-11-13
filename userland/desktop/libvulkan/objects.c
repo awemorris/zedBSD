@@ -33,7 +33,7 @@ static struct vulkan_wake *vulkan_wakes;
 
 static void vulkan_registry_lock(void);
 static void vulkan_registry_unlock(void);
-static VkResult wake_register(struct vulkan_wake *wake, struct VkDevice_T *device, uint32_t count, const VkFence *fences);
+static VkResult wake_register(struct vulkan_wake *wake, struct VkDevice_T *device, uint32_t count, const VkFence *fences, const void *swapchain);
 static void wake_arm(struct vulkan_wake *wake);
 
 /*
@@ -537,16 +537,20 @@ vulkan_object_destroy_remote(
 
 /*
  * Registers one private event fd before a caller observes its wait predicates.
+ *
+ * The wait acquires from the given swapchain: errors, that swapchain's image
+ * transitions and a window system's image release arm it.
  */
 VkResult
 vulkan_wake_create(
 	struct vulkan_wake *wake,
-	struct VkDevice_T *device)
+	struct VkDevice_T *device,
+	const void *swapchain)
 {
 	VkResult status;
 
-	/* An image wait names no fence: errors and image transitions arm it. */
-	status = wake_register(wake, device, 0U, NULL);
+	/* An image wait names no fence, only its swapchain. */
+	status = wake_register(wake, device, 0U, NULL, swapchain);
 	if (status != VK_SUCCESS)
 		return status;
 
@@ -571,7 +575,7 @@ vulkan_wake_create_fences(
 	VkResult status;
 
 	/* The fence set is in place before any publisher can see the wake. */
-	status = wake_register(wake, device, count, fences);
+	status = wake_register(wake, device, count, fences, NULL);
 	if (status != VK_SUCCESS)
 		return status;
 
@@ -620,7 +624,9 @@ vulkan_wake_destroy(
  * Arms each matching waiter independently without acquiring renderer or WSI locks.
  *
  * A device names its own errors, a context the renderer's; neither names
- * an image transition, which arms the image waits but not the fence waits.
+ * an image release by a window system that cannot name its swapchain, which
+ * arms every image wait but no fence wait.  A swapchain's own image
+ * transitions arm only its waits (vulkan_wake_notify_swapchain).
  */
 void
 vulkan_wake_notify(
@@ -644,7 +650,7 @@ vulkan_wake_notify(
 		if (context != NULL && wake->context != context)
 			continue;
 
-		/* An image transition (no device, no context) says nothing to a fence wait. */
+		/* An image release (no device, no context) says nothing to a fence wait. */
 		if (device == NULL &&
 		    context == NULL &&
 		    wake->fence_count != 0U)
@@ -714,6 +720,44 @@ vulkan_wake_notify_fence(
 	errno = saved_error;
 
 	/* Succeeded: only the waits for this fence were woken. */
+	return;
+}
+
+/*
+ * Arms only the image waits that acquire from this swapchain.
+ *
+ * The caller changed what an acquisition from the swapchain observes -- an
+ * image's state, the chain's retirement or its error -- under the swapchain
+ * state lock an acquisition observes it under.  Fence waits and the image
+ * waits of other swapchains are not woken.
+ */
+void
+vulkan_wake_notify_swapchain(
+	const void *swapchain)
+{
+	struct vulkan_wake *wake;
+	int saved_error;
+
+	/* The wake list is walked under the same lock as registration and retirement. */
+	saved_error = errno;
+	pthread_mutex_lock(&vulkan_wake_mutex);
+
+	/* Each image wait of the swapchain gets its own token. */
+	for (wake = vulkan_wakes; wake != NULL; wake = wake->next) {
+		/* A fence wait, or a wait on another swapchain, sleeps on. */
+		if (wake->fence_count != 0U || wake->swapchain != swapchain)
+			continue;
+
+		/* The waiter observes the swapchain's images again. */
+		wake_arm(wake);
+	}
+
+	pthread_mutex_unlock(&vulkan_wake_mutex);
+
+	/* The notification keeps the caller's error observation. */
+	errno = saved_error;
+
+	/* Succeeded: only the acquisitions from this swapchain were woken. */
 	return;
 }
 
@@ -815,7 +859,8 @@ wake_register(
 	struct vulkan_wake *wake,
 	struct VkDevice_T *device,
 	uint32_t count,
-	const VkFence *fences)
+	const VkFence *fences,
+	const void *swapchain)
 {
 	int descriptors[2];
 	int error;
@@ -833,6 +878,7 @@ wake_register(
 	wake->context = device->object.context;
 	wake->fences = fences;
 	wake->fence_count = count;
+	wake->swapchain = swapchain;
 	wake->read_fd = descriptors[0];
 	wake->write_fd = descriptors[1];
 

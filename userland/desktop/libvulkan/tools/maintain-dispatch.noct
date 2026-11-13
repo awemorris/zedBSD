@@ -40,6 +40,8 @@ func main(args) {
         if (line == "#define VK_KHR_video_queue 1") { extension = "VULKAN_DEVICE_VIDEO_QUEUE"; }
         if (line == "#define VK_KHR_video_decode_queue 1") { extension = "VULKAN_DEVICE_VIDEO_DECODE_QUEUE"; }
         if (line == "#define VK_KHR_synchronization2 1") { extension = "VULKAN_DEVICE_SYNCHRONIZATION2"; }
+        if (line == "#define VK_KHR_get_surface_capabilities2 1") { extension = "VULKAN_INSTANCE_SURFACE_CAPABILITIES2"; }
+        if (line == "#define VK_EXT_swapchain_maintenance1 1") { extension = "VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1"; }
         if (line == "#define VK_EXT_display_surface_counter 1") { extension = "VULKAN_INSTANCE_SURFACE_COUNTER"; }
         if (line == "#define VK_EXT_display_control 1") { extension = "VULKAN_DEVICE_DISPLAY_CONTROL"; }
         var at = String.indexOf(line, "(VKAPI_PTR *PFN_vk");
@@ -52,13 +54,14 @@ func main(args) {
         if (name == "vkVoidFunction" || name == "vkAllocationFunction" || name == "vkReallocationFunction" || name == "vkFreeFunction" || name == "vkInternalAllocationNotification" || name == "vkInternalFreeNotification") { continue; }
         var scope = "VULKAN_ENTRY_INSTANCE";
         if (starts(arguments, "VkDevice ") || starts(arguments, "VkQueue ") || starts(arguments, "VkCommandBuffer ")) { scope = "VULKAN_ENTRY_DEVICE"; }
+        if (scope == "VULKAN_ENTRY_INSTANCE" && starts(extension, "VULKAN_DEVICE_")) { scope = "VULKAN_ENTRY_PHYSICAL"; }
         if (name == "vkCreateInstance" || name == "vkEnumerateInstanceExtensionProperties" || name == "vkEnumerateInstanceLayerProperties" || name == "vkGetInstanceProcAddr") { scope = "VULKAN_ENTRY_GLOBAL"; }
         table = table + "\t{\"" + name + "\", (PFN_vkVoidFunction)" + name + ", " + scope + ", " + extension + "},\n";
         manifest = manifest + name + "\t" + scope + "\t" + extension + "\n";
         count = count + 1;
     }
-    if (count != 197) { System.error("expected 197 public command records, got " + count); }
+    if (count != 200) { System.error("expected 200 public command records, got " + count); }
     FileUtil.writeText(args[1] + "/dispatch-table.inc", table);
     FileUtil.writeText(args[1] + "/api-commands.tsv", manifest);
-    print("maintained 197 dispatch records");
+    print("maintained 200 dispatch records");
 }

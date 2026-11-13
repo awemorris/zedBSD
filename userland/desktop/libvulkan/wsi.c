@@ -13,6 +13,7 @@
 
 #include <limits.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -906,6 +907,146 @@ vkGetPhysicalDeviceSurfacePresentModesKHR(
 		return error;
 
 	/* Succeeded: the array contains only supported native presentation behavior. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Retrieves a surface's presentation limits through the extensible query.
+ *
+ * The surface maintenance records are answered too: no surface scales or
+ * moves a swapchain's images, and a present mode is compatible only with
+ * itself, since a swapchain keeps the mode it was created with.
+ */
+VKAPI_ATTR VkResult VKAPI_CALL
+vkGetPhysicalDeviceSurfaceCapabilities2KHR(
+	VkPhysicalDevice physicalDevice,
+	const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo,
+	VkSurfaceCapabilities2KHR *pSurfaceCapabilities)
+{
+	const VkBaseInStructure *input;
+	const VkSurfacePresentModeEXT *asked;
+	VkBaseOutStructure *output;
+	VkSurfacePresentScalingCapabilitiesEXT *scaling;
+	VkSurfacePresentModeCompatibilityEXT *compatibility;
+	VkSurfaceCapabilitiesKHR *capabilities;
+	VkResult error;
+
+	/* Only the extension's own records can carry the question and the answer. */
+	if (pSurfaceInfo == NULL ||
+	    pSurfaceCapabilities == NULL ||
+	    pSurfaceInfo->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR ||
+	    pSurfaceCapabilities->sType != VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The ordinary query answers the limits themselves. */
+	capabilities = &pSurfaceCapabilities->surfaceCapabilities;
+	error = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, pSurfaceInfo->surface, capabilities);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Finds the present mode the question is about, when it names one. */
+	asked = NULL;
+	for (input = pSurfaceInfo->pNext; input != NULL; input = input->pNext) {
+		if (input->sType == VK_STRUCTURE_TYPE_SURFACE_PRESENT_MODE_EXT)
+			asked = (const VkSurfacePresentModeEXT *)input;
+	}
+
+	/* Answers each surface maintenance record the caller chained; others are left untouched. */
+	for (output = pSurfaceCapabilities->pNext; output != NULL; output = output->pNext) {
+		/* No scaling and no gravity: images are shown at their own size, where the surface puts them. */
+		if (output->sType == VK_STRUCTURE_TYPE_SURFACE_PRESENT_SCALING_CAPABILITIES_EXT) {
+			scaling = (VkSurfacePresentScalingCapabilitiesEXT *)output;
+			scaling->supportedPresentScaling = 0U;
+			scaling->supportedPresentGravityX = 0U;
+			scaling->supportedPresentGravityY = 0U;
+			scaling->minScaledImageExtent = capabilities->minImageExtent;
+			scaling->maxScaledImageExtent = capabilities->maxImageExtent;
+		}
+
+		/* The asked mode is compatible with itself alone; without a mode there is nothing to name. */
+		if (output->sType == VK_STRUCTURE_TYPE_SURFACE_PRESENT_MODE_COMPATIBILITY_EXT) {
+			compatibility = (VkSurfacePresentModeCompatibilityEXT *)output;
+			if (asked == NULL) {
+				compatibility->presentModeCount = 0U;
+			} else if (compatibility->pPresentModes == NULL) {
+				compatibility->presentModeCount = 1U;
+			} else if (compatibility->presentModeCount != 0U) {
+				compatibility->pPresentModes[0] = asked->presentMode;
+				compatibility->presentModeCount = 1U;
+			}
+		}
+	}
+
+	/* Succeeded: the records describe the current native surface generation. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Enumerates a surface's format and color-space pairs through the extensible query.
+ */
+VKAPI_ATTR VkResult VKAPI_CALL
+vkGetPhysicalDeviceSurfaceFormats2KHR(
+	VkPhysicalDevice physicalDevice,
+	const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo,
+	uint32_t *pSurfaceFormatCount,
+	VkSurfaceFormat2KHR *pSurfaceFormats)
+{
+	VkSurfaceFormatKHR *formats;
+	uint32_t available;
+	uint32_t written;
+	uint32_t index;
+	VkResult error;
+
+	/* Only the extension's own record can name the surface. */
+	if (pSurfaceInfo == NULL ||
+	    pSurfaceFormatCount == NULL ||
+	    pSurfaceInfo->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The number of pairs the ordinary query reports. */
+	available = 0U;
+	error = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, pSurfaceInfo->surface, &available, NULL);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* A count-only question is answered by that number. */
+	if (pSurfaceFormats == NULL) {
+		*pSurfaceFormatCount = available;
+		return VK_SUCCESS;
+	}
+
+	/* A surface with no pair leaves the caller's array as it is. */
+	if (available == 0U) {
+		*pSurfaceFormatCount = 0U;
+		return VK_SUCCESS;
+	}
+
+	/* Scratch storage for the ordinary answer, which the extensible records then carry. */
+	formats = calloc(available, sizeof(*formats));
+	if (formats == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* The pairs themselves. */
+	error = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, pSurfaceInfo->surface, &available, formats);
+	if (error != VK_SUCCESS && error != VK_INCOMPLETE) {
+		free(formats);
+		return error;
+	}
+
+	/* Copies as many pairs as the caller has room for, keeping each record's chain. */
+	written = *pSurfaceFormatCount;
+	if (written > available)
+		written = available;
+	for (index = 0U; index < written; index++)
+		pSurfaceFormats[index].surfaceFormat = formats[index];
+	free(formats);
+	*pSurfaceFormatCount = written;
+
+	/* A caller array too small for every pair is told so. */
+	if (written < available)
+		return VK_INCOMPLETE;
+
+	/* Succeeded: every reported format can back this surface's swapchain images. */
 	return VK_SUCCESS;
 }
 

@@ -384,6 +384,13 @@ device_validate(
 			continue;
 		}
 
+		/* Selects present fences, present modes, scaling and image release. */
+		match = strcmp(info->ppEnabledExtensionNames[index], VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+		if (match == 0) {
+			bits |= VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1;
+			continue;
+		}
+
 		/* Selects display power, hotplug and refresh events. */
 		match = strcmp(info->ppEnabledExtensionNames[index], VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME);
 		if (match == 0) {
@@ -411,6 +418,16 @@ device_validate(
 
 	/* Present regions describe swapchain presents only. */
 	if ((bits & VULKAN_DEVICE_INCREMENTAL_PRESENT) && !(bits & VULKAN_DEVICE_SWAPCHAIN))
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+
+	/*
+	 * Swapchain maintenance depends on the swapchain, on the instance's
+	 * surface maintenance and on its extensible physical-device queries.
+	 */
+	if ((bits & VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1) &&
+	    (!(bits & VULKAN_DEVICE_SWAPCHAIN) ||
+	     !(physical->instance->enabled_extensions & VULKAN_INSTANCE_SURFACE_MAINTENANCE1) ||
+	     !(physical->instance->enabled_extensions & VULKAN_INSTANCE_PROPERTIES2)))
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
 
 	/* Display control depends on the swapchain and on the instance's surface counters. */

@@ -463,7 +463,9 @@ enum vulkan_instance_extension_bits {
 	VULKAN_INSTANCE_PROPERTIES2 = 8,
 	VULKAN_INSTANCE_EXTERNAL_MEMORY = 16,
 	VULKAN_INSTANCE_EXTERNAL_FENCE = 32,
-	VULKAN_INSTANCE_SURFACE_COUNTER = 64
+	VULKAN_INSTANCE_SURFACE_COUNTER = 64,
+	VULKAN_INSTANCE_SURFACE_CAPABILITIES2 = 128,
+	VULKAN_INSTANCE_SURFACE_MAINTENANCE1 = 256
 };
 
 /* Device capabilities are enabled explicitly by VkDeviceCreateInfo. */
@@ -482,7 +484,8 @@ enum vulkan_device_extension_bits {
 	VULKAN_DEVICE_VIDEO_DECODE_H264 = 2048,
 	VULKAN_DEVICE_DISPLAY_CONTROL = 4096,
 	VULKAN_DEVICE_INCREMENTAL_PRESENT = 8192,
-	VULKAN_DEVICE_VIDEO_DECODE_H265 = 16384
+	VULKAN_DEVICE_VIDEO_DECODE_H265 = 16384,
+	VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1 = 32768
 };
 
 /* Owns a completed reply after the transport transaction unlocks. */
@@ -508,7 +511,10 @@ struct vulkan_notification {
  * from the caller for the length of the wait): it is armed by the device's
  * and the context's errors and by a change of one of those fences, never by
  * an image transition or by another fence's submission.  An image wait has
- * no fences and is armed by errors and image transitions.
+ * no fences and names the swapchain it acquires from (swapchain, an opaque
+ * identity): it is armed by errors, by a transition of that swapchain's
+ * images, and by a window system's release of an image, which names no
+ * swapchain.
  */
 struct vulkan_wake {
 	struct vulkan_wake *next;
@@ -516,15 +522,17 @@ struct vulkan_wake {
 	struct vulkan_context *context;
 	const VkFence *fences;
 	uint32_t fence_count;
+	const void *swapchain;
 	int read_fd;
 	int write_fd;
 };
 
-VkResult vulkan_wake_create(struct vulkan_wake *wake, struct VkDevice_T *device);
+VkResult vulkan_wake_create(struct vulkan_wake *wake, struct VkDevice_T *device, const void *swapchain);
 VkResult vulkan_wake_create_fences(struct vulkan_wake *wake, struct VkDevice_T *device, uint32_t count, const VkFence *fences);
 void vulkan_wake_destroy(struct vulkan_wake *wake);
 void vulkan_wake_notify(struct VkDevice_T *device, struct vulkan_context *context);
 void vulkan_wake_notify_fence(struct VkDevice_T *device, VkFence fence);
+void vulkan_wake_notify_swapchain(const void *swapchain);
 void vulkan_wake_drain(struct vulkan_wake *wake);
 void vulkan_context_error(struct vulkan_context *context, VkResult error);
 void vulkan_sync_reap_locked(struct vulkan_context *context);

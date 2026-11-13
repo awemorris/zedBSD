@@ -431,7 +431,7 @@ vkEnumerateInstanceExtensionProperties(
 	uint32_t *pPropertyCount,
 	VkExtensionProperties *pProperties)
 {
-	VkExtensionProperties available[7];
+	VkExtensionProperties available[9];
 	VkResult status;
 
 	/* This library does not impersonate a separately installable validation layer. */
@@ -454,9 +454,13 @@ vkEnumerateInstanceExtensionProperties(
 	available[5].specVersion = VK_KHR_EXTERNAL_FENCE_CAPABILITIES_SPEC_VERSION;
 	strcpy(available[6].extensionName, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME);
 	available[6].specVersion = VK_EXT_DISPLAY_SURFACE_COUNTER_SPEC_VERSION;
+	strcpy(available[7].extensionName, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+	available[7].specVersion = VK_KHR_GET_SURFACE_CAPABILITIES_2_SPEC_VERSION;
+	strcpy(available[8].extensionName, VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+	available[8].specVersion = VK_EXT_SURFACE_MAINTENANCE_1_SPEC_VERSION;
 
 	/* Preserves the required partial-array result when caller capacity is smaller. */
-	status = enumerate_extensions(available, 7, pPropertyCount, pProperties);
+	status = enumerate_extensions(available, 9, pPropertyCount, pProperties);
 	if (status != VK_SUCCESS)
 		return status;
 
@@ -475,7 +479,7 @@ vkEnumerateDeviceExtensionProperties(
 	VkExtensionProperties *pProperties)
 {
 	struct VkPhysicalDevice_T *physical;
-	VkExtensionProperties available[15];
+	VkExtensionProperties available[16];
 	uint32_t count;
 	VkResult status;
 
@@ -547,6 +551,13 @@ vkEnumerateDeviceExtensionProperties(
 	if (physical->supported_extensions & VULKAN_DEVICE_SYNCHRONIZATION2) {
 		strcpy(available[count].extensionName, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
 		available[count].specVersion = VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION;
+		count++;
+	}
+
+	/* Present fences, present modes, scaling and image release of a swapchain. */
+	if (physical->supported_extensions & VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1) {
+		strcpy(available[count].extensionName, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+		available[count].specVersion = VK_EXT_SWAPCHAIN_MAINTENANCE_1_SPEC_VERSION;
 		count++;
 	}
 
@@ -684,9 +695,29 @@ instance_extensions(
 			continue;
 		}
 
+		/* The extensible surface queries, and the surface maintenance records they carry. */
+		match = strcmp(info->ppEnabledExtensionNames[index], VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+		if (match == 0) {
+			bits |= VULKAN_INSTANCE_SURFACE_CAPABILITIES2;
+			continue;
+		}
+		match = strcmp(info->ppEnabledExtensionNames[index], VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+		if (match == 0) {
+			bits |= VULKAN_INSTANCE_SURFACE_MAINTENANCE1;
+			continue;
+		}
+
 		/* An unknown requested extension cannot be silently treated as implemented. */
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
 	}
+
+	/* The extensible surface queries describe surfaces. */
+	if ((bits & VULKAN_INSTANCE_SURFACE_CAPABILITIES2) && !(bits & VULKAN_INSTANCE_SURFACE))
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+
+	/* Surface maintenance answers through the extensible surface queries. */
+	if ((bits & VULKAN_INSTANCE_SURFACE_MAINTENANCE1) && !(bits & VULKAN_INSTANCE_SURFACE_CAPABILITIES2))
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
 
 	/* Both presentation backends require the surface capability in the same instance. */
 	if ((bits & (VULKAN_INSTANCE_DISPLAY | VULKAN_INSTANCE_WAYLAND)) && !(bits & VULKAN_INSTANCE_SURFACE))
@@ -1148,6 +1179,12 @@ physical_load(
 
 	/* A present may name its changed rectangles; the Wayland commit damages only them (BUG-221). */
 	physical->supported_extensions |= VULKAN_DEVICE_INCREMENTAL_PRESENT;
+
+	/*
+	 * Every swapchain's presents retire on its worker, which signals a
+	 * present's fences when it retires the present, on both backends.
+	 */
+	physical->supported_extensions |= VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1;
 
 	/*
 	 * The memory requirement queries of VK_KHR_get_memory_requirements2 and

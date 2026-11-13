@@ -240,3 +240,41 @@ the five commands (`vkGetPhysicalDeviceSurfaceCapabilities2EXT`,
 instance extension is always offered; the device extension only on a renderer whose
 node has the display, topology-event and display-control capabilities. Core Vulkan
 remains 1.0.
+
+## Surface-capability and surface/swapchain maintenance declarations
+
+`vulkan_external.h` additionally selects `VK_KHR_get_surface_capabilities2`
+(revision 1), `VK_EXT_surface_maintenance1` (revision 1) and
+`VK_EXT_swapchain_maintenance1` (revision 1) from the same pinned Khronos
+Vulkan-Headers `v1.3.269` `include/vulkan/vulkan_core.h` as the core selection
+(input SHA-256 `8cb01233ecf0fac130f0db2fdbbd79b6643f91f65c9afb807978924148798287`,
+verified on 2026-11-14 against the byte-identical copy virglrenderer 1.1.0
+carries as `src/venus/venus-protocol/vulkan_core.h`). The declarations are
+copied as the input states them: the structures, the two flag enumerations of
+surface maintenance and their `VkFlags` types, the command prototypes and their
+`PFN_` types. The structure-type values and
+`VK_SWAPCHAIN_CREATE_DEFERRED_MEMORY_ALLOCATION_BIT_EXT` were already present
+in the core selection. Declaration license: Apache-2.0, copyright 2015–2023
+The Khronos Group Inc. (`LICENSE-API`, unchanged: the added text is from the
+same input and license as the rest of the file). The tool change is the
+extension list of `maintain-external.noct` (which now also accepts `VK_EXT_`
+blocks) and its file header, which now matches the maintained header; the
+output differs from the previous header only by these additions and the
+header's description lines.
+
+```sh
+timeout 90 build/NoctLang/build-static/noct \
+  userland/desktop/libvulkan/tools/maintain-external.noct \
+  /path/to/verified/pinned/vulkan_core.h include/libc/vulkan/vulkan_external.h
+```
+
+The three commands (`vkGetPhysicalDeviceSurfaceCapabilities2KHR`,
+`vkGetPhysicalDeviceSurfaceFormats2KHR`, `vkReleaseSwapchainImagesEXT`) bring
+the dispatch table from 197 to 200 records; `VK_EXT_surface_maintenance1` adds
+no command. `maintain-dispatch.noct` regenerated `dispatch-table.inc` and
+`api-commands.tsv`; it now also names a physical-device command of a device
+extension `VULKAN_ENTRY_PHYSICAL`, which the maintained table already used for
+the two video capability queries. The instance extensions are always offered;
+`VK_EXT_swapchain_maintenance1` is offered with `VK_KHR_swapchain` and needs
+`VK_EXT_surface_maintenance1` and `VK_KHR_get_physical_device_properties2` on
+the instance. Core Vulkan remains 1.0.

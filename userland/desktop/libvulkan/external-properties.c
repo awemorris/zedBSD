@@ -32,22 +32,29 @@ vkGetPhysicalDeviceFeatures2KHR(
 	struct VkPhysicalDevice_T *physical;
 	VkBaseOutStructure *next;
 	VkPhysicalDeviceSynchronization2Features *synchronization;
+	VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT *maintenance;
 
 	/* Unknown output extensions are left untouched, as in the standard chain contract. */
 	physical = vulkan_physical_device(physicalDevice);
 	vkGetPhysicalDeviceFeatures(physicalDevice, &pFeatures->features);
 
-	/* Answers the synchronization2 feature wherever the caller chained it. */
+	/* Answers the synchronization2 and swapchain maintenance features wherever the caller chained them. */
 	for (next = pFeatures->pNext; next != NULL; next = next->pNext) {
-		/* Only the synchronization2 feature record has a local answer. */
-		if (next->sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES)
-			continue;
-
 		/* The translated commands are available exactly when the extension is named. */
-		synchronization = (VkPhysicalDeviceSynchronization2Features *)next;
-		synchronization->synchronization2 = VK_FALSE;
-		if (physical->supported_extensions & VULKAN_DEVICE_SYNCHRONIZATION2)
-			synchronization->synchronization2 = VK_TRUE;
+		if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES) {
+			synchronization = (VkPhysicalDeviceSynchronization2Features *)next;
+			synchronization->synchronization2 = VK_FALSE;
+			if (physical->supported_extensions & VULKAN_DEVICE_SYNCHRONIZATION2)
+				synchronization->synchronization2 = VK_TRUE;
+		}
+
+		/* The whole of swapchain maintenance is there exactly when the extension is named. */
+		if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT) {
+			maintenance = (VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT *)next;
+			maintenance->swapchainMaintenance1 = VK_FALSE;
+			if (physical->supported_extensions & VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1)
+				maintenance->swapchainMaintenance1 = VK_TRUE;
+		}
 	}
 
 	/* Succeeded: the wrapper preserves caller-owned chain links. */

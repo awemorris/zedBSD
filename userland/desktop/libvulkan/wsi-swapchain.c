@@ -308,6 +308,12 @@ struct wsi_present_job {
 	enum vulkan_wsi_cursor_outcome outcome;
 	VkBool32 logged;
 	struct wsi_cursor_log log;
+	/*
+	 * Each target's present fence (VK_EXT_swapchain_maintenance1), or a null
+	 * fence; NULL when the present named none.  The job signals them as it
+	 * retires, once the present was enqueued, whatever its result.
+	 */
+	VkFence *present_fences;
 };
 
 /* The part of one target's image that changed (VK_KHR_incremental_present): known, and the box around its rectangles. */
@@ -397,10 +403,14 @@ static VkResult swapchain_current(struct vulkan_swapchain *chain);
 static VkResult swapchain_now(uint64_t *nanoseconds);
 static VkResult swapchain_acquire(struct vulkan_swapchain *chain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t *result, struct vulkan_wake *wake);
 static VkResult swapchain_poll(struct vulkan_swapchain *chain, struct vulkan_wake *wake, uint64_t timeout);
-static void swapchain_notify_locked(void);
+static void swapchain_notify_locked(struct vulkan_swapchain *chain);
+static void swapchain_signal_locked(void);
 static VkResult present_prepare(struct wsi_present_job *job, struct VkQueue_T *queue, const VkPresentInfoKHR *info);
 static VkResult present_reserve(struct wsi_present_job *job, const VkPresentInfoKHR *info);
 static VkResult present_regions(struct wsi_present_job *job, const VkPresentInfoKHR *info);
+static VkResult present_maintenance(struct wsi_present_job *job, const VkPresentInfoKHR *info);
+static void present_fences_signal(struct wsi_present_job *job);
+static VkResult swapchain_validate_maintenance(const VkSwapchainCreateInfoKHR *info);
 static VkResult present_fence_prepare(struct wsi_present_job *job);
 static VkResult present_record(struct wsi_present_job *job, const VkPresentInfoKHR *info);
 static void present_recording_key(struct wsi_present_job *job, const VkPresentInfoKHR *info);
@@ -451,7 +461,7 @@ vulkan_wsi_image_notify(
 	/* Serializes notification with the last image-state observation before sleep. */
 	pthread_mutex_lock(&swapchain_mutex);
 
-	swapchain_notify_locked();
+	swapchain_notify_locked(NULL);
 
 	pthread_mutex_unlock(&swapchain_mutex);
 
@@ -931,6 +941,61 @@ cleanup:
 }
 
 /*
+ * Gives acquired images that were never presented back to acquisition.
+ *
+ * An acquisition completes in this library before it returns, so an
+ * acquired image is in no GPU or presentation use the release must wait for.
+ */
+VKAPI_ATTR VkResult VKAPI_CALL
+vkReleaseSwapchainImagesEXT(
+	VkDevice device,
+	const VkReleaseSwapchainImagesInfoEXT *pReleaseInfo)
+{
+	struct VkDevice_T *owner;
+	struct vulkan_swapchain *chain;
+	uint32_t index;
+	uint32_t image;
+
+	/* Resolves the device and the chain the release names. */
+	owner = vulkan_device(device);
+	if (owner == NULL ||
+	    pReleaseInfo == NULL ||
+	    pReleaseInfo->sType != VK_STRUCTURE_TYPE_RELEASE_SWAPCHAIN_IMAGES_INFO_EXT)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* A chain of another device names nothing this device holds. */
+	chain = swapchain_get(pReleaseInfo->swapchain);
+	if (chain == NULL || chain->device != owner)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* A release of some images needs their indices. */
+	if (pReleaseInfo->imageIndexCount != 0U && pReleaseInfo->pImageIndices == NULL)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* Every named image must be one the application holds, checked before any is released. */
+	pthread_mutex_lock(&swapchain_mutex);
+
+	for (index = 0U; index < pReleaseInfo->imageIndexCount; index++) {
+		/* An image outside the chain, or one not held by the application, cannot be released. */
+		image = pReleaseInfo->pImageIndices[index];
+		if (image >= chain->group->count || chain->states[image] != WSI_IMAGE_ACQUIRED) {
+			pthread_mutex_unlock(&swapchain_mutex);
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+	}
+
+	/* The images may be acquired again; this chain's acquisitions look again. */
+	for (index = 0U; index < pReleaseInfo->imageIndexCount; index++)
+		chain->states[pReleaseInfo->pImageIndices[index]] = WSI_IMAGE_AVAILABLE;
+	swapchain_notify_locked(chain);
+
+	pthread_mutex_unlock(&swapchain_mutex);
+
+	/* Succeeded: the images are available to acquisition, as if never acquired. */
+	return VK_SUCCESS;
+}
+
+/*
  * Reads a monotonic nanosecond clock fine enough for the cursor log's lengths.
  *
  * The system's monotonic clock advances once a millisecond on the Pi 4, so
@@ -1153,7 +1218,7 @@ swapchain_create(
 		pthread_mutex_lock(&swapchain_mutex);
 
 		old->retired = VK_TRUE;
-		swapchain_notify_locked();
+		swapchain_notify_locked(old);
 
 		/* Removes the retired swapchain from the surface active slot. */
 		if (old->surface->active == old)
@@ -1459,6 +1524,7 @@ swapchain_validate(
 	VkSurfaceCapabilitiesKHR capabilities;
 	VkSurfaceFormatKHR formats[2];
 	VkPresentModeKHR modes[4];
+	VkSwapchainCreateFlagsKHR flags;
 	uint32_t count;
 	uint32_t index;
 	VkBool32 matched;
@@ -1473,9 +1539,21 @@ swapchain_validate(
 	if (info->sType != VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR)
 		return VK_ERROR_INITIALIZATION_FAILED;
 
-	/* Refuses unadvertised swapchain flags or layered native scanout. */
-	if (info->flags != 0U || info->imageArrayLayers != 1U)
+	/*
+	 * Refuses unadvertised swapchain flags or layered native scanout.  A
+	 * deferred allocation only permits binding the images late, so with
+	 * swapchain maintenance enabled they are still allocated at creation.
+	 */
+	flags = info->flags;
+	if ((device->enabled_extensions & VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1) != 0U)
+		flags &= ~(VkSwapchainCreateFlagsKHR)VK_SWAPCHAIN_CREATE_DEFERRED_MEMORY_ALLOCATION_BIT_EXT;
+	if (flags != 0U || info->imageArrayLayers != 1U)
 		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The present modes and scaling the swapchain is asked to allow. */
+	error = swapchain_validate_maintenance(info);
+	if (error != VK_SUCCESS)
+		return error;
 
 	/* No surface offers a counter (VK_EXT_display_surface_counter), so none can be asked for. */
 	for (extension = info->pNext; extension != NULL; extension = extension->pNext) {
@@ -1582,6 +1660,50 @@ swapchain_validate(
 	*result = surface;
 
 	/* Succeeded: the requested image contract is supported by this native surface. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Checks the swapchain maintenance records of a creation: the present modes
+ * the swapchain may switch between, which can only be its own mode, and the
+ * scaling of its images, which no surface does.
+ */
+static VkResult
+swapchain_validate_maintenance(
+	const VkSwapchainCreateInfoKHR *info)
+{
+	const VkBaseInStructure *extension;
+	const VkSwapchainPresentModesCreateInfoEXT *modes;
+	const VkSwapchainPresentScalingCreateInfoEXT *scaling;
+	uint32_t index;
+
+	/* Looks at every record of the application's chain. */
+	for (extension = info->pNext; extension != NULL; extension = extension->pNext) {
+		/* Every mode named must be the creation's mode, the only one compatible with it. */
+		if (extension->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_EXT) {
+			/* The creation's mode must be among them. */
+			modes = (const VkSwapchainPresentModesCreateInfoEXT *)(const void *)extension;
+			if (modes->presentModeCount == 0U || modes->pPresentModes == NULL)
+				return VK_ERROR_INITIALIZATION_FAILED;
+
+			/* Another mode would need a switch the swapchain does not make. */
+			for (index = 0U; index < modes->presentModeCount; index++) {
+				if (modes->pPresentModes[index] != info->presentMode)
+					return VK_ERROR_INITIALIZATION_FAILED;
+			}
+		}
+
+		/* No scaling or gravity is supported, so none can be asked for. */
+		if (extension->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_SCALING_CREATE_INFO_EXT) {
+			scaling = (const VkSwapchainPresentScalingCreateInfoEXT *)(const void *)extension;
+			if (scaling->scalingBehavior != 0U ||
+			    scaling->presentGravityX != 0U ||
+			    scaling->presentGravityY != 0U)
+				return VK_ERROR_INITIALIZATION_FAILED;
+		}
+	}
+
+	/* Succeeded: the records ask nothing the swapchain does not do. */
 	return VK_SUCCESS;
 }
 
@@ -2825,6 +2947,11 @@ present_prepare(
 	if (error != VK_SUCCESS)
 		return error;
 
+	/* The present fences and present modes the application named, if it enabled swapchain maintenance. */
+	error = present_maintenance(job, info);
+	if (error != VK_SUCCESS)
+		return error;
+
 	/* What each overlay target asks of its plane. */
 	error = present_overlay_prepare(job);
 	if (error != VK_SUCCESS)
@@ -3854,6 +3981,71 @@ present_native(
 	return combined;
 }
 
+/*
+ * Takes the swapchain maintenance records of a present: each target's present
+ * fence, and the present mode each target asks for, which must be the mode
+ * its chain was created with (a mode is compatible only with itself here).
+ */
+static VkResult
+present_maintenance(
+	struct wsi_present_job *job,
+	const VkPresentInfoKHR *info)
+{
+	const VkBaseInStructure *extension;
+	const VkSwapchainPresentFenceInfoEXT *fences;
+	const VkSwapchainPresentModeInfoEXT *modes;
+	size_t bytes;
+	uint32_t index;
+
+	/* Only a device that enabled the extension names these records. */
+	if ((job->queue->device->enabled_extensions & VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1) == 0U)
+		return VK_SUCCESS;
+
+	/* The records in the application's chain, if there are any. */
+	fences = NULL;
+	modes = NULL;
+	for (extension = info->pNext; extension != NULL; extension = extension->pNext) {
+		/* A present's fences, one a target. */
+		if (extension->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT)
+			fences = (const VkSwapchainPresentFenceInfoEXT *)(const void *)extension;
+
+		/* A present's modes, one a target. */
+		if (extension->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT)
+			modes = (const VkSwapchainPresentModeInfoEXT *)(const void *)extension;
+	}
+
+	/* Every target keeps the mode its chain was created with. */
+	if (modes != NULL) {
+		/* A record for another set of targets describes nothing here. */
+		if (modes->swapchainCount != job->count || modes->pPresentModes == NULL)
+			return VK_ERROR_INITIALIZATION_FAILED;
+
+		/* A target asking for another mode would need a switch the chain does not make. */
+		for (index = 0U; index < job->count; index++) {
+			if (modes->pPresentModes[index] != job->chains[index]->present_mode)
+				return VK_ERROR_INITIALIZATION_FAILED;
+		}
+	}
+
+	/* No fence record: the present signals nothing. */
+	if (fences == NULL)
+		return VK_SUCCESS;
+
+	/* A record for another set of targets describes nothing here. */
+	if (fences->swapchainCount != job->count || fences->pFences == NULL)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* The job's own copy, since the caller's array ends with the call. */
+	bytes = (size_t)job->count * sizeof(*job->present_fences);
+	job->present_fences = vulkan_allocate(&job->allocator, bytes, sizeof(void *), VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+	if (job->present_fences == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	memcpy(job->present_fences, fences->pFences, bytes);
+
+	/* Succeeded: the job signals these fences as it retires. */
+	return VK_SUCCESS;
+}
+
 /* Frees a complete or partial job and applies the enqueue ownership boundary. */
 static void
 present_finish(
@@ -3868,6 +4060,14 @@ present_finish(
 	/* No helper may touch the queue when validation failed before it was assigned. */
 	if (job->queue == NULL)
 		return;
+
+	/*
+	 * An enqueued present's fences are signaled before its chains let a
+	 * destruction go on, so none is left unsignaled behind a destroyed
+	 * chain; a present that was not enqueued leaves them unchanged.
+	 */
+	if (job->submitted != VK_FALSE)
+		present_fences_signal(job);
 
 	/* A failed enqueue leaves acquisition unchanged; an enqueued present releases it. */
 	pthread_mutex_lock(&swapchain_mutex);
@@ -3921,10 +4121,19 @@ present_finish(
 		}
 	}
 
-	pthread_mutex_unlock(&swapchain_mutex);
+	/*
+	 * Wakes idle and destruction waiters, and the acquisitions from the
+	 * job's chains alone, once every image and chain ownership transition
+	 * is visible.
+	 */
+	swapchain_signal_locked();
+	for (index = 0U; index < job->count; index++) {
+		/* A target that preparation never resolved has no acquisitions to wake. */
+		if (job->chains != NULL && job->chains[index] != NULL)
+			swapchain_notify_locked(job->chains[index]);
+	}
 
-	/* Wake idle and destruction waiters after all image and chain ownership transitions are visible. */
-	vulkan_wsi_image_notify();
+	pthread_mutex_unlock(&swapchain_mutex);
 
 	/* All application allocation callbacks run after the state mutex is released. */
 	if (job->composed != NULL) {
@@ -3934,6 +4143,7 @@ present_finish(
 	}
 
 	vulkan_free(&job->allocator, job->composed);
+	vulkan_free(&job->allocator, job->present_fences);
 	vulkan_free(&job->allocator, job->overlays);
 	vulkan_free(&job->allocator, job->damage);
 	vulkan_free(&job->allocator, job->stages);
@@ -3943,6 +4153,36 @@ present_finish(
 	vulkan_free(&job->allocator, job->indices);
 
 	/* Succeeded: no transient job object retains a swapchain or caller output array. */
+	return;
+}
+
+/*
+ * Signals each present fence of an enqueued present as its job retires.
+ *
+ * The fence then says that this library no longer uses the present's
+ * images and waits: the native present was asked and returned, or the job
+ * ended with an error.  Jobs retire in their worker's order, so the fences
+ * of one swapchain's presents are signaled in present order.  A lost device
+ * leaves a fence unsignaled, and a wait on it reports the loss.
+ */
+static void
+present_fences_signal(
+	struct wsi_present_job *job)
+{
+	uint32_t index;
+
+	/* A present that named no fence signals none. */
+	if (job->present_fences == NULL)
+		return;
+
+	/* Signals each target's fence, skipping a null one, as an acquisition signals its fence. */
+	for (index = 0U; index < job->count; index++) {
+		/* A target may name no fence. */
+		if (job->present_fences[index] != VK_NULL_HANDLE)
+			(void)vulkan_wsi_acquire_signal(job->queue->device, VK_NULL_HANDLE, job->present_fences[index]);
+	}
+
+	/* Succeeded: every named fence is signaled, unless the device is lost. */
 	return;
 }
 
@@ -4360,7 +4600,7 @@ present_worker_main(
 		pthread_mutex_lock(&swapchain_mutex);
 
 		worker->current = NULL;
-		swapchain_notify_locked();
+		swapchain_signal_locked();
 
 		pthread_mutex_unlock(&swapchain_mutex);
 		vulkan_free(&allocator, job);
@@ -4491,7 +4731,7 @@ present_workers_stop(
 		/* An empty stopping worker exits at its next protected wakeup. */
 		*link = worker->next;
 		worker->stopping = VK_TRUE;
-		swapchain_notify_locked();
+		swapchain_signal_locked();
 
 		pthread_mutex_unlock(&swapchain_mutex);
 
@@ -4676,7 +4916,7 @@ swapchain_acquire(
 			/* Registration runs unlocked and is followed by an unconditional full predicate recheck. */
 			if (wake->read_fd < 0) {
 				pthread_mutex_unlock(&swapchain_mutex);
-				error = vulkan_wake_create(wake, device);
+				error = vulkan_wake_create(wake, device, chain);
 				if (error != VK_SUCCESS)
 					return error;
 
@@ -4756,7 +4996,7 @@ swapchain_acquire(
 		pthread_mutex_lock(&swapchain_mutex);
 
 		chain->states[index] = WSI_IMAGE_AVAILABLE;
-		swapchain_notify_locked();
+		swapchain_notify_locked(chain);
 
 		pthread_mutex_unlock(&swapchain_mutex);
 
@@ -4825,16 +5065,45 @@ swapchain_poll(
 	return VK_SUCCESS;
 }
 
-/* Publishes image-state changes to condition waiters and independently armed fd waiters. */
+/*
+ * Publishes image-state changes to condition waiters and independently armed fd waiters.
+ *
+ * A change of one chain's images, retirement or error arms only the fd
+ * waiters acquiring from that chain; a NULL chain is a window system's
+ * release that names no chain, and arms every acquisition's fd waiter.
+ */
 static void
 swapchain_notify_locked(
-	void)
+	struct vulkan_swapchain *chain)
 {
 	/* Callers retain swapchain_mutex so registration and predicate checks cannot miss this transition. */
 	pthread_cond_broadcast(&swapchain_condition);
-	vulkan_wake_notify(NULL, NULL);
+
+	/* The fd waiters the change concerns. */
+	if (chain != NULL) {
+		vulkan_wake_notify_swapchain(chain);
+	} else {
+		vulkan_wake_notify(NULL, NULL);
+	}
 
 	/* Succeeded: no waiter consumes another waiter's independently retained event. */
+	return;
+}
+
+/*
+ * Publishes a worker, drain or destruction transition to condition waiters.
+ *
+ * No image changes owner, so no acquisition's fd waiter is armed: a
+ * render present's publication does not wake a cursor acquisition.
+ */
+static void
+swapchain_signal_locked(
+	void)
+{
+	/* Callers retain swapchain_mutex, as for an image-state change. */
+	pthread_cond_broadcast(&swapchain_condition);
+
+	/* Succeeded: workers, drains and destructions observe the transition again. */
 	return;
 }
 
@@ -5005,6 +5274,11 @@ present_route(
 
 	/* A present that hides an overlay plane shows no pixels, so only its waits matter. */
 	if (job->overlays != NULL && job->overlays[0].hide != VK_FALSE) {
+		/* A present fence is signaled in order by the worker, behind the presents queued before it. */
+		job->log.why = "next";
+		if (job->present_fences != NULL)
+			return WSI_ROUTE_EMPTY;
+
 		job->log.why = "waits";
 		consumed = present_waits_consume(job, info);
 		if (consumed == VK_FALSE)
@@ -5361,7 +5635,7 @@ present_publish_locked(
 	else
 		worker->head = job;
 	worker->tail = job;
-	swapchain_notify_locked();
+	swapchain_signal_locked();
 
 	/* Succeeded: only the worker may release the job from now on. */
 	return;
