@@ -371,6 +371,8 @@ sessiond_seat_socket(
 			break;
 		}
 	}
+
+	/* All taken: the compositor opens the devices itself. */
 	if (slot == NULL) {
 		sessiond_log("SESSIOND SEAT socket errno=%d", EMFILE);
 		return EMFILE;
@@ -581,6 +583,8 @@ seat_socket_read(
 		seat_socket_close(socket);
 		return;
 	}
+
+	/* Kept after what came before, as one string. */
 	socket->used += (size_t)count;
 	socket->line[socket->used] = '\0';
 
@@ -636,6 +640,8 @@ seat_request(
 		seat_answer(socket->descriptor, EINVAL, -1);
 		return;
 	}
+
+	/* The node's name follows the word. */
 	name = line + 5;
 
 	/* A compositor that does not hold the seat gets nothing of it. */
@@ -683,6 +689,8 @@ seat_node_open(
 		if (digits >= SEAT_NODE_DIGITS)
 			return EINVAL;
 	}
+
+	/* At least one digit. */
 	if (digits == 0U)
 		return EINVAL;
 
@@ -699,7 +707,9 @@ seat_node_open(
 		(void)close(opened);
 		return error;
 	}
-	if (!S_ISCHR(status.st_mode)) {
+
+	/* Anything but a character device is not an input device. */
+	if ((status.st_mode & S_IFMT) != S_IFCHR) {
 		(void)close(opened);
 		return ENODEV;
 	}

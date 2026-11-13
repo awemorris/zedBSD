@@ -567,6 +567,8 @@ greeter_child(
 		arguments[next] = wallpaper;
 		next++;
 	}
+
+	/* The end of the list. */
 	arguments[next] = NULL;
 
 	/* Only a failed exec comes back. */

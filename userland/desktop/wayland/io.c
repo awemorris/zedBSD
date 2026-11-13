@@ -503,6 +503,8 @@ io_devices_start(
 		printf("KWL DEVICES unavailable errno=%d the event loop hears the devices\n", error);
 		return;
 	}
+
+	/* Nothing handed over yet. */
 	server->devices_head = NULL;
 	server->devices_tail = NULL;
 	server->devices_lost = 0U;
@@ -574,6 +576,8 @@ io_devices_run(
 			server->devices_ended = 1U;
 			server->devices_error = error;
 		}
+
+		/* One wake for all that is not taken yet. */
 		wake = 0U;
 		if (!server->devices_woken) {
 			server->devices_woken = 1U;

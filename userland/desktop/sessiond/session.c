@@ -788,10 +788,14 @@ session_child(
 		arguments[next] = seat_option;
 		next++;
 	}
+
+	/* The lock screen first, when the session that crashed showed it. */
 	if (daemon->session_start_locked) {
 		arguments[next] = "--locked";
 		next++;
 	}
+
+	/* The end of the list. */
 	arguments[next] = NULL;
 	(void)execve("/bin/sh", arguments, environment);
 	_exit(127);

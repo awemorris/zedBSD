@@ -176,17 +176,21 @@ void
 kl_backend_events_close(
 	struct kl_backend *backend)
 {
-	/* The devices' descriptor (its thread has ended), the pipe and the lock. */
+	/* The devices' descriptor (its thread has ended). */
 	if (backend->devices_descriptor >= 0) {
 		(void)close(backend->devices_descriptor);
 		backend->devices_descriptor = -1;
 	}
+
+	/* The cancel pipe. */
 	if (backend->cancel[0] >= 0) {
 		(void)close(backend->cancel[0]);
 		(void)close(backend->cancel[1]);
 		backend->cancel[0] = -1;
 		backend->cancel[1] = -1;
 	}
+
+	/* The seat socket's lock. */
 	if (backend->seat_lock_ready) {
 		(void)pthread_mutex_destroy(&backend->seat_lock);
 		backend->seat_lock_ready = 0U;
@@ -227,6 +231,8 @@ kl_backend_devices_start(
 		(void)close(descriptor);
 		return error;
 	}
+
+	/* The thread's from now on. */
 	backend->devices_descriptor = descriptor;
 
 	/* The event loop keeps the machine's own (a refusal leaves both hearing the devices: twice is harmless). */

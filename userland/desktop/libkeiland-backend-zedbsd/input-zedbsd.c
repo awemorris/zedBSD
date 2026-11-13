@@ -657,6 +657,7 @@ seat_open(
 	if (backend->seat_lock_ready)
 		pthread_mutex_lock(&backend->seat_lock);
 
+	/* Nothing is asked on a socket given up. */
 	error = EPIPE;
 	if (!backend->seat_gone)
 		error = seat_ask(backend, socket, request, descriptor);
@@ -709,6 +710,8 @@ seat_ask(
 			(void)close(*descriptor);
 			*descriptor = -1;
 		}
+
+		/* No later answer can be told from this one's: the socket is given up. */
 		backend->seat_gone = 1U;
 		return error;
 	}
@@ -758,6 +761,7 @@ seat_answer(
 	struct pollfd entries[2];
 	struct msghdr header;
 	struct iovec vector;
+	size_t least;
 	size_t used;
 	ssize_t length;
 	nfds_t count;
@@ -803,10 +807,11 @@ seat_answer(
 
 		/* The descriptor, the first that came (sessiond sends one at most). */
 		message_control = CMSG_FIRSTHDR(&header);
+		least = CMSG_LEN(sizeof(int));
 		if (message_control != NULL &&
 		    message_control->cmsg_level == SOL_SOCKET &&
 		    message_control->cmsg_type == SCM_RIGHTS &&
-		    message_control->cmsg_len >= CMSG_LEN(sizeof(int))) {
+		    message_control->cmsg_len >= least) {
 			memcpy(&received, CMSG_DATA(message_control), sizeof(int));
 			if (*descriptor < 0)
 				*descriptor = received;
@@ -822,6 +827,8 @@ seat_answer(
 			*end = '\0';
 			break;
 		}
+
+		/* No room left for the rest of the line. */
 		if (used + 1U >= size)
 			return EPROTO;
 	}
