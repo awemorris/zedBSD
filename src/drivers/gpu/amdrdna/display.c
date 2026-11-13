@@ -45,7 +45,6 @@
 #include <kern/kcrt.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
-#include <kern/poll.h>
 #include <kern/sched.h>
 #include <kern/uaccess.h>
 #include <kern/waitq.h>
@@ -1357,6 +1356,7 @@ amdrdna_display_topology_move(
 	struct amdrdna_device *device)
 {
 	struct amdrdna_display *display;
+	uint64_t topology;
 	unsigned long irq;
 
 	/* One more under the interrupt thread's lock. */
@@ -1364,11 +1364,12 @@ amdrdna_display_topology_move(
 	irq = spin_lock_irqsave(&display->lock);
 
 	display->topology++;
+	topology = display->topology;
 
 	spin_unlock_irqrestore(&display->lock, irq);
 
-	/* Wakes whoever polls the GPU device for the display's events. */
-	poll_notify();
+	/* Signals the display-event fences and wakes whoever polls the GPU device for the display's events. */
+	amdrdna_node_display_changed(device, topology);
 }
 
 /* Reads the console's timing generator's frame counter (24 bits). */
@@ -2153,6 +2154,7 @@ display_hotplug(
 {
 	struct amdrdna_display *display;
 	unsigned long irq;
+	uint64_t topology;
 	uint32_t word;
 	uint32_t status;
 	bool level;
@@ -2195,6 +2197,9 @@ display_hotplug(
 		changed = true;
 	}
 
+	/* The sequence the core compares the display-event fences against. */
+	topology = display->topology;
+
 	spin_unlock_irqrestore(&display->lock, irq);
 
 	/* Tells the pollers of the display's events, outside the lock. */
@@ -2205,8 +2210,8 @@ display_hotplug(
 			amdrdna_mark("display: the monitor on hot-plug line %u was disconnected", display->hotplug);
 		}
 
-		/* Wakes whoever polls the GPU device for the display's events. */
-		poll_notify();
+		/* Signals the display-event fences and wakes whoever polls the GPU device for the display's events. */
+		amdrdna_node_display_changed(device, topology);
 
 		/* The bring-up thread turns the output off, or reads the monitor and lights it again (stage A13). */
 		amdrdna_hotplug_request(device);

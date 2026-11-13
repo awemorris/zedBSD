@@ -80,6 +80,15 @@
 #define GPU_DISPLAY_CURSOR_HIDE		_IOW('G', 43, struct gpu_display_cursor_hide)
 #define GPU_DISPLAY_COMMIT		_IOWR('G', 44, struct gpu_display_commit)
 #define GPU_DISPLAY_OVERLAY_INFO	_IOWR('G', 45, struct gpu_display_overlay_info)
+#define GPU_DISPLAY_FENCE		_IOWR('G', 54, struct gpu_display_fence)
+#define GPU_DISPLAY_FENCE_CANCEL	_IOW('G', 55, struct gpu_display_fence_cancel)
+
+/* gpu_display_fence.event: what signals the fence. */
+#define GPU_DISPLAY_FENCE_HOTPLUG	1U	/* the display topology changes after the registration */
+#define GPU_DISPLAY_FENCE_REFRESH	2U	/* one display refreshes (not offered yet: EOPNOTSUPP) */
+
+/* The registrations one open may hold unsignaled at once. */
+#define GPU_DISPLAY_FENCE_MAX		16U
 
 /*
  * One non-destructive display-change snapshot, with an optional exact acknowledgement.
@@ -412,6 +421,45 @@ struct gpu_display_commit {
 	uint64_t sequence;
 	uint64_t adopted;
 	uint64_t reserved;
+};
+
+/*
+ * One display event the kernel signals a fence for (GPU_DISPLAY_FENCE), from a
+ * readable open of a node with GPU_CAP_DISPLAY_EVENTS.
+ *
+ * Inputs are version, size, flags (GPU_HANDLE_CLOEXEC, GPU_HANDLE_CLOFORK) and
+ * event; fd is -1 and every other field zero.  The kernel reads the node's
+ * topology sequence at the registration and signals the returned fence once
+ * the sequence moves past it, also when the move raced the registration.  The
+ * fence is the payload of GPU_FENCE_*: poll its fd for POLLIN.  The device's
+ * withdrawal or failure, or the open's final close, signal it with ENODEV
+ * (POLLIN and POLLERR).  A signaled registration needs no cancel; an open holds
+ * at most GPU_DISPLAY_FENCE_MAX unsignaled ones (ENOSPC beyond them).
+ * display_id and generation are reserved for GPU_DISPLAY_FENCE_REFRESH.
+ */
+struct gpu_display_fence {
+	uint32_t version;
+	uint32_t size;
+	uint32_t flags;
+	uint32_t event;
+	uint32_t display_id;
+	uint32_t reserved;
+	uint64_t generation;
+	int32_t fd;
+	uint32_t reserved2;
+};
+
+/*
+ * Withdraws one registration of this open (GPU_DISPLAY_FENCE_CANCEL): fd names
+ * the fence GPU_DISPLAY_FENCE returned.  An unsignaled fence stays unsignaled
+ * and the kernel forgets it.  ENOENT when the open holds no registration of
+ * it, which includes a signaled one the kernel has already forgotten.
+ */
+struct gpu_display_fence_cancel {
+	uint32_t version;
+	uint32_t size;
+	int32_t fd;
+	uint32_t reserved;
 };
 
 /* One overlay plane's limits on the output's current mode (vkGetDisplayPlaneCapabilitiesKHR); it names the output and needs no lease. */

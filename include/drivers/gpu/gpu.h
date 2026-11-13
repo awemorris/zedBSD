@@ -208,6 +208,19 @@ void drv_gpu_report_session_error(struct drv_gpu_device *device, void *session, 
 void drv_gpu_capacity_changed(struct drv_gpu_device *device);
 
 /*
+ * Publishes a new display topology sequence of the device.
+ *
+ * The backend calls it after its events operation reports the new sequence, in
+ * place of the poll_notify() that the change would otherwise make: it signals
+ * every GPU_DISPLAY_FENCE hotplug registration whose sequence is older and then
+ * wakes every poll.  It takes only the core's registry lock and the fences'
+ * IRQ-safe locks, so it may run in an interrupt handler or a thread, but never
+ * under a lock the events operation takes.  The caller retains the wrapper
+ * (a NULL one, before publication or after withdrawal, only wakes the polls).
+ */
+void drv_gpu_display_changed(struct drv_gpu_device *device, uint64_t sequence);
+
+/*
  * Says and clears the GPU ioctl timing's sums (a build with -DGPU_IOCTL_TIMING=1;
  * nothing otherwise), from a backend's timing thread.
  */

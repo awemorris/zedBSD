@@ -18,6 +18,7 @@
  */
 
 #include "internal.h"
+#include "display.h"
 #include "hpd.h"
 #include "xd-dp.h"
 #include "dp-ext-kern.h"
@@ -33,7 +34,6 @@
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
-#include <kern/poll.h>
 #include <kern/sched.h>
 
 #include <uapi/errno.h>
@@ -695,8 +695,8 @@ drv_i915_hpd_topology_touch(
 
 	spin_unlock_irqrestore(&world->topology_lock, irq);
 
-	/* A display session waiting for the change hears of it. */
-	poll_notify();
+	/* The display-event fences and the sessions waiting for the change hear of it. */
+	drv_i915_display_changed(display->device);
 }
 
 /*
@@ -1228,9 +1228,9 @@ i915_hpd_topology_update(
 
 	spin_unlock_irqrestore(&world->topology_lock, irq);
 
-	/* A display session waiting for the change hears of it. */
+	/* The display-event fences and the sessions waiting for the change hear of it. */
 	if (publish)
-		poll_notify();
+		drv_i915_display_changed(world->display->device);
 }
 
 /* Arms a delayed work for a new delay, replacing an arming not yet run. */

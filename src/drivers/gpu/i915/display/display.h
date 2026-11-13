@@ -51,6 +51,9 @@ void drv_i915_display_destroy(struct i915_device *device);
 
 /* Reports the display topology's sequence (the display events operation). */
 int drv_i915_display_events(void *device, void *session, uint64_t *sequence);
+
+/* Tells the GPU core that the display topology's sequence moved; no lock of the sequence may be held. */
+void drv_i915_display_changed(struct i915_device *device);
 int drv_i915_display_resident_identity(struct i915_display *display, uint32_t *display_id, uint64_t *generation, int *connected);
 
 /* Tells whether a display ID and generation name the resident output or another connector: 0, ENOENT or ESTALE. */
