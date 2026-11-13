@@ -26,6 +26,17 @@ enum vulkan_sync_event {
 	VULKAN_SYNC_EVENT_SPENT
 };
 
+/*
+ * One kernel registration of a hotplug fence: the display node it lives on
+ * (its native identity) and the fence descriptor the kernel returned.  The
+ * kernel signals the descriptor when the node's display topology changes,
+ * and with an error when the node is withdrawn or fails.
+ */
+struct vulkan_sync_event_fence {
+	uint64_t node;
+	int fd;
+};
+
 /* A device mutex protects the software payload of one ordinary sync object. */
 struct vulkan_sync {
 	struct vulkan_object object;
@@ -42,17 +53,28 @@ struct vulkan_sync {
 	VkBool32 native_unsubmitted;
 	/*
 	 * A fence registered for a display event is signaled by this library
-	 * when its observation (vulkan_display_event_poll) sees the event: a
-	 * topology sequence above the cursor (HOTPLUG), or a refresh boundary of
-	 * event_display after the cursor of generation event_generation (REFRESH).
+	 * when its observation (vulkan_display_event_poll) sees the event.  A
+	 * HOTPLUG fence sees it when one of its kernel registrations
+	 * (event_fences) is signaled.  A REFRESH fence sees a refresh boundary
+	 * of event_display after the cursor of generation event_generation;
 	 * event_based is false until a cursor was taken.  The device mutex
-	 * protects these fields.
+	 * protects event and the REFRESH fields.
 	 */
 	enum vulkan_sync_event event;
 	VkBool32 event_based;
 	struct vulkan_display *event_display;
 	uint64_t event_cursor;
 	uint64_t event_generation;
+	/*
+	 * The kernel registrations of a HOTPLUG fence, one for each display
+	 * node of the renderer that reports topology events.  They are filled
+	 * before the fence is handed to the application and stay until the
+	 * fence is destroyed, so a wait may read them without the device mutex;
+	 * a reset withdraws them from the kernel but keeps the descriptors open
+	 * while a concurrent wait may still poll them.
+	 */
+	struct vulkan_sync_event_fence *event_fences;
+	uint32_t event_fence_count;
 };
 
 /* These helpers never acquire a device mutex; their caller already owns it. */
@@ -69,8 +91,10 @@ VkResult vulkan_sync_ledger_reap(struct vulkan_context *context);
 VkResult vulkan_sync_job_retired(struct vulkan_sync *sync);
 void vulkan_sync_quiesce(struct vulkan_sync *sync);
 
-/* Display events; the caller owns the fence's device mutex. */
+/* Display events; the caller owns the fence's device mutex, except for the final release. */
 VkBool32 vulkan_display_event_poll(struct VkDevice_T *device, struct vulkan_sync *sync);
+void vulkan_display_event_reset_locked(struct VkDevice_T *device, struct vulkan_sync *sync);
+void vulkan_display_event_finish(struct vulkan_sync *sync);
 
 /* Shared reference payloads retain native completion proof and caller-owned synchronization. */
 VkResult vulkan_external_fence_create(struct VkDevice_T *device, struct vulkan_sync *sync, const VkFenceCreateInfo *create);

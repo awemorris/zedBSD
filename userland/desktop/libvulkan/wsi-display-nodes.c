@@ -10,6 +10,7 @@
  */
 
 #include "wsi-internal.h"
+#include "sync-internal.h"
 
 #include <uapi/gpu-scanout.h>
 #include <dirent.h>
@@ -50,6 +51,9 @@ static int node_ioctl(struct wsi_display_node *node, unsigned long command, void
 static VkBool32 node_is_renderer(struct wsi_display_inventory *inventory, struct wsi_display_node *node);
 static VkBool32 node_name(const char *name);
 static uint64_t renderer_identity(struct wsi_display_inventory *inventory, struct VkPhysicalDevice_T *physical);
+static int node_hotplug_register(struct wsi_display_node *node, int *fd);
+static void node_hotplug_cancel(struct wsi_display_node *node, int fd);
+static VkBool32 node_is_display(struct wsi_display_node *node, uint64_t renderer);
 
 /*
  * Enumerates only displays assigned to this Vulkan renderer by stable native identity.
@@ -182,63 +186,171 @@ vulkan_wsi_display_node_ioctl(
 }
 
 /*
- * Sums the topology sequences of the display nodes assigned to this renderer.
+ * Counts the display nodes assigned to this renderer.
  *
- * Each node's sequence only grows, so the sum grows exactly when one of them
- * does: a hotplug fence compares it with the sum taken at registration.  The
- * query is the non-destructive one on the node's discovery open, which no
- * lease shares, and it acknowledges nothing.  A node without topology events
- * contributes nothing.
+ * The count bounds the kernel registrations one hotplug fence needs
+ * (vulkan_wsi_display_node_hotplug): the inventory does not change while
+ * the instance lives.
  */
 VkResult
-vulkan_wsi_display_node_topology(
+vulkan_wsi_display_node_count(
 	struct VkPhysicalDevice_T *physical,
-	uint64_t *sequence)
+	uint32_t *count)
 {
 	struct wsi_display_inventory *inventory;
 	struct wsi_display_node *node;
-	struct gpu_display_events request;
 	uint64_t renderer;
-	uint64_t total;
+	uint32_t total;
+	VkBool32 display;
 	VkResult error;
-	int status;
+
+	/* The cached inventory names the nodes. */
+	error = inventory_get(physical->instance, &inventory);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Counts every display node assigned to this renderer. */
+	renderer = renderer_identity(inventory, physical);
+	total = 0U;
+	for (node = inventory->nodes; node != NULL; node = node->next) {
+		/* Another renderer's outputs and render-only nodes do not count. */
+		display = node_is_display(node, renderer);
+		if (display != VK_FALSE)
+			total++;
+	}
+
+	/* Succeeded: the caller sizes its registrations by this count. */
+	*count = total;
+	return VK_SUCCESS;
+}
+
+/*
+ * Registers a hotplug fence with every display node of this renderer.
+ *
+ * Each node that reports topology events returns a kernel fence the node
+ * signals at its next topology change (GPU_DISPLAY_FENCE); the entries
+ * receive the node and the descriptor, at most capacity of them.  A node
+ * without topology events, or one already withdrawn, has no hotplug to
+ * report and is skipped.  On a failure every registration made here is
+ * withdrawn and closed again.
+ */
+VkResult
+vulkan_wsi_display_node_hotplug(
+	struct VkPhysicalDevice_T *physical,
+	uint32_t capacity,
+	struct vulkan_sync_event_fence *entries,
+	uint32_t *count)
+{
+	struct wsi_display_inventory *inventory;
+	struct wsi_display_node *node;
+	uint64_t renderer;
+	uint32_t registered;
+	uint32_t index;
+	VkBool32 display;
+	VkResult error;
+	int native_error;
+	int fd;
+
+	/* Nothing is registered until a node answers. */
+	*count = 0U;
 
 	/* The cached inventory names the nodes and their discovery opens. */
 	error = inventory_get(physical->instance, &inventory);
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* Adds the current sequence of every display node assigned to this renderer. */
+	/* Registers with every display node of the renderer, in identity order. */
 	renderer = renderer_identity(inventory, physical);
-	total = 0U;
+	registered = 0U;
+	error = VK_SUCCESS;
 	for (node = inventory->nodes; node != NULL; node = node->next) {
 		/* Another renderer's outputs and render-only nodes have no hotplug for this device. */
-		if (renderer == 0U ||
-		    node->renderer != renderer ||
-		    (node->info.roles & GPU_DEVICE_DISPLAY) == 0U)
+		display = node_is_display(node, renderer);
+		if (display == VK_FALSE)
 			continue;
 
-		/* Samples the node's topology sequence without acknowledging it. */
-		memset(&request, 0, sizeof(request));
-		request.version = GPU_ABI_VERSION;
-		request.size = sizeof(request);
-		status = node_ioctl(node, GPU_DISPLAY_EVENTS, &request);
-		if (status != 0) {
-			/* A node without topology events never reports a hotplug. */
-			if (errno == EOPNOTSUPP)
-				continue;
-
-			/* A failed node cannot say whether its topology changed. */
-			return VK_ERROR_SURFACE_LOST_KHR;
+		/* The caller sized the entries by the node count, which does not change. */
+		if (registered == capacity) {
+			error = VK_ERROR_UNKNOWN;
+			break;
 		}
 
-		/* The sum cannot wrap: each sequence counts events from one. */
-		total += request.sequence;
+		/* Asks the node for a fence its next topology change signals. */
+		native_error = node_hotplug_register(node, &fd);
+		if (native_error == EOPNOTSUPP || native_error == ENODEV) {
+			/* A node without topology events, or a withdrawn one, reports no hotplug. */
+			continue;
+		} else if (native_error == ENOSPC ||
+			   native_error == ENOMEM ||
+			   native_error == EMFILE ||
+			   native_error == ENFILE) {
+			/* The open's registrations or the process's descriptors ran out. */
+			error = VK_ERROR_OUT_OF_HOST_MEMORY;
+			break;
+		} else if (native_error != 0) {
+			/* Any other refusal leaves the node unable to report its hotplug. */
+			error = VK_ERROR_UNKNOWN;
+			break;
+		}
+
+		/* The entry owns the descriptor from here. */
+		entries[registered].node = node->info.device_id;
+		entries[registered].fd = fd;
+		registered++;
 	}
 
-	/* Succeeded: the caller compares this sum with an earlier one. */
-	*sequence = total;
+	/* A failure withdraws and closes what was registered, so no node keeps a registration for nothing. */
+	if (error != VK_SUCCESS) {
+		for (index = 0U; index < registered; index++) {
+			vulkan_wsi_display_node_hotplug_cancel(physical, entries[index].node, entries[index].fd);
+			close(entries[index].fd);
+		}
+		return error;
+	}
+
+	/* Succeeded: the entries hold one registration for each node that reports hotplug. */
+	*count = registered;
 	return VK_SUCCESS;
+}
+
+/*
+ * Withdraws one hotplug registration from the node that made it.
+ *
+ * The descriptor stays open and belongs to the caller.  A registration the
+ * kernel has already signaled and forgotten, or a node that is gone, has
+ * nothing left to withdraw.
+ */
+void
+vulkan_wsi_display_node_hotplug_cancel(
+	struct VkPhysicalDevice_T *physical,
+	uint64_t node_identity,
+	int fd)
+{
+	struct wsi_display_inventory *inventory;
+	struct wsi_display_node *node;
+	VkResult error;
+
+	/* The cached inventory still holds the node's discovery open. */
+	error = inventory_get(physical->instance, &inventory);
+	if (error != VK_SUCCESS)
+		return;
+
+	/* Finds the node by the identity the registration recorded. */
+	for (node = inventory->nodes; node != NULL; node = node->next) {
+		/* The discovery open that registered the fence is the one that withdraws it. */
+		if (node->info.device_id == node_identity)
+			break;
+	}
+
+	/* A node that left the inventory took its registrations with its open. */
+	if (node == NULL)
+		return;
+
+	/* Withdraws the registration from the node's open. */
+	node_hotplug_cancel(node, fd);
+
+	/* Succeeded: the kernel no longer signals the descriptor. */
+	return;
 }
 
 /*
@@ -657,4 +769,76 @@ renderer_identity(
 
 	/* Succeeded: the physical renderer resolves to this stable native identity. */
 	return node->info.device_id;
+}
+
+/* Registers one hotplug fence on a node's discovery open; returns 0 or the kernel's errno. */
+static int
+node_hotplug_register(
+	struct wsi_display_node *node,
+	int *fd)
+{
+	struct gpu_display_fence request;
+	int status;
+
+	/* A hotplug registration names no display; the kernel fills in the descriptor. */
+	memset(&request, 0, sizeof(request));
+	request.version = GPU_ABI_VERSION;
+	request.size = sizeof(request);
+	request.flags = GPU_HANDLE_CLOEXEC;
+	request.event = GPU_DISPLAY_FENCE_HOTPLUG;
+	request.fd = -1;
+	status = node_ioctl(node, GPU_DISPLAY_FENCE, &request);
+	if (status != 0)
+		return errno;
+
+	/* Succeeded: the caller owns the descriptor of the registered fence. */
+	*fd = request.fd;
+	return 0;
+}
+
+/* Withdraws one registration from a node's discovery open, ignoring one already forgotten. */
+static void
+node_hotplug_cancel(
+	struct wsi_display_node *node,
+	int fd)
+{
+	struct gpu_display_fence_cancel request;
+	int status;
+
+	/*
+	 * ENOENT means the kernel signaled the registration and has since
+	 * reclaimed it, and any other failure leaves nothing this library could
+	 * do: the outcome is not needed.
+	 */
+	memset(&request, 0, sizeof(request));
+	request.version = GPU_ABI_VERSION;
+	request.size = sizeof(request);
+	request.fd = fd;
+	status = node_ioctl(node, GPU_DISPLAY_FENCE_CANCEL, &request);
+	(void)status;
+
+	/* Succeeded: the node no longer holds the registration. */
+	return;
+}
+
+/* Reports whether a node is a display node assigned to the given renderer. */
+static VkBool32
+node_is_display(
+	struct wsi_display_node *node,
+	uint64_t renderer)
+{
+	/* A device with no renderer of its own has no display nodes. */
+	if (renderer == 0U)
+		return VK_FALSE;
+
+	/* Another renderer's outputs belong to another physical device. */
+	if (node->renderer != renderer)
+		return VK_FALSE;
+
+	/* A render-only node has no outputs. */
+	if ((node->info.roles & GPU_DEVICE_DISPLAY) == 0U)
+		return VK_FALSE;
+
+	/* Succeeded: the node's outputs belong to this renderer. */
+	return VK_TRUE;
 }

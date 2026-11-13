@@ -307,6 +307,7 @@ queue_enqueue(
 	struct vulkan_queue_transaction transaction;
 	struct vulkan_queue_fence *private_fence;
 	struct vulkan_sync *completion;
+	VkFence caller_fence;
 	VkResult status;
 	VkBool32 accepted;
 	VkBool32 prepared;
@@ -356,6 +357,7 @@ queue_enqueue(
 	}
 
 	/* The host must finish borrowing a public completion proof before its next submission. */
+	caller_fence = fence;
 	completion = vulkan_sync_object((uint64_t)(uintptr_t)fence);
 	mark = vulkan_timing_start();
 	vulkan_sync_quiesce(completion);
@@ -436,6 +438,13 @@ queue_enqueue(
 	/* A WSI caller retains its lock until it publishes the accepted presentation job. */
 	if (locked == VK_FALSE)
 		pthread_mutex_unlock(&queue->mutex);
+
+	/*
+	 * The waits for the caller's fence see that a queue holds it now: they
+	 * sleep on its job from here.  A lost device has woken every wait.
+	 */
+	if (accepted != VK_FALSE)
+		vulkan_wake_notify_fence(device, caller_fence);
 
 	/* Temporary payload observations never outlive this synchronous API call. */
 	vulkan_free(&device->object.allocator, transaction.waits);

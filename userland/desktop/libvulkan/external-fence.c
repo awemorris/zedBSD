@@ -187,6 +187,9 @@ vkImportFenceFdKHR(
 	if (retired >= 0)
 		close(retired);
 
+	/* The waits for the fence observe its new payload. */
+	vulkan_wake_notify_fence(owner, pImportFenceFdInfo->fence);
+
 	/* Succeeded: the caller must no longer use or close its imported descriptor. */
 	return VK_SUCCESS;
 }

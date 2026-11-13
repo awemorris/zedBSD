@@ -33,6 +33,8 @@ static struct vulkan_wake *vulkan_wakes;
 
 static void vulkan_registry_lock(void);
 static void vulkan_registry_unlock(void);
+static VkResult wake_register(struct vulkan_wake *wake, struct VkDevice_T *device, uint32_t count, const VkFence *fences);
+static void wake_arm(struct vulkan_wake *wake);
 
 /*
  * Allocates host storage with the caller's specified allocation policy.
@@ -541,30 +543,39 @@ vulkan_wake_create(
 	struct vulkan_wake *wake,
 	struct VkDevice_T *device)
 {
-	int descriptors[2];
-	int error;
+	VkResult status;
 
-	/* Both ends are private, nonblocking and absent from subsequently executed programs. */
-	memset(wake, 0, sizeof(*wake));
-	wake->read_fd = -1;
-	wake->write_fd = -1;
-	error = pipe2(descriptors, O_CLOEXEC | O_NONBLOCK);
-	if (error != 0)
-		return VK_ERROR_OUT_OF_HOST_MEMORY;
-
-	/* Registration precedes the mandatory fresh error and image-ownership observation. */
-	wake->device = device;
-	wake->context = device->object.context;
-	wake->read_fd = descriptors[0];
-	wake->write_fd = descriptors[1];
-	pthread_mutex_lock(&vulkan_wake_mutex);
-
-	wake->next = vulkan_wakes;
-	vulkan_wakes = wake;
-
-	pthread_mutex_unlock(&vulkan_wake_mutex);
+	/* An image wait names no fence: errors and image transitions arm it. */
+	status = wake_register(wake, device, 0U, NULL);
+	if (status != VK_SUCCESS)
+		return status;
 
 	/* Succeeded: later matching publications cannot lose this waiter's wake. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Registers one private event fd for a wait on the given fences.
+ *
+ * The array is borrowed until vulkan_wake_destroy: a submission, reset,
+ * import or acquisition of one of these fences arms the wake, and the
+ * device's or the context's error does too.
+ */
+VkResult
+vulkan_wake_create_fences(
+	struct vulkan_wake *wake,
+	struct VkDevice_T *device,
+	uint32_t count,
+	const VkFence *fences)
+{
+	VkResult status;
+
+	/* The fence set is in place before any publisher can see the wake. */
+	status = wake_register(wake, device, count, fences);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* Succeeded: a change of one of the fences after this point arms the wake. */
 	return VK_SUCCESS;
 }
 
@@ -607,6 +618,9 @@ vulkan_wake_destroy(
 
 /*
  * Arms each matching waiter independently without acquiring renderer or WSI locks.
+ *
+ * A device names its own errors, a context the renderer's; neither names
+ * an image transition, which arms the image waits but not the fence waits.
  */
 void
 vulkan_wake_notify(
@@ -614,13 +628,10 @@ vulkan_wake_notify(
 	struct vulkan_context *context)
 {
 	struct vulkan_wake *wake;
-	unsigned char token;
-	ssize_t bytes;
 	int saved_error;
 
 	/* One full pipe is already armed, so notification never waits for a reader. */
 	saved_error = errno;
-	token = 1;
 	pthread_mutex_lock(&vulkan_wake_mutex);
 
 	/* Each waiter owns its own token; another consumer cannot steal its notification. */
@@ -633,10 +644,14 @@ vulkan_wake_notify(
 		if (context != NULL && wake->context != context)
 			continue;
 
-		/* Only signal interruption warrants retry; EAGAIN already represents an armed event. */
-		do {
-			bytes = write(wake->write_fd, &token, sizeof(token));
-		} while (bytes < 0 && errno == EINTR);
+		/* An image transition (no device, no context) says nothing to a fence wait. */
+		if (device == NULL &&
+		    context == NULL &&
+		    wake->fence_count != 0U)
+			continue;
+
+		/* The waiter observes its predicates again. */
+		wake_arm(wake);
 	}
 
 	pthread_mutex_unlock(&vulkan_wake_mutex);
@@ -645,6 +660,60 @@ vulkan_wake_notify(
 	errno = saved_error;
 
 	/* Succeeded: no callback or secondary ownership lock was entered by publication. */
+	return;
+}
+
+/*
+ * Arms only the fence waits of a device that wait for this fence.
+ *
+ * The caller has changed what an observation of the fence sees -- a queue
+ * now holds it, it was reset, imported or signaled by an acquisition -- and
+ * released the device mutex that observation takes, so a woken waiter sees
+ * the change.  Waits for other fences, and image waits, are not woken.
+ */
+void
+vulkan_wake_notify_fence(
+	struct VkDevice_T *device,
+	VkFence fence)
+{
+	struct vulkan_wake *wake;
+	uint32_t index;
+	int saved_error;
+
+	/* A null fence changes nothing anybody waits for. */
+	if (fence == VK_NULL_HANDLE)
+		return;
+
+	/* The wake list is walked under the same lock as registration and retirement. */
+	saved_error = errno;
+	pthread_mutex_lock(&vulkan_wake_mutex);
+
+	/* Each fence wait of this device that names the fence gets its own token. */
+	for (wake = vulkan_wakes; wake != NULL; wake = wake->next) {
+		/* Another device's waits observe other fences. */
+		if (wake->device != device)
+			continue;
+
+		/* Looks for the fence among the ones this wait observes. */
+		for (index = 0U; index < wake->fence_count; index++) {
+			if (wake->fences[index] == fence)
+				break;
+		}
+
+		/* A wait that does not name the fence sleeps on. */
+		if (index == wake->fence_count)
+			continue;
+
+		/* The waiter observes its fences again. */
+		wake_arm(wake);
+	}
+
+	pthread_mutex_unlock(&vulkan_wake_mutex);
+
+	/* The notification keeps the caller's error observation. */
+	errno = saved_error;
+
+	/* Succeeded: only the waits for this fence were woken. */
 	return;
 }
 
@@ -737,5 +806,62 @@ vulkan_registry_unlock(
 		abort();
 
 	/* Succeeded: other registry users may now proceed. */
+	return;
+}
+
+/* Opens a wake's pipe and links it, with its fence set, before the caller's first observation. */
+static VkResult
+wake_register(
+	struct vulkan_wake *wake,
+	struct VkDevice_T *device,
+	uint32_t count,
+	const VkFence *fences)
+{
+	int descriptors[2];
+	int error;
+
+	/* Both ends are private, nonblocking and absent from subsequently executed programs. */
+	memset(wake, 0, sizeof(*wake));
+	wake->read_fd = -1;
+	wake->write_fd = -1;
+	error = pipe2(descriptors, O_CLOEXEC | O_NONBLOCK);
+	if (error != 0)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* What the wake watches is fixed before a publisher can see it. */
+	wake->device = device;
+	wake->context = device->object.context;
+	wake->fences = fences;
+	wake->fence_count = count;
+	wake->read_fd = descriptors[0];
+	wake->write_fd = descriptors[1];
+
+	/* Registration precedes the mandatory fresh error and payload observation. */
+	pthread_mutex_lock(&vulkan_wake_mutex);
+
+	wake->next = vulkan_wakes;
+	vulkan_wakes = wake;
+
+	pthread_mutex_unlock(&vulkan_wake_mutex);
+
+	/* Succeeded: later matching publications cannot lose this waiter's wake. */
+	return VK_SUCCESS;
+}
+
+/* Writes one token to a registered wake; the caller holds the wake list's lock. */
+static void
+wake_arm(
+	struct vulkan_wake *wake)
+{
+	unsigned char token;
+	ssize_t bytes;
+
+	/* Only signal interruption warrants retry; EAGAIN already represents an armed event. */
+	token = 1;
+	do {
+		bytes = write(wake->write_fd, &token, sizeof(token));
+	} while (bytes < 0 && errno == EINTR);
+
+	/* Succeeded: the waiter's poll finds the pipe readable. */
 	return;
 }

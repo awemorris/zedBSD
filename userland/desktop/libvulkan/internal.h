@@ -501,18 +501,30 @@ struct vulkan_notification {
 	unsigned waiters;
 };
 
-/* One blocked operation owns independent error and image-transition wake storage. */
+/*
+ * One blocked operation owns independent error and image-transition wake storage.
+ *
+ * A fence wait's wake also names the fences it waits for (fences, borrowed
+ * from the caller for the length of the wait): it is armed by the device's
+ * and the context's errors and by a change of one of those fences, never by
+ * an image transition or by another fence's submission.  An image wait has
+ * no fences and is armed by errors and image transitions.
+ */
 struct vulkan_wake {
 	struct vulkan_wake *next;
 	struct VkDevice_T *device;
 	struct vulkan_context *context;
+	const VkFence *fences;
+	uint32_t fence_count;
 	int read_fd;
 	int write_fd;
 };
 
 VkResult vulkan_wake_create(struct vulkan_wake *wake, struct VkDevice_T *device);
+VkResult vulkan_wake_create_fences(struct vulkan_wake *wake, struct VkDevice_T *device, uint32_t count, const VkFence *fences);
 void vulkan_wake_destroy(struct vulkan_wake *wake);
 void vulkan_wake_notify(struct VkDevice_T *device, struct vulkan_context *context);
+void vulkan_wake_notify_fence(struct VkDevice_T *device, VkFence fence);
 void vulkan_wake_drain(struct vulkan_wake *wake);
 void vulkan_context_error(struct vulkan_context *context, VkResult error);
 void vulkan_sync_reap_locked(struct vulkan_context *context);

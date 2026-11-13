@@ -332,7 +332,10 @@ int vulkan_wsi_display_node_ioctl(struct VkPhysicalDevice_T *physical, const str
 void vulkan_wsi_display_overlay_flush(struct VkDevice_T *device);
 VkResult vulkan_wsi_display_overlay_info(struct VkPhysicalDevice_T *physical, const struct vulkan_wsi_output *output, uint32_t plane, struct gpu_display_overlay_info *info);
 void vulkan_wsi_display_nodes_finish(struct VkInstance_T *instance);
-VkResult vulkan_wsi_display_node_topology(struct VkPhysicalDevice_T *physical, uint64_t *sequence);
+struct vulkan_sync_event_fence;
+VkResult vulkan_wsi_display_node_count(struct VkPhysicalDevice_T *physical, uint32_t *count);
+VkResult vulkan_wsi_display_node_hotplug(struct VkPhysicalDevice_T *physical, uint32_t capacity, struct vulkan_sync_event_fence *entries, uint32_t *count);
+void vulkan_wsi_display_node_hotplug_cancel(struct VkPhysicalDevice_T *physical, uint64_t node_identity, int fd);
 
 /* Reads a monotonic nanosecond clock fine enough for the cursor log's lengths. */
 uint64_t vulkan_wsi_cursor_clock(void);

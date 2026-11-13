@@ -10,20 +10,29 @@
  * surface counters they depend on (VK_EXT_display_surface_counter).
  *
  * A fence registered for an event is an ordinary fence whose payload this
- * library signals.  No thread watches the kernel: each observation of a
- * pending event fence asks the kernel once, without waiting, whether the
- * event happened after the cursor the fence took, and a fence that saw its
- * event stays signaled until it is reset.  Waiting on such a fence uses the
- * fence wait's bounded polling.  Each fence keeps its own cursor, so one
- * client's observation never consumes another's, and no request
- * acknowledges the topology on any open.
+ * library signals once it sees the event, and which stays signaled until it
+ * is reset.  No thread watches the kernel.
+ *
+ * A hotplug fence holds one kernel fence for each display node of the
+ * renderer (GPU_DISPLAY_FENCE): the kernel signals it at the node's next
+ * topology change, also one that raced the registration.  An observation
+ * of the Vulkan fence polls those descriptors without waiting, and a wait
+ * sleeps in poll on them, so nothing asks the kernel periodically.  Each
+ * fence has registrations of its own, so one client's observation never
+ * consumes another's, and no request acknowledges the topology on any open.
+ *
+ * A refresh fence keeps a cursor of the display's refresh count: each
+ * observation asks the kernel once, without waiting, whether a boundary
+ * came after it, and a wait on it uses the fence wait's bounded polling.
  */
 
 #include "wsi-internal.h"
 #include "sync-internal.h"
 
 #include <errno.h>
+#include <poll.h>
 #include <string.h>
+#include <unistd.h>
 
 static VkResult event_fence_create(VkDevice device_handle, const VkAllocationCallbacks *allocator, VkFence *fence, struct vulkan_sync **sync);
 static VkBool32 event_hotplug_poll(struct VkDevice_T *device, struct vulkan_sync *sync);
@@ -131,10 +140,11 @@ vkDisplayPowerControlEXT(
 /*
  * Registers a fence signaled when a display of the device is plugged or unplugged.
  *
- * The fence takes the topology sequence of the device's display nodes now;
- * it is signaled once a later observation finds the sequence above it, and
- * stays signaled until it is reset.  A client registers a new fence before it
- * enumerates the displays again, so a change between the two is not missed.
+ * Every display node of the renderer that reports topology events gets a
+ * kernel registration now; the fence is signaled once one of them is, and
+ * stays signaled until it is reset.  A client registers a new fence before
+ * it enumerates the displays again, so a change between the two is not
+ * missed.  A renderer without such a node gets a fence nothing signals.
  */
 VKAPI_ATTR VkResult VKAPI_CALL
 vkRegisterDeviceEventEXT(
@@ -145,7 +155,9 @@ vkRegisterDeviceEventEXT(
 {
 	struct VkDevice_T *owner;
 	struct vulkan_sync *sync;
-	uint64_t sequence;
+	struct vulkan_sync_event_fence *entries;
+	uint32_t capacity;
+	uint32_t count;
 	VkResult error;
 
 	/* Resolves the device; the hotplug is the only device event. */
@@ -160,6 +172,11 @@ vkRegisterDeviceEventEXT(
 	    pDeviceEventInfo->deviceEvent != VK_DEVICE_EVENT_TYPE_DISPLAY_HOTPLUG_EXT)
 		return VK_ERROR_UNKNOWN;
 
+	/* The registrations needed: one for each display node of the renderer. */
+	error = vulkan_wsi_display_node_count(owner->physical, &capacity);
+	if (error != VK_SUCCESS)
+		return error;
+
 	/* Creates the ordinary unsignaled fence the event will signal. */
 	error = event_fence_create(device, pAllocator, pFence, &sync);
 	if (error != VK_SUCCESS)
@@ -169,15 +186,36 @@ vkRegisterDeviceEventEXT(
 	sync->event = VULKAN_SYNC_EVENT_HOTPLUG;
 	sync->event_based = VK_FALSE;
 
-	/*
-	 * The cursor is the topology sequence now.  A failed sample leaves the
-	 * fence without a cursor; its first successful observation takes one.
-	 */
-	error = vulkan_wsi_display_node_topology(owner->physical, &sequence);
-	if (error == VK_SUCCESS) {
-		sync->event_cursor = sequence;
-		sync->event_based = VK_TRUE;
+	/* A renderer without display nodes has no registration to hold. */
+	if (capacity == 0U)
+		return VK_SUCCESS;
+
+	/* The registrations' storage follows the fence's allocation policy and lifetime. */
+	entries = vulkan_allocate(&sync->object.allocator, (size_t)capacity * sizeof(*entries), sizeof(uint64_t), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (entries == NULL) {
+		vkDestroyFence(device, *pFence, pAllocator);
+		*pFence = VK_NULL_HANDLE;
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
 	}
+
+	/* Asks each display node for a fence its next topology change signals. */
+	error = vulkan_wsi_display_node_hotplug(owner->physical, capacity, entries, &count);
+	if (error != VK_SUCCESS) {
+		vulkan_free(&sync->object.allocator, entries);
+		vkDestroyFence(device, *pFence, pAllocator);
+		*pFence = VK_NULL_HANDLE;
+		return error;
+	}
+
+	/* No node reports topology events: the fence holds nothing. */
+	if (count == 0U) {
+		vulkan_free(&sync->object.allocator, entries);
+		return VK_SUCCESS;
+	}
+
+	/* The fence owns the registrations until it is destroyed. */
+	sync->event_fences = entries;
+	sync->event_fence_count = count;
 
 	/* Succeeded: the caller owns a fence the next hotplug signals. */
 	return VK_SUCCESS;
@@ -287,6 +325,85 @@ vulkan_display_event_poll(
 	return fired;
 }
 
+/*
+ * Retires a display-event fence's observation as vkResetFences resets it.
+ *
+ * The caller owns the device mutex.  A hotplug fence whose event has
+ * happened -- observed already, or signaled by the kernel and not observed
+ * yet -- is spent: it observes nothing again, and its registrations are
+ * withdrawn from the kernel.  A pending hotplug fence is unsignaled
+ * already, so its reset changes nothing and it keeps waiting for the
+ * event.  The descriptors stay open until the fence is destroyed, because
+ * a wait on another thread may be polling them.
+ */
+void
+vulkan_display_event_reset_locked(
+	struct VkDevice_T *device,
+	struct vulkan_sync *sync)
+{
+	VkBool32 fired;
+	uint32_t index;
+
+	/* A fence of no display event, or a spent one, has nothing to retire. */
+	if (sync->event == VULKAN_SYNC_EVENT_NONE || sync->event == VULKAN_SYNC_EVENT_SPENT)
+		return;
+
+	/* An unobserved hotplug the kernel has signaled makes the fence signaled at the reset. */
+	fired = sync->software_signaled;
+	if (!fired && sync->event == VULKAN_SYNC_EVENT_HOTPLUG)
+		fired = event_hotplug_poll(device, sync);
+
+	/* A pending event fence keeps observing; the reset leaves it as it was. */
+	if (!fired)
+		return;
+
+	/* Withdraws the hotplug registrations a node has not signaled yet. */
+	if (sync->event == VULKAN_SYNC_EVENT_HOTPLUG) {
+		for (index = 0U; index < sync->event_fence_count; index++)
+			vulkan_wsi_display_node_hotplug_cancel(device->physical, sync->event_fences[index].node, sync->event_fences[index].fd);
+	}
+
+	/* The signaled event is not replayed after the reset. */
+	sync->event = VULKAN_SYNC_EVENT_SPENT;
+
+	/* Succeeded: the fence is an ordinary unsignaled fence from now on. */
+	return;
+}
+
+/*
+ * Releases a hotplug fence's registrations as the fence is destroyed.
+ *
+ * Each registration is withdrawn from its node, so the node's limit of
+ * registrations is not held for a fence nobody can wait on, and its
+ * descriptor is closed.
+ */
+void
+vulkan_display_event_finish(
+	struct vulkan_sync *sync)
+{
+	struct VkDevice_T *device;
+	uint32_t index;
+
+	/* A fence without registrations owns nothing here. */
+	if (sync->event_fences == NULL)
+		return;
+
+	/* Withdraws and closes every registration; a spent fence's withdrawals answer that nothing is left. */
+	device = (struct VkDevice_T *)sync->object.parent;
+	for (index = 0U; index < sync->event_fence_count; index++) {
+		vulkan_wsi_display_node_hotplug_cancel(device->physical, sync->event_fences[index].node, sync->event_fences[index].fd);
+		close(sync->event_fences[index].fd);
+	}
+
+	/* The storage goes with the fence's allocation policy. */
+	vulkan_free(&sync->object.allocator, sync->event_fences);
+	sync->event_fences = NULL;
+	sync->event_fence_count = 0U;
+
+	/* Succeeded: no node holds a registration of the destroyed fence. */
+	return;
+}
+
 /* Creates one unsignaled ordinary fence for an event registration. */
 static VkResult
 event_fence_create(
@@ -312,33 +429,39 @@ event_fence_create(
 	return VK_SUCCESS;
 }
 
-/* Reports whether the device's display topology changed after the fence's cursor. */
+/* Reports whether the kernel has signaled one of the hotplug fence's registrations. */
 static VkBool32
 event_hotplug_poll(
 	struct VkDevice_T *device,
 	struct vulkan_sync *sync)
 {
-	uint64_t sequence;
-	VkResult error;
+	struct pollfd descriptor;
+	uint32_t index;
+	int ready;
 
-	/* Samples the topology sequences of the device's display nodes. */
-	error = vulkan_wsi_display_node_topology(device->physical, &sequence);
-	if (error != VK_SUCCESS)
-		return VK_FALSE;
+	(void)device;
 
-	/* A fence whose registration could not sample takes its cursor now. */
-	if (!sync->event_based) {
-		sync->event_cursor = sequence;
-		sync->event_based = VK_TRUE;
-		return VK_FALSE;
+	/*
+	 * Looks at each registration without waiting.  POLLIN is the signal;
+	 * POLLERR comes with it when the node was withdrawn or failed, which
+	 * also ends the wait: the client enumerates the displays again and
+	 * sees the change.
+	 */
+	for (index = 0U; index < sync->event_fence_count; index++) {
+		descriptor.fd = sync->event_fences[index].fd;
+		descriptor.events = POLLIN;
+		descriptor.revents = 0;
+		ready = poll(&descriptor, 1U, 0);
+		if (ready <= 0)
+			continue;
+
+		/* Any readiness of the descriptor is the end of the registration. */
+		if (descriptor.revents != 0)
+			return VK_TRUE;
 	}
 
-	/* The topology has not moved since the cursor. */
-	if (sequence <= sync->event_cursor)
-		return VK_FALSE;
-
-	/* Succeeded: a display was plugged or unplugged after the registration. */
-	return VK_TRUE;
+	/* Succeeded: no display node has changed its topology since the registration. */
+	return VK_FALSE;
 }
 
 /* Reports whether the fence's display passed a refresh boundary after the cursor. */
