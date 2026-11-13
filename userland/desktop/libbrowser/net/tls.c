@@ -150,12 +150,14 @@ net_tls_open(
 		return ENOMEM;
 	}
 
-	/* The socket, then the name sent (SNI) and the name checked. */
+	/* Gives the connection its socket. */
 	error = tls_attach(made->ssl, socket, reason);
 	if (error != 0) {
 		net_tls_close(made);
 		return error;
 	}
+
+	/* The name sent to the server and checked against the certificate. */
 	error = tls_set_host(made->ssl, host);
 	if (error != 0) {
 		tls_fail(reason, "setup", made->ssl, 0);
@@ -297,12 +299,14 @@ net_tls_start(
 		return ENOMEM;
 	}
 
-	/* The socket, then the name sent (SNI) and the name checked. */
+	/* Gives the connection its socket. */
 	error = tls_attach(made->ssl, socket, reason);
 	if (error != 0) {
 		net_tls_close(made);
 		return error;
 	}
+
+	/* The name sent to the server and checked against the certificate. */
 	error = tls_set_host(made->ssl, host);
 	if (error != 0) {
 		tls_fail(reason, "setup", made->ssl, 0);
@@ -507,6 +511,7 @@ net_tls_reason(
 	/* The connection's text. */
 	return tls->reason;
 }
+
 /*
  * Makes the context once for all threads; returns 0 or EPROTONOSUPPORT
  * (reason, NET_TLS_REASON_MAX bytes, then says why), or what taking the
@@ -525,6 +530,7 @@ tls_load(
 		return error;
 	}
 
+	/* Makes the context, or finds the outcome of the first attempt. */
 	error = tls_load_once();
 	if (error != 0)
 		tls_set_reason(reason, "%s", tls_load_reason);
@@ -726,6 +732,8 @@ tls_set_host(
 		result = X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), address);
 		if (result != 1)
 			return EPROTO;
+
+		/* Succeeded: the address is set. */
 		return 0;
 	}
 

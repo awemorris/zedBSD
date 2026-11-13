@@ -97,6 +97,8 @@ ml_tls_add_ca_file(
 	/* Kept until the context is made. */
 	tls_ca_files[tls_ca_file_count] = path;
 	tls_ca_file_count++;
+
+	/* Succeeded: the file is kept for the context. */
 	return 0;
 }
 
@@ -334,6 +336,7 @@ tls_load(void)
 	/* One maker at a time. */
 	kl_mutex_lock(&tls_lock);
 
+	/* Makes the context, or finds the outcome of the first attempt. */
 	error = tls_load_locked();
 
 	kl_mutex_unlock(&tls_lock);
