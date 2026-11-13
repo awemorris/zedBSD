@@ -11,7 +11,13 @@
 # is build/ws353-p002-run (P1's own).  The image is build/x86_64/hdd-image.img: the build keeps the x86_64 sysroot in
 # build/x86_64 whatever BUILD says, so the image is built there, one target after the other (sysroot, userland, disk).
 # Steps: idle 30 s with no change; wait (head plugged, then unplugged); latency (the wake within 1 s of the change);
-# cancel; limit; race (registrations while the head is plugged and unplugged back to back).
+# cancel; limit; race (registrations while the head is plugged and unplugged back to back); quiet (the topology
+# sequence does not move from one step to the next, where a program opens the GPU and its control queue interrupts,
+# but the head does not change).
+# The program opens the GPU node first, and the open puts a kernel record on the console the serial line carries; a
+# record that lands in a command's status line costs serial.py time.  So each step that changes the head is gated:
+# the program makes /tmp/NAME.ready after the open and registers only once the host makes /tmp/NAME.go, so the
+# record is out before the registration and the host sees the marker soon after it is made.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
 cd "$(dirname -- "$0")/../../.."
@@ -102,7 +108,7 @@ step_start() {
 	name=$1
 	shift
 	# The kernel's lines on the same line can hide the command's status: the result file decides.
-	serial "rm -f /tmp/$name.out /tmp/$name.armed; /root/display-fence-test $* > /tmp/$name.out 2>&1 < /dev/null &" \
+	serial "rm -f /tmp/$name.out /tmp/$name.armed /tmp/$name.ready /tmp/$name.go; /root/display-fence-test $* > /tmp/$name.out 2>&1 < /dev/null &" \
 	    > "$out/$name.start.txt" 2>&1 || true
 }
 # Waits for the step's result file to hold its result line, then records it.
@@ -135,6 +141,27 @@ marker_wait() {
 	done
 }
 
+# Lets a gated step register: waits for its program's open (NAME.ready), then says go (NAME.go).
+gate_go() {
+	marker_wait "/tmp/$1.ready" || { say "$1: FAIL no ready"; failed=1; return 0; }
+	serial "touch /tmp/$1.go" > /dev/null 2>&1 || true
+}
+# The topology sequence a step's result line ends with ("sequence A -> B"): first A, last B.
+sequence_of() {
+	sed -n 's/.* sequence \([0-9]*\) -> \([0-9]*\).*/\1 \2/p' "$out/$1.txt" | tail -1
+}
+# quiet: the sequence the next step read first is the one the step before ended with.
+quiet_between() {
+	last=$(sequence_of "$1" | cut -d' ' -f2)
+	first=$(sequence_of "$2" | cut -d' ' -f1)
+	if [ -n "$last" ] && [ "$last" = "$first" ]; then
+		say "quiet: PASS $1 -> $2 sequence $last"
+	else
+		say "quiet: FAIL $1 ended at '$last', $2 began at '$first' with no head change between"
+		failed=1
+	fi
+}
+
 # idle: nothing changes for 30 s.
 step_start idle idle 30
 sleep 30
@@ -142,7 +169,8 @@ step_end idle 30
 
 # wait: plug, then unplug; each registration wakes at the change.
 for change in 1024x768 off; do
-	step_start "wait-$change" wait 20 /tmp/wait-$change.armed
+	step_start "wait-$change" wait 20 /tmp/wait-$change.armed /tmp/wait-$change
+	gate_go "wait-$change"
 	marker_wait /tmp/wait-$change.armed || { say "wait-$change: FAIL no marker"; failed=1; }
 	head1 "$change"
 	step_end "wait-$change" 20
@@ -151,7 +179,8 @@ done
 # latency: the host waits 2 s after seeing the marker, then plugs the head.  The program's time from its marker,
 # less the host's time from seeing the marker to starting the change, bounds the delay after the change began
 # (the marker was made before the host saw it; the change's D-Bus call is included).
-step_start latency wait 20 /tmp/latency.armed
+step_start latency wait 20 /tmp/latency.armed /tmp/latency
+gate_go latency
 marker_wait /tmp/latency.armed || { say "latency: FAIL no marker"; failed=1; }
 seen=$(now_ms)
 sleep 2
@@ -173,7 +202,8 @@ else
 fi
 
 # cancel: a canceled registration does not wake when the head changes.
-step_start cancel cancel 8 /tmp/cancel.armed
+step_start cancel cancel 8 /tmp/cancel.armed /tmp/cancel
+gate_go cancel
 marker_wait /tmp/cancel.armed || { say "cancel: FAIL no marker"; failed=1; }
 head1 off
 sleep 8
@@ -184,12 +214,20 @@ step_start limit limit
 step_end limit 10
 
 # race: registrations back to back while the head is plugged and unplugged.
-step_start race race 600 5
+step_start race race 600 5 /tmp/race
+gate_go race
 for change in 1024x768 off 800x600 off 1024x768 off 800x600 off; do
 	head1 "$change"
 	sleep 0.3
 done
 step_end race 30
+
+# No step's program moved the sequence by opening the GPU: only the head changes did.
+quiet_between idle wait-1024x768
+quiet_between wait-1024x768 wait-off
+quiet_between wait-off latency
+quiet_between latency cancel
+quiet_between cancel race
 
 # The guest's kernel lines about the GPU, fetched with a command.
 serial 'dmesg | grep -i -e venus -e gpu' > "$out/dmesg-gpu.txt" 2>&1 || true

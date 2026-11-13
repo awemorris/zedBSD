@@ -22,6 +22,7 @@ import argparse
 import codecs
 import os
 import re
+import secrets
 import socket
 import sys
 import time
@@ -29,6 +30,19 @@ import time
 # What the shell shows when it is waiting, and what login asks.
 PROMPT = re.compile(r"[#$] $|[#$] \Z")
 MARKER = "ZEDBSD-SERIAL-STATUS"
+
+# The shell variable that keeps a command's status until its line is read.
+STATUS_VARIABLE = "__zedbsd_serial_status"
+
+# The kernel writes its records on the same console, a character at a time
+# between the shell's own: a record can land in the middle of the status
+# line, which then no longer matches.  A broken line is still there with its
+# letters in order and others between them; when the line has been silent
+# this long after one, the status is asked for again, at most this often.
+# A kernel record is at most 512 bytes, which bounds what lands inside one.
+QUIET_SECONDS = 2.0
+ASK_LIMIT = 5
+BROKEN_SPAN = 1024
 
 
 class Console:
@@ -72,6 +86,68 @@ class Console:
 		"""Drops what has been read, so the next wait starts clean."""
 		self.pending = ""
 
+	def read_status(self, pattern: re.Pattern, marker: str, again: str) -> tuple[str, int | None]:
+		"""Reads until the status line matches, asking again for a broken one.
+
+		Returns everything read and where the first broken status line
+		started (None when the first one was whole).  A broken line is the
+		marker's letters in order, apart from the copy in the echo of the
+		typed line; the shell has run the command by the time it prints one,
+		so the line typed again goes to the shell.
+		"""
+		deadline = time.monotonic() + self.timeout
+		silent_since = time.monotonic()
+		broken = None
+		asked = 0
+		while time.monotonic() < deadline:
+			if pattern.search(self.pending):
+				return self.pending, broken
+			try:
+				chunk = self.socket.recv(4096)
+			except socket.timeout:
+				# A silent line that holds a broken status line asks for the status again.
+				if time.monotonic() - silent_since >= QUIET_SECONDS and asked < ASK_LIMIT:
+					echo = scattered(self.pending, marker, 0)
+					copy = None
+					if echo is not None:
+						copy = scattered(self.pending, marker, echo[1])
+					if copy is not None:
+						if broken is None:
+							broken = copy[0]
+						self.send(again)
+						asked += 1
+						silent_since = time.monotonic()
+				continue
+			if not chunk:
+				break
+			self.pending += self.decoder.decode(chunk)
+			silent_since = time.monotonic()
+		raise SystemExit(
+			f"serial: never saw {pattern.pattern!r}\n"
+			f"--- last output ---\n{self.pending[-2000:]}")
+
+
+def scattered(text: str, word: str, start: int) -> tuple[int, int] | None:
+	"""Finds word in text from start, its letters in order with others between.
+
+	Returns where the first such copy starts and where it ends, or None.  A
+	copy spans at most BROKEN_SPAN characters more than the word.
+	"""
+	first = text.find(word[0], start)
+	while first >= 0:
+		at = first
+		for letter in word:
+			at = text.find(letter, at)
+			if at < 0:
+				return None
+			if at - first >= len(word) + BROKEN_SPAN:
+				break
+			at += 1
+		else:
+			return first, at
+		first = text.find(word[0], first + 1)
+	return None
+
 
 def login(console: Console, user: str) -> None:
 	"""Logs in, or does nothing if a shell is already there."""
@@ -102,23 +178,33 @@ def run(console: Console, command: str) -> int:
 
 	The status is carried back in a line of its own rather than read from
 	the prompt, because the prompt does not show it and the console is
-	shared with whatever else the system is writing.
+	shared with whatever else the system is writing.  The shell keeps the
+	status in a variable, so that a status line broken up by a kernel record
+	can be asked for again (Console.read_status).
 	"""
 	console.forget()
 
 	# A command that ends in & is already terminated, and "&;" is not a
-	# command list the shell accepts; the marker is then its own command.
+	# command list the shell accepts; the status is then its own command.
 	# Its status is that of starting the background job, which is zero.
+	# The marker carries a number of this run's own, so that a status line
+	# a slow guest prints after an earlier run gave up is not taken for this one.
+	marker = f"{MARKER}-{secrets.randbelow(1000000000):09d}"
 	separator = " " if command.rstrip().endswith("&") else "; "
-	console.send(f"{command}{separator}echo {MARKER}=$?")
-	pattern = re.compile(re.escape(MARKER) + r"=(\d+)")
-	output = console.read_until(pattern)
+	again = f"echo {marker}=${STATUS_VARIABLE}"
+	console.send(f"{command}{separator}{STATUS_VARIABLE}=$?; {again}")
+	pattern = re.compile(re.escape(marker) + r"=(\d+)\r?\n")
+	output, broken = console.read_status(pattern, marker + "=", again)
 	match = pattern.search(output)
 	assert match is not None
 
 	# What the command printed is between the echo of the line and the
-	# marker; the echo is dropped so that a caller sees only the answer.
-	body = output[:match.start()]
+	# marker (or the broken marker); the echo is dropped so that a caller
+	# sees only the answer.
+	end = match.start()
+	if broken is not None:
+		end = broken
+	body = output[:end]
 	newline = body.find("\n")
 	if newline >= 0:
 		body = body[newline + 1:]
