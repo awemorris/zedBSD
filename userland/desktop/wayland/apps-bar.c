@@ -659,10 +659,12 @@ kwl_apps_bar_tick(
 	uint64_t now;
 	int built;
 
-	/* A drag and drop's rest on the icons or the previews (spring-loading). */
+	/* A drag and drop's rest on the icons or the previews (spring-loading), looked at closely while the drag lasts. */
 	state = &server->apps_bar;
-	if (server->dnd_active)
+	if (server->dnd_active) {
 		spring_tick(server);
+		kwl_due_soon(server);
+	}
 
 	/* Nothing waits while idle. */
 	if (state->state == KWL_APPS_IDLE)
@@ -675,19 +677,24 @@ kwl_apps_bar_tick(
 		return;
 	}
 
-	/* The rest on an icon. */
+	/* The rest on an icon (on the clock). */
 	now = kwl_milliseconds();
 	if (state->state == KWL_APPS_ARMED && now - state->since_ms >= HOVER_MS) {
 		kwl_apps_bar_show(server, &view, state->key, KWL_APPS_VIA_HOVER);
 		return;
 	}
+	if (state->state == KWL_APPS_ARMED)
+		kwl_due(server, state->since_ms + HOVER_MS);
 
 	/* The absence from the icons and the panel hides what the rest showed (a click's previews stay). */
 	if (state->state == KWL_APPS_SHOWN &&
 	    (state->via == KWL_APPS_VIA_HOVER || state->via == KWL_APPS_VIA_SPRING) &&
-	    state->left &&
-	    now - state->since_ms >= LEAVE_MS)
-		kwl_apps_bar_hide(server, "leave");
+	    state->left) {
+		if (now - state->since_ms >= LEAVE_MS)
+			kwl_apps_bar_hide(server, "leave");
+		else
+			kwl_due(server, state->since_ms + LEAVE_MS);
+	}
 }
 
 /*

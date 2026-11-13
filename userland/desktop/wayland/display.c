@@ -246,8 +246,12 @@ kwl_schedule(
 	    server->transition == NULL &&
 	    !moving &&
 	    !server->home_dragging &&
-	    now - server->frame_done_ms < server->frame_wait_ms)
+	    now - server->frame_done_ms < server->frame_wait_ms) {
+		/* A commit ends the wait, or its time does. */
+		if (server->dirty || server->damaged)
+			kwl_due(server, server->frame_done_ms + server->frame_wait_ms);
 		return;
+	}
 
 	/* Nothing to draw: a layer's stale picture may be drawn again in the quiet (layer-cache.c, ws211-p002). */
 	if (!server->dirty && !server->damaged) {

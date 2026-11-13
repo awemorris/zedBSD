@@ -264,6 +264,22 @@ kl_backend_audio_stream_next(
 }
 
 /*
+ * Gives no descriptor: the pump thread queues the reports, and the host
+ * looks for them soon.
+ */
+int
+kl_backend_audio_stream_descriptor(
+	const struct kl_backend_audio_stream *stream,
+	short *events)
+{
+	(void)stream;
+
+	/* The reports come without an event. */
+	*events = 0;
+	return KL_BACKEND_AUDIO_STREAM_UNWAITED;
+}
+
+/*
  * Ends a stream without waiting: its pump is told to end, and the stream
  * waits on the closed list until reap joins it.
  */

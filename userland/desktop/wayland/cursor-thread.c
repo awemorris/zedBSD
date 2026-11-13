@@ -23,6 +23,7 @@
 
 #include "cursor-thread.h"
 
+#include <signal.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -78,6 +79,8 @@ int
 kwl_cursor_thread_start(
 	struct kwl_cursor_thread *cursor)
 {
+	sigset_t signals_all;
+	sigset_t signals_before;
 	unsigned index;
 	int error;
 
@@ -86,7 +89,11 @@ kwl_cursor_thread_start(
 		cursor->pinned[index] = -1;
 
 	/* The thread presents from now on. */
+	/* The thread blocks every signal: the stops and a child's end go to the event loop's thread. */
+	(void)sigfillset(&signals_all);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_all, &signals_before);
 	error = pthread_create(&cursor->thread, NULL, cursor_main, cursor);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_before, NULL);
 	if (error != 0)
 		return error;
 

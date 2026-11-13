@@ -243,6 +243,8 @@ kwl_printers_tick(
 	struct kwl_server *server)
 {
 	unsigned changed;
+	short events;
+	int descriptor;
 
 	/* Nothing before the first printers object. */
 	if (printers_state.backend == NULL)
@@ -264,6 +266,18 @@ kwl_printers_tick(
 		printers_tell(server);
 	if ((changed & KL_BACKEND_PRINT_CHANGED_RESULT) != 0U)
 		printers_answers(server);
+
+	/*
+	 * The daemon's connection wakes the loop with what comes; the settings
+	 * file is looked at once a second (a daemon that did not end in its
+	 * time is looked at then too).
+	 */
+	descriptor = kl_backend_print_descriptor(printers_state.backend, &events);
+	kwl_watch(server, descriptor, events);
+	if (printers_state.hosted)
+		kwl_due(server, printers_state.checked_ms + PRINTERS_CHECK_MS);
+	else
+		kwl_due(server, kwl_milliseconds() + PRINTERS_CHECK_MS);
 }
 
 /* Opens the backend once: the user's settings file and the daemon's program. */

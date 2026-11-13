@@ -88,9 +88,11 @@ kwl_sleep_tick(
 		}
 	}
 
-	/* A pending request goes on; one waiting for its answer has nothing to do. */
+	/* A pending request goes on (its frames, and its time looked at closely); one waiting for its answer has nothing to do. */
 	if (sleep->state == KWL_SLEEP_PENDING) {
 		sleep_pending(server, now);
+		if (sleep->state == KWL_SLEEP_PENDING)
+			kwl_due_soon(server);
 		return;
 	}
 
@@ -397,13 +399,23 @@ sleep_quiet_since(
 {
 	struct kwl_object *top;
 	uint64_t since;
+	int inhibiting;
 
-	/* A fullscreen window in front of an unlocked session keeps the time from counting. */
+	/*
+	 * A fullscreen window in front of an unlocked session keeps the time
+	 * from counting; the time counts from when it stopped (the pass that
+	 * finds it gone, not the last pass that saw it: passes come with
+	 * events, not on a clock).
+	 */
+	inhibiting = 0;
 	if (!server->greeter && !server->locked) {
 		top = kwl_top_window(server);
 		if (top != NULL && top->fullscreen)
-			server->sleep.inhibited_ms = now_ms;
+			inhibiting = 1;
 	}
+	if (inhibiting || server->sleep.inhibiting)
+		server->sleep.inhibited_ms = now_ms;
+	server->sleep.inhibiting = (unsigned)inhibiting;
 
 	/* The later of the last input and the last such tick. */
 	since = server->lock_input_ms;
@@ -448,14 +460,19 @@ sleep_idle(
 		server->screen_idle_off = 1U;
 		printf("KWL SLEEP screen off via=idle quiet_ms=%llu\n", (unsigned long long)quiet);
 	}
+	if (limit != 0U && !server->screen_off)
+		kwl_due(server, since + limit / 2U);
 
-	/* The sleeps need a machine that can sleep, and no pause. */
+	/* The sleeps need a machine that can sleep, and no pause (looked at again when the pause ends). */
 	possible = sleep_possible(server);
 	if (!possible)
 		return;
 	may = kwl_sleep_may_begin(sleep, now_ms);
-	if (!may)
+	if (!may) {
+		if (sleep->state == KWL_SLEEP_IDLE && !sleep->unsupported)
+			kwl_due(server, sleep->pause_until_ms);
 		return;
+	}
 
 	/* The lid closed, when it matters to the output shown. */
 	if (server->lid.closed) {
@@ -472,11 +489,17 @@ sleep_idle(
 		sleep_begin(server, KWL_SLEEP_VIA_REST, now_ms);
 		return;
 	}
+	if (sleep->resting)
+		kwl_due(server, since + KWL_SLEEP_REST_MS);
 
 	/* The whole time without input, unless a failed idle sleep waits for new input. */
 	allowed = kwl_sleep_idle_allowed(sleep, server->lock_input_ms);
-	if (limit != 0U && quiet >= limit && allowed)
+	if (limit != 0U && quiet >= limit && allowed) {
 		sleep_begin(server, KWL_SLEEP_VIA_IDLE, now_ms);
+		return;
+	}
+	if (limit != 0U && allowed)
+		kwl_due(server, since + limit);
 }
 
 /* Begins a sleep: the session locked (and the lid's black kept), the request sent once that was drawn. */

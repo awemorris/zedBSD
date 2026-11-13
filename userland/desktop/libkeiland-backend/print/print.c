@@ -45,6 +45,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
@@ -444,6 +445,26 @@ kl_backend_print_update(
 	*changed = print->changed;
 	print->changed = 0;
 	return 0;
+}
+
+/*
+ * Gives the daemon's connection for the host's wait, and what it waits for.
+ */
+int
+kl_backend_print_descriptor(
+	const struct kl_backend_print *print,
+	short *events)
+{
+	/* No connection, nothing to wait for. */
+	*events = 0;
+	if (print == NULL || print->socket < 0)
+		return -1;
+
+	/* The daemon's lines, and room for those waiting to go. */
+	*events = POLLIN;
+	if (print->queue_count > 0U)
+		*events |= POLLOUT;
+	return print->socket;
 }
 
 /*
@@ -1937,11 +1958,17 @@ print_change(
 	struct kl_backend_print *print,
 	struct print_change *change)
 {
+	sigset_t signals_all;
+	sigset_t signals_before;
 	int error;
 
 	/* The writer, started once (the host writes when it is hosted). */
 	if (!print->writer_started && !print->hosted) {
+		/* The thread blocks every signal: the stops and a child's end go to the event loop's thread. */
+		(void)sigfillset(&signals_all);
+		(void)pthread_sigmask(SIG_SETMASK, &signals_all, &signals_before);
 		error = pthread_create(&print->writer, NULL, print_writer, print);
+		(void)pthread_sigmask(SIG_SETMASK, &signals_before, NULL);
 		if (error != 0) {
 			free(change);
 			return error;

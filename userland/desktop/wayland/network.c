@@ -346,6 +346,7 @@ kwl_network_tick(
 			network_view.info_asked_ms = now;
 			kwl_system_bar_saved(server);
 		}
+		kwl_due(server, network_view.info_asked_ms + NETWORK_INFO_REFRESH_MS);
 	}
 
 	/* The start's grace ran out with the daemon still silent: the menu says it is unavailable now. */
@@ -354,6 +355,8 @@ kwl_network_tick(
 		if (now - network_view.opened_ms >= NETWORK_START_GRACE_MS) {
 			network_view.grace_over = 1U;
 			server->dirty = 1;
+		} else {
+			kwl_due(server, network_view.opened_ms + NETWORK_START_GRACE_MS);
 		}
 	}
 
@@ -1850,8 +1853,11 @@ network_switch_settle(
 	now = kwl_milliseconds();
 	if (network_view.switch_until != 0U && now >= network_view.switch_until)
 		agrees = 1;
-	if (!agrees)
+	if (!agrees) {
+		if (network_view.switch_until != 0U)
+			kwl_due(server, network_view.switch_until);
 		return;
+	}
 
 	/* The state again. */
 	network_view.switch_wanted = 0U;

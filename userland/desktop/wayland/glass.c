@@ -50,6 +50,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
+#include <signal.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -496,6 +497,8 @@ void
 kwl_glass_prefetch(
 	struct kwl_server *server)
 {
+	sigset_t signals_all;
+	sigset_t signals_before;
 	int error;
 
 	/* Only the glass look with a picture reads one. */
@@ -504,7 +507,11 @@ kwl_glass_prefetch(
 
 	/* The thread; without it the file is read when the wallpaper is drawn. */
 	glass_prefetch.path = server->wallpaper_path;
+	/* The thread blocks every signal: the stops and a child's end go to the event loop's thread. */
+	(void)sigfillset(&signals_all);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_all, &signals_before);
 	error = pthread_create(&glass_prefetch.thread, NULL, prefetch_run, NULL);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_before, NULL);
 	if (error != 0) {
 		printf("KWL GLASS prefetch unavailable errno=%d\n", error);
 		return;
@@ -864,6 +871,10 @@ kwl_glass_blur_take(
 				blur_submit(server, &picture, glass_loader.path, glass_loader.answer, glass_loader.resize, glass_loader.started_ms);
 			}
 		}
+
+		/* The loader tells its end with nothing but the flag: looked at soon while it reads. */
+		if (!done)
+			kwl_due_soon(server);
 	}
 
 	/* The drawings made. */
@@ -877,8 +888,10 @@ kwl_glass_blur_take(
 	writable = kwl_compose_host_writable(server);
 	if (!writable) {
 		now = kwl_milliseconds();
-		if (now - glass_blur_held_ms < GLASS_BLUR_HOLD_MS)
+		if (now - glass_blur_held_ms < GLASS_BLUR_HOLD_MS) {
+			kwl_due(server, glass_blur_held_ms + GLASS_BLUR_HOLD_MS);
 			return;
+		}
 	}
 
 	/* Shows the held drawing and lets it go. */
@@ -2143,6 +2156,8 @@ loader_start(
 	unsigned answer,
 	unsigned resize)
 {
+	sigset_t signals_all;
+	sigset_t signals_before;
 	int error;
 
 	/* Makes the lock with the first picture. */
@@ -2173,7 +2188,11 @@ loader_start(
 	glass_loader.done = 0;
 
 	/* Starts the thread that reads and decodes the picture. */
+	/* The thread blocks every signal: the stops and a child's end go to the event loop's thread. */
+	(void)sigfillset(&signals_all);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_all, &signals_before);
 	error = pthread_create(&glass_loader.thread, NULL, loader_run, NULL);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_before, NULL);
 	if (error != 0)
 		return error;
 

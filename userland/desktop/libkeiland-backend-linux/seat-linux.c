@@ -345,3 +345,17 @@ seat_console_take(
 	/* Succeeded: the console restores both at close. */
 	return 0;
 }
+
+/*
+ * Tells whether the backend wakes the compositor by itself: no, Linux's
+ * areas (the bus, the sound card's controls, the wireless daemon, the
+ * playback pumps) are read without waiting each pass.
+ */
+int
+kl_backend_wakes(
+	const struct kl_backend *backend)
+{
+	/* The compositor comes back soon instead. */
+	(void)backend;
+	return 0;
+}

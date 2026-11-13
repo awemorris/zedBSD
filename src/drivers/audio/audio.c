@@ -418,7 +418,7 @@ drv_audio_interrupt(
 	}
 
 	/* Wakes poll callers waiting for room or data. */
-	poll_notify();
+	poll_notify_object(device);
 }
 
 /* Checks that a backend supplies every required operation and valid formats. */
@@ -957,7 +957,7 @@ audio_stream_stop(
 		kern_memset(stream->buffer.address, 0, AUDIO_RING_BYTES);
 
 	/* Wakes poll callers; room has changed. */
-	poll_notify();
+	poll_notify_object(device);
 }
 
 /*
@@ -1879,9 +1879,10 @@ audio_dsp_poll(
 	if (revents == NULL)
 		return EINVAL;
 
-	/* Samples both directions under one lock. */
+	/* Samples both directions under one lock; the device's changes wake the poll. */
 	*revents = 0;
 	device = file->f_data;
+	poll_wait_object(device);
 	irq = spin_lock_irqsave(&device->lock);
 
 	/*

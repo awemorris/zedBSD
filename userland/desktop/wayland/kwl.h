@@ -61,6 +61,7 @@
 #include "lane.h"
 #include "input-thread.h"
 #include "seat-answer.h"
+#include <poll.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <sys/types.h>
@@ -114,6 +115,19 @@
 #define KWL_SEAT_OUTPUT_ASK	0U
 #define KWL_SEAT_OUTPUT_CLOSING	1U
 #define KWL_SEAT_OUTPUT_CLOSED	2U
+
+/*
+ * The event loop's step for work that follows time closely (kwl_due_soon),
+ * in milliseconds: the pace its passes came at before they waited for
+ * events.
+ */
+#define KWL_DUE_SOON_MS	10U
+
+/* How long after the wall clock's minute turns kwl_due_next_minute's pass comes, in milliseconds. */
+#define KWL_MINUTE_LATE_MS	20U
+
+/* The descriptors kwl_watch adds to one wait at most. */
+#define KWL_WATCH_MAX	8U
 
 /* Rescan period for evdev nodes that appear after start-up, in milliseconds. */
 #define KWL_INPUT_SCAN_MS	2000U
@@ -2179,6 +2193,32 @@ struct kwl_server {
 	 */
 	uint64_t retire_last_ms;
 	uint64_t retire_next_ms;
+
+	/*
+	 * The earliest time the event loop has work that no descriptor and no
+	 * thread's wake announces (kwl_milliseconds' clock; UINT64_MAX: none):
+	 * a timer, an animation's step, a state another part reads without an
+	 * event.  Each pass starts it again after its wait, and every part with
+	 * such work lowers it (kwl_due) while the work waits; the wait ends
+	 * then at the latest.
+	 */
+	uint64_t due_ms;
+
+	/*
+	 * Descriptors a part reads without waiting on every pass (kwl_watch),
+	 * which the event loop's next wait also waits for; started again with
+	 * due_ms.  One that does not fit makes the loop come back soon instead.
+	 */
+	struct pollfd watched[KWL_WATCH_MAX];
+	unsigned watched_count;
+
+	/*
+	 * Whether a change was left to draw when the scheduler last ran (it
+	 * waits then for what lets it draw, which wakes the loop or is due); a
+	 * change made after it, by a part outside the scheduler, has the next
+	 * pass come at once.
+	 */
+	unsigned schedule_left;
 };
 
 /*
@@ -2190,6 +2230,10 @@ typedef void kwl_display_fn(struct kwl_server *server, int error, void *context)
 void kwl_display_settle(struct kwl_server *server);
 
 uint64_t kwl_milliseconds(void);
+void kwl_due(struct kwl_server *server, uint64_t at_ms);
+void kwl_due_soon(struct kwl_server *server);
+void kwl_due_next_minute(struct kwl_server *server);
+void kwl_watch(struct kwl_server *server, int descriptor, short events);
 uint64_t kwl_microseconds(void);
 uint64_t kwl_log_us(void);
 void kwl_request_stop(void);
@@ -2400,7 +2444,6 @@ int kwl_window_enter_fullscreen(struct kwl_object *surface);
 int kwl_window_leave_fullscreen(struct kwl_object *surface);
 void kwl_window_centre(struct kwl_server *server, struct kwl_object *surface);
 int kwl_fence_ready(struct kwl_server *server, struct kwl_object *surface);
-int kwl_compose_waiting(struct kwl_server *server);
 void kwl_compose_want_frame(struct kwl_server *server);
 void kwl_compose_poll(struct kwl_server *server);
 void kwl_compose_give_tasks(struct kwl_server *server);

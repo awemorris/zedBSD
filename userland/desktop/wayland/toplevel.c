@@ -494,9 +494,11 @@ kwl_ping_check(
 		if (client->fatal || client->ping_serial == 0U || client->unresponsive)
 			continue;
 
-		/* A ping still within its time. */
-		if (now < client->ping_ms || now - client->ping_ms < PING_TIMEOUT_MS)
+		/* A ping still within its time: the loop looks again when it runs out. */
+		if (now < client->ping_ms || now - client->ping_ms < PING_TIMEOUT_MS) {
+			kwl_due(server, client->ping_ms + PING_TIMEOUT_MS);
 			continue;
+		}
 
 		/* It is not responding; its title bars say so. */
 		client->unresponsive = 1;

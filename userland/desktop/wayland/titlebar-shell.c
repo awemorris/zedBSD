@@ -748,7 +748,8 @@ kwl_titlebar_key_released(
  * Presses the key held in the field with the keyboard again when its next
  * press is due (ws074-p229): after the keyboards' delay, then at their
  * rate, as wl_keyboard.repeat_info tells the applications to repeat.  The
- * main loop calls it once a pass (its poll waits 10 ms at most).
+ * main loop calls it once a pass, and its wait ends when the next press
+ * is due.
  */
 void
 kwl_titlebar_tick(
@@ -774,9 +775,11 @@ kwl_titlebar_tick(
 		return;
 	}
 
-	/* Not due yet. */
-	if (now < shell_titlebar.repeat_next)
+	/* Not due yet: the loop comes back then. */
+	if (now < shell_titlebar.repeat_next) {
+		kwl_due(server, shell_titlebar.repeat_next);
 		return;
+	}
 
 	/*
 	 * The next press an interval after this one was due, from now when the
@@ -793,8 +796,13 @@ kwl_titlebar_tick(
 	/* The press again; a key the field no longer takes (with Alt held now) ends the repeat. */
 	shell_titlebar.repeat_count++;
 	taken = shell_field_press(server, shell_titlebar.repeat_key);
-	if (taken == 0)
+	if (taken == 0) {
 		shell_repeat_stop();
+		return;
+	}
+
+	/* The next press. */
+	kwl_due(server, shell_titlebar.repeat_next);
 }
 
 /*

@@ -246,10 +246,14 @@ kwl_displays_pending_tick(
 {
 	struct displays_held *held;
 
-	/* Each result that waits for the move, long enough. */
+	/* Each result that waits for the move, long enough (the loop comes back when it would be). */
 	for (held = displays_held_list; held != NULL; held = held->next) {
-		if (!held->moving || now - held->since_ms < DISPLAYS_PENDING_MS)
+		if (!held->moving)
 			continue;
+		if (now - held->since_ms < DISPLAYS_PENDING_MS) {
+			kwl_due(server, held->since_ms + DISPLAYS_PENDING_MS);
+			continue;
+		}
 
 		/* Settled as the choice applied. */
 		kwl_displays_move_settled(server, 0);

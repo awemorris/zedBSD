@@ -187,6 +187,29 @@ kl_daemon_link_submit(
 }
 
 /*
+ * Tells whether the backend wakes the compositor by itself: zedBSD's
+ * daemons are read on the links' threads, which write the wake pipe the
+ * compositor lent, and its other descriptors are in the compositor's poll.
+ */
+int
+kl_backend_wakes(
+	const struct kl_backend *backend)
+{
+	struct kl_backend_threads threads;
+
+	/* Without a backend nothing is read. */
+	if (backend == NULL)
+		return 1;
+
+	/* The links wake only with the pipe the compositor lent. */
+	memset(&threads, 0, sizeof(threads));
+	threads.wake_descriptor = -1;
+	if (kl_backend_threads != NULL)
+		kl_backend_threads(&threads);
+	return threads.wake_descriptor >= 0;
+}
+
+/*
  * Takes the link's lock (the operations and the published state); held
  * only to move or copy, never to wait.
  */
@@ -259,12 +282,14 @@ link_run(
 		if (fresh)
 			link_wake(link);
 
-		/* Waits for the connections, an operation or the stop, and at most a tick. */
+		/* Waits for the connections, an operation or the stop, and the protocol's next timer when it has one. */
 		descriptors[0].fd = link->pipe[0];
 		descriptors[0].events = POLLIN;
 		descriptors[0].revents = 0;
-		timeout = KL_DAEMON_LINK_TICK_MS;
+		timeout = KL_DAEMON_LINK_NO_TIMER;
 		count = link->ops->poll_fill(link->owner, descriptors + 1, KL_DAEMON_LINK_POLL_MAX, &timeout);
+		if (timeout == KL_DAEMON_LINK_NO_TIMER)
+			timeout = -1;
 		(void)poll(descriptors, (nfds_t)(1U + count), timeout);
 
 		/* The pipe's bytes are spent: the operations are taken at the top of the loop. */

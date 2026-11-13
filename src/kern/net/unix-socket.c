@@ -124,6 +124,7 @@ static ssize_t unix_recvfrom(struct socket *socket, void *buffer, size_t length,
 static int unix_shutdown(struct socket *socket, int how);
 static int unix_bind(struct socket *socket, const struct sockaddr *address, socklen_t length);
 static void unix_connect_cancel(struct socket *socket);
+static void unix_poll_follow_peer(struct socket *socket, struct unix_socket *endpoint);
 static int unix_connect_resolved(struct socket *socket, struct socket *listener_socket, const struct kern_peercred *connector_credential, const char *path, unsigned io_flags);
 static int unix_connect(struct socket *socket, const struct sockaddr *address, socklen_t length, unsigned io_flags);
 static int unix_accept(struct socket *socket, struct socket **result, struct sockaddr *address, socklen_t *length, unsigned io_flags);
@@ -706,7 +707,7 @@ unix_socket_receive_abort(
 	/* The inactive transaction no longer needs its protecting socket reference. */
 	transaction->active = 0;
 	socket_release(socket);
-	poll_notify();
+	poll_notify_object(socket);
 
 	/* Succeeded: the receive transaction retains no temporary ownership. */
 	return;
@@ -865,7 +866,7 @@ unix_socket_receive_commit(
 	/* The inactive transaction no longer needs its protecting socket reference. */
 	transaction->active = 0;
 	socket_release(socket);
-	poll_notify();
+	poll_notify_object(socket);
 
 	/* Succeeded: the consumed queue ownership is retired. */
 	return;
@@ -1802,7 +1803,7 @@ unix_stream_send(
 		if (error != 0)
 			break;
 		offset += amount;
-		poll_notify();
+		poll_notify_object(peer);
 	}
 
 	socket_release(peer);
@@ -2064,7 +2065,10 @@ unix_shutdown(
 		}
 	}
 
-	poll_notify();
+	/* This end's polls, and the peer's (the pointer names the object only, the reference is gone). */
+	poll_notify_object(socket);
+	if (peer != NULL)
+		poll_notify_object(peer);
 	return 0;
 }
 
@@ -2258,7 +2262,8 @@ unix_connect_resolved(
 		client->peer_credential_valid = 1;
 		client->connecting = 0;
 		spin_unlock_irqrestore(&socket->lock, irq);
-		poll_notify();
+		poll_notify_object(socket);
+		poll_notify_object(&listener->socket);
 	} else {
 		unix_connect_cancel(socket);
 	}
@@ -2487,6 +2492,9 @@ unix_poll(
 	endpoint = unix_endpoint(socket);
 	peer = NULL;
 
+	/* The peer's changes wake the poll too: its queue's room makes this end writable. */
+	unix_poll_follow_peer(socket, endpoint);
+
 	/* A listener is readable when a connection awaits accept. */
 	result = 0;
 	if (endpoint->listening) {
@@ -2595,6 +2603,36 @@ unix_poll(
 
 	*revents = result;
 	return 0;
+}
+
+/*
+ * Names the peer of an end (its connection's other end, or the datagram
+ * peer it connected to) as an object whose changes wake the poll being
+ * scanned for; the socket itself is named by the file's poll.
+ */
+static void
+unix_poll_follow_peer(
+	struct socket *socket,
+	struct unix_socket *endpoint)
+{
+	struct socket *peer;
+	unsigned long irq;
+
+	/* The connection's other end. */
+	if (unix_peer_ref(endpoint, &peer) == 0) {
+		poll_wait_object(peer);
+		socket_release(peer);
+	}
+
+	/* The datagram peer (its pointer names it; no reference is needed for that). */
+	irq = spin_lock_irqsave(&socket->lock);
+
+	peer = endpoint->datagram_peer;
+
+	spin_unlock_irqrestore(&socket->lock, irq);
+
+	if (peer != NULL)
+		poll_wait_object(peer);
 }
 
 /* Wakes the peer's senders after the send buffer size changed. */
@@ -2713,7 +2751,7 @@ unix_endpoint_close(
 			waitq_wake_all(&peer->receive_waitq);
 			waitq_wake_all(&peer->receive_space_waitq);
 			spin_unlock_irqrestore(&peer->lock, irq);
-			poll_notify();
+			poll_notify_object(peer);
 			socket_release(peer);
 		}
 

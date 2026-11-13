@@ -28,6 +28,7 @@
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
 
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 
 /*
@@ -102,8 +103,16 @@ void
 kwl_handoff_tick(
 	struct kwl_server *server)
 {
+	uint64_t due;
+	int descriptor;
+
 	/* The backend reads the manager's lines and keeps the Log Out's deadline. */
 	kl_backend_tick(server->backend, kwl_milliseconds());
+
+	/* The manager's lines wake the loop, and the deadline ends its wait. */
+	descriptor = kl_backend_wait(server->backend, &due);
+	kwl_watch(server, descriptor, POLLIN);
+	kwl_due(server, due);
 }
 
 /*

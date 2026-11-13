@@ -986,12 +986,13 @@ kwl_greeter_tick(
 	uint64_t now_ms;
 	int64_t minute;
 
-	/* The clock shows a new minute. */
+	/* The clock shows a new minute (the loop comes back at the next). */
 	minute = (int64_t)(time(NULL) / 60);
 	if (minute != server->clock_minute) {
 		server->clock_minute = minute;
 		server->dirty = 1;
 	}
+	kwl_due_next_minute(server);
 
 	/*
 	 * The styles of the selected user, asked once no other answer is
@@ -1021,6 +1022,8 @@ kwl_greeter_tick(
 			(void)kwl_key_sleep(&greeter_key);
 			server->dirty = 1;
 			printf("KWL LOCK card hidden\n");
+		} else {
+			kwl_due(server, server->lock_input_ms + GREETER_CARD_IDLE_MS);
 		}
 	}
 
@@ -1032,6 +1035,7 @@ kwl_greeter_tick(
 	if (greeter_powering[0] != '\0') {
 		server->dirty = 1;
 		greeter_power_send(server);
+		kwl_due_soon(server);
 	}
 }
 
@@ -2746,14 +2750,17 @@ greeter_key_tick(
 	action = kwl_key_tick(&greeter_key, now_ms);
 	if (action == KWL_KEY_GRANTED)
 		greeter_key_granted(server);
+	kwl_due(server, kwl_key_next(&greeter_key));
 
-	/* Whose a key is, once it may be asked. */
+	/* Whose a key is, once it may be asked (on the clock: a second after the last asking). */
 	listening = greeter_key_listening(server);
 	if (!listening || greeter_waiting || greeter_styles_asked || greeter_styles_wanted || greeter_submit_pending || !server->handed_over)
 		return;
 	due = kwl_key_owner_due(&greeter_key, now_ms);
-	if (!due)
+	if (!due) {
+		kwl_due(server, kwl_key_owner_next(&greeter_key));
 		return;
+	}
 
 	/* Asked. */
 	error = kl_backend_session_key_owner(server->backend);

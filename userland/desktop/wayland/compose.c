@@ -896,20 +896,6 @@ kwl_compose_complete(
 }
 
 /*
- * Tells whether the event loop must ask a fence's status each pass: never,
- * as the render thread waits for the frames' fences and
- * wakes the loop with their completions.
- */
-int
-kwl_compose_waiting(
-	struct kwl_server *server)
-{
-	/* The render thread waits. */
-	(void)server;
-	return 0;
-}
-
-/*
  * Applies the render thread's messages in their order: a
  * ready is kept for the next walk (or cancelled when the want changed), a
  * failed acquire is the output's loss or the compositor's failure, and a

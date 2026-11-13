@@ -160,9 +160,12 @@ kwl_notify_log_tick(
 		return;
 	}
 
-	/* Its fade needs frames. */
-	if (now - log_view.opened_ms < LOG_FADE_MS)
+	/* Its fade needs frames; it closes on the clock. */
+	if (now - log_view.opened_ms < LOG_FADE_MS) {
 		server->dirty = 1;
+		kwl_due_soon(server);
+	}
+	kwl_due(server, log_view.used_ms + LOG_IDLE_MS);
 }
 
 /*

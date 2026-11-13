@@ -648,6 +648,7 @@ kwl_arrange_glide(
 	for (part = 0U; part < 4U; part++)
 		body[part] = slot->from[part] + (int32_t)((float)(slot->to[part] - slot->from[part]) * t);
 	server->dirty = 1;
+	kwl_due_soon(server);
 
 	/* Succeeded: the window glides. */
 	return 1;

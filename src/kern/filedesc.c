@@ -54,6 +54,7 @@ static void slot_make_reserved(struct filedesc_entry *entry, uint64_t id);
 static int filedesc_grow(struct filedesc *fd, unsigned wanted);
 static unsigned slot_span_locked(const struct filedesc *fd);
 static void notify_table_pollers(struct filedesc *fd);
+static void notify_slot_pollers(struct filedesc *fd, int descriptor);
 
 /*
  * Creates an empty descriptor table for a process.
@@ -569,8 +570,10 @@ retry:
 
 	spin_unlock_irqrestore(&fd->lock, irq);
 
-	/* Readiness scanners must observe the newly published descriptor identity. */
-	notify_table_pollers(fd);
+	/*
+	 * A free slot became live: no poll waits on its number (a poll of a
+	 * free number returns at once), so no poll is woken.
+	 */
 
 	/* Succeeded: the duplicate owns its reference to the source object. */
 	return 0;
@@ -672,8 +675,8 @@ filedesc_dup2(
 
 	spin_unlock_irqrestore(&fd->lock, irq);
 
-	/* Notify scanners after the atomic destination replacement is visible. */
-	notify_table_pollers(fd);
+	/* Notify scanners of the destination after the atomic replacement is visible. */
+	notify_slot_pollers(fd, newfd);
 
 	/* File record locks and either backend's destruction stay outside the lock. */
 	descriptor_record_unlock(fd, &displaced);
@@ -767,8 +770,7 @@ retry:
 
 	spin_unlock_irqrestore(&fd->lock, irq);
 
-	/* Publish readiness changes only after both descriptors are live. */
-	notify_table_pollers(fd);
+	/* Two free slots became live: no poll waits on their numbers. */
 
 	/* Succeeded: the namespace owns both supplied file references. */
 	return 0;
@@ -951,8 +953,7 @@ filedesc_abort_reserved(
 
 	spin_unlock_irqrestore(&fd->lock, irq);
 
-	/* Wakes this table's polls, then drops the reservation's reference. */
-	notify_table_pollers(fd);
+	/* Reserved slots became free: no poll waits on them; the reservation's reference goes. */
 	filedesc_destroy(fd);
 }
 
@@ -1204,8 +1205,7 @@ retry:
 
 	spin_unlock_irqrestore(&fd->lock, irq);
 
-	/* Readiness scans must observe the newly live descriptor. */
-	notify_table_pollers(fd);
+	/* A free slot became live: no poll waits on its number. */
 
 	/* Succeeded: the table owns the supplied reference. */
 	return 0;
@@ -1265,8 +1265,7 @@ filedesc_install_object_at(
 
 	spin_unlock_irqrestore(&fd->lock, irq);
 
-	/* Notify waiters after the descriptor becomes visible. */
-	notify_table_pollers(fd);
+	/* A free slot became live: no poll waits on its number. */
 
 	/* Succeeded: the selected descriptor owns the supplied reference. */
 	return 0;
@@ -1352,8 +1351,7 @@ filedesc_commit_objects(
 
 	spin_unlock_irqrestore(&fd->lock, irq);
 
-	/* Wakes this table's polls before the reservation's reference goes. */
-	notify_table_pollers(fd);
+	/* Reserved slots became live: no poll waits on a reserved number (it answers at once). */
 
 	/* The committed descriptors, not the reservation, now own their objects. */
 	filedesc_destroy(fd);
@@ -1389,7 +1387,9 @@ filedesc_poll_end(
 }
 
 /*
- * Wakes the polls that may depend on a change to this table.
+ * Wakes the polls that may depend on a change to this table: a whole
+ * table's change (its end, an exec's closes) wakes every poll that scans
+ * it.
  *
  * A descriptor number's meaning matters only to a poll scanning this table;
  * a change to what an object is ready for is announced by the object's own
@@ -1403,11 +1403,31 @@ notify_table_pollers(
 {
 	unsigned pollers;
 
-	/* Wakes the poll channel only while a poll scans this table. */
+	/* Wakes the polls only while one scans this table. */
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 	pollers = __atomic_load_n(&fd->pollers, __ATOMIC_SEQ_CST);
 	if (pollers != 0)
-		poll_notify();
+		poll_notify_object(fd);
+}
+
+/*
+ * Wakes the polls that scan one descriptor number of this table after its
+ * live slot was replaced or taken away.  A slot that becomes live wakes
+ * nobody: a poll never waits on a free or reserved number (its scan answers
+ * POLLNVAL at once).
+ */
+static void
+notify_slot_pollers(
+	struct filedesc *fd,
+	int descriptor)
+{
+	unsigned pollers;
+
+	/* As for the table, only while a poll scans it. */
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	pollers = __atomic_load_n(&fd->pollers, __ATOMIC_SEQ_CST);
+	if (pollers != 0)
+		poll_notify_object(poll_slot_key(fd, descriptor));
 }
 
 /* Marks a slot free. */
@@ -1540,7 +1560,7 @@ filedesc_take_kind(
 	spin_unlock_irqrestore(&fd->lock, irq);
 
 	/* Descriptor side effects run before returning the ownership to its caller. */
-	notify_table_pollers(fd);
+	notify_slot_pollers(fd, descriptor);
 	descriptor_record_unlock(fd, result);
 	descriptor_readahead_cancel(result);
 

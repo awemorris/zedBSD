@@ -18,8 +18,10 @@
 #include "input-thread.h"
 #include "kwl.h"
 
+#include <signal.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,9 +33,6 @@
 
 /* The events one read of a device takes at most. */
 #define INPUT_READ_EVENTS	32U
-
-/* How often the touch pads' timers run while one is attached, in milliseconds (the event loop's poll before). */
-#define INPUT_PAD_TICK_MS	10
 
 /*
  * One ready device's events while the devices are read together: those read
@@ -62,6 +61,7 @@ static void input_pad_report(struct kwl_input_thread *input, struct kwl_input_re
 static void input_pad_actions(struct kwl_input_thread *input, struct kwl_input_reader *reader, const struct kwl_touchpad_actions *actions, uint32_t time);
 static void input_report(struct kwl_input_thread *input, struct kwl_input_reader *reader, uint32_t time);
 static void input_pad_ticks(struct kwl_input_thread *input);
+static int input_pad_timeout(const struct kwl_input_thread *input, int timeout_ms);
 static struct kwl_input_event *input_event_new(struct kwl_input_thread *input, struct kwl_input_reader *reader, enum kwl_input_event_kind kind, uint32_t time);
 static void input_queue(struct kwl_input_thread *input, struct kwl_input_event *event);
 static void input_fail(struct kwl_input_thread *input, int error);
@@ -127,10 +127,16 @@ int
 kwl_input_thread_start(
 	struct kwl_input_thread *input)
 {
+	sigset_t signals_all;
+	sigset_t signals_before;
 	int error;
 
 	/* The thread runs passes until it is asked to stop. */
+	/* The thread blocks every signal: the stops and a child's end go to the event loop's thread. */
+	(void)sigfillset(&signals_all);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_all, &signals_before);
 	error = pthread_create(&input->thread, NULL, input_main, input);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_before, NULL);
 	if (error != 0)
 		return error;
 
@@ -205,7 +211,7 @@ kwl_input_thread_destroy(
 /*
  * Runs one pass of the input thread: the main thread's commands, a poll of
  * the attached devices (at most timeout_ms, -1 for no limit; a touch pad
- * shortens it to its timers' period), their reports read in the order they
+ * shortens it to its next timer), their reports read in the order they
  * were made, and the touch pads' timers.
  *
  * Returns 1 to go on, 0 when the thread is asked to stop, -1 when the poll
@@ -253,14 +259,14 @@ kwl_input_thread_step(
 		polled[count] = &input->readers[index];
 		count++;
 
-		/* A touch pad's timers need the pass to come back soon. */
+		/* A touch pad has timers. */
 		if (input->readers[index].device.touchpad)
 			pads = 1;
 	}
 
-	/* A touch pad's tap completes when no drag comes in time. */
-	if (pads && (timeout_ms < 0 || timeout_ms > INPUT_PAD_TICK_MS))
-		timeout_ms = INPUT_PAD_TICK_MS;
+	/* A touch pad's tap completes when no drag comes in time: the wait ends then at the latest. */
+	if (pads)
+		timeout_ms = input_pad_timeout(input, timeout_ms);
 
 	/* The devices' events or the main thread's wake, and when the wait began and ended (the box's lag, ws213-p004). */
 	input->poll_entered_us = kwl_microseconds();
@@ -1173,6 +1179,49 @@ input_pad_ticks(
 		if (actions.count != 0)
 			input_pad_actions(input, reader, &actions, (uint32_t)now);
 	}
+}
+
+/*
+ * Shortens a wait (milliseconds, -1 for no limit) to the touch pads' next
+ * timer, rounded up so that the timer is due when the wait ends.
+ */
+static int
+input_pad_timeout(
+	const struct kwl_input_thread *input,
+	int timeout_ms)
+{
+	const struct kwl_input_reader *reader;
+	uint64_t due;
+	uint64_t next;
+	uint64_t now;
+	unsigned index;
+
+	/* The earliest timer of every attached touch pad. */
+	next = UINT64_MAX;
+	for (index = 0; index < KWL_INPUT_THREAD_DEVICES; index++) {
+		reader = &input->readers[index];
+		if (!reader->active || !reader->device.touchpad)
+			continue;
+		due = kwl_touchpad_due(&reader->pad);
+		if (due < next)
+			next = due;
+	}
+
+	/* No timer: the wait is as asked. */
+	if (next == UINT64_MAX)
+		return timeout_ms;
+
+	/* A timer due already ends the wait at once; a later one when it is due. */
+	now = kwl_milliseconds();
+	if (next <= now)
+		return 0;
+	if (next - now >= (uint64_t)INT_MAX)
+		return timeout_ms;
+	if (timeout_ms < 0 || (uint64_t)timeout_ms > next - now)
+		return (int)(next - now);
+
+	/* Succeeded: the wait asked for ends first. */
+	return timeout_ms;
 }
 
 /*

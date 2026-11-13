@@ -1527,9 +1527,15 @@ kwl_home_tick(
 			home_content_rising = 0U;
 	}
 
-	/* A launch whose window never came is forgotten. */
+	/* A launch whose window never came is forgotten (on the clock). */
 	if (server->home_launching && now - server->home_launch_ms > HOME_LAUNCH_FORGET_MS)
 		server->home_launching = 0;
+	if (server->home_launching)
+		kwl_due(server, server->home_launch_ms + HOME_LAUNCH_FORGET_MS + 1U);
+
+	/* The page turn, the icons coming and the animation are looked at closely until they end. */
+	if (server->home_page_moving || home_content_rising || server->home_moving)
+		kwl_due_soon(server);
 
 	/* No animation: nothing to draw. */
 	if (!server->home_moving)

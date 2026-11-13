@@ -397,6 +397,20 @@ kl_backend_session_managed(
 }
 
 /*
+ * Waits for nothing: no manager sends anything.
+ */
+int
+kl_backend_session_wait(
+	const struct kl_backend *backend,
+	uint64_t *due_ms)
+{
+	/* Nothing to read, nothing due. */
+	(void)backend;
+	*due_ms = UINT64_MAX;
+	return -1;
+}
+
+/*
  * Has nothing to read.
  */
 void

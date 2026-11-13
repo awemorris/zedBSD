@@ -244,6 +244,30 @@ kl_backend_media_update(
 }
 
 /*
+ * Tells whether a helper is running (its pipes and its end are looked at
+ * by kl_backend_media_update).
+ */
+int
+kl_backend_media_busy(
+	const struct kl_backend_media *media)
+{
+	size_t index;
+
+	/* A missing queue runs nothing. */
+	if (media == NULL)
+		return 0;
+
+	/* Any job not done yet. */
+	for (index = 0U; index < MEDIA_JOBS_MAX; index++) {
+		if (media->jobs[index].id != 0U && !media->jobs[index].done)
+			return 1;
+	}
+
+	/* Nothing runs. */
+	return 0;
+}
+
+/*
  * Takes one completed response, transferring descriptor ownership to the caller.
  */
 int
