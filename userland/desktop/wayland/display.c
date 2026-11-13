@@ -115,14 +115,17 @@ kwl_schedule(
 	int ready;
 	int held;
 	int moving;
+	int showing;
+	int asked;
 	int error;
 
 	/* An OS-paused display cannot compose or present until authority returns. */
 	if (server->os_paused != 0)
 		return;
 
-	/* The scheduler's parts are timed (KWL PERF main, ws213-p001 M0), its ticks first. */
+	/* The scheduler's parts are timed (KWL PERF main, ws213-p001 M0), its ticks first; whether a frame was asked for before them. */
 	part = kwl_cycles();
+	asked = server->dirty;
 
 	/* The sleep's causes and its course (sleep.c, ws052-p012), before the lock screen's own tick. */
 	kwl_sleep_tick(server);
@@ -137,6 +140,17 @@ kwl_schedule(
 	/* The desktop surface's program and place (desktop.c). */
 	kwl_desktop_tick(server);
 	server->perf.schedule_tick_cycles += kwl_cycles() - part;
+
+	/*
+	 * A frame only the ticks asked for (an animation's next step) while the
+	 * output's last frame is not shown yet is drawn when it is: the
+	 * animations step with the display's presents (compose.c's shown).
+	 */
+	showing = kwl_compose_showing(server);
+	if (!asked && server->dirty && showing) {
+		server->dirty = 0;
+		server->step_after_shown = 1U;
+	}
 
 	/* Every committed surface takes its new image. */
 	part = kwl_cycles();

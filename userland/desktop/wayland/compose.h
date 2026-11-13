@@ -140,6 +140,12 @@ struct kwl_import {
 	 * has completed, and the image is let go only after it has.
 	 */
 	uint64_t task;
+	/*
+	 * A host image's: the drawing (struct kwl_compose's drawings_given
+	 * count) that last took its staging to copy it; the CPU may write the
+	 * staging again once that drawing has completed.  0 for none.
+	 */
+	uint64_t copy_drawing;
 };
 
 /* The glass look's images and glyphs (glass.c). */
@@ -564,19 +570,18 @@ struct kwl_turn {
 /*
  * What one submission owns until it completes: the command buffers it is
  * recorded into (its host images' copies, then its drawing), its fence,
- * the client buffers it samples and the frame callbacks it is to send,
  * whether it copies host images, and what its completion applies (the
  * frame's number and start, whether it draws a layer's picture and the
  * layers' generation then, whether it wrote the cursor-free scene).  The
  * joined quads' vertices of the slot are its part of the batch buffer.
+ * It holds no client buffer and no frame callback: a buffer goes back
+ * by the drawings' completions (struct kwl_compose's returns), and the
+ * callbacks by the frame's presents (struct kwl_frame_told).
  */
 struct kwl_frame_slot {
 	VkCommandBuffer command;
 	VkCommandBuffer copy_command;
 	VkFence fence;
-	struct kwl_object *held[KWL_FRAME_WINDOWS + 3U];
-	struct kwl_object *callbacks;
-	unsigned held_count;
 	unsigned copies;
 	uint64_t number;
 	uint64_t start_cycles;
@@ -585,6 +590,25 @@ struct kwl_frame_slot {
 	uint64_t layers_generation;
 	unsigned scene_written;
 	unsigned flying;
+};
+
+/*
+ * A frame given whose presents the display has not all taken yet: the
+ * job's number (by which its shown messages name it), the compositor's
+ * frame number and the frame's start (for the lines), the frame callbacks
+ * of the surfaces it showed (sent, in request order, when the output's
+ * present is shown), whether the output's present is still to be shown,
+ * and the heads (by slot) whose presents are.  The main thread's alone;
+ * it goes once every present is shown.
+ */
+struct kwl_frame_told {
+	struct kwl_frame_told *next;
+	uint64_t number;
+	uint64_t frame;
+	uint64_t start_ms;
+	struct kwl_object *callbacks;
+	unsigned output;
+	unsigned heads;
 };
 
 /*
@@ -918,6 +942,24 @@ struct kwl_compose {
 	 */
 	struct kwl_render_thread render;
 	unsigned render_started;
+	/*
+	 * The shown thread (render-thread.c) and its register entry: it waits
+	 * for the present fences of the window mode's frames.  present_fences
+	 * says the device has them (VK_EXT_swapchain_maintenance1 enabled),
+	 * shown_started that the thread runs.  told are the frames given whose
+	 * presents are not all shown yet, oldest first (told_tail the last);
+	 * showing counts those whose output's present is not; head_missed says
+	 * a head missed a frame and is drawn again when a head's present is
+	 * shown (its image comes free then).
+	 */
+	struct kwl_shown shown;
+	struct kwl_thread shown_thread;
+	unsigned present_fences;
+	unsigned shown_started;
+	struct kwl_frame_told *told;
+	struct kwl_frame_told *told_tail;
+	unsigned showing;
+	unsigned head_missed;
 	enum kwl_render_kind want_kind;
 	uint64_t want_number;
 	unsigned want_head_count;
@@ -986,6 +1028,15 @@ struct kwl_compose {
 	uint64_t drawings_done;
 	unsigned drawing_open;
 	struct kwl_grave *graves;
+	/*
+	 * The client buffers replaced or let go whose last hold waits for the
+	 * drawings that read them (a buffer's read_drawing beyond
+	 * drawings_done), oldest first through return_next: each keeps that
+	 * hold until drawings_done reaches its read_drawing, and is then put
+	 * (released to its client, or freed when it was destroyed).
+	 */
+	struct kwl_object *returns;
+	struct kwl_object *returns_tail;
 	/*
 	 * The backdrop (backdrop.c); the framebuffer of the frame being
 	 * recorded, which its pass is taken up again on; and the blurred scene
@@ -1119,6 +1170,8 @@ VkResult kwl_compose_submit_quiet(struct kwl_server *server);
 int kwl_compose_render_start(struct kwl_server *server);
 int kwl_compose_want_layer(struct kwl_server *server);
 int kwl_compose_host_writable(struct kwl_server *server);
+int kwl_compose_host_image_writable(struct kwl_compose *compose, const struct kwl_import *image);
+int kwl_compose_showing(const struct kwl_server *server);
 void kwl_compose_park(struct kwl_server *server);
 void kwl_compose_want_nothing(struct kwl_server *server);
 void kwl_compose_output_let_go(struct kwl_server *server, struct kwl_head_rest *heads, unsigned *head_count);
