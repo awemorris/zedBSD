@@ -1797,6 +1797,9 @@ kwl_perf_report(
 	    100.0 * (double)perf->poll_cycles / (double)cycles,
 	    100.0 * (double)perf->work_cycles / (double)cycles);
 
+	/* The timers that fired in the window, by name (the passes they woke are among the passes above). */
+	kwl_timers_report(&server->timers);
+
 	/* Window mode's frames: how many, the CPU time to record and submit one, and the time until its fence. */
 	if (perf->compose_frames != 0) {
 		printf("KWL PERF compose frames=%u draw_ms=%.2f (acquire %.2f submit+present %.2f) frame_ms=%.2f\n",

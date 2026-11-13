@@ -254,6 +254,14 @@ test_same_and_move(void)
 	check(log.count == 0U, "move: not before its new time");
 	(void)kwl_timers_take(&timers, 600U, &log);
 	check(log.count == 1U && log.order[0] == &first, "move: at its new time");
+
+	/* The fired timers are counted by name for KWL PERF, and the report starts the counts again. */
+	check(timers.told_total == 3U, "told: three fired");
+	check(timers.told_kinds == 2U, "told: two names");
+	check(strcmp(timers.told_names[0], "first") == 0 && timers.told_counts[0] == 2U, "told: first twice");
+	check(strcmp(timers.told_names[1], "second") == 0 && timers.told_counts[1] == 1U, "told: second once");
+	kwl_timers_report(&timers);
+	check(timers.told_total == 0U && timers.told_kinds == 0U, "told: reported and cleared");
 	kwl_timers_destroy(&timers);
 }
 
