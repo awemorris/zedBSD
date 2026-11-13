@@ -2259,11 +2259,16 @@ sync_notification_poll(
 	int timeout;
 	int error;
 
-	/* A wait for completions consumes unrelated completed markers so level-triggered poll cannot spin on them. */
+	/*
+	 * A wait for completions first consumes every ended record nobody
+	 * waits on: the context stays readable while one is left, so a short
+	 * ledger (below the reap threshold) would make the poll return at once,
+	 * again and again, until the awaited job ends.
+	 */
 	if (completions) {
 		vulkan_context_lock(context);
 
-		status = sync_notifications_reap_if(context, &retired, 0);
+		status = sync_notifications_reap_if(context, &retired, 1);
 
 		vulkan_context_unlock(context);
 

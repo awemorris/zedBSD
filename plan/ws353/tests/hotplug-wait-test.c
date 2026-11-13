@@ -573,11 +573,12 @@ step_submit(
 	fence_status = vkGetFenceStatus(state->device, fence);
 	hotplug_status = vkGetFenceStatus(state->device, partner);
 
-	/* The wait returned soon after the submission, with the submitted fence signaled. */
+	/* The wait returned soon after the submission, with the submitted fence signaled, without spinning. */
 	if (submitted == VK_SUCCESS &&
 	    wait.result == VK_SUCCESS &&
 	    fence_status == VK_SUCCESS &&
 	    hotplug_status == VK_NOT_READY &&
+	    polls <= 3U &&
 	    wait.returned_ms - at < 200U) {
 		test_say(state, "%s: PASS ms=%llu polls=%u", name, (unsigned long long)(wait.returned_ms - at), polls);
 	} else {
@@ -635,8 +636,8 @@ step_narrow(
 	pthread_join(thread, NULL);
 	polls = __atomic_load_n(&counted_polls, __ATOMIC_RELAXED);
 
-	/* The wait slept once through all of the other fence's rounds. */
-	if (error == VK_SUCCESS && wait.result == VK_SUCCESS && during <= 1U) {
+	/* The wait slept once through all of the other fence's rounds, and a few times more at most for its own. */
+	if (error == VK_SUCCESS && wait.result == VK_SUCCESS && during <= 1U && polls <= 3U) {
 		test_say(state, "%s: PASS rounds=%u polls-during=%u polls=%u", name, round, during, polls);
 	} else {
 		test_say(state, "%s: FAIL error=%d result=%d rounds=%u polls-during=%u polls=%u", name, (int)error, (int)wait.result,

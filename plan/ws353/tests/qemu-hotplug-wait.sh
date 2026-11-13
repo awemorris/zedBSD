@@ -155,7 +155,7 @@ until serial 'cat /tmp/p3/result.txt' > "$out/result-raw.txt" 2>&1; do
 	[ "$tries" -lt 5 ] || break
 	sleep 2
 done
-grep -E '^[a-z-]+: ' "$out/result-raw.txt" | grep -v '^serial:' | tee -a "$summary" || true
+grep -E '^[a-z0-9-]+: ' "$out/result-raw.txt" | grep -v '^serial:' | tee -a "$summary" || true
 serial 'cat /tmp/p3/out.txt' > "$out/program-out.txt" 2>&1 || true
 serial 'dmesg | grep -i -e venus -e gpu' > "$out/dmesg-gpu.txt" 2>&1 || true
 
