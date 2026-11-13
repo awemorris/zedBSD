@@ -109,7 +109,7 @@ fi
 lin 'test -x $HOME/boot-zedbsd.sh' || { say "FAIL: no ~/boot-zedbsd.sh on Debian"; exit 1; }
 
 for mode in $MODES; do
-	[ "$mode" = write ] && p6fresh
+	case "$mode" in write | rawone) p6fresh ;; esac
 	run=$mode
 	envrun=$ENVS
 	case "$mode" in
@@ -146,7 +146,7 @@ for mode in $MODES; do
 	zb 'dmesg' > "$LOGS/$NAME-$mode-dmesg.txt" 2>&1
 	zb "echo $ZBU | sudo -S reboot" > /dev/null 2>&1
 	debian_up
-	[ "$mode" = write ] && p6fresh
+	case "$mode" in write | rawone) p6fresh ;; esac
 done
 python3 -I $T/summary.py "$LOGS" "$NAME"
 say done

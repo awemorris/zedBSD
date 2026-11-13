@@ -1,12 +1,13 @@
 #!/bin/sh
 # ws299: the NVMe read/write measurement on the Latitude 5330's zedBSD, run as root by nvme-bench-5330.sh.
-#   sh bench-zedbsd.sh read | seqcold | residue | write | p7rawwrite | p7rawread | p7fswrite | p7fsread | p7direct
+#   sh bench-zedbsd.sh read | seqcold | residue | write | rawone | p7rawwrite | p7rawread | p7fswrite | p7fsread | p7direct
 # read:  /dev/zero at three block sizes; random 4 KiB reads at depth 1 and 32 (randread, copied to RANDREAD);
 #        the UFS file WFILE read cold (the write mode of an earlier boot wrote it); reads of /dev/nvme0n1 at three
 #        block sizes and the curve of CHUNKS reads of CHUNK_MIB MiB, all inside the data region R0_MIB..+R_MIB
 #        (blocks of a Debian file of random bytes, the same blocks bench-debian.sh reads), with the cache and I/O
 #        counters after every step ("snap" blocks), and a re-read of the last chunk (a cache hit).  Only reads.
 # seqcold: the sequential reads of read alone, with no random reads before them to fill the cache.
+# rawone: 1 GiB of zeros onto p6 by one dd and a sync (the shape of Debian's b-w1m), p6 discarded by the caller.
 # residue: random reads through the cache, then RES_MIB MiB of the region read sequentially and its cksum
 #        ("cksum res CRC SIZE", for Debian's of the same blocks).
 # write: REST seconds before each step.  WFILE (1 GiB on the root UFS, p5, zedBSD's own) written over in place
@@ -29,7 +30,7 @@
 # build host (summary.py).  The only file removed is WFILE_NEW, inside zedBSD, before it is written again.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
-MODE=${1:?read|seqcold|residue|write|p7rawwrite|p7rawread|p7fswrite|p7fsread|p7direct|qdprobe|cpu}
+MODE=${1:?read|seqcold|residue|write|rawone|p7rawwrite|p7rawread|p7fswrite|p7fsread|p7direct|qdprobe|cpu}
 DEV=/dev/nvme0n1
 SWAP=/dev/nvme0n1p6
 R0_MIB=${R0_MIB:-25681}
@@ -168,6 +169,18 @@ write)
 		echo "step rawsync bytes=0"
 		/bin/time sync 2>&1 | grep -E '^(real|user|sys) '
 		snap rawsync
+	else
+		echo "swapoff failed: raw write skipped"
+	fi
+	;;
+rawone)
+	# 1 GiB of zeros onto p6 (discarded by the caller before this boot) by one dd and a sync, the shape of Debian's
+	# b-w1m (dd conv=fsync).
+	if swapoff $SWAP; then
+		echo "swapoff ok"
+		sleep "$REST"
+		shstep raw1g $((1024 * 1048576)) "dd if=/dev/zero of=$SWAP bs=1024k count=1024 && sync"
+		snap raw1g
 	else
 		echo "swapoff failed: raw write skipped"
 	fi
