@@ -168,11 +168,16 @@ sleep 10
 window quiet
 
 # 3. The sleeps.
-TO=20 zb 'ps ax' > "$LOGS/ps-before.txt" 2>&1
+TO=20 zb 'ps -A' > "$LOGS/ps-before.txt" 2>&1
 n=1
 while [ "$n" -le "$SLEEPS" ]; do
 	lines=$(TO=20 zb 'dmesg | wc -l' | tr -d ' ')
-	TO=20 zr "rm -f /tmp/b424-s$n.txt; nohup sh -c \"date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0; /tmp/b424-sleepctl s0idle; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0\" > /tmp/b424-s$n.txt 2>&1 < /dev/null &" > /dev/null 2>&1
+	# The radio goes down right before the sleep: networkd may have opened it again since.
+	down=
+	for w in $(grep -o '^wlan[0-9]*' "$LOGS/ifconfig.txt" | sort -u); do
+		down="$down /tmp/b424-wifi $w down; ifconfig $w down;"
+	done
+	TO=20 zr "rm -f /tmp/b424-s$n.txt; nohup sh -c \"$down sleep 2; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0; /tmp/b424-sleepctl s0idle; date +%s; /tmp/b424-thermal meters; /tmp/b424-thermal idle package 0\" > /tmp/b424-s$n.txt 2>&1 < /dev/null &" > /dev/null 2>&1
 	began=$(date +%s)
 	sleep 15
 	outcome=
@@ -203,7 +208,7 @@ while [ "$n" -le "$SLEEPS" ]; do
 	esac
 	TO=30 zb "dmesg | tail -n +$((lines + 1))" > "$LOGS/s$n-dmesg.txt" 2>&1
 	say "sleep $n: $(grep -h '^sleep' "$LOGS/s$n.txt")"
-	say "sleep $n kernel: $(grep -E 'sleep:|vmd:|pci:|nvme:|i915: (suspend|resume|unpark|park)|watchdog|fault|panic|trap|acpi: test' "$LOGS/s$n-dmesg.txt" | head -40 | tr '\n' ';')"
+	say "sleep $n kernel: $(grep -E 'sleep:|vmd:|pci:|nvme:|intel-ax211|i915: (suspend|resume|unpark|park)|watchdog|fault|panic|trap|acpi: test' "$LOGS/s$n-dmesg.txt" | head -40 | tr '\n' ';')"
 	# The package's energy and C-state residency over the sleep, by zedBSD's clock around it.
 	say "sleep $n package: $(awk '
 		$1 == "meter" && $3 ~ /package/ { for (i = 4; i <= NF; i++) if ($i ~ /^energy=/) { split($i, kv, "="); e[++ne] = kv[2] } }
@@ -222,7 +227,7 @@ while [ "$n" -le "$SLEEPS" ]; do
 	fi
 	say "sleep $n disk: $(tr '\n' ' ' < "$LOGS/s$n-disk.txt" | cut -c1-300)"
 	gt "s$n-gt.txt"
-	TO=20 zb 'ps ax' > "$LOGS/s$n-ps.txt" 2>&1
+	TO=20 zb 'ps -A' > "$LOGS/s$n-ps.txt" 2>&1
 	say "sleep $n gpu: $(grep i915 "$LOGS/s$n-gt.txt" | cut -c1-160); session: $(grep -E -o 'keiland[a-z-]*|sessiond' "$LOGS/s$n-ps.txt" | sort -u | tr '\n' ' ')processes $(grep -c . "$LOGS/s$n-ps.txt") (before $(grep -c . "$LOGS/ps-before.txt"))"
 	n=$((n + 1))
 	sleep 10
