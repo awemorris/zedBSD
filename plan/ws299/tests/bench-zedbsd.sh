@@ -1,11 +1,14 @@
 #!/bin/sh
 # ws299: the NVMe read/write measurement on the Latitude 5330's zedBSD, run as root by nvme-bench-5330.sh.
-#   sh bench-zedbsd.sh read | write | p7rawwrite | p7rawread | p7fswrite | p7fsread | p7direct
+#   sh bench-zedbsd.sh read | seqcold | residue | write | p7rawwrite | p7rawread | p7fswrite | p7fsread | p7direct
 # read:  /dev/zero at three block sizes; random 4 KiB reads at depth 1 and 32 (randread, copied to RANDREAD);
 #        the UFS file WFILE read cold (the write mode of an earlier boot wrote it); reads of /dev/nvme0n1 at three
 #        block sizes and the curve of CHUNKS reads of CHUNK_MIB MiB, all inside the data region R0_MIB..+R_MIB
 #        (blocks of a Debian file of random bytes, the same blocks bench-debian.sh reads), with the cache and I/O
 #        counters after every step ("snap" blocks), and a re-read of the last chunk (a cache hit).  Only reads.
+# seqcold: the sequential reads of read alone, with no random reads before them to fill the cache.
+# residue: random reads through the cache, then RES_MIB MiB of the region read sequentially and its cksum
+#        ("cksum res CRC SIZE", for Debian's of the same blocks).
 # write: REST seconds before each step.  WFILE (1 GiB on the root UFS, p5, zedBSD's own) written over in place
 #        and synced; WFILE_NEW removed and written anew (new blocks: UFS sends no TRIM) and synced; then, when the
 #        swap on p6 (zedBSD's own, discarded by the caller before this boot) can be turned off, 1 GiB of zeros onto
@@ -26,7 +29,7 @@
 # build host (summary.py).  The only file removed is WFILE_NEW, inside zedBSD, before it is written again.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
-MODE=${1:?read|write|p7rawwrite|p7rawread|p7fswrite|p7fsread|p7direct|qdprobe|cpu}
+MODE=${1:?read|seqcold|residue|write|p7rawwrite|p7rawread|p7fswrite|p7fsread|p7direct|qdprobe|cpu}
 DEV=/dev/nvme0n1
 SWAP=/dev/nvme0n1p6
 R0_MIB=${R0_MIB:-25681}
@@ -44,6 +47,7 @@ DIRECTIO=${DIRECTIO:-/tmp/directio-zedbsd}
 P7=/dev/nvme0n1p7
 P7_MIB=${P7_MIB:-4096}
 P7_MNT=/mnt/bench7
+RES_MIB=${RES_MIB:-1024}
 
 snap() {
 	echo "snap $1"
@@ -66,6 +70,31 @@ step() {
 shstep() {
 	echo "step $1 bytes=$2"
 	/bin/time sh -c "$3" 2>&1 | grep -E '^(real|user|sys) |^dd:|time:'
+}
+
+# The sequential reads of the data region: three block sizes of 128 MiB, the curve of CHUNKS reads of CHUNK_MIB MiB,
+# and the last chunk again (a cache hit).
+sequential() {
+	# Block sizes, 128 MiB each.
+	step bs64k $((128 * 1048576)) if=$DEV of=/dev/null bs=64k skip=$((R0_MIB * 16)) count=2048
+	step bs1m $((128 * 1048576)) if=$DEV of=/dev/null bs=1024k skip=$((R0_MIB + 128)) count=128
+	step bs4m $((128 * 1048576)) if=$DEV of=/dev/null bs=4096k skip=$(((R0_MIB + 256) / 4)) count=32
+	snap bs
+
+	# The curve.
+	i=0
+	while [ "$i" -lt "$CHUNKS" ]; do
+		step "chunk$i" $((CHUNK_MIB * 1048576)) if=$DEV of=/dev/null bs=1024k \
+		    skip=$((R0_MIB + 512 + i * CHUNK_MIB)) count=$CHUNK_MIB
+		snap "chunk$i"
+		i=$((i + 1))
+	done
+
+	# The last chunk again, which the cache should hold.
+	last=$((i - 1))
+	step reread $((CHUNK_MIB * 1048576)) if=$DEV of=/dev/null bs=1024k \
+	    skip=$((R0_MIB + 512 + last * CHUNK_MIB)) count=$CHUNK_MIB
+	snap reread
 }
 
 echo "bench mode=$MODE"
@@ -101,26 +130,7 @@ read)
 		snap ufsread
 	fi
 
-	# Block sizes, 128 MiB each.
-	step bs64k $((128 * 1048576)) if=$DEV of=/dev/null bs=64k skip=$((R0_MIB * 16)) count=2048
-	step bs1m $((128 * 1048576)) if=$DEV of=/dev/null bs=1024k skip=$((R0_MIB + 128)) count=128
-	step bs4m $((128 * 1048576)) if=$DEV of=/dev/null bs=4096k skip=$(((R0_MIB + 256) / 4)) count=32
-	snap bs
-
-	# The curve.
-	i=0
-	while [ "$i" -lt "$CHUNKS" ]; do
-		step "chunk$i" $((CHUNK_MIB * 1048576)) if=$DEV of=/dev/null bs=1024k \
-		    skip=$((R0_MIB + 512 + i * CHUNK_MIB)) count=$CHUNK_MIB
-		snap "chunk$i"
-		i=$((i + 1))
-	done
-
-	# The last chunk again, which the cache should hold.
-	last=$((i - 1))
-	step reread $((CHUNK_MIB * 1048576)) if=$DEV of=/dev/null bs=1024k \
-	    skip=$((R0_MIB + 512 + last * CHUNK_MIB)) count=$CHUNK_MIB
-	snap reread
+	sequential
 	;;
 write)
 	df /root
@@ -161,6 +171,21 @@ write)
 	else
 		echo "swapoff failed: raw write skipped"
 	fi
+	;;
+residue)
+	# Sequential reads on a cache full of the random reads' lines: random 4 KiB reads at depth 32 through the cache,
+	# then RES_MIB MiB of the region read in 1 MiB requests, and the same range's cksum (to compare with Debian's).
+	echo "step res-rand4k-qd32 bytes=0"
+	"$RANDREAD" $DEV 4096 32 "$RAND_SECONDS" "$R0_MIB" "$R_MIB"
+	snap res-rand
+	step res-seq $((RES_MIB * 1048576)) if=$DEV of=/dev/null bs=1024k skip=$((R0_MIB + 512)) count=$RES_MIB
+	snap res-seq
+	echo "cksum res $(dd if=$DEV bs=1024k skip=$((R0_MIB + 512)) count=$RES_MIB 2> /dev/null | cksum)"
+	;;
+seqcold)
+	# The sequential reads alone, on the cache as the boot left it (no random reads before them, as Debian's
+	# b- steps follow a drop of its page cache).
+	sequential
 	;;
 p7rawwrite)
 	echo "step p7-rawwrite bytes=$((P7_MIB * 1048576))"

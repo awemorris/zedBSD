@@ -27,6 +27,8 @@ def rates(logs, name):
     for path in sorted(glob.glob(os.path.join(logs, name + "-*.txt"))):
         if path.endswith(("-dmesg.txt", "-summary.md")):
             continue
+        mode = os.path.basename(path)[len(name) + 1:-len(".txt")]
+        found = {}
         step = None
         size = 0
         with open(path, errors="replace") as stream:
@@ -42,14 +44,15 @@ def rates(logs, name):
                 for pattern in (PATWRITE, RANDREAD, DIRECTIO):
                     match = pattern.match(line)
                     if match:
-                        out[step] = float(match.group(1))
+                        found[step] = float(match.group(1))
                         step = None
                         break
                 if step is None:
                     continue
                 match = DD.match(line)
-                if match and float(match.group(2)) > 0 and step not in out:
-                    out.setdefault("dd:" + step, int(match.group(1)) / float(match.group(2)) / 1e6)
+                if match and float(match.group(2)) > 0:
+                    found.setdefault(step, int(match.group(1)) / float(match.group(2)) / 1e6)
+                    step = None
                     continue
                 match = TIME.match(line)
                 if match:
@@ -58,11 +61,12 @@ def rates(logs, name):
                         raw_bytes += size
                         raw_real += real
                     if real > 0 and size > 0:
-                        out[step] = size / real / 1e6
+                        found[step] = size / real / 1e6
                     step = None
-    # Debian's dd rates stand for the step when nothing else measured it.
-    for key in [key for key in out if key.startswith("dd:")]:
-        out.setdefault(key[3:], out.pop(key))
+        # Each step by its mode ("read:chunk0"), and by its name alone from the first mode that has it.
+        for key, value in found.items():
+            out[mode + ":" + key] = value
+            out.setdefault(key, value)
     if raw_real > 0:
         out["rawtotal"] = raw_bytes / raw_real / 1e6
     return out
@@ -79,7 +83,9 @@ def main():
     zedbsd = rates(logs, zedbsd_name)
     chunks = ["chunk%d" % index for index in range(2, 16)]
     debian["chunk2-15"] = median_of(debian, ["b-" + name for name in chunks])
-    zedbsd["chunk2-15"] = median_of(zedbsd, chunks)
+    zedbsd["chunk2-15"] = median_of(zedbsd, ["read:" + name for name in chunks])
+    zedbsd["seqcold:chunk0-15"] = median_of(zedbsd, ["seqcold:chunk%d" % index for index in range(16)])
+    debian["chunk0-15"] = median_of(debian, ["b-chunk%d" % index for index in range(16)])
     pairs = [
         ("raw の書き p7 4 GiB（fsync まで）", "p7-rawwrite", "p7-rawwrite"),
         ("raw の冷えた読み p7 4 GiB（cache 経由）", "p7-rawread", "p7-rawread"),
@@ -93,17 +99,26 @@ def main():
         ("乱読み 4 KiB direct QD32", "r-rand4k-qd32-hmb1", "rand4k-direct-qd32"),
         ("乱読み 4 KiB direct QD32（thread ごとの open）", "r-rand4k-qd32-hmb1", "rand4k-direct-fdeach-qd32"),
         ("乱読み 4 KiB QD1（cache 経由）", "r-rand4k-qd1-cached", "rand4k-qd1"),
-        ("乱読み 4 KiB QD32（cache 経由）", "r-rand4k-qd32-cached", "rand4k-qd32"),
+        ("乱読み 4 KiB QD32（zedBSD は cache 経由、Debian は direct）", "r-rand4k-qd32-hmb1", "rand4k-qd32"),
+        ("（参考）乱読み 4 KiB QD32（両方 cache 経由。Debian は page cache が範囲の多くを持つ）", "r-rand4k-qd32-cached",
+         "rand4k-qd32"),
         ("root の file 1 GiB の上書き（ext4 / UFS、sync まで）", "ext4-w1m", "ufsover"),
         ("root の file 1 GiB を新しく（ext4 / UFS、sync まで）", "ext4-w1m", "ufsnew"),
         ("root の file 1 GiB の冷えた読み", "ext4-r1m", "ufsread"),
         ("p6 の raw の書き 1 GiB（sync まで）", "b-w1m", "rawtotal"),
         ("data 範囲の raw の連続の読み chunk2〜15 の中央値（cache 経由）", "chunk2-15", "chunk2-15"),
-        ("同じ、bs 64 KiB 128 MiB", "b-bs64k", "bs64k"),
-        ("同じ、bs 1 MiB 128 MiB", "b-bs1m", "bs1m"),
-        ("同じ、bs 4 MiB 128 MiB", "b-bs4m", "bs4m"),
-        ("同じ、chunk0 256 MiB", "b-chunk0", "chunk0"),
-        ("同じ、chunk1 256 MiB", "b-chunk1", "chunk1"),
+        ("read mode（乱読みの後）の bs 64 KiB 128 MiB", "b-bs64k", "read:bs64k"),
+        ("同じ、bs 1 MiB 128 MiB", "b-bs1m", "read:bs1m"),
+        ("同じ、bs 4 MiB 128 MiB", "b-bs4m", "read:bs4m"),
+        ("同じ、chunk0 256 MiB", "b-chunk0", "read:chunk0"),
+        ("同じ、chunk1 256 MiB", "b-chunk1", "read:chunk1"),
+        ("seqcold（乱読みの前）の bs 64 KiB 128 MiB", "b-bs64k", "seqcold:bs64k"),
+        ("同じ、bs 1 MiB 128 MiB", "b-bs1m", "seqcold:bs1m"),
+        ("同じ、bs 4 MiB 128 MiB", "b-bs4m", "seqcold:bs4m"),
+        ("同じ、chunk0 256 MiB", "b-chunk0", "seqcold:chunk0"),
+        ("同じ、chunk1 256 MiB", "b-chunk1", "seqcold:chunk1"),
+        ("同じ、chunk0〜15 の中央値", "chunk0-15", "seqcold:chunk0-15"),
+        ("residue（乱読み QD32 の後）の 1 GiB（Debian は cache を捨てた後の chunk の中央値）", "chunk0-15", "residue:res-seq"),
     ]
     print("| 項目（5330） | Debian %s MB/s | zedBSD %s MB/s | 比 |" % (debian_name, zedbsd_name))
     print("| --- | --- | --- | --- |")
@@ -115,12 +130,13 @@ def main():
             share = "%.0f%%" % (right * 100.0 / left)
         print("| %s | %s | %s | %s |" % (label, "%.1f" % left if left else "-", "%.1f" % right if right else "-",
                                          share))
-    first = zedbsd.get("chunk0")
-    last = zedbsd.get("chunk15")
-    if first and last:
-        print("")
-        print("zedBSD の raw の連続の読みの最初の 256 MiB と最後の 256 MiB の比（受け入れ 1）: %.2f（%.1f / %.1f MB/s）" % (
-            min(first, last) / max(first, last), first, last))
+    for mode in ("read", "seqcold"):
+        first = zedbsd.get(mode + ":chunk0")
+        last = zedbsd.get(mode + ":chunk15")
+        if first and last:
+            print("")
+            print("zedBSD %s の raw の連続の読みの最初の 256 MiB と最後の 256 MiB の比（受け入れ 1）: %.2f（%.1f / %.1f MB/s）" % (
+                mode, min(first, last) / max(first, last), first, last))
 
 
 main()

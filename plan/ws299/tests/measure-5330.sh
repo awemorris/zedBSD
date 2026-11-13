@@ -3,8 +3,9 @@
 # VMUNIX on p4 with zedbsd.cfg plus watchdog=WATCHDOG and zedBSD's modes (each a single start, ~/boot-zedbsd.sh),
 # then p4 put back as it was and the two compared.
 #   sh plan/ws299/tests/measure-5330.sh NAME VMUNIX
-# DMODES (default "read write p7raw p7fs p7direct") are bench-debian.sh's, ZMODES (default "read write p7rawwrite
-# p7rawread p7fswrite p7fsread p7direct") bench-zedbsd.sh's; either may be empty.  The 5330 must be on Debian with
+# DMODES (default "read write p7raw p7fs p7direct") are bench-debian.sh's, ZMODES (default "read seqcold residue write
+# p7rawwrite p7rawread p7fswrite p7fsread p7direct") bench-zedbsd.sh's; either may be empty.  After the residue mode
+# its cksum is compared with Debian's of the same 1 GiB.  The 5330 must be on Debian with
 # p4's kernel and zedbsd.cfg kept as ~/ws245/vmunix-p027-orig and ~/ws245/zedbsd.cfg-p027-orig (their sha256 are
 # checked before and after).  A zedBSD that stops is reset by the TCO watchdog (WATCHDOG s, default 600) and comes
 # back as Debian; p4 is put back in every case.
@@ -19,7 +20,7 @@ cd "$(dirname "$0")/../../.."
 T=plan/ws299/tests
 LOGS=${LOGS:-build/hw5330/ws299}
 DMODES=${DMODES-read write p7raw p7fs p7direct}
-ZMODES=${ZMODES-read write p7rawwrite p7rawread p7fswrite p7fsread p7direct}
+ZMODES=${ZMODES-read seqcold residue write p7rawwrite p7rawread p7fswrite p7fsread p7direct}
 WATCHDOG=${WATCHDOG:-600}
 ORIG_VMUNIX=4c98d617279bf96b
 ORIG_CFG=1b33a395b0ff4bd7
@@ -58,7 +59,7 @@ restore() {
 		say "FAIL: the 5330 is not on Debian $((WATCHDOG + 600)) s on; p4 still holds the measured kernel"
 		exit 2
 	fi
-	TO=300 lin "sudo -n sh -c 'mkdir -p /mnt/zb && { while mountpoint -q /mnt/zb; do umount /mnt/zb; done; } && mount $NV_BOOT /mnt/zb && cp \$HOME/ws245/vmunix-p027-orig /mnt/zb/vmunix && cp \$HOME/ws245/zedbsd.cfg-p027-orig /mnt/zb/zedbsd.cfg && sync && umount /mnt/zb'" > /dev/null 2>&1
+	TO=300 lin "sudo -n sh -c 'mkdir -p /mnt/zb && { while mountpoint -q /mnt/zb; do umount /mnt/zb; done; } && mount $NV_BOOT /mnt/zb && cp $DH/ws245/vmunix-p027-orig /mnt/zb/vmunix && cp $DH/ws245/zedbsd.cfg-p027-orig /mnt/zb/zedbsd.cfg && sync && umount /mnt/zb'" > /dev/null 2>&1
 	sums=$(p4_sums)
 	if [ "$sums" = "$ORIG_VMUNIX $ORIG_CFG " ]; then
 		say "p4 put back: vmunix $ORIG_VMUNIX, zedbsd.cfg $ORIG_CFG"
@@ -73,6 +74,9 @@ exec 9> /tmp/i915-hw.lock
 flock -w 3600 9 || { say "FAIL: the lock"; exit 1; }
 export WS299_LOCKED=1
 is_debian || { say "FAIL: the 5330 is not on Debian"; exit 1; }
+# Debian's home, spelled out: inside sudo's sh, $HOME is root's.
+DH=$(TO=15 lin 'echo $HOME')
+case $DH in /home/*) ;; *) say "FAIL: the Debian home ($DH)"; exit 1 ;; esac
 orig=$(TO=30 lin 'sha256sum ws245/vmunix-p027-orig ws245/zedbsd.cfg-p027-orig' | awk '{ printf "%s ", substr($1, 1, 16) }')
 [ "$orig" = "$ORIG_VMUNIX $ORIG_CFG " ] || { say "FAIL: the kept p4 files are $orig"; exit 1; }
 before=$(p4_sums)
@@ -88,11 +92,21 @@ if [ -n "$ZMODES" ]; then
 	TO=120 timeout 120 scp -q "$VMUNIX" "$HOST:ws245/vmunix-$NAME" || { say "FAIL: copy of the kernel"; exit 1; }
 	lin "sudo -n sh \$HOME/ws245/5330-nvme-write.sh kernel \$HOME/ws245/vmunix-$NAME" > /dev/null ||
 		{ say "FAIL: kernel install"; exit 1; }
-	lin "sudo -n sh -c 'mkdir -p /mnt/zb && { while mountpoint -q /mnt/zb; do umount /mnt/zb; done; } && mount $NV_BOOT /mnt/zb && cp \$HOME/ws245/zedbsd.cfg-p027-orig /mnt/zb/zedbsd.cfg && echo watchdog=$WATCHDOG >> /mnt/zb/zedbsd.cfg && sync && umount /mnt/zb'" > /dev/null 2>&1 ||
+	lin "sudo -n sh -c 'mkdir -p /mnt/zb && { while mountpoint -q /mnt/zb; do umount /mnt/zb; done; } && mount $NV_BOOT /mnt/zb && cp $DH/ws245/zedbsd.cfg-p027-orig /mnt/zb/zedbsd.cfg && echo watchdog=$WATCHDOG >> /mnt/zb/zedbsd.cfg && sync && umount /mnt/zb'" > /dev/null 2>&1 ||
 		{ say "FAIL: zedbsd.cfg"; exit 1; }
 	say "p4 for zedBSD: $(p4_sums)(watchdog=$WATCHDOG)"
 	# shellcheck disable=SC2086
 	sh $T/nvme-bench-5330.sh zedbsd "$NAME-Z" - $ZMODES 2>&1 | grep '^nvme-bench:' | tee -a "$OUT"
+	# The residue mode's cksum against Debian's of the same blocks.
+	if [ -f "$LOGS/$NAME-Z-residue.txt" ]; then
+		zsum=$(sed -n 's/^cksum res //p' "$LOGS/$NAME-Z-residue.txt")
+		dsum=$(TO=300 lin "sudo -n dd if=/dev/nvme0n1 bs=1M skip=$((25681 + 512)) count=1024 status=none | cksum")
+		if [ -n "$zsum" ] && [ "$zsum" = "$dsum" ]; then
+			say "residue cksum equal ($zsum)"
+		else
+			say "FAIL: residue cksum zedBSD '$zsum' Debian '$dsum'"
+		fi
+	fi
 	for f in "$LOGS/$NAME"-Z-*-dmesg.txt; do
 		[ -f "$f" ] && say "$(basename "$f"): $(grep -h 'watchdog: armed\|host memory buffer' "$f" | tr '\n' ';' | cut -c1-200)"
 	done
