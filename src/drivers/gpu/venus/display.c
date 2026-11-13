@@ -89,6 +89,13 @@ struct venus_display_engine {
 	unsigned initialized;
 
 	/*
+	 * The topology sequence read just before the last completed display
+	 * query.  The cached outputs are queried again once the transport's
+	 * sequence differs, which every acknowledged display event makes it do.
+	 */
+	uint64_t queried_sequence;
+
+	/*
 	 * Console storage belongs to the controller's context-zero namespace, never to an open.
 	 * The worker accesses these fields under the controller mutex except its atomic stop flag.
 	 */
@@ -1452,11 +1459,12 @@ display_refresh(
 	uint8_t response[408];
 	uint8_t *configuration;
 	uint32_t count;
-	uint32_t events;
+	uint64_t sequence;
 	uint32_t index;
 	uint32_t width;
 	uint32_t height;
 	unsigned connected;
+	int saturated;
 	int error;
 
 	/* No cached information can make a failed transport usable again. */
@@ -1492,15 +1500,20 @@ display_refresh(
 	engine = controller->display;
 	if (count != engine->count)
 		return EIO;
-	events = kern_mmio_read32(configuration);
-	if (engine->initialized != 0U && (events & 1U) == 0U)
-		return 0;
 
-	/* Publishes before clearing, including when a query outruns delayed MSI-X delivery. */
-	if ((events & 1U) != 0U) {
-		drv_venus_transport_display_changed(&controller->transport);
-		kern_mmio_write32(configuration + 4U, 1U);
-	}
+	/* Takes an event the interrupt has not delivered yet, so this query sees the change it reports. */
+	drv_venus_transport_display_event(&controller->transport);
+
+	/*
+	 * The inventory stays valid while the topology sequence has not moved
+	 * since it was queried.  A saturated sequence no longer tells changes
+	 * apart, so it queries every time.
+	 */
+	saturated = display_events(controller, NULL, &sequence);
+	if (saturated == 0 &&
+	    engine->initialized != 0U &&
+	    sequence == engine->queried_sequence)
+		return 0;
 
 	/* Queries after acknowledgement so later hardware changes remain latched independently. */
 	drv_venus_header(command, 0x0100U, 0U);
@@ -1540,7 +1553,9 @@ display_refresh(
 			return error;
 	}
 
+	/* A change published after the sequence was read moves it again and makes the next caller query. */
 	engine->initialized = 1U;
+	engine->queried_sequence = sequence;
 
 	/* Succeeded: discovery now reflects one completed native topology query. */
 	return 0;

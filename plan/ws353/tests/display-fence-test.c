@@ -9,11 +9,18 @@
  * The guest side of the display-event fence test (GPU_DISPLAY_FENCE): one
  * step per run, each printing one result line that qemu-display-fence.sh reads.
  *
- *   display-fence-test idle SECONDS          a registration stays unsignaled
- *   display-fence-test wait SECONDS MARKER   a registration wakes poll(); prints the milliseconds after MARKER
- *   display-fence-test cancel SECONDS MARKER a canceled registration never wakes poll()
- *   display-fence-test limit                 16 per open, ENOSPC past them, a closed open's fences end
- *   display-fence-test race COUNT GAP_MS     registrations made while the head is plugged and unplugged
+ *   display-fence-test idle SECONDS                 a registration stays unsignaled
+ *   display-fence-test wait SECONDS MARKER [GATE]   a registration wakes poll(); prints the milliseconds after MARKER
+ *   display-fence-test cancel SECONDS MARKER [GATE] a canceled registration never wakes poll()
+ *   display-fence-test limit                        16 per open, ENOSPC past them, a closed open's fences end
+ *   display-fence-test race COUNT GAP_MS [GATE]     registrations made while the head is plugged and unplugged
+ *
+ * With GATE, the program opens the node, makes GATE.ready and waits for the
+ * host to make GATE.go before it registers.  Opening a GPU node puts a kernel
+ * record on the console the host drives the guest through, and a record that
+ * lands in the middle of the host's command costs that command time; the gate
+ * keeps the record before the registration, so the host's time from the
+ * marker to the change stays short.
  */
 
 #include <errno.h>
@@ -35,6 +42,10 @@
 /* The registrations the race step makes at most. */
 #define TEST_RACE_MAX	4096
 
+/* How long a gated step waits for the host's go, in milliseconds, and how often it looks. */
+#define TEST_GATE_MS		120000
+#define TEST_GATE_POLL_US	5000
+
 /*
  * One registration of the race step: the topology sequence read before and
  * after it, and its fence's descriptor.
@@ -51,11 +62,12 @@ static int cancel_hotplug(int node, int fence);
 static int read_sequence(int node, uint64_t *sequence);
 static uint64_t now_ms(void);
 static int wait_fence(int fence, int timeout_ms, short *revents);
+static int gate_pass(const char *gate);
 static int step_idle(int seconds);
-static int step_wait(int seconds, const char *marker, int expect_wake);
+static int step_wait(int seconds, const char *marker, const char *gate, int expect_wake);
 static int step_limit(void);
 static int race_check(const struct race_entry *entry, uint64_t now);
-static int step_race(int count, int gap_ms);
+static int step_race(int count, int gap_ms, const char *gate);
 
 /* The race step's registrations, too many for the stack. */
 static struct race_entry race_entries[TEST_RACE_MAX];
@@ -81,14 +93,14 @@ main(
 	status = 2;
 	if (strcmp(argv[1], "idle") == 0 && argc == 3) {
 		status = step_idle(atoi(argv[2]));
-	} else if (strcmp(argv[1], "wait") == 0 && argc == 4) {
-		status = step_wait(atoi(argv[2]), argv[3], 1);
-	} else if (strcmp(argv[1], "cancel") == 0 && argc == 4) {
-		status = step_wait(atoi(argv[2]), argv[3], 0);
+	} else if (strcmp(argv[1], "wait") == 0 && (argc == 4 || argc == 5)) {
+		status = step_wait(atoi(argv[2]), argv[3], argc == 5 ? argv[4] : NULL, 1);
+	} else if (strcmp(argv[1], "cancel") == 0 && (argc == 4 || argc == 5)) {
+		status = step_wait(atoi(argv[2]), argv[3], argc == 5 ? argv[4] : NULL, 0);
 	} else if (strcmp(argv[1], "limit") == 0 && argc == 2) {
 		status = step_limit();
-	} else if (strcmp(argv[1], "race") == 0 && argc == 4) {
-		status = step_race(atoi(argv[2]), atoi(argv[3]));
+	} else if (strcmp(argv[1], "race") == 0 && (argc == 4 || argc == 5)) {
+		status = step_race(atoi(argv[2]), atoi(argv[3]), argc == 5 ? argv[4] : NULL);
 	} else {
 		fprintf(stderr, "display-fence-test: unknown step or arguments\n");
 	}
@@ -236,6 +248,46 @@ wait_fence(
 	return ready > 0;
 }
 
+/*
+ * Makes GATE.ready and waits for GATE.go: 0 when the host said go (or there
+ * is no gate), or the errno.
+ */
+static int
+gate_pass(
+	const char *gate)
+{
+	char path[256];
+	uint64_t started;
+	int file;
+	int found;
+
+	/* An ungated step goes on at once. */
+	if (gate == NULL)
+		return 0;
+
+	/* Tells the host the node is open and its kernel record written. */
+	snprintf(path, sizeof(path), "%s.ready", gate);
+	file = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (file < 0)
+		return errno;
+	close(file);
+
+	/* Looks for the host's go until it comes or the wait runs out. */
+	snprintf(path, sizeof(path), "%s.go", gate);
+	started = now_ms();
+	for (;;) {
+		found = access(path, F_OK);
+		if (found == 0)
+			break;
+		if (now_ms() - started >= TEST_GATE_MS)
+			return ETIMEDOUT;
+		usleep(TEST_GATE_POLL_US);
+	}
+
+	/* Succeeded: the host said go. */
+	return 0;
+}
+
 /* A registration with no topology change stays unsignaled for SECONDS. */
 static int
 step_idle(
@@ -288,6 +340,7 @@ static int
 step_wait(
 	int seconds,
 	const char *marker,
+	const char *gate,
 	int expect_wake)
 {
 	const char *name;
@@ -307,6 +360,13 @@ step_wait(
 	node = open_display_node(path, sizeof(path));
 	if (node < 0) {
 		printf("%s: FAIL no display node\n", name);
+		return 1;
+	}
+
+	/* The host's go, after the open's kernel record. */
+	error = gate_pass(gate);
+	if (error != 0) {
+		printf("%s: FAIL gate %d\n", name, error);
 		return 1;
 	}
 	error = read_sequence(node, &before);
@@ -462,7 +522,8 @@ race_check(
 static int
 step_race(
 	int count,
-	int gap_ms)
+	int gap_ms,
+	const char *gate)
 {
 	struct race_entry *entry;
 	struct race_entry *old;
@@ -482,6 +543,13 @@ step_race(
 	node = open_display_node(path, sizeof(path));
 	if (node < 0) {
 		printf("race: FAIL no display node\n");
+		return 1;
+	}
+
+	/* The host's go, after the open's kernel record. */
+	error = gate_pass(gate);
+	if (error != 0) {
+		printf("race: FAIL gate %d\n", error);
 		return 1;
 	}
 
