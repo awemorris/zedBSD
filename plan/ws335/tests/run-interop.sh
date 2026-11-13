@@ -22,7 +22,7 @@
 #                                                 the image as /root/ca.pem; the guest reaches the host's
 #                                                 127.0.0.1 as 10.0.2.2 (QEMU's user network).  The subset of the
 #                                                 Windows run, without the EOF cases (the serial console returns a
-#                                                 command's output when it ends); run-guest.sh drives it.
+#                                                 command's output when it ends).
 # Each case prints one line "interop: <name>: PASS" or "interop: <name>: FAIL (<why>; <dir>)"; the last line is
 # "run-interop: PASS (<n> cases)" or "run-interop: FAIL (<failed> of <n> cases)".  Output under build/tmp/ws335-interop
 # (a fresh run directory); each case's client and server output is in its own directory.
