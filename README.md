@@ -6,13 +6,11 @@ Gonna change the way computing is, to reshape the way 8 billion are!
 ---
 
 <div align="center">
-  <hr>
   <img src="docs/imgs/screenshot1.png" alt="Screenshot 1" width="80%"><br>
   <hr>
   <img src="docs/imgs/screenshot2.png" alt="Screenshot 2" width="80%"><br>
   <hr>
   <img src="docs/imgs/screenshot3.png" alt="Screenshot 3" width="80%"><br>
-  <hr>
 </div><br>
 
 ---
