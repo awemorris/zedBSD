@@ -129,6 +129,10 @@ static struct kwl_server *test_phone_server;
 /* The checks that failed. */
 static int test_failures;
 
+/* The phone's timer as the fake timers keep it (NULL: none armed), and its time. */
+static struct kwl_timer *test_timer;
+static uint64_t test_timer_due;
+
 int main(void);
 static void test_shell(void);
 static void test_view(void);
@@ -138,6 +142,7 @@ static int test_sync_what(struct kwl_object *object, uint32_t request, uint32_t 
 static int test_link_record(unsigned from, uint32_t *contacts, uint32_t *record);
 static void test_state(void);
 static void test_check(const char *name, int passed);
+static void test_pass(struct kwl_server *server);
 static size_t test_put_string(unsigned char *bytes, size_t offset, const char *text);
 static size_t test_put_word(unsigned char *bytes, size_t offset, uint32_t word);
 static uint32_t test_get_word(const struct test_event *event, size_t offset);
@@ -258,6 +263,37 @@ kwl_milliseconds(
 	void)
 {
 	return test_now;
+}
+
+/* Readies a timer (threads.c's): not armed, with its handler. */
+void
+kwl_timer_init(
+	struct kwl_timer *timer,
+	const char *name,
+	kwl_timer_fire_fn *fire)
+{
+	memset(timer, 0, sizeof(*timer));
+	timer->name = name;
+	timer->fire = fire;
+}
+
+/* Arms the one timer the phone has for at_ms, or disarms it (main.c's); test_pass fires it. */
+void
+kwl_timer_set(
+	struct kwl_server *server,
+	struct kwl_timer *timer,
+	uint64_t at_ms)
+{
+	(void)server;
+	if (at_ms == UINT64_MAX) {
+		if (test_timer == timer)
+			test_timer = NULL;
+		return;
+	}
+
+	/* Armed. */
+	test_timer = timer;
+	test_timer_due = at_ms;
 }
 
 /* The fake desktop's settings: only phone.backend exists. */
@@ -649,7 +685,7 @@ test_shell(
 		return;
 
 	/* The first tick opens the backend. */
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("open", test_phone.next_id == 1U && test_phone.state.reachable == 1U);
 
 	/* The gate: another program's listen hears "not-phone", its sync is refused; its watch_link hears the state. */
@@ -690,7 +726,7 @@ test_shell(
 	test_item(first_id, "0000000000000002");
 	test_result(first_id, 0, 0U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM | KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	found = test_find(1U, KL_SYSTEM_PHONE_EVENT_ITEM, 0U, &item_at);
 	found &= test_find(1U, KL_SYSTEM_PHONE_EVENT_PAGE_END, 0U, &end_at);
 	found &= test_find(1U, KL_SYSTEM_PHONE_EVENT_DONE, 0U, &done_at);
@@ -707,7 +743,7 @@ test_shell(
 	test_check("sync-waits", test_phone.pages == 2U);
 	test_result(first_id, ECONNRESET, 0U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	found = test_find(1U, KL_SYSTEM_PHONE_EVENT_DONE, 0U, &at);
 	test_check("sync-lost", found && test_get_word(&test_events[at], 4U) == KL_SYSTEM_RESULT_LOST &&
 	    !test_find(1U, KL_SYSTEM_PHONE_EVENT_PAGE_END, 0U, &at));
@@ -717,13 +753,13 @@ test_shell(
 	test_event_count = 0U;
 	(void)test_sync(phone, 10U);
 	test_now += 150000U;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	found = test_find(1U, KL_SYSTEM_PHONE_EVENT_DONE, 0U, &at);
 	test_check("sync-timeout", found && test_get_word(&test_events[at], 0U) == 10U &&
 	    test_get_word(&test_events[at], 4U) == KL_SYSTEM_RESULT_TIMEOUT && test_phone.pages == 3U);
 	test_result(test_phone.last_page_id, 0, 0U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 
 	/* A text: its SENT before its answer is held, told after the done. */
 	test_event_count = 0U;
@@ -732,11 +768,11 @@ test_shell(
 	test_phone.sent_states[0] = KL_BACKEND_PHONE_SENT;
 	test_phone.sent_count = 1U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_SENT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("sent-held", test_event_count == 0U);
 	test_result(test_phone.last_send_id, 0, 77U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("sent-told", test_event_count == 2U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_DONE &&
 	    test_events[1].opcode == KL_SYSTEM_PHONE_EVENT_STATUS && test_get_word(&test_events[1], 0U) == 11U &&
 	    test_get_word(&test_events[1], 4U) == KL_SYSTEM_PHONE_SENT);
@@ -745,7 +781,7 @@ test_shell(
 	test_phone.sent_states[0] = KL_BACKEND_PHONE_DELIVERED;
 	test_phone.sent_count = 1U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_SENT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("delivered", test_event_count == 1U && test_get_word(&test_events[0], 4U) == KL_SYSTEM_PHONE_DELIVERED);
 
 	/* A state of no text is dropped after 10 seconds. */
@@ -754,13 +790,13 @@ test_shell(
 	test_phone.sent_states[0] = KL_BACKEND_PHONE_SENT;
 	test_phone.sent_count = 1U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_SENT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_now += 10000U;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	(void)test_send_text(phone, 12U, "+15550100", "again");
 	test_result(test_phone.last_send_id, 0, 99U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("held-expires", test_event_count == 1U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_DONE);
 
 	/* A client that reads too little: its page's items are lost, page_end and done owed (NO_ROOM), sent in order later. */
@@ -771,14 +807,14 @@ test_shell(
 	test_item(first_id, "0000000000000003");
 	test_result(first_id, 0, 0U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM | KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	(void)test_send_text(phone, 14U, "+1", "x");
 	test_result(test_phone.last_send_id, EINVAL, 0U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("owed", test_event_count == 0U);
 	test_full_client = 0U;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("owed-order", test_event_count == 3U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_PAGE_END &&
 	    test_events[1].opcode == KL_SYSTEM_PHONE_EVENT_DONE && test_get_word(&test_events[1], 0U) == 13U &&
 	    test_get_word(&test_events[1], 4U) == KL_SYSTEM_RESULT_NO_ROOM &&
@@ -789,7 +825,7 @@ test_shell(
 	test_event_count = 0U;
 	test_item(0U, "0000000000000004");
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("live", test_event_count == 2U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_ITEM &&
 	    test_get_word(&test_events[0], 0U) == 0U && !test_find(2U, KL_SYSTEM_PHONE_EVENT_ITEM, 0U, &at));
 
@@ -802,7 +838,7 @@ test_shell(
 	test_phone.items[0].has_mime = 1U;
 	test_phone.items[0].mime_descriptor = fileno(mime);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	found = test_find(1U, KL_SYSTEM_PHONE_EVENT_ITEM_MIME, 0U, &at);
 	test_check("live-mime-new-event", found && test_event_count == 2U);
 	found = test_find(3U, KL_SYSTEM_PHONE_EVENT_ITEM, 0U, &at);
@@ -820,7 +856,7 @@ test_shell(
 	test_check("mms-file-closed", fcntl(mms_descriptor, F_GETFD) < 0);
 	test_result(test_phone.last_send_id, 0, 0U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	found = test_find(1U, KL_SYSTEM_PHONE_EVENT_DONE, 0U, &at);
 	test_check("mms-done", found && test_get_word(&test_events[at], 0U) == 19U && test_get_word(&test_events[at], 4U) == KL_SYSTEM_RESULT_OK);
 
@@ -836,7 +872,7 @@ test_shell(
 	test_check("call-asked", error == 0 && test_phone.last_ask == KL_SYSTEM_PHONE_ASK_DIAL + 1U && !test_phone.last_ask_had_argument);
 	test_result(test_phone.last_ask_id, 0, 0U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	found = test_find(1U, KL_SYSTEM_PHONE_EVENT_DONE, 0U, &at);
 	test_check("call-done", found && test_get_word(&test_events[at], 0U) == 21U && test_get_word(&test_events[at], 4U) == KL_SYSTEM_RESULT_OK);
 	error = test_control(phone, 22U, 99U, "");
@@ -854,7 +890,7 @@ test_shell(
 	(void)snprintf(test_phone.calls[0].name, sizeof(test_phone.calls[0].name), "%s", "Taro");
 	test_phone.call_count = 1U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_HF | KL_BACKEND_PHONE_CHANGED_CALL;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	found = test_find(1U, KL_SYSTEM_PHONE_EVENT_HF, 0U, &at);
 	test_check("call-hf", found && test_get_word(&test_events[at], 0U) == KL_BACKEND_PHONE_HF_READY &&
 	    test_get_word(&test_events[at], 20U) == 9U && test_get_word(&test_events[at], 24U) == KL_SYSTEM_PHONE_HF_HOLD);
@@ -867,7 +903,7 @@ test_shell(
 	/* bluetoothd dropped an event: the phone programs hear dropped. */
 	test_event_count = 0U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_DROPPED;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("dropped", test_event_count == 2U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_DROPPED);
 
 	/* The switch is anyone's, through the backend whatever the setting. */
@@ -879,7 +915,7 @@ test_shell(
 	(void)kwl_phone_request(stranger, KL_SYSTEM_PHONE_LINK_SET, bytes, offset);
 	test_result(test_phone.last_link_id, EACCES, 0U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("link-set", test_event_count == 1U && test_events[0].client == 2U && test_get_word(&test_events[0], 0U) == 15U &&
 	    test_get_word(&test_events[0], 4U) == KL_SYSTEM_RESULT_REFUSED);
 
@@ -887,7 +923,7 @@ test_shell(
 	test_event_count = 0U;
 	(void)test_sync(phone, 16U);
 	test_backend = 0;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	found = test_find(1U, KL_SYSTEM_PHONE_EVENT_DONE, 0U, &at);
 	test_check("unavailable", found && test_get_word(&test_events[at], 0U) == 16U &&
 	    test_get_word(&test_events[at], 4U) == KL_SYSTEM_RESULT_UNAVAILABLE && test_find(1U, KL_SYSTEM_PHONE_EVENT_LINK, 0U, &at));
@@ -895,26 +931,26 @@ test_shell(
 	(void)test_sync(phone, 17U);
 	test_check("no-backend", test_event_count == 1U && test_get_word(&test_events[0], 4U) == KL_SYSTEM_RESULT_UNAVAILABLE);
 	test_backend = 2;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 
 	/* bluetoothd again: the texts' numbers are forgotten. */
 	test_event_count = 0U;
 	(void)test_send_text(phone, 18U, "+1", "y");
 	test_result(test_phone.last_send_id, 0, 5U);
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_RESULT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_phone.state.reachable = 0U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_STATE;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_phone.state.reachable = 1U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_STATE;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_event_count = 0U;
 	test_phone.sents[0] = 5U;
 	test_phone.sent_states[0] = KL_BACKEND_PHONE_SENT;
 	test_phone.sent_count = 1U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_SENT;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("forget", !test_find(1U, KL_SYSTEM_PHONE_EVENT_STATUS, 0U, &at));
 
 	/* Version 16's send from another program is refused with the paired phone. */
@@ -932,7 +968,7 @@ test_shell(
 	test_event_count = 0U;
 	test_item(0U, "0000000000000005");
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("gone", test_event_count == 1U && test_events[0].client == 3U && test_notify_count == 0U);
 
 	/* No phone program listens: the compositor's own notification, the lock screen's words, the number's command. */
@@ -941,7 +977,7 @@ test_shell(
 	test_item(0U, "0000000000000006");
 	(void)snprintf(test_phone.items[0].name, sizeof(test_phone.items[0].name), "%s", "Mother");
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("notify", test_event_count == 0U && test_notify_count == 1U && strcmp(test_notify_title, "Mother") == 0 &&
 	    strcmp(test_notify_lock, "New message from Mother") == 0 && strstr(test_notify_command, "--peer '+15550100'") != NULL);
 
@@ -949,11 +985,11 @@ test_shell(
 	test_item(0U, "0000000000000007");
 	test_phone.items[0].read = 1U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_notify_allowed = 0;
 	test_item(0U, "0000000000000008");
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
-	kwl_phone_tick(&server);
+	test_pass(&server);
 	test_check("notify-none", test_notify_count == 1U);
 }
 
@@ -1669,4 +1705,22 @@ test_state(
 	test_event_count = 0U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_STATE;
 	kwl_phone_tick(test_phone_server);
+}
+
+/* One pass of the event loop as the phone sees it: its timer fires when due, then its tick. */
+static void
+test_pass(
+	struct kwl_server *server)
+{
+	struct kwl_timer *timer;
+
+	/* The timer, taken out before its handler (which may arm it again). */
+	if (test_timer != NULL && test_now >= test_timer_due) {
+		timer = test_timer;
+		test_timer = NULL;
+		timer->fire(server, timer);
+	}
+
+	/* The tick. */
+	kwl_phone_tick(server);
 }
