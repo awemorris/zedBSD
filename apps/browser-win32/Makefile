@@ -7,8 +7,10 @@ ifeq ($(WIN32_ARCH),x86_64)
 WIN32_NAME := win64
 else ifeq ($(WIN32_ARCH),aarch64)
 WIN32_NAME := winarm64
+else ifeq ($(WIN32_ARCH),i386)
+WIN32_NAME := win32
 else
-$(error WIN32_ARCH must be x86_64 or aarch64, not '$(WIN32_ARCH)')
+$(error WIN32_ARCH must be x86_64, aarch64, or i386, not '$(WIN32_ARCH)')
 endif
 WIN32_TRIPLE := $(WIN32_ARCH)-w64-mingw32
 BROWSER_WIN32_BUILD ?= build/browser-$(WIN32_NAME)
@@ -20,8 +22,8 @@ WIN32_CC := $(LLVM_MINGW)/bin/$(WIN32_TRIPLE)-clang
 else ifneq ($(shell command -v $(WIN32_TRIPLE)-clang 2>/dev/null),)
 WIN32_CC := $(WIN32_TRIPLE)-clang
 else ifeq ($(WIN32_ARCH),x86_64)
-ifneq ($(shell command -v x86_64-w64-mingw32ucrt-gcc 2>/dev/null),)
-WIN32_CC := x86_64-w64-mingw32ucrt-gcc
+ifneq ($(shell command -v x86_64-w64-mingw32-gcc 2>/dev/null),)
+WIN32_CC := x86_64-w64-mingw32-gcc
 endif
 endif
 endif
@@ -47,7 +49,7 @@ WIN32_COMMON_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -MMD -MP \
 	-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE \
 	-I. -Iuserland/desktop/include -Iuserland/desktop/libbrowser -Iuserland/desktop/libmedia \
 	-I$(BROWSER_WIN32_OBJ)/include
-WIN32_CFLAGS := $(WIN32_COMMON_CFLAGS) -Wno-maybe-uninitialized -Werror
+WIN32_CFLAGS := $(WIN32_COMMON_CFLAGS) -Wno-unknown-warning-option -Wno-maybe-uninitialized -Werror
 WIN32_COMPAT_CFLAGS := $(WIN32_COMMON_CFLAGS)
 
 WIN32_THREAD_LDFLAGS := -lpthread
