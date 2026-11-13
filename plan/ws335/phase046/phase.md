@@ -52,3 +52,8 @@ image の build は `flock /tmp/zedbsd-image-build.lock`。firmware の許諾に
 ## 結果
 
 （担当が書く）
+
+## Q1 の追記（2026-11-13）
+
+- `plan/ws335/tests/run-mailer-guest.sh` はまだ `-DML_TLS_COMPAT` を前提にしている（2・7・63・84〜85 行、`.flags` の確かめ）。p044 の後の mailer に合わせて直してから流す。
+- p043 の報告: host の http の試験は全部 127.0.0.1 に繋ぐので、名前（DNS）の照合（`SSL_set1_host`・SNI）の道を通らない。名前で繋ぐ試験を guest か host に足す。
