@@ -159,10 +159,21 @@ rate() {
 	echo "$line"
 }
 
-# An idle stretch of SECONDS: its KWL PERF windows, kept in the variable named by the first argument.
+# Asks the session's capture for a PING: a pass that prints the KWL PERF window under way when it is five seconds old.
+ping() {
+	run "keiland-shot --socket /run/user/1000/keiland-shot.sock --request PING > /tmp/p18-ping.txt 2>&1" > /dev/null 2>&1 || true
+}
+
+# An idle stretch of SECONDS: its KWL PERF windows (the window under way is ended first by a PING five seconds after
+# it began, the stretch's by the PING at its end), kept in the variable named by the first argument.
 idle() {
+	sleep 6
+	ping
+	sleep 1
 	from=$(count_in '' "$session")
 	sleep "$2"
+	ping
+	sleep 2
 	numbers=$(rate "$from")
 	say "$1: $numbers"
 	eval "$1_numbers=\"\$numbers\""
@@ -194,6 +205,9 @@ idle idle_before 20
 plug() {
 	taken=$(count_in "KWL INPUT device=.*kind=$3" "$session")
 	scans=$(count_in 'KWL EVENT input changed' "$session")
+	opens=$(count_in 'SESSIOND SEAT open node=event[0-9]* error=0 holder=1' "$sessiond")
+	asked=$(count_in 'SESSIOND SEAT open node=' "$sessiond")
+	came=$(count_in 'KL DEVICES input came node=event[0-9]* error=0' "$session")
 	plugged_at=$(now_ms)
 	if qmp device_add "{\"driver\": \"$1\", \"bus\": \"xhci.0\", \"id\": \"$2\"}" && wait_in "KWL INPUT device=.*kind=$3" $((taken + 1)) 20 "$session"; then
 		say "$2-taken: PASS taken within $(( $(now_ms) - plugged_at )) ms of the plug (to the SSH check's resolution)"
@@ -201,14 +215,15 @@ plug() {
 		fail_step "$2-taken" "not taken within 20 s"
 		return
 	fi
-	node=$(run "grep 'KWL INPUT device=.*kind=$3' $session | sed -n '\$p'" | tr -d '\r' | sed -n 's|.*device=/dev/input/\(event[0-9]*\) .*|\1|p' | sed -n '$p')
-	opens=$(count_in "SESSIOND SEAT open node=$node error=0 holder=1" "$sessiond")
-	refused=$(count_in "SESSIOND SEAT open node=$node error=[1-9]" "$sessiond")
-	came=$(count_in "KL DEVICES input came node=$node error=0" "$session")
-	if [ -n "$node" ] && [ "$opens" -eq 1 ] && [ "$refused" -eq 0 ] && [ "$came" -ge 1 ]; then
-		say "$2-one-open: PASS $node opened by sessiond on one request, by the devices' thread"
+	node=$(run "grep 'KWL INPUT device=' $session" | tr -d '\r' | grep "kind=$3" | sed -n '$p' | sed -n 's|.*device=/dev/input/\(event[0-9]*\) .*|\1|p')
+	granted=$(( $(count_in 'SESSIOND SEAT open node=event[0-9]* error=0 holder=1' "$sessiond") - opens ))
+	requests=$(( $(count_in 'SESSIOND SEAT open node=' "$sessiond") - asked ))
+	last=$(run "grep 'SESSIOND SEAT open node=' $sessiond" | tr -d '\r' | sed -n '$p')
+	opened=$(( $(count_in 'KL DEVICES input came node=event[0-9]* error=0' "$session") - came ))
+	if [ -n "$node" ] && [ "$granted" -eq 1 ] && [ "$requests" -eq 1 ] && [ "$opened" -eq 1 ] && echo "$last" | grep -q "node=$node error=0 holder=1"; then
+		say "$2-one-open: PASS $node opened by sessiond on one request, from the devices' thread"
 	else
-		fail_step "$2-one-open" "node=${node:-none} sessiond opens=$opens refused=$refused devices' thread=$came"
+		fail_step "$2-one-open" "node=${node:-none} requests=$requests granted=$granted devices' thread=$opened last=$last"
 	fi
 	sleep 3
 	after=$(count_in 'KWL EVENT input changed' "$session")
