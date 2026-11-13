@@ -403,7 +403,7 @@
 | 2-01 | output-switch.c の hotplug 250 ms（と出力を失った時の 10 ms） | 道 | 消: kernel が signal する fence と hotplug の thread（§3・§4.1・§5.3・§5.4） | p002〜p004 |
 | 2-02 | 入力の scan 2 s（zedBSD） | 名 | 消: /dev/system の INPUT の事象だけ（Linux・FreeBSD は数えない行で残す） | p005 |
 | 2-03 | 事象の後 2 s の 100 ms の scan | 道 | 残（事象の後だけ）: kernel の順は既に正しい（input.c は cdev の登録の後に ADD を出す）。100 ms の理由は sessiond が同じ事象で node を利用者へ chown する前は開けない事（BUG-264）。sessiond が seat を与えた事を session の control の fd で知らせる形にすれば消せる（2026-11-14 p005 の調べ、Q1 が後の Phase に） | p005（調べ）・後の Phase |
-| 2-04 | printers-shell の 1 s | 道 | 外: printd が設定を持ち変化を push する（daemon）。それまで printers の面がある間の timer として残す | p007（timer へ）・外 |
+| 2-04 | printers-shell の 1 s | 道 | 外: printd が設定を持ち変化を push する（daemon）か、file の変化の通知（kernel）。それまで printers の object か printd の接続がある間の 1 s の timer として残す（2026-11-14 p007）。libkeiland の `kl_system_open` は printd がある時 printers の object を必ず作るので、kl_system を開く app（Settings・Files・Photos・Monitor・pdfviewer など）が開いている間 1 s の起床が残る（QEMU で Settings を開いて 30 s に 30 回、閉じて 0）。使う時だけ作る形（libkeiland）でも狭められる | p007（timer へ）・外 |
 | 2-05 | network.c の詳細の 1 s | 道 | 外: networkd が詳細の変化を push する。それまで view がある間の timer | p006（timer へ）・外 |
 | 2-06 | sysmon の 250 ms | 締 | 残: 購読がある間の timer | p006 |
 | 2-07 | cursor-plane.c の 10 ms | 名 | 消: cursor の thread が手放しで wake | p005 |
