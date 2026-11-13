@@ -317,6 +317,8 @@ WS に固有の決定はその ws.md にある。ここは複数の WS・OS 全�
 - **配布物の許諾の文（2026-11-13）**: ユーザーの決定の要点: compiler の C runtime（mingw-w64 の runtime・LLVM の compiler-rt など、link の例外を持つ物）の許諾は配布物に表示しない（一般の慣行）。表示するのは自分たちと第三者の library・font・data の許諾。Windows では winpthreads を使わず thread は Win32 の API（WS334 p040）。
 - **libwebp の値（2026-11-13）**: ユーザーの決定の要点: libwebp-compat の YUV→RGB の定数などは引用であり、libwebp の著作権の表示は要らない。zip にも zedBSD の package にも libwebp の許諾を入れない（出典の comment は残す）。
 
+- **desktop は 1 人の利用者が前提（2026-11-14）**: ユーザーの決定の要点: Keiland の desktop はタブレットを前提にした client の OS なので、1 人の利用者で使う事を前提にする。別の session で設定（printer など）が変わる事はありえなくはないが、主な使い方とみなさない（その追従のための仕組みは要らない）。
+
 ### 11.1 対象 platform
 
 - **重要な platform と参考の platform**（2026-11-13 ユーザーの決定の要点）: 重要なのは x86_64・arm64・riscv64 だけで、直しはこれらを優先する。i386・pc9821 は参考までに動かしている platform で、build が崩れても後でまとめて直せばよい。変更ごとに i386・pc9821 の build を確かめない。定期的に build を確かめて直すだけにする。
