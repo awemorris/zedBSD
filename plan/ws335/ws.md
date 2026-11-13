@@ -13,6 +13,7 @@
 
 ## ユーザーの決定
 
+- 2026-11-13 ユーザーから、mailer の compat 化を WS335 の Phase（p041）として足し、終わってから WS335 を完了にする、という趣旨の決定を受けた。Q1 の判断: 凍結の header に SSL_get1_peer_certificate・X509_digest を足す事を承認。
 - 2026-11-13 ユーザーから、p036 の Makefile・mk の差分 A（libbrowser の `-DWB_TLS_COMPAT`）・B（`apps/browser-win32/Makefile` を compat の static link に、OpenSSL を外す）・C（7 つの platform の defaults.mk に compat の 2 つ）の承認を受けた（Q1 が当てた）。
 - （2026-11-02 10:52）ユーザーから、WS335 の完了の後に、Windows 版のブラウザ（WS334）の OpenSSL を libssl-compat・libcrypto-compat に切り替えて OpenSSL への依存を無くす、という趣旨の指示を受けた（p036 の切り替えを Windows にも、WS335 の後）。
 - （2026-11-02 10:07）ユーザーから、WS335 を completed まで進める、Sonnet なら 3 並列で実装してよい、という趣旨の指示を受けた。
@@ -79,6 +80,7 @@
 | [p038](phase038/phase.md) | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類（Opus） | cleared（2026-11-02 11:50 Q1、limbo 9,792 件のうち 9,733 件が一致・59 件は理由付き・理由の無い違い 0。Q1 の判断は ws.md の「Q1 の判断（p038）」）。実装済み・試験 PASS（2026-11-02 P7 q1929-i01。test-limbo 95464 checks、posix・win32 PASS、9,792 件のうち一致 9,733・理由つきの違い 59（issuance 11・cabf 23・no-crl 10・name 4・no-mldsa 3・anchor 2・key-usage 2・nc-leaf 2・depth 1・nc-noncritical 1）・理由の無い違い 0。cryc の欠陥は無し。16 枚を越える list は名前で辿れる certificate に減らしてから切る（bettertls pathbuilding の 20 件が path の組み立てを経る）。anchor の制約・CA/B Forum の規則・先頭の dot は Q1 に案を返した。cleared は Q1） | p020 |
 | [p039](phase039/phase.md) | zedBSD の libcrypto-compat.so（build の規則・exports・package と image の登録、`sources.mk`）。TLS は無し。WS336 の zedBSD の Phase が待つ | cleared（2026-11-02 10:21 Q1、main で libcrypto-compat.so の build warning 0・check-exports PASS。version node は置かない（Q1、p035 で design.md を直す）。dlclose の NODELETE は BUG-409）。実装済み・試験 PASS（2026-11-02 10:20 Sonnet 5.5 q1925-i01。amd64・aarch64・riscv64 の libcrypto-compat.so が warning 0 で build、check-dynamic-elf と check-exports PASS、QEMU の serial で crypto-smoke 47 checks PASS、run-unit all・check-skeleton PASS。map は version node 無し（Q1 承認）。ld.so が NODELETE を守らない件は phase039 の結果に。cleared は Q1） | p023、p024 |
 | [p040](phase040/phase.md) | secp384r1 の group: supported_groups で申し出る（x25519・secp256r1 の後）、TLS 1.2 の ServerKeyExchange の P-384 の ECDHE、TLS 1.3 の HRR の後の P-384 の key share、共有の秘密 48 byte（凍結の header の変更は Q1 の承認の後）。p033 の 8 件の known limit を繋がる側に戻す | cleared（2026-11-02 18:41 Q1、ddc678f69 を main に merge 4535e4137、main で test-hs13・hs12・api-ssl PASS、check-skeleton は BASE=ddc678f69 に移して PASS）。実装済み・試験 PASS（2026-11-02 18:30 P1 q1981-i01。run-unit all・--win32 all（57 本）・run-ct all PASS、run-interop host 139 件・Wine 47 件が known limit 0 で PASS、run-limbo PASS、ecc384.badssl.com が繋がる、zedBSD の .so warning 0・check-exports PASS、check-skeleton（BASE=4eae22020）は承認済みの sslc-hs.h・sslc-keysched.h の差だけで FAIL。cleared は Q1） | p033（p034 の前） |
+| [p041](phase041/phase.md) | mailer の TLS を compat に（compat に SSL_get1_peer_certificate・X509_digest を足す） | in-progress（2026-11-13 Q1、q2048-i01 P2） | p036 |
 
 - 2026-11-02 03:56 Q1: check-skeleton の BASE は 641a2f195 に移す（p015 で Q1 が run-unit.sh に Wine の LC_ALL=C.UTF-8 を足したため。header と道具はこの commit で固定）。
 
