@@ -1,6 +1,6 @@
 #!/bin/sh
 # https of libbrowser on Windows under Wine (x86_64), with zedBSD's TLS (libssl-compat and libcrypto-compat)
-# linked into the program (net/tls-static-compat.c fills tls.c's table): the test program
+# linked into the program (net/tls.c calls them directly): the test program
 # plan/ws334/tests/tls-main.c (built by the Windows build's test-program, which links every static library)
 # fetches a page from the host's `openssl s_server` on 127.0.0.1 (a test CA and a server certificate made here,
 # the network outside is not used), with the blocking fetch and with the loader, and must:
@@ -51,8 +51,16 @@ for archive in libssl-compat.a libcrypto-compat.a; do
 	fi
 done
 program=$build/tests/tls-tool.exe
-if [ ! -f "$build/obj/userland/desktop/libbrowser/net/tls-static-compat.o" ]; then
-	echo "tls-wine: the program was not built with net/tls-static-compat.c"
+tls_dir=$build/obj/userland/desktop/libbrowser/net
+if [ -e "$tls_dir/tls-static-compat.o" ] || [ -e "$tls_dir/tls-static.o" ]; then
+	echo "tls-wine: the build holds a table object of net/ (tls-static-compat.o or tls-static.o)"
+	status=1
+fi
+"$LLVM_MINGW/bin/llvm-nm" "$tls_dir/tls.o" > "$out/tls-o-names.txt" 2>&1
+if ! grep -q ' U SSL_connect$' "$out/tls-o-names.txt" ||
+    ! grep -q ' U SSL_CTX_set_default_verify_paths$' "$out/tls-o-names.txt" ||
+    grep -q 'tls_static_library' "$out/tls-o-names.txt"; then
+	echo "tls-wine: net/tls.o does not call libssl-compat directly"
 	status=1
 fi
 
@@ -64,7 +72,7 @@ if grep -q 'ssl\|crypto-' "$out/imports.txt"; then
 	status=1
 fi
 "$LLVM_MINGW/bin/llvm-nm" "$program" > "$out/names.txt" 2>&1
-if grep -q ' OPENSSL_init_ssl$\| X509_digest$\| X509_STORE_CTX_set_error$' "$out/names.txt"; then
+if grep -q ' OPENSSL_init_ssl$\| X509_STORE_CTX_set_error$' "$out/names.txt"; then
 	echo "tls-wine: the program holds OpenSSL's own functions"
 	status=1
 fi

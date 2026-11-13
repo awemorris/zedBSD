@@ -15,7 +15,6 @@
 
 #include <windows.h>
 #include <bcrypt.h>
-#include <wincrypt.h>
 
 #include <errno.h>
 #include <limits.h>
@@ -35,44 +34,8 @@
 /* The largest size, in UTF-16 units, the buffer for the path of the running program grows to. */
 #define OS_MODULE_PATH_LIMIT	65536U
 
-/* The error CertEnumCertificatesInStore sets when the store has no more certificates. */
-#define OS_NO_MORE_CERTIFICATES	((DWORD)0x80092004UL)
-
 /* The suffix after the directory of the running program, where the bundled data lives. */
 #define OS_DATA_SUFFIX		L"\\share"
-
-/*
- * One system certificate store the trust enumeration reads.
- *
- * The enumeration walks a fixed list of these, so the order in which
- * certificates are handed over is the order of the list.
- */
-struct os_trust_store {
-	/* The system store's name. */
-	const wchar_t *name;
-
-	/* The location flag: the current user's stores or the machine's. */
-	DWORD location;
-
-	/* What the callback is told about each certificate of the store. */
-	int distrusted;
-};
-
-/*
- * The system stores read for trust, in the order they are handed over.
- *
- * The trusted roots come first, the current user's and then the machine's,
- * and the stores of certificates never to be trusted follow, so that a
- * caller sees every root before the certificates that revoke trust.
- */
-static const struct os_trust_store os_trust_stores[] = {
-	{ L"ROOT", CERT_SYSTEM_STORE_CURRENT_USER, 0 },
-	{ L"ROOT", CERT_SYSTEM_STORE_LOCAL_MACHINE, 0 },
-	{ L"Disallowed", CERT_SYSTEM_STORE_CURRENT_USER, 1 },
-	{ L"Disallowed", CERT_SYSTEM_STORE_LOCAL_MACHINE, 1 }
-};
-
-static int os_trust_store_read(const struct os_trust_store *description, wb_os_trust_each each, void *context);
 
 /*
  * Allocates memory whose address is a multiple of alignment.
@@ -390,101 +353,5 @@ wb_os_data_directory(
 	free(text);
 
 	/* Succeeded: the buffer holds the data directory. */
-	return 0;
-}
-
-/*
- * Hands each certificate of the system's trust stores to each.
- *
- * A store the system does not have is skipped.
- */
-int
-wb_os_trust_roots(
-	wb_os_trust_each each,
-	void *context)
-{
-	size_t i;
-	int error;
-
-	/* Refuses a call that names no function to hand certificates to. */
-	if (each == NULL)
-		return EINVAL;
-
-	/* Reads each store in order and stops at the first failure or stop request. */
-	for (i = 0; i < sizeof(os_trust_stores) / sizeof(os_trust_stores[0]); i++) {
-		error = os_trust_store_read(&os_trust_stores[i], each, context);
-		if (error != 0)
-			return error;
-	}
-
-	/* Succeeded: every certificate of every store that exists was handed over. */
-	return 0;
-}
-
-/*
- * Hands the certificates of one system store to each.
- *
- * The store is opened read-only and only if it exists; one that cannot be
- * opened is treated as missing.  A certificate that is not X.509 ASN.1 is
- * skipped.
- */
-static int
-os_trust_store_read(
-	const struct os_trust_store *description,
-	wb_os_trust_each each,
-	void *context)
-{
-	HCERTSTORE store;
-	PCCERT_CONTEXT certificate;
-	PCCERT_CONTEXT next;
-	DWORD flags;
-	DWORD last_error;
-	int stop;
-	int result;
-
-	/* Opens the store read-only if it exists; a store that does not open is skipped. */
-	flags = description->location | CERT_STORE_READONLY_FLAG | CERT_STORE_OPEN_EXISTING_FLAG;
-	store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, flags, description->name);
-	if (store == NULL)
-		return 0;
-
-	/* Walks the certificates; each call to the enumeration releases the previous one. */
-	result = 0;
-	certificate = NULL;
-	for (;;) {
-		SetLastError(0);
-		next = CertEnumCertificatesInStore(store, certificate);
-		if (next == NULL) {
-			/* The end of the store sets "not found"; any other failure means the store could not be read. */
-			last_error = GetLastError();
-			if (last_error != 0 && last_error != OS_NO_MORE_CERTIFICATES)
-				result = EIO;
-			break;
-		}
-		certificate = next;
-
-		/* Skips a certificate that is not X.509 ASN.1 or that holds no bytes. */
-		if ((certificate->dwCertEncodingType & X509_ASN_ENCODING) == 0)
-			continue;
-		if (certificate->pbCertEncoded == NULL || certificate->cbCertEncoded == 0)
-			continue;
-
-		/* Hands the certificate's DER to the caller; a nonzero answer stops the walk. */
-		stop = each(context, certificate->pbCertEncoded, (size_t)certificate->cbCertEncoded, description->distrusted);
-		if (stop != 0) {
-			CertFreeCertificateContext(certificate);
-			result = stop;
-			break;
-		}
-	}
-
-	/* Closes the store. */
-	CertCloseStore(store, 0);
-
-	/* Reports why the walk ended: 0 at the end of the store, else the failure or the caller's stop value. */
-	if (result != 0)
-		return result;
-
-	/* Succeeded: every certificate of the store was handed over. */
 	return 0;
 }

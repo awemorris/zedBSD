@@ -10,7 +10,6 @@
  */
 
 #include "base/os-system.h"
-#include "base/base.h"
 
 #include "include/kern/os-name.h"
 #include "userland/desktop/paths.h"
@@ -323,26 +322,5 @@ wb_os_data_directory(
 	memcpy(buffer, KEILAND_DATADIR, length + 1U);
 
 	/* Succeeded: the buffer holds the data directory. */
-	return 0;
-}
-
-/*
- * Hands each certificate of the system's trust stores to each.
- *
- * On these systems the TLS library reads the system's certificate file
- * itself, so there is nothing to hand over.
- */
-int
-wb_os_trust_roots(
-	wb_os_trust_each each,
-	void *context)
-{
-	UNUSED_PARAMETER(context);
-
-	/* Refuses a call that names no function to hand certificates to. */
-	if (each == NULL)
-		return EINVAL;
-
-	/* Succeeded: every certificate (there is none to hand over) was handed over. */
 	return 0;
 }
