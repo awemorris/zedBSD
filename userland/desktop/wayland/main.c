@@ -121,6 +121,7 @@ main(
 	server.listener = -1;
 	server.auth_fd = -1;
 	server.control_fd = -1;
+	server.seat_fd = -1;
 	server.wake[0] = -1;
 	server.wake[1] = -1;
 	server.font_path = KEILAND_DATADIR "/fonts/keiland.ttf";
@@ -175,7 +176,7 @@ main(
 	/* Reads the command line; a mistake ends the run with the usage. */
 	error = parse_options(&server, count, arguments);
 	if (error != 0) {
-		fprintf(stderr, "usage: wayland [--socket=/path] [--width=N] [--height=N] [--rotate=0|90|180|270] [--testing [--timeout=seconds] [--max-frames=N]] [--log-frames] [--no-layer-cache] [--keyboard-blur] [--glass] [--font=/path] [--fallback-font=/path] [--wallpaper=/path.png|.jpg] [--window-opacity=1..100] [--desktop-client=COMMAND|none] [--desktop-token=TOKEN] [--session [--control-fd=N [--locked]] [--lock-idle=seconds] | --greeter --auth-fd=N]\n");
+		fprintf(stderr, "usage: wayland [--socket=/path] [--width=N] [--height=N] [--rotate=0|90|180|270] [--testing [--timeout=seconds] [--max-frames=N]] [--log-frames] [--no-layer-cache] [--keyboard-blur] [--glass] [--font=/path] [--fallback-font=/path] [--wallpaper=/path.png|.jpg] [--window-opacity=1..100] [--desktop-client=COMMAND|none] [--desktop-token=TOKEN] [--session [--control-fd=N [--locked]] [--lock-idle=seconds] | --greeter --auth-fd=N] [--seat-fd=N]\n");
 		return 2;
 	}
 
@@ -198,6 +199,10 @@ main(
 		(void)fcntl(server.control_fd, F_SETFD, FD_CLOEXEC);
 		(void)fcntl(server.control_fd, F_SETFL, fcntl(server.control_fd, F_GETFL) | O_NONBLOCK);
 	}
+
+	/* sessiond's seat socket does not go to the programs the compositor starts; it is waited on with poll. */
+	if (server.seat_fd >= 0)
+		(void)fcntl(server.seat_fd, F_SETFD, FD_CLOEXEC);
 
 	/* The login screen is the glass look's, and asks sessiond on a descriptor it was given. */
 	if (server.greeter) {
@@ -251,6 +256,7 @@ main(
 	 */
 	backend_options.greeter_descriptor = -1;
 	backend_options.session_descriptor = -1;
+	backend_options.seat_descriptor = server.seat_fd;
 	if (server.greeter)
 		backend_options.greeter_descriptor = server.auth_fd;
 	else
@@ -751,6 +757,16 @@ parse_options(
 				return error;
 			server->control_fd = (int)number;
 			request.control_fd = 1U;
+			continue;
+		}
+
+		/* The socket sessiond opens the input devices on for the greeter or the session. */
+		match = strncmp(argument, "--seat-fd=", 10);
+		if (match == 0) {
+			error = unsigned_option(argument + 10, 1023, &number);
+			if (error != 0)
+				return error;
+			server->seat_fd = (int)number;
 			continue;
 		}
 
@@ -1782,10 +1798,9 @@ loop_timeout(
 /*
  * Scans the evdev nodes when the seat's devices may have changed: when a
  * scan was asked (a device's event, the seat's resume, a scan that came
- * while a finding was under way), and quickly for a while after a device's
- * event, because sessiond gives the new node to the seat's user on the same
- * event and the compositor cannot open it before.  Only a backend
- * that does not tell the devices' comings has them looked for every
+ * while a finding was under way).  A device that comes is opened by the
+ * devices' thread (io.c), or found by the scan its event asks for.  Only a
+ * backend that does not tell the devices' comings has them looked for every
  * KWL_INPUT_SCAN_MS as well.  The next scan's time is the input scan's
  * timer.
  */
@@ -1802,17 +1817,10 @@ input_scan_pace(
 		return;
 	}
 
-	/*
-	 * An asked scan goes now, or the quick scan after a device's event once
-	 * KWL_INPUT_SETTLE_SCAN_MS passed, or the backend's lack of events
-	 * makes the ordinary one due.
-	 */
+	/* An asked scan goes now, or the backend's lack of events makes the ordinary one due. */
 	told = kl_backend_input_events(server->backend);
 	if (server->input_scan_time == 0U) {
 		kwl_input_scan(server);
-	} else if (now < server->input_settle_until) {
-		if (now - server->input_scan_time >= KWL_INPUT_SETTLE_SCAN_MS)
-			kwl_input_scan(server);
 	} else if (!told) {
 		if (now - server->input_scan_time >= KWL_INPUT_SCAN_MS)
 			kwl_input_scan(server);
@@ -1821,12 +1829,6 @@ input_scan_pace(
 	/* A finding under way keeps the scan asked: its end wakes the loop, not the clock. */
 	if (server->input_scan_time == 0U) {
 		kwl_timer_set(server, &server->input_scan_timer, UINT64_MAX);
-		return;
-	}
-
-	/* The quick scans' next while the event's time lasts. */
-	if (now < server->input_settle_until) {
-		kwl_timer_wake_at(server, &server->input_scan_timer, "input-scan", server->input_scan_time + KWL_INPUT_SETTLE_SCAN_MS);
 		return;
 	}
 

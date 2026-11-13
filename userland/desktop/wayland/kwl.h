@@ -17,10 +17,12 @@
  *
  * - Every /dev/input/eventN reporting REL_X+REL_Y or ABS_X+ABS_Y is a
  *   pointer and every one reporting KEY_A and KEY_Z is a keyboard.  Nodes are
- *   scanned at start-up, on the system's event of a device and then every
- *   KWL_INPUT_SETTLE_SCAN_MS for KWL_INPUT_SETTLE_MS, and, where the backend
- *   does not tell the devices' comings, every KWL_INPUT_SCAN_MS; a node that
- *   fails a read is closed.  Capabilities follow the open nodes.
+ *   scanned at start-up and when records of the system's events were lost;
+ *   a node that comes later is opened by the devices' thread on its event
+ *   (through sessiond's seat socket in a session it started, io.c), and,
+ *   where the backend does not tell the devices' comings, the nodes are
+ *   scanned every KWL_INPUT_SCAN_MS; a node that fails a read is closed.
+ *   Capabilities follow the open nodes.
  * - Focus is the surface currently on the display; its client's pointer and
  *   keyboard objects get enter when it is shown and leave when it is replaced,
  *   unmapped or destroyed.  Clients without seat objects get nothing.
@@ -132,16 +134,6 @@
 /* Rescan period for evdev nodes that appear after start-up, where the backend does not tell them, in milliseconds. */
 #define KWL_INPUT_SCAN_MS	2000U
 
-/*
- * After the system's event of an input device, the nodes are scanned every
- * KWL_INPUT_SETTLE_SCAN_MS for KWL_INPUT_SETTLE_MS (milliseconds): the
- * kernel tells the event after the node exists, but sessiond makes the node
- * the seat's user's on the same event, and the compositor cannot open it
- * before.  Nothing tells the compositor when sessiond is done.
- */
-#define KWL_INPUT_SETTLE_MS		2000U
-#define KWL_INPUT_SETTLE_SCAN_MS	100U
-
 /* A window's place when the client chooses its size: cascaded from the centre by this step. */
 #define KWL_CASCADE_STEP	32
 
@@ -239,6 +231,7 @@ struct kl_backend;
 struct kwl_import;
 struct kwl_panels;
 struct kwl_ime;
+struct kwl_device_batch;
 
 /* Each live protocol identity has one immutable interface and negotiated version. */
 enum kwl_kind {
@@ -1396,8 +1389,10 @@ struct kwl_server {
 	 * App Home's Log Out.  size_given: --width or --height
 	 * was given, so the display's preferred size is not used.  control_fd:
 	 * the session's descriptor to sessiond (--control-fd, -1 for none);
-	 * auth_fd and control_fd are handed to libkeiland-backend, which speaks
-	 * on them (ws131-p006);
+	 * seat_fd: the socket sessiond opens the input devices on for the
+	 * greeter or the session (--seat-fd, -1 for none);
+	 * auth_fd, control_fd and seat_fd are handed to libkeiland-backend,
+	 * which speaks on them (ws131-p006);
 	 * handed_over: the display's hand-over (handoff.c, ws035-p101) is done;
 	 * logout_ms: when Log Out asked sessiond for a greeter (0: it did not).
 	 */
@@ -1405,6 +1400,7 @@ struct kwl_server {
 	unsigned session;
 	int auth_fd;
 	int control_fd;
+	int seat_fd;
 	unsigned handed_over;
 	uint64_t logout_ms;
 	/*
@@ -1423,7 +1419,6 @@ struct kwl_server {
 	unsigned failed;
 	struct kwl_input_device inputs[KWL_INPUT_MAX];
 	uint64_t input_scan_time;
-	uint64_t input_settle_until;
 	/*
 	 * The device I/O thread (io.c): io_device runs the jobs that may wait
 	 * for a device or the kernel (the input devices' opening and closing,
@@ -1438,6 +1433,27 @@ struct kwl_server {
 	unsigned io_started;
 	unsigned io_input;
 	unsigned input_finding;
+	/*
+	 * The devices' thread (io.c): it waits for the system's events of the
+	 * devices that come and go and opens the input devices that come
+	 * (devices_thread, devices_started while it runs).  Under
+	 * devices_lock: the batches it made and the event loop has not taken
+	 * (devices_head to devices_tail), devices_lost when a batch could not
+	 * be kept (a finding is owed), devices_ended and devices_error when the
+	 * thread ended on a failure, devices_woken while a wake it wrote is not
+	 * taken yet, and devices_wakes, how often its wait returned (the
+	 * log the tests read).
+	 */
+	struct kwl_thread devices_thread;
+	pthread_mutex_t devices_lock;
+	struct kwl_device_batch *devices_head;
+	struct kwl_device_batch *devices_tail;
+	unsigned devices_lost;
+	unsigned devices_ended;
+	int devices_error;
+	unsigned devices_woken;
+	unsigned devices_wakes;
+	unsigned devices_started;
 	/*
 	 * The file I/O thread (io.c): io_file runs the jobs that read or
 	 * write the session's files (a write's fsync waits seconds on UFS),

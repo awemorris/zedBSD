@@ -34,6 +34,22 @@
  * Giving a device away does not take it from a process that opened it
  * before: there is no revoke in the kernel yet, so the graphical login is
  * for a machine with one user (login-manager-design.md §7).
+ *
+ * The compositors sessiond starts (the greeter's and the session's) also
+ * have the input devices opened for them here, so that a device plugged in
+ * is read at once and not after its node's owner has changed: each gets
+ * one end of a socket pair of its own as descriptor SESSIOND_SEAT_FD
+ * (--seat-fd), and asks on it with a line
+ *
+ *   OPEN eventN      the evdev node /dev/input/eventN
+ *
+ * which is answered with one line: OK with the node's descriptor
+ * (SCM_RIGHTS), opened by sessiond for reading without waiting, or
+ * FAIL errno.  Only the compositor that holds the seat now (the greeter
+ * while it runs, then the session, then the greeter a Log Out starts) has
+ * its requests granted; the others hear FAIL EPERM.  A descriptor given
+ * before stays with the compositor until it closes it or ends (the same
+ * as a node opened before its owner changed).
  */
 
 #include "sessiond.h"
@@ -41,9 +57,12 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <uapi/gpu.h>
@@ -81,6 +100,24 @@
 /* The records one read of the events takes. */
 #define SEAT_EVENT_READ		8U
 
+/* The longest request a compositor sends on its seat's socket, with its line end. */
+#define SEAT_REQUEST_MAX	32U
+
+/* The longest evdev node number a request may name (eventN, N of at most this many digits). */
+#define SEAT_NODE_DIGITS	4U
+
+/*
+ * sessiond's end of one compositor's seat socket (SESSIOND_SEAT_FD on the
+ * other side): the descriptor, and the bytes of a request not read whole
+ * yet.  live is set while the slot holds a socket.
+ */
+struct seat_socket {
+	unsigned live;
+	int descriptor;
+	char line[SEAT_REQUEST_MAX];
+	size_t used;
+};
+
 /*
  * The descriptor the seat's events are read on: /dev/system, subscribed to
  * SEAT_EVENT_CLASSES and read without waiting.  -1 when the kernel has no
@@ -90,10 +127,31 @@
  */
 static int seat_events = -1;
 
+/*
+ * The seat sockets of the compositors sessiond started and that have not
+ * ended (a greeter, its session, and the greeter a Log Out starts while
+ * the session still shows).  A slot is filled when sessiond makes the
+ * socket for a compositor it starts and emptied when that compositor's
+ * end closes; sessiond's one thread uses them.
+ */
+static struct seat_socket seat_sockets[SESSIOND_SEAT_SOCKETS];
+
+/*
+ * sessiond's end of the seat socket of the compositor that holds the seat
+ * now, whose OPEN requests are granted; -1 while none does (the seat is
+ * root's, or the holder ended).  It follows sessiond_seat_hold.
+ */
+static int seat_holder = -1;
+
 static void seat_set(const char *path, uid_t uid, gid_t gid, mode_t mode);
 static void seat_input(const char *prefix, uid_t uid, gid_t gid, mode_t mode);
 static void seat_cameras(uid_t uid, gid_t gid);
 static void seat_events_fail(const char *what, int error);
+static void seat_socket_read(struct seat_socket *socket);
+static void seat_socket_close(struct seat_socket *socket);
+static void seat_request(struct seat_socket *socket, const char *line);
+static int seat_node_open(const char *name, int *descriptor);
+static void seat_answer(int socket, int error, int descriptor);
 
 /*
  * Gives the display and the input devices to a user, for that user only,
@@ -178,6 +236,9 @@ sessiond_seat_restore(
 		seat_set(path, 0, SEAT_WHEEL_GID, SEAT_KEY_MODE);
 	}
 	seat_cameras(0, SEAT_WHEEL_GID);
+
+	/* No compositor has the input devices opened for it any more. */
+	seat_holder = -1;
 }
 
 /*
@@ -285,6 +346,124 @@ sessiond_seat_events_collect(
 	return 0;
 }
 
+/*
+ * Makes the seat socket of a compositor sessiond is about to start: own is
+ * sessiond's end (kept from the programs sessiond starts, and heard by the
+ * greeter's and the session's loops from now on), child the end the
+ * compositor gets as SESSIOND_SEAT_FD.  Returns 0, or an errno value (no
+ * socket: the compositor opens the devices itself).
+ */
+int
+sessiond_seat_socket(
+	int *own,
+	int *child)
+{
+	struct seat_socket *slot;
+	unsigned index;
+	int pair[2];
+	int error;
+
+	/* A free place for sessiond's end. */
+	slot = NULL;
+	for (index = 0U; index < SESSIOND_SEAT_SOCKETS; index++) {
+		if (!seat_sockets[index].live) {
+			slot = &seat_sockets[index];
+			break;
+		}
+	}
+
+	/* All taken: the compositor opens the devices itself. */
+	if (slot == NULL) {
+		sessiond_log("SESSIOND SEAT socket errno=%d", EMFILE);
+		return EMFILE;
+	}
+
+	/* The pair. */
+	error = socketpair(AF_UNIX, SOCK_STREAM, 0, pair);
+	if (error != 0) {
+		error = errno;
+		sessiond_log("SESSIOND SEAT socket errno=%d", error);
+		return error;
+	}
+
+	/* sessiond's end is its own: no program it starts gets it. */
+	(void)fcntl(pair[0], F_SETFD, FD_CLOEXEC);
+	memset(slot, 0, sizeof(*slot));
+	slot->live = 1U;
+	slot->descriptor = pair[0];
+
+	/* Succeeded: the child's end goes to the compositor. */
+	*own = pair[0];
+	*child = pair[1];
+	return 0;
+}
+
+/*
+ * Gives the seat's input devices to the compositor on a seat socket
+ * (sessiond's end): its OPEN requests are granted from now on, and the
+ * other compositors' refused.
+ */
+void
+sessiond_seat_hold(
+	int own)
+{
+	/* The holder. */
+	seat_holder = own;
+	sessiond_log("SESSIOND SEAT holder socket=%d", own);
+}
+
+/*
+ * Fills a loop's poll entries with the seat sockets, at most room of them,
+ * and reports how many it filled.
+ */
+nfds_t
+sessiond_seat_poll_fill(
+	struct pollfd *entries,
+	nfds_t room)
+{
+	unsigned index;
+	nfds_t count;
+
+	/* Each live socket, readable when a request or its end comes. */
+	count = 0;
+	for (index = 0U; index < SESSIOND_SEAT_SOCKETS && count < room; index++) {
+		if (!seat_sockets[index].live)
+			continue;
+		entries[count].fd = seat_sockets[index].descriptor;
+		entries[count].events = POLLIN;
+		entries[count].revents = 0;
+		count++;
+	}
+
+	/* Succeeded: the entries filled. */
+	return count;
+}
+
+/*
+ * Answers the requests on the seat sockets a poll found readable, and lets
+ * go of the sockets whose compositor ended.
+ */
+void
+sessiond_seat_poll_done(
+	const struct pollfd *entries,
+	nfds_t count)
+{
+	unsigned index;
+	nfds_t entry;
+
+	/* Each entry with something to read, matched to its socket. */
+	for (entry = 0; entry < count; entry++) {
+		if (entries[entry].revents == 0)
+			continue;
+		for (index = 0U; index < SESSIOND_SEAT_SOCKETS; index++) {
+			if (!seat_sockets[index].live || seat_sockets[index].descriptor != entries[entry].fd)
+				continue;
+			seat_socket_read(&seat_sockets[index]);
+			break;
+		}
+	}
+}
+
 /* Gives every camera node an owner, 0600 (devfs's own mode, so root's alone when given back). */
 static void
 seat_cameras(
@@ -385,4 +564,203 @@ seat_events_fail(
 	sessiond_log("SESSIOND SEAT events failed what=%s errno=%d", what, error);
 	(void)close(seat_events);
 	seat_events = -1;
+}
+
+/* Reads what a compositor sent on its seat socket and answers each whole request. */
+static void
+seat_socket_read(
+	struct seat_socket *socket)
+{
+	ssize_t count;
+	size_t length;
+	char *end;
+
+	/* What came; its end (or a failed read) is the compositor's end. */
+	count = read(socket->descriptor, socket->line + socket->used, sizeof(socket->line) - 1U - socket->used);
+	if (count < 0 && (errno == EINTR || errno == EAGAIN))
+		return;
+	if (count <= 0) {
+		seat_socket_close(socket);
+		return;
+	}
+
+	/* Kept after what came before, as one string. */
+	socket->used += (size_t)count;
+	socket->line[socket->used] = '\0';
+
+	/* Each whole request, then what is left moves to the front. */
+	for (;;) {
+		end = strchr(socket->line, '\n');
+		if (end == NULL)
+			break;
+		*end = '\0';
+		length = (size_t)(end - socket->line) + 1U;
+		seat_request(socket, socket->line);
+		memmove(socket->line, socket->line + length, socket->used - length);
+		socket->used -= length;
+		socket->line[socket->used] = '\0';
+	}
+
+	/* A line longer than any request is refused and thrown away. */
+	if (socket->used + 1U >= sizeof(socket->line)) {
+		socket->used = 0U;
+		socket->line[0] = '\0';
+		seat_answer(socket->descriptor, EINVAL, -1);
+	}
+}
+
+/* Lets go of the seat socket of a compositor that ended. */
+static void
+seat_socket_close(
+	struct seat_socket *socket)
+{
+	/* The holder that ended holds nothing; the slot is free again. */
+	if (seat_holder == socket->descriptor)
+		seat_holder = -1;
+	(void)close(socket->descriptor);
+	socket->live = 0U;
+	socket->descriptor = -1;
+	socket->used = 0U;
+}
+
+/* Answers one request of a compositor: the node it names, opened for it when it holds the seat. */
+static void
+seat_request(
+	struct seat_socket *socket,
+	const char *line)
+{
+	const char *name;
+	int descriptor;
+	int match;
+	int error;
+
+	/* Only OPEN is asked. */
+	match = strncmp(line, "OPEN ", 5U);
+	if (match != 0) {
+		seat_answer(socket->descriptor, EINVAL, -1);
+		return;
+	}
+
+	/* The node's name follows the word. */
+	name = line + 5;
+
+	/* A compositor that does not hold the seat gets nothing of it. */
+	if (socket->descriptor != seat_holder) {
+		sessiond_log("SESSIOND SEAT open node=%.16s error=%d holder=0", name, EPERM);
+		seat_answer(socket->descriptor, EPERM, -1);
+		return;
+	}
+
+	/* The node, opened as root (its owner may not have been given yet). */
+	descriptor = -1;
+	error = seat_node_open(name, &descriptor);
+	sessiond_log("SESSIOND SEAT open node=%.16s error=%d holder=1", name, error);
+
+	/* The answer, then sessiond's own copy goes. */
+	seat_answer(socket->descriptor, error, descriptor);
+	if (descriptor >= 0)
+		(void)close(descriptor);
+}
+
+/*
+ * Opens /dev/input/NAME for reading without waiting, when NAME is an evdev
+ * node's (event and a few digits) and the path is a character device.
+ * Returns 0 with the descriptor, or an errno value.
+ */
+static int
+seat_node_open(
+	const char *name,
+	int *descriptor)
+{
+	char path[64];
+	struct stat status;
+	size_t digits;
+	int opened;
+	int error;
+	int match;
+
+	/* "event" and one to SEAT_NODE_DIGITS digits, nothing else (no path of the compositor's choosing). */
+	match = strncmp(name, "event", 5U);
+	if (match != 0)
+		return EINVAL;
+	for (digits = 0U; name[5U + digits] != '\0'; digits++) {
+		if (name[5U + digits] < '0' || name[5U + digits] > '9')
+			return EINVAL;
+		if (digits >= SEAT_NODE_DIGITS)
+			return EINVAL;
+	}
+
+	/* At least one digit. */
+	if (digits == 0U)
+		return EINVAL;
+
+	/* The node, never through a link. */
+	snprintf(path, sizeof(path), "%s/%s", SEAT_INPUT_DIRECTORY, name);
+	opened = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
+	if (opened < 0)
+		return errno;
+
+	/* Only a device node is given. */
+	error = fstat(opened, &status);
+	if (error != 0) {
+		error = errno;
+		(void)close(opened);
+		return error;
+	}
+
+	/* Anything but a character device is not an input device. */
+	if ((status.st_mode & S_IFMT) != S_IFCHR) {
+		(void)close(opened);
+		return ENODEV;
+	}
+
+	/* Succeeded: the caller gives the descriptor and closes its own copy. */
+	*descriptor = opened;
+	return 0;
+}
+
+/* Sends one answer on a seat socket: OK with the descriptor, or FAIL with the errno value. */
+static void
+seat_answer(
+	int socket,
+	int error,
+	int descriptor)
+{
+	union {
+		struct cmsghdr header;
+		char space[CMSG_SPACE(sizeof(int))];
+	} control;
+	struct cmsghdr *message_control;
+	struct msghdr header;
+	struct iovec vector;
+	char text[32];
+	ssize_t sent;
+
+	/* The line. */
+	if (error == 0)
+		snprintf(text, sizeof(text), "OK\n");
+	else
+		snprintf(text, sizeof(text), "FAIL %d\n", error);
+	memset(&header, 0, sizeof(header));
+	vector.iov_base = text;
+	vector.iov_len = strlen(text);
+	header.msg_iov = &vector;
+	header.msg_iovlen = 1;
+
+	/* The descriptor with it. */
+	if (error == 0 && descriptor >= 0) {
+		memset(&control, 0, sizeof(control));
+		header.msg_control = control.space;
+		header.msg_controllen = sizeof(control.space);
+		message_control = CMSG_FIRSTHDR(&header);
+		message_control->cmsg_level = SOL_SOCKET;
+		message_control->cmsg_type = SCM_RIGHTS;
+		message_control->cmsg_len = CMSG_LEN(sizeof(int));
+		memcpy(CMSG_DATA(message_control), &descriptor, sizeof(int));
+	}
+
+	/* One message (a compositor that went does not read it). */
+	sent = sendmsg(socket, &header, MSG_NOSIGNAL);
+	if (sent != (ssize_t)vector.iov_len)
+		sessiond_log("SESSIOND SEAT answer lost errno=%d", errno);
 }

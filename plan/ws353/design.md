@@ -183,7 +183,7 @@
 
 - poll の timeout は常に -1。毎 pass に全部の tick を呼ばない。pass は「wake を空にする → 出口を全部取る（今の順、§3.3 of WS309）→ 発火した timer の handler → client の要求 → 描くかの判断 → flush」。
 - 毎 pass に呼んでいた物の行き先（main 483bec3718 の main.c:950〜975 と display.c:115〜200）:
-  - 入力の scan: zedBSD は /dev/system の INPUT の事象だけ（backend-host.c の `input_scan_time = 0` を「scan の依頼」に）。事象の後 2 s の 100 ms は §5.11。
+  - 入力の scan: zedBSD は /dev/system の INPUT の事象だけ（backend-host.c の `input_scan_time = 0` を「scan の依頼」に）。事象の後 2 s の 100 ms は p018 で消えた（devices の thread と sessiond の seat の socket、表の 2-03）。
   - ping・IME・titlebar・sleep・displays・glass・sysmon・machine・shot・data・clipboard の期限: timer（§5.5）。
   - `kwl_settings_tick`・`kwl_system_tick`: 中身は thread の結果の取り込みと daemon の写しの更新。wake の後の take（出口がある時だけ）に移す。
   - `kwl_output_tick`: §5.4。
@@ -283,7 +283,7 @@
 ### 5.11 thread の結果の flag を wake に（名残り）
 
 - 壁紙の loader（glass.c:877）、shot の送り（shot.c:276）、cursor の copy の手放し（cursor-plane.c:475）、machine の読み、media の helper（media-library.c:214、pipe を poll と SIGCHLD）: 終わりに wake pipe。system.c の 2 つ（562・2613）: lane の終わりと sessiond の答えで続ける。
-- 入力の scan の事象の後 2 s の 100 ms（`KWL_INPUT_SETTLE_SCAN_MS`）: kernel が /dev/system の INPUT の事象を evdev の node が見える前に出しているなら kernel の順を直す（`src/drivers/generic/input.c` の登録）。直れば事象の時の 1 回の scan で足りる。
+- 入力の scan の事象の後 2 s の 100 ms（`KWL_INPUT_SETTLE_SCAN_MS`）: kernel の順は正しく（input.c は cdev の登録の後に ADD）、理由は sessiond の chown の追い越しだった。p018 で devices の thread が ADD の node を sessiond の seat の socket で開く形にして消した（表の 2-03）。
   - 2026-11-14 p005 の調べ: kernel の順は既に正しい（`input.c` の登録は `cdev_register_managed` の後に `post_device_event(ADD)`）。100 ms の理由は、sessiond が同じ ADD の事象で node を seat の利用者へ chown する前は compositor が開けない事（BUG-264、devfs の既定は root の 0640）。p005 は 2 s の周期の scan だけを消し（zedBSD は INPUT の事象・resume・finding の終わりでだけ scan）、100 ms は事象の後の 2 s だけの物として残した。push の形（sessiond が seat を与えた後に session の control の fd で知らせ、compositor はそれで scan する）は Q1 が後の Phase に足す。
 - daemon link の network の答えの 10 ms（network-zedbsd.c:638 `NETWORK_ANSWER_LOOK_MS`）: 答えの fd を link の poll に入れる（理由の kernel の振る舞いは BUG-149 で直っている）。
 
@@ -403,7 +403,7 @@
 | --- | --- | --- | --- | --- |
 | 2-01 | output-switch.c の hotplug 250 ms（と出力を失った時の 10 ms） | 道 | 消: kernel が signal する fence と hotplug の thread（§3・§4.1・§5.3・§5.4） | p002〜p004 |
 | 2-02 | 入力の scan 2 s（zedBSD） | 名 | 消: /dev/system の INPUT の事象だけ（Linux・FreeBSD は数えない行で残す） | p005 |
-| 2-03 | 事象の後 2 s の 100 ms の scan | 道 | 残（事象の後だけ）: kernel の順は既に正しい（input.c は cdev の登録の後に ADD を出す）。100 ms の理由は sessiond が同じ事象で node を利用者へ chown する前は開けない事（BUG-264）。sessiond が seat を与えた事を session の control の fd で知らせる形にすれば消せる（2026-11-14 p005 の調べ、Q1 が後の Phase に） | p005（調べ）・後の Phase |
+| 2-03 | 事象の後 2 s の 100 ms の scan | 道 | 消: compositor の devices の thread が /dev/system の INPUT の ADD で node を開く。sessiond が起こした compositor は seat の socket（`--seat-fd`）で sessiond に OPEN を 1 回頼み、sessiond が root で開いた fd を SCM_RIGHTS で受ける（chown を待たない）。`KWL_INPUT_SETTLE_*`・`input_settle_until` を消した（2026-11-14 p018） | p005（調べ）・p018 |
 | 2-04 | printers-shell の 1 s | 道 | 外: printd が設定を持ち変化を push する（daemon）か、file の変化の通知（kernel）。それまで printers の object か printd の接続がある間の 1 s の timer として残す（2026-11-14 p007）。libkeiland の `kl_system_open` は printd がある時 printers の object を必ず作るので、kl_system を開く app（Settings・Files・Photos・Monitor・pdfviewer など）が開いている間 1 s の起床が残る（QEMU で Settings を開いて 30 s に 30 回、閉じて 0）。使う時だけ作る形（libkeiland）でも狭められる | p007（timer へ）・外 |
 | 2-05 | network.c の詳細の 1 s | 道 | 外: networkd が詳細の変化を push する。それまで view がある間の timer | p006（timer へ）・外 |
 | 2-06 | sysmon の 250 ms | 締 | 残: 購読がある間の timer | p006 |

@@ -7,12 +7,29 @@
 
 /*
  * The input devices on zedBSD (libkeiland-backend since ws131-p007): the
- * evdev nodes opened directly (there is no seat service).
+ * evdev nodes, opened by the session manager when it started the
+ * compositor with a seat socket (sessiond's --seat-fd), and directly
+ * otherwise.
+ *
+ * On the seat socket the compositor writes one line, OPEN eventN, and
+ * sessiond answers one line: OK with the node's descriptor (SCM_RIGHTS),
+ * or FAIL errno (FAIL EPERM when the compositor does not hold the seat).
+ * Only the compositor's threads ask (the devices' thread and the finding's),
+ * one request and its answer at a time under seat_lock, and the answer is
+ * waited for without a time limit: sessiond answers once its loop runs
+ * again, and the socket's end or the cancel ends the wait.  Opened by
+ * sessiond, a node is read at once, before its owner has been changed to
+ * the seat's user.  The event loop's own scan (without a thread) opens the
+ * nodes directly: it never waits for sessiond, which does not answer while
+ * it waits for the compositor's READY.
  */
 #include "userland/desktop/libkeiland-backend/backend-private.h"
 #include "userland/desktop/libkeiland-backend/keiland-backend-evdev.h"
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <dirent.h>
+#include <poll.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
@@ -23,11 +40,18 @@
 /* The directory whose eventN nodes are the evdev devices. */
 #define INPUT_DIRECTORY "/dev/input"
 
+/* The longest request and answer on the seat socket, with the line end. */
+#define INPUT_SEAT_LINE 32U
+
 static int event_node_name(const char *name);
 static void refusals_forget(struct kl_backend *backend, uint64_t generation);
 static int node_refused(const struct kl_backend *backend, unsigned events_heard, unsigned long node);
 static void probe_device(struct kl_backend *backend, const char *path, unsigned long node);
-static int open_node(struct kl_backend *backend, unsigned events_heard, const char *path, unsigned long node, int *descriptor, struct kl_backend_input_caps *capabilities);
+static int open_node(struct kl_backend *backend, unsigned events_heard, unsigned ask, const char *path, unsigned long node, int *descriptor, struct kl_backend_input_caps *capabilities);
+static int seat_socket(const struct kl_backend *backend);
+static int seat_open(struct kl_backend *backend, unsigned long node, int *descriptor);
+static int seat_ask(struct kl_backend *backend, int socket, const char *request, int *descriptor);
+static int seat_answer(struct kl_backend *backend, int socket, char *answer, size_t size, int *descriptor);
 static int find_known(const struct kl_backend_input_find *find, const char *path);
 static int read_capabilities(int descriptor, struct kl_backend_input_caps *capabilities);
 
@@ -196,7 +220,7 @@ kl_backend_input_find(
 
 		/* The node and its capabilities, into the list's next place. */
 		found = &find->nodes[find->count];
-		error = open_node(backend, find->events_heard, path, node, &found->descriptor, &found->caps);
+		error = open_node(backend, find->events_heard, 1U, path, node, &found->descriptor, &found->caps);
 		if (error != 0)
 			continue;
 		(void)snprintf(found->path, sizeof(found->path), "%s", path);
@@ -208,6 +232,66 @@ kl_backend_input_find(
 
 	/* Succeeded: the list holds the nodes opened. */
 	return 0;
+}
+
+/*
+ * Opens one input device for the devices' thread (path is
+ * /dev/input/eventN), through the seat socket when there is one, and reads
+ * its capabilities into node.  A failure is not remembered as a refusal:
+ * only the findings pass refused nodes by.
+ */
+int
+kl_backend_input_open(
+	struct kl_backend *backend,
+	const char *path,
+	struct kl_backend_input_node *node)
+{
+	const char *name;
+	unsigned long number;
+	int valid;
+	int error;
+
+	/* The node's number, from its name. */
+	name = strrchr(path, '/');
+	if (name == NULL)
+		return EINVAL;
+	name++;
+	valid = event_node_name(name);
+	if (!valid)
+		return EINVAL;
+	number = strtoul(name + 5, NULL, 10);
+
+	/* The node and its capabilities, asked of sessiond where it opens them. */
+	node->descriptor = -1;
+	error = open_node(backend, 0U, 1U, path, number, &node->descriptor, &node->caps);
+	if (error != 0)
+		return error;
+	(void)snprintf(node->path, sizeof(node->path), "%s", path);
+
+	/* Succeeded: the caller owns the descriptor. */
+	return 0;
+}
+
+/*
+ * Ends the devices' thread's wait and every wait for sessiond's answer,
+ * for good (the cancel pipe stays readable).
+ */
+void
+kl_backend_input_cancel(
+	struct kl_backend *backend)
+{
+	char byte;
+	ssize_t written;
+
+	/* Nothing to end without the pipe. */
+	if (backend == NULL || backend->cancel[1] < 0)
+		return;
+
+	/* One byte makes the read end readable from now on. */
+	byte = 0;
+	written = write(backend->cancel[1], &byte, 1U);
+	if (written != 1)
+		printf("KL SEAT cancel errno=%d\n", errno);
 }
 
 /*
@@ -410,7 +494,7 @@ probe_device(
 	events_heard = 0U;
 	if (backend->events_descriptor >= 0)
 		events_heard = 1U;
-	error = open_node(backend, events_heard, path, node, &descriptor, &capabilities);
+	error = open_node(backend, events_heard, 0U, path, node, &descriptor, &capabilities);
 	if (error != 0)
 		return;
 
@@ -423,30 +507,43 @@ probe_device(
 }
 
 /*
- * Opens one node (eventN) and reads its capability bitmaps.  A failure of
- * the device's own is remembered while the system's events are heard.
- * Returns 0 with the descriptor (the caller's), or an errno value.
+ * Opens one node (eventN) and reads its capability bitmaps: sessiond opens
+ * it when ask is set and the compositor has a seat socket, the caller
+ * otherwise.  A failure of the device's own is remembered while the
+ * system's events are heard.  Returns 0 with the descriptor (the
+ * caller's), or an errno value.
  */
 static int
 open_node(
 	struct kl_backend *backend,
 	unsigned events_heard,
+	unsigned ask,
 	const char *path,
 	unsigned long node,
 	int *descriptor,
 	struct kl_backend_input_caps *capabilities)
 {
 	int opened;
+	int socket;
 	int error;
 
-	/* Opens a nonblocking descriptor that children cannot inherit. */
-	opened = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-	if (opened < 0) {
-		/*
-		 * The device's own failure is remembered; a node not the
-		 * seat's user's yet (EACCES) is tried at every scan.
-		 */
-		error = errno;
+	/* A nonblocking descriptor that children cannot inherit, from sessiond or opened here. */
+	socket = seat_socket(backend);
+	opened = -1;
+	error = 0;
+	if (ask && socket >= 0) {
+		error = seat_open(backend, node, &opened);
+	} else {
+		opened = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+		if (opened < 0)
+			error = errno;
+	}
+
+	/*
+	 * The device's own failure is remembered; a node not the seat's user's
+	 * yet (EACCES) is tried at every scan.
+	 */
+	if (error != 0) {
 		if (events_heard && (error == EIO || error == ENXIO || error == ENODEV) && node < 64UL * KL_BACKEND_INPUT_REFUSED_WORDS)
 			backend->input_refused[node / 64UL] |= (uint64_t)1 << (node % 64UL);
 		return error;
@@ -521,5 +618,221 @@ read_capabilities(
 		memset(capabilities->properties, 0, sizeof(capabilities->properties));
 
 	/* Succeeded: the bitmaps describe the node. */
+	return 0;
+}
+
+/* Reports the seat socket sessiond gave the compositor, or -1 (none, or the standard input of cleared options). */
+static int
+seat_socket(
+	const struct kl_backend *backend)
+{
+	/* Above the standard descriptors only. */
+	if (backend->options.seat_descriptor <= STDERR_FILENO)
+		return -1;
+
+	/* Succeeded: the socket. */
+	return backend->options.seat_descriptor;
+}
+
+/*
+ * Asks sessiond to open /dev/input/eventN (node is N), one request at a
+ * time.  Returns 0 with the descriptor, or an errno value: sessiond's
+ * refusal, EPIPE once the socket is gone, ECANCELED after the cancel.
+ */
+static int
+seat_open(
+	struct kl_backend *backend,
+	unsigned long node,
+	int *descriptor)
+{
+	char request[INPUT_SEAT_LINE];
+	int socket;
+	int error;
+
+	/* The request's line. */
+	socket = seat_socket(backend);
+	(void)snprintf(request, sizeof(request), "OPEN event%lu\n", node);
+
+	/* The request and its answer, alone on the socket. */
+	if (backend->seat_lock_ready)
+		pthread_mutex_lock(&backend->seat_lock);
+
+	/* Nothing is asked on a socket given up. */
+	error = EPIPE;
+	if (!backend->seat_gone)
+		error = seat_ask(backend, socket, request, descriptor);
+
+	if (backend->seat_lock_ready)
+		pthread_mutex_unlock(&backend->seat_lock);
+
+	/* The outcome, for the log the tests read. */
+	printf("KL SEAT open node=event%lu error=%d\n", node, error);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller owns the descriptor. */
+	return 0;
+}
+
+/*
+ * Writes one request on the seat socket and reads its answer, under
+ * seat_lock.  A socket that ended, a wait cancelled or an answer not
+ * understood leaves the socket gone (a late answer could follow).
+ */
+static int
+seat_ask(
+	struct kl_backend *backend,
+	int socket,
+	const char *request,
+	int *descriptor)
+{
+	char answer[INPUT_SEAT_LINE];
+	size_t length;
+	ssize_t sent;
+	char *end;
+	long value;
+	int same;
+	int error;
+
+	/* The request, whole. */
+	*descriptor = -1;
+	length = strlen(request);
+	sent = send(socket, request, length, MSG_NOSIGNAL);
+	if (sent != (ssize_t)length) {
+		backend->seat_gone = 1U;
+		return EPIPE;
+	}
+
+	/* The answer's line and the descriptor that may come with it. */
+	error = seat_answer(backend, socket, answer, sizeof(answer), descriptor);
+	if (error != 0) {
+		if (*descriptor >= 0) {
+			(void)close(*descriptor);
+			*descriptor = -1;
+		}
+
+		/* No later answer can be told from this one's: the socket is given up. */
+		backend->seat_gone = 1U;
+		return error;
+	}
+
+	/* OK with the descriptor. */
+	same = strcmp(answer, "OK");
+	if (same == 0 && *descriptor >= 0)
+		return 0;
+
+	/* A descriptor with anything else is not kept. */
+	if (*descriptor >= 0) {
+		(void)close(*descriptor);
+		*descriptor = -1;
+	}
+
+	/* FAIL errno: sessiond's refusal, the socket still good. */
+	same = strncmp(answer, "FAIL ", 5U);
+	if (same == 0) {
+		value = strtol(answer + 5, &end, 10);
+		if (end != answer + 5 && *end == '\0' && value > 0 && value < 4096)
+			return (int)value;
+	}
+
+	/* Anything else: the protocol is lost. */
+	backend->seat_gone = 1U;
+	return EPROTO;
+}
+
+/*
+ * Reads one answer line from the seat socket into answer (without its line
+ * end) and the descriptor that came with it, waiting without a time limit
+ * until it is whole, the socket ends (EPIPE) or the cancel (ECANCELED).
+ */
+static int
+seat_answer(
+	struct kl_backend *backend,
+	int socket,
+	char *answer,
+	size_t size,
+	int *descriptor)
+{
+	union {
+		struct cmsghdr header;
+		char space[CMSG_SPACE(sizeof(int))];
+	} control;
+	struct cmsghdr *message_control;
+	struct pollfd entries[2];
+	struct msghdr header;
+	struct iovec vector;
+	size_t least;
+	size_t used;
+	ssize_t length;
+	nfds_t count;
+	char *end;
+	int received;
+	int ready;
+
+	/* What comes, until the line ends. */
+	used = 0U;
+	for (;;) {
+		/* The answer, or the cancel. */
+		entries[0].fd = socket;
+		entries[0].events = POLLIN;
+		entries[0].revents = 0;
+		entries[1].fd = backend->cancel[0];
+		entries[1].events = POLLIN;
+		entries[1].revents = 0;
+		count = 1;
+		if (backend->cancel[0] >= 0)
+			count = 2;
+		ready = poll(entries, count, -1);
+		if (ready < 0 && errno == EINTR)
+			continue;
+		if (ready < 0)
+			return errno;
+		if (count == 2 && entries[1].revents != 0)
+			return ECANCELED;
+
+		/* What came, with its descriptor. */
+		memset(&header, 0, sizeof(header));
+		memset(&control, 0, sizeof(control));
+		vector.iov_base = answer + used;
+		vector.iov_len = size - 1U - used;
+		header.msg_iov = &vector;
+		header.msg_iovlen = 1;
+		header.msg_control = control.space;
+		header.msg_controllen = sizeof(control.space);
+		length = recvmsg(socket, &header, MSG_CMSG_CLOEXEC);
+		if (length < 0 && (errno == EINTR || errno == EAGAIN))
+			continue;
+		if (length <= 0)
+			return EPIPE;
+
+		/* The descriptor, the first that came (sessiond sends one at most). */
+		message_control = CMSG_FIRSTHDR(&header);
+		least = CMSG_LEN(sizeof(int));
+		if (message_control != NULL &&
+		    message_control->cmsg_level == SOL_SOCKET &&
+		    message_control->cmsg_type == SCM_RIGHTS &&
+		    message_control->cmsg_len >= least) {
+			memcpy(&received, CMSG_DATA(message_control), sizeof(int));
+			if (*descriptor < 0)
+				*descriptor = received;
+			else
+				(void)close(received);
+		}
+
+		/* The line ends here, or the answer is longer than any. */
+		used += (size_t)length;
+		answer[used] = '\0';
+		end = strchr(answer, '\n');
+		if (end != NULL) {
+			*end = '\0';
+			break;
+		}
+
+		/* No room left for the rest of the line. */
+		if (used + 1U >= size)
+			return EPROTO;
+	}
+
+	/* Succeeded: the answer's line. */
 	return 0;
 }

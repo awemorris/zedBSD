@@ -1,0 +1,59 @@
+# The x86_64 guest image of the seat's hotplug test (qemu-seat-hotplug.sh): the graphical login on, so that sessiond
+# logs the image's user in at boot (/etc/keiland/autologin) and starts the session's compositor with its seat socket;
+# the programs the test's script uses, the compositor with its test-only screen capture and the libraries and data it
+# needs, the capture's and the settings' command-line clients, the guest's rate script, the zedBSD SSH server and the
+# guest harness's key and network files (the test drives the guest over SSH: the login screen takes the console's
+# place).  The kernel is the default x86_64 one (venus among its GPU drivers).
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+# The tree, found from this file: the nested makes read it from their own directories.
+WS353_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../../..)
+include $(WS353_TREE)/config/config.x86_64.mk
+
+override CONFIG_GRAPHICAL_LOGIN := y
+override CONFIG_ROOTFS_DEVELOPMENT := n
+override CONFIG_PCAT_SERIAL_MIRROR := y
+override CONFIG_USERLAND_PROGRAMS := sh init cron getty syslogd networkd mount fsck sysctl net \
+	login dhcpc ssh libcrypto-compat libz-compat etc ls cat echo sleep test true false mkdir rm touch \
+	kill ps dmesg sync poweroff halt reboot service env id uname date timeout chmod chown grep \
+	libwayland libwayland-client libvulkan libtruetype libkeiland sessiond mediastorage libpng-compat \
+	libjpeg-compat noto-color-emoji hand-hershey wayland awk keiland-shot keiland-settings
+
+# The compositor's test-only screen capture, which keiland-shot asks.
+ZEDBSD_TEST_SCREEN_CAPTURE := y
+
+# The guest harness (plan/tools/guest/guest.py extra-files): root's authorized key, the host keys and DHCP on ue0.
+WS353_GUEST_KEYS := $(WS353_TREE)/plan/tmp/guest
+WS353_HARNESS_FILES := \
+	--file /root/.ssh/authorized_keys=$(WS353_GUEST_KEYS)/id_ed25519.pub \
+	--mode /root/.ssh/authorized_keys=0600 --mode /root/.ssh=0700 \
+	--file /etc/ssh/ssh_host_rsa_key=$(WS353_GUEST_KEYS)/ssh_host_rsa_key \
+	--file /etc/ssh/ssh_host_rsa_key.pub=$(WS353_GUEST_KEYS)/ssh_host_rsa_key.pub \
+	--mode /etc/ssh/ssh_host_rsa_key=0600 \
+	--file /etc/ssh/ssh_host_ecdsa_key=$(WS353_GUEST_KEYS)/ssh_host_ecdsa_key \
+	--file /etc/ssh/ssh_host_ecdsa_key.pub=$(WS353_GUEST_KEYS)/ssh_host_ecdsa_key.pub \
+	--mode /etc/ssh/ssh_host_ecdsa_key=0600 \
+	--file /etc/ssh/ssh_host_ed25519_key=$(WS353_GUEST_KEYS)/ssh_host_ed25519_key \
+	--file /etc/ssh/ssh_host_ed25519_key.pub=$(WS353_GUEST_KEYS)/ssh_host_ed25519_key.pub \
+	--mode /etc/ssh/ssh_host_ed25519_key=0600 \
+	--file /root/wall-1.png=$(WS353_TREE)/docs/howto/keiland-examples/01-app.png \
+	--file /root/wall-2.png=$(WS353_TREE)/docs/howto/keiland-examples/02-window.png \
+	--file /root/perf-rate.sh=$(WS353_TREE)/plan/ws353/tests/perf-rate.sh
+# The harness's net.conf takes the place of the base one: the rootfs copies init's data (the base net.conf) over
+# the entries below, so init's own list names the harness's file (init's Makefile reads this configuration).
+override INIT_DATA := /etc/rc.conf=userland/base/etc/rc.conf \
+	/etc/fstab=userland/base/etc/fstab \
+	/etc/net.conf=plan/tools/guest/net.conf \
+	/etc/service.d/syslogd=userland/base/init/services/syslogd \
+	/etc/service.d/getty_console=userland/base/init/services/getty_console \
+	/etc/service.d/networkd=userland/base/init/services/networkd \
+	/etc/service.d/networking=userland/base/init/services/networking \
+	/etc/service.d/cron=userland/base/init/services/cron \
+	/etc/service.d/ntpdate=userland/base/init/services/ntpdate \
+	/etc/service.d/homes=userland/base/init/services/homes \
+	/usr/libexec/make-homes=userland/base/init/make-homes
+X86_64_ARCH_FILES = $(subst /etc/net.conf=userland/base/etc/net.conf,/etc/net.conf=$(WS353_TREE)/plan/tools/guest/net.conf,$(ROOTFS_FILES)) $(WS353_HARNESS_FILES)
+
+# The rootfs is made again when this file or a harness file changes.
+X86_64_ARCH_INPUTS = $(ROOTFS_INPUTS) $(WS353_TREE)/plan/ws353/tests/config-amd64-seat.mk \
+	$(WS353_TREE)/plan/tools/guest/net.conf $(WS353_GUEST_KEYS)/id_ed25519.pub \
+	$(WS353_TREE)/plan/ws353/tests/perf-rate.sh

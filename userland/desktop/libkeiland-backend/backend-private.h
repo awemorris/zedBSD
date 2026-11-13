@@ -16,6 +16,9 @@
 #define KL_BACKEND_PRIVATE_H
 
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
+#include "userland/desktop/libkeiland-backend/keiland-backend-evdev.h"
+
+#include <pthread.h>
 
 /* The bytes kept of the session manager's lines not read whole yet. */
 #define KL_BACKEND_SESSION_LINE	512U
@@ -111,6 +114,24 @@ struct kl_backend {
 	 */
 	uint64_t input_refused_generation;
 	uint64_t input_refused_seen;
+	/*
+	 * The devices' thread and the seat socket (zedBSD's events-zedbsd.c
+	 * and input-zedbsd.c).  devices_descriptor is the second subscription
+	 * to the system's events the devices' thread waits on (-1 while there
+	 * is none).  cancel is a pipe whose read end becomes readable for good
+	 * once kl_backend_input_cancel wrote to it: it ends that wait and every
+	 * wait for the session manager's answer (-1 when it could not be made).
+	 * seat_lock lets one thread at a time write a request on the seat
+	 * socket and read its answer (seat_lock_ready once it is made);
+	 * seat_gone, under it, is set once the socket ended, answered something
+	 * unreadable or a wait on it was cancelled: nothing is asked on it any
+	 * more.
+	 */
+	int devices_descriptor;
+	int cancel[2];
+	pthread_mutex_t seat_lock;
+	unsigned seat_lock_ready;
+	unsigned seat_gone;
 };
 
 /*
@@ -172,6 +193,13 @@ void kl_backend_notify_poll_done(struct kl_backend *backend, const struct pollfd
  * keep is given back to the seat.
  */
 void kl_backend_input_offer(struct kl_backend *backend, int descriptor, const char *path);
+
+/*
+ * Opens one input device (path /dev/input/eventN) for the devices' thread,
+ * through the seat socket when there is one, and reads its capabilities
+ * into node (zedBSD's input-zedbsd.c): 0, or an errno value.
+ */
+int kl_backend_input_open(struct kl_backend *backend, const char *path, struct kl_backend_input_node *node);
 
 /*
  * The shared POSIX parts of the computer's reading (ws188-p002,

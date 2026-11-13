@@ -236,6 +236,76 @@ kl_backend_input_find(
 }
 
 /*
+ * Refuses the devices' thread: the seat's service tells the devices that
+ * come, on the event loop's thread.
+ */
+int
+kl_backend_devices_start(
+	struct kl_backend *backend)
+{
+	(void)backend;
+
+	/* No thread hears the devices here. */
+	return ENOTSUP;
+}
+
+/*
+ * Refuses a wait of the devices' thread, which never starts here.
+ */
+int
+kl_backend_devices_wait(
+	struct kl_backend *backend,
+	struct kl_backend_device_batch *batch)
+{
+	(void)backend;
+
+	/* Nothing is heard here. */
+	memset(batch, 0, sizeof(*batch));
+	return ENOTSUP;
+}
+
+/*
+ * Takes nothing: no batch is made here.
+ */
+void
+kl_backend_devices_take(
+	struct kl_backend *backend,
+	const struct kl_backend_device_batch *batch)
+{
+	(void)backend;
+	(void)batch;
+
+	/* Nothing to act on. */
+	return;
+}
+
+/*
+ * Stops nothing: the devices' thread never starts here.
+ */
+void
+kl_backend_devices_stop(
+	struct kl_backend *backend)
+{
+	(void)backend;
+
+	/* Nothing started. */
+	return;
+}
+
+/*
+ * Cancels nothing: no wait of the devices' thread or for an open runs here.
+ */
+void
+kl_backend_input_cancel(
+	struct kl_backend *backend)
+{
+	(void)backend;
+
+	/* Nothing waits. */
+	return;
+}
+
+/*
  * Closes an input device descriptor.
  *
  * The seat module returns both descriptor and service ownership.

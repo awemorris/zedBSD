@@ -31,7 +31,9 @@
  * user (not for root, whose processes are the system's).
  *
  * The hand-over of the display: the script is given one end of
- * a socket pair as descriptor 3 and the option --control-fd=3 for the compositor.
+ * a socket pair as descriptor 3 and the option --control-fd=3 for the compositor
+ * (and its seat socket as descriptor 4 with --seat-fd=4, on which sessiond
+ * opens the input devices for it while it holds the seat, seat.c).
  * The greeter stays on the screen while the session starts; the compositor says
  * READY when it is about to take the display, sessiond then has the
  * greeter give it back and answers GO.  A session that never says READY
@@ -110,7 +112,7 @@
 static int session_runtime(struct sessiond_account *account, char *directory, size_t size);
 static void session_home(struct sessiond_account *account);
 static void session_runtime_clean(const char *directory);
-static void session_child(struct sessiond *daemon, struct sessiond_account *account, const char *directory, int control);
+static void session_child(struct sessiond *daemon, struct sessiond_account *account, const char *directory, int control, int seat);
 static void session_network_group(void);
 static void session_network_notify(const struct sessiond_account *account, const char *change);
 static int session_handoff(struct sessiond *daemon, int control);
@@ -134,19 +136,23 @@ sessiond_session_run(
 	struct sessiond_account *account)
 {
 	struct sessiond_exchange exchange;
-	struct pollfd entry[4];
+	struct pollfd entry[4 + SESSIOND_SEAT_SOCKETS];
 	char directory[64];
 	pid_t child;
 	pid_t waited;
 	long long start_ms;
 	long long now_ms;
 	int pair[2];
+	int seat_own;
+	int seat_child;
 	int control;
 	int leaving;
 	int hung;
 	nfds_t entries;
 	nfds_t sleep_slot;
 	nfds_t seat_slot;
+	nfds_t sockets_first;
+	nfds_t sockets;
 	int timeout;
 	int busy;
 	int ready;
@@ -175,12 +181,21 @@ sessiond_session_run(
 		return error;
 	}
 
-	/* The session's process. */
+	/* The socket it asks for the input devices on; without one the compositor opens them itself. */
+	seat_own = -1;
+	seat_child = -1;
+	error = sessiond_seat_socket(&seat_own, &seat_child);
+	if (error != 0)
+		seat_child = -1;
+
+	/* The session's process (a seat socket left without its child sees its end and goes). */
 	child = fork();
 	if (child < 0) {
 		sessiond_log("SESSIOND SESSION fork errno=%d", errno);
 		(void)close(pair[0]);
 		(void)close(pair[1]);
+		if (seat_child >= 0)
+			(void)close(seat_child);
 		sessiond_greeter_finish(daemon);
 		return EAGAIN;
 	}
@@ -188,11 +203,15 @@ sessiond_session_run(
 	/* The child becomes the session and does not come back. */
 	if (child == 0) {
 		(void)close(pair[0]);
-		session_child(daemon, account, directory, pair[1]);
+		session_child(daemon, account, directory, pair[1], seat_child);
 	}
 
-	/* sessiond keeps its own end. */
+	/* sessiond keeps its own ends; the input devices are the session's to ask for (the greeter's are refused). */
 	(void)close(pair[1]);
+	if (seat_child >= 0) {
+		(void)close(seat_child);
+		sessiond_seat_hold(seat_own);
+	}
 	control = pair[0];
 	(void)fcntl(control, F_SETFD, FD_CLOEXEC);
 
@@ -267,6 +286,11 @@ sessiond_session_run(
 		entry[seat_slot].revents = 0;
 		if (entry[seat_slot].fd >= 0)
 			entries++;
+
+		/* A compositor's request for an input device (seat.c). */
+		sockets_first = entries;
+		sockets = sessiond_seat_poll_fill(entry + sockets_first, SESSIOND_SEAT_SOCKETS);
+		entries += sockets;
 		busy = sessiond_exchange_busy(&exchange);
 		timeout = 1000;
 		if (busy)
@@ -291,6 +315,10 @@ sessiond_session_run(
 		/* The sleep's answer goes to the compositor that asked. */
 		if (ready > 0 && sleep_slot < entries && entry[sleep_slot].revents != 0)
 			sessiond_sleep_collect();
+
+		/* The input devices asked for are opened for the compositor that holds the seat. */
+		if (ready > 0)
+			sessiond_seat_poll_done(entry + sockets_first, sockets);
 
 		/* The events of the devices are read; the giving below follows every pass anyway. */
 		if (ready > 0 && seat_slot < entries && entry[seat_slot].revents != 0)
@@ -658,9 +686,13 @@ session_child(
 	struct sessiond *daemon,
 	struct sessiond_account *account,
 	const char *directory,
-	int control)
+	int control,
+	int seat)
 {
-	char *arguments[5];
+	char *arguments[6];
+	char seat_option[24];
+	int first_closed;
+	int next;
 	char *environment[8];
 	char home[320];
 	char user[96];
@@ -704,14 +736,24 @@ session_child(
 		(void)dup2(descriptor, STDERR_FILENO);
 	}
 
-	/* The socket to sessiond as descriptor 3, and no other descriptor of sessiond's. */
-	if (control != SESSIOND_CONTROL_FD) {
+	/*
+	 * The seat socket is moved above the places the two sockets go first,
+	 * so that putting the control socket at descriptor 3 cannot close it.
+	 */
+	if (seat >= 0)
+		seat = fcntl(seat, F_DUPFD, SESSIOND_SEAT_FD + 1);
+
+	/* The socket to sessiond as descriptor 3, the seat socket as 4, and no other descriptor of sessiond's. */
+	if (control != SESSIOND_CONTROL_FD)
 		(void)dup2(control, SESSIOND_CONTROL_FD);
-		(void)close(control);
+	first_closed = SESSIOND_CONTROL_FD + 1;
+	if (seat >= 0) {
+		(void)dup2(seat, SESSIOND_SEAT_FD);
+		first_closed = SESSIOND_SEAT_FD + 1;
 	}
 
-	/* Nothing above it. */
-	for (descriptor = SESSIOND_CONTROL_FD + 1; descriptor < 256; descriptor++)
+	/* Nothing above them. */
+	for (descriptor = first_closed; descriptor < 256; descriptor++)
 		(void)close(descriptor);
 
 	/* The home directory, or / when it cannot be entered. */
@@ -732,14 +774,29 @@ session_child(
 	environment[5] = runtime;
 	environment[6] = NULL;
 
-	/* The session script, told the descriptor and whether it starts locked; only a failed exec comes back. */
+	/*
+	 * The session script, told the descriptors and whether it starts
+	 * locked (it hands its arguments to the compositor); only a failed exec
+	 * comes back.
+	 */
 	arguments[0] = "sh";
 	arguments[1] = (char *)daemon->session;
 	arguments[2] = "--control-fd=3";
-	arguments[3] = NULL;
-	if (daemon->session_start_locked)
-		arguments[3] = "--locked";
-	arguments[4] = NULL;
+	next = 3;
+	if (seat >= 0) {
+		snprintf(seat_option, sizeof(seat_option), "--seat-fd=%d", SESSIOND_SEAT_FD);
+		arguments[next] = seat_option;
+		next++;
+	}
+
+	/* The lock screen first, when the session that crashed showed it. */
+	if (daemon->session_start_locked) {
+		arguments[next] = "--locked";
+		next++;
+	}
+
+	/* The end of the list. */
+	arguments[next] = NULL;
 	(void)execve("/bin/sh", arguments, environment);
 	_exit(127);
 }

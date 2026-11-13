@@ -21,6 +21,18 @@
  * Where the backend opens the devices through a seat service (Linux and
  * FreeBSD), the event loop scans as before.
  *
+ * The devices' thread (devices): the compositor's one thread that hears
+ * the devices come and go (the system's INPUT and USB events on zedBSD;
+ * the displays' hotplug is output-switch.c's thread, which waits on a
+ * Vulkan fence).  It waits without a time limit, opens each input device
+ * that comes -- through sessiond's seat socket when sessiond started the
+ * compositor, so the node is read at once whoever owns it yet -- and hands
+ * the event loop a batch: the devices opened, which the seat classifies
+ * as a finding's, and the notes (the keys changed, records lost).  The
+ * event loop keeps the machine's own events (the buttons, the lid, the
+ * power).  Without the thread the event loop hears the devices too and
+ * scans on their events.
+ *
  * The file I/O thread (io-file): the reads and writes of the session's
  * files run here, in the order given (a file is written in the order its
  * writes were given), each answered on the event loop's thread when it is
@@ -30,6 +42,7 @@
 #include "kwl.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,6 +71,16 @@ struct io_close_job {
 	int descriptor;
 };
 
+/*
+ * One batch the devices' thread made and the event loop has not taken:
+ * the backend's batch (its descriptors are the event loop's once taken),
+ * in the order made.
+ */
+struct kwl_device_batch {
+	struct kwl_device_batch *next;
+	struct kl_backend_device_batch batch;
+};
+
 static void io_find_run(struct kwl_lane_job *job);
 static void io_find_done(void *context, struct kwl_lane_job *job);
 static void io_find_drop(struct kwl_lane_job *job);
@@ -65,6 +88,13 @@ static void io_close_run(struct kwl_lane_job *job);
 static void io_close_done(void *context, struct kwl_lane_job *job);
 static void io_close_drop(struct kwl_lane_job *job);
 static void io_find_known(const struct kwl_server *server, struct kl_backend_input_find *find);
+static void io_devices_start(struct kwl_server *server);
+static void *io_devices_run(void *argument);
+static void io_devices_take(struct kwl_server *server);
+static void io_devices_stop(struct kwl_server *server);
+static void io_devices_end(struct kwl_server *server);
+static void io_devices_offer(struct kwl_server *server, const struct kl_backend_device_batch *batch);
+static void io_devices_drop(struct kwl_server *server, const struct kl_backend_device_batch *batch);
 
 /* The operations of a finding. */
 static const struct kwl_lane_ops io_find_ops = {
@@ -124,6 +154,9 @@ kwl_io_start(
 	supported = kl_backend_input_find_supported();
 	if (supported)
 		server->io_input = 1U;
+
+	/* The devices' thread, which hears the devices come before the first scan. */
+	io_devices_start(server);
 }
 
 /*
@@ -137,6 +170,9 @@ kwl_io_take(
 	/* The findings offer their nodes, the other jobs are applied; the closes need nothing. */
 	if (server->io_started)
 		(void)kwl_lane_take(&server->io_device, server);
+
+	/* The devices that came, opened by the devices' thread. */
+	io_devices_take(server);
 
 	/* The files read and written are applied and answered. */
 	if (server->io_file_started)
@@ -215,6 +251,9 @@ void
 kwl_io_stop(
 	struct kwl_server *server)
 {
+	/* The devices' thread ends first, and so does a finding's wait for sessiond. */
+	io_devices_stop(server);
+
 	/* Nothing runs. */
 	if (!server->io_started)
 		return;
@@ -433,4 +472,286 @@ io_find_known(
 		(void)snprintf(find->known[find->known_count], sizeof(find->known[0]), "%s", server->inputs[index].path);
 		find->known_count++;
 	}
+}
+
+/*
+ * Starts the devices' thread, once: the backend takes the devices' events
+ * off the event loop's descriptor for it.  Without it (no such events, a
+ * backend whose seat tells them, a failure) the event loop hears them.
+ */
+static void
+io_devices_start(
+	struct kwl_server *server)
+{
+	int error;
+
+	/* Once. */
+	if (server->devices_started)
+		return;
+
+	/* The backend's descriptor for the thread. */
+	error = kl_backend_devices_start(server->backend);
+	if (error != 0) {
+		printf("KWL DEVICES unavailable errno=%d the event loop hears the devices\n", error);
+		return;
+	}
+
+	/* The batches' lock. */
+	error = pthread_mutex_init(&server->devices_lock, NULL);
+	if (error != 0) {
+		kl_backend_devices_stop(server->backend);
+		printf("KWL DEVICES unavailable errno=%d the event loop hears the devices\n", error);
+		return;
+	}
+
+	/* Nothing handed over yet. */
+	server->devices_head = NULL;
+	server->devices_tail = NULL;
+	server->devices_lost = 0U;
+	server->devices_ended = 0U;
+	server->devices_error = 0;
+	server->devices_woken = 0U;
+	server->devices_wakes = 0U;
+
+	/* The thread, which waits for the first record. */
+	error = kwl_thread_start(&server->devices_thread, "devices", io_devices_run, server);
+	if (error != 0) {
+		(void)pthread_mutex_destroy(&server->devices_lock);
+		kl_backend_devices_stop(server->backend);
+		printf("KWL DEVICES unavailable errno=%d the event loop hears the devices\n", error);
+		return;
+	}
+
+	/* Succeeded: the thread runs until io_devices_stop. */
+	server->devices_started = 1U;
+	printf("KWL DEVICES started\n");
+}
+
+/*
+ * The devices' thread: waits for the devices' records, and hands each
+ * batch to the event loop with a wake, until the cancel or a failure.
+ */
+static void *
+io_devices_run(
+	void *argument)
+{
+	struct kl_backend_device_batch batch;
+	struct kwl_device_batch *kept;
+	struct kwl_server *server;
+	unsigned wake;
+	int error;
+
+	/* Each wait, until it is cancelled or fails. */
+	server = argument;
+	for (;;) {
+		/* The records, without a time limit; the devices that came are opened in it. */
+		error = kl_backend_devices_wait(server->backend, &batch);
+		if (error == ECANCELED)
+			break;
+
+		/* The batch kept for the event loop; without memory its devices are closed and a finding is owed. */
+		kept = NULL;
+		if (error == 0)
+			kept = malloc(sizeof(*kept));
+		if (error == 0 && kept == NULL)
+			io_devices_drop(server, &batch);
+		if (kept != NULL) {
+			kept->next = NULL;
+			kept->batch = batch;
+		}
+
+		/* Handed over (or the failure told), counted, and the event loop woken once for what is not taken yet. */
+		pthread_mutex_lock(&server->devices_lock);
+
+		server->devices_wakes++;
+		if (kept != NULL && server->devices_tail != NULL)
+			server->devices_tail->next = kept;
+		if (kept != NULL && server->devices_tail == NULL)
+			server->devices_head = kept;
+		if (kept != NULL)
+			server->devices_tail = kept;
+		if (error == 0 && kept == NULL)
+			server->devices_lost = 1U;
+		if (error != 0) {
+			server->devices_ended = 1U;
+			server->devices_error = error;
+		}
+
+		/* One wake for all that is not taken yet. */
+		wake = 0U;
+		if (!server->devices_woken) {
+			server->devices_woken = 1U;
+			wake = 1U;
+		}
+
+		pthread_mutex_unlock(&server->devices_lock);
+
+		/* The event loop takes it at its next pass. */
+		if (wake)
+			kwl_thread_wake(server->wake[1]);
+
+		/* A failure ends the thread; the event loop hears the devices again. */
+		if (error != 0)
+			break;
+	}
+
+	/* Succeeded: the thread ends. */
+	return NULL;
+}
+
+/*
+ * Takes the devices' thread's batches on the event loop's thread: the
+ * devices offered to the seat, the notes acted on, and a thread that
+ * ended on a failure joined (the event loop hears the devices again and
+ * looks at them once).
+ */
+static void
+io_devices_take(
+	struct kwl_server *server)
+{
+	struct kwl_device_batch *batches;
+	struct kwl_device_batch *next;
+	unsigned lost;
+	unsigned ended;
+	int error;
+
+	/* Only a thread that runs. */
+	if (!server->devices_started)
+		return;
+
+	/* What was handed over, emptied: the next batch wakes the loop again. */
+	pthread_mutex_lock(&server->devices_lock);
+
+	batches = server->devices_head;
+	server->devices_head = NULL;
+	server->devices_tail = NULL;
+	lost = server->devices_lost;
+	server->devices_lost = 0U;
+	ended = server->devices_ended;
+	error = server->devices_error;
+	server->devices_woken = 0U;
+
+	pthread_mutex_unlock(&server->devices_lock);
+
+	/* Each batch in the order made: its devices to the seat, its notes to the backend. */
+	while (batches != NULL) {
+		next = batches->next;
+		io_devices_offer(server, &batches->batch);
+		kl_backend_devices_take(server->backend, &batches->batch);
+		free(batches);
+		batches = next;
+	}
+
+	/* A batch that could not be kept: a finding looks for its devices. */
+	if (lost)
+		kwl_backend_input_changed(server);
+
+	/* The thread ended on a failure: joined, the devices heard by the event loop again, and looked for once. */
+	if (ended) {
+		printf("KWL DEVICES unavailable errno=%d the event loop hears the devices\n", error);
+		io_devices_end(server);
+		kwl_backend_input_changed(server);
+	}
+}
+
+/*
+ * Ends, for good as the compositor stops, the devices' thread's wait and a
+ * finding's wait for sessiond's answer, then the thread.
+ */
+static void
+io_devices_stop(
+	struct kwl_server *server)
+{
+	/* The waits end (the backend's cancel stays). */
+	kl_backend_input_cancel(server->backend);
+
+	/* The thread, when it runs. */
+	if (server->devices_started)
+		io_devices_end(server);
+}
+
+/*
+ * Joins the devices' thread once its wait has ended (cancelled, or failed
+ * by itself): the devices it opened and the event loop did not take are
+ * closed, and the event loop hears the devices again.
+ */
+static void
+io_devices_end(
+	struct kwl_server *server)
+{
+	struct kwl_device_batch *batches;
+	struct kwl_device_batch *next;
+	unsigned wakes;
+
+	/* The thread has ended or ends now. */
+	kwl_thread_join(&server->devices_thread);
+	server->devices_started = 0U;
+
+	/* The batches not taken, and the count the tests read (once for each wait that returned). */
+	pthread_mutex_lock(&server->devices_lock);
+
+	batches = server->devices_head;
+	server->devices_head = NULL;
+	server->devices_tail = NULL;
+	wakes = server->devices_wakes;
+
+	pthread_mutex_unlock(&server->devices_lock);
+
+	/* Their devices are closed; nobody reads them. */
+	while (batches != NULL) {
+		next = batches->next;
+		io_devices_drop(server, &batches->batch);
+		free(batches);
+		batches = next;
+	}
+
+	/* The lock goes; the event loop hears the devices again. */
+	(void)pthread_mutex_destroy(&server->devices_lock);
+	kl_backend_devices_stop(server->backend);
+	printf("KWL DEVICES stopped wakes=%u\n", wakes);
+}
+
+/*
+ * Offers the devices of a batch to the seat, as a finding's: one the seat
+ * reads already is closed again, and so is one it does not keep.
+ */
+static void
+io_devices_offer(
+	struct kwl_server *server,
+	const struct kl_backend_device_batch *batch)
+{
+	const struct kl_backend_input_node *node;
+	unsigned index;
+	int known;
+	int kept;
+
+	/* Each device opened, in the order its records came. */
+	for (index = 0U; index < batch->count; index++) {
+		node = &batch->nodes[index];
+
+		/* A device the seat reads already (a finding opened it meanwhile). */
+		known = kwl_backend_input_known(server, node->path);
+		if (known) {
+			kwl_io_input_close(server, node->descriptor);
+			continue;
+		}
+
+		/* The seat's classification keeps it, or it is closed. */
+		kept = kwl_input_probe(server, node->descriptor, node->path, &node->caps);
+		if (!kept)
+			kwl_io_input_close(server, node->descriptor);
+	}
+}
+
+/* Closes the devices of a batch nobody takes, on the thread that drops it. */
+static void
+io_devices_drop(
+	struct kwl_server *server,
+	const struct kl_backend_device_batch *batch)
+{
+	unsigned index;
+
+	/* Each descriptor; nothing reads it. */
+	for (index = 0U; index < batch->count; index++)
+		kl_backend_input_close(server->backend, batch->nodes[index].descriptor);
 }
