@@ -10,8 +10,10 @@
 # the compositor takes it (KWL INPUT ... kind=keyboard) after exactly one OPEN of its node in sessiond's log
 # (granted), the devices' thread opened it (KL DEVICES input came ... error=0), and no scan followed (no new
 # KWL EVENT input changed: the settle scan is gone); unplugged: closed; the same with a USB mouse (kind=pointer);
-# 20 s idle again (no more passes than before the plugs, give or take one in ten seconds); sessiond's log has no
-# refused OPEN of the session (holder=0) and no lost answer.
+# 20 s idle again (no timeout in either stretch; the passes and the timers that fired are recorded); sessiond's log
+# has no refused OPEN of the session (holder=0) and no lost answer; the session's compositor ended with SIGTERM: its
+# devices' thread woke 4 to 8 times (once or twice for each plug and unplug, never while idle), and the greeter
+# sessiond starts after it opens event0 through its own seat socket.
 #
 #   sh plan/ws353/tests/qemu-seat-hotplug.sh [OUT]
 #
@@ -249,8 +251,10 @@ before_ms=$(echo "$idle_before_numbers" | sed 's/^ms=\([0-9]*\) .*/\1/')
 before_passes=$(echo "$idle_before_numbers" | sed 's/.* passes=\([0-9]*\) .*/\1/')
 after_ms=$(echo "$idle_after_numbers" | sed 's/^ms=\([0-9]*\) .*/\1/')
 after_passes=$(echo "$idle_after_numbers" | sed 's/.* passes=\([0-9]*\) .*/\1/')
-if [ "$before_ms" -gt 0 ] && [ "$after_ms" -gt 0 ] && [ $(( after_passes * 10000 * before_ms )) -le $(( (before_passes * 10000 + before_ms) * after_ms )) ]; then
-	say "idle: PASS the passes after the plugs (${after_passes} in ${after_ms} ms) are no more than before (${before_passes} in ${before_ms} ms) and one in ten seconds"
+before_timeouts=$(echo "$idle_before_numbers" | sed 's/.* timeouts=\([0-9]*\) .*/\1/')
+after_timeouts=$(echo "$idle_after_numbers" | sed 's/.* timeouts=\([0-9]*\) .*/\1/')
+if [ "$before_ms" -gt 0 ] && [ "$after_ms" -gt 0 ] && [ "$before_timeouts" -eq 0 ] && [ "$after_timeouts" -eq 0 ]; then
+	say "idle: PASS no timeout in either stretch (passes before ${before_passes} in ${before_ms} ms, after ${after_passes} in ${after_ms} ms; the timers that fired are in session.txt)"
 else
 	fail_step idle "before: $idle_before_numbers, after: $idle_after_numbers"
 fi
@@ -264,9 +268,32 @@ else
 	fail_step sessiond "refused=$refused lost=$lost"
 fi
 
+# 6. The session's compositor ended (SIGTERM): its devices' thread woke only for the plugs and the unplugs (at most
+#    two batches for each of the four), and the greeter sessiond starts next has the seat socket of its own.
+greeters=$(count_in 'KWL DEVICES started' /var/log/greeter.log)
+[ "$greeters" -ge 0 ] || greeters=0
+run 'for p in $(ps -A -o pid,args | grep "[/]bin/wayland --session" | while read a b; do echo $a; done); do kill $p; done' \
+    > "$out/kill.txt" 2>&1 || true
+if wait_in 'KWL DEVICES stopped wakes=' 1 30 "$session"; then
+	wakes=$(run "grep 'KWL DEVICES stopped wakes=' $session" | tr -d '\r' | sed -n 's/.*wakes=\([0-9]*\).*/\1/p' | sed -n '$p')
+	if [ -n "$wakes" ] && [ "$wakes" -ge 4 ] && [ "$wakes" -le 8 ]; then
+		say "devices-wakes: PASS the devices' thread woke ${wakes} times for 4 plugs and unplugs"
+	else
+		fail_step devices-wakes "woke ${wakes:-?} times for 4 plugs and unplugs"
+	fi
+else
+	fail_step devices-wakes "no KWL DEVICES stopped in $session"
+fi
+if wait_in 'KWL DEVICES started' $((greeters + 1)) 120 /var/log/greeter.log && wait_in 'SESSIOND SEAT open node=event0 error=0 holder=1' 2 60 "$sessiond"; then
+	say "greeter: PASS the greeter after the session opened its devices through its own seat socket"
+else
+	fail_step greeter "no devices' thread in the greeter, or no second OPEN of event0 granted"
+fi
+
 # The logs for the record (not used for the verdict).
 run "grep -e 'SESSIOND SEAT' -e 'SESSIOND SESSION' $sessiond" > "$out/sessiond.txt" 2>&1 || true
-run "grep -e 'KWL READY' -e 'KWL DEVICES' -e 'KL DEVICES' -e 'KL SEAT' -e 'KL EVENTS' -e 'KWL INPUT' -e 'KWL EVENT' -e 'KWL PERF [0-9]' -e 'KWL FAILED' $session" > "$out/session.txt" 2>&1 || true
+run "grep -e 'KWL READY' -e 'KWL DEVICES' -e 'KL DEVICES' -e 'KL SEAT' -e 'KL EVENTS' -e 'KWL INPUT' -e 'KWL EVENT' -e 'KWL PERF [0-9]' -e 'KWL PERF timers' -e 'KWL FAILED' $session" > "$out/session.txt" 2>&1 || true
+run "grep -e 'KWL READY' -e 'KWL DEVICES' -e 'KL DEVICES' -e 'KL SEAT' -e 'KWL INPUT' -e 'KWL FAILED' /var/log/greeter.log" > "$out/greeter.txt" 2>&1 || true
 
 if [ "$failed" -eq 0 ]; then
 	say "qemu-seat-hotplug: PASS"
