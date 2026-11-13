@@ -137,7 +137,7 @@ static int http_case_differs(const char *text, const char *name, size_t length);
  * Fetches a URL with GET, following redirects: fills the response (its
  * final URL, status, Content-Type and body) or returns an errno value
  * (EPROTONOSUPPORT for a scheme other than http and https, or https
- * without the OpenSSL package; EPROTO for a TLS failure, whose reason
+ * when TLS cannot be set up; EPROTO for a TLS failure, whose reason
  * response->reason gives; EINVAL for a response
  * that is not HTTP, ELOOP for too many redirects).  The cookies of the
  * jar (NULL for none) go with each request, and the responses' cookies

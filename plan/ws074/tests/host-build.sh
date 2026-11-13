@@ -6,6 +6,9 @@
 # Every engine source listed in userland/desktop/libbrowser/Makefile and main.c and main-posix.c from
 # userland/desktop/browser/Makefile are built, not the shell/ directory (the zdesktop window);
 # plan/ws074/tests/host-shell.c stands in for it.
+# The TLS library (libcrypto-compat, libssl-compat) is compiled in, and net/tls.c calls it directly.
+# The library's default roots on Linux are /etc/ssl/cert.pem only; for a public site on a Debian host pass
+# --ca-file /etc/ssl/certs/ca-certificates.crt to the browser.
 # The GPU renderer (paint/vulkan.c) links the host's libvulkan (Debian's libvulkan-dev; lavapipe
 # draws when there is no GPU).
 # The outputs, in build/ws074-host/<variant>/:
@@ -77,6 +80,20 @@ for file in userland/desktop/libjpeg-compat/*.c userland/desktop/libpng-compat/*
 	object=$out/obj/$library-$(basename "$file" .c).o
 	if [ ! -f "$object" ] || [ "$file" -nt "$object" ] || [ "$out/flags" -nt "$object" ]; then
 		"$cc" $flags -Wno-error -I"$(dirname "$file")" -c "$file" -o "$object"
+	fi
+	engine="$engine $object"
+	objects="$objects $object"
+done
+
+# The TLS library (libcrypto-compat and libssl-compat), which net/tls.c calls directly: built from the sources of the
+# zedBSD build (the common files and, for libcrypto-compat, the POSIX one) with the engine's flags, and no -Wno-error.
+for file in $(grep -v '^#' userland/base/libcrypto-compat/sources.mk | grep -o 'userland/base/libcrypto-compat/[a-z0-9-]*\.c' | grep -v -- '-win32\.c') \
+    $(grep -v '^#' userland/base/libssl-compat/sources.mk | grep -o 'userland/base/libssl-compat/[a-z0-9-]*\.c'); do
+	library=$(basename "$(dirname "$file")")
+	object=$out/obj/$library-$(basename "$file" .c).o
+	if [ ! -f "$object" ] || [ "$file" -nt "$object" ] || [ "$out/flags" -nt "$object" ] ||
+	    [ -n "$(find userland/base/libcrypto-compat userland/base/libssl-compat include/libc/compat -name '*.h' -newer "$object" | head -1)" ]; then
+		"$cc" $flags -c "$file" -o "$object"
 	fi
 	engine="$engine $object"
 	objects="$objects $object"

@@ -19,11 +19,12 @@ out=build/tmp/ws334-net-ring/$variant
 mkdir -p "$out"
 src=userland/desktop/libbrowser
 base=$(ls $src/base/*.c | grep -v -e '-win32\.c$')
-# The network's sources but the bindings of the TLS libraries linked statically (tls-static.c for OpenSSL,
-# tls-static-compat.c for libssl-compat; the Windows build's).
+# The TLS library (libcrypto-compat, libssl-compat), which net/tls.c calls directly, for the host.
+HOST_COMPAT_CFLAGS=$sanitize sh plan/tools/tls/host-compat-libs.sh "$out/compat" || { echo "net-ring-test: FAIL (host-compat-libs.sh)"; exit 1; }
+# The network's sources but the Windows build's old bindings of the TLS libraries, until they are removed.
 net=$(ls $src/net/*.c | grep -v -e '/tls-static\.c$' -e '/tls-static-compat\.c$')
-cc $sanitize -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I$src -I. -Iuserland/desktop/include -Ibuild/ws074-host/include \
+cc $sanitize -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I$src -I. -Iuserland/desktop/include -Ibuild/ws074-host/include -I$out/compat/include \
 	$net $src/storage/queue.c $src/storage/records.c $base userland/base/libz-compat/*.c \
 	plan/ws334/tests/net-ring-test.c userland/tests/browser-threads/threads-posix.c \
-	-o "$out/net-ring-test" -ldl -lpthread -lm || exit 1
+	"$out/compat/libssl-compat.a" "$out/compat/libcrypto-compat.a" -o "$out/net-ring-test" -ldl -lpthread -lm || exit 1
 TSAN_OPTIONS="halt_on_error=1 exitcode=66" timeout 120 "$out/net-ring-test"

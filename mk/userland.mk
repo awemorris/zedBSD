@@ -97,7 +97,7 @@ $(BUILD)/packages/libkeiland/.stamp: $(BUILD)/packages/libwayland/.stamp $(BUILD
 $(BUILD)/packages/libegl/.stamp: $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libwayland/.stamp $(BUILD)/packages/libwayland-egl/.stamp
 $(BUILD)/packages/libglesv2/.stamp: $(BUILD)/packages/libegl/.stamp
 $(BUILD)/packages/libGL/.stamp: $(BUILD)/packages/libegl/.stamp
-$(BUILD)/packages/libbrowser/.stamp: $(BUILD)/packages/libtruetype/.stamp $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libmedia/.stamp $(BUILD)/packages/libjpeg-compat/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libgif-compat/.stamp $(BUILD)/packages/libwebp-compat/.stamp
+$(BUILD)/packages/libbrowser/.stamp: $(BUILD)/packages/libtruetype/.stamp $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libmedia/.stamp $(BUILD)/packages/libjpeg-compat/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libgif-compat/.stamp $(BUILD)/packages/libwebp-compat/.stamp $(BUILD)/packages/libssl-compat/.stamp $(BUILD)/packages/libcrypto-compat/.stamp
 $(BUILD)/packages/libGLX/.stamp: $(BUILD)/packages/libGL/.stamp $(BUILD)/packages/libegl/.stamp
 
 # Desktop app dependencies
@@ -114,7 +114,7 @@ $(BUILD)/packages/photos/.stamp:      $(KEILAND_COMMON_DEPS) $(BUILD)/packages/m
 $(BUILD)/packages/music/.stamp:       $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libmedia/.stamp $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libjpeg-compat/.stamp $(BUILD)/packages/libgif-compat/.stamp
 $(BUILD)/packages/videoplayer/.stamp: $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libmedia/.stamp
 $(BUILD)/packages/calendar/.stamp:    $(KEILAND_COMMON_DEPS)
-$(BUILD)/packages/mailer/.stamp:      $(KEILAND_COMMON_DEPS)
+$(BUILD)/packages/mailer/.stamp:      $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libssl-compat/.stamp $(BUILD)/packages/libcrypto-compat/.stamp
 $(BUILD)/packages/monitor/.stamp:     $(KEILAND_COMMON_DEPS)
 $(BUILD)/packages/phone/.stamp:       $(KEILAND_COMMON_DEPS) $(BUILD)/packages/preview/.stamp $(BUILD)/packages/libz-compat/.stamp
 $(BUILD)/packages/mediastorage/.stamp: $(BUILD)/packages/libkeiland/.stamp $(BUILD)/packages/libwayland/.stamp $(BUILD)/packages/preview/.stamp

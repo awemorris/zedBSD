@@ -1,18 +1,15 @@
 #!/bin/sh
-# The host tests of the browser's net/tls.c with libssl-compat in place of OpenSSL.  net/tls.c opens
-# libcrypto-compat.so and libssl-compat.so when it is built with WB_TLS_COMPAT (zedBSD's build), OpenSSL's libcrypto
-# and libssl otherwise.  The browser and host-loader are built twice with plan/ws074/tests/host-build.sh (unchanged):
-# as they are, and with -DWB_TLS_COMPAT (a compiler wrapper given as CC); the compat libraries are built for the host
-# as shared libraries (the host's cc, their exports.map) into one directory under their own names only (no link named
-# like OpenSSL's: the compat runs show that net/tls.c opens the compat names itself), and the programs are run
-# through a wrapper that sets LD_LIBRARY_PATH to that directory (only the browser gets it: the test server is Python
-# with the host's OpenSSL).  The WS074 runners run-http-tests.py and run-loader-tests.py go once with the host's
-# OpenSSL and once with compat; both must pass, with the same counts, and the dynamic loader's log must show the
-# compat libraries loaded in the compat runs and not in the OpenSSL runs.
+# The host tests of the browser's net/tls.c, which calls libssl-compat and libcrypto-compat directly.  The browser
+# and host-loader are built with plan/ws074/tests/host-build.sh (it compiles the two libraries into libbrowser.so
+# and the host-loader from their sources).  Then:
+#   - libbrowser.so needs no libssl or libcrypto (readelf), exports no SSL_, X509_, ERR_ or TLS_client_method name
+#     and imports none (nm), and holds no name of a TLS library to open (strings);
+#   - the WS074 runners run-http-tests.py and run-loader-tests.py pass, with the counts of the WS335 p036 baseline
+#     (http 15, loader 11), and the dynamic loader's log shows no libssl or libcrypto started.
 #   sh plan/ws335/tests/run-nettls.sh
 # The servers bind 127.0.0.1 on ports the kernel chose just before.  The browser build goes to
 # build/ws335-nettls-host (kept between runs, host-build.sh rebuilds what changed); the rest under
-# build/tmp/ws335-nettls (a fresh run directory); the compat build to build/ws335-nettls-host-compat.  The last line is run-nettls: PASS or run-nettls: FAIL.
+# build/tmp/ws335-nettls (a fresh run directory).  The last line is run-nettls: PASS or run-nettls: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
@@ -23,95 +20,42 @@ python=/usr/bin/python3
 . plan/tools/fresh-out.sh
 out=build/tmp/ws335-nettls
 fresh_out "$out"
-host_openssl=build/ws335-nettls-host
-host_compat=build/ws335-nettls-host-compat
+host=build/ws335-nettls-host
 status=0
 
-# 1. The browser and host-loader for the host, as they are and with -DWB_TLS_COMPAT (the wrapper keeps its path, so
-# host-build.sh reuses the objects of the last run).
-mkdir -p "$host_compat"
-wrapper=$top/$host_compat/cc-compat
-printf '#!/bin/sh\nexec cc -DWB_TLS_COMPAT "$@"\n' > "$out/cc-compat"
-if ! cmp -s "$out/cc-compat" "$wrapper"; then
-	cp "$out/cc-compat" "$wrapper"
-	chmod 755 "$wrapper"
-fi
-if ! BROWSER_HOST_BUILD=$host_openssl timeout 3000 sh plan/ws074/tests/host-build.sh plain > "$out/host-build.log" 2>&1; then
+# 1. The browser and host-loader for the host.
+if ! BROWSER_HOST_BUILD=$host timeout 3000 sh plan/ws074/tests/host-build.sh plain > "$out/host-build.log" 2>&1; then
 	tail -20 "$out/host-build.log"
 	echo "run-nettls: FAIL (host-build.sh; $out/host-build.log)"
 	exit 1
 fi
-if ! CC=$wrapper BROWSER_HOST_BUILD=$host_compat timeout 3000 sh plan/ws074/tests/host-build.sh plain \
-    > "$out/host-build-compat.log" 2>&1; then
-	tail -20 "$out/host-build-compat.log"
-	echo "run-nettls: FAIL (host-build.sh with -DWB_TLS_COMPAT; $out/host-build-compat.log)"
-	exit 1
-fi
-for host in $host_openssl $host_compat; do
-	for program in browser host-loader; do
-		if [ ! -x "$host/plain/$program" ]; then
-			echo "run-nettls: FAIL (no $host/plain/$program)"
-			exit 1
-		fi
-	done
+for program in browser host-loader; do
+	if [ ! -x "$host/plain/$program" ]; then
+		echo "run-nettls: FAIL (no $host/plain/$program)"
+		exit 1
+	fi
 done
-if ! strings "$host_compat/plain/libbrowser.so" | grep -q '^libssl-compat\.so$' || strings "$host_compat/plain/libbrowser.so" | grep -q '^libssl\.so$'; then
-	echo "nettls: the compat libbrowser.so does not name libssl-compat.so alone"
-	status=1
-fi
-if strings "$host_openssl/plain/libbrowser.so" | grep -q '^libssl-compat\.so$'; then
-	echo "nettls: the OpenSSL libbrowser.so names libssl-compat.so"
+
+# 2. The library names: nothing of OpenSSL's or of the compat shared libraries is needed, imported, exported or opened.
+library=$host/plain/libbrowser.so
+needed=$(readelf -d "$library" | grep 'NEEDED' | grep -c 'Shared library: \[lib\(ssl\|crypto\)')
+imported=$(nm -D --undefined-only "$library" | grep -c -E ' (SSL_|X509_|ERR_|TLS_client_method)')
+exported=$(nm -D --defined-only "$library" | grep -c -E ' (SSL_|X509_|ERR_|TLS_client_method)')
+named=$(strings "$library" | grep -c -E 'libssl\.so|libcrypto\.so|libssl-compat\.so|libcrypto-compat\.so')
+echo "nettls: libbrowser.so: $needed libssl/libcrypto NEEDED, $imported imported and $exported exported TLS names, $named library names in strings"
+if [ "$needed" -ne 0 ] || [ "$imported" -ne 0 ] || [ "$exported" -ne 0 ] || [ "$named" -ne 0 ]; then
+	echo "nettls: libbrowser.so depends on or names a TLS shared library"
 	status=1
 fi
 
-# 2. The compat libraries as host shared libraries, under the names net/tls.c opens first.
-lib=$out/lib
-mkdir -p "$lib/include" "$lib/obj"
-ln -sfn "$top/include/libc/compat" "$lib/include/compat"
-build_library() {
-	name=$1
-	shift
-	objects=
-	for file in "$@"; do
-		object=$lib/obj/$name-$(basename "$file" .c).o
-		if ! timeout 300 cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fPIC -I"$lib/include" -I. \
-		    -c "$file" -o "$object" >> "$lib/build.log" 2>&1; then
-			return 1
-		fi
-		objects="$objects $object"
-	done
-	cc -shared -Wl,-soname,$name.so -Wl,-z,defs -Wl,-z,nodelete -Wl,--version-script=userland/base/$name/exports.map \
-	    $objects -L"$lib" $libraries -lpthread -o "$lib/$name.so" >> "$lib/build.log" 2>&1
-}
-# The sources of each library from its sources.mk (the zedBSD lists: the common files and the POSIX one).
-crypto_sources=$(grep -v '^#' userland/base/libcrypto-compat/sources.mk | grep -o 'userland/base/libcrypto-compat/[a-z0-9-]*\.c' | grep -v -- '-win32\.c')
-ssl_sources=$(grep -v '^#' userland/base/libssl-compat/sources.mk | grep -o 'userland/base/libssl-compat/[a-z0-9-]*\.c')
-: > "$lib/build.log"
-libraries=
-build_library libcrypto-compat $crypto_sources || { tail -20 "$lib/build.log"; echo "run-nettls: FAIL (libcrypto-compat.so)"; exit 1; }
-libraries=-l:libcrypto-compat.so
-build_library libssl-compat $ssl_sources || { tail -20 "$lib/build.log"; echo "run-nettls: FAIL (libssl-compat.so)"; exit 1; }
-if [ -s "$lib/build.log" ]; then
-	head -20 "$lib/build.log"
-	echo "run-nettls: FAIL (warnings in the library build; $lib/build.log)"
-	exit 1
-fi
-echo "nettls: host libcrypto-compat.so and libssl-compat.so built ($(echo $crypto_sources | wc -w) and $(echo $ssl_sources | wc -w) sources), no warning"
-
-# 3. The wrappers: each runs the program with the dynamic loader's log of its libraries in its own files.
-for flavour in openssl compat; do
-	mkdir -p "$out/$flavour/ld"
-	host=$host_openssl
-	[ "$flavour" = compat ] && host=$host_compat
-	for program in browser host-loader; do
-		{
-			echo '#!/bin/sh'
-			[ "$flavour" = compat ] && echo "LD_LIBRARY_PATH=$top/$lib"
-			[ "$flavour" = compat ] && echo "export LD_LIBRARY_PATH"
-			echo "LD_DEBUG=libs LD_DEBUG_OUTPUT=$top/$out/$flavour/ld/$program exec $top/$host/plain/$program \"\$@\""
-		} > "$out/$flavour/$program"
-		chmod 755 "$out/$flavour/$program"
-	done
+# 3. The wrappers: each runs the program with the dynamic loader's log of its libraries in its own file.
+mkdir -p "$out/ld"
+for program in browser host-loader; do
+	{
+		echo '#!/bin/sh'
+		echo "LD_DEBUG=libs LD_DEBUG_OUTPUT=$top/$out/ld/$program exec $top/$host/plain/$program \"\$@\""
+	} > "$out/$program"
+	chmod 755 "$out/$program"
 done
 
 free_port() {
@@ -121,47 +65,43 @@ s.bind(("127.0.0.1", 0))
 print(s.getsockname()[1])'
 }
 
-# 4. The runners, with the host's OpenSSL and with compat.
-for flavour in openssl compat; do
-	timeout 1200 "$python" plan/ws074/tests/run-http-tests.py --program "$top/$out/$flavour/browser" \
-	    --port "$(free_port)" --tls-port "$(free_port)" --tls-wrong-port "$(free_port)" > "$out/$flavour/http.txt" 2>&1
-	echo "nettls: $flavour: run-http-tests $(tail -1 "$out/$flavour/http.txt")"
-	timeout 1200 "$python" plan/ws074/tests/run-loader-tests.py --program "$top/$out/$flavour/host-loader" \
-	    --port "$(free_port)" --tls-port "$(free_port)" --tls-wrong-port "$(free_port)" > "$out/$flavour/loader.txt" 2>&1
-	echo "nettls: $flavour: run-loader-tests $(tail -1 "$out/$flavour/loader.txt")"
-	grep '^FAIL' "$out/$flavour/http.txt" "$out/$flavour/loader.txt"
-	for runner in http loader; do
-		total=$(tail -1 "$out/$flavour/$runner.txt" | sed -n 's/^[a-z-]* \([0-9]*\)\/\([0-9]*\)$/\2/p')
-		passed=$(tail -1 "$out/$flavour/$runner.txt" | sed -n 's/^[a-z-]* \([0-9]*\)\/\([0-9]*\)$/\1/p')
-		if [ -z "$total" ] || [ "$passed" != "$total" ]; then
-			echo "nettls: $flavour: $runner tests did not all pass"
-			status=1
-		fi
-		eval "count_${flavour}_$runner=\$total"
-	done
-done
+# 4. The runners.
+timeout 1200 "$python" plan/ws074/tests/run-http-tests.py --program "$top/$out/browser" \
+    --port "$(free_port)" --tls-port "$(free_port)" --tls-wrong-port "$(free_port)" > "$out/http.txt" 2>&1
+echo "nettls: run-http-tests $(tail -1 "$out/http.txt")"
+timeout 1200 "$python" plan/ws074/tests/run-loader-tests.py --program "$top/$out/host-loader" \
+    --port "$(free_port)" --tls-port "$(free_port)" --tls-wrong-port "$(free_port)" > "$out/loader.txt" 2>&1
+echo "nettls: run-loader-tests $(tail -1 "$out/loader.txt")"
+grep '^FAIL' "$out/http.txt" "$out/loader.txt"
 for runner in http loader; do
-	eval "a=\${count_openssl_$runner:-}; b=\${count_compat_$runner:-}"
-	if [ "$a" != "$b" ]; then
-		echo "nettls: the $runner counts differ (OpenSSL $a, compat $b)"
+	total=$(tail -1 "$out/$runner.txt" | sed -n 's/^[a-z-]* \([0-9]*\)\/\([0-9]*\)$/\2/p')
+	passed=$(tail -1 "$out/$runner.txt" | sed -n 's/^[a-z-]* \([0-9]*\)\/\([0-9]*\)$/\1/p')
+	if [ -z "$total" ] || [ "$passed" != "$total" ]; then
+		echo "nettls: $runner tests did not all pass"
 		status=1
 	fi
+	eval "count_$runner=\${total:-0}"
 done
+if [ "$count_http" -ne 15 ]; then
+	echo "nettls: the http count is $count_http, not 15"
+	status=1
+fi
+if [ "$count_loader" -ne 11 ]; then
+	echo "nettls: the loader count is $count_loader, not 11"
+	status=1
+fi
 
-# 5. Which libraries were loaded (the dynamic loader names each by the path it opened): in the compat runs libssl
-# from the compat directory and never another, in the OpenSSL runs never one from that directory.
-compat_loads=$(cat "$out"/compat/ld/* 2> /dev/null | grep -c "calling init: $top/$lib/libssl-compat\.so")
-compat_system=$(cat "$out"/compat/ld/* 2> /dev/null | grep 'calling init: .*/libssl[.-]' | grep -vc "calling init: $top/$lib/")
-openssl_loads=$(cat "$out"/openssl/ld/* 2> /dev/null | grep -c 'calling init: .*/libssl\.so')
-openssl_compat=$(cat "$out"/openssl/ld/* 2> /dev/null | grep -c "$top/$lib/")
-echo "nettls: loader logs: compat runs init libssl from $lib $compat_loads times and another libssl $compat_system times; OpenSSL runs init libssl $openssl_loads times, from $lib $openssl_compat times"
-if [ "$compat_loads" -eq 0 ] || [ "$compat_system" -ne 0 ] || [ "$openssl_loads" -eq 0 ] || [ "$openssl_compat" -ne 0 ]; then
-	echo "nettls: the libraries loaded are not the ones meant"
+# 5. Which libraries were started (the dynamic loader names each it initializes): never a libssl or libcrypto.
+started=$(cat "$out"/ld/* 2> /dev/null | grep -c -E 'calling init: .*/lib(ssl|crypto)')
+logged=$(cat "$out"/ld/* 2> /dev/null | grep -c 'calling init:')
+echo "nettls: loader logs: $logged libraries started, $started of them libssl or libcrypto"
+if [ "$logged" -eq 0 ] || [ "$started" -ne 0 ]; then
+	echo "nettls: the libraries started are not the ones meant"
 	status=1
 fi
 
 if [ $status -eq 0 ]; then
-	echo "run-nettls: PASS (http $count_compat_http cases, loader $count_compat_loader cases, each with OpenSSL and compat)"
+	echo "run-nettls: PASS (http $count_http cases, loader $count_loader cases, libssl-compat and libcrypto-compat linked)"
 else
 	echo "run-nettls: FAIL"
 fi

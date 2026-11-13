@@ -5,6 +5,9 @@
 
 include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
+# Mail's TLS (tls.c) is libssl-compat and libcrypto-compat, zedBSD's own TLS library, which the program links.
+# OpenSSL is never used.
+
 MAILER_SOURCES := \
 	userland/desktop/mailer/main.c \
 	userland/desktop/mailer/view.c \
@@ -22,4 +25,4 @@ MAILER_SOURCES := \
 	userland/desktop/mailer/account.c \
 	userland/desktop/mailer/secret.c
 
-$(eval $(call USERLAND_PACKAGE,mailer,mailer - Mail,x86_64,n,basic,$(MAILER_SOURCES),y,desktop,desktop/mailer,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype,0755,program,,,bin))
+$(eval $(call USERLAND_PACKAGE,mailer,mailer - Mail,x86_64,n,basic,$(MAILER_SOURCES),y,desktop,desktop/mailer,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype base/libssl-compat base/libcrypto-compat,0755,program,,,bin))

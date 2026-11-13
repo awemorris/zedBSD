@@ -11,8 +11,7 @@ LIBBROWSER_IMAGE_DATA := \
 		/usr/share/licenses/browser/WHATWG-entities=userland/base/licenses/browser/WHATWG-entities \
 		/usr/share/licenses/browser/Unicode-License-V3=userland/base/licenses/browser/Unicode-License-V3
 
-$(eval $(call USERLAND_PACKAGE,libbrowser,libbrowser,x86_64,n,library,$(LIBBROWSER_SOURCES),y,desktop,desktop/libbrowser,desktop/libtruetype desktop/libvulkan desktop/libmedia desktop/libjpeg-compat desktop/libpng-compat base/libz-compat desktop/libgif-compat desktop/libwebp-compat,,shared-library,$(LIBBROWSER_IMAGE_DATA),userland/desktop/include/browser/browser.h userland/desktop/include/browser/storage.h,lib))
+$(eval $(call USERLAND_PACKAGE,libbrowser,libbrowser,x86_64,n,library,$(LIBBROWSER_SOURCES),y,desktop,desktop/libbrowser,desktop/libtruetype desktop/libvulkan desktop/libmedia desktop/libjpeg-compat desktop/libpng-compat base/libz-compat desktop/libgif-compat desktop/libwebp-compat base/libssl-compat base/libcrypto-compat,,shared-library,$(LIBBROWSER_IMAGE_DATA),userland/desktop/include/browser/browser.h userland/desktop/include/browser/storage.h,lib))
 
-# https on zedBSD goes through libssl-compat and libcrypto-compat: net/tls.c opens them by name
-# (libssl-compat.so, libcrypto-compat.so) when it is compiled with WB_TLS_COMPAT.
-STANDALONE_CFLAGS_libbrowser += -DWB_TLS_COMPAT
+# https goes through libssl-compat and libcrypto-compat, zedBSD's own TLS library: net/tls.c calls them
+# directly, and libbrowser.so links them (libssl-compat.so, libcrypto-compat.so).  OpenSSL is never used.
