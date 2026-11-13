@@ -162,10 +162,19 @@ kwl_output_tick(
 	if (kwl_display_busy(server) || compose->listing)
 		return;
 
-	/* Not too often. */
-	if (compose->hotplug != VK_NULL_HANDLE && now - compose->hotplug_checked_ms < OUTPUT_HOTPLUG_MS && compose->output_lost != 1U)
+	/*
+	 * Not too often: the hotplug fence has no event of its own (it is asked
+	 * for the displays' changes), so it is looked at on the clock; a lost
+	 * output at once.
+	 */
+	if (compose->hotplug != VK_NULL_HANDLE && now - compose->hotplug_checked_ms < OUTPUT_HOTPLUG_MS && compose->output_lost != 1U) {
+		kwl_due(server, compose->hotplug_checked_ms + OUTPUT_HOTPLUG_MS);
 		return;
+	}
 	compose->hotplug_checked_ms = now;
+	kwl_due(server, now + OUTPUT_HOTPLUG_MS);
+	if (compose->output_lost == 1U)
+		kwl_due_soon(server);
 
 	/* The first look: a fence, then the displays as they are, and their heads. */
 	if (compose->hotplug == VK_NULL_HANDLE) {

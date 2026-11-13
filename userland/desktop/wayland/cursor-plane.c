@@ -470,8 +470,11 @@ kwl_cursor_plane_update(
 	fixed = plane_fixed(server, image);
 	if (!fixed) {
 		shown_image = plane_copy(server, plane, image);
-		if (shown_image == NULL)
+		if (shown_image == NULL) {
+			/* The cursor thread lets a copy go without a wake: looked at again soon. */
+			kwl_due_soon(server);
 			return;
+		}
 	}
 
 	/* The box shows it from the cursor thread's next look. */

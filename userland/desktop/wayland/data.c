@@ -429,10 +429,12 @@ kwl_data_tick(
 	if (offer != NULL && offer->dnd_answered && offer->dnd_accepted && offer->version >= DATA_ACTIONS_VERSION && offer->dnd_action == ACTION_NONE)
 		answered = 0;
 
-	/* Not yet, and time is left. */
+	/* Not yet, and time is left: the answer comes as a request, the deadline on the clock. */
 	now = kwl_milliseconds();
-	if (!answered && now < server->dnd_release_deadline)
+	if (!answered && now < server->dnd_release_deadline) {
+		kwl_due(server, server->dnd_release_deadline);
 		return;
+	}
 
 	/* Succeeded: the release, decided now. */
 	printf("KWL DATA drag release decided answered=%d\n", answered);

@@ -192,9 +192,11 @@ kwl_scanout_pass(
 		return 0;
 	}
 
-	/* Not to be shown straight: window mode (the reason logged for a window that asked). */
+	/* Not to be shown straight: window mode (the reason logged for a window that asked); a moving pointer only until it rests. */
 	if (reason != KWL_SCANOUT_DIRECT) {
 		scanout_note(server, top, reason);
+		if (reason == KWL_SCANOUT_POINTER)
+			kwl_due(server, server->scanout_motion_ms + KWL_SCANOUT_POINTER_IDLE_MS);
 		return 0;
 	}
 
@@ -913,6 +915,8 @@ scanout_frame(
 		kwl_scanout_leave(server, KWL_SCANOUT_REFUSED);
 		return;
 	}
+	if (chain->shown == 0U && chain->flight < 0)
+		kwl_due(server, chain->lent_ms + SCANOUT_ADOPT_MS + 1U);
 
 	/* Only a new image. */
 	buffer = top->current;

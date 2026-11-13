@@ -35,6 +35,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,6 +111,7 @@ static struct clipboard_write {
 };
 
 static void clipboard_read_end(int keep);
+static void clipboard_read_step(void);
 static void clipboard_write_step(struct clipboard_write *write_job);
 static void clipboard_write_end(struct clipboard_write *write_job);
 static void clipboard_add(char *text, size_t length);
@@ -193,23 +195,43 @@ kwl_clipboard_selected(
 /*
  * Reads what the source wrote so far (the pipe was readable); at the end
  * of the text it joins the history.  A read that takes too long is given
- * up (called each pass of the event loop).
+ * up (called each pass of the event loop, which also waits for the pipes
+ * and for the time a read or a write is given up).
  */
 void
 kwl_clipboard_poll(
 	struct kwl_server *server)
 {
-	char chunk[1024];
-	char *grown;
 	unsigned index;
-	ssize_t got;
 
-	/* The writes under way go on with what fits now. */
-	(void)server;
+	/* The writes under way go on with what fits now, the read with what came. */
 	for (index = 0U; index < CLIPBOARD_WRITES; index++) {
 		if (clipboard_writes[index].fd >= 0)
 			clipboard_write_step(&clipboard_writes[index]);
 	}
+	clipboard_read_step();
+
+	/* What is still under way wakes the loop with its pipe, or at its time. */
+	for (index = 0U; index < CLIPBOARD_WRITES; index++) {
+		if (clipboard_writes[index].fd < 0)
+			continue;
+		kwl_watch(server, clipboard_writes[index].fd, POLLOUT);
+		kwl_due(server, clipboard_writes[index].started + CLIPBOARD_WRITE_MS + 1U);
+	}
+	if (clipboard_read.fd >= 0) {
+		kwl_watch(server, clipboard_read.fd, POLLIN);
+		kwl_due(server, clipboard_read.started + CLIPBOARD_READ_MS + 1U);
+	}
+}
+
+/* Reads what the source of the read under way wrote so far. */
+static void
+clipboard_read_step(
+	void)
+{
+	char chunk[1024];
+	char *grown;
+	ssize_t got;
 
 	/* No read under way. */
 	if (clipboard_read.fd < 0)

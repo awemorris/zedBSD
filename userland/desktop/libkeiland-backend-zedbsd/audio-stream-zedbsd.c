@@ -316,6 +316,27 @@ kl_backend_audio_stream_next(
 }
 
 /*
+ * Gives the connection to audiod for the host's wait: its messages bring
+ * the reports, and its room ends a connection under way.
+ */
+int
+kl_backend_audio_stream_descriptor(
+	const struct kl_backend_audio_stream *stream,
+	short *events)
+{
+	/* An ended stream waits for nothing. */
+	*events = 0;
+	if (stream == NULL || stream->stage == STREAM_ENDED || stream->socket < 0)
+		return -1;
+
+	/* The messages; while connecting, the connection made. */
+	*events = POLLIN;
+	if (stream->stage == STREAM_CONNECTING)
+		*events = POLLOUT;
+	return stream->socket;
+}
+
+/*
  * Ends a stream: closing the connection makes audiod destroy the stream.
  */
 void

@@ -1067,6 +1067,34 @@ kl_backend_session_tick(
 }
 
 /*
+ * Tells what kl_backend_session_tick waits for: sessiond's lines, and the
+ * end of the time a Log Out asked waits for its answer.
+ */
+int
+kl_backend_session_wait(
+	const struct kl_backend *backend,
+	uint64_t *due_ms)
+{
+	int descriptor;
+
+	/* Nothing to read without sessiond, or after it left. */
+	*due_ms = UINT64_MAX;
+	descriptor = session_descriptor(backend);
+	if (descriptor < 0 || backend->session_gone)
+		return -1;
+
+	/* A Log Out asked: its time starts at the next tick, and runs out after SESSION_LOGOUT_MS. */
+	if (backend->logout_asked) {
+		*due_ms = 0U;
+		if (backend->logout_ms != 0U)
+			*due_ms = backend->logout_ms + SESSION_LOGOUT_MS;
+	}
+
+	/* Succeeded: sessiond's lines wake the wait. */
+	return descriptor;
+}
+
+/*
  * Sends one request line to sessiond (sharing-zedbsd.c's SERVICE).
  */
 int

@@ -251,7 +251,7 @@ socket_setsockopt_common(
 		spin_unlock_irqrestore(&socket->lock, irq);
 		if (socket->ops != NULL && socket->ops->buffer_changed != NULL)
 			socket->ops->buffer_changed(socket, option);
-		poll_notify();
+		poll_notify_object(socket);
 		return 0;
 	}
 
@@ -458,7 +458,7 @@ socket_set_error(
 
 	spin_unlock_irqrestore(&socket->lock, irq);
 
-	poll_notify();
+	poll_notify_object(socket);
 }
 
 /*
@@ -545,7 +545,7 @@ socket_close_endpoint(
 
 	spin_unlock_irqrestore(&socket->lock, irq);
 
-	poll_notify();
+	poll_notify_object(socket);
 }
 
 /*
@@ -584,7 +584,7 @@ socket_release(
 
 	spin_unlock_irqrestore(&socket->lock, irq);
 
-	poll_notify();
+	poll_notify_object(socket);
 
 	/* Frees the queued packets. */
 	for (;;) {
@@ -943,7 +943,7 @@ socket_enqueue_packet_wait(
 	if (error != 0)
 		packet_buf_free(packet);
 	else
-		poll_notify();
+		poll_notify_object(socket);
 
 	/* Reports why the queueing failed. */
 	if (error != 0)
@@ -1230,8 +1230,8 @@ socket_poll_notify(
 	if (polled == 0)
 		return;
 
-	/* Every poll scans again. */
-	poll_notify();
+	/* The polls of this socket, and of the sockets that read its state, scan again. */
+	poll_notify_object(socket);
 }
 
 /* Wakes one wait queue of a socket under its lock and notifies pollers. */

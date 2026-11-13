@@ -619,14 +619,17 @@ kwl_touch_tick(
 		if (screen->input == NULL)
 			continue;
 		for (slot = 0; slot < TOUCH_SLOTS; slot++) {
-			if (screen->contacts[slot].following)
-				follow_step(server, screen, slot, (uint32_t)now);
+			if (!screen->contacts[slot].following)
+				continue;
+			follow_step(server, screen, slot, (uint32_t)now);
+			kwl_due_soon(server);
 		}
 	}
 
-	/* Only fingers on a title bar wait for anything. */
+	/* Only fingers on a title bar wait for anything (looked at closely while they do). */
 	if (title.state != TITLE_HELD && title.state != TITLE_PAIR)
 		return;
+	kwl_due_soon(server);
 
 	/* The time an event would carry now, counted on from the first finger's. */
 	time = title.first_time + (uint32_t)(now - title.first_clock);

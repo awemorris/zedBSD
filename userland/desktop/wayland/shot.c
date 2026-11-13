@@ -55,6 +55,7 @@
 #include "threads.h"
 
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -269,21 +270,26 @@ kwl_shot_tick(
 	int sending;
 	int error;
 
-	/* A sending of pixels under way holds the next request back until it has ended. */
+	/* A sending of pixels under way holds the next request back until it has ended (looked at soon again). */
 	sending = shot_send_end(server, 0U);
-	if (sending)
+	if (sending) {
+		kwl_due_soon(server);
 		return;
+	}
 
-	/* A request whose frame did not come. */
+	/* A request whose frame did not come (its frame wakes the loop; its time runs out on the clock). */
 	now = kwl_milliseconds();
 	if (shot.client >= 0 && now - shot.asked_ms > SHOT_WAIT_MS) {
 		shot_finish(server, "timeout");
 		return;
 	}
+	if (shot.client >= 0)
+		kwl_due(server, shot.asked_ms + SHOT_WAIT_MS + 1U);
 
-	/* A new connection, one at a time. */
+	/* A new connection, one at a time (one that comes wakes the loop). */
 	if (shot.listener < 0 || shot.client >= 0)
 		return;
+	kwl_watch(server, shot.listener, POLLIN);
 	connection = accept(shot.listener, NULL, NULL);
 	if (connection < 0)
 		return;

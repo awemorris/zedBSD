@@ -635,8 +635,10 @@ kwl_output_rotate_held(
 	/* The old frame stays while a window is waited for and the wait is not over. */
 	now = kwl_milliseconds();
 	holding = kwl_rotate_holding(waiting, server->rotate_hold_ms, now);
-	if (holding)
+	if (holding) {
+		kwl_due(server, server->rotate_hold_ms + KWL_ROTATE_HOLD_MS);
 		return 1;
+	}
 
 	/* The wait ends: no window is waited for any more. */
 	for (client = server->clients; client != NULL; client = client->next) {

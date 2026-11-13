@@ -21,6 +21,7 @@
 
 #include "settings-store.h"
 
+#include <signal.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -414,6 +415,8 @@ int
 kwl_settings_store_save_later(
 	struct kwl_settings_store *store)
 {
+	sigset_t signals_all;
+	sigset_t signals_before;
 	struct kwl_settings_writer *writer;
 	int error;
 
@@ -428,7 +431,11 @@ kwl_settings_store_save_later(
 		return 0;
 
 	/* Starts the thread that merges the changes. */
+	/* The thread blocks every signal: the stops and a child's end go to the event loop's thread. */
+	(void)sigfillset(&signals_all);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_all, &signals_before);
 	error = pthread_create(&writer->thread, NULL, store_writer_run, writer);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_before, NULL);
 	if (error != 0) {
 		writer->given = 0;
 		return error;

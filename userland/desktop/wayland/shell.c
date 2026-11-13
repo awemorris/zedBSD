@@ -3393,10 +3393,12 @@ kwl_glass_tick(
 		return;
 	}
 
-	/* A session left without input for long enough locks (ws035-p102). */
+	/* A session left without input for long enough locks (ws035-p102); the loop comes back when it would. */
 	idle = kwl_milliseconds() - server->lock_input_ms;
 	if (server->lock_idle_ms != 0U && idle >= server->lock_idle_ms)
 		(void)kwl_lock(server, "idle");
+	else if (server->lock_idle_ms != 0U)
+		kwl_due(server, server->lock_input_ms + server->lock_idle_ms);
 
 	/* The sheets where their parents are (ws090-p014). */
 	sheet_place(server);
@@ -3486,7 +3488,12 @@ kwl_glass_tick(
 		}
 	}
 
-	/* The minute of the clock. */
+	/* The slides and animations step with the frames, and are looked at closely until they end. */
+	if (server->desktop_moving || server->anim != NULL || server->wiseview_moving)
+		kwl_due_soon(server);
+
+	/* The minute of the clock (the loop comes back at the next). */
+	kwl_due_next_minute(server);
 	now = time(NULL);
 	if ((int64_t)now / 60 == server->clock_minute)
 		return;
@@ -8147,11 +8154,13 @@ band_tick(
 	if (!server->band_press)
 		return;
 
-	/* Not yet long enough. */
+	/* Not yet long enough (looked at closely while the finger rests). */
 	held_ms = kwl_milliseconds() - server->band_since_ms;
 	held = kwl_edge_band_held(held_ms);
-	if (!held)
+	if (!held) {
+		kwl_due_soon(server);
 		return;
+	}
 	server->band_press = 0;
 	printf("KWL EDGE band hold ms=%llu fullscreen=%u\n", (unsigned long long)held_ms, server->band_fullscreen);
 

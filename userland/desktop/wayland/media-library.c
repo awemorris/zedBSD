@@ -208,6 +208,10 @@ kwl_media_library_tick(
 	/* Completes pending operations before publishing the latest generation. */
 	media_answers(server);
 	media_watchers(server);
+
+	/* Helpers still running: their pipes and their ends are looked at again soon. */
+	if (kl_backend_media_busy(media_state.backend))
+		kwl_due_soon(server);
 }
 
 /*

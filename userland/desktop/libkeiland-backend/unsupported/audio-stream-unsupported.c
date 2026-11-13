@@ -78,6 +78,21 @@ kl_backend_audio_stream_next(
 }
 
 /*
+ * Gives no descriptor: there is no stream.
+ */
+int
+kl_backend_audio_stream_descriptor(
+	const struct kl_backend_audio_stream *stream,
+	short *events)
+{
+	UNUSED_PARAMETER(stream);
+
+	/* Nothing to wait for. */
+	*events = 0;
+	return -1;
+}
+
+/*
  * Ends a stream: there is none.
  */
 void

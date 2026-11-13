@@ -404,8 +404,9 @@ socket_file_poll(
 	if (socket == NULL)
 		return EBADF;
 
-	/* Marks the socket watched before its readiness is read, so a change after the read is told. */
+	/* Marks the socket watched before its readiness is read, so a change after the read is told, and follows it. */
 	socket_poll_watch(socket);
+	poll_wait_object(socket);
 
 	/* Uses the socket's poll, or the common queue-based one. */
 	if (socket->ops != NULL && socket->ops->poll != NULL)

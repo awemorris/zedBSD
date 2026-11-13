@@ -8,10 +8,18 @@
 /*
  * The poll event channel and file readiness scanning.
  *
- * Every readiness change in the kernel wakes one process-wide wait queue.
- * A poll waits on that channel with the sequence it observed before its
- * scan, so a change that races the scan is never missed, and it rescans
- * after each wakeup until a descriptor is ready or the deadline expires.
+ * A readiness change names the object that changed (a pipe, a socket, a
+ * device; poll_notify_object), and wakes only the polls that wait for that
+ * object.  A poll learns the objects it waits for while it scans: each
+ * file type's poll operation names the objects its answer reads
+ * (poll_wait_object).  A descriptor whose operation names none, and a poll
+ * that follows more objects than it can hold, are woken by every change, as
+ * are all polls by a change that names no object (poll_notify).
+ *
+ * Every change counts the channel's sequence.  A poll observes the
+ * sequence before its scan and sleeps only when it is unchanged, so a
+ * change that races the scan is never missed; it rescans after each wakeup
+ * until a descriptor is ready or the deadline expires.
  */
 
 #include "kern/poll.h"
@@ -24,19 +32,43 @@
 #include "kern/signal.h"
 #include "kern/thread.h"
 #include "kern/waitq.h"
+#include <kern/kcrt.h>
 
 #include <uapi/errno.h>
 #include <uapi/fcntl.h>
 
+/* The objects one poll follows by name; a poll with more is woken by every change. */
+#define POLL_OBJECTS	16U
+
+/*
+ * One sleeping poll: its own wait queue, and the objects whose changes wake
+ * it (every change when every is set).  It lives on the polling thread's
+ * stack, linked on the channel only while the thread sleeps; noted tells
+ * the scan whether the descriptor just asked named an object.
+ */
+struct poll_waiter {
+	struct poll_waiter *next;
+	struct wait_queue waitq;
+	const void *objects[POLL_OBJECTS];
+	unsigned count;
+	unsigned every;
+	unsigned noted;
+};
+
+/* The sleeping polls, and the count of the changes so far, under the lock. */
 struct poll_channel {
 	struct spinlock lock;
-	struct wait_queue waitq;
+	struct poll_waiter *waiters;
+	uint64_t sequence;
 };
 
 static struct poll_channel channel;
 static atomic_uint_t channel_ready;
 
-static int poll_scan(struct process *process, struct pollfd *fds, nfds_t count, int *ready);
+static int poll_scan(struct process *process, struct pollfd *fds, nfds_t count, struct poll_waiter *waiter, int *ready);
+static int poll_follows(const struct poll_waiter *waiter, const void *object);
+static uint64_t poll_sequence(void);
+static int poll_sleep(struct poll_waiter *waiter, uint64_t observed, uint64_t deadline, unsigned flags);
 static int poll_wait_ready(struct process *process, struct pollfd *fds, nfds_t count, uint64_t deadline, int immediate, int *ready);
 
 /*
@@ -46,63 +78,148 @@ void
 poll_init(
 	void)
 {
-	/* Publishes the channel only after its lock and queue exist. */
+	/* Publishes the channel only after its lock exists. */
 	spin_init(&channel.lock, LOCK_RANK_POLL, "poll event channel");
-	waitq_init(&channel.waitq, "poll event channel");
+	channel.waiters = NULL;
+	channel.sequence = 0;
 	atomic_store_release(&channel_ready, 1U);
 }
 
 /*
- * Wakes every poll after a readiness change.
+ * Wakes every poll after a readiness change that names no object.
  */
 void
 poll_notify(
 	void)
 {
+	struct poll_waiter *waiter;
 	unsigned long irq;
 
 	/* Ignores a change before the channel exists. */
 	if (atomic_load_acquire(&channel_ready) == 0)
 		return;
 
-	/* Wakes every waiting poll. */
+	/* Counts the change and wakes every sleeping poll. */
 	irq = spin_lock_irqsave(&channel.lock);
 
-	waitq_wake_all(&channel.waitq);
+	channel.sequence++;
+	for (waiter = channel.waiters; waiter != NULL; waiter = waiter->next)
+		waitq_wake_all(&waiter->waitq);
 
 	spin_unlock_irqrestore(&channel.lock, irq);
 }
 
 /*
+ * Wakes the polls that wait for one object after its readiness changed,
+ * and those that wait for every change.
+ */
+void
+poll_notify_object(
+	const void *object)
+{
+	struct poll_waiter *waiter;
+	unsigned long irq;
+
+	/* Ignores a change before the channel exists. */
+	if (atomic_load_acquire(&channel_ready) == 0)
+		return;
+
+	/* Counts the change and wakes the polls that follow the object. */
+	irq = spin_lock_irqsave(&channel.lock);
+
+	channel.sequence++;
+	for (waiter = channel.waiters; waiter != NULL; waiter = waiter->next) {
+		if (waiter->every || poll_follows(waiter, object))
+			waitq_wake_all(&waiter->waitq);
+	}
+
+	spin_unlock_irqrestore(&channel.lock, irq);
+}
+
+/*
+ * Names an object whose changes are to wake the poll the calling thread is
+ * scanning for.  A file type's poll operation calls it for every object its
+ * answer reads, before it reads them; outside a poll's scan it does nothing.
+ */
+void
+poll_wait_object(
+	const void *object)
+{
+	struct poll_waiter *waiter;
+	struct thread *thread;
+
+	/* Only a thread scanning for a poll follows objects. */
+	thread = thread_current();
+	if (thread == NULL || thread->poll_waiter == NULL)
+		return;
+	waiter = thread->poll_waiter;
+
+	/* The descriptor named an object. */
+	waiter->noted = 1U;
+
+	/* Each object once; one too many makes the poll follow every change. */
+	if (object == NULL || poll_follows(waiter, object))
+		return;
+	if (waiter->count >= POLL_OBJECTS) {
+		waiter->every = 1U;
+		return;
+	}
+	waiter->objects[waiter->count] = object;
+	waiter->count++;
+}
+
+/* Tells whether a poll follows an object by name. */
+static int
+poll_follows(
+	const struct poll_waiter *waiter,
+	const void *object)
+{
+	unsigned index;
+
+	/* One of its objects. */
+	for (index = 0; index < waiter->count; index++) {
+		if (waiter->objects[index] == object)
+			return 1;
+	}
+
+	/* Not followed by name. */
+	return 0;
+}
+
+/*
  * Reads the channel sequence a poll must observe before scanning.
  */
-uint64_t
+static uint64_t
 poll_sequence(
 	void)
 {
+	unsigned long irq;
 	uint64_t sequence;
 
-	/* Reports a placeholder before the channel exists. */
-	if (atomic_load_acquire(&channel_ready) == 0)
-		return 0;
+	/* Read under the lock the changes count it under. */
+	irq = spin_lock_irqsave(&channel.lock);
 
-	/* Reads the wait queue sequence. */
-	sequence = waitq_sequence(&channel.waitq);
+	sequence = channel.sequence;
+
+	spin_unlock_irqrestore(&channel.lock, irq);
 
 	/* Reports the observed sequence. */
 	return sequence;
 }
 
 /*
- * Sleeps on the channel until a readiness change, interruption, or
- * deadline.
+ * Sleeps until a change of an object the poll follows, interruption, or
+ * deadline; EAGAIN at once when a change came since the sequence was
+ * observed (the scan may have missed it).
  */
-int
-poll_wait(
+static int
+poll_sleep(
+	struct poll_waiter *waiter,
 	uint64_t observed,
 	uint64_t deadline,
 	unsigned flags)
 {
+	struct poll_waiter **link;
 	unsigned long irq;
 	int error;
 
@@ -110,19 +227,31 @@ poll_wait(
 	if (atomic_load_acquire(&channel_ready) == 0)
 		return EAGAIN;
 
-	/* Sleeps under the channel lock. */
+	/* A change since the scan began: the poll scans again. */
 	irq = spin_lock_irqsave(&channel.lock);
 
-	error = waitq_sleep(&channel.waitq, &channel.lock, observed, deadline, flags);
+	if (channel.sequence != observed) {
+		spin_unlock_irqrestore(&channel.lock, irq);
+		return EAGAIN;
+	}
+
+	/* Linked for the changes to find, asleep, then unlinked under the same lock. */
+	waiter->next = channel.waiters;
+	channel.waiters = waiter;
+	error = waitq_sleep(&waiter->waitq, &channel.lock,
+	    waitq_sequence(&waiter->waitq), deadline, flags);
+	for (link = &channel.waiters; *link != NULL; link = &(*link)->next) {
+		if (*link == waiter) {
+			*link = waiter->next;
+			break;
+		}
+	}
+	waiter->next = NULL;
 
 	spin_unlock_irqrestore(&channel.lock, irq);
 
-	/* Reports why the sleep failed. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded. */
-	return 0;
+	/* Reports why the sleep ended. */
+	return error;
 }
 
 /*
@@ -244,6 +373,7 @@ poll_wait_ready(
 	int immediate,
 	int *ready)
 {
+	struct poll_waiter waiter;
 	struct thread *thread;
 	uint64_t observed;
 	uint64_t now;
@@ -251,11 +381,15 @@ poll_wait_ready(
 
 	thread = thread_current();
 
-	/* Scans, then sleeps for the next change, until something is ready. */
-	observed = poll_sequence();
+	/* The poll's own queue, and no object followed yet. */
+	kern_memset(&waiter, 0, sizeof(waiter));
+	waitq_init(&waiter.waitq, "poll event channel");
+
+	/* Scans, then sleeps for the next change it follows, until something is ready. */
 	for (;;) {
 		/* Stops on a scan error, a ready descriptor, or an immediate poll. */
-		error = poll_scan(process, fds, count, ready);
+		observed = poll_sequence();
+		error = poll_scan(process, fds, count, &waiter, ready);
 		if (error != 0 || *ready != 0 || immediate)
 			return error;
 
@@ -263,8 +397,8 @@ poll_wait_ready(
 		if (thread != NULL && signal_pending_unblocked(thread))
 			return EINTR;
 
-		/* Sleeps until the channel changes. */
-		error = poll_wait(observed, deadline, WAITQ_INTERRUPTIBLE);
+		/* Sleeps until an object it follows changes. */
+		error = poll_sleep(&waiter, observed, deadline, WAITQ_INTERRUPTIBLE);
 		if (error == EINTR)
 			return EINTR;
 
@@ -272,10 +406,8 @@ poll_wait_ready(
 		 * An expired deadline scans once more: a change that came as it
 		 * passed (the system busy past it) is still reported (T1-129).
 		 */
-		if (error == ETIMEDOUT) {
-			error = poll_scan(process, fds, count, ready);
-			return error;
-		}
+		if (error == ETIMEDOUT)
+			return poll_scan(process, fds, count, NULL, ready);
 
 		/* Another failure of the sleep ends the poll. */
 		if (error != 0 && error != EAGAIN)
@@ -283,32 +415,48 @@ poll_wait_ready(
 
 		/* The same for a deadline that passed while the wake was on its way. */
 		now = sched_ticks();
-		if (deadline != 0 && now >= deadline) {
-			error = poll_scan(process, fds, count, ready);
-			return error;
-		}
-
-		observed = poll_sequence();
+		if (deadline != 0 && now >= deadline)
+			return poll_scan(process, fds, count, NULL, ready);
 	}
 }
 
-/* Scans every polled descriptor once and counts the ready ones. */
+/*
+ * Scans every polled descriptor once and counts the ready ones.  With a
+ * waiter, the scan also gathers the objects whose changes are to wake the
+ * poll: each descriptor's poll operation names them; a descriptor that
+ * names none makes the poll follow every change.
+ */
 static int
 poll_scan(
 	struct process *process,
 	struct pollfd *fds,
 	nfds_t count,
+	struct poll_waiter *waiter,
 	int *ready)
 {
 	struct fd_object object;
+	struct thread *thread;
 	nfds_t i;
 	short revents;
 	int total;
 	int error;
 
+	/* The objects are gathered afresh: what the descriptors read may have changed. */
+	thread = thread_current();
+	if (waiter != NULL) {
+		waiter->count = 0;
+		waiter->every = 0;
+		if (thread == NULL)
+			waiter->every = 1U;
+		else
+			thread->poll_waiter = waiter;
+	}
+
 	/* Count only descriptors whose requested or terminal readiness is observable. */
 	total = 0;
 	for (i = 0; i < count; i++) {
+		if (waiter != NULL)
+			waiter->noted = 0;
 		/* Negative poll entries intentionally carry no descriptor ownership. */
 		revents = 0;
 		fds[i].revents = 0;
@@ -344,7 +492,15 @@ poll_scan(
 		/* Valid release-only handles contribute no readiness to this count. */
 		if (fds[i].revents != 0)
 			total++;
+
+		/* A descriptor whose operation named no object is followed by every change. */
+		if (waiter != NULL && !waiter->noted)
+			waiter->every = 1U;
 	}
+
+	/* The scan names no more objects. */
+	if (waiter != NULL && thread != NULL)
+		thread->poll_waiter = NULL;
 
 	/* Publish the complete scan after every temporary object reference has been released. */
 	*ready = total;

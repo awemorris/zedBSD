@@ -191,6 +191,7 @@ kwl_layers_tick(
 	int home_due;
 	int maps_due;
 	int busy;
+	uint64_t quiet;
 
 	/* Only with the pictures, the output, no frame in flight, in the glass look, with nothing else on the screen. */
 	compose = server->compose;
@@ -228,14 +229,25 @@ kwl_layers_tick(
 			return 0;
 	}
 
-	/* Only in the quiet: no input and no window commit for a while, no frame just done, two drawings a second at most. */
+	/*
+	 * Only in the quiet: no input and no window commit for a while, no
+	 * frame just done, two drawings a second at most.  Before the quiet the
+	 * loop comes back when it begins (a frame wanted draws first).
+	 */
 	now = kwl_milliseconds();
-	if (server->dirty || server->damaged ||
-	    now - server->input_ms < LAYER_QUIET_MS ||
-	    now - server->commit_ms < LAYER_QUIET_MS ||
-	    now - server->frame_done_ms < LAYER_FRAME_QUIET_MS ||
-	    (layers->bake_times[0] != 0U && now - layers->bake_times[0] < LAYER_TURN_MS))
+	if (server->dirty || server->damaged)
 		return 0;
+	quiet = server->input_ms + LAYER_QUIET_MS;
+	if (server->commit_ms + LAYER_QUIET_MS > quiet)
+		quiet = server->commit_ms + LAYER_QUIET_MS;
+	if (server->frame_done_ms + LAYER_FRAME_QUIET_MS > quiet)
+		quiet = server->frame_done_ms + LAYER_FRAME_QUIET_MS;
+	if (layers->bake_times[0] != 0U && layers->bake_times[0] + LAYER_TURN_MS > quiet)
+		quiet = layers->bake_times[0] + LAYER_TURN_MS;
+	if (now < quiet) {
+		kwl_due(server, quiet);
+		return 0;
+	}
 
 	/* The key made again: a picture that shows it already is kept, and then only the maps are drawn. */
 	if (home_due && layers_home_current(server))

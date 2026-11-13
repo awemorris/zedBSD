@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -42,7 +43,13 @@
 /* Signal handlers only request ordinary event-loop cleanup, they own no GPU state. */
 static volatile sig_atomic_t stop_requested;
 
+/* The write end of the threads' wake pipe for the signal handlers (-1 until it is open). */
+static volatile sig_atomic_t signal_wake = -1;
+
 static void stop_service(int signal_number);
+static void child_ended(int signal_number);
+static void signal_wake_loop(void);
+static int child_wake_install(void);
 static void compose_unavailable_reason(void);
 static void log_append(int descriptor);
 static int parse_options(struct kwl_server *server, int count, char **arguments);
@@ -63,6 +70,7 @@ static void perf_box_report(struct kwl_perf *perf, const struct kwl_cursor_stats
 static uint32_t perf_percentile(uint32_t *values, uint32_t count, unsigned percent, uint32_t *largest);
 static int perf_value_order(const void *left, const void *right);
 static int event_loop(struct kwl_server *server);
+static int loop_timeout(struct kwl_server *server);
 static void wake_drain(struct kwl_server *server);
 static void service_cleanup(struct kwl_server *server);
 static uint64_t startup_step(const char *step, uint64_t since);
@@ -234,6 +242,15 @@ main(
 	error = kwl_wake_open(&server);
 	if (error != 0)
 		printf("KWL FAILED site=wake errno=%d\n", error);
+	signal_wake = server.wake[1];
+
+	/*
+	 * A child's end wakes the event loop, which reaps it (the desktop's
+	 * program, the input method, App Home's programs) and starts it again
+	 * when it has to; the loop does not look for it on a clock.
+	 */
+	if (child_wake_install() != 0)
+		return 1;
 	backend_options.threads.wake_descriptor = server.wake[1];
 	backend_options.threads.start = kwl_thread_start_lent;
 	backend_options.threads.ended = kwl_thread_ended;
@@ -436,8 +453,58 @@ stop_service(
 	(void)signal_number;
 	stop_requested = 1;
 
+	/* The loop's wait ends now. */
+	signal_wake_loop();
+
 	/* Succeeded: the event loop will withdraw this service generation. */
 	return;
+}
+
+/* Wakes the event loop when a child ended: the parts that reap their children look at once. */
+static void
+child_ended(
+	int signal_number)
+{
+	/* Only the wake; the reaping is the loop's. */
+	(void)signal_number;
+	signal_wake_loop();
+}
+
+/* Writes one byte to the threads' wake pipe from a signal handler (write is async-signal-safe). */
+static void
+signal_wake_loop(
+	void)
+{
+	unsigned char byte;
+	int saved;
+	int descriptor;
+
+	/* The handler keeps the errno of the code it interrupted. */
+	saved = errno;
+	descriptor = signal_wake;
+	byte = 1U;
+	if (descriptor >= 0)
+		(void)write(descriptor, &byte, 1U);
+	errno = saved;
+}
+
+/* Installs the SIGCHLD handler that wakes the loop; restartable calls go on after it. */
+static int
+child_wake_install(
+	void)
+{
+	struct sigaction action;
+
+	/* Only ends and stops of children matter for the reaping: ends alone. */
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = child_ended;
+	(void)sigemptyset(&action.sa_mask);
+	action.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+	if (sigaction(SIGCHLD, &action, NULL) != 0)
+		return errno;
+
+	/* Succeeded: an ended child wakes the loop. */
+	return 0;
 }
 
 /* Parses explicit bounded service settings without depending on environment state. */
@@ -915,8 +982,8 @@ event_loop(
 	size_t first_fence;
 	size_t first_os;
 	size_t os_count;
+	size_t first_watched;
 	unsigned fence;
-	int waiting;
 	int retire_ready;
 	uint64_t mark;
 	uint64_t part;
@@ -955,6 +1022,8 @@ event_loop(
 			scan_period = KWL_INPUT_SETTLE_SCAN_MS;
 		if (server->os_paused == 0 && now - server->input_scan_time >= scan_period)
 			kwl_input_scan(server);
+		if (server->os_paused == 0)
+			kwl_due(server, server->input_scan_time + scan_period);
 
 		/* A client that has left a ping unanswered too long is not responding (toplevel.c). */
 		kwl_ping_check(server, now);
@@ -1015,10 +1084,12 @@ event_loop(
 			}
 		}
 
-		/* Counts the OS entries after the input and fence descriptors. */
+		/* Counts the OS entries after the input and fence descriptors, then the watched ones. */
 		first_os = count;
 		os_count = kwl_os_poll_count(server);
 		count += os_count;
+		first_watched = count;
+		count += server->watched_count;
 
 		/* Allocation failure leaves all live clients owned by service cleanup. */
 		descriptors = calloc(count, sizeof(*descriptors));
@@ -1035,18 +1106,18 @@ event_loop(
 			return ENOMEM;
 		}
 
-		/* A short finite poll interval also bounds cleanup of fatal clients with stalled output. */
+		/* The listener first. */
 		descriptors[0].fd = server->listener;
 		descriptors[0].events = POLLIN;
-		timeout = 10;
-		waiting = kwl_compose_waiting(server);
-		if (waiting)
-			timeout = 2;
+
+		/* The gone clients' buffers are released a few at a time, between the frames and the input (objects.c). */
+		if (server->retiring != NULL)
+			kwl_due_soon(server);
 
 		/* A gone client's buffer that may be released now: the input is looked at, then it is released. */
 		retire_ready = kwl_retire_ready(server, kwl_milliseconds());
 		if (retire_ready)
-			timeout = 0;
+			kwl_due(server, 0U);
 		index = 1;
 		for (client = server->clients; client != NULL; client = client->next) {
 			/* Retain the snapshot identity while suppressing new input on fatal connections. */
@@ -1059,9 +1130,11 @@ event_loop(
 			if (client->output_head != NULL)
 				descriptors[index].events |= POLLOUT;
 
-			/* A fully flushed fatal connection can be retired immediately. */
+			/* A fully flushed fatal connection can be retired immediately, one that is not when its time is up. */
 			if (client->fatal && client->output_head == NULL)
-				timeout = 0;
+				kwl_due(server, 0U);
+			if (client->fatal && client->output_head != NULL)
+				kwl_due(server, client->fatal_time + 2000U);
 
 			/* Each slot and pointer now describe one live connection generation. */
 			index++;
@@ -1096,8 +1169,10 @@ event_loop(
 			}
 		}
 
-		/* Lets the OS populate its entries in this descriptor snapshot. */
+		/* Lets the OS populate its entries in this descriptor snapshot, and the watched descriptors after them. */
 		kwl_os_poll_fill(server, descriptors + first_os);
+		for (index = 0; index < server->watched_count; index++)
+			descriptors[first_watched + index] = server->watched[index];
 
 		/* The input thread computes the motions from now on with the settings and outputs as they are. */
 		kwl_input_sync(server);
@@ -1105,11 +1180,31 @@ event_loop(
 		/* The images' moves to their layout recorded in this pass go to the render thread before the loop waits. */
 		kwl_compose_give_tasks(server);
 
+		/*
+		 * The wait ends with an event, or when work without one is due; a
+		 * service with a bound ends at the bound.  A backend that reads some
+		 * of its areas without waiting has them looked at soon.
+		 */
+		if (server->timeout_ms != UINT64_MAX)
+			kwl_due(server, started + server->timeout_ms);
+		if (!kl_backend_wakes(server->backend))
+			kwl_due_soon(server);
+
+		/* A change to draw made since the scheduler ran is drawn at once (the scheduler waits for nothing else it). */
+		if ((server->dirty || server->damaged) && !server->schedule_left)
+			kwl_due(server, 0U);
+		timeout = loop_timeout(server);
+
 		/* Poll sees sockets only; typed image fds are consumed immediately during import. */
 		mark = kwl_cycles();
 		ready = poll(descriptors, count, timeout);
 		server->perf.poll_cycles += kwl_cycles() - mark;
 		mark = kwl_cycles();
+
+		/* The pass's work comes from now on: its time, and the work without an event it leaves for later. */
+		now = kwl_milliseconds();
+		server->due_ms = UINT64_MAX;
+		server->watched_count = 0;
 
 		/* The pass's work starts now; its parts are told apart at its end if it runs long. */
 		perf_pass_begin(server);
@@ -1254,6 +1349,7 @@ event_loop(
 		part = kwl_cycles();
 		kwl_schedule(server);
 		server->perf.schedule_cycles += kwl_cycles() - part;
+		server->schedule_left = server->dirty || server->damaged;
 
 		/*
 		 * One gone client's buffer released after the frame, only while the
@@ -1425,6 +1521,112 @@ kwl_perf_vk_outside(
 	/* The longest of the window. */
 	if (cycles > server->perf.vk_outside_max_cycles)
 		server->perf.vk_outside_max_cycles = cycles;
+}
+
+/*
+ * Lowers the time the event loop's wait ends at the latest to at_ms
+ * (kwl_milliseconds' clock; 0 or a time past: at once).  A part of the
+ * compositor whose work comes with time, not with an event, calls it on
+ * every pass while the work waits.
+ */
+void
+kwl_due(
+	struct kwl_server *server,
+	uint64_t at_ms)
+{
+	/* The earliest wins. */
+	if (at_ms < server->due_ms)
+		server->due_ms = at_ms;
+}
+
+/*
+ * Asks for the next pass within KWL_DUE_SOON_MS: for work that follows
+ * time closely (a state looked at again and again while it lasts), as the
+ * loop's passes always came before.
+ */
+void
+kwl_due_soon(
+	struct kwl_server *server)
+{
+	/* One step of the old pace. */
+	kwl_due(server, kwl_milliseconds() + KWL_DUE_SOON_MS);
+}
+
+/*
+ * Asks for a pass just after the wall clock's next minute (a clock shown
+ * turns over then): the time to it is taken from the real-time clock and
+ * counted on kwl_milliseconds' clock.
+ */
+void
+kwl_due_next_minute(
+	struct kwl_server *server)
+{
+	struct timespec wall;
+	uint64_t into;
+	uint64_t left;
+
+	/* The milliseconds into the present minute. */
+	if (clock_gettime(CLOCK_REALTIME, &wall) != 0) {
+		kwl_due(server, kwl_milliseconds() + 1000U);
+		return;
+	}
+	into = (uint64_t)(wall.tv_sec % 60) * 1000U + (uint64_t)wall.tv_nsec / 1000000U;
+
+	/* The rest of it, and a little more so that the minute has turned. */
+	left = 60000U - into;
+	kwl_due(server, kwl_milliseconds() + left + KWL_MINUTE_LATE_MS);
+}
+
+/*
+ * Adds a descriptor a part reads without waiting on every pass to the
+ * event loop's next wait (for events, POLLIN and POLLOUT), so that what
+ * comes on it ends the wait; with no room left the loop comes back soon.
+ */
+void
+kwl_watch(
+	struct kwl_server *server,
+	int descriptor,
+	short events)
+{
+	/* Nothing to wait for. */
+	if (descriptor < 0 || events == 0)
+		return;
+
+	/* No room: the old pace instead. */
+	if (server->watched_count >= KWL_WATCH_MAX) {
+		kwl_due_soon(server);
+		return;
+	}
+
+	/* The descriptor joins the next wait. */
+	server->watched[server->watched_count].fd = descriptor;
+	server->watched[server->watched_count].events = events;
+	server->watched[server->watched_count].revents = 0;
+	server->watched_count++;
+}
+
+/*
+ * Works out the event loop's wait (milliseconds for poll, -1 for none)
+ * from the time its work without an event is due, rounded up so that the
+ * work is due when the wait ends.
+ */
+static int
+loop_timeout(
+	struct kwl_server *server)
+{
+	uint64_t now;
+
+	/* Nothing due: the wait lasts until an event. */
+	if (server->due_ms == UINT64_MAX)
+		return -1;
+
+	/* Due already: no wait; later: until then. */
+	now = kwl_milliseconds();
+	if (server->due_ms <= now)
+		return 0;
+	if (server->due_ms - now > (uint64_t)INT_MAX)
+		return INT_MAX;
+	return (int)(server->due_ms - now);
 }
 
 /* Prints the loop's timing every five seconds and starts a new window. */

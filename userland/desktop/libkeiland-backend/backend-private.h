@@ -124,6 +124,7 @@ void kl_backend_threads(struct kl_backend_threads *threads);
  * reads what its manager sent and keeps its deadlines.
  */
 void kl_backend_session_tick(struct kl_backend *backend, uint64_t now_ms);
+int kl_backend_session_wait(const struct kl_backend *backend, uint64_t *due_ms);
 
 /*
  * Sends one request line to the session's manager and remembers which

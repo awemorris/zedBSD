@@ -32,6 +32,7 @@
 
 #include "language.h"
 #include "machine-wait.h"
+#include "threads.h"
 
 #include "userland/desktop/libkeiland/system/kl-system-protocol.h"
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
@@ -81,6 +82,8 @@ struct machine_job {
 	size_t mount_count;
 	unsigned mounts_skipped;
 	int mounts_error;
+	/* The event loop's wake pipe (its write end), written when the job is done. */
+	int wake;
 };
 
 /*
@@ -242,10 +245,12 @@ kwl_machine_tick(
 		return;
 	}
 
-	/* Still within its time. */
+	/* Still within its time: looked at again when it runs out. */
 	now = kwl_milliseconds();
-	if (now - machine_state.started_ms < MACHINE_STALL_MS)
+	if (now - machine_state.started_ms < MACHINE_STALL_MS) {
+		kwl_due(server, machine_state.started_ms + MACHINE_STALL_MS);
 		return;
+	}
 
 	/*
 	 * Given up: the thread frees the job when it ends (the job is not
@@ -332,6 +337,7 @@ machine_begin(
 		return;
 	}
 	job->what = what;
+	job->wake = server->wake[1];
 
 	/* The thread, detached: nobody joins it, the job tells its end. */
 	error = kwl_thread_start_detached(MACHINE_THREAD, machine_run, job);
@@ -395,6 +401,9 @@ machine_run(
 		return NULL;
 	}
 	job->done = 1U;
+
+	/* The event loop takes the answers at once (under the lock: a job given up at the close wakes nothing). */
+	kwl_thread_wake(job->wake);
 	(void)pthread_mutex_unlock(&machine_lock);
 
 	/* Succeeded: the event loop answers from the job; the thread leaves the register. */

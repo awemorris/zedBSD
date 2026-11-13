@@ -186,10 +186,12 @@ kwl_volume_tick(
 		}
 	}
 
-	/* A volume a drag held back. */
+	/* A volume a drag held back (sent on the clock). */
 	now = kwl_milliseconds();
 	if (volume_view.send_waiting && now - volume_view.sent_ms >= VOLUME_SEND_MS)
 		volume_send(server);
+	if (volume_view.send_waiting)
+		kwl_due(server, volume_view.sent_ms + VOLUME_SEND_MS);
 }
 
 /*

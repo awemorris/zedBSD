@@ -427,6 +427,22 @@ kwl_touchpad_tick(
 }
 
 /*
+ * Tells when kwl_touchpad_tick has work next (kwl_milliseconds' clock): the
+ * end of a tap's drag time, or UINT64_MAX when nothing waits for time.
+ */
+uint64_t
+kwl_touchpad_due(
+	const struct kwl_touchpad *pad)
+{
+	/* Only a tap waiting for its drag waits for time. */
+	if (pad->tap == KWL_TOUCHPAD_TAP_PENDING)
+		return pad->tap_deadline_ms;
+
+	/* Nothing waits. */
+	return UINT64_MAX;
+}
+
+/*
  * Lets every button the pad holds go and gives up a gesture under way (the
  * device is going away).
  */

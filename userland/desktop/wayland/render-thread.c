@@ -17,14 +17,12 @@
 
 #include "render-thread.h"
 
+#include <signal.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-/* How long the thread sleeps between its checks of the main thread's requests while it waits, in milliseconds. */
-#define RENDER_WAIT_MS		100U
 
 static void *render_main(void *argument);
 static enum kwl_render_step render_idle(struct kwl_render_thread *render);
@@ -137,10 +135,16 @@ int
 kwl_render_start(
 	struct kwl_render_thread *render)
 {
+	sigset_t signals_all;
+	sigset_t signals_before;
 	int error;
 
 	/* The thread steps until it is asked to stop. */
+	/* The thread blocks every signal: the stops and a child's end go to the event loop's thread. */
+	(void)sigfillset(&signals_all);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_all, &signals_before);
 	error = pthread_create(&render->thread, NULL, render_main, render);
+	(void)pthread_sigmask(SIG_SETMASK, &signals_before, NULL);
 	if (error != 0)
 		return error;
 
@@ -648,7 +652,6 @@ render_main(
 	void *argument)
 {
 	struct kwl_render_thread *render;
-	struct timespec deadline;
 	enum kwl_render_step step;
 
 	/* Step after step. */
@@ -660,12 +663,16 @@ render_main(
 		if (step == KWL_RENDER_STEP_WORKED)
 			continue;
 
-		/* Blocked: the next change the main thread makes, looked at every 100 ms at most. */
-		render_deadline(&deadline, RENDER_WAIT_MS);
+		/*
+		 * Blocked: the next change the main thread makes (every change
+		 * signals; a job or a task in flight is never blocked, its fence
+		 * is waited for in the steps).  An image taken ahead that was not
+		 * free is taken with the next frame's want instead.
+		 */
 		pthread_mutex_lock(&render->lock);
 
-		if (render->sequence == render->seen_sequence)
-			(void)pthread_cond_timedwait(&render->changed, &render->lock, &deadline);
+		while (render->sequence == render->seen_sequence)
+			(void)pthread_cond_wait(&render->changed, &render->lock);
 
 		pthread_mutex_unlock(&render->lock);
 	}

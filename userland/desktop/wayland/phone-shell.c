@@ -320,6 +320,7 @@ static void phone_answer(struct phone_pending *pending, const struct kl_backend_
 static void phone_items(struct kwl_server *server);
 static void phone_sents(uint64_t now);
 static int phone_sent_match(uint32_t sent_request, unsigned state);
+static void phone_due(struct kwl_server *server);
 static void phone_held_check(uint64_t now);
 static void phone_sync_next(uint64_t now);
 static void phone_unavailable(void);
@@ -530,6 +531,29 @@ kwl_phone_tick(
 	phone_held_check(now);
 	phone_sync_next(now);
 	phone_owed_flush();
+
+	/* A held state and a waiting sync are given up when their time runs out. */
+	phone_due(server);
+}
+
+/* Tells the event loop when a held state or a waiting sync runs out of time. */
+static void
+phone_due(
+	struct kwl_server *server)
+{
+	unsigned index;
+
+	/* Each held state. */
+	for (index = 0U; index < PHONE_HELD_MAX; index++) {
+		if (phone_state.held[index].used)
+			kwl_due(server, phone_state.held[index].at_ms + PHONE_HOLD_MS);
+	}
+
+	/* Each sync waiting. */
+	for (index = 0U; index < PHONE_SLOTS; index++) {
+		if (phone_state.slots[index].object != NULL && phone_state.slots[index].sync_waiting)
+			kwl_due(server, phone_state.slots[index].sync_since_ms + PHONE_SYNC_WAIT_MS);
+	}
 }
 
 /*

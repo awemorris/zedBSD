@@ -555,9 +555,11 @@ kwl_system_tick(
 		system_power_read(server);
 	}
 
-	/* A step of a saved key the system bar's request held up. */
+	/* A step of a saved key the system bar's request held up (tried again each pass while it stays held up). */
 	if (system_state.wait.stage == SYSTEM_NETWORK_RETRY)
 		system_network_step(server, system_state.wait.request);
+	if (system_state.wait.stage == SYSTEM_NETWORK_RETRY)
+		kwl_due_soon(server);
 
 	/* An asking for scans not asked again for a minute ends (ws089-p021). */
 	system_scanning_expire(server);
@@ -1527,8 +1529,12 @@ system_scanning_expire(
 		for (object = client->objects; object != NULL; object = object->next) {
 			if (object->kind != KWL_SYSTEM_NETWORK || object->dead)
 				continue;
-			if (object->network_scanning == 0U || now < object->network_scanning_until)
+			if (object->network_scanning == 0U)
 				continue;
+			if (now < object->network_scanning_until) {
+				kwl_due(server, object->network_scanning_until);
+				continue;
+			}
 
 			/* Its minute ran out without its asking again. */
 			printf("KWL SYSTEM scanning expired client=%llu id=%u\n", (unsigned long long)client->number, object->id);
@@ -2603,8 +2609,10 @@ system_enrolled_tick(
 	if (!system_state.enrolled_wanted || system_state.enrolled_asked || !server->handed_over)
 		return;
 	error = kl_backend_session_enrolled(server->backend);
-	if (error == EBUSY)
+	if (error == EBUSY) {
+		kwl_due_soon(server);
 		return;
+	}
 	system_state.enrolled_wanted = 0U;
 	if (error == 0)
 		system_state.enrolled_asked = 1U;

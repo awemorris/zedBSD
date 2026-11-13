@@ -374,10 +374,12 @@ audio_poll_fill(
 	/* The thread's own part of the record. */
 	record = owner;
 
-	/* No connection: the next try is due within the tick. */
+	/* No connection: the wait ends when the next try is due. */
 	if (record->inner.socket < 0 || capacity == 0U) {
 		now = audio_milliseconds();
-		if (record->inner.retry_ms > now && record->inner.retry_ms - now < (uint64_t)*timeout)
+		if (record->inner.retry_ms <= now)
+			*timeout = 0;
+		else if (record->inner.retry_ms - now < (uint64_t)*timeout)
 			*timeout = (int)(record->inner.retry_ms - now);
 		return 0U;
 	}

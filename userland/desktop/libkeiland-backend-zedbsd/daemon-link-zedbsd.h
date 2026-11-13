@@ -21,12 +21,14 @@
  * something new it writes one byte to the compositor's wake pipe, so the
  * event loop's next update finds it at once.  Between steps the thread
  * waits in poll for its connections, its own pipe (an operation given or
- * the stop) and at most a tick, which drives the protocol's timers.
+ * the stop) and the protocol's next timer, and for nothing else: with no
+ * timer due it waits until one of them wakes it.
  */
 
 #ifndef KL_BACKEND_DAEMON_LINK_H
 #define KL_BACKEND_DAEMON_LINK_H
 
+#include <limits.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stddef.h>
@@ -34,8 +36,11 @@
 /* The most descriptors a link's step waits for, besides the link's own pipe. */
 #define KL_DAEMON_LINK_POLL_MAX	8U
 
-/* The longest wait between two steps, in milliseconds: the protocols' timers are a second or more. */
-#define KL_DAEMON_LINK_TICK_MS	250
+/*
+ * The wait a protocol's poll_fill is given (milliseconds): no timer.  It
+ * lowers it to its next timer; a wait left at this value has no end.
+ */
+#define KL_DAEMON_LINK_NO_TIMER	INT_MAX
 
 /* The longest name of a link's thread, with its terminating zero. */
 #define KL_DAEMON_LINK_NAME	16U
@@ -47,8 +52,10 @@ struct kl_daemon_link_op;
  *
  * step moves the protocol: it reads what came, connects again when it is
  * time, writes what waits and keeps the timers.  poll_fill gives the
- * descriptors the next wait is to wake for (at most capacity) and may lower
- * *timeout (milliseconds, KL_DAEMON_LINK_TICK_MS on entry).  publish runs
+ * descriptors the next wait is to wake for (at most capacity) and lowers
+ * *timeout (milliseconds, KL_DAEMON_LINK_NO_TIMER on entry) to its next
+ * timer, so that every timer the step keeps is due when the wait ends
+ * (step is called after every wait, whatever ended it).  publish runs
  * under the lock: it copies to the event loop's side what changed and moves
  * there what waits to be taken, and returns 1 when the event loop has
  * something new.  All three get the owner given to kl_daemon_link_start.
