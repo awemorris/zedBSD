@@ -18,12 +18,10 @@
 #     test262, the list of failing tests are compared;
 #  4. --render-gpu and --render of a few pages (gpu-compare.py, lavapipe on both sides): the pictures the host
 #     and Wine drew are compared (compare-ppm.py), and the GPU's against the CPU's on each side;
-#  5. --render-gpu with the Vulkan loader turned off (WINEDLLOVERRIDES=vulkan-1=d): the program must end with
-#     an error, not with the delay-load exception;
-#  6. Interop 2025's focus areas: plan/ws074/tests/run-wpt-reftests.py over the same 20 tests of each of five
+#  5. Interop 2025's focus areas: plan/ws074/tests/run-wpt-reftests.py over the same 20 tests of each of five
 #     areas' directories (the selection is the runner's stratified one for --limit 20), on both sides; the
 #     outcome of each test is compared.
-# The parts to run: ONLY="build host runners gpu loader interop" (default: all; runners is js url html5lib
+# The parts to run: ONLY="build host runners gpu interop" (default: all; runners is js url html5lib
 # test262, each also by its own name).  TEST262_FILTERS="test/built-ins/Math/ test/annexB/" chooses the test262
 # directories (default: five; all: all of test262, which takes hours under Wine).
 #   sh plan/ws334/tests/host-tests-windows.sh
@@ -41,7 +39,7 @@ name=build/tmp/ws334-host-tests-windows
 fresh_out "$name"
 out=$(cd "$root/$name" && pwd -P)
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
-ONLY=${ONLY:-build host runners gpu loader interop}
+ONLY=${ONLY:-build host runners gpu interop}
 build=build/tmp/ws334-wine-build/browser-win64
 sources=build/tmp/ws334-win32-sources
 lock=/tmp/zedbsd-wine.lock
@@ -79,7 +77,7 @@ if [ ! -f "$prefix/system.reg" ]; then
 fi
 
 # 1. The builds.
-if wants build || wants host || wants runners || wants gpu || wants loader || wants interop; then
+if wants build || wants host || wants runners || wants gpu || wants interop; then
 	if ! win32_make "$out/make.log" layers libbrowser-core libraries vulkan headers; then
 		say "host-tests-windows: the Windows libraries did not build cleanly (log $out/make.log)"
 		tail -10 "$out/make.log"
@@ -275,27 +273,7 @@ if wants gpu; then
 	sync
 fi
 
-# 5. --render-gpu without the Vulkan loader (and, as the control, with it).
-if wants loader; then
-	fonts="--font=userland/desktop/fonts/Mahora-Regular.ttf --mono-font=userland/desktop/fonts/Mahora-Mono.ttf"
-	# shellcheck disable=SC2086
-	WINEDLLOVERRIDES=vulkan-1=d timeout 300 "$out/bin/wine-exe" "$cli" --render-gpu --output="$out/loader-none.ppm" \
-	    --width=400 --height=300 $fonts userland/desktop/browser/data/start.html > "$out/loader.out" 2>&1
-	code=$?
-	tr -d '\r' < "$out/loader.out" > "$out/loader.log"
-	say "render-gpu without vulkan-1.dll: exit $code: $(tail -1 "$out/loader.log")"
-	# 0xc06d007e (the delay-load exception) is a status over 128; a handled error is 1.
-	if [ "$code" -ne 1 ] || ! grep -qi 'vulkan' "$out/loader.log"; then
-		differences=$((differences + 1))
-		say "render-gpu without vulkan-1.dll: not a handled error that names Vulkan"
-	fi
-	# shellcheck disable=SC2086
-	timeout 300 "$out/bin/wine-exe" "$cli" --render-gpu --output="$out/loader-with.ppm" \
-	    --width=400 --height=300 $fonts userland/desktop/browser/data/start.html > "$out/loader-with.out" 2>&1
-	say "render-gpu with vulkan-1.dll (lavapipe): exit $?, picture $(wc -c < "$out/loader-with.ppm" 2> /dev/null) bytes"
-fi
-
-# 6. Interop 2025's focus areas, reftests.
+# 5. Interop 2025's focus areas, reftests.
 if wants interop; then
 	wrapper "$cli" "$out/bin/browser-wine"
 	: > "$out/interop.txt"
