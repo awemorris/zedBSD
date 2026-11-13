@@ -103,7 +103,8 @@ static struct shot_state shot = { -1, { 0 }, -1, SHOT_IDLE, 0, VK_NULL_HANDLE, V
  * start until the event loop takes the sending back), the header and the
  * pixels copied out of the buffer, and what came of it.  lock guards done
  * and sent, which the sender writes last; the event loop joins the sender
- * once done is set (SHOT_SENDING until then).
+ * once done is set (SHOT_SENDING until then).  wake is the event loop's
+ * wake pipe, which the sender writes once it is done.
  */
 struct shot_send {
 	struct kwl_thread thread;
@@ -116,6 +117,7 @@ struct shot_send {
 	uint32_t height;
 	size_t sent;
 	unsigned done;
+	int wake;
 };
 
 /* The sending under way, while the stage is SHOT_SENDING. */
@@ -130,7 +132,7 @@ static void shot_pointer(struct kwl_server *server, int connection);
 static void shot_finish(struct kwl_server *server, const char *error);
 static int shot_buffer(struct kwl_compose *compose);
 static void shot_buffer_free(struct kwl_compose *compose);
-static int shot_send_start(int connection, const char *header, const void *pixels, size_t size);
+static int shot_send_start(int connection, const char *header, const void *pixels, size_t size, int wake);
 static void *shot_send_run(void *argument);
 static int shot_send_end(struct kwl_server *server, unsigned wait);
 
@@ -270,12 +272,10 @@ kwl_shot_tick(
 	int sending;
 	int error;
 
-	/* A sending of pixels under way holds the next request back until it has ended (looked at soon again). */
+	/* A sending of pixels under way holds the next request back until it has ended (its end wakes the loop). */
 	sending = shot_send_end(server, 0U);
-	if (sending) {
-		kwl_due_soon(server);
+	if (sending)
 		return;
-	}
 
 	/* A request whose frame did not come (its frame wakes the loop; its time runs out on the clock). */
 	now = kwl_milliseconds();
@@ -498,7 +498,7 @@ kwl_shot_complete(
 	    server->compose->rotation, server->compose->scanout_rotation, server->compose->turn_rotation);
 
 	/* The sender takes the connection and a copy of the pixels; the buffer is given back below. */
-	error = shot_send_start(shot.client, header, map, (size_t)shot.size);
+	error = shot_send_start(shot.client, header, map, (size_t)shot.size, server->wake[1]);
 	if (error == 0) {
 		vkUnmapMemory(server->compose->device, shot.memory);
 		shot.client = -1;
@@ -864,15 +864,17 @@ shot_pointer(
 
 /*
  * Starts the sender of one frame: a copy of the pixels, the header and the
- * connection go to its thread.  Returns 0, or ENOMEM or the thread's errno
- * value (the caller then still owns the connection).
+ * connection go to its thread, which writes wake (the event loop's wake
+ * pipe) once it is done.  Returns 0, or ENOMEM or the thread's errno value
+ * (the caller then still owns the connection).
  */
 static int
 shot_send_start(
 	int connection,
 	const char *header,
 	const void *pixels,
-	size_t size)
+	size_t size,
+	int wake)
 {
 	int error;
 
@@ -886,6 +888,7 @@ shot_send_start(
 	shot_sending.width = shot.width;
 	shot_sending.height = shot.height;
 	shot_sending.connection = connection;
+	shot_sending.wake = wake;
 	(void)snprintf(shot_sending.header, sizeof(shot_sending.header), "%s", header);
 
 	/* The lock of what the sender reports. */
@@ -938,6 +941,9 @@ shot_send_run(
 	send->done = 1U;
 
 	pthread_mutex_unlock(&send->lock);
+
+	/* The event loop's poll returns and its pass joins the sender. */
+	kwl_thread_wake(send->wake);
 
 	/* The thread ends. */
 	return NULL;

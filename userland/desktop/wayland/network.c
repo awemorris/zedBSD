@@ -408,6 +408,9 @@ kwl_network_tick(
 		} else {
 			network_finished(server, request, error);
 		}
+
+		/* The daemon takes a request again: the extension's step held up for it goes now (system.c). */
+		kwl_system_network_free(server);
 	}
 
 	/* Something shown has changed. */

@@ -633,3 +633,16 @@ kl_backend_wakes(
 	(void)backend;
 	return 0;
 }
+
+/*
+ * Tells whether the backend tells every input device that comes or goes:
+ * no, FreeBSD's devices are found by the compositor's own scans.
+ */
+int
+kl_backend_input_events(
+	const struct kl_backend *backend)
+{
+	/* The compositor scans on its own. */
+	(void)backend;
+	return 0;
+}

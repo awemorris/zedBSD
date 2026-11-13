@@ -319,23 +319,6 @@ kwl_transition_request(
 }
 
 /*
- * Ends the frame in flight when its fence fd became readable.
- */
-void
-kwl_frame_done(
-	struct kwl_server *server)
-{
-	int error;
-
-	/* The frame's held buffers and callbacks are released. */
-	error = kwl_compose_complete(server);
-	if (error != 0) {
-		kwl_fatal("KWL FAILED site=frame_done errno=%d", error);
-		server->failed = 1;
-	}
-}
-
-/*
  * Returns the topmost mapped window of a live client, or NULL.
  */
 struct kwl_object *

@@ -138,7 +138,10 @@ typedef void kwl_cursor_box_move_fn(const void *context, const struct kwl_plane_
  * no Vulkan until the park ends) or to stop.  The cursor thread writes
  * whether it failed (it then calls no Vulkan again), how many of its copies
  * read each of the two copies (pins: the main thread writes only a copy
- * with none that the box does not show), and its counts.  sequence counts
+ * with none that the box does not show), and its counts.  copy_wanted is
+ * the main thread's note that it found both copies in use: the cursor
+ * thread clears it and wakes the main thread when it lets go of a copy's
+ * last pin, so the main thread writes the copy then.  sequence counts
  * every change the cursor thread waits for; answered signals the main
  * thread.
  *
@@ -162,6 +165,7 @@ struct kwl_cursor_box {
 	unsigned failed;
 	const struct kwl_import *copies[KWL_CURSOR_COPIES];
 	unsigned pins[KWL_CURSOR_COPIES];
+	unsigned copy_wanted;
 	struct kwl_cursor_stats stats;
 	int32_t x;
 	int32_t y;

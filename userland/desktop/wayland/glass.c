@@ -221,7 +221,8 @@ struct glass_prefetch {
  * The picture is drawn at the output's size and blurred on the blur
  * thread (struct glass_blur_job); answer says the settings' request waits
  * for it, resize that it is the output's new size's (only logged), and
- * started_ms when it was asked for.
+ * started_ms when it was asked for.  wake is the event loop's wake pipe,
+ * which the thread writes once it is done.
  */
 struct glass_loader {
 	pthread_t thread;
@@ -235,6 +236,7 @@ struct glass_loader {
 	int error;
 	int done;
 	int started;
+	int wake;
 };
 
 /*
@@ -871,10 +873,6 @@ kwl_glass_blur_take(
 				blur_submit(server, &picture, glass_loader.path, glass_loader.answer, glass_loader.resize, glass_loader.started_ms);
 			}
 		}
-
-		/* The loader tells its end with nothing but the flag: looked at soon while it reads. */
-		if (!done)
-			kwl_due_soon(server);
 	}
 
 	/* The drawings made. */
@@ -2140,6 +2138,9 @@ loader_run(
 
 	(void)pthread_mutex_unlock(&glass_loader.lock);
 
+	/* The event loop's poll returns and its pass joins the thread. */
+	kwl_thread_wake(glass_loader.wake);
+
 	/* Succeeded: the thread ends. */
 	return NULL;
 }
@@ -2177,9 +2178,9 @@ loader_start(
 		path = "-";
 	}
 
-	/* The path, what its result is for, and nothing read yet. */
-	(void)server;
+	/* The path, what its result is for, whom to wake at the end, and nothing read yet. */
 	(void)snprintf(glass_loader.path, sizeof(glass_loader.path), "%s", path);
+	glass_loader.wake = server->wake[1];
 	glass_loader.answer = answer;
 	glass_loader.resize = resize;
 	glass_loader.started_ms = kwl_milliseconds();

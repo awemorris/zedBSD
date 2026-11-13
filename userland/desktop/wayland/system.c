@@ -92,7 +92,7 @@
 #define SYSTEM_NETWORK_SAVING	3U	/* the file I/O thread saves the key */
 #define SYSTEM_NETWORK_PROFILES	4U	/* the daemon is told the saved networks changed */
 #define SYSTEM_NETWORK_JOINING	5U	/* the network of the saved key is joined */
-#define SYSTEM_NETWORK_RETRY	6U	/* a step the system bar's request held up, sent again next pass */
+#define SYSTEM_NETWORK_RETRY	6U	/* a step the system bar's request held up, sent again when it is done */
 
 /*
  * The account's job on the file I/O thread (ws160-p002): what it does (a
@@ -529,8 +529,8 @@ kwl_system_request(
 
 /*
  * Looks after the extension once a pass: the power read at the start, the
- * threads' finished jobs and the next ones, a network step held up, and
- * the sound told when it changed.
+ * threads' finished jobs and the next ones, and the sound told when it
+ * changed.
  */
 void
 kwl_system_tick(
@@ -554,12 +554,6 @@ kwl_system_tick(
 		system_state.power_again = 0U;
 		system_power_read(server);
 	}
-
-	/* A step of a saved key the system bar's request held up (tried again each pass while it stays held up). */
-	if (system_state.wait.stage == SYSTEM_NETWORK_RETRY)
-		system_network_step(server, system_state.wait.request);
-	if (system_state.wait.stage == SYSTEM_NETWORK_RETRY)
-		kwl_due_soon(server);
 
 	/* An asking for scans not asked again for a minute ends (ws089-p021). */
 	system_scanning_expire(server);
@@ -663,6 +657,35 @@ kwl_system_network_done(
 
 	/* Succeeded: the answer was the extension's. */
 	return 1;
+}
+
+/*
+ * Sends again the step of a saved key the system bar's request held up,
+ * once the network daemon has answered a request (the daemon takes one at
+ * a time); a step held up again waits for the next answer.
+ */
+void
+kwl_system_network_free(
+	struct kwl_server *server)
+{
+	/* Only a step held up waits for this. */
+	if (system_state.wait.stage != SYSTEM_NETWORK_RETRY)
+		return;
+
+	/* The step, as it was asked. */
+	system_network_step(server, system_state.wait.request);
+}
+
+/*
+ * Asks sessiond again what was held up while another request waited for
+ * its answer, now that an answer came (sessiond takes one at a time).
+ */
+void
+kwl_system_session_free(
+	struct kwl_server *server)
+{
+	/* What the user has enrolled, when it is still wanted. */
+	system_enrolled_tick(server);
 }
 
 /*
@@ -2604,15 +2627,14 @@ system_enrolled_tick(
 	/*
 	 * Asked when wanted and not asked already, once the display has been
 	 * handed over (sessiond reads nothing of a session's before its READY);
-	 * a busy session manager is asked on a later pass.
+	 * while another request waits for sessiond's answer, it is asked when
+	 * that answer comes (kwl_system_session_free).
 	 */
 	if (!system_state.enrolled_wanted || system_state.enrolled_asked || !server->handed_over)
 		return;
 	error = kl_backend_session_enrolled(server->backend);
-	if (error == EBUSY) {
-		kwl_due_soon(server);
+	if (error == EBUSY)
 		return;
-	}
 	system_state.enrolled_wanted = 0U;
 	if (error == 0)
 		system_state.enrolled_asked = 1U;
@@ -2881,7 +2903,8 @@ system_network_details(
 
 /*
  * Sends a step of a saved key (the saved networks told, or the join); one
- * the system bar's request holds up is sent again next pass.
+ * the system bar's request holds up is sent again when that request is
+ * done (kwl_system_network_free).
  */
 static void
 system_network_step(
@@ -2907,7 +2930,7 @@ system_network_step(
 		named = wait->ssid;
 	error = kl_backend_network_request(watch, request, named);
 
-	/* Held up by the system bar's request: sent again next pass. */
+	/* Held up by the system bar's request: sent again when it is done. */
 	if (error == EBUSY) {
 		wait->stage = SYSTEM_NETWORK_RETRY;
 		wait->request = request;

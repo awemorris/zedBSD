@@ -268,6 +268,74 @@ kl_backend_media_busy(
 }
 
 /*
+ * Gives the running helpers' pipes for the host's poll and the seconds
+ * until the earliest time limit (kl_backend_media_update kills a helper
+ * whose limit passed).
+ */
+size_t
+kl_backend_media_poll(
+	const struct kl_backend_media *media,
+	struct pollfd *descriptors,
+	size_t capacity,
+	long *left_seconds)
+{
+	const struct media_job *job;
+	size_t count;
+	size_t index;
+	time_t now;
+	long left;
+
+	/* Nothing runs yet. */
+	*left_seconds = -1;
+	if (media == NULL)
+		return 0U;
+
+	/* Each running helper's pipes and its limit. */
+	count = 0U;
+	now = time(NULL);
+	for (index = 0U; index < MEDIA_JOBS_MAX; index++) {
+		job = &media->jobs[index];
+		if (job->id == 0U || job->done)
+			continue;
+
+		/* A request still being written: the pipe takes more when it has room. */
+		if (job->input >= 0 && job->sent < job->length) {
+			if (count < capacity) {
+				descriptors[count].fd = job->input;
+				descriptors[count].events = POLLOUT;
+				descriptors[count].revents = 0;
+			}
+			count++;
+		}
+
+		/* The answer, read as it comes (its end too). */
+		if (job->output >= 0) {
+			if (count < capacity) {
+				descriptors[count].fd = job->output;
+				descriptors[count].events = POLLIN;
+				descriptors[count].revents = 0;
+			}
+			count++;
+		}
+
+		/*
+		 * A running process is killed once more than its limit has passed
+		 * since its start: the second after that, counted from now.
+		 */
+		if (job->process <= 0)
+			continue;
+		left = (long)(job->started + job->limit + 1 - now);
+		if (left < 0)
+			left = 0;
+		if (*left_seconds < 0 || left < *left_seconds)
+			*left_seconds = left;
+	}
+
+	/* Reports how many pipes there are. */
+	return count;
+}
+
+/*
  * Takes one completed response, transferring descriptor ownership to the caller.
  */
 int

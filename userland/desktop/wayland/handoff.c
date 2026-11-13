@@ -31,6 +31,8 @@
 #include <poll.h>
 #include <stdio.h>
 
+static void handoff_answer_route(struct kwl_server *server, unsigned request, int error);
+
 /*
  * Says ready and waits to be let take the display, once, before it is
  * first taken.
@@ -160,7 +162,7 @@ kwl_handoff_stop(
 
 /*
  * The backend's session_answer: the manager's answer to the login or the
- * lock screen.
+ * lock screen, or to a request of another part.
  */
 void
 kwl_handoff_answer(
@@ -169,11 +171,26 @@ kwl_handoff_answer(
 	int error)
 {
 	struct kwl_server *server;
-	int taken;
-	int waiting;
 
 	/* The compositor the backend was opened for. */
 	server = data;
+
+	/* The answer goes to the part that asked. */
+	handoff_answer_route(server, request, error);
+
+	/* sessiond takes a request again: one that waited for that is sent now (system.c). */
+	kwl_system_session_free(server);
+}
+
+/* Gives sessiond's answer to the part that asked: the sleep, the system extension, or the login and lock screens. */
+static void
+handoff_answer_route(
+	struct kwl_server *server,
+	unsigned request,
+	int error)
+{
+	int taken;
+	int waiting;
 
 	/*
 	 * A sleep's answer is the sleep's (sleep.c), before the login and lock
