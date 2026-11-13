@@ -11,6 +11,8 @@
 
 ## ユーザーの決定
 
+- 2026-11-13 ユーザーから、次の趣旨の指示を受けた: GitHub の CI で、top で `make browser-win32` と 1 文字も違わない command だけで build が通るようにする（script で包まない、変数も渡さない）。CI の compiler は mingw-w64（gcc）。既定で build するのは x86_64（arm64 は llvm-mingw の時に WIN32_ARCH=aarch64）。
+
 - （2026-11-02 10:52）ユーザーから、WS335 の完了の後に、Windows 版のブラウザの OpenSSL を libssl-compat・libcrypto-compat（static link）に切り替え、OpenSSL への依存を無くす、という趣旨の指示を受けた。
 - 2026-10-31 ユーザーから、次の趣旨の指示を受けた。
   1. libbrowser のブラウザを Windows に移植する WS を作る。
