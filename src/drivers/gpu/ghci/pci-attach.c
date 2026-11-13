@@ -13,11 +13,12 @@
  * GPU's local memory, and whose one interrupt is a message (MSI-X or MSI)
  * or the INTx pin.
  *
- * The attach maps the windows only.  The interrupt is taken and bus
- * mastering turned on by the start (through ghci_bus_ops) once the GPU
- * has been reset, so that neither an interrupt nor a DMA a kernel before
- * this one left behind reaches this one.  Bus mastering that the firmware
- * left on (a boot display may be scanning through the GPU) is left on.
+ * The attach maps the register window and claims the local window only.
+ * The interrupt is taken and bus mastering turned on by the start
+ * (through ghci_bus_ops) once the GPU has been reset, so that neither an
+ * interrupt nor a DMA a kernel before this one left behind reaches this
+ * one.  Bus mastering that the firmware left on (a boot display may be
+ * scanning through the GPU) is left on.
  *
  * A host that offers no interrupt (the VisionFive 2's PLDA root complexes
  * take no message, and a function may have no INTx pin) leaves the device
@@ -69,8 +70,12 @@
 /* The register window the driver maps: one page, of which GHCI 1.0 uses the first 1 KiB. */
 #define REGISTER_BYTES			0x1000U
 
-/* The largest local window the driver maps. */
-#define WINDOW_BYTES_MAX		(1ULL << 30)
+/*
+ * What of the local window the driver maps: one page, only to learn where
+ * the window is on the processor's side.  The driver never reads or
+ * writes local memory through it.
+ */
+#define WINDOW_PLACE_BYTES		0x1000U
 
 /* The tries at letting the handler go while it may still run on another processor, a millisecond apart. */
 #define RELEASE_TRIES			1000U
@@ -81,14 +86,16 @@
 
 /*
  * The bus record of one function: the function, its mappings and its
- * interrupt, with the device it carries.  It lives from the attach to
- * the detach.
+ * interrupt, with the device it carries; window_claimed says the local
+ * window's BAR is claimed and its first page mapped (window_map).  It
+ * lives from the attach to the detach.
  */
 struct ghci_pci {
 	struct ghci_device device;
 	struct drv_pci_device *pci;
 	struct drv_pci_mapping register_map;
 	struct drv_pci_mapping window_map;
+	int window_claimed;
 	struct drv_pci_irq irq;
 	unsigned irq_count;
 	void *irq_cookie;
@@ -173,7 +180,7 @@ ghci_pci_match(
 	return DRV_PCI_MATCH_CLASS;
 }
 
-/* Maps the function's windows and starts the device. */
+/* Maps the register window, claims the local window and starts the device. */
 static int
 ghci_pci_attach(
 	struct drv_pci_device *pci,
@@ -204,7 +211,7 @@ ghci_pci_attach(
 		return error;
 	}
 
-	/* The local window when the function has one, how host memory is reached, and the bus master bit as found. */
+	/* Where the local window is when the function has one, how host memory is reached, and the bus master bit as found. */
 	map_window(bus);
 	choose_host_view(bus);
 	device->bus_master_found = bus_master_found(bus);
@@ -338,10 +345,18 @@ map_registers(
 }
 
 /*
- * Claims and maps BAR2, the local window, when there is one.
+ * Claims BAR2, the local window, when there is one, and records where it
+ * is on the processor's side: the console's ranges at its end name the
+ * whole BAR.  Only the first page is mapped, to learn that place: the
+ * window is for the boot framebuffer alone, which the boot console writes
+ * through a mapping of its own, and the driver keeps no view of it.
  *
  * The window is optional: a BAR2 the host left unplaced (it did not fit
  * the host's window) or could not map leaves the device without one.
+ *
+ * Procedure referenced: amaterrace-gpu fe6431b1 docs/ghci.md (section
+ * 11.1, the local window for the framebuffer only; every other access
+ * to memory made by the GPU).
  */
 static void
 map_window(
@@ -373,10 +388,10 @@ map_window(
 		return;
 	}
 
-	/* Maps it uncached, so that a write reaches the GPU's memory in program order. */
-	bytes = bar.size;
-	if (bytes > WINDOW_BYTES_MAX)
-		bytes = WINDOW_BYTES_MAX;
+	/* The first page, uncached, which gives the window's physical place; nothing accesses it. */
+	bytes = WINDOW_PLACE_BYTES;
+	if (bytes > bar.size)
+		bytes = bar.size;
 	error = drv_pci_device_map_bar_region(bus->pci,
 	    BAR_WINDOW,
 	    0U,
@@ -389,15 +404,11 @@ map_window(
 		return;
 	}
 
-	/* The whole BAR, not only the part mapped. */
+	/* Succeeded: the whole BAR, not only the page mapped, is the device's. */
 	bus->device.bars[bus->device.bar_count].physical = bus->window_map.physical_address;
 	bus->device.bars[bus->device.bar_count].bytes = bar.size;
 	bus->device.bar_count++;
-
-	/* Succeeded: the processor's view of the window and its physical place. */
-	bus->device.window = bus->window_map.address;
-	bus->device.window_physical = bus->window_map.physical_address;
-	bus->device.window_bytes = bytes;
+	bus->window_claimed = 1;
 }
 
 /*
@@ -562,11 +573,11 @@ release_bus(
 	/* The interrupt, if the start left it. */
 	(void)interrupt_release(&bus->device);
 
-	/* The local window. */
-	if (bus->device.window != NULL) {
+	/* The local window's BAR and its one page. */
+	if (bus->window_claimed) {
 		drv_pci_device_unmap_bar(bus->pci, &bus->window_map);
 		drv_pci_device_release_bar(bus->pci, BAR_WINDOW);
-		bus->device.window = NULL;
+		bus->window_claimed = 0;
 	}
 
 	/* The register window. */

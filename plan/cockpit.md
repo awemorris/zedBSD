@@ -10,7 +10,7 @@
 | P1 | — | 待機 | Pi 500 の報告の処理を返却（WS348・350 p001、BUG-425〜427、文書） | WS349 の design-reviewer と実装の Phase |
 | P2 | q2041 | 作業中 | BUG-424: VMD の suspend・resume、5330 で S0 idle と電力の再計測 | 次: WS299（5330 の NVMe、電力制御の実装待ちだった、2026-11-13 ユーザー） |
 | P3 | — | 待機 | WS347 依頼 07 の監査を返却（A15・B3）、依頼 08 を agy へ | agy の依頼 08 の 1 次回答の後に確かめ |
-| P4 | q2043 | 作業中 | WS347 p009: copy_by_processor の削除、host が local に GOP の VRAM 以外を書かない形の点検 | — |
+| P4 | — | 待機 | WS347 p009 cleared（host は local memory に GOP 以外触れない） | p004（VF2＋KC705 の実機） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
 | P7 | — | 待機 | WS335 p038（limbo の照合）は cleared 済み | — |

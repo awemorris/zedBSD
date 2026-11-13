@@ -14,10 +14,10 @@
  * registers: GHCI_MAGIC and the major version say it is GHCI 1.0, and the
  * capability registers and the extended capability list say what it has.
  * Nothing in the driver names a vendor or branches on a minor version.
- * The bus glue (pci-attach.c) maps the register window and the optional
- * local window and fills bus_ops, which the start calls to take the
- * interrupt and to turn on bus mastering once the GPU has been reset; it
- * then hands the device to ghci_device_start().  On a bus that delivers
+ * The bus glue (pci-attach.c) maps the register window, finds where the
+ * optional local window is, and fills bus_ops, which the start calls to
+ * take the interrupt and to turn on bus mastering once the GPU has been
+ * reset; it then hands the device to ghci_device_start().  On a bus that delivers
  * no interrupt of the GPU's the device is polled: a thread does the
  * interrupt handler's work every GHCI_POLL_MS, and IRQ_ENABLE stays zero.
  *
@@ -256,12 +256,11 @@ struct ghci_arena;
  *
  * bus is the address the GPU uses (on the platforms the driver knows,
  * the processor's physical address; for local memory, its local address),
- * bytes its size in whole pages, view the processor's kernel view (the
- * direct map, or an uncached mapping on a bus that does not snoop the
- * caches; for local memory, its place in the local window, or NULL when
- * the window does not show it, which only the driver's own accesses use
- * while they hold the window open) and run the RAM it is (unused for
- * local memory).  The allocation lives until its owner gives it back
+ * bytes its size in whole pages, view the processor's kernel view of
+ * host memory (the direct map, or an uncached mapping on a bus that does
+ * not snoop the caches; NULL for local memory, which the processor never
+ * reads or writes: the GPU reaches it, and copies to and from it) and run
+ * the RAM it is (unused for local memory).  The allocation lives until its owner gives it back
  * after the GPU is done with it; on a lost device it waits in the
  * quarantine instead.  holds counts what keeps a shared allocation (a
  * resource, an export, a mapping until its unmap's fence passed), and
@@ -469,13 +468,17 @@ struct ghci_rows {
  * side of a session's open and close, the memory a blob of an executor's
  * VkDeviceMemory shows, the completions the service thread retires, the
  * executor's own end at the detach, and a copy of rows in session 0 by
- * the driver's copy program.
+ * the driver's copy program with the check that it can make one.
  *
  *  - session_open fails only without memory and leaves nothing behind.
  *  - session_close cannot fail; it runs before the session's resources go.
  *  - memory_blob runs under the device's lock and returns the allocation
  *    of the session's VkDeviceMemory named by blob_id, or NULL.
  *  - service runs on the service thread and holds no lock of the device.
+ *  - copy_ready places the copy program in session 0 once and reports
+ *    whether copy_rows can make copies: 0, ENOTSUP when the compiler or
+ *    the pipeline state refuses the program (for good), ENOMEM, or EIO.
+ *    The caller holds no lock of the device.
  *  - copy_rows places the copy as the driver's own work and gives its
  *    ticket, which the caller waits for before it lets go of either side;
  *    the caller makes one copy at a time and holds no lock of the device.
@@ -489,6 +492,7 @@ struct ghci_executor_ops {
 	struct ghci_allocation *(*memory_blob)(struct ghci_device *device, struct ghci_session *session, uint64_t blob_id);
 	void (*service)(struct ghci_device *device);
 	void (*detach)(struct ghci_device *device);
+	int (*copy_ready)(struct ghci_device *device);
 	int (*copy_rows)(struct ghci_device *device, const struct ghci_rows *rows, struct ghci_ticket *ticket);
 };
 
@@ -699,20 +703,18 @@ struct ghci_bus_range {
 struct ghci_device {
 	/*
 	 * The bus, filled by the glue: its private record, its operations,
-	 * the register window, the local window, the function's IDs, whether
-	 * the device is polled, whether host memory is reached uncached (the
-	 * bus does not snoop the caches), whether bus mastering was on when
-	 * the driver found the function (a boot display may be using it), the
-	 * ring's size in bytes (0: GHCI_RING_BYTES), and the processor physical
-	 * ranges of the BARs mapped (bar_count of bars, each a whole BAR).
+	 * the register window, the function's IDs, whether the device is
+	 * polled, whether host memory is reached uncached (the bus does not
+	 * snoop the caches), whether bus mastering was on when the driver
+	 * found the function (a boot display may be using it), the ring's
+	 * size in bytes (0: GHCI_RING_BYTES), and the processor physical
+	 * ranges of the BARs claimed (bar_count of bars, each a whole BAR:
+	 * the register window and the local window).
 	 */
 	void *bus;
 	const struct ghci_bus_ops *bus_ops;
 	volatile uint8_t *registers;
 	uint32_t register_bytes;
-	volatile uint8_t *window;
-	uint64_t window_physical;
-	uint64_t window_bytes;
 	uint16_t pci_vendor;
 	uint16_t pci_device;
 	int polled;
@@ -805,10 +807,10 @@ struct ghci_device {
 	uint32_t boot_bytes[GHCI_BOOT_RANGES];
 
 	/*
-	 * The local window (irq_lock): window_users counts what of the driver
-	 * uses it (the kept boot framebuffer, which the boot console may
-	 * write through it, and each hold of the driver's own accesses), and
-	 * window_open is what the driver last wrote to WINDOW_CTRL.ENABLE:
+	 * The local window (irq_lock): window_users counts what uses it (the
+	 * kept boot framebuffer, which the boot console may write through it;
+	 * the driver itself never reaches local memory through the window),
+	 * and window_open is what the driver last wrote to WINDOW_CTRL.ENABLE:
 	 * open while window_users is not 0, closed otherwise.
 	 */
 	unsigned window_users;
@@ -953,10 +955,6 @@ int ghci_memory_local_start(struct ghci_device *device);
 void ghci_memory_local_stop(struct ghci_device *device);
 uint64_t ghci_memory_local_bytes(const struct ghci_device *device);
 void ghci_memory_boot_release(struct ghci_device *device);
-int ghci_memory_window_hold(struct ghci_device *device);
-void ghci_memory_window_unhold(struct ghci_device *device);
-int ghci_memory_local_read(struct ghci_device *device, const struct ghci_allocation *allocation, uint64_t offset, void *buffer, uint64_t bytes);
-int ghci_memory_local_write(struct ghci_device *device, const struct ghci_allocation *allocation, uint64_t offset, const void *buffer, uint64_t bytes);
 int ghci_memory_free(struct ghci_device *device, struct ghci_allocation *allocation);
 void ghci_memory_quarantine(struct ghci_device *device, struct ghci_allocation *allocation);
 void ghci_memory_release_quarantine(struct ghci_device *device);

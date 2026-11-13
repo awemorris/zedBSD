@@ -1072,22 +1072,30 @@ ghci_scan_sleep(
 }
 
 /*
- * Takes memory the controller scans, the device's own: local memory on a
- * discrete GPU, host memory below the GPU's limit otherwise, held by the
- * display.  Its address must fit the controller's 32 bits.  Returns 0, or
- * ENOMEM.
+ * Takes memory the controller scans, the device's own, held by the
+ * display: local memory on a discrete GPU when local is set (memory only
+ * the GPU writes), host memory below the GPU's limit otherwise (memory
+ * the processor writes, which the controller reads by DMA on a discrete
+ * GPU as well).  Its address must fit the controller's 32 bits.  Returns
+ * 0, or ENOMEM.
+ *
+ * Values referenced: amaterrace-gpu fe6431b1 docs/ghci.md (section 6.0,
+ * the scan-out addresses in local memory or below HOST_LIMIT in host
+ * memory; section 11.3, MEM's HOST_LIMIT: every address outside local
+ * memory routes to host memory).
  */
 int
 ghci_scan_alloc(
 	struct ghci_device *device,
 	uint64_t bytes,
+	int local,
 	struct ghci_allocation **result)
 {
 	struct ghci_allocation *memory;
 	int error;
 
-	/* Local memory on a discrete GPU, host memory otherwise. */
-	if (device->local_ready)
+	/* Local memory on a discrete GPU when asked for, host memory otherwise. */
+	if (local && device->local_ready)
 		error = ghci_memory_alloc_local(device, bytes, &memory);
 	else
 		error = ghci_memory_alloc(device, bytes, 0U, &memory);
@@ -1114,9 +1122,9 @@ ghci_scan_alloc(
 }
 
 /*
- * Writes bytes into memory the controller scans: through the processor's
- * view of host memory, or through the local window.  Returns 0, EINVAL for
- * a range outside the memory, or ENOTSUP when the window does not show it.
+ * Writes bytes into host memory the controller scans, through the
+ * processor's view.  Returns 0, EINVAL for a range outside the memory, or
+ * ENOTSUP for local memory, which the processor never writes.
  */
 int
 ghci_scan_write(
@@ -1126,17 +1134,15 @@ ghci_scan_write(
 	const void *bytes,
 	uint64_t length)
 {
-	int error;
+	(void)device;
 
 	/* A range inside the memory. */
 	if (offset > memory->bytes || length > memory->bytes - offset)
 		return EINVAL;
 
-	/* Local memory, through the window. */
-	if (memory->kind == GHCI_MEMORY_LOCAL) {
-		error = ghci_memory_local_write(device, memory, offset, bytes, length);
-		return error;
-	}
+	/* Local memory is the GPU's to write. */
+	if (memory->kind != GHCI_MEMORY_HOST)
+		return ENOTSUP;
 
 	/* Succeeded: host memory, through the view. */
 	kern_memcpy(memory->view + offset, bytes, (size_t)length);

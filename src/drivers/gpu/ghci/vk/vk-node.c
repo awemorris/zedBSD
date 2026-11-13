@@ -92,6 +92,7 @@ static const struct ghci_executor_ops executor_operations = {
 	ghci_vk_memory_blob,
 	ghci_vk_service,
 	node_detach,
+	ghci_vk_copy_ready,
 	ghci_vk_copy_rows
 };
 

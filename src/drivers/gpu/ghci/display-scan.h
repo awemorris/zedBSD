@@ -93,12 +93,12 @@ void ghci_scan_sleep(struct ghci_device *device, uint64_t mark, uint64_t deadlin
 
 /*
  * Takes memory the controller scans, the device's own: local memory on a
- * discrete GPU, host memory below 4 GiB otherwise.  The caller holds no
- * lock of the device.
+ * discrete GPU when local is set (memory only the GPU writes), host
+ * memory below 4 GiB otherwise.  The caller holds no lock of the device.
  */
-int ghci_scan_alloc(struct ghci_device *device, uint64_t bytes, struct ghci_allocation **result);
+int ghci_scan_alloc(struct ghci_device *device, uint64_t bytes, int local, struct ghci_allocation **result);
 
-/* Writes bytes into memory the controller scans; the caller may hold any lock but the interrupt's. */
+/* Writes bytes into host memory the controller scans; the caller may hold any lock but the interrupt's. */
 int ghci_scan_write(struct ghci_device *device, struct ghci_allocation *memory, uint64_t offset, const void *bytes, uint64_t length);
 
 #endif
