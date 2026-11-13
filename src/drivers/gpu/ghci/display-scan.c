@@ -1079,7 +1079,7 @@ ghci_scan_sleep(
  * GPU as well).  Its address must fit the controller's 32 bits.  Returns
  * 0, or ENOMEM.
  *
- * Values referenced: amaterrace-gpu fe6431b1 docs/ghci.md (section 6,
+ * Values referenced: amaterrace-gpu fe6431b1 docs/ghci.md (section 6.0,
  * the scan-out addresses in local memory or below HOST_LIMIT in host
  * memory; section 11.3, MEM's HOST_LIMIT: every address outside local
  * memory routes to host memory).

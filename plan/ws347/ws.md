@@ -71,4 +71,4 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 | [p007](phase007/phase.md) | 直した RTL で bitstream を作り直し、CAPS を実機で照合 | canceled（2026-11-11、RTL はユーザーが直す） | — |
 | [p005](phase005/phase.md) | 規約の全文の見直し | planned | p003・p004・p006 |
 | [p008](phase008/phase.md) | blitter の無い GPU で表示の copy の present を shader で写す（今は CPU が写す）。2026-11-13 の決定で CONFIG_GHCI_POLL・HOST_UNCACHED を外し、CLIP_POLY の shortfall を外す事を足した | cleared（2026-11-13 Q1、P4 q2030。main に merge） | p003 |
-| [p009](phase009/phase.md) | host が local memory に GOP の VRAM 以外を書かない形に: `copy_by_processor` の削除と、driver の local の窓の使い方の点検 | in-progress（2026-11-13 Q1、q2043-i01 P4） | p008 |
+| [p009](phase009/phase.md) | host が local memory に GOP の VRAM 以外を書かない形に: `copy_by_processor` の削除と、driver の local の窓の使い方の点検 | in-progress（2026-11-13 Q1、q2043-i01 P4。P4 の実装・host 試験 全 PASS・vf2・x86_64 warning 0、Q1 の判定待ち） | p008 |
