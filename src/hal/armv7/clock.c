@@ -161,6 +161,31 @@ armv7_clock_read(
 }
 
 /*
+ * Reports the tick's rate, which this timer runs at from boot and never
+ * changes.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	/* The rate the timer is programmed at. */
+	return ARMV7_TICK_HZ;
+}
+
+/*
+ * Keeps the tick's rate, which this timer cannot change, and reports it.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	UNUSED_PARAMETER(hz);
+
+	/* The rate the timer stays at. */
+	return ARMV7_TICK_HZ;
+}
+
+/*
  * Reads the counter and its frequency.
  *
  * The counter is the same on every processor and runs through every idle

@@ -9,14 +9,6 @@
 #define HAL_HAL_ARCH_X86_64_H
 
 /*
- * The periodic tick, in hertz.  Every time the kernel keeps is counted in
- * these ticks, and every conversion to and from milliseconds uses this value.
- * A slower tick lets idle packages reach their deep power states; a finer one
- * suits frame pacing on the desktop.
- */
-#define HAL_TIMER_FREQUENCY	(100U)
-
-/*
  * Signal Frame
  */
 

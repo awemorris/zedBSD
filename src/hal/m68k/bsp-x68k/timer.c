@@ -35,6 +35,9 @@
 #define MFP_VECTOR_BASE		0x40U
 #define MFP_TIMER_D_CONTROL	0x0fU
 
+/* The tick's rate, in hertz, which never changes. */
+#define X68K_TICK_HZ		100U
+
 /* The largest count timer C takes. */
 #define TIMER_DATA_MAX		255U
 
@@ -113,6 +116,31 @@ x68k_timer_init(
 
 	/* Starts timer C with the chosen prescaler. */
 	x68k_mfp_write(MFP_TCDCR, (uint8_t)((control & MFP_TIMER_D_CONTROL) | (best_control << 4)));
+}
+
+/*
+ * Reports the tick's rate, which this timer runs at from boot and never
+ * changes.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	/* The rate the timer is programmed at. */
+	return X68K_TICK_HZ;
+}
+
+/*
+ * Keeps the tick's rate, which this timer cannot change, and reports it.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	UNUSED_PARAMETER(hz);
+
+	/* The rate the timer stays at. */
+	return X68K_TICK_HZ;
 }
 
 /*

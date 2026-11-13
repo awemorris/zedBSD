@@ -75,6 +75,13 @@ struct riscv64_percpu {
 	uint64_t timer_ticks;
 
 	/*
+	 * How many periods of the fastest tick one of this hart's ticks spans
+	 * (hal_rtc_set_tick_hz()); 0 before its tick starts, which counts as 1.
+	 * Only the hart itself writes it, with interrupts off.
+	 */
+	uint64_t timer_divisor;
+
+	/*
 	 * Why other harts interrupted this one, one RISCV64_IPI_ bit each.
 	 * Senders set bits with an atomic or before raising the interrupt;
 	 * this hart takes them all with an atomic swap.

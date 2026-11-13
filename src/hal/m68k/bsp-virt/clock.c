@@ -36,8 +36,11 @@
 /* The clock's interrupt number: source 1 of the sixth controller. */
 #define RTC_IRQ			(1U + 5U * 32U)
 
+/* The tick's rate, in hertz, which never changes. */
+#define CLOCK_TICK_HZ		100U
+
 /* The nanoseconds of one tick. */
-#define TICK_NANOSECONDS	(RTC_FREQUENCY / HAL_TIMER_FREQUENCY)
+#define TICK_NANOSECONDS	(RTC_FREQUENCY / CLOCK_TICK_HZ)
 
 /* The count the next tick is due at; zero before the clock starts. */
 static uint64_t next_deadline;
@@ -139,6 +142,31 @@ virt_clock_ticked(
 
 	/* Failed: no tick in the time allowed. */
 	return false;
+}
+
+/*
+ * Reports the tick's rate, which this timer runs at from boot and never
+ * changes.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	/* The rate the timer is programmed at. */
+	return CLOCK_TICK_HZ;
+}
+
+/*
+ * Keeps the tick's rate, which this timer cannot change, and reports it.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	UNUSED_PARAMETER(hz);
+
+	/* The rate the timer stays at. */
+	return CLOCK_TICK_HZ;
 }
 
 /*

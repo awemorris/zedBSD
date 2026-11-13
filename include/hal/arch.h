@@ -98,11 +98,6 @@
  */
 #define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_NATIVE
 
-/*
- * A host test has no timer; it counts its tick in milliseconds.
- */
-#define HAL_TIMER_FREQUENCY	(1000U)
-
 #endif
 
 #if HAL_ATOMIC_STYLE != HAL_ATOMIC_STYLE_NATIVE && \

@@ -17,6 +17,9 @@
 #include <hal/types.h>
 #include "fdt.h"
 
+/* The scheduling tick's rate on every board, in hertz, which never changes. */
+#define ARMV7_TICK_HZ	1000U
+
 /*
  * The board's scheduling tick and counter.
  *

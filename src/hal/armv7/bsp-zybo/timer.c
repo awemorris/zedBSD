@@ -110,7 +110,7 @@ timer_init_boot(
 		return HAL_ERR_UNSUPPORTED;
 
 	/* The counts of one tick, which the private timer's load register holds less one. */
-	interval = timer_frequency / HAL_TIMER_FREQUENCY;
+	interval = timer_frequency / ARMV7_TICK_HZ;
 	if (interval < 2U || interval > 0xffffffffULL)
 		return HAL_ERR_UNSUPPORTED;
 	timer_interval = (uint32_t)interval;

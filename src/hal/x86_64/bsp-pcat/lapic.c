@@ -87,9 +87,15 @@
 /* CPUID leaf 1's ECX: the local APIC timer has the TSC-deadline mode. */
 #define CPUID_TSC_DEADLINE            (1U << 24)
 
+/* The fastest tick, in hertz, which every CPU starts at. */
+#define LAPIC_TICK_HZ_MAX             1000U
+
+/* The slowest tick, as the most periods of the fastest one a tick spans. */
+#define LAPIC_TICK_DIVISOR_MAX        100U
+
 /*
  * Whether the tick is timed by the TSC-deadline mode, with every CPU's
- * deadlines at the multiples of one tick period on the shared TSC.  Every
+ * deadlines at the multiples of its tick period on the shared TSC.  Every
  * CPU then takes its tick at the same moment and sleeps in the same gap,
  * so the package can stay in a deep state for most of the period; a
  * periodic timer started on each CPU at its own moment spreads the ticks
@@ -100,20 +106,35 @@
 #endif
 
 static volatile uint32_t *lapic;
-static uint32_t timer_initial;
 static uint32_t lapic_physical_address;
 
+/* The local APIC timer's count of the fastest tick's period; 0 before the calibration. */
+static uint32_t timer_base;
+
 /*
- * The TSC count of one tick when the TSC-deadline mode may time the tick,
- * else 0; chosen once on the BSP with the calibration.
+ * The TSC count of the fastest tick's period when the TSC-deadline mode
+ * may time the tick, else 0; chosen once on the BSP with the calibration.
  */
-static uint64_t tick_period_tsc;
+static uint64_t tick_base_tsc;
 
 /*
  * Which CPUs' ticks the TSC-deadline mode times now: each such CPU arms its
  * next deadline at every tick.  Only the CPU itself writes its entry.
  */
 static bool tick_deadline[AMD64_SMP_MAX_CPUS];
+
+/* Which CPUs' periodic timers run now.  Only the CPU itself writes its entry. */
+static bool tick_periodic[AMD64_SMP_MAX_CPUS];
+
+/*
+ * How many periods of the fastest tick one of each CPU's ticks spans
+ * (hal_rtc_set_tick_hz()); 0, before the CPU sets it, counts as 1.  A
+ * slower period is a whole number of the fastest, so with TSC deadlines a
+ * slow CPU's ticks fall on a fast one's.  Only the CPU itself writes its
+ * entry, with interrupts off; it is kept when the timer stops and starts
+ * again.
+ */
+static uint32_t tick_divisor[AMD64_SMP_MAX_CPUS];
 
 static uint32_t read_reg(unsigned offset);
 static void write_reg(unsigned offset, uint32_t value);
@@ -126,6 +147,8 @@ static int calibrate_timer(void);
 static void choose_tick_source(void);
 static bool cpu_has_tsc_deadline(void);
 static void arm_next_deadline(void);
+static uint32_t cpu_divisor(hal_cpu_id_t cpu);
+static uint32_t periodic_count(hal_cpu_id_t cpu);
 static int tsc_wait_window(uint64_t window_ticks, unsigned *polls, const char **stage, uint32_t *lapic_start, uint32_t *lapic_end);
 static int pit_wait_level(struct amd64_pit_poll *poll, int expected_high, uint8_t *last_port61);
 static int pit_wait_10ms(uint8_t *last_port61, unsigned *polls, const char **stage, int measure_tsc, uint64_t *tsc_start, uint64_t *tsc_end, uint32_t *lapic_start, uint32_t *lapic_end);
@@ -281,10 +304,11 @@ amd64_lapic_eoi(
 }
 
 /*
- * Starts the calibrated periodic local APIC timer.
+ * Starts the calibrated local APIC timer.
  *
  * The BSP calibrates the period once; every later call, on a secondary CPU
- * or after a system sleep, programs the same period.
+ * or after a system sleep, programs the same period at the rate the CPU
+ * last chose.
  */
 int
 amd64_lapic_timer_start(
@@ -295,7 +319,7 @@ amd64_lapic_timer_start(
 	int error;
 
 	/* Calibrates the shared timer period once on the BSP and chooses how ticks are timed. */
-	if (timer_initial == 0) {
+	if (timer_base == 0) {
 		error = calibrate_timer();
 		if (error != HAL_OK)
 			return error;
@@ -305,9 +329,10 @@ amd64_lapic_timer_start(
 	/* Times this CPU's tick by TSC deadlines when the BSP chose them and this CPU has the mode. */
 	cpu = hal_cpu_current();
 	deadline = false;
-	if (tick_period_tsc != 0U)
+	if (tick_base_tsc != 0U)
 		deadline = cpu_has_tsc_deadline();
 	tick_deadline[cpu] = deadline;
+	tick_periodic[cpu] = !deadline;
 
 	/*
 	 * Arms the first deadline at the next multiple of the period.  The
@@ -324,7 +349,7 @@ amd64_lapic_timer_start(
 	if (!deadline) {
 		write_reg(LAPIC_TIMER_DIVIDE, 0x3U);
 		write_reg(LAPIC_LVT_TIMER, LAPIC_PERIODIC | INT_IRQ_BASE);
-		write_reg(LAPIC_TIMER_INITIAL, timer_initial);
+		write_reg(LAPIC_TIMER_INITIAL, periodic_count(cpu));
 	}
 
 	/* Succeeded: the local timer is running. */
@@ -361,6 +386,7 @@ amd64_lapic_timer_stop(
 	 * pending does not write a deadline into a timer that is stopped.
 	 */
 	tick_deadline[hal_cpu_current()] = false;
+	tick_periodic[hal_cpu_current()] = false;
 
 	/*
 	 * Masks the timer vector before clearing its initial count.  Leaving
@@ -369,6 +395,72 @@ amd64_lapic_timer_stop(
 	 */
 	write_reg(LAPIC_LVT_TIMER, LAPIC_MASKED | INT_IRQ_BASE);
 	write_reg(LAPIC_TIMER_INITIAL, 0);
+}
+
+/*
+ * Reports the current CPU's tick rate.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	uint32_t divisor;
+	bool enabled;
+
+	/* Reads the CPU's entry with interrupts off, so the CPU cannot change under it. */
+	enabled = hal_irq_disable();
+	divisor = cpu_divisor(hal_cpu_current());
+	if (enabled)
+		hal_irq_enable();
+
+	/* Succeeded: the fastest rate over the periods a tick spans. */
+	return LAPIC_TICK_HZ_MAX / divisor;
+}
+
+/*
+ * Sets the current CPU's tick rate to the nearest whole number of the
+ * fastest tick's periods, from 1000 Hz down to 10 Hz, and reports it.
+ *
+ * With TSC deadlines the deadline already armed is moved at once to the
+ * next multiple of the new period, so neither a fast tick is left over
+ * after a slowdown nor a slow one waited for after a speedup.  A periodic
+ * timer counts the new period from now.  A stopped timer starts at the
+ * rate when it starts.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	hal_cpu_id_t cpu;
+	uint32_t divisor;
+	uint32_t before;
+	bool enabled;
+
+	/* The nearest number of periods, within the bounds. */
+	divisor = LAPIC_TICK_DIVISOR_MAX;
+	if (hz != 0U)
+		divisor = (LAPIC_TICK_HZ_MAX + hz / 2U) / hz;
+	if (divisor == 0U)
+		divisor = 1U;
+	if (divisor > LAPIC_TICK_DIVISOR_MAX)
+		divisor = LAPIC_TICK_DIVISOR_MAX;
+
+	/* Changes this CPU's period with interrupts off, so its tick cannot run between. */
+	enabled = hal_irq_disable();
+	cpu = hal_cpu_current();
+	before = cpu_divisor(cpu);
+	tick_divisor[cpu] = divisor;
+
+	/* Applies it to the timer that runs. */
+	if (tick_deadline[cpu] && divisor != before)
+		arm_next_deadline();
+	if (tick_periodic[cpu] && divisor != before)
+		write_reg(LAPIC_TIMER_INITIAL, periodic_count(cpu));
+	if (enabled)
+		hal_irq_enable();
+
+	/* Succeeded: the rate the tick now runs at. */
+	return LAPIC_TICK_HZ_MAX / divisor;
 }
 
 /*
@@ -879,10 +971,10 @@ calibrate_timer(
 	/*
 	 * Publishes APIC calibration before optional PIT TSC completion.
 	 * A window is a TIMER_CAL_WINDOWS_PER_SECOND-th of a second; the
-	 * period is scaled to the HAL tick rate.
+	 * period is the fastest tick's.
 	 */
-	timer_initial = (uint32_t)(((uint64_t)elapsed * TIMER_CAL_WINDOWS_PER_SECOND) /
-	    HAL_TIMER_FREQUENCY);
+	timer_base = (uint32_t)(((uint64_t)elapsed * TIMER_CAL_WINDOWS_PER_SECOND) /
+	    LAPIC_TICK_HZ_MAX);
 	if (measure_tsc) {
 		amd64_timecounter_pit_complete(
 			tsc_start,
@@ -890,9 +982,9 @@ calibrate_timer(
 			PIT_INPUT_HZ,
 			PIT_CAL_TICKS);
 	}
-	hal_printf("A64 TIMER CAL READY ticks=%u\n", timer_initial);
+	hal_printf("A64 TIMER CAL READY ticks=%u\n", timer_base);
 
-	/* Succeeded: timer_initial holds the period every CPU programs. */
+	/* Succeeded: timer_base holds the period every CPU's timer is a multiple of. */
 	return HAL_OK;
 }
 
@@ -913,7 +1005,7 @@ choose_tick_source(
 	bool has_mode;
 
 	/* Keeps the periodic timer when the build asks for it. */
-	tick_period_tsc = 0U;
+	tick_base_tsc = 0U;
 	if (LAPIC_TICK_TSC_DEADLINE == 0) {
 		hal_puts("A64 TIMER TICK source=periodic\n");
 		return;
@@ -924,7 +1016,7 @@ choose_tick_source(
 	known = amd64_timecounter_bsp_candidate_frequency(&frequency);
 	period = 0U;
 	if (invariant && known)
-		period = frequency / HAL_TIMER_FREQUENCY;
+		period = frequency / LAPIC_TICK_HZ_MAX;
 
 	/* Asks this CPU for the mode only when there is a period to time. */
 	has_mode = false;
@@ -938,7 +1030,7 @@ choose_tick_source(
 	}
 
 	/* Publishes the period every CPU's deadlines are multiples of. */
-	tick_period_tsc = period;
+	tick_base_tsc = period;
 	hal_printf(
 		"A64 TIMER TICK source=tsc-deadline period=%llu\n",
 		(unsigned long long)period);
@@ -970,12 +1062,13 @@ cpu_has_tsc_deadline(
 }
 
 /*
- * Writes the current CPU's next deadline: the first multiple of the period
+ * Writes the current CPU's next deadline: the first multiple of its period
  * after the TSC now.  The deadlines are multiples of the period on every CPU
  * rather than the last deadline plus the period, so a tick that was late
  * does not move the phase, and every CPU keeps the same phase however long
- * after another it started.  At a tick the TSC has reached the deadline, so
- * the next multiple is always a later one.
+ * after another it started.  Every period is a multiple of the fastest one,
+ * so CPUs at different rates keep the phase too.  At a tick the TSC has
+ * reached the deadline, so the next multiple is always a later one.
  */
 static void
 arm_next_deadline(
@@ -983,13 +1076,44 @@ arm_next_deadline(
 {
 	uint64_t now;
 	uint64_t next;
+	uint64_t period;
 
 	/* The next multiple of the period after now. */
+	period = tick_base_tsc * cpu_divisor(hal_cpu_current());
 	now = amd64_timecounter_sample_serialized();
-	next = (now / tick_period_tsc + 1U) * tick_period_tsc;
+	next = (now / period + 1U) * period;
 
 	/* Arms the local APIC timer at that TSC value. */
 	asm_write_msr(MSR_IA32_TSC_DEADLINE, next);
+}
+
+/* Reports the periods of the fastest tick one of a CPU's ticks spans. */
+static uint32_t
+cpu_divisor(
+	hal_cpu_id_t cpu)
+{
+	/* A CPU that has not chosen runs at the fastest rate. */
+	if (cpu >= AMD64_SMP_MAX_CPUS || tick_divisor[cpu] == 0U)
+		return 1U;
+
+	/* Succeeded: the CPU's own. */
+	return tick_divisor[cpu];
+}
+
+/* Reports the periodic timer's initial count for a CPU's period, at most the register's. */
+static uint32_t
+periodic_count(
+	hal_cpu_id_t cpu)
+{
+	uint64_t count;
+
+	/* A whole number of the fastest period. */
+	count = (uint64_t)timer_base * cpu_divisor(cpu);
+	if (count > UINT32_MAX)
+		return UINT32_MAX;
+
+	/* Succeeded: the count. */
+	return (uint32_t)count;
 }
 
 /* Measures the APIC timer's count over one window timed by the TSC. */

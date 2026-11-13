@@ -231,9 +231,9 @@ kern_sleep_s0idle(
 
 /*
  * Runs in place of hal_cpu_idle() in each CPU's idle loop (interrupts
- * masked): while the sleep's state is ENTER the CPU suspends to idle, CPU 0
- * bringing the tick count forward around it, and the first CPU back wakes
- * the coordinator.
+ * masked): while the sleep's state is ENTER the CPU suspends to idle, and
+ * the first CPU back wakes the coordinator.  The kernel's time comes from
+ * the counter, which keeps running meanwhile.
  */
 void
 kern_sleep_idle(
@@ -252,12 +252,8 @@ kern_sleep_idle(
 		return;
 	}
 
-	/* The suspend-to-idle, CPU 0 keeping the time it slept. */
-	if (cpu == 0)
-		kern_clock_idle_suspend_begin();
+	/* The suspend-to-idle. */
 	status = hal_cpu_idle_suspend();
-	if (cpu == 0)
-		kern_clock_idle_suspend_end();
 
 	/* The coordinator checked the probe, so this does not happen; it ends the sleep rather than spin. */
 	if (status != HAL_OK)

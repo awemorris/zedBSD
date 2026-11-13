@@ -252,7 +252,7 @@ wait_for_ticks(
 	/* Waits, by the counter rather than by wait, so that a missing tick is reported. */
 	start = mips_clock_read_counter();
 	frequency = (uint32_t)mips_clock_frequency();
-	limit = (uint64_t)frequency / HAL_TIMER_FREQUENCY * CMAIN_TICK_WAIT_FACTOR * CMAIN_TICKS_WANTED;
+	limit = (uint64_t)frequency / hal_rtc_get_tick_hz() * CMAIN_TICK_WAIT_FACTOR * CMAIN_TICKS_WANTED;
 	for (;;) {
 		ticks = mips_clock_ticks();
 		if (ticks >= CMAIN_TICKS_WANTED)

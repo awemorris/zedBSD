@@ -9,13 +9,6 @@
 #define HAL_HAL_ARCH_M68040_H
 
 /*
- * The periodic tick, in hertz.  Every time the kernel keeps is counted in
- * these ticks, and every conversion to and from milliseconds uses this value.
- * The same rate as the MC68040 port.
- */
-#define HAL_TIMER_FREQUENCY	(100U)
-
-/*
  * Signal Frame
  */
 

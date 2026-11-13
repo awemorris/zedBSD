@@ -14,6 +14,12 @@
 
 #include <hal/hal.h>
 
+/*
+ * The tick's rate, in hertz: the one PIT of the machine interrupts every
+ * CPU's scheduler at this rate, which never changes.
+ */
+#define I386_TICK_HZ	100U
+
 void bsp_timer_init(void);
 void clock_handler(void);	/* tick, from irq.c */
 

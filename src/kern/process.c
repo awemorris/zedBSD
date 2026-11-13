@@ -72,6 +72,9 @@ static struct spinlock process_tree_lock = {
 /* The armed real interval timers one tick collects before it walks by PID. */
 #define PROCESS_ITIMER_REAL_BATCH 16U
 
+/* The time of CPU 0's last pass over the real interval timers, in ticks; only that pass writes it. */
+static uint64_t itimer_real_last;
+
 /* How long _exit sleeps between two looks at the threads it killed, in milliseconds. */
 #define PROCESS_EXIT_POLL_MS 1U
 
@@ -101,6 +104,8 @@ static void process_exit_cleanup(int thread_status) __attribute__((noreturn));
 static void process_thread_exit_publish_locked(struct process *process, struct thread *thread);
 static int process_commit_thread_exit(struct thread *thread, int status);
 static void __attribute__((noreturn)) process_exit_final(int thread_status, int wait_status);
+static uint64_t itimer_real_elapsed(struct process *process, uint64_t since, uint64_t now);
+static uint64_t itimer_real_nearest(struct process *process, uint64_t now, uint64_t nearest);
 
 /*
  * Tests whether a process belongs to an orphaned process group.
@@ -2147,6 +2152,7 @@ process_itimer_set(
 	uint64_t *old_interval)
 {
 	unsigned sequence;
+	uint64_t now;
 	bool enabled;
 
 	/* Rejects a missing process or an unknown timer. */
@@ -2172,26 +2178,38 @@ process_itimer_set(
 	if (old_interval != NULL)
 		*old_interval = atomic_u64_load_acquire(
 		    &process->itimer_interval[which]);
+	now = clock_ticks();
 	atomic_u64_store_release(&process->itimer_interval[which], interval);
 	atomic_u64_store_release(&process->itimer_remaining[which], remaining);
+	if (which == 0)
+		atomic_u64_store_release(&process->itimer_real_armed, now);
 	atomic_raw_store_release(&process->itimer_sequence[which], sequence + 2U);
 	if (enabled)
 		hal_irq_enable();
+
+	/* CPU 0, whose tick counts ITIMER_REAL down from when it was set, looks at it in time. */
+	if (which == 0 && remaining != 0U && remaining <= UINT64_MAX - now)
+		kern_clock_timer_armed(now + remaining);
 
 	/* Reports the set timer. */
 	return 0;
 }
 
 /*
- * Counts one tick against an interval timer, reporting its expiry.
+ * Counts the ticks that passed against an interval timer, reporting its
+ * expiry.  Ticks past the expiry count against the reloaded interval, so
+ * a timer late by part of its period keeps its phase.
  */
 int
 process_itimer_tick(
 	struct process *process,
-	int which)
+	int which,
+	uint64_t elapsed)
 {
 	uint64_t remaining;
 	uint64_t interval;
+	uint64_t left;
+	uint64_t over;
 	unsigned sequence;
 
 	/* Ignores a missing process or an unknown timer. */
@@ -2223,36 +2241,44 @@ process_itimer_tick(
 	/* Counts down, reloading the interval on expiry. */
 	remaining = atomic_u64_load_acquire(&process->itimer_remaining[which]);
 	interval = atomic_u64_load_acquire(&process->itimer_interval[which]);
-	if (remaining != 0) {
-		if (remaining == 1U)
-			atomic_u64_store_release(&process->itimer_remaining[which],
-			    interval);
-		else
-			atomic_u64_store_release(&process->itimer_remaining[which],
-			    remaining - 1U);
+	left = remaining;
+	if (remaining != 0U && elapsed < remaining) {
+		left = remaining - elapsed;
+	} else if (remaining != 0U) {
+		/* Expired: the ticks past it are taken from the next interval. */
+		over = elapsed - remaining;
+		left = 0U;
+		if (interval != 0U)
+			left = interval - over % interval;
 	}
+	if (left != remaining)
+		atomic_u64_store_release(&process->itimer_remaining[which], left);
 
 	atomic_raw_store_release(&process->itimer_sequence[which], sequence + 2U);
 
-	/* Reports whether this tick expired the timer. */
-	if (remaining != 1U)
+	/* Reports whether these ticks expired the timer. */
+	if (remaining == 0U || elapsed < remaining)
 		return 0;
 	return 1;
 }
 
 /*
- * Ticks the real-time interval timer of every process, raising SIGALRM
- * on expiry.
+ * Counts the ticks since the last call against the real-time interval
+ * timer of every process, raising SIGALRM on expiry, and reports the
+ * nearest expiry still to come in ticks, or UINT64_MAX.  Only CPU 0's
+ * tick calls it, with the time now.
  */
-void
+uint64_t
 process_itimer_real_tick_all(
-	void)
+	uint64_t now)
 {
 	struct process *armed[PROCESS_ITIMER_REAL_BATCH];
 	struct process *process;
 	struct signal_info info;
 	unsigned long irq;
 	uint64_t remaining;
+	uint64_t since;
+	uint64_t nearest;
 	unsigned count;
 	unsigned index;
 	int overflow;
@@ -2262,8 +2288,13 @@ process_itimer_real_tick_all(
 	cursor = -1;
 	count = 0;
 	overflow = 0;
+	nearest = UINT64_MAX;
 	kern_memset(&info, 0, sizeof(info));
 	info.code = SI_TIMER;
+
+	/* The last pass; each timer counts the ticks since then, or since it was set. */
+	since = itimer_real_last;
+	itimer_real_last = now;
 
 	/*
 	 * Collects the processes whose real timer is armed in one pass.
@@ -2305,14 +2336,16 @@ process_itimer_real_tick_all(
 			process = armed[index];
 			expired = 0;
 			if (process->state != PROCESS_DEAD)
-				expired = process_itimer_tick(process, 0);
+				expired = process_itimer_tick(process, 0,
+				    itimer_real_elapsed(process, since, now));
 			if (expired)
 				(void)signal_send_process_info(process, SIGALRM, &info);
+			nearest = itimer_real_nearest(process, now, nearest);
 			process_release(process);
 		}
 
-		/* Reports the tick counted. */
-		return;
+		/* Reports the nearest expiry. */
+		return nearest;
 	}
 
 	/* Drops the batch and ticks every process in PID order instead. */
@@ -2323,11 +2356,61 @@ process_itimer_real_tick_all(
 		cursor = process->pid;
 		if (process != &process0 &&
 		    process->state != PROCESS_DEAD &&
-		    process_itimer_tick(process, 0))
+		    process_itimer_tick(process, 0,
+		    itimer_real_elapsed(process, since, now)))
 			(void)signal_send_process_info(process, SIGALRM, &info);
+		if (process != &process0)
+			nearest = itimer_real_nearest(process, now, nearest);
 		process_release(process);
 		process = process_find_next_ref(cursor);
 	}
+
+	/* Reports the nearest expiry. */
+	return nearest;
+}
+
+/*
+ * Reports the ticks a process's real-time timer counts at a pass: those
+ * since the last pass, or since the timer was set when that is later, so
+ * that a timer set between two passes does not expire early.
+ */
+static uint64_t
+itimer_real_elapsed(
+	struct process *process,
+	uint64_t since,
+	uint64_t now)
+{
+	uint64_t armed;
+
+	/* From the later of the two. */
+	armed = atomic_u64_load_acquire(&process->itimer_real_armed);
+	if (armed > since)
+		since = armed;
+	if (now <= since)
+		return 0U;
+
+	/* Succeeded: the ticks between. */
+	return now - since;
+}
+
+/* Lowers nearest to a process's real-time timer expiry, in ticks from now. */
+static uint64_t
+itimer_real_nearest(
+	struct process *process,
+	uint64_t now,
+	uint64_t nearest)
+{
+	uint64_t remaining;
+
+	/* An unarmed timer, or a later one, leaves it. */
+	remaining = atomic_u64_load_acquire(&process->itimer_remaining[0]);
+	if (remaining == 0U || remaining > UINT64_MAX - now)
+		return nearest;
+	if (now + remaining >= nearest)
+		return nearest;
+
+	/* Succeeded: this one is nearer. */
+	return now + remaining;
 }
 
 /*

@@ -82,7 +82,7 @@ timer_init_boot(
 		return HAL_ERR_UNSUPPORTED;
 
 	/* The tick's length in counter ticks, at least one. */
-	timer_interval = timer_frequency / HAL_TIMER_FREQUENCY;
+	timer_interval = timer_frequency / ARMV7_TICK_HZ;
 	if (timer_interval == 0)
 		timer_interval = 1;
 

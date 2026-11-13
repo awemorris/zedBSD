@@ -9,13 +9,6 @@
 #define HAL_HAL_ARCH_MIPS32_H
 
 /*
- * The periodic tick, in hertz.  As on the other ports the kernel keeps a
- * millisecond tick; the HAL programs the board's timer source (the
- * coprocessor 0 counter, or a SoC timer where the core has none) from it.
- */
-#define HAL_TIMER_FREQUENCY	(1000U)
-
-/*
  * Signal Frame
  */
 

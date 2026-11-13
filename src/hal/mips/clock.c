@@ -8,7 +8,7 @@
 /*
  * The MIPS scheduling tick and counter.
  *
- * The board owns the timer: it arms a tick of HAL_TIMER_FREQUENCY, takes
+ * The board owns the timer: it arms a tick of CLOCK_TICK_HZ, takes
  * its interrupt down and calls mips_clock_tick() for each, and reads a
  * free-running 64-bit counter at a rate it reports.  The malta board
  * uses coprocessor 0's Count and Compare; a processor without them uses
@@ -21,6 +21,9 @@
 #include "bsp.h"
 #include "clock.h"
 #include "irq.h"
+
+/* The tick's rate, in hertz, which never changes. */
+#define CLOCK_TICK_HZ	1000U
 
 /*
  * The counter's rate.  Set once by mips_clock_init() before the tick's
@@ -51,7 +54,7 @@ mips_clock_init(
 	void)
 {
 	/* The board arms its timer and reports the counter's rate. */
-	clock_frequency = mips_board_timer_init(HAL_TIMER_FREQUENCY);
+	clock_frequency = mips_board_timer_init(CLOCK_TICK_HZ);
 	if (clock_frequency == 0)
 		HAL_FATAL("mips board gives no counter rate");
 }
@@ -83,6 +86,31 @@ mips_clock_start_kernel(
 {
 	/* Every later tick goes to kernel_timer_handler(). */
 	clock_kernel_running = 1;
+}
+
+/*
+ * Reports the tick's rate, which this timer runs at from boot and never
+ * changes.
+ */
+uint32_t
+hal_rtc_get_tick_hz(
+	void)
+{
+	/* The rate the timer is programmed at. */
+	return CLOCK_TICK_HZ;
+}
+
+/*
+ * Keeps the tick's rate, which this timer cannot change, and reports it.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz)
+{
+	UNUSED_PARAMETER(hz);
+
+	/* The rate the timer stays at. */
+	return CLOCK_TICK_HZ;
 }
 
 /*
