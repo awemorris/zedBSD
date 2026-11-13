@@ -1,26 +1,32 @@
 #!/bin/sh
-# Mail's TLS over libssl-compat on zedBSD (x86_64, QEMU): Mail's own tls.c, built with -DML_TLS_COMPAT as the image's
-# mailer is, connects from the guest to the host's openssl s_server (-rev) with a pin, and a pin that is not the
-# server's is refused.
+# Mail's TLS over libssl-compat on zedBSD (x86_64, QEMU): Mail's own tls.c, which calls libssl-compat and
+# libcrypto-compat directly and is linked with them as the image's mailer is, connects from the guest to the host's
+# openssl s_server (-rev) with a pin, and a pin that is not the server's is refused.
 #  1. The image: the platform's programs without the firmware packages (CONFIG_USERLAND_PROGRAMS on the make command
-#     line: the defaults are read after the configuration file, so the file cannot take them out), Mail built with
-#     -DML_TLS_COMPAT (STANDALONE_CFLAGS_mailer on the command line, what the mailer Makefile's proposed line does),
+#     line: the defaults are read after the configuration file, so the file cannot take them out),
 #     plan/ws335/tests/config-p036-guest.mk with the graphical login off.  IMAGE=<file> skips the build; BUILD_JOBS
 #     (default 4) is passed to make.
-#  2. The guest program: plan/ws335/tests/mailer-tls.c and userland/desktop/mailer/tls.c compiled with the flags the
-#     image's mailer was compiled with (build/x86_64/packages/mailer/.flags, which must hold -DML_TLS_COMPAT) and
-#     linked as a program of the image is; it goes into the guest over the serial line in base64 (checked by cksum).
+#  2. The image's mailer (build/x86_64/bin/mailer) needs libssl-compat.so and libcrypto-compat.so and no OpenSSL
+#     library (readelf -d).  The guest program: plan/ws335/tests/mailer-tls.c and userland/desktop/mailer/tls.c
+#     compiled with the flags the image's mailer was compiled with (build/x86_64/packages/mailer/.flags) and linked
+#     as a program of the image is, with the two compat libraries; it goes into the guest over the serial line in
+#     base64 (checked by cksum).
 #  3. The host's servers on 127.0.0.1 (10.0.2.2 from the guest): a self-signed certificate for localhost (TLS 1.3,
-#     P-256), another self-signed one over TLS 1.2 (RSA), and a certificate the tests' CA signed.
-#  4. In the guest (MAILER_TLS_ADDRESS=10.0.2.2, the name localhost): /bin/mailer names libssl-compat.so and no
-#     OpenSSL library; without a pin ML_ERROR_UNTRUSTED with the fingerprint openssl x509 -fingerprint -sha256 gives;
-#     with it the connection is made and a line goes each way; with another certificate's pin ML_ERROR_UNTRUSTED;
-#     the same over TLS 1.2; the CA-signed server with the CA file (sent over the serial line) without a pin.
+#     P-256), another self-signed one over TLS 1.2 (RSA), a certificate the tests' CA signed for localhost, one
+#     server whose certificate for the name the client sends (SNI localhost) differs from its default one (signed by
+#     the CA for another name), and a CA-signed certificate for another name alone.
+#  4. In the guest (MAILER_TLS_ADDRESS=10.0.2.2, the name localhost): /bin/mailer is the build's file (cksum), so its
+#     NEEDED are those of step 2; without a pin ML_ERROR_UNTRUSTED with the fingerprint openssl x509 -fingerprint
+#     -sha256 gives; with it the connection is made and a line goes each way; with another certificate's pin
+#     ML_ERROR_UNTRUSTED; the same over TLS 1.2; the CA-signed server with the CA file (sent over the serial line)
+#     without a pin, and without the CA file ML_ERROR_UNTRUSTED; with the CA file, the server that picks its
+#     certificate by SNI is trusted (the name went out), and the certificate for another name is ML_ERROR_UNTRUSTED
+#     with "hostname mismatch" (the name is matched).
 # The verdict is the guest program's own last line over the serial line (plan/tools/guest/serial.py), not a console
-# log.  The QEMU run is named ws335-p2-p041, its directory build/tmp/ws335-mailer-guest (a fresh run); the disk is
-# opened with snapshot=on.
+# log.  The QEMU run is named ws335-mailer-guest, its directory build/tmp/ws335-mailer-guest (a fresh run); the disk
+# is opened with snapshot=on.
 #   sh plan/ws335/tests/run-mailer-guest.sh
-# The last line is run-mailer-guest: PASS or run-mailer-guest: FAIL.
+# The last line is run-mailer-guest: PASS (<N> cases) or run-mailer-guest: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
@@ -60,8 +66,7 @@ EOF
 	[ -n "$programs" ] || fail "no program list from mk/platform-x86_64/defaults.mk"
 	echo "run-mailer-guest: $(echo $programs | wc -w) programs, no firmware"
 	if ! flock /tmp/zedbsd-image-build.lock timeout 7000 make CONFIGMK=plan/ws335/tests/config-p036-guest.mk \
-	    CONFIG_GRAPHICAL_LOGIN=n BUILD_JOBS=${BUILD_JOBS:-4} 'STANDALONE_CFLAGS_mailer=$(STANDALONE_PROGRAM_CFLAGS) -DML_TLS_COMPAT' \
-	    CONFIG_USERLAND_PROGRAMS="$programs" disk > "$out/make.log" 2>&1; then
+	    CONFIG_GRAPHICAL_LOGIN=n BUILD_JOBS=${BUILD_JOBS:-4} CONFIG_USERLAND_PROGRAMS="$programs" disk > "$out/make.log" 2>&1; then
 		tail -20 "$out/make.log"
 		fail "make disk, $out/make.log"
 	fi
@@ -78,12 +83,16 @@ EOF
 fi
 [ -f "$image" ] || fail "no image $image"
 
-# 2. The guest program, with the image's mailer's flags.
+# 2. The image's mailer needs the two compat libraries and no OpenSSL library; the guest program, with its flags.
+readelf -d build/x86_64/bin/mailer 2> /dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' > "$out/needed.txt"
+echo "run-mailer-guest: build/x86_64/bin/mailer needs: $(tr '\n' ' ' < "$out/needed.txt")"
+if ! grep -qx 'libssl-compat.so' "$out/needed.txt" || ! grep -qx 'libcrypto-compat.so' "$out/needed.txt" ||
+    grep -q '^lib\(ssl\|crypto\)\.so' "$out/needed.txt"; then
+	echo "run-mailer-guest: the mailer does not need libssl-compat.so and libcrypto-compat.so alone"
+	status=1
+fi
 flags=$(cat build/x86_64/packages/mailer/.flags 2> /dev/null)
-case "$flags" in
-*-DML_TLS_COMPAT*) ;;
-*) fail "the image's mailer was not compiled with -DML_TLS_COMPAT (build/x86_64/packages/mailer/.flags)" ;;
-esac
+[ -n "$flags" ] || fail "no build/x86_64/packages/mailer/.flags"
 sysroot=$top/build/x86_64/sysroot
 dynamic=$top/build/x86_64/dynamic
 {
@@ -93,7 +102,7 @@ dynamic=$top/build/x86_64/dynamic
 	    -Wl,--no-relax -Wl,--gc-sections -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
 	    -Wl,-z,stack-size=0x100000,--allow-shlib-undefined -Wl,--dynamic-linker=/lib/ld.so \
 	    "$sysroot/usr/lib/crt1.o" "$out/mailer-tls.o" "$out/tls.o" -L"$dynamic" -Wl,-rpath-link,"$dynamic" \
-	    -l:libkeiland.so -l:libm.so -l:libc.so -o "$out/mailer-tls"
+	    -l:libssl-compat.so -l:libcrypto-compat.so -l:libkeiland.so -l:libm.so -l:libc.so -o "$out/mailer-tls"
 } > "$out/guest-build.log" 2>&1
 if [ ! -x "$out/mailer-tls" ] || [ -s "$out/guest-build.log" ]; then
 	head -20 "$out/guest-build.log"
@@ -118,7 +127,12 @@ san=subjectAltName=DNS:localhost
 	    -keyout "$pki/leaf.key" -out "$pki/leaf.csr" &&
 	printf '%s\nbasicConstraints=CA:FALSE\n' "$san" > "$pki/leaf.ext" &&
 	openssl x509 -req -in "$pki/leaf.csr" -CA "$pki/ca.pem" -CAkey "$pki/ca.key" -CAcreateserial -days 2 \
-	    -extfile "$pki/leaf.ext" -out "$pki/leaf.pem"
+	    -extfile "$pki/leaf.ext" -out "$pki/leaf.pem" &&
+	openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj /CN=mail.invalid \
+	    -keyout "$pki/named.key" -out "$pki/named.csr" &&
+	printf 'subjectAltName=DNS:mail.invalid\nbasicConstraints=CA:FALSE\n' > "$pki/named.ext" &&
+	openssl x509 -req -in "$pki/named.csr" -CA "$pki/ca.pem" -CAkey "$pki/ca.key" -CAcreateserial -days 2 \
+	    -extfile "$pki/named.ext" -out "$pki/named.pem"
 } > "$pki/openssl.log" 2>&1 || fail "certificates, $pki/openssl.log"
 fingerprint() {
 	openssl x509 -in "$1" -noout -fingerprint -sha256 | sed 's/^.*=//; s/://g' | tr 'A-F' 'a-f'
@@ -127,6 +141,7 @@ fp_self=$(fingerprint "$pki/self.pem")
 fp_self12=$(fingerprint "$pki/self12.pem")
 fp_other=$(fingerprint "$pki/other.pem")
 fp_leaf=$(fingerprint "$pki/leaf.pem")
+fp_named=$(fingerprint "$pki/named.pem")
 free_port() {
 	"$python" -I -c 'import socket
 s = socket.socket()
@@ -145,24 +160,28 @@ sys.exit(1)' "$1"
 }
 qemu=
 trap 'kill $qemu $servers 2> /dev/null; wait $qemu 2> /dev/null; sync' EXIT
+# start_server <label> <certificate> <more options of s_server>; the port in port_<label>.
 start_server() {
 	port=$(free_port)
-	timeout 3000 openssl s_server -rev -accept "127.0.0.1:$port" -cert "$pki/$1.pem" -key "$pki/$1.key" $2 \
+	timeout 3000 openssl s_server -rev -accept "127.0.0.1:$port" -cert "$pki/$2.pem" -key "$pki/$2.key" $3 \
 	    > "$out/server-$1.log" 2>&1 < /dev/null &
 	servers="$servers $!"
 	wait_port "$port" || fail "s_server $1 did not start"
 	eval "port_$1=$port"
 }
-start_server self ""
-start_server self12 "-tls1_2"
-start_server leaf ""
+start_server self self ""
+start_server self12 self12 "-tls1_2"
+start_server leaf leaf ""
+# The certificate for localhost only to a client that sends the name localhost; to others the one for mail.invalid.
+start_server sni named "-servername localhost -cert2 $pki/leaf.pem -key2 $pki/leaf.key"
+start_server named named ""
 
 # 4. The guest: UEFI, NVMe (snapshot), the serial console and QMP on unix sockets, the user network on USB.
 . plan/tools/guest/qemu-accel.sh
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$out/vars.fd"
 socket=$top/$out/serial.sock
 qmp=$top/$out/qmp.sock
-timeout 3000 qemu-system-x86_64 -name ws335-p2-p041 -machine q35 -m 4G -smp 4 $(qemu_accel_args max) \
+timeout 3000 qemu-system-x86_64 -name ws335-mailer-guest -machine q35 -m 4G -smp 4 $(qemu_accel_args max) \
     -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
     -drive "if=pflash,format=raw,file=$out/vars.fd" \
     -drive "if=none,id=boot,file=$image,format=raw,snapshot=on" \
@@ -198,15 +217,16 @@ done
 grep -q 'inet 10\.0\.2\.' "$out/ifconfig.txt" || fail "no DHCP address on ue0, $out/ifconfig.txt"
 echo "run-mailer-guest: ue0 $(grep -o 'inet 10\.0\.2\.[0-9]*' "$out/ifconfig.txt")"
 
-# What the guest has: the compat libraries, and the names the image's mailer opens.
+# What the guest has: the compat libraries, and the build's mailer (whose NEEDED step 2 read).
 $serial run 'uname -a; ls -l /lib/libssl-compat.so /lib/libcrypto-compat.so /bin/mailer' > "$out/files.txt" 2>&1 ||
     { cat "$out/files.txt"; fail "the files in the guest"; }
 tr -d '\r' < "$out/files.txt"
-$serial run "strings /bin/mailer | grep '^lib.*\.so'" > "$out/strings.txt" 2>&1
-tr -d '\r' < "$out/strings.txt" | grep -x 'lib\(ssl\|crypto\)\(-compat\)\{0,1\}\.so\(\.3\)\{0,1\}' > "$out/names.txt"
-echo "run-mailer-guest: /bin/mailer opens: $(tr '\n' ' ' < "$out/names.txt")"
-if ! grep -qx 'libssl-compat.so' "$out/names.txt" || grep -q '^libssl\.so' "$out/names.txt"; then
-	echo "run-mailer-guest: /bin/mailer does not open libssl-compat.so alone"
+$serial run 'cksum /bin/mailer' > "$out/mailer-cksum.txt" 2>&1
+if [ "$(tr -d '\r' < "$out/mailer-cksum.txt" | grep '/bin/mailer' | awk '{print $1, $2}')" = \
+    "$(cksum < build/x86_64/bin/mailer | awk '{print $1, $2}')" ]; then
+	echo "run-mailer-guest: /bin/mailer is build/x86_64/bin/mailer (cksum)"
+else
+	echo "run-mailer-guest: /bin/mailer differs from build/x86_64/bin/mailer, $out/mailer-cksum.txt"
 	status=1
 fi
 
@@ -248,6 +268,12 @@ run_case "self-signed 1.2 RSA, its pin" - "$port_self12" "$fp_self12" ok
 run_case "self-signed 1.2 RSA, another pin" - "$port_self12" "$fp_other" untrusted "$fp_self12"
 run_case "CA-signed, the CA file" /root/ca.pem "$port_leaf" - ok
 run_case "CA-signed, no CA file" - "$port_leaf" - untrusted "$fp_leaf"
+run_case "CA-signed, the certificate SNI picks" /root/ca.pem "$port_sni" - ok
+run_case "CA-signed, another name" /root/ca.pem "$port_named" - untrusted "$fp_named"
+if ! grep -q 'hostname mismatch' "$out/case-$count.clean.txt"; then
+	echo "run-mailer-guest: another name: not refused for the name"
+	status=1
+fi
 
 $serial run 'sync' > /dev/null
 sync
