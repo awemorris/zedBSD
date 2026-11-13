@@ -13,7 +13,7 @@ cd "$(dirname -- "$0")/../../.."
 [ $# -ge 1 ] || { echo "usage: build-image.sh BUILD [ARGUMENT...]" >&2; exit 2; }
 build=$1
 shift
-files=$(python3 plan/tools/guest/guest.py extra-files | sed -n "s/^ZEDBSD_TEST_EXTRA_FILES='\(.*\)'$/\1/p")
+files=$(python3 plan/tools/guest/guest.py extra-files)
 [ -n "$files" ] || { echo "build-image: no guest harness files" >&2; exit 1; }
 # Every --file and --mode pair but the network's.
 keep=

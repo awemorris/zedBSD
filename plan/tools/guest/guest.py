@@ -18,10 +18,11 @@ debugger.  This gives the guest a network instead:
 
 The key pair is made once under plan/tmp/guest and is for these guests
 only.  The public half has to be in the image, which is what `extra-files`
-prints the make arguments for.
+prints the --file and --mode arguments for; plan/tools/guest/test-image.sh
+puts them in by itself.
 
     plan/tools/guest/guest.sh keys
-    eval "make ... $(plan/tools/guest/guest.sh extra-files) disk-image"
+    plan/tools/guest/test-image.sh CONFIG build/x
     plan/tools/guest/guest.sh start build/x/hdd-image.img
     plan/tools/guest/guest.sh run 'net show'
     plan/tools/guest/guest.sh put a.txt /tmp/a.txt
@@ -102,7 +103,11 @@ def make_keys() -> None:
 
 
 def extra_files() -> str:
-	"""Prints the make arguments that put the harness into an image."""
+	"""Returns the --file and --mode arguments that put the harness into an image.
+
+	They are the arguments plan/tools/guest/test-image.sh takes, as one line
+	of words: DESTINATION=SOURCE and DESTINATION=MODE after each option.
+	"""
 	make_keys()
 	files = [
 		f"--file /root/.ssh/authorized_keys={KEY}.pub",
@@ -122,7 +127,7 @@ def extra_files() -> str:
 	# every boot: doing that takes tens of seconds on an emulated disk and
 	# writes over the console while it does.  These keys are for harness
 	# guests and are in the repository's build tree, not in a release.
-	return "ZEDBSD_TEST_EXTRA_FILES=" + shlex.quote(" ".join(files))
+	return " ".join(shlex.quote(word) for item in files for word in item.split(" ", 1))
 
 
 def ssh_options(session: dict, port_flag: str = "-p") -> list[str]:
@@ -356,7 +361,7 @@ def main() -> int:
 	commands = parser.add_subparsers(dest="command", required=True)
 
 	commands.add_parser("keys", help="make the harness key pair")
-	commands.add_parser("extra-files", help="print the make arguments")
+	commands.add_parser("extra-files", help="print the --file and --mode arguments")
 
 	start_parser = commands.add_parser("start", help="boot a guest")
 	start_parser.add_argument("image")

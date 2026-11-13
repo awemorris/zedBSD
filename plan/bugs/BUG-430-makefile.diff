@@ -1,0 +1,362 @@
+diff -ruN a/Makefile b/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -62,8 +62,13 @@
+ include mk/config.mk
+ 
+ # Import the current developer configuration.
++MAKEFILES_BEFORE_CONFIG := $(MAKEFILE_LIST)
+ include $(CONFIGMK)
+ 
++# The configuration file and every file it includes, which the packages'
++# stamps follow (mk/userland.mk).
++CONFIGMK_FILES := $(filter-out $(MAKEFILES_BEFORE_CONFIG),$(MAKEFILE_LIST))
++
+ # The same configuration file as an absolute path, for the nested makes
+ # (they run in other directories).
+ ZEDBSD_CONFIGMK := $(abspath $(CONFIGMK))
+diff -ruN a/mk/build-jobs.mk b/mk/build-jobs.mk
+--- a/mk/build-jobs.mk
++++ b/mk/build-jobs.mk
+@@ -5,9 +5,11 @@
+ # instead.  Keeping the answer in one place stops the number from being
+ # written differently in each of them.
+ #
+-# It is 16, or the machine's count when that is smaller, unless the caller
+-# says otherwise (2026-10-03: several builds run at once on the 64-thread
+-# build machine, and 64 jobs each filled its disk's write-back):
++# It is the number the caller gave make with -j, so that "make -j4" keeps
++# every nested build tool to 4 jobs as well.  Without a number it is 16, or
++# the machine's count when that is smaller (2026-10-03: several builds run
++# at once on the 64-thread build machine, and 64 jobs each filled its disk's
++# write-back).  The caller may also name it:
+ #
+ #   make BUILD_JOBS=8 toolchain
+ #
+@@ -18,6 +20,15 @@
+ ifndef BUILD_JOBS_MK
+ BUILD_JOBS_MK := 1
+ 
++# The number given with -j, if any (make puts it in MAKEFLAGS before it
++# reads the makefiles, and passes it on to the nested makes).
++BUILD_JOBS_FROM_MAKE := $(lastword $(patsubst -j%,%,$(filter -j%,$(MAKEFLAGS))))
++
++# The caller's -j decides the jobs of the nested build tools when it has a number.
++ifneq ($(BUILD_JOBS_FROM_MAKE),)
++BUILD_JOBS ?= $(BUILD_JOBS_FROM_MAKE)
++endif
++
+ BUILD_JOBS ?= $(shell n=$$(nproc 2>/dev/null || echo 4); if test "$$n" -gt 16; then n=16; fi; echo "$$n")
+ BUILD_LINK_JOBS ?= $(shell \
+ 	jobs=$(BUILD_JOBS); \
+diff -ruN a/mk/platform-i386/sysroot.mk b/mk/platform-i386/sysroot.mk
+--- a/mk/platform-i386/sysroot.mk
++++ b/mk/platform-i386/sysroot.mk
+@@ -10,7 +10,8 @@
+ PLATFORM_I386_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+ REPO_ROOT ?= $(abspath $(PLATFORM_I386_DIR)/../..)
+ 
+-SYSROOT     := $(REPO_ROOT)/build/i386/sysroot
++# The sysroot is in the build directory, where the packages look for it.
++SYSROOT     := $(abspath $(BUILD))/sysroot
+ SYSROOT_INC := $(SYSROOT)/usr/include
+ SYSROOT_LIB := $(SYSROOT)/usr/lib
+ 
+diff -ruN a/mk/platform-rpi4/sysroot.mk b/mk/platform-rpi4/sysroot.mk
+--- a/mk/platform-rpi4/sysroot.mk
++++ b/mk/platform-rpi4/sysroot.mk
+@@ -10,7 +10,8 @@
+ PLATFORM_RPI4_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+ REPO_ROOT         ?= $(abspath $(PLATFORM_RPI4_DIR)/../..)
+ 
+-SYSROOT     := $(REPO_ROOT)/build/rpi4/sysroot
++# The sysroot is in the build directory, where the packages look for it.
++SYSROOT     := $(abspath $(BUILD))/sysroot
+ SYSROOT_INC := $(SYSROOT)/usr/include
+ SYSROOT_LIB := $(SYSROOT)/usr/lib
+ 
+diff -ruN a/mk/platform-rpi5/sysroot.mk b/mk/platform-rpi5/sysroot.mk
+--- a/mk/platform-rpi5/sysroot.mk
++++ b/mk/platform-rpi5/sysroot.mk
+@@ -10,7 +10,8 @@
+ PLATFORM_RPI5_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+ REPO_ROOT         ?= $(abspath $(PLATFORM_RPI5_DIR)/../..)
+ 
+-SYSROOT     := $(REPO_ROOT)/build/rpi5/sysroot
++# The sysroot is in the build directory, where the packages look for it.
++SYSROOT     := $(abspath $(BUILD))/sysroot
+ SYSROOT_INC := $(SYSROOT)/usr/include
+ SYSROOT_LIB := $(SYSROOT)/usr/lib
+ 
+diff -ruN a/mk/platform-x86_64/sysroot.mk b/mk/platform-x86_64/sysroot.mk
+--- a/mk/platform-x86_64/sysroot.mk
++++ b/mk/platform-x86_64/sysroot.mk
+@@ -10,7 +10,8 @@
+ PLATFORM_X86_64_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+ REPO_ROOT ?= $(abspath $(PLATFORM_X86_64_DIR)/../..)
+ 
+-SYSROOT     := $(REPO_ROOT)/build/x86_64/sysroot
++# The sysroot is in the build directory, where the packages look for it.
++SYSROOT     := $(abspath $(BUILD))/sysroot
+ SYSROOT_INC := $(SYSROOT)/usr/include
+ SYSROOT_LIB := $(SYSROOT)/usr/lib
+ 
+diff -ruN a/mk/platform-x86_64/vmunix.mk b/mk/platform-x86_64/vmunix.mk
+--- a/mk/platform-x86_64/vmunix.mk
++++ b/mk/platform-x86_64/vmunix.mk
+@@ -8,7 +8,7 @@
+ KERN_CPPFLAGS := \
+ 	-nostdlib \
+ 	-nostdinc \
+-	-Ibuild/x86_64/sysroot/usr/include \
++	-I$(BUILD)/sysroot/usr/include \
+ 	-Iinclude \
+ 	-Isrc \
+ 	-I. \
+diff -ruN a/mk/rootfs.mk b/mk/rootfs.mk
+--- a/mk/rootfs.mk
++++ b/mk/rootfs.mk
+@@ -83,6 +83,14 @@
+ ROOTFS_CONFIG_STAMP := \
+ 	$(BUILD)/.rootfs-config
+ 
++# Files a configuration or a test puts into the root besides the platform's
++# and the packages', as --file DESTINATION=SOURCE and --mode DESTINATION=MODE
++# pairs.  They are put in last, so they take the place of a file of the
++# same name, and the root is made again when one of their sources changes.
++ROOTFS_EXTRA_FILES ?=
++ROOTFS_EXTRA_INPUTS := $(foreach item,$(ROOTFS_EXTRA_FILES),\
++	$(if $(findstring =,$(item)),$(wildcard $(lastword $(subst =, ,$(item))))))
++
+ ROOTFS_TARGET_SYSROOT ?= \
+ 	$(BUILD)/sysroot
+ 
+@@ -119,7 +127,7 @@
+ 
+ define ROOTFS_TREE_RULE_AT
+ $(4)/.stamp: $(ROOTFS_CONFIG_STAMP) $(2) mk/rootfs.mk \
+-	$(PACKAGE_INPUTS) $(PROGRAM_STAMPS) $(ROOTFS_DEVELOPMENT_INPUTS)
++	$(PACKAGE_INPUTS) $(PROGRAM_STAMPS) $(ROOTFS_DEVELOPMENT_INPUTS) $(ROOTFS_EXTRA_INPUTS)
+ 	@rm -rf $(4)
+ 	@umask 022; mkdir -p $(4) $(addprefix $(4)/,\
+  $(ROOTFS_DIRECTORIES) $(ROOTFS_STICKY_DIRECTORIES))
+@@ -130,13 +138,42 @@
+ 	@ln -s ../run $(4)/var/run
+ 	@umask 022; printf '%s\n' '$(1)' > $(4)/lib/arch.id
+ 	@umask 022; printf 'zedBSD ufs root v1\n' > $(4)/etc/zedbsd-root
++# What the packages installed in the build directory comes first, and the
++# files and modes the lists name come after it, so that a list (the
++# platform's, a package's or ROOTFS_EXTRA_FILES) decides a file both name.
++	@set -e; umask 022; \
++		test -d $(BUILD)/bin && cp -f $(BUILD)/bin/* $(4)/bin/ 2>/dev/null || true; \
++		test -d $(BUILD)/sbin && cp -f $(BUILD)/sbin/* $(4)/sbin/ 2>/dev/null || true; \
++		if test -d $(BUILD)/usr/bin; then mkdir -p $(4)/usr/bin && cp -f $(BUILD)/usr/bin/* $(4)/usr/bin/ 2>/dev/null || true; fi; \
++		if test -d $(BUILD)/usr/sbin; then mkdir -p $(4)/usr/sbin && cp -f $(BUILD)/usr/sbin/* $(4)/usr/sbin/ 2>/dev/null || true; fi; \
++		if test -d $(BUILD)/usr/libexec; then mkdir -p $(4)/usr/libexec && cp -f $(BUILD)/usr/libexec/* $(4)/usr/libexec/ 2>/dev/null || true; fi; \
++		if test -d $(BUILD)/dynamic; then mkdir -p $(4)/lib && cp -f $(BUILD)/dynamic/* $(4)/lib/ 2>/dev/null || true; fi; \
++		if test -d $(BUILD)/lib/firmware; then mkdir -p $(4)/lib/firmware && cp -RP $(BUILD)/lib/firmware/. $(4)/lib/firmware/; fi; \
++		if test -d $(BUILD)/usr/share; then mkdir -p $(4)/usr/share && cp -RP $(BUILD)/usr/share/. $(4)/usr/share/ 2>/dev/null || true; fi; \
++		if test -d $(BUILD)/share; then mkdir -p $(4)/share && cp -RP $(BUILD)/share/. $(4)/share/ 2>/dev/null || true; fi; \
++		if test -d $(BUILD)/etc; then mkdir -p $(4)/etc && cp -RP $(BUILD)/etc/. $(4)/etc/ 2>/dev/null || true; fi; \
++		chmod 0755 $(4)/bin/* $(4)/sbin/* 2>/dev/null || true; \
++		test -d $(4)/usr/bin && chmod 0755 $(4)/usr/bin/* 2>/dev/null || true; \
++		test -d $(4)/usr/sbin && chmod 0755 $(4)/usr/sbin/* 2>/dev/null || true; \
++		test -d $(4)/usr/libexec && chmod 0755 $(4)/usr/libexec/* 2>/dev/null || true; \
++		chmod 0755 $(4)/lib/*.so* 2>/dev/null || true; \
++		test -f $(4)/lib/ld.so && chmod 0755 $(4)/lib/ld.so || true; \
++		for record in $(BUILD)/packages/*/mode; do \
++			test -f "$$$$record" || continue; \
++			read -r path mode < "$$$$record"; \
++			test -f "$(4)$$$$path" && chmod "$$$$mode" "$(4)$$$$path"; \
++		done; true
++# Every directory is 0755 (but the sticky ones) before the lists' modes,
++# so that a --mode a list gives a directory stays.
++	@find $(4) \( -path $(4)/tmp -o -path $(4)/shm \) \
++		-prune -o -type d -exec chmod 0755 {} +
+ 	@set -e; umask 022; \
+ 		cfg_items=""; \
+ 		if [ -f "$$(ROOTFS_CONFIG_STAMP)" ]; then \
+ 			cfg_items="$$$$($$(PYTHON) -c 'with open("$$(ROOTFS_CONFIG_STAMP)") as f: d=dict(p.split("=",1) for p in f.read().strip().split(";") if "=" in p); print(d.get("data","") + " " + d.get("files","") + " " + d.get("platform_files",""))')"; \
+ 		fi; \
+ 		for pass in file mode; do \
+-			set -- $$$$cfg_items $(3) $$(PACKAGE_FILES); while test $$$$# -gt 0; do \
++			set -- $$$$cfg_items $(3) $$(PACKAGE_FILES) $$(ROOTFS_EXTRA_FILES); while test $$$$# -gt 0; do \
+ 				option=$$$$1; specification=$$$$2; shift 2; \
+ 				path=$$$${specification%%=*}; value=$$$${specification#*=}; \
+ 				path=$$$${path#/}; \
+@@ -160,28 +197,6 @@
+ 			done; \
+ 		done
+ 	@set -e; umask 022; \
+-		test -d $(BUILD)/bin && cp -f $(BUILD)/bin/* $(4)/bin/ 2>/dev/null || true; \
+-		test -d $(BUILD)/sbin && cp -f $(BUILD)/sbin/* $(4)/sbin/ 2>/dev/null || true; \
+-		if test -d $(BUILD)/usr/bin; then mkdir -p $(4)/usr/bin && cp -f $(BUILD)/usr/bin/* $(4)/usr/bin/ 2>/dev/null || true; fi; \
+-		if test -d $(BUILD)/usr/sbin; then mkdir -p $(4)/usr/sbin && cp -f $(BUILD)/usr/sbin/* $(4)/usr/sbin/ 2>/dev/null || true; fi; \
+-		if test -d $(BUILD)/usr/libexec; then mkdir -p $(4)/usr/libexec && cp -f $(BUILD)/usr/libexec/* $(4)/usr/libexec/ 2>/dev/null || true; fi; \
+-		if test -d $(BUILD)/dynamic; then mkdir -p $(4)/lib && cp -f $(BUILD)/dynamic/* $(4)/lib/ 2>/dev/null || true; fi; \
+-		if test -d $(BUILD)/lib/firmware; then mkdir -p $(4)/lib/firmware && cp -RP $(BUILD)/lib/firmware/. $(4)/lib/firmware/; fi; \
+-		if test -d $(BUILD)/usr/share; then mkdir -p $(4)/usr/share && cp -RP $(BUILD)/usr/share/. $(4)/usr/share/ 2>/dev/null || true; fi; \
+-		if test -d $(BUILD)/share; then mkdir -p $(4)/share && cp -RP $(BUILD)/share/. $(4)/share/ 2>/dev/null || true; fi; \
+-		if test -d $(BUILD)/etc; then mkdir -p $(4)/etc && cp -RP $(BUILD)/etc/. $(4)/etc/ 2>/dev/null || true; fi; \
+-		chmod 0755 $(4)/bin/* $(4)/sbin/* 2>/dev/null || true; \
+-		test -d $(4)/usr/bin && chmod 0755 $(4)/usr/bin/* 2>/dev/null || true; \
+-		test -d $(4)/usr/sbin && chmod 0755 $(4)/usr/sbin/* 2>/dev/null || true; \
+-		test -d $(4)/usr/libexec && chmod 0755 $(4)/usr/libexec/* 2>/dev/null || true; \
+-		chmod 0755 $(4)/lib/*.so* 2>/dev/null || true; \
+-		test -f $(4)/lib/ld.so && chmod 0755 $(4)/lib/ld.so || true; \
+-		for record in $(BUILD)/packages/*/mode; do \
+-			test -f "$$$$record" || continue; \
+-			read -r path mode < "$$$$record"; \
+-			test -f "$(4)$$$$path" && chmod "$$$$mode" "$(4)$$$$path"; \
+-		done; true
+-	@set -e; umask 022; \
+ 		links=""; \
+ 		if [ -f "$$(ROOTFS_CONFIG_STAMP)" ]; then \
+ 			links="$$$$($$(PYTHON) -c 'with open("$$(ROOTFS_CONFIG_STAMP)") as f: d=dict(p.split("=",1) for p in f.read().strip().split(";") if "=" in p); print(d.get("links",""))')"; \
+@@ -195,8 +210,6 @@
+ 			mkdir -p "$$$${destination%/*}"; ln -sfn "$$$$target" "$$$$destination"; \
+ 		done
+ 	@$$(call ROOTFS_INSTALL_DEVELOPMENT,$(4))
+-	@find $(4) \( -path $(4)/tmp -o -path $(4)/shm \) \
+-		-prune -o -type d -exec chmod 0755 {} +
+ 	@umask 022; touch $$@
+ endef
+ 
+@@ -209,7 +222,8 @@
+ 	architecture='$(ARCHITECTURE)'; \
+ 	board='$(BOARD)'; \
+ 	programs='$(strip $(USERLAND_PROGRAMS))'; \
+-	value="platform=$$platform;architecture=$$architecture;board=$$board;programs=$$programs"; \
++	extra='$(strip $(ROOTFS_EXTRA_FILES))'; \
++	value="platform=$$platform;architecture=$$architecture;board=$$board;programs=$$programs;extra=$$extra"; \
+ 	if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
+ 		printf '%s\n' "$$value" > $@.tmp; \
+ 		mv $@.tmp $@; \
+diff -ruN a/mk/tracking.mk b/mk/tracking.mk
+--- a/mk/tracking.mk
++++ b/mk/tracking.mk
+@@ -62,3 +62,15 @@
+ $(LIBC_TRACKED_OBJS): CC += -MMD -MP
+ 
+ -include $(LIBC_TRACKED_OBJS:.o=.d)
++
++################################################
++# Packages
++################################################
++
++# The packages compile against the sysroot (its headers and libraries), so
++# none of them starts before the sysroot is complete, however the build
++# was asked for: "programs", a package's stamp (also one another package
++# needs, which is not among the selected ones) or a package's own target.
++ALL_PROGRAM_STAMPS := $(foreach d,$(ALL_PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsubst %/,%,$(d)))/.stamp)
++
++$(ALL_PROGRAM_STAMPS) $(ALL_PROGRAM_DIRS) $(patsubst %/,%,$(ALL_PROGRAM_DIRS)): | $(SYSROOT_COMPLETE_STAMP)
+diff -ruN a/mk/userland.mk b/mk/userland.mk
+--- a/mk/userland.mk
++++ b/mk/userland.mk
+@@ -11,7 +11,9 @@
+ CONFIG_USERLAND_PROGRAMS := $(USERLAND_PROGRAMS)
+ endif
+ 
+-override CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh init cron getty syslogd networkd mount fsck sysctl net)
++# The programs every image has.  networkd runs ifconfig, route and dhcpc
++# to configure an interface, so they come with it.
++override CONFIG_USERLAND_PROGRAMS := $(sort $(CONFIG_USERLAND_PROGRAMS) sh init cron getty syslogd networkd mount fsck sysctl net ifconfig route dhcpc)
+ 
+ ALL_PROGRAM_MAKEFILES := $(sort \
+ 	$(wildcard userland/firmware/*/Makefile) \
+@@ -45,6 +47,22 @@
+ # the source tree.
+ SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)" BUILD="$(abspath $(BUILD))"
+ 
++# The configuration the packages were made with: its files and the
++# variables given on the command line.  A package reads the configuration
++# itself (a value such as ZEDBSD_TEST_SCREEN_CAPTURE chooses its sources),
++# so a change of it runs every package's make again, which then makes
++# again only what the change touches.  The stamp is written every time and
++# replaced only when the configuration changes.
++PACKAGE_CONFIG_STAMP := $(BUILD)/.package-config
++
++.PHONY: FORCE_PACKAGE_CONFIG
++FORCE_PACKAGE_CONFIG:
++$(PACKAGE_CONFIG_STAMP): FORCE_PACKAGE_CONFIG
++	@mkdir -p $(dir $@)
++	@printf '%s\n' '$(subst ','\'',$(MAKEOVERRIDES))' > $@.tmp
++	@for f in $(sort $(abspath $(CONFIGMK_FILES))); do cat "$$f"; done >> $@.tmp
++	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
++
+ define PROGRAM_RULE
+ _CHILD_DIRS_$(1) := $$(filter $(1)%/,$$(filter-out $(1),$$(ALL_PROGRAM_DIRS)))
+ _CHILD_SRCS_$(1) := $$(foreach c,$$(_CHILD_DIRS_$(1)),$$(wildcard $$(c)* $$(c)*/* $$(c)*/*/*) $$(patsubst %/,%,$$(c)))
+@@ -52,7 +70,7 @@
+ _DIR_NAMES_$(1) := $$(patsubst %/.,%,$$(wildcard $$(addsuffix /.,$$(_ALL_SRCS_$(1)))))
+ _PKG_SRCS_$(1) := $$(filter-out $$(_CHILD_SRCS_$(1)) $$(_DIR_NAMES_$(1)),$$(_ALL_SRCS_$(1)))
+ 
+-$$(BUILD)/packages/$(notdir $(patsubst %/,%,$(1)))/.stamp: $$(_PKG_SRCS_$(1)) userland/base/package.mk
++$$(BUILD)/packages/$(notdir $(patsubst %/,%,$(1)))/.stamp: $$(_PKG_SRCS_$(1)) userland/base/package.mk $$(PACKAGE_CONFIG_STAMP)
+ 	@case "$(1)" in \
+ 		userland/packages/*) \
+ 			$$(MAKE) -C $(1) $$(SUBMAKE_CONFIG) ;; \
+diff -ruN a/userland/base/package.mk b/userland/base/package.mk
+--- a/userland/base/package.mk
++++ b/userland/base/package.mk
+@@ -292,10 +292,19 @@
+ 
+ -include $$(STANDALONE_OBJECTS_$(1):.o=.d)
+ 
++# The objects the output is made of, replaced only when the list changes: a
++# source the configuration takes in or leaves out makes the output again
++# even when every object is older than it.
++STANDALONE_OBJECTS_STAMP_$(1) = $$(STANDALONE_WORK_DIR_$(1))/.objects
++$$(STANDALONE_OBJECTS_STAMP_$(1)): FORCE
++	$$(Q)mkdir -p "$$(@D)"
++	$$(Q)printf '%s\n' '$$(STANDALONE_OBJECTS_$(1))' > $$@.tmp
++	$$(Q)if cmp -s $$@.tmp $$@; then rm -f $$@.tmp; else mv -f $$@.tmp $$@; fi
++
+ # A program: linked against libc.so, with its mode recorded for the root.
+ ifeq ($(7),program)
+ STANDALONE_OUTPUT_$(1) = $$(STANDALONE_BUILD_DIR)/$(10)/$(1)
+-$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
++$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
+ 	$$(call standalone_log,LD,$(10)/$(1))
+ 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_WORK_DIR_$(1))"
+ 	$$(Q)$$(CC) $$(STANDALONE_PROGRAM_LDFLAGS) \
+@@ -310,7 +319,7 @@
+ # A shared library: in the dynamic directory, and a copy among the libraries.
+ ifeq ($(7),shared-library)
+ STANDALONE_OUTPUT_$(1) = $$(STANDALONE_DYNAMIC_DIR)/$(2).so
+-$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(wildcard exports.map) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
++$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) $$(wildcard exports.map) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
+ 	$$(call standalone_log,SHLIB,$(2).so)
+ 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_LIB_DIR)"
+ 	$$(Q)$$(CC) $$(STANDALONE_SHLIB_LDFLAGS) \
+@@ -326,7 +335,7 @@
+ # A static library, when it has sources.
+ ifeq ($(7)$(if $(strip $(4)),y),libraryy)
+ STANDALONE_OUTPUT_$(1) = $$(STANDALONE_LIB_DIR)/lib$(1).a
+-$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1))
++$$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1))
+ 	$$(call standalone_log,AR,lib$(1).a)
+ 	$$(Q)mkdir -p "$$(@D)"
+ 	$$(Q)rm -f $$@
+diff -ruN a/userland/desktop/wallpapers/Makefile b/userland/desktop/wallpapers/Makefile
+--- a/userland/desktop/wallpapers/Makefile
++++ b/userland/desktop/wallpapers/Makefile
+@@ -15,7 +15,7 @@
+ KEILAND_WALLPAPER_FILES     := $(addprefix $(BUILD)/wallpapers/,$(addsuffix .png,$(KEILAND_WALLPAPER_GENERATED)))
+ 
+ # The pictures as DESTINATION=SOURCE, and those the image takes: all
+-# of them, less any a test's extra files name.
++# of them, less any the root's extra files (ROOTFS_EXTRA_FILES) name.
+ KEILAND_WALLPAPER_DATA := \
+ 	/usr/share/keiland/wallpaper.png=$(BUILD)/wallpapers/$(KEILAND_WALLPAPER_DEFAULT).png \
+ 	/usr/share/keiland/wallpapers/Birch-Lake.png=$(WALLPAPERS_DIR)Birch-Lake.png \
+@@ -25,7 +25,7 @@
+ KEILAND_WALLPAPER_TAKEN := \
+ 	$(if $(filter y,$(KEILAND_WALLPAPERS)), \
+ 		$(foreach item,$(KEILAND_WALLPAPER_DATA),\
+-			$(if $(findstring $(firstword $(subst =, ,$(item)))=,$(TEST_EXTRA_FILES) $(ZEDBSD_TEST_EXTRA_FILES)), \
++			$(if $(findstring $(firstword $(subst =, ,$(item)))=,$(ROOTFS_EXTRA_FILES)), \
+ 				,$(item) \
+ 			) \
+ 		) \
