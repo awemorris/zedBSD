@@ -2,7 +2,7 @@
 
 # ws335-p043: libbrowser の net/tls.c を libssl-compat・libcrypto-compat を直に呼ぶ形に（名前の表・dlopen・WB_TLS_COMPAT・WB_TLS_STATIC を無くす）
 
-Status: planned
+Status: in-progress（2026-11-13 実装済み。確かめ 1〜6・9・10 PASS、7・8 は zedBSD の toolchain が worktree に無く未実施。cleared は Q1）
 Parent: [WS335](../ws.md)。設計: [p042](../phase042/phase.md)（§1.1・§1.3・§2・§4）。実装の担当: phase-runner-low（Sonnet 5.5 high）、1 回の起動。依存: p042 の Q1 の判定（Q4〜Q7 の答え）と makefile.diff のユーザーの承認。
 
 ## 0. 何をするか（要約）
@@ -117,6 +117,59 @@ header に不備を見つけたら直さずに止め、どの header のどの�
 - 結果の節（日付は host の `date`）: 実行したコマンドと最後の行、件数、自分で決めた点、未実施、消してほしい path（`build/tmp/p043`、使われなくなった `build/ws335-nettls-host-compat`（compat の wrapper の build）など、理由付き）。ws.md の行は「実装済み・試験 PASS」（cleared は Q1）。
 - Q1 への報告: commit の SHA、上の要約。
 
-## 結果
+## 結果（2026-11-13 Sonnet q2053-i01、branch `agent/s-ws335-p043`、基点 main 13e62a764b）
 
-（実装の担当が書く）
+### 変えた物
+
+- `userland/desktop/libbrowser/net/tls.c`: 1296 行 → 818 行。表・名前の表・`wb_os_library_open`・`WB_TLS_COMPAT`・`WB_TLS_STATIC`・OpenSSL の定数の写し・`init_ssl`・OS の根の loop・Disallowed の指紋と検証の callback を外し、`<compat/ssl/ssl.h>` の関数を直に呼ぶ。`struct net_tls` の `ssl` は `SSL *`、context は `SSL_CTX *`。`tls_add_roots` は `SSL_CTX_set_default_verify_paths` だけ（1 でなければ `ERR_clear_error`・「cannot read the system's trusted certificates」・EPROTO）。誤りの文・errno・`INT_MAX` で切る長さ・`wb_os_socket_last_error()`・IP の時 SNI を送らない形は今のまま。
+- comment だけ: `net/net.h`・`net/http.c`・`base/os-net.h`（OpenSSL の語を「the TLS library」等に）。
+- 新: `plan/tools/tls/host-compat-libs.sh`。変更: `plan/ws074/tests/host-build.sh`（compat の TLS の loop、`-Wno-error` 無し、host の根の comment）、`plan/ws334/tests/net-ring-test.sh`（compat を先に build して link、tsan の時は HOST_COMPAT_CFLAGS に sanitizer）、`plan/ws335/tests/run-nettls.sh`（書き直し）。
+- 変えていない: header、`net/tls-library.h`・`tls-static.c`・`tls-static-compat.c`、Makefile・`mk/`。
+
+### 確かめ
+
+| # | コマンド | 結果 |
+| --- | --- | --- |
+| 1 | 確かめ 1 の grep | 何も出ない |
+| 2 | 確かめ 2 の grep | `tls.c:10`（「OpenSSL 3.5's」）の 1 か所だけ |
+| 3 | `sh plan/tools/tls/host-compat-libs.sh build/tmp/p043/compat` を 2 回 | 1 回目 4.9 s で compile（`-Werror`、warning 0）、2 回目 0.4 s で object の mtime が変わらず compile 0。最後の行 `host-compat-libs: build/tmp/p043/compat (30 crypto, 10 ssl sources)`。archive は 30・10 個 |
+| 4 | `sh plan/ws335/tests/run-nettls.sh`（最終の tree で 1 回、その前に 1 回） | `libbrowser.so: 0 libssl/libcrypto NEEDED, 0 imported and 0 exported TLS names, 0 library names in strings`、`http-tests 15/15`、`loader-tests 11/11`、`119 libraries started, 0 of them libssl or libcrypto`、`run-nettls: PASS (http 15 cases, loader 11 cases, libssl-compat and libcrypto-compat linked)` |
+| 5 | `sh plan/ws334/tests/net-ring-test.sh plain` | `net-ring-test: PASS`（11 s。`build/ws074-host` は無いまま、zlib の header は libz-compat の source の-I で足りた）。tsan は未実施 |
+| 6 | `BROWSER_HOST_BUILD=build/tmp/p043/asan-host sh plan/ws074/tests/host-build.sh asan`、続けて `ASAN_OPTIONS=detect_stack_use_after_return=0` で run-http-tests.py | build 通る（`-Werror`）、`http-tests 15/15`、ASan・UBSan の報告 0（grep で数えた） |
+| 7 | zedBSD の build（x86_64） | **未実施**: worktree に `build/llvm`・sysroot が無い（`build/x86_64` も無い）。toolchain の build・install は担当がしない規則なので Q1 に返す |
+| 8 | libbrowser.so の未定義の名前が compat で解ける | **未実施**（7 に依る）。代わりの確かめ（zedBSD の確かめではない）: host の `libbrowser_net_tls.o` が参照する `SSL_`・`X509_`・`ERR_`・`TLS_client_method` の 25 名の全部が `libssl-compat`・`libcrypto-compat` の `exports.map` の global にある（`grep -w`、欠け 0） |
+| 9 | Windows の core（確かめ 4 の 3 の手順、`LLVM_MINGW=$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64`、`-j3`） | 差分 A・C を写しに当てて `git apply -v` が `Applied patch ... cleanly`、写しの `grep -c 'tls-static\|WB_TLS_STATIC'` は 0。`libbrowser-core` は exit 0（2 回目の実行も exit 0）、`warning:`・`error:` 0 行。`llvm-nm net/tls.o` に `U SSL_connect`・`U SSL_CTX_new`・`U X509_VERIFY_PARAM_set1_ip_asc`・`U ERR_*`、`tls_static_library`・`tls_library` は無い |
+| 10 | `git diff --check` | 出力なし |
+
+### わざと壊す確かめ（tls.c を壊して host build し run-http-tests。終わりに戻して `git diff` が空である事を確かめた）
+
+| 壊し方 | 結果 |
+| --- | --- |
+| (a) `SSL_CTX_set_verify` を `SSL_VERIFY_NONE` に | `FAIL untrusted`・`FAIL wrong-name`、13/15 |
+| (b) `tls_set_host` の `SSL_set1_host` の呼びと検査を消す | **15/15（観測できない）**。理由: http の試験は全て `127.0.0.1`（IP）に繋ぎ、`tls_set_host` の IP の枝（`X509_VERIFY_PARAM_set1_ip_asc`）を通り、名前の枝（SNI と `SSL_set1_host`）を通らない。phase.md の「(b) で名前の違う証明書の case が FAIL」は成り立たない |
+| (b') 代わりに IP の枝の `X509_VERIFY_PARAM_set1_ip_asc` を消す | `FAIL wrong-name`、14/15 |
+| (c) `tls_add_roots` の失敗を無視 | 15/15（変化なし。host で default paths が成功するため観測できない） |
+
+名前の枝（DNS 名の host、SNI と `SSL_set1_host`）は host の試験で通らない。host の試験に名前で繋ぐ case（server が 127.0.0.1 のまま、`/etc/hosts` に頼らず `--resolve` 相当）が無いため。p046 の guest か別の試験で確かめる事を勧める。
+
+### 自分で決めた点
+
+- `tls_add_roots` を関数のまま残した（default paths の失敗を context の失敗にする理由の comment を持たせる）。
+- 2 回目以降の失敗の文は「cannot set up TLS」、lock の失敗は「cannot lock the setup of TLS (error %d)」。
+- `net-ring-test.sh` の tsan は compat の object も `-fsanitize=thread` で作る（HOST_COMPAT_CFLAGS に渡す。out の directory が variant ごとなので混ざらない）。
+- Q9（Q1 の判断: A）の 1 行を host-build.sh の先頭の comment に。
+
+### 食い違い（phase042 と phase.md）
+
+phase.md と phase042 の食い違いは見つからなかった。phase.md の (b) の記述だけ上のとおり成り立たない。
+
+### 未実施
+
+zedBSD の x86_64 の build と `readelf`・`llvm-nm` の確かめ（7・8）、net-ring-test の tsan、`plan/ws074/tests/guest-build.sh`（旧い道具）、Windows の `tls-wine.sh`・`tls-wine-compat.sh`（p045）、arm64・riscv64、QEMU・実機。
+
+### 消してほしい path（Q1 の pipeline で）
+
+- `build/tmp/p043`（asan-host・compat・win64・tree・break の log と script を含む。checks の出力の置き場。Q1 が見た後に）
+- `build/ws335-nettls-host`（run-nettls の host build の置き場。続けて使うなら残す）
+- 古い `build/ws335-nettls-host-compat` はこの worktree には作っていない（main の checkout の分は Q1 の判断）。
+- `plan/ws335/tests/` の compat の wrapper の build に頼る他の道具は無い（`run-nettls.sh` が唯一だった）。

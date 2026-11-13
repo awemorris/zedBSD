@@ -7,6 +7,8 @@
 # userland/desktop/browser/Makefile are built, not the shell/ directory (the zdesktop window);
 # plan/ws074/tests/host-shell.c stands in for it.
 # The TLS library (libcrypto-compat, libssl-compat) is compiled in, and net/tls.c calls it directly.
+# The library's default roots on Linux are /etc/ssl/cert.pem only; for a public site on a Debian host pass
+# --ca-file /etc/ssl/certs/ca-certificates.crt to the browser.
 # The GPU renderer (paint/vulkan.c) links the host's libvulkan (Debian's libvulkan-dev; lavapipe
 # draws when there is no GPU).
 # The outputs, in build/ws074-host/<variant>/:
