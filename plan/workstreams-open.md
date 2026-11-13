@@ -117,3 +117,4 @@
 | [WS285](ws285/ws.md) | MG006 | camera の object detection の demo の app（WS282〜WS284 の上） | planning・保留（後日） | p001 設計 |
 | [WS287](ws287/ws.md) | MG008 | EHCI の full-speed・low-speed の device（split transaction、ZYBO の ChipIdea を含む） | planning・保留（後日） | — |
 | [WS297](ws297/ws.md) | MG001 | completed の WS に残った「規約の全文の見直し」を一括で（WS296 と同じ形、2026-10-27 ユーザーの回答「1 つの WS にまとめる」） | planned（時期は整理で） | p001 対象の確定（候補 101 Phase・89 WS） |
+| [WS353](ws353/ws.md) | MG006 | compositor・libvulkan・kernel の待ち方の作り直し（事象は push、周期で見ない、合成と client の buffer の管理を分ける）（2026-11-13 ユーザー） | planning | p001 設計（P1 q2056） |

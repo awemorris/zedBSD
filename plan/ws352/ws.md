@@ -17,6 +17,8 @@ desktop が何もしていない時に、compositor（`/bin/wayland`）・input 
 - 2026-11-13 ユーザーから、idle の電力の未達は compositor（と client）の poll を直して解く（kernel の timer slack は足さない）、という趣旨の決定を受けた。
 - 前からの決定（Keiland）: blocking の仕事は名前の付いた thread で、数を決めて持つ（fd の事象の loop ではなく）。compositor の描画は Vulkan だけ。
 
+- 2026-11-13: ユーザーの決定で、待ち方の根本の作り直しを [WS353](../ws353/ws.md) で設計する。p002 は WS353 の設計を待つ。
+
 ## Phase
 
 | Phase | 中身 | 状態 | 依存 |
