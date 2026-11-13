@@ -77,10 +77,10 @@ index b45077ba28..93e5b9231e 100644
  	/* The HAL is asked only for a change. */
  	lowered = atomic_raw_load_acquire(&tick_lowered[cpu]);
 diff --git a/src/kern/poll.c b/src/kern/poll.c
-index d5b9077c55..473211d3f1 100644
+index 3c6eae2669..da26adfa41 100644
 --- a/src/kern/poll.c
 +++ b/src/kern/poll.c
-@@ -33,6 +33,7 @@
+@@ -35,6 +35,7 @@
  #include "kern/thread.h"
  #include "kern/waitq.h"
  #include <kern/kcrt.h>
@@ -88,7 +88,7 @@ index d5b9077c55..473211d3f1 100644
  
  #include <uapi/errno.h>
  #include <uapi/fcntl.h>
-@@ -55,6 +56,26 @@ struct poll_waiter {
+@@ -57,6 +58,28 @@ struct poll_waiter {
  	unsigned noted;
  };
  
@@ -111,11 +111,13 @@ index d5b9077c55..473211d3f1 100644
 +static uint32_t poll_diag_notifies;
 +static uint32_t poll_diag_named;
 +static uint32_t poll_diag_woken;
++static uintptr_t poll_diag_caller[16];
++static uint32_t poll_diag_caller_count[16];
 +
  /* The sleeping polls, and the count of the changes so far, under the lock. */
  struct poll_channel {
  	struct spinlock lock;
-@@ -68,6 +89,7 @@ static atomic_uint_t channel_ready;
+@@ -70,6 +93,7 @@ static atomic_uint_t channel_ready;
  static int poll_scan(struct process *process, struct pollfd *fds, nfds_t count, struct poll_waiter *waiter, int *ready);
  static int poll_follows(const struct poll_waiter *waiter, const void *object);
  static uint64_t poll_sequence(void);
@@ -123,7 +125,7 @@ index d5b9077c55..473211d3f1 100644
  static int poll_sleep(struct poll_waiter *waiter, uint64_t observed, uint64_t deadline, unsigned flags);
  static int poll_wait_ready(struct process *process, struct pollfd *fds, nfds_t count, uint64_t deadline, int immediate, int *ready);
  
-@@ -80,6 +102,7 @@ poll_init(
+@@ -82,6 +106,7 @@ poll_init(
  {
  	/* Publishes the channel only after its lock exists. */
  	spin_init(&channel.lock, LOCK_RANK_POLL, "poll event channel");
@@ -131,12 +133,24 @@ index d5b9077c55..473211d3f1 100644
  	channel.waiters = NULL;
  	channel.sequence = 0;
  	atomic_store_release(&channel_ready, 1U);
-@@ -103,8 +126,11 @@ poll_notify(
+@@ -105,8 +130,23 @@ poll_notify(
  	irq = spin_lock_irqsave(&channel.lock);
  
  	channel.sequence++;
 -	for (waiter = channel.waiters; waiter != NULL; waiter = waiter->next)
 +	poll_diag_notifies++;
++	{
++		uintptr_t caller = (uintptr_t)__builtin_return_address(0);
++		unsigned c;
++
++		for (c = 0; c < 16U; c++) {
++			if (poll_diag_caller_count[c] == 0U || poll_diag_caller[c] == caller) {
++				poll_diag_caller[c] = caller;
++				poll_diag_caller_count[c]++;
++				break;
++			}
++		}
++	}
 +	for (waiter = channel.waiters; waiter != NULL; waiter = waiter->next) {
 +		poll_diag_woken++;
  		waitq_wake_all(&waiter->waitq);
@@ -144,7 +158,7 @@ index d5b9077c55..473211d3f1 100644
  
  	spin_unlock_irqrestore(&channel.lock, irq);
  }
-@@ -128,9 +154,12 @@ poll_notify_object(
+@@ -130,9 +170,12 @@ poll_notify_object(
  	irq = spin_lock_irqsave(&channel.lock);
  
  	channel.sequence++;
@@ -158,7 +172,7 @@ index d5b9077c55..473211d3f1 100644
  	}
  
  	spin_unlock_irqrestore(&channel.lock, irq);
-@@ -412,6 +441,8 @@ poll_wait_ready(
+@@ -414,6 +457,8 @@ poll_wait_ready(
  		/* Another failure of the sleep ends the poll. */
  		if (error != 0 && error != EAGAIN)
  			return error;
@@ -167,7 +181,7 @@ index d5b9077c55..473211d3f1 100644
  
  		/* The same for a deadline that passed while the wake was on its way. */
  		now = sched_ticks();
-@@ -508,3 +539,116 @@ poll_scan(
+@@ -513,3 +558,122 @@ poll_scan(
  	/* Succeeded: the caller receives this scan's readiness count. */
  	return 0;
  }
@@ -271,6 +285,12 @@ index d5b9077c55..473211d3f1 100644
 +	poll_diag_woken = 0U;
 +	spin_unlock_irqrestore(&poll_diag_lock, irq);
 +	kern_logf("polldiag: notifies %u named %u woken %u\n", (unsigned)notifies, (unsigned)named, (unsigned)woken);
++	for (i = 0; i < 16U; i++) {
++		if (poll_diag_caller_count[i] == 0U)
++			continue;
++		kern_logf("polldiag: legacy caller %llx count %u\n", (unsigned long long)poll_diag_caller[i], (unsigned)poll_diag_caller_count[i]);
++		poll_diag_caller_count[i] = 0U;
++	}
 +	for (i = 0; i < 64U; i++) {
 +		if (poll_diag_copy[i].calls + poll_diag_copy[i].rescans == 0U)
 +			continue;
