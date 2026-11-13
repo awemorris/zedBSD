@@ -21,7 +21,9 @@
  * numbers or its link is down.  V leaving D3hot without No_Soft_Reset
  * resets V (its header, configuration register and MSI-X table), R (bus
  * numbers, windows, PCI Express controls, link down for a few reads of its
- * link status) and N.
+ * link status) and N.  V's PMCSR says No_Soft_Reset, so that its driver
+ * lets it go to D3hot, and the machine resets it all the same, so that
+ * every write-back is exercised; a V without the bit stays in D0.
  *
  *   sh plan/bugs/BUG-424/run.sh build/bug424
  */
@@ -142,9 +144,10 @@ static uint8_t *cfgbar;
 static char trace[TRACE_MAX];
 static char klog[LOG_MAX];
 
-/* Played faults: C's suspend fails, V's bus range cannot be written back. */
+/* Played faults: C's suspend fails, V's bus range cannot be written back, R is gone after V's reset. */
 static bool c_refuses;
 static bool v_range_locked;
+static bool r_lost;
 
 /* V's No_Soft_Reset, and R's link: down, and for how many more reads of its status. */
 static bool v_no_soft_reset;
@@ -176,6 +179,9 @@ static void test_state_kept(void);
 static void test_range_locked(void);
 static void test_later_failure(void);
 static void test_depth(void);
+static void unexpected(const char *name);
+static void test_vmd_in_d0(void);
+static void test_port_lost(void);
 
 /*
  * Runs the checks and reports how many failed.
@@ -194,6 +200,8 @@ main(void)
 	test_state_kept();
 	test_range_locked();
 	test_later_failure();
+	test_vmd_in_d0();
+	test_port_lost();
 	free(cfgbar);
 
 	/* Reports the outcome. */
@@ -297,6 +305,7 @@ reset_world(void)
 	klog[0] = '\0';
 	c_refuses = false;
 	v_range_locked = false;
+	r_lost = false;
 	v_no_soft_reset = false;
 	link_reads_left = 0;
 	slept_ms = 0;
@@ -333,7 +342,7 @@ fill_vmd(void)
 	put(config, 0x34, 1, V_PM);
 	put(config, V_PM, 1, 0x01);
 	put(config, V_PM + 1U, 1, V_MSIX);
-	put(config, V_PM + 4U, 2, 0x0000U);
+	put(config, V_PM + 4U, 2, 0x0008U);
 	put(config, V_MSIX, 1, 0x11);
 	put(config, V_MSIX + 2U, 2, 0x8000U | (MSIX_ENTRIES - 1U));
 
@@ -555,9 +564,9 @@ reachable(
 	if (((configuration >> 8) & 3U) != 2U)
 		return false;
 
-	/* R answers once V does. */
+	/* R answers once V does, unless V's reset lost it. */
 	if (device == &r_function)
-		return true;
+		return !r_lost;
 
 	/* N needs R's bus numbers and an active link. */
 	buses = get(r_function.config, 0x18, 4);
@@ -671,6 +680,10 @@ power_written(
 		reset_vmd();
 		reset_port();
 		reset_endpoint(&n_function);
+
+		/* A lost R reads as all ones in the CFGBAR too. */
+		if (r_lost)
+			memset(r_function.config, 0xff, CONFIG_SIZE);
 		return;
 	}
 
@@ -898,6 +911,55 @@ test_later_failure(void)
 	check((get(v_function.config, V_PM + 4U, 2) & 3U) == 0U, "later failure: V in D0");
 }
 
+/* A V without No_Soft_Reset stays in D0, and nothing behind it is lost. */
+static void
+test_vmd_in_d0(void)
+{
+	struct drv_pci_device *failed;
+	uint8_t v_before[CONFIG_SIZE];
+	uint8_t r_before[CONFIG_SIZE];
+	int error;
+
+	/* Clears No_Soft_Reset and suspends. */
+	reset_world();
+	put(v_function.config, V_PM + 4U, 2, 0x0000U);
+	memcpy(v_before, v_function.config, CONFIG_SIZE);
+	memcpy(r_before, r_function.config, CONFIG_SIZE);
+	error = drv_pci_suspend_all(&failed);
+	check(error == 0, "in D0: the suspend succeeds");
+	check((get(v_function.config, V_PM + 4U, 2) & 3U) == 0U, "in D0: V stays in D0");
+	check(position("w:V:84") < 0, "in D0: V's PMCSR not written");
+	check(strstr(klog, "sleeps in D0") != NULL, "in D0: logged");
+
+	/* Resumes: nothing was lost, nothing waited for. */
+	trace[0] = '\0';
+	error = drv_pci_resume_all();
+	check(error == 0, "in D0: the resume succeeds");
+	check(position("w:V:44") < 0, "in D0: V's register not written");
+	check(position("r:R:72") < 0, "in D0: R's link not waited for");
+	check(memcmp(v_before, v_function.config, 0x48) == 0, "in D0: V's header");
+	check(memcmp(r_before, r_function.config, 0x100) == 0, "in D0: R");
+}
+
+/* A root port that does not answer after V's reset fails V's resume. */
+static void
+test_port_lost(void)
+{
+	struct drv_pci_device *failed;
+	int error;
+
+	/* Suspends, then loses R. */
+	reset_world();
+	error = drv_pci_suspend_all(&failed);
+	check(error == 0, "port lost: the suspend succeeds");
+	r_lost = true;
+
+	/* The resume reports V's failure and names the port. */
+	error = drv_pci_resume_all();
+	check(error == EIO, "port lost: EIO");
+	check(strstr(klog, "ffff:e0:06.0 does not answer after the sleep") != NULL, "port lost: logged");
+}
+
 /*
  * The drivers of N and C, and the platform.
  */
@@ -977,6 +1039,24 @@ drv_pci_device_driver(
 	const struct drv_pci_device *device)
 {
 	return device->driver;
+}
+
+/* Visits the functions of a bus: R on V's bus, N on R's. */
+int
+drv_pci_bus_foreach_device(
+	struct drv_pci_bus *bus,
+	drv_pci_device_iterator_t visitor,
+	void *argument)
+{
+	/* The one function on each of the two buses behind V. */
+	if (bus == &vmd_bus)
+		return visitor(&r_function, argument);
+	if (bus == &port_bus)
+		return visitor(&n_function, argument);
+
+	/* The platform's bus is not asked for. */
+	unexpected(__func__);
+	return EIO;
 }
 
 /* Reports a function's driver data. */

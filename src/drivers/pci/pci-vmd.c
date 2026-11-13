@@ -29,7 +29,10 @@
  * MSI-X table; this driver keeps the one register of its own a reset
  * loses, the configuration register (the bus range and the bypass bit),
  * and checks on resume that the buses and the windows are where the
- * functions behind it were placed.
+ * functions behind it were placed.  A VMD without No_Soft_Reset stays in
+ * D0: its reset would also lose what the firmware set up beyond its
+ * header and that register (which root ports it hides), which no driver
+ * can write back.
  */
 
 #include <drivers/pci/pci-vmd.h>
@@ -107,6 +110,22 @@
  * 6.8.2 (the MSI-X capability and table entry).
  */
 #define VMD_CAP_MSIX		0x11U
+
+/*
+ * The power management capability and its control register's
+ * No_Soft_Reset bit: a function that sets it keeps its configuration
+ * from D3hot to D0.
+ *
+ * Values referenced: PCI Bus Power Management Interface Specification
+ * Revision 1.2, section 3.2.4 (PMCSR, No_Soft_Reset).
+ */
+#define VMD_CAP_PM		0x01U
+#define VMD_PM_CONTROL		0x04U
+#define VMD_PM_NO_SOFT_RESET	0x0008U
+
+/* The vendor ID register, and what a function that does not answer reads. */
+#define VMD_CFG_VENDOR		0x00U
+#define VMD_ABSENT_VENDOR	0xffffU
 #define VMD_MSIX_ENTRY_WORDS	4U
 #define VMD_MSIX_CONTROL_WORD	3U
 #define VMD_MSIX_ENTRY_MASK	0x00000001U
@@ -177,12 +196,16 @@ struct vmd_host {
 	struct drv_pci_bus *root;
 	unsigned claimed[3];
 	uint16_t saved_configuration;
+	unsigned sleep_logged;
 };
 
 static int vmd_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
 static int vmd_detach(struct drv_pci_device *device, unsigned flags);
 static int vmd_suspend(struct drv_pci_device *device);
 static int vmd_resume(struct drv_pci_device *device);
+static bool vmd_keeps_state(struct vmd_host *host);
+static int vmd_check_ports(struct vmd_host *host);
+static int vmd_check_port(struct drv_pci_device *function, void *argument);
 static int host_config_read(void *context, const struct drv_pci_address *address, unsigned offset, unsigned width, uint32_t *value);
 static int host_config_write(void *context, const struct drv_pci_address *address, unsigned offset, unsigned width, uint32_t value);
 static int host_map_bar(void *context, struct drv_pci_device *device, const struct drv_pci_bar *bar, unsigned flags, struct drv_pci_mapping *mapping);
@@ -448,6 +471,7 @@ vmd_suspend(
 {
 	struct vmd_host *host;
 	uint16_t configuration;
+	bool keeps;
 	int error;
 
 	/* Refuses a function this driver holds nothing for. */
@@ -464,6 +488,14 @@ vmd_suspend(
 
 	/* Keeps it for the resume. */
 	host->saved_configuration = configuration;
+
+	/* Stays in D0 unless D3hot keeps the VMD's configuration. */
+	keeps = vmd_keeps_state(host);
+	if (!keeps) {
+		error = drv_pci_device_keep_d0(device, true);
+		if (error != 0)
+			return error;
+	}
 
 	/* Succeeded: the VMD can go to D3hot. */
 	return 0;
@@ -533,6 +565,11 @@ vmd_resume(
 		return EIO;
 	}
 
+	/* Refuses root ports that no longer answer: the VMD lost which ports it hides. */
+	error = vmd_check_ports(host);
+	if (error != 0)
+		return EIO;
+
 	/* Refuses windows that moved. */
 	error = vmd_check_windows(host);
 	if (error != 0)
@@ -542,6 +579,93 @@ vmd_resume(
 	kern_logf("vmd: %04x: resumed (configuration %04x, %s)\n", host->segment, configuration, reset ? "written back after a reset" : "kept");
 
 	/* Succeeded: the root ports behind the VMD can be written back. */
+	return 0;
+}
+
+/*
+ * Reports whether the VMD keeps its configuration in D3hot: its power
+ * management capability sets No_Soft_Reset.  A VMD whose capability
+ * cannot be read is taken not to.  The answer is logged once.
+ */
+static bool
+vmd_keeps_state(
+	struct vmd_host *host)
+{
+	unsigned capability;
+	uint16_t control;
+	bool keeps;
+	int error;
+
+	/* Reads PMCSR. */
+	keeps = false;
+	error = drv_pci_device_find_capability(host->device, VMD_CAP_PM, &capability);
+	if (error == 0) {
+		error = drv_pci_device_config_read16(host->device, capability + VMD_PM_CONTROL, &control);
+		if (error == 0 && (control & VMD_PM_NO_SOFT_RESET) != 0)
+			keeps = true;
+	}
+
+	/* Says once which way the VMD sleeps. */
+	if (!host->sleep_logged) {
+		host->sleep_logged = 1U;
+		if (keeps)
+			kern_logf("vmd: %04x: sleeps in D3hot (No_Soft_Reset)\n", host->segment);
+		else
+			kern_logf("vmd: %04x: sleeps in D0 (no No_Soft_Reset)\n", host->segment);
+	}
+
+	/* Reports it. */
+	return keeps;
+}
+
+/*
+ * Checks that every function the scan found on the VMD's first bus (its
+ * root ports) answers again.  EIO reports one that reads as absent.
+ */
+static int
+vmd_check_ports(
+	struct vmd_host *host)
+{
+	int error;
+
+	/* A VMD whose bus was not published has nothing behind it to check. */
+	if (host->root == NULL)
+		return 0;
+
+	/* Reads each function's vendor through the CFGBAR. */
+	error = drv_pci_bus_foreach_device(host->root, vmd_check_port, host);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: every function behind the VMD answers. */
+	return 0;
+}
+
+/* Checks that one function on the VMD's first bus answers; EIO stops the walk. */
+static int
+vmd_check_port(
+	struct drv_pci_device *function,
+	void *argument)
+{
+	struct drv_pci_address location;
+	struct vmd_host *host;
+	uint32_t vendor;
+	int error;
+
+	/* Reads its vendor through the CFGBAR. */
+	host = argument;
+	drv_pci_device_address(function, &location);
+	error = vmd_config_read(host, location.bus, location.device, location.function, VMD_CFG_VENDOR, 2U, &vendor);
+	if (error != 0 || vendor == VMD_ABSENT_VENDOR) {
+		kern_logf("vmd: %04x:%02x:%02x.%u does not answer after the sleep\n",
+			  location.segment,
+			  location.bus,
+			  location.device,
+			  location.function);
+		return EIO;
+	}
+
+	/* Succeeded: the function answers. */
 	return 0;
 }
 
