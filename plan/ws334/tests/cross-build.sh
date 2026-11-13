@@ -113,7 +113,7 @@ for name in win64 winarm64; do
 	"${WIN32_TOOL_PREFIX}nm" -u $core 2> /dev/null |
 	    awk 'NF == 2 { print $2 } NF == 1 && $1 !~ /:$/ { print $1 }' | sed 's/^__imp_//' |
 	    sort -u > "$out/core-undefined-$name.txt"
-	"${WIN32_TOOL_PREFIX}nm" --defined-only $core "$media" $archives "$build/obj/libvulkan-1.a" "$build/openssl/lib/libssl.a" "$build/openssl/lib/libcrypto.a" 2> /dev/null |
+	"${WIN32_TOOL_PREFIX}nm" --defined-only $core "$media" $archives "$build/obj/libvulkan-1.a" "$build/obj/libssl-compat.a" "$build/obj/libcrypto-compat.a" 2> /dev/null |
 	    awk 'NF == 3 { print $3 }' | sed 's/^__imp_//' | sort -u > "$out/core-defined-$name.txt"
 	comm -23 "$out/core-undefined-$name.txt" "$out/core-defined-$name.txt" > "$out/core-imports-$name.txt"
 	if [ ! -s "$out/core-imports-$name.txt" ]; then

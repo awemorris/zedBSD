@@ -7,7 +7,8 @@ This directory holds the licence of each part, as its authors give it.
 zedBSD-LICENSE.txt
     OmniGrammaton and the libraries of the zedBSD tree it is built from
     (the browser's engine, its media, its text and pictures, the Keiland
-    toolkit): the zlib licence.  Copyright (C) 2026 Awe Morris.
+    toolkit, and its TLS for https, libssl-compat and libcrypto-compat):
+    the zlib licence.  Copyright (C) 2026 Awe Morris.
 
 Mahora-LICENSE.txt
     The Mahora fonts (share/fonts/keiland.ttf, keiland-bold.ttf,
@@ -33,10 +34,6 @@ libwebp-COPYING.txt
     The constants of the WebP decoder's colour conversion, values of
     libwebp 1.5.0 (no libwebp code is in the program): the BSD 3-Clause
     licence.  Copyright (c) 2010, Google Inc.
-
-OpenSSL-LICENSE.txt
-    OpenSSL (TLS for https), linked into the program: the Apache License
-    2.0.
 
 MinGW-w64-runtime.txt, winpthreads.txt, LLVM-LICENSE.txt
     The parts of the toolchain (llvm-mingw) linked into the program: the

@@ -1,30 +1,32 @@
 #!/bin/sh
-# https of libbrowser on Windows under Wine (x86_64), with the OpenSSL linked into the program: the
-# test program plan/ws334/tests/tls-main.c (built by the Windows build's test-program, which links the
-# static OpenSSL) fetches a page from the host's `openssl s_server` on 127.0.0.1 (a test CA and a
-# server certificate made here, the network outside is not used), with the blocking fetch and with the
-# loader, and must:
+# https of libbrowser on Windows under Wine (x86_64), with zedBSD's TLS (libssl-compat and libcrypto-compat)
+# linked into the program (net/tls-static-compat.c fills tls.c's table): the test program
+# plan/ws334/tests/tls-main.c (built by the Windows build's test-program, which links every static library)
+# fetches a page from the host's `openssl s_server` on 127.0.0.1 (a test CA and a server certificate made here,
+# the network outside is not used), with the blocking fetch and with the loader, and must:
 #   a. connect when the test CA is added with --ca-file;
 #   b. fail the verification when nothing trusts the CA;
 #   c. connect when the CA is in Wine's current-user ROOT store (the program puts it there for the run);
-#   d. refuse when the same CA is also in the Disallowed store;
+#   d. refuse ("certificate rejected") when the same CA is also in the Disallowed store;
 #   e. connect when the CA is the bundle of roots shipped with the program (share/certs/ca-certificates.pem
 #      beside the .exe);
-#   f. still connect with OPENSSL_CONF naming a configuration that would break TLS if it were read (it
-#      activates only the base provider, which has no algorithms); the program reads no configuration.
-# It also checks that the program holds the --openssldir path no user can create.
+#   f. still connect with OPENSSL_CONF naming a configuration that would break OpenSSL if it were read
+#      (nothing reads it);
+#   g. connect when the CA is cert.pem beside the .exe (libssl-compat's default paths on Windows).
+# The program must import no DLL of OpenSSL, hold none of OpenSSL's own names, and hold libssl-compat's.
 #   sh plan/ws334/tests/tls-wine.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
-# WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-tls-wine); PORT=<n> the server's port (18443).
-# Wine runs under flock /tmp/zedbsd-wine.lock.  Last line: tls-wine: PASS or tls-wine: FAIL.
+# WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-tls-wine-prefix); PORT=<n> the server's port (18443).
+# Wine runs under flock /tmp/zedbsd-wine.lock; make runs with -j4.  Last line: tls-wine: PASS or tls-wine: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
+top=$(pwd)
 . plan/tools/fresh-out.sh
 out=build/tmp/ws334-tls-wine
 fresh_out "$out"
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
-WINEPREFIX=${WINEPREFIX:-$(pwd)/build/tmp/ws334-tls-wine-prefix}
+WINEPREFIX=${WINEPREFIX:-$top/build/tmp/ws334-tls-wine-prefix}
 export WINEPREFIX
 port=${PORT:-18443}
 build=${BROWSER_WIN32_BUILD:-build/tmp/ws334-tls-build/browser-win64}
@@ -32,9 +34,9 @@ sources=build/tmp/ws334-win32-sources
 mkdir -p "$sources"
 status=0
 
-# The program, with the OpenSSL it links.
+# 1. The program, and the two TLS archives the Windows build makes for it.
 if ! timeout 3300 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 \
-    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j8 \
+    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j4 \
     test-program TEST_PROGRAM=tls-tool TEST_PROGRAM_SOURCES="plan/ws334/tests/tls-main.c" \
     > "$out/make.log" 2>&1 || grep -q 'warning:' "$out/make.log"; then
 	echo "tls-wine: the program did not build cleanly (log $out/make.log)"
@@ -42,17 +44,36 @@ if ! timeout 3300 make --no-print-directory -f apps/browser-win32/Makefile WIN32
 	echo "tls-wine: FAIL"
 	exit 1
 fi
+for archive in libssl-compat.a libcrypto-compat.a; do
+	if [ ! -f "$build/obj/$archive" ]; then
+		echo "tls-wine: the build made no $archive"
+		status=1
+	fi
+done
 program=$build/tests/tls-tool.exe
-
-# The path no user can create is in the program.
-if strings -a "$program" | grep -q 'C:/Windows/System32/OmniGrammaton-no-config'; then
-	echo "tls-wine: the program holds the configured openssldir"
-else
-	echo "tls-wine: the program does not hold the configured openssldir"
+if [ ! -f "$build/obj/userland/desktop/libbrowser/net/tls-static-compat.o" ]; then
+	echo "tls-wine: the program was not built with net/tls-static-compat.c"
 	status=1
 fi
 
-# A test CA, a server certificate for 127.0.0.1 signed by it, and the CA in DER for the store.
+# 2. What the program is made of: no OpenSSL DLL among its imports, none of OpenSSL's names, libssl-compat's.
+"$LLVM_MINGW/bin/llvm-objdump" -p "$program" | sed -n 's/^ *DLL Name: //p' | tr 'A-Z' 'a-z' > "$out/imports.txt"
+echo "tls-wine: imports: $(tr '\n' ' ' < "$out/imports.txt")"
+if grep -q 'ssl\|crypto-' "$out/imports.txt"; then
+	echo "tls-wine: the program imports a DLL of OpenSSL"
+	status=1
+fi
+"$LLVM_MINGW/bin/llvm-nm" "$program" > "$out/names.txt" 2>&1
+if grep -q ' OPENSSL_init_ssl$\| X509_digest$\| X509_STORE_CTX_set_error$' "$out/names.txt"; then
+	echo "tls-wine: the program holds OpenSSL's own functions"
+	status=1
+fi
+if ! grep -q ' SSL_connect$' "$out/names.txt" || ! grep -q ' sslc_' "$out/names.txt"; then
+	echo "tls-wine: the program does not hold libssl-compat"
+	status=1
+fi
+
+# 3. A test CA, a server certificate for 127.0.0.1 signed by it, and the CA in DER for the stores.
 mkdir -p "$out/pki" "$out/site"
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=tls-wine test CA" \
     -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" \
@@ -75,8 +96,8 @@ fi
 size=$(wc -c < "$out/site/page.txt" | tr -d ' ')
 
 # The server, for as long as the program runs (-WWW serves files below its directory).
-(cd "$out/site" && exec openssl s_server -accept "127.0.0.1:$port" -cert ../pki/server.pem -key ../pki/server.key \
-    -WWW -quiet > ../server.log 2>&1) &
+(cd "$out/site" && exec timeout 1800 openssl s_server -accept "127.0.0.1:$port" -cert ../pki/server.pem \
+    -key ../pki/server.key -WWW -quiet > ../server.log 2>&1) &
 server=$!
 for i in 1 2 3 4 5 6 7 8 9 10; do
 	if /usr/bin/python3 -I -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(s.connect_ex(('127.0.0.1', $port)))"; then
@@ -147,12 +168,18 @@ cp "$out/pki/ca.pem" "$out/bundle/share/certs/ca-certificates.pem"
 run e-bundle "$out/bundle/tls-tool.exe"
 connects e-bundle
 
-# f. OPENSSL_CONF naming a configuration that would break TLS if it were read (with the CA added, as in
-# a): only the base provider is activated, so the default provider's algorithms are never loaded.
+# f. OPENSSL_CONF naming a configuration that would break OpenSSL (with the CA added, as in a).
 printf 'openssl_conf = init\n[init]\nproviders = providers\n[providers]\nbase = base_section\n[base_section]\nactivate = 1\n' \
     > "$out/bad-openssl.cnf"
 OPENSSL_CONF="$out/bad-openssl.cnf" run f-conf "$program" --ca-file "$out/pki/ca.pem"
 connects f-conf
+
+# g. the CA as cert.pem beside the .exe (another copy in its own directory).
+mkdir -p "$out/beside"
+cp "$program" "$out/beside/tls-tool.exe"
+cp "$out/pki/ca.pem" "$out/beside/cert.pem"
+run g-cert-pem "$out/beside/tls-tool.exe"
+connects g-cert-pem
 
 kill "$server" 2> /dev/null
 wait "$server" 2> /dev/null
