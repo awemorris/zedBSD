@@ -623,10 +623,10 @@ vulkan_wake_destroy(
 /*
  * Arms each matching waiter independently without acquiring renderer or WSI locks.
  *
- * A device names its own errors, a context the renderer's; neither names
- * an image release by a window system that cannot name its swapchain, which
- * arms every image wait but no fence wait.  A swapchain's own image
- * transitions arm only its waits (vulkan_wake_notify_swapchain).
+ * A device names its own errors, a context the renderer's.  With neither,
+ * the caller is a window system's image release that cannot name its
+ * swapchain, which arms every image wait but no fence wait.  A swapchain's
+ * own image transitions arm only its waits (vulkan_wake_notify_swapchain).
  */
 void
 vulkan_wake_notify(
