@@ -71,11 +71,45 @@ static int venus_wait_expired(uint64_t started);
 
 
 /*
+ * Acknowledges a pending display event and publishes it as one topology change.
+ *
+ * events_read latches VIRTIO_GPU_EVENT_DISPLAY until the driver writes the bit
+ * to events_clear (Virtio 1.2, 5.7.4).  The bit is cleared before the sequence
+ * moves: a change that lands after the clear latches the bit again and raises a
+ * new configuration interrupt, and every reader woken by this sequence queries
+ * the device after the clear, so no change falls between the two.  Clearing
+ * also keeps a later queue interrupt on the shared vector from reporting the
+ * same event again.  Both the interrupt and a display query call this; when
+ * they race, both may publish, and a duplicate invalidation is harmless.
+ */
+void
+drv_venus_transport_display_event(
+	struct venus_transport *transport)
+{
+	uint8_t *configuration;
+	uint32_t events;
+
+	/* Reads the device's latched events; a clear bit means nothing is pending. */
+	configuration = transport->configuration.mapping.address;
+	events = kern_mmio_read32(configuration);
+	if ((events & VENUS_EVENT_DISPLAY) == 0U)
+		return;
+
+	/* Acknowledges only the display event, the one this driver handles. */
+	kern_mmio_write32(configuration + 4U, VENUS_EVENT_DISPLAY);
+
+	/* Publishes the acknowledged change to every open and registration. */
+	drv_venus_transport_display_changed(transport);
+
+	/* Succeeded: the event is acknowledged and its sequence is visible. */
+	return;
+}
+
+/*
  * Publishes an inventory invalidation through a retained snapshot of the GPU registration.
  *
- * Both IRQ delivery and a query that clears a pending configuration event call
- * this helper. Duplicate invalidations are harmless; no hardware event may be
- * cleared before its software sequence is visible to every independently open fd.
+ * drv_venus_transport_display_event() calls this after acknowledging the
+ * device's event.  Duplicate invalidations are harmless.
  */
 void
 drv_venus_transport_display_changed(
@@ -2568,11 +2602,17 @@ venus_interrupt(
 	unsigned long irq;
 	uint8_t status;
 
-	/* INTx ownership is decided only by this function's read-to-clear status byte. */
+	/*
+	 * INTx ownership is decided only by this function's read-to-clear status
+	 * byte.  The MSI-X vector belongs to this device alone, and a driver
+	 * should not read the status on it (Virtio 1.2, 4.1.4.5.2).
+	 */
 	transport = argument;
-	status = kern_mmio_read8(transport->isr.mapping.address);
-	if (transport->interrupt.type == DRV_PCI_IRQ_INTX && status == 0U)
-		return 0;
+	if (transport->interrupt.type == DRV_PCI_IRQ_INTX) {
+		status = kern_mmio_read8(transport->isr.mapping.address);
+		if (status == 0U)
+			return 0;
+	}
 
 	/* Counts actual driver IRQ dispatches independently from command submissions. */
 	irq = spin_lock_irqsave(&transport->queue_lock);
@@ -2581,15 +2621,12 @@ venus_interrupt(
 
 	spin_unlock_irqrestore(&transport->queue_lock, irq);
 
-	/* Config IRQs and a shared MSI-X vector expose display invalidation independently of work. */
-	if ((status & 2U) != 0U) {
-		drv_venus_transport_display_changed(transport);
-	} else if (transport->interrupt.type == DRV_PCI_IRQ_MSIX) {
-		/* MSI-X need not populate ISR bits, so sample its still-latched device event. */
-		status = (uint8_t)kern_mmio_read32(transport->configuration.mapping.address);
-		if ((status & 1U) != 0U)
-			drv_venus_transport_display_changed(transport);
-	}
+	/*
+	 * The configuration change and the control queue share this one source,
+	 * so every interrupt samples the latched display event; an acknowledged
+	 * event reads clear and is not reported again.
+	 */
+	drv_venus_transport_display_event(transport);
 
 	/* A single interrupt may retire several independent contexts in any used-ring order. */
 	collected = venus_queue_collect(transport);

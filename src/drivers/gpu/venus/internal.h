@@ -34,6 +34,7 @@
 #define VENUS_SLOT_RESERVED		4U
 #define VENUS_HEADER_BYTES		24U
 #define VENUS_FEATURE_EDID		2U
+#define VENUS_EVENT_DISPLAY		1U
 #define VENUS_MAX_RESOURCE_BYTES	(256U * 1024U * 1024U)
 #define VENUS_MAX_APERTURE_BYTES	(1024U * 1024U * 1024U)
 
@@ -244,6 +245,7 @@ int drv_venus_transport_quiesce(struct venus_transport *transport, uint32_t cont
 void drv_venus_transport_fail(struct venus_transport *transport, int error);
 int drv_venus_transport_isolate(struct venus_transport *transport, uint32_t context, int error);
 void drv_venus_display_forget_locked(struct venus_controller *controller, struct venus_session *session);
+void drv_venus_transport_display_event(struct venus_transport *transport);
 void drv_venus_transport_display_changed(struct venus_transport *transport);
 void drv_venus_header(void *buffer, uint32_t command, uint32_t context);
 uint16_t drv_venus_load16(const volatile void *buffer);
