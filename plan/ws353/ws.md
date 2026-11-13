@@ -75,6 +75,10 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | [p016](phase016/phase.md) | 試験: QEMU の回帰と 5330 の idle（電力・PC2・thread ごとの起床） | planned | p002〜p015 |
 | [p017](phase017/phase.md) | 規約の全文の見直し | planned | p016 |
 
+## Q1 の判断
+
+- 2026-11-14（p005、P1 の問い）: 入力の device の追加の後の 100 ms の settle の scan は、kernel の順の問題ではなく（`src/drivers/generic/input.c:362〜376` は node の登録の後に ADD の事象）、sessiond が同じ ADD の事象で node を利用者へ chown する前は開けない（BUG-264）ため。p005 では 2 s の周期の scan だけ消し、settle は事象の後だけの物として残す。本来の形（sessiond が seat を与えた事を session の control の fd で push し、compositor はそれで scan）は、後の Phase として足す（p018 の候補、p005 の申し送りを見て Q1 が立てる）。
+
 ## Resume point
 
 - 2026-11-14 02:32 P1（q2060-i01、branch `agent/p1-ws353d`）: p004 を実装（output-switch.c の hotplug の thread、`kwl_output_tick` と 250 ms を消し、出力の追従は `kwl_output_follow_later` で求めて main の take で走らせる、window mode の外・display の change・列挙の間は保留し終わりで wake）。x86_64・arm64・riscv64 の build は warning 0、host 試験（`plan/ws113/tests/host-output-switch.sh`、今の API に直した）PASS、QEMU（`plan/ws353/tests/qemu-hotplug-follow.sh`）2 回 PASS（[phase004](phase004/phase.md) の結果）。次は p005・p011。
