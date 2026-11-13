@@ -154,3 +154,7 @@
 - **minimal（KC705）と balanced の DEVICE_CAPS（0x008）・EXT_CAP_FMT0（0x080）・EXT_CAP_FEATURE（0x084）の 16 進**。tb で読んだ値と、§3.2 の bit の名前ごとの内訳（前回の報告は offset と bit の意味が旧い CAPS の物だった）。
 - X1 の lifecycle ごとの seq の止め方の表、X2 の flush の要求と完了の handshake、X4 の source ごとの「何が起きたか → KIND・UNIT・STAGE・SESSION」の表、X5 の slot 0 の確かめの結果、X6 の [4] の判断と根拠（試験の名前）、決められなかった所。
 - 順: X1 → X2 → X5 → X4 → X3 → X6 → X7・X8・X9。区切りごとに commit し、`build/agy/request-08.md` に書き足してよい。
+
+## 訂正（2026-11-13 Q1、ユーザーの訂正を受けて）
+
+X3 と B35 の前提に誤解があった。host が BAR の local memory の窓から GPU の local memory に書いてよいのは GOP の VRAM（firmware の boot の framebuffer）だけで、ring・vertex・fence など host と GPU が分け合う物は全部 host memory に置き、GPU が DMA で読み書きする。だから窓と L2 の一貫性の問題は起きない。依頼の送り文で頼んだ ghci.md §6.3・§11 の 1 文（「driver が command で一貫させる」）は、「窓は GOP の VRAM のため（host はそれ以外の local memory を読み書きしない。host と GPU が分け合う物は host memory に置く）」に直す。agy の今の作業が終わった後に、この訂正を送る。
