@@ -3,7 +3,7 @@
 # offers no interrupt and polls, and whether the bus's DMA is coherent).
 # Kernel: make PLATFORM=vf2 CONFIGMK=plan/ws347/tests/config-vf2-ghci.mk build/vf2/vmunix
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-include config/config.visionfive2.mk
+include config/config.vf2.mk
 
 PLATFORM := vf2
 CONFIG_DRIVER_PCI_GHCI := y

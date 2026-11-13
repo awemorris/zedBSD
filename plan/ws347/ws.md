@@ -18,6 +18,7 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 
 ## ユーザーの決定（要点）
 
+- 2026-11-13 ユーザーから、GHCI の仕様の問いの決定を受けた: B33 は session の fault（今の RTL どおり、SESSION ≠ 0 なら watchdog・AXI_ERROR も session だけを止める）、B34 は後の fault の記録（FAULT_INFO・FAULT_ADDR）だけを捨て、SESSION_ACTIVE・FAULTED・IRQ_FAULT は行う（依頼 08 の X5 (a) の仮の形のまま）。
 - 2026-11-13 ユーザーから、次の趣旨の説明を受けた: discrete の GPU でも scan-out は host memory を読める。GOP の framebuffer が host memory か板の VRAM かは、host（または板の UEFI）の firmware による。→ host が GPU の local memory に書くのは、GOP が板の VRAM にある時の GOP の framebuffer だけ。仕様の §13.2・§11.3 の比べの表を直す（agy の依頼 08 の後の訂正に入れる）。
 - 2026-11-13 ユーザーから、次の趣旨の訂正を受けた: host が GPU の local memory に書いてよいのは GOP の VRAM だけ（B35 の前提の誤解の訂正）。GOP を残して使う事はまず無いので、blitter の無い discrete の GPU で CPU が local の窓を通して frame に書く予備の道（`display.c` の `copy_by_processor`）は削除する。
 - 2026-11-13 ユーザーから、依頼 08（X1〜X9）は全部実装し、B35（host の BAR の local の窓と L2 の一貫性）は driver が command で守る、という趣旨の決定を受けた。

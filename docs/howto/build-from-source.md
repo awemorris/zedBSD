@@ -36,9 +36,11 @@ carries one per platform in `config/`:
 | Raspberry Pi 5 and Raspberry Pi 500 | `config/config.rpi5.mk` | `build/rpi5/` |
 | Raspberry Pi 4 | `config/config.rpi4.mk` | `build/rpi4/` |
 | PC/AT (i386) | `config/config.i386.mk` | `build/i386/` |
+| VisionFive 2 | `config/config.vf2.mk` | `build/vf2/` |
+| PC-9821 | `config/config.pc9821.mk` | `build/pc9821/` |
 
-The other files of `config/` (`config.pc98.mk`, `config.visionfive2.mk`,
-`config.odroidc5.mk`) name platforms the new `Makefile` does not build yet.
+`config/config.odroidc5.mk` names a platform the new `Makefile` does not
+build yet.
 The files below `config/ci/` belong to the build system that was replaced and
 are not read by this `Makefile`.
 

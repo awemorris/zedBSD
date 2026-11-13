@@ -21,10 +21,10 @@ cd "$repo" || exit 1
 all="x86_64:config/config.x86_64.mk
 intelmid64:config/config.x86_64.mk
 i386:config/config.i386.mk
-pc9821:config/config.pc98.mk
+pc9821:config/config.pc9821.mk
 rpi4:config/config.rpi4.mk
 rpi5:config/config.rpi5.mk
-vf2:config/config.visionfive2.mk"
+vf2:config/config.vf2.mk"
 if [ $# -gt 0 ]; then
 	sel=""
 	for p in "$@"; do
