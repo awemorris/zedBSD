@@ -1,0 +1,154 @@
+diff --git a/userland/desktop/libbrowser/Makefile b/userland/desktop/libbrowser/Makefile
+--- a/userland/desktop/libbrowser/Makefile
++++ b/userland/desktop/libbrowser/Makefile
+@@ -11,8 +11,7 @@
+ 		/usr/share/licenses/browser/WHATWG-entities=userland/base/licenses/browser/WHATWG-entities \
+ 		/usr/share/licenses/browser/Unicode-License-V3=userland/base/licenses/browser/Unicode-License-V3
+ 
+-$(eval $(call USERLAND_PACKAGE,libbrowser,libbrowser,x86_64,n,library,$(LIBBROWSER_SOURCES),y,desktop,desktop/libbrowser,desktop/libtruetype desktop/libvulkan desktop/libmedia desktop/libjpeg-compat desktop/libpng-compat base/libz-compat desktop/libgif-compat desktop/libwebp-compat,,shared-library,$(LIBBROWSER_IMAGE_DATA),userland/desktop/include/browser/browser.h userland/desktop/include/browser/storage.h,lib))
++$(eval $(call USERLAND_PACKAGE,libbrowser,libbrowser,x86_64,n,library,$(LIBBROWSER_SOURCES),y,desktop,desktop/libbrowser,desktop/libtruetype desktop/libvulkan desktop/libmedia desktop/libjpeg-compat desktop/libpng-compat base/libz-compat desktop/libgif-compat desktop/libwebp-compat base/libssl-compat base/libcrypto-compat,,shared-library,$(LIBBROWSER_IMAGE_DATA),userland/desktop/include/browser/browser.h userland/desktop/include/browser/storage.h,lib))
+ 
+-# https on zedBSD goes through libssl-compat and libcrypto-compat: net/tls.c opens them by name
+-# (libssl-compat.so, libcrypto-compat.so) when it is compiled with WB_TLS_COMPAT.
+-STANDALONE_CFLAGS_libbrowser += -DWB_TLS_COMPAT
++# https goes through libssl-compat and libcrypto-compat, zedBSD's own TLS library: net/tls.c calls them
++# directly, and libbrowser.so links them (libssl-compat.so, libcrypto-compat.so).  OpenSSL is never used.
+diff --git a/userland/desktop/mailer/Makefile b/userland/desktop/mailer/Makefile
+--- a/userland/desktop/mailer/Makefile
++++ b/userland/desktop/mailer/Makefile
+@@ -5,6 +5,9 @@
+ 
+ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
+ 
++# Mail's TLS (tls.c) is libssl-compat and libcrypto-compat, zedBSD's own TLS library, which the program links.
++# OpenSSL is never used.
++
+ MAILER_SOURCES := \
+ 	userland/desktop/mailer/main.c \
+ 	userland/desktop/mailer/view.c \
+@@ -22,4 +25,4 @@
+ 	userland/desktop/mailer/account.c \
+ 	userland/desktop/mailer/secret.c
+ 
+-$(eval $(call USERLAND_PACKAGE,mailer,mailer - Mail,x86_64,n,basic,$(MAILER_SOURCES),y,desktop,desktop/mailer,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype,0755,program,,,bin))
++$(eval $(call USERLAND_PACKAGE,mailer,mailer - Mail,x86_64,n,basic,$(MAILER_SOURCES),y,desktop,desktop/mailer,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype base/libssl-compat base/libcrypto-compat,0755,program,,,bin))
+diff --git a/apps/browser-win32/Makefile b/apps/browser-win32/Makefile
+--- a/apps/browser-win32/Makefile
++++ b/apps/browser-win32/Makefile
+@@ -85,7 +85,6 @@
+ LIBBROWSER_CORE_EXCLUDED := $(LIBBROWSER_OS_SOURCES) \
+ 	$(LIBBROWSER_OS_NET_SOURCES)
+ LIBBROWSER_CORE_SOURCES := $(filter-out $(LIBBROWSER_CORE_EXCLUDED),$(LIBBROWSER_SOURCES))
+-LIBBROWSER_CORE_SOURCES += $(LIBBROWSER_DIR)/net/tls-static-compat.c
+ LIBBROWSER_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBBROWSER_CORE_SOURCES))
+ 
+ LIBBROWSER_SCRIPT_WIN32_LAYER := $(LIBBROWSER_DIR)/base/os-win32.c \
+@@ -296,7 +295,6 @@
+ $(LIBBROWSER_CORE_OBJECTS) $(BROWSER_UI_OBJECTS) $(OMNIGRAMMATON_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
+ $(LIBMEDIA_CORE_OBJECTS): | $(WIN32_VULKAN_HEADERS)
+ 
+-$(BROWSER_WIN32_OBJ)/$(LIBBROWSER_DIR)/net/tls.o: WIN32_CFLAGS += -DWB_TLS_STATIC
+ $(WIN32_TLS_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES)
+ 
+ $(LIBKEILAND_WIN32_OBJECTS) $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBKEILAND_WIN32_STUB_SOURCES)): | \
+diff --git a/mk/userland.mk b/mk/userland.mk
+--- a/mk/userland.mk
++++ b/mk/userland.mk
+@@ -97,7 +97,7 @@
+ $(BUILD)/packages/libegl/.stamp: $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libwayland/.stamp $(BUILD)/packages/libwayland-egl/.stamp
+ $(BUILD)/packages/libglesv2/.stamp: $(BUILD)/packages/libegl/.stamp
+ $(BUILD)/packages/libGL/.stamp: $(BUILD)/packages/libegl/.stamp
+-$(BUILD)/packages/libbrowser/.stamp: $(BUILD)/packages/libtruetype/.stamp $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libmedia/.stamp $(BUILD)/packages/libjpeg-compat/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libgif-compat/.stamp $(BUILD)/packages/libwebp-compat/.stamp
++$(BUILD)/packages/libbrowser/.stamp: $(BUILD)/packages/libtruetype/.stamp $(BUILD)/packages/libvulkan/.stamp $(BUILD)/packages/libmedia/.stamp $(BUILD)/packages/libjpeg-compat/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libgif-compat/.stamp $(BUILD)/packages/libwebp-compat/.stamp $(BUILD)/packages/libssl-compat/.stamp $(BUILD)/packages/libcrypto-compat/.stamp
+ $(BUILD)/packages/libGLX/.stamp: $(BUILD)/packages/libGL/.stamp $(BUILD)/packages/libegl/.stamp
+ 
+ # Desktop app dependencies
+@@ -114,7 +114,7 @@
+ $(BUILD)/packages/music/.stamp:       $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libmedia/.stamp $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libjpeg-compat/.stamp $(BUILD)/packages/libgif-compat/.stamp
+ $(BUILD)/packages/videoplayer/.stamp: $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libmedia/.stamp
+ $(BUILD)/packages/calendar/.stamp:    $(KEILAND_COMMON_DEPS)
+-$(BUILD)/packages/mailer/.stamp:      $(KEILAND_COMMON_DEPS)
++$(BUILD)/packages/mailer/.stamp:      $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libssl-compat/.stamp $(BUILD)/packages/libcrypto-compat/.stamp
+ $(BUILD)/packages/monitor/.stamp:     $(KEILAND_COMMON_DEPS)
+ $(BUILD)/packages/phone/.stamp:       $(KEILAND_COMMON_DEPS) $(BUILD)/packages/preview/.stamp $(BUILD)/packages/libz-compat/.stamp
+ $(BUILD)/packages/mediastorage/.stamp: $(BUILD)/packages/libkeiland/.stamp $(BUILD)/packages/libwayland/.stamp $(BUILD)/packages/preview/.stamp
+diff --git a/userland/base/libssl-compat/Makefile b/userland/base/libssl-compat/Makefile
+--- a/userland/base/libssl-compat/Makefile
++++ b/userland/base/libssl-compat/Makefile
+@@ -7,7 +7,8 @@
+ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
+ 
+ # libssl-compat: zedBSD's own TLS client with the part of OpenSSL's libssl interface that the browser uses; no
+-# OpenSSL code.  It is built on libcrypto-compat.  Off by default: a program that links it selects it.
++# OpenSSL code.  It is built on libcrypto-compat.  libbrowser and mailer link it: a build that makes either
++# makes it first, and the image takes every shared library the build made.
+ # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ 
+ LIBSSL_COMPAT_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libssl-compat.so=$(BUILD)/dynamic/libssl-compat.so)
+diff --git a/userland/base/libcrypto-compat/Makefile b/userland/base/libcrypto-compat/Makefile
+--- a/userland/base/libcrypto-compat/Makefile
++++ b/userland/base/libcrypto-compat/Makefile
+@@ -7,7 +7,9 @@
+ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
+ 
+ # libcrypto-compat: zedBSD's own libcrypto interface (the part of OpenSSL's libcrypto that the TLS library, the
+-# browser and the SSH programs use); no OpenSSL code.  Off by default: a program that links it selects it.
++# browser, Mail and the SSH programs use); no OpenSSL code.  libssl-compat, libbrowser, mailer, ssh, fidoctl and
++# passkey-fido2 link it: a build that makes one of them makes it first, and the image takes every shared library
++# the build made.
+ # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ 
+ LIBCRYPTO_COMPAT_IMAGE_DATA := $(if $(TOPLEVEL_BUILD),/lib/libcrypto-compat.so=$(BUILD)/dynamic/libcrypto-compat.so)
+diff --git a/userland/packages/security/openssl/Makefile b/userland/packages/security/openssl/Makefile
+--- a/userland/packages/security/openssl/Makefile
++++ b/userland/packages/security/openssl/Makefile
+@@ -1,12 +1,15 @@
+ # zedBSD userland package: OpenSSL (external release tarball).
+ # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ #
++# An external package, never part of the system: it is built and put in an
++# image only when the configuration names the package openssl (curl,
++# python3 and openssh need it, so a configuration that names them names it
++# too).  Nothing of the system needs it; the system's own TLS and
++# cryptography are libssl-compat and libcrypto-compat (userland/base/),
++# which the browser, Mail and ssh use.
++#
+ # OpenSSL itself is Apache-2.0 and stays outside the source tree: only this
+ # Makefile, the patches beside it and the recorded archive identity live here.
+-# Provenance and the license audit are in plan/ws032/provenance.md.
+-#
+-# Registration as a selectable package and the cross build land with the build
+-# work; this file currently owns acquisition of the verified source tree.
+ OPENSSL_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+ OPENSSL_DIR := $(patsubst %/,%,$(dir $(OPENSSL_MAKEFILE)))
+ include $(OPENSSL_DIR)/../../../base/package.mk
+@@ -52,7 +55,6 @@
+ # The deprecated interfaces are kept.  They were left out while the zedBSD
+ # libc had no gethostbyname, which some of them reach for; the libc has it
+ # now, and OpenSSH is written against EC_KEY, which is among them.
+-# See plan/ws032/phase006/results.md for the rest.
+ OPENSSL_CONFIGURE_OPTIONS := \
+ 	--prefix=/usr --openssldir=/etc/ssl --libdir=lib \
+ 	no-asm no-tests no-docs no-engine no-dso no-module \
+diff --git a/userland/packages/network/openssh/Makefile b/userland/packages/network/openssh/Makefile
+--- a/userland/packages/network/openssh/Makefile
++++ b/userland/packages/network/openssh/Makefile
+@@ -1,12 +1,14 @@
+ # zedBSD userland package: OpenSSH portable (external release tarball).
+ # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ #
++# An external package, never part of the system: it is built and put in an
++# image only when the configuration names it, and it needs OpenSSL, which the
++# configuration names as well.
++# The system's own ssh, sshd, ssh-keygen and sftp-server are userland/base/ssh
++# (on libcrypto-compat).
++#
+ # OpenSSH is BSD/ISC licensed and stays outside the source tree: only this
+ # Makefile, the patches beside it and the recorded archive identity live here.
+-# Provenance and the license audit are in plan/ws032/provenance.md.
+-#
+-# Registration as a selectable package and the cross build land with the build
+-# work; this file currently owns acquisition of the verified source tree.
+ OPENSSH_MAKEFILE := $(lastword $(MAKEFILE_LIST))
+ OPENSSH_DIR := $(patsubst %/,%,$(dir $(OPENSSH_MAKEFILE)))
+ include $(OPENSSH_DIR)/../../../base/package.mk

@@ -74,3 +74,29 @@
 - 基点の commit b7dfd3952 の tree で: check-skeleton.sh PASS（cc・clang、zedBSD の clang の x86_64・aarch64、llvm-mingw の x86_64・aarch64 の compile・static link・名前の範囲、x86_64 の gnu11）、`BASE=b7dfd3952` でも PASS、
   run-unit.sh all PASS（test-tools 18 checks）、run-unit.sh --win32 all PASS（test-tools 18 checks、Wine）、`git diff --check` 空。WS335_VECTORS は共有の `/home/awe/zedBSD-claude1/build/sources/tls-vectors`。
 - 壊す確かめ: 失敗する nm を PATH の先に置くと check-skeleton の 7 が `FAILED cc: nm failed on …` で FAIL。名前の範囲の外の名前（`helper`・crypto の object の `SSL_x`）を filter が拾う事を別の object で確かめた。
+
+## p042 の design-reviewer（2026-11-13 P2 q2051-i01、基点 d6e86e186e）
+
+対象: [phase042/phase.md](phase042/phase.md)・[makefile.diff](phase042/makefile.diff)・p043〜p047 の phase.md。重大 1・中 8・軽 8。全部を反映した（反映の後の commit は phase042 の結果の節）。
+
+| # | 重さ | 指摘 | 扱い |
+| --- | --- | --- | --- |
+| 1 | 重大 | host-compat-libs.sh の archive: mktemp の空の file に `ar rcs` は `file format not recognized` で失敗する | 反映: p043 §2.3 の 1 を `printf '!<arch>\n'` で見出しを書いた `libX.a.new` に `ar rcs`、`mv -f` に。mktemp を使わない |
+| 2 | 中 | p043・p044 の grep の確かめが、求める comment（「libssl-compat and libcrypto-compat」）に当たって FAIL する | 反映: grep を名前で開く物（`"libssl`・`libssl\.so` など）と表・macro に絞った |
+| 3 | 中 | `git apply --include=apps/...` は `--directory` の後の path と照合され、全部 Skipped で exit 0 | 反映: `--include=build/tmp/p043/tree/apps/browser-win32/Makefile`、`-v`、grep が 0 でなければ当たっていない、に（p043・p045） |
+| 4 | 中 | 差分 C を p043 と同時に当てると tls-wine.sh が p045 まで main で FAIL。C は急ぐ理由が無い | 反映: A・B・D〜G は p043 の merge と同じ commit、C は p045 の merge と同じ commit に（p042 §4・Q7、p045、ws.md） |
+| 5 | 中 | Q6 の「image から欠ける」と G の comment が実際（`mk/rootfs.mk:163` が dynamic を全部写す）と違う | 反映: p042 §2 の 2・Q6 を直し、G の文を「build が先に作り、image は build の shared library を全部取る」に |
+| 6 | 中 | 一覧が `mail.h:9-11` の「the OpenSSL package」を落とし、p044 の §3 と §6 が食い違う | 反映: 一覧と p044 §2.2・§6 に足した |
+| 7 | 中 | host の試験では system の根が `/etc/ssl/cert.pem` だけになり Debian の根を読まない | 反映: p042 §2 の 5 に書き、問い Q9 を足した。p043 §5 |
+| 8 | 中 | p046 の guest の試験の順と image の出どころ（browser-guest は image を作らない） | 反映: p046 で mailer-guest（image を作る）→ 同じ image で browser-guest、image の mtime を確かめる |
+| 9 | 中 | p043 の壊し (b)「SNI を送らない」は試験の server が SNI を見ないので観測できない | 反映: (b) を「`SSL_set1_host` を呼ばない」に |
+| 10 | 軽 | host の compat の object が header の変更で作り直されない | 反映: p043 §2.3 の 1 に header の `find -newer` の条件 |
+| 11 | 軽 | asan の build の compat を流す確かめが無い | 反映: p043 §3 の 6 に asan の browser で run-http-tests を 1 回 |
+| 12 | 軽 | WS074・WS334 の design.md の写し（OpenSSL を dlopen、`wb_os_trust_roots`）が直らない | 反映: 問い Q5 に足し、p046 の 4 で注を |
+| 13 | 軽 | openssl の Makefile の中ほどの plan/ への参照が残る | 反映: 差分 E に 1 行の削除を足した |
+| 14 | 軽 | 「curl・python3・openssh を名指せば OpenSSL も build される」は未確認（requirement から自動で作る規則が無い） | 反映: E の comment を「openssl を名指す。curl などはそれを要るので、それらを名指す設定は openssl も名指す」に |
+| 15 | 軽 | §1.2 の mailer の tls.c の行番号のずれ | 反映: 40・56-67・75-107・109-165・442-571 に |
+| 16 | 軽 | phase042 が「design-review.md の p042 の節」を置いたと先に書いていた | 反映: この節を書いてから commit |
+| 17 | 軽 | その他: `plan/ws074/tests/guest-build.sh`、`build/ws335-nettls-host-compat`、zedBSD の「warning 0」の弱さ（`-Wall` 無し）、`plan/tools/` の旧い config の `openssl` | 反映: p046 の消す候補、p043 の消してほしい path、p042 §4・p043 §5 の注、Q8 の (3)(4) |
+
+確かめて正しかった事（reviewer）: 使う関数は全部 exports.map にある、`SSL_set_tlsext_host_name` などは ssl.h の macro、command line の `STANDALONE_SO_LIST_<名前>` の上書きは link の recipe で効き値は `standalone_required_so` と一致、`git apply --check` が通る、A が無いまま p043 を入れると browser が起動しない、Windows の archive の順で tls.o の参照が解ける、compat の 40 file は host-build の flag（asan を含む）で gcc 14.2 の warning 0、object の名前と大域の名前は衝突しない。
