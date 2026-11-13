@@ -425,6 +425,15 @@ main(void)
 	check(view.tasks == 7U && view.task_numbers[6] == 6U, "D: the stop came after task 6's completion");
 	check(view.completed == 11U, "D: and after the frame's");
 
+	/* The thread's own counts, read after its end: each fence waited for once. */
+	check(render.counts.jobs == 11U && render.counts.fence_waits == 11U, "counts: one wait for each job's fence");
+	check(render.counts.tasks == 7U && render.counts.task_waits == 6U, "counts: one wait for each submitted task's fence");
+	printf("counts acquires_waiting=%llu acquires_now=%llu acquires_missed=%llu sleeps=%llu\n",
+	    (unsigned long long)render.counts.acquires_waiting,
+	    (unsigned long long)render.counts.acquires_now,
+	    (unsigned long long)render.counts.acquires_missed,
+	    (unsigned long long)render.counts.sleeps);
+
 	/* Every wait the thread made: no timeout but none and forever, and no fence waited for twice. */
 	pthread_mutex_lock(&test_lock);
 
