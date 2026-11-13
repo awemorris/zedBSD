@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | q2046 | 作業中 | WS352: desktop の idle の短い poll を無くす（compositor・input・client） | 5330 の idle を WS333 p029 と同等に |
 | P2 | q2048 | 作業中 | WS335 p041: mailer の TLS を compat に、cross-build.sh を make browser-win32 に | 次: WS299 p007 |
-| P3 | q2050 | 作業中 | WS334: GitHub CI で素の make browser-win32（mingw-w64）が通る差分を作り直す | agy の依頼 08 の監査 |
+| P3 | — | 待機 | WS334 p039 は ユーザーが直して cleared | agy の依頼 08 の監査（agy が終われば） |
 | P4 | — | 待機 | WS347 p009 cleared（host は local memory に GOP 以外触れない） | p004（VF2＋KC705 の実機） |
 | P5 | — | ラップアップ | WS345 p010（origin ごとの agent）の中心を main に（00:05）。残り: tsan の 3 件、回帰、busy・stop を遠隔の frame に広げる（phase010 の引き継ぎ） | — |
 | P6 | — | ラップアップ | WS336 p024 の途中まで main に（00:05）。残り: replace-check.sh、interop の流し直し、変異の試験（phase024 の引き継ぎ）。config/ci の差分の案は phase024 に（WS343 で入れる） | — |
