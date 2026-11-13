@@ -1,3 +1,12 @@
+#
+# Add kernel test configuration options here. These options are not
+# part of the kernel configuration, but are used to enable/disable
+# kernel test features in the kernel source code.
+#
+# See also test-kernel.mk for how these options are used in the kernel
+# build.
+#
+
 # [Kernel Test: Checkpoints]
 CONFIG_KERNEL_TEST_CHECKPOINTS    ?= n
 

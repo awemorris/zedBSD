@@ -1,3 +1,7 @@
+#
+# Additional kernel test features and drivers for the kernel build.
+#
+
 # [PC/AT serial mirror of the console]
 ifneq ($(filter y,$(CONFIG_PCAT_SERIAL_MIRROR)),)
 KERN_CPPFLAGS += -DPCAT_SERIAL_MIRROR
