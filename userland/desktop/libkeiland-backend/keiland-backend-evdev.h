@@ -140,4 +140,56 @@ ssize_t kl_backend_input_read(int descriptor, struct input_event *events, size_t
  */
 void kl_backend_input_close(struct kl_backend *backend, int descriptor);
 
+/* The input devices one wait of the devices' thread opens at most (more are left to a finding). */
+#define KL_BACKEND_DEVICES_NODES_MAX	8U
+
+/*
+ * What one wait of the devices' thread brought: an input device came or
+ * went (input_changed), a security key or a smart card did (keys_changed),
+ * records were lost or more devices came than the batch holds, so every
+ * device is to be looked at again (overflow), and the input devices that
+ * came, opened with their capabilities (count of them, each descriptor
+ * the compositor's to keep or close).  One instance is filled on the
+ * devices' thread and taken on the event loop's.
+ */
+struct kl_backend_device_batch {
+	unsigned input_changed;
+	unsigned keys_changed;
+	unsigned overflow;
+	unsigned count;
+	struct kl_backend_input_node nodes[KL_BACKEND_DEVICES_NODES_MAX];
+};
+
+/*
+ * The devices' thread (zedBSD): the system's events of the devices that
+ * come and go are heard on a thread of the compositor's, which opens each
+ * input device that comes (through the session manager's seat socket when
+ * there is one) and hands it to the event loop.
+ *
+ * kl_backend_devices_start, on the event loop's thread before the first
+ * finding, subscribes the thread's descriptor and takes those classes off
+ * the event loop's: 0, or ENOTSUP where the system does not tell them
+ * (Linux, FreeBSD, a kernel without the events), or an errno value.
+ * kl_backend_devices_wait, on the devices' thread, waits without a time
+ * limit for records, opens the input devices that came and fills batch:
+ * 0, ECANCELED once kl_backend_input_cancel was called, or an errno value
+ * (the thread ends).  kl_backend_devices_take, on the event loop's thread,
+ * acts on a batch's notes (the refusals forgotten, keys_changed, and
+ * input_changed for an overflow); the compositor offers its nodes itself.
+ * kl_backend_devices_stop, on the event loop's thread after the thread
+ * ended, gives the classes back to the event loop's descriptor.
+ */
+int kl_backend_devices_start(struct kl_backend *backend);
+int kl_backend_devices_wait(struct kl_backend *backend, struct kl_backend_device_batch *batch);
+void kl_backend_devices_take(struct kl_backend *backend, const struct kl_backend_device_batch *batch);
+void kl_backend_devices_stop(struct kl_backend *backend);
+
+/*
+ * Ends, from any thread and for good, the devices' thread's wait and every
+ * wait for the session manager's answer to an open (they return
+ * ECANCELED); called as the compositor stops, before its threads are
+ * joined.
+ */
+void kl_backend_input_cancel(struct kl_backend *backend);
+
 #endif

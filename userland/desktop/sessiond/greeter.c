@@ -33,6 +33,10 @@
  * between the two.  At a Log Out a greeter is started while the session
  * still shows; its READY is answered only once the session has given the
  * display back (session.c).
+ *
+ * The greeter also gets a seat socket as descriptor 4 (--seat-fd=4), on
+ * which sessiond opens the input devices for it while it holds the seat
+ * (seat.c).
  */
 
 #include "auth.h"
@@ -88,7 +92,7 @@ struct greeter {
 
 static int greeter_account_find(struct sessiond_account *greeter_account);
 static int greeter_start(struct sessiond *daemon, struct greeter *greeter, struct sessiond_account *greeter_account);
-static void greeter_child(struct sessiond *daemon, int socket, struct sessiond_account *greeter_account);
+static void greeter_child(struct sessiond *daemon, int socket, int seat, struct sessiond_account *greeter_account);
 static int greeter_read(struct greeter *greeter);
 static void greeter_request(struct greeter *greeter, char *line);
 static void greeter_power(struct greeter *greeter, const char *what);
@@ -109,7 +113,7 @@ sessiond_greeter_run(
 {
 	struct sessiond_account greeter_account;
 	struct greeter greeter;
-	struct pollfd poll_entry[4];
+	struct pollfd poll_entry[4 + SESSIOND_SEAT_SOCKETS];
 	enum sessiond_greeter_end end;
 	long long seat_ms;
 	long long now_ms;
@@ -117,6 +121,8 @@ sessiond_greeter_run(
 	nfds_t entries;
 	nfds_t sleep_slot;
 	nfds_t seat_slot;
+	nfds_t sockets_first;
+	nfds_t sockets;
 	int timeout;
 	int busy;
 	int ready;
@@ -182,6 +188,11 @@ sessiond_greeter_run(
 		poll_entry[seat_slot].revents = 0;
 		if (poll_entry[seat_slot].fd >= 0)
 			entries++;
+
+		/* A compositor's request for an input device (seat.c). */
+		sockets_first = entries;
+		sockets = sessiond_seat_poll_fill(poll_entry + sockets_first, SESSIOND_SEAT_SOCKETS);
+		entries += sockets;
 		busy = sessiond_exchange_busy(&greeter.exchange);
 		timeout = 1000;
 		if (busy)
@@ -195,6 +206,10 @@ sessiond_greeter_run(
 		/* The sleep's answer goes to the compositor that asked. */
 		if (ready > 0 && sleep_slot < entries && poll_entry[sleep_slot].revents != 0)
 			sessiond_sleep_collect();
+
+		/* The input devices asked for are opened for the compositor that holds the seat. */
+		if (ready > 0)
+			sessiond_seat_poll_done(poll_entry + sockets_first, sockets);
 
 		/* The attempt moves on; a login passkey granted takes the account. */
 		sessiond_exchange_tick(&greeter.exchange);
@@ -412,6 +427,8 @@ greeter_start(
 	struct sessiond_account *greeter_account)
 {
 	int pair[2];
+	int seat_own;
+	int seat_child;
 	int error;
 
 	/* The greeter's account. */
@@ -429,23 +446,36 @@ greeter_start(
 		return errno;
 	}
 
-	/* The greeter's process. */
+	/* The socket it asks for the input devices on; without one it opens them itself. */
+	seat_own = -1;
+	seat_child = -1;
+	error = sessiond_seat_socket(&seat_own, &seat_child);
+	if (error != 0)
+		seat_child = -1;
+
+	/* The greeter's process (a seat socket left without its child sees its end and goes). */
 	greeter->pid = fork();
 	if (greeter->pid < 0) {
 		sessiond_log("SESSIOND GREETER fork errno=%d", errno);
 		(void)close(pair[0]);
 		(void)close(pair[1]);
+		if (seat_child >= 0)
+			(void)close(seat_child);
 		return EAGAIN;
 	}
 
 	/* The child becomes the greeter and does not come back. */
 	if (greeter->pid == 0) {
 		(void)close(pair[0]);
-		greeter_child(daemon, pair[1], greeter_account);
+		greeter_child(daemon, pair[1], seat_child, greeter_account);
 	}
 
-	/* sessiond keeps its own end. */
+	/* sessiond keeps its own ends; the input devices are the new greeter's to ask for. */
 	(void)close(pair[1]);
+	if (seat_child >= 0) {
+		(void)close(seat_child);
+		sessiond_seat_hold(seat_own);
+	}
 	greeter->socket = pair[0];
 	(void)fcntl(greeter->socket, F_SETFD, FD_CLOEXEC);
 	greeter->started = time(NULL);
@@ -460,9 +490,13 @@ static void
 greeter_child(
 	struct sessiond *daemon,
 	int socket,
+	int seat,
 	struct sessiond_account *greeter_account)
 {
-	char *arguments[5];
+	char *arguments[6];
+	char seat_option[24];
+	int first_closed;
+	int next;
 	char *environment[5];
 	char user[96];
 	char wallpaper[160];
@@ -470,8 +504,20 @@ greeter_child(
 	int descriptor;
 	int error;
 
-	/* The socket as descriptor 3, the log as its output, nothing to read on standard input. */
+	/*
+	 * The seat socket is moved above the places the two sockets go first,
+	 * so that putting the greeter's socket at descriptor 3 cannot close it.
+	 */
+	if (seat >= 0)
+		seat = fcntl(seat, F_DUPFD, SESSIOND_SEAT_FD + 1);
+
+	/* The socket as descriptor 3, the seat socket as 4, the log as its output, nothing to read on standard input. */
 	(void)dup2(socket, SESSIOND_AUTH_FD);
+	first_closed = SESSIOND_AUTH_FD + 1;
+	if (seat >= 0) {
+		(void)dup2(seat, SESSIOND_SEAT_FD);
+		first_closed = SESSIOND_SEAT_FD + 1;
+	}
 	descriptor = open("/dev/null", O_RDONLY);
 	if (descriptor >= 0)
 		(void)dup2(descriptor, STDIN_FILENO);
@@ -482,7 +528,7 @@ greeter_child(
 	}
 
 	/* No other descriptor of sessiond's goes with it. */
-	for (descriptor = SESSIOND_AUTH_FD + 1; descriptor < 256; descriptor++)
+	for (descriptor = first_closed; descriptor < 256; descriptor++)
 		(void)close(descriptor);
 
 	/* Its own session, and its account's groups and ids (the last step as root). */
@@ -505,17 +551,23 @@ greeter_child(
 	environment[2] = "PATH=/bin:/sbin:/usr/bin";
 	environment[3] = NULL;
 
-	/* The greeter's options: the wallpaper when the image has one. */
+	/* The greeter's options: the seat socket when it has one, the wallpaper when the image has one. */
 	arguments[0] = (char *)daemon->greeter;
 	arguments[1] = "--greeter";
 	arguments[2] = "--auth-fd=3";
-	arguments[3] = NULL;
+	next = 3;
+	if (seat >= 0) {
+		snprintf(seat_option, sizeof(seat_option), "--seat-fd=%d", SESSIOND_SEAT_FD);
+		arguments[next] = seat_option;
+		next++;
+	}
 	error = stat(SESSIOND_WALLPAPER, &status);
 	if (error == 0) {
 		snprintf(wallpaper, sizeof(wallpaper), "--wallpaper=%s", SESSIOND_WALLPAPER);
-		arguments[3] = wallpaper;
-		arguments[4] = NULL;
+		arguments[next] = wallpaper;
+		next++;
 	}
+	arguments[next] = NULL;
 
 	/* Only a failed exec comes back. */
 	(void)execve(daemon->greeter, arguments, environment);

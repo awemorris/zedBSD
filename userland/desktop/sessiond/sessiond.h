@@ -12,6 +12,7 @@
 #ifndef SESSIOND_H
 #define SESSIOND_H
 
+#include <poll.h>
 #include <pwd.h>
 #include <signal.h>
 #include <sys/types.h>
@@ -30,6 +31,15 @@
 /* The descriptor the greeter talks to sessiond on, and the one the session does. */
 #define SESSIOND_AUTH_FD	3
 #define SESSIOND_CONTROL_FD	3
+
+/*
+ * The descriptor the greeter and the session ask sessiond to open the
+ * seat's input devices on (--seat-fd, seat.c), and how many such sockets
+ * sessiond keeps at once (a greeter, its session, and the greeter a Log
+ * Out starts while the session still shows).
+ */
+#define SESSIOND_SEAT_FD	4
+#define SESSIOND_SEAT_SOCKETS	4U
 
 /* The longest line of the greeter's protocol, and the longest user name. */
 #define SESSIOND_LINE_MAX	512U
@@ -119,6 +129,12 @@ void sessiond_seat_restore(void);
 void sessiond_seat_events_open(void);
 int sessiond_seat_events_fd(void);
 int sessiond_seat_events_collect(void);
+
+/* The compositors' seat sockets: the input devices opened for the one that holds the seat (seat.c). */
+int sessiond_seat_socket(int *own, int *child);
+void sessiond_seat_hold(int own);
+nfds_t sessiond_seat_poll_fill(struct pollfd *entries, nfds_t room);
+void sessiond_seat_poll_done(const struct pollfd *entries, nfds_t count);
 
 void sessiond_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
 

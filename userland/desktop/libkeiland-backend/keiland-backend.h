@@ -127,12 +127,18 @@ struct kl_backend_threads {
  * (--control-fd), or -1 when no session manager started the session.  The
  * session (ws131-p006) and the power (ws131-p005) speak on them; the
  * compositor makes them nonblocking and keeps them from its children.
+ * seat_descriptor is the socket the session manager opens the input
+ * devices on for the compositor (zedBSD's sessiond, --seat-fd): -1, or 0
+ * as options cleared to zero leave it, when there is none (the standard
+ * input is never that socket), and the compositor opens them itself.
+ * The compositor keeps it from its children.
  * threads are the compositor's threads lent to the backend's own.
  */
 struct kl_backend_options {
 	unsigned flags;
 	int greeter_descriptor;
 	int session_descriptor;
+	int seat_descriptor;
 	struct kl_backend_threads threads;
 };
 
