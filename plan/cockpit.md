@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | 待機 | BUG-418 fixed（rpi4 の image と QEMU も確かめた） | — |
+| P1 | q2042 | 作業中 | Pi 500 の報告: WS348（dtb）・BUG-425〜427 の再現の確かめ・build の手順の文書・WS350（機種の記録）・返信用の link の一覧 | WS349（HDMI の音）は設計 |
 | P2 | q2041 | 作業中 | BUG-424: VMD の suspend・resume、5330 で S0 idle | — |
 | P3 | q2040 | 作業中 | WS347: agy の依頼 07（V1〜V9）の監査、次の依頼の下書き | — |
 | P4 | — | 待機 | WS347 p008（blitter 無しの表示を shader で）cleared、merge 済み | 次: p004（VF2＋KC705 の実機。bitstream の書き込み p001 と agy の依頼 07 の後） |

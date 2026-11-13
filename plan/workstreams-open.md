@@ -12,7 +12,6 @@
 | --- | --- | --- | --- | --- |
 | [WS299](ws299/ws.md) | MG004 | 5330 の NVMe の読み書きを速くする（512 MiB の崖、転送・queue・readahead）（2026-10-27 ユーザー） | incomplete | p001〜p003・p009 cleared（raw の読み 583 MB/s ≒ Debian の 50%）。受け入れは Debian の 95% 以上、HMB はやる（ユーザー）。q1634（P1）で p004 raw の先読み → p005〜p008 2026-10-30 ユーザー「WS299はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の後 |
 | [WS300](ws300/ws.md) | MG003 | NVMe と VMD の低電力（S0 idle の VMD の suspend・NVMe の状態、APST・ASPM・LTR）（2026-10-27 ユーザー） | incomplete（p001 cleared、p002〜p005 実装済み・試験未実施、branch agent/p6-ws300 は 5330 の試験の後に merge） | p006（5330、WS052 p014 と一緒）。Q300-6（_OSC 無しの ASPM）はユーザーの判断待ち |
-| [WS333](ws333/ws.md) | MG004 | /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）。WS301・WS303 を統合（2026-10-31 ユーザー） | incomplete（2026-11-12: build は CONFIG_KERN_THERMAL・CONFIG_DRIVER_X86_POWER_CONTROL を y で。p004 の UAPI の案はユーザーの review 待ち） | p004 の review の後に実装、p014（5330 の受け入れ） |
 | [WS334](ws334/ws.md) | MG006 | libbrowser の Web ブラウザ OmniGrammaton を Windows に移植（libkeiland の Win32 の実装、.exe）（2026-10-31 ユーザー） | incomplete | 設計 p002〜p004 cleared、実装の第 1 群（p005・p009・p010・p013・p020） |
 | [WS335](ws335/ws.md) | MG002 | libssl-compat・libcrypto-compat: OpenSSL の libssl・libcrypto と互換の自前の TLS と暗号の library（libbrowser と自前の ssh が使う部分、標準廉価実装手順）（2026-11-01 ユーザー） | incomplete | p001 設計（P6 q1789） |
 | [WS336](ws336/ws.md) | MG005 | 自前の sshd・ssh（OpenSSH と互換の protocol、ed25519 と鍵の交換 1 つ、WS335 の暗号の口を使う、標準廉価実装手順）（2026-11-01 ユーザー） | incomplete | incomplete（p001 設計 cleared、p002 から実装） |
@@ -52,6 +51,9 @@
 | [WS345](ws345/ws.md) | MG006 | ブラウザの thread の分け方: JavaScript を窓の event と別の thread に、通信を独立した thread に（2026-11-02 ユーザー） | incomplete | P8 が p001 の設計（q1959） |
 | [WS346](ws346/ws.md) | MG006 | libbrowser の style と layout の差分の再計算（layout cache）。DOM の変更の記録・style の無効化・layout の部分木の再利用、全体の作り直しとの照合（2026-11-03 ユーザー、設計は Q1、実装は Sonnet） | completed | 全 Phase (p001〜p009) cleared。Q1 が直に実装、既定 cache=on、bench 14〜17 倍、実サイト verify 差異 0、Windows cross-build PASS（[design.md](ws346/design.md)） |
 | [WS347](ws347/ws.md) | MG006 | VF2＋KC705 で Amaterrace GPU を試験・デバッグする。KC705 に minimal・200 MHz の bitstream を Vivado で書き、GHCI の driver を最新の ghci.md に追従（2026-11-11 ユーザー）。RTL は Gemini、Claude は監査（[amaterrace.md](amaterrace.md)） | incomplete | Gemini の修正（ad23fe01）の監査 → 依頼 03、bitstream の書き込み（p001）、driver の追従（p003、P2 の worktree に未 commit） |
+| [WS348](ws348/ws.md) | MG003 | Raspberry Pi 500 の dtb を image に入れる（そのまま Pi 500 で起動）（2026-11-13、Pi 500 の外部の報告から） | planned | p001 |
+| [WS349](ws349/ws.md) | MG006 | Raspberry Pi 5 の HDMI の音（2026-11-13、Pi 500 の外部の報告から） | planned | p001 |
+| [WS350](ws350/ws.md) | MG003 | Raspberry Pi 500 を動作の確かめた機種として記録する（2026-11-13、Pi 500 の外部の報告から） | planned | p001 |
 | [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
 | [WS339](ws339/ws.md) | MG004 | x86 の PC の UEFI の起動の画面の解像度を monitor（EDID）に合わせる、標準の設定の video=640x480 を外す（2026-11-01 ユーザー） | planning | p001（担当の割当はユーザーの指示で） |
 | [WS338](ws338/ws.md) | MG006 | libmedia の H.264 の software の decoder の速さの続き（WS326 から分けた、2026-11-01 ユーザー） | planning | p001 設計（担当の割当はユーザーの指示で） |
