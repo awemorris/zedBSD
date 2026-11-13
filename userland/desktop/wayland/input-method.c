@@ -264,9 +264,9 @@ kwl_ime_start(
 }
 
 /*
- * Looks after the input method once a pass: collects the process of one
- * that died, and follows the lock screen and App Home.  Its start again
- * and the time an answer has are its timers'.
+ * Looks after the input method once a pass: follows the lock screen and
+ * App Home.  Its process's end is told by kwl_ime_child_ended; its start
+ * again and the time an answer has are its timers'.
  */
 void
 kwl_ime_tick(
@@ -274,8 +274,6 @@ kwl_ime_tick(
 	uint64_t now)
 {
 	struct kwl_ime *ime;
-	pid_t reaped;
-	int status;
 
 	/* The pass's time is not needed: the times are the timers'. */
 	(void)now;
@@ -284,17 +282,33 @@ kwl_ime_tick(
 	if (ime == NULL)
 		return;
 
-	/* A process that has ended is collected. */
-	if (ime->pid > 0) {
-		reaped = waitpid(ime->pid, &status, WNOHANG);
-		if (reaped == ime->pid || (reaped < 0 && errno == ECHILD)) {
-			printf("KWL IME exited pid=%ld\n", (long)ime->pid);
-			ime->pid = 0;
-		}
-	}
-
 	/* The lock screen and App Home take the keys; the input method follows them. */
 	kwl_ime_update(server, NULL);
+}
+
+/*
+ * Takes a child the event loop collected after its SIGCHLD (main.c):
+ * returns 1 when it was the input method's process, which is then gone (it
+ * is started again by its timer, or given up), and 0 for another child.
+ */
+int
+kwl_ime_child_ended(
+	struct kwl_server *server,
+	long child)
+{
+	struct kwl_ime *ime;
+
+	/* Only the running input method's process. */
+	ime = server->ime;
+	if (ime == NULL || ime->pid <= 0)
+		return 0;
+	if ((long)ime->pid != child)
+		return 0;
+
+	/* Succeeded: the process is gone (a test reads the line). */
+	printf("KWL IME exited pid=%ld\n", (long)ime->pid);
+	ime->pid = 0;
+	return 1;
 }
 
 /*

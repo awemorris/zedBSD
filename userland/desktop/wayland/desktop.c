@@ -167,7 +167,6 @@ static int desktop_string(const unsigned char *bytes, size_t size, size_t offset
 static void desktop_place(struct kwl_server *server, int32_t *x, int32_t *y, int32_t *width, int32_t *height);
 static int desktop_configure(struct kwl_server *server);
 static void desktop_start(struct kwl_server *server);
-static void desktop_watch(struct kwl_server *server);
 static void desktop_welcome(struct kwl_server *server);
 static void desktop_started(struct kwl_server *server, pid_t pid, int error, void *context);
 static void desktop_installer_started(struct kwl_server *server, pid_t pid, int error, void *context);
@@ -327,8 +326,7 @@ kwl_desktop_tick(
 	int32_t height;
 	int error;
 
-	/* The program: started, watched, started again; the Welcome once after it (ws164-p002). */
-	desktop_watch(server);
+	/* The program: started, and started again after its end (kwl_desktop_child_ended); the Welcome once after it (ws164-p002). */
 	desktop_start(server);
 	desktop_welcome(server);
 
@@ -355,6 +353,29 @@ kwl_desktop_tick(
 
 	/* Succeeded: the desktop is in step with the pass. */
 	return;
+}
+
+/*
+ * Takes a child the event loop collected after its SIGCHLD (main.c):
+ * returns 1 when it was the desktop's program, which is then gone and
+ * started again after a while, and 0 for another child.
+ */
+int
+kwl_desktop_child_ended(
+	struct kwl_server *server,
+	long child)
+{
+	/* Only the running program. */
+	if (desk.pid <= 0 || (long)desk.pid != child)
+		return 0;
+
+	/* The program is gone; it is started again after a while (a test reads the line). */
+	desktop_gone(server);
+	printf("KWL DESKTOP exited pid=%d at_ms=%llu\n", (int)desk.pid, (unsigned long long)desk.gone_ms);
+	desk.pid = 0;
+
+	/* Succeeded: the end is noted. */
+	return 1;
 }
 
 /*
@@ -967,36 +988,6 @@ desktop_welcome_started(
 
 	/* Succeeded: the log the tests read. */
 	printf("KWL WELCOME start pid=%d\n", (int)pid);
-}
-
-/* Notices that the desktop program ended (its own wait, or App Home's collecting every child). */
-static void
-desktop_watch(
-	struct kwl_server *server)
-{
-	pid_t ended;
-	int status;
-
-	/* No program running. */
-	if (desk.pid <= 0)
-		return;
-
-	/* Still running: nothing to do. */
-	ended = waitpid(desk.pid, &status, WNOHANG);
-	if (ended == 0)
-		return;
-
-	/* Ended, or collected already (ECHILD); another error leaves it running. */
-	if (ended < 0 && errno != ECHILD)
-		return;
-
-	/* The program is gone; it is started again after a while. */
-	desktop_gone(server);
-	printf("KWL DESKTOP exited pid=%d at_ms=%llu\n", (int)desk.pid, (unsigned long long)desk.gone_ms);
-	desk.pid = 0;
-
-	/* Succeeded: the end is noted. */
-	return;
 }
 
 /* Tells whether /etc/keiland/desktop turns the desktop off (its first word is "off"). */

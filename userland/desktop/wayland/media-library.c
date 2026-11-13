@@ -447,7 +447,6 @@ media_wait(
 	size_t index;
 	long left;
 	uint64_t now;
-	int error;
 
 	/* The timer is readied once. */
 	if (media_limit.fire == NULL)
@@ -460,9 +459,9 @@ media_wait(
 	for (index = 0U; index < count && index < MEDIA_WATCH_MAX; index++)
 		kwl_watch(server, descriptors[index].fd, descriptors[index].events);
 
-	/* More pipes than one wait takes: the loop comes back soon for the rest. */
+	/* More pipes than one wait takes: the soon timer brings the next look for the rest. */
 	if (count > MEDIA_WATCH_MAX)
-		kwl_due_soon(server);
+		kwl_soon(server);
 
 	/* None runs: no limit to wait for. */
 	if (left < 0) {
@@ -470,11 +469,9 @@ media_wait(
 		return;
 	}
 
-	/* The earliest limit; without room in the timers, the loop's own deadline. */
+	/* The earliest limit. */
 	now = kwl_milliseconds();
-	error = kwl_timer_arm(&server->timers, &media_limit, now + (uint64_t)left * 1000U);
-	if (error != 0)
-		kwl_due(server, now + (uint64_t)left * 1000U);
+	kwl_timer_set(server, &media_limit, now + (uint64_t)left * 1000U);
 }
 
 /*

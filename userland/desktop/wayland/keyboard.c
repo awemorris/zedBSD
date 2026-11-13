@@ -631,6 +631,14 @@ static float keyboard_on_blue[4];
  */
 static struct kwl_timer keyboard_hand_timer;
 
+/*
+ * The timer of a contact's arming (KEYBOARD_ARM_MS after its start, when
+ * one not armed is let go): armed at the start, a wake-only timer
+ * (kwl_timer_wake_at) whose pass the tick judges.  A contact that armed or
+ * ended meanwhile leaves it armed; it then fires once for nothing.
+ */
+static struct kwl_timer keyboard_arm_timer;
+
 static int keyboard_contact_begin(struct kwl_server *server, int32_t x, int32_t y, uint32_t time);
 static int keyboard_contact_move(struct kwl_server *server, int32_t x, int32_t y, uint32_t time);
 static int keyboard_contact_end(struct kwl_server *server, int32_t x, int32_t y, uint32_t time);
@@ -1071,18 +1079,22 @@ kwl_keyboard_tick(
 	unfinished = keyboard_slide_unfinished(now);
 	if (now - keyboard.slide_ms < KEYBOARD_SLIDE_MS) {
 		server->dirty = 1;
-		kwl_due_soon(server);
 	} else if (unfinished) {
 		server->dirty = 1;
-		kwl_due_soon(server);
 	} else if (keyboard.leaving != PANEL_NONE) {
 		keyboard.leaving = PANEL_NONE;
 		server->dirty = 1;
 	}
 
-	/* A contact and the windows' move are looked at closely while they last. */
-	if (keyboard.contact.active || keyboard.moving)
-		kwl_due_soon(server);
+	/* The windows' move steps with the frames while it lasts. */
+	if (keyboard.moving)
+		server->dirty = 1;
+
+	/* A contact not armed yet is let go at its time, which its timer wakes the pass for. */
+	if (keyboard.contact.active &&
+	    !keyboard.contact.armed &&
+	    !keyboard.contact.expired)
+		kwl_timer_wake_at(server, &keyboard_arm_timer, "osk-arm", keyboard.contact.start_clock_ms + KEYBOARD_ARM_MS + 1U);
 
 	/* A reading whose field no longer has the keyboard (disabled, or another field) is gone with its preedit. */
 	input = kwl_text_input_current(server);

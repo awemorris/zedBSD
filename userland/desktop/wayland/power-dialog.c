@@ -295,12 +295,10 @@ kwl_power_dialog_tick(
 		return;
 	}
 
-	/* Darkening or lightening: drawn every frame, and looked at closely until it ends. */
+	/* Darkening or lightening: each frame asks for the next until it ends. */
 	progress = power_progress(server);
-	if ((!dialog->closing && progress < 1.0f) || (dialog->closing && progress > 0.0f)) {
+	if ((!dialog->closing && progress < 1.0f) || (dialog->closing && progress > 0.0f))
 		server->dirty = 1;
-		kwl_due_soon(server);
-	}
 
 	/* Closed. */
 	if (dialog->closing && progress <= 0.0f) {

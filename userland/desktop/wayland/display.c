@@ -247,9 +247,9 @@ kwl_schedule(
 	    !moving &&
 	    !server->home_dragging &&
 	    now - server->frame_done_ms < server->frame_wait_ms) {
-		/* A commit ends the wait, or its time does. */
+		/* A commit ends the wait, or its time does, which the pacing's timer wakes the pass for. */
 		if (server->dirty || server->damaged)
-			kwl_due(server, server->frame_done_ms + server->frame_wait_ms);
+			kwl_timer_wake_at(server, &server->pace_timer, "frame-pace", server->frame_done_ms + server->frame_wait_ms);
 		return;
 	}
 

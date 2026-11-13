@@ -163,12 +163,10 @@ kwl_notify_log_tick(
 	if (!log_view.open)
 		return;
 
-	/* Its fade needs frames. */
+	/* Its fade steps with the frames: each asks for the next while it lasts. */
 	now = kwl_milliseconds();
-	if (now - log_view.opened_ms < LOG_FADE_MS) {
+	if (now - log_view.opened_ms < LOG_FADE_MS)
 		server->dirty = 1;
-		kwl_due_soon(server);
-	}
 }
 
 /*

@@ -3532,12 +3532,14 @@ kwl_glass_tick(
 		}
 	}
 
-	/* The slides and animations step with the frames, and are looked at closely until they end. */
-	if (server->desktop_moving || server->anim != NULL || server->wiseview_moving)
-		kwl_due_soon(server);
+	/*
+	 * The slides and animations step with the frames: each one drawn while
+	 * they move asks for the next, whose pass comes with the frame's
+	 * completion.
+	 */
 
-	/* The minute of the clock (the loop comes back at the next). */
-	kwl_due_next_minute(server);
+	/* The minute of the clock: its timer wakes the pass at the next while the screen shows it. */
+	kwl_clock_follow(server, kwl_clock_shown(server));
 	now = time(NULL);
 	if ((int64_t)now / 60 == server->clock_minute)
 		return;
@@ -3557,6 +3559,28 @@ kwl_glass_tick(
 	kwl_damage_rect(server, 0, 0, (int32_t)server->width, KWL_GLASS_BAR + BAR_CLOCK_REACH);
 	if (kwl_home_progress(server) > 0.0f)
 		kwl_home_clock_damage(server);
+}
+
+/*
+ * Tells whether a clock is on the screen for its minute to turn over: the
+ * glass look's system bar, the lock screen's or the login screen's clock,
+ * on a screen that is lit (not out for the lid or for the time without
+ * input, and not given up to a sleep's request).
+ */
+int
+kwl_clock_shown(
+	const struct kwl_server *server)
+{
+	/* The screen out: no clock is seen. */
+	if (server->screen_off || server->screen_idle_off)
+		return 0;
+
+	/* A sleep's request waits for its answer: no frame is drawn. */
+	if (server->sleep_hold)
+		return 0;
+
+	/* Succeeded: the clock's face is drawn. */
+	return 1;
 }
 
 /* Lays out the system bar on the anchor (bar_layout_on). */

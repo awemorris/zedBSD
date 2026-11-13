@@ -491,9 +491,9 @@ kwl_phone_tick(
 		phone_links();
 	}
 
-	/* What came. */
+	/* What came, only after a wake (the daemon's link thread writes the pipe when it has queued something). */
 	changed = 0U;
-	if (phone_state.backend != NULL)
+	if (phone_state.backend != NULL && server->woken)
 		(void)kl_backend_phone_update(phone_state.backend, &changed);
 
 	/* The state: a backend that reached bluetoothd again forgets the texts' numbers (they start again). */

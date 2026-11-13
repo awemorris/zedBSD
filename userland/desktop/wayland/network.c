@@ -355,8 +355,14 @@ kwl_network_tick(
 	if (network_view.watch == NULL)
 		return;
 
-	/* What arrived; with nothing, the switch may still have waited long enough. */
-	(void)kl_backend_network_update(network_view.watch, &changed);
+	/*
+	 * What arrived, only after a wake (the daemon's link thread writes the
+	 * pipe when it has queued something); with nothing, the switch may
+	 * still have waited long enough.
+	 */
+	changed = 0U;
+	if (server->woken)
+		(void)kl_backend_network_update(network_view.watch, &changed);
 	if (changed == 0) {
 		network_switch_settle(server, 0);
 		return;

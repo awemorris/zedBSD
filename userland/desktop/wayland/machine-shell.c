@@ -233,6 +233,10 @@ kwl_machine_tick(
 		return;
 	}
 
+	/* A reading under way ends with the thread's wake: nothing to look at before one. */
+	if (!server->woken)
+		return;
+
 	/* Whether the thread has read everything. */
 	(void)pthread_mutex_lock(&machine_lock);
 	done = job->done;

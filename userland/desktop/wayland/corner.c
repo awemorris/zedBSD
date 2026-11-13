@@ -163,6 +163,14 @@ static struct corner_state corner;
  */
 static struct kwl_timer corner_launch_timer;
 
+/*
+ * The timer of a contact's arming (CORNER_ARM_MS after its start, when
+ * one not armed is let go): armed while it waits, a wake-only timer
+ * (kwl_timer_wake_at) whose pass the tick judges.  A contact that armed or
+ * ended meanwhile leaves it armed; it then fires once for nothing.
+ */
+static struct kwl_timer corner_arm_timer;
+
 static int corner_in_zone(struct kwl_server *server, int32_t x, int32_t y);
 static void corner_sample(int32_t x, int32_t y, uint32_t time);
 static float corner_speed(void);
@@ -472,9 +480,11 @@ kwl_corner_tick(
 			corner.settling = 0;
 	}
 
-	/* A contact and the hint are looked at closely while they last. */
-	if (corner.contact.active || corner.settling)
-		kwl_due_soon(server);
+	/* A contact not armed yet is let go at its time, which its timer wakes the pass for; the hint steps with the frames. */
+	if (corner.contact.active &&
+	    !corner.contact.armed &&
+	    !corner.contact.expired)
+		kwl_timer_wake_at(server, &corner_arm_timer, "corner-arm", corner.contact.start_clock_ms + CORNER_ARM_MS + 1U);
 }
 
 /*
