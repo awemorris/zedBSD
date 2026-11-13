@@ -90,6 +90,14 @@ struct displays_held {
 /* The results held back (struct displays_held), the event loop's thread's alone. */
 static struct displays_held *displays_held_list;
 
+/*
+ * The timer of the result held for a move: armed for DISPLAYS_PENDING_MS
+ * after it was held (the move's first frame never came: nothing was drawn,
+ * or the output was moved again), disarmed when the move settles.  Readied
+ * by the first hold; the event loop's thread's alone.
+ */
+static struct kwl_timer displays_pending_timer;
+
 static void displays_snapshot(struct kwl_object *object);
 static void displays_output(struct kwl_object *object, struct kwl_server *server, unsigned index);
 static void displays_label(const char *key, char *label, size_t size);
@@ -111,6 +119,7 @@ static int displays_string(const unsigned char *bytes, size_t size, size_t offse
 static size_t displays_put_word(unsigned char *payload, size_t offset, uint32_t word);
 static size_t displays_put_string(unsigned char *payload, size_t offset, const char *text);
 static uint32_t displays_word(const unsigned char *bytes, size_t offset);
+static void displays_pending_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Makes a displays object for a manager's get_displays (new id), and sends
@@ -217,7 +226,8 @@ kwl_displays_move_settled(
 {
 	struct displays_held *held;
 
-	UNUSED_PARAMETER(server);
+	/* Nothing waits for the move's time any more. */
+	kwl_timer_disarm(&server->timers, &displays_pending_timer);
 
 	/* Each result that waits for the move (one at most). */
 	for (held = displays_held_list; held != NULL; held = held->next) {
@@ -233,32 +243,6 @@ kwl_displays_move_settled(
 
 	/* What waits for nothing more is answered. */
 	displays_held_settle();
-}
-
-/*
- * Settles a move held back too long (the move's first frame never came:
- * nothing was drawn, or the output was moved again), as applied.
- */
-void
-kwl_displays_pending_tick(
-	struct kwl_server *server,
-	uint64_t now)
-{
-	struct displays_held *held;
-
-	/* Each result that waits for the move, long enough (the loop comes back when it would be). */
-	for (held = displays_held_list; held != NULL; held = held->next) {
-		if (!held->moving)
-			continue;
-		if (now - held->since_ms < DISPLAYS_PENDING_MS) {
-			kwl_due(server, held->since_ms + DISPLAYS_PENDING_MS);
-			continue;
-		}
-
-		/* Settled as the choice applied. */
-		kwl_displays_move_settled(server, 0);
-		return;
-	}
 }
 
 /*
@@ -390,22 +374,17 @@ kwl_displays_key(
 }
 
 /*
- * Answers a displays result held back too long (BUG-266), and sets the
- * light displays.conf keeps once a session's first frame is up
+ * Sets the light displays.conf keeps once a session's first frame is up
  * (D-BRIGHT-BOOT: the panel is not lit by the driver before it); a light
- * not kept stays as the firmware left it.
+ * not kept stays as the firmware left it.  A displays result held back too
+ * long (BUG-266) is answered by its timer.
  */
 void
 kwl_displays_tick(
 	struct kwl_server *server)
 {
 	struct kwl_compose *compose;
-	uint64_t now;
 	int error;
-
-	/* A result whose move's first frame never came is settled after its time. */
-	now = kwl_milliseconds();
-	kwl_displays_pending_tick(server, now);
 
 	/* Once, in a session, after its first frame. */
 	if (displays_state.boot_light_done || server->greeter)
@@ -1202,6 +1181,13 @@ displays_hold(
 	held->moving = moving;
 	held->since_ms = kwl_milliseconds();
 
+	/* A move's result is settled as applied when its first frame does not come in time. */
+	if (moving) {
+		if (displays_pending_timer.fire == NULL)
+			kwl_timer_init(&displays_pending_timer, "displays-pending", displays_pending_fired);
+		kwl_timer_set(object->client->server, &displays_pending_timer, held->since_ms + DISPLAYS_PENDING_MS);
+	}
+
 	/* Kept after the results held before. */
 	link = &displays_held_list;
 	while (*link != NULL)
@@ -1346,4 +1332,20 @@ displays_word(
 	/* The bytes may not be aligned. */
 	memcpy(&word, bytes + offset, sizeof(word));
 	return word;
+}
+
+/*
+ * A move's result waited too long (its first frame never came: nothing was
+ * drawn, or the output was moved again): it is settled as the choice
+ * applied.
+ */
+static void
+displays_pending_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	UNUSED_PARAMETER(timer);
+
+	/* Settled as applied (nothing when the move settled meanwhile). */
+	kwl_displays_move_settled(context, 0);
 }

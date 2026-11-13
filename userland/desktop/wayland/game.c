@@ -171,8 +171,7 @@ kwl_game_send_image(
 	words[1] = index;
 	error = kwl_emit_fd(game->client, game->id, GAME_EVENT_IMAGE, words, sizeof(words), fd);
 	if (error != 0) {
-		game->client->fatal = 1;
-		game->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(game->client);
 		return error;
 	}
 
@@ -336,8 +335,7 @@ game_emit(
 	/* The event. */
 	error = kwl_emit(game->client, game->id, opcode, words, count * sizeof(words[0]));
 	if (error != 0) {
-		game->client->fatal = 1;
-		game->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(game->client);
 		return error;
 	}
 

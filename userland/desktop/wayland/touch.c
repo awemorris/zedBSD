@@ -2713,8 +2713,7 @@ emit(
 	/* A client that stopped reading loses its connection rather than compositor memory. */
 	error = kwl_emit(client, id, opcode, payload, size);
 	if (error != 0) {
-		client->fatal = 1;
-		client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(client);
 		return;
 	}
 

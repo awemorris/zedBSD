@@ -127,7 +127,7 @@ kwl_schedule(
 	/* The sleep's causes and its course (sleep.c, ws052-p012), before the lock screen's own tick. */
 	kwl_sleep_tick(server);
 
-	/* A displays result held back too long, and the light a session keeps once its first frame is up (displays-shell.c, ws113-p005). */
+	/* The light a session keeps once its first frame is up (displays-shell.c, ws113-p005). */
 	kwl_displays_tick(server);
 
 	/* The glass look's clock turns over. */

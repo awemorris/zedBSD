@@ -537,6 +537,7 @@ kwl_lock_release(
 	server->dirty = 1;
 	printf("KWL LOCK unlocked reason=%s\n", reason);
 	greeter_lock_tell(server);
+	kwl_lock_idle_pace(server);
 
 	/* The keys there may have changed while it was locked (ws199-p001). */
 	kwl_system_keys_changed(server);
@@ -2245,6 +2246,7 @@ greeter_unlock(
 	kwl_lid_unlocked(&server->lid);
 	kwl_system_keys_changed(server);
 	greeter_lock_tell(server);
+	kwl_lock_idle_pace(server);
 }
 
 /* Tells sessiond whether the lock screen shows; a session without one has nothing to tell. */

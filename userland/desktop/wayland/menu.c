@@ -353,8 +353,7 @@ kwl_menu_send_activated(
 	/* The event; a client that cannot take it is failed. */
 	error = kwl_emit(place->client, place->id, PLACE_ACTIVATED, words, sizeof(words));
 	if (error != 0) {
-		place->client->fatal = 1;
-		place->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(place->client);
 	}
 
 	/* The log line the tests read. */
@@ -389,8 +388,7 @@ kwl_menu_send_context_activated(
 	/* The event; a client that cannot take it is failed. */
 	error = kwl_emit(context->client, context->id, CONTEXT_ACTIVATED, words, sizeof(words));
 	if (error != 0) {
-		context->client->fatal = 1;
-		context->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(context->client);
 	}
 
 	/* The log line the tests read. */
@@ -415,8 +413,7 @@ kwl_menu_send_context_done(
 	/* The event has no arguments. */
 	error = kwl_emit(context->client, context->id, CONTEXT_DONE, NULL, 0U);
 	if (error != 0) {
-		context->client->fatal = 1;
-		context->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(context->client);
 	}
 
 	/* It shows nothing more. */
@@ -446,8 +443,7 @@ kwl_menu_send_popup(
 		opcode = PLACE_OPENED;
 	error = kwl_emit(place->client, place->id, opcode, &item, sizeof(item));
 	if (error != 0) {
-		place->client->fatal = 1;
-		place->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(place->client);
 	}
 }
 

@@ -259,8 +259,7 @@ kwl_buffer_put(
 			/* Queue reuse notification before a possible final wrapper retirement. */
 			error = kwl_emit(buffer->client, buffer->id, 0, NULL, 0);
 			if (error != 0) {
-				buffer->client->fatal = 1;
-				buffer->client->fatal_time = kwl_milliseconds();
+				kwl_client_fail(buffer->client);
 			}
 
 			/* The on-screen keyboard's measurement hears when a client it awaits got a buffer back (ws102-p011). */
@@ -299,8 +298,7 @@ kwl_callbacks_done(
 			/* Queue this callback exactly once before withdrawing its object ID. */
 			error = kwl_emit(callback->client, callback->id, 0, &milliseconds, sizeof(milliseconds));
 			if (error != 0) {
-				callback->client->fatal = 1;
-				callback->client->fatal_time = kwl_milliseconds();
+				kwl_client_fail(callback->client);
 			}
 
 			/* The on-screen keyboard's measurement hears when a client it awaits was told a frame was done (ws102-p011). */

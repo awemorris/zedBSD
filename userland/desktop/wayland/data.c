@@ -116,6 +116,13 @@
 #define DATA_MIME_MAX			32U
 #define DATA_MIME_LENGTH		256U
 
+/*
+ * The timer of a drag let go before its target answered: armed for the end
+ * of DATA_RELEASE_WAIT_MS while the release waits, disarmed when it is
+ * decided.  Readied by the first wait.
+ */
+static struct kwl_timer data_release_timer;
+
 static int manager_request(struct kwl_object *manager, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int source_request(struct kwl_object *source, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int device_request(struct kwl_object *device, uint32_t opcode, const unsigned char *bytes, size_t size);
@@ -148,6 +155,7 @@ static void drag_pick(struct kwl_server *server);
 static void drag_forget(struct kwl_server *server, struct kwl_object *object);
 static void drag_clear_target(struct kwl_server *server);
 static int emit_nullable(struct kwl_client *client, uint32_t id, uint32_t opcode, const char *text);
+static void data_release_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Carries out a request of one of the data-sharing interfaces.
@@ -331,7 +339,7 @@ kwl_data_drag_release(
 	/*
 	 * Let go before the target answered (a quick drag let go at once,
 	 * ws189-p002 F1): the drop waits for the answer, or for
-	 * DATA_RELEASE_WAIT_MS (kwl_data_tick decides then).
+	 * DATA_RELEASE_WAIT_MS (data_release_fired decides then).
 	 */
 	offer = server->dnd_offer;
 	source = server->dnd_source;
@@ -342,12 +350,16 @@ kwl_data_drag_release(
 	    server->dnd_target != NULL) {
 		server->dnd_releasing = 1;
 		server->dnd_release_deadline = kwl_milliseconds() + DATA_RELEASE_WAIT_MS;
+		if (data_release_timer.fire == NULL)
+			kwl_timer_init(&data_release_timer, "drag-release", data_release_fired);
+		kwl_timer_set(server, &data_release_timer, server->dnd_release_deadline);
 		printf("KWL DATA drag release wait client=%llu\n", (unsigned long long)offer->client->number);
 		return;
 	}
 
 	/* Decided now (a release that waited ends its wait). */
 	server->dnd_releasing = 0;
+	kwl_timer_disarm(&server->timers, &data_release_timer);
 
 	/* A drag inside its client drops on any of its surfaces; one with a source needs an accepting target with an action. */
 	device = server->dnd_target_device;
@@ -404,15 +416,14 @@ kwl_data_drag_release(
 /*
  * Decides a drop let go before its target answered (ws189-p002 F1): once
  * the target's offer has answered (with its actions too, when it can say
- * them), or at the deadline, the release is carried out as it would have
- * been.
+ * them), the release is carried out as it would have been.  The end of the
+ * wait is the timer's (data_release_fired).
  */
 void
 kwl_data_tick(
 	struct kwl_server *server)
 {
 	struct kwl_object *offer;
-	uint64_t now;
 	int answered;
 
 	/* Only a release waiting. */
@@ -429,12 +440,9 @@ kwl_data_tick(
 	if (offer != NULL && offer->dnd_answered && offer->dnd_accepted && offer->version >= DATA_ACTIONS_VERSION && offer->dnd_action == ACTION_NONE)
 		answered = 0;
 
-	/* Not yet, and time is left: the answer comes as a request, the deadline on the clock. */
-	now = kwl_milliseconds();
-	if (!answered && now < server->dnd_release_deadline) {
-		kwl_due(server, server->dnd_release_deadline);
+	/* Not yet: the answer comes as a request, the end of the wait with the timer (data_release_fired). */
+	if (!answered)
 		return;
-	}
 
 	/* Succeeded: the release, decided now. */
 	printf("KWL DATA drag release decided answered=%d\n", answered);
@@ -766,7 +774,7 @@ offer_request(
 	/* An offer of the compositor's own selection: the compositor writes the text (clipboard.c). */
 	if (offer->data_offered) {
 		printf("KWL DATA receive client=%llu mime=%s source=history\n", (unsigned long long)offer->client->number, text);
-		kwl_clipboard_offer_write(descriptor);
+		kwl_clipboard_offer_write(offer->client->server, descriptor);
 		return 0;
 	}
 
@@ -1835,6 +1843,7 @@ drag_end(
 	/* The drag's state. */
 	server->dnd_active = 0;
 	server->dnd_releasing = 0;
+	kwl_timer_disarm(&server->timers, &data_release_timer);
 	server->dnd_source = NULL;
 	server->dnd_origin = NULL;
 	server->dnd_icon = NULL;
@@ -2009,4 +2018,28 @@ drag_clear_target(
 	server->dnd_target = NULL;
 	server->dnd_target_device = NULL;
 	server->dnd_offer = NULL;
+}
+
+/*
+ * The wait of a drag let go before its target answered has run out: the
+ * release is decided now, without the answer.
+ */
+static void
+data_release_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+
+	/* Only the drag's timer comes here. */
+	(void)timer;
+
+	/* Only a release still waiting (one decided meanwhile disarmed the timer). */
+	server = context;
+	if (!server->dnd_active || !server->dnd_releasing)
+		return;
+
+	/* Succeeded: the release, decided without the answer. */
+	printf("KWL DATA drag release decided answered=0\n");
+	kwl_data_drag_release(server);
 }

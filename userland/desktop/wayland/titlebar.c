@@ -201,8 +201,7 @@ kwl_titlebar_object_gone(
 		error = kwl_decoration_native_changed(object->top);
 		if (error != 0) {
 			/* Defers connection teardown until the dispatcher can report failure. */
-			object->client->fatal = 1;
-			object->client->fatal_time = kwl_milliseconds();
+			kwl_client_fail(object->client);
 		}
 	}
 
@@ -1559,6 +1558,5 @@ titlebar_emit(
 		return;
 
 	/* The client is failed. */
-	titlebar->client->fatal = 1;
-	titlebar->client->fatal_time = kwl_milliseconds();
+	kwl_client_fail(titlebar->client);
 }

@@ -31,7 +31,15 @@
 #include <poll.h>
 #include <stdio.h>
 
+/*
+ * The timer of the backend's time-bound session work (the end of the time
+ * a Log Out waits for its answer): armed for the time the backend gives,
+ * disarmed when it gives none.  Readied by the first tick.
+ */
+static struct kwl_timer handoff_timer;
+
 static void handoff_answer_route(struct kwl_server *server, unsigned request, int error);
+static void handoff_due_fired(void *context, struct kwl_timer *timer);
 
 /*
  * Says ready and waits to be let take the display, once, before it is
@@ -108,13 +116,17 @@ kwl_handoff_tick(
 	uint64_t due;
 	int descriptor;
 
+	/* The timer is readied once. */
+	if (handoff_timer.fire == NULL)
+		kwl_timer_init(&handoff_timer, "handoff", handoff_due_fired);
+
 	/* The backend reads the manager's lines and keeps the Log Out's deadline. */
 	kl_backend_tick(server->backend, kwl_milliseconds());
 
-	/* The manager's lines wake the loop, and the deadline ends its wait. */
+	/* The manager's lines wake the loop, and the deadline is the timer's. */
 	descriptor = kl_backend_wait(server->backend, &due);
 	kwl_watch(server, descriptor, POLLIN);
-	kwl_due(server, due);
+	kwl_timer_set(server, &handoff_timer, due);
 }
 
 /*
@@ -261,4 +273,20 @@ handoff_answer_route(
 
 	/* Anything else is not for this compositor. */
 	printf("KWL HANDOFF answer request=%u error=%d\n", request, error);
+}
+
+/*
+ * The backend's session work is due (a Log Out's answer that did not come
+ * in time): the backend does it now.
+ */
+static void
+handoff_due_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	/* Only the hand-over's timer comes here. */
+	(void)timer;
+
+	/* The backend's tick, and the timer for what it waits for next. */
+	kwl_handoff_tick(context);
 }

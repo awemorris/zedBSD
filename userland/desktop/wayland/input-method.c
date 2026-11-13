@@ -189,6 +189,9 @@ static void ime_spawn(struct kwl_server *server, uint64_t now);
 static void ime_started(struct kwl_server *server, pid_t pid, int error, void *context);
 static struct kwl_client *ime_connect(struct kwl_server *server, int descriptor);
 static void ime_lost(struct kwl_server *server);
+static void ime_restart_arm(struct kwl_server *server);
+static void ime_restart_fired(void *context, struct kwl_timer *timer);
+static void ime_answer_fired(void *context, struct kwl_timer *timer);
 static int ime_manager_request(struct kwl_object *manager, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int ime_method_request(struct kwl_object *method, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int ime_keyboard_request(struct kwl_object *keyboard, uint32_t opcode, const unsigned char *bytes, size_t size);
@@ -252,6 +255,8 @@ kwl_ime_start(
 	}
 
 	strcpy(ime->language, "direct");
+	kwl_timer_init(&ime->restart_timer, "ime-restart", ime_restart_fired);
+	kwl_timer_init(&ime->answer_timer, "ime-answer", ime_answer_fired);
 	server->ime = ime;
 
 	/* Starts the program. */
@@ -260,8 +265,8 @@ kwl_ime_start(
 
 /*
  * Looks after the input method once a pass: collects the process of one
- * that died, starts it again when due, passes by one that does not answer,
- * and follows the lock screen and App Home.
+ * that died, and follows the lock screen and App Home.  Its start again
+ * and the time an answer has are its timers'.
  */
 void
 kwl_ime_tick(
@@ -271,7 +276,9 @@ kwl_ime_tick(
 	struct kwl_ime *ime;
 	pid_t reaped;
 	int status;
-	uint64_t oldest;
+
+	/* The pass's time is not needed: the times are the timers'. */
+	(void)now;
 
 	ime = server->ime;
 	if (ime == NULL)
@@ -285,30 +292,6 @@ kwl_ime_tick(
 			ime->pid = 0;
 		}
 	}
-
-	/* An input method that has gone is started again, unless it keeps dying (a change of method is no death). */
-	if (ime->client == NULL && !ime->given_up && ime->restart_ms != 0U && now >= ime->restart_ms) {
-		oldest = ime->starts[ime->start_index];
-		if (!ime->replacing && oldest != 0U && now - oldest < IME_START_WINDOW_MS) {
-			ime->given_up = 1;
-			printf("KWL IME given-up starts=3 window_ms=%u\n", IME_START_WINDOW_MS);
-		} else {
-			ime_spawn(server, now);
-		}
-	}
-
-	/* A key left unanswered too long: the input method is passed by until it answers. */
-	if (ime->watching && now - ime->watch_ms >= IME_ANSWER_MS) {
-		ime->watching = 0;
-		ime->bypass = 1;
-		printf("KWL IME bypass after_ms=%u\n", IME_ANSWER_MS);
-	}
-
-	/* The start again and the answer's time are due on the clock (a death wakes the loop with SIGCHLD). */
-	if (ime->client == NULL && !ime->given_up && ime->restart_ms != 0U)
-		kwl_due(server, ime->restart_ms);
-	if (ime->watching)
-		kwl_due(server, ime->watch_ms + IME_ANSWER_MS);
 
 	/* The lock screen and App Home take the keys; the input method follows them. */
 	kwl_ime_update(server, NULL);
@@ -341,6 +324,7 @@ kwl_ime_request(
 		}
 
 		ime->watching = 0;
+		kwl_timer_set(server, &ime->answer_timer, UINT64_MAX);
 		if (ime->bypass) {
 			ime->bypass = 0;
 			printf("KWL IME answering\n");
@@ -570,6 +554,7 @@ kwl_ime_method_changed(
 
 	/* None runs: started at the next pass. */
 	ime->restart_ms = kwl_milliseconds();
+	ime_restart_arm(server);
 }
 
 /*
@@ -697,6 +682,7 @@ kwl_ime_key_grab(
 	if (!ime->watching) {
 		ime->watching = 1;
 		ime->watch_ms = kwl_milliseconds();
+		kwl_timer_set(server, &ime->answer_timer, ime->watch_ms + IME_ANSWER_MS);
 	}
 
 	/* Succeeded: the input method has the key. */
@@ -1210,6 +1196,7 @@ ime_spawn(
 
 	ime = server->ime;
 	ime->restart_ms = 0;
+	ime_restart_arm(server);
 
 	/* The input method chosen, as the program's argument (WS154). */
 	method = "--method=ja";
@@ -1223,6 +1210,7 @@ ime_spawn(
 	if (error != 0) {
 		printf("KWL IME spawn-failed step=socketpair errno=%d\n", errno);
 		ime->restart_ms = now + IME_RESTART_MS;
+		ime_restart_arm(server);
 		return;
 	}
 
@@ -1231,6 +1219,7 @@ ime_spawn(
 	if (client == NULL) {
 		close(pair[1]);
 		ime->restart_ms = now + IME_RESTART_MS;
+		ime_restart_arm(server);
 		return;
 	}
 
@@ -1381,6 +1370,7 @@ ime_lost(
 	ime->activated = 0;
 	ime->composing = 0;
 	ime->watching = 0;
+	kwl_timer_set(server, &ime->answer_timer, UINT64_MAX);
 	ime->bypass = 0;
 	strcpy(ime->language, "direct");
 	ime_set_text(&ime->pending_commit, NULL);
@@ -1394,6 +1384,7 @@ ime_lost(
 	ime->restart_ms = kwl_milliseconds() + IME_RESTART_MS;
 	if (ime->replacing)
 		ime->restart_ms = kwl_milliseconds();
+	ime_restart_arm(server);
 }
 
 /*
@@ -2317,8 +2308,7 @@ ime_emit(
 	/* A client that stopped reading loses its connection. */
 	error = kwl_emit(object->client, object->id, opcode, payload, size);
 	if (error != 0) {
-		object->client->fatal = 1;
-		object->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(object->client);
 	}
 }
 
@@ -2792,4 +2782,88 @@ ime_deliver(
 	kwl_text_input_deliver(input, preedit, begin, end, commit, before, after);
 	if (server->log_frames && commit != NULL && commit[0] != '\0')
 		printf("KWL KEY ime_commit bytes=%u at_us=%llu\n", (unsigned)strlen(commit), (unsigned long long)kwl_log_us());
+}
+
+/*
+ * Arms the start again for restart_ms while the program is gone and not
+ * given up; otherwise nothing waits for it.
+ */
+static void
+ime_restart_arm(
+	struct kwl_server *server)
+{
+	struct kwl_ime *ime;
+
+	/* A start is due only for a program that is gone, not given up, with a time. */
+	ime = server->ime;
+	if (ime->client != NULL || ime->given_up || ime->restart_ms == 0U) {
+		kwl_timer_set(server, &ime->restart_timer, UINT64_MAX);
+		return;
+	}
+
+	/* The timer starts it then. */
+	kwl_timer_set(server, &ime->restart_timer, ime->restart_ms);
+}
+
+/*
+ * The start again is due: an input method that has gone is started
+ * again, unless it keeps dying (a change of method is no death).
+ */
+static void
+ime_restart_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	struct kwl_ime *ime;
+	uint64_t now;
+	uint64_t oldest;
+
+	/* Only the input method's timer comes here. */
+	(void)timer;
+
+	/* Nothing to start when one came back meanwhile or it was given up. */
+	server = context;
+	ime = server->ime;
+	if (ime == NULL || ime->client != NULL || ime->given_up || ime->restart_ms == 0U)
+		return;
+
+	/* Three starts within the window: given up. */
+	now = kwl_milliseconds();
+	oldest = ime->starts[ime->start_index];
+	if (!ime->replacing && oldest != 0U && now - oldest < IME_START_WINDOW_MS) {
+		ime->given_up = 1;
+		printf("KWL IME given-up starts=3 window_ms=%u\n", IME_START_WINDOW_MS);
+		return;
+	}
+
+	/* Succeeded: the program starts. */
+	ime_spawn(server, now);
+}
+
+/*
+ * A key was left unanswered too long: the input method is passed by until
+ * it answers.
+ */
+static void
+ime_answer_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct kwl_server *server;
+	struct kwl_ime *ime;
+
+	/* Only the input method's timer comes here. */
+	(void)timer;
+
+	/* Nothing watched any more (the answer disarms the timer; this is the guard). */
+	server = context;
+	ime = server->ime;
+	if (ime == NULL || !ime->watching)
+		return;
+
+	/* Passed by from now. */
+	ime->watching = 0;
+	ime->bypass = 1;
+	printf("KWL IME bypass after_ms=%u\n", IME_ANSWER_MS);
 }

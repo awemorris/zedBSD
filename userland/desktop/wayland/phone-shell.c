@@ -236,8 +236,9 @@ struct phone_held {
  * read, the setting phone.backend as last seen (setting_known 0 before),
  * the objects followed, the requests waiting for the backend and the
  * texts' states held, whether a sync is at the backend, the requests'
- * ages, and the loopback's next key.  The event loop's thread alone uses
- * it.
+ * ages, the loopback's next key, and the timer that gives up a held state
+ * after PHONE_HOLD_MS and a waiting sync after PHONE_SYNC_WAIT_MS (armed
+ * while either waits).  The event loop's thread alone uses it.
  */
 struct phone_shell_state {
 	unsigned opened;
@@ -251,6 +252,7 @@ struct phone_shell_state {
 	unsigned sync_running;
 	uint64_t order;
 	uint32_t loopback_key;
+	struct kwl_timer timer;
 
 	/* The paired phone's calls as last told (state 0: a free row) and its hands-free unit (ws197-p006), told to a phone program at listen. */
 	struct kl_backend_phone_call calls[PHONE_CALLS_MAX];
@@ -318,11 +320,12 @@ static int phone_shell_safe(const char *text);
 static void phone_answers(void);
 static void phone_answer(struct phone_pending *pending, const struct kl_backend_phone_result *result);
 static void phone_items(struct kwl_server *server);
-static void phone_sents(uint64_t now);
+static void phone_sents(struct kwl_server *server, uint64_t now);
 static int phone_sent_match(uint32_t sent_request, unsigned state);
-static void phone_due(struct kwl_server *server);
-static void phone_held_check(uint64_t now);
-static void phone_sync_next(uint64_t now);
+static void phone_pace(struct kwl_server *server);
+static void phone_due_fired(void *context, struct kwl_timer *timer);
+static void phone_held_check(void);
+static void phone_sync_next(void);
 static void phone_unavailable(void);
 static void phone_forget_texts(void);
 static void phone_drops(void);
@@ -515,7 +518,7 @@ kwl_phone_tick(
 	if ((changed & KL_BACKEND_PHONE_CHANGED_RESULT) != 0U)
 		phone_answers();
 	if ((changed & KL_BACKEND_PHONE_CHANGED_SENT) != 0U)
-		phone_sents(now);
+		phone_sents(server, now);
 
 	/* bluetoothd dropped an event: every phone program synchronises again. */
 	if ((changed & KL_BACKEND_PHONE_CHANGED_DROPPED) != 0U)
@@ -527,33 +530,10 @@ kwl_phone_tick(
 	if ((changed & KL_BACKEND_PHONE_CHANGED_CALL) != 0U)
 		phone_calls(server);
 
-	/* The texts' states held, a sync that waited, and what the clients were owed. */
-	phone_held_check(now);
-	phone_sync_next(now);
+	/* The texts' states held, a sync that waited, and what the clients were owed (their times are the timer's, phone_due_fired). */
+	phone_held_check();
+	phone_sync_next();
 	phone_owed_flush();
-
-	/* A held state and a waiting sync are given up when their time runs out. */
-	phone_due(server);
-}
-
-/* Tells the event loop when a held state or a waiting sync runs out of time. */
-static void
-phone_due(
-	struct kwl_server *server)
-{
-	unsigned index;
-
-	/* Each held state. */
-	for (index = 0U; index < PHONE_HELD_MAX; index++) {
-		if (phone_state.held[index].used)
-			kwl_due(server, phone_state.held[index].at_ms + PHONE_HOLD_MS);
-	}
-
-	/* Each sync waiting. */
-	for (index = 0U; index < PHONE_SLOTS; index++) {
-		if (phone_state.slots[index].object != NULL && phone_state.slots[index].sync_waiting)
-			kwl_due(server, phone_state.slots[index].sync_since_ms + PHONE_SYNC_WAIT_MS);
-	}
 }
 
 /*
@@ -850,6 +830,7 @@ phone_sync(
 		slot->sync_request = request;
 		slot->sync_page = page;
 		slot->sync_since_ms = kwl_milliseconds();
+		phone_pace(object->client->server);
 		printf("KWL PHONE sync waits client=%llu request=%u\n", (unsigned long long)object->client->number, request);
 		return 0;
 	}
@@ -2617,6 +2598,7 @@ phone_items(
 /* Hands the texts' states to their objects; one that came before the answer naming its number is held a while. */
 static void
 phone_sents(
+	struct kwl_server *server,
 	uint64_t now)
 {
 	uint32_t sent_request;
@@ -2651,6 +2633,9 @@ phone_sents(
 		phone_state.held[index].state = state;
 		phone_state.held[index].at_ms = now;
 	}
+
+	/* A state held waits on the timer for its time. */
+	phone_pace(server);
 }
 
 /* Tells a text's state to its object by bluetoothd's number.  Returns 1 when a text has that number. */
@@ -2680,10 +2665,10 @@ phone_sent_match(
 	return 0;
 }
 
-/* Tells the held states whose text's number came; one held too long goes. */
+/* Tells the held states whose text's number came (one held too long goes by the timer, phone_due_fired). */
 static void
 phone_held_check(
-	uint64_t now)
+	void)
 {
 	struct phone_held *held;
 	unsigned index;
@@ -2695,20 +2680,20 @@ phone_held_check(
 		if (!held->used)
 			continue;
 
-		/* Told, or given up after its time. */
+		/* Told. */
 		matched = phone_sent_match(held->sent_request, held->state);
-		if (matched || now - held->at_ms >= PHONE_HOLD_MS)
+		if (matched)
 			held->used = 0U;
 	}
 }
 
 /*
- * Gives up a sync that waited too long (TIMEOUT), and starts the one that
- * waited longest when the paired phone carries none.
+ * Starts the sync that waited longest when the paired phone carries none
+ * (one that waited too long is given up by the timer, phone_due_fired).
  */
 static void
 phone_sync_next(
-	uint64_t now)
+	void)
 {
 	struct phone_slot *slot;
 	struct phone_slot *oldest;
@@ -2720,13 +2705,6 @@ phone_sync_next(
 		slot = &phone_state.slots[index];
 		if (slot->object == NULL || !slot->sync_waiting)
 			continue;
-
-		/* Waited too long. */
-		if (now - slot->sync_since_ms >= PHONE_SYNC_WAIT_MS) {
-			slot->sync_waiting = 0U;
-			phone_done(slot->object, slot->sync_request, KL_SYSTEM_RESULT_TIMEOUT);
-			continue;
-		}
 
 		/* The one that waited longest. */
 		if (oldest == NULL || slot->sync_since_ms < oldest->sync_since_ms)
@@ -3005,4 +2983,83 @@ phone_word(
 	/* The word. */
 	memcpy(&word, bytes + offset, sizeof(word));
 	return word;
+}
+
+/*
+ * Arms the phone's timer for the earliest end of a held state's time and
+ * a waiting sync's, or disarms it when neither waits.
+ */
+static void
+phone_pace(
+	struct kwl_server *server)
+{
+	uint64_t earliest;
+	uint64_t due;
+	unsigned index;
+
+	/* The timer is readied once. */
+	if (phone_state.timer.fire == NULL)
+		kwl_timer_init(&phone_state.timer, "phone", phone_due_fired);
+
+	/* Each held state. */
+	earliest = UINT64_MAX;
+	for (index = 0U; index < PHONE_HELD_MAX; index++) {
+		if (!phone_state.held[index].used)
+			continue;
+		due = phone_state.held[index].at_ms + PHONE_HOLD_MS;
+		if (due < earliest)
+			earliest = due;
+	}
+
+	/* Each sync waiting. */
+	for (index = 0U; index < PHONE_SLOTS; index++) {
+		if (phone_state.slots[index].object == NULL || !phone_state.slots[index].sync_waiting)
+			continue;
+		due = phone_state.slots[index].sync_since_ms + PHONE_SYNC_WAIT_MS;
+		if (due < earliest)
+			earliest = due;
+	}
+
+	/* The timer follows the earliest, or waits for nothing. */
+	kwl_timer_set(server, &phone_state.timer, earliest);
+}
+
+/*
+ * The phone's timer is due: a state held PHONE_HOLD_MS goes, a sync that
+ * waited PHONE_SYNC_WAIT_MS is answered TIMEOUT, and the timer moves on.
+ */
+static void
+phone_due_fired(
+	void *context,
+	struct kwl_timer *timer)
+{
+	struct phone_slot *slot;
+	uint64_t now;
+	unsigned index;
+
+	/* Only the phone's timer comes here. */
+	(void)timer;
+
+	/* Each held state whose time ran out. */
+	now = kwl_milliseconds();
+	for (index = 0U; index < PHONE_HELD_MAX; index++) {
+		if (!phone_state.held[index].used)
+			continue;
+		if (now - phone_state.held[index].at_ms >= PHONE_HOLD_MS)
+			phone_state.held[index].used = 0U;
+	}
+
+	/* Each sync that waited too long. */
+	for (index = 0U; index < PHONE_SLOTS; index++) {
+		slot = &phone_state.slots[index];
+		if (slot->object == NULL || !slot->sync_waiting)
+			continue;
+		if (now - slot->sync_since_ms < PHONE_SYNC_WAIT_MS)
+			continue;
+		slot->sync_waiting = 0U;
+		phone_done(slot->object, slot->sync_request, KL_SYSTEM_RESULT_TIMEOUT);
+	}
+
+	/* The next end of a time. */
+	phone_pace(context);
 }

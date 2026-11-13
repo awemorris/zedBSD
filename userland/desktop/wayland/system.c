@@ -561,9 +561,6 @@ kwl_system_tick(
 	/* What the user has enrolled, asked of sessiond when it is wanted (ws172-p002). */
 	system_enrolled_tick(server);
 
-	/* The monitor's samples, to the monitor objects (sysmon.c, WS134 p012). */
-	kwl_sysmon_tick(server);
-
 	/* The printers: the daemon's news and the answers (printers-shell.c, ws145-p003). */
 	kwl_printers_tick(server);
 

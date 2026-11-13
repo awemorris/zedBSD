@@ -2203,6 +2203,28 @@ struct kwl_server {
 	struct kwl_timer retire_timer;
 
 	/*
+	 * The timer of the failed clients' last flush (main.c): armed when a
+	 * client fails, and again for the earliest failed client whose events
+	 * still wait to be sent, at the end of its KWL_FATAL_FLUSH_MS; the
+	 * event loop's pass it wakes retires the client.
+	 */
+	struct kwl_timer fatal_timer;
+
+	/*
+	 * The timer of the run's bound (--timeout, the test role's deadline):
+	 * armed once for the bound when the event loop starts; time_up is 1
+	 * once it fired, and the loop ends.
+	 */
+	struct kwl_timer timeout_timer;
+	unsigned time_up;
+
+	/*
+	 * The timer of the pings (toplevel.c): armed while a ping waits for its
+	 * answer, for the earliest end of a ping's time.
+	 */
+	struct kwl_timer ping_timer;
+
+	/*
 	 * The main thread's timers and the timer thread that wakes the event
 	 * loop when the earliest is due (threads.c).  Made with the wake pipe,
 	 * the thread started after the other threads and stopped when the
@@ -2250,6 +2272,8 @@ uint64_t kwl_milliseconds(void);
 void kwl_due(struct kwl_server *server, uint64_t at_ms);
 void kwl_due_soon(struct kwl_server *server);
 void kwl_due_next_minute(struct kwl_server *server);
+void kwl_timer_set(struct kwl_server *server, struct kwl_timer *timer, uint64_t at_ms);
+void kwl_client_fail(struct kwl_client *client);
 void kwl_watch(struct kwl_server *server, int descriptor, short events);
 uint64_t kwl_microseconds(void);
 uint64_t kwl_log_us(void);
@@ -2283,6 +2307,7 @@ void kwl_backend_lid_changed(void *data, unsigned open);
 void kwl_power_read(struct kwl_server *server);
 void kwl_power_read_later(struct kwl_server *server);
 int kwl_lock(struct kwl_server *server, const char *reason);
+void kwl_lock_idle_pace(struct kwl_server *server);
 void kwl_lock_release(struct kwl_server *server, const char *reason);
 void kwl_lid_screen_restore(struct kwl_server *server);
 void kwl_lid_follow(struct kwl_server *server, unsigned open);
@@ -2570,7 +2595,6 @@ void kwl_system_network_gone(struct kwl_object *object);
 void kwl_system_close(struct kwl_server *server);
 int kwl_sysmon_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
 int kwl_sysmon_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
-void kwl_sysmon_tick(struct kwl_server *server);
 void kwl_sysmon_close(struct kwl_server *server);
 int kwl_notify_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
 int kwl_notify_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
@@ -2595,7 +2619,6 @@ int kwl_displays_request(struct kwl_object *object, uint32_t opcode, const unsig
 void kwl_displays_tell(struct kwl_server *server);
 /* A result held back while the output's move is not proven (displays-shell.c, BUG-266). */
 void kwl_displays_move_settled(struct kwl_server *server, int failed);
-void kwl_displays_pending_tick(struct kwl_server *server, uint64_t now);
 void kwl_displays_object_gone(struct kwl_object *object);
 void kwl_displays_written(struct kwl_server *server, uint64_t ticket, int error);
 int kwl_displays_key(struct kwl_server *server, uint32_t key, uint32_t state);

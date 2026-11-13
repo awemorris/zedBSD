@@ -174,6 +174,13 @@ struct kwl_ime {
 	 */
 	unsigned replacing;
 	int32_t method_started;
+	/*
+	 * The timers of the start again (armed for restart_ms while the
+	 * program is gone and not given up) and of the answer to a key
+	 * (armed for watch_ms and IME_ANSWER_MS while watching).
+	 */
+	struct kwl_timer restart_timer;
+	struct kwl_timer answer_timer;
 };
 
 /* text-input.c */

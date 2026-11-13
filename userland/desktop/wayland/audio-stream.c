@@ -822,8 +822,7 @@ audio_drop_client(
 	client = stream->object->client;
 	printf("KWL AUDIO stream client=%llu id=%u dropped errno=%d\n", (unsigned long long)client->number, stream->object->id, error);
 	if (!client->fatal) {
-		client->fatal = 1;
-		client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(client);
 	}
 }
 

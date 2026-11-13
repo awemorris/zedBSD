@@ -34,7 +34,7 @@ void kwl_data_select_offered(struct kwl_server *server);
 /* The history (clipboard.c): a new selection heard, the reading of its pipe, the compositor's text written to a reader, the list logged. */
 void kwl_clipboard_selected(struct kwl_server *server, struct kwl_object *source);
 void kwl_clipboard_poll(struct kwl_server *server);
-void kwl_clipboard_offer_write(int descriptor);
+void kwl_clipboard_offer_write(struct kwl_server *server, int descriptor);
 void kwl_clipboard_history_log(struct kwl_server *server);
 
 /* The primary selection: zwp_primary_selection_device_manager_v1 and its objects (ws035-p100, primary.c). */

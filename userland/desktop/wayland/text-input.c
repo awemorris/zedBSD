@@ -600,8 +600,7 @@ input_emit(
 	/* A client that stopped reading loses its connection. */
 	error = kwl_emit(object->client, object->id, opcode, payload, size);
 	if (error != 0) {
-		object->client->fatal = 1;
-		object->client->fatal_time = kwl_milliseconds();
+		kwl_client_fail(object->client);
 	}
 }
 

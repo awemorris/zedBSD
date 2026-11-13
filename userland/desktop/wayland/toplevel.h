@@ -34,6 +34,5 @@ int kwl_toplevel_button(struct kwl_server *server, uint32_t state);
 int kwl_toplevel_resize_start(struct kwl_server *server, struct kwl_object *surface, uint32_t edges);
 void kwl_ping_send(struct kwl_client *client);
 void kwl_ping_pong(struct kwl_client *client, uint32_t serial);
-void kwl_ping_check(struct kwl_server *server, uint64_t now);
 
 #endif
