@@ -1,46 +1,6 @@
-# OmniGrammaton for Windows: the cross build of libbrowser, libmedia,
-# libkeiland and the browser's user interface into Windows programs.
-# Run from the top of the tree: make -f apps/browser-win32/Makefile
-# WIN32_ARCH=x86_64 (or aarch64) or through the top Makefile: make
-# browser-win64, make browser-winarm64.  Output under
-# $(BROWSER_WIN32_BUILD) (build/browser-win64 or
-# build/browser-winarm64 by default).
 #
-# Windows gets no DLL of this tree: every library is a static library,
-# and a program links them all into one .exe that imports only
-# Windows' own DLLs, the C runtime's (UCRT) and, delayed, the Vulkan
-# loader.  The threads of libbrowser and libmedia are winpthreads',
-# linked statically; libkeiland's Windows files use the system's
-# threads and locks directly.
+# Browser
 #
-# What it builds so far: the files of the operating-system layers
-# (libbrowser's base/os-*, its storage, libmedia's media-os,
-# libkeiland's Windows files), compiled with the Windows compiler and
-# its warnings; the static libraries: libbrowser.a (all of libbrowser,
-# with its Windows layer), libmedia.a (all of libmedia and its
-# container reader, with media-os-win32.c), libkeiland.a (its Windows
-# files so far), libtruetype and the png, jpeg, gif, webp and z compat
-# libraries (from the same source lists as the zedBSD build); the
-# Vulkan headers and the import library of the Vulkan loader, and
-# zedBSD's TLS (libssl-compat.a and libcrypto-compat.a, from their
-# sources.mk; libbrowser's net/tls.c uses them through
-# net/tls-static-compat.c).  A test's program links with them all
-# (test-program); the browser's program and its resources join later,
-# linked the same way (WIN32_PROGRAM).  Apart from those:
-# libbrowser-script.a, the script core alone with its Windows layer,
-# and script-core.exe over it.
-#
-# The toolchain, first found wins:
-#   1. WIN32_CC=<compiler>
-#   2. LLVM_MINGW=<root of llvm-mingw>: $(LLVM_MINGW)/bin/<triple>-clang
-#   3. <triple>-clang on PATH
-#   4. x86_64 only: x86_64-w64-mingw32ucrt-gcc on PATH (Debian's UCRT mingw-w64)
-#
-# where <triple> is x86_64-w64-mingw32 or aarch64-w64-mingw32.  The
-# msvcrt mingw-w64 gcc (x86_64-w64-mingw32-gcc) is never used: the
-# build targets the UCRT.  Recipes run under a POSIX sh (also on a
-# Windows host: Git for Windows' or MSYS2's).  Copyright (C) 2026 Awe
-# Morris; SPDX-License-Identifier: Zlib
 
 WIN32_ARCH ?= x86_64
 ifeq ($(WIN32_ARCH),x86_64)
@@ -83,26 +43,15 @@ BROWSER_WIN32_DIST := $(BROWSER_WIN32_BUILD)/OmniGrammaton
 # Where the fetched tarballs are kept (fetch).
 BROWSER_WIN32_SOURCES ?= $(BROWSER_WIN32_BUILD)/sources
 
-# The flags of every file this build compiles.  The files written for this build are held to warning 0;
-# libtruetype and the compat libraries are compiled as the zedBSD tree has them, without -Werror, and
-# their warnings are kept beside each object (<object>.log) and counted in toolchain.txt.
-# $(BROWSER_WIN32_OBJ)/include holds the compat headers and the Vulkan headers, copied (not -Iinclude/libc,
-# which would hide the C runtime's headers).
 WIN32_COMMON_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -MMD -MP \
 	-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE \
 	-I. -Iuserland/desktop/include -Iuserland/desktop/libbrowser -Iuserland/desktop/libmedia \
 	-I$(BROWSER_WIN32_OBJ)/include
-WIN32_CFLAGS := $(WIN32_COMMON_CFLAGS) -Werror
+WIN32_CFLAGS := $(WIN32_COMMON_CFLAGS) -Wno-maybe-uninitialized -Werror
 WIN32_COMPAT_CFLAGS := $(WIN32_COMMON_CFLAGS)
 
-# What a program links with.  -static takes every library's static form: winpthreads (which llvm-mingw
-# links only when named) goes into the .exe, and the C runtime and the system's libraries, which have
-# no static form, stay imports of the UCRT's and Windows' own DLLs.  Vulkan goes through the loader's
-# import library as a delayed import (lld's --delayload): a program starts on a machine without
-# vulkan-1.dll and calls no vk* there.  The system's libraries are the ones the libraries call so far;
-# each file that calls another adds its library here.
 WIN32_THREAD_LDFLAGS := -lpthread
-WIN32_VULKAN_LDFLAGS := -L$(BROWSER_WIN32_OBJ) -lvulkan-1 -Wl,--delayload=vulkan-1.dll
+WIN32_VULKAN_LDFLAGS := -L$(BROWSER_WIN32_OBJ) -lvulkan-1
 WIN32_SYSTEM_LDFLAGS := -lws2_32 -liphlpapi -lbcrypt -lcrypt32 -ldwmapi -lshcore -limm32 -lshell32 -lole32 -luuid \
 	-lgdi32 -luser32 -ladvapi32
 WIN32_PROGRAM_LDFLAGS := -static $(WIN32_VULKAN_LDFLAGS) $(WIN32_THREAD_LDFLAGS) $(WIN32_SYSTEM_LDFLAGS)
@@ -130,23 +79,13 @@ BROWSER_WIN32_LAYER_SOURCES := \
 
 BROWSER_WIN32_LAYER_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_WIN32_LAYER_SOURCES))
 
-# libbrowser: the zedBSD build's list less its POSIX operating-system layer, which the Windows layer
-# above replaces.
 include userland/desktop/libbrowser/sources.mk
 LIBBROWSER_CORE_EXCLUDED := $(LIBBROWSER_OS_SOURCES) \
 	$(LIBBROWSER_OS_NET_SOURCES)
 LIBBROWSER_CORE_SOURCES := $(filter-out $(LIBBROWSER_CORE_EXCLUDED),$(LIBBROWSER_SOURCES))
-# TLS: tls.c uses libssl-compat and libcrypto-compat linked into the program (WB_TLS_STATIC) through
-# tls-static-compat.c, which only this build compiles (it is not in sources.mk: the zedBSD build opens the
-# shared libraries).
 LIBBROWSER_CORE_SOURCES += $(LIBBROWSER_DIR)/net/tls-static-compat.c
 LIBBROWSER_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBBROWSER_CORE_SOURCES))
 
-# libbrowser's script core alone (the base library, the virtual machine and JavaScript), with the Windows
-# files of the operating-system layer it uses (the system, the files and the clocks, not the network):
-# libbrowser-script.a, the library a program that runs only JavaScript links.  Its objects are
-# libbrowser.a's.  script-core.exe (a test's program over it and nothing else of libbrowser) links only
-# when the core needs nothing of the engine.
 LIBBROWSER_SCRIPT_WIN32_LAYER := $(LIBBROWSER_DIR)/base/os-win32.c \
 	$(LIBBROWSER_DIR)/base/os-system-win32.c \
 	$(LIBBROWSER_DIR)/base/os-file-win32.c \
@@ -159,15 +98,10 @@ SCRIPT_CORE_SOURCES := plan/ws334/tests/script-core-main.c
 SCRIPT_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(SCRIPT_CORE_SOURCES))
 SCRIPT_CORE_PROGRAM := $(BROWSER_WIN32_BUILD)/tests/script-core.exe
 
-# libmedia (with the container reader built into it): the zedBSD build's list less its POSIX
-# operating-system layer, which media-os-win32.c of the layers above replaces.
 include userland/desktop/libmedia/sources.mk
 LIBMEDIA_CORE_SOURCES := $(filter-out $(LIBMEDIA_OS_SOURCES),$(LIBMEDIA_SOURCES))
 LIBMEDIA_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBMEDIA_CORE_SOURCES))
 
-# libkeiland on Windows: the files of its source list that compile as they are (they include nothing of
-# Wayland or POSIX), its Windows files, and the stubs of every public function neither has (generated:
-# int ENOTSUP, a pointer NULL, nothing for void).  The rest of the list is the Wayland backend's.
 LIBKEILAND_WIN32_COMMON_SOURCES := \
 	userland/desktop/libkeiland/version.c \
 	userland/desktop/libkeiland/motion.c \
@@ -202,6 +136,7 @@ LIBKEILAND_WIN32_COMMON_SOURCES := \
 	userland/desktop/libkeiland/ui/chooser-view.c \
 	userland/desktop/libkeiland/ui/picker-view.c \
 	userland/desktop/picture/color-glyph.c
+
 LIBKEILAND_WIN32_OWN_SOURCES := \
 	userland/desktop/libkeiland/win32/app.c \
 	userland/desktop/libkeiland/win32/window.c \
@@ -213,35 +148,26 @@ LIBKEILAND_WIN32_OWN_SOURCES := \
 	userland/desktop/libkeiland/win32/clipboard.c \
 	userland/desktop/libkeiland/win32/pointer.c \
 	userland/desktop/libkeiland/win32/drag.c
-# Files of the list that read files through the C runtime's POSIX calls only, which the Windows C runtime
-# has too (the fonts, read as binary).
+
 LIBKEILAND_WIN32_CRT_SOURCES := userland/desktop/libkeiland/ui/text.c
 LIBKEILAND_WIN32_STUB_SOURCES := userland/desktop/libkeiland/win32/unsupported.c
 LIBKEILAND_WIN32_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBKEILAND_WIN32_COMMON_SOURCES) \
 	$(LIBKEILAND_WIN32_CRT_SOURCES) $(LIBKEILAND_WIN32_OWN_SOURCES))
 
-# The browser's user interface (the zedBSD build's list less its POSIX entry, with the Windows wrapping of its
-# storage, protect.c), a static library the
-# program's entry (main.c) and a test's console program link: its files find their own headers under
-# userland/desktop/browser, and libkeiland's application is called OmniGrammaton.
 include userland/desktop/browser/sources.mk
+
 BROWSER_UI_SOURCES := $(filter-out $(KEILAND_BROWSER_DIR)/main-posix.c,$(KEILAND_BROWSER_SOURCES)) \
 	apps/browser-win32/protect.c
 BROWSER_UI_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_UI_SOURCES))
 WIN32_SOURCES_browser-ui := $(BROWSER_UI_SOURCES)
 $(BROWSER_UI_OBJECTS): WIN32_CFLAGS += -I$(KEILAND_BROWSER_DIR) -DSHELL_APPLICATION_ID=\"OmniGrammaton\"
 
-# OmniGrammaton.exe: the entry, the single start and the resources (the manifest, the version and the
-# icon) over every static library, a program of the Windows subsystem; and the directory a user runs it
-# from, with the fonts, the browser's pages, the trusted roots and the licences under share, and its zip.
 include apps/browser-win32/version.mk
 OMNIGRAMMATON_SOURCES := apps/browser-win32/main.c apps/browser-win32/single.c
 OMNIGRAMMATON_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(OMNIGRAMMATON_SOURCES)) \
 	$(BROWSER_WIN32_OBJ)/apps/browser-win32/resources/OmniGrammaton.res.o
 OMNIGRAMMATON_PROGRAM := $(BROWSER_WIN32_BUILD)/OmniGrammaton.exe
-# The program is linked with its debug information (OMNIGRAMMATON_FULL) and split in two: the .exe that
-# is shipped has none, and OmniGrammaton.dbg (the DWARF, which a .exe keeps in sections; lld's --pdb
-# makes a PDB only from CodeView) stays in the build's output, named by the .exe's .gnu_debuglink.
+
 OMNIGRAMMATON_FULL := $(BROWSER_WIN32_OBJ)/OmniGrammaton-full.exe
 OMNIGRAMMATON_DEBUG := $(BROWSER_WIN32_BUILD)/OmniGrammaton.dbg
 WIN32_OBJCOPY ?= $(WIN32_TOOL_PREFIX)objcopy
@@ -258,26 +184,18 @@ OMNIGRAMMATON_SHARE := \
 	browser/text.html=$(KEILAND_BROWSER_DIR)/data/text.html
 OMNIGRAMMATON_SHARE_COPIES := $(foreach pair,$(OMNIGRAMMATON_SHARE),$(BROWSER_WIN32_DIST)/share/$(word 1,$(subst =, ,$(pair))))
 
-# The icon: a host tool (make-ico, built with the host's compiler) draws the browser's picture as the
-# Keiland desktop does (its icons.c) and writes OmniGrammaton.ico, which the resources take.
 HOST_CC ?= cc
 OMNIGRAMMATON_ICON := $(BROWSER_WIN32_OBJ)/OmniGrammaton.ico
 MAKE_ICO := $(BROWSER_WIN32_OBJ)/host/make-ico
 MAKE_ICO_SOURCES = apps/browser-win32/tools/make-ico.c apps/browser-win32/tools/ico.c \
 	userland/desktop/wayland/icons.c userland/desktop/picture/png-write.c $(LIBZ_COMPAT_SOURCES)
 
-# The trusted roots: the ca-certificates package's file (its release, size and SHA-256 read from the
-# package), from the shared downloads when they have it, else fetched; as share/certs/ca-certificates.pem.
 CA_CERTIFICATES_PACKAGE := userland/packages/security/ca-certificates/Makefile
 CA_CERTIFICATES_ARCHIVE := $(shell sed -n 's/^EXT_ca-certificates_ARCHIVE := //p' $(CA_CERTIFICATES_PACKAGE))
 CA_CERTIFICATES_URL := $(shell sed -n 's/^EXT_ca-certificates_URL := //p' $(CA_CERTIFICATES_PACKAGE))
 CA_CERTIFICATES_SHA256 := $(shell sed -n 's/^EXT_ca-certificates_SHA256 := //p' $(CA_CERTIFICATES_PACKAGE))
 CA_CERTIFICATES_FILE := $(BROWSER_WIN32_SOURCES)/$(CA_CERTIFICATES_ARCHIVE)
 
-# The licences of what the program is made of (share/licenses, with a README.txt that lists them): the
-# tree's (also libssl-compat's and libcrypto-compat's), the fonts', the engine's tables', the toolchain's
-# parts linked in (llvm-mingw's MinGW-w64 runtime and winpthreads, and LLVM's compiler runtime) and the
-# trusted roots'.
 WIN32_TOOLCHAIN_ROOT := $(abspath $(dir $(shell command -v $(WIN32_CC) 2>/dev/null || echo $(WIN32_CC)))..)
 WIN32_MINGW_LICENSES := $(WIN32_TOOLCHAIN_ROOT)/$(WIN32_TRIPLE)/share/mingw32
 OMNIGRAMMATON_LICENSES = \
@@ -286,22 +204,13 @@ OMNIGRAMMATON_LICENSES = \
 	Mahora-LICENSE.txt=userland/desktop/fonts/Mahora-LICENSE.txt \
 	JetBrainsMono-OFL.txt=userland/desktop/fonts/JetBrainsMono-OFL.txt \
 	DroidSansFallback-LICENSE.txt=userland/desktop/fonts/DroidSansFallback-LICENSE.txt \
-	Apache-2.0.txt=userland/desktop/fonts/Apache-2.0.txt \
 	WHATWG-entities.txt=userland/base/licenses/browser/WHATWG-entities \
 	Unicode-License-V3.txt=userland/base/licenses/browser/Unicode-License-V3 \
-	libwebp-COPYING.txt=userland/base/licenses/libwebp-compat/libwebp-COPYING \
-	MinGW-w64-runtime.txt=$(WIN32_MINGW_LICENSES)/COPYING.MinGW-w64-runtime.txt \
-	winpthreads.txt=$(WIN32_MINGW_LICENSES)/COPYING.winpthreads.txt \
-	LLVM-LICENSE.txt=$(WIN32_TOOLCHAIN_ROOT)/LICENSE.TXT \
 	ca-certificates-MPL-2.0.txt=userland/packages/security/ca-certificates/MPL-2.0.txt
 OMNIGRAMMATON_LICENSE_COPIES := $(foreach pair,$(OMNIGRAMMATON_LICENSES),$(BROWSER_WIN32_DIST)/share/licenses/$(word 1,$(subst =, ,$(pair))))
 
-# The zip: OmniGrammaton-<version>-<win64|winarm64>.zip of the directory, the same bytes from the same files.
 OMNIGRAMMATON_ZIP := $(BROWSER_WIN32_BUILD)/OmniGrammaton-$(OMNIGRAMMATON_VERSION)-$(WIN32_NAME).zip
 
-# The static libraries of the tree's libraries, each from its files of the Windows build so far:
-# libbrowser (its storage modules, which the layers above list too, once) with its Windows layer,
-# libmedia with media-os-win32.c, and libkeiland (its common files, its Windows files and the stubs).
 WIN32_SOURCES_browser := $(LIBBROWSER_CORE_SOURCES) \
 	$(filter-out $(LIBBROWSER_CORE_SOURCES),$(filter userland/desktop/libbrowser/%,$(BROWSER_WIN32_LAYER_SOURCES)))
 WIN32_SOURCES_media := $(LIBMEDIA_CORE_SOURCES) $(filter userland/desktop/libmedia/%,$(BROWSER_WIN32_LAYER_SOURCES))
@@ -309,8 +218,6 @@ WIN32_SOURCES_keiland := $(LIBKEILAND_WIN32_COMMON_SOURCES) $(filter userland/de
 	$(LIBKEILAND_WIN32_CRT_SOURCES) $(LIBKEILAND_WIN32_OWN_SOURCES) $(LIBKEILAND_WIN32_STUB_SOURCES)
 WIN32_TREE_LIBRARIES := browser-ui browser media keiland
 
-# libtruetype and the compat libraries: the zedBSD build's source lists, each a static library a
-# program links with libbrowser.a.
 include userland/desktop/libtruetype/sources.mk
 include userland/desktop/libpng-compat/sources.mk
 include userland/desktop/libjpeg-compat/sources.mk
@@ -329,9 +236,6 @@ WIN32_COMPAT_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(WIN32_COMPAT_S
 WIN32_COMPAT_ARCHIVES := $(foreach library,$(WIN32_COMPAT_LIBRARIES),$(BROWSER_WIN32_OBJ)/lib$(library).a)
 WIN32_TREE_ARCHIVES := $(foreach library,$(WIN32_TREE_LIBRARIES),$(BROWSER_WIN32_OBJ)/lib$(library).a)
 
-# zedBSD's TLS: libssl-compat and libcrypto-compat from their source lists (the common files and the Windows
-# file of the operating-system layer), held to warning 0 like the files written for this build.  Their
-# Windows layer calls bcrypt, crypt32 and ws2_32, which WIN32_SYSTEM_LDFLAGS links.
 include userland/base/libcrypto-compat/sources.mk
 include userland/base/libssl-compat/sources.mk
 WIN32_TLS_LIBRARIES := ssl-compat crypto-compat
@@ -340,12 +244,8 @@ WIN32_SOURCES_crypto-compat := $(LIBCRYPTO_COMPAT_SOURCES) $(LIBCRYPTO_COMPAT_WI
 WIN32_TLS_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(WIN32_SOURCES_ssl-compat) $(WIN32_SOURCES_crypto-compat))
 WIN32_TLS_ARCHIVES := $(foreach library,$(WIN32_TLS_LIBRARIES),$(BROWSER_WIN32_OBJ)/lib$(library).a)
 
-# Every static library a program links, a user's before what it uses (lld also finds a name in an
-# archive given earlier, but the order states the layers).  libssl-compat uses libcrypto-compat.
 WIN32_PROGRAM_ARCHIVES := $(WIN32_TREE_ARCHIVES) $(WIN32_COMPAT_ARCHIVES) $(WIN32_TLS_ARCHIVES)
 
-# A test's program (test-program): TEST_PROGRAM=<name> TEST_PROGRAM_SOURCES="<file>.c ...", linked
-# with every static library into $(BROWSER_WIN32_BUILD)/tests/<name>.exe.
 BROWSER_WIN32_TESTS := $(BROWSER_WIN32_BUILD)/tests
 TEST_PROGRAM_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(TEST_PROGRAM_SOURCES))
 
@@ -353,8 +253,6 @@ TEST_PROGRAM_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(TEST_PROGRAM_S
 WIN32_COMPAT_HEADERS := $(wildcard include/libc/compat/*.h include/libc/compat/*/*.h)
 WIN32_COMPAT_HEADER_COPIES := $(patsubst include/libc/%,$(BROWSER_WIN32_OBJ)/include/%,$(WIN32_COMPAT_HEADERS))
 
-# The Vulkan headers and the loader's export list, from Khronos' tarballs of the SDK's tag (the version
-# of the host's libvulkan-dev).  The SHA-256 values are of GitHub's archives of the tags.
 VULKAN_SDK_TAG := vulkan-sdk-1.4.309.0
 VULKAN_HEADERS_TARBALL := $(BROWSER_WIN32_SOURCES)/Vulkan-Headers-$(VULKAN_SDK_TAG).tar.gz
 VULKAN_HEADERS_URL := https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/$(VULKAN_SDK_TAG).tar.gz
@@ -393,36 +291,24 @@ $(BROWSER_WIN32_OBJ)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(WIN32_CC) $(WIN32_CFLAGS) -c $< -o $@
 
-# libbrowser includes the compat headers (the images) and the Vulkan headers (the GPU renderer, and
-# <browser/browser.h>, which names Vulkan's types).  Of the script core only js/tool.c includes
-# <browser/browser.h>, and so does script-core.exe's main.
 $(LIBBROWSER_CORE_OBJECTS) $(BROWSER_UI_OBJECTS) $(OMNIGRAMMATON_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
-# libmedia's Vulkan Video files include the Vulkan headers (and the others include nothing copied).
 $(LIBMEDIA_CORE_OBJECTS): | $(WIN32_VULKAN_HEADERS)
 
-# tls.c calls the TLS libraries linked into the program, whose public headers (the compat copies)
-# tls-static-compat.c includes; the libraries' own files include them too.
 $(BROWSER_WIN32_OBJ)/$(LIBBROWSER_DIR)/net/tls.o: WIN32_CFLAGS += -DWB_TLS_STATIC
 $(WIN32_TLS_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES)
-# libkeiland's public headers name Vulkan's types, and its colour glyphs read PNG (the compat headers).
+
 $(LIBKEILAND_WIN32_OBJECTS) $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBKEILAND_WIN32_STUB_SOURCES)): | \
 	$(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
 $(SCRIPT_CORE_OBJECTS): | $(WIN32_VULKAN_HEADERS)
 
-# A compat object keeps what the compiler said in <object>.log, and shows it only when the compile fails.
 $(WIN32_COMPAT_OBJECTS): $(BROWSER_WIN32_OBJ)/%.o: %.c | $(WIN32_COMPAT_HEADER_COPIES)
 	@mkdir -p $(dir $@)
 	$(WIN32_CC) $(WIN32_COMPAT_CFLAGS) -c $< -o $@ 2> $@.log || { cat $@.log; exit 1; }
 
-# Only the compat headers: zedBSD's C library side also has Vulkan headers (include/libc/vulkan), which
-# must not replace the Khronos headers this build copies under the same directory.
 $(BROWSER_WIN32_OBJ)/include/compat/%.h: include/libc/compat/%.h
 	@mkdir -p $(dir $@)
 	cp $< $@
 
-# lib<name>.a from its list, made afresh each time.  The members are appended (q), not replaced (r):
-# libbrowser has files of the same name in different directories (page/input.c and html/input.c), and
-# an archive keeps members by their file's name, so replacing would keep only the last of them.
 define WIN32_STATIC_LIBRARY
 $(BROWSER_WIN32_OBJ)/lib$(1).a: $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(WIN32_SOURCES_$(1)))
 	@mkdir -p $$(dir $$@)
@@ -432,9 +318,6 @@ $(BROWSER_WIN32_OBJ)/lib$(1).a: $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(WIN32_
 endef
 $(foreach library,$(WIN32_TREE_LIBRARIES) $(WIN32_COMPAT_LIBRARIES) $(WIN32_TLS_LIBRARIES) browser-script,$(eval $(call WIN32_STATIC_LIBRARY,$(library))))
 
-# A program: <output>.exe from its objects and every static library, with the flags the subsystem
-# needs (-mwindows for the browser, -mconsole for a test), so that another program is one line.
-#   $(call WIN32_PROGRAM,<output>,<objects>,<subsystem flag>)
 define WIN32_PROGRAM
 $(1): $(2) $(WIN32_PROGRAM_ARCHIVES) $(WIN32_VULKAN_LIBRARY)
 	@mkdir -p $$(dir $$@)

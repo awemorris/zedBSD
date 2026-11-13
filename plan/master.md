@@ -51,7 +51,7 @@
 ### 統合の注意
 
 <!-- master:merge:start -->
-- build system は作り直した（top の Makefile と `mk/platform-<機種>/`）。順は `make CONFIGMK=<cfg> llvm-toolchain-cached` → `make sysroot` → 個別の target。include/ を変えたら `make sysroot` を流し直す（[tools.md](tools.md)）。
+- build system は作り直した（top の Makefile と `mk/platform-<機種>/`）。作り直しの後、Makefile・mk/・`apps/*/Makefile` の comment と一部の規則は実態と合っていない事がある（2026-11-13 ユーザー: リファクタで build できなくなった所があり、記述が正しくない前提で扱う）。build の不具合は「単なるバグ」と決めず、作り直しの名残りを疑う。順は `make CONFIGMK=<cfg> llvm-toolchain-cached` → `make sysroot` → 個別の target。include/ を変えたら `make sysroot` を流し直す（[tools.md](tools.md)）。
 - 担当の worktree は main から新しく作り、`build/` に main の tree を symlink しない（[BUG-420](bugs/BUG-420.md)）。試験と build は 4 thread まで。
 - Makefile・`mk/` は Claude が変えない（`mk/test-config.mk` だけは Q1 が変えてよい）。要る時は差分の案をユーザーへ（[makefile-style.md](makefile-style.md)）。
 - WS074（ブラウザ）は Q1 が管理し、Claude の担当に割り当ててよい。Windows 版のブラウザ（WS334）と libbrowser の直しは P8 に寄せる。
@@ -98,7 +98,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-430 · q2049 · WS353 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-430 · q2051 · WS353 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
