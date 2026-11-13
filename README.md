@@ -24,6 +24,12 @@ computers with touch displays.
 
 ---
 
+## Current Work Map
+
+![Work Map](plan/cockpit-map.svg)
+
+---
+
 ## Hardware Support
 
 zedBSD and Keiland are already available and are currently being
