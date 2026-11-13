@@ -21,6 +21,15 @@
  * instead.  This driver takes one such vector, gives every child's
  * message the address that selects it, and runs every child's handler
  * when it fires.
+ *
+ * Across S0 idle the PCI core suspends the functions behind the VMD
+ * first, saves the configuration of the root ports (they have no driver),
+ * and then puts the VMD itself in D3hot; it brings them back in the
+ * reverse order.  The core saves and writes back the VMD's header and
+ * MSI-X table; this driver keeps the one register of its own a reset
+ * loses, the configuration register (the bus range and the bypass bit),
+ * and checks on resume that the buses and the windows are where the
+ * functions behind it were placed.
  */
 
 #include <drivers/pci/pci-vmd.h>
@@ -167,11 +176,13 @@ struct vmd_host {
 	unsigned long interrupts;
 	struct drv_pci_bus *root;
 	unsigned claimed[3];
+	uint16_t saved_configuration;
 };
 
 static int vmd_attach(struct drv_pci_device *device, const struct drv_pci_id *id);
 static int vmd_detach(struct drv_pci_device *device, unsigned flags);
 static int vmd_suspend(struct drv_pci_device *device);
+static int vmd_resume(struct drv_pci_device *device);
 static int host_config_read(void *context, const struct drv_pci_address *address, unsigned offset, unsigned width, uint32_t *value);
 static int host_config_write(void *context, const struct drv_pci_address *address, unsigned offset, unsigned width, uint32_t value);
 static int host_map_bar(void *context, struct drv_pci_device *device, const struct drv_pci_bar *bar, unsigned flags, struct drv_pci_mapping *mapping);
@@ -230,6 +241,7 @@ static struct drv_pci_driver vmd_driver = {
 	.attach = vmd_attach,
 	.detach = vmd_detach,
 	.suspend = vmd_suspend,
+	.resume = vmd_resume,
 };
 
 /*
@@ -396,6 +408,11 @@ vmd_attach(
 	vmd_instances++;
 	(void)drv_pci_device_set_driver_data(device, host);
 
+	/* Puts the bus behind the VMD, so that across a sleep its functions go down before the VMD and come up after it. */
+	error = drv_pci_bus_set_host_function(host->root, device);
+	if (error != 0)
+		kern_logf("vmd: %04x: the bus cannot be put behind the VMD (%d)\n", host->segment, error);
+
 	/* Enumerates the functions behind the VMD, which binds their drivers. */
 	error = drv_pci_bus_scan_tree(host->root);
 	if (error != 0)
@@ -419,19 +436,113 @@ vmd_detach(
 }
 
 /*
- * Refuses to suspend.
+ * Prepares the VMD for D3hot: keeps its configuration register.
  *
- * The root ports behind the VMD have no driver to save and restore their
- * bus numbers and windows across D3, so a suspend would lose the disks.
+ * The PCI core has suspended the functions behind the VMD and saved the
+ * root ports by now; it saves the VMD's header and MSI-X table itself
+ * after this returns.
  */
 static int
 vmd_suspend(
 	struct drv_pci_device *device)
 {
-	UNUSED_PARAMETER(device);
+	struct vmd_host *host;
+	uint16_t configuration;
+	int error;
 
-	/* Reports the VMD as unable to suspend; the PCI core resumes what it suspended before. */
-	return EBUSY;
+	/* Refuses a function this driver holds nothing for. */
+	host = drv_pci_device_driver_data(device);
+	if (host == NULL)
+		return EINVAL;
+
+	/* Reads the configuration register: the bus range and whether messages are caught. */
+	error = drv_pci_device_config_read16(device, VMD_REG_CONFIGURATION, &configuration);
+	if (error != 0) {
+		kern_logf("vmd: %04x: the configuration register cannot be read (%d)\n", host->segment, error);
+		return error;
+	}
+
+	/* Keeps it for the resume. */
+	host->saved_configuration = configuration;
+
+	/* Succeeded: the VMD can go to D3hot. */
+	return 0;
+}
+
+/*
+ * Brings the VMD back after D0: its configuration register as it was,
+ * then checks that the buses and the windows are where the functions
+ * behind it were placed.
+ *
+ * The PCI core has written back the VMD's header and MSI-X table by now,
+ * and writes back the root ports and resumes the functions behind them
+ * after this returns.  EIO reports a VMD whose bus range or windows did
+ * not come back, behind which nothing can be reached.
+ */
+static int
+vmd_resume(
+	struct drv_pci_device *device)
+{
+	struct vmd_host *host;
+	uint16_t capability;
+	uint16_t configuration;
+	unsigned start;
+	bool reset;
+	int error;
+
+	/* Refuses a function this driver holds nothing for. */
+	host = drv_pci_device_driver_data(device);
+	if (host == NULL)
+		return EINVAL;
+
+	/* Reads the configuration register as the reset left it. */
+	error = drv_pci_device_config_read16(device, VMD_REG_CONFIGURATION, &configuration);
+	if (error != 0) {
+		kern_logf("vmd: %04x: the configuration register cannot be read (%d)\n", host->segment, error);
+		return EIO;
+	}
+
+	/* Writes the saved register back when the reset changed it, and reads what took. */
+	reset = false;
+	if (configuration != host->saved_configuration) {
+		reset = true;
+		error = drv_pci_device_config_write16(device, VMD_REG_CONFIGURATION, host->saved_configuration);
+		if (error != 0) {
+			kern_logf("vmd: %04x: the configuration register cannot be written (%d)\n", host->segment, error);
+			return EIO;
+		}
+
+		/* Reads it back. */
+		error = drv_pci_device_config_read16(device, VMD_REG_CONFIGURATION, &configuration);
+		if (error != 0)
+			return EIO;
+	}
+
+	/* Reads the capability register, which says whether the bus range applies. */
+	error = drv_pci_device_config_read16(device, VMD_REG_CAPABILITY, &capability);
+	if (error != 0)
+		return EIO;
+
+	/* Refuses a bus range other than the one the buses were numbered in. */
+	error = drv_pci_vmd_bus_start(capability, configuration, &start);
+	if (error != 0 || start != host->domain.bus_start) {
+		kern_logf("vmd: %04x: the buses did not come back (configuration %04x, saved %04x)\n",
+			  host->segment,
+			  configuration,
+			  host->saved_configuration);
+		return EIO;
+	}
+
+	/* Refuses windows that moved. */
+	error = vmd_check_windows(host);
+	if (error != 0)
+		return EIO;
+
+	/* Logs the VMD back, and whether the sleep had reset its register. */
+	kern_logf("vmd: %04x: resumed (configuration %04x, %s)\n", host->segment, configuration, reset ? "written back after a reset" : "kept");
+
+	/* Succeeded: the root ports behind the VMD can be written back. */
+	return 0;
 }
 
 /* Reads a register behind the VMD for the PCI core. */

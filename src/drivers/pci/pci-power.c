@@ -26,9 +26,17 @@
  * ESTALE says its function lost the state it had and can be attached
  * afresh; the function is detached and attached again.
  *
- * Functions without a driver are left alone.  The two calls come from the
- * one thread that enters and leaves S0 idle; a second suspend before the
- * resume is refused.
+ * A function without a driver is left alone, unless a function above it
+ * has a driver and so may lose its power: a root port behind a VMD loses
+ * its bus numbers and windows when the VMD goes to D3hot.  Such a function
+ * only has its configuration saved, after the functions behind it were
+ * suspended and before the one above it is; it is written back after the
+ * function above it is resumed and before the ones behind it are.  A port
+ * whose link went down meanwhile is given the time the link and the device
+ * behind it need before they are spoken to.
+ *
+ * The two calls come from the one thread that enters and leaves S0 idle;
+ * a second suspend before the resume is refused.
  */
 
 #include <drivers/pci/pci.h>
@@ -40,9 +48,19 @@
 #include "kern/klog.h"
 #include "kern/kmem.h"
 
-/* The configuration space registers the save and the restore use. */
+/*
+ * The configuration space registers the save and the restore use: the
+ * command register, the dword holding the header type, the header type's
+ * layout field and the bridge layout, and the dword holding a bridge's
+ * bus numbers.
+ */
 #define PCI_COMMAND		0x04U
 #define PCI_HEADER_DWORDS	16U
+#define PCI_HEADER_TYPE_DWORD	3U
+#define PCI_HEADER_TYPE_SHIFT	16U
+#define PCI_HEADER_LAYOUT	0x7fU
+#define PCI_HEADER_BRIDGE	0x01U
+#define PCI_BRIDGE_BUSES_DWORD	6U
 
 /* The capabilities: power management, MSI, PCI Express and MSI-X. */
 #define CAPABILITY_PM		0x01U
@@ -77,11 +95,59 @@
 #define MSIX_FUNCTION_MASK	0x4000U
 #define MSIX_ENTRY_DWORDS	4U
 
-/* The PCI Express control registers saved: device, link, device 2 and link 2. */
+/*
+ * The PCI Express capability: the capabilities register with the port's
+ * type and the slot bit, the link capabilities with the bit that says the
+ * port reports an active data link, the link status with that bit, and the
+ * control registers saved: device, link, slot, root, device 2 and link 2.
+ * The slot control exists on a port with a slot, the root control on a
+ * root port and a root complex event collector.
+ *
+ * Values referenced: PCI Express Base Specification Revision 4.0
+ * Version 1.0, section 7.5.3 (the PCI Express Capabilities, Link
+ * Capabilities, Link Control, Link Status, Slot Control and Root Control
+ * registers) and section 7.8.3.3 (the L1 PM Substates are enabled only
+ * while ASPM L1 is disabled).
+ */
+#define PCIE_CAPABILITIES	0x02U
+#define PCIE_TYPE_MASK		0x00f0U
+#define PCIE_TYPE_ROOT_PORT	0x0040U
+#define PCIE_TYPE_DOWNSTREAM	0x0060U
+#define PCIE_TYPE_EVENT_COLLECTOR	0x00a0U
+#define PCIE_SLOT_IMPLEMENTED	0x0100U
 #define PCIE_DEVICE_CONTROL	0x08U
+#define PCIE_LINK_CAPABILITIES	0x0cU
+#define PCIE_LINK_ACTIVE_REPORTING	0x00100000U
 #define PCIE_LINK_CONTROL	0x10U
+#define PCIE_LINK_ASPM		0x0003U
+#define PCIE_LINK_STATUS	0x12U
+#define PCIE_LINK_ACTIVE	0x2000U
+#define PCIE_SLOT_CONTROL	0x18U
+#define PCIE_ROOT_CONTROL	0x1cU
 #define PCIE_DEVICE_CONTROL2	0x28U
 #define PCIE_LINK_CONTROL2	0x30U
+
+/* Where each saved control sits in the saved state's pcie[]. */
+#define SAVED_DEVICE_CONTROL	0U
+#define SAVED_LINK_CONTROL	1U
+#define SAVED_DEVICE_CONTROL2	2U
+#define SAVED_LINK_CONTROL2	3U
+#define SAVED_SLOT_CONTROL	4U
+#define SAVED_ROOT_CONTROL	5U
+
+/*
+ * What a port whose link went down needs before the device behind it is
+ * spoken to: up to a second for the link to come up, polled every 10
+ * milliseconds, then 100 milliseconds; a port that cannot report its link
+ * gets the 100 milliseconds alone.
+ *
+ * Values referenced: PCI Express Base Specification Revision 4.0
+ * Version 1.0, section 6.6.1 (the 100 ms after the link is up, and the
+ * 1.0 s within which a device must answer after a reset).
+ */
+#define LINK_UP_POLLS		100U
+#define LINK_UP_POLL_MS		10U
+#define LINK_SETTLE_MS		100U
 
 /* LTR: the maximum snoop and no-snoop latencies. */
 #define LTR_LATENCIES		0x04U
@@ -95,11 +161,18 @@
  * is in the bus tree, and how far its suspend went, which is exactly what
  * its resume undoes.  wake_wanted is set by the driver's suspend through
  * drv_pci_device_set_wake(), keep_d0 through drv_pci_device_keep_d0().
+ * save_only marks a function without a driver behind one with a driver:
+ * only its configuration is saved and written back.  link_reported and
+ * link_active say whether such a port reports its link, and whether the
+ * link was up when it was saved.
  */
 struct power_entry {
 	struct drv_pci_device *device;
 	struct drv_pci_saved_state saved;
 	unsigned depth;
+	uint8_t save_only;
+	uint8_t link_reported;
+	uint8_t link_active;
 	uint8_t driver_suspended;
 	uint8_t wake_wanted;
 	uint8_t wake_armed;
@@ -137,10 +210,15 @@ static struct {
 
 static int count_visitor(struct drv_pci_device *device, void *argument);
 static int collect_visitor(struct drv_pci_device *device, void *argument);
+static int taken_on(struct drv_pci_device *device, uint8_t *save_only);
 static unsigned device_depth(struct drv_pci_device *device);
 static void sort_deepest_first(struct power_entry *entries, unsigned count);
 static int suspend_entry(struct power_entry *entry);
+static int save_entry(struct power_entry *entry);
 static int resume_entry(struct power_entry *entry);
+static int restore_entry(struct power_entry *entry);
+static void settle_link(struct power_entry *entry);
+static int port_with_link(const struct drv_pci_saved_state *state);
 static int platform_state(struct drv_pci_device *device, unsigned state);
 static int platform_wake(struct drv_pci_device *device, bool wake);
 static int pme_set(struct drv_pci_device *device, bool enable);
@@ -165,6 +243,7 @@ drv_pci_device_save_state(
 	unsigned capability;
 	unsigned index;
 	unsigned count;
+	unsigned type;
 	uint16_t value;
 	int error;
 
@@ -207,11 +286,23 @@ drv_pci_device_save_state(
 	/* Saves the PCI Express control registers. */
 	error = drv_pci_device_find_capability(device, CAPABILITY_PCIE, &capability);
 	if (error == 0) {
+		/* Reads the port's type and whether it has a slot, which say which controls exist. */
+		state->pcie_flags = (uint16_t)read16_or_zero(device, capability + PCIE_CAPABILITIES);
+
 		/* Reads the device, link, device 2 and link 2 controls; one that fails stays zero. */
-		state->pcie[0] = read16_or_zero(device, capability + PCIE_DEVICE_CONTROL);
-		state->pcie[1] = read16_or_zero(device, capability + PCIE_LINK_CONTROL);
-		state->pcie[2] = read16_or_zero(device, capability + PCIE_DEVICE_CONTROL2);
-		state->pcie[3] = read16_or_zero(device, capability + PCIE_LINK_CONTROL2);
+		state->pcie[SAVED_DEVICE_CONTROL] = read16_or_zero(device, capability + PCIE_DEVICE_CONTROL);
+		state->pcie[SAVED_LINK_CONTROL] = read16_or_zero(device, capability + PCIE_LINK_CONTROL);
+		state->pcie[SAVED_DEVICE_CONTROL2] = read16_or_zero(device, capability + PCIE_DEVICE_CONTROL2);
+		state->pcie[SAVED_LINK_CONTROL2] = read16_or_zero(device, capability + PCIE_LINK_CONTROL2);
+
+		/* Reads the slot control of a port with a slot. */
+		if ((state->pcie_flags & PCIE_SLOT_IMPLEMENTED) != 0)
+			state->pcie[SAVED_SLOT_CONTROL] = read16_or_zero(device, capability + PCIE_SLOT_CONTROL);
+
+		/* Reads the root control of a root port and of an event collector. */
+		type = state->pcie_flags & PCIE_TYPE_MASK;
+		if (type == PCIE_TYPE_ROOT_PORT || type == PCIE_TYPE_EVENT_COLLECTOR)
+			state->pcie[SAVED_ROOT_CONTROL] = read16_or_zero(device, capability + PCIE_ROOT_CONTROL);
 
 		/* Remembers where the capability is. */
 		state->pcie_offset = (uint16_t)capability;
@@ -286,7 +377,9 @@ drv_pci_device_save_state(
  * Writes a saved configuration back after the function returned to D0,
  * and frees the copy of the MSI-X table.
  *
- * The PCI Express controls, LTR and L1 PM Substates come first, then the
+ * The PCI Express controls (device, link without ASPM, slot, root,
+ * device 2, link 2), LTR, L1 PM Substates and the link control with ASPM
+ * come first, then the
  * header from its last dword down with the command register last, then
  * MSI and MSI-X with their enables last.  A failed write is reported once
  * everything else was written.
@@ -302,7 +395,9 @@ drv_pci_device_restore_state(
 	unsigned index;
 	unsigned count;
 	unsigned entries;
+	unsigned type;
 	uint16_t msi_control;
+	uint16_t slot_control;
 	int first_error;
 	int error;
 
@@ -314,10 +409,28 @@ drv_pci_device_restore_state(
 	first_error = 0;
 	capability = state->pcie_offset;
 	if (capability != 0) {
-		(void)drv_pci_device_config_write16(device, capability + PCIE_DEVICE_CONTROL, (uint16_t)state->pcie[0]);
-		(void)drv_pci_device_config_write16(device, capability + PCIE_LINK_CONTROL, (uint16_t)state->pcie[1]);
-		(void)drv_pci_device_config_write16(device, capability + PCIE_DEVICE_CONTROL2, (uint16_t)state->pcie[2]);
-		(void)drv_pci_device_config_write16(device, capability + PCIE_LINK_CONTROL2, (uint16_t)state->pcie[3]);
+		/* The device control, and the link control without ASPM until the L1 PM Substates are back. */
+		(void)drv_pci_device_config_write16(device, capability + PCIE_DEVICE_CONTROL, (uint16_t)state->pcie[SAVED_DEVICE_CONTROL]);
+		(void)drv_pci_device_config_write16(device, capability + PCIE_LINK_CONTROL, (uint16_t)(state->pcie[SAVED_LINK_CONTROL] & ~PCIE_LINK_ASPM));
+
+		/*
+		 * The slot control of a port with a slot, only when it differs:
+		 * a write is a command to the slot's controller.
+		 */
+		if ((state->pcie_flags & PCIE_SLOT_IMPLEMENTED) != 0) {
+			slot_control = (uint16_t)read16_or_zero(device, capability + PCIE_SLOT_CONTROL);
+			if (slot_control != (uint16_t)state->pcie[SAVED_SLOT_CONTROL])
+				(void)drv_pci_device_config_write16(device, capability + PCIE_SLOT_CONTROL, (uint16_t)state->pcie[SAVED_SLOT_CONTROL]);
+		}
+
+		/* The root control of a root port and of an event collector. */
+		type = state->pcie_flags & PCIE_TYPE_MASK;
+		if (type == PCIE_TYPE_ROOT_PORT || type == PCIE_TYPE_EVENT_COLLECTOR)
+			(void)drv_pci_device_config_write16(device, capability + PCIE_ROOT_CONTROL, (uint16_t)state->pcie[SAVED_ROOT_CONTROL]);
+
+		/* The device 2 and link 2 controls. */
+		(void)drv_pci_device_config_write16(device, capability + PCIE_DEVICE_CONTROL2, (uint16_t)state->pcie[SAVED_DEVICE_CONTROL2]);
+		(void)drv_pci_device_config_write16(device, capability + PCIE_LINK_CONTROL2, (uint16_t)state->pcie[SAVED_LINK_CONTROL2]);
 	}
 
 	/* Writes the LTR latencies back. */
@@ -329,6 +442,10 @@ drv_pci_device_restore_state(
 		(void)drv_pci_device_config_write32(device, state->l1ss_offset + L1SS_CONTROL2, state->l1ss[1]);
 		(void)drv_pci_device_config_write32(device, state->l1ss_offset + L1SS_CONTROL1, state->l1ss[0]);
 	}
+
+	/* Enables ASPM again once the substates are programmed: the saved link control whole. */
+	if (capability != 0 && (state->pcie[SAVED_LINK_CONTROL] & PCIE_LINK_ASPM) != 0)
+		(void)drv_pci_device_config_write16(device, capability + PCIE_LINK_CONTROL, (uint16_t)state->pcie[SAVED_LINK_CONTROL]);
 
 	/* Writes the header back from its last dword, leaving the identifiers and the class, which are read-only. */
 	for (index = PCI_HEADER_DWORDS - 1U; index > 2U; index--) {
@@ -589,7 +706,8 @@ drv_pci_platform_power_set(
 
 /*
  * Suspends every function a driver is bound to, deepest in the bus tree
- * first.
+ * first, and saves the configuration of the functions without a driver
+ * behind them.
  *
  * On a failure the functions already suspended are resumed again, failed
  * receives the function that failed (it may be NULL), and the failure is
@@ -612,7 +730,7 @@ drv_pci_suspend_all(
 	if (power.suspended)
 		return EBUSY;
 
-	/* Counts the bound functions. */
+	/* Counts the functions the suspend takes on. */
 	kern_memset(&collection, 0, sizeof(collection));
 	(void)drv_pci_foreach_device(count_visitor, &collection);
 
@@ -721,26 +839,27 @@ drv_pci_resume_all(void)
 	return 0;
 }
 
-/* Counts one bound function. */
+/* Counts one function the suspend takes on. */
 static int
 count_visitor(
 	struct drv_pci_device *device,
 	void *argument)
 {
 	struct power_collection *collection;
-	struct drv_pci_driver *driver;
+	uint8_t save_only;
+	int taken;
 
-	/* Counts the function when a driver is bound to it. */
+	/* Counts the function when the suspend takes it on. */
 	collection = argument;
-	driver = drv_pci_device_driver(device);
-	if (driver != NULL)
+	taken = taken_on(device, &save_only);
+	if (taken)
 		collection->count++;
 
 	/* Goes on with the next function. */
 	return 0;
 }
 
-/* Collects one bound function with its depth. */
+/* Collects one function the suspend takes on, with its depth. */
 static int
 collect_visitor(
 	struct drv_pci_device *device,
@@ -748,42 +867,86 @@ collect_visitor(
 {
 	struct power_collection *collection;
 	struct power_entry *entry;
-	struct drv_pci_driver *driver;
+	uint8_t save_only;
+	int taken;
 
-	/* Skips a function without a driver, and one beyond the room counted. */
+	/* Skips a function the suspend leaves alone, and one beyond the room counted. */
 	collection = argument;
-	driver = drv_pci_device_driver(device);
-	if (driver == NULL || collection->count == collection->room)
+	taken = taken_on(device, &save_only);
+	if (!taken || collection->count == collection->room)
 		return 0;
 
 	/* Fills the entry. */
 	entry = &collection->entries[collection->count];
 	entry->device = device;
 	entry->depth = device_depth(device);
+	entry->save_only = save_only;
 	collection->count++;
 
 	/* Goes on with the next function. */
 	return 0;
 }
 
-/* Reports how many bridges are above a function. */
+/*
+ * Reports whether the suspend takes a function on: one with a driver is
+ * suspended; one without is only saved when a function above it has a
+ * driver, which may take the power away from below it.  save_only receives
+ * which of the two it is.
+ */
+static int
+taken_on(
+	struct drv_pci_device *device,
+	uint8_t *save_only)
+{
+	struct drv_pci_device *above;
+	struct drv_pci_driver *driver;
+
+	/* A function with a driver is suspended. */
+	*save_only = 0;
+	driver = drv_pci_device_driver(device);
+	if (driver != NULL)
+		return 1;
+
+	/* Climbs the functions above it, looking for one with a driver. */
+	above = drv_pci_device_upstream(device);
+	while (above != NULL) {
+		/* One with a driver may power down what is below it: the function is saved. */
+		driver = drv_pci_device_driver(above);
+		if (driver != NULL) {
+			*save_only = 1;
+			return 1;
+		}
+
+		/* One function further up. */
+		above = drv_pci_device_upstream(above);
+	}
+
+	/* Nothing above it powers down: the function is left alone. */
+	return 0;
+}
+
+/*
+ * Reports how deep a function is: one on a root bus of the platform's host
+ * bridge is at depth 1, and each function above it (a bridge, or the
+ * function that presents its root bus) adds one.
+ */
 static unsigned
 device_depth(
 	struct drv_pci_device *device)
 {
-	struct drv_pci_bus *bus;
+	struct drv_pci_device *above;
 	unsigned depth;
 
-	/* Climbs from the function's bus to its root bus. */
-	depth = 0;
-	bus = drv_pci_device_bus(device);
-	while (bus != NULL) {
-		/* One bus further up. */
-		bus = drv_pci_bus_parent(bus);
+	/* Climbs the functions above it. */
+	depth = 1;
+	above = drv_pci_device_upstream(device);
+	while (above != NULL) {
+		/* One function further up. */
+		above = drv_pci_device_upstream(above);
 		depth++;
 	}
 
-	/* Reports the number of buses above and including the function's. */
+	/* Reports the depth. */
 	return depth;
 }
 
@@ -824,6 +987,16 @@ suspend_entry(
 	struct drv_pci_device *device;
 	struct drv_pci_driver *driver;
 	int error;
+
+	/* Only saves a function without a driver. */
+	if (entry->save_only) {
+		error = save_entry(entry);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the function's configuration is kept. */
+		return 0;
+	}
 
 	/* Refuses a driver that cannot suspend its function. */
 	device = entry->device;
@@ -894,6 +1067,50 @@ suspend_entry(
 }
 
 /*
+ * Saves the configuration of a function without a driver, and for a port
+ * whether its link was up.
+ */
+static int
+save_entry(
+	struct power_entry *entry)
+{
+	struct drv_pci_device *device;
+	unsigned capability;
+	uint32_t link_capabilities;
+	uint16_t link_status;
+	int is_port;
+	int error;
+
+	/* Saves the configuration. */
+	device = entry->device;
+	error = drv_pci_device_save_state(device, &entry->saved);
+	if (error != 0)
+		return error;
+
+	/* Nothing more for a function that is not a port with a link below it. */
+	is_port = port_with_link(&entry->saved);
+	if (!is_port)
+		return 0;
+
+	/* Reads whether the port reports its link; one that cannot gives no more. */
+	capability = entry->saved.pcie_offset;
+	error = drv_pci_device_config_read32(device, capability + PCIE_LINK_CAPABILITIES, &link_capabilities);
+	if (error != 0)
+		return 0;
+	if ((link_capabilities & PCIE_LINK_ACTIVE_REPORTING) == 0)
+		return 0;
+
+	/* Records whether the link is up. */
+	entry->link_reported = 1;
+	error = drv_pci_device_config_read16(device, capability + PCIE_LINK_STATUS, &link_status);
+	if (error == 0 && (link_status & PCIE_LINK_ACTIVE) != 0)
+		entry->link_active = 1;
+
+	/* Succeeded: the configuration is saved. */
+	return 0;
+}
+
+/*
  * Resumes one function as far as its suspend went: the platform, D0, the
  * configuration, the wake and the driver.  Every step is tried; the first
  * failure is reported.
@@ -906,6 +1123,18 @@ resume_entry(
 	struct drv_pci_driver *driver;
 	int first_error;
 	int error;
+
+	/* Only writes back the configuration of a function without a driver. */
+	if (entry->save_only) {
+		error = restore_entry(entry);
+		if (error != 0) {
+			log_device("resume", entry->device, error);
+			return error;
+		}
+
+		/* Succeeded: the function has its configuration again. */
+		return 0;
+	}
 
 	/* Gives the platform's power back first, so that the function has power for D0. */
 	device = entry->device;
@@ -971,6 +1200,129 @@ resume_entry(
 	}
 
 	/* Succeeded: the function runs again. */
+	return 0;
+}
+
+/*
+ * Writes back the configuration of a function without a driver.  A port
+ * that lost its bus numbers was reset with what is behind it, and its
+ * link is given the time it needs.
+ */
+static int
+restore_entry(
+	struct power_entry *entry)
+{
+	struct drv_pci_device *device;
+	uint32_t buses;
+	int is_port;
+	int lost;
+	int error;
+
+	/* Nothing to write back when the save did not happen. */
+	device = entry->device;
+	if (!entry->saved.saved)
+		return 0;
+
+	/* Reads whether a port still has its bus numbers. */
+	lost = 0;
+	is_port = port_with_link(&entry->saved);
+	if (is_port) {
+		error = drv_pci_device_config_read32(device, PCI_BRIDGE_BUSES_DWORD * 4U, &buses);
+		if (error != 0 || buses != entry->saved.header[PCI_BRIDGE_BUSES_DWORD])
+			lost = 1;
+	}
+
+	/* Writes the configuration back. */
+	error = drv_pci_device_restore_state(device, &entry->saved);
+	if (error != 0)
+		return error;
+
+	/* Waits for the link of a port that was reset. */
+	if (lost)
+		settle_link(entry);
+
+	/* Succeeded: the function has its configuration again. */
+	return 0;
+}
+
+/*
+ * Waits after a port's configuration came back for its link: up to a
+ * second for a link that was up to come up again, then the time the
+ * device behind it needs; a port that cannot report its link gets that
+ * time alone.  A link that stays down is logged; the functions behind it
+ * then fail their own resume.
+ */
+static void
+settle_link(
+	struct power_entry *entry)
+{
+	struct drv_pci_address address;
+	struct drv_pci_device *device;
+	unsigned capability;
+	unsigned poll;
+	uint16_t link_status;
+	int error;
+
+	/* A port that cannot report its link, or whose link was down, is given the time alone. */
+	device = entry->device;
+	if (!entry->link_reported || !entry->link_active) {
+		sleep_ms(LINK_SETTLE_MS);
+		return;
+	}
+
+	/* Polls until the data link layer is up again. */
+	capability = entry->saved.pcie_offset;
+	for (poll = 0; poll < LINK_UP_POLLS; poll++) {
+		/* Reads the link status. */
+		link_status = 0;
+		error = drv_pci_device_config_read16(device, capability + PCIE_LINK_STATUS, &link_status);
+		if (error == 0 && (link_status & PCIE_LINK_ACTIVE) != 0)
+			break;
+
+		/* Lets the link train. */
+		sleep_ms(LINK_UP_POLL_MS);
+	}
+
+	/* Logs a link that did not come back, or how long it took. */
+	if (poll == LINK_UP_POLLS) {
+		log_device("link of", device, ETIMEDOUT);
+	} else {
+		drv_pci_device_address(device, &address);
+		kern_logf("pci: %04x:%02x:%02x.%x was reset; its link was up again after %u ms\n", (unsigned)address.segment, (unsigned)address.bus, (unsigned)address.device, (unsigned)address.function, poll * LINK_UP_POLL_MS);
+	}
+
+	/* Gives the device behind the port its time after the link is up. */
+	sleep_ms(LINK_SETTLE_MS);
+}
+
+/*
+ * Reports whether a saved function is a bridge whose secondary side is a
+ * PCI Express link: a root port or a switch's downstream port.
+ */
+static int
+port_with_link(
+	const struct drv_pci_saved_state *state)
+{
+	unsigned layout;
+	unsigned type;
+
+	/* A function with another layout than a bridge's has no secondary side. */
+	layout = (state->header[PCI_HEADER_TYPE_DWORD] >> PCI_HEADER_TYPE_SHIFT) & PCI_HEADER_LAYOUT;
+	if (layout != PCI_HEADER_BRIDGE)
+		return 0;
+
+	/* A bridge without the PCI Express capability has no link to wait for. */
+	if (state->pcie_offset == 0)
+		return 0;
+
+	/* Root ports and downstream ports have a link below them. */
+	type = state->pcie_flags & PCIE_TYPE_MASK;
+	if (type == PCIE_TYPE_ROOT_PORT)
+		return 1;
+	if (type == PCIE_TYPE_DOWNSTREAM)
+		return 1;
+
+	/* Any other bridge has none. */
 	return 0;
 }
 
