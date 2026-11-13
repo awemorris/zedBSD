@@ -75,7 +75,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 | [p016](phase016/phase.md) | 試験: QEMU の回帰と 5330 の idle（電力・PC2・thread ごとの起床） | planned | p002〜p015 |
 | [p017](phase017/phase.md) | 規約の全文の見直し | planned | p016 |
 | [p018](phase018/phase.md) | 入力の device の hotplug を sessiond に開かせる（fd の受け渡し、100 ms の settle の scan を消す） | cleared（2026-11-14 Q1 判定。P1 q2072 e8b9a14a0d、main に merge f4d831e0ea。sessiond が seat の socket で OPEN に fd を渡す、compositor の devices の thread、settle の scan を消した。QEMU の seat-hotplug 3 回目 全 PASS（挿した keyboard・mouse は sessiond の OPEN 1 回、scan 0、idle の timeout 0）。sessiond 無しの道は挿す step が 3 回とも PASS、他の step は host の負荷で時間切れ。Log Out・password の login の QEMU は未実施） | p008 |
-| [p019](phase019/phase.md) | printers の 1 s の見回りを消す（printd の push、一覧は設定から、libkeiland は使う時だけ作る） | planned（q2074、P1） | p008 |
+| [p019](phase019/phase.md) | printers の 1 s の見回りを消す（printd の push、一覧は設定から、libkeiland は使う時だけ作る） | cleared（2026-11-14 P1 q2074、branch agent/p1-ws353j。周期の check を消し一覧は object を作る時に 1 回読む、printd の打ち切りは期限の timer、print.c の folder の作りの欠陥も直した。build 3 機種 warning 0、host 試験 PASS、QEMU の qemu-printers.sh PASS。libkeiland の使う時だけ作る形はしていない（理由は phase.md）。Q1 の確認待ち） | p008 |
 
 ## ユーザーの決定（続き）
 
@@ -91,6 +91,7 @@ Keiland の compositor（`userland/desktop/wayland/`、`libkeiland-backend-zedbs
 
 ## Resume point
 
+- 2026-11-14 08:4x P1（q2074-i01、branch `agent/p1-ws353j`）: p019 を実装（printers の 1 s の check を消し、一覧は printers の object を作った時に 1 回読む、printd の状態は socket の push のまま、protocol を破った printd の打ち切りは `kl_backend_print_due` の timer、`print.c` が `~/.config` から folder を作る）。3 機種の build warning 0、host 試験（`plan/ws353/tests/printers/run.sh`）PASS、QEMU（新しい `plan/ws353/tests/qemu-printers.sh`）PASS（[phase019](phase019/phase.md) の結果）。
 - 2026-11-14 07:4x P1（q2072-i01、branch `agent/p1-ws353i`）: p018 を実装（sessiond の seat の socket で入力の device を開かせる、compositor の devices の thread、settle の scan を消した）。3 機種の build warning 0、host 試験 PASS、QEMU の `qemu-seat-hotplug.sh` PASS（[phase018](phase018/phase.md) の結果）。Log Out の handoff の QEMU と実機は未実施。
 - 2026-11-14 06:2x P1（q2068-i01、branch `agent/p1-ws353h`）: p008 を実装（`kwl_due`・`due_ms` を消し poll は -1、animation は frame の完了で、期限・pacing・入力の scan・時計は timer、子の回収は SIGCHLD の後、network・phone・machine の取り込みは wake の後）。3 機種の build warning 0、host 試験 PASS、QEMU（新しい `plan/ws353/tests/qemu-animation.sh`、idle の閾値を timeout 0 にした main-wake・deadlines・ui-deadlines）PASS（[phase008](phase008/phase.md) の結果）。状態に追従する tick が毎 pass に残る点は Q1 の判断待ち。次は p010（p009・p011 の後）。
 - 2026-11-14 06:5x P2（q2067-i01、branch `agent/p2-ws353d`）: p011 を実装（render の step を「依頼を先に、出来る事が無ければ最古の fence を無期限、何も飛んでいなければ acquire か cond」に、park の間は want を取らない、`KWL RENDER stopped` の数えと `KWL LAT completed`）。3 機種の build warning 0、host 試験（`plan/ws353/tests/render-step/run.sh`）と QEMU（`plan/ws353/tests/qemu-render-wait.sh`）PASS（[phase011](phase011/phase.md) の結果）。`plan/ws309/tests/render-task/` は merge の時に Q1 が消す。次は p012（cursor）、p010。
