@@ -54,6 +54,7 @@
 | [WS348](ws348/ws.md) | MG003 | Raspberry Pi 500 の dtb を image に入れる（そのまま Pi 500 で起動）（2026-11-13、Pi 500 の外部の報告から） | incomplete（p001 cleared: zedBSD-firmware 2670dc1 と mk f949ade4f2、FAT に 3 つの dtb。Pi 500 の実機は未確かめ） | p001 |
 | [WS349](ws349/ws.md) | MG006 | Raspberry Pi 5 の HDMI の音（2026-11-13、Pi 500 の外部の報告から） | incomplete（p001 設計の第一版、design-reviewer 未実施） | p001 |
 | [WS350](ws350/ws.md) | MG003 | Raspberry Pi 500 を動作の確かめた機種として記録する（2026-11-13、Pi 500 の外部の報告から） | incomplete（p001 cleared: README と tools.md に Pi 500） | p001 |
+| [WS351](ws351/ws.md) | MG004 | 可変の tick（普段 1000 Hz、idle で 100 Hz）と HAL_TIMER_FREQUENCY の廃止。HAL の API はユーザーが決めた（2026-11-13） | planned | p001 |
 | [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
 | [WS339](ws339/ws.md) | MG004 | x86 の PC の UEFI の起動の画面の解像度を monitor（EDID）に合わせる、標準の設定の video=640x480 を外す（2026-11-01 ユーザー） | planning | p001（担当の割当はユーザーの指示で） |
 | [WS338](ws338/ws.md) | MG006 | libmedia の H.264 の software の decoder の速さの続き（WS326 から分けた、2026-11-01 ユーザー） | planning | p001 設計（担当の割当はユーザーの指示で） |

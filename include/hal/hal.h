@@ -546,18 +546,24 @@ hal_irq_send_eoi(
  * RTC
  *
  * Do not consider timers other than local scheduling ticks.
- *
- * HAL_TIMER_FREQUENCY, the rate of the periodic tick in hertz, is defined by
- * each architecture's header (<hal/arch/ARCH.h>), because the rate is chosen per
- * machine: a desktop that renders with Vulkan wants a fine tick, and a small
- * machine kept for demonstration does not.  A BSP derives its timer divisor
- * from this value and never writes a rate of its own, and the kernel's tick
- * rate, kern_clock_tick_rate(), is the same number.
  */
 
-#ifndef HAL_TIMER_FREQUENCY
-#error "the architecture header does not define HAL_TIMER_FREQUENCY"
-#endif
+/*
+ * Get the local scheduling tick resolution.
+ */
+uint32_t
+hal_rtc_get_tick_hz(void);
+
+/*
+ * Set the scheduling tick resolution of the local CPU.  Note that
+ * this is not a guarantee that the tick will be delivered at that
+ * rate and delivered immediate, only that the HAL will try to deliver
+ * it at around that rate on the next timer interrupt.  The retuned
+ * value is the actual tick rate that the HAL will try to deliver.
+ */
+uint32_t
+hal_rtc_set_tick_hz(
+	uint32_t hz);
 
 /*
  * Read wall-clock time as whole seconds since the Unix epoch.
