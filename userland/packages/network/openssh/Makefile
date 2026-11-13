@@ -1,12 +1,14 @@
 # zedBSD userland package: OpenSSH portable (external release tarball).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
+# An external package, never part of the system: it is built and put in an
+# image only when the configuration names it, and it needs OpenSSL, which the
+# configuration names as well.
+# The system's own ssh, sshd, ssh-keygen and sftp-server are userland/base/ssh
+# (on libcrypto-compat).
+#
 # OpenSSH is BSD/ISC licensed and stays outside the source tree: only this
 # Makefile, the patches beside it and the recorded archive identity live here.
-# Provenance and the license audit are in plan/ws032/provenance.md.
-#
-# Registration as a selectable package and the cross build land with the build
-# work; this file currently owns acquisition of the verified source tree.
 OPENSSH_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 OPENSSH_DIR := $(patsubst %/,%,$(dir $(OPENSSH_MAKEFILE)))
 include $(OPENSSH_DIR)/../../../base/package.mk

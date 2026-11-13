@@ -1,12 +1,15 @@
 # zedBSD userland package: OpenSSL (external release tarball).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
+# An external package, never part of the system: it is built and put in an
+# image only when the configuration names the package openssl (curl,
+# python3 and openssh need it, so a configuration that names them names it
+# too).  Nothing of the system needs it; the system's own TLS and
+# cryptography are libssl-compat and libcrypto-compat (userland/base/),
+# which the browser, Mail and ssh use.
+#
 # OpenSSL itself is Apache-2.0 and stays outside the source tree: only this
 # Makefile, the patches beside it and the recorded archive identity live here.
-# Provenance and the license audit are in plan/ws032/provenance.md.
-#
-# Registration as a selectable package and the cross build land with the build
-# work; this file currently owns acquisition of the verified source tree.
 OPENSSL_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 OPENSSL_DIR := $(patsubst %/,%,$(dir $(OPENSSL_MAKEFILE)))
 include $(OPENSSL_DIR)/../../../base/package.mk
@@ -52,7 +55,6 @@ OPENSSL_LICENSE := $(EXT_openssl_SRCDIR)/LICENSE.txt
 # The deprecated interfaces are kept.  They were left out while the zedBSD
 # libc had no gethostbyname, which some of them reach for; the libc has it
 # now, and OpenSSH is written against EC_KEY, which is among them.
-# See plan/ws032/phase006/results.md for the rest.
 OPENSSL_CONFIGURE_OPTIONS := \
 	--prefix=/usr --openssldir=/etc/ssl --libdir=lib \
 	no-asm no-tests no-docs no-engine no-dso no-module \
