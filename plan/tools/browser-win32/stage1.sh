@@ -1,12 +1,12 @@
 #!/bin/sh
-# The first stage of WS334's tests (design.md §7.1) on one tree, for counting before and after a change:
+# The first stage of the browser's host tests on one tree, for counting before and after a change:
 # the WS074 host build and its host-* tests, the JavaScript tests, the network tests (loader, HTTP with
 # and without --async, fetch) and the browser component, for one variant.
-#   sh plan/ws334/tests/stage1.sh TREE plain|asan [PORT_OFFSET]
+#   sh plan/tools/browser-win32/stage1.sh TREE plain|asan [PORT_OFFSET]
 # TREE is the root of a source tree (this one, or a git archive of another commit); everything is built
 # and run inside it.  PORT_OFFSET (default 0) is added to the network tests' ports, so that two trees can
 # run at the same time.  The summary (one line per check, "name: result") goes to
-# TREE/build/tmp/ws334-stage1-VARIANT/summary.txt and to the standard output; host-exits.txt there has
+# TREE/build/tmp/browser-win32-stage1-VARIANT/summary.txt and to the standard output; host-exits.txt there has
 # each host-* test's exit status.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -18,7 +18,7 @@ plain|asan) ;;
 *) echo "stage1: unknown variant $variant" >&2; exit 2 ;;
 esac
 cd "$tree" || exit 2
-out=build/tmp/ws334-stage1-$variant
+out=build/tmp/browser-win32-stage1-$variant
 mkdir -p "$out"
 summary=$out/summary.txt
 : > "$summary"

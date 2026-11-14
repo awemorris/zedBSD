@@ -296,8 +296,8 @@
 | `plan/ws322/tests/config-vf2-video.mk` | ZEDBSD_CONFIG ZEDBSD_USER_PROGRAMS | ws322 は incomplete、その WS の試験 |  |
 | `plan/ws322/tests/config-visionfive2-vpu-probe.mk` | ZEDBSD_CONFIG | ws322 は incomplete、その WS の試験 |  |
 | `plan/ws322/tests/config-visionfive2-vpu.mk` | ZEDBSD_CONFIG | ws322 は incomplete、その WS の試験 |  |
-| `plan/ws334/tests/config-amd64-p027-guest.mk` | ZEDBSD_USER_PROGRAMS | ws334 は incomplete、その WS の試験 |  |
-| `plan/ws334/tests/sources-same.sh` | ZEDBSD_TOPLEVEL_BUILD | ws334 は incomplete、その WS の試験 |  |
+| `plan/ws334/tests/config-amd64-p027-guest.mk` | ZEDBSD_USER_PROGRAMS | ws334 は incomplete、その WS の試験 | 消した（2026-11-15 P7 q2120: WS334 の完了、開発の時だけの guest の試験） |
+| `plan/ws334/tests/sources-same.sh` | ZEDBSD_TOPLEVEL_BUILD | ws334 は incomplete、その WS の試験 | 消した（2026-11-15 P7 q2120: WS334 の完了、source の一覧を移した時の一度きりの比較） |
 | `plan/ws336/tests/config-amd64-ci-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 | 消した（2026-11-15 P2 q2101: 既定の config が自前の ssh） |
 | `plan/tools/ssh/config-amd64-ssh.mk`（もと `plan/ws336/tests/config-amd64-ssh.mk`） | ZEDBSD_USER_PROGRAMS | ws336 の試験、WS の完了で plan/tools/ssh へ移した | 直した（2026-11-15 P2 q2101、CONFIGMK の形） |
 | `plan/ws336/tests/config-amd64-tcp-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 | 消した（2026-11-15 P2 q2101: 既定の config が自前の ssh） |

@@ -6,7 +6,7 @@
 #  1. the Windows libraries (make -f apps/browser-win32/Makefile layers libbrowser-core libraries vulkan
 #     headers, test-program browser-cli) and the host's build (plan/ws074/tests/host-build.sh plain);
 #  2. every plan/ws074/tests/host-*.c as a Windows .exe (the same compile flags as the Windows build, linked
-#     with every static library and plan/ws334/tests/binary-mode.c, which makes the standard streams and
+#     with every static library and plan/tools/browser-win32/binary-mode.c, which makes the standard streams and
 #     files binary as on the host; win32-posix.h gives setenv and realpath; host-heap is compiled from a copy
 #     whose 64-bit state is an unsigned long long, and with -fno-inline; host-svg-length and host-svg-text
 #     from copies whose temporary directory is on Wine's Z: drive), run on the host and under Wine from the
@@ -24,27 +24,27 @@
 # The parts to run: ONLY="build host runners gpu interop" (default: all; runners is js url html5lib
 # test262, each also by its own name).  TEST262_FILTERS="test/built-ins/Math/ test/annexB/" chooses the test262
 # directories (default: five; all: all of test262, which takes hours under Wine).
-#   sh plan/ws334/tests/host-tests-windows.sh
+#   sh plan/tools/browser-win32/host-tests-windows.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
-# the output is build/tmp/ws334-host-tests-windows (a new directory each run); the summary there is
+# the output is build/tmp/browser-win32-host-tests-windows (a new directory each run); the summary there is
 # summary.txt, and the table of the host tests is host-table.txt.  Each Wine command runs under
 # flock /tmp/zedbsd-wine.lock (do not run the whole script under that lock: it would wait for itself).  Wine's
-# prefix is build/tmp/ws334-wine (made when missing).
+# prefix is build/tmp/browser-win32-wine (made when missing).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 root=$(pwd)
 . plan/tools/fresh-out.sh
-name=build/tmp/ws334-host-tests-windows
+name=build/tmp/browser-win32-host-tests-windows
 fresh_out "$name"
 out=$(cd "$root/$name" && pwd -P)
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
 ONLY=${ONLY:-build host runners gpu interop}
-build=build/tmp/ws334-wine-build/browser-win64
-sources=build/tmp/ws334-win32-sources
+build=build/tmp/browser-win32-wine-build/browser-win64
+sources=build/tmp/browser-win32-sources
 lock=/tmp/zedbsd-wine.lock
 lvp=/usr/share/vulkan/icd.d/lvp_icd.json
-prefix=$root/build/tmp/ws334-wine
+prefix=$root/build/tmp/browser-win32-wine
 python=/usr/bin/python3
 summary=$out/summary.txt
 : > "$summary"
@@ -84,7 +84,7 @@ if wants build || wants host || wants runners || wants gpu || wants interop; the
 		exit 1
 	fi
 	if ! win32_make "$out/make-cli.log" test-program TEST_PROGRAM=browser-cli \
-	    TEST_PROGRAM_SOURCES=plan/ws334/tests/browser-cli-main.c TEST_PROGRAM_LDFLAGS=-municode; then
+	    TEST_PROGRAM_SOURCES=plan/tools/browser-win32/browser-cli-main.c TEST_PROGRAM_LDFLAGS=-municode; then
 		say "host-tests-windows: browser-cli.exe did not build cleanly (log $out/make-cli.log)"
 		exit 1
 	fi
@@ -150,10 +150,10 @@ if [ "\$n" = host-svg-length ] || [ "\$n" = host-svg-text ]; then
 	sed 's|"/tmp/ws074-|"Z:/tmp/ws074-|' \$source > $out/exe/\$n.c
 	source=$out/exe/\$n.c
 fi
-$WIN32_CC $cflags -include plan/ws334/tests/win32-posix.h \$extra -Iplan/ws074/tests -Iuserland/desktop/browser -c \$source -o $out/exe/\$n.o > $out/exe/\$n.log 2>&1 &&
+$WIN32_CC $cflags -include plan/tools/browser-win32/win32-posix.h \$extra -Iplan/ws074/tests -Iuserland/desktop/browser -c \$source -o $out/exe/\$n.o > $out/exe/\$n.log 2>&1 &&
     $WIN32_CC -static -o $out/exe/\$n.exe $out/exe/\$n.o $out/binary-mode.o $WIN32_PROGRAM_ARCHIVES $WIN32_PROGRAM_LDFLAGS >> $out/exe/\$n.log 2>&1
 EOF
-	$WIN32_CC $cflags -c plan/ws334/tests/binary-mode.c -o "$out/binary-mode.o" || exit 1
+	$WIN32_CC $cflags -c plan/tools/browser-win32/binary-mode.c -o "$out/binary-mode.o" || exit 1
 	ls plan/ws074/tests/host-*.c | sed 's|.*/||; s|\.c$||' | grep -vx host-shell > "$out/host-names.txt"
 	xargs -P 16 -n 1 sh "$out/compile.sh" < "$out/host-names.txt"
 	sync
@@ -259,7 +259,7 @@ if wants gpu; then
 		base=$(basename "$page" .html)
 		for kind in gpu cpu; do
 			if [ -f "$out/gpu-host/$base-$kind.ppm" ] && [ -f "$out/gpu-wine/$base-$kind.ppm" ]; then
-				line=$($python plan/ws334/tests/compare-ppm.py "$base $kind (host against Wine)" "$out/gpu-host/$base-$kind.ppm" "$out/gpu-wine/$base-$kind.ppm")
+				line=$($python plan/tools/browser-win32/compare-ppm.py "$base $kind (host against Wine)" "$out/gpu-host/$base-$kind.ppm" "$out/gpu-wine/$base-$kind.ppm")
 			else
 				line="$base $kind: a picture is missing (host: $(ls "$out/gpu-host/$base-$kind.ppm" 2> /dev/null | wc -l), Wine: $(ls "$out/gpu-wine/$base-$kind.ppm" 2> /dev/null | wc -l))"
 			fi
@@ -284,7 +284,7 @@ if wants interop; then
 		    --program "$hostdir/browser" --out "$out/reftest-host-$tag" > "$out/reftest-host-$tag.log" 2>&1
 		timeout 7200 $python plan/ws074/tests/run-wpt-reftests.py --root "$area" --limit 20 \
 		    --program "$out/bin/browser-wine" --out "$out/reftest-wine-$tag" > "$out/reftest-wine-$tag.log" 2>&1
-		line=$($python plan/ws334/tests/compare-reftests.py "reftests $area" "$out/reftest-host-$tag/report.json" "$out/reftest-wine-$tag/report.json")
+		line=$($python plan/tools/browser-win32/compare-reftests.py "reftests $area" "$out/reftest-host-$tag/report.json" "$out/reftest-wine-$tag/report.json")
 		say "$line"
 		case $line in
 		*"other status 0"*) ;;

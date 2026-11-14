@@ -1,7 +1,7 @@
 #!/bin/sh
 # https of libbrowser on Windows under Wine (x86_64), with zedBSD's TLS (libssl-compat and libcrypto-compat)
 # linked into the program (net/tls.c calls them directly): the test program
-# plan/ws334/tests/tls-main.c (built by the Windows build's test-program, which links every static library)
+# plan/tools/browser-win32/tls-main.c (built by the Windows build's test-program, which links every static library)
 # fetches a page from the host's `openssl s_server` on 127.0.0.1 (a test CA and a server certificate made here,
 # the network outside is not used), with the blocking fetch and with the loader, and must:
 #   a. connect when the test CA is added with --ca-file;
@@ -14,30 +14,30 @@
 #      (nothing reads it);
 #   g. connect when the CA is cert.pem beside the .exe (libssl-compat's default paths on Windows).
 # The program must import no DLL of OpenSSL, hold none of OpenSSL's own names, and hold libssl-compat's.
-#   sh plan/ws334/tests/tls-wine.sh
+#   sh plan/tools/browser-win32/tls-wine.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
-# WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-tls-wine-prefix); PORT=<n> the server's port (18443).
+# WINEPREFIX=<dir> the Wine prefix (default build/tmp/browser-win32-tls-wine-prefix); PORT=<n> the server's port (18443).
 # Wine runs under flock /tmp/zedbsd-wine.lock; make runs with -j4.  Last line: tls-wine: PASS or tls-wine: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 top=$(pwd)
 . plan/tools/fresh-out.sh
-out=build/tmp/ws334-tls-wine
+out=build/tmp/browser-win32-tls-wine
 fresh_out "$out"
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
-WINEPREFIX=${WINEPREFIX:-$top/build/tmp/ws334-tls-wine-prefix}
+WINEPREFIX=${WINEPREFIX:-$top/build/tmp/browser-win32-tls-wine-prefix}
 export WINEPREFIX
 port=${PORT:-18443}
-build=${BROWSER_WIN32_BUILD:-build/tmp/ws334-tls-build/browser-win64}
-sources=build/tmp/ws334-win32-sources
+build=${BROWSER_WIN32_BUILD:-build/tmp/browser-win32-tls-build/browser-win64}
+sources=build/tmp/browser-win32-sources
 mkdir -p "$sources"
 status=0
 
 # 1. The program, and the two TLS archives the Windows build makes for it.
 if ! timeout 3300 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 \
     LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j4 \
-    test-program TEST_PROGRAM=tls-tool TEST_PROGRAM_SOURCES="plan/ws334/tests/tls-main.c" \
+    test-program TEST_PROGRAM=tls-tool TEST_PROGRAM_SOURCES="plan/tools/browser-win32/tls-main.c" \
     > "$out/make.log" 2>&1 || grep -q 'warning:' "$out/make.log"; then
 	echo "tls-wine: the program did not build cleanly (log $out/make.log)"
 	tail -10 "$out/make.log"

@@ -3,12 +3,12 @@
 # reference, not the judgement of a real Windows.  The items of the minimal set M1 to M8 that Wine can show
 # (an item Wine cannot show is "not run (a real Windows)" and is not counted):
 #  0. the Windows build (make -f apps/browser-win32/Makefile all zip: OmniGrammaton.exe and its zip), two
-#     test's console programs over the same libraries (plan/ws334/tests/browser-cli-main.c over the
+#     test's console programs over the same libraries (plan/tools/browser-win32/browser-cli-main.c over the
 #     browser's entry, cert-store-main.c that puts a certificate into a store of the current user), the
 #     host's browser (plan/ws074/tests/host-build.sh plain); the zip extracted into a new directory, and
 #     every window below started from there;
 #  M8 the headless modes print the same bytes on the host and under Wine: --js of all of plan/ws074/tests/js
-#     and of plan/ws334/tests/js/gc-parse.js (the parser's setjmp and longjmp between collections of the
+#     and of plan/tools/browser-win32/js/gc-parse.js (the parser's setjmp and longjmp between collections of the
 #     heap), --dump=layout of the bundled start.html, about.html and text.html;
 #  M1 OmniGrammaton.exe draws start.html with Vulkan (lavapipe through Wine's Vulkan) in Xvfb (1280x800);
 #  M2 the CPU's way: with --no-gpu (vulkan-1.dll is an ordinary import, so the program does not start
@@ -22,46 +22,46 @@
 #     clipboard (Ctrl+L, Ctrl+C) and typed back opens it again (Japanese with an input method: a real
 #     Windows);
 #  M5 letters typed into a page's text field reach it (the page prints its input events); the input
-#     method's composition: a real Windows; M5t: plan/ws334/tests/tsf-main.c drives libkeiland's TSF
+#     method's composition: a real Windows; M5t: plan/tools/browser-win32/tsf-main.c drives libkeiland's TSF
 #     text store in a window of its own (the checks Wine's TSF can do: inserted text is committed, and
 #     not handed on while the program does not ask for text);
 #  M6 after the program is closed (its close button) and started again, a cookie with an expiry and
 #     localStorage are still there, and a cookie without one is not; the cookies' records on disk are
 #     protected for the user (DPAPI: each starts with the wrapping's magic), and
-#     plan/ws334/tests/protect-main.c checks the wrapping backend over a files backend of its own;
+#     plan/tools/browser-win32/protect-main.c checks the wrapping backend over a files backend of its own;
 #  caption: the bare title bar beside the location's box is the window's caption: the frame answers
-#     WM_NCHITTEST there with HTCAPTION (plan/ws334/tests/hit-test-main.c sends it), on the box and the
+#     WM_NCHITTEST there with HTCAPTION (plan/tools/browser-win32/hit-test-main.c sends it), on the box and the
 #     buttons with HTCLIENT; a drag from there moves the window, a double click maximizes it and a second
 #     restores it (told to the frame as Windows does: Wine does not move a maximized frame's X window
 #     without a window manager; the snap of the drag and the system menu of a right click: a real
 #     Windows);
 #  M7 the dark mode (AppsUseLightTheme 0 in the registry) gives a dark title bar and the page its dark
 #     scheme (start.html's prefers-color-scheme: dark, a dark ground; the light one in the light mode);
-#     the mode changed while the program runs (plan/ws334/tests/theme-main.c writes the value and
+#     the mode changed while the program runs (plan/tools/browser-win32/theme-main.c writes the value and
 #     broadcasts WM_SETTINGCHANGE "ImmersiveColorSet") turns the page light and dark again; at 144 dpi
 #     the title bar is 1.5 times as tall; the snap layouts and Mica: a real Windows (Wine shows none).
 # A window's screenshot passes when it has more than 100 colours (a page, not an empty window).  The PNGs
-# go to build/review/ws334-p033/.  Each Wine command runs under flock /tmp/zedbsd-wine.lock (do not run
+# go to build/review/browser-win32-wine/.  Each Wine command runs under flock /tmp/zedbsd-wine.lock (do not run
 # the whole script under that lock: it would wait for itself).
-#   sh plan/ws334/tests/wine-run.sh
+#   sh plan/tools/browser-win32/wine-run.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64),
-# PORT=<n> the https server's port (18444).  The Wine prefixes are build/tmp/ws334-wine (the console
-# programs), build/tmp/ws334-wine-gui (the windows), build/tmp/ws334-wine-gui144 (LogPixels 144) and
-# build/tmp/ws334-wine-dark (the dark mode); a missing one is made.  Last line: wine-run: PASS or
+# PORT=<n> the https server's port (18444).  The Wine prefixes are build/tmp/browser-win32-wine (the console
+# programs), build/tmp/browser-win32-wine-gui (the windows), build/tmp/browser-win32-wine-gui144 (LogPixels 144) and
+# build/tmp/browser-win32-wine-dark (the dark mode); a missing one is made.  Last line: wine-run: PASS or
 # wine-run: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 root=$(pwd)
 . plan/tools/fresh-out.sh
-out=build/tmp/ws334-wine-run
+out=build/tmp/browser-win32-wine-run
 fresh_out "$out"
 out=$root/$out
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
 port=${PORT:-18444}
-build=build/tmp/ws334-wine-build/browser-win64
-sources=build/tmp/ws334-win32-sources
-review=build/review/ws334-p033
+build=build/tmp/browser-win32-wine-build/browser-win64
+sources=build/tmp/browser-win32-sources
+review=build/review/browser-win32-wine
 lock=/tmp/zedbsd-wine.lock
 lvp=/usr/share/vulkan/icd.d/lvp_icd.json
 mkdir -p "$sources" "$review"
@@ -105,17 +105,17 @@ if ! win32_make "$out/make.log" all zip; then
 	exit 1
 fi
 if ! win32_make "$out/make-cli.log" test-program TEST_PROGRAM=browser-cli \
-    TEST_PROGRAM_SOURCES=plan/ws334/tests/browser-cli-main.c TEST_PROGRAM_LDFLAGS=-municode ||
+    TEST_PROGRAM_SOURCES=plan/tools/browser-win32/browser-cli-main.c TEST_PROGRAM_LDFLAGS=-municode ||
     ! win32_make "$out/make-cert.log" test-program TEST_PROGRAM=cert-store \
-    TEST_PROGRAM_SOURCES=plan/ws334/tests/cert-store-main.c ||
+    TEST_PROGRAM_SOURCES=plan/tools/browser-win32/cert-store-main.c ||
     ! win32_make "$out/make-theme.log" test-program TEST_PROGRAM=theme-set \
-    TEST_PROGRAM_SOURCES=plan/ws334/tests/theme-main.c ||
+    TEST_PROGRAM_SOURCES=plan/tools/browser-win32/theme-main.c ||
     ! win32_make "$out/make-protect.log" test-program TEST_PROGRAM=protect-test \
-    TEST_PROGRAM_SOURCES=plan/ws334/tests/protect-main.c ||
+    TEST_PROGRAM_SOURCES=plan/tools/browser-win32/protect-main.c ||
     ! win32_make "$out/make-hit.log" test-program TEST_PROGRAM=hit-test \
-    TEST_PROGRAM_SOURCES=plan/ws334/tests/hit-test-main.c ||
+    TEST_PROGRAM_SOURCES=plan/tools/browser-win32/hit-test-main.c ||
     ! win32_make "$out/make-tsf.log" test-program TEST_PROGRAM=tsf-test \
-    TEST_PROGRAM_SOURCES=plan/ws334/tests/tsf-main.c; then
+    TEST_PROGRAM_SOURCES=plan/tools/browser-win32/tsf-main.c; then
 	echo "wine-run: a test's program did not build cleanly (logs $out/make-cli.log, $out/make-cert.log, $out/make-theme.log, $out/make-protect.log, $out/make-hit.log, $out/make-tsf.log)"
 	echo "wine-run: FAIL"
 	exit 1
@@ -153,10 +153,10 @@ prefix() {
 		WINEPREFIX=$1 timeout 120 wineserver -w
 	fi
 }
-gui=$root/build/tmp/ws334-wine-gui
-gui144=$root/build/tmp/ws334-wine-gui144
-dark=$root/build/tmp/ws334-wine-dark
-for each in "$root/build/tmp/ws334-wine" "$gui" "$gui144" "$dark"; do
+gui=$root/build/tmp/browser-win32-wine-gui
+gui144=$root/build/tmp/browser-win32-wine-gui144
+dark=$root/build/tmp/browser-win32-wine-dark
+for each in "$root/build/tmp/browser-win32-wine" "$gui" "$gui144" "$dark"; do
 	prefix "$each"
 done
 WINEPREFIX=$gui144 WINEDEBUG=-all timeout 300 flock "$lock" \
@@ -177,7 +177,7 @@ compare() {
 	name=$1
 	shift
 	timeout 300 "$host" "$@" > "$out/$name.host" 2>&1
-	WINEPREFIX=$root/build/tmp/ws334-wine WINEDEBUG=-all timeout 300 flock "$lock" wine "$cli" "$@" \
+	WINEPREFIX=$root/build/tmp/browser-win32-wine WINEDEBUG=-all timeout 300 flock "$lock" wine "$cli" "$@" \
 	    > "$out/$name.wine" 2>&1
 	if cmp -s "$out/$name.host" "$out/$name.wine" && [ -s "$out/$name.host" ]; then
 		same=$((same + 1))
@@ -186,7 +186,7 @@ compare() {
 	fi
 }
 total=0
-for test in plan/ws074/tests/js/*.js plan/ws334/tests/js/*.js; do
+for test in plan/ws074/tests/js/*.js plan/tools/browser-win32/js/*.js; do
 	compare "js-$(basename "$test" .js)" --js "$test"
 	total=$((total + 1))
 done
@@ -532,7 +532,7 @@ for record in "$gui"/drive_c/users/*/AppData/Local/OmniGrammaton/cookies/*; do
 	[ "$(head -c 8 "$record")" = OGDPAPI1 ] || plain=$((plain + 1))
 done
 mkdir -p "$out/protect"
-WINEPREFIX=$root/build/tmp/ws334-wine WINEDEBUG=-all timeout 300 flock "$lock" wine "$root/$build/tests/protect-test.exe" \
+WINEPREFIX=$root/build/tmp/browser-win32-wine WINEDEBUG=-all timeout 300 flock "$lock" wine "$root/$build/tests/protect-test.exe" \
     "Z:$(echo "$out/protect" | tr / '\\')" > "$out/protect.log" 2>&1
 protect=$(tr -d '\r' < "$out/protect.log" | tail -1)
 if [ "$records" -gt 0 ] && [ "$plain" = 0 ] && echo "$protect" | grep -q '^test-protect: PASS'; then
@@ -580,7 +580,7 @@ fi
 unrun M4j "Japanese with an input method (MS-IME) in the box, the candidates' window"
 
 # M5. A page's text field.
-start input "$gui" input "$root/plan/ws334/tests/wine-pages/input.html"
+start input "$gui" input "$root/plan/tools/browser-win32/wine-pages/input.html"
 cp "$out/input/input.png" "$review/m5-input.png" 2> /dev/null
 value=$(grep '^ZBROWSER CONSOLE level=[0-9]* M5 value=' "$out/input/first.txt" | tail -1 | sed 's/.* M5 value=//')
 if [ "$value" = "hello wine" ]; then

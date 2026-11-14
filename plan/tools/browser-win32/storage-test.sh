@@ -1,12 +1,12 @@
 #!/bin/sh
-# Builds and runs plan/ws334/tests/storage-test.c: libbrowser's instances over the files backend and a
+# Builds and runs plan/tools/browser-win32/storage-test.c: libbrowser's instances over the files backend and a
 # fake backend (the cookie jar and Web Storage kept across instances, two instances apart, the backend's
 # close and errors).  The engine's objects come from the WS074 host build (plan/ws074/tests/host-build.sh
 # VARIANT, run first); the test's pages are served by the host's python3 -m http.server on 127.0.0.1.
-#   sh plan/ws334/tests/storage-test.sh [plain|asan]
+#   sh plan/tools/browser-win32/storage-test.sh [plain|asan]
 # PORT=<n> chooses the server's port (default 18335); the persistent cache part uses the server of
 # cache-server.py on the next port (the test stops it at the end).  The output goes to a new directory of
-# build/tmp/ws334-storage (fresh_out).
+# build/tmp/browser-win32-storage (fresh_out).
 # Last line: storage-test: PASS or storage-test: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -19,7 +19,7 @@ plain|asan) ;;
 esac
 PORT=${PORT:-18335}
 CACHE_PORT=$((PORT + 1))
-out=build/tmp/ws334-storage
+out=build/tmp/browser-win32-storage
 fresh_out "$out"
 run=$(cd "$out" && pwd -P)
 
@@ -32,7 +32,7 @@ fi
 host=build/ws074-host/$variant
 flags=$(cat "$host/flags" | cut -d' ' -f2-)
 engine=$(ls "$host"/obj/*.o | grep -v -e '/browser_main\.o$' -e '/browser_main-posix\.o$' -e '/host-shell\.o$' -e '/browser-os-error\.o$')
-if ! timeout 600 ${CC:-cc} $flags -Iplan/ws334/tests/unit -o "$run/storage-test" plan/ws334/tests/storage-test.c \
+if ! timeout 600 ${CC:-cc} $flags -Iplan/tools/browser-win32/unit -o "$run/storage-test" plan/tools/browser-win32/storage-test.c \
     $engine -lvulkan -lm -ldl -lpthread > "$run/compile.log" 2>&1 || [ -s "$run/compile.log" ]; then
 	cat "$run/compile.log"
 	echo "storage-test: FAIL (the test did not compile cleanly)"
@@ -78,7 +78,7 @@ until /usr/bin/python3 -I -c "import socket,sys; socket.create_connection(('127.
 done
 
 # The cache part's server, which the test stops itself.
-/usr/bin/python3 -I plan/ws334/tests/cache-server.py "$CACHE_PORT" > "$run/cache-server.log" 2>&1 &
+/usr/bin/python3 -I plan/tools/browser-win32/cache-server.py "$CACHE_PORT" > "$run/cache-server.log" 2>&1 &
 cache_server=$!
 tries=0
 until /usr/bin/python3 -I -c "import socket,sys; socket.create_connection(('127.0.0.1', int(sys.argv[1])), 1).close()" "$CACHE_PORT" 2> /dev/null; do

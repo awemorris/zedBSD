@@ -6,19 +6,19 @@
 # (ui/window.h, ui/app.h), comments left out (a type named only as an incomplete struct, "struct wl_surface"
 # in a declaration or a pointer, is not counted: it needs nothing of Wayland); and when it compiles with the
 # Windows compiler (WIN32_CC=<compiler>, or LLVM_MINGW=<root>) and the Windows build's flags.  The result goes to
-# plan/ws334/keiland-common.txt ("common <file>" or "excluded <file>: <reason>", in the list's order), and
+# build/tmp/browser-win32-keiland-common/keiland-common.txt ("common <file>" or "excluded <file>: <reason>", in the list's order), and
 # the list of common files is compared with LIBKEILAND_WIN32_COMMON_SOURCES of apps/browser-win32/Makefile.
-#   sh plan/ws334/tests/keiland-common.sh
+#   sh plan/tools/browser-win32/keiland-common.sh
 # Last line: keiland-common: PASS (the Makefile's list is the result's) or keiland-common: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh
-out=build/tmp/ws334-keiland-common
+out=build/tmp/browser-win32-keiland-common
 fresh_out "$out"
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
 WIN32_CC=${WIN32_CC:-$LLVM_MINGW/bin/x86_64-w64-mingw32-clang}
-result=plan/ws334/keiland-common.txt
+result=$out/keiland-common.txt
 
 # The source list, and the Windows build's flags and its list of common files.
 printf 'include userland/desktop/libkeiland/sources.mk\n$(info $(LIBKEILAND_SOURCES))\nall: ; @:\n' |
@@ -30,7 +30,7 @@ make -s --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 LL
     sed '/^$/d' > "$out/makefile-common.txt"
 # The headers the Windows build copies (the compat headers, and the Vulkan headers it fetches).
 make -s --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 LLVM_MINGW="$LLVM_MINGW" \
-    BROWSER_WIN32_BUILD="$out/win64" BROWSER_WIN32_SOURCES=build/tmp/ws334-win32-sources headers > "$out/headers.log" 2>&1
+    BROWSER_WIN32_BUILD="$out/win64" BROWSER_WIN32_SOURCES=build/tmp/browser-win32-sources headers > "$out/headers.log" 2>&1
 
 # The search, comments left out with the host's preprocessor (-fpreprocessed: no macro and no #include is expanded).
 /usr/bin/python3 -I - "$out/sources.txt" "$out/candidates.txt" <<'PYTHON'
@@ -105,7 +105,7 @@ while read -r kind file rest; do
 	fi
 done < "$out/candidates.txt"
 {
-	echo "# libkeiland's files the Windows build compiles as they are (plan/ws334/tests/keiland-common.sh, generated)."
+	echo "# libkeiland's files the Windows build compiles as they are (plan/tools/browser-win32/keiland-common.sh, generated)."
 	cat "$out/result.txt"
 } > "$result"
 sed -n 's/^common //p' "$out/result.txt" > "$out/common.txt"

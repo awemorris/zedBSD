@@ -9,7 +9,7 @@
 #     text, image) is needed;
 #  3. host: plan/ws334/tests/script-core-main.c linked with the archive and nothing else of libbrowser
 #     runs plan/ws074/tests/js (run-js-tests.py --program, compared with Chromium's output) and the
-#     tests of plan/ws334/tests/script-core (many exceptions, enough garbage to collect many times, the
+#     tests of plan/tools/browser-win32/script-core (many exceptions, enough garbage to collect many times, the
 #     local time's string forms, Math, JSON, regular expressions and a promise), compared with their
 #     .expected files;
 #  4. Windows x86_64 and aarch64: apps/browser-win32/Makefile's libbrowser-script (the core with its
@@ -17,26 +17,26 @@
 #     allowed-imports.txt; the .exe imports only Windows' own DLLs and the UCRT's (no Vulkan);
 #  5. Windows x86_64 under Wine: script-core.exe writes the same bytes as the host's program for every
 #     test of 3 (standard output and standard error, the same time zone).  aarch64: built only.
-#   sh plan/ws334/tests/script-core-link.sh
+#   sh plan/tools/browser-win32/script-core-link.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
-# the Wine prefix is build/tmp/ws334-wine (run-unit.sh's).  The time zone of the runs is
-# America/New_York.  Output under build/tmp/ws334-script-core (a fresh run directory).
+# the Wine prefix is build/tmp/browser-win32-wine (run-unit.sh's).  The time zone of the runs is
+# America/New_York.  Output under build/tmp/browser-win32-script-core (a fresh run directory).
 # Last line: script-core-link: PASS or script-core-link: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 top=$(pwd)
 . plan/tools/fresh-out.sh
-out=build/tmp/ws334-script-core
+out=build/tmp/browser-win32-script-core
 fresh_out "$out"
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
-WINEPREFIX=$top/build/tmp/ws334-wine
+WINEPREFIX=$top/build/tmp/browser-win32-wine
 export WINEPREFIX
 TZ=America/New_York
 export TZ
-sources=build/tmp/ws334-win32-sources
+sources=build/tmp/browser-win32-sources
 mkdir -p "$sources"
-allowed=plan/ws334/tests/allowed-imports.txt
+allowed=plan/tools/browser-win32/allowed-imports.txt
 status=0
 
 # The script core's files, from the list the zedBSD build uses.
@@ -118,7 +118,7 @@ else
 fi
 
 # The tests of both lists, each run by the host's program; the outputs are kept for 5.
-tests=$(ls plan/ws074/tests/js/*.js plan/ws334/tests/script-core/*.js)
+tests=$(ls plan/ws074/tests/js/*.js plan/tools/browser-win32/script-core/*.js)
 mkdir -p "$host/out"
 for test in $tests; do
 	name=$(basename "$(dirname "$test")")-$(basename "$test" .js)
@@ -127,7 +127,7 @@ for test in $tests; do
 done
 passed=0
 count=0
-for test in plan/ws334/tests/script-core/*.js; do
+for test in plan/tools/browser-win32/script-core/*.js; do
 	name=script-core-$(basename "$test" .js)
 	count=$((count + 1))
 	if cmp -s "$host/out/$name.out" "${test%.js}.expected" && [ ! -s "$host/out/$name.err" ] &&
@@ -140,7 +140,7 @@ for test in plan/ws334/tests/script-core/*.js; do
 		status=1
 	fi
 done
-echo "host: plan/ws334/tests/script-core: $passed/$count as expected"
+echo "host: plan/tools/browser-win32/script-core: $passed/$count as expected"
 
 # 4 and 5 on Windows.
 for name in win64 winarm64; do
@@ -208,9 +208,9 @@ for name in win64 winarm64; do
 		status=1
 		continue
 	fi
-	if [ ! -f "$WINEPREFIX/.ws334-ready" ]; then
+	if [ ! -f "$WINEPREFIX/.browser-win32-ready" ]; then
 		if WINEDEBUG=-all timeout 600 wineboot -i > "$out/wineboot.log" 2>&1; then
-			: > "$WINEPREFIX/.ws334-ready"
+			: > "$WINEPREFIX/.browser-win32-ready"
 		else
 			echo "FAILED wineboot (log $out/wineboot.log)"
 			status=1

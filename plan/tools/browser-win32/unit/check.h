@@ -16,8 +16,8 @@
  * Windows no POSIX thread layer is linked).
  */
 
-#ifndef WS334_TEST_CHECK_H
-#define WS334_TEST_CHECK_H
+#ifndef BROWSER_WIN32_TEST_CHECK_H
+#define BROWSER_WIN32_TEST_CHECK_H
 
 #include <stdio.h>
 
