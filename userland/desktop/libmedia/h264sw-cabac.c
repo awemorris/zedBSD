@@ -7,8 +7,8 @@
 
 /*
  * The CABAC of one slice of the software H.264 decoder: the context
- * variables and their initialization (9.3.1.1); the arithmetic decoding
- * engine is vcodec-cabac.c's.
+ * variables and their initialization (9.3.1.1), which the encoder shares;
+ * the arithmetic decoding engine is vcodec-cabac.c's.
  */
 
 #include "h264sw-cabac.h"
@@ -41,7 +41,6 @@ struct cabac_listed {
 
 /* Static function declarations. */
 static int cabac_set_for(unsigned slice_type, unsigned cabac_init_idc, unsigned *set);
-static void cabac_contexts_init(struct h264sw_cabac *cabac, const struct cabac_listed *listed, unsigned set, int qp);
 
 /*
  * The ctxIdx that I slices initialize.
@@ -93,7 +92,6 @@ h264sw_cabac_start(
 	unsigned cabac_init_idc,
 	int qp)
 {
-	const struct cabac_listed *listed;
 	unsigned set;
 	unsigned alignment_bit;
 	size_t byte;
@@ -108,17 +106,10 @@ h264sw_cabac_start(
 	if (bits->error != 0)
 		return EINVAL;
 
-	/* Refuses a slice type or a cabac_init_idc outside the ranges, and chooses the set of initial values. */
+	/* Refuses a slice type or a cabac_init_idc outside the ranges before reading anything. */
 	status = cabac_set_for(slice_type, cabac_init_idc, &set);
 	if (status != 0)
 		return status;
-
-	/* Chooses the ctxIdx the slice type needs. */
-	listed = &cabac_listed_i;
-	if (slice_type == H264SW_SLICE_P)
-		listed = &cabac_listed_p;
-	if (slice_type == H264SW_SLICE_B)
-		listed = &cabac_listed_b;
 
 	/* Reads cabac_alignment_one_bit up to the byte boundary; each must be 1. */
 	aligned = vcodec_bitreader_aligned(bits);
@@ -142,8 +133,10 @@ h264sw_cabac_start(
 	if (bits->size - byte < VCODEC_CABAC_START_BYTES)
 		return EINVAL;
 
-	/* Initializes the context variables from the (m, n) tables (9.3.1.1). */
-	cabac_contexts_init(cabac, listed, set, qp);
+	/* Initializes the context variables from the (m, n) tables (9.3.1.1); the arguments were checked above. */
+	status = h264sw_cabac_contexts_init(cabac->state, slice_type, cabac_init_idc, qp);
+	if (status != 0)
+		return status;
 
 	/* Starts the engine on the bytes from the boundary to the end of the RBSP (9.3.1.2). */
 	status = vcodec_cabac_start(&cabac->engine, bits->data + byte, bits->size - byte);
@@ -151,6 +144,59 @@ h264sw_cabac_start(
 		return status;
 
 	/* Succeeded: the engine is ready to decode the first bin. */
+	return 0;
+}
+
+/*
+ * Initializes the context variables of a slice (9.3.1.1).
+ *
+ * Every byte is cleared first, so the ctxIdx the slice type does not list
+ * (and all of them after a refusal) are pStateIdx 0 and valMPS 0.
+ */
+int
+h264sw_cabac_contexts_init(
+	uint8_t *state,
+	unsigned slice_type,
+	unsigned cabac_init_idc,
+	int qp)
+{
+	const struct cabac_listed *listed;
+	unsigned set;
+	unsigned range_index;
+	unsigned ctx_idx;
+	int status;
+
+	/* Leaves every context variable at pStateIdx 0 and valMPS 0 until it is initialized. */
+	memset(state, 0, H264SW_CABAC_CONTEXTS);
+
+	/* Refuses a slice type or a cabac_init_idc outside the ranges, and chooses the set of initial values. */
+	status = cabac_set_for(slice_type, cabac_init_idc, &set);
+	if (status != 0)
+		return status;
+
+	/* Chooses the ctxIdx the slice type needs. */
+	listed = &cabac_listed_i;
+	if (slice_type == H264SW_SLICE_P)
+		listed = &cabac_listed_p;
+	if (slice_type == H264SW_SLICE_B)
+		listed = &cabac_listed_b;
+
+	/* Walks every range of the list. */
+	for (range_index = 0U;
+	     range_index < listed->count;
+	     range_index++) {
+		/* Initializes each ctxIdx of the range from its (m, n) pair. */
+		for (ctx_idx = listed->range[range_index].first;
+		     ctx_idx <= listed->range[range_index].last;
+		     ctx_idx++) {
+			state[ctx_idx] = vcodec_cabac_context_init(
+				h264sw_cabac_init_mn[ctx_idx][set][0],
+				h264sw_cabac_init_mn[ctx_idx][set][1],
+				qp);
+		}
+	}
+
+	/* Succeeded: the slice's context variables hold their initial states. */
 	return 0;
 }
 
@@ -208,34 +254,4 @@ cabac_set_for(
 
 	/* Succeeded: the set is chosen. */
 	return 0;
-}
-
-/*
- * Initializes the context variables of the slice type's list (9.3.1.1);
- * the others stay at pStateIdx 0 and valMPS 0.
- */
-static void
-cabac_contexts_init(
-	struct h264sw_cabac *cabac,
-	const struct cabac_listed *listed,
-	unsigned set,
-	int qp)
-{
-	unsigned range_index;
-	unsigned ctx_idx;
-
-	/* Walks every range of the list. */
-	for (range_index = 0U;
-	     range_index < listed->count;
-	     range_index++) {
-		/* Initializes each ctxIdx of the range from its (m, n) pair. */
-		for (ctx_idx = listed->range[range_index].first;
-		     ctx_idx <= listed->range[range_index].last;
-		     ctx_idx++) {
-			cabac->state[ctx_idx] = vcodec_cabac_context_init(
-				h264sw_cabac_init_mn[ctx_idx][set][0],
-				h264sw_cabac_init_mn[ctx_idx][set][1],
-				qp);
-		}
-	}
 }

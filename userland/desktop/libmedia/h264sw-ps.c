@@ -29,9 +29,6 @@
 #define PS_LISTS_8X8 2U
 #define PS_LISTS_ALL 8U
 
-/* The level_idc that means level 1b in every profile taken here (A.3.1, A.3.2). */
-#define PS_LEVEL_1B 9U
-
 /* The level_idc of level 1.1, which is level 1b when constraint_set3_flag is 1 in profiles 66, 77 and 88 (A.3.1). */
 #define PS_LEVEL_1_1 11U
 
@@ -78,15 +75,6 @@ struct ps_aspect_ratio {
 };
 
 /*
- * One level of Table A-1 with the largest decoded picture buffer it
- * allows, in macroblocks.
- */
-struct ps_level_limit {
-	unsigned level_idc;
-	unsigned max_dpb_mbs;
-};
-
-/*
  * The sample aspect ratios of aspect_ratio_idc 1..16, indexed by idc - 1.
  *
  * Values referenced: ITU-T H.264 (08/2021) Table E-1
@@ -114,33 +102,35 @@ static const struct ps_aspect_ratio ps_aspect_ratios[16] = {
 };
 
 /*
- * The decoded picture buffer size of each level, in macroblocks (MaxDpbMbs).
+ * The rows of Table A-1, in increasing order of level: level_idc, MaxMBPS,
+ * MaxFS, MaxDpbMbs, MaxBR, MaxCPB, MaxVmvR, MinCR, MaxMvsPer2Mb (0 for
+ * "-").  Level 1b is the row of level_idc 9.
  *
- * Values referenced: ITU-T H.264 (08/2021) Table A-1, the Max decoded
- * picture buffer size column, level numbers 1 to 6.2 as level_idc 10 to 62.
- * Level 1b is not a row here: ps_max_dpb_mbs answers 396 for it.
+ * Values referenced: ITU-T H.264 (08/2021) Table A-1, every row and
+ * column (levels 1, 1b, 1.1 to 6.2).
  * It is read-only and lives as long as the program.
  */
-static const struct ps_level_limit ps_level_limits[] = {
-	{ 10U, 396U },
-	{ 11U, 900U },
-	{ 12U, 2376U },
-	{ 13U, 2376U },
-	{ 20U, 2376U },
-	{ 21U, 4752U },
-	{ 22U, 8100U },
-	{ 30U, 8100U },
-	{ 31U, 18000U },
-	{ 32U, 20480U },
-	{ 40U, 32768U },
-	{ 41U, 32768U },
-	{ 42U, 34816U },
-	{ 50U, 110400U },
-	{ 51U, 184320U },
-	{ 52U, 184320U },
-	{ 60U, 696320U },
-	{ 61U, 696320U },
-	{ 62U, 696320U }
+const struct h264sw_level h264sw_levels[H264SW_LEVELS] = {
+	{ 10U, 1485U, 99U, 396U, 64U, 175U, 64U, 2U, 0U },
+	{ 9U, 1485U, 99U, 396U, 128U, 350U, 64U, 2U, 0U },
+	{ 11U, 3000U, 396U, 900U, 192U, 500U, 128U, 2U, 0U },
+	{ 12U, 6000U, 396U, 2376U, 384U, 1000U, 128U, 2U, 0U },
+	{ 13U, 11880U, 396U, 2376U, 768U, 2000U, 128U, 2U, 0U },
+	{ 20U, 11880U, 396U, 2376U, 2000U, 2000U, 128U, 2U, 0U },
+	{ 21U, 19800U, 792U, 4752U, 4000U, 4000U, 256U, 2U, 0U },
+	{ 22U, 20250U, 1620U, 8100U, 4000U, 4000U, 256U, 2U, 0U },
+	{ 30U, 40500U, 1620U, 8100U, 10000U, 10000U, 256U, 2U, 32U },
+	{ 31U, 108000U, 3600U, 18000U, 14000U, 14000U, 512U, 4U, 16U },
+	{ 32U, 216000U, 5120U, 20480U, 20000U, 20000U, 512U, 4U, 16U },
+	{ 40U, 245760U, 8192U, 32768U, 20000U, 25000U, 512U, 4U, 16U },
+	{ 41U, 245760U, 8192U, 32768U, 50000U, 62500U, 512U, 2U, 16U },
+	{ 42U, 522240U, 8704U, 34816U, 50000U, 62500U, 512U, 2U, 16U },
+	{ 50U, 589824U, 22080U, 110400U, 135000U, 135000U, 512U, 2U, 16U },
+	{ 51U, 983040U, 36864U, 184320U, 240000U, 240000U, 512U, 2U, 16U },
+	{ 52U, 2073600U, 36864U, 184320U, 240000U, 240000U, 512U, 2U, 16U },
+	{ 60U, 4177920U, 139264U, 696320U, 240000U, 240000U, 8192U, 2U, 16U },
+	{ 61U, 8355840U, 139264U, 696320U, 480000U, 480000U, 8192U, 2U, 16U },
+	{ 62U, 16711680U, 139264U, 696320U, 800000U, 800000U, 8192U, 2U, 16U }
 };
 
 /* Static function declarations. */
@@ -495,6 +485,40 @@ h264sw_ps_scaling(
 			memcpy(destination, default_list, size);
 		}
 	}
+}
+
+/*
+ * Finds the row of Table A-1 of a level.
+ *
+ * Level 1b is level_idc 9 in every profile, and level_idc 11 with
+ * constraint_set3_flag 1 in profiles 66, 77 and 88 (A.3.1, A.3.2).
+ */
+const struct h264sw_level *
+h264sw_level_find(
+	unsigned profile_idc,
+	unsigned level_idc,
+	int constraint_set3)
+{
+	unsigned index;
+	unsigned key;
+
+	/* Level 1b sent as level 1.1 with constraint_set3_flag, in the profiles that define it that way, is the row of level_idc 9. */
+	key = level_idc;
+	if (level_idc == PS_LEVEL_1_1 &&
+	    constraint_set3 != 0 &&
+	    (profile_idc == H264SW_PROFILE_BASELINE ||
+	     profile_idc == H264SW_PROFILE_MAIN ||
+	     profile_idc == H264SW_PROFILE_EXTENDED))
+		key = H264SW_LEVEL_1B;
+
+	/* Looks the level up in Table A-1. */
+	for (index = 0U; index < H264SW_LEVELS; index++) {
+		if (h264sw_levels[index].level_idc == key)
+			return &h264sw_levels[index];
+	}
+
+	/* A level that is not in the table. */
+	return NULL;
 }
 
 /*
@@ -1177,37 +1201,27 @@ ps_vui_reset(
 /*
  * Returns MaxDpbMbs of the set's level (Table A-1), or 0 when the level is not in the table.
  *
- * Level 1b is level_idc 9 in every profile, and level_idc 11 with
- * constraint_set3_flag 1 in profiles 66, 77 and 88 (A.3.1, A.3.2).
+ * h264sw_level_find tells level 1b by constraint_set3_flag.
  */
 static unsigned
 ps_max_dpb_mbs(
 	const struct h264sw_sps *sps)
 {
-	unsigned index;
-	unsigned count;
+	const struct h264sw_level *level;
+	int constraint_set3;
 
-	/* Level 1b by its own level_idc. */
-	if (sps->level_idc == PS_LEVEL_1B)
-		return 396U;
-
-	/* Level 1b by level 1.1 with constraint_set3_flag, in the profiles that define it that way. */
-	if (sps->level_idc == PS_LEVEL_1_1 &&
-	    (sps->constraint_flags & PS_CONSTRAINT_SET3) != 0U &&
-	    (sps->profile_idc == H264SW_PROFILE_BASELINE ||
-	     sps->profile_idc == H264SW_PROFILE_MAIN ||
-	     sps->profile_idc == H264SW_PROFILE_EXTENDED))
-		return 396U;
-
-	/* Looks the level up in Table A-1. */
-	count = (unsigned)(sizeof(ps_level_limits) / sizeof(ps_level_limits[0]));
-	for (index = 0U; index < count; index++) {
-		if (ps_level_limits[index].level_idc == sps->level_idc)
-			return ps_level_limits[index].max_dpb_mbs;
-	}
+	/* Finds the level's row. */
+	constraint_set3 = 0;
+	if ((sps->constraint_flags & PS_CONSTRAINT_SET3) != 0U)
+		constraint_set3 = 1;
+	level = h264sw_level_find(sps->profile_idc, sps->level_idc, constraint_set3);
 
 	/* A level that is not in the table has no known limit. */
-	return 0U;
+	if (level == NULL)
+		return 0U;
+
+	/* Succeeded: the level's largest decoded picture buffer, in macroblocks. */
+	return (unsigned)level->max_dpb_mbs;
 }
 
 /*

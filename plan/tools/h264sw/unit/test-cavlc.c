@@ -17,8 +17,9 @@
  * codewords is the number the specification's table leaves.
  *
  * The module's source is included so that its tables and its static
- * helpers can be read; its public functions are renamed there, and the
- * public interface is tested through the module linked in alongside.
+ * helpers can be read; its public functions and tables are renamed there,
+ * and the public interface is tested through the module linked in
+ * alongside.
  */
 
 #include "check.h"
@@ -33,10 +34,22 @@
 #define h264sw_cavlc_residual_block copy_residual_block
 #define h264sw_cavlc_nc copy_nc
 #define h264sw_cavlc_cbp copy_cbp
+#define h264sw_cavlc_coeff_token copy_coeff_token
+#define h264sw_cavlc_coeff_token_chroma_dc copy_coeff_token_chroma_dc
+#define h264sw_cavlc_total_zeros copy_total_zeros
+#define h264sw_cavlc_total_zeros_chroma_dc copy_total_zeros_chroma_dc
+#define h264sw_cavlc_run_before copy_run_before
+#define h264sw_cavlc_cbp_values copy_cbp_values
 #include "userland/desktop/libmedia/h264sw-cavlc.c"
 #undef h264sw_cavlc_residual_block
 #undef h264sw_cavlc_nc
 #undef h264sw_cavlc_cbp
+#undef h264sw_cavlc_coeff_token
+#undef h264sw_cavlc_coeff_token_chroma_dc
+#undef h264sw_cavlc_total_zeros
+#undef h264sw_cavlc_total_zeros_chroma_dc
+#undef h264sw_cavlc_run_before
+#undef h264sw_cavlc_cbp_values
 
 /* The units of the Kraft sums below: a code of n bits counts 2^(16 - n). */
 #define KRAFT_ONE 65536UL
@@ -79,13 +92,13 @@ static uint32_t random_state = 2463534242UL;
 static uint32_t random_next(void);
 static void put_bits(struct bitwriter *out, const char *bits);
 static size_t bits_length(const char *bits);
-static void put_table_code(struct bitwriter *out, const struct cavlc_code *codes, unsigned count, unsigned value);
+static void put_table_code(struct bitwriter *out, const struct h264sw_vlc_code *codes, unsigned count, unsigned value);
 static void put_token(struct bitwriter *out, int nc, unsigned total, unsigned trailing);
 static void put_level(struct bitwriter *out, int32_t level_code, unsigned suffix_length);
 static void put_block(struct bitwriter *out, int nc, unsigned start, unsigned end, unsigned max_coeff, const int32_t *levels);
 static int read_block(const struct bitwriter *in, size_t bytes, int nc, unsigned start, unsigned end, unsigned max_coeff, int32_t *levels, unsigned *total, size_t *position);
-static unsigned long kraft_sum(const struct cavlc_code *codes, unsigned count);
-static int prefix_free(const struct cavlc_code *codes, unsigned count);
+static unsigned long kraft_sum(const struct h264sw_vlc_code *codes, unsigned count);
+static int prefix_free(const struct h264sw_vlc_code *codes, unsigned count);
 static void check_picked_tokens(int nc, const struct picked *picks, unsigned count);
 static void check_token_tables(void);
 static void check_token_columns(void);
@@ -372,7 +385,7 @@ bits_length(
 static void
 put_table_code(
 	struct bitwriter *out,
-	const struct cavlc_code *codes,
+	const struct h264sw_vlc_code *codes,
 	unsigned count,
 	unsigned value)
 {
@@ -405,15 +418,15 @@ put_token(
 
 	/* The column nC selects. */
 	if (nc == -1) {
-		put_table_code(out, coeff_token_chroma_dc, CAVLC_TOKEN_CHROMA_DC_COUNT, value);
+		put_table_code(out, h264sw_cavlc_coeff_token_chroma_dc, H264SW_COEFF_TOKEN_CHROMA_DC_CODES, value);
 	} else if (nc < 2) {
-		put_table_code(out, coeff_token_0_2, CAVLC_TOKEN_COUNT, value);
+		put_table_code(out, h264sw_cavlc_coeff_token[0], H264SW_COEFF_TOKEN_CODES, value);
 	} else if (nc < 4) {
-		put_table_code(out, coeff_token_2_4, CAVLC_TOKEN_COUNT, value);
+		put_table_code(out, h264sw_cavlc_coeff_token[1], H264SW_COEFF_TOKEN_CODES, value);
 	} else if (nc < 8) {
-		put_table_code(out, coeff_token_4_8, CAVLC_TOKEN_COUNT, value);
+		put_table_code(out, h264sw_cavlc_coeff_token[2], H264SW_COEFF_TOKEN_CODES, value);
 	} else {
-		put_table_code(out, coeff_token_8_up, CAVLC_TOKEN_COUNT, value);
+		put_table_code(out, h264sw_cavlc_coeff_token[3], H264SW_COEFF_TOKEN_CODES, value);
 	}
 }
 
@@ -575,9 +588,9 @@ put_block(
 	zeros = positions[count - 1U] + 1U - count;
 	if (count < end - start + 1U) {
 		if (max_coeff == 4U) {
-			put_table_code(out, total_zeros_chroma_dc[count - 1U], 5U - count, zeros);
+			put_table_code(out, h264sw_cavlc_total_zeros_chroma_dc[count - 1U], 5U - count, zeros);
 		} else {
-			put_table_code(out, total_zeros_4x4[count - 1U], 17U - count, zeros);
+			put_table_code(out, h264sw_cavlc_total_zeros[count - 1U], 17U - count, zeros);
 		}
 	}
 
@@ -586,9 +599,9 @@ put_block(
 	for (index = 0; index + 1U < count && zeros_left > 0U; index++) {
 		run = positions[count - 1U - index] - positions[count - 2U - index] - 1U;
 		if (zeros_left > 6U) {
-			put_table_code(out, run_before[6], 15U, run);
+			put_table_code(out, h264sw_cavlc_run_before[6], 15U, run);
 		} else {
-			put_table_code(out, run_before[zeros_left - 1U], zeros_left + 1U, run);
+			put_table_code(out, h264sw_cavlc_run_before[zeros_left - 1U], zeros_left + 1U, run);
 		}
 
 		/* Takes the run off the zeros that are still left. */
@@ -629,7 +642,7 @@ read_block(
  */
 static unsigned long
 kraft_sum(
-	const struct cavlc_code *codes,
+	const struct h264sw_vlc_code *codes,
 	unsigned count)
 {
 	unsigned long sum;
@@ -662,7 +675,7 @@ kraft_sum(
 /* Reports whether no code of a table is a prefix of another. */
 static int
 prefix_free(
-	const struct cavlc_code *codes,
+	const struct h264sw_vlc_code *codes,
 	unsigned count)
 {
 	unsigned long sum;
@@ -846,53 +859,53 @@ check_table_shapes(void)
 	unsigned total;
 	unsigned trailing;
 	unsigned long expect;
-	const struct cavlc_code *column;
+	const struct h264sw_vlc_code *column;
 	int prefix_ok;
 	unsigned long sum;
 
 	/* Every coeff_token column is a prefix code with the codes the table has. */
-	prefix_ok = prefix_free(coeff_token_0_2, CAVLC_TOKEN_COUNT);
+	prefix_ok = prefix_free(h264sw_cavlc_coeff_token[0], H264SW_COEFF_TOKEN_CODES);
 	CHECK(prefix_ok);
-	prefix_ok = prefix_free(coeff_token_2_4, CAVLC_TOKEN_COUNT);
+	prefix_ok = prefix_free(h264sw_cavlc_coeff_token[1], H264SW_COEFF_TOKEN_CODES);
 	CHECK(prefix_ok);
-	prefix_ok = prefix_free(coeff_token_4_8, CAVLC_TOKEN_COUNT);
+	prefix_ok = prefix_free(h264sw_cavlc_coeff_token[2], H264SW_COEFF_TOKEN_CODES);
 	CHECK(prefix_ok);
-	prefix_ok = prefix_free(coeff_token_8_up, CAVLC_TOKEN_COUNT);
+	prefix_ok = prefix_free(h264sw_cavlc_coeff_token[3], H264SW_COEFF_TOKEN_CODES);
 	CHECK(prefix_ok);
-	prefix_ok = prefix_free(coeff_token_chroma_dc, CAVLC_TOKEN_CHROMA_DC_COUNT);
+	prefix_ok = prefix_free(h264sw_cavlc_coeff_token_chroma_dc, H264SW_COEFF_TOKEN_CHROMA_DC_CODES);
 	CHECK(prefix_ok);
 
 	/* The 8 <= nC column is 64 six-bit codes less two unused; 0 <= nC < 2 leaves 15 zeros, 2 <= nC < 4 leaves 13, 4 <= nC < 8 leaves 10; nC -1 is full. */
-	sum = kraft_sum(coeff_token_0_2, CAVLC_TOKEN_COUNT);
+	sum = kraft_sum(h264sw_cavlc_coeff_token[0], H264SW_COEFF_TOKEN_CODES);
 	CHECK(sum == KRAFT_ONE - (KRAFT_ONE >> 15));
-	sum = kraft_sum(coeff_token_2_4, CAVLC_TOKEN_COUNT);
+	sum = kraft_sum(h264sw_cavlc_coeff_token[1], H264SW_COEFF_TOKEN_CODES);
 	CHECK(sum == KRAFT_ONE - (KRAFT_ONE >> 13));
-	sum = kraft_sum(coeff_token_4_8, CAVLC_TOKEN_COUNT);
+	sum = kraft_sum(h264sw_cavlc_coeff_token[2], H264SW_COEFF_TOKEN_CODES);
 	CHECK(sum == KRAFT_ONE - (KRAFT_ONE >> 10));
-	sum = kraft_sum(coeff_token_8_up, CAVLC_TOKEN_COUNT);
+	sum = kraft_sum(h264sw_cavlc_coeff_token[3], H264SW_COEFF_TOKEN_CODES);
 	CHECK(sum == KRAFT_ONE - 2UL * (KRAFT_ONE >> 6));
-	sum = kraft_sum(coeff_token_chroma_dc, CAVLC_TOKEN_CHROMA_DC_COUNT);
+	sum = kraft_sum(h264sw_cavlc_coeff_token_chroma_dc, H264SW_COEFF_TOKEN_CHROMA_DC_CODES);
 	CHECK(sum == KRAFT_ONE);
 
 	/* The fixed-length column has only 6-bit codes, as the table prints it. */
-	for (index = 0; index < CAVLC_TOKEN_COUNT; index++)
-		CHECK(coeff_token_8_up[index].length == 6U);
+	for (index = 0; index < H264SW_COEFF_TOKEN_CODES; index++)
+		CHECK(h264sw_cavlc_coeff_token[3][index].length == 6U);
 
 	/* Each (TrailingOnes, TotalCoeff) of a column is present once: 62 pairs, TrailingOnes at most 3 and at most TotalCoeff. */
 	for (pair = 0; pair < 4U; pair++) {
 		if (pair == 0U) {
-			column = coeff_token_0_2;
+			column = h264sw_cavlc_coeff_token[0];
 		} else if (pair == 1U) {
-			column = coeff_token_2_4;
+			column = h264sw_cavlc_coeff_token[1];
 		} else if (pair == 2U) {
-			column = coeff_token_4_8;
+			column = h264sw_cavlc_coeff_token[2];
 		} else {
-			column = coeff_token_8_up;
+			column = h264sw_cavlc_coeff_token[3];
 		}
 
 		/* Counts how often each pair of TotalCoeff and TrailingOnes occurs in the column. */
 		memset(seen, 0, sizeof(seen));
-		for (index = 0; index < CAVLC_TOKEN_COUNT; index++) {
+		for (index = 0; index < H264SW_COEFF_TOKEN_CODES; index++) {
 			total = (unsigned)column[index].value >> 2;
 			trailing = (unsigned)column[index].value & 3U;
 			CHECK(total <= 16U);
@@ -917,9 +930,9 @@ check_table_shapes(void)
 
 	/* The chroma DC column has the 14 pairs of TotalCoeff up to 4. */
 	memset(seen, 0, sizeof(seen));
-	for (index = 0; index < CAVLC_TOKEN_CHROMA_DC_COUNT; index++) {
-		total = (unsigned)coeff_token_chroma_dc[index].value >> 2;
-		trailing = (unsigned)coeff_token_chroma_dc[index].value & 3U;
+	for (index = 0; index < H264SW_COEFF_TOKEN_CHROMA_DC_CODES; index++) {
+		total = (unsigned)h264sw_cavlc_coeff_token_chroma_dc[index].value >> 2;
+		trailing = (unsigned)h264sw_cavlc_coeff_token_chroma_dc[index].value & 3U;
 		CHECK(total <= 4U);
 		CHECK(trailing <= 3U);
 		if (total <= 16U && trailing <= 3U)
@@ -941,44 +954,44 @@ check_table_shapes(void)
 		expect = KRAFT_ONE;
 		if (index == 1U)
 			expect = KRAFT_ONE - (KRAFT_ONE >> 9);
-		sum = kraft_sum(total_zeros_4x4[index - 1U], 17U - index);
+		sum = kraft_sum(h264sw_cavlc_total_zeros[index - 1U], 17U - index);
 		CHECK(sum == expect);
 	}
 
 	/* total_zeros of the chroma DC block of 4:2:0 are full. */
 	for (index = 1; index <= 3U; index++) {
-		sum = kraft_sum(total_zeros_chroma_dc[index - 1U], 5U - index);
+		sum = kraft_sum(h264sw_cavlc_total_zeros_chroma_dc[index - 1U], 5U - index);
 		CHECK(sum == KRAFT_ONE);
 	}
 
 	/* run_before: zerosLeft 1 to 6 are full; above 6 leaves the 11-bit all-zero pattern. */
 	for (index = 1; index <= 6U; index++) {
-		sum = kraft_sum(run_before[index - 1U], index + 1U);
+		sum = kraft_sum(h264sw_cavlc_run_before[index - 1U], index + 1U);
 		CHECK(sum == KRAFT_ONE);
 	}
 
 	/* Checks that zerosLeft above 6 leaves room for the 11-bit all-zero pattern. */
-	sum = kraft_sum(run_before[6], 15U);
+	sum = kraft_sum(h264sw_cavlc_run_before[6], 15U);
 	CHECK(sum == KRAFT_ONE - (KRAFT_ONE >> 11));
 
 	/* The entries of total_zeros and run_before are numbered from 0 in order. */
 	for (index = 1; index <= 15U; index++) {
 		for (pair = 0; pair < 17U - index; pair++)
-			CHECK((unsigned)total_zeros_4x4[index - 1U][pair].value == pair);
+			CHECK((unsigned)h264sw_cavlc_total_zeros[index - 1U][pair].value == pair);
 	}
 
 	/* Checks the numbering of the chroma DC tables of total_zeros the same way. */
 	for (index = 1; index <= 3U; index++) {
 		for (pair = 0; pair < 5U - index; pair++)
-			CHECK((unsigned)total_zeros_chroma_dc[index - 1U][pair].value == pair);
+			CHECK((unsigned)h264sw_cavlc_total_zeros_chroma_dc[index - 1U][pair].value == pair);
 	}
 
 	/* Checks the numbering of the run_before row for zerosLeft above 6. */
 	for (pair = 0; pair < 15U; pair++)
-		CHECK((unsigned)run_before[6][pair].value == pair);
+		CHECK((unsigned)h264sw_cavlc_run_before[6][pair].value == pair);
 	for (index = 1; index <= 6U; index++) {
 		for (pair = 0; pair <= index; pair++)
-			CHECK((unsigned)run_before[index - 1U][pair].value == pair);
+			CHECK((unsigned)h264sw_cavlc_run_before[index - 1U][pair].value == pair);
 	}
 }
 

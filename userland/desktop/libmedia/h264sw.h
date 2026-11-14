@@ -6,8 +6,8 @@
  */
 
 /*
- * The range and the limits of libmedia's software H.264 decoder, shared
- * by every part of it.
+ * The range and the limits of libmedia's software H.264 codec, shared
+ * by every part of its decoder and its encoder.
  *
  * The decoder reads progressive frames of 8-bit 4:2:0 streams: the
  * Constrained Baseline, Baseline, Main and High profiles, and streams of
