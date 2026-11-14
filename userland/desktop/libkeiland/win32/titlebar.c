@@ -911,10 +911,11 @@ titlebar_width(
 	/* A generic control's pill. */
 	if (control->role == KL_CONTROL_GENERIC) {
 		label = (int)(strlen(control->label) * titlebar_pixels(window) / 2U);
-		if (window->text_open)
+		if (window->text_open) {
 			label_length = strlen(control->label);
 			label_pixels = titlebar_pixels(window);
 			label = kl_text_width(&window->text, control->label, label_length, label_pixels, 0);
+		}
 		return (uint32_t)label + 2U * keiui_win32_scale(TITLEBAR_PADDING, window->dpi);
 	}
 
