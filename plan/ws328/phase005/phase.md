@@ -81,7 +81,7 @@
 - 壊す確かめ（git の外の複製で、44 通りを符号・境界の比較・定数・条件の削除などで変えて試験を走らせた）: 40 通りが FAIL。生き残った 4 通りは等価（`raster_line_from` の補正の 2 つの `<`/`<=`、面積が 0 の時の `<=`/`<`、挿入 sort の予算を大きくして heap sort に行かない形。heap sort の枝は別の壊し方で FAIL するので試験が通っている）。初めの 44 通りの時に生き残った `VEC_RASTER_TILES_MAX` ちょうど（65537 枚）と高さちょうど 16384 の境の 2 通りは、試験（65537 枚の ENOBUFS、高さ 16384 の成功）を足して FAIL するようにした。作業の複製は build の外の scratch。
 - 自分で決めた点（header が黙っている所）:
   - 頂点の移動と交点は double で計算する（頂点は float のまま、offset を足すのも double）。副走査線の高さ (j + 0.5) / 16 は double で正確なので、線分がどの副走査線を跨ぐかが参照と一致する。header の「float で計算すると 1 段ずれうる」の範囲に収まる。
-  - 縦の隣り合う区間は winding の結果が変わる所だけで区切る（nonzero で winding 1 から 2 に変わる所で切らない）ので、重なる輪郭に継ぎ目が出ない。
+  - x の向きに隣り合う区間は winding の結果が変わる所だけで区切る（nonzero で winding 1 から 2 に変わる所で切らない）ので、重なる輪郭に継ぎ目が出ない。
   - `vec_rasterize` の `lines == NULL` は EINVAL、頂点を 1 つも持たない lines・面積 0 の形は成功の空の結果。`out` は呼ぶ前に必ず空にする（失敗でも空）。
   - bounds は alpha が 0 でない pixel を含む最小の矩形（partial の tile は pixel ごとに読む。run は tile 全体）。clip で切られて tile の端が alpha 0 の時もその外へ広げない。
   - `vec_coverage_intersect`・`vec_coverage_unite` は `out` が `a` か `b` と同じなら EINVAL（out は触らない）。結果の tile は全部 0 なら捨て、全部 255 なら run にする（手で作った coverage の tile も同じ扱い）。run の count が 0 以下の要素は読み飛ばす。ENOMEM は試験で起こせていない（未実施）。
