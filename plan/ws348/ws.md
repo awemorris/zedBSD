@@ -2,7 +2,7 @@
 
 # WS348: Raspberry Pi 500 の dtb を image に入れる（そのまま Pi 500 で起動）
 
-Status: incomplete
+Status: completed（2026-11-14 ユーザー。Pi 500 の実機での起動は外部の利用者の報告を待つ）
 Primary Milestone: MG003
 Parent: [Master](../master.md)
 Owner: Q1
@@ -19,11 +19,13 @@ Owner: Q1
 
 ## Resume point
 
+- 2026-11-14 Q1: ユーザーの決定で completed。dtb は `mk/platform-rpi5/firmware.mk` の規則で FAT に入る（3 つの dtb）。残り（WS の外）: Pi 500 の実機での起動は外部の利用者の報告を待つ。`mk/platform-rpi5/rpi5-boot-firmware.notice` と config.txt の comment に 500 の dtb が抜けている件は mk の差分の案としてユーザーへ（master の「ユーザーの判断が要る事」）。cache の検査を取り足しの形にするかは任意で、今はしない。
+
 - 2026-11-13 Q1 が立てた。P1 が処理する。
-- 2026-11-13 P1: p001 cleared（[phase.md](phase001/phase.md)）。残り: Pi 500 の実機での起動の確かめ（外部の利用者）、cache の検査を「数ちょうど」から取り足しの形にするかの判断（mk、ユーザー）。
+- 2026-11-13 P1: p001 cleared（phase.md は完了の時に消した）。残り: Pi 500 の実機での起動の確かめ（外部の利用者）、cache の検査を「数ちょうど」から取り足しの形にするかの判断（mk、ユーザー）。
 
 ## Phase
 
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | `bcm2712-rpi-500.dtb`（raspberrypi/firmware `3d301dd` の `boot/`）を取得し大きさと SHA-256 を照合して `RPI5_BOOT_FIRMWARE_FILES` に足す。rpi5 の SD の image の FAT に入る事、config.txt の os_check の扱い（合う dtb が無いと止める）を確かめる | cleared（2026-11-13 P1。FAT に 3 つの dtb、mirror 2670dc1 から取得。Pi 500 の実機は未実施） | — |
+| p001 | `bcm2712-rpi-500.dtb`（raspberrypi/firmware `3d301dd` の `boot/`）を取得し大きさと SHA-256 を照合して `RPI5_BOOT_FIRMWARE_FILES` に足す。rpi5 の SD の image の FAT に入る事、config.txt の os_check の扱い（合う dtb が無いと止める）を確かめる | cleared（2026-11-13 P1。FAT に 3 つの dtb、mirror 2670dc1 から取得。Pi 500 の実機は未実施） | — |

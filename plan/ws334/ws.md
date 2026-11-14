@@ -58,6 +58,8 @@
 
 ## Resume point
 
+- 2026-11-14 Q1: ユーザーの決定で p037 も実装する（TSF・DirectManipulation・題の帯の透過。試験は Wine で確かめられる所まで、本物の Windows の確かめは cockpit の「ユーザーが拾える試験」に）。modal の間の描き直しは WS345 p013 の `kl_window_on_resize` で実質済み（p037 の範囲から外す）。p035（規約の見直し、対象の file の一覧を決め直す）と、Phase の無い不具合 2 件（再検証の 200 が保存できない時に古い cache が残る、win32 の run-unit の files・os-file・queue が build できない）も片付けて completed に。
+
 - 2026-11-01 01:30 決定 22（標準廉価実装手順）で Phase の表を組み直した: 設計の Phase p002〜p004 で全部の module の header・.c の骨格・試験の道具・実装の phase.md・design-reviewer を済ませ、
   p004 が cleared になるまで実装の Phase（p005 以降）を始めない。統合（Opus）の Phase の phase.md も設計の Phase で書き、実装の間に設計の判断を残さない（Q1 の条件）。module の Phase（Sonnet）は表の順が優先の順で、Q1 が 4〜6 本ずつ起動する（目安: 1 組目 p005・p009・p010・p013・p020、2 組目 p006・p007・p008・p011・p012・p014、3 組目 p015〜p019）。2026-11-01 P7 が q1790 で p002〜p004 を済ませた（基点 d393d3267、design-reviewer 34 件を反映、design.md §16）。次は Q1 の確認（p002〜p004 の cleared）の後、1 組目の実装の Phase（p005・p009・p010・p013 と glue の p020）。開発と試験は host の Wine＋llvmpipe（決定 20）。
 

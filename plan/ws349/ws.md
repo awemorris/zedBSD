@@ -18,6 +18,8 @@ Pi 5（と Pi 500）は `/dev` に音の device が無く HDMI の音が出な�
 
 ## Resume point
 
+- 2026-11-14 Q1: 目標の確かめ。Pi 5 には音の driver が 1 つも無く、rpi5 の既定で audio の core も n（`mk/platform-rpi5/defaults.mk`）。内蔵の音の出口は HDMI（3.5 mm の jack は無い）。ユーザーから、目標は HDMI の音のままでよい、という趣旨の答えを受けた（2026-11-14）。mk の `CONFIG_DRIVER_RPI5_AUDIO` の枠は RP1 を指し source が空なので、HDMI の driver の名前と枠は設計の改訂で決め直す（mk の変更は案としてユーザーへ）。p001 の設計は design-reviewer を通していないので、次は design-reviewer と改訂。
+
 - 2026-11-13 Q1 が立てた。P1 が処理する。
 - 2026-11-13 P1: p001 の設計の第一版（[phase.md](phase001/phase.md)）。次: design-reviewer、未確定の出典の確かめ（p002 の案）、実装の Phase を Q1 が立てる。
 

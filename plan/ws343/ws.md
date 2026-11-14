@@ -29,6 +29,8 @@
 
 ## Resume point
 
+- 2026-11-14 Q1: 既定の config（`mk/platform-*/defaults.mk`）から openssh・openssl・curl・libcurl は外れ、自前の ssh・libssl-compat・libcrypto-compat・ca-certificates が入っている（作り直しで済んだ）。ユーザーの決定（2026-11-14）: library の名前は libssl-compat.so・libcrypto-compat.so のままで締める（libssl.so・libcrypto.so の名前は出さない）。残り: fetch の https（今は「https is not supported」）、`mk/rootfs.mk` の libcurl.so への link を消す mk の差分の案、CI の `config/ci/*.mk` と workflow の作り直しは BUG-435 で扱う。p001 は今の実態で書き直す。
+
 - 2026-11-02 10:52 Q1: 作成。WS335 の completed と WS336 の ssh・sshd の完成の後に p001 を割り当てる。
 
 ## Q1 の判断（2026-11-02 22:20、p002 の merge）

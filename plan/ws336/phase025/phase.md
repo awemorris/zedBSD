@@ -2,7 +2,7 @@
 
 # ws336-p025: 規約の全文の見直し
 
-Status: 実装済み・試験 PASS（2026-11-14 P2 q2089。cleared は Q1 が決める。前: in-progress）
+Status: cleared（2026-11-14 23:1x Q1、04c73da979 を main に merge 6637a37b99。userland/base/ssh の見直し、header の comment の直し（基点 4ef0ba4b28）、試験と 3 機種の build PASS。plan/ws336/tests/ の C の規約の残りは p026 に分けた）
 Parent: [WS336](../ws.md)
 担当（推し）: conformance-reviewer
 依存: p024
@@ -81,7 +81,7 @@ HAL・toolchain・共有の `build/`、他の WS の file。動作を変える�
 
 ### 壊す確かめ（実装を git の外で壊し、元に戻して `cmp` で一致）
 
-12 通りを流した。11 通りは FAIL（見逃し 0）、1 通りは PASS で試験を足した: no-more-sessions の判定を反転、`ssh_mon_put_frame` の上限の比較を 1 ずらす、`ssh_packet_take_line` の NUL の確かめを反転、private key の magic の確かめを反転、同じく magic の比較を 1 byte 短く、`config_skip_blanks` の停止の条件を反転、`config_trim_blanks` の添字を 1 ずらす、subsystem の名前の比較を反転、base64 の右 shift を 1 ずらす、`hostfile_same_key` の比較を 1 byte 短く（最初は PASS: 試験を足した後は FAIL）。全部 `RESTORED-OK`（`cmp` と `git diff --quiet`）。
+10 通りを流した（2026-11-14 Q1 が件数を直した。前の記述は 12 通り・11 FAIL）。9 通りは FAIL（見逃し 0）、1 通りは PASS で試験を足した: no-more-sessions の判定を反転、`ssh_mon_put_frame` の上限の比較を 1 ずらす、`ssh_packet_take_line` の NUL の確かめを反転、private key の magic の確かめを反転、同じく magic の比較を 1 byte 短く、`config_skip_blanks` の停止の条件を反転、`config_trim_blanks` の添字を 1 ずらす、subsystem の名前の比較を反転、base64 の右 shift を 1 ずらす、`hostfile_same_key` の比較を 1 byte 短く（最初は PASS: 試験を足した後は FAIL）。全部 `RESTORED-OK`（`cmp` と `git diff --quiet`）。
 
 ### 残り（次の担当へ）
 
