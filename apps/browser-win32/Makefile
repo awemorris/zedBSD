@@ -94,7 +94,7 @@ LIBBROWSER_SCRIPT_WIN32_LAYER := $(LIBBROWSER_DIR)/base/os-win32.c \
 WIN32_SOURCES_browser-script := $(filter-out $(LIBBROWSER_OS_SOURCES),$(LIBBROWSER_SCRIPT_SOURCES)) \
 	$(LIBBROWSER_SCRIPT_WIN32_LAYER)
 LIBBROWSER_SCRIPT_ARCHIVE := $(BROWSER_WIN32_OBJ)/libbrowser-script.a
-SCRIPT_CORE_SOURCES := plan/ws334/tests/script-core-main.c
+SCRIPT_CORE_SOURCES := apps/browser-win32/tools/script-core-main.c
 SCRIPT_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(SCRIPT_CORE_SOURCES))
 SCRIPT_CORE_PROGRAM := $(BROWSER_WIN32_BUILD)/tests/script-core.exe
 

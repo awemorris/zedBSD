@@ -7,7 +7,7 @@
 #     C library, libm, libpthread, libdl and the dynamic loader (the table made from nm -D of the
 #     host's libraries), so nothing of the engine (dom, bind, page, net, html, css, layout, paint,
 #     text, image) is needed;
-#  3. host: plan/ws334/tests/script-core-main.c linked with the archive and nothing else of libbrowser
+#  3. host: apps/browser-win32/tools/script-core-main.c linked with the archive and nothing else of libbrowser
 #     runs plan/ws074/tests/js (run-js-tests.py --program, compared with Chromium's output) and the
 #     tests of plan/tools/browser-win32/script-core (many exceptions, enough garbage to collect many times, the
 #     local time's string forms, Math, JSON, regular expressions and a promise), compared with their
@@ -98,7 +98,7 @@ fi
 
 # 3. The program over the archive alone, and the tests.
 program=$host/script-core
-if ! timeout 300 cc $flags plan/ws334/tests/script-core-main.c "$archive" -lm -lpthread -ldl -o "$program" \
+if ! timeout 300 cc $flags apps/browser-win32/tools/script-core-main.c "$archive" -lm -lpthread -ldl -o "$program" \
     > "$host/link.log" 2>&1 || [ -s "$host/link.log" ]; then
 	echo "FAILED host: script-core-main.c did not link cleanly with the archive alone (log $host/link.log)"
 	cat "$host/link.log"
