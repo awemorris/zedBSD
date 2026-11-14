@@ -105,6 +105,14 @@
 volatile sig_atomic_t sessiond_stopping;
 
 /*
+ * The pipe SIGTERM and SIGINT write one byte to, so a loop that waits in
+ * poll without a time limit wakes for them: [0] is polled, [1] written by
+ * main_stop.  Both -1 while there is none (the loops then keep a bound on
+ * their wait).  Made before the handlers and kept until sessiond ends.
+ */
+static int main_stop_pipe[2] = { -1, -1 };
+
+/*
  * Set once the mark that a desktop has taken the display is left.  Only the
  * first desktop of the boot is what init waits for; it is never cleared.
  */
@@ -190,7 +198,13 @@ main(
 		return 0;
 	}
 
-	/* SIGTERM and SIGINT end the greeter or the session and then sessiond. */
+	/* SIGTERM and SIGINT end the greeter or the session and then sessiond, waking the loops' polls. */
+	error = pipe2(main_stop_pipe, O_CLOEXEC | O_NONBLOCK);
+	if (error != 0) {
+		sessiond_log("SESSIOND STOP pipe errno=%d", errno);
+		main_stop_pipe[0] = -1;
+		main_stop_pipe[1] = -1;
+	}
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = main_stop;
 	sigemptyset(&action.sa_mask);
@@ -478,6 +492,19 @@ sessiond_milliseconds(
 	return (long long)now.tv_sec * 1000LL + (long long)(now.tv_nsec / 1000000L);
 }
 
+/*
+ * Reports the descriptor that becomes readable once sessiond is asked to
+ * stop (and stays so), or -1 when there is none: a loop that polls it
+ * needs no time limit to see sessiond_stopping.
+ */
+int
+sessiond_stop_fd(
+	void)
+{
+	/* The pipe's read end, or -1. */
+	return main_stop_pipe[0];
+}
+
 /* Reads the options: which greeter and session, and whether to go graphical regardless of the boot parameters. */
 static int
 main_options(
@@ -688,10 +715,23 @@ static void
 main_stop(
 	int signal_number)
 {
+	char byte;
+	ssize_t written;
+	int saved;
+
 	(void)signal_number;
 
 	/* The loops see this between their steps. */
 	sessiond_stopping = 1;
+
+	/* A loop waiting in poll wakes (the pipe holds one byte at most that matters; a full one is awake already). */
+	if (main_stop_pipe[1] < 0)
+		return;
+	saved = errno;
+	byte = 0;
+	written = write(main_stop_pipe[1], &byte, 1U);
+	(void)written;
+	errno = saved;
 }
 
 /* Sends sessiond's output to its log (the console has no one reading it). */

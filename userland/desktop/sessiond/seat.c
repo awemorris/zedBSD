@@ -6,9 +6,9 @@
  */
 
 /*
- * The seat's devices: the display (/dev/gpu*), the input devices
- * (/dev/input/event*), the panel's light (/dev/backlight/backlight*,
- * ws113-p013), and the security keys' raw HID nodes
+ * The seat's devices: the display (/dev/gpu*), the panel's light
+ * (/dev/backlight/backlight*, ws113-p013), and the security keys' raw HID
+ * nodes
  * (/dev/input/hidraw*) and the smart card slots (/dev/smartcard*,
  * ws161-p002, the user's approval U3) and the cameras (/dev/cam*) belong
  * to the seat's user, 0600, while sessiond runs a greeter or a session,
@@ -20,24 +20,29 @@
  * keys, the cards and the cameras (ws172: its security key login is
  * passkey's, which opens them as root).
  *
+ * The input devices (/dev/input/event*) stay root's and wheel's, 0640:
+ * sessiond opens them for the compositor that holds the seat (below), so
+ * their owner is never changed.
+ *
  * devfs keeps an owner and a mode given to a name, also for a node made
- * again under that name (a keyboard plugged in again).  A node that appears
- * for the first time comes with devfs's own owner.  sessiond hears the
- * system's events of the input devices, of the USB devices (the smart
- * card slots) and of the cameras on /dev/system (ws132-p002) and gives
- * the devices again as soon as one comes (BUG-264: the compositor,
- * which hears the same event, then finds the node already its user's).  The loops that wait for the
- * greeter and the session still give them every second, for a kernel
- * without the events and for the nodes that post none (a display that
- * attaches late).
+ * again under that name (a key plugged in again).  A node that appears for
+ * the first time comes with devfs's own owner.  The devices are given when
+ * the greeter or the session starts, and again only when the system's
+ * events on /dev/system (ws132-p002) tell of a device that came: the raw
+ * HID nodes post the input devices' class, the smart card slots the USB
+ * devices', the cameras their own.  The displays and the backlights post
+ * none: one that attaches after the greeter or the session started is not
+ * given until the next start (sessiond waits for the displays the kernel
+ * is still attaching before the first greeter).  A kernel without the
+ * events has the devices given at the starts only.
  *
  * Giving a device away does not take it from a process that opened it
  * before: there is no revoke in the kernel yet, so the graphical login is
  * for a machine with one user (login-manager-design.md §7).
  *
- * The compositors sessiond starts (the greeter's and the session's) also
- * have the input devices opened for them here, so that a device plugged in
- * is read at once and not after its node's owner has changed: each gets
+ * The compositors sessiond starts (the greeter's and the session's)
+ * have the input devices opened for them here, which their user could not
+ * open, and a device plugged in is read at once: each gets
  * one end of a socket pair of its own as descriptor SESSIOND_SEAT_FD
  * (--seat-fd), and asks on it with a line
  *
@@ -85,12 +90,11 @@
 
 /* devfs's own modes, which the devices go back to (a GPU's is the kernel's, with its group). */
 #define SEAT_GPU_MODE		GPU_NODE_MODE
-#define SEAT_INPUT_MODE		0640
 #define SEAT_BACKLIGHT_MODE	0644
 #define SEAT_KEY_MODE		0600
 #define SEAT_CAMERA_MODE	0600
 
-/* The wheel group, which owns the input devices when no one has the seat. */
+/* The wheel group, which owns the devices when no one has the seat. */
 #define SEAT_WHEEL_GID		0
 
 /* The kernel's system device, and the classes of its events that bring or take a seat's device. */
@@ -121,8 +125,8 @@ struct seat_socket {
 /*
  * The descriptor the seat's events are read on: /dev/system, subscribed to
  * SEAT_EVENT_CLASSES and read without waiting.  -1 when the kernel has no
- * events or the descriptor failed; the loops' every-second giving is then
- * the only one.  Opened once at sessiond's start and kept until it ends;
+ * events or the descriptor failed; the devices are then given at the
+ * greeter's and the session's starts only.  Opened once at sessiond's start and kept until it ends;
  * sessiond's one thread uses it.
  */
 static int seat_events = -1;
@@ -154,9 +158,10 @@ static int seat_node_open(const char *name, int *descriptor);
 static void seat_answer(int socket, int error, int descriptor);
 
 /*
- * Gives the display and the input devices to a user, for that user only,
- * and the security keys and the smart card slots too when keys is set (a
- * session's user; not the login screen's account).
+ * Gives the displays and the backlights to a user, for that user only, and
+ * the security keys, the smart card slots and the cameras too when keys is
+ * set (a session's user; not the login screen's account, for whom they go
+ * back to root).
  */
 void
 sessiond_seat_give(
@@ -173,9 +178,6 @@ sessiond_seat_give(
 		seat_set(path, uid, gid, 0600);
 	}
 
-	/* Every input device. */
-	seat_input("event", uid, gid, 0600);
-
 	/* Every backlight, which the session's compositor sets. */
 	for (index = 0U; index < SEAT_BACKLIGHT_COUNT; index++) {
 		snprintf(path, sizeof(path), "/dev/backlight/backlight%u", index);
@@ -191,7 +193,7 @@ sessiond_seat_give(
 		}
 		seat_cameras(0, SEAT_WHEEL_GID);
 
-		/* The login screen's account has the display and the input devices only. */
+		/* The login screen's account has the displays and the backlights only. */
 		return;
 	}
 
@@ -205,7 +207,7 @@ sessiond_seat_give(
 }
 
 /*
- * Gives the display and the input devices back to root with devfs's modes.
+ * Gives the seat's devices back to root with devfs's modes.
  */
 void
 sessiond_seat_restore(
@@ -220,8 +222,7 @@ sessiond_seat_restore(
 		seat_set(path, 0, GPU_NODE_GROUP, SEAT_GPU_MODE);
 	}
 
-	/* Every input device, which root and wheel read; every security key's raw node, root's alone. */
-	seat_input("event", 0, SEAT_WHEEL_GID, SEAT_INPUT_MODE);
+	/* Every security key's raw node, root's alone. */
 	seat_input("hidraw", 0, SEAT_WHEEL_GID, SEAT_KEY_MODE);
 
 	/* Every backlight, which anyone reads and root sets. */
@@ -242,9 +243,9 @@ sessiond_seat_restore(
 }
 
 /*
- * Subscribes to the system's events of the input and the USB devices, so a
- * device that comes is given at once.  A kernel without them leaves the
- * every-second giving alone.
+ * Subscribes to the system's events of the input devices, the USB devices
+ * and the cameras, so a device that comes is given at once.  Without them
+ * the devices are given at the greeter's and the session's starts only.
  */
 void
 sessiond_seat_events_open(
@@ -496,7 +497,7 @@ seat_set(
 	if (error != 0)
 		return;
 
-	/* Nothing to do for a node that already has them (no log line every second). */
+	/* Nothing to do for a node that already has them (no log line for a device given before). */
 	if (status.st_uid == uid && status.st_gid == gid && (status.st_mode & 07777) == mode)
 		return;
 
@@ -554,7 +555,7 @@ seat_input(
 	(void)closedir(directory);
 }
 
-/* Gives up the seat's events after a failed read; the every-second giving goes on. */
+/* Gives up the seat's events after a failed read; the devices are given at the starts only from then on. */
 static void
 seat_events_fail(
 	const char *what,
@@ -651,7 +652,7 @@ seat_request(
 		return;
 	}
 
-	/* The node, opened as root (its owner may not have been given yet). */
+	/* The node, opened as root (it stays root's). */
 	descriptor = -1;
 	error = seat_node_open(name, &descriptor);
 	sessiond_log("SESSIOND SEAT open node=%.16s error=%d holder=1", name, error);
