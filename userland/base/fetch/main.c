@@ -177,6 +177,7 @@ main(
 	int closed;
 	int error;
 
+	/* Starts with no output name, URL or descriptor, and no redirect followed yet. */
 	output_name = NULL;
 	url = NULL;
 	output = -1;
@@ -376,6 +377,7 @@ fetch_once(
 	int error;
 	int copied;
 
+	/* Starts with no redirect target. */
 	redirect[0] = '\0';
 
 	/* Takes the URL apart. */
@@ -427,6 +429,8 @@ fetch_once(
 			fprintf(stderr, "fetch: HTTP status %d without a location\n", head.status);
 			return -1;
 		}
+
+		/* Succeeded: a redirect target is waiting in redirect. */
 		return 1;
 	}
 
@@ -445,6 +449,8 @@ fetch_once(
 	} else {
 		copied = copy_to_eof(&reader, output);
 	}
+
+	/* Closes the connection, which the body has been taken from. */
 	connection_close(&connection);
 	if (copied != 0) {
 		fprintf(stderr, "fetch: %s: the body could not be read or written in full\n", url.host);
@@ -476,6 +482,8 @@ send_request(
 	} else {
 		length = snprintf(authority, sizeof(authority), "%s:%u", url->host, url->port);
 	}
+
+	/* Refuses an authority that did not fit. */
 	if (length < 0 || length >= (int)sizeof(authority))
 		return -1;
 
@@ -522,12 +530,16 @@ read_head(
 		fprintf(stderr, "fetch: %s: no response\n", url->host);
 		return -1;
 	}
+
+	/* Finds the status code in the line. */
 	space = strchr(line, ' ');
 	version = strncmp(line, "HTTP/", 5);
 	if (space == NULL || version != 0) {
 		fprintf(stderr, "fetch: %s: not an HTTP response\n", url->host);
 		return -1;
 	}
+
+	/* Reads the status code. */
 	head->status = (int)strtoul(space + 1, &end, 10);
 
 	/* Shows the status line with -v. */
@@ -604,6 +616,8 @@ read_field(
 			fprintf(stderr, "fetch: %s: a bad Content-Length\n", url->host);
 			return -1;
 		}
+
+		/* A length is the framing unless chunks were already named. */
 		if (head->framing != BODY_CHUNKED)
 			head->framing = BODY_LENGTH;
 		return 0;
@@ -624,6 +638,8 @@ read_field(
 			fprintf(stderr, "fetch: %s: a Location this program cannot follow: %s\n", url->host, value);
 			return -1;
 		}
+
+		/* Succeeded: the Location is recorded. */
 		return 0;
 	}
 
@@ -681,11 +697,15 @@ parse_url(
 		fprintf(stderr, "fetch: the URL has no host or too long a one\n");
 		return -1;
 	}
+
+	/* Refuses a user name, which this program does not send. */
 	at = memchr(host, '@', (size_t)(path - host));
 	if (at != NULL) {
 		fprintf(stderr, "fetch: user names in URLs are not supported\n");
 		return -1;
 	}
+
+	/* Copies the host name out. */
 	memcpy(url->host, host, length);
 	url->host[length] = '\0';
 
@@ -704,6 +724,8 @@ parse_url(
 		fprintf(stderr, "fetch: the URL's path is too long\n");
 		return -1;
 	}
+
+	/* Lays the path out with a leading slash. */
 	if (length == 0 || path[0] != '/') {
 		/* An empty path, or a query straight after the authority, is the root's. */
 		url->path[0] = '/';
@@ -763,6 +785,7 @@ connect_server(
 	int error;
 	int connected;
 
+	/* Starts with no socket. */
 	descriptor = -1;
 
 	/* Looks up the host's addresses. */
@@ -790,6 +813,8 @@ connect_server(
 		close(descriptor);
 		descriptor = -1;
 	}
+
+	/* Releases the address list. */
 	freeaddrinfo(addresses);
 
 	/* No address took the connection. */
@@ -880,6 +905,8 @@ tls_start(
 		fprintf(stderr, "fetch: %s: cannot set up TLS\n", url->host);
 		return -1;
 	}
+
+	/* Hands the connected socket to the TLS object. */
 	result = SSL_set_fd(connection->ssl, connection->fd);
 	if (result != 1) {
 		tls_report("cannot set up TLS", connection, 0);
@@ -946,6 +973,7 @@ tls_report(
 	int saved_errno;
 	char text[256];
 
+	/* Keeps the errno the failing call left, which the work below may change. */
 	saved_errno = errno;
 
 	/* A certificate that did not verify says why. */
@@ -1035,8 +1063,12 @@ connection_send(
 				tls_report("TLS write failed", connection, written);
 				return -1;
 			}
+
+			/* Takes the bytes the write took. */
 			count = written;
 		}
+
+		/* Moves past what was sent. */
 		cursor += count;
 		length -= (size_t)count;
 	}
@@ -1063,6 +1095,7 @@ connection_receive(
 	int result;
 	int reason;
 
+	/* Starts with nothing received. */
 	*count = 0;
 
 	/* Plain: the socket itself. */
@@ -1092,13 +1125,14 @@ connection_receive(
 			break;
 	}
 
-	/* The server's close_notify is the end. */
-	if (reason == SSL_ERROR_ZERO_RETURN)
-		return 0;
+	/* Anything but the server's close_notify, an end without it among it, is a failure. */
+	if (reason != SSL_ERROR_ZERO_RETURN) {
+		tls_report("TLS read failed", connection, result);
+		return -1;
+	}
 
-	/* Anything else, an end without close_notify among it, is a failure. */
-	tls_report("TLS read failed", connection, result);
-	return -1;
+	/* Succeeded: the server's close_notify is the end. */
+	return 0;
 }
 
 /* Reads one line, without its CR LF; returns 0, or -1 at the end or for too long a line. */
@@ -1338,6 +1372,8 @@ write_origin(
 	} else {
 		length = snprintf(result, capacity, "%s://%s:%u", scheme, base->host, base->port);
 	}
+
+	/* Refuses an origin that did not fit. */
 	if (length < 0 || length >= (int)capacity)
 		return -1;
 
