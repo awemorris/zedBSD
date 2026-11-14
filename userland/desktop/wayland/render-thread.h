@@ -58,6 +58,19 @@
  *
  * The thread knows nothing of the compositor: its Vulkan work is done by
  * the operations it is given (compose.c's, or a host test's fakes).
+ *
+ * The shown thread (struct kwl_shown) tells when the display took a
+ * frame's presents.  The render thread gives each present of a frame (the
+ * output's and every head's) a present fence of the shown thread's spares
+ * and hands the fences on after the presents; the shown thread waits for
+ * the oldest of each swapchain, however long that takes, and posts a
+ * shown message to the same ordered queue for each one signalled.  A
+ * present that was not queued (its fence untouched) is told shown, as
+ * failed, by the render thread at once.  Without a shown thread (no
+ * present fences) the render thread tells a frame's presents shown with
+ * its completion.  The main thread sends the frame callbacks and steps the
+ * animations on the output's shown, and draws a head that missed a frame
+ * again on that head's.
  */
 
 #ifndef KWL_RENDER_THREAD_H
@@ -124,8 +137,13 @@ enum kwl_render_message_kind {
 	/* A task completed (or its submission or its fence failed). */
 	KWL_RENDER_TASK_DONE,
 	/* The thread parked, drained, for a park asked without waiting (the main thread's message given back). */
-	KWL_RENDER_PARKED
+	KWL_RENDER_PARKED,
+	/* The display took one of a frame's presents (its present fence signalled), or the present failed. */
+	KWL_RENDER_SHOWN
 };
+
+/* Which of a frame's presents a shown message tells: the output's, or 1 + the slot of a head. */
+#define KWL_RENDER_SHOWN_OUTPUT	0U
 
 /*
  * The want: its number, its kind, and for a frame the heads (slots of
@@ -156,7 +174,9 @@ struct kwl_render_held {
  * What the main thread gives with its list: the want's number and kind,
  * the slot it was recorded for (its command buffers and fence), and for a
  * frame the output's image and the heads it drew (every held head, which
- * the thread presents).
+ * the thread presents).  The present fences are the render thread's: it
+ * fills them for the run (VK_NULL_HANDLE for a present without one), and
+ * the run passes each with its present.
  */
 struct kwl_render_job {
 	uint64_t number;
@@ -165,6 +185,8 @@ struct kwl_render_job {
 	uint32_t output_image;
 	unsigned heads[KWL_RENDER_HEADS];
 	uint32_t head_images[KWL_RENDER_HEADS];
+	VkFence present_fence;
+	VkFence head_fences[KWL_RENDER_HEADS];
 };
 
 /*
@@ -203,7 +225,9 @@ struct kwl_render_outcome {
  * outcome a completion's; acquired_us when a ready's output image was
  * acquired and acquire_cycles how long that took; serial, for a job or a
  * task the thread submitted, the order it was submitted in (from 1 up),
- * by which the oldest in flight is waited for first.
+ * by which the oldest in flight is waited for first.  A shown message
+ * tells, for the job's number, which present (shown_key) the display took
+ * and its present's result (result: VK_SUCCESS, or why it was not shown).
  *
  * A task's message is the main thread's instead: it allocates it with the
  * task (number, task_command, task_fence), the thread submits and watches
@@ -223,6 +247,7 @@ struct kwl_render_message {
 	uint64_t acquired_us;
 	uint64_t acquire_cycles;
 	uint64_t serial;
+	unsigned shown_key;
 	VkCommandBuffer task_command;
 	VkFence task_fence;
 };
@@ -291,6 +316,8 @@ struct kwl_render_ops {
 	VkResult (*wait_task)(void *context, VkFence fence, uint64_t timeout_ns);
 };
 
+struct kwl_shown;
+
 /*
  * The render thread and what it shares with the main thread.
  *
@@ -313,7 +340,9 @@ struct kwl_render_ops {
  * oldest first (flight_count of them; busy says any is, or a job runs),
  * the tasks submitted and not seen complete, oldest first, the serial of
  * the last job or task submitted, what it did (counts), and the main
- * thread's wake pipe.
+ * thread's wake pipe.  shown is the shown thread its frames' present
+ * fences go to (NULL without present fences), set before the thread
+ * starts.
  */
 struct kwl_render_thread {
 	pthread_mutex_t lock;
@@ -353,8 +382,83 @@ struct kwl_render_thread {
 	struct kwl_render_counts counts;
 	uint64_t seen_sequence;
 	int wake_main;
+	struct kwl_shown *shown;
 	pthread_t thread;
 	unsigned started;
+};
+
+/*
+ * One present the shown thread waits for, or a spare present fence: the
+ * job's number, which present it is (shown_key), its fence, and the
+ * present's result.  The record and its fence go between the spares, the
+ * render thread (from taking the spare to handing it on), the given list
+ * and the shown thread's own list, and back to the spares.
+ */
+struct kwl_shown_present {
+	struct kwl_shown_present *next;
+	uint64_t number;
+	unsigned key;
+	VkFence fence;
+	VkResult result;
+};
+
+/*
+ * The Vulkan work of the shown thread and of its spares, through their
+ * owner: make an unsignalled fence and destroy one, wait until any of
+ * fences is signalled (with no time limit; any result but VK_SUCCESS is a
+ * failure of them all), tell whether one is signalled (VK_SUCCESS) or not
+ * yet (VK_NOT_READY), and reset one for its next present.
+ */
+struct kwl_shown_ops {
+	VkResult (*create)(void *context, VkFence *fence);
+	void (*destroy)(void *context, VkFence fence);
+	VkResult (*wait)(void *context, const VkFence *fences, unsigned count);
+	VkResult (*status)(void *context, VkFence fence);
+	VkResult (*reset)(void *context, VkFence fence);
+};
+
+/*
+ * What the shown thread did, counted by the thread alone (fences_made by
+ * whoever takes a spare, under the lock) and read once it has ended: the
+ * presents told shown and those told failed, its waits for fences (each
+ * returns with at least one present told, or a failure), the times it
+ * slept for the next present given, and the present fences ever made.
+ */
+struct kwl_shown_counts {
+	uint64_t shown;
+	uint64_t failed;
+	uint64_t waits;
+	uint64_t sleeps;
+	uint64_t fences_made;
+};
+
+/*
+ * The shown thread (the window mode's present completions) and what it
+ * shares with the render thread.
+ *
+ * Under lock: the presents given and not taken by the thread yet, oldest
+ * first; the spare fences (reset, ready for a present); stop (the thread
+ * ends once no present waits); and sequence, which counts every change the
+ * thread waits for (a present given, the stop).  The thread's own: the
+ * presents it waits for, oldest first (a swapchain's presents signal in
+ * their order, so only the oldest of each is waited for), the operations
+ * and their context, the render thread whose queue its messages go to,
+ * what it did (counts) and the sequence it last looked at.
+ */
+struct kwl_shown {
+	pthread_mutex_t lock;
+	pthread_cond_t changed;
+	uint64_t sequence;
+	struct kwl_shown_present *given;
+	struct kwl_shown_present *given_tail;
+	struct kwl_shown_present *spares;
+	unsigned stop;
+	struct kwl_shown_present *flying;
+	struct kwl_shown_ops ops;
+	void *context;
+	struct kwl_render_thread *render;
+	struct kwl_shown_counts counts;
+	uint64_t seen_sequence;
 };
 
 int kwl_render_init(struct kwl_render_thread *render, const struct kwl_render_ops *ops, void *context, int wake_main);
@@ -373,5 +477,10 @@ void kwl_render_forget(struct kwl_render_thread *render, unsigned output, unsign
 void kwl_render_task(struct kwl_render_thread *render, struct kwl_render_message *task);
 int kwl_render_running(struct kwl_render_thread *render);
 void kwl_render_status(struct kwl_render_thread *render, struct kwl_render_status *status);
+int kwl_shown_init(struct kwl_shown *shown, const struct kwl_shown_ops *ops, void *context, struct kwl_render_thread *render);
+void kwl_shown_destroy(struct kwl_shown *shown);
+void *kwl_shown_main(void *argument);
+enum kwl_render_step kwl_shown_step(struct kwl_shown *shown);
+void kwl_shown_stop(struct kwl_shown *shown);
 
 #endif

@@ -2,7 +2,9 @@
 # ws131-p010: builds the host test of Keiland's system extension -- libkeiland's view and kl_system_* client
 # (userland/desktop/libkeiland/system/) with the host's libwayland-client, against the compositor's
 # userland/desktop/wayland/system.c with fakes of the network, the sound and the power -- under ASan and UBSan,
-# and runs it.
+# and runs it.  host-system-stubs.c stands in for the compositor's parts the test does not look at (the event
+# loop's helpers, the I/O threads, the greeter ...); the tree's unsupported backends stand in for the
+# notices and the phone.
 #   sh plan/ws131/tests/host-system.sh [OUTPUT]   (default build/ws131-host/host-system)
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
@@ -14,9 +16,12 @@ cp userland/desktop/include/keiland/keiland*.h "$(dirname -- "$out")/include/kei
 ${CC:-cc} -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -pthread \
 	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
 	-I. -I"$(dirname -- "$out")/include" \
-	plan/ws131/tests/host-system.c userland/desktop/wayland/system.c userland/desktop/wayland/sysmon.c \
+	plan/ws131/tests/host-system.c plan/ws131/tests/host-system-stubs.c \
+	userland/desktop/wayland/system.c userland/desktop/wayland/sysmon.c userland/desktop/wayland/threads.c \
 	userland/desktop/wayland/notify.c userland/desktop/wayland/notify-shell.c userland/desktop/wayland/mail-shell.c userland/desktop/wayland/phone-shell.c userland/desktop/wayland/printers-shell.c \
-	userland/desktop/libkeiland-backend/print/print.c \
+	userland/desktop/libkeiland-backend/print/print.c userland/desktop/libkeiland-backend/unsupported/notify-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/phone-unsupported.c \
+	userland/desktop/wayland/media-library.c userland/desktop/libkeiland-backend/media/media.c \
 	userland/desktop/wayland/bluetooth-shell.c userland/desktop/libkeiland-backend/unsupported/bluetooth-unsupported.c \
 	userland/desktop/wayland/audio-stream.c userland/desktop/libkeiland-backend/unsupported/audio-stream-unsupported.c userland/desktop/libkeiland-backend-linux/peer-linux.c \
 	userland/desktop/wayland/machine-shell.c userland/desktop/wayland/machine-wait.c userland/desktop/wayland/language-file.c \

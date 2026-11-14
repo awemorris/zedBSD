@@ -15,6 +15,11 @@
  * (design 4.6).  It waits for one thing at a time: the oldest fence in
  * flight, the output's next image with nothing in flight, or the main
  * thread's next change with nothing in flight; none of them with a timeout.
+ *
+ * The shown thread is here too, as it shares the present fences with the
+ * render thread: it waits for one thing at a time, the oldest present
+ * fence of each swapchain together while any present waits, or the render
+ * thread's next present with none; neither with a timeout.
  */
 
 #include "render-thread.h"
@@ -40,6 +45,18 @@ static void render_messages_free(struct kwl_render_message *messages);
 static void render_post(struct kwl_render_thread *render, struct kwl_render_message *message);
 static void render_deadline(struct timespec *deadline, unsigned wait_ms);
 static void render_wake(int descriptor);
+static void render_fences_take(struct kwl_render_thread *render, struct kwl_render_job *job, struct kwl_shown_present **taken);
+static void render_presents_give(struct kwl_render_thread *render, const struct kwl_render_job *job, const struct kwl_render_outcome *outcome, struct kwl_shown_present **taken);
+static void render_present_give(struct kwl_render_thread *render, uint64_t number, unsigned key, struct kwl_shown_present *present, VkResult result);
+static void render_shown_now(struct kwl_render_thread *render, const struct kwl_render_message *completion);
+static void render_shown_post(struct kwl_render_thread *render, uint64_t number, unsigned key, VkResult result);
+static int render_present_queued(VkResult result);
+static struct kwl_shown_present *shown_spare_take(struct kwl_shown *shown);
+static void shown_spare_put(struct kwl_shown *shown, struct kwl_shown_present *present);
+static void shown_give(struct kwl_shown *shown, struct kwl_shown_present *present);
+static void shown_fail_all(struct kwl_shown *shown, VkResult result);
+static void shown_unlink(struct kwl_shown *shown, struct kwl_shown_present *present);
+static void shown_presents_free(struct kwl_shown *shown, struct kwl_shown_present *presents);
 
 /*
  * Makes the render thread's state: its lock and signals (timed by the
@@ -622,6 +639,232 @@ kwl_render_status(
 	pthread_mutex_unlock(&render->lock);
 }
 
+/*
+ * Makes the shown thread's state: its lock and signal, no present and no
+ * spare fence, and the render thread whose queue its messages go to.
+ */
+int
+kwl_shown_init(
+	struct kwl_shown *shown,
+	const struct kwl_shown_ops *ops,
+	void *context,
+	struct kwl_render_thread *render)
+{
+	int error;
+
+	/* Nothing given, waited for or spare. */
+	memset(shown, 0, sizeof(*shown));
+	shown->ops = *ops;
+	shown->context = context;
+	shown->render = render;
+
+	/* The lock. */
+	error = pthread_mutex_init(&shown->lock, NULL);
+	if (error != 0)
+		return error;
+
+	/* The render thread's presents and the stop, which the thread waits for. */
+	error = pthread_cond_init(&shown->changed, NULL);
+	if (error != 0) {
+		pthread_mutex_destroy(&shown->lock);
+		return error;
+	}
+
+	/* Succeeded: the thread can be started. */
+	return 0;
+}
+
+/*
+ * Frees what the stopped shown thread leaves: its spare fences (and the
+ * presents of a thread never started, whose fences are destroyed
+ * unwaited), and its lock and signal.  The device must still be there.
+ */
+void
+kwl_shown_destroy(
+	struct kwl_shown *shown)
+{
+	/* The presents never waited for, then the spares. */
+	shown_presents_free(shown, shown->given);
+	shown->given = NULL;
+	shown->given_tail = NULL;
+	shown_presents_free(shown, shown->flying);
+	shown->flying = NULL;
+	shown_presents_free(shown, shown->spares);
+	shown->spares = NULL;
+
+	/* The signal, then the lock. */
+	pthread_cond_destroy(&shown->changed);
+	pthread_mutex_destroy(&shown->lock);
+}
+
+/*
+ * Runs the shown thread's steps, waiting between them for the render
+ * thread's next present when no present waits, until it is asked to stop
+ * and every present given has been told.
+ */
+void *
+kwl_shown_main(
+	void *argument)
+{
+	struct kwl_shown *shown;
+	enum kwl_render_step step;
+
+	/* Step after step. */
+	shown = argument;
+	for (;;) {
+		step = kwl_shown_step(shown);
+		if (step == KWL_RENDER_STEP_STOP)
+			break;
+		if (step == KWL_RENDER_STEP_WORKED)
+			continue;
+
+		/* No present waits: the next one given, or the stop (counted as a sleep). */
+		pthread_mutex_lock(&shown->lock);
+
+		shown->counts.sleeps++;
+		while (shown->sequence == shown->seen_sequence)
+			(void)pthread_cond_wait(&shown->changed, &shown->lock);
+
+		pthread_mutex_unlock(&shown->lock);
+	}
+
+	/* The thread ends. */
+	return NULL;
+}
+
+/*
+ * Runs one step of the shown thread: takes the presents the render thread
+ * gave, then waits for the oldest present fence of each swapchain at once,
+ * however long that takes, and tells every one of them that is signalled
+ * (its fence reset and spare again).  A wait that fails tells every
+ * present waited for as failed.  Reports that it is blocked with no
+ * present to wait for, or the stop once none is left after a stop.
+ */
+enum kwl_render_step
+kwl_shown_step(
+	struct kwl_shown *shown)
+{
+	struct kwl_shown_present *oldest[1U + KWL_RENDER_HEADS];
+	struct kwl_shown_present *present;
+	struct kwl_shown_present *given;
+	struct kwl_shown_present **tail;
+	VkFence fences[1U + KWL_RENDER_HEADS];
+	unsigned count;
+	unsigned index;
+	unsigned stop;
+	VkResult result;
+
+	/* The presents given up to now and the stop, taken together with the look at the changes. */
+	pthread_mutex_lock(&shown->lock);
+
+	shown->seen_sequence = shown->sequence;
+	given = shown->given;
+	shown->given = NULL;
+	shown->given_tail = NULL;
+	stop = shown->stop;
+
+	pthread_mutex_unlock(&shown->lock);
+
+	/* They are waited for after those given before them. */
+	tail = &shown->flying;
+	while (*tail != NULL)
+		tail = &(*tail)->next;
+	*tail = given;
+
+	/* No present waits: the stop ends the thread, or the next present is waited for. */
+	if (shown->flying == NULL) {
+		if (stop)
+			return KWL_RENDER_STEP_STOP;
+		return KWL_RENDER_STEP_BLOCKED;
+	}
+
+	/* The oldest present of each swapchain: the others signal after it. */
+	for (index = 0U; index < 1U + KWL_RENDER_HEADS; index++)
+		oldest[index] = NULL;
+	for (present = shown->flying; present != NULL; present = present->next) {
+		if (present->key < 1U + KWL_RENDER_HEADS && oldest[present->key] == NULL)
+			oldest[present->key] = present;
+	}
+
+	/* Their fences, waited for together: a slow display does not hold a fast one's. */
+	count = 0U;
+	for (index = 0U; index < 1U + KWL_RENDER_HEADS; index++) {
+		if (oldest[index] == NULL)
+			continue;
+		fences[count] = oldest[index]->fence;
+		count++;
+	}
+
+	/* One wait for them all, with no time limit. */
+	result = shown->ops.wait(shown->context, fences, count);
+	shown->counts.waits++;
+
+	/* A wait that failed (the device lost): every present waited for is told failed. */
+	if (result != VK_SUCCESS) {
+		shown_fail_all(shown, result);
+		return KWL_RENDER_STEP_WORKED;
+	}
+
+	/* Each oldest one signalled is told, and its fence is spare again. */
+	for (index = 0U; index < 1U + KWL_RENDER_HEADS; index++) {
+		present = oldest[index];
+		if (present == NULL)
+			continue;
+
+		/* Not signalled yet: waited for again in the next step. */
+		result = shown->ops.status(shown->context, present->fence);
+		if (result == VK_NOT_READY)
+			continue;
+
+		/* Out of the presents waited for, and told: shown, or failed with the fence's failure. */
+		shown_unlink(shown, present);
+		if (result != VK_SUCCESS) {
+			shown->counts.failed++;
+			render_shown_post(shown->render, present->number, present->key, result);
+			shown->ops.destroy(shown->context, present->fence);
+			free(present);
+			continue;
+		}
+
+		/* Shown, with the present's own result. */
+		shown->counts.shown++;
+		render_shown_post(shown->render, present->number, present->key, present->result);
+
+		/* Reset for its next present; one that cannot be is destroyed instead of being spare. */
+		result = shown->ops.reset(shown->context, present->fence);
+		if (result != VK_SUCCESS) {
+			shown->ops.destroy(shown->context, present->fence);
+			free(present);
+			continue;
+		}
+
+		/* Spare for the render thread's next present. */
+		shown_spare_put(shown, present);
+	}
+
+	/* Succeeded: what was signalled is told. */
+	return KWL_RENDER_STEP_WORKED;
+}
+
+/*
+ * Asks the shown thread to end once every present given has been told
+ * (after the render thread stopped, so that none is given after), and
+ * waits for nothing: the owner joins the thread.
+ */
+void
+kwl_shown_stop(
+	struct kwl_shown *shown)
+{
+	/* The request, which wakes the thread. */
+	pthread_mutex_lock(&shown->lock);
+
+	shown->stop = 1U;
+	shown->sequence++;
+	pthread_cond_broadcast(&shown->changed);
+
+	pthread_mutex_unlock(&shown->lock);
+}
+
 /* Runs the render thread's steps, waiting between them for the main thread when blocked, until it is asked to stop. */
 static void *
 render_main(
@@ -825,6 +1068,7 @@ static enum kwl_render_step
 render_answer(
 	struct kwl_render_thread *render)
 {
+	struct kwl_shown_present *taken[1U + KWL_RENDER_HEADS];
 	struct kwl_render_message *completion;
 	struct kwl_render_message *tasks;
 	enum kwl_render_answer answer;
@@ -880,6 +1124,9 @@ render_answer(
 	/* The tasks go first, so that the list's commands come after them in the queue. */
 	render_tasks_submit(render, tasks);
 
+	/* A frame's presents each get a present fence, which the shown thread waits for after them. */
+	render_fences_take(render, &job, taken);
+
 	/* Recorded, submitted after the tasks and presented; the thread looks for the next want from now on. */
 	completion = render->completion;
 	render->completion = NULL;
@@ -891,6 +1138,9 @@ render_answer(
 	completion->serial = render->submitted;
 	render->ops.run(render->context, &job, &completion->outcome);
 	render->state = KWL_RENDER_STATE_IDLE;
+
+	/* The presents' fences go on to the shown thread, or back to its spares with the presents told failed. */
+	render_presents_give(render, &job, &completion->outcome, taken);
 	pthread_mutex_lock(&render->lock);
 
 	render->running = 0U;
@@ -907,6 +1157,9 @@ render_answer(
 		render->busy = 0U;
 
 		pthread_mutex_unlock(&render->lock);
+
+		/* Without a shown thread its presents are told with it (the main thread frees the completion once posted). */
+		render_shown_now(render, completion);
 		render_post(render, completion);
 		return KWL_RENDER_STEP_WORKED;
 	}
@@ -991,6 +1244,9 @@ render_reap(
 
 		pthread_mutex_unlock(&render->lock);
 	}
+
+	/* Without a shown thread its presents are told with it (the main thread frees the completion once posted). */
+	render_shown_now(render, completion);
 
 	/* Told in order, before any ready that follows. */
 	render_post(render, completion);
@@ -1263,4 +1519,367 @@ render_wake(
 	do {
 		written = write(descriptor, &byte, 1U);
 	} while (written < 0 && errno == EINTR);
+}
+
+/*
+ * Gives each present of a frame job a spare present fence of the shown
+ * thread's (taken[key], NULL when none could be had: that present goes
+ * without one and is told shown when it is made).  Nothing without a
+ * shown thread, or for a layer's picture.
+ */
+static void
+render_fences_take(
+	struct kwl_render_thread *render,
+	struct kwl_render_job *job,
+	struct kwl_shown_present **taken)
+{
+	unsigned index;
+
+	/* No present has a fence yet. */
+	job->present_fence = VK_NULL_HANDLE;
+	for (index = 0U; index < KWL_RENDER_HEADS; index++)
+		job->head_fences[index] = VK_NULL_HANDLE;
+	for (index = 0U; index < 1U + KWL_RENDER_HEADS; index++)
+		taken[index] = NULL;
+
+	/* Only a frame presents, and only the shown thread waits for the fences. */
+	if (render->shown == NULL || job->kind != KWL_RENDER_FRAME)
+		return;
+
+	/* The output's present. */
+	taken[KWL_RENDER_SHOWN_OUTPUT] = shown_spare_take(render->shown);
+	if (taken[KWL_RENDER_SHOWN_OUTPUT] != NULL)
+		job->present_fence = taken[KWL_RENDER_SHOWN_OUTPUT]->fence;
+
+	/* Each head's present. */
+	for (index = 0U; index < KWL_RENDER_HEADS; index++) {
+		if (!job->heads[index])
+			continue;
+		taken[1U + index] = shown_spare_take(render->shown);
+		if (taken[1U + index] != NULL)
+			job->head_fences[index] = taken[1U + index]->fence;
+	}
+}
+
+/*
+ * Hands the fences of a frame job's presents on to the shown thread after
+ * the run, with each present's result; a present that was not queued (the
+ * run failed before it, or the present refused it), whose fence is left
+ * untouched, is told failed now and its fence is spare again.  Nothing
+ * without a shown thread, or for a layer's picture.
+ */
+static void
+render_presents_give(
+	struct kwl_render_thread *render,
+	const struct kwl_render_job *job,
+	const struct kwl_render_outcome *outcome,
+	struct kwl_shown_present **taken)
+{
+	unsigned index;
+	VkResult result;
+
+	/* Only a frame presents, and only with a shown thread. */
+	if (render->shown == NULL || job->kind != KWL_RENDER_FRAME)
+		return;
+
+	/* The output's present: made only once the run submitted the frame. */
+	result = outcome->present_result;
+	if (outcome->result != VK_SUCCESS)
+		result = outcome->result;
+	render_present_give(render, job->number, KWL_RENDER_SHOWN_OUTPUT, taken[KWL_RENDER_SHOWN_OUTPUT], result);
+
+	/* Each head's present, made after the output's. */
+	for (index = 0U; index < KWL_RENDER_HEADS; index++) {
+		if (!job->heads[index])
+			continue;
+
+		/* Its result; a head the run did not get to present was not queued. */
+		result = outcome->head_results[index];
+		if (!outcome->heads[index])
+			result = VK_ERROR_INITIALIZATION_FAILED;
+		if (outcome->result != VK_SUCCESS)
+			result = outcome->result;
+		render_present_give(render, job->number, 1U + index, taken[1U + index], result);
+	}
+}
+
+/*
+ * Hands one present's fence on to the shown thread when the present was
+ * queued (its fence will be signalled), or tells it now: shown at once
+ * for a present made without a fence, failed for one not queued (the
+ * fence then is spare again, untouched).
+ */
+static void
+render_present_give(
+	struct kwl_render_thread *render,
+	uint64_t number,
+	unsigned key,
+	struct kwl_shown_present *present,
+	VkResult result)
+{
+	int queued;
+
+	/* Whether the present was queued, which signals its fence. */
+	queued = render_present_queued(result);
+
+	/* No fence: told now, with what came of the present. */
+	if (present == NULL) {
+		render_shown_post(render, number, key, result);
+		return;
+	}
+
+	/* Not queued: the fence is untouched and spare again; the present is told failed. */
+	if (!queued) {
+		shown_spare_put(render->shown, present);
+		render_shown_post(render, number, key, result);
+		return;
+	}
+
+	/* Queued: the shown thread tells it once its fence is signalled. */
+	present->number = number;
+	present->key = key;
+	present->result = result;
+	shown_give(render->shown, present);
+}
+
+/*
+ * Tells a frame job's presents shown with its completion when there is no
+ * shown thread (no present fences): the output's and each head's, with
+ * their results.  Nothing with a shown thread, or for a layer's picture.
+ */
+static void
+render_shown_now(
+	struct kwl_render_thread *render,
+	const struct kwl_render_message *completion)
+{
+	const struct kwl_render_outcome *outcome;
+	unsigned index;
+	VkResult result;
+
+	/* Only a frame presents; with a shown thread its presents are told from there. */
+	if (render->shown != NULL || completion->job.kind != KWL_RENDER_FRAME)
+		return;
+
+	/* The output's present. */
+	outcome = &completion->outcome;
+	result = outcome->present_result;
+	if (outcome->result != VK_SUCCESS)
+		result = outcome->result;
+	render_shown_post(render, completion->number, KWL_RENDER_SHOWN_OUTPUT, result);
+
+	/* Each head's present. */
+	for (index = 0U; index < KWL_RENDER_HEADS; index++) {
+		if (!completion->job.heads[index])
+			continue;
+
+		/* Its result; a head the run did not get to present was not shown. */
+		result = outcome->head_results[index];
+		if (!outcome->heads[index])
+			result = VK_ERROR_INITIALIZATION_FAILED;
+		if (outcome->result != VK_SUCCESS)
+			result = outcome->result;
+		render_shown_post(render, completion->number, 1U + index, result);
+	}
+}
+
+/*
+ * Posts a shown message for a present of a job (from the render thread or
+ * the shown thread) to the main thread's ordered queue.  Without memory
+ * it tries again: a present never goes untold.
+ */
+static void
+render_shown_post(
+	struct kwl_render_thread *render,
+	uint64_t number,
+	unsigned key,
+	VkResult result)
+{
+	struct kwl_render_message *message;
+
+	/* The message, made however long memory takes to come. */
+	message = calloc(1, sizeof(*message));
+	while (message == NULL) {
+		usleep(1000);
+		message = calloc(1, sizeof(*message));
+	}
+
+	/* Which present, of which job, and what came of it. */
+	message->kind = KWL_RENDER_SHOWN;
+	message->number = number;
+	message->want_kind = KWL_RENDER_FRAME;
+	message->shown_key = key;
+	message->result = result;
+	render_post(render, message);
+}
+
+/*
+ * Tells whether vkQueuePresentKHR queued a present with this result, and
+ * so signals its present fence: a refused present (out of date, the
+ * surface lost) is queued too; out of memory, a device lost and any other
+ * failure leave the fence untouched.  Returns 1 when it was queued.
+ */
+static int
+render_present_queued(
+	VkResult result)
+{
+	/* Shown, or shown in a way the surface does not match. */
+	if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)
+		return 1;
+
+	/* Refused by the display, but queued (the fence is signalled). */
+	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_ERROR_SURFACE_LOST_KHR)
+		return 1;
+
+	/* Not queued. */
+	return 0;
+}
+
+/*
+ * Takes a spare present fence of the shown thread's, or makes one when
+ * none is spare (never waiting for a present).  Returns NULL when none
+ * could be made.
+ */
+static struct kwl_shown_present *
+shown_spare_take(
+	struct kwl_shown *shown)
+{
+	struct kwl_shown_present *present;
+	VkResult result;
+
+	/* A spare one. */
+	pthread_mutex_lock(&shown->lock);
+
+	present = shown->spares;
+	if (present != NULL)
+		shown->spares = present->next;
+
+	pthread_mutex_unlock(&shown->lock);
+
+	/* Taken from the spares. */
+	if (present != NULL) {
+		present->next = NULL;
+		return present;
+	}
+
+	/* None spare: a new record. */
+	present = calloc(1, sizeof(*present));
+	if (present == NULL)
+		return NULL;
+
+	/* Its new fence, unsignalled. */
+	result = shown->ops.create(shown->context, &present->fence);
+	if (result != VK_SUCCESS) {
+		free(present);
+		return NULL;
+	}
+
+	/* Counted with the fences made. */
+	pthread_mutex_lock(&shown->lock);
+
+	shown->counts.fences_made++;
+
+	pthread_mutex_unlock(&shown->lock);
+
+	/* Succeeded: a fence for one present. */
+	return present;
+}
+
+/* Puts a present fence, reset (or never used), back among the spares. */
+static void
+shown_spare_put(
+	struct kwl_shown *shown,
+	struct kwl_shown_present *present)
+{
+	/* At the head of the spares. */
+	pthread_mutex_lock(&shown->lock);
+
+	present->next = shown->spares;
+	shown->spares = present;
+
+	pthread_mutex_unlock(&shown->lock);
+}
+
+/* Gives the shown thread a queued present to wait for, after those given before, and wakes it. */
+static void
+shown_give(
+	struct kwl_shown *shown,
+	struct kwl_shown_present *present)
+{
+	/* At the end of the given ones. */
+	present->next = NULL;
+	pthread_mutex_lock(&shown->lock);
+
+	if (shown->given_tail == NULL) {
+		shown->given = present;
+	} else {
+		shown->given_tail->next = present;
+	}
+
+	/* The present is now the last one given, and the thread is told of the change. */
+	shown->given_tail = present;
+	shown->sequence++;
+	pthread_cond_broadcast(&shown->changed);
+
+	pthread_mutex_unlock(&shown->lock);
+}
+
+/*
+ * Tells every present the shown thread waits for as failed (a wait that
+ * failed: the device lost, whose fences are never signalled) and destroys
+ * their fences.
+ */
+static void
+shown_fail_all(
+	struct kwl_shown *shown,
+	VkResult result)
+{
+	struct kwl_shown_present *present;
+
+	/* Each, oldest first. */
+	while (shown->flying != NULL) {
+		present = shown->flying;
+		shown->flying = present->next;
+
+		/* Told failed, and gone with its fence. */
+		shown->counts.failed++;
+		render_shown_post(shown->render, present->number, present->key, result);
+		shown->ops.destroy(shown->context, present->fence);
+		free(present);
+	}
+}
+
+/* Takes a present out of those the shown thread waits for. */
+static void
+shown_unlink(
+	struct kwl_shown *shown,
+	struct kwl_shown_present *present)
+{
+	struct kwl_shown_present **link;
+
+	/* Its place in the list. */
+	link = &shown->flying;
+	while (*link != NULL && *link != present)
+		link = &(*link)->next;
+
+	/* Out of it. */
+	if (*link == present)
+		*link = present->next;
+	present->next = NULL;
+}
+
+/* Destroys a chain of presents' fences and frees their records. */
+static void
+shown_presents_free(
+	struct kwl_shown *shown,
+	struct kwl_shown_present *presents)
+{
+	struct kwl_shown_present *present;
+
+	/* Each, oldest first. */
+	while (presents != NULL) {
+		present = presents;
+		presents = present->next;
+		shown->ops.destroy(shown->context, present->fence);
+		free(present);
+	}
 }

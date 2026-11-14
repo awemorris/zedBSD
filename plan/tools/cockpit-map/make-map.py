@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draws the cockpit's work map (plan/cockpit-map.svg) from map.json.
+"""Draws the cockpit's work map (plan/cockpit-map.svg and .png) from map.json.
 
 The map shows Objective -> Milestone -> WS / Bug -> Phase -> owner on a
 white background with frosted-glass cards.  Edit map.json and run:
@@ -9,6 +9,8 @@ white background with frosted-glass cards.  Edit map.json and run:
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 from xml.sax.saxutils import escape
 
@@ -205,6 +207,18 @@ def main():
 	with open(OUT, "w", encoding="utf-8") as f:
 		f.write("\n".join(out) + "\n")
 	print(f"make-map: wrote {os.path.relpath(OUT, ROOT)} ({W}x{height})")
+
+	# A PNG beside it, for viewers that show no SVG inside Markdown.
+	png = os.path.splitext(OUT)[0] + ".png"
+	browser = shutil.which("chromium") or shutil.which("chromium-browser")
+	if browser is None:
+		print("make-map: no chromium, PNG not written", file=sys.stderr)
+		return 1
+	subprocess.run([browser, "--headless", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
+		f"--window-size={W},{height}", f"--screenshot={png}", "file://" + OUT],
+		check=True, timeout=120, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+	print(f"make-map: wrote {os.path.relpath(png, ROOT)}")
+	return 0
 
 
 if __name__ == "__main__":

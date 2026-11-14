@@ -1143,6 +1143,9 @@ serve_pass(void)
 			world.bar_done_count++;
 			pthread_mutex_unlock(&world.lock);
 		}
+
+		/* The daemon takes a request again: a step the bar's request held up goes now. */
+		kwl_system_network_free(&server);
 	}
 
 	/* sessiond's answer to a key's change (ws172-p003): an addition is touched first; the password "kei" alone is good. */
@@ -1186,6 +1189,19 @@ serve_pass(void)
 		(void)kwl_system_pin_answer(&server, unlock_error);
 	if (enrolled)
 		kwl_system_enrolled_answer(&server, 0);
+
+	/* As handoff.c does after each of sessiond's answers: what waited for it is asked now. */
+	if (key || unlock || enrolled)
+		kwl_system_session_free(&server);
+
+	/*
+	 * As the compositor's loop does: the timers due on the test's clock fire
+	 * (the scans' minute, the readings' stall), and the pass counts as woken
+	 * (the test runs no wake pipe; the machine reading's thread is looked at
+	 * each pass, as with a backend that does not wake the loop).
+	 */
+	server.woken = 1U;
+	(void)kwl_timers_take(&server.timers, kwl_milliseconds(), &server);
 
 	/* The extension's own pass. */
 	kwl_system_tick(&server);
@@ -1594,7 +1610,9 @@ test_both_ends(void)
 		return;
 	/* The library's table describes the version it binds (zedBSD's libwayland refuses more than the table; T1-144). */
 	CHECK(kl_system_manager_v1_interface.version == (int)KL_SYSTEM_MANAGER_VERSION, "manager table version %d", kl_system_manager_v1_interface.version);
-	CHECK(kl_system_capabilities(system) == (KL_SYSTEM_HAS_NETWORK | KL_SYSTEM_HAS_AUDIO | KL_SYSTEM_HAS_POWER | KL_SYSTEM_HAS_DEVICES | KL_SYSTEM_HAS_MONITOR | KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_SHARING | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_NOTIFY | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_MAIL | KL_SYSTEM_HAS_PHONE | KL_SYSTEM_HAS_DISPLAYS | KL_SYSTEM_HAS_MACHINE | KL_SYSTEM_HAS_BLUETOOTH), "capabilities");
+	/* Every object of the version bound; the printers only when the host has the print daemon's program. */
+	CHECK((kl_system_capabilities(system) & ~KL_SYSTEM_HAS_PRINTERS) == (KL_SYSTEM_HAS_NETWORK | KL_SYSTEM_HAS_AUDIO | KL_SYSTEM_HAS_POWER | KL_SYSTEM_HAS_DEVICES | KL_SYSTEM_HAS_MONITOR | KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_SHARING | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_NOTIFY | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_MAIL | KL_SYSTEM_HAS_PHONE | KL_SYSTEM_HAS_DISPLAYS | KL_SYSTEM_HAS_MACHINE | KL_SYSTEM_HAS_BLUETOOTH | KL_SYSTEM_HAS_KEY_OPS | KL_SYSTEM_HAS_METHODS | KL_SYSTEM_HAS_PHONE_SYNC | KL_SYSTEM_HAS_PHONE_CONTACTS | KL_SYSTEM_HAS_PHONE_HF | KL_SYSTEM_HAS_MEDIA), "capabilities %#x", kl_system_capabilities(system));
+	CHECK(((kl_system_capabilities(system) & KL_SYSTEM_HAS_PRINTERS) != 0U) == (kwl_printers_available() != 0), "printers offered as the daemon's program is there");
 	kl_system_network_get_state(system, &state);
 	CHECK(state.reachable == 1U && state.connected == 1U && state.kind == KL_NETWORK_WIFI && state.wifi == KL_WIFI_CONNECTED, "first network state");
 	CHECK(strcmp(state.interface, "wlan0") == 0 && strcmp(state.ssid, "Home") == 0 && state.wired[0] == '\0', "first network names");
@@ -1953,8 +1971,9 @@ test_both_ends(void)
 	CHECK(kl_system_account_set_pin(system, "wrong", "654321", &first) == 0, "PIN with a wrong password asked");
 	expect_result(display, system, first, EPERM, "PIN: the password wrong");
 	CHECK(kl_system_account_refusal(system, first, reason, sizeof(reason)) == 1 && strcmp(reason, "bad-secret") == 0, "PIN: the refusal's word");
-	CHECK(kl_system_account_set_pin(system, "kei", "12345", &first) == 0, "five digits asked");
-	expect_result(display, system, first, EINVAL, "PIN: five digits refused");
+	(void)pump(display, system, until_enrolled, 400);
+	CHECK(kl_system_account_set_pin(system, "kei", "123", &first) == 0, "three digits asked");
+	expect_result(display, system, first, EINVAL, "PIN: three digits refused (four to six)");
 	CHECK(kl_system_account_set_pin(system, "kei", "", &first) == 0, "PIN removal asked");
 	expect_result(display, system, first, 0, "PIN removed");
 	(void)pump(display, system, until_enrolled, 400);
@@ -2001,6 +2020,14 @@ main(void)
 	FILE *old_pin;
 
 	pthread_mutex_init(&world.lock, NULL);
+
+	/* The compositor's timers, taken by the server thread's passes; no wake pipe (the threads' wakes go nowhere). */
+	if (kwl_timers_init(&server.timers) != 0) {
+		printf("host-system: no timers\n");
+		return 1;
+	}
+	server.wake[0] = -1;
+	server.wake[1] = -1;
 	snprintf(world.home, sizeof(world.home), "%s", "/tmp/ws131-host-system.XXXXXX");
 	if (mkdtemp(world.home) == NULL) {
 		printf("host-system: no scratch home\n");
