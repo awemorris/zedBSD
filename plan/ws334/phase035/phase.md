@@ -3,7 +3,7 @@
 # ws334-p035 規約の全文の見直しと header の持ち越しの直し
 
 - 親: [WS334](../ws.md)。AGENTS.md §2（code を作る WS の最後の Phase）、手順 docs/agent/spec-module-delegation.md の §4.6（header の持ち越し）。
-- 状態: planned（2026-11-01 p003 で作成）。
+- 状態: cleared（2026-11-15 Q1）
 - 依存: p033・p034・p036。
 - 担当の想定: conformance-reviewer（書き方だけ、動作を変えない）。
 
