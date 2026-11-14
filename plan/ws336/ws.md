@@ -64,7 +64,7 @@
 | [p023](phase023/phase.md) | 他の arch の build | cleared（2026-11-02 23:40 Q1、6e6fd8452 を main に merge 7d0968ab1）。実装済み・試験 PASS（2026-11-02 23:35 P6 q1998。arm64（rpi4）・riscv64（visionfive2-keiland）・armv7（zybo）で libcrypto-compat.so と ssh・sshd・ssh-keygen・sftp-server が警告 0、NEEDED は libcrypto-compat.so と libc.so だけ、check-exports PASS。armv7 に libcrypto-compat.so と ssh の規則を足した（Q1 が armv7 の sysroot を作り直した後）。壊す確かめ 6 通り中 5 が FAIL・1 は同値） | p021 | **WS335 実装** |
 | [p024](phase024/phase.md) | OpenSSH からの入れ替え（Opus、Q6 の A） | cleared（2026-11-14 22:3x Q1。作り直しの後の既定の config が自前の ssh を選び OpenSSH を選ばない形で入れ替えは済んでいた。Pi 5 の自前の sshd を host の OpenSSH 10.0p2 で確かめ全部 PASS（password・公開鍵・scp 8 MiB と再鍵・sftp・pty・exit の値、Pi の自前の ssh から自前の sshd）。zybo・config/ci の案・replace-check.sh は外した） | p022・p023 | **WS335 実装** |
 | [p025](phase025/phase.md) | 規約の全文の見直し（conformance-reviewer） | cleared（2026-11-14 Q1、merge 6637a37b99。userland の見直し・header の comment（基点 4ef0ba4b28）・run-unit・sshd-pair-host・interop-host 161・crypto-contract 108・3 機種の ssh の build warning 0。試験の C の残りは p026） | p024 | — |
-| [p026](phase026/phase.md) | 試験の C（`plan/ws336/tests/`）の規約の全文の見直し（p025 の残り: paragraph comment 464・条件の中の呼び出し 141・forward declaration 61 ほか） | planned（2026-11-14 Q1 の判断で p025 から分けた） | p025 | — |
+| [p026](phase026/phase.md) | 試験の C（`plan/ws336/tests/`）の規約の全文の見直し（p025 の残り: paragraph comment 464・条件の中の呼び出し 141・forward declaration 61 ほか） | 実装済み・試験 PASS（2026-11-15 P2 q2094。機械の検査 731→0、run-unit・sshd-pair-host・interop-host 161・crypto-contract 108・check-skeleton PASS。cleared は Q1） | p025 | — |
 
 ## 未実装（後で実装する物）
 
