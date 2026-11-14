@@ -3,7 +3,7 @@
 # ws299-p004 待ちを重ねる: 連続の読みの先読みを非同期の worker で（raw の block device）
 
 - 親: [WS299](../ws.md)。Queue: q1617 / q1617-i01（担当 P1、2026-10-27）。前提: p003（cleared 2026-10-27、main be47a24df）。
-- Status: in-progress（2026-10-28 Q1 の判定待ち。2026-11-13 q2044 P2: 乱読みの後の連続の読みで run が cache の line で切れる件を直した、下の「2026-11-13」。QEMU は未実施）
+- Status: in-progress（実装済み・試験 PASS: 5330 の受け入れ 1（2026-10-28）・host・QEMU（2026-11-15 q2108 P4、main ba1482f25d、35b527f23c の直しを含む）・x86_64・rpi5・vf2 の build warning 0。Q1 の判定待ち。下の「2026-11-15」）
 - Disposition: normal
 
 ## 測った事（2026-10-27、5330、kernel は main be47a24df ＋ 下の測る口、`nvme-bench-5330.sh zedbsd zb-p004m … read`）
@@ -159,3 +159,10 @@
 - 確かめ（kernel ea880d69a7b53468、q2044b、5330）: 乱読み QD32（987 MB/s）の直後の 1 GiB の連続の読み 1471 MB/s（Debian の cache を捨てた後の chunk の中央値 1511 の 97%）。その 1 GiB を zedBSD で読んだ cksum（260050290 1073741824）が Debian で同じ block を読んだ cksum と一致。read mode の bs 64 KiB・1 MiB・4 MiB は 1917・2684・1491、chunk0・1 は 2237・2065（Debian の 97〜177%、256 MiB の段は 10 ms 刻みで ±8%）。seqcold の chunk の中央値 2065、乱読み QD1 57.6・QD32 1004.9（main の kernel の q2044a は 1790・57.6・996.4、chunk は 10 ms 刻みのぶれの内）。build（x86_64）rc 0・warning 0。
 - 未実施: QEMU の回帰（試験の image の作り方が今の build system に合っていない、p007）、他の機種の build、file system の prefetch（`buf_prefetch`）の道での確かめ（同じ関数を通るが測っていない）。
 - 受け入れ 1 の材料: 乱読みの前（seqcold）の最初と最後の 256 MiB の比 1.00（main の kernel）、乱読みの後（read mode、bucket の kernel）0.92。
+
+## 2026-11-15（q2108、P4）: QEMU の確かめ
+
+- main ba1482f25d（35b527f23c の bucket の直しを含む）で、今の build に直した `plan/ws299/tests/qemu-suite.sh` を流した（[phase007](../phase007/phase.md) の「結果」）: `qemu-readahead` PASS（(a)〜(e) と、足した (f): cache を捨てた後の cache 経由の乱読み 13624 回で line を散らした区域の 200 MiB の連続の読みの cksum が元と一致）、`qemu-cache-stress` PASS（128 MiB の cache、evictions 506558、capacity_failures 0）、`qemu-nvme-shapes`・`qemu-grow-reboot`・boot-test PASS。host 試験 `buf-readahead-test`・`buf-slab-test` PASS。
+- 受け入れ 4 の build の一覧は今の機種に読み替えた（m68k-virt などは今の build に無い）: x86_64（`CONFIG_KERN_THERMAL=y CONFIG_DRIVER_X86_POWER_CONTROL=y`）・rpi5・vf2 の kernel で rc 0・warning 0。
+- 受け入れとの照合: 1（5330 の raw の連続の読み）は 2026-10-28 に達、2026-11-13 の直しの後も q2044b で乱読みの後 97%。2 は「連続 2 回」の条件と host 試験で確かめた（乱読みで先読みを頼まない事の数は未取得）。3 は QEMU で (a)〜(f) PASS（hot unplug は未実施のまま）。4・5 は達。→ 推し: cleared（Q1 の判定）。5330 での main の kernel の測り直しは p007 の 5330 の段。
+- 未実施: file system の prefetch（`buf_prefetch`）の道で bucket を通る事の確かめ、bucket の道を通った回数の数（数える口が無い）。

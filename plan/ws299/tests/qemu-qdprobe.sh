@@ -5,8 +5,8 @@
 # call, a pin of the buffer and a copy), and direct and cached reads of a 2 GiB NVMe disk (threads, processes), and
 # prints the kernel's perf lines of each run.
 #   sh plan/ws299/tests/qemu-qdprobe.sh IMAGE [SECONDS]
-# IMAGE: plan/tools/posix/config-amd64-serial.mk, ZEDBSD_BOOT_EXTRA_LINES='kern.perf=1', and
-# ZEDBSD_EXTRA_FILES='--file /root/randread=OUT/randread-zedbsd' (OUT from build-randread.sh).
+# IMAGE: the serial image of qemu-suite.sh (config-qemu-serial.mk with /root/randread from build-randread.sh) built
+# with the boot line kern.perf=1 (ZEDBSD_BOOT_EXTRA_LINES, if the build still takes it; not checked).
 # W is ${WS299_RUNS:-build/tmp}/qemu-qdprobe (a fresh run each time).  The output is the guest's lines; the last line is
 # "qemu-qdprobe: done N runs" or "qemu-qdprobe: FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -19,7 +19,7 @@ mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-q
 W=${WS299_RUNS:-build/tmp}/qemu-qdprobe
 truncate -s 2G "$W/nvme.img"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
-timeout 1800 qemu-system-x86_64 -machine q35 -m 4G -smp 8 $(qemu_accel_args max) \
+timeout 1800 qemu-system-x86_64 -name "${WS299_NAME:-ws299}-qdprobe" -machine q35 -m 4G -smp 8 $(qemu_accel_args max) \
   -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
   -drive "if=pflash,format=raw,file=$W/vars.fd" \
   -drive "if=none,id=boot,file=$IMAGE,format=raw,snapshot=on" \

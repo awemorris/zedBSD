@@ -16,7 +16,7 @@ W=${WS299_RUNS:-build/tmp}/qemu-nvme-shapes
 truncate -s 1G "$W/d4k.img"
 truncate -s 1G "$W/d512.img"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
-qemu-system-x86_64 -machine q35 -m 8G -smp 4 $(qemu_accel_args max) \
+qemu-system-x86_64 -name "${WS299_NAME:-ws299}-nvme-shapes" -machine q35 -m 8G -smp 4 $(qemu_accel_args max) \
   -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
   -drive "if=pflash,format=raw,file=$W/vars.fd" \
   -drive "if=none,id=boot,file=$IMAGE,format=raw,snapshot=on" \

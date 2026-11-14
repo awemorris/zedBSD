@@ -131,3 +131,8 @@
 
 - 残る候補（未確認）: 1 request の 16 command の完了ごとの割り込み（VMD の 1 vector）と待つ thread の起床の回数、request の間の隙間（完了 → user → 次の pin・post）。次は TSC で request の中の区間（pin・post・最後の完了・起床・unpin）を測る。
 - 乱読み direct QD1 104%・QD32 97%（[phase006](../phase006/phase.md)）。
+
+## 2026-11-15（q2108、P4）: QEMU の確かめ
+
+- main ba1482f25d で `qemu-directio.sh`（今の build に直した suite、[phase007](../phase007/phase.md)）PASS: `qemu-directio: PASS (2 checks, 3 transfers)`（NVMe 512 B と AHCI の両方で `directio check` の全項目、direct の 256 MiB の書きと 4 MiB・1 MiB の読み）。host `buf-direct-test` PASS。x86_64・rpi5・vf2 の kernel の build warning 0。
+- 受け入れ 2 の「NVMe 4 KiB の sector、virtio-blk」の disk は `qemu-directio.sh` に無い（NVMe 512 B と AHCI）。未実施のまま。受け入れ 3（5330 の direct の読み 4 MiB 92〜93%・1 MiB 94〜95%）が残る。Status は変えない（in-progress、5330 の段）。

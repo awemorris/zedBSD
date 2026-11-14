@@ -18,7 +18,7 @@ W=${WS299_RUNS:-build/tmp}/qemu-cache-stress
 truncate -s 1G "$W/d.img"
 printf '\125\252' | dd of="$W/d.img" bs=1 seek=510 conv=notrunc 2> /dev/null
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
-timeout 2400 qemu-system-x86_64 -name p1-cache-stress -machine q35 -m 4G -smp 4 $(qemu_accel_args max) \
+timeout 2400 qemu-system-x86_64 -name "${WS299_NAME:-ws299}-cache-stress" -machine q35 -m 4G -smp 4 $(qemu_accel_args max) \
   -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
   -drive "if=pflash,format=raw,file=$W/vars.fd" \
   -drive "if=none,id=boot,file=$IMAGE,format=raw,snapshot=on" \

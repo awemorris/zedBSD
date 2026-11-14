@@ -8,9 +8,12 @@
 #   (d) after a read ahead past 201 MiB, 1 MiB of new data written at 201 MiB is what a later read sees;
 #   (c) ten times a cold read of 64 MiB followed at once by a partition reload, none refused (no false EBUSY from
 #       read-ahead still running);
-#   (e) a cold 4 KiB-block sequential read.
+#   (e) a cold 4 KiB-block sequential read;
+#   (f) after the cache is dropped, one second of cached 4 KiB random reads (/root/randread, build-randread.sh) over
+#       the region at 300 MiB, then a sequential read of it: the read-ahead runs read over the scattered cached lines
+#       (into the bucket page) and the data must still be the source's.
 # and prints the read-ahead log line and the I/O counters.
-#   sh plan/ws299/tests/qemu-readahead.sh IMAGE      (IMAGE built with CONFIG_PCAT_SERIAL_MIRROR=y)
+#   sh plan/ws299/tests/qemu-readahead.sh IMAGE      (the serial image of qemu-suite.sh)
 # W is ${WS299_RUNS:-build/tmp}/qemu-readahead (a fresh run each time).  The last line is "qemu-readahead: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -22,7 +25,7 @@ W=${WS299_RUNS:-build/tmp}/qemu-readahead
 truncate -s 1G "$W/d.img"
 printf '\125\252' | dd of="$W/d.img" bs=1 seek=510 conv=notrunc 2> /dev/null
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
-timeout 1800 qemu-system-x86_64 -name p1-readahead -machine q35 -m 8G -smp 4 $(qemu_accel_args max) \
+timeout 1800 qemu-system-x86_64 -name "${WS299_NAME:-ws299}-readahead" -machine q35 -m 8G -smp 4 $(qemu_accel_args max) \
   -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
   -drive "if=pflash,format=raw,file=$W/vars.fd" \
   -drive "if=none,id=boot,file=$IMAGE,format=raw,snapshot=on" \
@@ -54,6 +57,9 @@ for command in \
 	"dd if=/root/new.bin bs=1024k seek=201 conv=notrunc of=$D 2> /dev/null; dd if=$D bs=1024k skip=201 count=1 2> /dev/null | cksum | sed 's/^/new /'" \
 	"i=0; f=0; while [ \$i -lt 10 ]; do dd if=$D of=/dev/null bs=1024k count=64 skip=\$((i * 64 + 1)) 2> /dev/null; diskpart reload $D > /dev/null 2>&1 || f=\$((f + 1)); i=\$((i + 1)); done; echo \"refused \$f\"" \
 	"dd if=$D bs=4k count=51200 skip=76800 2> /tmp/e | cksum; tail -1 /tmp/e" \
+	"$DROP" \
+	"/root/randread $D 4096 1 1 300 200 | tail -1" \
+	"dd if=$D bs=1024k count=200 skip=300 2> /tmp/e | cksum; tail -1 /tmp/e" \
 	"dmesg | grep -E 'buf: readahead' | tail -4; sysctl vfs.io.stats; sysctl vfs.bufcache.stats"; do
 	echo "guest\$ $command" | tee -a "$out"
 	$S run "$command" | tee -a "$out"
@@ -64,10 +70,10 @@ same=$(grep -cxF "$src" "$out.clean")
 new=$(grep -E '^new [0-9]+ 1048576$' "$out.clean" | sort -u | wc -l)
 newcount=$(grep -cE '^new [0-9]+ 1048576$' "$out.clean")
 refused=$(sed -n 's/^refused \([0-9]*\)$/\1/p' "$out.clean")
-# src.bin's own checksum, then (a) twice, (b) twice and (e): six lines.
+# src.bin's own checksum, then (a) twice, (b) twice, (e) and (f): seven lines.
 reloads=$(grep -c '^reload=0$' "$out.clean")
-if [ "$same" -eq 6 ] && [ "$newcount" -eq 2 ] && [ "$new" -eq 1 ] && [ "${refused:-x}" = 0 ] && [ "$reloads" -eq 1 ]; then
-	echo "qemu-readahead: PASS (6 equal checksums, new data seen, 0 reloads refused)"
+if [ "$same" -eq 7 ] && [ "$newcount" -eq 2 ] && [ "$new" -eq 1 ] && [ "${refused:-x}" = 0 ] && [ "$reloads" -eq 2 ]; then
+	echo "qemu-readahead: PASS (7 equal checksums, new data seen, 0 reloads refused)"
 else
-	echo "qemu-readahead: FAIL (checksums $same/6, new $newcount/$new, refused ${refused:-?}, reload ok $reloads/1)"
+	echo "qemu-readahead: FAIL (checksums $same/7, new $newcount/$new, refused ${refused:-?}, reload ok $reloads/2)"
 fi

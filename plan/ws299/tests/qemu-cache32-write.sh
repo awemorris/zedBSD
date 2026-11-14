@@ -16,12 +16,12 @@ MIB=${3:-200}
 mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-cache32-write
 W=${WS299_RUNS:-build/tmp}/qemu-cache32-write
 if [ -n "$KERNEL" ]; then
-	cp "$IMAGE" "$W/image.img"
-	mcopy -o -i "$W/image.img@@$((133120 * 512))" "$KERNEL" ::/vmunix || { echo "qemu-cache32-write: FAIL kernel copy"; exit 1; }
+	sh plan/ws299/tests/image-kernel.sh "$IMAGE" "$KERNEL" "$W/image.img" > /dev/null ||
+		{ echo "qemu-cache32-write: FAIL kernel copy"; exit 1; }
 	IMAGE=$W/image.img
 fi
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
-timeout 1800 qemu-system-x86_64 -name p1-cache32 -machine q35 -m 4G -smp 4 $(qemu_accel_args max) \
+timeout 1800 qemu-system-x86_64 -name "${WS299_NAME:-ws299}-cache32" -machine q35 -m 4G -smp 4 $(qemu_accel_args max) \
   -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
   -drive "if=pflash,format=raw,file=$W/vars.fd" \
   -drive "if=none,id=boot,file=$IMAGE,format=raw,snapshot=on" \
