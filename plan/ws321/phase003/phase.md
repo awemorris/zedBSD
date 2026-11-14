@@ -185,5 +185,5 @@ clip は host の ffmpeg（libx265 -preset fast、testsrc2、20 秒、mp4、hvc1
 - SAODBLK_A・B の正否（VF2 と同じく ffmpeg の参照が zip の md5 と合わない。板の出力の I420 の md5 を zip の md5 と照らす道具が要る、ws322-p006 の残りと同じ）。
 - VPSSPSPPS_A の正しい参照での照合（VF2 は正しい参照で一致、その参照の作り方は ws322-p006）。
 - Pi 4 の実機の非退行（build だけ）。
-- `CONFIG_DRIVER_BCM2712_VIDEO` の既定 y（Q1 の判断、p003 の受け入れの後）。
+- `CONFIG_DRIVER_BCM2712_VIDEO` の既定 y（Q1 の判断、p003 の受け入れの後）。→ 2026-11-02 に Q1 が既定 y にした。今の build system では option は無く、`CONFIG_DRIVER_RPI5_GPU` に含まれる。
 - 速さ: 1080p60 の始めの late 3 は phase 1 と phase 2 を重ねていない事と、poll の形（p002 の R4・R5）。後の Phase。

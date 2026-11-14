@@ -482,6 +482,8 @@ bcm2712_hevc_slice_read(
 		/* Succeeded: the dependent segment's place and data. */
 		return 0;
 	}
+
+	/* An independent segment, first in the picture or not. */
 	slice->first_in_picture = first;
 	slice->dependent = false;
 
@@ -827,12 +829,15 @@ bits_byte(
 	/* A three after two zeros is not data (7.4.2). */
 	byte = bits->bytes[bits->at];
 	if (bits->zeros >= 2U && byte == 3U) {
+		/* Steps past the emulation prevention byte; the stream must not end there. */
 		bits->at++;
 		bits->zeros = 0;
 		if (bits->at >= bits->length) {
 			bits->error = true;
 			return 0;
 		}
+
+		/* The data byte that follows it. */
 		byte = bits->bytes[bits->at];
 	}
 
@@ -860,10 +865,13 @@ bits_read(
 	/* Each bit, taking a new byte when the last one is used up. */
 	value = 0;
 	for (index = 0; index < count && !bits->error; index++) {
+		/* Takes a new byte when the current one is used up. */
 		if (bits->left == 0U) {
 			bits->current = bits_byte(bits);
 			bits->left = 8U;
 		}
+
+		/* Appends the next bit of the current byte. */
 		bits->left--;
 		value = (value << 1) | ((bits->current >> bits->left) & 1U);
 	}
@@ -883,10 +891,21 @@ bits_golomb(
 {
 	uint32_t zeros;
 	uint32_t suffix;
+	uint32_t bit;
 
 	/* The leading zeros, up to the limit. */
 	zeros = 0;
-	while (bits_read(bits, 1U) == 0U && !bits->error) {
+	for (;;) {
+		/* A one ends the zeros. */
+		bit = bits_read(bits, 1U);
+		if (bit != 0U)
+			break;
+
+		/* So does a read past the end. */
+		if (bits->error)
+			break;
+
+		/* Counts the zero; too many make no 32-bit code. */
 		zeros++;
 		if (zeros > HEVC_GOLOMB_ZEROS) {
 			bits->error = true;
@@ -1012,6 +1031,7 @@ read_references(
 	uint32_t index;
 	uint32_t remaining;
 	uint32_t chunk;
+	uint64_t available;
 	bool from_sps;
 	int error;
 
@@ -1021,8 +1041,16 @@ read_references(
 
 	/* A set in the header is skipped by its size; one of the sequence's is named by index. */
 	if (!from_sps) {
-		if (picture->short_term_bits > HEVC_SHORT_TERM_BITS_MAX || picture->short_term_bits > bits_remaining(bits))
+		/* Refuses a set larger than the limit. */
+		if (picture->short_term_bits > HEVC_SHORT_TERM_BITS_MAX)
 			return EINVAL;
+
+		/* Refuses a set larger than what is left of the header. */
+		available = bits_remaining(bits);
+		if (picture->short_term_bits > available)
+			return EINVAL;
+
+		/* Skips the set's bits, at most 32 at a time. */
 		remaining = picture->short_term_bits;
 		while (remaining != 0U && !bits->error) {
 			chunk = remaining;
@@ -1047,6 +1075,8 @@ read_references(
 		if (error != 0)
 			return error;
 	}
+
+	/* Refuses a header that ended early. */
 	if (bits->error)
 		return EINVAL;
 
@@ -1064,13 +1094,17 @@ read_long_term(
 	uint32_t pictures;
 	uint32_t index;
 	uint32_t cycle;
+	uint32_t msb_present;
 
 	/* The counts: of the sequence's pictures, then of the header's own. */
 	from_sps = 0;
 	if (sps->long_term_sps > 0U)
 		from_sps = bits_golomb(bits);
 	pictures = bits_golomb(bits);
-	if (bits->error || from_sps > sps->long_term_sps || pictures > HEVC_LONG_TERM_MAX || from_sps + pictures > HEVC_LONG_TERM_MAX)
+	if (bits->error ||
+	    from_sps > sps->long_term_sps ||
+	    pictures > HEVC_LONG_TERM_MAX ||
+	    from_sps + pictures > HEVC_LONG_TERM_MAX)
 		return EINVAL;
 
 	/* Each picture: its index or its order count and use, and its order count's high part. */
@@ -1084,12 +1118,15 @@ read_long_term(
 		}
 
 		/* delta_poc_msb_present_flag and delta_poc_msb_cycle_lt, at most 2^( 32 - log2_max_poc_lsb ). */
-		if (bits_read(bits, 1U) != 0U) {
+		msb_present = bits_read(bits, 1U);
+		if (msb_present != 0U) {
 			cycle = bits_golomb(bits);
 			if ((uint64_t)cycle > ((uint64_t)1U << (28U - sps->log2_max_poc_lsb_minus4)))
 				return EINVAL;
 		}
 	}
+
+	/* Refuses a header that ended early. */
 	if (bits->error)
 		return EINVAL;
 
@@ -1121,6 +1158,9 @@ build_list(
 	uint32_t used;
 	uint32_t index;
 	uint32_t entry;
+	uint32_t first_count;
+	uint32_t second_count;
+	uint32_t long_term_count;
 	uint8_t substitute;
 
 	/* List 0 takes the pictures before the current first, list 1 those after. */
@@ -1131,17 +1171,27 @@ build_list(
 		second = picture->before;
 	}
 
+	/* The sizes of the three sets the temporary list repeats. */
+	first_count = set_count(first);
+	second_count = set_count(second);
+	long_term_count = set_count(picture->long_term);
+
 	/* The temporary list, the sets again and again until it is long enough (NumRpsCurrTempListX). */
 	length = count;
 	if (total > length)
 		length = total;
 	used = 0;
 	while (used < length) {
-		for (index = 0; index < set_count(first) && used < length; index++)
+		/* The first set's pictures. */
+		for (index = 0; index < first_count && used < length; index++)
 			temporary[used++] = first[index];
-		for (index = 0; index < set_count(second) && used < length; index++)
+
+		/* The second set's pictures. */
+		for (index = 0; index < second_count && used < length; index++)
 			temporary[used++] = second[index];
-		for (index = 0; index < set_count(picture->long_term) && used < length; index++)
+
+		/* The long-term pictures. */
+		for (index = 0; index < long_term_count && used < length; index++)
 			temporary[used++] = picture->long_term[index];
 	}
 
@@ -1151,8 +1201,12 @@ build_list(
 		if (temporary[index] < BCM2712_HEVC_SLOTS && slots[temporary[index]].present)
 			substitute = temporary[index];
 	}
+
+	/* Refuses a list that references no picture at all. */
 	if (substitute == BCM2712_HEVC_NO_SLOT)
 		return EINVAL;
+
+	/* Puts the substitute in every missing picture's place. */
 	for (index = 0; index < used; index++) {
 		if (temporary[index] >= BCM2712_HEVC_SLOTS || !slots[temporary[index]].present)
 			temporary[index] = substitute;
@@ -1197,6 +1251,11 @@ read_predicted(
 	uint32_t index;
 	uint32_t count;
 	uint32_t candidates;
+	uint32_t overridden;
+	uint32_t before_count;
+	uint32_t after_count;
+	uint32_t long_term_count;
+	uint32_t modification;
 	int error;
 
 	/* The active counts: the slice's own when overridden, else the picture's (1 to 15). */
@@ -1208,16 +1267,26 @@ read_predicted(
 	slice->references[1] = 0;
 	if (b_slice)
 		slice->references[1] = pps->l1_minus1 + 1U;
-	if (bits_read(bits, 1U) != 0U) {
+
+	/* num_ref_idx_active_override_flag: the slice's own counts. */
+	overridden = bits_read(bits, 1U);
+	if (overridden != 0U) {
 		slice->references[0] = bits_golomb(bits) + 1U;
 		if (b_slice)
 			slice->references[1] = bits_golomb(bits) + 1U;
 	}
-	if (bits->error || slice->references[0] > BCM2712_HEVC_REFERENCES || slice->references[1] > BCM2712_HEVC_REFERENCES)
+
+	/* Refuses a header that ended early or counts beyond the decoder. */
+	if (bits->error ||
+	    slice->references[0] > BCM2712_HEVC_REFERENCES ||
+	    slice->references[1] > BCM2712_HEVC_REFERENCES)
 		return EINVAL;
 
 	/* NumPicTotalCurr: the three current sets' pictures, of which a predicted slice needs one. */
-	total = set_count(picture->before) + set_count(picture->after) + set_count(picture->long_term);
+	before_count = set_count(picture->before);
+	after_count = set_count(picture->after);
+	long_term_count = set_count(picture->long_term);
+	total = before_count + after_count + long_term_count;
 	if (total == 0U)
 		return EINVAL;
 
@@ -1226,9 +1295,15 @@ read_predicted(
 	modified[1] = false;
 	if ((pps->flags & BCM2712_HEVC_PPS_LISTS_MODIFICATION) != 0U && total > 1U) {
 		for (list = 0; list < lists; list++) {
-			modified[list] = bits_read(bits, 1U) != 0U;
+			/* ref_pic_list_modification_flag_lX: whether the list names its entries. */
+			modification = bits_read(bits, 1U);
+			modified[list] = false;
+			if (modification != 0U)
+				modified[list] = true;
 			if (!modified[list])
 				continue;
+
+			/* list_entry_lX: each entry, below NumPicTotalCurr. */
 			for (index = 0; index < slice->references[list]; index++) {
 				entries[list][index] = (uint8_t)bits_read(bits, ceil_log2(total));
 				if (entries[list][index] >= total)
@@ -1236,6 +1311,8 @@ read_predicted(
 			}
 		}
 	}
+
+	/* Refuses a header that ended early. */
 	if (bits->error)
 		return EINVAL;
 
@@ -1386,6 +1463,8 @@ read_list_weights(
 				clip(128 + offset - shift_floor(128 * weight, weights->chroma_log2_denom), -128, 127);
 		}
 	}
+
+	/* Refuses a header that ended early. */
 	if (bits->error)
 		return EINVAL;
 
@@ -1406,7 +1485,9 @@ read_tail(
 {
 	uint32_t length;
 	uint32_t index;
+	uint32_t alignment_bit;
 	uint64_t needed;
+	uint64_t available;
 
 	/* The entry points with tiles or wavefronts: a count, the offsets' length, the offsets. */
 	slice->entry_points = 0;
@@ -1415,10 +1496,16 @@ read_tail(
 		if (bits->error || slice->entry_points > HEVC_ENTRY_POINTS_MAX)
 			return EINVAL;
 		if (slice->entry_points != 0U) {
+			/* offset_len_minus1: refuses offsets longer than 32 bits or than the header. */
 			length = bits_golomb(bits) + 1U;
 			needed = (uint64_t)length * slice->entry_points;
-			if (bits->error || length > 32U || needed > bits_remaining(bits))
+			if (bits->error || length > 32U)
 				return EINVAL;
+			available = bits_remaining(bits);
+			if (needed > available)
+				return EINVAL;
+
+			/* Reads past the offsets. */
 			for (index = 0; index < slice->entry_points && !bits->error; index++)
 				(void)bits_read(bits, length);
 		}
@@ -1434,8 +1521,11 @@ read_tail(
 	}
 
 	/* byte_alignment(): a one, then zeros to the byte's end. */
-	if (bits_read(bits, 1U) != 1U || bits->error)
+	alignment_bit = bits_read(bits, 1U);
+	if (alignment_bit != 1U || bits->error)
 		return EINVAL;
+
+	/* Reads past the zeros to the byte's end. */
 	(void)bits_read(bits, bits->left);
 	if (bits->error)
 		return EINVAL;
@@ -1556,6 +1646,8 @@ spacing(
 			size = 1U;
 		bounds[index + 1U] = bounds[index] + (uint32_t)size;
 	}
+
+	/* The last part ends at the total. */
 	bounds[parts] = total;
 }
 
@@ -1630,6 +1722,8 @@ tile_scan_to_raster(
 				*y = geometry->row_bounds[tile_y] + ts / width;
 				return;
 			}
+
+			/* Steps past a tile before the address. */
 			ts -= size;
 		}
 	}
@@ -1946,12 +2040,14 @@ tile_fill(
 		emit(program, REG_STATUS, 2U | (end_x << 5) | (end_y << 18));
 		emit(program, REG_TRANSFER, TRANSFER_RELOAD);
 
-		/* The next tile in scan order, and its entry point. */
+		/* The next tile in scan order. */
 		tile_x++;
 		if (tile_x >= geometry->columns) {
 			tile_x = 0;
 			tile_y++;
 		}
+
+		/* The next tile's entry point. */
 		entry_point(program, false, true, PAUSE_TILE, tile_x, tile_y, geometry->column_bounds[tile_x], geometry->row_bounds[tile_y], program->entry_qp, program->entry_slice);
 	}
 }
@@ -1991,6 +2087,8 @@ tile_segment(
 	const struct hevc_geometry *geometry;
 	uint32_t tile_x;
 	uint32_t tile_y;
+	uint32_t previous_tile_x;
+	uint32_t previous_tile_y;
 	bool reset_qp;
 
 	/* The segment's tile, the previous segment's end, the messages and the bitstream. */
@@ -2003,12 +2101,14 @@ tile_segment(
 	write_bitstream(program, slice);
 
 	/* The contexts start again for a new picture, an independent segment or a new tile. */
+	previous_tile_x = tile_of(geometry->column_bounds, geometry->columns, program->previous_x);
+	previous_tile_y = tile_of(geometry->row_bounds, geometry->rows, program->previous_y);
 	reset_qp = false;
 	if (program->start_ts == 0U || !slice->dependent)
 		reset_qp = true;
-	if (tile_x != tile_of(geometry->column_bounds, geometry->columns, program->previous_x))
+	if (tile_x != previous_tile_x)
 		reset_qp = true;
-	if (tile_y != tile_of(geometry->row_bounds, geometry->rows, program->previous_y))
+	if (tile_y != previous_tile_y)
 		reset_qp = true;
 	if (reset_qp)
 		write_probabilities(program, slice);
@@ -2075,6 +2175,8 @@ slice_messages(
 					backward = false;
 			}
 		}
+
+		/* Sets the message's bit for a slice with no reference after the current picture. */
 		if (backward)
 			word |= 1U << 10;
 		program->messages[program->message_count++] = (uint16_t)word;
@@ -2213,6 +2315,8 @@ write_probabilities(
 			state = 124 + (state & 1);
 		states[index] = (uint8_t)state;
 	}
+
+	/* Pads the states to whole words. */
 	states[PROBABILITY_VALUES] = 0;
 	states[PROBABILITY_VALUES + 1U] = 0;
 
@@ -2222,6 +2326,8 @@ write_probabilities(
 		     (uint32_t)states[index] | ((uint32_t)states[index + 1U] << 8) |
 		     ((uint32_t)states[index + 2U] << 16) | ((uint32_t)states[index + 3U] << 24));
 	}
+
+	/* Saves the states as the ones the next segment or tile may reload. */
 	emit(program, REG_TRANSFER, TRANSFER_BACKUP);
 }
 
@@ -2360,6 +2466,8 @@ scaling_table(
 			scaling_expand(1U, fallback, 0U, table + hevc_scaling_offsets[1][matrix]);
 			scaling_expand(2U, fallback, HEVC_FLAT, table + hevc_scaling_offsets[2][matrix]);
 		}
+
+		/* The 32x32 lists: intra, then inter. */
 		scaling_expand(3U, hevc_default_intra, HEVC_FLAT, table + hevc_scaling_offsets[3][0]);
 		scaling_expand(3U, hevc_default_inter, HEVC_FLAT, table + hevc_scaling_offsets[3][1]);
 		return;
@@ -2371,6 +2479,8 @@ scaling_table(
 		scaling_expand(1U, source->list8[matrix], 0U, table + hevc_scaling_offsets[1][matrix]);
 		scaling_expand(2U, source->list16[matrix], source->dc16[matrix], table + hevc_scaling_offsets[2][matrix]);
 	}
+
+	/* The set's two 32x32 lists, with their DC values. */
 	for (matrix = 0; matrix < 2U; matrix++)
 		scaling_expand(3U, source->list32[matrix], source->dc32[matrix], table + hevc_scaling_offsets[3][matrix]);
 }
@@ -2416,10 +2526,13 @@ scaling_expand(
 		column = 0;
 		row = diagonal;
 		while (row >= 0) {
+			/* Places the next coded entry when the position is inside the square. */
 			if (column < (int32_t)side && row < (int32_t)side && index < count) {
 				raster[(uint32_t)row * side + (uint32_t)column] = coded[index];
 				index++;
 			}
+
+			/* Moves up and to the right along the diagonal. */
 			row--;
 			column++;
 		}
@@ -2441,6 +2554,8 @@ scaling_expand(
 		for (x = 0; x < side; x++)
 			out[y * side + x] = raster[(y / repeat) * 8U + x / repeat];
 	}
+
+	/* The DC value replaces the first entry. */
 	out[0] = dc;
 }
 
