@@ -293,10 +293,16 @@ parse_exact(
 {
 	struct ssh_kexinit kexinit;
 	uint8_t *copy;
+	size_t allocation;
 	int error;
 
 	/* Copies the payload into memory of exactly its size. */
-	copy = malloc(size == 0 ? 1 : size);
+	allocation = size;
+	if (allocation == 0)
+		allocation = 1;
+
+	/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+	copy = malloc(allocation);
 	if (copy == NULL)
 		abort();
 	if (size > 0)
@@ -922,6 +928,7 @@ test_hybrid_init(void)
 	size_t value_size;
 	size_t length;
 	uint8_t *copy;
+	size_t allocation;
 	int error;
 
 	fill_pattern(c_init, sizeof(c_init), 29, 11);
@@ -982,7 +989,12 @@ test_hybrid_init(void)
 
 	/* Every proper prefix is refused (copied into memory of exactly its size). */
 	for (length = 0; length < payload_wire.size; length++) {
-		copy = malloc(length == 0 ? 1 : length);
+		allocation = length;
+		if (allocation == 0)
+			allocation = 1;
+
+		/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+		copy = malloc(allocation);
 		if (copy == NULL)
 			abort();
 		if (length > 0)
@@ -1074,6 +1086,7 @@ test_hybrid_errors(void)
 	size_t signature_size;
 	size_t length;
 	uint8_t *copy;
+	size_t allocation;
 	int error;
 
 	fill_pattern(bytes, sizeof(bytes), 5, 5);
@@ -1090,7 +1103,12 @@ test_hybrid_errors(void)
 
 	/* Every proper prefix is refused, with the outputs cleared. */
 	for (length = 0; length < payload_wire.size; length++) {
-		copy = malloc(length == 0 ? 1 : length);
+		allocation = length;
+		if (allocation == 0)
+			allocation = 1;
+
+		/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+		copy = malloc(allocation);
 		if (copy == NULL)
 			abort();
 		if (length > 0)
@@ -1500,6 +1518,7 @@ test_random_feed(void)
 	size_t c_size;
 	const char *lists[TEST_LISTS];
 	uint8_t *copy;
+	size_t allocation;
 	size_t size;
 	size_t valid_size;
 	size_t index;
@@ -1547,7 +1566,12 @@ test_random_feed(void)
 	/* Random bytes of random length go to all three parsers, in memory of exactly their size. */
 	for (run = 0; run < TEST_RANDOM_RUNS; run++) {
 		size = next_random() % 200U;
-		copy = malloc(size == 0 ? 1 : size);
+		allocation = size;
+		if (allocation == 0)
+			allocation = 1;
+
+		/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+		copy = malloc(allocation);
 		if (copy == NULL)
 			abort();
 		for (index = 0; index < size; index++)

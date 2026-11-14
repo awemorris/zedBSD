@@ -93,6 +93,19 @@ static const struct time_case time_cases[] = {
 #define TIME_CASE_COUNT		(sizeof(time_cases) / sizeof(time_cases[0]))
 
 static int client_add(const char *text, const char *host);
+static int sshd_read(const char *text);
+static int client_read(const char *text, const char *host);
+static int client_option(const char *option);
+static int client_read_defaults(const char *text, const char *host);
+static int error_starts(const char *prefix);
+static int error_has(const char *text);
+static void make_line(char *line, const char *keyword, char byte, size_t count);
+static int bit_count(uint32_t mask);
+static void check_sshd_bool(const char *keyword, size_t offset);
+static void check_sshd_number(const char *keyword, size_t offset, unsigned minimum, unsigned maximum);
+static void check_sshd_time(const char *keyword, size_t offset);
+static unsigned fuzz_next(unsigned limit);
+static size_t fuzz_text(char *text, size_t capacity);
 
 /* Fills sshd with the defaults and reads text into it; the status of sshd_config_parse. */
 static int
@@ -100,12 +113,18 @@ sshd_read(
 	const char *text)
 {
 	char *copy;
+	size_t allocation;
 	size_t length;
 	int status;
 
 	/* The text is copied to a block of exactly its size, so that a read past its end is caught by the checker. */
 	length = strlen(text);
-	copy = malloc(length != 0 ? length : 1);
+	allocation = length;
+	if (allocation == 0)
+		allocation = 1;
+
+	/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+	copy = malloc(allocation);
 	CHECK(copy != NULL);
 	memcpy(copy, text, length);
 	sshd_config_defaults(&sshd);
@@ -154,12 +173,18 @@ client_add(
 	const char *host)
 {
 	char *copy;
+	size_t allocation;
 	size_t length;
 	int status;
 
 	/* The text is copied to a block of exactly its size, so that a read past its end is caught by the checker. */
 	length = strlen(text);
-	copy = malloc(length != 0 ? length : 1);
+	allocation = length;
+	if (allocation == 0)
+		allocation = 1;
+
+	/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+	copy = malloc(allocation);
 	CHECK(copy != NULL);
 	memcpy(copy, text, length);
 	memset(error, 'x', sizeof(error) - 1);
@@ -236,6 +261,7 @@ bit_count(
 		mask >>= 1;
 	}
 
+	/* Reports how many bits were set. */
 	return count;
 }
 
@@ -319,6 +345,7 @@ test_shipped(void)
 		CHECK_EQ(sshd_config_parse(&sshd, text, size, error), 0);
 	}
 
+	/* Parses the client configuration the package ships, when the file is there. */
 	file = fopen("userland/packages/network/openssh/files/ssh_config", "rb");
 	if (file != NULL) {
 		size = fread(text, 1, sizeof(text), file);
@@ -367,7 +394,8 @@ check_sshd_bool(
 
 	/* The keyword is read without regard to case. */
 	sprintf(line, "%s no\n", keyword);
-	line[0] = (char)(line[0] >= 'A' && line[0] <= 'Z' ? line[0] - 'A' + 'a' : line[0]);
+	if (line[0] >= 'A' && line[0] <= 'Z')
+		line[0] = (char)(line[0] - 'A' + 'a');
 	CHECK_EQ(sshd_read(line), 0);
 	CHECK_EQ(*field, 0);
 
@@ -430,6 +458,10 @@ check_sshd_number(
 		CHECK(error_starts("line 1: "));
 	}
 
+	/*
+	 * A value above the maximum, one that overflows 32 bits and one that is not a number
+	 * are refused with the line number.
+	 */
 	sprintf(line, "%s %u\n", keyword, maximum + 1);
 	CHECK_EQ(sshd_read(line), EINVAL);
 	CHECK(error_starts("line 1: "));
@@ -442,6 +474,7 @@ check_sshd_number(
 		CHECK_EQ(sshd_read(line), EINVAL);
 	}
 
+	/* An empty or a missing value is refused. */
 	sprintf(line, "%s \"\"\n", keyword);
 	CHECK_EQ(sshd_read(line), EINVAL);
 	sprintf(line, "%s\n", keyword);
@@ -597,6 +630,7 @@ test_sshd_values(void)
 		strcat(text, line);
 	}
 
+	/* Eight host keys fit and a ninth is refused with the line number. */
 	CHECK_EQ(sshd_read(text), 0);
 	CHECK_EQ(sshd.host_key_count, 8);
 	CHECK(strcmp(sshd.host_key[7], "/key7") == 0);
@@ -791,7 +825,7 @@ test_sshd_ignored(void)
 	/* Keywords of OpenSSH that these programs do not know are errors with the line number and the keyword. */
 	CHECK_EQ(sshd_read("Port 22\n\n# c\nBogus 1\n"), EINVAL);
 	CHECK(error_starts("line 4: unknown keyword: Bogus"));
-	CHECK_EQ(sshd_read("Include /etc/ssh/sshd_config.d/*.conf\n"), EINVAL);
+	CHECK_EQ(sshd_read("Include /etc/ssh/sshd_config.d/" "*.conf\n"), EINVAL);
 	CHECK_EQ(sshd_read("Ciphers aes128-ctr\n"), EINVAL);
 	CHECK_EQ(sshd_read("ForceCommand /bin/true\n"), EINVAL);
 	CHECK_EQ(sshd_read("Ports 22\n"), EINVAL);
@@ -1009,6 +1043,7 @@ test_ssh_values(void)
 			CHECK_EQ(status, EINVAL);
 		}
 
+		/* Reads the interval and checks the seconds, or the refusal. */
 		sprintf(line, "ServerAliveInterval %s\n", time_cases[index].text);
 		status = client_read(line, "h");
 		if (time_cases[index].seconds >= 0) {
@@ -1118,6 +1153,7 @@ test_ssh_values(void)
 		strcat(text, line);
 	}
 
+	/* Eight identity files fit and a ninth is refused with the line number. */
 	CHECK_EQ(client_read(text, "h"), 0);
 	CHECK_EQ(client.identity_count, 8);
 	strcat(text, "IdentityFile /id8\n");
@@ -1771,6 +1807,7 @@ fuzz_text(
 	unsigned line;
 	unsigned word;
 	unsigned pick;
+	unsigned space_pick;
 
 	/* Builds one to six lines of one to five words. */
 	length = 0;
@@ -1788,24 +1825,29 @@ fuzz_text(
 				continue;
 			}
 
+			/* Picks a word of the vocabulary; it is left out if it would not fit. */
 			pick = fuzz_next((unsigned)FUZZ_WORD_COUNT);
 			word_length = strlen(fuzz_words[pick]);
 			if (length + word_length + 3 >= capacity)
 				break;
 			memcpy(text + length, fuzz_words[pick], word_length);
 			length += word_length;
-			if (fuzz_next(4) != 0) {
+			/* Puts a space after the word three times out of four. */
+			space_pick = fuzz_next(4);
+			if (space_pick != 0) {
 				text[length] = ' ';
 				length++;
 			}
 		}
 
+		/* Ends the line, if there is room. */
 		if (length + 2 < capacity) {
 			text[length] = '\n';
 			length++;
 		}
 	}
 
+	/* Reports how many bytes the text has. */
 	return length;
 }
 
@@ -1822,6 +1864,7 @@ check_sshd_invariants(void)
 		CHECK(strlen(sshd.host_key[index]) < SSH_CONFIG_PATH_MAX);
 	}
 
+	/* The strings are inside their arrays. */
 	CHECK(strlen(sshd.listen_address) < sizeof(sshd.listen_address));
 	CHECK(strlen(sshd.authorized_keys_file) < SSH_CONFIG_PATH_MAX);
 	CHECK(strlen(sshd.sftp_command) < SSH_CONFIG_PATH_MAX);
@@ -1850,6 +1893,7 @@ check_client_invariants(void)
 		CHECK(strlen(client.identity[index]) < SSH_CONFIG_PATH_MAX);
 	}
 
+	/* The strings are inside their arrays. */
 	CHECK(strlen(client.user) <= SSH_USER_MAX);
 	CHECK(strlen(client.host_name) < sizeof(client.host_name));
 	CHECK(strlen(client.user_known_hosts) < SSH_CONFIG_PATH_MAX);
@@ -1867,6 +1911,7 @@ test_fuzz(void)
 {
 	static char text[4096];
 	char *copy;
+	size_t allocation;
 	unsigned long round;
 	size_t size;
 	int status;
@@ -1877,7 +1922,12 @@ test_fuzz(void)
 		sshd_config_defaults(&sshd);
 		memset(error, 'x', sizeof(error) - 1);
 		error[sizeof(error) - 1] = '\0';
-		copy = malloc(size != 0 ? size : 1);
+		allocation = size;
+		if (allocation == 0)
+			allocation = 1;
+
+		/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+		copy = malloc(allocation);
 		CHECK(copy != NULL);
 		memcpy(copy, text, size);
 		status = sshd_config_parse(&sshd, copy, size, error);
@@ -1888,6 +1938,10 @@ test_fuzz(void)
 			CHECK(strlen(error) < SSH_CONFIG_ERROR_MAX);
 		}
 
+		/*
+		 * The configuration must still hold only allowed values, and finishing it
+		 * must give at least one host key.
+		 */
 		check_sshd_invariants();
 		CHECK_EQ(sshd_config_finish(&sshd), 0);
 		CHECK(sshd.host_key_count >= 1);
@@ -1899,7 +1953,12 @@ test_fuzz(void)
 		ssh_config_init(&client);
 		memset(error, 'x', sizeof(error) - 1);
 		error[sizeof(error) - 1] = '\0';
-		copy = malloc(size != 0 ? size : 1);
+		allocation = size;
+		if (allocation == 0)
+			allocation = 1;
+
+		/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+		copy = malloc(allocation);
 		CHECK(copy != NULL);
 		memcpy(copy, text, size);
 		status = ssh_config_parse(&client, copy, size, fuzz_hosts[round % 3], error);
@@ -1910,6 +1969,7 @@ test_fuzz(void)
 			CHECK(strlen(error) < SSH_CONFIG_ERROR_MAX);
 		}
 
+		/* Applying the defaults must leave a usable client configuration. */
 		ssh_config_defaults(&client);
 		check_client_invariants();
 		CHECK(client.port >= 1);

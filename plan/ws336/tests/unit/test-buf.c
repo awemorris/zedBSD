@@ -1148,6 +1148,7 @@ test_reader_random(void)
 {
 	struct ssh_reader reader;
 	uint8_t *data;
+	size_t allocation;
 	size_t length;
 	size_t index;
 	uint32_t round;
@@ -1169,7 +1170,12 @@ test_reader_random(void)
 	for (round = 0; round < 100000; round++) {
 		/* Makes the input: short, often with small values so that string lengths are sometimes valid. */
 		length = next_random() % 48;
-		data = malloc(length == 0 ? 1 : length);
+		allocation = length;
+		if (allocation == 0)
+			allocation = 1;
+
+		/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+		data = malloc(allocation);
 		if (data == NULL) {
 			failures++;
 			continue;
