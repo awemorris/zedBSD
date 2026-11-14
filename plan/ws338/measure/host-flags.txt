@@ -1,0 +1,8 @@
+gcc-O2 high-1080-grain: speed-bench: frames 240 best_fps 22.53 median_fps 22.28 concealed 0 errors 0
+gcc-O2 sample-h264-high: speed-bench: frames 150 best_fps 16.01 median_fps 15.73 concealed 0 errors 0
+clang-O2 high-1080-grain: speed-bench: frames 240 best_fps 24.86 median_fps 24.24 concealed 0 errors 0
+clang-O2 sample-h264-high: speed-bench: frames 150 best_fps 18.27 median_fps 18.08 concealed 0 errors 0
+clang-O0 high-1080-grain: speed-bench: frames 240 best_fps 5.63 median_fps 5.48 concealed 0 errors 0
+clang-O0 sample-h264-high: speed-bench: frames 150 best_fps 4.40 median_fps 4.38 concealed 0 errors 0
+clang-Os high-1080-grain: speed-bench: frames 240 best_fps 19.61 median_fps 18.73 concealed 0 errors 0
+clang-Os sample-h264-high: speed-bench: frames 150 best_fps 14.42 median_fps 14.34 concealed 0 errors 0
