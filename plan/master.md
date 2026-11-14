@@ -24,15 +24,15 @@
 ### 動いている担当と Queue
 
 <!-- master:agents:start -->
-（2026-11-12 23:42。詳しくは [cockpit.md](cockpit.md)）
+（2026-11-14 21:3x。詳しくは [cockpit.md](cockpit.md)。Q1 は main の checkout `/home/awe/zedBSD-claude1` で動く）
 
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
-| P1 | q2022 | [WS333](ws333/ws.md) [p025](ws333/phase025/phase.md): p014（5330 の CPU の受け入れ）の食い違いを code と SDM で解析して直す。5330 は最後に 1 回 |
-| Gemini（agy） | — | [WS347](ws347/ws.md) 依頼 07（[gemini-request-07.md](ws347/gemini-request-07.md)、V1〜V9）の RTL の実装。V1 は amaterrace-gpu 77d6f219、V2 から続き。終われば Q1 か P3 が監査 |
-| P2〜P8 | — | 動いていない。P5・P6・P8 は 2026-11-02 のラップアップの引き継ぎが phase.md に残る（[WS345](ws345/ws.md) p010・p014、[WS336](ws336/ws.md) p024） |
+| P1 | q2088 | [WS353](ws353/ws.md) [p016](ws353/phase016/phase.md)（待ち方の作り直しの最後の試験）の再開: QEMU の未実施・無効・FAIL の流し直しと 5330 の idle・入力 |
+| agy | — | [WS347](ws347/ws.md) RTL の reset は 10 回目（amaterrace-gpu 38593b0e）まで。11 回目は Q1 が 10 回目を確かめてから |
+| P2〜P8 | — | 動いていない |
 
-- main は未 push（push はユーザーの指示で、`git log origin/main..main` で数える）。
+- host は 2026-11-14 19:30 頃に再起動。NVMe の書き込みは 1.0 GB/s に戻った（止めた時は 22 MB/s）。merge していない branch の diff は [backup-20261114/](backup-20261114/README.md)。
 <!-- master:agents:end -->
 
 ### Q1 が次に回す事
@@ -40,11 +40,11 @@
 <!-- master:next-actions:start -->
 上から順に、空いた担当へ。終われば次の Phase を Q1 が立てる。
 
-1. [WS347](ws347/ws.md) Amaterrace GPU: agy の依頼 07 の監査 → 次の依頼。driver を最新の ghci.md に追従し、KC705 の minimal の bitstream で VF2 から疎通（SFU を使わない範囲）。
-2. [WS333](ws333/ws.md) 電力・熱: p025 → 5330 で 1 回測る → p014 の判定 → p024（規約の見直しと文書）。i915 の qs40 と S0 idle は 5330 の image と遠隔の電源の都合で、測れる形を Q1 が決めて Phase にする。
-3. [WS335](ws335/ws.md) TLS ライブラリ: p036（`net/tls.c` を新しいライブラリに切り替える）を P2 に。
+1. [WS353](ws353/ws.md) 待ち方の作り直し: p016（P1、q2088）→ 規約の見直しの Phase → 完了の判定。
+2. [WS347](ws347/ws.md) Amaterrace GPU: agy の reset の 10 回目の確かめ（atg_dc_tmds の reset 以外の書き換え）→ 11 回目以降（rst-files.txt の残り）。atg_dc_regs の testbench の FAIL 3 件はユーザーの判断待ち。reset の後に上位の testbench を流し直して描画の 4 つの原因を解析、依頼 08 の X5〜X9。
+3. [WS333](ws333/ws.md) 電力・熱: p025 → 5330 で 1 回測る → p014 の判定 → p024（規約の見直しと文書）。
 4. ラップアップの残り: [WS345](ws345/ws.md) p010・p014、[WS336](ws336/ws.md) p024 を新しい起動で片付け、cleared を判定する。
-5. build system の作り直しの後始末（[BUG-418](bugs/BUG-418.md) 古い前提の道具・文書、[BUG-419](bugs/BUG-419.md) noct の JIT）。
+5. build system の作り直しの後始末（[BUG-418](bugs/BUG-418.md)、[BUG-419](bugs/BUG-419.md)、[BUG-435](bugs/BUG-435.md) の残り）。
 6. 下の優先順位の WS を、空いた担当へ。
 <!-- master:next-actions:end -->
 
@@ -98,7 +98,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-436 · q2088 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-436 · q2089 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
