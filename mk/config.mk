@@ -484,6 +484,18 @@ CONFIG_DRIVER_RPI5_FAN            ?= n
 CONFIG_DRIVER_DELL_SMM_BOOST      ?= n
 
 ################################################
+# Scheduling
+################################################
+
+# [Desktop Thread Balancer]
+#  - Description: Hint the scheduler which kind of core and which priority
+#    each user thread should have, from what threads do and from the input
+#    and GPU activity.  Core kinds come from the thermal core
+#    (CONFIG_KERN_THERMAL; on x86 also CONFIG_DRIVER_X86_POWER_CONTROL);
+#    without them only the priority hints work.
+CONFIG_KERN_DESKTOP_BALANCER      ?= n
+
+################################################
 # Camera and Capture
 ################################################
 

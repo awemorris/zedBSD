@@ -1260,6 +1260,13 @@ KERN_SOURCES += \
 endif
 endif
 
+# [Desktop Thread Balancer]
+ifneq ($(filter y,$(CONFIG_KERN_DESKTOP_BALANCER)),)
+KERN_CPPFLAGS += -DCONFIG_KERN_DESKTOP_BALANCER=1
+KERN_SOURCES += \
+	src/kern/desktop-balancer.c
+endif
+
 # [Smart Card driver] (/dev/smartcard)
 ifneq ($(filter y,$(CONFIG_DRIVER_SMARTCARD) $(CONFIG_DRIVER_USB_CCID)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_SMARTCARD=1
