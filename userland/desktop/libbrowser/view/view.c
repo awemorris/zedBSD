@@ -2866,7 +2866,6 @@ int
 view_settle_state(
 	struct browser_view *view,
 	double budget,
-	unsigned flags,
 	int *done,
 	int *wait)
 {
@@ -2881,8 +2880,6 @@ view_settle_state(
 	int navigation;
 	int waiting;
 	int found;
-
-	UNUSED_PARAMETER(flags);
 
 	/* Not yet, until news. */
 	*done = 0;
@@ -3324,21 +3321,16 @@ view_fill_snapshot(
 	return 0;
 }
 
-/* Tells which Vulkan call (or step) failed last in a drawing, and what it returned. */
+/*
+ * Tells which Vulkan call (or step) failed last in a drawing, and what it
+ * returned (in a view of its own threads, a drawing of the drawing
+ * thread's, which calls this).
+ */
 void
 browser_view_gpu_failure(
 	const struct browser_view *view,
 	struct browser_gpu_failure *failure)
 {
-	int windowed;
-
-	/* A view of its own threads made no Vulkan call for the program. */
-	windowed = view_front_window(view);
-	if (windowed) {
-		memset(failure, 0, sizeof(*failure));
-		return;
-	}
-
 	/* The one kept. */
 	*failure = view->failure;
 }

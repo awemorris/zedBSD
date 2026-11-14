@@ -155,7 +155,7 @@ struct net_loader *view_loader(const struct browser_view *view);
 int view_fill_snapshot(struct browser_view *view, struct view_snapshot *snapshot);
 int view_commit_scene(struct browser_view *view, struct paint_scene **scene, layout_unit *scroll_y);
 void view_frame_opportunity(struct browser_view *view);
-int view_settle_state(struct browser_view *view, double budget, unsigned flags, int *done, int *wait);
+int view_settle_state(struct browser_view *view, double budget, int *done, int *wait);
 int view_rendering_checkpoint(struct browser_view *view);
 
 #endif

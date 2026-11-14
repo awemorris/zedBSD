@@ -1768,13 +1768,13 @@ front_settled(
 
 	/* Where the page is. */
 	call = front->settling;
-	error = view_settle_state(front->view, call->budget, call->flags, &done, &wait);
+	error = view_settle_state(front->view, call->budget, &done, &wait);
 
 	/* At rest: the page as it is now is committed for the drawing, and looked at again when its layout asks for images. */
 	if (done && error == 0) {
 		(void)front_commit_now(front);
 		if ((call->flags & BROWSER_SETTLE_LAYOUT) != 0U)
-			error = view_settle_state(front->view, call->budget, call->flags, &done, &wait);
+			error = view_settle_state(front->view, call->budget, &done, &wait);
 	}
 
 	/* Not yet: the next look. */

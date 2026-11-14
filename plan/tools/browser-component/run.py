@@ -10,6 +10,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--threads', action='store_true', help="the client's views on their own threads")
 parser.add_argument('client')
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[3]
@@ -48,8 +49,8 @@ thread.start()
 environment = os.environ.copy()
 environment['VK_DRIVER_FILES'] = '/usr/share/vulkan/icd.d/lvp_icd.json'
 try:
-    result = subprocess.run([str(root / args.client),
-                             f'http://127.0.0.1:{server.server_port}'],
+    result = subprocess.run([str(root / args.client)] + (['--threads'] if args.threads else []) +
+                            [f'http://127.0.0.1:{server.server_port}'],
                             cwd=root, env=environment, timeout=60)
 finally:
     server.shutdown()
