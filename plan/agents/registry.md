@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner | ws353 p020 sessiond の chown (q2083-i01) | `/home/awe/zedBSD-worktrees/p1-ws353l` / `agent/p1-ws353l` | 動いている（2026-11-14） | — |
+| P1 | phase-runner | ws353 p020 sessiond の chown (q2083-i01) | `/home/awe/zedBSD-worktrees/p1-ws353l` / `agent/p1-ws353l` | 返却（2026-11-14、cleared） | b1c04993d4（merge 7dce275a17） |
 | P2 | phase-runner | ws347 p010 RTL の reset cp ほか (q2080-i01) | `/home/awe/amaterrace-worktrees/p2-reset` / `p2-reset` | 返却（2026-11-14、canceled・破棄） | — |
 | P4 | phase-runner | ws347 p010 RTL の reset su・vf・tu (q2081-i01) | `/home/awe/amaterrace-worktrees/p4-reset` / `p4-reset` | 返却（2026-11-14、canceled・破棄） | — |
 | P5 | phase-runner | ws347 p010 RTL の reset rx・rop (q2082-i01) | `/home/awe/amaterrace-worktrees/p5-reset` / `p5-reset` | 返却（2026-11-14、canceled・破棄） | — |
