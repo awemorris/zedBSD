@@ -42,7 +42,7 @@
 | Phase | 目的 | 型 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
 | ws329-p001 | 設計（Opus 5.5）: decoder との共通化の洗い出しと設計、encoder の module・header の案・試験の道・実装の Phase の表 | O | cleared（2026-11-14 Q1。設計と review の反映は済み、問いは 2026-11-14 に全部 A で決まった） | — |
-| [ws329-p002](phase002/phase.md) | 共通化の refactor（CAVLC の表・CABAC の context の選び・context の初期化・表 A-1、decoder の振る舞いは不変） | O | planned | WS326 completed（p026 を含む） |
+| [ws329-p002](phase002/phase.md) | 共通化の refactor（CAVLC の表・CABAC の context の選び・context の初期化・表 A-1、decoder の振る舞いは不変） | O | 実装済み・試験 PASS（2026-11-15 P5 q2092-i01、b753848bf2 ほか。cleared は Q1） | WS326 completed（p026 を含む） |
 | [ws329-p003](phase003/phase.md) | encoder の header と骨格を source に、run-unit・check-skeleton・試験の土台 fixture.h、BASE | O | planned | p002 |
 | [ws329-p004](phase004/phase.md) | vcodec-bitwriter、vcodec-nalwriter | S | planned | p003 |
 | [ws329-p005](phase005/phase.md) | vcodec-cabac-enc | S | planned | p004 |
@@ -70,6 +70,7 @@
 
 ## Resume point
 
+- 2026-11-15 P5（q2092-i01）: p002 を実装、試験 PASS（run-unit all 24 本・適合 101 in／103 out・run-stream・run-backend が前後で同じ、新しい test-cabac_ctx・test-levels、x86_64・arm64・riscv64 の libmedia の build warning 0）。前提の直し: 新しい `.c` は libmedia の sources.mk（make の file）の変更を要するので、共通の関数と表は既存の h264sw-cavlc・h264sw-cabac-se・h264sw-cabac・h264sw-ps に置いた（design §5.3）。cbp の表は `h264sw_cavlc_cbp_values`（既存の関数と名前がぶつかるため）。phase003〜026 の build の command を今の `CONFIGMK=config/config.<機種>.mk` の形に。仕様の PDF と適合の stream は main の build/ から消えていたので取り直した（design §1）。次: Q1 の cleared の判断、WS326 の check-skeleton の BASE を b753848bf2 に、proposed/shared/ の削除、p003（encoder の `.c` を足す sources.mk の差分の案が要る）。
 - 2026-11-15 Q1: WS318 は canceled（ユーザーの判断）。p024（libmedia の backend、WS318 の encoder の ops）と p025（WS318 p008 に依る）の依存は無くなった。libmedia に encoder の口が無いので、p024 の前に Q1 が「encoder の最小の公開の口を WS329 の中で決めるか、新しい WS を立てるか」を決め、p024・p025 の phase.md を直す（p002〜p023 は影響なし）。Q329-4（WS318 と並べる）・Q329-5（WS318 の `media_encoder_config` に速さの欄）は、その口を決める時に読み替える。
 
 - 2026-11-14 Q1: Q329-1〜5 は全部 A（11-01 の答えは取り消し）。p001 cleared。p002（共通化の refactor）から P5 q2092。header の基点と p003 の名前の写しは下の 10-31 の行。

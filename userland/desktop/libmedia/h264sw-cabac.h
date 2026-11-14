@@ -6,10 +6,10 @@
  */
 
 /*
- * The CABAC of one slice of the software H.264 decoder: its context
+ * The CABAC of one slice of the software H.264 codec: its context
  * variables, their initialization (9.3.1.1 with the values of m and n of
- * Tables 9-12 to 9-24) and the decoding of a bin with a context named by
- * its ctxIdx.  The arithmetic decoding engine itself (9.3.1.2, 9.3.3.2)
+ * Tables 9-12 to 9-24, shared by the decoder and the encoder) and the
+ * decoding of a bin with a context named by its ctxIdx.  The arithmetic decoding engine itself (9.3.1.2, 9.3.3.2)
  * is the codec-independent one of vcodec-cabac.h: the bypass and
  * terminate bins and the I_PCM samples are decoded with its functions on
  * the engine member.
@@ -53,15 +53,30 @@ struct h264sw_cabac {
 };
 
 /*
+ * Initializes the context variables of a slice (9.3.1.1).
+ *
+ * state receives H264SW_CABAC_CONTEXTS bytes: pStateIdx in bits 0..5 and
+ * valMPS in bit 6, the byte vcodec_cabac_decision takes.  slice_type is
+ * H264SW_SLICE_I, _P or _B; cabac_init_idc 0..2 (ignored for I); qp is
+ * SliceQPY (clipped to 0..51 by 9-5).  Each ctxIdx 0..459 except 276 that
+ * Table 9-11 lists for the slice type is initialized from (m, n) of
+ * h264sw_cabac_init_mn (h264sw-cabac-init.h) by 9-5
+ * (vcodec_cabac_context_init); the others are 0.  h264sw_cabac_start
+ * calls it, and an encoder calls it for the contexts it encodes with.
+ * Returns 0, or EINVAL (state 0 everywhere) for a slice type other than
+ * I, P and B or a cabac_init_idc above 2.
+ */
+int h264sw_cabac_contexts_init(uint8_t *state, unsigned slice_type, unsigned cabac_init_idc, int qp);
+
+/*
  * Starts CABAC for a slice: the context variables and then the engine (9.3.1).
  *
  * bits is at the start of slice_data(); the cabac_alignment_one_bit
  * bits up to the byte boundary are read and checked to be 1 (EINVAL
  * otherwise).  slice_type is H264SW_SLICE_I, _P or _B; cabac_init_idc
  * 0..2 (ignored for I); qp is SliceQPY.  Each ctxIdx 0..459 except 276
- * that Table 9-11 lists for the slice type is initialized from (m, n) of
- * h264sw_cabac_init_mn (h264sw-cabac-init.h) by 9-5
- * (vcodec_cabac_context_init); the others are set to pStateIdx 0 and
+ * that Table 9-11 lists for the slice type is initialized by
+ * h264sw_cabac_contexts_init; the others are set to pStateIdx 0 and
  * valMPS 0 and are never read.  Then the engine starts on the bytes from
  * the boundary to the end of the RBSP (vcodec_cabac_start): codIRange is
  * 510 and codIOffset the next 9 bits (9.3.1.2); codIOffset 510 or 511

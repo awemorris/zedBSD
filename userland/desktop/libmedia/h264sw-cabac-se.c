@@ -6,7 +6,8 @@
  */
 
 /*
- * The CABAC syntax elements of the software H.264 decoder (9.3.2, 9.3.3.1).
+ * The CABAC syntax elements of the software H.264 decoder (9.3.2, 9.3.3.1)
+ * and the context selection it shares with the encoder.
  */
 
 #include "h264sw-cabac-se.h"
@@ -150,36 +151,16 @@ unsigned
 h264sw_cabac_mb_skip(
 	struct h264sw_slice_ctx *ctx)
 {
-	unsigned offset;
-	unsigned inc;
 	unsigned bin;
 
-	/* Chooses the context range of the slice type. */
-	if (ctx->header->slice_type == H264SW_SLICE_P) {
-		offset = SE_OFFSET_SKIP_P;
-	} else if (ctx->header->slice_type == H264SW_SLICE_B) {
-		offset = SE_OFFSET_SKIP_B;
-	} else {
-		/* Any other slice type has no skipped macroblocks, so the caller made a mistake. */
+	/* Any slice type other than P and B has no skipped macroblocks, so the caller made a mistake. */
+	if (ctx->header->slice_type != H264SW_SLICE_P && ctx->header->slice_type != H264SW_SLICE_B) {
 		ctx->cabac.engine.error = 1;
 		return 0;
 	}
 
-	/* Adds one for each neighbour that is available and not skipped (9-7). */
-	inc = 0;
-	if (ctx->n.a != NULL) {
-		if (ctx->n.a->kind != H264SW_MB_P_SKIP && ctx->n.a->kind != H264SW_MB_B_SKIP)
-			inc++;
-	}
-
-	/* The upper neighbour counts the same way. */
-	if (ctx->n.b != NULL) {
-		if (ctx->n.b->kind != H264SW_MB_P_SKIP && ctx->n.b->kind != H264SW_MB_B_SKIP)
-			inc++;
-	}
-
-	/* Decodes the flag, one bin of FL with cMax 1. */
-	bin = h264sw_cabac_decision(&ctx->cabac, offset + inc);
+	/* Decodes the flag, one bin of FL with cMax 1, with the context the neighbours select. */
+	bin = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_mb_skip(ctx));
 
 	/* Reports the flag. */
 	return bin;
@@ -211,11 +192,7 @@ h264sw_cabac_mb_type(
 	switch (slice_type) {
 	case H264SW_SLICE_I:
 		/* An I slice: Table 9-36 with ctxIdxOffset 3, whose first bin depends on the neighbours (9-9). */
-		inc = 0;
-		if (ctx->n.a != NULL)
-			inc += se_mb_type_i_cond(ctx->n.a);
-		if (ctx->n.b != NULL)
-			inc += se_mb_type_i_cond(ctx->n.b);
+		inc = h264sw_ctx_mb_type_inc(ctx, H264SW_SLICE_I);
 
 		/* The ctxIdx of each bin of Table 9-36: bin 0 by the neighbours, bin 1 is the terminate bin, the others by Tables 9-39 and 9-41. */
 		contexts.first = SE_OFFSET_MB_TYPE_I + inc;
@@ -357,24 +334,10 @@ unsigned
 h264sw_cabac_transform_8x8(
 	struct h264sw_slice_ctx *ctx)
 {
-	unsigned inc;
 	unsigned bin;
 
-	/* Adds one for each neighbour that is available and uses the 8x8 transform (9-20). */
-	inc = 0;
-	if (ctx->n.a != NULL) {
-		if (ctx->n.a->transform_8x8 != 0U)
-			inc++;
-	}
-
-	/* The upper neighbour counts the same way. */
-	if (ctx->n.b != NULL) {
-		if (ctx->n.b->transform_8x8 != 0U)
-			inc++;
-	}
-
-	/* Decodes the flag, one bin of FL with cMax 1. */
-	bin = h264sw_cabac_decision(&ctx->cabac, SE_OFFSET_TRANSFORM_8X8 + inc);
+	/* Decodes the flag, one bin of FL with cMax 1, with the context the neighbours select. */
+	bin = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_transform_8x8(ctx));
 
 	/* Reports the flag. */
 	return bin;
@@ -418,28 +381,10 @@ unsigned
 h264sw_cabac_chroma_mode(
 	struct h264sw_slice_ctx *ctx)
 {
-	unsigned inc;
 	unsigned bin;
 
-	/* Adds one for each neighbour that is available, coded in an Intra mode, not I_PCM, and has a chroma mode other than 0 (9-18). */
-	inc = 0;
-	if (ctx->n.a != NULL) {
-		if (ctx->n.a->kind < H264SW_MB_P_SKIP &&
-		    ctx->n.a->kind != H264SW_MB_I_PCM &&
-		    ctx->n.a->chroma_pred_mode != 0U)
-			inc++;
-	}
-
-	/* The upper neighbour counts the same way. */
-	if (ctx->n.b != NULL) {
-		if (ctx->n.b->kind < H264SW_MB_P_SKIP &&
-		    ctx->n.b->kind != H264SW_MB_I_PCM &&
-		    ctx->n.b->chroma_pred_mode != 0U)
-			inc++;
-	}
-
 	/* Bin 0 with the neighbours' context: 0 is the value 0. */
-	bin = h264sw_cabac_decision(&ctx->cabac, SE_OFFSET_CHROMA_MODE + inc);
+	bin = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_chroma_mode(ctx));
 	if (bin == 0U)
 		return 0;
 
@@ -472,9 +417,7 @@ h264sw_cabac_ref_idx(
 	unsigned y,
 	unsigned *ref_idx)
 {
-	unsigned blk;
 	unsigned active;
-	unsigned inc;
 	unsigned bin;
 	unsigned count;
 	unsigned bin_ctx;
@@ -493,16 +436,9 @@ h264sw_cabac_ref_idx(
 	if (active == 0U)
 		return EINVAL;
 
-	/* Finds the 4x4 block at the partition's upper-left corner, whose neighbours are the partition's. */
-	blk = h264sw_blk4x4_at(x, y);
-
-	/* Forms the first bin's ctxIdxInc from the left and upper partitions (9-14). */
-	inc = se_ref_idx_cond(ctx, list, blk, 0);
-	inc += 2U * se_ref_idx_cond(ctx, list, blk, 1);
-
-	/* Decodes the unary bins: ctxIdx 54 + inc for bin 0, 58 for bin 1 and 59 for the rest; each 1 is one more, and the first 0 ends the value. */
+	/* Decodes the unary bins: ctxIdx 54 + the neighbours' increment for bin 0, 58 for bin 1 and 59 for the rest; each 1 is one more, and the first 0 ends the value. */
 	count = 0;
-	bin_ctx = SE_OFFSET_REF_IDX + inc;
+	bin_ctx = h264sw_ctx_ref_idx(ctx, list, x, y);
 	bin = h264sw_cabac_decision(&ctx->cabac, bin_ctx);
 	while (bin != 0U) {
 		count++;
@@ -539,10 +475,7 @@ h264sw_cabac_mvd(
 	unsigned component,
 	int *mvd)
 {
-	unsigned blk;
 	unsigned offset;
-	unsigned sum;
-	unsigned inc;
 	unsigned bin;
 	unsigned count;
 	unsigned bin_inc;
@@ -564,24 +497,8 @@ h264sw_cabac_mvd(
 	if (component == 1U)
 		offset = SE_OFFSET_MVD_Y;
 
-	/* Finds the 4x4 block at the partition's upper-left corner, whose neighbours are the partition's. */
-	blk = h264sw_blk4x4_at(x, y);
-
-	/* Sums the neighbours' absolute mvd components (absMvdCompA + absMvdCompB), each at most 255. */
-	sum = se_mvd_abs(ctx, list, blk, 0, component);
-	sum += se_mvd_abs(ctx, list, blk, 1, component);
-
-	/* Forms the first bin's ctxIdxInc: a sum above 32 is 2, above 2 is 1, else 0. */
-	if (sum > 32U) {
-		inc = 2;
-	} else if (sum > 2U) {
-		inc = 1;
-	} else {
-		inc = 0;
-	}
-
-	/* Decodes bin 0 of the prefix: 0 is the value 0. */
-	bin = h264sw_cabac_decision(&ctx->cabac, offset + inc);
+	/* Decodes bin 0 of the prefix with the context the neighbours' mvd select: 0 is the value 0. */
+	bin = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_mvd(ctx, list, x, y, component));
 	if (bin == 0U)
 		return 0;
 
@@ -634,64 +551,25 @@ unsigned
 h264sw_cabac_cbp(
 	struct h264sw_slice_ctx *ctx)
 {
-	const struct h264sw_mb *mb_n;
 	unsigned luma;
 	unsigned chroma;
 	unsigned blk;
-	unsigned blk_n;
-	unsigned side;
-	unsigned cond[2];
-	unsigned inc;
 	unsigned bin;
 
-	/* Decodes the four luma bins, bin k being bit k of CodedBlockPatternLuma. */
+	/* Decodes the four luma bins, bin k being bit k of CodedBlockPatternLuma, each with the context of the left and upper 8x8 blocks (9-10). */
 	luma = 0;
 	for (blk = 0; blk < 4U; blk++) {
-		/* Finds condTermFlagA (side 0) and condTermFlagB (side 1) from the left and upper 8x8 blocks (9.3.3.1.1.4). */
-		for (side = 0; side < 2U; side++) {
-			mb_n = h264sw_mb_neighbour_8x8(&ctx->n, blk, (int)side, &blk_n);
-
-			/* A block of the current macroblock counts by the bin decoded for it; of another macroblock by its pattern, where I_PCM and a coded block do not count and a skipped macroblock does. */
-			if (mb_n == NULL) {
-				cond[side] = 0;
-			} else if (mb_n == ctx->n.current) {
-				cond[side] = 1;
-				if (((luma >> blk_n) & 1U) != 0U)
-					cond[side] = 0;
-			} else if (mb_n->kind == H264SW_MB_I_PCM) {
-				cond[side] = 0;
-			} else if (mb_n->kind == H264SW_MB_P_SKIP || mb_n->kind == H264SW_MB_B_SKIP) {
-				cond[side] = 1;
-			} else if ((((unsigned)mb_n->cbp >> blk_n) & 1U) != 0U) {
-				cond[side] = 0;
-			} else {
-				cond[side] = 1;
-			}
-		}
-
-		/* Decodes the bin with ctxIdx 73 + condTermFlagA + 2 * condTermFlagB (9-10). */
-		inc = cond[0] + 2U * cond[1];
-		bin = h264sw_cabac_decision(&ctx->cabac, SE_OFFSET_CBP_LUMA + inc);
+		bin = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_cbp_luma(ctx, blk, luma));
 		luma |= bin << blk;
 	}
 
 	/* Decodes bin 0 of the chroma suffix, whose contexts come from the neighbouring macroblocks (9-11): 0 is CodedBlockPatternChroma 0. */
-	inc = 0;
-	if (ctx->n.a != NULL)
-		inc += se_cbp_chroma_cond(ctx->n.a, 0);
-	if (ctx->n.b != NULL)
-		inc += 2U * se_cbp_chroma_cond(ctx->n.b, 0);
-	bin = h264sw_cabac_decision(&ctx->cabac, SE_OFFSET_CBP_CHROMA + inc);
+	bin = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_cbp_chroma(ctx, 0U));
 	if (bin == 0U)
 		return luma;
 
-	/* Decodes bin 1, with 4 added to the increment: 0 is 1 and 1 is 2 (TU with cMax 2). */
-	inc = 4;
-	if (ctx->n.a != NULL)
-		inc += se_cbp_chroma_cond(ctx->n.a, 1);
-	if (ctx->n.b != NULL)
-		inc += 2U * se_cbp_chroma_cond(ctx->n.b, 1);
-	bin = h264sw_cabac_decision(&ctx->cabac, SE_OFFSET_CBP_CHROMA + inc);
+	/* Decodes bin 1: 0 is 1 and 1 is 2 (TU with cMax 2). */
+	bin = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_cbp_chroma(ctx, 1U));
 	chroma = 1U + bin;
 
 	/* Succeeded: the luma bits and the chroma value in bits 4 and 5. */
@@ -709,8 +587,6 @@ h264sw_cabac_qp_delta(
 	struct h264sw_slice_ctx *ctx,
 	int *qp_delta)
 {
-	const struct h264sw_mb *prev;
-	unsigned inc;
 	unsigned bin;
 	unsigned bin_ctx;
 	unsigned mapped;
@@ -718,27 +594,9 @@ h264sw_cabac_qp_delta(
 	/* Clears the answer so that a refusal leaves a defined value. */
 	*qp_delta = 0;
 
-	/* Forms the first bin's ctxIdxInc from the macroblock before this one in decoding order (9.3.3.1.1.5); a first macroblock of the slice has none. */
-	inc = 0;
-	if (ctx->prev_mb_addr >= 0 && (uint32_t)ctx->prev_mb_addr < ctx->picture->size_mbs) {
-		prev = &ctx->picture->mbs[ctx->prev_mb_addr];
-
-		/* It counts only when that macroblock had an mb_qp_delta other than 0: not a skipped one, not I_PCM, and not one without residual that is not Intra_16x16. */
-		inc = 1;
-		if (prev->kind == H264SW_MB_P_SKIP || prev->kind == H264SW_MB_B_SKIP) {
-			inc = 0;
-		} else if (prev->kind == H264SW_MB_I_PCM) {
-			inc = 0;
-		} else if (prev->kind != H264SW_MB_I_16X16 && prev->cbp == 0U) {
-			inc = 0;
-		} else if (ctx->prev_qp_delta_nonzero == 0) {
-			inc = 0;
-		}
-	}
-
-	/* Decodes the unary bins of the mapped value: ctxIdx 60 + inc for bin 0, 62 for bin 1 and 63 for the rest; the first 0 ends the value. */
+	/* Decodes the unary bins of the mapped value: ctxIdx 60 + the previous macroblock's increment for bin 0, 62 for bin 1 and 63 for the rest; the first 0 ends the value. */
 	mapped = 0;
-	bin_ctx = SE_OFFSET_QP_DELTA + inc;
+	bin_ctx = h264sw_ctx_qp_delta(ctx);
 	bin = h264sw_cabac_decision(&ctx->cabac, bin_ctx);
 	while (bin != 0U) {
 		mapped++;
@@ -814,9 +672,6 @@ h264sw_cabac_residual_block(
 	unsigned index;
 	unsigned position;
 	unsigned num_coeff;
-	unsigned inc;
-	unsigned sig_offset;
-	unsigned last_offset;
 	unsigned flag;
 	unsigned last_seen;
 	unsigned eq1;
@@ -837,24 +692,13 @@ h264sw_cabac_residual_block(
 
 	/* Reads coded_block_flag unless the block is an 8x8 luma block, whose flag is inferred to be 1 (7.4.5.3.3). */
 	flag = 1;
-	if (cat != H264SW_CAT_LUMA_8X8) {
-		inc = se_coded_block_flag_inc(ctx, cat, blk, component);
-		flag = h264sw_cabac_decision(&ctx->cabac, SE_OFFSET_CODED_BLOCK_FLAG + se_cat_offset_coded_block_flag[cat] + inc);
-	}
+	if (cat != H264SW_CAT_LUMA_8X8)
+		flag = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_coded_block_flag(ctx, cat, blk, component));
 
 	/* A block with no coefficient has all levels 0. */
 	if (flag == 0U)
 		return 0;
 	*coded = 1;
-
-	/* Takes the contexts of the significance map, which are by ctxBlockCat. */
-	if (cat == H264SW_CAT_LUMA_8X8) {
-		sig_offset = SE_OFFSET_SIGNIFICANT_8X8;
-		last_offset = SE_OFFSET_LAST_8X8;
-	} else {
-		sig_offset = SE_OFFSET_SIGNIFICANT + se_cat_offset_significant[cat];
-		last_offset = SE_OFFSET_LAST + se_cat_offset_significant[cat];
-	}
 
 	/* Reads the significance map: for each position before the last one a significant_coeff_flag and, for a significant one, a last_significant_coeff_flag that ends the map. */
 	count = 0;
@@ -862,8 +706,7 @@ h264sw_cabac_residual_block(
 	num_coeff = end + 1U;
 	index = start;
 	while (index + 1U < num_coeff) {
-		inc = se_significance_inc(cat, index, 0);
-		flag = h264sw_cabac_decision(&ctx->cabac, sig_offset + inc);
+		flag = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_significance(cat, index, 0));
 
 		/* A significant position is noted, and its last flag says whether it is the final one. */
 		if (flag != 0U) {
@@ -871,8 +714,7 @@ h264sw_cabac_residual_block(
 			count++;
 
 			/* The last flag of the significant position says whether the map ends here. */
-			inc = se_significance_inc(cat, index, 1);
-			flag = h264sw_cabac_decision(&ctx->cabac, last_offset + inc);
+			flag = h264sw_cabac_decision(&ctx->cabac, h264sw_ctx_significance(cat, index, 1));
 			if (flag != 0U) {
 				last_seen = 1;
 				num_coeff = index + 1U;
@@ -924,6 +766,389 @@ h264sw_cabac_residual_block(
 
 	/* Succeeded: the block's levels in scan order. */
 	return 0;
+}
+
+/*
+ * Gives ctxIdx of mb_skip_flag (ctxIdxOffset 11 for P, 24 for B; ctxIdxInc 9.3.3.1.1.1).
+ *
+ * condTermFlagN is 0 when mbAddrN is not available or is skipped (9-7).
+ */
+unsigned
+h264sw_ctx_mb_skip(
+	const struct h264sw_slice_ctx *ctx)
+{
+	unsigned offset;
+	unsigned inc;
+
+	/* Chooses the context range of the slice type; a P slice's for any slice that is not B. */
+	offset = SE_OFFSET_SKIP_P;
+	if (ctx->header->slice_type == H264SW_SLICE_B)
+		offset = SE_OFFSET_SKIP_B;
+
+	/* Adds one for each neighbour that is available and not skipped (9-7). */
+	inc = 0;
+	if (ctx->n.a != NULL) {
+		if (ctx->n.a->kind != H264SW_MB_P_SKIP && ctx->n.a->kind != H264SW_MB_B_SKIP)
+			inc++;
+	}
+
+	/* The upper neighbour counts the same way. */
+	if (ctx->n.b != NULL) {
+		if (ctx->n.b->kind != H264SW_MB_P_SKIP && ctx->n.b->kind != H264SW_MB_B_SKIP)
+			inc++;
+	}
+
+	/* Succeeded: the context of the flag. */
+	return offset + inc;
+}
+
+/*
+ * Gives ctxIdxInc of the first bin of mb_type (9.3.3.1.1.3) in an I or a B slice.
+ *
+ * A neighbour that is not available counts 0; the others count by
+ * se_mb_type_i_cond or se_mb_type_b_cond.  0 for any other slice type.
+ */
+unsigned
+h264sw_ctx_mb_type_inc(
+	const struct h264sw_slice_ctx *ctx,
+	unsigned slice_type)
+{
+	unsigned inc;
+
+	/* Sums condTermFlagA and condTermFlagB by the rule of the slice type (9-9). */
+	inc = 0;
+	if (slice_type == H264SW_SLICE_I) {
+		if (ctx->n.a != NULL)
+			inc += se_mb_type_i_cond(ctx->n.a);
+		if (ctx->n.b != NULL)
+			inc += se_mb_type_i_cond(ctx->n.b);
+	} else if (slice_type == H264SW_SLICE_B) {
+		if (ctx->n.a != NULL)
+			inc += se_mb_type_b_cond(ctx->n.a);
+		if (ctx->n.b != NULL)
+			inc += se_mb_type_b_cond(ctx->n.b);
+	}
+
+	/* Succeeded: the increment of the first bin. */
+	return inc;
+}
+
+/* Gives ctxIdx of transform_size_8x8_flag (399 + the neighbours' flags, 9.3.3.1.1.10). */
+unsigned
+h264sw_ctx_transform_8x8(
+	const struct h264sw_slice_ctx *ctx)
+{
+	unsigned inc;
+
+	/* Adds one for each neighbour that is available and uses the 8x8 transform (9-20). */
+	inc = 0;
+	if (ctx->n.a != NULL) {
+		if (ctx->n.a->transform_8x8 != 0U)
+			inc++;
+	}
+
+	/* The upper neighbour counts the same way. */
+	if (ctx->n.b != NULL) {
+		if (ctx->n.b->transform_8x8 != 0U)
+			inc++;
+	}
+
+	/* Succeeded: the context of the flag. */
+	return SE_OFFSET_TRANSFORM_8X8 + inc;
+}
+
+/* Gives ctxIdx of bin 0 of intra_chroma_pred_mode (64 + 9.3.3.1.1.8). */
+unsigned
+h264sw_ctx_chroma_mode(
+	const struct h264sw_slice_ctx *ctx)
+{
+	unsigned inc;
+
+	/* Adds one for each neighbour that is available, coded in an Intra mode, not I_PCM, and has a chroma mode other than 0 (9-18). */
+	inc = 0;
+	if (ctx->n.a != NULL) {
+		if (ctx->n.a->kind < H264SW_MB_P_SKIP &&
+		    ctx->n.a->kind != H264SW_MB_I_PCM &&
+		    ctx->n.a->chroma_pred_mode != 0U)
+			inc++;
+	}
+
+	/* The upper neighbour counts the same way. */
+	if (ctx->n.b != NULL) {
+		if (ctx->n.b->kind < H264SW_MB_P_SKIP &&
+		    ctx->n.b->kind != H264SW_MB_I_PCM &&
+		    ctx->n.b->chroma_pred_mode != 0U)
+			inc++;
+	}
+
+	/* Succeeded: the context of bin 0. */
+	return SE_OFFSET_CHROMA_MODE + inc;
+}
+
+/*
+ * Gives ctxIdx of bin 0 of ref_idx_lX for the partition at (x, y) (54 + 9.3.3.1.1.6).
+ *
+ * The neighbours A and B are the partitions holding ( x - 1, y ) and
+ * ( x, y - 1 ), found through the 4x4 block at the partition's corner.
+ */
+unsigned
+h264sw_ctx_ref_idx(
+	const struct h264sw_slice_ctx *ctx,
+	unsigned list,
+	unsigned x,
+	unsigned y)
+{
+	unsigned blk;
+	unsigned inc;
+
+	/* Finds the 4x4 block at the partition's upper-left corner, whose neighbours are the partition's. */
+	blk = h264sw_blk4x4_at(x, y);
+
+	/* Forms the first bin's ctxIdxInc from the left and upper partitions (9-14). */
+	inc = se_ref_idx_cond(ctx, list, blk, 0);
+	inc += 2U * se_ref_idx_cond(ctx, list, blk, 1);
+
+	/* Succeeded: the context of bin 0. */
+	return SE_OFFSET_REF_IDX + inc;
+}
+
+/*
+ * Gives ctxIdx of bin 0 of the prefix of an mvd_lX component for the (sub-)partition at (x, y) (9.3.3.1.1.7).
+ *
+ * The sum absMvdCompA + absMvdCompB above 32 gives ctxIdxInc 2, above 2
+ * gives 1, else 0.
+ */
+unsigned
+h264sw_ctx_mvd(
+	const struct h264sw_slice_ctx *ctx,
+	unsigned list,
+	unsigned x,
+	unsigned y,
+	unsigned comp)
+{
+	unsigned blk;
+	unsigned offset;
+	unsigned sum;
+	unsigned inc;
+
+	/* The horizontal component has ctxIdxOffset 40, the vertical one 47. */
+	offset = SE_OFFSET_MVD_X;
+	if (comp == 1U)
+		offset = SE_OFFSET_MVD_Y;
+
+	/* Finds the 4x4 block at the partition's upper-left corner, whose neighbours are the partition's. */
+	blk = h264sw_blk4x4_at(x, y);
+
+	/* Sums the neighbours' absolute mvd components (absMvdCompA + absMvdCompB), each at most 255. */
+	sum = se_mvd_abs(ctx, list, blk, 0, comp);
+	sum += se_mvd_abs(ctx, list, blk, 1, comp);
+
+	/* Forms the first bin's ctxIdxInc: a sum above 32 is 2, above 2 is 1, else 0. */
+	if (sum > 32U) {
+		inc = 2;
+	} else if (sum > 2U) {
+		inc = 1;
+	} else {
+		inc = 0;
+	}
+
+	/* Succeeded: the context of bin 0. */
+	return offset + inc;
+}
+
+/*
+ * Gives ctxIdx of prefix bin b8 of coded_block_pattern (73 + 9.3.3.1.1.4).
+ *
+ * luma_bits holds the bins of the current macroblock already coded (bit b
+ * for the 8x8 block b); the other macroblocks count by their pattern.
+ */
+unsigned
+h264sw_ctx_cbp_luma(
+	const struct h264sw_slice_ctx *ctx,
+	unsigned b8,
+	unsigned luma_bits)
+{
+	const struct h264sw_mb *mb_n;
+	unsigned blk_n;
+	unsigned side;
+	unsigned cond[2];
+
+	/* Finds condTermFlagA (side 0) and condTermFlagB (side 1) from the left and upper 8x8 blocks (9.3.3.1.1.4). */
+	for (side = 0; side < 2U; side++) {
+		mb_n = h264sw_mb_neighbour_8x8(&ctx->n, b8, (int)side, &blk_n);
+
+		/* A block of the current macroblock counts by the bin coded for it; of another macroblock by its pattern, where I_PCM and a coded block do not count and a skipped macroblock does. */
+		if (mb_n == NULL) {
+			cond[side] = 0;
+		} else if (mb_n == ctx->n.current) {
+			cond[side] = 1;
+			if (((luma_bits >> blk_n) & 1U) != 0U)
+				cond[side] = 0;
+		} else if (mb_n->kind == H264SW_MB_I_PCM) {
+			cond[side] = 0;
+		} else if (mb_n->kind == H264SW_MB_P_SKIP || mb_n->kind == H264SW_MB_B_SKIP) {
+			cond[side] = 1;
+		} else if ((((unsigned)mb_n->cbp >> blk_n) & 1U) != 0U) {
+			cond[side] = 0;
+		} else {
+			cond[side] = 1;
+		}
+	}
+
+	/* Succeeded: ctxIdx 73 + condTermFlagA + 2 * condTermFlagB (9-10). */
+	return SE_OFFSET_CBP_LUMA + cond[0] + 2U * cond[1];
+}
+
+/* Gives ctxIdx of suffix bin bin_idx (0 or 1) of coded_block_pattern (77 + 9.3.3.1.1.4, bin 1 with 4 added). */
+unsigned
+h264sw_ctx_cbp_chroma(
+	const struct h264sw_slice_ctx *ctx,
+	unsigned bin_idx)
+{
+	unsigned inc;
+
+	/* Bin 1 has 4 added to its increment (9-11). */
+	inc = 0;
+	if (bin_idx != 0U)
+		inc = 4;
+
+	/* Adds condTermFlagA and 2 * condTermFlagB from the neighbouring macroblocks. */
+	if (ctx->n.a != NULL)
+		inc += se_cbp_chroma_cond(ctx->n.a, bin_idx);
+	if (ctx->n.b != NULL)
+		inc += 2U * se_cbp_chroma_cond(ctx->n.b, bin_idx);
+
+	/* Succeeded: the context of the bin. */
+	return SE_OFFSET_CBP_CHROMA + inc;
+}
+
+/*
+ * Gives ctxIdx of bin 0 of mb_qp_delta (60 + 9.3.3.1.1.5).
+ *
+ * The increment comes from the macroblock before the current one in
+ * decoding order, ctx->prev_mb_addr (none for the first macroblock of a
+ * slice), and ctx->prev_qp_delta_nonzero.
+ */
+unsigned
+h264sw_ctx_qp_delta(
+	const struct h264sw_slice_ctx *ctx)
+{
+	const struct h264sw_mb *prev;
+	unsigned inc;
+
+	/* Forms the first bin's ctxIdxInc from the macroblock before this one in decoding order (9.3.3.1.1.5); a first macroblock of the slice has none. */
+	inc = 0;
+	if (ctx->prev_mb_addr >= 0 && (uint32_t)ctx->prev_mb_addr < ctx->picture->size_mbs) {
+		prev = &ctx->picture->mbs[ctx->prev_mb_addr];
+
+		/* It counts only when that macroblock had an mb_qp_delta other than 0: not a skipped one, not I_PCM, and not one without residual that is not Intra_16x16. */
+		inc = 1;
+		if (prev->kind == H264SW_MB_P_SKIP || prev->kind == H264SW_MB_B_SKIP) {
+			inc = 0;
+		} else if (prev->kind == H264SW_MB_I_PCM) {
+			inc = 0;
+		} else if (prev->kind != H264SW_MB_I_16X16 && prev->cbp == 0U) {
+			inc = 0;
+		} else if (ctx->prev_qp_delta_nonzero == 0) {
+			inc = 0;
+		}
+	}
+
+	/* Succeeded: the context of bin 0. */
+	return SE_OFFSET_QP_DELTA + inc;
+}
+
+/* Gives ctxIdx of coded_block_flag of a block of category cat 0..4 (85 + Table 9-40 + 9.3.3.1.1.9). */
+unsigned
+h264sw_ctx_coded_block_flag(
+	const struct h264sw_slice_ctx *ctx,
+	unsigned cat,
+	unsigned blk,
+	unsigned component)
+{
+	unsigned inc;
+
+	/* Forms ctxIdxInc from the neighbouring blocks' flags. */
+	inc = se_coded_block_flag_inc(ctx, cat, blk, component);
+
+	/* Succeeded: the offset of the element, of the category and the increment. */
+	return SE_OFFSET_CODED_BLOCK_FLAG + se_cat_offset_coded_block_flag[cat] + inc;
+}
+
+/*
+ * Gives ctxIdx of significant_coeff_flag (last 0) or last_significant_coeff_flag (last 1) at scan position idx of a block of category cat, frame coded.
+ *
+ * idx is at most 62 for cat 5 and below the category's maxNumCoeff - 1
+ * for the others.
+ */
+unsigned
+h264sw_ctx_significance(
+	unsigned cat,
+	unsigned idx,
+	int last)
+{
+	unsigned offset;
+
+	/* Takes the first context of the map, which is by ctxBlockCat and by the flag (Tables 9-34 and 9-40). */
+	if (cat == H264SW_CAT_LUMA_8X8) {
+		offset = SE_OFFSET_SIGNIFICANT_8X8;
+		if (last)
+			offset = SE_OFFSET_LAST_8X8;
+	} else {
+		offset = SE_OFFSET_SIGNIFICANT + se_cat_offset_significant[cat];
+		if (last)
+			offset = SE_OFFSET_LAST + se_cat_offset_significant[cat];
+	}
+
+	/* Succeeded: the offset and the increment of the position. */
+	return offset + se_significance_inc(cat, idx, last);
+}
+
+/*
+ * Gives ctxIdx of bin bin_idx of the prefix of coeff_abs_level_minus1 of a block of category cat (9.3.3.1.3).
+ *
+ * eq1 and gt1 are numDecodAbsLevelEq1 and numDecodAbsLevelGt1 of the
+ * levels of the block already coded, in reverse scan order.
+ */
+unsigned
+h264sw_ctx_abs_level(
+	unsigned cat,
+	unsigned bin_idx,
+	unsigned eq1,
+	unsigned gt1)
+{
+	unsigned offset;
+	unsigned inc;
+	unsigned limit;
+
+	/* Takes the first context of the category's coeff_abs_level_minus1. */
+	if (cat == H264SW_CAT_LUMA_8X8) {
+		offset = SE_OFFSET_ABS_LEVEL_8X8;
+	} else {
+		offset = SE_OFFSET_ABS_LEVEL + se_cat_offset_abs_level[cat];
+	}
+
+	/* Forms ctxIdxInc of bin 0 (9-23): 0 once a level above 1 was coded, else 1 + the number of levels equal to 1, at most 4. */
+	if (bin_idx == 0U) {
+		inc = 0;
+		if (gt1 == 0U) {
+			inc = 1U + eq1;
+			if (inc > 4U)
+				inc = 4;
+		}
+		return offset + inc;
+	}
+
+	/* Forms ctxIdxInc of the later bins (9-24): 5 + the number of levels above 1, at most 4, or at most 3 for the chroma DC. */
+	limit = 4;
+	if (cat == H264SW_CAT_CHROMA_DC)
+		limit = 3;
+	inc = gt1;
+	if (inc > limit)
+		inc = limit;
+
+	/* Succeeded: the context of a later bin. */
+	return offset + 5U + inc;
 }
 
 /* Gives condTermFlagN of mb_type in an I slice for an available neighbour: 0 when it is I_NxN (9.3.3.1.1.3). */
@@ -1211,11 +1436,7 @@ se_mb_type_b(
 	int error;
 
 	/* Forms the first bin's ctxIdxInc from the neighbours (9-9). */
-	inc = 0;
-	if (ctx->n.a != NULL)
-		inc += se_mb_type_b_cond(ctx->n.a);
-	if (ctx->n.b != NULL)
-		inc += se_mb_type_b_cond(ctx->n.b);
+	inc = h264sw_ctx_mb_type_inc(ctx, H264SW_SLICE_B);
 
 	/* Bin 0: 0 is B_Direct_16x16. */
 	bin_0 = h264sw_cabac_decision(&ctx->cabac, SE_OFFSET_MB_TYPE_B_PREFIX + inc);
@@ -1496,41 +1717,19 @@ se_abs_level(
 	unsigned gt1,
 	uint32_t *abs_level)
 {
-	unsigned offset;
-	unsigned first_inc;
-	unsigned later_inc;
-	unsigned limit;
+	unsigned first_ctx;
+	unsigned later_ctx;
 	unsigned bin;
 	unsigned ones;
 	uint32_t suffix;
 	int error;
 
-	/* Takes the first context of the category's coeff_abs_level_minus1. */
-	if (cat == H264SW_CAT_LUMA_8X8) {
-		offset = SE_OFFSET_ABS_LEVEL_8X8;
-	} else {
-		offset = SE_OFFSET_ABS_LEVEL + se_cat_offset_abs_level[cat];
-	}
-
-	/* Forms ctxIdxInc of bin 0 (9-23): 0 once a level above 1 was read, else 1 + the number of levels equal to 1, at most 4. */
-	first_inc = 0;
-	if (gt1 == 0U) {
-		first_inc = 1U + eq1;
-		if (first_inc > 4U)
-			first_inc = 4;
-	}
-
-	/* Forms ctxIdxInc of the later bins (9-24): 5 + the number of levels above 1, at most 4, or at most 3 for the chroma DC. */
-	limit = 4;
-	if (cat == H264SW_CAT_CHROMA_DC)
-		limit = 3;
-	later_inc = gt1;
-	if (later_inc > limit)
-		later_inc = limit;
-	later_inc += 5U;
+	/* Takes the contexts of bin 0 and of the later bins of the prefix, which depend on the levels read before. */
+	first_ctx = h264sw_ctx_abs_level(cat, 0U, eq1, gt1);
+	later_ctx = h264sw_ctx_abs_level(cat, 1U, eq1, gt1);
 
 	/* Bin 0: 0 is coeff_abs_level_minus1 equal to 0, a level of absolute value 1. */
-	bin = h264sw_cabac_decision(&ctx->cabac, offset + first_inc);
+	bin = h264sw_cabac_decision(&ctx->cabac, first_ctx);
 	if (bin == 0U) {
 		*abs_level = 1;
 		return 0;
@@ -1539,7 +1738,7 @@ se_abs_level(
 	/* Reads the rest of the prefix, TU with cMax 14: each 1 adds one and the first 0 ends the value. */
 	ones = 1;
 	while (ones < SE_LEVEL_UCOFF) {
-		bin = h264sw_cabac_decision(&ctx->cabac, offset + later_inc);
+		bin = h264sw_cabac_decision(&ctx->cabac, later_ctx);
 		if (bin == 0U)
 			break;
 		ones++;

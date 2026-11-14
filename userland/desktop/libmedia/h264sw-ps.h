@@ -12,6 +12,12 @@
  * scaling lists of both and their fall-back rules (7.3.2.1.1.1, Table
  * 7-2), and the store that keeps the last set of each id.
  *
+ * The level limits of Table A-1 are here too, shared by the decoder and
+ * the encoder: the decoder derives the size of its decoded picture buffer
+ * from them (A.3.1 h)), the encoder chooses the lowest level a
+ * configuration fits and keeps its motion vectors and picture sizes
+ * inside it.
+ *
  * This reader is separate from h264.c, which reads the same syntax into
  * the StdVideo structures of Vulkan Video: the software decoder needs
  * every field in its own units, and must build and be tested without the
@@ -298,5 +304,53 @@ int h264sw_ps_read_pps(struct h264sw_ps_store *store, struct vcodec_bitreader *b
  * Cannot fail: both sets were checked when they were read.
  */
 void h264sw_ps_scaling(const struct h264sw_sps *sps, const struct h264sw_pps *pps, struct h264sw_scaling *scaling);
+
+
+/* The level_idc of level 1b when it is not sent as 11 with constraint_set3_flag (A.3.1). */
+#define H264SW_LEVEL_1B 9U
+
+/* The rows of Table A-1, levels 1, 1b, 1.1 ... 6.2. */
+#define H264SW_LEVELS 20U
+
+/*
+ * One row of Table A-1.
+ *
+ * level_idc is ten times the level number (9 for level 1b, the row's own
+ * key; level 1b sent as level_idc 11 with constraint_set3_flag 1 is found
+ * by h264sw_level_find).  max_mbps MaxMBPS (macroblocks per second),
+ * max_fs MaxFS (macroblocks), max_dpb_mbs MaxDpbMbs (macroblocks), max_br
+ * MaxBR and max_cpb MaxCPB as the table gives them (in units of 1000
+ * bits/s and 1000 bits for the VCL of the Baseline, Constrained Baseline,
+ * Main and Extended profiles, 1200 for their NAL; of cpbBrVclFactor and
+ * cpbBrNalFactor of Table A-2 for the High profiles), max_vmv_r
+ * MaxVmvR (the vertical motion vector component range: -MaxVmvR ..
+ * MaxVmvR - 0.25 luma frame samples), min_cr MinCR, and max_mvs_per_2mb
+ * MaxMvsPer2Mb (0 where the table has "-").
+ */
+struct h264sw_level {
+	unsigned level_idc;
+	uint32_t max_mbps;
+	uint32_t max_fs;
+	uint32_t max_dpb_mbs;
+	uint32_t max_br;
+	uint32_t max_cpb;
+	unsigned max_vmv_r;
+	unsigned min_cr;
+	unsigned max_mvs_per_2mb;
+};
+
+/* Table A-1, in increasing order of level (1, 1b, 1.1, 1.2, 1.3, 2, ... 6.2). */
+extern const struct h264sw_level h264sw_levels[H264SW_LEVELS];
+
+/*
+ * Finds the row of a level.
+ *
+ * profile_idc, level_idc and constraint_set3 (constraint_set3_flag, 0 or
+ * not 0) as the SPS sends them.  Level 1b is level_idc 9, or level_idc 11
+ * with constraint_set3_flag 1 in profiles 66, 77 and 88 (Baseline and
+ * Constrained Baseline, Main, Extended; A.3.1, A.3.2).  Returns the row,
+ * or NULL for a level_idc not in the table.
+ */
+const struct h264sw_level *h264sw_level_find(unsigned profile_idc, unsigned level_idc, int constraint_set3);
 
 #endif
