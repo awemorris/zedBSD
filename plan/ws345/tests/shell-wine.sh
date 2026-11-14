@@ -57,7 +57,7 @@ result() {
 }
 
 # The Windows build and its zip, extracted.
-if ! timeout 3000 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 -j8 LLVM_MINGW="$LLVM_MINGW" \
+if ! timeout 3000 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 -j4 LLVM_MINGW="$LLVM_MINGW" \
     BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" all zip > "$out/make.log" 2>&1 || grep -q 'warning:' "$out/make.log"; then
 	echo "shell-wine: the Windows build did not build cleanly (log $out/make.log)"
 	echo "shell-wine: FAIL"

@@ -3,7 +3,7 @@
 # ws345-p014 応答しない頁の問い
 
 - WS: [ws.md](../ws.md)。設計: [design.md](../design.md) §9。
-- 状態: in-progress（2026-11-02 P8 q1996-i01: 実装と試験は済み、cleared の判定は Q1。下の結果）
+- 状態: in-progress（2026-11-14 P3 q2090-i01: 残りの shell-wine の全 case と p010 の agent への広げを済ませた。実装済み・試験 PASS、cleared の判定は Q1。下の「結果（2026-11-14 P3）」。前: 2026-11-02 P8 q1996-i01 が実装と試験）
 - 出所: 2026-11-02 ユーザーの決定（J2 の答え、ws.md）。
 
 ## 目的
@@ -71,3 +71,13 @@ script が決まった時間走り続けて頁が応答しない時に、Chrome�
 - touch の入力は問いの表示中も今までどおり頁に行く（card への tap は未対応）。
 - p010（段 B、origin ごとの agent）: busy・stop は今 view の一つの agent（top と iframe）だけを見る。agent が増えたら全ての agent の task を見て止めるよう広げる（P5 へ、Q1 経由）。
 - 最後の直し（`strcspn`、shell-wine の測り方）の後の shell-wine の全 case（busy・xhr・busy-cpu）は流していない（prompt の 2 case だけ）。
+
+## 結果（2026-11-14 P3 q2090-i01、残りの確かめ）
+
+- main c5b8a10d24 に p014 の実装（`browser_view_script_busy`・`_stop_script`、`shell/unresponsive.c`・`prompt.c`、`locale/ja/browser.tr`）がある事を確かめた。
+- 「未実施・残り」の片付け:
+  - p010 への広げ: 済み（p010 の結果の (6)、commit 7073d0c19c）。task の番号を process で一つにし、busy は全 agent の一番長い task、stop はその task の agent だけ。host-frames (k) の 4 check と host-threaded-view (r) で確かめた（p010 の表）。
+  - 最後の直しの後の shell-wine の全 case: `sh plan/ws345/tests/shell-wine.sh build/tmp/p3/shell-wine`（7073d0c19c の tree、make は `-j4` に直した後）→ `shell-wine: 23 passed, 0 failed`、`shell-wine: PASS`（busy・xhr・busy-cpu・prompt・prompt-cpu）。
+  - 回帰（p010 の表と同じ run）: host-build plain・tsan warning 0、host-threaded-view plain 55/55、host-prompt-rule 13/13、cross-build PASS、zedBSD x86_64・rpi5・vf2 の browser warning 0。
+- 受け入れの根拠: host の (r)（busy・stop・古い番号・loop の無い頁）、QEMU の shell-guest 27/27（2026-11-02、上の表）、Wine の全 case 23/23（今回）。問いの間の窓の待ち最長は Wine で 20.7〜22.4 ms・over_100ms 0。
+- 未実施のまま（理由）: Linux の Keiland は今も browser の build が無い（`userland/desktop/keiland-linux.mk` に browser が無い）。本物の Windows・実機（ユーザーが拾える試験の一覧へ、Q1）。日本語の文言の画面。touch の問いへの tap。shell-guest は image の config の乖離（p010 の結果）で今回は流していない（2026-11-02 の 27/27 の後に変えた所は libbrowser の busy・stop の agent の扱いだけで、shell の側は変えていない）。
