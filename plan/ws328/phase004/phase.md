@@ -88,7 +88,7 @@ contour の長さ（開・閉・範囲外）、butt・square・round の cap（u
 
 ### わざと壊す確かめ
 
-実装を git の外で 41 通りに書き換え（符号・境界の比較・定数・分岐の削除。miter limit の境、外側の向き、square cap の長さ、dash の offset・倍率・奇数の反復・和 0・最後の dash の延長・継ぎ、向きの反転、moveto だけ、曲線の join、segment の境、弧の段、幅、join の閉じ、倍率、閉じた線分の長さ、巻き戻し、零長の向き、cap の向きと位置、範囲の検査など）、毎回 `sh plan/ws328/tests/run-unit.sh stroke` を流した: 40 通りが FAIL、1 通りだけ PASS（「x の座標の範囲の検査を外す」: 出力の vec_lines_begin・add が同じ検査をするので動作が同じ、等価）。1 回目の確かめで見逃した 4 通り（segment の境、共線の閾値、和 0 の dash を round で、零長の dash の向き、継ぎの零長、単独の dash）は試験を足して塞いだ。ほかに等価・無害と判断した変更が 2 通りあった（共線の閾値を 0 にする: 面積 0 の piece は捨てるので出力が同じ。atan2 の引数を 1e-3 ずらす: 面積の差が許容の内）。壊した後は `cmp` で元の file と一致を確かめ、`git diff` が空に戻った。
+実装を git の外で 42 通りに書き換え（符号・境界の比較・定数・分岐の削除。miter limit の境、外側の向き、square cap の長さ、dash の offset・倍率・奇数の反復・和 0・最後の dash の延長・継ぎ、向きの反転、moveto だけ、曲線の join、segment の境、弧の段、幅、join の閉じ、倍率、閉じた線分の長さ、巻き戻し、零長の向き、cap の向きと位置、範囲の検査など）、毎回 `sh plan/ws328/tests/run-unit.sh stroke` を流した: 41 通りが FAIL、1 通りだけ PASS（「x の座標の範囲の検査を外す」: 出力の vec_lines_begin・add が同じ検査をするので動作が同じ、等価）。最初の確かめで見逃した 5 通り（segment の境と長さ 0 の dash の向き、共線の閾値、和 0 の dash を round で、継ぎの長さ 0 の最初の dash、単独の dash が loop になる）は試験を足して塞いだ。ほかに等価・無害と判断した変更が 2 通りあった（共線の閾値を 0 にする: 面積 0 の piece は捨てるので出力が同じ。atan2 の引数を 1e-3 ずらす: 面積の差が許容の内）。壊した後は `cmp` で元の file と一致を確かめ、`git diff` が空に戻った。
 
 ### 自分で決めた点（header が黙っている所）
 
