@@ -3,7 +3,7 @@
 # ws329-p002 共通化の refactor: CAVLC の表・CABAC の context の選び・context の初期化・表 A-1 を decoder と encoder の共通に
 
 - 親: [WS329](../ws.md)、設計 [design.md](../design.md)。
-- 状態: 実装済み・試験 PASS（2026-11-15 P5 q2092-i01。合否の判断は Q1）。2026-10-31 p001 で作成。
+- 状態: cleared（2026-11-15 Q1、merge c034b02dab）
 - 依存: WS326 completed（p026 の名前の移しを含む。header の凍結 BASE=fd1d6f88c が外れた後）。2026-10-31 に completed、p026 は 92ca2d0e8、WS326 の header の基点は 77ed48ac4。
 - 担当の想定: Opus 5.5（phase-runner）。decoder の hot path に触れるので Sonnet に回さない。
 

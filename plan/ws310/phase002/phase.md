@@ -2,7 +2,7 @@
 
 # ws310-p002: aml-host の option と `_OSC` の ASL の試験
 
-Status: in-progress（2026-11-15 P2 q2106-i01: 実装済み・試験 PASS。cleared は Q1）
+Status: cleared（2026-11-15 Q1、merge 8f44dfd2a7）
 
 - Queue: q2106-i01（P2、worktree `p2-ws310`、branch `agent/p2-ws310`、基点 main 52b2e7e351）。
 - 範囲: `plan/tools/aml-host/`（`aml-host.c`・`aml-host-wmi.c`・`aml-host-wmi.h`、`asl/osc.*`・`asl/hostopts.*` の新しい試験）、`plan/ws310/tests/osc-host/`（新）、この phase.md。`plan/tools/aml-host/Makefile` は変えていない（新しい .c を足さず、既存の file に入れた）。

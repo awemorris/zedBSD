@@ -39,7 +39,7 @@
 - backend の順（p023、ユーザーの決定）: Vulkan Video → この software の decoder（`h264-software`）→ libavcodec。open の拒否と受け入れ後の拒否（ENOTSUP・ENODEV・EBUSY）で次の backend へ切り替え、key frame まで捨てる。host で MP4・TS・複数 slice を `h264-software` で decode し ffmpeg と一致（run-host-decode）。
 - 速さ（p024、host の Xeon Gold 6130・-O2・1 thread・5 回の best）: 補間の block 化と deblocking の bS の書き直しで 1.35〜1.94 倍。1080p で High CABAC B 8 Mbps 16.7 → 24.1 fps、High CRF 23 19.7 → 36.3 fps、Main CAVLC 8 Mbps 17.3 → 27.3 fps、実 stream Main 1080p24 8 Mbps 18.4 → 35.7 fps、実 stream High 1080p30 13 Mbps 13.0 → 17.5 fps。出力は前と bit 単位で同じ。
 - 規約の全文の見直し（p025）: style-check の違反 0、全試験が前と同じ、header は h264sw-ps.h の comment の大きさの記述だけ後で直した（77ed48ac4）。
-- 試験の道具は [plan/tools/h264sw/](../tools/h264sw/) に移した（WS329・WS330・WS318 も回帰に使う）。header の照合の基点は 77ed48ac4（`BASE=77ed48ac4 sh plan/tools/h264sw/check-skeleton.sh`）。
+- 試験の道具は [plan/tools/h264sw/](../tools/h264sw/) に移した（WS329・WS330・WS318 も回帰に使う）。header の照合の基点は 77ed48ac4（`BASE=b753848bf2 sh plan/tools/h264sw/check-skeleton.sh`（2026-11-15 WS329 p002 が header を共通化したので基点を移した。前は 77ed48ac4））。
 
 ## 制限・移管
 
@@ -85,7 +85,7 @@ phase.md は完了で消した（git の履歴に残る）。
 
 ## 試験（plan/tools/h264sw/、host）
 
-- `sh plan/tools/h264sw/run-unit.sh all`（単体 24 本）、`BASE=77ed48ac4 sh plan/tools/h264sw/check-skeleton.sh`、`sh plan/tools/h264sw/run-stream.sh`（ffmpeg が要る）、`sh plan/tools/h264sw/backend/run-backend.sh`・`run-host-decode.sh`、
+- `sh plan/tools/h264sw/run-unit.sh all`（単体 24 本）、`BASE=b753848bf2 sh plan/tools/h264sw/check-skeleton.sh`（2026-11-15 WS329 p002 が header を共通化したので基点を移した。前は 77ed48ac4）、`sh plan/tools/h264sw/run-stream.sh`（ffmpeg が要る）、`sh plan/tools/h264sw/backend/run-backend.sh`・`run-host-decode.sh`、
   `H264SW_CONFORMANCE_DIR=<dir> sh plan/tools/h264sw/conformance/run.sh`（bitstream は `conformance/fetch.sh` で取得、展開後 約 7 GB）、`sh plan/tools/h264sw/speed/run-speed.sh`（計測）。
 
 ## Resume point

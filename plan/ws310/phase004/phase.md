@@ -2,7 +2,7 @@
 
 # ws310-p004: `acpi-osc-codec`（純粋な関数）と host 試験
 
-Status: in-progress（2026-11-15 P2 q2106-i01: 実装済み・試験 PASS。cleared は Q1）
+Status: cleared（2026-11-15 Q1、merge 8f44dfd2a7）
 
 - Queue: q2106-i01（P2、worktree `p2-ws310`、branch `agent/p2-ws310`、基点 main 52b2e7e351）。
 - 範囲: `src/drivers/acpi/acpi-osc-codec.c`・`.h`（新）、`plan/ws310/tests/osc-codec/`（新）、この phase.md。kernel の build への組み込み（`mk/kernel.mk`）は案だけ（下）。
