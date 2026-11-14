@@ -38,6 +38,7 @@ GHCI 1.0 の仕様（`docs/ghci.md`）と Amaterrace GPU の RTL は `/home/awe/
   5. testbench: agy が RTL を実装・修正した時は、変えた module の小さな単体の testbench（`sim/run.sh NAME` を 1 本ずつ、変えた module の物）を agy が流してよい。長い物・上位の物（`atg_top*`・`atg_ghci_top`・`atg_kc705_*`・`atg_su` の全体など）と全体の回帰（`sim/run.sh` の全部・`make sim`）は agy は流さず、返事に「流してほしい testbench の名前（と plusarg）と理由」を書き、Claude が流して（並列 4 まで、時間の上限、background）結果を返す。
 - **agy の Gemini 3.8 Flash は RTL を書く担当として使う**（2026-11-14 ユーザーの要点）: RTL 専用の model ではないが、RTL を書く力が非常に高い事をユーザーが確かめている。Gemini 4 以降でこの力が保たれているかは分からないので 3.8 Flash を使う。一方で、Claude の指摘が無いと全体の整合（仕様・他の module・testbench との合わせ）が取れない。だから Claude は解析・仕様との照合・全体の整合の指摘を受け持ち、agy は指摘に沿った RTL の記述と修正を受け持つ。
 - agy への依頼には、触ってよい path を明記する（amaterrace-gpu の main の tree の中だけ。`/home/awe/amaterrace-worktrees/` の他の worktree や Claude の診断の file は読みも書きもしない）。2026-11-14、調べだけの回の agy が Claude の解析の worktree の file を書き換え、その script を流したので Q1 が止めた。Claude が同じ件を解析している間は、agy に同じ調べを並べて頼まない。
+- **例外: register の reset は Claude が入れる**（2026-11-14 ユーザーの決定）。全ての register を reset で初期化する（memory は初期化しない）。clock が複数ある module はユーザーが直す。手順は [ws347 p010](ws347/phase010/phase.md)。それ以外の RTL は今までどおり agy が書く。
 - **問題の所の解析は Claude が行ってよい**（2026-11-14 ユーザーの決定）。RTL の修正は今までどおり agy が行う。Claude は testbench を流し、波形・$display・単体の再現で、どの module のどの信号で誤るかを突き止め、修正の依頼（直す所と期待する振る舞い）にして agy に渡す。解析のための一時の testbench・診断は Claude の worktree か scratchpad に置き、RTL と amaterrace-gpu の main の tree は変えない。
 - Claude は agy の process の出力（stream-json）を見て、上位の testbench や全体の実行を始めたら止める。
 - 前の形（155 本を途中の報告なしに数時間流した）は、この流れで置き換えた。

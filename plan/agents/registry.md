@@ -5,7 +5,10 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P2 | phase-runner | BUG-435 古い build の変数 (q2079-i01) | `/home/awe/zedBSD-worktrees/p2-bug435` / `agent/p2-bug435` | 動いている（2026-11-14） | — |
+| P2 | phase-runner | ws347 p010 RTL の reset cp ほか (q2080-i01) | `/home/awe/amaterrace-worktrees/p2-reset` / `p2-reset` | 動いている（2026-11-14） | — |
+| P4 | phase-runner | ws347 p010 RTL の reset su・vf・tu (q2081-i01) | `/home/awe/amaterrace-worktrees/p4-reset` / `p4-reset` | 動いている（2026-11-14） | — |
+| P5 | phase-runner | ws347 p010 RTL の reset rx・rop (q2082-i01) | `/home/awe/amaterrace-worktrees/p5-reset` / `p5-reset` | 動いている（2026-11-14） | — |
+| P2 | phase-runner | BUG-435 古い build の変数 (q2079-i01) | `/home/awe/zedBSD-worktrees/p2-bug435` / `agent/p2-bug435` | 返却（2026-11-14、1 段目 cleared） | c0603e0fcc（merge 7d8ef71552） |
 | P2 | phase-runner-high | BUG-433 ws131 host 試験 (q2077-i01) | `/home/awe/zedBSD-worktrees/p2-bug433` / `agent/p2-bug433` | 返却（2026-11-14、fixed） | 07bef9d24d |
 | P1 | phase-runner-high | ws353 p012 cursor (q2076-i01) | `/home/awe/zedBSD-worktrees/p1-ws353k` / `agent/p1-ws353k` | 動いている（2026-11-14） | — |
 | P2 | phase-runner-high | BUG-432 stdout の flush (q2075-i01) | `/home/awe/zedBSD-worktrees/p2-bug432` / `agent/p2-bug432` | 返却（2026-11-14、fixed） | 97706198bb（merge 8ba44ca444） |
