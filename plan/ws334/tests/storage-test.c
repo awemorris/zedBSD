@@ -43,7 +43,9 @@
  *     no-store ones, plain responses and POSTs; a new instance answers
  *     the same URLs from the records, without the server being asked
  *     (and, at the end, with the server stopped); a stale ETag entry is
- *     revalidated (304) and kept fresh again across instances; a record
+ *     revalidated (304) and kept fresh again across instances, replaced
+ *     by a 200 with a new body, and dropped by a 200 that may not be
+ *     kept (no-store), in memory and in its record; a record
  *     that does not decode is removed; records the index does not list
  *     and an index that does not decode are swept when the instance is
  *     made; the records' total is kept under the limit by dropping the
@@ -155,6 +157,7 @@ static void test_no_instance(void);
 static void test_cache(void);
 static void test_cache_limit(void);
 static void test_cache_changed(void);
+static void test_cache_gone(void);
 static void test_cache_offline(void);
 
 /*
@@ -201,6 +204,7 @@ main(
 	test_cache();
 	test_cache_limit();
 	test_cache_changed();
+	test_cache_gone();
 	test_cache_offline();
 
 	/* Succeeded or not: the summary line. */
@@ -1495,6 +1499,97 @@ test_cache_changed(void)
 	CHECK(strcmp(result.body, "change-v2") == 0);
 	CHECK_EQ(test_server_count("/etag-change", &hits, &conditional), 0);
 	CHECK_EQ(hits, 2);
+	net_loader_destroy(loader);
+	CHECK_EQ(browser_instance_destroy(instance), 0);
+	sync();
+}
+
+/*
+ * A stale response revalidated by If-None-Match that comes back as a 200
+ * that may not be kept (no-store) takes the kept one out of the memory
+ * cache and its record: the next request asks without If-None-Match, in
+ * the same instance and in a later one.
+ */
+static void
+test_cache_gone(void)
+{
+	struct browser_instance *instance;
+	struct net_loader *loader;
+	struct test_fetch result;
+	int hits;
+	int conditional;
+	int error;
+
+	/* The first body, kept with a 1 s max-age and an ETag. */
+	error = test_files_instance("g", &instance);
+	CHECK_EQ(error, 0);
+	if (error != 0)
+		return;
+	error = net_loader_create(NULL, NULL, &loader);
+	CHECK_EQ(error, 0);
+	if (error != 0) {
+		browser_instance_destroy(instance);
+		return;
+	}
+	net_loader_set_cookies(loader, instance->cookies);
+	net_loader_set_cache(loader, instance->cache);
+	CHECK_EQ(test_fetch(loader, "/etag-gone", NULL, &result), 0);
+	CHECK(strcmp(result.body, "gone-v1") == 0);
+	net_loader_destroy(loader);
+	CHECK_EQ(browser_instance_destroy(instance), 0);
+	sync();
+
+	/* A later instance has the record; stale, it is revalidated and the server answers a no-store 200. */
+	error = test_files_instance("g", &instance);
+	CHECK_EQ(error, 0);
+	if (error != 0)
+		return;
+	CHECK(test_cache_has(instance, "/etag-gone"));
+	error = net_loader_create(NULL, NULL, &loader);
+	CHECK_EQ(error, 0);
+	if (error != 0) {
+		browser_instance_destroy(instance);
+		return;
+	}
+	net_loader_set_cookies(loader, instance->cookies);
+	net_loader_set_cache(loader, instance->cache);
+	test_pause(1300);
+	CHECK_EQ(test_fetch(loader, "/etag-gone", NULL, &result), 0);
+	CHECK_EQ(result.status, 200);
+	CHECK(strcmp(result.body, "gone-v2") == 0);
+	CHECK_EQ(test_server_count("/etag-gone", &hits, &conditional), 0);
+	CHECK_EQ(hits, 2);
+	CHECK_EQ(conditional, 1);
+
+	/* The old entry is gone from memory: the next request does not revalidate it. */
+	CHECK_EQ(test_fetch(loader, "/etag-gone", NULL, &result), 0);
+	CHECK(strcmp(result.body, "gone-v3") == 0);
+	CHECK_EQ(test_server_count("/etag-gone", &hits, &conditional), 0);
+	CHECK_EQ(hits, 3);
+	CHECK_EQ(conditional, 1);
+	net_loader_destroy(loader);
+	CHECK_EQ(browser_instance_destroy(instance), 0);
+	sync();
+
+	/* And from the records: a later instance has none, and asks plainly. */
+	error = test_files_instance("g", &instance);
+	CHECK_EQ(error, 0);
+	if (error != 0)
+		return;
+	CHECK(!test_cache_has(instance, "/etag-gone"));
+	error = net_loader_create(NULL, NULL, &loader);
+	CHECK_EQ(error, 0);
+	if (error != 0) {
+		browser_instance_destroy(instance);
+		return;
+	}
+	net_loader_set_cookies(loader, instance->cookies);
+	net_loader_set_cache(loader, instance->cache);
+	CHECK_EQ(test_fetch(loader, "/etag-gone", NULL, &result), 0);
+	CHECK(strcmp(result.body, "gone-v3") == 0);
+	CHECK_EQ(test_server_count("/etag-gone", &hits, &conditional), 0);
+	CHECK_EQ(hits, 4);
+	CHECK_EQ(conditional, 1);
 	net_loader_destroy(loader);
 	CHECK_EQ(browser_instance_destroy(instance), 0);
 	sync();

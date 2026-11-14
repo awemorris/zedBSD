@@ -418,6 +418,43 @@ net_cache_store(
 }
 
 /*
+ * Removes the response of a URL, when the cache has one: its record
+ * goes from the storage and its item from the index.  Never waits, so
+ * the loader's network thread may call it.  A URL the cache does not
+ * hold is not an error.
+ *
+ * url, length: the URL as net_cache_store keyed it.
+ */
+void
+net_cache_remove(
+	struct net_cache *cache,
+	const char *url,
+	size_t length)
+{
+	char key[BROWSER_STORAGE_KEY_MAX + 1];
+	size_t index;
+	int error;
+
+	/* The URL's key; a URL that has none was never stored. */
+	if (length == 0)
+		return;
+	error = wb_storage_key_text(url, length, 0, key);
+	if (error != 0)
+		return;
+
+	/* The index and the queue change together. */
+	wb_mutex_lock(&cache->lock);
+
+	index = cache_find(cache, key);
+	if (index != (size_t)-1) {
+		cache_drop(cache, index, 1);
+		cache_write_index(cache);
+	}
+
+	wb_mutex_unlock(&cache->lock);
+}
+
+/*
  * Reads the index record, drops the records it does not list, and
  * makes the total fit the limit.  Returns 0 or ENOMEM.
  */
