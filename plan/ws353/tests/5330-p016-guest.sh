@@ -42,9 +42,9 @@ wait_for() {
 aat() {
 	timeout 10 aat-input "$@" >> "$D/aat.log" 2>&1
 }
-# Ends every process of a name (there is no pkill).
+# Ends every process of a name (there is no pkill; ps gives the command's path, the name is its last part).
 killname() {
-	for p in $(ps -A -o pid,comm | awk -v n="$1" '$2 == n { print $1 }'); do
+	for p in $(ps -A -o pid,comm | awk -v n="$1" '{ c = $2; sub(".*/", "", c) } c == n { print $1 }'); do
 		kill "$p" 2> /dev/null
 	done
 }
@@ -59,7 +59,7 @@ sleep 2
 killname wayland
 sleep 2
 ps -A -o pid,comm,args > "$D/ps-before.txt" 2>&1
-/bin/wayland --testing --glass --log-frames --rotate-policy=any --timeout=1500 \
+/bin/wayland --testing --glass --log-frames --timeout=1500 \
     --wallpaper=/usr/share/keiland/wallpaper.png > "$L" 2>&1 < /dev/null &
 cpid=$!
 if wait_for 'KWL MODE window' 90; then
