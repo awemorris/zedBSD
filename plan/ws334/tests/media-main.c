@@ -99,6 +99,7 @@ media_tool_decoder(
 	unsigned count;
 	unsigned index;
 	int status;
+	int more;
 
 	/* The file and its first H.264 track. */
 	status = media_file_open(path, &file);
@@ -134,7 +135,12 @@ media_tool_decoder(
 	}
 
 	/* The track's packets, a full decoder giving its pictures first; then the drain. */
-	while (!read.failed && media_file_read(file, &packet) == 0) {
+	for (;;) {
+		more = 0;
+		if (!read.failed)
+			more = media_file_read(file, &packet) == 0;
+		if (!more)
+			break;
 		if (packet.track != video)
 			continue;
 		status = media_decoder_send(read.decoder, &packet);
@@ -177,9 +183,16 @@ media_tool_take(
 	int width;
 	int height;
 	int status;
+	unsigned long long hash;
+	int more;
 
 	/* Each picture (sound is not asked for). */
-	while (!read->failed && media_decoder_receive(read->decoder, &time_us) == 1) {
+	for (;;) {
+		more = 0;
+		if (!read->failed)
+			more = media_decoder_receive(read->decoder, &time_us) == 1;
+		if (!more)
+			break;
 		frame = media_decoder_picture(read->decoder);
 		if (frame == NULL) {
 			read->failed = 1;
@@ -194,11 +207,12 @@ media_tool_take(
 			status = ENOMEM;
 			if (pixels != NULL)
 				status = media_frame_scale(frame, &read->scaler, pixels, (size_t)width * sizeof(*pixels), width, height);
-			if (status == 0)
-				printf("media-tool: picture %u %dx%d %016llx\n", read->pictures, width, height,
-				    (unsigned long long)media_tool_hash(pixels, (size_t)width * (size_t)height));
-			else
+			if (status == 0) {
+				hash = media_tool_hash(pixels, (size_t)width * (size_t)height);
+				printf("media-tool: picture %u %dx%d %016llx\n", read->pictures, width, height, hash);
+			} else {
 				read->failed = 1;
+			}
 			free(pixels);
 		}
 		media_frame_free(&frame);
@@ -220,6 +234,7 @@ media_tool_engine(
 	int drawn;
 	int waits;
 	int error;
+	unsigned long long hash;
 
 	/* Opened on the engine's thread, without a wake (the program asks). */
 	error = media_engine_open(path, NULL, 0U, NULL, NULL, NULL, &engine);
@@ -246,11 +261,12 @@ media_tool_engine(
 		if (!drawn)
 			media_tool_pause();
 	}
-	if (drawn)
-		printf("media-tool: engine %dx%d %016llx\n", status.width, status.height,
-		    (unsigned long long)media_tool_hash(pixels, (size_t)status.width * (size_t)status.height));
-	else
+	if (drawn) {
+		hash = media_tool_hash(pixels, (size_t)status.width * (size_t)status.height);
+		printf("media-tool: engine %dx%d %016llx\n", status.width, status.height, hash);
+	} else {
 		printf("media-tool: engine gave no picture\n");
+	}
 	free(pixels);
 	media_engine_close(engine);
 

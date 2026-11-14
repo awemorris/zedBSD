@@ -101,6 +101,8 @@ fetch_loader(
 	struct net_loader *loader;
 	time_t deadline;
 	int error;
+	int pending;
+	time_t now;
 
 	/* The loader, without a notify (the caller waits). */
 	error = net_loader_create(NULL, NULL, &loader);
@@ -113,7 +115,11 @@ fetch_loader(
 	memset(&outcome, 0, sizeof(outcome));
 	error = net_loader_fetch(loader, url, fetch_done, &outcome, NULL);
 	deadline = time(NULL) + FETCH_SECONDS;
-	while (error == 0 && net_loader_pending(loader) != 0 && time(NULL) <= deadline) {
+	for (;;) {
+		pending = net_loader_pending(loader);
+		now = time(NULL);
+		if (error != 0 || pending == 0 || now > deadline)
+			break;
 		net_loader_wait(loader, 1000);
 		net_loader_dispatch(loader);
 	}

@@ -97,6 +97,8 @@ main(void)
 	int before;
 	int index;
 	int error;
+	const char *path;
+	int failed;
 
 	/* The engine makes its threads with the POSIX threads. */
 	error = browser_threads_set(browser_threads_posix());
@@ -111,7 +113,10 @@ main(void)
 	memset(&address, 0, sizeof(address));
 	address.sin_family = AF_INET;
 	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	if (bind(server_socket, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(server_socket, 64) != 0) {
+	failed = bind(server_socket, (struct sockaddr *)&address, sizeof(address)) != 0;
+	if (!failed)
+		failed = listen(server_socket, 64) != 0;
+	if (failed) {
 		perror("server");
 		return 2;
 	}
@@ -211,7 +216,10 @@ main(void)
 	/* Many rings from several threads while requests run: every request ends, notify comes. */
 	memset(outcomes, 0, sizeof(outcomes));
 	for (index = 0; index < MANY; index++) {
-		url(text, sizeof(text), (index % 4) == 0 ? "/slow" : "/fast");
+		path = "/fast";
+		if (index % 4 == 0)
+			path = "/slow";
+		url(text, sizeof(text), path);
 		net_loader_fetch(loader, text, done, &outcomes[index], &outcomes[index].request);
 	}
 	before = atomic_load(&notified);
@@ -295,6 +303,8 @@ answer(
 	size_t used;
 	ssize_t got;
 	int client;
+	int different;
+	char *found;
 
 	client = (int)(intptr_t)argument;
 	used = 0;
@@ -304,11 +314,13 @@ answer(
 			break;
 		used += (size_t)got;
 		request[used] = '\0';
-		if (strstr(request, "\r\n\r\n") != NULL)
+		found = strstr(request, "\r\n\r\n");
+		if (found != NULL)
 			break;
 	}
 	request[used] = '\0';
-	if (strncmp(request, "GET /slow", 9) == 0)
+	different = strncmp(request, "GET /slow", 9);
+	if (different == 0)
 		pause_ms(SLOW_MS);
 	(void)write(client, reply, sizeof(reply) - 1U);
 	close(client);
@@ -361,10 +373,16 @@ settle(
 	int seconds)
 {
 	time_t deadline;
+	int pending;
+	time_t now;
 
 	deadline = time(NULL) + seconds;
-	while (net_loader_pending(loader) != 0) {
-		if (time(NULL) > deadline)
+	for (;;) {
+		pending = net_loader_pending(loader);
+		if (pending == 0)
+			break;
+		now = time(NULL);
+		if (now > deadline)
 			return 1;
 		net_loader_wait(loader, 1000);
 		net_loader_dispatch(loader);

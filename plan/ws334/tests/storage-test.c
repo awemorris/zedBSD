@@ -427,6 +427,7 @@ test_fake_backend(void)
 	int storage_lines;
 	int index;
 	int error;
+	int different;
 
 	/* Options of another version: refused, and the backend closed once. */
 	memset(&fake, 0, sizeof(fake));
@@ -483,7 +484,8 @@ test_fake_backend(void)
 	browser_view_process(view);
 	storage_lines = 0;
 	for (index = 0; index < console.count; index++) {
-		if (strncmp(console.lines[index], "storage: could not save (", 25) == 0 && console.levels[index] == 1)
+		different = strncmp(console.lines[index], "storage: could not save (", 25);
+		if (different == 0 && console.levels[index] == 1)
 			storage_lines++;
 	}
 	CHECK_EQ(storage_lines, 1);
@@ -652,6 +654,7 @@ test_cookie_header(
 	const char *text;
 	size_t length;
 	int error;
+	int different;
 
 	/* The header. */
 	header[0] = '\0';
@@ -669,7 +672,10 @@ test_cookie_header(
 	/* Its value. */
 	text = wb_buffer_string(&out);
 	length = out.length;
-	if (length >= 10U && strncmp(text, "Cookie: ", 8) == 0) {
+	different = 1;
+	if (length >= 10U)
+		different = strncmp(text, "Cookie: ", 8);
+	if (length >= 10U && different == 0) {
 		snprintf(header, size, "%.*s", (int)(length - 10U), text + 8);
 	}
 	wb_buffer_release(&out);
@@ -718,6 +724,7 @@ test_count_files(
 	struct dirent *entry;
 	DIR *directory;
 	int count;
+	const char *temporary;
 
 	/* The directory. */
 	snprintf(path, sizeof(path), "%s/%s/%s", test_directory, name, space);
@@ -727,10 +734,14 @@ test_count_files(
 
 	/* Its entries but . and .. (and the replace's temporary files, whose names have a dot). */
 	count = 0;
-	while ((entry = readdir(directory)) != NULL) {
+	for (;;) {
+		entry = readdir(directory);
+		if (entry == NULL)
+			break;
 		if (entry->d_name[0] == '.')
 			continue;
-		if (strstr(entry->d_name, ".tmp") != NULL)
+		temporary = strstr(entry->d_name, ".tmp");
+		if (temporary != NULL)
 			continue;
 		count++;
 	}
@@ -777,6 +788,7 @@ test_write_v1(
 	size_t length;
 	size_t index;
 	FILE *file;
+	size_t written;
 
 	/* The magic, the two lengths and the UTF-16 units of the key and the value. */
 	length = strlen(WB_STORAGE_MAGIC_LOCAL_1);
@@ -805,7 +817,8 @@ test_write_v1(
 	file = fopen(path, "wb");
 	if (file == NULL)
 		return errno;
-	if (fwrite(bytes, 1, length, file) != length) {
+	written = fwrite(bytes, 1, length, file);
+	if (written != length) {
 		fclose(file);
 		return EIO;
 	}

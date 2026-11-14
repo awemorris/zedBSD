@@ -47,6 +47,27 @@ static int is_win32;
 static const int64_t outside_below[] = { WB_OS_TIME_FIRST - 1, WB_OS_TIME_FIRST - 86400LL, INT64_MIN };
 static const int64_t outside_above[] = { WB_OS_TIME_LAST + 1, WB_OS_TIME_LAST + 86400LL, INT64_MAX };
 
+static void sleep_ms(unsigned milliseconds);
+static void test_monotonic(void);
+static void test_wall(void);
+static void test_errors(void);
+static void use_zone(const char *zone);
+static void test_posix_zones(void);
+static void test_posix_clamp(void);
+static void test_posix_odd_names(void);
+static void test_posix(void);
+static void narrow(const wchar_t *wide, char *text, size_t size);
+static int64_t filetime_ticks(const SYSTEMTIME *time);
+static int leap_year(int year);
+static int month_days(int year, int month);
+static int64_t days_since_1970(int year, int month, int day);
+static int64_t transition_seconds(const SYSTEMTIME *rule, int year);
+static long rule_offset(const TIME_ZONE_INFORMATION *rules, int year, int64_t seconds);
+static long expected_offset(DYNAMIC_TIME_ZONE_INFORMATION *dynamic, int64_t seconds);
+static void test_windows_offsets(void);
+static void test_windows_names(void);
+static void test_windows(void);
+
 /* Sleeps for a number of milliseconds with the system's own call. */
 static void
 sleep_ms(

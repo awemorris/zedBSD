@@ -45,6 +45,14 @@ static const size_t good_alignments[] = { sizeof(void *), 16U, 64U, 4096U, 65536
 /* The sizes the allocation test tries at each alignment. */
 static const size_t good_sizes[] = { 1U, 7U, 100U, 5000U, 70000U };
 
+static void test_aligned(void);
+static unsigned distinct_values(const unsigned char *bytes, size_t length);
+static void test_random(void);
+static void test_library(void);
+static void test_names(void);
+static void check_data_directory(const char *expected);
+static void test_data_directory(void);
+
 /* Checks wb_os_aligned_alloc and wb_os_aligned_free. */
 static void
 test_aligned(
@@ -231,6 +239,10 @@ test_library(
 	struct wb_os_library *library;
 	wb_os_function function;
 	int error;
+#ifdef _WIN32
+	wchar_t system_directory[512];
+	wchar_t source[600];
+#endif
 
 	/* The first name is missing and the second loads. */
 	library = NULL;
@@ -309,26 +321,22 @@ test_library(
 
 #ifdef _WIN32
 	/* A library that sits in the current directory only is not loaded: the search skips that directory. */
-	{
-		static const char *const planted[] = { "ws334-planted.dll", NULL };
-		wchar_t system_directory[512];
-		wchar_t source[600];
-		UINT got;
-		BOOL copied;
+	static const char *const planted[] = { "ws334-planted.dll", NULL };
+	UINT got;
+	BOOL copied;
 
-		got = GetSystemDirectoryW(system_directory, 512U);
-		CHECK(got > 0 && got < 400U);
-		if (got > 0 && got < 400U) {
-			wcscpy(source, system_directory);
-			wcscat(source, L"\\version.dll");
-			copied = CopyFileW(source, L"ws334-planted.dll", FALSE);
-			CHECK(copied);
-			if (copied) {
-				library = (struct wb_os_library *)&sentinel_target;
-				error = wb_os_library_open(planted, &library);
-				CHECK_EQ(error, ENOENT);
-				CHECK(library == NULL);
-			}
+	got = GetSystemDirectoryW(system_directory, 512U);
+	CHECK(got > 0 && got < 400U);
+	if (got > 0 && got < 400U) {
+		wcscpy(source, system_directory);
+		wcscat(source, L"\\version.dll");
+		copied = CopyFileW(source, L"ws334-planted.dll", FALSE);
+		CHECK(copied);
+		if (copied) {
+			library = (struct wb_os_library *)&sentinel_target;
+			error = wb_os_library_open(planted, &library);
+			CHECK_EQ(error, ENOENT);
+			CHECK(library == NULL);
 		}
 	}
 #endif

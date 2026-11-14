@@ -64,13 +64,17 @@ main(
 	char **argv)
 {
 	int status;
+	int posix_different;
+	int win32_different;
 
 	/* The runner passes the system the test is built for. */
 	if (argc < 2) {
 		printf("test-frame: FAIL (no system argument)\n");
 		return 1;
 	}
-	if (strcmp(argv[1], "posix") != 0 && strcmp(argv[1], "win32") != 0) {
+	posix_different = strcmp(argv[1], "posix");
+	win32_different = strcmp(argv[1], "win32");
+	if (posix_different != 0 && win32_different != 0) {
 		printf("test-frame: FAIL (unknown system %s)\n", argv[1]);
 		return 1;
 	}

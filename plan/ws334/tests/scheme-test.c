@@ -334,6 +334,7 @@ test_style_has(
 	size_t length;
 	int error;
 	int has;
+	char *found;
 
 	/* The dump, as the page is styled now. */
 	error = browser_view_dump(view, BROWSER_DUMP_STYLE, &text, &length);
@@ -342,7 +343,8 @@ test_style_has(
 
 	/* The text in it. */
 	has = 0;
-	if (strstr(text, wanted) != NULL)
+	found = strstr(text, wanted);
+	if (found != NULL)
 		has = 1;
 	browser_free(text);
 

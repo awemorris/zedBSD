@@ -104,16 +104,26 @@ main(
 	char **argv)
 {
 	int error;
+	int child;
+	int free_mode;
 
 	/* The directory locks' mutex comes from the POSIX threads, in every process of the test. */
 	error = browser_threads_set(browser_threads_posix());
 	if (error != 0)
 		return 2;
 
-	if (argc >= 3 && strcmp(argv[1], "files-child") == 0)
-		return child_main("files-child", argv[2]);
-	if (argc >= 3 && strcmp(argv[1], "files-free") == 0)
-		return child_main("files-free", argv[2]);
+	if (argc >= 3) {
+		child = strcmp(argv[1], "files-child");
+		if (child == 0) {
+			error = child_main("files-child", argv[2]);
+			return error;
+		}
+		free_mode = strcmp(argv[1], "files-free");
+		if (free_mode == 0) {
+			error = child_main("files-free", argv[2]);
+			return error;
+		}
+	}
 
 	if (argc < 2) {
 		printf("usage: test-files posix|win32\n");
@@ -180,8 +190,10 @@ raw_exists(
 #ifdef _WIN32
 	DWORD attributes;
 	wchar_t wide[512];
+	int converted;
 
-	if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, 512) == 0)
+	converted = MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, 512);
+	if (converted == 0)
 		return 0;
 	attributes = GetFileAttributesW(wide);
 	return attributes != INVALID_FILE_ATTRIBUTES;
@@ -272,12 +284,16 @@ is_record(
 	int found;
 	int error;
 	int same;
+	int difference;
 
 	wb_buffer_init(&bytes);
 	error = read_record(calls, context, space, key, &bytes, &found);
 	same = 0;
 	if (error == 0 && found == 1 && bytes.length == length) {
-		if (length == 0 || memcmp(bytes.data, expected, length) == 0)
+		difference = 0;
+		if (length != 0)
+			difference = memcmp(bytes.data, expected, length);
+		if (difference == 0)
 			same = 1;
 	}
 	wb_buffer_release(&bytes);
@@ -317,12 +333,16 @@ file_has(
 	struct wb_buffer bytes;
 	int error;
 	int same;
+	int difference;
 
 	wb_buffer_init(&bytes);
 	error = wb_os_file_read(path, &bytes);
 	same = 0;
 	if (error == 0 && bytes.length == length) {
-		if (length == 0 || memcmp(bytes.data, expected, length) == 0)
+		difference = 0;
+		if (length != 0)
+			difference = memcmp(bytes.data, expected, length);
+		if (difference == 0)
 			same = 1;
 	}
 	wb_buffer_release(&bytes);
@@ -336,11 +356,13 @@ collect_key(
 	const char *key)
 {
 	struct key_set *set;
+	size_t key_length;
 
 	set = (struct key_set *)each_context;
 	if (set->count >= KEY_SET_MAX)
 		return EOVERFLOW;
-	if (strlen(key) > BROWSER_STORAGE_KEY_MAX)
+	key_length = strlen(key);
+	if (key_length > BROWSER_STORAGE_KEY_MAX)
 		return EOVERFLOW;
 	strcpy(set->keys[set->count], key);
 	set->count++;
@@ -372,9 +394,11 @@ key_set_has(
 	const char *key)
 {
 	size_t i;
+	int difference;
 
 	for (i = 0; i < set->count; i++) {
-		if (strcmp(set->keys[i], key) == 0)
+		difference = strcmp(set->keys[i], key);
+		if (difference == 0)
 			return 1;
 	}
 	return 0;
@@ -862,6 +886,7 @@ test_legacy(void)
 	char path[400];
 	char key[BROWSER_STORAGE_KEY_MAX + 1];
 	size_t i;
+	struct key_set set;
 
 	/* The file name of an earlier engine: the origin's bytes in lower-case hexadecimal. */
 	for (i = 0; i + 1 < sizeof(origin); i++)
@@ -883,13 +908,9 @@ test_legacy(void)
 	CHECK(is_record(calls, context, BROWSER_STORAGE_LOCAL, key, old_file, sizeof(old_file) - 1));
 
 	/* And it is listed under that key. */
-	{
-		struct key_set set;
-
-		CHECK_EQ(list_keys(calls, context, BROWSER_STORAGE_LOCAL, &set), 0);
-		CHECK_EQ(set.count, 1);
-		CHECK(key_set_has(&set, key));
-	}
+	CHECK_EQ(list_keys(calls, context, BROWSER_STORAGE_LOCAL, &set), 0);
+	CHECK_EQ(set.count, 1);
+	CHECK(key_set_has(&set, key));
 
 	close_backend(calls, context);
 }
@@ -961,6 +982,7 @@ test_hostile(void)
 	size_t i;
 	int found;
 	int error;
+	int matched;
 
 	CHECK(raw_make_directory("hos"));
 	CHECK(raw_make_directory("hos/cookies"));
@@ -990,7 +1012,8 @@ test_hostile(void)
 	/* Every truncation of a file reads as the bytes it has. */
 	for (cut = 0; cut < 40; cut++) {
 		raw_write("hos/cookies/ae", noise, cut);
-		if (!is_record(calls, context, BROWSER_STORAGE_COOKIES, "ae", noise, cut))
+		matched = is_record(calls, context, BROWSER_STORAGE_COOKIES, "ae", noise, cut);
+		if (!matched)
 			CHECK(0);
 	}
 	CHECK(1);
@@ -1057,6 +1080,7 @@ test_directory_spellings(void)
 	void *context;
 	struct wb_buffer here;
 	int error;
+	const struct browser_storage_calls *again_calls;
 
 	/* A relative directory is fixed when opened. */
 	CHECK(raw_make_directory("sp"));
@@ -1082,7 +1106,6 @@ test_directory_spellings(void)
 	error = open_backend("sp/rel/", &calls, &context);
 	CHECK_EQ(error, 0);
 	if (calls != NULL && context != NULL) {
-		const struct browser_storage_calls *again_calls;
 		void *again_context;
 
 		CHECK(is_record(calls, context, BROWSER_STORAGE_COOKIES, "ab", "moved", 5));
@@ -1104,12 +1127,14 @@ child_main(
 	const struct browser_storage_calls *calls;
 	void *context;
 	int error;
+	int child;
 
 	calls = NULL;
 	context = NULL;
 	error = browser_storage_files_open(directory, &calls, &context);
 
-	if (strcmp(mode, "files-child") == 0) {
+	child = strcmp(mode, "files-child");
+	if (child == 0) {
 		if (error != EBUSY)
 			return 3;
 		if (calls != NULL || context != NULL)
@@ -1140,6 +1165,7 @@ run_child(
 	PROCESS_INFORMATION process;
 	DWORD code;
 	DWORD units;
+	BOOL created;
 
 	/* Windows finds its own program file from the module; the path from argv[0] is for POSIX. */
 	(void)self_path;
@@ -1152,7 +1178,8 @@ run_child(
 	memset(&startup, 0, sizeof(startup));
 	startup.cb = sizeof(startup);
 	memset(&process, 0, sizeof(process));
-	if (CreateProcessW(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process) == 0)
+	created = CreateProcessW(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process);
+	if (created == 0)
 		return -1;
 	WaitForSingleObject(process.hProcess, 120000);
 	code = 0xffffU;
@@ -1164,12 +1191,18 @@ run_child(
 	char *const arguments[4] = { (char *)self_path, (char *)mode, (char *)directory, NULL };
 	pid_t pid;
 	int status;
+	int spawned;
+	int waited;
+	int exited;
 
-	if (posix_spawn(&pid, self_path, NULL, NULL, arguments, environ) != 0)
+	spawned = posix_spawn(&pid, self_path, NULL, NULL, arguments, environ);
+	if (spawned != 0)
 		return -1;
-	if (waitpid(pid, &status, 0) < 0)
+	waited = waitpid(pid, &status, 0);
+	if (waited < 0)
 		return -1;
-	if (!WIFEXITED(status))
+	exited = WIFEXITED(status);
+	if (!exited)
 		return -1;
 	return WEXITSTATUS(status);
 #endif

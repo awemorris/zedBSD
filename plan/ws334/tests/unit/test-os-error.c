@@ -74,16 +74,19 @@ test_texts(void)
 {
 	size_t index;
 	const char *text;
+	int different;
 
 	/* Each value has its text. */
 	for (index = 0; index < sizeof(expected_texts) / sizeof(expected_texts[0]); index++) {
 		text = wb_os_error_text(expected_texts[index].code);
 		CHECK(text != NULL);
 		if (text != NULL) {
-			CHECK(strcmp(text, expected_texts[index].text) == 0);
-			if (strcmp(text, expected_texts[index].text) != 0)
+			different = strcmp(text, expected_texts[index].text);
+			CHECK(different == 0);
+			if (different != 0) {
 				printf("value %d: \"%s\", expected \"%s\"\n", expected_texts[index].code, text,
-				    expected_texts[index].text);
+					expected_texts[index].text);
+			}
 		}
 	}
 

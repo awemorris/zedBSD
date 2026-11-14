@@ -512,6 +512,7 @@ test_to_utf16_invalid(void)
 	size_t used;
 	int error;
 	unsigned lead;
+	char text[2];
 
 	/* The example of table 3-8: 61 F1 80 80 E1 80 C2 62 80 63 80 BF 64. */
 	CHECK_TO_UTF16("\x61\xF1\x80\x80\xE1\x80\xC2\x62\x80\x63\x80\xBF\x64", table_3_8);
@@ -573,8 +574,6 @@ test_to_utf16_invalid(void)
 
 	/* Every byte from 80 to FF alone, and every lead byte from C2 to F4 followed by a space. */
 	for (lead = 0x80; lead <= 0xFF; lead++) {
-		char text[2];
-
 		text[0] = (char)lead;
 		text[1] = ' ';
 		memset(got, 0x55, sizeof(got));
@@ -833,6 +832,11 @@ static void
 test_random_cut(void)
 {
 	unsigned round;
+	uint32_t code_point;
+	char one_utf8[4];
+	uint16_t one_utf16[2];
+	size_t one_bytes;
+	size_t one_units;
 
 	for (round = 0; round < RANDOM_CASES; round++) {
 		uint16_t units[32];
@@ -864,12 +868,6 @@ test_random_cut(void)
 		boundary_bytes = 0;
 		boundary_units = 0;
 		for (index = 0; index < characters; index++) {
-			uint32_t code_point;
-			char one_utf8[4];
-			uint16_t one_utf16[2];
-			size_t one_bytes;
-			size_t one_units;
-
 			/* Decodes the character at boundary_units by hand from the units. */
 			if (units[boundary_units] >= 0xD800 && units[boundary_units] <= 0xDBFF) {
 				code_point = 0x10000 + (((uint32_t)units[boundary_units] - 0xD800) << 10) +

@@ -78,6 +78,11 @@ main(
 	int failed;
 	int index;
 	int error;
+	int is_ca;
+	int is_root;
+	int is_disallowed;
+	int has_value;
+	int placed;
 
 	/* The engine makes its threads with the browser's (libkeiland's Win32 threads). */
 	error = browser_threads_set(shell_threads());
@@ -89,19 +94,25 @@ main(
 	/* The options, then the URL. */
 	url = NULL;
 	for (index = 1; index < argc; index++) {
-		if (strcmp(argv[index], "--ca-file") == 0 && index + 1 < argc) {
+		is_ca = strcmp(argv[index], "--ca-file");
+		is_root = strcmp(argv[index], "--root");
+		is_disallowed = strcmp(argv[index], "--disallowed");
+		has_value = index + 1 < argc;
+		if (is_ca == 0 && has_value) {
 			error = net_tls_add_ca_file(argv[index + 1]);
 			if (error != 0) {
 				printf("tls-tool: --ca-file error %d\n", error);
 				return 2;
 			}
 			index++;
-		} else if (strcmp(argv[index], "--root") == 0 && index + 1 < argc) {
-			if (place(L"ROOT", argv[index + 1]) != 0)
+		} else if (is_root == 0 && has_value) {
+			placed = place(L"ROOT", argv[index + 1]);
+			if (placed != 0)
 				return 2;
 			index++;
-		} else if (strcmp(argv[index], "--disallowed") == 0 && index + 1 < argc) {
-			if (place(L"Disallowed", argv[index + 1]) != 0)
+		} else if (is_disallowed == 0 && has_value) {
+			placed = place(L"Disallowed", argv[index + 1]);
+			if (placed != 0)
 				return 2;
 			index++;
 		} else if (url == NULL) {
@@ -134,6 +145,7 @@ place(
 	struct placed *entry;
 	size_t length;
 	FILE *file;
+	BOOL added;
 
 	/* The file. */
 	file = fopen(path, "rb");
@@ -158,8 +170,9 @@ place(
 
 	/* The certificate in it. */
 	entry->certificate = NULL;
-	if (!CertAddEncodedCertificateToStore(entry->store, X509_ASN_ENCODING, der, (DWORD)length,
-	    CERT_STORE_ADD_REPLACE_EXISTING, &entry->certificate)) {
+	added = CertAddEncodedCertificateToStore(entry->store, X509_ASN_ENCODING, der, (DWORD)length,
+		CERT_STORE_ADD_REPLACE_EXISTING, &entry->certificate);
+	if (!added) {
 		printf("tls-tool: cannot add %s to %ls (error %lu)\n", path, store_name, (unsigned long)GetLastError());
 		CertCloseStore(entry->store, 0);
 		return 1;
@@ -218,6 +231,8 @@ fetch_loader(
 	struct net_loader *loader;
 	time_t deadline;
 	int error;
+	int pending;
+	time_t now;
 
 	/* The loader, without a notify (the caller waits). */
 	error = net_loader_create(NULL, NULL, &loader);
@@ -230,7 +245,11 @@ fetch_loader(
 	memset(&outcome, 0, sizeof(outcome));
 	error = net_loader_fetch(loader, url, fetch_done, &outcome, NULL);
 	deadline = time(NULL) + FETCH_SECONDS;
-	while (error == 0 && net_loader_pending(loader) != 0 && time(NULL) <= deadline) {
+	for (;;) {
+		pending = net_loader_pending(loader);
+		now = time(NULL);
+		if (error != 0 || pending == 0 || now > deadline)
+			break;
 		net_loader_wait(loader, 1000);
 		net_loader_dispatch(loader);
 	}

@@ -163,9 +163,13 @@ test_make_file(
 	unsigned char *bytes;
 	size_t index;
 	size_t written;
+	size_t allocation;
 
 	/* Fills a buffer with the pattern. */
-	bytes = malloc(size == 0 ? 1 : size);
+	allocation = size;
+	if (allocation == 0)
+		allocation = 1;
+	bytes = malloc(allocation);
 	if (bytes == NULL)
 		return 1;
 	for (index = 0;
@@ -306,6 +310,7 @@ test_reads(void)
 	uint64_t offset;
 	int wrong;
 	int error;
+	unsigned char expected;
 
 	/* Opens the big file made by the size group. */
 	buffer = malloc(TEST_BIG_SIZE);
@@ -331,7 +336,8 @@ test_reads(void)
 	for (index = 0;
 	     index < 4096;
 	     index++) {
-		if (buffer[index] != test_pattern(index))
+		expected = test_pattern(index);
+		if (buffer[index] != expected)
 			wrong++;
 	}
 	CHECK_EQ(wrong, 0);
@@ -344,7 +350,8 @@ test_reads(void)
 	for (index = 0;
 	     index < 100000;
 	     index++) {
-		if (buffer[index] != test_pattern(offset + index))
+		expected = test_pattern(offset + index);
+		if (buffer[index] != expected)
 			wrong++;
 	}
 	CHECK_EQ(wrong, 0);
@@ -357,7 +364,8 @@ test_reads(void)
 	for (index = 0;
 	     index < 100;
 	     index++) {
-		if (buffer[index] != test_pattern(offset + index))
+		expected = test_pattern(offset + index);
+		if (buffer[index] != expected)
 			wrong++;
 	}
 	CHECK_EQ(wrong, 0);
@@ -372,7 +380,8 @@ test_reads(void)
 	for (index = 0;
 	     index < TEST_BIG_SIZE;
 	     index++) {
-		if (buffer[index] != test_pattern(index))
+		expected = test_pattern(index);
+		if (buffer[index] != expected)
 			wrong++;
 	}
 	CHECK_EQ(wrong, 0);
@@ -564,6 +573,7 @@ test_names(void)
 		"bad\xc0\xaf.mp4",
 		"\x80"
 	};
+	int win32_system;
 
 	/* A file that is not there. */
 	file = (struct media_os_file *)1;
@@ -649,7 +659,8 @@ test_names(void)
 		file = (struct media_os_file *)1;
 		size = 5;
 		error = media_os_file_open(invalid[index], &file, &size);
-		if (strcmp(test_system, "win32") == 0)
+		win32_system = strcmp(test_system, "win32");
+		if (win32_system == 0)
 			CHECK_EQ(error, EILSEQ);
 		else
 			CHECK_EQ(error, ENOENT);
@@ -800,6 +811,8 @@ test_access(void)
 	int error;
 #ifdef _WIN32
 	HANDLE holder;
+#else
+	uid_t user;
 #endif
 
 	error = test_make_file("locked.bin", 10);
@@ -826,7 +839,8 @@ test_access(void)
 	media_os_file_close(file);
 #else
 	/* A file with no permission bits refuses everyone but the superuser. */
-	if (geteuid() == 0)
+	user = geteuid();
+	if (user == 0)
 		return;
 	error = chmod("locked.bin", 0);
 	CHECK_EQ(error, 0);

@@ -922,15 +922,22 @@ read_image(
 	uint32_t from_top;
 	unsigned bit;
 	size_t at;
+	unsigned long header_size;
+	unsigned entries;
+	unsigned reserved;
+	unsigned kind;
 
 	memset(found, 0, sizeof(*found));
 
 	/* The directory header. */
 	if (length < 6U + 16U * (size_t)(index + 1U))
 		return EINVAL;
-	if (get_u16(file) != 0U || get_u16(file + 2) != 1U)
+	reserved = get_u16(file);
+	kind = get_u16(file + 2);
+	if (reserved != 0U || kind != 1U)
 		return EINVAL;
-	if (index >= get_u16(file + 4))
+	entries = get_u16(file + 4);
+	if (index >= entries)
 		return EINVAL;
 
 	/* The entry. */
@@ -957,7 +964,8 @@ read_image(
 	/* A bitmap's header: size 40, width, doubled height, planes 1, 32 bits, no compression. */
 	if (found->length < 40U)
 		return EINVAL;
-	if (get_u32(image) != 40U)
+	header_size = get_u32(image);
+	if (header_size != 40U)
 		return EINVAL;
 	found->width = (uint32_t)get_u32(image + 4);
 	header_height = get_u32(image + 8);

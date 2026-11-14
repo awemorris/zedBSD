@@ -134,7 +134,8 @@ wake(
 {
 	pthread_mutex_lock(&wake_lock);
 	wakes++;
-	if (pthread_equal(pthread_self(), test_thread))
+	same = pthread_equal(pthread_self(), test_thread);
+	if (same)
 		wakes_on_thread++;
 	else
 		wakes_off_thread++;
@@ -143,6 +144,7 @@ wake(
 	pthread_cond_broadcast(&wake_cond);
 	pthread_mutex_unlock(&wake_lock);
 }
+	int same;
 
 /* How many times the wake was called. */
 static int
@@ -168,13 +170,15 @@ wait_opened(
 {
 	struct timespec deadline;
 	time_t end;
+	time_t now;
 
 	end = time(NULL) + WAKE_SECONDS;
 	for (;;) {
 		media_engine_status(engine, status);
 		if (status->state != MEDIA_OPENING)
 			return 0;
-		if (time(NULL) > end)
+		now = time(NULL);
+		if (now > end)
 			return ETIMEDOUT;
 		pthread_mutex_lock(&wake_lock);
 		clock_gettime(CLOCK_REALTIME, &deadline);

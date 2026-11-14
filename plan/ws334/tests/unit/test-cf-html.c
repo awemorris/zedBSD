@@ -820,13 +820,17 @@ main(
 	char **argv)
 {
 	int status;
+	int posix_different;
+	int win32_different;
 
 	/* The runner passes the system the test is built for. */
 	if (argc < 2) {
 		printf("test-cf-html: FAIL (no system argument)\n");
 		return 1;
 	}
-	if (strcmp(argv[1], "posix") != 0 && strcmp(argv[1], "win32") != 0) {
+	posix_different = strcmp(argv[1], "posix");
+	win32_different = strcmp(argv[1], "win32");
+	if (posix_different != 0 && win32_different != 0) {
 		printf("test-cf-html: FAIL (unknown system %s)\n", argv[1]);
 		return 1;
 	}
@@ -1357,6 +1361,7 @@ test_random(void)
 	unsigned violations;
 	unsigned successes;
 	int error;
+	unsigned roll;
 
 	/* Decodes each random block. */
 	violations = 0U;
@@ -1371,7 +1376,8 @@ test_random(void)
 			for (index = 0U;
 			     index < count;
 			     index++) {
-				if ((random_next() & 3U) == 0U)
+				roll = random_next();
+				if ((roll & 3U) == 0U)
 					block[length++] = (char)(random_next() & 0xFFU);
 				else
 					block[length++] = (char)(32U + random_next() % 95U);
@@ -1382,7 +1388,8 @@ test_random(void)
 			for (index = 0U;
 			     index < 4U;
 			     index++) {
-				if ((random_next() & 7U) == 0U)
+				roll = random_next();
+				if ((roll & 7U) == 0U)
 					length += (size_t)sprintf(block + length, "%s-1\r\n", offset_names[index]);
 				else
 					length += (size_t)sprintf(block + length, "%s%u\r\n", offset_names[index], 100U + random_next() % 120U);
@@ -1611,9 +1618,13 @@ exact_copy(
 	size_t length)
 {
 	char *copy;
+	size_t allocation;
 
 	/* Allocates the block, which has at least one byte so that an empty copy has an address. */
-	copy = malloc(length > 0U ? length : 1U);
+	allocation = length;
+	if (allocation == 0U)
+		allocation = 1U;
+	copy = malloc(allocation);
 	if (copy == NULL)
 		return NULL;
 

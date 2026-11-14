@@ -97,6 +97,24 @@ static const struct code_row socket_rows[] = {
 static wchar_t sentinel_wide[2];
 static char sentinel_text[2];
 
+static int expected_for(const struct code_row *rows, size_t count, unsigned long code);
+static void test_error_from_system(void);
+static void test_error_from_socket(void);
+static void expect_wide(const char *text, const unsigned short *units, size_t count);
+static void expect_wide_error(const char *text, int expected);
+static int reference_valid(const unsigned char *bytes, size_t count, unsigned long *value);
+static void sweep_one(const unsigned char *bytes, size_t count, unsigned *failures);
+static void test_utf8_sweeps(void);
+static void test_utf8_round_trip(void);
+static void test_wide_from_utf8(void);
+static void expect_text(const wchar_t *wide, size_t count, const char *expected, size_t expected_length);
+static void expect_text_error(const wchar_t *wide, size_t count, int expected);
+static void test_utf8_from_wide(void);
+static void expect_path(const char *path, const wchar_t *expected);
+static void expect_path_error(const char *path, int expected);
+static char *make_directory(const char *parent, const char *name);
+static void test_wide_path(void);
+
 /* Looks a code up in a table; a code that is not in it maps to EIO. */
 static int
 expected_for(
@@ -322,6 +340,10 @@ test_utf8_sweeps(
 	unsigned third;
 	size_t a;
 	size_t b;
+	char text[4];
+	wchar_t *wide;
+	size_t length;
+	int error;
 
 	/* Every two-byte shape: each lead from 0x80 up, each second byte except NUL. */
 	failures = 0;
@@ -369,11 +391,6 @@ test_utf8_sweeps(
 	/* Every lead byte alone, and every lead with only valid continuation bytes up to a cut, then the NUL. */
 	failures = 0;
 	for (lead = 0x80; lead <= 0xff; lead++) {
-		char text[4];
-		wchar_t *wide;
-		size_t length;
-		int error;
-
 		text[0] = (char)lead;
 		text[1] = '\0';
 		wide = sentinel_wide;
