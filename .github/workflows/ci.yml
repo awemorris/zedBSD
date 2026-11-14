@@ -40,6 +40,19 @@ jobs:
             build-essential cmake curl device-tree-compiler dosfstools e2fsprogs git grub-common gzip \
             mtools nasm ninja-build patch python3 xz-utils
 
+      # The Makefile uses .WAIT, which needs GNU make 4.4 or later; the runner has 4.3.
+      - name: Install GNU make 4.4.1
+        run: |
+          curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz -o "$RUNNER_TEMP/make.tar.gz"
+          echo "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3  $RUNNER_TEMP/make.tar.gz" | sha256sum -c
+          tar -xzf "$RUNNER_TEMP/make.tar.gz" -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/make-4.4.1"
+          ./configure --prefix=/usr/local --without-guile > /dev/null
+          make -j4 > /dev/null
+          sudo make install > /dev/null
+          hash -r
+          make --version | head -n 1
+
       - name: Install the pinned toolchain from its cache
         run: make CONFIGMK="$CONFIGMK" toolchain-cached
 
