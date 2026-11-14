@@ -3,7 +3,7 @@
 # ws217-p009a: UAPI の 180° の定数・ops の印・核の検査
 
 Parent: [WS217](../ws.md)
-Status: in-progress（2026-11-15 P5 q2110-i01: main 44bb7cdaac の上に載せ直し、host 試験・3 platform の build・QEMU の回帰まで。cleared の判定は Q1）
+Status: cleared（2026-11-15 Q1、merge 557ea0ffbf）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts:

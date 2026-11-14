@@ -475,3 +475,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-434](bugs/BUG-434.md) | clang の driver の -static（crt1.o + libc.a）で link できない（libc.a に system call の stub が無い） | open（2026-11-14 Q1 が起票、BUG-432 の報告） |
 | [BUG-435](bugs/BUG-435.md) | 試験の道具と config の多く（約 220 file）が、作り直す前の build の変数を使っている | open（2026-11-14 Q1 が起票） |
 | [BUG-436](bugs/BUG-436.md) | 5330 で、既定の program の一式を敷いた後の起動が間欠に止まる（watchdog の reset まで答えない） | open（2026-11-15 Q1 が起票） |
+| [BUG-437](bugs/BUG-437.md) | idle の時に xHCI の port の worker の thread が 1 秒に 90〜100 回起きる（5330 の PC2 が下がる） | open（2026-11-15 Q1 が起票） |
