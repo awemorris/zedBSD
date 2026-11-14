@@ -3,7 +3,7 @@
 # ws328-p002 vec-base と vec-path（行列・path の builder・弧・tight な bbox）
 
 - WS: [WS328](../ws.md)。設計: [design.md](../design.md)。
-- Status: 実装済み・試験 PASS（2026-11-15 P4 q2104-i01。cleared は Q1）
+- Status: cleared（2026-11-15 Q1、merge 4360704e39）
 - 担当: 実装の担当（Sonnet 5.5 high、phase-runner-low、1 回の起動）。
 - 依存: —（依存の Phase が main に merge され cleared の後に始める）。
 - 基点の SHA（header の凍結）: ws.md の Resume point に Q1 が書いた SHA。`BASE=<それ>`。
