@@ -126,6 +126,7 @@ posix_start(
 	size_t length;
 	int error;
 
+	/* The engine's context is not used: the POSIX table needs none. */
 	(void)context;
 
 	/* The record, with the name cut to what the system keeps. */
@@ -139,6 +140,8 @@ posix_start(
 		made->name[length] = name[length];
 		length++;
 	}
+
+	/* Ends the name. */
 	made->name[length] = '\0';
 
 	/* The attributes: the stack asked for (at least the system's least). */
@@ -147,6 +150,8 @@ posix_start(
 		free(made);
 		return ENOMEM;
 	}
+
+	/* Applies the stack size asked for. */
 	if (stack_size != 0) {
 #if defined(PTHREAD_STACK_MIN)
 		/* winpthreads names no least; the system rounds the size up itself there. */
@@ -178,6 +183,7 @@ posix_join(
 {
 	struct posix_thread *started;
 
+	/* The engine's context is not used: the POSIX table needs none. */
 	(void)context;
 
 	/* The wait, then the record goes. */
@@ -196,6 +202,7 @@ posix_is_current(
 	const struct posix_thread *started;
 	int same;
 
+	/* The engine's context is not used: the POSIX table needs none. */
 	(void)context;
 
 	/* The system's comparison. */
@@ -217,6 +224,7 @@ posix_mutex_create(
 	pthread_mutex_t *made;
 	int error;
 
+	/* The engine's context is not used: the POSIX table needs none. */
 	(void)context;
 
 	/* The block, then the mutex in it. */
@@ -281,6 +289,7 @@ posix_cond_create(
 	pthread_cond_t *made;
 	int error;
 
+	/* The engine's context is not used: the POSIX table needs none. */
 	(void)context;
 
 	/* The block. */
@@ -346,6 +355,7 @@ posix_cond_wait_for(
 	struct timespec deadline;
 	int status;
 
+	/* The engine's context is not used: the POSIX table needs none. */
 	(void)context;
 
 	/* The deadline on the condition's clock. */
