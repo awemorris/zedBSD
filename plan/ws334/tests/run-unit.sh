@@ -48,6 +48,15 @@ fi
 host_flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer"
 host_libs="-lpthread -ldl -lm"
 win_cc=$LLVM_MINGW/bin/x86_64-w64-mingw32-clang
+# <browser/browser.h> includes <vulkan/vulkan.h>, which llvm-mingw does not have: the tests take a copy of
+# the host's Vulkan headers (only the headers; no loader is linked), apart from the host's other headers.
+win_vulkan=$out/vulkan-include
+if [ ! -f /usr/include/vulkan/vulkan.h ] || [ ! -d /usr/include/vk_video ]; then
+	echo "run-unit: FAIL (no host Vulkan headers in /usr/include/vulkan and /usr/include/vk_video)"
+	exit 1
+fi
+mkdir -p "$win_vulkan"
+cp -R /usr/include/vulkan /usr/include/vk_video "$win_vulkan/"
 win_flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE
 	-fsanitize=undefined -fsanitize-trap=undefined"
 win_libs="-lws2_32 -lbcrypt -lcrypt32 -lshell32 -lole32 -Wl,-Bstatic -lpthread -Wl,-Bdynamic"
@@ -76,7 +85,7 @@ for name in $names; do
 			build="cc $host_flags $ws334_includes $source $modules $host_libs -o $program"
 		else
 			program=$run.exe
-			build="$win_cc $win_flags $ws334_includes $source $modules $win_libs -o $program"
+			build="$win_cc $win_flags $ws334_includes -isystem $win_vulkan $source $modules $win_libs -o $program"
 		fi
 		if ! $build > "$run.build.log" 2>&1 || [ -s "$run.build.log" ]; then
 			echo "test-$name ($system): FAIL (build; log $run.build.log)"

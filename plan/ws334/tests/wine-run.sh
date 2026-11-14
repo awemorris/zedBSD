@@ -22,7 +22,9 @@
 #     clipboard (Ctrl+L, Ctrl+C) and typed back opens it again (Japanese with an input method: a real
 #     Windows);
 #  M5 letters typed into a page's text field reach it (the page prints its input events); the input
-#     method's composition: a real Windows;
+#     method's composition: a real Windows; M5t: plan/ws334/tests/tsf-main.c drives libkeiland's TSF
+#     text store in a window of its own (the checks Wine's TSF can do: inserted text is committed, and
+#     not handed on while the program does not ask for text);
 #  M6 after the program is closed (its close button) and started again, a cookie with an expiry and
 #     localStorage are still there, and a cookie without one is not; the cookies' records on disk are
 #     protected for the user (DPAPI: each starts with the wrapping's magic), and
@@ -111,8 +113,10 @@ if ! win32_make "$out/make-cli.log" test-program TEST_PROGRAM=browser-cli \
     ! win32_make "$out/make-protect.log" test-program TEST_PROGRAM=protect-test \
     TEST_PROGRAM_SOURCES=plan/ws334/tests/protect-main.c ||
     ! win32_make "$out/make-hit.log" test-program TEST_PROGRAM=hit-test \
-    TEST_PROGRAM_SOURCES=plan/ws334/tests/hit-test-main.c; then
-	echo "wine-run: a test's program did not build cleanly (logs $out/make-cli.log, $out/make-cert.log, $out/make-theme.log, $out/make-protect.log, $out/make-hit.log)"
+    TEST_PROGRAM_SOURCES=plan/ws334/tests/hit-test-main.c ||
+    ! win32_make "$out/make-tsf.log" test-program TEST_PROGRAM=tsf-test \
+    TEST_PROGRAM_SOURCES=plan/ws334/tests/tsf-main.c; then
+	echo "wine-run: a test's program did not build cleanly (logs $out/make-cli.log, $out/make-cert.log, $out/make-theme.log, $out/make-protect.log, $out/make-hit.log, $out/make-tsf.log)"
 	echo "wine-run: FAIL"
 	exit 1
 fi
@@ -586,6 +590,20 @@ else
 fi
 unrun M5j "an input method's composition in the page's field"
 
+# M5t. libkeiland's TSF text store, driven in its own process as an input method would (Wine's TSF has
+# no compositions and no view: those of its checks are not run).
+WINEPREFIX=$gui WINEDEBUG=-all timeout 300 flock "$lock" xvfb-run -a wine "$root/$build/tests/tsf-test.exe" \
+    > "$out/tsf.log" 2>&1
+WINEPREFIX=$gui timeout 120 wineserver -w
+tsf=$(tr -d '\r' < "$out/tsf.log" | grep '^tsf-test: ' | tail -1)
+if echo "$tsf" | grep -q '^tsf-test: PASS'; then
+	result PASS M5t "the text store hands inserted text on as a commit, and none while text is not wanted; $tsf"
+else
+	result FAIL M5t "$tsf ($out/tsf.log)"
+fi
+unrun M5c "TSF's composition shown, committed and dropped, and the candidates at the caret (Wine's TSF has no compositions)"
+unrun M5d "a precision touch pad's scrolling through DirectManipulation and its fling after the fingers lift"
+
 # The bare title bar as the caption: the hit test, the drag, the double clicks.
 start caption "$gui" caption share/browser/start.html
 convert "$out/caption/first.png" -crop 1280x32+0+0 "$review/titlebar-caption.png" 2> /dev/null
@@ -652,7 +670,7 @@ else
 	result FAIL M7t "after the changes: page $to_light, title bar $to_light_bar, page $to_dark, SCHEME $schemes ($told; $out/dark/)"
 fi
 unrun M7s "the snap layouts over the maximize button (Windows 11)"
-unrun M7m "Mica behind the frame (Windows 11 22H2), the accent of the system (Wine has no DWM colours)"
+unrun M7m "Mica behind the frame and through the title bar (Windows 11 22H2), the accent of the system (Wine has no DWM colours)"
 start dpi144 "$gui144" plain share/browser/start.html
 convert "$out/dpi144/first.png" -crop 1280x48+0+0 "$review/titlebar-144dpi.png" 2> /dev/null
 cp "$out/dpi144/first.png" "$review/dpi144.png" 2> /dev/null

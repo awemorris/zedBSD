@@ -377,3 +377,31 @@ SHCreateStdEnumFmtEtc
 CryptProtectData
 CryptUnprotectData
 LocalFree
+
+# ole32, msctf through uuid, user32: the input method's TSF (its thread manager, the text store's interfaces,
+# the caret and the frame on the screen) and the system's high contrast (whether the title bar may be glass).
+CLSID_TF_ThreadMgr
+ClientToScreen
+CoCreateInstance
+CoInitializeEx
+CoUninitialize
+GetWindowRect
+IID_ITextStoreACP
+IID_ITextStoreACPSink
+IID_ITfContextOwnerCompositionServices
+IID_ITfContextOwnerCompositionSink
+IID_ITfRangeACP
+IID_ITfThreadMgr
+SystemParametersInfoW
+
+# DirectManipulation through uuid, user32: the touch pad's scrolling (its manager, viewport and content,
+# the timer it is updated on, the pointer's place).
+CLSID_DirectManipulationManager
+GetCursorPos
+IID_IDirectManipulationContent
+IID_IDirectManipulationManager
+IID_IDirectManipulationUpdateManager
+IID_IDirectManipulationViewport
+IID_IDirectManipulationViewportEventHandler
+KillTimer
+SetTimer

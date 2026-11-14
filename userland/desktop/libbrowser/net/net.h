@@ -252,6 +252,7 @@ int net_cache_open(struct wb_storage_queue *queue, size_t limit, struct net_cach
 void net_cache_close(struct net_cache *cache);
 int net_cache_read(struct net_cache *cache, const char *url, size_t length, struct wb_buffer *record, int *found);
 int net_cache_store(struct net_cache *cache, const struct wb_storage_cache_entry *entry);
+void net_cache_remove(struct net_cache *cache, const char *url, size_t length);
 
 /* data: URLs (data.c). */
 int net_data_parse(const struct net_url *url, struct net_data *data);

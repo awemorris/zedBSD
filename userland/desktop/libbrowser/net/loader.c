@@ -2932,6 +2932,10 @@ loader_cache_answer(
  * Keeps a request's final 200 response in the cache when it may be kept
  * (a max-age or an ETag, and not no-store), in place of an older one of
  * the same URL; the least recently used go when the bodies are too many.
+ * A 200 that may not be kept still takes the URL's older response out of
+ * the memory and the persistent cache: the server has sent a newer one,
+ * so the older is not to answer for the URL again (a revalidation that
+ * the 200 answered included).
  */
 static void
 loader_cache_store(
@@ -2941,18 +2945,15 @@ loader_cache_store(
 	struct net_loader *loader;
 	struct loader_entry *entry;
 	struct wb_buffer url;
+	int keep;
 	int error;
 
-	/* Only a 200 that says it may be kept, and not larger than the cache. */
+	/* Only the 200 of a plain GET concerns the cache. */
 	loader = request->loader;
-	if (!request->plain || request->response.status != 200 || request->response.no_store)
-		return;
-	if (request->response.max_age <= 0 && request->response.etag.length == 0)
-		return;
-	if (request->response.body.length > LOADER_CACHE_MAX)
+	if (!request->plain || request->response.status != 200)
 		return;
 
-	/* The URL, the key; an older response of it goes. */
+	/* The URL, the key. */
 	wb_buffer_init(&url);
 	error = net_url_serialize(&request->url, 1, &url);
 	if (error != 0) {
@@ -2970,6 +2971,21 @@ loader_cache_store(
 	/* An older entry of the URL is replaced (by a 200 to its revalidation too, whose body changed). */
 	if (entry != NULL)
 		loader_cache_free(loader, entry);
+
+	/* A 200 that says it may be kept, and not larger than the cache. */
+	keep = !request->response.no_store;
+	if (request->response.max_age <= 0 && request->response.etag.length == 0)
+		keep = 0;
+	if (request->response.body.length > LOADER_CACHE_MAX)
+		keep = 0;
+
+	/* One that may not be kept leaves the URL out of the persistent cache too. */
+	if (!keep) {
+		if (loader->disk != NULL)
+			net_cache_remove(loader->disk, wb_buffer_string(&url), url.length);
+		wb_buffer_release(&url);
+		return;
+	}
 
 	/* The response as a record: what the memory entry keeps, stamped with the wall clock. */
 	memset(&record, 0, sizeof(record));
