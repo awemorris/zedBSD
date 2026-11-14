@@ -120,6 +120,8 @@ main(void)
 		perror("server");
 		return 2;
 	}
+
+	/* Find out which port the server got. */
 	length = sizeof(address);
 	getsockname(server_socket, (struct sockaddr *)&address, &length);
 	server_port = ntohs(address.sin_port);
@@ -139,6 +141,8 @@ main(void)
 		error = net_loader_fetch(loader, text, done, &outcomes[index], &outcomes[index].request);
 		check(error == 0, "many: fetch");
 	}
+
+	/* Check how each request ended. */
 	check(net_loader_pending(loader) == MANY, "many: pending");
 	check(settle(loader, 10) == 0, "many: settled");
 	for (index = 0; index < MANY; index++) {
@@ -222,6 +226,8 @@ main(void)
 		url(text, sizeof(text), path);
 		net_loader_fetch(loader, text, done, &outcomes[index], &outcomes[index].request);
 	}
+
+	/* Count the wakes so far, then ring the loader from several threads at once. */
 	before = atomic_load(&notified);
 	for (index = 0; index < RINGERS; index++)
 		pthread_create(&ringers[index], NULL, ring_many, loader);
@@ -249,6 +255,8 @@ main(void)
 		url(text, sizeof(text), "/slow");
 		net_loader_fetch(loader, text, done, &outcomes[index], NULL);
 	}
+
+	/* Let the requests start, then destroy the loader. */
 	pause_ms(50);
 	net_loader_destroy(loader);
 	for (index = 0; index < 8; index++)
@@ -259,6 +267,8 @@ main(void)
 		printf("net-ring-test: %d failed\n", failures);
 		return 1;
 	}
+
+	/* Report the pass. */
 	printf("net-ring-test: PASS\n");
 	return 0;
 }
@@ -282,6 +292,7 @@ serve(
 	pthread_t thread;
 	intptr_t client;
 
+	/* The thread has no argument. */
 	(void)argument;
 	for (;;) {
 		client = accept(server_socket, NULL, NULL);
@@ -290,6 +301,8 @@ serve(
 		pthread_create(&thread, NULL, answer, (void *)client);
 		pthread_detach(thread);
 	}
+
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -306,6 +319,7 @@ answer(
 	int different;
 	char *found;
 
+	/* Read the request up to its blank line. */
 	client = (int)(intptr_t)argument;
 	used = 0;
 	while (used < sizeof(request) - 1U) {
@@ -318,6 +332,8 @@ answer(
 		if (found != NULL)
 			break;
 	}
+
+	/* End the request text. */
 	request[used] = '\0';
 	different = strncmp(request, "GET /slow", 9);
 	if (different == 0)
@@ -345,6 +361,7 @@ done(
 {
 	struct outcome *outcome;
 
+	/* Record how the request ended. */
 	outcome = context;
 	outcome->ended++;
 	outcome->error = net_request_error(request);
@@ -361,6 +378,7 @@ pause_ms(
 {
 	struct timespec time;
 
+	/* Sleep for the milliseconds. */
 	time.tv_sec = milliseconds / 1000;
 	time.tv_nsec = (milliseconds % 1000) * 1000000L;
 	nanosleep(&time, NULL);
@@ -376,6 +394,7 @@ settle(
 	int pending;
 	time_t now;
 
+	/* Run the loader until nothing is pending or the time is up. */
 	deadline = time(NULL) + seconds;
 	for (;;) {
 		pending = net_loader_pending(loader);
@@ -387,6 +406,8 @@ settle(
 		net_loader_wait(loader, 1000);
 		net_loader_dispatch(loader);
 	}
+
+	/* Everything settled in time. */
 	return 0;
 }
 
@@ -416,6 +437,7 @@ ring_many(
 {
 	int index;
 
+	/* Ring many times. */
 	for (index = 0; index < RINGS; index++)
 		net_loader_ring(argument);
 	return NULL;
@@ -427,6 +449,7 @@ now_ms(void)
 {
 	struct timespec now;
 
+	/* Read the monotonic clock in milliseconds. */
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	return (long)now.tv_sec * 1000L + now.tv_nsec / 1000000L;
 }

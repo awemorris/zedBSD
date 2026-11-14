@@ -123,6 +123,8 @@ fetch_loader(
 		net_loader_wait(loader, 1000);
 		net_loader_dispatch(loader);
 	}
+
+	/* Release the loader. */
 	net_loader_destroy(loader);
 
 	/* The outcome. */
@@ -134,6 +136,8 @@ fetch_loader(
 		printf("fetch-tool: loader error %d\n", error);
 		return 1;
 	}
+
+	/* Report success. */
 	printf("fetch-tool: loader %d %zu\n", outcome.status, outcome.length);
 	return 0;
 }

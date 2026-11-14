@@ -80,6 +80,7 @@ test_aligned(
 				continue;
 			CHECK_EQ((uintptr_t)memory % good_alignments[a], 0);
 
+			/* Fill the block with a pattern. */
 			bytes = (unsigned char *)memory;
 			for (i = 0; i < good_sizes[s]; i++)
 				bytes[i] = (unsigned char)(i * 7U + a);
@@ -88,6 +89,8 @@ test_aligned(
 				if (bytes[i] != (unsigned char)(i * 7U + a))
 					intact = 0;
 			}
+
+			/* Release the block. */
 			CHECK(intact);
 			wb_os_aligned_free(memory);
 		}
@@ -131,6 +134,7 @@ distinct_values(
 	unsigned count;
 	size_t i;
 
+	/* Mark each byte value that appears. */
 	memset(seen, 0, sizeof(seen));
 	for (i = 0; i < length; i++)
 		seen[bytes[i]] = 1;
@@ -140,6 +144,7 @@ distinct_values(
 			count++;
 	}
 
+	/* Report how many different values appeared. */
 	return count;
 }
 
@@ -183,6 +188,8 @@ test_random(
 		free(second);
 		return;
 	}
+
+	/* Two reads of the generator. */
 	error = wb_os_random(first, length);
 	CHECK_EQ(error, 0);
 	error = wb_os_random(second, length);
@@ -192,12 +199,16 @@ test_random(
 		if (first[i] != 0)
 			all_zero = 0;
 	}
+
+	/* The first read has a byte that is not zero. */
 	CHECK(all_zero == 0);
 	all_zero = 1;
 	for (i = 0; i < length; i++) {
 		if (second[i] != 0)
 			all_zero = 0;
 	}
+
+	/* The two reads differ and together show every value. */
 	CHECK(all_zero == 0);
 	CHECK(memcmp(first, second, length) != 0);
 	CHECK_EQ(distinct_values(first, length), 256);
@@ -262,6 +273,7 @@ test_library(
 			ULONGLONG called;
 			ULONGLONG after;
 
+			/* Look the function up by its name. */
 			function = wb_os_library_symbol(library, "GetTickCount64");
 			CHECK(function != NULL);
 			if (function != NULL) {
@@ -276,6 +288,7 @@ test_library(
 		} else {
 			double (*cosine)(double);
 
+			/* Look the function up by its name. */
 			function = wb_os_library_symbol(library, "cos");
 			CHECK(function != NULL);
 			if (function != NULL) {
@@ -325,6 +338,7 @@ test_library(
 	UINT got;
 	BOOL copied;
 
+	/* Ask for the system directory. */
 	got = GetSystemDirectoryW(system_directory, 512U);
 	CHECK(got > 0 && got < 400U);
 	if (got > 0 && got < 400U) {
@@ -374,6 +388,7 @@ check_data_directory(
 	char *buffer;
 	int error;
 
+	/* The length of the path. */
 	length = strlen(expected);
 
 	/* A buffer of exactly the needed size holds the path and its NUL. */
@@ -478,11 +493,13 @@ main(
 	is_win32 = strcmp(argv[1], "win32") == 0;
 	CHECK(is_win32 || strcmp(argv[1], "posix") == 0);
 
+	/* Run every group. */
 	test_aligned();
 	test_random();
 	test_library();
 	test_names();
 	test_data_directory();
 
+	/* Report the count of failures. */
 	return check_finish("os-system");
 }

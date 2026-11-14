@@ -35,6 +35,8 @@ main(void)
 		printf("delay-load: no vulkan-1.dll, no Vulkan call\n");
 		return 0;
 	}
+
+	/* The probe is let go; the delayed import loads the DLL by itself. */
 	FreeLibrary(loader);
 
 	/* The first call loads the DLL through the delayed import. */
@@ -44,6 +46,8 @@ main(void)
 		printf("delay-load: vkEnumerateInstanceVersion returned %d\n", (int)result);
 		return 1;
 	}
+
+	/* Report success. */
 	printf("delay-load: Vulkan %u.%u\n", VK_API_VERSION_MAJOR(version), VK_API_VERSION_MINOR(version));
 	return 0;
 }

@@ -49,6 +49,8 @@ main(
 		if (differs == 0)
 			path = argv[2];
 	}
+
+	/* The file is required. */
 	if (path == NULL) {
 		fprintf(stderr, "usage: script-core [--js] FILE\n");
 		return 2;

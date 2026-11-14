@@ -112,12 +112,15 @@ main(
 	if (error != 0)
 		return 2;
 
+	/* A second process of the test does its one job and ends. */
 	if (argc >= 3) {
 		child = strcmp(argv[1], "files-child");
 		if (child == 0) {
 			error = child_main("files-child", argv[2]);
 			return error;
 		}
+
+		/* The other job of the second process. */
 		free_mode = strcmp(argv[1], "files-free");
 		if (free_mode == 0) {
 			error = child_main("files-free", argv[2]);
@@ -125,15 +128,19 @@ main(
 		}
 	}
 
+	/* The harness names the system. */
 	if (argc < 2) {
 		printf("usage: test-files posix|win32\n");
 		return 2;
 	}
+
+	/* The program's own path, to start it again. */
 	self_path = argv[0];
 #ifndef _WIN32
 	umask(022);
 #endif
 
+	/* Run every test. */
 	test_open();
 	test_arguments();
 	test_round_trip();
@@ -146,6 +153,7 @@ main(
 	test_directory_spellings();
 	test_other_process();
 
+	/* Report the count of failures. */
 	return check_finish("files");
 }
 
@@ -159,6 +167,7 @@ raw_write(
 	FILE *file;
 	size_t written;
 
+	/* Write the bytes to the file. */
 	file = fopen(path, "wb");
 	CHECK(file != NULL);
 	if (file == NULL)
@@ -192,6 +201,7 @@ raw_exists(
 	wchar_t wide[512];
 	int converted;
 
+	/* Ask for the attributes of the file. */
 	converted = MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, 512);
 	if (converted == 0)
 		return 0;
@@ -200,6 +210,7 @@ raw_exists(
 #else
 	struct stat status;
 
+	/* The file exists when it can be looked at. */
 	return lstat(path, &status) == 0;
 #endif
 }
@@ -213,6 +224,7 @@ make_pattern(
 {
 	size_t i;
 
+	/* Fill with a pattern that depends on the position and the seed. */
 	for (i = 0; i < length; i++)
 		bytes[i] = (unsigned char)((i * 31U + (i >> 8) + seed) & 0xffU);
 }
@@ -249,6 +261,7 @@ read_record(
 	struct browser_storage_sink sink;
 	int error;
 
+	/* Read through the backend into the sink. */
 	wb_storage_sink_init(&sink, bytes);
 	*found = 12345;
 	error = calls->read(context, space, key, &sink, found);
@@ -266,6 +279,7 @@ put(
 {
 	int error;
 
+	/* Write through the backend. */
 	error = calls->write(context, space, key, text, strlen(text));
 	CHECK_EQ(error, 0);
 }
@@ -286,6 +300,7 @@ is_record(
 	int same;
 	int difference;
 
+	/* Read the record and compare its bytes. */
 	wb_buffer_init(&bytes);
 	error = read_record(calls, context, space, key, &bytes, &found);
 	same = 0;
@@ -296,6 +311,8 @@ is_record(
 		if (difference == 0)
 			same = 1;
 	}
+
+	/* Release the buffer. */
 	wb_buffer_release(&bytes);
 	return same;
 }
@@ -313,6 +330,7 @@ is_absent(
 	int error;
 	int absent;
 
+	/* Read into a buffer that holds some bytes; a missing record leaves them. */
 	wb_buffer_init(&bytes);
 	wb_buffer_append_string(&bytes, "xyz");
 	error = read_record(calls, context, space, key, &bytes, &found);
@@ -335,6 +353,7 @@ file_has(
 	int same;
 	int difference;
 
+	/* Read the file and compare its bytes. */
 	wb_buffer_init(&bytes);
 	error = wb_os_file_read(path, &bytes);
 	same = 0;
@@ -345,6 +364,8 @@ file_has(
 		if (difference == 0)
 			same = 1;
 	}
+
+	/* Release the buffer. */
 	wb_buffer_release(&bytes);
 	return same;
 }
@@ -358,6 +379,7 @@ collect_key(
 	struct key_set *set;
 	size_t key_length;
 
+	/* Remember the key; the table is limited. */
 	set = (struct key_set *)each_context;
 	if (set->count >= KEY_SET_MAX)
 		return EOVERFLOW;
@@ -379,6 +401,7 @@ collect_name(
 {
 	struct name_set *set;
 
+	/* Remember the name. */
 	set = (struct name_set *)context;
 	if (set->count >= KEY_SET_MAX)
 		return 0;
@@ -396,11 +419,14 @@ key_set_has(
 	size_t i;
 	int difference;
 
+	/* Look the key up. */
 	for (i = 0; i < set->count; i++) {
 		difference = strcmp(set->keys[i], key);
 		if (difference == 0)
 			return 1;
 	}
+
+	/* It is not there. */
 	return 0;
 }
 
@@ -516,16 +542,19 @@ test_arguments(void)
 	CHECK(calls == NULL);
 	CHECK(context == NULL);
 
+	/* An empty directory name is refused and the outputs are cleared. */
 	calls = (const struct browser_storage_calls *)&sentinel;
 	context = &sentinel;
 	CHECK_EQ(browser_storage_files_open("", &calls, &context), EINVAL);
 	CHECK(calls == NULL);
 	CHECK(context == NULL);
 
+	/* No place for the table is refused and the context is cleared. */
 	context = &sentinel;
 	CHECK_EQ(browser_storage_files_open("arg-dir", NULL, &context), EINVAL);
 	CHECK(context == NULL);
 
+	/* No place for the context is refused and the table is cleared. */
 	calls = (const struct browser_storage_calls *)&sentinel;
 	CHECK_EQ(browser_storage_files_open("arg-dir", &calls, NULL), EINVAL);
 	CHECK(calls == NULL);
@@ -566,9 +595,11 @@ test_arguments(void)
 	CHECK_EQ(calls->write(context, BROWSER_STORAGE_CACHE, "aa", NULL, 0), 0);
 	CHECK(is_record(calls, context, BROWSER_STORAGE_CACHE, "aa", NULL, 0));
 
+	/* One key is listed in the cache space. */
 	CHECK_EQ(list_keys(calls, context, BROWSER_STORAGE_CACHE, &set), 0);
 	CHECK_EQ(set.count, 1);
 
+	/* Close the backend. */
 	close_backend(calls, context);
 }
 
@@ -583,10 +614,12 @@ test_round_trip(void)
 	unsigned space;
 	size_t i;
 
+	/* Open the backend in a new directory. */
 	CHECK_EQ(open_backend("rt", &calls, &context), 0);
 	if (calls == NULL || context == NULL)
 		return;
 
+	/* Each space round-trips records. */
 	for (i = 0; i < sizeof(spaces) / sizeof(spaces[0]); i++) {
 		space = spaces[i];
 
@@ -631,6 +664,7 @@ test_round_trip(void)
 	CHECK(is_record(calls, context, BROWSER_STORAGE_LOCAL, "0b-1", "other", 5));
 	CHECK(is_record(calls, context, 7U, "0b-1", "other", 5));
 
+	/* Close the backend. */
 	close_backend(calls, context);
 }
 
@@ -650,6 +684,7 @@ test_sizes(void)
 	int error;
 	size_t i;
 
+	/* Open the backend in a new directory. */
 	CHECK_EQ(open_backend("sz", &calls, &context), 0);
 	if (calls == NULL || context == NULL)
 		return;
@@ -672,6 +707,7 @@ test_sizes(void)
 		CHECK_EQ(calls->write(context, BROWSER_STORAGE_CACHE, "03", big, BIG_SIZE), 0);
 		CHECK(is_record(calls, context, BROWSER_STORAGE_CACHE, "03", big, BIG_SIZE));
 
+		/* A read appends after the bytes the buffer holds. */
 		wb_buffer_init(&bytes);
 		wb_buffer_append_string(&bytes, "prefix");
 		wb_storage_sink_init(&sink, &bytes);
@@ -712,8 +748,10 @@ test_sizes(void)
 		raw_write("sz/space-7/0f", huge, WB_STORAGE_RECORD_MAX);
 		raw_write("sz/space-7/1f", huge, WB_STORAGE_RECORD_MAX + 1);
 
+		/* The largest record reads whole. */
 		CHECK(is_record(calls, context, 7U, "0f", huge, WB_STORAGE_RECORD_MAX));
 
+		/* A file over the largest record is refused with EFBIG. */
 		wb_buffer_init(&bytes);
 		error = read_record(calls, context, 7U, "1f", &bytes, &found);
 		CHECK_EQ(error, EFBIG);
@@ -721,6 +759,7 @@ test_sizes(void)
 		free(huge);
 	}
 
+	/* Close the backend. */
 	close_backend(calls, context);
 }
 
@@ -738,10 +777,12 @@ test_list_and_clear(void)
 	size_t i;
 	int error;
 
+	/* Open the backend in a new directory. */
 	CHECK_EQ(open_backend("lc", &calls, &context), 0);
 	if (calls == NULL || context == NULL)
 		return;
 
+	/* Put three cookies. */
 	put(calls, context, BROWSER_STORAGE_COOKIES, "01", "a");
 	put(calls, context, BROWSER_STORAGE_COOKIES, "02", "b");
 	put(calls, context, BROWSER_STORAGE_COOKIES, "3-0", "c");
@@ -751,6 +792,8 @@ test_list_and_clear(void)
 		snprintf(name, sizeof(name), "lc/cookies/%s", stray_cookies[i]);
 		raw_write(name, "stray", 5);
 	}
+
+	/* Stray files and a key that is too long are not listed. */
 	memset(too_long, 'a', BROWSER_STORAGE_KEY_MAX + 1);
 	too_long[BROWSER_STORAGE_KEY_MAX + 1] = '\0';
 	snprintf(name, sizeof(name), "lc/cookies/%s", too_long);
@@ -771,6 +814,7 @@ test_list_and_clear(void)
 	CHECK_EQ(error, 4);
 	CHECK_EQ(set.count, 2);
 
+	/* A callback that fails stops the listing with its error. */
 	memset(&set, 0, sizeof(set));
 	set.stop_at = 1;
 	set.stop_value = ENOENT;
@@ -788,6 +832,8 @@ test_list_and_clear(void)
 		snprintf(name, sizeof(name), "lc/cookies/%s", stray_cookies[i]);
 		CHECK(raw_exists(name));
 	}
+
+	/* The files that are not records stay. */
 	snprintf(name, sizeof(name), "lc/cookies/%s", too_long);
 	CHECK(raw_exists(name));
 
@@ -816,6 +862,7 @@ test_list_and_clear(void)
 	CHECK_EQ(list_keys(calls, context, BROWSER_STORAGE_LOCAL, &set), 0);
 	CHECK_EQ(set.count, 3);
 
+	/* A clear removes the whole space. */
 	CHECK_EQ(calls->clear(context, BROWSER_STORAGE_LOCAL), 0);
 	CHECK_EQ(list_keys(calls, context, BROWSER_STORAGE_LOCAL, &set), 0);
 	CHECK_EQ(set.count, 0);
@@ -831,6 +878,7 @@ test_list_and_clear(void)
 	/* The stray files of one space are not seen as the record of a key in it. */
 	CHECK(is_absent(calls, context, BROWSER_STORAGE_LOCAL, "0e"));
 
+	/* Close the backend. */
 	close_backend(calls, context);
 }
 
@@ -842,10 +890,12 @@ test_layout(void)
 	void *context;
 	struct wb_buffer bytes;
 
+	/* Open the backend in a new directory. */
 	CHECK_EQ(open_backend("lay", &calls, &context), 0);
 	if (calls == NULL || context == NULL)
 		return;
 
+	/* Put one record in each space. */
 	put(calls, context, BROWSER_STORAGE_COOKIES, "ab", "cookie");
 	put(calls, context, BROWSER_STORAGE_CACHE, "cd", "cache");
 	put(calls, context, BROWSER_STORAGE_LOCAL, "ef", "local");
@@ -870,6 +920,7 @@ test_layout(void)
 	CHECK_EQ(wb_os_file_read("lay/lock", &bytes), 0);
 	wb_buffer_release(&bytes);
 
+	/* Close the backend; the lock file stays. */
 	close_backend(calls, context);
 	CHECK(raw_exists("lay/lock"));
 }
@@ -900,6 +951,7 @@ test_legacy(void)
 	snprintf(path, sizeof(path), "old/local-storage/%s.ls", hex);
 	raw_write(path, old_file, sizeof(old_file) - 1);
 
+	/* Open a directory that an older version wrote. */
 	CHECK_EQ(open_backend("old", &calls, &context), 0);
 	if (calls == NULL || context == NULL)
 		return;
@@ -912,6 +964,7 @@ test_legacy(void)
 	CHECK_EQ(set.count, 1);
 	CHECK(key_set_has(&set, key));
 
+	/* Close the backend. */
 	close_backend(calls, context);
 }
 
@@ -929,13 +982,16 @@ test_bad_keys(void)
 	size_t i;
 	int found;
 
+	/* Open the backend in a new directory. */
 	CHECK_EQ(open_backend("bad", &calls, &context), 0);
 	if (calls == NULL || context == NULL)
 		return;
 
+	/* A key that is too long. */
 	memset(too_long, 'a', BROWSER_STORAGE_KEY_MAX + 1);
 	too_long[BROWSER_STORAGE_KEY_MAX + 1] = '\0';
 
+	/* Every call refuses bad keys in every space. */
 	for (space = 1; space <= 4; space++) {
 		wb_buffer_init(&bytes);
 		wb_storage_sink_init(&sink, &bytes);
@@ -956,6 +1012,7 @@ test_bad_keys(void)
 			CHECK_EQ(calls->remove(context, space, bad[i]), EINVAL);
 		}
 
+		/* A refused read left the buffer empty. */
 		CHECK_EQ(bytes.length, 0);
 		wb_buffer_release(&bytes);
 	}
@@ -965,6 +1022,7 @@ test_bad_keys(void)
 	CHECK(!raw_exists("bad/space-4"));
 	CHECK(!raw_exists("bad/x"));
 
+	/* Close the backend. */
 	close_backend(calls, context);
 }
 
@@ -984,6 +1042,7 @@ test_hostile(void)
 	int error;
 	int matched;
 
+	/* A directory with records that were cut or damaged. */
 	CHECK(raw_make_directory("hos"));
 	CHECK(raw_make_directory("hos/cookies"));
 	CHECK(raw_make_directory("hos/cache"));
@@ -1000,10 +1059,12 @@ test_hostile(void)
 	raw_write("hos/space-9", "plain file", 10);
 	CHECK(raw_make_directory("hos/local-storage"));
 
+	/* Open the backend over them. */
 	CHECK_EQ(open_backend("hos", &calls, &context), 0);
 	if (calls == NULL || context == NULL)
 		return;
 
+	/* Each record reads as the bytes it has. */
 	CHECK(is_record(calls, context, BROWSER_STORAGE_COOKIES, "aa", noise, sizeof(noise)));
 	CHECK(is_record(calls, context, BROWSER_STORAGE_COOKIES, "ab", noise, 17));
 	CHECK(is_record(calls, context, BROWSER_STORAGE_COOKIES, "ac", "KEILAND COOKIE 1\n\xff\xff\xff\xff", 21));
@@ -1016,6 +1077,8 @@ test_hostile(void)
 		if (!matched)
 			CHECK(0);
 	}
+
+	/* Every truncation was read. */
 	CHECK(1);
 
 	/* A directory in the place of a record is an error for read and remove, and not a found record. */
@@ -1069,6 +1132,7 @@ test_hostile(void)
 	/* A failed replace did not disturb an existing record of another key. */
 	CHECK(is_record(calls, context, BROWSER_STORAGE_COOKIES, "aa", noise, sizeof(noise)));
 
+	/* Close the backend. */
 	close_backend(calls, context);
 }
 
@@ -1089,15 +1153,18 @@ test_directory_spellings(void)
 	if (calls == NULL || context == NULL)
 		return;
 
+	/* Remember the current directory. */
 	wb_buffer_init(&here);
 	CHECK_EQ(wb_os_current_directory(&here), 0);
 
+	/* Change the directory; the backend keeps its own directory. */
 	CHECK_EQ(chdir("sp/inner"), 0);
 	put(calls, context, BROWSER_STORAGE_COOKIES, "ab", "moved");
 	CHECK(is_record(calls, context, BROWSER_STORAGE_COOKIES, "ab", "moved", 5));
 	CHECK_EQ(chdir((const char *)here.data), 0);
 	wb_buffer_release(&here);
 
+	/* The record is in the opened directory, not in the new one. */
 	CHECK(file_has("sp/rel/cookies/ab", "moved", 5));
 	CHECK(!raw_exists("sp/inner/cookies"));
 	close_backend(calls, context);
@@ -1108,6 +1175,7 @@ test_directory_spellings(void)
 	if (calls != NULL && context != NULL) {
 		void *again_context;
 
+		/* A second open of the same directory is refused while it is held. */
 		CHECK(is_record(calls, context, BROWSER_STORAGE_COOKIES, "ab", "moved", 5));
 		CHECK_EQ(open_backend("sp/rel", &again_calls, &again_context), EBUSY);
 		CHECK(again_calls == NULL);
@@ -1129,10 +1197,12 @@ child_main(
 	int error;
 	int child;
 
+	/* Open the directory. */
 	calls = NULL;
 	context = NULL;
 	error = browser_storage_files_open(directory, &calls, &context);
 
+	/* While another process holds it, the open must fail with EBUSY. */
 	child = strcmp(mode, "files-child");
 	if (child == 0) {
 		if (error != EBUSY)
@@ -1142,6 +1212,7 @@ child_main(
 		return 0;
 	}
 
+	/* When it is free the open succeeds. */
 	if (error != 0)
 		return 5;
 	if (calls == NULL || context == NULL)
@@ -1195,6 +1266,7 @@ run_child(
 	int waited;
 	int exited;
 
+	/* Start the second process. */
 	spawned = posix_spawn(&pid, self_path, NULL, NULL, arguments, environ);
 	if (spawned != 0)
 		return -1;
@@ -1215,10 +1287,12 @@ test_other_process(void)
 	const struct browser_storage_calls *calls;
 	void *context;
 
+	/* Open the backend in a new directory. */
 	CHECK_EQ(open_backend("proc", &calls, &context), 0);
 	if (calls == NULL || context == NULL)
 		return;
 
+	/* The second process cannot open the directory while this one holds it. */
 	put(calls, context, BROWSER_STORAGE_COOKIES, "aa", "held");
 	CHECK_EQ(run_child("files-child", "proc"), 0);
 
@@ -1226,5 +1300,6 @@ test_other_process(void)
 	CHECK(is_record(calls, context, BROWSER_STORAGE_COOKIES, "aa", "held", 4));
 	close_backend(calls, context);
 
+	/* After the close the second process gets it. */
 	CHECK_EQ(run_child("files-free", "proc"), 0);
 }

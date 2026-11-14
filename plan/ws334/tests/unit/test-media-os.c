@@ -145,8 +145,11 @@ test_fopen(
 		wide_mode[index] = (wchar_t)(unsigned char)mode[index];
 		index++;
 	}
+
+	/* End the wide mode. */
 	wide_mode[index] = 0;
 
+	/* Open through the wide names. */
 	return _wfopen(wide_name, wide_mode);
 #else
 	return fopen(name, mode);
@@ -183,12 +186,15 @@ test_make_file(
 		free(bytes);
 		return 1;
 	}
+
+	/* Write all the bytes. */
 	written = fwrite(bytes, 1, size, stream);
 	fclose(stream);
 	free(bytes);
 	if (written != size)
 		return 1;
 
+	/* The file is made. */
 	return 0;
 }
 
@@ -205,6 +211,7 @@ test_make_directory(
 	status = mkdir(name, 0777);
 #endif
 
+	/* Give the result of the call. */
 	return status;
 }
 
@@ -279,6 +286,7 @@ test_sizes(void)
 		error = test_make_file(names[index], sizes[index]);
 		CHECK_EQ(error, 0);
 
+		/* Poison the outputs, so that a call that leaves them alone shows. */
 		file = (struct media_os_file *)1;
 		size = 12345;
 		error = media_os_file_open(names[index], &file, &size);
@@ -294,6 +302,7 @@ test_sizes(void)
 			CHECK_EQ(byte, test_pattern(0));
 		}
 
+		/* Close the file. */
 		media_os_file_close(file);
 	}
 }
@@ -340,6 +349,8 @@ test_reads(void)
 		if (buffer[index] != expected)
 			wrong++;
 	}
+
+	/* No byte had a wrong value. */
 	CHECK_EQ(wrong, 0);
 
 	/* Reads 100000 bytes from the middle, from an offset that is not aligned. */
@@ -354,6 +365,8 @@ test_reads(void)
 		if (buffer[index] != expected)
 			wrong++;
 	}
+
+	/* No byte had a wrong value. */
 	CHECK_EQ(wrong, 0);
 
 	/* Reads the last 100 bytes, the last byte alone, and the whole file at once. */
@@ -368,6 +381,8 @@ test_reads(void)
 		if (buffer[index] != expected)
 			wrong++;
 	}
+
+	/* No byte had a wrong value. */
 	CHECK_EQ(wrong, 0);
 	byte = 0;
 	error = media_os_file_read_at(file, TEST_BIG_SIZE - 1, &byte, 1);
@@ -384,6 +399,8 @@ test_reads(void)
 		if (buffer[index] != expected)
 			wrong++;
 	}
+
+	/* No byte had a wrong value. */
 	CHECK_EQ(wrong, 0);
 
 	/* Reading nothing succeeds at the start, at the end, past the end and at the largest offset. */
@@ -422,6 +439,7 @@ test_reads(void)
 	CHECK_EQ(error, 0);
 	CHECK_EQ(byte, test_pattern(12));
 
+	/* Close the file and release the buffer. */
 	media_os_file_close(file);
 	free(buffer);
 }
@@ -481,6 +499,7 @@ test_far(void)
 	error = media_os_file_read_at(file, far_offset + 1, bytes, 3);
 	CHECK_EQ(error, EIO);
 
+	/* Close the file. */
 	media_os_file_close(file);
 }
 
@@ -648,6 +667,8 @@ test_names(void)
 		printf("note: no file with a non-ASCII name can be made here\n");
 		CHECK(strcmp(test_system, "win32") == 0);
 	}
+
+	/* A name with non-ASCII letters is looked up too. */
 	error = media_os_file_open("absent-\xc3\xa9-\xe5\x8b\x95-\xf0\x9f\x8e\xac.mp4", &file, &size);
 	CHECK_EQ(error, ENOENT);
 	CHECK(file == NULL);
@@ -733,6 +754,8 @@ test_sharing(void)
 		CHECK_EQ(buffer[0], test_pattern(10));
 		CHECK_EQ(buffer[3], test_pattern(13));
 	}
+
+	/* Close the file. */
 	media_os_file_close(file);
 }
 
@@ -815,6 +838,7 @@ test_access(void)
 	uid_t user;
 #endif
 
+	/* A file the test makes. */
 	error = test_make_file("locked.bin", 10);
 	CHECK_EQ(error, 0);
 	file = (struct media_os_file *)1;

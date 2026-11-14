@@ -205,6 +205,8 @@ test_shape(void)
 			CHECK(table[i].standard[0] != '\0');
 			CHECK(strlen(table[i].standard) <= NAME_BYTES_MAX);
 		}
+
+		/* A daylight name, when the zone has one, is not empty and fits. */
 		if (table[i].daylight != NULL) {
 			CHECK(table[i].daylight[0] != '\0');
 			CHECK(strlen(table[i].daylight) <= NAME_BYTES_MAX);
@@ -234,11 +236,13 @@ test_expected_rows(void)
 		if (names == NULL)
 			continue;
 
+		/* The row has its key and its standard name. */
 		CHECK(strcmp(names->key, expected_rows[i].key) == 0);
 		CHECK(names->standard != NULL);
 		if (names->standard != NULL)
 			CHECK(strcmp(names->standard, expected_rows[i].standard) == 0);
 
+		/* The daylight name is the expected one. */
 		if (expected_rows[i].daylight == NULL) {
 			/* CLDR gives this zone no daylight name. */
 			CHECK(names->daylight == NULL);

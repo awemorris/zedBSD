@@ -104,6 +104,8 @@ main(
 				printf("tls-tool: --ca-file error %d\n", error);
 				return 2;
 			}
+
+			/* Skip the option's value. */
 			index++;
 		} else if (is_root == 0 && has_value) {
 			placed = place(L"ROOT", argv[index + 1]);
@@ -122,6 +124,8 @@ main(
 			break;
 		}
 	}
+
+	/* The URL is required. */
 	if (url == NULL) {
 		fprintf(stderr, "usage: tls-tool [--ca-file PEM] [--root DER] [--disallowed DER] URL\n");
 		unplace();
@@ -153,6 +157,8 @@ place(
 		printf("tls-tool: cannot open %s\n", path);
 		return 1;
 	}
+
+	/* Read the certificate file. */
 	length = fread(der, 1, sizeof(der), file);
 	fclose(file);
 	if (length == 0 || placed_count == PLACED_MAX) {
@@ -171,7 +177,7 @@ place(
 	/* The certificate in it. */
 	entry->certificate = NULL;
 	added = CertAddEncodedCertificateToStore(entry->store, X509_ASN_ENCODING, der, (DWORD)length,
-		CERT_STORE_ADD_REPLACE_EXISTING, &entry->certificate);
+		    CERT_STORE_ADD_REPLACE_EXISTING, &entry->certificate);
 	if (!added) {
 		printf("tls-tool: cannot add %s to %ls (error %lu)\n", path, store_name, (unsigned long)GetLastError());
 		CertCloseStore(entry->store, 0);
@@ -196,6 +202,8 @@ unplace(void)
 		CertControlStore(placed[index - 1].store, 0, CERT_STORE_CTRL_COMMIT, NULL);
 		CertCloseStore(placed[index - 1].store, 0);
 	}
+
+	/* No store is held now. */
 	placed_count = 0;
 }
 
@@ -253,6 +261,8 @@ fetch_loader(
 		net_loader_wait(loader, 1000);
 		net_loader_dispatch(loader);
 	}
+
+	/* Release the loader. */
 	net_loader_destroy(loader);
 
 	/* The outcome. */
@@ -264,6 +274,8 @@ fetch_loader(
 		printf("tls-tool: loader error %d\n", error);
 		return 1;
 	}
+
+	/* Report the answer. */
 	printf("tls-tool: loader %d %zu\n", outcome.status, outcome.length);
 	return 0;
 }

@@ -828,6 +828,8 @@ main(
 		printf("test-cf-html: FAIL (no system argument)\n");
 		return 1;
 	}
+
+	/* Which system the harness runs the test on. */
 	posix_different = strcmp(argv[1], "posix");
 	win32_different = strcmp(argv[1], "win32");
 	if (posix_different != 0 && win32_different != 0) {
@@ -1122,6 +1124,8 @@ test_decode_cases(void)
 			CHECK_EQ(answer.length, 0U);
 			CHECK_EQ(answer.has_url, 0);
 		}
+
+		/* No case left a broken answer. */
 		CHECK_EQ(answer.broken, 0);
 
 		/*
@@ -1278,6 +1282,8 @@ test_truncation(void)
 		CHECK_EQ(answer.broken, 0);
 		free(copy);
 	}
+
+	/* Release the data. */
 	free(data);
 }
 
@@ -1326,6 +1332,8 @@ test_mutation(void)
 			free(copy);
 		}
 	}
+
+	/* Release the data. */
 	free(data);
 
 	/* No answer left the block, and changes that leave the header alone still decode. */
@@ -1394,6 +1402,8 @@ test_random(void)
 				else
 					length += (size_t)sprintf(block + length, "%s%u\r\n", offset_names[index], 100U + random_next() % 120U);
 			}
+
+			/* Then a random number of other bytes. */
 			count = random_next() % 100U;
 			for (index = 0U;
 			     index < count;
@@ -1468,6 +1478,8 @@ check_round_trip(
 		CHECK_EQ(answer.url_length, strlen(url));
 		CHECK(memcmp(copy + answer.url_offset, url, answer.url_length) == 0);
 	}
+
+	/* The answer does not point outside the block. */
 	CHECK_EQ(answer.broken, 0);
 	free(copy);
 
@@ -1566,6 +1578,8 @@ decode_copy(
 			answer->offset = (size_t)(fragment - copy);
 			answer->length = fragment_length;
 		}
+
+		/* The URL, when there is one, is inside the block too. */
 		if (url != NULL) {
 			if (url < copy || (size_t)(url - copy) > length || url_length > length - (size_t)(url - copy)) {
 				answer->broken = 1;
@@ -1578,6 +1592,8 @@ decode_copy(
 			answer->broken = 1;
 		}
 	}
+
+	/* Release the copy. */
 	free(copy);
 
 	/* Reports the decoder's own answer. */
