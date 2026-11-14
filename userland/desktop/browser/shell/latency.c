@@ -113,6 +113,8 @@ shell_latency_take(
 		latency->longest_us = waited;
 		latency->longest_at_us = now - latency->started_us;
 	}
+
+	/* Counts a wait longer than the limit the program calls long. */
 	if (waited > LATENCY_LONG_US)
 		latency->over_20ms++;
 	if (waited > LATENCY_LONGER_US) {

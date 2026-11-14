@@ -192,6 +192,8 @@ view_style_lend(
 		} else {
 			style->first = &request;
 		}
+
+		/* The request is the last one asked now. */
 		style->last = &request;
 		wb_cond_signal(&style->asked);
 		while (!request.done)

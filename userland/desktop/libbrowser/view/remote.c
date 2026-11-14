@@ -287,6 +287,8 @@ view_remotes_destroy(
 		up = wb_vector_at(&remotes->up, index);
 		remote_up_free(up);
 	}
+
+	/* Releases the lists and the lock. */
 	wb_vector_release(&remotes->up);
 	wb_vector_release(&remotes->live);
 	wb_mutex_destroy(&remotes->lock);
@@ -299,11 +301,13 @@ view_remotes_close_all(
 	struct view_remotes *remotes)
 {
 	struct view_remote *remote;
+	size_t count;
 
 	/* Each, as a closed one, without its parent's element and page (gone). */
 	if (remotes == NULL)
 		return;
-	while (view_remotes_count(remotes) != 0) {
+	count = view_remotes_count(remotes);
+	while (count != 0) {
 		wb_mutex_lock(&remotes->lock);
 		remote = *(struct view_remote **)wb_vector_at(&remotes->live, 0);
 		wb_mutex_unlock(&remotes->lock);
@@ -311,6 +315,9 @@ view_remotes_close_all(
 		remote->element = NULL;
 		remote->loading = 0;
 		remote_end(remote);
+
+		/* Counts the frames still live. */
+		count = view_remotes_count(remotes);
 	}
 }
 
@@ -356,7 +363,10 @@ view_remotes_load(
 	struct view_remotes *remotes;
 	struct view_remote *remote;
 	struct remote_entry entry;
+	const char *mime;
+	size_t body_size;
 	size_t stack;
+	int room;
 	int error;
 
 	/* The response, copied for the frame's thread. */
@@ -364,15 +374,23 @@ view_remotes_load(
 	memset(&entry, 0, sizeof(entry));
 	entry.kind = REMOTE_ENTRY_LOAD;
 	entry.url = remote_strdup(response->url, strlen(response->url));
-	entry.mime = remote_strdup(response->mime != NULL ? response->mime : "", response->mime_length);
+	mime = "";
+	if (response->mime != NULL)
+		mime = response->mime;
+	entry.mime = remote_strdup(mime, response->mime_length);
 	entry.mime_length = response->mime_length;
-	entry.body = malloc(response->length == 0 ? 1U : response->length);
+	body_size = response->length;
+	if (body_size == 0)
+		body_size = 1U;
+	entry.body = malloc(body_size);
 	entry.length = response->length;
 	bind_tape_init(&entry.tape);
 	if (entry.url == NULL || entry.mime == NULL || entry.body == NULL) {
 		remote_entry_free(&entry);
 		return ENOMEM;
 	}
+
+	/* Copies the body. */
 	if (response->length != 0)
 		memcpy(entry.body, response->body, response->length);
 
@@ -390,19 +408,26 @@ view_remotes_load(
 			remote->loading = 1;
 			page_remote_loading(remote->page);
 		}
+
+		/* Succeeded: the frame has the response queued. */
 		return 0;
 	}
 
 	/* A new frame, in the view's bound (its iframes' threads and its frames). */
-	if (!view_frames_room(context) || page->loader == NULL) {
+	room = view_frames_room(context);
+	if (!room || page->loader == NULL) {
 		remote_entry_free(&entry);
 		return EAGAIN;
 	}
+
+	/* Allocates the frame. */
 	remote = calloc(1, sizeof(*remote));
 	if (remote == NULL) {
 		remote_entry_free(&entry);
 		return ENOMEM;
 	}
+
+	/* Fills the new frame in. */
 	remote->remotes = remotes;
 	remote->refs = 1U;
 	remote->element = element;
@@ -510,6 +535,8 @@ remote_end(
 		remotes->live.count--;
 		break;
 	}
+
+	/* Drops the entries of the frame that ended. */
 	kept = 0;
 	for (index = 0; index < remotes->up.count; index++) {
 		up = wb_vector_at(&remotes->up, index);
@@ -517,9 +544,13 @@ remote_end(
 			remote_up_free(up);
 			continue;
 		}
+
+		/* Moves the entry that stays down to the kept place. */
 		*(struct remote_up *)wb_vector_at(&remotes->up, kept) = *up;
 		kept++;
 	}
+
+	/* Keeps only the entries of other frames. */
 	remotes->up.count = kept;
 
 	wb_mutex_unlock(&remotes->lock);
@@ -611,6 +642,7 @@ view_remotes_deliver(
 	struct vm_agent *agent;
 	size_t index;
 	size_t kept;
+	int pushed;
 	int error;
 
 	/* The runner's entries, taken out of the queue. */
@@ -622,11 +654,19 @@ view_remotes_deliver(
 	kept = 0;
 	for (index = 0; index < remotes->up.count; index++) {
 		up = wb_vector_at(&remotes->up, index);
-		if (up->runner == runner && wb_vector_push(&taken, up) == 0)
-			continue;
+		if (up->runner == runner) {
+			/* Takes the entry out of the queue, which keeps it when the table of the taken has no room. */
+			pushed = wb_vector_push(&taken, up);
+			if (pushed == 0)
+				continue;
+		}
+
+		/* Moves the entry that stays down to the kept place. */
 		*(struct remote_up *)wb_vector_at(&remotes->up, kept) = *up;
 		kept++;
 	}
+
+	/* Keeps the queue's entries that stay. */
 	remotes->up.count = kept;
 
 	wb_mutex_unlock(&remotes->lock);
@@ -640,6 +680,8 @@ view_remotes_deliver(
 			remote_up_free(up);
 			continue;
 		}
+
+		/* Finds the window the entry is for. */
 		window = element->node.document->view;
 		if (up->target == BIND_REMOTE_TOP)
 			window = remote->page->window;
@@ -662,14 +704,19 @@ view_remotes_deliver(
 				remote->loading = 0;
 				error = page_remote_loaded(remote->page, element, 1);
 			}
+
 			break;
 		default:
 			break;
 		}
+
+		/* Ends the task the entry ran in. */
 		vm_agent_task_end(agent);
 		(void)error;
 		remote_up_free(up);
 	}
+
+	/* Releases the table of the entries taken. */
 	wb_vector_release(&taken);
 }
 
@@ -770,14 +817,30 @@ view_remotes_key(
 {
 	struct view_remote *remote;
 	struct remote_entry entry;
+	const char *key_text;
+	const char *code_text;
+	size_t key_length;
+	size_t code_length;
 	int error;
 
 	/* The entry. */
 	memset(&entry, 0, sizeof(entry));
 	entry.kind = REMOTE_ENTRY_KEY;
 	snprintf(entry.type, sizeof(entry.type), "%s", type);
-	entry.key = remote_strdup(key != NULL ? key : "", key != NULL ? strlen(key) : 0);
-	entry.code = remote_strdup(code != NULL ? code : "", code != NULL ? strlen(code) : 0);
+	key_text = "";
+	key_length = 0;
+	if (key != NULL) {
+		key_text = key;
+		key_length = strlen(key);
+	}
+	entry.key = remote_strdup(key_text, key_length);
+	code_text = "";
+	code_length = 0;
+	if (code != NULL) {
+		code_text = code;
+		code_length = strlen(code);
+	}
+	entry.code = remote_strdup(code_text, code_length);
 	entry.repeat = repeat;
 	entry.modifiers = modifiers;
 	bind_tape_init(&entry.tape);
@@ -924,7 +987,11 @@ remote_post(
 	entry.source = BIND_REMOTE_PARENT;
 	if (kind != BIND_REMOTE_CHILD || entry.origin == NULL || entry.target == NULL) {
 		remote_entry_free(&entry);
-		return kind != BIND_REMOTE_CHILD ? ENOENT : ENOMEM;
+
+		/* A message to anything but a child has no frame; a child's strings that did not copy ran out of memory. */
+		if (kind != BIND_REMOTE_CHILD)
+			return ENOENT;
+		return ENOMEM;
 	}
 
 	/* The sender is the frame's parent, or its top seen from a deeper frame. */
@@ -1057,8 +1124,14 @@ child_post(
 		free(up.target_origin);
 		return ENOMEM;
 	}
+
+	/* Hands the message to the view's queue. */
 	error = remote_up(remote, &up);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the message is queued for the view. */
+	return 0;
 }
 
 /* A frame's window navigates its parent or its top (their proxies' location). */
@@ -1143,6 +1216,8 @@ remote_find(
 		if (remote->number == number)
 			return remote;
 	}
+
+	/* Reports that the view has no frame of that number. */
 	return NULL;
 }
 
@@ -1189,7 +1264,9 @@ remote_up(
 
 	error = ENOENT;
 	if (remote->attached) {
-		up->runner = up->target == BIND_REMOTE_TOP ? NULL : remote->runner;
+		up->runner = NULL;
+		if (up->target != BIND_REMOTE_TOP)
+			up->runner = remote->runner;
 		__atomic_fetch_add(&remote->refs, 1U, __ATOMIC_RELAXED);
 		error = wb_vector_push(&remotes->up, up);
 		if (error != 0)
@@ -1202,8 +1279,13 @@ remote_up(
 	if (error != 0) {
 		up->remote = NULL;
 		remote_up_free(up);
+
+		/* Reports why the entry was not queued. */
+		return error;
 	}
-	return error;
+
+	/* Succeeded: the entry is queued. */
+	return 0;
 }
 
 /* Lets go of an entry of the queue and its hold on its frame. */
@@ -1268,6 +1350,7 @@ remote_run(
 	uint64_t wait;
 	size_t index;
 	int ending;
+	int reaching;
 
 	/* This thread is the frame's: its requests' client, no runner (its page is its own). */
 	remote = argument;
@@ -1280,7 +1363,8 @@ remote_run(
 		/* The wait: for the inbox, news or the end, at most until the next timer. */
 		wb_mutex_lock(&remote->lock);
 
-		while (!remote->rung && remote->inbox.count == 0 && !__atomic_load_n(&remote->ending, __ATOMIC_ACQUIRE)) {
+		reaching = __atomic_load_n(&remote->ending, __ATOMIC_ACQUIRE);
+		while (!remote->rung && remote->inbox.count == 0 && !reaching) {
 			now = wb_os_monotonic_ns();
 			if (deadline != UINT64_MAX && now >= deadline)
 				break;
@@ -1288,7 +1372,12 @@ remote_run(
 			if (deadline != UINT64_MAX && (deadline - now + 999999ULL) / 1000000ULL < wait)
 				wait = (deadline - now + 999999ULL) / 1000000ULL;
 			(void)wb_cond_wait_for(&remote->changed, &remote->lock, (uint32_t)wait);
+
+			/* Looks again at whether the frame was told to end while this thread waited. */
+			reaching = __atomic_load_n(&remote->ending, __ATOMIC_ACQUIRE);
 		}
+
+		/* Takes the entries queued for this round. */
 		remote->rung = 0;
 		taken = remote->inbox;
 		wb_vector_init(&remote->inbox, sizeof(struct remote_entry));
@@ -1302,6 +1391,8 @@ remote_run(
 				entry = wb_vector_at(&taken, index);
 				remote_entry_free(entry);
 			}
+
+			/* Releases the table of the entries taken. */
 			wb_vector_release(&taken);
 			break;
 		}
@@ -1333,18 +1424,29 @@ remote_round(
 {
 	struct remote_entry *entry;
 	struct vm_agent *agent;
+	uint64_t now;
 	size_t index;
+	int ending;
 	int error;
+	int reached;
 
 	/* The responses first (each makes the page anew; the others go to the page shown then). */
 	for (index = 0; index < taken->count; index++) {
 		entry = wb_vector_at(taken, index);
-		if (entry->kind == REMOTE_ENTRY_LOAD && !__atomic_load_n(&remote->ending, __ATOMIC_ACQUIRE))
-			remote_show(remote, entry);
+		if (entry->kind == REMOTE_ENTRY_LOAD) {
+			/* Shows the response unless the frame was told to end. */
+			ending = __atomic_load_n(&remote->ending, __ATOMIC_ACQUIRE);
+			if (!ending)
+				remote_show(remote, entry);
+		}
+
+		/* Drops an entry of a frame without a document, and the response that was just shown. */
 		if (remote->own == NULL || entry->kind == REMOTE_ENTRY_LOAD) {
 			remote_entry_free(entry);
 			continue;
 		}
+
+		/* Runs the entry as one task of the frame's agent. */
 		agent = vm_heap_agent(remote->own->heap);
 		vm_agent_task_begin(agent);
 		if (entry->kind == REMOTE_ENTRY_MESSAGE)
@@ -1354,17 +1456,23 @@ remote_round(
 		vm_agent_task_end(agent);
 		remote_entry_free(entry);
 	}
+
+	/* Ends the round when the frame shows no document. */
 	if (remote->own == NULL)
 		return;
 
 	/* The network's news, the timers and the images, as one task. */
 	agent = vm_heap_agent(remote->own->heap);
 	vm_agent_task_begin(agent);
-	if (net_loader_client_dispatch_until(remote->client, wb_os_monotonic_ns() + REMOTE_DISPATCH_NS)) {
+	now = wb_os_monotonic_ns();
+	reached = net_loader_client_dispatch_until(remote->client, now + REMOTE_DISPATCH_NS);
+	if (reached) {
 		wb_mutex_lock(&remote->lock);
 		remote->rung = 1;
 		wb_mutex_unlock(&remote->lock);
 	}
+
+	/* Brings the page's time up to the frame's. */
 	error = page_set_time(remote->own, remote_time(remote));
 	if (error == 0)
 		error = page_images_checkpoint(remote->own);
@@ -1448,6 +1556,8 @@ remote_input(
 	struct page *page;
 	int canceled;
 	int found;
+	int order;
+	int error;
 
 	/* The page's document's place of the pointer. */
 	page = remote->own;
@@ -1467,23 +1577,35 @@ remote_input(
 	}
 
 	/* A wheel, a move, a press (the focus moves there), a release and its click (a link followed is the frame's navigation). */
-	if (strcmp(entry->type, "wheel") == 0) {
+	order = strcmp(entry->type, "wheel");
+	if (order == 0) {
 		(void)page_wheel_event(page, &pointer, &canceled);
 		return;
 	}
+
+	/* Tells the page of the mouse event, and moves the focus to a press. */
 	(void)page_mouse_event(page, entry->type, &pointer, &canceled);
-	if (strcmp(entry->type, "mousedown") == 0) {
+	order = strcmp(entry->type, "mousedown");
+	if (order == 0) {
 		(void)page_focus_at(page, pointer.x, pointer.y);
 		return;
 	}
-	if (strcmp(entry->type, "mouseup") != 0)
+
+	/* Ends the click here unless the button went up. */
+	order = strcmp(entry->type, "mouseup");
+	if (order != 0)
 		return;
+
+	/* Clicks where the button went up, which a script may cancel. */
 	(void)page_mouse_event(page, "click", &pointer, &canceled);
 	if (canceled)
 		return;
+
+	/* Follows the link under the click, which is the frame's navigation. */
 	wb_buffer_init(&href);
 	found = 0;
-	if (page_click_control(page, pointer.x, pointer.y, &href, &found) == 0 && found && href.length != 0)
+	error = page_click_control(page, pointer.x, pointer.y, &href, &found);
+	if (error == 0 && found && href.length != 0)
 		(void)remote_navigate_self(remote, wb_buffer_string(&href), 0);
 	wb_buffer_release(&href);
 }
@@ -1495,6 +1617,7 @@ remote_loaded_check(
 {
 	struct remote_up up;
 	int count;
+	int waiting;
 
 	/* The frames' count its proxies tell. */
 	count = remote_count_frames(remote->own);
@@ -1505,7 +1628,10 @@ remote_loaded_check(
 	wb_mutex_unlock(&remote->remotes->lock);
 
 	/* Once, after the load ran. */
-	if (remote->told || remote->own->load_pending || page_load_waiting(remote->own))
+	if (remote->told || remote->own->load_pending)
+		return;
+	waiting = page_load_waiting(remote->own);
+	if (waiting)
 		return;
 	remote->told = 1;
 	memset(&up, 0, sizeof(up));
@@ -1579,6 +1705,7 @@ remote_commit(
 	int width;
 	int height;
 	int changed;
+	int needs_paint;
 	int error;
 
 	/* The size its parent gives. */
@@ -1606,12 +1733,17 @@ remote_commit(
 			return;
 		remote->laid_width = width;
 		remote->laid_height = height;
-	} else if (page_needs_paint(page)) {
-		error = page_paint(page);
-		if (error != 0)
-			return;
-		changed = 1;
+	} else {
+		needs_paint = page_needs_paint(page);
+		if (needs_paint) {
+			error = page_paint(page);
+			if (error != 0)
+				return;
+			changed = 1;
+		}
 	}
+
+	/* Keeps the scene the last paint made while nothing changed. */
 	if (!changed && remote->scene != NULL)
 		return;
 	if (!page->painted)
@@ -1649,14 +1781,21 @@ remote_deadline(
 	double due;
 	double wait;
 	uint64_t now;
+	int ready;
+	int timer;
 
 	/* Without a page, none; with work due now, now. */
 	if (remote->own == NULL)
 		return UINT64_MAX;
 	now = wb_os_monotonic_ns();
-	if (page_images_ready(remote->own) || bind_navigation_pending(remote->own->window))
+	ready = page_images_ready(remote->own);
+	if (ready)
 		return now;
-	if (!page_next_timer(remote->own, &due))
+	ready = bind_navigation_pending(remote->own->window);
+	if (ready)
+		return now;
+	timer = page_next_timer(remote->own, &due);
+	if (!timer)
 		return UINT64_MAX;
 	wait = due - remote_time(remote);
 	if (wait <= 0.0)
@@ -1693,6 +1832,7 @@ remote_count_document(
 {
 	struct dom_node *walk;
 	int count;
+	int is_iframe;
 
 	/* Each iframe element. */
 	count = 0;
@@ -1700,10 +1840,17 @@ remote_count_document(
 		return 0;
 	walk = document->node.first_child;
 	while (walk != NULL) {
-		if (walk->type == DOM_ELEMENT && dom_element_is(walk, DOM_NS_HTML, DOM_TAG_IFRAME))
-			count++;
+		if (walk->type == DOM_ELEMENT) {
+			is_iframe = dom_element_is(walk, DOM_NS_HTML, DOM_TAG_IFRAME);
+			if (is_iframe)
+				count++;
+		}
+
+		/* Moves on to the next node of the document. */
 		walk = bind_following(walk, &document->node);
 	}
+
+	/* Succeeded: reports how many iframes the document has. */
 	return count;
 }
 
@@ -1726,6 +1873,8 @@ remote_release(
 		entry = wb_vector_at(&remote->inbox, index);
 		remote_entry_free(entry);
 	}
+
+	/* Releases the table of the entries and the loader's client. */
 	wb_vector_release(&remote->inbox);
 	if (remote->client != NULL)
 		net_loader_client_close(remote->client);

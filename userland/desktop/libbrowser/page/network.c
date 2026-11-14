@@ -58,6 +58,8 @@ page_fetch_now(
 		wb_buffer_release(&location);
 		return error;
 	}
+
+	/* Whether the loader takes the location. */
 	remote = net_loader_takes(wb_buffer_string(&location));
 
 	/* Without the loader, or a local or data resource: read at once. */
@@ -79,6 +81,8 @@ page_fetch_now(
 		wb_buffer_clear(final_url);
 		error = wb_buffer_append(final_url, response.url.data, response.url.length);
 	}
+
+	/* Gives the response back. */
 	net_response_release(&response);
 	if (error != 0)
 		return error;
@@ -122,17 +126,28 @@ page_send_response_now(
 {
 	struct net_request *request;
 	struct net_loader_client *client;
+	int method_order;
 	int plain;
 	int remote;
 	int error;
 
 	/* Without the loader, or a location it does not take: at once. */
 	remote = net_loader_takes(location);
-	plain = send == NULL || send->method == NULL || strcmp(send->method, "GET") == 0;
+	plain = 1;
+	if (send != NULL && send->method != NULL) {
+		/* Whether the method is the plain GET. */
+		method_order = strcmp(send->method, "GET");
+		if (method_order != 0)
+			plain = 0;
+	}
+
+	/* Sends a request of its own at once from this thread. */
 	if (page->loader == NULL && remote && !plain) {
 		error = net_http_fetch_send(page_cookies(page), location, send, response);
 		return error;
 	}
+
+	/* Reads the location at once, which only a plain GET can be. */
 	if (page->loader == NULL || !remote) {
 		if (!plain) {
 			net_response_init(response);

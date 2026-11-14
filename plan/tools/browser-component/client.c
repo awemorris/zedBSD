@@ -161,13 +161,18 @@ main(
 	uint64_t serial;
 	int point;
 	int commits;
+	const char *note;
 	int argument;
+	int order;
 
 	/* The views' mode and the origin of the asynchronous checks. */
 	argument = 1;
-	if (argc > argument && strcmp(argv[argument], "--threads") == 0) {
-		own = 1;
-		argument++;
+	if (argc > argument) {
+		order = strcmp(argv[argument], "--threads");
+		if (order == 0) {
+			own = 1;
+			argument++;
+		}
 	}
 
 	/* The engine makes its threads with the POSIX threads, before any view. */
@@ -390,8 +395,10 @@ main(
 		return 1;
 
 	/* Succeeded: both views and all client-owned GPU resources were released. */
-	printf("component: %d checks, PASS two views, input/timers, callback, allocation rollback, async history, Vulkan draw/record, resize/release%s\n", checks,
-	    own ? " (views of their own threads: the allocation rollback is not refused there)" : "");
+	note = "";
+	if (own)
+		note = " (views of their own threads: the allocation rollback is not refused there)";
+	printf("component: %d checks, PASS two views, input/timers, callback, allocation rollback, async history, Vulkan draw/record, resize/release%s\n", checks, note);
 	return 0;
 }
 
@@ -758,6 +765,8 @@ submit(
 		vkDestroyCommandPool(gpu->device, pool, NULL);
 		return ENOMEM;
 	}
+
+	/* Starts recording the commands. */
 	memset(&begin, 0, sizeof(begin));
 	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	result = vkBeginCommandBuffer(commands, &begin);
@@ -772,6 +781,8 @@ submit(
 	} else {
 		error = browser_view_record(view, target, commands);
 	}
+
+	/* Ends the recording, and drops the pool the commands came from. */
 	(void)vkEndCommandBuffer(commands);
 	vkDestroyCommandPool(gpu->device, pool, NULL);
 	return error;

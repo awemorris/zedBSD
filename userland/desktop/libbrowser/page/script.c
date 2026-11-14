@@ -583,6 +583,8 @@ script_request_sync(
 	} else {
 		done(done_context, error, 0, NULL, "", NULL, 0);
 	}
+
+	/* Gives the response back. */
 	net_response_release(&response);
 
 	/* Succeeded: done has been called. */
@@ -936,8 +938,10 @@ int
 page_wait_sheets(
 	struct page *page)
 {
+	struct net_loader_client *client;
 	double elapsed;
 	double waited;
+	int blocking;
 	int error;
 
 	/* Without the loader the sheets came when they were linked. */
@@ -950,12 +954,17 @@ page_wait_sheets(
 		return error;
 
 	/* Each short wait lets the loader bring them in (the ones this thread asked for: their callbacks run here). */
+	client = page_client(page);
+	blocking = page_sheets_blocking_for(page, client);
 	waited = 0;
-	while (page_sheets_blocking_for(page, page_client(page)) && waited < 30000) {
+	while (blocking && waited < 30000) {
 		error = script_settle_network(page, 10, &elapsed);
 		if (error != 0)
 			return error;
 		waited += elapsed;
+
+		/* Asks again whether a sheet still blocks. */
+		blocking = page_sheets_blocking_for(page, client);
 	}
 
 	/* The sheets that came are styled in. */
@@ -1195,11 +1204,17 @@ script_run_ready(
 {
 	struct page_script *entry;
 	size_t index;
+	void *runner;
 	int ordered_blocked;
 	int error;
 
-	/* A script's checkpoint may recurse while this loop runs; the page's scripts run on its own thread (a frame's thread leaves them to it). */
-	if (page->scripts_running || bind_thread_runner() != NULL)
+	/* A script's checkpoint may recurse while this loop runs. */
+	if (page->scripts_running)
+		return 0;
+
+	/* The page's scripts run on its own thread (a frame's thread leaves them to it). */
+	runner = bind_thread_runner();
+	if (runner != NULL)
 		return 0;
 
 	/* Each ready entry runs once, in the table's insertion order. */

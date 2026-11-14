@@ -1333,9 +1333,11 @@ browser_view_pointer_button(
 	struct page_pointer pointer;
 	float distance_x;
 	float distance_y;
+	const char *type;
 	int clicked;
 	int canceled;
 	int error;
+	int routed;
 	int windowed;
 
 	/* A view of its own threads: the program's thread only queues the button. */
@@ -1348,7 +1350,11 @@ browser_view_pointer_button(
 	/* Over a frame of another agent, the frame's press or release (a press there sends it the keys too). */
 	if (pressed)
 		view->input_frame = 0;
-	if (view_route_pointer(view, x, y, pressed ? "mousedown" : "mouseup", button, modifiers, 0.0f, 0.0f)) {
+	type = "mouseup";
+	if (pressed)
+		type = "mousedown";
+	routed = view_route_pointer(view, x, y, type, button, modifiers, 0.0f, 0.0f);
+	if (routed) {
 		view->press_button = -1;
 		return 0;
 	}
@@ -1465,6 +1471,7 @@ browser_view_wheel(
 	struct page_pointer pointer;
 	int canceled;
 	int error;
+	int routed;
 	int windowed;
 
 	/* A view of its own threads: the program's thread only queues the turn. */
@@ -1475,7 +1482,8 @@ browser_view_wheel(
 	}
 
 	/* Over a frame of another agent, the frame's wheel. */
-	if (view_route_pointer(view, x, y, "wheel", 0, modifiers, delta_x, delta_y))
+	routed = view_route_pointer(view, x, y, "wheel", 0, modifiers, delta_x, delta_y);
+	if (routed)
 		return 0;
 
 	/* The place, which the pointer is at now. */
@@ -1530,6 +1538,8 @@ browser_view_key(
 {
 	struct bind_key event;
 	struct bind_key typed;
+	struct view_frames *frames;
+	const char *type;
 	int canceled;
 	int handled;
 	int error;
@@ -1544,8 +1554,11 @@ browser_view_key(
 
 	/* A frame of another agent pressed last takes the keys while it lasts. */
 	if (view->input_frame != 0 && view->front != NULL) {
-		error = view_remotes_key(view_frames_remotes(view_front_frames(view->front)), view->input_frame, pressed ? "keydown" : "keyup", key, code,
-		    repeat, view_bind_modifiers(modifiers));
+		type = "keyup";
+		if (pressed)
+			type = "keydown";
+		frames = view_front_frames(view->front);
+		error = view_remotes_key(view_frames_remotes(frames), view->input_frame, type, key, code, repeat, view_bind_modifiers(modifiers));
 		if (error != ENOENT)
 			return 0;
 		view->input_frame = 0;
@@ -2542,6 +2555,7 @@ view_render_cpu(
 	struct view_commit *commit;
 	struct paint_drawing drawing;
 	struct paint_bitmap bitmap;
+	const struct paint_list *list;
 	unsigned char *row_start;
 	unsigned row;
 	int changed;
@@ -2560,6 +2574,8 @@ view_render_cpu(
 		view_commit_release(commit);
 		return error;
 	}
+
+	/* Drops the glyphs the GPU kept when the faces changed. */
 	if (changed && view->gpu_open)
 		paint_gpu_forget_glyphs(&view->gpu);
 
@@ -2575,7 +2591,10 @@ view_render_cpu(
 			return error;
 		}
 	}
-	error = paint_software(paint_drawing_list(commit->scene, &drawing), &view->render_text, commit->scroll_y, &bitmap);
+
+	/* Draws the scene's display list into the bitmap. */
+	list = paint_drawing_list(commit->scene, &drawing);
+	error = paint_software(list, &view->render_text, commit->scroll_y, &bitmap);
 
 	/* A packed bitmap is copied into the caller's rows and goes. */
 	if (bitmap.pixels != pixels) {
@@ -2583,6 +2602,8 @@ view_render_cpu(
 			row_start = (unsigned char *)pixels + (size_t)row * stride;
 			memcpy(row_start, bitmap.pixels + (size_t)row * width, (size_t)width * sizeof(uint32_t));
 		}
+
+		/* Gives the packed bitmap back. */
 		paint_bitmap_release(&bitmap);
 	}
 
@@ -2637,9 +2658,9 @@ view_render_text(
 
 /*
  * Finds the frame of another agent at a place of the view (on the page's
- * own thread, J6 of the design: by the frame items of the latest committed
- * frame, as the user saw them): its number (0: none, or a view of the
- * caller's) and the place in its viewport.
+ * own thread, by the frame items of the latest committed frame, as the
+ * user saw them): its number (0: none, or a view of the caller's) and
+ * the place in its viewport.
  */
 static uint64_t
 view_route_at(
@@ -2654,6 +2675,8 @@ view_route_at(
 	float document_y;
 	float left;
 	float top;
+	float right;
+	float bottom;
 	size_t index;
 
 	/* Only a view of its own threads has frames of other agents. */
@@ -2672,14 +2695,20 @@ view_route_at(
 			continue;
 		left = layout_to_px(item->x);
 		top = layout_to_px(item->y);
-		if (x < left || x >= left + layout_to_px(item->width) || document_y < top || document_y >= top + layout_to_px(item->height))
+		right = left + layout_to_px(item->width);
+		bottom = top + layout_to_px(item->height);
+		if (x < left || x >= right || document_y < top || document_y >= bottom)
 			continue;
 		found = item->frame;
 		memset(pointer, 0, sizeof(*pointer));
 		pointer->client_x = (int)floorf(x - left);
 		pointer->client_y = (int)floorf(document_y - top);
 	}
+
+	/* Lets go of the frame. */
 	view_commit_release(commit);
+
+	/* Reports the frame found, or none. */
 	return found;
 }
 
@@ -2700,7 +2729,9 @@ view_route_pointer(
 	float delta_y)
 {
 	struct page_pointer pointer;
+	struct view_frames *frames;
 	uint64_t frame;
+	int order;
 	int error;
 
 	/* The frame there. */
@@ -2713,11 +2744,17 @@ view_route_pointer(
 	pointer.modifiers = view_bind_modifiers(modifiers);
 	pointer.delta_x = (double)delta_x;
 	pointer.delta_y = (double)delta_y;
-	error = view_remotes_pointer(view_frames_remotes(view_front_frames(view->front)), frame, type, &pointer);
+	frames = view_front_frames(view->front);
+	error = view_remotes_pointer(view_frames_remotes(frames), frame, type, &pointer);
 	if (error == ENOENT)
 		return 0;
-	if (strcmp(type, "mousedown") == 0)
+
+	/* A press makes the frame the keys' too. */
+	order = strcmp(type, "mousedown");
+	if (order == 0)
 		view->input_frame = frame;
+
+	/* Reports that the frame of another agent took the input. */
 	return 1;
 }
 
@@ -2734,11 +2771,15 @@ view_render_frames(
 	struct paint_drawing *drawing)
 {
 	struct view_frames *frames;
+	struct view_remotes *remotes;
 
 	/* The frames' scenes by their numbers. */
 	paint_drawing_init(drawing);
 	frames = view_front_frames(view->front);
-	(void)paint_frames_resolve(scene, view_remotes_scene, frames != NULL ? view_frames_remotes(frames) : NULL, drawing);
+	remotes = NULL;
+	if (frames != NULL)
+		remotes = view_frames_remotes(frames);
+	(void)paint_frames_resolve(scene, view_remotes_scene, remotes, drawing);
 }
 
 /*
@@ -2917,6 +2958,8 @@ view_settle_state(
 			*done = 1;
 			return 0;
 		}
+
+		/* Waits only for the work under way, and then a little more. */
 		left = budget + VIEW_SETTLE_NETWORK_MS - now;
 		*wait = (int)left + 1;
 		return 0;
@@ -3289,6 +3332,8 @@ view_fill_snapshot(
 		if (snapshot->url == NULL)
 			return ENOMEM;
 	}
+
+	/* Copies the page's title. */
 	title = browser_view_title(view);
 	if (title != NULL) {
 		snapshot->title = strdup(title);

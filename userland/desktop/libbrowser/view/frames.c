@@ -206,6 +206,8 @@ view_frames_close(
 		wb_mutex_unlock(&frame->lock);
 		(void)wb_vector_push(&frames->dead, &frame);
 	}
+
+	/* Empties the list of the live, which are all dead now. */
 	wb_mutex_lock(&frames->lock);
 	frames->live.count = 0;
 	wb_cond_broadcast(&frames->freed);
@@ -218,6 +220,8 @@ view_frames_close(
 			wb_thread_join(&frame->thread);
 		frames_free(frame);
 	}
+
+	/* Empties the list of the dead, which are let go. */
 	wb_mutex_lock(&frames->lock);
 	frames->dead.count = 0;
 	wb_mutex_unlock(&frames->lock);
@@ -356,6 +360,8 @@ view_frames_abort_agent_waited(
 		frame = *(struct view_frame **)wb_vector_at(&frames->live, index);
 		net_loader_client_abort_waited(frame->client);
 	}
+
+	/* Aborts the waiting requests of each dead frame too. */
 	for (index = 0; index < frames->dead.count; index++) {
 		frame = *(struct view_frame **)wb_vector_at(&frames->dead, index);
 		net_loader_client_abort_waited(frame->client);
@@ -405,12 +411,14 @@ frames_attach(
 {
 	struct view_frames *frames;
 	struct view_frame *frame;
+	size_t remote_count;
 	size_t stack;
 	int error;
 
 	/* A frame more than the view may have (its page's own and the frames of other agents count) gets none. */
 	frames = context;
-	if (frames->live.count + view_remotes_count(frames->remotes) + 1U >= frames->limit || page->loader == NULL)
+	remote_count = view_remotes_count(frames->remotes);
+	if (frames->live.count + remote_count + 1U >= frames->limit || page->loader == NULL)
 		return EAGAIN;
 
 	/* The record, its lock, its condition and its client. */
@@ -432,6 +440,8 @@ frames_attach(
 		error = wb_vector_push(&frames->live, &frame);
 		wb_mutex_unlock(&frames->lock);
 	}
+
+	/* Gives the frame up when a step above failed. */
 	if (error != 0) {
 		frames_free(frame);
 		return error;
@@ -575,6 +585,7 @@ frames_run(
 	struct view_frames *frames;
 	uint64_t now;
 	uint64_t wait;
+	int acquired;
 	int ending;
 
 	/* This thread is the frame's: its view's, its runner, its requests' client and its stack's base. */
@@ -591,11 +602,17 @@ frames_run(
 		/* The wait: for news or the end, at most until the next timer. */
 		wb_mutex_lock(&frame->lock);
 
-		while (!frame->rung && !__atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE)) {
+		ending = __atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE);
+		while (!frame->rung && !ending) {
 			if (frame->deadline_ns == FRAMES_NO_DEADLINE) {
 				wb_cond_wait(&frame->changed, &frame->lock);
+
+				/* Looks again at whether the frame was told to end while this thread waited. */
+				ending = __atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE);
 				continue;
 			}
+
+			/* Sleeps until the frame's next timer, at most a second. */
 			now = wb_os_monotonic_ns();
 			if (now >= frame->deadline_ns)
 				break;
@@ -603,7 +620,12 @@ frames_run(
 			if (wait > 1000ULL)
 				wait = 1000ULL;
 			(void)wb_cond_wait_for(&frame->changed, &frame->lock, (uint32_t)wait);
+
+			/* Looks again at whether the frame was told to end while this thread waited. */
+			ending = __atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE);
 		}
+
+		/* Takes the news, and whether the frame was told to end. */
 		frame->rung = 0;
 		ending = __atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE);
 
@@ -612,7 +634,8 @@ frames_run(
 		/* The end, before the agent or while waiting for it. */
 		if (ending)
 			break;
-		if (!frames_acquire(frames, frame))
+		acquired = frames_acquire(frames, frame);
+		if (!acquired)
 			break;
 
 		/* The round, then the agent goes back. */
@@ -635,6 +658,8 @@ frames_round(
 	struct vm_heap *heap;
 	const void *saved;
 	uint64_t deadline;
+	uint64_t now;
+	int ending;
 	int left;
 	int status;
 
@@ -646,23 +671,31 @@ frames_round(
 	vm_agent_task_begin(frames->agent);
 
 	/* The callbacks of its requests that ended, and what the frames of other agents ask of its documents. */
-	left = net_loader_client_dispatch_until(frame->client, wb_os_monotonic_ns() + FRAMES_DISPATCH_NS);
-	if (!__atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE))
+	now = wb_os_monotonic_ns();
+	left = net_loader_client_dispatch_until(frame->client, now + FRAMES_DISPATCH_NS);
+	ending = __atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE);
+	if (!ending)
 		view_remotes_deliver(frames->remotes, frame);
 
 	/* Its timers due, at the page's time, and the checkpoint after them (its documents' loads are activated there). */
 	status = 0;
 	window = NULL;
-	if (!__atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE))
+	ending = __atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE);
+	if (!ending)
 		window = bind_frame_child(&frame->element->node);
 	if (window != NULL && !window->detached) {
 		bind_window_set_time(window, view_page_time(frames->view));
 		status = bind_run_timers(window);
 		if (status == 0)
 			status = bind_checkpoint(window);
-	} else if (!__atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE)) {
-		status = page_frames_checkpoint(frame->page);
+	} else {
+		/* A frame without a window runs its page's checkpoint, unless it was told to end meanwhile. */
+		ending = __atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE);
+		if (!ending)
+			status = page_frames_checkpoint(frame->page);
 	}
+
+	/* The task's outcome is not acted on here: a failed task leaves the next round to try again. */
 	(void)status;
 	vm_agent_task_end(frames->agent);
 
@@ -699,8 +732,12 @@ frames_acquire(
 			break;
 		wb_cond_wait(&frames->freed, &frames->lock);
 	}
+
+	/* The page's own thread is no longer waiting for it. */
 	if (frame == NULL)
 		frames->top_waiting--;
+
+	/* Holds it for the caller, unless the frame was told to end. */
 	if (!ending) {
 		frames->held = 1;
 		frames->holder = frame;
@@ -775,12 +812,20 @@ frames_deadline(
 	uint64_t now;
 	double due;
 	double wait;
+	int ending;
+	int timer;
 
 	/* The frame's window, when it has one. */
-	if (__atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE))
+	ending = __atomic_load_n(&frame->ending, __ATOMIC_ACQUIRE);
+	if (ending)
 		return FRAMES_NO_DEADLINE;
 	window = bind_frame_child(&frame->element->node);
-	if (window == NULL || window->detached || !bind_next_timer(window, &due))
+	if (window == NULL || window->detached)
+		return FRAMES_NO_DEADLINE;
+
+	/* A frame whose window has no timer waits for news only. */
+	timer = bind_next_timer(window, &due);
+	if (!timer)
 		return FRAMES_NO_DEADLINE;
 
 	/* The page's time to the monotonic clock. */
@@ -803,7 +848,9 @@ frames_reap(
 	struct view_frames *frames)
 {
 	struct view_frame *frame;
+	uint64_t now;
 	size_t index;
+	size_t pending;
 
 	/* Each dead one, from the last (one let go leaves the list). */
 	index = frames->dead.count;
@@ -819,9 +866,17 @@ frames_reap(
 			frame->orphan = 1;
 			wb_mutex_unlock(&frame->lock);
 		}
-		(void)net_loader_client_dispatch_until(frame->client, wb_os_monotonic_ns() + FRAMES_DISPATCH_NS);
-		if (net_loader_client_pending(frame->client) != 0)
+
+		/* Dispatches the news of the frame's client here, where its thread is gone. */
+		now = wb_os_monotonic_ns();
+		(void)net_loader_client_dispatch_until(frame->client, now + FRAMES_DISPATCH_NS);
+
+		/* A frame with a request still under way stays on the list. */
+		pending = net_loader_client_pending(frame->client);
+		if (pending != 0)
 			continue;
+
+		/* Takes the frame off the list, and lets it go. */
 		wb_mutex_lock(&frames->lock);
 		frames_remove(&frames->dead, frame);
 		wb_mutex_unlock(&frames->lock);

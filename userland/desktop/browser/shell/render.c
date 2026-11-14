@@ -202,6 +202,8 @@ shell_render_resize(
 		render->configure = 1;
 		render->configure_serial = serial;
 	}
+
+	/* Wakes the render thread to take the new size. */
 	kl_cond_broadcast(&render->changed);
 
 	kl_mutex_unlock(&render->lock);
@@ -342,6 +344,8 @@ shell_render_cpu_frame(
 		render->fresh = 0;
 		*fresh = 1;
 	}
+
+	/* Takes the frame to draw. */
 	frame = &render->frames[render->front];
 
 	kl_mutex_unlock(&render->lock);
@@ -615,6 +619,8 @@ render_gpu(
 			fprintf(stderr, "browser: cannot resize: %s failed (%d)\n", present->operation, (int)result);
 			return 1;
 		}
+
+		/* Asks for the frame to be drawn again at the new size. */
 		*retry = 1;
 		return 0;
 	}

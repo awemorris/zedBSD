@@ -37,6 +37,7 @@ wb_once_run(
 	void *argument)
 {
 	int expected;
+	int claimed;
 	int state;
 
 	/* A call made before. */
@@ -44,9 +45,10 @@ wb_once_run(
 	if (state == ONCE_MADE)
 		return;
 
-	/* The first thread here makes the call, then says it is made. */
+	/* Tries to become the first thread here, which makes the call and then says it is made. */
 	expected = ONCE_NOT_MADE;
-	if (__atomic_compare_exchange_n(&once->state, &expected, ONCE_MAKING, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+	claimed = __atomic_compare_exchange_n(&once->state, &expected, ONCE_MAKING, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+	if (claimed) {
 		run(argument);
 		__atomic_store_n(&once->state, ONCE_MADE, __ATOMIC_RELEASE);
 		return;
