@@ -261,3 +261,5 @@ WS が完了・取り下げになったら、行を master.md からここへ移
 | [WS335](ws335/ws.md) | MG002 | libssl-compat・libcrypto-compat: OpenSSL の libssl・libcrypto と互換の自前の TLS と暗号の library（libbrowser と自前の ssh が使う部分、標準廉価実装手順）（2026-11-01 ユーザー） | completed（2026-11-14） | —
 | [WS348](ws348/ws.md) | MG003 | Raspberry Pi 500 の dtb を image に入れる（そのまま Pi 500 で起動）（2026-11-13、Pi 500 の外部の報告から） | completed（2026-11-14 ユーザー） | dtb は image の FAT に入る（mk/platform-rpi5/firmware.mk）。Pi 500 の実機は外部の報告待ち |
 | [WS350](ws350/ws.md) | MG003 | Raspberry Pi 500 を動作の確かめた機種として記録する（2026-11-13、Pi 500 の外部の報告から） | completed（2026-11-15 ユーザー） | README と plan/tools.md の機種の表に Pi 500（外部の報告で動作）を載せた |
+| [WS223](ws223/ws.md) | MG006 | 全画面は compositor の合成、game mode は Wayland の拡張で求められた時だけ（Video Player は game mode をやめる）（2026-10-13 ユーザー） | canceled（2026-11-15 ユーザー） | 他の作業で実装済み（合成の全画面、wp_content_type の game で game mode）。video も game mode に入る点は既知の違い |
+| [WS309](ws309/ws.md) | MG006 | Keiland の compositor の thread の構成を整理し main loop が待たないようにする。ゲームモードは Vulkan display の仕様の中で | completed（2026-11-15 ユーザー） | compositor の thread の構成と待たない main loop、game mode は VK_KHR_display。p015 の V2 は VF2 52.5 fps・copy 0 |

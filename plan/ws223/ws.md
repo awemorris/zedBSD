@@ -3,7 +3,7 @@
 # WS223: 全画面は compositor の合成で、game mode は Wayland の拡張で求められた時だけ（Video Player は game mode をやめる）
 
 <!-- awesome-plan-current:start -->
-Status: planning（すぐ進める。2026-10-27 ユーザーの回答（クリック）「推しで決めて実装」: D1〜D6 は p001 の推しの案、video は compositor の合成、game mode は Wayland の拡張で求められた時だけ）。旧: planning・保留（ユーザーの判断待ち）（2026-10-27 P3 の精査 q1608、ユーザー「…masterとWSを修正して、completedやcanceledにしてください。」: p001 第 1 版の後、design-reviewer とユーザーの D1〜D6 を待ったまま 2026-10-13 から止…
+Status: canceled（2026-11-15 ユーザーの判断: 目標は他の作業で実装済み。全画面の窓は compositor の合成（`shell.c` の `fullscreen_whole`）、game mode は Wayland の拡張 `wp_content_type_v1` の game で求めた時に直の scanout（`scanout.c`・`game.c`、present の道は WS309 の VK_KHR_display）。既知の違い: Video Player の content type の video も今は game mode に入る（`scanout-rules.c`、`videoplayer/main.c` の KL_CONTENT_VIDEO）。2026-10-13 の「Video Player は game mode をやめる」と異なり、外す時は小さな直しとして拾う）
 Resume point: p001 の review の後、D1（求めの形、推奨は `wp_content_type_v1` の `game`）と D2（Video Player の `KL_CONTENT_VIDEO` の呼びを残すか）が決まれば p002 を開始できる。p003（wltest の `--content-type`、game mode の AAT と host 試験）は p002 の後。WS217 p012 は p002・p003 に依存。
 Primary Milestone: MG006
 Related Milestones: なし
@@ -31,7 +31,7 @@ p001 第 1 版の要点（2026-10-13 P3）: 「Game Mode でない全画面」�
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 調べと設計: 今の game mode の入り口（content type・全画面・size の一致）、合成の全画面の速さ（5330・Pi 4）、求めの拡張の決め、WS217 p012 との関係、試験の洗い出し、段の分け方 | planning（第 1 版 2026-10-13 P3、design-reviewer とユーザーの D1〜D6 待ち） | — |
+| p001 | 調べと設計: 今の game mode の入り口（content type・全画面・size の一致）、合成の全画面の速さ（5330・Pi 4）、求めの拡張の決め、WS217 p012 との関係、試験の洗い出し、段の分け方 | planning（第 1 版 2026-10-13 P3、design-reviewer とユーザーの D1〜D6 待ち） | — |
 | p002 | 規則: `scanout-rules.h/.c` の content の条件を `game` だけに（`KWL_SCANOUT_CONTENT_VIDEO` を削除）、`scanout.c` の `scanout_note` を game だけに、注記（scanout.c・display.c・kwl.h・backend の header・content-type.c・keiland.h）、Video Player の注記か呼びの削除（D2）。AAT の `apps.videoplayer.fullscreen` と `helpers_apps.py` を「`KWL SCANOUT` の行が出ない」の否定の check に直す | planned（p001 の review と D1・D2 の後） | p001 |
 | p003 | 試験: wltest に `--content-type=none|photo|video|game`、AAT の `desktop.game-mode.wltest`（Venus の `direct=1`・`reason=shot`・`reason=pointer`・`reason=no-window`、video の対照）と `full.suite`、AAT の image に wltest、`plan/tools/compositor/scanout-rules-host-test`（規則の表、ASan・UBSan、master の Tools への登録は Q1） | planned | p002 |
 | p004 | 実機の確かめ（Q1 → T1・ユーザー）: 5330 の Video Player の全画面（`KWL SCANOUT` 無し、`FRAMES late=` が window と同じ桁）と wltest の game の `direct=1`（BUG-223 の i915 の証拠）、Pi 4 の全画面の再生の計測の記録（D4） | planned | p003 |

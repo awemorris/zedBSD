@@ -107,6 +107,8 @@
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
+- WS309 p015（game mode の V2、2026-11-15 main）: Pi 4・Pi 5 で、game の content type を求める全画面の app（wltest の `--content-type game` や mview の全画面）が直の scanout で滑らかに出て、抜ける時に desktop が戻るか（QEMU・VF2・RTX は確かめ済み）。
+
 - WS334 p037・p032・p033（Windows 版ブラウザ、2026-11-14 main）: 本物の Windows 10・11 で、TSF の日本語入力（MS-IME・Google 日本語入力、focus が離れた時の変換中の文字の扱い、英語・絵文字の panel・touch keyboard）、touchpad の scroll と慣性、wheel が前と同じ、Windows 11 22H2 以降で Mica が題の帯まで透けて caption の button が二重にならず snap layout が出る、Windows 10 と high contrast では不透明、dpi と全画面の切り替え、p032 の M1〜M8、暗い mode と accent、touch と pen、画像の drag out、DPAPI、arm64。項目の一覧と手順は [phase037/phase.md](ws334/phase037/phase.md) の「本物の Windows の確かめの一覧」（1〜19）。
 
 （2026-11-01 10:29 クリア。手順は各 Bug の ticket にある）
