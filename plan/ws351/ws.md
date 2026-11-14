@@ -2,7 +2,7 @@
 
 # WS351: 可変の tick（普段 1000 Hz、idle の時 100 Hz）と HAL_TIMER_FREQUENCY の廃止
 
-Status: incomplete（2026-11-14 Q1: 可変の tick と時刻の counter 化は 2026-11-13 に merge 済み。workstreams-open.md の写しに合わせた）
+Status: completed（2026-11-15 Q1。可変の tick（走っている間 1000 Hz・idle の間 100 Hz）と時刻の counter 化、HAL_TIMER_FREQUENCY の廃止。arm64 は Pi 5 の main の kernel（2026-11-14 の更新、UAT と 60 fps の試験）で動く。riscv64 の起動は次に VF2 を main に更新する時に確かめる）
 Primary Milestone: MG004
 Parent: [Master](../master.md)
 Owner: Q1
@@ -22,8 +22,10 @@ tick の周期を走っている間に CPU ごとに変える。普段は 1000 H
 | --- | --- | --- | --- |
 | p001 | 設計: kernel の時刻と sleep・timer を tick の数でなく `hal_rtc_read_counter()`（固定の周波数の counter）から作る形、idle の出入りで rate を変える所と条件（近くの timer の予定、tick の位相を新しい周期の倍数にそろえる x86_64 の TSC-deadline）、各 arch の HAL の実装の方針（重要な x86_64・arm64・riscv64、timer が全体で 1 つの機械）、`HAL_TIMER_FREQUENCY` の削除の範囲 | cleared（2026-11-15 Q1。設計と design-reviewer 済み、実装は main に merge 済み） | — |
 | p002 | 実装と試験（host、QEMU、5330 で idle の電力と clock の分解能） | cleared（2026-11-15 Q1。実装と試験は main。5330 の idle の電力の受け入れは WS352・WS353 p016 に移した（4.54 W・PC2 66〜74 %、WS352 fix4 と同等）。arm64・riscv64・i386・pc9821 の起動は p003 で QEMU） | p001 |
-| p003 | 規約の全文の見直し（AGENTS §2） | 実装済み・試験 PASS（2026-11-15 P8 q2105、build 5 機種 warning 0・host・QEMU amd64。arm64・riscv64 の QEMU は未実施、[phase.md](phase003/phase.md)。cleared は Q1） | p002 |
+| p003 | 規約の全文の見直し（AGENTS §2） | cleared（2026-11-15 Q1、merge f8a5a58806。WS351 の行の規約の違反 20→0、5 機種の vmunix warning 0、clock-host 42・itimer-host 10 PASS、QEMU x86_64 の TSC-deadline・periodic で idle 1 10 10 10・busy 1 1 1 1） | p002 |
 
 ## Resume point
+
+- 2026-11-15 Q1: completed。QEMU の arm64・riscv64 は今の build に virt の機種が無く流せなかった。arm64 は Pi 5（2026-11-14 に main の tip に更新、WS351 の後）で動いている事を証拠とした。riscv64（VF2）の起動は、次に VF2 を main に更新する担当が確かめる。Phase の directory は消した（試験は tests/ に残す）。
 
 - 2026-11-15 Q1: p001・p002 cleared。残りは p003（規約の全文の見直し、5 機種の build warning 0、QEMU の arm64・riscv64 の起動と tick_divisor）。

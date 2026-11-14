@@ -45,7 +45,6 @@
 | [WS345](ws345/ws.md) | MG006 | ブラウザの thread の分け方: JavaScript を窓の event と別の thread に、通信を独立した thread に（2026-11-02 ユーザー） | incomplete | incomplete（p001〜p010・p013・p014 cleared、p011 受け入れを P3 で） |
 | [WS347](ws347/ws.md) | MG006 | VF2＋KC705 で Amaterrace GPU を試験・デバッグする。KC705 に minimal・200 MHz の bitstream を Vivado で書き、GHCI の driver を最新の ghci.md に追従（2026-11-11 ユーザー）。RTL は Gemini、Claude は監査（[amaterrace.md](amaterrace.md)） | incomplete | Gemini の修正（ad23fe01）の監査 → 依頼 03、bitstream の書き込み（p001）、driver の追従（p003、P2 の worktree に未 commit） |
 | [WS349](ws349/ws.md) | MG006 | Raspberry Pi 5 の HDMI の音（2026-11-13、Pi 500 の外部の報告から） | incomplete（p001 設計の第一版、design-reviewer 未実施） | p001 |
-| [WS351](ws351/ws.md) | MG004 | 可変の tick（普段 1000 Hz、idle で 100 Hz）と HAL_TIMER_FREQUENCY の廃止。HAL の API はユーザーが決めた（2026-11-13） | incomplete（2026-11-13: 可変の tick と時刻の counter 化を merge、HAL_TIMER_FREQUENCY を削除。5330 の idle の電力は WS352 で） | p001 |
 | [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
 | [WS339](ws339/ws.md) | MG004 | x86 の PC の UEFI の起動の画面の解像度を monitor（EDID）に合わせる、標準の設定の video=640x480 を外す（2026-11-01 ユーザー） | planning | p001（担当の割当はユーザーの指示で） |
 | [WS338](ws338/ws.md) | MG006 | libmedia の H.264 の software の decoder の速さの続き（WS326 から分けた、2026-11-01 ユーザー） | planning | p001 設計（担当の割当はユーザーの指示で） |
