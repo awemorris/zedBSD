@@ -113,6 +113,11 @@ KERN_SOURCES += \
 	src/drivers/mmc/sdhci-acpi.c
 endif
 
+ifneq ($(filter y,$(CONFIG_DRIVER_NE2000)),)
+KERN_SOURCES += \
+	src/drivers/ethernet/dp8390.c
+endif
+
 VMUNIX_OBJS := \
 	$(patsubst %.c,$(BUILD)/%.o,$(KERN_SOURCES)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(KERN_ASM))

@@ -1307,6 +1307,7 @@ KERN_SOURCES += \
 	src/drivers/acpi/acpi-ec.c \
 	src/drivers/acpi/acpi-event.c \
 	src/drivers/acpi/acpi-kern.c \
+	src/drivers/acpi/acpi-osc-codec.c \
 	src/drivers/acpi/acpi-pci-power.c \
 	src/drivers/acpi/acpi-pci-root.c \
 	src/drivers/acpi/acpi-power.c \
