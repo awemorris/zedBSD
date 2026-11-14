@@ -5,8 +5,9 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
+| P2 | phase-runner-high | BUG-433 ws131 host 試験 (q2077-i01) | `/home/awe/zedBSD-worktrees/p2-bug433` / `agent/p2-bug433` | 動いている（2026-11-14） | — |
 | P1 | phase-runner-high | ws353 p012 cursor (q2076-i01) | `/home/awe/zedBSD-worktrees/p1-ws353k` / `agent/p1-ws353k` | 動いている（2026-11-14） | — |
-| P2 | phase-runner-high | BUG-432 stdout の flush (q2075-i01) | `/home/awe/zedBSD-worktrees/p2-bug432` / `agent/p2-bug432` | 動いている（2026-11-14） | — |
+| P2 | phase-runner-high | BUG-432 stdout の flush (q2075-i01) | `/home/awe/zedBSD-worktrees/p2-bug432` / `agent/p2-bug432` | 返却（2026-11-14、fixed） | 97706198bb（merge 8ba44ca444） |
 | P1 | phase-runner-high | ws353 p019 printers (q2074-i01) | `/home/awe/zedBSD-worktrees/p1-ws353j` / `agent/p1-ws353j` | 返却（2026-11-14、cleared） | 810dba2742（merge 8dddb662f6） |
 | P2 | phase-runner-high | ws353 p010 shown・client の buffer (q2073-i01) | `/home/awe/zedBSD-worktrees/p2-ws353e` / `agent/p2-ws353e` | 返却（2026-11-14、merge 保留: ユーザーの判断待ち） | f129cf3a30 |
 | P1 | phase-runner-high | ws353 p018 入力と sessiond (q2072-i01) | `/home/awe/zedBSD-worktrees/p1-ws353i` / `agent/p1-ws353i` | 返却（2026-11-14、cleared） | e8b9a14a0d（merge f4d831e0ea） |
