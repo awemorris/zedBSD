@@ -45,6 +45,21 @@ every firmware with the extended input, a modifier alone only by firmware
 that reports the held state or honours exposed modifiers.  See
 `docs/reference/kernel-boot-parameters.md` Section 7c.
 
+The GOP mode is chosen once, after the boot keys, in this order.  A
+`video=WIDTHxHEIGHT` token names a mode that must exist (a missing one stops
+the boot).  Without it, a boot with Ctrl held wishes for 640x480.  Any other
+boot asks for the monitor's size: the loader reads the monitor's EDID from
+`EFI_EDID_ACTIVE_PROTOCOL`, or `EFI_EDID_DISCOVERED_PROTOCOL` when there is no
+active one, on the GOP's handle (or the only EDID in the system, when the GOP
+is the console's and carries none), and takes the active size of its preferred
+timing (the first detailed timing descriptor of an EDID 1.x base block with a
+valid checksum; an interlaced one is refused).  The mode of that size is set
+when the firmware has it; otherwise the largest mode by area that fits inside
+it, one of the monitor's aspect ratio winning a tie, so nothing is cut off.
+When there is no EDID or no mode fits, a boot with a logo wishes for
+1920x1080 (1080x1920 on a portrait screen), and otherwise the firmware's mode
+stays.  Only modes in a 32-bit RGB or BGR linear layout are taken.
+
 After validating and loading the configured restricted ELF64 kernel, the
 loader captures a ZBL6 v2 memory map, exits boot services, installs private
 four-level bootstrap page tables, and enters the kernel using the System V

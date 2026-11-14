@@ -288,7 +288,7 @@ video_fit(
 		if (info == 0)
 			return EFI_DEVICE_ERROR;
 
-		/* Takes what the selection needs, then releases the firmware's description. */
+		/* Takes whether the kernel can draw on the mode, and then its size. */
 		usable = video_layout_usable(info, size);
 		width = 0;
 		height = 0;
@@ -297,13 +297,16 @@ video_fit(
 			height = info->VerticalResolution;
 		}
 
+		/* Releases the firmware's description of the mode. */
 		release_status = boot->FreePool(info);
 		if (EFI_ERROR(release_status))
 			return release_status;
 
-		/* Passes over a layout the kernel does not take and a mode larger than the monitor. */
+		/* Passes over a layout the kernel does not take. */
 		if (!usable)
 			continue;
+
+		/* Passes over a mode that would be cut off on the monitor. */
 		if (width > monitor_width || height > monitor_height)
 			continue;
 
@@ -375,11 +378,15 @@ video_edid_size(
 	    boot->FreePool == 0)
 		return 0;
 
-	/* Lists the handles that carry the protocol. */
+	/* Lists the handles that carry the protocol; none is the usual answer. */
 	handles = 0;
 	count = 0;
 	status = boot->LocateHandleBuffer(ByProtocol, guid, 0, &count, &handles);
-	if (EFI_ERROR(status) || handles == 0)
+	if (EFI_ERROR(status))
+		return 0;
+
+	/* Refuses a successful search that returned no list. */
+	if (handles == 0)
 		return 0;
 
 	/* Picks the handle whose EDID describes this GOP's monitor. */
