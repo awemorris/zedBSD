@@ -13,7 +13,7 @@
   - **A2**: 自分の WS・Bug の外の記録（他の `plan/wsNNN/`・`plan/bugs/`・`plan/tools/`・`plan/tests.md`・`plan/uat`）が path で呼ぶ物、または Status が incomplete・planned・planning の WS の試験。
   - **B**: retired の directory、今の build に無い機種（m68k・mips・ppc・sun4u・x68k・zybo・armv7・riscv32・riscv64-virt・odroid・intelmac。今の PLATFORM は x86_64・rpi5・rpi4・vf2・i386・pc9821）、完了・取り下げの WS の物で他から呼ばれない物。
   - **N**: 古い名を使っていない（広い grep に掛かっただけ）。
-- 数: **A1 83、A2 121、B 81、N 55**（古い名を使うのは 285）。この段で直したのは 72 file（下の表の「この段」）。
+- 数: **A1 83、A2 121、B 81、N 55**（古い名を使うのは 285）。この段で直したのは、表の中の 72 file（下の表の「この段」）と、表の外の 9 file（相対の include だけの config 5、`config-amd64-uat.mk`、fflush の手当ての 3）の計 81。
 
 ## 古い名と今の名
 
@@ -43,8 +43,8 @@
 
 ## この段の確かめ
 
-- 直した config の全部（67 file）を `make -pn CONFIGMK=<file> BUILD=build/bug435-parse help` で parse した。全部 rc 0、PLATFORM が決まり（prompt にならない）、`CONFIG_USERLAND_PROGRAMS` が期待の大きさ（boot の image は 20 語、全部の userland は 180〜264 語）。
-- `sh plan/tools/process/forkrace-qemu.sh amd64 build/bug435-fr build/bug435-fr-out2`（`plan/tools/boot-images/config-amd64-boot.mk` を include する `config-amd64-forkrace.mk` を `make -j4 BUILD_JOBS=4 CONFIGMK=… BUILD=… disk` で作り、`plan/tools/boot-test.sh`（uefi-usb）で起動し、login して forkrace を走らせる）: 結果は下の「経過」。
+- 直した config の全部（65 file）を `make -pn CONFIGMK=<file> BUILD=build/bug435-parse help` で parse した。全部 rc 0、PLATFORM が決まり（prompt にならない）、`CONFIG_USERLAND_PROGRAMS` が期待の大きさ（boot の image は 20 語、全部の userland は 180〜264 語）。
+- `sh plan/tools/process/forkrace-qemu.sh amd64 build/bug435-fr build/bug435-fr-out2`（`plan/tools/boot-images/config-amd64-boot.mk` を include する `config-amd64-forkrace.mk` を `make -j4 BUILD_JOBS=4 CONFIGMK=… BUILD=… disk` で作り、`plan/tools/boot-test.sh`（uefi-usb）で起動し、login して forkrace を走らせる）: `forkrace-qemu: PASS amd64`。build の log の `warning:` は 0。boot-test は画面で login・Password・root@・`FORKRACE PASS` を見た（`build/bug435-fr-out2/boot/login-after.png`、P2 が目でも見た）。
 - `sh plan/tools/installer/host/ufs-read-test.sh`（`make -s CONFIGMK=config/config.x86_64.mk build/x86_64/zedimage-host` に直した）: `ufs-read-test: PASS`。
 - 未実施: 直した他の config の build（parse だけ）、rpi4・i386・vf2 の image、QEMU の rpi4（console-end・forkrace の rpi4）、実機の道具（i915-hw・gpu-compute/hw・hw5330・rtl8127・nvrtx など）。
 
@@ -87,7 +87,9 @@
 
 ## 経過
 
-- (forkrace の結果を待つ)
+- 2026-11-14 P2: 一覧を作り分けた。最初の forkrace の build は、config の相対の include が package の入れ子の make で読めず止まった（`userland/base/cat`）。include を `TEST_TREE` の絶対 path にして 2 度目で PASS。
+- 見つけた事（直していない）: 最小の image（boot の確かめ）で、init が `/sbin/volumed`・`bluetoothd`・`audiod`・`ntpdate` を exec して ENOENT になり、何度も起こし直す（画面に出続ける）。init の service の一覧が、選ばれていない program の service も入れている。BUG-430 の観測 6（networkd）と同じ種類で、`mk/userland.mk` の必ず入れる一覧か、init の service の data の選び方の問題。
+- fflush の手当てを外した 3 本: `build/bug435-fr/sysroot` に向けて流し（script の `sr` を置き換えて stdin から）、`-Werror` で compile・link が通った（thermal・netsleep・sysctl）。`llvm-objdump` で `_start` が main の後に `exit` を呼ぶ事を確かめた。guest・実機（5330）での出力の確かめは未実施（BUG-432 は QEMU で確かめ済み）。
 
 ## 一覧
 
