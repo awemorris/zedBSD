@@ -6,11 +6,10 @@
 - Status: planning（2026-10-30 Q1 が作成。2026-10-30 ユーザーの決定で WS074 を止めて先に実装する。2026-11-14 P4 が p001 の設計を作成、Q1 の確かめ待ち）
 - 目標: libbrowser の描画（`userland/desktop/libbrowser/paint/`）にベクトル描画を足し、それで CSS の描画（角丸・gradient・影など）と、libbrowser の中の SVG の描画を作る。既存の library は使わない（libbrowser は単体の library）。
 
-## ユーザーの決定（2026-10-30、原文）
+## ユーザーの決定（要点）
 
-「libbrowserはCSS描画のためのベクトル描画を持っていると思います。持っていないなら、内部に実装するのがいいと思います。このベクトル描画機能を使って、libbrowser内にSVG描画を実装するのがいいと思います。WebP, AVIFは、あとでlibwebp-compatのような実装をしたいと思いますが、H.264デコーダが安いAIモデルで実装できるかの実験結果を待ちたいと思います。」
-
-- 2026-10-30 ユーザー「WS328は、Vulkanで描画する実装にします。」→ path の塗り・線・gradient などの描画は Vulkan（GPU）で行う（CPU の参照の描画との関係は設計で示す）。
+- 2026-10-30 ユーザーから、次の趣旨の指示を受けた: CSS の描画のためのベクトル描画が libbrowser に無ければ内部に作り、それを使って libbrowser の中に SVG の描画を作る。WebP・AVIF は後で libwebp-compat のような自前の実装にしたいが、安い model で H.264 の decoder が作れるかの実験の結果を待つ。
+- 2026-10-30 ユーザーから、WS328 は Vulkan で描画する形にする、という趣旨の決定を受けた → path の塗り・線・gradient などの描画は Vulkan（GPU）で行う（CPU の参照の描画との関係は設計で示す）。
 
 ## 今の状態（2026-11-14 P4 が p001 で確かめ直した。2026-10-30 の Q1 の調べを置き換え）
 
@@ -21,8 +20,7 @@
 
 ## Phase（2026-10-30 Q1 が標準廉価実装手順の形に）
 
-ユーザーの指示（2026-10-30、原文）「WS328は標準廉価実装手順を適用してphaseを書いてください。」
-→ 手順は [docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)。設計の担当は Opus 5.5、実装の担当は Sonnet 5.5 high を Phase ごとに別の worktree で。
+2026-10-30 ユーザーから、WS328 に標準廉価実装手順を適用して Phase を書く、という趣旨の指示を受けた。手順は [docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)。設計の担当は Opus 5.5、実装の担当は Sonnet 5.5 high を Phase ごとに別の worktree で。
 基づく標準: SVG 2（W3C）、CSS Backgrounds and Borders 3（border-radius・box-shadow）、CSS Images 3（gradient）、Compositing and Blending 1。WPT の該当の試験を照合に使う。
 module と実装の Phase の分け方は p001 が決めた（[design.md](design.md) §5・§11）。WS074 との file の調整は、WS074 が止まっているので今は要らない（WS074 の再開の時に design.md §12 の形を前提にする）。
 
@@ -62,6 +60,6 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 
 - 2026-10-30 Q1: ユーザーの指示で Phase を標準廉価実装手順の形にした。p001 の設計（Opus）から、着手の時期は未定（WS074 と調整）。
 
-## 日程（2026-10-30 ユーザー、原文）
+## 日程
 
-「WS328に関しては、WS074を止めてWS328を先に実装する、です。」（Codex の解約で WS074 は Claude の管理下に移った後の判断）→ WS074 は止めたまま、WS328 を p001（設計、Opus）から進める。WS074 の再開は WS328 の後。
+2026-10-30 ユーザーから、WS074 を止めて WS328 を先に実装する、という趣旨の指示を受けた（Codex の解約で WS074 は Claude の管理下に移った後の判断）→ WS074 は止めたまま、WS328 を p001（設計、Opus）から進める。WS074 の再開は WS328 の後。
