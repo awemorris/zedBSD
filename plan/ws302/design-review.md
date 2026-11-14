@@ -180,3 +180,40 @@ vmunix.mk は 15（platform/ の 17 の directory には common・fpga を含む
 ## 数
 
 Blocker 2（B1・B2）、Major 11（M1〜M11）、Minor 13（m1〜m13）。
+
+---
+
+# 第 3 版の敵対的レビュー（2026-11-14）
+
+- 対象: [design.md](design.md) 第 3 版（今の code との照合、D-1〜D-14）、[phase002/phase.md](phase002/phase.md)、[tests/dtb-overlay.mk](tests/dtb-overlay.mk)、`proposed/include/`。
+- 方法: design-reviewer（subagent）が基点 fd18bd61ee の source（`git show fd18bd61ee:<path>`）と照らした。p002 の書きかけの差分は参考に読んだだけ。build・QEMU は走らせていない。
+- 数: Blocker 0、Major 6、Minor 9、確かめて問題が無かった点 18。反映は [design.md](design.md) §15。
+
+## Major
+
+- M1: 今の tick を 100 Hz とした事実が誤り。`src/kern/clock.c:49〜54` は busy 1000 Hz・idle 100 Hz（WS351 の可変の tick、commit 68910dea12 が `HAL_TIMER_FREQUENCY` を外した）。idle から出る時に idle の時間を先に計上するので、走っている thread の `elapsed` は普段 1。D-7・D-8・改訂の要点 5(c)・§10.1 の Q302-2 の「約 10 ms」は誤り。
+- M2: `sched_set_cpu` を「変えない」と「変える・呼ぶ」が文書の中で食い違う（§4.1・§4.6.7・§7 と、§4.6.1・§4.3・§4.5・§4.14・§8・§13）。`set_affinity_in_place` は lock の中で状態を見ずに BOUND を書くので、手渡しの途中の thread が BOUND になりうる（今の呼び手は NEW の kernel の thread だけで起きない）。直し: 一か所に正確に書き、手渡しで FREE を確かめる。
+- M3: 新しい thread が作り手の hint を継ぐ規則は、user の syscall の中で `kthread_create` された kernel の worker にも効き、kernel の worker を 10〜12 に下げうる（どの driver がそうするかは未確認）。作り手の hint を lock 無しで読む競争も。直し: user の thread だけが継ぐ、lock の下で読む。
+- M4: §6.3 の 5330 の image の config で `CONFIG_KERN_THERMAL=y` を書いても、Makefile が後で読む `mk/platform-x86_64/defaults.mk:55` の `:=` が上書きする。`override` か command line。
+- M5: p002 の受け入れ「text の違いは build の印の文字列だけ」は成り立たない（`HAL_FATAL` の `__LINE__` が即値として動く）。dis-compare.py は既に避けている。riscv64 では即値の長さの境で命令の長さが変わりうる（推測）。
+- M6: 全 platform で build できる形にした判断（第 2 版は amd64 だけ）の記録が無く、arm64・riscv64 の起動の確かめも無い。範囲の判断はユーザー。
+
+## Minor
+
+- m1: 第 2 版の文・行の残り（§4.12・§4.13 の入力の通知の lock、「15 の vmunix.mk」、§4.6.1・§4.6.5 の行、§4.9 の時間）。
+- m2: §4.6.1 の戻しの所に、盗みの失敗の戻し（sched.c:2772）と `sched_hint_set` 自身の入れ直しが無い。
+- m3: thread0 は static で `base_priority` が 0。idle は対象の外と書く。
+- m4: `proposed/include/kern/` の header が古く、本物と 2 つの写しになっている。
+- m5: 入力の通知は report ではなく event ごと（mouse の 1 report は 3 event）。
+- m6: kernel の中を 10 より下げない規則は、I/O で眠りがちな nice > 0 の thread では nice の priority の効きをほとんど消す。
+- m7: overlay で x86_64・vf2 に recipe の無い `kernel.elf` の target が出来る（害は無い）。rpi4・rpi5 では link の順が案の後と違う。
+- m8: p001 の cleared の前に p002 の実装が進んでいる（p002 への影響は小さい）。
+- m9: `CONFIG_DTB` の名前の問いは早めに。
+
+## 前回（第 1 版）の指摘の確かめ
+
+直っている: B1・B2・M1〜M4・M6〜M11・m1・m3・m5・m7・m9〜m13。M5 は実装（dis-compare.py）では直り design の文が残っていた（第 3 版 M5 で直した）。m4・m6 は古くなった（第 3 版 m1・m4）。
+
+## 確かめて問題が無かった点（主な物）
+
+D-3・D-4・D-5・D-6・D-9・D-10・D-12 の事実、`KERN_DTB 11` が空いている事、起床の道が全部 `wake_enqueue_locked` を通り持ち越しの起床は `sched_set_cpu` の 2 か所だけな事、syscall の入口の窓（`user_streak` の書き手は重ならない）、u64 の atomic が全 arch に有る事、入力の通知を lock の外に移した事、`CONFIG_DTB=n` の書き方（未定義の macro は 0、`-Wundef` 無し）、overlay の展開の時期（stamp と link の recipe は実行の時に展開）、§4.6.7 の hint の道の確かめ直しの条件、HAL の差分が要らない事、手渡しの席の規則、idle の時間が `user_streak` を膨らませない事。
