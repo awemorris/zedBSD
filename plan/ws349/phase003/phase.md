@@ -3,7 +3,7 @@
 # ws349-p003 計算の部品（wire）と host 試験
 
 - WS: [ws.md](../ws.md)。設計: [p001](../phase001/phase.md)。依存: p002（values.md）。
-- 状態: planned
+- 状態: cleared（Q1 の受け入れ待ち。2026-11-15 P8、Queue q2124-i01、worktree `/home/awe/zedBSD-worktrees/p8-ws349p002`、branch `agent/p8-ws349p002`）
 - 担当の定義の推し: phase-runner-high（driver の部品）。
 
 ## 目的
@@ -46,3 +46,12 @@ hardware に触れない計算を `src/drivers/platform/rpi5/rpi5-hdmi-audio-wir
 ## 試験（短い）
 
 - `sh plan/ws349/tests/run-hdmi-audio-wire-test.sh`（timeout 600 s）。
+
+## 結果（2026-11-15 P8）
+
+- 作った物: `src/drivers/platform/rpi5/rpi5-hdmi-audio-wire.h`・`.c`（hardware に触れない計算。public は `drv_rpi5_hdmi_audio_*` の 18 関数）、`plan/ws349/tests/hdmi-audio-wire-test.c`・`run-hdmi-audio-wire-test.sh`（79 の check）。
+- 中身: channel status の 24 byte、subframe（preamble・C・P）、fragment の変換（block の位置は通し番号 mod 3 から）、通し番号の進め、PHY の読み戻しから f_TMDS（OFFSET_ONLY・VCODIV_EN・REFFRQ・25〜600 MHz を確かめる）、N と CTS（8 bit の表、deep color は N を探す、名目の rate に ±200 ppm で寄せる、`hardware_cts` の時は N 6144）、MAI の sample の分周（連分数の最良近似、N ≤ 0xffffff・M ≤ 256）とその word、InfoFrame と packet RAM の 9 word と slot の offset、DMA の cell の読み・CS の run の word・40 bit の CB の環（4 GiB の境・40 bit・CB の field の上限を拒む）、SRC・SRCI からの fragment と PCM の offset、HVS の VERSION からの stepping、DREQ の表と tree の cell の照合、MAI_THR の詰め方（C・D0）。出典は block ごとに「Values referenced:」「Procedure referenced:」（[values.md](../values.md) の行）、file の先頭には書いていない。
+- 試験（host、自分の worktree の `build/tmp/`）: `timeout 600 sh plan/ws349/tests/run-hdmi-audio-wire-test.sh` → ASan・UBSan と通常の両方で `hdmi-audio-wire: 79 checks`・最後の行 `hdmi-audio-wire: all PASS`（1.4 s）。mmap の順の模擬は、変換を core の写しの後にする順で新しい音、前にする順で古い音になる事の両方を確かめた（DMA が次の fragment を読み始めるのは割り込みの手続きの前、という前提で判定）。
+- kernel の flag の compile: `mk/platform-rpi5/vmunix.mk` の KERN_CPPFLAGS・KERN_CFLAGS と同じ flag（sysroot の include の代わりに同じ中身の `include/libc`、clang は共有の `build/llvm/bin/clang` 23.1.0 を実行だけ）で `-c` → warning 0（`-Werror`）。未定義の symbol は 0（`llvm-nm`）。`-std=c89 -pedantic -Wdeclaration-after-statement` でも `long long`・`_Bool`（tree の header の物）の他は warning 0。`git diff --check` 0。
+- 未実施: kernel の build への組み込み（mk の枠が無い、U1）、x86_64・riscv64 の build（Pi 5 だけの file なので対象外）、実機・QEMU（範囲の外）。
+- p004 への申し送り: 割り込みの手続きの順は D7 のまま（`drv_audio_interrupt()` の後に k と k+1）。f_TMDS が表の rate から ±200 ppm の外なら N 6144 と CTS の近い整数（exact は false）。EXTERNAL_CTS_EN を立てる既定では `hardware_cts` を true で呼ぶ。
