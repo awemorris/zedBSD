@@ -3,7 +3,7 @@
 # builds hevc-slice-host-test.c with the parser and libmedia's H.265 parse (host cc, -std=c89, ASan and UBSan), runs it
 # over every HEVC_v1 conformance zip of the cache (the bitstream read with `unzip -p`, nothing unpacked to disk), then runs
 # the fuzz over the segments the streams gave.
-#   sh plan/ws321/tests/hevc-slice/run.sh [<name>...]     (default: every zip of the cache)
+#   sh plan/tools/h265/hevc-slice/run.sh [<name>...]     (default: every zip of the cache)
 # A stream outside the decoder's Main 8-bit 4:2:0 (bcm2712_hevc_check answers ENOTSUP) is counted as refused, not failed.
 # The cache is $H265SW_CONFORMANCE_DIR (default /home/awe/zedBSD-claude1/build/sources/h265-conformance, read only).
 # $HEVC_SLICE_FUZZ is the number of fuzz cases (default 100000) and $HEVC_SLICE_SEED the seed (default 1).
@@ -17,7 +17,7 @@ cd "$(dirname -- "$0")/../../../.."
 out=build/tmp/hevc-slice
 fresh_out "$out"
 cache=${H265SW_CONFORMANCE_DIR:-/home/awe/zedBSD-claude1/build/sources/h265-conformance}
-here=plan/ws321/tests/hevc-slice
+here=plan/tools/h265/hevc-slice
 cases=${HEVC_SLICE_FUZZ:-100000}
 seed=${HEVC_SLICE_SEED:-1}
 
@@ -28,7 +28,7 @@ for file in $lib/h265sw-*.c $lib/h265-*.c; do
 	modules="$modules $file"
 done
 if ! timeout 600 cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined \
-    -fno-sanitize-recover=all -fno-omit-frame-pointer -Iinclude -Isrc -I. -Iplan/tools/h264sw/unit -Iplan/ws324/tests/unit \
+    -fno-sanitize-recover=all -fno-omit-frame-pointer -Iinclude -Isrc -I. \
     $here/hevc-slice-host-test.c src/drivers/gpu/videocore/vk/vulkan-video-hevc-slice.c $modules \
     $lib/vcodec-bitreader.c $lib/vcodec-nal.c $lib/bits.c -lm -o "$out/hevc-slice-host-test" > "$out/build.log" 2>&1; then
 	echo "hevc-slice: build failed"

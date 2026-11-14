@@ -19,7 +19,7 @@
 | `src/drivers/gpu/videocore/v3d71-job.c` | TFU の job の検べを raster の出力（IOC の形 0）にも開く |
 | `Makefile`・`platform/arm64/vmunix.mk`（今は `mk/kernel.mk`） | `CONFIG_DRIVER_BCM2712_VIDEO`（既定 n、Pi 5 で BCM2712 GPU の時だけ）、source の追加。今は `CONFIG_DRIVER_RPI5_GPU` に含まれ、別の option は無い |
 | `plan/ws321/tests/config-rpi5-hevc.mk` | 試験の image（Pi 5 の config + screen capture + probe。2026-11-15 に `config/config.rpi5.mk` と `CONFIG_USERLAND_PROGRAMS` の形に直した） |
-| `plan/ws321/tests/hevc-slice/` | host 試験（P3 の helper が作った）: libmedia（適合で確かめ済み）の StdVideo と header の parse に照合、100000 件の壊れた入力 |
+| `plan/ws321/tests/hevc-slice/`（2026-11-15 に `plan/tools/h265/hevc-slice/` へ移した） | host 試験（P3 の helper が作った）: libmedia（適合で確かめ済み）の StdVideo と header の parse に照合、100000 件の壊れた入力 |
 | `plan/ws321/tests/pi5-hevc.sh` | 実機の script（check・deploy・files・probe・player・restore、cksum で戻す） |
 
 HAL・UAPI・toolchain の変更は無い。
