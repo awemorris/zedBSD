@@ -992,7 +992,10 @@ test_local_v2(void)
 			items[index].key = units + index;
 			items[index].key_length = 1;
 			items[index].value = units + index;
-			items[index].value_length = (index % 3U == 0) ? 1U : 0U;
+			if (index % 3U == 0)
+				items[index].value_length = 1U;
+			else
+				items[index].value_length = 0U;
 		}
 		wb_buffer_init(&record);
 		error = wb_storage_local_encode("origin", 6, items, 1000, &record);
@@ -1222,6 +1225,8 @@ test_local_errors(void)
 static void
 test_random(void)
 {
+	unsigned roll;
+
 	static const char *const magics[] = {
 		"KEILAND COOKIE 1\n", "KEILAND CACHE 1\n",
 		"KEILAND LOCAL STORAGE 1\n", "KEILAND LOCAL STORAGE 2\n"
@@ -1246,8 +1251,13 @@ test_random(void)
 			byte = (unsigned char)(random_next() >> 16);
 
 			/* A third of the bytes are zero or 0xff, which make lengths of interesting sizes. */
-			if (random_next() % 3U == 0)
-				byte = (unsigned char)((random_next() & 1U) ? 0xffU : 0x00U);
+			roll = random_next();
+			if (roll % 3U == 0) {
+				roll = random_next();
+				byte = 0x00U;
+				if ((roll & 1U) != 0U)
+					byte = 0xffU;
+			}
 			error = wb_buffer_append_byte(&record, byte);
 			if (error != 0)
 				break;
@@ -1281,6 +1291,7 @@ test_mutation(void)
 	unsigned variant;
 	unsigned char changed;
 	size_t accepted;
+	int status;
 
 	/* Three small good records. */
 	fill_cookie(&cookie, WB_STORAGE_COOKIE_SECURE);
@@ -1324,7 +1335,8 @@ test_mutation(void)
 			else
 				changed = (unsigned char)(saved + 1U);
 			cookie_record.data[index] = changed;
-			if (decode_cookie_copy(cookie_record.data, cookie_record.length) == 0)
+			status = decode_cookie_copy(cookie_record.data, cookie_record.length);
+			if (status == 0)
 				accepted++;
 		}
 		cookie_record.data[index] = saved;
@@ -1334,11 +1346,13 @@ test_mutation(void)
 		for (variant = 0; variant < 4U; variant++) {
 			changed = (unsigned char)(saved ^ (0x01U << variant));
 			cache_record.data[index] = changed;
-			if (decode_cache_copy(cache_record.data, cache_record.length) == 0)
+			status = decode_cache_copy(cache_record.data, cache_record.length);
+			if (status == 0)
 				accepted++;
 			changed = (unsigned char)(saved ^ (0x10U << variant));
 			cache_record.data[index] = changed;
-			if (decode_cache_copy(cache_record.data, cache_record.length) == 0)
+			status = decode_cache_copy(cache_record.data, cache_record.length);
+			if (status == 0)
 				accepted++;
 		}
 		cache_record.data[index] = saved;
@@ -1348,7 +1362,8 @@ test_mutation(void)
 		for (variant = 0; variant < 8U; variant++) {
 			changed = (unsigned char)(saved ^ (0x01U << variant));
 			local_record.data[index] = changed;
-			if (decode_local_copy(local_record.data, local_record.length) == 0)
+			status = decode_local_copy(local_record.data, local_record.length);
+			if (status == 0)
 				accepted++;
 		}
 		local_record.data[index] = saved;
@@ -1456,9 +1471,13 @@ exact_copy(
 	size_t length)
 {
 	unsigned char *copy;
+	size_t allocation;
 
 	/* A block of the size, at least one byte so that an empty record has an address. */
-	copy = (unsigned char *)malloc(length == 0 ? 1U : length);
+	allocation = length;
+	if (allocation == 0)
+		allocation = 1U;
+	copy = (unsigned char *)malloc(allocation);
 	if (copy == NULL) {
 		CHECK(copy != NULL);
 		abort();
@@ -1739,6 +1758,8 @@ same_bytes(
 	const void *right,
 	size_t right_length)
 {
+	int different;
+
 	/* Different lengths differ. */
 	if (left_length != right_length)
 		return 0;
@@ -1748,7 +1769,8 @@ same_bytes(
 		return 1;
 
 	/* The bytes. */
-	if (memcmp(left, right, left_length) != 0)
+	different = memcmp(left, right, left_length);
+	if (different != 0)
 		return 0;
 
 	/* The same. */

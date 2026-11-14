@@ -110,12 +110,15 @@ main(
 	int argc,
 	char **argv)
 {
+	int different;
+
 	/* The harness names the system; this layer is Windows only. */
 	CHECK(argc == 2);
 	if (argc != 2)
 		return check_finish("platform-win32");
-	CHECK(strcmp(argv[1], "win32") == 0);
-	if (strcmp(argv[1], "win32") != 0)
+	different = strcmp(argv[1], "win32");
+	CHECK(different == 0);
+	if (different != 0)
 		return check_finish("platform-win32");
 
 	/* Runs the groups. */
@@ -758,11 +761,13 @@ identity_thread(
 	void *argument)
 {
 	struct identity_job *job;
+	int parent_is_self;
 
 	job = (struct identity_job *)argument;
 	job->own = keiui_thread_self();
 	job->own_is_self = keiui_thread_is(job->own);
-	if (keiui_thread_is(job->parent) == 0)
+	parent_is_self = keiui_thread_is(job->parent);
+	if (parent_is_self == 0)
 		job->parent_is_not_self = 1;
 	SetEvent(job->ready);
 	WaitForSingleObject(job->release, WAIT_LIMIT);

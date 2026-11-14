@@ -77,6 +77,8 @@ static void
 test_wheel(void)
 {
 	int delta;
+	double vertical;
+	double horizontal;
 
 	/* The constants the header promises. */
 	CHECK_EQ(KEIUI_WIN32_WHEEL_DELTA, 120);
@@ -114,8 +116,8 @@ test_wheel(void)
 
 	/* The distance is linear in the delta and vertical is the horizontal one negated. */
 	for (delta = -1000; delta <= 1000; delta += 7) {
-		double vertical = keiui_win32_wheel_pixels(delta, 0);
-		double horizontal = keiui_win32_wheel_pixels(delta, 1);
+		vertical = keiui_win32_wheel_pixels(delta, 0);
+		horizontal = keiui_win32_wheel_pixels(delta, 1);
 
 		CHECK(horizontal == (double)delta / 2.0);
 		CHECK(vertical == -horizontal);

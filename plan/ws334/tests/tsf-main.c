@@ -522,11 +522,16 @@ tsf_check(
 	int passed,
 	const char *what)
 {
+	const char *verdict;
+
 	/* Counted. */
 	tsf_checks++;
 	if (!passed)
 		tsf_failed++;
-	printf("%s %s\n", passed ? "ok" : "FAIL", what);
+	verdict = "FAIL";
+	if (passed)
+		verdict = "ok";
+	printf("%s %s\n", verdict, what);
 	fflush(stdout);
 }
 

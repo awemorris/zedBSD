@@ -29,9 +29,17 @@ setenv(
 	const char *value,
 	int overwrite)
 {
-	if (overwrite == 0 && getenv(name) != NULL)
+	const char *existing;
+	errno_t status;
+
+	/* An existing variable stays unless the caller asks to replace it. */
+	existing = getenv(name);
+	if (overwrite == 0 && existing != NULL)
 		return 0;
-	return _putenv_s(name, value) == 0 ? 0 : -1;
+	status = _putenv_s(name, value);
+	if (status != 0)
+		return -1;
+	return 0;
 }
 
 static inline char *
@@ -40,16 +48,21 @@ realpath(
 	char *resolved)
 {
 	char full[PATH_MAX];
+	char *made;
 	size_t index;
 
-	if (_fullpath(full, path, sizeof(full)) == NULL)
+	made = _fullpath(full, path, sizeof(full));
+	if (made == NULL)
 		return NULL;
 	if (resolved == NULL)
 		resolved = malloc(strlen(full) + 1U);
 	if (resolved == NULL)
 		return NULL;
-	for (index = 0; full[index] != '\0'; index++)
-		resolved[index] = full[index] == '\\' ? '/' : full[index];
+	for (index = 0; full[index] != '\0'; index++) {
+		resolved[index] = full[index];
+		if (full[index] == '\\')
+			resolved[index] = '/';
+	}
 	resolved[index] = '\0';
 	return resolved;
 }

@@ -95,12 +95,16 @@ to_utf8(
 {
 	uint16_t *copy;
 	int error;
+	size_t allocation;
 
 	/* NULL stays NULL; anything else is copied to a block of count units. */
 	if (units == NULL)
 		return keiui_win32_utf8_from_utf16(NULL, count, buffer, size, consumed);
 
-	copy = malloc((count == 0 ? 1 : count) * sizeof(*copy));
+	allocation = count;
+	if (allocation == 0)
+		allocation = 1;
+	copy = malloc(allocation * sizeof(*copy));
 	CHECK(copy != NULL);
 	if (count > 0)
 		memcpy(copy, units, count * sizeof(*copy));
@@ -124,12 +128,16 @@ to_utf16(
 {
 	char *copy;
 	int error;
+	size_t allocation;
 
 	/* NULL stays NULL; anything else is copied to a block of length bytes. */
 	if (text == NULL)
 		return keiui_win32_utf16_from_utf8(NULL, length, units, capacity, count);
 
-	copy = malloc(length == 0 ? 1 : length);
+	allocation = length;
+	if (allocation == 0)
+		allocation = 1;
+	copy = malloc(allocation);
 	CHECK(copy != NULL);
 	if (length > 0)
 		memcpy(copy, text, length);
@@ -242,6 +250,7 @@ test_to_utf8_surrogates(void)
 	char buffer[64];
 	size_t used;
 	int error;
+	static const uint16_t after[] = { 0xD83D, 0xDE00 };
 
 	CHECK_TO_UTF8(lone_high_start, "\xEF\xBF\xBD" "A");
 	CHECK_TO_UTF8(lone_high_end, "A\xEF\xBF\xBD");
@@ -263,16 +272,12 @@ test_to_utf8_surrogates(void)
 	CHECK_TO_UTF8(pair_after_high, "\xEF\xBF\xBD\xF0\x90\x80\x80");
 
 	/* A high surrogate at the end of the count is alone even if memory after it holds a low one. */
-	{
-		static const uint16_t after[] = { 0xD83D, 0xDE00 };
-
-		memset(buffer, 'x', sizeof(buffer));
-		used = 99;
-		error = to_utf8(after, 1, buffer, sizeof(buffer), &used);
-		CHECK_EQ(error, 0);
-		CHECK(strcmp(buffer, "\xEF\xBF\xBD") == 0);
-		CHECK_EQ(used, 1);
-	}
+	memset(buffer, 'x', sizeof(buffer));
+	used = 99;
+	error = to_utf8(after, 1, buffer, sizeof(buffer), &used);
+	CHECK_EQ(error, 0);
+	CHECK(strcmp(buffer, "\xEF\xBF\xBD") == 0);
+	CHECK_EQ(used, 1);
 }
 
 /*
@@ -792,22 +797,26 @@ static void
 test_random_round_trip(void)
 {
 	unsigned round;
+	uint16_t units[32];
+	uint16_t back[40];
+	char expected[64];
+	char buffer[64];
+	size_t unit_count;
+	size_t byte_count;
+	size_t used;
+	size_t back_count;
+	size_t characters;
+	size_t index;
+	uint32_t code_point;
 
 	/* Each round converts a random string of 1 to 12 scalar values both ways. */
 	for (round = 0; round < RANDOM_CASES; round++) {
-		uint16_t units[32];
-		uint16_t back[40];
-		char expected[64];
-		char buffer[64];
-		size_t unit_count = 0;
-		size_t byte_count = 0;
-		size_t used;
-		size_t back_count;
-		size_t characters = 1 + random_next() % 12;
-		size_t index;
+		unit_count = 0;
+		byte_count = 0;
+		characters = 1 + random_next() % 12;
 
 		for (index = 0; index < characters; index++) {
-			uint32_t code_point = random_scalar();
+			code_point = random_scalar();
 
 			unit_count += encode_utf16(code_point, units + unit_count);
 			byte_count += encode_utf8(code_point, expected + byte_count);
@@ -837,23 +846,27 @@ test_random_cut(void)
 	uint16_t one_utf16[2];
 	size_t one_bytes;
 	size_t one_units;
+	uint16_t units[32];
+	char whole[64];
+	char buffer[64];
+	size_t unit_count;
+	size_t byte_count;
+	size_t used;
+	size_t size;
+	size_t characters;
+	size_t index;
+	size_t boundary_bytes;
+	size_t boundary_units;
+	int error;
+	int expected_error;
 
 	for (round = 0; round < RANDOM_CASES; round++) {
-		uint16_t units[32];
-		char whole[64];
-		char buffer[64];
-		size_t unit_count = 0;
-		size_t byte_count = 0;
-		size_t used;
-		size_t size;
-		size_t characters = 1 + random_next() % 8;
-		size_t index;
-		size_t boundary_bytes;
-		size_t boundary_units;
-		int error;
+		unit_count = 0;
+		byte_count = 0;
+		characters = 1 + random_next() % 8;
 
 		for (index = 0; index < characters; index++) {
-			uint32_t code_point = random_scalar();
+			code_point = random_scalar();
 
 			unit_count += encode_utf16(code_point, units + unit_count);
 			byte_count += encode_utf8(code_point, whole + byte_count);
@@ -883,7 +896,10 @@ test_random_cut(void)
 			boundary_units += one_units;
 		}
 
-		CHECK_EQ(error, boundary_units == unit_count ? 0 : ERANGE);
+		expected_error = ERANGE;
+		if (boundary_units == unit_count)
+			expected_error = 0;
+		CHECK_EQ(error, expected_error);
 		CHECK_EQ(used, boundary_units);
 		CHECK_EQ(strlen(buffer), boundary_bytes);
 		CHECK(bytes_equal(buffer, whole, boundary_bytes));
@@ -901,33 +917,40 @@ test_random_cut(void)
 static void
 test_random_bytes(void)
 {
+	unsigned roll;
+
 	static const unsigned char interesting[] = {
 		0x00, 0x41, 0x7F, 0x80, 0x8F, 0x90, 0x9F, 0xA0, 0xBF, 0xC0, 0xC1, 0xC2, 0xDF,
 		0xE0, 0xE1, 0xEC, 0xED, 0xEE, 0xEF, 0xF0, 0xF1, 0xF3, 0xF4, 0xF5, 0xFF
 	};
 	unsigned round;
+	char bytes[24];
+	uint16_t units[32];
+	uint16_t again[32];
+	char utf8[128];
+	size_t length;
+	size_t count;
+	size_t again_count;
+	size_t used;
+	size_t index;
+	size_t zero_at;
+	int error;
 
 	for (round = 0; round < RANDOM_CASES; round++) {
-		char bytes[24];
-		uint16_t units[32];
-		uint16_t again[32];
-		char utf8[128];
-		size_t length = random_next() % sizeof(bytes);
-		size_t count;
-		size_t again_count;
-		size_t used;
-		size_t index;
-		size_t zero_at;
-		int error;
+		length = random_next() % sizeof(bytes);
 
 		for (index = 0; index < length; index++) {
-			if (random_next() % 4 == 0)
+			roll = random_next();
+			if (roll % 4 == 0)
 				bytes[index] = (char)(random_next() & 0xFF);
 			else
 				bytes[index] = (char)interesting[random_next() % sizeof(interesting)];
 			/* Zero bytes are common in the table; keep most texts whole by thinning them. */
-			if (bytes[index] == 0 && random_next() % 4 != 0)
-				bytes[index] = 'z';
+			if (bytes[index] == 0) {
+				roll = random_next();
+				if (roll % 4 != 0)
+					bytes[index] = 'z';
+			}
 		}
 
 		/* The text ends at the first NUL byte, if any. */

@@ -51,11 +51,13 @@ static void sleep_ms(unsigned milliseconds);
 static void test_monotonic(void);
 static void test_wall(void);
 static void test_errors(void);
+#ifndef _WIN32
 static void use_zone(const char *zone);
 static void test_posix_zones(void);
 static void test_posix_clamp(void);
 static void test_posix_odd_names(void);
 static void test_posix(void);
+#else
 static void narrow(const wchar_t *wide, char *text, size_t size);
 static int64_t filetime_ticks(const SYSTEMTIME *time);
 static int leap_year(int year);
@@ -67,6 +69,7 @@ static long expected_offset(DYNAMIC_TIME_ZONE_INFORMATION *dynamic, int64_t seco
 static void test_windows_offsets(void);
 static void test_windows_names(void);
 static void test_windows(void);
+#endif
 
 /* Sleeps for a number of milliseconds with the system's own call. */
 static void
@@ -77,12 +80,16 @@ sleep_ms(
 	Sleep(milliseconds);
 #else
 	struct timespec request;
+	int slept;
 
 	/* Asks for the sleep, and sleeps on after an interruption by a signal. */
 	request.tv_sec = milliseconds / 1000U;
 	request.tv_nsec = (long)(milliseconds % 1000U) * 1000000L;
-	while (nanosleep(&request, &request) != 0 && errno == EINTR)
-		;
+	for (;;) {
+		slept = nanosleep(&request, &request);
+		if (slept == 0 || errno != EINTR)
+			break;
+	}
 #endif
 }
 
@@ -115,7 +122,8 @@ test_monotonic(
 	/* Some reads carry a part of a second, so the clock is not rounded to whole seconds. */
 	fractions = 0;
 	for (i = 0; i < 100; i++) {
-		if (wb_os_monotonic_ns() % 1000000000ULL != 0)
+		now = wb_os_monotonic_ns();
+		if (now % 1000000000ULL != 0)
 			fractions++;
 	}
 	CHECK(fractions > 0);
@@ -148,6 +156,7 @@ test_wall(
 	int64_t second;
 	int64_t library_seconds;
 	int64_t library_before;
+	int64_t wall;
 	int fractions;
 	int i;
 	int64_t difference;
@@ -170,7 +179,8 @@ test_wall(
 	/* Some reads carry a part of a second, so the clock is not rounded to whole seconds. */
 	fractions = 0;
 	for (i = 0; i < 100; i++) {
-		if (wb_os_wall_ns() % 1000000000LL != 0)
+		wall = wb_os_wall_ns();
+		if (wall % 1000000000LL != 0)
 			fractions++;
 	}
 	CHECK(fractions > 0);
@@ -519,9 +529,13 @@ month_days(
 	int month)
 {
 	static const int days[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+	int leap;
 
-	if (month == 2 && leap_year(year))
-		return 29;
+	if (month == 2) {
+		leap = leap_year(year);
+		if (leap)
+			return 29;
+	}
 	return days[month - 1];
 }
 
@@ -535,10 +549,16 @@ days_since_1970(
 	int64_t days;
 	int y;
 	int m;
+	int leap;
 
 	days = 0;
-	for (y = 1970; y < year; y++)
-		days += leap_year(y) ? 366 : 365;
+	for (y = 1970; y < year; y++) {
+		leap = leap_year(y);
+		if (leap)
+			days += 366;
+		else
+			days += 365;
+	}
 	for (m = 1; m < month; m++)
 		days += month_days(year, m);
 	days += day - 1;
@@ -560,6 +580,7 @@ transition_seconds(
 	int64_t days;
 	int weekday;
 	int day;
+	int length;
 
 	if (rule->wYear != 0) {
 		day = rule->wDay;
@@ -569,8 +590,12 @@ transition_seconds(
 		weekday = (int)((4 + days) % 7);
 		day = 1 + (rule->wDayOfWeek - weekday + 7) % 7;
 		day += 7 * (rule->wDay - 1);
-		while (day > month_days(year, rule->wMonth))
+		for (;;) {
+			length = month_days(year, rule->wMonth);
+			if (day <= length)
+				break;
 			day -= 7;
+		}
 	}
 	days = days_since_1970(year, rule->wMonth, day);
 	return days * 86400LL + rule->wHour * 3600LL + rule->wMinute * 60LL + rule->wSecond;
@@ -583,8 +608,8 @@ rule_offset(
 	int year,
 	int64_t seconds)
 {
-	int64_t standard_local;
-	int64_t daylight_local;
+	int64_t standard_wall;
+	int64_t daylight_wall;
 	int64_t start;
 	int64_t end;
 	long standard_offset;
@@ -601,13 +626,15 @@ rule_offset(
 	/* The daylight time starts in standard local time and ends in daylight local time. */
 	start = transition_seconds(&rules->DaylightDate, year);
 	end = transition_seconds(&rules->StandardDate, year);
-	standard_local = seconds + standard_offset;
-	daylight_local = seconds + daylight_offset;
+	standard_wall = seconds + standard_offset;
+	daylight_wall = seconds + daylight_offset;
 	if (start < end)
-		in_daylight = standard_local >= start && daylight_local < end;
+		in_daylight = standard_wall >= start && daylight_wall < end;
 	else
-		in_daylight = standard_local >= start || daylight_local < end;
-	return in_daylight ? daylight_offset : standard_offset;
+		in_daylight = standard_wall >= start || daylight_wall < end;
+	if (in_daylight)
+		return daylight_offset;
+	return standard_offset;
 }
 
 /* Finds an offset by the system's rules of the instant's own year, not the current year's. */
@@ -713,6 +740,11 @@ test_windows_names(
 	char daylight[BUFFER_SIZE * 4U];
 	char name[BUFFER_SIZE];
 	const char *wanted;
+	const char *other;
+	const char *knows;
+	size_t wanted_length;
+	size_t name_length;
+	int different;
 	int64_t instant;
 	long offset;
 	long daylight_offset;
@@ -729,8 +761,11 @@ test_windows_names(
 	narrow(dynamic.DaylightName, daylight, sizeof(daylight));
 	names = wb_os_zone_find(key);
 	daylight_offset = -((long)dynamic.Bias + (long)dynamic.DaylightBias) * 60L;
+	knows = "does not know it";
+	if (names != NULL)
+		knows = "knows it";
 	printf("zone key \"%s\", table %s, standard \"%s\", daylight \"%s\", daylight bias %ld\n", key,
-	    names != NULL ? "knows it" : "does not know it", standard, daylight, (long)dynamic.DaylightBias);
+	    knows, standard, daylight, (long)dynamic.DaylightBias);
 
 	/* Every instant has the standard or the daylight name, by the daylight offset of the per-year rules. */
 	for (i = 0; i < sizeof(windows_instants) / sizeof(windows_instants[0]) + sizeof(transition_instants) / sizeof(transition_instants[0]); i++) {
@@ -750,15 +785,25 @@ test_windows_names(
 			else
 				CHECK(strcmp(name, names->standard) == 0);
 		} else {
-			wanted = is_daylight ? daylight : standard;
+			wanted = standard;
+			other = daylight;
+			if (is_daylight) {
+				wanted = daylight;
+				other = standard;
+			}
 			if (wanted[0] == '\0')
-				wanted = is_daylight ? standard : daylight;
+				wanted = other;
 			if (wanted[0] == '\0')
 				wanted = "UTC";
-			if (strlen(wanted) <= WB_OS_ZONE_NAME_MAX)
-				CHECK(strcmp(name, wanted) == 0);
-			else
-				CHECK(strncmp(name, wanted, strlen(name)) == 0);
+			wanted_length = strlen(wanted);
+			if (wanted_length <= WB_OS_ZONE_NAME_MAX) {
+				different = strcmp(name, wanted);
+				CHECK(different == 0);
+			} else {
+				name_length = strlen(name);
+				different = strncmp(name, wanted, name_length);
+				CHECK(different == 0);
+			}
 		}
 	}
 }

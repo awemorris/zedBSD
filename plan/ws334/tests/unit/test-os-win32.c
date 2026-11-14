@@ -425,6 +425,7 @@ test_utf8_round_trip(
 	size_t back_length;
 	int error;
 	size_t expected_units;
+	int back_different;
 
 	failures = 0;
 	for (code = 1; code <= 0x10ffffUL; code++) {
@@ -452,7 +453,9 @@ test_utf8_round_trip(
 			size = 4;
 		}
 		encoded[size] = 0;
-		expected_units = code >= 0x10000UL ? 2 : 1;
+		expected_units = 1;
+		if (code >= 0x10000UL)
+			expected_units = 2;
 
 		/* To UTF-16: one unit, or a surrogate pair from the definition. */
 		wide = NULL;
@@ -473,12 +476,18 @@ test_utf8_round_trip(
 		/* And back, by the count and by the NUL. */
 		back = NULL;
 		error = wb_os_utf8_from_wide(wide, length, &back, &back_length);
-		if (error != 0 || back_length != size || memcmp(back, encoded, size + 1) != 0)
+		back_different = 1;
+		if (error == 0 && back_length == size)
+			back_different = memcmp(back, encoded, size + 1);
+		if (error != 0 || back_length != size || back_different != 0)
 			failures++;
 		free(back);
 		back = NULL;
 		error = wb_os_utf8_from_wide(wide, (size_t)-1, &back, &back_length);
-		if (error != 0 || back_length != size || memcmp(back, encoded, size + 1) != 0)
+		back_different = 1;
+		if (error == 0 && back_length == size)
+			back_different = memcmp(back, encoded, size + 1);
+		if (error != 0 || back_length != size || back_different != 0)
 			failures++;
 		free(back);
 		free(wide);
@@ -751,6 +760,7 @@ expect_path(
 {
 	wchar_t *wide;
 	int error;
+	int different;
 
 	wide = NULL;
 	error = wb_os_wide_path(path, &wide);
@@ -758,8 +768,9 @@ expect_path(
 	if (error != 0 || wide == NULL)
 		return;
 	CHECK(wcscmp(wide, expected) == 0);
-	if (wcscmp(wide, expected) != 0)
-		wprintf(L"  got %ls\n  expected %ls\n", wide, expected);
+	different = wcscmp(wide, expected);
+	CHECK(different == 0);
+	if (different != 0)
 	free(wide);
 }
 
