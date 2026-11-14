@@ -134,6 +134,10 @@ static void test_list(void);
 static void test_flush_close(void);
 static void test_stress(void);
 
+static void *reader_main(void *argument);
+static void *opener_main(void *argument);
+static void *stress_main(void *argument);
+
 static const struct browser_storage_calls fake_calls;
 
 static void fake_init(struct fake *fake);
@@ -169,6 +173,7 @@ main(
 {
 	int error;
 
+	/* The test takes no arguments. */
 	(void)argc;
 	(void)argv;
 
@@ -176,6 +181,7 @@ main(
 	error = browser_threads_set(browser_threads_posix());
 	CHECK_EQ(error, 0);
 
+	/* Run every test in order. */
 	test_open();
 	test_arguments();
 	test_order();
@@ -190,6 +196,7 @@ main(
 	test_flush_close();
 	test_stress();
 
+	/* Report the count of failures. */
 	return check_finish("queue");
 }
 
@@ -239,6 +246,7 @@ test_open(void)
 		found = 7;
 		count = 9;
 
+		/* With no backend every write and remove is accepted and dropped, and a read or list finds nothing. */
 		CHECK_EQ(wb_storage_queue_write(queue, SPACE_ONE, "a1", "xyz", 3), 0);
 		CHECK_EQ(wb_storage_queue_write(queue, SPACE_ONE, "a1", NULL, 0), 0);
 		CHECK_EQ(wb_storage_queue_remove(queue, SPACE_ONE, "a1"), 0);
@@ -260,6 +268,7 @@ test_open(void)
 		CHECK_EQ(wb_storage_queue_write(queue, SPACE_ONE, "a1", NULL, 1), EINVAL);
 		CHECK_EQ(wb_storage_queue_write(queue, SPACE_ONE, "a1", big, WB_STORAGE_QUEUE_LIMIT + 1UL), EFBIG);
 
+		/* Release the buffers and close the queue. */
 		wb_buffer_release(&out);
 		wb_buffer_release(&keys);
 		wb_storage_queue_close(queue);
@@ -288,6 +297,8 @@ test_open(void)
 		CHECK_EQ(error, ENOTSUP);
 		CHECK(queue == NULL);
 	}
+
+	/* Nothing reached the backend for the refused tables. */
 	CHECK_EQ(fake.closes, 0);
 	CHECK_EQ(fake.total_calls, 0);
 
@@ -302,12 +313,15 @@ test_open(void)
 		put(queue, SPACE_ONE, "a1", "v");
 		wb_storage_queue_close(queue);
 	}
+
+	/* The close member is optional, so no close call was made. */
 	CHECK_EQ(fake.closes, 0);
 	CHECK(fake_has(&fake, SPACE_ONE, "a1", "v"));
 
 	/* Closing nothing does nothing. */
 	wb_storage_queue_close(NULL);
 
+	/* Release the fake. */
 	fake_destroy(&fake);
 }
 
@@ -323,6 +337,7 @@ test_arguments(void)
 	struct wb_buffer keys;
 	static struct fake fake;
 	char long_key[FAKE_KEY_SIZE + 8];
+	const char *bad;
 	size_t count;
 	int found;
 	unsigned i;
@@ -338,6 +353,7 @@ test_arguments(void)
 	wb_storage_queue_flush(NULL);
 	CHECK_EQ(wb_storage_queue_take_error(NULL), 0);
 
+	/* A queue on a fresh fake. */
 	fake_init(&fake);
 	queue = open_queue(&fake);
 	if (queue == NULL) {
@@ -357,7 +373,7 @@ test_arguments(void)
 
 	/* Keys outside [0-9a-f-] or of the wrong length are refused by every call that takes one. */
 	for (i = 0; i < 4; i++) {
-		const char *bad = "";
+		bad = "";
 		if (i == 0)
 			bad = "";
 		if (i == 1)
@@ -369,6 +385,8 @@ test_arguments(void)
 			long_key[201] = 0;
 			bad = long_key;
 		}
+
+		/* The remaining invalid keys are refused in every call, and the backend is not reached. */
 		found = 5;
 		CHECK_EQ(wb_storage_queue_write(queue, SPACE_ONE, bad, "x", 1), EINVAL);
 		CHECK_EQ(wb_storage_queue_remove(queue, SPACE_ONE, bad), EINVAL);
@@ -391,6 +409,7 @@ test_arguments(void)
 	CHECK_EQ(fake_event_count(&fake, 'W', "e0"), 1);
 	CHECK_EQ(fake.total_calls, 4);
 
+	/* Close the queue and release what the test holds. */
 	wb_storage_queue_close(queue);
 	wb_buffer_release(&out);
 	wb_buffer_release(&keys);
@@ -408,9 +427,11 @@ test_order(void)
 	static struct fake fake;
 	char text[512];
 	struct wb_buffer out;
+	int different;
 	int found;
 	int error;
 
+	/* A queue on a fresh fake. */
 	fake_init(&fake);
 	queue = open_queue(&fake);
 	if (queue == NULL) {
@@ -444,14 +465,16 @@ test_order(void)
 	CHECK(memcmp(out.data, "xyBB", 4) == 0);
 	wb_buffer_release(&out);
 
+	/* Close the queue; the backend then saw every call it should. */
 	wb_storage_queue_close(queue);
 
 	/* The backend saw exactly this sequence, then the close. */
 	fake_log_text(&fake, text, sizeof(text));
 	CHECK(strcmp(text,
 	    "W1:a1:3;W1:b2:2;X1:a1:0;R1:a1:0;R1:b2:0;W2:b2:3;W2:c3:5;C2::0;R2:b2:0;R2:c3:0;R1:b2:0;R1:b2:0;Q0::0;") == 0);
-	if (strcmp(text,
-	    "W1:a1:3;W1:b2:2;X1:a1:0;R1:a1:0;R1:b2:0;W2:b2:3;W2:c3:5;C2::0;R2:b2:0;R2:c3:0;R1:b2:0;R1:b2:0;Q0::0;") != 0)
+	different = strcmp(text,
+	    "W1:a1:3;W1:b2:2;X1:a1:0;R1:a1:0;R1:b2:0;W2:b2:3;W2:c3:5;C2::0;R2:b2:0;R2:c3:0;R1:b2:0;R1:b2:0;Q0::0;");
+	if (different != 0)
 		printf("log: %s\n", text);
 
 	/* One thread, not the caller's, never two calls at once, named for debuggers. */
@@ -463,6 +486,7 @@ test_order(void)
 	CHECK_EQ(fake.closes, 1);
 	CHECK_EQ(fake.calls_after_close, 0);
 
+	/* Release the fake. */
 	fake_destroy(&fake);
 }
 
@@ -481,6 +505,7 @@ test_write_behind(void)
 	char value[16];
 	unsigned i;
 
+	/* The fake is slow to write, so a returning write call proves the write is queued. */
 	fake_init(&fake);
 	fake.write_delay_ms = 200;
 	queue = open_queue(&fake);
@@ -496,6 +521,8 @@ test_write_behind(void)
 		snprintf(value, sizeof(value), "value-%u", i);
 		CHECK_EQ(wb_storage_queue_write(queue, SPACE_ONE, key, value, strlen(value)), 0);
 	}
+
+	/* The writes returned long before the backend could finish them. */
 	elapsed = now_ms() - start;
 	CHECK(elapsed < 50);
 
@@ -506,6 +533,7 @@ test_write_behind(void)
 		CHECK(expect_record(queue, SPACE_ONE, key, value));
 	}
 
+	/* Close the queue, which waits for the backend, and release the fake. */
 	wb_storage_queue_close(queue);
 	fake_destroy(&fake);
 
@@ -516,6 +544,8 @@ test_write_behind(void)
 		fake_destroy(&fake);
 		return;
 	}
+
+	/* The queued write reaches the backend without a later call. */
 	put(queue, SPACE_ONE, "a1", "v");
 	fake_wait_calls(&fake, 1);
 	CHECK(fake_has(&fake, SPACE_ONE, "a1", "v"));
@@ -537,6 +567,7 @@ test_merge(void)
 	static struct fake fake;
 	char text[512];
 
+	/* A queue on a fresh fake. */
 	fake_init(&fake);
 	queue = open_queue(&fake);
 	if (queue == NULL) {
@@ -573,6 +604,7 @@ test_merge(void)
 	put(queue, SPACE_TWO, "ee", "two");
 	put(queue, SPACE_ONE, "ee", "uno");
 
+	/* Open the gate and let the queue drain. */
 	fake_set_gate(&fake, 0);
 	wb_storage_queue_flush(queue);
 
@@ -594,6 +626,7 @@ test_merge(void)
 	CHECK(strstr(text, "W2:dd:1;C2::0;W2:dd:1;") != NULL);
 	CHECK_EQ(fake.max_inside, 1);
 
+	/* Close the queue and release the fake. */
 	wb_storage_queue_close(queue);
 	fake_destroy(&fake);
 }
@@ -618,6 +651,7 @@ reader_main(
 	struct reader_job *job;
 	struct wb_buffer out;
 
+	/* Take the job from the argument and read through the queue. */
 	job = argument;
 	wb_buffer_init(&out);
 	job->found = 0;
@@ -627,6 +661,7 @@ reader_main(
 		memcpy(job->seen, out.data, out.length);
 	wb_buffer_release(&out);
 
+	/* The thread has no result to return. */
 	return NULL;
 }
 
@@ -646,8 +681,10 @@ test_merge_read_barrier(void)
 	pthread_t reader;
 	int attempt;
 	int saw_first;
+	int first;
 	int created;
 
+	/* Try several times to make the reader enter the queue before the writer's flush. */
 	saw_first = 0;
 	for (attempt = 0; attempt < 5 && !saw_first; attempt++) {
 		fake_init(&fake);
@@ -684,12 +721,16 @@ test_merge_read_barrier(void)
 		CHECK_EQ(job.found, 1);
 		CHECK(strcmp(job.seen, "first") == 0 || strcmp(job.seen, "second") == 0);
 		CHECK(fake_has(&fake, SPACE_ONE, "aa", "second"));
-		if (strcmp(job.seen, "first") == 0)
+		first = strcmp(job.seen, "first");
+		if (first == 0)
 			saw_first = 1;
 
+		/* Close the queue and release the fake. */
 		wb_storage_queue_close(queue);
 		fake_destroy(&fake);
 	}
+
+	/* The reader saw the first value in at least one attempt. */
 	CHECK(saw_first);
 }
 
@@ -702,16 +743,19 @@ test_limits(void)
 	struct wb_storage_queue *queue;
 	static struct fake fake;
 	unsigned char *big;
+	struct fake_record *record;
 	long long start;
 	long long elapsed;
 	int error;
 
+	/* A block one byte over the limit, and one that fits. */
 	big = malloc(WB_STORAGE_QUEUE_LIMIT + 1UL);
 	CHECK(big != NULL);
 	if (big == NULL)
 		return;
 	memset(big, 'x', WB_STORAGE_QUEUE_LIMIT + 1UL);
 
+	/* A queue on a fresh fake. */
 	fake_init(&fake);
 	queue = open_queue(&fake);
 	if (queue == NULL) {
@@ -751,21 +795,24 @@ test_limits(void)
 	wb_storage_queue_flush(queue);
 	CHECK_EQ(wb_storage_queue_take_error(queue), 0);
 	CHECK_EQ(fake_event_count(&fake, 'W', "0a"), 1);
-	{
-		struct fake_record *record;
 
-		pthread_mutex_lock(&fake.lock);
-		record = fake_find(&fake, SPACE_ONE, "0a");
-		CHECK(record != NULL);
-		if (record != NULL) {
-			CHECK_EQ(record->length, WB_STORAGE_QUEUE_LIMIT);
-			CHECK(memcmp(record->bytes, big, 64) == 0);
-		}
-		pthread_mutex_unlock(&fake.lock);
+	/* Look at the record the backend holds under the lock. */
+	pthread_mutex_lock(&fake.lock);
+	record = fake_find(&fake, SPACE_ONE, "0a");
+	CHECK(record != NULL);
+	if (record != NULL) {
+		CHECK_EQ(record->length, WB_STORAGE_QUEUE_LIMIT);
+		CHECK(memcmp(record->bytes, big, 64) == 0);
 	}
+
+	/* Let the lock go; the bytes of the largest write arrived whole. */
+	pthread_mutex_unlock(&fake.lock);
+
+	/* A write after the large one is accepted and read back. */
 	CHECK_EQ(wb_storage_queue_write(queue, SPACE_ONE, "0b", "x", 1), 0);
 	CHECK(expect_record(queue, SPACE_ONE, "0b", "x"));
 
+	/* Close the queue and release the block and the fake. */
 	wb_storage_queue_close(queue);
 	free(big);
 	fake_destroy(&fake);
@@ -784,6 +831,7 @@ test_item_limit(void)
 	unsigned i;
 	int error;
 
+	/* A queue on a fresh fake that does not log events, so many writes fit. */
 	fake_init(&fake);
 	fake.record_events = 0;
 	queue = open_queue(&fake);
@@ -806,6 +854,8 @@ test_item_limit(void)
 		if (error == 0)
 			accepted++;
 	}
+
+	/* The 65536th write is refused as the queue is full, and the 65535 before it were accepted. */
 	CHECK_EQ(error, ENOSPC);
 	CHECK_EQ(accepted, 65535);
 
@@ -821,6 +871,7 @@ test_item_limit(void)
 	CHECK(expect_record(queue, SPACE_ONE, "fffff", "x"));
 	CHECK_EQ(fake.total_calls, 65536 + 2);
 
+	/* Close the queue and release the fake. */
 	wb_storage_queue_close(queue);
 	fake_destroy(&fake);
 }
@@ -835,6 +886,7 @@ test_errors(void)
 	struct wb_storage_queue *queue;
 	static struct fake fake;
 
+	/* A queue on a fresh fake. */
 	fake_init(&fake);
 	queue = open_queue(&fake);
 	if (queue == NULL) {
@@ -892,12 +944,15 @@ test_read_errors(void)
 	int found;
 	int error;
 
+	/* A queue on a fresh fake. */
 	fake_init(&fake);
 	queue = open_queue(&fake);
 	if (queue == NULL) {
 		fake_destroy(&fake);
 		return;
 	}
+
+	/* Put a record the backend can read. */
 	put(queue, SPACE_ONE, "a1", "abcdef");
 	wb_storage_queue_flush(queue);
 
@@ -946,6 +1001,7 @@ test_read_errors(void)
 	CHECK(memcmp(out.data, "preabcdef", 10) == 0);
 	fake.big_read = 0;
 
+	/* Release the buffer, close the queue and release the fake. */
 	wb_buffer_release(&out);
 	wb_storage_queue_close(queue);
 	fake_destroy(&fake);
@@ -964,6 +1020,7 @@ test_list(void)
 	size_t count;
 	int error;
 
+	/* A queue on a fresh fake. */
 	fake_init(&fake);
 	queue = open_queue(&fake);
 	if (queue == NULL) {
@@ -1023,6 +1080,7 @@ test_list(void)
 	CHECK_EQ(count, 1);
 	CHECK(memcmp(keys.data, "dd\0", 3) == 0);
 
+	/* Release the keys, close the queue and release the fake. */
 	wb_buffer_release(&keys);
 	wb_storage_queue_close(queue);
 	fake_destroy(&fake);
@@ -1043,10 +1101,12 @@ opener_main(
 {
 	struct opener_job *job;
 
+	/* Take the job, wait, and open the gate. */
 	job = argument;
 	sleep_ms(job->delay_ms);
 	fake_set_gate(job->fake, 0);
 
+	/* The thread has no result to return. */
 	return NULL;
 }
 
@@ -1074,10 +1134,14 @@ test_flush_close(void)
 		fake_destroy(&fake);
 		return;
 	}
+
+	/* Ten records that all reach the backend. */
 	for (i = 0; i < 10; i++) {
 		key_text(key, i);
 		put(queue, SPACE_ONE, key, "v");
 	}
+
+	/* Wait until the backend has them. */
 	wb_storage_queue_flush(queue);
 	for (i = 0; i < 10; i++) {
 		key_text(key, i);
@@ -1097,6 +1161,8 @@ test_flush_close(void)
 		fake_destroy(&fake);
 		return;
 	}
+
+	/* Hold the backend at the gate with one write inside it. */
 	fake_set_gate(&fake, CALL_ALL);
 	put(queue, SPACE_ONE, "5a", "hold");
 	fake_wait_entered(&fake, 1);
@@ -1104,9 +1170,12 @@ test_flush_close(void)
 		key_text(key, 0x10 + i);
 		put(queue, SPACE_ONE, key, "queued");
 	}
+
+	/* Queue more writes behind the gate and a remove after them. */
 	CHECK_EQ(wb_storage_queue_remove(queue, SPACE_ONE, "5a"), 0);
 	CHECK_EQ(fake.closes, 0);
 
+	/* A thread opens the gate after a delay while the close waits. */
 	job.fake = &fake;
 	job.delay_ms = 150;
 	created = pthread_create(&opener, NULL, opener_main, &job);
@@ -1117,10 +1186,13 @@ test_flush_close(void)
 	if (created == 0)
 		pthread_join(opener, NULL);
 
+	/* After the close every queued write reached the backend. */
 	for (i = 0; i < 5; i++) {
 		key_text(key, 0x10 + i);
 		CHECK(fake_has(&fake, SPACE_ONE, key, "queued"));
 	}
+
+	/* The removed record is gone. */
 	CHECK(!fake_has(&fake, SPACE_ONE, "5a", "hold"));
 	CHECK_EQ(fake.closes, 1);
 	CHECK_EQ(fake.calls_after_close, 0);
@@ -1164,6 +1236,7 @@ stress_main(
 	int found;
 	int error;
 
+	/* Take the job; the thread uses its own key and a shared one. */
 	job = argument;
 	found = 0;
 	count = 0;
@@ -1176,6 +1249,7 @@ stress_main(
 		snprintf(value, sizeof(value), "t%u-p%u", job->number, pass);
 		length = strlen(value);
 
+		/* Each pass does one kind of call, chosen by the pass number. */
 		switch (pass % 5) {
 		case 0:
 			CHECK_EQ(wb_storage_queue_write(job->queue, SPACE_ONE, own, value, length), 0);
@@ -1222,9 +1296,11 @@ stress_main(
 		}
 	}
 
+	/* Release the buffers. */
 	wb_buffer_release(&out);
 	wb_buffer_release(&keys);
 
+	/* The thread has no result to return. */
 	return NULL;
 }
 
@@ -1241,6 +1317,7 @@ test_stress(void)
 	int created[STRESS_THREADS];
 	unsigned i;
 
+	/* A queue on a fresh fake that does not log events. */
 	fake_init(&fake);
 	fake.record_events = 0;
 	queue = open_queue(&fake);
@@ -1275,6 +1352,7 @@ test_stress(void)
 	CHECK_EQ(fake.calls_after_close, 0);
 	CHECK(fake.total_calls > STRESS_THREADS * STRESS_PASSES / 2);
 
+	/* Release the fake. */
 	fake_destroy(&fake);
 }
 
@@ -1300,6 +1378,7 @@ fake_destroy(
 {
 	int i;
 
+	/* Free the bytes of every record, then the locks. */
 	for (i = 0; i < FAKE_RECORDS; i++)
 		free(fake->records[i].bytes);
 	pthread_cond_destroy(&fake->changed);
@@ -1333,6 +1412,7 @@ fake_wait_entered(
 	int reached;
 	int tries;
 
+	/* Poll for up to ten seconds until enough calls are inside the fake. */
 	reached = 0;
 	for (tries = 0; tries < 10000 && !reached; tries++) {
 		pthread_mutex_lock(&fake->lock);
@@ -1342,6 +1422,8 @@ fake_wait_entered(
 		if (!reached)
 			sleep_ms(1);
 	}
+
+	/* The calls arrived in time. */
 	CHECK(reached);
 }
 
@@ -1356,6 +1438,7 @@ fake_wait_calls(
 	int reached;
 	int tries;
 
+	/* Poll for up to ten seconds until the fake has the calls and none is inside. */
 	reached = 0;
 	for (tries = 0; tries < 10000 && !reached; tries++) {
 		pthread_mutex_lock(&fake->lock);
@@ -1365,6 +1448,8 @@ fake_wait_calls(
 		if (!reached)
 			sleep_ms(1);
 	}
+
+	/* The calls arrived in time. */
 	CHECK(reached);
 }
 
@@ -1406,10 +1491,14 @@ fake_enter(
 	struct fake_event *event;
 	int call_bit;
 	int error;
+	int same_thread;
 #ifndef _WIN32
 	char name[32];
+	int name_error;
+	int name_difference;
 #endif
 
+	/* The call kind selects the bit tested against the gate and failure masks. */
 	call_bit = 0;
 	if (kind == 'R')
 		call_bit = CALL_READ;
@@ -1422,6 +1511,7 @@ fake_enter(
 	if (kind == 'C')
 		call_bit = CALL_CLEAR;
 
+	/* Take the lock for the rest of the bookkeeping. */
 	pthread_mutex_lock(&fake->lock);
 
 	/* Counts the call, and notes one made after the close. */
@@ -1433,9 +1523,13 @@ fake_enter(
 	if (!fake->thread_known) {
 		fake->thread = pthread_self();
 		fake->thread_known = 1;
-	} else if (!pthread_equal(fake->thread, pthread_self())) {
-		fake->wrong_thread = 1;
+	} else {
+		same_thread = pthread_equal(fake->thread, pthread_self());
+		if (!same_thread)
+			fake->wrong_thread = 1;
 	}
+
+	/* One more call is inside the fake now, and the most at once is remembered. */
 	fake->inside++;
 	if (fake->inside > fake->max_inside)
 		fake->max_inside = fake->inside;
@@ -1445,8 +1539,14 @@ fake_enter(
 	if (!fake->name_checked) {
 		fake->name_checked = 1;
 		name[0] = 0;
-		if (pthread_getname_np(pthread_self(), name, sizeof(name)) != 0 || strcmp(name, WB_STORAGE_QUEUE_THREAD) != 0)
+		name_error = pthread_getname_np(pthread_self(), name, sizeof(name));
+		if (name_error != 0) {
 			fake->name_wrong = 1;
+		} else {
+			name_difference = strcmp(name, WB_STORAGE_QUEUE_THREAD);
+			if (name_difference != 0)
+				fake->name_wrong = 1;
+		}
 	}
 #endif
 
@@ -1481,6 +1581,7 @@ fake_enter(
 	if (kind == 'W' && fake->write_delay_ms != 0)
 		sleep_ms(fake->write_delay_ms);
 
+	/* Report the failure, if one was asked for. */
 	return error;
 }
 
@@ -1507,13 +1608,19 @@ fake_find(
 	unsigned space,
 	const char *key)
 {
+	int difference;
 	int i;
 
+	/* Look for a used record of the space and key. */
 	for (i = 0; i < FAKE_RECORDS; i++) {
-		if (fake->records[i].used && fake->records[i].space == space && strcmp(fake->records[i].key, key) == 0)
+		if (!fake->records[i].used || fake->records[i].space != space)
+			continue;
+		difference = strcmp(fake->records[i].key, key);
+		if (difference == 0)
 			return &fake->records[i];
 	}
 
+	/* There is none. */
 	return NULL;
 }
 
@@ -1534,6 +1641,7 @@ fake_read(
 	int sink_error;
 	size_t total;
 
+	/* Start a read: nothing is found until a record is copied. */
 	fake = context;
 	*found = 0;
 	error = fake_enter(fake, 'R', space, key, 0);
@@ -1552,6 +1660,7 @@ fake_read(
 		return sink_error;
 	}
 
+	/* Look the record up under the lock. */
 	pthread_mutex_lock(&fake->lock);
 	record = fake_find(fake, space, key);
 	if (record != NULL) {
@@ -1568,8 +1677,11 @@ fake_read(
 			}
 		}
 	}
+
+	/* The record, if any, was copied to the sink. */
 	pthread_mutex_unlock(&fake->lock);
 
+	/* Leave the fake. */
 	fake_leave(fake);
 	if (error != 0)
 		*found = 1;
@@ -1593,6 +1705,7 @@ fake_write(
 	int error;
 	int i;
 
+	/* Start a write. */
 	fake = context;
 	error = fake_enter(fake, 'W', space, key, length);
 	if (error != 0) {
@@ -1605,6 +1718,7 @@ fake_write(
 	if (copy != NULL && length > 0)
 		memcpy(copy, bytes, length);
 
+	/* Find the record for the key, or a free one, under the lock. */
 	pthread_mutex_lock(&fake->lock);
 	record = fake_find(fake, space, key);
 	if (record == NULL) {
@@ -1613,6 +1727,8 @@ fake_write(
 				record = &fake->records[i];
 		}
 	}
+
+	/* Store the copy, or give it up when no record is free. */
 	if (record != NULL && copy != NULL) {
 		free(record->bytes);
 		record->used = 1;
@@ -1624,8 +1740,11 @@ fake_write(
 		free(copy);
 		error = ENOSPC;
 	}
+
+	/* The record table is consistent again. */
 	pthread_mutex_unlock(&fake->lock);
 
+	/* Leave the fake. */
 	fake_leave(fake);
 	return error;
 }
@@ -1643,6 +1762,7 @@ fake_remove(
 	struct fake_record *record;
 	int error;
 
+	/* Start a remove. */
 	fake = context;
 	error = fake_enter(fake, 'X', space, key, 0);
 	if (error != 0) {
@@ -1650,14 +1770,18 @@ fake_remove(
 		return error;
 	}
 
+	/* Drop the record under the lock. */
 	pthread_mutex_lock(&fake->lock);
 	record = fake_find(fake, space, key);
 	if (record != NULL) {
 		free(record->bytes);
 		memset(record, 0, sizeof(*record));
 	}
+
+	/* The table is consistent again. */
 	pthread_mutex_unlock(&fake->lock);
 
+	/* Leave the fake. */
 	fake_leave(fake);
 	return 0;
 }
@@ -1680,6 +1804,7 @@ fake_list(
 	int error;
 	int result;
 
+	/* Start a list. */
 	fake = context;
 	error = fake_enter(fake, 'L', space, "", 0);
 
@@ -1692,8 +1817,11 @@ fake_list(
 			count++;
 		}
 	}
+
+	/* The fake's state is no longer in use. */
 	pthread_mutex_unlock(&fake->lock);
 
+	/* A key longer than the limit that the queue must refuse. */
 	memset(long_key, 'a', 201);
 	long_key[201] = 0;
 	result = 0;
@@ -1705,6 +1833,7 @@ fake_list(
 		each(each_context, NULL);
 	}
 
+	/* Give each key to the queue's callback. */
 	for (i = 0; i < count && result == 0; i++) {
 		result = each(each_context, keys[i]);
 
@@ -1721,9 +1850,11 @@ fake_list(
 		}
 	}
 
+	/* Some backends add a key that is not valid. */
 	if (fake->list_extras)
 		each(each_context, "G-0");
 
+	/* Leave the fake. */
 	fake_leave(fake);
 	if (error != 0)
 		return error;
@@ -1742,6 +1873,7 @@ fake_clear(
 	int error;
 	int i;
 
+	/* Start a clear. */
 	fake = context;
 	error = fake_enter(fake, 'C', space, "", 0);
 	if (error != 0) {
@@ -1749,6 +1881,7 @@ fake_clear(
 		return error;
 	}
 
+	/* Drop every record of the space under the lock. */
 	pthread_mutex_lock(&fake->lock);
 	for (i = 0; i < FAKE_RECORDS; i++) {
 		if (fake->records[i].used && fake->records[i].space == space) {
@@ -1756,8 +1889,11 @@ fake_clear(
 			memset(&fake->records[i], 0, sizeof(fake->records[i]));
 		}
 	}
+
+	/* The table is consistent again. */
 	pthread_mutex_unlock(&fake->lock);
 
+	/* Leave the fake. */
 	fake_leave(fake);
 	return 0;
 }
@@ -1772,8 +1908,10 @@ fake_close(
 	struct fake *fake;
 	struct fake_event *event;
 
+	/* Take the fake from the context. */
 	fake = context;
 
+	/* Everything below is under the lock. */
 	pthread_mutex_lock(&fake->lock);
 
 	fake->closes++;
@@ -1787,6 +1925,8 @@ fake_close(
 		event->length = 0;
 		fake->event_count++;
 	}
+
+	/* The backend is closed. */
 	fake->closed = 1;
 
 	pthread_mutex_unlock(&fake->lock);
@@ -1805,9 +1945,11 @@ fake_log_text(
 	size_t used;
 	int wrote;
 
+	/* Start with an empty text. */
 	text[0] = 0;
 	used = 0;
 
+	/* Print each event in order under the lock. */
 	pthread_mutex_lock(&fake->lock);
 	for (i = 0; i < fake->event_count; i++) {
 		wrote = snprintf(text + used, size - used, "%c%u:%s:%u;",
@@ -1816,6 +1958,8 @@ fake_log_text(
 			break;
 		used += (size_t)wrote;
 	}
+
+	/* The text is complete. */
 	pthread_mutex_unlock(&fake->lock);
 }
 
@@ -1830,16 +1974,25 @@ fake_event_count(
 {
 	size_t i;
 	size_t count;
+	int difference;
 
+	/* No events counted yet. */
 	count = 0;
 
+	/* Count the matching events under the lock. */
 	pthread_mutex_lock(&fake->lock);
 	for (i = 0; i < fake->event_count; i++) {
-		if (fake->events[i].kind == kind && strcmp(fake->events[i].key, key) == 0)
+		if (fake->events[i].kind != kind)
+			continue;
+		difference = strcmp(fake->events[i].key, key);
+		if (difference == 0)
 			count++;
 	}
+
+	/* All events were looked at. */
 	pthread_mutex_unlock(&fake->lock);
 
+	/* Report the count. */
 	return count;
 }
 
@@ -1854,16 +2007,27 @@ fake_has(
 	const char *bytes)
 {
 	struct fake_record *record;
+	size_t length;
+	int difference;
 	int has;
 
+	/* Nothing found yet. */
 	has = 0;
 
+	/* Compare the record's bytes under the lock. */
 	pthread_mutex_lock(&fake->lock);
 	record = fake_find(fake, space, key);
-	if (record != NULL && record->length == strlen(bytes) && memcmp(record->bytes, bytes, record->length) == 0)
-		has = 1;
+	length = strlen(bytes);
+	if (record != NULL && record->length == length) {
+		difference = memcmp(record->bytes, bytes, record->length);
+		if (difference == 0)
+			has = 1;
+	}
+
+	/* The lock is let go; the answer is known. */
 	pthread_mutex_unlock(&fake->lock);
 
+	/* Report the answer. */
 	return has;
 }
 
@@ -1877,11 +2041,13 @@ open_queue(
 	struct wb_storage_queue *queue;
 	int error;
 
+	/* No queue yet. */
 	queue = NULL;
 	error = wb_storage_queue_open(&fake_calls, fake, &queue);
 	CHECK_EQ(error, 0);
 	CHECK(queue != NULL);
 
+	/* Report the queue; it is NULL if opening failed. */
 	return queue;
 }
 
@@ -1897,6 +2063,7 @@ put(
 {
 	int error;
 
+	/* The write is queued with the text's own length. */
 	error = wb_storage_queue_write(queue, space, key, text, strlen(text));
 	CHECK_EQ(error, 0);
 }
@@ -1913,17 +2080,29 @@ expect_record(
 {
 	struct wb_buffer out;
 	int found;
+	size_t length;
+	int difference;
 	int error;
 	int same;
 
+	/* Read the record into an empty buffer. */
 	wb_buffer_init(&out);
 	found = 0;
 	error = wb_storage_queue_read(queue, space, key, &out, &found);
 	same = 0;
-	if (error == 0 && found == 1 && out.length == strlen(text) && (out.length == 0 || memcmp(out.data, text, out.length) == 0))
-		same = 1;
+	length = strlen(text);
+	if (error == 0 && found == 1 && out.length == length) {
+		difference = 0;
+		if (out.length != 0)
+			difference = memcmp(out.data, text, out.length);
+		if (difference == 0)
+			same = 1;
+	}
+
+	/* The buffer is not needed any more. */
 	wb_buffer_release(&out);
 
+	/* Report the answer. */
 	return same;
 }
 
@@ -1941,6 +2120,7 @@ expect_absent(
 	int error;
 	int absent;
 
+	/* Read the record into an empty buffer; found starts as 1 so a missing answer is noticed. */
 	wb_buffer_init(&out);
 	found = 1;
 	error = wb_storage_queue_read(queue, space, key, &out, &found);
@@ -1949,6 +2129,7 @@ expect_absent(
 		absent = 1;
 	wb_buffer_release(&out);
 
+	/* Report the answer. */
 	return absent;
 }
 
@@ -1963,6 +2144,7 @@ now_ms(void)
 #else
 	struct timespec now;
 
+	/* Read the monotonic clock. */
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	return (long long)now.tv_sec * 1000LL + (long long)(now.tv_nsec / 1000000L);
 #endif
