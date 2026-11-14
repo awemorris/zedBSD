@@ -3,7 +3,7 @@
 # ws334-p039 素の tree の `make browser-win32` が build できない件（gcc の未初期化の error、top の入口）
 
 - 親: [WS334](../ws.md)。2026-11-13 Q1 が q2049-i01 で P3 に割り当て（ユーザーから、P3 で直す、という趣旨の指示）。
-- Status: in-progress（調べ・試験済み、cleared は Q1。2026-11-13 P3 q2049-i01、基点 main 405a70d176）
+- Status: cleared（2026-11-15 Q1、ws.md の表に合わせた）
 - 依存: なし（p020・p036 の build の形の上）。
 
 ## 目的

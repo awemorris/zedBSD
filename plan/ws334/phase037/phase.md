@@ -3,7 +3,7 @@
 # ws334-p037 本物の Windows が要る口: TSF・DirectManipulation・題の帯の透過
 
 - 親: [WS334](../ws.md)。p033 から分けた（2026-11-02 02:44 Q1）。
-- 状態: in-progress（2026-11-14 q2095-i01、P7: 実装と Wine で確かめられる所の試験まで。本物の Windows の確かめは下の一覧。cleared は Q1）。
+- 状態: cleared（2026-11-15 Q1、ws.md の表に合わせた）
 - 依存: p033。
 
 ## 範囲（2026-11-14 に直した）

@@ -5,7 +5,7 @@
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
 | P2 | phase-runner-low | ws328 p003 flatten (q2117-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p003` / `agent/p2-ws328p003` | 動いている（2026-11-15 01:5x） | — |
-| P7 | conformance-reviewer | ws334 p035 の続き (q2107-i01) | `/home/awe/zedBSD-worktrees/p7-ws334d` / `agent/p7-ws334d` | 動いている（2026-11-15 00:5x） | — |
+| P7 | phase-runner | ws334 完了の手順 (q2120-i01) | `/home/awe/zedBSD-worktrees/p7-ws334close` / `agent/p7-ws334close` | 動いている（2026-11-15 01:5x） | — |
 | P8 | phase-runner | ws349 設計の review と改訂 (q2118-i01) | `/home/awe/zedBSD-worktrees/p8-ws349` / `agent/p8-ws349` | 動いている（2026-11-15 01:5x） | — |
 | P5 | phase-runner | ws339 EDID の解像度 (q2119-i01) | `/home/awe/zedBSD-worktrees/p5-ws339` / `agent/p5-ws339` | 動いている（2026-11-15 01:5x） | — |
 | P6 | phase-runner-high | ws302 p003 の締めと p004 (q2109-i01) | `/home/awe/zedBSD-worktrees/p6-ws302c` / `agent/p6-ws302c` | 動いている（2026-11-15 01:1x） | — |

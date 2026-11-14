@@ -35,7 +35,7 @@
 | P4 | q2116 | [WS068](ws068/ws.md)（EGL・GL を Vulkan の上に）試験の config と p045 |
 | P5 | q2119 | [WS339](ws339/ws.md)（UEFI の起動の画面を EDID の解像度に）p001 |
 | P6 | q2109 | [WS302](ws302/ws.md) p003 の締め → p004 DTB の本体 |
-| P7 | q2107 | [WS334](ws334/ws.md)（Windows 版ブラウザ）p035 の続き（試験の C、共有の file の block） |
+| P7 | q2120 | [WS334](ws334/ws.md)（Windows 版ブラウザ）全 Phase cleared、試験を plan/tools/ へ |
 | P8 | q2118 | [WS349](ws349/ws.md)（Pi 5 の HDMI の音）設計の review と改訂 |
 
 - host は 2026-11-14 19:30 頃に再起動。NVMe の書き込みは 1.0 GB/s に戻った（止めた時は 22 MB/s）。merge していない branch の diff は [backup-20261114/](backup-20261114/README.md)。
@@ -104,7 +104,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-438 · q2120 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-438 · q2121 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
