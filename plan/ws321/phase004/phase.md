@@ -3,7 +3,7 @@
 # ws321-p004 規約の全文の見直し（AGENTS §2）
 
 - 親: [WS321](../ws.md)。Queue: q2111-i01（P2、worktree p2-ws321、branch agent/p2-ws321、基点 main 44bb7cdaac）。
-- Status: in-progress（2026-11-15 P2。実装済み・試験 PASS。cleared は Q1 の受け入れ）
+- Status: cleared（2026-11-15 Q1、merge 91a6c53f0a）
 - 依存: p002。
 
 ## 範囲

@@ -3,7 +3,7 @@
 # ws299-p005 UFS の file の連続の読み書き（先読みの窓・大きな request・書きの合流）
 
 - 親: [WS299](../ws.md)。Queue: q1634 / q1634-i01（調べ）→ q1640 / q1640-i01（設計・実装、担当 P1）。前提: p002・p004（raw の先読み）。
-- Status: in-progress（実装済み・試験 PASS: 受け入れ 1 は 2026-11-13 Q1 の同じ形の基準で 5330 q2044 の数が全部 95% 以上、2・3 は QEMU（2026-11-15 q2108 P4）、4 は x86_64・rpi5・vf2 の build と host 試験。Q1 の判定待ち。下の「2026-11-15」）
+- Status: cleared（2026-11-15 Q1、merge 3def0f09c5）
 - Disposition: normal
 
 ## 調べた事実（2026-10-28、読みだけの調べ、tree は agent/p1-ws299 36d0d7b5d）

@@ -3,7 +3,7 @@
 # ws345-p011 受け入れと回帰
 
 - WS: [ws.md](../ws.md)。設計: [design.md](../design.md)。
-- 状態: in-progress（2026-11-15 P3 q2097-i01: 受け入れの試験を全部流した。R12（headless の `--threads`）は p015 待ち、Wine の窓の待ちの上限は Wine 自身の一回の止まり（下）で未達。cleared の判定は Q1。下の「結果（2026-11-15 P3）」）
+- 状態: cleared（2026-11-15 Q1、merge 98db6c32cd）
 
 ## 目的
 

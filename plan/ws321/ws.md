@@ -3,7 +3,7 @@
 # WS321 Pi 5（BCM2712） の Vulkan Video: H.265 decode（HEVC の block を Vulkan Video として）。H.264 は hardware に無く libavcodec
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: incomplete（2026-11-02 08:32 ユーザーの指示で P3 が着手。WS318 の completed を待たない）
+- Status: completed（2026-11-15 Q1。全 Phase cleared。Pi 5 の HEVC の block を Vulkan Video として見せる。Pi 5 の実機での md5 の照らし直し（SAODBLK_A・B、VPSSPSPPS_A）は次に Pi 5 を使う時に。実機の script pi5-hevc.sh と config は tests/ に残す）
 - 目標: Pi 5（BCM2712） の video の hardware のうち zedBSD で未実装の物を、kernel の Vulkan の executor（`src/drivers/gpu/videocore/`、HEVC の block は `hevc-decoder.c`、executor は `vk/vulkan-video-hevc.c`・`vk/vulkan-video-hevc-slice.c`）の Vulkan Video（`VK_KHR_video_decode_*`・`VK_KHR_video_encode_*`）として実装し、libmedia から使えるようにする。
 
 ## ユーザーの決定
@@ -21,9 +21,11 @@
 | [ws321-p001](phase001/phase.md) | 調べと設計: HEVC の block（register・clock・割り込み・2 段の pipeline・SAND の出力・制限）、出典と license、Vulkan Video への写し、試験の道 | cleared（2026-11-02 P3 q1923-i01、Q1 が 2026-11-02 10:17 に受け入れ。設計と review 37 件の反映） | — |
 | [ws321-p002](phase002/phase.md) | 実装: slice header と命令の FIFO（host 試験）、HEVC の block の driver、bcm2711 の executor（今は `videocore/`）の H.265 の reader と run（session の memory の SAND、TFU で NV12 へ）、`CONFIG_DRIVER_BCM2712_VIDEO`（既定 n。今は `CONFIG_DRIVER_RPI5_GPU` に含まれる） | cleared（2026-11-02 P3 q1923-i01、Q1 が 2026-11-02 10:17 に受け入れ。warning 0、host 試験 147 本 不一致 0・fuzz 100000 件） | p001 |
 | [ws321-p003](phase003/phase.md) | 実機の受け入れ: vkvideo-probe の H.265 の適合の stream を ffmpeg と照合、Video Player の GPU の道で H.265 を再生 | cleared（2026-11-02 P3 q1923-i01、Q1 が 2026-11-02 10:17 に受け入れ。Pi 5 で HEVC_v1 146 本のうち 128 本が全 frame 一致・15 本は理由付きで断る・3 本未決（VF2 と同じ）、Video Player GPU の道 H.265 1080p30 600/600 late 0・1080p60 1197 late 3、画面の PNG） | p002、ws322-p006（libmedia の H.265 の backend） |
-| [ws321-p004](phase004/phase.md) | 規約の全文の見直し（AGENTS §2）、記録と試験を今の形へ | in-progress（2026-11-15 P2 q2111-i01: 実装済み・試験 PASS。style-check 204 → 0、rpi5 の vmunix・libvulkan warning 0、hevc-slice PASS で直す前と同じ結果。host 試験は plan/tools/h265/hevc-slice/ へ。cleared は Q1） | p002 |
+| [ws321-p004](phase004/phase.md) | 規約の全文の見直し（AGENTS §2）、記録と試験を今の形へ | cleared（2026-11-15 Q1、bad63e558a を main に merge 91a6c53f0a。style-check 204→0、rpi5 の kernel・libvulkan・vkvideo-probe の build warning 0、hevc-slice の host 試験は前後同じ（147 streams・15 refused）、試験は plan/tools/h265/hevc-slice へ移した） | p002 |
 
 ## Resume point
+
+- 2026-11-15 Q1: completed。host の試験は plan/tools/h265/hevc-slice/。Phase の directory は消した。
 
 - 2026-11-15 01:45 P2（q2111-i01）: p004 を実装した（[phase004](phase004/phase.md)）。記録の dir・config の名前を今に、試験の config を `CONFIGMK`・`CONFIG_USERLAND_PROGRAMS` の形に、host 試験を `plan/tools/h265/hevc-slice/` へ。次: Q1 の受け入れ。残り: Pi 5 の実機での SAODBLK_A・B と VPSSPSPPS_A の照らし直し（範囲の外）、速さ（phase 1・2 の重ね、割り込み）。
 

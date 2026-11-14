@@ -3,7 +3,7 @@
 # ws299-p004 待ちを重ねる: 連続の読みの先読みを非同期の worker で（raw の block device）
 
 - 親: [WS299](../ws.md)。Queue: q1617 / q1617-i01（担当 P1、2026-10-27）。前提: p003（cleared 2026-10-27、main be47a24df）。
-- Status: in-progress（実装済み・試験 PASS: 5330 の受け入れ 1（2026-10-28）・host・QEMU（2026-11-15 q2108 P4、main ba1482f25d、35b527f23c の直しを含む）・x86_64・rpi5・vf2 の build warning 0。Q1 の判定待ち。下の「2026-11-15」）
+- Status: cleared（2026-11-15 Q1、merge 3def0f09c5）
 - Disposition: normal
 
 ## 測った事（2026-10-27、5330、kernel は main be47a24df ＋ 下の測る口、`nvme-bench-5330.sh zedbsd zb-p004m … read`）
