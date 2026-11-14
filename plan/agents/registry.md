@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- | --- |
 | P2 | phase-runner-low | ws328 p008 svg-values (q2127-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p008` / `agent/p2-ws328p008` | 動いている（2026-11-15 02:5x） | — |
 | P7 | phase-runner-low | ws328 p005 vec-raster (q2123-i01) | `/home/awe/zedBSD-worktrees/p7-ws328p005` / `agent/p7-ws328p005` | 動いている（2026-11-15 02:3x） | — |
-| P8 | phase-runner | ws349 p002 値の表・p003 wire (q2124-i01) | `/home/awe/zedBSD-worktrees/p8-ws349p002` / `agent/p8-ws349p002` | 動いている（2026-11-15 02:3x） | — |
+| P8 | phase-runner-low | ws328 p017 CSS の gradient の解析 (q2128-i01) | `/home/awe/zedBSD-worktrees/p8-ws328p017` / `agent/p8-ws328p017` | 動いている（2026-11-15 03:0x） | — |
 | P5 | phase-runner-low | ws328 p006 vec-gradient (q2126-i01) | `/home/awe/zedBSD-worktrees/p5-ws328p006` / `agent/p5-ws328p006` | 動いている（2026-11-15 02:4x） | — |
 | P6 | phase-runner-high | ws302 p003 の締めと p004 (q2109-i01) | `/home/awe/zedBSD-worktrees/p6-ws302c` / `agent/p6-ws302c` | 動いている（2026-11-15 01:1x） | — |
 | P3 | phase-runner-mid | ws345 p015 (q2115-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p015` / `agent/p3-ws345p015` | 動いている（2026-11-15 01:5x） | — |

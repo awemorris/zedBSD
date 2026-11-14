@@ -36,7 +36,7 @@
 | P5 | q2126 | [WS328](ws328/ws.md) p006 vec-gradient（Sonnet）。WS339 p001 は merge 済み（受け入れの文はユーザーへ、p002 は 5330） |
 | P6 | q2109 | [WS302](ws302/ws.md) p003 の締め → p004 DTB の本体 |
 | P7 | q2123 | [WS328](ws328/ws.md) p005 vec-raster（Sonnet） |
-| P8 | q2124 | [WS349](ws349/ws.md)（Pi 5 の HDMI の音）p002 値の表・p003 wire。設計第二版は merge 済み |
+| P8 | q2128 | [WS328](ws328/ws.md) p017 CSS の gradient の解析（Sonnet）。WS349 は p003 まで cleared、p004 は mk の枠（U1）の答え待ち |
 
 - host は 2026-11-14 19:30 頃に再起動。NVMe の書き込みは 1.0 GB/s に戻った（止めた時は 22 MB/s）。merge していない branch の diff は [backup-20261114/](backup-20261114/README.md)。
 <!-- master:agents:end -->
@@ -104,7 +104,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-438 · q2128 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-438 · q2129 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

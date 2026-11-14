@@ -18,7 +18,7 @@
 | P5 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2126: p006 vec-gradient（Sonnet） | p008・p017 |
 | P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2109: p003 の締め → p004 DTB の本体 | p005・p006（5330 の評価） |
 | P7 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2123: p005 vec-raster（Sonnet） | p006〜p008・p017 |
-| P8 | [WS349](ws349/ws.md) | Pi 5 の HDMI の音 | q2124: p002 値の表、続けて p003 wire と host 試験 | p004 は mk の枠（U1）の答えの後、Pi 5 の実機 |
+| P8 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2128: p017 CSS の gradient の解析（Sonnet）。WS349 は p003 まで cleared、p004 は U1 待ち | p009・p010 |
 | agy | [WS347](ws347/ws.md) | Amaterrace GPU（RTL） | reset の 10 回目（38593b0e）まで済み | Q1 が 10 回目を確かめて 11 回目 |
 | Q1 | — | — | main の checkout で merge・Queue・判断の振り分け | WS347 の 10 回目の確かめ |
 
