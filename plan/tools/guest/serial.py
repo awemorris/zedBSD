@@ -193,7 +193,7 @@ def run(console: Console, command: str) -> int:
 	separator = " " if command.rstrip().endswith("&") else "; "
 	again = f"echo {marker}=${STATUS_VARIABLE}"
 	console.send(f"{command}{separator}{STATUS_VARIABLE}=$?; {again}")
-	pattern = re.compile(re.escape(marker) + r"=(\d+)\r?\n")
+	pattern = re.compile(re.escape(marker) + r"=(\d+)\r*\n")
 	output, broken = console.read_status(pattern, marker + "=", again)
 	match = pattern.search(output)
 	assert match is not None
