@@ -18,6 +18,8 @@ Pi 5（と Pi 500）は `/dev` に音の device が無く HDMI の音が出な�
 
 ## Resume point
 
+- 2026-11-15 02:27 Q1: q2118 の設計第二版（9cad9d7daf）を main に merge（dc991a7f65）、p001 は cleared のまま。p002・p003 を P8（q2124）へ。p004 の前に mk の枠（U1）、U2・U3 をユーザーへ。
+
 - 2026-11-15 P8（q2118-i01）: p001 を第二版に改訂（乖離の確かめ: Pi 5 の display は HDMI に触れず firmware が mode を持つ、C1 と D0 の dtb で DREQ が違う、dma の cell の上位の bit の意味、audio の clock の gate）。design-reviewer の指摘 15 件を反映（[design-review.md](phase001/design-review.md)）。p002〜p007 を立てた。ユーザーへの問いは [user-questions.md](user-questions.md)（U1 mk の枠の名前と時期、U2 二つの画面、U3 起動の後の画面）。次: p002（値の照合）と p003（計算の部品と host 試験）は mk の答えを待たずに進められる。p004 は U1 の kernel.mk・config.mk の枠が当たってから。
 - 2026-11-14 Q1: 目標の確かめ。Pi 5 には音の driver が 1 つも無く、rpi5 の既定で audio の core も n（`mk/platform-rpi5/defaults.mk`）。内蔵の音の出口は HDMI（3.5 mm の jack は無い）。ユーザーから、目標は HDMI の音のままでよい、という趣旨の答えを受けた（2026-11-14）。mk の `CONFIG_DRIVER_RPI5_AUDIO` の枠は RP1 を指し source が空なので、HDMI の driver の名前と枠は設計の改訂で決め直す（mk の変更は案としてユーザーへ）。p001 の設計は design-reviewer を通していないので、次は design-reviewer と改訂。
 
@@ -29,7 +31,7 @@ Pi 5（と Pi 500）は `/dev` に音の device が無く HDMI の音が出な�
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計: BCM2712 の HDMI audio の経路（HDMI の controller・DMA・audiod の device の口）と、Pi 4 の vc4 の HDMI audio との違い、出典（guardrail の値の規則）。設計の後に実装の Phase を立てる | cleared（2026-11-13 P1 の第一版。2026-11-15 P8 が第二版に改訂、design-reviewer を反映） | — |
-| [p002](phase002/phase.md) | 値の照合と出典の表（`values.md`） | planned | p001 |
+| [p002](phase002/phase.md) | 値の照合と出典の表（`values.md`） | in-progress（2026-11-15 P8 q2124） | p001 |
 | [p003](phase003/phase.md) | 計算の部品 `rpi5-hdmi-audio-wire.c` と host 試験 | planned | p002 |
 | [p004](phase004/phase.md) | attach と読みだけの probe、Pi 5 の実機で未確定を記録し設計を直す | planned | p003、U1（mk の枠） |
 | [p005](phase005/phase.md) | 再生の driver と audio の core への登録、docs | planned | p004 |

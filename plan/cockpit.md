@@ -17,8 +17,8 @@
 | P4 | [WS068](ws068/ws.md) | EGL・GL を Vulkan の上に | q2116: 試験の config と p045（Venus） | p047〜 |
 | P5 | [WS339](ws339/ws.md) | UEFI の起動の画面を EDID の解像度に | q2119: p001 loader の EDID と video= の除去（QEMU） | 5330 の受け入れ（WS300 は p003・p005 cleared） |
 | P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2109: p003 の締め → p004 DTB の本体 | p005・p006（5330 の評価） |
-| P7 | [WS334](ws334/ws.md) | Windows 版ブラウザ | q2120: 全 Phase cleared、試験を plan/tools/ へ移す | WS334 を completed に |
-| P8 | [WS349](ws349/ws.md) | Pi 5 の HDMI の音 | q2118: 設計の review と改訂 | p002 以後（Pi 5 は p005） |
+| P7 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2123: p005 vec-raster（Sonnet） | p006〜p008・p017 |
+| P8 | [WS349](ws349/ws.md) | Pi 5 の HDMI の音 | q2124: p002 値の表、続けて p003 wire と host 試験 | p004 は mk の枠（U1）の答えの後、Pi 5 の実機 |
 | agy | [WS347](ws347/ws.md) | Amaterrace GPU（RTL） | reset の 10 回目（38593b0e）まで済み | Q1 が 10 回目を確かめて 11 回目 |
 | Q1 | — | — | main の checkout で merge・Queue・判断の振り分け | WS347 の 10 回目の確かめ |
 
