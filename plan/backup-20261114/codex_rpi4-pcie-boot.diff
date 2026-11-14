@@ -1,0 +1,43 @@
+diff --git a/plan/ws048/codex-pcie-boot-queue.md b/plan/ws048/codex-pcie-boot-queue.md
+index 47784a24c1..92439299f8 100644
+--- a/plan/ws048/codex-pcie-boot-queue.md
++++ b/plan/ws048/codex-pcie-boot-queue.md
+@@ -17,3 +17,7 @@ Source fix, meaningful before/after host checks, warning0 current-config kernel
+ changed-source rules review complete. [Evidence](tests/rpi4-pcie-boot-20261011.md).
+ Attempt uncleared because physical boot outcome is still absent; source integration requires
+ specific commit approval. Shared planning/GitHub reconciliation pending Q1. No automatic next Queue.
++
++## Main統合 / 2026-10-11
++
++current user「mainに統合してください。」で具体的source commit fbcb2b543を承認。main df1d2be26からfbcb2b5437523c39b1319d8a51a79127e5cbcfc6へのfast-forward成功、HEAD/差分無し/cleanをread-back確認。実機確認未実施、p008/attempt unclearedを維持、pushなし。統合結果の記録は専用branchへ保存し、共有投影/GitHubはQ1 pending。
+diff --git a/plan/ws048/phase008/phase.md b/plan/ws048/phase008/phase.md
+index a2cac7159a..c3a6045e77 100644
+--- a/plan/ws048/phase008/phase.md
++++ b/plan/ws048/phase008/phase.md
+@@ -50,3 +50,7 @@ Specific source commit main integration also awaits user approval. Resume: integ
+ build user's image, user boots RPi4 and confirms boot progresses beyond PCIe/USB; if it fails, retain new
+ photo/ELF/config and diagnose that evidence. No further source scope/Queue auto-started.
+ Shared Master/Queue/history/bug projection and GitHub publication remain Q1 pending; no push.
++
++## Main統合 / 2026-10-11
++
++current user「mainに統合してください。」で具体的source commit fbcb2b543を承認。main df1d2be26からfbcb2b5437523c39b1319d8a51a79127e5cbcfc6へのfast-forward成功、HEAD/差分無し/cleanをread-back確認。実機確認未実施、p008/attempt unclearedを維持、pushなし。統合結果の記録は専用branchへ保存し、共有投影/GitHubはQ1 pending。
+diff --git a/plan/ws048/ws.md b/plan/ws048/ws.md
+index 77c6025632..33ae2cccf2 100644
+--- a/plan/ws048/ws.md
++++ b/plan/ws048/ws.md
+@@ -9,7 +9,7 @@ Related Milestones: MG003, MG006
+ Objectives: O2, O4
+ Parent: [Master](../master.md)
+ Queue: [Codex PCIe boot](codex-pcie-boot-queue.md) finished（限定p008、実機再起動待ち）。旧2026-09-27の実行記録は保持。
+-Resume point: p008の具体的commit統合承認とRPi4実機の再起動結果。従来のp004 cleared/p005〜p007未完の状態は保持し、全USBの再開範囲は別判断。
++Resume point: p008 source fbcb2b543はmain統合済み。RPi4実機の再起動結果。従来のp004 cleared/p005〜p007未完の状態は保持し、全USBの再開範囲は別判断。
+ Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
+ <!-- awesome-plan-current:end -->
+ 
+@@ -82,3 +82,5 @@ Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS11
+ ユーザーの最新の写真と修正指示でp008/独立Queueを追加。全USB計画を自動で再開せず、このboot例外と関連MMIO mappingのみを修正/build確認する。旧p002〜p004の実機未確認は保持。実機の受入はユーザー確認、共有投影/GitHubはQ1 pending。
+ 
+ p008のsource/host/buildは完了、実機再起動結果がないためuncleared。RAM判定のunsigned減算のunderflowを除きMMIOをDeviceでmapし、PCIe revision読出しをreset/SerDes起床後へ移した。警告0 kernel buildとbefore/afterのhost確認PASS。[証拠](tests/rpi4-pcie-boot-20261011.md)。旧WSのUSB実機acceptanceは未達のまま、具体的commitのmain統合承認とユーザー実機確認を待つ。共有投影/GitHubはQ1 pending。
++
++2026-10-11 user「mainに統合してください。」によりfbcb2b5437523c39b1319d8a51a79127e5cbcfc6を承認。cleanなmain df1d2be26へfast-forward統合し、HEAD一致/差分無し/cleanをread-back確認。p008は実機確認待ちのunclearedを維持。pushなし、共有投影/GitHubはQ1 pending。追記は専用branchに保存する。

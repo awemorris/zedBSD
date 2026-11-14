@@ -1,0 +1,846 @@
+diff --git a/plan/ws270/phase007/notes-p2.md b/plan/ws270/phase007/notes-p2.md
+index 2daea68163..4e35dfeeba 100644
+--- a/plan/ws270/phase007/notes-p2.md
++++ b/plan/ws270/phase007/notes-p2.md
+@@ -355,3 +355,19 @@ branch agent/p2-q1553（基 main 782f995e4）。
+   - free list の page は常に 0 にした物を使う（pool からの再利用と uncleared をやめた）。
+   - global list の page（16 MB）は、render node の spare の thread が 0 にして write-back まで済ませた物を 1 つ先に作って置く。session の最初の render はそれを取り、thread が次を作る。無い時（続けて起動した時）は render の中で 0 にして作る（前と同じ約 34 ms）。local list はその場で 0 にして作る。
+   - build/q1556t/vmunix（timing 1）sha256 ad8698212baabaaa…、build/q1556k/vmunix（CI の keiland config）7712eaf6…、どちらも warning 0。p009 505/0、p010 15 本 0 failed。板は未確認。
++- 2026-10-22 P2（再起動後、compositor の draw→shown の driver の費用）:
++  - 4d087f65b: gpu.c の ioctl の計時（`-DGPU_IOCTL_TIMING=1`、thread ごと・連続する 2 つの要求の組ごとに user の時間と kernel の時間、powervr の timing の thread が 5 s ごとに上位 32 組）。d127: compositor の 1 frame に wire の往復約 8、GET_FENCE_STATUS 3.4（worker 1.5）、GPU_DISPLAY_QUERY 約 10。DISPLAY_PRESENT は worker で 12.5 ms（flip の latch）。VF2 の display の道は共有の fence を使わない（GPU_CAP_FENCE なし）。
++  - 61d541df9: vkResetFences で共有の fence の native_unsubmitted を戻す、display の slot の fence を worker で張り直す（VF2 では効かない、共有の fence の道のため）。
++  - eefdc538b: queue の marker が終わった fence は GET_FENCE_STATUS の往復なしで signaled、待つ wait は pending の marker を未完として marker で眠る。d129 で QUEUE_SUBMIT あたり FENCE_STATUS 2.2 → 0.6〜0.8。ws214 の host 試験に timing の stub。
++  - d51bd1185: riscv64 の HAL で scounteren.TM（ユーザー承認）、libvulkan の VULKAN TIMING を rdtime で μs に、SCHED_WAKE_LATENCY に「忙しい CPU への起床・そのとき他が idle」の数。d129: 起床から実行は殆ど 0.1 ms 未満（遅れの原因ではない）。main に merge 済み。
++  - 2c769286f: d51bd1185 の sync.c の変数を __riscv の時だけに（amd64・arm64 の libvulkan が -Werror で通らなかった）。
++  - 35c94a0e7（scheduler: 起床・横取りを idle の CPU へ渡す）は d130 で session の落ち・device lost → 捨てた（branch にも無い）。疑い: 切り替え中の thread を盗んで retry の後に戻すと、走っている thread が queue にも入る。
++  - d129 の compositor の 1 frame（μs の VULKAN TIMING）: vkQueueSubmit 約 2.3 ms（execute 1.24・reserve 0.31・finish 0.17）、vkQueuePresentKHR 約 3.0 ms（prepare 0.33・record 0.72・submit 1.67 = 空の command buffer の 2 回目の submit）。context の lock を握る wire の往復 6.2 回 × 0.75 ms。往復の大半は 2 つの ioctl の間の user の時間（malloc の疑い: libc の heap は 1 本の free list の first fit を全体の lock で）。
++  - 50bd6331c（板の A/B 待ち、速くならなければ捨てる）: writer・reader の inline の buffer（1 往復の malloc/free 約 3 組を無くす）、swapchain_current の platform の確かめを 50 ms に 1 回（DISPLAY_QUERY 約 10/frame）、VULKAN TIMING に heap。build/q1557/dynamic/libvulkan.so sha256 007de7df…。p009 505/0、p010 2387/0・27/0、overlay-host PASS。
++  - 残り（今回は範囲外、ユーザー「若干、やりすぎ」）: libc の malloc（heap の数字が大きければ Q1 に報告のみ）、present の空の 2 回目の submit の除去、Begin を End の frame にまとめる。
++- 2026-10-22 P2（再起動後、lockup の解析。ユーザー「コンポジタが落ちましたね。それは解析して直しましょう。」）:
++  - d132 の HWR の記録の読み: dm 3 は 3D（fragment）。compositor の render context 0x5 の 3D（job 125、916x632 の部分の area、load draw と枠の 19 draw）が kick の約 0x25 tick 後に BIF fault。要求は IPF CREQ（ISP の control stream の読み）の read で address 0、catalogue base 13 = PM-TE1（parameter manager の TE の catalogue。session の MMU の catalogue ではない、session 0x2 の catalogue は 0x4176b000）、level 2 = page catalogue。つまり 3D が使った PM の TE の catalogue の page 0x4f3ca000 に PM の address 0 の entry が無い（0）。hwrt 0xc007b180 は target の record 0xc007b000 の half 1。d122 の dm 3 の記録も同じ hwrt 0xc007b180・同じ job の形で、その時は fault ではなく 3D が終わらない lockup（free list の page が 0 でなかった版: 0 の page では fault、ごみの page では無限の walk、と読める）。
++  - firmware の trace（groups 0x401 なので HWR の行だけ）を decode: MMU fault → HWR → 「Reconstruction needed for freelist 0xc007a000 (ID 1, local) / 0xc0079000 (ID 0, global), phase 3D」→ 3D の command を skip → 「Holding Scheduling on DM 3/2 ... pending freelist reconstruction」。fault は 3D の開始の直後なので、KWL の 4 s の stall は 3D の kick の前（TA か待ち）に起きている。
++  - コードで否定した物: 同じ session の中の TA と 3D の重なり（geometry は context の前の fragment を待つ）、half の取り違え（geometry と fragment は同じ data set の address）、target の追い出し（cleanup の後）、spare の buffer の二重の受け渡し、pool への kernel の buffer の再利用（vkAllocateMemory だけが pool から取る）。原因は未確定。
++  - c51859d15（診断、POWERVR_DEBUG の kernel だけ）: HWR の記録ごとに、PM の catalogue の page がどの free list の page か（無ければ「in no free list」）、その page の 1024 語のうち 0 でない語の数と先頭 8 語、どの free list の entries がその page を指すか（回数・位置・stack top）、hwrt の target の half の PM の語（vce・te・last・alist・stack・flags・state）・macrolist の先頭 12 語・local と global の list の record。reset の時の timeline（geometry・fragment・transfer の現在の値と kick した値、最後の geometry の待ち）。free list の rebuild の前の record。BIF の decode に MMU の level と PM の catalogue の名前。
++  - build（warning 0）: build/q1561d/vmunix（desktop-gpu、timing 0、trace groups 0x401）sha256 52f7354f…、build/q1561e/vmunix（同じ ＋ trace groups 0x04C3 = MAIN・PM・RTD・HWR、kick の順と free list の load・store が trace に出る、firmware の時間は増える）1f201f0d…、build/q1561o/vmunix（d ＋ DM overlap 0 の試し）8625737c…、build/q1561k/vmunix（CI の keiland）431b74c0…。p009 505/0、p010 15 本 0 failed。板は未実施（Q1 が冷却の後に流す）。
+diff --git a/plan/ws270/tests/fw-trace-decode.py b/plan/ws270/tests/fw-trace-decode.py
+new file mode 100755
+index 0000000000..10040cdc07
+--- /dev/null
++++ b/plan/ws270/tests/fw-trace-decode.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python3
++# Decodes the PowerVR firmware trace a HWR dump printed ("powervr: dump: trace" lines).
++#   python3 -I fw-trace-decode.py pvr_rogue_fwif_sf.h dmesg.txt
++# pvr_rogue_fwif_sf.h: Linux drivers/gpu/drm/imagination (e.g. /home/awe/visionfive-linux).
++# The first word is taken from the dump's "trace pointer P, N words from F" line.
++# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
++import re, sys
++sf = open(sys.argv[1]).read()
++groups = re.findall(r'ROGUE_FW_GROUP_(\w+),', sf.split('};')[0])
++gi = {('ROGUE_FW_GROUP_'+g): i for i, g in enumerate(groups)}
++tab = {}
++for m in re.finditer(r'ROGUE_FW_LOG_CREATESFID\((\d+),\s*(ROGUE_FW_GROUP_\w+),\s*(\d+)\),\s*((?:"[^"]*"\s*)+)', sf):
++    a, g, e, s = int(m.group(1)), gi.get(m.group(2), 0), int(m.group(3)), m.group(4)
++    s = ''.join(re.findall(r'"([^"]*)"', s))
++    tab[(a | (g << 12) | (e << 16))] = (e, s)
++words = {}
++for line in open(sys.argv[2]):
++    m = re.search(r'dump: trace\s+(\d+): ((?:[0-9a-f]{8} ?){8})', line)
++    if m:
++        b = int(m.group(1))
++        for i, w in enumerate(m.group(2).split()):
++            words[b + i] = int(w, 16)
++start = int(re.search(r"words from (\d+)", open(sys.argv[2]).read()).group(1)); n = 12000
++seq = [words.get((start + i) % n, 0) for i in range(1024)]
++i = 0
++while i < len(seq):
++    w = seq[i]
++    k = w & 0x0fffffff
++    if (w & 0xf0000000) == 0x70000000 and k in tab:
++        e, s = tab[k]
++        ts = (seq[i+1] << 32 | seq[i+2]) if i + 2 < len(seq) else 0
++        args = seq[i+3:i+3+e]
++        try:
++            txt = re.sub(r'%[-0-9.]*l*[duxX]', '{}', s).format(*[hex(a) for a in args])
++        except Exception:
++            txt = s + ' ' + ' '.join(hex(a) for a in args)
++        print('%10x %s' % (ts, txt))
++        i += 3 + e
++    else:
++        i += 1
+diff --git a/src/drivers/gpu/powervr/firmware-hwr.c b/src/drivers/gpu/powervr/firmware-hwr.c
+index d6e0dbf572..7d5ce38428 100644
+--- a/src/drivers/gpu/powervr/firmware-hwr.c
++++ b/src/drivers/gpu/powervr/firmware-hwr.c
+@@ -72,6 +72,26 @@
+ #define HWR_TYPE_BIF0		3U
+ #define HWR_TYPE_TEXAS_BIF0	5U
+ 
++/*
++ * The first catalogue base the parameter manager's own catalogues take
++ * (8 to 15: VCE, TE, ZLS and ALIST of its two sets).
++ *
++ * Values referenced: StarFive Linux JH7110_VisionFive2_6.12.y_devel
++ * drivers/gpu/drm/img/img-rogue/services/server/devices/rogue/rgxdebug.c
++ * (_RGXDecodePMPC: 0x8 PM-VCE0 to 0xF PM-ALIST1; _RGXDecodeMMULevel: data
++ * type 0 page table, 1 directory, 2 catalogue, 3 catalogue base).
++ */
++#define HWR_PM_CATALOGUE_FIRST	8U
++
++/* The MMU level a fault stopped at (data type 0..3), and the parameter manager's catalogue bases 8..15. */
++static const char *const level_names[] = {
++	"page table", "page directory", "page catalogue", "catalogue base"
++};
++static const char *const pm_catalogue_names[] = {
++	"PM VCE0", "PM TE0", "PM ZLS0", "PM ALIST0", "PM VCE1", "PM TE1", "PM ZLS1", "PM ALIST1"
++};
++
++/* The requesters by tag ID. */
+ static const char *const tag_names[] = {
+ 	"MMU", "CPU MMU", "CPU IFU", "CPU LSU", "MIPS", "CDM 0", "CDM 1", "CDM 2",
+ 	"CDM 3", "VDM 0", "VDM 1", "VDM 2", "VDM 3", "VDM 4", "PDS 0", "PDS 1",
+@@ -102,6 +122,8 @@ powervr_hwr_dump(
+ 	uint32_t words[8];
+ 	uint32_t done;
+ 	uint32_t count;
++	uint32_t type;
++	uint64_t catalogue;
+ 
+ 	/* The buffer's counters, and each data master's counts. */
+ 	info = &core->firmware.hwr_info;
+@@ -136,8 +158,18 @@ powervr_hwr_dump(
+ 			  (unsigned long long)get64(info, base + 88U), (unsigned long long)get64(info, base + 96U),
+ 			  (unsigned long long)get64(info, base + 104U), (unsigned long long)get64(info, base + 112U),
+ 			  (unsigned long long)get64(info, base + 32U));
+-		if (powervr_object_get32(info, base + 72U) >= HWR_TYPE_BIF0 && powervr_object_get32(info, base + 72U) <= HWR_TYPE_TEXAS_BIF0)
++		catalogue = 0;
++		type = powervr_object_get32(info, base + 72U);
++		if (type >= HWR_TYPE_BIF0 && type <= HWR_TYPE_TEXAS_BIF0) {
+ 			bif_decode(record, get64(info, base), get64(info, base + 8U), get64(info, base + 16U));
++
++			/* A fault through a parameter manager catalogue base (8 and up) names that catalogue's page. */
++			if (((get64(info, base + 8U) >> 12) & 0xfU) >= HWR_PM_CATALOGUE_FIRST)
++				catalogue = get64(info, base + 16U) & ~0xfffULL;
++		}
++
++		/* What the render targets know of the record's data set and the catalogue. */
++		powervr_targets_describe_fault(core->render, powervr_object_get32(info, base + 56U), catalogue);
+ 	}
+ 
+ 	/*
+@@ -197,17 +229,27 @@ bif_decode(
+ 	uint64_t catalogue)
+ {
+ 	uint32_t tag;
++	uint32_t base;
+ 	const char *name;
++	const char *base_name;
+ 
+ 	/* The requester by its tag. */
+ 	tag = (uint32_t)((request >> 40) & 0x3fU);
+ 	name = "?";
+ 	if (tag < sizeof(tag_names) / sizeof(tag_names[0]))
+ 		name = tag_names[tag];
+-	kern_logf("powervr: hwr: record %u: bif fault at 0x%llx, %s by tag %u (%s) side band %u; mmu fault %u read only %u pm/meta read only %u data type %u page size %u catalogue base %u; page catalogue 0x%llx\n",
++
++	/* The catalogue base: a context's (0 to 7) or one of the parameter manager's. */
++	base = (uint32_t)((status >> 12) & 0xfU);
++	base_name = "context";
++	if (base >= HWR_PM_CATALOGUE_FIRST)
++		base_name = pm_catalogue_names[base - HWR_PM_CATALOGUE_FIRST];
++
++	/* The fault, decoded. */
++	kern_logf("powervr: hwr: record %u: bif fault at 0x%llx, %s by tag %u (%s) side band %u; mmu fault %u read only %u pm/meta read only %u level %s page size %u catalogue base %u (%s); page catalogue 0x%llx\n",
+ 		  (unsigned)record, (unsigned long long)(request & 0xfffffffff0ULL), ((request >> 52) & 1U) != 0 ? "read" : "write",
+ 		  (unsigned)tag, name, (unsigned)((request >> 46) & 0x3fU),
+ 		  (unsigned)(status & 1U), (unsigned)((status >> 4) & 1U), (unsigned)((status >> 2) & 1U),
+-		  (unsigned)((status >> 5) & 3U), (unsigned)((status >> 8) & 7U), (unsigned)((status >> 12) & 0xfU),
++		  level_names[(status >> 5) & 3U], (unsigned)((status >> 8) & 7U), (unsigned)base, base_name,
+ 		  (unsigned long long)catalogue);
+ }
+diff --git a/src/drivers/gpu/powervr/render-private.h b/src/drivers/gpu/powervr/render-private.h
+index 2c52d226ac..9e4365d2f0 100644
+--- a/src/drivers/gpu/powervr/render-private.h
++++ b/src/drivers/gpu/powervr/render-private.h
+@@ -780,6 +780,14 @@ void powervr_target_catalogues(const struct powervr_target *target, unsigned hal
+ uint32_t powervr_target_record_address(const struct powervr_target *target);
+ 
+ void powervr_target_dump(const struct powervr_target *target);
++
++/*
++ * Prints what the render targets know of a recovery: the free lists a
++ * faulted parameter manager catalogue page lies in or is listed by, and
++ * the target half at the recovery's data set address; the core's lock is
++ * held (render-target.c).
++ */
++void powervr_targets_describe_fault(struct powervr_render *render, uint32_t target_data, uint64_t catalogue);
+ void powervr_session_global_list_dump(const struct powervr_session *session);
+ 
+ /* Reports the firmware address of the cleanup count of one half of a render target, which a kick names. */
+diff --git a/src/drivers/gpu/powervr/render-queue.c b/src/drivers/gpu/powervr/render-queue.c
+index 7c4a78b627..eb246bb88b 100644
+--- a/src/drivers/gpu/powervr/render-queue.c
++++ b/src/drivers/gpu/powervr/render-queue.c
+@@ -140,6 +140,7 @@ static void take_reached(struct powervr_session *session, struct delivery *deliv
+ static void take_all(struct powervr_session *session, int error, struct delivery *delivery);
+ static void deliver(struct powervr_render *render, struct delivery *delivery);
+ static void handle_notice(void *context, uint32_t type, const struct powervr_object *buffer, uint32_t offset);
++static void describe_timelines(const struct powervr_session *session);
+ /* How often the timing says its sums, and how often its thread looks whether to end, in milliseconds. */
+ #define TIMING_REPORT_MS		5000U
+ #define TIMING_LOOK_MS			100U
+@@ -2784,6 +2785,47 @@ service_pass(
+ 	return pending;
+ }
+ 
++/*
++ * Prints a reset session's timelines, each the value the core reached
++ * and the last one kicked, with its firmware address, and the syncs its
++ * newest render's geometry waited for: whether the render's geometry had
++ * finished when its 3D was reset, and what it had waited on.
++ */
++static void
++describe_timelines(
++	const struct powervr_session *session)
++{
++	const struct powervr_render_context *context;
++	const struct powervr_render_sequence *sequence;
++	const struct powervr_transfer_context *transfer;
++	unsigned waits;
++
++	/* The render context's two timelines, and its newest render's waits (the fence before the geometry). */
++	context = session->render_context;
++	if (context != NULL) {
++		sequence = &context->sequence;
++		waits = 0;
++		if (sequence->geometry_count != 0U && sequence->geometry_commands[0].type == POWERVR_CLIENT_FENCE_PARTIAL)
++			waits = sequence->geometry_commands[0].size / 8U;
++		kern_logf("powervr: reset timelines: geometry 0x%x at %u of %u, fragment 0x%x at %u of %u; the geometry waited for %u: 0x%x>=%u 0x%x>=%u 0x%x>=%u\n",
++			  (unsigned)powervr_object_address(&context->geometry.timeline, 0),
++			  (unsigned)powervr_object_get32(&context->geometry.timeline, POWERVR_SYNC_ADDRESS), (unsigned)context->geometry.submitted,
++			  (unsigned)powervr_object_address(&context->fragment.timeline, 0),
++			  (unsigned)powervr_object_get32(&context->fragment.timeline, POWERVR_SYNC_ADDRESS), (unsigned)context->fragment.submitted,
++			  waits, (unsigned)sequence->geometry_waits[0].address, (unsigned)sequence->geometry_waits[0].value,
++			  (unsigned)sequence->geometry_waits[1].address, (unsigned)sequence->geometry_waits[1].value,
++			  (unsigned)sequence->geometry_waits[2].address, (unsigned)sequence->geometry_waits[2].value);
++	}
++
++	/* The transfer context's timeline. */
++	transfer = session->transfer_context;
++	if (transfer != NULL) {
++		kern_logf("powervr: reset timelines: transfer 0x%x at %u of %u\n",
++			  (unsigned)powervr_object_address(&transfer->client.timeline, 0),
++			  (unsigned)powervr_object_get32(&transfer->client.timeline, POWERVR_SYNC_ADDRESS), (unsigned)transfer->client.submitted);
++	}
++}
++
+ /* Takes, under the queue lock, the session's commands whose points were reached, in order. */
+ static void
+ take_reached(
+@@ -2985,8 +3027,10 @@ handle_notice(
+ 			powervr_reset_stage_of(&notice, kind, &stage);
+ 			powervr_stage_fail_value(stage.stage, stage.reason, stage.value);
+ 			powervr_session_describe_fault(session, notice.fault_address);
+-			if (POWERVR_DEBUG)
++			if (POWERVR_DEBUG) {
+ 				powervr_session_describe_job(session);
++				describe_timelines(session);
++			}
+ 
+ 			/* The diagnostics: the target its newest render job kicked with, its buffers and its catalogues before the kick and now. */
+ 			if (POWERVR_DIAGNOSTICS && session->noted_target != NULL) {
+diff --git a/src/drivers/gpu/powervr/render-target.c b/src/drivers/gpu/powervr/render-target.c
+index 6eb3bbc2da..7218450b39 100644
+--- a/src/drivers/gpu/powervr/render-target.c
++++ b/src/drivers/gpu/powervr/render-target.c
+@@ -138,6 +138,11 @@ static void notice_statistics(struct powervr_render *render, const uint32_t noti
+ static void rebuild_list(struct powervr_free_list *list);
+ static struct powervr_gpu_space *program_space(struct powervr_session *session, enum powervr_program_heap heap);
+ static uint64_t ms_ticks(unsigned milliseconds);
++static void describe_catalogue(struct powervr_render *render, uint64_t catalogue);
++static void describe_listing(const struct powervr_free_list *list, uint32_t frame);
++static void describe_half(struct powervr_render *render, const struct powervr_target *target, unsigned half);
++static void describe_list(const char *name, const struct powervr_free_list *list);
++static uint64_t target_word64(const struct powervr_target *target, uint32_t offset);
+ 
+ /*
+  * Sets up a session's program windows.
+@@ -1101,11 +1106,14 @@ notice_rebuild(
+ 	if (error != 0)
+ 		return;
+ 
+-	/* Each one the node knows. */
++	/* Each one the node knows; a debug kernel says first how the firmware left it. */
+ 	for (index = 0; index < count; index++) {
+ 		list = list_find(render, identities[index]);
+-		if (list != NULL)
+-			rebuild_list(list);
++		if (list == NULL)
++			continue;
++		if (POWERVR_DEBUG)
++			describe_list("rebuilt", list);
++		rebuild_list(list);
+ 	}
+ 	render->target_events.rebuilds++;
+ 
+@@ -1334,3 +1342,222 @@ powervr_session_global_list_dump(
+ 			  (unsigned)powervr_object_get32(&list->record, offset + 24U), (unsigned)powervr_object_get32(&list->record, offset + 28U));
+ 	}
+ }
++
++/*
++ * Prints what the render targets know of a recovery: for a catalogue
++ * (the page a parameter manager catalogue base named in a BIF fault, 0
++ * for none), every free list whose pages hold it or whose entries list
++ * its page with the page's words; then the target half at the data set
++ * address the recovery names, with its record's parameter manager words,
++ * its macrolist's first entries and its two lists' records.  The core's
++ * lock is held (a reset notice), so the listed free lists and their
++ * targets stay.
++ */
++void
++powervr_targets_describe_fault(
++	struct powervr_render *render,
++	uint32_t target_data,
++	uint64_t catalogue)
++{
++	struct powervr_free_list *list;
++	unsigned half;
++
++	/* Nothing without the render node. */
++	if (render == NULL)
++		return;
++
++	/* The catalogue's page, when the fault named one. */
++	if (catalogue != 0U)
++		describe_catalogue(render, catalogue);
++
++	/* The half at the data set address: each local list's target, both halves. */
++	for (list = render->free_lists; list != NULL; list = list->next) {
++		if (list->owner == NULL)
++			continue;
++		for (half = 0; half < 2U; half++) {
++			if (powervr_target_data_address(list->owner, half) == target_data)
++				describe_half(render, list->owner, half);
++		}
++	}
++}
++
++/*
++ * Prints the free lists a catalogue page belongs to: each whose pages
++ * hold it, with the page's first words and how many of its words are
++ * set (read through the uncached view, as the core sees them), and each
++ * whose entries name its page (a page two lists hand out is a page two
++ * parameter managers write).
++ */
++static void
++describe_catalogue(
++	struct powervr_render *render,
++	uint64_t catalogue)
++{
++	struct powervr_free_list *list;
++	volatile const uint32_t *words;
++	uint64_t page;
++	uint32_t frame;
++	uint32_t index;
++	unsigned set;
++	unsigned held;
++
++	/* The page and its parameter manager number. */
++	page = catalogue & ~(uint64_t)(POWERVR_PM_PAGE_BYTES - 1U);
++	frame = (uint32_t)(page >> POWERVR_PM_PAGE_SHIFT);
++	held = 0;
++
++	/* Each listed free list: whether its pages hold the page, and whether its entries name it. */
++	for (list = render->free_lists; list != NULL; list = list->next) {
++		if (list->pages != NULL && page >= list->pages->run.paddr && page < list->pages->run.paddr + list->pages->run.size) {
++			/* The page's words as the core reads them. */
++			words = (volatile const uint32_t *)(list->pages->view + (page - list->pages->run.paddr));
++			set = 0;
++			for (index = 0; index < POWERVR_PM_PAGE_BYTES / 4U; index++) {
++				if (words[index] != 0U)
++					set++;
++			}
++			held++;
++			kern_logf("powervr: hwr: catalogue 0x%llx is page %u of free list %u (%s, %u pages); %u of %u words set: %08x %08x %08x %08x %08x %08x %08x %08x\n",
++				  (unsigned long long)catalogue, (unsigned)((page - list->pages->run.paddr) >> POWERVR_PM_PAGE_SHIFT),
++				  (unsigned)list->identity, list->owner != NULL ? "local" : "global", (unsigned)list->page_count,
++				  set, (unsigned)(POWERVR_PM_PAGE_BYTES / 4U), (unsigned)words[0], (unsigned)words[1], (unsigned)words[2],
++				  (unsigned)words[3], (unsigned)words[4], (unsigned)words[5], (unsigned)words[6], (unsigned)words[7]);
++		}
++		describe_listing(list, frame);
++	}
++
++	/* A page no list holds came from elsewhere. */
++	if (held == 0U)
++		kern_logf("powervr: hwr: catalogue 0x%llx is in no free list's pages\n", (unsigned long long)catalogue);
++}
++
++/* Prints where a free list's entries name a page, and its stack top, when they do. */
++static void
++describe_listing(
++	const struct powervr_free_list *list,
++	uint32_t frame)
++{
++	volatile const uint32_t *entries;
++	uint32_t index;
++	uint32_t first;
++	uint32_t last;
++	unsigned count;
++
++	/* Nothing without the entries. */
++	if (list->entries == NULL)
++		return;
++
++	/* Every entry naming the page: how many, the first and the last. */
++	entries = (volatile const uint32_t *)list->entries->buffer->view;
++	count = 0;
++	first = 0;
++	last = 0;
++	for (index = 0; index < list->page_count; index++) {
++		if (entries[index] != frame)
++			continue;
++		if (count == 0U)
++			first = index;
++		last = index;
++		count++;
++	}
++
++	/* Said only when listed. */
++	if (count == 0U)
++		return;
++	kern_logf("powervr: hwr: free list %u (%s, %u pages) names the page %u time(s), entries %u..%u; stack top %u, allocated %u, tables %u\n",
++		  (unsigned)list->identity, list->owner != NULL ? "local" : "global", (unsigned)list->page_count, count,
++		  (unsigned)first, (unsigned)last,
++		  (unsigned)powervr_object_get32(&list->record, (uint32_t)offsetof(struct powervr_fw_free_list, stack_top)),
++		  (unsigned)powervr_object_get32(&list->record, (uint32_t)offsetof(struct powervr_fw_free_list, allocated_pages)),
++		  (unsigned)powervr_object_get32(&list->record, (uint32_t)offsetof(struct powervr_fw_free_list, allocated_table_pages)));
++}
++
++/*
++ * Prints one target half the recovery named: its record's parameter
++ * manager words (each 64-bit catalogue, its last one, the lists'
++ * stacks, flags and state), its macrolist's first entries, and its
++ * local and global lists.
++ */
++static void
++describe_half(
++	struct powervr_render *render,
++	const struct powervr_target *target,
++	unsigned half)
++{
++	const struct powervr_free_list *list;
++	volatile const uint32_t *macrolist;
++	uint32_t base;
++	uint32_t global;
++
++	/* The half and its catalogues: VCE 0..3 and their last ones, TE 0..3 and theirs, the ALIST and its last. */
++	base = POWERVR_TARGET_DATA_OFFSET(half);
++	kern_logf("powervr: hwr: target 0x%x %ux%u half %u (next %u): vce %llx %llx %llx %llx last %llx; te %llx %llx %llx %llx last %llx %llx\n",
++		  (unsigned)powervr_object_address(&target->record, 0), (unsigned)target->shape.width, (unsigned)target->shape.height,
++		  half, target->next_half,
++		  (unsigned long long)target_word64(target, base + 8U), (unsigned long long)target_word64(target, base + 16U),
++		  (unsigned long long)target_word64(target, base + 24U), (unsigned long long)target_word64(target, base + 32U),
++		  (unsigned long long)target_word64(target, base + 40U),
++		  (unsigned long long)target_word64(target, base + 72U), (unsigned long long)target_word64(target, base + 80U),
++		  (unsigned long long)target_word64(target, base + 88U), (unsigned long long)target_word64(target, base + 96U),
++		  (unsigned long long)target_word64(target, base + 104U), (unsigned long long)target_word64(target, base + 112U));
++	kern_logf("powervr: hwr: half %u: alist %llx last %llx stack %llx; macrolist stack %x flags %x state %x snapshot %x %x\n",
++		  half, (unsigned long long)target_word64(target, base + 136U), (unsigned long long)target_word64(target, base + 144U),
++		  (unsigned long long)target_word64(target, base + 152U),
++		  (unsigned)powervr_object_get32(&target->record, base + 160U), (unsigned)powervr_object_get32(&target->record, base + 168U),
++		  (unsigned)powervr_object_get32(&target->record, base + 172U), (unsigned)powervr_object_get32(&target->record, base + 188U),
++		  (unsigned)powervr_object_get32(&target->record, base + 192U));
++
++	/* The half's macrolist: the pages the parameter manager took for its tables. */
++	if (target->macrolists != NULL) {
++		macrolist = (volatile const uint32_t *)(target->macrolists->buffer->view + half * target->layout.macrolist_bytes);
++		kern_logf("powervr: hwr: half %u macrolist: %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n", half,
++			  (unsigned)macrolist[0], (unsigned)macrolist[1], (unsigned)macrolist[2], (unsigned)macrolist[3],
++			  (unsigned)macrolist[4], (unsigned)macrolist[5], (unsigned)macrolist[6], (unsigned)macrolist[7],
++			  (unsigned)macrolist[8], (unsigned)macrolist[9], (unsigned)macrolist[10], (unsigned)macrolist[11]);
++	}
++
++	/* Its local list, and the global list its record names. */
++	describe_list("local", &target->local);
++	global = powervr_object_get32(&target->record, base + (uint32_t)offsetof(struct powervr_fw_target_data, free_lists) + 4U);
++	for (list = render->free_lists; list != NULL; list = list->next) {
++		if (list->owner == NULL && powervr_object_address(&list->record, 0) == global)
++			describe_list("global", list);
++	}
++}
++
++/* Prints a free list's pages and its firmware record's stack. */
++static void
++describe_list(
++	const char *name,
++	const struct powervr_free_list *list)
++{
++	/* The pages, then the record's words that move. */
++	kern_logf("powervr: hwr: %s list %u: pages 0x%llx..0x%llx (%u); current %u, stack top %u, allocated %u, tables %u, ready %u, flags %x\n",
++		  name, (unsigned)list->identity,
++		  (unsigned long long)(list->pages != NULL ? list->pages->run.paddr : 0U),
++		  (unsigned long long)(list->pages != NULL ? list->pages->run.paddr + list->pages->run.size : 0U),
++		  (unsigned)list->page_count,
++		  (unsigned)powervr_object_get32(&list->record, (uint32_t)offsetof(struct powervr_fw_free_list, current_pages)),
++		  (unsigned)powervr_object_get32(&list->record, (uint32_t)offsetof(struct powervr_fw_free_list, stack_top)),
++		  (unsigned)powervr_object_get32(&list->record, (uint32_t)offsetof(struct powervr_fw_free_list, allocated_pages)),
++		  (unsigned)powervr_object_get32(&list->record, (uint32_t)offsetof(struct powervr_fw_free_list, allocated_table_pages)),
++		  (unsigned)powervr_object_get32(&list->record, (uint32_t)offsetof(struct powervr_fw_free_list, ready_pages)),
++		  (unsigned)powervr_object_get32(&list->record, (uint32_t)offsetof(struct powervr_fw_free_list, flags)));
++}
++
++/* Reads a 64-bit word of a target's record, low half first. */
++static uint64_t
++target_word64(
++	const struct powervr_target *target,
++	uint32_t offset)
++{
++	uint64_t low;
++	uint64_t high;
++
++	/* The two halves. */
++	low = powervr_object_get32(&target->record, offset);
++	high = powervr_object_get32(&target->record, offset + 4U);
++
++	/* Succeeded: the word. */
++	return low | (high << 32);
++}
+diff --git a/userland/desktop/libvulkan/context.c b/userland/desktop/libvulkan/context.c
+index 5ab4a647db..413340fb57 100644
+--- a/userland/desktop/libvulkan/context.c
++++ b/userland/desktop/libvulkan/context.c
+@@ -787,8 +787,10 @@ vulkan_context_transaction(
+ 	if (reply_capacity > SIZE_MAX - VULKAN_REPLY_TRAILER_BYTES)
+ 		return VK_ERROR_OUT_OF_HOST_MEMORY;
+ 
+-	/* Allocates caller-owned reply bytes before a command can have side effects. */
+-	if (writer->allocator.has_callbacks) {
++	/* Caller-owned reply bytes before a command can have side effects: the reader's own for a small reply. */
++	if (reply_capacity <= sizeof(reader->inline_data)) {
++		response = reader->inline_data;
++	} else if (writer->allocator.has_callbacks) {
+ 		response = writer->allocator.callbacks.pfnAllocation(writer->allocator.callbacks.pUserData, reply_capacity, 16, VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+ 	} else {
+ 		response = malloc(reply_capacity);
+@@ -812,7 +814,7 @@ vulkan_context_transaction(
+ 	__atomic_thread_fence(__ATOMIC_RELEASE);
+ 
+ 	/* Encodes small transport framing around the caller's independent command. */
+-	vulkan_writer_init(&command);
++	vulkan_writer_init_local(&command);
+ 	command.allocator = writer->allocator;
+ 	vulkan_encode_reply_stream(&command, context);
+ 
+diff --git a/userland/desktop/libvulkan/internal.h b/userland/desktop/libvulkan/internal.h
+index f1db3b76d3..378b3b0ec6 100644
+--- a/userland/desktop/libvulkan/internal.h
++++ b/userland/desktop/libvulkan/internal.h
+@@ -165,6 +165,14 @@ struct VkQueue_T {
+ 	pthread_mutex_t mutex;
+ };
+ 
++/*
++ * The bytes a writer and a reader hold in themselves before they allocate:
++ * most commands and replies fit, so a transaction needs no heap.  A writer
++ * or a reader is never copied by value, as its data may point into it.
++ */
++#define VULKAN_WRITER_INLINE_BYTES	512U
++#define VULKAN_READER_INLINE_BYTES	64U
++
+ /* Keeps one encoded command independent of other recording threads. */
+ struct vulkan_writer {
+ 	struct vulkan_allocator allocator;
+@@ -175,6 +183,7 @@ struct vulkan_writer {
+ 	size_t bytes;
+ 	size_t capacity;
+ 	VkResult error;
++	_Alignas(16) uint8_t inline_data[VULKAN_WRITER_INLINE_BYTES];
+ };
+ 
+ /* The swapchain images one command buffer may name as written before it counts them unknown. */
+@@ -313,13 +322,14 @@ enum vulkan_device_extension_bits {
+ 	VULKAN_DEVICE_INCREMENTAL_PRESENT = 8192
+ };
+ 
+-/* Owns a completed reply after the transport transaction unlocks. */
++/* Owns a completed reply after the transport transaction unlocks; a small one is held in inline_data. */
+ struct vulkan_reader {
+ 	struct vulkan_allocator allocator;
+ 	uint8_t *data;
+ 	size_t bytes;
+ 	size_t cursor;
+ 	VkResult error;
++	_Alignas(16) uint8_t inline_data[VULKAN_READER_INLINE_BYTES];
+ };
+ 
+ /* Retains one supervised job until terminal observation or context close. */
+@@ -614,6 +624,11 @@ void
+ vulkan_writer_init(
+ 	struct vulkan_writer *writer);
+ 
++/* A writer of this library's own transaction, which starts in its own bytes. */
++void
++vulkan_writer_init_local(
++	struct vulkan_writer *writer);
++
+ void
+ vulkan_writer_init_for_object(
+ 	struct vulkan_writer *writer,
+@@ -806,6 +821,7 @@ enum vulkan_timing_part {
+ 	VULKAN_TIMING_ACQUIRE_RELEASE,
+ 	VULKAN_TIMING_ACQUIRE_TIMEOUT,
+ 	VULKAN_TIMING_FIFO_WAIT,
++	VULKAN_TIMING_HEAP,
+ 	VULKAN_TIMING_PARTS
+ };
+ 
+diff --git a/userland/desktop/libvulkan/queue.c b/userland/desktop/libvulkan/queue.c
+index 1f2d18d6f3..7e78e1d507 100644
+--- a/userland/desktop/libvulkan/queue.c
++++ b/userland/desktop/libvulkan/queue.c
+@@ -314,8 +314,10 @@ queue_enqueue(
+ 		if (sizeof(*transaction.waits) > SIZE_MAX / capacity)
+ 			return VK_ERROR_OUT_OF_HOST_MEMORY;
+ 
+-		/* Allocation failure cannot occur after a kernel job has been reserved. */
++		/* Allocation failure cannot occur after a kernel job has been reserved (the allocation timed as heap). */
++		mark = vulkan_timing_start();
+ 		transaction.waits = vulkan_allocate(&device->object.allocator, capacity * sizeof(*transaction.waits), sizeof(uint64_t), VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
++		vulkan_timing_add(VULKAN_TIMING_HEAP, mark, 0);
+ 		if (transaction.waits == NULL)
+ 			return VK_ERROR_OUT_OF_HOST_MEMORY;
+ 
+diff --git a/userland/desktop/libvulkan/sync.c b/userland/desktop/libvulkan/sync.c
+index d335b76b47..b3e7241d0b 100644
+--- a/userland/desktop/libvulkan/sync.c
++++ b/userland/desktop/libvulkan/sync.c
+@@ -587,6 +587,7 @@ vulkan_sync_job_reserve(
+ 	int error;
+ 	int saved_error;
+ 	uint64_t mark;
++	uint64_t heap_started;
+ 
+ 	/* A failed reservation cannot leave a caller with partially published job storage. */
+ 	*reserved = NULL;
+@@ -610,8 +611,10 @@ vulkan_sync_job_reserve(
+ 	/* Later capacity retries revalidate the shared generation without repeating native preparation. */
+ 	*prepared = VK_TRUE;
+ 
+-	/* Local bookkeeping must exist before any native submission or kernel reservation. */
++	/* Local bookkeeping must exist before any native submission or kernel reservation (its allocation timed as heap). */
++	heap_started = vulkan_timing_start();
+ 	notification = calloc(1, sizeof(*notification));
++	vulkan_timing_add(VULKAN_TIMING_HEAP, heap_started, 0);
+ 	if (notification == NULL)
+ 		return VK_ERROR_OUT_OF_HOST_MEMORY;
+ 
+@@ -1247,7 +1250,7 @@ vulkan_timing_report(
+ 	static const char *const names[VULKAN_TIMING_PARTS] = {
+ 		"submit", "quiesce", "queue_lock", "device_lock", "prepare", "reserve", "execute", "finish",
+ 		"capacity", "context_wait", "context_hold", "present_prepare", "present_record", "present_submit", "present",
+-		"acquire", "acquire_state", "acquire_release", "acquire_timeout", "fifo_wait",
++		"acquire", "acquire_state", "acquire_release", "acquire_timeout", "fifo_wait", "heap",
+ 	};
+ 	uint64_t now;
+ 	unsigned part;
+diff --git a/userland/desktop/libvulkan/wire.c b/userland/desktop/libvulkan/wire.c
+index a75a52c895..793989888b 100644
+--- a/userland/desktop/libvulkan/wire.c
++++ b/userland/desktop/libvulkan/wire.c
+@@ -16,6 +16,7 @@
+  */
+ 
+ #include <stdlib.h>
++#include <stddef.h>
+ #include <string.h>
+ #include "internal.h"
+ 
+@@ -110,14 +111,32 @@ void
+ vulkan_writer_init(
+ 	struct vulkan_writer *writer)
+ {
+-	/* Starts with no allocation so empty writers always have cheap cleanup. */
+-	memset(writer, 0, sizeof(*writer));
++	/* Starts with no allocation so empty writers always have cheap cleanup; its bytes may be handed over. */
++	memset(writer, 0, offsetof(struct vulkan_writer, inline_data));
+ 	writer->external_memory_type = VULKAN_EXTERNAL_MEMORY_DMABUF;
+ 
+ 	/* Succeeded: the writer can grow as command parameters are encoded. */
+ 	return;
+ }
+ 
++/*
++ * Initializes a writer for one transaction of this library, which starts in
++ * the writer's own bytes, so a small command allocates nothing.  Its data is
++ * never handed to another owner.
++ */
++void
++vulkan_writer_init_local(
++	struct vulkan_writer *writer)
++{
++	/* An ordinary writer, then its own bytes. */
++	vulkan_writer_init(writer);
++	writer->data = writer->inline_data;
++	writer->capacity = sizeof(writer->inline_data);
++
++	/* Succeeded: the writer encodes into itself until it outgrows it. */
++	return;
++}
++
+ /*
+  * Releases command storage without retaining a pointer into a prior request.
+  */
+@@ -125,14 +144,16 @@ void
+ vulkan_writer_finish(
+ 	struct vulkan_writer *writer)
+ {
+-	/* Releases all storage owned by this independent encoding transaction. */
+-	if (writer->allocator.has_callbacks) {
+-		writer->allocator.callbacks.pfnFree(writer->allocator.callbacks.pUserData, writer->data);
+-	} else {
+-		free(writer->data);
++	/* Releases all storage owned by this independent encoding transaction; its own bytes are not allocated. */
++	if (writer->data != writer->inline_data) {
++		if (writer->allocator.has_callbacks) {
++			writer->allocator.callbacks.pfnFree(writer->allocator.callbacks.pUserData, writer->data);
++		} else {
++			free(writer->data);
++		}
+ 	}
+ 
+-	memset(writer, 0, sizeof(*writer));
++	memset(writer, 0, offsetof(struct vulkan_writer, inline_data));
+ 
+ 	/* Succeeded: the writer no longer retains command bytes. */
+ 	return;
+@@ -186,11 +207,17 @@ vulkan_writer_reserve(
+ 	if (writer->allocator.has_callbacks) {
+ 		storage = writer->allocator.callbacks.pfnAllocation(writer->allocator.callbacks.pUserData, capacity, 16, writer->scope);
+ 		if (storage != NULL) {
+-			/* Retains encoded bytes before returning the previous callback allocation. */
++			/* Retains encoded bytes before returning the previous callback allocation (the writer's own bytes are not one). */
+ 			if (writer->bytes != 0)
+ 				memcpy(storage, writer->data, writer->bytes);
+-			writer->allocator.callbacks.pfnFree(writer->allocator.callbacks.pUserData, writer->data);
++			if (writer->data != writer->inline_data)
++				writer->allocator.callbacks.pfnFree(writer->allocator.callbacks.pUserData, writer->data);
+ 		}
++	} else if (writer->data == writer->inline_data) {
++		/* Leaves the writer's own bytes for the heap, keeping what was encoded. */
++		storage = malloc(capacity);
++		if (storage != NULL && writer->bytes != 0)
++			memcpy(storage, writer->data, writer->bytes);
+ 	} else {
+ 		/* Keeps the ordinary allocator fast when the application supplied none. */
+ 		storage = realloc(writer->data, capacity);
+@@ -397,7 +424,7 @@ vulkan_reader_init(
+ 	size_t bytes)
+ {
+ 	/* Initializes an independent cursor with one clear storage owner. */
+-	memset(reader, 0, sizeof(*reader));
++	memset(reader, 0, offsetof(struct vulkan_reader, inline_data));
+ 	reader->data = owned_data;
+ 	reader->bytes = bytes;
+ 
+@@ -416,14 +443,16 @@ void
+ vulkan_reader_finish(
+ 	struct vulkan_reader *reader)
+ {
+-	/* Releases all response storage without touching another transaction. */
+-	if (reader->allocator.has_callbacks) {
+-		reader->allocator.callbacks.pfnFree(reader->allocator.callbacks.pUserData, reader->data);
+-	} else {
+-		free(reader->data);
++	/* Releases all response storage without touching another transaction; the reader's own bytes are not allocated. */
++	if (reader->data != reader->inline_data) {
++		if (reader->allocator.has_callbacks) {
++			reader->allocator.callbacks.pfnFree(reader->allocator.callbacks.pUserData, reader->data);
++		} else {
++			free(reader->data);
++		}
+ 	}
+ 
+-	memset(reader, 0, sizeof(*reader));
++	memset(reader, 0, offsetof(struct vulkan_reader, inline_data));
+ 
+ 	/* Succeeded: the reader no longer refers to a renderer response. */
+ 	return;
+@@ -652,8 +681,8 @@ vulkan_writer_init_for_object(
+ 	struct vulkan_writer *writer,
+ 	const struct vulkan_object *object)
+ {
+-	/* Starts a fresh command whose bytes never outlive the provoking API call. */
+-	vulkan_writer_init(writer);
++	/* Starts a fresh command whose bytes never outlive the provoking API call, in the writer's own bytes. */
++	vulkan_writer_init_local(writer);
+ 
+ 	/* Uses object, pool, device, or instance policy already resolved at creation. */
+ 	if (object != NULL) {
+diff --git a/userland/desktop/libvulkan/wsi-swapchain.c b/userland/desktop/libvulkan/wsi-swapchain.c
+index b33b2bc21c..229ef808a1 100644
+--- a/userland/desktop/libvulkan/wsi-swapchain.c
++++ b/userland/desktop/libvulkan/wsi-swapchain.c
+@@ -33,6 +33,15 @@
+ #define WSI_COMPLETION_TIMEOUT	10000000000ULL
+ #define WSI_PROGRESS_INTERVAL	10000000ULL
+ 
++/*
++ * How long a swapchain's surface counts as valid after the platform last
++ * said so, in nanoseconds.  Acquire and present each asked (on the display,
++ * three GPU_DISPLAY_QUERY ioctls); a topology change or a lost lease that
++ * falls in the interval is still refused by the native present, which checks
++ * the lease's generation, and is reported on the chain from there.
++ */
++#define WSI_CURRENT_INTERVAL	50000000ULL
++
+ /* How long a cursor present keeps trying while the output has no free cursor image. */
+ #define WSI_CURSOR_BUSY_LIMIT	1000000000ULL
+ 
+@@ -136,6 +145,12 @@ struct vulkan_swapchain {
+ 	 * freed chain's address can be a later chain's.
+ 	 */
+ 	uint64_t serial;
++	/*
++	 * When the surface's native mode was last found valid (monotonic
++	 * nanoseconds, 0 never): swapchain_current asks the platform again
++	 * only WSI_CURRENT_INTERVAL later.  Read and written atomically.
++	 */
++	uint64_t validated_ns;
+ };
+ 
+ /* The independently ordered workers of one queue: ordinary presents, the cursor plane's, and the overlay planes'. */
+@@ -2021,6 +2036,8 @@ swapchain_current(
+ {
+ 	VkSurfaceCapabilitiesKHR capabilities;
+ 	VkResult error;
++	uint64_t now;
++	uint64_t validated;
+ 
+ 	/* Asynchronous native loss remains visible even when a later image would otherwise be available. */
+ 	error = __atomic_load_n(&chain->error, __ATOMIC_ACQUIRE);
+@@ -2046,6 +2063,14 @@ swapchain_current(
+ 			return error;
+ 	}
+ 
++	/* A surface found valid less than WSI_CURRENT_INTERVAL ago is not asked again. */
++	error = swapchain_now(&now);
++	if (error != VK_SUCCESS)
++		return error;
++	validated = __atomic_load_n(&chain->validated_ns, __ATOMIC_RELAXED);
++	if (validated != 0U && now >= validated && now - validated < WSI_CURRENT_INTERVAL)
++		return VK_SUCCESS;
++
+ 	/* Revalidates the selected native mode without altering acquisition ownership. */
+ 	error = chain->surface->platform->capabilities(
+ 		chain->surface,
+@@ -2054,7 +2079,8 @@ swapchain_current(
+ 	if (error != VK_SUCCESS)
+ 		return error;
+ 
+-	/* Succeeded: the native surface still accepts this swapchain's complete images. */
++	/* Succeeded: the native surface still accepts this swapchain's complete images, as of now. */
++	__atomic_store_n(&chain->validated_ns, now, __ATOMIC_RELAXED);
+ 	return VK_SUCCESS;
+ }
+ 

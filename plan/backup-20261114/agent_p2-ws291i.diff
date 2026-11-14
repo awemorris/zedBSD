@@ -1,0 +1,2174 @@
+diff --git a/plan/tools/system-events/run-host-events.sh b/plan/tools/system-events/run-host-events.sh
+index dc8df020f7..02f2fd9081 100755
+--- a/plan/tools/system-events/run-host-events.sh
++++ b/plan/tools/system-events/run-host-events.sh
+@@ -7,8 +7,10 @@ set -eu
+ cd "$(dirname -- "$0")/../../.."
+ out=${1:-build/ws132-host}
+ mkdir -p "$out"
+-${CC:-cc} -std=gnu89 -Wall -Wextra -Werror -D_GNU_SOURCE -I. -Iinclude -fsanitize=address,undefined -g \
++${CC:-cc} -std=gnu89 -Wall -Wextra -Werror -D_GNU_SOURCE -I. -Iinclude -fsanitize=address,undefined -g -pthread \
+     userland/desktop/libkeiland-backend/backend.c userland/desktop/libkeiland-backend/session/session-none.c \
+     userland/desktop/libkeiland-backend/unsupported/seat-unsupported.c \
++    userland/desktop/libkeiland-backend/unsupported/notify-unsupported.c \
++    userland/desktop/libkeiland-backend-zedbsd/input-zedbsd.c \
+     userland/desktop/libkeiland-backend-zedbsd/events-zedbsd.c plan/tools/system-events/host-events.c -o "$out/host-events"
+ exec "$out/host-events"
+diff --git a/plan/ws291/keiland-blocking.md b/plan/ws291/keiland-blocking.md
+new file mode 100644
+index 0000000000..5971d53d08
+--- /dev/null
++++ b/plan/ws291/keiland-blocking.md
+@@ -0,0 +1,118 @@
++<!-- awesome-plan project=zedbsd record=ws291-keiland-blocking -->
++
++# Keiland の main loop を止め得る同期の待ち（2026-10-29 P2、q1661）
++
++- ユーザーの指示（2026-10-28、Q1 経由、原文）「Keilandの直し方ですが、デバイスの検出はスレッドに追い出してください。他にもメインループにそういったブロッキング要素がないかチェックしてください。」
++- 親: [ws.md](ws.md)、経緯は [phase006](phase006/phase.md) の「約 2 s 周期の止まりの原因と直し」（b574fbf6a: 開けなかった node を覚えて開き直さない直し）。
++
++## 1. input の device の検出を thread に（commit 3d9306f02）
++
++### 形
++
++- zedBSD の backend（`userland/desktop/libkeiland-backend-zedbsd/input-zedbsd.c`）に worker thread を 1 本（最初の `kl_backend_input_scan` で作り、
++  `kl_backend_close` → `kl_backend_input_stop` で止めて join）。thread がする事: `/dev/input` の readdir、`eventN` の open、capability の
++  ioctl（EVIOCGBIT ×4・EVIOCGPROP）、descriptor の close（compositor が返した物と、compositor が keep しなかった物）。
++- main loop（event loop）は `kl_backend_input_scan` で「compositor が既に読んでいる node の集合」を渡して scan を頼むだけ（lock の中で
++  flag を立てて cond を signal、数十 µs）。thread は開けた device を lock で守った queue に積み、pipe に 1 byte 書く。pipe は backend の
++  poll の part（`kl_backend_input_poll_count/fill/done`、`backend.c` の seat・events・notify の後）で main loop の poll に入り、
++  `kl_backend_poll_done` で queue を取り、今までどおり main の thread で `input_known`・`input_found`（compositor の分類）を呼ぶ。
++  compositor の callback の thread の契約（`kl_backend_poll_done` か `kl_backend_tick` からだけ）は変えていない。
++- close も thread で: kernel の evdev の close は driver の close の callback（PS/2 の aux の停止など、device を待ち得る）を呼ぶため
++  （`src/drivers/generic/input.c` `input_close`）。descriptor は thread が閉じるまで開いたままなので、番号の再利用で別の file を読む事はない。
++- compositor が open の後に呼ぶ ioctl（`kl_backend_input_absinfo`・`_name`・`_id`）は main loop に残した: kernel は device の記述の写しを
++  spinlock の下で copyout するだけで待たない（`src/drivers/generic/input.c` `copy_abs_info` ほか）。待つのは open（`input_open` →
++  `device->open`）と close だけ。
++- 重複の防ぎ: thread は「compositor が読んでいる（known）」「queue に積んで未配達（pending）」の node を開かない。known は scan を頼む時に
++  main が、前回の scan が見た node と前回の known について `input_known` を聞いて作る。配達の時に main がもう一度 `input_known` を見て、
++  既に読んでいる物（重なった scan の 2 度目の open）は thread に閉じさせる。node 番号 256 以上は集合に持たず、毎回開いて配達で重複を落とす。
++- thread が立たない時（pipe・pthread_create の失敗）は今までの同期の scan に戻る（log `KL INPUT worker ... the scans wait in the event loop`）。
++- signal: thread は全 signal を block して作る（audio の pump と同じ）。compositor の SIGINT・SIGTERM は main が受ける。
++- Linux・FreeBSD（`libkeiland-backend/evdev/input-evdev.c`）は seat（logind の D-Bus）経由の open で、今までどおり同期。poll の part は空、
++  stop は何もしない（共通の `backend.c` と API の形は保った）。
++
++### b574fbf6a の「開けなかった node を覚える」は残した（判断）
++
++- main loop の止まりは thread 化で無くなるので、記憶は止まりの直しではなく、thread の中の無駄な再試行を減らす工夫として残した。
++  理由: mouse の無い PS/2 の aux の open は毎回 約 80 ms kernel の中で待つ（8042 の controller を keyboard と共有する）。2 s ごとに無駄に
++  叩く理由が無い。記憶は thread の中（`refused`）で、/dev/system の INPUT・OVERFLOW の event（`kl_backend_input_devices_changed`）で忘れる。
++  system の event が無い kernel（events_descriptor < 0、event の降りた後も）では覚えない（host 試験で、event の無くなった後に記憶が残る誤りを
++  見つけて直した）。EACCES（seat の user の物になる前）は毎回試す。
++
++### 試験
++
++- host: `sh plan/ws291/tests/input-worker/run.sh`（backend.c・events-zedbsd.c・input-zedbsd.c を host で、/dev/input を linker の --wrap で偽装:
++  keyboard の event0、open が 80 ms 待って EIO の event4、keep されない event5）。ASan+UBSan と TSan の 2 回。確かめる事: scan の呼び出しと
++  毎回の poll_done が 5 ms 未満（実測 最大 0.6 ms、TSan で 0.07 ms）、keyboard が poll 経由で main の thread で offer、event5 の close が thread、
++  2 回目の scan で event0・event4 を開かず event5 は開く、device の event の後に event4 を再試行、event が無いと毎回試す、
++  `kl_backend_input_close` が thread、thread が立たない時は scan の呼び出しの中で offer、close で join（leak 無し）。26 checks PASS。
++- `plan/tools/system-events/run-host-events.sh` は notify-unsupported.c の欠けで link が既に壊れていた。input-zedbsd.c も要るようになったので
++  両方を足して直した（54 checks PASS）。
++- build: amd64（plan/ws291/tests/config.mk、BUILD=build/ws291/usb）・arm64（config-rpi4、BUILD=build/ws291/rpi4）・riscv64（config-visionfive2、
++  BUILD=build/ws291/vf2）の `/bin/wayland` が rc=0・warning 0（-Werror、input-zedbsd.o を含む）。Linux の input-evdev.c・backend.c は host の
++  cc -fsyntax-only -Werror で通る（keiland-linux の全体の build は未実施）。
++
++### 実機（RDNA、10.0.10.3 の NVMe の zedBSD、2026-10-29 00:00〜00:10、`plan/ws291/tests/kw2-check.sh`）
++
++- 配置: `kw2-check.sh build/ws291/kw2-a deploy`（/bin/wayland を 3d9306f02 の amd64 の build に差し替え、元の b574fbf6a の物は
++  /bin/wayland.p2b574、その前の物は /bin/wayland.p2old。measure.sh deploy で Debian 経由の再起動）。kernel vmunix-m2j、cfg は
++  amdrdna.smu.memory=2・ngg=2、/lib/libvulkan.so は 7650291df の build（前と同じ）。
++- 起動時の device: event0（pointer）・event1（keyboard）・event2（pointer と keyboard）・event3・event5（keyboard）が READY の後に worker 経由で
++  attach（前の版と同じ組、前は READY の前）、`KL INPUT worker` の失敗 0。PS/2 の aux の event4 は今までどおり attach されない。
++- mview の HITCH（33 ms 超の frame の間隔、12 s ずつ、2 回）: window FIFO 1 体 60.31・60.33 fps HITCH 0、1500 体 60.29・60.22 fps HITCH 0、
++  game mailbox 4 枚 1 体 1547・1514 fps HITCH 1（frame 2327 の 61 ms、frame 2009 の 50 ms: run の開始の direct scanout への切り替え、
++  前の版と同じ 1 回）。周期の止まりは 0。
++- 後から来る device（hotplug）: `aat-input stop` → `start`（/dev/system の INPUT の event）で `KWL EVENT input changed` ×4 → worker の scan で
++  event6（pointer）・event7（absolute pointer）・event8（keyboard）・event9（touch）が attach、stop で 4 つとも `INPUT_CLOSED`、再 start で再 attach。
++  その間の client（mview、fullscreen）に drag の motion 5 行・button 4・wheel 1・key 105（left）と 13（equal）が届いた（build/ws291/kw2-d）。
++- compositor の pass: SLOW_PASS（33 ms 超の pass）は boot からの全体で 5 回: 起動の 120 ms（frame 0）、game mode の出入りの 41〜62 ms
++  （下の表の 2）。KWL PERF pass の pass_max_us は 0.2〜8.4 ms。
++- 未実施: 実機の物理の keyboard・mouse を手で押す確かめ（遠隔では不可。起動時の attach までは確かめた）、USB の物理の抜き差し。
++- QEMU Venus の回帰（`plan/ws291/tests/venus-reg.sh build/ws291/venus4 build/ws291/forge/hdd-image.img build/ws291/forge/dynamic/libvulkan.so`、
++  image は 3d9306f02 の tree の `build-forge-image.sh build/ws291/forge`、compositor に worker の文字列あり）: forge-guest・fence-guest・wltest・
++  mview-mailbox・mview-submits・compositor ok、PASS。
++
++## 2. 点検: main loop を止め得る同期の待ち
++
++- 方法: compositor（`userland/desktop/wayland/`）の event_loop（main.c）の 1 回の pass から届く呼び出しと、zedBSD の backend の
++  `kl_backend_*` の全部を、Explore の subagent 2 本で読み（file:line は 3d9306f02 の tree）、kernel の側の待ちの有無は該当の driver を読んで
++  確かめた。最悪の時間は、実測の記した物の他は code からの見積り。「頻度」は通常の desktop の frame の間に起きるか。
++- pass の順: tick（input の scan・ping・settings・system・ime・titlebar）→ poll（窓 10 ms、frame 待ちは 2 ms）→ backend の poll_done →
++  input の drain → client の要求 → clipboard・data → `kwl_schedule`（sleep・output・displays・glass の tick（bar・network・volume）・
++  desktop・scanout・shm の upload・cursor・layer・compose）→ retire → flush。
++- 既に thread の外: render-thread（acquire 50 ms・record・submit・present・fence）、cursor-thread、input-thread（evdev の read）、
++  glyph-worker、glass の wallpaper loader、settings の writer、heads の writer（角度だけ）、system.c の job（network の link・DNS・保存、
++  power、account の fork/exec）、sysmon、machine-shell、手書きの template の読み込み、print の config writer、scanout の present thread、
++  今回の input の worker。
++
++| # | 待ち（file:line） | 何を待つか | 頻度 | 最悪 | 判定 |
++| --- | --- | --- | --- | --- | --- |
++| 1 | input の scan: `/dev/input` の open（`input-zedbsd.c`、旧 `probe_device`）と close | driver の open（PS/2 の aux は mouse 無しで 約 80 ms 待って EIO）・close | 2 s ごと、device の event の後 2 s は 100 ms ごと | 80 ms（実測、phase006） | **直した**（1 節、3d9306f02） |
++| 2 | direct scanout の出入り: 入りは `compose.c:656/661`（park・`vkDeviceWaitIdle`）・`cursor-plane.c:210/217`・`scanout-zedbsd.c:125/170/191`（open・query・`GPU_DISPLAY_CLAIM`）、出は `scanout-zedbsd.c:565`（present thread の join）・`:511`（RELEASE）・swapchain の作り直し | GPU の idle、display の claim・release、1 vblank、swapchain・target・cursor plane の作り直し | fullscreen の GPU の window が direct を得る・失う時。pointer が動くと失う（`scanout-rules.c:64`、2 s 止まると戻る）、popup・通知でも | 実測 switch_ms=51（phase006、KWL SCANOUT）。出は未計測 | 案 A（Q1 へ）。mview の game の run の最初の HITCH 1 回はこれ |
++| 3 | `kwl_compose_quiesce`（`compose.c:1012` → `:948`、timeout 無し）と `image_layout`（`shm.c:964` render の idle 待ち + `:1003` `vkQueueWaitIdle`） | GPU の frame の完了 | wl_shm の size の変化（X11 の window の resize の各段、IME の候補の popup）、shm の surface の破棄、client の切断 | 約 1 frame の GPU の時間（Pi 4 で 36 ms の記録）。GPU の hang で無限 | 案 B（Q1 へ）。render thread の設計に係る |
++| 4 | `heads_save` → `heads_write_file` の `fsync`（`heads.c:1714`・`:1802`）と `heads_writer_drain`（`:1884`） | UFS の flush（BUG-306: volume 全体を書き出す） | Settings → Displays の mode・配置・display の on/off、出力の移動の失敗（`output-switch.c:904`） | 秒（BUG-306 の実測） | 案 C（Q1 へ）。角度だけ writer thread（BUG-306 の直し）、残りは loop。thread へ移すと client への `saved` の答えが「渡した」になる（角度と同じ）ので protocol の意味が変わる |
++| 5 | 予備の font の読み込み `glass_open_face`（`glass.c:3889` → `file_read` `:1671`、4 MB の DroidSansFallbackFull）・emoji の PNG の decode（`color-glyph.c:36`） | disk の read、decode | session で最初の CJK・emoji の文字の描画の時（frame の walk の中）、emoji は新しい文字と size ごと | font: 数十 ms（SSD）、USB・SD はそれ以上。emoji 1 つ 0.5〜3 ms | 案 D（Q1 へ）: 起動の後に thread で先読み |
++| 6 | `fork()`（`home.c:1618` `kwl_spawn`、`input-method.c:1219`）、`posix_spawn`（`print.c:1143`・`media.c:637`） | address space の複写と COW | app の起動・IME の再起動・印刷・media の要求 | 2〜30 ms 以上（mapping の量による、未計測） | 案 E（Q1 へ）: vfork 相当の spawn か専用の spawn の process |
++| 7 | wallpaper の差し替え: `glass.c:849-850`（quiesce + `vkDeviceWaitIdle`）・`loader_copy`／`wallpaper_draw` | GPU の idle、8〜33 MB の copy | wallpaper の変更 | 10〜60 ms | 低（user の操作の 1 回）。記録だけ |
++| 8 | 出力の size の変化: `glass.c:595` 以下（quiesce・`vkDeviceWaitIdle`・wallpaper の decode と blur を loop で）、回転（`output-rotate.c:703/720-722`）、`heads.c:323/1078-1080` | decode・GPU の idle・modeset | hotplug・lid・回転・別の size の display | 数百 ms〜（BUG-306 で回転全体 7〜12 s） | 低（modeset と一緒で画面は元々止まる）。記録だけ |
++| 9 | clipboard の書き込みの spin（`clipboard.c:327-337`、最大 100 ms） | 遅い読み手、pipe の容量（64 KiB）を超える text | compositor の持つ選択（履歴）の paste | 100 ms | 案 F（小）: 残りを poll の集合に入れて pass ごとに書く |
++| 10 | 手書きの認識（`keyboard-hand.c:335/400`）、template の join（`:382/594`） | 全 template との照合、最初は parse | OSK の手書きの各認識 | 数〜数十 ms | 低（手書きの mode の時だけ）。記録だけ |
++| 11 | blocking の AF_UNIX `connect`: audiod（`audio-zedbsd.c:318`）・networkd（`network-zedbsd.c:545`）・bluetoothd（`bluetooth-zedbsd.c:666`）・phone（`phone-zedbsd.c:952`）・volumed（`volume-zedbsd.c:289`） | daemon の accept（kernel の `unix-socket.c:2173-2216`: backlog が満ちると accept まで待つ） | 1〜30 s ごとの再接続・scan・要求 | 通常 µs、daemon が accept を止めると無限 | 案 G（中）: 非 blocking の connect と poll の集合 |
++| 12 | networkd の frame の残りの timed read（`protocol.c:305`、header は 1 byte ずつ、2 s の期限）: `network-zedbsd.c:679/854/903` | 最初の byte の後の frame の残り | 毎 pass（state・scan・答え） | 通常 sub-ms、networkd が frame を途中で止めると 2 s（watch・request・scan で最大 約 6 s） | 案 G と一緒（frame を pass をまたいで組み立てる） |
++| 13 | `printers.conf` の `stat`（`print.c:399`）と mtime の変化での読み直し | path の lookup | printers の object の後は毎 pass | µs | 不要 |
++| 14 | stdout（行 buffer、session の log の file）の `write` | file の write | log の行ごと（KWL PERF 5 s ごと、`--log-frames` で frame ごと） | 通常 µs。volume 全体の flush の後ろで待つかは未確認 | 不要（未確認として記録） |
++| 15 | その他の GPU の同期: cursor の形の初回（`cursor.c:759`）、cursor plane の copy（`cursor-plane.c:644`）、import の layout（`import.c:310/365`）、buffer の import（`gpu-buffer-zedbsd.c:514-582`）、retire（`objects.c:682`） | frame の完了、driver の import の ioctl | 初回・新しい buffer（resize で swapchain の作り直し） | 約 1 frame、import 0.1〜2 ms | 低。記録だけ |
++| 16 | `kwl_cursor_plane_hold` → `cursor-thread.c:339`（2000 ms まで） | cursor thread の fence の待ち（100 ms まで） | game mode に入る・sleep | 100 ms まで | 低 |
++| 17 | 電源の読み直し `kwl_power_read`（`backend-host.c:435`: `/dev/system` の ioctl は kernel の写しで速い、`getpwuid`・`getgrnam` が /etc/passwd・/etc/group を読む `power-zedbsd.c:321-324`）。`backend-host.c:212` は poll_done の中から `kwl_schedule` を呼ぶ | 小さな file の read | AC・battery の event（battery の % の段） | 1 ms 未満 | 不要 |
++| 18 | backlight の ioctl（`backlight-zedbsd.c:92/122`、i915 の旧い経路は i915 の worker で GPU の batch の後ろ） | register の書き込み、i915 の worker | brightness の slider、lid、idle | xd9 は µs、旧い i915 は 5〜50 ms（見積り） | 低（RDNA に無い、user の操作） |
++| 19 | 小さな file の read（言語の catalog・ssh の host key・MMS の本文 16 MiB まで・media の stat と spool の write） | disk | user の操作 | ms〜数十 ms（MMS 16 MiB） | 低。記録だけ |
++| 20 | wl_shm の行の copy（`shm.c:723-724`） | memory の帯域 | shm の commit（damage の行） | 1080p 全面 約 8 MB で 2〜10 ms | 低（X11 の app の時）。案 B と一緒に考える |
++
++- 起動と終了だけ（frame に効かない）: `kl_backend_session_ready` の GO の待ち（20 s まで、`session-zedbsd.c:182`）、設定の file の読み込み、
++  font・atlas の作成、終了の時の settings の fsync・thread の join・`vkDeviceWaitIdle`。
++
++### 直した物・直さなかった物
++
++- 直した: 1（input の検出と close）。
++- 案（設計が変わる、Q1 に送って判断を待つ）: 2（direct scanout の出入り）、3（shm の GPU の待ち）、4（displays.conf の fsync）、5（予備の
++  font の先読み）、6（fork）、11・12（daemon の接続と networkd の frame）、9（clipboard の spin、小）。
++- 不要・低: 7・8・10・13〜20。通常の desktop の frame の間には起きないか、µs。
+diff --git a/plan/ws291/phase006/phase.md b/plan/ws291/phase006/phase.md
+index ee29d4810c..e510af1c85 100644
+--- a/plan/ws291/phase006/phase.md
++++ b/plan/ws291/phase006/phase.md
+@@ -1006,3 +1006,13 @@ Linux 6.12.5（/home/awe/visionfive-linux、GPL、値と手順の参照だけ）
+ - underflow: bench の間の guard の 5 回の読みで underflow=0・timing_underflow=0・hung=0、window の run の後の amdrdnactl status も 0。
+ - 機械の状態（23:40）: cfg amdrdna.smu.memory=2、kernel vmunix-m2j、/lib/libvulkan.so は 7650291df の build、/bin/wayland は b574fbf6a の build
+   （元は /bin/wayland.p2old）、/bin/mview は 10d72c341。
++
++## q1661（2026-10-29 P2、worktree p2-ws291i、基点 main b5f66af59）
++
++- ユーザーの指示（Q1 経由、原文）「Keilandの直し方ですが、デバイスの検出はスレッドに追い出してください。他にもメインループにそういったブロッキング要素がないかチェックしてください。」
++- 結果は [keiland-blocking.md](../keiland-blocking.md): input の device の検出（/dev/input の scan・open・capability の ioctl・close）を zedBSD の
++  backend の worker thread に（3d9306f02）。b574fbf6a の「開けなかった node を覚える」は thread の中の無駄な再試行を減らす工夫として残した。
++  RDNA の実機で window HITCH 0、game は run の開始の 1 回だけ、hotplug と client への入力を確かめた。Venus の回帰 PASS。
++- main loop の blocking の点検の表（20 項目）と、設計の変わる直しの案 A〜G は Q1 の判断待ち（同じ文書の 2 節）。
++- 機械の状態（00:11）: /bin/wayland は 3d9306f02 の build（元は /bin/wayland.p2b574）、他は「受け入れの評価」の節の終わりと同じ。
++
+diff --git a/plan/ws291/tests/input-worker/host-input-worker.c b/plan/ws291/tests/input-worker/host-input-worker.c
+new file mode 100644
+index 0000000000..1986812556
+--- /dev/null
++++ b/plan/ws291/tests/input-worker/host-input-worker.c
+@@ -0,0 +1,601 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The host test of the zedBSD backend's input devices' thread
++ * (libkeiland-backend-zedbsd/input-zedbsd.c): backend.c, events-zedbsd.c
++ * and input-zedbsd.c on the host, with /dev/input faked by the linker's
++ * --wrap of opendir, readdir, closedir, open, ioctl and close:
++ *   event0  a keyboard (EV_KEY with KEY_A and KEY_Z), opens at once;
++ *   event4  a PS/2 mouse port without a mouse: the open waits 80 ms and
++ *           fails with EIO;
++ *   event5  a node the compositor does not keep (EV_SYN only).
++ * It checks:
++ *   - kl_backend_input_scan and every kl_backend_poll_done return in a few
++ *     milliseconds while the thread waits on event4;
++ *   - the keyboard is offered on the main thread through the poll, event5
++ *     is offered and closed by the thread, never by the main thread;
++ *   - a later scan does not open event0 (read) or event4 (refused) again,
++ *     and opens event5 again;
++ *   - kl_backend_input_devices_changed makes the next scan try event4
++ *     again; without the system's events every scan tries it;
++ *   - kl_backend_input_close is done by the thread;
++ *   - when the thread cannot start, the scan offers the devices from its
++ *     own call;
++ *   - kl_backend_close ends the thread (the sanitizers see no leak).
++ *
++ *   sh plan/ws291/tests/input-worker/run.sh [build-dir]
++ */
++
++#include "userland/desktop/libkeiland-backend/backend-private.h"
++#include "userland/desktop/libkeiland-backend/keiland-backend-evdev.h"
++
++#include <dirent.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <pthread.h>
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <time.h>
++#include <unistd.h>
++
++/* The fake nodes. */
++#define FAKE_NODES	3U
++#define FAKE_KEYBOARD	0U
++#define FAKE_MOUSE	1U
++#define FAKE_OTHER	2U
++
++/* How long event4's open waits, and the longest a main-thread call may take (microseconds). */
++#define FAKE_MOUSE_WAIT_US	80000U
++#define MAIN_CALL_MAX_US	5000U
++
++/* The bits of a bitmap of unsigned longs. */
++#define BITS_PER_LONG	(8U * sizeof(unsigned long))
++
++/* One fake node: its name, how often it was opened and closed, and on which thread it was closed. */
++struct fake_node {
++	const char *name;
++	unsigned long node;
++	int opens;
++	int closes;
++	int closes_on_main;
++	int descriptor;
++};
++
++/* What the compositor's callbacks keep. */
++struct seat {
++	int keyboard;
++	int offers;
++	int offers_off_main;
++	char keyboard_path[KL_BACKEND_INPUT_PATH_MAX];
++};
++
++/* The real functions the wrappers call. */
++int __real_open(const char *path, int flags, ...);
++int __real_close(int descriptor);
++int __real_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*start)(void *), void *argument);
++
++/* The wrappers the linker puts in place of the backend's calls. */
++DIR *__wrap_opendir(const char *path);
++struct dirent *__wrap_readdir(DIR *directory);
++int __wrap_closedir(DIR *directory);
++int __wrap_open(const char *path, int flags, ...);
++int __wrap_ioctl(int descriptor, unsigned long request, ...);
++int __wrap_close(int descriptor);
++int __wrap_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*start)(void *), void *argument);
++
++static int input_known(void *data, const char *path);
++static int input_found(void *data, int descriptor, const char *path, const struct kl_backend_input_caps *caps);
++static void check(int condition, const char *what);
++static uint64_t now_us(void);
++static struct fake_node *node_by_descriptor(int descriptor);
++static void set_bit(unsigned long *bits, unsigned bit);
++static int poll_until(struct kl_backend *backend, struct seat *seat, int keyboard, uint64_t limit_us);
++static void wait_quiet(struct kl_backend *backend, struct seat *seat);
++static void reset_counts(void);
++static int fake_read(const int *field);
++static struct kl_backend *open_backend(struct seat *seat, struct kl_backend_host *host);
++
++/* The fake nodes, guarded by fake_lock (the thread and the main thread both touch them). */
++static struct fake_node fake_nodes[FAKE_NODES] = {
++	{ "event0", 0, 0, 0, 0, -1 },
++	{ "event4", 4, 0, 0, 0, -1 },
++	{ "event5", 5, 0, 0, 0, -1 },
++};
++static pthread_mutex_t fake_lock = PTHREAD_MUTEX_INITIALIZER;
++
++/* The fake directory's place in its listing, and the entry readdir returns. */
++static int fake_directory;
++static unsigned fake_cursor;
++static struct dirent fake_entry;
++
++/* The main thread, and whether pthread_create is to fail. */
++static pthread_t main_thread;
++static int create_fails;
++
++/* The longest main-thread call measured, the checks that failed and those that ran. */
++static uint64_t main_call_max_us;
++static int failures;
++static int checks;
++
++/* Runs the checks. */
++int
++main(void)
++{
++	struct kl_backend_host host;
++	struct kl_backend *backend;
++	struct seat seat;
++	int pipes[2];
++	uint64_t start;
++	uint64_t spent;
++	int found;
++	int error;
++
++	/* The main thread is the event loop's. */
++	main_thread = pthread_self();
++
++	/* A backend whose system's events are a quiet pipe, so refusals are remembered. */
++	backend = open_backend(&seat, &host);
++	error = pipe(pipes);
++	check(error == 0, "pipe");
++	(void)fcntl(pipes[0], F_SETFL, O_NONBLOCK);
++	backend->events_descriptor = pipes[0];
++
++	/* The first scan returns at once though event4 waits 80 ms. */
++	start = now_us();
++	kl_backend_input_scan(backend);
++	spent = now_us() - start;
++	check(spent < MAIN_CALL_MAX_US, "scan returns at once");
++	check(seat.keyboard == 0, "nothing offered from the scan's call");
++
++	/* The keyboard comes through the poll, every poll_done short. */
++	found = poll_until(backend, &seat, 1, 2000000U);
++	check(found, "keyboard offered through the poll");
++	check(seat.offers_off_main == 0, "offers on the main thread");
++	wait_quiet(backend, &seat);
++	check(fake_read(&fake_nodes[FAKE_KEYBOARD].opens) == 1, "event0 opened once");
++	check(fake_read(&fake_nodes[FAKE_MOUSE].opens) == 1, "event4 tried once");
++	check(fake_read(&fake_nodes[FAKE_OTHER].opens) == 1, "event5 opened once");
++	check(fake_read(&fake_nodes[FAKE_OTHER].closes) == 1, "event5 closed (not kept)");
++	check(fake_read(&fake_nodes[FAKE_OTHER].closes_on_main) == 0, "event5 closed off the main thread");
++	check(main_call_max_us < MAIN_CALL_MAX_US, "every poll_done short");
++
++	/* A second scan passes the keyboard and the refused port by. */
++	kl_backend_input_scan(backend);
++	wait_quiet(backend, &seat);
++	check(fake_read(&fake_nodes[FAKE_KEYBOARD].opens) == 1, "event0 not opened again");
++	check(fake_read(&fake_nodes[FAKE_MOUSE].opens) == 1, "event4 not tried again");
++	check(fake_read(&fake_nodes[FAKE_OTHER].opens) == 2, "event5 offered again");
++	check(seat.keyboard == 1, "one keyboard");
++
++	/* A device came or went: the port is tried again. */
++	kl_backend_input_devices_changed(backend);
++	kl_backend_input_scan(backend);
++	wait_quiet(backend, &seat);
++	check(fake_read(&fake_nodes[FAKE_MOUSE].opens) == 2, "event4 tried after a device's event");
++
++	/* Without the system's events every scan tries it. */
++	backend->events_descriptor = -1;
++	kl_backend_input_scan(backend);
++	wait_quiet(backend, &seat);
++	kl_backend_input_scan(backend);
++	wait_quiet(backend, &seat);
++	check(fake_read(&fake_nodes[FAKE_MOUSE].opens) == 4, "event4 tried at each scan without the events");
++	check(main_call_max_us < MAIN_CALL_MAX_US, "every poll_done short (later scans)");
++
++	/* The compositor gives the keyboard back: the thread closes it. */
++	kl_backend_input_close(backend, fake_read(&fake_nodes[FAKE_KEYBOARD].descriptor));
++	seat.keyboard = 0;
++	wait_quiet(backend, &seat);
++	check(fake_read(&fake_nodes[FAKE_KEYBOARD].closes) == 1, "keyboard closed");
++	check(fake_read(&fake_nodes[FAKE_KEYBOARD].closes_on_main) == 0, "keyboard closed off the main thread");
++
++	/* The backend closes; the thread ends. */
++	kl_backend_close(backend);
++	(void)__real_close(pipes[1]);
++
++	/* Without the thread the scan offers the devices from its call. */
++	reset_counts();
++	create_fails = 1;
++	backend = open_backend(&seat, &host);
++	kl_backend_input_scan(backend);
++	check(seat.keyboard == 1, "keyboard offered from the scan's call without the thread");
++	check(kl_backend_poll_count(backend) == 0, "no pipe in the poll without the thread");
++	check(fake_read(&fake_nodes[FAKE_OTHER].closes) == 1, "event5 closed in the call without the thread");
++	kl_backend_input_close(backend, fake_read(&fake_nodes[FAKE_KEYBOARD].descriptor));
++	check(fake_read(&fake_nodes[FAKE_KEYBOARD].closes) == 1, "keyboard closed in the call without the thread");
++	kl_backend_close(backend);
++
++	/* The verdict. */
++	printf("host-input-worker: %d checks, %d failed, longest main-thread call %llu us\n", checks, failures, (unsigned long long)main_call_max_us);
++	if (failures != 0) {
++		printf("host-input-worker: FAIL\n");
++		return 1;
++	}
++
++	/* Succeeded: every check held. */
++	printf("host-input-worker: PASS\n");
++	return 0;
++}
++
++/* Opens a backend whose host keeps the devices in seat. */
++static struct kl_backend *
++open_backend(
++	struct seat *seat,
++	struct kl_backend_host *host)
++{
++	struct kl_backend_options options;
++	struct kl_backend *backend;
++	int error;
++
++	/* The callbacks. */
++	memset(seat, 0, sizeof(*seat));
++	memset(host, 0, sizeof(*host));
++	memset(&options, 0, sizeof(options));
++	host->data = seat;
++	host->input_known = input_known;
++	host->input_found = input_found;
++
++	/* The backend. */
++	backend = NULL;
++	error = kl_backend_open(&options, host, &backend);
++	check(error == 0, "kl_backend_open");
++	if (error != 0)
++		exit(1);
++
++	/* Succeeded. */
++	return backend;
++}
++
++/* Polls the backend's descriptors until the keyboard count is reached or the limit passes; times each poll_done. */
++static int
++poll_until(
++	struct kl_backend *backend,
++	struct seat *seat,
++	int keyboard,
++	uint64_t limit_us)
++{
++	struct pollfd descriptors[8];
++	uint64_t start;
++	uint64_t mark;
++	uint64_t spent;
++	size_t count;
++
++	/* Each pass like the event loop's: count, fill, poll 10 ms, done. */
++	start = now_us();
++	while (now_us() - start < limit_us) {
++		count = kl_backend_poll_count(backend);
++		if (count > 8U)
++			return 0;
++		memset(descriptors, 0, sizeof(descriptors));
++		kl_backend_poll_fill(backend, descriptors);
++		(void)poll(descriptors, count, 10);
++		mark = now_us();
++		kl_backend_poll_done(backend, descriptors);
++		spent = now_us() - mark;
++		if (spent > main_call_max_us)
++			main_call_max_us = spent;
++		if (seat->keyboard >= keyboard)
++			return 1;
++	}
++
++	/* The limit passed. */
++	return 0;
++}
++
++/* Polls for a while longer than the thread's slowest scan, so everything asked is done. */
++static void
++wait_quiet(
++	struct kl_backend *backend,
++	struct seat *seat)
++{
++	/* 300 ms covers the 80 ms open with room. */
++	(void)poll_until(backend, seat, 1000, 300000U);
++}
++
++/* Forgets the counts of the fake nodes. */
++static void
++reset_counts(void)
++{
++	unsigned index;
++
++	/* Each node. */
++	for (index = 0; index < FAKE_NODES; index++) {
++		fake_nodes[index].opens = 0;
++		fake_nodes[index].closes = 0;
++		fake_nodes[index].closes_on_main = 0;
++		fake_nodes[index].descriptor = -1;
++	}
++}
++
++/* Reads a fake node's count or descriptor under the lock the thread writes it under. */
++static int
++fake_read(
++	const int *field)
++{
++	int value;
++
++	pthread_mutex_lock(&fake_lock);
++	value = *field;
++	pthread_mutex_unlock(&fake_lock);
++	return value;
++}
++
++/* The compositor reads the keyboard once it kept it. */
++static int
++input_known(
++	void *data,
++	const char *path)
++{
++	struct seat *seat;
++
++	/* Only the kept keyboard is read. */
++	seat = data;
++	if (seat->keyboard > 0 && strcmp(path, seat->keyboard_path) == 0)
++		return 1;
++	return 0;
++}
++
++/* Keeps a node with EV_KEY; anything else is left to the backend to close. */
++static int
++input_found(
++	void *data,
++	int descriptor,
++	const char *path,
++	const struct kl_backend_input_caps *caps)
++{
++	struct seat *seat;
++
++	/* Counted, and the thread noted. */
++	(void)descriptor;
++	seat = data;
++	seat->offers++;
++	if (!pthread_equal(pthread_self(), main_thread))
++		seat->offers_off_main++;
++
++	/* A keyboard is kept. */
++	if ((caps->event[0] & (1UL << EV_KEY)) == 0U)
++		return 0;
++	seat->keyboard++;
++	snprintf(seat->keyboard_path, sizeof(seat->keyboard_path), "%s", path);
++	return 1;
++}
++
++/* The fake /dev/input. */
++DIR *
++__wrap_opendir(
++	const char *path)
++{
++	/* Only /dev/input is faked. */
++	if (strcmp(path, "/dev/input") != 0) {
++		errno = ENOENT;
++		return NULL;
++	}
++
++	/* A listing from the start. */
++	fake_cursor = 0;
++	return (DIR *)&fake_directory;
++}
++
++/* The fake listing: ".", then the nodes. */
++struct dirent *
++__wrap_readdir(
++	DIR *directory)
++{
++	/* The listing ends after the nodes. */
++	if (directory != (DIR *)&fake_directory)
++		return NULL;
++	if (fake_cursor > FAKE_NODES)
++		return NULL;
++
++	/* "." first, which is no node. */
++	memset(&fake_entry, 0, sizeof(fake_entry));
++	if (fake_cursor == 0)
++		snprintf(fake_entry.d_name, sizeof(fake_entry.d_name), ".");
++	else
++		snprintf(fake_entry.d_name, sizeof(fake_entry.d_name), "%s", fake_nodes[fake_cursor - 1U].name);
++	fake_cursor++;
++	return &fake_entry;
++}
++
++/* Ends the fake listing. */
++int
++__wrap_closedir(
++	DIR *directory)
++{
++	(void)directory;
++	return 0;
++}
++
++/* Opens a fake node (a descriptor of /dev/null), event4 after its wait and with EIO. */
++int
++__wrap_open(
++	const char *path,
++	int flags,
++	...)
++{
++	struct fake_node *node;
++	unsigned index;
++	int descriptor;
++	va_list arguments;
++	int mode;
++
++	/* Anything else is the real file. */
++	if (strncmp(path, "/dev/input/", 11) != 0) {
++		va_start(arguments, flags);
++		mode = va_arg(arguments, int);
++		va_end(arguments);
++		return __real_open(path, flags, mode);
++	}
++
++	/* The node by its name. */
++	node = NULL;
++	for (index = 0; index < FAKE_NODES; index++) {
++		if (strcmp(path + 11, fake_nodes[index].name) == 0)
++			node = &fake_nodes[index];
++	}
++	if (node == NULL) {
++		errno = ENOENT;
++		return -1;
++	}
++
++	/* Counted. */
++	pthread_mutex_lock(&fake_lock);
++	node->opens++;
++	pthread_mutex_unlock(&fake_lock);
++
++	/* The port without a mouse answers only after its timeout. */
++	if (node == &fake_nodes[FAKE_MOUSE]) {
++		usleep(FAKE_MOUSE_WAIT_US);
++		errno = EIO;
++		return -1;
++	}
++
++	/* Any other node is a descriptor of /dev/null. */
++	descriptor = __real_open("/dev/null", O_RDONLY | O_CLOEXEC);
++	pthread_mutex_lock(&fake_lock);
++	node->descriptor = descriptor;
++	pthread_mutex_unlock(&fake_lock);
++	return descriptor;
++}
++
++/* Answers the capability ioctls of a fake node. */
++int
++__wrap_ioctl(
++	int descriptor,
++	unsigned long request,
++	...)
++{
++	struct fake_node *node;
++	unsigned long *bits;
++	va_list arguments;
++	unsigned number;
++	size_t size;
++
++	/* The bitmap's address. */
++	va_start(arguments, request);
++	bits = va_arg(arguments, unsigned long *);
++	va_end(arguments);
++
++	/* Only the fake nodes answer. */
++	node = node_by_descriptor(descriptor);
++	if (node == NULL || _IOC_TYPE(request) != 'E') {
++		errno = ENOTTY;
++		return -1;
++	}
++
++	/* Empty unless set below. */
++	number = _IOC_NR(request);
++	size = _IOC_SIZE(request);
++	memset(bits, 0, size);
++
++	/* EVIOCGBIT(0): the event types; EVIOCGBIT(EV_KEY): the keys. */
++	if (number == 0x20U) {
++		set_bit(bits, EV_SYN);
++		if (node == &fake_nodes[FAKE_KEYBOARD])
++			set_bit(bits, EV_KEY);
++	} else if (number == 0x20U + EV_KEY && node == &fake_nodes[FAKE_KEYBOARD]) {
++		set_bit(bits, KEY_A);
++		set_bit(bits, KEY_Z);
++	}
++
++	/* Succeeded. */
++	return (int)size;
++}
++
++/* Closes a descriptor, counting the fake nodes' closes and their thread. */
++int
++__wrap_close(
++	int descriptor)
++{
++	struct fake_node *node;
++
++	/* A fake node's close is counted. */
++	node = node_by_descriptor(descriptor);
++	if (node != NULL) {
++		pthread_mutex_lock(&fake_lock);
++		node->closes++;
++		if (pthread_equal(pthread_self(), main_thread))
++			node->closes_on_main++;
++		node->descriptor = -1;
++		pthread_mutex_unlock(&fake_lock);
++	}
++
++	/* The real close. */
++	return __real_close(descriptor);
++}
++
++/* Starts a thread, or fails when the test asks it to. */
++int
++__wrap_pthread_create(
++	pthread_t *thread,
++	const pthread_attr_t *attributes,
++	void *(*start)(void *),
++	void *argument)
++{
++	/* The failure the fallback's check asks for. */
++	if (create_fails)
++		return EAGAIN;
++
++	/* The real thread. */
++	return __real_pthread_create(thread, attributes, start, argument);
++}
++
++/* The fake node a descriptor is open on, or NULL. */
++static struct fake_node *
++node_by_descriptor(
++	int descriptor)
++{
++	struct fake_node *node;
++	unsigned index;
++
++	/* Each node's latest descriptor. */
++	node = NULL;
++	pthread_mutex_lock(&fake_lock);
++	for (index = 0; index < FAKE_NODES; index++) {
++		if (descriptor >= 0 && fake_nodes[index].descriptor == descriptor)
++			node = &fake_nodes[index];
++	}
++	pthread_mutex_unlock(&fake_lock);
++	return node;
++}
++
++/* Sets one bit of a bitmap of unsigned longs. */
++static void
++set_bit(
++	unsigned long *bits,
++	unsigned bit)
++{
++	bits[bit / BITS_PER_LONG] |= 1UL << (bit % BITS_PER_LONG);
++}
++
++/* The monotonic clock in microseconds. */
++static uint64_t
++now_us(void)
++{
++	struct timespec now;
++
++	clock_gettime(CLOCK_MONOTONIC, &now);
++	return (uint64_t)now.tv_sec * 1000000U + (uint64_t)now.tv_nsec / 1000U;
++}
++
++/* Counts a check and reports a failure. */
++static void
++check(
++	int condition,
++	const char *what)
++{
++	checks++;
++	if (condition)
++		return;
++	failures++;
++	printf("FAIL: %s\n", what);
++}
+diff --git a/plan/ws291/tests/input-worker/run.sh b/plan/ws291/tests/input-worker/run.sh
+new file mode 100644
+index 0000000000..2d54ab1de9
+--- /dev/null
++++ b/plan/ws291/tests/input-worker/run.sh
+@@ -0,0 +1,21 @@
++#!/bin/sh
++# Builds and runs the host test of the zedBSD backend's input devices' thread: libkeiland-backend's backend.c, the zedBSD
++# events-zedbsd.c and input-zedbsd.c on the host, with /dev/input faked by the linker's --wrap, under the sanitizers.
++#   sh plan/ws291/tests/input-worker/run.sh [build-dir]
++# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
++set -eu
++cd "$(dirname -- "$0")/../../../.."
++out=${1:-build/ws291/host-input-worker}
++mkdir -p "$out"
++wraps="-Wl,--wrap=opendir -Wl,--wrap=readdir -Wl,--wrap=closedir -Wl,--wrap=open -Wl,--wrap=ioctl -Wl,--wrap=close -Wl,--wrap=pthread_create"
++for sanitizer in address,undefined thread; do
++	${CC:-cc} -std=gnu89 -Wall -Wextra -Werror -D_GNU_SOURCE -I. -Iinclude -fsanitize=$sanitizer -g -pthread \
++	    userland/desktop/libkeiland-backend/backend.c userland/desktop/libkeiland-backend/session/session-none.c \
++	    userland/desktop/libkeiland-backend/unsupported/seat-unsupported.c \
++	    userland/desktop/libkeiland-backend/unsupported/notify-unsupported.c \
++	    userland/desktop/libkeiland-backend-zedbsd/events-zedbsd.c \
++	    userland/desktop/libkeiland-backend-zedbsd/input-zedbsd.c \
++	    plan/ws291/tests/input-worker/host-input-worker.c $wraps -o "$out/host-input-worker-${sanitizer%%,*}"
++	echo "== sanitizer $sanitizer"
++	"$out/host-input-worker-${sanitizer%%,*}"
++done
+diff --git a/plan/ws291/tests/kw2-check.sh b/plan/ws291/tests/kw2-check.sh
+new file mode 100644
+index 0000000000..c267a3c9f8
+--- /dev/null
++++ b/plan/ws291/tests/kw2-check.sh
+@@ -0,0 +1,102 @@
++#!/bin/sh
++# ws291: the compositor whose input devices are found by the backend's own thread, on the RDNA machine, from the host
++# at the top of the tree, in one command: the compositor put in (with "deploy"; the machine's one kept as
++# /bin/wayland.p2b574 once), then
++#   1. the devices found at start-up (the compositor's KWL INPUT lines) and no KL INPUT worker failure;
++#   2. mview's stops (MVIEW HITCH, frames over 33 ms) in window mode (FIFO, 1 and 1500 copies) and game mode (mailbox,
++#      four images, 1 copy), 12 s each;
++#   3. the devices that come later: aat-input's pointer, tablet pointer and keyboard appear (the system's INPUT event,
++#      the thread's scan), and their drag, click, wheel and keys reach a client (mview's MVIEW INPUT lines); then they go
++#      (KWL INPUT_CLOSED);
++#   4. the compositor's slow passes (KWL SLOW_PASS) and its longest pass (KWL PERF main) of the whole run.
++# Long logs stay in OUT; the summary is printed.
++#   usage: plan/ws291/tests/kw2-check.sh OUT [deploy]
++# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
++set -u
++out=${1:?usage: kw2-check.sh OUT [deploy]}
++mkdir -p "$out"
++top=$(pwd)
++m=plan/tools/gpu-perf/measure.sh
++. plan/tools/gpu-perf/conf.sh
++KEY=${KEY:-$top/plan/tmp/guest/id_ed25519}
++mkdir -p "$top/build/tmp"
++ZSSHOPT="-o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ControlMaster=auto -o ControlPath=$top/build/tmp/ssh-%h -o ControlPersist=600"
++SESSION=/run/user/1000/session.log
++WAYLAND=${WAYLAND:-$PERF_BUILD/usb/bin/wayland}
++
++zs() {
++	timeout "${ZS_TIMEOUT:-60}" ssh -i "$KEY" $ZSSHOPT "root@$ip" "$@"
++}
++
++# The compositor put in, the machine's own kept once.
++if [ "${2:-}" = deploy ]; then
++	ip=$(sh "$m" zedbsd) || { echo "kw2: zedBSD not reached"; exit 1; }
++	zs "[ -f /bin/wayland.p2b574 ] || cp /bin/wayland /bin/wayland.p2b574; sync" || exit 1
++	timeout 1500 sh "$m" deploy "/bin/wayland=$WAYLAND" > "$out/deploy.out" 2>&1 || { tail -3 "$out/deploy.out"; echo "kw2: deploy failed"; exit 1; }
++fi
++ip=$(sh "$m" zedbsd) || { echo "kw2: zedBSD not reached"; exit 1; }
++here=$(wc -c < "$WAYLAND")
++there=$(zs "wc -c < /bin/wayland")
++echo "kw2: /bin/wayland bytes $there (build $here)"
++
++# 1. The devices of the start-up.
++zs "grep -E 'KWL INPUT|KL INPUT|KL EVENTS|KWL READY' $SESSION" > "$out/boot-input.txt"
++echo "kw2: start-up devices: $(grep -c 'KWL INPUT device' "$out/boot-input.txt"), worker failures: $(grep -c 'KL INPUT worker' "$out/boot-input.txt")"
++grep 'KWL INPUT device' "$out/boot-input.txt" | sed 's/^/  /'
++
++# 2. mview's stops (KW2_STEPS=hotplug leaves them out).
++for run in "win1|--spin=12" "win1500|--spin=12 --copies=1500" "game1|--spin=12 --content=game --present=mailbox --images=4"; do
++	[ "${KW2_STEPS:-all}" = hotplug ] && break
++	name=${run%%|*}
++	options=${run#*|}
++	timeout 300 sh "$m" mview "$out/$name" $options > "$out/$name.out" 2>&1
++	spin=$(grep -m1 'MVIEW SPIN' "$out/$name/mview.log" 2>/dev/null | grep -o 'fps=[0-9.]*')
++	hitches=$(grep -h 'MVIEW HITCHES' "$out/$name/mview.log" 2>/dev/null | tail -1 | grep -o 'hitches=[0-9]*')
++	frames=$(grep -h 'MVIEW HITCH run' "$out/$name/mview.log" 2>/dev/null | sed 's/.*frame=\([0-9]*\) ms=\([0-9.]*\).*/\1:\2/' | tr '\n' ' ')
++	echo "kw2: $name $spin $hitches [$frames]"
++done
++
++# 3. The devices that come later, and their input in a client: the script runs on its own on zedBSD (its sshd leaves
++# long sessions stuck now and then, BUG-346) and its output is fetched when it is done.
++zs "cat > /tmp/kw2.sh && rm -f /tmp/kw2.done /tmp/kw2.out && { (sh /tmp/kw2.sh > /tmp/kw2.out 2>&1; echo \$? > /tmp/kw2.done) > /dev/null 2>&1 < /dev/null & }" <<'EOS'
++S=/run/user/1000/session.log
++/bin/aat-input stop > /dev/null 2>&1
++sleep 2
++n=$(wc -l < $S)
++rm -f /tmp/kw2-mview.log
++su kei -c 'env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 /bin/mview --token=kw2 --timeout-s=20' > /tmp/kw2-mview.log 2>&1 < /dev/null &
++sleep 3
++/bin/aat-input start --width 1920 --height 1080 > /tmp/kw2-aat.out 2>&1
++tail -1 /tmp/kw2-aat.out
++sleep 3
++/bin/aat-input move-to 400 300
++/bin/aat-input move-to 900 600
++/bin/aat-input click 960 540
++/bin/aat-input key left
++/bin/aat-input key equal
++/bin/aat-input drag 700 400 900 500 5
++/bin/aat-input wheel 1
++sleep 2
++/bin/aat-input stop > /tmp/kw2-aat.out 2>&1
++tail -1 /tmp/kw2-aat.out
++sleep 2
++wait
++echo "== compositor"
++tail -n +$n $S | grep -E 'KWL INPUT|KWL EVENT|KL INPUT|KWL CURSOR shown'
++echo "== client"
++grep -c 'MVIEW INPUT run=kw2 kind=motion' /tmp/kw2-mview.log | sed 's/^/motion /'
++grep -c 'MVIEW INPUT run=kw2 kind=button' /tmp/kw2-mview.log | sed 's/^/button /'
++grep -c 'MVIEW INPUT run=kw2 kind=axis' /tmp/kw2-mview.log | sed 's/^/axis /'
++grep 'MVIEW INPUT run=kw2 kind=key' /tmp/kw2-mview.log | head -6
++EOS
++end=$(($(date +%s) + 120))
++while [ "$(date +%s)" -lt $end ]; do
++	sleep 3
++	ZS_TIMEOUT=15 zs "test -f /tmp/kw2.done" < /dev/null 2> /dev/null && break
++done
++zs "cat /tmp/kw2.out" > "$out/hotplug.txt" 2>&1 < /dev/null
++echo "kw2: hotplug: attached $(grep -c 'KWL INPUT device' "$out/hotplug.txt"), closed $(grep -c 'KWL INPUT_CLOSED' "$out/hotplug.txt"), $(grep -E '^(motion|button|axis) ' "$out/hotplug.txt" | tr '\n' ' ')keys $(grep -c 'MVIEW INPUT run=kw2 kind=key' "$out/hotplug.txt")"
++
++# 4. The compositor's passes over the whole run.
++zs "grep -E 'KWL SLOW_PASS|KWL PERF (main|pass)' $SESSION" > "$out/passes.txt"
++echo "kw2: slow passes $(grep -c 'KWL SLOW_PASS' "$out/passes.txt"); longest pass of the last PERF windows: $(grep 'KWL PERF pass' "$out/passes.txt" | grep -o 'pass_max_us=[0-9]*' | tail -5 | tr '\n' ' ')"
+diff --git a/plan/ws291/ws.md b/plan/ws291/ws.md
+index f2bab2ab1e..f94d3dcd0a 100644
+--- a/plan/ws291/ws.md
++++ b/plan/ws291/ws.md
+@@ -154,3 +154,10 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps
+   変えていない。venus-reg PASS、arm64・riscv64 の libvulkan と Keiland warning 0。評価: scene-6500 49.2 fps（Linux 50.1、fence は同じ 19.5 ms）、
+   scene-1500 201.8（Linux 200.4）、big・subs は Linux の 1/3〜1/10（[phase006](phase006/phase.md) の「受け入れの評価」）。次は案 4・5 を Q1 と相談。
+   別件（範囲外）: kernel の PS/2 の aux の node が mouse 無しで作られ open が 80 ms 待つ。
++
++## 2026-10-29 q1661（P2、worktree p2-ws291i）
++
++- ユーザーの指示（Q1 経由、原文）「Keilandの直し方ですが、デバイスの検出はスレッドに追い出してください。他にもメインループにそういったブロッキング要素がないかチェックしてください。」
++- 再開点（2026-10-29 00:11 P2）: [keiland-blocking.md](keiland-blocking.md)。input の検出の thread 化（3d9306f02）は実機と Venus で確かめた。
++  点検の表の案 A〜G（direct scanout の出入り、shm の GPU の待ち、displays.conf の fsync、予備の font、fork、daemon の接続、clipboard）は Q1 の判断待ち。
++
+diff --git a/userland/desktop/libkeiland-backend-zedbsd/events-zedbsd.c b/userland/desktop/libkeiland-backend-zedbsd/events-zedbsd.c
+index bae6d40674..6bedb51008 100644
+--- a/userland/desktop/libkeiland-backend-zedbsd/events-zedbsd.c
++++ b/userland/desktop/libkeiland-backend-zedbsd/events-zedbsd.c
+@@ -205,7 +205,7 @@ kl_backend_events_poll_done(
+ 	 * went may be one that refused to open, which the next scan tries again.
+ 	 */
+ 	if ((asked & EVENTS_INPUT) != 0U)
+-		memset(backend->input_refused, 0, sizeof(backend->input_refused));
++		kl_backend_input_devices_changed(backend);
+ 	if ((asked & EVENTS_INPUT) != 0U && backend->host.input_changed != NULL)
+ 		backend->host.input_changed(backend->host.data);
+ 	if ((asked & EVENTS_POWER) != 0U && backend->host.power_changed != NULL)
+diff --git a/userland/desktop/libkeiland-backend-zedbsd/input-zedbsd.c b/userland/desktop/libkeiland-backend-zedbsd/input-zedbsd.c
+index 2de8d1b491..672122f88f 100644
+--- a/userland/desktop/libkeiland-backend-zedbsd/input-zedbsd.c
++++ b/userland/desktop/libkeiland-backend-zedbsd/input-zedbsd.c
+@@ -8,12 +8,39 @@
+ /*
+  * The input devices on zedBSD (libkeiland-backend since ws131-p007): the
+  * evdev nodes opened directly (there is no seat service).
++ *
++ * The nodes are found, opened and closed by a thread of the backend's own,
++ * never by the compositor's event loop: an open or a close runs the
++ * driver's own start or stop, which can wait on the hardware (a PS/2 mouse
++ * port without a mouse answers EIO only after its timeout, tens of
++ * milliseconds), and the event loop must not miss a frame for it.
++ *
++ * The event loop asks for a scan (kl_backend_input_scan) with the nodes the
++ * compositor already reads; the thread lists /dev/input, opens every other
++ * eventN, reads its capability bitmaps and queues it, then writes a byte to
++ * its pipe, which is in the event loop's poll.  kl_backend_poll_done takes
++ * the queue and offers each device to the compositor (host input_found) on
++ * the event loop's thread, as before.  A descriptor the compositor gives
++ * back (kl_backend_input_close) or does not keep is queued for the thread
++ * to close.  The other ioctls the compositor asks of an open device (axes,
++ * name, identity) read the kernel's copy of the device's description and do
++ * not wait, so they stay in the compositor's calls.
++ *
++ * A node whose open failed with the device's own error is not opened again
++ * until the system's events tell of an input device that came or went
++ * (kl_backend_input_devices_changed): the thread would only wait on the
++ * same timeout every scan.  Without the system's events every node is
++ * tried at every scan.  Should the thread not start, the scan is done in
++ * the event loop's call as it was before.
+  */
+ #include "userland/desktop/libkeiland-backend/backend-private.h"
+ #include "userland/desktop/libkeiland-backend/keiland-backend-evdev.h"
+ #include <sys/ioctl.h>
+ #include <dirent.h>
+ #include <fcntl.h>
++#include <poll.h>
++#include <pthread.h>
++#include <signal.h>
+ #include <unistd.h>
+ #include <errno.h>
+ #include <stdio.h>
+@@ -23,77 +50,262 @@
+ /* The directory whose eventN nodes are the evdev devices. */
+ #define INPUT_DIRECTORY "/dev/input"
+ 
++/*
++ * The nodes whose state is kept in bit sets: /dev/input/eventN for N below
++ * 64 times INPUT_NODE_WORDS.  A node past them is opened at every scan and
++ * offered only when the compositor does not read it yet.
++ */
++#define INPUT_NODE_WORDS	4U
++#define INPUT_NODES		(64UL * INPUT_NODE_WORDS)
++
++/* The bytes the event loop reads from the thread's pipe at a time. */
++#define INPUT_WAKE_READ		64U
++
++/*
++ * One device the thread opened, waiting in the queue for the event loop to
++ * offer it to the compositor.  The queue owns the descriptor until then.
++ */
++struct input_found {
++	struct input_found *next;
++	int descriptor;
++	unsigned long node;
++	char path[KL_BACKEND_INPUT_PATH_MAX];
++	struct kl_backend_input_caps capabilities;
++};
++
++/*
++ * One descriptor the compositor gave back or did not keep, waiting for the
++ * thread to close it.  The list owns the descriptor until it is closed.
++ */
++struct input_closing {
++	struct input_closing *next;
++	int descriptor;
++};
++
++/*
++ * The thread that finds, opens and closes the input devices.
++ *
++ * Made at the first scan and freed when the backend closes.  lock guards
++ * every field between it and refused: what the event loop asks
++ * (scan_asked, stop_asked, forget_refused with refusals_kept), the nodes
++ * not to open (known: the compositor reads them; pending: opened and
++ * queued), the nodes the last scan listed (seen), and the two queues.
++ * refused belongs to whoever scans: the thread, or the event loop when
++ * there is no thread.  threaded and wake are set before the thread starts
++ * and not changed while it runs.
++ */
++struct kl_backend_input_worker {
++	pthread_mutex_t lock;
++	pthread_cond_t asked;
++	unsigned scan_asked;
++	unsigned stop_asked;
++	unsigned forget_refused;
++	unsigned refusals_kept;
++	uint64_t known[INPUT_NODE_WORDS];
++	uint64_t pending[INPUT_NODE_WORDS];
++	uint64_t seen[INPUT_NODE_WORDS];
++	struct input_found *found;
++	struct input_found **found_tail;
++	struct input_closing *closing;
++	uint64_t refused[INPUT_NODE_WORDS];
++	pthread_t thread;
++	unsigned threaded;
++	int wake[2];
++};
++
++static struct kl_backend_input_worker *worker_get(struct kl_backend *backend);
++static void worker_start(struct kl_backend_input_worker *worker);
++static void *worker_main(void *argument);
++static void known_snapshot(struct kl_backend *backend, struct kl_backend_input_worker *worker);
++static void scan_directory(struct kl_backend_input_worker *worker);
++static void probe_node(struct kl_backend_input_worker *worker, const char *path, unsigned long node, unsigned refusals_kept);
++static void deliver(struct kl_backend *backend, struct kl_backend_input_worker *worker);
++static void close_later(struct kl_backend_input_worker *worker, int descriptor);
++static void closings_run(struct input_closing *closing);
++static void wake_drain(int descriptor);
+ static int event_node_name(const char *name);
+-static int node_refused(const struct kl_backend *backend, unsigned long node);
+-static void probe_device(struct kl_backend *backend, const char *path, unsigned long node);
++static int node_marked(const uint64_t *words, unsigned long node);
++static void node_mark(uint64_t *words, unsigned long node);
++static void node_unmark(uint64_t *words, unsigned long node);
+ static int read_capabilities(int descriptor, struct kl_backend_input_caps *capabilities);
+ 
+ /*
+- * Opens every evdev pointer and keyboard not already open.
++ * Asks for every evdev pointer and keyboard not already open to be opened.
+  *
+- * A missing directory leaves the seat without devices; it is not an error.
+- * The event loop calls this periodically so late devices are picked up.
+- * A node whose open failed with the device's own error is passed by until
+- * the system's events tell of an input device that came or went
+- * (events-zedbsd.c forgets the refusals then).
++ * The event loop calls this at start-up, periodically, and soon after the
++ * system's event of a device.  The thread opens the nodes and the devices
++ * are offered from a later kl_backend_poll_done; without the thread they
++ * are offered from this call.  A missing directory leaves the seat
++ * without devices; it is not an error.
+  */
+ void
+ kl_backend_input_scan(
+ 	struct kl_backend *backend)
+ {
+-	DIR *directory;
+-	struct dirent *entry;
+-	char path[KL_BACKEND_INPUT_PATH_MAX];
+-	unsigned long node;
+-	int length;
+-	int valid;
+-	int refused;
+-	int open_already;
++	struct kl_backend_input_worker *worker;
+ 
+-	/* Without the directory there is nothing to read. */
+-	directory = opendir(INPUT_DIRECTORY);
+-	if (directory == NULL)
++	/* The thread, made at the first scan. */
++	worker = worker_get(backend);
++	if (worker == NULL)
+ 		return;
+ 
+-	/* Every eventN entry is a candidate device. */
+-	while (1) {
+-		/* The end of the directory ends the scan. */
+-		entry = readdir(directory);
+-		if (entry == NULL)
+-			break;
++	/* The nodes the compositor reads are passed by; the thread is asked to scan. */
++	known_snapshot(backend, worker);
+ 
+-		/* Only eventN nodes speak evdev. */
+-		valid = event_node_name(entry->d_name);
+-		if (!valid)
+-			continue;
++	/* With the thread, the devices come through the poll. */
++	if (worker->threaded)
++		return;
+ 
+-		/* A node that refused to open is not opened again while no device came or went. */
+-		node = strtoul(entry->d_name + 5, NULL, 10);
+-		refused = node_refused(backend, node);
+-		if (refused)
+-			continue;
++	/* Without it, the scan is done here and its devices offered at once. */
++	scan_directory(worker);
++	deliver(backend, worker);
+ 
+-		/* An overlong name cannot be an ordinary device node. */
+-		length = snprintf(path, sizeof(path), "%s/%s", INPUT_DIRECTORY, entry->d_name);
+-		if (length < 0 || (size_t)length >= sizeof(path))
+-			continue;
++	/* Succeeded: every present pointer and keyboard is open. */
++	return;
++}
+ 
+-		/* A node the compositor already reads is left alone. */
+-		open_already = 0;
+-		if (backend->host.input_known != NULL)
+-			open_already = backend->host.input_known(backend->host.data, path);
+-		if (open_already)
+-			continue;
++/*
++ * Tells the input devices' finding that a device came or went: the nodes
++ * that refused to open are tried again at the next scan.
++ */
++void
++kl_backend_input_devices_changed(
++	struct kl_backend *backend)
++{
++	struct kl_backend_input_worker *worker;
++
++	/* Before the first scan nothing has been refused. */
++	worker = backend->input_worker;
++	if (worker == NULL)
++		return;
++
++	/* forget_refused makes the next scan start from no refusals. */
++	pthread_mutex_lock(&worker->lock);
++
++	worker->forget_refused = 1U;
++
++	pthread_mutex_unlock(&worker->lock);
++}
++
++/*
++ * Counts the thread's pipe in the event loop's poll.
++ */
++size_t
++kl_backend_input_poll_count(
++	const struct kl_backend *backend)
++{
++	/* Only a running thread writes to its pipe. */
++	if (backend->input_worker == NULL)
++		return 0;
++	if (!backend->input_worker->threaded)
++		return 0;
++
++	/* Succeeded: the pipe is one descriptor. */
++	return 1;
++}
++
++/*
++ * Fills the thread's pipe into the event loop's poll.
++ */
++void
++kl_backend_input_poll_fill(
++	struct kl_backend *backend,
++	struct pollfd *descriptors)
++{
++	struct kl_backend_input_worker *worker;
++
++	/* Nothing counted, nothing filled. */
++	worker = backend->input_worker;
++	if (worker == NULL || !worker->threaded)
++		return;
++
++	/* The read end becomes readable when a device is queued. */
++	descriptors[0].fd = worker->wake[0];
++	descriptors[0].events = POLLIN;
++	descriptors[0].revents = 0;
++}
++
++/*
++ * Offers the devices the thread queued, when its pipe woke the poll.
++ */
++void
++kl_backend_input_poll_done(
++	struct kl_backend *backend,
++	const struct pollfd *descriptors)
++{
++	struct kl_backend_input_worker *worker;
++
++	/* Nothing counted, nothing to handle. */
++	worker = backend->input_worker;
++	if (worker == NULL || !worker->threaded)
++		return;
++
++	/* The pipe stayed quiet: nothing was queued. */
++	if ((descriptors[0].revents & POLLIN) == 0)
++		return;
++
++	/* The bytes are emptied before the queue is taken, so a later device wakes the next poll. */
++	wake_drain(worker->wake[0]);
++	deliver(backend, worker);
++}
++
++/*
++ * Ends the thread when the backend closes.
++ *
++ * The thread closes the descriptors given back before it ends; devices it
++ * opened that were never offered are closed here.
++ */
++void
++kl_backend_input_stop(
++	struct kl_backend *backend)
++{
++	struct kl_backend_input_worker *worker;
++	struct input_found *found;
++	struct input_found *next;
++	struct input_closing *closing;
++	unsigned index;
++
++	/* No scan, no thread. */
++	worker = backend->input_worker;
++	if (worker == NULL)
++		return;
++
++	/* The thread finishes what it does, closes the given-back descriptors and ends. */
++	if (worker->threaded) {
++		pthread_mutex_lock(&worker->lock);
+ 
+-		/* The compositor classifies the node and keeps it if it is a pointer or a keyboard. */
+-		probe_device(backend, path, node);
++		worker->stop_asked = 1U;
++		pthread_cond_signal(&worker->asked);
++
++		pthread_mutex_unlock(&worker->lock);
++
++		(void)pthread_join(worker->thread, NULL);
+ 	}
+ 
+-	/* The directory stream is no longer needed. */
+-	closedir(directory);
++	/* Devices never offered, and descriptors left to close (none once the thread ended). */
++	found = worker->found;
++	closing = worker->closing;
++	worker->found = NULL;
++	worker->closing = NULL;
++	while (found != NULL) {
++		next = found->next;
++		(void)close(found->descriptor);
++		free(found);
++		found = next;
++	}
+ 
+-	/* Succeeded: every present pointer and keyboard is open. */
+-	return;
++	closings_run(closing);
++
++	/* The pipe, the lock and the state. */
++	for (index = 0; index < 2U; index++) {
++		if (worker->wake[index] >= 0)
++			(void)close(worker->wake[index]);
++	}
++
++	pthread_cond_destroy(&worker->asked);
++	pthread_mutex_destroy(&worker->lock);
++	free(worker);
++	backend->input_worker = NULL;
+ }
+ 
+ /*
+@@ -197,21 +409,519 @@ kl_backend_input_read(
+  * Closes an input device descriptor.
+  *
+  * zedBSD does not need a separate seat service to relinquish the node.
++ * The thread closes it, because the driver's stop may wait on the device;
++ * the descriptor stays open until then, so its number is not reused early.
+  */
+ void
+ kl_backend_input_close(
+ 	struct kl_backend *backend,
+ 	int descriptor)
+ {
+-	(void)backend;
++	struct kl_backend_input_worker *worker;
++
++	/* Without the thread the descriptor is closed here. */
++	worker = backend->input_worker;
++	if (worker == NULL) {
++		(void)close(descriptor);
++		return;
++	}
+ 
+-	/* Releases the node's descriptor. */
+-	close(descriptor);
++	/* The thread closes it. */
++	close_later(worker, descriptor);
+ 
+ 	/* Succeeded: the descriptor is no longer owned by the seat. */
+ 	return;
+ }
+ 
++/* Returns the input devices' thread, made and started at the first call (NULL when it could not be made). */
++static struct kl_backend_input_worker *
++worker_get(
++	struct kl_backend *backend)
++{
++	struct kl_backend_input_worker *worker;
++	int error;
++
++	/* Made once. */
++	if (backend->input_worker != NULL)
++		return backend->input_worker;
++
++	/* The state, with nothing asked, known or queued. */
++	worker = calloc(1, sizeof(*worker));
++	if (worker == NULL) {
++		printf("KL INPUT worker errno=%d\n", ENOMEM);
++		return NULL;
++	}
++
++	worker->found_tail = &worker->found;
++	worker->wake[0] = -1;
++	worker->wake[1] = -1;
++
++	/* The lock over what the event loop and the thread share. */
++	error = pthread_mutex_init(&worker->lock, NULL);
++	if (error != 0) {
++		printf("KL INPUT worker errno=%d\n", error);
++		free(worker);
++		return NULL;
++	}
++
++	/* What the thread waits on for a scan, a close or its end. */
++	error = pthread_cond_init(&worker->asked, NULL);
++	if (error != 0) {
++		printf("KL INPUT worker errno=%d\n", error);
++		pthread_mutex_destroy(&worker->lock);
++		free(worker);
++		return NULL;
++	}
++
++	/* The thread; without it the scans are done in the event loop's call. */
++	worker_start(worker);
++
++	/* Succeeded: the backend keeps it until it closes. */
++	backend->input_worker = worker;
++	return worker;
++}
++
++/* Makes the thread's pipe and starts the thread; on a failure the scans stay in the event loop. */
++static void
++worker_start(
++	struct kl_backend_input_worker *worker)
++{
++	sigset_t all;
++	sigset_t previous;
++	unsigned index;
++	int error;
++
++	/* The pipe the thread wakes the event loop with. */
++	error = pipe(worker->wake);
++	if (error != 0) {
++		printf("KL INPUT worker pipe errno=%d; the scans wait in the event loop\n", errno);
++		worker->wake[0] = -1;
++		worker->wake[1] = -1;
++		return;
++	}
++
++	/* Neither end blocks, and neither goes to a program the compositor starts. */
++	for (index = 0; index < 2U; index++) {
++		(void)fcntl(worker->wake[index], F_SETFL, O_NONBLOCK);
++		(void)fcntl(worker->wake[index], F_SETFD, FD_CLOEXEC);
++	}
++
++	/*
++	 * threaded is set first: the thread reads it to know it has a pipe to
++	 * write.  The thread blocks every signal; the compositor's own thread
++	 * takes them.
++	 */
++	worker->threaded = 1U;
++	(void)sigfillset(&all);
++	(void)pthread_sigmask(SIG_SETMASK, &all, &previous);
++	error = pthread_create(&worker->thread, NULL, worker_main, worker);
++	(void)pthread_sigmask(SIG_SETMASK, &previous, NULL);
++	if (error != 0) {
++		printf("KL INPUT worker thread errno=%d; the scans wait in the event loop\n", error);
++		worker->threaded = 0U;
++		for (index = 0; index < 2U; index++) {
++			(void)close(worker->wake[index]);
++			worker->wake[index] = -1;
++		}
++		return;
++	}
++
++	/* Succeeded: the thread waits for the first scan. */
++	return;
++}
++
++/* The thread: closes the descriptors given back, scans when asked, and ends when the backend closes. */
++static void *
++worker_main(
++	void *argument)
++{
++	struct kl_backend_input_worker *worker;
++	struct input_closing *closing;
++
++	/* The state the backend made. */
++	worker = argument;
++
++	/* Each wake does what was asked, closes first, until the end is asked. */
++	pthread_mutex_lock(&worker->lock);
++
++	while (1) {
++		/* The descriptors given back are closed outside the lock. */
++		if (worker->closing != NULL) {
++			closing = worker->closing;
++			worker->closing = NULL;
++			pthread_mutex_unlock(&worker->lock);
++			closings_run(closing);
++			pthread_mutex_lock(&worker->lock);
++			continue;
++		}
++
++		/* The backend closes. */
++		if (worker->stop_asked)
++			break;
++
++		/* A scan, outside the lock: the opens are what may wait. */
++		if (worker->scan_asked) {
++			pthread_mutex_unlock(&worker->lock);
++			scan_directory(worker);
++			pthread_mutex_lock(&worker->lock);
++			continue;
++		}
++
++		/* Nothing asked: waits for the event loop. */
++		pthread_cond_wait(&worker->asked, &worker->lock);
++	}
++
++	pthread_mutex_unlock(&worker->lock);
++
++	/* Succeeded: the thread ends. */
++	return NULL;
++}
++
++/*
++ * Tells the thread which of the nodes the last scan listed, or that were
++ * passed by before, the compositor reads, and asks for a scan (the event
++ * loop's side).
++ */
++static void
++known_snapshot(
++	struct kl_backend *backend,
++	struct kl_backend_input_worker *worker)
++{
++	uint64_t seen[INPUT_NODE_WORDS];
++	uint64_t known[INPUT_NODE_WORDS];
++	char path[KL_BACKEND_INPUT_PATH_MAX];
++	unsigned long node;
++	unsigned word;
++	unsigned refusals_kept;
++	int length;
++	int open_already;
++
++	/*
++	 * The nodes the last scan listed, and those passed by until now: a
++	 * device offered while a scan ran may not be listed yet.
++	 */
++	pthread_mutex_lock(&worker->lock);
++
++	for (word = 0; word < INPUT_NODE_WORDS; word++)
++		seen[word] = worker->seen[word] | worker->known[word];
++
++	pthread_mutex_unlock(&worker->lock);
++
++	/* Each of them the compositor reads is passed by. */
++	memset(known, 0, sizeof(known));
++	for (node = 0; node < INPUT_NODES; node++) {
++		/* A node not listed is not asked about. */
++		if (!node_marked(seen, node))
++			continue;
++
++		/* The compositor knows the node by its path. */
++		length = snprintf(path, sizeof(path), "%s/event%lu", INPUT_DIRECTORY, node);
++		if (length < 0 || (size_t)length >= sizeof(path))
++			continue;
++
++		/* A node the compositor already reads is left alone. */
++		open_already = 0;
++		if (backend->host.input_known != NULL)
++			open_already = backend->host.input_known(backend->host.data, path);
++		if (open_already)
++			node_mark(known, node);
++	}
++
++	/* The refusals are remembered only where the system's events tell when to forget them. */
++	refusals_kept = 0U;
++	if (backend->events_descriptor >= 0)
++		refusals_kept = 1U;
++
++	/* The scan, with what the compositor reads; scans asked meanwhile are one. */
++	pthread_mutex_lock(&worker->lock);
++
++	memcpy(worker->known, known, sizeof(known));
++	worker->refusals_kept = refusals_kept;
++	worker->scan_asked = 1U;
++	pthread_cond_signal(&worker->asked);
++
++	pthread_mutex_unlock(&worker->lock);
++}
++
++/* Lists /dev/input and opens every eventN neither read, queued nor refused (the thread's side). */
++static void
++scan_directory(
++	struct kl_backend_input_worker *worker)
++{
++	DIR *directory;
++	struct dirent *entry;
++	char path[KL_BACKEND_INPUT_PATH_MAX];
++	uint64_t seen[INPUT_NODE_WORDS];
++	unsigned long node;
++	unsigned refusals_kept;
++	int length;
++	int valid;
++	int passed;
++
++	/*
++	 * Takes the scan asked.  Refusals are forgotten once a device came or
++	 * went, and when the system's events are no longer heard (nothing
++	 * would tell when to try again).
++	 */
++	pthread_mutex_lock(&worker->lock);
++
++	worker->scan_asked = 0U;
++	refusals_kept = worker->refusals_kept;
++	if (worker->forget_refused || !refusals_kept) {
++		memset(worker->refused, 0, sizeof(worker->refused));
++		worker->forget_refused = 0U;
++	}
++
++	pthread_mutex_unlock(&worker->lock);
++
++	/* Without the directory there is nothing to read. */
++	directory = opendir(INPUT_DIRECTORY);
++	if (directory == NULL)
++		return;
++
++	/* Every eventN entry is a candidate device. */
++	memset(seen, 0, sizeof(seen));
++	while (1) {
++		/* The end of the directory ends the scan. */
++		entry = readdir(directory);
++		if (entry == NULL)
++			break;
++
++		/* Only eventN nodes speak evdev. */
++		valid = event_node_name(entry->d_name);
++		if (!valid)
++			continue;
++
++		/* The node is listed, for the next scan's question of what the compositor reads. */
++		node = strtoul(entry->d_name + 5, NULL, 10);
++		node_mark(seen, node);
++
++		/* A node the compositor reads, or one opened and not offered yet, is left alone. */
++		pthread_mutex_lock(&worker->lock);
++
++		passed = 0;
++		if (node_marked(worker->known, node))
++			passed = 1;
++		else if (node_marked(worker->pending, node))
++			passed = 1;
++
++		pthread_mutex_unlock(&worker->lock);
++
++		if (passed)
++			continue;
++
++		/* A node that refused to open is not opened again while no device came or went. */
++		passed = node_marked(worker->refused, node);
++		if (passed)
++			continue;
++
++		/* An overlong name cannot be an ordinary device node. */
++		length = snprintf(path, sizeof(path), "%s/%s", INPUT_DIRECTORY, entry->d_name);
++		if (length < 0 || (size_t)length >= sizeof(path))
++			continue;
++
++		/* Opens it and queues it for the compositor. */
++		probe_node(worker, path, node, refusals_kept);
++	}
++
++	/* The directory stream is no longer needed. */
++	closedir(directory);
++
++	/* The listed nodes, for the next scan's question. */
++	pthread_mutex_lock(&worker->lock);
++
++	memcpy(worker->seen, seen, sizeof(seen));
++
++	pthread_mutex_unlock(&worker->lock);
++}
++
++/* Opens one node (eventN), reads its capability bitmaps and queues it for the event loop. */
++static void
++probe_node(
++	struct kl_backend_input_worker *worker,
++	const char *path,
++	unsigned long node,
++	unsigned refusals_kept)
++{
++	struct input_found *found;
++	ssize_t written;
++	int descriptor;
++	int error;
++
++	/* The queue's entry, which carries the bitmaps. */
++	found = calloc(1, sizeof(*found));
++	if (found == NULL)
++		return;
++
++	/* Opens a nonblocking descriptor that children cannot inherit. */
++	descriptor = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
++	if (descriptor < 0) {
++		/*
++		 * The device's own failure is remembered; a node not the
++		 * seat's user's yet (EACCES) is tried at every scan.
++		 */
++		error = errno;
++		if (refusals_kept && (error == EIO || error == ENXIO || error == ENODEV))
++			node_mark(worker->refused, node);
++		free(found);
++		return;
++	}
++
++	/* Reads the bits that determine the device's role. */
++	error = read_capabilities(descriptor, &found->capabilities);
++	if (error != 0) {
++		(void)close(descriptor);
++		free(found);
++		return;
++	}
++
++	/* The entry; the path fits, the scan made it. */
++	found->descriptor = descriptor;
++	found->node = node;
++	snprintf(found->path, sizeof(found->path), "%s", path);
++
++	/* Queued, and not opened again until the event loop has offered it. */
++	pthread_mutex_lock(&worker->lock);
++
++	*worker->found_tail = found;
++	worker->found_tail = &found->next;
++	node_mark(worker->pending, node);
++
++	pthread_mutex_unlock(&worker->lock);
++
++	/* The event loop wakes; a full pipe is already readable. */
++	if (worker->threaded) {
++		written = write(worker->wake[1], "i", 1);
++		(void)written;
++	}
++}
++
++/*
++ * Offers every queued device to the compositor and queues those it does
++ * not keep for closing (the event loop's side).
++ */
++static void
++deliver(
++	struct kl_backend *backend,
++	struct kl_backend_input_worker *worker)
++{
++	struct input_found *found;
++	struct input_found *next;
++	int known;
++	int kept;
++
++	/*
++	 * Takes the queue.  Its nodes count as read until the compositor says
++	 * otherwise, so a scan running meanwhile does not open them again.
++	 */
++	pthread_mutex_lock(&worker->lock);
++
++	found = worker->found;
++	worker->found = NULL;
++	worker->found_tail = &worker->found;
++	for (next = found; next != NULL; next = next->next) {
++		node_unmark(worker->pending, next->node);
++		node_mark(worker->known, next->node);
++	}
++
++	pthread_mutex_unlock(&worker->lock);
++
++	/* Each device, in the order the thread opened them. */
++	while (found != NULL) {
++		next = found->next;
++
++		/* A node the compositor came to read since the scan asked (a second open of it) is not offered. */
++		known = 0;
++		if (backend->host.input_known != NULL)
++			known = backend->host.input_known(backend->host.data, found->path);
++
++		/* The compositor's classification keeps it, or it is closed. */
++		kept = 0;
++		if (!known && backend->host.input_found != NULL)
++			kept = backend->host.input_found(backend->host.data, found->descriptor, found->path, &found->capabilities);
++
++		/* A device not kept is offered again at the next scan, as it would have been without the thread. */
++		if (!known && !kept) {
++			pthread_mutex_lock(&worker->lock);
++
++			node_unmark(worker->known, found->node);
++
++			pthread_mutex_unlock(&worker->lock);
++		}
++
++		/* A second open, or a device not kept, is closed by the thread. */
++		if (!kept)
++			close_later(worker, found->descriptor);
++		free(found);
++		found = next;
++	}
++}
++
++/* Queues a descriptor for the thread to close; without the thread, or without memory, it is closed here. */
++static void
++close_later(
++	struct kl_backend_input_worker *worker,
++	int descriptor)
++{
++	struct input_closing *closing;
++
++	/* Without the thread nothing waits but this call. */
++	if (!worker->threaded) {
++		(void)close(descriptor);
++		return;
++	}
++
++	/* The list's entry. */
++	closing = malloc(sizeof(*closing));
++	if (closing == NULL) {
++		(void)close(descriptor);
++		return;
++	}
++
++	closing->descriptor = descriptor;
++
++	/* Queued, and the thread woken. */
++	pthread_mutex_lock(&worker->lock);
++
++	closing->next = worker->closing;
++	worker->closing = closing;
++	pthread_cond_signal(&worker->asked);
++
++	pthread_mutex_unlock(&worker->lock);
++}
++
++/* Closes every descriptor of a list taken from the thread's state and frees the list. */
++static void
++closings_run(
++	struct input_closing *closing)
++{
++	struct input_closing *next;
++
++	/* Each descriptor once. */
++	while (closing != NULL) {
++		next = closing->next;
++		(void)close(closing->descriptor);
++		free(closing);
++		closing = next;
++	}
++}
++
++/* Reads every byte waiting in the thread's pipe. */
++static void
++wake_drain(
++	int descriptor)
++{
++	char bytes[INPUT_WAKE_READ];
++	ssize_t length;
++
++	/* Until the pipe is empty (the read end does not block). */
++	while (1) {
++		length = read(descriptor, bytes, sizeof(bytes));
++		if (length <= 0)
++			break;
++	}
++}
++
+ /* Reports whether a directory entry is named eventN. */
+ static int
+ event_node_name(
+@@ -236,67 +946,53 @@ event_node_name(
+ 	return 1;
+ }
+ 
+-/*
+- * Reports whether eventN refused to open since the system's events last
+- * told of an input device that came or went.  Without the events nothing
+- * would tell when to try again, so no node is passed by.
+- */
++/* Reports whether node's bit is set in a set of INPUT_NODE_WORDS words; a node past them never is. */
+ static int
+-node_refused(
+-	const struct kl_backend *backend,
++node_marked(
++	const uint64_t *words,
+ 	unsigned long node)
+ {
+ 	uint64_t bit;
+ 
+-	/* Without the system's events, and past the remembered nodes, every node is tried. */
+-	if (backend->events_descriptor < 0)
+-		return 0;
+-	if (node >= 64UL * KL_BACKEND_INPUT_REFUSED_WORDS)
++	/* A node past the set is not kept in it. */
++	if (node >= INPUT_NODES)
+ 		return 0;
+ 
+ 	/* The node's bit. */
+ 	bit = (uint64_t)1 << (node % 64UL);
+-	return (backend->input_refused[node / 64UL] & bit) != 0U;
++	if ((words[node / 64UL] & bit) != 0U)
++		return 1;
++
++	/* Succeeded: the bit is clear. */
++	return 0;
+ }
+ 
+-/* Opens one node (eventN) and offers it, with its capability bitmaps, to the compositor. */
++/* Sets node's bit in a set of INPUT_NODE_WORDS words; a node past them is not kept. */
+ static void
+-probe_device(
+-	struct kl_backend *backend,
+-	const char *path,
++node_mark(
++	uint64_t *words,
+ 	unsigned long node)
+ {
+-	struct kl_backend_input_caps capabilities;
+-	int descriptor;
+-	int error;
+-	int kept;
+-
+-	/* Opens a nonblocking descriptor that children cannot inherit. */
+-	descriptor = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+-	if (descriptor < 0) {
+-		/*
+-		 * The device's own failure is remembered; a node not the
+-		 * seat's user's yet (EACCES) is tried at every scan.
+-		 */
+-		error = errno;
+-		if ((error == EIO || error == ENXIO || error == ENODEV) && node < 64UL * KL_BACKEND_INPUT_REFUSED_WORDS)
+-			backend->input_refused[node / 64UL] |= (uint64_t)1 << (node % 64UL);
++	/* A node past the set is not kept in it. */
++	if (node >= INPUT_NODES)
+ 		return;
+-	}
+ 
+-	/* Reads the bits that determine the device's role. */
+-	error = read_capabilities(descriptor, &capabilities);
+-	if (error != 0) {
+-		close(descriptor);
++	/* The node's bit. */
++	words[node / 64UL] |= (uint64_t)1 << (node % 64UL);
++}
++
++/* Clears node's bit in a set of INPUT_NODE_WORDS words. */
++static void
++node_unmark(
++	uint64_t *words,
++	unsigned long node)
++{
++	/* A node past the set is not kept in it. */
++	if (node >= INPUT_NODES)
+ 		return;
+-	}
+ 
+-	/* The compositor's classification keeps it, or it is closed here. */
+-	kept = 0;
+-	if (backend->host.input_found != NULL)
+-		kept = backend->host.input_found(backend->host.data, descriptor, path, &capabilities);
+-	if (!kept)
+-		close(descriptor);
++	/* The node's bit. */
++	words[node / 64UL] &= ~((uint64_t)1 << (node % 64UL));
+ }
+ 
+ /* Reads the event, key, relative and absolute capability bitmaps and the properties of one node. */
+diff --git a/userland/desktop/libkeiland-backend/backend-private.h b/userland/desktop/libkeiland-backend/backend-private.h
+index 4bb2bf605d..b3463ce078 100644
+--- a/userland/desktop/libkeiland-backend/backend-private.h
++++ b/userland/desktop/libkeiland-backend/backend-private.h
+@@ -21,10 +21,10 @@
+ #define KL_BACKEND_SESSION_LINE	512U
+ 
+ /*
+- * The evdev nodes (/dev/input/eventN) remembered as refusing to open: N
+- * below 64 times KL_BACKEND_INPUT_REFUSED_WORDS.
++ * The input devices' finding where a thread of the backend's own opens
++ * them (zedBSD's input-zedbsd.c): its state is that file's.
+  */
+-#define KL_BACKEND_INPUT_REFUSED_WORDS	4U
++struct kl_backend_input_worker;
+ 
+ /*
+  * The compositor's backend.
+@@ -92,14 +92,11 @@ struct kl_backend {
+ 	 */
+ 	struct kl_backend_notify *notify;
+ 	/*
+-	 * The evdev nodes whose open failed with the device's own error
+-	 * (bit N of the words for /dev/input/eventN) while the system's
+-	 * events are heard: the periodic scan passes them by until an input
+-	 * device comes or goes, because each open of such a node can block
+-	 * the event loop for tens of milliseconds (a PS/2 mouse port without
+-	 * a mouse answers EIO only after its timeout).
++	 * The thread that finds and opens the input devices away from the
++	 * event loop (zedBSD), made at the first scan and ended when the
++	 * backend closes; NULL until then and where the backend has none.
+ 	 */
+-	uint64_t input_refused[KL_BACKEND_INPUT_REFUSED_WORDS];
++	struct kl_backend_input_worker *input_worker;
+ };
+ 
+ /*
+@@ -138,6 +135,22 @@ size_t kl_backend_events_poll_count(const struct kl_backend *backend);
+ void kl_backend_events_poll_fill(struct kl_backend *backend, struct pollfd *descriptors);
+ void kl_backend_events_poll_done(struct kl_backend *backend, const struct pollfd *descriptors);
+ 
++/*
++ * The input devices' part of the poll and their end: where a thread of the
++ * backend opens the devices (zedBSD), its pipe joins the poll and the
++ * devices it opened are offered to the compositor from
++ * kl_backend_poll_done; kl_backend_input_stop ends the thread when the
++ * backend closes.  Elsewhere the part is empty and the stop does nothing.
++ * kl_backend_input_devices_changed tells the zedBSD thread that an input
++ * device came or went (the system's events), so the nodes that refused to
++ * open are tried again.
++ */
++size_t kl_backend_input_poll_count(const struct kl_backend *backend);
++void kl_backend_input_poll_fill(struct kl_backend *backend, struct pollfd *descriptors);
++void kl_backend_input_poll_done(struct kl_backend *backend, const struct pollfd *descriptors);
++void kl_backend_input_stop(struct kl_backend *backend);
++void kl_backend_input_devices_changed(struct kl_backend *backend);
++
+ /*
+  * The bus's notifications' part of the poll (ws156-p006): each operating
+  * system counts, fills and handles the descriptor of its bus, none while
+diff --git a/userland/desktop/libkeiland-backend/backend.c b/userland/desktop/libkeiland-backend/backend.c
+index 23fd5ac58e..f305105157 100644
+--- a/userland/desktop/libkeiland-backend/backend.c
++++ b/userland/desktop/libkeiland-backend/backend.c
+@@ -66,7 +66,8 @@ kl_backend_close(
+ 	if (backend == NULL)
+ 		return;
+ 
+-	/* The bus's notifications (ws156-p006), the system's events, then the backend. */
++	/* The input devices' thread (the compositor closed its devices before), the bus's notifications (ws156-p006), the system's events, then the backend. */
++	kl_backend_input_stop(backend);
+ 	kl_backend_notify_close(backend);
+ 	kl_backend_events_close(backend);
+ 	free(backend);
+@@ -85,10 +86,11 @@ kl_backend_poll_count(
+ 	if (backend == NULL)
+ 		return 0;
+ 
+-	/* The seat's service (ws131-p006), the system's events (ws132-p003), then the bus's notifications (ws156-p006). */
++	/* The seat's service (ws131-p006), the system's events (ws132-p003), the bus's notifications (ws156-p006), then the input devices' thread. */
+ 	count = kl_backend_seat_poll_count(backend);
+ 	count += kl_backend_events_poll_count(backend);
+ 	count += kl_backend_notify_poll_count(backend);
++	count += kl_backend_input_poll_count(backend);
+ 	return count;
+ }
+ 
+@@ -102,17 +104,24 @@ kl_backend_poll_fill(
+ {
+ 	size_t seat;
+ 	size_t events;
++	size_t notify;
+ 
+ 	/* A compositor whose backend did not open has nothing to fill. */
+ 	if (backend == NULL)
+ 		return;
+ 
+-	/* The seat's service (ws131-p006), the system's events after it (ws132-p003), then the bus's notifications (ws156-p006). */
++	/*
++	 * The seat's service (ws131-p006), the system's events after it
++	 * (ws132-p003), the bus's notifications (ws156-p006), then the input
++	 * devices' thread.
++	 */
+ 	seat = kl_backend_seat_poll_count(backend);
+ 	events = kl_backend_events_poll_count(backend);
++	notify = kl_backend_notify_poll_count(backend);
+ 	kl_backend_seat_poll_fill(backend, descriptors);
+ 	kl_backend_events_poll_fill(backend, descriptors + seat);
+ 	kl_backend_notify_poll_fill(backend, descriptors + seat + events);
++	kl_backend_input_poll_fill(backend, descriptors + seat + events + notify);
+ }
+ 
+ /*
+@@ -125,6 +134,7 @@ kl_backend_poll_done(
+ {
+ 	size_t seat;
+ 	size_t events;
++	size_t notify;
+ 
+ 	/* A compositor whose backend did not open was told nothing. */
+ 	if (backend == NULL)
+@@ -132,15 +142,18 @@ kl_backend_poll_done(
+ 
+ 	/*
+ 	 * The seat's pauses and resumes (ws131-p006), the system's events after
+-	 * them (ws132-p003), then the bus's notifications (ws156-p006).  The
+-	 * counts are taken before any is handled: a handler may close its
+-	 * descriptor, and the places filled stay where they were.
++	 * them (ws132-p003), the bus's notifications (ws156-p006), then the
++	 * devices the input devices' thread opened.  The counts are taken
++	 * before any is handled: a handler may close its descriptor, and the
++	 * places filled stay where they were.
+ 	 */
+ 	seat = kl_backend_seat_poll_count(backend);
+ 	events = kl_backend_events_poll_count(backend);
++	notify = kl_backend_notify_poll_count(backend);
+ 	kl_backend_seat_poll_done(backend, descriptors);
+ 	kl_backend_events_poll_done(backend, descriptors + seat);
+ 	kl_backend_notify_poll_done(backend, descriptors + seat + events);
++	kl_backend_input_poll_done(backend, descriptors + seat + events + notify);
+ }
+ 
+ /*
+diff --git a/userland/desktop/libkeiland-backend/evdev/input-evdev.c b/userland/desktop/libkeiland-backend/evdev/input-evdev.c
+index ecb760ffea..b2b4a8a1d3 100644
+--- a/userland/desktop/libkeiland-backend/evdev/input-evdev.c
++++ b/userland/desktop/libkeiland-backend/evdev/input-evdev.c
+@@ -208,6 +208,56 @@ kl_backend_input_close(
+ 	return;
+ }
+ 
++/*
++ * Counts the input devices' descriptors in the event loop's poll.
++ *
++ * The scan opens the nodes through the seat in the event loop's own call,
++ * so no thread of the backend has anything to tell.
++ */
++size_t
++kl_backend_input_poll_count(
++	const struct kl_backend *backend)
++{
++	(void)backend;
++
++	/* Succeeded: the input devices add nothing to the poll. */
++	return 0;
++}
++
++/*
++ * Fills the input devices' part of the poll, which is empty.
++ */
++void
++kl_backend_input_poll_fill(
++	struct kl_backend *backend,
++	struct pollfd *descriptors)
++{
++	(void)backend;
++	(void)descriptors;
++}
++
++/*
++ * Handles the input devices' part of the poll, which is empty.
++ */
++void
++kl_backend_input_poll_done(
++	struct kl_backend *backend,
++	const struct pollfd *descriptors)
++{
++	(void)backend;
++	(void)descriptors;
++}
++
++/*
++ * Ends the input devices' work when the backend closes; there is no thread.
++ */
++void
++kl_backend_input_stop(
++	struct kl_backend *backend)
++{
++	(void)backend;
++}
++
+ /* Reports whether a directory entry is named eventN. */
+ static int
+ event_node_name(
+diff --git a/userland/desktop/libkeiland-backend/keiland-backend-evdev.h b/userland/desktop/libkeiland-backend/keiland-backend-evdev.h
+index 26d1378c7b..bbd3a89921 100644
+--- a/userland/desktop/libkeiland-backend/keiland-backend-evdev.h
++++ b/userland/desktop/libkeiland-backend/keiland-backend-evdev.h
+@@ -58,9 +58,13 @@ struct kl_backend_input_caps {
+  * yet (host input_known), through the seat where there is one (nothing
+  * while it is paused), with the compositor's monotonic clock for the
+  * events' times, and offers each to the compositor (host input_found).
+- * A node the compositor does not keep is closed here.  A missing directory
+- * is no error; the compositor scans again from time to time for devices
+- * that come later.  The callbacks are called from this call.
++ * A node the compositor does not keep is closed by the backend.  A missing
++ * directory is no error; the compositor scans again from time to time for
++ * devices that come later.  On Linux and FreeBSD the callbacks are called
++ * from this call.  On zedBSD a thread of the backend opens the nodes, so
++ * that an open that waits on the device does not stop the event loop: this
++ * call only asks for the scan, and the devices are offered from a later
++ * kl_backend_poll_done, still on the event loop's thread.
+  */
+ void kl_backend_input_scan(struct kl_backend *backend);
+ 
+@@ -80,7 +84,8 @@ int kl_backend_input_id(int descriptor, struct input_id *id);
+ ssize_t kl_backend_input_read(int descriptor, struct input_event *events, size_t capacity);
+ 
+ /*
+- * Closes a device the compositor kept, through the seat that opened it.
++ * Closes a device the compositor kept, through the seat that opened it (on
++ * zedBSD the backend's thread closes it, a little later).
+  */
+ void kl_backend_input_close(struct kl_backend *backend, int descriptor);
+ 
+diff --git a/userland/desktop/wayland/input.c b/userland/desktop/wayland/input.c
+index 52badbcdb6..665240572f 100644
+--- a/userland/desktop/wayland/input.c
++++ b/userland/desktop/wayland/input.c
+@@ -105,8 +105,10 @@ static void input_settings(struct kwl_server *server, struct kwl_input_settings
+ static void pointer_warp_place(const void *context, const struct kwl_plane_rect *outputs, int32_t *x, int32_t *y, unsigned *output);
+ 
+ /*
+- * Opens the input devices not read yet (libkeiland-backend's scan, which
+- * offers each through kwl_input_probe) and sets the time of the next scan.
++ * Asks for the input devices not read yet to be opened (libkeiland-backend's
++ * scan, which offers each through kwl_input_probe, from this call or, where
++ * the backend opens them on a thread of its own, from a later poll) and
++ * sets the time of the next scan.
+  */
+ void
+ kwl_input_scan(
+diff --git a/userland/desktop/wayland/main.c b/userland/desktop/wayland/main.c
+index cb5aeb98f7..297683db35 100644
+--- a/userland/desktop/wayland/main.c
++++ b/userland/desktop/wayland/main.c
+@@ -291,7 +291,11 @@ main(
+ 			printf("KWL FAILED site=input-thread errno=%d\n", error);
+ 	}
+ 
+-	/* Input devices are found before READY; a seat without devices is still valid. */
++	/*
++	 * The input devices are looked for before READY (on zedBSD they join a
++	 * moment later, from the event loop's poll); a seat without devices is
++	 * still valid.
++	 */
+ 	if (error == 0) {
+ 		kwl_input_scan(&server);
+ 		step_start = startup_step("input", step_start);

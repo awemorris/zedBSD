@@ -1,0 +1,629 @@
+diff --git a/docs/reference/image-formatters.md b/docs/reference/image-formatters.md
+index 5885567dd8..a53c62be65 100644
+--- a/docs/reference/image-formatters.md
++++ b/docs/reference/image-formatters.md
+@@ -76,7 +76,9 @@ is not secure erasure. It does not copy a bootable root tree or install a loader
+ Use the [installer](../howto/boot-and-storage.md) for that complete workflow.
+ 
+ Native UFS uses geometry sized for the volume and is not limited by the
+-regular-image profile's 2-GiB ceiling. Its representable size also depends on
++regular-image profile's 2-GiB ceiling. It publishes no tail journal: the
++kernel carries its metadata in the batched journal and delays its writes, as
++on the root image. Its representable size also depends on
+ file offsets and filesystem geometry. The following queries do not open or
+ modify a device; they check geometry and report usable capacity:
+ 
+diff --git a/include/drivers/generic/dma.h b/include/drivers/generic/dma.h
+index deb3cb24e9..ab4bf77547 100644
+--- a/include/drivers/generic/dma.h
++++ b/include/drivers/generic/dma.h
+@@ -97,7 +97,7 @@ void drv_dma_unmap(struct drv_dma_device *device,
+ /*
+  * Gives the bus address of caller-owned memory the caller knows the physical
+  * address of.  Only a coherent device is served, and only for a range inside
+- * its reach; anything else fails and the caller uses bounce memory (ws299).
++ * its reach; anything else fails and the caller uses bounce memory.
+  * device_address_bits is how wide an address the device itself takes (for
+  * example 64 for NVMe, whose PRP entries are 64-bit); zero takes the DMA
+  * device's own width.  The bus offset, the platform's physical limit and
+diff --git a/plan/bugs/BUG-355.md b/plan/bugs/BUG-355.md
+index f123495161..9819d69e82 100644
+--- a/plan/bugs/BUG-355.md
++++ b/plan/bugs/BUG-355.md
+@@ -7,3 +7,4 @@
+ - 観測: 0 書きが約 1 MB/s。installer は 1 MiB の write と最後の fsync 1 回で書いており、installer の側に直す所は無い（P4 の読み）。WS307 p006 の制限（UFS の 16 MiB の dd が同じ桁）と同じ見込み。
+ - 期待: 媒体の速さに近い書き込み（少なくとも数十 MB/s）。
+ - 未確認: QEMU だけか実機（NVMe・SATA）でも同じか、FAT・block device への直の書き込みとの比べ、原因（UFS の block の割り当て・buffer cache・同期の書き込み・driver の queue の深さ）。
++- 原因の見込み（2026-10-29 P6、読みだけ、未確認）: installer が root を作る `mkfs -t ufs --profile=native` が volume の後ろに v2 の tail journal の locator（ZUJ2）を書く（`userland/base/mkfs/ufs-format.c` の `format_tail`、WS019 p036 から）。kernel は tail journal の volume を write-through で mount し（`src/drivers/fs/ufs.c` の `write_cached_intended`）、block の割当ごとに `order_barrier` → `disk_sync`（全体の書き出しと flush）を出す。5330 の NVMe で同じ形の volume の 4 GiB の書きが 7 MB/s・`IO_DRIVER_FLUSH` 728057 回（WS299 p005）。案と調べは [WS299 p005](../ws299/phase005/phase.md) の「mkfs native の tail journal」。直し（mkfs native が tail を 0 にする、a689288f7）は branch agent/p6-ws299 に置いたまま、file system の作りの判断待ち。
+diff --git a/plan/ws299/phase005/phase.md b/plan/ws299/phase005/phase.md
+index 63d8002f08..972af62f3b 100644
+--- a/plan/ws299/phase005/phase.md
++++ b/plan/ws299/phase005/phase.md
+@@ -131,3 +131,49 @@
+ ## 再開点（2026-10-28、P1）
+ 
+ - p004 の後に P1 の context が少なくなったので、p005 はこの調べと案で止めた。次: 1（測る）→ 案の design-reviewer → 実装。
++
++## mkfs native の tail journal（2026-10-29、P6、q1681-i01、試験なし・branch に置いたまま）
++
++- Q1（2026-10-29）: 「mkfs の native の形（tail journal ZUJ2 と snapshot ZSL1 の locator）を外すのは file system の作りの判断。先に、その locator を書く形が誰のどの決定で入ったか…と、外した時の電源断の後の一貫性…を phase.md に書いて Q1 に送って。それが分かるまで、この変更は branch に置いたまま」。
++- 実装（a689288f7、agent/p6-ws299）: `format_tail`（`userland/base/mkfs/ufs-format.c`）で native の profile は tail を予約したまま（geometry・容量は不変）全部 0 にし、ZUJ2・ZSL1・ZSN1 を書かない。README・`docs/reference/image-formatters.md` を合わせた。host: `sh plan/ws299/tests/host/mkfs-native-tail-test.sh` PASS（0b60a3289 の formatter と差は tail の 39〜47 byte だけ・新しい tail は全部 0・署名なし・formatter の verify・superblock の decoder・loader の reader の mount。512 の 4 MiB〜64 GiB、4096 の 4 MiB〜100 GiB）。`plan/ws307/tests/host/mkfs-ufs-native-test.sh` は native の byte 一致の 5 件が設計どおり DIFFERS（WS307 の file、決まったら Q1 が P4 に追従を頼む）。QEMU・実機は未実施。
++
++### どう入ったか（読みの調べ）
++
++- native の profile は WS019 p036（q169、2026-09-09「native UFS initialization and wide geometry」）で入った。`format_tail` の条件は `if (!context->profile) return 0;` で、`FORMAT_NATIVE`（2）も真なので、journal-snapshot の profile（1）と同じ tail（ZUJ2・ZSL1・ZSN1）を書く。mkfs の README は「The existing journal/snapshot persistence tail remains outside filesystem allocation.」。p036 の phase.md・results.md は消され、2026-10-03 より前の git の履歴は local に無い（GitHub の `old`）ので、意図して入れたか条件の副作用かは確かめられない。ユーザーの決定の原文は見つからなかった。当時は v2 の tail journal が唯一の journal で、batched journal（v3）は後の WS060・WS063（2026-09-26〜27）。
++- WS063（[ws063/ws.md](../../ws063/ws.md)、journal を既定に）の「制限・移管」: 「v2 の tail の journal（`--profile=journal-snapshot` の volume）は v2 のまま動く（操作ごとの flush で遅い、BUG-040 の形）。…この profile は明示の指定でしか作られない（試験と snapshot 用）。」と、判断が要る点 1「v2 の tail の journal の volume を v3 へ移すか（今は移さない）。**2026-09-27 ユーザーの判断: 今のまま**（「じゃあとりあえず今のままでOKです。」）。スナップショットの機能を設計するときに見直す。」。この判断は「v2 は明示の指定でしか作られない」を前提にしているが、実際には installer が root を作る `mkfs -t ufs --profile=native` も v2 の tail を書いており（WS019 p036 から）、前提が事実と違う。→ installer で入れた root と mkfs native の volume は全部 write-through（`write_cached_intended` が `journal_enabled` で 0、block の割当ごとの `order_barrier` → `disk_sync`）。5330 の p7 で 7 MB/s（`IO_DRIVER_FLUSH` 728057 回 / 4 GiB）、BUG-355（QEMU の SATA で約 1 MB/s）、WS307 p006 の「4096 の disk で 512 byte の journal の record の read-modify-write」の見立ても同じ道。
++- snapshot の利用者: UAPI `include/uapi/snapshot.h`（`KERN_SNAPSHOT_CREATE` など）を使う userland は tree に無い（grep）。snapshot の機能は ioctl の口だけで、使う道具が無い。
++
++### 外した時の電源断の後の一貫性（読みの見立て、試験は未実施）
++
++| 項目 | v2 の tail journal（今の native） | v3 の batched journal＋遅らせる書き（変更後の native ＝ 今の root image と同じ） |
++| --- | --- | --- |
++| metadata の整合（mount できる・fsck の要らない形） | 操作ごとに journal の record → flush → 本体（write-through） | commit ごとに replay で戻る（WS063 p002 の強制終了の試験: v3 の 4 時点・root で replay の後 UFS OK、sync した内容が残る） |
++| 返った write・名前の操作の耐久 | 返った時に device にある（操作ごとに flush） | fsync・sync・unmount・flusher の間隔（約 1〜3 秒）までは失いうる。fsync した物は残る |
++| 失わないと言えない物 | （write-through なので、返った操作は残る） | (1) 最後の commit の後の操作（数秒分）、(2) `J3_FREED_MAX` を超えて解放した block の追跡の外れ（commit 前に新しい中身が書かれると、解放を戻す crash の後に古い持ち主の中身が変わりうる。metadata は保つ、WS063 の「制限」）、(3) BUG-308（commit の途中の crash で新しい file が消した file の中身を見せうる、fsync の返る前の crash） |
++| 名前の無い inode の回収 | mount ごとに scan | clean でない終わりの後だけ scan（ws073-p054・BUG-164） |
++| snapshot | 領域あり（`snapshot_available`、ioctl が使える。使う道具は無い） | 領域なし、ioctl は EOPNOTSUPP。snapshot の機能は native の volume で無くなる（journal-snapshot の profile では今のまま） |
++| ZSL1 だけ残す案 | — | 採らなかった: v3 の volume に snapshot を付けた形は今まで無く（journal-snapshot は常に v2）、遅らせる書きと snapshot の保存の道の組み合わせは確かめていない |
++
++### fsync・sync が v3 で保証する事（code の読み、2026-10-29 P6、Q1 の問い「案 A で fsync が返った後の耐久も失うのか」）
++
++- 失わない。v3（`ms->j3.active`）の volume の `ufs_file_sync`（`src/drivers/fs/ufs.c` の `.fsync`、fsync・fdatasync の口）は: (1) `inode_sync` で inode を metadata に入れる、(2) `file_writeback_locked` で その file の data の block（直接と間接の指す block）を cache から書く、(3) `ufs_sync_journal` で走っている transaction を commit する（inode・間接 block・block の割当の記録と、sync の前の名前の変更（新しい名前・rename）が同じ transaction に入る。home が残れば `UFS_SYNC_OWED_ROUNDS` まで commit を繰り返す）、(4) `bio_flush` で device を flush。commit の seal（`j3_commit_seal`）は、seal する物を先に durable にした後に commit の record を書き、その line を書き戻して `bio_flush` する。→ fsync が返った時、その file の中身と metadata（と、それより前の名前の変更）は device にあり、電源断の後の replay で戻る。
++- `sync`・unmount（`ufs_sync`）: commit → `buf_sync`（disk 全体の dirty の line）→ `buf_write_unjournaled` → `disk_sync`（flush）。返った時に volume 全体が durable。
++- O_SYNC・O_DSYNC の write は、転送の後に `file_fsync` を呼ぶ（`src/kern/file.c` の file の I/O の終わり、「Uses full fsync for both flags」）ので、返った時に同じく durable。
++- 表の「失いうる」は、fsync・sync・O_SYNC のどれも通っていない書きと名前の操作だけ（flusher の間隔の約 1〜3 秒と、次の commit まで）。BUG-308 の窓は fsync が返る前の commit の途中の crash、`J3_FREED_MAX` の件は commit の前の crash で、どちらも fsync が返った後の物には及ばない（読みの見立て）。
++- v2（今の native）との差は「fsync を呼ばない書きが返った時に device にあるか」だけで、POSIX が求める fsync の耐久は両方で同じ。電源断の試験（`plan/tools/ufs/crash-test.sh`、v3 で fsync の後の内容が残る事）は native の volume では未実施。
++
++- 既に mkfs native で作った volume（installer で入れた root を含む）は、作り直すまで v2 の write-through のまま（kernel は変えていない）。それも速くするには WS063 の判断点 1（v2 → v3 の移行、snapshot の on-disk の形に触る）が要る。
++
++### 判断が要る点（Q1 → ユーザー）
++
++- 案 A（推し、a689288f7）: 新しく mkfs native で作る volume は tail を 0 にし、root image と同じ v3＋遅らせる書きにする。失う物は上の表の「返った操作の即時の耐久」と native の volume の snapshot の口（使う道具は無い）。
++- 案 B: 今のまま（installer の root は write-through、BUG-355 は残る）。
++- 案 C: kernel で v2 の volume を v3 へ移す（既存の install も速くなる。WS063 で「今のまま」とされた点で、snapshot の形に触る、大きい）。
++
++## UFS の file の書きの CPU: 遅らせる書きを line の束で（2026-10-29、P6、q1681-i01、実装済み・試験未実施）
++
++- 見立て（読み、数は前の profile）: 書き手の CPU の大半は buffer cache の 4 KiB の line ごとの処理（1 line 約 2.4 µs）。遅らせる書き（`write_range` の delayed の道）は 1 line ごとに cache_lock を 2 回（`reference_line` の引き・take over、`buf_release` の返し）、b_lock を 3 回、dirty_index_lock を 1 回取り、hash の chain を 2 回歩く（引きと take over の外し）。cache_lock は書き戻しの worker 4 本・flusher と取り合う。
++- 実装（`src/kern/buf.c` の `write_cached_lines`、`write_range` から）: 遅らせる書きで、page の大きさの whole line が 2 つ以上続く所は、最大 `BUF_RUN_LINES`（16 line = 64 KiB）を cache_lock の 1 回の保持で引き（hit は参照、miss は cache が満ちていれば `recycle_line_locked` で idle の clean な line を take over）、1 本ずつ busy を待たずに取り（busy・転送中・形の違う line で止める）、写して `mark_dirty`（今と同じ unjournaled の記録）、busy を外し、参照を cache_lock の 1 回の保持で返す。cache にまだ余裕があって miss した時は 0 を返し、その `write_range` の残りは今の 1 line ずつの道（確保する）に戻る。dirty の上限: 束を取る前に `cache_dirty_bytes + 束 ≤ dirty_limit_of(disk)` に切り詰める（上限を越えた書きはすぐ書く、の決まりを保つ。並ぶ書き手の数 × 16 line までは越えうる、軟らかい上限）。束の後は `writeback_kick` を 1 回。
++- 期待: cache_lock の取得が 1 line 2 回 → 16 line で 2 回、取り合いが減る。hash の歩き・写し・mark_dirty は同じ。効果は未測定（5330・QEMU は範囲の外）。raw の遅らせる書き（`buf_write_delayed`）にも効く。
++- 確かめ: build（下）。host 試験は無い（buf.c の内部の道で、純関数に切り出していない）。未実施: QEMU の回帰（`qemu-cache-stress.sh`・`qemu-cache32-write.sh`・`qemu-readahead.sh`・`qemu-nvme-shapes.sh`・boot-test）、5330 の UFS 書き（`ufsover`・`p7ufswrite`）と raw の書き。
++- build（`write_cached_lines` と p008 の comment の直しの tree）: `sh kbuild.sh w1 …`（自分の worktree、`BUILD=build/p6-w1-<config>`）で config-5330・pcat・visionfive2・rpi5 の vmunix が rc 0・warning 0。m68k-virt は rc 2: `src/kern/net/ipv6-frag.c:991:47: error: comparison of unsigned expression in '>= 0' is always true [-Werror=type-limits]`（この branch は触っていない file、main 0b60a3289 にある今日の変更。buf.o・syscall.o・object-sync.o は m68k でも -Werror で compile できた）。
+diff --git a/plan/ws299/phase010/phase.md b/plan/ws299/phase010/phase.md
+index d8b9ecbb6a..14e9be4c6c 100644
+--- a/plan/ws299/phase010/phase.md
++++ b/plan/ws299/phase010/phase.md
+@@ -117,3 +117,9 @@
+ ## 2026-10-28 夜（q1657、P1）
+ 
+ - direct の書き 59% の差は、道具 directio の fill（長さを変数にした memcpy を 8 byte ごとに呼び、zedBSD の libc の memcpy が遅い）だった。kernel の 1 MiB の書きは約 0.47 ms で、I/O の時間は Debian と同じ程度。fill を直し、NVMe の 1 request を 4 MiB・同時 16 command にした（c9468203a）。5330: direct の書き 1384 / 1579 MB/s（88%）、読み 1 MiB 2554 / 2486（103%）、4 MiB 2809 / 3101（91%）。表と見立ては [ws.md](../ws.md) の「結果（2026-10-28 21:50）」。
++
++## 2026-10-29（q1681-i01、P6、読みだけ、実装なし）
++
++- 4 MiB の direct の読み 91%（2809 / 3101 MB/s）の差は 4 MiB あたり約 0.13 ms（1.42 ms と 1.29 ms）。読みで見た候補（どれも未測定）: (a) `buf_direct_prepare` が 4 MiB ごとに 1024 line の hash を引く（64 個ずつ cache_lock の 1 回の保持。5330 は同じ leaf の root の line があるので `d_buffer_refs` での素通りは効かない。chain は平均約 4、header は cache に無いので 1 回の引きが数十〜百 ns）、(b) syscall の層の 1024 page の pin と解き、(c) command の形（zedBSD は 256 KiB × 16、Linux の 5330 は `max_sectors_kb` 128 で 128 KiB × 32）。(d) 1 本の thread の要求の間で device が空く時間（両方の OS で同じ形）。
++- 次の一手（測定が要るので試験の時に）: kernel に TSC の内訳（pin・prepare・transfer・unpin）を一時の patch で足し、4 MiB の 1 要求の時間を Debian の `iflag=direct bs=4M` の 1 要求の時間と比べる。(a) が効いていれば、partition（open した範囲）ごとの line の数を数えて 0 なら引かない形（hash の挿入と外しの 3 箇所で数える）を作る。(c) は `NVME_IO_PAGE_COMMAND_BYTES` を 128 KiB にした kernel と比べる。
++- p010 の他の残り（試験の未実施の項目）は変わらない。
+diff --git a/plan/ws299/tests/host/mkfs-native-tail-test.sh b/plan/ws299/tests/host/mkfs-native-tail-test.sh
+new file mode 100644
+index 0000000000..cc97da1d1b
+--- /dev/null
++++ b/plan/ws299/tests/host/mkfs-native-tail-test.sh
+@@ -0,0 +1,54 @@
++#!/bin/sh
++# The host test of the native UFS profile's tail: mkfs -t ufs --profile=native publishes no tail journal (ZUJ2) or
++# snapshot (ZSL1) locator, so the kernel mounts the volume with the batched journal and delayed writes.  Formats
++# each size with the formatter of OLD (default 0b60a3289, which wrote the locators) and with the tree's, checks that
++# the two differ only in the reserved tail and that the new tail is all zero, and that the new volume verifies,
++# decodes and mounts with the loaders' reader (the WS307 test program's check).  Output goes to a new
++# build/ws299-test/mkfs-tail.* directory (sparse files).
++#   sh plan/ws299/tests/host/mkfs-native-tail-test.sh [OLD]
++# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
++set -eu
++cd "$(dirname "$0")/../../../.."
++old=${1:-0b60a3289}
++mkdir -p build/ws299-test
++out=$(mktemp -d build/ws299-test/mkfs-tail.XXXXXX)
++mkdir "$out/old"
++git show "$old:userland/base/mkfs/ufs-format.c" > "$out/old/ufs-format.c"
++git show "$old:userland/base/mkfs/ufs-format.h" > "$out/old/ufs-format.h"
++srcs="userland/base/mkfs/ufs-super.c userland/base/mkfs/ufs-endian.c bootloader/common/ufs-read.c"
++cc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -I. -Iuserland/base/mkfs -o "$out/new" \
++	plan/ws307/tests/host/mkfs-ufs-native-test.c userland/base/mkfs/ufs-format.c $srcs
++cc -std=c99 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -I. -I"$out/old" -Iuserland/base/mkfs -o "$out/old/old" \
++	plan/ws307/tests/host/mkfs-ufs-native-test.c "$out/old/ufs-format.c" $srcs
++fail=0
++# The reserved tail: the journal records, the snapshot area and the alignment padding (at most this many bytes).
++tail_max=$(( (2 + 256 + 2049) * 512 + 4096 + 1024 ))
++for case in 512:4194304 512:1073741824 512:68719480832 4096:4194304 4096:1073741824 4096:107374182400; do
++	sector=${case%%:*}
++	bytes=${case#*:}
++	"$out/old/old" write native "$sector" "$bytes" "$out/a.img"
++	"$out/new" write native "$sector" "$bytes" "$out/b.img"
++	# Each differing byte: its 1-based offset and the new value (octal).
++	cmp -l "$out/a.img" "$out/b.img" > "$out/diff.txt" || true
++	result=$(awk -v bytes="$bytes" -v tail_max="$tail_max" '
++		{ n++; if (bytes - $1 + 1 > tail_max) outside++; if ($3 != 0) nonzero++ }
++		END { printf "%d %d %d\n", n, outside + 0, nonzero + 0 }' "$out/diff.txt")
++	set -- $result
++	if [ "$1" -eq 0 ] || [ "$2" -ne 0 ] || [ "$3" -ne 0 ]; then
++		echo "BAD $sector $bytes: $1 bytes differ, $2 outside the tail, $3 not zero"
++		fail=1
++	else
++		echo "ok $sector $bytes: $1 locator bytes cleared, all in the tail"
++	fi
++	# No locator signature is left anywhere in the tail.
++	if tail -c "$tail_max" "$out/b.img" | grep -a -q -e ZUJ2 -e ZSL1 -e ZSN1; then
++		echo "BAD $sector $bytes: a locator signature is left in the tail"
++		fail=1
++	fi
++	"$out/new" check "$sector" "$bytes" "$out/c.img" > /dev/null || { echo "BAD $sector $bytes: check"; fail=1; }
++done
++if [ $fail -ne 0 ]; then
++	echo "mkfs-native-tail-test: FAIL $out"
++	exit 1
++fi
++echo "mkfs-native-tail-test: PASS $out"
+diff --git a/plan/ws299/ws.md b/plan/ws299/ws.md
+index ede6f6ebb8..58426f1a9b 100644
+--- a/plan/ws299/ws.md
++++ b/plan/ws299/ws.md
+@@ -77,7 +77,7 @@ Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRA
+ | [p002](phase002/phase.md) | buffer cache: header の確保を O(1)（空きの list）にし、irq を止める区間を短く。evict を run 単位に。host 試験で計算量 | p001 | 4 | cleared（2026-10-27 11:41） |
+ | [p003](phase003/phase.md) | NVMe の大きな転送: MDTS に合わせた command、PRP list（bounce を使わず page に直接、使う所だけ bounce）、BIO の上限を上げる（`d_max_transfer_blocks`） | p001・p002 | 6 | cleared（2026-10-27、Q1 判定。raw の読み中央値 583 MB/s = p002 の後の 1.52 倍、書き 1.5 倍） |
+ | [p004](phase004/phase.md) | raw の block device の先読み（buffer cache の worker で device の待ちと CPU の仕事を重ねる）。複数の queue・VMD の vector は p007 の乱読みの測定の後に要否（2026-10-28 Q1） | p003 | 6 | in-progress（実装・QEMU・5330 済み、raw の読み 4 GiB 中央値 1917 MB/s。Q1 の判定待ち、q1634） |
+-| [p005](phase005/phase.md) | 連続の読み書き: UFS の file の readahead の窓と cluster の読み書き、書きの合流（raw の先読みは p004 へ、2026-10-28 Q1） | p002・p004 | 4 | in-progress（raw 書き 119%・raw 読み 150%・UFS 読み 126%、UFS 書き 55% で未達、2026-10-28 P1） |
++| [p005](phase005/phase.md) | 連続の読み書き: UFS の file の readahead の窓と cluster の読み書き、書きの合流（raw の先読みは p004 へ、2026-10-28 Q1） | p002・p004 | 4 | in-progress（raw 書き 119%・raw 読み 150%・UFS 読み 126%、UFS 書き 55% で未達、2026-10-28 P1。2026-10-29 P6 q1681: mkfs native の tail を 0 に（ユーザーの判断待ち）と遅らせる書きの束を実装、試験未実施） |
+ | [p006](phase006/phase.md) | HMB（DRAM-less の BG5） | p003 | 4 | in-progress（実装・5330 で動作、QD1 98%。QD32 は 44% で未達、2026-10-28 P1） |
+ | [p010](phase010/phase.md) | block device の O_DIRECT（2026-10-28 ユーザー「O_DIRECT を UAPI に足す」、Q1 が p010 に確定、p007 の前） | p004・p005 | 4 | in-progress（2026-10-28 q1657: direct 書き 88%（59% は道具の fill の libc memcpy だった）、読み 1 MiB 103%・4 MiB 91%、QD32 99%。下の「結果」、ユーザーの継続の判断待ち） |
+ | p007 | 5330 の測定の受け入れと回帰（QEMU の nvme・USB の起動は T、5330 は 1 本の script） | p002〜p006・p010 | 2 | planned |
+@@ -164,3 +164,11 @@ Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRA
+ 
+ - 残る差の見立て（未確認の物を含む）: (1) CPU の速さ（idle が C1 だけ・HWP なし・hybrid を知らない置き方）で、書き手の CPU が律速の項目（UFS の書き・direct の書きの fill）は 10〜30% 遅くなる。所有の外（HAL の idle・scheduler）。(2) UFS の書きは buffer cache の line ごとの費用。(3) 時計入りの randread は clock_gettime が syscall（vDSO が無く 1 ms 刻み）のため。(4) read mode の最初の約 900 MiB が遅いのは、乱読みが残した 4 KiB の line を追い出す道が遅いためと見ている（cache は乱読みの後に既に満杯、chunk2 から速い。未確認）。(5) memcpy は 1 KiB〜4 KiB（dst を揃えていない、AVX なし）と 32 MiB（non-temporal の store なし）で glibc より遅い。
+ - 再開点: ユーザーの継続の判断待ち（2026-10-28 ユーザー「その上で継続判断させてください。」）。証拠は worktree の `build/hw5330/ws299d/`（切り分け）・`build/hw5330/ws299e/`（全体）、git の外。
++
++## 2026-10-29（q1681-i01、P6、試験なしの実装だけ、branch agent/p6-ws299、merge は試験の後）
++
++- 2026-10-29 ユーザー「作業の手が空いてしまったら、テストなしで実装だけ進める戦略で、残っているWSのphaseをまんべんなく進めましょう。」
++- p004: 記録だけ（Q1 の判定待ちのまま、変更なし）。
++- p005: (1) mkfs native の tail journal を書かない（a689288f7、BUG-355 の原因の見込み）。出自・電源断の一貫性・fsync の保証は [phase005](phase005/phase.md)「mkfs native の tail journal」。Q1 がユーザーに案 A・B・C を聞く（それまで branch のまま）。(2) 遅らせる書きを 16 line の束で（`write_cached_lines`、[phase005](phase005/phase.md) の末尾）。どちらも実装済み・試験未実施。
++- p008 の一部（source の comment の開発の管理情報）: `ws299` の 18 箇所を comment から外した（syscall.c・object-sync.c・ufs.c・dma.c・dma.h・pci-nvme.c、comment だけ）。測る口の log（`buf: readahead`・nvme の latency）を CONFIG にするか消すか、規約の全文の見直しは p008 の残り。
++- p006・p010: 実装の残りは無し（p006 の recovery・resume の再有効化は試験の未実施、p010 の 4 MiB の読み 91% は測定が要る。見立ては phase010 に書く）。
+diff --git a/src/drivers/fs/ufs.c b/src/drivers/fs/ufs.c
+index 395c0237ad..784cb176b2 100644
+--- a/src/drivers/fs/ufs.c
++++ b/src/drivers/fs/ufs.c
+@@ -4083,7 +4083,7 @@ cg_ndblk(
+  *
+  * Groups follow one another fpg fragments apart, so only the group the
+  * fragment divided by fpg falls in can hold it; a volume grown to many groups
+- * (ws299) would otherwise be searched group by group for every block pointer.
++ * would otherwise be searched group by group for every block pointer.
+  * A volume that staggers its group metadata (cgoffset under a cgmask that
+  * leaves bits) moves where each group starts, so there every group is still
+  * a candidate and the caller searches them all, as before.
+diff --git a/src/drivers/generic/dma.c b/src/drivers/generic/dma.c
+index d1adfdb430..6799a326c3 100644
+--- a/src/drivers/generic/dma.c
++++ b/src/drivers/generic/dma.c
+@@ -664,7 +664,7 @@ drv_dma_map(
+  * Gives the bus address a device uses for memory the caller owns.
+  *
+  * This is for memory outside the device's own coherent allocations whose
+- * physical address the caller knows, such as a buffer-cache page (ws299).
++ * physical address the caller knows, such as a buffer-cache page.
+  * Only a coherent device is served, because one that does not snoop the
+  * caches would need cache maintenance this call does not do; every other
+  * case, and a range outside the device's reach, fails, and the caller moves
+diff --git a/src/drivers/pci/pci-nvme.c b/src/drivers/pci/pci-nvme.c
+index 2532c12b68..016b2b443a 100644
+--- a/src/drivers/pci/pci-nvme.c
++++ b/src/drivers/pci/pci-nvme.c
+@@ -39,14 +39,14 @@
+ #define NVME_IO_QUEUE_ID 1U
+ /*
+  * Each slot's bounce memory, which carries the data of a request that does
+- * not come as physical pages the device can reach (ws299: was one page).
++ * not come as physical pages the device can reach.
+  */
+ #define NVME_IO_BOUNCE_SIZE (64U * 1024U)
+ 
+ /*
+  * The most one command carries, before MDTS narrows it: 2 MiB, which is one
+  * page of PRP list entries after PRP1 with 4 KiB pages, so a list never
+- * chains (ws299).
++ * chains.
+  */
+ #define NVME_IO_MAX_COMMAND_BYTES (2U * 1024U * 1024U)
+ #define NVME_IO_MAX_COMMAND_PAGES (NVME_IO_MAX_COMMAND_BYTES / KERN_PAGE_SIZE)
+@@ -90,7 +90,7 @@ enum nvme_hmb_state {
+ /*
+  * How wide a DMA address an NVMe controller takes: PRP entries are 64-bit
+  * (NVMe Base Specification 2.0, PRP entry), wider than the 32-bit default of
+- * a PC's PCI bus (ws299, 2026-10-27 Q1).
++ * a PC's PCI bus.
+  */
+ #define NVME_DMA_ADDRESS_BITS 64U
+ 
+@@ -238,7 +238,7 @@ struct drv_nvme_io_lifecycle {
+ struct nvme_io_slot {
+ 	struct drv_nvme_io_lifecycle lifecycle;
+ 	struct drv_dma_buffer bounce_dma;
+-	/* The page of PRP list entries a command of more than two pages names in PRP2 (ws299). */
++	/* The page of PRP list entries a command of more than two pages names in PRP2. */
+ 	struct drv_dma_buffer prp_list_dma;
+ 	/* The bus address of every page of the command being built, PRP1 first. */
+ 	uint64_t *page_bus;
+@@ -271,7 +271,7 @@ struct nvme_io_slot {
+ struct nvme_io_chunk {
+ 	struct nvme_io_slot *slot;
+ 	uint8_t *bytes;
+-	/* The chunk's physical pages, when the request came as a page list (ws299). */
++	/* The chunk's physical pages, when the request came as a page list. */
+ 	const uint64_t *pages;
+ 	uint32_t page_count;
+ 	/* Set when the chunk's data went through the slot's bounce memory. */
+@@ -382,27 +382,27 @@ struct nvme_controller {
+ 	size_t maximum_transfer_bytes;
+ 	/*
+ 	 * Set when the device can move physical pages directly: its DMA is
+-	 * coherent and its memory page is the kernel's page (ws299).
++	 * coherent and its memory page is the kernel's page.
+ 	 */
+ 	unsigned page_vector;
+ 	/*
+ 	 * How many times the I/O path has been proven stopped (controller or bus
+ 	 * mastering off and the interrupts drained).  A request whose command
+ 	 * failed while posted waits for it to move before giving its pages
+-	 * back (ws299).  Changed under command_lock.
++	 * back.  Changed under command_lock.
+ 	 */
+ 	uint64_t io_dma_quiesce_count;
+ 	/*
+ 	 * Page-list commands sent to the pages themselves and through the
+-	 * bounce memory (the device could not reach a page), counted for the
+-	 * measurement of ws299 and logged every NVME_IO_PATH_LOG_EVERY of them.
++	 * bounce memory (the device could not reach a page), counted for
++	 * measurement and logged every NVME_IO_PATH_LOG_EVERY of them.
+ 	 */
+ 	uint64_t io_direct_commands;
+ 	uint64_t io_bounced_commands;
+ 	/*
+ 	 * Sums of the time from post to the interrupt's completion and from
+ 	 * there to the waiter running, over latency_count commands, logged and
+-	 * cleared every NVME_IO_LATENCY_LOG_EVERY (ws299-p004).  Changed under
++	 * cleared every NVME_IO_LATENCY_LOG_EVERY.  Changed under
+ 	 * command_lock.
+ 	 */
+ 	uint64_t latency_device_ns;
+@@ -6210,7 +6210,7 @@ nvme_probe_namespace(
+ 
+ 	/*
+ 	 * Takes physical page lists when the device reaches the kernel's pages
+-	 * directly: coherent DMA and a memory page equal to the kernel's (ws299).
++	 * directly: coherent DMA and a memory page equal to the kernel's.
+ 	 */
+ 	controller->page_vector = 0;
+ 	if (drv_dma_device_is_coherent(drv_pci_device_dma(controller->pci)) &&
+@@ -6406,7 +6406,7 @@ nvme_io_dma_allocate(
+ 	/*
+ 	 * Gives every slot its bounce, PRP list page and page address array.
+ 	 * When the larger bounce cannot be had for every slot, all of them
+-	 * start again with one-page bounces, as before ws299.
++	 * start again with one-page bounces.
+ 	 */
+ 	controller->io_bounce_size = NVME_IO_BOUNCE_SIZE;
+ 	index = 0;
+@@ -6436,7 +6436,7 @@ nvme_io_dma_allocate(
+ 			goto fail;
+ 		}
+ 
+-		/* Takes the page the slot's PRP lists are written in (ws299). */
++		/* Takes the page the slot's PRP lists are written in. */
+ 		error = drv_dma_alloc_coherent(
+ 			dma, controller->page_size, controller->page_size,
+ 			&controller->io_slots[index].prp_list_dma);
+diff --git a/src/kern/buf.c b/src/kern/buf.c
+index 50ca0bab4c..1a6eed30d3 100644
+--- a/src/kern/buf.c
++++ b/src/kern/buf.c
+@@ -537,6 +537,7 @@ static int readahead_running(struct disk *leaf);
+ static uint64_t readahead_now_ns(void);
+ static void readahead_account(uint64_t *sum, uint64_t value);
+ static uint32_t copy_cached_lines(struct disk *disk, uint64_t block, uint64_t remaining, uint8_t *out);
++static uint32_t write_cached_lines(const struct disk *disk, struct disk *leaf, uint64_t block, uint64_t remaining, const uint8_t *in);
+ static struct buf *recycle_line_locked(struct disk *disk, uint64_t line_block, uint64_t line_blocks, uint64_t line_bytes, int needed);
+ static uint64_t dirty_limit_for(uint64_t cap);
+ static int cluster_line_locked(const struct buf *buffer, uint64_t line_blocks);
+@@ -1084,9 +1085,11 @@ write_range(
+ 	uint64_t amount_blocks;
+ 	int full;
+ 	int delayed;
++	int batching;
+ 	uint32_t run_blocks;
+ 
+ 	in = data;
++	batching = 1;
+ 
+ 	/* Rejects a missing buffer, an empty range, or a read-only disk. */
+ 	if (data == NULL || count == 0)
+@@ -1127,6 +1130,24 @@ write_range(
+ 			continue;
+ 		}
+ 
++		/*
++		 * A delayed write of whole lines takes several at once, under
++		 * one hold of the cache lock to look them up and one to give
++		 * them back.  Once the cache has no line to take over, the rest
++		 * of the write goes a line at a time, which allocates.
++		 */
++		if (delayed && batching) {
++			run_blocks = write_cached_lines(disk, leaf, mapped, end - mapped, in);
++			if (run_blocks == 0)
++				batching = 0;
++		}
++		if (run_blocks != 0) {
++			mapped += run_blocks;
++			in += (size_t)run_blocks * leaf->d_block_size;
++			writeback_kick(disk);
++			continue;
++		}
++
+ 		if (leaf->d_block_size > KERN_PAGE_SIZE)
+ 			line_bytes = leaf->d_block_size;
+ 		else
+@@ -5733,6 +5754,154 @@ copy_cached_lines(
+ 	return (uint32_t)(copied * line_blocks);
+ }
+ 
++/*
++ * Writes the whole lines at the start of a range into the cache and leaves
++ * them dirty, up to BUF_RUN_LINES of them, and reports the blocks written;
++ * the caller has found the write delayed.
++ *
++ * The lines are looked up, or taken over from idle clean lines when the
++ * cache is full, under one hold of the cache lock, and given back under
++ * one more.  A line that is in use, of another shape, or missing while the
++ * cache still has room ends the run without waiting, and zero leaves the
++ * range to the path that writes a line at a time.  The run is taken only
++ * while it keeps dirty memory within the disk's bound, so that a write
++ * past the bound still goes through at once.
++ */
++static uint32_t
++write_cached_lines(
++	const struct disk *disk,
++	struct disk *leaf,
++	uint64_t block,
++	uint64_t remaining,
++	const uint8_t *in)
++{
++	struct buf *lines[BUF_RUN_LINES];
++	uint64_t line_blocks;
++	uint64_t line_block;
++	uint64_t dirty;
++	uint64_t limit;
++	unsigned count;
++	unsigned found;
++	unsigned taken;
++	unsigned recycled;
++	unsigned index;
++	unsigned long irq;
++	int usable;
++
++	/* Takes whole page-sized lines only, from a line's start. */
++	if (leaf->d_block_size == 0 || leaf->d_block_size > KERN_PAGE_SIZE)
++		return 0;
++	line_blocks = KERN_PAGE_SIZE / leaf->d_block_size;
++	if (block % line_blocks != 0 || remaining < 2U * line_blocks)
++		return 0;
++	count = BUF_RUN_LINES;
++	if (remaining / line_blocks < count)
++		count = (unsigned)(remaining / line_blocks);
++
++	/* Leaves out a line the disk's end cuts short. */
++	if (block >= leaf->d_block_count)
++		return 0;
++	if ((leaf->d_block_count - block) / line_blocks < count)
++		count = (unsigned)((leaf->d_block_count - block) / line_blocks);
++	if (count < 2U)
++		return 0;
++
++	/* Keeps the run within the bound of dirty memory. */
++	dirty = atomic_u64_load_acquire(&cache_dirty_bytes);
++	limit = dirty_limit_of(disk);
++	if (dirty > limit)
++		return 0;
++	if ((limit - dirty) / KERN_PAGE_SIZE < count)
++		count = (unsigned)((limit - dirty) / KERN_PAGE_SIZE);
++	if (count < 2U)
++		return 0;
++
++	/* References the lines that are there, or takes over idle ones, under one hold. */
++	found = 0;
++	recycled = 0;
++	irq = spin_lock_irqsave(&cache_lock);
++
++	for (index = 0; index < count; index++) {
++		line_block = block + index * line_blocks;
++		lines[index] = hash_find_locked(leaf, line_block);
++		if (lines[index] != NULL) {
++			/* A hit: referenced and kept out of the LRU while it is written. */
++			refcount_get(&lines[index]->b_refs);
++			lru_remove_locked(lines[index]);
++		} else {
++			/* A miss: an idle line of a full cache comes back hashed, invalid and referenced. */
++			lines[index] = recycle_line_locked(leaf, line_block, line_blocks, KERN_PAGE_SIZE, 0);
++			if (lines[index] == NULL)
++				break;
++			recycled++;
++		}
++		found++;
++	}
++
++	spin_unlock_irqrestore(&cache_lock, irq);
++
++	/* Counts the lookups as the line-at-a-time path does. */
++	stat_add(&stat_hits, found - recycled);
++	stat_add(&stat_misses, recycled);
++	stat_add(&stat_evictions, recycled);
++
++	/* Takes each idle line of the page's shape in turn, stopping at the first other one. */
++	taken = 0;
++	for (index = 0; index < found; index++) {
++		irq = spin_lock_irqsave(&lines[index]->b_lock);
++		usable = 0;
++		if (!lines[index]->b_busy &&
++		    !lines[index]->b_io_inflight &&
++		    lines[index]->b_block_count == line_blocks &&
++		    lines[index]->b_memory.size == KERN_PAGE_SIZE) {
++			lines[index]->b_busy = 1;
++			usable = 1;
++		}
++		spin_unlock_irqrestore(&lines[index]->b_lock, irq);
++		if (!usable)
++			break;
++		taken++;
++	}
++
++	/*
++	 * Copies the caller's bytes into each line taken and marks it dirty,
++	 * its blocks written outside any journal, as the line-at-a-time path
++	 * does, then lets it go.
++	 */
++	for (index = 0; index < taken; index++) {
++		kern_memcpy(lines[index]->b_data, in + (size_t)index * KERN_PAGE_SIZE, KERN_PAGE_SIZE);
++		mark_dirty(lines[index], 0, line_blocks, 0);
++
++		irq = spin_lock_irqsave(&lines[index]->b_lock);
++
++		lines[index]->b_busy = 0;
++		waitq_wake_all(&lines[index]->b_waitq);
++
++		spin_unlock_irqrestore(&lines[index]->b_lock, irq);
++	}
++
++	/* Nothing was looked up: the caller writes a line at a time. */
++	if (found == 0)
++		return 0;
++
++	/*
++	 * Gives every reference back under one hold.  A line taken over but
++	 * not written stays hashed, invalid and idle, as a line whose read
++	 * has not started would.
++	 */
++	irq = spin_lock_irqsave(&cache_lock);
++
++	for (index = 0; index < found; index++) {
++		if (refcount_put_not_last(&lines[index]->b_refs) == 1)
++			lru_add_locked(lines[index]);
++	}
++
++	spin_unlock_irqrestore(&cache_lock, irq);
++
++	/* Succeeded: the blocks of the lines written. */
++	return (uint32_t)(taken * line_blocks);
++}
++
+ /*
+  * Takes over an idle line for another block when the cache is full;
+  * cache_lock is held and the block is known to be missing.
+diff --git a/src/kern/syscall.c b/src/kern/syscall.c
+index 63221e6dc7..7e21fe426b 100644
+--- a/src/kern/syscall.c
++++ b/src/kern/syscall.c
+@@ -88,7 +88,7 @@
+ /*
+  * The largest bounce buffer a regular file or block device transfer
+  * allocates, so a long read or write reaches the disk as one long request
+- * instead of 64 KiB ones (ws299, 2026-10-27 Q1).
++ * instead of 64 KiB ones.
+  */
+ #define SYSCALL_LARGE_CHUNK (1024U * 1024U)
+ #define SYSCALL_SOCKET_BUFFER_MAX (64U * 1024U)
+@@ -2862,7 +2862,7 @@ syscall_io_pooled(
+  *
+  * A short transfer uses the caller's stack buffer.  A transfer of a regular
+  * file or a block device longer than one pool batch first gets a heap buffer
+- * of up to SYSCALL_LARGE_CHUNK, so the disk sees long requests (ws299).
++ * of up to SYSCALL_LARGE_CHUNK, so the disk sees long requests.
+  * Otherwise a regular file or a block device borrows shared scratch without
+  * allocation or waiting.  A pipe, socket or other device gets a heap buffer of up to
+  * SYSCALL_STREAM_CHUNK: it may block while it holds it, so it does not take
+diff --git a/src/kern/vm/object-sync.c b/src/kern/vm/object-sync.c
+index 154c0751f1..76e3612962 100644
+--- a/src/kern/vm/object-sync.c
++++ b/src/kern/vm/object-sync.c
+@@ -960,7 +960,7 @@ vm_object_sync_range_buffer(
+ 	 * window.
+ 	 *
+ 	 * The pass walks the range in offset order through the page index and
+-	 * resumes after the page it took last (ws299).  Searching the whole
++	 * resumes after the page it took last.  Searching the whole
+ 	 * page list from its head for every page made a sync quadratic in the
+ 	 * resident pages: a 3 GiB file kept the shutdown's sync running for
+ 	 * hours.
+diff --git a/userland/base/mkfs/README.md b/userland/base/mkfs/README.md
+index b02138db10..0bb032c0c4 100644
+--- a/userland/base/mkfs/README.md
++++ b/userland/base/mkfs/README.md
+@@ -71,8 +71,12 @@ normal formatting still requires identity revalidation and BLKRESERVE.
+ `ufs_format_native_validate_size`, `ufs_format_native_write` and
+ `ufs_format_native_verify` provide the dedicated-root initializer. The initial
+ namespace contains only root `.` and `..`, with no `.zovl*` files or marker.
+-The existing journal/snapshot persistence tail remains outside filesystem
+-allocation. Total fragments and free-space summaries use 64-bit arithmetic.
++The journal/snapshot persistence tail stays reserved outside filesystem
++allocation but is zeroed, with no journal or snapshot locator: a volume with
++the tail journal is mounted write-through and flushes the device at every
++block allocation, while the native volume, like the root image, carries its
++metadata in the batched journal the kernel makes at the first writable mount
++and delays its writes. Total fragments and free-space summaries use 64-bit arithmetic.
+ Geometry checks account for the caller's off_t, inode-number capacity,
+ per-group bitmaps and the final group's metadata room. Native metadata is
+ flushed before primary publication; formatting is not crash-atomic.
+diff --git a/userland/base/mkfs/ufs-format.c b/userland/base/mkfs/ufs-format.c
+index abe7f41ad3..cebeef1aa7 100644
+--- a/userland/base/mkfs/ufs-format.c
++++ b/userland/base/mkfs/ufs-format.c
+@@ -1225,7 +1225,10 @@ locator_digest(
+ 	return value;
+ }
+ 
+-/* Initializes disjoint journal and inactive snapshot storage after the volume. */
++/*
++ * Initializes disjoint journal and inactive snapshot storage after the
++ * volume; the native profile's tail is only cleared.
++ */
+ static int
+ format_tail(
+ 	struct format_context *context)
+@@ -1233,6 +1236,7 @@ format_tail(
+ 	uint8_t buffer[512];
+ 	uint64_t end;
+ 	uint64_t cursor;
++	uint64_t volume_bytes;
+ 	uint32_t checksum;
+ 	int error;
+ 
+@@ -1240,6 +1244,22 @@ format_tail(
+ 	if (!context->profile)
+ 		return 0;
+ 
++	/*
++	 * Keeps the native volume's tail reserved but publishes nothing in it.
++	 * A volume with the tail journal is mounted write-through and flushes
++	 * the device at every block allocation; without it the kernel carries
++	 * the metadata in the batched journal and delays the writes, as on the
++	 * root image.  Zeroing the whole tail also clears the locators an
++	 * earlier format of the medium left there, which the kernel would
++	 * otherwise find after the new volume's end.
++	 */
++	if (context->profile == FORMAT_NATIVE) {
++		volume_bytes = (uint64_t)context->fragments * context->fsize;
++		error = zero_region(context, volume_bytes,
++		    context->medium_bytes - volume_bytes);
++		return error;
++	}
++
+ 	/*
+ 	 * Clear old recovery records and unallocated final alignment padding.
+ 	 * The records are in 512-byte sectors after the volume, where the

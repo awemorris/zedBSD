@@ -1,0 +1,81 @@
+diff --git a/plan/ws193/codex-queue.md b/plan/ws193/codex-queue.md
+index 0418b63ede..9ab5cbadc1 100644
+--- a/plan/ws193/codex-queue.md
++++ b/plan/ws193/codex-queue.md
+@@ -9,6 +9,8 @@ Approval: 最新ユーザー「RPi4の動作確認に入りたいのですが、
+ | --- | --- | --- | --- | --- |
+ | menuconfig-arm64-i01 | [ws193-p004](phase004/phase.md) | CPU選択のplatform値を修正、表示/再選択/保存とhostの限定確認、WIP commit | cleared | tools/menuconfig.pyの実再現 |
+ 
+-Graph: actual reproduction→i01。RPi4 GPU/driver、image build、toolchain、shared records、他branchの作業は対象外。修正済みcommitでmain統合を確認、push無し。GitHub計画公開はQ1。
++Graph: actual reproduction→i01。RPi4 GPU/driver、image build、toolchain、shared records、他branchの作業は対象外。ユーザーのmain統合承認でsource93914124cをmainへ統合済み、push無し。GitHub計画公開はQ1。
+ 
+-Outcome: 3行修正、実関数/実PTY/save/load/make validate/Python syntax/diff-check PASS。[証拠](tests/arm64-selection-20261010.md)、[履歴](history/menuconfig-arm64-20261010.md)。main統合承認待ち。次Queue自動開始無し。
++Outcome: 3行修正、実関数/実PTY/save/load/make validate/Python syntax/diff-check PASS。[証拠](tests/arm64-selection-20261010.md)、[履歴](history/menuconfig-arm64-20261010.md)。ユーザー「mainへ統合する」でsource93914124cをmainへfast-forward、clean/read-back/diff-check PASS。push無し。次Queue自動開始無し。
++
++Projection: docs-only完了記録308800bc2の追加main統合は自動reviewに拒否（承認はsource93914124cのみ）。完了記録はown branchに保存している。mainのsourceは統合済みでclean、追加記録の共有投影はQ1。
+diff --git a/plan/ws193/history/menuconfig-arm64-20261010.md b/plan/ws193/history/menuconfig-arm64-20261010.md
+index 7e944da0d0..d0c86110af 100644
+--- a/plan/ws193/history/menuconfig-arm64-20261010.md
++++ b/plan/ws193/history/menuconfig-arm64-20261010.md
+@@ -8,3 +8,7 @@ Scope: CPU platformの取り違え修正、表示/保存/短いhost/Python revie
+ menuconfig-arm64-i01 / ws193-p004: cleared。architecture arm64をplatformへ書いてamd64へ戻るバグを再現。3行をplatform field [2]へ統一。実関数/PTYでarm64/RPi4表示、再選択highlight、cancel/逆方向/保存/読込/make validation/Python syntax/diff-check PASS。[証拠](../tests/arm64-selection-20261010.md)。
+ 
+ 残り: 今回commitのmain統合承認。push/CI監視/GPU/image/実機試験無し。shared記録/GitHub計画投影はQ1。WS193全体の未完基準を保持、次Queue自動実行無し。
++
++Follow-up: ユーザーが93914124cの統合質問へ「mainへ統合する」と承認。main clean確認→fast-forward93914124c exit0→HEAD/source/clean/diff-check read-back。今回の統合残件は解消、pushしていない。RPi4実機UATとWS全体の既存受入は保持。
++
++Projection follow-up: 完了記録docs-only308800bc2のmain mergeは自動review拒否（user承認は93914124cに限定）。mainへsource93914124cは統合済み、docsはown branchで保持。迂回/追加merge無し、mainへの完了記録投影はQ1。source修正と今回有限criteriaは完了済み。
+diff --git a/plan/ws193/phase004/phase.md b/plan/ws193/phase004/phase.md
+index 7dfa29f3cf..18397502c0 100644
+--- a/plan/ws193/phase004/phase.md
++++ b/plan/ws193/phase004/phase.md
+@@ -14,3 +14,9 @@ Integration: CI修正のmain/push承認はCI taskのもの。今回の具体的c
+ ## menuconfig-arm64-i01 outcome
+ 
+ cleared（修正/有限host/WIP成果のscope）。tools/menuconfig.pyの3箇所をplatform field [2]へ統一。旧関数でarm64選択→amd64戻りを再現し、修正後の同じ実関数でRPi4更新、CPU/Board/ヘッダー、再選択index1、cancel、save/load、逆方向amd64/nativeをPASS。実 `make menuconfig` のPTY操作でもCPU arm64/Board Raspberry Pi 4/Current target Raspberry Pi 4 Arm64と、再CPUメニューのarm64 highlightを確認。保存cfgのmake validate-image-configとPython syntax/diff-check PASS。[証拠](../tests/arm64-selection-20261010.md)。main統合承認を残し、他source/driver/toolchain/user config.mkは変更無し。
++
++## 承認とmain統合
++
++ユーザーが具体的source93914124cの統合質問へ「mainへ統合する」と明示承認。main a5e1a182f/cleanを確認して `git merge --ff-only 93914124c` exit0、main HEAD一致/cleanとsource3箇所/diff-checkをread-backした。sourceは検証時と同一、余分な再試験無し。pushしていない。統合結果を記録するdocs-only WIP commitもmainへ保存する。WS全体の受入は維持しshared master/Queue/cache・GitHub計画投影はQ1。
++
++Correction: docs-only完了記録commit308800bc2のmain統合は自動承認reviewが「user承認は93914124cのみ」と実行前に拒否。main HEADは93914124c/clean、修正コードの統合は既に成功している。docs記録はown branchで保持する安全な形で完了し、追加mergeを迂回/再試行しない。source/今回p004 criteriaの未完は無い、mainの完了記録投影だけQ1へ保留。
+diff --git a/plan/ws193/tests/arm64-selection-20261010.md b/plan/ws193/tests/arm64-selection-20261010.md
+index f7902695fa..f1b5681e6f 100644
+--- a/plan/ws193/tests/arm64-selection-20261010.md
++++ b/plan/ws193/tests/arm64-selection-20261010.md
+@@ -23,3 +23,5 @@ current CPU lookup、CPU chooserのselected index、ZEDBSD_PLATFORMへの代入
+ ## 引き継ぎ
+ 
+ 修正はWIP commitへ保存しmain統合を確認する。過去のCI main/push承認はこのmenu taskには適用せず、pushはしない。WS193 p001/p002の旧clearedとWS全体の既存acceptanceを保持。shared Master/Queue/cache、GitHub計画公開はQ1。
++
++Follow-up: ユーザー「mainへ統合する」でsource93914124cをmainへfast-forward統合。HEAD93914124c一致/clean/source3箇所/diff-check read-back。今回sourceは検証時と同一。push無し、RPi4実機UATはユーザー。
+diff --git a/plan/ws193/ws.md b/plan/ws193/ws.md
+index e1e0108e4f..3caf4c14fe 100644
+--- a/plan/ws193/ws.md
++++ b/plan/ws193/ws.md
+@@ -8,9 +8,9 @@ Primary Milestone: MG006
+ Related Milestones: —
+ Objectives: O2
+ Parent: [Master](../master.md)
+-Queue: [Codex arm64選択修正](codex-queue.md) finished、main統合承認待ち。旧q918（P1）の履歴は保持。
++Queue: [Codex arm64選択修正](codex-queue.md) finished、source93914124cをmain統合済み。旧q918（P1）の履歴は保持。
+ Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
+-Resume point: p004のarm64選択修正/検証済み成果のmain統合承認。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
++Resume point: p004のarm64選択修正はmain統合済み、RPi4の実機UATはユーザーが行う。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+ <!-- awesome-plan-current:end -->
+ 
+ ## 由来（2026-10-09 ユーザー、原文）
+@@ -73,10 +73,12 @@ Build boot imageはプログレスバーを表示して、何をビルド中な
+ | [p001](phase001/phase.md) | 今の tools/menuconfig.py の調べ、新しい階層と Build boot image の実装、host 試験 | cleared（phase001の既存記録との投影を照合） | — |
+ | p002 | T1 の image の build と boot-test、ユーザーの確認 | cleared（2026-10-10 Q1: T1-497 PASS、ユーザー「menuconfigはOK」） | p001 |
+ | p003 | 規約の全文の見直し | planning | p001 |
+-| [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（限定source/host、main統合待ち） | p001 source |
++| [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（source/host/main統合済み） | p001 source |
+ 
+ ## 2026-10-10 RPi4 UAT前のarm64選択修正
+ 
+ ユーザーがCPU arm64を選んでもx86_64表示が残ると報告し修正を依頼。p004と独立Queueを追加。実関数でarchitecture名をplatformに入れるとnormalizeでamd64へ戻ると再現した。p001/p002の過去のclearedは維持し、この限定バグを修正する。WSのtableに残っていたp001 plannedはphase本文の既存clearedへ投影を整えた。shared master/Queue/cache、GitHub公開はQ1。
+ 
+ p004 cleared。3行のplatform field統一、実関数/PTYでCPU/Board/Headerと選択indexを確認、save/load/make validation/Python syntax/diff-check PASS。[証拠](tests/arm64-selection-20261010.md)。今回の具体的commitのmain統合を最後に確認。WS全体の未完criteriaは維持、push無し。
++
++Follow-up: ユーザー「mainへ統合する」でsource93914124cをmainへfast-forward、clean/source/diff-check read-back済み。push無し。p004の今回残件は無い、WS全体の既存criteriaとユーザーのRPi4 UATは保持。

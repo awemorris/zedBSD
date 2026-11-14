@@ -1,0 +1,57 @@
+diff --git a/plan/ws193/codex-drivers-queue.md b/plan/ws193/codex-drivers-queue.md
+index fc52c9557a..b5c95d32dd 100644
+--- a/plan/ws193/codex-drivers-queue.md
++++ b/plan/ws193/codex-drivers-queue.md
+@@ -18,3 +18,7 @@ Outlook: 具体的成果のmain統合承認、shared計画/規則の投影はQ1
+ 2026-10-11 userがDisk/Input/GPU/Audio/Ethernet/WiFi/USBの階層を追加指定。前のflat確認は初期証拠として保持、未統合UIのカテゴリ化と同じ有限範囲の再確認を本attemptで続ける。
+ 
+ 最終結果（2026-10-11）: 本attemptの階層化を含めp007 cleared。8分類/23設定、全6platformの実handler・保存/load・旧default一致・CPU切替・Make条件分岐、RPi4実メニューの階層/ECM保存PASS。適用規則全文review PASS。有限Queueを終了し、新Queueは開始しない。main統合は具体的commitの個別承認待ち、shared投影/GitHub公開はQ1へ保留。
++
++## main統合の追記（2026-10-11）
++
++ユーザーが具体的コミットa1c65db6aの「mainへ統合する」を承認。mainのclean状態・基点c2b97e953からのancestryを確認し、git merge --ff-only a1c65db6aadba7ed963d0a568ed5d1079bde1abfで統合。main HEADのread-back、8分類/23設定、Python構文を確認PASS。push無し。上記の統合承認待ちは当時の状態。現在はmain統合済み。この統合結果の追記は担当branchへ保存し、shared Master/Queue/Guardrail/GitHub投影と追記の共有反映はQ1へ保留。
+diff --git a/plan/ws193/phase007/phase.md b/plan/ws193/phase007/phase.md
+index 58f243afcd..397dfce662 100644
+--- a/plan/ws193/phase007/phase.md
++++ b/plan/ws193/phase007/phase.md
+@@ -31,3 +31,7 @@ user「Disk, Input, GPU, Audio, Ethernet, WiFi, USBみたいに階層化して
+ 
+ menuconfig-drivers-20261010-i01 cleared。Disk/Input/GPU/Audio/Ethernet/WiFi/USB/Platformの8分類へ23boolを重複・欠落なしで配置。全6platformで実drivers_menu/driver_optionsによる全カテゴリ全設定のtoggle/save/load、初期既定値の旧実装との一致、Make validation PASS。CPU切替保持、x86 ECMのsource条件分岐も再確認PASS。RPi4 real PTYでDriversの位置、8分類、EthernetのECMをOFFへ変更して保存を確認。Python構文/対象既存fixture/diff-checkと変更全文の適用規則review PASS。
+ 最終差分はtools/menuconfig.py、config/drivers/menu.list、既存fixtureのtop-level期待値と本WS記録。分類metadataはUI配置だけを持ち、設定名・label・kind・defaultの正本は既存driver定義のまま。[証拠](../tests/drivers-menu-20261010.md)。main統合は具体的commitの承認待ち、pushなし。WS全体のp003は未完、shared投影/GitHub公開はQ1へ保留。
++
++## main統合の追記（2026-10-11）
++
++ユーザーが具体的コミットa1c65db6aの「mainへ統合する」を承認。mainのclean状態・基点c2b97e953からのancestryを確認し、git merge --ff-only a1c65db6aadba7ed963d0a568ed5d1079bde1abfで統合。main HEADのread-back、8分類/23設定、Python構文を確認PASS。push無し。上記の統合承認待ちは当時の状態。現在はmain統合済み。この統合結果の追記は担当branchへ保存し、shared Master/Queue/Guardrail/GitHub投影と追記の共有反映はQ1へ保留。
+diff --git a/plan/ws193/tests/drivers-menu-20261010.md b/plan/ws193/tests/drivers-menu-20261010.md
+index 71c69d2a2c..cf195185fe 100644
+--- a/plan/ws193/tests/drivers-menu-20261010.md
++++ b/plan/ws193/tests/drivers-menu-20261010.md
+@@ -54,3 +54,7 @@ Pythonのみの編集でnative compile対象なし。kernel/image/QEMU/実機の
+ - 対象既存fixture、2 Python sourceのcompile、git diff --check PASS。分類追加を含む最終差分全体をAGENTS/Guardrail・既存Python規約に照らしてmanual review PASS。
+ 
+ native build対象なし。driver移植・image・QEMU・実機試験はscope外で未実施。main統合は具体的commitの承認待ち。
++
++## main統合の追記（2026-10-11）
++
++ユーザーが具体的コミットa1c65db6aの「mainへ統合する」を承認。mainのclean状態・基点c2b97e953からのancestryを確認し、git merge --ff-only a1c65db6aadba7ed963d0a568ed5d1079bde1abfで統合。main HEADのread-back、8分類/23設定、Python構文を確認PASS。push無し。上記の統合承認待ちは当時の状態。現在はmain統合済み。この統合結果の追記は担当branchへ保存し、shared Master/Queue/Guardrail/GitHub投影と追記の共有反映はQ1へ保留。
+diff --git a/plan/ws193/ws.md b/plan/ws193/ws.md
+index 1fc888a87a..687920da44 100644
+--- a/plan/ws193/ws.md
++++ b/plan/ws193/ws.md
+@@ -76,7 +76,7 @@ Build boot imageはプログレスバーを表示して、何をビルド中な
+ | [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（限定source/host、93914124c main統合済み） | p001 source |
+ | [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、fe4300313 main統合済み） | p004 source |
+ | [p006](phase006/phase.md) | Firmwareも全CPUで選択/保存/packaging可能にする | cleared（source/host、c2b97e953 main統合済み） | p005 source |
+-| [p007](phase007/phase.md) | Driversを指定位置へ追加、機能別階層と全CPU共通bool選択/保存 | cleared（限定source/host、main統合待ち） | p006 source |
++| [p007](phase007/phase.md) | Driversを指定位置へ追加、機能別階層と全CPU共通bool選択/保存 | cleared（限定source/host、a1c65db6a main統合済み） | p006 source |
+ 
+ ## 2026-10-10 RPi4 UAT前のarm64選択修正
+ 
+@@ -102,3 +102,7 @@ userがBoot OptionとDevelopmentの間へのDrivers追加、全CPU共通選択
+ 既存23boolを共通表示、normalizeの互換性filterを外しsave/CPU切替で保持。初期/未指定driver既定値の旧実装との一致も確認。対象host/PTY/Make条件分岐/全文review PASS。ECMはx86で既存build切替あり、arm64にはsource未接続であり移植の成功とはしない。固定driverには選択flagを追加していない。WS全体のp003/受入は未完。具体的成果commitのmain統合を確認し、shared投影/GitHubはQ1へ保留、push無し。
+ 
+ 2026-10-11 userの追加指定でp007内の未統合UIを機能別に階層化。Disk/Input/GPU/Audio/Ethernet/WiFi/USB/Platformに既存23boolを配置。全6platformの実カテゴリhandler・全件toggle/save/load・初期既定値の一致、RPi4 real PTYのDrivers→Ethernet→ECM操作と保存を最終sourceで再確認PASS。p007 cleared、独立Queue finished。p001等の当時の結果は保持。main統合はこの最終差分の具体的commit承認待ち、共有投影/GitHub公開はQ1へ保留。
++
++## main統合の追記（2026-10-11）
++
++ユーザーが具体的コミットa1c65db6aの「mainへ統合する」を承認。mainのclean状態・基点c2b97e953からのancestryを確認し、git merge --ff-only a1c65db6aadba7ed963d0a568ed5d1079bde1abfで統合。main HEADのread-back、8分類/23設定、Python構文を確認PASS。push無し。上記の統合承認待ちは当時の状態。現在はmain統合済み。この統合結果の追記は担当branchへ保存し、shared Master/Queue/Guardrail/GitHub投影と追記の共有反映はQ1へ保留。

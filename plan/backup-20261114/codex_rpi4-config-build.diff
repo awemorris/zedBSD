@@ -1,0 +1,52 @@
+diff --git a/plan/ws193/codex-rpi4-build-queue.md b/plan/ws193/codex-rpi4-build-queue.md
+index 384c8f7585..75ec070629 100644
+--- a/plan/ws193/codex-rpi4-build-queue.md
++++ b/plan/ws193/codex-rpi4-build-queue.md
+@@ -16,3 +16,7 @@ Outlook: 指定configのビルド確認と具体的成果の統合。全CPUで
+ 
+ Selected configの通常make -j16とcheck-disk-image PASS。初期missing rule、arm64 package/ELF設定、最終image容量不足を修正。最終source review済み。
+ Evidence: [build summary](tests/rpi4-build-20261011.md), [Phase outcome](phase008/phase.md)。実機未実施、main具体的commit承認・共有Past Log/Master投影・GitHub公開はQ1 pending。新Queueは開始しない。
++
++## Main統合の追記 / 2026-10-11
++
++current userが「mainへ統合する」と具体的commit df1d2be26を承認。mainはclean、ad9d2f6d3からdf1d2be263514710d645da115959609fc1a6ec77へfast-forward成功。HEAD/commit差分無し/cleanをread-back確認。pushなし、実機未実施、共有投影/GitHubはQ1 pending。追記は専用branchに残す。
+diff --git a/plan/ws193/phase008/phase.md b/plan/ws193/phase008/phase.md
+index e20d3e969e..4d8079327f 100644
+--- a/plan/ws193/phase008/phase.md
++++ b/plan/ws193/phase008/phase.md
+@@ -31,3 +31,7 @@ libbrowserと全DSO依存の実arm64 build/ELF検査PASS、warning/error 0。共
+ rpi4-config-build-20261011-i01 cleared。現在configのライブラリ/選択app/static preview、kernel、承認済みNoct、外部package、rootfs、SD imageの通常make -j16が完了。イメージ終盤の固定256MiB容量不足もこのconfigのbuild修正として、FAT配置/root開始LBAを保って必要な大きさへ伸長。最終root199MiB、SD image328MiB。
+ `make check-disk-image`でMBR/FAT/収録payload/UFS byte一致PASS。最終変更全文の規則review、Python syntax、amd64移動recipeの逆置換全文一致、ELF arm64 alias/異CPU拒否、diff-check PASS。変更coreのcompiler警告0、外部packageの既存warningとtoolchain固定/未bootの制限は[証拠](../tests/rpi4-build-20261011.md)に記録。
+ main統合は具体的WIP commitの承認待ち。共有Master/Queue/Past Log投影とGitHub公開はQ1へ保留。WS全体p003/実機受入をこのbuildのみでclearにしない。
++
++## Main統合の追記 / 2026-10-11
++
++current userが「mainへ統合する」と具体的commit df1d2be26を承認。mainはclean、ad9d2f6d3からdf1d2be263514710d645da115959609fc1a6ec77へfast-forward成功。HEAD/commit差分無し/cleanをread-back確認。pushなし、実機未実施、共有投影/GitHubはQ1 pending。追記は専用branchに残す。
+diff --git a/plan/ws193/ws.md b/plan/ws193/ws.md
+index 821a5103aa..ea819d6139 100644
+--- a/plan/ws193/ws.md
++++ b/plan/ws193/ws.md
+@@ -10,7 +10,7 @@ Objectives: O2
+ Parent: [Master](../master.md)
+ Queue: [Codex RPi4 build](codex-rpi4-build-queue.md) finished。旧arm64選択修正とq918（P1）の履歴は保持。
+ Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
+-Resume point: p008の具体的成果のmain統合承認、WS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
++Resume point: p008 source df1d2be26はmain統合済み。WS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+ <!-- awesome-plan-current:end -->
+ 
+ ## 由来（2026-10-09 ユーザー、原文）
+@@ -77,7 +77,7 @@ Build boot imageはプログレスバーを表示して、何をビルド中な
+ | [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、fe4300313 main統合済み） | p004 source |
+ | [p006](phase006/phase.md) | Firmwareも全CPUで選択/保存/packaging可能にする | cleared（source/host、c2b97e953 main統合済み） | p005 source |
+ | [p007](phase007/phase.md) | Driversを指定位置へ追加、機能別階層と全CPU共通bool選択/保存 | cleared（限定source/host、a1c65db6a main統合済み） | p006 source |
+-| [p008](phase008/phase.md) | 選択したRPi4 configのrootfs/desktopビルドルール補完 | cleared（選択config/image build、main統合待ち） | p005〜p007 main source |
++| [p008](phase008/phase.md) | 選択したRPi4 configのrootfs/desktopビルドルール補完 | cleared（選択config/image build、df1d2be26 main統合済み） | p005〜p007 main source |
+ 
+ ## 2026-10-10 RPi4 UAT前のarm64選択修正
+ 
+@@ -109,3 +109,5 @@ userがBoot OptionとDevelopmentの間へのDrivers追加、全CPU共通選択
+ userが現在config.mkでmake -j16時のlibbrowser.soルール不足を報告し修正を依頼。p008と独立有限Queueを追加。共通の選択registryに対して不足したarm64 link/配置ルールを補う。main ad9d2f6d3でp007 source a1c65db6aの統合を再確認。shared投影/GitHubはQ1へ保留。
+ 
+ p008 cleared: 保存した現在configの通常make -j16がライブラリ/全選択app/static preview/Noct/kernel/外部package/rootfs/SD imageまで完了、check-disk-image PASS。amd64のportable source/link/check recipeは共通化前と逆置換で全文一致、変更の最終規則review PASS。[証拠](tests/rpi4-build-20261011.md)。外部package既存warningと共有toolchain固定は明記、実機/boot未実施。p008の具体的commit統合承認を確認し、WS全体p003/受入は未完のまま。共有Master/Queue/Past LogとGitHub投影はQ1 pending、pushなし。
++
++2026-10-11 userが具体的commit df1d2be26のmain統合を承認。cleanなmain ad9d2f6d3からfast-forwardし、HEAD df1d2be263514710d645da115959609fc1a6ec77・差分無し・作業ツリーcleanをread-back確認。push/実機起動は未実施。共有計画/GitHub投影はQ1 pending。この統合結果の追記は専用branchに保存し、承認済みsource以外をmainへ追加統合しない。

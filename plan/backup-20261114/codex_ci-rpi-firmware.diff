@@ -1,0 +1,121 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 6a89c6e4f4..0b8fcc86c1 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -36,12 +36,15 @@ jobs:
+           mkdir -p artifacts
+           gzip -9 -c build/amd64/hdd-image.img > artifacts/zedbsd-intel.img.gz
+ 
++      - name: Fetch pinned Raspberry Pi firmware
++        run: git submodule update --init --depth 1 -- vendor/raspberrypi-firmware
++
+       - name: Build arm64
+         run: |
+           cp config/ci/config-rpi4.mk config.mk
+           make -j4
+           mkdir -p artifacts
+-          gzip -9 -c build/amd64/hdd-image.img > artifacts/zedbsd-rpi4.img.gz
++          gzip -9 -c build/arm64/hdd-image.img > artifacts/zedbsd-rpi4.img.gz
+ 
+       - name: Package Kei-nightly.zip
+         # Until the base package is on the rev-0 release, a failure here leaves
+diff --git a/.gitmodules b/.gitmodules
+index f6ee447c48..82f510bf60 100644
+--- a/.gitmodules
++++ b/.gitmodules
+@@ -1,3 +1,4 @@
+ [submodule "vendor/raspberrypi-firmware"]
+ 	path = vendor/raspberrypi-firmware
+ 	url = https://github.com/raspberrypi/firmware.git
++	shallow = true
+diff --git a/plan/ws129/codex-rpi-firmware-ci-queue.md b/plan/ws129/codex-rpi-firmware-ci-queue.md
+new file mode 100644
+index 0000000000..fad6f50633
+--- /dev/null
++++ b/plan/ws129/codex-rpi-firmware-ci-queue.md
+@@ -0,0 +1,17 @@
++# Codex Queue: rpi-firmware-ci-20261011
++
++Status: finished
++Owner: Codex / codex/ci-rpi-firmware
++Approval: current user「CIが失敗しています。RPiのファームウェアをshallow cloneするように修正できますか？」
++Finite scope: initialize the pinned RPi firmware submodule with depth1 before the nightly arm64 build, declare its shallow preference, and correct the adjacent RPi artifact source path. Review YAML/shell, verify pinned shallow behavior in an isolated local Git fixture, record failed-run evidence. No full rebuild, long CI monitoring, toolchain, release publication, push or unrelated boot0 integration.
++
++| Attempt | Phase | Status | Dependencies |
++| --- | --- | --- | --- |
++| rpi-firmware-ci-20261011-i01 | [ws129-p015](phase015/phase.md) | cleared | failed CI38079321808 / current workflow |
++
++Graph: existing nightly CI (context) → i01 → subsequent remote CI (context).
++Main/push approval and shared/remote planning projections remain separate; no automatic next Queue.
++
++## Outcome
++
++Workflow/host item cleared. [Evidence](tests/rpi-firmware-ci-20261011.md): failed-run cause read back, targeted pinned depth1 acquisition and RPi artifact input corrected, YAML/shell and older-pinned shallow fixture PASS. No C build required. Main/push approval and actual remote CI result pending; no monitoring, toolchain rebuild or next Queue.
+diff --git a/plan/ws129/phase015/phase.md b/plan/ws129/phase015/phase.md
+new file mode 100644
+index 0000000000..47705a014e
+--- /dev/null
++++ b/plan/ws129/phase015/phase.md
+@@ -0,0 +1,17 @@
++<!-- awesome-plan project=zedbsd record=ws129-p015 -->
++# WS129 p015: RPi firmware shallow acquisition in nightly CI
++
++Status: cleared
++Disposition: normal
++Parent: [WS129](../ws.md)
++Queue: [rpi-firmware-ci-20261011](../codex-rpi-firmware-ci-queue.md)
++
++User authorized fixing CI by shallow-cloning RPi firmware. Run38079321808 (head402598d27) fails during Build arm64 with missing vendor/raspberrypi-firmware/boot/start4.elf; checkout never initialized submodules. The same arm64 step incorrectly compresses build/amd64/hdd-image.img into the RPi artifact.
++
++Design: add a targeted git submodule update --init --depth 1 before the arm64 build. Preserve the gitlink's fixed commit instead of following upstream HEAD. Declare shallow=true for this submodule's default acquisition. Compress the actual build/arm64 image. amd64-only tagged release workflow does not need RPi firmware acquisition.
++
++Criteria: YAML parse, bash syntax of run steps, isolated local Git fixture demonstrating shallow acquisition of a pinned older commit and idempotent update, artifact path review, diff-check and full applicable project-rule review. No C code or compiled-source change. No full toolchain/image rebuild or long remote CI monitoring; later remote success is not implied. Separate main/push authority; private worktree, shared Master/Queue/cache unchanged, Q1 projection pending.
++
++## Source outcome / 2026-10-11
++
++Limited criteria cleared: targeted depth1 submodule update before arm64, shallow preference and corrected RPi artifact input. YAML/shell syntax, actual workflow command with older-pinned local Git fixture and repeat update PASS; full applicable rule review/diff-check PASS. [Evidence and limitations](../tests/rpi-firmware-ci-20261011.md). Production gitlink preserved. Remote CI success, main integration/push and shared projections remain pending; no long monitoring or unrelated boot0 integration.
+diff --git a/plan/ws129/tests/rpi-firmware-ci-20261011.md b/plan/ws129/tests/rpi-firmware-ci-20261011.md
+new file mode 100644
+index 0000000000..652dae015c
+--- /dev/null
++++ b/plan/ws129/tests/rpi-firmware-ci-20261011.md
+@@ -0,0 +1,21 @@
++# RPi firmware CI acquisition / 2026-10-11
++
++Parent: [ws129-p015](../phase015/phase.md)
++Worktree: codex/ci-rpi-firmware, base main9a0ddc6cb. Unintegrated boot0 changes are not in this branch.
++
++## Failure evidence
++
++[CI38079321808](https://github.com/awemorris/zedBSD/actions/runs/38079321808), head402598d2708ca3ed3daaf923caedb73e6c95d2e4, failed during Build arm64: `No rule to make target 'vendor/raspberrypi-firmware/boot/start4.elf', needed by 'bootloader'`. Default actions/checkout did not initialize submodules. Gitlink pins firmware3d301dd924bcd758a4c8cb19fe8531031f033f43. Full failed-step log saved privately at build/ci-rpi-firmware/failed-run.log; read-only gh run list/view successful. No remote mutation or CI rerun.
++
++## Changes
++
++Before Build arm64, nightly now executes `git submodule update --init --depth 1 -- vendor/raspberrypi-firmware`. The pinned gitlink remains unchanged; upstream HEAD is not adopted. .gitmodules also records shallow=true for this submodule. No recursive/all-submodule acquisition is added. The RPi artifact now compresses build/arm64/hdd-image.img rather than build/amd64/hdd-image.img. Tagged release currently builds amd64 only and is unchanged.
++
++## Verification and limits
++
++- PyYAML parsed the changed workflow; `bash -n` passed for every build-job run step. Diff-check PASS. Existing YAML indentation and simple run syntax preserved. Full applicable AGENTS/Guardrail/project-rule review performed; no C source change or separate YAML/shell full standard is present.
++- Small isolated Git fixture under build/ci-rpi-firmware/shallow-3a4ugwd9 creates three firmware revisions, pins the second in a parent gitlink, and substitutes only the fixture file:// URL into the actual .gitmodules. It executes the exact command extracted from the changed workflow. Checked out HEAD equals the older pin, `git rev-parse --is-shallow-repository` is true, all fixture boot payloads are present and start4.elf has revision2 content. A repeat command succeeds and preserves the pin. Production/shared submodule and Git configuration are untouched.
++- Source diff confirms unchanged production gitlink, one targeted depth1 acquisition, correct arm64 artifact input and unchanged amd64/tagged-release behavior.
++- No full firmware network transfer, toolchain/image rebuild, remote Actions run/success, long monitoring, push or release publication. The fixture verifies Git semantics, not GitHub network availability or subsequent unrelated compilation. User previously requested no long CI monitoring; none is started.
++
++Limited workflow/host criteria cleared. Main/push require the concrete change's approval; shared Master/Queue/history/cache/GitHub planning projections remain Q1 pending. WS release acceptance remains incomplete.
+diff --git a/plan/ws129/ws.md b/plan/ws129/ws.md
+index 624ae6442a..a7cc6f980c 100644
+--- a/plan/ws129/ws.md
++++ b/plan/ws129/ws.md
+@@ -59,6 +59,13 @@ push・GitHub release の公開はユーザーの指示で行う。
+ | [p011](phase011/phase.md) | 試験の QEMU を KVM に統一（`plan/tools/guest/qemu-accel.sh`）、image の build の並列の数を 16 に（`plan/tools/guest/jobs.sh`） | cleared（q646、T1-038 PASS） | — | 2h |
+ | [p012](phase012/phase.md) | REmacs のコマンド名を `/bin/emacs` に（package 名も emacs、`/usr/bin/noct` の link、CI config・license の生成物・remacs-guest.sh）。2026-10-04 user | cleared（T1-082、試験の誤りは 3876079 で修正） | — | 1h |
+ | [p014](phase014/phase.md) | nightly CIのlibavcodec configure失敗: nasm依存を補完 | cleared（workflow/host、main/push待ち） | 実CIログ・p004 workflow | 短い限定修正 |
++| [p015](phase015/phase.md) | nightlyのRPi firmware固定commitをshallow取得、arm64成果物path修正 | cleared（限定workflow/host、main/push待ち） | 実CIログ・現workflow | 短い限定修正 |
++
++## 2026-10-11 RPi firmware CI修正
++
++UserのCI失敗/shallow clone指示で[p015](phase015/phase.md)、[限定Queue](codex-rpi-firmware-ci-queue.md)を追加。CI38079321808はsubmodule未取得でstart4.elfが欠落。arm64成果物の圧縮元もamd64を指すため合わせて修正する。既存release受入とp014の履歴は保持、WS incomplete。boot0修正の承認待ちcommitは混ぜない。共有Master/Queue/cache/GitHub投影はQ1 pending。
++
++p015限定workflow/host criteria cleared。[証拠](tests/rpi-firmware-ci-20261011.md): 固定commitのdepth1取得、YAML/shell構文、旧commitをpinした小さなGit fixtureのshallow/再実行と成果物path確認PASS。main/push/実CI成功は未確認、長時間監視はuser指示どおり行わない。WS incompleteを維持、共有投影はQ1 pending。
+ 
+ ## 2026-10-10 nightly CI修正の追加
+ 

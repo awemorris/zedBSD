@@ -1,0 +1,3979 @@
+diff --git a/plan/master.md b/plan/master.md
+index 52bfe85c89..6c7cf58c5b 100644
+--- a/plan/master.md
++++ b/plan/master.md
+@@ -646,6 +646,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
+ - 2026-10-12 ユーザー:「いったんデフォルトの解像度を1024x600にします。OSC Tokyoでのデモはこの解像度のタッチLCDを購入してのぞみます。」→ platform/arm64/config.txt の既定を 1024x600 60Hz（hdmi_mode 87＋hdmi_cvt）に（Q1）。ディスプレイ本来の解像度（1920x1200）で出す件は後回し。デモの機材は 1024x600 のタッチ LCD（touch の入力の確かめが要る）。
+ - 2026-10-12 ユーザー:「画面更新の分割って、もっと高度化できそうですか？無理ですか？」→ Q1 の案（1 damage を複数の四角のまま描く、2 窓を HVS の plane に載せる、3 CPU の記録・driver の decode の使い回し、4 app の present の部分化）にユーザー「ぜんぶやりましょう。」→ 1 は WS211 p009（P3）、3 は WS211 p010（P4）、4 は WS210 p013（P1、Calendar の後）、2 は新しい WS214（P2、p001 設計から）。800x480 の試し: compositor の draw→shown p50 38ms・submit→shown p50 11ms（place23）。Notes の起動の失敗（stencil format failed -11）は WS141 p017 を (b) の前に回すかをユーザーに問い中。
+ <!-- master:decisions-log:start -->
++- 2026-10-22 ユーザー（d101 を目視して）「ディスプレイで目視していました。アニメーションが素晴らしいです。この調子でチューニングを続けてください。」→ ws270-p007 の 60 fps の最適化を P1・P2 で続ける。
+ - 2026-10-22 ユーザー「CIにVisionFive 2のイメージ作成を追加できますか？」→ config/ci/config-visionfive2-keiland.mk（desktop・graphical login・PowerVR の firmware、試験専用の物は外す）と .github/workflows/ci.yml の vf2-keiland の step（make native-image → zedbsd-vf2.img.gz、release の表と file）。手元で同じ設定の build が rc 0・warning 0。CI の runner では push の後に確認（push はユーザーの指示まで）。
+ - 2026-10-22 ユーザー「ソースコードの整理ができたら、さらに最適化をすすめてください。すべての操作で16msで描画でき、60fpsになることが目標です。ただ、どうしても難しければ、retireしてかまいません。おそらく限界まで最適化して、1280x720に落とせば、目標は自動的にクリアされています。」→ ws270-p007 の受け入れを「全ての操作で 1 frame ≤ 16 ms（60 fps、1920x1080）」に。q1551（comment の整理）の後に始める。難しければ retire してよい（1280x720 なら達成の見込み）。
+ - 2026-10-22 ユーザー「オーケーです。監査しましたがクリアです。plan/ws256/design-peripherals.md section 2.4 みたいなself citationは削除して整理し、ドライバ単体で価値のあるものにしましょう。」→ PowerVR の driver（src/drivers/gpu/powervr/ と VF2 の GPU の platform）の comment から plan・WS・Phase・Queue・Bug の番号への参照を除き、comment だけで意味が分かる形に（q1551 P1）。他の tree への広げはユーザーに確認。
+diff --git a/plan/ws270/phase007/notes-p1.md b/plan/ws270/phase007/notes-p1.md
+index a0fbfa40a3..606414a239 100644
+--- a/plan/ws270/phase007/notes-p1.md
++++ b/plan/ws270/phase007/notes-p1.md
+@@ -235,3 +235,30 @@ branch agent/p1-q1550（基 main 5907c9d3b）。ユーザー（2026-10-21、板
+ - d95a（Q1、fed1a5fa3 の wayland）: 1 窓の全画面 14〜18 ms（d89・d90 は 29〜35）、2 窓 17〜21 ms、窓無し 5〜7 ms。drag の区間は compose の acquire 13.9 ms・frame_ms 28.7 ms。191 ms の外れ 1 本（frame 15）は新しい client 2 つの接続・Vulkan の import と同時（app の起動）。
+ - idle の 139 ms の読み（d95、ac2420800 の trace kernel）: firmware は速い（dust の電源 on 1〜2 tick、TA 0.3・3D 1.1 ms）。同期の job trace では sent 10 ms（host 側）で 139 ms は出ない。timing の job wait は kick→reap で、reap は次の submit まで遅れる（vk-queue の powervr_render_jobs_reap(…, 0)）。Keiland の vkQueueSubmit の 139 ms は kernel の powervr の submit（284 us）の外（libvulkan の capacity・semaphore の待ちか gpu.c の受け付け）。後回し（Q1）。
+ - 39a097e0e（flip を 1 blank で）: zero copy の flip は commit から 2 blank 後を取り込みとしていた（DC_PANEL_LOCATION が板で常に 0 のため位置で判定できない）→ flip は 2 blank に 1 回で acquire が待つ。blank の割り込みで fine counter を記録し、直前の周期（8〜50 ms）から次の blank の 3 ms 以上前の commit はその blank で取られると数える。板の確認（tearing が無いことの目視）待ち。
++
++## q1552（2026-10-22、P1）: 全ての操作で 60 fps（16 ms）
++
++branch agent/p1-q1552（基 main 782f995e4）。ユーザー（2026-10-22）:「すべての操作で16msで描画でき、60fpsになることが目標です。ただ、どうしても難しければ、retireしてかまいません。おそらく限界まで最適化して、1280x720に落とせば、目標は自動的にクリアされています。」
++
++### 計測の道具（plan/ws270/tests/frame-ops/）
++
++- frame-ops.sh（板で root）: Terminal の起動、文字の入力、seq の出力、wheel、title bar と system bar の hover、title bar の drag 往復、App Home 開閉 ×2、Wiseview 開閉 ×2。各段の前に session.log の行数を marks に書く。
++- frame-times.py（host）: KWL LAT の行から frame ごとに pace（acquired→draw）・cpu（draw→recorded）・submit（recorded→queued、GPU）・present・work（draw→submit）・period（前の frame の draw から、100 ms 未満の時）・shown（submit→完了の受け取り）と KWL PASSES の area を表にし、段ごとに work>16・period>16 の数、p50/max、fps を出す。
++- shot-diff.py（host）: keiland-shot の 2 枚の画素の差（max、over2、over8、差の box、差の画像）。
++
++### 読み（d97・d98 の session.log、main 782f995e4 相当）
++
++- drag（d98 frame 39〜48）: 全部 dirty=1 の全画面、work 24〜27 ms（cpu 5、submit 18、present 2）、period 39〜50 ms（約 20 fps）。d97 は work 37〜43、period 61〜73。
++  - 原因 1: damage.c の kwl_damage_pointer が drag 中（button の押下で hover の記録が使えない）に dirty=1 にしていた。shell.c の motion 側（glass_motion_take）は drag_measured で部分の書き直しを選んでいたのに、pointer 側が見ていなかった。
++  - 原因 2: cursor plane の時は pointer_moved が立たないので、scene を変える pointer の move の frame も frame pacing（client の commit 待ち、前の frame の時間の半分、約 13 ms）で毎回待っていた（pace の wait_ms 13〜15）。
++- 約 1/15 の frame で submit→shown が 100〜102 ms（= KWL_RENDER_FENCE_NS の 100 ms）。vkWaitForFences（libvulkan sync.c の sync_notification_wait）が fence の signal で起きず timeout まで寝ている疑い。次の frame もその分遅れる。driver・libvulkan 側（P2 へ）。
++- App Home（d90、古い）: frame ごとに stage の全画面 glass（2 Mpx）と全画面の光の shadow（2 Mpx、内側無し）と content の picture。submit 40〜80 ms。Wiseview: 全画面 glass（sheen 付き、opacity=progress）＋全画面の solid の shade＋窓の tile。
++
++### 変更
++
++- fdc686ca4: kwl_glass_drag_measured を公開し、kwl_damage_pointer も測れる drag では damage（窓の旧と新の場所）だけに。scene を変える pointer の move（hover の probe の変化、drag、dirty）では pointer_moved を立て、pacing で待たない。
++- 99b63fedd・1ce1d3758（glass-map.c、新）: glass の内側の色は blurred wallpaper の画素と glass の色（白の lift・dark の shade・sheen）だけで決まる。色ごとに出力の大きさの map へ同じ shader（opaque の inside variant）で 1 度描き、以後の内側は map を最近傍で読む variant（KWL_PANEL_INSIDE_MAP: texture 1 回）。sheen 付きは box が全画面の時だけ（Wiseview・App Home の stage）。2 frame が求めた色だけ、次の frame の pass の前に描く（6 枚まで、1 frame に 1 枚、直前 2 frame に使った map は追い出さない）。light の無色の flat glass は blurred そのものを同じ variant で読む（map 不要、式が恒等）。blurred の generation・version と出力の大きさが変われば描き直し。`--no-glass-map` で前の描き方（比較の基準）。
++  - App Home の stage（全画面の glass と光）は frame ごとに同じなので、全画面の picture（同じ map の仕組み、描く関数を home.c が渡す）に 1 度描き、frame では opaque の image 1 枚に。
++  - shaders.h は regenerate.py で作り直し、既存の全 variant の SPIR-V が前と同一（名前の番号だけ変わった）。map variant は texture 1 回と除算 1 つ。
++- d3f2abd6e: 窓の commit の damage を全画面にする条件を「上の窓が近い」から「上の窓が近く、その glass が下の scene を blur する（set_blur か docked の中央）」に。上の窓が wallpaper の blur だけなら、その部分も damage の中で描き直される。
++- build（config-visionfive2-desktop-gpu.mk、BUILD=build/q1552）: rc 0、warning 0。板は Q1 待ち。
+diff --git a/plan/ws270/phase007/phase.md b/plan/ws270/phase007/phase.md
+index 7ea91fc0a7..fb4a7ef248 100644
+--- a/plan/ws270/phase007/phase.md
++++ b/plan/ws270/phase007/phase.md
+@@ -87,3 +87,12 @@ clear 3.85 ms、LOAD 23.35 ms、平らな quad 15.1 ms、1/4 面積 7.2 ms、402
+ - d97（P1 39a097e0e: zero copy の flip を条件付きで 1 blank で取られたと数える）: drag の窓で acquire 13.9 → 7.3 ms、frame_ms は 34.6（rec の end 11.45 ms が次の律速）。output lost 0。tearing の目視はユーザー待ち。
+ - d98（P1 41ed59242: kernel の vk-command の object の検索を 256 bucket の hash に、39a097e0e 込み）: vkmatrix 109/109、HWR 0、output lost 0。rec の end 11.45 → 0.8〜1.5 ms、drag の窓の compose frame_ms 22〜33 ms（acquire 3〜6.5、submit 12〜14）。
+ - 2026-10-22 ユーザー（d98）「うん、これは素晴らしい。問題ないです。」→ tearing なし、main 8a1c69fd8 に merge。
++- d99（P2 72ecf8ec6: POWERVR_SUBMIT_TIMING の既定 0、report は submit の道から外して専用の thread）: idle 60 s の後の時計の frame の rec submit 3 ms（d90 は 139〜140 ms）、操作中の submit の max 21 ms（起動直後の窓は 80）。main に merge。
++- d101（P2 2feac9314 の timing 1 の kernel: texture の F16 の sample の道・uniform への mix の書き直し、P1 f67a811c0 の Keiland: drag の部分の書き直し・pacing・glass の map・Home の stage・影の picture、P2 の libvulkan の診断）: vkmatrix 109/109、HWR 0、見た目正常（shot-d101.png）。perf: texture 2950・texture-nob 2900（F16 の道で変わらず）。frame-ops（P1 の試験、操作ごと）: type 44 fps（work p50 8、period p50 18）、output 39、scroll 15 fps（work 6 なのに period 65）、hover 20、drag 43 fps（work p50 11）、home 29（work 17）、wiseview 26（work 24）、launch 28。VULKAN TIMING: submit の大半は execute（kernel の ioctl）平均 7〜8.5 ms・max 20〜27 ms。
++- 2026-10-22 ユーザー（d101 の frame-ops の操作をディスプレイで目視して）「アニメーションが素晴らしいです。この調子でチューニングを続けてください。」
++- d102（P2 9d7db594a の kernel: clamp・min/max・uniform の積の書き直し、kernel の timing の内訳）: 見た目正常（shot-d102.png）。frame-ops: drag 44 fps（work 11）、home 29（17）、wiseview 25（24）、type 40。kernel の powervr の submit は平均 0.7 ms、libvulkan の execute は 7〜8 ms → ioctl の入口から powervr の submit までの外側が 6〜7 ms（P2）。Home の frame は submit から次の acquire が 18〜21 ms で 2 blank ごと → flip の latch（P1 に dc8200 の調べを許可）。
++- d103（P2 b60c38183: command の frame の fence を、その場で実行し終えたら直ちに完了（GPU の仕事の完了を待たない）、uncached の 64-bit の store、P1 95db457c4: drag の部分の書き直し・pacing・glass の map・Home の stage・影の picture・Home の隠れる所を描かない・Wiseview の地を 2 枚に）: vkmatrix 109/109、reset・HWR・fault・device lost 0、見た目正常（shot-d103.png）。VULKAN TIMING の execute 7〜8.5 ms → 1.0〜1.3 ms。frame-ops の work p50/max: drag 8/10（51 fps）、home 6/14（17/31）、wiseview 7/50（24/64）、type 7、launch 8。残りは表示の flip の待ち（next p50 24 ms、P1）。main 76ff675fd（P2）・P1 95db457c4 を merge。
++- d104（P1 0b95ffc6d の flip の診断）: flip の多くは 1 blank で取られる（early 80〜87%）、2 blank は commit が blank の後 14 ms 以降の時。GPU 完了から commit まで 3〜4 ms（libvulkan の WSI の present の worker の道）→ P1 が commit_early の道（GPU の完了で kernel が直ちに commit）を実装する（許可）。
++- d105・d106（Q1 の合成: P1 81bc03d70 まで（animation 中は frame を渡した直後に次の image を取る、Home の content の crop）＋ P2 d5e6d9475・efc40884f（buffer の 0 埋めを cached、render target 8 つ、transfer の memory の使い回し、timing の longest））: vkmatrix 109/109、reset・fault 0。frame-ops: home 6/15 ms で 45 fps、drag 49 fps、wiseview 29 fps（work 7、next 24）、type 40。ALLOCATE_MEMORY の context_hold max 30 ms が残る（uncached の alias を作る時の L2 の 64 byte ごとの flush の疑い、P2）。P2 efc40884f まで main に merge。
++- d107（main ＋ P1 2ec8fa710: flip の report を既定 off、ring の中を描かない、Wiseview の地を 1 回の draw に）: 109/109、frame-ops の drag 55 fps、home 44。main f08a27229 に merge。
++- d108〜d110（main ＋ P1 1f7936510（libvulkan の WSI: primary の image の hold を atomic にし、acquire の空き確認を display_mutex 無しで）＋ P2 ed9c74527（flush 済みの alias の buffer の pool））: 1f7936510 の libvulkan だと idle の後の操作で compositor が SIGSEGV（d108・d110 で再現）、main の libvulkan では落ちない（d109） → 1f7936510 が原因。速さは d110 で home 55 fps、drag 60、wiseview 38、launch 48、type 50。P1 が直す。
+diff --git a/plan/ws270/tests/frame-ops/frame-ops.sh b/plan/ws270/tests/frame-ops/frame-ops.sh
+new file mode 100755
+index 0000000000..c23343347d
+--- /dev/null
++++ b/plan/ws270/tests/frame-ops/frame-ops.sh
+@@ -0,0 +1,151 @@
++#!/bin/sh
++#
++# zedBSD
++# Copyright (C) 2026 Awe Morris
++#
++# SPDX-License-Identifier: Zlib
++#
++# The desktop's operations one after another, for the time of each frame
++# (frame-times.py).  Run as root on a board whose Keiland runs with
++# --log-frames and whose image has aat-input (CONFIG_INPUT_TEST_INJECT):
++#
++#     frame-ops.sh SESSION.LOG MARKS [WIDTH HEIGHT]
++#
++# Before each step the number of lines SESSION.LOG has goes to MARKS as
++# "NAME LINE".  The steps: idle, Terminal started from App Home (launch),
++# a line typed into it (type), a long output (output), the wheel over it
++# (scroll), the pointer over the title bars and the system bar (hover), the
++# Terminal's window dragged by its title bar there and back (drag), App
++# Home opened and closed twice (home), Wiseview opened and closed twice
++# (wiseview), and the end.  The output's size defaults to 1920 x 1080.
++
++set -u
++
++log=$1
++marks=$2
++width=${3:-1920}
++height=${4:-1080}
++
++mark() {
++	printf '%s %s\n' "$1" "$(wc -l < "$log" | tr -d ' ')" >> "$marks"
++}
++
++input() {
++	aat-input "$@" > /dev/null || echo "frame-ops: aat-input $* failed" >&2
++}
++
++pause() {
++	aat-input sleep "$1" > /dev/null
++}
++
++: > "$marks"
++if [ ! -S /run/aat-input.sock ]; then
++	aat-input start --width "$width" --height "$height" || exit 1
++	sleep 3
++fi
++
++# A still desktop first: the frames a quiet desktop draws.
++input move-to 960 600
++mark idle
++sleep 3
++
++# Terminal from App Home: Super, its name, Enter.
++mark launch
++start=$(wc -l < "$log" | tr -d ' ')
++input key super
++pause 800
++input type terminal
++pause 500
++input key enter
++sleep 5
++
++# The Terminal's place: its body's top-left corner (KWL MAP after the launch).
++place=$(tail -n "+$start" "$log" | grep 'KWL MAP client=' | tail -1)
++tx=$(echo "$place" | sed -n 's/.* x=\(-\{0,1\}[0-9]*\).*/\1/p')
++ty=$(echo "$place" | sed -n 's/.* y=\(-\{0,1\}[0-9]*\).*/\1/p')
++if [ -z "$tx" ] || [ -z "$ty" ]; then
++	echo "frame-ops: no KWL MAP after the launch; the window is taken at 400,300" >&2
++	tx=400
++	ty=300
++fi
++echo "frame-ops: terminal at $tx,$ty"
++
++# A line typed into it, at the usual typing speed (15 ms a character).
++input click left $((tx + 200)) $((ty + 150))
++pause 500
++mark type
++input type 'echo the quick brown fox jumps over the lazy dog 0123456789'
++input key enter
++sleep 1
++
++# A long output.
++mark output
++input type 'seq 1 400'
++input key enter
++sleep 3
++
++# The wheel over it: up and down, a notch each 50 ms.
++mark scroll
++i=0
++while [ $i -lt 20 ]; do
++	input wheel 1
++	pause 50
++	i=$((i + 1))
++done
++i=0
++while [ $i -lt 20 ]; do
++	input wheel -1
++	pause 50
++	i=$((i + 1))
++done
++sleep 1
++
++# The pointer over the Terminal's title bar (its buttons light) and the system bar.
++mark hover
++ybar=$((ty - 30))
++x=$tx
++while [ $x -lt $((tx + 900)) ] && [ $x -lt $((width - 20)) ]; do
++	input move-to $x $ybar
++	pause 15
++	x=$((x + 12))
++done
++x=20
++while [ $x -lt $((width - 20)) ]; do
++	input move-to $x 22
++	pause 15
++	x=$((x + 24))
++done
++input move-to 960 600
++sleep 1
++
++# The window dragged by its title bar, 100 moves out and 100 back.
++mark drag
++input drag $((tx + 60)) $ybar $((tx + 460)) $((ybar + 150)) 100
++pause 300
++input drag $((tx + 460)) $((ybar + 150)) $((tx + 60)) $ybar 100
++sleep 1
++
++# App Home opened and closed, twice.
++mark home
++i=0
++while [ $i -lt 2 ]; do
++	input key super
++	pause 1500
++	input key super
++	pause 1500
++	i=$((i + 1))
++done
++
++# Wiseview opened and closed, twice.
++mark wiseview
++i=0
++while [ $i -lt 2 ]; do
++	input key super+tab
++	pause 1500
++	input key esc
++	pause 1500
++	i=$((i + 1))
++done
++
++mark end
++sleep 1
+diff --git a/plan/ws270/tests/frame-ops/frame-times.py b/plan/ws270/tests/frame-ops/frame-times.py
+new file mode 100755
+index 0000000000..8260b80dd3
+--- /dev/null
++++ b/plan/ws270/tests/frame-ops/frame-times.py
+@@ -0,0 +1,179 @@
++#!/usr/bin/env python3
++"""The time of each of Keiland's frames, operation by operation, from its session log.
++
++Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
++
++    frame-times.py SESSION.LOG MARKS [--frames]
++
++MARKS is the file frame-ops.sh writes on the board: one line per step,
++"NAME LINE", LINE being the number of lines the session log had when the
++step began.  A step's frames are those whose "KWL LAT draw" line lies
++between its mark and the next.
++
++For each frame (the compositor's KWL LAT lines, times in ms):
++    pace     acquired -> draw: the wait for the clients told of the last frame
++    cpu      draw -> recorded: the walk and the recording
++    submit   recorded -> queued: vkQueueSubmit (the GPU's run of the frame)
++    present  queued -> submit: vkQueuePresentKHR
++    work     draw -> submit: the frame's own time
++    period   from the previous frame's draw, when that was less than 100 ms
++             before (frames of one movement; a frame after a pause has none)
++    shown    submit -> the frame's completion on the main loop
++    next     submit -> the next frame's acquired image (a wait here is the
++             display's: an image comes back only when a flip is taken)
++    lag      the input the frame shows -> its submit: the pointer's latest
++             accepted motion (input_us), or the latest window commit
++             (KWL LAT adopt) since the frame before
++The KWL PASSES line gives the pixels the frame drew (area) and loaded (load);
++dirty 1 is a frame drawn whole.
++
++The summary counts the frames whose work, or whose period, is over 16 ms;
++the period of type, scroll, hover and drag is also bounded by how fast
++frame-ops.sh gives the input, so for them work and lag are the measure.
++--frames prints every frame too.  The step's KWL PERF compose and rec lines
++(5 s windows that end in the step) are printed under it.
++"""
++from __future__ import annotations
++
++import re
++import sys
++
++BUDGET_MS = 16.0
++MOVEMENT_MS = 100.0
++
++LAT = re.compile(r"KWL LAT (acquired|pace|draw|recorded|queued|submit|shown) frame=(\d+)(.*)")
++ADOPT = re.compile(r"KWL LAT adopt surface=\d+ at_us=(\d+)")
++FIELD = re.compile(r"(\w+)=(-?[\d.]+)")
++PASSES = re.compile(r"KWL PASSES frame=(\d+) .*?area_px=(\d+) load_px=(\d+)")
++
++
++def fields(text: str) -> dict[str, float]:
++	"""The name=number pairs of a line's rest."""
++	return {name: float(value) for name, value in FIELD.findall(text)}
++
++
++def read_frames(lines: list[str]) -> dict[int, dict]:
++	"""Each frame's times (ms) and the line of its draw."""
++	frames: dict[int, dict] = {}
++	adopted = None
++	for number, line in enumerate(lines, 1):
++		match = ADOPT.search(line)
++		if match:
++			adopted = int(match.group(1)) / 1000.0
++			continue
++		match = LAT.search(line)
++		if match:
++			kind, frame, rest = match.group(1), int(match.group(2)), match.group(3)
++			entry = frames.setdefault(frame, {"frame": frame})
++			values = fields(rest)
++			if "at_us" in values:
++				entry[kind] = values["at_us"] / 1000.0
++			if kind == "draw":
++				entry["line"] = number
++				entry["dirty"] = int(values.get("dirty", 0))
++				entry["input"] = None
++				if values.get("input_us", 0.0) > 0.0:
++					entry["input"] = values["input_us"] / 1000.0
++				if adopted is not None and (entry["input"] is None or adopted > entry["input"]):
++					entry["input"] = adopted
++				adopted = None
++			if kind == "pace":
++				entry["waited"] = values.get("waited_ms", 0.0)
++			continue
++		match = PASSES.search(line)
++		if match:
++			entry = frames.setdefault(int(match.group(1)), {"frame": int(match.group(1))})
++			entry["area"] = int(match.group(2))
++			entry["load"] = int(match.group(3))
++	return frames
++
++
++def span(entry: dict, start: str, end: str) -> float | None:
++	"""The time from one of a frame's points to another, when both were logged."""
++	if start in entry and end in entry:
++		return entry[end] - entry[start]
++	return None
++
++
++def text(value: float | None) -> str:
++	"""A time for the table."""
++	return "-" if value is None else f"{value:.0f}"
++
++
++def main() -> int:
++	args = [word for word in sys.argv[1:] if not word.startswith("--")]
++	every = "--frames" in sys.argv
++	if len(args) != 2:
++		print(__doc__.strip().splitlines()[2], file=sys.stderr)
++		return 2
++	with open(args[0], encoding="utf-8", errors="replace") as log:
++		lines = log.read().splitlines()
++	marks = []
++	with open(args[1], encoding="utf-8") as file:
++		for row in file:
++			words = row.split()
++			if len(words) >= 2 and words[-1].isdigit():
++				marks.append((" ".join(words[:-1]), int(words[-1])))
++	frames = read_frames(lines)
++	ordered = sorted((entry for entry in frames.values() if "line" in entry), key=lambda entry: entry["line"])
++	previous = None
++	for entry in ordered:
++		entry["next"] = None
++		following = frames.get(entry["frame"] + 1)
++		if following is not None and "acquired" in following and "submit" in entry:
++			gap = following["acquired"] - entry["submit"]
++			if gap < MOVEMENT_MS:
++				entry["next"] = gap
++		entry["lag"] = None
++		if entry.get("input") is not None and "submit" in entry:
++			entry["lag"] = entry["submit"] - entry["input"]
++		entry["period"] = None
++		if previous is not None and "draw" in previous and "draw" in entry:
++			gap = entry["draw"] - previous["draw"]
++			if gap < MOVEMENT_MS:
++				entry["period"] = gap
++		previous = entry
++
++	print(f"{'step':<14} {'frames':>6} {'whole':>5} {'work>16':>7} {'period>16':>9} "
++		f"{'work p50/max':>12} {'submit p50/max':>14} {'period p50/max':>14} {'fps':>5} "
++		f"{'next p50/max':>12} {'lag p50/max':>11}")
++	for index, (name, start) in enumerate(marks):
++		end = marks[index + 1][1] if index + 1 < len(marks) else len(lines) + 1
++		chosen = [entry for entry in ordered if start < entry["line"] <= end]
++		works = [value for value in (span(entry, "draw", "submit") for entry in chosen) if value is not None]
++		submits = [value for value in (span(entry, "recorded", "queued") for entry in chosen) if value is not None]
++		periods = [entry["period"] for entry in chosen if entry["period"] is not None]
++		nexts = [entry["next"] for entry in chosen if entry["next"] is not None]
++		lags = [entry["lag"] for entry in chosen if entry["lag"] is not None]
++		whole = sum(1 for entry in chosen if entry.get("dirty"))
++
++		def stat(values: list[float]) -> str:
++			if not values:
++				return "-"
++			ordered_values = sorted(values)
++			return f"{ordered_values[len(ordered_values) // 2]:.0f}/{ordered_values[-1]:.0f}"
++
++		fps = "-"
++		if periods:
++			fps = f"{1000.0 * len(periods) / sum(periods):.0f}"
++		print(f"{name:<14} {len(chosen):>6} {whole:>5} {sum(1 for value in works if value > BUDGET_MS):>7} "
++			f"{sum(1 for value in periods if value > BUDGET_MS + 0.7):>9} {stat(works):>12} {stat(submits):>14} "
++			f"{stat(periods):>14} {fps:>5} {stat(nexts):>12} {stat(lags):>11}")
++		if every:
++			print(f"  {'frame':>6} {'dirty':>5} {'area':>8} {'load':>8} {'pace':>4} {'cpu':>4} {'submit':>6} "
++				f"{'present':>7} {'work':>4} {'period':>6} {'shown':>5} {'next':>4} {'lag':>4}")
++			for entry in chosen:
++				print(f"  {entry['frame']:>6} {entry.get('dirty', '-'):>5} {entry.get('area', '-'):>8} "
++					f"{entry.get('load', '-'):>8} {text(span(entry, 'acquired', 'draw')):>4} "
++					f"{text(span(entry, 'draw', 'recorded')):>4} {text(span(entry, 'recorded', 'queued')):>6} "
++					f"{text(span(entry, 'queued', 'submit')):>7} {text(span(entry, 'draw', 'submit')):>4} "
++					f"{text(entry['period']):>6} {text(span(entry, 'submit', 'shown')):>5} "
++					f"{text(entry['next']):>4} {text(entry['lag']):>4}")
++			for line in lines[start:end - 1]:
++				if line.startswith("KWL PERF compose") or line.startswith("KWL PERF rec "):
++					print(f"  {line}")
++	return 0
++
++
++if __name__ == "__main__":
++	sys.exit(main())
+diff --git a/plan/ws270/tests/frame-ops/shot-diff.py b/plan/ws270/tests/frame-ops/shot-diff.py
+new file mode 100755
+index 0000000000..cfc4716f73
+--- /dev/null
++++ b/plan/ws270/tests/frame-ops/shot-diff.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python3
++"""Compares two screenshots of the desktop (keiland-shot) pixel by pixel.
++
++Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
++
++    shot-diff.py BEFORE.png AFTER.png [DIFF.png]
++
++Prints the largest difference of a channel (0 to 255), how many pixels
++differ at all, by more than 2 and by more than 8, and the box around those
++over 2 (a changed clock or cursor shows as a small box).  DIFF.png, when
++given, is the difference made 16 times brighter.
++"""
++import sys
++
++import numpy
++from PIL import Image
++
++
++def main() -> int:
++	if len(sys.argv) not in (3, 4):
++		print(__doc__.strip().splitlines()[3], file=sys.stderr)
++		return 2
++	before = numpy.asarray(Image.open(sys.argv[1]).convert("RGB"), dtype=numpy.int16)
++	after = numpy.asarray(Image.open(sys.argv[2]).convert("RGB"), dtype=numpy.int16)
++	if before.shape != after.shape:
++		print(f"sizes differ: {before.shape} and {after.shape}")
++		return 1
++	difference = numpy.abs(before - after).max(axis=2)
++	print(f"max {int(difference.max())} differ {int((difference > 0).sum())} "
++		f"over2 {int((difference > 2).sum())} over8 {int((difference > 8).sum())} of {difference.size}")
++	rows, columns = numpy.nonzero(difference > 2)
++	if rows.size:
++		print(f"box over2 x={columns.min()}..{columns.max()} y={rows.min()}..{rows.max()}")
++	if len(sys.argv) == 4:
++		Image.fromarray(numpy.clip(difference * 16, 0, 255).astype(numpy.uint8)).save(sys.argv[3])
++	return 0
++
++
++if __name__ == "__main__":
++	sys.exit(main())
+diff --git a/src/drivers/gpu/powervr/dc8200.c b/src/drivers/gpu/powervr/dc8200.c
+index b2b8520af2..84fd0937e7 100644
+--- a/src/drivers/gpu/powervr/dc8200.c
++++ b/src/drivers/gpu/powervr/dc8200.c
+@@ -377,6 +377,15 @@ static struct spinlock dc_commit_lock = {
+  */
+ static volatile unsigned dc_fatal;
+ 
++/*
++ * The last commit's place in its frame, for the display's flip report: how
++ * far after the newest blank it was written (microseconds, the fine
++ * counter), the period the blanks measured then, and whether it counted as
++ * early (taken at the next blank).  Written under dc_commit_lock by a
++ * commit, read by its caller under the display's mutex after it.
++ */
++static struct drv_powervr_dc_commit_note dc_last_commit;
++
+ static uint32_t read_control(const struct dc_adoption *adoption, uint32_t offset);
+ static uint32_t read_display(const struct dc_adoption *adoption, uint32_t offset);
+ static void write_display(const struct dc_adoption *adoption, uint32_t offset, uint32_t value);
+@@ -388,6 +397,7 @@ static void write_control(const struct dc_adoption *adoption, uint32_t offset, u
+ static void write_plane(const struct dc_adoption *adoption, const struct powervr_dc_plane *plane);
+ static void blank_interrupt(int irq, kern_irq_ack_t acknowledge, void *argument);
+ static int commit_early(const struct dc_blanks *blanks, uint64_t sequence);
++static void dc_phase(const struct dc_blanks *blanks, uint64_t *since_us, uint64_t *period_us);
+ static const struct powervr_dc_mode *choose_mode(void);
+ static int own_screen(const struct powervr_dc_mode *mode, struct powervr_dc_screen *screen, uint32_t *format);
+ static void draw_bars(volatile uint32_t *pixels, const struct powervr_dc_screen *screen);
+@@ -905,6 +915,9 @@ drv_powervr_dc_commit(
+ 	write_plane(adoption, &plane);
+ 	*base = atomic_u64_load_acquire(&board_blanks.sequence);
+ 	early = commit_early(&board_blanks, *base);
++	dc_phase(&board_blanks, &dc_last_commit.since_us, &dc_last_commit.period_us);
++	dc_last_commit.early = early;
++	dc_last_commit.sequence = *base;
+ 	if (early)
+ 		*base -= 1U;
+ 
+@@ -914,6 +927,28 @@ drv_powervr_dc_commit(
+ 	return 0;
+ }
+ 
++/* Gives the last commit's place in its frame (dc_last_commit). */
++void
++drv_powervr_dc_commit_noted(
++	struct drv_powervr_dc_commit_note *note)
++{
++	/* A copy; the caller's mutex keeps the next commit out. */
++	*note = dc_last_commit;
++}
++
++/*
++ * Gives how far after the newest blank it is now and the period the blanks
++ * measured, in microseconds (both 0 without the fine counter or a period).
++ */
++void
++drv_powervr_dc_phase(
++	uint64_t *since_us,
++	uint64_t *period_us)
++{
++	/* The board's blanks. */
++	dc_phase(&board_blanks, since_us, period_us);
++}
++
+ /*
+  * Reports the HDMI panel's vertical-blank count.
+  */
+@@ -1413,6 +1448,37 @@ blank_interrupt(
+ 	kern_irq_send_eoi(acknowledge);
+ }
+ 
++/*
++ * Gives how far after the newest blank it is now and the period between
++ * the last two blanks, in microseconds, from the fine counter; 0 for what
++ * cannot be told.  Read without the blanks' lock, as commit_early reads it.
++ */
++static void
++dc_phase(
++	const struct dc_blanks *blanks,
++	uint64_t *since_us,
++	uint64_t *period_us)
++{
++	uint64_t counter;
++	uint64_t frequency;
++	uint64_t last;
++	bool counting;
++
++	/* Nothing without the counter or a blank. */
++	*since_us = 0U;
++	*period_us = 0U;
++	counting = kern_rtc_read_counter(&counter, &frequency);
++	if (!counting || frequency == 0U)
++		return;
++	last = blanks->last_counter;
++	if (last == 0U || counter < last)
++		return;
++
++	/* The counts turned into microseconds. */
++	*since_us = (counter - last) * 1000000U / frequency;
++	*period_us = blanks->period_counts * 1000000U / frequency;
++}
++
+ /*
+  * Tells whether a commit written now, with the blank count at sequence,
+  * comes early enough in the frame to be taken at the blank that ends it:
+diff --git a/src/drivers/gpu/powervr/display.c b/src/drivers/gpu/powervr/display.c
+index 3ee27cc3f6..5cacba54f7 100644
+--- a/src/drivers/gpu/powervr/display.c
++++ b/src/drivers/gpu/powervr/display.c
+@@ -102,6 +102,26 @@
+ /* The page resources are allocated in, and the framebuffer's view is made in. */
+ #define POWERVR_DISPLAY_PAGE_BYTES	4096U
+ 
++/*
++ * The flip report: how often the counts of the frames scanned directly are
++ * written to the log (milliseconds), and how many bins its histograms
++ * have (blanks waited: 1, 2, 3, 4 or more; the commit's place after a
++ * blank: under 4, 4 to 8, 8 to 12, 12 to 14 and 14 ms or more).
++ */
++#define POWERVR_FLIP_REPORT_MS		5000U
++
++/*
++ * Whether the flip report is kept and written (1) or not (0).  Off by
++ * default: the report is written to the serial console at its speed from
++ * the present's thread, under the display's mutex.  A measurement build
++ * turns it on (ZEDBSD_TEST_CPPFLAGS += -DPOWERVR_FLIP_REPORT=1).
++ */
++#ifndef POWERVR_FLIP_REPORT
++#define POWERVR_FLIP_REPORT		0
++#endif
++#define POWERVR_FLIP_WAITED_BINS	4U
++#define POWERVR_FLIP_PHASE_BINS		5U
++
+ /* The bytes of one pixel of the screen and of a frame. */
+ #define POWERVR_DISPLAY_PIXEL_BYTES	4U
+ 
+@@ -249,6 +269,27 @@ struct powervr_display {
+ 	int flipping;
+ 	struct wait_queue flip_done;
+ 
++	/*
++	 * The flip report, under the mutex: since report_tick, the frames
++	 * scanned directly, how many commits counted as early, how many blanks
++	 * each waited from its commit to its taking, where in its frame each
++	 * commit was written, and the time from the present's entry to its
++	 * commit (the change before it) and from the commit to its return
++	 * (microseconds, sum and longest).  present_entry_us is the present
++	 * under way's entry.
++	 */
++	uint64_t report_tick;
++	uint32_t report_presents;
++	uint32_t report_early;
++	uint32_t report_waited[POWERVR_FLIP_WAITED_BINS];
++	uint32_t report_phases[POWERVR_FLIP_PHASE_BINS];
++	uint64_t report_queue_us;
++	uint64_t report_queue_most_us;
++	uint64_t report_take_us;
++	uint64_t report_take_most_us;
++	uint64_t report_period_us;
++	uint64_t present_entry_us;
++
+ 	/*
+ 	 * The cursor plane, under the mutex: its images, made at the
+ 	 * first image set, their uncached views, the one shown or last set
+@@ -344,6 +385,9 @@ static int change_plane(struct powervr_display *display, struct powervr_display_
+ static int await_plane(struct powervr_display *display, struct powervr_display_resource **freed, unsigned *count);
+ static int settle_lost(struct powervr_display *display, struct powervr_display_resource **freed, unsigned *count);
+ static void wait_flip_over(struct powervr_display *display);
++static uint64_t flip_now_us(void);
++static void flip_count(struct powervr_display *display, const struct drv_powervr_dc_commit_note *note, uint64_t committed_us, uint64_t reached);
++static void flip_report(struct powervr_display *display);
+ static void collect_freed(struct powervr_flip_hold **taken, unsigned taken_count, struct powervr_display_resource **freed, unsigned *count);
+ static struct powervr_display_resource *resource_of_hold(struct powervr_flip_hold *hold);
+ static void free_resource(struct powervr_display_resource *resource);
+@@ -944,6 +988,7 @@ output_present(
+ 	struct powervr_display *display;
+ 	struct powervr_display_resource *resource;
+ 	struct powervr_display_resource *freed[POWERVR_DISPLAY_FREED_MAX];
++	uint64_t entry_us;
+ 	unsigned count;
+ 	int shared;
+ 	int direct;
+@@ -952,6 +997,9 @@ output_present(
+ 	display = device;
+ 	resource = private_resource;
+ 	count = 0;
++	entry_us = 0U;
++	if (POWERVR_FLIP_REPORT)
++		entry_us = flip_now_us();
+ 
+ 	/* Only the session's own resource; the core checked the frame lies inside it. */
+ 	if (resource->owner != session)
+@@ -1009,7 +1057,10 @@ output_present(
+ 		}
+ 
+ 		if (direct) {
++			display->present_entry_us = entry_us;
+ 			error = change_plane(display, resource, freed, &count);
++			if (POWERVR_FLIP_REPORT)
++				flip_report(display);
+ 		} else {
+ 			if (shared)
+ 				show_shared_frame(display, resource, request);
+@@ -1603,7 +1654,9 @@ change_plane(
+ 	unsigned *count)
+ {
+ 	const struct drv_powervr_dc_frame *frame;
++	struct drv_powervr_dc_commit_note note;
+ 	struct powervr_flip_hold *hold;
++	uint64_t committed_us;
+ 	uint64_t base;
+ 	int error;
+ 
+@@ -1622,10 +1675,24 @@ change_plane(
+ 
+ 	/* Holds the buffer from now until the commit after it is taken. */
+ 	powervr_flip_commit(&display->flip, hold, base);
++	committed_us = 0U;
++	kern_memset(&note, 0, sizeof(note));
++	if (POWERVR_FLIP_REPORT) {
++		committed_us = flip_now_us();
++		drv_powervr_dc_commit_noted(&note);
++	}
+ 
+ 	/* Waits for the plane to take it. */
+ 	error = await_plane(display, freed, count);
+-	return error;
++	if (error != 0)
++		return error;
++
++	/* A frame's buffer: its commit and taking counted for the report, when it is kept. */
++	if (POWERVR_FLIP_REPORT && resource != NULL)
++		flip_count(display, &note, committed_us, drv_powervr_dc_sequence());
++
++	/* Succeeded: the plane took it. */
++	return 0;
+ }
+ 
+ /*
+@@ -1739,6 +1806,129 @@ wait_flip_over(
+ 	}
+ }
+ 
++/* Gives the fine counter's time in microseconds (0 without the counter). */
++static uint64_t
++flip_now_us(
++	void)
++{
++	uint64_t counter;
++	uint64_t frequency;
++	bool counting;
++
++	/* The counter, turned into microseconds. */
++	counting = kern_rtc_read_counter(&counter, &frequency);
++	if (!counting || frequency == 0U)
++		return 0U;
++
++	/* Succeeded: the time. */
++	return counter / frequency * 1000000U + counter % frequency * 1000000U / frequency;
++}
++
++/*
++ * Counts a frame scanned directly for the flip report: whether its commit
++ * was early, how many blanks it waited from the count read at its commit
++ * to the count once taken, where in its frame it was written, and how long
++ * it waited before and after its commit.  The caller holds the mutex.
++ */
++static void
++flip_count(
++	struct powervr_display *display,
++	const struct drv_powervr_dc_commit_note *note,
++	uint64_t committed_us,
++	uint64_t reached)
++{
++	uint64_t returned_us;
++	uint64_t queue_us;
++	uint64_t take_us;
++	uint64_t waited;
++	unsigned bin;
++
++	/* The frame, and an early commit. */
++	display->report_presents++;
++	if (note->early)
++		display->report_early++;
++
++	/* The blanks from the commit to its taking: 1, 2, 3, or 4 and more. */
++	waited = 0U;
++	if (reached > note->sequence)
++		waited = reached - note->sequence;
++	bin = POWERVR_FLIP_WAITED_BINS - 1U;
++	if (waited <= 1U)
++		bin = 0U;
++	else if (waited < POWERVR_FLIP_WAITED_BINS)
++		bin = (unsigned)waited - 1U;
++	display->report_waited[bin]++;
++
++	/* Where the commit was written after the newest blank. */
++	bin = 4U;
++	if (note->since_us < 4000U)
++		bin = 0U;
++	else if (note->since_us < 8000U)
++		bin = 1U;
++	else if (note->since_us < 12000U)
++		bin = 2U;
++	else if (note->since_us < 14000U)
++		bin = 3U;
++	display->report_phases[bin]++;
++	display->report_period_us = note->period_us;
++
++	/* The waits before and after the commit. */
++	returned_us = flip_now_us();
++	queue_us = 0U;
++	if (committed_us > display->present_entry_us)
++		queue_us = committed_us - display->present_entry_us;
++	take_us = 0U;
++	if (returned_us > committed_us)
++		take_us = returned_us - committed_us;
++	display->report_queue_us += queue_us;
++	if (queue_us > display->report_queue_most_us)
++		display->report_queue_most_us = queue_us;
++	display->report_take_us += take_us;
++	if (take_us > display->report_take_most_us)
++		display->report_take_most_us = take_us;
++}
++
++/*
++ * Writes the flip report to the log every POWERVR_FLIP_REPORT_MS while
++ * frames are scanned directly, then starts the next.  The caller holds the
++ * mutex.
++ */
++static void
++flip_report(
++	struct powervr_display *display)
++{
++	uint64_t now;
++	uint32_t presents;
++
++	/* Not yet time, or nothing to say. */
++	now = sched_ticks();
++	if (now - display->report_tick < KERN_MS_TO_TICKS(POWERVR_FLIP_REPORT_MS))
++		return;
++	presents = display->report_presents;
++	display->report_tick = now;
++	if (presents == 0U)
++		return;
++
++	/* The counts, then cleared for the next. */
++	kern_logf("powervr: display flips: %u, early %u, taken after 1/2/3/4+ blanks %u/%u/%u/%u, "
++		  "committed 0-4/4-8/8-12/12-14/14+ ms after a blank %u/%u/%u/%u/%u, "
++		  "before the commit %llu/%llu us, commit to taken %llu/%llu us (average/longest), period %llu us\n",
++		  presents, display->report_early,
++		  display->report_waited[0], display->report_waited[1], display->report_waited[2], display->report_waited[3],
++		  display->report_phases[0], display->report_phases[1], display->report_phases[2], display->report_phases[3], display->report_phases[4],
++		  (unsigned long long)(display->report_queue_us / presents), (unsigned long long)display->report_queue_most_us,
++		  (unsigned long long)(display->report_take_us / presents), (unsigned long long)display->report_take_most_us,
++		  (unsigned long long)display->report_period_us);
++	display->report_presents = 0U;
++	display->report_early = 0U;
++	kern_memset(display->report_waited, 0, sizeof(display->report_waited));
++	kern_memset(display->report_phases, 0, sizeof(display->report_phases));
++	display->report_queue_us = 0U;
++	display->report_queue_most_us = 0U;
++	display->report_take_us = 0U;
++	display->report_take_most_us = 0U;
++}
++
+ /* Adds the buffers a taken commit let go of to the caller's list of resources to free. */
+ static void
+ collect_freed(
+diff --git a/src/drivers/gpu/powervr/powervr.h b/src/drivers/gpu/powervr/powervr.h
+index fb5af779b1..cacc8e4b19 100644
+--- a/src/drivers/gpu/powervr/powervr.h
++++ b/src/drivers/gpu/powervr/powervr.h
+@@ -192,6 +192,23 @@ int drv_powervr_dc_frame_fits(uint32_t width, uint32_t height, uint32_t stride);
+  * interrupts off; must not be called with it held.
+  */
+ int drv_powervr_dc_commit(const struct drv_powervr_dc_frame *frame, uint64_t *base);
++
++/*
++ * Where the last commit was written in its frame (the display's flip
++ * report): the blank count read after it, how far after the newest blank
++ * and the period then (microseconds), and whether it counted as early,
++ * taken at the next blank.  drv_powervr_dc_phase() gives the same place
++ * for now.
++ */
++struct drv_powervr_dc_commit_note {
++	uint64_t sequence;
++	uint64_t since_us;
++	uint64_t period_us;
++	int early;
++};
++
++void drv_powervr_dc_commit_noted(struct drv_powervr_dc_commit_note *note);
++void drv_powervr_dc_phase(uint64_t *since_us, uint64_t *period_us);
+ int drv_powervr_dc_cursor(int shown, uint64_t physical, int32_t x, int32_t y);
+ 
+ /* Reports the HDMI panel's vertical-blank count. */
+diff --git a/userland/desktop/wayland/Makefile b/userland/desktop/wayland/Makefile
+index 3c1e01531d..1539401c41 100644
+--- a/userland/desktop/wayland/Makefile
++++ b/userland/desktop/wayland/Makefile
+@@ -20,7 +20,7 @@ KEILAND_SOURCES := userland/desktop/wayland/main.c userland/desktop/wayland/wire
+ 	userland/desktop/wayland/popup.c userland/desktop/wayland/toplevel.c userland/desktop/wayland/sheet.c userland/desktop/wayland/subsurface.c userland/desktop/wayland/keymap.c userland/desktop/wayland/data.c \
+ 	userland/desktop/wayland/icons.c userland/desktop/wayland/titlebar-shell.c \
+ 	userland/desktop/wayland/decoration.c userland/desktop/wayland/cursor.c userland/desktop/wayland/cursor-plane.c userland/desktop/wayland/cursor-thread.c userland/desktop/wayland/viewport.c userland/desktop/wayland/content-type.c userland/desktop/wayland/scanout.c userland/desktop/wayland/scanout-rules.c userland/desktop/wayland/activation.c userland/desktop/wayland/theme.c \
+-	userland/desktop/wayland/panels.c userland/desktop/wayland/backdrop.c userland/desktop/wayland/layer-cache.c userland/desktop/wayland/compose-bind.c userland/desktop/wayland/draw-list.c userland/desktop/wayland/render-thread.c userland/desktop/wayland/glyph-worker.c userland/desktop/wayland/batch.c userland/desktop/wayland/damage.c userland/desktop/wayland/greeter.c userland/desktop/wayland/handoff.c userland/desktop/wayland/role.c userland/desktop/wayland/backend-host.c userland/desktop/wayland/os.c userland/desktop/wayland/primary.c \
++	userland/desktop/wayland/panels.c userland/desktop/wayland/backdrop.c userland/desktop/wayland/glass-map.c userland/desktop/wayland/layer-cache.c userland/desktop/wayland/compose-bind.c userland/desktop/wayland/draw-list.c userland/desktop/wayland/render-thread.c userland/desktop/wayland/glyph-worker.c userland/desktop/wayland/batch.c userland/desktop/wayland/damage.c userland/desktop/wayland/greeter.c userland/desktop/wayland/handoff.c userland/desktop/wayland/role.c userland/desktop/wayland/backend-host.c userland/desktop/wayland/os.c userland/desktop/wayland/primary.c \
+ 	userland/desktop/wayland/network.c userland/desktop/wayland/volume.c userland/desktop/wayland/media.c userland/desktop/wayland/media-library.c userland/desktop/wayland/language.c \
+ 	userland/desktop/wayland/settings.c userland/desktop/wayland/settings-store.c $(KEILAND_SHOT_SOURCE) userland/desktop/wayland/system.c userland/desktop/wayland/sysmon.c userland/desktop/wayland/notify.c userland/desktop/wayland/notify-shell.c userland/desktop/wayland/notify-flow.c userland/desktop/wayland/notify-popup.c userland/desktop/wayland/notify-system.c userland/desktop/wayland/notify-log.c userland/desktop/wayland/mail-shell.c userland/desktop/wayland/phone-shell.c userland/desktop/wayland/printers-shell.c userland/desktop/wayland/bluetooth-shell.c userland/desktop/wayland/audio-stream.c userland/desktop/wayland/bluetooth-ask.c userland/desktop/wayland/bluetooth-bar.c userland/desktop/wayland/status-panel.c userland/desktop/wayland/machine-shell.c userland/desktop/wayland/machine-wait.c userland/desktop/wayland/language-file.c userland/desktop/settings-keys/settings-keys.c \
+ 	userland/desktop/wayland/text-input.c userland/desktop/wayland/input-method.c \
+diff --git a/userland/desktop/wayland/Makefile.freebsd b/userland/desktop/wayland/Makefile.freebsd
+index 41b394677b..e847274274 100644
+--- a/userland/desktop/wayland/Makefile.freebsd
++++ b/userland/desktop/wayland/Makefile.freebsd
+@@ -48,6 +48,7 @@ WAYLAND_FREEBSD_SOURCES := userland/desktop/wayland/main.c \
+ 	userland/desktop/wayland/theme.c \
+ 	userland/desktop/wayland/panels.c \
+ 	userland/desktop/wayland/backdrop.c \
++	userland/desktop/wayland/glass-map.c \
+ 	userland/desktop/wayland/layer-cache.c \
+ 	userland/desktop/wayland/compose-bind.c \
+ 	userland/desktop/wayland/draw-list.c \
+diff --git a/userland/desktop/wayland/Makefile.linux b/userland/desktop/wayland/Makefile.linux
+index 5971095c9a..7fc5a60750 100644
+--- a/userland/desktop/wayland/Makefile.linux
++++ b/userland/desktop/wayland/Makefile.linux
+@@ -50,6 +50,7 @@ WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
+ 	userland/desktop/wayland/theme.c \
+ 	userland/desktop/wayland/panels.c \
+ 	userland/desktop/wayland/backdrop.c \
++	userland/desktop/wayland/glass-map.c \
+ 	userland/desktop/wayland/layer-cache.c \
+ 	userland/desktop/wayland/compose-bind.c \
+ 	userland/desktop/wayland/draw-list.c \
+diff --git a/userland/desktop/wayland/compose-bind.c b/userland/desktop/wayland/compose-bind.c
+index a2da2c0f3f..ffb94c2bfc 100644
+--- a/userland/desktop/wayland/compose-bind.c
++++ b/userland/desktop/wayland/compose-bind.c
+@@ -18,6 +18,10 @@
+  * rectangles apart, a quad is drawn once for each of them it meets, with
+  * the scissor cut to that rectangle; the rectangles do not overlap, so no
+  * pixel is drawn twice.
++ *
++ * While a layer's picture is drawn, the draws' box is gathered
++ * (kwl_compose_bounds_begin and _end), so that a frame draws only the part
++ * of the picture that holds anything.
+  */
+ 
+ #include "compose.h"
+@@ -27,6 +31,7 @@ static int clip_cut(const VkRect2D *clip, const VkRect2D *scissor, VkRect2D *cut
+ static int clip_meets(const VkRect2D *rect, float x, float y, float width, float height);
+ static int clip_same(const VkRect2D *first, const VkRect2D *second);
+ static void clip_box(float *x, float *y, float *width, float *height);
++static void bounds_add(struct kwl_compose *compose, float left, float top, float right, float bottom);
+ 
+ /*
+  * Binds a pipeline and a descriptor set (set 0, with the pipeline layout it
+@@ -185,6 +190,10 @@ kwl_compose_clip_draw(
+ 	if (compose->clip_scissor_valid && command->scissor_serial == compose->clip_serial)
+ 		known = 1;
+ 
++	/* The box of what is drawn, when it is gathered. */
++	if (compose->bounding)
++		bounds_add(compose, x, y, x + width, y + height);
++
+ 	/* Without rectangles drawn apart: one draw, within the frame's scissor, set back if a rectangle's was left. */
+ 	active = clip_active(compose);
+ 	if (!active) {
+@@ -257,6 +266,10 @@ kwl_compose_clip_draw_rect(
+ 	if (!left)
+ 		return;
+ 
++	/* The box of what is drawn, when it is gathered. */
++	if (compose->bounding)
++		bounds_add(compose, (float)inside.offset.x, (float)inside.offset.y, (float)inside.offset.x + (float)inside.extent.width, (float)inside.offset.y + (float)inside.extent.height);
++
+ 	/* Without rectangles drawn apart: one draw within the rectangle. */
+ 	active = clip_active(compose);
+ 	if (!active) {
+@@ -281,6 +294,38 @@ kwl_compose_clip_draw_rect(
+ 	}
+ }
+ 
++/* Starts gathering the box of the draws (a layer's picture being drawn). */
++void
++kwl_compose_bounds_begin(
++	struct kwl_compose *compose)
++{
++	/* Nothing drawn yet. */
++	compose->bounding = 1U;
++	compose->bounded = 0U;
++}
++
++/*
++ * Ends gathering the box of the draws, giving it (left, top, right,
++ * bottom) through bounds.  Returns 1 when anything was drawn.
++ */
++int
++kwl_compose_bounds_end(
++	struct kwl_compose *compose,
++	float *bounds)
++{
++	/* No longer gathered. */
++	compose->bounding = 0U;
++	if (!compose->bounded)
++		return 0;
++
++	/* Succeeded: the box. */
++	bounds[0] = compose->bounds[0];
++	bounds[1] = compose->bounds[1];
++	bounds[2] = compose->bounds[2];
++	bounds[3] = compose->bounds[3];
++	return 1;
++}
++
+ /* Tells whether the damage's rectangles are drawn apart in the pass being recorded: only the anchor's, not a backdrop's or a layer's. */
+ static int
+ clip_active(
+@@ -405,3 +450,46 @@ clip_box(
+ 		*height = -*height;
+ 	}
+ }
++
++/* Grows the box of the draws by a draw's rectangle (left, top, right, bottom), within the scissor. */
++static void
++bounds_add(
++	struct kwl_compose *compose,
++	float left,
++	float top,
++	float right,
++	float bottom)
++{
++	const VkRect2D *scissor;
++
++	/* The rectangle within the scissor; nothing of it is drawn outside. */
++	scissor = &compose->scissor_now;
++	if (left < (float)scissor->offset.x)
++		left = (float)scissor->offset.x;
++	if (top < (float)scissor->offset.y)
++		top = (float)scissor->offset.y;
++	if (right > (float)scissor->offset.x + (float)scissor->extent.width)
++		right = (float)scissor->offset.x + (float)scissor->extent.width;
++	if (bottom > (float)scissor->offset.y + (float)scissor->extent.height)
++		bottom = (float)scissor->offset.y + (float)scissor->extent.height;
++	if (right <= left || bottom <= top)
++		return;
++
++	/* The first rectangle is the box; later ones grow it. */
++	if (!compose->bounded) {
++		compose->bounds[0] = left;
++		compose->bounds[1] = top;
++		compose->bounds[2] = right;
++		compose->bounds[3] = bottom;
++		compose->bounded = 1U;
++		return;
++	}
++	if (left < compose->bounds[0])
++		compose->bounds[0] = left;
++	if (top < compose->bounds[1])
++		compose->bounds[1] = top;
++	if (right > compose->bounds[2])
++		compose->bounds[2] = right;
++	if (bottom > compose->bounds[3])
++		compose->bounds[3] = bottom;
++}
+diff --git a/userland/desktop/wayland/compose.c b/userland/desktop/wayland/compose.c
+index fdb0b80bfc..48d0a6a9b6 100644
+--- a/userland/desktop/wayland/compose.c
++++ b/userland/desktop/wayland/compose.c
+@@ -657,6 +657,7 @@ kwl_compose_output_close(
+ 	kwl_layers_close(compose);
+ 	kwl_scene_close(&compose->scene, compose->device);
+ 	kwl_backdrop_destroy(compose);
++	kwl_glass_maps_destroy(compose);
+ 	kwl_turn_close(compose, &compose->turn);
+ 	compose_targets_destroy(compose);
+ 	vkdemo_display_close(compose->instance, compose->device, &compose->output);
+@@ -705,6 +706,7 @@ kwl_compose_draw(
+ 	unsigned subsurfaces;
+ 	unsigned index;
+ 	int partial;
++	int moving;
+ 	unsigned cursor_id;
+ 	VkResult result;
+ 
+@@ -849,6 +851,16 @@ kwl_compose_draw(
+ 	/* The new images' layouts went with the frame. */
+ 	kwl_import_layouts_done(compose);
+ 
++	/*
++	 * While the compositor's own animation moves, the next frame is
++	 * wanted at once: the render thread acquires its image as soon as this
++	 * frame completes, instead of after the main thread has heard of the
++	 * completion and asked again (two wakeups of each thread less).
++	 */
++	moving = kwl_compositor_moving(server);
++	if (moving)
++		kwl_compose_want_frame(server);
++
+ 	/* The CPU time of the main thread's part of the frame. */
+ 	server->perf.compose_draw_cycles += kwl_cycles() - compose->frame_start_cycles;
+ 
+@@ -3351,6 +3363,10 @@ compose_record(
+ 	/* The clients' images imported since the last frame go to the layout they are sampled in. */
+ 	kwl_import_layouts_record(compose, command);
+ 
++	/* The colours of flat glass the last frames asked for, before anything samples them (glass-map.c). */
++	if (server->glass)
++		kwl_glass_maps_inband(server, command);
++
+ 	/* The pictures App Home's animation lacks, drawn before the frame's pass (layer-cache.c). */
+ 	compose->frame_layers_generation = compose->layers.generation;
+ 	kwl_layers_inband(server, command, windows, count);
+diff --git a/userland/desktop/wayland/compose.h b/userland/desktop/wayland/compose.h
+index 0d80b17810..520206657f 100644
+--- a/userland/desktop/wayland/compose.h
++++ b/userland/desktop/wayland/compose.h
+@@ -66,7 +66,9 @@
+ #define KWL_PANEL_INSIDE_SOLID		2U
+ #define KWL_PANEL_INSIDE_DARK_GLASS	3U
+ #define KWL_PANEL_INSIDE_SHADOW		4U
+-#define KWL_PANEL_INSIDES		5U
++#define KWL_PANEL_INSIDE_MAP		5U
++#define KWL_PANEL_INSIDE_CROSSFADE	6U
++#define KWL_PANEL_INSIDES		7U
+ 
+ /* Bound the buffers that hold a descriptor set at once. */
+ #define KWL_DESCRIPTOR_MAX	512U
+@@ -158,6 +160,85 @@ struct kwl_backdrop {
+ 	struct kwl_backdrop_target targets[2];
+ };
+ 
++/*
++ * The glass maps (glass-map.c): how many there are, and the values that
++ * tell one from another (a glass's colour and opacity, whether it is
++ * lifted and darkened, its sheen and the height and top of its box when it
++ * has one, and a whole-output picture's number, 0 for glass).
++ */
++#define KWL_GLASS_MAPS		8U
++#define KWL_GLASS_MAP_KEY	10U
++
++/*
++ * The pictures among the maps (the last value of a key, 0 for glass):
++ * App Home's stage over the whole output, a soft shadow around a box (its
++ * own size, drawn anywhere), and Wiseview's ground (the wallpaper, and its
++ * glass, each under Wiseview's shade, and both side by side in one image
++ * twice the output's width).  How many shadows have one.
++ */
++#define KWL_GLASS_PICTURE_STAGE	1U
++#define KWL_GLASS_PICTURE_SHADOW	2U
++#define KWL_GLASS_PICTURE_WISEVIEW_WALL	3U
++#define KWL_GLASS_PICTURE_WISEVIEW_GLASS	4U
++#define KWL_GLASS_PICTURE_WISEVIEW_GROUND	5U
++#define KWL_SHADOW_MAPS		12U
++
++/* How many keys without a map the maps remember (glass-map.c). */
++#define KWL_GLASS_CANDIDATES	16U
++
++/* Draws a whole-output picture into its map (glass-map.c), as the frame would draw it on the output. */
++typedef void (*kwl_glass_picture_draw)(struct kwl_server *server, struct kwl_list *command);
++
++/*
++ * One map: a glass's colour worked out for every output pixel, or a
++ * whole-output picture that does not change (with what draws it).  Its
++ * key; whether it is wanted or drawn; which blurred wallpaper (its generation and version) and
++ * size it was drawn from; the last frame that used it; and the image the
++ * frame reads (nearest sampling).
++ */
++struct kwl_glass_map {
++	unsigned state;
++	float key[KWL_GLASS_MAP_KEY];
++	kwl_glass_picture_draw draw;
++	uint64_t source;
++	uint32_t version;
++	uint32_t width;
++	uint32_t height;
++	uint64_t used;
++	uint32_t image_width;
++	uint32_t image_height;
++	VkImage image;
++	VkDeviceMemory memory;
++	VkImageView view;
++	VkFramebuffer framebuffer;
++	VkDescriptorSet set;
++};
++
++/*
++ * The glass maps of the output: the passes that draw them (every pixel
++ * written, or cleared first for a shadow) and the output's size, made the
++ * first time one is drawn and gone with the output's size; failed when the
++ * device could not make them (everything is then drawn as before).
++ */
++struct kwl_glass_maps {
++	unsigned failed;
++	uint32_t width;
++	uint32_t height;
++	VkRenderPass pass;
++	VkRenderPass clear_pass;
++	struct kwl_glass_map maps[KWL_GLASS_MAPS];
++	struct kwl_glass_map shadows[KWL_SHADOW_MAPS];
++	/*
++	 * The keys asked for lately that have no map yet, each with the frame
++	 * that asked (a ring, next the slot to write): a key takes a map only
++	 * when another frame asks for it again, so that a key seen once (a
++	 * shape on its way in an animation) never takes the map of a lasting one.
++	 */
++	float candidates[KWL_GLASS_CANDIDATES][KWL_GLASS_MAP_KEY];
++	uint64_t candidate_frames[KWL_GLASS_CANDIDATES];
++	unsigned candidate_next;
++};
++
+ /*
+  * The pictures of the layers (layer-cache.c, ws211-p002): App Home's content,
+  * the desktop layer, and the window a dock or an undock animates
+@@ -196,7 +277,10 @@ struct kwl_layer_image {
+  * (server->anim_serial) whose first frame decided whether its frames use
+  * the desktop's and the window's pictures (anim_using, until a frame could
+  * not), and anim_rect the rectangle of the window's picture its body was
+- * drawn in (ws211-p007).
++ * drawn in (ws211-p007).  home_bounds is the box (left, top, right,
++ * bottom, in the picture's pixels) of everything Home's picture drew, so
++ * a frame draws only that part of it (outside it the picture is clear);
++ * home_bounded says it is known.
+  */
+ struct kwl_layers {
+ 	unsigned ready;
+@@ -229,6 +313,8 @@ struct kwl_layers {
+ 	uint64_t anim_decided;
+ 	unsigned anim_using;
+ 	int32_t anim_rect[4];
++	float home_bounds[4];
++	unsigned home_bounded;
+ };
+ 
+ /* How many new client images wait at most for their move to the general layout in the next frame (ws099-p016). */
+@@ -527,6 +613,16 @@ struct kwl_compose {
+ 	uint64_t frame_layers_generation;
+ 	/* The layers' pictures (layer-cache.c, ws211-p002). */
+ 	struct kwl_layers layers;
++	/* The colours of flat glass worked out beforehand (glass-map.c). */
++	struct kwl_glass_maps glass_maps;
++	/*
++	 * While bounding is set, every draw grows bounds (left, top, right,
++	 * bottom, in the pass's pixels, within its scissor) and bounded says
++	 * one was drawn (compose-bind.c): what a layer's picture covers.
++	 */
++	unsigned bounding;
++	unsigned bounded;
++	float bounds[4];
+ 	/* Descriptor sets images gave back, for the next images (kwl_compose_set_get). */
+ 	VkDescriptorSet spare_sets[KWL_DESCRIPTOR_MAX];
+ 	unsigned spare_count;
+@@ -746,6 +842,8 @@ uint64_t kwl_compose_count_pixels(struct kwl_server *server, float x, float y, f
+ void kwl_compose_count_kind(struct kwl_server *server, unsigned kind, uint64_t pixels);
+ void kwl_compose_bind(struct kwl_server *server, struct kwl_list *command, VkPipeline pipeline, VkPipelineLayout layout, VkDescriptorSet set);
+ void kwl_compose_bind_forget(struct kwl_compose *compose);
++void kwl_compose_bounds_begin(struct kwl_compose *compose);
++int kwl_compose_bounds_end(struct kwl_compose *compose, float *bounds);
+ int kwl_compose_clip_visible(struct kwl_compose *compose, float x, float y, float width, float height);
+ void kwl_compose_clip_draw(struct kwl_server *server, struct kwl_list *command, float x, float y, float width, float height, uint32_t vertices);
+ void kwl_compose_clip_draw_rect(struct kwl_server *server, struct kwl_list *command, const VkRect2D *rect, uint32_t vertices);
+@@ -772,6 +870,7 @@ void kwl_layers_complete(struct kwl_server *server, uint64_t generation);
+ void kwl_layers_inband(struct kwl_server *server, struct kwl_list *command, struct kwl_object **windows, unsigned count);
+ int kwl_layers_pictured(struct kwl_server *server, const struct kwl_object *surface);
+ int kwl_layers_home_hidden(struct kwl_server *server);
++int kwl_layers_home_bounds(struct kwl_server *server, float *bounds);
+ void kwl_layers_note(struct kwl_server *server, const struct kwl_object *surface);
+ int kwl_layers_showing(struct kwl_server *server);
+ VkDescriptorSet kwl_layers_set(struct kwl_server *server, unsigned which);
+@@ -809,6 +908,13 @@ void kwl_backdrop_end(struct kwl_server *server, struct kwl_list *command);
+ void kwl_backdrop_reset(struct kwl_server *server);
+ void kwl_backdrop_destroy(struct kwl_compose *compose);
+ 
++/* The colours of flat glass worked out beforehand (glass-map.c). */
++int kwl_glass_map_set(struct kwl_server *server, const float *constants, VkDescriptorSet set, VkDescriptorSet *map_set);
++int kwl_glass_picture_set(struct kwl_server *server, unsigned picture, kwl_glass_picture_draw draw, VkDescriptorSet *picture_set);
++int kwl_glass_shadow_set(struct kwl_server *server, const float *box, float radius, float soft, const float *colour, float *origin, float *size, VkDescriptorSet *shadow_set);
++void kwl_glass_maps_inband(struct kwl_server *server, struct kwl_list *command);
++void kwl_glass_maps_destroy(struct kwl_compose *compose);
++
+ /* The clients' new images' move to the general layout, in the next frame (import.c). */
+ void kwl_import_layouts_record(struct kwl_compose *compose, struct kwl_list *command);
+ void kwl_import_layouts_done(struct kwl_compose *compose);
+diff --git a/userland/desktop/wayland/damage.c b/userland/desktop/wayland/damage.c
+index 9654d2cea3..b29aefa7b1 100644
+--- a/userland/desktop/wayland/damage.c
++++ b/userland/desktop/wayland/damage.c
+@@ -113,7 +113,11 @@ kwl_damage_pointer(
+ 	/* The cursor plane shows the move by itself (cursor-plane.c); a frame is drawn only for what the move changes under it. */
+ 	plane = kwl_cursor_plane_takes(server);
+ 
+-	/* The next frame shows the move without waiting for the windows (frame pacing, display.c). */
++	/*
++	 * The next frame shows the move without waiting for the windows (frame
++	 * pacing, display.c); with the plane, only a move that changes the
++	 * scene draws a frame, and that frame does not wait either.
++	 */
+ 	if (!plane)
+ 		server->pointer_moved = 1U;
+ 
+@@ -134,10 +138,18 @@ kwl_damage_pointer(
+ 			calm = kwl_glass_pointer_calm(server, server->pointer_x, server->pointer_y);
+ 		if (!calm)
+ 			calm = kwl_hover_damage(server);
++
++		/* A window being moved has marked its old and new places itself (shell.c). */
++		if (!calm)
++			calm = kwl_glass_drag_measured(server);
+ 		if (!calm) {
++			server->pointer_moved = 1U;
+ 			server->dirty = 1;
+ 			return;
+ 		}
++
++		/* Whatever the move changes is drawn without waiting for the windows. */
++		server->pointer_moved = 1U;
+ 	}
+ 
+ 	/* The plane moves the cursor; the frame keeps its pixels. */
+diff --git a/userland/desktop/wayland/display.c b/userland/desktop/wayland/display.c
+index e8668f83ab..1334c1c240 100644
+--- a/userland/desktop/wayland/display.c
++++ b/userland/desktop/wayland/display.c
+@@ -113,6 +113,7 @@ kwl_schedule(
+ 	int direct;
+ 	int ready;
+ 	int held;
++	int moving;
+ 	int error;
+ 
+ 	/* An OS-paused display cannot compose or present until authority returns. */
+@@ -241,15 +242,12 @@ kwl_schedule(
+ 	 * review-2 N3).
+ 	 */
+ 	now = kwl_milliseconds();
++	moving = kwl_compositor_moving(server);
+ 	if (server->awaiting != 0 &&
+ 	    !server->pointer_moved &&
+ 	    server->transition == NULL &&
+-	    server->anim == NULL &&
+-	    !server->home_moving &&
+-	    !server->home_page_moving &&
++	    !moving &&
+ 	    !server->home_dragging &&
+-	    !server->wiseview_moving &&
+-	    !server->desktop_moving &&
+ 	    now - server->frame_done_ms < server->frame_wait_ms)
+ 		return;
+ 
+@@ -281,6 +279,27 @@ kwl_schedule(
+ 	}
+ }
+ 
++/*
++ * Tells whether the compositor's own animation moves (a window's, App
++ * Home's or its pages', Wiseview's, the desktops sliding): each of its
++ * frames is followed by another.
++ */
++int
++kwl_compositor_moving(
++	const struct kwl_server *server)
++{
++	/* Any of them. */
++	if (server->anim != NULL)
++		return 1;
++	if (server->home_moving || server->home_page_moving)
++		return 1;
++	if (server->wiseview_moving || server->desktop_moving)
++		return 1;
++
++	/* Still. */
++	return 0;
++}
++
+ /*
+  * Notes that App Home or Wiseview was asked to open or close: the next
+  * frame is drawn without waiting for the windows (frame pacing), and the
+diff --git a/userland/desktop/wayland/glass-map.c b/userland/desktop/wayland/glass-map.c
+new file mode 100644
+index 0000000000..c1695d5e87
+--- /dev/null
++++ b/userland/desktop/wayland/glass-map.c
+@@ -0,0 +1,1130 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The glass maps: the colour of glass at every output pixel, worked out
++ * beforehand, and pictures of the whole output that do not change.
++ *
++ * Flat glass (a window's panels, its blurred desktop) samples the blurred
++ * wallpaper at its own place on the output and whitens or darkens it by its
++ * colour; nothing else of the shape changes the colour of its inside.  So
++ * for one colour the inside's colour depends on the output pixel alone,
++ * and the panel shader that works it out (its inside variant, over the
++ * same blurred wallpaper) can write it for every pixel of an image of the
++ * output's size once.  The inside of such glass is then drawn by the map
++ * variant (KWL_PANEL_INSIDE_MAP), which reads the map at the pixel itself
++ * (nearest sampling, at the texel's centre): the same bytes, without the
++ * per-pixel arithmetic.  Glass with a sheen from the top depends on its
++ * box too; only glass over the whole output (Wiseview's, App Home's stage)
++ * is mapped so, its box being the output's.
++ *
++ * A glass's map is made once two frames asked for it (a shape seen once,
++ * or one whose key moves, is not worth a pass over the whole output, nor
++ * the map of a lasting one), drawn before the next frame's own pass
++ * (kwl_glass_maps_inband), and used from then on; meanwhile the glass is
++ * drawn as before.  A map is drawn again
++ * when the blurred wallpaper changes, and all go with the output's size.
++ * Plain flat glass in the light appearance (no colour, not lifted) is the
++ * blurred wallpaper itself, read by the same variant with its own linear
++ * sampling, and needs no map.
++ *
++ * A whole-output picture (App Home's stage: its glass and its light) is
++ * drawn the same way by the function its user gives, the frame after the
++ * first that asked; the frames then draw it as one opaque image.
++ *
++ * A soft shadow around a box depends only on the pixel's place from the
++ * box, its size, corner radius, softness and colour: its picture (as far
++ * as the shadow reaches) is drawn once, on transparent black, and a
++ * shadow at a whole pixel's place is then drawn as that picture, blended,
++ * instead of working out the distance to the box at every pixel.  The
++ * picture holds the shadow's colour in the output's bytes, so the blend
++ * may differ from the shadow worked out in the frame by a step of a byte.
++ */
++
++#include "compose.h"
++#include "glass.h"
++
++#include <math.h>
++#include <stdio.h>
++#include <string.h>
++
++/* What a map holds: nothing, a colour waiting to be drawn, or that colour drawn. */
++#define GLASS_MAP_FREE		0U
++#define GLASS_MAP_WANTED	1U
++#define GLASS_MAP_READY		2U
++
++/* The most maps drawn before one frame's pass (each is a pass over the whole output), and the most shadows. */
++#define GLASS_MAP_DRAWS		1U
++#define GLASS_SHADOW_DRAWS	2U
++
++static int map_key_same(const struct kwl_glass_map *map, const float *key);
++static void map_key_of(const float *constants, float *key);
++static struct kwl_glass_map *map_find(struct kwl_glass_map *maps, unsigned count, const float *key);
++static struct kwl_glass_map *map_claim(struct kwl_server *server, struct kwl_glass_map *maps, unsigned count, const float *key);
++static int map_take(struct kwl_server *server, struct kwl_glass_map *maps, unsigned count, const float *key, kwl_glass_picture_draw draw, VkDescriptorSet *map_set);
++static int map_current(struct kwl_server *server, const struct kwl_glass_map *map);
++static int map_candidate(struct kwl_server *server, const float *key);
++static void maps_draw_wanted(struct kwl_server *server, struct kwl_list *command, struct kwl_glass_map *maps, unsigned count, unsigned most);
++static VkResult maps_open(struct kwl_server *server);
++static VkResult map_pass_create(struct kwl_compose *compose, VkAttachmentLoadOp load, VkRenderPass *created);
++static void map_image_size(struct kwl_server *server, const struct kwl_glass_map *map, uint32_t *width, uint32_t *height);
++static VkResult map_image_create(struct kwl_compose *compose, struct kwl_glass_map *map);
++static void map_image_destroy(struct kwl_compose *compose, struct kwl_glass_map *map);
++static void map_draw(struct kwl_server *server, struct kwl_list *command, struct kwl_glass_map *map, const struct kwl_import *blurred);
++static void map_draw_glass(struct kwl_server *server, struct kwl_list *command, const struct kwl_glass_map *map, const struct kwl_import *blurred);
++static void map_draw_picture(struct kwl_server *server, struct kwl_list *command, const struct kwl_glass_map *map);
++static void map_draw_shadow(struct kwl_server *server, struct kwl_list *command, const struct kwl_glass_map *map, const struct kwl_import *blurred);
++
++/*
++ * Gives the descriptor set the inside of a glass shape (its constants,
++ * the shape's own set) is drawn from with the map variant, when it can be:
++ * glass on the blurred wallpaper, on the output's whole plane, flat or over
++ * the whole output.  A colour without a map yet asks for one and gets none
++ * this time.  Returns 1 with *map_set, or 0 (the inside is drawn as before).
++ */
++int
++kwl_glass_map_set(
++	struct kwl_server *server,
++	const float *constants,
++	VkDescriptorSet set,
++	VkDescriptorSet *map_set)
++{
++	const struct kwl_import *blurred;
++	struct kwl_compose *compose;
++	float key[KWL_GLASS_MAP_KEY];
++	int taken;
++
++	/* Not asked for (--no-glass-map), or not possible on this device. */
++	compose = server->compose;
++	if (server->glass_map_off || compose->glass_maps.failed)
++		return 0;
++
++	/* Glass on the blurred wallpaper (not on a window's backdrop). */
++	blurred = glass_blurred(server);
++	if (blurred == NULL ||
++	    blurred->set == VK_NULL_HANDLE ||
++	    set != blurred->set)
++		return 0;
++
++	/* On the output's whole plane, at its size (not a head's part of it). */
++	if (server->view_width != 0U)
++		return 0;
++	if (constants[20] != (float)server->width || constants[21] != (float)server->height)
++		return 0;
++
++	/* A sheen from the top depends on the box: only a box that is the whole output. */
++	if (constants[6] != 0.0f &&
++	    (constants[8] != 0.0f ||
++	     constants[9] != 0.0f ||
++	     constants[10] != (float)server->width ||
++	     constants[11] != (float)server->height))
++		return 0;
++
++	/*
++	 * Plain flat glass in the light appearance (no colour, not lifted, not
++	 * darkened) is the blurred wallpaper as it is: the shader mixes in
++	 * nothing, so its own image serves.
++	 */
++	if (constants[15] == 0.0f &&
++	    constants[4] == 0.0f &&
++	    constants[5] == 0.0f &&
++	    constants[6] == 0.0f) {
++		*map_set = set;
++		return 1;
++	}
++
++	/* The map of the colour, drawn over the blurred wallpaper as it is now. */
++	map_key_of(constants, key);
++	taken = map_take(server, compose->glass_maps.maps, KWL_GLASS_MAPS, key, NULL, map_set);
++	if (!taken)
++		return 0;
++
++	/* Succeeded: the inside reads the map. */
++	return 1;
++}
++
++/*
++ * Gives the descriptor set of a whole-output picture that does not change
++ * while the blurred wallpaper, the appearance and the output's size stay
++ * (picture, KWL_GLASS_PICTURE_*), drawn by draw; a picture not drawn yet
++ * is drawn before the next frame's pass.  Returns 1 with *picture_set, or 0 (the
++ * caller draws it itself this time).
++ */
++int
++kwl_glass_picture_set(
++	struct kwl_server *server,
++	unsigned picture,
++	kwl_glass_picture_draw draw,
++	VkDescriptorSet *picture_set)
++{
++	const struct kwl_import *blurred;
++	float key[KWL_GLASS_MAP_KEY];
++	int taken;
++
++	/* Not asked for (--no-glass-map), or not possible on this device. */
++	if (server->glass_map_off || server->compose->glass_maps.failed)
++		return 0;
++
++	/* Nothing to draw from before the glass look opens. */
++	blurred = glass_blurred(server);
++	if (blurred == NULL || blurred->set == VK_NULL_HANDLE)
++		return 0;
++
++	/* The picture's key: its number, and the appearance it was drawn in. */
++	memset(key, 0, sizeof(key));
++	if (server->dark != 0)
++		key[0] = 1.0f;
++	key[9] = (float)picture;
++	taken = map_take(server, server->compose->glass_maps.maps, KWL_GLASS_MAPS, key, draw, picture_set);
++	if (!taken)
++		return 0;
++
++	/* Succeeded: the frame shows the picture. */
++	return 1;
++}
++
++/*
++ * Gives the picture of a soft shadow around a box (x, y, width, height on
++ * the output, at whole pixels) of a corner radius, a softness (a whole
++ * number of pixels) and a colour (straight, with its opacity): *origin is
++ * where the picture's top-left corner goes on the output, *size its width
++ * and height.  A shadow without a picture yet asks for one.  Returns 1 with
++ * the picture's set, or 0 (the shadow is worked out as before).
++ */
++int
++kwl_glass_shadow_set(
++	struct kwl_server *server,
++	const float *box,
++	float radius,
++	float soft,
++	const float *colour,
++	float *origin,
++	float *size,
++	VkDescriptorSet *shadow_set)
++{
++	struct kwl_glass_map *map;
++	float key[KWL_GLASS_MAP_KEY];
++	float whole[3];
++	float reach;
++	int taken;
++
++	/* Not asked for (--no-glass-map), or not possible on this device. */
++	if (server->glass_map_off || server->compose->glass_maps.failed)
++		return 0;
++
++	/* A box at whole pixels, of a whole softness: the picture's pixels are the output's. */
++	whole[0] = floorf(box[0]);
++	whole[1] = floorf(box[1]);
++	whole[2] = floorf(soft);
++	if (box[0] != whole[0] || box[1] != whole[1] || soft != whole[2])
++		return 0;
++	if (box[2] <= 0.0f || box[3] <= 0.0f || soft < 1.0f)
++		return 0;
++
++	/* The shadow's key: its colour, the box's size, the radius and the softness. */
++	memset(key, 0, sizeof(key));
++	memcpy(key, colour, 4U * sizeof(float));
++	key[4] = box[2];
++	key[5] = box[3];
++	key[6] = radius;
++	key[7] = soft;
++	key[9] = (float)KWL_GLASS_PICTURE_SHADOW;
++	taken = map_take(server, server->compose->glass_maps.shadows, KWL_SHADOW_MAPS, key, NULL, shadow_set);
++	if (!taken)
++		return 0;
++
++	/* As far as the shadow reaches around the box (the trimmed quad, glass.c), and a pixel for the rounding. */
++	map = map_find(server->compose->glass_maps.shadows, KWL_SHADOW_MAPS, key);
++	reach = soft + 1.0f;
++	origin[0] = box[0] - reach;
++	origin[1] = box[1] - reach;
++	size[0] = (float)map->image_width;
++	size[1] = (float)map->image_height;
++
++	/* Succeeded: the shadow is the picture. */
++	return 1;
++}
++
++/*
++ * Draws the maps the last frames asked for, before the frame's pass (no
++ * frame is in flight): at most GLASS_MAP_DRAWS glass maps or pictures and
++ * GLASS_SHADOW_DRAWS shadows a frame.
++ */
++void
++kwl_glass_maps_inband(
++	struct kwl_server *server,
++	struct kwl_list *command)
++{
++	const struct kwl_import *blurred;
++	struct kwl_compose *compose;
++	struct kwl_glass_maps *maps;
++
++	/* Not asked for, or not possible on this device. */
++	compose = server->compose;
++	maps = &compose->glass_maps;
++	if (server->glass_map_off || maps->failed)
++		return;
++
++	/* Nothing to draw from before the glass look opens. */
++	blurred = glass_blurred(server);
++	if (blurred == NULL || blurred->set == VK_NULL_HANDLE)
++		return;
++
++	/* The maps of another size go first (the output turned or changed its mode). */
++	if (maps->pass != VK_NULL_HANDLE && (maps->width != server->width || maps->height != server->height))
++		kwl_glass_maps_destroy(compose);
++
++	/* The maps wanted, up to the frame's share, then the shadows. */
++	maps_draw_wanted(server, command, maps->maps, KWL_GLASS_MAPS, GLASS_MAP_DRAWS);
++	if (maps->failed)
++		return;
++	maps_draw_wanted(server, command, maps->shadows, KWL_SHADOW_MAPS, GLASS_SHADOW_DRAWS);
++}
++
++/* Releases the maps' images and pass (no frame that reads them is in flight). */
++void
++kwl_glass_maps_destroy(
++	struct kwl_compose *compose)
++{
++	struct kwl_glass_maps *maps;
++	unsigned failed;
++	unsigned index;
++
++	/* Each map's image, and each shadow's. */
++	maps = &compose->glass_maps;
++	for (index = 0U; index < KWL_GLASS_MAPS; index++)
++		map_image_destroy(compose, &maps->maps[index]);
++	for (index = 0U; index < KWL_SHADOW_MAPS; index++)
++		map_image_destroy(compose, &maps->shadows[index]);
++
++	/* The passes the maps are drawn with. */
++	if (maps->pass != VK_NULL_HANDLE)
++		vkDestroyRenderPass(compose->device, maps->pass, NULL);
++	if (maps->clear_pass != VK_NULL_HANDLE)
++		vkDestroyRenderPass(compose->device, maps->clear_pass, NULL);
++
++	/* Nothing is left; a device that could not make them stays without. */
++	failed = maps->failed;
++	memset(maps, 0, sizeof(*maps));
++	maps->failed = failed;
++}
++
++/* Tells whether a map holds the colour of a key. */
++static int
++map_key_same(
++	const struct kwl_glass_map *map,
++	const float *key)
++{
++	unsigned index;
++
++	/* A map that holds nothing holds no colour. */
++	if (map->state == GLASS_MAP_FREE)
++		return 0;
++
++	/* Every value of the key. */
++	for (index = 0U; index < KWL_GLASS_MAP_KEY; index++) {
++		if (map->key[index] != key[index])
++			return 0;
++	}
++
++	/* The same colour. */
++	return 1;
++}
++
++/*
++ * Gives the key of a glass shape's colour: its colour and opacity, whether
++ * it is lifted (white) and darkened (dark glass), and its sheen with the
++ * one over its box's height (the box is the whole output then); 0 for a
++ * picture.
++ */
++static void
++map_key_of(
++	const float *constants,
++	float *key)
++{
++	/* The colour, then the two choices glass_shape_glass_constants made. */
++	key[0] = constants[12];
++	key[1] = constants[13];
++	key[2] = constants[14];
++	key[3] = constants[15];
++	key[4] = constants[4];
++	key[5] = constants[5];
++
++	/* The sheen and how it fades down the box (nothing on flat glass, whose box does not matter). */
++	key[6] = constants[6];
++	key[7] = 0.0f;
++	if (constants[6] != 0.0f)
++		key[7] = constants[7];
++	key[8] = 0.0f;
++
++	/* Glass, not a picture. */
++	key[9] = 0.0f;
++}
++
++/*
++ * Gives a map's set when it is drawn over the blurred wallpaper as it is
++ * now and at the output's size, noting the frame's use; otherwise asks for
++ * it (a new key takes a map, which draw draws for a picture).  Returns 1
++ * with *map_set, or 0.
++ */
++static int
++map_take(
++	struct kwl_server *server,
++	struct kwl_glass_map *maps,
++	unsigned count,
++	const float *key,
++	kwl_glass_picture_draw draw,
++	VkDescriptorSet *map_set)
++{
++	struct kwl_glass_map *map;
++	int current;
++	int again;
++
++	/* The map of the key, current. */
++	map = map_find(maps, count, key);
++	current = 0;
++	if (map != NULL)
++		current = map_current(server, map);
++	if (current) {
++		map->used = server->frame;
++		*map_set = map->set;
++		return 1;
++	}
++
++	/* None yet: a key an earlier frame asked for too (a picture's at once) takes a map. */
++	if (map == NULL) {
++		if (draw == NULL) {
++			again = map_candidate(server, key);
++			if (!again)
++				return 0;
++		}
++		map = map_claim(server, maps, count, key);
++		if (map == NULL)
++			return 0;
++		map->draw = draw;
++	}
++
++	/* Stale or not drawn yet: the next frame draws it. */
++	map->state = GLASS_MAP_WANTED;
++	map->used = server->frame;
++
++	/* Not drawn this time. */
++	return 0;
++}
++
++/*
++ * Tells whether a key without a map was asked for by an earlier frame
++ * (it is then forgotten, as it takes a map); otherwise remembers that this
++ * frame asked for it.  Returns 1 for a key asked for again.
++ */
++static int
++map_candidate(
++	struct kwl_server *server,
++	const float *key)
++{
++	struct kwl_glass_maps *maps;
++	unsigned index;
++	int same;
++
++	/* Each key remembered. */
++	maps = &server->compose->glass_maps;
++	for (index = 0U; index < KWL_GLASS_CANDIDATES; index++) {
++		if (maps->candidate_frames[index] == 0U)
++			continue;
++		same = memcmp(maps->candidates[index], key, sizeof(maps->candidates[index]));
++		if (same != 0)
++			continue;
++
++		/* Asked for already in this frame: still once. */
++		if (maps->candidate_frames[index] == server->frame + 1U)
++			return 0;
++
++		/* Asked for again: forgotten, as it takes a map. */
++		maps->candidate_frames[index] = 0U;
++		return 1;
++	}
++
++	/* Remembered as asked for by this frame (the frame being drawn). */
++	index = maps->candidate_next;
++	memcpy(maps->candidates[index], key, sizeof(maps->candidates[index]));
++	maps->candidate_frames[index] = server->frame + 1U;
++	maps->candidate_next = (index + 1U) % KWL_GLASS_CANDIDATES;
++
++	/* Asked for once. */
++	return 0;
++}
++
++/*
++ * Tells whether a map is drawn and still shows what it would show now: a
++ * glass's map or a whole-output picture drawn over the blurred wallpaper as
++ * it is and at the output's size; a shadow's picture depends on neither.
++ */
++static int
++map_current(
++	struct kwl_server *server,
++	const struct kwl_glass_map *map)
++{
++	const struct kwl_import *blurred;
++
++	/* Drawn. */
++	if (map->state != GLASS_MAP_READY)
++		return 0;
++
++	/* A shadow's picture is what its key says. */
++	if (map->key[9] == (float)KWL_GLASS_PICTURE_SHADOW)
++		return 1;
++
++	/* Over the blurred wallpaper as it is now, at the output's size. */
++	blurred = glass_blurred(server);
++	if (map->source != blurred->generation || map->version != blurred->version)
++		return 0;
++	if (map->width != server->width || map->height != server->height)
++		return 0;
++
++	/* Current. */
++	return 1;
++}
++
++/* Finds the map of a key among count maps, or NULL. */
++static struct kwl_glass_map *
++map_find(
++	struct kwl_glass_map *maps,
++	unsigned count,
++	const float *key)
++{
++	struct kwl_glass_map *map;
++	unsigned index;
++	int same;
++
++	/* Each map. */
++	for (index = 0U; index < count; index++) {
++		map = &maps[index];
++		same = map_key_same(map, key);
++		if (same)
++			return map;
++	}
++
++	/* None holds it. */
++	return NULL;
++}
++
++/*
++ * Gives a map for a new key: a free one, else the one used longest ago
++ * that the last two frames did not use (so that more colours than maps do
++ * not draw a map again every frame).  NULL when none can be given.
++ */
++static struct kwl_glass_map *
++map_claim(
++	struct kwl_server *server,
++	struct kwl_glass_map *maps,
++	unsigned count,
++	const float *key)
++{
++	struct kwl_glass_map *oldest;
++	struct kwl_glass_map *map;
++	unsigned index;
++
++	/* A free map first, else the oldest one not in use. */
++	oldest = NULL;
++	for (index = 0U; index < count; index++) {
++		map = &maps[index];
++		if (map->state == GLASS_MAP_FREE) {
++			oldest = map;
++			break;
++		}
++		if (map->used + 1U >= server->frame)
++			continue;
++		if (oldest == NULL || map->used < oldest->used)
++			oldest = map;
++	}
++
++	/* Every map is in use. */
++	if (oldest == NULL)
++		return NULL;
++
++	/* The map takes the key; its image is drawn again. */
++	memcpy(oldest->key, key, sizeof(oldest->key));
++	oldest->state = GLASS_MAP_WANTED;
++
++	/* Succeeded: the map for the key. */
++	return oldest;
++}
++
++/* Makes the maps' pass, at the output's size. */
++static VkResult
++maps_open(
++	struct kwl_server *server)
++{
++	struct kwl_glass_maps *maps;
++	VkResult result;
++
++	/* The size the maps are drawn at. */
++	maps = &server->compose->glass_maps;
++	maps->width = server->width;
++	maps->height = server->height;
++
++	/* The pass that writes every pixel, and the one that clears first (a shadow's picture). */
++	result = map_pass_create(server->compose, VK_ATTACHMENT_LOAD_OP_DONT_CARE, &maps->pass);
++	if (result != VK_SUCCESS)
++		return result;
++	result = map_pass_create(server->compose, VK_ATTACHMENT_LOAD_OP_CLEAR, &maps->clear_pass);
++	if (result != VK_SUCCESS)
++		return result;
++
++	/* Succeeded: maps can be drawn. */
++	return VK_SUCCESS;
++}
++
++/*
++ * Draws the wanted maps among count, at most most of them, each image
++ * made first at the size it needs (the output's, or a shadow's own); a
++ * failure leaves the maps failed.
++ */
++static void
++maps_draw_wanted(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	struct kwl_glass_map *maps,
++	unsigned count,
++	unsigned most)
++{
++	const struct kwl_import *blurred;
++	struct kwl_compose *compose;
++	struct kwl_glass_map *map;
++	uint32_t width;
++	uint32_t height;
++	VkResult result;
++	unsigned drawn;
++	unsigned index;
++
++	/* Each map wanted, up to the share. */
++	compose = server->compose;
++	blurred = glass_blurred(server);
++	drawn = 0U;
++	for (index = 0U; index < count && drawn < most; index++) {
++		map = &maps[index];
++		if (map->state != GLASS_MAP_WANTED)
++			continue;
++
++		/* The passes, made the first time (a failure is remembered). */
++		if (compose->glass_maps.pass == VK_NULL_HANDLE) {
++			result = maps_open(server);
++			if (result != VK_SUCCESS) {
++				printf("KWL GLASS map failed result=%d\n", (int)result);
++				kwl_glass_maps_destroy(compose);
++				compose->glass_maps.failed = 1U;
++				return;
++			}
++		}
++
++		/* Its image at the size it needs, made again when another size is needed. */
++		map_image_size(server, map, &width, &height);
++		if (map->image != VK_NULL_HANDLE && (map->image_width != width || map->image_height != height))
++			map_image_destroy(compose, map);
++		if (map->image == VK_NULL_HANDLE) {
++			map->image_width = width;
++			map->image_height = height;
++			result = map_image_create(compose, map);
++			if (result != VK_SUCCESS) {
++				printf("KWL GLASS map failed result=%d\n", (int)result);
++				kwl_glass_maps_destroy(compose);
++				compose->glass_maps.failed = 1U;
++				return;
++			}
++		}
++
++		/* Drawn, ready for the shapes drawn after it. */
++		map_draw(server, command, map, blurred);
++		map->source = blurred->generation;
++		map->version = blurred->version;
++		map->width = server->width;
++		map->height = server->height;
++		map->state = GLASS_MAP_READY;
++		drawn++;
++		printf("KWL GLASS map drawn slot=%u picture=%.0f key=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f size=%ux%u\n",
++		       index, (double)map->key[9], (double)map->key[0], (double)map->key[1], (double)map->key[2], (double)map->key[3],
++		       (double)map->key[4], (double)map->key[5], (double)map->key[6], (double)map->key[7], map->image_width, map->image_height);
++	}
++
++}
++
++/* Gives the size of a map's image: a shadow's reach around its box, Wiseview's ground twice the output's width, else the output's. */
++static void
++map_image_size(
++	struct kwl_server *server,
++	const struct kwl_glass_map *map,
++	uint32_t *width,
++	uint32_t *height)
++{
++	float reach;
++
++	/* The output's size, for a glass's map and a whole-output picture; two outputs side by side for Wiseview's ground. */
++	*width = server->width;
++	*height = server->height;
++	if (map->key[9] == (float)KWL_GLASS_PICTURE_WISEVIEW_GROUND)
++		*width = 2U * server->width;
++	if (map->key[9] != (float)KWL_GLASS_PICTURE_SHADOW)
++		return;
++
++	/* The box (its size up to whole pixels) and the shadow's reach (its softness and a pixel) on each side. */
++	reach = map->key[7] + 1.0f;
++	*width = (uint32_t)ceilf(map->key[4] + 2.0f * reach);
++	*height = (uint32_t)ceilf(map->key[5] + 2.0f * reach);
++}
++
++/*
++ * Makes a pass of the maps: every pixel written (load DONT_CARE) or the
++ * image cleared first (CLEAR), and left to be sampled; it waits for the
++ * reads of the map's last use, and its writes are seen by the reads after
++ * it.
++ */
++static VkResult
++map_pass_create(
++	struct kwl_compose *compose,
++	VkAttachmentLoadOp load,
++	VkRenderPass *created)
++{
++	VkAttachmentDescription attachment;
++	VkAttachmentReference reference;
++	VkSubpassDescription subpass;
++	VkSubpassDependency dependencies[2];
++	VkRenderPassCreateInfo pass;
++	VkResult result;
++
++	/* One colour attachment of the output's format, so that a map's bytes are the frame's. */
++	memset(&attachment, 0, sizeof(attachment));
++	attachment.format = compose->format;
++	attachment.samples = VK_SAMPLE_COUNT_1_BIT;
++	attachment.loadOp = load;
++	attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
++	attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
++	attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
++	attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++	attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
++	memset(&reference, 0, sizeof(reference));
++	reference.attachment = 0U;
++	reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
++	memset(&subpass, 0, sizeof(subpass));
++	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
++	subpass.colorAttachmentCount = 1U;
++	subpass.pColorAttachments = &reference;
++
++	/* Written after the last reads of the map, and after the copy of the blurred wallpaper. */
++	memset(dependencies, 0, sizeof(dependencies));
++	dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
++	dependencies[0].dstSubpass = 0U;
++	dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
++	dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
++	dependencies[0].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
++	dependencies[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
++
++	/* Read after the writes. */
++	dependencies[1].srcSubpass = 0U;
++	dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
++	dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
++	dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
++	dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
++	dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
++
++	/* The pass. */
++	memset(&pass, 0, sizeof(pass));
++	pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
++	pass.attachmentCount = 1U;
++	pass.pAttachments = &attachment;
++	pass.subpassCount = 1U;
++	pass.pSubpasses = &subpass;
++	pass.dependencyCount = 2U;
++	pass.pDependencies = dependencies;
++	result = vkCreateRenderPass(compose->device, &pass, NULL, created);
++	if (result != VK_SUCCESS)
++		return result;
++
++	/* Succeeded. */
++	return VK_SUCCESS;
++}
++
++/* Makes a map's image: device memory, a view, a framebuffer of the maps' pass, and a set sampled at the nearest texel. */
++static VkResult
++map_image_create(
++	struct kwl_compose *compose,
++	struct kwl_glass_map *map)
++{
++	VkPhysicalDeviceMemoryProperties memory;
++	VkMemoryRequirements requirements;
++	VkImageCreateInfo image;
++	VkMemoryAllocateInfo allocate;
++	VkImageViewCreateInfo view;
++	VkFramebufferCreateInfo framebuffer;
++	VkDescriptorImageInfo image_info;
++	VkWriteDescriptorSet write;
++	uint32_t index;
++	VkResult result;
++
++	/* The image: drawn into and sampled, of the map's size and the output's format. */
++	memset(&image, 0, sizeof(image));
++	image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
++	image.imageType = VK_IMAGE_TYPE_2D;
++	image.format = compose->format;
++	image.extent.width = map->image_width;
++	image.extent.height = map->image_height;
++	image.extent.depth = 1U;
++	image.mipLevels = 1U;
++	image.arrayLayers = 1U;
++	image.samples = VK_SAMPLE_COUNT_1_BIT;
++	image.tiling = VK_IMAGE_TILING_OPTIMAL;
++	image.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
++	image.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++	image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++	result = vkCreateImage(compose->device, &image, NULL, &map->image);
++	if (result != VK_SUCCESS)
++		return result;
++
++	/* Device memory for it (the device's own first). */
++	vkGetImageMemoryRequirements(compose->device, map->image, &requirements);
++	vkGetPhysicalDeviceMemoryProperties(compose->physical, &memory);
++	for (index = 0; index < memory.memoryTypeCount; index++) {
++		if ((requirements.memoryTypeBits & (1U << index)) != 0U &&
++		    (memory.memoryTypes[index].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0U)
++			break;
++	}
++
++	/* Otherwise any type the image takes. */
++	if (index == memory.memoryTypeCount) {
++		for (index = 0; index < memory.memoryTypeCount; index++) {
++			if ((requirements.memoryTypeBits & (1U << index)) != 0U)
++				break;
++		}
++	}
++
++	/* No memory the image takes. */
++	if (index == memory.memoryTypeCount)
++		return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++
++	/* The memory, bound. */
++	memset(&allocate, 0, sizeof(allocate));
++	allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
++	allocate.allocationSize = requirements.size;
++	allocate.memoryTypeIndex = index;
++	result = vkAllocateMemory(compose->device, &allocate, NULL, &map->memory);
++	if (result != VK_SUCCESS)
++		return result;
++	result = vkBindImageMemory(compose->device, map->image, map->memory, 0U);
++	if (result != VK_SUCCESS)
++		return result;
++
++	/* Its view. */
++	memset(&view, 0, sizeof(view));
++	view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
++	view.image = map->image;
++	view.viewType = VK_IMAGE_VIEW_TYPE_2D;
++	view.format = compose->format;
++	view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
++	view.subresourceRange.levelCount = 1U;
++	view.subresourceRange.layerCount = 1U;
++	result = vkCreateImageView(compose->device, &view, NULL, &map->view);
++	if (result != VK_SUCCESS)
++		return result;
++
++	/* The framebuffer of the maps' pass. */
++	memset(&framebuffer, 0, sizeof(framebuffer));
++	framebuffer.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
++	framebuffer.renderPass = compose->glass_maps.pass;
++	framebuffer.attachmentCount = 1U;
++	framebuffer.pAttachments = &map->view;
++	framebuffer.width = map->image_width;
++	framebuffer.height = map->image_height;
++	framebuffer.layers = 1U;
++	result = vkCreateFramebuffer(compose->device, &framebuffer, NULL, &map->framebuffer);
++	if (result != VK_SUCCESS)
++		return result;
++
++	/* The descriptor set, sampled at the nearest texel: a pixel reads its own. */
++	result = kwl_compose_set_get(compose, &map->set);
++	if (result != VK_SUCCESS)
++		return result;
++	memset(&image_info, 0, sizeof(image_info));
++	image_info.sampler = compose->sampler;
++	image_info.imageView = map->view;
++	image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
++	memset(&write, 0, sizeof(write));
++	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
++	write.dstSet = map->set;
++	write.dstBinding = 0U;
++	write.descriptorCount = 1U;
++	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++	write.pImageInfo = &image_info;
++	vkUpdateDescriptorSets(compose->device, 1U, &write, 0U, NULL);
++
++	/* Succeeded: the map can be drawn. */
++	return VK_SUCCESS;
++}
++
++/* Releases a map's image, view, framebuffer, memory and set; its key and state stay. */
++static void
++map_image_destroy(
++	struct kwl_compose *compose,
++	struct kwl_glass_map *map)
++{
++	/* Whatever was made. */
++	if (map->framebuffer != VK_NULL_HANDLE)
++		vkDestroyFramebuffer(compose->device, map->framebuffer, NULL);
++	if (map->view != VK_NULL_HANDLE)
++		vkDestroyImageView(compose->device, map->view, NULL);
++	if (map->image != VK_NULL_HANDLE)
++		vkDestroyImage(compose->device, map->image, NULL);
++	if (map->memory != VK_NULL_HANDLE)
++		vkFreeMemory(compose->device, map->memory, NULL);
++	if (map->set != VK_NULL_HANDLE)
++		kwl_compose_set_put(compose, map->set);
++
++	/* No image. */
++	map->framebuffer = VK_NULL_HANDLE;
++	map->view = VK_NULL_HANDLE;
++	map->image = VK_NULL_HANDLE;
++	map->memory = VK_NULL_HANDLE;
++	map->set = VK_NULL_HANDLE;
++	map->image_width = 0U;
++	map->image_height = 0U;
++}
++
++/* Draws a map: its pass on the map's image, with the pass's own viewport, scissor and quad corners, then a glass's colour or a picture. */
++static void
++map_draw(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	struct kwl_glass_map *map,
++	const struct kwl_import *blurred)
++{
++	struct kwl_compose *compose;
++	VkRenderPassBeginInfo pass;
++	VkClearValue clear;
++	VkViewport viewport;
++	VkRect2D scissor;
++	VkDeviceSize offset;
++	unsigned shadow;
++
++	/* The pass on the map's image; a shadow's picture on transparent black. */
++	compose = server->compose;
++	shadow = 0U;
++	if (map->key[9] == (float)KWL_GLASS_PICTURE_SHADOW)
++		shadow = 1U;
++	memset(&clear, 0, sizeof(clear));
++	memset(&pass, 0, sizeof(pass));
++	pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
++	pass.renderPass = compose->glass_maps.pass;
++	if (shadow) {
++		pass.renderPass = compose->glass_maps.clear_pass;
++		pass.clearValueCount = 1U;
++		pass.pClearValues = &clear;
++	}
++	pass.framebuffer = map->framebuffer;
++	pass.renderArea.extent.width = map->image_width;
++	pass.renderArea.extent.height = map->image_height;
++	kwl_list_begin_render_pass(command, &pass, VK_SUBPASS_CONTENTS_INLINE);
++	kwl_compose_bind_forget(compose);
++
++	/* The pass's own viewport, scissor and quad corners. */
++	memset(&viewport, 0, sizeof(viewport));
++	viewport.width = (float)map->image_width;
++	viewport.height = (float)map->image_height;
++	viewport.maxDepth = 1.0f;
++	kwl_list_set_viewport(command, 0U, 1U, &viewport);
++	memset(&scissor, 0, sizeof(scissor));
++	scissor.extent.width = map->image_width;
++	scissor.extent.height = map->image_height;
++	kwl_list_set_scissor(command, 0U, 1U, &scissor);
++	offset = 0U;
++	kwl_list_bind_vertex_buffers(command, 0U, 1U, &compose->corners, &offset);
++
++	/* A picture by its own function, a shadow or a glass's colour by one quad. */
++	if (map->draw != NULL) {
++		map_draw_picture(server, command, map);
++	} else if (shadow) {
++		map_draw_shadow(server, command, map, blurred);
++	} else {
++		map_draw_glass(server, command, map, blurred);
++	}
++
++	/* The pass ends with the map ready to be sampled. */
++	kwl_list_end_render_pass(command);
++	kwl_compose_bind_forget(compose);
++}
++
++/*
++ * Draws a glass's map: one quad over the whole image with the opaque inside
++ * variant of the glass the frame draws (light or dark), its colour, its
++ * sheen down the whole output, at full opacity, over the blurred wallpaper.
++ */
++static void
++map_draw_glass(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	const struct kwl_glass_map *map,
++	const struct kwl_import *blurred)
++{
++	struct kwl_compose *compose;
++	float constants[KWL_PANEL_CONSTANTS];
++	VkPipeline pipeline;
++
++	/* The whole image; the box is the image too (it places the sheen). */
++	compose = server->compose;
++	memset(constants, 0, sizeof(constants));
++	constants[0] = -1.0f;
++	constants[1] = -1.0f;
++	constants[2] = 1.0f;
++	constants[3] = 1.0f;
++	constants[4] = map->key[4];
++	constants[5] = map->key[5];
++	constants[6] = map->key[6];
++	constants[7] = map->key[7];
++	constants[10] = (float)map->image_width;
++	constants[11] = (float)map->image_height;
++	memcpy(&constants[12], map->key, 4U * sizeof(float));
++	constants[17] = (float)MODE_GLASS;
++	constants[20] = (float)map->image_width;
++	constants[21] = (float)map->image_height;
++	constants[23] = 1.0f;
++
++	/* The opaque inside of the glass the frame would draw: the dark glass's darkens. */
++	pipeline = compose->panel_opaque_pipelines[KWL_PANEL_INSIDE_GLASS];
++	if (map->key[5] != 0.0f) {
++		constants[17] = -1.0f;
++		pipeline = compose->panel_opaque_pipelines[KWL_PANEL_INSIDE_DARK_GLASS];
++	}
++
++	/* One quad. */
++	kwl_compose_bind(server, command, pipeline, compose->panel_layout, blurred->set);
++	kwl_list_push_constants(command, compose->panel_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0U, sizeof(constants), constants);
++	kwl_list_draw(command, KWL_QUAD_VERTICES, 1U, 0U, 0U);
++}
++
++/*
++ * Draws a picture's map by its function, as on the output's whole plane:
++ * no damage, backdrop, layer, head, covering windows or hover tests; the
++ * frame's draw counts and the state the drawing reads are given back.
++ */
++static void
++map_draw_picture(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	const struct kwl_glass_map *map)
++{
++	struct kwl_compose *compose;
++	struct kwl_draw_counts counts;
++	VkDescriptorSet backdrop_saved;
++	VkFramebuffer framebuffer_saved;
++	VkRect2D scissor_saved;
++	unsigned backdrop_recording_saved;
++	unsigned recording_saved;
++	unsigned keep_saved;
++	unsigned cover_count_saved;
++	unsigned layer_saved;
++	int cover_level_saved;
++	int32_t view_x_saved;
++	int32_t view_y_saved;
++	uint32_t view_width_saved;
++	uint32_t view_height_saved;
++
++	/* The state the drawing reads, kept to be given back. */
++	compose = server->compose;
++	scissor_saved = compose->scissor_now;
++	framebuffer_saved = compose->framebuffer_now;
++	backdrop_saved = compose->backdrop_set;
++	backdrop_recording_saved = compose->backdrop_recording;
++	recording_saved = server->hover_recording;
++	keep_saved = server->keep_colours;
++	cover_count_saved = server->cover_count;
++	cover_level_saved = server->cover_level;
++	layer_saved = server->layer_on;
++	view_x_saved = server->view_x;
++	view_y_saved = server->view_y;
++	view_width_saved = server->view_width;
++	view_height_saved = server->view_height;
++	counts = server->draw_counts;
++
++	/* The whole image, unplaced. */
++	compose->scissor_now.offset.x = 0;
++	compose->scissor_now.offset.y = 0;
++	compose->scissor_now.extent.width = map->image_width;
++	compose->scissor_now.extent.height = map->image_height;
++	compose->framebuffer_now = VK_NULL_HANDLE;
++	compose->backdrop_set = VK_NULL_HANDLE;
++	compose->backdrop_recording = 0U;
++	server->hover_recording = 0U;
++	server->cover_count = 0U;
++	server->cover_level = -1;
++	server->layer_on = 0U;
++	server->view_x = 0;
++	server->view_y = 0;
++	server->view_width = 0U;
++	server->view_height = 0U;
++
++	/* The picture, its joined quads drawn. */
++	map->draw(server, command);
++	kwl_batch_flush(server, command);
++
++	/* The state given back. */
++	compose->scissor_now = scissor_saved;
++	compose->framebuffer_now = framebuffer_saved;
++	compose->backdrop_set = backdrop_saved;
++	compose->backdrop_recording = backdrop_recording_saved;
++	server->hover_recording = recording_saved;
++	server->keep_colours = keep_saved;
++	server->cover_count = cover_count_saved;
++	server->cover_level = cover_level_saved;
++	server->layer_on = layer_saved;
++	server->view_x = view_x_saved;
++	server->view_y = view_y_saved;
++	server->view_width = view_width_saved;
++	server->view_height = view_height_saved;
++	server->draw_counts = counts;
++}
++
++/*
++ * Draws a shadow's picture: one quad over the whole image with the
++ * shadow's own variant, blended over transparent black, its box where the
++ * shadow's reach leaves it (a pixel more than the softness from each
++ * side), at full opacity.
++ */
++static void
++map_draw_shadow(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	const struct kwl_glass_map *map,
++	const struct kwl_import *blurred)
++{
++	struct kwl_compose *compose;
++	float constants[KWL_PANEL_CONSTANTS];
++	float reach;
++
++	/* The whole image; the box inside it by the reach. */
++	compose = server->compose;
++	reach = map->key[7] + 1.0f;
++	memset(constants, 0, sizeof(constants));
++	constants[0] = -1.0f;
++	constants[1] = -1.0f;
++	constants[2] = 1.0f;
++	constants[3] = 1.0f;
++	constants[6] = 1.0f;
++	constants[7] = 1.0f;
++	constants[8] = reach;
++	constants[9] = reach;
++	constants[10] = map->key[4];
++	constants[11] = map->key[5];
++	memcpy(&constants[12], map->key, 4U * sizeof(float));
++	constants[16] = map->key[6];
++	constants[17] = (float)MODE_SHADOW;
++	constants[18] = map->key[7];
++	constants[20] = (float)map->image_width;
++	constants[21] = (float)map->image_height;
++	constants[23] = 1.0f;
++
++	/* One quad (the shadow samples nothing; the blurred wallpaper is bound as any set). */
++	kwl_compose_bind(server, command, compose->panel_pipelines[1], compose->panel_layout, blurred->set);
++	kwl_list_push_constants(command, compose->panel_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0U, sizeof(constants), constants);
++	kwl_list_draw(command, KWL_QUAD_VERTICES, 1U, 0U, 0U);
++}
+diff --git a/userland/desktop/wayland/glass.c b/userland/desktop/wayland/glass.c
+index 0196a8f05a..0563e82a66 100644
+--- a/userland/desktop/wayland/glass.c
++++ b/userland/desktop/wayland/glass.c
+@@ -339,6 +339,8 @@ static void glass_shape_draw_pieces(struct kwl_server *server, struct kwl_list *
+ static void glass_shape_piece(const struct glass_shape *shape, const float *part, struct glass_shape *piece);
+ static int glass_shape_cover(struct kwl_server *server, struct kwl_list *command, const struct glass_shape *shape);
+ static void glass_shadow_trim(struct glass_shape *shape);
++static int glass_shadow_picture(struct kwl_server *server, const struct glass_shape *shadow, struct glass_shape *picture);
++static int glass_ring_hollow(struct kwl_server *server, struct kwl_list *command, const struct glass_shape *shape);
+ static unsigned glass_count_kind_of(const float *constants);
+ static int wallpaper_create(struct kwl_server *server, struct kwl_glass *glass, uint32_t width, uint32_t height);
+ static int glass_size_make(struct kwl_server *server, uint32_t width, uint32_t height, struct kwl_glass_size *size);
+@@ -2086,6 +2088,7 @@ glass_shape_draw(
+ 	VkPipeline pipeline;
+ 	VkRect2D pieces[1U + KWL_CUT_PIECES];
+ 	struct glass_shape trimmed;
++	struct glass_shape picture;
+ 	uint64_t pixels;
+ 	unsigned count;
+ 	unsigned inside;
+@@ -2095,6 +2098,8 @@ glass_shape_draw(
+ 	int covered;
+ 	int opaque;
+ 	int split;
++	int pictured;
++	int hollow;
+ 
+ 	/* A shape of a layer faded out wholly is not drawn (the desktop behind App Home). */
+ 	if (server->layer_on && server->layer_opacity <= 0.0f)
+@@ -2108,6 +2113,11 @@ glass_shape_draw(
+ 		trimmed = *shape;
+ 		glass_shadow_trim(&trimmed);
+ 		shape = &trimmed;
++
++		/* Drawn from the shadow's picture when it has one (glass-map.c). */
++		pictured = glass_shadow_picture(server, &trimmed, &picture);
++		if (pictured)
++			shape = &picture;
+ 	}
+ 
+ 	/*
+@@ -2159,6 +2169,11 @@ glass_shape_draw(
+ 	if (covered)
+ 		return;
+ 
++	/* An outline is drawn around its empty middle, where it covers nothing. */
++	hollow = glass_ring_hollow(server, command, shape);
++	if (hollow)
++		return;
++
+ 	/* The quad in normalized device coordinates. */
+ 	constants[0] = 2.0f * quad[0] / width - 1.0f;
+ 	constants[1] = 2.0f * quad[1] / height - 1.0f;
+@@ -2447,21 +2462,34 @@ glass_shape_draw_split(
+ 	int opaque)
+ {
+ 	struct kwl_compose *compose;
++	VkDescriptorSet inside_set;
+ 	VkPipeline middle;
+ 	uint64_t pixels;
+ 	unsigned index;
+ 	unsigned kind;
++	int mapped;
+ 
+-	/* The inside, counted by its shape's kind (KWL MODES). */
++	/*
++	 * The inside of flat glass on the blurred wallpaper reads its colour
++	 * from the colour's map when there is one (glass-map.c).
++	 */
+ 	compose = server->compose;
++	inside_set = set;
++	if (inside == KWL_PANEL_INSIDE_GLASS || inside == KWL_PANEL_INSIDE_DARK_GLASS) {
++		mapped = kwl_glass_map_set(server, constants, set, &inside_set);
++		if (mapped)
++			inside = KWL_PANEL_INSIDE_MAP;
++	}
++
++	/* The inside, counted by its shape's kind (KWL MODES). */
+ 	kind = glass_count_kind_of(constants);
+ 	middle = compose->panel_inside_pipelines[inside];
+ 	if (opaque)
+ 		middle = compose->panel_opaque_pipelines[inside];
+-	kwl_compose_count_draw(server, middle, set, 1U);
++	kwl_compose_count_draw(server, middle, inside_set, 1U);
+ 	pixels = kwl_compose_count_pixels(server, (float)pieces[0].offset.x, (float)pieces[0].offset.y, (float)pieces[0].extent.width, (float)pieces[0].extent.height, !opaque);
+ 	kwl_compose_count_kind(server, kind, pixels);
+-	kwl_compose_bind(server, command, middle, compose->panel_layout, set);
++	kwl_compose_bind(server, command, middle, compose->panel_layout, inside_set);
+ 	kwl_list_push_constants(command, compose->panel_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0U, KWL_PANEL_CONSTANTS * sizeof(float), constants);
+ 	kwl_compose_clip_draw_rect(server, command, &pieces[0], KWL_QUAD_VERTICES);
+ 
+@@ -3378,6 +3406,19 @@ glass_wallpaper_set(
+ 	return server->compose->glass->wallpaper.set;
+ }
+ 
++/* Gives the blurred wallpaper the glass samples (its set, generation and version), or NULL before the glass look opens. */
++const struct kwl_import *
++glass_blurred(
++	struct kwl_server *server)
++{
++	/* No glass look yet. */
++	if (server->compose->glass == NULL)
++		return NULL;
++
++	/* The quarter-size image. */
++	return &server->compose->glass->blurred;
++}
++
+ /* Gives the version of the wallpaper's image (it grows with each new picture), for the keys of pictures that show it. */
+ uint32_t
+ glass_wallpaper_version(
+@@ -4758,3 +4799,200 @@ glass_shadow_trim(
+ 	shape->quad[2] = right - left;
+ 	shape->quad[3] = bottom - top;
+ }
++
++/*
++ * Gives a soft shadow (trimmed to its reach, in its place on the output)
++ * as the image of its picture (glass-map.c) over the same quad, when it has
++ * one: the box is the quad grown by a pixel (every pixel of the quad fully
++ * covered, none rounded), and the quad's corners show the picture's pixels
++ * under them.  Not in a backdrop's small passes or on a head.  Returns 1
++ * with *picture, or 0 (the shadow is drawn as itself).
++ */
++static int
++glass_shadow_picture(
++	struct kwl_server *server,
++	const struct glass_shape *shadow,
++	struct glass_shape *picture)
++{
++	VkDescriptorSet set;
++	float origin[2];
++	float size[2];
++	int pictured;
++
++	/* On the output's own plane, in the frame's own pass, with something to draw. */
++	if (server->view_width != 0U || server->compose->backdrop_recording != 0U)
++		return 0;
++	if (shadow->quad[2] <= 0.0f || shadow->quad[3] <= 0.0f)
++		return 0;
++
++	/* The shadow's picture, when it is drawn. */
++	pictured = kwl_glass_shadow_set(server, shadow->box, shadow->radius, shadow->soft, shadow->color, origin, size, &set);
++	if (!pictured)
++		return 0;
++
++	/* The picture's part under the quad, as an image of premultiplied colour. */
++	*picture = *shadow;
++	picture->mode = MODE_IMAGE;
++	picture->set = set;
++	picture->radius = 0.0f;
++	picture->soft = 0.0f;
++	picture->opaque = 0.0f;
++	picture->edge = 0.0f;
++	picture->box[0] = shadow->quad[0] - 1.0f;
++	picture->box[1] = shadow->quad[1] - 1.0f;
++	picture->box[2] = shadow->quad[2] + 2.0f;
++	picture->box[3] = shadow->quad[3] + 2.0f;
++	picture->uv[0] = (shadow->quad[0] - origin[0]) / size[0];
++	picture->uv[1] = (shadow->quad[1] - origin[1]) / size[1];
++	picture->uv[2] = (shadow->quad[0] + shadow->quad[2] - origin[0]) / size[0];
++	picture->uv[3] = (shadow->quad[1] + shadow->quad[3] - origin[1]) / size[1];
++
++	/* Succeeded: the shadow is drawn as its picture. */
++	return 1;
++}
++
++/*
++ * Draws an outline (MODE_RING) around its middle, where the shader's two
++ * coverages are both whole and cancel (the distance at most the thickness
++ * and a pixel less: the box less its radius, the thickness and a pixel),
++ * when that middle is large: as the pieces of its quad around it.  Only in
++ * its place on the output's own plane.  Returns 1 when it was drawn so, 0
++ * when it is to be drawn whole.
++ */
++static int
++glass_ring_hollow(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	const struct glass_shape *shape)
++{
++	float hole[1][4];
++	float left;
++	float top;
++	float right;
++	float bottom;
++
++	/* An outline in its place on the output's plane. */
++	if (shape->mode != MODE_RING || server->layer_on || server->view_width != 0U)
++		return 0;
++
++	/* Its empty middle. */
++	glass_opaque_inside(shape->box, shape->radius + shape->soft, hole[0]);
++
++	/* Worth cutting only where it lies within the quad over a large area. */
++	left = hole[0][0] > shape->quad[0] ? hole[0][0] : shape->quad[0];
++	top = hole[0][1] > shape->quad[1] ? hole[0][1] : shape->quad[1];
++	right = hole[0][0] + hole[0][2] < shape->quad[0] + shape->quad[2] ? hole[0][0] + hole[0][2] : shape->quad[0] + shape->quad[2];
++	bottom = hole[0][1] + hole[0][3] < shape->quad[1] + shape->quad[3] ? hole[0][1] + hole[0][3] : shape->quad[1] + shape->quad[3];
++	if (right <= left || bottom <= top || (right - left) * (bottom - top) < GLASS_SPLIT_AREA)
++		return 0;
++
++	/* Succeeded: the quad's pieces around the middle (each lies off it, so is drawn whole). */
++	glass_shape_draw_except(server, command, shape, (const float (*)[4])hole, 1U);
++	return 1;
++}
++
++/*
++ * Draws two whole-output pictures side by side into an image twice the
++ * output's width (the pass's viewport), left and right, each a texel for a
++ * pixel: the picture glass_draw_crossfade fades between.
++ */
++void
++glass_draw_halves(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	VkDescriptorSet left,
++	VkDescriptorSet right)
++{
++	struct kwl_compose *compose;
++	float constants[KWL_PANEL_CONSTANTS];
++	VkPipeline pipeline;
++
++	/* An opaque image over each half; its box is the whole image, so every pixel is covered. */
++	compose = server->compose;
++	memset(constants, 0, sizeof(constants));
++	constants[0] = -1.0f;
++	constants[1] = -1.0f;
++	constants[2] = 0.0f;
++	constants[3] = 1.0f;
++	constants[6] = 1.0f;
++	constants[7] = 1.0f;
++	constants[10] = 2.0f * (float)server->width;
++	constants[11] = (float)server->height;
++	constants[15] = 1.0f;
++	constants[17] = MODE_IMAGE;
++	constants[19] = 1.0f;
++	constants[20] = 2.0f * (float)server->width;
++	constants[21] = (float)server->height;
++	constants[23] = 1.0f;
++	pipeline = compose->panel_opaque_pipelines[KWL_PANEL_INSIDE_IMAGE];
++
++	/* The left half. */
++	kwl_compose_bind(server, command, pipeline, compose->panel_layout, left);
++	kwl_list_push_constants(command, compose->panel_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0U, sizeof(constants), constants);
++	kwl_list_draw(command, KWL_QUAD_VERTICES, 1U, 0U, 0U);
++
++	/* The right half. */
++	constants[0] = 0.0f;
++	constants[2] = 1.0f;
++	kwl_compose_bind(server, command, pipeline, compose->panel_layout, right);
++	kwl_list_push_constants(command, compose->panel_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0U, sizeof(constants), constants);
++	kwl_list_draw(command, KWL_QUAD_VERTICES, 1U, 0U, 0U);
++	kwl_compose_count_draw(server, pipeline, right, 2U);
++}
++
++/*
++ * Draws over the whole output, opaque, the left half of a picture of two
++ * (glass_draw_halves) with its right half faded in over it by mix: the
++ * same as the left drawn and the right blended over it at that opacity,
++ * in one draw.
++ */
++void
++glass_draw_crossfade(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	VkDescriptorSet set,
++	float mix)
++{
++	struct kwl_compose *compose;
++	float constants[KWL_PANEL_CONSTANTS];
++	float width;
++	float height;
++	VkPipeline pipeline;
++	uint64_t pixels;
++	int visible;
++
++	/* Not seen where the frame's damage leaves nothing. */
++	compose = server->compose;
++	width = (float)server->width;
++	height = (float)server->height;
++	visible = kwl_compose_clip_visible(compose, 0.0f, 0.0f, width, height);
++	if (!visible)
++		return;
++
++	/* The whole output, sampling the left half; the right half is half the image along. */
++	memset(constants, 0, sizeof(constants));
++	constants[0] = -1.0f;
++	constants[1] = -1.0f;
++	constants[2] = 1.0f;
++	constants[3] = 1.0f;
++	constants[6] = 0.5f;
++	constants[7] = 1.0f;
++	constants[10] = width;
++	constants[11] = height;
++	constants[15] = mix;
++	constants[17] = MODE_IMAGE;
++	constants[19] = 1.0f;
++	constants[20] = width;
++	constants[21] = height;
++	constants[23] = 1.0f;
++	pipeline = compose->panel_opaque_pipelines[KWL_PANEL_INSIDE_CROSSFADE];
++
++	/* One opaque quad, counted as an image (KWL MODES). */
++	kwl_compose_count_draw(server, pipeline, set, 1U);
++	pixels = kwl_compose_count_pixels(server, 0.0f, 0.0f, width, height, 0);
++	kwl_compose_count_kind(server, glass_count_kind_of(constants), pixels);
++	kwl_compose_bind(server, command, pipeline, compose->panel_layout, set);
++	kwl_list_push_constants(command, compose->panel_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0U, sizeof(constants), constants);
++	kwl_compose_clip_draw(server, command, 0.0f, 0.0f, width, height, KWL_QUAD_VERTICES);
++	kwl_compose_count_commands(server, 1U, 1U);
++}
+diff --git a/userland/desktop/wayland/glass.h b/userland/desktop/wayland/glass.h
+index 3ff3bbb8bf..ce418af1ae 100644
+--- a/userland/desktop/wayland/glass.h
++++ b/userland/desktop/wayland/glass.h
+@@ -128,6 +128,9 @@ void glass_draw_app_tile(struct kwl_server *server, struct kwl_list *command, un
+ void glass_draw_app_tile_reflection(struct kwl_server *server, struct kwl_list *command, unsigned icon, float x, float y, float pixels, float height, float opacity);
+ void glass_draw_mark(struct kwl_server *server, struct kwl_list *command, int32_t x, int32_t y, unsigned pixels, enum glass_mark_look look, float opacity);
+ VkDescriptorSet glass_wallpaper_set(struct kwl_server *server);
++const struct kwl_import *glass_blurred(struct kwl_server *server);
++void glass_draw_halves(struct kwl_server *server, struct kwl_list *command, VkDescriptorSet left, VkDescriptorSet right);
++void glass_draw_crossfade(struct kwl_server *server, struct kwl_list *command, VkDescriptorSet set, float mix);
+ 
+ /*
+  * The system bar's colours in the appearance shown (ws099-p034b, the
+@@ -183,7 +186,7 @@ int kwl_glass_anim_picturable(struct kwl_server *server, struct kwl_object **win
+ int kwl_home_launch_tile(struct kwl_server *server, float *x, float *y, float *size, float *radius);
+ void kwl_home_draw_clock_over(struct kwl_server *server, struct kwl_list *command, float progress);
+ void kwl_home_clock_damage(struct kwl_server *server);
+-void kwl_home_draw_stage(struct kwl_server *server, struct kwl_list *command);
++void kwl_home_draw_stage(struct kwl_server *server, struct kwl_list *command, const float (*under)[4], unsigned under_count);
+ void kwl_home_draw_content(struct kwl_server *server, struct kwl_list *command, float progress, unsigned neutral);
+ uint64_t kwl_home_picture_key(struct kwl_server *server);
+ uint32_t glass_wallpaper_version(struct kwl_server *server);
+diff --git a/userland/desktop/wayland/home.c b/userland/desktop/wayland/home.c
+index a504f61e33..13190af977 100644
+--- a/userland/desktop/wayland/home.c
++++ b/userland/desktop/wayland/home.c
+@@ -304,7 +304,9 @@ static void home_read_apps(struct kwl_server *server);
+ static int home_present(const char *name, const char *command);
+ static void home_add_app(const char *name, const char *command, const char *keywords, uint32_t rgb, const char *picture);
+ static void home_draw_letter(struct kwl_server *server, struct kwl_list *command, const struct home_app *app, int32_t x, int32_t y, float left, float top, float size, int over, float opacity);
+-static void home_stage(struct kwl_server *server, struct kwl_list *command, float x, float y, float width, float height);
++static void home_stage(struct kwl_server *server, struct kwl_list *command, float x, float y, float width, float height, const float (*under)[4], unsigned under_count);
++static void home_stage_shapes(struct kwl_server *server, struct kwl_list *command, float x, float y, float width, float height);
++static void home_stage_picture(struct kwl_server *server, struct kwl_list *command);
+ static void home_draw_tile(struct kwl_server *server, struct kwl_list *command, float left, float top, float size, const float *color);
+ static void home_parse_line(char *line);
+ static uint32_t home_hex(const char *text);
+@@ -592,17 +594,79 @@ kwl_home_draw_head(
+ 	struct kwl_list *command)
+ {
+ 	/* The stage over the head, then the appearance's colours again. */
+-	home_stage(server, command, (float)server->view_x, (float)server->view_y, (float)server->view_width, (float)server->view_height);
++	home_stage(server, command, (float)server->view_x, (float)server->view_y, (float)server->view_width, (float)server->view_height, NULL, 0U);
+ 	server->keep_colours = 0U;
+ }
+ 
+ /*
+  * Draws the stage over a rectangle of the plane (ws099-p035b, its own
+- * colours in both appearances): the blurred scene under black glass, and a
+- * soft bluish light from the top's middle, as the bar's middle is lighter.
++ * colours in both appearances).  Over the whole output, where it is the
++ * same in every frame, it is drawn once into a picture (glass-map.c) and
++ * shown as that opaque image, except under the holes (under, under_count:
++ * where what is drawn over the stage hides it); elsewhere, and until the
++ * picture is drawn, as its shapes.
+  */
+ static void
+ home_stage(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	float x,
++	float y,
++	float width,
++	float height,
++	const float (*under)[4],
++	unsigned under_count)
++{
++	struct glass_shape shape;
++	VkDescriptorSet set;
++	int whole;
++	int pictured;
++
++	/* The whole output's plane, not a head's part of it, not moved with a layer. */
++	whole = 0;
++	if (x == 0.0f &&
++	    y == 0.0f &&
++	    width == (float)server->width &&
++	    height == (float)server->height &&
++	    server->view_width == 0U &&
++	    !server->layer_on)
++		whole = 1;
++
++	/* The stage's picture, when it is drawn. */
++	pictured = 0;
++	if (whole)
++		pictured = kwl_glass_picture_set(server, KWL_GLASS_PICTURE_STAGE, home_stage_picture, &set);
++	if (!pictured) {
++		home_stage_shapes(server, command, x, y, width, height);
++		return;
++	}
++
++	/* The picture over the whole output, opaque, a pixel for a pixel; the stage's own colours stay. */
++	server->keep_colours = 1U;
++	glass_shape_init(&shape, 0.0f, 0.0f, width, height);
++	shape.mode = MODE_IMAGE;
++	shape.opaque = 1.0f;
++	shape.set = set;
++	glass_shape_draw_except(server, command, &shape, under, under_count);
++}
++
++/* Draws the stage over the whole output into its picture (glass-map.c). */
++static void
++home_stage_picture(
++	struct kwl_server *server,
++	struct kwl_list *command)
++{
++	/* The shapes, as a frame draws them. */
++	home_stage_shapes(server, command, 0.0f, 0.0f, (float)server->width, (float)server->height);
++}
++
++/*
++ * Draws the stage's shapes over a rectangle of the plane: the blurred
++ * scene under black glass, and a soft bluish light from the top's middle,
++ * as the bar's middle is lighter.
++ */
++static void
++home_stage_shapes(
+ 	struct kwl_server *server,
+ 	struct kwl_list *command,
+ 	float x,
+@@ -662,7 +726,7 @@ kwl_home_draw(
+ 	 * blurred desktop under black glass, in its own colours.
+ 	 */
+ 	width = (float)server->width;
+-	home_stage(server, command, 0.0f, 0.0f, width, (float)server->height);
++	home_stage(server, command, 0.0f, 0.0f, width, (float)server->height, NULL, 0U);
+ 
+ 	/* The stage's first frame since Home was asked to open (BUG-225's wait, measured). */
+ 	if (!server->home_cover_logged && server->home_to > 0.0f) {
+@@ -759,10 +823,12 @@ kwl_home_clock_damage(
+ void
+ kwl_home_draw_stage(
+ 	struct kwl_server *server,
+-	struct kwl_list *command)
++	struct kwl_list *command,
++	const float (*under)[4],
++	unsigned under_count)
+ {
+-	/* The dark stage, whole. */
+-	home_stage(server, command, 0.0f, 0.0f, (float)server->width, (float)server->height);
++	/* The dark stage, whole, except where the layer over it hides it. */
++	home_stage(server, command, 0.0f, 0.0f, (float)server->width, (float)server->height, under, under_count);
+ }
+ 
+ /*
+diff --git a/userland/desktop/wayland/kwl.h b/userland/desktop/wayland/kwl.h
+index 379281f900..9d426e874f 100644
+--- a/userland/desktop/wayland/kwl.h
++++ b/userland/desktop/wayland/kwl.h
+@@ -1305,6 +1305,8 @@ struct kwl_server {
+ 	unsigned cover_cutting;
+ 	/* Nonzero with --no-layer-cache: no layer's picture, every frame drawn whole (the reference, review-4 M4). */
+ 	unsigned layer_cache_off;
++	/* Nonzero with --no-glass-map: every glass worked out pixel by pixel (the reference of glass-map.c). */
++	unsigned glass_map_off;
+ 	unsigned home_progress_frozen;
+ 	float home_progress_value;
+ 	/* The event loop records the latest traced motion; recording a frame consumes this timestamp. */
+@@ -2186,6 +2188,7 @@ void kwl_buffer_size(const struct kwl_object *buffer, uint32_t *width, uint32_t
+ void kwl_callbacks_done(struct kwl_object **callbacks);
+ void kwl_schedule(struct kwl_server *server);
+ void kwl_transition_request(struct kwl_server *server, const char *what);
++int kwl_compositor_moving(const struct kwl_server *server);
+ void kwl_frame_done(struct kwl_server *server);
+ int kwl_compose_open(struct kwl_server *server);
+ int kwl_compose_output_prepare(struct kwl_server *server);
+@@ -2241,6 +2244,7 @@ int kwl_glass_still(struct kwl_server *server);
+ int kwl_glass_hover_still(struct kwl_server *server);
+ int kwl_glass_body_damage(struct kwl_server *server, struct kwl_object *surface, int32_t *rect);
+ int kwl_glass_pointer_calm(struct kwl_server *server, int32_t x, int32_t y);
++int kwl_glass_drag_measured(struct kwl_server *server);
+ void kwl_damage_pointer(struct kwl_server *server, int32_t old_x, int32_t old_y);
+ void kwl_hover_probe(struct kwl_server *server, int32_t x, int32_t y, int32_t width, int32_t height);
+ void kwl_hover_begin(struct kwl_server *server, int whole);
+diff --git a/userland/desktop/wayland/layer-cache.c b/userland/desktop/wayland/layer-cache.c
+index 64b8fc7c3d..00d35478f3 100644
+--- a/userland/desktop/wayland/layer-cache.c
++++ b/userland/desktop/wayland/layer-cache.c
+@@ -383,6 +383,31 @@ kwl_layers_set(
+ 	return server->compose->layers.images[which].set;
+ }
+ 
++/*
++ * Gives the box (left, top, right, bottom, in the picture's pixels) of
++ * what Home's picture holds; outside it the picture is clear.  Returns 0
++ * when it is not known (the whole picture is then drawn).
++ */
++int
++kwl_layers_home_bounds(
++	struct kwl_server *server,
++	float *bounds)
++{
++	struct kwl_layers *layers;
++
++	/* Known once the picture was drawn with it. */
++	layers = &server->compose->layers;
++	if (!layers->home_bounded)
++		return 0;
++
++	/* Succeeded: the box. */
++	bounds[0] = layers->home_bounds[0];
++	bounds[1] = layers->home_bounds[1];
++	bounds[2] = layers->home_bounds[2];
++	bounds[3] = layers->home_bounds[3];
++	return 1;
++}
++
+ /*
+  * Draws, in the frame being recorded and before its pass, the pictures the
+  * animation of a docking or returning window shows (ws211-p007): decided
+@@ -714,9 +739,12 @@ layers_record_pass(
+ 	server->view_height = 0U;
+ 	memset(&server->draw_counts, 0, sizeof(server->draw_counts));
+ 
+-	/* Home's content as it opens, no icon lit, no clock; the desktop layer, noting the windows it draws; or the animated window. */
++	/* Home's content as it opens, no icon lit, no clock, and the box of it; the desktop layer, noting the windows it draws; or the animated window. */
+ 	if (which == KWL_LAYER_HOME) {
++		kwl_compose_bounds_begin(compose);
+ 		kwl_home_draw_content(server, command, 1.0f, 1U);
++		kwl_batch_flush(server, command);
++		layers->home_bounded = (unsigned)kwl_compose_bounds_end(compose, layers->home_bounds);
+ 	} else if (which == KWL_LAYER_DESKTOP) {
+ 		layers->window_count = 0U;
+ 		layers->noting = 1U;
+diff --git a/userland/desktop/wayland/main.c b/userland/desktop/wayland/main.c
+index dc975aabb6..5858f1c2ce 100644
+--- a/userland/desktop/wayland/main.c
++++ b/userland/desktop/wayland/main.c
+@@ -143,7 +143,7 @@ main(
+ 	/* Reads the command line; a mistake ends the run with the usage. */
+ 	error = parse_options(&server, count, arguments);
+ 	if (error != 0) {
+-		fprintf(stderr, "usage: wayland [--socket=/path] [--width=N] [--height=N] [--rotate=0|90|180|270] [--testing [--timeout=seconds] [--max-frames=N]] [--log-frames] [--no-layer-cache] [--keyboard-blur] [--glass] [--font=/path] [--fallback-font=/path] [--wallpaper=/path.png|.jpg] [--window-opacity=1..100] [--desktop-client=COMMAND|none] [--desktop-token=TOKEN] [--session [--control-fd=N] [--lock-idle=seconds] | --greeter --auth-fd=N]\n");
++		fprintf(stderr, "usage: wayland [--socket=/path] [--width=N] [--height=N] [--rotate=0|90|180|270] [--testing [--timeout=seconds] [--max-frames=N]] [--log-frames] [--no-layer-cache] [--no-glass-map] [--keyboard-blur] [--glass] [--font=/path] [--fallback-font=/path] [--wallpaper=/path.png|.jpg] [--window-opacity=1..100] [--desktop-client=COMMAND|none] [--desktop-token=TOKEN] [--session [--control-fd=N] [--lock-idle=seconds] | --greeter --auth-fd=N]\n");
+ 		return 2;
+ 	}
+ 
+@@ -552,6 +552,13 @@ parse_options(
+ 			continue;
+ 		}
+ 
++		/* Flat glass worked out at each pixel, without the glass maps (the reference for their pictures). */
++		match = strcmp(argument, "--no-glass-map");
++		if (match == 0) {
++			server->glass_map_off = 1U;
++			continue;
++		}
++
+ 		/* Every frame drawn whole, without the layers' pictures (the reference for their tests). */
+ 		match = strcmp(argument, "--no-layer-cache");
+ 		if (match == 0) {
+diff --git a/userland/desktop/wayland/output-rotate.c b/userland/desktop/wayland/output-rotate.c
+index a0278374d4..a4252ac0c6 100644
+--- a/userland/desktop/wayland/output-rotate.c
++++ b/userland/desktop/wayland/output-rotate.c
+@@ -885,6 +885,7 @@ output_rotate_caches(
+ 		kwl_layers_close(compose);
+ 		kwl_layers_open(server);
+ 		kwl_backdrop_destroy(compose);
++		kwl_glass_maps_destroy(compose);
+ 	}
+ 
+ 	/* No image holds the new picture yet. */
+diff --git a/userland/desktop/wayland/shaders.h b/userland/desktop/wayland/shaders.h
+index 4bdbbb6c76..ac159e037c 100644
+--- a/userland/desktop/wayland/shaders.h
++++ b/userland/desktop/wayland/shaders.h
+@@ -1411,8 +1411,8 @@ static const uint32_t kwl_panel_frag_inside_0[] = {
+ 	0x0000007cU, 0x0003003eU, 0x00000079U, 0x0000007dU, 0x000100fdU, 0x00010038U,
+ };
+ 
+-/* Validated immutable kwl_panel_frag_inside_2 SPIR-V, used while creating graphics pipelines. */
+-static const uint32_t kwl_panel_frag_inside_2[] = {
++/* Validated immutable kwl_panel_frag_inside_1 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_inside_1[] = {
+ 	0x07230203U, 0x00010000U, 0x000d000bU, 0x00000044U, 0x00000000U, 0x00020011U,
+ 	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
+ 	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0007000fU, 0x00000004U,
+@@ -1459,8 +1459,8 @@ static const uint32_t kwl_panel_frag_inside_2[] = {
+ 	0x000100fdU, 0x00010038U,
+ };
+ 
+-/* Validated immutable kwl_panel_frag_inside_3 SPIR-V, used while creating graphics pipelines. */
+-static const uint32_t kwl_panel_frag_inside_3[] = {
++/* Validated immutable kwl_panel_frag_inside_2 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_inside_2[] = {
+ 	0x07230203U, 0x00010000U, 0x000d000bU, 0x0000003cU, 0x00000000U, 0x00020011U,
+ 	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
+ 	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0006000fU, 0x00000004U,
+@@ -1498,8 +1498,8 @@ static const uint32_t kwl_panel_frag_inside_3[] = {
+ 	0x00000036U, 0x0000003bU, 0x000100fdU, 0x00010038U,
+ };
+ 
+-/* Validated immutable kwl_panel_frag_inside_7 SPIR-V, used while creating graphics pipelines. */
+-static const uint32_t kwl_panel_frag_inside_7[] = {
++/* Validated immutable kwl_panel_frag_inside_3 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_inside_3[] = {
+ 	0x07230203U, 0x00010000U, 0x000d000bU, 0x0000008eU, 0x00000000U, 0x00020011U,
+ 	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
+ 	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0007000fU, 0x00000004U,
+@@ -1598,8 +1598,8 @@ static const uint32_t kwl_panel_frag_inside_7[] = {
+ 	0x00000089U, 0x0000008dU, 0x000100fdU, 0x00010038U,
+ };
+ 
+-/* Validated immutable kwl_panel_frag_inside_1 SPIR-V, used while creating graphics pipelines. */
+-static const uint32_t kwl_panel_frag_inside_1[] = {
++/* Validated immutable kwl_panel_frag_inside_4 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_inside_4[] = {
+ 	0x07230203U, 0x00010000U, 0x000d000bU, 0x00000052U, 0x00000000U, 0x00020011U,
+ 	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
+ 	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0006000fU, 0x00000004U,
+@@ -1648,6 +1648,112 @@ static const uint32_t kwl_panel_frag_inside_1[] = {
+ 	0x00010038U,
+ };
+ 
++/* Validated immutable kwl_panel_frag_inside_5 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_inside_5[] = {
++	0x07230203U, 0x00010000U, 0x000d000bU, 0x00000045U, 0x00000000U, 0x00020011U,
++	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
++	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0007000fU, 0x00000004U,
++	0x00000004U, 0x6e69616dU, 0x00000000U, 0x00000018U, 0x0000003fU, 0x00030010U,
++	0x00000004U, 0x00000007U, 0x00030047U, 0x0000000aU, 0x00000002U, 0x00050048U,
++	0x0000000aU, 0x00000000U, 0x00000023U, 0x00000000U, 0x00050048U, 0x0000000aU,
++	0x00000001U, 0x00000023U, 0x00000010U, 0x00050048U, 0x0000000aU, 0x00000002U,
++	0x00000023U, 0x00000020U, 0x00050048U, 0x0000000aU, 0x00000003U, 0x00000023U,
++	0x00000030U, 0x00050048U, 0x0000000aU, 0x00000004U, 0x00000023U, 0x00000040U,
++	0x00050048U, 0x0000000aU, 0x00000005U, 0x00000023U, 0x00000050U, 0x00040047U,
++	0x00000018U, 0x0000001eU, 0x00000001U, 0x00040047U, 0x00000029U, 0x00000021U,
++	0x00000000U, 0x00040047U, 0x00000029U, 0x00000022U, 0x00000000U, 0x00040047U,
++	0x0000003fU, 0x0000001eU, 0x00000000U, 0x00020013U, 0x00000002U, 0x00030021U,
++	0x00000003U, 0x00000002U, 0x00030016U, 0x00000006U, 0x00000020U, 0x00040017U,
++	0x00000009U, 0x00000006U, 0x00000004U, 0x0008001eU, 0x0000000aU, 0x00000009U,
++	0x00000009U, 0x00000009U, 0x00000009U, 0x00000009U, 0x00000009U, 0x00040020U,
++	0x0000000bU, 0x00000009U, 0x0000000aU, 0x0004003bU, 0x0000000bU, 0x0000000cU,
++	0x00000009U, 0x00040015U, 0x0000000dU, 0x00000020U, 0x00000001U, 0x00040015U,
++	0x0000000fU, 0x00000020U, 0x00000000U, 0x00040020U, 0x00000011U, 0x00000009U,
++	0x00000006U, 0x00040017U, 0x00000014U, 0x00000006U, 0x00000002U, 0x00040020U,
++	0x00000017U, 0x00000001U, 0x00000014U, 0x0004003bU, 0x00000017U, 0x00000018U,
++	0x00000001U, 0x0004002bU, 0x00000006U, 0x00000021U, 0x3f800000U, 0x00040017U,
++	0x00000023U, 0x00000006U, 0x00000003U, 0x00090019U, 0x00000026U, 0x00000006U,
++	0x00000001U, 0x00000000U, 0x00000000U, 0x00000000U, 0x00000001U, 0x00000000U,
++	0x0003001bU, 0x00000027U, 0x00000026U, 0x00040020U, 0x00000028U, 0x00000000U,
++	0x00000027U, 0x0004003bU, 0x00000028U, 0x00000029U, 0x00000000U, 0x0004002bU,
++	0x0000000dU, 0x0000002cU, 0x00000005U, 0x00040020U, 0x0000002dU, 0x00000009U,
++	0x00000009U, 0x00040020U, 0x0000003eU, 0x00000003U, 0x00000009U, 0x0004003bU,
++	0x0000003eU, 0x0000003fU, 0x00000003U, 0x0004002bU, 0x0000000fU, 0x00000041U,
++	0x00000003U, 0x00050036U, 0x00000002U, 0x00000004U, 0x00000000U, 0x00000003U,
++	0x000200f8U, 0x00000005U, 0x0004003dU, 0x00000014U, 0x00000019U, 0x00000018U,
++	0x0004003dU, 0x00000027U, 0x0000002aU, 0x00000029U, 0x00050041U, 0x0000002dU,
++	0x0000002eU, 0x0000000cU, 0x0000002cU, 0x0004003dU, 0x00000009U, 0x0000002fU,
++	0x0000002eU, 0x0007004fU, 0x00000014U, 0x00000030U, 0x0000002fU, 0x0000002fU,
++	0x00000000U, 0x00000001U, 0x00050088U, 0x00000014U, 0x00000031U, 0x00000019U,
++	0x00000030U, 0x00050057U, 0x00000009U, 0x00000032U, 0x0000002aU, 0x00000031U,
++	0x0008004fU, 0x00000023U, 0x00000033U, 0x00000032U, 0x00000032U, 0x00000000U,
++	0x00000001U, 0x00000002U, 0x0005008eU, 0x00000023U, 0x00000038U, 0x00000033U,
++	0x00000021U, 0x00050051U, 0x00000006U, 0x0000003aU, 0x00000038U, 0x00000000U,
++	0x00050051U, 0x00000006U, 0x0000003bU, 0x00000038U, 0x00000001U, 0x00050051U,
++	0x00000006U, 0x0000003cU, 0x00000038U, 0x00000002U, 0x00070050U, 0x00000009U,
++	0x0000003dU, 0x0000003aU, 0x0000003bU, 0x0000003cU, 0x00000021U, 0x00060041U,
++	0x00000011U, 0x00000042U, 0x0000000cU, 0x0000002cU, 0x00000041U, 0x0004003dU,
++	0x00000006U, 0x00000043U, 0x00000042U, 0x0005008eU, 0x00000009U, 0x00000044U,
++	0x0000003dU, 0x00000043U, 0x0003003eU, 0x0000003fU, 0x00000044U, 0x000100fdU,
++	0x00010038U,
++};
++
++/* Validated immutable kwl_panel_frag_inside_6 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_inside_6[] = {
++	0x07230203U, 0x00010000U, 0x000d000bU, 0x0000004eU, 0x00000000U, 0x00020011U,
++	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
++	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0007000fU, 0x00000004U,
++	0x00000004U, 0x6e69616dU, 0x00000000U, 0x0000002aU, 0x00000048U, 0x00030010U,
++	0x00000004U, 0x00000007U, 0x00030047U, 0x0000000aU, 0x00000002U, 0x00050048U,
++	0x0000000aU, 0x00000000U, 0x00000023U, 0x00000000U, 0x00050048U, 0x0000000aU,
++	0x00000001U, 0x00000023U, 0x00000010U, 0x00050048U, 0x0000000aU, 0x00000002U,
++	0x00000023U, 0x00000020U, 0x00050048U, 0x0000000aU, 0x00000003U, 0x00000023U,
++	0x00000030U, 0x00050048U, 0x0000000aU, 0x00000004U, 0x00000023U, 0x00000040U,
++	0x00050048U, 0x0000000aU, 0x00000005U, 0x00000023U, 0x00000050U, 0x00040047U,
++	0x00000028U, 0x00000021U, 0x00000000U, 0x00040047U, 0x00000028U, 0x00000022U,
++	0x00000000U, 0x00040047U, 0x0000002aU, 0x0000001eU, 0x00000000U, 0x00040047U,
++	0x00000048U, 0x0000001eU, 0x00000000U, 0x00020013U, 0x00000002U, 0x00030021U,
++	0x00000003U, 0x00000002U, 0x00030016U, 0x00000006U, 0x00000020U, 0x00040017U,
++	0x00000009U, 0x00000006U, 0x00000004U, 0x0008001eU, 0x0000000aU, 0x00000009U,
++	0x00000009U, 0x00000009U, 0x00000009U, 0x00000009U, 0x00000009U, 0x00040020U,
++	0x0000000bU, 0x00000009U, 0x0000000aU, 0x0004003bU, 0x0000000bU, 0x0000000cU,
++	0x00000009U, 0x00040015U, 0x0000000dU, 0x00000020U, 0x00000001U, 0x0004002bU,
++	0x0000000dU, 0x0000000eU, 0x00000004U, 0x00040015U, 0x0000000fU, 0x00000020U,
++	0x00000000U, 0x00040020U, 0x00000011U, 0x00000009U, 0x00000006U, 0x00040017U,
++	0x00000014U, 0x00000006U, 0x00000002U, 0x00040020U, 0x00000017U, 0x00000001U,
++	0x00000014U, 0x0004002bU, 0x00000006U, 0x0000001dU, 0x3f000000U, 0x0004002bU,
++	0x00000006U, 0x00000020U, 0x00000000U, 0x0004002bU, 0x00000006U, 0x00000021U,
++	0x3f800000U, 0x00090019U, 0x00000025U, 0x00000006U, 0x00000001U, 0x00000000U,
++	0x00000000U, 0x00000000U, 0x00000001U, 0x00000000U, 0x0003001bU, 0x00000026U,
++	0x00000025U, 0x00040020U, 0x00000027U, 0x00000000U, 0x00000026U, 0x0004003bU,
++	0x00000027U, 0x00000028U, 0x00000000U, 0x0004003bU, 0x00000017U, 0x0000002aU,
++	0x00000001U, 0x0005002cU, 0x00000014U, 0x0000002fU, 0x0000001dU, 0x00000020U,
++	0x0004002bU, 0x0000000dU, 0x00000032U, 0x00000003U, 0x0004002bU, 0x0000000fU,
++	0x00000033U, 0x00000003U, 0x00040020U, 0x00000047U, 0x00000003U, 0x00000009U,
++	0x0004003bU, 0x00000047U, 0x00000048U, 0x00000003U, 0x0004002bU, 0x0000000dU,
++	0x0000004aU, 0x00000005U, 0x00050036U, 0x00000002U, 0x00000004U, 0x00000000U,
++	0x00000003U, 0x000200f8U, 0x00000005U, 0x0004003dU, 0x00000026U, 0x00000029U,
++	0x00000028U, 0x0004003dU, 0x00000014U, 0x0000002bU, 0x0000002aU, 0x00050057U,
++	0x00000009U, 0x0000002cU, 0x00000029U, 0x0000002bU, 0x00050081U, 0x00000014U,
++	0x00000030U, 0x0000002bU, 0x0000002fU, 0x00050057U, 0x00000009U, 0x00000031U,
++	0x00000029U, 0x00000030U, 0x00060041U, 0x00000011U, 0x00000034U, 0x0000000cU,
++	0x00000032U, 0x00000033U, 0x0004003dU, 0x00000006U, 0x00000035U, 0x00000034U,
++	0x00070050U, 0x00000009U, 0x00000036U, 0x00000035U, 0x00000035U, 0x00000035U,
++	0x00000035U, 0x0008000cU, 0x00000009U, 0x00000037U, 0x00000001U, 0x0000002eU,
++	0x0000002cU, 0x00000031U, 0x00000036U, 0x00050051U, 0x00000006U, 0x0000003dU,
++	0x00000037U, 0x00000003U, 0x00060041U, 0x00000011U, 0x0000003eU, 0x0000000cU,
++	0x0000000eU, 0x00000033U, 0x0004003dU, 0x00000006U, 0x0000003fU, 0x0000003eU,
++	0x0007000cU, 0x00000006U, 0x00000040U, 0x00000001U, 0x00000028U, 0x0000003dU,
++	0x0000003fU, 0x00050051U, 0x00000006U, 0x00000041U, 0x00000037U, 0x00000000U,
++	0x00050051U, 0x00000006U, 0x00000042U, 0x00000037U, 0x00000001U, 0x00050051U,
++	0x00000006U, 0x00000043U, 0x00000037U, 0x00000002U, 0x00070050U, 0x00000009U,
++	0x00000044U, 0x00000041U, 0x00000042U, 0x00000043U, 0x00000040U, 0x0005008eU,
++	0x00000009U, 0x00000046U, 0x00000044U, 0x00000021U, 0x00060041U, 0x00000011U,
++	0x0000004bU, 0x0000000cU, 0x0000004aU, 0x00000033U, 0x0004003dU, 0x00000006U,
++	0x0000004cU, 0x0000004bU, 0x0005008eU, 0x00000009U, 0x0000004dU, 0x00000046U,
++	0x0000004cU, 0x0003003eU, 0x00000048U, 0x0000004dU, 0x000100fdU, 0x00010038U,
++};
++
+ /* Validated immutable kwl_panel_frag_opaque_0 SPIR-V, used while creating graphics pipelines. */
+ static const uint32_t kwl_panel_frag_opaque_0[] = {
+ 	0x07230203U, 0x00010000U, 0x000d000bU, 0x00000080U, 0x00000000U, 0x00020011U,
+@@ -1735,8 +1841,8 @@ static const uint32_t kwl_panel_frag_opaque_0[] = {
+ 	0x0000007fU, 0x000100fdU, 0x00010038U,
+ };
+ 
+-/* Validated immutable kwl_panel_frag_opaque_2 SPIR-V, used while creating graphics pipelines. */
+-static const uint32_t kwl_panel_frag_opaque_2[] = {
++/* Validated immutable kwl_panel_frag_opaque_1 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_opaque_1[] = {
+ 	0x07230203U, 0x00010000U, 0x000d000bU, 0x0000004aU, 0x00000000U, 0x00020011U,
+ 	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
+ 	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0007000fU, 0x00000004U,
+@@ -1769,8 +1875,8 @@ static const uint32_t kwl_panel_frag_opaque_2[] = {
+ 	0x00010038U,
+ };
+ 
+-/* Validated immutable kwl_panel_frag_opaque_3 SPIR-V, used while creating graphics pipelines. */
+-static const uint32_t kwl_panel_frag_opaque_3[] = {
++/* Validated immutable kwl_panel_frag_opaque_2 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_opaque_2[] = {
+ 	0x07230203U, 0x00010000U, 0x000d000bU, 0x0000003dU, 0x00000000U, 0x00020011U,
+ 	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
+ 	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0006000fU, 0x00000004U,
+@@ -1809,8 +1915,8 @@ static const uint32_t kwl_panel_frag_opaque_3[] = {
+ 	0x00010038U,
+ };
+ 
+-/* Validated immutable kwl_panel_frag_opaque_7 SPIR-V, used while creating graphics pipelines. */
+-static const uint32_t kwl_panel_frag_opaque_7[] = {
++/* Validated immutable kwl_panel_frag_opaque_3 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_opaque_3[] = {
+ 	0x07230203U, 0x00010000U, 0x000d000bU, 0x00000090U, 0x00000000U, 0x00020011U,
+ 	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
+ 	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0007000fU, 0x00000004U,
+@@ -1907,8 +2013,8 @@ static const uint32_t kwl_panel_frag_opaque_7[] = {
+ 	0x00010038U,
+ };
+ 
+-/* Validated immutable kwl_panel_frag_opaque_1 SPIR-V, used while creating graphics pipelines. */
+-static const uint32_t kwl_panel_frag_opaque_1[] = {
++/* Validated immutable kwl_panel_frag_opaque_4 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_opaque_4[] = {
+ 	0x07230203U, 0x00010000U, 0x000d000bU, 0x00000053U, 0x00000000U, 0x00020011U,
+ 	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
+ 	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0006000fU, 0x00000004U,
+@@ -1953,6 +2059,104 @@ static const uint32_t kwl_panel_frag_opaque_1[] = {
+ 	0x00000021U, 0x0003003eU, 0x00000044U, 0x0000004aU, 0x000100fdU, 0x00010038U,
+ };
+ 
++/* Validated immutable kwl_panel_frag_opaque_5 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_opaque_5[] = {
++	0x07230203U, 0x00010000U, 0x000d000bU, 0x00000046U, 0x00000000U, 0x00020011U,
++	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
++	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0007000fU, 0x00000004U,
++	0x00000004U, 0x6e69616dU, 0x00000000U, 0x00000018U, 0x0000003fU, 0x00030010U,
++	0x00000004U, 0x00000007U, 0x00030047U, 0x0000000aU, 0x00000002U, 0x00050048U,
++	0x0000000aU, 0x00000000U, 0x00000023U, 0x00000000U, 0x00050048U, 0x0000000aU,
++	0x00000001U, 0x00000023U, 0x00000010U, 0x00050048U, 0x0000000aU, 0x00000002U,
++	0x00000023U, 0x00000020U, 0x00050048U, 0x0000000aU, 0x00000003U, 0x00000023U,
++	0x00000030U, 0x00050048U, 0x0000000aU, 0x00000004U, 0x00000023U, 0x00000040U,
++	0x00050048U, 0x0000000aU, 0x00000005U, 0x00000023U, 0x00000050U, 0x00040047U,
++	0x00000018U, 0x0000001eU, 0x00000001U, 0x00040047U, 0x00000029U, 0x00000021U,
++	0x00000000U, 0x00040047U, 0x00000029U, 0x00000022U, 0x00000000U, 0x00040047U,
++	0x0000003fU, 0x0000001eU, 0x00000000U, 0x00020013U, 0x00000002U, 0x00030021U,
++	0x00000003U, 0x00000002U, 0x00030016U, 0x00000006U, 0x00000020U, 0x00040017U,
++	0x00000009U, 0x00000006U, 0x00000004U, 0x0008001eU, 0x0000000aU, 0x00000009U,
++	0x00000009U, 0x00000009U, 0x00000009U, 0x00000009U, 0x00000009U, 0x00040020U,
++	0x0000000bU, 0x00000009U, 0x0000000aU, 0x0004003bU, 0x0000000bU, 0x0000000cU,
++	0x00000009U, 0x00040015U, 0x0000000dU, 0x00000020U, 0x00000001U, 0x00040017U,
++	0x00000014U, 0x00000006U, 0x00000002U, 0x00040020U, 0x00000017U, 0x00000001U,
++	0x00000014U, 0x0004003bU, 0x00000017U, 0x00000018U, 0x00000001U, 0x0004002bU,
++	0x00000006U, 0x00000021U, 0x3f800000U, 0x00040017U, 0x00000023U, 0x00000006U,
++	0x00000003U, 0x00090019U, 0x00000026U, 0x00000006U, 0x00000001U, 0x00000000U,
++	0x00000000U, 0x00000000U, 0x00000001U, 0x00000000U, 0x0003001bU, 0x00000027U,
++	0x00000026U, 0x00040020U, 0x00000028U, 0x00000000U, 0x00000027U, 0x0004003bU,
++	0x00000028U, 0x00000029U, 0x00000000U, 0x0004002bU, 0x0000000dU, 0x0000002cU,
++	0x00000005U, 0x00040020U, 0x0000002dU, 0x00000009U, 0x00000009U, 0x00040020U,
++	0x0000003eU, 0x00000003U, 0x00000009U, 0x0004003bU, 0x0000003eU, 0x0000003fU,
++	0x00000003U, 0x00050036U, 0x00000002U, 0x00000004U, 0x00000000U, 0x00000003U,
++	0x000200f8U, 0x00000005U, 0x0004003dU, 0x00000014U, 0x00000019U, 0x00000018U,
++	0x0004003dU, 0x00000027U, 0x0000002aU, 0x00000029U, 0x00050041U, 0x0000002dU,
++	0x0000002eU, 0x0000000cU, 0x0000002cU, 0x0004003dU, 0x00000009U, 0x0000002fU,
++	0x0000002eU, 0x0007004fU, 0x00000014U, 0x00000030U, 0x0000002fU, 0x0000002fU,
++	0x00000000U, 0x00000001U, 0x00050088U, 0x00000014U, 0x00000031U, 0x00000019U,
++	0x00000030U, 0x00050057U, 0x00000009U, 0x00000032U, 0x0000002aU, 0x00000031U,
++	0x0008004fU, 0x00000023U, 0x00000033U, 0x00000032U, 0x00000032U, 0x00000000U,
++	0x00000001U, 0x00000002U, 0x0005008eU, 0x00000023U, 0x00000038U, 0x00000033U,
++	0x00000021U, 0x00050051U, 0x00000006U, 0x0000003aU, 0x00000038U, 0x00000000U,
++	0x00050051U, 0x00000006U, 0x0000003bU, 0x00000038U, 0x00000001U, 0x00050051U,
++	0x00000006U, 0x0000003cU, 0x00000038U, 0x00000002U, 0x00070050U, 0x00000009U,
++	0x00000045U, 0x0000003aU, 0x0000003bU, 0x0000003cU, 0x00000021U, 0x0003003eU,
++	0x0000003fU, 0x00000045U, 0x000100fdU, 0x00010038U,
++};
++
++/* Validated immutable kwl_panel_frag_opaque_6 SPIR-V, used while creating graphics pipelines. */
++static const uint32_t kwl_panel_frag_opaque_6[] = {
++	0x07230203U, 0x00010000U, 0x000d000bU, 0x00000054U, 0x00000000U, 0x00020011U,
++	0x00000001U, 0x0006000bU, 0x00000001U, 0x4c534c47U, 0x6474732eU, 0x3035342eU,
++	0x00000000U, 0x0003000eU, 0x00000000U, 0x00000001U, 0x0007000fU, 0x00000004U,
++	0x00000004U, 0x6e69616dU, 0x00000000U, 0x0000002aU, 0x00000048U, 0x00030010U,
++	0x00000004U, 0x00000007U, 0x00030047U, 0x0000000aU, 0x00000002U, 0x00050048U,
++	0x0000000aU, 0x00000000U, 0x00000023U, 0x00000000U, 0x00050048U, 0x0000000aU,
++	0x00000001U, 0x00000023U, 0x00000010U, 0x00050048U, 0x0000000aU, 0x00000002U,
++	0x00000023U, 0x00000020U, 0x00050048U, 0x0000000aU, 0x00000003U, 0x00000023U,
++	0x00000030U, 0x00050048U, 0x0000000aU, 0x00000004U, 0x00000023U, 0x00000040U,
++	0x00050048U, 0x0000000aU, 0x00000005U, 0x00000023U, 0x00000050U, 0x00040047U,
++	0x00000028U, 0x00000021U, 0x00000000U, 0x00040047U, 0x00000028U, 0x00000022U,
++	0x00000000U, 0x00040047U, 0x0000002aU, 0x0000001eU, 0x00000000U, 0x00040047U,
++	0x00000048U, 0x0000001eU, 0x00000000U, 0x00020013U, 0x00000002U, 0x00030021U,
++	0x00000003U, 0x00000002U, 0x00030016U, 0x00000006U, 0x00000020U, 0x00040017U,
++	0x00000009U, 0x00000006U, 0x00000004U, 0x0008001eU, 0x0000000aU, 0x00000009U,
++	0x00000009U, 0x00000009U, 0x00000009U, 0x00000009U, 0x00000009U, 0x00040020U,
++	0x0000000bU, 0x00000009U, 0x0000000aU, 0x0004003bU, 0x0000000bU, 0x0000000cU,
++	0x00000009U, 0x00040015U, 0x0000000dU, 0x00000020U, 0x00000001U, 0x00040015U,
++	0x0000000fU, 0x00000020U, 0x00000000U, 0x00040020U, 0x00000011U, 0x00000009U,
++	0x00000006U, 0x00040017U, 0x00000014U, 0x00000006U, 0x00000002U, 0x00040020U,
++	0x00000017U, 0x00000001U, 0x00000014U, 0x0004002bU, 0x00000006U, 0x0000001dU,
++	0x3f000000U, 0x0004002bU, 0x00000006U, 0x00000020U, 0x00000000U, 0x0004002bU,
++	0x00000006U, 0x00000021U, 0x3f800000U, 0x00090019U, 0x00000025U, 0x00000006U,
++	0x00000001U, 0x00000000U, 0x00000000U, 0x00000000U, 0x00000001U, 0x00000000U,
++	0x0003001bU, 0x00000026U, 0x00000025U, 0x00040020U, 0x00000027U, 0x00000000U,
++	0x00000026U, 0x0004003bU, 0x00000027U, 0x00000028U, 0x00000000U, 0x0004003bU,
++	0x00000017U, 0x0000002aU, 0x00000001U, 0x0005002cU, 0x00000014U, 0x0000002fU,
++	0x0000001dU, 0x00000020U, 0x0004002bU, 0x0000000dU, 0x00000032U, 0x00000003U,
++	0x0004002bU, 0x0000000fU, 0x00000033U, 0x00000003U, 0x00040020U, 0x00000047U,
++	0x00000003U, 0x00000009U, 0x0004003bU, 0x00000047U, 0x00000048U, 0x00000003U,
++	0x00030001U, 0x00000006U, 0x00000053U, 0x00050036U, 0x00000002U, 0x00000004U,
++	0x00000000U, 0x00000003U, 0x000200f8U, 0x00000005U, 0x0004003dU, 0x00000026U,
++	0x00000029U, 0x00000028U, 0x0004003dU, 0x00000014U, 0x0000002bU, 0x0000002aU,
++	0x00050057U, 0x00000009U, 0x0000002cU, 0x00000029U, 0x0000002bU, 0x00050081U,
++	0x00000014U, 0x00000030U, 0x0000002bU, 0x0000002fU, 0x00050057U, 0x00000009U,
++	0x00000031U, 0x00000029U, 0x00000030U, 0x00060041U, 0x00000011U, 0x00000034U,
++	0x0000000cU, 0x00000032U, 0x00000033U, 0x0004003dU, 0x00000006U, 0x00000035U,
++	0x00000034U, 0x00070050U, 0x00000009U, 0x00000036U, 0x00000035U, 0x00000035U,
++	0x00000035U, 0x00000035U, 0x0008000cU, 0x00000009U, 0x00000037U, 0x00000001U,
++	0x0000002eU, 0x0000002cU, 0x00000031U, 0x00000036U, 0x00050051U, 0x00000006U,
++	0x00000041U, 0x00000037U, 0x00000000U, 0x00050051U, 0x00000006U, 0x00000042U,
++	0x00000037U, 0x00000001U, 0x00050051U, 0x00000006U, 0x00000043U, 0x00000037U,
++	0x00000002U, 0x00070050U, 0x00000009U, 0x00000044U, 0x00000041U, 0x00000042U,
++	0x00000043U, 0x00000053U, 0x0005008eU, 0x00000009U, 0x00000046U, 0x00000044U,
++	0x00000021U, 0x00050051U, 0x00000006U, 0x0000004bU, 0x00000046U, 0x00000000U,
++	0x00050051U, 0x00000006U, 0x0000004cU, 0x00000046U, 0x00000001U, 0x00050051U,
++	0x00000006U, 0x0000004dU, 0x00000046U, 0x00000002U, 0x00070050U, 0x00000009U,
++	0x0000004eU, 0x0000004bU, 0x0000004cU, 0x0000004dU, 0x00000021U, 0x0003003eU,
++	0x00000048U, 0x0000004eU, 0x000100fdU, 0x00010038U,
++};
++
+ /* Glass, shadow, image, solid, ring, text, blur and dark glass avoid unused branch work. */
+ static const struct kwl_panel_shader kwl_panel_variants[8] = {
+ 	{kwl_panel_frag_0, sizeof(kwl_panel_frag_0)},
+@@ -1965,22 +2169,26 @@ static const struct kwl_panel_shader kwl_panel_variants[8] = {
+ 	{kwl_panel_frag_7, sizeof(kwl_panel_frag_7)},
+ };
+ 
+-/* The insides of glass, image, solid, dark glass and shadow shapes, wholly covered and off the edge (glass.c). */
+-static const struct kwl_panel_shader kwl_panel_inside_variants[5] = {
++/* The insides of glass, image, solid, dark glass and shadow shapes and of mapped flat glass, wholly covered and off the edge (glass.c). */
++static const struct kwl_panel_shader kwl_panel_inside_variants[7] = {
+ 	{kwl_panel_frag_inside_0, sizeof(kwl_panel_frag_inside_0)},
++	{kwl_panel_frag_inside_1, sizeof(kwl_panel_frag_inside_1)},
+ 	{kwl_panel_frag_inside_2, sizeof(kwl_panel_frag_inside_2)},
+ 	{kwl_panel_frag_inside_3, sizeof(kwl_panel_frag_inside_3)},
+-	{kwl_panel_frag_inside_7, sizeof(kwl_panel_frag_inside_7)},
+-	{kwl_panel_frag_inside_1, sizeof(kwl_panel_frag_inside_1)},
++	{kwl_panel_frag_inside_4, sizeof(kwl_panel_frag_inside_4)},
++	{kwl_panel_frag_inside_5, sizeof(kwl_panel_frag_inside_5)},
++	{kwl_panel_frag_inside_6, sizeof(kwl_panel_frag_inside_6)},
+ };
+ 
+ /* The same insides of opaque shapes at full opacity, written as they are (glass.c). */
+-static const struct kwl_panel_shader kwl_panel_opaque_variants[5] = {
++static const struct kwl_panel_shader kwl_panel_opaque_variants[7] = {
+ 	{kwl_panel_frag_opaque_0, sizeof(kwl_panel_frag_opaque_0)},
++	{kwl_panel_frag_opaque_1, sizeof(kwl_panel_frag_opaque_1)},
+ 	{kwl_panel_frag_opaque_2, sizeof(kwl_panel_frag_opaque_2)},
+ 	{kwl_panel_frag_opaque_3, sizeof(kwl_panel_frag_opaque_3)},
+-	{kwl_panel_frag_opaque_7, sizeof(kwl_panel_frag_opaque_7)},
+-	{kwl_panel_frag_opaque_1, sizeof(kwl_panel_frag_opaque_1)},
++	{kwl_panel_frag_opaque_4, sizeof(kwl_panel_frag_opaque_4)},
++	{kwl_panel_frag_opaque_5, sizeof(kwl_panel_frag_opaque_5)},
++	{kwl_panel_frag_opaque_6, sizeof(kwl_panel_frag_opaque_6)},
+ };
+ 
+ #endif
+diff --git a/userland/desktop/wayland/shaders/panel.frag b/userland/desktop/wayland/shaders/panel.frag
+index ea7ee5cd4e..7134dc1167 100644
+--- a/userland/desktop/wayland/shaders/panel.frag
++++ b/userland/desktop/wayland/shaders/panel.frag
+@@ -81,6 +81,13 @@ void main()
+ 		// x whether the glass is white (its colour 0.9 or more in every
+ 		// channel), y whether it is dark glass (mode -1), z the sheen from the
+ 		// top (none on flat glass, shape.z 1), w one over the box's height.
++#if defined(KWL_PANEL_MAP)
++		// KWL_PANEL_MAP: the inside of flat glass whose colour was worked
++		// out for every output pixel beforehand (glass-map.c), by this
++		// shader over the same blurred wallpaper: the image is that colour,
++		// read at the pixel itself; flat glass has no sheen to add.
++		vec3 glass = texture(image, point / panel.screen.xy).rgb;
++#else
+ 		vec3 under = texture(image, point / panel.screen.xy).rgb;
+ 		vec3 glass = mix(under, panel.color.rgb, panel.color.a);
+ 		float luma = dot(glass, vec3(0.2126, 0.7152, 0.0722));
+@@ -98,6 +105,7 @@ void main()
+ 
+ 		// A sheen from the top, except on flat glass (a window's panels).
+ 		glass += vec3(panel.texture.z) * (1.0 - depth);
++#endif
+ #if !defined(KWL_PANEL_INSIDE)
+ 		// The bright edge, which an inside's pixels are off (the mix by 0 leaves the glass as it is).
+ 		glass = mix(glass, vec3(1.0), edge * panel.screen.z);
+@@ -119,7 +127,14 @@ void main()
+ 	} else if (mode < 2.5) {
+ #endif
+ 		// A window's image with rounded corners (an opaque image has no alpha of its own).
++#if defined(KWL_PANEL_CROSSFADE)
++		// KWL_PANEL_CROSSFADE: two pictures side by side in one image (the
++		// left half and the right), the second faded in over the first by
++		// color.a, in one draw instead of two (glass.c).
++		vec4 texel = mix(texture(image, texcoord), texture(image, texcoord + vec2(0.5, 0.0)), panel.color.a);
++#else
+ 		vec4 texel = texture(image, texcoord);
++#endif
+ 
+ 		colour = vec4(texel.rgb, max(texel.a, panel.shape.w)) * cover;
+ #endif
+diff --git a/userland/desktop/wayland/shaders/regenerate.py b/userland/desktop/wayland/shaders/regenerate.py
+index a358ef5bb3..ca73ddc58b 100644
+--- a/userland/desktop/wayland/shaders/regenerate.py
++++ b/userland/desktop/wayland/shaders/regenerate.py
+@@ -18,10 +18,11 @@ SHADERS = [("quad.vert", "kwl_quad_vert"), ("quad.frag", "kwl_quad_frag"),
+            ("panel-text.vert", "kwl_text_vert"), ("panel-text.frag", "kwl_text_frag"),
+            ("turn.vert", "kwl_turn_vert")]
+ 
+-# The panel modes whose insides have a variant of their own (glass, image,
+-# solid, dark glass and shadow), in the order of kwl_panel_inside_variants
+-# (compose.h's KWL_PANEL_INSIDE_*).
+-INSIDE_MODES = (0, 2, 3, 7, 1)
++# The insides that have a variant of their own (glass, image, solid, dark
++# glass, shadow, flat glass read from its map, and two pictures cross-faded),
++# each its panel mode and its own definitions, in the order of
++# kwl_panel_inside_variants (compose.h's KWL_PANEL_INSIDE_*).
++INSIDE_MODES = ((0, ()), (2, ()), (3, ()), (7, ()), (1, ()), (0, ("-DKWL_PANEL_MAP",)), (2, ("-DKWL_PANEL_CROSSFADE",)))
+ 
+ 
+ def compile_shader(source, definitions=()):
+@@ -48,12 +49,12 @@ def main():
+     variants = [(source, name, ()) for source, name in SHADERS]
+     variants.extend(("panel.frag", "kwl_panel_frag_%d" % mode,
+                      ("-DKWL_PANEL_MODE=%d" % mode,)) for mode in range(8))
+-    variants.extend(("panel.frag", "kwl_panel_frag_inside_%d" % mode,
+-                     ("-DKWL_PANEL_MODE=%d" % mode, "-DKWL_PANEL_INSIDE"))
+-                    for mode in INSIDE_MODES)
+-    variants.extend(("panel.frag", "kwl_panel_frag_opaque_%d" % mode,
+-                     ("-DKWL_PANEL_MODE=%d" % mode, "-DKWL_PANEL_INSIDE", "-DKWL_PANEL_OPAQUE"))
+-                    for mode in INSIDE_MODES)
++    variants.extend(("panel.frag", "kwl_panel_frag_inside_%d" % index,
++                     ("-DKWL_PANEL_MODE=%d" % mode, "-DKWL_PANEL_INSIDE", *extra))
++                    for index, (mode, extra) in enumerate(INSIDE_MODES))
++    variants.extend(("panel.frag", "kwl_panel_frag_opaque_%d" % index,
++                     ("-DKWL_PANEL_MODE=%d" % mode, "-DKWL_PANEL_INSIDE", "-DKWL_PANEL_OPAQUE", *extra))
++                    for index, (mode, extra) in enumerate(INSIDE_MODES))
+     for source, name, definitions in variants:
+         words = compile_shader(HERE / source, definitions)
+         lines.append("/* Validated immutable %s SPIR-V, used while creating graphics pipelines. */" % name)
+@@ -68,15 +69,15 @@ def main():
+     for mode in range(8):
+         lines.append("\t{kwl_panel_frag_%d, sizeof(kwl_panel_frag_%d)}," % (mode, mode))
+     lines.extend(["};", "",
+-                  "/* The insides of glass, image, solid, dark glass and shadow shapes, wholly covered and off the edge (glass.c). */",
++                  "/* The insides of glass, image, solid, dark glass and shadow shapes and of mapped flat glass, wholly covered and off the edge (glass.c). */",
+                   "static const struct kwl_panel_shader kwl_panel_inside_variants[%d] = {" % len(INSIDE_MODES)])
+-    for mode in INSIDE_MODES:
+-        lines.append("\t{kwl_panel_frag_inside_%d, sizeof(kwl_panel_frag_inside_%d)}," % (mode, mode))
++    for index in range(len(INSIDE_MODES)):
++        lines.append("\t{kwl_panel_frag_inside_%d, sizeof(kwl_panel_frag_inside_%d)}," % (index, index))
+     lines.extend(["};", "",
+                   "/* The same insides of opaque shapes at full opacity, written as they are (glass.c). */",
+                   "static const struct kwl_panel_shader kwl_panel_opaque_variants[%d] = {" % len(INSIDE_MODES)])
+-    for mode in INSIDE_MODES:
+-        lines.append("\t{kwl_panel_frag_opaque_%d, sizeof(kwl_panel_frag_opaque_%d)}," % (mode, mode))
++    for index in range(len(INSIDE_MODES)):
++        lines.append("\t{kwl_panel_frag_opaque_%d, sizeof(kwl_panel_frag_opaque_%d)}," % (index, index))
+     lines.extend(["};", "", "#endif"])
+     (HERE.parent / "shaders.h").write_text("\n".join(lines) + "\n")
+ 
+diff --git a/userland/desktop/wayland/shell.c b/userland/desktop/wayland/shell.c
+index 200e8060a7..b303047f0d 100644
+--- a/userland/desktop/wayland/shell.c
++++ b/userland/desktop/wayland/shell.c
+@@ -118,6 +118,12 @@
+ #define FRAME_BAND		8
+ #define FRAME_CORNER		24
+ 
++/* The corner radius of the desktop layer's wallpaper while it goes back over App Home, in the layer's own pixels. */
++#define HOME_LAYER_RADIUS	18.0f
++
++/* How far around what Home's picture holds it is drawn, in its pixels (the linear sampling reads a texel beyond). */
++#define HOME_PICTURE_MARGIN	2.0f
++
+ /*
+  * Placing a new window (ws035-p092): how far each cascade step moves it
+  * (a title bar and its gap, so the title bar under it shows), how many
+@@ -341,6 +347,9 @@ static const char *const shell_square_apps[] = {
+ 	"terminal"
+ };
+ 
++/* Wiseview's shade over its blurred ground, a little darker (premultiplied by the shape: straight colour and opacity). */
++static const float wiseview_shade[4] = { 0.0f, 0.02f, 0.06f, 0.08f };
++
+ /* Where the pointer is over a window. */
+ enum shell_hit {
+ 	HIT_NONE,
+@@ -529,7 +538,13 @@ static void wiseview_key(struct kwl_server *server, uint32_t key, uint32_t state
+ static void wiseview_close_key(struct kwl_server *server);
+ static unsigned wiseview_windows(struct kwl_server *server, struct kwl_object **windows, unsigned capacity);
+ static void wiseview_layout(struct kwl_server *server, struct kwl_object **windows, unsigned count, struct shell_rect *tiles);
+-static void draw_wiseview(struct kwl_server *server, struct kwl_list *command, struct kwl_object **stacked, unsigned stacked_count, float progress);
++static void draw_wiseview(struct kwl_server *server, struct kwl_list *command, struct kwl_object **stacked, unsigned stacked_count, float progress, VkDescriptorSet ground, int crossfaded);
++static int wiseview_ground(struct kwl_server *server, VkDescriptorSet *sets);
++static int wiseview_crossfade(struct kwl_server *server, VkDescriptorSet *set);
++static void wiseview_wall_picture(struct kwl_server *server, struct kwl_list *command);
++static void wiseview_glass_picture(struct kwl_server *server, struct kwl_list *command);
++static void wiseview_ground_picture(struct kwl_server *server, struct kwl_list *command);
++static void wiseview_glass(struct kwl_server *server, struct kwl_list *command, float opacity);
+ static void draw_tile(struct kwl_server *server, struct kwl_list *command, struct kwl_object *surface, const struct shell_rect *tile, float progress, unsigned current, unsigned over);
+ static int wiseview_button(struct kwl_server *server, uint32_t button, uint32_t state);
+ static void wiseview_log(struct kwl_server *server);
+@@ -602,7 +617,8 @@ static float desktop_position(struct kwl_server *server);
+ static void desktop_turn(struct kwl_server *server, int target, const char *via);
+ static void desktop_release(struct kwl_server *server);
+ static unsigned desktop_windows(struct kwl_server *server, unsigned desktop);
+-static void draw_home_picture(struct kwl_server *server, struct kwl_list *command, float home);
++static void draw_home_picture(struct kwl_server *server, struct kwl_list *command, float home, const float (*under)[4], unsigned under_count);
++static unsigned home_under_layer(struct kwl_server *server, float home, float (*under)[4]);
+ static void draw_layer_animated(struct kwl_server *server, struct kwl_list *command, struct kwl_object **windows, unsigned count, float home, const struct shell_bar *bar);
+ 
+ /*
+@@ -621,6 +637,12 @@ kwl_glass_draw(
+ 	struct kwl_object *top;
+ 	struct kwl_object *cover;
+ 	struct shell_bar bar;
++	VkDescriptorSet ground_sets[2];
++	VkDescriptorSet crossfade_set;
++	int crossfade;
++	float under[1][4];
++	unsigned under_count;
++	int ground;
+ 	unsigned hidden;
+ 	int whole;
+ 	float progress;
+@@ -668,12 +690,15 @@ kwl_glass_draw(
+ 	home = kwl_home_progress(server);
+ 	hidden = 0U;
+ 	pictures = 0;
++	under_count = 0U;
+ 	if (home > 0.0f)
+ 		pictures = kwl_layers_showing(server);
++	if (home > 0.0f)
++		under_count = home_under_layer(server, home, under);
+ 	if (home > 0.0f) {
+ 		server->draw_section = KWL_SECTION_HOME;
+ 		if (pictures)
+-			draw_home_picture(server, command, home);
++			draw_home_picture(server, command, home, (const float (*)[4])under, under_count);
+ 		else
+ 			kwl_home_draw(server, command, home);
+ 		server->draw_section = KWL_SECTION_LAYER;
+@@ -713,7 +738,7 @@ kwl_glass_draw(
+ 		shape.color[1] = 0.12f;
+ 		shape.color[2] = 0.24f;
+ 		shape.color[3] = 0.40f * home * server->layer_opacity;
+-		glass_shape_draw(server, command, &shape);
++		glass_shape_draw_except(server, command, &shape, (const float (*)[4])under, under_count);
+ 	}
+ 
+ 	/* The layer's place over Home is where the wallpaper and the windows are drawn. */
+@@ -753,17 +778,49 @@ kwl_glass_draw(
+ 	    home <= 0.0f)
+ 		server->cover_count = cover_holes(server, windows, count, server->cover_holes, server->cover_levels);
+ 
+-	/* The wallpaper over the whole output (with round corners while it is pushed aside), unless Home hides the layer. */
++	/*
++	 * Wiseview, opening, open or closing, stands on its ground: the
++	 * wallpaper under its shade, and over it the blurred glass under the
++	 * shade as far as Wiseview is open, from their pictures when they are
++	 * drawn (wiseview_ground).
++	 */
++	progress = wiseview_progress(server);
++	ground = 0;
++	if (progress > 0.0f &&
++	    !hidden &&
++	    !pictures &&
++	    !anim_pictures &&
++	    home <= 0.0f &&
++	    !server->layer_on)
++		ground = wiseview_ground(server, ground_sets);
++	if (!ground)
++		ground_sets[1] = VK_NULL_HANDLE;
++
++	/* Both in one draw, from their picture side by side, once that is drawn too. */
++	crossfade = 0;
++	if (ground)
++		crossfade = wiseview_crossfade(server, &crossfade_set);
++
++	/*
++	 * The wallpaper over the whole output (with round corners while it is
++	 * pushed aside), unless Home hides the layer; under Wiseview's shade
++	 * from its picture, and not at all under its glass once it is open.
++	 */
+ 	server->draw_section = KWL_SECTION_LAYER;
+-	if (!hidden) {
++	if (crossfade) {
++		glass_draw_crossfade(server, command, crossfade_set, progress);
++		ground_sets[1] = VK_NULL_HANDLE;
++	} else if (!hidden && (!ground || progress < 1.0f)) {
+ 		glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
+ 		shape.mode = MODE_IMAGE;
+ 		shape.opaque = 1.0f;
+ 		shape.set = glass_wallpaper_set(server);
+ 		if (pictures || anim_pictures)
+ 			shape.set = kwl_layers_set(server, KWL_LAYER_DESKTOP);
++		if (ground)
++			shape.set = ground_sets[0];
+ 		if (home > 0.0f)
+-			shape.radius = 18.0f;
++			shape.radius = HOME_LAYER_RADIUS;
+ 		glass_shape_draw(server, command, &shape);
+ 	}
+ 
+@@ -771,11 +828,10 @@ kwl_glass_draw(
+ 	server->draw_section = KWL_SECTION_OTHER;
+ 	bar_layout(server, &bar);
+ 
+-	/* Wiseview, opening, open or closing, takes the windows' place. */
+-	progress = wiseview_progress(server);
++	/* Wiseview takes the windows' place. */
+ 	if (progress > 0.0f) {
+ 		server->cover_count = 0U;
+-		draw_wiseview(server, command, windows, count, progress);
++		draw_wiseview(server, command, windows, count, progress, ground_sets[1], crossfade);
+ 		server->layer_on = 0;
+ 		server->draw_section = KWL_SECTION_BAR;
+ 		draw_system_bar(server, command, &bar);
+@@ -2191,9 +2247,11 @@ glass_still(
+ /*
+  * Finds the rectangle (left, top, right, bottom) a window's body alone
+  * covers, when a change of its image can be drawn there alone: the look is
+- * still, the window is shown, and no window above it comes near enough
+- * for its glass to blur the change in (ws035-p055).  Returns 1 with the
+- * rectangle, 0 when the whole output must be drawn.
++ * still, the window is shown, and no window above it whose glass shows the
++ * scene under it blurred (backdrop.c) comes near enough to blur the change
++ * in (ws035-p055).  A window above whose glass shows the blurred wallpaper
++ * alone is drawn again over the rectangle like everything else there.
++ * Returns 1 with the rectangle, 0 when the whole output must be drawn.
+  */
+ int
+ kwl_glass_body_damage(
+@@ -2205,8 +2263,10 @@ kwl_glass_body_damage(
+ 	struct kwl_object *other;
+ 	struct shell_rect body;
+ 	struct shell_rect near;
++	unsigned blur;
+ 	int still;
+ 	int close;
++	int centred;
+ 
+ 	/* A still look, and a window on the desktop shown. */
+ 	still = kwl_glass_still(server);
+@@ -2220,7 +2280,7 @@ kwl_glass_body_damage(
+ 	near.width = body.width + 2 * DAMAGE_REACH;
+ 	near.height = body.height + 2 * DAMAGE_REACH;
+ 
+-	/* No window above it within the reach (its body and its title bar). */
++	/* No window above it within the reach (its body and its title bar) that blurs what is under it. */
+ 	for (client = server->clients; client != NULL; client = client->next) {
+ 		for (other = client->objects; other != NULL; other = other->next) {
+ 			if (other == surface || other->kind != KWL_SURFACE || !other->mapped)
+@@ -2228,7 +2288,15 @@ kwl_glass_body_damage(
+ 			if (other->map_order < surface->map_order || other->minimized || other->desktop != server->desktop)
+ 				continue;
+ 			close = damage_near(server, other, &near);
+-			if (close)
++			if (!close)
++				continue;
++
++			/* Its glass on the scene under it (set_blur, or centred in the docked space). */
++			blur = kwl_panels_blur(other);
++			if (blur)
++				return 0;
++			centred = window_centred_over(server, other);
++			if (centred)
+ 				return 0;
+ 		}
+ 	}
+@@ -5886,6 +5954,18 @@ drag_measured(
+ 	return 1;
+ }
+ 
++/* Tells whether the window being moved marks its old and new places itself (for the pointer's damage, damage.c). */
++int
++kwl_glass_drag_measured(
++	struct kwl_server *server)
++{
++	int measured;
++
++	/* The move's own test. */
++	measured = drag_measured(server);
++	return measured;
++}
++
+ /* Marks a moving window's place as damage: its title bar and body, with the reach of its shadow and the glass's blur. */
+ static void
+ drag_damage(
+@@ -8504,6 +8584,114 @@ wiseview_layout(
+ 	}
+ }
+ 
++/*
++ * Gives Wiseview's ground from its two pictures (glass-map.c): sets[0] the
++ * wallpaper under Wiseview's shade, sets[1] its blurred glass under the
++ * shade.  Fading the second in over the first is the same blend as fading
++ * the glass in over the wallpaper and the shade over both.  Returns 1 when
++ * both are drawn (each not drawn yet is asked for).
++ */
++static int
++wiseview_ground(
++	struct kwl_server *server,
++	VkDescriptorSet *sets)
++{
++	int wall;
++	int glass;
++
++	/* Both pictures, each asked for when it is not drawn. */
++	wall = kwl_glass_picture_set(server, KWL_GLASS_PICTURE_WISEVIEW_WALL, wiseview_wall_picture, &sets[0]);
++	glass = kwl_glass_picture_set(server, KWL_GLASS_PICTURE_WISEVIEW_GLASS, wiseview_glass_picture, &sets[1]);
++	if (!wall || !glass)
++		return 0;
++
++	/* Succeeded: the ground is the two pictures. */
++	return 1;
++}
++
++/*
++ * Gives the picture of Wiseview's two grounds side by side (the wallpaper
++ * and the glass, each under the shade), drawn from their own pictures once
++ * both are drawn (wiseview_ground).  Returns 1 with its set when drawn.
++ */
++static int
++wiseview_crossfade(
++	struct kwl_server *server,
++	VkDescriptorSet *set)
++{
++	int drawn;
++
++	/* The picture, asked for when it is not drawn. */
++	drawn = kwl_glass_picture_set(server, KWL_GLASS_PICTURE_WISEVIEW_GROUND, wiseview_ground_picture, set);
++	if (!drawn)
++		return 0;
++
++	/* Succeeded: Wiseview's ground in one draw. */
++	return 1;
++}
++
++/* Draws Wiseview's two grounds side by side into their picture, from their own pictures. */
++static void
++wiseview_ground_picture(
++	struct kwl_server *server,
++	struct kwl_list *command)
++{
++	VkDescriptorSet sets[2];
++	int ground;
++
++	/* The two pictures, drawn before (wiseview_crossfade asks only then); without them nothing. */
++	ground = wiseview_ground(server, sets);
++	if (!ground)
++		return;
++
++	/* The wallpaper's on the left, the glass's on the right. */
++	glass_draw_halves(server, command, sets[0], sets[1]);
++}
++
++/* Draws the wallpaper under Wiseview's shade into its picture. */
++static void
++wiseview_wall_picture(
++	struct kwl_server *server,
++	struct kwl_list *command)
++{
++	struct glass_shape shape;
++
++	/* The sharp wallpaper, then the shade. */
++	glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
++	shape.mode = MODE_IMAGE;
++	shape.opaque = 1.0f;
++	shape.set = glass_wallpaper_set(server);
++	glass_shape_draw(server, command, &shape);
++	glass_draw_solid(server, command, 0.0f, 0.0f, (float)server->width, (float)server->height, 0.0f, wiseview_shade);
++}
++
++/* Draws Wiseview's glass at full opacity under its shade into its picture. */
++static void
++wiseview_glass_picture(
++	struct kwl_server *server,
++	struct kwl_list *command)
++{
++	/* The glass opaque over the whole output, so nothing under it shows. */
++	wiseview_glass(server, command, 1.0f);
++}
++
++/* Draws Wiseview's blurred glass over the whole output faded by opacity, and the shade over it. */
++static void
++wiseview_glass(
++	struct kwl_server *server,
++	struct kwl_list *command,
++	float opacity)
++{
++	struct glass_shape shape;
++
++	/* The blurred wallpaper over the sharp one, and a little darker. */
++	glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
++	shape.mode = MODE_GLASS;
++	shape.opacity = opacity;
++	glass_shape_draw(server, command, &shape);
++	glass_draw_solid(server, command, 0.0f, 0.0f, (float)server->width, (float)server->height, 0.0f, wiseview_shade);
++}
++
+ /*
+  * Draws Wiseview as far as it is open: the wallpaper blurred and darkened,
+  * each window on its way from its place to its tile (the stacking order
+@@ -8516,9 +8704,10 @@ draw_wiseview(
+ 	struct kwl_list *command,
+ 	struct kwl_object **stacked,
+ 	unsigned stacked_count,
+-	float progress)
++	float progress,
++	VkDescriptorSet ground,
++	int crossfaded)
+ {
+-	static const float shade[4] = { 0.0f, 0.02f, 0.06f, 0.08f };
+ 	static const float dark[4] = { 0.10f, 0.14f, 0.22f, 1.0f };
+ 	struct kwl_object *windows[WISEVIEW_WINDOWS];
+ 	struct shell_rect tiles[WISEVIEW_WINDOWS];
+@@ -8535,12 +8724,24 @@ draw_wiseview(
+ 	unsigned over;
+ 	int32_t width;
+ 
+-	/* The blurred wallpaper over the sharp one, and a little darker. */
+-	glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
+-	shape.mode = MODE_GLASS;
+-	shape.opacity = progress;
+-	glass_shape_draw(server, command, &shape);
+-	glass_draw_solid(server, command, 0.0f, 0.0f, (float)server->width, (float)server->height, 0.0f, shade);
++	/*
++	 * The blurred wallpaper over the sharp one, and a little darker: the
++	 * glass's picture under the shade, faded in over the wallpaper's under
++	 * the shade (kwl_glass_draw), which is the same blend; or the glass and
++	 * the shade themselves.
++	 */
++	if (crossfaded) {
++		/* Drawn already, with the wallpaper (kwl_glass_draw). */
++	} else if (ground != VK_NULL_HANDLE) {
++		glass_shape_init(&shape, 0.0f, 0.0f, (float)server->width, (float)server->height);
++		shape.mode = MODE_IMAGE;
++		shape.opaque = 1.0f;
++		shape.set = ground;
++		shape.opacity = progress;
++		glass_shape_draw(server, command, &shape);
++	} else {
++		wiseview_glass(server, command, progress);
++	}
+ 
+ 	/* The windows and their tiles. */
+ 	count = wiseview_windows(server, windows, WISEVIEW_WINDOWS);
+@@ -10606,6 +10807,43 @@ home_layer_log(
+ 	printf("KWL HOME layer hidden=%u\n", hidden);
+ }
+ 
++/*
++ * Works out where the desktop layer, going back into the distance over
++ * App Home (kwl_home_layer), hides what is drawn under it: the inside of
++ * its wallpaper's rounded rectangle, when the layer is drawn at full
++ * opacity (its wallpaper and windows are then opaque there).  Returns the
++ * number of such holes (0 or 1) in under.
++ */
++static unsigned
++home_under_layer(
++	struct kwl_server *server,
++	float home,
++	float (*under)[4])
++{
++	float rect[4];
++	float opacity;
++	float scale;
++	float x;
++	float y;
++
++	/* The layer's place over Home this far open; a layer fading out hides nothing. */
++	kwl_home_layer(server, home, &x, &y, &scale, &opacity);
++	if (opacity < 1.0f || scale <= 0.0f)
++		return 0U;
++
++	/* The wallpaper's rectangle (the whole output, scaled) less its rounded corners (scaled) and a pixel. */
++	rect[0] = x;
++	rect[1] = y;
++	rect[2] = (float)server->width * scale;
++	rect[3] = (float)server->height * scale;
++	glass_opaque_inside(rect, HOME_LAYER_RADIUS * scale, under[0]);
++	if (under[0][2] <= 0.0f || under[0][3] <= 0.0f)
++		return 0U;
++
++	/* Succeeded: one hole. */
++	return 1U;
++}
++
+ /*
+  * Draws App Home from the pictures (layer-cache.c, ws211-p002): the stage,
+  * then Home's picture coming forward from the distance as far as Home is
+@@ -10616,10 +10854,17 @@ static void
+ draw_home_picture(
+ 	struct kwl_server *server,
+ 	struct kwl_list *command,
+-	float home)
++	float home,
++	const float (*under)[4],
++	unsigned under_count)
+ {
+ 	struct kwl_edge_depth depth;
+ 	struct glass_shape shape;
++	struct glass_shape part;
++	float bounds[4];
++	float crop[4];
++	int bounded;
++	int shown;
+ 	float radius;
+ 	float grown;
+ 	float size;
+@@ -10628,7 +10873,7 @@ draw_home_picture(
+ 	int launched;
+ 
+ 	/* The stage, in Home's own colours; an opening's first frame shows only it (Home's picture comes next, review-4 H3). */
+-	kwl_home_draw_stage(server, command);
++	kwl_home_draw_stage(server, command, under, under_count);
+ 	if (kwl_layers_home_hidden(server)) {
+ 		server->keep_colours = 0U;
+ 		return;
+@@ -10644,13 +10889,29 @@ draw_home_picture(
+ 		printf("KWL HOME layer=content after_ms=%llu picture=1\n", (unsigned long long)(kwl_milliseconds() - server->home_asked_ms));
+ 	}
+ 
+-	/* Home's picture, placed and scaled as the content is, faded in by how far Home is open. */
++	/*
++	 * Home's picture, placed and scaled as the content is, faded in by how
++	 * far Home is open: only the part that holds anything (with a margin
++	 * for the linear sampling at its edge), the rest being clear.
++	 */
+ 	kwl_edge_home_content(home, (int32_t)server->width, (int32_t)server->height, &depth);
+ 	glass_shape_init(&shape, depth.x, depth.y, (float)server->width * depth.scale, (float)server->height * depth.scale);
+ 	shape.mode = MODE_IMAGE;
+ 	shape.set = kwl_layers_set(server, KWL_LAYER_HOME);
+ 	shape.opacity = home;
+-	glass_shape_draw(server, command, &shape);
++	shown = 1;
++	bounded = kwl_layers_home_bounds(server, bounds);
++	if (bounded) {
++		crop[0] = depth.x + (bounds[0] - HOME_PICTURE_MARGIN) * depth.scale;
++		crop[1] = depth.y + (bounds[1] - HOME_PICTURE_MARGIN) * depth.scale;
++		crop[2] = (bounds[2] - bounds[0] + 2.0f * HOME_PICTURE_MARGIN) * depth.scale;
++		crop[3] = (bounds[3] - bounds[1] + 2.0f * HOME_PICTURE_MARGIN) * depth.scale;
++		shown = glass_shape_crop(&shape, crop, &part);
++		if (shown)
++			shape = part;
++	}
++	if (shown)
++		glass_shape_draw_except(server, command, &shape, under, under_count);
+ 
+ 	/* The clock over the picture, placed and faded as the content (it is not in the picture, review-3 B6). */
+ 	kwl_home_draw_clock_over(server, command, home);

@@ -1,0 +1,335 @@
+diff --git a/plan/bugs/BUG-267/tests/host-touch-group.c b/plan/bugs/BUG-267/tests/host-touch-group.c
+index 501a250788..d9cfd7b361 100644
+--- a/plan/bugs/BUG-267/tests/host-touch-group.c
++++ b/plan/bugs/BUG-267/tests/host-touch-group.c
+@@ -19,10 +19,11 @@
+  * (the press, the pointer's way, the release).
+  *
+  * BUG-315 adds the Pi 4's 13.3-inch OLED panel (Wacom 056a:8191) as a
+- * second touch screen with its declared range (X 0..16383, Y 0..9599) and
+- * its quirk (its fingers reach Y 6450 at the bottom), and the short taps
+- * and the one-finger swipes in the middle that must stay the client's,
+- * also right after a tap the shell took at an edge.
++ * second touch screen with its declared range (X 0..16383, Y 0..9599), and
++ * the short taps and the one-finger swipes in the middle that must stay
++ * the client's, also right after a tap the shell took at an edge.  BUG-333
++ * gives the panel its quirk: its X covers only a window in the middle of
++ * the output, so 0 and 16383 are the window's edges, not the output's.
+  * usage: host-touch-group
+  */
+ 
+@@ -52,7 +53,11 @@
+ #define OLED_PRODUCT	0x8191U
+ #define OLED_X_MAX	16383
+ #define OLED_Y_MAX	9599
+-#define OLED_Y_REACH	6450
++
++/* The window of the output's width the OLED panel's X covers (BUG-333), in thousandths, as touch.c's quirk has it. */
++#define OLED_WINDOW_LEFT	375
++#define OLED_WINDOW_RIGHT	603
++#define OLED_WINDOW_WHOLE	1000
+ 
+ /* The descriptors of the two touch screens' nodes. */
+ #define INPUT_FD	3
+@@ -145,6 +150,8 @@ static void test_edge_tap_then_middle(void);
+ static void test_edge_pair_then_middle(void);
+ static void test_oled_range(void);
+ static int32_t scale_axis(const struct kwl_cursor_axis *axis, uint32_t size);
++static int32_t oled_column(int32_t value);
++static int32_t window_column(int32_t thousandths);
+ 
+ /* Runs every scenario and reports how many checks failed. */
+ int
+@@ -1585,30 +1592,74 @@ test_oled_range(
+ 	scenario_begin("the OLED panel's range");
+ 	target = &oled;
+ 
+-	/* A tap at the bottom edge (T1-649's bottom-right tap read 15785,6445): the bottom strip's, so the shell's. */
+-	finger_down(0, 341, 15785, 6445);
++	/* A tap at the bottom edge: the bottom strip's, so the shell's, in the middle column. */
++	finger_down(0, 341, OLED_X_MAX / 2, OLED_Y_MAX);
+ 	report_send(24000);
+ 	finger_up(0);
+ 	report_send(24070);
+ 	check(seen.shell_presses == 1 && seen.shell_releases == 1, "oled: the bottom tap is in the bottom strip");
+-	check(seen.press_y >= OUTPUT_HEIGHT - 2, "oled: the bottom tap is on the bottom row");
+-	check(seen.press_x == (int32_t)((int64_t)15785 * (OUTPUT_WIDTH - 1) / OLED_X_MAX), "oled: X keeps its declared range");
++	check(seen.press_y == OUTPUT_HEIGHT - 1, "oled: the bottom tap is on the bottom row");
++	check(seen.press_x == oled_column(OLED_X_MAX / 2), "oled: the middle of X is the window's middle column");
++	check(seen.press_x > window_column(OLED_WINDOW_LEFT + OLED_WINDOW_RIGHT) / 2 - 4 &&
++	      seen.press_x < window_column(OLED_WINDOW_LEFT + OLED_WINDOW_RIGHT) / 2 + 4, "oled: the window's middle column is between its edges");
+ 
+-	/* A tap halfway down. */
+-	finger_down(0, 342, 8192, OLED_Y_REACH / 2);
++	/* A tap halfway down, with X at its maximum (a finger right of the window): the client's, at the window's edge. */
++	finger_down(0, 342, OLED_X_MAX, OLED_Y_MAX / 2);
+ 	report_send(24200);
+ 	finger_up(0);
+ 	report_send(24270);
+-	check(seen.downs == 1, "oled: the client hears the middle tap");
+-	check(seen.down_y == (OUTPUT_HEIGHT - 1) / 2, "oled: halfway down the reach is the middle row");
++	check(seen.downs == 1 && seen.shell_presses == 1, "oled: the client hears the tap right of the window");
++	check(seen.down_y == (OUTPUT_HEIGHT - 1) / 2, "oled: halfway down Y is the middle row");
++	check(seen.down_x == oled_column(OLED_X_MAX), "oled: the X maximum is the window's right edge");
++	check(seen.down_x > window_column(OLED_WINDOW_RIGHT) - 4 && seen.down_x < window_column(OLED_WINDOW_RIGHT) + 4, "oled: the window's right edge is where the quirk puts it");
+ 
+-	/* A tap at the top edge: the top band's, so the shell's. */
+-	finger_down(0, 343, 8192, 1);
++	/* A swipe left with X at its minimum all the way (a finger left of the window): the client's, not the desktops'. */
++	finger_down(0, 343, 0, OLED_Y_MAX / 2);
+ 	report_send(24400);
++	finger_move(0, 0, OLED_Y_MAX / 2 + 100);
++	report_send(24420);
++	finger_up(0);
++	report_send(24440);
++	check(seen.downs == 2 && seen.shell_presses == 1, "oled: the client hears the finger left of the window");
++	check(seen.down_x == oled_column(0), "oled: the X minimum is the window's left edge");
++	check(seen.down_x > window_column(OLED_WINDOW_LEFT) - 4 && seen.down_x < window_column(OLED_WINDOW_LEFT) + 4, "oled: the window's left edge is where the quirk puts it");
++
++	/* A tap at the top edge: the top band's, so the shell's. */
++	finger_down(0, 344, OLED_X_MAX / 2, 1);
++	report_send(24600);
+ 	finger_up(0);
+-	report_send(24470);
++	report_send(24670);
+ 	check(seen.shell_presses == 2 && seen.press_y == 0, "oled: the top edge is the top row");
+ 
+ 	/* The reports are the first screen's again. */
+ 	target = &input;
+ }
++
++/* Gives the column an OLED panel's X lands on, its range carried beyond the window to the output's edges as touch.c does. */
++static int32_t
++oled_column(
++	int32_t value)
++{
++	struct kwl_cursor_axis axis;
++	int64_t span;
++	int64_t width;
++
++	/* The range per thousandth of the window, carried to both of the output's edges. */
++	span = OLED_X_MAX;
++	width = OLED_WINDOW_RIGHT - OLED_WINDOW_LEFT;
++	axis.value = value;
++	axis.minimum = (int32_t)(0 - span * OLED_WINDOW_LEFT / width);
++	axis.maximum = (int32_t)(OLED_X_MAX + span * (OLED_WINDOW_WHOLE - OLED_WINDOW_RIGHT) / width);
++
++	/* Succeeded: the column, in whole pixels. */
++	return scale_axis(&axis, OUTPUT_WIDTH) / 256;
++}
++
++/* Gives the column so many thousandths of the output's width across. */
++static int32_t
++window_column(
++	int32_t thousandths)
++{
++	/* Succeeded: the column, rounding down. */
++	return (int32_t)((int64_t)(OUTPUT_WIDTH - 1) * thousandths / OLED_WINDOW_WHOLE);
++}
+diff --git a/plan/bugs/BUG-333.md b/plan/bugs/BUG-333.md
+index 280001de45..f2ba023526 100644
+--- a/plan/bugs/BUG-333.md
++++ b/plan/bugs/BUG-333.md
+@@ -2,11 +2,27 @@
+ 
+ # BUG-333: Pi 4 の USB の touchscreen で 1 本指のスワイプが 2 本指のスワイプとして扱われる
+ 
+-- 状態: reproduced（ユーザーの観察、Pi 4 10.0.30.6、main 5a13204 の kernel と userland）/ scheduled
++- 状態: reproduced（ユーザーの観察、Pi 4 10.0.30.6、main 5a13204 の kernel と userland）/ scheduled（2026-10-17 P2: compositor の quirk を Pi に入れた、ユーザーの確認待ち）
+ - 発見: 2026-10-17 ユーザー「1本指のスワイプが2本指スワイプで認識されています。この点を調査できますか。サブエージェントでお願いします。」
+ - 機器: USB の HID の touchscreen（usb0 device 4、interface 0、contact-count-maximum=10、report 54 byte、10 slots。interface 1 は vendor の report で attach 失敗、interface 2 は mouse の emulation で非公開）。/dev/input/event2 HIDTOUCH Touchscreen。
+ - 手がかり: dmesg に `hid-input: usb0/port1/device4/interface0 touch: 2 fingers down at once (of 10 slots)`。1 本指で 2 つの contact が down になっている見込み（contact count・tip switch・slot の扱い、hybrid の report mode の扱い）。
+ - 担当: q1238。
++
++## 2026-10-17 P2 の解析と直し（q1238-i01）
++
++- 記録: Pi の `/dev/input/event2` を host から `od` で読むだけの記録を 5 回（Pi には何も書かない）。1 回目は 2 本指が混じった（ユーザー）。2 回目（id 197〜349、1 本指）、4 回目（ゆっくりの横 drag 3 回 id 391〜393、7 か所の hold id 394〜402）を根拠にした。10-15 の T1-649 の記録と BUG-315 の Y の quirk は、ユーザーの指示（「15日の特例はあまり考慮せず削除して」）で根拠にしない。
++- 原因（確か）: panel（Wacom 056a:8191）が送る X は、画面の中央の窓の中だけ 0〜16383 で動き、窓の左右では 0・16383 ちょうどに張り付く（ゆっくりの横 swipe の 49 report のうち 30 が 16383、上の段の右からの 20 回の tap が全部 16383）。kernel は範囲外の値の report を捨てる（`hid-report.c` の `decode_field_value`）ので、張り付きは panel の値。kernel の contact の解釈（contact count・tip・contact id、hybrid でない）は正しい。
++  - Keiland（`userland/desktop/wayland/touch.c`）は 0〜16383 を画面の全幅に写すので、(a) 中央の窓の動きが全幅に引き伸ばされ（ユーザーの「中央 1/3 が引き延ばされる」）、(b) 窓の外の指は全部 x=0・1279、つまり画面の端の指になり、1 本指の左右の端の swipe（仮想 desktop 送り）が発動した。session.log の「KWL TOUCH shell contact=0 x=1279 … KWL GLASS desktop swipe」。ユーザーの「1 本指が 2 本指の swipe として扱われる」はこの (b)。
++  - 1 本指が 2 つの contact に割れたのは 2 回目の記録で 1 回だけ（id 219、0.86 cm、11 ms 後、2 report の点滅）。ghost の除去は入れていない。
++- 窓の幅（7 か所の hold）: 真ん中 ≈ 9300、右 2 cm 13950・4 cm 16383（張り付き）、左 2 cm 4300・4 cm 0 → 約 2400/cm、窓は真ん中の 3.7 cm 左〜3.0 cm 右。画面の幅 29.4 cm（13.3 インチ 16:9）で 375〜603‰（全幅の約 23%）。system bar の中央の pill の tap は raw ≈ 8500（631 px）で合う。
++- 直し（`touch.c`、WIP 213d33298）: 10-15 の Y の quirk（6450）を外し、quirk の表を「X が覆う出力の窓（‰）」に変えた。056a:8191 は 375〜603。`read_quirk` → `widen_window` が X の範囲を窓の外へ延ばし（-26945..44909）、0〜16383 が窓に写る。窓の外の指は窓の端に置かれ、画面の端の gesture にならない。Y は宣言の 0〜9599。
++- 制限: 窓の外（左右の約 3/8 ずつ）の指は位置が取れない（panel が値を出さない）。左右の 1/3 の物は touch で押せず、左右の端からの touch の swipe は起きない。根本は panel の側の写し方の設定（monitor の状態、Pi の出力の解像度 1280x720 との関係の見込み、未確認）。
++- 試験（host）: `plan/bugs/BUG-267/tests/run-host-touch-group.sh` の OLED の場面を書き直した（窓の中央・右の張り付き・左の張り付きの swipe が client の物で端の gesture にならない、下端・上端は shell）。`host-touch-group: ok (100 checks)`。
++- build: `make -j8 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/bug333-rpi4 build/bug333-rpi4/bin/wayland` rc 0、warning 0、`git diff --check` ok。
++- 実機: 2026-10-17 01:37 JST、Pi 4 の `/bin/wayland` を差し替え（元は `/root/wayland.orig-bug333`、cksum 2894246028。新 cksum 1359191446）、reboot。session.log に `KWL TOUCH added device=/dev/input/event2 x=-26945..44909 y=0..9599`。ユーザーの操作の確認は待ち。
++- 戻し: `sudo cp -p /root/wayland.orig-bug333 /bin/wayland` と reboot。
+ - 2026-10-17 6:00 Q1: 原因を特定。panel は数え上げの最初の GET_DESCRIPTOR(Device) で ID を選ぶ。Linux と Windows は wLength 64 を full-speed で 64 byte の EP0 に出し、panel の 8 byte の packet が short packet になって 8 byte で終わる → panel は Goodix 27c6:8191 を名乗る。zedBSD は wLength 8・EP0 8 byte → panel は Wacom 互換 056a:8191（中央 1/3 の帯の写し）を名乗る。5330 の Linux の usbmon（build/review/pi4/usbmon-5330-linux2.txt）と zedBSD の control の記録（usb.ctltrace=1、build/review/pi4/zedbsd-5330-ctltrace.txt）を並べて確かめた。5330 の zedBSD で usb.first64=1 → 27c6:8191、無し → 056a:8191 を交互に確かめた。Input Mode・SET_IDLE・MS OS descriptor・2 回目の port reset・reset の後の待ちは関係なし。
+ - 直し（opt-in の boot の語 usb.first64=1）: usb.c の最初の要求を 64 byte に、pci-xhci.c で full-speed の EP0 を 64 から始める（Linux と同じ）。これで 5330・Pi 4 の他の機器（Intel BT、Logitech の receiver）も数え上げに成功。未確認: 27c6 の時の X の範囲（ユーザーの drag）、既定にするか（全部の USB 機器の数え上げが変わる）。
+ - 実験の boot の語（既定 off）: usb.ctltrace=1、usb.winreset=1、usb.resetwait=1、usbhid.nomode=1、usbhid.msos=1、usbhid.idle=1。
++- 2026-10-17 06:23 P2（5330、27c6:8191、usb.first64=1）: 例の session.log の `down client=2 … x=22` と `shell contact=0 x=1904 … desktop swipe` は別々の 1 本指の 2 回の touch。2 回目は右端の帯（shell.c の `DESKTOP_EDGE` 16 px、1920 幅で x≥1904）に落ち、設計どおりの 1 本指の端の swipe（BUG-267 で受け入れ済み）。群の規則（`group_check` は 2 本未満で何もしない）と kernel の 2 slot（dmesg の「2 fingers down」は最大の記録が 1 回、同じ log に意図した 2 本指の操作がある）は関係が見えなかった。056a:8191 の quirk の表は vendor 27c6 に当たらない（`KWL TOUCH added … x=0..16383` で quirk の行なし）。
++- ユーザー「了解です、ではいったん仕様として受け止めます。」→ 調べを止めた。生の記録（5330 `/tmp/p2-ev3.txt`）は操作の前に止めたので空。実機には何も入れていない（Pi 4 の `/bin/wayland` は元の cksum 2894246028 のまま）。前の世代の未 commit の touch.c の試し（中央 23% への写し）は P2 の worktree の `git stash`（"p2 prev-gen touch.c center-23% attempt"）に退避。
+diff --git a/plan/known-bugs.md b/plan/known-bugs.md
+index 115383844c..6f5ba30e33 100644
+--- a/plan/known-bugs.md
++++ b/plan/known-bugs.md
+@@ -200,7 +200,7 @@ remain as traceable history and are not new implementation work.
+ | [BUG-330](bugs/BUG-330.md) | framebuffer の console のスクロールが遅い（1920x1080 で 1 秒に約 4 行、毎行で全部の cell を描き直す） | reproduced（ユーザー）/ tracking（2026-10-16 夜 ユーザーの指示で修正を止めた） | ユーザー 2026-10-16 | 未割当 |
+ | [BUG-331](bugs/BUG-331.md) | RDNA 機の desktop が App Home を閉じる animation 中に固まり（mouse も止まる）、reset して Debian に戻る（p017 の 2 段目の試験の kernel） | reproduced 0 回（ユーザー 1 回）/ tracking | ユーザー 2026-10-16 | P3（p017 の中） |
+ | [BUG-332](bugs/BUG-332.md) | app の起動の fork の直後に compositor が GPU の memory を解放すると EBUSY で device lost（子が exec まで親の GPU の mmap を持つ） | reproduced（実機 1 回）/ tracking | P3・P5 2026-10-16 | 未割当（共通の code） |
+-| [BUG-333](bugs/BUG-333.md) | Pi 4 の USB の touchscreen で 1 本指のスワイプが 2 本指として扱われる（dmesg「2 fingers down at once」） | reproduced（ユーザー）/ scheduled | ユーザー 2026-10-17 | P2（q1238） |
++| [BUG-333](bugs/BUG-333.md) | Pi 4 の OLED（Wacom 056a:8191）の touch で 1 本指のスワイプが 2 本指として扱われる。原因は panel の X が中央の窓（約 23%）の外で 0・16383 に張り付くこと。compositor の窓の quirk を Pi に入れた | reproduced（ユーザー）/ scheduled（ユーザーの確認待ち） | ユーザー 2026-10-17 | P2（q1238） |
+ | [BUG-176](bugs/BUG-176.md) | 起動の直後の約 10 秒「Network service is not …」と出る | reproduced（実機） / resolved（2026-10-08 夜 ユーザー「下記は実装の変更が多かったので、いったんすべてcloseします。」、Q1 の中継）。前: scheduled、低（q726: bar の起動の直後の表示を「Starting the network service...」に、UAT 待ち） | UAT 2026-10-04 | WS131・networkd（[ticket](bugs/BUG-176.md)） |
+ | [BUG-159](bugs/BUG-159.md) | バッテリー駆動で描画が 5 fps ほどに落ち、電池切れで警告なく落ちる | reproduced（実機 S1） / tracking | S1（WS133） | WS075（i915）、電源の管理（WS050〜052・WS132）。UAT 2026-10-04: 再現せず（電源の状態は BUG-165 の後） |
+ | [BUG-158](bugs/BUG-158.md) | 操作中・放置中にフリーズし、電源ボタンの長押しが要る | reproduced（実機 S1・UAT） / **resolved**（2026-10-04 UAT-3 の実機で確認） | S1（WS133） | WS004（AX211）・WS005。**原因確定（2026-10-04 P4、passthrough + gdbstub）**: 未接続 scan 中の firmware assert → recovery の `ax211_pci_interrupt_drain` が RX DMA 進行中に PCI bus master を落とし PCH ごと停止。修正の計画は ticket の「修正の計画」(1)〜(5)。**q684-i03 の修正を q697 で確認: user 採用の console で671秒、SW_ERROR/restart 10回、host応答継続、最後12 vCPU idle。q697 cleared。実機UAT待ち。q698 cleared（解析）: SW_ERRORはcommand doorbellを256で巻き戻す不具合。16 bit値へのgdb補正で消失、補正解除で再現。q699 cleared（修正）: 16 bit連番を製品実装（acb4afa）。補正無しのconsole10分24秒、256境界10回、SW_ERROR/restart 0、host ping/SSH各70回成功、最終12 vCPU idle。host試験は65536境界・失敗/resetもPASS。実機UAT待ち**。ws005-p032（q684-i01）: panic の可視化・kernel.log の永続化・scan の失敗からの自動の再 open を実装済み（T1-089 PASS、UAT 待ち） |
+diff --git a/userland/desktop/wayland/touch.c b/userland/desktop/wayland/touch.c
+index 4a0764cf4a..071a7e3a9d 100644
+--- a/userland/desktop/wayland/touch.c
++++ b/userland/desktop/wayland/touch.c
+@@ -144,6 +144,15 @@
+ #define GROUP_SHELL		2
+ #define GROUP_DONE		3
+ 
++/*
++ * A quirk's window across the output in thousandths of its width: the
++ * whole width, and the window the OLED's Wacom panel's X covers (BUG-333,
++ * measured as touch_quirks says).
++ */
++#define TOUCH_WINDOW_WHOLE		1000
++#define TOUCH_WINDOW_LEFT_8191		375
++#define TOUCH_WINDOW_RIGHT_8191		603
++
+ /* Event opcodes of wl_touch. */
+ #define TOUCH_DOWN		0U
+ #define TOUCH_UP		1U
+@@ -249,18 +258,17 @@ struct touch_group {
+ };
+ 
+ /*
+- * A touch screen whose fingers do not reach the range it declares
+- * (BUG-315): its USB vendor and product, and the place across and down
+- * that its fingers really read at the output's right and bottom edges.  A
+- * zero keeps that axis's declared maximum.
++ * A touch screen whose range across covers only a window of the output
++ * (BUG-333): its USB vendor and product, and the window's left and right
++ * edges in thousandths of the output's width from its left edge.
+  *
+  * Instances live only in the constant table below.
+  */
+ struct touch_quirk {
+ 	uint16_t vendor;
+ 	uint16_t product;
+-	int32_t maximum_x;
+-	int32_t maximum_y;
++	int32_t window_left;
++	int32_t window_right;
+ };
+ 
+ /*
+@@ -278,19 +286,31 @@ struct touch_report {
+ };
+ 
+ /*
+- * The touch screens whose declared range is not where their fingers reach
+- * (BUG-315), looked up by read_axes when a screen is added.
++ * The touch screens whose declared range is not where their fingers are
++ * on the output, looked up by read_axes when a screen is added.
+  *
+- * The 13.3-inch OLED's Wacom panel (056a:8191) declares Y 0..9599, but a
+- * finger at the bottom edge of the picture reads about 6450 (T1-649: the
+- * taps along the bottom read 5848..6446, never more); the top edge reads
+- * 0 and X spans its declared 0..16383.  Mapped by the declared maximum,
+- * the lower third of the picture could not be touched, and every finger
+- * landed a third higher than it was.  The table is constant and lives as
+- * long as the process.
++ * The 13.3-inch OLED's Wacom panel (056a:8191) on the Pi 4 (BUG-333, its
++ * reports read on 2026-10-17) spans its declared Y 0..9599 from the top
++ * edge to the bottom one, but its X runs over 0..16383 only within the
++ * middle of the picture: a finger left or right of it reads 0 or 16383
++ * exactly, wherever it is (a slow swipe across read 16383 for 30 of its
++ * 49 reports, and twenty taps along the top from the right edge read
++ * 16383).  Held at the picture's middle a finger read about 9300, 2 cm to
++ * the right 13950 and 4 cm 16383, 2 cm to the left 4300 and 4 cm 0: about
++ * 2400 a centimetre, the window from 3.7 cm left of the middle to 3.0 cm
++ * right of it, on a picture 29.4 cm wide (375 to 603 thousandths).  A tap
++ * on the system bar's middle reads about 8500, 631 of 1280 pixels.  Mapped
++ * across the whole output, the middle was stretched over it, and every
++ * finger in the sides was at the output's left or right edge, where one
++ * finger swipes the desktops.  The kernel passes the panel's values as
++ * they are (it refuses a report with a value out of range), so the sides
++ * cannot be placed; mapped onto the window the panel covers, the middle is
++ * under the finger and a finger in the sides stays at the window's edge,
++ * not the output's.  The table is constant and lives as long as the
++ * process.
+  */
+ static const struct touch_quirk touch_quirks[] = {
+-	{ 0x056aU, 0x8191U, 0, 6450 },
++	{ 0x056aU, 0x8191U, TOUCH_WINDOW_LEFT_8191, TOUCH_WINDOW_RIGHT_8191 },
+ };
+ 
+ /*
+@@ -321,6 +341,7 @@ static struct touch_group group;
+ static struct touch_screen *screen_of(struct kwl_input_device *input);
+ static int read_axes(struct touch_screen *screen);
+ static void read_quirk(struct touch_screen *screen);
++static void widen_window(struct input_absinfo *axis, int32_t left, int32_t right);
+ static void read_report(struct kwl_server *server, struct touch_screen *screen);
+ static void contact_begin(struct kwl_server *server, struct touch_screen *screen, unsigned slot, struct touch_report *report);
+ static void contact_move(struct kwl_server *server, struct touch_screen *screen, unsigned slot, struct touch_report *report);
+@@ -896,7 +917,7 @@ read_axes(
+ 	if (screen->axis_y.maximum <= screen->axis_y.minimum)
+ 		return EINVAL;
+ 
+-	/* A screen known to declare more than its fingers reach maps by where they reach (BUG-315). */
++	/* A screen known to cover only a window of the output across maps onto that window (BUG-333). */
+ 	read_quirk(screen);
+ 
+ 	/* The slot the next report's finger events address until one names another. */
+@@ -911,9 +932,9 @@ read_axes(
+ }
+ 
+ /*
+- * Narrows a touch screen's range to where its fingers reach when the
+- * screen is one of touch_quirks (BUG-315); any other keeps its declared
+- * range.
++ * Maps a touch screen's range across onto the window of the output it
++ * covers when the screen is one of touch_quirks (BUG-333); any other keeps
++ * its declared range.
+  */
+ static void
+ read_quirk(
+@@ -958,15 +979,36 @@ read_quirk(
+ 	printf("KWL TOUCH quirk device=%s vendor=%04x product=%04x declared x=%d..%d y=%d..%d\n", screen->input->path, identity.vendor,
+ 	       identity.product, screen->axis_x.minimum, screen->axis_x.maximum, screen->axis_y.minimum, screen->axis_y.maximum);
+ 
+-	/* Across: only a maximum inside the declared range, above its minimum, is taken. */
+-	if (quirk->maximum_x > screen->axis_x.minimum &&
+-	    quirk->maximum_x < screen->axis_x.maximum)
+-		screen->axis_x.maximum = quirk->maximum_x;
++	/* Succeeded: across, a range that covers a window of the output reaches the output's edges beyond it (kwl_touch_add's line shows the range used). */
++	widen_window(&screen->axis_x, quirk->window_left, quirk->window_right);
++}
++
++/*
++ * Widens a range that covers only the window from left to right (in
++ * thousandths of the output's width) to the range that would cover the
++ * whole output, so that the range's ends land on the window's edges.  A
++ * window that is the whole output, or not a window, leaves it.
++ */
++static void
++widen_window(
++	struct input_absinfo *axis,
++	int32_t left,
++	int32_t right)
++{
++	int64_t span;
++	int64_t width;
++
++	/* Only a window inside the output, narrower than it. */
++	if (left < 0 || right > TOUCH_WINDOW_WHOLE || left >= right)
++		return;
++	if (left == 0 && right == TOUCH_WINDOW_WHOLE)
++		return;
+ 
+-	/* Succeeded: down, the same (kwl_touch_add's line shows the range used). */
+-	if (quirk->maximum_y > screen->axis_y.minimum &&
+-	    quirk->maximum_y < screen->axis_y.maximum)
+-		screen->axis_y.maximum = quirk->maximum_y;
++	/* The range per thousandth of the width, carried to both of the output's edges. */
++	span = (int64_t)axis->maximum - axis->minimum;
++	width = (int64_t)right - left;
++	axis->minimum = (int32_t)(axis->minimum - span * left / width);
++	axis->maximum = (int32_t)(axis->maximum + span * (TOUCH_WINDOW_WHOLE - right) / width);
+ }
+ 
+ /*

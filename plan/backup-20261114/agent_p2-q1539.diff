@@ -1,0 +1,191 @@
+diff --git a/plan/ws270/phase007/notes-p2.md b/plan/ws270/phase007/notes-p2.md
+index 8e26954e58..8bb9926ed1 100644
+--- a/plan/ws270/phase007/notes-p2.md
++++ b/plan/ws270/phase007/notes-p2.md
+@@ -214,3 +214,50 @@ Mesa 26.2.5（drm-shim、BVNC 36.50.54.182、`PVR_DEBUG=cs`、vkmatrix の perf-
+ - a7eb3188e: 2 つ以上の FMAD の addend になる定数を、program の始めに temp に置く（upper set の s5 が shared を名指せないので、組を妨げていた）。alu4 73→41 group。
+ - 711dea277: x·1.0 を copy にする（1.0/x が rcp と mul だったのを rcp 1 つに）。vkmatrix に perf-rcp（依存する rcp 32 個、38 group）を足した。perf-mul4 との比で rcp 1 つの slot 数を見る。
+ - 板の kernel: build/q1539/vf2i/vmunix（711dea277、sha256 910e868996b965da…）、build/q1539/vf2i/bin/vkmatrix（sha256 3b1f30647707c226…）。
++
++### precision を落とせるか（2026-10-21 ユーザー「浮動小数点が32bitなのはちょっと気になるので、precisionを落とせないか確認するのがいいと思います。」）
++
++- Mesa 26.2.5 の ISA の表（pco_isa.py・pco_ops.py・pco_map.py）を調べた:
++  - main ALU の fadd・fmul・fmad は F32 だけで、F16 の vec2 の SIMD の形は無い。
++  - 有るもの: fadd_lp・fmul_lp（main op の別の値）、fmad の lp の bit、single op の f16sop（F16 の sum of products。Mesa では「F16SOP # TODO」で encoding が無い）、変換・iterate の f16 の flag。
++  - pco は lp も f16sop も使わない。nir の fp16 も allow_fp16 = false で、Mesa で mediump は効かない。
++- 我々の compiler は RelaxedPrecision を読まない。Keiland の GLSL にも mediump は無い。
++- 試し（99ca2cfd1）: POWERVR_SHADER_LOW_PRECISION_TRIAL（既定 0）で、全部の FADD・FMUL・FMAD を lp の形にする。group 数は既定と同じ。
++- 板の組: build/q1539/vf2j/vmunix（既定、vf2i と同じ binary）、build/q1539/vf2j-lp/vmunix（lp、sha256 4b7cd72326e5c142…）。perf-mul4・alu4・alu・flat を比べる。
++- f16sop は一次資料が無く、encoding を推測で試すと firmware の lockup の危険があるので、していない。
++
++### VF2 の Linux（Mesa の PowerVR）で vkmatrix の perf を流す手順（Q1 の依頼、2026-10-21）
++
++- vkmatrix（userland/tests/vkmatrix/main.c と shader.h だけ）は、そのまま Linux の Vulkan loader で build できる。zedBSD 固有の部分は無い（POSIX の clock_gettime・fork だけ）。
++  - host で `gcc -std=c11 -O2 -Wall -Wextra -Werror main.c -lvulkan` が警告 0 で通る。
++  - Mesa 26.2.5 の powervr（drm-shim、BVNC 36.50.54.182）で、perf の case の API の呼び出しが全部通る事を確かめた（drm-shim は GPU を走らせないので、色の比較の case は FAIL するが、それは想定どおり）。
++  - 時間の測り方は zedBSD と同じ: 1 frame ごとに vkQueueSubmit から vkWaitForFences まで、20 frame の平均と最小。
++- 板（Debian の VF2）で入れる物:
++  - `sudo apt install build-essential libvulkan-dev vulkan-tools mesa-vulkan-drivers`
++  - PowerVR の ICD があるか: `ls /usr/share/vulkan/icd.d/ | grep -i powervr`（例 powervr_mesa_icd.riscv64.json）。
++  - Mesa の PowerVR は既定で隠れているので、`PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1` を付けて `vulkaninfo --summary` で device が出るか確かめる。
++  - ICD が無い、または Mesa が古い時は、Mesa 26.2.5 を板で build する（host の比較と同じ版）。
++    - `sudo apt build-dep mesa && sudo apt install meson ninja-build glslang-tools python3-mako`
++    - `meson setup build -Dvulkan-drivers=imagination -Dgallium-drivers= -Dplatforms= -Dglx=disabled -Degl=disabled -Dgbm=disabled -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Dvideo-codecs= -Dbuildtype=release`
++    - `ninja -C build`
++    - ICD は `build/src/imagination/vulkan/powervr_mesa_devenv_icd.riscv64.json`。板で 1〜2 時間の見込み（未確認）。
++- 板へ写す物: repository の `userland/tests/vkmatrix/main.c` と `userland/tests/vkmatrix/shader.h` の 2 つ（main の最新）。
++- build（板で）: `gcc -std=c11 -O2 -o vkmatrix main.c -lvulkan`
++- 流す（板で）:
++
++```
++export PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1
++export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/powervr_mesa_icd.riscv64.json   # 自前の build なら上の devenv の json
++for c in perf-clear perf-flat perf-immediate perf-quarter perf-alu perf-alu4 perf-mul4 perf-rcp \
++         perf-texture perf-load perf-load-part perf-load-small clear-64 perf-tri128 perf-draws4; do
++	./vkmatrix $c
++done
++./vkmatrix          # 全部の case（色の比較の PASS 数も見る）
++```
++
++- 合わせて記録する物:
++  - GPU の clock: `sudo cat /sys/kernel/debug/clk/clk_summary | grep -i gpu`。zedBSD は 396 MHz。Linux は vendor の既定の 594 MHz の事があるので、clock で割って比べる。
++  - `uname -a`、`vulkaninfo --summary` の driverInfo（Mesa の版）。
++- 読み方: 同じ SPIR-V について、Mesa の group 数は表のとおり（例 alu 220、mul4 は Mesa の版で数える）、ours は 1/3〜1/5。
++  - Mesa の時間を group 数で割った 1 group あたりの時間が、ours の約 0.7〜0.8 ms/全画面（396 MHz）と同じなら、hardware の issue の速さが上限で、ours の差は group 数の差。
++  - Mesa の 1 group が明らかに速ければ、ours の task・PDS・USC の設定に違いがある。
+diff --git a/src/drivers/gpu/powervr/shader-backend.c b/src/drivers/gpu/powervr/shader-backend.c
+index bcffd4ed95..8e98353510 100644
+--- a/src/drivers/gpu/powervr/shader-backend.c
++++ b/src/drivers/gpu/powervr/shader-backend.c
+@@ -181,6 +181,7 @@ static void propagate_copies(struct powervr_ir_shader *shader);
+ static void simplify_products(struct powervr_ir_shader *shader);
+ static void hoist_addends(struct powervr_ir_shader *shader, uint32_t stage);
+ static void alias_shared(const struct powervr_ir_shader *shader, const struct powervr_shader_program *program, struct shader_backend *backend);
++static int register_readers(const struct powervr_ir_shader *shader, unsigned value);
+ static void fuse_multiply_adds(struct powervr_ir_shader *shader, uint32_t stage);
+ static int fuse_multiply_add(struct powervr_ir_shader *shader, unsigned at, unsigned which);
+ static int fuse_clamp(struct powervr_ir_shader *shader, unsigned at);
+@@ -901,11 +902,39 @@ alias_shared(
+ 	unsigned writer;
+ 	unsigned at;
+ 	unsigned source;
++	unsigned bank;
++	unsigned index;
+ 	int ok;
+ 
+-	/* None yet; none at all when the words are given up front. */
+-	for (value = 0; value < POWERVR_IR_VALUES; value++)
++	/* None yet. */
++	for (value = 0; value < POWERVR_IR_VALUES; value++) {
+ 		backend->shared_alias[value] = 0;
++		backend->alias_bank[value] = POWERVR_USC_BANK_SHARED;
++	}
++
++	/* A vertex input or a flat varying's C coefficient read where it is. */
++	for (at = 0; at < shader->instruction_count; at++) {
++		instruction = &shader->instructions[at];
++		value = instruction->destination;
++		if (value == 0 || value >= shader->value_count || shader->values[value].width != 1)
++			continue;
++		if (instruction->opcode == POWERVR_IR_INPUT) {
++			bank = POWERVR_USC_BANK_VERTEX_INPUT;
++			index = instruction->immediate;
++		} else if (instruction->opcode == POWERVR_IR_ITERATE && (instruction->flags & POWERVR_IR_FLAT) != 0) {
++			bank = POWERVR_USC_BANK_COEFFICIENT;
++			index = instruction->immediate + 2U;
++		} else {
++			continue;
++		}
++		(void)value_references(shader, value, &writes, &writer);
++		if (writes != 1 || !register_readers(shader, value))
++			continue;
++		backend->shared_alias[value] = (uint16_t)(index + 1U);
++		backend->alias_bank[value] = (uint8_t)bank;
++	}
++
++	/* The shared words, none at all when the words are given up front. */
+ 	if (backend->inline_values != NULL)
+ 		return;
+ 
+@@ -1071,6 +1100,39 @@ simplify_products(
+ 	}
+ }
+ 
++/*
++ * Reports whether every reader of a value takes it through an operand
++ * whose sources name the vertex input and coefficient banks (float
++ * arithmetic and its single operations, outputs, and the pixel stores
++ * and samples that move their operands first).
++ */
++static int
++register_readers(
++	const struct powervr_ir_shader *shader,
++	unsigned value)
++{
++	const struct powervr_ir_instruction *reader;
++	unsigned at;
++	unsigned source;
++	unsigned opcode;
++
++	/* Each read. */
++	for (at = 0; at < shader->instruction_count; at++) {
++		reader = &shader->instructions[at];
++		opcode = reader->opcode;
++		for (source = 0; source < 4; source++) {
++			if (reader->source[source].kind != POWERVR_IR_OPERAND_VALUE || reader->source[source].value != value)
++				continue;
++			if (opcode != POWERVR_IR_FLOAT_ADD && opcode != POWERVR_IR_FLOAT_MULTIPLY && opcode != POWERVR_IR_FLOAT_MULTIPLY_ADD &&
++			    opcode != POWERVR_IR_FLOAT_MINIMUM && opcode != POWERVR_IR_FLOAT_MAXIMUM && opcode != POWERVR_IR_FLOAT_RECIPROCAL &&
++			    opcode != POWERVR_IR_FLOAT_RECIPROCAL_ROOT && opcode != POWERVR_IR_OUTPUT && opcode != POWERVR_IR_PIXEL_STORE &&
++			    opcode != POWERVR_IR_SAMPLE)
++				return 0;
++		}
++	}
++	return 1;
++}
++
+ /* Reports whether a constant is one the core holds in a register (zero, one, 1.0 and all ones), so reading it costs nothing. */
+ static int
+ free_constant(
+@@ -2333,6 +2395,9 @@ select_instruction(
+ 		}
+ 		break;
+ 	case POWERVR_IR_INPUT:
++		/* A vertex input read in place needs no copy. */
++		if (select->backend->shared_alias[instruction->destination] != 0)
++			break;
+ 		operation = append(select, MACHINE_MOVE);
+ 		if (operation != NULL) {
+ 			operation->destination[0] = destination_of(select, instruction);
+@@ -2342,7 +2407,9 @@ select_instruction(
+ 	case POWERVR_IR_ITERATE:
+ 		destination = destination_of(select, instruction);
+ 		if ((instruction->flags & POWERVR_IR_FLAT) != 0) {
+-			/* A flat varying is its C coefficient. */
++			/* A flat varying is its C coefficient, read in place when its readers can. */
++			if (select->backend->shared_alias[instruction->destination] != 0)
++				break;
+ 			operation = append(select, MACHINE_MOVE);
+ 			if (operation != NULL) {
+ 				operation->destination[0] = destination;
+@@ -2764,7 +2831,7 @@ operand_register(
+ 	*modifiers = 0;
+ 	if (operand->kind == POWERVR_IR_OPERAND_VALUE && select->backend->shared_alias[operand->value] != 0) {
+ 		*modifiers = operand->modifiers;
+-		reg = bank_register(POWERVR_USC_BANK_SHARED, select->backend->shared_alias[operand->value] - 1U);
++		reg = bank_register(select->backend->alias_bank[operand->value], select->backend->shared_alias[operand->value] - 1U);
+ 
+ 		/* Succeeded: the shared register. */
+ 		return reg;
+diff --git a/src/drivers/gpu/powervr/shader-private.h b/src/drivers/gpu/powervr/shader-private.h
+index 73419bcc38..5d4e50f292 100644
+--- a/src/drivers/gpu/powervr/shader-private.h
++++ b/src/drivers/gpu/powervr/shader-private.h
+@@ -197,6 +197,7 @@ struct shader_backend {
+ 	unsigned group_count;
+ 	uint16_t value_register[POWERVR_IR_VALUES];
+ 	uint16_t shared_alias[POWERVR_IR_VALUES];
++	uint8_t alias_bank[POWERVR_IR_VALUES];
+ 	uint32_t first_use[POWERVR_IR_VALUES];
+ 	uint32_t last_use[POWERVR_IR_VALUES];
+ 	uint32_t uses[POWERVR_IR_VALUES];

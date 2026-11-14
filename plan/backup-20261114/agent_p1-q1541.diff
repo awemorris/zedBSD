@@ -1,0 +1,403 @@
+diff --git a/plan/ws269/tests/p010/data-host-test.c b/plan/ws269/tests/p010/data-host-test.c
+index 3329f958da..d2e1831811 100644
+--- a/plan/ws269/tests/p010/data-host-test.c
++++ b/plan/ws269/tests/p010/data-host-test.c
+@@ -213,6 +213,8 @@ test_shared(void)
+ 	struct powervr_set_layout layout;
+ 	struct powervr_data_state state;
+ 	struct powervr_data_load loads[POWERVR_DATA_LOADS_MAX];
++	uint8_t set_bytes[256];
++	uint8_t push_bytes[24];
+ 	uint32_t count;
+ 	uint32_t c32;
+ 	int error;
+@@ -294,6 +296,34 @@ test_shared(void)
+ 	check(powervr_data_shared_build(loads, 1, &shared) == EINVAL, "shared: pair to an odd register refused");
+ 	state.push_address = 0;
+ 	check(powervr_data_resolve(&program, &state, loads, POWERVR_DATA_LOADS_MAX, &count) == EINVAL, "resolve: no push buffer refused");
++	state.push_address = 0x200000ULL;
++
++	/*
++	 * The host's copies (q1541): the descriptor and push constant words
++	 * written from them, two to an even register; the same loads by DMA
++	 * when a copy is too short, and when the table lacks room.
++	 */
++	for (index = 0; index < (int)sizeof(set_bytes); index++)
++		set_bytes[index] = (uint8_t)index;
++	for (index = 0; index < (int)sizeof(push_bytes); index++)
++		push_bytes[index] = (uint8_t)(0x80 + index);
++	state.set_bytes[0] = set_bytes;
++	state.push_bytes = push_bytes;
++	state.push_size = sizeof(push_bytes);
++	error = powervr_data_resolve(&program, &state, loads, POWERVR_DATA_LOADS_MAX, &count);
++	check(error == 0 && count == 14, "inline: 14 loads");
++	check(loads[0].kind == POWERVR_DATA_LOAD_WRITE && loads[0].shared == 0 && loads[0].words == 2 && loads[0].source == 0x0706050403020100ULL, "inline: buffer address words written");
++	check(loads[1].kind == POWERVR_DATA_LOAD_WRITE && loads[1].shared == 2 && loads[1].words == 2 && loads[1].source == 0x1716151413121110ULL, "inline: image words 0 and 1 from offset 16");
++	check(loads[3].kind == POWERVR_DATA_LOAD_WRITE && loads[3].shared == 6 && loads[3].source == 0x3736353433323130ULL, "inline: sampler words from offset 48");
++	check(loads[8].kind == POWERVR_DATA_LOAD_WRITE && loads[8].shared == 14 && loads[8].words == 2 && loads[8].source == 0x8f8e8d8c8b8a8988ULL, "inline: push words 2 and 3 to shared 14");
++	check(loads[9].kind == POWERVR_DATA_LOAD_WRITE && loads[9].shared == 16 && loads[9].words == 1 && loads[9].source == 0x93929190ULL, "inline: push word 4 alone");
++	check(loads[12].kind == POWERVR_DATA_LOAD_DMA && loads[12].shared == 22, "inline: blend constants still by DMA");
++	state.push_size = 16;
++	error = powervr_data_resolve(&program, &state, loads, POWERVR_DATA_LOADS_MAX, &count);
++	check(error == 0 && count == 13 && loads[8].kind == POWERVR_DATA_LOAD_DMA && loads[8].source == 0x200008ULL, "inline: a short push copy is copied by DMA");
++	program.request_count = 2;
++	error = powervr_data_resolve(&program, &state, loads, 4, &count);
++	check(error == 0 && count == 2 && loads[0].kind == POWERVR_DATA_LOAD_WRITE && loads[1].kind == POWERVR_DATA_LOAD_DMA && loads[1].source == 0x100010ULL, "inline: DMA once the table lacks room");
+ }
+ 
+ /* The vertex program. */
+diff --git a/plan/ws270/phase007/notes-p1.md b/plan/ws270/phase007/notes-p1.md
+index 54aa0fba14..ba140025bf 100644
+--- a/plan/ws270/phase007/notes-p1.md
++++ b/plan/ws270/phase007/notes-p1.md
+@@ -96,3 +96,20 @@ branch agent/p1-q1541（main を merge 済み）。板は Q1（d59〜d68）。
+ DDK の vkmatrix（594 MHz）: flat 1372、texture 2325、quarter 1324、clear-64 348、load-64 581、load-small 1964 us。flat と quarter がほぼ同じ → 全画面でも固定費が主で、pixel の費用は小さい（圧縮か SLC の効果の疑い）。
+ 
+ 試しの kernel: 01c0e812f（594 MHz ＋ APM 100 ＋ SLC 64-byte interleave ＋ firmware の data cached、build/q1541k）。既定（merge 用）は 5bced8f66（全部 0、register の one-shot の log だけ入る）。
++
++### LINEAR どうしの比べと 1 group の費用（2026-10-21、P1）
++
++| case（594 MHz、us） | DDK | zedBSD（d83） |
++| --- | --- | --- |
++| clear / clear-linear | 1219 / 1659 | 2200 / 2500 |
++| flat / flat-linear | 1290〜1368 / 1896〜1999 | 4350 / 4300 |
++| texture / texture-linear | 2225〜2242 / 2520〜2543 | 8450 / 8250〜8750 |
++| quarter | 1241〜1260 | 2650 |
++| clear-64 | 348 | 約 1100（userland の clock が 1 ms 刻み） |
++
++- 圧縮（OPTIMAL）の効き目は DDK で 0.3〜0.6 ms だけ → 差の主因ではない。FBCDC の道（OPTIMAL で圧縮して描き、damage の矩形だけ LINEAR の scanout へ展開する）は後回しにする。要る物（調べた事実だけ）: BXE-4-32 は fbcdc algorithm 50・architecture 7。Mesa の pbestate・texstate に compression の field はあるが Mesa に実装は無い。header の buffer の配置と、TPU の展開の state は未調査。
++- zedBSD の 1 group の費用（host の dump で数えた group 数、上の perf）: alu 68 group 32050、alu4 41 group 23700、rcp 38 group 19150、flat（push4）4 group 4300、immediate 2 group 2300、clear 2200。傾きは全画面で 1 group あたり 0.43〜0.5 ms で、594 MHz で 8 instance-group/clock（8 lane × 1 group/clock）。
++- immediate→flat の差（+2 group）は 2.0 ms で、傾きから見込める 0.9 ms より約 1.1 ms 多い。flat だけが shared register の要求（push 1 語の DOUTD）を持つ → shared の program がメモリを待つ費用が tile ごとに入る、と読んだ（2040 tile × 約 330 clock）。試し c90be335c（POWERVR_DATA_INLINE_WORDS 16）: 16 語までの push・descriptor の要求と LOAD の 8 語を、host の写しから DOUTW で書く。板の結果待ち。
++- texture.frag（blend あり）は 12 group: ITER、WAIT、SAMPLE、WAIT、source の clamp（FADD.sat の組）2、output の UNPACK、1−a、FMAD の組 2、PACK、END。UNORM の attachment に blend する時、Vulkan では source を clamp するので、clamp は外せない。
++- Q1 の疑い「DDK は texture の sample を PDS（DOUTT）で行う」: Rogue の PDS には texture の DOUT が無い（Mesa の pvr_rogue_pds_defs.h の DOUT の行き先は D・W・U・V・I・C だけ。DOUTI は三角形ごとの coefficient を TSP・FPU が USC に入れるもの）。Mesa も iterate と sample は USC の命令 → この道は無い。
++- 次の切り分け: DDK で perf-alu・alu4・mul4・rcp を流して、1 group の速さを比べる（Q1 に依頼済み）。DDK の alu が約 30 ms なら group の速さは同じで、差は group の数と待ち。約 15 ms なら、こちらは task の詰め方で半分の速さになっている。
+diff --git a/src/drivers/gpu/powervr/data-program.c b/src/drivers/gpu/powervr/data-program.c
+index 0beb64d659..ed73523ce9 100644
+--- a/src/drivers/gpu/powervr/data-program.c
++++ b/src/drivers/gpu/powervr/data-program.c
+@@ -81,7 +81,8 @@
+ 
+ static int load_add(struct powervr_data_load *loads, uint32_t room, uint32_t *count, uint8_t kind, uint32_t shared, uint32_t words, uint64_t source);
+ static int write_words(struct powervr_data_load *loads, uint32_t room, uint32_t *count, uint32_t shared, const uint32_t *values, uint32_t words);
+-static int resolve_descriptor(const struct powervr_shader_request *request, const struct powervr_data_state *state, uint64_t *address);
++static int resolve_descriptor(const struct powervr_shader_request *request, const struct powervr_data_state *state, uint64_t *address, uint32_t *offset);
++static int copy_or_write(struct powervr_data_load *loads, uint32_t room, uint32_t *count, uint32_t shared, uint32_t words, uint64_t source, const uint8_t *bytes);
+ static int find_constant(uint8_t usage[VERTEX_GROUPS], uint32_t *index);
+ static int vertex_write(struct powervr_data_vertex_program *result, uint8_t usage[VERTEX_GROUPS], uint32_t reg, uint32_t half, bool last);
+ 
+@@ -110,8 +111,10 @@ powervr_data_resolve(
+ 	uint32_t *count)
+ {
+ 	const struct powervr_shader_request *request;
++	const uint8_t *bytes;
+ 	uint32_t values[3];
+ 	uint64_t address;
++	uint32_t offset;
+ 	uint32_t index;
+ 	int error;
+ 
+@@ -139,16 +142,23 @@ powervr_data_resolve(
+ 			error = write_words(loads, room, count, request->shared, values, 2);
+ 			break;
+ 		case POWERVR_SHADER_REQUEST_DESCRIPTOR:
+-			/* The descriptor's part, copied from the set's memory. */
+-			error = resolve_descriptor(request, state, &address);
+-			if (error == 0)
+-				error = load_add(loads, room, count, POWERVR_DATA_LOAD_DMA, request->shared, request->words, address);
++			/* The descriptor's part, from the set's memory or the host's copy of it. */
++			error = resolve_descriptor(request, state, &address, &offset);
++			if (error != 0)
++				break;
++			bytes = NULL;
++			if (state->set_bytes[request->set] != NULL)
++				bytes = state->set_bytes[request->set] + offset;
++			error = copy_or_write(loads, room, count, request->shared, request->words, address, bytes);
+ 			break;
+ 		case POWERVR_SHADER_REQUEST_PUSH_CONSTANTS:
+ 			/* The range of the push constants' bytes. */
+ 			if (state->push_address == 0 || (request->offset & 3U) != 0)
+ 				return EINVAL;
+-			error = load_add(loads, room, count, POWERVR_DATA_LOAD_DMA, request->shared, request->words, state->push_address + request->offset);
++			bytes = NULL;
++			if (state->push_bytes != NULL && (uint64_t)request->offset + (uint64_t)request->words * 4U <= state->push_size)
++				bytes = state->push_bytes + request->offset;
++			error = copy_or_write(loads, room, count, request->shared, request->words, state->push_address + request->offset, bytes);
+ 			break;
+ 		case POWERVR_SHADER_REQUEST_LITERAL:
+ 			/* The constant as it is. */
+@@ -501,15 +511,49 @@ write_words(
+ 	return 0;
+ }
+ 
+-/* Works out the address of the part of a descriptor a request names, in its set's memory. */
++/*
++ * Appends the load of words registers from shared on: written from the
++ * host's copy bytes when there is one, the words are few enough
++ * (POWERVR_DATA_INLINE_WORDS) and the table has room for a write a
++ * word; copied from the device address source otherwise.
++ */
++static int
++copy_or_write(
++	struct powervr_data_load *loads,
++	uint32_t room,
++	uint32_t *count,
++	uint32_t shared,
++	uint32_t words,
++	uint64_t source,
++	const uint8_t *bytes)
++{
++	uint32_t values[POWERVR_DATA_INLINE_WORDS + 1U];
++	uint32_t index;
++	const uint8_t *at;
++
++	/* A copy from memory when the words cannot be written. */
++	if (bytes == NULL || words == 0 || words > POWERVR_DATA_INLINE_WORDS || *count + words > room)
++		return load_add(loads, room, count, POWERVR_DATA_LOAD_DMA, shared, words, source);
++
++	/* The words, little-endian as the memory holds them. */
++	for (index = 0; index < words; index++) {
++		at = bytes + index * 4U;
++		values[index] = (uint32_t)at[0] | (uint32_t)at[1] << 8 | (uint32_t)at[2] << 16 | (uint32_t)at[3] << 24;
++	}
++
++	/* Succeeded: the writes. */
++	return write_words(loads, room, count, shared, values, words);
++}
++
++/* Works out the address of the part of a descriptor a request names, in its set's memory, and its offset there. */
+ static int
+ resolve_descriptor(
+ 	const struct powervr_shader_request *request,
+ 	const struct powervr_data_state *state,
+-	uint64_t *address)
++	uint64_t *address,
++	uint32_t *offset)
+ {
+ 	const struct powervr_set_layout *layout;
+-	uint32_t offset;
+ 	int error;
+ 
+ 	/* A set the state has. */
+@@ -520,14 +564,14 @@ resolve_descriptor(
+ 		return EINVAL;
+ 
+ 	/* The part's place, and room for its words in the set. */
+-	error = powervr_set_descriptor_offset(layout, request->binding, request->array_index, request->part, &offset);
++	error = powervr_set_descriptor_offset(layout, request->binding, request->array_index, request->part, offset);
+ 	if (error != 0)
+ 		return error;
+-	if ((uint64_t)offset + (uint64_t)request->words * 4U > layout->bytes)
++	if ((uint64_t)*offset + (uint64_t)request->words * 4U > layout->bytes)
+ 		return EINVAL;
+ 
+ 	/* Succeeded: the set's address plus the place. */
+-	*address = state->set_addresses[request->set] + offset;
++	*address = state->set_addresses[request->set] + *offset;
+ 	return 0;
+ }
+ 
+diff --git a/src/drivers/gpu/powervr/data-program.h b/src/drivers/gpu/powervr/data-program.h
+index fd58fa3ef1..33c96b5fd1 100644
+--- a/src/drivers/gpu/powervr/data-program.h
++++ b/src/drivers/gpu/powervr/data-program.h
+@@ -61,16 +61,34 @@ struct powervr_data_load {
+ 	uint64_t source;
+ };
+ 
++/*
++ * The most words of a push constant or descriptor request the shared
++ * register program writes from the host's copy of the bytes (data
++ * sequencer writes from its constants) instead of copying them from
++ * memory; 0 copies every one (ws270-p007, q1541: a copy from memory
++ * waits for the memory before the pixels it serves, again for each
++ * tile).
++ */
++#ifndef POWERVR_DATA_INLINE_WORDS
++#define POWERVR_DATA_INLINE_WORDS	16U
++#endif
++
+ /*
+  * What the bound state gives the shared register requests: each set's
+  * layout and the device address of its memory, the device addresses of
+  * the push constants' bytes and of the four blend constants, and a
+- * compute task's workgroup id and workgroup count.
++ * compute task's workgroup id and workgroup count.  Set_bytes and
++ * push_bytes are the host's copies of the same bytes (push_size of
++ * them), NULL when the caller has none; a request of up to
++ * POWERVR_DATA_INLINE_WORDS words is written from them.
+  */
+ struct powervr_data_state {
+ 	const struct powervr_set_layout *layouts[POWERVR_DATA_SETS];
+ 	uint64_t set_addresses[POWERVR_DATA_SETS];
++	const uint8_t *set_bytes[POWERVR_DATA_SETS];
+ 	uint64_t push_address;
++	const uint8_t *push_bytes;
++	uint32_t push_size;
+ 	uint64_t blend_address;
+ 	uint32_t workgroup_id[3];
+ 	uint32_t workgroups[3];
+diff --git a/src/drivers/gpu/powervr/render-job.c b/src/drivers/gpu/powervr/render-job.c
+index 5a135b9dc5..3a6ef3770c 100644
+--- a/src/drivers/gpu/powervr/render-job.c
++++ b/src/drivers/gpu/powervr/render-job.c
+@@ -1162,9 +1162,14 @@ job_background(
+ 				  (unsigned)words[0], (unsigned)words[1], (unsigned)words[2], (unsigned)words[3], (unsigned)words[4], (unsigned)words[5]);
+ 		}
+ 
+-		/* The words in the job's memory, and the program that loads them (or writes them as constants for the WRITTEN probe). */
++		/*
++		 * The words in the job's memory, and the program that writes
++		 * them as constants (as a draw's few shared words,
++		 * POWERVR_DATA_INLINE_WORDS, and for the WRITTEN probe) or
++		 * loads them from there.
++		 */
+ 		put_words(memory->general->buffer, GENERAL_LOAD_WORDS, words, POWERVR_RENDER_LOAD_SHARED_WORDS);
+-		if (POWERVR_RENDER_LOAD_PROBE == LOAD_PROBE_WRITTEN) {
++		if (POWERVR_RENDER_LOAD_PROBE == LOAD_PROBE_WRITTEN || POWERVR_DATA_INLINE_WORDS >= POWERVR_RENDER_LOAD_SHARED_WORDS) {
+ 			/* The words as four pairs of constants. */
+ 			for (pair = 0; pair < POWERVR_RENDER_LOAD_SHARED_WORDS / 2U; pair++) {
+ 				loads[pair].kind = POWERVR_DATA_LOAD_WRITE;
+@@ -1438,11 +1443,14 @@ draw_place(
+ 		put_bytes(memory->draw_general->buffer, at, set->bytes, set->layout.bytes);
+ 		state.layouts[slot] = &set->layout;
+ 		state.set_addresses[slot] = memory->draw_general->address + at;
++		state.set_bytes[slot] = set->bytes;
+ 		at += (set->layout.bytes + 15U) & ~15U;
+ 	}
+ 	put_bytes(memory->draw_general->buffer, index * DRAW_SLOT + DRAW_PUSH, draw->push, draw->push_bytes);
+ 	put_words(memory->draw_general->buffer, index * DRAW_SLOT + DRAW_BLEND, blend_zero, 4U);
+ 	state.push_address = general + DRAW_PUSH;
++	state.push_bytes = draw->push;
++	state.push_size = draw->push_bytes;
+ 	state.blend_address = general + DRAW_BLEND;
+ 
+ 	/* The two shared register programs. */
+diff --git a/userland/tests/vkmatrix/main.c b/userland/tests/vkmatrix/main.c
+index 232e13ee91..56168bd9ac 100644
+--- a/userland/tests/vkmatrix/main.c
++++ b/userland/tests/vkmatrix/main.c
+@@ -316,6 +316,10 @@ static VkResult case_perf_load_small(struct vkmatrix *run);
+ static VkResult small_target_case(struct vkmatrix *run, int load);
+ static VkResult case_perf_clear_64(struct vkmatrix *run);
+ static VkResult case_perf_load_64(struct vkmatrix *run);
++static VkResult linear_perf_case(struct vkmatrix *run, int kind);
++static VkResult case_perf_flat_linear(struct vkmatrix *run);
++static VkResult case_perf_texture_linear(struct vkmatrix *run);
++static VkResult case_perf_clear_linear(struct vkmatrix *run);
+ 
+ /* Every case, in the order they run. */
+ static const struct vkmatrix_case cases[] = {
+@@ -368,11 +372,21 @@ static const struct vkmatrix_case cases[] = {
+ 	{ "perf-load-small", case_perf_load_small },
+ 	{ "perf-clear-64", case_perf_clear_64 },
+ 	{ "perf-load-64", case_perf_load_64 },
++	{ "perf-flat-linear", case_perf_flat_linear },
++	{ "perf-texture-linear", case_perf_texture_linear },
++	{ "perf-clear-linear", case_perf_clear_linear },
+ };
+ 
+ /* The clear colour of every case's first pass: dark blue. */
+ static const float background[4] = { 0.0f, 0.0f, 0.5f, 1.0f };
+ 
++/*
++ * The tiling of the perf cases' 1920x1080 target (q1541): OPTIMAL, or
++ * LINEAR while a -linear case runs (set and put back by it), which a
++ * driver cannot compress, as Keiland's scanned-out swapchain images.
++ */
++static VkImageTiling perf_tiling = VK_IMAGE_TILING_OPTIMAL;
++
+ int
+ main(
+ 	int argc,
+@@ -4198,8 +4212,8 @@ perf_case(
+ 		first = perf_geometry(run, kind, &vertices);
+ 	}
+ 
+-	/* The 1920x1080 attachment. */
+-	status = linear_target(run, VK_IMAGE_TILING_OPTIMAL, &layout);
++	/* The 1920x1080 attachment, OPTIMAL unless a case asked for LINEAR (perf_tiling). */
++	status = linear_target(run, perf_tiling, &layout);
+ 	if (status != VK_SUCCESS)
+ 		return status;
+ 
+@@ -4281,7 +4295,8 @@ perf_case(
+ 	}
+ 
+ 	/* The line, and nothing for the shared target's comparison to say. */
+-	snprintf(run->note, sizeof(run->note), "perf %s: %lu us a frame (min %lu us) over %u frames of 1920x1080", names[kind],
++	snprintf(run->note, sizeof(run->note), "perf %s%s: %lu us a frame (min %lu us) over %u frames of 1920x1080", names[kind],
++		 perf_tiling == VK_IMAGE_TILING_LINEAR ? "-linear" : "",
+ 		 (unsigned long)(total / PERF_FRAMES / 1000U), (unsigned long)(least / 1000U), (unsigned)PERF_FRAMES);
+ 	memcpy(run->expected, run->pixels, sizeof(run->expected));
+ 	run->tolerance = 0;
+@@ -4990,3 +5005,70 @@ case_perf_load_64(
+ 	/* Succeeded: the case ran. */
+ 	return VK_SUCCESS;
+ }
++
++/* Runs a perf case on a LINEAR 1920x1080 target (perf_tiling), then puts the tiling back. */
++static VkResult
++linear_perf_case(
++	struct vkmatrix *run,
++	int kind)
++{
++	VkResult status;
++
++	/* The case on the LINEAR target. */
++	perf_tiling = VK_IMAGE_TILING_LINEAR;
++	status = perf_case(run, kind);
++	perf_tiling = VK_IMAGE_TILING_OPTIMAL;
++	if (status != VK_SUCCESS)
++		return status;
++
++	/* Succeeded: the timing is printed. */
++	return VK_SUCCESS;
++}
++
++/* perf-flat-linear: perf-flat on a LINEAR target. */
++static VkResult
++case_perf_flat_linear(
++	struct vkmatrix *run)
++{
++	VkResult status;
++
++	/* The flat quad on the LINEAR target. */
++	status = linear_perf_case(run, PERF_FLAT);
++	if (status != VK_SUCCESS)
++		return status;
++
++	/* Succeeded: the case ran. */
++	return VK_SUCCESS;
++}
++
++/* perf-texture-linear: perf-texture on a LINEAR target. */
++static VkResult
++case_perf_texture_linear(
++	struct vkmatrix *run)
++{
++	VkResult status;
++
++	/* The textured quad on the LINEAR target. */
++	status = linear_perf_case(run, PERF_TEXTURE);
++	if (status != VK_SUCCESS)
++		return status;
++
++	/* Succeeded: the case ran. */
++	return VK_SUCCESS;
++}
++
++/* perf-clear-linear: perf-clear on a LINEAR target. */
++static VkResult
++case_perf_clear_linear(
++	struct vkmatrix *run)
++{
++	VkResult status;
++
++	/* The clear on the LINEAR target. */
++	status = linear_perf_case(run, PERF_CLEAR);
++	if (status != VK_SUCCESS)
++		return status;
++
++	/* Succeeded: the case ran. */
++	return VK_SUCCESS;
++}

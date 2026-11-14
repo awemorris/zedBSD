@@ -1,0 +1,139 @@
+diff --git a/plan/ws129/codex-ci-queue.md b/plan/ws129/codex-ci-queue.md
+index b1abade081..de0295474f 100644
+--- a/plan/ws129/codex-ci-queue.md
++++ b/plan/ws129/codex-ci-queue.md
+@@ -1,14 +1,18 @@
+ # Codex CI修正 Queue
+ 
+-Cycle: ci-nasm-20261010
++Cycle: ci-nasm-integration-20261010
+ Status: finished
+ Owner: 本セッション、branch codex/fix-ci-nasm、独立worktree ci-nasm、base/main 39ebb1b06。共有master/Queue/cacheの書き手はQ1。
+-Approval: 最新ユーザー「ghコマンドが使えるので、GitHubのCIビルドエラーを解決してください」。原因のあるCI dependencyに限定して修正し、workflow reviewと近接の短い確認を行う。main merge/pushはこの依頼に明示されていないため、修正済みcommitを示して最後に確認する。
++Approval: 最新ユーザーが、具体的commit a5e1a182f のmain統合・push・修正SHAのCI確認の質問に「mainへ統合・pushしてCIを確認」と明示承認。以前の実装Queueは[履歴](history/ci-nasm-20261010.md)。
++
++Scope revision: ユーザー「CIは30分以上かかるので、監視はいらないです」で監視/成功確認を撤回。main統合/pushとCI開始read-backまででfinish。
+ 
+ | Attempt | Phase | Scope | Status | Dependency |
+ | --- | --- | --- | --- | --- |
+-| ci-nasm-i01 | [ws129-p014](phase014/phase.md) | 失敗CIのnasm dependency補完、YAML/shell/assemblyの限定確認、WIP commit | cleared | GitHub run38047175690/job114198937732の実ログ |
++| ci-nasm-integration-i01 | [ws129-p015](phase015/phase.md) | a5e1a182fをmain統合・非force push、CI開始read-back、監視はuser指示で撤回 | cleared | p014の検証済みsource a5e1a182f |
++
++Graph: verified p014 source→main統合→push→修正SHAのCI確認。toolchain・packageの設定・releaseの公開を変更しない。既存Photos未統合branchも対象外。GitHub計画公開は保留、次Queueは自動実行しない。
+ 
+-Graph: 実ログ→i01。toolchain・packageの設定・releaseの公開を変更しない。既存Photos未統合branchも対象外。GitHub計画公開は保留、次Queueは自動実行しない。
++Checkpoint: fetch origin/commit messageチェック後、a5e1a182fをmainへfast-forward/非force push済み。main clean/remote SHA一致をread-back。[修正SHAのrun38058208105](https://github.com/awemorris/zedBSD/actions/runs/38058208105) in-progress、remote greenは確認後に記録。
+ 
+-Outcome: nightly apt listへのnasm追加1行、有限host確認PASS、main/push前のレビュー可能なWIP成果を作成。[証拠](tests/ci-nasm-20261010.md)。残りは今回変更のmain統合/pushの明示承認、修正SHAでGitHub CIの確認。remote greenは未確認。archiveは[同cycle履歴](history/ci-nasm-20261010.md)。
++Outcome: main/push/CI開始確認を完了。local監視を終了しGitHub CIは継続、remote greenは未確認。userの監視撤回でselected itemをcleared。[履歴](history/ci-nasm-integration-20261010.md)。次Queueは自動実行しない。
+diff --git a/plan/ws129/history/ci-nasm-integration-20261010.md b/plan/ws129/history/ci-nasm-integration-20261010.md
+new file mode 100644
+index 0000000000..bd246fa8d5
+--- /dev/null
++++ b/plan/ws129/history/ci-nasm-integration-20261010.md
+@@ -0,0 +1,10 @@
++# ci-nasm-integration-20261010 history
++
++Status: finished
++Owner: Codex / codex/fix-ci-nasm、source a5e1a182f。
++Exact approval: a5e1a182fのmain統合・push・CI成功確認の質問へユーザー「mainへ統合・pushしてCIを確認」。
++Scope revision: 続くユーザー「CIは30分以上かかるので、監視はいらないです」で監視/成功確認を撤回。main統合/pushとCI開始read-backまででfinish。
++
++ci-nasm-integration-i01 / ws129-p015: cleared。origin fetchでmainと一致、push範囲1commitはWIPのみ/Co-Authored-By 0。main fast-forward/非force push exit0、remote SHA一致/clean main確認。[修正SHAのCI run38058208105](https://github.com/awemorris/zedBSD/actions/runs/38058208105) をread-back。
++
++local gh watchをSIGTERMで停止・exit143、GitHub上のCIは継続。CI Build/全workflow成功は未確認で、user再依頼時だけ結果を調査する。手動release/tag変更無し。Photos未統合branch無し。closing記録は担当branchへ保存して余分なpushによるCI再実行を増やさない。共有master/Queue/cache/GitHub計画投影はQ1。WS129全体のrelease acceptanceは未完。次Queue開始無し。
+diff --git a/plan/ws129/phase014/phase.md b/plan/ws129/phase014/phase.md
+index 97401b2850..fd2002638b 100644
+--- a/plan/ws129/phase014/phase.md
++++ b/plan/ws129/phase014/phase.md
+@@ -3,7 +3,7 @@
+ Parent: [../ws.md](../ws.md)
+ Status: cleared
+ Disposition: normal
+-Queue: [ci-nasm-20261010](../codex-ci-queue.md)
++Queue: [ci-nasm-20261010 history](../history/ci-nasm-20261010.md)
+ Approval: 2026-10-10 最新ユーザー「ghコマンドが使えるので、GitHubのCIビルドエラーを解決してください」。
+ Scope / Criteria: GitHubの直近失敗CIをghで確認し、原因のあるnightly dependencyを修正。YAMLとshell syntax、nasmと実package設定/assembly probeの整合を確認、diff review、WIP commitでmain/push前の具体的成果を作る。remote CI greenをまだ主張しない。
+ Prerequisite: read-only gh取得済み、main/base39ebb1b06 clean。WS129 p004のrelease workflowはnasm導入済み。
+@@ -18,3 +18,5 @@ Integration: main merge/pushの具体的承認を最後に確認。共有master/
+ cleared（workflow修正/有限host確認/commit準備の限定scope）。変更はnightlyのapt listにnasm追加1行。[検証証拠](../tests/ci-nasm-20261010.md)。YAML読み込みとbash -n、nasm2.16.03のELF64/AVX2 assembly warning0、git diff --check PASS。既存cross libavcodec buildのconfig/logで同じnasm使用と成功をread-only照合。C/source/toolchain変更無し、全体image rebuild無し。
+ 
+ main/pushは明示承認待ちで未実施。現mainのremote run38057778279はtoolchain stepがin-progress、修正後CI結果ではない。remote CI greenの条件をこの有限Phaseで達成したとは主張しない。承認された場合は規定push前チェック→統合/push→修正SHAのCI確認へ続く。WS全体のrelease acceptanceは維持。
++
++Follow-up: ユーザー「mainへ統合・pushしてCIを確認」で統合を承認。過去のlocal clearanceを保持し、[p015](../phase015/phase.md)でremote実結果を確認する。
+diff --git a/plan/ws129/phase015/phase.md b/plan/ws129/phase015/phase.md
+new file mode 100644
+index 0000000000..db1611e5cd
+--- /dev/null
++++ b/plan/ws129/phase015/phase.md
+@@ -0,0 +1,20 @@
++# ws129-p015: nasm修正のmain統合・push・CI確認
++
++Parent: [../ws.md](../ws.md)
++Status: cleared
++Disposition: normal
++Queue: [ci-nasm-integration-20261010](../codex-ci-queue.md)
++Approval: ユーザーがa5e1a182fのmain統合・GitHub push・CI成功確認の具体的質問に「mainへ統合・pushしてCIを確認」と明示承認。Photos未統合commitは含めない。
++Scope / Criteria: origin fetch/clean/sync確認、push commit messageがWIPのみ/Co-Authored-By無しを確認しmain fast-forward・非force push。対象SHAのCI Buildとworkflow結果をghで確認し、実失敗の場合は実ログ/残り/再開条件を保存する。nightly公開は既存workflowの設定どおり、手動release/tag操作無し。
++
++Scope revision: 最新ユーザー「CIは30分以上かかるので、監視はいらないです」でCI監視/成功確認を今回条件から撤回。main統合/pushとCI開始のread-backでclearedとし、成功結果は未確認と明記する。
++Prerequisite: p014のlocal検証済みsource a5e1a182f、main/origin/main 39ebb1b06一致。
++Standards / bounds: AGENTS/Guardrailのgit/担当境界と既存CI仕様。C変更無し、余分なlocal image/QEMU/回帰無し。remote runを短いgh readと短い待機で確認する。shared Master/Queue/cacheはQ1、GitHub計画publicationは保留。
++
++## 統合/push checkpoint
++
++origin fetch後main/origin一致、push対象1commitのmessageはWIPちょうど/Co-Authored-By 0。`git merge --ff-only a5e1a182f`、clean main read-back、`git push origin main`ともexit0。remote mainをgh APIで読み直し `a5e1a182f5f308158c0e2f10d198f4cb798d6428` と一致。[修正SHAのCI run38058208105](https://github.com/awemorris/zedBSD/actions/runs/38058208105) がin-progress。成功確認を残す。
++
++## ci-nasm-integration-i01 outcome
++
++cleared（最新userの監視不要を反映したscope）。ローカルgh run watchだけをSIGTERMで終了しexit143をread-back、GitHubのCI cancel/restartは行っていない。最後に得た状態はdependency step success/toolchain step in-progress、Build成功は未確認。source a5e1a182f はmain/originへ統合/push済み・clean。今回のclosing記録はown branchにWIP保存し、同じsourceで不要なCI再実行を増やすpushは行わない。共有投影/GitHub計画公開はQ1。ユーザーがCI結果の調査を再依頼した時に実結果を読む。
+diff --git a/plan/ws129/tests/ci-nasm-20261010.md b/plan/ws129/tests/ci-nasm-20261010.md
+index 375e790825..1870fb1de8 100644
+--- a/plan/ws129/tests/ci-nasm-20261010.md
++++ b/plan/ws129/tests/ci-nasm-20261010.md
+@@ -40,3 +40,13 @@ private log `/tmp/zedbsd-ci-job-114098030955.log` SHA256 `621fb44b08ac7f4ada22cb
+ 修正はWIP commitに保存、main/pushは未実施。AGENTSの「pushはユーザーが指示した時だけ」に従い、具体的な成果を示してmain統合とpushを確認する。Photos削除の未統合branchは含めない。mainで進行中のrun38057778279は最後のread時点でLLVM cache step in-progressであり、今回の修正を含まない。
+ 
+ 承認後はremote mainをfetchし他人の変更を保持、push範囲の全commit messageが正確にWIPでCo-Authored-By無しと確認、非force pushのみ。そのSHAのCIが成功した時にのみremote解決を報告する。共有master/Queue/cache・GitHub計画の投影はQ1、WS129全体のrelease acceptanceは未完。
++
++## 承認後の実結果
++
++ユーザー「mainへ統合・pushしてCIを確認」で承認。fetch後main/origin一致、push1commitのWIP/付記なし確認、fast-forward/非force pushともexit0、remote mainはa5e1a182fと一致。[CI run38058208105](https://github.com/awemorris/zedBSD/actions/runs/38058208105) 開始をread-back。
++
++続いてユーザー「CIは30分以上かかるので、監視はいらないです」で監視/成功確認を撤回。local gh watchを終了（exit143）し、GitHub CIはcancelしない。最後のlocal表示はdependencies success/toolchain in-progress。CI成功未確認として記録し今回作業を終了。closing recordsはown branchに保存、追加push/CI rerun無し。
++
++## ユーザーの失敗報告の照合
++
++ユーザー「あ、CIが失敗したようです」で再照合。失敗したrun38057778279は修正前SHA39ebb1b06。job114229670784の実ログでも14:05:56Zにnasm不足→libavcodec configure Error1、14:06:18Zにjob exit2。新しいエラーではなく今回修正済みの原因だった。修正SHA a5e1a182fのrun38058208105は依存導入success/LLVM cache step in-progressで、失敗していない。userの監視不要は維持し、継続poll/cancel/rerun/pushは行わない。
+diff --git a/plan/ws129/ws.md b/plan/ws129/ws.md
+index 624ae6442a..d337854339 100644
+--- a/plan/ws129/ws.md
++++ b/plan/ws129/ws.md
+@@ -9,7 +9,7 @@ Related Milestones: MG003, MG006
+ Objectives: O1, O2
+ Parent: [Master](../master.md)
+ Focused goal: fg019（ベータ1、2026-10-17）
+-Queue: [Codex CI修正](codex-ci-queue.md) finished、main/push承認待ち。
++Queue: [Codex CI統合/確認](codex-ci-queue.md) finished、main/push完了、CI監視はuser指示で撤回。
+ Resume point: [p001](phase001/phase.md)（release の定義: 版の付け方、配布物、CI の release、release notes・既知の問題・license の一覧の作り方、凍結と最終回帰・実機の確認の日程、planned）。版の名前はユーザーの判断。
+ 凍結は無し（2026-10-02 user（作業開始の指示）「凍結はしません。できたところまででベータ1にします。安定化はベータの最後の方のバージョンで行います。」）。p001 の日程案（10/13 凍結）を置き換える。デモの image は CI の設定を土台に変える（同日 user）。
+ 2026-10-02 user（リリースの流れ）:「CIはPrereleaseを生成、それをダウンロードして動作確認した私が、PrereleaseからLatest Releaseに手動昇格します。」→ CI の release の job はベータ1 の版の Prerelease を作る（nightly とは別の tag）。ユーザーが download して動作確認し、手で Latest Release に昇格する。エージェントは昇格・公開をしない。版の名前・tag の形・配布物（Windows の zip を載せるか）は未決。
+@@ -58,7 +58,8 @@ push・GitHub release の公開はユーザーの指示で行う。
+ | [p008](phase008/phase.md) | 公開（tag、CI の実行、配布物の確認）。ユーザーの指示でだけ | planning | p007、ユーザーの公開の指示 | 1h |
+ | [p011](phase011/phase.md) | 試験の QEMU を KVM に統一（`plan/tools/guest/qemu-accel.sh`）、image の build の並列の数を 16 に（`plan/tools/guest/jobs.sh`） | cleared（q646、T1-038 PASS） | — | 2h |
+ | [p012](phase012/phase.md) | REmacs のコマンド名を `/bin/emacs` に（package 名も emacs、`/usr/bin/noct` の link、CI config・license の生成物・remacs-guest.sh）。2026-10-04 user | cleared（T1-082、試験の誤りは 3876079 で修正） | — | 1h |
+-| [p014](phase014/phase.md) | nightly CIのlibavcodec configure失敗: nasm依存を補完 | cleared（workflow/host、main/push待ち） | 実CIログ・p004 workflow | 短い限定修正 |
++| [p014](phase014/phase.md) | nightly CIのlibavcodec configure失敗: nasm依存を補完 | cleared（workflow/host、main/push完了） | 実CIログ・p004 workflow | 短い限定修正 |
++| [p015](phase015/phase.md) | nasm修正のmain統合・push・CI開始確認 | cleared（監視はuser撤回、CI成功未確認） | p014 / a5e1a182f | remote CI開始のみ |
+ 
+ ## 2026-10-10 nightly CI修正の追加
+ 
+@@ -66,4 +67,8 @@ push・GitHub release の公開はユーザーの指示で行う。
+ 
+ p014 cleared、[証拠](tests/ci-nasm-20261010.md)。nightly apt listのnasm追加1行と限定host確認を完了。WS全体はincomplete、main/pushと修正SHAのCI確認は明示承認を待つ。共有投影・GitHub計画公開は保留。
+ 
++Follow-up: ユーザーがa5e1a182fの「mainへ統合・pushしてCIを確認」を承認。p015/新有限Queueを追加して統合とremote結果を確認する。Photos削除branchを混ぜず、WS全体のrelease acceptanceは保持。
++
++Final: source a5e1a182fをmainへfast-forward/非force push、remote main/CI開始read-back済み。ユーザーがCI監視を撤回したためlocal監視を終了しp015 cleared、GitHub CIは継続。[履歴](history/ci-nasm-integration-20261010.md)。CIの成功は未確認、WS全体のrelease acceptanceは保持。closing記録はown branchに保存、共有投影はQ1。
++
+ 日程の案（p001 で確定）: 10/13 機能の凍結の候補 → 10/14 RC → 10/14〜15 最終回帰 → 10/15〜16 実機の確認 → 10/17 公開。

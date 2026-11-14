@@ -1,0 +1,13 @@
+diff --git a/src/drivers/gpu/powervr/firmware-boot.c b/src/drivers/gpu/powervr/firmware-boot.c
+index c3ca027128..39d1e8167c 100644
+--- a/src/drivers/gpu/powervr/firmware-boot.c
++++ b/src/drivers/gpu/powervr/firmware-boot.c
+@@ -233,7 +233,7 @@ static void watch_thread(void *argument);
+  * and logs it; a diagnostic that delays the first jobs by a second.
+  */
+ #ifndef POWERVR_MEASURE_CORE_CLOCK
+-#define POWERVR_MEASURE_CORE_CLOCK	0
++#define POWERVR_MEASURE_CORE_CLOCK	1
+ #endif
+ #define CORE_TIMER_REGISTER		0x0160U
+ #define CORE_TIMER_MASK			0x0000FFFFFFFFFFFFULL

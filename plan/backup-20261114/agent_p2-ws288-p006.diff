@@ -1,0 +1,2488 @@
+diff --git a/include/drivers/platform/zybo/pl-memory.h b/include/drivers/platform/zybo/pl-memory.h
+new file mode 100644
+index 0000000000..9fc3139fb6
+--- /dev/null
++++ b/include/drivers/platform/zybo/pl-memory.h
+@@ -0,0 +1,44 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The memory of the programmable logic's blocks on the ZYBO: the range of
++ * DDR the board's device tree reserves for them (/reserved-memory, the
++ * node gpu@... or the one compatible with "amaterrace,gpu-memory"), which
++ * the kernel's page allocator never hands out.  The kernel reaches it only
++ * through one uncached view, made once at boot and kept for the life of
++ * the system: a block written into the logic later finds the same memory,
++ * whichever driver holds the block.
++ */
++
++#ifndef KERN_DRIVERS_PLATFORM_ZYBO_PL_MEMORY_H
++#define KERN_DRIVERS_PLATFORM_ZYBO_PL_MEMORY_H
++
++#include <stdint.h>
++
++/*
++ * The reserved range: its physical address (the address the blocks use),
++ * its size, and the kernel's uncached view of it.
++ */
++struct drv_zybo_pl_memory {
++	uint64_t physical;
++	uint64_t bytes;
++	void *mapped;
++};
++
++/*
++ * Finds the reserved range in the device tree and maps it uncached.
++ * Returns 0, ENOENT when the tree reserves none, or why the view failed.
++ */
++int drv_zybo_pl_memory_init(void);
++
++/*
++ * Copies out the reserved range.  Returns 0, or ENODEV when there is none.
++ */
++int drv_zybo_pl_memory_get(struct drv_zybo_pl_memory *memory);
++
++#endif
+diff --git a/include/drivers/platform/zybo/zynq-devcfg.h b/include/drivers/platform/zybo/zynq-devcfg.h
+index b0950a48b0..06d6433b08 100644
+--- a/include/drivers/platform/zybo/zynq-devcfg.h
++++ b/include/drivers/platform/zybo/zynq-devcfg.h
+@@ -50,6 +50,32 @@
+  */
+ #define DRV_ZYNQ_DEVCFG_SYNC_SEARCH		4096U
+ 
++/* How many block drivers can be registered with the device. */
++#define DRV_ZYNQ_PL_BLOCK_MAX			4U
++
++/*
++ * One kernel driver of a block the programmable logic may hold, found by
++ * the first word of the block's window.
++ *
++ * The device calls attach when an enabled logic's window starts with
++ * magic, with the device's lock held: the driver takes the window (mapped
++ * as device memory), its physical address and size, and the interrupt,
++ * whose handler the device has removed so that the driver installs its
++ * own.  A nonzero return leaves the block to /dev/fpga0.  Before the logic
++ * is written again or disabled the device asks busy (nonzero refuses:
++ * the driver's device is in use), then detach, which quiets the block,
++ * withdraws the driver's device and removes its interrupt handler; EBUSY
++ * from detach means the withdrawal waits for an open to close and is
++ * asked again.  The table is borrowed for the life of the system.
++ */
++struct drv_zynq_pl_block {
++	const char *name;
++	uint32_t magic;
++	int (*attach)(volatile uint8_t *window, uint64_t window_physical, size_t window_bytes, int irq);
++	int (*busy)(void);
++	int (*detach)(void);
++};
++
+ /*
+  * Starts the driver of /dev/fpga0: maps the configuration interface,
+  * installs the logic's interrupt and publishes the device.  The logic
+@@ -57,6 +83,12 @@
+  */
+ int drv_zynq_devcfg_attach(void);
+ 
++/*
++ * Registers a driver of a block the logic may hold.  Returns 0, ENODEV
++ * when /dev/fpga0 did not start, or ENOSPC when the table is full.
++ */
++int drv_zynq_pl_block_register(const struct drv_zynq_pl_block *block);
++
+ /*
+  * Reports whether a request to set and clear bits of CTRL stays inside
+  * DRV_ZYNQ_DEVCFG_CTRL_ALLOWED and asks for something: 1 when it does.
+diff --git a/include/uapi/fpga.h b/include/uapi/fpga.h
+index 0dba15173d..d34091e4cc 100644
+--- a/include/uapi/fpga.h
++++ b/include/uapi/fpga.h
+@@ -35,6 +35,7 @@
+ #define FPGA_STATUS_ENABLED		0x00000004U	/* level shifters open, resets released, window usable */
+ #define FPGA_STATUS_PROGRAMMING		0x00000008U	/* a bitstream is being written */
+ #define FPGA_STATUS_EMULATED		0x00000010U	/* the emulator's model: the waits on the logic were skipped */
++#define FPGA_STATUS_ATTACHED		0x00000020U	/* a kernel driver holds the block (writes and waits refused) */
+ 
+ /* What fpga_status.error says of the last FPGA_PROGRAM: 0, or an errno. */
+ 
+@@ -87,4 +88,17 @@ struct fpga_irq_wait {
+ #define FPGA_REG_WRITE		_IOW(KERN_FPGA_IOC_GROUP, 5, struct fpga_reg)
+ #define FPGA_IRQ_WAIT		_IOWR(KERN_FPGA_IOC_GROUP, 6, struct fpga_irq_wait)
+ 
++/*
++ * A kernel driver of the block the logic holds (the GPU's, WS288) takes
++ * the block when the logic is enabled and its window's first word names
++ * the driver.  While it holds the block, FPGA_REG_WRITE and FPGA_IRQ_WAIT
++ * answer EBUSY (FPGA_REG_READ still reads), and FPGA_PROGRAM and
++ * FPGA_DISABLE first give the block back, which they cannot while the
++ * driver's device is open (EBUSY).  FPGA_BLOCK_DETACH gives the block
++ * back and leaves the logic enabled, for a test that drives the registers
++ * itself; FPGA_BLOCK_ATTACH offers an enabled logic to the drivers again.
++ */
++#define FPGA_BLOCK_DETACH	_IO(KERN_FPGA_IOC_GROUP, 7)
++#define FPGA_BLOCK_ATTACH	_IO(KERN_FPGA_IOC_GROUP, 8)
++
+ #endif
+diff --git a/include/uapi/gpu-op.h b/include/uapi/gpu-op.h
+index 3467d545a0..8ae8586a4f 100644
+--- a/include/uapi/gpu-op.h
++++ b/include/uapi/gpu-op.h
+@@ -2010,7 +2010,34 @@ enum gpu_op {
+ 	 * the buffer is submitted on the video decode queue family.
+ 	 * Order: inside a coding scope (GPU_OP_CMD_BEGIN_VIDEO_CODING).
+ 	 */
+-	GPU_OP_CMD_DECODE_VIDEO = 0x1000d
++	GPU_OP_CMD_DECODE_VIDEO = 0x1000d,
++
++	/*
++	 * The GHCI commands (WS288): the generic driver of a GPU with the GPU
++	 * Host Controller Interface (src/drivers/gpu/ghci/, the GHCI 1.0 draft
++	 * in amaterrace-gpu docs/ghci.md section 9) writes them into the GPU's
++	 * command ring as class V packets for the GPU's command processor
++	 * firmware, which decodes them; libvulkan never sends them.  The
++	 * driver makes SESSION_OPEN, SESSION_CLOSE, MEMORY (in place of
++	 * GPU_OP_ALLOCATE_MEMORY), PROGRAM and FRAME itself.
++	 *
++	 * GPU_OP_GHCI_NATIVE alone is sent by userland, and only by root on a
++	 * kernel built with CONFIG_GHCI_NATIVE (the test images): through
++	 * GPU_COMMAND, [u32 number][u32 flags 0][u32 count][count class N
++	 * packets of the GHCI ring], which the driver checks (the standard
++	 * micro-operations of a test, every address inside the session's
++	 * memory), gives the session's job tag and copies into the ring
++	 * followed by a fence of its own.  The address of a blob of the GHCI
++	 * device is its resource id.  Sent by: userland/tests/ghci-blit.
++	 * Decoded by: ghci/native.c: ghci_native_command, ghci/check.c:
++	 * ghci_native_prepare.
++	 */
++	GPU_OP_GHCI_SESSION_OPEN = 0x10100,
++	GPU_OP_GHCI_SESSION_CLOSE = 0x10101,
++	GPU_OP_GHCI_MEMORY = 0x10102,
++	GPU_OP_GHCI_PROGRAM = 0x10103,
++	GPU_OP_GHCI_NATIVE = 0x10104,
++	GPU_OP_GHCI_FRAME = 0x10105
+ };
+ 
+ #endif
+diff --git a/plan/ws288/phase006/phase.md b/plan/ws288/phase006/phase.md
+new file mode 100644
+index 0000000000..ed791fc57f
+--- /dev/null
++++ b/plan/ws288/phase006/phase.md
+@@ -0,0 +1,49 @@
++<!-- awesome-plan project=zedbsd record=ws288-p006 -->
++
++# WS288 p006 zedBSD の GHCI の driver（ZYBO）: devcfg の block の登録、pl-memory、ghci の GPU と DC の device、ghci-blit・ghci-display・ghcictl
++
++- 親: [ws.md](../ws.md)。設計: [design.md](../design.md) §2（GHCI）、§5.2、§6.1〜§6.5、§6.8、§8 の p006 の行、U10・U26（推しで決定済み）。
++- 担当: P2（2026-10-24、Q1 の依頼）。worktree `/home/awe/zedBSD-worktrees/p2-ws288-p006`、branch `agent/p2-ws288-p006`（base main 2f4777fcb）。
++- 状態: **in-progress（途中で中断）**。2026-10-24 ユーザーの指示（週の利用の上限）で Q1 がラップアップを依頼。下の「済み」まで commit、残りは「再開点」。
++- 受け入れ（design §8）: 板で `ghci-blit` PASS、`ghci-display` の画面（目視はユーザーの一覧へ）、detach/reattach の試験（session を開いたままの `fpgaload` が EBUSY、閉じた後に通る）、QEMU armv7-virt の回帰（T1）。zybo・armv7-virt の build warning 0（共有の file を変えたので amd64・rpi4 も）。
++
++## 計画（Q1 ACK 2026-10-24）
++
++1. devcfg（`zynq-devcfg.c`）に PL の block の driver の登録: `{name, magic, attach(window, phys, bytes, irq), busy(), detach()}`。logic を enable した後に窓の offset 0 が magic なら attach、IRQ 61 は devcfg の handler を外して block の driver に渡す。block が attach している間 `FPGA_REG_WRITE`・`FPGA_IRQ_WAIT` は EBUSY（READ は可）。`FPGA_PROGRAM`・`FPGA_DISABLE` は先に block を返させる: `busy()` なら EBUSY、`detach()` の EBUSY は 5 s まで 10 ms ごとに retry。新しい ioctl `FPGA_BLOCK_DETACH`・`FPGA_BLOCK_ATTACH`（fpgareg だけの板の script を driver 入りの kernel で使い続けるため。`fpgaload --detach/--attach` を足す）、status の flag `FPGA_STATUS_ATTACHED`。
++2. `pl-memory.c`: DTB の `/reserved-memory` の `compatible = "amaterrace,gpu-memory"`（無ければ名前 `gpu@…`）を `kern_pmem_map_uncached` で一度だけ uncached に map し、system の寿命で持つ。`gpu.mem=` の予備は boot parameter の key の追加（`kern/boot.c`）が要るので作らない（予約が無い board では GHCI は attach しない）。
++3. `src/drivers/gpu/ghci/`: `hcr.h`・`packets.h`（amaterrace-gpu 903f861 の写し）、`ghci-check.h`/`check.c`（純粋な計算: fence の比較、ring の空きと詰め物、EXTCAP の走査、GPU address の first-fit の allocator、BLT の SET_REG/BLIT の packet、native の stream の検査）、`ghci.h`（device・session・allocation・display の構造、file の間の API）、`ghci.c`（attach/detach/busy、session と tag、ops の表: GPU は RESOURCE|BLOB|TRANSFER|MAPPING（+COMMAND は native の build だけ）、DC は RESOURCE|TRANSFER|MAPPING|DISPLAY|DISPLAY_EVENTS、driver_name "ghci:AMAT:ATG1"/"ghci-dc:AMAT:ATDC"、blob の resource_id = GPU address）、`zybo-attach.c`（devcfg への登録と pool の受け渡し）、`cp.c`（RESET → aperture → ring 64 KiB → fence page → IRQ_ENABLE → RUN、submit の後ろに driver の FENCE、IRQ で completed、service thread（system の寿命、fault の回復 = RESET と全 fence の完了、遅延の解放）、detach は最後の fence を待って HALT → HALTED・AXI_IDLE）、`memory.c`（session の allocation、resource_destroy は session の最後の fence が過ぎるまで遅延、close は fence を 2 s 待って過ぎなければ reset してから解放）、`blit.c`（新しい allocation の 0 埋めを BLT の FILL で: driver 自身の ring・fence・IRQ の道が native の無い build でも通る）、`native.c`（`CONFIG_GHCI_NATIVE` の build だけ、root だけ、weak symbol で COMMAND を名乗る）、`jobs.c`・`capset.c`（host 試験だけ、配線は vk/ の p019）、`display/display.c`（640×480・1280×720、2 枚の driver の frame に copy して FB_NEXT と FLIP_DONE、lease 1 つ、events は 1 固定）。lock の順: device の lock → cp_lock、IRQ は irq_lock（`irq_live` で detach 後の handler を無害にする）。
++4. userland: `userland/base/ghcictl`（status = node の driver_name と `/dev/fpga0` の READ で HCR、fw-load は stub）、`userland/tests/ghci-blit`（blob を mmap、native で fill32・copy32・fill16・重なる copy、自分の FENCE を poll、0 埋めの確認、ring の wrap の 300 回、不正な stream の EINVAL）、`userland/tests/ghci-display`（color bar・gradient・白枠を present、--hold）。試験の image の config は `plan/ws288/tests/config-ghci.mk`（CONFIG_GHCI_NATIVE=y）。host 試験 `tests/ghci-host-test.c`。
++5. 共有の file: top の Makefile（`CONFIG_GHCI_NATIVE ?= n`）、`platform/armv7/zybo.mk`・`userland.mk`、`src/kern/platform/zybo.c`（devcfg の後に pl-memory と ghci の登録）、`include/uapi/fpga.h`・`gpu-op.h`、`config/ci/config-zybo.mk`（ghcictl）、`plan/tools/zybo/ghci-*-board.py`（load の後に `fpgaload --detach`）。
++
++## 済み（commit 済み、この attempt）
++
++| file | 中身 | 確認 |
++| --- | --- | --- |
++| `include/uapi/fpga.h` | `FPGA_STATUS_ATTACHED`、`FPGA_BLOCK_DETACH`(7)・`FPGA_BLOCK_ATTACH`(8) | 下の compile |
++| `include/drivers/platform/zybo/zynq-devcfg.h` | `struct drv_zynq_pl_block`、`drv_zynq_pl_block_register()` | 同上 |
++| `src/drivers/platform/zybo/zynq-devcfg.c` | 計画 1 の全部（登録、attach_block、release_block、take_back_interrupt、2 つの ioctl、WRITE/IRQ_WAIT の EBUSY、wait 中の受け渡しで EBUSY） | armv7 の clang（共有 `build/llvm`、zybo の flag、`-Wall -Wextra -Werror`）で compile warning 0。**link・板は未実施**。まだ登録する driver が無いので動作は従来と同じ（fpgaload の `--detach/--attach` は未作成） |
++| `include/drivers/platform/zybo/pl-memory.h`・`src/drivers/platform/zybo/pl-memory.c` | 計画 2 | compile warning 0。**zybo.mk に未登録・未呼び出し** |
++| `plan/ws288/tests/zybo-gpu-sd.dts` | `compatible = "amaterrace,gpu-memory"` を追加 | dtb の build は未実施 |
++| `include/uapi/gpu-op.h` | `GPU_OP_GHCI_SESSION_OPEN`(0x10100)〜`GPU_OP_GHCI_FRAME`(0x10105) を enum に | **amd64・rpi4 の build 未実施**（enum の switch の -Wswitch を確かめる要） |
++| `src/drivers/gpu/ghci/hcr.h`・`packets.h` | amaterrace-gpu 903f861 の写し（先頭に出所の注記、本文は diff で一致を確認） | — |
++| `src/drivers/gpu/ghci/ghci-check.h`・`check.c` | 計画 3 の純粋な部分の全部 | compile warning 0。host 試験は未作成 |
++| `src/drivers/gpu/ghci/ghci.h` | device・session・allocation・display の構造と API の宣言 | まだどの .c も include していない（未 compile） |
++
++未作成: `ghci.c`・`zybo-attach.c`・`cp.c`・`memory.c`・`blit.c`・`native.c`・`state.c`（BLT の packet は `check.c` の `ghci_state_blit` に入れたので不要の見込み）・`jobs.c`・`capset.c`・`display/display.c`、build の配線、userland の 3 つ、host 試験、fpgaload の `--detach/--attach`、板の script の追従。
++
++## 再開点
++
++1. `ghci.c`（ops の表と attach/detach）→ `cp.c` → `memory.c` → `blit.c` → `zybo-attach.c` の順に書き、`ghci.h` の宣言に合わせる。
++2. 配線: `platform/armv7/zybo.mk` に `pl-memory.c`・`ghci/*.c`・`gpu.c`/`gpu-fence.c`（riscv64 の visionfive2 と同じ `filter-out $(KERN_GPU_SOURCES)` の形）、`ifeq ($(CONFIG_GHCI_NATIVE),y)` で `native.c`。`zybo.c` の `kern_platform_refresh_devices` で devcfg の後に `drv_zybo_pl_memory_init()` と ghci の登録。
++3. `display/display.c`（amdrdna の `present.c` の present/claim/wait の形が雛形）。
++4. userland（`userland/tests/gpu-bars` が雛形、`ARMV7_ROOT_PL_COMMANDS` に足す）、`tests/ghci-host-test.c`（`tests/zynq-devcfg-host-test.c` の形）、`fpgaload --detach/--attach`。
++5. build: worktree に `build/llvm` の読み取り専用の symlink が要る（make が `$(CURDIR)/build/llvm/bin/clang` を使う。今回は直接 clang を呼んで compile だけ確かめた）。`make ZEDBSD_CONFIG=config/ci/config-zybo.mk BUILD=build/p006 build/p006/vmunix`、armv7-virt・amd64・rpi4 も。
++6. 板（10.0.30.2、lock `/tmp/zedbsd-zybo-board.lock`、`plan/tools/zybo/deploy.sh`）で ghci-blit・detach/reattach、DC の bitstream で ghci-display（目視の手順はこの file に書いてユーザーの一覧へ）。T1 に armv7-virt の回帰を依頼（Q1 経由）。
++
++## 決めた事・注意
++
++- `drv_gpu_unregister` との競争: detach の最初に `withdrawing` を立て、open は ENODEV で断る（busy と unregister の間の open を作らない）。
++- `kern_mmio_write32` は armv7 で書き込みの前に `dsb st` を含む（`src/hal/armv7/asm.c`）: design §2.7 の問い「含むか」の答え。driver は doorbell の前に `kern_io_write_barrier()` も置く予定。
++- fpgareg だけの板の script（`ghci-blt-board.py`・`ghci-dc-board.py`）は GHCI の driver が attach すると write が EBUSY になる。driver を入れる時に load の後の `fpgaload --detach` を足す（WS288 の道具）。
++- SHARE・ALLOCATION_SHARE・scanout の import は ZYBO では GPU と DC が同時に載らないので p006 では名乗らない（KC705 と p019 で）。
++- 板・QEMU の試験はまだ一度も流していない。
+diff --git a/plan/ws288/tests/zybo-gpu-sd.dts b/plan/ws288/tests/zybo-gpu-sd.dts
+index 6bf4d8fea3..4ce149176b 100644
+--- a/plan/ws288/tests/zybo-gpu-sd.dts
++++ b/plan/ws288/tests/zybo-gpu-sd.dts
+@@ -6,7 +6,8 @@
+  * the GPU's debug port touch nothing of the system's.  The memory node
+  * stays at 512 MiB (make-zybo-boot-files.py checks it); the reservation is
+  * a child of /reserved-memory, which the kernel takes out of its pages
+- * (src/hal/armv7/fdt.c, page.c).
++ * (src/hal/armv7/fdt.c, page.c).  The compatible string lets the GHCI
++ * driver's pool (src/drivers/platform/zybo/pl-memory.c, WS288 p006) find it.
+  *   python3 platform/armv7/tools/make-zybo-boot-files.py dtb \
+  *       --dts plan/ws288/tests/zybo-gpu-sd.dts OUT/system.dtb
+  *   plan/tools/zybo/deploy.sh KERNEL --dtb OUT/system.dtb
+@@ -20,6 +21,10 @@
+ 		#address-cells = <1>;
+ 		#size-cells = <1>;
+ 		ranges;
+-		gpu@1c000000 { reg = <0x1c000000 0x04000000>; no-map; };
++		gpu@1c000000 {
++			compatible = "amaterrace,gpu-memory";
++			reg = <0x1c000000 0x04000000>;
++			no-map;
++		};
+ 	};
+ };
+diff --git a/plan/ws288/ws.md b/plan/ws288/ws.md
+index 1873c55d08..993670609f 100644
+--- a/plan/ws288/ws.md
++++ b/plan/ws288/ws.md
+@@ -37,6 +37,7 @@
+ | [p004](phase004/phase.md) | CP の子 module（regs・state・ring・seq・fence・ctl・irq・dbg、am_amb_mux）を spec から実装、atg_cp を配線だけに、ring（版 3 の封筒）・FENCE・watchdog・FAULT・RESET、p023 の bug 2 件と TB の漏れ、MC の router の木との統合 | p003、p023 | cleared（2026-10-23 Q1: amaterrace-gpu 98885bf で lint 97/97、sim 18/18 PASS（seed 2/3/42 も）、Verilator PASS、わざとの誤り 4 件で FAIL を確認。Vivado ZYBO 2D: LUT 5027・100 MHz WNS +0.570 ns。実機の ZYBO（SD 起動、fpgareg だけ）で ghci-blt-board.py 3/3 PASS: ring の FILL + FENCE の割り込み、HALTED の DBG、class V の fault → RESET → ring の先頭から。watchdog・WAIT_FENCE・STEP・RESULT・ring の折り返しは simulation だけ） |
+ | [p005](phase005/phase.md) | DC（bitstream 2）: atg_dc_regs・tgen・dma・vga・tmds を spec から実装、ZYBO の pclk（PLL + MMCM、BUFGMUX）・TMDS の出力・XDC、TEST_PATTERN → DDR の framebuffer | p002、p023 | in-progress（2026-10-24 P3: amaterrace-gpu p3-dc 96c1619、lint 97/97、sim 6 本 PASS、Vivado LUT 1984・WNS +1.401 ns。実機の ZYBO（fpgareg だけ）で ghci-dc-board.py 2 回とも 28/28 PASS: 640×480・720p で 60 Hz、VSYNC の割り込み、SCAN_SUM が塗った framebuffer と一致、flip、underflow 無し。残り: ユーザーの目視 V1〜V5（phase.md）） |
+ | [p017](phase017/phase.md) | CP の制御の CPU `atg_cpu` と firmware の土台、class V の経路 | p004 | cleared（2026-10-24 Q1: amaterrace-gpu 903f861。atg_cpu（RV32IM、4 段、CPI 1.27）と子 7 つ、CPFW の配線、fw/cp/ の firmware（起動・poll の loop・PARK・GHCI_FRAME・session/memory/buffer/command buffer・FILL/COPY_BUFFER・QUEUE_SUBMIT → BLT の µop）。sim 42/42 PASS（atg_top_fw_tb: class V = class N の memory、record、RESULT/RETIRE、watchdog → RESET → .data の復元、CPFW LOAD）、lint 97 clean。bitstream 1'（ZYBO 2D + CPU）: LUT 8257・WNS +0.463 ns。実機の ZYBO で ghci-blt-board.py --fw 3/3 PASS。1 frame 13 command は 32.5k cycle（class N は 12.5k、command あたり約 15 µs）。残り: Verilator に CPU 無し、fw の host 試験無し、HALTED の class V の STEP、heap は DMEM（CP_HEAP は後）） |
++| [p006](phase006/phase.md) | zedBSD の GHCI の driver（devcfg の block の登録、pl-memory、ghci の GPU と DC の device、ghci-blit・ghci-display・ghcictl、detach/reattach） | p004、p005 | in-progress（2026-10-24 P2: devcfg の block の登録・pl-memory・ghci の check.c と header まで、compile warning 0。driver の本体・配線・userland・板は未。再開点は phase.md。ラップアップで中断） |
+ | [p008](phase008/phase.md) | SU v0 と GSI1（整数の経路は済み: dec・alu・rf・wb・opd・sb・sched・fetch・icache・exec、NPHYS 8/16/32 で同じ結果。FP・LSU・cache・xu・div・pk は part 2） | p004、U12 | in-progress（2026-10-24 P1 part 2） |
+ | p023 | module の木・空の module・module ごとの spec（design §7.6）。part 1（P1）: まだ無い 86 module の port だけの Verilog と spec、`atg_top` の block の parameter、board の top、MC の router の木（2026-10-23 ユーザーの要求で `atg_rt` 等を実装）: [phase023](phase023/phase.md)。part 2（P2）: 既存の module の spec | p001（版 4）、p002、U37、U38 | cleared（2026-10-23 Q1: part 1（P1）= module の木の空の module と spec（CP・CPU・SU 24・VF・RX・TU・ROP・MC と router の木 atg_rt・DC・SA の port の予約・ZYBO と KC705 の board の top）、part 2（P2）= 既存 10 module の spec。lint 97/97 clean、sim 18/18 PASS。amaterrace-gpu main 98885bf まで） |
+ 
+diff --git a/src/drivers/gpu/ghci/check.c b/src/drivers/gpu/ghci/check.c
+new file mode 100644
+index 0000000000..7cee743ef3
+--- /dev/null
++++ b/src/drivers/gpu/ghci/check.c
+@@ -0,0 +1,647 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The GHCI driver's word arithmetic: fences, the ring's room, the
++ * extended capability list, the blitter's packets and the check of a
++ * native command stream (ghci-check.h).  Nothing here touches the kernel
++ * or the hardware.
++ *
++ * Values referenced: amaterrace-gpu docs/ghci.md (the GHCI 1.0 draft)
++ * sections 5 (the ring), 6 (fences), 8 (the state register file) and 9
++ * (the packet envelope and the class N micro-operations), through the
++ * copies hcr.h and packets.h.
++ */
++
++#include <stddef.h>
++#include <stdint.h>
++
++#include <uapi/errno.h>
++#include <uapi/gpu-op.h>
++
++#include "ghci-check.h"
++#include "hcr.h"
++#include "packets.h"
++
++/* The words of a native command's head: the number, the flags and the packet count. */
++#define NATIVE_HEAD_DWORDS		3U
++
++/* The state register file's size, and the parts of it that hold addresses. */
++#define STATE_COUNT			512U
++#define STATE_VF_INDEX_BASE		0x021U
++#define STATE_VF_ATTR_BASE_FIRST	0x030U
++#define STATE_VF_ATTRS			16U
++#define STATE_ROP_RT_BASE		0x070U
++#define STATE_ROP_DS_BASE		0x074U
++#define STATE_TU_FIRST			0x090U
++#define STATE_TU_SLOTS			16U
++#define STATE_TU_SLOT_WORDS		16U
++#define STATE_PROGRAM_VS_BASE		0x190U
++#define STATE_PROGRAM_FS_BASE		0x192U
++#define STATE_PROGRAM_CS_BASE		0x194U
++#define STATE_PROGRAM_CONST_BASE	0x196U
++
++/* The flags each checked micro-operation may carry. */
++#define BLIT_FLAGS			0x01U
++#define DISPATCH_FLAGS			0x02U
++#define FENCE_FLAGS			0x01U
++#define INVALIDATE_FLAGS		0x0fU
++
++/* The constant regions LOAD_CONST may fill, and the most words of one load. */
++#define CONST_REGIONS			4U
++#define CONST_WORDS_MAX			0x00100000U
++
++/* The fields of a packet's first dword. */
++#define PACKET_OP(header)		(((header) >> 24) & 0x3fU)
++#define PACKET_FLAGS(header)		(((header) >> 8) & 0xffU)
++#define PACKET_PAYLOAD(header)		((header) & 0xffU)
++
++/* The number of state words one blitter operation writes. */
++#define BLIT_STATE_WORDS		11U
++
++static int check_packet(uint32_t header, const uint32_t *payload, const struct ghci_native_check *check);
++static int check_set_reg(const uint32_t *payload, uint32_t count, const struct ghci_native_check *check);
++static int check_owned(const struct ghci_native_check *check, uint32_t address, uint32_t bytes, uint32_t alignment);
++
++/*
++ * Reports whether a fence value in memory has reached a value.
++ */
++int
++ghci_fence_passed(
++	uint32_t memory,
++	uint32_t value)
++{
++	int32_t distance;
++
++	/* The values are a circle: memory is past value when it is less than half a turn ahead. */
++	distance = (int32_t)(memory - value);
++	if (distance >= 0)
++		return 1;
++
++	/* Succeeded: the fence has not been reached. */
++	return 0;
++}
++
++/*
++ * Plans where the next need dwords go in the ring.
++ */
++int
++ghci_ring_plan(
++	uint32_t wptr,
++	uint32_t rptr,
++	uint32_t ring_dwords,
++	uint32_t need,
++	uint32_t *pad)
++{
++	uint32_t free_dwords;
++	uint32_t to_end;
++	uint32_t padding;
++
++	/* Refuses a ring position outside the ring, and a request that could never fit. */
++	if (ring_dwords == 0 || wptr >= ring_dwords || rptr >= ring_dwords)
++		return EINVAL;
++	if (need == 0 || need >= ring_dwords)
++		return EINVAL;
++
++	/* The room is the distance back to the reader, less the one dword the ring leaves unused. */
++	free_dwords = (rptr + ring_dwords - wptr - 1U) % ring_dwords;
++
++	/* A run of packets never crosses the end: the rest is padded when it does not hold them. */
++	to_end = ring_dwords - wptr;
++	padding = 0;
++	if (need > to_end)
++		padding = to_end;
++
++	/* A request that needs the padding as well must fit after it at the start. */
++	if (padding != 0 && need >= ring_dwords - 1U)
++		return EINVAL;
++
++	/* Waits for the reader while the room is short. */
++	if (free_dwords < padding + need)
++		return EAGAIN;
++
++	/* Succeeded: the padding (if any) and the packets fit. */
++	*pad = padding;
++	return 0;
++}
++
++/*
++ * Walks the extended capability list for the entry of an id.
++ */
++int
++ghci_extcap_find(
++	uint32_t (*read)(void *context, uint32_t offset),
++	void *context,
++	uint32_t first,
++	uint32_t window_bytes,
++	uint32_t id,
++	uint32_t *registers,
++	uint32_t *version)
++{
++	uint32_t entry;
++	uint32_t word;
++	uint32_t next;
++	unsigned walked;
++
++	/* A list that starts nowhere has no entries. */
++	if (first == 0)
++		return ENOENT;
++
++	/* Follows the entries, a bounded number of them, inside the window. */
++	entry = first;
++	for (walked = 0; walked < GHCI_EXTCAP_MAX; walked++) {
++		/* Refuses an entry that is not two whole words of the window. */
++		if ((entry % 4U) != 0 || entry > window_bytes - 8U || window_bytes < 8U)
++			return EINVAL;
++
++		/* The entry's first word: its id, version and the distance to the next. */
++		word = read(context, entry);
++
++		/* The entry asked for: its registers' offset is the second word. */
++		if (GHCI_XCAP_ID(word) == id) {
++			*registers = read(context, entry + 4U);
++			*version = GHCI_XCAP_VERSION(word);
++			return 0;
++		}
++
++		/* The last entry ends the list. */
++		next = GHCI_XCAP_NEXT(word);
++		if (next == 0)
++			return ENOENT;
++
++		/* Moves on, refusing a step that leaves the window. */
++		if (next > (window_bytes - entry) / 4U)
++			return EINVAL;
++		entry += next * 4U;
++	}
++
++	/* Failed: a list that does not end within its bound. */
++	return EINVAL;
++}
++
++/*
++ * Starts an allocator over [base, limit) with the caller's table.
++ */
++void
++ghci_range_init(
++	struct ghci_range_map *map,
++	uint32_t base,
++	uint32_t limit,
++	struct ghci_range_extent *extents,
++	unsigned capacity)
++{
++	/* The range and its empty table. */
++	map->base = base;
++	map->limit = limit;
++	map->extents = extents;
++	map->count = 0;
++	map->capacity = capacity;
++}
++
++/*
++ * Takes the first aligned run of addresses that fits.
++ */
++int
++ghci_range_alloc(
++	struct ghci_range_map *map,
++	uint32_t bytes,
++	uint32_t alignment,
++	uint32_t *address)
++{
++	uint64_t candidate;
++	uint64_t gap_end;
++	unsigned index;
++	unsigned slot;
++
++	/* Refuses an empty run and an alignment that is not a power of two. */
++	if (bytes == 0 || alignment == 0 || (alignment & (alignment - 1U)) != 0)
++		return EINVAL;
++
++	/* Refuses a request when the table cannot record another extent. */
++	if (map->count >= map->capacity)
++		return ENOSPC;
++
++	/*
++	 * Tries each gap in address order: before the first extent, between
++	 * two, after the last.  slot is the index the new extent takes.
++	 */
++	candidate = map->base;
++	for (slot = 0; slot <= map->count; slot++) {
++		/* The gap ends at the next extent, or at the range's limit. */
++		gap_end = map->limit;
++		if (slot < map->count)
++			gap_end = map->extents[slot].address;
++
++		/* Aligns the start of the gap. */
++		candidate = (candidate + alignment - 1U) & ~((uint64_t)alignment - 1U);
++
++		/* The first gap that holds the run takes it. */
++		if (candidate + bytes <= gap_end)
++			break;
++
++		/* The next gap starts after this extent. */
++		if (slot < map->count)
++			candidate = (uint64_t)map->extents[slot].address + map->extents[slot].bytes;
++	}
++
++	/* Reports a range with no gap large enough. */
++	if (slot > map->count)
++		return ENOMEM;
++
++	/* Opens the slot by moving the later extents up one. */
++	for (index = map->count; index > slot; index--)
++		map->extents[index] = map->extents[index - 1U];
++
++	/* Records the new extent. */
++	map->extents[slot].address = (uint32_t)candidate;
++	map->extents[slot].bytes = bytes;
++	map->count++;
++
++	/* Succeeded: the run is the caller's. */
++	*address = (uint32_t)candidate;
++	return 0;
++}
++
++/*
++ * Gives back the extent that starts at address.
++ */
++int
++ghci_range_free(
++	struct ghci_range_map *map,
++	uint32_t address)
++{
++	unsigned index;
++	unsigned found;
++
++	/* Finds the extent. */
++	found = map->count;
++	for (index = 0; index < map->count; index++) {
++		/* An extent is named by its first address. */
++		if (map->extents[index].address == address) {
++			found = index;
++			break;
++		}
++	}
++
++	/* Reports an address that starts no extent. */
++	if (found == map->count)
++		return ENOENT;
++
++	/* Closes the hole by moving the later extents down one. */
++	for (index = found; index + 1U < map->count; index++)
++		map->extents[index] = map->extents[index + 1U];
++	map->count--;
++
++	/* Succeeded: the run is free. */
++	return 0;
++}
++
++/*
++ * Reports the bytes of the range still free.
++ */
++uint32_t
++ghci_range_free_bytes(
++	const struct ghci_range_map *map)
++{
++	uint32_t used;
++	unsigned index;
++
++	/* Adds up the extents in use. */
++	used = 0;
++	for (index = 0; index < map->count; index++)
++		used += map->extents[index].bytes;
++
++	/* Succeeded: the rest of the range. */
++	return (map->limit - map->base) - used;
++}
++
++/*
++ * Writes the packets of one blitter operation.
++ */
++int
++ghci_state_blit(
++	const struct ghci_blit *blit,
++	uint32_t tag,
++	uint32_t *out,
++	uint32_t capacity,
++	uint32_t *dwords)
++{
++	uint32_t values[BLIT_STATE_WORDS];
++	uint32_t needed;
++	uint32_t index;
++
++	/* One SET_REG of every state word and one BLIT, which ends when the blit has. */
++	needed = 1U + 2U * BLIT_STATE_WORDS + 1U;
++	if (capacity < needed)
++		return ENOSPC;
++
++	/* The state words in their register order. */
++	values[0] = blit->op;
++	values[1] = blit->dst_base;
++	values[2] = blit->dst_stride;
++	values[3] = blit->src_base;
++	values[4] = blit->src_stride;
++	values[5] = GHCI_XY(blit->dst_x, blit->dst_y);
++	values[6] = GHCI_XY(blit->src_x, blit->src_y);
++	values[7] = GHCI_XY(blit->width, blit->height);
++	values[8] = blit->color;
++	values[9] = 0;
++	values[10] = 0;
++
++	/* The SET_REG header and its (index, value) pairs. */
++	out[0] = GHCI_PKT_N(GHCI_PKT_CLASS_STD, GHCI_OP_SET_REG, tag, 0, 2U * BLIT_STATE_WORDS);
++	for (index = 0; index < BLIT_STATE_WORDS; index++) {
++		out[1U + 2U * index] = GHCI_S_BLT + index;
++		out[2U + 2U * index] = values[index];
++	}
++
++	/* The BLIT. */
++	out[needed - 1U] = GHCI_PKT_N(GHCI_PKT_CLASS_STD, GHCI_OP_BLIT, tag, 0, 0);
++
++	/* Succeeded: the packets are written. */
++	*dwords = needed;
++	return 0;
++}
++
++/*
++ * Reports whether a state register holds a GPU address.
++ */
++int
++ghci_state_is_address(
++	uint32_t index)
++{
++	/* The blitter's destination and source. */
++	if (index == GHCI_S_BLT_DST_BASE || index == GHCI_S_BLT_SRC_BASE)
++		return 1;
++
++	/* The vertex fetcher's index buffer and attribute bases (every other word). */
++	if (index == STATE_VF_INDEX_BASE)
++		return 1;
++	if (index >= STATE_VF_ATTR_BASE_FIRST &&
++	    index < STATE_VF_ATTR_BASE_FIRST + 2U * STATE_VF_ATTRS &&
++	    ((index - STATE_VF_ATTR_BASE_FIRST) % 2U) == 0)
++		return 1;
++
++	/* The render target and the depth and stencil buffer. */
++	if (index == STATE_ROP_RT_BASE || index == STATE_ROP_DS_BASE)
++		return 1;
++
++	/* Each texture slot's first word. */
++	if (index >= STATE_TU_FIRST &&
++	    index < STATE_TU_FIRST + STATE_TU_SLOTS * STATE_TU_SLOT_WORDS &&
++	    ((index - STATE_TU_FIRST) % STATE_TU_SLOT_WORDS) == 0)
++		return 1;
++
++	/* The programs and the constant region. */
++	if (index == STATE_PROGRAM_VS_BASE || index == STATE_PROGRAM_FS_BASE)
++		return 1;
++	if (index == STATE_PROGRAM_CS_BASE || index == STATE_PROGRAM_CONST_BASE)
++		return 1;
++
++	/* Succeeded: the register holds no address. */
++	return 0;
++}
++
++/*
++ * Checks a native command and copies its packets with the caller's tag.
++ */
++int
++ghci_native_prepare(
++	const uint32_t *stream,
++	uint32_t stream_dwords,
++	const struct ghci_native_check *check,
++	uint32_t *out,
++	uint32_t capacity,
++	uint32_t *dwords)
++{
++	uint32_t position;
++	uint32_t packets;
++	uint32_t header;
++	uint32_t length;
++	uint32_t written;
++	uint32_t index;
++	int error;
++
++	/* The head: the command's number, no flags, and a bounded count of packets. */
++	if (stream_dwords < NATIVE_HEAD_DWORDS + 1U)
++		return EINVAL;
++	if (stream[0] != GPU_OP_GHCI_NATIVE || stream[1] != 0)
++		return EINVAL;
++	packets = stream[2];
++	if (packets == 0 || packets > GHCI_NATIVE_PACKETS_MAX)
++		return EINVAL;
++
++	/* Checks and copies each packet in turn. */
++	position = NATIVE_HEAD_DWORDS;
++	written = 0;
++	for (index = 0; index < packets; index++) {
++		/* The packet's header, and its payload, which must be in the stream. */
++		if (position >= stream_dwords)
++			return EINVAL;
++		header = stream[position];
++		length = 1U + PACKET_PAYLOAD(header);
++		if (length > stream_dwords - position)
++			return EINVAL;
++
++		/* The micro-operation and its operands. */
++		error = check_packet(header, &stream[position + 1U], check);
++		if (error != 0)
++			return error;
++
++		/* Refuses packets past the room the caller gave. */
++		if (length > capacity - written)
++			return E2BIG;
++
++		/* The copy carries the session's tag in place of the caller's. */
++		out[written] = (header & ~0x00ff0000U) | ((check->tag & 0xffU) << 16);
++		for (length--; length != 0; length--) {
++			out[written + 1U] = stream[position + 1U];
++			written++;
++			position++;
++		}
++		written++;
++		position++;
++	}
++
++	/* Refuses words after the last packet: the count and the stream disagree. */
++	if (position != stream_dwords)
++		return EINVAL;
++
++	/* Succeeded: every packet is checked and copied. */
++	*dwords = written;
++	return 0;
++}
++
++/*
++ * Writes the driver's fence packet.
++ */
++void
++ghci_fence_packet(
++	uint32_t tag,
++	uint32_t address,
++	uint32_t value,
++	uint32_t *out)
++{
++	/* A complete fence that raises the fence interrupt once it is written. */
++	out[0] = GHCI_PKT_N(GHCI_PKT_CLASS_STD, GHCI_OP_FENCE, tag, GHCI_FENCE_IRQ, 2U);
++	out[1] = address;
++	out[2] = value;
++}
++
++/* Checks one packet of a native command: its class, operation, length, flags and addresses. */
++static int
++check_packet(
++	uint32_t header,
++	const uint32_t *payload,
++	const struct ghci_native_check *check)
++{
++	uint32_t op;
++	uint32_t flags;
++	uint32_t count;
++	int error;
++
++	/* Only the standard micro-operations are taken. */
++	if (GHCI_PKT_GET_CLASS(header) != GHCI_PKT_CLASS_STD)
++		return EINVAL;
++	op = PACKET_OP(header);
++	flags = PACKET_FLAGS(header);
++	count = PACKET_PAYLOAD(header);
++
++	/* Selects the rules of the operation. */
++	switch (op) {
++	case GHCI_OP_NOP:
++		/* Skipped words of any number, and no flags. */
++		if (flags != 0)
++			return EINVAL;
++		break;
++	case GHCI_OP_SET_REG:
++		/* Pairs of a register and a value. */
++		if (flags != 0 || count == 0 || (count % 2U) != 0)
++			return EINVAL;
++		error = check_set_reg(payload, count / 2U, check);
++		if (error != 0)
++			return error;
++		break;
++	case GHCI_OP_BLIT:
++		/* No operands; the flag says whether the sequencer waits. */
++		if (count != 0 || (flags & ~BLIT_FLAGS) != 0)
++			return EINVAL;
++		break;
++	case GHCI_OP_DRAW:
++	case GHCI_OP_LOAD_PROGRAM:
++		/* DRAW has no operands, LOAD_PROGRAM one (the stage); neither has flags. */
++		if (flags != 0)
++			return EINVAL;
++		if (op == GHCI_OP_DRAW && count != 0)
++			return EINVAL;
++		if (op == GHCI_OP_LOAD_PROGRAM && count != 1U)
++			return EINVAL;
++		break;
++	case GHCI_OP_DISPATCH:
++		/* The three group counts; the flag that gives the dispatch the systolic array. */
++		if (count != 3U || (flags & ~DISPATCH_FLAGS) != 0)
++			return EINVAL;
++		break;
++	case GHCI_OP_FENCE:
++		/* The address and the value; the word is the session's. */
++		if (count != 2U || (flags & ~FENCE_FLAGS) != 0)
++			return EINVAL;
++		error = check_owned(check, payload[0], 4U, 4U);
++		if (error != 0)
++			return error;
++		break;
++	case GHCI_OP_WAIT_IDLE:
++		/* No operands; the flags are a mask of the blocks waited for. */
++		if (count != 0)
++			return EINVAL;
++		break;
++	case GHCI_OP_LOAD_CONST:
++		/* The region, the address and the words, all in the session's memory. */
++		if (count != 3U || flags != 0)
++			return EINVAL;
++		if (payload[0] >= CONST_REGIONS || payload[2] == 0 || payload[2] > CONST_WORDS_MAX)
++			return EINVAL;
++		error = check_owned(check, payload[1], payload[2] * 4U, 4U);
++		if (error != 0)
++			return error;
++		break;
++	case GHCI_OP_INVALIDATE:
++		/* No operands; the flags name the caches. */
++		if (count != 0 || (flags & ~INVALIDATE_FLAGS) != 0)
++			return EINVAL;
++		break;
++	case GHCI_OP_RESULT:
++		/* The address of two words, the status and the auxiliary word. */
++		if (count != 3U || flags != 0)
++			return EINVAL;
++		error = check_owned(check, payload[0], 8U, 8U);
++		if (error != 0)
++			return error;
++		break;
++	default:
++		/* WAIT_FENCE, PERF_RESET, WAIT_VSYNC and the reserved numbers are refused. */
++		return EINVAL;
++	}
++
++	/* Succeeded: the packet is one a test may send. */
++	return 0;
++}
++
++/* Checks the (register, value) pairs of a SET_REG: registers of the file, addresses the session's. */
++static int
++check_set_reg(
++	const uint32_t *payload,
++	uint32_t count,
++	const struct ghci_native_check *check)
++{
++	uint32_t index;
++	uint32_t pair;
++	int is_address;
++	int error;
++
++	/* Each pair in turn. */
++	for (pair = 0; pair < count; pair++) {
++		/* The register must be one of the file's. */
++		index = payload[2U * pair];
++		if (index >= STATE_COUNT)
++			return EINVAL;
++
++		/* A register that holds an address takes only the session's memory. */
++		is_address = ghci_state_is_address(index);
++		if (is_address) {
++			error = check_owned(check, payload[2U * pair + 1U], 1U, 1U);
++			if (error != 0)
++				return error;
++		}
++	}
++
++	/* Succeeded: every pair may be written. */
++	return 0;
++}
++
++/* Checks that a run of GPU addresses is aligned and inside the session's memory. */
++static int
++check_owned(
++	const struct ghci_native_check *check,
++	uint32_t address,
++	uint32_t bytes,
++	uint32_t alignment)
++{
++	int owned;
++
++	/* Refuses a misaligned address. */
++	if ((address % alignment) != 0)
++		return EINVAL;
++
++	/* Asks the caller whether the session owns the run. */
++	owned = check->owned(check->context, address, bytes);
++	if (!owned)
++		return EINVAL;
++
++	/* Succeeded: the run is the session's. */
++	return 0;
++}
+diff --git a/src/drivers/gpu/ghci/ghci-check.h b/src/drivers/gpu/ghci/ghci-check.h
+new file mode 100644
+index 0000000000..031195abd5
+--- /dev/null
++++ b/src/drivers/gpu/ghci/ghci-check.h
+@@ -0,0 +1,155 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The parts of the GHCI driver that are pure arithmetic on words: the
++ * fence comparison, the ring's space and padding, the walk of the
++ * extended capability list, the allocator of GPU addresses, the
++ * blitter's state packets and the check of a native command stream.
++ * They depend on nothing of the kernel, so that a host test
++ * (tests/ghci-host-test.c) runs them as the kernel does.
++ */
++
++#ifndef DRIVERS_GPU_GHCI_CHECK_H
++#define DRIVERS_GPU_GHCI_CHECK_H
++
++#include <stddef.h>
++#include <stdint.h>
++
++/* The most entries of the extended capability list that are walked. */
++#define GHCI_EXTCAP_MAX			32U
++
++/* The most class N packets one native command carries. */
++#define GHCI_NATIVE_PACKETS_MAX		1024U
++
++/* The dwords the driver's own fence packet takes: the header, the address and the value. */
++#define GHCI_FENCE_PACKET_DWORDS	3U
++
++/*
++ * One extent of GPU addresses in use, kept sorted by address in the
++ * allocator's table.
++ */
++struct ghci_range_extent {
++	uint32_t address;
++	uint32_t bytes;
++};
++
++/*
++ * The allocator of a range of GPU addresses: first fit over a table of
++ * the extents in use, sorted by address.  The table is the caller's and
++ * lives as long as the allocator; the allocator holds no lock, its owner
++ * serializes every call.
++ */
++struct ghci_range_map {
++	uint32_t base;
++	uint32_t limit;
++	struct ghci_range_extent *extents;
++	unsigned count;
++	unsigned capacity;
++};
++
++/*
++ * What the check of a native command needs from its caller: whether a
++ * range of GPU addresses lies inside memory the submitting session owns
++ * (owned returns 1 when it does), and the job tag every packet is given.
++ */
++struct ghci_native_check {
++	int (*owned)(void *context, uint32_t address, uint32_t bytes);
++	void *context;
++	uint32_t tag;
++};
++
++/*
++ * One rectangle operation of the blitter, in the words of its state
++ * (STATE[0x000..0x00A]).  Coordinates are pixels, strides bytes.
++ */
++struct ghci_blit {
++	uint32_t op;
++	uint32_t dst_base;
++	uint32_t dst_stride;
++	uint32_t src_base;
++	uint32_t src_stride;
++	uint32_t dst_x;
++	uint32_t dst_y;
++	uint32_t src_x;
++	uint32_t src_y;
++	uint32_t width;
++	uint32_t height;
++	uint32_t color;
++};
++
++/*
++ * Reports whether a fence value in memory has reached a value, with the
++ * 32-bit wrap: 1 when it has.
++ */
++int ghci_fence_passed(uint32_t memory, uint32_t value);
++
++/*
++ * Plans where the next need dwords go in the ring: pad says how many
++ * dwords of padding come first (0, or the rest of the ring up to its end,
++ * which a padding packet fills).  Returns 0, EAGAIN while the ring has no
++ * room yet, or EINVAL for a request no ring of this size can take.
++ */
++int ghci_ring_plan(uint32_t wptr, uint32_t rptr, uint32_t ring_dwords, uint32_t need, uint32_t *pad);
++
++/*
++ * Walks the extended capability list from its first entry for the entry
++ * of an id, reading the window's words through read.  Returns 0 with the
++ * entry's register offset and version, ENOENT without such an entry, or
++ * EINVAL for a list that leaves the window or does not end.
++ */
++int ghci_extcap_find(uint32_t (*read)(void *context, uint32_t offset), void *context, uint32_t first, uint32_t window_bytes, uint32_t id, uint32_t *registers, uint32_t *version);
++
++/*
++ * Starts an allocator over [base, limit) with the caller's table.
++ */
++void ghci_range_init(struct ghci_range_map *map, uint32_t base, uint32_t limit, struct ghci_range_extent *extents, unsigned capacity);
++
++/*
++ * Takes bytes of addresses aligned to alignment (a power of two), the
++ * first that fit.  Returns 0 with the address, ENOMEM when nothing fits,
++ * ENOSPC when the table is full, or EINVAL for a bad request.
++ */
++int ghci_range_alloc(struct ghci_range_map *map, uint32_t bytes, uint32_t alignment, uint32_t *address);
++
++/*
++ * Gives back the extent that starts at address.  Returns 0 or ENOENT.
++ */
++int ghci_range_free(struct ghci_range_map *map, uint32_t address);
++
++/*
++ * Reports the bytes of the range still free.
++ */
++uint32_t ghci_range_free_bytes(const struct ghci_range_map *map);
++
++/*
++ * Writes the packets of one blitter operation: a SET_REG of its state and
++ * a BLIT.  Returns 0 with the dwords written, or ENOSPC when they do not
++ * fit in capacity.
++ */
++int ghci_state_blit(const struct ghci_blit *blit, uint32_t tag, uint32_t *out, uint32_t capacity, uint32_t *dwords);
++
++/*
++ * Reports whether a state register holds a GPU address: 1 when it does.
++ */
++int ghci_state_is_address(uint32_t index);
++
++/*
++ * Checks a GPU_OP_GHCI_NATIVE command ([u32 number][u32 flags][u32
++ * count][count class N packets]) and copies its packets to out with the
++ * caller's job tag.  Returns 0 with the dwords written, E2BIG when they
++ * do not fit in capacity, or EINVAL for anything the check refuses.
++ */
++int ghci_native_prepare(const uint32_t *stream, uint32_t stream_dwords, const struct ghci_native_check *check, uint32_t *out, uint32_t capacity, uint32_t *dwords);
++
++/*
++ * Writes the driver's fence packet: a FENCE of value to address that
++ * raises the fence interrupt.  out holds GHCI_FENCE_PACKET_DWORDS.
++ */
++void ghci_fence_packet(uint32_t tag, uint32_t address, uint32_t value, uint32_t *out);
++
++#endif
+diff --git a/src/drivers/gpu/ghci/ghci.h b/src/drivers/gpu/ghci/ghci.h
+new file mode 100644
+index 0000000000..856f84f270
+--- /dev/null
++++ b/src/drivers/gpu/ghci/ghci.h
+@@ -0,0 +1,347 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The generic driver of a GPU with the GPU Host Controller Interface
++ * (GHCI 1.0, amaterrace-gpu docs/ghci.md): the device, its sessions and
++ * allocations, and the parts the driver's files share.
++ *
++ * One window of host control registers is one device.  A window whose
++ * CAPS has the command processor ([0]) is a GPU device: a ring, a fence
++ * page, GPU memory for the sessions, /dev/gpuN named
++ * "ghci:<vendor>:<device>".  A window with only a display controller
++ * (CAPS [3], the ZYBO's display bitstream) is a display device,
++ * "ghci-dc:<vendor>:<device>", whose sessions draw into memory of the
++ * same pool and present it.  The board glue (zybo-attach.c) hands the
++ * window, its interrupt and the memory pool to ghci_attach().
++ *
++ * The board has one window, so there is one device, kept in a static
++ * structure for the life of the system: a later attach (another
++ * bitstream) reuses it after the earlier device has been withdrawn.
++ */
++
++#ifndef DRIVERS_GPU_GHCI_H
++#define DRIVERS_GPU_GHCI_H
++
++#include <stddef.h>
++#include <stdint.h>
++
++#include <drivers/gpu/gpu.h>
++#include <kern/lock.h>
++#include <kern/waitq.h>
++
++#include "ghci-check.h"
++
++/* The kinds of device a window is. */
++#define GHCI_KIND_NONE			0
++#define GHCI_KIND_GPU			1
++#define GHCI_KIND_DISPLAY		2
++
++/* The job tags of sessions (1 to 255; 0 is the driver's own work). */
++#define GHCI_TAG_DRIVER			0U
++#define GHCI_TAG_MAX			255U
++#define GHCI_TAG_WORDS			8U
++
++/* The GPU's memory is handed out in pages, and the ring and the fence page are the driver's. */
++#define GHCI_PAGE_BYTES			4096U
++#define GHCI_RING_SIZE_LOG2		16U
++#define GHCI_RING_BYTES			(1U << GHCI_RING_SIZE_LOG2)
++#define GHCI_FENCE_PAGE_BYTES		GHCI_PAGE_BYTES
++
++/* The most allocations the pool records, and the most one session holds. */
++#define GHCI_EXTENTS_MAX		1024U
++#define GHCI_SESSION_RESOURCES		256U
++
++/* How long the driver waits for the hardware: a reset, a ring's room, a fence at close. */
++#define GHCI_RESET_WAIT_MS		1000U
++#define GHCI_RING_WAIT_MS		1000U
++#define GHCI_FENCE_WAIT_MS		2000U
++
++struct ghci_device;
++struct ghci_session;
++
++/*
++ * The window and memory the board glue hands to ghci_attach(): the host
++ * control registers (mapped as device memory, physical address and size),
++ * the interrupt, and the pool of memory the GPU reaches (its GPU address,
++ * the processor's physical address of it and an uncached kernel view).
++ * The board keeps all of them until ghci_detach() has returned 0.
++ */
++struct ghci_window {
++	volatile uint8_t *registers;
++	uint64_t registers_physical;
++	size_t registers_bytes;
++	int irq;
++	uint32_t pool_gpu;
++	uint64_t pool_physical;
++	uint32_t pool_bytes;
++	uint8_t *pool_view;
++};
++
++/*
++ * One allocation of the pool: a session's resource, or memory the device
++ * keeps for itself (the ring, the fence page, the display's frames).
++ *
++ * A session's allocation sits on the session's list until it is
++ * destroyed; then, if the GPU may still use it (the session's last fence
++ * has not passed), it moves to the device's deferred list with that fence
++ * until the service thread gives it back.  The device's lock protects
++ * both lists and every field.
++ */
++struct ghci_allocation {
++	struct ghci_allocation *next;
++	struct ghci_session *session;
++	uint32_t gpu_address;
++	uint32_t bytes;
++	uint32_t fence;
++	int blob;
++};
++
++/*
++ * One open of the device.
++ *
++ * tag is the session's job tag, written into every packet it submits.
++ * outstanding says last_fence (the fence after its newest submission) may
++ * not have passed yet; it is cleared once seen passed, so an old value is
++ * never compared after the 32-bit circle has turned.  The device's lock
++ * protects the fields; the list of allocations is the session's.
++ */
++struct ghci_session {
++	struct ghci_device *device;
++	struct ghci_allocation *allocations;
++	unsigned allocation_count;
++	uint32_t tag;
++	uint32_t last_fence;
++	int outstanding;
++};
++
++/*
++ * The display controller's state of a display device (display/display.c):
++ * the controller's registers, the lease, the mode shown, the two frames
++ * the driver copies sessions' storage into, and the interrupt's count.
++ *
++ * The device's lock protects everything but the interrupt's fields, which
++ * irq_lock of the device protects: frames counts vsyncs, flips counts
++ * completed flips; flip_wake wakes a present waiting for its flip.
++ */
++struct ghci_display {
++	uint32_t registers;
++	uint32_t dc_id;
++	uint32_t dc_version;
++	uint32_t dc_caps;
++	struct ghci_session *owner;
++	uint64_t lease;
++	uint64_t next_lease;
++	uint64_t sequence;
++	uint64_t shown_time_ns;
++	uint32_t width;
++	uint32_t height;
++	uint32_t format;
++	int enabled;
++	struct ghci_allocation *frame[2];
++	unsigned back;
++	uint64_t frames;
++	uint64_t flips;
++	uint32_t underflows;
++	struct wait_queue flip_wake;
++};
++
++/*
++ * The device.
++ *
++ * lock (a mutex) serializes the sessions, the pool, the lists of
++ * allocations, the display and the registration; cp_lock (a mutex, taken
++ * after lock) serializes the ring and the reset.  irq_lock (a spinlock,
++ * taken from the interrupt) protects completed, the fault's record,
++ * service_work, irq_live and the display's interrupt fields.
++ *
++ * kind is GHCI_KIND_NONE while no window is attached.  withdrawing says a
++ * detach has begun: opens are refused, the hardware is quiet, and only
++ * drv_gpu_unregister() remains.  lost says the hardware did not come back
++ * from a reset: every submission fails until the window is detached.
++ */
++struct ghci_device {
++	struct mutex lock;
++	struct mutex cp_lock;
++	struct spinlock irq_lock;
++	struct wait_queue fence_wake;
++	struct wait_queue service_wake;
++	int initialized;
++
++	int kind;
++	int withdrawing;
++	int lost;
++	struct ghci_window window;
++	struct drv_gpu_device *gpu;
++	char name[32];
++
++	uint32_t version;
++	uint32_t vendor_id;
++	uint32_t device_id;
++	uint32_t isa_id;
++	uint32_t device_version;
++	uint32_t caps;
++	uint32_t caps2;
++	uint32_t gclk_hz;
++
++	unsigned sessions;
++	uint32_t tags[GHCI_TAG_WORDS];
++
++	struct ghci_range_map pool;
++	struct ghci_range_extent extents[GHCI_EXTENTS_MAX];
++	struct ghci_allocation *deferred;
++
++	struct ghci_allocation *ring;
++	uint32_t ring_dwords;
++	uint32_t wptr;
++	struct ghci_allocation *fence_page;
++	uint32_t fence_issued;
++	int cp_running;
++
++	uint32_t completed;
++	int irq_live;
++	int fault_pending;
++	uint32_t fault_info;
++	uint32_t fault_address;
++	unsigned service_work;
++
++	struct ghci_display display;
++};
++
++/* The work the service thread is woken for (service_work). */
++#define GHCI_WORK_RECLAIM		1U
++#define GHCI_WORK_RECOVER		2U
++
++/*
++ * Attaches the device to a window the board glue found GHCI_MAGIC in.
++ * Returns 0, or why the window is not taken (it then stays the board's).
++ */
++int ghci_attach(const struct ghci_window *window);
++
++/*
++ * Reports whether the attached device is in use (an open is not closed):
++ * 1 when it is.
++ */
++int ghci_busy(void);
++
++/*
++ * Quiets the attached device's hardware and withdraws its node.  Returns
++ * 0, or EBUSY while an open still has to close (asked again later).
++ */
++int ghci_detach(void);
++
++/* Reads one host control register of the device's window. */
++uint32_t ghci_read(struct ghci_device *device, uint32_t offset);
++
++/* Writes one host control register of the device's window. */
++void ghci_write(struct ghci_device *device, uint32_t offset, uint32_t value);
++
++/* Sleeps about the given milliseconds. */
++void ghci_sleep_ms(unsigned milliseconds);
++
++/*
++ * The command processor (cp.c).
++ */
++
++/* Starts the command processor: reset, aperture, ring, fence page, interrupt, RUN. */
++int ghci_cp_start(struct ghci_device *device);
++
++/* Waits for the driver's last fence and halts the command processor for the detach. */
++void ghci_cp_stop(struct ghci_device *device);
++
++/*
++ * Writes packets into the ring for a session (NULL: the driver's own
++ * work), followed by the driver's fence, and rings the doorbell.  The
++ * device's lock is held.  Returns 0 with the fence's value, or why the
++ * packets were not written.
++ */
++int ghci_cp_submit(struct ghci_device *device, struct ghci_session *session, const uint32_t *packets, uint32_t dwords, uint32_t *fence);
++
++/* Waits a bounded time for a fence value.  Returns 0, ETIMEDOUT or EIO. */
++int ghci_cp_wait(struct ghci_device *device, uint32_t fence, unsigned milliseconds);
++
++/* Reports whether a fence value has passed: 1 when it has. */
++int ghci_cp_passed(struct ghci_device *device, uint32_t fence);
++
++/* Resets the command processor and completes every fence; cp_lock is not held. */
++void ghci_cp_recover(struct ghci_device *device, const char *reason);
++
++/* Wakes the service thread for some work. */
++void ghci_service_wake(struct ghci_device *device, unsigned work);
++
++/* Starts the service thread once for the life of the system. */
++int ghci_service_start(struct ghci_device *device);
++
++/*
++ * The memory (memory.c).  The device's lock is held for every call.
++ */
++
++/* Starts the pool over the window's memory. */
++void ghci_memory_init(struct ghci_device *device);
++
++/* Takes memory the device keeps for itself (never a session's). */
++int ghci_memory_device_alloc(struct ghci_device *device, uint32_t bytes, struct ghci_allocation **result);
++
++/* Gives back memory the device kept for itself. */
++void ghci_memory_device_free(struct ghci_device *device, struct ghci_allocation *allocation);
++
++/* Takes zeroed memory for a session's resource. */
++int ghci_memory_create(struct ghci_device *device, struct ghci_session *session, uint64_t bytes, int blob, struct ghci_allocation **result);
++
++/* Gives back a session's resource now, or once the GPU is done with it. */
++void ghci_memory_destroy(struct ghci_device *device, struct ghci_allocation *allocation);
++
++/* Gives back every deferred allocation whose fence has passed. */
++void ghci_memory_reclaim(struct ghci_device *device);
++
++/* Reports whether a run of GPU addresses lies inside one of a session's allocations: 1 when it does. */
++int ghci_memory_owned(struct ghci_session *session, uint32_t address, uint32_t bytes);
++
++/* Reports the kernel's view of a GPU address of the pool. */
++uint8_t *ghci_memory_view(struct ghci_device *device, uint32_t gpu_address);
++
++/* Reports whether a session's last submission has passed (and forgets it then): 1 when it has. */
++int ghci_session_idle(struct ghci_device *device, struct ghci_session *session);
++
++/*
++ * The blitter (blit.c).  The device's lock is held.
++ */
++
++/* Fills a run of GPU memory with a 32-bit value through the blitter and waits for it. */
++int ghci_blit_fill(struct ghci_device *device, uint32_t gpu_address, uint32_t bytes, uint32_t value);
++
++/*
++ * The display device (display/display.c).
++ */
++
++/* The display operations of a display device. */
++extern const struct drv_gpu_display_ops ghci_display_ops;
++
++/* Starts the display controller of a display device; the device's lock is held. */
++int ghci_display_attach(struct ghci_device *device, uint32_t registers);
++
++/* Turns the display controller off for the detach; the device's lock is held. */
++void ghci_display_detach(struct ghci_device *device);
++
++/* Ends a closing session's lease; the device's lock is held. */
++void ghci_display_session_close(struct ghci_device *device, struct ghci_session *session);
++
++/* Serves the display controller's interrupt. */
++void ghci_display_interrupt(struct ghci_device *device);
++
++/*
++ * The native command of the test kernels (native.c, CONFIG_GHCI_NATIVE).
++ */
++
++/*
++ * Checks and submits a GPU_OP_GHCI_NATIVE command from root.  Weak: a
++ * kernel without CONFIG_GHCI_NATIVE has none, and its GPU device does
++ * not advertise GPU_CAP_COMMAND.
++ */
++extern int ghci_native_command(struct ghci_device *device, struct ghci_session *session, const void *stream, uint32_t bytes) __attribute__((weak));
++
++#endif
+diff --git a/src/drivers/gpu/ghci/hcr.h b/src/drivers/gpu/ghci/hcr.h
+new file mode 100644
+index 0000000000..c932930e60
+--- /dev/null
++++ b/src/drivers/gpu/ghci/hcr.h
+@@ -0,0 +1,263 @@
++/*
++ * Copied from amaterrace-gpu 903f861 include/ghci_regs.h (the GHCI 1.0
++ * draft, the original is the authority): do not edit here, copy again.
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * Amaterrace GPU
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * ghci_regs.h: the GHCI 1.0 host control registers (docs/ghci.md, draft).
++ * An OS driver copies this file; it has no dependency but the C integer
++ * constants.  include/ghci_regs.vh holds the same values for the RTL.
++ */
++
++#ifndef GHCI_REGS_H
++#define GHCI_REGS_H
++
++#define GHCI_MAGIC_VALUE 0x47484349u /* "GHCI" */
++#define GHCI_VERSION_MAJOR 1u
++#define GHCI_VERSION_MINOR 0u
++
++/* FourCCs as read from the ID registers (the first letter in bits 31:24). */
++#define GHCI_FOURCC(a, b, c, d) \
++	(((unsigned)(a) << 24) | ((unsigned)(b) << 16) | ((unsigned)(c) << 8) | (unsigned)(d))
++
++/* Host control register offsets (bytes). */
++#define GHCI_MAGIC 0x000u
++#define GHCI_VERSION 0x004u
++#define GHCI_VENDOR_ID 0x008u
++#define GHCI_DEVICE_ID 0x00Cu
++#define GHCI_ISA_ID 0x010u
++#define GHCI_DEVICE_VERSION 0x014u
++#define GHCI_EXTCAP 0x018u
++#define GHCI_GCLK_HZ 0x01Cu
++#define GHCI_CAPS 0x020u
++#define GHCI_CAPS2 0x024u
++#define GHCI_SCRATCH 0x028u
++#define GHCI_COUNTER 0x02Cu
++#define GHCI_CTRL 0x030u
++#define GHCI_STATUS 0x034u
++#define GHCI_IRQ_STATUS 0x038u
++#define GHCI_IRQ_ENABLE 0x03Cu
++#define GHCI_IRQ_SET 0x040u
++#define GHCI_WDT_CYCLES 0x044u
++#define GHCI_RING_BASE 0x050u
++#define GHCI_RING_SIZE 0x054u
++#define GHCI_RING_WPTR 0x058u
++#define GHCI_RING_RPTR 0x05Cu
++#define GHCI_APERTURE_BASE 0x060u
++#define GHCI_APERTURE_LIMIT 0x064u
++#define GHCI_FAULT_ADDR 0x068u
++#define GHCI_FAULT_INFO 0x06Cu
++#define GHCI_FENCE_LAST 0x070u
++#define GHCI_PERF(n) (0x080u + 4u * (n))
++#define GHCI_PERF_CTRL 0x090u
++#define GHCI_DBG_ADDR 0x0A0u
++#define GHCI_DBG_DATA 0x0A4u
++#define GHCI_DBG_STATUS 0x0A8u
++#define GHCI_CPFW_CTRL 0x120u /* the CPFW capability (id 6), p017 */
++#define GHCI_CPFW_STATUS 0x124u
++#define GHCI_CPFW_IBASE 0x128u
++#define GHCI_CPFW_IWORDS 0x12Cu
++#define GHCI_CPFW_DBASE 0x130u
++#define GHCI_CPFW_DWORDS 0x134u
++#define GHCI_CPFW_VERSION 0x138u
++#define GHCI_CPFW_MBOX(n) (0x150u + 4u * (n)) /* n = 0..3, after SA's 0x140-0x14F */
++#define GHCI_KICK 0xF00u
++#define GHCI_STATE(i) (0x1000u + 4u * (i))
++#define GHCI_STATE_COUNT 512u
++
++/* CPFW_CTRL and CPFW_STATUS. */
++#define GHCI_CPFW_CTRL_LOAD (1u << 0)
++#define GHCI_CPFW_CTRL_RUN (1u << 1)
++#define GHCI_CPFW_CTRL_HALT (1u << 2)
++#define GHCI_CPFW_STATUS_READY (1u << 0)
++#define GHCI_CPFW_STATUS_FAULT (1u << 1)
++#define GHCI_CPFW_STATUS_ALIVE (1u << 2)
++#define GHCI_CPFW_STATUS_STATE(s) (((s) >> 8) & 0xFFu)
++
++/* CAPS. */
++#define GHCI_CAPS_CP (1u << 0)
++#define GHCI_CAPS_BLT (1u << 1)
++#define GHCI_CAPS_SHADER (1u << 2)
++#define GHCI_CAPS_DISP (1u << 3)
++#define GHCI_CAPS_LANES_LOG2(c) (((c) >> 4) & 0xFu)
++#define GHCI_CAPS_TU_BILINEAR (1u << 8)
++#define GHCI_CAPS_ROP_STENCIL (1u << 9)
++#define GHCI_CAPS_WAIT_VSYNC (1u << 10)
++#define GHCI_CAPS_TILE4X4 (1u << 11)
++#define GHCI_CAPS_STATE_VERSION(c) (((c) >> 12) & 0xFu)
++#define GHCI_CAPS_MMU (1u << 16)
++#define GHCI_CAPS_LINE_LOG2(c) (((c) >> 20) & 0xFu)
++
++/* CAPS2. */
++#define GHCI_CAPS2_QUEUES(c) ((c) & 0xFFu)
++#define GHCI_CAPS2_LDS_KIB(c) (((c) >> 8) & 0xFFu)
++#define GHCI_CAPS2_CONST_WORDS(c) ((((c) >> 16) & 0xFFu) * 16u)
++#define GHCI_CAPS2_TEX_SLOTS(c) ((((c) >> 24) & 0xFu) * 4u)
++#define GHCI_CAPS2_ATTRS(c) ((((c) >> 28) & 0xFu) * 4u)
++
++/* CTRL. */
++#define GHCI_CTRL_RUN (1u << 0)
++#define GHCI_CTRL_RESET (1u << 1)
++#define GHCI_CTRL_HALT (1u << 2)
++#define GHCI_CTRL_STEP (1u << 3)
++#define GHCI_CTRL_WDT_EN (1u << 4)
++
++/* STATUS. */
++#define GHCI_STATUS_CP_BUSY (1u << 0)
++#define GHCI_STATUS_BLT_BUSY (1u << 1)
++#define GHCI_STATUS_VF_BUSY (1u << 2)
++#define GHCI_STATUS_RX_BUSY (1u << 3)
++#define GHCI_STATUS_ROP_BUSY (1u << 4)
++#define GHCI_STATUS_TU_BUSY (1u << 5)
++#define GHCI_STATUS_SU_BUSY (1u << 6)
++#define GHCI_STATUS_AXI_IDLE (1u << 8)
++#define GHCI_STATUS_FAULT (1u << 9)
++#define GHCI_STATUS_HALTED (1u << 10)
++#define GHCI_STATUS_RING_EMPTY (1u << 11)
++#define GHCI_STATUS_MEM_READY (1u << 12)
++#define GHCI_STATUS_AXI_STUCK (1u << 13)
++#define GHCI_STATUS_QUIESCED (1u << 14)
++#define GHCI_STATUS_STATE(s) (((s) >> 16) & 0xFu)
++
++/* CP states (STATUS[19:16]). */
++#define GHCI_ST_IDLE 0u
++#define GHCI_ST_RUNNING 1u
++#define GHCI_ST_HALTING 2u
++#define GHCI_ST_HALTED 3u
++#define GHCI_ST_FAULTED 4u
++#define GHCI_ST_RESETTING 5u
++
++/* IRQ_STATUS, IRQ_ENABLE, IRQ_SET. */
++#define GHCI_IRQ_FENCE (1u << 0)
++#define GHCI_IRQ_FAULT (1u << 1)
++#define GHCI_IRQ_RING_EMPTY (1u << 2)
++#define GHCI_IRQ_WATCHDOG (1u << 3)
++#define GHCI_IRQ_DBG_DONE (1u << 4)
++#define GHCI_IRQ_SOFT (1u << 5)
++#define GHCI_IRQ_HALTED (1u << 6)
++#define GHCI_IRQ_RESULT (1u << 7)
++#define GHCI_IRQ_RETIRE (1u << 8)
++
++/* FAULT_INFO. */
++#define GHCI_FAULT_CLIENT(f) ((f) & 0xFFu)
++#define GHCI_FAULT_WRITE (1u << 8)
++#define GHCI_FAULT_KIND(f) (((f) >> 12) & 0xFu)
++#define GHCI_FAULT_BLOCK(f) (((f) >> 16) & 0xFFu)
++#define GHCI_FAULT_JOB_TAG(f) (((f) >> 24) & 0xFFu)
++#define GHCI_FAULT_APERTURE 1u
++#define GHCI_FAULT_OPCODE 2u
++#define GHCI_FAULT_RING 3u
++#define GHCI_FAULT_WATCHDOG 4u
++#define GHCI_FAULT_AXI 5u
++#define GHCI_FAULT_KICK 6u
++#define GHCI_FAULT_LOCKED 7u
++
++/* DBG_STATUS. */
++#define GHCI_DBG_BUSY (1u << 0)
++#define GHCI_DBG_ERROR (1u << 1)
++
++/* KICK. */
++#define GHCI_KICK_BLIT (1u << 0)
++#define GHCI_KICK_DRAW (1u << 1)
++#define GHCI_KICK_DISPATCH (1u << 2)
++
++/* Extended capabilities: entry word 0 and the IDs. */
++#define GHCI_XCAP_ID(w) ((w) & 0xFFu)
++#define GHCI_XCAP_VERSION(w) (((w) >> 8) & 0xFFu)
++#define GHCI_XCAP_NEXT(w) (((w) >> 16) & 0xFFFFu)
++#define GHCI_XCAP_DISP 1u
++#define GHCI_XCAP_DBG 2u
++#define GHCI_XCAP_PERF 3u
++#define GHCI_XCAP_VEND 4u
++#define GHCI_XCAP_MMU 5u
++
++/*
++ * The PERF capability's registers (from its register offset): PERF_SRCn
++ * says what PERFn counts: a STATUS busy bit number (0 CP .. 6 SU), the
++ * memory (cycles with accesses outstanding) or nothing.
++ */
++#define GHCI_PERF_SRC(n) (4u * (n))
++#define GHCI_PERF_SRC_MEM 8u
++#define GHCI_PERF_SRC_NONE 0xFFu
++
++/*
++ * State register file.  Only the BLT range is defined in this draft; the
++ * other ranges follow the command set of design v3 (docs/ghci.md).
++ */
++#define GHCI_S_BLT 0x000u
++#define GHCI_S_VENDOR 0x1E0u
++
++/* BLT. */
++#define GHCI_S_BLT_OP (GHCI_S_BLT + 0u)
++#define GHCI_S_BLT_DST_BASE (GHCI_S_BLT + 1u)
++#define GHCI_S_BLT_DST_STRIDE (GHCI_S_BLT + 2u)
++#define GHCI_S_BLT_SRC_BASE (GHCI_S_BLT + 3u)
++#define GHCI_S_BLT_SRC_STRIDE (GHCI_S_BLT + 4u)
++#define GHCI_S_BLT_DST_XY (GHCI_S_BLT + 5u)
++#define GHCI_S_BLT_SRC_XY (GHCI_S_BLT + 6u)
++#define GHCI_S_BLT_SIZE (GHCI_S_BLT + 7u)
++#define GHCI_S_BLT_COLOR (GHCI_S_BLT + 8u)
++#define GHCI_S_BLT_CLIP_MIN (GHCI_S_BLT + 9u)
++#define GHCI_S_BLT_CLIP_MAX (GHCI_S_BLT + 10u)
++#define GHCI_BLT_FILL 0u
++#define GHCI_BLT_COPY 1u
++#define GHCI_BLT_TILE 2u
++#define GHCI_BLT_UNTILE 3u
++#define GHCI_BLT_BLEND_OVER (1u << 4)
++#define GHCI_BLT_BPP16 (1u << 8)
++#define GHCI_BLT_REVERSE (1u << 12)
++#define GHCI_XY(x, y) (((unsigned)(y) << 16) | ((unsigned)(x) & 0xFFFFu))
++
++/* The display controller's registers (DISP capability, docs/ghci.md
++ * section 12): offsets from the capability's register offset. */
++#define GHCI_DC_ID_VALUE 0x41544443u /* "ATDC" */
++#define GHCI_DC_ID 0x00u
++#define GHCI_DC_VERSION 0x04u
++#define GHCI_DC_CAPS 0x08u
++#define GHCI_DC_CTRL 0x10u
++#define GHCI_DC_STATUS 0x14u
++#define GHCI_DC_IRQ_STATUS 0x18u
++#define GHCI_DC_IRQ_ENABLE 0x1Cu
++#define GHCI_DC_FB_BASE 0x20u
++#define GHCI_DC_FB_NEXT 0x24u
++#define GHCI_DC_FB_STRIDE 0x28u
++#define GHCI_DC_FB_SIZE 0x2Cu
++#define GHCI_DC_H_ACTIVE 0x30u
++#define GHCI_DC_H_FP 0x34u
++#define GHCI_DC_H_SYNC 0x38u
++#define GHCI_DC_H_BP 0x3Cu
++#define GHCI_DC_V_ACTIVE 0x40u
++#define GHCI_DC_V_FP 0x44u
++#define GHCI_DC_V_SYNC 0x48u
++#define GHCI_DC_V_BP 0x4Cu
++#define GHCI_DC_SYNC_POL 0x50u
++#define GHCI_DC_FRAME_COUNT 0x54u
++#define GHCI_DC_PCLK_SEL 0x58u
++#define GHCI_DC_I2C_CTRL 0x60u
++#define GHCI_DC_I2C_DATA 0x64u
++#define GHCI_DC_I2C_STATUS 0x68u
++#define GHCI_DC_SCAN_SUM 0x70u /* Amaterrace: sum of the last frame's pixel words */
++#define GHCI_DC_SCAN_WORDS 0x74u /* Amaterrace: pixel words of the last frame */
++#define GHCI_DC_STANDALONE_DISP 0x200u /* DISP of a DC-only window */
++#define GHCI_DC_CTRL_ENABLE (1u << 0)
++#define GHCI_DC_CTRL_RESET (1u << 1)
++#define GHCI_DC_CTRL_TEST_PATTERN (1u << 2)
++#define GHCI_DC_CTRL_FORMAT(f) (((unsigned)(f) & 3u) << 4)
++#define GHCI_DC_CTRL_OUTPUT_HDMI (1u << 6)
++#define GHCI_DC_FMT_BGRA8 0u
++#define GHCI_DC_FMT_RGBA8 1u
++#define GHCI_DC_FMT_RGB565 2u
++#define GHCI_DC_IRQ_VSYNC (1u << 0)
++#define GHCI_DC_IRQ_UNDERFLOW (1u << 1)
++#define GHCI_DC_IRQ_FLIP_DONE (1u << 2)
++
++#endif /* GHCI_REGS_H */
+diff --git a/src/drivers/gpu/ghci/packets.h b/src/drivers/gpu/ghci/packets.h
+new file mode 100644
+index 0000000000..052e4b90bc
+--- /dev/null
++++ b/src/drivers/gpu/ghci/packets.h
+@@ -0,0 +1,67 @@
++/*
++ * Copied from amaterrace-gpu 903f861 include/ghci_packets.h (the GHCI 1.0
++ * draft, the original is the authority): do not edit here, copy again.
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * Amaterrace GPU
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * ghci_packets.h: the GHCI command ring's packet envelope (version 3) and
++ * the class N micro-operations (docs/ghci.md section 9).  Class V packets
++ * carry zedBSD's GPU command protocol (gpu-op) for the CP's firmware.
++ */
++
++#ifndef GHCI_PACKETS_H
++#define GHCI_PACKETS_H
++
++/*
++ * dword0: [31:30] class, [29:24] op (class N), [23:16] job tag,
++ * class N: [15:8] flags, [7:0] payload dwords; class V and padding:
++ * [15:0] dwords after the header.
++ */
++#define GHCI_PKT_CLASS_STD 0u	/* class N, standard micro-ops */
++#define GHCI_PKT_CLASS_VENDOR 1u	/* class N, vendor micro-ops */
++#define GHCI_PKT_CLASS_V 2u	/* a gpu-op for the firmware */
++#define GHCI_PKT_CLASS_PAD 3u	/* padding: skipped */
++#define GHCI_PKT_N(cls, op, tag, flags, n) \
++	((unsigned)(cls) << 30 | ((unsigned)(op) & 0x3Fu) << 24 | ((unsigned)(tag) & 0xFFu) << 16 | \
++	    ((unsigned)(flags) & 0xFFu) << 8 | ((unsigned)(n) & 0xFFu))
++#define GHCI_PKT_V(tag, n) (GHCI_PKT_CLASS_V << 30 | ((unsigned)(tag) & 0xFFu) << 16 | \
++	((unsigned)(n) & 0xFFFFu))
++#define GHCI_PKT_PAD(n) (GHCI_PKT_CLASS_PAD << 30 | ((unsigned)(n) & 0xFFFFu))
++#define GHCI_PKT_GET_CLASS(d) ((d) >> 30)
++#define GHCI_PKT_GET_TAG(d) (((d) >> 16) & 0xFFu)
++
++/* Standard micro-ops (class 0) and their payload dwords. */
++#define GHCI_OP_NOP 0u	/* n: skipped */
++#define GHCI_OP_SET_REG 1u	/* (index, value) pairs */
++#define GHCI_OP_BLIT 2u	/* 0; flags[0]: wait for the end */
++#define GHCI_OP_DRAW 3u	/* 0 */
++#define GHCI_OP_DISPATCH 4u	/* 3: gx, gy, gz */
++#define GHCI_OP_FENCE 5u	/* 2: addr, value; flags[0]: IRQ */
++#define GHCI_OP_WAIT_IDLE 6u	/* 0; flags: STATUS busy-bit mask, 0 = all */
++#define GHCI_OP_LOAD_CONST 7u	/* 3: region, addr, words */
++#define GHCI_OP_LOAD_PROGRAM 8u	/* 1: stage */
++#define GHCI_OP_WAIT_FENCE 9u	/* 2: addr, value */
++#define GHCI_OP_PERF_RESET 10u	/* 0 */
++#define GHCI_OP_WAIT_VSYNC 11u	/* 0 */
++#define GHCI_OP_INVALIDATE 12u	/* 0; flags: [0] D$ [1] T$ [2] constants [3] I$ */
++#define GHCI_OP_RESULT 13u	/* 3: addr, status, aux */
++#define GHCI_FENCE_IRQ 0x01u	/* FENCE flags */
++#define GHCI_BLIT_WAIT 0x01u	/* BLIT flags */
++
++/* Amaterrace's vendor micro-ops (class 1). */
++#define ATG_VOP_DRAW_RAW 0u	/* 9: three vertices x, y, z */
++#define ATG_VOP_DBG_MARK 1u	/* 1: STATE[0x1FF] = payload */
++
++/* Fence values are 32 bits and compare with wrap-around. */
++#define GHCI_FENCE_PASSED(mem, value) ((int)((unsigned)(mem) - (unsigned)(value)) >= 0)
++
++#endif /* GHCI_PACKETS_H */
+diff --git a/src/drivers/platform/zybo/pl-memory.c b/src/drivers/platform/zybo/pl-memory.c
+new file mode 100644
+index 0000000000..c9fcd3ddd2
+--- /dev/null
++++ b/src/drivers/platform/zybo/pl-memory.c
+@@ -0,0 +1,251 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The memory of the programmable logic's blocks on the ZYBO.
++ *
++ * The board's device tree (plan/ws288/tests/zybo-gpu-sd.dts) reserves the
++ * top 64 MiB of DDR for the GPU in the logic: a child of /reserved-memory,
++ * no-map, which the HAL takes out of the page allocator.  The node is
++ * found by its compatible string "amaterrace,gpu-memory", or else by its
++ * name gpu@<address>.  The range is mapped once through
++ * kern_pmem_map_uncached(), a Normal non-cacheable view: the blocks'
++ * memory accesses do not snoop the processor's caches, and on armv7 a
++ * device mapping of RAM would hand back the cached direct map instead.
++ * The view is kept for the life of the system, so the GPU's driver and
++ * the display controller's, whichever bitstream is loaded, borrow the
++ * same memory.
++ */
++
++#include <stddef.h>
++#include <stdint.h>
++
++#include <drivers/generic/fdt.h>
++#include <drivers/platform/zybo/pl-memory.h>
++#include <hal/hal.h>
++#include <kern/kcrt.h>
++#include <kern/klog.h>
++#include <kern/pmem.h>
++#include <uapi/errno.h>
++
++/* The compatible string of the reserved node, and the prefix of its name. */
++#define PL_MEMORY_COMPATIBLE		"amaterrace,gpu-memory"
++#define PL_MEMORY_NAME_PREFIX		"gpu@"
++#define PL_MEMORY_PARENT_NAME		"reserved-memory"
++
++/* How much of the device tree is read: the board's is a few KiB. */
++#define PL_MEMORY_FDT_LIMIT		(256U * 1024U)
++
++/* The view's granule, the page. */
++#define PL_MEMORY_PAGE_BYTES		4096U
++
++/*
++ * The reserved range and its view, filled once by drv_zybo_pl_memory_init()
++ * on the boot path before any block can be attached, and read without a
++ * lock afterwards.  found is zero while there is none.
++ */
++static struct drv_zybo_pl_memory pl_memory;
++static int pl_memory_found;
++
++static int find_node(const struct drv_fdt *fdt, uint32_t *node);
++static int find_child_named(const struct drv_fdt *fdt, uint32_t parent, const char *name, int prefix, uint32_t *child);
++static int node_name_matches(const struct drv_fdt *fdt, uint32_t node, const char *name, int prefix);
++
++/*
++ * Finds the reserved range in the device tree and maps it uncached.
++ */
++int
++drv_zybo_pl_memory_init(
++	void)
++{
++	const uint64_t *fdt_range;
++	struct drv_fdt fdt;
++	struct kern_pmem run;
++	const void *blob;
++	uint64_t address;
++	uint64_t size;
++	uint32_t node;
++	void *mapped;
++	int error;
++
++	/* Finds the device tree the loader passed. */
++	fdt_range = hal_get_arch_handoff("armv7.fdt");
++	if (fdt_range == NULL)
++		return ENOENT;
++	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_range[0]);
++	if (blob == NULL)
++		return ENOENT;
++
++	/* Opens the tree before searching it. */
++	error = drv_fdt_open(&fdt, blob, PL_MEMORY_FDT_LIMIT);
++	if (error != 0)
++		return error;
++
++	/* Finds the reserved node; a tree without one leaves the blocks without memory. */
++	error = find_node(&fdt, &node);
++	if (error != 0) {
++		kern_logf("pl-memory: the device tree reserves no memory for the logic\n");
++		return ENOENT;
++	}
++
++	/* Reads the range; reserved-memory's ranges are the identity. */
++	error = drv_fdt_reg(&fdt, node, 0, &address, &size);
++	if (error != 0)
++		return error;
++
++	/* The view takes whole pages of the 32-bit physical space. */
++	if ((address % PL_MEMORY_PAGE_BYTES) != 0 || (size % PL_MEMORY_PAGE_BYTES) != 0)
++		return EINVAL;
++	if (size == 0 || address > 0xffffffffULL || size > 0x100000000ULL - address)
++		return EINVAL;
++
++	/* Maps the range uncached, once for the life of the system. */
++	run.paddr = (hal_physaddr_t)address;
++	run.size = (size_t)size;
++	error = kern_pmem_map_uncached(&run, &mapped);
++	if (error != 0) {
++		kern_logf("pl-memory: %llx+%llx not mapped (%d)\n",
++			  (unsigned long long)address,
++			  (unsigned long long)size,
++			  error);
++		return error;
++	}
++
++	/* Publishes the range to the blocks' drivers. */
++	pl_memory.physical = address;
++	pl_memory.bytes = size;
++	pl_memory.mapped = mapped;
++	pl_memory_found = 1;
++	kern_logf("pl-memory: %llu MiB at %llx for the logic's blocks\n",
++		  (unsigned long long)(size >> 20),
++		  (unsigned long long)address);
++
++	/* Succeeded: the range is reachable. */
++	return 0;
++}
++
++/*
++ * Copies out the reserved range.
++ */
++int
++drv_zybo_pl_memory_get(
++	struct drv_zybo_pl_memory *memory)
++{
++	/* Refuses a missing destination. */
++	if (memory == NULL)
++		return EINVAL;
++
++	/* A board without the reservation has no range to give. */
++	if (!pl_memory_found)
++		return ENODEV;
++
++	/* Succeeded: the caller has the range and its view. */
++	*memory = pl_memory;
++	return 0;
++}
++
++/*
++ * Finds the reserved node: by its compatible string, or by its name under
++ * /reserved-memory.
++ */
++static int
++find_node(
++	const struct drv_fdt *fdt,
++	uint32_t *node)
++{
++	uint32_t parent;
++	int error;
++
++	/* The compatible string names the node wherever it is. */
++	error = drv_fdt_find_compatible(fdt, PL_MEMORY_COMPATIBLE, DRV_FDT_NO_NODE, node);
++	if (error == 0)
++		return 0;
++
++	/* Else /reserved-memory, a child of the root (the first node of the structure). */
++	error = find_child_named(fdt, fdt->structure_offset, PL_MEMORY_PARENT_NAME, 0, &parent);
++	if (error != 0)
++		return error;
++
++	/* And its child gpu@... */
++	error = find_child_named(fdt, parent, PL_MEMORY_NAME_PREFIX, 1, node);
++	if (error != 0)
++		return error;
++
++	/* Succeeded: the node is found. */
++	return 0;
++}
++
++/* Finds a child of a node by its name, or by the start of its name. */
++static int
++find_child_named(
++	const struct drv_fdt *fdt,
++	uint32_t parent,
++	const char *name,
++	int prefix,
++	uint32_t *child)
++{
++	uint32_t candidate;
++	int matches;
++	int error;
++
++	/* Walks the children in order. */
++	candidate = DRV_FDT_NO_NODE;
++	for (;;) {
++		error = drv_fdt_child(fdt, parent, candidate, &candidate);
++		if (error != 0)
++			return ENOENT;
++
++		/* The first child of the name is the answer. */
++		matches = node_name_matches(fdt, candidate, name, prefix);
++		if (matches)
++			break;
++	}
++
++	/* Succeeded: the child is found. */
++	*child = candidate;
++	return 0;
++}
++
++/*
++ * Reports whether a node's name is the one asked for (or starts with it):
++ * 1 when it is.  The name follows the begin-node token in the structure.
++ */
++static int
++node_name_matches(
++	const struct drv_fdt *fdt,
++	uint32_t node,
++	const char *name,
++	int prefix)
++{
++	const char *text;
++	size_t length;
++	size_t limit;
++	int differ;
++
++	/* The name starts four bytes after the token. */
++	if (node > fdt->size || fdt->size - node < 5U)
++		return 0;
++	text = (const char *)fdt->blob + node + 4U;
++	limit = fdt->size - node - 4U;
++
++	/* Measures the name, which must end inside the blob. */
++	length = 0;
++	while (length < limit && text[length] != '\0')
++		length++;
++	if (length == limit)
++		return 0;
++
++	/* A prefix match needs only the start; a whole match the same length. */
++	differ = kern_strncmp(text, name, kern_strlen(name));
++	if (differ != 0)
++		return 0;
++	if (!prefix && length != kern_strlen(name))
++		return 0;
++
++	/* Succeeded: the name is the one asked for. */
++	return 1;
++}
+diff --git a/src/drivers/platform/zybo/zynq-devcfg.c b/src/drivers/platform/zybo/zynq-devcfg.c
+index 6a9359a31a..400a69b995 100644
+--- a/src/drivers/platform/zybo/zynq-devcfg.c
++++ b/src/drivers/platform/zybo/zynq-devcfg.c
+@@ -33,6 +33,14 @@
+  * emulator (PSS_IDCODE reads 0), the waits on the logic are skipped and
+  * the status says FPGA_STATUS_EMULATED; the logic is not enabled.
+  *
++ * A kernel driver of the block (the GPU's, WS288) registers itself with
++ * drv_zynq_pl_block_register(); when the logic is enabled and the first
++ * word of its window is the driver's magic, the driver takes the block and
++ * the interrupt (the device's handler is removed), and the registers are
++ * then only read through /dev/fpga0.  The block is given back before the
++ * logic is written again or disabled, which waits a bounded time for the
++ * driver's device to be closed.
++ *
+  * Procedure referenced: Linux v6.12 drivers/fpga/zynq-fpga.c,
+  * zynq_fpga_ops_write_init (the PROG_B sequence, PCAP_PR and PCAP_MODE,
+  * the DMA queue check, PCAP_LPBK), zynq_fpga_ops_write (clearing INT_STS
+@@ -140,6 +148,10 @@
+ /* The size of a register of the block. */
+ #define REG_BYTES			4U
+ 
++/* How long a block driver's withdrawal is waited for, and how often it is asked. */
++#define DETACH_WAIT_MS			5000U
++#define DETACH_RETRY_MS			10U
++
+ /* Marks a parameter the interrupt handler's signature carries but the driver does not need. */
+ #define UNUSED_PARAMETER(parameter)	((void)(parameter))
+ 
+@@ -166,6 +178,13 @@ struct fpga_open {
+  * irq_lock (taken from the interrupt handler) keeps irq_pending, the
+  * interrupts since the last FPGA_IRQ_WAIT returned, and irq_waiting, set
+  * while one waits.
++ *
++ * blocks holds the registered block drivers (under lock, filled after
++ * the start and never emptied); block is the one holding the enabled
++ * logic's block, NULL when /dev/fpga0 has the block (under lock); started
++ * says drv_zynq_devcfg_attach() finished.  irq_handed_over (under
++ * irq_lock) says the interrupt belongs to the block's driver, so a wait
++ * on it ends.
+  */
+ struct fpga_device {
+ 	volatile uint8_t *devcfg;
+@@ -181,6 +200,11 @@ struct fpga_device {
+ 	struct wait_queue irq_wake;
+ 	uint32_t irq_pending;
+ 	int irq_waiting;
++	const struct drv_zynq_pl_block *blocks[DRV_ZYNQ_PL_BLOCK_MAX];
++	unsigned block_count;
++	const struct drv_zynq_pl_block *block;
++	int started;
++	int irq_handed_over;
+ };
+ 
+ static int fpga_open(struct file *file);
+@@ -221,6 +245,11 @@ static int ioctl_reg_write(uintptr_t argument);
+ static int ioctl_irq_wait(uintptr_t argument);
+ static int window_offset_valid(uint32_t offset);
+ static void pl_interrupt(int irq, kern_irq_ack_t acknowledge, void *argument);
++static void attach_block(void);
++static int release_block(void);
++static void take_back_interrupt(void);
++static int ioctl_block_detach(void);
++static int ioctl_block_attach(void);
+ 
+ /*
+  * Starts the driver of /dev/fpga0.
+@@ -303,10 +332,53 @@ drv_zynq_devcfg_attach(
+ 		  (unsigned)interrupts,
+ 		  fpga.skip_waits ? ", emulated" : "");
+ 
++	/* Block drivers may register from now on. */
++	mutex_lock(&fpga.lock);
++
++	fpga.started = 1;
++
++	mutex_unlock(&fpga.lock);
++
+ 	/* Succeeded: /dev/fpga0 is there. */
+ 	return 0;
+ }
+ 
++/*
++ * Registers a driver of a block the logic may hold.
++ */
++int
++drv_zynq_pl_block_register(
++	const struct drv_zynq_pl_block *block)
++{
++	/* A driver needs its magic and all three operations. */
++	if (block == NULL || block->attach == NULL || block->busy == NULL || block->detach == NULL)
++		return EINVAL;
++
++	/*
++	 * A device that did not start has no logic to offer, nor a lock.
++	 * started is set once at the end of the start and never cleared.
++	 */
++	if (!fpga.started)
++		return ENODEV;
++
++	/* Adds the driver under the device's lock, which the attach reads the table under. */
++	mutex_lock(&fpga.lock);
++
++	/* A full table refuses the driver. */
++	if (fpga.block_count >= DRV_ZYNQ_PL_BLOCK_MAX) {
++		mutex_unlock(&fpga.lock);
++		return ENOSPC;
++	}
++
++	fpga.blocks[fpga.block_count] = block;
++	fpga.block_count++;
++
++	mutex_unlock(&fpga.lock);
++
++	/* Succeeded: the next enabled logic is offered to the driver. */
++	return 0;
++}
++
+ /* Reads one register of the SLCR; 0 if the SLCR cannot be read. */
+ static uint32_t
+ slcr_read(
+@@ -562,6 +634,12 @@ fpga_ioctl(
+ 	case FPGA_IRQ_WAIT:
+ 		error = ioctl_irq_wait(argument);
+ 		break;
++	case FPGA_BLOCK_DETACH:
++		error = ioctl_block_detach();
++		break;
++	case FPGA_BLOCK_ATTACH:
++		error = ioctl_block_attach();
++		break;
+ 	default:
+ 		error = ENOTTY;
+ 		break;
+@@ -641,6 +719,11 @@ program_logic(
+ 	if (!valid)
+ 		return EINVAL;
+ 
++	/* Takes the block back from its driver; a driver whose device is open refuses. */
++	error = release_block();
++	if (error != 0)
++		return error;
++
+ 	/* Closes the window, which the new logic will not answer until it is enabled again. */
+ 	disable_logic();
+ 
+@@ -844,6 +927,9 @@ enable_logic(
+ 	fpga.window = mapped;
+ 	fpga.enabled = 1;
+ 
++	/* Offers the block to the driver its first word names, if one is registered. */
++	attach_block();
++
+ 	/* Succeeded: the block's registers are reachable. */
+ 	return 0;
+ }
+@@ -910,6 +996,8 @@ ioctl_status(
+ 		status.flags |= FPGA_STATUS_PROGRAMMING;
+ 	if (fpga.skip_waits)
+ 		status.flags |= FPGA_STATUS_EMULATED;
++	if (fpga.block != NULL)
++		status.flags |= FPGA_STATUS_ATTACHED;
+ 	status.error = fpga.last_error;
+ 	status.devcfg_status = devcfg_status;
+ 	status.window_base = WINDOW_PHYS;
+@@ -946,22 +1034,226 @@ ioctl_enable(
+ 	return 0;
+ }
+ 
+-/* Disables the logic. */
++/* Disables the logic, once its block's driver has given the block back. */
+ static int
+ ioctl_disable(
+ 	void)
+ {
++	int error;
++
+ 	/* Disables under the device's lock, after any access in progress. */
+ 	mutex_lock(&fpga.lock);
+ 
+-	disable_logic();
++	error = release_block();
++	if (error == 0)
++		disable_logic();
+ 
+ 	mutex_unlock(&fpga.lock);
+ 
++	/* Reports a block whose driver's device is still open. */
++	if (error != 0)
++		return error;
++
+ 	/* Succeeded: the logic is held in reset. */
+ 	return 0;
+ }
+ 
++/* Gives the block back from its driver and leaves the logic enabled. */
++static int
++ioctl_block_detach(
++	void)
++{
++	int error;
++
++	/* Withdraws the driver under the device's lock. */
++	mutex_lock(&fpga.lock);
++
++	error = release_block();
++
++	mutex_unlock(&fpga.lock);
++
++	/* Reports a block whose driver's device is still open. */
++	if (error != 0)
++		return error;
++
++	/* Succeeded: /dev/fpga0 has the block. */
++	return 0;
++}
++
++/* Offers an enabled logic's block to the registered drivers again. */
++static int
++ioctl_block_attach(
++	void)
++{
++	int attached;
++
++	/* Offers under the device's lock. */
++	mutex_lock(&fpga.lock);
++
++	/* A logic that is not enabled has no window to offer. */
++	if (!fpga.enabled) {
++		mutex_unlock(&fpga.lock);
++		return EIO;
++	}
++
++	attach_block();
++
++	/* Notes whether a driver took the block. */
++	attached = 0;
++	if (fpga.block != NULL)
++		attached = 1;
++
++	mutex_unlock(&fpga.lock);
++
++	/* Reports a block no registered driver took. */
++	if (!attached)
++		return ENODEV;
++
++	/* Succeeded: a driver holds the block. */
++	return 0;
++}
++
++/*
++ * Offers the enabled logic's block to the driver whose magic its first
++ * word holds.  The device's lock is held, and the window is mapped.
++ */
++static void
++attach_block(
++	void)
++{
++	const struct drv_zynq_pl_block *candidate;
++	unsigned long irq_state;
++	uint32_t magic;
++	unsigned index;
++	int error;
++
++	/* A block already held stays with its driver. */
++	if (fpga.block != NULL)
++		return;
++
++	/* Reads the first word of the window, which names the block. */
++	magic = kern_mmio_read32(fpga.window);
++
++	/* Finds the first registered driver of that name. */
++	candidate = NULL;
++	for (index = 0; index < fpga.block_count; index++) {
++		/* The first driver of that name takes it. */
++		if (fpga.blocks[index]->magic == magic) {
++			candidate = fpga.blocks[index];
++			break;
++		}
++	}
++
++	/* No driver knows the block: /dev/fpga0 keeps it. */
++	if (candidate == NULL)
++		return;
++
++	/*
++	 * Hands the interrupt over: the device's handler goes, and a wait on
++	 * the interrupt ends.  The line is masked by the removal.
++	 */
++	irq_state = spin_lock_irqsave(&fpga.irq_lock);
++
++	fpga.irq_handed_over = 1;
++	fpga.irq_pending = 0;
++	waitq_wake_all(&fpga.irq_wake);
++
++	spin_unlock_irqrestore(&fpga.irq_lock, irq_state);
++
++	error = kern_irq_unregister(PL_IRQ, pl_interrupt, &fpga);
++	if (error != 0)
++		kern_logf("fpga: interrupt %d not removed (%d)\n", PL_IRQ, error);
++
++	/* The driver takes the window and the interrupt, or leaves the block. */
++	error = candidate->attach(fpga.window, WINDOW_PHYS, WINDOW_BYTES, PL_IRQ);
++	if (error != 0) {
++		kern_logf("fpga: %s did not take the block (%d)\n", candidate->name, error);
++		take_back_interrupt();
++		return;
++	}
++
++	/* The block is the driver's until it is given back. */
++	fpga.block = candidate;
++	kern_logf("fpga: block %08x taken by %s\n", (unsigned)magic, candidate->name);
++}
++
++/*
++ * Gives the block back from its driver: refused while the driver's device
++ * is in use, and waited for a bounded time while an open of it is still
++ * closing.  The device's lock is held.  Returns 0 or EBUSY.
++ */
++static int
++release_block(
++	void)
++{
++	uint64_t deadline;
++	uint64_t now;
++	int busy;
++	int error;
++
++	/* /dev/fpga0 already has the block. */
++	if (fpga.block == NULL)
++		return 0;
++
++	/* Refuses while the driver's device is open. */
++	busy = fpga.block->busy();
++	if (busy) {
++		kern_logf("fpga: %s is in use; close its device first\n", fpga.block->name);
++		return EBUSY;
++	}
++
++	/* Asks the driver to withdraw until it has, or the time is up. */
++	deadline = sched_ticks() + kern_ms_to_ticks(DETACH_WAIT_MS);
++	for (;;) {
++		error = fpga.block->detach();
++		if (error != EBUSY)
++			break;
++
++		/* Gives up at the deadline, or asks again a little later. */
++		now = sched_ticks();
++		if (now >= deadline)
++			break;
++		sched_sleep(now + kern_ms_to_ticks(DETACH_RETRY_MS));
++	}
++
++	/* Reports a withdrawal that still waits for a close; the driver keeps the block. */
++	if (error != 0) {
++		kern_logf("fpga: %s did not give the block back (%d)\n", fpga.block->name, error);
++		return EBUSY;
++	}
++
++	/* The block and its interrupt are the device's again. */
++	kern_logf("fpga: block given back by %s\n", fpga.block->name);
++	fpga.block = NULL;
++	take_back_interrupt();
++
++	/* Succeeded: /dev/fpga0 has the block. */
++	return 0;
++}
++
++/* Installs the device's interrupt handler again, the line masked until a wait. */
++static void
++take_back_interrupt(
++	void)
++{
++	unsigned long irq_state;
++	int error;
++
++	/* The handler counts the block's interrupts again. */
++	kern_irq_mask(PL_IRQ);
++	error = kern_irq_register(PL_IRQ, pl_interrupt, &fpga);
++	if (error != 0)
++		kern_logf("fpga: interrupt %d not taken back (%d)\n", PL_IRQ, error);
++
++	/* Waits may begin again. */
++	irq_state = spin_lock_irqsave(&fpga.irq_lock);
++
++	fpga.irq_handed_over = 0;
++	fpga.irq_pending = 0;
++
++	spin_unlock_irqrestore(&fpga.irq_lock, irq_state);
++}
++
+ /* Reports whether an offset names one register of the window: 1 when it does. */
+ static int
+ window_offset_valid(
+@@ -1045,6 +1337,12 @@ ioctl_reg_write(
+ 		return EIO;
+ 	}
+ 
++	/* A block held by its driver is only read through the device. */
++	if (fpga.block != NULL) {
++		mutex_unlock(&fpga.lock);
++		return EBUSY;
++	}
++
+ 	/* One 32-bit write of the register. */
+ 	kern_mmio_write32(fpga.window + reg.offset, reg.value);
+ 
+@@ -1068,6 +1366,7 @@ ioctl_irq_wait(
+ 	uint64_t deadline;
+ 	uint64_t observed;
+ 	int enabled;
++	int held;
+ 	int error;
+ 
+ 	/* Takes the timeout from the caller. */
+@@ -1078,17 +1377,24 @@ ioctl_irq_wait(
+ 	/* Refuses a wait on a logic that is not enabled: no interrupt can come. */
+ 	mutex_lock(&fpga.lock);
+ 	enabled = fpga.enabled;
++	held = 0;
++	if (fpga.block != NULL)
++		held = 1;
+ 	mutex_unlock(&fpga.lock);
+ 	if (!enabled)
+ 		return EIO;
+ 
++	/* Refuses a wait on an interrupt the block's driver has. */
++	if (held)
++		return EBUSY;
++
+ 	/* Waits under the interrupt's lock, one waiter at a time. */
+ 	deadline = sched_ticks() + kern_ms_to_ticks(request.timeout_ms);
+ 	error = 0;
+ 	irq_state = spin_lock_irqsave(&fpga.irq_lock);
+ 
+-	/* Refuses a second waiter: the count goes to one. */
+-	if (fpga.irq_waiting) {
++	/* Refuses a second waiter, and a wait on an interrupt handed over since the check. */
++	if (fpga.irq_waiting || fpga.irq_handed_over) {
+ 		spin_unlock_irqrestore(&fpga.irq_lock, irq_state);
+ 		return EBUSY;
+ 	}
+@@ -1101,8 +1407,14 @@ ioctl_irq_wait(
+ 	if (fpga.irq_pending == 0)
+ 		kern_irq_unmask(PL_IRQ);
+ 
+-	/* Sleeps until an interrupt is counted, the time is up or a signal comes. */
++	/* Sleeps until an interrupt is counted, the time is up, a signal comes or the line goes. */
+ 	while (fpga.irq_pending == 0) {
++		/* A block driver took the interrupt: no count can come any more. */
++		if (fpga.irq_handed_over) {
++			error = EBUSY;
++			break;
++		}
++
+ 		observed = waitq_sequence(&fpga.irq_wake);
+ 		error = waitq_sleep(&fpga.irq_wake, &fpga.irq_lock, observed, deadline, WAITQ_INTERRUPTIBLE);
+ 		if (error == EAGAIN) {

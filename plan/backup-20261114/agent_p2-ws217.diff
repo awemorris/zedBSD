@@ -1,0 +1,2538 @@
+diff --git a/include/drivers/gpu/gpu-display.h b/include/drivers/gpu/gpu-display.h
+index 11ba6d694f..19e8c8c078 100644
+--- a/include/drivers/gpu/gpu-display.h
++++ b/include/drivers/gpu/gpu-display.h
+@@ -96,4 +96,13 @@ struct drv_gpu_display_ops {
+ /* drv_gpu_display_ops.flags: presentation and the cursor bypass the open's admission. */
+ #define DRV_GPU_DISPLAY_UNGATED	1U
+ 
++/*
++ * drv_gpu_display_ops.flags: the backend shows a primary turned by 180
++ * degrees (GPU_DISPLAY_PRESENT_ROTATE_180, GPU_DISPLAY_PLANE_ROTATE_180) on
++ * the outputs whose query reports GPU_DISPLAY_ROTATE_180, and refuses the
++ * turn with EOPNOTSUPP on any other.  Without it the core refuses the turn
++ * before the backend sees the request.
++ */
++#define DRV_GPU_DISPLAY_ROTATE_180	2U
++
+ #endif
+diff --git a/include/uapi/gpu-display.h b/include/uapi/gpu-display.h
+index be8c476c1f..eb617ad159 100644
+--- a/include/uapi/gpu-display.h
++++ b/include/uapi/gpu-display.h
+@@ -34,12 +34,27 @@
+ 
+ /* gpu_display_info.flags: planes 1 to plane_count - 1 are overlays (GPU_DISPLAY_COMMIT, GPU_DISPLAY_OVERLAY_INFO). */
+ #define GPU_DISPLAY_HAS_OVERLAYS	2048U
++
++/*
++ * gpu_display_info.flags: the primary plane can show its image turned by 180
++ * degrees (GPU_DISPLAY_PRESENT_ROTATE_180, GPU_DISPLAY_PLANE_ROTATE_180).
++ * The cursor and overlay planes are never turned.
++ */
++#define GPU_DISPLAY_ROTATE_180		4096U
+ #define GPU_DISPLAY_FORMAT_BGRA8888	1U
+ #define GPU_DISPLAY_FORMAT_RGBA8888	2U
+ #define GPU_DISPLAY_MODE_ENUMERATE	0U
+ #define GPU_DISPLAY_MODE_VALIDATE	1U
+ #define GPU_DISPLAY_PRESENT_FIFO	1U
+ #define GPU_DISPLAY_PRESENT_BLOB	2U
++
++/*
++ * gpu_display_present.flags, with FIFO (and BLOB): this frame is shown turned
++ * by 180 degrees after the driver has placed it on the output, so pixel
++ * (x, y) of the output shows at (W - 1 - x, H - 1 - y).  A frame without it
++ * is shown unturned.  EOPNOTSUPP when the output lacks GPU_DISPLAY_ROTATE_180.
++ */
++#define GPU_DISPLAY_PRESENT_ROTATE_180	4U
+ #define GPU_DISPLAY_COUNT_ONLY		UINT32_MAX
+ #define GPU_DISPLAY_POWER_ON		0U
+ #define GPU_DISPLAY_POWER_OFF		1U
+@@ -53,6 +68,7 @@
+ /* gpu_display_plane_state.flags (inputs). */
+ #define GPU_DISPLAY_PLANE_SHOWN		1U	/* in the list; clear: hidden, no image read or borrowed */
+ #define GPU_DISPLAY_PLANE_IMAGE		2U	/* handle to format name a new image; clear: keep the image */
++#define GPU_DISPLAY_PLANE_ROTATE_180	4U	/* primary only, with SHOWN: as GPU_DISPLAY_PRESENT_ROTATE_180 */
+ 
+ /* gpu_display_plane_state.result (output). */
+ #define GPU_DISPLAY_PLANE_APPLIED	1U
+diff --git a/plan/ws217/phase009a/phase.md b/plan/ws217/phase009a/phase.md
+new file mode 100644
+index 0000000000..4ed86bcf37
+--- /dev/null
++++ b/plan/ws217/phase009a/phase.md
+@@ -0,0 +1,46 @@
++<!-- awesome-plan project=zedbsd record=ws217-p009a -->
++
++# ws217-p009a: UAPI の 180° の定数・ops の印・核の検査
++
++Parent: [WS217](../ws.md)
++Status: in-progress（実装済み・試験未実施。2026-10-29 P2、q1680-i01。実機・QEMU は範囲外、build と host 試験まで。cleared にしない）
++Disposition: normal
++Primary Milestone: MG006（WS から継承）
++Queue / attempts: q1680-i01（P2、worktree `/home/awe/zedBSD-worktrees/p2-ws217`、branch `agent/p2-ws217`、基点 main `d23ab8838`）。
++ユーザーの指示（原文 2026-10-29）「作業の手が空いてしまったら、テストなしで実装だけ進める戦略で、残っているWSのphaseをまんべんなく進めましょう。」
++Purpose / goal: [design-v5.md](../design-v5.md) A2 の p009a。UAPI の 3 つの定数と ops の印 `DRV_GPU_DISPLAY_ROTATE_180`、核の検査（登録・present・commit）を純粋な関数にして host 試験。
++印を立てる driver はまだ無いので、既存の driver の挙動は変わらない（どの ops にも印が無く、`ROTATE_180` の present・commit は核が EOPNOTSUPP で断る）。
++Prerequisites: p009-1（PRM の確認、済み）。
++
++## 1. 実装（commit `ff15539e6`）
++
++| file | 内容 |
++| --- | --- |
++| `include/uapi/gpu-display.h` | `GPU_DISPLAY_ROTATE_180 4096U`（info.flags）、`GPU_DISPLAY_PRESENT_ROTATE_180 4U`（present.flags）、`GPU_DISPLAY_PLANE_ROTATE_180 4U`（plane_state.flags、primary だけ・SHOWN と一緒）。意味は p001 第 4 版 §5.1 のまま。`GPU_ABI_VERSION`・struct は不変 |
++| `include/drivers/gpu/gpu-display.h` | `DRV_GPU_DISPLAY_ROTATE_180 2U`（kernel の内部の面、HAL ではない）。印のある backend は query が `GPU_DISPLAY_ROTATE_180` を出さない出力で EOPNOTSUPP を答える、と契約に書いた |
++| `src/drivers/gpu/gpu-display-flags.h`（新） | 核の純粋な検査（`static inline`）: `gpu_display_ops_flags_check`（既知の印は UNGATED・ROTATE_180）、`gpu_display_present_flags_check`（FIFO・FIFO\|BLOB、それぞれ \|ROTATE_180、印の無い ops は EOPNOTSUPP）、`gpu_display_plane_flags_check`（既知の bit、overlay の ROTATE と隠れた primary の ROTATE は EINVAL）、`gpu_display_plane_rotation_check`（印の無い ops は EOPNOTSUPP） |
++| `src/drivers/gpu/gpu.c` | `gpu_ops_validate`（登録）・`GPU_DISPLAY_PRESENT`（PRESENT_SYNC も同じ所を通る）・`gpu_commit_plane_check`・`gpu_commit_ioctl`（`gpu_commit_check` の後、ops を見て）で上の関数を呼ぶ |
++| `src/drivers/gpu/tests/host-display-flags-test.c`（新）、`plan/ws217/tests/host-gpu-display-flags.sh`（新） | 上の 4 つの関数の host 試験（34 項）。review m6 に沿い試験は `src/drivers/gpu/tests/` に置いた。WS の完了の後も回帰に使うなら Q1 が runner を `plan/tools/` に移し tools.md に登録する |
++
++判断（推しで決めた所、Q1 へ報告）:
++- 検査は新しい `.c` ではなく header の `static inline` にした。`.c` を足すと `Makefile` の `KERN_GPU_SOURCES` と `platform/arm64/vmunix.mk`（3 か所）・`platform/riscv64/vmunix.mk` の共有の build の list を変える要る。header なら build の list は変わらない。
++- EINVAL（形の誤り）を EOPNOTSUPP（印が無い）より先に判定する。commit は全部の plane の形の検査（`gpu_commit_check`）の後で印を見る。
++
++## 2. 確かめた事（2026-10-29）
++
++| 確かめ | コマンド | 結果 |
++| --- | --- | --- |
++| 核の host 試験（ASan/UBSan、`-Wall -Wextra -Werror`） | `sh plan/ws217/tests/host-gpu-display-flags.sh build/p009a-host` | `host-display-flags-test: 34 checks, 0 failures` |
++| amd64 vmunix | `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=build/p009a build/p009a/vmunix` | exit 0、warning 0、`amd64 vmunix check: PASS` |
++| arm64（rpi4）vmunix | `make ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/p009a-rpi4 build/p009a-rpi4/vmunix` | exit 0、warning 0、`arm64 vmunix check: PASS` |
++| riscv64（visionfive2）vmunix | `make ZEDBSD_CONFIG=config/ci/config-visionfive2.mk BUILD=build/p009a-vf2 build/p009a-vf2/vmunix` | exit 0、warning 0（link まで） |
++| `git diff --check` | 変えた file | 出力なし |
++
++## 3. 未実施
++
++- QEMU・実機の試験（範囲外。既存の present・commit の挙動が変わらない事の起動の回帰も未実施）。
++- 既存の venus・bcm2711・ghci の driver の present の flags の検査（`request->flags != FIFO` など）は変えていない（核が印の無い ops の ROTATE を先に断るので届かない）。
++
++## 4. 残り
++
++p009b（i915 xd・xd9 が印を立てる）、p009c（libvulkan）。
+diff --git a/plan/ws217/phase009b/phase.md b/plan/ws217/phase009b/phase.md
+new file mode 100644
+index 0000000000..0a8026c1d2
+--- /dev/null
++++ b/plan/ws217/phase009b/phase.md
+@@ -0,0 +1,71 @@
++<!-- awesome-plan project=zedbsd record=ws217-p009b -->
++
++# ws217-p009b: i915 の 180° の scanout（xd と xd9）
++
++Parent: [WS217](../ws.md)
++Status: in-progress（実装済み・試験未実施。2026-10-29 P2、q1680-i01。5330・SV7 の実機の回帰は未実施。guardrail「i915 の display の書き換えは 5330 で動く段ごとに」により、5330 で通るまで main に入れない。cleared にしない）
++Disposition: normal
++Primary Milestone: MG006（WS から継承）
++Queue / attempts: q1680-i01（P2、worktree `/home/awe/zedBSD-worktrees/p2-ws217`、branch `agent/p2-ws217`、基点 main `d23ab8838`、p009a の上）
++Purpose / goal: [design-v5.md](../design-v5.md) の r2 の A1・A3〜A6・A8・A11 の i915 の部分。display 11〜13 の xd（resident と head）と display 9 の xd9（firmware の plane の flip）で、`GPU_DISPLAY_PRESENT_ROTATE_180` の frame を plane の hardware の回転で出す。
++Prerequisites: p009a（UAPI と核の検査）。
++
++## 1. 実装
++
++### 1.1 xd（display 11〜13）
++
++| 所 | 内容 |
++| --- | --- |
++| `intel/display-regs-xd.h` | `I915_XD_PLANE_CTL_ROTATE 0x3`・`I915_XD_PLANE_CTL_ROTATE_180 0x2`。出典は TGL・ACM の PRM Vol 2c の PLANE_CTL（Plane Rotation）を Doc Ref つきの複数行の block で（m10） |
++| `xd-pipe.h/.c` | `struct i915_xd_plane` に `rotation`（度数）。`drv_i915_xd_plane_words` は 180 の時だけ rotation の field に 10b、他の値（90 など）は回さない（m14） |
++| `xd-screen.h/.c` | `struct i915_xd_flip` に `current_rotation`・`pending_rotation`。`drv_i915_xd_flip_arm(flip, surface, rotation)`、judge・idle・settled が latch の時に回転も写す（stuck では写さない、A4）。純粋な関数 `drv_i915_xd_flip_target(idle, armed_rotation, rotation)` → `I915_XD_TARGET_BACK`・`_ARMED`・`_SETTLE`（A5） |
++| `xd-picture.h/.c` | config に `fb_rotation`（prepare が `flip.current_rotation` と plane に入れる、A1）、status に `cur_rotation`・`pend_rotation`、`drv_i915_xd_picture_flip`／`_flip_nowait` に `rotation`、新しい `drv_i915_xd_picture_rotation(pictures, screen)`（armed なら pending の、でなければ表示中の回転）。flip の arm で回転が表示中と違う時だけ `i915: display screen N: plane rotate=R` を log（m13） |
++| `worker.h` | `struct i915_worker_present` に `rotation` |
++| `present.h/.c` | `drv_i915_present(..., rotation)`（呼び手 1 つ）、`i915_present_shared`・`i915_present_head` の copied の経路で `request->flags` から item に（A3）。`i915_present_target(display, rotation, &flip)` は `drv_i915_xd_flip_target` で選び、SETTLE なら `drv_i915_xd_picture_flip_settle` で待ってから back に（A5、`I915_PRESENT_NO_VSYNC=1` の build だけで届く経路）。`i915_present_flip(display, publish, rotation)`。`drv_i915_lcd_resident_flip`（window の終わりの buffer A への flip back）は表示中の回転で flip（A3・M2） |
++| `resident.c`・`display-internal.h` | window の終わりに relight なら `display->window.kept_rotation` に表示中の回転を残し、次の点灯の `env->cfg.fb_rotation` に。buffer を作り直す点灯は 0（A1） |
++| `head.c`・`internal.h` | head の item の回転で target・flip（A5 も同じ）。`drv_i915_head_stop(keep=1)` は表示中の回転を `head->kept_rotation` に残し、`i915_head_light_once` が dormant の buffer で点ける時に `head->cfg.fb_rotation` に。新しい buffer は 0（A1） |
++| `display.c` | `i915_display_ops` に `DRV_GPU_DISPLAY_ROTATE_180`、`i915_display_query`（resident）と `i915_display_other_query`（head の候補）の両方に `GPU_DISPLAY_ROTATE_180`（m4）。i915_display_ops の出力は全部 xd の universal plane（Gen9 は bootfb の ops） |
++| `display-internal.h` | scanout の buffer の注記の「no rotation」を直した |
++
++### 1.2 xd9（display 9、A6）
++
++| 所 | 内容 |
++| --- | --- |
++| `intel/display-regs-xd9.h` | `I915_XD9_PLANE_CTL_ROTATE_180 0x2`（既存の KBL PRM の block の中、`ROTATE_MASK` の隣） |
++| `xd-pipe.c`・`xd-pipe.h` | `drv_i915_xd9_plane_flip(io, pipe, surf, stride, rotation)`: firmware の PLANE_CTL を読み、rotation の field だけを替えて、変わる時だけ書く → stride → SURF（SURF の書き込みが両方を arm する） |
++| `xd9-flip.c` | present が `request->flags` から回転を arm に渡す。restore（lease の終わり・flip の停止）は 0 で arm し firmware の値（readout は回った plane を引き取らないので firmware の rotation は 0）に戻す |
++| `bootfb.c` | ops に `DRV_GPU_DISPLAY_ROTATE_180`。query は flip を使う時（`bootfb->flip`）だけ `GPU_DISPLAY_ROTATE_180`。copy の経路・xd9 の外部 display・flip が途中で諦められた frame の `ROTATE_180` は EOPNOTSUPP（copy は回せない） |
++
++### 1.3 推しで決めた所（Q1 へ報告）
++
++- A5 の「回転が違えば settle して flip」の判定を `xd-screen.c` の純粋な関数にし、resident と head の両方で使った。
++- window の終わりの flip back（relight でない時）は buffer A の絵の回転ではなく表示中（B）の回転で出す。A は同じ lease の 1 つ前の絵で、直後に出力は止まる（最大 1 frame）。
++- xd9 で flip が途中で失敗し copy に戻った後の 180 の frame は EOPNOTSUPP（CPU・GPU の copy で回して出す案は範囲を広げるので採らない）。その後の query は `GPU_DISPLAY_ROTATE_180` を出さない。
++- 同じ buffer への回転だけの変化は今まで通り SAME で断る（present は常に表示していない buffer に描くので当たらない）。
++
++## 2. 確かめた事（2026-10-29、host と build だけ）
++
++| 確かめ | コマンド | 結果 |
++| --- | --- | --- |
++| xd の host 試験の全部（ASan/UBSan、source の監査） | `sh plan/tools/i915-display/run-xd-host-tests.sh build/p009b-host3` | 下の §2.1 |
++| Gen9 の host 試験 | `sh plan/ws237/tests/run-gen9-{flip,backlight,mode,modeset,outputs}-host-test.sh` | flip 48・backlight 21・mode 61・modeset 77・outputs 29 checks、全部 0 failures |
++| amd64 vmunix | `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=build/p009a build/p009a/vmunix` | exit 0、warning 0、`amd64 vmunix check: PASS` |
++
++### 2.1 足した host 試験の項
++
++- `host-xd-pipe-test.c`: display 11・12・13 で 180 の PLANE_CTL が 10b（他の bit は今と同じ: 0x84000002・0x94000002）、display 13 の 90 は回さない、xd9 の flip が firmware の PLANE_CTL の rotation の field だけを替え、0 で戻す。
++- `host-xd-screen-test.c`: arm の pending の回転、idle・judge・settled の latch で current に写る、stuck・not settled では残る、`drv_i915_xd_flip_target` の 6 通り。既存の `drv_i915_xd_flip_arm` の呼びの追従。
++- `host-xd-picture-test.c`: 180 の flip_nowait が PLANE_CTL に 10b を書き `drv_i915_xd_picture_rotation` が 180、latch の後 `cur_rotation` 180、0 の waited flip で 0 に戻る、dark の後に `fb_rotation = 180` の config で prepare・light すると plane が 180 で arm される（A1 の keep の後の点灯）。既存の 3 つの呼びの追従。
++
++## 3. 未実施
++
++- 5330（display 13）・SV7（display 9.5）・5320（display 12）の実機（A8 の vkdemo `--transform=180` の間の PLANE_CTL の bit 1:0・SURFLIVE、終わりの後の 00b、DC の idle の後、head の 180、hold の経路）。T1 か担当の script で、Q1 の機械の割当の後（Q217-3）。
++- QEMU（i915 は QEMU で動かない）。
++- display 11（Ice Lake）の PRM の確認（m7）: host 試験は TGL と同じ field を仮定。
++- display 14 以上が xd に入らない門の所在（m8）: 調べていない。
++- DC5/DC6 の後に PLANE_CTL の回転が保たれるか（PRM に記述なし）。
++- m17（prepare を経ずに light を繰り返す経路）: head は light_once が毎回 prepare し、失敗の後は buffer を返して新しく作る（回転 0）ことを読んだ。resident の run の再試行は読んでいない。
++
++## 4. 残り
++
++p009c（libvulkan・vkdemo）。実機の回帰の後に Q1 が merge。
+diff --git a/plan/ws217/phase009c/phase.md b/plan/ws217/phase009c/phase.md
+new file mode 100644
+index 0000000000..61593ed058
+--- /dev/null
++++ b/plan/ws217/phase009c/phase.md
+@@ -0,0 +1,52 @@
++<!-- awesome-plan project=zedbsd record=ws217-p009c -->
++
++# ws217-p009c: libvulkan の display の transform 180° と vkdemo `--transform=180`
++
++Parent: [WS217](../ws.md)
++Status: in-progress（実装済み・試験未実施。2026-10-29 P2、q1680-i01。build だけ。cleared にしない）
++Disposition: normal
++Primary Milestone: MG006（WS から継承）
++Queue / attempts: q1680-i01（P2、worktree `/home/awe/zedBSD-worktrees/p2-ws217`、branch `agent/p2-ws217`、p009a・p009b の上）。
++Q217-2 の順（WS309 の WSI の段との順）は 2026-10-29 Q1「進めて良い。P1 は今 WS309 p011（compositor の手書き）で libvulkan の WSI は触っていない（WS309 の p015・V2 swapchain が後で WSI を触るので、変更は小さく 1 commit に）」。
++Purpose / goal: p001 第 4 版 §5.3 と design-v5 §3・A8・A11（m5）。display の `supportedTransforms` に 180、primary の surface の `transform = ROTATE_180` を受け、その surface の present と commit に `ROTATE_180` の flag を付ける。surface の capabilities と swapchain は IDENTITY のまま（S11）。
++
++## 1. 実装（libvulkan は 1 commit）
++
++| file | 内容 |
++| --- | --- |
++| `userland/desktop/libvulkan/wsi-internal.h` | `VULKAN_WSI_OUTPUT_ROTATE_180 64U` |
++| `userland/desktop/libvulkan/wsi-display.c` | query の写し: `GPU_DISPLAY_ROTATE_180` → `VULKAN_WSI_OUTPUT_ROTATE_180`。present の blob（`GPU_DISPLAY_PRESENT_FIFO \| BLOB`）と copied（`FIFO`）の 2 か所、commit の primary（`request.planes[0]`、`display_overlay_state` の中ではなく呼び手で、L28）に、`lease->surface->display_info.transform == ROTATE_180` なら `ROTATE_180`。cursor・overlay の present は元から primary の present に来ない |
++| `userland/desktop/libvulkan/wsi.c` | `vkGetPhysicalDeviceDisplayPropertiesKHR` の `supportedTransforms` に、出力の印があれば `ROTATE_180`。`vkCreateDisplayPlaneSurfaceKHR` は IDENTITY か、印のある出力の primary（cursor でも overlay でもない）の `ROTATE_180` を受ける。他は `VK_ERROR_INITIALIZATION_FAILED` のまま |
++| `userland/desktop/libvulkan/README.md` | 節「Scanout の 180° の回転」: surface の座標は scanout が回す前の画像の座標、capabilities は IDENTITY、`preTransform = IDENTITY` |
++| `userland/tests/vkdemo/display.c`・`display.h` | `vkdemo_display_open_transform`・`vkdemo_display_open_on_transform`（`transform` を `supportedTransforms` で選び surface に渡す）。今の `vkdemo_display_open`・`_open_on` はそれを IDENTITY で呼ぶ（compositor の `compose.c`・`heads.c` は変えない、M25） |
++| `userland/tests/vkdemo/renderer.c`・`renderer.h`・`main.c` | `vkdemo_initialize(..., rotate180)`、option `--transform=0\|180`（`--offscreen` とは組めない） |
++
++変えていない: `wsi-display.c` の surface の capabilities（`supportedTransforms = currentTransform = IDENTITY`）、`wsi-swapchain.c` の `preTransform != IDENTITY` の断り、libvulkan-compat（Linux・FreeBSD）。
++
++## 2. 確かめた事（2026-10-29、build だけ）
++
++| 確かめ | コマンド | 結果 |
++| --- | --- | --- |
++| amd64 | `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=build/p009c build/p009c/dynamic/libvulkan.so build/p009c/bin/vkdemo build/p009c/bin/wayland` | exit 0、warning 0 |
++| arm64（rpi4）・riscv64（visionfive2）・Linux の Keiland | §2.1 | §2.1 |
++| `git diff --check` | 変えた file | 出力なし |
++
++### 2.1 他の platform の build
++
++| build | コマンド | 結果 |
++| --- | --- | --- |
++| arm64（rpi4）の libvulkan と compositor | `make ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/p009c-rpi4 build/p009c-rpi4/dynamic/libvulkan.so build/p009c-rpi4/bin/wayland` | 1 回目は worktree の新しい arm64 の sysroot の生成と libc の object の `-j` の競合で `errno.h` が無い（変更と無関係）。sysroot ができた後の 2 回目は exit 0、warning 0 |
++| riscv64（visionfive2）の libvulkan と vkdemo | `make ZEDBSD_CONFIG=config/ci/config-visionfive2.mk BUILD=build/p009c-vf2 build/p009c-vf2/dynamic/libvulkan.so build/p009c-vf2/bin/vkdemo` | exit 0、warning 0 |
++| Linux の Keiland（compositor が vkdemo の `display.c` を含む） | `make keiland-linux KEILAND_ASK=n KEILAND_LINUX_BUILD=build/p009c-linux` | exit 0、warning 0（install はしていない） |
++| FreeBSD の Keiland | `make keiland-freebsd KEILAND_ASK=n KEILAND_FREEBSD_BUILD=build/p009c-freebsd` | 未実施と同じ: この host に FreeBSD の `/usr/local/include/libdrm` が無く、header の段で止まる（FreeBSD の guest が要る） |
++| amd64 vmunix（p009b の最後の直しの後） | `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=build/p009a build/p009a/vmunix` | exit 0、warning 0、`amd64 vmunix check: PASS` |
++
++## 3. 未実施
++
++- libvulkan の host 試験: 作っていない。既存の fixture（`plan/ws214/tests/vulkan-overlay-host.c`）は他の WS の物で、present の flags を記録しない。推し: p007 の実機（5330 で vkdemo `--transform=180` の間の PLANE_CTL）で見る。要るなら次の Phase で `plan/ws217/tests/` に fixture を作る（Q1 の判断）。
++- venus-reg（`plan/ws291/tests/venus-reg.sh`、QEMU の Venus guest）: この Queue は QEMU を使わない約束なので流していない。venus の driver は `GPU_DISPLAY_ROTATE_180` を出さないので、libvulkan の変わる所は通らない（読みの判断）。merge の前に Q1 が QEMU を割り当てて流す。
++- 実機（5330・SV7・Pi 4）での vkdemo `--transform=180`。
++
++## 4. 残り
++
++compositor の段（p010 以降）は WS309 の後。
+diff --git a/plan/ws217/tests/host-gpu-display-flags.sh b/plan/ws217/tests/host-gpu-display-flags.sh
+new file mode 100644
+index 0000000000..c45d01d8da
+--- /dev/null
++++ b/plan/ws217/tests/host-gpu-display-flags.sh
+@@ -0,0 +1,12 @@
++#!/bin/sh
++# The display core's flag checks (src/drivers/gpu/gpu-display-flags.h) on the host, under ASan/UBSan.
++#   sh plan/ws217/tests/host-gpu-display-flags.sh [OUT]   (default build/ws217-host)
++# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
++set -e
++cd "$(dirname "$0")/../../.."
++OUT=${1:-build/ws217-host}
++mkdir -p "$OUT"
++${CC:-cc} -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \
++	-DKERN_USER_ABI_LP64 -Iinclude -Isrc -I. -idirafter libc/include \
++	-o "$OUT/host-display-flags-test" src/drivers/gpu/tests/host-display-flags-test.c
++"$OUT/host-display-flags-test"
+diff --git a/plan/ws217/ws.md b/plan/ws217/ws.md
+index b73f2af688..ce14b8e091 100644
+--- a/plan/ws217/ws.md
++++ b/plan/ws217/ws.md
+@@ -4,7 +4,7 @@
+ 
+ <!-- awesome-plan-current:start -->
+ Status: incomplete（2026-10-28 ユーザーの回答（クリック）「WS217 を開き直す」: p005（複数 head の回転）・p006（pen・touch と display の結び付け、2026-10-13 ユーザー「画面ごとに向きを持つ、ペン・タッチと画面の結び付ける」）・p009-1・p009〜p012 が未着手で行き先が無いため）。旧: completed（2026-10-27 P3 の精査 q1608、ユーザー「…masterとWSを修正して、completedやcanceledにしてください。」: Settings の回転と Notes の縦長の目的は p002a・p002b・p003・p004 で達成（2026-10-13〜14 Q1、T1-576・T1-592・T1-598・T1-611〜T1-616 PASS））。旧: incomplete（2026-10-18 Q1: Phase を実行済みなので planning から直した。旧: planning（2026-10-13 Q1 作成。P4 が p001 の第 1 版、design-reviewer の [review-1](phase001/review-1.md)（致命的 2・重…。残り・制限: p005（複数 head の回転）・p006（pen と display の結び付け）・p009〜p011（scanout の 180°）は未着手、実機の確認は未実施
+-Resume point（2026-10-29 P5、q1666）: 残りの段は [design-v5.md](design-v5.md)（第 5 版 r2、review [design-v5-review.md](design-v5-review.md) を反映）。順（2026-10-29 Q1 の判断「kernel・libvulkan の p009・p011 を先に。compositor の段は WS309 の構成の確定の後」）: p009a（UAPI・核）→ p009b（i915 xd・xd9、5330・SV7）・p009c（libvulkan、WS309 の WSI の段と順を Q1 が決める）・p011（Pi 4）→ WS309 の後に p010・p005・p006・p012 → p007・p008、計 91 LW。旧 Resume point（2026-10-28 P4、開き直し）: 次は未着手の p009-1（Intel の PRM の確認）・p009〜p011（scanout の 180°）・p005（複数 head）・p006（pen・touch と display の結び付け）・p012（game の session）、その後 p007（確かめ）・p008（規約）。p002a・p002b・p003・p004 は済み（Settings の回転と Notes の縦長、T1-576・T1-592・T1-598・T1-611〜T1-616 PASS）。旧: review-3 の判定で p002a（compositor の中核、turn 無し、open の比較は最初から組）と p009-1（Intel の PRM の確認）は第 4 版の後に始められる。p002b・p009 の実装・p010 以降は review-4 の後。p012（game の session）は D18 の後（game だけで先に実装してよい）。D5（Notes の toolbar の幅）は p007 で測る。Pi 4 の 180° は p011、90°・270° は WS141 p015 の後（D7）。
++Resume point（2026-10-29 P2、q1680-i01）: p009a・p009b・p009c を agent/p2-ws217 に実装（試験未実施、build と host 試験まで）。次は 5330・SV7 の実機の回帰（p009b、guardrail で 5330 を通るまで main に入れない）と venus-reg（p009c）、その後 p011・WS309 の後の compositor の段。旧 Resume point（2026-10-29 P5、q1666）: 残りの段は [design-v5.md](design-v5.md)（第 5 版 r2、review [design-v5-review.md](design-v5-review.md) を反映）。順（2026-10-29 Q1 の判断「kernel・libvulkan の p009・p011 を先に。compositor の段は WS309 の構成の確定の後」）: p009a（UAPI・核）→ p009b（i915 xd・xd9、5330・SV7）・p009c（libvulkan、WS309 の WSI の段と順を Q1 が決める）・p011（Pi 4）→ WS309 の後に p010・p005・p006・p012 → p007・p008、計 91 LW。旧 Resume point（2026-10-28 P4、開き直し）: 次は未着手の p009-1（Intel の PRM の確認）・p009〜p011（scanout の 180°）・p005（複数 head）・p006（pen・touch と display の結び付け）・p012（game の session）、その後 p007（確かめ）・p008（規約）。p002a・p002b・p003・p004 は済み（Settings の回転と Notes の縦長、T1-576・T1-592・T1-598・T1-611〜T1-616 PASS）。旧: review-3 の判定で p002a（compositor の中核、turn 無し、open の比較は最初から組）と p009-1（Intel の PRM の確認）は第 4 版の後に始められる。p002b・p009 の実装・p010 以降は review-4 の後。p012（game の session）は D18 の後（game だけで先に実装してよい）。D5（Notes の toolbar の幅）は p007 で測る。Pi 4 の 180° は p011、90°・270° は WS141 p015 の後（D7）。
+ Primary Milestone: MG006
+ Related Milestones: なし
+ <!-- awesome-plan-current:end -->
+@@ -33,6 +33,9 @@ Related Milestones: なし
+ | [p002b](phase002b/phase.md) | turn: turn.image・2 つの pass・pipeline（`turn.vert`＋既存の `quad.frag`、NEAREST）・CLEAR/LOAD の選び方、damage（turn.image の age と swapchain の物理の矩形）、scene/backdrop/layers/glass の論理の大きさ、`kwl_output_select_rotation`／`kwl_output_apply_rotation`（review-4 S12、先に作る・park と cursor の hold・同じ物理の点の pointer・大きさが同じなら作り直さない・保存）、open の turn の資源の失敗 → 0、試験の image だけの `--rotate-policy` と shot.c の `POLICY`・`ROTATE`・`SHOT partial`、GPU の vendor で既定の turn（Pi 4 は無効） | cleared（2026-10-14、T1-583・T1-592） | p002a |
+ | p009-1 | Intel の公開の PRM で linear の 180 を確かめる段（引用と出典を p009 の phase.md に） | **planned（review-3 の判定で開始可）** | p001 |
+ | p009 | scanout の 180°（kernel・libvulkan）: UAPI の 3 つの定数と ops の印 `DRV_GPU_DISPLAY_ROTATE_180`、核の検査、i915（能力の印、**worker の present の item の `rotation`** → flip → `hw.rotation`）、libvulkan（display の `supportedTransforms` と surface の transform だけ、capabilities と swapchain は不変、present/commit の flag）、vkdemo の `open_on` の transform | 案（review-4 の後。p002 と並行可。実機 5330・5320 で受け入れ） | p009-1 |
++| [p009a](phase009a/phase.md) | UAPI の 3 つの定数・ops の印・核の検査（純粋な関数＋host 試験）（design-v5 A2） | in-progress（実装済み・試験未実施、2026-10-29 P2 q1680-i01） | p009-1 |
++| [p009b](phase009b/phase.md) | i915 xd（A1・A3〜A5）と xd9（A6）、host 試験（A8）、5330・SV7 の回帰 | in-progress（実装済み・試験未実施、2026-10-29 P2 q1680-i01。5330 の回帰まで main に入れない） | p009a |
++| [p009c](phase009c/phase.md) | libvulkan・vkdemo（第 4 版 §5.3、A8） | in-progress（実装済み・試験未実施、2026-10-29 P2 q1680-i01。順は 2026-10-29 Q1「進めて良い」） | p009a、WS309 の WSI の段との順（Q217-2） |
+ | p010 | compositor の scanout の 180° と能力の policy: `scanout_rotation`、`hw180`（display の property）、surface の transform、REOPEN の経路（heads も閉じる）、`rotations` の mask と why（`WHY_RESOURCE`）、保存の角度を当てられない時の 1 つの規則 | 案 | p002b、p009 |
+ | [p003](phase003/phase.md) | 入力（anchor）: `struct kwl_cursor_geometry`、`kwl_output_absolute()`、touch・tablet・受け箱の置き換え、ROTATED の手順の geometry と同じ物理の点、direct の分類（touch screen と絶対の pointer は常に、pen は property）、傾き、kernel の hid-input の property の規則（BUG-267 の fixture）、注入の pen の DIRECT と `PEN_POINTER`（D12）、Linux・FreeBSD の backend の `EVIOCGPROP`（D11） | cleared（2026-10-14、T1-592・598・599） | p002b（p010 と並行可） |
+ | [p004](phase004/phase.md) | protocol・libkeiland・Settings の回転: version 34 の wire の全部（requests 7・events 6、`rotation` は選択の値、`why` の 4 bit）と KL_VERSION の次の API の全部、compositor は `set_rotation`・`rotation`・`rotations` を実装し `bind_touch`・`listen_touch` は UNSUPPORTED、`page-display.c` の 4 つの絵と理由の文、shown でない display の論理の snapshot、`keiland-desktop` の policy の file | cleared（2026-10-14、T1-611・613・614・616） | p002b、p003 |
+diff --git a/src/drivers/gpu/gpu-display-flags.h b/src/drivers/gpu/gpu-display-flags.h
+new file mode 100644
+index 0000000000..f998a5fe8e
+--- /dev/null
++++ b/src/drivers/gpu/gpu-display-flags.h
+@@ -0,0 +1,119 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The display core's checks of the flags a backend declares and a request carries.
++ */
++
++#ifndef DRIVERS_GPU_DISPLAY_FLAGS_H
++#define DRIVERS_GPU_DISPLAY_FLAGS_H
++
++#include <drivers/gpu/gpu-display.h>
++#include <uapi/errno.h>
++#include <stdint.h>
++
++/* Every flag of drv_gpu_display_ops.flags this core honors. */
++#define GPU_DISPLAY_OPS_KNOWN_FLAGS	(DRV_GPU_DISPLAY_UNGATED | DRV_GPU_DISPLAY_ROTATE_180)
++
++/* Every flag of gpu_display_plane_state.flags a commit may carry. */
++#define GPU_DISPLAY_PLANE_KNOWN_FLAGS	(GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_IMAGE | GPU_DISPLAY_PLANE_ROTATE_180)
++
++/*
++ * Checks the flags of a backend's display operations at registration.
++ *
++ * A flag this core does not know would be a promise nobody keeps.
++ */
++static inline int
++gpu_display_ops_flags_check(
++	uint32_t ops_flags)
++{
++	/* Refuses a flag this core cannot honor. */
++	if ((ops_flags & ~GPU_DISPLAY_OPS_KNOWN_FLAGS) != 0U)
++		return EINVAL;
++
++	/* Succeeded: every declared flag is one the core honors. */
++	return 0;
++}
++
++/*
++ * Checks a present's flags against the backend's display operations.
++ *
++ * A present is FIFO, optionally BLOB, optionally turned by 180 degrees.
++ * The turn reaches only a backend that declares it can show one; for any
++ * other the request is refused before the backend sees it, so no backend
++ * ignores the flag or answers it differently.
++ */
++static inline int
++gpu_display_present_flags_check(
++	uint32_t flags,
++	uint32_t ops_flags)
++{
++	uint32_t mode;
++
++	/* The mode without the turn is FIFO or FIFO with BLOB. */
++	mode = flags & ~GPU_DISPLAY_PRESENT_ROTATE_180;
++	if (mode != GPU_DISPLAY_PRESENT_FIFO && mode != (GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB))
++		return EINVAL;
++
++	/* A turned frame needs a backend that can show one. */
++	if ((flags & GPU_DISPLAY_PRESENT_ROTATE_180) != 0U && (ops_flags & DRV_GPU_DISPLAY_ROTATE_180) == 0U)
++		return EOPNOTSUPP;
++
++	/* Succeeded: the backend may take the frame with these flags. */
++	return 0;
++}
++
++/*
++ * Checks one commit plane's flags, without the backend.
++ *
++ * Only the primary may be turned, and only while it is shown.
++ */
++static inline int
++gpu_display_plane_flags_check(
++	uint32_t plane,
++	uint32_t flags)
++{
++	/* Refuses a flag the commit does not define. */
++	if ((flags & ~GPU_DISPLAY_PLANE_KNOWN_FLAGS) != 0U)
++		return EINVAL;
++
++	/* An unturned plane needs nothing more. */
++	if ((flags & GPU_DISPLAY_PLANE_ROTATE_180) == 0U)
++		return 0;
++
++	/* Overlays are never turned. */
++	if (plane != GPU_DISPLAY_PLANE_PRIMARY)
++		return EINVAL;
++
++	/* A hidden primary has no picture to turn. */
++	if ((flags & GPU_DISPLAY_PLANE_SHOWN) == 0U)
++		return EINVAL;
++
++	/* Succeeded: the turn applies to the shown primary. */
++	return 0;
++}
++
++/*
++ * Checks a commit plane's turn against the backend's display operations.
++ *
++ * Called once the request's own fields are checked: a turn reaches only a
++ * backend that declares it can show one.
++ */
++static inline int
++gpu_display_plane_rotation_check(
++	uint32_t flags,
++	uint32_t ops_flags)
++{
++	/* A turned primary needs a backend that can show one. */
++	if ((flags & GPU_DISPLAY_PLANE_ROTATE_180) != 0U && (ops_flags & DRV_GPU_DISPLAY_ROTATE_180) == 0U)
++		return EOPNOTSUPP;
++
++	/* Succeeded: the backend may take the plane's state. */
++	return 0;
++}
++
++#endif
+diff --git a/src/drivers/gpu/gpu.c b/src/drivers/gpu/gpu.c
+index 06766ff2a8..9afe20a51d 100644
+--- a/src/drivers/gpu/gpu.c
++++ b/src/drivers/gpu/gpu.c
+@@ -41,6 +41,7 @@
+ 
+ #include <uapi/errno.h>
+ #include <limits.h>
++#include "gpu-display-flags.h"
+ 
+ #define GPU_DEVICE_BASE		0x00090000U
+ #define GPU_RESOURCE_STORAGE	1U
+@@ -1027,6 +1028,8 @@ static int
+ gpu_ops_validate(
+ 	const struct drv_gpu_ops *ops)
+ {
++	int error;
++
+ 	/* A missing or incompatible table cannot be dispatched safely. */
+ 	if (ops == NULL)
+ 		return EINVAL;
+@@ -1274,11 +1277,12 @@ gpu_ops_validate(
+ 	     ops->display->cursor_hide == NULL))
+ 		return EINVAL;
+ 
+-	/* Ungated presentation is the only defined flag, and it comes with its adoption wait. */
++	/* Ungated presentation and the 180-degree turn are the defined flags; ungated comes with its adoption wait. */
+ 	if (ops->display != NULL) {
+ 		/* An unknown flag cannot be honored by this core. */
+-		if ((ops->display->flags & ~DRV_GPU_DISPLAY_UNGATED) != 0U)
+-			return EINVAL;
++		error = gpu_display_ops_flags_check(ops->display->flags);
++		if (error != 0)
++			return error;
+ 
+ 		/* A present that does not wait needs the separate wait. */
+ 		if ((ops->display->flags & DRV_GPU_DISPLAY_UNGATED) != 0U && ops->display->adoption_wait == NULL)
+@@ -3952,11 +3956,14 @@ gpu_display_ioctl(
+ 		/* Packed rows must occupy only live ordinary storage in this session. */
+ 		if (request.present.lease == 0 ||
+ 		    request.present.generation == 0 ||
+-		    request.present.sequence != 0 ||
+-		    (request.present.flags != GPU_DISPLAY_PRESENT_FIFO &&
+-		     request.present.flags != (GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB)))
++		    request.present.sequence != 0)
+ 			return EINVAL;
+ 
++		/* FIFO, optionally BLOB, and a turn only for a backend that shows one. */
++		error = gpu_display_present_flags_check(request.present.flags, ops->flags);
++		if (error != 0)
++			return error;
++
+ 		/* Bounds packed row arithmetic before checking any resource extent. */
+ 		if (request.present.width == 0 ||
+ 		    request.present.width > UINT32_MAX / 4U ||
+@@ -4335,6 +4342,13 @@ gpu_commit_ioctl(
+ 	if (error != 0)
+ 		return error;
+ 
++	/* A turned primary reaches only a backend that shows one. */
++	for (index = 0; index < request.count; index++) {
++		error = gpu_display_plane_rotation_check(request.planes[index].flags, ops->flags);
++		if (error != 0)
++			return error;
++	}
++
+ 	/* Fences need the shared completion capability of this node. */
+ 	fenced = 0U;
+ 	if (request.signal_fd >= 0)
+@@ -4477,14 +4491,19 @@ static int
+ gpu_commit_plane_check(
+ 	const struct gpu_display_plane_state *state)
+ {
+-	/* An existing plane, the defined flags, and the result zero on input. */
++	int error;
++
++	/* An existing plane, and the result zero on input. */
+ 	if (state->plane > GPU_DISPLAY_OVERLAY_MAX)
+ 		return EINVAL;
+-	if ((state->flags & ~(GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_IMAGE)) != 0U)
+-		return EINVAL;
+ 	if (state->result != 0U || state->serial == 0U)
+ 		return EINVAL;
+ 
++	/* The defined flags; only the shown primary is turned. */
++	error = gpu_display_plane_flags_check(state->plane, state->flags);
++	if (error != 0)
++		return error;
++
+ 	/* A wait fence has an exact generation, and none has none. */
+ 	if (state->wait_fd < -1)
+ 		return EINVAL;
+diff --git a/src/drivers/gpu/i915/display/bootfb.c b/src/drivers/gpu/i915/display/bootfb.c
+index db17feedf2..a9656749f3 100644
+--- a/src/drivers/gpu/i915/display/bootfb.c
++++ b/src/drivers/gpu/i915/display/bootfb.c
+@@ -160,7 +160,10 @@ static int i915_bootfb_events(void *device, void *session, uint64_t *sequence);
+  * sequence is the panel's, which reads only the lease and, without a
+  * panel, never touches the hardware.  There is no display control (no power,
+  * no refresh), no cursor plane, and presents wait under the open's
+- * admission (no DRV_GPU_DISPLAY_UNGATED).  The table never changes.
++ * admission (no DRV_GPU_DISPLAY_UNGATED).  The panel turns a frame by 180
++ * degrees while its frames are flipped onto the firmware's plane
++ * (DRV_GPU_DISPLAY_ROTATE_180: its query says when); the copies and the
++ * external displays refuse a turned frame.  The table never changes.
+  */
+ static const struct drv_gpu_display_ops i915_bootfb_ops = {
+ 	i915_bootfb_query,
+@@ -176,7 +179,7 @@ static const struct drv_gpu_display_ops i915_bootfb_ops = {
+ 	NULL,
+ 	NULL,
+ 	NULL,
+-	0,
++	DRV_GPU_DISPLAY_ROTATE_180,
+ 	NULL,
+ 	NULL
+ };
+@@ -668,6 +671,10 @@ i915_bootfb_query(
+ 	if (owner_device->display->rd.active)
+ 		request->flags |= GPU_DISPLAY_ACTIVE;
+ 
++	/* The firmware's plane turns a flipped frame by 180 degrees; a copied one is not turned. */
++	if (bootfb->flip)
++		request->flags |= GPU_DISPLAY_ROTATE_180;
++
+ 	/* One plane, the two packed formats, and the largest source taken. */
+ 	request->plane_count = 1U;
+ 	request->formats = GPU_DISPLAY_FORMAT_BGRA8888 | GPU_DISPLAY_FORMAT_RGBA8888;
+@@ -924,14 +931,22 @@ i915_bootfb_present(
+ 	int flipped;
+ 	int flip_failed;
+ 	int external;
++	int turned;
+ 	int error;
+ 
+ 	owner_device = device;
+ 	rd = &owner_device->display->rd;
+ 	bootfb = &i915_bootfb_display;
+ 
+-	/* An external display's frame is the node's (xd9-node.c). */
++	/* Only the flips onto the firmware's plane turn a frame. */
++	turned = 0;
++	if ((request->flags & GPU_DISPLAY_PRESENT_ROTATE_180) != 0U)
++		turned = 1;
++
++	/* An external display's frame is the node's (xd9-node.c), never turned. */
+ 	external = drv_i915_xd9_node_owns_lease(request->lease);
++	if (external && turned)
++		return EOPNOTSUPP;
+ 	if (external) {
+ 		error = drv_i915_xd9_node_present(device, session, object, request);
+ 		if (error != 0)
+@@ -955,6 +970,12 @@ i915_bootfb_present(
+ 		return ESTALE;
+ 	}
+ 
++	/* A copied frame cannot be turned. */
++	if (turned && !bootfb->flip) {
++		mutex_unlock(&rd->mutex);
++		return EOPNOTSUPP;
++	}
++
+ 	/* Flips the frame onto the firmware's plane. */
+ 	flipped = 0;
+ 	error = 0;
+@@ -977,6 +998,12 @@ i915_bootfb_present(
+ 		}
+ 
+ 		i915_bootfb_flip_failed(owner_device);
++
++		/* The copies that take over do not turn a frame. */
++		if (turned) {
++			mutex_unlock(&rd->mutex);
++			return EOPNOTSUPP;
++		}
+ 	}
+ 
+ 	/* A frame that was not flipped is copied by the GPU and then the CPU. */
+diff --git a/src/drivers/gpu/i915/display/display-internal.h b/src/drivers/gpu/i915/display/display-internal.h
+index 353b55b2a3..315d5de210 100644
+--- a/src/drivers/gpu/i915/display/display-internal.h
++++ b/src/drivers/gpu/i915/display/display-internal.h
+@@ -163,9 +163,10 @@ struct i915_pch_bridge_ops {
+ /*
+  * One scanout buffer: a framebuffer the display engine reads.
+  *
+- * The buffer is narrow on purpose: XRGB8888, linear rows, no rotation, no
+- * scaling, no compression and one colour plane.  A linear buffer needs no
+- * display page table, so it is bound in the ordinary GGTT.
++ * The buffer is narrow on purpose: XRGB8888, linear rows, no scaling, no
++ * compression and one colour plane; the plane may turn it by 180 degrees,
++ * which keeps the rows linear.  A linear buffer needs no display page
++ * table, so it is bound in the ordinary GGTT.
+  *
+  * It keeps apart things that have different owners:
+  *   backing      DMA pages and their size                       (gt_mem object)
+@@ -470,11 +471,14 @@ struct i915_present_window {
+ 	 * at once, for two pipes, because a head's first frame came while the
+ 	 * run had no room for it (the first output is lit again when the
+ 	 * second is added).  keep_buffers keeps
+-	 * the resident buffers, and their picture, across that new lighting.
+-	 * Only the worker reads and writes both.
++	 * the resident buffers, and their picture, across that new lighting;
++	 * kept_rotation is the rotation that picture was drawn for (clockwise
++	 * degrees), which the new lighting shows it with.
++	 * Only the worker reads and writes all three.
+ 	 */
+ 	int relight;
+ 	int keep_buffers;
++	uint32_t kept_rotation;
+ 
+ 	/*
+ 	 * Nonzero asks for the same, for the resident output alone, because
+diff --git a/src/drivers/gpu/i915/display/display.c b/src/drivers/gpu/i915/display/display.c
+index 53755d31ec..01a455a3ca 100644
+--- a/src/drivers/gpu/i915/display/display.c
++++ b/src/drivers/gpu/i915/display/display.c
+@@ -176,7 +176,9 @@ static int i915_display_outputs_differ(const struct i915_display_output *one, co
+  * Power and refresh check the display here and are done by
+  * the display control (control.c).  The cursor plane is not used yet
+  * so the cursor operations are absent.  Presents
+- * wait under the open's admission (no DRV_GPU_DISPLAY_UNGATED).
++ * wait under the open's admission (no DRV_GPU_DISPLAY_UNGATED).  Every
++ * output's plane is a display 11 to 13 universal plane, which turns a
++ * frame by 180 degrees (DRV_GPU_DISPLAY_ROTATE_180).
+  * The table never changes.
+  */
+ static const struct drv_gpu_display_ops i915_display_ops = {
+@@ -193,7 +195,7 @@ static const struct drv_gpu_display_ops i915_display_ops = {
+ 	NULL,
+ 	NULL,
+ 	NULL,
+-	0,
++	DRV_GPU_DISPLAY_ROTATE_180,
+ 	NULL,
+ 	NULL
+ };
+@@ -2034,8 +2036,8 @@ i915_display_query(
+ 
+ 	/* The display, by its connector's ID and generation, its state and its formats. */
+ 	(void)drv_i915_display_resident_identity(display, &request->display_id, &request->generation, &connected);
+-	/* Frames are presented from shared resources (present.c), so BLOB is offered. */
+-	request->flags = GPU_DISPLAY_CONNECTED | GPU_DISPLAY_FIFO | GPU_DISPLAY_BLOB;
++	/* Frames are presented from shared resources (present.c), so BLOB is offered; the plane turns a frame by 180 degrees. */
++	request->flags = GPU_DISPLAY_CONNECTED | GPU_DISPLAY_FIFO | GPU_DISPLAY_BLOB | GPU_DISPLAY_ROTATE_180;
+ 	if (display->rd.active)
+ 		request->flags |= GPU_DISPLAY_ACTIVE;
+ 
+@@ -2695,10 +2697,10 @@ i915_display_other_query(
+ 	if (error != 0)
+ 		return EINVAL;
+ 
+-	/* Its identity and state. */
++	/* Its identity and state; as the second output its plane turns a frame by 180 degrees. */
+ 	request->display_id = I915_DISPLAY_OTHER_ID + connector;
+ 	request->generation = output.generation;
+-	request->flags = GPU_DISPLAY_FIFO | GPU_DISPLAY_BLOB;
++	request->flags = GPU_DISPLAY_FIFO | GPU_DISPLAY_BLOB | GPU_DISPLAY_ROTATE_180;
+ 
+ 	/*
+ 	 * A connected one: the second output when it is the head, lit or not;
+diff --git a/src/drivers/gpu/i915/display/head.c b/src/drivers/gpu/i915/display/head.c
+index cbc26dddd3..5eb532a703 100644
+--- a/src/drivers/gpu/i915/display/head.c
++++ b/src/drivers/gpu/i915/display/head.c
+@@ -117,8 +117,8 @@ static void i915_head_buffers_release(struct i915_display *display, int confirme
+ static int i915_head_commit_stop(struct i915_display *display);
+ static int i915_head_map(struct i915_display *display, struct i915_ppgtt *vm);
+ static void i915_head_unmap(struct i915_display *display);
+-static struct i915_scanout *i915_head_target(struct i915_display *display, int *flip);
+-static int i915_head_flip(struct i915_display *display, struct i915_scanout *to);
++static struct i915_scanout *i915_head_target(struct i915_display *display, unsigned rotation, int *flip);
++static int i915_head_flip(struct i915_display *display, struct i915_scanout *to, unsigned rotation);
+ static void i915_head_copy(struct i915_scanout *back, const struct i915_worker_present *frame);
+ static enum i915_head_kind i915_head_kind_of(unsigned hpd_kind);
+ static const char *i915_head_kind_name(enum i915_output_kind kind);
+@@ -615,7 +615,11 @@ drv_i915_head_frame(
+ 	}
+ 
+ 	/* The buffer the frame goes into, and whether the head must flip to it. */
+-	back = i915_head_target(display, &flip);
++	back = i915_head_target(display, frame->rotation, &flip);
++	if (back == NULL)
++		return EIO;
++
++	/* Which of the two it is. */
+ 	index = 0U;
+ 	if (back == &head->buf[1])
+ 		index = 1U;
+@@ -647,7 +651,7 @@ drv_i915_head_frame(
+ 
+ 	/* Shows the buffer. */
+ 	if (flip) {
+-		error = i915_head_flip(display, back);
++		error = i915_head_flip(display, back, frame->rotation);
+ 		if (error != 0)
+ 			return EIO;
+ 	}
+@@ -674,6 +678,7 @@ drv_i915_head_stop(
+ 	int keep)
+ {
+ 	struct i915_display_head *head;
++	uint32_t rotation;
+ 	unsigned held;
+ 	int error;
+ 
+@@ -689,6 +694,9 @@ drv_i915_head_stop(
+ 		return;
+ 	}
+ 
++	/* The rotation of the head's last picture, for a stop that keeps it. */
++	rotation = drv_i915_xd_picture_rotation(&display->xd.pictures, I915_XD_PICTURE_HEAD);
++
+ 	/* The plane and the crtc off; the GPU's mappings go before the buffers; the DBUF keeps the head's pipe reserved. */
+ 	error = i915_head_commit_stop(display);
+ 	i915_head_unmap(display);
+@@ -718,6 +726,7 @@ drv_i915_head_stop(
+ 
+ 		head->front = 0U;
+ 		head->dormant = 1;
++		head->kept_rotation = rotation;
+ 		kern_logf("i915: display head: stopped with the window (connector %u); its picture is kept for the next window\n", head->connector);
+ 		return;
+ 	}
+@@ -891,9 +900,15 @@ i915_head_light_once(
+ 	resident_pipe = drv_i915_display_output_pipe(&display->output);
+ 	head->cfg.also_pipes = (uint8_t)(1U << resident_pipe);
+ 
+-	/* The two buffers, or the ones kept with the last picture over a window's end; the plane reads A first. */
++	/*
++	 * The two buffers, or the ones kept with the last picture over a
++	 * window's end, shown with the rotation it was drawn for; the plane
++	 * reads A first.
++	 */
++	head->cfg.fb_rotation = 0U;
+ 	if (head->dormant) {
+ 		head->dormant = 0;
++		head->cfg.fb_rotation = head->kept_rotation;
+ 	} else {
+ 		buffers_error = i915_head_buffers(display);
+ 		if (buffers_error != 0) {
+@@ -1196,39 +1211,55 @@ i915_head_unmap(
+ }
+ 
+ /*
+- * Chooses the head buffer a frame is drawn into, and whether the head must
+- * then flip to it: the one it does not show, or, while an armed flip has
+- * not latched, the one that flip shows (the newest frame wins).
++ * Chooses the head buffer a frame shown with rotation is drawn into, and
++ * whether the head must then flip to it: the one it does not show, or,
++ * while an armed flip of the same rotation has not latched, the one that
++ * flip shows (the newest frame wins).  An armed flip of another rotation
++ * is waited for first; NULL when it did not complete.
+  */
+ static struct i915_scanout *
+ i915_head_target(
+ 	struct i915_display *display,
++	unsigned rotation,
+ 	int *flip)
+ {
+ 	struct i915_display_head *head;
++	uint32_t armed_rotation;
++	unsigned target;
++	int settled;
+ 	int idle;
+ 
+ 	head = &display->head;
+ 
+-	/* Whether a flip is still armed on the head's screen. */
++	/* Whether a flip is still armed on the head's screen, and the rotation its buffer is shown with. */
+ 	idle = drv_i915_xd_picture_flip_poll(&display->xd.pictures, I915_XD_PICTURE_HEAD);
++	armed_rotation = drv_i915_xd_picture_rotation(&display->xd.pictures, I915_XD_PICTURE_HEAD);
++	target = drv_i915_xd_flip_target(idle, armed_rotation, rotation);
+ 
+-	/* An armed flip keeps the frame in the buffer it shows next. */
++	/* An armed flip of the same rotation keeps the frame in the buffer it shows next. */
+ 	*flip = 1;
+-	if (!idle) {
++	if (target == I915_XD_TARGET_ARMED) {
+ 		*flip = 0;
+ 		return &head->buf[head->front];
+ 	}
+ 
++	/* One of another rotation latches first, so its buffer is not shown with this frame's rotation. */
++	if (target == I915_XD_TARGET_SETTLE) {
++		settled = drv_i915_xd_picture_flip_settle(&display->xd.pictures, I915_XD_PICTURE_HEAD);
++		if (settled != 0)
++			return NULL;
++	}
++
+ 	/* Succeeded: the buffer the head does not show. */
+ 	return &head->buf[head->front ^ 1U];
+ }
+ 
+-/* Arms the head's flip to a buffer; it latches at the head's next vblank.  0, or EIO. */
++/* Arms the head's flip to a buffer shown turned by rotation; it latches at the head's next vblank.  0, or EIO. */
+ static int
+ i915_head_flip(
+ 	struct i915_display *display,
+-	struct i915_scanout *to)
++	struct i915_scanout *to,
++	unsigned rotation)
+ {
+ 	struct i915_display_head *head;
+ 	struct i915_xd_picture_flip result;
+@@ -1238,7 +1269,7 @@ i915_head_flip(
+ 
+ 	/* Arms the flip on the head's screen. */
+ 	kern_memset(&result, 0, sizeof(result));
+-	error = drv_i915_xd_picture_flip_nowait(&display->xd.pictures, I915_XD_PICTURE_HEAD, (uint32_t)to->surf, &result);
++	error = drv_i915_xd_picture_flip_nowait(&display->xd.pictures, I915_XD_PICTURE_HEAD, (uint32_t)to->surf, rotation, &result);
+ 
+ 	/* Says why the flip failed. */
+ 	if (error != 0 || result.result != I915_XD_PICTURE_FLIP_ARMED) {
+diff --git a/src/drivers/gpu/i915/display/internal.h b/src/drivers/gpu/i915/display/internal.h
+index 515faf98c9..33cdfce885 100644
+--- a/src/drivers/gpu/i915/display/internal.h
++++ b/src/drivers/gpu/i915/display/internal.h
+@@ -1146,10 +1146,12 @@ struct i915_display_head {
+ 	/*
+ 	 * Nonzero while the lit head's buffers, and its last picture, are kept
+ 	 * over a display window's end (a sleep, a hold that ran out): the next
+-	 * window lights the head again with them at its start.
+-	 * Only the worker reads and writes it.
++	 * window lights the head again with them at its start, shown with
++	 * kept_rotation, the rotation that picture was drawn for (clockwise
++	 * degrees).  Only the worker reads and writes both.
+ 	 */
+ 	int dormant;
++	uint32_t kept_rotation;
+ 
+ 	/* Nonzero once a head's stop was not confirmed: its buffers are abandoned and no head is lit again. */
+ 	int broken;
+diff --git a/src/drivers/gpu/i915/display/present.c b/src/drivers/gpu/i915/display/present.c
+index 7d439f38c4..0c942647dd 100644
+--- a/src/drivers/gpu/i915/display/present.c
++++ b/src/drivers/gpu/i915/display/present.c
+@@ -129,17 +129,19 @@ static int i915_present_window_retry(struct i915_display *display, int error, in
+ static int i915_present_unplug_take(struct i915_display *display);
+ static int i915_present_window_serve(void *ctx);
+ static void i915_present_check_frame(struct i915_display *display, const struct i915_worker_present *frame, struct i915_scanout *back, unsigned index);
+-static struct i915_scanout *i915_present_target(struct i915_display *display, int *flip);
+-static int i915_present_flip(struct i915_display *display, int publish);
++static unsigned i915_present_rotation(const struct gpu_display_present *request);
++static struct i915_scanout *i915_present_target(struct i915_display *display, unsigned rotation, int *flip);
++static int i915_present_flip(struct i915_display *display, int publish, unsigned rotation);
+ static void i915_present_hold_end(struct i915_display *display);
+ static void i915_present_clear_stale(struct i915_display *display, struct i915_scanout *back, uint32_t width, uint32_t height, uint32_t scale);
+ static int i915_present_latch(struct i915_device *device);
+ 
+ /*
+- * Shows a CPU frame on the panel.
++ * Shows a CPU frame on the panel, turned by rotation.
+  *
+  * Queued to the worker and waited for: the worker lights the panel for the
+- * first frame, then copies the frame into the back buffer and flips.
++ * first frame, then copies the frame into the back buffer and flips, the
++ * plane turning the buffer by rotation (clockwise degrees, 0 or 180).
+  */
+ int
+ drv_i915_present(
+@@ -148,7 +150,8 @@ drv_i915_present(
+ 	uint32_t width,
+ 	uint32_t height,
+ 	uint32_t stride,
+-	int bgra)
++	int bgra,
++	unsigned rotation)
+ {
+ 	struct i915_worker_present item;
+ 	int error;
+@@ -160,6 +163,7 @@ drv_i915_present(
+ 	item.height = height;
+ 	item.stride = stride;
+ 	item.bgra = bgra;
++	item.rotation = rotation;
+ 
+ 	/* Hands it to the worker and waits. */
+ 	error = drv_i915_worker_sync_display(device, I915_WORKER_SYNC_PRESENT, &item);
+@@ -353,6 +357,7 @@ drv_i915_present_display_present(
+ 	uint32_t display_id;
+ 	uint64_t generation;
+ 	uint64_t start;
++	unsigned rotation;
+ 	int connected;
+ 	int owns_head;
+ 	int error;
+@@ -424,7 +429,8 @@ drv_i915_present_display_present(
+ 	} else {
+ 		/* The copied route: the core checked the extent against the storage, which is ordinary managed RAM. */
+ 		pixels = (const uint8_t *)kern_pmem_to_kernel(storage->run.paddr) + request->offset;
+-		error = drv_i915_present(owner_device, pixels, request->width, request->height, request->stride, request->format == GPU_PIXEL_BGRA8888);
++		rotation = i915_present_rotation(request);
++		error = drv_i915_present(owner_device, pixels, request->width, request->height, request->stride, request->format == GPU_PIXEL_BGRA8888, rotation);
+ 	}
+ 
+ 	/* A completed presentation: the panel shows this node's frames, and the sequence advances. */
+@@ -1141,7 +1147,7 @@ drv_i915_present_frame(
+ 	display = device->display;
+ 
+ 	/* The buffer the frame goes into, and whether the panel must flip to it. */
+-	back = i915_present_target(display, &flip);
++	back = i915_present_target(display, frame->rotation, &flip);
+ 	if (back == NULL)
+ 		return EIO;
+ 
+@@ -1186,7 +1192,7 @@ drv_i915_present_frame(
+ 
+ 	/* Shows the buffer: the CPU wrote it, so its cache lines are published first. */
+ 	if (flip) {
+-		flip_error = i915_present_flip(display, 1);
++		flip_error = i915_present_flip(display, 1, frame->rotation);
+ 		if (flip_error != 0)
+ 			return EIO;
+ 	} else {
+@@ -1226,7 +1232,7 @@ drv_i915_present_blob_frame(
+ 	display = device->display;
+ 
+ 	/* The buffer the frame goes into, and whether the panel must flip to it. */
+-	back = i915_present_target(display, &flip);
++	back = i915_present_target(display, frame->rotation, &flip);
+ 	if (back == NULL)
+ 		return EIO;
+ 
+@@ -1278,7 +1284,7 @@ drv_i915_present_blob_frame(
+ 	 * mapping, so no CPU cache line needs publishing.
+ 	 */
+ 	if (flip) {
+-		flip_error = i915_present_flip(display, 0);
++		flip_error = i915_present_flip(display, 0, frame->rotation);
+ 		if (flip_error != 0)
+ 			return EIO;
+ 	}
+@@ -1304,7 +1310,9 @@ drv_i915_present_count(
+ }
+ 
+ /*
+- * Flips the panel to the back buffer of the resident run.
++ * Flips the panel to the back buffer of the resident run, shown with the
++ * rotation of the picture the panel shows now (the back buffer holds that
++ * picture, or one of the same lease).
+  *
+  * What the CPU or the GPU wrote is made visible first.  Returns 0 once the
+  * new buffer is displayed and the old one free, EINVAL when the panel is
+@@ -1314,10 +1322,14 @@ int
+ drv_i915_lcd_resident_flip(
+ 	struct i915_display *display)
+ {
++	unsigned rotation;
+ 	int error;
+ 
++	/* The rotation the panel's picture is shown with. */
++	rotation = drv_i915_xd_picture_rotation(&display->xd.pictures, I915_XD_PICTURE_RESIDENT);
++
+ 	/* Publishes the back buffer and flips to it, waiting for the completion. */
+-	error = i915_present_flip(display, 1);
++	error = i915_present_flip(display, 1, rotation);
+ 	if (error != 0)
+ 		return error;
+ 
+@@ -1492,6 +1504,7 @@ i915_present_shared(
+ 	item.build = i915_present_blit_build;
+ 	item.build_ctx = &blit;
+ 	item.head = head;
++	item.rotation = i915_present_rotation(request);
+ 	error = drv_i915_worker_sync_display(device, I915_WORKER_SYNC_PRESENT_BLOB, &item);
+ 	if (error != 0)
+ 		return error;
+@@ -1615,19 +1628,26 @@ i915_present_check_frame(
+ }
+ 
+ /*
+- * Chooses the resident buffer a frame is drawn into, and whether the panel
+- * must then flip to it; NULL when the panel is not up.
++ * Chooses the resident buffer a frame shown with rotation is drawn into,
++ * and whether the panel must then flip to it; NULL when the panel is not
++ * up or an armed flip did not complete.
+  *
+  * Normally it is the buffer the panel does not show.  Without the wait for
+  * the vblank, a flip may still be armed: the frame then replaces the one
+- * that flip shows, in the buffer it latches, and no new flip is needed.
++ * that flip shows, in the buffer it latches, and no new flip is needed,
++ * unless that flip shows its buffer with another rotation; then it is
++ * waited for first and the frame goes into the buffer not shown.
+  */
+ static struct i915_scanout *
+ i915_present_target(
+ 	struct i915_display *display,
++	unsigned rotation,
+ 	int *flip)
+ {
+ 	struct i915_scanout *back;
++	uint32_t armed_rotation;
++	unsigned target;
++	int settled;
+ 	int idle;
+ 
+ 	/* The panel shows its buffers only while it is up. */
+@@ -1635,21 +1655,45 @@ i915_present_target(
+ 	if (back == NULL)
+ 		return NULL;
+ 
+-	/* An armed flip that has not latched keeps the frame in the buffer it shows next. */
+-	*flip = 1;
++	/* Whether a flip is still armed, and the rotation its buffer is shown with. */
+ 	idle = drv_i915_xd_picture_flip_poll(&display->xd.pictures, I915_XD_PICTURE_RESIDENT);
+-	if (!idle) {
++	armed_rotation = drv_i915_xd_picture_rotation(&display->xd.pictures, I915_XD_PICTURE_RESIDENT);
++	target = drv_i915_xd_flip_target(idle, armed_rotation, rotation);
++
++	/* An armed flip of the same rotation that has not latched keeps the frame in the buffer it shows next. */
++	*flip = 1;
++	if (target == I915_XD_TARGET_ARMED) {
+ 		*flip = 0;
+ 		return &display->resident_buf[display->resident_front];
+ 	}
+ 
+-	/* Nothing armed: the buffer the panel does not show. */
++	/* One of another rotation latches first, so its buffer is not shown with this frame's rotation. */
++	if (target == I915_XD_TARGET_SETTLE) {
++		settled = drv_i915_xd_picture_flip_settle(&display->xd.pictures, I915_XD_PICTURE_RESIDENT);
++		if (settled != 0)
++			return NULL;
++	}
++
++	/* Succeeded: the buffer the panel does not show. */
+ 	return back;
+ }
+ 
++/* Gives the rotation a present asks for, clockwise degrees: 180 with GPU_DISPLAY_PRESENT_ROTATE_180, else 0. */
++static unsigned
++i915_present_rotation(
++	const struct gpu_display_present *request)
++{
++	/* A turned frame. */
++	if ((request->flags & GPU_DISPLAY_PRESENT_ROTATE_180) != 0U)
++		return 180U;
++
++	/* Succeeded: an unturned frame. */
++	return 0U;
++}
++
+ /*
+- * Flips the panel to the back buffer of the resident run, publishing the
+- * CPU's writes first when `publish` is set.
++ * Flips the panel to the back buffer of the resident run, shown turned by
++ * rotation, publishing the CPU's writes first when `publish` is set.
+  *
+  * The flip waits for its completion, or only arms it in a kernel built
+  * with I915_PRESENT_NO_VSYNC set; either way the back buffer is the front
+@@ -1659,7 +1703,8 @@ i915_present_target(
+ static int
+ i915_present_flip(
+ 	struct i915_display *display,
+-	int publish)
++	int publish,
++	unsigned rotation)
+ {
+ 	struct i915_lcd_kernel *k;
+ 	struct i915_scanout *to;
+@@ -1694,7 +1739,7 @@ i915_present_flip(
+ 	kern_memset(&result, 0, sizeof(result));
+ 	start = drv_i915_perf_now();
+ 	expected = I915_XD_PICTURE_FLIP_ARMED;
+-	error = drv_i915_xd_picture_flip_nowait(&display->xd.pictures, I915_XD_PICTURE_RESIDENT, (uint32_t)to->surf, &result);
++	error = drv_i915_xd_picture_flip_nowait(&display->xd.pictures, I915_XD_PICTURE_RESIDENT, (uint32_t)to->surf, rotation, &result);
+ 	drv_i915_perf_add(&display->device->perf, I915_PERF_PRESENT_FLIP, start);
+ 
+ 	/* Says why the flip failed. */
+@@ -1935,6 +1980,7 @@ i915_present_head(
+ 		item.stride = request->stride;
+ 		item.bgra = request->format == GPU_PIXEL_BGRA8888;
+ 		item.head = 1;
++		item.rotation = i915_present_rotation(request);
+ 		error = drv_i915_worker_sync_display(device, I915_WORKER_SYNC_PRESENT, &item);
+ 	}
+ 
+diff --git a/src/drivers/gpu/i915/display/present.h b/src/drivers/gpu/i915/display/present.h
+index a0d0a24e3b..480771ba82 100644
+--- a/src/drivers/gpu/i915/display/present.h
++++ b/src/drivers/gpu/i915/display/present.h
+@@ -38,8 +38,8 @@ struct gpu_display_wait;
+  * ==== The side that asks (any thread) ====
+  */
+ 
+-/* Shows a CPU frame: queued to the worker and waited for. */
+-int drv_i915_present(struct i915_device *device, const void *pixels, uint32_t width, uint32_t height, uint32_t stride, int bgra);
++/* Shows a CPU frame, turned by rotation (clockwise degrees, 0 or 180): queued to the worker and waited for. */
++int drv_i915_present(struct i915_device *device, const void *pixels, uint32_t width, uint32_t height, uint32_t stride, int bgra, unsigned rotation);
+ 
+ /* Gives the panel back: the worker holds the last picture for the next lease, or stops the panel. */
+ int drv_i915_present_release(struct i915_device *device);
+diff --git a/src/drivers/gpu/i915/display/resident.c b/src/drivers/gpu/i915/display/resident.c
+index 56063c0758..c6a6798fa8 100644
+--- a/src/drivers/gpu/i915/display/resident.c
++++ b/src/drivers/gpu/i915/display/resident.c
+@@ -314,11 +314,12 @@ drv_i915_resident_run(
+ 		kept = 0;
+ 	}
+ 
+-	/* Creates, pins, clears and publishes both buffers at the output's size, or takes the ones kept for this run. */
++	/* Creates, pins, clears and publishes both buffers at the output's size, or takes the ones kept for this run (their picture's rotation too). */
+ 	if (kept) {
+ 		display->window.keep_buffers = 0;
+ 		kern_logf("i915: resident display: the buffers and their picture are kept for this lighting (pipes besides it 0x%x)\n", display->window.run_pipes);
+ 	} else {
++		display->window.kept_rotation = 0U;
+ 		buffers_error = resident_buffers(display, d, mode);
+ 		if (buffers_error != 0) {
+ 			k->p = NULL;
+@@ -867,6 +868,7 @@ resident_show_display(
+ 	env->cfg.fb_height = so->height;
+ 	env->cfg.fb_pitch = so->pitch;
+ 	env->cfg.fb_surf = (uint32_t)so->surf;
++	env->cfg.fb_rotation = display->window.kept_rotation;
+ 
+ 	/* The run log stacks on the backend, and the observer samples at every commit point. */
+ 	drv_i915_lcd_trace_init(trace, env->hw);
+@@ -2349,13 +2351,17 @@ resident_window(
+ 	/*
+ 	 * Lit again for two pipes next: buffer A, which the next lighting
+ 	 * shows first, takes the picture B shows, so the output comes back
+-	 * with its last picture and not an older one.  The GPU wrote B through
+-	 * an uncached mapping, so the CPU's stale lines go first.
++	 * with its last picture and not an older one, and with the rotation
++	 * that picture was drawn for.  The GPU wrote B through an uncached
++	 * mapping, so the CPU's stale lines go first.
+ 	 */
+-	if (display->window.relight && display->resident_front != 0U) {
+-		drv_i915_gt_clflush(display->resident_buf[1].cpu, display->resident_buf[1].size);
+-		kern_memcpy(display->resident_buf[0].cpu, display->resident_buf[1].cpu, display->resident_buf[0].size);
+-		drv_i915_scanout_publish(&display->resident_buf[0]);
++	if (display->window.relight) {
++		display->window.kept_rotation = drv_i915_xd_picture_rotation(&display->xd.pictures, I915_XD_PICTURE_RESIDENT);
++		if (display->resident_front != 0U) {
++			drv_i915_gt_clflush(display->resident_buf[1].cpu, display->resident_buf[1].size);
++			kern_memcpy(display->resident_buf[0].cpu, display->resident_buf[1].cpu, display->resident_buf[0].size);
++			drv_i915_scanout_publish(&display->resident_buf[0]);
++		}
+ 	}
+ 
+ 	/* Ends on buffer A; the flip back is only armed, so it is settled too. */
+diff --git a/src/drivers/gpu/i915/display/xd-picture.c b/src/drivers/gpu/i915/display/xd-picture.c
+index 2c11d755b5..13c313d22c 100644
+--- a/src/drivers/gpu/i915/display/xd-picture.c
++++ b/src/drivers/gpu/i915/display/xd-picture.c
+@@ -106,11 +106,11 @@ static void i915_xd_picture_plan(struct i915_xd_pictures *pictures, struct i915_
+ static void i915_xd_picture_dbuf_on(struct i915_xd_picture *pic, const struct i915_xd_plan *plan);
+ static void i915_xd_picture_dbuf_off(struct i915_xd_pictures *pictures, struct i915_xd_picture *pic, uint8_t keep_pipes);
+ static void i915_xd_picture_publish(struct i915_xd_picture *pic, const struct i915_xd_plan *plan);
+-static void i915_xd_picture_plane_fill(struct i915_xd_picture *pic, uint32_t surface);
++static void i915_xd_picture_plane_fill(struct i915_xd_picture *pic, uint32_t surface, uint32_t rotation);
+ static void i915_xd_picture_plane_wm(struct i915_xd_picture *pic);
+ static int i915_xd_picture_plane_on(struct i915_xd_picture *pic);
+ static void i915_xd_picture_plane_flip(struct i915_xd_picture *pic);
+-static int i915_xd_picture_flip_arm(struct i915_xd_picture *pic, unsigned screen, uint32_t surface, struct i915_xd_picture_flip *result, int *dc_off);
++static int i915_xd_picture_flip_arm(struct i915_xd_picture *pic, unsigned screen, uint32_t surface, uint32_t rotation, struct i915_xd_picture_flip *result, int *dc_off);
+ static void i915_xd_picture_flip_retire(struct i915_xd_picture *pic);
+ static uint32_t i915_xd_picture_live(struct i915_xd_picture *pic);
+ static int i915_xd_picture_dc_domain(struct i915_xd_picture *pic);
+@@ -363,9 +363,10 @@ drv_i915_xd_picture_prepare(
+ 	if (error != 0)
+ 		return error;
+ 
+-	/* The plane shows it first. */
++	/* The plane shows it first, with the rotation its picture was drawn for. */
+ 	pic->flip.current = config->fb_surf;
+-	i915_xd_picture_plane_fill(pic, config->fb_surf);
++	pic->flip.current_rotation = config->fb_rotation;
++	i915_xd_picture_plane_fill(pic, config->fb_surf, config->fb_rotation);
+ 
+ 	/* The plan needs the memory's watermark latencies. */
+ 	if (config->wm_levels == 0U || config->wm_levels > I915_XD_WM_LEVELS)
+@@ -835,6 +836,8 @@ drv_i915_xd_picture_status(
+ 	/* The flips. */
+ 	status->cur_surf = pic->flip.current;
+ 	status->pend_surf = pic->flip.pending;
++	status->cur_rotation = pic->flip.current_rotation;
++	status->pend_rotation = pic->flip.pending_rotation;
+ 	status->flip_pending = pic->flip.armed;
+ 	status->flip_stuck = pic->flip.stuck;
+ 	status->flip_event_ref = pic->flip_event_ref;
+@@ -883,7 +886,8 @@ drv_i915_xd_picture_link_status(
+ 
+ /*
+  * Flips a lit screen to another buffer of the same format, size and
+- * pitch and waits for it: the plane's words, then the arming writes in
++ * pitch, shown with a rotation (clockwise degrees, 0 or 180), and waits
++ * for it: the plane's words, then the arming writes in
+  * one frame, the completion event armed; then the event and the plane's
+  * live surface.  The old buffer is free only when the event came and the
+  * live surface is the new buffer; otherwise both stay protected and every
+@@ -902,6 +906,7 @@ drv_i915_xd_picture_flip(
+ 	struct i915_xd_pictures *pictures,
+ 	unsigned screen,
+ 	uint32_t surface,
++	uint32_t rotation,
+ 	struct i915_xd_picture_flip *result)
+ {
+ 	const struct i915_xd_backend *backend;
+@@ -918,7 +923,7 @@ drv_i915_xd_picture_flip(
+ 		return I915_XD_PICTURE_NOT_READY;
+ 
+ 	/* Arms the flip; a refusal writes nothing. */
+-	armed = i915_xd_picture_flip_arm(pic, screen, surface, &flip, &dc_off);
++	armed = i915_xd_picture_flip_arm(pic, screen, surface, rotation, &flip, &dc_off);
+ 	if (armed != I915_XD_PICTURE_OK) {
+ 		if (result != NULL)
+ 			*result = flip;
+@@ -971,7 +976,8 @@ drv_i915_xd_picture_flip(
+ }
+ 
+ /*
+- * Flips a lit screen to another buffer without waiting: armed as
++ * Flips a lit screen to another buffer, shown with a rotation, without
++ * waiting: armed as
+  * drv_i915_xd_picture_flip() arms it, latched at the pipe's next vertical
+  * blank; until then both buffers stay protected, and a flip still armed
+  * refuses the next one (the caller polls first).
+@@ -985,6 +991,7 @@ drv_i915_xd_picture_flip_nowait(
+ 	struct i915_xd_pictures *pictures,
+ 	unsigned screen,
+ 	uint32_t surface,
++	uint32_t rotation,
+ 	struct i915_xd_picture_flip *result)
+ {
+ 	const struct i915_xd_backend *backend;
+@@ -1000,7 +1007,7 @@ drv_i915_xd_picture_flip_nowait(
+ 		return I915_XD_PICTURE_NOT_READY;
+ 
+ 	/* Arms the flip; a refusal writes nothing. */
+-	armed = i915_xd_picture_flip_arm(pic, screen, surface, &flip, &dc_off);
++	armed = i915_xd_picture_flip_arm(pic, screen, surface, rotation, &flip, &dc_off);
+ 	if (armed != I915_XD_PICTURE_OK) {
+ 		if (result != NULL)
+ 			*result = flip;
+@@ -1166,6 +1173,32 @@ drv_i915_xd_picture_flip_settle(
+ 	return 0;
+ }
+ 
++/*
++ * Tells the rotation of the picture a screen shows next: the armed flip's
++ * while one is armed (a stuck one included, whose buffer the display may
++ * be showing), otherwise the displayed buffer's.  A screen out of range
++ * shows nothing turned.
++ */
++uint32_t
++drv_i915_xd_picture_rotation(
++	struct i915_xd_pictures *pictures,
++	unsigned screen)
++{
++	struct i915_xd_picture *pic;
++
++	/* A screen out of range. */
++	pic = i915_xd_picture_of(pictures, screen);
++	if (pic == NULL)
++		return 0U;
++
++	/* The armed flip's picture is the newest. */
++	if (pic->flip.armed)
++		return pic->flip.pending_rotation;
++
++	/* Succeeded: the displayed buffer's rotation. */
++	return pic->flip.current_rotation;
++}
++
+ /*
+  * Sets the brightness of a lit screen's panel to level of max, shown at
+  * once while the backlight is on.  The backlight device's brightness
+@@ -2141,11 +2174,12 @@ i915_xd_picture_publish(
+ 	pic->bw_data_rate = plan->data_mbps;
+ }
+ 
+-/* Fills a screen's plane: full screen, unscaled and opaque on its pipe, on a buffer at surface. */
++/* Fills a screen's plane: full screen, unscaled and opaque on its pipe, on a buffer at surface, turned by rotation. */
+ static void
+ i915_xd_picture_plane_fill(
+ 	struct i915_xd_picture *pic,
+-	uint32_t surface)
++	uint32_t surface,
++	uint32_t rotation)
+ {
+ 	struct i915_xd_plane *plane;
+ 
+@@ -2158,6 +2192,7 @@ i915_xd_picture_plane_fill(
+ 	plane->pitch = pic->config.fb_pitch;
+ 	plane->surf = surface;
+ 	plane->alpha = 0xffU;
++	plane->rotation = rotation;
+ 
+ 	/* Its control words. */
+ 	drv_i915_xd_plane_words(pic->pictures->platform, plane);
+@@ -2252,7 +2287,8 @@ i915_xd_picture_plane_flip(
+ }
+ 
+ /*
+- * Refuses or arms one flip of a screen, up to the armed event.
++ * Refuses or arms one flip of a screen to a surface shown with a
++ * rotation, up to the armed event.
+  *
+  * Refuses a screen that is not lit, is retained, has a flip armed or
+  * stuck, the same buffer, an unaligned one, or a backend without the
+@@ -2267,6 +2303,7 @@ i915_xd_picture_flip_arm(
+ 	struct i915_xd_picture *pic,
+ 	unsigned screen,
+ 	uint32_t surface,
++	uint32_t rotation,
+ 	struct i915_xd_picture_flip *result,
+ 	int *dc_off)
+ {
+@@ -2315,10 +2352,14 @@ i915_xd_picture_flip_arm(
+ 	error = drv_i915_xd_plane_check(pic->config.fb_fourcc, pic->config.fb_modifier, pic->config.fb_width, pic->config.fb_height, pic->config.fb_pitch, surface);
+ 	if (error != 0)
+ 		return I915_XD_PICTURE_NOT_READY;
+-	i915_xd_picture_plane_fill(pic, surface);
++	i915_xd_picture_plane_fill(pic, surface, rotation);
++
++	/* The plane's rotation is told when it changes. */
++	if (rotation != pic->flip.current_rotation)
++		kern_logf("i915: display screen %u: plane rotate=%u\n", screen, rotation);
+ 
+ 	/* From here both buffers may be read by the display until the completion is known. */
+-	drv_i915_xd_flip_arm(&pic->flip, surface);
++	drv_i915_xd_flip_arm(&pic->flip, surface, rotation);
+ 	before = pic->errors;
+ 
+ 	/* The display stays out of DC states around the update. */
+diff --git a/src/drivers/gpu/i915/display/xd-picture.h b/src/drivers/gpu/i915/display/xd-picture.h
+index 8c27be77d7..adc65fd8ee 100644
+--- a/src/drivers/gpu/i915/display/xd-picture.h
++++ b/src/drivers/gpu/i915/display/xd-picture.h
+@@ -91,7 +91,9 @@
+  * allowed, the DMC programs loaded, and whether the VBT overrides the
+  * PLLs' AFC startup.  The mode and the link (rate, lanes, depth, M/N) the
+  * output's plan chose, the reference clock and a combo PLL's words, and
+- * the framebuffer the screen shows first.
++ * the framebuffer the screen shows first, with the rotation it is shown
++ * with (clockwise degrees, 0 or 180: a kept picture keeps the rotation it
++ * was drawn for).
+  */
+ struct i915_xd_picture_config {
+ 	unsigned kind;
+@@ -140,6 +142,7 @@ struct i915_xd_picture_config {
+ 	uint32_t fb_height;
+ 	uint32_t fb_pitch;
+ 	uint32_t fb_surf;
++	uint32_t fb_rotation;
+ };
+ 
+ /*
+@@ -199,6 +202,8 @@ struct i915_xd_picture_status {
+ 	int dither;
+ 	uint32_t cur_surf;
+ 	uint32_t pend_surf;
++	uint32_t cur_rotation;
++	uint32_t pend_rotation;
+ 	int flip_pending;
+ 	int flip_stuck;
+ 	unsigned flip_gen;
+@@ -359,8 +364,9 @@ int drv_i915_xd_picture_retained(struct i915_xd_pictures *pictures, unsigned scr
+ int drv_i915_xd_picture_discard_model(struct i915_xd_pictures *pictures, unsigned screen, const struct i915_xd_backend *backend);
+ void drv_i915_xd_picture_status(struct i915_xd_pictures *pictures, unsigned screen, struct i915_xd_picture_status *status);
+ void drv_i915_xd_picture_link_status(struct i915_xd_pictures *pictures, unsigned screen, struct i915_xd_picture_status *status);
+-int drv_i915_xd_picture_flip(struct i915_xd_pictures *pictures, unsigned screen, uint32_t surface, struct i915_xd_picture_flip *result);
+-int drv_i915_xd_picture_flip_nowait(struct i915_xd_pictures *pictures, unsigned screen, uint32_t surface, struct i915_xd_picture_flip *result);
++int drv_i915_xd_picture_flip(struct i915_xd_pictures *pictures, unsigned screen, uint32_t surface, uint32_t rotation, struct i915_xd_picture_flip *result);
++int drv_i915_xd_picture_flip_nowait(struct i915_xd_pictures *pictures, unsigned screen, uint32_t surface, uint32_t rotation, struct i915_xd_picture_flip *result);
++uint32_t drv_i915_xd_picture_rotation(struct i915_xd_pictures *pictures, unsigned screen);
+ int drv_i915_xd_picture_flip_poll(struct i915_xd_pictures *pictures, unsigned screen);
+ int drv_i915_xd_picture_flip_wait(struct i915_xd_pictures *pictures, unsigned screen);
+ int drv_i915_xd_picture_flip_settle(struct i915_xd_pictures *pictures, unsigned screen);
+diff --git a/src/drivers/gpu/i915/display/xd-pipe.c b/src/drivers/gpu/i915/display/xd-pipe.c
+index 2f1f686423..9c880fa132 100644
+--- a/src/drivers/gpu/i915/display/xd-pipe.c
++++ b/src/drivers/gpu/i915/display/xd-pipe.c
+@@ -940,8 +940,9 @@ drv_i915_xd_plane_check(
+ 
+ /*
+  * Fills the control words of a plane of linear XRGB8888: the enable and
+- * the format, on display 13 one arbiter slot (a 4-byte pixel); the
+- * colour control with the plane gamma off (the format has no alpha).
++ * the format, on display 13 one arbiter slot (a 4-byte pixel), the
++ * rotation of a plane turned by 180 degrees; the colour control with the
++ * plane gamma off (the format has no alpha).
+  *
+  * Procedure referenced: Linux v6.8.12 drivers/gpu/drm/i915/display/skl_universal_plane.c
+  * (skl_plane_ctl, adlp_plane_ctl_arb_slots, glk_plane_color_ctl).
+@@ -956,6 +957,14 @@ drv_i915_xd_plane_words(
+ 	if (platform->display_ver == 13U)
+ 		plane->ctl |= i915_xd_field_put(I915_XD_PLANE_CTL_ARB_SLOTS, 1U);
+ 
++	/*
++	 * A plane turned by 180 degrees: the hardware walks the buffer from its
++	 * last pixel, so the offset, position and stride stay as they are.
++	 * Only 180 has a value on every display version this path drives.
++	 */
++	if (plane->rotation == 180U)
++		plane->ctl |= i915_xd_field_put(I915_XD_PLANE_CTL_ROTATE, I915_XD_PLANE_CTL_ROTATE_180);
++
+ 	/* The colour control. */
+ 	plane->color_ctl = I915_XD_PLANE_COLOR_GAMMA_OFF;
+ }
+@@ -1263,19 +1272,33 @@ drv_i915_xd9_pipe_wait_vblank(
+ }
+ 
+ /*
+- * Points a display 9 pipe's first plane at a surface: the stride first
+- * when it differs from the plane's, then the surface, whose write arms
+- * both for the next vertical blank.
++ * Points a display 9 pipe's first plane at a surface turned by rotation
++ * (clockwise degrees, 0 or 180; another value is unturned): the rotation
++ * field of the plane's control word and the stride first, each only when
++ * it differs from the plane's, then the surface, whose write arms them for
++ * the next vertical blank.  The rest of the control word stays the
++ * firmware's.
+  */
+ void
+ drv_i915_xd9_plane_flip(
+ 	struct i915_xd_io *io,
+ 	unsigned pipe,
+ 	uint32_t surf,
+-	uint32_t stride)
++	uint32_t stride,
++	uint32_t rotation)
+ {
++	uint32_t control;
++	uint32_t turned;
+ 	uint32_t current;
+ 
++	/* The rotation field, only when it changes; a linear plane keeps its offset, position and stride when turned. */
++	control = drv_i915_xd_io_read(io, I915_XD9_PLANE_CTL(pipe));
++	turned = control & ~I915_XD9_PLANE_CTL_ROTATE_MASK;
++	if (rotation == 180U)
++		turned |= I915_XD9_PLANE_CTL_ROTATE_180;
++	if (turned != control)
++		drv_i915_xd_io_write(io, I915_XD9_PLANE_CTL(pipe), turned);
++
+ 	/* The stride, only when it changes. */
+ 	current = drv_i915_xd_io_read(io, I915_XD9_PLANE_STRIDE(pipe));
+ 	if (current != stride)
+diff --git a/src/drivers/gpu/i915/display/xd-pipe.h b/src/drivers/gpu/i915/display/xd-pipe.h
+index 8ad7eeb2a3..123df8e504 100644
+--- a/src/drivers/gpu/i915/display/xd-pipe.h
++++ b/src/drivers/gpu/i915/display/xd-pipe.h
+@@ -170,7 +170,9 @@ struct i915_xd_pipe_misc {
+ /*
+  * The first plane of a pipe: the source size and pitch of its buffer,
+  * its position on the pipe, the buffer's GGTT address, the plane alpha
+- * (0xff opaque), and the control words drv_i915_xd_plane_words() fills.
++ * (0xff opaque), its clockwise rotation in degrees (0 or 180; any other
++ * value scans out unturned), and the control words
++ * drv_i915_xd_plane_words() fills.
+  */
+ struct i915_xd_plane {
+ 	unsigned pipe;
+@@ -181,6 +183,7 @@ struct i915_xd_plane {
+ 	uint32_t y;
+ 	uint32_t surf;
+ 	uint8_t alpha;
++	uint32_t rotation;
+ 	uint32_t ctl;
+ 	uint32_t color_ctl;
+ };
+@@ -212,7 +215,7 @@ void drv_i915_xd9_pipe_stop(struct i915_xd_io *io, unsigned trans);
+ void drv_i915_xd9_plane_on(struct i915_xd_io *io, unsigned pipe, uint32_t surf, uint32_t stride_units, uint32_t width, uint32_t height, int rgbx);
+ void drv_i915_xd9_plane_off(struct i915_xd_io *io, unsigned pipe);
+ int drv_i915_xd9_pipe_wait_vblank(struct i915_xd_io *io, unsigned pipe);
+-void drv_i915_xd9_plane_flip(struct i915_xd_io *io, unsigned pipe, uint32_t surf, uint32_t stride);
++void drv_i915_xd9_plane_flip(struct i915_xd_io *io, unsigned pipe, uint32_t surf, uint32_t stride, uint32_t rotation);
+ uint32_t drv_i915_xd9_plane_surf_live(struct i915_xd_io *io, unsigned pipe);
+ uint32_t drv_i915_xd9_plane_fault(struct i915_xd_io *io, unsigned pipe);
+ void drv_i915_xd9_flip_irq_clear(struct i915_xd_io *io, unsigned pipe);
+diff --git a/src/drivers/gpu/i915/display/xd-screen.c b/src/drivers/gpu/i915/display/xd-screen.c
+index b1e086f664..811b4551a1 100644
+--- a/src/drivers/gpu/i915/display/xd-screen.c
++++ b/src/drivers/gpu/i915/display/xd-screen.c
+@@ -674,17 +674,20 @@ drv_i915_xd_flip_refused(
+ }
+ 
+ /*
+- * Records a flip armed to a surface: from here both buffers may be read
+- * by the display until the flip is known to have latched.
++ * Records a flip armed to a surface shown with a rotation: from here both
++ * buffers may be read by the display until the flip is known to have
++ * latched.
+  */
+ void
+ drv_i915_xd_flip_arm(
+ 	struct i915_xd_flip *flip,
+-	uint32_t surface)
++	uint32_t surface,
++	uint32_t rotation)
+ {
+-	/* The buffers (the caller counted the flip's generation when it passed the refusals). */
++	/* The buffers (the caller counted the flip's generation when it passed the refusals), and the new one's rotation. */
+ 	flip->old = flip->current;
+ 	flip->pending = surface;
++	flip->pending_rotation = rotation;
+ 	flip->armed = 1;
+ }
+ 
+@@ -712,8 +715,9 @@ drv_i915_xd_flip_judge(
+ 		return I915_XD_FLIP_NOT_LATCHED;
+ 	}
+ 
+-	/* Succeeded: the new buffer is displayed. */
++	/* Succeeded: the new buffer is displayed, with its rotation. */
+ 	flip->current = flip->pending;
++	flip->current_rotation = flip->pending_rotation;
+ 	flip->armed = 0;
+ 	return I915_XD_FLIP_DONE;
+ }
+@@ -737,8 +741,9 @@ drv_i915_xd_flip_idle(
+ 	if (live != flip->pending)
+ 		return 0;
+ 
+-	/* Succeeded: the flip latched; the new buffer is the current one. */
++	/* Succeeded: the flip latched; the new buffer is the current one, with its rotation. */
+ 	flip->current = flip->pending;
++	flip->current_rotation = flip->pending_rotation;
+ 	flip->armed = 0;
+ 	return 1;
+ }
+@@ -760,12 +765,39 @@ drv_i915_xd_flip_settled(
+ 		return EIO;
+ 	}
+ 
+-	/* Succeeded: no flip is pending. */
++	/* Succeeded: no flip is pending; the new buffer is shown with its rotation. */
+ 	flip->current = flip->pending;
++	flip->current_rotation = flip->pending_rotation;
+ 	flip->armed = 0;
+ 	return 0;
+ }
+ 
++/*
++ * Chooses where a frame shown with a rotation goes (I915_XD_TARGET_*):
++ * with no flip armed (idle), into the buffer not shown and a flip; with
++ * one armed that shows its buffer with the same rotation, into that
++ * buffer without a new flip; with one armed for another rotation, after
++ * the armed flip is waited for, into the buffer not shown and a flip, so
++ * no picture is shown with a rotation it was not drawn for.
++ */
++unsigned
++drv_i915_xd_flip_target(
++	int idle,
++	uint32_t armed_rotation,
++	uint32_t rotation)
++{
++	/* Nothing armed: the buffer the screen does not show. */
++	if (idle)
++		return I915_XD_TARGET_BACK;
++
++	/* An armed flip of another rotation is waited for first. */
++	if (armed_rotation != rotation)
++		return I915_XD_TARGET_SETTLE;
++
++	/* Succeeded: the frame replaces the one the armed flip shows next. */
++	return I915_XD_TARGET_ARMED;
++}
++
+ /*
+  * Gives a resident run's verdict: why it ended (served, unplugged, asked
+  * to light again, failed) and whether the display had the buffers.
+diff --git a/src/drivers/gpu/i915/display/xd-screen.h b/src/drivers/gpu/i915/display/xd-screen.h
+index 6f6c7946e6..15213d015e 100644
+--- a/src/drivers/gpu/i915/display/xd-screen.h
++++ b/src/drivers/gpu/i915/display/xd-screen.h
+@@ -238,17 +238,32 @@ struct i915_xd_screen {
+  * until the pipe latches it), the one it replaces, whether a flip is
+  * armed, whether one never completed (stuck: every later flip is refused
+  * and both buffers stay the display's until the screen stops), and the
+- * generation of the last flip.
++ * generation of the last flip.  Each buffer is shown with its own
++ * rotation (clockwise degrees, 0 or 180): the displayed one's goes with
++ * current, the armed one's with pending, and a latch moves both.
+  */
+ struct i915_xd_flip {
+ 	uint32_t current;
+ 	uint32_t pending;
+ 	uint32_t old;
++	uint32_t current_rotation;
++	uint32_t pending_rotation;
+ 	int armed;
+ 	int stuck;
+ 	unsigned gen;
+ };
+ 
++/*
++ * Where a frame goes while a flip may be armed: into the buffer the
++ * screen does not show, then a flip to it; into the buffer the armed
++ * flip shows next, with no new flip (the newest frame wins); or, when
++ * the armed flip shows its buffer with another rotation, after the armed
++ * flip is waited for, into the buffer not shown, then a flip.
++ */
++#define I915_XD_TARGET_BACK		0U
++#define I915_XD_TARGET_ARMED		1U
++#define I915_XD_TARGET_SETTLE		2U
++
+ /* Why a flip is refused: the screen is not lit, retained, busy, stuck, the same buffer, an unaligned one. */
+ #define I915_XD_FLIP_OK			0U
+ #define I915_XD_FLIP_NOT_LIT		1U
+@@ -353,10 +368,11 @@ void drv_i915_xd_screen_update(struct i915_xd_io *io, const struct i915_xd_updat
+ int drv_i915_xd_screen_light(struct i915_xd_screen *screen, struct i915_xd_io *io, const struct i915_xd_screen_hooks *hooks, int undo);
+ int drv_i915_xd_screen_dark(struct i915_xd_screen *screen, struct i915_xd_io *io, const struct i915_xd_screen_hooks *hooks);
+ unsigned drv_i915_xd_flip_refused(const struct i915_xd_flip *flip, int lit, int retained, uint32_t surface);
+-void drv_i915_xd_flip_arm(struct i915_xd_flip *flip, uint32_t surface);
++void drv_i915_xd_flip_arm(struct i915_xd_flip *flip, uint32_t surface, uint32_t rotation);
+ unsigned drv_i915_xd_flip_judge(struct i915_xd_flip *flip, int event_error, uint32_t live);
+ int drv_i915_xd_flip_idle(struct i915_xd_flip *flip, uint32_t live);
+ int drv_i915_xd_flip_settled(struct i915_xd_flip *flip, int event_error, uint32_t live);
++unsigned drv_i915_xd_flip_target(int idle, uint32_t armed_rotation, uint32_t rotation);
+ int drv_i915_xd_screen_run_verdict(const struct i915_xd_run_outcome *outcome, struct i915_xd_run_result *result);
+ 
+ #endif /* DRIVERS_GPU_I915_DISPLAY_XD_SCREEN_H */
+diff --git a/src/drivers/gpu/i915/display/xd9-flip.c b/src/drivers/gpu/i915/display/xd9-flip.c
+index 902cfe0d8a..fb903f8bf9 100644
+--- a/src/drivers/gpu/i915/display/xd9-flip.c
++++ b/src/drivers/gpu/i915/display/xd9-flip.c
+@@ -163,7 +163,7 @@ static void i915_xd9_flip_free_buffers(struct i915_xd9_flip *flip);
+ static int i915_xd9_flip_map(struct i915_device *device, struct i915_ppgtt *vm);
+ static void i915_xd9_flip_unmap(struct i915_device *device);
+ static int i915_xd9_flip_latch(struct i915_xd9_flip *flip, uint32_t surf);
+-static void i915_xd9_flip_arm(struct i915_xd9_flip *flip, uint32_t surf, uint32_t stride);
++static void i915_xd9_flip_arm(struct i915_xd9_flip *flip, uint32_t surf, uint32_t stride, uint32_t rotation);
+ static int i915_xd9_flip_restore(struct i915_xd9_flip *flip);
+ static void i915_xd9_flip_irq_enable(struct i915_xd9_flip *flip);
+ static void i915_xd9_flip_irq_disable(struct i915_xd9_flip *flip);
+@@ -432,6 +432,7 @@ drv_i915_xd9_flip_present(
+ 	uint64_t started;
+ 	uint64_t waited;
+ 	uint64_t copied;
++	uint32_t rotation;
+ 	int error;
+ 
+ 	/* The flips of the one device. */
+@@ -514,8 +515,15 @@ drv_i915_xd9_flip_present(
+ 	if (flip->armed == 0U)
+ 		flip->faults = 0U;
+ 
+-	/* Points the plane at the buffer (its pin keeps the address within 32 bits); it latches at the next vertical blank. */
+-	i915_xd9_flip_arm(flip, (uint32_t)back->surf, back->stride_units);
++	/*
++	 * Points the plane at the buffer (its pin keeps the address within 32
++	 * bits), turned as the frame asks; it latches at the next vertical
++	 * blank.
++	 */
++	rotation = 0U;
++	if ((request->flags & GPU_DISPLAY_PRESENT_ROTATE_180) != 0U)
++		rotation = 180U;
++	i915_xd9_flip_arm(flip, (uint32_t)back->surf, back->stride_units, rotation);
+ 	flip->armed = (uint32_t)back->surf;
+ 	flip->back ^= 1U;
+ 	flip->flips++;
+@@ -1026,21 +1034,22 @@ i915_xd9_flip_latch(
+ }
+ 
+ /*
+- * Points the plane at a surface: the stride first when it differs from
+- * the one the plane has, then the surface, whose write arms both for the
+- * next vertical blank.
++ * Points the plane at a surface turned by rotation: the rotation and the
++ * stride first when they differ from the plane's, then the surface, whose
++ * write arms them for the next vertical blank.
+  */
+ static void
+ i915_xd9_flip_arm(
+ 	struct i915_xd9_flip *flip,
+ 	uint32_t surf,
+-	uint32_t stride)
++	uint32_t stride,
++	uint32_t rotation)
+ {
+ 	/* A stale completion would only end the next sleep early; it starts empty for this flip. */
+ 	drv_i915_reinit_completion(&flip->done);
+ 
+-	/* Succeeded: the stride when it changes, and the surface that arms it. */
+-	drv_i915_xd9_plane_flip(&flip->io, flip->readout.pipe, surf, stride);
++	/* Succeeded: the rotation and the stride when they change, and the surface that arms them. */
++	drv_i915_xd9_plane_flip(&flip->io, flip->readout.pipe, surf, stride, rotation);
+ }
+ 
+ /*
+@@ -1060,8 +1069,8 @@ i915_xd9_flip_restore(
+ 	if (flip->armed == 0U)
+ 		return 0;
+ 
+-	/* The firmware's surface and stride, armed together. */
+-	i915_xd9_flip_arm(flip, flip->readout.surf, flip->firmware_stride);
++	/* The firmware's surface and stride, unturned as the firmware set the plane, armed together. */
++	i915_xd9_flip_arm(flip, flip->readout.surf, flip->firmware_stride, 0U);
+ 
+ 	/* Waits until the plane shows it. */
+ 	error = i915_xd9_flip_latch(flip, flip->readout.surf);
+diff --git a/src/drivers/gpu/i915/intel/display-regs-xd.h b/src/drivers/gpu/i915/intel/display-regs-xd.h
+index bdfd39ab67..145f6760d0 100644
+--- a/src/drivers/gpu/i915/intel/display-regs-xd.h
++++ b/src/drivers/gpu/i915/intel/display-regs-xd.h
+@@ -972,6 +972,23 @@
+ #define I915_XD_PLANE_CTL_FORMAT		0x0f800000U
+ #define I915_XD_PLANE_CTL_FORMAT_XRGB8888	0x08U
+ #define I915_XD_PLANE_CTL_TILING		0x00001c00U
++
++/*
++ * The plane's hardware rotation in its control word: the field, and the
++ * value that turns the plane by 180 degrees (0 is no rotation).  Display 13
++ * defines only these two values; a 180-degree linear plane keeps its
++ * offset, position and stride.
++ *
++ * Values referenced: Intel Iris Xe and UHD Graphics Open Source PRM,
++ * "Tiger Lake", Volume 2c: Command Reference: Registers, Part 2,
++ * December 2021, Revision 1.0 (Doc Ref # IHD-OS-TGL-Vol 2c-12.21),
++ * PLANE_CTL (Plane Rotation); Intel Arc A-Series Graphics Open-Source PRM,
++ * "Alchemist", Volume 2c: Command Reference: Registers, Part 2,
++ * March 2023, Revision 1.0 (Doc Ref # IHD-OS-ACM-Vol 2c-3.23), PLANE_CTL
++ * (Plane Rotation).
++ */
++#define I915_XD_PLANE_CTL_ROTATE		0x00000003U
++#define I915_XD_PLANE_CTL_ROTATE_180		0x2U
+ #define I915_XD_PLANE_STRIDE(pipe)		(0x70188U + I915_XD_PIPE_STRIDE * (pipe))
+ #define I915_XD_PLANE_STRIDE_UNITS		0x00000fffU
+ #define I915_XD_PLANE_POS(pipe)			(0x7018cU + I915_XD_PIPE_STRIDE * (pipe))
+diff --git a/src/drivers/gpu/i915/intel/display-regs-xd9.h b/src/drivers/gpu/i915/intel/display-regs-xd9.h
+index 6e52a91e62..351cfb46a7 100644
+--- a/src/drivers/gpu/i915/intel/display-regs-xd9.h
++++ b/src/drivers/gpu/i915/intel/display-regs-xd9.h
+@@ -334,6 +334,7 @@
+ #define I915_XD9_PLANE_CTL_TILED_MASK		0x7U
+ #define I915_XD9_PLANE_TILED_LINEAR		0U
+ #define I915_XD9_PLANE_CTL_ROTATE_MASK		0x3U
++#define I915_XD9_PLANE_CTL_ROTATE_180		0x2U
+ #define I915_XD9_PLANE_CTL_ASYNC_FLIP		(1U << 9)
+ #define I915_XD9_PLANE_STRIDE_MASK		0xfffU
+ #define I915_XD9_PLANE_STRIDE_UNIT		64U
+diff --git a/src/drivers/gpu/i915/tests/display/host-xd-picture-test.c b/src/drivers/gpu/i915/tests/display/host-xd-picture-test.c
+index 479ef397c0..708653e111 100644
+--- a/src/drivers/gpu/i915/tests/display/host-xd-picture-test.c
++++ b/src/drivers/gpu/i915/tests/display/host-xd-picture-test.c
+@@ -900,24 +900,33 @@ i915_xd_pt_test_panel(void)
+ 	error = drv_i915_xd_picture_prepare(pictures, I915_XD_PICTURE_RESIDENT, &config, &i915_xd_pt_model.hooks);
+ 	i915_host_check(error == EBUSY, "P9: a lit screen is not prepared again");
+ 
+-	/* A flip armed without waiting latches at once in the model. */
+-	error = drv_i915_xd_picture_flip_nowait(pictures, I915_XD_PICTURE_RESIDENT, I915_XD_PT_SURF_B, &flip);
++	/* A flip armed without waiting latches at once in the model; B is turned by 180 degrees. */
++	error = drv_i915_xd_picture_flip_nowait(pictures, I915_XD_PICTURE_RESIDENT, I915_XD_PT_SURF_B, 180U, &flip);
+ 	i915_host_check(error == I915_XD_PICTURE_OK && flip.result == I915_XD_PICTURE_FLIP_ARMED && flip.old_surf == I915_XD_PT_SURF_A,
+ 			"P10: the flip to B is armed from A");
++	i915_host_check((i915_xd_fake_get(I915_XD_PLANE_CTL(0U)) & I915_XD_PLANE_CTL_ROTATE) == I915_XD_PLANE_CTL_ROTATE_180 &&
++			(i915_xd_fake_get(I915_XD_PLANE_CTL(0U)) & I915_XD_PLANE_CTL_ENABLE) != 0U,
++			"P10a: the flip to B writes the plane's control word with the 180 degree rotation");
++	i915_host_check(drv_i915_xd_picture_rotation(pictures, I915_XD_PICTURE_RESIDENT) == 180U,
++			"P10b: the picture shown next, the armed flip's, is turned by 180");
+ 	i915_host_check(i915_xd_pt_model.events_armed == 1U && i915_xd_pt_model.vblank_refs == 1 && !i915_xd_pt_model.irq_off && i915_xd_pt_model.irq_errors == 0U,
+ 			"P11: the flip armed one event that holds a vertical blank reference, interrupts back on");
+ 	idle = drv_i915_xd_picture_flip_poll(pictures, I915_XD_PICTURE_RESIDENT);
+ 	drv_i915_xd_picture_status(pictures, I915_XD_PICTURE_RESIDENT, &status);
+ 	i915_host_check(idle == 1 && status.cur_surf == I915_XD_PT_SURF_B && !status.flip_pending && i915_xd_pt_model.vblank_refs == 0,
+ 			"P12: the latched flip is retired by the poll: B is shown, the reference given back");
++	i915_host_check(status.cur_rotation == 180U, "P12a: B is shown turned by 180");
+ 
+-	/* The same buffer, and a waited flip back to A. */
+-	error = drv_i915_xd_picture_flip_nowait(pictures, I915_XD_PICTURE_RESIDENT, I915_XD_PT_SURF_B, &flip);
++	/* The same buffer, and a waited flip back to A, unturned. */
++	error = drv_i915_xd_picture_flip_nowait(pictures, I915_XD_PICTURE_RESIDENT, I915_XD_PT_SURF_B, 180U, &flip);
+ 	i915_host_check(error == I915_XD_PICTURE_NOT_READY && flip.result == I915_XD_PICTURE_FLIP_REFUSED,
+ 			"P13: a flip to the buffer shown is refused");
+-	error = drv_i915_xd_picture_flip(pictures, I915_XD_PICTURE_RESIDENT, I915_XD_PT_SURF_A, &flip);
++	error = drv_i915_xd_picture_flip(pictures, I915_XD_PICTURE_RESIDENT, I915_XD_PT_SURF_A, 0U, &flip);
+ 	i915_host_check(error == I915_XD_PICTURE_OK && flip.result == I915_XD_PICTURE_FLIP_DONE && flip.live_after == I915_XD_PT_SURF_A,
+ 			"P14: a waited flip back to A is done when A is live");
++	drv_i915_xd_picture_status(pictures, I915_XD_PICTURE_RESIDENT, &status);
++	i915_host_check((i915_xd_fake_get(I915_XD_PLANE_CTL(0U)) & I915_XD_PLANE_CTL_ROTATE) == 0U && status.cur_rotation == 0U,
++			"P14a: the flip back to A turns the plane back to no rotation");
+ 	error = drv_i915_xd_picture_flip_wait(pictures, I915_XD_PICTURE_RESIDENT);
+ 	i915_host_check(error == 0, "P15: a presenting thread waits for nothing when no flip is armed");
+ 
+@@ -956,6 +965,23 @@ i915_xd_pt_test_panel(void)
+ 	i915_host_check(error == I915_XD_PICTURE_NOT_READY, "P25: a dark screen is not darkened again");
+ 	error = drv_i915_xd_picture_brightness(pictures, I915_XD_PICTURE_RESIDENT, 10U, 100U);
+ 	i915_host_check(error == I915_XD_PICTURE_NOT_READY, "P26: a dark screen takes no brightness");
++
++	/* Lit again with a kept picture that was drawn turned: the plane turns it from the light. */
++	i915_xd_pt_panel_config(&config);
++	config.fb_rotation = 180U;
++	error = drv_i915_xd_picture_prepare(pictures, I915_XD_PICTURE_RESIDENT, &config, &i915_xd_pt_model.hooks);
++	if (error == 0)
++		error = drv_i915_xd_picture_light(pictures, I915_XD_PICTURE_RESIDENT);
++	drv_i915_xd_picture_status(pictures, I915_XD_PICTURE_RESIDENT, &status);
++	i915_host_check(error == I915_XD_PICTURE_OK && status.plane_armed && status.cur_rotation == 180U &&
++			(i915_xd_fake_get(I915_XD_PLANE_CTL(0U)) & I915_XD_PLANE_CTL_ROTATE) == I915_XD_PLANE_CTL_ROTATE_180,
++			"P27: a light of a kept picture drawn at 180 arms the plane turned by 180");
++	error = drv_i915_xd_picture_plane_off(pictures, I915_XD_PICTURE_RESIDENT);
++	if (error == I915_XD_PICTURE_OK)
++		error = drv_i915_xd_picture_dark(pictures, I915_XD_PICTURE_RESIDENT);
++	drv_i915_xd_picture_released(pictures, I915_XD_PICTURE_RESIDENT);
++	i915_host_check(error == I915_XD_PICTURE_OK && i915_xd_pt_refs(&i915_xd_pt_model) == 0,
++			"P28: the turned screen darkens and gives every reference back");
+ }
+ 
+ /* A second screen beside the lit panel: the other combo PLL, the same one with the same words, none left. */
+diff --git a/src/drivers/gpu/i915/tests/display/host-xd-pipe-test.c b/src/drivers/gpu/i915/tests/display/host-xd-pipe-test.c
+index 1a2e13a466..7a2aa2d27d 100644
+--- a/src/drivers/gpu/i915/tests/display/host-xd-pipe-test.c
++++ b/src/drivers/gpu/i915/tests/display/host-xd-pipe-test.c
+@@ -438,6 +438,8 @@ i915_xd_pipe_test_plane(void)
+ 	};
+ 	const struct i915_xd_platform *platform;
+ 	const struct i915_xd_platform *tgl;
++	const struct i915_xd_platform *icl;
++	const struct i915_xd_platform *adlp;
+ 	struct i915_xd_plane plane;
+ 	struct i915_xd_io_record records[32];
+ 	unsigned count;
+@@ -469,6 +471,34 @@ i915_xd_pipe_test_plane(void)
+ 		drv_i915_xd_plane_words(tgl, &plane);
+ 	i915_host_check(tgl != NULL && plane.ctl == 0x84000000U && plane.color_ctl == 0x2000U, "plane: the control word of display 12");
+ 
++	/* Turned by 180 degrees on display 11, 12 and 13: only the rotation field, 10b, joins the control word. */
++	memset(&plane, 0, sizeof(plane));
++	plane.rotation = 180U;
++	if (tgl != NULL)
++		drv_i915_xd_plane_words(tgl, &plane);
++	i915_host_check(tgl != NULL && plane.ctl == 0x84000002U && plane.color_ctl == 0x2000U, "plane: display 12 turned by 180 (rotation field 10b)");
++	icl = i915_xd_pipe_test_setup(I915_XD_PIPE_TEST_ICL, I915_XD_PIPE_TEST_ICL_REVID);
++	memset(&plane, 0, sizeof(plane));
++	if (icl != NULL)
++		drv_i915_xd_plane_words(icl, &plane);
++	i915_host_check(icl != NULL && plane.ctl == 0x84000000U, "plane: the control word of display 11");
++	memset(&plane, 0, sizeof(plane));
++	plane.rotation = 180U;
++	if (icl != NULL)
++		drv_i915_xd_plane_words(icl, &plane);
++	i915_host_check(icl != NULL && plane.ctl == 0x84000002U, "plane: display 11 turned by 180 (rotation field 10b)");
++	adlp = i915_xd_pipe_test_setup(I915_XD_PIPE_TEST_ADLP, I915_XD_PIPE_TEST_ADLP_REVID);
++	memset(&plane, 0, sizeof(plane));
++	plane.rotation = 180U;
++	if (adlp != NULL)
++		drv_i915_xd_plane_words(adlp, &plane);
++	i915_host_check(adlp != NULL && plane.ctl == 0x94000002U && plane.color_ctl == 0x2000U, "plane: display 13 turned by 180 (rotation field 10b)");
++	memset(&plane, 0, sizeof(plane));
++	plane.rotation = 90U;
++	if (adlp != NULL)
++		drv_i915_xd_plane_words(adlp, &plane);
++	i915_host_check(adlp != NULL && plane.ctl == 0x94000000U, "plane: display 13 has no 90 degree value: the plane scans out unturned");
++
+ 	/* Alder Lake-P: the panel's buffer at 0x180000. */
+ 	platform = i915_xd_pipe_test_setup(I915_XD_PIPE_TEST_ADLP, I915_XD_PIPE_TEST_ADLP_REVID);
+ 	if (platform == NULL) {
+@@ -525,4 +555,15 @@ i915_xd_pipe_test_plane(void)
+ 	i915_host_check(i915_xd_fake_get(0x70180U) == 0U && i915_xd_fake_get(0x7019cU) == 0U &&
+ 			drv_i915_xd_plane_live(&i915_xd_pipe_test_io, 0U) == 0x180000U,
+ 			"plane: the plane off, and the live surface");
++
++	/* A display 9 flip turned by 180: only the firmware's rotation field changes, then back. */
++	i915_xd_fake_set(0x70180U, 0x84000000U);
++	i915_xd_fake_set(0x70188U, 0x78U);
++	drv_i915_xd9_plane_flip(&i915_xd_pipe_test_io, 0U, 0x200000U, 0x78U, 180U);
++	i915_host_check(i915_xd_fake_get(0x70180U) == 0x84000002U && i915_xd_fake_get(0x7019cU) == 0x200000U &&
++			i915_xd_fake_get(0x70188U) == 0x78U,
++			"plane: a display 9 flip turned by 180 sets the rotation field 10b, keeps the rest of the firmware's control word");
++	drv_i915_xd9_plane_flip(&i915_xd_pipe_test_io, 0U, 0x180000U, 0x78U, 0U);
++	i915_host_check(i915_xd_fake_get(0x70180U) == 0x84000000U && i915_xd_fake_get(0x7019cU) == 0x180000U,
++			"plane: a display 9 flip back unturned gives the firmware's control word back");
+ }
+diff --git a/src/drivers/gpu/i915/tests/display/host-xd-screen-test.c b/src/drivers/gpu/i915/tests/display/host-xd-screen-test.c
+index eccd2633df..aa6fb55413 100644
+--- a/src/drivers/gpu/i915/tests/display/host-xd-screen-test.c
++++ b/src/drivers/gpu/i915/tests/display/host-xd-screen-test.c
+@@ -1189,26 +1189,30 @@ i915_xd_screen_test_flips(void)
+ 	i915_host_check(drv_i915_xd_flip_refused(&flip, 1, 0, 0x2010U) == I915_XD_FLIP_UNALIGNED, "flips: not on a page");
+ 	i915_host_check(drv_i915_xd_flip_refused(&flip, 1, 0, 0x2000U) == I915_XD_FLIP_OK, "flips: a flip may be armed");
+ 
+-	/* Armed: busy until it latches; the poll retires it. */
+-	drv_i915_xd_flip_arm(&flip, 0x2000U);
++	/* Armed: busy until it latches; the poll retires it, with the new buffer's rotation. */
++	drv_i915_xd_flip_arm(&flip, 0x2000U, 180U);
+ 	i915_host_check(flip.armed && flip.pending == 0x2000U && flip.old == 0x1000U, "flips: armed, both buffers the display's");
++	i915_host_check(flip.pending_rotation == 180U && flip.current_rotation == 0U, "flips: armed at 180: the new buffer's rotation pends, the shown one's stays");
+ 	i915_host_check(drv_i915_xd_flip_refused(&flip, 1, 0, 0x3000U) == I915_XD_FLIP_BUSY, "flips: a second flip while one is armed is refused");
+ 	idle = drv_i915_xd_flip_idle(&flip, 0x1000U);
+-	i915_host_check(idle == 0 && flip.armed, "flips: the pipe still scans the old buffer: not idle");
++	i915_host_check(idle == 0 && flip.armed && flip.current_rotation == 0U, "flips: the pipe still scans the old buffer: not idle, unturned");
+ 	idle = drv_i915_xd_flip_idle(&flip, 0x2000U);
+ 	i915_host_check(idle == 1 && !flip.armed && flip.current == 0x2000U, "flips: latched: retired, the new buffer is the current one");
++	i915_host_check(flip.current_rotation == 180U, "flips: latched: the shown buffer is turned by 180");
+ 
+ 	/* A waited flip: done, not latched, no event. */
+-	drv_i915_xd_flip_arm(&flip, 0x1000U);
++	drv_i915_xd_flip_arm(&flip, 0x1000U, 0U);
+ 	verdict = drv_i915_xd_flip_judge(&flip, 0, 0x1000U);
+ 	i915_host_check(verdict == I915_XD_FLIP_DONE && flip.current == 0x1000U && !flip.stuck, "flips: the event and the new buffer: done");
+-	drv_i915_xd_flip_arm(&flip, 0x2000U);
++	i915_host_check(flip.current_rotation == 0U, "flips: done: the shown buffer is unturned again");
++	drv_i915_xd_flip_arm(&flip, 0x2000U, 180U);
+ 	verdict = drv_i915_xd_flip_judge(&flip, 0, 0x1000U);
+ 	i915_host_check(verdict == I915_XD_FLIP_NOT_LATCHED && flip.stuck && flip.current == 0x1000U, "flips: the event without the new buffer: stuck");
++	i915_host_check(flip.current_rotation == 0U && flip.pending_rotation == 180U, "flips: stuck: the shown buffer keeps its rotation");
+ 	i915_host_check(drv_i915_xd_flip_refused(&flip, 1, 0, 0x3000U) == I915_XD_FLIP_BUSY, "flips: a stuck screen refuses flips");
+ 	memset(&flip, 0, sizeof(flip));
+ 	flip.current = 0x1000U;
+-	drv_i915_xd_flip_arm(&flip, 0x2000U);
++	drv_i915_xd_flip_arm(&flip, 0x2000U, 0U);
+ 	verdict = drv_i915_xd_flip_judge(&flip, 5, 0x1000U);
+ 	i915_host_check(verdict == I915_XD_FLIP_TIMEOUT && flip.stuck && flip.armed, "flips: no event: stuck, still armed");
+ 	idle = drv_i915_xd_flip_idle(&flip, 0x2000U);
+@@ -1217,12 +1221,22 @@ i915_xd_screen_test_flips(void)
+ 	/* The settle. */
+ 	memset(&flip, 0, sizeof(flip));
+ 	flip.current = 0x1000U;
+-	drv_i915_xd_flip_arm(&flip, 0x2000U);
++	drv_i915_xd_flip_arm(&flip, 0x2000U, 180U);
+ 	error = drv_i915_xd_flip_settled(&flip, 0, 0x2000U);
+ 	i915_host_check(error == 0 && flip.current == 0x2000U && !flip.armed, "flips: settled");
+-	drv_i915_xd_flip_arm(&flip, 0x3000U);
++	i915_host_check(flip.current_rotation == 180U, "flips: settled: the shown buffer is turned by 180");
++	drv_i915_xd_flip_arm(&flip, 0x3000U, 0U);
+ 	error = drv_i915_xd_flip_settled(&flip, 0, 0x2000U);
+ 	i915_host_check(error == EIO && flip.stuck, "flips: not settled: stuck");
++	i915_host_check(flip.current_rotation == 180U, "flips: not settled: the shown buffer keeps its rotation");
++
++	/* Where a frame goes while a flip may be armed. */
++	i915_host_check(drv_i915_xd_flip_target(1, 0U, 180U) == I915_XD_TARGET_BACK, "flips: nothing armed: the buffer not shown");
++	i915_host_check(drv_i915_xd_flip_target(1, 180U, 180U) == I915_XD_TARGET_BACK, "flips: nothing armed, same rotation: the buffer not shown");
++	i915_host_check(drv_i915_xd_flip_target(0, 180U, 180U) == I915_XD_TARGET_ARMED, "flips: armed, same rotation: the armed flip's buffer");
++	i915_host_check(drv_i915_xd_flip_target(0, 0U, 0U) == I915_XD_TARGET_ARMED, "flips: armed, unturned: the armed flip's buffer");
++	i915_host_check(drv_i915_xd_flip_target(0, 0U, 180U) == I915_XD_TARGET_SETTLE, "flips: armed unturned, a turned frame: the flip is waited for");
++	i915_host_check(drv_i915_xd_flip_target(0, 180U, 0U) == I915_XD_TARGET_SETTLE, "flips: armed turned, an unturned frame: the flip is waited for");
+ }
+ 
+ /* The verdicts of a resident run. */
+diff --git a/src/drivers/gpu/i915/worker.h b/src/drivers/gpu/i915/worker.h
+index 70eb29d447..aa1ab0b1e6 100644
+--- a/src/drivers/gpu/i915/worker.h
++++ b/src/drivers/gpu/i915/worker.h
+@@ -86,6 +86,12 @@ struct i915_worker_present {
+ 
+ 	/* Nonzero: a frame or the release of the second output, the head, not of the resident output. */
+ 	int head;
++
++	/*
++	 * The rotation the frame is shown with, clockwise degrees (0 or 180):
++	 * the plane turns it, the copy into the panel buffer does not.
++	 */
++	unsigned rotation;
+ };
+ 
+ int drv_i915_worker_create(struct i915_device *device);
+diff --git a/src/drivers/gpu/tests/host-display-flags-test.c b/src/drivers/gpu/tests/host-display-flags-test.c
+new file mode 100644
+index 0000000000..e0c83478e6
+--- /dev/null
++++ b/src/drivers/gpu/tests/host-display-flags-test.c
+@@ -0,0 +1,172 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The display core's flag checks (../gpu-display-flags.h) on the host: the
++ * backend's declared flags, a present's flags and a commit plane's flags,
++ * for a backend that shows a 180-degree turn and for one that does not.
++ */
++
++#include "../gpu-display-flags.h"
++#include <stdio.h>
++
++/* One check's expectation: the flags it passes and the answer it expects. */
++struct flags_case {
++	const char *name;
++	uint32_t plane;
++	uint32_t flags;
++	uint32_t ops_flags;
++	int expected;
++};
++
++/*
++ * The registration cases: the flags a backend may declare.
++ *
++ * plane is unused here.
++ */
++static const struct flags_case ops_cases[] = {
++	{"no flag", 0U, 0U, 0U, 0},
++	{"ungated", 0U, DRV_GPU_DISPLAY_UNGATED, 0U, 0},
++	{"turn", 0U, DRV_GPU_DISPLAY_ROTATE_180, 0U, 0},
++	{"ungated and turn", 0U, DRV_GPU_DISPLAY_UNGATED | DRV_GPU_DISPLAY_ROTATE_180, 0U, 0},
++	{"unknown 4", 0U, 4U, 0U, EINVAL},
++	{"turn and unknown", 0U, DRV_GPU_DISPLAY_ROTATE_180 | 0x80000000U, 0U, EINVAL},
++};
++
++/*
++ * The present cases: the request's flags against each backend.
++ *
++ * plane is unused here.
++ */
++static const struct flags_case present_cases[] = {
++	{"FIFO", 0U, GPU_DISPLAY_PRESENT_FIFO, 0U, 0},
++	{"FIFO|BLOB", 0U, GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB, 0U, 0},
++	{"FIFO on a turning backend", 0U, GPU_DISPLAY_PRESENT_FIFO, DRV_GPU_DISPLAY_ROTATE_180, 0},
++	{"FIFO|ROTATE", 0U, GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_ROTATE_180, DRV_GPU_DISPLAY_ROTATE_180, 0},
++	{"FIFO|BLOB|ROTATE", 0U, GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB | GPU_DISPLAY_PRESENT_ROTATE_180,
++	 DRV_GPU_DISPLAY_ROTATE_180 | DRV_GPU_DISPLAY_UNGATED, 0},
++	{"FIFO|ROTATE without the mark", 0U, GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_ROTATE_180,
++	 DRV_GPU_DISPLAY_UNGATED, EOPNOTSUPP},
++	{"FIFO|BLOB|ROTATE without the mark", 0U,
++	 GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB | GPU_DISPLAY_PRESENT_ROTATE_180, 0U, EOPNOTSUPP},
++	{"none", 0U, 0U, DRV_GPU_DISPLAY_ROTATE_180, EINVAL},
++	{"BLOB alone", 0U, GPU_DISPLAY_PRESENT_BLOB, DRV_GPU_DISPLAY_ROTATE_180, EINVAL},
++	{"ROTATE alone", 0U, GPU_DISPLAY_PRESENT_ROTATE_180, DRV_GPU_DISPLAY_ROTATE_180, EINVAL},
++	{"ROTATE alone without the mark", 0U, GPU_DISPLAY_PRESENT_ROTATE_180, 0U, EINVAL},
++	{"BLOB|ROTATE", 0U, GPU_DISPLAY_PRESENT_BLOB | GPU_DISPLAY_PRESENT_ROTATE_180, DRV_GPU_DISPLAY_ROTATE_180,
++	 EINVAL},
++	{"FIFO|unknown 8", 0U, GPU_DISPLAY_PRESENT_FIFO | 8U, DRV_GPU_DISPLAY_ROTATE_180, EINVAL},
++	{"FIFO|ROTATE|unknown 8", 0U, GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_ROTATE_180 | 8U,
++	 DRV_GPU_DISPLAY_ROTATE_180, EINVAL},
++};
++
++/*
++ * The commit plane cases: a plane's own flags (ops_flags unused), then its
++ * turn against each backend.
++ */
++static const struct flags_case plane_cases[] = {
++	{"primary shown", 0U, GPU_DISPLAY_PLANE_SHOWN, 0U, 0},
++	{"primary shown with an image", 0U, GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_IMAGE, 0U, 0},
++	{"primary hidden", 0U, 0U, 0U, 0},
++	{"primary shown and turned", 0U, GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_ROTATE_180, 0U, 0},
++	{"primary turned with an image", 0U,
++	 GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_IMAGE | GPU_DISPLAY_PLANE_ROTATE_180, 0U, 0},
++	{"primary hidden and turned", 0U, GPU_DISPLAY_PLANE_ROTATE_180, 0U, EINVAL},
++	{"overlay shown", 1U, GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_IMAGE, 0U, 0},
++	{"overlay turned", 1U, GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_ROTATE_180, 0U, EINVAL},
++	{"last overlay turned", GPU_DISPLAY_OVERLAY_MAX, GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_ROTATE_180, 0U,
++	 EINVAL},
++	{"unknown 8", 0U, GPU_DISPLAY_PLANE_SHOWN | 8U, 0U, EINVAL},
++};
++
++/* The commit plane turn cases: a checked plane's flags against each backend. */
++static const struct flags_case rotation_cases[] = {
++	{"unturned, no mark", 0U, GPU_DISPLAY_PLANE_SHOWN, 0U, 0},
++	{"unturned, mark", 0U, GPU_DISPLAY_PLANE_SHOWN, DRV_GPU_DISPLAY_ROTATE_180, 0},
++	{"turned, mark", 0U, GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_ROTATE_180,
++	 DRV_GPU_DISPLAY_ROTATE_180 | DRV_GPU_DISPLAY_UNGATED, 0},
++	{"turned, no mark", 0U, GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_ROTATE_180, DRV_GPU_DISPLAY_UNGATED,
++	 EOPNOTSUPP},
++};
++
++/*
++ * The answers that did not match.
++ *
++ * Counted by check() for the whole run; zero means every case passed.
++ */
++static unsigned failures;
++
++/* The cases checked, for the summary. */
++static unsigned checks;
++
++static void check(const char *group, const struct flags_case *item, int answer);
++
++/*
++ * Runs every case and reports the count.
++ *
++ * The exit status is zero only when every answer matched.
++ */
++int
++main(void)
++{
++	size_t index;
++	int answer;
++
++	/* The flags a backend declares at registration. */
++	for (index = 0; index < sizeof(ops_cases) / sizeof(ops_cases[0]); index++) {
++		answer = gpu_display_ops_flags_check(ops_cases[index].flags);
++		check("ops", &ops_cases[index], answer);
++	}
++
++	/* A present's flags against the backend. */
++	for (index = 0; index < sizeof(present_cases) / sizeof(present_cases[0]); index++) {
++		answer = gpu_display_present_flags_check(present_cases[index].flags, present_cases[index].ops_flags);
++		check("present", &present_cases[index], answer);
++	}
++
++	/* A commit plane's own flags. */
++	for (index = 0; index < sizeof(plane_cases) / sizeof(plane_cases[0]); index++) {
++		answer = gpu_display_plane_flags_check(plane_cases[index].plane, plane_cases[index].flags);
++		check("plane", &plane_cases[index], answer);
++	}
++
++	/* A commit plane's turn against the backend. */
++	for (index = 0; index < sizeof(rotation_cases) / sizeof(rotation_cases[0]); index++) {
++		answer = gpu_display_plane_rotation_check(rotation_cases[index].flags, rotation_cases[index].ops_flags);
++		check("rotation", &rotation_cases[index], answer);
++	}
++
++	/* Reports the tally. */
++	printf("host-display-flags-test: %u checks, %u failures\n", checks, failures);
++
++	/* Some answer did not match. */
++	if (failures != 0U)
++		return 1;
++
++	/* Succeeded: every answer matched. */
++	return 0;
++}
++
++/* Compares one answer with its case's expectation and counts it. */
++static void
++check(
++	const char *group,
++	const struct flags_case *item,
++	int answer)
++{
++	/* Every case counts toward the summary. */
++	checks++;
++
++	/* A mismatch is printed and counted. */
++	if (answer != item->expected) {
++		printf("FAIL %s: %s: %d, expected %d\n", group, item->name, answer, item->expected);
++		failures++;
++	}
++
++	/* Succeeded: the answer is counted. */
++	return;
++}
+diff --git a/userland/desktop/libvulkan/README.md b/userland/desktop/libvulkan/README.md
+index 8e2c041d9f..0c057340ea 100644
+--- a/userland/desktop/libvulkan/README.md
++++ b/userland/desktop/libvulkan/README.md
+@@ -156,6 +156,18 @@ log: `VULKAN_ZEDBSD_OVERLAY_LOG=1` で overlay の present・commit ごとに 1
+ を標準エラーに書きます（`why` は cursor の log と同じ語に nospace・invalid・expired・flush・destroy・busy を足した物）。
+ host の試験は `plan/ws214/tests/vulkan-overlay-host.sh`。
+ 
++## Scanout の 180° の回転
++
++`GPU_DISPLAY_ROTATE_180` の出力では、`VkDisplayPropertiesKHR.supportedTransforms` に
++`VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR` が加わり、primary の plane の surface を
++`VkDisplaySurfaceCreateInfoKHR.transform = ROTATE_180` で作れます（cursor・overlay の plane は IDENTITY だけ、
++90°・270° は受けません）。この transform は scanout が画像に当てます: その surface の present・primary の commit に
++`GPU_DISPLAY_PRESENT_ROTATE_180`・`GPU_DISPLAY_PLANE_ROTATE_180` を付け、display の hardware が画像を 180° 回して出します。
++
++約束: surface の座標は scanout が回す前の画像の座標です。surface の capabilities の `supportedTransforms`・`currentTransform` は
++IDENTITY のまま、application は `preTransform = IDENTITY` で回す前の絵を描き、出力の上では画素 (x, y) が (W−1−x, H−1−y) に出ます。
++application が自分で content を回す（`preTransform != IDENTITY`）ことはこの実装では受けません。
++
+ ## 宣言とprotocolの来歴
+ 
+ [API-PROVENANCE.md](../../../include/libc/vulkan/API-PROVENANCE.md) に
+diff --git a/userland/desktop/libvulkan/wsi-display.c b/userland/desktop/libvulkan/wsi-display.c
+index 0ddcbbbc3e..84ef396a4d 100644
+--- a/userland/desktop/libvulkan/wsi-display.c
++++ b/userland/desktop/libvulkan/wsi-display.c
+@@ -352,6 +352,10 @@ vulkan_wsi_display_query(
+ 	if ((request.flags & GPU_DISPLAY_ACTIVE) != 0U)
+ 		output->flags |= VULKAN_WSI_OUTPUT_ACTIVE;
+ 
++	/* The primary plane may scan its image out turned by 180 degrees. */
++	if ((request.flags & GPU_DISPLAY_ROTATE_180) != 0U)
++		output->flags |= VULKAN_WSI_OUTPUT_ROTATE_180;
++
+ 	/* Overlay planes (GPU_DISPLAY_HAS_OVERLAYS) follow the primary, below the cursor plane. */
+ 	if ((request.flags & GPU_DISPLAY_HAS_OVERLAYS) != 0U && output->plane_count > 1U) {
+ 		output->flags |= VULKAN_WSI_OUTPUT_OVERLAYS;
+@@ -1418,6 +1422,10 @@ display_present_image_sync(
+ 	request.refresh_millihz = lease->surface->display_mode->parameters.refreshRate;
+ 	request.flags = GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB;
+ 	request.generation = lease->generation;
++
++	/* The surface's transform is applied by the scanout. */
++	if (lease->surface->display_info.transform == VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR)
++		request.flags |= GPU_DISPLAY_PRESENT_ROTATE_180;
+ 	pthread_mutex_lock(&display_mutex);
+ 
+ 	/* A retained image cannot acquire another plane reference after counter exhaustion. */
+@@ -1858,6 +1866,10 @@ display_present_native(
+ 	request.refresh_millihz = lease->surface->display_mode->parameters.refreshRate;
+ 	request.flags = GPU_DISPLAY_PRESENT_FIFO;
+ 	request.generation = lease->generation;
++
++	/* The surface's transform is applied by the scanout. */
++	if (lease->surface->display_info.transform == VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR)
++		request.flags |= GPU_DISPLAY_PRESENT_ROTATE_180;
+ 	status = ioctl(lease->plane->connection->fd, GPU_DISPLAY_PRESENT, &request);
+ 	if (status != 0) {
+ 		native_error = errno;
+@@ -2409,6 +2421,10 @@ display_primary_commit(
+ 	request.generation = lease->generation;
+ 	display_overlay_state(&request.planes[0], GPU_DISPLAY_PLANE_PRIMARY, ticket, VK_TRUE, image, &whole, &whole);
+ 
++	/* The surface's transform is applied by the scanout, to the primary only. */
++	if (lease->surface->display_info.transform == VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR)
++		request.planes[0].flags |= GPU_DISPLAY_PLANE_ROTATE_180;
++
+ 	/* The kernel checks the producer's fence again before the record, as for a synchronized selection. */
+ 	if (wait_fd >= 0) {
+ 		request.planes[0].wait_fd = wait_fd;
+diff --git a/userland/desktop/libvulkan/wsi-internal.h b/userland/desktop/libvulkan/wsi-internal.h
+index e26b017778..e133c6c7da 100644
+--- a/userland/desktop/libvulkan/wsi-internal.h
++++ b/userland/desktop/libvulkan/wsi-internal.h
+@@ -25,6 +25,8 @@
+ #define VULKAN_WSI_OUTPUT_CURSOR	16U
+ /* Planes 1 to overlay_count are overlay planes (GPU_DISPLAY_HAS_OVERLAYS): premultiplied, placed and maybe scaled. */
+ #define VULKAN_WSI_OUTPUT_OVERLAYS	32U
++/* The primary plane shows its image turned by 180 degrees on request (GPU_DISPLAY_ROTATE_180). */
++#define VULKAN_WSI_OUTPUT_ROTATE_180	64U
+ #define VULKAN_WSI_FORMAT_RGBA		1U
+ #define VULKAN_WSI_FORMAT_BGRA		2U
+ 
+diff --git a/userland/desktop/libvulkan/wsi.c b/userland/desktop/libvulkan/wsi.c
+index e0e586ab6e..64efa2fa8a 100644
+--- a/userland/desktop/libvulkan/wsi.c
++++ b/userland/desktop/libvulkan/wsi.c
+@@ -126,6 +126,10 @@ vkGetPhysicalDeviceDisplayPropertiesKHR(
+ 		property->planeReorderPossible = VK_FALSE;
+ 		property->persistentContent = VK_FALSE;
+ 
++		/* The primary plane's scanout may turn the image by 180 degrees. */
++		if ((output.flags & VULKAN_WSI_OUTPUT_ROTATE_180) != 0U)
++			property->supportedTransforms |= VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR;
++
+ 		/* An absent native name is represented by the standard NULL value. */
+ 		if (display->name[0] != '\0')
+ 			property->displayName = display->name;
+@@ -574,6 +578,7 @@ vkCreateDisplayPlaneSurfaceKHR(
+ 	uint32_t local_plane;
+ 	bool cursor;
+ 	bool overlay;
++	bool turned;
+ 	VkResult error;
+ 
+ 	/* Resolves the instance and the mode before allocating a surface. */
+@@ -617,11 +622,22 @@ vkCreateDisplayPlaneSurfaceKHR(
+ 	cursor = wsi_cursor_plane(&output, local_plane);
+ 	overlay = wsi_overlay_plane(&output, local_plane);
+ 
+-	/* Exposes the direct adapter's supported transform and the plane's composition behavior. */
+-	if (create_info->transform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ||
+-	    create_info->alphaMode != capabilities.supportedAlpha) {
++	/* Exposes the plane's composition behavior. */
++	if (create_info->alphaMode != capabilities.supportedAlpha)
++		return VK_ERROR_INITIALIZATION_FAILED;
++
++	/*
++	 * The transform the scanout applies: none, or 180 degrees on the
++	 * primary plane of an output that turns it.
++	 */
++	turned = false;
++	if (create_info->transform == VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR &&
++	    !cursor &&
++	    !overlay &&
++	    (output.flags & VULKAN_WSI_OUTPUT_ROTATE_180) != 0U)
++		turned = true;
++	if (create_info->transform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR && !turned)
+ 		return VK_ERROR_INITIALIZATION_FAILED;
+-	}
+ 
+ 	/* A cursor or overlay image fits the plane's limits; a full plane takes the complete selected mode without scaling. */
+ 	if (cursor || overlay) {
+diff --git a/userland/tests/vkdemo/display.c b/userland/tests/vkdemo/display.c
+index e04ec1533e..82d03d2708 100644
+--- a/userland/tests/vkdemo/display.c
++++ b/userland/tests/vkdemo/display.c
+@@ -19,8 +19,8 @@ static VkResult choose_plane(VkPhysicalDevice physical, VkDisplayKHR display, Vk
+ static VkResult choose_format(VkPhysicalDevice physical, VkSurfaceKHR surface, VkFormat *format);
+ 
+ /*
+- * Opens a direct-display surface of the requested size on the first display
+- * that can show it.
++ * Opens an unturned direct-display surface of the requested size on the
++ * first display that can show it.
+  */
+ VkResult
+ vkdemo_display_open(
+@@ -29,6 +29,30 @@ vkdemo_display_open(
+ 	uint32_t width,
+ 	uint32_t height,
+ 	struct vkdemo_display *display)
++{
++	VkResult status;
++
++	/* The surface the scanout shows as it is drawn. */
++	status = vkdemo_display_open_transform(instance, physical, width, height, VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, display);
++	if (status != VK_SUCCESS)
++		return status;
++
++	/* Succeeded: the renderer owns one direct-display surface. */
++	return VK_SUCCESS;
++}
++
++/*
++ * Opens a direct-display surface of the requested size, whose image the
++ * scanout turns by transform, on the first display that can show it so.
++ */
++VkResult
++vkdemo_display_open_transform(
++	VkInstance instance,
++	VkPhysicalDevice physical,
++	uint32_t width,
++	uint32_t height,
++	VkSurfaceTransformFlagBitsKHR transform,
++	struct vkdemo_display *display)
+ {
+ 	VkDisplayPropertiesKHR *properties;
+ 	VkResult status;
+@@ -69,12 +93,12 @@ vkdemo_display_open(
+ 	/* Try each display without inventing a device-specific preferred identifier. */
+ 	status = VK_ERROR_INITIALIZATION_FAILED;
+ 	for (index = 0; index < count; index++) {
+-		/* This demo draws an unrotated full-plane image. */
+-		if ((properties[index].supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) == 0)
++		/* A display whose scanout applies the transform asked for. */
++		if ((properties[index].supportedTransforms & transform) == 0)
+ 			continue;
+ 
+ 		/* The first display that takes a surface of this size is the one. */
+-		status = vkdemo_display_open_on(instance, physical, properties[index].display, width, height, display);
++		status = vkdemo_display_open_on_transform(instance, physical, properties[index].display, width, height, transform, display);
+ 		if (status == VK_SUCCESS)
+ 			break;
+ 	}
+@@ -89,10 +113,11 @@ vkdemo_display_open(
+ }
+ 
+ /*
+- * Opens a direct-display surface of the requested size on one given display.
++ * Opens an unturned direct-display surface of the requested size on one
++ * given display.
+  *
+  * A compositor that moves to another display while it runs names the
+- * display itself (ws113-p004a).
++ * display itself.
+  */
+ VkResult
+ vkdemo_display_open_on(
+@@ -102,6 +127,34 @@ vkdemo_display_open_on(
+ 	uint32_t width,
+ 	uint32_t height,
+ 	struct vkdemo_display *display)
++{
++	VkResult status;
++
++	/* The surface the scanout shows as it is drawn. */
++	status = vkdemo_display_open_on_transform(instance, physical, target, width, height, VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR, display);
++	if (status != VK_SUCCESS)
++		return status;
++
++	/* Succeeded: the caller owns one direct-display surface on the display. */
++	return VK_SUCCESS;
++}
++
++/*
++ * Opens a direct-display surface of the requested size on one given
++ * display, whose image the scanout turns by transform.
++ *
++ * The swapchain stays unturned (preTransform IDENTITY): the picture is
++ * drawn as it is, and the display's hardware turns it.
++ */
++VkResult
++vkdemo_display_open_on_transform(
++	VkInstance instance,
++	VkPhysicalDevice physical,
++	VkDisplayKHR target,
++	uint32_t width,
++	uint32_t height,
++	VkSurfaceTransformFlagBitsKHR transform,
++	struct vkdemo_display *display)
+ {
+ 	VkDisplaySurfaceCreateInfoKHR create;
+ 	VkDisplayModeKHR mode;
+@@ -124,13 +177,13 @@ vkdemo_display_open_on(
+ 	if (status != VK_SUCCESS)
+ 		return status;
+ 
+-	/* Initialize the one-to-one, opaque direct-display surface. */
++	/* Initialize the one-to-one, opaque direct-display surface, turned by the scanout as asked. */
+ 	memset(&create, 0, sizeof(create));
+ 	create.sType = VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR;
+ 	create.displayMode = mode;
+ 	create.planeIndex = plane;
+ 	create.planeStackIndex = stack;
+-	create.transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
++	create.transform = transform;
+ 	create.globalAlpha = 1.0f;
+ 	create.alphaMode = VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR;
+ 	create.imageExtent.width = width;
+diff --git a/userland/tests/vkdemo/display.h b/userland/tests/vkdemo/display.h
+index e06bbf0ae5..6882540a78 100644
+--- a/userland/tests/vkdemo/display.h
++++ b/userland/tests/vkdemo/display.h
+@@ -27,6 +27,8 @@ struct vkdemo_display {
+ 
+ VkResult vkdemo_display_open(VkInstance instance, VkPhysicalDevice physical, uint32_t width, uint32_t height, struct vkdemo_display *display);
+ VkResult vkdemo_display_open_on(VkInstance instance, VkPhysicalDevice physical, VkDisplayKHR target, uint32_t width, uint32_t height, struct vkdemo_display *display);
++VkResult vkdemo_display_open_transform(VkInstance instance, VkPhysicalDevice physical, uint32_t width, uint32_t height, VkSurfaceTransformFlagBitsKHR transform, struct vkdemo_display *display);
++VkResult vkdemo_display_open_on_transform(VkInstance instance, VkPhysicalDevice physical, VkDisplayKHR target, uint32_t width, uint32_t height, VkSurfaceTransformFlagBitsKHR transform, struct vkdemo_display *display);
+ VkResult vkdemo_display_choose_format(VkPhysicalDevice physical, struct vkdemo_display *display);
+ VkResult vkdemo_display_create_swapchain(VkPhysicalDevice physical, VkDevice device, uint32_t family, struct vkdemo_display *display, int readback);
+ VkResult vkdemo_display_create_swapchain_usage(VkPhysicalDevice physical, VkDevice device, uint32_t family, struct vkdemo_display *display, VkImageUsageFlags extra);
+diff --git a/userland/tests/vkdemo/main.c b/userland/tests/vkdemo/main.c
+index 7e684c20c0..62ffa77d73 100644
+--- a/userland/tests/vkdemo/main.c
++++ b/userland/tests/vkdemo/main.c
+@@ -33,6 +33,7 @@ struct demo_options {
+ 	int verify;
+ 	int offscreen;
+ 	int readback;
++	int rotate180;
+ };
+ 
+ /*
+@@ -76,7 +77,7 @@ main(
+ 	if (status != 0) {
+ 		fprintf(
+ 			stderr,
+-			"usage: vkdemo [--device-index=N] [--offscreen] [--readback] [--output=PATH] [--token=NAME] [--duration=0..3600 | --time-ms=0..3600000 --hold=0..120 | --verify-session]\n");
++			"usage: vkdemo [--device-index=N] [--offscreen] [--readback] [--transform=0|180] [--output=PATH] [--token=NAME] [--duration=0..3600 | --time-ms=0..3600000 --hold=0..120 | --verify-session]\n");
+ 		return 2;
+ 	}
+ 
+@@ -85,7 +86,7 @@ main(
+ 	fflush(stdout);
+ 
+ 	/* Create the Vulkan shaders, texture and retained frame resources. */
+-	status = vkdemo_initialize(options.device_index, options.offscreen, options.readback);
++	status = vkdemo_initialize(options.device_index, options.offscreen, options.readback, options.rotate180);
+ 	if (status != 0)
+ 		goto out;
+ 
+@@ -270,6 +271,18 @@ parse_arguments(
+ 			continue;
+ 		}
+ 
++		/* Ask the display's scanout to turn the picture: none, or 180 degrees. */
++		match = strcmp(argv[index], "--transform=0");
++		if (match == 0) {
++			options->rotate180 = 0;
++			continue;
++		}
++		match = strcmp(argv[index], "--transform=180");
++		if (match == 0) {
++			options->rotate180 = 1;
++			continue;
++		}
++
+ 		/* Request explicit pixel evidence for an otherwise ordinary display animation. */
+ 		match = strcmp(argv[index], "--readback");
+ 		if (match == 0) {
+@@ -371,6 +384,10 @@ parse_arguments(
+ 			return -1;
+ 	}
+ 
++	/* Only a display's scanout turns the picture. */
++	if (options->rotate180 != 0 && options->offscreen != 0)
++		return -1;
++
+ 	/* Offscreen rendering, image output and checkpoints explicitly require real pixels. */
+ 	if (options->offscreen != 0 || options->verify != 0)
+ 		options->readback = 1;
+diff --git a/userland/tests/vkdemo/renderer.c b/userland/tests/vkdemo/renderer.c
+index 25cf827991..04e9e1c3c6 100644
+--- a/userland/tests/vkdemo/renderer.c
++++ b/userland/tests/vkdemo/renderer.c
+@@ -85,6 +85,7 @@ struct demo_renderer {
+ 	VkResult last_error;
+ 	const char *last_operation;
+ 	int offscreen;
++	int rotate180;
+ 	int readback_enabled;
+ 	int ready;
+ 	int has_frame;
+@@ -147,7 +148,8 @@ int
+ vkdemo_initialize(
+ 	uint32_t device_index,
+ 	int offscreen,
+-	int readback)
++	int readback,
++	int rotate180)
+ {
+ 	VkFormatProperties properties;
+ 	int error;
+@@ -155,6 +157,7 @@ vkdemo_initialize(
+ 	/* Keep partial initialization valid for the caller's unconditional close. */
+ 	memset(&renderer, 0, sizeof(renderer));
+ 	renderer.offscreen = offscreen;
++	renderer.rotate180 = rotate180;
+ 	renderer.readback_enabled = readback;
+ 	if (offscreen != 0)
+ 		renderer.readback_enabled = 1;
+@@ -540,6 +543,7 @@ create_context(
+ 	VkDeviceCreateInfo device;
+ 	VkPhysicalDeviceProperties properties;
+ 	VkPhysicalDevice *physical;
++	VkSurfaceTransformFlagBitsKHR transform;
+ 	VkResult status;
+ 	uint32_t count;
+ 	float priority;
+@@ -617,9 +621,12 @@ create_context(
+ 	free(physical);
+ 	vkGetPhysicalDeviceMemoryProperties(renderer.physical, &renderer.memory);
+ 
+-	/* Select a real display surface before choosing its presentation queue. */
++	/* Select a real display surface, turned by the scanout when asked, before choosing its presentation queue. */
++	transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
++	if (renderer.rotate180 != 0)
++		transform = VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR;
+ 	if (renderer.offscreen == 0) {
+-		status = vkdemo_display_open(renderer.instance, renderer.physical, VKDEMO_WIDTH, VKDEMO_HEIGHT, &renderer.display);
++		status = vkdemo_display_open_transform(renderer.instance, renderer.physical, VKDEMO_WIDTH, VKDEMO_HEIGHT, transform, &renderer.display);
+ 		if (status != VK_SUCCESS) {
+ 			record_error(status, "direct display surface");
+ 			return -1;
+diff --git a/userland/tests/vkdemo/renderer.h b/userland/tests/vkdemo/renderer.h
+index a522e61cdc..b9a195e816 100644
+--- a/userland/tests/vkdemo/renderer.h
++++ b/userland/tests/vkdemo/renderer.h
+@@ -18,7 +18,8 @@
+ #define VKDEMO_HEIGHT	240U
+ #define VKDEMO_BYTES	(VKDEMO_WIDTH * VKDEMO_HEIGHT * 4U)
+ 
+-int vkdemo_initialize(uint32_t device_index, int offscreen, int readback);
++/* rotate180: the display's scanout turns the picture by 180 degrees (the surface's transform). */
++int vkdemo_initialize(uint32_t device_index, int offscreen, int readback, int rotate180);
+ int vkdemo_render(uint32_t milliseconds, uint32_t frame, char digest[65]);
+ int vkdemo_write_frame(const char *path);
+ int vkdemo_close(void);

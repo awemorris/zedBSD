@@ -1,0 +1,102 @@
+diff --git a/plan/ws048/phase009/phase.md b/plan/ws048/phase009/phase.md
+index d03e109e7c..3458c4aad1 100644
+--- a/plan/ws048/phase009/phase.md
++++ b/plan/ws048/phase009/phase.md
+@@ -1,7 +1,7 @@
+ <!-- awesome-plan project=zedbsd record=ws048-p009 -->
+ # WS048 p009: RPi4 USB input activation and selected class drivers
+ 
+-Status: uncleared（source/build済み、USB実機受入待ち）
++Status: uncleared（source/build済み、実機USB keyboard/LAN失敗、原因調査中）
+ Disposition: normal
+ Parent: [WS048](../ws.md)
+ Queue: [focused queue](../codex-usb-session-queue.md)
+@@ -28,3 +28,15 @@ rpi4-usb-session-20261011-i01 ends uncleared only because current USB physical a
+ ## Main integration follow-up / 2026-10-11
+ 
+ User explicitly instructed「mainにマージしてください。」for source commit `8c93ba8e026c3d3e8e2bfe3f22c5ffe430e9dd62`. Main was clean at `fbcb2b543` and fast-forwarded to that exact commit without conflict. Read-back confirmed all 15 integrated files byte-identical to the verified worktree. Owned-worktree `make -j16 build/arm64/vmunix` succeeds with no further source changes; prior full image/option checks remain applicable. Integration is complete; earlier integration-pending text is historical. USB input and greeter physical checks remain pending, with no acceptance-state promotion from merge alone. Shared Master/Queue/history/cache/GitHub reconciliation remains Q1 pending; no push.
++
++## Physical failure and initialization investigation / 2026-10-11
++
++User reports keyboard and USB LAN unavailable, no visible hotplug messages; PCIe screen absence is uncertain. Current config/compiled core path verified, host initialization stage remains unconfirmed. [Investigation](../tests/rpi4-usb-init-investigation-20261011.md). User will attach data.img to recover saved kernel logs read-only. No new implementation/source changes; p009 stays uncleared. Earlier physical-pending wording is historical. Shared projections/GitHub pending Q1.
++
++## Photo/data follow-up / 2026-10-11
++
++Photo confirms USB core initialization and PCIe Gen2 x1 link/BAR0 placement; user confirms later login. Attached data.img contains no logs; native SD root is a separate UFS partition. Requested booted SD root kernel.log or whole-card image, correcting earlier acquisition advice. Firmware/xHCI outcome remains unknown. [Evidence](../tests/rpi4-usb-init-investigation-20261011.md). p009 remains uncleared; no source edits or physical acceptance.
++
++## Storage-layout clarification / 2026-10-11
++
++User reports no apparent second partition and expects loopback mounting, then asks whether migration is complete. Verified current main build/arm64/hdd-image.img MBR directly: partition1 type0x0c, LBA2048, 134217728 bytes; partition2 type0xa5, LBA264192, 207618048 bytes. Current generator is native UFS root; vfs_mount_legacy_root retains loopback overlay fallback when no marked UFS partition exists. This proves the locally generated image layout only. Actual physical-card partition table/root selection remains unverified; earlier statements that the actual card uses native UFS are corrected. Attached data.img genuinely has no logs; absence does not itself prove root selection or a storage failure. Need actual card evidence before further location claims.
+diff --git a/plan/ws048/tests/rpi4-usb-init-investigation-20261011.md b/plan/ws048/tests/rpi4-usb-init-investigation-20261011.md
+new file mode 100644
+index 0000000000..6d0f8ea557
+--- /dev/null
++++ b/plan/ws048/tests/rpi4-usb-init-investigation-20261011.md
+@@ -0,0 +1,38 @@
++# RPi4 USB initialization investigation / 2026-10-11
++
++Source: main `a094b953c`, USB source `8c93ba8e0`. Current user requested config and initialization investigation. This is read-only source/artifact investigation, not a new implementation Queue.
++
++## Physical report
++
++User reports USB keyboard and USB LAN unavailable, unplug/replug produces no visible messages. USB messages were not observed; absence of PCIe messages is uncertain. No usable Ethernet/input for dmesg. USB previously worked; the working image/commit is unidentified. This is failed physical acceptance of p009.
++
++## Verified findings
++
++- Actual Make evaluation with current config selects rpi4/arm64, xHCI/HID/hub/storage and graphical login. USB core/xHCI sources are selected. Main kernel.elf disassembly of drv_rpi4_pcie_init contains USB core initialization, flag store, log call and class registrations.
++- Boot worker retains the original extended handoff, discovers then refreshes devices before VFS/userspace. RPi4 runs SDHCI, PCIe then VC4. Reaching SD login rules out earlier SDHCI exits on this path.
++- USB core/class/xHCI registration precedes FDT/controller/link checks. Missing or disabled PCIe cannot itself skip the core call. No earlier RPi4 USB core caller found.
++- Initialization sequence: runtime FDT → controller description → reset/SerDes → DMA window → link training → outbound window/BAR allocation → VL805 firmware mailbox/reassignment → PCI scan → xHCI attach/start → worker → platform refresh enables root probing → VFS input-ready activates pending HID.
++- The checked-in firmware DTB enables BCM2711 PCIe and contains expected ranges/reset node. Runtime firmware can mutate this tree; runtime contents are unverified.
++- brcmstb ops do not set defer_unassigned, so PCI deferred probing does not hold this host back.
++- Platform discards PCIe initialization errors; PCI enumeration can succeed despite endpoint attach failure. Login therefore does not prove a usable USB host.
++- Early screen messages can scroll away or be cleared on VC4 console repaint/takeover, while the log retains them. Screen absence alone does not establish skipped initialization.
++- USB core EALREADY currently stops class registration, but no earlier caller found: robustness observation only, not established cause.
++- xHCI worker polls topology every 100 ms once root_ready is set. Keyboard and LAN both failing is consistent with common host failure, without identifying the stage.
++
++## Evidence recovery / resume
++
++Existing syslogd copies boot/current kernel records to `/var/log/kernel.log`, follows and flushes every two seconds, and keeps `/var/log/kernel.log.old` from the previous boot. If syslogd starts and storage is writable, the SD system partition supplies logs without keyboard/SSH. User will attach data.img; recover logs read-only once received. Image not yet received. `/run/dmesg.boot` is also generated but may be volatile.
++
++No source edits, builds, QEMU, hardware access, push or main integration. Root cause remains unconfirmed. Resume with kernel log/serial evidence or identified working image; inspect the first PCIe/xHCI failure. Logo/kernel animation stays deferred. Shared projections/GitHub pending Q1.
++
++## Photo and attached data image follow-up
++
++User supplied photo shows `usb: URB completion contract q009-release-acquire-v1`, brcmstb resetting at fd500000, revision 304, link up generation 2 x1, and 01:00.0 BAR0 at c0000000 (4096 bytes). User confirms this screen later advances to login. USB core initialization, controller reset, PCIe link and initial BAR assignment have physical evidence. No firmware/xHCI outcome is visible in this photo; it does not locate a permanent stop.
++
++Attached data.img: 33554432 bytes, SHA256 e9934e45b34599b0176137b2a58e98e7458b038709d4abe81534c7268c0d90b6. Read-only `file`, `fls -r -p`, `istat`, `icat` and checked-in UFS reader agree: only /.zovl0, /.zovl1 and /etc/zedbsd-root; no /var or logs. No writes/mounts performed. Current RPi4 image includes a separate native UFS root partition, selected before legacy image overlay by vfs_mount_legacy_root; data.img is not the current root/log storage. Corrected the earlier acquisition advice to the user; requested /var/log/kernel.log from the booted SD second partition or booted SD whole-card image.
++
++Additional static observation: firmware wait_mailbox counts 100000 10us sleeps as a nominal one-second timeout. Current kern_usleep_range yields until a scheduler tick and may exceed the requested interval; RPi4 reports 1ms ticks. This timeout may therefore take much longer than one second. Nested waits also restart the budget on unrelated mailbox words. This is a timing defect in the nominal timeout contract, not yet evidence of the actual USB failure or firmware response absence. No source change under this read-only investigation.
++
++## Storage-layout clarification / 2026-10-11
++
++User reports no apparent second partition and expects loopback mounting, then asks whether migration is complete. Verified current main build/arm64/hdd-image.img MBR directly: partition1 type0x0c, LBA2048, 134217728 bytes; partition2 type0xa5, LBA264192, 207618048 bytes. Current generator is native UFS root; vfs_mount_legacy_root retains loopback overlay fallback when no marked UFS partition exists. This proves the locally generated image layout only. Actual physical-card partition table/root selection remains unverified; earlier statements that the actual card uses native UFS are corrected. Attached data.img genuinely has no logs; absence does not itself prove root selection or a storage failure. Need actual card evidence before further location claims.
+diff --git a/plan/ws048/ws.md b/plan/ws048/ws.md
+index 203dd9d9a5..9d33c99d43 100644
+--- a/plan/ws048/ws.md
++++ b/plan/ws048/ws.md
+@@ -3,7 +3,7 @@
+ # WS048: Raspberry Pi 4 の USB（PCIe・VL805 の xHCI・USB キーボード）
+ 
+ <!-- awesome-plan-current:start -->
+-Status: incomplete（p008実機boot例外はcleared、p009 USB修正source/build済み・実機入力待ち）
++Status: incomplete（p008実機boot例外はcleared、p009実機USB keyboard/LAN失敗・原因調査中）
+ Primary Milestone: MG008
+ Related Milestones: MG003, MG006
+ Objectives: O2, O4
+@@ -95,3 +95,15 @@ p009 terminal: HID pending activationと選択classの不足を補完、現在co
+ ## Main integration follow-up / 2026-10-11
+ 
+ User explicitly instructed「mainにマージしてください。」for source commit `8c93ba8e026c3d3e8e2bfe3f22c5ffe430e9dd62`. Main was clean at `fbcb2b543` and fast-forwarded to that exact commit without conflict. Read-back confirmed all 15 integrated files byte-identical to the verified worktree. Owned-worktree `make -j16 build/arm64/vmunix` succeeds with no further source changes; prior full image/option checks remain applicable. Integration is complete; earlier integration-pending text is historical. USB input and greeter physical checks remain pending, with no acceptance-state promotion from merge alone. Shared Master/Queue/history/cache/GitHub reconciliation remains Q1 pending; no push.
++
++## Physical failure and initialization investigation / 2026-10-11
++
++User reports keyboard and USB LAN unavailable, no visible hotplug messages; PCIe screen absence is uncertain. Current config/compiled core path verified, host initialization stage remains unconfirmed. [Investigation](tests/rpi4-usb-init-investigation-20261011.md). User will attach data.img to recover saved kernel logs read-only. No new implementation/source changes; p009 stays uncleared. Earlier physical-pending wording is historical. Shared projections/GitHub pending Q1.
++
++## Photo/data follow-up / 2026-10-11
++
++Photo confirms USB core initialization and PCIe Gen2 x1 link/BAR0 placement; user confirms later login. Attached data.img contains no logs; native SD root is a separate UFS partition. Requested booted SD root kernel.log or whole-card image, correcting earlier acquisition advice. Firmware/xHCI outcome remains unknown. [Evidence](tests/rpi4-usb-init-investigation-20261011.md). p009 remains uncleared; no source edits or physical acceptance.
++
++## Storage-layout clarification / 2026-10-11
++
++User reports no apparent second partition and expects loopback mounting, then asks whether migration is complete. Verified current main build/arm64/hdd-image.img MBR directly: partition1 type0x0c, LBA2048, 134217728 bytes; partition2 type0xa5, LBA264192, 207618048 bytes. Current generator is native UFS root; vfs_mount_legacy_root retains loopback overlay fallback when no marked UFS partition exists. This proves the locally generated image layout only. Actual physical-card partition table/root selection remains unverified; earlier statements that the actual card uses native UFS are corrected. Attached data.img genuinely has no logs; absence does not itself prove root selection or a storage failure. Need actual card evidence before further location claims.

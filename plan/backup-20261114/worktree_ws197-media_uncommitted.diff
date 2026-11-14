@@ -1,0 +1,1721 @@
+diff --git a/plan/ws197/codex-queue.md b/plan/ws197/codex-queue.md
+index 587f4e3072..c0a757cf04 100644
+--- a/plan/ws197/codex-queue.md
++++ b/plan/ws197/codex-queue.md
+@@ -1,27 +1,15 @@
+-# WS197 Codex 承認済み実行記録
++# WS197 Codex 承認済み実行記録: MMS media
+ 
+ Status: finished
+-Owner: Codex / codex/ws197-pbap-sms
+-Approval: current user、2026-10-10、WS197 p005 完了と新規受信SMS不具合の修正。Pc1〜Pc6 推奨どおり。
+-Scope: [p005](phase005/phase.md) 第3.1版の i06/i07 残り、最終全文規約・host・named build と SMS 受信経路診断修正。調査は実機の読み取り＋同経路の有界 host 回帰。実機PBAP UATはp008。
++Owner: Codex / codex/ws197-mms-media
++Approval: current user、2026-10-10「写真の受信、動画の受信、写真の送信、動画の送信も一緒に実装してしまいましょう。」
++Scope: [p010](phase010/phase.md)の4機能、必要なcodec/daemon/backend/compositor/libkeiland/Phone、最終全文規約・host・named build・main統合。旧p005の完了/承認/結果は[履歴](codex-queue-p005-history.md)に保存、過去の合格を書き換えない。
+ 
+ | 項目 | 状態 | 依存 |
+ | --- | --- | --- |
+-| p005 i06/i07・最終検証 | cleared | main に統合済み i01〜i05・既存store |
+-| 新規SMS/MMSテキスト受信表示 | cleared | 実機SSH成功、MAPの受信通知経路 |
++| p010 MMS media送受信 | in-progress | main 9dfebc99bのMMSテキスト受信とSMS PushMessage |
++| p010 最終全文規約/host/build/統合 | pending | media実装 |
+ 
+-共有 Queue の ID は Q1 が管理。独自の q 番号を割り当てない。master.md は変更しない。終了時に WS/Phase に結果と残りを記録し、この範囲だけ main へ統合する（既存ユーザー承認）。
++共有Queue ID/registry/masterはQ1の所有、変更しない。自分のtreeは `.claude/worktrees/ws197-media`。実装はここで分離する。写真/動画を実際に宛先へ送る操作はユーザーが行う。実機GUI再起動は検証済み成果を提示してから判断する。GitHub公開は保留。HFPやAAC/動画codecの新規実装は範囲外。
+ 
+-## 2026-10-10 新規受信の診断とMMSテキスト承認
+-
+-実機 beta2+ge8adcdf の17:41 JSTのMNS通知は `type=1 message-type=3 handle-present=1`（NewMessage / MMS）。通知自体は到達し、MAPのSMS限定条件とlisting filterで除外されていた。本文・番号・handleは記録しない。ユーザー回答「MMSのテキスト受信も含める」により、SMS受信修正へMMSのテキスト本文の抽出・履歴取り込み・通知・保存・表示を追加する。添付画像・動画は対象外、MIME生データを本文として表示しない。MIME parserは独自Zlib実装、RFC2045/2046のtransfer encodingとmultipartを参照。共有master/queueへの投影はQ1に保留。
+-
+-## 終了（2026-10-10）
+-
+-p005 i06/i07はhost・named build warning0・最終変更source全文規約でcleared。新規受信はMMS除外と末尾CRLFの2点を修正、ユーザーが「ゴミは消え、日本語も受信できました」と実機確認してcleared。結果は[p005](phase005/phase.md)・[p004](phase004/phase.md)・[WS197](ws.md)へ記録。WS197全体はincomplete、次Phaseの自動開始はしない。
+-
+-WS199はユーザー受け入れでcompleted/local closed、[完了証拠](../ws199/ws.md)に記録。remote issueが存在せずGitHub closeは行わない。Q1への未反映事項: master/共有Queue/Past Logの結果投影、WS197旧p003/current headerの履歴整理、WS199 completed投影とPhase/固有testの整理。共有記録と外部sessionの削除境界を守り、master/Queueは変更しない。既存方針によりGitHub公開は保留。
+-
+-## main統合確認（2026-10-10）
+-
+-実装/検証/完了記録のsource commit `6bca6f2a2`をmainへmerge `bee41dded`で統合した。merge前のmain `5e178dd17`のbeta2.md更新を保持。master/共有Queueは未変更、push/公開は行わない。変更sourceは検証したprivate treeと同一。Q1向けの残り投影/整理は既述どおり。
++2026-10-10: メディア管理先行のユーザー指示で本試行をunclearedで終了。p010の途中sourceはこのtreeに保管、main未統合。新しい有限scopeはcodex/ws197-media-libraryの実行記録。
+diff --git a/plan/ws197/phase004/phase.md b/plan/ws197/phase004/phase.md
+index 823ae74de2..8bc30490b1 100644
+--- a/plan/ws197/phase004/phase.md
++++ b/plan/ws197/phase004/phase.md
+@@ -645,3 +645,7 @@ P1〜P7 はクリック「全部推しどおり」: P1 app が閉じている間
+ - codeで確認: `map.c:map_run_get`はGetMessageで`Attachment=0`を送るため画像本体を要求しない。`mms.c:mms_part`は明示的attachmentとimage/*を読み飛ばし、text/plainだけを取り出す。MIMEヘッダーのfilename/nameを本文に写すコードは無い。従ってファイル名表示はスマホが返した代替text/plainである可能性が高いが、当該bMessageの構造は未取得なので断定しない。
+ - `view.c:view_photo`は現状、図形でサンプル画像を描く仮表示。MMS画像の取得・保存・画像decode/表示へつながっていない。既存MAP/bMessageの全体上限65536byteも写真対応時には見直しが要る。
+ - 必要な拡張: 添付を含むMAP取得、MIMEの画像partとテキストの対応づけ、bluetoothd→compositor→libkeiland→Phoneの添付中継、Phone所有の画像保存と既存decoderによる描画、写真を扱う受信上限/メモリの設計。新しいQueueの範囲として画像対応を承認する前に、許容形式/上限を具体化する。今回sourceと実機daemonは変更していない。
++
++## 2026-10-10 写真・動画の双方向転送の承認
++
++ユーザー「写真の受信、動画の受信、写真の送信、動画の送信も一緒に実装してしまいましょう。」によりMMS添付の4機能を[p010](phase010/phase.md)へ追加（p004からの参照は[こちら](../phase010/phase.md)）。旧text-onlyの受け入れ証拠は保存。FD中継・Phone保存・写真の実画像表示・動画のVideo Player起動・添付選択/送信を実装する。全WS conformance p009のscopeはp010を含む。master/共有Queueへの反映はQ1。
+diff --git a/plan/ws197/tests/bt-map-host-test.c b/plan/ws197/tests/bt-map-host-test.c
+index d13ae940cd..a4167bf1fd 100644
+--- a/plan/ws197/tests/bt-map-host-test.c
++++ b/plan/ws197/tests/bt-map-host-test.c
+@@ -927,7 +927,7 @@ test_page(void)
+ 	check(found && header.length == 34U && memcmp(header.data, list_parameters, 34U) == 0, "page: the listing's parameters");
+ 	respond_body(0xa0U, listing);
+ 
+-	/* GET of the SMS: its handle in 16 digits, no attachment, UTF-8. */
++	/* GET of the SMS: its handle in 16 digits, attachment requested, UTF-8. */
+ 	length = take(packet, sizeof(packet));
+ 	check(length != 0U && packet[0] == 0x83U, "page: the message's Get");
+ 	found = find_header(packet, length, 3U, 0x42U, &header);
+@@ -935,7 +935,7 @@ test_page(void)
+ 	found = find_header(packet, length, 3U, 0x01U, &header);
+ 	check(found && is_text(&header, "0000000000000010"), "page: Name the handle");
+ 	found = find_header(packet, length, 3U, 0x4cU, &header);
+-	check(found && header.length == 6U && memcmp(header.data, "\x0a\x01\x00\x14\x01\x01", 6U) == 0, "page: Attachment 0, Charset 1");
++	check(found && header.length == 6U && memcmp(header.data, "\x0a\x01\x01\x14\x01\x01", 6U) == 0, "page: Attachment 1, Charset 1");
+ 
+ 	/* Answered in two packets: Continue with a Body, the next Get, then Success with End of Body. */
+ 	half = strlen(message) / 2U;
+@@ -1214,8 +1214,10 @@ test_live(void)
+ 	respond_body(0xa0U, "BEGIN:BMSG\r\nVERSION:1.0\r\nSTATUS:UNREAD\r\nTYPE:MMS\r\nBEGIN:BENV\r\nBEGIN:BBODY\r\nCHARSET:UTF-8\r\nBEGIN:MSG\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\nTGl2ZSBNTVM=\r\nEND:MSG\r\nEND:BBODY\r\nEND:BENV\r\nEND:BMSG\r\n");
+ 	found = has_emit("type=mms");
+ 	check(found, "MMS: type metadata preserved");
+-	found = has_emit("length=8\nLive MMS");
+-	check(found, "MMS: only decoded body emitted");
++	found = has_emit("format=mime");
++	check(found, "MMS: complete MIME body forwarded");
++	found = has_emit("TGl2ZSBNTVM=");
++	check(found, "MMS: transfer encoding preserved for media transport");
+ 	(void)take(packet, sizeof(packet));
+ 	respond(0xa0U, NULL, 0U);
+ }
+diff --git a/plan/ws197/tests/bt-phone-host-test.sh b/plan/ws197/tests/bt-phone-host-test.sh
+index 61905378cd..0af610cde1 100644
+--- a/plan/ws197/tests/bt-phone-host-test.sh
++++ b/plan/ws197/tests/bt-phone-host-test.sh
+@@ -17,12 +17,12 @@ for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
+ 	"bt-outq-host-test userland/base/bluetoothd/outq.c" \
+ 	"bt-phoneio-host-test userland/base/bluetoothd/phoneio.c userland/base/bluetoothd/mapxml.c" \
+ 	"bt-mapxml-host-test userland/base/bluetoothd/mapxml.c" \
+-	"bt-mms-host-test userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/bluetoothd/mapxml.c" \
+-	"bt-bmsg-host-test userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/bluetoothd/mapxml.c" \
++	"bt-mms-host-test userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/libmms/mms.c userland/base/bluetoothd/mapxml.c" \
++	"bt-bmsg-host-test userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/libmms/mms.c userland/base/bluetoothd/mapxml.c" \
+ 	"bt-vcard-host-test userland/base/bluetoothd/vcard.c userland/base/bluetoothd/mapxml.c" \
+ 	"bt-phonemux-host-test userland/base/bluetoothd/phonemux.c" \
+ 	"bt-pbap-host-test userland/base/bluetoothd/pbap.c userland/base/bluetoothd/obex.c userland/base/bluetoothd/vcard.c userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/phoneio.c userland/base/bluetoothd/sdp.c" \
+-	"bt-map-host-test userland/base/bluetoothd/map.c userland/base/bluetoothd/obex.c userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/bluetoothd/phoneio.c userland/base/bluetoothd/sdp.c" \
++	"bt-map-host-test userland/base/bluetoothd/map.c userland/base/bluetoothd/obex.c userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/libmms/mms.c userland/base/bluetoothd/phoneio.c userland/base/bluetoothd/sdp.c" \
+ 	"bt-obex-host-test userland/base/bluetoothd/obex.c" \
+ 	"bt-sdp-host-test userland/base/bluetoothd/sdps.c userland/base/bluetoothd/sdp.c" \
+ 	"bt-l2cap-move-host-test userland/base/bluetoothd/l2cap.c" \
+diff --git a/plan/ws197/ws.md b/plan/ws197/ws.md
+index e7039290bc..a5e50abbc4 100644
+--- a/plan/ws197/ws.md
++++ b/plan/ws197/ws.md
+@@ -10,7 +10,7 @@ Objectives: O2
+ Parent: [Master](../master.md)
+ Queue: [Codex承認済み実行記録](codex-queue.md)、p005と新規受信修正は終了。共有QueueはQ1が反映。
+ Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
+-Resume point: p005 i01〜i07 cleared。次はp006 HFPの選択/承認、p008で実機PBAP UAT。旧P1再開情報は履歴として保持。
++Resume point: p010 MMS写真/動画の送受信を実行中。p005 cleared、p006 HFP/p008 PBAP UATは保留。
+ <!-- awesome-plan-current:end -->
+ 
+ ## 由来（2026-10-09 ユーザー）
+@@ -47,7 +47,8 @@ Resume point: p005 i01〜i07 cleared。次はp006 HFPの選択/承認、p008で
+ | p006 | HFP の制御（AT の SLC、indicator、応答・終話・発信、発信者、割り込み、codec の交渉） | 12 | planned |
+ | p007 | HFP の音: p007a xHCI の isochronous・usb-bt の interface 1・SCO の口、p007b SCO・audiod・CVSD の後に mSBC（Q9 の SCO の UAPI は p007a の設計の後にユーザーに聞く） | 25 | planned |
+ | p008 | 実機（Android が先、iPhone は HFP の後、Q13）。PHONE PROBE は p003 で消すので MAP の操作で確かめる | 20 | planned |
+-| p009 | 規約の全文の見直し | 2 | planned |
++| p009 | 規約の全文の見直し（p010 MMS mediaも含む） | 2 | planned |
++| [p010](phase010/phase.md) | MMS写真/動画の受信・保存/表示・送信 | — | in-progress（2026-10-10ユーザー承認、Codex） |
+ 
+ 関連の Bug: [BUG-282](../bugs/BUG-282.md)（WS143 の hid.c の page の途中の Connection Request の取り違え、p003 i03 と同じ形で直す）。Future Work: fw-bt-goep2（ERTM・GOEP 2.0、MAP 1.4・PBAP 1.2）、F-086（SUBSCRIBE の phone の分は p003）。
+ 
+@@ -104,3 +105,7 @@ p005 i06/i07を実装し、host回帰・最終変更source全文規約・zedBSD/
+ - codeで確認: `map.c:map_run_get`はGetMessageで`Attachment=0`を送るため画像本体を要求しない。`mms.c:mms_part`は明示的attachmentとimage/*を読み飛ばし、text/plainだけを取り出す。MIMEヘッダーのfilename/nameを本文に写すコードは無い。従ってファイル名表示はスマホが返した代替text/plainである可能性が高いが、当該bMessageの構造は未取得なので断定しない。
+ - `view.c:view_photo`は現状、図形でサンプル画像を描く仮表示。MMS画像の取得・保存・画像decode/表示へつながっていない。既存MAP/bMessageの全体上限65536byteも写真対応時には見直しが要る。
+ - 必要な拡張: 添付を含むMAP取得、MIMEの画像partとテキストの対応づけ、bluetoothd→compositor→libkeiland→Phoneの添付中継、Phone所有の画像保存と既存decoderによる描画、写真を扱う受信上限/メモリの設計。新しいQueueの範囲として画像対応を承認する前に、許容形式/上限を具体化する。今回sourceと実機daemonは変更していない。
++
++## 2026-10-10 写真・動画の双方向転送の承認
++
++ユーザー「写真の受信、動画の受信、写真の送信、動画の送信も一緒に実装してしまいましょう。」によりMMS添付の4機能を[p010](phase010/phase.md)へ追加（p004からの参照は[こちら](../phase010/phase.md)）。旧text-onlyの受け入れ証拠は保存。FD中継・Phone保存・写真の実画像表示・動画のVideo Player起動・添付選択/送信を実装する。全WS conformance p009のscopeはp010を含む。master/共有Queueへの反映はQ1。
+diff --git a/userland/base/bluetoothd/Makefile b/userland/base/bluetoothd/Makefile
+index 02c6a022d3..4d869320f4 100644
+--- a/userland/base/bluetoothd/Makefile
++++ b/userland/base/bluetoothd/Makefile
+@@ -17,7 +17,7 @@ BLUETOOTHD_SOURCES := userland/base/bluetoothd/main.c userland/base/bluetoothd/s
+ 	userland/base/bluetoothd/hog.c userland/base/bluetoothd/rfcomm.c userland/base/bluetoothd/obex.c \
+ 	userland/base/bluetoothd/sdps.c userland/base/bluetoothd/phone.c \
+ 	userland/base/bluetoothd/phonerec.c userland/base/bluetoothd/outq.c userland/base/bluetoothd/phoneio.c \
+-	userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/bluetoothd/map.c \
++	userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/libmms/mms.c userland/base/bluetoothd/map.c \
+ 	userland/base/bluetoothd/vcard.c userland/base/bluetoothd/phonemux.c userland/base/bluetoothd/pbap.c
+ BLUETOOTHD_DATA := /etc/service.d/bluetoothd=userland/base/bluetoothd/bluetoothd.service
+ $(eval $(call ZEDBSD_USERLAND_PACKAGE,bluetoothd,Bluetooth daemon,amd64,n,basic,$(BLUETOOTHD_SOURCES),y,base,base/bluetoothd,,0755,program,$(BLUETOOTHD_DATA),,sbin))
+diff --git a/userland/base/bluetoothd/bmsg.c b/userland/base/bluetoothd/bmsg.c
+index d8d03c9840..d5b5020480 100644
+--- a/userland/base/bluetoothd/bmsg.c
++++ b/userland/base/bluetoothd/bmsg.c
+@@ -11,6 +11,7 @@
+ 
+ #include "userland/base/bluetoothd/bmsg.h"
+ #include "userland/base/bluetoothd/mms.h"
++#include "userland/base/libmms/mms.h"
+ 
+ #include <errno.h>
+ #include <stdio.h>
+@@ -299,6 +300,7 @@ btd_bmsg_build(
+ 	size_t body;
+ 	int number_ok;
+ 	int text_ok;
++	struct mms_document document;
+ 	int written;
+ 	int error;
+ 
+@@ -308,17 +310,28 @@ btd_bmsg_build(
+ 		return EINVAL;
+ 
+ 	/* A text of 1 to 8192 bytes of UTF-8 without a NUL. */
+-	if (length == 0U || length > BTD_BMSG_SEND_MAX)
+-		return EINVAL;
+-	text_ok = btd_bmsg_utf8_ok(text, length);
+-	if (!text_ok)
++	if (text == NULL || length == 0U)
+ 		return EINVAL;
++	if (type == BTD_MAP_TYPE_MMS) {
++		error = mms_parse(text, length, &document);
++		if (error != 0)
++			return error;
++		mms_release(&document);
++	} else {
++		if (length > BTD_BMSG_SEND_MAX)
++			return EINVAL;
++		text_ok = btd_bmsg_utf8_ok(text, length);
++		if (!text_ok)
++			return EINVAL;
++	}
+ 
+ 	/* The type's name. */
+ 	if (type == BTD_MAP_TYPE_SMS_GSM) {
+ 		type_name = "SMS_GSM";
+ 	} else if (type == BTD_MAP_TYPE_SMS_CDMA) {
+ 		type_name = "SMS_CDMA";
++	} else if (type == BTD_MAP_TYPE_MMS) {
++		type_name = "MMS";
+ 	} else {
+ 		return EINVAL;
+ 	}
+@@ -1069,6 +1082,7 @@ bmsg_take_text(
+ 	int line_start;
+ 	int escaped;
+ 	int error;
++	struct mms_document document;
+ 
+ 	/* The text ends before the END:MSG line's break (CRLF or LF); an empty text has none. */
+ 	message = reader->message;
+@@ -1081,9 +1095,17 @@ bmsg_take_text(
+ 
+ 	/* MMS selects decoded plain text before the SMS text limit can hide a later part. */
+ 	if (message->type == BTD_MAP_TYPE_MMS) {
+-		error = btd_mms_text(reader->bytes + body_start, body_end - body_start, message->text, sizeof(message->text), &message->text_length, &message->truncated);
++		error = mms_parse(reader->bytes + body_start, body_end - body_start, &document);
+ 		if (error != 0)
+ 			return error;
++
++		/* Keeps the caption and borrows the complete media body for transport. */
++		memcpy(message->text, document.text, document.text_length + 1U);
++		message->text_length = document.text_length;
++		message->truncated = document.truncated;
++		message->mime = reader->bytes + body_start;
++		message->mime_length = body_end - body_start;
++		mms_release(&document);
+ 	} else {
+ 		/* Each character of the text. */
+ 		at = body_start;
+diff --git a/userland/base/bluetoothd/bmsg.h b/userland/base/bluetoothd/bmsg.h
+index d8ded17014..eb517d88a7 100644
+--- a/userland/base/bluetoothd/bmsg.h
++++ b/userland/base/bluetoothd/bmsg.h
+@@ -33,7 +33,7 @@
+ #include <stdint.h>
+ 
+ /* The most one bMessage is, in bytes. */
+-#define BTD_BMSG_INPUT_MAX		65536U
++#define BTD_BMSG_INPUT_MAX		(16U * 1024U * 1024U + 1024U)
+ 
+ /* The longest text kept of a message read; a longer one is cut. */
+ #define BTD_BMSG_TEXT_MAX		16384U
+@@ -83,6 +83,9 @@ struct btd_bmsg {
+ 	int truncated;
+ 	size_t text_length;
+ 	char text[BTD_BMSG_TEXT_MAX + 1U];
++	/* Borrows the complete MMS MIME span from the input until its next reuse. */
++	const uint8_t *mime;
++	size_t mime_length;
+ };
+ 
+ int btd_bmsg_parse(const uint8_t *input, size_t length, struct btd_bmsg *message);
+diff --git a/userland/base/bluetoothd/main.c b/userland/base/bluetoothd/main.c
+index e26244163a..266d970b51 100644
+--- a/userland/base/bluetoothd/main.c
++++ b/userland/base/bluetoothd/main.c
+@@ -1280,6 +1280,7 @@ btd_phone_send_request(
+ 	int allowed;
+ 	int got;
+ 	int same;
++	int media;
+ 
+ 	/* The owner and root. */
+ 	client = &btd_clients[index];
+@@ -1291,6 +1292,7 @@ btd_phone_send_request(
+ 
+ 	/* The number among the arguments (the length was read by the input). */
+ 	number[0] = '\0';
++	media = 0;
+ 	cursor = line + strlen("PHONE SEND");
+ 	for (;;) {
+ 		got = btd_phoneio_next(&cursor, key, sizeof(key), value, sizeof(value));
+@@ -1304,6 +1306,19 @@ btd_phone_send_request(
+ 			continue;
+ 		}
+ 
++		/* An explicit media body selects the MMS PushMessage path. */
++		same = strcmp(key, "type");
++		if (same == 0) {
++			same = strcmp(value, "mms");
++			if (same != 0 || media) {
++				btd_write(client, "ERROR argument\nDONE\n");
++				return;
++			}
++
++			media = 1;
++			continue;
++		}
++
+ 		/* Any other key. */
+ 		same = strcmp(key, "length");
+ 		if (same != 0) {
+@@ -1320,6 +1335,9 @@ btd_phone_send_request(
+ 
+ 	/* Asked of MAP, the client waiting for its DONE (a refusal answered now). */
+ 	client->waits_phone = 1;
++	if (media)
++		refused = btd_map_send_mms(&btd_messages, btd_token(index), number, text, length);
++	else
+ 	refused = btd_map_send(&btd_messages, btd_token(index), number, text, length);
+ 	if (refused != NULL) {
+ 		client->waits_phone = 0;
+diff --git a/userland/base/bluetoothd/map.c b/userland/base/bluetoothd/map.c
+index a55b061a66..e4e02054df 100644
+--- a/userland/base/bluetoothd/map.c
++++ b/userland/base/bluetoothd/map.c
+@@ -790,6 +790,75 @@ btd_map_send(
+ 	return NULL;
+ }
+ 
++/*
++ * Queues a complete MMS MIME body for the phone's MMS-capable outbox.
++ */
++const char *
++btd_map_send_mms(
++	struct btd_map *map,
++	uint64_t token,
++	const char *number,
++	const uint8_t *mime,
++	size_t length)
++{
++	struct btd_map_op op;
++	uint8_t *message;
++	size_t size;
++	size_t used;
++	unsigned index;
++	int error;
++	int ok;
++
++	/* Requires an established MAS that advertises MMS PushMessage support. */
++	if (map->state != BTD_MAP_READY)
++		return "not-ready";
++	if (!map->send || (map->message_types & MAP_TYPES_MMS) == 0U)
++		return "no-send";
++	ok = btd_bmsg_number_ok(number);
++	if (!ok)
++		return "number";
++	if (length == 0U || length > BTD_BMSG_INPUT_MAX - 1024U)
++		return "argument";
++
++	/* Allows only one large payload in flight or waiting per phone. */
++	if (map->queue_count >= BTD_MAP_QUEUE_MAX)
++		return "busy";
++	if (map->running && map->current.message_length > BTD_BMSG_BUILD_MAX)
++		return "busy";
++	for (index = 0U; index < map->queue_count; index++) {
++		if (map->queue[index].message_length > BTD_BMSG_BUILD_MAX)
++			return "busy";
++	}
++
++	/* Reserves worst-case line normalization room and validates MIME before queuing. */
++	size = 2U * length + 1024U;
++	message = malloc(size);
++	if (message == NULL)
++		return "busy";
++	error = btd_bmsg_build(number, mime, length, BTD_MAP_TYPE_MMS, message, size, &used);
++	if (error != 0 || used > BTD_BMSG_INPUT_MAX) {
++		free(message);
++		return "argument";
++	}
++
++	/* Queue ownership keeps the encoded bMessage alive until its final answer. */
++	map->next_request++;
++	map_op_init(&op, BTD_MAP_OP_PUSH);
++	op.token = token;
++	op.request = map->next_request;
++	op.message = message;
++	op.message_length = used;
++	error = map_enqueue(map, &op);
++	if (error != 0) {
++		free(message);
++		return "busy";
++	}
++
++	/* Succeeded: the normal PushMessage state machine owns this request. */
++	map_settle(map);
++	return NULL;
++}
++
+ /*
+  * Forgets the requests of a client that went (the token's): its queued
+  * operations go, its pages end quietly (an operation running for it ends
+@@ -1313,6 +1382,12 @@ map_end_requests(
+ 		map_page_free(map, index);
+ 	}
+ 
++	/* Releases the operation input when all outstanding requests have ended. */
++	free(map->body);
++	map->body = NULL;
++	map->body_capacity = 0U;
++	map->body_length = 0U;
++
+ 	/* Succeeded: the announced messages, the sent ones and the held events forgotten. */
+ 	memset(map->lives, 0, sizeof(map->lives));
+ 	memset(map->sents, 0, sizeof(map->sents));
+@@ -1749,7 +1824,7 @@ map_run_listing(
+ 		return EMSGSIZE;
+ 
+ 	/* Sent. */
+-	error = btd_obex_get(&map->mas, headers, writer.used, BTD_MAP_BODY_MAX, map_now(map));
++	error = btd_obex_get(&map->mas, headers, writer.used, 65536U, map_now(map));
+ 	if (error != 0)
+ 		return error;
+ 
+@@ -1773,7 +1848,7 @@ map_run_get(
+ 
+ 	/* The parameters. */
+ 	used = 0U;
+-	map_parameter8(parameters, &used, MAP_TAG_ATTACHMENT, 0U);
++	map_parameter8(parameters, &used, MAP_TAG_ATTACHMENT, 1U);
+ 	map_parameter8(parameters, &used, MAP_TAG_CHARSET, MAP_CHARSET_UTF8);
+ 
+ 	/* The headers: Type, Name of the handle in 16 hex digits, the parameters. */
+@@ -2203,7 +2278,7 @@ map_page_get_done(
+ 	/* Its line and text to the page's client. */
+ 	error = map_item(map, line, sizeof(line), entry->handle, page->folder, entry);
+ 	if (error == 0) {
+-		map->hooks.answer(map->hooks.context, page->token, line, (const uint8_t *)map->message.text, map->message.text_length);
++		map->hooks.answer(map->hooks.context, page->token, line, map->message.mime != NULL ? map->message.mime : (const uint8_t *)map->message.text, map->message.mime != NULL ? map->message.mime_length : map->message.text_length);
+ 		page->given++;
+ 	}
+ 
+@@ -2321,7 +2396,7 @@ map_live_get_done(
+ 		entry = &live->entry;
+ 	error = map_item(map, line, sizeof(line), live->handle, live->folder, entry);
+ 	if (error == 0)
+-		map->hooks.emit(map->hooks.context, line, (const uint8_t *)map->message.text, map->message.text_length);
++		map->hooks.emit(map->hooks.context, line, map->message.mime != NULL ? map->message.mime : (const uint8_t *)map->message.text, map->message.mime != NULL ? map->message.mime_length : map->message.text_length);
+ 
+ 	/* Unread in the inbox (or not known): unread again. */
+ 	unread = 0;
+@@ -3051,7 +3126,7 @@ map_item(
+ 		if (from == BTD_MAP_FROM_MSE)
+ 			zone = "mse";
+ 		partial = 0;
+-		key_value = map_key(key_folder, datetime, peer, (const uint8_t *)message->text, message->text_length);
++		key_value = map_key(key_folder, datetime, peer, message->mime != NULL ? message->mime : (const uint8_t *)message->text, message->mime != NULL ? message->mime_length : message->text_length);
+ 		(void)snprintf(key,
+ 			       sizeof(key),
+ 			       "%016llx",
+@@ -3084,7 +3159,7 @@ map_item(
+ 	/* Existing SMS metadata stays compatible; MMS carries an explicit type. */
+ 	type_field = "";
+ 	if (message->type == BTD_MAP_TYPE_MMS)
+-		type_field = " type=mms";
++		type_field = " type=mms format=mime";
+ 
+ 	/* The fields before the strings. */
+ 	written = snprintf(line,
+@@ -3128,7 +3203,7 @@ map_item(
+ 			   read,
+ 			   partial,
+ 			   message->truncated,
+-			   (unsigned long)message->text_length);
++			   (unsigned long)(message->mime != NULL ? message->mime_length : message->text_length));
+ 	if (written < 0 || (size_t)written >= size - used)
+ 		return ENOSPC;
+ 
+@@ -3584,11 +3659,29 @@ map_mas_body(
+ 	size_t length)
+ {
+ 	struct btd_map *map;
++	uint8_t *body;
++	size_t wanted;
++	size_t capacity;
+ 
+-	/* Past the room. */
++	/* Bounds the complete operation before growing its reusable input buffer. */
+ 	map = context;
+-	if (length > sizeof(map->body) - map->body_length)
++	if (length > BTD_MAP_BODY_MAX - map->body_length)
+ 		return 1;
++	wanted = map->body_length + length;
++	if (wanted > map->body_capacity) {
++		capacity = map->body_capacity;
++		if (capacity == 0U)
++			capacity = 65536U;
++		while (capacity < wanted && capacity < BTD_MAP_BODY_MAX / 2U)
++			capacity *= 2U;
++		if (capacity < wanted)
++			capacity = BTD_MAP_BODY_MAX;
++		body = realloc(map->body, capacity);
++		if (body == NULL)
++			return 1;
++		map->body = body;
++		map->body_capacity = capacity;
++	}
+ 
+ 	/* Succeeded: gathered. */
+ 	memcpy(map->body + map->body_length, data, length);
+diff --git a/userland/base/bluetoothd/map.h b/userland/base/bluetoothd/map.h
+index 40bc6cabbd..d54c0d2adc 100644
+--- a/userland/base/bluetoothd/map.h
++++ b/userland/base/bluetoothd/map.h
+@@ -56,7 +56,7 @@
+ #define BTD_MAP_LOCATE_COUNT		32U
+ 
+ /* The longest body of a listing or a message taken. */
+-#define BTD_MAP_BODY_MAX		65536U
++#define BTD_MAP_BODY_MAX		BTD_BMSG_INPUT_MAX
+ 
+ /*
+  * The times (milliseconds): the wait for Connect's answer while the phone
+@@ -331,7 +331,8 @@ struct btd_map {
+ 
+ 	/* The body being received, and the room a bMessage or a search's listing is read into. */
+ 	size_t body_length;
+-	uint8_t body[BTD_MAP_BODY_MAX];
++	uint8_t *body;
++	size_t body_capacity;
+ 	struct btd_bmsg message;
+ 	struct btd_map_entry located[BTD_MAP_LOCATE_COUNT];
+ 
+@@ -370,6 +371,7 @@ void btd_map_open_failed(void *context, unsigned server_channel);
+ const char *btd_map_page(struct btd_map *map, uint64_t token, int64_t since, unsigned limit, const char *cursor, unsigned count);
+ const char *btd_map_read(struct btd_map *map, uint64_t token, const char *handle);
+ const char *btd_map_send(struct btd_map *map, uint64_t token, const char *number, const uint8_t *text, size_t length);
++const char *btd_map_send_mms(struct btd_map *map, uint64_t token, const char *number, const uint8_t *mime, size_t length);
+ void btd_map_cancel(struct btd_map *map, uint64_t token);
+ void btd_map_check(struct btd_map *map);
+ void btd_map_pump(struct btd_map *map);
+diff --git a/userland/base/bluetoothd/mms.c b/userland/base/bluetoothd/mms.c
+index 930a8aed11..6941da7157 100644
+--- a/userland/base/bluetoothd/mms.c
++++ b/userland/base/bluetoothd/mms.c
+@@ -5,60 +5,12 @@
+  * SPDX-License-Identifier: Zlib
+  */
+ 
+-/*
+- * Reads MMS text/plain parts from MAP's MIME body. RFC 2045 supplies the
+- * transfer encodings; RFC 2046 supplies multipart delimiters. This original
+- * reader bounds headers, nesting, parts and output. It ignores media, SMIL,
+- * HTML and attachments, and never falls back to displaying MIME source.
+- */
+-
+-#include "userland/base/bluetoothd/mms.h"
+-#include "userland/base/bluetoothd/bmsg.h"
+-
+-#include <errno.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include <strings.h>
+-
+-/* Limits on unfolded headers and multipart traversal within one bMessage. */
+-#define MMS_HEADER_MAX 1024U
+-#define MMS_DEPTH_MAX 4U
+-#define MMS_PARTS_MAX 64U
+-
+-/* MIME properties needed to select and decode one part. */
+-struct mms_headers {
+-	char type[MMS_HEADER_MAX];
+-	char encoding[80];
+-	char disposition[160];
+-	size_t body;
+-};
+-
+-/* One extraction accumulates UTF-8 text and counts all visited MIME parts. */
+-struct mms_reader {
+-	char *output;
+-	size_t size;
+-	size_t used;
+-	unsigned parts;
+-	int found;
+-	int truncated;
+-};
+-
+-static int mms_line(const uint8_t *input, size_t length, size_t *at, size_t *start, size_t *end);
+-static int mms_headers_read(const uint8_t *input, size_t length, struct mms_headers *headers);
+-static int mms_header_keep(struct mms_headers *headers, const char *line);
+-static int mms_parameter(const char *type, const char *name, char *value, size_t size);
+-static int mms_token(const char *value, const char *token);
+-static int mms_part(struct mms_reader *reader, const uint8_t *input, size_t length, unsigned depth);
+-static int mms_multipart(struct mms_reader *reader, const uint8_t *input, size_t length, const char *boundary, unsigned depth);
+-static int mms_decode(const uint8_t *input, size_t length, const char *encoding, uint8_t *output, size_t *used);
+-static int mms_base64(unsigned byte);
+-static int mms_hex(unsigned byte);
+-static int mms_append(struct mms_reader *reader, const uint8_t *input, size_t length, const char *charset);
++/* Keeps the daemon's text-only extraction API backed by the shared MIME reader. */
++#include "mms.h"
++#include "userland/base/libmms/mms.h"
+ 
+ /*
+- * Extracts text into a NUL-terminated UTF-8 buffer. Reports ENODATA for media
+- * without plain text, ENOTSUP for an unsupported encoding, EINVAL for broken
+- * MIME, or an allocation error. A successful long text sets truncated.
++ * Extracts only decoded UTF-8 plain text, preserving the existing daemon contract.
+  */
+ int
+ btd_mms_text(
+@@ -69,732 +21,13 @@ btd_mms_text(
+ 	size_t *used,
+ 	int *truncated)
+ {
+-	struct mms_reader reader;
+ 	int error;
+ 
+-	/* Requires a complete bounded body and space for its terminator. */
+-	if (input == NULL || output == NULL || used == NULL || truncated == NULL ||
+-	    size == 0U || length > BTD_BMSG_INPUT_MAX)
+-		return EINVAL;
+-
+-	/* Initializes the extraction without exposing partial results on failure. */
+-	memset(&reader, 0, sizeof(reader));
+-	reader.output = output;
+-	reader.size = size;
+-	output[0] = '\0';
+-	*used = 0U;
+-	*truncated = 0;
+-	error = mms_part(&reader, input, length, 0U);
+-	if (error != 0) {
+-		output[0] = '\0';
+-		return error;
+-	}
+-
+-	/* A multimedia-only message has no text to import. */
+-	if (!reader.found)
+-		return ENODATA;
+-
+-	/* MIME text commonly ends in a transport line break, which is not a glyph. */
+-	while (reader.used > 0U && reader.output[reader.used - 1U] == '\n')
+-		reader.used--;
+-
+-	/* Succeeded: exposes only the selected decoded parts. */
+-	output[reader.used] = '\0';
+-	*used = reader.used;
+-	*truncated = reader.truncated;
+-	return 0;
+-}
+-
+-/* Reads one MIME line, excluding CRLF, advancing even an unterminated last line. */
+-static int
+-mms_line(
+-	const uint8_t *input,
+-	size_t length,
+-	size_t *at,
+-	size_t *start,
+-	size_t *end)
+-{
+-	/* End of this bounded entity. */
+-	if (*at >= length)
+-		return 0;
+-
+-	/* Finds the line's next separator within the body span. */
+-	*start = *at;
+-	while (*at < length && input[*at] != '\n')
+-		(*at)++;
+-	*end = *at;
+-
+-	/* Excludes the carriage return of CRLF. */
+-	if (*end > *start && input[*end - 1U] == '\r')
+-		(*end)--;
+-
+-	/* Consumes the line feed, if this is not the last unterminated line. */
+-	if (*at < length)
+-		(*at)++;
+-
+-	/* Succeeded: one line is available. */
+-	return 1;
+-}
+-
+-/* Reads and unfolds MIME headers before the required empty separator line. */
+-static int
+-mms_headers_read(
+-	const uint8_t *input,
+-	size_t length,
+-	struct mms_headers *headers)
+-{
+-	char line[MMS_HEADER_MAX];
+-	size_t at;
+-	size_t start;
+-	size_t end;
+-	size_t used;
+-	size_t skip;
+-	unsigned count;
+-	int found;
+-	int error;
+-
+-	/* Defaults a missing Content-Type to plain text, without guessing media. */
+-	memset(headers, 0, sizeof(*headers));
+-	memcpy(headers->type, "text/plain", 11U);
+-	at = 0U;
+-	used = 0U;
+-	count = 0U;
+-
+-	/* Unfolds each field into a bounded temporary line. */
+-	for (;;) {
+-		found = mms_line(input, length, &at, &start, &end);
+-		if (!found)
+-			return EINVAL;
+-
+-		/* A blank line terminates headers and fixes the body span. */
+-		if (start == end) {
+-			line[used] = '\0';
+-			error = mms_header_keep(headers, line);
+-			if (error != 0)
+-				return error;
+-			headers->body = at;
+-			break;
+-		}
+-
+-		/* Processes the preceding field before starting the next field. */
+-		skip = start;
+-		if (input[start] != ' ' && input[start] != '\t') {
+-			line[used] = '\0';
+-			error = mms_header_keep(headers, line);
+-			if (error != 0)
+-				return error;
+-			used = 0U;
+-			count++;
+-			if (count > 128U)
+-				return EOVERFLOW;
+-		} else {
+-			/* A continuation needs a preceding header to continue. */
+-			if (used == 0U)
+-				return EINVAL;
+-
+-			/* Replaces folding whitespace with one separating space. */
+-			while (skip < end && (input[skip] == ' ' || input[skip] == '\t'))
+-				skip++;
+-			if (used + 1U >= sizeof(line))
+-				return EOVERFLOW;
+-			line[used++] = ' ';
+-		}
+-
+-		/* Refuses overlong headers rather than interpreting a shortened value. */
+-		if (end - skip >= sizeof(line) - used)
+-			return EOVERFLOW;
+-		memcpy(line + used, input + skip, end - skip);
+-		used += end - skip;
+-	}
+-
+-	/* Succeeded: the empty separator leaves the complete body span. */
+-	return 0;
+-}
+-
+-/* Retains only the MIME headers used by the plain-text reader. */
+-static int
+-mms_header_keep(
+-	struct mms_headers *headers,
+-	const char *line)
+-{
+-	const char *colon;
+-	const char *value;
+-	char *destination;
+-	size_t size;
+-	size_t name_length;
+-	size_t length;
+-	int same;
+-
+-	/* No preceding field at the beginning of the header section. */
+-	if (line[0] == '\0')
+-		return 0;
+-
+-	/* Separates a complete field name from its value. */
+-	colon = strchr(line, ':');
+-	if (colon == NULL)
+-		return EINVAL;
+-	name_length = (size_t)(colon - line);
+-	value = colon + 1U;
+-
+-	/* Removes whitespace surrounding the field value. */
+-	while (*value == ' ' || *value == '\t')
+-		value++;
+-	length = strlen(value);
+-	while (length > 0U && (value[length - 1U] == ' ' || value[length - 1U] == '\t'))
+-		length--;
+-
+-	/* Chooses a known header, preserving exact values for parameter parsing. */
+-	destination = NULL;
+-	size = 0U;
+-	same = strncasecmp(line, "Content-Type", name_length);
+-	if (name_length == 12U && same == 0) {
+-		destination = headers->type;
+-		size = sizeof(headers->type);
+-	} else {
+-		/* Transfer encoding identifies how this leaf body must be decoded. */
+-		same = strncasecmp(line, "Content-Transfer-Encoding", name_length);
+-		if (name_length == 25U && same == 0) {
+-			destination = headers->encoding;
+-			size = sizeof(headers->encoding);
+-		} else {
+-			/* Explicit attachments must not be rendered as conversation text. */
+-			same = strncasecmp(line, "Content-Disposition", name_length);
+-			if (name_length == 19U && same == 0) {
+-				destination = headers->disposition;
+-				size = sizeof(headers->disposition);
+-			}
+-		}
+-	}
+-
+-	/* Unneeded headers remain outside the text output. */
+-	if (destination == NULL)
+-		return 0;
+-
+-	/* Rejects a truncated property before copying it. */
+-	if (length >= size)
+-		return EOVERFLOW;
+-
+-	/* Succeeded: the selected property is available to the part reader. */
+-	memcpy(destination, value, length);
+-	destination[length] = '\0';
+-	return 0;
+-}
+-
+-/* Compares a MIME token case-insensitively, permitting its parameter suffix. */
+-static int
+-mms_token(
+-	const char *value,
+-	const char *token)
+-{
+-	size_t length;
+-	int same;
+-
+-	/* Compares the whole token before accepting a parameter delimiter. */
+-	length = strlen(token);
+-	same = strncasecmp(value, token, length);
+-	if (same != 0)
+-		return 0;
+-	if (value[length] != '\0' && value[length] != ';' && value[length] != ' ' && value[length] != '\t')
+-		return 0;
+-
+-	/* Succeeded: this is the requested MIME token. */
+-	return 1;
+-}
+-
+-/* Extracts a quoted or unquoted parameter without treating embedded semicolons as delimiters. */
+-static int
+-mms_parameter(
+-	const char *type,
+-	const char *name,
+-	char *value,
+-	size_t size)
+-{
+-	const char *at;
+-	const char *start;
+-	size_t name_length;
+-	size_t wanted_length;
+-	size_t used;
+-	int quoted;
+-	int selected;
+-	int same;
+-
+-	/* Walks parameters following the media token. */
+-	value[0] = '\0';
+-	wanted_length = strlen(name);
+-	selected = 0;
+-	at = strchr(type, ';');
+-	while (at != NULL && *at != '\0') {
+-		/* Reads the parameter name without surrounding whitespace. */
+-		at++;
+-		while (*at == ' ' || *at == '\t')
+-			at++;
+-		start = at;
+-		while (*at != '\0' && *at != '=' && *at != ';' && *at != ' ' && *at != '\t')
+-			at++;
+-		name_length = (size_t)(at - start);
+-		while (*at == ' ' || *at == '\t')
+-			at++;
+-		if (*at != '=')
+-			return EINVAL;
+-		at++;
+-		while (*at == ' ' || *at == '\t')
+-			at++;
+-		same = strncasecmp(start, name, name_length);
+-		selected = 0;
+-		if (same == 0 && name_length == wanted_length)
+-			selected = 1;
+-
+-		/* Reads a complete value, unescaping quoted pairs. */
+-		quoted = 0;
+-		if (*at == '"') {
+-			quoted = 1;
+-			at++;
+-		}
+-
+-		/* Copies only the requested value, with its terminator reserved. */
+-		used = 0U;
+-		while (*at != '\0') {
+-			if (quoted && *at == '"')
+-				break;
+-			if (!quoted && (*at == ';' || *at == ' ' || *at == '\t'))
+-				break;
+-			if (quoted && *at == '\\') {
+-				at++;
+-				if (*at == '\0')
+-					return EINVAL;
+-			}
+-
+-			/* Refuses shortening the requested parameter. */
+-			if (selected) {
+-				if (used + 1U >= size)
+-					return EOVERFLOW;
+-				value[used++] = *at;
+-			}
+-
+-			/* Advances within this parameter's complete value. */
+-			at++;
+-		}
+-
+-		/* A quoted value must close before another parameter. */
+-		if (quoted) {
+-			if (*at != '"')
+-				return EINVAL;
+-			at++;
+-		}
+-
+-		/* Separates the next parameter from trailing whitespace. */
+-		while (*at == ' ' || *at == '\t')
+-			at++;
+-		if (*at != '\0' && *at != ';')
+-			return EINVAL;
+-		if (selected) {
+-			value[used] = '\0';
+-			break;
+-		}
+-	}
+-
+-	/* The requested property was not supplied. */
+-	if (!selected)
+-		return ENOENT;
+-
+-	/* Succeeded: the complete requested parameter is available. */
+-	return 0;
+-}
+-
+-/* Selects one MIME entity, recursively inspecting bounded multipart bodies. */
+-static int
+-mms_part(
+-	struct mms_reader *reader,
+-	const uint8_t *input,
+-	size_t length,
+-	unsigned depth)
+-{
+-	struct mms_headers headers;
+-	char boundary[72];
+-	char charset[80];
+-	uint8_t *decoded;
+-	size_t used;
+-	int selected;
+-	int error;
+-
+-	/* Stops pathological nesting and excessive part counts within the bounded message. */
+-	reader->parts++;
+-	if (depth > MMS_DEPTH_MAX || reader->parts > MMS_PARTS_MAX)
+-		return EOVERFLOW;
+-
+-	/* Reads the entity's MIME properties before selecting its payload. */
+-	error = mms_headers_read(input, length, &headers);
++	/* Delegates MIME selection and transfer decoding to the common implementation. */
++	error = mms_extract_text(input, length, output, size, used, truncated);
+ 	if (error != 0)
+ 		return error;
+ 
+-	/* Skips explicit attachments, including text attachments. */
+-	selected = mms_token(headers.disposition, "attachment");
+-	if (selected)
+-		return 0;
+-
+-	/* Multipart entities preserve delimiters before leaf transfer decoding. */
+-	selected = strncasecmp(headers.type, "multipart/", 10U);
+-	if (selected == 0) {
+-		error = mms_parameter(headers.type, "boundary", boundary, sizeof(boundary));
+-		if (error != 0 || boundary[0] == '\0')
+-			return EINVAL;
+-		error = mms_multipart(reader, input + headers.body, length - headers.body, boundary, depth);
+-		if (error != 0)
+-			return error;
+-
+-		/* Succeeded: the multipart's selected leaves have been inspected. */
+-		return 0;
+-	}
+-
+-	/* Never exposes HTML, SMIL or multimedia as raw text. */
+-	selected = mms_token(headers.type, "text/plain");
+-	if (!selected)
+-		return 0;
+-
+-	/* Accepts UTF-8 by default, and explicit ASCII or Latin-1. */
+-	error = mms_parameter(headers.type, "charset", charset, sizeof(charset));
+-	if (error == ENOENT) {
+-		memcpy(charset, "utf-8", 6U);
+-	} else if (error != 0) {
+-		return error;
+-	}
+-
+-	/* Decodes into a bounded owned workspace before validating its text. */
+-	decoded = malloc(length + 1U);
+-	if (decoded == NULL)
+-		return ENOMEM;
+-	error = mms_decode(input + headers.body, length - headers.body, headers.encoding, decoded, &used);
+-	if (error == 0)
+-		error = mms_append(reader, decoded, used, charset);
+-	free(decoded);
+-
+-	/* Reports an undecodable text part without exposing its MIME source. */
+-	if (error != 0)
+-		return error;
+-
+-	/* Succeeded: this plain-text part is accounted for. */
+-	return 0;
+-}
+-
+-/* Traverses whole-line multipart delimiters and requires a closing delimiter. */
+-static int
+-mms_multipart(
+-	struct mms_reader *reader,
+-	const uint8_t *input,
+-	size_t length,
+-	const char *boundary,
+-	unsigned depth)
+-{
+-	size_t at;
+-	size_t start;
+-	size_t end;
+-	size_t part;
+-	size_t part_end;
+-	size_t boundary_length;
+-	size_t tail;
+-	int active;
+-	int closed;
+-	int line;
+-	int same;
+-	int error;
+-
+-	/* Finds delimiters without interpreting preamble or epilogue as text. */
+-	at = 0U;
+-	part = 0U;
+-	active = 0;
+-	closed = 0;
+-	boundary_length = strlen(boundary);
+-	for (;;) {
+-		line = mms_line(input, length, &at, &start, &end);
+-		if (!line)
+-			break;
+-		if (end - start < boundary_length + 2U || input[start] != '-' || input[start + 1U] != '-')
+-			continue;
+-		same = memcmp(input + start + 2U, boundary, boundary_length);
+-		if (same != 0)
+-			continue;
+-
+-		/* A longer prefix is body text rather than a delimiter line. */
+-		tail = start + boundary_length + 2U;
+-		closed = 0;
+-		if (end - tail >= 2U && input[tail] == '-' && input[tail + 1U] == '-') {
+-			closed = 1;
+-			tail += 2U;
+-		}
+-
+-		/* Allows only transport padding after the complete delimiter. */
+-		while (tail < end && (input[tail] == ' ' || input[tail] == '\t'))
+-			tail++;
+-		if (tail != end)
+-			continue;
+-
+-		/* The delimiter's preceding CRLF belongs to it, not the leaf body. */
+-		if (active) {
+-			part_end = start;
+-			if (part_end > part && input[part_end - 1U] == '\n')
+-				part_end--;
+-			if (part_end > part && input[part_end - 1U] == '\r')
+-				part_end--;
+-			error = mms_part(reader, input + part, part_end - part, depth + 1U);
+-			if (error != 0)
+-				return error;
+-		}
+-
+-		/* A complete closing delimiter terminates this multipart entity. */
+-		if (closed)
+-			break;
+-		part = at;
+-		active = 1;
+-	}
+-
+-	/* An incomplete multipart must not produce a successful text import. */
+-	if (!closed)
+-		return EINVAL;
+-
+-	/* Succeeded: a complete closing delimiter ended this entity. */
+-	return 0;
+-}
+-
+-/* Converts one Base64 alphabet byte to its six-bit value, or -1. */
+-static int
+-mms_base64(
+-	unsigned byte)
+-{
+-	/* The three contiguous alphabet ranges. */
+-	if (byte >= 'A' && byte <= 'Z')
+-		return (int)(byte - 'A');
+-	if (byte >= 'a' && byte <= 'z')
+-		return (int)(byte - 'a' + 26U);
+-	if (byte >= '0' && byte <= '9')
+-		return (int)(byte - '0' + 52U);
+-	if (byte == '+')
+-		return 62;
+-	if (byte == '/')
+-		return 63;
+-
+-	/* This is not a Base64 alphabet byte. */
+-	return -1;
+-}
+-
+-/* Converts one hexadecimal digit used by quoted-printable to its value, or -1. */
+-static int
+-mms_hex(
+-	unsigned byte)
+-{
+-	/* The decimal and letter digit ranges. */
+-	if (byte >= '0' && byte <= '9')
+-		return (int)(byte - '0');
+-	if (byte >= 'A' && byte <= 'F')
+-		return (int)(byte - 'A' + 10U);
+-	if (byte >= 'a' && byte <= 'f')
+-		return (int)(byte - 'a' + 10U);
+-
+-	/* This byte cannot form a quoted-printable escape. */
+-	return -1;
+-}
+-
+-/* Decodes supported leaf transfer encodings, writing no more bytes than the input length. */
+-static int
+-mms_decode(
+-	const uint8_t *input,
+-	size_t length,
+-	const char *encoding,
+-	uint8_t *output,
+-	size_t *used)
+-{
+-	int group[4];
+-	unsigned count;
+-	unsigned byte;
+-	size_t at;
+-	int base64;
+-	int qp;
+-	int identity;
+-	int low;
+-	int high;
+-	int padded;
+-
+-	/* Classifies the encoding before copying any bytes. */
+-	base64 = mms_token(encoding, "base64");
+-	qp = mms_token(encoding, "quoted-printable");
+-	identity = 0;
+-	if (encoding[0] == '\0')
+-		identity = 1;
+-	if (!identity)
+-		identity = mms_token(encoding, "7bit");
+-	if (!identity)
+-		identity = mms_token(encoding, "8bit");
+-	if (!identity)
+-		identity = mms_token(encoding, "binary");
+-	if (!base64 && !qp && !identity)
+-		return ENOTSUP;
+-
+-	/* Converts each byte, validating complete escape or Base64 groups. */
+-	*used = 0U;
+-	count = 0U;
+-	padded = 0;
+-	for (at = 0U; at < length; at++) {
+-		byte = input[at];
+-		if (base64) {
+-			/* Whitespace may separate Base64 groups and their padding. */
+-			if (byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n')
+-				continue;
+-			if (padded)
+-				return EINVAL;
+-			low = -2;
+-			if (byte != '=')
+-				low = mms_base64(byte);
+-			if (low == -1)
+-				return EINVAL;
+-			group[count++] = low;
+-			if (count < 4U)
+-				continue;
+-
+-			/* Padding is permitted only in the last two positions. */
+-			if (group[0] < 0 || group[1] < 0 ||
+-			    (group[2] == -2 && group[3] != -2))
+-				return EINVAL;
+-			output[(*used)++] = (uint8_t)((group[0] << 2) | (group[1] >> 4));
+-			if (group[2] >= 0) {
+-				output[(*used)++] = (uint8_t)((group[1] << 4) | (group[2] >> 2));
+-				if (group[3] >= 0)
+-					output[(*used)++] = (uint8_t)((group[2] << 6) | group[3]);
+-			}
+-
+-			/* The final padded quartet forbids subsequent non-whitespace bytes. */
+-			if (group[3] == -2)
+-				padded = 1;
+-			count = 0U;
+-		} else if (qp && byte == '=') {
+-			/* A soft line break continues the encoded text. */
+-			if (at + 1U < length && input[at + 1U] == '\n') {
+-				at++;
+-				continue;
+-			}
+-
+-			/* CRLF is the canonical soft line break. */
+-			if (at + 2U < length && input[at + 1U] == '\r' && input[at + 2U] == '\n') {
+-				at += 2U;
+-				continue;
+-			}
+-
+-			/* An escaped byte requires two hexadecimal digits. */
+-			if (at + 2U >= length)
+-				return EINVAL;
+-			high = mms_hex(input[at + 1U]);
+-			low = mms_hex(input[at + 2U]);
+-			if (high < 0 || low < 0)
+-				return EINVAL;
+-			output[(*used)++] = (uint8_t)((high << 4) | low);
+-			at += 2U;
+-		} else {
+-			/* Identity and literal quoted-printable bytes remain unchanged. */
+-			output[(*used)++] = (uint8_t)byte;
+-		}
+-	}
+-
+-	/* A partial Base64 quartet is not a complete transfer representation. */
+-	if (count != 0U)
+-		return EINVAL;
+-
+-	/* Succeeded: only decoded payload bytes have been produced. */
+-	return 0;
+-}
+-
+-/* Appends one validated text part, converting Latin-1 and preserving complete UTF-8 characters. */
+-static int
+-mms_append(
+-	struct mms_reader *reader,
+-	const uint8_t *input,
+-	size_t length,
+-	const char *charset)
+-{
+-	uint8_t character[2];
+-	size_t at;
+-	size_t count;
+-	unsigned byte;
+-	int latin;
+-	int utf8;
+-	int ascii;
+-	int valid;
+-
+-	/* Recognizes only character sets whose bytes can be converted completely. */
+-	latin = mms_token(charset, "iso-8859-1");
+-	utf8 = mms_token(charset, "utf-8");
+-	ascii = mms_token(charset, "us-ascii");
+-	if (!latin && !utf8 && !ascii)
+-		return ENOTSUP;
+-
+-	/* Validates the complete text before exposing even its first bytes. */
+-	valid = btd_bmsg_utf8_ok(input, length);
+-	if (!latin && !valid)
+-		return EINVAL;
+-
+-	/* Refuses embedded NUL and non-ASCII bytes in explicit ASCII text. */
+-	for (at = 0U; at < length; at++) {
+-		if (input[at] == 0U || (ascii && input[at] >= 0x80U))
+-			return EINVAL;
+-	}
+-
+-	/* Separates distinct text parts without inserting an initial newline. */
+-	if (reader->found && reader->used > 0U && !reader->truncated) {
+-		if (reader->used + 1U >= reader->size) {
+-			reader->truncated = 1;
+-		} else {
+-			reader->output[reader->used++] = '\n';
+-		}
+-	}
+-
+-	/* Copies each complete character until the output limit is reached. */
+-	reader->found = 1;
+-	for (at = 0U; at < length; at += count) {
+-		byte = input[at];
+-		count = 1U;
+-
+-		/* Normalizes CRLF and bare CR before they reach a text renderer. */
+-		if (byte == '\r') {
+-			if (at + 1U < length && input[at + 1U] == '\n')
+-				count = 2U;
+-			if (reader->truncated || reader->used + 1U >= reader->size) {
+-				reader->truncated = 1;
+-				break;
+-			}
+-
+-			/* One logical newline replaces either wire representation. */
+-			reader->output[reader->used++] = '\n';
+-			continue;
+-		}
+-
+-		/* Determines the complete output character's byte count. */
+-		if (latin && byte >= 0x80U) {
+-			character[0] = (uint8_t)(0xc0U | (byte >> 6));
+-			character[1] = (uint8_t)(0x80U | (byte & 0x3fU));
+-			count = 2U;
+-		} else if (utf8 && byte >= 0x80U) {
+-			/* Complete UTF-8 was already validated above. */
+-			count = 2U;
+-			if (byte >= 0xe0U)
+-				count = 3U;
+-			if (byte >= 0xf0U)
+-				count = 4U;
+-		}
+-
+-		/* Long bodies stop at character boundaries and still report a valid text. */
+-		if (reader->truncated || count >= reader->size - reader->used) {
+-			reader->truncated = 1;
+-			break;
+-		}
+-
+-		/* Latin-1 expands one source byte; UTF-8 retains its original byte count. */
+-		if (latin && byte >= 0x80U) {
+-			memcpy(reader->output + reader->used, character, 2U);
+-			reader->used += 2U;
+-			count = 1U;
+-		} else {
+-			memcpy(reader->output + reader->used, input + at, count);
+-			reader->used += count;
+-		}
+-	}
+-
+-	/* Succeeded: this text part has been selected without its MIME headers. */
++	/* Succeeded: the output contains only text suitable for a renderer. */
+ 	return 0;
+ }
+diff --git a/userland/base/bluetoothd/outq.h b/userland/base/bluetoothd/outq.h
+index 19f38208f9..dfc4bb0f0c 100644
+--- a/userland/base/bluetoothd/outq.h
++++ b/userland/base/bluetoothd/outq.h
+@@ -26,7 +26,7 @@
+ #include <sys/types.h>
+ 
+ /* The most a client's queue holds. */
+-#define BTD_OUTQ_MAX		262144U
++#define BTD_OUTQ_MAX		(2U * 16U * 1024U * 1024U)
+ 
+ /*
+  * Sends bytes to the client: how many went (0 or more), or -1 with errno
+diff --git a/userland/base/bluetoothd/phoneio.c b/userland/base/bluetoothd/phoneio.c
+index 0f86ba66e7..3dd2a08d99 100644
+--- a/userland/base/bluetoothd/phoneio.c
++++ b/userland/base/bluetoothd/phoneio.c
+@@ -158,6 +158,7 @@ btd_phoneio_send_length(
+ 	size_t index;
+ 	size_t number;
+ 	int found;
++	int media;
+ 	int same;
+ 	int got;
+ 
+@@ -169,6 +170,7 @@ btd_phoneio_send_length(
+ 	/* Each argument, the length once among them. */
+ 	cursor = line + PHONEIO_SEND_BYTES;
+ 	found = 0;
++	media = 0;
+ 	number = 0U;
+ 	for (;;) {
+ 		got = btd_phoneio_next(&cursor, key, sizeof(key), value, sizeof(value));
+@@ -177,6 +179,16 @@ btd_phoneio_send_length(
+ 		if (got != BTD_PHONEIO_ARGUMENT)
+ 			return EINVAL;
+ 
++		/* Selects the larger bound only for an explicit MMS body. */
++		same = strcmp(key, "type");
++		if (same == 0) {
++			same = strcmp(value, "mms");
++			if (same != 0 || media)
++				return EINVAL;
++			media = 1;
++			continue;
++		}
++
+ 		/* Another argument is the request's to read. */
+ 		same = strcmp(key, "length");
+ 		if (same != 0)
+@@ -197,7 +209,7 @@ btd_phoneio_send_length(
+ 	}
+ 
+ 	/* A length within the range. */
+-	if (!found || number == 0U || number > BTD_PHONE_SEND_MAX)
++	if (!found || number == 0U || number > (media ? BTD_PHONE_MIME_MAX : BTD_PHONE_SEND_MAX))
+ 		return EINVAL;
+ 
+ 	/* Succeeded: the length of the text that follows. */
+diff --git a/userland/base/bluetoothd/phoneio.h b/userland/base/bluetoothd/phoneio.h
+index 9308607b74..3710319413 100644
+--- a/userland/base/bluetoothd/phoneio.h
++++ b/userland/base/bluetoothd/phoneio.h
+@@ -24,6 +24,7 @@
+ #include <sys/types.h>
+ 
+ /* The longest text PHONE SEND carries. */
++#define BTD_PHONE_MIME_MAX (16U * 1024U * 1024U)
+ #define BTD_PHONE_SEND_MAX		8192U
+ 
+ /* The longest key and value of a request's argument (a value's NUL included). */
+diff --git a/userland/desktop/libkeiland-backend-zedbsd/phone-zedbsd.c b/userland/desktop/libkeiland-backend-zedbsd/phone-zedbsd.c
+index 13f79be92d..9c1b3d3350 100644
+--- a/userland/desktop/libkeiland-backend-zedbsd/phone-zedbsd.c
++++ b/userland/desktop/libkeiland-backend-zedbsd/phone-zedbsd.c
+@@ -37,6 +37,7 @@
+ 
+ #include "userland/desktop/libkeiland-backend/keiland-backend.h"
+ #include "userland/base/bluetoothd/protocol.h"
++#include "userland/base/libmms/mms.h"
+ 
+ #include <errno.h>
+ #include <stdio.h>
+@@ -121,6 +122,7 @@ struct phone_connection {
+ 
+ 	/* The text of a message being read. */
+ 	unsigned reading_text;
++	unsigned reading_mime;
+ 	struct kl_backend_phone_item text_item;
+ 	char *text;
+ 	size_t text_used;
+@@ -188,6 +190,7 @@ struct kl_backend_phone {
+ 	size_t item_head;
+ 	size_t item_count;
+ 	char *taken_text;
++	int taken_mime;
+ 	struct kl_backend_phone_result results[PHONE_RESULTS_MAX];
+ 	size_t result_head;
+ 	size_t result_count;
+@@ -221,6 +224,7 @@ static void phone_message_fields(struct kl_backend_phone_item *item, const char
+ static void phone_contact_fields(struct kl_backend_phone_item *item, const char *line);
+ static void phone_call_fields(struct kl_backend_phone_item *item, const char *line);
+ static unsigned phone_zone(const char *line);
++static int phone_mime_take(struct phone_connection *connection);
+ static void phone_item_push(struct kl_backend_phone *phone, struct phone_connection *connection);
+ static void phone_result_push(struct kl_backend_phone *phone, const struct kl_backend_phone_result *result);
+ static void phone_sent_line(struct kl_backend_phone *phone, const char *line);
+@@ -261,6 +265,7 @@ kl_backend_phone_open(
+ 	/* Unreachable until the events are asked for, which the first update does; ids start at 1 (0 is a message that came by itself). */
+ 	(void)snprintf(phone->state.why, sizeof(phone->state.why), "%s", "unreachable");
+ 	phone->next_id = 1U;
++	phone->taken_mime = -1;
+ 
+ 	/* Succeeded: the first update asks for the events. */
+ 	return phone;
+@@ -292,8 +297,15 @@ kl_backend_phone_close(
+ 		phone_request_drop(&phone->requests);
+ 
+ 	/* The texts of the items not taken, and of the one taken last. */
+-	for (index = 0U; index < phone->item_count; index++)
++	for (index = 0U; index < phone->item_count; index++) {
+ 		free(phone->items[(phone->item_head + index) % PHONE_ITEMS_MAX].text);
++		if (phone->items[(phone->item_head + index) % PHONE_ITEMS_MAX].item.has_mime)
++			close(phone->items[(phone->item_head + index) % PHONE_ITEMS_MAX].item.mime_descriptor);
++	}
++
++	/* Closes the descriptor whose previous take still borrowed it. */
++	if (phone->taken_mime >= 0)
++		close(phone->taken_mime);
+ 	free(phone->taken_text);
+ 
+ 	/* The record. */
+@@ -513,6 +525,47 @@ kl_backend_phone_send(
+ 	return 0;
+ }
+ 
++/*
++ * Queues a complete bounded MIME body for MMS PushMessage.
++ */
++int
++kl_backend_phone_send_mms(
++	struct kl_backend_phone *phone,
++	const char *to,
++	const uint8_t *mime,
++	size_t length,
++	uint32_t *id)
++{
++	char line[PHONE_LINE_MAX];
++	size_t index;
++	int valid;
++	int error;
++
++	/* Requires a reachable phone and a dialable recipient. */
++	if (phone == NULL || id == NULL || to == NULL || mime == NULL)
++		return EINVAL;
++	valid = phone_number_valid(to);
++	if (!valid || length == 0U || length > KL_BACKEND_PHONE_MIME_MAX)
++		return EINVAL;
++	if (!phone->state.reachable)
++		return ENOTCONN;
++
++	/* Keeps only one large send waiting rather than multiplying the payload limit. */
++	for (index = 0U; index < phone->requests.count; index++) {
++		if (phone->requests.requests[index].length > KL_BACKEND_PHONE_SEND_MAX)
++			return EBUSY;
++	}
++
++	/* Keeps the same request result and sent-state flow as ordinary text. */
++	(void)snprintf(line, sizeof(line), "PHONE SEND to=\"%s\" type=mms length=%lu\n", to, (unsigned long)length);
++	error = phone_queue(phone, &phone->requests, PHONE_KIND_SEND, line, mime, length, id);
++	if (error != 0)
++		return error;
++
++	/* Succeeded: the request connection owns its copied MIME bytes. */
++	return 0;
++}
++
+ /*
+  * Turns the phone's switch on with its profiles, or off keeping them
+  * (bluetoothd's PHONE LINK); the record is read again once it is
+@@ -598,6 +651,9 @@ kl_backend_phone_take_item(
+ 	/* The text of the item taken last goes now. */
+ 	free(phone->taken_text);
+ 	phone->taken_text = NULL;
++	if (phone->taken_mime >= 0)
++		close(phone->taken_mime);
++	phone->taken_mime = -1;
+ 
+ 	/* None waits. */
+ 	if (phone->item_count == 0U)
+@@ -609,6 +665,9 @@ kl_backend_phone_take_item(
+ 	item->text = kept->text;
+ 	phone->taken_text = kept->text;
+ 	kept->text = NULL;
++	if (kept->item.has_mime)
++		phone->taken_mime = kept->item.mime_descriptor;
++	kept->item.has_mime = 0U;
+ 	phone->item_head = (phone->item_head + 1U) % PHONE_ITEMS_MAX;
+ 	phone->item_count--;
+ 
+@@ -1397,6 +1456,7 @@ phone_item_line(
+ 	unsigned long length;
+ 	char *end;
+ 	int found;
++	int same;
+ 
+ 	/* The item, numbered by its page (0 for one that came by itself). */
+ 	item = &connection->text_item;
+@@ -1413,6 +1473,19 @@ phone_item_line(
+ 		phone_message_fields(item, line);
+ 	}
+ 
++	/* Distinguishes raw MIME from the ordinary UTF-8 body before selecting its bound. */
++	connection->reading_mime = 0U;
++	found = phone_field(line, "format=", value, sizeof(value));
++	if (found && what == KL_BACKEND_PHONE_WHAT_MESSAGES) {
++		same = strcmp(value, "mime");
++		if (same != 0) {
++			connection->broken = 1U;
++			return EPROTO;
++		}
++
++		connection->reading_mime = 1U;
++	}
++
+ 	/* The text's length. */
+ 	found = phone_field(line, "length=", value, sizeof(value));
+ 	if (!found) {
+@@ -1426,7 +1499,7 @@ phone_item_line(
+ 	/* A whole number, within what bluetoothd sends. */
+ 	if (end == value ||
+ 	    *end != '\0' ||
+-	    length > KL_BACKEND_PHONE_TEXT_MAX) {
++	    length > (connection->reading_mime ? KL_BACKEND_PHONE_MIME_MAX : KL_BACKEND_PHONE_TEXT_MAX)) {
+ 		connection->broken = 1U;
+ 		return EPROTO;
+ 	}
+@@ -1599,6 +1672,92 @@ phone_zone(
+ 	return KL_BACKEND_PHONE_ZONE_RECEIVED;
+ }
+ 
++/* Converts an input MIME body to its caption and an independently readable anonymous file. */
++static int
++phone_mime_take(
++	struct phone_connection *connection)
++{
++	struct mms_document document;
++	FILE *stream;
++	char *caption;
++	size_t written;
++	int descriptor;
++	int error;
++	int closed;
++
++	/* Validates media and text before exporting any partial MIME. */
++	error = mms_parse((const uint8_t *)connection->text, connection->text_item.length, &document);
++	if (error != 0)
++		return error;
++
++	/* Reserves the ordinary item caption independently of its large body. */
++	caption = malloc(document.text_length + 1U);
++	if (caption == NULL) {
++		mms_release(&document);
++		return ENOMEM;
++	}
++
++	/* Creates an unlinked stream that survives only while an owner holds its descriptor. */
++	stream = tmpfile();
++	if (stream == NULL) {
++		error = errno;
++		free(caption);
++		mms_release(&document);
++		return error;
++	}
++
++	/* Completes the file before publishing the descriptor. */
++	written = fwrite(connection->text, 1U, connection->text_item.length, stream);
++	error = 0;
++	if (written != connection->text_item.length)
++		error = EIO;
++	if (error == 0) {
++		error = fflush(stream);
++		if (error != 0)
++			error = EIO;
++	}
++
++	/* Rewinds the shared file description before duplicating it for the backend. */
++	descriptor = -1;
++	if (error == 0) {
++		error = fseek(stream, 0L, SEEK_SET);
++		if (error != 0)
++			error = EIO;
++	}
++
++	/* Transfers a descriptor whose lifetime is independent of stdio. */
++	if (error == 0) {
++		descriptor = dup(fileno(stream));
++		if (descriptor < 0)
++			error = errno;
++	}
++
++	/* Keeps every failure path free of both temporary bytes and descriptors. */
++	closed = fclose(stream);
++	if (closed != 0 && error == 0)
++		error = EIO;
++	if (error != 0) {
++		if (descriptor >= 0)
++			close(descriptor);
++		free(caption);
++		mms_release(&document);
++		return error;
++	}
++
++	/* Exposes the ordinary caption with its original MIME body beside it. */
++	memcpy(caption, document.text, document.text_length + 1U);
++	free(connection->text);
++	connection->text = caption;
++	connection->text_item.length = document.text_length;
++	connection->text_item.truncated = (unsigned)document.truncated;
++	connection->text_item.has_mime = 1U;
++	connection->text_item.mime_descriptor = descriptor;
++	mms_release(&document);
++
++	/* Succeeded: the next item can transport media without a large wire array. */
++	return 0;
++}
++
+ /* Keeps a connection's whole message for the caller; with no room the oldest goes and a drop is told. */
+ static void
+ phone_item_push(
+@@ -1607,9 +1766,21 @@ phone_item_push(
+ {
+ 	struct phone_kept_item *kept;
+ 	size_t slot;
++	int error;
++
++	/* Converts MIME to a caption plus an anonymous descriptor before publishing it. */
++	if (connection->reading_mime) {
++		error = phone_mime_take(connection);
++		if (error != 0) {
++			connection->broken = 1U;
++			return;
++		}
++	}
+ 
+ 	/* No room: the oldest goes, and the caller synchronises again. */
+ 	if (phone->item_count == PHONE_ITEMS_MAX) {
++		if (phone->items[phone->item_head].item.has_mime)
++			close(phone->items[phone->item_head].item.mime_descriptor);
+ 		free(phone->items[phone->item_head].text);
+ 		phone->items[phone->item_head].text = NULL;
+ 		phone->item_head = (phone->item_head + 1U) % PHONE_ITEMS_MAX;
+@@ -1630,6 +1801,8 @@ phone_item_push(
+ 	connection->text = NULL;
+ 	connection->text_used = 0U;
+ 	connection->reading_text = 0U;
++	connection->reading_mime = 0U;
++	connection->text_item.has_mime = 0U;
+ }
+ 
+ /* Keeps a result for the caller; with no room the oldest goes (the caller's own watch ends its wait). */
+diff --git a/userland/desktop/libkeiland-backend/keiland-backend.h b/userland/desktop/libkeiland-backend/keiland-backend.h
+index ff5240863c..8c03ddbcba 100644
+--- a/userland/desktop/libkeiland-backend/keiland-backend.h
++++ b/userland/desktop/libkeiland-backend/keiland-backend.h
+@@ -932,6 +932,7 @@ struct kl_backend_phone;
+ #define KL_BACKEND_PHONE_CURSOR_MAX	64U
+ #define KL_BACKEND_PHONE_NUMBER_MAX	33U
+ #define KL_BACKEND_PHONE_TEXT_MAX	16384U
++#define KL_BACKEND_PHONE_MIME_MAX (16U * 1024U * 1024U)
+ #define KL_BACKEND_PHONE_SEND_MAX	8192U
+ 
+ /* The most items a page has, and the most a synchronisation takes from a folder (0: no limit). */
+@@ -1007,6 +1008,9 @@ struct kl_backend_phone_item {
+ 	unsigned truncated;
+ 	const char *text;
+ 	size_t length;
++	/* The backend owns this MIME descriptor until the next take or close. */
++	unsigned has_mime;
++	int mime_descriptor;
+ };
+ 
+ /*
+@@ -1056,6 +1060,9 @@ int kl_backend_phone_read(struct kl_backend_phone *phone, const char *handle, ui
+ /* Sends a text (1 to KL_BACKEND_PHONE_SEND_MAX bytes, no NUL) to a number ([0-9+*#], 1 to 32).  Returns as kl_backend_phone_page. */
+ int kl_backend_phone_send(struct kl_backend_phone *phone, const char *to, const uint8_t *text, size_t length, uint32_t *id);
+ 
++/* Queues an original MMS MIME body, with the same result/state as text send. */
++int kl_backend_phone_send_mms(struct kl_backend_phone *phone, const char *to, const uint8_t *mime, size_t length, uint32_t *id);
++
+ /* Turns the phone's switch on with its profiles (KL_BACKEND_PHONE_PROFILE_*), or off keeping them.  Returns as kl_backend_phone_page. */
+ int kl_backend_phone_link_set(struct kl_backend_phone *phone, const char *address, unsigned on, unsigned profiles, uint32_t *id);
+ 

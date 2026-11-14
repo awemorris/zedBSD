@@ -1,0 +1,14 @@
+diff --git a/plan/ws243/ws.md b/plan/ws243/ws.md
+index 472c0e7b9c..0458b95461 100644
+--- a/plan/ws243/ws.md
++++ b/plan/ws243/ws.md
+@@ -44,3 +44,9 @@ Resume point: [p001](phase001/phase.md) の「再開の点」（調べた事実
+ - 2026-10-29 01:3x ユーザー「P6は設計が決まっているWSについて、テストなしでひたすら実装だけ進めてテスト未完了でincompleteだけど実装はできていてマージされていない状態のWSを増やす。」
+ - ユーザー「調査しなくてよい、設計ができているか自明なWSについて、ひたすら書いてください。選択したもののうち、調査が必要なものはスキップします。WSごとにサブのサブエージェントを作ってよいです。」（選択: WS223・WS282〜WS284・WS243・WS296）
+ - 解釈（Q1）: 試験をせず実装だけを P6 の branch に積み、main に merge しない。Status は incomplete のまま（試験は未実施）。調べが要ると分かれば P6 は飛ばして Q1 に返す。
++- 2026-10-29 01:41 P6: q1667 では**飛ばした**（Q1 の了承 2026-10-29「WS243 を飛ばすのも OK」）。code は書いていない。足りない物（実装の前に調べと設計が要る）:
++  1. `plan/ws243/design.md` が未作成。p001 の「設計の案」は phase.md の中のメモだけで、design-reviewer の review も無い。
++  2. 参考の source（`plan/ws243/temp/` の open-gpu-doc・open-gpu-kernel-modules 570.144・Mesa NVK の sparse・`offsets.txt`）がどの checkout にも残っていない。phase.md の版で取り直しが要る。
++  3. 計画に無い依存の候補が未決: NV12 の readback の buffer を host の cached な system memory に置く memory type（nvrtx の executor 全体の変更、WS037・WS241 の範囲）。
++  4. engine の context の buffer（GET_CONSTRUCTED_FALCON_INFO・PROMOTE_CTX）の手順は nouveau を読んだだけで、nvrtx の今の RM の呼びとの接続を設計で決めていない。
++  再開点は変わらず p001（temp を取り直す → design.md → design-reviewer → p002）。

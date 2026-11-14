@@ -1,0 +1,61 @@
+diff --git a/plan/ws193/codex-userland-queue.md b/plan/ws193/codex-userland-queue.md
+index d7277edf86..875970a4f7 100644
+--- a/plan/ws193/codex-userland-queue.md
++++ b/plan/ws193/codex-userland-queue.md
+@@ -16,4 +16,6 @@ Outlook: main統合の具体的成果の確認、実機でのメディア再生
+ 
+ ## 結果
+ 
+-全項目の選択/保存とarm64 FFmpeg package buildを確認して1項目cleared。証拠はphase005/tests。main統合は具体的WIP commitの承認待ち。shared投影/GitHubはQ1へ保留、push無し。Outlookは承認ではなく次Queueは開始しない。
++全項目の選択/保存とarm64 FFmpeg package buildを確認して1項目cleared。証拠はphase005/tests。mainへのsource統合はfe4300313で完了（2026-10-10 user承認、fast-forward/read-back）。shared投影/GitHubはQ1へ保留、push無し。Outlookは承認ではなく次Queueは開始しない。
++
++統合後mainでamd64/rpi4の255共通項目とMultimedia FFmpeg登録を確認してPASS。この後続記録のmain投影/GitHub公開はQ1へ保留。次Queueは開始しない。
+diff --git a/plan/ws193/phase005/phase.md b/plan/ws193/phase005/phase.md
+index a40ac3db86..a6e910df6e 100644
+--- a/plan/ws193/phase005/phase.md
++++ b/plan/ws193/phase005/phase.md
+@@ -32,3 +32,8 @@ cleared（今回の限定範囲）。全6platformの255共通項目で表示・
+ [コマンド・環境・失敗と修正・警告/未実施範囲](../tests/userland-selection-20261010.md)。外部FFmpegの12 compiler警告は未変更upstreamのものとして記録し、warning 0とは報告しない。全optional packageの全CPU移植は今回の受入に含めない。
+ 
+ main統合は具体的成果commitについて確認する。WS全体のp003/受入と共有Master/Queue/GitHub公開は未完のまま。push無し。次Queueを開始しない。
++
++## 2026-10-10 main統合
++
++current user「mainにマージしてください。」によりsource commit fe4300313f3f6db169a499a08a1ff487160c352bをmainへfast-forward統合した。main HEADのread-back一致、worktree clean、mainでamd64/rpi4のregistry同一と255項目の共通登録/Multimedia FFmpegを確認してPASS。push無し。実機/全optional package buildは未実施のまま。
++この後続記録は作業branchで保持し、共有main計画の投影・GitHub公開はQ1へ保留。sourceの統合は完了している。
+diff --git a/plan/ws193/ws.md b/plan/ws193/ws.md
+index ecc1a74552..b4811d55bf 100644
+--- a/plan/ws193/ws.md
++++ b/plan/ws193/ws.md
+@@ -3,14 +3,14 @@
+ # WS193: make menuconfig のメニュー階層の作り直しと Build boot image（進捗表示）
+ 
+ <!-- awesome-plan-current:start -->
+-Status: incomplete（p004はmain統合済み、p005のCPU共通選択/FFmpeg build確認済み）
++Status: incomplete（p004はmain統合済み、p005のCPU共通選択/FFmpeg build修正はmain統合済み）
+ Primary Milestone: MG006
+ Related Milestones: —
+ Objectives: O2
+ Parent: [Master](../master.md)
+ Queue: [Codexユーザーランド選択](codex-userland-queue.md) finished。旧arm64選択修正とq918（P1）の履歴は保持。
+ Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
+-Resume point: p005の検証済みWIP成果のmain統合承認。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
++Resume point: source統合済み。WS全体のp003/受入のQ1照合と後続記録のmain投影。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+ <!-- awesome-plan-current:end -->
+ 
+ ## 由来（2026-10-09 ユーザー、原文）
+@@ -74,7 +74,7 @@ Build boot imageはプログレスバーを表示して、何をビルド中な
+ | p002 | T1 の image の build と boot-test、ユーザーの確認 | cleared（2026-10-10 Q1: T1-497 PASS、ユーザー「menuconfigはOK」） | p001 |
+ | p003 | 規約の全文の見直し | planning | p001 |
+ | [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（限定source/host、93914124c main統合済み） | p001 source |
+-| [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、main統合待ち） | p004 source |
++| [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、fe4300313 main統合済み） | p004 source |
+ 
+ ## 2026-10-10 RPi4 UAT前のarm64選択修正
+ 
+@@ -89,3 +89,5 @@ p004 cleared。3行のplatform field統一、実関数/PTYでCPU/Board/Headerと
+ p004のsource 93914124cはユーザーの個別承認でmain統合済み（このQueue開始時のmain HEADから確認）。前Queueの統合待ちの記録は当時の状態として保持し、現在の投影を上で訂正した。後続docs commit 308800bc2/2e48f7341は別branchに残り、この修正へ取り込んでいない。
+ 
+ p005 cleared: 共通registryをrootに一箇所で適用し、全6platformの255項目の選択/保存/Make実効値PASS、RPi4実メニューのFFmpeg表示PASS、FFmpeg arm64 package buildと全5 ELF検証PASS。[証拠](tests/userland-selection-20261010.md)。外部sourceの警告、全optional package/実機の未確認は証拠に明記。WS全体の受入は維持し完了扱いにはしない。mainへ具体的成果の承認を確認する。
++
++2026-10-10 user「mainにマージしてください。」でp005 source fe4300313をmainへ統合。HEAD一致・clean・amd64/rpi4登録一致/255項目/FFmpegのmain read-back PASS。push無し。WS全体の未完 criteriaは保持。この後続記録のmain投影/GitHub公開はQ1へ保留。

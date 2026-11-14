@@ -1,0 +1,1384 @@
+diff --git a/include/hal/arch/amd64.h b/include/hal/arch/amd64.h
+index 9bb5797ecb..b73c571feb 100644
+--- a/include/hal/arch/amd64.h
++++ b/include/hal/arch/amd64.h
+@@ -141,9 +141,19 @@ struct hal_gpregs {
+ 	uint64_t rip, rflags;
+ 	uint64_t cs, ss;
+ 	uint64_t fs_base;
+-	uint64_t gs_base;	/* reserved; user code here has no gs base */
++	uint64_t gs_base;	/* the user GS base (hal_amd64_task_set_user_gs_base) */
+ };
+ 
++/*
++ * The user GS base of a task.  User code reads through GS whatever the
++ * value points at; the kernel attaches no meaning to it.  Only a lower-half
++ * (user) address is accepted: the set call reports -1 for anything else.
++ * The task is a hal_task_t, spelled as its underlying type because this
++ * header is read before hal.h names it.
++ */
++int hal_amd64_task_set_user_gs_base(void *task, uintptr_t value);
++uintptr_t hal_amd64_task_get_user_gs_base(void *task);
++
+ /*
+  * The x87 state.  Each of the eight registers is ten bytes wide and is
+  * held in sixteen, which is how the processor writes them out.
+diff --git a/include/uapi/thread.h b/include/uapi/thread.h
+index c71705d10c..a222114a02 100644
+--- a/include/uapi/thread.h
++++ b/include/uapi/thread.h
+@@ -11,6 +11,13 @@
+ #define KERN_THREAD_SELF_TID		0U
+ #define KERN_THREAD_SELF_GET_TLS	1U
+ #define KERN_THREAD_SELF_SET_TLS	2U
++/*
++ * The calling thread's user GS base (amd64 only; other architectures report
++ * EOPNOTSUPP).  The kernel attaches no meaning to it.  Only a user address
++ * is accepted.
++ */
++#define KERN_THREAD_SELF_GET_GSBASE	3U
++#define KERN_THREAD_SELF_SET_GSBASE	4U
+ #define KERN_THREAD_CANCEL_REQUEST	0U
+ #define KERN_THREAD_CANCEL_TEST		1U
+ #define KERN_THREAD_CANCEL_CLEAR	2U
+diff --git a/plan/ws080/phase002/phase.md b/plan/ws080/phase002/phase.md
+new file mode 100644
+index 0000000000..cfbea67d09
+--- /dev/null
++++ b/plan/ws080/phase002/phase.md
+@@ -0,0 +1,47 @@
++<!-- awesome-plan project=zedbsd record=ws080-p002 -->
++
++# ws080-p002: amd64 の user の GS base（swapgs）
++
++Status: in-progress（実装と build まで。QEMU の回帰は未実施、T1 に依頼する）。**main に merge しない: QEMU の回帰が通るまで agent/p1 に積む**（2026-10-14 Q1、ベータ2 の release の kernel に入るため）
++Disposition: normal
++Parent: [WS080](../ws.md)
++Queue: 2026-10-14 夜 ユーザー「空いているサブエージェントがあるなら、ld.coffを実装してください。」→ Q1 が P1 に WS080 p002〜p010 相当を依頼
++Approval: HAL A1・A2（[proposed/hal-gs-base.md](../proposed/hal-gs-base.md)、2026-10-14 ユーザーのクリック「A1・A2 を承認」、Guardrail の承認済みの表）。A3・K1 は承認不要（同じ案）
++
++## 実装（commit a06d5d75d、base bdc49fcb4）
++
++案のとおり。案との差:
++
++1. **A1 の宣言の引数の型**: `include/hal/arch/amd64.h` は `hal.h` の `hal_task_t` の typedef より先に読まれるので、宣言は `void *task`（`hal_task_t` と同じ型）。定義（`task.c`）は `hal_task_t`。Guardrail の表への注記は Q1 に依頼。
++2. **出口の `cli`**: `iretq` で user へ戻る全ての出口（`trap.S` の `SAVE_AND_CALL`、paranoid の出口、`dispatch.S` の 2 つ）で、`swapgs` の前に `cli`（`iretq` が RFLAGS を戻す）。int_handler が割り込みを許したまま戻っても、`swapgs` と `iretq` の間に IRQ が入って kernel の CS の下で user の GS を見ることが無いように。
++3. `hal_task_set_user_gpregs()`（ptrace の PT_SETREGS）は `gs_base` を frame を変える前に検査し、上半分・非 canonical なら -1（EINVAL）。
++4. K1 の `thread_create`: amd64 は `args[4]` を最初の GS base として thread の作成の後に設定し、拒まれたら `thread_abort_new()` して EINVAL。他の arch は従来どおり `args[4] != 0` を拒む。
++
++file: `src/hal/amd64/{defs.h,trap.S,dispatch.S,percpu.c,task.h,task.c}`、`include/hal/arch/amd64.h`、`include/uapi/thread.h`（GET 3・SET 4）、`src/kern/syscall.c`。
++
++## 確認
++
++| 確認 | 結果 |
++| --- | --- |
++| `make -j16 build/amd64/vmunix`（worktree の build/amd64、config.mk = amd64 native） | warning 0。`llvm-objdump -d` で swapgs 8 か所（共通の入口・iret の出口・sysret・SYSCALL の入口・paranoid の入口と出口・dispatch の 2） |
++| 試験の program `userland/tests/gsbase-probe.c` → `build/amd64/GSBASE-PROBE.ELF`（`platform/amd64/vmunix.mk` に規則） | build は warning 0。guest では未実行 |
++| QEMU の回帰 | **未実施**（下の手順で T1 に依頼する） |
++
++## T1 への QEMU の回帰の手順（p002 だけ。ld.coff の試験とは別に先に流す）
++
++image: agent/p1 の commit（a06d5d75d 以降の WIP の先頭）の tree で `config/ci/config-amd64.mk` の image を作り、`--file /root/GSBASE-PROBE.ELF=build/amd64/GSBASE-PROBE.ELF`（`make build/amd64/GSBASE-PROBE.ELF` で作る）を足す。QEMU は `-smp 4`。
++
++1. **起動**: `plan/tools/boot-test.sh IMAGE`（UEFI USB）で login prompt。PNG を残す。合格: login prompt。
++2. **GS base の probe**: guest で `/root/GSBASE-PROBE.ELF`（SSH か serial の対話）。合格: 全ての行が `GSBASE:*:PASS`、最後が `GSBASE:ALL:PASS`、exit 0。中身: SYSCALL と `int $0xc2` の 10 万回ずつ、#PF・#UD・#BP の signal（handler の中と後）、2 億回の spin（timer の割り込み）、2 thread × 100 万回の yield、fork の継承、exec で 0、上半分・非 canonical の拒否、`thread_create` の args[4]（libc 無しの thread）と kernel の address の拒否、ptrace（PT_GETREGS の r_gs_base、PT_SETREGS の拒否、kernel の address の debug の点の拒否、user の write の watchpoint の #DB、PT_STEP の #DB 8 回）。
++3. **NMI**: 2 を走らせている間（spin の数秒）に QEMU の monitor で `nmi` を 3 回。合格: 2 の PASS が変わらず、kernel が落ちない（その後も SSH が通る）。
++4. **SMP の負荷**: `/root/GSBASE-PROBE.ELF` を 4 本同時に + 既存の `SMP-STRESS.ELF`（`make build/amd64/SMP-STRESS.ELF`、`--file` で入れる）を同時に。合格: 全部 PASS・exit 0、kernel の fatal 無し。
++5. **既存の回帰**: smoke の AAT（`tests/suites/smoke.suite`、desktop の Venus を含む）と、`POSIX-R2.ELF`（signal・thread の既存の試験、`plan/tools/posix/console-posix-r2.sh` の流儀で 1 回）。合格: 既存の基準どおり。
++6. **network**: guest で `fetch` か `ping` で外へ（MSI・IRQ の入口を負荷の下で）。合格: 通る。
++7. kernel の ktest: 今の CI の config に ktest の段は無い（`CONFIG_KERNEL_TEST_CHECKPOINTS := n`）ので対象外。
++8. 実機（i915 の 5330）: swapgs は全ての入口に触るので、ベータ2 の後に Q1・ユーザーの判断で（ws.md の p002 の条件）。
++
++失敗の時の解析の入口: kernel の fatal・固まりは QEMU の gdbstub（`-S -gdb`）で `info registers`（GS_BASE・KERNEL_GS_BASE の MSR は `info registers` に出る）と `bt`。
++
++## Resume point
++
++QEMU の回帰（上）を T1 に依頼済みになるのを待つ。p003 以降は p002 の merge を待たずに agent/p1 で続けられる（p008 の guest の試験は p002 が要る）。
+diff --git a/plan/ws080/ws.md b/plan/ws080/ws.md
+index 000e1502f0..808ea0bff6 100644
+--- a/plan/ws080/ws.md
++++ b/plan/ws080/ws.md
+@@ -81,7 +81,7 @@ forward）、DLL の依存の解決、IAT の書き換え、Microsoft x64 ABI 
+ | Phase | 目的 | 完了の条件 | Status | 依存 |
+ | --- | --- | --- | --- | --- |
+ | [ws080-p001](phase001/phase.md) | 設計の文書（`plan/ws080/design.md`）: 3 つの層、kernel の汎用の機能、`ld.coff` の構成、module の namespace・探索・import/export・依存の graph・初期化の順、MS x64 ABI の境界、最小の TEB/PEB の offset、PE の側の runtime、LLP64 の header の生成、syscall の stub の仕様（上の register の規則）、試験の PE の作り方（clang + `lld-link`）、`LoadLibrary`・`GetProcAddress` が実行時に `ld.coff` の loader を使う道（橋の DLL を置かない形で）、Wayland の道。**GS base の HAL の差分を plan に置く** | 設計の文書と HAL の差分の案、design-reviewer の review | uncleared（文書と案は完了。review・判断・承認待ち） | — |
+-| ws080-p002 | HAL と kernel: `swapgs` の方式、thread ごとの user の GS base の保存・復元、user が GS base を設定・取得する汎用の UAPI、CR4.FSGSBASE の扱い | **HAL の差分の承認の後**。全ての入口（syscall・割り込み・例外・NMI）の試験、既存の回帰（boot test・desktop・i915 の実機）、user の GS base が thread の切り替えで保たれる試験 | planning | p001、HAL の承認 |
++| [ws080-p002](phase002/phase.md) | HAL と kernel: `swapgs` の方式、thread ごとの user の GS base の保存・復元、user が GS base を設定・取得する汎用の UAPI、CR4.FSGSBASE の扱い | **HAL の差分の承認の後**。全ての入口（syscall・割り込み・例外・NMI）の試験、既存の回帰（boot test・desktop・i915 の実機）、user の GS base が thread の切り替えで保たれる試験 | planning | p001、HAL の承認 |
+ | ws080-p003 | kernel: exec が `MZ`/`PE\0\0` を見て `/usr/libexec/ld.coff` を interpreter として起こす（argv の約束） | PE を exec すると ld.coff が起き、元の path と argv を受け取る試験 | planning | p001 |
+ | [ws080-p004](phase004/phase.md) | LLP64 の UAPI の header の生成の script と生成物（固定幅の型、LP64 の元との offset・大きさの `_Static_assert`） | 生成物が clang の windows の target で通り、LP64 との照合が全て合う。UAPI の変更を検出する試験 | in-progress（q676、P1 generation14 は計画と生成の方式まで。script・生成物・試験は未着手、2026-10-04 ラップアップ） | p001 |
+ | [ws080-p005](phase005/phase.md) | PE の側の build の基盤: make の規則（clang `--target=x86_64-pc-windows-msvc` + `lld-link`）、PE の側の最小の runtime（静的な library）、syscall の stub、CRT 無しの試験用の EXE・DLL の fixture | stub の register の保存の host の試験、fixture の EXE・DLL ができる | planned（計画だけ、2026-10-04） | p001、p004 |
+@@ -107,3 +107,8 @@ p002 は全ての kernel の入口を変えるので、単独の Phase にして
+ - design.md §19 の D1〜D17: ユーザーは「個別に見直す」を選んだ。見直す番号と方針を確認中（Q1、2026-10-14）。
+ - **保留（2026-10-14 ユーザー「すみません、WS080とWS234はいったん保留します。」）**: 実装は始めていない。design-reviewer の review は開始直後に止めた（成果なし）。HAL A1・A2 の承認と Guardrail の記録は残す。D1〜D17 の見直しは再開の時に確認する。
+ - **再開（2026-10-14 夜 ユーザー）**: 「空いているサブエージェントがあるなら、ld.coffを実装してください。ライブラリのサーチパスは、バイナリと同じディレクトリと、/lib/coff/だけにします。」→ 保留を解き、P1 が実装。DLL の探索は EXE の directory と `/lib/coff/` だけ（design.md の `/usr/lib/coff64/`・`COFF_LIBRARY_PATH` は使わない、D11 の大文字小文字の揺れの吸収は残す）。D1〜D17 の残りは既定のまま（ユーザーは「個別に見直す」を選んだが番号の指定は無く、今回の指示で実装に入る。見直しの指示が来たら合わせる）。HAL A1・A2 は承認済み。
++
++## 2026-10-14 夜 P1 の進捗と中断
++
++- p002: 実装と build（commit a06d5d75d、warning 0）。試験の program `GSBASE-PROBE.ELF` と QEMU の回帰の手順は [phase002](phase002/phase.md)。**QEMU の回帰が通るまで main に merge しない**（Q1）。
++- 中断（2026-10-14 夜 Q1）: 優先の高い WS238（ベータ2 の配布の image の layout）へ P1 を移す。**再開点**: p002 の T1 の結果を待ちつつ、p003（`src/kern/exec.c` の target の解決の loop に PE の検出を足す。`exec_shebang_parse` の後、`MZ`・`e_lfanew`・`PE\0\0`・Machine 0x8664・Magic 0x20b → interpreter `/usr/libexec/ld.coff` で `exec_script_argv_build()`）から。DLL の探索は EXE の directory と `/lib/coff/` だけ（2026-10-14 ユーザー）。
+diff --git a/platform/amd64/vmunix.mk b/platform/amd64/vmunix.mk
+index 3b372cde47..4ab00fa9e7 100644
+--- a/platform/amd64/vmunix.mk
++++ b/platform/amd64/vmunix.mk
+@@ -834,6 +834,17 @@ $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
+ 	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
+ 	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+ 
++# ws080-p002: the user GS base probe (thread_self GET/SET_GSBASE, swapgs).
++$(BUILD)/GSBASE-PROBE.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
++	$(BUILD)/user64/userland/tests/gsbase-probe.o \
++	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
++	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
++ -z max-page-size=4096 -z stack-size=0x100000 \
++ -T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
++ $(BUILD)/user64/userland/tests/gsbase-probe.o -o $@
++	@test -z "$$($(NM) -u $@)" || { $(NM) -u $@; exit 1; }
++	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
++
+ AMD64_USER_SYSCTL_OBJ := $(AMD64_APP_OBJ)/userland/base/sysctl/main.o
+ $(BUILD)/bin/sysctl: $(AMD64_APP_INPUTS) $(AMD64_USER_SYSCTL_OBJ)
+ 	@mkdir -p $(dir $@)
+diff --git a/src/hal/amd64/defs.h b/src/hal/amd64/defs.h
+index 90095b552f..8a409de643 100644
+--- a/src/hal/amd64/defs.h
++++ b/src/hal/amd64/defs.h
+@@ -75,6 +75,11 @@
+ #define AMD64_EFER_SCE         0x00000001U
+ #define AMD64_MSR_FS_BASE      0xc0000100U
+ #define AMD64_MSR_GS_BASE      0xc0000101U
++/*
++ * The GS base SWAPGS exchanges with IA32_GS_BASE.  While the kernel runs it
++ * holds the user's GS base; while user code runs, the per-CPU state.
++ */
++#define AMD64_MSR_KERNEL_GS_BASE 0xc0000102U
+ 
+ #define AMD64_SMP_MAX_CPUS     64U
+ #define AMD64_AP_TRAMPOLINE    0x00008000U
+diff --git a/src/hal/amd64/dispatch.S b/src/hal/amd64/dispatch.S
+index 72d9383eb0..a339e34ce4 100644
+--- a/src/hal/amd64/dispatch.S
++++ b/src/hal/amd64/dispatch.S
+@@ -51,6 +51,13 @@ amd64_user_task_entry:
+ 	subq $8, %rsp
+ 	call amd64_task_finish_switch
+ 	addq $8, %rsp
++
++	/* A return to ring three gives the user its GS base back (see trap.S). */
++	testb $3, 8(%rsp)
++	jz 1f
++	cli
++	swapgs
++1:
+ 	iretq
+ .size amd64_user_task_entry, .-amd64_user_task_entry
+ 
+@@ -75,6 +82,13 @@ amd64_user_frame_entry:
+ 	popq %rbx
+ 	popq %rax
+ 	addq $16, %rsp
++
++	/* A return to ring three gives the user its GS base back (see trap.S). */
++	testb $3, 8(%rsp)
++	jz 1f
++	cli
++	swapgs
++1:
+ 	iretq
+ .size amd64_user_frame_entry, .-amd64_user_frame_entry
+ 
+diff --git a/src/hal/amd64/percpu.c b/src/hal/amd64/percpu.c
+index 18bc161757..9cca7a23bc 100644
+--- a/src/hal/amd64/percpu.c
++++ b/src/hal/amd64/percpu.c
+@@ -90,6 +90,12 @@ amd64_percpu_select(
+ 	/* Establishes the self-check before publishing the state pointer. */
+ 	cpu->self = cpu;
+ 	asm_write_msr(AMD64_MSR_GS_BASE, (uint64_t)(uintptr_t)cpu);
++
++	/*
++	 * No user GS base waits on this CPU yet: the first switch to a task
++	 * loads that task's own value into IA32_KERNEL_GS_BASE.
++	 */
++	asm_write_msr(AMD64_MSR_KERNEL_GS_BASE, 0);
+ }
+ 
+ /*
+diff --git a/src/hal/amd64/task.c b/src/hal/amd64/task.c
+index 0640d20ce6..bc8fc08bc9 100644
+--- a/src/hal/amd64/task.c
++++ b/src/hal/amd64/task.c
+@@ -58,6 +58,7 @@ static void *task_signal_fpregs(struct amd64_task *task, unsigned depth);
+ static void tasklist_add(struct amd64_task *task);
+ static void tasklist_del(struct amd64_task *task);
+ static void build_initial_stack(struct amd64_task *task, void (*start)(void *), void *argument, void *user_stack);
++static int amd64_user_address_valid(uint64_t value);
+ 
+ /*
+  * Initializes task state for the current CPU.
+@@ -250,6 +251,9 @@ hal_task_fork_current(
+ 	child->resume_rsp = (uintptr_t)resume;
+ 	child->tls = current_task->tls;
+ 
++	/* The child starts with the parent's live user GS base. */
++	child->user_gs_base = (uintptr_t)asm_read_msr(AMD64_MSR_KERNEL_GS_BASE);
++
+ 	/* Saves the live parent FP image before copying it to the child. */
+ 	running_fpregs = task_fpregs(current_task);
+ 	__asm__ volatile("fxsave64 (%0)"
+@@ -330,6 +334,10 @@ hal_task_exec_current(
+ 	current_task->space = new_space;
+ 	current_task->tls = 0;
+ 	asm_write_msr(AMD64_MSR_FS_BASE, 0);
++
++	/* A new program starts without a user GS base. */
++	current_task->user_gs_base = 0;
++	asm_write_msr(AMD64_MSR_KERNEL_GS_BASE, 0);
+ 	current_task->signal_depth = 0;
+ 
+ 	/* Restores the canonical initial floating-point state. */
+@@ -579,11 +587,17 @@ hal_task_context_switch(
+ 	current_cpu = hal_cpu_current();
+ 	__atomic_store_n(&to->run_cpu, (int)current_cpu, __ATOMIC_RELEASE);
+ 
+-	/* Switches task identity, address space, and architectural TLS. */
++	/*
++	 * Switches task identity, address space, architectural TLS and the
++	 * user GS base, which waits in IA32_KERNEL_GS_BASE while the kernel
++	 * runs.
++	 */
+ 	from->tls = (uintptr_t)asm_read_msr(AMD64_MSR_FS_BASE);
++	from->user_gs_base = (uintptr_t)asm_read_msr(AMD64_MSR_KERNEL_GS_BASE);
+ 	amd64_percpu_current()->running_task = to;
+ 	hal_space_switch(to->space);
+ 	asm_write_msr(AMD64_MSR_FS_BASE, (uint64_t)to->tls);
++	asm_write_msr(AMD64_MSR_KERNEL_GS_BASE, (uint64_t)to->user_gs_base);
+ 
+ 	/*
+ 	 * The debug registers are written only when one of the two tasks
+@@ -736,6 +750,67 @@ hal_task_get_tls(
+ 	return 0;
+ }
+ 
++/*
++ * Sets one task's user GS base.
++ *
++ * Reports -1 for a value outside the lower canonical half: the paranoid
++ * entries tell a user GS base from the kernel's by its half.
++ */
++int
++hal_amd64_task_set_user_gs_base(
++	hal_task_t handle,
++	uintptr_t value)
++{
++	struct amd64_task *task;
++	int user_address;
++
++	task = handle;
++
++	/* Requires a task. */
++	if (task == NULL)
++		return -1;
++
++	/* Requires a user address. */
++	user_address = amd64_user_address_valid((uint64_t)value);
++	if (!user_address)
++		return -1;
++
++	/* Records the value the next switch to the task loads. */
++	task->user_gs_base = value;
++
++	/* The running task's user value waits in IA32_KERNEL_GS_BASE. */
++	if (task == current_task)
++		asm_write_msr(AMD64_MSR_KERNEL_GS_BASE, (uint64_t)value);
++
++	/* Succeeded. */
++	return 0;
++}
++
++/*
++ * Reports one task's user GS base.
++ */
++uintptr_t
++hal_amd64_task_get_user_gs_base(
++	hal_task_t handle)
++{
++	uintptr_t value;
++
++	/* Reads the live value for the running task. */
++	if (handle == current_task) {
++		value = (uintptr_t)asm_read_msr(AMD64_MSR_KERNEL_GS_BASE);
++
++		/* Returns the live user GS base. */
++		return value;
++	}
++
++	/* Returns the saved value of an inactive task. */
++	if (handle != NULL)
++		return ((struct amd64_task *)handle)->user_gs_base;
++
++	/* Returns the neutral value for an absent task. */
++	return 0;
++}
++
+ /*
+  * Sets one task's kernel-private pointer.
+  */
+@@ -1190,7 +1265,9 @@ hal_task_get_user_gpregs(
+ 		registers->fs_base = (uint64_t)asm_read_msr(AMD64_MSR_FS_BASE);
+ 	else
+ 		registers->fs_base = (uint64_t)task->tls;
+-	registers->gs_base = 0;
++
++	/* Reports the user GS base the task returns to user code with. */
++	registers->gs_base = (uint64_t)hal_amd64_task_get_user_gs_base(task);
+ 
+ 	/* Succeeded. */
+ 	return 0;
+@@ -1206,6 +1283,7 @@ hal_task_set_user_gpregs(
+ {
+ 	struct amd64_task *task;
+ 	struct amd64_interrupt_frame *frame;
++	int error;
+ 
+ 	task = handle;
+ 
+@@ -1225,6 +1303,13 @@ hal_task_set_user_gpregs(
+ 	    !amd64_user_address_valid(registers->rsp))
+ 		return -1;
+ 
++	/*
++	 * A user GS base is a lower-half address, which the paranoid entries
++	 * rely on to tell it from the kernel's.
++	 */
++	if (!amd64_user_address_valid(registers->gs_base))
++		return -1;
++
+ 	frame->rax = registers->rax;
+ 	frame->rbx = registers->rbx;
+ 	frame->rcx = registers->rcx;
+@@ -1259,6 +1344,11 @@ hal_task_set_user_gpregs(
+ 		asm_write_msr(AMD64_MSR_FS_BASE, registers->fs_base);
+ 	task->tls = (uintptr_t)registers->fs_base;
+ 
++	/* The user GS base follows the same way; its half was checked above. */
++	error = hal_amd64_task_set_user_gs_base(task, (uintptr_t)registers->gs_base);
++	if (error != 0)
++		return -1;
++
+ 	/* Succeeded. */
+ 	return 0;
+ }
+@@ -1642,6 +1732,17 @@ debug_point_field(
+ 		if ((point->address & (uintptr_t)(point->length - 1U)) != 0)
+ 			return -1;
+ 	}
++
++	/*
++	 * A point watches user memory only.  A kernel address would raise the
++	 * debug exception inside the kernel, possibly between an exchange of
++	 * the GS base and the change of ring, and would tell the user what the
++	 * kernel touches.
++	 */
++	if (!amd64_user_address_valid((uint64_t)point->address))
++		return -1;
++	if (!amd64_user_address_valid((uint64_t)(point->address + point->length - 1U)))
++		return -1;
+ 	*field = AMD64_DR7_LOCAL(index) |
+ 	    ((watch | (length << 2)) << AMD64_DR7_FIELD(index));
+ 
+diff --git a/src/hal/amd64/task.h b/src/hal/amd64/task.h
+index 4c1986caac..67cf00c816 100644
+--- a/src/hal/amd64/task.h
++++ b/src/hal/amd64/task.h
+@@ -30,6 +30,14 @@ struct amd64_task {
+ 	uint8_t fpregs[512 + 15];
+ 	void *private_data;
+ 	uintptr_t tls;
++
++	/*
++	 * The task's user GS base while it is off the processor.  While it
++	 * runs, the live value waits in IA32_KERNEL_GS_BASE as long as the
++	 * kernel runs and is exchanged into IA32_GS_BASE on the way to user
++	 * code; the kernel attaches no meaning to it.
++	 */
++	uintptr_t user_gs_base;
+ 	void *active_user_frame;
+ 	struct amd64_interrupt_frame signal_frame[HAL_SIGNAL_NEST_MAX];
+ 	uint8_t signal_fpregs[HAL_SIGNAL_NEST_MAX][512 + 15];
+diff --git a/src/hal/amd64/trap.S b/src/hal/amd64/trap.S
+index ac955dbe63..bedddc5cd5 100644
+--- a/src/hal/amd64/trap.S
++++ b/src/hal/amd64/trap.S
+@@ -52,17 +52,41 @@
+ 	popq %rbx
+ 	popq %rax
+ 	addq $16, %rsp
++
++	/*
++	 * A return to ring three gives the user its GS base back.  Interrupts
++	 * stay off from the exchange to IRETQ, which restores the flags: an
++	 * interrupt taken in between would find the user's GS base under a
++	 * kernel code segment.
++	 */
++	testb $3, 8(%rsp)
++	jz 1f
++	cli
++	swapgs
++1:
+ 	iretq
+ .endm
+ 
++/*
++ * Enters the kernel from any vector but the four paranoid ones.  An entry
++ * from ring three exchanges the user's GS base for the per-CPU state; an
++ * entry from ring zero already runs with the per-CPU state.
++ */
+ .global amd64_common_interrupt
+ amd64_common_interrupt:
++	testb $3, 24(%rsp)
++	jz amd64_common_interrupt_swapped
++	swapgs
++.global amd64_common_interrupt_swapped
++amd64_common_interrupt_swapped:
+ 	SAVE_AND_CALL
+ 
+ /*
+  * Returns from a system call by SYSRET: rcx and r11 take the return
+  * address and flags (the SYSCALL ABI gives up their values), and the user
+  * stack is loaded with interrupts off, which SYSRET turns back on from r11.
++ * SYSRET always returns to ring three, so the user's GS base comes back
++ * before the user stack is loaded.
+  */
+ amd64_sysret:
+ 	popq %r15
+@@ -83,18 +107,21 @@ amd64_sysret:
+ 	movq 16(%rsp), %rcx
+ 	movq 32(%rsp), %r11
+ 	cli
++	swapgs
+ 	movq 40(%rsp), %rsp
+ 	sysretq
+ 
+ /*
+  * Enters a system call made by SYSCALL: rcx holds the return address, r11
+- * the flags, and the stack is still the user's.  Switches to this CPU's
+- * kernel stack and builds the frame an interrupt gate would have, marked
+- * INT_SYSCALL_FAST, then joins the common path.  Interrupts stay off (the
++ * the flags, and the stack is still the user's.  Exchanges the user's GS
++ * base for the per-CPU state, switches to this CPU's kernel stack and
++ * builds the frame an interrupt gate would have, marked INT_SYSCALL_FAST,
++ * then joins the common path after its own exchange.  Interrupts stay off (the
+  * FMASK clears IF) until the frame is on the kernel stack.
+  */
+ .global amd64_syscall_fast_entry
+ amd64_syscall_fast_entry:
++	swapgs
+ 	movq %rsp, %gs:AMD64_PERCPU_SYSCALL_SCRATCH
+ 	movq %gs:AMD64_PERCPU_SYSCALL_RSP, %rsp
+ 	pushq $(SEG_USER_DATA | 3)
+@@ -104,7 +131,7 @@ amd64_syscall_fast_entry:
+ 	pushq %rcx
+ 	pushq $0
+ 	pushq $INT_SYSCALL_FAST
+-	jmp amd64_common_interrupt
++	jmp amd64_common_interrupt_swapped
+ 
+ .macro ISR_NOERR n
+ .Lfault\n:
+@@ -119,15 +146,35 @@ amd64_syscall_fast_entry:
+ 	jmp amd64_common_interrupt
+ .endm
+ 
++/*
++ * The debug exception, the NMI, the double fault and the machine check may
++ * arrive between an exchange of the GS base and the change of ring that
++ * goes with it, so the saved code segment does not tell whose GS base is
++ * loaded.  They enter through amd64_paranoid_interrupt, which asks the GS
++ * base itself.
++ */
++.macro ISR_PARANOID_NOERR n
++.Lfault\n:
++	pushq $0
++	pushq $\n
++	jmp amd64_paranoid_interrupt
++.endm
++
++.macro ISR_PARANOID_ERR n
++.Lfault\n:
++	pushq $\n
++	jmp amd64_paranoid_interrupt
++.endm
++
+ ISR_NOERR 0
+-ISR_NOERR 1
+-ISR_NOERR 2
++ISR_PARANOID_NOERR 1
++ISR_PARANOID_NOERR 2
+ ISR_NOERR 3
+ ISR_NOERR 4
+ ISR_NOERR 5
+ ISR_NOERR 6
+ ISR_NOERR 7
+-ISR_ERR   8
++ISR_PARANOID_ERR   8
+ ISR_NOERR 9
+ ISR_ERR   10
+ ISR_ERR   11
+@@ -137,7 +184,7 @@ ISR_ERR   14
+ ISR_NOERR 15
+ ISR_NOERR 16
+ ISR_ERR   17
+-ISR_NOERR 18
++ISR_PARANOID_NOERR 18
+ ISR_NOERR 19
+ ISR_NOERR 20
+ ISR_ERR   21
+@@ -152,6 +199,70 @@ ISR_ERR   29
+ ISR_ERR   30
+ ISR_NOERR 31
+ 
++/*
++ * Enters the kernel for a paranoid vector.  The per-CPU state lives in the
++ * upper half and a user GS base only in the lower half (the setter refuses
++ * anything else, and CR4.FSGSBASE stays clear so user code cannot write the
++ * base directly), so the sign of IA32_GS_BASE tells whether to exchange.
++ * r12 remembers the exchange across int_handler, which preserves it as a
++ * callee-saved register, so the return undoes exactly what the entry did.
++ */
++.global amd64_paranoid_interrupt
++amd64_paranoid_interrupt:
++	pushq %rax
++	pushq %rbx
++	pushq %rcx
++	pushq %rdx
++	pushq %rsi
++	pushq %rdi
++	pushq %rbp
++	pushq %r8
++	pushq %r9
++	pushq %r10
++	pushq %r11
++	pushq %r12
++	pushq %r13
++	pushq %r14
++	pushq %r15
++	cld
++	xorl %r12d, %r12d
++	movl $AMD64_MSR_GS_BASE, %ecx
++	rdmsr
++	testl %edx, %edx
++	js 1f
++	swapgs
++	movl $1, %r12d
++1:
++	movq %rsp, %rdi
++	movq %rsp, %rbx
++	andq $-16, %rsp
++	call int_handler
++	movq %rbx, %rsp
++
++	/* Gives back the GS base the vector arrived with. */
++	testl %r12d, %r12d
++	jz 2f
++	cli
++	swapgs
++2:
++	popq %r15
++	popq %r14
++	popq %r13
++	popq %r12
++	popq %r11
++	popq %r10
++	popq %r9
++	popq %r8
++	popq %rbp
++	popq %rdi
++	popq %rsi
++	popq %rdx
++	popq %rcx
++	popq %rbx
++	popq %rax
++	addq $16, %rsp
++	iretq
++
+ .macro IRQ n
+ .Lirq\n:
+ 	pushq $0
+diff --git a/src/kern/syscall.c b/src/kern/syscall.c
+index 43e0bf43e0..4be03c1a91 100644
+--- a/src/kern/syscall.c
++++ b/src/kern/syscall.c
+@@ -7482,6 +7482,9 @@ sys_thread_create_call(
+ 	struct uaccess_pin pin;
+ 	tid_t tid;
+ 	int error;
++#if defined(HAL_ARCH_AMD64)
++	int gs_status;
++#endif
+ 
+ 	/* Rejects a call that leaves the new thread underspecified. */
+ 	process = current_process();
+@@ -7489,16 +7492,35 @@ sys_thread_create_call(
+ 	    process->vmspace == NULL ||
+ 	    args[0] == 0 ||
+ 	    args[1] == 0 ||
+-	    args[4] != 0 ||
+ 	    args[5] == 0)
+ 		return -EINVAL;
+ 
++	/*
++	 * The fifth argument is the new thread's first user GS base, so that
++	 * the thread never runs without the one its runtime expects.  Only
++	 * amd64 has one; elsewhere the argument stays reserved and zero.
++	 */
++#if !defined(HAL_ARCH_AMD64)
++	if (args[4] != 0)
++		return -EINVAL;
++#endif
++
+ 	/* The new thread starts only once its id has been reported. */
+ 	kern_memset(&pin, 0, sizeof(pin));
+ 	error = uaccess_pin(args[5], sizeof(tid), HAL_SPACE_WRITE, &pin);
+ 	if (error != 0)
+ 		return -error;
+ 	error = thread_create(process, args[0], args[1], &thread);
++#if defined(HAL_ARCH_AMD64)
++	if (error == 0) {
++		/* Gives the new thread its first user GS base, or refuses one. */
++		gs_status = hal_amd64_task_set_user_gs_base(thread->task, args[4]);
++		if (gs_status != 0) {
++			(void)thread_abort_new(thread);
++			error = EINVAL;
++		}
++	}
++#endif
+ 	if (error == 0) {
+ 		hal_task_set_tls(thread->task, args[3]);
+ 
+@@ -7739,6 +7761,11 @@ static intptr_t
+ sys_thread_self_call(
+ 	const uintptr_t args[6])
+ {
++#if defined(HAL_ARCH_AMD64)
++	uintptr_t gs_base;
++	int gs_status;
++#endif
++
+ 	if (curthread == NULL ||
+ 	    args[2] != 0 ||
+ 	    args[3] != 0 ||
+@@ -7754,6 +7781,32 @@ sys_thread_self_call(
+ 		return 0;
+ 	}
+ 
++	/* Reports the user GS base, which only amd64 has. */
++	if (args[0] == KERN_THREAD_SELF_GET_GSBASE && args[1] == 0) {
++#if defined(HAL_ARCH_AMD64)
++		gs_base = hal_amd64_task_get_user_gs_base(curthread->task);
++
++		/* Succeeded: a user address, never negative as a result. */
++		return (intptr_t)gs_base;
++#else
++		return -EOPNOTSUPP;
++#endif
++	}
++
++	/* Sets the user GS base, refusing anything but a user address. */
++	if (args[0] == KERN_THREAD_SELF_SET_GSBASE) {
++#if defined(HAL_ARCH_AMD64)
++		gs_status = hal_amd64_task_set_user_gs_base(curthread->task, args[1]);
++		if (gs_status != 0)
++			return -EINVAL;
++
++		/* Succeeded: user code reads through GS from the next return. */
++		return 0;
++#else
++		return -EOPNOTSUPP;
++#endif
++	}
++
+ 	return -EINVAL;
+ }
+ 
+diff --git a/userland/tests/gsbase-probe.c b/userland/tests/gsbase-probe.c
+new file mode 100644
+index 0000000000..1dc0667301
+--- /dev/null
++++ b/userland/tests/gsbase-probe.c
+@@ -0,0 +1,676 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The user GS base probe (ws080-p002).
++ *
++ * Sets a thread's GS base with thread_self(SET_GSBASE) and checks that the
++ * value survives every way into and out of the kernel: system calls by
++ * SYSCALL and by the interrupt gate, faults turned into signals, the timer
++ * interrupting a spin, thread switches, fork, a single step and a data
++ * watchpoint taken under ptrace.  It also checks that exec starts with no
++ * GS base, that thread_create gives a new thread its first one, and that a
++ * kernel address is refused everywhere a user GS base can be written.
++ *
++ * Each check prints GSBASE:<name>:PASS or GSBASE:<name>:FAIL:<detail>; the
++ * last line is GSBASE:ALL:PASS (exit 0) or GSBASE:ALL:FAIL (exit 1).  An
++ * operator may send the guest NMIs (QEMU monitor "nmi") while the spin runs.
++ */
++
++#include <errno.h>
++#include <pthread.h>
++#include <setjmp.h>
++#include <signal.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++#include <sys/ptrace.h>
++#include <sys/wait.h>
++#include <unistd.h>
++#include <uapi/reg.h>
++#include <uapi/syscall.h>
++#include <uapi/thread.h>
++
++#define GSBASE_MARKER_MAIN	0x6773626173656d61ULL
++#define GSBASE_MARKER_LEFT	0x6773626173656c65ULL
++#define GSBASE_MARKER_RIGHT	0x6773626173657269ULL
++#define GSBASE_MARKER_NEW	0x677362617365ee77ULL
++#define GSBASE_SWITCH_ROUNDS	1000000UL
++#define GSBASE_SPIN_ROUNDS	200000000UL
++#define GSBASE_SYSCALL_ROUNDS	100000UL
++#define GSBASE_KERNEL_ADDRESS	0xffff800000000000ULL
++#define GSBASE_NONCANONICAL	0x0000800000000000ULL
++#define GSBASE_THREAD_STACK	65536U
++#define GSBASE_STEP_COUNT	8
++
++/*
++ * What a GS base points at in this probe: a marker read at %gs:0 and a
++ * scratch word written at %gs:8 (the data watchpoint watches it).
++ */
++struct gsbase_block {
++	uint64_t marker;
++	uint64_t scratch;
++};
++
++/*
++ * One thread of the switch test: the block its GS base points at and what
++ * it found.
++ */
++struct gsbase_switcher {
++	struct gsbase_block block;
++	unsigned long mismatches;
++	int set_error;
++};
++
++/*
++ * The GS blocks of the main thread and of the raw thread.  They live for
++ * the whole run; a forked child sees them at the same addresses.
++ */
++static struct gsbase_block gsbase_main_block;
++static struct gsbase_block gsbase_new_block;
++
++/*
++ * What the raw thread read through GS, and whether it has run.  The main
++ * thread spins on the flag; the raw thread exits right after setting it.
++ */
++static volatile uint64_t gsbase_new_seen;
++static volatile int gsbase_new_done;
++
++/*
++ * Where a signal handler resumes the main thread, and what the handler
++ * read through GS.  Only the signal tests use them, one at a time.
++ */
++static sigjmp_buf gsbase_signal_return;
++static volatile uint64_t gsbase_handler_seen;
++
++/* The number of failed checks; the exit status follows it. */
++static unsigned gsbase_failures;
++
++intptr_t __syscall6(uint32_t number, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d, uintptr_t e, uintptr_t f);
++
++/*
++ * The raw thread's entry: no C library state, so it reads GS, publishes
++ * what it saw and leaves by thread_exit (110) itself.
++ */
++void gsbase_new_thread_entry(void);
++__asm__(
++	".text\n"
++	".globl gsbase_new_thread_entry\n"
++	"gsbase_new_thread_entry:\n"
++	"\tmovq %gs:0, %rax\n"
++	"\tmovq %rax, gsbase_new_seen(%rip)\n"
++	"\tmovl $1, gsbase_new_done(%rip)\n"
++	"\tmovl $110, %eax\n"
++	"\txorl %ebx, %ebx\n"
++	"\tsyscall\n"
++	"\tud2\n");
++
++static uint64_t gsbase_read_marker(void);
++static void gsbase_write_scratch(uint64_t value);
++static intptr_t gsbase_set(uintptr_t value);
++static intptr_t gsbase_get(void);
++static void gsbase_report(const char *name, int passed, const char *detail);
++static void gsbase_test_set_get(void);
++static void gsbase_test_syscalls(void);
++static void gsbase_signal_handler(int signal_number);
++static void gsbase_test_one_signal(const char *name, int signal_number, int kind);
++static void gsbase_test_signals(void);
++static void gsbase_test_spin(void);
++static void *gsbase_switcher_main(void *argument);
++static void gsbase_test_switches(void);
++static void gsbase_test_fork(void);
++static void gsbase_test_exec(const char *self);
++static void gsbase_test_reject(void);
++static void gsbase_test_thread_create(void);
++static void gsbase_traced_child(void);
++static void gsbase_test_ptrace(void);
++
++/*
++ * Runs every check, or reports the GS base of an execed image.
++ */
++int
++main(
++	int argc,
++	char *argv[])
++{
++	intptr_t inherited;
++
++	/* The image exec started reports the GS base it began with. */
++	if (argc == 2 && strcmp(argv[1], "--exec-child") == 0) {
++		inherited = gsbase_get();
++		if (inherited != 0)
++			return 1;
++
++		/* Succeeded: exec cleared the GS base. */
++		return 0;
++	}
++
++	/* Runs the checks, each independent of the others' outcome. */
++	gsbase_test_set_get();
++	gsbase_test_syscalls();
++	gsbase_test_signals();
++	gsbase_test_spin();
++	gsbase_test_switches();
++	gsbase_test_fork();
++	gsbase_test_exec(argv[0]);
++	gsbase_test_reject();
++	gsbase_test_thread_create();
++	gsbase_test_ptrace();
++
++	/* Reports a failed run. */
++	if (gsbase_failures != 0) {
++		printf("GSBASE:ALL:FAIL\n");
++		return 1;
++	}
++
++	/* Succeeded: every check passed. */
++	printf("GSBASE:ALL:PASS\n");
++	return 0;
++}
++
++/* Reads the marker at %gs:0. */
++static uint64_t
++gsbase_read_marker(
++	void)
++{
++	uint64_t marker;
++
++	/* Loads through the GS segment. */
++	__asm__ volatile("movq %%gs:0, %0" : "=r"(marker) : : "memory");
++
++	/* Reports the marker. */
++	return marker;
++}
++
++/* Writes the scratch word at %gs:8. */
++static void
++gsbase_write_scratch(
++	uint64_t value)
++{
++	/* Stores through the GS segment. */
++	__asm__ volatile("movq %0, %%gs:8" : : "r"(value) : "memory");
++}
++
++/* Sets the calling thread's GS base; reports 0 or a negative errno. */
++static intptr_t
++gsbase_set(
++	uintptr_t value)
++{
++	intptr_t error;
++
++	/* Asks the kernel through thread_self. */
++	error = __syscall6(KERN_SYS_thread_self, KERN_THREAD_SELF_SET_GSBASE, value, 0, 0, 0, 0);
++
++	/* Reports the kernel's answer. */
++	return error;
++}
++
++/* Reports the calling thread's GS base, or a negative errno. */
++static intptr_t
++gsbase_get(
++	void)
++{
++	intptr_t value;
++
++	/* Asks the kernel through thread_self. */
++	value = __syscall6(KERN_SYS_thread_self, KERN_THREAD_SELF_GET_GSBASE, 0, 0, 0, 0, 0);
++
++	/* Reports the kernel's answer. */
++	return value;
++}
++
++/* Prints one check's outcome and counts a failure. */
++static void
++gsbase_report(
++	const char *name,
++	int passed,
++	const char *detail)
++{
++	/* A passed check prints only its name. */
++	if (passed) {
++		printf("GSBASE:%s:PASS\n", name);
++		fflush(stdout);
++		return;
++	}
++
++	/* A failed check says why. */
++	gsbase_failures++;
++	printf("GSBASE:%s:FAIL:%s\n", name, detail);
++	fflush(stdout);
++}
++
++/* Sets the main thread's GS base and reads it back both ways. */
++static void
++gsbase_test_set_get(
++	void)
++{
++	intptr_t error;
++	intptr_t value;
++	uint64_t marker;
++
++	/* Points GS at the main block. */
++	gsbase_main_block.marker = GSBASE_MARKER_MAIN;
++	error = gsbase_set((uintptr_t)&gsbase_main_block);
++	if (error != 0) {
++		gsbase_report("set", 0, "thread_self(SET_GSBASE) refused a user address");
++		return;
++	}
++
++	gsbase_report("set", 1, "");
++
++	/* Reads the base back from the kernel. */
++	value = gsbase_get();
++	gsbase_report("get", value == (intptr_t)&gsbase_main_block, "GET_GSBASE differs from the value set");
++
++	/* Reads the marker through the segment. */
++	marker = gsbase_read_marker();
++	gsbase_report("read", marker == GSBASE_MARKER_MAIN, "%gs:0 is not the marker");
++}
++
++/* Enters the kernel many times by both system call paths. */
++static void
++gsbase_test_syscalls(
++	void)
++{
++	unsigned long round;
++	unsigned long mismatches;
++	long pid;
++
++	/* Calls getpid by SYSCALL and checks GS after each return. */
++	mismatches = 0;
++	for (round = 0; round < GSBASE_SYSCALL_ROUNDS; round++) {
++		(void)getpid();
++		if (gsbase_read_marker() != GSBASE_MARKER_MAIN)
++			mismatches++;
++	}
++
++	gsbase_report("syscall", mismatches == 0, "GS changed across SYSCALL");
++
++	/* Calls getpid through the interrupt gate and checks GS after each. */
++	mismatches = 0;
++	for (round = 0; round < GSBASE_SYSCALL_ROUNDS; round++) {
++		__asm__ volatile("int $0xc2"
++				 : "=a"(pid)
++				 : "a"((long)KERN_SYS_getpid)
++				 : "memory");
++		if (gsbase_read_marker() != GSBASE_MARKER_MAIN)
++			mismatches++;
++	}
++
++	gsbase_report("int-gate", mismatches == 0, "GS changed across the interrupt gate");
++}
++
++/* Records GS in a handler and resumes the test that raised the signal. */
++static void
++gsbase_signal_handler(
++	int signal_number)
++{
++	(void)signal_number;
++
++	/* Records what the handler reads through GS. */
++	gsbase_handler_seen = gsbase_read_marker();
++
++	/* Returns to the test past the faulting instruction. */
++	siglongjmp(gsbase_signal_return, 1);
++}
++
++/* Raises one fault kind, then checks GS in the handler and after it. */
++static void
++gsbase_test_one_signal(
++	const char *name,
++	int signal_number,
++	int kind)
++{
++	struct sigaction action;
++	struct sigaction previous;
++	int resumed;
++
++	/* Installs the handler for this signal. */
++	memset(&action, 0, sizeof(action));
++	action.sa_handler = gsbase_signal_handler;
++	sigemptyset(&action.sa_mask);
++	sigaction(signal_number, &action, &previous);
++	gsbase_handler_seen = 0;
++
++	/* Raises the fault; the handler comes back here with 1. */
++	resumed = sigsetjmp(gsbase_signal_return, 1);
++	if (resumed == 0) {
++		if (kind == 0)
++			*(volatile int *)16 = 1;
++		else if (kind == 1)
++			__asm__ volatile("ud2");
++		else
++			__asm__ volatile("int3");
++	}
++
++	/* Restores the previous disposition. */
++	sigaction(signal_number, &previous, NULL);
++
++	/* Checks the handler's view and the view after it returned. */
++	if (gsbase_handler_seen != GSBASE_MARKER_MAIN) {
++		gsbase_report(name, 0, "the handler did not see the GS base");
++		return;
++	}
++
++	gsbase_report(name, gsbase_read_marker() == GSBASE_MARKER_MAIN, "GS changed after the handler");
++}
++
++/* Checks GS across a page fault, an invalid opcode and a breakpoint. */
++static void
++gsbase_test_signals(
++	void)
++{
++	/* A user #PF delivered as SIGSEGV. */
++	gsbase_test_one_signal("page-fault", SIGSEGV, 0);
++
++	/* A user #UD delivered as SIGILL. */
++	gsbase_test_one_signal("invalid-opcode", SIGILL, 1);
++
++	/* A user #BP delivered as SIGTRAP. */
++	gsbase_test_one_signal("breakpoint", SIGTRAP, 2);
++}
++
++/* Spins long enough for timer interrupts (and an operator's NMIs). */
++static void
++gsbase_test_spin(
++	void)
++{
++	unsigned long round;
++	unsigned long mismatches;
++
++	/* Reads GS in a tight loop that interrupts break into. */
++	mismatches = 0;
++	for (round = 0; round < GSBASE_SPIN_ROUNDS; round++) {
++		if (gsbase_read_marker() != GSBASE_MARKER_MAIN)
++			mismatches++;
++	}
++
++	gsbase_report("spin", mismatches == 0, "GS changed under interrupts");
++}
++
++/* Runs one switcher thread: its own GS base, read across many yields. */
++static void *
++gsbase_switcher_main(
++	void *argument)
++{
++	struct gsbase_switcher *switcher;
++	unsigned long round;
++	intptr_t error;
++
++	switcher = argument;
++
++	/* Points this thread's GS at its own block. */
++	error = gsbase_set((uintptr_t)&switcher->block);
++	if (error != 0) {
++		switcher->set_error = 1;
++		return NULL;
++	}
++
++	/* Reads the marker, giving the processor away now and then. */
++	for (round = 0; round < GSBASE_SWITCH_ROUNDS; round++) {
++		if (gsbase_read_marker() != switcher->block.marker)
++			switcher->mismatches++;
++		if ((round & 1023UL) == 0)
++			sched_yield();
++	}
++
++	/* Succeeded: the counts are in the switcher. */
++	return NULL;
++}
++
++/* Runs two threads with different GS bases side by side. */
++static void
++gsbase_test_switches(
++	void)
++{
++	static struct gsbase_switcher left;
++	static struct gsbase_switcher right;
++	pthread_t left_thread;
++	pthread_t right_thread;
++	int error;
++
++	/* Gives each thread its own marker. */
++	memset(&left, 0, sizeof(left));
++	memset(&right, 0, sizeof(right));
++	left.block.marker = GSBASE_MARKER_LEFT;
++	right.block.marker = GSBASE_MARKER_RIGHT;
++
++	/* Starts both threads. */
++	error = pthread_create(&left_thread, NULL, gsbase_switcher_main, &left);
++	if (error != 0) {
++		gsbase_report("switch", 0, "pthread_create failed");
++		return;
++	}
++
++	error = pthread_create(&right_thread, NULL, gsbase_switcher_main, &right);
++	if (error != 0) {
++		pthread_join(left_thread, NULL);
++		gsbase_report("switch", 0, "pthread_create failed");
++		return;
++	}
++
++	/* Waits for both and judges what they saw, and that main kept its own. */
++	pthread_join(left_thread, NULL);
++	pthread_join(right_thread, NULL);
++	if (left.set_error || right.set_error) {
++		gsbase_report("switch", 0, "a thread could not set its GS base");
++		return;
++	}
++
++	gsbase_report("switch", left.mismatches == 0 && right.mismatches == 0, "a thread read another thread's GS");
++	gsbase_report("switch-main", gsbase_read_marker() == GSBASE_MARKER_MAIN, "the main thread lost its GS base");
++}
++
++/* Checks that a forked child starts with the parent's GS base. */
++static void
++gsbase_test_fork(
++	void)
++{
++	pid_t child;
++	int status;
++
++	/* The child judges its own GS and reports it in the exit status. */
++	child = fork();
++	if (child < 0) {
++		gsbase_report("fork", 0, "fork failed");
++		return;
++	}
++
++	if (child == 0) {
++		if (gsbase_read_marker() != GSBASE_MARKER_MAIN)
++			_exit(1);
++		if (gsbase_get() != (intptr_t)&gsbase_main_block)
++			_exit(2);
++		_exit(0);
++	}
++
++	/* Collects the child's verdict. */
++	waitpid(child, &status, 0);
++	gsbase_report("fork", WIFEXITED(status) && WEXITSTATUS(status) == 0, "the child did not inherit the GS base");
++}
++
++/* Checks that exec starts the new image without a GS base. */
++static void
++gsbase_test_exec(
++	const char *self)
++{
++	pid_t child;
++	int status;
++
++	/* The child execs this program, which reports its GS base. */
++	child = fork();
++	if (child < 0) {
++		gsbase_report("exec", 0, "fork failed");
++		return;
++	}
++
++	if (child == 0) {
++		execl(self, self, "--exec-child", (char *)NULL);
++		_exit(3);
++	}
++
++	/* Collects the execed image's verdict. */
++	waitpid(child, &status, 0);
++	gsbase_report("exec", WIFEXITED(status) && WEXITSTATUS(status) == 0, "exec kept a GS base");
++}
++
++/* Checks that kernel and non-canonical addresses are refused. */
++static void
++gsbase_test_reject(
++	void)
++{
++	intptr_t error;
++
++	/* An upper-half address would pass for the per-CPU state. */
++	error = gsbase_set((uintptr_t)GSBASE_KERNEL_ADDRESS);
++	gsbase_report("reject-kernel", error == -EINVAL, "a kernel address was accepted");
++
++	/* A non-canonical address is no address at all. */
++	error = gsbase_set((uintptr_t)GSBASE_NONCANONICAL);
++	gsbase_report("reject-noncanonical", error == -EINVAL, "a non-canonical address was accepted");
++
++	/* The refusals left the base alone. */
++	gsbase_report("reject-kept", gsbase_read_marker() == GSBASE_MARKER_MAIN, "a refused value changed the GS base");
++}
++
++/* Checks thread_create's first GS base on a thread with no C library state. */
++static void
++gsbase_test_thread_create(
++	void)
++{
++	void *stack;
++	uintptr_t stack_top;
++	unsigned long spins;
++	intptr_t error;
++	int tid;
++
++	/* Maps the raw thread's stack. */
++	stack = mmap(NULL, GSBASE_THREAD_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++	if (stack == MAP_FAILED) {
++		gsbase_report("thread-create", 0, "mmap failed");
++		return;
++	}
++
++	/* A kernel address as the first GS base is refused before the thread runs. */
++	stack_top = ((uintptr_t)stack + GSBASE_THREAD_STACK) & ~(uintptr_t)15U;
++	error = __syscall6(KERN_SYS_thread_create, (uintptr_t)gsbase_new_thread_entry, stack_top, 0, 0, (uintptr_t)GSBASE_KERNEL_ADDRESS, (uintptr_t)&tid);
++	gsbase_report("thread-create-reject", error == -EINVAL, "a kernel address was accepted");
++
++	/* Starts the raw thread with its own block. */
++	gsbase_new_block.marker = GSBASE_MARKER_NEW;
++	error = __syscall6(KERN_SYS_thread_create, (uintptr_t)gsbase_new_thread_entry, stack_top, 0, 0, (uintptr_t)&gsbase_new_block, (uintptr_t)&tid);
++	if (error != 0) {
++		gsbase_report("thread-create", 0, "thread_create refused a user GS base");
++		return;
++	}
++
++	/* Waits for the raw thread's report. */
++	for (spins = 0; spins < 100000000UL && !gsbase_new_done; spins++)
++		sched_yield();
++
++	gsbase_report("thread-create", gsbase_new_done && gsbase_new_seen == GSBASE_MARKER_NEW, "the new thread did not start with its GS base");
++	gsbase_report("thread-create-main", gsbase_read_marker() == GSBASE_MARKER_MAIN, "the creator's GS base changed");
++}
++
++/* Runs the traced child: stops, writes the watched word, then checks GS. */
++static void
++gsbase_traced_child(
++	void)
++{
++	int step;
++
++	/* Becomes traced and stops for the tracer's setup. */
++	ptrace(PT_TRACE_ME, 0, NULL, 0);
++	raise(SIGSTOP);
++
++	/* The write the data watchpoint catches. */
++	gsbase_write_scratch(1);
++
++	/* A few instructions the tracer single-steps through. */
++	for (step = 0; step < GSBASE_STEP_COUNT; step++)
++		gsbase_write_scratch((uint64_t)step);
++
++	/* Reports whether GS survived the debug exceptions. */
++	if (gsbase_read_marker() != GSBASE_MARKER_MAIN)
++		_exit(1);
++	_exit(0);
++}
++
++/* Checks GS under ptrace: registers, debug points, single steps. */
++static void
++gsbase_test_ptrace(
++	void)
++{
++	struct ptrace_debug_points points;
++	struct reg registers;
++	pid_t child;
++	int status;
++	int error;
++	int step;
++
++	/* Starts the child that the rest of the test traces. */
++	child = fork();
++	if (child < 0) {
++		gsbase_report("ptrace", 0, "fork failed");
++		return;
++	}
++
++	if (child == 0)
++		gsbase_traced_child();
++
++	/* Waits for the child's own stop. */
++	waitpid(child, &status, 0);
++	if (!WIFSTOPPED(status)) {
++		gsbase_report("ptrace", 0, "the child did not stop");
++		return;
++	}
++
++	/* The tracer sees the child's GS base among its registers. */
++	error = ptrace(PT_GETREGS, child, &registers, 0);
++	gsbase_report("ptrace-getregs", error == 0 && registers.r_gs_base == (uint64_t)(uintptr_t)&gsbase_main_block, "PT_GETREGS did not report the GS base");
++
++	/* A kernel address is refused as a GS base by PT_SETREGS. */
++	registers.r_gs_base = GSBASE_KERNEL_ADDRESS;
++	error = ptrace(PT_SETREGS, child, &registers, 0);
++	gsbase_report("ptrace-setregs-reject", error == -1, "PT_SETREGS accepted a kernel GS base");
++
++	/* A debug point on a kernel address is refused. */
++	memset(&points, 0, sizeof(points));
++	points.pdps_count = 1;
++	points.pdps_point[0].pdp_address = (uintptr_t)GSBASE_KERNEL_ADDRESS;
++	points.pdps_point[0].pdp_length = 8;
++	points.pdps_point[0].pdp_kind = PTRACE_DEBUG_WRITE;
++	error = ptrace(PT_SET_DEBUG_POINTS, child, &points, 0);
++	gsbase_report("debug-point-kernel-reject", error == -1, "a kernel debug point was accepted");
++
++	/* A write point on the child's scratch word is accepted. */
++	points.pdps_point[0].pdp_address = (uintptr_t)&gsbase_main_block.scratch;
++	error = ptrace(PT_SET_DEBUG_POINTS, child, &points, 0);
++	gsbase_report("debug-point-user", error == 0, "a user debug point was refused");
++
++	/* Runs the child into the watchpoint (a #DB from ring three). */
++	ptrace(PT_CONTINUE, child, (void *)1, 0);
++	waitpid(child, &status, 0);
++	gsbase_report("watchpoint-stop", WIFSTOPPED(status) && WSTOPSIG(status) == SIGTRAP, "the watchpoint did not stop the child");
++
++	/* Clears the point and single-steps (more #DB from ring three). */
++	points.pdps_count = 0;
++	ptrace(PT_SET_DEBUG_POINTS, child, &points, 0);
++	for (step = 0; step < GSBASE_STEP_COUNT; step++) {
++		ptrace(PT_STEP, child, (void *)1, 0);
++		waitpid(child, &status, 0);
++		if (!WIFSTOPPED(status))
++			break;
++	}
++
++	/* Lets the child finish and judge its GS. */
++	ptrace(PT_CONTINUE, child, (void *)1, 0);
++	waitpid(child, &status, 0);
++	gsbase_report("ptrace-child", WIFEXITED(status) && WEXITSTATUS(status) == 0, "the child's GS did not survive the debug exceptions");
++}

@@ -1,0 +1,538 @@
+diff --git a/plan/ws270/phase007/notes-p3.md b/plan/ws270/phase007/notes-p3.md
+new file mode 100644
+index 0000000000..509100e98c
+--- /dev/null
++++ b/plan/ws270/phase007/notes-p3.md
+@@ -0,0 +1,71 @@
++# ws270-p007 P3 の記録（q1540 / q1540-i01）: GPU の memory の read の速さ
++
++- 担当 P3、worktree /home/awe/zedBSD-worktrees/p3、branch agent/p3-q1540（main fcba026e7 から）。
++- 承認: 2026-10-21 ユーザー「lockupは解決したのですが、描画が遅すぎてデスクトップが利用可能な水準ではありません。たぶん2fpsくらいです。これを解決したいです。」
++- 板は Q1 だけが触る。この記録の板の結果は Q1 の報告を写したものだけ。P3 は build と host の試験まで。
++
++## 1. Linux（mainline の pvr・StarFive の DDK）と Mesa との比較
++
++出典: StarFive Linux JH7110_VisionFive2_6.12.y_devel 4cecf169f38e（/home/awe/visionfive-linux）の
++`drivers/gpu/drm/imagination/`（mainline の pvr）と `drivers/gpu/drm/img/img-rogue/`（DDK 1.19）、Mesa 26.2.5 `src/imagination/`。
++
++| 項目 | mainline の pvr | StarFive の DDK | Mesa | こちら（fcba026e7） | 差 |
++| --- | --- | --- | --- | --- | --- |
++| GPU の page の大きさ | 4 KiB（`PVR_DEVICE_PAGE_SIZE` = `PAGE_SIZE`） | 4 KiB | heap の page_size（4 KiB） | 4 KiB だけ | 無い |
++| page entry の bit | valid・read only・CC 0・SLC_BYPASS は BO の flag・PM_META_PROTECT | 同じ（GPU_UNCACHED で bypass） | — | 同じ形（`powervr_gpu_page_entry`） | 無い |
++| どの memory が SLC を迂回するか | `DRM_PVR_BO_BYPASS_DEVICE_CACHE` の BO だけ | `PVRSRV_MEMALLOCFLAG_GPU_UNCACHED` だけ | GPU_UNCACHED は free list・RT dataset（vheap/RTC・region headers など）・context switch の state だけ。**Vulkan の memory（device・host-visible とも）、program、command stream は全部 SLC を通す** | `powervr_gpu_buffer_flags`: CPU が map する物と shareable は全部 bypass。device-local も既定（`POWERVR_DEVICE_MEMORY_CACHED` 0）で mappable=1 なので bypass。**つまり既定で全部の memory が SLC を迂回する** | **大きい** |
++| SLC_CTRL_MISC | 下位 32 bit = PVR_HASH1、PSG hazard の bit は残す、line < 1024 bit なら BYPASS_BURST_COMBINER、BRN 71242 は multicore なしの時だけ | 同じ（BRN 60084 は無関係） | — | 同じ（`init_cache`） | 無い（この core は multicore 有り、line 512 bit） |
++| SLC_CTRL_BYPASS | 書かない | 8 KiB の SLC か BRN 61450 の時だけ | — | 書かない（SLC 16 KiB） | 無い |
++| AXI ACE-Lite | 非 snoop の domain 3、他は 2、非 snoop の AxCACHE 0（device, non-bufferable） | 同じ | — | 同じ（新しい試しの switch `POWERVR_AXI_NON_SNOOP_CACHE`、既定 0） | 無い（試しは下の A） |
++| BIF の初期化 | MIPS の時は host が書かない | 同じ | — | 同じ | 無い |
++| SLC の flush の command（KCCB 105） | 定義だけで送らない | buffer を解放する時に snoop の system だけ（`rgxinit.c`）、OpenCL の compute の flush | — | cached な buffer の解放の前に全部の flush と invalidate（`POWERVR_SLC_FLUSH_ON_FREE` 1、device を cached にした時だけ走る） | 有る（mainline は送らない） |
++| CPU と SLC の一貫性 | firmware が job の前後で SLC を書き戻し・捨てる事に頼る（Mesa の host-visible も cached） | snoop は EMULATED、CPU の側は L2 の flush | — | CPU が触る物を bypass にして避ける | 方針が違う |
++| GPU の clock | core は clk_bv（GPU_CORE）、AXI の gate（NOC_BUS_GPU_AXI）は GPU_CORE から、sys は ISP_AXI から | 594 MHz（BIN2 は 396 MHz）、rate は clk_bv だけ設定 | — | 396 MHz（実測 395.65 MHz、d45）、同じ 6 つの clock を入れる | 無い |
++| system の flags | 0（SLC ≥ 4 KiB） | — | — | POW_RASCALDUST（0x10） | 既知（ws269 の知見） |
++
++- 読み: memory の設定で mainline・Mesa とはっきり違うのは「どの memory を SLC に通すか」だけ。Mesa は Vulkan の memory を全部 SLC に通すので、こちらの既定（全部 bypass）は Mesa のどの形とも違う。
++- BXE-4-32 の SLC は 16 KiB（1 bank、512 bit の line）と小さい。容量で当たる事は少ない。効くとすれば、request の合成と同時に出せる read の数（latency を隠す）による。
++
++## 2. SLC を通すと板が再起動した件（d38）
++
++- d38 の組み合わせ: 1db3be24d（device-local を SLC に通す）。この時は flush on free の switch（a1b5a8ed8、10:20）がまだ無く、解放の前に必ず KCCB 105 を送っていた。
++- d43（84eaa2f3b、program と general を SLC に通す）は、最初は板が戻らなかったが、SD が不安定だった起動で、2 回目には動いた（vkmatrix 36/36、HWR 0）。この試しでは `gpu_cached` が立たないので KCCB 105 は一度も送られていない。つまり CPU が書いて GPU が SLC 越しに読む形は板で動いている。
++- code を読んで分かったこと:
++  - cached な buffer の解放の順序に誤りは見つからなかった: resource の unmap → MMU の flush → `powervr_buffer_put` → `slc_pending` → service が KCCB 105 → 解放。`next` の共用（kept_buffers と slc_pending）も排他になっている。
++  - KCCB 105 の data の配置（inval +4、dm_context +8、address・size 0）は mainline の struct と合う。全部の flush は volcanic の DDK と同じ address 0・size 0。
++  - kernel の panic は halt で、再起動はしない（`src/kern/panic.c`）。だから log 無しの再起動は kernel の panic ではない。SoC の reset か電源のどちらか。
++- 残る候補（確定していない）:
++  - (a) mainline が送らない KCCB 105 を、この firmware（1.1.OS@6976702）が予期しない形で処理した。
++  - (b) device-local の memory に固有の道。
++  - (c) SD の不安定（BUG-343）がたまたま重なった。
++- 切り分けの試し（下の B）: device-local を cached にし、KCCB 105 は送らない（`POWERVR_SLC_FLUSH_ON_FREE` 0）。mainline と同じ形で、mainline・Mesa は同じ板と firmware でこれで動いている。B が安定なら、(a) が濃い。
++  - B だけで再起動するなら、B に flush on free を足した試し（d38 と同じ形）は要らない。
++
++## 3. read の速さの perf の case（vkmatrix perf-read、3e8da0a45）
++
++- 全画面の quad（blend なし）が、1920x1080 の OPTIMAL の texture を nearest で 1 pixel に 1 texel だけ sample する。
++- texture は 3 つ: device-local の memory、host-visible の memory（いつも SLC を迂回する）、64x64（texture の cache に収まる）。
++- 大きい texture の時間から 64x64 の時間を引いた差で 8294400 byte を割り、MB/s を出す。
++- 出力: `vkmatrix: perf-read: PASS (perf read: device N us, host N us, small N us; device N MB/s, host N MB/s over 20 frames of 1920x1080)`
++- 既存の perf-texture は 1024x1024 の bilinear で、拡大し、blend over も付く。その +23 ms は read の帯域だけでは説明できない（memory の traffic は約 4 MB で、LOAD の 8 MB の +8 ms より多くかかっている）。perf-read は read だけを分けて測る。
++- host（lavapipe、`plan/ws269/tests/vkmatrix/run.sh`）で 37/37 PASS。
++
++## 4. 試しの switch（どれも既定 0、compile 時の -D）
++
++| 試し | -D | 中身 | 危険 |
++| --- | --- | --- | --- |
++| A | `POWERVR_AXI_NON_SNOOP_CACHE=3` | GPU の bus の request の AxCACHE を normal・non-cacheable・bufferable にする（interconnect が合成と並べ替えをしてよい） | 低い（mainline と違う値） |
++| B | `POWERVR_DEVICE_MEMORY_CACHED=1 POWERVR_SLC_FLUSH_ON_FREE=0` | device-local の Vulkan の memory を SLC に通す。解放の前の KCCB 105 は送らない（mainline と同じ） | **板が再起動しうる**（d38 の近縁） |
++| D | B と `POWERVR_HOST_MEMORY_CACHED=1` | 共有しない host-visible の memory も SLC に通す（Mesa と同じ範囲） | 再起動しうる。CPU と GPU の一貫性を firmware に頼るので、読み戻しの FAIL もありうる |
++
++- build: `make ZEDBSD_CONFIG=plan/ws270/tests/config-visionfive2-desktop-gpu.mk BUILD=build/q1540-<x> -j16 ZEDBSD_KERNEL_LTO_CFLAGS="-flto <-D...>" vmunix`
++  - command line から LTO の flags を上書きすると、その -D が kernel の全部の C の object に付く。stamp で compile し直される。
++- `POWERVR_HOST_MEMORY_CACHED` の道: `powervr_resource_make_cached`（render.c、`RESOURCE_THROUGH_CACHE`）。CPU が map したまま page entry に SLC_BYPASS を付けない。`gpu_cached` を立てる。
++
++## 5. 経過
++
++- 2026-10-21 3e8da0a45: vkmatrix perf-read、AXI の switch。
++  - 確認: VF2 の vmunix と bin/vkmatrix は rc 0、warning 0。lavapipe で 37/37 PASS。
++- 2026-10-21（次の commit）: `POWERVR_HOST_MEMORY_CACHED` と `powervr_resource_make_cached`。interface.h の comment の順を直した（device-local の comment が flush の define の前に離れていた）。
++  - 確認: p009 505 passed・0 failed、p010 は全部 0 failed。
++- 板の結果: （Q1 の報告を待つ）
+diff --git a/src/drivers/gpu/powervr/interface.h b/src/drivers/gpu/powervr/interface.h
+index da1876d917..21804141f0 100644
+--- a/src/drivers/gpu/powervr/interface.h
++++ b/src/drivers/gpu/powervr/interface.h
+@@ -231,16 +231,36 @@
+ /*
+  * The ACE-Lite domains and cache attributes of the core's bus requests:
+  * outer shareable for non-snooping requests, inner shareable and
+- * cacheable for coherent ones and for cache maintenance.
++ * cacheable for coherent ones and for cache maintenance.  The cache
++ * attribute (AxCACHE) of the non-snooping requests, which are every
++ * request on this board, is POWERVR_AXI_NON_SNOOP_CACHE in both the read
++ * (bits 4-7) and the write (bits 0-3) field.
+  *
+  * Values referenced:
+  * Linux v7.3 drivers/gpu/drm/imagination/pvr_rogue_cr_defs.h
+- * (the ROGUE_CR_AXI_ACE_LITE_CONFIGURATION_*_SHIFT fields) and
+- * pvr_fw_startstop.c (rogue_axi_ace_list_init: 3 for the non-snooping
+- * domains, 2 for the rest).
++ * (the ROGUE_CR_AXI_ACE_LITE_CONFIGURATION_*_SHIFT fields:
++ * AWCACHE_NON_SNOOPING 0, ARCACHE_NON_SNOOPING 4) and pvr_fw_startstop.c
++ * (rogue_axi_ace_list_init: 3 for the non-snooping domains, 2 for the
++ * rest, the non-snooping cache attributes left 0); StarFive Linux
++ * JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
++ * drivers/gpu/drm/img/img-rogue/services/server/devices/rogue/rgxstartstop.c
++ * (RGXAXIACELiteInit: the same value).
+  */
+ #define POWERVR_AXI_ACE_LITE_VALUE	((3ULL << 8) | (3ULL << 10) | (2ULL << 12) | (2ULL << 14) | \
+-					 (2ULL << 16) | (2ULL << 22) | (2ULL << 26) | (2ULL << 30))
++					 (2ULL << 16) | (2ULL << 22) | (2ULL << 26) | (2ULL << 30) | \
++					 ((unsigned long long)POWERVR_AXI_NON_SNOOP_CACHE << 4) | \
++					 (unsigned long long)POWERVR_AXI_NON_SNOOP_CACHE)
++
++/*
++ * The AXI cache attribute of the core's non-snooping requests: 0 (device,
++ * non-bufferable), as mainline and the vendor driver leave it, or a trial
++ * value such as 3 (normal, non-cacheable, bufferable: the interconnect
++ * may merge and reorder them), to see whether the board's interconnect
++ * reads faster (q1540).
++ */
++#ifndef POWERVR_AXI_NON_SNOOP_CACHE
++#define POWERVR_AXI_NON_SNOOP_CACHE	0
++#endif
+ 
+ /*
+  * The MIPS wrapper: its configuration, its four remap windows, the
+@@ -365,12 +385,6 @@
+ #define POWERVR_COMMAND_SLC_FLUSH	(POWERVR_COMMAND_MAGIC | 105U)
+ #define POWERVR_SLC_FLUSH_INVALIDATE	4U
+ 
+-/*
+- * Whether device-local Vulkan memory (only the GPU reaches it) is mapped
+- * through the system level cache (1), instead of around it like memory
+- * the processor maps; its buffers' cached lines are written back and
+- * dropped before their pages are freed.
+- */
+ /*
+  * Whether a cached buffer's pages wait for a flush of the system level
+  * cache before they are freed (1).  With 0 they are freed at once, as
+@@ -381,10 +395,26 @@
+ #define POWERVR_SLC_FLUSH_ON_FREE	1
+ #endif
+ 
++/*
++ * Whether device-local Vulkan memory (only the GPU reaches it) is mapped
++ * through the system level cache (1), instead of around it like memory
++ * the processor maps; with POWERVR_SLC_FLUSH_ON_FREE its buffers' cached
++ * lines are written back and dropped before their pages are freed.
++ */
+ #ifndef POWERVR_DEVICE_MEMORY_CACHED
+ #define POWERVR_DEVICE_MEMORY_CACHED	0
+ #endif
+ 
++/*
++ * Whether host-visible Vulkan memory that is not shared also goes through
++ * the system level cache (1), as Mesa maps every allocation; the memory
++ * stays coherent only through the firmware's writing back and dropping of
++ * the cache around each job (a trial, q1540).
++ */
++#ifndef POWERVR_HOST_MEMORY_CACHED
++#define POWERVR_HOST_MEMORY_CACHED	0
++#endif
++
+ /*
+  * Whether a job's programs (the data sequencer's and the shading
+  * cluster's windows) and its general memory (draw slots, descriptor sets)
+diff --git a/src/drivers/gpu/powervr/render-private.h b/src/drivers/gpu/powervr/render-private.h
+index 6fb350c3dd..7e551f383d 100644
+--- a/src/drivers/gpu/powervr/render-private.h
++++ b/src/drivers/gpu/powervr/render-private.h
+@@ -528,6 +528,9 @@ uint64_t powervr_session_border_table(const struct powervr_session *session);
+ int powervr_resource_make_region_headers(struct powervr_session *session, struct powervr_buffer *buffer, struct powervr_resource **result);
+ int powervr_resource_make_free_list(struct powervr_session *session, struct powervr_buffer *buffer, struct powervr_resource **result);
+ 
++/* Makes a session's handle on a buffer the processor maps, mapped through the system level cache (a trial). */
++int powervr_resource_make_cached(struct powervr_session *session, struct powervr_buffer *buffer, struct powervr_resource **result);
++
+ /* Finds a blob or an import of a session by the identifier the renderer names it by, or NULL. */
+ struct powervr_resource *powervr_session_blob(struct powervr_session *session, uint32_t identifier);
+ 
+diff --git a/src/drivers/gpu/powervr/render.c b/src/drivers/gpu/powervr/render.c
+index e0479a66d5..1ce35424a7 100644
+--- a/src/drivers/gpu/powervr/render.c
++++ b/src/drivers/gpu/powervr/render.c
+@@ -77,6 +77,8 @@ static int render_query(void *device, void *session, struct gpu_device_info *inf
+ static int resource_make(struct powervr_session *session, struct powervr_buffer *buffer, int mappable, int shareable, struct powervr_resource **result);
+ /* Not a mapping flag: the resource's address comes from the region header window. */
+ #define RESOURCE_REGION_HEADERS	0x80000000U
++/* Not a mapping flag: a resource the processor maps still goes through the system level cache. */
++#define RESOURCE_THROUGH_CACHE	0x40000000U
+ 
+ static int resource_make_flags(struct powervr_session *session, struct powervr_buffer *buffer, int mappable, int shareable, unsigned extra, struct powervr_resource **result);
+ static void resource_unmake(struct powervr_session *session, struct powervr_resource *resource);
+@@ -1302,6 +1304,40 @@ powervr_resource_make_free_list(
+ 	return 0;
+ }
+ 
++/*
++ * Makes a session's handle on a buffer the processor maps, mapped through
++ * the system level cache as Mesa maps host-visible memory: what the
++ * processor wrote reaches the core, and what the core wrote reaches the
++ * processor, only because the firmware writes the cache back and drops
++ * it around each job (a trial, POWERVR_HOST_MEMORY_CACHED).
++ *
++ * Procedure referenced:
++ * Mesa 26.2.5 src/imagination/vulkan/pvr_device.c (pvr_AllocateMemory:
++ * every allocation PVR_WINSYS_BO_FLAG_CPU_ACCESS without
++ * PVR_WINSYS_BO_FLAG_GPU_UNCACHED) and winsys/powervr/pvr_drm_bo.c
++ * (DRM_PVR_BO_BYPASS_DEVICE_CACHE only for GPU_UNCACHED).
++ */
++int
++powervr_resource_make_cached(
++	struct powervr_session *session,
++	struct powervr_buffer *buffer,
++	struct powervr_resource **result)
++{
++	int error;
++
++	/* Handles that waited for work which has since ended are unmapped first. */
++	resources_drain(session, 0);
++
++	/* Maps it for the processor, keeping the cache. */
++	error = resource_make_flags(session, buffer, 1, 0, RESOURCE_THROUGH_CACHE, result);
++	if (error != 0)
++		return error;
++
++	/* Succeeded: the handle is in result, named by its maker. */
++	(*result)->origin = (uintptr_t)__builtin_return_address(0);
++	return 0;
++}
++
+ /* Makes a session's handle on a render target's region headers, in their own window. */
+ int
+ powervr_resource_make_region_headers(
+@@ -1324,7 +1360,8 @@ powervr_resource_make_region_headers(
+ /*
+  * Makes a session's handle on a buffer with extra mapping flags;
+  * RESOURCE_REGION_HEADERS takes the address from the region header
+- * window instead of the general one.
++ * window instead of the general one, and RESOURCE_THROUGH_CACHE keeps
++ * the system level cache for a buffer the processor maps.
+  */
+ static int
+ resource_make_flags(
+@@ -1360,7 +1397,10 @@ resource_make_flags(
+ 	 * Host-visible and shareable memory goes around the core's system level
+ 	 * cache, so the processor and the display read what the core wrote.
+ 	 */
+-	flags = powervr_gpu_buffer_flags(mappable, shareable) | (extra & ~RESOURCE_REGION_HEADERS);
++	flags = powervr_gpu_buffer_flags(mappable, shareable);
++	if ((extra & RESOURCE_THROUGH_CACHE) != 0U)
++		flags = 0;
++	flags |= extra & ~(RESOURCE_REGION_HEADERS | RESOURCE_THROUGH_CACHE);
+ 
+ 	/* Takes a device address and maps the run there, then has the core drop stale table entries. */
+ 	mutex_lock(&render->core->lock);
+diff --git a/src/drivers/gpu/powervr/vk-memory.c b/src/drivers/gpu/powervr/vk-memory.c
+index 32ecc341c1..b3dce314bf 100644
+--- a/src/drivers/gpu/powervr/vk-memory.c
++++ b/src/drivers/gpu/powervr/vk-memory.c
+@@ -319,7 +319,14 @@ allocate_storage(
+ 		mappable = 0;
+ 		buffer->gpu_cached = 1;
+ 	}
+-	error = powervr_resource_make(session->owner, buffer, mappable, shareable, storage);
++	if (POWERVR_HOST_MEMORY_CACHED && type == POWERVR_VK_MEMORY_HOST && !shareable) {
++		/* Host-visible memory through the cache, as Mesa maps it (a trial). */
++		buffer->gpu_cached = 1;
++		error = powervr_resource_make_cached(session->owner, buffer, storage);
++	} else {
++		/* The mapping the memory's type and sharing ask for. */
++		error = powervr_resource_make(session->owner, buffer, mappable, shareable, storage);
++	}
+ 	powervr_buffer_put(render, buffer);
+ 	if (error != 0)
+ 		return error;
+diff --git a/userland/tests/vkmatrix/main.c b/userland/tests/vkmatrix/main.c
+index 12c807b086..d244d9a0c9 100644
+--- a/userland/tests/vkmatrix/main.c
++++ b/userland/tests/vkmatrix/main.c
+@@ -91,6 +91,12 @@
+ #define PERF_QUARTER		6
+ #define PERF_FRAMES		20U
+ 
++/* The perf-read case's textures: 1920x1080 in device-local memory, the same in host-visible memory, 64x64. */
++#define PERF_READ_DEVICE	0U
++#define PERF_READ_HOST		1U
++#define PERF_READ_SMALL		2U
++#define PERF_READ_TEXTURES	3U
++
+ /* The load cases' passes over one 1920x1080 image. */
+ #define VKMATRIX_LOAD_FRAMES	60U
+ 
+@@ -109,7 +115,7 @@
+ 
+ /* The most pipelines and textures one case makes. */
+ #define VKMATRIX_PIPELINES_MAX	4
+-#define VKMATRIX_TEXTURES_MAX	2
++#define VKMATRIX_TEXTURES_MAX	3
+ 
+ /* The floats of the compositor's batch vertex: position 2, colour 4, extra 4, alpha 1. */
+ #define VKMATRIX_BATCH_FLOATS	11U
+@@ -185,6 +191,7 @@ struct vkmatrix {
+ 	uint32_t texture_count;
+ 	VkFormat texture_format;
+ 	int texture_linear;
++	int texture_host;
+ 	uint32_t texture_width;
+ 	uint32_t texture_height;
+ 	uint32_t wide_width;
+@@ -272,6 +279,8 @@ static VkResult case_perf_texture(struct vkmatrix *run);
+ static VkResult case_perf_immediate(struct vkmatrix *run);
+ static VkResult case_perf_alu(struct vkmatrix *run);
+ static VkResult case_perf_quarter(struct vkmatrix *run);
++static VkResult case_perf_read(struct vkmatrix *run);
++static VkResult perf_read_frames(struct vkmatrix *run, uint32_t pipeline, uint32_t first, VkDescriptorSet set, uint64_t *average);
+ static uint64_t perf_now_ns(void);
+ static VkResult load_1080_textures(struct vkmatrix *run, uint32_t *pipeline);
+ static VkResult case_load_1080_6(struct vkmatrix *run);
+@@ -321,6 +330,7 @@ static const struct vkmatrix_case cases[] = {
+ 	{ "perf-immediate", case_perf_immediate },
+ 	{ "perf-alu", case_perf_alu },
+ 	{ "perf-quarter", case_perf_quarter },
++	{ "perf-read", case_perf_read },
+ 	{ "clear-64", case_clear_64 },
+ 	{ "clear-128", case_clear_128 },
+ 	{ "sample-linear-1180", case_sample_linear_wide },
+@@ -466,6 +476,7 @@ vkmatrix_run_cases(
+ 			run->vertex_floats = 0;
+ 			run->texture_format = VK_FORMAT_UNDEFINED;
+ 			run->texture_linear = 0;
++			run->texture_host = 0;
+ 			run->texture_width = 0;
+ 			run->texture_height = 0;
+ 			run->wide_width = VKMATRIX_SIZE;
+@@ -1041,7 +1052,8 @@ vkmatrix_pipeline(
+  * uploaded through a buffer, with a sampler of the filter clamped to the
+  * edge, and its descriptor set.  With run->texture_linear it is a LINEAR
+  * image of run->texture_width x run->texture_height texels written
+- * through its mapping row by row at its row pitch.
++ * through its mapping row by row at its row pitch.  With run->texture_host
++ * an OPTIMAL one is uploaded the same way into host-visible memory.
+  */
+ static VkResult
+ vkmatrix_texture(
+@@ -1116,7 +1128,7 @@ vkmatrix_texture(
+ 	memset(&allocate, 0, sizeof(allocate));
+ 	allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+ 	allocate.allocationSize = requirements.size;
+-	if (run->texture_linear) {
++	if (run->texture_linear || run->texture_host) {
+ 		status = vkmatrix_find_memory(run, requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &allocate.memoryTypeIndex);
+ 	} else {
+ 		status = vkmatrix_find_memory(run, requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &allocate.memoryTypeIndex);
+@@ -4325,3 +4337,186 @@ case_perf_quarter(
+ {
+ 	return perf_case(run, PERF_QUARTER);
+ }
++
++/*
++ * perf-read (q1540): how fast the core reads memory through its texture
++ * unit.  A full-screen quad without blending samples one texel a pixel
++ * (nearest) of a 1920x1080 OPTIMAL texture, from device-local memory and
++ * from host-visible memory, and of a 64x64 one the texture cache holds.
++ * The difference to the small texture's time is the reading of the
++ * 1920x1080x4 bytes, printed as MB/s.  Device-local memory goes through
++ * the core's system level cache only when the driver maps it so;
++ * host-visible memory always goes around it.
++ */
++static VkResult
++case_perf_read(
++	struct vkmatrix *run)
++{
++	struct vkmatrix_shape shape;
++	VkSubresourceLayout layout;
++	uint64_t spent[PERF_READ_TEXTURES];
++	uint64_t rate[PERF_READ_SMALL];
++	uint64_t bytes;
++	uint32_t *texels;
++	uint32_t pipeline;
++	uint32_t first;
++	uint32_t index;
++	VkResult status;
++
++	/* Opaque texels of a pattern, enough for the large textures. */
++	bytes = (uint64_t)VKMATRIX_LINEAR_WIDTH * VKMATRIX_LINEAR_HEIGHT * 4U;
++	texels = malloc((size_t)bytes);
++	if (texels == NULL) {
++		run->failed_call = "malloc";
++		return VK_ERROR_OUT_OF_HOST_MEMORY;
++	}
++	for (index = 0; index < VKMATRIX_LINEAR_WIDTH * VKMATRIX_LINEAR_HEIGHT; index++)
++		texels[index] = 0xff000000U | (index * 2654435761U >> 8);
++
++	/* The large texture in device-local memory, the same in host-visible memory, then the small one (PERF_READ_*). */
++	run->texture_width = VKMATRIX_LINEAR_WIDTH;
++	run->texture_height = VKMATRIX_LINEAR_HEIGHT;
++	status = vkmatrix_texture(run, 0, texels, VK_FILTER_NEAREST);
++	if (status == VK_SUCCESS) {
++		run->texture_host = 1;
++		status = vkmatrix_texture(run, 0, texels, VK_FILTER_NEAREST);
++	}
++	if (status == VK_SUCCESS) {
++		run->texture_host = 0;
++		run->texture_width = 0;
++		run->texture_height = 0;
++		status = vkmatrix_texture(run, 64U, texels, VK_FILTER_NEAREST);
++	}
++	free(texels);
++	if (status != VK_SUCCESS)
++		return status;
++
++	/* The textured pipeline without blending, and the quad over the whole target. */
++	memset(&shape, 0, sizeof(shape));
++	shape.vertex = vkmatrix_texture_vert;
++	shape.vertex_size = sizeof(vkmatrix_texture_vert);
++	shape.fragment = vkmatrix_texture_frag;
++	shape.fragment_size = sizeof(vkmatrix_texture_frag);
++	shape.layout = VKMATRIX_TEXTURE;
++	shape.texture = 1;
++	shape.blend = VKMATRIX_OPAQUE;
++	status = vkmatrix_pipeline(run, &shape, &pipeline);
++	if (status != VK_SUCCESS)
++		return status;
++	first = vkmatrix_texture_quad(run, 0.0f, 0.0f, 64.0f, 64.0f);
++
++	/* The 1920x1080 attachment. */
++	status = linear_target(run, VK_IMAGE_TILING_OPTIMAL, &layout);
++	if (status != VK_SUCCESS)
++		return status;
++
++	/* Each texture's time a frame. */
++	for (index = 0; index < PERF_READ_TEXTURES; index++) {
++		status = perf_read_frames(run, pipeline, first, run->textures[index].set, &spent[index]);
++		if (status != VK_SUCCESS)
++			return status;
++	}
++
++	/* Each large texture's rate: its bytes over the time it took beyond the small one's (bytes a microsecond are MB/s); 0 when none. */
++	for (index = 0; index < PERF_READ_SMALL; index++) {
++		rate[index] = 0;
++		if (spent[index] > spent[PERF_READ_SMALL])
++			rate[index] = bytes * 1000U / (spent[index] - spent[PERF_READ_SMALL]);
++	}
++
++	/* The line, and nothing for the shared target's comparison to say. */
++	snprintf(run->note, sizeof(run->note), "perf read: device %lu us, host %lu us, small %lu us; device %lu MB/s, host %lu MB/s over %u frames of 1920x1080",
++		 (unsigned long)(spent[PERF_READ_DEVICE] / 1000U), (unsigned long)(spent[PERF_READ_HOST] / 1000U),
++		 (unsigned long)(spent[PERF_READ_SMALL] / 1000U), (unsigned long)rate[PERF_READ_DEVICE],
++		 (unsigned long)rate[PERF_READ_HOST], (unsigned)PERF_FRAMES);
++	memcpy(run->expected, run->pixels, sizeof(run->expected));
++	run->tolerance = 0;
++
++	/* Succeeded: the timing is printed. */
++	return VK_SUCCESS;
++}
++
++/* Times perf-read's quad over one texture: the average of PERF_FRAMES frames after one not counted, in nanoseconds. */
++static VkResult
++perf_read_frames(
++	struct vkmatrix *run,
++	uint32_t pipeline,
++	uint32_t first,
++	VkDescriptorSet set,
++	uint64_t *average)
++{
++	VkCommandBufferBeginInfo begin;
++	VkRenderPassBeginInfo pass;
++	VkClearValue value;
++	VkViewport viewport;
++	VkRect2D scissor;
++	VkSubmitInfo submit;
++	uint64_t started;
++	uint64_t spent;
++	uint64_t total;
++	uint32_t frame;
++	VkResult status;
++
++	/* The frames, the first not counted. */
++	total = 0;
++	for (frame = 0; frame <= PERF_FRAMES; frame++) {
++		/* The command buffer and a cleared pass of the whole target. */
++		memset(&begin, 0, sizeof(begin));
++		begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
++		begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++		vkResetCommandBuffer(run->command, 0);
++		vkBeginCommandBuffer(run->command, &begin);
++		memset(&value, 0, sizeof(value));
++		memcpy(value.color.float32, background, sizeof(value.color.float32));
++		memset(&pass, 0, sizeof(pass));
++		pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
++		pass.renderPass = run->clear_pass;
++		pass.framebuffer = run->wide_framebuffer;
++		pass.renderArea.extent.width = VKMATRIX_LINEAR_WIDTH;
++		pass.renderArea.extent.height = VKMATRIX_LINEAR_HEIGHT;
++		pass.clearValueCount = 1;
++		pass.pClearValues = &value;
++		vkCmdBeginRenderPass(run->command, &pass, VK_SUBPASS_CONTENTS_INLINE);
++
++		/* The quad over the whole target, sampling the texture. */
++		memset(&viewport, 0, sizeof(viewport));
++		viewport.width = (float)VKMATRIX_LINEAR_WIDTH;
++		viewport.height = (float)VKMATRIX_LINEAR_HEIGHT;
++		viewport.maxDepth = 1.0f;
++		vkCmdSetViewport(run->command, 0, 1, &viewport);
++		memset(&scissor, 0, sizeof(scissor));
++		scissor.extent.width = VKMATRIX_LINEAR_WIDTH;
++		scissor.extent.height = VKMATRIX_LINEAR_HEIGHT;
++		vkCmdSetScissor(run->command, 0, 1, &scissor);
++		vkmatrix_bind(run, pipeline);
++		vkCmdBindDescriptorSets(run->command, VK_PIPELINE_BIND_POINT_GRAPHICS, run->layouts[pipeline], 0, 1, &set, 0, NULL);
++		vkCmdDraw(run->command, 6, 1, first, 0);
++		vkCmdEndRenderPass(run->command);
++		vkEndCommandBuffer(run->command);
++
++		/* The submit and its wait, timed. */
++		memset(&submit, 0, sizeof(submit));
++		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
++		submit.commandBufferCount = 1;
++		submit.pCommandBuffers = &run->command;
++		vkResetFences(run->device, 1, &run->fence);
++		started = perf_now_ns();
++		run->failed_call = "vkQueueSubmit (perf read)";
++		status = vkQueueSubmit(run->queue, 1, &submit, run->fence);
++		if (status != VK_SUCCESS)
++			return status;
++		run->failed_call = "vkWaitForFences (perf read)";
++		status = vkWaitForFences(run->device, 1, &run->fence, VK_TRUE, VKMATRIX_WAIT_NS);
++		if (status != VK_SUCCESS)
++			return status;
++		spent = perf_now_ns() - started;
++
++		/* Counted after the first frame. */
++		if (frame != 0)
++			total += spent;
++	}
++
++	/* Succeeded: the average time of a frame. */
++	*average = total / PERF_FRAMES;
++	return VK_SUCCESS;
++}

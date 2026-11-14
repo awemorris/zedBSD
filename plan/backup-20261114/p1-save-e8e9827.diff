@@ -1,0 +1,176 @@
+diff --git a/plan/ws142/phase002/phase.md b/plan/ws142/phase002/phase.md
+new file mode 100644
+index 0000000000..da18e69812
+--- /dev/null
++++ b/plan/ws142/phase002/phase.md
+@@ -0,0 +1,25 @@
++<!-- awesome-plan project=zedbsd record=ws142-p002 -->
++
++# ws142-p002: Super（Windows キー）単独で App Home を開く・閉じる
++
++Status: in-progress（2026-10-05 P1 generation17 / q719-i01。途中で止めた: Q1 の優先の変更で q720 ws159-p006 を先にする。安全な commit の地点、build には未だ入れていない）
++Disposition: normal
++Parent: [WS142](../ws.md)
++Queue: q719 / q719-i01（Q1 の投入）
++Design: [ws142-p001](../phase001/phase.md) の C
++
++## 範囲と受け入れ
++
++- Super（左右の Meta）を、Shift・Ctrl・Alt を押さずに押して、1 秒以内に、他の key・pointer の button・wheel・タッチ無しに離すと App Home を開く（開いていれば閉じる）。Super+Tab・Super+L・Super+Alt+文字は今のまま。Super の押下・解放は今まで通り client にも渡す（D9 の案）。lock・greeter の間は何もしない。
++- build warning 0、host の試験、QEMU（T1）: QMP の key で Super 単独 → `ZWL HOME open via=super`、もう一度 → `ZWL HOME close via=super`、Super+Tab は Wiseview（Home は開かない）、Super を押したまま click → 開かない。
++
++## 進み（2026-10-05）
++
++- 済: `userland/desktop/wayland/super-tap.c`・`super-tap.h`（純粋な判定。`zwl_super_tap_key(tap, key, state, others_held, now_ms)` が tap の解放で 1、`zwl_super_tap_cancel`）。style-check の指摘 0。まだ Makefile にも compositor にも入れていない（build に影響しない）。
++- 残り（再開の手順）:
++  1. `zwl.h`: `#include "super-tap.h"` と `struct zwl_super_tap super_tap;`（server）。
++  2. `seat.c` `zwl_seat_key`: lock・greeter の判定の後、IME と Home の key の前で `zwl_super_tap_key(&server->super_tap, key, state, (server->modifiers & (shift 0x1 | control 0x4 | alt 0x8)) != 0, zwl_milliseconds())`、1 なら `zwl_home_toggle(server, "super")` を呼び、key は続けて流す（Home が出ている時の解放は Home が取る）。
++  3. `zwl_seat_button`・`zwl_seat_axis` の先頭と `touch.c` の `touch_down` で `zwl_super_tap_cancel`。
++  4. `home.c`: `zwl_home_toggle(server, via)`（出ている・開いている途中なら `zwl_home_dismiss` と同じ片付けで閉じる、それ以外は `home_open(server, progress, via)`）と `zwl.h` の宣言。
++  5. `Makefile`・`Makefile.linux`・`Makefile.freebsd` に `super-tap.c`。
++  6. host の試験 `plan/ws142/tests/host-super-tap.c`（単独の tap、1 秒を超える、他の key・Super の両方・Shift を押した状態・cancel・repeat・解放だけ）、QEMU の試験 `plan/ws142/tests/p002-guest.sh`（pen の image、QMP の key）。
+diff --git a/userland/desktop/wayland/super-tap.c b/userland/desktop/wayland/super-tap.c
+new file mode 100644
+index 0000000000..51e469bb81
+--- /dev/null
++++ b/userland/desktop/wayland/super-tap.c
+@@ -0,0 +1,89 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The Windows key pressed alone (ws142-p002; the 2026-10-04 user request
++ * "Windowsキーでアプリ一覧を出してほしい。", plan/ws142/phase001 C).
++ *
++ * A press of either Super with no Shift, Control or Alt held arms the tap.
++ * Any other key pressed meanwhile (the other Super too), a pointer button,
++ * a wheel turn or a touch disarms it (zwl_super_tap_cancel), so Super+Tab,
++ * Super+L and the Super+Alt shortcuts stay what they are.  The release of
++ * the key that armed it, within ZWL_SUPER_TAP_MS of its press, is the tap.
++ * A key's repeat (state 2) changes nothing.  The keys still go to the
++ * client as before (plan/ws142/phase001 D9).
++ */
++
++#include "super-tap.h"
++
++#include <stddef.h>
++
++/*
++ * Takes one key: state 1 pressed, 0 released, 2 repeated; others_held is
++ * nonzero when Shift, Control or Alt is held.  Returns 1 when this release
++ * completes a tap, 0 otherwise.
++ */
++int
++zwl_super_tap_key(
++	struct zwl_super_tap *tap,
++	uint32_t key,
++	uint32_t state,
++	uint32_t others_held,
++	uint64_t now_ms)
++{
++	uint32_t armed_key;
++	uint64_t held_ms;
++	int super;
++
++	/* A repeat changes nothing. */
++	if (state == 2U)
++		return 0;
++
++	/* Which key it is. */
++	super = 0;
++	if (key == ZWL_SUPER_TAP_LEFT || key == ZWL_SUPER_TAP_RIGHT)
++		super = 1;
++
++	/* A press: a Super alone arms the tap, anything else disarms it. */
++	if (state != 0U) {
++		if (super && !tap->armed && others_held == 0U) {
++			tap->armed = 1U;
++			tap->key = key;
++			tap->down_ms = now_ms;
++			return 0;
++		}
++
++		/* Another key, or the other Super, while armed. */
++		zwl_super_tap_cancel(tap);
++		return 0;
++	}
++
++	/* A release of a key that did not arm it changes nothing. */
++	if (!tap->armed || key != tap->key)
++		return 0;
++
++	/* The release of the armed Super: a tap when it came soon enough. */
++	armed_key = tap->key;
++	held_ms = now_ms - tap->down_ms;
++	zwl_super_tap_cancel(tap);
++	if (armed_key != key || held_ms > ZWL_SUPER_TAP_MS)
++		return 0;
++
++	/* Succeeded: a tap. */
++	return 1;
++}
++
++/* Disarms the tap: something else happened while Super was down. */
++void
++zwl_super_tap_cancel(
++	struct zwl_super_tap *tap)
++{
++	/* Nothing armed. */
++	tap->armed = 0U;
++	tap->key = 0U;
++	tap->down_ms = 0U;
++}
+diff --git a/userland/desktop/wayland/super-tap.h b/userland/desktop/wayland/super-tap.h
+new file mode 100644
+index 0000000000..5d00c72118
+--- /dev/null
++++ b/userland/desktop/wayland/super-tap.h
+@@ -0,0 +1,44 @@
++/*
++ * zedBSD
++ * Copyright (C) 2026 Awe Morris
++ *
++ * SPDX-License-Identifier: Zlib
++ */
++
++/*
++ * The Windows key pressed alone (super-tap.c, ws142-p002): tells when a
++ * press and release of Super made a tap of its own, which opens or closes
++ * App Home.
++ *
++ * It knows nothing of the seat: the caller hands it each key and each
++ * pointer button, wheel turn or touch, and acts on the tap it reports
++ * (seat.c).  So the host tests run it alone.
++ */
++
++#ifndef ZWL_SUPER_TAP_H
++#define ZWL_SUPER_TAP_H
++
++#include <stdint.h>
++
++/* The evdev codes of the left and the right Super (Meta) keys. */
++#define ZWL_SUPER_TAP_LEFT	125U
++#define ZWL_SUPER_TAP_RIGHT	126U
++
++/* The longest a Super may be held and still be a tap (milliseconds). */
++#define ZWL_SUPER_TAP_MS	1000U
++
++/*
++ * The state: armed while a Super went down alone and nothing else has
++ * happened since, the key that armed it, and when it went down.  All zero
++ * when nothing is armed; it lives in the compositor's server.
++ */
++struct zwl_super_tap {
++	uint32_t armed;
++	uint32_t key;
++	uint64_t down_ms;
++};
++
++int zwl_super_tap_key(struct zwl_super_tap *tap, uint32_t key, uint32_t state, uint32_t others_held, uint64_t now_ms);
++void zwl_super_tap_cancel(struct zwl_super_tap *tap);
++
++#endif

@@ -1,0 +1,64 @@
+diff --git a/plan/ws193/codex-firmware-queue.md b/plan/ws193/codex-firmware-queue.md
+index 58af2fdc4f..ed4fd83769 100644
+--- a/plan/ws193/codex-firmware-queue.md
++++ b/plan/ws193/codex-firmware-queue.md
+@@ -17,3 +17,7 @@ Outlook: 実機での利用はユーザー、shared計画/規則への投影とG
+ ## 結果
+ 
+ p006の1項目cleared。対象host/PTY/Make packaging入力/全文reviewの証拠はtests/firmware-selection-20261010.md。mainへ追加訂正のsourceを統合してread-backする。共有記録/規則の投影とGitHub公開はQ1に保留。pushなし。
++
++2026-10-10: source c2b97e953のmain統合は自動承認レビューで個別承認が必要として拒否。main未変更。ユーザーに具体的commitの統合承認を質問済み。code/host結果のclearedとQueue finishedは維持。後続記録はown branchに保持。
++
++2026-10-10 user回答「mainへ統合する」でsource c2b97e953のmain統合完了、HEAD/clean/Firmware登録read-back PASS。後続記録はown branchのみ、shared投影/GitHub公開はQ1へ保留、push無し。
+diff --git a/plan/ws193/phase006/phase.md b/plan/ws193/phase006/phase.md
+index e5557222b5..7c2eda8c86 100644
+--- a/plan/ws193/phase006/phase.md
++++ b/plan/ws193/phase006/phase.md
+@@ -25,3 +25,11 @@ AGENTS.md/Guardrailのownership、外部firmware独立取得/cache/manifest/lice
+ ## 結果 / menuconfig-firmware-20261010-i01
+ 
+ cleared。全6platformの表示・4件選択・save/load・Make実効選択/packaging入力/config validation PASS。RPi4 real handlerとPTYでRTL8822Bを含む全4件表示・選択を確認。default-off維持、既存fixtureの対象check・Python構文・diff-check・適用規則全文review PASS。[証拠/範囲/未実施](../tests/firmware-selection-20261010.md)。mainへの追加訂正としてsource統合/read-backを行う。push無し。共有Master/Queue/Guardrail/automation/GitHub投影はQ1へ保留。次Queueを開始しない。
++
++## main統合の個別承認待ち / 2026-10-10
++
++修正source c2b97e953fcfa330bc71a5d9be47bd78bd1b94c8をWIP保存。mainへのfast-forward要求は自動承認レビューが拒否した（新commitのmain統合/副作用について個別の明示承認が必要）。mainはfe4300313のまま、変更なし。回避操作は行わず、userへ拒否理由を説明してc2b97e953の具体的承認を質問した。source/hostのclearedは維持、統合だけ承認待ち。この後続記録はown branchに保持し、c2b97e953とは別の未統合記録である。
++
++## main統合完了 / 2026-10-10
++
++ユーザーは具体的コミットc2b97e953への質問に「mainへ統合する」と回答。c2b97e953fcfa330bc71a5d9be47bd78bd1b94c8だけをmainへfast-forwardし、HEADのread-back一致、clean、mainのamd64/rpi4でFirmware全4件のPLATFORMS=*とdefault-off、RTL8822B登録を確認してPASS。1842e8c09の後続記録はmainへ含めていない。push無し。この完了記録も担当branchで保持し、shared計画/規則への投影とGitHub公開はQ1へ保留。
+diff --git a/plan/ws193/ws.md b/plan/ws193/ws.md
+index 31eb27b5ed..c57fd7e928 100644
+--- a/plan/ws193/ws.md
++++ b/plan/ws193/ws.md
+@@ -3,14 +3,14 @@
+ # WS193: make menuconfig のメニュー階層の作り直しと Build boot image（進捗表示）
+ 
+ <!-- awesome-plan-current:start -->
+-Status: incomplete（p004/p005 sourceはmain統合済み、p006のFirmware共通選択を追加訂正）
++Status: incomplete（p004/p005 sourceはmain統合済み、p006 Firmware共通選択もmain統合済み）
+ Primary Milestone: MG006
+ Related Milestones: —
+ Objectives: O2
+ Parent: [Master](../master.md)
+ Queue: [Codex Firmware選択](codex-firmware-queue.md) finished。旧arm64選択修正とq918（P1）の履歴は保持。
+ Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
+-Resume point: p006のsource統合/read-back、WS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
++Resume point: source統合完了。WS全体のp003/受入照合と共有記録/規則の投影。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+ <!-- awesome-plan-current:end -->
+ 
+ ## 由来（2026-10-09 ユーザー、原文）
+@@ -75,7 +75,7 @@ Build boot imageはプログレスバーを表示して、何をビルド中な
+ | p003 | 規約の全文の見直し | planning | p001 |
+ | [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（限定source/host、93914124c main統合済み） | p001 source |
+ | [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、fe4300313 main統合済み） | p004 source |
+-| [p006](phase006/phase.md) | Firmwareも全CPUで選択/保存/packaging可能にする | cleared（source/host、統合read-back待ち） | p005 source |
++| [p006](phase006/phase.md) | Firmwareも全CPUで選択/保存/packaging可能にする | cleared（source/host、c2b97e953 main統合/read-back済み） | p005 source |
+ 
+ ## 2026-10-10 RPi4 UAT前のarm64選択修正
+ 
+@@ -94,3 +94,5 @@ p005 cleared: 共通registryをrootに一箇所で適用し、全6platformの255
+ ## 2026-10-10 Firmwareの選択方針の追加訂正
+ 
+ current user「Firmwareもアーキテクチャに関係なくすべて選べるようにしてください。」でp006を追加。p005のFirmware条件保持という当時の方針を置換。前のp005のsource fe4300313はユーザーのmain統合指示で統合済み（このQueueの基点HEADで確認）。p005の既存結果は保持、追加訂正のscopeと結果はp006へ。全6platformでFirmware全4件の表示・選択・保存・Make実効値/配置入力とRPi4 real PTY PASS。限定規則全文review PASS。WS全体のp003/受入は未完のまま。共有Guardrail/Master/Queue投影とGitHub公開はQ1へ保留、pushなし。
++
++2026-10-10 p006 source c2b97e953はユーザーの具体的承認でmain統合/read-back済み。amd64/rpi4のFirmware全4件/default-off/RTL8822Bをmainでも確認。push無し。この後続記録と共有規則の投影はQ1へ保留。

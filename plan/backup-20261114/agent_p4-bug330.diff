@@ -1,0 +1,591 @@
+diff --git a/plan/bugs/BUG-330.md b/plan/bugs/BUG-330.md
+index c9d16c966f..58813b644c 100644
+--- a/plan/bugs/BUG-330.md
++++ b/plan/bugs/BUG-330.md
+@@ -7,3 +7,10 @@
+ - Q1 の読み: kernel の text console（src/drivers/platform/pcat/graphics/text.c の scroll_locked）は cell の配列を 1 行ずらした後に redraw_locked で全部の cell を描き直す。HAL の early console（src/hal/amd64/bsp-pcat/cons.c の scroll_locked）も全部の cell を framebuffer_draw_cell_locked で描き直す。1920x1080・8x16 で約 16000 cell、約 8 MB を 1 行ごとに書く。framebuffer の map の memory type（UC か WC か）は未確認。
+ - 修正の方向: 変わった cell だけ描く、または RAM の shadow から行をずらして写す（framebuffer からは読まない）、framebuffer を write-combining で map する。
+ - 関連: WS039 p017（P3 が kernel の console の framebuffer の map を自分で持つ形に変える）と同じ file の別の部分。
++
++## 2026-10-16 P4（q1232-i01、ユーザーの指示「framebufferは今は変更をやめます。」で中断）
++
++- 変更（branch agent/p4-bug330 の WIP commit、main には入れない）: text.c・cons.c の scroll を cell の差分の範囲だけ画素の行の順に連続で書く形に（framebuffer は読まない、書いた後 hal_wmb）、src/hal/amd64/framebuffer-map.c の固定の map を UC-（PCD、PAT index 2）から WC（PAT index 4、4 KiB は bit 7、2 MiB は bit 12）に。
++- QEMU（KVM、std VGA、GOP 1920x1080、240x67、serial mirror の build、guest の `time cat`）: 短い行（seq 1 2000）前 7.43 s → 後 0.37 s。236 文字の行 2000 行（ほぼ全 cell が変わる）前 17.58 s → 後 15.19 s。後者は serial mirror の 1 文字ごとの出力が主と見られる（未確認）。QEMU の KVM は VRAM を通常の RAM として扱うので、UC→WC の効果は QEMU では測れない（実機は未実施）。
++- 未実施: shadow（RAM の画素を memmove）の版 (2) の実装と比較、HAL の early console の画面の確認（gdbstub で止めて screendump）、実機。
++- 再開: branch agent/p4-bug330 の commit から。測定の config は worktree の build/bug330/config.mk（tree の外）。
+diff --git a/src/drivers/platform/pcat/graphics/text.c b/src/drivers/platform/pcat/graphics/text.c
+index ea8c078c97..952cc2c19e 100644
+--- a/src/drivers/platform/pcat/graphics/text.c
++++ b/src/drivers/platform/pcat/graphics/text.c
+@@ -93,6 +93,22 @@ static int text_ready;
+ static enum text_surface text_surface;
+ static volatile uint16_t *text_vram;
+ 
++/*
++ * The glyph rows of the cells one span draw paints, indexed by column.
++ *
++ * A span is painted one pixel row at a time across all of its cells (BUG-330),
++ * so each cell's glyph is looked up once, before the first pixel row is
++ * written.  Filled and consumed inside one draw_span_locked() under
++ * text_lock; a fatal stop draws without the lock, but nothing else runs then.
++ */
++static uint8_t text_span_glyphs[TEXT_MAX_COLUMNS][TEXT_GLYPH_HEIGHT];
++
++/* The foreground pixel of each cell of the span, kept beside text_span_glyphs. */
++static uint32_t text_span_foreground[TEXT_MAX_COLUMNS];
++
++/* The background pixel of each cell of the span, kept beside text_span_glyphs. */
++static uint32_t text_span_background[TEXT_MAX_COLUMNS];
++
+ /*
+  * A quiet console (the boot parameter kmsg=quiet, ws035-p097): the cells
+  * are kept but not drawn, so the boot logo stays on the screen, until the
+@@ -120,6 +136,7 @@ static const uint32_t text_palette[16] = {
+ 
+ static uint32_t text_color(unsigned index);
+ static void draw_cell_locked(unsigned row, unsigned column, int cursor);
++static void draw_span_locked(unsigned row, unsigned first_column, unsigned end_column);
+ static void redraw_locked(void);
+ static void scroll_locked(void);
+ static void putc_locked(int character);
+@@ -341,6 +358,123 @@ draw_cell_locked(
+ 			    first_x + dot] = pixel;
+ 		}
+ 	}
++
++	/* Pushes the cell out of the write-combining buffers to the screen. */
++	hal_wmb();
++}
++
++/*
++ * Draws the cells [first_column, end_column) of one row, without the cursor.
++ *
++ * The span is written one pixel row at a time from left to right, so the
++ * framebuffer receives long consecutive runs, which a write-combining mapping
++ * merges into whole bursts, and nothing is read back from it (BUG-330).
++ */
++static void
++draw_span_locked(
++	unsigned row,
++	unsigned first_column,
++	unsigned end_column)
++{
++	uint8_t glyph[32];
++	unsigned glyph_width;
++	unsigned glyph_height;
++	unsigned column;
++	unsigned line;
++	unsigned dot;
++	unsigned mask;
++	uint16_t cell;
++	uint8_t attribute;
++	uint8_t bits;
++	uint32_t foreground;
++	uint32_t background;
++	uint32_t pixel;
++	volatile uint32_t *out;
++	int found;
++
++	/* Rejects a row outside the live geometry. */
++	if (!text_ready || row >= text_rows)
++		return;
++
++	/* A quiet console keeps its cells off the screen. */
++	if (text_hidden)
++		return;
++
++	/* Clips the span to the row and ignores an empty one. */
++	if (end_column > text_columns)
++		end_column = text_columns;
++	if (first_column >= end_column)
++		return;
++
++	/* Text memory takes the cell words as they stand. */
++	if (text_surface == TEXT_SURFACE_VGA_TEXT) {
++		for (column = first_column; column < end_column; column++) {
++			text_vram[row * text_columns + column] =
++			    text_cells[row * text_columns + column];
++		}
++		return;
++	}
++
++	/* Looks up the colours and the glyph of every cell of the span once. */
++	for (column = first_column; column < end_column; column++) {
++		cell = text_cells[row * text_columns + column];
++		attribute = (uint8_t)(cell >> 8);
++		text_span_foreground[column] = text_color(attribute & 15U);
++		text_span_background[column] = text_color((attribute >> 4) & 15U);
++
++		/* Falls back to a blank cell when the font has no such glyph (the font reports success as 1). */
++		found = drv_pcat_font_get_glyph((uint8_t)cell, glyph, &glyph_width,
++						&glyph_height);
++		if (!found) {
++			glyph_width = TEXT_GLYPH_WIDTH;
++			glyph_height = TEXT_GLYPH_HEIGHT;
++			for (line = 0; line < TEXT_GLYPH_HEIGHT; line++)
++				glyph[line] = 0;
++		}
++
++		/* Clamps a font whose cell exceeds this layer's fixed geometry. */
++		if (glyph_width > TEXT_GLYPH_WIDTH)
++			glyph_width = TEXT_GLYPH_WIDTH;
++		if (glyph_height > TEXT_GLYPH_HEIGHT)
++			glyph_height = TEXT_GLYPH_HEIGHT;
++
++		/* Keeps only the dots inside the glyph's own width and height. */
++		mask = (0xff00U >> glyph_width) & 0xffU;
++		for (line = 0; line < TEXT_GLYPH_HEIGHT; line++) {
++			bits = 0;
++
++			/* A line inside the glyph keeps its dots. */
++			if (line < glyph_height)
++				bits = (uint8_t)(glyph[line] & mask);
++			text_span_glyphs[column][line] = bits;
++		}
++	}
++
++	/* Paints the span one pixel row at a time, each row one consecutive run. */
++	for (line = 0; line < TEXT_GLYPH_HEIGHT; line++) {
++		out = text_pixels +
++		    (size_t)(text_origin_y + row * TEXT_GLYPH_HEIGHT + line) *
++		    text_stride + text_origin_x + first_column * TEXT_GLYPH_WIDTH;
++		for (column = first_column; column < end_column; column++) {
++			bits = text_span_glyphs[column][line];
++			foreground = text_span_foreground[column];
++			background = text_span_background[column];
++
++			/* Paints the eight dots of this cell's glyph row. */
++			for (dot = 0; dot < TEXT_GLYPH_WIDTH; dot++) {
++				pixel = background;
++
++				/* Selects the foreground for a set glyph dot. */
++				if ((bits & (0x80U >> dot)) != 0)
++					pixel = foreground;
++				*out = pixel;
++				out++;
++			}
++		}
++	}
++
++	/* Pushes the span out of the write-combining buffers to the screen. */
++	hal_wmb();
+ }
+ 
+ /*
+@@ -351,17 +485,22 @@ redraw_locked(
+ 	void)
+ {
+ 	unsigned row;
+-	unsigned column;
+ 
+-	/* Paints the complete grid. */
+-	for (row = 0; row < text_rows; row++) {
+-		for (column = 0; column < text_columns; column++)
+-			draw_cell_locked(row, column, 0);
+-	}
++	/* Paints the complete grid, one whole row at a time. */
++	for (row = 0; row < text_rows; row++)
++		draw_span_locked(row, 0, text_columns);
+ }
+ 
+ /*
+  * Moves every row up by one and clears the last row.
++ *
++ * Only the cells whose contents change are painted again (BUG-330): each row
++ * paints the span from its first to its last changed cell.  Repainting the
++ * whole grid wrote every pixel of the screen for each line, about 8 MB at
++ * 1920x1080, which an uncached framebuffer took a quarter of a second to
++ * absorb.  The screen shows the cell array here: a writer erases the cursor's
++ * inversion before a line feed, and a surface that was drawn over (a quiet
++ * console, a graphics owner) is repainted whole when it is shown again.
+  */
+ static void
+ scroll_locked(
+@@ -369,26 +508,40 @@ scroll_locked(
+ {
+ 	unsigned row;
+ 	unsigned column;
++	unsigned first_changed;
++	unsigned end_changed;
+ 	uint16_t blank;
++	uint16_t cell;
+ 
+ 	/* Keeps the attribute of the current cursor cell for the new row. */
+ 	blank = (uint16_t)((text_cells[text_cursor_row * text_columns] &
+ 	    0xff00U) | (uint16_t)' ');
+ 
+-	/* Shifts the stored rows up by one. */
+-	for (row = 1; row < text_rows; row++) {
++	/* Gives each row the row below it (the last one a blank row) and paints what changed. */
++	for (row = 0; row < text_rows; row++) {
++		first_changed = text_columns;
++		end_changed = 0;
+ 		for (column = 0; column < text_columns; column++) {
+-			text_cells[(row - 1U) * text_columns + column] =
+-			    text_cells[row * text_columns + column];
+-		}
+-	}
++			cell = blank;
+ 
+-	/* Empties the last row. */
+-	for (column = 0; column < text_columns; column++)
+-		text_cells[(text_rows - 1U) * text_columns + column] = blank;
++			/* Every row but the last takes the cell below it. */
++			if (row + 1U < text_rows)
++				cell = text_cells[(row + 1U) * text_columns + column];
+ 
+-	/* Repaints the whole grid after the shift. */
+-	redraw_locked();
++			/* An unchanged cell keeps its pixels. */
++			if (text_cells[row * text_columns + column] == cell)
++				continue;
++
++			/* Stores the cell and widens the row's changed span over it. */
++			text_cells[row * text_columns + column] = cell;
++			if (first_changed == text_columns)
++				first_changed = column;
++			end_changed = column + 1U;
++		}
++
++		/* Paints the changed span of this row. */
++		draw_span_locked(row, first_changed, end_changed);
++	}
+ }
+ 
+ /*
+diff --git a/src/hal/amd64/bsp-pcat/cons.c b/src/hal/amd64/bsp-pcat/cons.c
+index 6848bf9776..fced85147d 100644
+--- a/src/hal/amd64/bsp-pcat/cons.c
++++ b/src/hal/amd64/bsp-pcat/cons.c
+@@ -102,6 +102,8 @@ static struct console_output_token console_output_lock(void);
+ static void console_output_unlock(struct console_output_token token);
+ static uint32_t framebuffer_color_locked(unsigned color);
+ static void framebuffer_draw_cell_locked(unsigned row, unsigned column, uint16_t cell, int cursor);
++static void framebuffer_draw_span_locked(unsigned row, unsigned first_column, unsigned end_column);
++static int framebuffer_cell_fits_locked(unsigned row, unsigned column);
+ static void write_cell_locked(unsigned row, unsigned column, int character, uint8_t attribute);
+ static void update_cursor_locked(void);
+ static void clear_row_locked(unsigned row);
+@@ -751,25 +753,68 @@ framebuffer_draw_cell_locked(
+ 	uint8_t bits;
+ 	uint32_t foreground;
+ 	uint32_t background;
+-	uint64_t first_x;
+-	uint64_t first_y;
+-	uint64_t pixel_count;
+ 	unsigned glyph_row;
+ 	unsigned glyph_column;
++	int fits;
+ 
+ 	/* Decodes the character and attribute stored in the text cell. */
+ 	character = (uint8_t)cell;
+ 	attribute = (uint8_t)(cell >> 8);
+ 
++	/* Rejects a cell whose pixels leave the framebuffer, or no framebuffer. */
++	fits = framebuffer_cell_fits_locked(row, column);
++	if (!fits)
++		return;
++
++	/* Inverts the cell colors while drawing the cursor. */
++	if (cursor)
++		attribute = (uint8_t)((attribute << 4) | (attribute >> 4));
++
++	/* Resolves VGA attributes into framebuffer colors. */
++	foreground = framebuffer_color_locked(attribute & 15U);
++	background = framebuffer_color_locked((attribute >> 4) & 15U);
++
++	/* Renders every row of the selected glyph. */
++	for (glyph_row = 0;
++	     glyph_row < PCAT_VGAFONT_HEIGHT;
++	     glyph_row++) {
++		bits = drv_pcat_vgafont16[(unsigned)character *
++		    PCAT_VGAFONT_HEIGHT + glyph_row];
++		out = framebuffer_pixels +
++		    (framebuffer_y + row * PCAT_VGAFONT_HEIGHT + glyph_row) *
++		    framebuffer->stride + framebuffer_x + column * 8U;
++
++		/* Renders all eight pixels in this glyph row. */
++		for (glyph_column = 0; glyph_column < 8U; glyph_column++) {
++			out[glyph_column] =
++			    bits & (0x80U >> glyph_column) ?
++			    foreground : background;
++		}
++	}
++
++	/* Pushes the cell out of the write-combining buffers to the screen. */
++	hal_wmb();
++}
++
++/* Reports whether the pixels of one cell lie inside the firmware framebuffer. */
++static int
++framebuffer_cell_fits_locked(
++	unsigned row,
++	unsigned column)
++{
++	uint64_t first_x;
++	uint64_t first_y;
++	uint64_t pixel_count;
++
+ 	/* Rejects a cell outside the fixed console geometry. */
+ 	if (row >= PCAT_CONS_ROWS || column >= PCAT_CONS_COLUMNS)
+-		return;
++		return 0;
+ 
+ 	/* Rejects an unavailable framebuffer backend. */
+ 	if (framebuffer == NULL || framebuffer_pixels == NULL)
+-		return;
++		return 0;
+ 
+-	/* Computes the pixel extent occupied by the requested cell. */
++	/* Computes the pixel extent occupied by the cell. */
+ 	first_x = (uint64_t)framebuffer_x + (uint64_t)column * 8U;
+ 	first_y = (uint64_t)framebuffer_y +
+ 	    (uint64_t)row * PCAT_VGAFONT_HEIGHT;
+@@ -777,55 +822,99 @@ framebuffer_draw_cell_locked(
+ 
+ 	/* Rejects a framebuffer with no usable stride. */
+ 	if (framebuffer->stride == 0)
+-		return;
++		return 0;
+ 
+ 	/* Rejects a glyph wider than the visible framebuffer. */
+ 	if (first_x + 8U > framebuffer->width)
+-		return;
++		return 0;
+ 
+ 	/* Rejects a glyph wider than the framebuffer stride. */
+ 	if (first_x + 8U > framebuffer->stride)
+-		return;
++		return 0;
+ 
+ 	/* Rejects a glyph below the visible framebuffer. */
+ 	if (first_y + PCAT_VGAFONT_HEIGHT > framebuffer->height)
+-		return;
++		return 0;
+ 
+ 	/* Rejects a framebuffer whose declared storage is too small. */
+ 	if (pixel_count > framebuffer->size / sizeof(*framebuffer_pixels))
+-		return;
++		return 0;
+ 
+ 	/* Rejects a glyph whose last row exceeds the pixel extent. */
+ 	if ((first_y + PCAT_VGAFONT_HEIGHT - 1U) *
+ 	    framebuffer->stride + first_x + 8U > pixel_count) {
+-		return;
++		return 0;
+ 	}
+ 
+-	/* Inverts the cell colors while drawing the cursor. */
+-	if (cursor)
+-		attribute = (uint8_t)((attribute << 4) | (attribute >> 4));
++	/* The whole cell is inside the framebuffer. */
++	return 1;
++}
+ 
+-	/* Resolves VGA attributes into framebuffer colors. */
+-	foreground = framebuffer_color_locked(attribute & 15U);
+-	background = framebuffer_color_locked((attribute >> 4) & 15U);
++/*
++ * Draws the stored cells [first_column, end_column) of one row, without the cursor.
++ *
++ * The span is written one pixel row at a time from left to right, so the
++ * framebuffer receives consecutive runs, which a write-combining mapping
++ * merges into whole bursts, and nothing is read back from it (BUG-330).
++ */
++static void
++framebuffer_draw_span_locked(
++	unsigned row,
++	unsigned first_column,
++	unsigned end_column)
++{
++	volatile uint32_t *out;
++	unsigned glyph_row;
++	unsigned glyph_column;
++	unsigned column;
++	uint16_t cell;
++	uint8_t attribute;
++	uint8_t bits;
++	uint32_t foreground;
++	uint32_t background;
++	int fits;
+ 
+-	/* Renders every row of the selected glyph. */
++	/* Ignores an empty span. */
++	if (first_column >= end_column)
++		return;
++
++	/*
++	 * Rejects a span whose last cell leaves the framebuffer; the cells to
++	 * its left lie inside whenever the last one does.
++	 */
++	fits = framebuffer_cell_fits_locked(row, end_column - 1U);
++	if (!fits)
++		return;
++
++	/* Renders the span one pixel row at a time. */
+ 	for (glyph_row = 0;
+ 	     glyph_row < PCAT_VGAFONT_HEIGHT;
+ 	     glyph_row++) {
+-		bits = drv_pcat_vgafont16[(unsigned)character *
+-		    PCAT_VGAFONT_HEIGHT + glyph_row];
+ 		out = framebuffer_pixels +
+ 		    (framebuffer_y + row * PCAT_VGAFONT_HEIGHT + glyph_row) *
+-		    framebuffer->stride + framebuffer_x + column * 8U;
+-
+-		/* Renders all eight pixels in this glyph row. */
+-		for (glyph_column = 0; glyph_column < 8U; glyph_column++) {
+-			out[glyph_column] =
+-			    bits & (0x80U >> glyph_column) ?
+-			    foreground : background;
++		    framebuffer->stride + framebuffer_x + first_column * 8U;
++
++		/* Renders this pixel row of every cell of the span. */
++		for (column = first_column; column < end_column; column++) {
++			cell = framebuffer_cells[row * PCAT_CONS_COLUMNS + column];
++			attribute = (uint8_t)(cell >> 8);
++			foreground = framebuffer_color_locked(attribute & 15U);
++			background = framebuffer_color_locked((attribute >> 4) & 15U);
++			bits = drv_pcat_vgafont16[(unsigned)(uint8_t)cell *
++			    PCAT_VGAFONT_HEIGHT + glyph_row];
++
++			/* Renders the eight pixels of this cell's glyph row. */
++			for (glyph_column = 0; glyph_column < 8U; glyph_column++) {
++				out[glyph_column] =
++				    bits & (0x80U >> glyph_column) ?
++				    foreground : background;
++			}
++			out += 8;
+ 		}
+ 	}
++
++	/* Pushes the span out of the write-combining buffers to the screen. */
++	hal_wmb();
+ }
+ 
+ /* Writes one cell through the active console backend. */
+@@ -970,32 +1059,66 @@ scroll_locked(
+ {
+ 	unsigned row;
+ 	unsigned column;
++	unsigned first_changed;
++	unsigned end_changed;
++	uint16_t blank;
+ 	uint16_t cell;
+ 
+-	/* Scrolls and redraws the framebuffer shadow when active. */
++	/*
++	 * Scrolls the framebuffer cells and paints only the cells that change
++	 * (BUG-330): each row gets the row below it, the last one a blank row in
++	 * the current attribute, and the span from its first to its last changed
++	 * cell is painted.  Repainting every cell wrote the whole console area
++	 * for each line.  A cursor cell that is left as it was still shows the
++	 * inversion; the caller's cursor update repaints it.
++	 */
+ 	if (!console_suspended &&
+ 	    framebuffer != NULL &&
+ 	    framebuffer_pixels != NULL) {
+-		/* Copies every framebuffer row to its predecessor. */
+-		for (row = 1; row < PCAT_CONS_ROWS; row++) {
+-			/* Copies every cell in this framebuffer row. */
++		blank = (uint16_t)((uint8_t)' ' |
++		    ((uint16_t)current_attribute << 8));
++		for (row = 0; row < PCAT_CONS_ROWS; row++) {
++			first_changed = PCAT_CONS_COLUMNS;
++			end_changed = 0;
++
++			/* Stores the new cells of this row and finds the changed span. */
+ 			for (column = 0;
+ 			     column < PCAT_CONS_COLUMNS;
+ 			     column++) {
+-				cell = framebuffer_cells[
+-				    row * PCAT_CONS_COLUMNS + column];
++				cell = blank;
++
++				/* Every row but the last takes the cell below it. */
++				if (row + 1U < PCAT_CONS_ROWS) {
++					cell = framebuffer_cells[
++					    (row + 1U) * PCAT_CONS_COLUMNS + column];
++				}
++
++				/* An unchanged cell keeps its pixels. */
++				if (framebuffer_cells[
++				    row * PCAT_CONS_COLUMNS + column] == cell)
++					continue;
++
++				/* Stores the cell and widens the changed span over it. */
+ 				framebuffer_cells[
+-				    (row - 1U) * PCAT_CONS_COLUMNS + column] =
+-				    cell;
+-				framebuffer_draw_cell_locked(
+-					row - 1U,
+-					column,
+-					cell,
+-					0);
++				    row * PCAT_CONS_COLUMNS + column] = cell;
++				if (first_changed == PCAT_CONS_COLUMNS)
++					first_changed = column;
++				end_changed = column + 1U;
+ 			}
++
++			/* Paints the changed span of this row. */
++			framebuffer_draw_span_locked(
++				row,
++				first_changed,
++				end_changed);
+ 		}
+-	} else if (!console_suspended) {
+-		/* Copies every VGA row to its predecessor. */
++
++		/* The last row is already blank. */
++		return;
++	}
++
++	/* Copies every VGA row to its predecessor when text memory is the surface. */
++	if (!console_suspended) {
+ 		for (row = 1; row < PCAT_CONS_ROWS; row++) {
+ 			/* Copies every text cell in this VGA row. */
+ 			for (column = 0;
+diff --git a/src/hal/amd64/framebuffer-map.c b/src/hal/amd64/framebuffer-map.c
+index 1b276012d2..00ea030770 100644
+--- a/src/hal/amd64/framebuffer-map.c
++++ b/src/hal/amd64/framebuffer-map.c
+@@ -5,10 +5,21 @@
+ 
+ #define FB_PAGE UINT64_C(4096)
+ #define FB_LARGE UINT64_C(0x200000)
+-#define FB_FLAGS (UINT64_C(0x8000000000000113))
++/*
++ * The leaf flags: present, writable, global and not executable.  The memory
++ * type is write-combining, IA32_PAT index 4 (amd64_cpu_init() programs it
++ * before the tables are built): the PAT bit set and PCD and PWT clear.  The
++ * PAT bit is bit 7 in a 4 KiB leaf and bit 12 in a 2 MiB leaf, where bit 7
++ * marks the large page.  An uncached framebuffer took every pixel write as
++ * its own bus cycle, and a console scroll wrote megabytes (BUG-330).
++ */
++#define FB_FLAGS (UINT64_C(0x8000000000000103))
++#define FB_PAT_4K UINT64_C(0x80)
++#define FB_LARGE_PAGE UINT64_C(0x80)
++#define FB_PAT_LARGE UINT64_C(0x1000)
+ 
+ /*
+- * Builds uncached leaves without aliasing adjacent write-back RAM pages.
++ * Builds write-combining leaves without aliasing adjacent write-back RAM pages.
+  * The caller supplies unpublished directories and two owned edge tables.
+  */
+ int
+@@ -57,13 +68,13 @@ amd64_framebuffer_map(
+ 	for (index = 0; index < count; index++) {
+ 		chunk = aligned + (uint64_t)index * FB_LARGE;
+ 		if (chunk >= first && end - chunk >= FB_LARGE) {
+-			directory[index] = chunk | FB_FLAGS | UINT64_C(0x80);
++			directory[index] = chunk | FB_FLAGS | FB_LARGE_PAGE | FB_PAT_LARGE;
+ 			continue;
+ 		}
+ 		for (slot = 0; slot < 512; slot++) {
+ 			page = chunk + (uint64_t)slot * FB_PAGE;
+ 			if (page >= first && page < end)
+-				edges[edge][slot] = page | FB_FLAGS;
++				edges[edge][slot] = page | FB_FLAGS | FB_PAT_4K;
+ 		}
+ 		directory[index] = edge_physical[edge] | UINT64_C(3);
+ 		edge++;
