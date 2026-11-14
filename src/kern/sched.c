@@ -125,6 +125,11 @@ sched_wake_latency_report(void)
 #define SCHED_WAKE_PENDING 0x00000002U
 #define SCHED_ONLINE_TIMEOUT 10000000U
 
+#if CONFIG_DTB
+/* Where a thread's user streak stops growing instead of wrapping to zero. */
+#define SCHED_HINT_STREAK_MAX	0xffffffffU
+#endif
+
 /* What a CPU's tick is charged to (struct sched_cpu's times, hw.cputimes). */
 #define SCHED_TIME_USER		0U
 #define SCHED_TIME_SYSTEM	1U
@@ -309,6 +314,10 @@ static void perf_note_longest(struct sched_perf_longest *longest, uint64_t count
 static void perf_merge_longest(struct sched_perf_longest *total, const struct sched_perf_longest *longest);
 static void perf_report_if_due(void);
 static void perf_report(void);
+#if CONFIG_DTB
+static void hint_charge_tick_locked(struct thread *thread, uint64_t ticks, int kernel);
+static void hint_note_wakeup_locked(struct thread *thread);
+#endif
 
 /*
  * Marks the current user thread as executing in the kernel for accounting.
@@ -1081,6 +1090,12 @@ sched_clock_cpu(
 		    thread->proc != NULL &&
 		    thread->proc != &process0) {
 			kernel = thread->accounting_kernel_depth != 0;
+#if CONFIG_DTB
+
+			/* Counts the thread's own run time and user streak for the balancer. */
+			hint_charge_tick_locked(thread, elapsed, kernel);
+#endif
+
 			accounted_ticks = atomic_u64_fetch_add_relaxed(
 			    &thread->proc->cpu_ticks, elapsed) + elapsed;
 			if (kernel)
@@ -1783,8 +1798,14 @@ sched_set_cpu(
 		irq = spin_lock_irqsave(&old_cpu->lock);
 		pending = thread->sched.need_migrate & SCHED_WAKE_PENDING;
 		thread->sched.need_migrate = 0;
-		if (pending && thread->state == THREAD_SLEEPING)
+		if (pending && thread->state == THREAD_SLEEPING) {
 			old_kind = SCHED_QUEUE_RUN;
+#if CONFIG_DTB
+
+			/* Counts the wakeup the move carried for the balancer. */
+			hint_note_wakeup_locked(thread);
+#endif
+		}
 		if (old_kind == SCHED_QUEUE_RUN) {
 			thread->state = THREAD_RUNNABLE;
 			queue_append(&old_cpu->run[thread->sched.priority], thread,
@@ -1815,8 +1836,14 @@ sched_set_cpu(
 	thread->sched.last_cpu = old;
 	thread->sched.affinity = affinity;
 	thread->sched.need_migrate = 0;
-	if (pending && thread->state == THREAD_SLEEPING)
+	if (pending && thread->state == THREAD_SLEEPING) {
 		old_kind = SCHED_QUEUE_RUN;
+#if CONFIG_DTB
+
+		/* Counts the wakeup the move carried for the balancer. */
+		hint_note_wakeup_locked(thread);
+#endif
+	}
 	if (old_kind == SCHED_QUEUE_RUN) {
 		thread->state = THREAD_RUNNABLE;
 		queue_append(&new_cpu->run[thread->sched.priority], thread,
@@ -1987,6 +2014,60 @@ sched_test_cpu_online(
 }
 #endif
 
+#if CONFIG_DTB
+/*
+ * Reads a thread's counters and where it is.
+ */
+void
+sched_hint_activity(
+	const struct thread *thread,
+	struct sched_hint_activity *activity)
+{
+	const struct sched_hint_state *state;
+
+	/* Loads each counter; the writers never wait for a reader. */
+	state = &thread->sched.hint;
+	activity->run_ticks = atomic_u64_load_acquire(&state->run_ticks);
+	activity->user_streak = atomic_raw_load_relaxed(&state->user_streak);
+	activity->syscalls = atomic_raw_load_relaxed(&state->syscalls);
+	activity->wakeups = atomic_raw_load_relaxed(&state->wakeups);
+
+	/* Reads where the thread is and whether it was running then. */
+	activity->cpu = (kern_cpu_id_t)atomic_raw_load_acquire(
+	    (const volatile unsigned *)&thread->sched.cpu);
+	activity->running = 0;
+	if (thread->state == THREAD_RUNNING)
+		activity->running = 1;
+}
+
+/*
+ * Counts a system call of the current thread and ends its user streak.
+ */
+void
+sched_note_syscall(
+	void)
+{
+	struct thread *thread;
+
+	/* Only user threads are counted, as the tick counts only them. */
+	thread = curthread;
+	if (thread == NULL ||
+	    (thread->flags & THREAD_FLAG_IDLE) != 0 ||
+	    thread->proc == NULL ||
+	    thread->proc == &process0)
+		return;
+
+	/*
+	 * A system call is what tells a thread that computes without asking
+	 * the kernel for anything from one that keeps talking to it: the
+	 * streak starts again from zero, and the count lets the balancer
+	 * see calls made between two of its looks.
+	 */
+	atomic_raw_store_relaxed(&thread->sched.hint.user_streak, 0U);
+	(void)atomic_raw_fetch_add_relaxed(&thread->sched.hint.syscalls, 1U);
+}
+#endif
+
 /* Sends an interval timer signal to a process. */
 static void
 send_itimer_signal(
@@ -2115,6 +2196,12 @@ wake_enqueue_locked(
 
 	/* The latency diagnostic measures the wait from here to the thread's run. */
 	perf_mark_runnable_locked(cpu, thread, SCHED_PERF_WOKEN);
+
+#if CONFIG_DTB
+	/* Counts the wakeup for the balancer. */
+	hint_note_wakeup_locked(thread);
+
+#endif
 
 	/* Places the thread by its priority against the running one. */
 	running = cpu->current;
@@ -3149,3 +3236,54 @@ perf_report(
 	finished = sched_perf_counter();
 	atomic_u64_store_release(&sched_perf_report_cost, finished - started);
 }
+
+#if CONFIG_DTB
+/*
+ * Charges a tick's time to the running user thread's balancer counters;
+ * the CPU's lock is held and interrupts are masked.
+ */
+static void
+hint_charge_tick_locked(
+	struct thread *thread,
+	uint64_t ticks,
+	int kernel)
+{
+	unsigned streak;
+
+	/* Adds the time the thread ran, in the kernel or not. */
+	(void)atomic_u64_fetch_add_relaxed(&thread->sched.hint.run_ticks, ticks);
+
+	/* Time in the kernel is neither a streak in user mode nor its end. */
+	if (kernel)
+		return;
+
+	/*
+	 * Lengthens the streak since the thread's last system call, stopping
+	 * at the maximum so that a thread that never calls stays busy.  Only
+	 * this CPU writes it now: the thread's system call entry runs on the
+	 * CPU the thread runs on, with interrupts masked as here.
+	 */
+	streak = atomic_raw_load_relaxed(&thread->sched.hint.user_streak);
+	if (ticks >= (uint64_t)(SCHED_HINT_STREAK_MAX - streak)) {
+		streak = SCHED_HINT_STREAK_MAX;
+	} else {
+		streak += (unsigned)ticks;
+	}
+	atomic_raw_store_relaxed(&thread->sched.hint.user_streak, streak);
+}
+
+/*
+ * Counts a sleeping thread made runnable; the lock of the thread's CPU is
+ * held.
+ */
+static void
+hint_note_wakeup_locked(
+	struct thread *thread)
+{
+	/*
+	 * Whichever CPU holds the thread counts it under its lock, so two
+	 * wakeups of one thread are never counted at once.
+	 */
+	(void)atomic_raw_fetch_add_relaxed(&thread->sched.hint.wakeups, 1U);
+}
+#endif

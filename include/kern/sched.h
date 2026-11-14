@@ -13,6 +13,7 @@
 #define KERN_KERN_SCHED_H
 
 #include <kern/clock.h>
+#include <kern/sched-hint.h>
 #include <kern/types.h>
 #include <stdint.h>
 
@@ -104,6 +105,13 @@ struct sched {
 	unsigned need_migrate;
 	struct thread *next;
 	struct thread *prev;
+#if CONFIG_DTB
+	/*
+	 * The balancer's hint for the thread and the counters it decides
+	 * from (struct sched_hint_state says who writes what).
+	 */
+	struct sched_hint_state hint;
+#endif
 };
 
 #if SCHED_WAKE_LATENCY

@@ -10446,6 +10446,7 @@ kernel_syscall_handler(
 	if (hal_irq_disable())
 		HAL_FATAL("syscall callback entered with IRQs enabled");
 	sched_accounting_kernel_enter();
+	sched_note_syscall();
 	hal_irq_enable();
 
 	/* Takes a private copy of the arguments a restart may reuse. */

@@ -3,7 +3,7 @@
 # WS302 デスクトップスレッドバランサ（DTB）
 
 - Master: [plan/master.md](../master.md)（2026-10-27 作成、q1615 P1 の計画）。Primary Milestone: MG006（グラフィカルな操作環境の応答）。Related: MG004、[WS333](../ws333/ws.md)（core の種類・相対の性能・topology の口、WS301 を統合。2026-10-31 に口は main に入った）。旧 [WS301](../ws301/ws.md) は WS333 に統合された。
-- Status: planning（2026-10-27 新設。2026-10-31 P5 q1775-i01: p001 の設計 [design.md](design.md) 第 1 版と問い [user-questions.md](user-questions.md)、ユーザーの答え待ち）
+- Status: incomplete（2026-10-27 新設。2026-11-14 問いが全部推しで決まり、P6 q2093-i01 が設計を第 3 版に改訂し p002 を実装）
 - 出典: 2026-10-27 ユーザー
   「デスクトップスレッドバランサの追加（WSを立てて検討）
   - コンフィグで有効にできるデスクトップスレッドバランサ(DTB)をカーネルに追加
@@ -80,8 +80,8 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 | Phase | 内容 | 状態 | 依存 | LW |
 | --- | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 検討と設計: 情報 → 性質 → hint の表、規則の強さの順、sched の口、統計の場所と負担、config、試験と受け入れ、design-reviewer、ユーザーの問い | in-progress（第 2 版で review（blocker 2・major 11・minor 13）を反映済み、ユーザーの答え待ち） | — | — |
-| p002 | config（`CONFIG_DTB`）、`dtb.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、gpu.c・input.c の通知）、`base_priority` の初め | planned | p001、Q302-5 | 3 |
+| [p001](phase001/phase.md) | 検討と設計: 情報 → 性質 → hint の表、規則の強さの順、sched の口、統計の場所と負担、config、試験と受け入れ、design-reviewer、ユーザーの問い | in-progress（2026-11-14 P6: 第 3 版で今の code（fd18bd61ee）と照合し決定を書き入れ、design-reviewer の 2 回目を反映。cleared は Q1 の判定） | — | — |
+| [p002](phase002/phase.md) | config（`CONFIG_DTB`、mk は案）、`dtb.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、gpu.c・input.c の通知）、`base_priority` の初め | in-progress（P6 q2093-i01） | p001、Q302-5 | 3 |
 | p003 | sched の口: base の priority と `sched_hint_set`、kernel の中の優先、CPU の種類の表、行き先の選び、置き場所・盗み・tick の助け、`sched_hint_place`、`sched_set_cpu` の確かめ直し、走っている thread の手渡し、飢えの防ぎ、計数、`CONFIG_DTB_TEST` の偽の種類と stress（QEMU 30 分） | planned | p002、Q302-2・3 | 7 |
 | p004 | DTB の本体（dtb.c・dtb-policy.c、分類・履歴・nice の段・HID の状態・周期・予算、`dtb=off`、`kern.dtb`） | planned | p003、Q302-1・6 | 6 |
 | p005 | （条件つき）compositor からの前面の app の hint（Q302-4 で作る時か、p006 の数で要る時だけ） | — | p004、UAPI の決定 | 3 |

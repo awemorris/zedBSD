@@ -13,6 +13,7 @@
 #include "kern/input-device.h"
 #include "kern/cdev.h"
 #include "kern/clock.h"
+#include <kern/dtb.h>
 #include "kern/file.h"
 #include "kern/input-capability.h"
 #include "kern/input-keymap.h"
@@ -948,9 +949,11 @@ drv_input_device_emit_at(
 
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 
-	/* Handles the published condition. */
-	if (published)
+	/* Wakes the device's pollers, and tells the balancer a person used a device. */
+	if (published) {
 		poll_notify_object(device);
+		kern_dtb_note_input();
+	}
 }
 
 /*
@@ -1083,9 +1086,11 @@ drv_input_device_emit_key_event(
 
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 
-	/* Handles the published condition. */
-	if (published)
+	/* Wakes the device's pollers, and tells the balancer a person used a device. */
+	if (published) {
 		poll_notify_object(device);
+		kern_dtb_note_input();
+	}
 }
 
 /*

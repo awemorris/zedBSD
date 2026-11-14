@@ -103,6 +103,11 @@ thread_create(
 	waitq_init(&thread->join_waitq, "thread join");
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
+#if CONFIG_DTB
+
+	/* Hints bring the thread back to the level it was made with until one sets another. */
+	thread->sched.hint.base_priority = (uint8_t)thread->sched.priority;
+#endif
 
 	/* Creates the HAL task in the process address space. */
 	thread->task = hal_task_create(process->vmspace->space,
@@ -190,6 +195,11 @@ thread_fork(
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	hal_task_set_private(task, thread);
+#if CONFIG_DTB
+
+	/* Hints bring the thread back to the level it was made with until one sets another. */
+	thread->sched.hint.base_priority = (uint8_t)thread->sched.priority;
+#endif
 
 	/* Prepares the scheduler state and joins the process. */
 	error = prepare_created_thread(thread);
@@ -257,6 +267,11 @@ kthread_create(
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	thread->kernel_entry = entry;
 	thread->kernel_arg = arg;
+#if CONFIG_DTB
+
+	/* Hints bring the thread back to the level it was made with until one sets another. */
+	thread->sched.hint.base_priority = (uint8_t)thread->sched.priority;
+#endif
 
 	/* Creates the HAL task in the kernel address space. */
 	thread->task = hal_task_create(HAL_SPACE_SYS, kernel_thread_trampoline,
@@ -412,6 +427,11 @@ thread_init_secondary(
 	thread->sched.cpu = cpu;
 	thread->sched.last_cpu = cpu;
 	hal_task_set_private(task, thread);
+#if CONFIG_DTB
+
+	/* Hints bring the thread back to the level it was made with until one sets another. */
+	thread->sched.hint.base_priority = (uint8_t)thread->sched.priority;
+#endif
 }
 
 /*
