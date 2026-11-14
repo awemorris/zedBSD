@@ -33,7 +33,12 @@
 /* How many images and acquisitions the plane's swapchain uses at most. */
 #define KWL_CURSOR_THREAD_IMAGES	4U
 
-/* How long the cursor thread waits for one of its copies, in nanoseconds (100 ms, as the main thread did). */
+/*
+ * How long the cursor thread waits for one of its copies when it stops, in
+ * nanoseconds (100 ms): a copy that does not finish by then keeps the
+ * plane's objects alive (stop_failed).  While it presents, the thread waits
+ * for each copy until it is done.
+ */
 #define KWL_CURSOR_FENCE_WAIT_NS	100000000ULL
 
 /* What one step of the cursor thread did. */
@@ -51,21 +56,38 @@ enum kwl_cursor_step {
 };
 
 /*
+ * What the cursor thread did, counted by the thread alone and read after it
+ * ended (it prints them as its last line): presents and copies, its waits
+ * for a copy's fence (each until the copy is done), its acquires that found
+ * an image at once and those that waited for one, and its waits for the
+ * box: until the next change (sleeps) or until a held move is due (holds,
+ * the only waits with a deadline).
+ */
+struct kwl_cursor_counts {
+	uint64_t presents;
+	uint64_t copies;
+	uint64_t copy_waits;
+	uint64_t acquires_now;
+	uint64_t acquires_waiting;
+	uint64_t sleeps;
+	uint64_t holds;
+};
+
+/*
  * The cursor thread and the plane's presentation it owns.
  *
  * The device and queue are the compositor's (the queue is shared with the
  * frames: each submit and present is made under the compose's queue lock,
  * queue_lock, as Vulkan's external synchronization wants); every other
  * object is the thread's.  held says which cursor image (its address, generation and
- * version) each swapchain image holds; pinned which of the box's two copies
- * the image's last copy read (-1 none), released once its fence is seen
- * done.  source, generation, version, x and y are what was presented last,
- * presented_us when that present started.  hold_us is how long a move of
- * the same image waits after a present (a refresh less the slack of the
- * clock).  sequence is the box's change count the last step saw.  log
- * prints a line for each present (the compositor's frame log).  failed and
- * stop_failed say the thread failed, or its last copies did not finish in
- * time when it stopped; wake_main is the main thread's wake pipe.
+ * version) each swapchain image holds.  source, generation, version, x and
+ * y are what was presented last, presented_us when that present started.
+ * hold_us is how long a move of the same image waits after a present (a
+ * refresh less the slack of the clock).  sequence is the box's change count
+ * the last step saw.  log prints a line for each present (the compositor's
+ * frame log).  failed and stop_failed say the thread failed, or its last
+ * copies did not finish in time when it stopped; wake_main is the main
+ * thread's wake pipe; counts are the thread's own.
  */
 struct kwl_cursor_thread {
 	struct kwl_cursor_box *box;
@@ -84,7 +106,6 @@ struct kwl_cursor_thread {
 	const struct kwl_import *held[KWL_CURSOR_THREAD_IMAGES];
 	uint64_t held_generation[KWL_CURSOR_THREAD_IMAGES];
 	uint32_t held_version[KWL_CURSOR_THREAD_IMAGES];
-	int pinned[KWL_CURSOR_THREAD_IMAGES];
 	const struct kwl_import *copies[KWL_CURSOR_COPIES];
 	unsigned presented;
 	uint64_t presented_us;
@@ -99,6 +120,7 @@ struct kwl_cursor_thread {
 	unsigned failed;
 	unsigned stop_failed;
 	int wake_main;
+	struct kwl_cursor_counts counts;
 	pthread_t thread;
 	unsigned started;
 };

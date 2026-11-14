@@ -38,7 +38,7 @@ struct kwl_import;
 /*
  * The cursor thread's counts of the KWL PERF lines (ws213-p001 M0, p004):
  * presents, moves held for the next refresh, images copied, a present's
- * parts in cycles (the copies' fences asked, the acquire, the copy's
+ * parts in cycles (the waits for the copies' fences, the acquire, the copy's
  * recording and submission, the present itself and its longest), the
  * longest present from its start to its end and the longest time between
  * two presents while the pointer moved, in microseconds.  The cursor thread
