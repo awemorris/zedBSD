@@ -3383,7 +3383,7 @@ kwl_glass_key(
 }
 
 /*
- * Arms the lock after a time without input (ws035-p102) for the end of
+ * Arms the lock after a time without input for the end of
  * the time from the last input, while a session a session manager started
  * is unlocked and the time is set; otherwise nothing waits for it.  Called
  * when the session starts, when it is unlocked, and when the time is set.
@@ -3427,6 +3427,7 @@ kwl_glass_tick(
 	uint64_t elapsed;
 	float progress;
 	time_t now;
+	int shown;
 
 	/* The login screen has only its clock (greeter.c) and the session manager's answers (handoff.c). */
 	if (server->greeter) {
@@ -3532,8 +3533,11 @@ kwl_glass_tick(
 		}
 	}
 
+	/* Asks whether the screen shows the clock. */
+	shown = kwl_clock_shown(server);
+
 	/* The minute of the clock: its timer wakes the pass at the next while the screen shows it. */
-	kwl_clock_follow(server, kwl_clock_shown(server));
+	kwl_clock_follow(server, shown);
 	now = time(NULL);
 	if ((int64_t)now / 60 == server->clock_minute)
 		return;
@@ -8205,7 +8209,7 @@ band_motion(
 
 /*
  * Follows a press held in the top edge's band without a motion
- * (ws177-p033), when its timer fires: resting KWL_EDGE_BAND_HOLD_MS where
+ * when its timer fires: resting KWL_EDGE_BAND_HOLD_MS where
  * it touched, it is a long press of what is under it, given again there
  * as a press that is still down (the bar's applications show their
  * previews); over a fullscreen window its client has the finger from

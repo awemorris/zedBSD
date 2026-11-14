@@ -911,5 +911,7 @@ timers_tell(
 		timers->told_kinds++;
 		return;
 	}
+
+	/* The names beyond the room are counted together. */
 	timers->told_other++;
 }

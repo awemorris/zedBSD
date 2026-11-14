@@ -123,6 +123,8 @@ kern_system_event_post(
 		poll_notify();
 		return;
 	}
+
+	/* The polls following each told subscriber look again. */
 	for (index = 0; index < delivered; index++)
 		poll_notify_object(told[index]);
 }

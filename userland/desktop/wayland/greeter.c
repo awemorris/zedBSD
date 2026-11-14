@@ -1009,6 +1009,7 @@ kwl_greeter_tick(
 {
 	uint64_t now_ms;
 	int64_t minute;
+	int shown;
 
 	/* The clock shows a new minute (its timer wakes the pass at the next while the screen shows it). */
 	minute = (int64_t)(time(NULL) / 60);
@@ -1016,7 +1017,12 @@ kwl_greeter_tick(
 		server->clock_minute = minute;
 		server->dirty = 1;
 	}
-	kwl_clock_follow(server, kwl_clock_shown(server));
+
+	/* Asks whether the screen shows the clock. */
+	shown = kwl_clock_shown(server);
+
+	/* The clock's timer follows whether the screen shows the clock. */
+	kwl_clock_follow(server, shown);
 
 	/*
 	 * The styles of the selected user, asked once no other answer is

@@ -271,6 +271,8 @@ kwl_render_step(
 			step = render_reap_oldest(render);
 			return step;
 		}
+
+		/* A stop with nothing in flight ends the thread. */
 		if (stop)
 			return KWL_RENDER_STEP_STOP;
 		step = render_parked(render);
@@ -1304,6 +1306,8 @@ render_tasks_reap(
 		task->result = result;
 		render->counts.task_waits++;
 	}
+
+	/* The task is counted once it is done. */
 	render->counts.tasks++;
 
 	/* Out of the flights. */
@@ -1452,10 +1456,14 @@ render_parked(
 		pthread_mutex_unlock(&render->lock);
 		return KWL_RENDER_STEP_WORKED;
 	}
+
+	/* The main thread waiting for the park is told it is in force. */
 	if (!render->parked) {
 		render->parked = 1U;
 		pthread_cond_broadcast(&render->answered);
 	}
+
+	/* Takes the park's message, which is told after the lock. */
 	notice = render->park_message;
 	render->park_message = NULL;
 

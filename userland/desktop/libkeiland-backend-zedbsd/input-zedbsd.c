@@ -663,6 +663,7 @@ seat_open(
 	if (!backend->seat_gone)
 		error = seat_ask(backend, socket, request, descriptor);
 
+	/* Lets the next request use the seat's socket. */
 	if (backend->seat_lock_ready)
 		pthread_mutex_unlock(&backend->seat_lock);
 

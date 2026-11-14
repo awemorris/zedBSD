@@ -2753,6 +2753,7 @@ gpu_poll(
 	if ((events & (POLLIN | POLLRDNORM)) != 0)
 		session->poll_scanned = 1U;
 
+	/* A device that is offline reports the error and the hang-up. */
 	if (session->device->online == 0U)
 		*revents |= POLLERR | POLLHUP;
 
@@ -3018,6 +3019,7 @@ gpu_display_fence_ioctl(
 			return error;
 		}
 
+		/* The refresh watcher now serves this registration. */
 		watched = 1U;
 	}
 
@@ -3172,6 +3174,7 @@ gpu_display_fence_cancel_ioctl(
 			display_id = slot->display_id;
 		}
 
+		/* Frees the slot for another registration. */
 		slot->handle = NULL;
 		slot->sequence = 0U;
 		slot->event = 0U;
@@ -3475,6 +3478,7 @@ gpu_refresh_watcher_stop(
 	struct thread *watcher;
 	uint64_t deadline;
 	uint64_t now;
+	uint64_t pause_ticks;
 	unsigned long irq;
 	int error;
 
@@ -3517,7 +3521,8 @@ gpu_refresh_watcher_stop(
 		}
 
 		/* Lets the woken watcher leave its wait. */
-		sched_sleep(now + kern_ms_to_ticks(GPU_WORKER_EXIT_POLL_MS));
+		pause_ticks = kern_ms_to_ticks(GPU_WORKER_EXIT_POLL_MS);
+		sched_sleep(now + pause_ticks);
 	}
 
 	/* Successful reap consumes the creator's retained thread reference. */

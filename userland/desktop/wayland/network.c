@@ -1837,7 +1837,7 @@ network_strength(
 
 /*
  * Lets the switch show the state again once it agrees with what was asked,
- * or a while after the answer (BUG-183; expired says that while has passed,
+ * or a while after the answer (expired says that while has passed,
  * from the switch's timer).
  */
 static void

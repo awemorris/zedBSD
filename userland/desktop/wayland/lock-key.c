@@ -135,8 +135,17 @@ uint64_t
 kwl_key_owner_next(
 	const struct kwl_key_mode *mode)
 {
-	/* Not wanted, under way, or after an attempt's answer. */
-	if (!mode->owner_wanted || mode->owner_asked || kwl_key_attempting(mode))
+	int attempting;
+
+	/* Not wanted, or after an attempt's answer. */
+	if (!mode->owner_wanted || mode->owner_asked)
+		return UINT64_MAX;
+
+	/* Asks whether an attempt is under way. */
+	attempting = kwl_key_attempting(mode);
+
+	/* Under way: its answer asks again. */
+	if (attempting)
 		return UINT64_MAX;
 
 	/* A second after the last one. */

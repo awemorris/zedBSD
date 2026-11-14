@@ -220,6 +220,8 @@ kwl_clipboard_poll(
 		if (clipboard_writes[index].fd >= 0)
 			clipboard_write_step(&clipboard_writes[index]);
 	}
+
+	/* The read goes on with what came. */
 	clipboard_read_step();
 
 	/* What is still under way wakes the loop with its pipe (its time is the timer's). */

@@ -855,6 +855,7 @@ drv_input_device_unregister(
 
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 
+	/* The polls following the device look again. */
 	poll_notify_object(device);
 
 	/* The desktop hears the device go. */

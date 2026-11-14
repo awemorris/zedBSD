@@ -2617,9 +2617,13 @@ unix_poll_follow_peer(
 {
 	struct socket *peer;
 	unsigned long irq;
+	int error;
 
-	/* The connection's other end. */
-	if (unix_peer_ref(endpoint, &peer) == 0) {
+	/* Takes the connection's other end, when there is one. */
+	error = unix_peer_ref(endpoint, &peer);
+
+	/* Follows the connection's other end. */
+	if (error == 0) {
 		poll_wait_object(peer);
 		socket_release(peer);
 	}
@@ -2631,6 +2635,7 @@ unix_poll_follow_peer(
 
 	spin_unlock_irqrestore(&socket->lock, irq);
 
+	/* Follows the datagram peer, when there is one. */
 	if (peer != NULL)
 		poll_wait_object(peer);
 }

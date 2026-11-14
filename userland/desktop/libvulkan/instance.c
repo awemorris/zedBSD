@@ -701,6 +701,8 @@ instance_extensions(
 			bits |= VULKAN_INSTANCE_SURFACE_CAPABILITIES2;
 			continue;
 		}
+
+		/* The surface maintenance records of the swapchains. */
 		match = strcmp(info->ppEnabledExtensionNames[index], VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
 		if (match == 0) {
 			bits |= VULKAN_INSTANCE_SURFACE_MAINTENANCE1;

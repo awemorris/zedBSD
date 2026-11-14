@@ -684,6 +684,7 @@ bt_step(
 	struct bt_follow *bluetooth;
 	unsigned *changed;
 	uint64_t now;
+	int may_start;
 	int error;
 
 	/* The thread's own part of the record. */
@@ -709,8 +710,11 @@ bt_step(
 			bluetooth->agent_due_ms = now + BT_AGENT_AGAIN_MS;
 	}
 
+	/* Asks whether a scan is wanted and nothing stops it. */
+	may_start = bt_scan_may_start(bluetooth);
+
 	/* A scan, while one is wanted and nothing stops it (Bluetooth off, a pairing, a request going on). */
-	if (bt_scan_may_start(bluetooth) && now >= bluetooth->scan_due_ms) {
+	if (may_start && now >= bluetooth->scan_due_ms) {
 		error = bt_connect(&bluetooth->scan, "SCAN 6\n");
 		if (error != 0)
 			bluetooth->scan_due_ms = now + BT_SCAN_FAILED_MS;
@@ -747,6 +751,7 @@ bt_poll_fill(
 	uint64_t now;
 	size_t count;
 	size_t index;
+	int may_start;
 
 	/* The thread's own part of the record. */
 	record = owner;
@@ -759,7 +764,10 @@ bt_poll_fill(
 		due = bluetooth->due_ms;
 	if (bluetooth->agent.socket < 0 && bluetooth->state.reachable && bluetooth->agent_due_ms < due)
 		due = bluetooth->agent_due_ms;
-	if (bt_scan_may_start(bluetooth) && bluetooth->scan_due_ms < due)
+
+	/* Asks whether a scan is wanted and nothing stops it. */
+	may_start = bt_scan_may_start(bluetooth);
+	if (may_start && bluetooth->scan_due_ms < due)
 		due = bluetooth->scan_due_ms;
 
 	/* Lowers the wait to what is due (a scan held back by something else waits for what lets it go, which comes on a connection or as an operation). */

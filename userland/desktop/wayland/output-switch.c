@@ -10,7 +10,7 @@
  * (ws113-p004a; the design is plan/ws113/phase004/phase.md, "p004a").
  *
  * The compositor shows one display at a time.  It follows the displays
- * through the hotplug fence of VK_EXT_display_control (ws113-p003), which
+ * through the hotplug fence of VK_EXT_display_control, which
  * a thread of its own (the hotplug thread) waits for with no time limit:
  * when the fence signals, the thread registers a new fence first, lets the
  * old one go, and tells the main thread, which enumerates the displays
@@ -21,7 +21,7 @@
  * or while the list is being read is held until that ends.
  *
  * The output moves when it is asked to (kwl_output_use_external and
- * kwl_output_use_internal, for the lid's choice of ws052-p012), and by
+ * kwl_output_use_internal, for the lid's choice), and by
  * itself when the display it shows is gone: to the machine's own display
  * first, else to any other.  A move
  * closes the swapchain and gives the display back, opens a swapchain on

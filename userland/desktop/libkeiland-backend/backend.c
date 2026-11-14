@@ -214,11 +214,16 @@ kl_backend_wait(
 	const struct kl_backend *backend,
 	uint64_t *due_ms)
 {
+	int descriptor;
+
 	/* A compositor whose backend did not open waits for nothing here. */
 	*due_ms = UINT64_MAX;
 	if (backend == NULL)
 		return -1;
 
-	/* The session manager's. */
-	return kl_backend_session_wait(backend, due_ms);
+	/* Asks the session manager's descriptor and deadline. */
+	descriptor = kl_backend_session_wait(backend, due_ms);
+
+	/* The session manager's descriptor, or -1 when it has none. */
+	return descriptor;
 }

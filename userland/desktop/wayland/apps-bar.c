@@ -705,6 +705,8 @@ kwl_apps_bar_tick(
 		kwl_apps_bar_show(server, &view, state->key, KWL_APPS_VIA_HOVER);
 		return;
 	}
+
+	/* A rest not yet long enough waits for its time. */
 	if (state->state == KWL_APPS_ARMED)
 		apps_bar_wait(server, state->since_ms + HOVER_MS);
 
