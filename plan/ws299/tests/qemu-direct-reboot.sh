@@ -8,7 +8,7 @@
 # VMUNIX), QMP "info registers" for every CPU to W/hang-N-qmp.txt, and the run stops with QEMU left running for a
 # debugger (its pid in W/qemu.pid).
 #   sh plan/ws299/tests/qemu-direct-reboot.sh IMAGE VMUNIX [ROUNDS]
-# IMAGE: plan/tools/posix/config-amd64-serial.mk with ZEDBSD_EXTRA_FILES putting directio and randread in /root.
+# IMAGE: the serial image of qemu-suite.sh (config-qemu-serial.mk with /root/directio and /root/randread).
 # W is ${WS299_RUNS:-build/tmp}/qemu-direct-reboot.  The last line is "qemu-direct-reboot: PASS N rounds|HANG round N|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -28,7 +28,7 @@ cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
 round=1
 while [ "$round" -le "$ROUNDS" ]; do
 	rm_sock=$W/serial-$round.sock
-	qemu-system-x86_64 -name p1-direct-reboot -machine q35 -m 4G -smp 8 $(qemu_accel_args max) \
+	qemu-system-x86_64 -name "${WS299_NAME:-ws299}-direct-reboot" -machine q35 -m 4G -smp 8 $(qemu_accel_args max) \
 	  -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
 	  -drive "if=pflash,format=raw,file=$W/vars.fd" \
 	  -drive "if=none,id=boot,file=$IMAGE,format=raw,snapshot=on" \

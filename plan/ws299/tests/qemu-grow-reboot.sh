@@ -17,11 +17,12 @@ GDB_PORT=${GDB_PORT:-12990}
 mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-grow-reboot
 W=${WS299_RUNS:-build/tmp}/qemu-grow-reboot
 mkdir -p "$W/tree/etc"
-[ -x build/zedimage-host ] || make build/zedimage-host > /dev/null
-build/zedimage-host ufs 1024M "$W/tree" "$W/vol.ufs" --inodes=65536
+# The image build's own UFS producer (mk/platform-x86_64/image.mk builds it the same way).
+cc -std=c11 -O2 -Wall -Wextra -Werror mk/old-tools/build/zedimage-host.c -o "$W/zedimage-host"
+"$W/zedimage-host" ufs 1024M "$W/tree" "$W/vol.ufs" --inodes=65536
 python3 -I plan/tools/hw5330/ufs-grow.py --size $((15104 << 20)) "$W/vol.ufs" || { echo "qemu-grow-reboot: FAIL grow"; exit 1; }
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
-qemu-system-x86_64 -machine q35 -m 8G -smp 4 $(qemu_accel_args max) \
+qemu-system-x86_64 -name "${WS299_NAME:-ws299}-grow-reboot" -machine q35 -m 8G -smp 4 $(qemu_accel_args max) \
   -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
   -drive "if=pflash,format=raw,file=$W/vars.fd" \
   -drive "if=none,id=boot,file=$IMAGE,format=raw,snapshot=on" \

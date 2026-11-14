@@ -1,6 +1,7 @@
 #!/bin/sh
 # ws299: host test of plan/tools/hw5330/ufs-grow.py.  Makes small UFS volumes with the image build's own producer
-# (build/zedimage-host), grows each in a file, and checks the grown volume with tools/build/check-ufs-image.py (the
+# (mk/old-tools/build/zedimage-host.c), grows each in a file, and checks the grown volume with
+# mk/old-tools/build/check-ufs-image.py (the
 # validator fsck-like checks of plan/tools/ufs/check-volume.py: block ownership, bitmaps, summaries, files): the
 # 1 GiB root's shape (65536 inodes, 256 groups of 4 MiB), a volume whose last group is partial, and a second run
 # that has nothing to do.  The files written before the growth read back the same.  Prints PASS last.
@@ -8,11 +9,14 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
 . plan/tools/fresh-out.sh
-# ZEDIMAGE_HOST: another copy of the producer (default the build's own, made when missing).
-ZEDIMAGE_HOST=${ZEDIMAGE_HOST:-build/zedimage-host}
-[ -x "$ZEDIMAGE_HOST" ] || make build/zedimage-host > /dev/null
 fresh_out build/tmp/ufs-grow
 W=build/tmp/ufs-grow
+# ZEDIMAGE_HOST: another copy of the producer (default one built here from the image build's source, as
+# mk/platform-x86_64/image.mk builds it).
+if [ -z "${ZEDIMAGE_HOST:-}" ]; then
+	ZEDIMAGE_HOST=$W/zedimage-host
+	cc -std=c11 -O2 -Wall -Wextra -Werror mk/old-tools/build/zedimage-host.c -o "$ZEDIMAGE_HOST"
+fi
 mkdir -p "$W/tree/etc" "$W/tree/bin"
 head -c 300000 /dev/urandom > "$W/tree/bin/blob"
 echo hello > "$W/tree/etc/motd"
@@ -20,7 +24,7 @@ echo hello > "$W/tree/etc/motd"
 check() {
 	python3 -I - "$1" "$W/tree" << 'EOF'
 import importlib.util, pathlib, sys
-spec = importlib.util.spec_from_file_location('c', 'tools/build/check-ufs-image.py')
+spec = importlib.util.spec_from_file_location('c', 'mk/old-tools/build/check-ufs-image.py')
 c = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)
 fs = c.UFS(pathlib.Path(sys.argv[1]).read_bytes(), runtime=True)

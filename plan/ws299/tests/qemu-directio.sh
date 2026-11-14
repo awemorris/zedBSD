@@ -4,8 +4,7 @@
 # runs "directio check" (plan/ws299/tests/directio.c, put in the image as /root/directio) on each, then a direct
 # write of 256 MiB of the NVMe disk and direct reads of it in 4 MiB and 1 MiB requests, and prints the I/O counts.
 #   sh plan/ws299/tests/qemu-directio.sh IMAGE
-# IMAGE: plan/tools/posix/config-amd64-serial.mk with ZEDBSD_EXTRA_FILES='--file /root/directio=OUT/directio-zedbsd'
-# (OUT from build-randread.sh).  W is ${WS299_RUNS:-build/tmp}/qemu-directio (a fresh run each time).  The last line is
+# IMAGE: the serial image of qemu-suite.sh (config-qemu-serial.mk with /root/directio from build-randread.sh).  W is ${WS299_RUNS:-build/tmp}/qemu-directio (a fresh run each time).  The last line is
 # "qemu-directio: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -17,7 +16,7 @@ W=${WS299_RUNS:-build/tmp}/qemu-directio
 truncate -s 1G "$W/nvme.img"
 truncate -s 256M "$W/ahci.img"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
-timeout 1800 qemu-system-x86_64 -machine q35 -m 4G -smp 4 $(qemu_accel_args max) \
+timeout 1800 qemu-system-x86_64 -name "${WS299_NAME:-ws299}-directio" -machine q35 -m 4G -smp 4 $(qemu_accel_args max) \
   -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
   -drive "if=pflash,format=raw,file=$W/vars.fd" \
   -drive "if=none,id=boot,file=$IMAGE,format=raw,snapshot=on" \

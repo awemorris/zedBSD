@@ -20,7 +20,7 @@ mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-r
 W=${WS299_RUNS:-build/tmp}/qemu-raw-curve
 truncate -s 6G "$W/d.img"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
-timeout 1800 qemu-system-x86_64 -name p1-raw-curve -machine q35 -m 8G -smp 4 $(qemu_accel_args max) \
+timeout 1800 qemu-system-x86_64 -name "${WS299_NAME:-ws299}-raw-curve" -machine q35 -m 8G -smp 4 $(qemu_accel_args max) \
   -drive "if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd" \
   -drive "if=pflash,format=raw,file=$W/vars.fd" \
   -drive "if=none,id=boot,file=$IMAGE,format=raw,snapshot=on" \
