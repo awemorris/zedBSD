@@ -3,7 +3,7 @@
 # ws343-p003 fetch の https（libssl-compat・libcrypto-compat）と、mk の差分の案（libcurl.so の link、fetch の link）
 
 - 親: [ws.md](../ws.md)。Queue: q2096-i01（P8、worktree `/home/awe/zedBSD-worktrees/p8-ws343`、branch `agent/p8-ws343`、基点 main c231c505e8）。
-- Status: in-progress（2026-11-14 P8。実装・host 試験・3 arch の build・QEMU は済み。mk の差分はユーザーの承認待ちの案。P8 の推し: 案の適用と同時の merge の後に cleared）
+- Status: cleared（2026-11-14 Q1、merge fdc6f069e1）
 
 ## 目的と範囲
 

@@ -3,7 +3,7 @@
 # ws343-p001 調べ: 今の build の既定の package、OpenSSL・OpenSSH・curl を使う物、base に入れる名前、残りの仕事
 
 - 親: [ws.md](../ws.md)。Queue: q2096-i01（P8、worktree `/home/awe/zedBSD-worktrees/p8-ws343`、branch `agent/p8-ws343`、基点 main c231c505e8）。
-- Status: in-progress（2026-11-14 23:20 P8。調べは済み。P8 の推し: cleared）
+- Status: cleared（2026-11-14 Q1）
 
 ## 目的
 

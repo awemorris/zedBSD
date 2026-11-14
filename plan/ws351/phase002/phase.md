@@ -2,7 +2,7 @@
 
 # ws351-p002: 実装と試験（可変の tick、HAL_TIMER_FREQUENCY の削除）
 
-Status: in-progress（2026-11-13 P1、q2045-i01。cleared は Q1）
+Status: cleared（2026-11-15 Q1。5330 の電力の受け入れは WS352・WS353 p016 へ）
 Parent: [WS351](../ws.md)。設計は [p001](../phase001/phase.md)。
 
 ## 変えた所（agent/p1-ws351、基点 main 7d95e0634f）

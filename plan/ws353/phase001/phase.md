@@ -13,7 +13,7 @@ WS353 の ws.md の「ユーザーの決定」と「合意した形」を、実�
 
 - `AGENTS.md`、`plan/agents/protocol.md`、`plan/master-design-policy.md`（§11 と設計の方針）、`plan/guardrail.md`（HAL の承認）、`plan/coding-style.md`（設計の例の code の書き方）。
 - `plan/ws353/ws.md`（決定と合意した形。これが正）。
-- `plan/ws352/poll-report.md`（91 件の全部、行番号は branch `agent/p1-ws352` の tree）と `plan/ws352/phase001/phase.md`・`phase002/phase.md`（branch `agent/p1-ws352` にある。main に未 merge）。
+- `plan/ws352/poll-report.md`（91 件の全部、行番号は branch `agent/p1-ws352` の tree）と `plan/ws352/ws.md`・`phase002/phase.md`（branch `agent/p1-ws352` にある。main に未 merge）。
 - `plan/ws309/ws.md`・`plan/ws309/design.md`（thread の構成と決定。design.md:123 の「hotplug の 250 ms の tick は main に残す」はこの WS で改める）。
 - code: `userland/desktop/wayland/`（main.c・render-thread.c・cursor-thread.c・display-thread.c・output-switch.c・compose.c・lane.c・input-thread.c）、`userland/desktop/libkeiland-backend-zedbsd/`、`userland/desktop/libvulkan/`（sync.c・wsi-display-control.c・wsi-display-nodes.c・WSI の client 側）、`src/drivers/gpu/gpu.c`（display の event・GPU の job の notification）、`src/kern/poll.c`。
 - branch `agent/p1-ws352` の未 merge の直し（kernel の poll を object ごとに起こす形など、`git log main..agent/p1-ws352`）。設計で採る・採らないを決める。b05187933a（libvulkan を POLLPRI で block させる形）はユーザーの決定 2 と違うので採らない。

@@ -2,7 +2,7 @@
 
 # ws351-p001: 設計（時刻と期限を counter から、idle で tick を 100 Hz に、HAL の実装、HAL_TIMER_FREQUENCY の削除）
 
-Status: in-progress（2026-11-13 P1、q2045-i01。設計と design-reviewer は済み、cleared は Q1）
+Status: cleared（2026-11-15 Q1）
 Parent: [WS351](../ws.md)
 
 数と行は 2026-11-13 の worktree `agent/p1-ws351`（main 7d95e0634f）。
