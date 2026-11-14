@@ -3,7 +3,7 @@
 # ws328-p005 vec-raster（coverage の tile）
 
 - WS: [WS328](../ws.md)。設計: [design.md](../design.md)。
-- Status: planned（2026-11-14 p001 が作成）
+- Status: cleared（Q1 の受け入れ待ち）（2026-11-15 P7 が実装、試験 PASS、check-skeleton は check 6 が未実施で INCOMPLETE）
 - 担当: 実装の担当（Sonnet 5.5 high、phase-runner-low、1 回の起動）。
 - 依存: p003（依存の Phase が main に merge され cleared の後に始める）。
 - 基点の SHA（header の凍結）: ws.md の Resume point に Q1 が書いた SHA。`BASE=<それ>`。
@@ -69,4 +69,23 @@
 
 ## 結果
 
-（実装の担当が書く。）
+- 日付: 2026-11-15（host の `date`）。担当 P7（Queue q2123-i01）、worktree `/home/awe/zedBSD-worktrees/p7-ws328p005`、基点 main dc991a7f65。
+- 作った物: `userland/desktop/libbrowser/vector/vec-raster.c`（骨格を実装に置き換え）、`plan/ws328/tests/unit/test-raster.c`。header・他の module・試験の道具・Makefile・`mk/` は変えていない。
+- 実行した command と結果（自分で出力を読んだ）:
+  - `sh plan/ws328/tests/run-unit.sh raster`（cc、ASan・UBSan）: `test-raster: PASS (1055903 checks)`、`run-unit: PASS`。
+  - `CC=clang sh plan/ws328/tests/run-unit.sh raster`: 同じ `PASS (1055903 checks)`、`run-unit: PASS`。
+  - `sh plan/ws328/tests/run-unit.sh all`: test-base 204220・test-flatten 93774・test-harness 1127・test-path 348081・test-raster 1055903、`run-unit: PASS`。
+  - `BASE=57bf94e62f sh plan/ws328/tests/check-skeleton.sh`: check 1〜5 は FAILED 行なし。check 6（zedBSD の clang と x86_64 の sysroot）は worktree の `build/llvm`・`build/x86_64/sysroot` が無く未実施で、最後の行は `check-skeleton: INCOMPLETE`（PASS ではない）。依頼文が toolchain の build を許していないので作っていない。
+  - `git diff --check`: 出力なし。
+  - 乱数の多角形（各 1000 形、fill rule 2 つ、固定の seed、offset は 0・0.25・0.5・0.75 と乱数）: 参照との最大の差 1（許容は 3）。
+- 壊す確かめ（git の外の複製で、44 通りを符号・境界の比較・定数・条件の削除などで変えて試験を走らせた）: 40 通りが FAIL。生き残った 4 通りは等価（`raster_line_from` の補正の 2 つの `<`/`<=`、面積が 0 の時の `<=`/`<`、挿入 sort の予算を大きくして heap sort に行かない形。heap sort の枝は別の壊し方で FAIL するので試験が通っている）。初めの 44 通りの時に生き残った `VEC_RASTER_TILES_MAX` ちょうど（65537 枚）と高さちょうど 16384 の境の 2 通りは、試験（65537 枚の ENOBUFS、高さ 16384 の成功）を足して FAIL するようにした。作業の複製は build の外の scratch。
+- 自分で決めた点（header が黙っている所）:
+  - 頂点の移動と交点は double で計算する（頂点は float のまま、offset を足すのも double）。副走査線の高さ (j + 0.5) / 16 は double で正確なので、線分がどの副走査線を跨ぐかが参照と一致する。header の「float で計算すると 1 段ずれうる」の範囲に収まる。
+  - 縦の隣り合う区間は winding の結果が変わる所だけで区切る（nonzero で winding 1 から 2 に変わる所で切らない）ので、重なる輪郭に継ぎ目が出ない。
+  - `vec_rasterize` の `lines == NULL` は EINVAL、頂点を 1 つも持たない lines・面積 0 の形は成功の空の結果。`out` は呼ぶ前に必ず空にする（失敗でも空）。
+  - bounds は alpha が 0 でない pixel を含む最小の矩形（partial の tile は pixel ごとに読む。run は tile 全体）。clip で切られて tile の端が alpha 0 の時もその外へ広げない。
+  - `vec_coverage_intersect`・`vec_coverage_unite` は `out` が `a` か `b` と同じなら EINVAL（out は触らない）。結果の tile は全部 0 なら捨て、全部 255 なら run にする（手で作った coverage の tile も同じ扱い）。run の count が 0 以下の要素は読み飛ばす。ENOMEM は試験で起こせていない（未実施）。
+  - 作業量の上限: 線分の数（contour の count の合計）は頂点の検査と bounds の計算の前、交差の数は線分の集計（1 回目の走査）で数えて、走査の前に ENOBUFS。partial の tile の上限は tile を足す時に ENOBUFS。active list の並べ替えは、挿入 sort の移動が (交点の数 × 4 + 16) を超えたら heap sort に切り替える（全ての線分が交差する形でも O(n log n)）。
+  - メモリ: 線分の記録は 16 byte（頂点の index 2 つと副走査線の範囲）で、最大 2^21 本で 32 MiB、active list も同じ数まで。
+- 未実施: check-skeleton の check 6（zedBSD の toolchain の build が許されていないため）、ENOMEM の試験（allocation の失敗を作る道具が無い）、`VEC_RASTER_CROSSINGS_MAX` ちょうど（2^26 の交差を走査する）の通る側の試験（ASan で数十秒かかるため。超える側は速さも含めて試験済み）、実機・QEMU（この Phase の対象外）。
+- 残り: Q1 の受け入れ（merge と cleared の判断）。check 6 は Q1 が toolchain を許した時に流す。

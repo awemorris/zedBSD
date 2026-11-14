@@ -100,6 +100,16 @@ add_rect_reversed(
 	add_contour(lines, points, 4);
 }
 
+/* Adds a 4 x 4 square with its upper left corner at (x, y). */
+static void
+add_square(
+	struct vec_lines *lines,
+	int x,
+	int y)
+{
+	add_rect(lines, (float)x, (float)y, (float)(x + 4), (float)(y + 4));
+}
+
 /*
  * Checks the invariants of a coverage's structure, independently of the
  * rasterizer: tiles sorted by row then column and not repeated, every
@@ -1119,7 +1129,7 @@ test_limits(void)
 	int row;
 	int column;
 	int count;
-	float points[8];
+	int variant;
 	size_t vertex_count;
 
 	vec_lines_init(&lines);
@@ -1132,6 +1142,14 @@ test_limits(void)
 	CHECK_LONG(cov.tile_count, VEC_RASTER_SIDE_MAX / VEC_TILE_SIZE);
 	CHECK_LONG(vec_coverage_at(&cov, VEC_RASTER_SIDE_MAX - 1, 0), 255);
 	CHECK_LONG(vec_coverage_at(&cov, VEC_RASTER_SIDE_MAX - 1, 1), 0);
+	check_structure(&cov);
+	vec_lines_reset(&lines);
+	add_rect(&lines, 0.0f, 0.0f, 1.0f, (float)VEC_RASTER_SIDE_MAX);
+	error = vec_rasterize(&lines, VEC_FILL_NONZERO, 0.0f, 0.0f, NULL, &cov);
+	CHECK_LONG(error, 0);
+	CHECK_LONG(cov.tile_count, VEC_RASTER_SIDE_MAX / VEC_TILE_SIZE);
+	CHECK_LONG(vec_coverage_at(&cov, 0, VEC_RASTER_SIDE_MAX - 1), 255);
+	CHECK_LONG(vec_coverage_at(&cov, 0, VEC_RASTER_SIDE_MAX), 0);
 	check_structure(&cov);
 	vec_lines_reset(&lines);
 	add_rect(&lines, 0.0f, 0.0f, (float)VEC_RASTER_SIDE_MAX + 1.0f, 1.0f);
@@ -1228,24 +1246,25 @@ test_limits(void)
 	CHECK_LONG(error, 0);
 	check_structure(&cov);
 
-	/* The partial tiles: 256 x 256 squares, one per tile, are exactly the most; one more column and row is too many. */
-	for (count = 256; count <= 257; count++) {
+	/*
+	 * The partial tiles: 256 x 256 squares, one per tile, are exactly the
+	 * most; one more square (65537 tiles) and one more column and row
+	 * (66049 tiles) are too many.
+	 */
+	for (variant = 0; variant < 3; variant++) {
+		count = variant == 2 ? 257 : 256;
 		vec_lines_reset(&lines);
 		for (row = 0; row < count; row++) {
 			for (column = 0; column < count; column++) {
-				points[0] = (float)(column * VEC_TILE_SIZE + 2);
-				points[1] = (float)(row * VEC_TILE_SIZE + 2);
-				points[2] = points[0] + 4.0f;
-				points[3] = points[1];
-				points[4] = points[0] + 4.0f;
-				points[5] = points[1] + 4.0f;
-				points[6] = points[0];
-				points[7] = points[1] + 4.0f;
-				add_contour(&lines, points, 4);
+				add_square(&lines, column * VEC_TILE_SIZE + 2, row * VEC_TILE_SIZE + 2);
 			}
 		}
+
+		/* The middle variant has one more square, in the next tile column of the first row. */
+		if (variant == 1)
+			add_square(&lines, 256 * VEC_TILE_SIZE + 2, 2);
 		error = vec_rasterize(&lines, VEC_FILL_NONZERO, 0.0f, 0.0f, NULL, &cov);
-		if (count == 256) {
+		if (variant == 0) {
 			CHECK_LONG(error, 0);
 			CHECK_LONG(cov.tile_count, VEC_RASTER_TILES_MAX);
 			CHECK_LONG(vec_coverage_at(&cov, 3, 3), 255);

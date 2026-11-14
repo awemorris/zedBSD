@@ -1828,10 +1828,10 @@ raster_combine_walk(
 			a_alone = 1;
 		} else if (!ca.item.valid) {
 			b_alone = 1;
-		} else if (raster_item_before(&ca.item, &cb.item)) {
-			a_alone = 1;
-		} else if (raster_item_before(&cb.item, &ca.item)) {
-			b_alone = 1;
+		} else {
+			a_alone = raster_item_before(&ca.item, &cb.item);
+			if (!a_alone)
+				b_alone = raster_item_before(&cb.item, &ca.item);
 		}
 
 		/* Keeps (unite) or drops (intersect) a piece that nothing of the other input touches. */
