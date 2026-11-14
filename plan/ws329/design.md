@@ -10,6 +10,7 @@
 ## 1. 出典と引用
 
 - 仕様: **ITU-T H.264 (08/2021)**（WS326 と同じ版）。PDF `/home/awe/zedBSD-claude1/build/sources/specs/itu-t-h264-202108.pdf`（SHA-256 `d6e09bcc94e5d095e1b2d6d16bf96d82a593d67915a963336ada082a775e9cdf`、git に入れない）。印刷の頁 N = PDF の頁 N + 22（例: 9.3.4.5 は印刷 282 頁 = PDF 304 頁）。
+  2026-11-14（p002）: main の `build/` の作り直しでこの PDF と適合の stream の cache は消えていた。PDF は ITU の公開の頁（`https://www.itu.int/rec/dologin_pub.asp?lang=e&id=T-REC-H.264-202108-S!!PDF-E&type=items`、版が置き換わったので `-I` ではなく `-S`）からパラメータの無い GET で取り、SHA-256 が上と一致することを確かめた（置き場は各担当の worktree の `build/sources/specs/`。main の置き場に戻すのは Q1）。
   encoder が読む節: 7.3〜7.4（構文と意味）、7.4.2.10（cabac_zero_word の制約）、9.1・9.2（Exp-Golomb、CAVLC）、9.3.1〜9.3.3（CABAC の初期化・2 値化・context）、**9.3.4（CABAC の encoder、informative）**、8.2（POC・参照）、8.3〜8.5・8.7（予測・変換・deblocking、再構成は decoder の物を使う）、Annex A（profile・level、表 A-1・A-4、A.3.1 n)・A.3.2 j) の 1 macroblock の bit の上限、A.3.1 c)・d) の access unit の大きさ、A.2.1・A.2.2 の PCM の標本の制約）、Annex B、Annex E（VUI）。
 - 仕様に無い encoder の判断（mode の選び、動きの探索、量子化の丸め、rate control）は、出典を header の該当の block に書いた公開の文献の考えを、数値まで header で固定した（WS318 D20 の AAC と同じ扱い）:
   - Lagrange 乗数 λ_mode = 0.85·2^((QP−12)/3)、λ_motion = √λ_mode: T. Wiegand ほか, IEEE TCSVT 13(7), 2003。
@@ -69,7 +70,7 @@ WS326 の各 module（main 85fbeb091 の header を読んだ事実）と、encod
 | h264sw-bits（RBSP の reader） | 単体試験で書いた物を読み戻す | 無し（WS326 p026 が汎用の名前に移すなら、その名前を使う） |
 | h264sw-nal（Annex B の分割・emulation の除去） | 試験で読み戻す | 無し（同上） |
 | h264sw-tables（zig-zag・既定の list・QPC・normAdjust） | 量子化の scan、MF の計算、QP'C | 無し |
-| h264sw-ps（SPS・PPS の reader と store、表 A-1 の MaxDpbMbs） | 書いた SPS・PPS の読み戻し（E3）、`struct h264sw_sps/pps` | 表 A-1 を `h264sw-levels`（全列）へ出し ps.c はそれを使う（p002、[proposed/shared/h264sw-levels.h](proposed/shared/h264sw-levels.h)） |
+| h264sw-ps（SPS・PPS の reader と store、表 A-1 の MaxDpbMbs） | 書いた SPS・PPS の読み戻し（E3）、`struct h264sw_sps/pps` | 表 A-1 の全列を `h264sw_levels`・`h264sw_level_find` として h264sw-ps.h に公開し、ps.c はそれを使う（p002 で済み、§5.3） |
 | h264sw-slice（slice header の構造体と reader、新しい picture の判定） | encoder が埋める header の型、試験の読み戻し | 無し |
 | h264sw-frame（frame と pool） | 再構成の frame と参照 | 無し |
 | h264sw-poc（POC） | DPB の状態の更新（`h264sw_poc_finish` は使わず、gop が値を決める） | 無し |
@@ -77,10 +78,10 @@ WS326 の各 module（main 85fbeb091 の header を読んだ事実）と、encod
 | h264sw-reflist（PicNum・初期の list） | slice の参照の list | 無し |
 | h264sw-mb（MB の entry・mb_type の表・neighbour） | entry を decoder と同じに保つ、neighbour、mb_type の意味 | 無し |
 | h264sw-context（picture・slice の context、MB の syntax） | encoder の MB の syntax も同じ構造体 | 無し |
-| h264sw-cavlc（読み、nC、cbp の表） | nC（`h264sw_cavlc_nc`）、符号の表 | 表（9-5・9-7〜9-10・9-4）を `h264sw-cavlc-tables` に出す（p002、[proposed/shared/h264sw-cavlc-tables.h](proposed/shared/h264sw-cavlc-tables.h)） |
+| h264sw-cavlc（読み、nC、cbp の表） | nC（`h264sw_cavlc_nc`）、符号の表 | 表（9-5・9-7〜9-10・9-4）を h264sw-cavlc.h に公開（p002 で済み、§5.3） |
 | h264sw-cabac-init（(m, n) の表） | context の初期化 | 無し |
-| h264sw-cabac（算術の decoder、表 9-44・9-45） | 表を encoder の engine が使う、試験で読み戻す | context の初期化を `h264sw_cabac_contexts_init` に分ける、表の宣言を header に（既に非 static）（p002） |
-| h264sw-cabac-se（2 値化と ctxIdxInc） | ctxIdxInc の導出 | neighbour に依る ctxIdxInc と residual の ctxIdx の導出を `h264sw-cabac-ctx` に出し、cabac-se.c はそれを呼ぶ（p002、[proposed/shared/h264sw-cabac-ctx.h](proposed/shared/h264sw-cabac-ctx.h)） |
+| h264sw-cabac（context の変数と初期化。算術の decoder と表 9-44・9-45 は WS326 p026 で vcodec-cabac に移った） | 初期化、試験で読み戻す | context の初期化を `h264sw_cabac_contexts_init` に分ける（p002 で済み）。表 9-44・9-45 は p026 が `vcodec_cabac_range_lps`・`_trans_lps`・`_trans_mps` として vcodec-cabac.h に宣言済み |
+| h264sw-cabac-se（2 値化と ctxIdxInc） | ctxIdxInc の導出 | neighbour に依る ctxIdxInc と residual の ctxIdx の導出を `h264sw_ctx_*` として h264sw-cabac-se.h に公開し、cabac-se.c はそれを呼ぶ（p002 で済み、§5.3） |
 | h264sw-macroblock（slice_data・MB の解析） | 試験の oracle（MB を書いて読み戻す） | 無し |
 | h264sw-transform（逆量子化・逆変換） | 再構成（intra の block の逐次と recon_mb の中）、MF の照合 | 無し |
 | h264sw-intra（予測・端・予測 mode） | intra の mode の選び | 無し |
@@ -98,7 +99,7 @@ decoder の module で encoder に要らない物は無い（全部が「使う�
 
 ### 5.1 順
 
-1. WS326 の p022（適合）→ **p026（codec に依らない名前への移し）** → p023〜p025 → WS326 completed（header の凍結 `BASE=fd1d6f88c` が外れる）。
+1. WS326 の p022（適合）→ **p026（codec に依らない名前への移し）** → p023〜p025 → WS326 completed（header の凍結 `BASE=fd1d6f88c` が外れる）。2026-10-31 に済み（p026 は 92ca2d0e8、WS326 の header の基点は 77ed48ac4。それから 2026-11-14 の main fd18bd61ee まで h264sw-*・vcodec-* の source は変わっていない）。
 2. **WS329 p002**: H.264 の encoder と decoder の共通化（§4 の「変更」の 4 つ）。WS326 p026 の名前の上に足す。
 3. WS329 p003: encoder の header（proposed/）と骨格を source に置き、WS329 の基点 BASE を決める。
 
@@ -108,9 +109,12 @@ p026 と p002 を 1 つにしないのは、WS326 の範囲（H.265 と共通の
 
 - codec に依らない物は `vcodec-<名>.h`、関数 `vcodec_`、定数 `VCODEC_` を推す（Q1 経由で WS326 p026 の設計に渡す）。WS329 が新しく作る `vcodec-bitwriter`・`vcodec-nalwriter`・`vcodec-cabac-enc` はこの形。p026 が decoder の reader 側を `vcodec-bits`・`vcodec-nal`・`vcodec-cabac`（算術の engine と表 9-44・9-45）に移せば、読み書きが揃う。
 - p026 が別の名前を選んだら、WS329 p003 が proposed/ の header の名前（`h264sw_cabac_range_lps` などの参照）を機械的に置き換える。proposed の内容（関数の仕様）は変わらない。
+- 結果（2026-10-31 p026、92ca2d0e8）: `vcodec.h`・`vcodec-bitreader`・`vcodec-nal`・`vcodec-cabac`（表は `vcodec_cabac_range_lps`・`_trans_lps`・`_trans_mps`）。frame・DPB は WS330 へ先送り。p002 で proposed/ の表と header の参照を今の名前に直した（`vcodec-cabac-enc.h`・`h264enc-cavlc.h`・`h264enc-cabac-se.h`・`h264enc-cabac-res.h`）。残る置き換え（comment の H.265 の節の番号など）は p003。
 - H.264 に固有の共通部分は `h264sw_` のまま（E5）。
 
 ### 5.3 p002 の変更（decoder の振る舞いを変えない refactor）
+
+2026-11-14 の実装（p002）での置き場の変更: 新しい `.c` を足すと libmedia の source の一覧 `userland/desktop/libmedia/sources.mk`（make の file、Claude は変えない）を変える必要があるので、新しい module（`h264sw-cavlc-tables`・`h264sw-cabac-ctx`・`h264sw-levels`）は作らず、同じ公開の関数と表を既存の module に置いた（R1 は h264sw-cavlc.[ch]、R2 は h264sw-cabac-se.[ch]、R3 は h264sw-cabac.[ch]、R4 は h264sw-ps.[ch]）。関数の名前と仕様は proposed/shared/ のとおり。cbp の表だけは既存の関数 `h264sw_cavlc_cbp` と名前がぶつかるので `h264sw_cavlc_cbp_values` にした。proposed/shared/ の 3 つの header は source に入った物で置き換わった（消すのは Q1）。下の表の file の名前は設計の時の物。
 
 | 変更 | 内容 | 確かめ |
 | --- | --- | --- |
@@ -120,7 +124,7 @@ p026 と p002 を 1 つにしないのは、WS326 の範囲（H.265 と共通の
 | R4 表 A-1 | `h264sw-ps.c` の `ps_level_limits` を `h264sw-levels.c` の全列の表へ、`h264sw_level_find` | test-ps、新しい test-levels（全行を PDF の画で照合） |
 | R5 文 | 共通の header の先頭の "of the software H.264 decoder" を "codec" に（意味は変えない） | check-skeleton |
 
-R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh` の BASE はこの Phase の commit に移る（Q1 が WS326 の記録に書く）。
+R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh` の BASE はこの Phase の commit に移る（Q1 が WS326 の記録と tools.md に書く。p002 の source の commit は b753848bf2）。
 
 ### 5.4 前向きの変換と量子化の導出（header の式の根拠）
 
@@ -137,14 +141,14 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 | --- | --- | --- |
 | vcodec-bitwriter | u・ue・se・te・整列・trailing・mark/rewind・長さ | — |
 | vcodec-nalwriter | emulation prevention の挿入、Annex B の access unit、cabac_zero_word | — |
-| vcodec-cabac-enc | 9.3.4 の算術の encoder、bin の数 | bitwriter、h264sw-cabac の表 |
+| vcodec-cabac-enc | 9.3.4 の算術の encoder、bin の数 | bitwriter、vcodec-cabac の表 |
 | h264enc.h | 上限・約束・公開の核の API（create・send・receive・parameter_sets・destroy） | — |
-| h264enc-ps | sequence の選び、level の選び（表 A-1）、SPS・PPS・VUI の書き | bitwriter、h264sw-levels |
+| h264enc-ps | sequence の選び、level の選び（表 A-1）、SPS・PPS・VUI の書き | bitwriter、h264sw-ps の h264sw_levels |
 | h264enc-slice | NAL の header、slice header の書き、cabac_zero_word の数、filler | bitwriter、h264sw-slice・ps |
 | h264enc-quant | 前向きの変換、量子化、DC、clamp | h264sw-tables |
-| h264enc-cavlc | residual_block_cavlc の書き、bit 数、cbp の codeNum | bitwriter、h264sw-cavlc-tables |
-| h264enc-cabac-se | MB の構文要素の CABAC の書き、PCM | cabac-enc、h264sw-cabac-ctx |
-| h264enc-cabac-res | residual_block_cabac の書き | cabac-se、h264sw-cabac-ctx |
+| h264enc-cavlc | residual_block_cavlc の書き、bit 数、cbp の codeNum | bitwriter、h264sw-cavlc の表 |
+| h264enc-cabac-se | MB の構文要素の CABAC の書き、PCM | cabac-enc、h264sw-cabac-se の h264sw_ctx_*、h264sw_cabac_contexts_init |
+| h264enc-cabac-res | residual_block_cabac の書き | cabac-se、h264sw-cabac-se の h264sw_ctx_* |
 | h264enc-cost | SAD・SATD・SSD・λ・mvd の bit | bitwriter（長さ） |
 | h264enc-source | 入力の copy と端の詰め | — |
 | h264enc-refplanes | 参照の 1/2 画素の 3 面と 1/4 画素の予測 | h264sw-interp、h264sw-frame |
@@ -245,7 +249,7 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 | Phase | 目的（module） | 型 | 依存 | 受け入れ |
 | --- | --- | --- | --- | --- |
 | p001 | 設計（この文書、proposed、問い、review） | O | — | Q1 の受け入れ、Q329 の回答 |
-| p002 | 共通化の refactor R1〜R5（decoder の振る舞いは変えない） | O | WS326 completed（p026 を含む） | WS326 の run-unit all と適合が前後で同じ、新しい test-cabac_ctx・test-levels、amd64 build warning 0 |
+| p002 | 共通化の refactor R1〜R5（decoder の振る舞いは変えない） | O | WS326 completed（p026 を含む） | WS326 の run-unit all と適合が前後で同じ、新しい test-cabac_ctx・test-levels、x86_64・arm64・riscv64 の build warning 0 |
 | p003 | encoder の header（proposed → source、p026 の名前に合わせる）・.c の骨格（ENOSYS）・Makefile・`run-unit.sh`・`check-skeleton.sh`・試験の土台 `fixture.h`・BASE | O | p002 | check-skeleton PASS、amd64 build warning 0、decoder の試験が変わらず PASS |
 | p004 | vcodec-bitwriter、vcodec-nalwriter | S | p003 | run-unit（bitwriter・nalwriter）、突然変異 |
 | p005 | vcodec-cabac-enc | S | p004 | 往復（h264sw_cabac）、見積もりの表の式の照合 |
@@ -280,7 +284,7 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 
 - **読む物（共通）**: AGENTS.md §4・§7・§9・§10、plan/agents/protocol.md、plan/coding-style.md の全文（§14 の checklist）、この文書の §1・§3・§4・§7・§10.1、`h264sw.h`・`h264enc.h`、実装する header と、その header が include する header、仕様の PDF（§1 の path と SHA-256、頁の換算）。
 - **変えてはいけない物**: 全部の `h264sw*.h`・`h264enc*.h`・`vcodec-*.h`、担当の外の `.c`、Makefile、`plan/ws329/tests/run-unit.sh`・`check-skeleton.sh`・`unit/check.h` 以外の試験の道具（自分の test を除く）、HAL・toolchain・共有の build/。header の不備は直さず止めて Q1 へ（どの header のどの関数で何が足りないか）。
-- **確かめの command**: `timeout 900 sh plan/ws329/tests/run-unit.sh <name>` と `all`、`BASE=<p003 の SHA> timeout 300 sh plan/ws329/tests/check-skeleton.sh`、WS326 の `sh plan/tools/h264sw/run-unit.sh all`（decoder が変わっていない）、zedBSD amd64 の libmedia.so の build（WS326 design §6 の command）で warning 0、`git diff --check`。
+- **確かめの command**: `timeout 900 sh plan/ws329/tests/run-unit.sh <name>` と `all`、`BASE=<p003 の SHA> timeout 300 sh plan/ws329/tests/check-skeleton.sh`、WS326 の `sh plan/tools/h264sw/run-unit.sh all`（decoder が変わっていない）、zedBSD の libmedia の build（x86_64・arm64・riscv64: `timeout 2400 make CONFIGMK=config/config.<機種>.mk -j4 build/<機種>/packages/libmedia/.stamp`、<機種> は x86_64・rpi5・vf2、自分の worktree の build/ で）で warning 0、`git diff --check`。
 - **終わりの条件**: 上が全部 PASS（出力を自分で読む）、わざと壊す確かめ、規約の checklist、`git add` の後 `git commit -m WIP -- <path>`、phase.md の「結果」（日付は host の `date`、command と件数、自分で決めた点、未実施）、ws.md の行を「実装済み・試験 PASS」（cleared は Q1）。
 
 ## 14. Q1 への注意（ユーザーの判断ではない物）

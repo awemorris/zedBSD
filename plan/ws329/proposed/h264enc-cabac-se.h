@@ -10,8 +10,9 @@
  * software H.264 encoder: for each element its binarization (9.3.2) and
  * the context of each bin (Table 9-34 offsets, Table 9-39 for the bins
  * after the first, the neighbour-dependent increments of 9.3.3.1.1 from
- * h264sw-cabac-ctx.h), coded with the engine of vcodec-cabac-enc.h.  The
- * residual blocks are in h264enc-cabac-res.h.
+ * h264sw-cabac-se.h, the initialization from h264sw-cabac.h), coded with
+ * the engine of vcodec-cabac-enc.h.  The residual blocks are in
+ * h264enc-cabac-res.h.
  *
  * Every function codes one element of the current macroblock
  * (ctx->n.current).  The slice context and the struct h264sw_mb entries

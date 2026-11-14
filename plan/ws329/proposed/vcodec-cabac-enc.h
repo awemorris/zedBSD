@@ -18,8 +18,8 @@
  * A context variable is one byte: pStateIdx in bits 0..5 and valMPS in
  * bit 6, as the decoders keep them.  rangeTabLPS (H.264 Table 9-44) and
  * the transitions (Table 9-45) are the decoder's tables
- * (h264sw_cabac_range_lps, h264sw_cabac_trans_lps,
- * h264sw_cabac_trans_mps), not a copy.
+ * (vcodec_cabac_range_lps, vcodec_cabac_trans_lps,
+ * vcodec_cabac_trans_mps of vcodec-cabac.h), not a copy.
  *
  * Bits go to a struct vcodec_bitwriter; its errors are the engine's.
  */

@@ -14,7 +14,7 @@
  * decisions), and the codeNum of coded_block_pattern (inverse of Table
  * 9-4).
  *
- * The codes come from the decoder's tables (h264sw-cavlc-tables.h);
+ * The codes come from the decoder's tables (h264sw-cavlc.h);
  * h264enc_cavlc_init indexes them by value once so that writing does not
  * search.  The nC of a block is the decoder's (h264sw_cavlc_nc).
  */
@@ -40,7 +40,7 @@ struct h264enc_code {
  * total_zeros_chroma_dc[tzVlcIndex - 1][total_zeros];
  * run_before[Min( zerosLeft, 7 ) - 1][run_before]; cbp_code[column][cbp]
  * the codeNum of each coded_block_pattern value 0..47, with the columns
- * of h264sw_cavlc_cbp: [0] Intra_4x4 and Intra_8x8, [1] Inter.  Owned by the
+ * of h264sw_cavlc_cbp_values: [0] Intra_4x4 and Intra_8x8, [1] Inter.  Owned by the
  * encoder (embedded); constant after init.
  */
 struct h264enc_cavlc {

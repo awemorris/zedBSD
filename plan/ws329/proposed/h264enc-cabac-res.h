@@ -10,7 +10,7 @@
  * (residual_block_cabac, 7.3.5.3.3): coded_block_flag, the significance
  * map (significant_coeff_flag and last_significant_coeff_flag), and the
  * levels (coeff_abs_level_minus1 as UEG0 with uCoff 14, and
- * coeff_sign_flag), with the contexts of h264sw-cabac-ctx.h.
+ * coeff_sign_flag), with the contexts of h264sw-cabac-se.h.
  */
 
 #ifndef LIBMEDIA_H264ENC_CABAC_RES_H
