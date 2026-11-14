@@ -38,6 +38,13 @@
  * (a location set, a reload, a form's submit) as the window does, each
  * page settled in turn; without it the first page is the one used.
  *
+ * --threads runs the page on the view's own threads (BROWSER_THREADING_OWN),
+ * as the window does, instead of in the program's calls: the settle runs
+ * the page on its own clock until it is at rest, a thread of the
+ * program's stands in for the window's drawing (it draws each committed
+ * frame and tells of its present, when the page's animation frames run),
+ * and the picture is drawn from the committed frame.
+ *
  * Since ws074-p057 the engine is libbrowser.so and the program uses it
  * through <browser/browser.h> only: the headless modes through a view, the
  * script modes (--js, --dump=ast, --dump=code) through the library's
@@ -112,6 +119,7 @@ struct main_options {
 	unsigned parse;
 	double settle_budget;
 	int async;
+	int threads;
 	unsigned follow;
 };
 
@@ -119,6 +127,13 @@ struct main_options {
  * The page of a headless mode: the command line, the view that holds the
  * page, and whether the load failed (the load callback said why).  It
  * lives in the mode's function for as long as the view.
+ *
+ * With --threads: the program's threads (table), the stand-in for the
+ * window's drawing thread (drawer, NULL when it does not run) with its
+ * lock and condition, and under the lock whether a new frame was committed
+ * (woken) and whether the drawer is to end (ending); allowed counts the
+ * navigations of the page's scripts the link callback let through (on the
+ * view's script thread, atomically), settled those a settle followed.
  */
 struct main_page {
 	const struct main_options *options;
@@ -126,6 +141,14 @@ struct main_page {
 	int failed;
 	int output_failed;
 	unsigned started;
+	const struct browser_threads *table;
+	void *drawer;
+	void *lock;
+	void *cond;
+	int woken;
+	int ending;
+	unsigned allowed;
+	unsigned settled;
 };
 
 /*
@@ -155,10 +178,18 @@ static int main_dump(const struct main_options *options);
 static int main_render(const struct main_options *options);
 static int main_run_page(const struct main_options *options);
 static int main_open(const struct main_options *options, const void *stack_base, unsigned flags, struct main_page *page);
+static int main_settle(struct main_page *page, unsigned flags);
+static void main_close(struct main_page *page);
+static int main_drawer_start(struct main_page *page);
+static void main_drawer_stop(struct main_page *page);
+static void main_drawer_run(void *argument);
+static void main_frame_wake(void *context);
+static enum browser_policy main_link(void *context, struct browser_view *view, const char *href);
+static int main_draw_gpu_frame(struct browser_view *view, const struct browser_gpu *gpu, const struct browser_target *target);
 static void main_loaded(void *context, struct browser_view *view, enum browser_load_state state, const char *url, int error, const char *reason);
 static void main_console_out(void *context, struct browser_view *view, int level, const char *text, size_t length);
 static void main_console_err(void *context, struct browser_view *view, int level, const char *text, size_t length);
-static int main_draw_gpu(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height);
+static int main_draw_gpu(struct browser_view *view, int threads, uint32_t *pixels, unsigned width, unsigned height);
 static int main_write_ppm(const char *path, const uint32_t *pixels, unsigned width, unsigned height);
 static int main_parse_size(const char *text, unsigned *size);
 static int main_parse_budget(const char *text, double *budget);
@@ -284,7 +315,7 @@ main_dump(
 
 	/* Releases the owned dump and view on either write outcome. */
 	browser_free(text);
-	browser_view_destroy(page.view);
+	main_close(&page);
 	if (error != 0) {
 		fprintf(stderr, "browser: cannot dump %s: %s\n", options->shell.start, wb_os_error_text(error));
 		return 1;
@@ -323,13 +354,13 @@ main_render(
 	pixels = calloc((size_t)width * (size_t)height, sizeof(uint32_t));
 	if (pixels == NULL) {
 		fprintf(stderr, "browser: cannot draw %s: %s\n", options->shell.start, wb_os_error_text(ENOMEM));
-		browser_view_destroy(page.view);
+		main_close(&page);
 		return 1;
 	}
 
 	/* Draws the page with the GPU renderer (which says why it failed), or with the CPU renderer. */
 	if (options->mode == MAIN_MODE_RENDER_GPU) {
-		error = main_draw_gpu(page.view, pixels, width, height);
+		error = main_draw_gpu(page.view, options->threads, pixels, width, height);
 	} else {
 		error = browser_view_draw_pixels(page.view, pixels, width, height, (size_t)width * sizeof(uint32_t));
 		if (error != 0)
@@ -337,7 +368,7 @@ main_render(
 	}
 
 	/* The view is no longer needed; a picture that could not be drawn is not written. */
-	browser_view_destroy(page.view);
+	main_close(&page);
 	if (error != 0) {
 		free(pixels);
 		return 1;
@@ -369,7 +400,7 @@ main_run_page(
 		return status;
 
 	/* The page is no longer needed. */
-	browser_view_destroy(page.view);
+	main_close(&page);
 	if (page.output_failed) {
 		fprintf(stderr, "browser: cannot write page console: %s\n", wb_os_error_text(EIO));
 		return 1;
@@ -382,9 +413,10 @@ main_run_page(
 /*
  * Makes the view of a headless mode and loads the page the command line
  * names into it, then lets it settle: its timers run on the virtual clock
- * and, with BROWSER_SETTLE_LAYOUT in flags, it is laid out with its images.
+ * (with --threads, on its own clock in the view's threads) and, with
+ * BROWSER_SETTLE_LAYOUT in flags, it is laid out with its images.
  * Reports the exit status of a failure after saying why, or 0 with the
- * view in page->view.
+ * view in page->view (main_close ends it).
  *
  * stack_base is the caller's frame: the pages' heaps scan the stack up to
  * it, and the caller goes on using the view after this returns.
@@ -398,13 +430,12 @@ main_open(
 {
 	struct browser_callbacks callbacks;
 	struct browser_view_options view_options;
-	unsigned followed;
-	unsigned started;
 	int error;
 
 	/* Every headless mode needs a page. */
 	memset(page, 0, sizeof(*page));
 	page->options = options;
+	page->table = shell_threads();
 	if (options->shell.start == NULL) {
 		fprintf(stderr, "browser: a file to load is needed\n");
 		return 2;
@@ -429,10 +460,47 @@ main_open(
 	view_options.fetch = BROWSER_FETCH_AT_ONCE;
 	if (options->async)
 		view_options.fetch = BROWSER_FETCH_BACKGROUND;
+
+	/*
+	 * With --threads, a view of its own threads, as the window's: it fetches
+	 * as the window does unless --async (its iframes' threads fetch through
+	 * the loader, which a view that reads every page at once has not), its
+	 * scripts' navigations are let through by the link callback and its
+	 * frames are drawn by the stand-in for the window's drawing.
+	 */
+	if (options->threads) {
+		if (!options->async)
+			view_options.fetch = BROWSER_FETCH_DEFAULT;
+		callbacks.link = main_link;
+		view_options.threading = BROWSER_THREADING_OWN;
+		view_options.frame_wake = main_frame_wake;
+		view_options.frame_wake_context = page;
+		error = page->table->mutex_create(page->table->context, &page->lock);
+		if (error == 0)
+			error = page->table->cond_create(page->table->context, &page->cond);
+		if (error != 0) {
+			fprintf(stderr, "browser: cannot make a view: %s\n", wb_os_error_text(error));
+			main_close(page);
+			return 1;
+		}
+	}
+
+	/* The view. */
 	error = browser_view_create(&view_options, &page->view);
 	if (error != 0) {
 		fprintf(stderr, "browser: cannot make a view: %s\n", wb_os_error_text(error));
+		main_close(page);
 		return 1;
+	}
+
+	/* The stand-in for the window's drawing, while the page settles. */
+	if (options->threads) {
+		error = main_drawer_start(page);
+		if (error != 0) {
+			fprintf(stderr, "browser: cannot start the drawing: %s\n", wb_os_error_text(error));
+			main_close(page);
+			return 1;
+		}
 	}
 
 	/* The page, running its scripts (a load that failed was said by the callback). */
@@ -440,30 +508,234 @@ main_open(
 	if (error != 0) {
 		if (!page->failed)
 			fprintf(stderr, "browser: cannot load %s: %s\n", options->shell.start, wb_os_error_text(error));
-		browser_view_destroy(page->view);
+		main_close(page);
 		return 1;
 	}
 
 	/* The page settled: fetched, its timers run, and laid out with its images when the mode needs that. */
+	error = main_settle(page, flags);
+
+	/* The drawing stands still from here (the mode draws or dumps the page at rest). */
+	main_drawer_stop(page);
+	if (error != 0) {
+		if (!page->failed)
+			fprintf(stderr, "browser: cannot run %s: %s\n", options->shell.start, wb_os_error_text(error));
+		main_close(page);
+		return 1;
+	}
+
+	/* Succeeded: the page is ready for the mode. */
+	return 0;
+}
+
+/*
+ * Settles the page, and with --follow the navigations its scripts asked
+ * for, each page settled in turn: the program's round carries out one in
+ * a view of the caller's thread; in a view of its own threads they happen
+ * as the page runs, as many as the link callback lets through.  Reports 0
+ * or the settle's error.
+ */
+static int
+main_settle(
+	struct main_page *page,
+	unsigned flags)
+{
+	const struct main_options *options;
+	unsigned followed;
+	unsigned started;
+	unsigned allowed;
+	int error;
+
+	/* The first page. */
+	options = page->options;
 	error = browser_view_settle(page->view, options->settle_budget, flags);
 
-	/* With --follow, the navigations the scripts asked for, each page settled in turn. */
+	/* Each navigation the scripts asked for, while --follow allows. */
 	for (followed = 0; error == 0 && followed < options->follow; followed++) {
+		/* A view of its own threads followed it already: a page that came since the last settle is settled again. */
+		if (options->threads) {
+			allowed = __atomic_load_n(&page->allowed, __ATOMIC_ACQUIRE);
+			if (allowed == page->settled)
+				break;
+			page->settled = allowed;
+			error = browser_view_settle(page->view, options->settle_budget, flags);
+			continue;
+		}
+
+		/* A view of the caller's thread follows it in the program's round. */
 		started = page->started;
 		browser_view_process(page->view);
 		if (page->started == started)
 			break;
 		error = browser_view_settle(page->view, options->settle_budget, flags);
 	}
-	if (error != 0) {
-		if (!page->failed)
-			fprintf(stderr, "browser: cannot run %s: %s\n", options->shell.start, wb_os_error_text(error));
+
+	/* A settle that failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the page is at rest. */
+	return 0;
+}
+
+/* Ends the page of a headless mode: the stand-in drawing, the view, and the drawing's lock and condition. */
+static void
+main_close(
+	struct main_page *page)
+{
+	/* The drawing first, which draws from the view. */
+	main_drawer_stop(page);
+
+	/* The view, after which nothing wakes the drawing. */
+	if (page->view != NULL)
 		browser_view_destroy(page->view);
-		return 1;
+	page->view = NULL;
+
+	/* The drawing's lock and condition. */
+	if (page->cond != NULL)
+		page->table->cond_destroy(page->table->context, page->cond);
+	if (page->lock != NULL)
+		page->table->mutex_destroy(page->table->context, page->lock);
+	page->cond = NULL;
+	page->lock = NULL;
+}
+
+/* Starts the stand-in for the window's drawing thread of a view of its own threads; reports 0 or why not. */
+static int
+main_drawer_start(
+	struct main_page *page)
+{
+	int error;
+
+	/* The thread, by the program's table as the window's is. */
+	page->ending = 0;
+	error = page->table->start(page->table->context, "browser-draw", 0, main_drawer_run, page, &page->drawer);
+	if (error != 0) {
+		page->drawer = NULL;
+		return error;
 	}
 
-	/* Succeeded: the page is ready for the mode. */
+	/* Succeeded: it draws each committed frame. */
 	return 0;
+}
+
+/* Stops the stand-in drawing (when it runs) and joins it. */
+static void
+main_drawer_stop(
+	struct main_page *page)
+{
+	/* Nothing runs. */
+	if (page->drawer == NULL)
+		return;
+
+	/* The end, told. */
+	page->table->mutex_lock(page->table->context, page->lock);
+
+	page->ending = 1;
+	page->table->cond_signal(page->table->context, page->cond);
+
+	page->table->mutex_unlock(page->table->context, page->lock);
+
+	/* Joined. */
+	page->table->join(page->table->context, page->drawer);
+	page->drawer = NULL;
+}
+
+/*
+ * The stand-in for the window's drawing thread: waits for a committed
+ * frame, draws it with the CPU as the window does without the GPU, and
+ * tells the view of its present (the chance for the page's animation
+ * frames), until it is told to end.
+ */
+static void
+main_drawer_run(
+	void *argument)
+{
+	struct main_page *page;
+	uint32_t *pixels;
+	unsigned width;
+	unsigned height;
+	int ending;
+	int error;
+
+	/* The picture, at the viewport's size. */
+	page = argument;
+	width = page->options->shell.width;
+	height = page->options->shell.height;
+	pixels = calloc((size_t)width * (size_t)height, sizeof(uint32_t));
+
+	/* Each frame committed, until the end. */
+	for (;;) {
+		/* The wait. */
+		page->table->mutex_lock(page->table->context, page->lock);
+
+		while (!page->woken && !page->ending)
+			page->table->cond_wait(page->table->context, page->cond, page->lock);
+		page->woken = 0;
+		ending = page->ending;
+
+		page->table->mutex_unlock(page->table->context, page->lock);
+
+		/* The end. */
+		if (ending)
+			break;
+
+		/* The frame drawn and presented (without a picture, only presented). */
+		error = 0;
+		if (pixels != NULL)
+			error = browser_view_render_pixels(page->view, pixels, width, height, (size_t)width * sizeof(uint32_t));
+		if (error == 0)
+			browser_view_presented(page->view, 0);
+	}
+
+	/* The picture goes. */
+	free(pixels);
+}
+
+/* The view's frame wake (on its thread): the stand-in drawing has a committed frame to draw. */
+static void
+main_frame_wake(
+	void *context)
+{
+	struct main_page *page;
+
+	/* The news, under the drawing's lock. */
+	page = context;
+	page->table->mutex_lock(page->table->context, page->lock);
+
+	page->woken = 1;
+	page->table->cond_signal(page->table->context, page->cond);
+
+	page->table->mutex_unlock(page->table->context, page->lock);
+}
+
+/*
+ * The link callback of a view of its own threads (on its script thread):
+ * a navigation of the page's scripts is let through while --follow
+ * allows more, as the program's round of a view of the caller's thread
+ * carries them out.
+ */
+static enum browser_policy
+main_link(
+	void *context,
+	struct browser_view *view,
+	const char *href)
+{
+	struct main_page *page;
+	unsigned allowed;
+
+	UNUSED_PARAMETER(view);
+	UNUSED_PARAMETER(href);
+
+	/* One more, while --follow allows. */
+	page = context;
+	allowed = __atomic_load_n(&page->allowed, __ATOMIC_ACQUIRE);
+	if (allowed >= page->options->follow)
+		return BROWSER_POLICY_DENY;
+	__atomic_store_n(&page->allowed, allowed + 1U, __ATOMIC_RELEASE);
+
+	/* Followed. */
+	return BROWSER_POLICY_ALLOW;
 }
 
 /* The view's load callback: a load that failed, and why (the TLS reason for an https page). */
@@ -546,11 +818,14 @@ main_console_err(
 /*
  * Draws the view with the GPU renderer into an offscreen image (a device
  * of the engine's own) and reads it back into pixels (width by height,
- * packed rows); says why on standard error when it cannot.
+ * packed rows); says why on standard error when it cannot.  A view of its
+ * own threads (threads) draws its latest committed frame, as the window's
+ * drawing thread does.
  */
 static int
 main_draw_gpu(
 	struct browser_view *view,
+	int threads,
 	uint32_t *pixels,
 	unsigned width,
 	unsigned height)
@@ -574,7 +849,11 @@ main_draw_gpu(
 	/* The view draws into it with its device, and waits for the drawing. */
 	browser_offscreen_target(offscreen, &gpu, &target);
 	browser_view_set_gpu(view, &gpu);
-	error = browser_view_draw(view, &target, VK_NULL_HANDLE, VK_NULL_HANDLE);
+	if (threads) {
+		error = main_draw_gpu_frame(view, &gpu, &target);
+	} else {
+		error = browser_view_draw(view, &target, VK_NULL_HANDLE, VK_NULL_HANDLE);
+	}
 	if (error == EIO) {
 		browser_view_gpu_failure(view, &failure);
 		fprintf(stderr, "browser: cannot draw on the GPU: %s failed (%d)\n", failure.operation, (int)failure.result);
@@ -596,6 +875,95 @@ main_draw_gpu(
 		return error;
 
 	/* Succeeded: the pixels hold the picture. */
+	return 0;
+}
+
+/*
+ * Draws the latest committed frame of a view of its own threads into an
+ * image on the GPU: records it into a command buffer of the program's,
+ * submits it on the device's queue and waits for it, as the window's
+ * drawing thread does.  Reports 0, the view's error, or EIO when a Vulkan
+ * call failed.
+ */
+static int
+main_draw_gpu_frame(
+	struct browser_view *view,
+	const struct browser_gpu *gpu,
+	const struct browser_target *target)
+{
+	VkCommandPoolCreateInfo pool_info;
+	VkCommandBufferAllocateInfo allocate;
+	VkCommandBufferBeginInfo begin;
+	VkFenceCreateInfo fence_info;
+	VkSubmitInfo submit;
+	VkCommandPool pool;
+	VkCommandBuffer commands;
+	VkFence fence;
+	VkQueue queue;
+	VkResult result;
+	uint64_t serial;
+	int error;
+
+	/* The commands, from the queue family the view draws with. */
+	memset(&pool_info, 0, sizeof(pool_info));
+	pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	pool_info.queueFamilyIndex = gpu->queue_family;
+	result = vkCreateCommandPool(gpu->device, &pool_info, NULL, &pool);
+	if (result != VK_SUCCESS)
+		return EIO;
+	memset(&allocate, 0, sizeof(allocate));
+	allocate.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocate.commandPool = pool;
+	allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocate.commandBufferCount = 1;
+	result = vkAllocateCommandBuffers(gpu->device, &allocate, &commands);
+	if (result != VK_SUCCESS) {
+		vkDestroyCommandPool(gpu->device, pool, NULL);
+		return EIO;
+	}
+
+	/* The frame recorded between the program's begin and end. */
+	memset(&begin, 0, sizeof(begin));
+	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	result = vkBeginCommandBuffer(commands, &begin);
+	if (result != VK_SUCCESS) {
+		vkDestroyCommandPool(gpu->device, pool, NULL);
+		return EIO;
+	}
+	error = browser_view_render(view, target, commands, &serial);
+	result = vkEndCommandBuffer(commands);
+	if (error == 0 && result != VK_SUCCESS)
+		error = EIO;
+	if (error != 0) {
+		vkDestroyCommandPool(gpu->device, pool, NULL);
+		return error;
+	}
+
+	/* Submitted on the device's queue and waited for. */
+	memset(&fence_info, 0, sizeof(fence_info));
+	fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	result = vkCreateFence(gpu->device, &fence_info, NULL, &fence);
+	if (result != VK_SUCCESS) {
+		vkDestroyCommandPool(gpu->device, pool, NULL);
+		return EIO;
+	}
+	vkGetDeviceQueue(gpu->device, gpu->queue_family, 0, &queue);
+	memset(&submit, 0, sizeof(submit));
+	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit.commandBufferCount = 1;
+	submit.pCommandBuffers = &commands;
+	result = vkQueueSubmit(queue, 1, &submit, fence);
+	if (result == VK_SUCCESS)
+		result = vkWaitForFences(gpu->device, 1, &fence, VK_TRUE, UINT64_MAX);
+
+	/* The finished commands and their fence go. */
+	vkDestroyFence(gpu->device, fence, NULL);
+	vkDestroyCommandPool(gpu->device, pool, NULL);
+	if (result != VK_SUCCESS)
+		return EIO;
+
+	/* Succeeded: the image holds the frame. */
 	return 0;
 }
 
@@ -749,6 +1117,13 @@ main_parse(
 		differs = strcmp(argv[index], "--strict");
 		if (differs == 0) {
 			options->parse |= BROWSER_SCRIPT_STRICT;
+			continue;
+		}
+
+		/* The headless modes run the page on the view's own threads, as the window does. */
+		differs = strcmp(argv[index], "--threads");
+		if (differs == 0) {
+			options->threads = 1;
 			continue;
 		}
 
@@ -976,5 +1351,5 @@ main_usage(
 		"       browser --js [--strict] FILE.js\n"
 		"       browser --dump=code [--strict] FILE.js\n"
 		"       browser --version | --help\n"
-		"       headless page modes: [--settle-ms=0..60000] (default 5000) [--follow=0..9] (default 0)\n");
+		"       headless page modes: [--settle-ms=0..60000] (default 5000) [--follow=0..9] (default 0) [--threads]\n");
 }

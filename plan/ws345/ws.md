@@ -3,7 +3,7 @@
 # WS345 ブラウザの thread の分け方: JavaScript を窓の event の処理と別の thread に、通信（connect を含む）を独立した thread に
 
 - Master: [plan/master.md](../master.md)（2026-11-02 14:03 作成）。Primary Milestone: MG006。
-- Status: incomplete（2026-11-15 P3: p001〜p010・p013・p014 cleared、p011 は試験済みで Q1 の判定待ち、p015 は planned（R12 の headless の `--threads`）、p012 は planned。設計 [design.md](design.md)）
+- Status: incomplete（2026-11-15 P3: p001〜p011・p013・p014 cleared、p015 は実装済み・試験 PASS で Q1 の判定待ち（R12 の headless の `--threads`）、p012 は planned。設計 [design.md](design.md)）
 - 目標: ブラウザ（libbrowser と browser の shell、zedBSD・Windows・Linux の Keiland）で、JavaScript の実行と通信がどれだけ長くかかっても、窓の event の処理（入力・再描画・resize・title bar の操作）が止まらない形にする。JavaScript は窓の event の thread と別の名前付きの thread で動かす。通信は同期の呼び出し（connect・TLS の handshake・read・write）のままでよく、それを独立した名前付きの thread で行う。
 - 置き場所: userland/desktop/libbrowser/、userland/desktop/browser/（shell）、Windows の OmniGrammaton の build（WS334）。
 
@@ -60,10 +60,12 @@
 | [ws345-p011](phase011/phase.md) | 受け入れと回帰: 窓の event の遅れの上限（script の loop・connect の掛かり・document.write・resize・decode の間）、ThreadSanitizer、host の試験・js・test262 の部分集合・段 1・cross-build、zedBSD の QEMU、Windows の Wine、Linux の Keiland | cleared（2026-11-15 Q1、02de1f1c57 を main に merge 98db6c32cd。threaded-latency plain・tsan 10/10、test262 と WPT の部分集合は基点と同じ、shell-guest 27/27・guest-latency qemu PASS、3 機種の build warning 0。Q1 の判断: Wine の窓の待ちの 20 ms 超は対照の program でも同じ時刻に出る Wine 自身の止まりとして受け入れ、R12 は p015 に移した） | p007、p010、p014 |
 | [ws345-p012](phase012/phase.md) | 規約の全文の見直し（AGENTS §2） | planned（依存に p015 を足した、2026-11-15 Q1） | p011 |
 | [ws345-p014](phase014/phase.md) | 応答しない頁の問い（約 10 s 走り続ける script に「応答していません: 待つ／止める」、止めるは p004 の打ち切り）。各 shell の UI、窓の側の timer が script の thread の task の番号と始めの時刻を読む | cleared（2026-11-14 Q1、merge b09f1e9c51。host・QEMU 27/27（11-02）・Wine の shell-wine 23 PASS） | p004、p005、p007 |
-| [ws345-p015](phase015/phase.md) | headless の `_OWN` の道（`--threads`）: `browser_view_settle`・`_dump` を `_OWN` でも script の thread への命令にして返事を待つ、main.c と component の client に `--threads`、R12 の両方の mode の回帰。2026-11-14 Q1 の判断で p011 から分けた | in-progress（2026-11-15 P3 q2115） | p010 |
+| [ws345-p015](phase015/phase.md) | headless の `_OWN` の道（`--threads`）: `browser_view_settle`・`_dump` を `_OWN` でも script の thread への命令にして返事を待つ、main.c と component の client に `--threads`、R12 の両方の mode の回帰。2026-11-14 Q1 の判断で p011 から分けた | 実装済み・試験 PASS（2026-11-15 P3 q2115-i01: settle・dump・draw_pixels を `_OWN` で script の thread への命令に（settle は page の時計）、main.c と component の client に `--threads`、R12 の `tests/r12.sh`: DOM 39/42・WPT reftest 62/37/1・http 15/15・http-async 19/20・fetch 38/38・component が両 mode で同じ、cross-origin 21/21 対 14/21 は agent を越える MessagePort（Future Work）の設計上の違い。直した `_OWN` の誤り: fonts.ready の反応、paint の dump、gpu_failure。3 機種 warning 0・cross-build PASS。cleared は Q1、[phase.md](phase015/phase.md) の結果） | p010 |
 | [ws345-p013](phase013/phase.md) | libkeiland の resize の口（Wayland の configure の ack を描画の側の present の直前に、Win32 の modal loop の間の大きさ）。design-reviewer の指摘 4 で足した（番号は表の後ろ、p007 の前にする） | cleared（2026-11-02 P4 q1974-i01: KL_VERSION 109 の `kl_window_set_configure_deferred`・`_configure_take`・`_ack` と `kl_window_on_resize`。host の configure-test・TSan・Wine の resize-wine PASS。cross-build の PASS の行は負荷の時間切れで未取得、[phase.md](phase013/phase.md) の結果） | p001 |
 
 ## Resume point
+
+- 2026-11-15 P3（q2115-i01）: p015 を実装し試験した（[phase015](phase015/phase.md) の結果）。Q1 の判定の後は p012（規約の見直し）。
 
 - 2026-11-15 Q1: p011 cleared。次は p015（headless の _OWN の道と --threads、R12）→ p012（規約の見直し、p015 の後）。
 
@@ -99,3 +101,7 @@
 
 - 64 個の iframe の頁の読み込みが OWN で 6.2 秒（CALLER で 3.5 秒）なのは、窓が止まらないので受け入れる。調整は p011 の計測の後に判断する。
 - run-frame-load-tests.py が base でも exit 2（browser がもう受けない引数を渡す）のは、p011 の担当がその場で直す。
+
+## Future Work
+
+- agent を越える MessagePort の entangle（transfer）。今は `DataCloneError`（design.md §8、段 B の外）。`_OWN` の cross-origin の iframe で port を渡す頁（run-cross-origin-tests の 7 件、WPT `webmessaging/Transferred_objects_unusable`）が動かない（2026-11-15 p015 の R12 で確かめた）。

@@ -9,6 +9,14 @@
  * Exercises the public component through libbrowser.so and standard Vulkan.
  * The executable interposes allocation and framebuffer creation to observe
  * failure ownership without adding switches to the production engine.
+ *
+ *   component-client [--threads] [ORIGIN]
+ *
+ * --threads makes the views of their own threads (BROWSER_THREADING_OWN),
+ * as a window's: the inputs and the loads are queued, their callbacks come
+ * in the settle that follows, the GPU draws the committed frame
+ * (browser_view_render into the client's commands) and the navigation
+ * copies, made on the views' threads, are not refused.
  */
 
 #include <browser/browser.h>
@@ -47,6 +55,9 @@ static int refuse_copy;
 /* The next framebuffer creation fails when this one-shot interposition is armed. */
 static int refuse_framebuffer;
 
+/* Whether the views run on their own threads (--threads), set once before any view. */
+static int own;
+
 static void expect(int observed, int expected, const char *operation);
 static void committed(void *context, struct browser_view *view);
 static void console(void *context, struct browser_view *view, int level, const char *text, size_t length);
@@ -54,6 +65,7 @@ static void load(void *context, struct browser_view *view, enum browser_load_sta
 static void asynchronous(const char *origin);
 static void pixels(struct browser_view *view, struct browser_offscreen *image, int recorded);
 static void record(struct browser_view *view, const struct browser_gpu *gpu, const struct browser_target *target);
+static int submit(struct browser_view *view, const struct browser_gpu *gpu, const struct browser_target *target, int recorded);
 
 /*
  * Copies strings while allowing the client to refuse a navigation allocation.
@@ -66,9 +78,9 @@ strdup(
 	char *copy;
 	size_t length;
 
-	/* Counts only the destination being tested, leaving unrelated runtime strings alone. */
+	/* Counts only the destination being tested, leaving unrelated runtime strings alone (and the views' threads' copies alone). */
 	match = strstr(text, "second.html");
-	if (match != NULL) {
+	if (match != NULL && !own) {
 		copies++;
 
 		/* Refuses one selected copy as a real allocation failure. */
@@ -146,8 +158,17 @@ main(
 	int error;
 	int possible;
 	int total_copies;
+	uint64_t serial;
 	int point;
 	int commits;
+	int argument;
+
+	/* The views' mode and the origin of the asynchronous checks. */
+	argument = 1;
+	if (argc > argument && strcmp(argv[argument], "--threads") == 0) {
+		own = 1;
+		argument++;
+	}
 
 	/* The engine makes its threads with the POSIX threads, before any view. */
 	error = browser_threads_set(browser_threads_posix());
@@ -184,6 +205,8 @@ main(
 	options.fetch = BROWSER_FETCH_AT_ONCE;
 	options.width = 32;
 	options.height = 24;
+	if (own)
+		options.threading = BROWSER_THREADING_OWN;
 
 	/* Refuses missing options/output and dimensions before owning a view. */
 	error = browser_view_create(NULL, &first);
@@ -225,21 +248,31 @@ main(
 	expect(error, 0, "first page load");
 	error = browser_view_load(second, "plan/tools/browser-component/pages/second.html");
 	expect(error, 0, "second page load");
-	location = browser_view_title(second);
-	error = strcmp(location, "second");
-	expect(error, 0, "second title independent");
+	if (!own) {
+		location = browser_view_title(second);
+		error = strcmp(location, "second");
+		expect(error, 0, "second title independent");
+	}
 	error = browser_view_key(first, "x", "KeyX", "x", 1, 0, 0);
 	expect(error, 0, "abstract key");
-	expect(a.keys, 1, "first key callback");
+	if (!own)
+		expect(a.keys, 1, "first key callback");
 	expect(b.keys, 0, "second receives no first input");
-	/* Advances one page's virtual timers without running the other view's timers. */
+	/* Advances one page's timers (on a view of its own threads, its callbacks come in its settle) without the other view's. */
 	error = browser_view_settle(first, 5.0, 0);
 	expect(error, 0, "first timer settle");
+	if (own)
+		expect(a.keys, 1, "first key callback");
 	expect(a.timers, 1, "first timer callback");
 	expect(b.timers, 0, "second timer is independent");
 	error = browser_view_settle(second, 5.0, 0);
 	expect(error, 0, "second timer settle");
 	expect(b.timers, 1, "second timer callback");
+	if (own) {
+		location = browser_view_title(second);
+		error = strcmp(location, "second");
+		expect(error, 0, "second title independent");
+	}
 	possible = browser_view_can_go(first, INT_MIN);
 	expect(possible, 0, "INT_MIN history query");
 	error = browser_view_resize(first, 0, 24);
@@ -250,7 +283,11 @@ main(
 	expect(error, EINVAL, "overflowing row span");
 	error = browser_view_draw_pixels(first, NULL, 32, 24, 128);
 	expect(error, EINVAL, "NULL pixels");
-	error = browser_view_draw(first, NULL, VK_NULL_HANDLE, VK_NULL_HANDLE);
+	if (own) {
+		error = browser_view_render(first, NULL, VK_NULL_HANDLE, &serial);
+	} else {
+		error = browser_view_draw(first, NULL, VK_NULL_HANDLE, VK_NULL_HANDLE);
+	}
 	expect(error, EINVAL, "NULL Vulkan target");
 
 	/* Measures the navigation copies and creates a forward history entry to preserve on failure. */
@@ -258,13 +295,23 @@ main(
 	error = browser_view_load(first, "plan/tools/browser-component/pages/second.html");
 	expect(error, 0, "history second page");
 	total_copies = copies;
+	if (own) {
+		error = browser_view_settle(first, 5.0, 0);
+		expect(error, 0, "history second page settle");
+	}
 	error = browser_view_go(first, -1);
 	expect(error, 0, "history back");
+	if (own) {
+		error = browser_view_settle(first, 5.0, 0);
+		expect(error, 0, "history back settle");
+		possible = browser_view_can_go(first, 1);
+		expect(possible, 1, "history back keeps the forward step");
+	}
 	location = browser_view_url(first);
 	snprintf(before, sizeof(before), "%s", location);
 
-	/* Refuses each of the two final ownership copies, after the page has loaded. */
-	for (point = total_copies - 1; point <= total_copies; point++) {
+	/* Refuses each of the two final ownership copies, after the page has loaded (a view's own threads copy outside the client's count). */
+	for (point = total_copies - 1; !own && point <= total_copies; point++) {
 		copies = 0;
 		refuse_copy = point;
 		commits = a.commits;
@@ -295,7 +342,8 @@ main(
 	browser_view_set_gpu(first, &gpu);
 	browser_view_set_gpu(second, &gpu);
 	refuse_framebuffer = 1;
-	error = browser_view_draw(first, &target, VK_NULL_HANDLE, VK_NULL_HANDLE);
+	error = submit(first, &gpu, &target, own);
+	refuse_framebuffer = 0;
 	expect(error, EIO, "framebuffer creation failure");
 	browser_view_gpu_failure(first, &failure);
 	expect(failure.result, VK_ERROR_OUT_OF_HOST_MEMORY, "precise GPU failure");
@@ -334,15 +382,16 @@ main(
 	browser_view_destroy(NULL);
 
 	/* A loopback server supplies a failed asynchronous history navigation. */
-	if (argc > 1)
-		asynchronous(argv[1]);
+	if (argc > argument)
+		asynchronous(argv[argument]);
 
 	/* Reports any violated public contract before the success summary. */
 	if (failures != 0)
 		return 1;
 
 	/* Succeeded: both views and all client-owned GPU resources were released. */
-	printf("component: %d checks, PASS two views, input/timers, callback, allocation rollback, async history, Vulkan draw/record, resize/release\n", checks);
+	printf("component: %d checks, PASS two views, input/timers, callback, allocation rollback, async history, Vulkan draw/record, resize/release%s\n", checks,
+	    own ? " (views of their own threads: the allocation rollback is not refused there)" : "");
 	return 0;
 }
 
@@ -449,8 +498,8 @@ pixels(
 	error = browser_view_draw_pixels(view, cpu, target.width, target.height, stride);
 	expect(error, 0, "CPU reference");
 
-	/* Uses either the view's waited submission or the client's own command buffer and fence. */
-	if (recorded) {
+	/* Uses either the view's waited submission or the client's own command buffer and fence (a view of its own threads: the committed frame, recorded). */
+	if (recorded || own) {
 		record(view, &gpu, &target);
 	} else {
 		error = browser_view_draw(view, &target, VK_NULL_HANDLE, VK_NULL_HANDLE);
@@ -484,6 +533,7 @@ record(
 	VkFence fence;
 	VkQueue queue;
 	VkResult result;
+	uint64_t serial;
 	int error;
 
 	/* Allocates commands from the same queue family the view's renderer uses. */
@@ -516,8 +566,12 @@ record(
 		return;
 	}
 
-	/* Asks the component to record only into the successfully begun buffer. */
-	error = browser_view_record(view, target, commands);
+	/* Asks the component to record only into the successfully begun buffer (a view of its own threads records its committed frame). */
+	if (own) {
+		error = browser_view_render(view, target, commands, &serial);
+	} else {
+		error = browser_view_record(view, target, commands);
+	}
 	expect(error, 0, "component record");
 	if (error != 0) {
 		vkDestroyCommandPool(gpu->device, pool, NULL);
@@ -662,4 +716,63 @@ asynchronous(
 
 	/* The background view no longer owns requests or history. */
 	return;
+}
+
+/* Submits one drawing and reports the view's error: recorded into the client's commands (recorded) or the view's waited submission. */
+static int
+submit(
+    struct browser_view *view,
+    const struct browser_gpu *gpu,
+    const struct browser_target *target,
+    int recorded)
+{
+	VkCommandPoolCreateInfo pool_info;
+	VkCommandBufferAllocateInfo allocate;
+	VkCommandBufferBeginInfo begin;
+	VkCommandPool pool;
+	VkCommandBuffer commands;
+	VkResult result;
+	uint64_t serial;
+	int error;
+
+	/* The view's own submission. */
+	if (!recorded) {
+		error = browser_view_draw(view, target, VK_NULL_HANDLE, VK_NULL_HANDLE);
+		return error;
+	}
+
+	/* The client's commands, from the view's queue family. */
+	memset(&pool_info, 0, sizeof(pool_info));
+	pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	pool_info.queueFamilyIndex = gpu->queue_family;
+	result = vkCreateCommandPool(gpu->device, &pool_info, NULL, &pool);
+	if (result != VK_SUCCESS)
+		return ENOMEM;
+	memset(&allocate, 0, sizeof(allocate));
+	allocate.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocate.commandPool = pool;
+	allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocate.commandBufferCount = 1;
+	result = vkAllocateCommandBuffers(gpu->device, &allocate, &commands);
+	if (result != VK_SUCCESS) {
+		vkDestroyCommandPool(gpu->device, pool, NULL);
+		return ENOMEM;
+	}
+	memset(&begin, 0, sizeof(begin));
+	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	result = vkBeginCommandBuffer(commands, &begin);
+	if (result != VK_SUCCESS) {
+		vkDestroyCommandPool(gpu->device, pool, NULL);
+		return ENOMEM;
+	}
+
+	/* The frame recorded (a refused framebuffer leaves nothing to submit), and the commands go. */
+	if (own) {
+		error = browser_view_render(view, target, commands, &serial);
+	} else {
+		error = browser_view_record(view, target, commands);
+	}
+	(void)vkEndCommandBuffer(commands);
+	vkDestroyCommandPool(gpu->device, pool, NULL);
+	return error;
 }

@@ -69,7 +69,10 @@ enum front_kind {
 	FRONT_FOCUS_FIELD,
 	FRONT_COMPOSE,
 	FRONT_COMMIT,
-	FRONT_IMAGE
+	FRONT_IMAGE,
+	FRONT_SETTLE,
+	FRONT_DUMP,
+	FRONT_FRAME
 };
 
 /* What a notification tells the program. */
@@ -85,9 +88,27 @@ enum front_note_kind {
 };
 
 /*
+ * A call the program's thread waits in for its answer (a settle, a dump, a
+ * frame committed now): what it asks (the settle's budget and flags, the
+ * dump's kind), what it gets (the error, the dump's text and length) and
+ * whether the answer came (done, under the front's lock).  It lives in the
+ * calling thread's frame until done.
+ */
+struct front_call {
+	int done;
+	int error;
+	double budget;
+	unsigned flags;
+	int kind;
+	char *text;
+	size_t length;
+};
+
+/*
  * One entry of the mailbox: its kind and its arguments (which of them a
  * kind uses is the call's), with the strings the entry owns (NULL when
- * none).  checked says a commit carries the session the program saw.
+ * none).  checked says a commit carries the session the program saw; call
+ * is the waiting call of a settle, a dump or a frame (NULL for the rest).
  */
 struct front_item {
 	int kind;
@@ -108,6 +129,7 @@ struct front_item {
 	char *text;
 	char *code;
 	char *typed;
+	struct front_call *call;
 };
 
 /*
@@ -144,10 +166,12 @@ struct front_note {
  * __atomic outside the lock), the creation's outcome (created, error), the
  * state published last, the notifications waiting (notes, with the console
  * lines dropped and whether a redraw waits), whether the program's wake is
- * owed, the latest committed frame and whether a present came since the
- * script thread last looked (opportunity).  changed is signalled for a new
- * entry, news, a present and the end, and broadcast when the creation
- * ended.
+ * owed, the latest committed frame, whether a present came since the
+ * script thread last looked (opportunity) and whether there is news for a
+ * waiting call's program thread (heard: a state or notifications
+ * published).  changed is signalled for a new entry, news, a present and
+ * the end, and broadcast when the creation ended; answered is broadcast
+ * for an answer and for heard.
  *
  * The script thread's alone: dirty (the view asked for a redraw since the
  * last committed frame), serial (the number of the last state), the
@@ -155,7 +179,8 @@ struct front_note {
  * style thread the agent lends its heaps to (style, made and ended by the
  * script thread) and the threads of the page's iframes (frames, made
  * before the view and ended after it, by the script thread; the agent is
- * held through them for every task).  The program's thread's alone: shown
+ * held through them for every task) and the settle the program waits for
+ * (settling, NULL when none).  The program's thread's alone: shown
  * (the state its getters read, replaced in browser_view_process) and the
  * copy of the options and callbacks.
  */
@@ -164,6 +189,7 @@ struct view_front {
 	struct wb_thread thread;
 	struct wb_mutex lock;
 	struct wb_cond changed;
+	struct wb_cond answered;
 	struct wb_vector items;
 	size_t presses;
 	int rung;
@@ -182,11 +208,13 @@ struct view_front {
 	int wake_owed;
 	struct view_commit *latest;
 	int opportunity;
+	int heard;
 	int dirty;
 	uint64_t serial;
 	uint64_t commit_serial;
 	struct view_style *style;
 	struct view_frames *frames;
+	struct front_call *settling;
 };
 
 /*
@@ -222,6 +250,10 @@ static enum browser_policy front_link(void *context, struct browser_view *view, 
 static void front_console(void *context, struct browser_view *view, int level, const char *text, size_t length);
 static void front_script_error(void *context, struct browser_view *view, int error);
 static void front_tell(struct view_front *front, struct front_note *note);
+static int front_call(struct browser_view *view, int kind, struct front_call *call);
+static void front_answer(struct view_front *front, struct front_call *call, int error);
+static int front_commit_now(struct view_front *front);
+static void front_settled(struct view_front *front, int *timeout);
 
 /*
  * Makes a view of its own threads: the front, then the script thread,
@@ -267,7 +299,10 @@ view_front_create(
 	error = wb_mutex_init(&front->lock);
 	if (error == 0)
 		error = wb_cond_init(&front->changed);
+	if (error == 0)
+		error = wb_cond_init(&front->answered);
 	if (error != 0) {
+		wb_cond_destroy(&front->answered);
 		wb_cond_destroy(&front->changed);
 		wb_mutex_destroy(&front->lock);
 		free(front);
@@ -280,6 +315,7 @@ view_front_create(
 		stack = FRONT_STACK_32;
 	error = wb_thread_start("browser-script", stack, front_run, front, &front->thread);
 	if (error != 0) {
+		wb_cond_destroy(&front->answered);
 		wb_cond_destroy(&front->changed);
 		wb_mutex_destroy(&front->lock);
 		free(front);
@@ -298,6 +334,7 @@ view_front_create(
 	/* A view that could not be made ended its thread. */
 	if (error != 0) {
 		wb_thread_join(&front->thread);
+		wb_cond_destroy(&front->answered);
 		wb_cond_destroy(&front->changed);
 		wb_mutex_destroy(&front->lock);
 		wb_vector_release(&front->items);
@@ -354,6 +391,7 @@ view_front_destroy(
 	front_snapshot_free(&front->published);
 	front_snapshot_free(&front->shown);
 	view_commit_release(front->latest);
+	wb_cond_destroy(&front->answered);
 	wb_cond_destroy(&front->changed);
 	wb_mutex_destroy(&front->lock);
 	free(front);
@@ -802,6 +840,81 @@ view_front_request_image(
 		return error;
 
 	/* Succeeded: the request is queued. */
+	return 0;
+}
+
+/*
+ * Settles a view of its own threads for the program (browser_view_settle):
+ * after the commands queued before it, the script thread runs the page as
+ * it runs in a window, on the page's own clock, until it is at rest (no
+ * fetch under way, and the clock at budget or no timer due by then),
+ * commits it and answers.  The program's callbacks are called on the
+ * calling thread meanwhile, as their news comes.
+ */
+int
+view_front_settle(
+	struct browser_view *view,
+	double budget,
+	unsigned flags)
+{
+	struct front_call call;
+	int error;
+
+	/* The call, answered once the page is at rest. */
+	memset(&call, 0, sizeof(call));
+	call.budget = budget;
+	call.flags = flags;
+	error = front_call(view, FRONT_SETTLE, &call);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the page is at rest and committed. */
+	return 0;
+}
+
+/* Dumps the page of a view of its own threads for the program (browser_view_dump), made on the script thread after the commands queued before it. */
+int
+view_front_dump(
+	struct browser_view *view,
+	enum browser_dump kind,
+	char **text,
+	size_t *length)
+{
+	struct front_call call;
+	int error;
+
+	/* The call; a text made for a call that failed after all goes. */
+	*text = NULL;
+	*length = 0;
+	memset(&call, 0, sizeof(call));
+	call.kind = (int)kind;
+	error = front_call(view, FRONT_DUMP, &call);
+	if (error != 0) {
+		free(call.text);
+		return error;
+	}
+
+	/* Succeeded: the text is the program's. */
+	*text = call.text;
+	*length = call.length;
+	return 0;
+}
+
+/* Commits the page of a view of its own threads as it is now, after the commands queued before it, for the program's drawing (browser_view_draw_pixels). */
+int
+view_front_frame(
+	struct browser_view *view)
+{
+	struct front_call call;
+	int error;
+
+	/* The call. */
+	memset(&call, 0, sizeof(call));
+	error = front_call(view, FRONT_FRAME, &call);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the latest committed frame is the page as it is now. */
 	return 0;
 }
 
@@ -1258,7 +1371,8 @@ front_enter(
  * The script thread's loop: waits for an entry, the loader's news or the
  * view's next timer, takes the agent from the iframes' threads, runs the
  * entries that came (each a task), the view's round (a task), publishes,
- * and gives the agent back, until the view's end.
+ * answers the calls the program waits in (a settle once the page is at
+ * rest), and gives the agent back, until the view's end.
  */
 static void
 front_loop(
@@ -1268,6 +1382,7 @@ front_loop(
 	struct front_item *item;
 	size_t index;
 	int opportunity;
+	int changed;
 	int timeout;
 	int ending;
 
@@ -1297,7 +1412,7 @@ front_loop(
 
 		wb_mutex_unlock(&front->lock);
 
-		/* Each entry in order, as a task, unless the view is ending. */
+		/* Each entry in order, as a task, unless the view is ending (a call is answered after the round). */
 		view_frames_enter(front->frames);
 		for (index = 0; index < taken.count; index++) {
 			item = wb_vector_at(&taken, index);
@@ -1306,14 +1421,25 @@ front_loop(
 				vm_agent_task_begin(&front->agent);
 				front_execute(front, item);
 				vm_agent_task_end(&front->agent);
+			} else if (item->call != NULL) {
+				front_answer(front, item->call, ECANCELED);
+				item->call = NULL;
 			}
 			front_item_free(item);
 		}
-		wb_vector_release(&taken);
 
-		/* The end. */
+		/* The end, with the settle that waited. */
 		ending = __atomic_load_n(&front->ending, __ATOMIC_ACQUIRE);
 		if (ending) {
+			for (index = 0; index < taken.count; index++) {
+				item = wb_vector_at(&taken, index);
+				if (item->call != NULL && item->call != front->settling)
+					front_answer(front, item->call, item->call->error);
+			}
+			if (front->settling != NULL)
+				front_answer(front, front->settling, ECANCELED);
+			front->settling = NULL;
+			wb_vector_release(&taken);
 			view_frames_leave(front->frames);
 			break;
 		}
@@ -1332,9 +1458,24 @@ front_loop(
 		browser_view_process(front->view);
 		vm_agent_task_end(&front->agent);
 
-		/* What the program sees, the next wait's bound, and the agent for the iframes' threads. */
+		/* What the program sees, with what the microtasks the rendering update left changed, and the calls of the round answered with it (a settle when the page is at rest). */
 		front_publish(front);
+		vm_agent_task_begin(&front->agent);
+		changed = view_rendering_checkpoint(front->view);
+		vm_agent_task_end(&front->agent);
+		if (changed)
+			front_publish(front);
+		for (index = 0; index < taken.count; index++) {
+			item = wb_vector_at(&taken, index);
+			if (item->call != NULL && item->call != front->settling)
+				front_answer(front, item->call, item->call->error);
+		}
+		wb_vector_release(&taken);
+
+		/* The next wait's bound (no longer than a settle's next look), and the agent for the iframes' threads. */
 		timeout = browser_view_timeout(front->view);
+		if (front->settling != NULL)
+			front_settled(front, &timeout);
 		view_frames_leave(front->frames);
 	}
 }
@@ -1421,6 +1562,18 @@ front_execute(
 		if (item->checked && session != item->session)
 			break;
 		error = browser_view_commit_text(view, item->text, item->delete_before, item->delete_after);
+		break;
+	case FRONT_SETTLE:
+		/* The settle waits for the page to come to rest, looked at after each round. */
+		front->settling = item->call;
+		break;
+	case FRONT_DUMP:
+		/* The dump, as a view of this thread makes it. */
+		item->call->error = browser_view_dump(view, (enum browser_dump)item->call->kind, &item->call->text, &item->call->length);
+		break;
+	case FRONT_FRAME:
+		/* The page as it is now, committed for the drawing. */
+		item->call->error = front_commit_now(front);
 		break;
 	case FRONT_IMAGE:
 		/* The image, copied for the program, or why there is none. */
@@ -1519,6 +1672,10 @@ front_publish(
 		front->wake_owed = 1;
 		wake = 1;
 	}
+	if (changed || front->notes.count != 0 || front->console_dropped != 0) {
+		front->heard = 1;
+		wb_cond_broadcast(&front->answered);
+	}
 
 	wb_mutex_unlock(&front->lock);
 
@@ -1590,6 +1747,135 @@ front_commit(
 
 	/* Succeeded: the drawing thread draws this one next. */
 	return 0;
+}
+
+/*
+ * Looks, after a round on the script thread, whether the page came to rest
+ * for the settle the program waits in: if so it is committed as it is now
+ * and the program answered; if not, the next wait (timeout, -1 for none)
+ * is bounded by when to look again.  A settle that lays the page out looks
+ * once more after the commit, which may have asked for images.
+ */
+static void
+front_settled(
+	struct view_front *front,
+	int *timeout)
+{
+	struct front_call *call;
+	int done;
+	int wait;
+	int error;
+
+	/* Where the page is. */
+	call = front->settling;
+	error = view_settle_state(front->view, call->budget, &done, &wait);
+
+	/* At rest: the page as it is now is committed for the drawing, and looked at again when its layout asks for images. */
+	if (done && error == 0) {
+		(void)front_commit_now(front);
+		if ((call->flags & BROWSER_SETTLE_LAYOUT) != 0U)
+			error = view_settle_state(front->view, call->budget, &done, &wait);
+	}
+
+	/* Not yet: the next look. */
+	if (!done) {
+		if (wait >= 0 && (*timeout < 0 || wait < *timeout))
+			*timeout = wait;
+		return;
+	}
+
+	/* The program hears. */
+	front->settling = NULL;
+	front_answer(front, call, error);
+}
+
+/* Commits the page as it is now at the view's size, on the script thread; reports 0, or why not (ENOENT: no page). */
+static int
+front_commit_now(
+	struct view_front *front)
+{
+	struct view_snapshot now;
+	int error;
+
+	/* The view's size, then the frame. */
+	memset(&now, 0, sizeof(now));
+	error = view_fill_snapshot(front->view, &now);
+	if (error == 0)
+		error = front_commit(front, now.width, now.height);
+	front_snapshot_free(&now);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the latest committed frame is the page as it is now. */
+	return 0;
+}
+
+/*
+ * Queues a call of the program's thread (a settle, a dump, a frame) and
+ * waits for its answer; the program's callbacks are called on this thread
+ * whenever the script thread published news meanwhile, and once more with
+ * the answer's.  Reports the call's error, or why it could not be queued.
+ */
+static int
+front_call(
+	struct browser_view *view,
+	int kind,
+	struct front_call *call)
+{
+	struct view_front *front;
+	struct front_item item;
+	int done;
+	int error;
+
+	/* The entry. */
+	front = view_front_of(view);
+	memset(&item, 0, sizeof(item));
+	item.kind = kind;
+	item.call = call;
+	error = front_push(view, &item);
+	if (error != 0)
+		return error;
+
+	/* The answer, the news told as it comes. */
+	for (;;) {
+		wb_mutex_lock(&front->lock);
+
+		while (!call->done && !front->heard)
+			wb_cond_wait(&front->answered, &front->lock);
+		done = call->done;
+		front->heard = 0;
+
+		wb_mutex_unlock(&front->lock);
+
+		/* The state and the callbacks, on this thread. */
+		view_front_process(view);
+		if (done)
+			break;
+	}
+
+	/* The call failed on the script thread. */
+	if (call->error != 0)
+		return call->error;
+
+	/* Succeeded: the call was answered. */
+	return 0;
+}
+
+/* Answers a call the program's thread waits in, on the script thread; the call is the caller's again (gone) once it wakes. */
+static void
+front_answer(
+	struct view_front *front,
+	struct front_call *call,
+	int error)
+{
+	/* The answer, under the lock the caller waits with. */
+	wb_mutex_lock(&front->lock);
+
+	call->error = error;
+	call->done = 1;
+	wb_cond_broadcast(&front->answered);
+
+	wb_mutex_unlock(&front->lock);
 }
 
 /* Queues an entry (its strings become the mailbox's), merging it with the last one when they merge; ENOBUFS or ENOMEM frees them. */

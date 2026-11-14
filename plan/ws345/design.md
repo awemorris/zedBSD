@@ -265,7 +265,8 @@ int browser_threads_set(const struct browser_threads *threads);
 | `browser_view_request_image`（新、drag の画像） | 窓 | 要求を積む。答えは callback `image`（新）で窓の thread に |
 | `_focus_field`（mail の sign-in code） | 窓 | 要求を積み、答え（focus が付いた field の caret）を callback `field`（新）で返す。mail の道は今の「focus して直ぐ `text_target` を読む」を、この答えを待つ形に変える |
 | `browser_view_set_gpu`・`_render`（新）・`_render_pixels`（新）・`_presented`（新）・`_release_targets`・`_gpu_failure` | 描画 | §6 |
-| `_settle`・`_dump`・`_draw_pixels`・`_prepare`・`_draw`・`_record`・`_image_at` | — | `BROWSER_THREADING_OWN` では `ENOTSUP`（headless の mode 用） |
+| `_settle`・`_dump`・`_draw_pixels` | 窓（headless の program） | 命令として mailbox に積み、返事を待つ（§5.5、p015 で足した） |
+| `_prepare`・`_draw`・`_record`・`_image_at` | — | `BROWSER_THREADING_OWN` では `ENOTSUP`（headless の mode 用） |
 
 - callback `link`（link を辿るかの判断）は script の thread で呼ばれる（答えがその場で要るため）。shell の実装は印字して ALLOW を返すだけで、窓の状態に触れない。契約に「script の thread で呼ばれる。view と窓に触れない」と書く。
 - 窓の thread が libbrowser でする事は、mailbox への copy と snapshot の読み（文字列の copy）だけで、DOM・JS・style・layout・通信に触れない（D1）。
@@ -290,6 +291,17 @@ int browser_threads_set(const struct browser_threads *threads);
 | style | request の queue の condition | script の thread の request |
 | net | socket と control の waker の `poll`（今のまま） | 要求・取り消し（waker を鳴らす） |
 | resolve・storage・media | 各 queue の condition（今のまま、表の物で） | — |
+
+### 5.5 headless の呼び出し（R12、p015）
+
+`browser_view_settle`・`_dump`・`_draw_pixels` は `_OWN` の view でも受ける（前は `ENOTSUP`）。公開 API の変更は関数の追加でなく、この三つの契約を `_OWN` に広げる事（`browser.h` の説明を合わせた。`BROWSER_API_VERSION` は 5 のまま: 型・関数・option の配置は変わらず、前に `ENOTSUP` だった呼び出しが動くだけ）。理由: R12（二つの道の分かれ）を閉じるには、WPT・DOM・component・段 1 の試験が出荷する道（front・mailbox・script の thread・style の thread の貸し・確定した frame・描画の thread）を通る必要があり、そのためには headless の program が `_OWN` の view を落ち着かせ、dump し、描けなければならない。
+
+- 三つとも呼んだ thread の命令を mailbox に積み（前の命令の後に走る）、呼んだ thread は返事を待つ。待つ間、script の thread が publish した news（state・通知）があれば、呼んだ thread で `browser_view_process` と同じく callback を呼ぶ（`_CALLER` の settle の中で callback が呼ばれるのと同じ順。console の 1024 行の上限も溜めずに済む）。待つのは呼んだ thread だけで、script の thread の loop・描画の thread・他の命令は止めない。
+- settle は仮想の時計でなく、窓と同じく page の時計（実時間）で走らせる。理由: `_OWN` では iframe ごとの thread が自分の時計と取得で走り（§3）、script の thread が agent を持ったまま仮想の時計を進めると、iframe の thread が走れず frame の load を待ち続ける（`_CALLER` の仮想の時計の settle は iframe の thread が無い前提）。終わりの判定（`view_settle_state`、各 round の publish の後に script の thread が見る）: 取得中の頁・request・frame の load が無く、page の時計が budget に達したか、それより前に budget までに来る timer・present を待つ animation frame・来る途中の画像・navigation の要求・iframe の thread が無い。取得が続けば budget の後 30 s（`_CALLER` の network の上限と同じ）で `ETIMEDOUT`。終わった時の頁を確定（commit）してから返事する。
+- animation frame は present を待つので、`_OWN` の headless の program は描画の代わりの thread（確定した frame を描いて `browser_view_presented`）を持つ（`browser --threads` の `browser-draw`、host-threaded-view の (s)）。
+- dump は script の thread で `_CALLER` と同じ code で作る（確定した frame が display list を取った後の paint の dump は、その場で paint し直す）。`_draw_pixels` は頁をその時点で確定し、呼んだ thread が `browser_view_render_pixels` と同じ描画の code（確定した frame）で描く。
+- `browser --threads` は `--async` でない時 `BROWSER_FETCH_DEFAULT`（窓と同じ）で view を作る。`BROWSER_FETCH_AT_ONCE` の view は loader を持たず、iframe の thread が取得の client を開けない（iframe が browsing context を持たない）ため。script の navigation は link の callback で `--follow` の数まで通す（`_CALLER` では program の round が一つずつ行う）。
+- R12 の試験で見つけて直した `_OWN` の道の誤り（窓でも同じ）: commit の layout が `document.fonts.ready` を解いても、その反応（microtask）が次の task まで走らなかった。round の publish の後に microtask の checkpoint を task として走らせ、頁が変われば確定し直す（`view_rendering_checkpoint`）。
 
 ## 6. 描画（D5）
 
@@ -399,7 +411,7 @@ for (;;) {
 | R9 | font の face の共有（layout と glyph の rasterize） | thread ごとに face を開く（§6.3）。memory は bytes を共有して face の構造だけ増える |
 | R10 | iframe の多い頁の thread の数（広告の iframe） | 上限 64（J4）。stack は予約だけで、触った分だけ memory になる |
 | R11 | 段 B の structured clone の対応の漏れ（heap を越える形） | 段 B の Phase で WPT の `postMessage` の試験の部分集合 |
-| R12 | `BROWSER_THREADING_CALLER` と `_OWN` の二つの道の分かれ（WPT・DOM・component・段 1 の試験が `_CALLER` だけを通ると、出荷する道を試さない） | 二つの道は front（積むか、直に呼ぶか）だけが違い、page の code は同じ。browser の headless の mode に `--threads` を足し（`_OWN` の view を内の描画の代わりの thread で回す）、p011 で WPT の reftest の見本・DOM の試験・component・段 1 の host の試験を両方の mode で流す |
+| R12 | `BROWSER_THREADING_CALLER` と `_OWN` の二つの道の分かれ（WPT・DOM・component・段 1 の試験が `_CALLER` だけを通ると、出荷する道を試さない） | 二つの道は front（積むか、直に呼ぶか）だけが違い、page の code は同じ。browser の headless の mode に `--threads` を足し（`_OWN` の view を内の描画の代わりの thread で回す、§5.5）、p015 で WPT の reftest の見本・DOM の試験・component・段 1 の host の試験を両方の mode で流す（p011 から分けた） |
 | R13 | 打ち切りが別の task に落ちる | task の通し番号で比べる（§9） |
 | R14 | 32-bit の target の address の空間（script の thread の stack の予約） | stack と frame の上限を target の幅で変える（§3.1、J4） |
 

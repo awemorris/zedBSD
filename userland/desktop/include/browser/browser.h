@@ -398,9 +398,10 @@ struct browser_gpu_failure {
  * frame (browser_view_render, _render_pixels), owns the view's GPU side
  * (browser_view_set_gpu, _release_targets) and tells of each present
  * (browser_view_presented), when the page's animation frames run.  In a
- * view of its own threads browser_view_settle, _dump, _draw_pixels,
- * _prepare, _draw, _record and _image_at report ENOTSUP, and
- * browser_view_timeout reports -1.
+ * view of its own threads browser_view_settle, _dump and _draw_pixels are
+ * the program's calls that wait for the view's thread (below), _prepare,
+ * _draw, _record and _image_at report ENOTSUP, and browser_view_timeout
+ * reports -1.
  */
 struct browser_view_options {
 	int version;
@@ -675,6 +676,19 @@ uint64_t browser_view_text_session(const struct browser_view *view);
  * images its layout asked for), drawn with the CPU into 0xAARRGGBB pixels
  * whose rows are stride bytes apart, or dumped as text (*text is the
  * program's to free with browser_free).
+ *
+ * In a view of its own threads each is queued after the program's
+ * commands before it and the calling thread waits for the answer, calling
+ * the program's callbacks (browser_view_process) as their news comes.  The
+ * settle runs the page as a window's runs, on its own clock, until it is
+ * at rest: nothing is fetched any more (for at most 30 s past budget, then
+ * ETIMEDOUT), and the clock reached budget or, before it, no timer is due
+ * by budget, no animation frame waits for a present, no image is on its
+ * way and no iframe has a thread; the page as it is then is committed.
+ * The animation frames run only when the program's drawing thread tells of
+ * presents (browser_view_presented).  The dump is made of the page as it
+ * is when the call is taken, and the drawing commits the page as it is
+ * then and draws the frame as browser_view_render_pixels does.
  */
 int browser_view_settle(struct browser_view *view, double budget, unsigned flags);
 int browser_view_draw_pixels(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);
