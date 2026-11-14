@@ -17,7 +17,7 @@ Queue: q2114-i01（P5）。以前: q1683-i01（P6、branch `agent/p6-ws300`、me
 - `include/drivers/pci/pci-nvme-protocol.h`（既存の header の inline、新しい .c は無い＝mk を変えない）: `struct drv_nvme_power_state`・`drv_nvme_power_profile`・`drv_nvme_apst_summary`、
   `drv_nvme_power_parse`（NPSS・APSTA・PSD の MP（MXPS で µW に）・NOPS・ENLAT・EXLAT）、`drv_nvme_apst_target`（番号の大きい最初の、非操作・両方の latency が報告され和が許容以下・電力が元の状態以下の状態）、
   `drv_nvme_apst_build`（256 byte の表、ITPT は和が 15000 µs 以下なら 100 ms、他は 2000 ms、要約）、`drv_nvme_apst_command`（Set Features 0Ch、APSTE、PRP1 の表は 1 page の中で dword 揃え）。
-  値の出典は block の comment（NVMe Base 1.4c の field、Linux の nvme の module の parameter の既定値は値だけ）。
+  値の出典は block の comment（NVMe Base 1.4c の field、Linux 6.19 の nvme の module の parameter の既定値は値だけ、2 段の idle の時間は Procedure referenced。comment の形を 2fd8d9f591 で guardrail の形に直した、x86_64 vmunix warning 0・host 試験 PASS を再確認）。
 - `src/drivers/pci/pci-nvme.c`: probe の Identify Controller の検査の直後に parse。HMB の setup の後に `nvme_apst_setup`（`nvme.apst=on` が無ければ何もしない。APSTA が 0 なら
   「not supported」の log。page を 1 つ取り、非操作の状態ごとに 1 行、`nvme_apst_apply`）。`nvme_apst_apply` は resume（`nvme_resume_steps` の HMB の後）と recovery（HMB の後、`recovery_command` 1）でも送り直す
   （page を取っていなければ何もしない）。移る先が無ければ APSTE = 0。失敗は log だけ。page は `nvme_dma_free` で返す。

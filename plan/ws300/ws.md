@@ -70,7 +70,7 @@ S0i3 の妨げにならない状態（NVMe は D3、link は L1.2 か L2 相当�
 
 ## Resume point（2026-11-15 P5、q2114-i01）
 
-- worktree `p5-ws300`（branch `agent/p5-ws300`、基点 main 5202274642）。p003 の code 4966ba2a1a、p005 の APST 1f22d22af8（`pci-nvme-protocol.h`・`pci-nvme.c`、host 試験 `tests/host/nvme-apst-test.c`）、QEMU の image の config `tests/config-amd64-sleep.mk`。
+- worktree `p5-ws300`（branch `agent/p5-ws300`、基点 main 5202274642）。p003 の code 4966ba2a1a、p005 の APST 1f22d22af8・2fd8d9f591（`pci-nvme-protocol.h`・`pci-nvme.c`、host 試験 `tests/host/nvme-apst-test.c`）、QEMU の image の config `tests/config-amd64-sleep.mk`。
 - 次: (1) Q1 の判断: p002 の canceled、p003・p005（APST）の cleared の可否。(2) ユーザーの判断 Q300-6 の後に p004 を main の上で作り直す（計算は header の inline、design §4.3）。Q300-2 の後に p005 の UAPI。
   (3) p006（5330: BUG-428・429 の後、WS052 p014 の script と一緒に、`nvme.apst=on` あり・なし、`nvme: suspended in N ms`、S0 idle の PC の滞在。root port の D3hot の要否もここで）。p006 の PASS の後に APST・ASPM の既定を on に。(4) p007。
 - 第 2 版の branch `agent/p6-ws300` は merge しない（p002 は BUG-424、p003〜p005 は main の上で作り直した・作り直す）。消してよいかは Q1。
