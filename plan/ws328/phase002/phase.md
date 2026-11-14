@@ -3,7 +3,7 @@
 # ws328-p002 vec-base と vec-path（行列・path の builder・弧・tight な bbox）
 
 - WS: [WS328](../ws.md)。設計: [design.md](../design.md)。
-- Status: planned（2026-11-14 p001 が作成）
+- Status: 実装済み・試験 PASS（2026-11-15 P4 q2104-i01。cleared は Q1）
 - 担当: 実装の担当（Sonnet 5.5 high、phase-runner-low、1 回の起動）。
 - 依存: —（依存の Phase が main に merge され cleared の後に始める）。
 - 基点の SHA（header の凍結）: ws.md の Resume point に Q1 が書いた SHA。`BASE=<それ>`。
@@ -71,4 +71,48 @@
 
 ## 結果
 
-（実装の担当が書く。）
+実装の担当（P4、Sonnet 5.5、Queue q2104-i01）。日付は host の `date`（2026-11-15）。
+
+### 実装
+
+- `vec-base.c`: 全関数（vec_finite・vec_point_valid・行列の identity/valid/multiply/invert/apply/apply_vector/scale_max・translate/scale/rotate/skew_x/skew_y・vec_rect_include/empty・vec_atan2・vec_exp）。
+- `vec-path.c`: 全関数（init/release/reset/error、move/line/quad/cubic/arc/close、rect/rounded_rect/ellipse、transform/copy、view_of/view_check/bounds）。builder の命令は scratch の領域に集めてから 1 回で path へ足す（失敗は error 以外を変えない）。
+- 試験: `plan/ws328/tests/unit/test-base.c`（204220 checks）・`test-path.c`（348081 checks）。期待の値は仕様の式と手の計算（半円の中点 (5, ±5)・円 r=10 の中心 (5, ±8.660254)・四半円の handle 4/3·tan(π/8)・二次の極値 5・三次の極値 7.5 と ±5√3・シア行列の特異値 (1+√5)/2・回転した楕円の bbox √((25+9)/2) など）。弧は乱数の円（3000 個）で「全ての sample が 1 つの円の上・sweep の符号が flag・large が半周超」を独立の幾何で確かめた。
+
+### 確かめ（出力を読んだ）
+
+- `sh plan/ws328/tests/run-unit.sh base path`: `test-base: PASS (204220 checks)`、`test-path: PASS (348081 checks)`、最後の行 `run-unit: PASS`。
+- `sh plan/ws328/tests/run-unit.sh all`（cc）と `CC=clang sh plan/ws328/tests/run-unit.sh all`: どちらも test-base・test-harness (1127)・test-path が PASS、最後の行 `run-unit: PASS`（ASan・UBSan・-Wall -Wextra -Werror）。
+- `BASE=57bf94e62f sh plan/ws328/tests/check-skeleton.sh`: 最後の行 `check-skeleton: PASS`（check 6 の zedBSD の clang・x86_64 の sysroot の compile を含む。自分の worktree の build/ に `llvm-toolchain-cached` と `sysroot` を入れて使った）。
+- `git diff --check`: 出力なし。
+
+### わざと壊す確かめ（git の外、30 通り、script は担当の scratchpad）
+
+28 通りで試験が FAIL（行列の合成の順・e の項・逆行列の e の符号・行列式の下限・scale_max の符号・rotate の c の符号・atan2 の反射と係数・exp の下限・rect_include の下端・範囲の検査・弧の中心の符号・sweep の補正・handle の長さ・分割の余裕・close の後の暗黙の move・三次の第 2 根・二次の根・rrect の handle の向き・楕円の向き・上限の境界・view の点数の検査・copy の closed・move の sticky・close の current・弧の端点の一致・半径の絶対値・変換の start）。毎回元に戻し、`git diff` が空に戻った事を確かめた。
+残った 2 通りは等価の変異: (1) skew の `reduced == 90` の削除は、90° の tanf が −2.2e7 になり `VEC_COORD_MAX` の検査で同じく EINVAL になるため結果が同じ（二重の防御）。(2) path_curve_at の hull への clamp の上限の変異は、float の丸めで hull を超える入力を作れず試験で踏めない（防御）。
+
+### 自分で決めた点（header が黙っている所）
+
+1. `vec_path_view_check`: 動詞も点も無い view は well formed（0）。`vec_path_bounds` は空の view を EINVAL（header どおり）。件数が `VEC_PATH_*_MAX` を超える view も EINVAL。
+2. `vec_rect_include`: 無効な点（NaN・範囲の外）は無視。`bottom < top` の矩形も `right < left` と同じく空の始まりとして扱う。
+3. `vec_atan2`: 無限大が入っても 0（NaN と同じ扱い）。
+4. `vec_matrix_rotate`: 角度を fmodf で [0, 360) に畳み、0・90・180・270 度は cos・sin を厳密な 0・±1 にする（90° で (1,0)→(0,1) が厳密）。skew は 180° 周期で [−90, 90] に畳み、ちょうど ±90（450°・270° を含む）は EINVAL。
+5. 弧: 半径は [1e-6, 1e9] に収める（二乗を作らず、`x1'/rx` を先に割る形で計算し、float の範囲に収まるため）。Λ が 1e-20 未満（弦が半径の 1e-10 未満）は直線を足す。角度は libm の atan2f（`vec_atan2` の誤差 1e-5 が大きな半径で端点を動かすため使わない）。曲線の数は ceil(|Δθ|/(π/2) − 1e-4) を 1〜4 に収める（半円の丸めで 3 本にならない）。最後の曲線の終点は引数の (x, y) をそのまま使う。曲線の点が座標の範囲を超えれば（極端に細長い楕円）EINVAL（sticky）。
+6. 弧で端点が現在の点と等しい（float の完全一致）時は、close の直後でも暗黙の move を足さず何もしない。現在の点が無い時の EINVAL は端点の比較より先。
+7. `vec_path_append_rounded_rect`: 半径はどちらかが 0 の角を両方 0（直角）にする。辺に沿った半径の和が辺を 1/1024 の余裕の中で超える時は、全ての半径を同じ比（最も混む辺が丁度満ちる）で縮める（header は余裕の外を EINVAL としか書いていない。CSS Backgrounds 3 §4.5 の縮め方）。直角の角は命令を足さない（辺の line が角で終わる）ので、全ての角が直角なら `vec_path_append_rect` と同じ M L L L Z。曲がる角が n 個（1〜4）の時は move 1・辺の line 4・曲線 n・close 1 で 6 + n verb、5 + 3n 点（n = 4 で 10 verb・17 点）。開始は左上の角の曲線の終点（直角なら角そのもの）。
+8. `vec_path_copy`: source が error なら EINVAL で destination は触らない。destination == source は何もしない。確保に失敗したら destination を release して error ENOMEM。copy の capacity は件数ちょうど。
+9. `vec_path_transform`: 失敗は sticky な EINVAL（header どおり）。点の他に start・current も写す（検査してから書く 2 回の走査）。
+10. bbox: 極値の点は de Casteljau で求め、制御点の箱に clamp する（丸めで座標の範囲を出ないように）。move だけの subpath の点も含む。三次の導関数の根は安定な二次の解の公式（a = 0 は一次）。
+11. `vec_matrix_invert` は float のまま（行列式も float）。逆行列が `vec_matrix_valid` を満たさない（成分が 2^24 を超える）時は EINVAL。
+
+### header の疑問（直さず報告）
+
+- `vec_path_view_check` の comment は空の view の扱いを書いていない（上の 1 で決めた）。
+- `vec_path_append_rounded_rect` の comment は「1/1024 の余裕の中の超過」をどうするかを書いていない（上の 7 で縮める事にした）。
+- 契約の誤りは見つからなかった（header は変えていない）。
+
+### 未実施
+
+- zedBSD の実機・QEMU での実行（この Phase の範囲外。zedBSD の clang での compile だけ check 6 で確かめた）。
+- realloc の失敗（ENOMEM）の経路の試験（phase.md が不要とした）。
+- 規約の全文の見直しは p023。自分の diff は coding-style §14 の checklist で読んだ（関数の中の関数呼び出しの条件・三項演算子・for の宣言は grep で 0 件を確かめた）。
