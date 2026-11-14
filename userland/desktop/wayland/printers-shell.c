@@ -156,6 +156,9 @@ kwl_printers_prepare(
 	int opened;
 	int can;
 
+	/* The server is not needed since the backend became the module's own. */
+	UNUSED_PARAMETER(server);
+
 	/* The backend open and hosted. */
 	printers_host();
 

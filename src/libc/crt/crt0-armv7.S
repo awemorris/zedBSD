@@ -49,8 +49,11 @@ _start:
 	mov	r2, r7
 	bl	main
 
-	/* Leaves with main's status; _exit does not return. */
-	bl	_exit
+	/*
+	 * Leaves with main's status; exit runs the atexit handlers and
+	 * flushes the streams, and does not return.
+	 */
+	bl	exit
 1:
 	udf	#0
 	b	1b

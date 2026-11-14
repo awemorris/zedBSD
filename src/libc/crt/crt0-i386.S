@@ -29,8 +29,9 @@ _start:
 	pushl %ecx
 	pushl %eax
 	call main
+	/* exit runs the atexit handlers and flushes the streams; it does not return. */
 	pushl %eax
-	call _exit
+	call exit
 1:
 	jmp 1b
 .size _start, .-_start
