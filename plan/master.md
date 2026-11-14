@@ -30,13 +30,13 @@
 | --- | --- | --- |
 | P1 | q2088 | [WS353](ws353/ws.md) [p016](ws353/phase016/phase.md)（待ち方の作り直しの最後の試験）の再開: QEMU の未実施・無効・FAIL の流し直しと 5330 の idle・入力 |
 | agy | — | [WS347](ws347/ws.md) RTL の reset は 10 回目（amaterrace-gpu 38593b0e）まで。11 回目は Q1 が 10 回目を確かめてから |
-| P2 | q2101 | [WS336](ws336/ws.md)（自前の ssh・sshd）全 Phase cleared。完了の手順（試験を plan/tools/ssh/ へ） |
+| P2 | q2106 | [WS310](ws310/ws.md)（ACPI の _OSC）p004 codec・p002 aml-host の option |
 | P3 | q2097 | [WS345](ws345/ws.md)（ブラウザの thread の分け方）p011 受け入れと回帰。p010・p014 は cleared |
 | P4 | q2104 | [WS328](ws328/ws.md) p002 vec-base・vec-path（Sonnet）。p001 cleared |
 | P5 | q2092 | [WS329](ws329/ws.md)（H.264 の software の encoder）p002 共通化の refactor |
 | P6 | q2099 | [WS302](ws302/ws.md)（デスクトップスレッドバランサ）p003 sched の口。p001 cleared、p002 は mk の案の承認待ち |
 | P7 | q2100 | [WS334](ws334/ws.md)（Windows 版ブラウザ）p035 規約の見直し。p037 cleared |
-| P8 | q2103 | [WS343](ws343/ws.md) 全 Phase cleared、完了の手順（試験を plan/tools/fetch/ へ） |
+| P8 | q2105 | [WS351](ws351/ws.md)（可変の tick）p003 規約の見直しと QEMU の起動 |
 
 - host は 2026-11-14 19:30 頃に再起動。NVMe の書き込みは 1.0 GB/s に戻った（止めた時は 22 MB/s）。merge していない branch の diff は [backup-20261114/](backup-20261114/README.md)。
 <!-- master:agents:end -->
@@ -104,7 +104,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-437 · q2105 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-437 · q2107 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

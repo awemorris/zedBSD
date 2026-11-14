@@ -27,9 +27,9 @@ zedBSD が ACPI の _OSC で OS の能力を firmware に申告し、firmware �
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 調べと設計（呼ぶ _OSC と bit、確かめの方法と項目） | cleared（2026-11-15 Q1。Q310-1〜6 は 2026-11-01 に答えを受けた（ws.md）。試験の機械は最初はデスクトップ 10.0.10.3、HAL の path は src/hal/x86_64/ に読み替える） | WS333 p006・p011（CPU の枠組み）・熱 |
-| p002 | aml-host の option（`--set`・`--memory-file`・`--trace`・`--diff`・`--call-every-method`・`--acpi-mode`）と `_OSC` の ASL の試験 | planning | p001、tools の所有の割当 |
+| p002 | aml-host の option（`--set`・`--memory-file`・`--trace`・`--diff`・`--call-every-method`・`--acpi-mode`）と `_OSC` の ASL の試験 | in-progress（2026-11-15 P2 q2106） | p001、tools の所有の割当 |
 | p003 | 5330 の入力の読み（`/dev/acpi`・Debian の dmesg と CMOS、読むだけ）と host の評価、`osc-effects-5330.md` | planning | p002、5330 の割当、CMOS の読みの許可 |
-| p004 | `acpi-osc-codec`（純粋な関数）と host 試験 | planning | p001 |
+| p004 | `acpi-osc-codec`（純粋な関数）と host 試験 | in-progress（2026-11-15 P2 q2106） | p001 |
 | p005 | `acpi-osc.c` の統合（3 段・ACPI mode の後・MADT・host bridge・PCI の口・log）、`acpi.osc=` など 4 つの語（既定 off）、QEMU の試験 | planning | p004、Q310-3・Q310-4 |
 | p006 | 5330 の前後の比べ（段ごと、1 本の script） | planning | p003、p005、Q310-2 |
 | p007 | PCIe の control つきの段の 5330 の比べ | planning | p006、WS300 の有効にする code の merge |
