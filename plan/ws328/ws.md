@@ -3,7 +3,7 @@
 # WS328 libbrowser のベクトル描画（path の塗りと線、CSS の角丸・gradient など）と、それを使った SVG の描画
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: planning（2026-10-30 Q1 が作成。2026-10-30 ユーザーの決定で WS074 を止めて先に実装する）
+- Status: planning（2026-10-30 Q1 が作成。2026-10-30 ユーザーの決定で WS074 を止めて先に実装する。2026-11-14 P4 が p001 の設計を作成、Q1 の確かめ待ち）
 - 目標: libbrowser の描画（`userland/desktop/libbrowser/paint/`）にベクトル描画を足し、それで CSS の描画（角丸・gradient・影など）と、libbrowser の中の SVG の描画を作る。既存の library は使わない（libbrowser は単体の library）。
 
 ## ユーザーの決定（2026-10-30、原文）
@@ -12,33 +12,49 @@
 
 - 2026-10-30 ユーザー「WS328は、Vulkanで描画する実装にします。」→ path の塗り・線・gradient などの描画は Vulkan（GPU）で行う（CPU の参照の描画との関係は設計で示す）。
 
-## 今の状態（Q1 の調べ、2026-10-30）
+## 今の状態（2026-11-14 P4 が p001 で確かめ直した。2026-10-30 の Q1 の調べを置き換え）
 
-- 描画の display list（`paint/paint.h`）の種類は PAINT_RECT・PAINT_TEXT・PAINT_CLIP・PAINT_UNCLIP・PAINT_IMAGE だけ。path・曲線・gradient・角丸の描画は無い（comment は「Rounded corners, background images, opacity and shadows come later」）。CPU の参照の描画（software.c）と Vulkan の描画（vulkan.c）の 2 つが同じ display list を描く。
-- SVG: DOM・HTML の解析（html/foreign.c）、inline の `<svg>` の大きさ（layout/replaced.c の viewBox の比）、JS の bind（svg-length.c・svg-text.c）はあるが、図形の描画は無い。画像としての SVG（`<img src=*.svg>`）も無い。
-
-## 方針（Q1 の案）
-
-- display list に path の item（move・line・二次と三次の Bézier・arc、塗りの規則 nonzero と evenodd、線の幅・join・cap・dash、変換の行列、単色と線形・放射の gradient、anti-alias）を足し、CPU の参照（coverage の計算）と Vulkan（GPU、例えば stencil して覆う形か compute の coverage）で同じ結果を描く（画素の比べの試験）。
-- CSS: border-radius、gradient の background、box-shadow を path の item で。
-- SVG: rect・circle・ellipse・line・polyline・polygon・path、fill・stroke、transform、viewBox、g、use、defs の gradient、clip-path の順に。`<img>` の SVG も。
-- WebP・AVIF（libwebp-compat の類）は [WS326](../ws326/ws.md)（H.264 の software の decoder を安い model で作れるかの実験）の結果を待つ。
+- 描画の display list（`paint/paint.h`）の種類は RECT・TEXT・CLIP・UNCLIP・IMAGE・BACKDROP・GROUP・GROUP_END・FRAME。角丸は pixel 行ごとの矩形の近似、box-shadow は 10 枚の半透明の重ね（inset は描かない）、linear gradient は CPU で bitmap にして IMAGE の item（`paint/gradient.c`）。radial・conic は解析も無い。GPU（vulkan.c）は filter の group を描かない。
+- SVG は `page/svg.c`（ws074-p228 以後）が inline の `<svg>` と `<img>` の SVG を CPU で bitmap（一辺 512 px まで）に描く（図形の塗り、近似の線、clip-path、use、gradient は最初の stop の色）。
+- 描画は WS345 の形: display list を style の thread で作り、確定した `paint_scene` を描画の thread で描く。build system は作り直された（libbrowser の source の一覧は `sources.mk`）。
+- 詳しい比べは [design.md](design.md) §2。
 
 ## Phase（2026-10-30 Q1 が標準廉価実装手順の形に）
 
 ユーザーの指示（2026-10-30、原文）「WS328は標準廉価実装手順を適用してphaseを書いてください。」
 → 手順は [docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)。設計の担当は Opus 5.5、実装の担当は Sonnet 5.5 high を Phase ごとに別の worktree で。
 基づく標準: SVG 2（W3C）、CSS Backgrounds and Borders 3（border-radius・box-shadow）、CSS Images 3（gradient）、Compositing and Blending 1。WPT の該当の試験を照合に使う。
-module と実装の Phase の正確な分け方は p001 が決める（下の p002〜 は Q1 の見込みで、p001 の表で置き換える）。
+module と実装の Phase の分け方は p001 が決めた（[design.md](design.md) §5・§11）。WS074 との file の調整は、WS074 が止まっているので今は要らない（WS074 の再開の時に design.md §12 の形を前提にする）。
 
 | Phase | 目的 | 担当 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
-| ws328-p001 | 設計（Opus）: WS074 との file の分け方の調整、module の分け方、各 header（定数・構造体・関数と仕様の comment、標準の節）の凍結、.c の骨格、試験の道具（CPU の参照の描画と Vulkan の描画の画素の比べ、独立の参照の rasterizer か WPT の reftest、単体試験の run-unit と check-skeleton）、実装の Phase の表と各 phase.md、design-reviewer | Opus | planned | WS074 と調整 |
-| ws328-p002〜 | 実装（Sonnet）、見込み: path の幾何（Bézier・arc の平坦化、変換）／線の展開（join・cap・dash）／塗りの coverage（nonzero・evenodd、CPU の参照）／gradient（線形・放射・conic）／影の blur／Vulkan の path の描画（stencil か compute の coverage）／display list の path の item と software.c・vulkan.c の受け／CSS（border-radius・gradient の background・box-shadow）／SVG の図形と style（rect〜path、fill・stroke、transform、viewBox、g・use・defs）／SVG の gradient と clip-path／`<img>` の SVG | Sonnet | planning | p001 |
-| ws328-p0xx | 統合: Browser の上の描画、WPT の該当の試験、QEMU の画面 | Opus | planning | 実装の Phase |
-| ws328-p0xx | 規約の全文の見直し | Sonnet | planning | 統合 |
+| [ws328-p001](phase001/phase.md) | 設計（module の分け方、header と骨格、試験の道具、実装の Phase、design-reviewer） | Opus（P4） | in-progress | — |
+| [ws328-p002](phase002/phase.md) | vec-base・vec-path（行列・path・弧・bbox） | Sonnet | planned | p001 |
+| [ws328-p003](phase003/phase.md) | vec-flatten（平坦化） | Sonnet | planned | p002 |
+| [ws328-p004](phase004/phase.md) | vec-stroke（線の輪郭・join・cap・dash） | Sonnet | planned | p003 |
+| [ws328-p005](phase005/phase.md) | vec-raster（coverage の tile） | Sonnet | planned | p003 |
+| [ws328-p006](phase006/phase.md) | vec-gradient（補間・ramp・t の計算） | Sonnet | planned | p002 |
+| [ws328-p007](phase007/phase.md) | vec-rrect（角丸・ring・辺・影） | Sonnet | planned | p002 |
+| [ws328-p008](phase008/phase.md) | svg-values（値の文法・viewBox の変換） | Sonnet | planned | p002 |
+| [ws328-p009](phase009/phase.md) | svg-pathdata（`d`） | Sonnet | planned | p008 |
+| [ws328-p010](phase010/phase.md) | svg-style（表示の性質） | Sonnet | planned | p008 |
+| [ws328-p011](phase011/phase.md) | svg-shape（図形の等価な path） | Sonnet | planned | p009・p010 |
+| [ws328-p012](phase012/phase.md) | svg-pserver（gradient の要素） | Sonnet | planned | p006・p010 |
+| [ws328-p013](phase013/phase.md) | svg-picture（描く命令の列） | Sonnet | planned | p011・p012 |
+| [ws328-p014](phase014/phase.md) | svg-clip（clipPath） | Sonnet | planned | p013 |
+| [ws328-p015](phase015/phase.md) | svg-draw（picture → sink） | Sonnet | planned | p004・p005・p014 |
+| [ws328-p016](phase016/phase.md) | svg-bitmap（CPU の bitmap） | Sonnet | planned | p006・p015 |
+| [ws328-p017](phase017/phase.md) | CSS の gradient の解析（radial・conic・repeating・hint） | Sonnet | planned | p001 |
+| [ws328-p018](phase018/phase.md) | paint の統合（新しい item、CPU の参照、sources.mk の承認済みの差分） | Opus | planned | p005・p006・p007 |
+| [ws328-p019](phase019/phase.md) | CSS の装飾を新しい item で（list.c） | Opus | planned | p004・p017・p018 |
+| [ws328-p020](phase020/phase.md) | Vulkan のベクトルの pipeline | Opus | planned | p018・p019 |
+| [ws328-p021](phase021/phase.md) | SVG の統合（page/svg.c の置き換え） | Opus | planned | p016・p018 |
+| [ws328-p022](phase022/phase.md) | 統合の試験（WPT・GPU と CPU・QEMU・実機の一覧） | Opus | planned | p019・p020・p021 |
+| [ws328-p023](phase023/phase.md) | 規約の全文の見直し | Sonnet（conformance-reviewer） | planned | p022 |
 
 ## Resume point
+
+- 2026-11-14 P4（q2091-i01）: p001 の設計を作った（[design.md](design.md)、header と骨格、試験の道具、p002〜p023 の phase.md、[user-questions.md](user-questions.md)）。header の基点の SHA は p001 の cleared の時に Q1 がここに書く（実装の Phase は `BASE=<その SHA> sh plan/ws328/tests/check-skeleton.sh`）。次は p002・p006・p007・p008・p017 から（並べられる）。
 
 - 2026-11-14 Q1: ユーザーの指示で着手（WS074 を今進めていないので file の調整は要らない）。P4 q2091: 乖離の確かめ → p001 の設計。
 
