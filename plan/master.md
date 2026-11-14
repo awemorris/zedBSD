@@ -36,7 +36,7 @@
 | P5 | q2092 | [WS329](ws329/ws.md)（H.264 の software の encoder）p002 共通化の refactor |
 | P6 | q2093 | [WS302](ws302/ws.md)（デスクトップスレッドバランサ）設計の改訂 → p002 |
 | P7 | q2095 | [WS334](ws334/ws.md)（Windows 版ブラウザ）p037 と Phase の無い不具合 2 件 |
-| P8 | q2096 | [WS343](ws343/ws.md)（base の TLS）fetch の https |
+| P8 | — | 返却: [WS343](ws343/ws.md) fetch の https（PASS、merge は Makefile の案の承認待ち） |
 
 - host は 2026-11-14 19:30 頃に再起動。NVMe の書き込みは 1.0 GB/s に戻った（止めた時は 22 MB/s）。merge していない branch の diff は [backup-20261114/](backup-20261114/README.md)。
 <!-- master:agents:end -->
