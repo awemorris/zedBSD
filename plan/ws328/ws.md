@@ -32,7 +32,7 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 | [ws328-p004](phase004/phase.md) | vec-stroke（線の輪郭・join・cap・dash） | Sonnet | cleared（2026-11-15 Q1、4e5cc05296 を main に merge。test-stroke cc 28392433・clang 27637132 checks、ASan・UBSan、check-skeleton PASS、壊す 42 通り中 41 FAIL・1 は等価） | p003 |
 | [ws328-p005](phase005/phase.md) | vec-raster（coverage の tile） | Sonnet | cleared（2026-11-15 Q1、d155fe2ba2 を main に merge。test-raster 1055903 checks、cc・clang・ASan・UBSan、check-skeleton は Q1 が toolchain のある worktree で check 6 まで流す、壊す 44 通り中 40 FAIL・4 は等価） | p003 |
 | [ws328-p006](phase006/phase.md) | vec-gradient（補間・hint・ramp・t の計算） | Sonnet | cleared（2026-11-15 Q1、18eec6e3ce を main に merge。test-gradient 277264 checks、cc・clang・ASan・UBSan、check-skeleton PASS（check 6 込み）、壊す 42 通り中 40 FAIL・2 は等価） | p002 |
-| [ws328-p007](phase007/phase.md) | vec-rrect（角丸・ring・辺・影） | Sonnet | in-progress（2026-11-15 P1 q2125） | p002 |
+| [ws328-p007](phase007/phase.md) | vec-rrect（角丸・ring・辺・影） | Sonnet | cleared（2026-11-15 Q1、2b93739794 を main に merge。test-rrect 419610 checks、cc・clang・ASan・UBSan、影は数値積分と最大差 0.0088、check-skeleton は Q1 が check 6 まで流す、壊す 34 通り全部 FAIL（4 は試験を足して）） | p002 |
 | [ws328-p008](phase008/phase.md) | svg-values（値の文法・viewBox の変換） | Sonnet | cleared（2026-11-15 Q1、0be12c1675 を main に merge。test-values 741102 checks、cc・clang・ASan・UBSan、check-skeleton は Q1 が check 6 まで流す、壊す 54 通り中 51 FAIL・残り 3 は試験の追加と死んだ確認の削除で処理） | p002 |
 | [ws328-p009](phase009/phase.md) | svg-pathdata（`d`） | Sonnet | planned | p008 |
 | [ws328-p010](phase010/phase.md) | svg-style（表示の性質、祖先からの style） | Sonnet | planned | p008 |
