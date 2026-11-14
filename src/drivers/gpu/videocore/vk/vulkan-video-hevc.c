@@ -356,6 +356,7 @@ static void reply_capabilities(struct i915_wire_writer *reply, const uint32_t *t
 static int video_format_properties(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int video_family_properties(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int session_create(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int session_resources(struct video_session *video, struct bcm2711_vulkan_object *device);
 static int session_requirements(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int session_bind(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int parameters_create(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -1032,8 +1033,6 @@ session_create(
 	uint64_t device_id;
 	uint64_t present;
 	uint64_t identity;
-	uint64_t pu_bytes;
-	uint64_t coefficient_bytes;
 	uint32_t type;
 	uint32_t family;
 	uint32_t flags;
@@ -1049,6 +1048,7 @@ session_create(
 	int different;
 	int error;
 	int released;
+	bool available;
 
 	/* Reads the create info: [type][chain][family][flags][profile][formats and limits][header]. */
 	kern_memset(&chain, 0, sizeof(chain));
@@ -1090,6 +1090,7 @@ session_create(
 
 	/* Checks the session against what the decoder takes; the first reason is the result. */
 	different = kern_strcmp(name, VIDEO_STD_NAME);
+	available = bcm2711_vulkan_video_available();
 	if (result != 0) {
 		/* The profile's own reason. */
 	} else if (family != 0U) {
@@ -1104,7 +1105,7 @@ session_create(
 		result = VK_ERROR_INITIALIZATION_FAILED;
 	} else if (different != 0 || version > VIDEO_STD_VERSION) {
 		result = VIDEO_ERROR_STD_VERSION;
-	} else if (!bcm2711_vulkan_video_available()) {
+	} else if (!available) {
 		result = VK_ERROR_INITIALIZATION_FAILED;
 	}
 
@@ -1120,6 +1121,8 @@ session_create(
 		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY);
 		return 0;
 	}
+
+	/* Records the session's limits and its pictures' layout. */
 	video->width = width;
 	video->height = height;
 	video->max_dpb_slots = slots;
@@ -1129,20 +1132,8 @@ session_create(
 	video->picture_bytes = (video->sand.luma_bytes + video->sand.chroma_bytes + video->motion_bytes + VIDEO_PAGE - 1U) & ~(uint64_t)(VIDEO_PAGE - 1U);
 	video->pictures = slots + 1U;
 
-	/* The phase 1 lists and the command list, and the block's clock. */
-	bcm2712_hevc_list_sizes(width, height, &pu_bytes, &coefficient_bytes);
-	error = bcm2711_buffer_create_uncached(pu_bytes, VIDEO_BUFFER_LIMIT, VIDEO_PAGE, &video->pu);
-	if (error == 0)
-		error = bcm2711_buffer_create_uncached(coefficient_bytes, VIDEO_BUFFER_LIMIT, VIDEO_PAGE, &video->coefficients);
-	if (error == 0)
-		error = bcm2711_buffer_create_uncached((uint64_t)VIDEO_COMMAND_PAIRS * 8U, VIDEO_BUFFER_LIMIT, VIDEO_PAGE, &video->commands);
-	if (error == 0) {
-		error = bcm2712_hevc_decoder_hold();
-		if (error == 0)
-			video->holding = true;
-	}
-	if (error == 0)
-		error = bcm2711_vulkan_object_retain(device);
+	/* Makes the phase 1 lists and the command list, and holds the block's clock and the device. */
+	error = session_resources(video, device);
 	if (error != 0) {
 		kern_logf("v3d: video: no decoder for a %ux%u session (%d)\n", (unsigned)width, (unsigned)height, error);
 		(void)release_session(session, video);
@@ -1171,6 +1162,53 @@ session_create(
 	drv_i915_wire_reply_u64(reply, identity);
 
 	/* Succeeded: the session exists. */
+	return 0;
+}
+
+/*
+ * Makes a new session's phase 1 lists and command list, holds the block's
+ * clock and retains the device; what was made before a failure stays in the
+ * session for release_session to free.
+ */
+static int
+session_resources(
+	struct video_session *video,
+	struct bcm2711_vulkan_object *device)
+{
+	uint64_t pu_bytes;
+	uint64_t coefficient_bytes;
+	int error;
+
+	/* Sizes the phase 1 lists for the session's largest picture. */
+	bcm2712_hevc_list_sizes(video->width, video->height, &pu_bytes, &coefficient_bytes);
+
+	/* Makes the prediction unit list phase 1 writes and phase 2 reads. */
+	error = bcm2711_buffer_create_uncached(pu_bytes, VIDEO_BUFFER_LIMIT, VIDEO_PAGE, &video->pu);
+	if (error != 0)
+		return error;
+
+	/* Makes the coefficient list phase 1 writes and phase 2 reads. */
+	error = bcm2711_buffer_create_uncached(coefficient_bytes, VIDEO_BUFFER_LIMIT, VIDEO_PAGE, &video->coefficients);
+	if (error != 0)
+		return error;
+
+	/* Makes the command list phase 1 reads. */
+	error = bcm2711_buffer_create_uncached((uint64_t)VIDEO_COMMAND_PAIRS * 8U, VIDEO_BUFFER_LIMIT, VIDEO_PAGE, &video->commands);
+	if (error != 0)
+		return error;
+
+	/* Holds the block's clock; holding tells release_session to let it go. */
+	error = bcm2712_hevc_decoder_hold();
+	if (error != 0)
+		return error;
+	video->holding = true;
+
+	/* Retains the device the session belongs to. */
+	error = bcm2711_vulkan_object_retain(device);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the session has its lists, the clock and its device. */
 	return 0;
 }
 
@@ -1211,6 +1249,8 @@ session_requirements(
 		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 		return 0;
 	}
+
+	/* The session the object carries. */
 	video = object->payload;
 
 	/* The bindings, as many as the capacity holds. */
@@ -1824,6 +1864,8 @@ decode_command(
 			command->has_setup = true;
 			read_slot(reader, &command->setup, &setup_resource);
 		}
+
+		/* The reference slots, then the H.265 picture and its slice segments from the chain. */
 		read_slots(reader, command);
 		command->has_picture = chain.has_picture;
 		command->picture = chain.picture;
@@ -2146,6 +2188,8 @@ read_fields(
 			chain->has_picture = true;
 			read_picture(reader, &chain->picture);
 		}
+
+		/* The slice segments' offsets in the bitstream. */
 		read_offsets(reader, chain);
 		break;
 	default:
@@ -2405,6 +2449,8 @@ read_add(
 			chain->add_error = EINVAL;
 			continue;
 		}
+
+		/* Marks the id as added. */
 		chain->new_vps |= 1U << id;
 	}
 
@@ -2575,12 +2621,14 @@ read_sps(
 		}
 	}
 
-	/* The long-term pictures, the VUI and the palette's initializers. */
+	/* The long-term pictures. */
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U) {
 		skip_words(reader, 1U);
 		read_words(reader, NULL, VIDEO_LONG_TERM_PICS);
 	}
+
+	/* The VUI and its HRD parameters. */
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U) {
 		skip_words(reader, 25U);
@@ -2588,6 +2636,8 @@ read_sps(
 		if (present != 0U)
 			read_hrd(reader, sub_layers);
 	}
+
+	/* The palette's initializers. */
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U)
 		read_words(reader, NULL, VIDEO_PALETTE_ENTRIES);
@@ -2837,6 +2887,8 @@ parameters_take(
 	struct video_pps_node *pps;
 	struct video_pps_node **pps_link;
 	struct video_pps_node *old_pps;
+	const struct bcm2712_hevc_sps *held_sps;
+	const struct bcm2712_hevc_pps *held_pps;
 	uint32_t vps;
 	uint32_t vps_count;
 	uint32_t sps_count;
@@ -2845,14 +2897,21 @@ parameters_take(
 
 	/* An update must not repeat a key the object holds. */
 	if (!replace) {
+		/* Refuses a video set id already held. */
 		if ((chain->new_vps & parameters->vps) != 0U)
 			return EINVAL;
+
+		/* Refuses a sequence set whose key is already held. */
 		for (sps = chain->new_sps; sps != NULL; sps = sps->next) {
-			if (find_sps(parameters, sps->sps.vps_id, sps->sps.id) != NULL)
+			held_sps = find_sps(parameters, sps->sps.vps_id, sps->sps.id);
+			if (held_sps != NULL)
 				return EINVAL;
 		}
+
+		/* Refuses a picture set whose key is already held. */
 		for (pps = chain->new_pps; pps != NULL; pps = pps->next) {
-			if (find_pps(parameters, pps->pps.vps_id, pps->pps.sps_id, pps->pps.id) != NULL)
+			held_pps = find_pps(parameters, pps->pps.vps_id, pps->pps.sps_id, pps->pps.id);
+			if (held_pps != NULL)
 				return EINVAL;
 		}
 	}
@@ -2865,26 +2924,34 @@ parameters_take(
 			vps_count++;
 	}
 
-	/* The sequence sets held, and the new ones of new keys. */
+	/* Counts the sequence sets held. */
 	sps_count = 0U;
 	for (sps = parameters->sps; sps != NULL; sps = sps->next)
 		sps_count++;
+
+	/* Counts the new sequence sets of new keys. */
 	for (sps = chain->new_sps; sps != NULL; sps = sps->next) {
-		if (find_sps(parameters, sps->sps.vps_id, sps->sps.id) == NULL)
+		held_sps = find_sps(parameters, sps->sps.vps_id, sps->sps.id);
+		if (held_sps == NULL)
 			sps_count++;
 	}
 
-	/* The picture sets held, and the new ones of new keys. */
+	/* Counts the picture sets held. */
 	pps_count = 0U;
 	for (pps = parameters->pps; pps != NULL; pps = pps->next)
 		pps_count++;
+
+	/* Counts the new picture sets of new keys. */
 	for (pps = chain->new_pps; pps != NULL; pps = pps->next) {
-		if (find_pps(parameters, pps->pps.vps_id, pps->pps.sps_id, pps->pps.id) == NULL)
+		held_pps = find_pps(parameters, pps->pps.vps_id, pps->pps.sps_id, pps->pps.id);
+		if (held_pps == NULL)
 			pps_count++;
 	}
 
 	/* Refuses sets beyond the object's capacity. */
-	if (vps_count > parameters->max_vps || sps_count > parameters->max_sps || pps_count > parameters->max_pps)
+	if (vps_count > parameters->max_vps ||
+	    sps_count > parameters->max_sps ||
+	    pps_count > parameters->max_pps)
 		return EINVAL;
 
 	/* The video sets' ids. */
@@ -2897,14 +2964,19 @@ parameters_take(
 		chain->new_sps = sps->next;
 		sps_link = &parameters->sps;
 		while (*sps_link != NULL) {
+			/* Removes a held set of the same key. */
 			if ((*sps_link)->sps.vps_id == sps->sps.vps_id && (*sps_link)->sps.id == sps->sps.id) {
 				old_sps = *sps_link;
 				*sps_link = old_sps->next;
 				kern_free(old_sps);
 				continue;
 			}
+
+			/* Steps past a set of another key. */
 			sps_link = &(*sps_link)->next;
 		}
+
+		/* Puts the new set at the head of the object's list. */
 		sps->next = parameters->sps;
 		parameters->sps = sps;
 	}
@@ -2915,6 +2987,7 @@ parameters_take(
 		chain->new_pps = pps->next;
 		pps_link = &parameters->pps;
 		while (*pps_link != NULL) {
+			/* Removes a held set of the same key. */
 			if ((*pps_link)->pps.vps_id == pps->pps.vps_id &&
 			    (*pps_link)->pps.sps_id == pps->pps.sps_id &&
 			    (*pps_link)->pps.id == pps->pps.id) {
@@ -2923,8 +2996,12 @@ parameters_take(
 				kern_free(old_pps);
 				continue;
 			}
+
+			/* Steps past a set of another key. */
 			pps_link = &(*pps_link)->next;
 		}
+
+		/* Puts the new set at the head of the object's list. */
 		pps->next = parameters->pps;
 		parameters->pps = pps;
 	}
@@ -2977,17 +3054,21 @@ parameters_free(
 	struct video_sps_node *sps;
 	struct video_pps_node *pps;
 
-	/* The sequence sets, then the picture sets. */
+	/* Frees the sequence sets. */
 	while (parameters->sps != NULL) {
 		sps = parameters->sps;
 		parameters->sps = sps->next;
 		kern_free(sps);
 	}
+
+	/* Frees the picture sets. */
 	while (parameters->pps != NULL) {
 		pps = parameters->pps;
 		parameters->pps = pps->next;
 		kern_free(pps);
 	}
+
+	/* No video set id is held any more. */
 	parameters->vps = 0U;
 }
 
@@ -3084,12 +3165,16 @@ pool_create(
 		drv_i915_wire_reply_u64(reply, 0U);
 		return 0;
 	}
+
+	/* Records the pool's size and retains its device. */
 	pool->count = count;
 	error = bcm2711_vulkan_object_retain(device);
 	if (error != 0) {
 		kern_free(pool);
 		return error;
 	}
+
+	/* The pool keeps its device. */
 	pool->owner.device = device;
 
 	/* Publishes the pool under its identity. */
@@ -3340,6 +3425,8 @@ run_decode(
 	enum bcm2712_hevc_result state;
 	const char *reason;
 	uint64_t limit;
+	uint64_t now;
+	uint64_t decode_ticks;
 	int error;
 	int closed;
 
@@ -3384,18 +3471,32 @@ run_decode(
 		}
 
 		/* Anything but running ends the look. */
-		if (state != BCM2712_HEVC_RUNNING || clock_ticks() >= limit)
+		if (state != BCM2712_HEVC_RUNNING)
 			break;
+
+		/* So does the end of the look's time. */
+		now = clock_ticks();
+		if (now >= limit)
+			break;
+
+		/* Gives the block a moment before the next poll. */
 		kern_usleep_range(50U, 100U);
 	}
+
+	/* Takes the controller mutex back. */
 	closed = bcm2711_render_window_close(controller);
 	if (closed != 0)
 		return closed;
 
 	/* Still running: the next step looks again, until the decode's time is over. */
 	if (state == BCM2712_HEVC_RUNNING) {
-		if (clock_ticks() - video_running.started < kern_ms_to_ticks(VIDEO_DECODE_MS))
+		/* Leaves a decode still within its time to the next step. */
+		now = clock_ticks();
+		decode_ticks = kern_ms_to_ticks(VIDEO_DECODE_MS);
+		if (now - video_running.started < decode_ticks)
 			return EINPROGRESS;
+
+		/* Gives up a block that did not finish in time. */
 		kern_logf("v3d: video: the decoder did not finish a picture in %u ms (phase %u); no more decodes this boot\n",
 			  (unsigned)VIDEO_DECODE_MS, (unsigned)video_running.phase);
 		video_block_lost = true;
@@ -3414,11 +3515,18 @@ run_decode(
 				error = grow_list(&video->coefficients);
 			}
 		}
+
+		/* A list that cannot grow skips the picture. */
 		if (error != 0) {
 			video_running.command = NULL;
 			skip(video, command, "the decoder's lists could not grow", error);
 			return 0;
 		}
+
+		/*
+		 * Counts the growth, bounded by VIDEO_GROWS, and starts phase 1
+		 * again on the larger lists.
+		 */
 		video_running.grows++;
 		phase1_buffers(video, video_running.command_count, video_running.phase2.ctb_rows, &phase1);
 		video_running.buffers.pu = phase1.pu;
@@ -3488,6 +3596,7 @@ start_decode(
 	uint32_t slot;
 	int error;
 
+	/* Preparing the decode does not need the controller. */
 	(void)controller;
 
 	/* The sets the picture names, which the decoder must take within the session's extent. */
@@ -3513,6 +3622,8 @@ start_decode(
 			return "the setup slot is outside the session";
 		setup = (uint32_t)command->setup.index;
 	}
+
+	/* Finds where that picture lives in the session's memory. */
 	error = picture_address(video, setup, &setup_physical, &native);
 	if (error != 0)
 		return "the session's memory is not bound";
@@ -3593,24 +3704,33 @@ start_decode(
 	buffers->luma_stride = video->sand.column_rows * 128U;
 	buffers->chroma_stride = video->sand.column_rows * 64U;
 	for (slot = 0; slot < BCM2712_HEVC_SLOTS; slot++) {
+		/* An empty slot points at the picture being written. */
 		buffers->reference_luma[slot] = buffers->luma;
 		buffers->reference_chroma[slot] = buffers->chroma;
 		if (!slots[slot].present)
 			continue;
+
+		/* A present slot points at its own picture. */
 		(void)picture_address(video, slot, &physical, &native);
 		buffers->reference_luma[slot] = physical;
 		buffers->reference_chroma[slot] = physical + video->sand.luma_bytes;
 	}
+
+	/* The picture's motion vectors are written after its planes when later pictures need them. */
 	buffers->motion_stride = video->motion_stride;
 	buffers->motion_write = 0;
 	if (video_running.phase2.write_motion)
 		buffers->motion_write = setup_physical + video->sand.luma_bytes + video->sand.chroma_bytes;
+
+	/* The collocated picture's motion vectors are read when it is present. */
 	buffers->motion_read = 0;
 	slot = video_running.phase2.collocated_slot;
 	if (slot < BCM2712_HEVC_SLOTS && slots[slot].present) {
 		(void)picture_address(video, slot, &physical, &native);
 		buffers->motion_read = physical + video->sand.luma_bytes + video->sand.chroma_bytes;
 	}
+
+	/* The phase 2 values the slice program computed. */
 	buffers->config2 = video_running.phase2.config2;
 	buffers->frame_size = video_running.phase2.frame_size;
 	buffers->current_poc = video_running.phase2.current_poc;
@@ -3887,19 +4007,34 @@ wait_idle(void)
 {
 	enum bcm2712_hevc_result state;
 	uint64_t limit;
+	uint64_t now;
 
 	/* Polls the phase until it ends or the time is over. */
 	limit = clock_ticks() + kern_ms_to_ticks(VIDEO_DECODE_MS);
-	while (video_running.command != NULL && clock_ticks() < limit) {
+	for (;;) {
+		/* Stops when the block has no decode. */
+		if (video_running.command == NULL)
+			break;
+
+		/* Stops when the time is over. */
+		now = clock_ticks();
+		if (now >= limit)
+			break;
+
+		/* Reads the state of the phase the block is in. */
 		if (video_running.phase == 1U) {
 			state = bcm2712_hevc_phase1_poll();
 		} else {
 			state = bcm2712_hevc_phase2_poll();
 		}
+
+		/* A phase that ended gives the decode up. */
 		if (state != BCM2712_HEVC_RUNNING) {
 			video_running.command = NULL;
 			break;
 		}
+
+		/* Gives the block a moment before the next poll. */
 		kern_usleep_range(100U, 200U);
 	}
 

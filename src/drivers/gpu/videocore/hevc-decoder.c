@@ -479,24 +479,41 @@ report_iommu(
 	uint32_t phandle;
 	uint32_t iommu_node;
 	uint32_t control;
+	const char *setting;
 	int error;
 
-	/* The IOMMU the node names, mapped only to be read. */
+	/* Finds the IOMMU the node names; a node without one has nothing to report. */
 	iommu.mapped = NULL;
 	error = drv_fdt_property(fdt, node, "iommus", &value, &length);
 	if (error != 0 || length < 4U)
 		return;
+
+	/* Resolves the phandle to the IOMMU's own node. */
 	phandle = (uint32_t)drv_fdt_cells_value(value, 0, 1);
 	error = drv_fdt_find_phandle(fdt, phandle, &iommu_node);
-	if (error == 0)
-		error = bcm2711_fdt_window(fdt, iommu_node, 0, &iommu);
-	if (error == 0 && iommu.size >= IOMMU_WINDOW_BYTES)
-		error = bcm2711_map_window(&iommu);
+	if (error != 0)
+		return;
+
+	/* Reads the IOMMU's register window from its node. */
+	error = bcm2711_fdt_window(fdt, iommu_node, 0, &iommu);
+	if (error != 0)
+		return;
+
+	/* Refuses a window too small to hold the control word. */
+	if (iommu.size < IOMMU_WINDOW_BYTES)
+		return;
+
+	/* Maps the window, only to be read. */
+	error = bcm2711_map_window(&iommu);
 	if (error != 0 || iommu.mapped == NULL)
 		return;
 
 	/* Its control word: off means the block's addresses go to memory as they are. */
 	control = kern_mmio_read32(iommu.mapped + IOMMU_CTRL);
-	kern_logf("v3d: hevc: iommu %llx ctrl %08x (%s)\n", (unsigned long long)iommu.physical, (unsigned)control,
-		  (control & IOMMU_ENABLE) != 0U ? "on" : "off");
+	setting = "off";
+	if ((control & IOMMU_ENABLE) != 0U)
+		setting = "on";
+
+	/* Logs the setting. */
+	kern_logf("v3d: hevc: iommu %llx ctrl %08x (%s)\n", (unsigned long long)iommu.physical, (unsigned)control, setting);
 }
