@@ -128,6 +128,8 @@ main(void)
 		printf("tsf-test: FAIL (no application)\n");
 		return 1;
 	}
+
+	/* Describes the window to open. */
 	memset(&options, 0, sizeof(options));
 	options.title = "tsf-test";
 	options.width = 320U;
@@ -139,6 +141,8 @@ main(void)
 		printf("tsf-test: FAIL (no window)\n");
 		return 1;
 	}
+
+	/* Makes the window want text and places its caret. */
 	kl_window_text_input(window, 1);
 	kl_window_text_cursor(window, 10, 20, 2, 16);
 	memset(&seen, 0, sizeof(seen));
@@ -151,6 +155,8 @@ main(void)
 		printf("tsf-test: no TSF (IMM32)\n");
 		return 2;
 	}
+
+	/* Starts the manager for this test as a client. */
 	result = ITfThreadMgr_Activate(threads, &client);
 	if (FAILED(result)) {
 		ITfThreadMgr_Release(threads);
@@ -158,6 +164,8 @@ main(void)
 		printf("tsf-test: no TSF (IMM32)\n");
 		return 2;
 	}
+
+	/* Finds the window's context among the thread's documents. */
 	context = tsf_context(threads);
 	if (context == NULL) {
 		(void)ITfThreadMgr_Deactivate(threads);
@@ -166,6 +174,8 @@ main(void)
 		printf("tsf-test: no TSF (IMM32)\n");
 		return 2;
 	}
+
+	/* Prepares the edit session that acts like an input method. */
 	memset(&session, 0, sizeof(session));
 	session.iface.lpVtbl = &tsf_session_calls;
 	session.context = context;
@@ -227,6 +237,8 @@ main(void)
 		printf("tsf-test: FAIL (%u of %u)\n", tsf_failed, tsf_checks);
 		return 1;
 	}
+
+	/* Reports the result of the checks. */
 	printf("tsf-test: PASS (%u checks, %u not run)\n", tsf_checks, tsf_unruns);
 	return 0;
 }
@@ -291,11 +303,16 @@ session_query(
 	REFIID id,
 	void **out)
 {
+	BOOL offered;
+
 	/* The session's, or nothing. */
 	if (out == NULL)
 		return E_POINTER;
 	*out = NULL;
-	if (!IsEqualIID(id, &IID_IUnknown) && !IsEqualIID(id, &IID_ITfEditSession))
+	offered = IsEqualIID(id, &IID_IUnknown);
+	if (!offered)
+		offered = IsEqualIID(id, &IID_ITfEditSession);
+	if (!offered)
 		return E_NOINTERFACE;
 	*out = iface;
 	return S_OK;
@@ -370,6 +387,8 @@ session_do(
 			ITfRange_Release(range);
 			return result;
 		}
+
+		/* Starts the composition over the range. */
 		result = ITfContextComposition_StartComposition(composing, cookie, range, NULL, &session->composition);
 		ITfContextComposition_Release(composing);
 		if (FAILED(result) || session->composition == NULL) {
@@ -377,6 +396,8 @@ session_do(
 			session->answer = E_FAIL;
 			return E_FAIL;
 		}
+
+		/* Sets the composition's text. */
 		result = ITfRange_SetText(range, cookie, 0U, session->text, (LONG)wcslen(session->text));
 		ITfRange_Release(range);
 		session->answer = result;
@@ -405,6 +426,8 @@ session_do(
 			ITfRange_Release(range);
 			return result;
 		}
+
+		/* Asks where the view shows the range. */
 		clipped = FALSE;
 		result = ITfContextView_GetTextExt(view, cookie, range, &session->extent, &clipped);
 		ITfContextView_Release(view);
@@ -444,6 +467,8 @@ tsf_context(
 			break;
 		context = NULL;
 	}
+
+	/* Releases the list of documents. */
 	IEnumTfDocumentMgrs_Release(documents);
 
 	/* The context, or none. */
@@ -478,6 +503,8 @@ tsf_look(
 				seen->commits++;
 				snprintf(seen->commit, sizeof(seen->commit), "%s", event.input.text);
 			}
+
+			/* Notes a pre-edit text the window was handed. */
 			if (event.input.kind == KL_WINDOW_TEXT_PREEDIT) {
 				seen->preedits++;
 				snprintf(seen->preedit, sizeof(seen->preedit), "%s", event.input.text);

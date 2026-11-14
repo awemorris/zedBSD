@@ -6,7 +6,7 @@
  */
 
 /*
- * The self-test of WS334's unit-test tools: the harness builds and runs a
+ * The self-test of the Windows port's unit-test tools: the harness builds and runs a
  * test on each system, with libbrowser's base helpers linked, in a
  * directory of its own.
  */
