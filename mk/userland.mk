@@ -47,6 +47,19 @@ PROGRAM_STAMPS := $(foreach d,$(PROGRAM_DIRS),$(BUILD)/packages/$(notdir $(patsu
 # the source tree.
 SUBMAKE_CONFIG := PLATFORM="$(PLATFORM)" STANDALONE_CONFIG="$(ZEDBSD_CONFIGMK)" BUILD="$(abspath $(BUILD))"
 
+# "yes | make firmware-licenses" settles the license of every selected
+# firmware package before a build (CI and scripts).  Each package asks in its
+# own make, one after another, so the answers on the standard input reach it.
+FIRMWARE_PROGRAM_DIRS := $(filter userland/firmware/%,$(PROGRAM_DIRS))
+
+.PHONY: firmware-licenses
+firmware-licenses:
+	@for d in $(FIRMWARE_PROGRAM_DIRS); do \
+		t=$$(sed -n 's/^\([a-z0-9-]*-license\):.*/\1/p' "$$d/Makefile" | head -n 1); \
+		test -n "$$t" || continue; \
+		$(MAKE) -C "$$d" $(SUBMAKE_CONFIG) "$$t" || exit 1; \
+	done
+
 # The configuration the packages were made with: its files and the
 # variables given on the command line.  A package reads the configuration
 # itself (a value such as ZEDBSD_TEST_SCREEN_CAPTURE chooses its sources),
