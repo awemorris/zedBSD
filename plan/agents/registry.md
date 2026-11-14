@@ -5,7 +5,7 @@
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
 | P2 | phase-runner | ws310 p004・p002 (q2106-i01) | `/home/awe/zedBSD-worktrees/p2-ws310` / `agent/p2-ws310` | 動いている（2026-11-15 00:4x） | — |
-| P7 | conformance-reviewer | ws334 p035 規約の見直し (q2100-i01) | `/home/awe/zedBSD-worktrees/p7-ws334c` / `agent/p7-ws334c` | 動いている（2026-11-14 23:5x） | — |
+| P7 | conformance-reviewer | ws334 p035 の続き (q2107-i01) | `/home/awe/zedBSD-worktrees/p7-ws334d` / `agent/p7-ws334d` | 動いている（2026-11-15 00:5x） | — |
 | P8 | conformance-reviewer | ws351 p003 (q2105-i01) | `/home/awe/zedBSD-worktrees/p8-ws351p003` / `agent/p8-ws351p003` | 動いている（2026-11-15 00:4x） | — |
 | P5 | phase-runner | ws329 p002 共通化 (q2092-i01) | `/home/awe/zedBSD-worktrees/p5-ws329b` / `agent/p5-ws329b` | 動いている（2026-11-14 23:3x） | — |
 | P6 | phase-runner-high | ws302 p003 sched の口 (q2099-i01) | `/home/awe/zedBSD-worktrees/p6-ws302b` / `agent/p6-ws302b` | 動いている（2026-11-14 23:4x） | — |

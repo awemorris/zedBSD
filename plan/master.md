@@ -35,7 +35,7 @@
 | P4 | q2104 | [WS328](ws328/ws.md) p002 vec-base・vec-path（Sonnet）。p001 cleared |
 | P5 | q2092 | [WS329](ws329/ws.md)（H.264 の software の encoder）p002 共通化の refactor |
 | P6 | q2099 | [WS302](ws302/ws.md)（デスクトップスレッドバランサ）p003 sched の口。p001 cleared、p002 は mk の案の承認待ち |
-| P7 | q2100 | [WS334](ws334/ws.md)（Windows 版ブラウザ）p035 規約の見直し。p037 cleared |
+| P7 | q2107 | [WS334](ws334/ws.md)（Windows 版ブラウザ）p035 の続き（試験の C、共有の file の block） |
 | P8 | q2105 | [WS351](ws351/ws.md)（可変の tick）p003 規約の見直しと QEMU の起動 |
 
 - host は 2026-11-14 19:30 頃に再起動。NVMe の書き込みは 1.0 GB/s に戻った（止めた時は 22 MB/s）。merge していない branch の diff は [backup-20261114/](backup-20261114/README.md)。
@@ -104,7 +104,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-437 · q2107 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-437 · q2108 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
