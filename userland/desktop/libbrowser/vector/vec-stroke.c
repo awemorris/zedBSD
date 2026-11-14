@@ -805,6 +805,7 @@ stroke_emit(
 	struct vec_point mapped[STROKE_POLY_MAX];
 	double x;
 	double y;
+	double magnitude;
 	double area;
 	size_t i;
 	size_t at;
@@ -826,21 +827,29 @@ stroke_emit(
 			x = (double)context->matrix->a * points[i].x + (double)context->matrix->c * points[i].y + (double)context->matrix->e;
 			y = (double)context->matrix->b * points[i].x + (double)context->matrix->d * points[i].y + (double)context->matrix->f;
 		}
-		if (!(fabs(x) <= (double)VEC_COORD_MAX))
+		magnitude = fabs(x);
+		if (!(magnitude <= (double)VEC_COORD_MAX))
 			return EINVAL;
-		if (!(fabs(y) <= (double)VEC_COORD_MAX))
+		magnitude = fabs(y);
+		if (!(magnitude <= (double)VEC_COORD_MAX))
 			return EINVAL;
 		mapped[i].x = (float)x;
 		mapped[i].y = (float)y;
 	}
 
-	/* Takes the signed area of the mapped points. */
+	/*
+	 * Takes the signed area of the mapped points, relative to the first
+	 * one: a far piece is then not a difference of large products, and
+	 * the area of the reversed order is exactly the negative of this one.
+	 */
 	area = 0.0;
 	for (i = 0;
 	     i < count;
 	     i++) {
 		next = (i + 1) % count;
-		area += (double)mapped[i].x * (double)mapped[next].y - (double)mapped[next].x * (double)mapped[i].y;
+		x = (double)mapped[i].x - (double)mapped[0].x;
+		y = (double)mapped[i].y - (double)mapped[0].y;
+		area += x * ((double)mapped[next].y - (double)mapped[0].y) - ((double)mapped[next].x - (double)mapped[0].x) * y;
 	}
 
 	/* Drops a piece that has no area. */
@@ -934,6 +943,7 @@ stroke_emit_join(
 	double cross;
 	double dot;
 	double turn;
+	double angle;
 	double side;
 	double factor;
 	int steps;
@@ -946,7 +956,8 @@ stroke_emit_join(
 	turn = atan2(cross, dot);
 
 	/* Draws no join where the segments are collinear. */
-	if (fabs(turn) < STROKE_COLLINEAR)
+	angle = fabs(turn);
+	if (angle < STROKE_COLLINEAR)
 		return 0;
 
 	/* Takes the outer side: opposite to the side the path turns towards. */
@@ -972,7 +983,7 @@ stroke_emit_join(
 
 	if (join == VEC_JOIN_ROUND) {
 		/* Lays out the sector: the vertex, then points of the arc from the first offset to the second. */
-		steps = stroke_arc_steps(context, fabs(turn));
+		steps = stroke_arc_steps(context, angle);
 		points[0] = vertex;
 		for (k = 0;
 		     k <= steps;

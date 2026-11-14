@@ -88,15 +88,17 @@ contour_area(
 	const struct vec_contour *contour;
 	const struct vec_vertex *a;
 	const struct vec_vertex *b;
+	const struct vec_vertex *origin;
 	double sum;
 	size_t i;
 
 	contour = &lines->contours[c];
+	origin = &lines->vertices[contour->first];
 	sum = 0.0;
 	for (i = 0; i < contour->count; i++) {
 		a = &lines->vertices[contour->first + i];
 		b = &lines->vertices[contour->first + (i + 1) % contour->count];
-		sum += (double)a->x * (double)b->y - (double)b->x * (double)a->y;
+		sum += ((double)a->x - origin->x) * ((double)b->y - origin->y) - ((double)b->x - origin->x) * ((double)a->y - origin->y);
 	}
 	return sum * 0.5;
 }
@@ -467,6 +469,29 @@ test_joins(void)
 	CHECK_LONG(out.contour_count, 2);
 	vec_lines_release(&out);
 	vec_lines_release(&center);
+
+	/* A turn of 0.1 radian is not collinear: it has its join (a bevel here), a turn of 1e-7 radian (under the limit of 1e-6) does not. */
+	{
+		static const float slight[] = { 0.0f, 10.0f, 10.0f, 10.0f, 20.0f, 11.0f };
+		static const float hairline[] = { 0.0f, 10.0f, 10.0f, 10.0f, 20.0f, 10.000001f };
+
+		make_lines(&center, slight, 3, 0, ALL_CORNERS);
+		vec_lines_init(&out);
+		make_style(&style, 4.0f, VEC_CAP_BUTT, VEC_JOIN_BEVEL);
+		error = vec_stroke(&center, &style, NULL, &out);
+		CHECK_LONG(error, 0);
+		CHECK_LONG(out.contour_count, 3);
+		vec_lines_release(&out);
+		vec_lines_release(&center);
+
+		make_lines(&center, hairline, 3, 0, ALL_CORNERS);
+		vec_lines_init(&out);
+		error = vec_stroke(&center, &style, NULL, &out);
+		CHECK_LONG(error, 0);
+		CHECK_LONG(out.contour_count, 2);
+		vec_lines_release(&out);
+		vec_lines_release(&center);
+	}
 
 	/* Collinear segments: two rectangles and no join piece. */
 	make_lines(&center, straight, 3, 0, ALL_CORNERS);
@@ -853,6 +878,12 @@ test_dashes(void)
 	CHECK_NEAR(fill_area(&out, 0, 0, 30, 20), 44.0, 0.05);
 	vec_lines_release(&out);
 
+	/* With round caps too: the whole line once (a rectangle and two half discs), not dots from zero-length dashes. */
+	error = stroke_dashed_line(&out, 22.0f, zeros, 2, 3.0f, 1.0f, VEC_CAP_ROUND);
+	CHECK_LONG(error, 0);
+	CHECK_LONG(out.contour_count, 3);
+	vec_lines_release(&out);
+
 	/* The same with no list at all. */
 	error = stroke_dashed_line(&out, 22.0f, NULL, 0, 0.0f, 1.0f, VEC_CAP_BUTT);
 	CHECK_LONG(error, 0);
@@ -1045,8 +1076,37 @@ test_closed(void)
 	CHECK_NEAR(fill_area(&out, -4, -4, 20, 20), 60.0, 0.05);
 	vec_lines_release(&out);
 
+	/* A single dash that does not cover the contour is an ordinary dash with caps and no closing join: [0, 15] is seg 0 and 5 of seg 1. */
+	vec_lines_init(&out);
+	style.dashes = (const float[]){ 15.0f, 100.0f };
+	style.dash_count = 2;
+	style.dash_offset = 0.0f;
+	error = vec_stroke(&center, &style, NULL, &out);
+	CHECK_LONG(error, 0);
+	CHECK_LONG(out.contour_count, 3);
+	CHECK_NEAR(fill_area(&out, -4, -4, 20, 20), 30.0, 0.05);
+	vec_lines_release(&out);
+
+	/*
+	 * Dashes [0, 10, 10, 0] with round caps on the perimeter 40: dots (dashes of
+	 * length 0) at 0 and 20, dashes [10, 20] and [30, 40].  The dot at 0 is not
+	 * joined to the dash that ends at 40, which has a length: a disc (1 piece) at
+	 * 0 and at 20, and a rectangle with two caps (3) for each dash: 8.
+	 */
+	vec_lines_init(&out);
+	style.dashes = (const float[]){ 0.0f, 10.0f, 10.0f, 0.0f };
+	style.dash_count = 4;
+	style.cap = VEC_CAP_ROUND;
+	error = vec_stroke(&center, &style, NULL, &out);
+	CHECK_LONG(error, 0);
+	CHECK_LONG(out.contour_count, 8);
+	vec_lines_release(&out);
+	style.cap = VEC_CAP_BUTT;
+
 	/* A closed contour whose dashes [0, 15] and [20, 35] do not meet at the first vertex: two dashes of 30 each (a corner each). */
 	vec_lines_init(&out);
+	style.dashes = wrap;
+	style.dash_count = 2;
 	style.dash_offset = 0.0f;
 	error = vec_stroke(&center, &style, NULL, &out);
 	CHECK_LONG(error, 0);
@@ -1211,6 +1271,35 @@ test_zero_length(void)
 		CHECK_LONG(error, 0);
 		CHECK_LONG(out.contour_count, 0);
 	}
+	vec_lines_release(&out);
+	vec_lines_release(&center);
+}
+
+/* A dash of length 0 at a vertex is turned to the segment that starts there. */
+static void
+test_dot_at_vertex(void)
+{
+	static const float points[] = { 0.0f, 0.0f, 10.0f, 0.0f, 20.0f, 10.0f };
+	static const float dots[] = { 0.0f, 10.0f };
+	struct vec_stroke_style style;
+	struct vec_lines center;
+	struct vec_lines out;
+	int error;
+
+	make_lines(&center, points, 3, 0, ALL_CORNERS);
+	vec_lines_init(&out);
+	make_style(&style, 2.0f, VEC_CAP_SQUARE, VEC_JOIN_MITER);
+	style.dashes = dots;
+	style.dash_count = 2;
+	error = vec_stroke(&center, &style, NULL, &out);
+	CHECK_LONG(error, 0);
+	/* Dots at 0, 10 and 20 (the length is 10 + 14.142 = 24.142): three squares of side 2. */
+	CHECK_LONG(out.contour_count, 3);
+	check_pieces(&out);
+	/* The one at (10, 0) follows the direction (0.7071, 0.7071): its corners are (10, 0) + d +- n with n = (-0.7071, 0.7071). */
+	CHECK(has_vertex(&out, 10.0 + 0.5 * sqrt(2.0) * 2.0, 0.0, 1e-4));
+	CHECK(has_vertex(&out, 10.0, 0.5 * sqrt(2.0) * 2.0, 1e-4));
+	CHECK(!has_vertex(&out, 11.0, 1.0, 1e-4));
 	vec_lines_release(&out);
 	vec_lines_release(&center);
 }
@@ -1602,6 +1691,67 @@ test_random(void)
 	}
 }
 
+/* Extreme values: huge and tiny widths, dashes, offsets and scales, far coordinates; every call returns 0 or a documented error, and what it returns is well formed. */
+static void
+test_random_extreme(void)
+{
+	static const float magnitudes[] = { 1e-30f, 1e-6f, 0.001f, 1.0f, 100.0f, 1e6f, 1e7f, 1e30f, 3e38f };
+	struct vec_stroke_style style;
+	struct vec_matrix matrix;
+	struct vec_lines center;
+	struct vec_lines out;
+	float dashes[4];
+	float offset;
+	uint32_t state;
+	size_t run;
+	size_t i;
+	size_t n;
+	size_t vertices_before;
+	int error;
+
+	state = 987654321U;
+	for (run = 0; run < 1200; run++) {
+		vec_lines_init(&center);
+		n = 1 + (size_t)(check_random(&state) % 5U);
+		for (i = 0; i < n; i++) {
+			error = vec_lines_add(&center, check_random_float(&state, -1.0e7f, 1.0e7f) * (float)(check_random(&state) % 2U),
+			    check_random_float(&state, -100.0f, 100.0f), VEC_VERTEX_CORNER);
+			CHECK_LONG(error, 0);
+		}
+		if ((check_random(&state) % 3U) == 0)
+			vec_lines_close(&center);
+
+		make_style(&style, magnitudes[check_random(&state) % 9U], (enum vec_cap)(check_random(&state) % 3U), (enum vec_join)(check_random(&state) % 3U));
+		style.miter_limit = 1.0f + magnitudes[check_random(&state) % 9U] * 0.01f;
+		style.tolerance = magnitudes[check_random(&state) % 5U] > 1e-6f ? magnitudes[check_random(&state) % 5U] : 0.001f;
+		if ((check_random(&state) % 2U) == 0) {
+			for (i = 0; i < 4; i++)
+				dashes[i] = magnitudes[check_random(&state) % 9U];
+			offset = magnitudes[check_random(&state) % 9U];
+			if ((check_random(&state) % 2U) == 0)
+				offset = -offset;
+			style.dashes = dashes;
+			style.dash_count = 1 + (size_t)(check_random(&state) % 4U);
+			style.dash_offset = offset;
+			style.dash_scale = magnitudes[check_random(&state) % 9U];
+		}
+		vec_matrix_scale(&matrix, magnitudes[check_random(&state) % 6U], 1.0f);
+
+		vec_lines_init(&out);
+		vertices_before = out.vertex_count;
+		error = vec_stroke(&center, &style, (run % 2U) ? &matrix : NULL, &out);
+		CHECK(error == 0 || error == EINVAL || error == ENOBUFS);
+		if (error == 0) {
+			check_pieces(&out);
+		} else {
+			CHECK_LONG(out.vertex_count, vertices_before);
+			CHECK_LONG(out.contour_count, 0);
+		}
+		vec_lines_release(&out);
+		vec_lines_release(&center);
+	}
+}
+
 int
 main(void)
 {
@@ -1618,11 +1768,13 @@ main(void)
 	test_closed_wrap_area();
 	test_dash_limit();
 	test_zero_length();
+	test_dot_at_vertex();
 	test_zero_length_segment();
 	test_curve_vertices();
 	test_invalid();
 	test_limits();
 	test_random();
+	test_random_extreme();
 
 	return check_finish("stroke");
 }
