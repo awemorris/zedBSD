@@ -416,6 +416,11 @@ kernel_entry(
 	if (error != 0)
 		kern_logf("thermal: /dev/thermal is not published (%d)\n", error);
 #endif
+#if CONFIG_KERN_DESKTOP_BALANCER && CONFIG_KERN_DESKTOP_BALANCER_TEST
+
+	/* Starts the scheduler hints' stress test when the boot line asks for it. */
+	sched_hint_test_start();
+#endif
 
 	/* Enables timer and device interrupts before the boot worker can wait. */
 	hal_irq_enable();

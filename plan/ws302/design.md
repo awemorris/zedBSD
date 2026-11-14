@@ -347,7 +347,7 @@ BUSY の計算の thread は眠らず、CPU に他の仕事が無ければ quant
 #### 4.6.7 動かす前の状態の確かめ（review B2、第 3 版で置き場所を変えた）
 
 - 今の `sched_set_cpu`（:1721）は状態の検査が lock の外で、RUNNING・ZOMBIE・DEAD だけを断る。NEW の thread は移せ（task を移し `sched.cpu` を行き先にするので、後の `sched_add` は行き先の CPU に入れる）、cpuperf.c:3590 と intel-tco.c:1106 が `kthread_create` の直後の NEW の thread を BOUND にするのに使っている。だから `sched_set_cpu` に「NEW を断る」確かめを足すと今の呼び手が壊れる（第 2 版の §4.6.7 の誤り）。
-- DTB の道（`sched_hint_place` の走っていない thread）は、`sched_set_cpu` を直に呼ばず、sched.c の中の `hint_move_locked` 相当の道を使う: 元の CPU の lock を取った後に `state` が RUNNABLE か SLEEPING で、`queue_kind` が RUN・WOKEN・SLEEP のどれかで、`affinity` が FREE で、`need_migrate == 0` である事を確かめ直し、違えば ESRCH（移動の途中は EBUSY）。そこから先（queue から外す・印・transfer・retarget・行き先で入れる・持ち越しの起床）は `sched_set_cpu` と同じ順。`CONFIG_KERN_DESKTOP_BALANCER=n` の kernel を今と同じに保つため、`sched_set_cpu` を分けて共通にはせず、`#if CONFIG_KERN_DESKTOP_BALANCER` の中の別の static 関数に書く（重なりは約 60 行。DTB の外で同じ確かめが要る時が来たら、その時に `sched_set_cpu` と一つにする）。
+- DTB の道（`sched_hint_place` の走っていない thread）は、`sched_set_cpu` を直に呼ばず、sched.c の中の `hint_move`（p003）を使う: 元の CPU の lock を取った後に、thread がまだその CPU に居て `need_migrate == 0`（違えば EBUSY）、`state` が RUNNABLE（`queue_kind` が RUN か WOKEN）か SLEEPING（時間つきなら SLEEP、時間の無い眠りは queue に無い NONE。p003 で、多くの UI の thread が時間の無い眠りで待つので NONE も移せるとした。眠りに入る途中でまだ CPU の上に居る thread は `hal_task_transfer` が BUSY で断り、元に戻す）、`affinity` が FREE である事を確かめ直し、違えば ESRCH（走っている thread は EBUSY）。そこから先（queue から外す・印・transfer・retarget・行き先で入れる・持ち越しの起床）は `sched_set_cpu` と同じ順。`CONFIG_KERN_DESKTOP_BALANCER=n` の kernel を今と同じに保つため、`sched_set_cpu` を分けて共通にはせず、`#if CONFIG_KERN_DESKTOP_BALANCER` の中の別の static 関数に書く（重なりは約 60 行。DTB の外で同じ確かめが要る時が来たら、その時に `sched_set_cpu` と一つにする）。
 - **`sched_set_cpu` について変える事と変えない事**（この節が正、review 第 3 版 M2）: lock の外の状態の検査と呼び手への約束は変えない。`#if CONFIG_KERN_DESKTOP_BALANCER` の中でだけ、(1) queue に入れる 2 か所（失敗で元の CPU・成功で行き先）の段を `queue_level_locked` にし（§4.6.1、p003）、(2) 移動の間に持ち越した起床を `wakeups` に数える（§4.3、p002 で入れた）。n の code は同じ。DTB は `sched_set_cpu` を呼ばない。
 - **手渡しと BOUND**: `sched_handoff`（current を席に置く時）と `complete_handoff`（transfer の前）は、lock の中で `affinity == SCHED_CPU_FREE` を確かめ、違えば元の CPU の run queue に戻して counter に数える（今の BOUND の呼び手は NEW の kernel の thread だけなので起きないが、将来 user の thread を BOUND にする口が入った時に BOUND を破らない）。
 - NEW の user の thread は `sched_prepare_thread` が置き場所を決め（§4.6.4）、`sched_add` までは DTB に見えても ESRCH。REAPING・ZOMBIE・DEAD・EXITING は task が壊れうるので断る。移動の印（`need_migrate`）を立てた後の thread は走れないので、移動の間に ZOMBIE・REAPING にはならない。DTB は thread の参照（`thread_ref`）を持って呼ぶので struct は消えない。
@@ -623,6 +623,7 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 
 - p001: 第 3 版（2026-11-14 P6）。今の code との照合と決定の書き入れ、design-reviewer（§15）の反映。cleared は Q1 の判定。
 - p002: [phase002/phase.md](phase002/phase.md)。
+- p003: [phase003/phase.md](phase003/phase.md)（sched の口。純な関数は `src/kern/sched-hint.c`、試験は `src/kern/sched-hint-test.c`。mk の追加の案は phase003 の phase.md）。
 
 ## 12. 未確認
 
