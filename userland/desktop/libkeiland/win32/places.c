@@ -60,6 +60,8 @@ kl_app_storage_directory(
 		CoTaskMemFree(folder);
 		return ENOENT;
 	}
+
+	/* Converts the folder's path to UTF-8 and releases it. */
 	error = places_utf8(folder, wcslen(folder), buffer, size);
 	CoTaskMemFree(folder);
 	if (error != 0)
@@ -72,6 +74,8 @@ kl_app_storage_directory(
 		buffer[0] = '\0';
 		return ERANGE;
 	}
+
+	/* Adds the separator and the application's name. */
 	buffer[length] = '\\';
 	memcpy(buffer + length + 1U, app->application, name + 1U);
 
@@ -116,6 +120,8 @@ kl_data_directory(
 		if (module[index] == L'\\' || module[index] == L'/')
 			cut = index;
 	}
+
+	/* Converts the program's directory to UTF-8. */
 	error = places_utf8(module, cut, buffer, size);
 	free(module);
 	if (error != 0)
@@ -127,6 +133,8 @@ kl_data_directory(
 		buffer[0] = '\0';
 		return ERANGE;
 	}
+
+	/* Adds the data directory's name. */
 	memcpy(buffer + length, PLACES_DATA, sizeof(PLACES_DATA));
 
 	/* Succeeded. */

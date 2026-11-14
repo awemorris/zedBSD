@@ -69,6 +69,7 @@ keiui_win32_modifiers(
 {
 	unsigned modifiers;
 
+	/* Starts with no modifier. */
 	modifiers = 0;
 
 	/* Shift and the Windows key map one to one. */
@@ -159,6 +160,7 @@ keiui_win32_key_flags(
 	if (flags == NULL)
 		return;
 
+	/* Takes the message's flag bits. */
 	bits = (uint64_t)lparam;
 
 	/* Bits 16 to 23 are the scan code. */

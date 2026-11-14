@@ -138,6 +138,8 @@ kl_app_window_create(
 		errno = ENOMEM;
 		return NULL;
 	}
+
+	/* Joins the window to its application and starts it with no presenter. */
 	window->app = app;
 	window->present = KL_PRESENT_NONE;
 	window->dpi = 96U;
@@ -464,6 +466,8 @@ keiui_win32_push(
 			from = (window->event_head + index + 1U) % KEIUI_WIN32_EVENTS;
 			window->events[to] = window->events[from];
 		}
+
+		/* Counts the event as taken. */
 		window->event_count--;
 	}
 
@@ -600,6 +604,8 @@ keiui_win32_window_procedure(
 		create = (const CREATESTRUCTW *)lparam;
 		(void)SetWindowLongPtrW(handle, GWLP_USERDATA, (LONG_PTR)create->lpCreateParams);
 	}
+
+	/* Takes the window the HWND belongs to. */
 	window = (struct kl_window *)GetWindowLongPtrW(handle, GWLP_USERDATA);
 
 	/* An HWND whose window is gone, or not made yet: the system's handling. */
@@ -632,6 +638,7 @@ window_frame_message(
 	MINMAXINFO *limits;
 	const RECT *suggested;
 	MONITORINFO monitor;
+	BOOL got;
 	HMONITOR place;
 	POINT point;
 	uint32_t caption;
@@ -667,9 +674,12 @@ window_frame_message(
 			place = MonitorFromRect(&sizes->rgrc[0], MONITOR_DEFAULTTONEAREST);
 			memset(&monitor, 0, sizeof(monitor));
 			monitor.cbSize = sizeof(monitor);
-			if (GetMonitorInfoW(place, &monitor))
+			got = GetMonitorInfoW(place, &monitor);
+			if (got)
 				sizes->rgrc[0] = monitor.rcWork;
 		}
+
+		/* Answers the message as handled. */
 		return 0;
 	case WM_NCHITTEST:
 		/* frame.c's answer at the point, in the client's pixels. */
@@ -875,6 +885,7 @@ window_content_message(
 	LPARAM lparam)
 {
 	TRACKMOUSEEVENT track;
+	BOOL tracked;
 	POINT point;
 	unsigned hit;
 	unsigned button;
@@ -909,9 +920,12 @@ window_content_message(
 			track.cbSize = sizeof(track);
 			track.dwFlags = TME_LEAVE;
 			track.hwndTrack = handle;
-			if (TrackMouseEvent(&track))
+			tracked = TrackMouseEvent(&track);
+			if (tracked)
 				window->tracking = 1;
 		}
+
+		/* Passes the move on to the program. */
 		window_pointer(window, KL_WINDOW_MOTION, lparam, 0U, 0);
 		return 0;
 	case WM_MOUSELEAVE:
@@ -1199,6 +1213,8 @@ window_key(
 				(void)keiui_win32_utf8_from_utf16(units, count, text, sizeof(text), NULL);
 			(void)keiui_win32_field_key(window, code, window_modifiers(), text);
 		}
+
+		/* Stops here: the field took the key. */
 		return;
 	}
 
@@ -1327,6 +1343,7 @@ window_caption_mouse(
 	WPARAM wparam)
 {
 	TRACKMOUSEEVENT track;
+	BOOL tracked;
 	unsigned button;
 	unsigned hover;
 	unsigned pressed;
@@ -1341,7 +1358,8 @@ window_caption_mouse(
 		track.cbSize = sizeof(track);
 		track.dwFlags = TME_LEAVE | TME_NONCLIENT;
 		track.hwndTrack = window->frame;
-		if (TrackMouseEvent(&track))
+		tracked = TrackMouseEvent(&track);
+		if (tracked)
 			window->frame_tracking = 1;
 	}
 
@@ -1416,6 +1434,8 @@ window_copy_data(
 		free(data);
 		return;
 	}
+
+	/* Hands the copied URLs to the program. */
 	input->code = KEIUI_WIN32_COPY_URLS;
 	input->data = data;
 }
@@ -1502,6 +1522,8 @@ window_set_title(
 		free(units);
 		return error;
 	}
+
+	/* Sets the frame's text. */
 	(void)SetWindowTextW(window->frame, (LPCWSTR)units);
 	free(units);
 
@@ -1544,6 +1566,7 @@ window_title_mouse(
 	LPARAM lparam)
 {
 	TRACKMOUSEEVENT track;
+	BOOL tracked;
 	int32_t x;
 	int32_t y;
 	unsigned index;
@@ -1562,12 +1585,15 @@ window_title_mouse(
 		window->control_hover = index;
 		(void)InvalidateRect(window->frame, NULL, FALSE);
 	}
+
+	/* Asks for the pointer's leaving once. */
 	if (!window->title_tracking) {
 		memset(&track, 0, sizeof(track));
 		track.cbSize = sizeof(track);
 		track.dwFlags = TME_LEAVE;
 		track.hwndTrack = window->frame;
-		if (TrackMouseEvent(&track))
+		tracked = TrackMouseEvent(&track);
+		if (tracked)
 			window->title_tracking = 1;
 	}
 

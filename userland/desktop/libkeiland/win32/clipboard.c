@@ -87,6 +87,7 @@ keiui_win32_clipboard_put(
 	uint16_t *units;
 	size_t count;
 	int error;
+	BOOL opened;
 
 	/* The UTF-16 form, in memory the clipboard can own. */
 	memory = GlobalAlloc(GMEM_MOVEABLE, (length + 1U) * sizeof(uint16_t));
@@ -97,6 +98,8 @@ keiui_win32_clipboard_put(
 		(void)GlobalFree(memory);
 		return ENOMEM;
 	}
+
+	/* Converts the text into the memory. */
 	error = keiui_win32_utf16_from_utf8(text, length, units, length + 1U, &count);
 	(void)GlobalUnlock(memory);
 	if (error != 0) {
@@ -105,10 +108,13 @@ keiui_win32_clipboard_put(
 	}
 
 	/* The clipboard, emptied and given the text (it owns the memory then). */
-	if (!OpenClipboard(window->frame)) {
+	opened = OpenClipboard(window->frame);
+	if (!opened) {
 		(void)GlobalFree(memory);
 		return EBUSY;
 	}
+
+	/* Empties the clipboard. */
 	(void)EmptyClipboard();
 	given = SetClipboardData(CF_UNICODETEXT, memory);
 	(void)CloseClipboard();
@@ -132,10 +138,12 @@ keiui_win32_clipboard_get(
 	HANDLE memory;
 	SIZE_T bytes;
 	size_t count;
+	BOOL opened;
 
 	/* Nothing yet. */
 	text[0] = '\0';
-	if (!OpenClipboard(window->frame))
+	opened = OpenClipboard(window->frame);
+	if (!opened)
 		return 0U;
 
 	/* The text, converted. */
@@ -149,6 +157,8 @@ keiui_win32_clipboard_get(
 			(void)GlobalUnlock(memory);
 		}
 	}
+
+	/* Closes the clipboard. */
 	(void)CloseClipboard();
 
 	/* Its length. */

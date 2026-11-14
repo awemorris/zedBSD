@@ -70,6 +70,9 @@ keiui_win32_utf8_from_utf16(
 	uint32_t code_point;
 	uint32_t unit;
 	int error;
+	int high;
+	int low;
+	int next_low;
 
 	/* Nothing has been converted yet. */
 	if (consumed != NULL)
@@ -98,14 +101,19 @@ keiui_win32_utf8_from_utf16(
 		/* Reads one character: a pair, a lone surrogate or a plain unit. */
 		step = 1;
 		code_point = unit;
-		if (is_high_surrogate(unit)) {
-			if (index + 1 < count && is_low_surrogate(units[index + 1])) {
+		high = is_high_surrogate(unit);
+		low = is_low_surrogate(unit);
+		next_low = 0;
+		if (high && index + 1 < count)
+			next_low = is_low_surrogate(units[index + 1]);
+		if (high) {
+			if (next_low) {
 				code_point = join_surrogates(unit, units[index + 1]);
 				step = 2;
 			} else {
 				code_point = REPLACEMENT_CHARACTER;
 			}
-		} else if (is_low_surrogate(unit)) {
+		} else if (low) {
 			code_point = REPLACEMENT_CHARACTER;
 		}
 
@@ -125,6 +133,7 @@ keiui_win32_utf8_from_utf16(
 			buffer[written + byte_index] = (char)bytes[byte_index];
 		}
 
+		/* Moves past the character in the output and the input. */
 		written += length;
 		index += step;
 	}
@@ -202,30 +211,39 @@ keiui_win32_char_unit(
 	uint16_t unit,
 	uint32_t *code_point)
 {
+	int high;
+	int low;
+
 	/* Changes nothing without a state and a place for the character. */
 	if (state == NULL || code_point == NULL)
 		return 0;
 
+	/* Tells which half of a surrogate pair the unit is, if any. */
+	high = is_high_surrogate(unit);
+	low = is_low_surrogate(unit);
+
 	/* A high surrogate waits for its low one; a waiting one is lost. */
-	if (is_high_surrogate(unit)) {
+	if (high) {
 		if (state->high != 0) {
 			state->high = unit;
 			*code_point = REPLACEMENT_CHARACTER;
 			return 1;
 		}
 
+		/* Keeps the high surrogate until its low one comes. */
 		state->high = unit;
 		return 0;
 	}
 
 	/* A low surrogate completes a pair, or stands alone and is replaced. */
-	if (is_low_surrogate(unit)) {
+	if (low) {
 		if (state->high != 0) {
 			*code_point = join_surrogates(state->high, unit);
 			state->high = 0;
 			return 1;
 		}
 
+		/* Replaces a low surrogate that has no high one. */
 		*code_point = REPLACEMENT_CHARACTER;
 		return 1;
 	}
@@ -360,6 +378,7 @@ decode_utf8(
 	size_t total;
 	size_t index;
 
+	/* Takes the lead byte. */
 	lead = bytes[0];
 
 	/* An ASCII byte is a character by itself. */
@@ -428,6 +447,7 @@ decode_utf8(
 			return index;
 		}
 
+		/* Adds the continuation byte's six bits. */
 		value = (value << 6) | (next & 0x3FU);
 	}
 
@@ -484,6 +504,7 @@ utf8_scan_units(
 	size_t unit_index;
 	uint32_t code_point;
 
+	/* Starts at the beginning of the input and the output. */
 	position = 0;
 	produced = 0;
 
@@ -493,6 +514,7 @@ utf8_scan_units(
 		if (bytes[position] == 0)
 			break;
 
+		/* Decodes the next character and encodes it as UTF-16 units. */
 		step = decode_utf8(bytes + position, length - position, &code_point);
 		unit_count = encode_utf16(code_point, pair);
 
@@ -506,6 +528,7 @@ utf8_scan_units(
 			}
 		}
 
+		/* Moves past the units made and the bytes read. */
 		produced += unit_count;
 		position += step;
 	}

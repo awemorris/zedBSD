@@ -121,10 +121,14 @@ kl_window_present_part(
 	size_t stride,
 	const struct kl_rect *part)
 {
+	unsigned count;
 	int error;
 
-	/* The parts' way, with one part. */
-	error = kl_window_present_parts(window, pixels, stride, part, part == NULL ? 0U : 1U);
+	/* The parts' way, with one part, or with none when nothing is named. */
+	count = 1U;
+	if (part == NULL)
+		count = 0U;
+	error = kl_window_present_parts(window, pixels, stride, part, count);
 	if (error != 0)
 		return error;
 
@@ -160,6 +164,8 @@ kl_window_present_parts(
 		(void)InvalidateRect(window->content, NULL, FALSE);
 		return 0;
 	}
+
+	/* Marks each changed part of the content for painting. */
 	for (index = 0U; index < count; index++) {
 		area.left = parts[index].x;
 		area.top = parts[index].y;
@@ -334,6 +340,8 @@ keiui_win32_paint_caption(
 			(void)EndPaint(window->frame, &paint);
 			return;
 		}
+
+		/* Replaces the caption's bitmap with the new one. */
 		if (window->caption != NULL)
 			(void)DeleteObject(window->caption);
 		window->caption = bitmap;
@@ -371,6 +379,8 @@ keiui_win32_paint_caption(
 		} else {
 			kl_canvas_fill(&canvas, &ground, theme->ground_top);
 		}
+
+		/* Draws the controls of the title bar. */
 		keiui_win32_titlebar_draw(window, &canvas, width, height);
 		for (index = 0U; index < 3U; index++)
 			present_button(&canvas, window, index, &buttons[index]);
@@ -486,6 +496,7 @@ present_button(
 	const struct kl_theme *theme;
 	struct kl_rect ground;
 	kl_color ink;
+	kl_color fill;
 	float side;
 	float line;
 	float cx;
@@ -504,10 +515,16 @@ present_button(
 	ground.height = (int)place->height;
 	if (window->pressed == index || window->hover == index) {
 		if (index == KEIUI_WIN32_BUTTON_CLOSE_INDEX) {
-			kl_canvas_fill(canvas, &ground, window->pressed == index ? PRESENT_CLOSE_PRESSED : PRESENT_CLOSE_HOVER);
+			fill = PRESENT_CLOSE_HOVER;
+			if (window->pressed == index)
+				fill = PRESENT_CLOSE_PRESSED;
+			kl_canvas_fill(canvas, &ground, fill);
 			ink = 0xffffffffU;
 		} else {
-			kl_canvas_fill(canvas, &ground, window->pressed == index ? theme->selection : theme->hover);
+			fill = theme->hover;
+			if (window->pressed == index)
+				fill = theme->selection;
+			kl_canvas_fill(canvas, &ground, fill);
 		}
 	}
 
@@ -520,6 +537,8 @@ present_button(
 		kl_canvas_line(canvas, cx - side / 2.0f, cy, cx + side / 2.0f, cy, line, ink);
 		return;
 	}
+
+	/* Draws the maximize or restore mark. */
 	if (index == KEIUI_WIN32_BUTTON_MAXIMIZE_INDEX) {
 		if (window->maximized) {
 			kl_canvas_round_border(canvas, cx - side / 2.0f, cy - side / 2.0f + 2.0f, side - 2.0f, side - 2.0f, 0.0f, line, ink);
@@ -528,8 +547,12 @@ present_button(
 		} else {
 			kl_canvas_round_border(canvas, cx - side / 2.0f, cy - side / 2.0f, side, side, 0.0f, line, ink);
 		}
+
+		/* Ends here: the mark is drawn. */
 		return;
 	}
+
+	/* Draws the close mark as a cross. */
 	kl_canvas_line(canvas, cx - side / 2.0f, cy - side / 2.0f, cx + side / 2.0f, cy + side / 2.0f, line, ink);
 	kl_canvas_line(canvas, cx - side / 2.0f, cy + side / 2.0f, cx + side / 2.0f, cy - side / 2.0f, line, ink);
 }

@@ -149,6 +149,7 @@ kl_window_start_drag_icon(
 {
 	int error;
 
+	/* The serial and the icon are not used on this system. */
 	(void)serial;
 	(void)icon;
 
@@ -175,6 +176,7 @@ kl_window_start_drag(
 {
 	int error;
 
+	/* The serial is not used on this system. */
 	(void)serial;
 
 	/* The drag. */
@@ -200,6 +202,7 @@ kl_window_drag_text(
 	struct kl_drag_data data;
 	int error;
 
+	/* The serial is not used on this system. */
 	(void)serial;
 
 	/* Text. */
@@ -305,6 +308,8 @@ keiui_win32_drag_run(
 			input->code = 0U;
 		return;
 	}
+
+	/* Joins the object's interface and gives it its first reference. */
 	object->iface.lpVtbl = &drag_object_calls;
 	object->references = 1;
 	object->drag = drag;
@@ -360,6 +365,7 @@ drag_begin(
 	struct drag_type *type;
 	size_t index;
 	size_t name;
+	unsigned kind;
 	BOOL posted;
 
 	/* A window, the types, and no drag on. */
@@ -379,7 +385,8 @@ drag_begin(
 	for (index = 0U; index < count && drag->count < DRAG_TYPES; index++) {
 		if (data[index].type == NULL)
 			continue;
-		if (drag_kind(data[index].type) == 0U)
+		kind = drag_kind(data[index].type);
+		if (kind == 0U)
 			continue;
 
 		/* Its name. */
@@ -390,8 +397,10 @@ drag_begin(
 			drag_free(drag);
 			return ENOMEM;
 		}
+
+		/* Copies the type's name. */
 		memcpy(type->name, data[index].type, name + 1U);
-		type->kind = drag_kind(data[index].type);
+		type->kind = kind;
 		drag->count++;
 
 		/* Its data, when it is given now. */
@@ -401,6 +410,8 @@ drag_begin(
 				drag_free(drag);
 				return ENOMEM;
 			}
+
+			/* Copies the type's data. */
 			memcpy(type->data, data[index].data, data[index].length);
 			type->length = data[index].length;
 		}
@@ -428,6 +439,8 @@ drag_begin(
 		drag_free(drag);
 		return ENOMEM;
 	}
+
+	/* Hands the drag to the window. */
 	window->drag = drag;
 
 	/* Succeeded: the drag starts at the next dispatch. */
@@ -450,6 +463,8 @@ drag_free(
 		free(drag->types[index].name);
 		free(drag->types[index].data);
 	}
+
+	/* Releases the drag itself. */
 	free(drag);
 }
 
@@ -538,6 +553,8 @@ drag_global(
 			(void)GlobalFree(memory);
 			return NULL;
 		}
+
+		/* Copies the picture's bytes into the memory. */
 		memcpy(locked, type->data, type->length);
 		(void)GlobalUnlock(memory);
 		return memory;
@@ -554,6 +571,8 @@ drag_global(
 			free(html);
 			return NULL;
 		}
+
+		/* Allocates the memory for the HTML. */
 		memory = GlobalAlloc(GMEM_MOVEABLE, made + 1U);
 		locked = NULL;
 		if (memory != NULL)
@@ -564,6 +583,8 @@ drag_global(
 			free(html);
 			return NULL;
 		}
+
+		/* Copies the HTML and ends it. */
 		memcpy(locked, html, made);
 		((char *)locked)[made] = '\0';
 		(void)GlobalUnlock(memory);
@@ -579,8 +600,12 @@ drag_global(
 			if (text[count] == '\r' || text[count] == '\n')
 				break;
 		}
+
+		/* Takes the text up to the line's end as the length. */
 		length = count;
 	}
+
+	/* Allocates the memory for the text. */
 	memory = GlobalAlloc(GMEM_MOVEABLE, (length + 1U) * sizeof(uint16_t));
 	if (memory == NULL)
 		return NULL;
@@ -589,6 +614,8 @@ drag_global(
 		(void)GlobalFree(memory);
 		return NULL;
 	}
+
+	/* Converts the text to UTF-16. */
 	count = 0U;
 	error = keiui_win32_utf16_from_utf8(text, length, units, length + 1U, &count);
 	if (error != 0)
@@ -607,8 +634,15 @@ object_query(
 	REFIID id,
 	void **out)
 {
+	BOOL ours;
+
+	/* Tells whether the interface asked for is one this object is. */
+	ours = IsEqualIID(id, &IID_IUnknown);
+	if (!ours)
+		ours = IsEqualIID(id, &IID_IDataObject);
+
 	/* IUnknown and IDataObject are this object. */
-	if (IsEqualIID(id, &IID_IUnknown) || IsEqualIID(id, &IID_IDataObject)) {
+	if (ours) {
 		*out = iface;
 		IDataObject_AddRef(iface);
 		return S_OK;
@@ -648,6 +682,8 @@ object_release(
 		drag_free(object->drag);
 		free(object);
 	}
+
+	/* Reports the references that are left. */
 	return (ULONG)count;
 }
 
@@ -833,8 +869,15 @@ source_query(
 	REFIID id,
 	void **out)
 {
+	BOOL ours;
+
+	/* Tells whether the interface asked for is one this object is. */
+	ours = IsEqualIID(id, &IID_IUnknown);
+	if (!ours)
+		ours = IsEqualIID(id, &IID_IDropSource);
+
 	/* IUnknown and IDropSource are this object. */
-	if (IsEqualIID(id, &IID_IUnknown) || IsEqualIID(id, &IID_IDropSource)) {
+	if (ours) {
 		*out = iface;
 		IDropSource_AddRef(iface);
 		return S_OK;

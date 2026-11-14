@@ -154,6 +154,7 @@ keiui_win32_cf_html_encode(
 		if (broken)
 			return EINVAL;
 
+		/* Measures the source URL line. */
 		url_length = strlen(source_url);
 		url_line_length = (sizeof(CF_HTML_SOURCE_URL_NAME) - 1U) + url_length + (sizeof(CF_HTML_EOL) - 1U);
 	}
@@ -331,6 +332,8 @@ put_offset(
 		cursor[digit_index - 1U] = (char)('0' + (int)(rest % 10U));
 		rest /= 10U;
 	}
+
+	/* Moves past the digits. */
 	cursor += KEIUI_WIN32_CF_HTML_DIGITS;
 
 	/* Ends the line. */
@@ -424,14 +427,18 @@ parse_offset(
 		if (data[start + index] < '0' || data[start + index] > '9')
 			return EINVAL;
 
+		/* Takes the digit's value. */
 		digit = (unsigned)(data[start + index] - '0');
 		if (value > (SIZE_MAX - digit) / 10U)
 			return EINVAL;
 
+		/* Adds the digit to the number. */
 		value = value * 10U + digit;
 		if (value > length)
 			return EINVAL;
 	}
+
+	/* Hands over the number. */
 	offset->value = value;
 
 	/* Succeeded: the offset is a number inside the data. */
@@ -470,6 +477,7 @@ name_is_valid(
 		if (letter == '-' || letter == '_')
 			continue;
 
+		/* Refuses any other character. */
 		return 0;
 	}
 
@@ -674,6 +682,8 @@ read_line(
 			header->url_start = value_start;
 			header->url_length = value_length;
 		}
+
+		/* Ends this field. */
 		break;
 	case CF_HTML_FIELD_OTHER:
 	default:
@@ -740,6 +750,7 @@ read_header(
 		if (error != 0)
 			return error;
 
+		/* Moves to the next line. */
 		position = next_line_of(data, line_end, length);
 	}
 
@@ -822,6 +833,7 @@ select_range(
 		if (!valid)
 			return EINVAL;
 
+		/* Records that the fragment's markers form a pair. */
 		fragment_pair = 1;
 	}
 
@@ -832,6 +844,7 @@ select_range(
 		if (!valid)
 			return EINVAL;
 
+		/* Records that the HTML's markers form a pair. */
 		html_pair = 1;
 	}
 
