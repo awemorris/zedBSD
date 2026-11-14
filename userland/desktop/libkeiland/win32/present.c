@@ -12,7 +12,11 @@
  * surface over the content (vkCreateWin32SurfaceKHR, looked up through the
  * loader the program loaded: libkeiland imports nothing of Vulkan), and the
  * title bar, which libkeiland draws with its canvas (the three caption
- * buttons, their hover and press in the theme's colours).
+ * buttons, their hover and press in the theme's colours).  A glass title
+ * bar (window.c) has a transparent ground, its pixels premultiplied, so
+ * that the system's backdrop shows through it; only the caption buttons'
+ * strip keeps the theme's ground, over the system's own caption buttons
+ * that the extended frame would show there.
  */
 
 #include <vulkan/vulkan.h>
@@ -223,9 +227,8 @@ kl_window_vulkan_surface(
 /*
  * Names the instance extensions a Vulkan instance needs for a window's
  * surface: the surface extension and Win32's.  Without the system's Vulkan
- * loader (no vulkan-1.dll where Windows keeps it) there is no instance to
- * make, and it returns EIO before the program's first Vulkan call: the
- * program imports the loader late, and that call would end the process.
+ * loader (no vulkan-1.dll loaded, nor where Windows keeps it) there is no
+ * instance to make, and it returns EIO.
  */
 int
 kl_window_vulkan_extensions(
@@ -242,10 +245,7 @@ kl_window_vulkan_extensions(
 	if (names == NULL || count == NULL)
 		return EINVAL;
 
-	/*
-	 * The loader, the system's (loaded here, it stays loaded, so the late
-	 * import later finds this one).
-	 */
+	/* The loader: the one the program imports, or the system's (loaded here, it stays loaded). */
 	loader = GetModuleHandleW(L"vulkan-1.dll");
 	if (loader == NULL)
 		loader = LoadLibraryExW(L"vulkan-1.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -300,6 +300,7 @@ keiui_win32_paint_caption(
 	struct keiui_win32_rect buttons[3];
 	struct kl_canvas canvas;
 	struct kl_rect ground;
+	struct kl_rect strip;
 	PAINTSTRUCT paint;
 	RECT client;
 	HDC context;
@@ -341,7 +342,17 @@ keiui_win32_paint_caption(
 		window->caption_height = height;
 	}
 
-	/* The ground and the buttons, drawn with the canvas. */
+	/* The caption buttons' places. */
+	memset(&frame, 0, sizeof(frame));
+	frame.width = width;
+	frame.height = (uint32_t)(client.bottom - client.top);
+	frame.dpi = window->dpi;
+	frame.maximized = window->maximized;
+	frame.fullscreen = window->fullscreen;
+	frame.caption_height = KEIUI_WIN32_CAPTION;
+	keiui_win32_frame_buttons(&frame, buttons);
+
+	/* The ground (transparent on glass, but for the buttons' strip), the controls and the buttons, drawn with the canvas. */
 	error = kl_canvas_init(&canvas, window->caption_pixels, width, (int)width, (int)height);
 	if (error == 0) {
 		theme = kl_theme_default();
@@ -349,16 +360,18 @@ keiui_win32_paint_caption(
 		ground.y = 0;
 		ground.width = (int)width;
 		ground.height = (int)height;
-		kl_canvas_fill(&canvas, &ground, theme->ground_top);
+		if (window->glass) {
+			(void)GdiFlush();
+			memset(window->caption_pixels, 0, (size_t)width * height * sizeof(uint32_t));
+			strip.x = buttons[KEIUI_WIN32_BUTTON_MINIMIZE_INDEX].x;
+			strip.y = 0;
+			strip.width = (int)width - strip.x;
+			strip.height = (int)height;
+			kl_canvas_fill(&canvas, &strip, theme->ground_top);
+		} else {
+			kl_canvas_fill(&canvas, &ground, theme->ground_top);
+		}
 		keiui_win32_titlebar_draw(window, &canvas, width, height);
-		memset(&frame, 0, sizeof(frame));
-		frame.width = width;
-		frame.height = (uint32_t)(client.bottom - client.top);
-		frame.dpi = window->dpi;
-		frame.maximized = window->maximized;
-		frame.fullscreen = window->fullscreen;
-		frame.caption_height = KEIUI_WIN32_CAPTION;
-		keiui_win32_frame_buttons(&frame, buttons);
 		for (index = 0U; index < 3U; index++)
 			present_button(&canvas, window, index, &buttons[index]);
 		kl_canvas_release(&canvas);

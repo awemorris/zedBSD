@@ -62,6 +62,10 @@
 /* A drag waiting for its start (drag.c). */
 struct keiui_win32_drag;
 
+/* A window's TSF (ime.c) and its touch pad's DirectManipulation (pointer.c). */
+struct keiui_win32_tsf;
+struct keiui_win32_manipulation;
+
 /* No control (an index of none). */
 #define KEIUI_WIN32_NO_CONTROL		0xffffffffU
 
@@ -168,8 +172,12 @@ struct kl_app {
  * the text input: whether the program asked for it and its caret's
  * rectangle (the content's pixels); whether the program takes the pen
  * as a tablet (tablet, pointer.c); the drag waiting for its start
- * (NULL when none, drag.c); and the program's callback for the sizes
- * during the modal size loop (NULL when none) with its data.
+ * (NULL when none, drag.c); the program's callback for the sizes
+ * during the modal size loop (NULL when none) with its data; the input
+ * method's TSF (NULL when the window uses IMM32, ime.c); the touch pad's
+ * DirectManipulation (NULL when the wheel's messages bring it, pointer.c);
+ * and whether the title bar is drawn over the system's backdrop (glass:
+ * its ground left transparent, present.c).
  */
 struct kl_window {
 	struct kl_app *app;
@@ -222,6 +230,9 @@ struct kl_window {
 	struct keiui_win32_drag *drag;
 	kl_window_resize_fn resize_callback;
 	void *resize_data;
+	struct keiui_win32_tsf *tsf;
+	struct keiui_win32_manipulation *manipulation;
+	int glass;
 };
 
 /* app.c */
@@ -262,6 +273,8 @@ void keiui_win32_titlebar_release_all(struct kl_window *window);
 /* ime.c */
 int keiui_win32_ime_message(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT *result);
 void keiui_win32_ime_place(struct kl_window *window);
+void keiui_win32_tsf_open(struct kl_window *window);
+void keiui_win32_tsf_close(struct kl_window *window);
 
 /* drag.c */
 void keiui_win32_drag_run(struct kl_window *window);
@@ -269,6 +282,9 @@ void keiui_win32_drag_drop(struct kl_window *window);
 
 /* pointer.c */
 int keiui_win32_pointer_message(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam);
+void keiui_win32_manipulation_open(struct kl_window *window);
+void keiui_win32_manipulation_close(struct kl_window *window);
+int keiui_win32_manipulation_message(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam);
 
 /* clipboard.c */
 int keiui_win32_clipboard_put(struct kl_window *window, const char *text, size_t length);

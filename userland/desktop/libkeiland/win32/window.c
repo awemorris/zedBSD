@@ -33,8 +33,13 @@
  * The frame follows the system's colours: the dark title bar
  * (DWMWA_USE_IMMERSIVE_DARK_MODE) in the dark appearance, and the system's
  * backdrop (Mica, DWMWA_SYSTEMBACKDROP_TYPE, Windows 11 22H2 and later;
- * an older system refuses it and keeps its own) behind what the program
- * does not draw over.  A change of the colours (WM_SETTINGCHANGE
+ * an older system refuses it and keeps its own).  Where the system takes
+ * Mica (and high contrast is off) the frame is extended into the client
+ * area down to the title bar's bottom and the title bar is drawn with a
+ * transparent ground (present.c), so that Mica shows through it; the
+ * content stays opaque (the program draws all of it).  Elsewhere the frame
+ * is extended by one pixel only, for the shadow, and the title bar is
+ * opaque.  A change of the colours (WM_SETTINGCHANGE
  * "ImmersiveColorSet", WM_DWMCOLORIZATIONCOLORCHANGED) is read again by
  * the application (app.c), which redoes every frame.
  */
@@ -76,6 +81,12 @@
 #define WINDOW_DWM_BACKDROP	38U
 #define WINDOW_BACKDROP_MAIN	2
 
+/* The first build of Windows that takes the backdrop attribute (Windows 11 22H2). */
+#define WINDOW_BACKDROP_BUILD	22621U
+
+/* ntdll's RtlGetVersion, which tells the system's real version whatever the manifest says. */
+typedef LONG (WINAPI *window_version_fn)(OSVERSIONINFOW *version);
+
 static LRESULT window_frame_message(struct kl_window *window, HWND handle, UINT message, WPARAM wparam, LPARAM lparam);
 static LRESULT window_content_message(struct kl_window *window, HWND handle, UINT message, WPARAM wparam, LPARAM lparam);
 static void window_frame_box(const struct kl_window *window, struct keiui_win32_frame *frame);
@@ -97,6 +108,8 @@ static int window_set_title(struct kl_window *window, const char *title);
 static void window_font(struct kl_window *window);
 static void window_title_mouse(struct kl_window *window, UINT message, LPARAM lparam);
 static int window_colors_changed(const WCHAR *area);
+static void window_glass(struct kl_window *window);
+static int window_backdrop_build(void);
 
 /*
  * Makes a window of the application: the frame with its title and the
@@ -108,7 +121,6 @@ kl_app_window_create(
 	const struct kl_window_options *options)
 {
 	struct kl_window *window;
-	MARGINS margins;
 	uint32_t width;
 	uint32_t height;
 	uint32_t caption;
@@ -167,6 +179,10 @@ kl_app_window_create(
 		return NULL;
 	}
 
+	/* The input method's TSF and the touch pad's DirectManipulation, where the system has them. */
+	keiui_win32_tsf_open(window);
+	keiui_win32_manipulation_open(window);
+
 	/* One of the application's windows, found by a second start of the program by its property. */
 	window->next = app->windows;
 	app->windows = window;
@@ -182,10 +198,7 @@ kl_app_window_create(
 		}
 	}
 
-	/* The system's shadow, the title bar and the backdrop of the appearance. */
-	memset(&margins, 0, sizeof(margins));
-	margins.cyTopHeight = 1;
-	(void)DwmExtendFrameIntoClientArea(window->frame, &margins);
+	/* The title bar and the backdrop of the appearance, and the system's shadow (or the glass of the title bar). */
 	keiui_win32_window_theme(window);
 
 	/* The frame's size at its dpi, its client the whole window from now on. */
@@ -228,6 +241,10 @@ kl_window_close(
 			break;
 		}
 	}
+
+	/* The input method's TSF and the touch pad's DirectManipulation stop while the HWNDs are there. */
+	keiui_win32_manipulation_close(window);
+	keiui_win32_tsf_close(window);
 
 	/* The HWNDs forget the window, then go. */
 	if (window->content != NULL)
@@ -369,8 +386,12 @@ void
 keiui_win32_window_theme(
 	struct kl_window *window)
 {
+	HIGHCONTRASTW contrast;
+	HRESULT result;
 	BOOL dark;
+	BOOL read;
 	int backdrop;
+	int recent;
 
 	/* The dark title bar in the dark appearance. */
 	dark = FALSE;
@@ -380,7 +401,23 @@ keiui_win32_window_theme(
 
 	/* Mica, where the system has it. */
 	backdrop = WINDOW_BACKDROP_MAIN;
-	(void)DwmSetWindowAttribute(window->frame, WINDOW_DWM_BACKDROP, &backdrop, sizeof(backdrop));
+	result = DwmSetWindowAttribute(window->frame, WINDOW_DWM_BACKDROP, &backdrop, sizeof(backdrop));
+
+	/*
+	 * The title bar is glass over Mica only on a system new enough to have
+	 * it (an older one, or Wine, may take the attribute and show none) and
+	 * out of high contrast, whose colours are solid.
+	 */
+	window->glass = 0;
+	recent = window_backdrop_build();
+	if (SUCCEEDED(result) && recent)
+		window->glass = 1;
+	memset(&contrast, 0, sizeof(contrast));
+	contrast.cbSize = sizeof(contrast);
+	read = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0U);
+	if (read && (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0U)
+		window->glass = 0;
+	window_glass(window);
 
 	/* The title bar in the theme's colours. */
 	(void)InvalidateRect(window->frame, NULL, FALSE);
@@ -757,6 +794,61 @@ window_frame_message(
 	return result;
 }
 
+/*
+ * Extends the frame into the client area: down to the title bar's bottom
+ * when it is glass (Mica shows where it is transparent), else one pixel
+ * at the top (the system's shadow).
+ */
+static void
+window_glass(
+	struct kl_window *window)
+{
+	MARGINS margins;
+
+	/* The margins: the title bar, or the shadow's pixel. */
+	memset(&margins, 0, sizeof(margins));
+	margins.cyTopHeight = 1;
+	if (window->glass)
+		margins.cyTopHeight = (int)keiui_win32_caption_pixels(window);
+	if (margins.cyTopHeight < 1)
+		margins.cyTopHeight = 1;
+
+	/* The frame extended. */
+	(void)DwmExtendFrameIntoClientArea(window->frame, &margins);
+}
+
+/* Tells whether the system is new enough for its backdrop (Windows 11 22H2 or later); 1 when it is. */
+static int
+window_backdrop_build(void)
+{
+	OSVERSIONINFOW version;
+	window_version_fn read;
+	HMODULE system;
+	FARPROC found;
+	LONG status;
+
+	/* ntdll's version call. */
+	system = GetModuleHandleW(L"ntdll.dll");
+	if (system == NULL)
+		return 0;
+	found = GetProcAddress(system, "RtlGetVersion");
+	if (found == NULL)
+		return 0;
+	memcpy(&read, &found, sizeof(read));
+
+	/* The version, and its build. */
+	memset(&version, 0, sizeof(version));
+	version.dwOSVersionInfoSize = sizeof(version);
+	status = read(&version);
+	if (status != 0)
+		return 0;
+	if (version.dwMajorVersion < 10U || version.dwBuildNumber < WINDOW_BACKDROP_BUILD)
+		return 0;
+
+	/* New enough. */
+	return 1;
+}
+
 /* Tells whether a WM_SETTINGCHANGE's area is the system's colours ("ImmersiveColorSet"). */
 static int
 window_colors_changed(
@@ -788,6 +880,11 @@ window_content_message(
 	unsigned button;
 	LRESULT result;
 	int taken;
+
+	/* A touch pad's contact or the timer of its DirectManipulation (pointer.c). */
+	taken = keiui_win32_manipulation_message(window, message, wparam, lparam);
+	if (taken)
+		return 0;
 
 	/* A finger's or a pen's message the window uses (pointer.c). */
 	taken = keiui_win32_pointer_message(window, message, wparam, lparam);
@@ -978,8 +1075,9 @@ window_layout(
 	if (width < 1)
 		width = 1;
 
-	/* The content there, the title bar's controls laid out, and the title bar painted again. */
+	/* The content there, the glass to the title bar's height, the title bar's controls laid out, and the title bar painted again. */
 	(void)MoveWindow(window->content, 0, (int)caption, (int)width, (int)height, TRUE);
+	window_glass(window);
 	keiui_win32_titlebar_layout(window, (uint32_t)(client.right - client.left), caption);
 	(void)InvalidateRect(window->frame, NULL, FALSE);
 

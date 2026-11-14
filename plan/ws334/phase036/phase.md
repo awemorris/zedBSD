@@ -4,6 +4,7 @@
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §6.1・§6.2・§6.6・§6.10。ws.md のユーザーの決定（2026-11-01: Windows では DLL を作らず 1 つの .exe、libkeiland の Windows の port は pthread を使わない）。
 - 状態: cleared（2026-11-01 09:04 Q1 の判定、main 8970a6e96。実装済み・試験 PASS。2026-11-01 q1808-i02、P7。p021 の後の同じ Queue の追い、Q1 の 2026-11-01 の指示。cleared の判定は Q1）。
+- 2026-11-14 の乖離の確かめ（q2095-i01 P7）: この Phase の .exe の形（DLL を作らない static link）は今も同じ。中身のうち、当面の OpenSSL は libssl-compat・libcrypto-compat に（2026-11-02 の決定、`apps/browser-win32/Makefile` の `WIN32_TLS_LIBRARIES`）、.exe に静的に入れた winpthreads は外され（p040）、vulkan-1.dll の遅延の import は普通の import に（2026-11-13 の決定、cross-build の検査 4）替わった。下の記録は当時の形。
 - 依存: p016（platform-win32.c）・p020（`apps/browser-win32/Makefile` と cross-build.sh）・p021（libbrowser-core）。
 - 担当の想定: Opus（phase-runner）を 1 回。後の Phase（p022・p023・p026・p028・p030・p031）が同じ形に library と .exe を足す。
 
