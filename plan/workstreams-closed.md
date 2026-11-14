@@ -260,3 +260,4 @@ WS が完了・取り下げになったら、行を master.md からここへ移
 | [WS344](ws344/ws.md) | MG006 | libwebp-compat（自前の WebP の decoder、libwebp と互換の API、libbrowser の画像、BUG-405）（2026-11-02 ユーザー） | completed（2026-11-02 20:23 Q1、main c10e15fa6。libwebp 1.5.0 と 364 + 214 file で byte 一致（host・Wine・QEMU）、about.google の画像が出た、試験は plan/tools/webp/） | — |
 | [WS335](ws335/ws.md) | MG002 | libssl-compat・libcrypto-compat: OpenSSL の libssl・libcrypto と互換の自前の TLS と暗号の library（libbrowser と自前の ssh が使う部分、標準廉価実装手順）（2026-11-01 ユーザー） | completed（2026-11-14） | —
 | [WS348](ws348/ws.md) | MG003 | Raspberry Pi 500 の dtb を image に入れる（そのまま Pi 500 で起動）（2026-11-13、Pi 500 の外部の報告から） | completed（2026-11-14 ユーザー） | dtb は image の FAT に入る（mk/platform-rpi5/firmware.mk）。Pi 500 の実機は外部の報告待ち |
+| [WS350](ws350/ws.md) | MG003 | Raspberry Pi 500 を動作の確かめた機種として記録する（2026-11-13、Pi 500 の外部の報告から） | completed（2026-11-15 ユーザー） | README と plan/tools.md の機種の表に Pi 500（外部の報告で動作）を載せた |
