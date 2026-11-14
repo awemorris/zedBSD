@@ -18,7 +18,7 @@
 | P5 | [WS329](ws329/ws.md) | H.264 の software の encoder | q2092: p002 共通化の refactor | p003 header と骨格 → 実装（Sonnet） |
 | P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2099: p003 sched の口（p001 cleared、p002 実装済み） | p004 DTB の本体 |
 | P7 | [WS334](ws334/ws.md) | Windows 版ブラウザ | q2100: p035 規約の見直し（p037 cleared、不具合 2 件直した） | WS334 を completed に |
-| P8 | [WS343](ws343/ws.md) | base の TLS と ssh を自前に | 返却: fetch の https PASS（host 18・3 機種・QEMU 4） | Makefile の案の承認 → merge → p004 規約の見直し |
+| P8 | [WS343](ws343/ws.md) | base の TLS と ssh を自前に | q2102: p004 規約の見直し（p001・p003 cleared） | WS343 を completed に |
 | agy | [WS347](ws347/ws.md) | Amaterrace GPU（RTL） | reset の 10 回目（38593b0e）まで済み | Q1 が 10 回目を確かめて 11 回目 |
 | Q1 | — | — | main の checkout で merge・Queue・判断の振り分け | WS347 の 10 回目の確かめ |
 
