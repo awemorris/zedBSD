@@ -214,40 +214,108 @@ struct css_anchor_names {
 	struct vm_string *names[CSS_ANCHOR_NAMES];
 };
 
-/* The most color stops of a gradient, and the directions of its "to" keywords (flags). */
-#define CSS_GRADIENT_STOPS	16
+/*
+ * The most entries of a gradient's stop list (its color stops and its
+ * transition hints together; a stop with two positions is two entries), and
+ * the directions of a linear gradient's "to" keywords (flags).
+ */
+#define CSS_GRADIENT_STOPS	32
 #define CSS_GRADIENT_TOP	1
 #define CSS_GRADIENT_RIGHT	2
 #define CSS_GRADIENT_BOTTOM	4
 #define CSS_GRADIENT_LEFT	8
 
-/* Where a color stop is: not given, in pixels, a percentage of the gradient line, or in ems (until the font size is known). */
+/*
+ * Where a color stop is: not given, in pixels, a percentage of the gradient
+ * line, in ems (until the font size is known), or an angle in degrees (a
+ * conic gradient's stop).
+ */
 enum css_gradient_unit {
 	CSS_GRADIENT_AT_AUTO,
 	CSS_GRADIENT_AT_PX,
 	CSS_GRADIENT_AT_PERCENT,
-	CSS_GRADIENT_AT_EM
+	CSS_GRADIENT_AT_EM,
+	CSS_GRADIENT_AT_DEGREES
 };
 
-/* One color stop of a gradient. */
+/* The kinds of gradient. */
+enum css_gradient_kind {
+	CSS_GRADIENT_LINEAR,
+	CSS_GRADIENT_RADIAL,
+	CSS_GRADIENT_CONIC
+};
+
+/*
+ * How a radial gradient's ending shape is sized along one axis: by explicit
+ * radii, or by the side or corner of the gradient box nearest or farthest
+ * from the center.
+ */
+enum css_gradient_extent {
+	CSS_GRADIENT_EXTENT_NONE,
+	CSS_GRADIENT_CLOSEST_SIDE,
+	CSS_GRADIENT_CLOSEST_CORNER,
+	CSS_GRADIENT_FARTHEST_SIDE,
+	CSS_GRADIENT_FARTHEST_CORNER
+};
+
+/*
+ * One entry of a gradient's stop list: a color stop, or (hint is 1) a
+ * transition hint that sits between the two stops around it and has no
+ * color.  The position of a hint is the place the transition is halfway.
+ */
 struct css_gradient_stop {
 	uint32_t color;
 	float position;
 	int unit;
+	int hint;
 };
 
 /*
- * A linear gradient: its direction (an angle in degrees, 0 pointing up and
- * turning clockwise, or the sides of a "to" keyword in corner) and its stops.
+ * A length of a gradient's geometry as a sum: percent of the length it is
+ * relative to, plus pixels, plus ems.  Parsing keeps the ems, and the cascade
+ * turns them into pixels (ems 0 afterwards).
+ */
+struct css_gradient_length {
+	float percent;
+	float pixels;
+	float ems;
+};
+
+/*
+ * A gradient (CSS Images 3 and 4): linear, radial or conic, its geometry and
+ * its stop list.  Only the fields of its kind are read.
+ *
+ * Linear: angle is in degrees (0 pointing up and turning clockwise), or
+ * corner holds the sides of a "to" keyword (angle is 0 then).
+ * Radial: circle is 1 for a circle and 0 for an ellipse; extent[0] and
+ * extent[1] are a css_gradient_extent for the horizontal and vertical radius
+ * (CSS_GRADIENT_EXTENT_NONE when the radius is explicit, then radius[0] and
+ * radius[1] hold it; a circle uses extent[0] and radius[0] alone).
+ * Conic: angle is the rotation in degrees.
+ * Radial and conic: at is the center, x then y, from the gradient box's left
+ * and top edges.
+ * The stops of a conic gradient are in degrees (CSS_GRADIENT_AT_DEGREES) or
+ * percentages of a turn; the others' are lengths or percentages.
  */
 struct css_gradient {
+	int kind;
 	float angle;
 	unsigned corner;
-	/* Whether the stops repeat along the line (repeating-linear-gradient). */
+	/* Whether the stops repeat along the line (repeating-*-gradient). */
 	unsigned repeating;
+	unsigned circle;
+	unsigned extent[2];
+	struct css_gradient_length radius[2];
+	struct css_gradient_length at[2];
 	unsigned count;
 	struct css_gradient_stop stops[CSS_GRADIENT_STOPS];
 };
+
+/*
+ * Copies a gradient's color stops without its transition hints, for the
+ * consumers that do not honor hints.  Returns the copy's stop count.
+ */
+unsigned css_gradient_color_stops(const struct css_gradient *gradient, struct css_gradient *stripped);
 
 /* The most entries of position-try-fallbacks, and try-tactics (flip-block, flip-inline, flip-start, flip-x, flip-y) in one. */
 #define CSS_TRY_ENTRIES	8

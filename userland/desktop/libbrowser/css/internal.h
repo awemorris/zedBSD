@@ -902,6 +902,7 @@ int css_property_lookup(const struct css_token *name);
 int css_parse_value(struct css_parse *parse, const struct css_token *tokens, size_t count, const struct css_token *name, struct css_declaration *out, size_t *out_count, size_t out_capacity);
 int css_parse_property(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *out_count);
 int css_parse_color(const struct css_token *tokens, size_t count, uint32_t *color);
+int css_gradient_function(const struct css_token *token);
 int css_gradient_parse(struct css_parse *parse, const struct css_token *tokens, size_t count, const struct css_gradient **gradient);
 int css_parse_value_as(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *out_count);
 int css_parse_font(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *out_count);

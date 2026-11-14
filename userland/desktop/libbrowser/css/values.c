@@ -2614,7 +2614,7 @@ values_single(
 	/* An image: url(...), a gradient or none. */
 	if (property == CSS_PROP_BACKGROUND_IMAGE) {
 		/* A gradient. */
-		if (count > 0 && tokens[0].type == CSS_TOKEN_FUNCTION && (css_ident_equal(&tokens[0], "linear-gradient") || css_ident_equal(&tokens[0], "repeating-linear-gradient"))) {
+		if (count > 0 && css_gradient_function(&tokens[0])) {
 			memset(value, 0, sizeof(*value));
 			error = css_gradient_parse(parse, tokens, count, &value->gradient);
 			if (error != 0)
@@ -4243,8 +4243,7 @@ values_background(
 		rest = values_function_length(tokens + index, count - index);
 
 		/* A gradient is an image. */
-		if (tokens[index].type == CSS_TOKEN_FUNCTION &&
-		    (css_ident_equal(&tokens[index], "linear-gradient") || css_ident_equal(&tokens[index], "repeating-linear-gradient"))) {
+		if (css_gradient_function(&tokens[index])) {
 			if (image_seen)
 				return EINVAL;
 			memset(&image, 0, sizeof(image));
@@ -7545,7 +7544,7 @@ values_shape_outside(
 		/* A gradient, or a basic shape. */
 		if (token->type != CSS_TOKEN_FUNCTION || shape->kind != 0)
 			return EINVAL;
-		if (css_ident_equal(token, "linear-gradient") || css_ident_equal(token, "repeating-linear-gradient")) {
+		if (css_gradient_function(token)) {
 			shape->kind = CSS_SHAPE_GRADIENT;
 			error = css_gradient_parse(parse, token, lengths[index], &shape->gradient);
 		} else {

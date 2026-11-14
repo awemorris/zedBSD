@@ -7409,7 +7409,10 @@ cascade_shape(
 	return made;
 }
 
-/* Keeps a gradient in the engine's arena, its stops in ems turned to pixels by the font size. */
+/*
+ * Keeps a gradient in the engine's arena: its pixels scaled by the page zoom
+ * as every length is, its ems turned to pixels by the font size.
+ */
 static const struct css_gradient *
 cascade_gradient(
 	struct css_engine *engine,
@@ -7417,15 +7420,36 @@ cascade_gradient(
 	float font_size)
 {
 	struct css_gradient resolved;
+	struct css_gradient_stop *stop;
+	struct css_gradient_length *length;
 	unsigned index;
 
-	/* A copy, each em position in pixels. */
-	resolved = *gradient;
+	/* A copy, with the padding of the original so that equal gradients keep equal bytes. */
+	memcpy(&resolved, gradient, sizeof(resolved));
+
+	/* Each stop and hint position in pixels or ems. */
 	for (index = 0; index < resolved.count; index++) {
-		if (resolved.stops[index].unit == CSS_GRADIENT_AT_EM) {
-			resolved.stops[index].position *= font_size;
-			resolved.stops[index].unit = CSS_GRADIENT_AT_PX;
+		stop = &resolved.stops[index];
+		if (stop->unit == CSS_GRADIENT_AT_EM) {
+			stop->position *= font_size;
+			stop->unit = CSS_GRADIENT_AT_PX;
+		} else if (stop->unit == CSS_GRADIENT_AT_PX) {
+			stop->position *= engine->zoom_eff;
 		}
+	}
+
+	/* Each radius: the pixels scaled, the ems added as pixels. */
+	for (index = 0; index < 2U; index++) {
+		length = &resolved.radius[index];
+		length->pixels = length->pixels * engine->zoom_eff + length->ems * font_size;
+		length->ems = 0.0f;
+	}
+
+	/* Each coordinate of the center, the same way. */
+	for (index = 0; index < 2U; index++) {
+		length = &resolved.at[index];
+		length->pixels = length->pixels * engine->zoom_eff + length->ems * font_size;
+		length->ems = 0.0f;
 	}
 
 	/* The kept copy. */

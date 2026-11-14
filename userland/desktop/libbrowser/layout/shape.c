@@ -343,6 +343,7 @@ shape_build_gradient(
 	float width,
 	float height)
 {
+	struct css_gradient plain;
 	float at[CSS_GRADIENT_STOPS];
 	float direction_x;
 	float direction_y;
@@ -357,6 +358,10 @@ shape_build_gradient(
 	float cross;
 	unsigned index;
 	const float infinity = 1.0e9f;
+
+	/* The color stops alone: the shape does not honor transition hints. */
+	css_gradient_color_stops(gradient, &plain);
+	gradient = &plain;
 
 	/* The direction of the line, as the painting takes it. */
 	if (gradient->corner == 0) {
@@ -624,6 +629,8 @@ layout_shape_build(
 		break;
 	case CSS_SHAPE_GRADIENT:
 		if (spec->gradient == NULL || spec->gradient->count == 0)
+			return 0;
+		if (spec->gradient->kind != CSS_GRADIENT_LINEAR)
 			return 0;
 		shape->kind = SHAPE_ALPHA;
 		shape->x0 = 0.0f;

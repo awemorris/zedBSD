@@ -239,6 +239,13 @@ static int computed_write_radius(const struct css_style *style, int index, struc
 static int computed_write_content(const struct css_style *style, struct wb_units *out);
 static int computed_write_overflow(const struct css_style *style, struct wb_units *out);
 static int computed_write_url(const struct vm_string *url, struct wb_units *out);
+static int computed_gradient(const struct css_gradient *gradient, struct wb_units *out);
+static int computed_gradient_geometry(const struct css_gradient *gradient, struct wb_units *out, int *written);
+static int computed_gradient_length(const struct css_gradient_length *length, struct wb_units *out);
+static int computed_gradient_middle(const struct css_gradient *gradient);
+static int computed_gradient_center(const struct css_gradient *gradient, struct wb_units *out);
+static int computed_gradient_edge(const struct css_gradient_length *length, const char *near_edge, const char *far_edge, struct wb_units *out);
+static int computed_gradient_stop(const struct css_gradient *gradient, unsigned index, struct wb_units *out);
 static int computed_needs_quotes(const struct vm_string *family);
 static int computed_write_percent(const struct css_length *length, struct wb_units *out);
 static int computed_write_url_quoted(const struct vm_string *text, struct wb_units *out);
@@ -480,6 +487,12 @@ static const char *const computed_pointer_events[] = { "auto", "none" };
 
 /* The names of overflow, by enum css_overflow. */
 static const char *const computed_overflows[] = { "visible", "hidden", "clip", "scroll", "auto" };
+
+/* The names of a radial gradient's size keywords, by enum css_gradient_extent (the first stands for an explicit size and is never written). */
+static const char *const computed_extents[] = { "", "closest-side", "closest-corner", "farthest-side", "farthest-corner" };
+
+/* The reserved color a gradient stop keeps for currentcolor (the cascade's encoding, css/internal.h). */
+#define COMPUTED_CURRENT_COLOR 0x00000001U
 
 /* The names of box-sizing, by enum css_box_sizing. */
 static const char *const computed_box_sizings[] = { "content-box", "border-box" };
@@ -1933,8 +1946,10 @@ computed_write_keyword(
 		error = computed_color(style->background_color, out);
 		break;
 	case COMPUTED_BACKGROUND_IMAGE:
-		/* None, or the URL in quotes. */
-		if (style->background_image == NULL) {
+		/* A gradient, the URL in quotes, or none. */
+		if (style->background_gradient != NULL) {
+			error = computed_gradient(style->background_gradient, out);
+		} else if (style->background_image == NULL) {
 			error = computed_ascii("none", out);
 		} else {
 			error = computed_write_url(style->background_image, out);
@@ -2857,6 +2872,379 @@ computed_write_url(
 	if (error != 0)
 		return error;
 	error = computed_ascii(")", out);
+	return error;
+}
+
+/*
+ * Writes a gradient as its function with the components that stand for the
+ * defaults left out (CSS Images 4 section 8): its geometry, then its stops
+ * and transition hints, with ", " between them.
+ */
+static int
+computed_gradient(
+	const struct css_gradient *gradient,
+	struct wb_units *out)
+{
+	static const char *const names[3][2] = {
+		{ "linear-gradient(", "repeating-linear-gradient(" },
+		{ "radial-gradient(", "repeating-radial-gradient(" },
+		{ "conic-gradient(", "repeating-conic-gradient(" }
+	};
+	unsigned index;
+	int written;
+	int error;
+
+	/* The function's name, which tells the kind and whether it repeats. */
+	if (gradient->kind < 0 || gradient->kind > 2)
+		return EINVAL;
+	error = computed_ascii(names[gradient->kind][gradient->repeating != 0 ? 1 : 0], out);
+	if (error != 0)
+		return error;
+
+	/* The geometry, when it is not the default one. */
+	written = 0;
+	error = computed_gradient_geometry(gradient, out, &written);
+	if (error != 0)
+		return error;
+
+	/* Each entry of the stop list. */
+	for (index = 0; index < gradient->count; index++) {
+		if (written) {
+			error = computed_ascii(", ", out);
+			if (error != 0)
+				return error;
+		}
+		error = computed_gradient_stop(gradient, index, out);
+		if (error != 0)
+			return error;
+		written = 1;
+	}
+
+	/* Succeeded: the function is closed. */
+	error = computed_ascii(")", out);
+	return error;
+}
+
+/* Writes a gradient's first argument, its direction, shape and size, or rotation and center; nothing when all are the defaults. */
+static int
+computed_gradient_geometry(
+	const struct css_gradient *gradient,
+	struct wb_units *out,
+	int *written)
+{
+	int words;
+	int error;
+
+	/* A linear gradient: "to" and the sides, or an angle; "to bottom" is the default. */
+	words = 0;
+	if (gradient->kind == CSS_GRADIENT_LINEAR) {
+		if (gradient->corner != 0 && gradient->corner != CSS_GRADIENT_BOTTOM) {
+			error = computed_ascii("to", out);
+			if (error != 0)
+				return error;
+			if ((gradient->corner & CSS_GRADIENT_LEFT) != 0) {
+				error = computed_ascii(" left", out);
+				if (error != 0)
+					return error;
+			}
+			if ((gradient->corner & CSS_GRADIENT_RIGHT) != 0) {
+				error = computed_ascii(" right", out);
+				if (error != 0)
+					return error;
+			}
+			if ((gradient->corner & CSS_GRADIENT_TOP) != 0) {
+				error = computed_ascii(" top", out);
+				if (error != 0)
+					return error;
+			}
+			if ((gradient->corner & CSS_GRADIENT_BOTTOM) != 0) {
+				error = computed_ascii(" bottom", out);
+				if (error != 0)
+					return error;
+			}
+			*written = 1;
+		} else if (gradient->corner == 0 && gradient->angle != 180.0f) {
+			error = computed_number(gradient->angle, out);
+			if (error != 0)
+				return error;
+			error = computed_ascii("deg", out);
+			if (error != 0)
+				return error;
+			*written = 1;
+		}
+		return 0;
+	}
+
+	/* A conic gradient: "from" and the rotation unless it is 0deg. */
+	if (gradient->kind == CSS_GRADIENT_CONIC) {
+		if (gradient->angle != 0.0f) {
+			error = computed_ascii("from ", out);
+			if (error != 0)
+				return error;
+			error = computed_number(gradient->angle, out);
+			if (error != 0)
+				return error;
+			error = computed_ascii("deg", out);
+			if (error != 0)
+				return error;
+			words = 1;
+		}
+		error = computed_gradient_center(gradient, out);
+		if (error != 0)
+			return error;
+		if (words != 0 || !computed_gradient_middle(gradient))
+			*written = 1;
+		return 0;
+	}
+
+	/*
+	 * A radial gradient: the shape and the size as few words as say them, then the center.  The circle's
+	 * word is left out when one length alone says it, and the ellipse's always; the default size, the
+	 * farthest corner, is left out too.
+	 */
+	if (gradient->circle != 0) {
+		if (gradient->extent[0] == CSS_GRADIENT_EXTENT_NONE) {
+			if (gradient->radius[0].percent != 0.0f) {
+				error = computed_ascii("circle ", out);
+				if (error != 0)
+					return error;
+			}
+			error = computed_gradient_length(&gradient->radius[0], out);
+			if (error != 0)
+				return error;
+			words = 1;
+		} else {
+			error = computed_ascii("circle", out);
+			if (error != 0)
+				return error;
+			words = 1;
+			if (gradient->extent[0] != CSS_GRADIENT_FARTHEST_CORNER) {
+				error = computed_ascii(" ", out);
+				if (error != 0)
+					return error;
+				error = computed_name(computed_extents, 5, (int)gradient->extent[0], out);
+				if (error != 0)
+					return error;
+			}
+		}
+	} else if (gradient->extent[0] == CSS_GRADIENT_EXTENT_NONE) {
+		error = computed_gradient_length(&gradient->radius[0], out);
+		if (error != 0)
+			return error;
+		error = computed_ascii(" ", out);
+		if (error != 0)
+			return error;
+		error = computed_gradient_length(&gradient->radius[1], out);
+		if (error != 0)
+			return error;
+		words = 1;
+	} else if (gradient->extent[0] != CSS_GRADIENT_FARTHEST_CORNER || gradient->extent[1] != CSS_GRADIENT_FARTHEST_CORNER) {
+		error = computed_name(computed_extents, 5, (int)gradient->extent[0], out);
+		if (error != 0)
+			return error;
+		words = 1;
+		if (gradient->extent[1] != gradient->extent[0]) {
+			error = computed_ascii(" ", out);
+			if (error != 0)
+				return error;
+			error = computed_name(computed_extents, 5, (int)gradient->extent[1], out);
+			if (error != 0)
+				return error;
+		}
+	}
+
+	/* The center, after a space when something came before it. */
+	if (words != 0 && !computed_gradient_middle(gradient)) {
+		error = computed_ascii(" ", out);
+		if (error != 0)
+			return error;
+	}
+	error = computed_gradient_center(gradient, out);
+	if (error != 0)
+		return error;
+	if (words != 0 || !computed_gradient_middle(gradient))
+		*written = 1;
+	return 0;
+}
+
+/* Tells whether a gradient's center is the middle of its box, the default. */
+static int
+computed_gradient_middle(
+	const struct css_gradient *gradient)
+{
+	/* Each coordinate is half of the box and nothing more. */
+	if (gradient->at[0].percent != 50.0f || gradient->at[1].percent != 50.0f)
+		return 0;
+	if (gradient->at[0].pixels != 0.0f || gradient->at[1].pixels != 0.0f)
+		return 0;
+	return 1;
+}
+
+/* Writes "at" and the center of a radial or conic gradient when it is not the middle of the box; a conic gradient's after its rotation. */
+static int
+computed_gradient_center(
+	const struct css_gradient *gradient,
+	struct wb_units *out)
+{
+	int offset_form;
+	int error;
+
+	/* The middle is the default. */
+	offset_form = 0;
+	if (computed_gradient_middle(gradient))
+		return 0;
+
+	/* A conic gradient's center follows its rotation when it has one. */
+	if (gradient->kind == CSS_GRADIENT_CONIC && gradient->angle != 0.0f) {
+		error = computed_ascii(" ", out);
+		if (error != 0)
+			return error;
+	}
+
+	/* A coordinate that is an offset from the far edge needs the four-value form: the edges and their offsets. */
+	error = computed_ascii("at ", out);
+	if (error != 0)
+		return error;
+	if (gradient->at[0].percent == 100.0f && gradient->at[0].pixels != 0.0f)
+		offset_form = 1;
+	if (gradient->at[1].percent == 100.0f && gradient->at[1].pixels != 0.0f)
+		offset_form = 1;
+	if (offset_form) {
+		error = computed_gradient_edge(&gradient->at[0], "left ", "right ", out);
+		if (error != 0)
+			return error;
+		error = computed_ascii(" ", out);
+		if (error != 0)
+			return error;
+		error = computed_gradient_edge(&gradient->at[1], "top ", "bottom ", out);
+		return error;
+	}
+
+	/* The horizontal and the vertical coordinate. */
+	error = computed_gradient_length(&gradient->at[0], out);
+	if (error != 0)
+		return error;
+	error = computed_ascii(" ", out);
+	if (error != 0)
+		return error;
+	error = computed_gradient_length(&gradient->at[1], out);
+	return error;
+}
+
+/*
+ * Writes one coordinate of a center as an edge and its offset: an offset back
+ * from the far edge is written from that edge, any other length from the near
+ * one.
+ */
+static int
+computed_gradient_edge(
+	const struct css_gradient_length *length,
+	const char *near_edge,
+	const char *far_edge,
+	struct wb_units *out)
+{
+	int error;
+
+	/* From the far edge. */
+	if (length->percent == 100.0f && length->pixels != 0.0f) {
+		error = computed_ascii(far_edge, out);
+		if (error != 0)
+			return error;
+		error = computed_pixels(-(double)length->pixels, out);
+		return error;
+	}
+
+	/* From the near edge. */
+	error = computed_ascii(near_edge, out);
+	if (error != 0)
+		return error;
+	error = computed_gradient_length(length, out);
+	return error;
+}
+
+/* Writes a length of a gradient's geometry: pixels, a percentage, or calc() of both. */
+static int
+computed_gradient_length(
+	const struct css_gradient_length *length,
+	struct wb_units *out)
+{
+	struct css_length sum;
+	int error;
+
+	/* Pixels alone, with the zoom taken out as every length is. */
+	if (length->percent == 0.0f) {
+		error = computed_pixels(length->pixels, out);
+		return error;
+	}
+
+	/* A percentage with the pixels added to it, as a computed length writes it. */
+	sum.value = length->percent;
+	sum.unit = CSS_UNIT_PERCENT;
+	sum.offset = length->pixels;
+	error = computed_write_percent(&sum, out);
+	return error;
+}
+
+/* Writes one entry of a gradient's stop list: a color with its position, or a transition hint's position. */
+static int
+computed_gradient_stop(
+	const struct css_gradient *gradient,
+	unsigned index,
+	struct wb_units *out)
+{
+	const struct css_gradient_stop *stop;
+	int omit;
+	int error;
+
+	/* The color of a color stop. */
+	stop = &gradient->stops[index];
+	if (stop->hint == 0) {
+		if (stop->color == COMPUTED_CURRENT_COLOR)
+			error = computed_ascii("currentcolor", out);
+		else
+			error = computed_color(stop->color, out);
+		if (error != 0)
+			return error;
+	}
+
+	/* The position a stop has when it is left out: the start for the first stop, the end for the last. */
+	omit = 0;
+	if (stop->unit == CSS_GRADIENT_AT_AUTO)
+		omit = 1;
+	if (stop->hint == 0 && index == 0 && stop->position == 0.0f)
+		omit = 1;
+	if (stop->hint == 0 && index + 1U == gradient->count) {
+		if (stop->unit == CSS_GRADIENT_AT_PERCENT && stop->position == 100.0f)
+			omit = 1;
+		if (stop->unit == CSS_GRADIENT_AT_DEGREES && stop->position == 360.0f)
+			omit = 1;
+	}
+	if (omit)
+		return 0;
+
+	/* A space between a color and its position. */
+	if (stop->hint == 0) {
+		error = computed_ascii(" ", out);
+		if (error != 0)
+			return error;
+	}
+
+	/* The position in its unit. */
+	if (stop->unit == CSS_GRADIENT_AT_PERCENT) {
+		error = computed_number(stop->position, out);
+		if (error != 0)
+			return error;
+		error = computed_ascii("%", out);
+		return error;
+	}
+	if (stop->unit == CSS_GRADIENT_AT_DEGREES) {
+		error = computed_number(stop->position, out);
+		if (error != 0)
+			return error;
+		error = computed_ascii("deg", out);
+		return error;
+	}
+	error = computed_pixels(stop->position, out);
 	return error;
 }
 
