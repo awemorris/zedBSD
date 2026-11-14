@@ -35,6 +35,11 @@
 - 上限: 一辺 VEC_RASTER_SIDE_MAX を超えて ENOBUFS、線分の数の上限、NaN・範囲の外で EINVAL、失敗で out が空。
 - 乱数の多角形（固定の seed、各 1000 形）で参照と照合、ASan・UBSan が落ちない。
 
+（2026-11-15 design-reviewer の反映で足した項目。上の項目と食い違う所はこちらが正）
+- `VEC_RASTER_CROSSINGS_MAX` を超える形（長い線分を多数）は走査の前に ENOBUFS（時間が掛からない事を試験の中で確かめる）、`VEC_RASTER_TILES_MAX` を超える partial の tile も ENOBUFS。
+- tile に揃えない clip で切られた tile は partial（clip の外は 0）。tile に揃えた 2 つの窓で作った tile が、1 つの大きな窓で作った物と同じ。
+- 参照の rasterizer（`reference_coverage`）の戻り値が 0 である事を毎回確かめる（-1 は試験の FAIL）。
+
 ## 4. 注意
 
 - 副走査線ごとに交点を x で並べ、winding の区間を pixel に配る（区間の両端の pixel は端数、間は 1）。float の丸めで 1 段の差まで（header）。
@@ -51,7 +56,7 @@
 ## 6. 確かめの command
 
 - `sh plan/ws328/tests/run-unit.sh raster` と `sh plan/ws328/tests/run-unit.sh all`（最後の行 `run-unit: PASS`）。`CC=clang` でも同じ。
-- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。zedBSD の clang が自分の worktree に無ければ `WS328_ZEDBSD_CC=/home/awe/zedBSD-claude1/build/llvm/bin/clang`（読むだけ）で check 6 も流す。
+- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。check 6（zedBSD の clang と x86_64 の sysroot での compile）は自分の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を使う。無ければ、Q1 が起動の依頼文で許した時に `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` の後 `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk sysroot` で自分の build/ に入れる（共有の toolchain と main の build/ は使わない・書かない。許しが無ければ Q1 に頼む）。最後の行が `check-skeleton: INCOMPLETE` の時は PASS ではない。
 - `git diff --check`。
 
 ## 7. 終わりの条件

@@ -34,6 +34,9 @@
 - vec_lines_check（first + count の overflow を含む壊れた構造で EINVAL）、vec_lines_begin・add・close、transform、bounds。
 - 乱数の path の平坦化で ASan・UBSan が落ちない。
 
+（2026-11-15 design-reviewer の反映で足した項目。上の項目と食い違う所はこちらが正）
+- tolerance の下限は `VEC_TOLERANCE_MIN`（1e-6）: 1e-6 で受け、それ未満で EINVAL。極小の tolerance でも分割数は `VEC_FLATTEN_SEGMENTS_MAX` を超えない。
+
 ## 4. 注意
 
 - close の時に閉じる線分の頂点を足さない（暗黙）。最後の頂点が最初と同じでもそのまま残す（header のとおり）。
@@ -49,7 +52,7 @@
 ## 6. 確かめの command
 
 - `sh plan/ws328/tests/run-unit.sh flatten` と `sh plan/ws328/tests/run-unit.sh all`（最後の行 `run-unit: PASS`）。`CC=clang` でも同じ。
-- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。zedBSD の clang が自分の worktree に無ければ `WS328_ZEDBSD_CC=/home/awe/zedBSD-claude1/build/llvm/bin/clang`（読むだけ）で check 6 も流す。
+- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。check 6（zedBSD の clang と x86_64 の sysroot での compile）は自分の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を使う。無ければ、Q1 が起動の依頼文で許した時に `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` の後 `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk sysroot` で自分の build/ に入れる（共有の toolchain と main の build/ は使わない・書かない。許しが無ければ Q1 に頼む）。最後の行が `check-skeleton: INCOMPLETE` の時は PASS ではない。
 - `git diff --check`。
 
 ## 7. 終わりの条件

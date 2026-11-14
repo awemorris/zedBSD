@@ -36,6 +36,13 @@
 - style の範囲の外（幅 0・負・NaN、miter_limit < 1、dashes が NULL で count > 0、count > VEC_DASHES_MAX）で EINVAL、失敗で out が戻る。
 - 乱数の折れ線と style で ASan・UBSan が落ちない。
 
+（2026-11-15 design-reviewer の反映で足した項目。上の項目と食い違う所はこちらが正）
+- moveto だけの contour（頂点 1 つ、closed 0）は何も描かない（SVG 2 §13.5.1）。頂点 1 つで closed 1、全ての線分が長さ 0 の contour は cap だけ。
+- dash_scale: 長さと offset に掛けてから並べる（pathLength = 80 で長さ 40 の線に dash [10] は実長 5 の dash: dash_scale 0.5）。
+- 長さ 0 の線分を挟む頂点の join は前後の長さのある線分で決まる（NaN が出ない）。
+- `VEC_DASH_PIECES_MAX` に達した後の残りは実線（最後の dash の始まりから contour の終わりまで）。
+- 出力の各 contour の shoelace の和が正（y 下向きで画面の上で時計回り）。
+
 ## 4. 注意
 
 - SVG 2 §13.5.7 の本文は「within distance stroke-width」と書くが、§13.5.3 と線の幅の意味から半分（width / 2）が正。header のとおり width / 2 で書く。
@@ -52,7 +59,7 @@
 ## 6. 確かめの command
 
 - `sh plan/ws328/tests/run-unit.sh stroke` と `sh plan/ws328/tests/run-unit.sh all`（最後の行 `run-unit: PASS`）。`CC=clang` でも同じ。
-- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。zedBSD の clang が自分の worktree に無ければ `WS328_ZEDBSD_CC=/home/awe/zedBSD-claude1/build/llvm/bin/clang`（読むだけ）で check 6 も流す。
+- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。check 6（zedBSD の clang と x86_64 の sysroot での compile）は自分の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を使う。無ければ、Q1 が起動の依頼文で許した時に `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` の後 `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk sysroot` で自分の build/ に入れる（共有の toolchain と main の build/ は使わない・書かない。許しが無ければ Q1 に頼む）。最後の行が `check-skeleton: INCOMPLETE` の時は PASS ではない。
 - `git diff --check`。
 
 ## 7. 終わりの条件

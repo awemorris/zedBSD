@@ -29,17 +29,22 @@
 期待の値は仕様の表・式と手の計算だけから作る。他の実装の出力を使わない。
 - normalize: CSS Backgrounds 3 §4.5 の f の手の計算（例: 幅 100 高さ 50 で全部 50 → f = 0.5）、負・NaN の半径が 0、片方 0 の角が両方 0。
 - inset: 外の半径 − 幅（下限 0）、幅の大きい border で内側が角。spread: §6.1.1 の例（半径 10・spread 20 → 27.5）、負の spread の floor。
-- coverage: 角丸の無い矩形で今の矩形の規則と同じ（端数の重なり）、円の角の中心の pixel が 1、角の外の遠い pixel が 0、曲線の上の pixel が約 0.5（中心が曲線上の時ちょうど 0.5）、楕円の角（rx ≠ ry）。
+- coverage: 角丸の無い矩形で今の矩形の規則と同じ（端数の重なり。display list は辺を整数にして渡す）、円の角の中心の pixel が 1、角の外の遠い pixel が 0、曲線の上の pixel が約 0.5（中心が曲線上の時ちょうど 0.5）、楕円の角（rx ≠ ry）。
 - ring: 外 − 内、border の中の pixel が 1、padding の中が 0。
 - side_share: 4 辺の和が 1（多数の pixel で）、辺の帯の中で 1、角の対角線の上で 0.5、片方の幅 0 で他方が全部。
 - erf: 0 → 0、大きい x → 1、奇関数、表の値（erf(0.5) = 0.5204999、erf(1) = 0.8427008）を 5e-7 で（A&S の誤差 1.5e-7 と float の丸め）。
-- shadow: σ < VEC_SIGMA_MIN で coverage と同じ、角丸の無い矩形で erf の積の厳密な値（手の式）と 1e-4、遠い所で 0、中で 1、辺の上で 0.5、角丸の矩形で密な 2 次元の数値積分（試験の中で書く、例えば 400×400 の標本）と 0.01 以内。
+- shadow: σ < VEC_SIGMA_MIN で coverage と同じ、角丸の無い矩形で erf の積の厳密な値（手の式）と 1e-4、遠い所で 0、中で 1、辺の上で 0.5、角丸の矩形は下の「足した項目」の照合（許容 0.015）。
 - 乱数の矩形・半径・σ で範囲 [0,1] と ASan・UBSan。
+
+（2026-11-15 design-reviewer の反映で足した項目。上の項目と食い違う所はこちらが正）
+- normalize: 1/256 px 未満の半径が 0。
+- side_share（新しい定義）: 中央線で分けた 4 象限、象限の角の線の上で 0.5、象限の外の 2 辺は 0、4 辺の和が 1（乱数の pixel・幅・半径で）、片方の幅 0 で他方が 1、両方 0 で水平の辺が 1。
+- shadow（新しい積分）: header の算法と独立の密な数値積分（試験の中で書く: 例えば y を 4000 等分した中点則で、各行の左右を楕円の式から、erf は倍精度の `erf`）を比べ、σ 0.5〜3・角 8〜100 px・楕円の角（rx ≠ ry、例 92×30）で全 pixel の差 ≤ 0.015。σ 10 と 30 でも同じ。半分の行が cy ± 4σ の外の時に飛ばしても値が変わらない事。
 
 ## 4. 注意
 
 - 角の箱の判定は pixel の中心で（header）。d の式の平方根の引数 0 の場合は header の値。
-- shadow の角の帯は中点則 VEC_SHADOW_NODES 点、範囲は [cy − 4σ, cy + 4σ] との交わり。GPU の shader が同じ順で計算するので、式の順を変えない。
+- shadow は右と左の辺ごと、直線部分は厳密、角の曲線は 45°（`vec_atan2(ry, rx)`）で二つに分け、急な半分は y の、緩い半分は部分積分で x の中点則 VEC_SHADOW_NODES 点（header の式のとおり）。範囲は cy ± 4σ・cx ± 4σ との交わり。GPU の shader が同じ順で計算するので、式の順を変えない。指数は `vec_exp`。
 - 骨格の関数の「Not implemented yet.」の comment は実装の comment に置き換える（規約の §10）。
 - 未定義の動作をしない: 負の値の shift、符号付きの overflow、範囲の外の float → int の変換、NULL の算術。信用できない入力で範囲の外を読み書きしない。
 
@@ -52,7 +57,7 @@
 ## 6. 確かめの command
 
 - `sh plan/ws328/tests/run-unit.sh rrect` と `sh plan/ws328/tests/run-unit.sh all`（最後の行 `run-unit: PASS`）。`CC=clang` でも同じ。
-- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。zedBSD の clang が自分の worktree に無ければ `WS328_ZEDBSD_CC=/home/awe/zedBSD-claude1/build/llvm/bin/clang`（読むだけ）で check 6 も流す。
+- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。check 6（zedBSD の clang と x86_64 の sysroot での compile）は自分の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を使う。無ければ、Q1 が起動の依頼文で許した時に `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` の後 `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk sysroot` で自分の build/ に入れる（共有の toolchain と main の build/ は使わない・書かない。許しが無ければ Q1 に頼む）。最後の行が `check-skeleton: INCOMPLETE` の時は PASS ではない。
 - `git diff --check`。
 
 ## 7. 終わりの条件

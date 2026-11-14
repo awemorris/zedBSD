@@ -37,6 +37,14 @@
 - sample: ramp からの lookup の index（t = 1 で width - 1）、painted 0 で 0。
 - 乱数の stop と点で ASan・UBSan が落ちない。
 
+（2026-11-15 design-reviewer の反映で足した項目。上の項目と食い違う所はこちらが正）
+- hint は entry（`is_hint`）で渡す: `red 50%, 20%, blue` で hint が 50% に繰り上がり、硬い遷移の扱い（H の端）。H = 0 で P > 0 の全てが第 2 色、H = 1 で P < 1 の全てが第 1 色、H = 0.5 で線形と同じ。fixup の後の count が stop の数。文法に反する hint（先頭・末尾・連続）で EINVAL。
+- `vec_gradient_extend_span`: −50%〜150% の stop の写しと start・length、[0, 1] の中の stop で何もしない。
+- `vec_gradient_average`: CSS Images 3 §3.3 の例（red・white・blue が全て 0px → rgb(75%, 50%, 75%)）。
+- radial: 安定な根の式で、焦点が中心の近く・円がほぼ同じ・r(ω) が 0 になる点（描かない）の手の計算。円錐: 中心で t = 0、`vec_atan2` を使う事（真上・真右・真下・真左で 0・0.25・0.5・0.75）。
+- linear の start = end: REPEAT・REFLECT でも最後の stop の色（`vec_gradient_sample`）。
+- `vec_gradient_line_length`: 線形・放射・円錐の手の計算（行列 scale 2 で 2 倍）。
+
 ## 4. 注意
 
 - premultiplied の color_at は premultiplied のまま 8 bit に丸める（各 color の channel ≤ alpha）。straight（SVG）の補間の結果も最後に premultiplied にして返す（header）。
@@ -53,7 +61,7 @@
 ## 6. 確かめの command
 
 - `sh plan/ws328/tests/run-unit.sh gradient` と `sh plan/ws328/tests/run-unit.sh all`（最後の行 `run-unit: PASS`）。`CC=clang` でも同じ。
-- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。zedBSD の clang が自分の worktree に無ければ `WS328_ZEDBSD_CC=/home/awe/zedBSD-claude1/build/llvm/bin/clang`（読むだけ）で check 6 も流す。
+- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。check 6（zedBSD の clang と x86_64 の sysroot での compile）は自分の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を使う。無ければ、Q1 が起動の依頼文で許した時に `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` の後 `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk sysroot` で自分の build/ に入れる（共有の toolchain と main の build/ は使わない・書かない。許しが無ければ Q1 に頼む）。最後の行が `check-skeleton: INCOMPLETE` の時は PASS ではない。
 - `git diff --check`。
 
 ## 7. 終わりの条件
