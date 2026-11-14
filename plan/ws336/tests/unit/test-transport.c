@@ -391,6 +391,7 @@ step(
 		inbox->count++;
 	}
 
+	/* Releases the buffer. */
 	ssh_buf_free(&payload);
 	return error;
 }
@@ -628,6 +629,7 @@ read_plain(
 		plain_out.count++;
 	}
 
+	/* Releases the buffer. */
 	ssh_buf_free(&payload);
 	ssh_packet_free(&reader);
 	return plain_out.count;
@@ -899,6 +901,7 @@ test_send_errors(void)
 		CHECK_EQ(server_inbox.hash[server_inbox.count - 1U], fnv(large, SSH_PACKET_LIMIT - 256U));
 	}
 
+	/* Releases the memory. */
 	free(large);
 
 	/* Refuses everything after a disconnect, as EPIPE. */
@@ -2702,6 +2705,7 @@ test_import_errors(void)
 		ssh_transport_free(&client);
 	}
 
+	/* Releases the memory. */
 	free(large);
 }
 

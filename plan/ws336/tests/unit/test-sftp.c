@@ -328,6 +328,7 @@ check_prefixes_invalid(
 			failures++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 
 	/* One extra byte after the last field is refused. */
@@ -633,6 +634,7 @@ test_next_packet_random(void)
 		ssh_buf_free(&packet);
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 }
 
@@ -1485,6 +1487,7 @@ test_unknown_types(void)
 			wrong++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(wrong, 0);
 
 	/* An unknown type with fewer than the 4 bytes of an id is malformed rather than unsupported. */
@@ -1504,6 +1507,7 @@ test_unknown_types(void)
 			wrong++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(wrong, 0);
 
 	/* EXTENDED with a name and request-specific bytes is answered OP_UNSUPPORTED, not parsed further. */
@@ -1717,6 +1721,7 @@ test_parse_random(void)
 			failures++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 
 	/* A valid request mutated in one byte (every position, a few values) never crashes the parser. */
@@ -1734,6 +1739,7 @@ test_parse_random(void)
 		}
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 }
 
@@ -2557,6 +2563,7 @@ test_long_name_cut(void)
 			failures++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 
 	/* The array of exactly length + 1 holds the whole text; length gives the text without its last character. */
@@ -2631,5 +2638,6 @@ test_long_name_random(void)
 		}
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 }

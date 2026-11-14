@@ -1376,6 +1376,7 @@ test_stages(void)
 		CHECK_EQ(status, EPROTO);
 	}
 
+	/* Releases the monitor. */
 	sshd_monitor_clear(&monitor);
 	CHECK(monitor.state.data == NULL);
 

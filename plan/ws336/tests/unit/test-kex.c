@@ -455,6 +455,7 @@ test_parse_roundtrip(void)
 				CHECK((const uint8_t *)kexinit.list[index] + kexinit.list_size[index] <= kept + out.size);
 			}
 
+			/* The payload announced no guessed packet, so the flag must read as zero. */
 			CHECK_EQ(kexinit.first_kex_packet_follows, 0);
 			ssh_buf_free(&out);
 		}
@@ -512,6 +513,7 @@ test_parse_errors(void)
 	size_t index;
 	int error;
 
+	/* Starts from the standard lists, which each case below changes. */
 	build_standard_lists(lists, "mlkem768x25519-sha256");
 
 	/* A payload of another message number. */
@@ -556,6 +558,7 @@ test_parse_errors(void)
 		longlist[index + 1] = 'a';
 	}
 
+	/* Ends the list, and gives it as the ninth list of a KEXINIT. */
 	longlist[8193] = '\0';
 	build_standard_lists(lists, "mlkem768x25519-sha256");
 	lists[9] = longlist;
@@ -597,6 +600,7 @@ test_parse_truncations(void)
 	const char *lists[TEST_LISTS];
 	size_t length;
 
+	/* Builds a valid payload with the first-packet flag set, which must parse. */
 	build_standard_lists(lists, "mlkem768x25519-sha256,kex-strict-c");
 	build_kexinit(&payload_wire, lists, 1, 7);
 	CHECK_EQ(parse_exact(payload_wire.data, payload_wire.size), 0);
@@ -622,6 +626,7 @@ set_lists(
 		kexinit->list_size[index] = strlen(lists[index]);
 	}
 
+	/* Records whether a guessed packet follows. */
 	kexinit->first_kex_packet_follows = first;
 }
 
@@ -635,10 +640,14 @@ test_choose_missing(void)
 	const char *kind;
 	int error;
 	int server;
+	const char *offer;
 
 	/* A peer that offers everything is accepted, from either side. */
 	for (server = 0; server < 2; server++) {
-		build_standard_lists(lists, server ? "mlkem768x25519-sha256,kex-strict-c" : "mlkem768x25519-sha256,kex-strict-s");
+		offer = "mlkem768x25519-sha256,kex-strict-s";
+		if (server != 0)
+			offer = "mlkem768x25519-sha256,kex-strict-c";
+		build_standard_lists(lists, offer);
 		set_lists(&peer, lists, 0);
 		memset(&choice, 0, sizeof(choice));
 		kind = "unset";
@@ -932,6 +941,7 @@ test_hybrid_init(void)
 	size_t allocation;
 	int error;
 
+	/* Fills the client's init value with a known pattern. */
 	fill_pattern(c_init, sizeof(c_init), 29, 11);
 
 	/* The message: number 30, then a string. */
@@ -1005,6 +1015,7 @@ test_hybrid_init(void)
 		free(copy);
 	}
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -1024,6 +1035,7 @@ test_hybrid_reply(void)
 	size_t signature_size;
 	int error;
 
+	/* Fills the host key, the reply and the signature with known patterns. */
 	fill_pattern(host_key, sizeof(host_key), 3, 1);
 	fill_pattern(s_reply, sizeof(s_reply), 7, 2);
 	fill_pattern(signature, sizeof(signature), 11, 3);
@@ -1090,6 +1102,7 @@ test_hybrid_errors(void)
 	size_t allocation;
 	int error;
 
+	/* Fills the values with known patterns. */
 	fill_pattern(bytes, sizeof(bytes), 5, 5);
 
 	/* A good message to cut and spoil. */
@@ -1169,6 +1182,7 @@ test_hash(void)
 	uint8_t expected[SSH_KEX_HASH_SIZE];
 	int error;
 
+	/* Makes the input of the hash. */
 	make_input(&input);
 
 	/* The known answer. */
@@ -1242,6 +1256,7 @@ test_hash_sensitivity(void)
 	unsigned which;
 	int error;
 
+	/* Makes the input of the hash. */
 	make_input(&input);
 
 	/* A boundary moved between the two identification lines (the same joined bytes, split one byte earlier) gives another hash. */
@@ -1307,6 +1322,10 @@ test_hash_sensitivity(void)
 			break;
 		}
 
+		/*
+		 * Hashes the input with the one field changed and compares it with the
+		 * unchanged hash.
+		 */
 		error = ssh_kex_hash(&spoiled, h);
 		CHECK_EQ(error, 0);
 		CHECK(memcmp(h, base, SSH_KEX_HASH_SIZE) != 0);
@@ -1355,6 +1374,7 @@ test_derive(void)
 	unsigned b;
 	int error;
 
+	/* Makes the secret, the hash and the session identifier from known patterns. */
 	fill_pattern(k, sizeof(k), 17, 6);
 	fill_pattern(h, sizeof(h), 23, 9);
 	fill_pattern(session_id, sizeof(session_id), 19, 7);
@@ -1421,12 +1441,14 @@ test_derive(void)
 			wire_bytes(&payload_wire, expected, made);
 		}
 
+		/* Hashes the block's input into the block that the module must also produce. */
 		error = ssh_sha256(payload_wire.data, payload_wire.size, block);
 		CHECK_EQ(error, 0);
 		memcpy(expected + made, block, 32);
 		made += 32;
 	}
 
+	/* The module's 256 bytes must equal the chain worked out here. */
 	CHECK_BYTES(full, expected, 256);
 
 	/* A different letter, session identifier, H or K gives different material (the six letters differ pairwise). */
@@ -1435,11 +1457,13 @@ test_derive(void)
 		CHECK_EQ(error, 0);
 	}
 
+	/* The material of each letter must differ from the material of every other letter. */
 	for (a = 0; a < 6; a++) {
 		for (b = a + 1; b < 6; b++)
 			CHECK(memcmp(others[a], others[b], 32) != 0);
 	}
 
+	/* A changed session identifier, hash or secret gives other material. */
 	session_id[0] ^= 1;
 	error = ssh_kex_derive(k, h, session_id, 'A', out, 32);
 	CHECK_EQ(error, 0);
@@ -1467,6 +1491,7 @@ test_derive_errors(void)
 	uint8_t out[300];
 	int error;
 
+	/* Makes the secret, the hash and the session identifier from known patterns. */
 	fill_pattern(k, sizeof(k), 17, 6);
 	fill_pattern(h, sizeof(h), 23, 9);
 	fill_pattern(session_id, sizeof(session_id), 19, 7);
@@ -1527,6 +1552,9 @@ test_random_feed(void)
 	unsigned flips;
 	unsigned success;
 	int error;
+	int server_side;
+	int strict_wanted;
+	unsigned coin;
 
 	/* A valid KEXINIT to damage. */
 	build_standard_lists(lists, "mlkem768x25519-sha256,kex-strict-c,kex-strict-c-v00@openssh.com");
@@ -1534,6 +1562,7 @@ test_random_feed(void)
 	valid_size = payload_wire.size;
 	memcpy(valid, payload_wire.data, valid_size);
 
+	/* Starts with no damaged payload that still parsed. */
 	success = 0;
 	for (run = 0; run < TEST_RANDOM_RUNS; run++) {
 		/* Takes a copy of the valid payload of exactly its size and flips a few bytes. */
@@ -1552,12 +1581,15 @@ test_random_feed(void)
 		if (error == 0) {
 			success++;
 			memset(&choice, 0, sizeof(choice));
-			error = ssh_kex_choose((int)(next_random() & 1U), (int)(next_random() & 1U), &kexinit, &choice, NULL);
+			server_side = (int)(next_random() & 1U);
+			strict_wanted = (int)(next_random() & 1U);
+			error = ssh_kex_choose(server_side, strict_wanted, &kexinit, &choice, NULL);
 			CHECK(error == 0 || error == ENOTSUP || error == EPROTO);
 		} else {
 			CHECK(error == EINVAL || error == EMSGSIZE);
 		}
 
+		/* Releases the copy. */
 		free(copy);
 	}
 
@@ -1577,7 +1609,11 @@ test_random_feed(void)
 			abort();
 		for (index = 0; index < size; index++)
 			copy[index] = (uint8_t)next_random();
-		if (size > 0 && (next_random() & 1U) != 0U)
+		/* Half of the time the first byte becomes a message number near the KEXINIT's. */
+		coin = 0;
+		if (size > 0)
+			coin = next_random() & 1U;
+		if (coin != 0U)
 			copy[0] = (uint8_t)(20U + (next_random() % 12U));
 		error = ssh_kexinit_parse(copy, size, &kexinit);
 		CHECK(error == 0 || error == EINVAL || error == EMSGSIZE);

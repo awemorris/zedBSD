@@ -1197,9 +1197,11 @@ test_random_frames(void)
 			}
 		}
 
+		/* Releases the buffer. */
 		ssh_buf_free(&in);
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(bad, 0);
 
 	/* The inputs covered all three outcomes, so the run was not all one kind. */
@@ -1265,9 +1267,11 @@ test_mutated_frames(void)
 		if (position >= 5 && (error != 0 || body.size != 30 || type != SSH_MON_PUBKEY_LOGIN))
 			bad++;
 
+		/* Releases the buffer. */
 		ssh_buf_free(&in);
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(bad, 0);
 	ssh_buf_free(&body);
 }

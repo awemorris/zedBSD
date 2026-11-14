@@ -180,6 +180,10 @@ take_payload(
 	struct ssh_buf payload;
 	int error;
 
+	/*
+	 * Takes the next payload out of the packet layer and copies it, with its size, to
+	 * the caller.
+	 */
 	ssh_buf_init(&payload, TEST_PAYLOAD_LIMIT, 0);
 	error = ssh_packet_next(packet, &payload);
 	*size = 0;
@@ -191,6 +195,7 @@ take_payload(
 		CHECK_EQ(payload.size, 0);
 	}
 
+	/* Releases the buffer. */
 	ssh_buf_free(&payload);
 	return error;
 }
@@ -205,6 +210,7 @@ move_output(
 	size_t size;
 	int error;
 
+	/* Moves the output of one packet layer into the input of the other and marks it written. */
 	data = ssh_packet_pending(from, &size);
 	if (data == NULL)
 		return 0;
@@ -221,6 +227,7 @@ feed_text(
 {
 	int error;
 
+	/* Feeds the text to the packet layer, as the identification line from the peer. */
 	error = ssh_packet_feed(packet, (const uint8_t *)text, strlen(text));
 	CHECK_EQ(error, 0);
 }
@@ -240,6 +247,7 @@ test_unkeyed_send(void)
 	size_t nonzero;
 	int error;
 
+	/* Starts with a fresh packet layer. */
 	ssh_packet_init(&packet);
 	nonzero = 0;
 	for (size = 1; size <= 40; size++) {
@@ -272,9 +280,14 @@ test_unkeyed_send(void)
 				nonzero++;
 		}
 
+		/* Marks the frame as written so the next send starts a new one. */
 		ssh_packet_written(&packet, out_size);
 	}
 
+	/*
+	 * Some of the padding must have been non-zero, and the counter must have advanced
+	 * once per packet.
+	 */
 	CHECK(nonzero > 0);
 	CHECK_EQ(packet.send.seq, 40);
 	ssh_packet_free(&packet);
@@ -292,9 +305,11 @@ test_unkeyed_send_max(void)
 	size_t index;
 	int error;
 
+	/* Fills the largest payload with a pattern. */
 	for (index = 0; index < TEST_PAYLOAD_MAX; index++)
 		big_payload[index] = (uint8_t)(index * 7U + 3U);
 
+	/* Starts with a fresh packet layer. */
 	ssh_packet_init(&sender);
 	ssh_packet_init(&receiver);
 	error = ssh_packet_send(&sender, big_payload, TEST_PAYLOAD_MAX);
@@ -307,6 +322,7 @@ test_unkeyed_send_max(void)
 		CHECK_EQ(ssh_load_be32(out), out_size - 4U);
 	}
 
+	/* Moves the largest payload across and checks that it arrives whole. */
 	error = move_output(&sender, &receiver);
 	CHECK_EQ(error, 0);
 	error = take_payload(&receiver, big_bytes, &size);
@@ -328,6 +344,10 @@ test_send_errors(void)
 	int pass;
 	int error;
 
+	/*
+	 * Fills the payload and makes a key, then sends one packet without a key and one
+	 * with it.
+	 */
 	memset(payload, 1, sizeof(payload));
 	make_key(key, 2);
 	for (pass = 0; pass < 2; pass++) {
@@ -370,6 +390,7 @@ test_unkeyed_receive(void)
 	size_t index;
 	int error;
 
+	/* Fills the first payload with a pattern. */
 	for (index = 0; index < sizeof(first); index++)
 		first[index] = (uint8_t)(0x10 + index);
 	second[0] = 0x99;
@@ -410,6 +431,7 @@ test_unkeyed_receive(void)
 		}
 	}
 
+	/* Releases the packet layer. */
 	ssh_packet_free(&packet);
 
 	/* Two frames in one feed, then a third byte pair of the next. */
@@ -479,6 +501,7 @@ test_unkeyed_receive_errors(void)
 	size_t size;
 	int error;
 
+	/* Fills the payload with a known byte. */
 	memset(payload, 0x33, sizeof(payload));
 
 	/* packet_length 4 is below the smallest packet. */
@@ -564,6 +587,10 @@ test_keyed_roundtrip(void)
 	size_t index;
 	int error;
 
+	/*
+	 * Makes the two keys and sets up one layer per side, with a different key for each
+	 * direction.
+	 */
 	make_key(key_ab, 11);
 	make_key(key_ba, 12);
 	ssh_packet_init(&a);
@@ -573,6 +600,7 @@ test_keyed_roundtrip(void)
 	ssh_packet_set_send_key(&b, key_ba);
 	ssh_packet_set_receive_key(&a, key_ba);
 
+	/* Sends packets of growing size in both directions, each under its own key. */
 	for (count = 1; count <= 30; count++) {
 		for (index = 0; index < count; index++)
 			payload[index] = (uint8_t)(count * 3U + index);
@@ -588,6 +616,7 @@ test_keyed_roundtrip(void)
 			CHECK_EQ((frame_size - 4U - SSH_CHACHAPOLY_TAG) % 8U, 0);
 		}
 
+		/* Moves the packet across and checks that it arrives whole. */
 		error = move_output(&a, &b);
 		CHECK_EQ(error, 0);
 		error = take_payload(&b, out, &size);
@@ -608,6 +637,7 @@ test_keyed_roundtrip(void)
 		CHECK_BYTES(out, payload, count);
 	}
 
+	/* Both sides must have counted all thirty packets. */
 	CHECK_EQ(a.receive.seq, 30);
 	CHECK_EQ(b.send.seq, 30);
 
@@ -636,6 +666,7 @@ test_keyed_tamper(void)
 	size_t bit;
 	int error;
 
+	/* Seals one packet under a key. */
 	make_key(key, 21);
 	memset(payload, 0x6d, sizeof(payload));
 	ssh_packet_init(&sender);
@@ -649,6 +680,7 @@ test_keyed_tamper(void)
 		return;
 	}
 
+	/* Keeps a copy of the frame the sender made. */
 	memcpy(frame, pending, frame_size);
 	ssh_packet_free(&sender);
 
@@ -714,6 +746,7 @@ test_keyed_errors(void)
 	size_t size;
 	int error;
 
+	/* Makes the key and a cipher with it. */
 	make_key(key, 31);
 	ssh_chachapoly_init(&cipher, key);
 	memset(payload, 0x44, sizeof(payload));
@@ -769,6 +802,7 @@ test_keyed_errors(void)
 	CHECK_EQ(size, 0);
 	ssh_packet_free(&packet);
 
+	/* Wipes the cipher. */
 	ssh_chachapoly_clear(&cipher);
 }
 
@@ -788,6 +822,7 @@ test_keyed_partial(void)
 	size_t index;
 	int error;
 
+	/* Seals one packet under a key. */
 	make_key(key, 41);
 	for (index = 0; index < sizeof(payload); index++)
 		payload[index] = (uint8_t)(index + 90U);
@@ -802,6 +837,7 @@ test_keyed_partial(void)
 		return;
 	}
 
+	/* Keeps a copy of the frame the sender made. */
 	memcpy(frame, pending, frame_size);
 	ssh_packet_free(&sender);
 
@@ -821,6 +857,7 @@ test_keyed_partial(void)
 		}
 	}
 
+	/* Releases the packet layer. */
 	ssh_packet_free(&receiver);
 
 	/* Two frames in one feed. */
@@ -864,6 +901,7 @@ test_counters(void)
 	int count;
 	int error;
 
+	/* Makes the key and the payload, and starts both layers unkeyed. */
 	make_key(key, 51);
 	memset(payload, 9, sizeof(payload));
 	ssh_packet_init(&a);
@@ -920,6 +958,7 @@ test_counters(void)
 		CHECK_EQ(error, 0);
 	}
 
+	/* The two sides must have counted the same bytes and five packets. */
 	CHECK_EQ(a.send.bytes, total);
 	CHECK_EQ(a.send.packets, 5);
 	CHECK_EQ(b.receive.bytes, total);
@@ -941,6 +980,7 @@ test_seq_wrap(void)
 	int pass;
 	int error;
 
+	/* Makes the key and the payload. */
 	make_key(key, 61);
 	memset(payload, 0x21, sizeof(payload));
 	for (pass = 0; pass < 2; pass++) {
@@ -951,6 +991,7 @@ test_seq_wrap(void)
 			ssh_packet_set_receive_key(&b, key);
 		}
 
+		/* Puts both counters at the last number before the wrap. */
 		a.send.seq = 0xffffffffU;
 		b.receive.seq = 0xffffffffU;
 		CHECK_EQ(a.send.wrapped, 0);
@@ -1006,6 +1047,7 @@ test_seq_wrap(void)
 			CHECK(error == EAGAIN || error == EBADMSG || error == EMSGSIZE);
 		}
 
+		/* Releases the packet layer. */
 		ssh_packet_free(&a);
 		ssh_packet_free(&b);
 	}
@@ -1227,6 +1269,7 @@ test_take_line_limits(void)
 		CHECK_EQ(error, 0);
 	}
 
+	/* A long run of bytes with no line end is refused. */
 	error = ssh_packet_take_line(&packet, line, sizeof(line), &length);
 	CHECK_EQ(error, EMSGSIZE);
 	ssh_packet_free(&packet);
@@ -1242,6 +1285,7 @@ test_raw_and_pending(void)
 	size_t size;
 	int error;
 
+	/* Starts with a fresh packet layer. */
 	ssh_packet_init(&packet);
 	memset(payload, 1, sizeof(payload));
 
@@ -1308,6 +1352,7 @@ test_limits(void)
 	size_t index;
 	int error;
 
+	/* Fills the buffers with known bytes. */
 	memset(big_bytes, 0x77, sizeof(big_bytes));
 	memset(payload, 5, sizeof(payload));
 
@@ -1384,6 +1429,7 @@ test_random_feed(void)
 	int ok;
 	size_t piece;
 
+	/* Makes the key and counts nothing yet. */
 	make_key(key, 71);
 	delivered = 0;
 	ok = 1;
@@ -1422,6 +1468,7 @@ test_random_feed(void)
 				continue;
 			}
 
+			/* Copies the frame and changes up to three of its bytes. */
 			length = pending_size;
 			memcpy(chunk, pending, length);
 			ssh_packet_free(&sender);
@@ -1447,15 +1494,18 @@ test_random_feed(void)
 				continue;
 			}
 
+			/* A result that is not one of the documented ones is a failure. */
 			if (error != EAGAIN && error != EMSGSIZE && error != EINVAL && error != EBADMSG)
 				ok = 0;
 			if (error != EAGAIN)
 				break;
 		}
 
+		/* Releases the packet layer. */
 		ssh_packet_free(&packet);
 	}
 
+	/* No result was outside the documented ones. */
 	CHECK(ok);
 
 	/* The valid frames with no change were delivered at least sometimes (unchanged runs exist). */
