@@ -1,20 +1,20 @@
 #!/bin/sh
 # Builds zedBSD's ssh programs for the host (userland/base/ssh): ssh, ssh-keygen, sshd and sftp-server, with ASan and
-# UBSan, against the host's OpenSSL 3.5 through the shims in plan/ws336/tests/host-crypto (libcrypto-compat has
+# UBSan, against the host's OpenSSL 3.5 through the shims in plan/tools/ssh/host-crypto (libcrypto-compat has
 # OpenSSL 3.5's interface).  Each program is its main file, the program files of its own (ssh-client-*.c for ssh,
 # sshd-*.c and the console login's password check for sshd) and every library module.
-#   sh plan/ws336/tests/build-host.sh <out-dir> [program...]     default: every program
+#   sh plan/tools/ssh/build-host.sh <out-dir> [program...]     default: every program
 # SSH_SOURCE_DIR=<dir> takes the sources from another directory (a changed copy under build/tmp).
 # Prints "build-host: <program> ok" or "build-host: <program> FAIL" for each; last line: build-host: PASS or FAIL.
 # SSH_CRYPTO_INCLUDE=<dir whose compat/crypto/ holds libcrypto-compat's headers> and SSH_CRYPTO_LIB=<what to link for
-# it> build against libcrypto-compat instead of the host's OpenSSL (plan/ws336/tests/compat-host.sh sets both).
+# it> build against libcrypto-compat instead of the host's OpenSSL (plan/tools/ssh/compat-host.sh sets both).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
-crypto_include=${SSH_CRYPTO_INCLUDE:-plan/ws336/tests/host-crypto}
+crypto_include=${SSH_CRYPTO_INCLUDE:-plan/tools/ssh/host-crypto}
 crypto_lib=${SSH_CRYPTO_LIB:--lcrypto}
 cd "$(dirname -- "$0")/../../.."
 if [ $# -lt 1 ]; then
-	echo "usage: sh plan/ws336/tests/build-host.sh <out-dir> [program...]"
+	echo "usage: sh plan/tools/ssh/build-host.sh <out-dir> [program...]"
 	echo "build-host: FAIL"
 	exit 2
 fi

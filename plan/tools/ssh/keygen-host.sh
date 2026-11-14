@@ -1,19 +1,19 @@
 #!/bin/sh
 # The host test of zedBSD's ssh-keygen program (userland/base/ssh/ssh-keygen-main.c): builds it with ASan and UBSan
-# against the host's OpenSSL 3.5 (through plan/ws336/tests/host-crypto) and runs it on temporary directories.
+# against the host's OpenSSL 3.5 (through plan/tools/ssh/host-crypto) and runs it on temporary directories.
 # Expected values come from the specification of the formats (RFC 8709 key blob, the SHA256 fingerprint, the key
 # file modes) and are computed here by shell and python, never from another implementation's output.  The last
 # block (OpenSSH's ssh-keygen, when installed) checks that the two programs read each other's files; it generates
 # nothing that the earlier blocks compare against.
 # KEYGEN_SOURCE=<file> and KEYGEN_OUT=<name> replace the program source and the output name (used to try changed
 # copies of the program under build/tmp).
-#   sh plan/ws336/tests/keygen-host.sh
+#   sh plan/tools/ssh/keygen-host.sh
 # Last line: keygen-host: PASS or keygen-host: FAIL.  Output under build/tmp/keygen-host.
 # SSH_CRYPTO_INCLUDE=<dir whose compat/crypto/ holds libcrypto-compat's headers> and SSH_CRYPTO_LIB=<what to link for
-# it> build against libcrypto-compat instead of the host's OpenSSL (plan/ws336/tests/compat-host.sh sets both).
+# it> build against libcrypto-compat instead of the host's OpenSSL (plan/tools/ssh/compat-host.sh sets both).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
-crypto_include=${SSH_CRYPTO_INCLUDE:-plan/ws336/tests/host-crypto}
+crypto_include=${SSH_CRYPTO_INCLUDE:-plan/tools/ssh/host-crypto}
 crypto_lib=${SSH_CRYPTO_LIB:--lcrypto}
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh

@@ -21,7 +21,7 @@
 # Nothing outside the run directory is touched: the fuzz targets open no file (the monitor's account checks are
 # replaced), the random SFTP input reaches only the stub, sshd serves the test's account with the run directory's
 # home and shell.
-#   sh plan/ws336/tests/fuzz-host.sh
+#   sh plan/tools/ssh/fuzz-host.sh
 # Last line: fuzz-host: PASS or fuzz-host: FAIL.  Output under build/tmp/fuzz-host (a fresh run directory).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -57,7 +57,7 @@ for target in $targets; do
 	[ "$target" = monitor ] && extra="$source_dir/sshd-monitor.c"
 	# shellcheck disable=SC2086
 	if ! timeout 600 clang -std=gnu99 -O1 -g -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined \
-	    -D_DEFAULT_SOURCE -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto "plan/ws336/tests/fuzz/fuzz-$target.c" \
+	    -D_DEFAULT_SOURCE -I. -I"$source_dir" -Iplan/tools/ssh/host-crypto "plan/tools/ssh/fuzz/fuzz-$target.c" \
 	    $extra $modules -lcrypto -o "$out/bin/fuzz-$target" > "$out/fuzz-$target.build.log" 2>&1; then
 		fail "build of fuzz-$target ($(grep error "$out/fuzz-$target.build.log" | head -2))"
 	fi
@@ -113,9 +113,9 @@ done
 
 # --- 2. sftp-server as a program: random bytes only to the stubbed build (which fails closed), short names in an
 # empty directory for the real one.
-SSH_SOURCE_DIR=$source_dir sh plan/ws336/tests/build-host.sh "$out/bin" sftp-server > "$out/sftp-server.build.log" 2>&1 ||
+SSH_SOURCE_DIR=$source_dir sh plan/tools/ssh/build-host.sh "$out/bin" sftp-server > "$out/sftp-server.build.log" 2>&1 ||
     fail "build of sftp-server"
-cc -std=c89 -O1 -D_DEFAULT_SOURCE -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto -c "$source_dir/sftp-server-main.c" \
+cc -std=c89 -O1 -D_DEFAULT_SOURCE -I. -I"$source_dir" -Iplan/tools/ssh/host-crypto -c "$source_dir/sftp-server-main.c" \
     -o "$out/sftp-server-main.o" > "$out/sftp-stub.build.log" 2>&1
 stub_allowed=" chmod chown close closedir fchmod fchown fstat ftruncate futimens getgrgid getpwuid link lstat mkdir open opendir pread pwrite readdir readlink realpath rename rmdir stat symlink truncate unlink utimensat __errno_location signal malloc free fwrite read write snprintf sprintf strlen strcmp strrchr strcpy memcpy memset memchr stderr time "
 unexpected=""
@@ -132,22 +132,22 @@ done
 if [ -z "$unexpected" ]; then
 	# shellcheck disable=SC2086
 	timeout 300 cc -std=gnu99 -O1 -g -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-	    -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto "$source_dir/sftp-server-main.c" plan/ws336/tests/sftp-fs-stub.c \
+	    -I. -I"$source_dir" -Iplan/tools/ssh/host-crypto "$source_dir/sftp-server-main.c" plan/tools/ssh/sftp-fs-stub.c \
 	    $modules -lcrypto -o "$out/bin/sftp-server-stub" >> "$out/sftp-stub.build.log" 2>&1 || fail "build of the stubbed sftp-server"
 	mkdir -p "$out/work/sftp-stub"
-	"$python" -I plan/ws336/tests/sftp-host.py fuzz-random "$out/bin/sftp-server-stub" "$out/work/sftp-stub" "$sftp_runs" \
+	"$python" -I plan/tools/ssh/sftp-host.py fuzz-random "$out/bin/sftp-server-stub" "$out/work/sftp-stub" "$sftp_runs" \
 	    > "$out/sftp-random.log" 2>&1 || fail "sftp-server random: $(grep FAIL "$out/sftp-random.log" | head -2 | tr '\n' ' ')"
 	echo "sftp-server random: $(tail -1 "$out/sftp-random.log")"
 fi
 mkdir -p "$out/work/sftp-names"
-"$python" -I plan/ws336/tests/sftp-host.py fuzz-structured "$out/bin/sftp-server" "$out/work/sftp-names" "$sftp_runs" \
+"$python" -I plan/tools/ssh/sftp-host.py fuzz-structured "$out/bin/sftp-server" "$out/work/sftp-names" "$sftp_runs" \
     > "$out/sftp-names.log" 2>&1 || fail "sftp-server names: $(grep FAIL "$out/sftp-names.log" | head -2 | tr '\n' ' ')"
 echo "sftp-server names: $(tail -1 "$out/sftp-names.log")"
 
 # --- 3. timing.
 # shellcheck disable=SC2086
-if timeout 300 cc -std=gnu99 -O2 -Wall -Wextra -D_DEFAULT_SOURCE -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto \
-    plan/ws336/tests/timing-host.c "$source_dir/sshd-monitor.c" "$source_dir/sshd-login.c" userland/base/login/verify.c \
+if timeout 300 cc -std=gnu99 -O2 -Wall -Wextra -D_DEFAULT_SOURCE -I. -I"$source_dir" -Iplan/tools/ssh/host-crypto \
+    plan/tools/ssh/timing-host.c "$source_dir/sshd-monitor.c" "$source_dir/sshd-login.c" userland/base/login/verify.c \
     $modules -lcrypto -lcrypt -o "$out/bin/timing-host" > "$out/timing.build.log" 2>&1; then
 	timeout 600 "$out/bin/timing-host" 5 > "$out/timing.log" 2>&1
 	rc=$?
@@ -163,8 +163,8 @@ mkdir -p "$b/home/.ssh"
 chmod 700 "$b/home" "$b/home/.ssh"
 # shellcheck disable=SC2086
 timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-    -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto $(ls "$source_dir"/sshd-*.c) userland/base/login/verify.c \
-    plan/ws336/tests/sshd-host-shim.c $modules -lcrypto -lcrypt -o "$b/sshd" > "$out/sshd.build.log" 2>&1 || fail "build of sshd"
+    -I. -I"$source_dir" -Iplan/tools/ssh/host-crypto $(ls "$source_dir"/sshd-*.c) userland/base/login/verify.c \
+    plan/tools/ssh/sshd-host-shim.c $modules -lcrypto -lcrypt -o "$b/sshd" > "$out/sshd.build.log" 2>&1 || fail "build of sshd"
 ssh-keygen -q -t ed25519 -N '' -f "$b/host_key" > /dev/null 2>&1
 ssh-keygen -q -t ed25519 -N '' -f "$out/work/id" > /dev/null 2>&1
 cp "$out/work/id.pub" "$b/home/.ssh/authorized_keys"
