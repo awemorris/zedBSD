@@ -12,7 +12,8 @@
 # build/ws345-host; host-build.sh makes them); the reftests and wpt-cross-origin need the WPT checkout
 # (fetch-suites.sh wpt).  PORT_OFFSET (default 0) is added to the network tests' ports.
 # Each test runs in the caller's mode, then in the own mode, one after the other.  Its results are compared:
-# the lines that name a check and its outcome (the logs' timings, temporary paths and ports aside).
+# the lines that name a check and its outcome (the logs' timings, temporary paths and ports aside; for fetch, its
+# result lines, without the test server's reports of a connection the browser closed).
 # wpt-cross-origin is not compared: the frames of other origins run in agents of their own only in a view of
 # its own threads (in the caller's they are refused), so its results are each mode's own.
 # Output: build/tmp/ws345-r12-<variant>/: <test>-<mode>.log, <test>-<mode>.results (the compared
@@ -78,6 +79,7 @@ run_one() {
 	# The compared lines: the outcome of each check, without timings, ports and temporary paths.
 	case $test in
 	reftests) grep -E '^\[[0-9]+/[0-9]+\] ' "$log" ;;
+	fetch) grep -E '^(ok |FAIL|fetch-tests)' "$log" ;;
 	component) grep -v -e '^built ' "$log" | sed 's/ (views of their own threads.*)$//; s/^component: [0-9]* checks, /component: /' ;;
 	wpt-cross-origin) cat "$out/wpt-cross-origin-$mode/results.txt" 2>/dev/null ;;
 	*) cat "$log" ;;
