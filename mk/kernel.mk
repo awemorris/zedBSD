@@ -1264,7 +1264,8 @@ endif
 ifneq ($(filter y,$(CONFIG_KERN_DESKTOP_BALANCER)),)
 KERN_CPPFLAGS += -DCONFIG_KERN_DESKTOP_BALANCER=1
 KERN_SOURCES += \
-	src/kern/desktop-balancer.c
+	src/kern/desktop-balancer.c \
+	src/kern/sched-hint.c
 endif
 
 # [Smart Card driver] (/dev/smartcard)

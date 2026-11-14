@@ -38,3 +38,10 @@ endif
 ifneq ($(filter y,$(CONFIG_KERNEL_USB_HID_CHECKPOINT)),)
 KERN_CPPFLAGS += -DCONFIG_KERNEL_USB_HID_CHECKPOINT=1
 endif
+
+# [Kernel Test] desktop thread balancer stress (needs the balancer)
+ifeq ($(CONFIG_KERN_DESKTOP_BALANCER)$(CONFIG_KERN_DESKTOP_BALANCER_TEST),yy)
+KERN_CPPFLAGS += -DCONFIG_KERN_DESKTOP_BALANCER_TEST=1
+KERN_SOURCES += \
+	src/kern/sched-hint-test.c
+endif

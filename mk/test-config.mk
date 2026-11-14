@@ -27,3 +27,7 @@ CONFIG_THERMAL_TEST_INJECT        ?= n
 ifneq ($(filter y,$(CONFIG_THERMAL_TEST_INJECT)),)
 CONFIG_CPPFLAGS += -DCONFIG_THERMAL_TEST_INJECT=1
 endif
+
+# [Kernel Test: Desktop Thread Balancer Stress] (desktop_balancer.classes=, desktop_balancer.stress=1)
+#  - Depends: CONFIG_KERN_DESKTOP_BALANCER
+CONFIG_KERN_DESKTOP_BALANCER_TEST ?= n
