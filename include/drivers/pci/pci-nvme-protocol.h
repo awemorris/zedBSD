@@ -539,6 +539,270 @@ drv_nvme_hmb_plan(const struct drv_nvme_controller_profile *profile,
 	return 1;
 }
 
+/*
+ * The power states a controller describes and its Autonomous Power State
+ * Transition feature.
+ *
+ * Values referenced: NVM Express Base Specification 1.4c, Identify
+ * Controller: NPSS byte 263 (the number of power states less one), APSTA
+ * byte 265 bit 0, the Power State Descriptors from byte 2048, 32 bytes
+ * each (MP bytes 1:0, MXPS byte 3 bit 0: units of 0.0001 W instead of
+ * 0.01 W, NOPS byte 3 bit 1, ENLAT bytes 7:4 and EXLAT bytes 11:8 in
+ * microseconds, zero when not reported); Set Features Feature Identifier
+ * 0Ch (CDW11 APSTE bit 0, the table in the data buffer: 32 entries of 64
+ * bits, one per power state, ITPS bits 7:3 and ITPT bits 31:8 in
+ * milliseconds, an ITPT of zero making no transition).
+ */
+#define DRV_NVME_FEATURE_AUTONOMOUS_POWER	0x0CU
+#define DRV_NVME_APST_ENABLE			(1U << 0)
+#define DRV_NVME_POWER_STATES_MAX		32U
+#define DRV_NVME_POWER_STATE_DESCRIPTORS	2048U
+#define DRV_NVME_POWER_STATE_DESCRIPTOR_SIZE	32U
+#define DRV_NVME_APST_ENTRY_SIZE		8U
+#define DRV_NVME_APST_TABLE_SIZE		(DRV_NVME_POWER_STATES_MAX * DRV_NVME_APST_ENTRY_SIZE)
+#define DRV_NVME_APST_ITPT_MAX			0x00ffffffU
+
+/*
+ * The latencies the transitions may cost: a state whose entry and exit
+ * latencies add up to more than the limit is never a target, and one
+ * that is out within the quick latency is entered after the short idle
+ * time, a slower one after the long idle time.
+ * Values referenced: the defaults of the Linux NVMe host driver's
+ * parameters (default_ps_max_latency_us 100000, apst_primary_latency_tol_us
+ * 15000, apst_primary_timeout_ms 100, apst_secondary_timeout_ms 2000), which
+ * also make the table Debian programs on a Kioxia BG5; values only.
+ */
+#define DRV_NVME_APST_LATENCY_LIMIT_US		100000U
+#define DRV_NVME_APST_QUICK_LATENCY_US		15000U
+#define DRV_NVME_APST_QUICK_IDLE_MS		100U
+#define DRV_NVME_APST_SLOW_IDLE_MS		2000U
+
+/* One power state: its most power in microwatts, its latencies, and whether it runs commands. */
+struct drv_nvme_power_state {
+	uint32_t max_power_uw;
+	uint32_t entry_latency_us;
+	uint32_t exit_latency_us;
+	uint8_t non_operational;
+};
+
+/* The power states Identify Controller describes, and whether the controller makes autonomous transitions. */
+struct drv_nvme_power_profile {
+	unsigned count;
+	uint8_t apst_supported;
+	struct drv_nvme_power_state states[DRV_NVME_POWER_STATES_MAX];
+};
+
+/*
+ * What a table of autonomous transitions does: for each power state, the
+ * state it goes to and after how long idle (its own number and zero when
+ * it stays), and how many states make a transition.
+ */
+struct drv_nvme_apst_summary {
+	unsigned transitions;
+	uint8_t target[DRV_NVME_POWER_STATES_MAX];
+	uint32_t idle_ms[DRV_NVME_POWER_STATES_MAX];
+};
+
+/* Reads the power states and APSTA from an Identify Controller page; reports whether the page was whole. */
+static inline int
+drv_nvme_power_parse(
+	const uint8_t *identify,
+	size_t size,
+	struct drv_nvme_power_profile *profile)
+{
+	const uint8_t *descriptor;
+	unsigned index;
+	uint32_t power;
+
+	/* Refuses a page too short to hold the descriptors. */
+	if (identify == NULL || profile == NULL)
+		return 0;
+	if (size < DRV_NVME_POWER_STATE_DESCRIPTORS + DRV_NVME_POWER_STATES_MAX * DRV_NVME_POWER_STATE_DESCRIPTOR_SIZE)
+		return 0;
+
+	/* Reads the count of the states, and whether the controller moves among them by itself. */
+	profile->count = (unsigned)identify[263U] + 1U;
+	profile->apst_supported = (uint8_t)(identify[265U] & 1U);
+
+	/* Reads each described state; the rest stay zero. */
+	for (index = 0; index < DRV_NVME_POWER_STATES_MAX; index++) {
+		descriptor = identify + DRV_NVME_POWER_STATE_DESCRIPTORS + index * DRV_NVME_POWER_STATE_DESCRIPTOR_SIZE;
+		if (index >= profile->count) {
+			profile->states[index].max_power_uw = 0;
+			profile->states[index].entry_latency_us = 0;
+			profile->states[index].exit_latency_us = 0;
+			profile->states[index].non_operational = 0;
+			continue;
+		}
+
+		/* The most power is in units of 0.01 W, or of 0.0001 W when MXPS is set. */
+		power = drv_nvme_load_le16(descriptor);
+		if ((descriptor[3] & 1U) != 0U)
+			power *= 100U;
+		else
+			power *= 10000U;
+		profile->states[index].max_power_uw = power;
+		profile->states[index].non_operational = (uint8_t)((descriptor[3] >> 1) & 1U);
+		profile->states[index].entry_latency_us = drv_nvme_load_le32(descriptor + 4U);
+		profile->states[index].exit_latency_us = drv_nvme_load_le32(descriptor + 8U);
+	}
+
+	/* Succeeded: the profile describes the controller. */
+	return 1;
+}
+
+/*
+ * Finds the state an idle controller in state from goes to: the first
+ * state numbered after it that is non-operational, has both latencies
+ * reported, costs no more than latency_limit_us to enter and leave, and
+ * draws no more power than from.  Reports whether there is one.
+ */
+static inline int
+drv_nvme_apst_target(
+	const struct drv_nvme_power_profile *profile,
+	unsigned from,
+	uint32_t latency_limit_us,
+	unsigned *target)
+{
+	const struct drv_nvme_power_state *state;
+	uint64_t latency;
+	unsigned index;
+
+	/* Looks at the states after from in order, so that the shallowest one that qualifies is chosen. */
+	for (index = from + 1U; index < profile->count && index < DRV_NVME_POWER_STATES_MAX; index++) {
+		state = &profile->states[index];
+
+		/* An operational state is not a place to idle in. */
+		if (!state->non_operational)
+			continue;
+
+		/* A state that does not say what it costs is not chosen blind. */
+		if (state->entry_latency_us == 0U || state->exit_latency_us == 0U)
+			continue;
+
+		/* A state too slow to come back from is left alone. */
+		latency = (uint64_t)state->entry_latency_us + state->exit_latency_us;
+		if (latency > latency_limit_us)
+			continue;
+
+		/* A state that may draw more than the one it is entered from saves nothing. */
+		if (state->max_power_uw > profile->states[from].max_power_uw)
+			continue;
+
+		*target = index;
+
+		/* Succeeded: the state found. */
+		return 1;
+	}
+
+	/* No state qualifies: the controller stays in from. */
+	return 0;
+}
+
+/*
+ * Builds the table of autonomous transitions in table (size bytes, at
+ * least DRV_NVME_APST_TABLE_SIZE) and describes it in summary: each state
+ * goes to its drv_nvme_apst_target() after DRV_NVME_APST_QUICK_IDLE_MS
+ * idle when the target is out within DRV_NVME_APST_QUICK_LATENCY_US, or
+ * after DRV_NVME_APST_SLOW_IDLE_MS when it is slower.  A table with no
+ * transition is all zero.
+ */
+static inline int
+drv_nvme_apst_build(
+	const struct drv_nvme_power_profile *profile,
+	uint32_t latency_limit_us,
+	uint8_t *table,
+	size_t size,
+	struct drv_nvme_apst_summary *summary)
+{
+	const struct drv_nvme_power_state *state;
+	uint64_t latency;
+	uint32_t idle_ms;
+	uint32_t entry;
+	unsigned index;
+	unsigned target;
+	unsigned byte;
+	int found;
+
+	/* Refuses a table too small for the controller's states. */
+	if (profile == NULL || table == NULL || summary == NULL)
+		return EINVAL;
+	if (size < DRV_NVME_APST_TABLE_SIZE || profile->count == 0U || profile->count > DRV_NVME_POWER_STATES_MAX)
+		return EINVAL;
+
+	/* Starts from a table in which no state moves. */
+	for (byte = 0; byte < DRV_NVME_APST_TABLE_SIZE; byte++)
+		table[byte] = 0;
+	summary->transitions = 0;
+
+	/* Gives each state its target and idle time. */
+	for (index = 0; index < DRV_NVME_POWER_STATES_MAX; index++) {
+		summary->target[index] = (uint8_t)index;
+		summary->idle_ms[index] = 0;
+		if (index >= profile->count)
+			continue;
+
+		/* A state with nowhere to go keeps its zero entry. */
+		found = drv_nvme_apst_target(profile, index, latency_limit_us, &target);
+		if (!found)
+			continue;
+
+		/* A target that is quick to leave is entered sooner. */
+		state = &profile->states[target];
+		latency = (uint64_t)state->entry_latency_us + state->exit_latency_us;
+		idle_ms = DRV_NVME_APST_SLOW_IDLE_MS;
+		if (latency <= DRV_NVME_APST_QUICK_LATENCY_US)
+			idle_ms = DRV_NVME_APST_QUICK_IDLE_MS;
+
+		/* Writes the entry: ITPS in bits 7:3, ITPT in bits 31:8, the upper word reserved. */
+		entry = ((uint32_t)target << 3) | (idle_ms << 8);
+		table[index * DRV_NVME_APST_ENTRY_SIZE + 0U] = (uint8_t)entry;
+		table[index * DRV_NVME_APST_ENTRY_SIZE + 1U] = (uint8_t)(entry >> 8);
+		table[index * DRV_NVME_APST_ENTRY_SIZE + 2U] = (uint8_t)(entry >> 16);
+		table[index * DRV_NVME_APST_ENTRY_SIZE + 3U] = (uint8_t)(entry >> 24);
+		summary->target[index] = (uint8_t)target;
+		summary->idle_ms[index] = idle_ms;
+		summary->transitions++;
+	}
+
+	/* Succeeded: the table is ready to send. */
+	return 0;
+}
+
+/*
+ * Builds the Set Features that enables (or disables) the autonomous power
+ * state transitions, with the table at table_address: one data buffer of
+ * DRV_NVME_APST_TABLE_SIZE bytes, dword aligned, in one memory page.
+ */
+static inline int
+drv_nvme_apst_command(
+	struct drv_nvme_command *command,
+	uint16_t command_id,
+	int enable,
+	uint64_t table_address)
+{
+	uint64_t offset;
+
+	/* Refuses a table the command's one PRP entry cannot describe. */
+	if (command == NULL || table_address == 0U || (table_address & 3U) != 0U)
+		return 0;
+	offset = table_address & UINT64_C(0xfff);
+	if (offset + DRV_NVME_APST_TABLE_SIZE > UINT64_C(0x1000))
+		return 0;
+
+	/* Builds the command. */
+	drv_nvme_command_clear(command);
+	command->cdw0 = DRV_NVME_ADMIN_SET_FEATURES | ((uint32_t)command_id << 16);
+	command->prp1 = table_address;
+	command->cdw10 = DRV_NVME_FEATURE_AUTONOMOUS_POWER;
+	command->cdw11 = 0;
+	if (enable)
+		command->cdw11 = DRV_NVME_APST_ENABLE;
+
+	/* Succeeded: the command is ready to send. */
+	return 1;
+}
+
 static inline int
 drv_nvme_queue_count_result(uint32_t result, unsigned *submission_count,
 	unsigned *completion_count)

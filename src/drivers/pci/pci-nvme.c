@@ -16,12 +16,14 @@
 #include <kern/kcrt.h>
 
 #include <kern/atomic.h>
+#include <kern/boot.h>
 #include <kern/clock.h>
 #include <kern/disk.h>
 #include <uapi/sysctl.h>
 #include <kern/io-pool.h>
 #include <kern/lock.h>
 #include <kern/page.h>
+#include <kern/platform.h>
 #include <kern/pmem.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
@@ -33,6 +35,12 @@
 #include "kern/klog.h"
 #include "kern/kmem.h"
 #include "kern/device-io.h"
+
+/*
+ * The boot parameter that turns the controller's autonomous power state
+ * transitions on.  Without it the controller keeps what the firmware set.
+ */
+#define NVME_TOKEN_APST_ON "nvme.apst=on"
 
 #define NVME_ADMIN_QUEUE_REQUESTED_DEPTH 64U
 #define NVME_IO_QUEUE_REQUESTED_DEPTH 64U
@@ -352,6 +360,16 @@ struct nvme_controller {
 	struct drv_dma_buffer hmb_list_dma;
 	uint32_t hmb_pages;
 	enum nvme_hmb_state hmb_state;
+
+	/*
+	 * The power states Identify Controller describes, read at the probe,
+	 * and the page the table of autonomous transitions is built in, taken
+	 * at the probe only when the transitions are turned on.  The probe,
+	 * a recovery and a resume give the table, each owning the admin queue
+	 * then.  The page is freed with the other DMA memory.
+	 */
+	struct drv_nvme_power_profile power_profile;
+	struct drv_dma_buffer apst_dma;
 	volatile struct drv_nvme_command *admin_submission;
 	volatile struct drv_nvme_completion *admin_completion;
 	unsigned submission_tail;
@@ -643,6 +661,8 @@ static void nvme_hmb_setup(struct nvme_controller *controller);
 static int nvme_hmb_enable(struct nvme_controller *controller, int recovery_command, int memory_return);
 static void nvme_hmb_reenable(struct nvme_controller *controller, int recovery_command);
 static int nvme_hmb_disable(struct nvme_controller *controller);
+static void nvme_apst_setup(struct nvme_controller *controller);
+static void nvme_apst_apply(struct nvme_controller *controller, int recovery_command, int report);
 static void nvme_hmb_free(struct nvme_controller *controller, struct drv_dma_device *dma);
 static int nvme_io_wait_locked(struct nvme_controller *controller, struct wait_queue *waitq, uint64_t deadline, unsigned long *irq);
 static int nvme_io_ensure_online(struct nvme_controller *controller);
@@ -2542,6 +2562,9 @@ nvme_resume_steps(
 	/* Gives back the Host Memory Buffer the reset took away. */
 	nvme_hmb_reenable(controller, 0);
 
+	/* Gives back the table of autonomous transitions the reset took away. */
+	nvme_apst_apply(controller, 0, 0);
+
 	/* Succeeded: the controller runs. */
 	return 0;
 }
@@ -3700,6 +3723,10 @@ nvme_dma_free(
 	if (controller->identify_dma.address != NULL)
 		drv_dma_free_coherent(dma, &controller->identify_dma);
 
+	/* Frees the page of the table of autonomous transitions, if one was taken. */
+	if (controller->apst_dma.address != NULL)
+		drv_dma_free_coherent(dma, &controller->apst_dma);
+
 	/* Handles the address availability. */
 	if (controller->admin_completion_dma.address != NULL)
 		drv_dma_free_coherent(dma, &controller->admin_completion_dma);
@@ -4644,6 +4671,127 @@ nvme_hmb_disable(
 	/* Succeeded: the controller no longer uses the buffer; the memory is kept. */
 	controller->hmb_state = NVME_HMB_READY;
 	return 0;
+}
+
+/*
+ * Turns the controller's autonomous power state transitions on when the
+ * boot line asks for them (NVME_TOKEN_APST_ON) and the controller has
+ * them: takes the page the table lives in, logs the non-operational
+ * states, and gives the controller its table.  Without the boot parameter
+ * nothing is sent and the controller keeps what the firmware set.
+ */
+static void
+nvme_apst_setup(
+	struct nvme_controller *controller)
+{
+	const struct drv_nvme_power_state *state;
+	struct drv_dma_device *dma;
+	const char *line;
+	unsigned index;
+	int wanted;
+	int error;
+
+	/* Leaves the controller as the firmware set it unless the boot line asks. */
+	wanted = 0;
+	line = kern_boot_handoff("boot.command-line");
+	if (line != NULL)
+		wanted = kern_boot_parameters_token_present(line, NVME_TOKEN_APST_ON);
+	if (!wanted)
+		return;
+
+	/* A controller without the feature keeps what it does. */
+	if (!controller->power_profile.apst_supported) {
+		kern_logf("nvme: autonomous power state transitions not supported\n");
+		return;
+	}
+
+	/* Takes the page the table is built in; without it the controller keeps what it does. */
+	dma = drv_pci_device_dma(controller->pci);
+	error = drv_dma_alloc_coherent(dma, controller->page_size, controller->page_size, &controller->apst_dma);
+	if (error != 0) {
+		kern_logf("nvme: autonomous power state transitions not set (no memory, %d)\n", error);
+		return;
+	}
+
+	/* Logs the states the controller may idle in. */
+	for (index = 0; index < controller->power_profile.count && index < DRV_NVME_POWER_STATES_MAX; index++) {
+		state = &controller->power_profile.states[index];
+		if (!state->non_operational)
+			continue;
+		kern_logf("nvme: ps%u non-operational, at most %u uW, entry %u us, exit %u us\n",
+		    index, state->max_power_uw, state->entry_latency_us, state->exit_latency_us);
+	}
+
+	/* Gives the controller its table, and logs the transitions. */
+	nvme_apst_apply(controller, 0, 1);
+}
+
+/*
+ * Gives a controller that the probe turned the autonomous transitions on
+ * for its table of transitions (drv_nvme_apst_build()), after the probe,
+ * a recovery or a resume: a reset of the controller takes the table away.
+ * A controller with nowhere to go is told to make no transition.  A
+ * failure is logged and the controller runs on without: the transitions
+ * save power and change nothing a request does.  report logs the
+ * transitions, at the probe.
+ */
+static void
+nvme_apst_apply(
+	struct nvme_controller *controller,
+	int recovery_command,
+	int report)
+{
+	struct drv_nvme_apst_summary summary;
+	struct drv_nvme_command command;
+	unsigned index;
+	int enable;
+	int built;
+	int error;
+
+	/* Only a controller given a table at the probe gets it again. */
+	if (controller->apst_dma.address == NULL)
+		return;
+
+	/* Builds the table. */
+	error = drv_nvme_apst_build(&controller->power_profile, DRV_NVME_APST_LATENCY_LIMIT_US,
+	    controller->apst_dma.address, controller->apst_dma.size, &summary);
+	if (error != 0) {
+		kern_logf("nvme: autonomous power state transitions not set (table %d)\n", error);
+		return;
+	}
+
+	/* A controller with nowhere to go is told to make no transition. */
+	enable = 0;
+	if (summary.transitions != 0U)
+		enable = 1;
+
+	/* Builds the Set Features over the table. */
+	built = drv_nvme_apst_command(&command, 0, enable, controller->apst_dma.device_address);
+	if (!built) {
+		kern_logf("nvme: autonomous power state transitions not set (command)\n");
+		return;
+	}
+	kern_io_write_barrier();
+
+	/* Sends it; a failure leaves the controller as it was. */
+	error = nvme_admin_execute_mode(controller, &command, NULL, recovery_command);
+	if (error != 0) {
+		kern_logf("nvme: autonomous power state transitions not set (%d)\n", error);
+		return;
+	}
+
+	/* Reports what the controller now does, once. */
+	if (!report)
+		return;
+	kern_logf("nvme: autonomous power state transitions %s (%u states, %u transitions)\n",
+	    enable ? "on" : "off", controller->power_profile.count, summary.transitions);
+
+	/* Logs each transition. */
+	for (index = 0; index < controller->power_profile.count && index < DRV_NVME_POWER_STATES_MAX; index++) {
+		if (summary.idle_ms[index] == 0U)
+			continue;
+		kern_logf("nvme: ps%u to ps%u after %u ms idle\n", index, summary.target[index], summary.idle_ms[index]);
+	}
 }
 
 /*
@@ -6189,6 +6337,7 @@ nvme_probe_namespace(
 	struct disk *disk;
 	uint32_t namespace_id;
 	uint32_t reasons;
+	int parsed;
 	int error;
 
 	/* Checks the operation status. */
@@ -6206,6 +6355,13 @@ nvme_probe_namespace(
 
 		/* Failed. */
 		return EOPNOTSUPP;
+	}
+
+	/* Reads the power states while the page is Identify Controller; a page too short describes none. */
+	parsed = drv_nvme_power_parse(controller->identify_dma.address, controller->identify_dma.size, &controller->power_profile);
+	if (!parsed) {
+		controller->power_profile.count = 0;
+		controller->power_profile.apst_supported = 0;
 	}
 
 	/* Checks the operation status. */
@@ -6271,6 +6427,9 @@ nvme_probe_namespace(
 
 	/* Gives the controller the Host Memory Buffer it asks for, if any; it works without. */
 	nvme_hmb_setup(controller);
+
+	/* Turns the autonomous power state transitions on when the boot line asks; it works without. */
+	nvme_apst_setup(controller);
 
 	/* Handles the disk availability. */
 	disk = disk_alloc();
@@ -7044,6 +7203,9 @@ nvme_io_recover(
 
 	/* Gives back the Host Memory Buffer the reset took away. */
 	nvme_hmb_reenable(controller, 1);
+
+	/* Gives back the table of autonomous transitions the reset took away. */
+	nvme_apst_apply(controller, 1, 0);
 	irq = spin_lock_irqsave(&controller->command_lock);
 
 	controller->io_recovery_busy = 0;
