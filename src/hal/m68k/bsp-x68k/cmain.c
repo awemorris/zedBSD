@@ -40,6 +40,8 @@ void
 m68k_x68k_cmain(
 	const struct x68k_boot_handoff *handoff)
 {
+	uint32_t tick_hz;
+
 	/* Shows the console. */
 	x68k_cons_init();
 	hal_puts("X68K MC68030 ENTRY\n");
@@ -52,7 +54,8 @@ m68k_x68k_cmain(
 	m68k030_page_init();
 	m68k030_space_init((uintptr_t)m68k030_bootstrap_empty_root);
 	m68k_int_init();
-	x68k_timer_init(hal_rtc_get_tick_hz());
+	tick_hz = hal_rtc_get_tick_hz();
+	x68k_timer_init(tick_hz);
 
 	/* Enters the kernel, which never returns. */
 	kernel_entry(x68k_kernel_handoff());

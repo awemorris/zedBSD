@@ -207,11 +207,14 @@ kern_clock_tick_idle(
 	uint64_t global;
 	unsigned lower;
 	unsigned lowered;
+	unsigned mode;
+	bool confirmed;
 
 	/* Only a counted time lets the interrupts slow down. */
+	mode = atomic_raw_load_acquire(&counter_mode);
 	if (cpu >= HAL_CPU_MAX)
 		return;
-	if (atomic_raw_load_acquire(&counter_mode) == 0U)
+	if (mode == 0U)
 		return;
 
 	/* The nearest deadline, CPU 0's timers included. */
@@ -235,6 +238,8 @@ kern_clock_tick_idle(
 		atomic_raw_store_release(&tick_lowered[cpu], 0U);
 		return;
 	}
+
+	/* Slows this CPU down and publishes that it did. */
 	(void)hal_rtc_set_tick_hz(CLOCK_TICK_IDLE_HZ);
 	atomic_raw_store_release(&tick_lowered[cpu], 1U);
 
@@ -245,12 +250,20 @@ kern_clock_tick_idle(
 	 * here, or comes after the exchange and sees the slowdown, and wakes
 	 * this CPU if its timer is near.
 	 */
-	if (cpu != 0 || atomic_u64_compare_exchange(&global_next, &global, global))
+	if (cpu != 0)
 		return;
+	confirmed = atomic_u64_compare_exchange(&global_next, &global, global);
+	if (confirmed)
+		return;
+
+	/* A timer armed meanwhile may be nearer than the deadline slowed down for. */
 	if (global < next)
 		next = global;
-	if (tick_far(now, next))
+	lower = tick_far(now, next);
+	if (lower != 0U)
 		return;
+
+	/* The nearer deadline needs the busy rate back. */
 	(void)hal_rtc_set_tick_hz(CLOCK_TICK_BUSY_HZ);
 	atomic_raw_store_release(&tick_lowered[cpu], 0U);
 }
@@ -290,11 +303,13 @@ kern_clock_timer_due(
 	uint64_t deadline)
 {
 	uint64_t seen;
+	bool exchanged;
 
 	/* Lowers the nearest deadline, never raises it. */
 	seen = atomic_u64_load_acquire(&global_next);
 	while (deadline < seen) {
-		if (atomic_u64_compare_exchange(&global_next, &seen, deadline))
+		exchanged = atomic_u64_compare_exchange(&global_next, &seen, deadline);
+		if (exchanged)
 			break;
 	}
 }
@@ -312,15 +327,23 @@ kern_clock_timer_armed(
 	uint64_t deadline)
 {
 	unsigned lowered;
+	hal_cpu_id_t current;
+	unsigned distant;
+	uint64_t now;
 
 	/* The nearest deadline, lowered with an exchange (kern_clock_tick_idle()). */
 	kern_clock_timer_due(deadline);
 
 	/* Wakes a slow CPU 0 to choose its rate again. */
 	lowered = atomic_raw_load_acquire(&tick_lowered[0]);
-	if (lowered == 0U || hal_cpu_current() == 0)
+	if (lowered == 0U)
 		return;
-	if (!tick_far(clock_ticks(), deadline))
+	current = hal_cpu_current();
+	if (current == 0)
+		return;
+	now = clock_ticks();
+	distant = tick_far(now, deadline);
+	if (distant == 0U)
 		(void)hal_cpu_notify(0);
 }
 
@@ -837,6 +860,7 @@ kern_duration_to_ticks_ceil(
 	if (seconds * unit_rate > UINT64_MAX - fraction)
 		return EOVERFLOW;
 
+	/* Converts the whole seconds and the rounded fraction into ticks. */
 	*ticks = seconds * unit_rate + fraction;
 
 	/* Reports the converted tick count. */
@@ -959,13 +983,15 @@ kern_clock_getres(
 	struct timespec *result)
 {
 	uint64_t step;
+	unsigned mode;
 
 	/* Rejects an unsupported clock. */
 	if (clock != CLOCK_MONOTONIC && clock != CLOCK_REALTIME)
 		return EINVAL;
 
 	/* The step the clocks are read to. */
-	if (atomic_raw_load_acquire(&counter_mode) != 0U)
+	mode = atomic_raw_load_acquire(&counter_mode);
+	if (mode != 0U)
 		step = (KERN_NSEC_PER_SEC + base_frequency - 1U) / base_frequency;
 	else
 		step = kern_clock_resolution_ns();
@@ -1180,10 +1206,12 @@ tick_cpu0(
 	uint64_t elapsed;
 	uint64_t units;
 	uint32_t hz;
+	unsigned mode;
 	bool counted;
 
 	/* The counter's units, once taken up. */
-	if (atomic_raw_load_acquire(&counter_mode) != 0U) {
+	mode = atomic_raw_load_acquire(&counter_mode);
+	if (mode != 0U) {
 		counted = counter_elapsed(&elapsed, &frequency);
 		if (counted) {
 			atomic_u64_store_release(&kernel_ticks,
@@ -1193,7 +1221,8 @@ tick_cpu0(
 	}
 
 	/* Takes the counter up when it reads, at the unit's multiple before now. */
-	if (atomic_raw_load_acquire(&counter_mode) == 0U) {
+	mode = atomic_raw_load_acquire(&counter_mode);
+	if (mode == 0U) {
 		counted = hal_rtc_read_counter(&counter, &frequency);
 		if (counted && frequency != 0U) {
 			base_period = frequency / unit_rate;
@@ -1229,10 +1258,12 @@ counter_elapsed(
 {
 	uint64_t counter;
 	uint64_t rate;
+	unsigned mode;
 	bool counted;
 
 	/* Not taken up yet. */
-	if (atomic_raw_load_acquire(&counter_mode) == 0U)
+	mode = atomic_raw_load_acquire(&counter_mode);
+	if (mode == 0U)
 		return false;
 
 	/* The counter now, at the frequency it was taken up at. */
@@ -1272,11 +1303,15 @@ global_next_swap(
 	uint64_t value)
 {
 	uint64_t seen;
+	bool exchanged;
 
 	/* An exchange, so that a deadline lowered meanwhile is ordered against it. */
 	seen = atomic_u64_load_acquire(&global_next);
-	while (!atomic_u64_compare_exchange(&global_next, &seen, value))
+	exchanged = atomic_u64_compare_exchange(&global_next, &seen, value);
+	while (!exchanged) {
 		hal_compiler_barrier();
+		exchanged = atomic_u64_compare_exchange(&global_next, &seen, value);
+	}
 
 	/* Succeeded: the deadline replaced. */
 	return seen;

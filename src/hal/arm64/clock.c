@@ -55,6 +55,7 @@ arm64_timer_init(
 	void)
 {
 	struct arm64_percpu *cpu;
+	uint64_t now;
 
 	/* Finds the calling CPU's record, which holds its deadline. */
 	cpu = arm64_percpu_current();
@@ -76,7 +77,8 @@ arm64_timer_init(
 	/* Starts at the fastest rate, at the next multiple of the period. */
 	if (cpu->timer_divisor == 0)
 		cpu->timer_divisor = 1;
-	arm_next(cpu, counter());
+	now = counter();
+	arm_next(cpu, now);
 
 	/* Enables the timer and its interrupt on this CPU. */
 	__asm__ volatile("msr cntp_ctl_el0, %0\n\tisb" : : "r"((uint64_t)1) : "memory");
@@ -178,6 +180,7 @@ hal_rtc_set_tick_hz(
 	struct arm64_percpu *cpu;
 	uint64_t divisor;
 	uint64_t before;
+	uint64_t now;
 	bool enabled;
 
 	/* The nearest number of periods, within the bounds. */
@@ -196,8 +199,10 @@ hal_rtc_set_tick_hz(
 	cpu->timer_divisor = divisor;
 
 	/* The next tick moves now, once the timer runs. */
-	if (divisor != before && timer_frequency != 0U && cpu->timer_deadline != 0U)
-		arm_next(cpu, counter());
+	if (divisor != before && timer_frequency != 0U && cpu->timer_deadline != 0U) {
+		now = counter();
+		arm_next(cpu, now);
+	}
 	if (enabled)
 		hal_irq_enable();
 

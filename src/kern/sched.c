@@ -1045,6 +1045,8 @@ sched_clock_cpu(
 	int kernel;
 	int backlog;
 	int waiting;
+	int itimer_expired;
+	uint64_t real_deadline;
 
 	expired_process = NULL;
 	accounted_process = NULL;
@@ -1111,9 +1113,13 @@ sched_clock_cpu(
 			 * ITIMER_PROF measures the complete user+system CPU
 			 * time of the process.
 			 */
-			if (!kernel && process_itimer_tick(thread->proc, 1, elapsed))
-				expired_signals |= 1U << 1;
-			if (process_itimer_tick(thread->proc, 2, elapsed))
+			if (!kernel) {
+				itimer_expired = process_itimer_tick(thread->proc, 1, elapsed);
+				if (itimer_expired)
+					expired_signals |= 1U << 1;
+			}
+			itimer_expired = process_itimer_tick(thread->proc, 2, elapsed);
+			if (itimer_expired)
 				expired_signals |= 1U << 2;
 			if (expired_signals != 0)
 				expired_process = thread->proc;
@@ -1186,8 +1192,10 @@ sched_clock_cpu(
 	 * ITIMER_REAL is wall-clock based, so CPU 0 advances all armed state
 	 * in one registry pass rather than repeatedly searching by PID.
 	 */
-	if (id == 0)
-		kern_clock_timer_due(process_itimer_real_tick_all(now));
+	if (id == 0) {
+		real_deadline = process_itimer_real_tick_all(now);
+		kern_clock_timer_due(real_deadline);
+	}
 	if (preempt)
 		sched_yield();
 	else if (wanted)
@@ -1614,6 +1622,7 @@ sched_idle(
 {
 	struct thread *idle;
 	hal_cpu_id_t cpu;
+	uint64_t deadline;
 	int stolen;
 
 	idle = curthread;
@@ -1647,7 +1656,8 @@ sched_idle(
 		 * it watches is near.
 		 */
 		idle_mask_set(cpu);
-		kern_clock_tick_idle(cpu, next_deadline(cpu));
+		deadline = next_deadline(cpu);
+		kern_clock_tick_idle(cpu, deadline);
 		kern_sleep_idle(cpu);
 		idle_mask_clear(cpu);
 		sched_switch();
@@ -1813,6 +1823,8 @@ sched_set_cpu(
 		} else if (old_kind == SCHED_QUEUE_SLEEP) {
 			queue_append(&old_cpu->sleep, thread, SCHED_QUEUE_SLEEP);
 		}
+
+		/* A sleeper with a deadline needs the old CPU's idle tick to watch it. */
 		timed = old_kind == SCHED_QUEUE_SLEEP && thread->sched.wakeup_tick != 0;
 
 		spin_unlock_irqrestore(&old_cpu->lock, irq);
@@ -1852,6 +1864,8 @@ sched_set_cpu(
 	} else if (old_kind == SCHED_QUEUE_SLEEP) {
 		queue_append(&new_cpu->sleep, thread, SCHED_QUEUE_SLEEP);
 	}
+
+	/* A sleeper with a deadline needs the new CPU's idle tick to watch it. */
 	timed = old_kind == SCHED_QUEUE_SLEEP && thread->sched.wakeup_tick != 0;
 
 	spin_unlock_irqrestore(&new_cpu->lock, irq);

@@ -366,6 +366,7 @@ syscall_restart_deadline_rearm(
 	uint64_t *deadline)
 {
 	struct thread *thread;
+	uint64_t now_ceil;
 	int error;
 
 	/* Rejects a call that names no deadline. */
@@ -377,7 +378,8 @@ syscall_restart_deadline_rearm(
 	 * Records the new deadline so a restart can reuse it, from the time
 	 * rounded up so that the wait never ends early.
 	 */
-	error = kern_deadline_after(clock_ticks_ceil(), ticks, deadline);
+	now_ceil = clock_ticks_ceil();
+	error = kern_deadline_after(now_ceil, ticks, deadline);
 	if (error == 0 && thread != NULL) {
 		thread->syscall_wait_deadline = *deadline;
 		thread->syscall_wait_deadline_valid = 1;
@@ -4596,6 +4598,7 @@ sys_nanosleep_call(
 	unsigned long irq;
 	int error;
 	uint64_t now;
+	uint64_t now_ceil;
 
 	process = current_process();
 
@@ -4610,7 +4613,8 @@ sys_nanosleep_call(
 		return -error;
 	if (ticks == 0)
 		return 0;
-	error = kern_deadline_after(clock_ticks_ceil(), ticks, &deadline);
+	now_ceil = clock_ticks_ceil();
+	error = kern_deadline_after(now_ceil, ticks, &deadline);
 	if (error != 0)
 		return -error;
 
@@ -8089,6 +8093,7 @@ sys_usync_call(
 	struct kern_timespec duration;
 	clockid_t clock;
 	struct timespec relative;
+	uint64_t now_ceil;
 
 	process = current_process();
 	shared_object = NULL;
@@ -8156,9 +8161,10 @@ sys_usync_call(
 				}
 
 				/* Takes the deadline, reusing the one a stop interrupted. */
-				if (error == 0)
-					error = kern_deadline_after(clock_ticks_ceil(), ticks,
-					    &deadline);
+				if (error == 0) {
+					now_ceil = clock_ticks_ceil();
+					error = kern_deadline_after(now_ceil, ticks, &deadline);
+				}
 			} else if (curthread != NULL &&
 			    curthread->syscall_stop_redispatch &&
 			    curthread->syscall_wait_deadline_valid) {

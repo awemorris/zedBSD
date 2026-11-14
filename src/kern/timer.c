@@ -287,6 +287,7 @@ process_timer_settime(
 	uint64_t realtime_interval;
 	uint64_t now_ticks;
 	uint64_t now_realtime;
+	uint64_t now_ceil;
 	uint64_t deadline;
 	uint64_t remaining;
 	uint64_t units;
@@ -378,8 +379,10 @@ process_timer_settime(
 	if (error == 0 && value != 0) {
 		if ((flags & TIMER_ABSTIME) != 0)
 			deadline = value;
-		else
-			error = kern_deadline_after(clock_ticks_ceil(), value, &deadline);
+		else {
+			now_ceil = clock_ticks_ceil();
+			error = kern_deadline_after(now_ceil, value, &deadline);
+		}
 	}
 
 	if (error != 0) {
