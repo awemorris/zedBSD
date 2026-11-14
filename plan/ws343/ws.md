@@ -3,7 +3,7 @@
 # WS343 base の TLS と ssh を自前に: 既定の image から OpenSSH・OpenSSL・curl・libcurl を外し、base に自前の ssh・sshd・libssl-compat.so・libcrypto-compat.so、fetch の https
 
 - Master: [plan/master.md](../master.md)（2026-11-02 10:52 作成）。Primary Milestone: MG005。
-- Status: incomplete（2026-11-14 23:20 P8 が p001 で今の実態に書き直した。残りは p003 の mk の差分の案の承認と適用、p004 の規約の見直し）
+- Status: completed（2026-11-15 Q1。全 Phase cleared。既定の config は自前の ssh・libssl-compat・libcrypto-compat・ca-certificates、fetch の https。回帰の試験は plan/tools/fetch/。CI の config/ci の作り直しは BUG-435）
 - 目標（2026-11-14 の実態で書き直した）:
   - 既定の image（`mk/platform-*/defaults.mk`）に OpenSSH・OpenSSL・curl・libcurl を入れない。代わりに自前の ssh・sshd（[WS336](../ws336/ws.md)）と libssl-compat.so・libcrypto-compat.so（[WS335](../ws335/ws.md)）を入れる。— 済み（build system の作り直しで、2026-11-14 に p001 で確かめた）
   - library の名前は libssl-compat.so・libcrypto-compat.so のまま（libssl.so・libcrypto.so の名前は出さない。2026-11-14 ユーザーの決定）。— 済み
@@ -29,12 +29,14 @@
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [ws343-p001](phase001/phase.md) | 調べ（2026-11-14 に今の実態で書き直した）: 既定の config の package、OpenSSL・OpenSSH・curl を使う物、base に入れる名前、行き先の無い link、残りの仕事 | cleared（2026-11-14 Q1。今の実態で書き直した。menuconfig と MAC-T001 の試験は今の build と合わないので完了の条件から外した（Q1 の判断）） | — |
-| [ws343-p002](phase002/phase.md) | libcrypto-compat に passkey が使う OpenSSL の関数 16 個を足し、passkey-fido2・fidoctl を link の差し替えだけで OpenSSL から外す | cleared（2026-11-02 22:20 Q1、b8c4adaf6 を main に merge 11846c70f、main で test-api-passkey PASS、passkey-fido2・fidoctl の amd64 の build が OpenSSL 無しで warning 0） | WS335 p039 |
-| [ws343-p003](phase003/phase.md) | fetch の https（libssl-compat、`/etc/ssl/cert.pem`、名前の確かめ、http→https の redirect）と、mk の差分の案（fetch の link、`mk/userland.mk` の順、`mk/rootfs.mk` の libcurl.so の link） | cleared（2026-11-14 Q1、merge fdc6f069e1。ユーザーが fetch/Makefile・mk/userland.mk・mk/rootfs.mk の差分を承認（2026-11-14）、c8a075021f で当てた。host 18・3 機種の build warning 0・QEMU 4 PASS は同じ差分で P8 が確かめた） | p001 |
-| [ws343-p004](phase004/phase.md) | 規約の全文の見直し（fetch の main.c） | cleared（2026-11-15 Q1、b5d6b3cf39 を main に merge eb3f3dcc28。style-check 21→1（残りは文字列の中の誤検出）、host 18・3 機種の build・QEMU 4 PASS） | p003 |
+| ws343-p001 | 調べ（2026-11-14 に今の実態で書き直した）: 既定の config の package、OpenSSL・OpenSSH・curl を使う物、base に入れる名前、行き先の無い link、残りの仕事 | cleared（2026-11-14 Q1。今の実態で書き直した。menuconfig と MAC-T001 の試験は今の build と合わないので完了の条件から外した（Q1 の判断）） | — |
+| ws343-p002 | libcrypto-compat に passkey が使う OpenSSL の関数 16 個を足し、passkey-fido2・fidoctl を link の差し替えだけで OpenSSL から外す | cleared（2026-11-02 22:20 Q1、b8c4adaf6 を main に merge 11846c70f、main で test-api-passkey PASS、passkey-fido2・fidoctl の amd64 の build が OpenSSL 無しで warning 0） | WS335 p039 |
+| ws343-p003 | fetch の https（libssl-compat、`/etc/ssl/cert.pem`、名前の確かめ、http→https の redirect）と、mk の差分の案（fetch の link、`mk/userland.mk` の順、`mk/rootfs.mk` の libcurl.so の link） | cleared（2026-11-14 Q1、merge fdc6f069e1。ユーザーが fetch/Makefile・mk/userland.mk・mk/rootfs.mk の差分を承認（2026-11-14）、c8a075021f で当てた。host 18・3 機種の build warning 0・QEMU 4 PASS は同じ差分で P8 が確かめた） | p001 |
+| ws343-p004 | 規約の全文の見直し（fetch の main.c） | cleared（2026-11-15 Q1、b5d6b3cf39 を main に merge eb3f3dcc28。style-check 21→1（残りは文字列の中の誤検出）、host 18・3 機種の build・QEMU 4 PASS） | p003 |
 
 ## Resume point
+
+- 2026-11-15 Q1: completed。Phase の directory は消した（試験は plan/tools/fetch/ に移した、merge 39d511b770）。
 
 - 2026-11-15 P8（q2103-i01）: 試験の始末。fetch の https の回帰（run-fetch-https.sh・https-server.py・run-fetch-qemu.sh・config-amd64-fetch.mk）を [plan/tools/fetch/](../tools/fetch/) に移し、tools.md に登録した。移した後に `sh plan/tools/fetch/run-fetch-https.sh` は `run-fetch-https: PASS (18 cases)`、`GUEST_RUNTIME=build/p8-fetch-guest sh plan/tools/fetch/run-fetch-qemu.sh`（QEMU x86_64、外の network あり）は `run-fetch-qemu: PASS (4 cases)`。今の main で動かない開発の時だけの試験（run-passkey-compare.sh・passkey-compare.c・config-amd64-compat.mk・ct-matrix.sh。ct-matrix.sh の範囲は `plan/ws335/tests/run-ct-matrix.sh api-passkey aes` と同じ）を消し、phase002・phase003・phase004・BUG-435 の inventory の参照に「消した」「移した」と書いた。`plan/ws343/tests/` は空になった。残りは Phase の directory の削除と completed への書き直し（Q1）。
 
