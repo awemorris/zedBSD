@@ -70,9 +70,6 @@
 #define GREETER_READY_MS	30000
 #define GREETER_RELEASE_MS	5000
 
-/* How often a new input device is given to the greeter (milliseconds). */
-#define GREETER_SEAT_MS		1000LL
-
 /*
  * One running greeter: its process, sessiond's end of the socket, the
  * request that has come in so far, and the login attempt under way.
@@ -98,6 +95,7 @@ static void greeter_request(struct greeter *greeter, char *line);
 static void greeter_power(struct greeter *greeter, const char *what);
 static void greeter_reply(struct greeter *greeter, const char *reply);
 static enum sessiond_greeter_end greeter_wait(struct greeter *greeter);
+static int greeter_timeout(const struct greeter *greeter, int stop);
 static void greeter_kill(struct greeter *greeter);
 static void greeter_reason(void);
 
@@ -113,10 +111,8 @@ sessiond_greeter_run(
 {
 	struct sessiond_account greeter_account;
 	struct greeter greeter;
-	struct pollfd poll_entry[4 + SESSIOND_SEAT_SOCKETS];
+	struct pollfd poll_entry[5 + SESSIOND_SEAT_SOCKETS];
 	enum sessiond_greeter_end end;
-	long long seat_ms;
-	long long now_ms;
 	time_t now;
 	nfds_t entries;
 	nfds_t sleep_slot;
@@ -124,6 +120,7 @@ sessiond_greeter_run(
 	nfds_t sockets_first;
 	nfds_t sockets;
 	int timeout;
+	int stop;
 	int busy;
 	int ready;
 	int error;
@@ -153,7 +150,6 @@ sessiond_greeter_run(
 
 	/* Its requests, until it logs a user in or goes. */
 	closed = 0;
-	seat_ms = sessiond_milliseconds();
 	while (!closed) {
 		/* sessiond is being stopped: the greeter (and an attempt under way) goes first. */
 		if (sessiond_stopping) {
@@ -162,7 +158,7 @@ sessiond_greeter_run(
 			return SESSIOND_GREETER_STOP;
 		}
 
-		/* A request, passkey's answer, or the time to look at the attempt or the seat again. */
+		/* A request, passkey's answer, or the time to look at the attempt or the greeter's start again. */
 		poll_entry[0].fd = greeter.socket;
 		poll_entry[0].events = POLLIN;
 		poll_entry[0].revents = 0;
@@ -189,12 +185,22 @@ sessiond_greeter_run(
 		if (poll_entry[seat_slot].fd >= 0)
 			entries++;
 
+		/* sessiond asked to stop, seen at the top of the next pass (main.c). */
+		stop = sessiond_stop_fd();
+		poll_entry[entries].fd = stop;
+		poll_entry[entries].events = POLLIN;
+		poll_entry[entries].revents = 0;
+		if (stop >= 0)
+			entries++;
+
 		/* A compositor's request for an input device (seat.c). */
 		sockets_first = entries;
 		sockets = sessiond_seat_poll_fill(poll_entry + sockets_first, SESSIOND_SEAT_SOCKETS);
 		entries += sockets;
+
+		/* Nothing else is waited for: no limit, but an attempt's steps and the greeter's start have their times. */
+		timeout = greeter_timeout(&greeter, stop);
 		busy = sessiond_exchange_busy(&greeter.exchange);
-		timeout = 1000;
 		if (busy)
 			timeout = SESSIOND_EXCHANGE_TICK_MS;
 		ready = poll(poll_entry, entries, timeout);
@@ -233,17 +239,14 @@ sessiond_greeter_run(
 			return SESSIOND_GREETER_FAILED;
 		}
 
-		/* A device that came is heard at once; the others are looked for every GREETER_SEAT_MS. */
+		/* A device that came is heard at once. */
 		plugged = 0;
 		if (ready > 0 && seat_slot < entries && poll_entry[seat_slot].revents != 0)
 			plugged = sessiond_seat_events_collect();
 
-		/* A new input device is the greeter's (never a security key, seat.c). */
-		now_ms = sessiond_milliseconds();
-		if (plugged || now_ms - seat_ms >= GREETER_SEAT_MS) {
+		/* The greeter's devices again (a security key goes back to root, seat.c). */
+		if (plugged)
 			sessiond_seat_give(greeter_account.passwd.pw_uid, greeter_account.passwd.pw_gid, 0);
-			seat_ms = now_ms;
-		}
 	}
 
 	/* An attempt still under way ends with the greeter. */
@@ -714,6 +717,40 @@ greeter_reply(
 	written = write(greeter->socket, line, length);
 	if (written != (ssize_t)length)
 		sessiond_log("SESSIOND GREETER reply lost");
+}
+
+/*
+ * Reports how long, in milliseconds, the greeter's loop may wait in poll:
+ * until the greeter's start is due to have ended while it has not said
+ * READY, and without a limit (-1) once it has; a second when sessiond has
+ * no stop pipe (stop is its descriptor, -1), so that a stop asked just
+ * before the poll is still seen.
+ */
+static int
+greeter_timeout(
+	const struct greeter *greeter,
+	int stop)
+{
+	time_t left;
+
+	/* A greeter still starting is ended as failed when its time is up (sessiond_greeter_run). */
+	if (!greeter->ready) {
+		left = greeter->started + SESSIOND_GREETER_START_SECONDS - time(NULL);
+
+		/* Its time is up already. */
+		if (left <= 0)
+			return 0;
+
+		/* Wakes when its time is up. */
+		return (int)left * 1000;
+	}
+
+	/* Without the pipe a stop is seen within a second. */
+	if (stop < 0)
+		return 1000;
+
+	/* Succeeded: only a request, an answer, a device or the stop ends the wait. */
+	return -1;
 }
 
 /* Waits for the greeter to end and says how it ended. */

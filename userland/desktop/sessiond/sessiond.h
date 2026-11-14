@@ -60,7 +60,7 @@ enum sessiond_greeter_end {
 };
 
 /*
- * One seat's user: who owns the display and the input devices, and the
+ * One seat's user: who owns the display and uses the input devices, and the
  * buffer passwd's strings for the account live in.
  */
 struct sessiond_account {
@@ -113,6 +113,9 @@ struct sessiond {
 
 /* Set by SIGTERM and SIGINT: sessiond ends its greeter or session and stops. */
 extern volatile sig_atomic_t sessiond_stopping;
+
+/* Readable once sessiond_stopping is set, or -1 (main.c). */
+int sessiond_stop_fd(void);
 
 enum sessiond_greeter_end sessiond_greeter_run(struct sessiond *daemon, struct sessiond_account *account);
 void sessiond_greeter_finish(struct sessiond *daemon);

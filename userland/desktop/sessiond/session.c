@@ -136,7 +136,7 @@ sessiond_session_run(
 	struct sessiond_account *account)
 {
 	struct sessiond_exchange exchange;
-	struct pollfd entry[4 + SESSIOND_SEAT_SOCKETS];
+	struct pollfd entry[5 + SESSIOND_SEAT_SOCKETS];
 	char directory[64];
 	pid_t child;
 	pid_t waited;
@@ -154,8 +154,10 @@ sessiond_session_run(
 	nfds_t sockets_first;
 	nfds_t sockets;
 	int timeout;
+	int stop;
 	int busy;
 	int ready;
+	int plugged;
 	int status;
 	int error;
 
@@ -231,7 +233,11 @@ sessiond_session_run(
 	daemon->session_ready = session_handoff(daemon, control);
 	sessiond_exchange_init(&exchange, control, account, NULL);
 
-	/* Waits for it to end, answering it, and giving a new input device to the user every second. */
+	/*
+	 * Waits for it to end, answering it, and giving a device that comes to
+	 * the user.  The wait is a second at most, for the session's end, which
+	 * is seen by waitpid (no event of a child that ends wakes the poll).
+	 */
 	status = 0;
 	leaving = 0;
 	hung = 0;
@@ -287,6 +293,16 @@ sessiond_session_run(
 		if (entry[seat_slot].fd >= 0)
 			entries++;
 
+		/* sessiond asked to stop, until the session has been told to end (main.c). */
+		stop = -1;
+		if (!sessiond_stopping)
+			stop = sessiond_stop_fd();
+		entry[entries].fd = stop;
+		entry[entries].events = POLLIN;
+		entry[entries].revents = 0;
+		if (stop >= 0)
+			entries++;
+
 		/* A compositor's request for an input device (seat.c). */
 		sockets_first = entries;
 		sockets = sessiond_seat_poll_fill(entry + sockets_first, SESSIOND_SEAT_SOCKETS);
@@ -295,11 +311,7 @@ sessiond_session_run(
 		timeout = 1000;
 		if (busy)
 			timeout = SESSIOND_EXCHANGE_TICK_MS;
-		ready = 0;
-		if (control >= 0)
-			ready = poll(entry, entries, timeout);
-		else
-			sleep(1);
+		ready = poll(entry, entries, timeout);
 		if (ready > 0 && entry[0].revents != 0) {
 			leaving |= session_request(daemon, account, control, &exchange);
 
@@ -320,16 +332,17 @@ sessiond_session_run(
 		if (ready > 0)
 			sessiond_seat_poll_done(entry + sockets_first, sockets);
 
-		/* The events of the devices are read; the giving below follows every pass anyway. */
+		/* A device that came is heard at once. */
+		plugged = 0;
 		if (ready > 0 && seat_slot < entries && entry[seat_slot].revents != 0)
-			(void)sessiond_seat_events_collect();
+			plugged = sessiond_seat_events_collect();
 
 		/* An attempt under way moves on. */
 		if (control >= 0)
 			sessiond_exchange_tick(&exchange);
 
-		/* Any new input device is the user's too, until the session hands the seat to the greeter. */
-		if (!leaving)
+		/* A device that came is the user's too, until the session hands the seat to the greeter. */
+		if (plugged && !leaving)
 			sessiond_seat_give(account->passwd.pw_uid, account->passwd.pw_gid, 1);
 	}
 
