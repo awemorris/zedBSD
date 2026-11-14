@@ -7,7 +7,7 @@
 # a cached read of the bad sector's own line fails as a whole).
 # The guest must stay usable throughout.
 #   sh plan/tools/kstress/qemu-nvme-errors.sh IMAGE
-# IMAGE: plan/tools/posix/config-amd64-serial.mk with randread in /root (ZEDBSD_EXTRA_FILES).  W is
+# IMAGE: plan/tools/posix/config-amd64-serial.mk with randread in /root (ROOTFS_EXTRA_FILES).  W is
 # build/tmp/qemu-nvme-errors (a fresh run each time).  The last line is "qemu-nvme-errors: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u

@@ -3,8 +3,12 @@
 # fresh tree, without the GPU demos, and with the serial mirror so that
 # plan/tools/guest/serial.py drives it; vi is added, since the CI
 # configuration lists its programs and does not name vi yet.
-include config/ci/config-amd64.mk
-CONFIG_PCAT_SERIAL_MIRROR := y
-ZEDBSD_USER_PROGRAMS := $(filter-out libcxx emacs clang openssh openssl \
+# The tree, found from this file: the packages' nested makes read the configuration from their own
+# directories, so the files it includes are named by absolute path.
+TEST_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
+include $(TEST_TREE)/config/config.x86_64.mk
+include $(TEST_TREE)/mk/platform-x86_64/defaults.mk
+override CONFIG_PCAT_SERIAL_MIRROR := y
+override CONFIG_USERLAND_PROGRAMS := $(filter-out libcxx emacs clang openssh openssl \
 	mview vkdemo zdesktop i915-firmware intelax211-firmware \
-	rtl8822b-firmware,$(ZEDBSD_USER_PROGRAMS)) vi
+	rtl8822b-firmware,$(CONFIG_USERLAND_PROGRAMS)) vi

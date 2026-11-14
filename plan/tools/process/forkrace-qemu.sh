@@ -51,10 +51,11 @@ zybo)
 esac
 
 # Builds the image; riscv64 boots its kernel with the root as a ramdisk.
-targets=disk-image
+targets=disk
 test "$port" = riscv64 && targets="$build/vmunix $build/root.img"
 test "$port" = zybo && targets="$build/vmunix $build/root.img"
-if ! timeout 3600 make -j16 ZEDBSD_CONFIG="$config" BUILD="$build" $targets \
+. plan/tools/guest/jobs.sh
+if ! timeout 3600 make -j"$ZEDBSD_JOBS" BUILD_JOBS="$ZEDBSD_JOBS" CONFIGMK="$config" BUILD="$build" $targets \
     >"$out/build.log" 2>&1; then
 	echo "forkrace-qemu: FAIL build (see $out/build.log)"
 	exit 1

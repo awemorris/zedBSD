@@ -2,7 +2,7 @@
 # ws308-p006: QEMU run of sigexec.c (exec of a multi-threaded process while SIGUSR1, SIGSTOP, SIGCONT and SIGKILL
 # arrive) on an 8-CPU guest, then the guest must still answer.
 #   [ROUNDS=300] sh plan/tools/kstress/qemu-sigexec.sh IMAGE
-# IMAGE: plan/tools/posix/config-amd64-serial.mk with ZEDBSD_EXTRA_FILES='--file /root/sigexec=OUT/sigexec-zedbsd'
+# IMAGE: plan/tools/posix/config-amd64-serial.mk with ROOTFS_EXTRA_FILES='--file /root/sigexec=OUT/sigexec-zedbsd'
 # (OUT from plan/tools/kstress/build.sh).  W is build/tmp/qemu-sigexec (a fresh run each time).  The last line
 # is "qemu-sigexec: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib

@@ -1,8 +1,12 @@
 # ws235: the kernel for the RTL8127 (PCIe 10GbE) on the RDNA machine (10.0.10.3, zedBSD on the NVMe started
 # once with UEFI BootNext, see plan/ws291/ws.md "手順と道具").  The CI amd64 config with the RTL8125-family
 # driver built in.  config/ci/config-amd64-server.mk is the user's and is not changed.
-# Build:  make ZEDBSD_CONFIG=plan/tools/rtl8127/config-amd64-rtl8127.mk BUILD=build/ws235/amd64 build/ws235/amd64/vmunix
+# Build:  make CONFIGMK=plan/tools/rtl8127/config-amd64-rtl8127.mk BUILD=build/ws235/amd64 build/ws235/amd64/vmunix
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-include config/ci/config-amd64.mk
+# The tree, found from this file: the packages' nested makes read the configuration from their own
+# directories, so the files it includes are named by absolute path.
+TEST_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
+include $(TEST_TREE)/config/config.x86_64.mk
+include $(TEST_TREE)/mk/platform-x86_64/defaults.mk
 
-CONFIG_DRIVER_PCI_RTL8125 := y
+override CONFIG_DRIVER_PCI_RTL8125 := y

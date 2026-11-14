@@ -6,4 +6,7 @@
 #   AAT_CONFIG=plan/tools/aat/config-amd64-notes-pen.mk plan/tools/aat/build-image.sh BUILD
 #   plan/tools/aat/run-aat.sh qemu OUTDIR apps.notes.draw-tools apps.notes.fill-region
 # Since 2026-10-13 the standard AAT image carries peninject, so this is the AAT image itself.
-include plan/tools/aat/config-amd64-aat.mk
+# The tree, found from this file: the packages' nested makes read the configuration from their own
+# directories, so the files it includes are named by absolute path.
+TEST_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
+include $(TEST_TREE)/plan/tools/aat/config-amd64-aat.mk

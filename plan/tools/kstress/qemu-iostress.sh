@@ -8,7 +8,7 @@
 # QEMU_EXTRA: more QEMU arguments (for example "-gdb tcp::22212" to look at the guest with gdb while it runs).
 # IOSTRESS_RUNS: the runs, ";" between them, each a disk under /dev and iostress's words (default: direct, cached,
 # direct with seteuid, cached with a 1200 MiB hog, and the boot disk direct with the hog and seteuid).
-# IMAGE: plan/tools/posix/config-amd64-serial.mk with /root/iostress and /root/directio (ZEDBSD_EXTRA_FILES, from
+# IMAGE: plan/tools/posix/config-amd64-serial.mk with /root/iostress and /root/directio (ROOTFS_EXTRA_FILES, from
 # plan/tools/kstress/build.sh and plan/ws299/tests/build-randread.sh).  W is build/tmp/qemu-iostress (a fresh run each time).  The last line is "qemu-iostress: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u

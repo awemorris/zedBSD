@@ -28,7 +28,7 @@ out=build/ws076-libm-guest
 mkdir -p "$out"
 
 # The C library of the image, which the runner links against.
-make -j"$ZEDBSD_JOBS" ZEDBSD_CONFIG=$config BUILD="$build" "$build/dynamic/libc.so"
+make -j"$ZEDBSD_JOBS" BUILD_JOBS="$ZEDBSD_JOBS" CONFIGMK=$config BUILD="$build" "$build/dynamic/libc.so"
 
 # The runner, compiled like a base program and linked with that libc.so.
 sysroot=$root/build/amd64/sysroot
@@ -51,10 +51,10 @@ fi
 # The image with both files in /root.
 # The firmware the configuration selects is fetched after its license is accepted once (ws233-p001); the question
 # is answered the way CI answers it (2026-10-14, Q1 for the user).
-yes | make ZEDBSD_CONFIG=$config BUILD="$build" firmware-licenses
-make -j"$ZEDBSD_JOBS" ZEDBSD_CONFIG=$config BUILD="$build" \
-	ZEDBSD_TEST_EXTRA_FILES="--file /root/libm-test=$root/$out/libm-test --file /root/libm-ref.bin=$root/$reference --mode /root/libm-test=0755" \
-	disk-image
+yes | make CONFIGMK=$config BUILD="$build" firmware-licenses
+make -j"$ZEDBSD_JOBS" BUILD_JOBS="$ZEDBSD_JOBS" CONFIGMK=$config BUILD="$build" \
+	ROOTFS_EXTRA_FILES="--file /root/libm-test=$root/$out/libm-test --file /root/libm-ref.bin=$root/$reference --mode /root/libm-test=0755" \
+	disk
 
 # Boots it and runs the runner.
 RUN=${RUN:-build/ws076-serial-run} TIMEOUT=${TIMEOUT:-600} \

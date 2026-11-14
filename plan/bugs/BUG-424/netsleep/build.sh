@@ -14,14 +14,10 @@ flags="--target=x86_64-unknown-zedbsd --sysroot=$sr -m64 -march=x86-64 -mno-red-
 	-DKERN_USER_ABI_LP64 -nostdinc -isystem $sr/usr/include -I. -ffreestanding -fno-pic -fno-pie -fno-stack-protector
 	-Os -Wall -Wextra -Werror"
 # shellcheck disable=SC2086
-$cc $flags -Dmain=tool_main -c plan/bugs/BUG-424/netsleep/main.c -o "$out/netsleep.o"
+$cc $flags -c plan/bugs/BUG-424/netsleep/main.c -o "$out/netsleep.o"
 # shellcheck disable=SC2086
 $cc $flags -c userland/base/net/protocol.c -o "$out/netsleep-protocol.o"
-printf '%s\n' '#include <stdio.h>' 'int tool_main(int, char **);' \
-	'int main(int argc, char **argv) { int status = tool_main(argc, argv); fflush(NULL); return status; }' > "$out/netsleep-flush.c"
-# shellcheck disable=SC2086
-$cc $flags -c "$out/netsleep-flush.c" -o "$out/netsleep-flush.o"
 $cc --target=x86_64-unknown-zedbsd --sysroot=$sr -m64 -nostdlib -static -Wl,--build-id=none \
-	-Wl,-T,$lib/zedbsd/x86_64/user.ld $lib/crt0.o "$out/netsleep.o" "$out/netsleep-protocol.o" "$out/netsleep-flush.o" \
+	-Wl,-T,$lib/zedbsd/x86_64/user.ld $lib/crt0.o "$out/netsleep.o" "$out/netsleep-protocol.o" \
 	-Wl,--start-group $lib/libc.a $lib/libzedbsd-compiler-rt.a $lib/libclang_rt.builtins.a -Wl,--end-group -o "$out/netsleep"
 echo "netsleep: $out/netsleep $(sha256sum "$out/netsleep" | cut -c1-16)"

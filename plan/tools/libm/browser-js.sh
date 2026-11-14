@@ -25,9 +25,9 @@ for test in plan/ws074/tests/js/*.js plan/tools/libm/js/*.js; do
 done
 # The firmware the configuration selects is fetched after its license is accepted once (ws233-p001); the question
 # is answered the way CI answers it (2026-10-14, Q1 for the user).
-yes | make ZEDBSD_CONFIG=plan/tools/libm/config-amd64-browser-libm.mk BUILD="$build" firmware-licenses
-make -j"$ZEDBSD_JOBS" ZEDBSD_CONFIG=plan/tools/libm/config-amd64-browser-libm.mk \
-	BUILD="$build" "ZEDBSD_TEST_EXTRA_FILES=$extra" disk-image
+yes | make CONFIGMK=plan/tools/libm/config-amd64-browser-libm.mk BUILD="$build" firmware-licenses
+make -j"$ZEDBSD_JOBS" BUILD_JOBS="$ZEDBSD_JOBS" CONFIGMK=plan/tools/libm/config-amd64-browser-libm.mk \
+	BUILD="$build" "ROOTFS_EXTRA_FILES=$extra" disk
 
 # Runs every test, marking where each output and its standard error begin.
 command='for f in /root/js/*.js; do n=${f##*/}; echo "@@@ ${n%.js}"; browser --js $f 2>/tmp/js.err; echo "@@@ stderr"; cat /tmp/js.err; done; echo "@@@ end"'

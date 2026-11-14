@@ -8,17 +8,21 @@
 #
 # The PowerVR firmware is left out because its fetch asks for agreement to
 # LICENSE.powervr.  To make a runnable image, read the license and build with
-#   make ZEDBSD_CONFIG=plan/tools/powervr/p010/config-visionfive2-selftest.mk \
-#        SELFTEST_FIRMWARE=powervr-firmware BUILD=build/<dir> disk-image
+#   make CONFIGMK=plan/tools/powervr/p010/config-visionfive2-selftest.mk \
+#        SELFTEST_FIRMWARE=powervr-firmware BUILD=build/<dir> disk
 # where license-agree.sh shows the license and asks yes/no on the first fetch.
-include config/ci/config-visionfive2.mk
+# The tree, found from this file: the packages' nested makes read the configuration from their own
+# directories, so the files it includes are named by absolute path.
+TEST_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../..)
+include $(TEST_TREE)/config/config.vf2.mk
+include $(TEST_TREE)/mk/platform-vf2/defaults.mk
 
 SELFTEST_FIRMWARE ?=
 GPU_SELFTEST_BOOT ?= y
-ZEDBSD_USER_PROGRAMS := $(filter-out powervr-firmware,$(ZEDBSD_USER_PROGRAMS)) \
-	libwayland-client libvulkan vkcompute vkimage vkstage vkdemo vkmatrix gpu-selftest \
+override CONFIG_USERLAND_PROGRAMS := $(filter-out powervr-firmware,$(CONFIG_USERLAND_PROGRAMS)) \
+	libwayland libvulkan vkcompute vkimage vkstage vkdemo vkmatrix gpu-selftest \
 	$(if $(filter y,$(GPU_SELFTEST_BOOT)),gpu-selftest-boot) $(SELFTEST_FIRMWARE)
 # The kernel renders a clear and a triangle once at start and says each step (render check).
-CONFIG_POWERVR_RENDER_CHECK := y
+override CONFIG_POWERVR_RENDER_CHECK := y
 # The GPU reset recovery test (ws269-p015, destructive; run by hand as vkreset --isolated).
-ZEDBSD_USER_PROGRAMS += vkreset
+override CONFIG_USERLAND_PROGRAMS += vkreset

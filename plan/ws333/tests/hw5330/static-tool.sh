@@ -17,13 +17,8 @@ flags="--target=x86_64-unknown-zedbsd --sysroot=$sr -m64 -march=x86-64 -mno-red-
 	-DKERN_USER_ABI_LP64 -nostdinc -isystem $sr/usr/include -ffreestanding -fno-pic -fno-pie -fno-stack-protector
 	-Os -Wall -Wextra -Werror"
 # shellcheck disable=SC2086
-$cc $flags -Dmain=tool_main -c "$src/main.c" -o "$out/$name.o"
-# The static start returns from main without flushing stdio; this main flushes before it returns.
-printf '%s\n' '#include <stdio.h>' 'int tool_main(int, char **);' \
-	'int main(int argc, char **argv) { int status = tool_main(argc, argv); fflush(NULL); return status; }' > "$out/$name-flush.c"
-# shellcheck disable=SC2086
-$cc $flags -c "$out/$name-flush.c" -o "$out/$name-flush.o"
+$cc $flags -c "$src/main.c" -o "$out/$name.o"
 $cc --target=x86_64-unknown-zedbsd --sysroot=$sr -m64 -nostdlib -static -Wl,--build-id=none \
-	-Wl,-T,$lib/zedbsd/x86_64/user.ld $lib/crt0.o "$out/$name.o" "$out/$name-flush.o" -Wl,--start-group $lib/libc.a \
+	-Wl,-T,$lib/zedbsd/x86_64/user.ld $lib/crt0.o "$out/$name.o" -Wl,--start-group $lib/libc.a \
 	$lib/libzedbsd-compiler-rt.a $lib/libclang_rt.builtins.a -Wl,--end-group -o "$out/$name"
 echo "static-tool: $out/$name $(sha256sum "$out/$name" | cut -c1-16)"

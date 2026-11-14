@@ -5,7 +5,10 @@
 # and that ends the console over the screen's range 90 seconds after the screen
 # is mapped, as a display driver's first flip does (KERN_TEST_TEXT_END_SECONDS
 # in src/drivers/generic/boot-fb.c).
-#   make ZEDBSD_CONFIG=plan/tools/console-end/config-rpi4-end.mk BUILD=build/<dir> disk-image
+#   make CONFIGMK=plan/tools/console-end/config-rpi4-end.mk BUILD=build/<dir> disk
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-include plan/tools/boot-images/config-rpi4-boot.mk
-ZEDBSD_TEST_CPPFLAGS := -DKERN_TEST_TEXT_SUSPEND_SECONDS=20 -DKERN_TEST_TEXT_END_SECONDS=90
+# The tree, found from this file: the packages' nested makes read the configuration from their own
+# directories, so the files it includes are named by absolute path.
+TEST_TREE := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
+include $(TEST_TREE)/plan/tools/boot-images/config-rpi4-boot.mk
+CONFIG_CPPFLAGS += -DKERN_TEST_TEXT_SUSPEND_SECONDS=20 -DKERN_TEST_TEXT_END_SECONDS=90
