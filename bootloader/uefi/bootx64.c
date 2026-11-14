@@ -312,6 +312,9 @@ efi_main(
 	unsigned held;
 	UINT32 wish_width;
 	UINT32 wish_height;
+	UINT32 monitor_width;
+	UINT32 monitor_height;
+	int monitor_known;
 
 	/* Nothing has been allocated yet. */
 	map = 0;
@@ -384,9 +387,10 @@ efi_main(
 	/*
 	 * Applies the optional display request before retaining framebuffer
 	 * addresses.  When there is no video=, a boot with Ctrl held wishes for
-	 * 640x480, where the early console's 80 columns fill the screen, and a
-	 * boot with a logo (logo=) for the GOP's 1920x1080, the boot splash's
-	 * size.
+	 * 640x480, where the early console's 80 columns fill the screen.  Any
+	 * other boot wishes for the monitor's own size from its EDID, and,
+	 * when the firmware has no EDID or no mode that fits, a boot with a
+	 * logo (logo=) for the GOP's 1920x1080, the boot splash's size.
 	 */
 	logo_named = zbl_logo_path(configuration.parameter_record.text,
 				   configuration.parameter_record.length,
@@ -394,6 +398,8 @@ efi_main(
 				   sizeof(logo_path));
 
 	/* Chooses the mode to wish for when video= names none. */
+	monitor_width = 0U;
+	monitor_height = 0U;
 	if ((held & ZBL_BOOT_OVERRIDE_KMSG) != 0U) {
 		/* Ctrl: the kernel messages are read on screen. */
 		wish_width = TEXT_MODE_WIDTH;
@@ -415,11 +421,22 @@ efi_main(
 		wish_height = 0U;
 	}
 
-	/* Sets the mode video= names, or the wished one when the firmware has it. */
+	/* Without Ctrl, the monitor's EDID names the size that suits it best. */
+	if ((held & ZBL_BOOT_OVERRIDE_KMSG) == 0U) {
+		monitor_known = zbl_uefi_video_monitor_size(boot, gop, &monitor_width, &monitor_height);
+		if (!monitor_known) {
+			monitor_width = 0U;
+			monitor_height = 0U;
+		}
+	}
+
+	/* Sets the mode video= names, else the monitor's, else the wished one when the firmware has it. */
 	status = zbl_uefi_video_select(boot,
 				       gop,
 				       configuration.parameter_record.text,
 				       configuration.parameter_record.length,
+				       monitor_width,
+				       monitor_height,
 				       wish_width,
 				       wish_height);
 	if (EFI_ERROR(status))

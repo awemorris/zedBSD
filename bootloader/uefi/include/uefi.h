@@ -477,6 +477,16 @@ typedef struct efi_graphics_output_protocol {
 } EFI_GRAPHICS_OUTPUT_PROTOCOL;
 
 /*
+ * The EDID of the monitor a graphics output drives: the one the monitor
+ * sent (discovered) or the one in force after a platform override
+ * (active).  Both protocols have this layout; a size of 0 means no EDID.
+ */
+typedef struct {
+	UINT32 SizeOfEdid;
+	uint8_t *Edid;
+} EFI_EDID_PROTOCOL;
+
+/*
  * The identifiers of the protocols and tables the loader asks the firmware
  * for.  Each translation unit that includes this header has its own copy;
  * they are constants and never change.
@@ -529,6 +539,25 @@ static const EFI_GUID EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID = {
     0x23dc,
     0x4a38,
     {0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a}};
+
+/*
+ * The EDID protocols, installed on the handle of the graphics output whose
+ * monitor they describe.
+ *
+ * Values referenced: UEFI Specification 2.10, Protocols - Console Support,
+ * EFI_EDID_ACTIVE_PROTOCOL and EFI_EDID_DISCOVERED_PROTOCOL (GUIDs).
+ */
+static const EFI_GUID EFI_EDID_ACTIVE_PROTOCOL_GUID = {
+    0xbd8c1056,
+    0x9f36,
+    0x44ec,
+    {0x92, 0xa8, 0xa6, 0x33, 0x7f, 0x81, 0x79, 0x86}};
+
+static const EFI_GUID EFI_EDID_DISCOVERED_PROTOCOL_GUID = {
+    0x1c0c34f6,
+    0xd380,
+    0x41fa,
+    {0xa0, 0x49, 0x8a, 0xd0, 0x6c, 0x1a, 0x66, 0xaa}};
 
 /*
  * The protocol a RISC-V firmware reports the boot hart's id through: the
