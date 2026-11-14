@@ -15,7 +15,8 @@
 # lines are read over SSH (plan/tools/guest/guest.py), its input sent through QMP (plan/ws035/tests/qmp-*.py), never
 # the serial console.  Wine: apps/browser-win32's x86_64 build (as shell-wine.sh builds it, in the same build
 # directory) in its own Xvfb, its standard output read on the host; each Wine command under flock
-# /tmp/zedbsd-wine.lock.  The logs and the screenshots are in OUT.  Last line: guest-latency: PASS or FAIL.
+# /tmp/zedbsd-wine.lock; after the Wine cases a control program without the browser (wine-post-probe.c) shows Wine's own
+# stalls (not judged).  The logs and the screenshots are in OUT.  Last line: guest-latency: PASS or FAIL.
 #
 #   sh plan/ws345/tests/guest-latency.sh [OUT] [IMAGE]
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -247,6 +248,15 @@ EOF
 			grep -q 'CONSOLE level=0 latency end' "$out/$each/first.txt" && ended=1
 			judge "$each" "$(grep '^ZBROWSER LATENCY samples=' "$out/$each/first.txt" | tail -1)" "$ended"
 		done
+		# The control, not judged: a Windows program with nothing of the browser that posts to its main thread every
+		# 5 ms for 60 s (wine-post-probe.c); a stall it shows is Wine's own (2026-11-15: about 40 to 75 ms once, 28 s
+		# after the start).
+		if "$LLVM_MINGW/bin/x86_64-w64-mingw32-clang" -O1 -Wall -Wextra -Werror -o "$out/wine-post-probe.exe" \
+		    plan/ws345/tests/wine-post-probe.c > "$out/probe-build.log" 2>&1; then
+			(cd "$out" && WINEPREFIX=$prefix WINEDEBUG=-all timeout 150 flock "$lock" wine wine-post-probe.exe 60) 2>&1 |
+			    tr -d '\r' > "$out/wine-post-probe.txt"
+			echo "guest-latency: control (not judged): $(tr '\n' ';' < "$out/wine-post-probe.txt")" | tee -a "$out/summary.txt"
+		fi
 	fi
 fi
 
