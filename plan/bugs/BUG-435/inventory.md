@@ -450,7 +450,6 @@
 - `plan/ws309/tests/rtx-p015.sh`
 - `plan/ws309/tests/vf2-p015.sh`
 - `plan/ws333/tests/hw5330/config-5330-qs40.mk`
-- `plan/ws334/tests/openssl-windows.sh`
 - `plan/ws336/tests/check-skeleton.sh`
 - `plan/ws353/tests/config-amd64-mainwake.mk`
 - `plan/ws353/tests/config-amd64-seat.mk`

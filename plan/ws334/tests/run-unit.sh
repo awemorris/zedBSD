@@ -6,6 +6,8 @@
 #          run under Wine (a prefix of its own under build/tmp/ws334-wine, made on first use, which takes a
 #          few minutes, and marked ready only when wineboot succeeded; winedbg is disabled so a trap ends the
 #          test).  The aarch64 Windows code is compiled by check-skeleton.sh but not run (no arm64 Wine).
+# Wine runs with LC_ALL=C.UTF-8: without a UTF-8 locale on the host (ja_JP.UTF-8 may be missing) Wine cannot make
+# a file whose name has a non-ASCII letter.
 # A test runs in a fresh empty directory of its own (its current directory) and may make files there.
 # It gets one argument, "posix" or "win32", and its last line is "test-<name>: PASS (...)" or "... FAIL (...)".
 #   sh plan/ws334/tests/run-unit.sh [--posix|--win32] <name>...
@@ -106,7 +108,7 @@ for name in $names; do
 					continue
 				fi
 			fi
-			(cd "$run" && WINEPREFIX=$wine_prefix WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d \
+			(cd "$run" && LC_ALL=C.UTF-8 WINEPREFIX=$wine_prefix WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d \
 			    timeout 600 wine "$program" win32) > "$run.log" 2>&1
 		fi
 		code=$?

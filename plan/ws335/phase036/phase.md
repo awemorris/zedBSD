@@ -105,7 +105,7 @@ Parent: [WS335](../ws.md)。担当: P2（q2029-i01 worktree `p2-ws335c`、q2047-
 - `build/p036-guest`（15 MB、`BUILD=` を変えて始めて止めた build。package は `build/<platform>` に出るので使えない）
 - `build/tmp/ws335-*.run.*` の古い run（symlink が指さない物）と `build/tmp/p036`（log）、`build/tmp/ws335-tls-build`・`build/tmp/ws334-win32-sources`・`build/tmp/ws335-tls-wine-prefix`（Wine の build と prefix）
 - `build/ws335-nettls-host`・`build/ws335-nettls-host-compat`（host の build、各 1.2 GB）、`build/x86_64`（image 込み 3.3 GB）、`build/ws074-tls`・`build/ws074-images`（WS074 の runner の出力）
-- 案 B が当たった後: `userland/desktop/libbrowser/net/tls-static.c`、`plan/ws334/tests/openssl-windows.sh`・`plan/ws334/tests/openssl-conf/`（使われなくなる）
+- 案 B が当たった後: `userland/desktop/libbrowser/net/tls-static.c`、`plan/ws334/tests/openssl-windows.sh`・`plan/ws334/tests/openssl-conf/`（使われなくなる。2026-11-14 WS334 p035 が消す）
 
 ## 締め（2026-11-13 P2 q2047-i01、branch `agent/p2-ws335d`、基点 main 37c2a904c3）
 

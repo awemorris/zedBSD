@@ -66,9 +66,11 @@ void wb_os_time_zone_start(void);
  *          offset), daylight saving included when it applies at that
  *          instant; 0 on failure.
  * Returns 0, EINVAL (offset NULL), EIO (the system could not convert).
- * POSIX: localtime_r's tm_gmtoff.  Windows: SystemTimeToTzSpecificLocalTimeEx
- * with the current dynamic zone (GetDynamicTimeZoneInformation) on the
- * instant, the difference of the two SYSTEMTIMEs in seconds.
+ * POSIX: localtime_r's tm_gmtoff.  Windows: the current dynamic zone
+ * (GetDynamicTimeZoneInformation) gives the rules of the instant's year
+ * (GetTimeZoneInformationForYear), SystemTimeToTzSpecificLocalTime applies
+ * them to the instant, and the offset is the difference of the two
+ * SYSTEMTIMEs in seconds.
  */
 int wb_os_local_offset(int64_t seconds, long *offset);
 
