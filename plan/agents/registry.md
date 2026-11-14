@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P5 | phase-runner | ws329 p002 共通化 (q2092-i01) | `/home/awe/zedBSD-worktrees/p5-ws329` / `agent/p5-ws329` | 動いている（2026-11-14 23:3x） | — |
+| P5 | phase-runner | ws329 p002 共通化 (q2092-i01) | `/home/awe/zedBSD-worktrees/p5-ws329b` / `agent/p5-ws329b` | 動いている（2026-11-14 23:3x） | — |
 | P6 | phase-runner-high | ws302 設計の改訂と p002 (q2093-i01) | `/home/awe/zedBSD-worktrees/p6-ws302` / `agent/p6-ws302` | 動いている（2026-11-14 23:3x） | — |
 | P3 | phase-runner-mid | ws345 p010・p014 の残り (q2090-i01) | `/home/awe/zedBSD-worktrees/p3-ws345` / `agent/p3-ws345` | 動いている（2026-11-14 23:0x） | — |
 | P4 | phase-runner | ws328 p001 設計 (q2091-i01) | `/home/awe/zedBSD-worktrees/p4-ws328` / `agent/p4-ws328` | 動いている（2026-11-14 23:0x） | — |
