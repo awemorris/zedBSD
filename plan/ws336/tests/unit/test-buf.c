@@ -52,6 +52,8 @@ static uint32_t next_random(void);
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_writer_types();
 	test_writer_growth();
@@ -68,7 +70,8 @@ main(void)
 	test_reader_random();
 
 	/* Reports the result of the whole test. */
-	return check_finish("buf");
+	status = check_finish("buf");
+	return status;
 }
 
 /*
@@ -189,6 +192,10 @@ test_writer_growth(void)
 			intact = 0;
 	}
 
+	/*
+	 * The bytes written one at a time must all be there, with no error and room within
+	 * the limit.
+	 */
 	CHECK_EQ(intact, 1);
 	CHECK_EQ(ssh_buf_error(&buf), 0);
 	CHECK(buf.capacity >= buf.size);
@@ -199,6 +206,7 @@ test_writer_growth(void)
 			intact = 0;
 	}
 
+	/* Every byte must still be as written. */
 	CHECK_EQ(intact, 1);
 
 	/* A reset keeps the memory and empties the used part. */
@@ -532,7 +540,9 @@ test_writer_secret(void)
 	size_t index;
 	size_t before;
 	int intact;
+	int different;
 
+	/* Makes a pattern of 2000 distinct-looking bytes. */
 	for (index = 0; index < sizeof(bytes); index++)
 		bytes[index] = (uint8_t)(index * 13 + 1);
 
@@ -545,12 +555,14 @@ test_writer_secret(void)
 		ssh_buf_put_u8(&buf, bytes[index]);
 		if (buf.size != index + 1)
 			intact = 0;
-		if (memcmp(buf.data, bytes, buf.size) != 0)
+		different = memcmp(buf.data, bytes, buf.size);
+		if (different != 0)
 			intact = 0;
 		if (before != 0 && buf.capacity < before)
 			intact = 0;
 	}
 
+	/* The content must have stayed right at every growth, with no error. */
 	CHECK_EQ(intact, 1);
 	CHECK_EQ(ssh_buf_error(&buf), 0);
 
@@ -931,6 +943,10 @@ test_reader_namelist(void)
 		CHECK_EQ(reader.offset, 0);
 	}
 
+	/*
+	 * A name list of 65 bytes is longer than a name may be and is refused, and one of 64
+	 * is read.
+	 */
 	memset(text, 'n', 65);
 	wire_reset(&input);
 	wire_string(&input, text, 65);
@@ -959,6 +975,7 @@ test_reader_namelist(void)
 			text[index] = 'a';
 	}
 
+	/* A list of exactly the largest size is read. */
 	wire_reset(&input);
 	wire_string(&input, text, SSH_NAMELIST_MAX);
 	ssh_reader_init(&reader, input.data, input.size);
@@ -1063,8 +1080,15 @@ test_roundtrip_random(void)
 	uint32_t step;
 	uint32_t round;
 	uint32_t index;
+	uint32_t u32_read;
+	uint64_t u64_read;
+	uint8_t u8_read;
+	int bool_read;
+	int error;
+	int different;
 	int mismatches;
 
+	/* Starts with no mismatch. */
 	mismatches = 0;
 
 	/* Runs many random messages. */
@@ -1096,43 +1120,59 @@ test_roundtrip_random(void)
 				ssh_buf_put_u32(&buf, 0);
 		}
 
-		if (ssh_buf_error(&buf) != 0)
+		/* Writing within the limit must not leave an error. */
+		error = ssh_buf_error(&buf);
+		if (error != 0)
 			mismatches++;
 
 		/* Reads the steps back in the same order. */
 		ssh_reader_init(&reader, buf.data, buf.size);
 		for (step = 0; step < steps; step++) {
 			if (kinds[step] == 0) {
-				if (ssh_reader_get_u8(&reader) != (uint8_t)values32[step])
+				u8_read = ssh_reader_get_u8(&reader);
+				if (u8_read != (uint8_t)values32[step])
 					mismatches++;
 			} else if (kinds[step] == 1) {
-				if (ssh_reader_get_bool(&reader) != (int)(values32[step] & 1U))
+				bool_read = ssh_reader_get_bool(&reader);
+				if (bool_read != (int)(values32[step] & 1U))
 					mismatches++;
 			} else if (kinds[step] == 2) {
-				if (ssh_reader_get_u32(&reader) != values32[step])
+				u32_read = ssh_reader_get_u32(&reader);
+				if (u32_read != values32[step])
 					mismatches++;
 			} else if (kinds[step] == 3) {
-				if (ssh_reader_get_u64(&reader) != values64[step])
+				u64_read = ssh_reader_get_u64(&reader);
+				if (u64_read != values64[step])
 					mismatches++;
 			} else if (kinds[step] == 4) {
 				ssh_reader_get_string(&reader, &data, &size);
-				if (size != lengths[step] || (size > 0 && memcmp(data, strings[step], size) != 0))
+				different = 0;
+				if (size > 0)
+					different = memcmp(data, strings[step], size);
+				if (size != lengths[step] || different != 0)
 					mismatches++;
 			} else if (kinds[step] == 5) {
 				data = ssh_reader_get_bytes(&reader, lengths[step]);
-				if (lengths[step] > 0 && (data == NULL || memcmp(data, strings[step], lengths[step]) != 0))
+				different = 0;
+				if (lengths[step] > 0 && data != NULL)
+					different = memcmp(data, strings[step], lengths[step]);
+				if (lengths[step] > 0 && (data == NULL || different != 0))
 					mismatches++;
 			} else {
-				if (ssh_reader_get_u32(&reader) != 0)
+				u32_read = ssh_reader_get_u32(&reader);
+				if (u32_read != 0)
 					mismatches++;
 			}
 		}
 
-		if (ssh_reader_finish(&reader) != 0)
+		/* Every byte written must have been read. */
+		error = ssh_reader_finish(&reader);
+		if (error != 0)
 			mismatches++;
 		ssh_buf_free(&buf);
 	}
 
+	/* Every value read back equals the value written. */
 	CHECK_EQ(mismatches, 0);
 }
 
@@ -1148,6 +1188,7 @@ test_reader_random(void)
 {
 	struct ssh_reader reader;
 	uint8_t *data;
+	size_t allocation;
 	size_t length;
 	size_t index;
 	uint32_t round;
@@ -1162,19 +1203,30 @@ test_reader_random(void)
 	size_t size;
 	char text[20];
 	uint32_t mode;
+	uint32_t coin;
+	int error;
+	int left;
+	int different;
 
+	/* Starts with no failure. */
 	failures = 0;
 
 	/* Runs many random inputs. */
 	for (round = 0; round < 100000; round++) {
 		/* Makes the input: short, often with small values so that string lengths are sometimes valid. */
 		length = next_random() % 48;
-		data = malloc(length == 0 ? 1 : length);
+		allocation = length;
+		if (allocation == 0)
+			allocation = 1;
+
+		/* Allocates a block of exactly that size, at least one byte so that an empty copy still has an address. */
+		data = malloc(allocation);
 		if (data == NULL) {
 			failures++;
 			continue;
 		}
 
+		/* Fills the input: any byte, small values, or letters, by the mode. */
 		mode = next_random() % 3;
 		for (index = 0; index < length; index++) {
 			if (mode == 0)
@@ -1186,7 +1238,10 @@ test_reader_random(void)
 		}
 
 		/* Starts the reader; a zero length is given no data now and then. */
-		if (length == 0 && (next_random() & 1U) != 0)
+		coin = 0;
+		if (length == 0)
+			coin = next_random() & 1U;
+		if (coin != 0)
 			ssh_reader_init(&reader, NULL, 0);
 		else
 			ssh_reader_init(&reader, data, length);
@@ -1213,13 +1268,19 @@ test_reader_random(void)
 				ssh_reader_get_string(&reader, &bytes, &size);
 				if (size > length || (size > 0 && (bytes < data || bytes + size > data + length)))
 					failures++;
-				if (ssh_reader_error(&reader) != 0 && (bytes != NULL || size != 0))
+				error = ssh_reader_error(&reader);
+				if (error != 0 && (bytes != NULL || size != 0))
 					failures++;
 			} else if (kind == 6) {
 				ssh_reader_get_cstring(&reader, text, next_random() % (sizeof(text) + 1));
 			} else if (kind == 7) {
 				ssh_reader_get_namelist(&reader, &list, &size);
-				if (ssh_reader_error(&reader) == 0 && size > 0 && ssh_namelist_check(list, size) != 0)
+				/* A list the reader handed out without an error must be a well formed list. */
+				error = ssh_reader_error(&reader);
+				different = 0;
+				if (error == 0 && size > 0)
+					different = ssh_namelist_check(list, size);
+				if (different != 0)
 					failures++;
 			} else {
 				(void)ssh_reader_left(&reader);
@@ -1231,16 +1292,23 @@ test_reader_random(void)
 				failures++;
 
 			/* An error that was there stays, and the offset does not move after it. */
-			if (had_error != 0 && (ssh_reader_error(&reader) != had_error || reader.offset != offset_before))
+			error = ssh_reader_error(&reader);
+			if (had_error != 0 && (error != had_error || reader.offset != offset_before))
 				failures++;
 
 			/* A reader with an error has nothing left. */
-			if (ssh_reader_error(&reader) != 0 && ssh_reader_left(&reader) != 0)
+			error = ssh_reader_error(&reader);
+			left = 0;
+			if (error != 0)
+				left = (int)ssh_reader_left(&reader);
+			if (left != 0)
 				failures++;
 		}
 
+		/* Releases the input. */
 		free(data);
 	}
 
+	/* No call broke a rule of the reader. */
 	CHECK_EQ(failures, 0);
 }

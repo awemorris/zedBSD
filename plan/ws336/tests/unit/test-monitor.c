@@ -190,11 +190,23 @@ main(
 	int argc,
 	char **argv)
 {
+	int is_preauth;
+	int is_session;
+	int status;
+
 	/* Plays the child the monitor started, which knows the same keys and paths. */
 	setup(argv[0]);
-	if (argc >= 2 && strcmp(argv[1], SSHD_EXEC_PREAUTH) == 0)
+	is_preauth = 0;
+	is_session = 0;
+	if (argc >= 2) {
+		is_preauth = (strcmp(argv[1], SSHD_EXEC_PREAUTH) == 0);
+		is_session = (strcmp(argv[1], SSHD_EXEC_SESSION) == 0);
+	}
+
+	/* Becomes the fake pre-authentication or session process when the monitor started this program as one; neither returns. */
+	if (is_preauth)
 		fake_preauth();
-	if (argc >= 2 && strcmp(argv[1], SSHD_EXEC_SESSION) == 0)
+	if (is_session)
 		fake_session();
 
 	/* Prints each failure as it happens. */
@@ -223,7 +235,8 @@ main(
 	test_run();
 
 	/* Reports the whole test. */
-	return check_finish("monitor");
+	status = check_finish("monitor");
+	return status;
 }
 
 /* Loads the keys, finds the account, and names the work directory and the authorized_keys file. */
@@ -436,6 +449,7 @@ call(
 		}
 	}
 
+	/* A request that was not answered with a reply must have written nothing. */
 	if (handled != 0 || local_next != SSHD_NEXT_REPLY)
 		CHECK_EQ(reply.size, 0);
 	ssh_buf_free(&reply);
@@ -927,8 +941,10 @@ test_password(void)
 	char password[SSH_PASSWORD_MAX + 1];
 	unsigned long before;
 	size_t index;
+	size_t password_length;
 	int zero;
 	int status;
+	int different;
 
 	/* An absent account: crypt runs once on the dummy hash, and the password is wiped. */
 	config = base_config;
@@ -937,14 +953,17 @@ test_password(void)
 	status = sshd_password_ok(&config, "zz-no-such-user-0", password);
 	CHECK_EQ(status, EACCES);
 	CHECK_EQ(crypt_calls - before, 1);
-	CHECK(strncmp(crypt_salt, TEST_DUMMY_PREFIX, strlen(TEST_DUMMY_PREFIX)) == 0);
+	different = strncmp(crypt_salt, TEST_DUMMY_PREFIX, strlen(TEST_DUMMY_PREFIX));
+	CHECK(different == 0);
 	CHECK_EQ(strlen(crypt_salt), 3 + 16 + 1 + 86);
 	zero = 1;
-	for (index = 0; index < strlen("secret-password"); index++) {
+	password_length = strlen("secret-password");
+	for (index = 0; index < password_length; index++) {
 		if (password[index] != 0)
 			zero = 0;
 	}
 
+	/* The password the call was given must have been wiped. */
 	CHECK(zero);
 
 	/* crypt's answer is wiped too. */
@@ -1247,6 +1266,7 @@ test_tty(void)
 	char name[64];
 	int master;
 	int status;
+	int usable;
 
 	/* Paths that are not a pseudo-terminal's. */
 	status = sshd_tty_check("/dev/tty1", getuid());
@@ -1272,7 +1292,19 @@ test_tty(void)
 
 	/* A terminal the test opens is its own, and no other user's. */
 	master = posix_openpt(O_RDWR | O_NOCTTY);
-	if (master >= 0 && grantpt(master) == 0 && unlockpt(master) == 0 && ptsname_r(master, name, sizeof(name)) == 0) {
+	usable = 0;
+	if (master >= 0) {
+		status = grantpt(master);
+		if (status == 0)
+			status = unlockpt(master);
+		if (status == 0)
+			status = ptsname_r(master, name, sizeof(name));
+		if (status == 0)
+			usable = 1;
+	}
+
+	/* A terminal that could be opened is checked as the owner and as another user. */
+	if (usable != 0) {
 		status = sshd_tty_check(name, getuid());
 		CHECK_EQ(status, 0);
 		status = sshd_tty_check(name, getuid() + 1U);
@@ -1281,6 +1313,7 @@ test_tty(void)
 		printf("note: no pseudo-terminal on this host; the owner check is not run\n");
 	}
 
+	/* Closes the terminal the test opened. */
 	if (master >= 0)
 		(void)close(master);
 
@@ -1317,6 +1350,7 @@ test_stages(void)
 	unsigned type;
 	uint32_t result;
 	size_t index;
+	size_t state_length;
 	int status;
 
 	/* Before any signature: the requests built right, but out of order. */
@@ -1364,9 +1398,10 @@ test_stages(void)
 	CHECK_EQ(status, 0);
 	CHECK_EQ(next, SSHD_NEXT_START_SESSION);
 	CHECK_EQ(monitor.stage, SSHD_STAGE_SESSION);
-	CHECK_EQ(monitor.state.size, strlen(TEST_STATE));
+	state_length = strlen(TEST_STATE);
+	CHECK_EQ(monitor.state.size, state_length);
 	CHECK(monitor.state.secret);
-	if (monitor.state.size == strlen(TEST_STATE))
+	if (monitor.state.size == state_length)
 		CHECK_BYTES(monitor.state.data, TEST_STATE, monitor.state.size);
 
 	/* A second AUTH_DONE, and every pre-authentication request, in the session stage. */
@@ -1376,6 +1411,7 @@ test_stages(void)
 		CHECK_EQ(status, EPROTO);
 	}
 
+	/* Releases the monitor. */
 	sshd_monitor_clear(&monitor);
 	CHECK(monitor.state.data == NULL);
 
@@ -1442,6 +1478,7 @@ test_sign(void)
 		CHECK_EQ(status, 0);
 	}
 
+	/* The signatures made so far are at the bound, and one more is refused. */
 	CHECK_EQ(monitor.preauth_signs, SSHD_PREAUTH_SIGN_MAX);
 	h[0] = 0x77;
 	status = sign_h(&monitor, h, 32);
@@ -1462,6 +1499,7 @@ test_sign(void)
 		CHECK_EQ(status, 0);
 	}
 
+	/* A signature for another exchange hash is refused in the same way. */
 	status = sign_h(&monitor, other_h, 32);
 	CHECK_EQ(status, EPROTO);
 	sshd_monitor_clear(&monitor);
@@ -1569,6 +1607,10 @@ test_signed_data(void)
 			break;
 		}
 
+		/*
+		 * Builds the login, signed by the user's key, or by the host key for one
+		 * variant, and sends it.
+		 */
 		if (variant == 15)
 			build_login(&request, self_name, &user_blob, &signed_data, &host_key, 0);
 		else
@@ -1744,6 +1786,7 @@ test_attempts(void)
 		CHECK_EQ(result, EACCES);
 	}
 
+	/* Three failed key logins, signed for another exchange. */
 	for (index = 0; index < 3; index++) {
 		build_signed(&signed_data, other_h, 32, 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
 		build_login(&request, self_name, &user_blob, &signed_data, &user_key, 0);
@@ -1752,6 +1795,7 @@ test_attempts(void)
 		CHECK_EQ(result, EACCES);
 	}
 
+	/* Six attempts are the limit, so the next request, of any kind, ends the connection. */
 	CHECK_EQ(monitor.tries, 6);
 	build_signed(&signed_data, session_h, 32, 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
 	build_login(&request, self_name, &user_blob, &signed_data, &user_key, 0);
@@ -1774,6 +1818,7 @@ test_attempts(void)
 		CHECK_EQ(status, 0);
 	}
 
+	/* The right key login as the sixth attempt is granted. */
 	build_signed(&signed_data, session_h, 32, 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
 	build_login(&request, self_name, &user_blob, &signed_data, &user_key, 0);
 	status = call(&monitor, SSH_MON_PUBKEY_LOGIN, &request, &type, &result, NULL, NULL);
@@ -1931,6 +1976,10 @@ test_timing(void)
 	CHECK(took < (long)SSHD_FAIL_DELAY_MS + 3000L);
 	sshd_monitor_clear(&monitor);
 
+	/*
+	 * Starts a monitor that has signed the exchange, to time a password for an absent
+	 * account.
+	 */
 	sshd_monitor_init(&monitor, &base_config, &host_key, 0);
 	(void)sign_h(&monitor, session_h, sizeof(session_h));
 	before = crypt_calls;
@@ -1943,6 +1992,7 @@ test_timing(void)
 	CHECK_EQ(crypt_calls - before, 1);
 	sshd_monitor_clear(&monitor);
 
+	/* Starts a monitor that has signed the exchange, to time a granted login. */
 	sshd_monitor_init(&monitor, &base_config, &host_key, 0);
 	(void)sign_h(&monitor, session_h, sizeof(session_h));
 	(void)clock_gettime(CLOCK_MONOTONIC, &start);
@@ -1977,6 +2027,10 @@ test_timing(void)
 		arrived.tv_sec--;
 	}
 
+	/*
+	 * The delay is counted from the arrival of the request, so the monitor waits only
+	 * the rest of it.
+	 */
 	(void)clock_gettime(CLOCK_MONOTONIC, &start);
 	status = sshd_monitor_handle(&monitor, SSH_MON_PUBKEY_QUERY, request.data, request.size, &arrived, &reply, &next);
 	CHECK_EQ(status, 0);
@@ -2026,6 +2080,7 @@ test_session_sign(void)
 		CHECK_EQ(status, 0);
 	}
 
+	/* A hash of another length than the digest's is refused. */
 	memset(long_h, 3, sizeof(long_h));
 	status = sign_h(&monitor, long_h, 31);
 	CHECK_EQ(status, EPROTO);
@@ -2058,6 +2113,7 @@ test_records(void)
 	uint32_t result;
 	int master;
 	int status;
+	int usable;
 
 	/* The path rule by itself: "/dev/pts/" and one to eight digits. */
 	status = sshd_tty_path_ok("/dev/pts/0");
@@ -2165,7 +2221,19 @@ test_records(void)
 	 * no process list for.
 	 */
 	master = posix_openpt(O_RDWR | O_NOCTTY);
-	if (master >= 0 && grantpt(master) == 0 && unlockpt(master) == 0 && ptsname_r(master, name, sizeof(name)) == 0) {
+	usable = 0;
+	if (master >= 0) {
+		status = grantpt(master);
+		if (status == 0)
+			status = unlockpt(master);
+		if (status == 0)
+			status = ptsname_r(master, name, sizeof(name));
+		if (status == 0)
+			usable = 1;
+	}
+
+	/* A terminal that could be opened is refused for the owner check and for the parent check. */
+	if (usable != 0) {
 		build_record(&request, name, strlen(name), (uint32_t)getpid(), 0);
 		monitor.user_uid = getuid() + 1U;
 		status = call(&monitor, SSH_MON_LOGIN_RECORD, &request, &type, &result, NULL, NULL);
@@ -2179,6 +2247,7 @@ test_records(void)
 		CHECK(strstr(log_last, "refused: not a process of the session") != NULL);
 	}
 
+	/* Closes the terminal the test opened. */
 	if (master >= 0)
 		(void)close(master);
 
@@ -2249,6 +2318,7 @@ test_run(void)
 	int grant;
 	long took;
 	int status;
+	char *failure;
 
 	/* A login and a session: both children report, the listener is told once. */
 	config = base_config;
@@ -2259,7 +2329,8 @@ test_run(void)
 	CHECK(strstr(report, "S:ok\n") != NULL);
 	CHECK(strstr(report, "fail") == NULL);
 	CHECK_EQ(grant, 1);
-	if (strstr(report, "fail") != NULL)
+	failure = strstr(report, "fail");
+	if (failure != NULL)
 		printf("report: %s", report);
 	CHECK(took >= (long)SSHD_FAIL_DELAY_MS + (long)SSHD_SIGN_INTERVAL_MS);
 
@@ -2373,6 +2444,7 @@ run_scenario(
 			wiped = 0;
 	}
 
+	/* The host key's seed must have been wiped. */
 	CHECK(wiped);
 	CHECK_EQ(key.private, 0);
 
@@ -2400,6 +2472,7 @@ run_scenario(
 			break;
 	}
 
+	/* Ends the report text and checks that every copy of the connection was closed. */
 	report[used] = '\0';
 	CHECK(ended);
 	if (!ended)
@@ -2414,6 +2487,7 @@ run_scenario(
 		CHECK_EQ(mark[0], 1);
 	}
 
+	/* Closes the listener's pipe and reports how the monitor ended. */
 	(void)close(started[0]);
 	return status;
 }
@@ -2457,6 +2531,7 @@ child_check_config(
 	size_t blob_size;
 	uint32_t privileged;
 	int status;
+	int different;
 
 	/* The four fields. */
 	ssh_reader_init(&reader, body->data, body->size);
@@ -2471,14 +2546,25 @@ child_check_config(
 	/* The text is settings; the file of the run is in them. */
 	sshd_config_defaults(&parsed);
 	status = sshd_config_parse(&parsed, (const char *)text, text_size, error_text);
-	if (status != 0 || strcmp(parsed.authorized_keys_file, keys_path) != 0)
+	if (status != 0)
+		return 2;
+	different = strcmp(parsed.authorized_keys_file, keys_path);
+	if (different != 0)
 		return 2;
 
-	/* The blob, the peer, the mode. */
-	if (blob_size != SSH_KEY_BLOB_SIZE || memcmp(blob, host_blob.data, SSH_KEY_BLOB_SIZE) != 0)
+	/* The blob must be the host key's. */
+	if (blob_size != SSH_KEY_BLOB_SIZE)
 		return 3;
-	if (strcmp(peer, TEST_PEER) != 0 || privileged != 0)
+	different = memcmp(blob, host_blob.data, SSH_KEY_BLOB_SIZE);
+	if (different != 0)
+		return 3;
+
+	/* The peer must be the run's and the mode unprivileged. */
+	different = strcmp(peer, TEST_PEER);
+	if (different != 0 || privileged != 0)
 		return 4;
+
+	/* Succeeded: every field is as expected. */
 	return 0;
 }
 
@@ -2487,13 +2573,16 @@ static int
 child_other_descriptors(void)
 {
 	int descriptor;
+	int flags;
 
 	/* Asks each number for its flags, which only an open descriptor has. */
 	for (descriptor = SSHD_FD_MONITOR + 1; descriptor < 256; descriptor++) {
-		if (fcntl(descriptor, F_GETFD) != -1)
+		flags = fcntl(descriptor, F_GETFD);
+		if (flags != -1)
 			return 1;
 	}
 
+	/* Succeeded: no other descriptor is open. */
 	return 0;
 }
 
@@ -2513,9 +2602,12 @@ child_parent_holds_connection(void)
 	char path[128];
 	DIR *listing;
 	int held;
+	int status;
+	int named;
 
 	/* What the connection is. */
-	if (fstat(SSHD_FD_CLIENT, &own) != 0)
+	status = fstat(SSHD_FD_CLIENT, &own);
+	if (status != 0)
 		return 0;
 
 	/* Looks through the parent's descriptors. */
@@ -2524,12 +2616,19 @@ child_parent_holds_connection(void)
 	if (listing == NULL)
 		return 0;
 	held = 0;
-	while ((entry = readdir(listing)) != NULL) {
+	for (;;) {
+		entry = readdir(listing);
+		if (entry == NULL)
+			break;
+
+		/* An entry that names the same socket as ours means the monitor still holds it. */
 		(void)snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
-		if (stat(path, &other) == 0 && other.st_ino == own.st_ino && other.st_dev == own.st_dev)
+		named = stat(path, &other);
+		if (named == 0 && other.st_ino == own.st_ino && other.st_dev == own.st_dev)
 			held = 1;
 	}
 
+	/* Releases the directory listing and reports whether the monitor holds the connection. */
 	(void)closedir(listing);
 	return held;
 }
@@ -2563,6 +2662,9 @@ fake_preauth(void)
 	char code;
 	ssize_t got;
 	int status;
+	int config_error;
+	int open_other;
+	static const uint8_t bad[5] = { 0, 0, 0, 1, 99 };
 
 	/* Takes the scenario and the settings. */
 	signal(SIGPIPE, SIG_IGN);
@@ -2573,15 +2675,20 @@ fake_preauth(void)
 	ssh_buf_init(&body, SSH_MON_STATE_MAX, 1);
 	ssh_buf_init(&reply, SSH_MON_STATE_MAX, 1);
 	status = child_read_frame(SSHD_FD_MONITOR, &input, &type, &body);
-	if (status != 0 || type != SSH_MON_CONFIG || child_check_config(&body) != 0) {
+	config_error = 1;
+	if (status == 0 && type == SSH_MON_CONFIG)
+		config_error = child_check_config(&body);
+	if (config_error != 0) {
 		child_report("P:config fail\n");
 		_exit(3);
 	}
 
+	/* Reports that the settings arrived and were right. */
 	child_report("P:config ok\n");
 
 	/* Only the two descriptors and the standard ones are open. */
-	if (child_other_descriptors())
+	open_other = child_other_descriptors();
+	if (open_other)
 		child_report("P:descriptor fail\n");
 
 	/* The scenarios without a login. */
@@ -2593,8 +2700,11 @@ fake_preauth(void)
 		_exit(0);
 	}
 
+	/*
+	 * The scenario that sends a malformed frame and then waits for an answer, which must
+	 * not come.
+	 */
 	if (code == 'B') {
-		static const uint8_t bad[5] = { 0, 0, 0, 1, 99 };
 		child_report("P:sent bad frame\n");
 		got = write(SSHD_FD_MONITOR, bad, sizeof(bad));
 		status = child_read_frame(SSHD_FD_MONITOR, &input, &type, &body);
@@ -2603,6 +2713,10 @@ fake_preauth(void)
 		_exit(0);
 	}
 
+	/*
+	 * The scenario that asks for a login record before the user is authenticated, which
+	 * must not be answered.
+	 */
 	if (code == 'V') {
 		build_record(&request, "/dev/pts/1", 10, 1, 0);
 		child_report("P:sent record\n");
@@ -2658,6 +2772,13 @@ fake_session(void)
 	char code;
 	ssize_t got;
 	int status;
+	int config_error;
+	int open_other;
+	int held;
+	int different;
+	int same_state;
+	long waited;
+	size_t expected_size;
 
 	/* Takes the scenario, the settings, the user and the transport. */
 	signal(SIGPIPE, SIG_IGN);
@@ -2668,32 +2789,46 @@ fake_session(void)
 	ssh_buf_init(&body, SSH_MON_STATE_MAX, 1);
 	ssh_buf_init(&reply, SSH_MON_STATE_MAX, 1);
 	status = child_read_frame(SSHD_FD_MONITOR, &input, &type, &body);
-	if (status != 0 || type != SSH_MON_CONFIG || child_check_config(&body) != 0) {
+	config_error = 1;
+	if (status == 0 && type == SSH_MON_CONFIG)
+		config_error = child_check_config(&body);
+	if (config_error != 0) {
 		child_report("S:config fail\n");
 		_exit(3);
 	}
 
+	/* The session start must carry the user and the state. */
 	status = child_read_frame(SSHD_FD_MONITOR, &input, &type, &body);
 	if (status != 0 || type != SSH_MON_SESSION_START) {
 		child_report("S:start fail\n");
 		_exit(3);
 	}
 
+	/* Reads the user and the state from the session start. */
 	ssh_reader_init(&reader, body.data, body.size);
 	ssh_reader_get_cstring(&reader, user, sizeof(user));
 	ssh_reader_get_string(&reader, &state, &state_size);
 	status = ssh_reader_finish(&reader);
-	if (status != 0 || strcmp(user, self_name) != 0 || state_size != strlen(TEST_STATE) || memcmp(state, TEST_STATE, state_size) != 0)
+	different = 1;
+	if (status == 0)
+		different = strcmp(user, self_name);
+	same_state = 0;
+	expected_size = strlen(TEST_STATE);
+	if (state_size == expected_size)
+		same_state = (memcmp(state, TEST_STATE, state_size) == 0);
+	if (status != 0 || different != 0 || !same_state)
 		child_report("S:start contents fail\n");
 
 	/* Started with an empty environment and only its two descriptors above the standard ones. */
 	if (environ != NULL && environ[0] != NULL)
 		child_report("S:environment fail\n");
-	if (child_other_descriptors())
+	open_other = child_other_descriptors();
+	if (open_other)
 		child_report("S:descriptor fail\n");
 
 	/* The monitor let its copy of the connection go once this process had it. */
-	if (child_parent_holds_connection())
+	held = child_parent_holds_connection();
+	if (held)
 		child_report("S:monitor kept connection fail\n");
 
 	/* R: a second hand-over, which the monitor answers by ending this process. */
@@ -2719,7 +2854,8 @@ fake_session(void)
 	status = ssh_mon_call(SSHD_FD_MONITOR, SSH_MON_SIGN, request.data, request.size, &type, &reply);
 	if (status != 0 || type != SSH_MON_SIGNATURE)
 		child_report("S:sign fail\n");
-	if (elapsed_ms(&start) < (long)SSHD_SIGN_INTERVAL_MS - 50L)
+	waited = elapsed_ms(&start);
+	if (waited < (long)SSHD_SIGN_INTERVAL_MS - 50L)
 		child_report("S:interval fail\n");
 
 	/* A login record this host cannot check: refused, the session kept. */

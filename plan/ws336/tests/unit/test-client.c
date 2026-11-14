@@ -55,6 +55,17 @@ static char directory[512];
 /* A connection used by the host key and reason checks (large for the stack). */
 static struct ssh_client client;
 
+static void test_base64(const uint8_t *in, size_t size, char *out);
+static void test_write_file(const char *path, const char *text);
+static void test_read_file(const char *path, char *out, size_t capacity);
+static void test_capture_end(char *out, size_t capacity);
+static int test_argv(char **argv, char *storage, const char *const *words);
+static int test_parse(const char *const *words, struct ssh_client_args *args);
+static int test_apply(const char *const *words, struct ssh_config *config);
+static enum ssh_client_host_action test_expected_action(enum ssh_known_result user_answer, enum ssh_known_result global_answer, enum ssh_strict_host strict, int batch_mode);
+static void test_client_setup(const char *const *options, const char *host, uint16_t port);
+static void test_escape_case(const char *input, size_t step, const char *expected, int expected_disconnect);
+
 /* Encodes size bytes as base64 with '=' padding (RFC 4648 4, Table 1) into out, apart from the module. */
 static void
 test_base64(
@@ -68,6 +79,7 @@ test_base64(
 	size_t length;
 	uint32_t group;
 
+	/* Starts at the first input byte with no output. */
 	position = 0;
 	length = 0;
 	while (size - position >= 3U) {
@@ -79,6 +91,7 @@ test_base64(
 		position += 3U;
 	}
 
+	/* Encodes the one or two bytes that are left over, padding the output with '='. */
 	if (size - position == 1U) {
 		group = (uint32_t)in[position] << 16;
 		out[length++] = alphabet[(group >> 18) & 63U];
@@ -93,6 +106,7 @@ test_base64(
 		out[length++] = '=';
 	}
 
+	/* Ends the text. */
 	out[length] = '\0';
 }
 
@@ -104,6 +118,7 @@ test_write_file(
 {
 	FILE *file;
 
+	/* Creates the file; a file that cannot be created fails the test. */
 	file = fopen(path, "wb");
 	CHECK(file != NULL);
 	if (file == NULL)
@@ -122,12 +137,14 @@ test_read_file(
 	FILE *file;
 	size_t size;
 
+	/* Opens the file, reporting an absent one by a marker text. */
 	file = fopen(path, "rb");
 	if (file == NULL) {
 		snprintf(out, capacity, "<absent>");
 		return;
 	}
 
+	/* Reads at most capacity - 1 bytes and ends the text. */
 	size = fread(out, 1, capacity - 1U, file);
 	out[size] = '\0';
 	fclose(file);
@@ -143,6 +160,10 @@ test_capture_start(void)
 {
 	int descriptor;
 
+	/*
+	 * Redirects the standard error stream into a file in the test directory, keeping the
+	 * old stream.
+	 */
 	fflush(stderr);
 	snprintf(capture_path, sizeof(capture_path), "%s/stderr", directory);
 	descriptor = open(capture_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
@@ -175,6 +196,7 @@ test_argv(
 	size_t used;
 	size_t length;
 
+	/* Copies each word into the storage and points an entry of the vector at it. */
 	count = 0;
 	used = 0;
 	while (words[count] != NULL) {
@@ -185,6 +207,7 @@ test_argv(
 		count++;
 	}
 
+	/* Ends the vector with a null pointer and reports how many words it holds. */
 	argv[count] = NULL;
 	return count;
 }
@@ -200,6 +223,7 @@ test_parse(
 	char error[256];
 	int argc;
 
+	/* Builds the vector from the words and parses it. */
 	argc = test_argv(argv, storage, words);
 	return ssh_client_parse_args(argc, argv, args, error, sizeof(error));
 }
@@ -398,6 +422,7 @@ test_apply(
 	char error[SSH_CONFIG_ERROR_MAX];
 	int status;
 
+	/* Parses the words and applies them to a fresh configuration. */
 	status = test_parse(words, &args);
 	CHECK_EQ(status, 0);
 	ssh_config_init(config);
@@ -555,6 +580,7 @@ test_client_setup(
 	char error[SSH_CONFIG_ERROR_MAX];
 	int index;
 
+	/* Starts a fresh connection state with the options applied, for the given host and port. */
 	ssh_client_free(&client);
 	ssh_client_init(&client);
 	ssh_config_init(&client.config);
@@ -582,6 +608,10 @@ test_check_host_key(void)
 	struct stat information;
 	int status;
 
+	/*
+	 * Writes the options that name the user's and the global known_hosts files in the
+	 * test directory.
+	 */
 	snprintf(user_path, sizeof(user_path), "%s/known_hosts", directory);
 	snprintf(global_path, sizeof(global_path), "%s/global_known_hosts", directory);
 	snprintf(user_option, sizeof(user_option), "UserKnownHostsFile %s", user_path);
@@ -743,13 +773,18 @@ test_escape_case(
 	size_t count;
 	size_t offset;
 	size_t piece;
+	size_t input_size;
 	int disconnect;
 
+	/* Starts an escape state with nothing sent yet. */
 	ssh_client_escape_init(&escape);
 	count = 0;
 	disconnect = 0;
-	for (offset = 0; offset < strlen(input) && !disconnect; offset += piece) {
-		piece = strlen(input) - offset;
+	input_size = strlen(input);
+
+	/* Feeds the input in pieces of at most step bytes until it is used up or the escape asks to disconnect. */
+	for (offset = 0; offset < input_size && !disconnect; offset += piece) {
+		piece = input_size - offset;
 		if (piece > step)
 			piece = step;
 		ssh_client_escape_filter(&escape, (const uint8_t *)input + offset, piece, out, &size, &disconnect);
@@ -758,6 +793,10 @@ test_escape_case(
 		count += size;
 	}
 
+	/*
+	 * The bytes that came through must be exactly the expected ones, and the disconnect
+	 * flag the expected value.
+	 */
 	CHECK_EQ(count, strlen(expected));
 	CHECK(memcmp(total, expected, count) == 0);
 	CHECK_EQ(disconnect, expected_disconnect);
@@ -797,6 +836,7 @@ test_paths(void)
 	char out[64];
 	char tiny[8];
 
+	/* Expands "~" against the HOME variable. */
 	CHECK_EQ(setenv("HOME", "/home/u", 1), 0);
 	CHECK_EQ(ssh_client_expand_path("~/.ssh/known_hosts", out, sizeof(out)), 0);
 	CHECK(strcmp(out, "/home/u/.ssh/known_hosts") == 0);
@@ -878,6 +918,10 @@ test_reason_and_backlog(void)
 			sent++;
 	}
 
+	/*
+	 * The send must fail for lack of room, and the backlog must hold what fitted and no
+	 * more.
+	 */
 	CHECK_EQ(status, ENOBUFS);
 	CHECK(client.backlog.size > 0);
 	CHECK(client.backlog.size <= SSH_CLIENT_BACKLOG_MAX);
@@ -913,6 +957,10 @@ test_read_limit(void)
 	char path[600];
 	struct ssh_buf text;
 
+	/*
+	 * Writes a file of ten bytes and reads it with a limit of ten, which fits, then
+	 * nine, which does not, then an absent file.
+	 */
 	snprintf(path, sizeof(path), "%s/ten", directory);
 	test_write_file(path, "0123456789");
 	ssh_buf_init(&text, 64, 0);
@@ -933,6 +981,7 @@ int
 main(void)
 {
 	int written;
+	int status;
 
 	/* The keys and their blobs and base64 forms. */
 	CHECK_EQ(wire_hex(t1_public_hex, key1, sizeof(key1)), 32);
@@ -952,6 +1001,7 @@ main(void)
 	CHECK(written > 0);
 	CHECK(mkdtemp(directory) != NULL);
 
+	/* Starts the connection state and runs every group of checks. */
 	ssh_client_init(&client);
 	test_args();
 	test_apply_args();
@@ -962,5 +1012,8 @@ main(void)
 	test_reason_and_backlog();
 	test_read_limit();
 	ssh_client_free(&client);
-	return check_finish("client");
+
+	/* Reports the result of the whole test. */
+	status = check_finish("client");
+	return status;
 }

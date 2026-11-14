@@ -81,6 +81,7 @@ check_record_bytes(
 	const unsigned char *right;
 	size_t index;
 
+	/* Views both buffers as bytes so they can be compared one by one. */
 	left = actual;
 	right = expected;
 

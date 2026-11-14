@@ -27,21 +27,34 @@ static int fuzz_ready;
 static int
 fuzz_host_blob(void *context, struct ssh_buf *out)
 {
+	int error;
+
+	/* The argument the callback does not look at. */
 	(void)context;
+
+	/* Writes the public blob of the fixed host key and reports whether the buffer took it. */
 	ssh_key_put_public_blob(fuzz_host_key.public_key, out);
-	return ssh_buf_error(out);
+	error = ssh_buf_error(out);
+	return error;
 }
 
 static int
 fuzz_sign(void *context, const uint8_t *h, struct ssh_buf *out)
 {
+	int error;
+
+	/* The argument the callback does not look at. */
 	(void)context;
-	return ssh_key_sign(&fuzz_host_key, h, SSH_KEX_HASH_SIZE, out);
+
+	/* Signs the exchange hash with the fixed host key. */
+	error = ssh_key_sign(&fuzz_host_key, h, SSH_KEX_HASH_SIZE, out);
+	return error;
 }
 
 static int
 fuzz_check(void *context, const uint8_t *blob, size_t size)
 {
+	/* The arguments the callback does not look at: any host key is taken. */
 	(void)context;
 	(void)blob;
 	(void)size;
@@ -59,7 +72,10 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	size_t written;
 	int status;
 	int role;
+	int error;
+	enum ssh_role side;
 
+	/* Derives the fixed host key from its seed the first time only. */
 	if (!fuzz_ready) {
 		static const uint8_t seed[32] = {
 			0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
@@ -71,25 +87,46 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		fuzz_ready = 1;
 	}
 
+	/* An empty input selects nothing to exercise. */
 	if (size == 0)
 		return 0;
+
+	/* The first byte picks the server or the client side. */
 	role = data[0] & 1;
 	data++;
 	size--;
+
+	/* Gives the transport the three callbacks of the harness. */
 	memset(&ops, 0, sizeof(ops));
 	ops.host_key = fuzz_host_blob;
 	ops.sign = fuzz_sign;
 	ops.check_host_key = fuzz_check;
-	if (ssh_transport_init(&transport, role ? SSH_ROLE_SERVER : SSH_ROLE_CLIENT, &ops, 100) != 0)
+
+	/* Starts a transport on the chosen side. */
+	side = SSH_ROLE_CLIENT;
+	if (role != 0)
+		side = SSH_ROLE_SERVER;
+	error = ssh_transport_init(&transport, side, &ops, 100);
+	if (error != 0)
 		return 0;
+
+	/* Prepares the buffer that receives each message the transport hands out. */
 	ssh_buf_init(&payload, SSH_PACKET_LIMIT, 1);
+
+	/* Feeds the input in pieces of at most 1500 bytes and takes every message that results. */
 	while (size > 0) {
-		piece = size < 1500 ? size : 1500;
+		piece = size;
+		if (piece > 1500)
+			piece = 1500;
+
+		/* Gives the transport the piece. */
 		status = ssh_transport_input(&transport, data, piece);
 		data += piece;
 		size -= piece;
 		if (status != 0 && status != EMSGSIZE)
 			break;
+
+		/* Takes every message the transport has ready and answers each one that is not a transport message. */
 		for (;;) {
 			ssh_buf_reset(&payload);
 			status = ssh_transport_next(&transport, &payload);
@@ -99,15 +136,20 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 				(void)ssh_transport_send(&transport, payload.data, payload.size);
 		}
 
+		/* Takes the bytes the transport wants to send and tells it they were written. */
 		pending = ssh_transport_pending(&transport, &written);
 		(void)pending;
 		ssh_transport_written(&transport, written);
 		(void)ssh_transport_tick(&transport, 100 + SSH_TRANSPORT_REKEY_SECONDS);
+		/* Stops when the transport has closed. */
 		if (transport.state == SSH_TRANSPORT_CLOSED)
 			break;
 	}
 
+	/* Releases the buffer and the transport. */
 	ssh_buf_free(&payload);
 	ssh_transport_free(&transport);
+
+	/* Succeeded: the input was handled without a crash. */
 	return 0;
 }

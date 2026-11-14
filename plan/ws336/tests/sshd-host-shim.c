@@ -45,9 +45,13 @@ shim_find(void)
 	char buffer[2048];
 	char *slash;
 	ssize_t got;
+	int error;
 
+	/* Does nothing when an earlier call already found them. */
 	if (shim_directory[0] != '\0')
 		return;
+
+	/* Reads the binary's own path to learn its directory. */
 	got = readlink("/proc/self/exe", shim_directory, sizeof(shim_directory) - 1U);
 	if (got <= 0) {
 		strcpy(shim_directory, "/nonexistent");
@@ -58,8 +62,12 @@ shim_find(void)
 			*slash = '\0';
 	}
 
+	/* Looks up the account the test runs as. */
 	found = NULL;
-	if (getpwuid_r(getuid(), &account, buffer, sizeof(buffer), &found) == 0 && found != NULL)
+	error = getpwuid_r(getuid(), &account, buffer, sizeof(buffer), &found);
+
+	/* Remembers the account's name when the lookup found it. */
+	if (error == 0 && found != NULL)
 		strncpy(shim_user, account.pw_name, sizeof(shim_user) - 1U);
 }
 
@@ -73,15 +81,24 @@ getpwnam_r(
 	struct passwd **result)
 {
 	int written;
+	int different;
 
+	/* Answers "not found" unless the name proves to be the test's account. */
 	*result = NULL;
 	shim_find();
-	if (shim_user[0] == '\0' || strcmp(name, shim_user) != 0)
+	if (shim_user[0] == '\0')
 		return 0;
+	different = strcmp(name, shim_user);
+	if (different != 0)
+		return 0;
+
+	/* Lays the account's strings out in the caller's buffer, as the shell and home directory the test uses. */
 	memset(account, 0, sizeof(*account));
 	written = snprintf(buffer, size, "%s%cx%c%s/home%c%s/shell.sh%c", shim_user, 0, 0, shim_directory, 0, shim_directory, 0);
 	if (written < 0 || (size_t)written >= size)
 		return ERANGE;
+
+	/* Points each field of the account at its string in the buffer. */
 	account->pw_name = buffer;
 	account->pw_passwd = buffer + strlen(shim_user) + 1U;
 	account->pw_dir = account->pw_passwd + 2;
@@ -89,6 +106,8 @@ getpwnam_r(
 	account->pw_gecos = account->pw_shell + strlen(account->pw_shell);
 	account->pw_uid = getuid();
 	account->pw_gid = getgid();
+
+	/* Publishes the account and reports that the lookup worked. */
 	*result = account;
 	return 0;
 }
@@ -100,6 +119,7 @@ openlog(
 	int option,
 	int facility)
 {
+	/* The arguments the replacement does not look at. */
 	(void)identity;
 	(void)option;
 	(void)facility;
@@ -118,14 +138,19 @@ vsyslog(
 	int descriptor;
 	ssize_t written;
 
+	/* Formats the line: the process id, the severity and the message. */
 	shim_find();
 	length = snprintf(line, sizeof(line), "%ld %d ", (long)getpid(), priority & 7);
 	(void)vsnprintf(line + length, sizeof(line) - (size_t)length - 1U, format, arguments);
 	strcat(line, "\n");
+
+	/* Opens the directory's log file for appending. */
 	(void)snprintf(path, sizeof(path), "%s/log", shim_directory);
 	descriptor = open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0600);
 	if (descriptor < 0)
 		return;
+
+	/* Appends the line; a short or failed write is not worth failing the program for. */
 	written = write(descriptor, line, strlen(line));
 	(void)written;
 	(void)close(descriptor);
@@ -140,6 +165,7 @@ syslog(
 {
 	va_list arguments;
 
+	/* Forwards the message to the version that takes an argument list. */
 	va_start(arguments, format);
 	vsyslog(priority, format, arguments);
 	va_end(arguments);

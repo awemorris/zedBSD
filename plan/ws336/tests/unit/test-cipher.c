@@ -72,6 +72,8 @@ static void fill_key(uint8_t *key, uint8_t seed);
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_known_answer();
 	test_construction();
@@ -80,7 +82,8 @@ main(void)
 	test_init_clear();
 
 	/* Prints the verdict. */
-	return check_finish("cipher");
+	status = check_finish("cipher");
+	return status;
 }
 
 /* Fills a 64-byte key with bytes that differ from byte to byte and from seed to seed. */
@@ -116,6 +119,7 @@ build_expected(
 	const uint8_t *k2;
 	int error;
 
+	/* Splits the 64-byte key into the main key and the header key. */
 	k1 = key;
 	k2 = key + 32;
 
@@ -169,6 +173,7 @@ test_known_answer(void)
 	count = wire_hex(example_tag, expected_tag, sizeof(expected_tag));
 	CHECK_EQ(count, SSH_CHACHAPOLY_TAG);
 
+	/* Starts a cipher with the example key. */
 	ssh_chachapoly_init(&cipher, key);
 
 	/* Encrypts the packet with sequence number 7 and compares byte by byte. */
@@ -197,6 +202,7 @@ test_known_answer(void)
 	CHECK_EQ(error, EBADMSG);
 	CHECK_BYTES(packet, expected_cipher, sizeof(packet));
 
+	/* Wipes the cipher. */
 	ssh_chachapoly_clear(&cipher);
 }
 
@@ -217,8 +223,10 @@ test_construction(void)
 	size_t index;
 	size_t fill;
 	size_t size_index;
+	size_t size;
 	int error;
 
+	/* Starts a cipher with a key made for this test. */
 	fill_key(key, 3);
 	ssh_chachapoly_init(&cipher, key);
 
@@ -233,8 +241,7 @@ test_construction(void)
 	/* Tries each sequence number at each packet size. */
 	for (index = 0; index < 3; index++) {
 		for (size_index = 0; size_index < 4; size_index++) {
-			size_t size;
-
+			/* Builds the expected bytes from the primitives for this size. */
 			size = sizes[size_index];
 			build_expected(key, seqs[index], plain, size, expected, expected_tag);
 
@@ -268,6 +275,7 @@ test_construction(void)
 	CHECK(memcmp(packet, expected, 64) != 0);
 	CHECK(memcmp(tag, expected_tag, sizeof(tag)) != 0);
 
+	/* Wipes the cipher. */
 	ssh_chachapoly_clear(&cipher);
 }
 
@@ -287,9 +295,11 @@ test_tampering(void)
 	size_t index;
 	int error;
 
+	/* Starts a cipher with a key made for this test. */
 	fill_key(key, 91);
 	ssh_chachapoly_init(&cipher, key);
 
+	/* Makes a plaintext whose first four bytes are a length that fits the packet. */
 	for (index = 0; index < sizeof(plain); index++)
 		plain[index] = (uint8_t)(index + 1U);
 	plain[0] = 0;
@@ -331,6 +341,7 @@ test_tampering(void)
 	CHECK_EQ(error, 0);
 	CHECK_BYTES(packet, plain, sizeof(packet));
 
+	/* Wipes the cipher. */
 	ssh_chachapoly_clear(&cipher);
 }
 
@@ -345,6 +356,10 @@ test_sizes(void)
 	uint8_t copy[8];
 	int error;
 
+	/*
+	 * Starts a cipher and a packet filled with a known byte, to try the sizes the
+	 * functions refuse.
+	 */
 	fill_key(key, 5);
 	ssh_chachapoly_init(&cipher, key);
 	memset(packet, 0x5a, sizeof(packet));
@@ -372,6 +387,7 @@ test_sizes(void)
 	error = ssh_chachapoly_open(&cipher, 0, packet, (size_t)SSH_PACKET_LIMIT + 5U, tag);
 	CHECK_EQ(error, EINVAL);
 
+	/* Wipes the cipher. */
 	ssh_chachapoly_clear(&cipher);
 }
 
@@ -383,6 +399,7 @@ test_init_clear(void)
 	uint8_t key[SSH_CHACHAPOLY_KEY];
 	uint8_t zeros[SSH_CHACHA20_KEY];
 
+	/* Splits a known key and checks the two halves that init stores. */
 	fill_key(key, 200);
 	ssh_chachapoly_init(&cipher, key);
 	CHECK_BYTES(cipher.main_key, key, SSH_CHACHA20_KEY);
