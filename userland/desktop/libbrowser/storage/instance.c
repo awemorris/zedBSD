@@ -81,6 +81,8 @@ browser_instance_create(
 	} else if (options->version != BROWSER_API_VERSION) {
 		error = ENOTSUP;
 	}
+
+	/* Leaves the output in its failure state. */
 	if (instance != NULL)
 		*instance = NULL;
 	if (error != 0) {
@@ -188,6 +190,8 @@ instance_make(
 			storage->close(storage_context);
 		return ENOMEM;
 	}
+
+	/* Records the cache limit and starts the list of storage areas. */
 	made->cache_limit = cache_limit;
 	wb_vector_init(&made->storage_areas, sizeof(void *));
 
