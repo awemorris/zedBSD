@@ -23,6 +23,8 @@
 
 ## Resume point
 
+- 2026-11-15 Q1: 全 Phase が cleared（p026 merge 9ee6b526be）。p025 の fuzz-host の 11 target は全部 300 万回で crash 無し。完了の手順: 回帰に使い続ける試験（run-unit・interop-host・sshd-pair-host・crypto-contract・check-skeleton・fuzz-host・keygen-host ほか）を `plan/tools/ssh/` に移して tools.md に登録（P2 q2101）、古い build の前提の試験（qemu-interop.sh・replace-check.sh・config-*-ssh.mk）は今の形に直すか消す。その後 Q1 が ws.md を完了の形にし Phase の directory を消す。
+
 - 2026-11-14 23:1x Q1: p025 cleared（merge 6637a37b99、header の基点は 4ef0ba4b28）。p025 の報告で、試験の C に規約の違反が多く残る（userland は済み）。Q1 の判断で p026 に分けた。WS336 の completed は p026 の後。check-skeleton.sh の sysroot の既定の path（build/amd64/sysroot）は作り直しの後に無く、`SSH_ZEDBSD_SYSROOT` で渡す。
 
 - 2026-11-14 22:3x Q1: build system の作り直しの後、全機種の既定の config は自前の ssh を選び OpenSSH を選ばない。p024 は Pi 5 の実機の相互運用で cleared。残りは p025（規約の全文の見直し、P2 q2089）だけで、p025 の cleared で WS336 を completed にする。config/ci の古い形の扱いは WS343・BUG-435。
@@ -64,7 +66,7 @@
 | [p023](phase023/phase.md) | 他の arch の build | cleared（2026-11-02 23:40 Q1、6e6fd8452 を main に merge 7d0968ab1）。実装済み・試験 PASS（2026-11-02 23:35 P6 q1998。arm64（rpi4）・riscv64（visionfive2-keiland）・armv7（zybo）で libcrypto-compat.so と ssh・sshd・ssh-keygen・sftp-server が警告 0、NEEDED は libcrypto-compat.so と libc.so だけ、check-exports PASS。armv7 に libcrypto-compat.so と ssh の規則を足した（Q1 が armv7 の sysroot を作り直した後）。壊す確かめ 6 通り中 5 が FAIL・1 は同値） | p021 | **WS335 実装** |
 | [p024](phase024/phase.md) | OpenSSH からの入れ替え（Opus、Q6 の A） | cleared（2026-11-14 22:3x Q1。作り直しの後の既定の config が自前の ssh を選び OpenSSH を選ばない形で入れ替えは済んでいた。Pi 5 の自前の sshd を host の OpenSSH 10.0p2 で確かめ全部 PASS（password・公開鍵・scp 8 MiB と再鍵・sftp・pty・exit の値、Pi の自前の ssh から自前の sshd）。zybo・config/ci の案・replace-check.sh は外した） | p022・p023 | **WS335 実装** |
 | [p025](phase025/phase.md) | 規約の全文の見直し（conformance-reviewer） | cleared（2026-11-14 Q1、merge 6637a37b99。userland の見直し・header の comment（基点 4ef0ba4b28）・run-unit・sshd-pair-host・interop-host 161・crypto-contract 108・3 機種の ssh の build warning 0。試験の C の残りは p026） | p024 | — |
-| [p026](phase026/phase.md) | 試験の C（`plan/ws336/tests/`）の規約の全文の見直し（p025 の残り: paragraph comment 464・条件の中の呼び出し 141・forward declaration 61 ほか） | 実装済み・試験 PASS（2026-11-15 P2 q2094。機械の検査 731→0、run-unit・sshd-pair-host・interop-host 161・crypto-contract 108・check-skeleton PASS。cleared は Q1） | p025 | — |
+| [p026](phase026/phase.md) | 試験の C（`plan/ws336/tests/`）の規約の全文の見直し（p025 の残り: paragraph comment 464・条件の中の呼び出し 141・forward declaration 61 ほか） | cleared（2026-11-14 Q1、77c52647ca を main に merge 9ee6b526be。試験の C の規約の違反 731 → 0、run-unit・sshd-pair-host・interop-host 161・crypto-contract 108・check-skeleton・fuzz-host PASS。CHECK の macro の引数の中の呼び出しは assert の値なので残す（Q1 の判断）） | p025 | — |
 
 ## 未実装（後で実装する物）
 

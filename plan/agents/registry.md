@@ -4,7 +4,7 @@
 [history/agents-registry-through-20261026.md](../history/agents-registry-through-20261026.md)。
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P2 | conformance-reviewer | ws336 p026 試験の C (q2094-i01) | `/home/awe/zedBSD-worktrees/p2-ws336p026` / `agent/p2-ws336p026` | 動いている（2026-11-14 23:2x） | — |
+| P2 | phase-runner | ws336 完了の手順 (q2101-i01) | `/home/awe/zedBSD-worktrees/p2-ws336close` / `agent/p2-ws336close` | 動いている（2026-11-15 00:0x） | — |
 | P7 | conformance-reviewer | ws334 p035 規約の見直し (q2100-i01) | `/home/awe/zedBSD-worktrees/p7-ws334c` / `agent/p7-ws334c` | 動いている（2026-11-14 23:5x） | — |
 | P8 | phase-runner | ws343 fetch の https (q2096-i01) | `/home/awe/zedBSD-worktrees/p8-ws343` / `agent/p8-ws343` | 返却（2026-11-14、merge は Makefile の案の承認待ち） | — |
 | P5 | phase-runner | ws329 p002 共通化 (q2092-i01) | `/home/awe/zedBSD-worktrees/p5-ws329b` / `agent/p5-ws329b` | 動いている（2026-11-14 23:3x） | — |
