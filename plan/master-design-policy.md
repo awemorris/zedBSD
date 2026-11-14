@@ -318,6 +318,7 @@ WS に固有の決定はその ws.md にある。ここは複数の WS・OS 全�
 - **libwebp の値（2026-11-13）**: ユーザーの決定の要点: libwebp-compat の YUV→RGB の定数などは引用であり、libwebp の著作権の表示は要らない。zip にも zedBSD の package にも libwebp の許諾を入れない（出典の comment は残す）。
 
 - **desktop は 1 人の利用者が前提（2026-11-14）**: ユーザーの決定の要点: Keiland の desktop はタブレットを前提にした client の OS なので、1 人の利用者で使う事を前提にする。別の session で設定（printer など）が変わる事はありえなくはないが、主な使い方とみなさない（その追従のための仕組みは要らない）。
+- **userland の最適化（2026-11-15）**: ユーザーの決定の要点: userland の独立の package（`userland/base/package.mk` の STANDALONE_PROGRAM_CFLAGS・STANDALONE_SHLIB_CFLAGS）は program・共有 library の両方を `-O2 -Wall -Wextra -Werror` で build する（前は `-Os`）。x86_64・rpi5・vf2 の userland で compile の error・warning 0 を確かめて main に入れた。
 
 ### 11.1 対象 platform
 
