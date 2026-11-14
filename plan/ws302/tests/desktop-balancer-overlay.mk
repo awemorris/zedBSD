@@ -4,11 +4,12 @@
 # SPDX-License-Identifier: Zlib
 
 #
-# The proposed CONFIG_KERN_DESKTOP_BALANCER rule of mk/kernel.mk and
-# CONFIG_KERN_DESKTOP_BALANCER_TEST rule of mk/test-kernel.mk, given on the
-# make command line until the proposals are applied, so that a kernel with
-# the balancer (and its stress test) can be built without changing the
-# build system:
+# The proposed additions to the CONFIG_KERN_DESKTOP_BALANCER rule of
+# mk/kernel.mk (the scheduler's hint decisions, src/kern/sched-hint.c) and
+# the proposed CONFIG_KERN_DESKTOP_BALANCER_TEST rule of mk/test-kernel.mk,
+# given on the make command line until the proposals are applied, so that
+# the kernel with the balancer (and its stress test) can be built without
+# changing the build system:
 #
 #   make -f Makefile -f plan/ws302/tests/desktop-balancer-overlay.mk \
 #	CONFIGMK=config/config.<platform>.mk CONFIG_KERN_DESKTOP_BALANCER=y \
@@ -24,8 +25,7 @@
 
 BALANCER_OVERLAY_OBJS :=
 ifneq ($(filter y,$(CONFIG_KERN_DESKTOP_BALANCER)),)
-KERN_CPPFLAGS += -DCONFIG_KERN_DESKTOP_BALANCER=1
-BALANCER_OVERLAY_OBJS += $(BUILD)/src/kern/desktop-balancer.o
+BALANCER_OVERLAY_OBJS += $(BUILD)/src/kern/sched-hint.o
 ifneq ($(filter y,$(CONFIG_KERN_DESKTOP_BALANCER_TEST)),)
 KERN_CPPFLAGS += -DCONFIG_KERN_DESKTOP_BALANCER_TEST=1
 BALANCER_OVERLAY_OBJS += $(BUILD)/src/kern/sched-hint-test.o
