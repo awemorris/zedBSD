@@ -5,14 +5,30 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build
+    name: Build ${{ matrix.platform }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x86_64
+            artifact: zedbsd-x86_64.img.gz
+          - platform: rpi4
+            artifact: zedbsd-rpi4.img.gz
+          - platform: rpi5
+            artifact: zedbsd-rpi5.img.gz
+          - platform: vf2
+            artifact: zedbsd-vf2.img.gz
+    env:
+      CONFIGMK: config/config.${{ matrix.platform }}.mk
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,96 +37,43 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential cmake curl device-tree-compiler git grub-common gzip ninja-build \
-            mtools nasm patch xz-utils
+            build-essential cmake curl device-tree-compiler dosfstools e2fsprogs git grub-common gzip \
+            mtools nasm ninja-build patch python3 xz-utils
 
-      - name: Install pinned LLVM toolchain cache
-        run: |
-          make toolchain-cache
-          make -j4 toolchain
+      - name: Install the pinned toolchain from its cache
+        run: make CONFIGMK="$CONFIGMK" toolchain-cached
 
-      - name: Build intel-keiland
+      - name: Accept the firmware licenses
+        run: yes | make CONFIGMK="$CONFIGMK" firmware-licenses
+
+      - name: Build the disk image
+        run: make -j4 CONFIGMK="$CONFIGMK" disk
+
+      - name: Compress the disk image
         run: |
-          cp config/ci/config-amd64.mk config.mk
-          yes | make firmware-licenses
-          make -j4
           mkdir -p artifacts
-          gzip -9 -c build/amd64/hdd-image.img > artifacts/zedbsd-intel.img.gz
+          gzip -9 -c "build/${{ matrix.platform }}/hdd-image.img" > "artifacts/${{ matrix.artifact }}"
 
-      - name: Build intel-server
-        run: |
-          cp config/ci/config-amd64-server.mk config.mk
-          yes | make firmware-licenses
-          make -j4
-          mkdir -p artifacts
-          gzip -9 -c build/amd64/hdd-image.img > artifacts/zedbsd-intel-server.img.gz
-
-      - name: Build pi4-keiland
-        run: |
-          cp config/ci/config-rpi4.mk config.mk
-          yes | make firmware-licenses
-          make -j4
-          mkdir -p artifacts
-          gzip -9 -c build/arm64/hdd-image.img > artifacts/zedbsd-rpi4.img.gz
-
-      - name: Build pi4-server
-        run: |
-          cp config/ci/config-rpi4-server.mk config.mk
-          yes | make firmware-licenses
-          make -j4
-          mkdir -p artifacts
-          gzip -9 -c build/arm64/hdd-image.img > artifacts/zedbsd-rpi4-server.img.gz
-
-      - name: Build vf2-keiland
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          cp config/ci/config-visionfive2-keiland.mk config.mk
-          yes | make firmware-licenses
-          make -j4 native-image
-          mkdir -p artifacts
-          gzip -9 -c build/visionfive2/native.img > artifacts/zedbsd-vf2.img.gz
-
-      - name: Build pc98
-        run: |
-          cp config/ci/config-pc98.mk config.mk
-          yes | make firmware-licenses
-          make -j4
-          mkdir -p artifacts
-          gzip -9 -c build/pc98/hdd-image.img > artifacts/zedbsd-pc98.img.gz
-
-      - name: Package zedbsd-qemu.zip
-        continue-on-error: true
-        run: |
-          make zedbsd-nightly-zip
-          cp build/amd64/zedbsd-nightly.zip artifacts/zedbsd-qemu.zip
-
-      - name: Upload binary
+      - name: Upload the disk image
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts
-          path: |
-            artifacts/*.img.gz
-            artifacts/zedbsd-qemu.zip
+          name: image-${{ matrix.platform }}
+          path: artifacts/${{ matrix.artifact }}
 
   release:
     name: Create GitHub Release
-
     runs-on: ubuntu-latest
-
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
     permissions:
       contents: write
-
     needs:
       - build
-
     steps:
-      - name: Download artifacts
+      - name: Download the disk images
         uses: actions/download-artifact@v4
         with:
-          name: artifacts
+          pattern: image-*
+          merge-multiple: true
           path: artifacts
 
       - name: Create GitHub Release
@@ -124,25 +87,14 @@ jobs:
 
           body: |
             This is an automated nightly build. Not an official release.
-            
+
             zedBSD OS
             =========
-            
-            | Image                   | CPU     | Machine        | File                         | Description                                  |
-            |-------------------------|---------|----------------|------------------------------|----------------------------------------------|
-            | Intel Keiland           | x86_64  | UEFI           | `zedbsd-intel.img.gz`        | USB image                                    |
-            | Intel Server            | x86_64  | UEFI           | `zedbsd-intel-server.img.gz` | USB image                                    |
-            | Pi4 Keiland             | Arm64   | Raspberry Pi 4 | `zedbsd-rpi4.img.gz`         | SD image                                     |
-            | Pi4 Server              | Arm64   | Raspberry Pi 4 | `zedbsd-rpi4-server.img.gz`  | SD image                                     |
-            | VisionFive 2 Keiland    | RISC-V  | VisionFive 2   | `zedbsd-vf2.img.gz`          | SD image                                     |
-            | NEC PC-9800             | i386    | NEC PC-9800    | `zedbsd-pc98.img.gz`         | CF image                                     |
-            | QEMU Win64              | x86_64  | Windows        | `zedbsd-qemu.zip`            | NVMe image with QEMU binary. Run `boot.bat`. |
 
-          files: |
-            artifacts/zedbsd-intel.img.gz
-            artifacts/zedbsd-intel-server.img.gz
-            artifacts/zedbsd-rpi4.img.gz
-            artifacts/zedbsd-rpi4-server.img.gz
-            artifacts/zedbsd-vf2.img.gz
-            artifacts/zedbsd-pc98.img.gz
-            artifacts/zedbsd-qemu.zip
+            | Image        | CPU     | Machine        | File                   | Description |
+            |--------------|---------|----------------|------------------------|-------------|
+            | x86_64       | x86_64  | UEFI PC        | `zedbsd-x86_64.img.gz` | USB image   |
+            | Raspberry Pi 4 | Arm64 | Raspberry Pi 4 | `zedbsd-rpi4.img.gz`   | SD image    |
+            | Raspberry Pi 5 | Arm64 | Raspberry Pi 5 | `zedbsd-rpi5.img.gz`   | SD image    |
+            | VisionFive 2 | RISC-V  | VisionFive 2   | `zedbsd-vf2.img.gz`    | SD image    |
+          files: artifacts/*.img.gz
