@@ -17,9 +17,9 @@
  * Only the compositor's threads ask (the devices' thread and the finding's),
  * one request and its answer at a time under seat_lock, and the answer is
  * waited for without a time limit: sessiond answers once its loop runs
- * again, and the socket's end or the cancel ends the wait.  Opened by
- * sessiond, a node is read at once, before its owner has been changed to
- * the seat's user.  The event loop's own scan (without a thread) opens the
+ * again, and the socket's end or the cancel ends the wait.  sessiond keeps
+ * the nodes root's and opens them itself, so a node is read at once and its
+ * owner is never changed.  The event loop's own scan (without a thread) opens the
  * nodes directly: it never waits for sessiond, which does not answer while
  * it waits for the compositor's READY.
  */
@@ -540,8 +540,9 @@ open_node(
 	}
 
 	/*
-	 * The device's own failure is remembered; a node not the seat's user's
-	 * yet (EACCES) is tried at every scan.
+	 * The device's own failure is remembered; a node this process may not
+	 * open (EACCES: root's under sessiond, or not given to the user yet
+	 * without it) is tried at every scan.
 	 */
 	if (error != 0) {
 		if (events_heard && (error == EIO || error == ENXIO || error == ENODEV) && node < 64UL * KL_BACKEND_INPUT_REFUSED_WORDS)
