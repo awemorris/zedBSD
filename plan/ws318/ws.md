@@ -3,7 +3,7 @@
 # WS318 libmedia の作り直し: Vulkan の device の共有・codec の問い合わせと指定・encoder・カメラ・libavcodec の内部の fallback、Keiland の app を libmedia だけに
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: planning（2026-10-30 Q1 が作成、担当は未割当）
+- Status: canceled（2026-11-15 ユーザーの判断。Vulkan の device の共有・codec の問い合わせと指定・encoder の口・カメラ・app からの libavcodec の移行は未実装のまま取り下げた。要る物は要る時に新しい WS で）
 - 目標: libmedia を Keiland の app の唯一の media の入り口にし、hardware は Vulkan Video の 1 本、無ければ libmedia の中で libavcodec を dlopen して使う。decoder・encoder（H.264・H.265・AAC-LC）・カメラを、app と共有する Vulkan の device の上で、fd を API に見せずに扱う。
   個別の GPU・VPU の Vulkan Video の driver は WS319〜WS325（この WS の completed の後）。
 
@@ -84,6 +84,8 @@
 - p016〜p019（H.265 の解析）は WS324 p006a〜h で済む。
 
 ## Resume point
+
+- 2026-11-15 Q1: ユーザーの判断で canceled。その時の main の実態: libmedia の decoder の backend は vkvideo（H.264・H.265 の hardware の decode）・h264sw（WS326）・aac。H.265 の解析 h265sw-* は WS324 が作った。`media_codec_load()` は常に 0、`vkvideo-runtime.c` は自分で Vulkan の device を作る、encoder は AAC だけ、カメラは無い、Video Player・Music は `media-app/avcodec.c` を build に含める。設計（design.md・proposed/・user-questions.md）は記録として残す。依存していた WS329（p024・p025）・WS330（p030・p047）の前提は各 ws.md に書いた。
 
 - 2026-10-30 Q1: 作成。担当は未割当。
 - 2026-11-01 09:24 Q1: ユーザーの Q318 の答えで設計の改訂が要る（上の「ユーザーの決定（2026-11-01）」）。次は p001 の改訂（libavcodec の backend を外し独自の software へ fallback、MJPEG を外す、hardware の試験は driver の WS へ）。

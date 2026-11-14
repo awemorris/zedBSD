@@ -70,6 +70,8 @@
 
 ## Resume point
 
+- 2026-11-15 Q1: WS318 は canceled（ユーザーの判断）。p024（libmedia の backend、WS318 の encoder の ops）と p025（WS318 p008 に依る）の依存は無くなった。libmedia に encoder の口が無いので、p024 の前に Q1 が「encoder の最小の公開の口を WS329 の中で決めるか、新しい WS を立てるか」を決め、p024・p025 の phase.md を直す（p002〜p023 は影響なし）。Q329-4（WS318 と並べる）・Q329-5（WS318 の `media_encoder_config` に速さの欄）は、その口を決める時に読み替える。
+
 - 2026-11-14 Q1: Q329-1〜5 は全部 A（11-01 の答えは取り消し）。p001 cleared。p002（共通化の refactor）から P5 q2092。header の基点と p003 の名前の写しは下の 10-31 の行。
 
 - 2026-10-30 Q1: 作成。WS326 の completed の後に p001。
