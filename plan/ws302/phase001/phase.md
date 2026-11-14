@@ -17,10 +17,12 @@ ws.md の p001 の行のとおり。どの統計からどの性質を推すか�
 - design-reviewer（1 回、blocker 2・major 11・minor 13）の結果は [../design-review.md](../design-review.md)。全部を第 2 版に反映した（design.md §14）。主な変更: user の thread を kernel の worker の段（8）より上に置かない、`sched_set_cpu` の状態の確かめ直し、手渡しの席を上書きしない、MOVE は希望の種類の idle の CPU だけ、S2 を 4 本に、試験の stress を p003 に。
 - 観察の UAPI の形の案 [../proposed/include/uapi/dtb-sysctl.h](../proposed/include/uapi/dtb-sysctl.h)（-m64・-m32 で 720 byte）。
 
+- 2026-11-14 P6（q2093-i01）: ユーザーが Q302-1〜7 を全部推しで決めた（2026-11-14）。設計を第 3 版に改訂した（今の main fd18bd61ee の code・新しい build system と照らし、冒頭に改訂の要点と食い違いの表 D-1〜D-15、決定を §10.1 に）。design-reviewer の 2 回目（blocker 0・major 6・minor 9）を反映した（design.md §15、design-review.md の「第 3 版の review」）。
+
 ## 受け入れ
 
 - design-reviewer の指摘の反映（済み、design.md §14）。
-- ユーザーの review（Q302-1〜7 の答え）。これが来るまで cleared にしない。
+- ユーザーの review（Q302-1〜7 の答え）。2026-11-14 に全部推しで決まった。cleared は Q1 の判定（第 3 版の改訂の後）。
 
 ## 後の Phase への持ち越し
 

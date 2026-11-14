@@ -80,8 +80,8 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 | Phase | 内容 | 状態 | 依存 | LW |
 | --- | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 検討と設計: 情報 → 性質 → hint の表、規則の強さの順、sched の口、統計の場所と負担、config、試験と受け入れ、design-reviewer、ユーザーの問い | in-progress（2026-11-14 P6: 第 3 版で今の code（fd18bd61ee）と照合し決定を書き入れ、design-reviewer の 2 回目を反映。cleared は Q1 の判定） | — | — |
-| [p002](phase002/phase.md) | config（`CONFIG_DTB`、mk は案）、`dtb.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、gpu.c・input.c の通知）、`base_priority` の初め | in-progress（P6 q2093-i01） | p001、Q302-5 | 3 |
+| [p001](phase001/phase.md) | 検討と設計: 情報 → 性質 → hint の表、規則の強さの順、sched の口、統計の場所と負担、config、試験と受け入れ、design-reviewer、ユーザーの問い | in-progress（2026-11-14 P6: 第 3 版で今の code（fd18bd61ee）と照合し決定を書き入れ、design-reviewer の 2 回目（blocker 0・major 6・minor 9）を反映。cleared は Q1 の判定） | — | — |
+| [p002](phase002/phase.md) | config（`CONFIG_DTB`、mk は案）、`dtb.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、gpu.c・input.c の通知）、`base_priority` の初め | 実装済み・試験 PASS（2026-11-14 P6 q2093-i01: x86_64・rpi5・vf2 の n・y の build warning 0、n は基点と同じ kernel、x86_64 QEMU の起動 n・y。mk の案はユーザーの承認待ち） | p001、Q302-5 | 3 |
 | p003 | sched の口: base の priority と `sched_hint_set`、kernel の中の優先、CPU の種類の表、行き先の選び、置き場所・盗み・tick の助け、`sched_hint_place`、`sched_set_cpu` の確かめ直し、走っている thread の手渡し、飢えの防ぎ、計数、`CONFIG_DTB_TEST` の偽の種類と stress（QEMU 30 分） | planned | p002、Q302-2・3 | 7 |
 | p004 | DTB の本体（dtb.c・dtb-policy.c、分類・履歴・nice の段・HID の状態・周期・予算、`dtb=off`、`kern.dtb`） | planned | p003、Q302-1・6 | 6 |
 | p005 | （条件つき）compositor からの前面の app の hint（Q302-4 で作る時か、p006 の数で要る時だけ） | — | p004、UAPI の決定 | 3 |
@@ -103,8 +103,9 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 ## 再開点（2026-10-31 P5、q1775-i01）
 
+- 2026-11-14 P6（q2093-i01）: design.md を第 3 版に改訂（冒頭に第 2 版からの改訂の要点と今の code との食い違いの表 D-1〜D-14）。p002 を実装（[phase002/phase.md](phase002/phase.md)、mk の案はユーザーの承認待ち）。次は p003（sched の口）。
 - 2026-11-14 Q1: 問いは全部推しで決まった。kernel thermal と CPU の種類・相対の性能（WS333、completed）が入ったので、P6 q2093 が設計を今の code に合わせて改訂し（design.md 第 3 版）、design-reviewer の後に p002 から実装する。
 
 - p001 の設計 [design.md](design.md) 第 2 版（main 3d820d9ca の code で書いた。第 1 版 f2d6ca7b4 に review を反映）、header の案 [proposed/include/kern/](proposed/include/kern/)（`sched-hint.h`・`dtb.h`、UAPI の案 `proposed/include/uapi/dtb-sysctl.h`）、問い [user-questions.md](user-questions.md)（Q302-1〜7）、review [design-review.md](design-review.md)。HAL は変えない（design.md §5）。
-- 次: ユーザーの答え。p002 は Q302-5、p003 は Q302-2・3、p004 は Q302-1・6 の答えの後（推しで先に始めるかは Q1、design.md §10.2 の 5）。
+- （2026-10-31 の時点の次: ユーザーの答え。2026-11-14 に決まった）
 - 前の再開点（2026-10-29）の source の棚卸し [survey-source.md](survey-source.md) は design.md §2.8 で引き直した。§0 の ws.md の食い違いは既に直っていた。
