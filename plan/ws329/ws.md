@@ -17,6 +17,8 @@
 
 ## ユーザーの決定（2026-11-01、Q329 の答え。要点）
 
+- **2026-11-14 ユーザーから、Q329-1〜5 を全部推しの A で決める、という趣旨の答えを受けた。下の 2026-11-01 の答え（画質より速さ、SIMD の 2 段）は取り消し、設計（p001、A で書かれた物）のまま進める**: 画質の目標は釣り合いの preset で x264 veryfast の BD-rate +40% 以内・速い preset で +80% 以内、速さの目標は Q329-2 の A、SIMD は範囲の外、B-frame は入れる、WS318 と並べる、encoder の設定に速さの欄。
+
 - 2026-11-01 09:30 ユーザーから次の趣旨の答えを受けた（原文は載せない）。Q329-1・Q329-2 の推し（画質の BD-rate の目標、SIMD を範囲の外）を置き換える。
   - 画質より速さを優先する。
   - SIMD は 2 段で入れる: (1) gcc・clang の自動の loop の vector 化が効くように、vectorizer の report（`-fopt-info-vec`・`-Rpass=loop-vectorize` など）を見ながら C の書き方を整える Phase を作る。(2) それで表せない SIMD は、short vector 型の intrinsics（`__attribute__((vector_size))` の類の C の拡張か、architecture ごとの intrinsics）で C で実装する。
@@ -39,7 +41,7 @@
 
 | Phase | 目的 | 型 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
-| ws329-p001 | 設計（Opus 5.5）: decoder との共通化の洗い出しと設計、encoder の module・header の案・試験の道・実装の Phase の表 | O | in-progress（q1758 P5。設計と review（29 件）の反映は済み、Q1 の受け入れと Q329-1〜5 の回答待ち） | — |
+| ws329-p001 | 設計（Opus 5.5）: decoder との共通化の洗い出しと設計、encoder の module・header の案・試験の道・実装の Phase の表 | O | cleared（2026-11-14 Q1。設計と review の反映は済み、問いは 2026-11-14 に全部 A で決まった） | — |
 | [ws329-p002](phase002/phase.md) | 共通化の refactor（CAVLC の表・CABAC の context の選び・context の初期化・表 A-1、decoder の振る舞いは不変） | O | planned | WS326 completed（p026 を含む） |
 | [ws329-p003](phase003/phase.md) | encoder の header と骨格を source に、run-unit・check-skeleton・試験の土台 fixture.h、BASE | O | planned | p002 |
 | [ws329-p004](phase004/phase.md) | vcodec-bitwriter、vcodec-nalwriter | S | planned | p003 |
@@ -67,6 +69,8 @@
 | [ws329-p026](phase026/phase.md) | 規約の全文の見直し | D | planned | p023〜p025 |
 
 ## Resume point
+
+- 2026-11-14 Q1: Q329-1〜5 は全部 A（11-01 の答えは取り消し）。p001 cleared。p002（共通化の refactor）から P5 q2092。header の基点と p003 の名前の写しは下の 10-31 の行。
 
 - 2026-10-30 Q1: 作成。WS326 の completed の後に p001。
 

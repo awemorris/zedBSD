@@ -15,6 +15,8 @@
 
 ## ユーザーの決定（2026-11-01、Q330 の答え。要点）
 
+- **2026-11-14 ユーザーから、Q330-1〜4 を全部推しの A で決める、という趣旨の答えを受けた。** Q330-1 は decoder・encoder とも Main（8 bit 4:2:0）だけ。A の「10 bit は libavcodec に回す」は libmedia が libavcodec を使わない決定と合わないので、10 bit の stream は当面再生できない（扱いは後で決め直す、2026-11-14 の問いの選択肢の説明のとおり）。Q330-2 A、Q330-3 A（5330 で 1080p30 など、設計の数）、Q330-4 A（WS329 の completed の後）。
+
 - 2026-11-01 09:30 ユーザーから、H.265 は Main（8 bit）だけにし、10 bit（Main 10）は表示と変換の道ができた後の別の WS で行う、という趣旨の答えを受けた。WS318 の決定で libmedia は libavcodec を使わないので、それまで 10 bit の動画は再生できない（前の案の「10 bit は libavcodec に回す」は取り消し）。
 - Q1 の判断: Q330-2 A（H.265 の解析を WS318 と 1 つに）、Q330-4 A（WS329 の完了の後）。Q330-3 の速さの目標は WS329 の答え（画質より速さ、自動の vector 化の Phase と short vector 型の intrinsics）に合わせて設計の改訂で決める。
 
@@ -35,7 +37,7 @@
 
 | Phase | 目的 | 型 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
-| ws330-p001 | 設計（Opus 5.5）: H.264 との共通部分の洗い出しと共通化の設計（frame・DPB を含む）、H.265 の decoder の module・header・試験の道・実装の Phase の表、encoder の地図と公開の header | O | in-progress（q1763 P5。設計と review（30 件）の反映は済み、Q1 の受け入れと Q330-1〜4 の回答待ち） | — |
+| ws330-p001 | 設計（Opus 5.5）: H.264 との共通部分の洗い出しと共通化の設計（frame・DPB を含む）、H.265 の decoder の module・header・試験の道・実装の Phase の表、encoder の地図と公開の header | O | cleared（2026-11-14 Q1。設計と review の反映は済み、問いは 2026-11-14 に全部 A で決まった） | — |
 | [ws330-p002](phase002/phase.md) | 共通化（vcodec.h の補助・frame・DPB・出力・CABAC の追加を H.264 と H.265 で共通に、H.264 の decoder と encoder を移し前後一致で確かめる） | O | planned | WS329 completed、WS326 p026 |
 | [ws330-p003](phase003/phase.md) | decoder の header と骨格を source に、試験の道具、BASE | O | planned | p002 |
 | [ws330-p004](phase004/phase.md) | h265sw-nal、h265sw-sei | S | planned | p003 |
@@ -91,6 +93,8 @@
 - H.265 の解析の 7 header（h265sw-nal・scaling・vui・rps・ps・slice・poc）は WS324 の source の物が正になる（WS324 p006a〜h）。WS330 の p004・p006〜p011 は確かめだけになる。h265sw_rps_read の引数が 1 つ増えた。software の decoder だけが使う量子化の行列と h265sw_ps_scaling は WS330 p003 が足す。適合の道具は plan/tools/h265/conformance/ に移した。
 
 ## Resume point
+
+- 2026-11-14 Q1: Q330-1〜4 は全部 A。p001 cleared。p002 は WS329 の completed の後（Q330-4）。
 
 - 2026-10-30 Q1: 作成。WS329 の completed の後に p001。
 - 2026-10-31 P5（q1763-i01）: p001 の設計を branch agent/p5-ws330 に（design.md・proposed/ の header 38 個（common 7 を含む、cc と clang の c89 pedantic で単独 compile を確かめた）・user-questions.md（Q330-1〜4）・phase002〜033 の phase.md（p024 は p024a・p024b に分けた）・tests/conformance の list・fetch.sh・sha256・design-review.md）。source は変えていない。次: Q1 が受け入れて merge、Q330-1〜4 の回答、design §14 の Q1 への注意（WS329 p003 への入力、WS318 の記録、phase024/phase.md の git rm）。WS329 completed の後に p002。

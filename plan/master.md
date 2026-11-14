@@ -33,7 +33,9 @@
 | P2 | q2089 | [WS336](ws336/ws.md) [p025](ws336/phase025/phase.md)（自前の ssh・sshd の規約の全文の見直し）。p024 は Pi 5 の実機で cleared、p025 の後に WS336 を completed に |
 | P3 | q2090 | [WS345](ws345/ws.md)（ブラウザの thread の分け方）の p010・p014 の残り |
 | P4 | q2091 | [WS328](ws328/ws.md)（libbrowser のベクトル描画と SVG）の p001 設計 |
-| P5〜P8 | — | 動いていない |
+| P5 | q2092 | [WS329](ws329/ws.md)（H.264 の software の encoder）p002 共通化の refactor |
+| P6 | q2093 | [WS302](ws302/ws.md)（デスクトップスレッドバランサ）設計の改訂 → p002 |
+| P7・P8 | — | 動いていない |
 
 - host は 2026-11-14 19:30 頃に再起動。NVMe の書き込みは 1.0 GB/s に戻った（止めた時は 22 MB/s）。merge していない branch の diff は [backup-20261114/](backup-20261114/README.md)。
 <!-- master:agents:end -->
@@ -101,7 +103,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-436 · q2092 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-436 · q2094 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

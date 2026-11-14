@@ -92,6 +92,8 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 ## 判断が要る点
 
+- **2026-11-14 ユーザーから、Q302-1〜7 を全部推しの案で決める、という趣旨の答えを受けた**（[user-questions.md](user-questions.md) の (A, 推し)・(B, 推し)・推し）。下の D2・D4・D5 と Q302-6・7 はこれで決まった。
+
 - D1: 決定済み（2026-10-27 09:39 ユーザー（クリック）「CONFIG_DTB の既定は off」、上の原文）。
 - D2: → Q302-1（推し: nice → 忙しい計算 → 画面を作る process → GPU の app → terminal、terminal は兄弟も空いた P がある時だけ）と Q302-2（忙しい計算の空いた P への溢れ）。
 - D3: 決定済み（2026-10-27 09:39 ユーザー（クリック）「nice は core の選択に加えて sched の priority にも効かせる」、上の原文）。今は sched が nice を読まない（survey-source.md §2）ので、飢えを防ぐ対応（段か重みか上限か）は p001 の設計で決める。→ user の thread を kernel の worker（8）より上に置かない段（DTB が on の時の user の既定 10、上げは 8・9）と 100 ms の飢えの防ぎ（design.md §4.7）。段と on の時だけにするかは Q302-3。
@@ -100,6 +102,8 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 - 新: Q302-6（観察の読みだけの UAPI `kern.dtb`）、Q302-7（受け入れの数、design.md §6.4）。
 
 ## 再開点（2026-10-31 P5、q1775-i01）
+
+- 2026-11-14 Q1: 問いは全部推しで決まった。kernel thermal と CPU の種類・相対の性能（WS333、completed）が入ったので、P6 q2093 が設計を今の code に合わせて改訂し（design.md 第 3 版）、design-reviewer の後に p002 から実装する。
 
 - p001 の設計 [design.md](design.md) 第 2 版（main 3d820d9ca の code で書いた。第 1 版 f2d6ca7b4 に review を反映）、header の案 [proposed/include/kern/](proposed/include/kern/)（`sched-hint.h`・`dtb.h`、UAPI の案 `proposed/include/uapi/dtb-sysctl.h`）、問い [user-questions.md](user-questions.md)（Q302-1〜7）、review [design-review.md](design-review.md)。HAL は変えない（design.md §5）。
 - 次: ユーザーの答え。p002 は Q302-5、p003 は Q302-2・3、p004 は Q302-1・6 の答えの後（推しで先に始めるかは Q1、design.md §10.2 の 5）。
