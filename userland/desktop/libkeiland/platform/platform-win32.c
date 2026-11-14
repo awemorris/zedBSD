@@ -430,6 +430,7 @@ platform_thread_create(
 	if (start == NULL)
 		return ENOMEM;
 
+	/* Hands the thread's function and its argument to the new thread. */
 	start->run = run;
 	start->argument = argument;
 

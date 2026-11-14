@@ -40,6 +40,7 @@ wWinMain(
 	int handed;
 	int status;
 
+	/* The program reads the command line itself as wide text, so it uses none of the start-up parameters. */
 	(void)instance;
 	(void)previous;
 	(void)line;
@@ -95,11 +96,15 @@ main_arguments(
 			main_arguments_free(index, arguments);
 			return NULL;
 		}
+
+		/* Converts the word to UTF-8. */
 		arguments[index] = malloc((size_t)bytes);
 		if (arguments[index] == NULL) {
 			main_arguments_free(index, arguments);
 			return NULL;
 		}
+
+		/* Writes the UTF-8 text of the word. */
 		(void)WideCharToMultiByte(CP_UTF8, 0U, wide[index], -1, arguments[index], bytes, NULL, NULL);
 	}
 

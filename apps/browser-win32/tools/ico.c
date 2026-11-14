@@ -99,6 +99,7 @@ ico_write(
 		if (error != 0)
 			return error;
 
+		/* Adds the image's size to the total. */
 		image_bytes = ico_image_bytes(&images[index]);
 		total += image_bytes;
 
@@ -130,6 +131,7 @@ ico_write(
 			ico_put_bitmap(file + offset, &images[index]);
 		}
 
+		/* Moves past the image's bytes. */
 		offset += (uint32_t)image_bytes;
 	}
 
@@ -294,6 +296,7 @@ ico_put_entry(
 	if (image->width == ICO_SIZE_MAX)
 		width_byte = 0;
 
+	/* Writes a side of 256 as 0 in the height as well. */
 	height_byte = (unsigned char)image->height;
 	if (image->height == ICO_SIZE_MAX)
 		height_byte = 0;
@@ -335,6 +338,7 @@ ico_put_bitmap(
 	uint32_t column;
 	uint32_t source_index;
 
+	/* Measures the colour bytes and the mask rows. */
 	colour_bytes = (uint64_t)image->width * image->height * 4U;
 	mask_row_bytes = ico_mask_row_bytes(image->width);
 
@@ -377,6 +381,7 @@ ico_put_bitmap(
 				mask_row[column / 8U] |= (unsigned char)(0x80U >> (column % 8U));
 		}
 
+		/* Moves to the next row of the mask. */
 		mask_row += mask_row_bytes;
 	}
 }

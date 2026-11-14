@@ -73,6 +73,8 @@ main(
 			fprintf(stderr, "make-ico: out of memory\n");
 			return 1;
 		}
+
+		/* Draws the icon tile of this size. */
 		kwl_icon_tile((unsigned)icon, side, pixels[index], side);
 		images[index].width = side;
 		images[index].height = side;
@@ -84,6 +86,8 @@ main(
 				fprintf(stderr, "make-ico: cannot write the PNG (%d)\n", error);
 				return 1;
 			}
+
+			/* Hands the PNG's bytes to the image. */
 			images[index].png = png;
 			images[index].png_length = png_length;
 		} else {
@@ -99,6 +103,8 @@ main(
 		fprintf(stderr, "make-ico: cannot write the icon (%d)\n", error);
 		return 1;
 	}
+
+	/* Saves the file. */
 	error = make_ico_save(argv[1], file, length);
 	free(file);
 	free(png);

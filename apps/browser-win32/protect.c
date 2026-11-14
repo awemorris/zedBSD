@@ -84,6 +84,8 @@ shell_storage_wrap(
 		*context = NULL;
 		return ENOMEM;
 	}
+
+	/* Keeps the storage that is wrapped. */
 	backend->inner = *calls;
 	backend->inner_context = *context;
 
@@ -197,6 +199,8 @@ protect_write(
 		(void)LocalFree(sealed.pbData);
 		return ENOMEM;
 	}
+
+	/* Builds the record: the magic and the sealed bytes. */
 	memcpy(record, PROTECT_MAGIC, PROTECT_MAGIC_LENGTH);
 	memcpy(record + PROTECT_MAGIC_LENGTH, sealed.pbData, sealed.cbData);
 	error = backend->inner->write(backend->inner_context, space, key, record, PROTECT_MAGIC_LENGTH + (size_t)sealed.cbData);
@@ -320,6 +324,8 @@ protect_unseal(
 		*found = 0;
 		return 0;
 	}
+
+	/* Takes the sealed bytes after the magic. */
 	sealed.cbData = (DWORD)(length - PROTECT_MAGIC_LENGTH);
 	sealed.pbData = (BYTE *)(bytes + PROTECT_MAGIC_LENGTH);
 	memset(&plain, 0, sizeof(plain));

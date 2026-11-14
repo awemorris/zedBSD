@@ -244,6 +244,7 @@ media_os_file_read_at(
 		if (piece > MEDIA_OS_READ_PIECE)
 			piece = MEDIA_OS_READ_PIECE;
 
+		/* Reads the next piece at the position after what was read. */
 		count = pread(file->descriptor, bytes + done, piece, (off_t)(offset + (uint64_t)done));
 
 		/* A signal interrupted the call before it read: repeats it. */
@@ -258,6 +259,7 @@ media_os_file_read_at(
 		if (count == 0)
 			return EIO;
 
+		/* Moves past the bytes that were read. */
 		done += (size_t)count;
 	}
 
