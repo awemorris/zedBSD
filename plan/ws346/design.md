@@ -411,7 +411,7 @@ layout-cache: mode=on engines=<engine を作った数> styles=<計算> style_hit
 `BROWSER_LAYOUT_CACHE=verify` で次を流し、`mismatches=0` と、`off` の時と同じ PASS の数であること:
 
 - `run-wpt-reftests.py`（既定の 100 件）、`run-interop2025-scripted-reftests.py`、`run-dom-tests.py`、`run-js-tests.py`、`run-acid-tests.py`（Acid2・Acid3）。
-- `plan/ws334/tests/stage1.sh`（段 1 の回帰）。
+- `plan/tools/browser-win32/stage1.sh`（段 1 の回帰）。
 - live の頁（Q1 が流す。取得は最小の回数）: amazon.co.jp、yahoo.co.jp、google.com、store.google.com。
 
 ### 6.3 わざと壊す

@@ -148,7 +148,7 @@ U2 の答えの A（名前で開いて本家と compat を切り替える、Wind
   根は `SSL_CTX_set_default_verify_paths`（zedBSD は `/etc/ssl/cert.pem`、Windows は ROOT から Disallowed を除いた物と .exe の隣の `cert.pem`、Disallowed は鎖のどこでも拒む: D14・D24）。libbrowser はその失敗を context の失敗とし、続けて program の束（`<data>/certs/ca-certificates.pem`）を読む。
   `wb_os_trust_roots` の DER を入れる loop、Disallowed の指紋の一覧、証明書ごとの検証の callback、`OPENSSL_init_ssl` は無い（`wb_os_trust_roots` は p045 で消した）。mailer は自己署名の pin のため、検証が通らない時に `SSL_get1_peer_certificate` と `X509_digest(EVP_sha256())` で指紋を取る。
   `EPROTONOSUPPORT` は「この process では TLS の context が作れない」の意味だけ（library が無い事は link の時に解ける）。
-- **試験**: host は compat を host の cc で build して link する（`plan/tools/tls/host-compat-libs.sh`、`plan/ws074/tests/host-build.sh`）。zedBSD の QEMU は `plan/ws335/tests/run-browser-guest.sh`・`run-mailer-guest.sh`（名前の照合と SNI の case を含む）、Windows は `plan/ws334/tests/tls-wine.sh`。
+- **試験**: host は compat を host の cc で build して link する（`plan/tools/tls/host-compat-libs.sh`、`plan/ws074/tests/host-build.sh`）。zedBSD の QEMU は `plan/ws335/tests/run-browser-guest.sh`・`run-mailer-guest.sh`（名前の照合と SNI の case を含む）、Windows は `plan/tools/browser-win32/tls-wine.sh`。
 
 ### 4.3 build
 

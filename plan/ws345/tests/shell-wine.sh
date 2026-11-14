@@ -1,7 +1,7 @@
 #!/bin/sh
 # ws345-p007: OmniGrammaton's window under Wine (Xvfb 1280x800, Mesa's lavapipe through Wine's Vulkan) stays alive
 # while its page's script runs: one script, build -> start -> run -> collect -> summary.  The Windows build is
-# apps/browser-win32's (x86_64, its zip extracted into a new directory, as plan/ws334/tests/wine-run.sh does); the
+# apps/browser-win32's (x86_64, its zip extracted into a new directory, as plan/tools/browser-win32/wine-run.sh does); the
 # pages are this directory's pages/.  For each case the program opens the page with BROWSER_LATENCY set and, while
 # the page's script runs (its "start" console line came and its "end" did not):
 #  A. the titlebar's Reload (the frame's control 93 pixels from the left) is clicked: NAVIGATE and the script again;

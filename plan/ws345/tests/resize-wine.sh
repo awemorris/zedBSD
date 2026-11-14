@@ -15,7 +15,7 @@ LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
 WINEPREFIX=${WINEPREFIX:-$(pwd)/build/tmp/ws345-resize-wine}
 export WINEPREFIX
 build=build/tmp/ws345-resize-win64
-sources=build/tmp/ws334-win32-sources
+sources=build/tmp/browser-win32-sources
 lock=/tmp/zedbsd-wine.lock
 mkdir -p "$build" "$sources"
 

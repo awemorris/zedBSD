@@ -25,7 +25,7 @@ browser の headless の mode（`--run`・`--dump=*`・`--render`・`--render-gp
 ## 試験
 
 - host: `host-threaded-view` に settle・dump の `_OWN` の check、ThreadSanitizer の variant。
-- R12: WPT の reftest の見本・DOM の試験（`run-dom-tests.py`）・component・`plan/ws334/tests/stage1.sh` の host の試験を `--threads` 有りと無しで流し、結果が同じ（違えば原因）。
+- R12: WPT の reftest の見本・DOM の試験（`run-dom-tests.py`）・component・`plan/tools/browser-win32/stage1.sh` の host の試験を `--threads` 有りと無しで流し、結果が同じ（違えば原因）。
 - 回帰: host-build（plain・tsan）warning 0、zedBSD 3 機種の build warning 0、cross-build。
 
 ## 受け入れ

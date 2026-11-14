@@ -18,32 +18,32 @@
 #     library uses the system's threads and locks;
 #  6a. OmniGrammaton.exe imports only Windows' own DLLs, the UCRT's and vulkan-1.dll;
 #  7. the zip (make -f apps/browser-win32/Makefile WIN32_ARCH=<arch> zip): it holds what
-#     plan/ws334/tests/zip-contents.txt lists, is the same bytes when made again, and its icon has 8 images
+#     plan/tools/browser-win32/zip-contents.txt lists, is the same bytes when made again, and its icon has 8 images
 #     (ImageMagick's identify);
-#  6. one .exe of static libraries: plan/ws334/tests/script-tool-main.c linked by the build's
+#  6. one .exe of static libraries: plan/tools/browser-win32/script-tool-main.c linked by the build's
 #     test-program with every static library imports only Windows' own DLLs, the UCRT's and at most
 #     vulkan-1.dll, none delayed (no DLL of this tree, no libwinpthread-1.dll), and holds no winpthreads
 #     name either; on x86_64 under Wine it
 #     prints 16 random bytes and runs a script that reads the clock (arm64: linked only).
-#   sh plan/ws334/tests/cross-build.sh                               x86_64
-#   WIN32_ARCH=aarch64 sh plan/ws334/tests/cross-build.sh            arm64 only
-#   WIN32_ARCH="x86_64 aarch64" sh plan/ws334/tests/cross-build.sh   both
+#   sh plan/tools/browser-win32/cross-build.sh                               x86_64
+#   WIN32_ARCH=aarch64 sh plan/tools/browser-win32/cross-build.sh            arm64 only
+#   WIN32_ARCH="x86_64 aarch64" sh plan/tools/browser-win32/cross-build.sh   both
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
-# WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-wine).  The fetched tarballs are kept in
-# build/tmp/ws334-win32-sources between runs.
+# WINEPREFIX=<dir> the Wine prefix (default build/tmp/browser-win32-wine).  The fetched tarballs are kept in
+# build/tmp/browser-win32-sources between runs.
 # Last line: cross-build: PASS or cross-build: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh
-out=build/tmp/ws334-cross
+out=build/tmp/browser-win32-cross
 fresh_out "$out"
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
-WINEPREFIX=${WINEPREFIX:-$(pwd)/build/tmp/ws334-wine}
+WINEPREFIX=${WINEPREFIX:-$(pwd)/build/tmp/browser-win32-wine}
 export WINEPREFIX
-sources=build/tmp/ws334-win32-sources
+sources=build/tmp/browser-win32-sources
 mkdir -p "$sources"
-allowed=plan/ws334/tests/allowed-imports.txt
+allowed=plan/tools/browser-win32/allowed-imports.txt
 status=0
 
 for arch in ${WIN32_ARCH:-x86_64}; do
@@ -254,7 +254,7 @@ for arch in ${WIN32_ARCH:-x86_64}; do
 		echo "$name: OmniGrammaton.exe imports only the system's DLLs and vulkan-1.dll ($(wc -l < "$out/omnigrammaton-dlls-$name.txt"))"
 	fi
 
-	# 7. The zip (apps/browser-win32/Makefile's zip target): what it holds is plan/ws334/tests/zip-contents.txt,
+	# 7. The zip (apps/browser-win32/Makefile's zip target): what it holds is plan/tools/browser-win32/zip-contents.txt,
 	# the same bytes when it is made again from the same directory, and the icon of 8 images (ImageMagick's
 	# identify).
 	zip=$build/OmniGrammaton-$(sed -n 's/^OMNIGRAMMATON_VERSION := //p' apps/browser-win32/version.mk)-$name.zip
@@ -266,11 +266,11 @@ for arch in ${WIN32_ARCH:-x86_64}; do
 		status=1
 	else
 		unzip -Z1 "$zip" | sed 's|^OmniGrammaton/||' > "$out/zip-$name.txt"
-		sed '/^#/d' plan/ws334/tests/zip-contents.txt > "$out/zip-expected.txt"
+		sed '/^#/d' plan/tools/browser-win32/zip-contents.txt > "$out/zip-expected.txt"
 		/usr/bin/python3 -I apps/browser-win32/tools/make-zip.py "$build/OmniGrammaton" "$out/zip-again-$name.zip" > /dev/null
 		icons=$(identify "$build/obj/OmniGrammaton.ico" 2> /dev/null | wc -l)
 		if ! cmp -s "$out/zip-$name.txt" "$out/zip-expected.txt"; then
-			echo "FAILED $name: the zip holds other files than plan/ws334/tests/zip-contents.txt:"
+			echo "FAILED $name: the zip holds other files than plan/tools/browser-win32/zip-contents.txt:"
 			diff "$out/zip-expected.txt" "$out/zip-$name.txt" | head -10
 			status=1
 		elif ! cmp -s "$zip" "$out/zip-again-$name.zip"; then
@@ -288,7 +288,7 @@ for arch in ${WIN32_ARCH:-x86_64}; do
 	program=$build/tests/script-tool.exe
 	if ! timeout 900 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=$arch \
 	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" \
-	    test-program TEST_PROGRAM=script-tool TEST_PROGRAM_SOURCES=plan/ws334/tests/script-tool-main.c \
+	    test-program TEST_PROGRAM=script-tool TEST_PROGRAM_SOURCES=plan/tools/browser-win32/script-tool-main.c \
 	    > "$out/program-$name.log" 2>&1 || grep -q 'warning:' "$out/program-$name.log"; then
 		echo "FAILED $name: the test program did not link cleanly (log $out/program-$name.log)"
 		tail -10 "$out/program-$name.log"

@@ -24,7 +24,7 @@
  * Last line: test-protect: PASS (<n> checks), or the failures.
  */
 
-#include "plan/ws334/tests/unit/check.h"
+#include "plan/tools/browser-win32/unit/check.h"
 
 #include "userland/desktop/browser/shell/shell.h"
 

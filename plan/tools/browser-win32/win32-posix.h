@@ -16,8 +16,8 @@
  * the URL standard parses it).
  */
 
-#ifndef WS334_WIN32_POSIX_H
-#define WS334_WIN32_POSIX_H
+#ifndef BROWSER_WIN32_TEST_POSIX_H
+#define BROWSER_WIN32_TEST_POSIX_H
 
 #include <limits.h>
 #include <stdlib.h>

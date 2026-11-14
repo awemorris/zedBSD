@@ -1,9 +1,9 @@
 #!/bin/sh
-# Builds and runs plan/ws334/tests/scheme-test.c: the color scheme a libbrowser view's pages are shown in
+# Builds and runs plan/tools/browser-win32/scheme-test.c: the color scheme a libbrowser view's pages are shown in
 # (browser_view_set_color_scheme, the prefers-color-scheme media queries and matchMedia).  The engine's
 # objects come from the WS074 host build (plan/ws074/tests/host-build.sh VARIANT, run here first).
-#   sh plan/ws334/tests/scheme-test.sh [plain|asan]
-# The output goes to a new directory of build/tmp/ws334-scheme (fresh_out).
+#   sh plan/tools/browser-win32/scheme-test.sh [plain|asan]
+# The output goes to a new directory of build/tmp/browser-win32-scheme (fresh_out).
 # Last line: scheme-test: PASS or scheme-test: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -14,7 +14,7 @@ case $variant in
 plain|asan) ;;
 *) echo "scheme-test: unknown variant $variant" >&2; exit 2 ;;
 esac
-out=build/tmp/ws334-scheme
+out=build/tmp/browser-win32-scheme
 fresh_out "$out"
 run=$(cd "$out" && pwd -P)
 
@@ -27,7 +27,7 @@ fi
 host=build/ws074-host/$variant
 flags=$(cat "$host/flags" | cut -d' ' -f2-)
 engine=$(ls "$host"/obj/*.o | grep -v -e '/browser_main\.o$' -e '/browser_main-posix\.o$' -e '/host-shell\.o$' -e '/browser-os-error\.o$')
-if ! timeout 600 ${CC:-cc} $flags -Iplan/ws334/tests/unit -o "$run/scheme-test" plan/ws334/tests/scheme-test.c \
+if ! timeout 600 ${CC:-cc} $flags -Iplan/tools/browser-win32/unit -o "$run/scheme-test" plan/tools/browser-win32/scheme-test.c \
     $engine -lvulkan -lm -ldl -lpthread > "$run/compile.log" 2>&1 || [ -s "$run/compile.log" ]; then
 	cat "$run/compile.log"
 	echo "scheme-test: FAIL (the test did not compile cleanly)"

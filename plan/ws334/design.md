@@ -106,7 +106,7 @@ ISO C の `<stdio.h>`・`<time.h>` の `time` などは除いた。
 | O26 | `vm/heap.c:59`・`:270`、`vm/vm.h`・`vm/bytecode.h`・`vm/interpreter.c` | `__attribute__((noinline))`・`__builtin_unwind_init`・`__builtin_frame_address`（保守的な stack の走査） | gcc・clang の拡張。mingw の gcc と clang で使える。MSVC は対象にしない（§6.1） |
 | O27 | `js/internal.h:17`、`js/compile.h:30`、`image/jpeg.c:21` | `setjmp`・`longjmp` | mingw の x64 の `setjmp` は既定で SEH の巻き戻しをする。全部の frame に unwind の情報があれば正しい（gcc・clang は付ける）。p003 で確かめる（§12 R4） |
 | O28 | `bind/window.c:491`・`:516`、`bind/prelude.c:922`、`page/module.c:477`、`js/tool.c:110`ほか | `strerror` の文（console と標準の誤りの出力） | errno の名前は mingw の `errno.h` にあるが値が違い（POSIX の補いの値）、UCRT の `strerror` は EPROTO などを「Unknown error」と書く見込み（未確かめ）。挙動は変えない。試験が誤りの文を比べる所（runner の照合）は Windows で差になりうる → p016 で runner の期待を見る |
-| O29 | 標準の出力の text の mode（`--dump`・`--run`・`--js` の出力、`browser/main.c` の `printf`・`fwrite`） | Windows の CRT は text の mode で `\n` を `\r\n` にする | Windows の試験の program（`plan/ws334/tests`、配らない）が標準の出力と誤りの出力を binary の mode（`_setmode(_fileno(stdout), _O_BINARY)`）にする。golden の比較を zedBSD と同じ bytes にするため。配る `OmniGrammaton.exe` は console の出力を持たない（2026-11-01 ユーザーの答え、§6.2） |
+| O29 | 標準の出力の text の mode（`--dump`・`--run`・`--js` の出力、`browser/main.c` の `printf`・`fwrite`） | Windows の CRT は text の mode で `\n` を `\r\n` にする | Windows の試験の program（`plan/tools/browser-win32`、配らない）が標準の出力と誤りの出力を binary の mode（`_setmode(_fileno(stdout), _O_BINARY)`）にする。golden の比較を zedBSD と同じ bytes にするため。配る `OmniGrammaton.exe` は console の出力を持たない（2026-11-01 ユーザーの答え、§6.2） |
 | O30 | `vm/heap.c:555`・`:745`（解放は `free`、`:137`・`:570`・`:1005`・`:1067`） | `posix_memalign` | mingw・UCRT に無い。`_aligned_malloc` は `_aligned_free` で放す。`wb_os_aligned_alloc`・`wb_os_aligned_free` を OS の層に足し、vm/heap.c の 6 か所を替える（レビュー #1） |
 | O31 | `page/svg.c:1968` | `memmem`（GNU の拡張） | mingw に無い。`base/` に ISO C の `wb_memmem` を置く（`net/http.c:1348` の `http_memmem` と同じ働き）。OS の層でなく base の関数 |
 | O32 | `net/tls.c:302`・`:482` | `SSL_ERROR_SYSCALL` の後に `errno` を読む | WinSock の誤りは `errno` に入らない。OS の層の「最後の socket の誤り」（`wb_os_socket_error`、Win32 は `WSAGetLastError` を errno に写す）を読む |
@@ -685,7 +685,7 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/。top �
   UCRT の `api-ms-win-crt-*`、`vulkan-1.dll`（普通の import）。確かめは `llvm-readobj --coff-imports` と cross-build.sh の許す表（同梱の DLL の欄は無い）。
 - **配る .exe は 1 本**（2026-11-01 ユーザーの答え、ws.md）: 配るのは `OmniGrammaton.exe`（GUI の subsystem）だけ。前の設計の console 用の `omnigrammaton-cli.exe` は作らない。
   配る .exe のために console 向けの機能（`AttachConsole` で端末に出力をつなぐ headless の mode）を作り込まない。Windows の headless の確かめ（`--js`・`--dump`・`--render` に当たる物）は
-  試験の program（`plan/ws334/tests` の配らない .exe、p036 の `test-program` で同じ static library を link）で行う（p021・p036 の `script-tool.exe` の形）。
+  試験の program（`plan/tools/browser-win32` の配らない .exe、p036 の `test-program` で同じ static library を link）で行う（p021・p036 の `script-tool.exe` の形）。
 - **export**: .exe は名前を export しないので、Windows では `.def` と `exports.map` の展開が要らない（zedBSD・Linux の `.so` は今のまま）。公開の header に `__declspec` を足さない。
 - **名前の衝突**: zedBSD の `.so` は version script で private の名前を隠すが、1 つの .exe では全部の library の外の名前が 1 つの空間に入る。lld は object の間の重複の定義を誤りにするので link で分かる
   （`--allow-multiple-definition` を使わない）。static library は使われた member だけを取り込む（`--whole-archive` にしない）。
@@ -732,7 +732,7 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/。top �
 | S-C | SChannel（Windows の TLS、SSPI）で `net_tls_*`（`net/net.h:176-188`）の別の実装 `net/tls-schannel.c` | 将来の案。OpenSSL が要らず、OS の失効の確かめ・根の更新が効く。code が大きく（`InitializeSecurityContextW` の loop）、zedBSD と TLS の挙動が分かれる |
 
 - 今の形（2026-11-14）: TLS の code は zedBSD と同じ `net/tls.c` で、Windows の build は libssl-compat・libcrypto-compat（static library）を link する。OpenSSL は build にも .exe にも入らない
-  （`plan/ws334/tests/tls-wine.sh` が .exe に OpenSSL の名前が無い事を確かめる）。根は compat の `SSL_CTX_set_default_verify_paths` が Windows の ROOT の store（Disallowed を除く）と同梱の束
+  （`plan/tools/browser-win32/tls-wine.sh` が .exe に OpenSSL の名前が無い事を確かめる）。根は compat の `SSL_CTX_set_default_verify_paths` が Windows の ROOT の store（Disallowed を除く）と同梱の束
   `share/certs/ca-certificates.pem` から読む。2026-11-01 の案（OpenSSL の static link、`tls-static.c`、Disallowed を検証の callback で照合）の記録は WS335 の design と phase030・phase042 にある。
 - 既知の限り: Windows は足りない根を必要な時に Windows Update から取る（ROOT の store は全部を持たない）ので、store だけでは正しい site が失敗しうる。同梱の Mozilla の根（S-B）で補う。
   Windows の検証（`CertGetCertificateChain`）を検証の callback から呼ぶ形は第 2 段の案（失効・企業の方針も効く）。
@@ -783,7 +783,7 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/。top �
 - **Vulkan の header と import library**: Vulkan-Headers を版を固定した tarball で取得（SHA-256 を照合）して `$(BROWSER_WIN32_BUILD)/sources/` に置き（担当の worktree から共有の
   `build/sources/` に書かない、AGENTS.md §7。共有の写しが要れば Q1 が置く）、`$(BROWSER_WIN32_BUILD)/obj/include/vulkan/` に写す。import library は §6.2（普通の import）。
   取得の規則は `make -f apps/browser-win32/Makefile fetch`（`make download` は使わない）。
-- **Wine での試し**: `plan/ws334/tests/wine-run.sh`（`make browser-win32` の .exe と試験の program を Wine で動かす）。本物の Windows の確かめの代わりにはしない（決定 11）。
+- **Wine での試し**: `plan/tools/browser-win32/wine-run.sh`（`make browser-win32` の .exe と試験の program を Wine で動かす）。本物の Windows の確かめの代わりにはしない（決定 11）。
 
 ### 6.10 libssl-compat への切り替え（WS335、[plan/ws335/design.md](../ws335/design.md) §4.2・§4.4）
 
@@ -811,7 +811,7 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/。top �
 | 4 | 実機の Windows（ユーザーの host） | §7.3 | §7.3 |
 | 5 | zedBSD | WS334 の変更で zedBSD の browser が壊れていない: `boot-test.sh`（login の画面）、browser の画面の確かめは WS074 の guest の道具（`plan/ws074/tests/browser-guest.sh`）を Q1 の割当で | 既存の判定 |
 
-### 7.2 新しい host の試験（`plan/ws334/tests/`）
+### 7.2 新しい host の試験（`plan/tools/browser-win32/`）
 
 - `os-test.c`: libbrowser の OS の層の各関数（posix で host、win32 で cross build して実機・Wine）: socket の loopback、poll と waker、file の書き置き換え、path ↔ URL、時刻帯（固定の TZ）、乱数の長さ。
 - `storage-test.c`: files の backend の表を直に（読み・書き・list・clear・壊れた記録・200 字を超える key・lock）、instance で cookie の期限・2 つの instance の分離・
@@ -864,12 +864,12 @@ LW は Q1 の目安（8 LW ≈ 2〜3 時間）。「標準」= 標準廉価実�
 
 | Phase | 目的 | 主な file | 受け入れ | 依存 | LW | 標準 |
 | --- | --- | --- | --- | --- | --- | --- |
-| p002 | build の土台: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の骨（toolchain の探し方・compat の header の写し・clean の守り、§6.9）と一番上の `browser-win64`・`browser-winarm64`、Vulkan の遅延の import の確かめ（§6.2）、libtruetype の 1 関数と compat の Windows の build、`plan/ws334/tests/cross-build.sh`（warning の数・`nm -u` の許す表・export・依存の DLL の許す表） | §9 の該当の行 | `make -f apps/browser-win32/Makefile` と `make browser-win64` の両方で 5 つの library が build でき、WS334 の書いた file に warning 0（compat・libtruetype の warning は数を記録）。zedBSD の libbrowser・browser と Linux の libtruetype の object の一覧が前後で同じ（R12） | p001 と U3 の答え | 6 | — |
+| p002 | build の土台: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の骨（toolchain の探し方・compat の header の写し・clean の守り、§6.9）と一番上の `browser-win64`・`browser-winarm64`、Vulkan の遅延の import の確かめ（§6.2）、libtruetype の 1 関数と compat の Windows の build、`plan/tools/browser-win32/cross-build.sh`（warning の数・`nm -u` の許す表・export・依存の DLL の許す表） | §9 の該当の行 | `make -f apps/browser-win32/Makefile` と `make browser-win64` の両方で 5 つの library が build でき、WS334 の書いた file に warning 0（compat・libtruetype の warning は数を記録）。zedBSD の libbrowser・browser と Linux の libtruetype の object の一覧が前後で同じ（R12） | p001 と U3 の答え | 6 | — |
 | p003 | libbrowser の OS の層（posix・win32）と O13〜O24・O28〜O34 の直し（`vm/heap.c` の aligned の確保、`page/svg.c` の memmem を含む） | §9.1 の p003 の行 | 段 1 の件数が前と同じ。libbrowser の全部の .c の cross compile が warning 0 で、`nm -u` が許す表の中。`os-test.c` の posix の側が PASS | p002 | 9 | — |
 | p004 | network の Windows（O1〜O10・O32・O33）、libmedia の wake の callback（M1）と `net_loader_ring` | `net/loader.c`・`net/http.c`・`net/tls.c`・`net/net.h`・`page/media.c`・`libmedia/engine.c`・`media.h` | 段 1、`run-loader-tests.py`・`run-http-tests.py`・`run-fetch-tests.py` の件数が同じ、net の cross compile が warning 0、`os-test.c` の socket・poll・waker の posix の側 | p003 | 10 | — |
 | p005 | instance と API v4: instance、cookie の jar を instance へ（期限を含む）、Web Storage の領域を instance へ、storage の thread と queue、ストレージバックエンドの表と files の backend（cookie と LOCAL、v1 の読みと v2 の書き、OS の lock）、利用側の v4 への直し | `include/browser/browser.h`・`exports.map`・`net/cookie.c`・`net/http.c`・`page/storage.c`・`page/script.c`・`page/link.c`・`view/view.c`・`storage/*`（新）・利用側 | 段 1、`storage-test.c`（cookie と LOCAL）、2 instance の分離、今の `.ls` の読みと移行 | p004 | 12 | — |
 | p006 | 永続の HTTP の cache（問い U5 の答えが「第 1 段で」の時。それ以外は後へ）: 索引、storage の thread での body の読み書き、上限の LRU | `net/loader.c`・`storage/*` | `storage-test.c` の cache の項、`run-loader-tests.py` の件数が同じ | p005 | 6 | — |
-| p007 | script の core の archive と link の確かめ | `libbrowser/sources.mk`・`plan/ws334/tests/script-core-link.sh` | `nm -u` が libc・OS の層・libm だけ、archive だけの program で `--js` が走る | p003 | 2 | — |
+| p007 | script の core の archive と link の確かめ | `libbrowser/sources.mk`・`plan/tools/browser-win32/script-core-link.sh` | `nm -u` が libc・OS の層・libm だけ、archive だけの program で `--js` が走る | p003 | 2 | — |
 | p008 | libmedia の Windows（M2・M4・M7・M9）と mediafile | `libmedia/*`・`mediafile/mediafile.c` | Linux の host の media の試験が同じ、cross compile warning 0 | p004 | 5 | — |
 | p009 | browser の UI の準備: `browser_main` への分け、libkeiland の公開の header への 3 つの追加と Wayland の backend の実装、present の拡張の名前・CPU の道・鍵の `text`・時計（§4.8）、WS074 の `host-build.sh`・`host-shell.c` の追従 | `browser/*`・`include/keiland/*`・`libkeiland/ui/*`・`plan/ws074/tests/host-build.sh`・`host-shell.c` | zedBSD の browser・libkeiland の build が warning 0、`host-build.sh` の headless の試験の件数が同じ、zedBSD の guest の browser の確かめ（§7.1 段 5、Q1 の割当） | p005 | 5 | — |
 | p010 | 鍵の表: scan code（set 1・拡張の bit）→ evdev の番号（`libkeiland/win32/keys-table.c`、Win32 の header に依らない module） | 上の 1 file と単体試験 | 表の単体試験（全 key、拡張の bit、Pause・PrintScreen の特別な列）。仕様の file と SHA-256、header の仕様の comment は p010 の前に設計の担当が用意する（手順 §4.1・§4.3） | p002 | 3 | ○ T1 |
@@ -1041,7 +1041,7 @@ make の target の名前は §6.9（`browser-win32`。2026-11-01 の案の `bro
 ## 15. 標準廉価実装手順への組み直し（2026-11-01、ws.md の決定 22）
 
 - 決定 22 で、§8 の Phase の表を設計の Phase（p002 設計 A、p003 設計 B、p004 確定）・module の Phase（p005〜p019、Sonnet 5.5 high）・統合の Phase（p020〜p035、Opus）に組み直した。番号の対応は ws.md の表の「旧 pNNN」。§8 の表は経緯として残す（今の Phase は ws.md）。
-- module の分けと header の一覧は [phase002/phase.md](phase002/phase.md)（libbrowser・libmedia）と [phase003/phase.md](phase003/phase.md)（libkeiland の Win32・apps）。試験の道具は `plan/ws334/tests/`（modules.sh・run-unit.sh・check-skeleton.sh・unit/check.h）。
+- module の分けと header の一覧は [phase002/phase.md](phase002/phase.md)（libbrowser・libmedia）と [phase003/phase.md](phase003/phase.md)（libkeiland の Win32・apps）。試験の道具は `plan/tools/browser-win32/`（modules.sh・run-unit.sh・unit/check.h）。
 - §3.4 からの変更（header を書く中で決めた事）:
   - OS の層を 1 つの `os.h` でなく群ごとの header に分けた（`os-system.h`・`os-file.h`・`os-net.h`・`os-time.h`、共通の約束は `os.h`、Windows の共通の補助は `os-win32.h`、時刻帯の名前の表は `os-zones.h`）。module ごとに 1 回の起動で済む大きさにするため。
   - 名前の解決も OS の層に入れた（`wb_os_resolve`）。`getaddrinfo` を直に使うと engine の file が `<netdb.h>` と `<ws2tcpip.h>` を選ぶ `#ifdef` を持つため。

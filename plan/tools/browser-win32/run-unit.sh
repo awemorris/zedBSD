@@ -1,31 +1,31 @@
 #!/bin/sh
-# The unit tests of WS334's modules.  Each test plan/ws334/tests/unit/test-<name>.c is built with the module
-# sources plan/ws334/tests/modules.sh lists for it and run on each system it applies to:
+# The unit tests of the Windows build's modules.  Each test plan/tools/browser-win32/unit/test-<name>.c is built with the module
+# sources plan/tools/browser-win32/modules.sh lists for it and run on each system it applies to:
 #   posix  the host's cc with ASan and UBSan (-std=gnu11 -Wall -Wextra -Werror), run on the host;
 #   win32  llvm-mingw's x86_64-w64-mingw32-clang with UBSan in trap mode and winpthreads linked statically,
-#          run under Wine (a prefix of its own under build/tmp/ws334-wine, made on first use, which takes a
+#          run under Wine (a prefix of its own under build/tmp/browser-win32-wine, made on first use, which takes a
 #          few minutes, and marked ready only when wineboot succeeded; winedbg is disabled so a trap ends the
-#          test).  The aarch64 Windows code is compiled by check-skeleton.sh but not run (no arm64 Wine).
+#          test).  The aarch64 Windows code is compiled by cross-build.sh but not run (no arm64 Wine).
 # Wine runs with LC_ALL=C.UTF-8: without a UTF-8 locale on the host (ja_JP.UTF-8 may be missing) Wine cannot make
 # a file whose name has a non-ASCII letter.
 # A test runs in a fresh empty directory of its own (its current directory) and may make files there.
 # It gets one argument, "posix" or "win32", and its last line is "test-<name>: PASS (...)" or "... FAIL (...)".
-#   sh plan/ws334/tests/run-unit.sh [--posix|--win32] <name>...
-#   sh plan/ws334/tests/run-unit.sh [--posix|--win32] all
+#   sh plan/tools/browser-win32/run-unit.sh [--posix|--win32] <name>...
+#   sh plan/tools/browser-win32/run-unit.sh [--posix|--win32] all
 # Without --posix or --win32 a test runs on both systems where it applies.
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64).
-# Last line: run-unit: PASS or run-unit: FAIL.  Output under build/tmp/ws334-unit (a fresh run directory).
+# Last line: run-unit: PASS or run-unit: FAIL.  Output under build/tmp/browser-win32-unit (a fresh run directory).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 top=$(pwd)
 . plan/tools/fresh-out.sh
-. plan/ws334/tests/modules.sh
-out=build/tmp/ws334-unit
+. plan/tools/browser-win32/modules.sh
+out=build/tmp/browser-win32-unit
 fresh_out "$out"
 out=$top/$out
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
-wine_prefix=$top/build/tmp/ws334-wine
+wine_prefix=$top/build/tmp/browser-win32-wine
 
 systems="posix win32"
 case "${1:-}" in
@@ -36,14 +36,14 @@ esac
 names="$*"
 if [ "$names" = "all" ]; then
 	names=""
-	for file in plan/ws334/tests/unit/test-*.c; do
+	for file in plan/tools/browser-win32/unit/test-*.c; do
 		[ -f "$file" ] || continue
 		name=$(basename "$file" .c)
 		names="$names ${name#test-}"
 	done
 fi
 if [ -z "$names" ]; then
-	echo "usage: sh plan/ws334/tests/run-unit.sh [--posix|--win32] <name>... | all"
+	echo "usage: sh plan/tools/browser-win32/run-unit.sh [--posix|--win32] <name>... | all"
 	exit 2
 fi
 
@@ -66,14 +66,14 @@ win_libs="-lws2_32 -lbcrypt -lcrypt32 -lshell32 -lole32 -Wl,-Bstatic -lpthread -
 status=0
 ran=0
 for name in $names; do
-	source=plan/ws334/tests/unit/test-$name.c
+	source=plan/tools/browser-win32/unit/test-$name.c
 	if [ ! -f "$source" ]; then
 		echo "test-$name: FAIL (no $source)"
 		status=1
 		continue
 	fi
 	for system in $systems; do
-		modules=$(ws334_test_sources "$name" "$system")
+		modules=$(bw_test_sources "$name" "$system")
 		[ "$modules" = none ] && continue
 		if [ "$modules" = unknown ]; then
 			echo "test-$name: FAIL (modules.sh does not list it)"
@@ -84,10 +84,10 @@ for name in $names; do
 		mkdir -p "$run"
 		if [ "$system" = posix ]; then
 			program=$run.bin
-			build="cc $host_flags $ws334_includes $source $modules $host_libs -o $program"
+			build="cc $host_flags $bw_includes $source $modules $host_libs -o $program"
 		else
 			program=$run.exe
-			build="$win_cc $win_flags $ws334_includes -isystem $win_vulkan $source $modules $win_libs -o $program"
+			build="$win_cc $win_flags $bw_includes -isystem $win_vulkan $source $modules $win_libs -o $program"
 		fi
 		if ! $build > "$run.build.log" 2>&1 || [ -s "$run.build.log" ]; then
 			echo "test-$name ($system): FAIL (build; log $run.build.log)"
@@ -99,9 +99,9 @@ for name in $names; do
 			(cd "$run" && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 			    timeout 600 "$program" posix) > "$run.log" 2>&1
 		else
-			if [ ! -f "$wine_prefix/.ws334-ready" ]; then
+			if [ ! -f "$wine_prefix/.browser-win32-ready" ]; then
 				if WINEPREFIX=$wine_prefix WINEDEBUG=-all timeout 600 wineboot -i > "$out/wineboot.log" 2>&1; then
-					: > "$wine_prefix/.ws334-ready"
+					: > "$wine_prefix/.browser-win32-ready"
 				else
 					echo "test-$name ($system): FAIL (wineboot; log $out/wineboot.log)"
 					status=1

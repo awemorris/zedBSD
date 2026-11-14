@@ -1,5 +1,5 @@
 #!/bin/sh
-# libmedia on Windows under Wine (x86_64) against the same program on the host: plan/ws334/tests/media-main.c
+# libmedia on Windows under Wine (x86_64) against the same program on the host: plan/tools/browser-win32/media-main.c
 # reads an H.264 MP4 through the decoder layer and through the engine and prints the pictures' sizes and
 # hashes; the host's build (libmedia's zedBSD source list, its POSIX media-os) and the Windows build's
 # (test-program, linked with every static library) must print the same lines.  The MP4 is
@@ -8,21 +8,21 @@
 # decodes video, so both use the software H.264; the Windows run must still find the Vulkan loader
 # (vulkan-1.dll, through media-os) and ask it for the devices, and the .exe imports only Windows' own
 # DLLs and the UCRT's and holds no winpthreads name.  Wine runs under flock /tmp/zedbsd-wine.lock.
-#   sh plan/ws334/tests/media-wine.sh
+#   sh plan/tools/browser-win32/media-wine.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
-# WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-wine).
+# WINEPREFIX=<dir> the Wine prefix (default build/tmp/browser-win32-wine).
 # Last line: media-wine: PASS or media-wine: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh
-out=build/tmp/ws334-media-wine
+out=build/tmp/browser-win32-media-wine
 fresh_out "$out"
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
-WINEPREFIX=${WINEPREFIX:-$(pwd)/build/tmp/ws334-wine}
+WINEPREFIX=${WINEPREFIX:-$(pwd)/build/tmp/browser-win32-wine}
 export WINEPREFIX
-build=${BROWSER_WIN32_BUILD:-build/tmp/ws334-media-build/browser-win64}
-sources=build/tmp/ws334-win32-sources
+build=${BROWSER_WIN32_BUILD:-build/tmp/browser-win32-media-build/browser-win64}
+sources=build/tmp/browser-win32-sources
 mkdir -p "$sources"
 status=0
 
@@ -38,7 +38,7 @@ fi
 # The host's program, from libmedia's source list.
 list=$(printf 'include userland/desktop/libmedia/sources.mk\n$(info $(LIBMEDIA_SOURCES))\nall: ; @:\n' |
     make -s --no-print-directory -f - all)
-if ! timeout 900 cc -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I. plan/ws334/tests/media-main.c $list \
+if ! timeout 900 cc -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I. plan/tools/browser-win32/media-main.c $list \
     -o "$out/media-tool" -lm -ldl -lpthread > "$out/host-build.log" 2>&1; then
 	echo "media-wine: the host's program did not build (log $out/host-build.log)"
 	head -10 "$out/host-build.log"
@@ -49,7 +49,7 @@ fi
 # The Windows program.
 if ! timeout 1800 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 \
     LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j4 \
-    test-program TEST_PROGRAM=media-tool TEST_PROGRAM_SOURCES="plan/ws334/tests/media-main.c" \
+    test-program TEST_PROGRAM=media-tool TEST_PROGRAM_SOURCES="plan/tools/browser-win32/media-main.c" \
     > "$out/make.log" 2>&1 || grep -q 'warning:' "$out/make.log"; then
 	echo "media-wine: the Windows program did not build cleanly (log $out/make.log)"
 	tail -10 "$out/make.log"

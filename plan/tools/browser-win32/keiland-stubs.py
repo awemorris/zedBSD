@@ -11,11 +11,11 @@ here: a function returning int returns ENOTSUP, a pointer NULL, another value 0,
 does nothing.  The prototypes are read from the public headers and libkeiland's private headers
 (comments taken out by the host's preprocessor).
 
-    python3 -I plan/ws334/tests/keiland-stubs.py           # writes unsupported.c
-    python3 -I plan/ws334/tests/keiland-stubs.py --check   # fails when unsupported.c differs
+    python3 -I plan/tools/browser-win32/keiland-stubs.py           # writes unsupported.c
+    python3 -I plan/tools/browser-win32/keiland-stubs.py --check   # fails when unsupported.c differs
 
 LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64).
-The objects are built under build/tmp/ws334-keiland-stubs.  Last line: keiland-stubs: PASS or FAIL.
+The objects are built under build/tmp/browser-win32-keiland-stubs.  Last line: keiland-stubs: PASS or FAIL.
 """
 
 import glob
@@ -26,7 +26,7 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 OUT = os.path.join(ROOT, "userland", "desktop", "libkeiland", "win32", "unsupported.c")
-BUILD = "build/tmp/ws334-keiland-stubs"
+BUILD = "build/tmp/browser-win32-keiland-stubs"
 LLVM_MINGW = os.environ.get("LLVM_MINGW", os.path.expanduser("~/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64"))
 
 # The tree's own names (a call of another library's, libtruetype's, is that library's).
@@ -60,7 +60,7 @@ def make(*arguments):
     """Runs the Windows build's Makefile with the build directory of this script."""
     command = ["make", "-s", "--no-print-directory", "-f", "apps/browser-win32/Makefile", "WIN32_ARCH=x86_64",
                "LLVM_MINGW=" + LLVM_MINGW, "BROWSER_WIN32_BUILD=" + BUILD,
-               "BROWSER_WIN32_SOURCES=build/tmp/ws334-win32-sources"] + list(arguments)
+               "BROWSER_WIN32_SOURCES=build/tmp/browser-win32-sources"] + list(arguments)
     return subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
 
 
