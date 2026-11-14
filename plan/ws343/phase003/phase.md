@@ -3,7 +3,7 @@
 # ws343-p003 fetch の https（libssl-compat・libcrypto-compat）と、mk の差分の案（libcurl.so の link、fetch の link）
 
 - 親: [ws.md](../ws.md)。Queue: q2096-i01（P8、worktree `/home/awe/zedBSD-worktrees/p8-ws343`、branch `agent/p8-ws343`、基点 main c231c505e8）。
-- Status: in-progress（2026-11-14 P8。実装と host 試験と 3 arch の build は済み。mk の差分はユーザーの承認待ちの案。QEMU の結果は下）
+- Status: in-progress（2026-11-14 P8。実装・host 試験・3 arch の build・QEMU は済み。mk の差分はユーザーの承認待ちの案。P8 の推し: 案の適用と同時の merge の後に cleared）
 
 ## 目的と範囲
 
@@ -73,11 +73,16 @@
 | --- | --- | --- |
 | host 試験 | `sh plan/ws343/tests/run-fetch-https.sh` | PASS（18 cases）: 長さ・chunked・close_notify のある終わりまでの body、close_notify の無い終わりの失敗、絶対・相対の path の redirect、http→https の redirect、redirect の loop、CA file 無し・自己署名・期限切れ・別の名前の失敗、TLS 1.2、address literal、plain の http、404、読めない CA file、標準出力 |
 | 3 arch の build（案 1・2・3 を作業の copy に当てて） | `make -j4 CONFIGMK=config/config.<p>.mk build/<p>/packages/fetch/.stamp`（p = x86_64・rpi5・vf2） | 3 つとも exit 0、log の warning 0。`build/<p>/bin/fetch` の NEEDED は libssl-compat.so・libcrypto-compat.so・libm.so・libc.so、Machine は X86-64・AArch64・RISC-V |
-| QEMU（x86_64、既定の image、公開の site） | `sh plan/ws343/tests/run-fetch-qemu.sh` | （下の「QEMU の結果」） |
+| QEMU（x86_64、既定の image、公開の site） | `sh plan/ws343/tests/run-fetch-qemu.sh` | PASS（4 cases、下の「QEMU の結果」） |
 
 ## QEMU の結果
 
-（実行中）
+- 2026-11-14 P8、`sh plan/ws343/tests/run-fetch-qemu.sh`（案 1〜3 を当てた作業の copy、KVM、harness の USB CDC-ECM と QEMU の user の NAT、外の network あり）: `run-fetch-qemu: PASS (4 cases)`。
+  - `https://example.com/`（577 byte）、`https://www.rfc-editor.org/rfc/rfc9110.txt`（502941 byte、chunked でない長さの body）、`http://www.rfc-editor.org/rfc/rfc8446.txt`（http→https の redirect、337736 byte）: guest の fetch の取得を host に写し、host の curl の取得と SHA-256 が一致。
+  - `https://self-signed.badssl.com/`: `fetch: self-signed.badssl.com: TLS handshake failed: certificate verify failed: self-signed certificate`、exit 1。
+  - guest の `/etc/ssl/cert.pem`（188900 byte）・`/lib/libssl-compat.so`・`/lib/libcrypto-compat.so` がある事、`/usr/lib/libcurl.so` が無い事（案 3）を `ls` で見た。
+- image は既定の x86_64 の config から firmware の package（*-firmware）だけを外した物（`config-amd64-fetch.mk`）。既定の config のままでは `plan/tools/guest/test-image.sh` が amd-navi-firmware の license の問いに答えられず止まった（`mk/platform-x86_64/firmware.mk` の `firmware-licenses` が空。この Queue の外、Q1 に報告）。image の build の log の `warning:` は 0。
+- 実機は使っていない（未実施）。aarch64・riscv64 の QEMU は未実施（build だけ）。
 
 ## 残り
 
