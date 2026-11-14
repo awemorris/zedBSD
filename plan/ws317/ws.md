@@ -3,19 +3,19 @@
 # WS317 hotplugd: hot-plug の device の通知・承認・登録と driver の開始と終了（volumed を置き換える）
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG005。
-- Status: planning（2026-10-30 Q1 が作成。ユーザー「今は取り組みません」）
+- Status: planning（2026-10-30 Q1 が作成。今は取り組まない。2026-11-15 設計の変更が要る、と記録）
 - 目標: PCIe の hot-plug（USB4・Thunderbolt の tunnel を含む）と USB の device とディスクを 1 つの daemon（hotplugd）で扱い、通知・承認・拒否・
   登録と削除・driver の開始と終了を行う。Keiland の compositor は hotplugd と話し、承認の選択を利用者に出す。
 
-## ユーザーの決定（2026-10-30、原文）
+## ユーザーの決定（要点）
 
-1. 「またhotplugについて、PCIeデバイスを自動で使用開始してしまうと、ホストメモリにアクセスできるというセキュリティの懸念があるという認識で正しいですか？
-   ディスクのホットプラグはvolumedで管理していると思いますが、これをdevicedに変更して、PCIe hotplugやディスクも含めて、通知、機器の登録と承認と削除、自動承認、デバイスドライバの開始と終了、を実装するのがいいと思います。Keilandコンポジタにはvolumedと通信する部分があるので、devicedとの通信に変更して、デバイスのアタッチが通知されたとき、承認、今後は自動承認、拒否、今後は自動拒否、みたいな選択を出す仕組みにしたいです。PCIe機器の登録は、再起動したら消えて、必ず再登録が必要な仕組みでいいと思います。USBディスクは、起動パーティション以外はかならず承認が必要という仕組みでいいと思います。」
-2. 「USB の keyboard・mouseは許可不要で自動アタッチにするしかないです。USBディスクは、マウントは承認制にして、アタッチは自動でもいいかもしれないです。今後は自動、はなくていいかもしれないです。再起動したら自動承認は消えてOKです。
-   volumedはdevicedだとわかりづらいのでhotplugdでもいいです。」
-3. 「この内容でよいでしょうか。よさそうならWSに記録しておいて、今は取り組みません。」
+- 2026-10-30 ユーザーから、次の趣旨の指示を受けた（原文は載せない）:
+  1. PCIe の device を自動で使い始めると host の memory に触れる懸念がある。volumed を置き換え、PCIe の hot-plug とディスクを含めて、通知・登録・承認・削除・driver の開始と終了を 1 つの daemon で行う。Keiland の compositor の volumed との通信をこれに替え、attach の通知で承認・拒否などの選択を出す。PCIe の登録は再起動で消え、再登録が要る。USB のディスクは起動の partition 以外は承認が要る。
+  2. USB の keyboard・mouse は承認なしで自動で attach。USB のディスクは attach は自動、mount は承認制。「今後は自動」は無くてよい。再起動で自動の承認は消える。名前は hotplugd でよい。
+  3. 方針を WS に記録し、今は取り組まない。
+- 2026-11-15 ユーザーから、hotplug の扱いが compositor の側に入ったので、この WS は設計の変更が要る、記録だけしておく、という趣旨の指示を受けた。
 
-## 決まった方針（Q1 のまとめ、上の原文が正）
+## 決まった方針（Q1 のまとめ、2026-10-30 時点。上の決定が正）
 
 - 名前: hotplugd（volumed を置き換える）。compositor の volumed との通信を hotplugd との通信に置き換える。
 - 既定は拒否を kernel が守る: 承認の前は device を見つけるだけで driver を付けず、PCIe は bus master を切ったまま（hotplugd が落ちていても、起動の途中・ログインの前でも安全）。
@@ -35,4 +35,5 @@
 
 ## Resume point
 
+- 2026-11-15 Q1: **設計の変更が要る**（ユーザーの指摘）。この WS を立てた後、compositor と seat の側に hotplug の扱いが入った: compositor の display の hotplug の thread（WS353 p004、kernel の hotplug の fence は p002・p003）、sessiond が入力の device を開き compositor に渡す形（WS353 p018・p020、試験 seat-hotplug・seat-owner）。上の「決まった方針」の「compositor の volumed との通信を hotplugd との通信に置き換える」と、承認の UI・device の開き方の分担は、着手の時にこの今の形に合わせて設計し直す。今は取り組まない（記録だけ）。
 - 2026-10-30 Q1: 方針を記録。ユーザーの指示で今は取り組まない。
