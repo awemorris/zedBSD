@@ -2,7 +2,7 @@
 
 # ws353-p016: 試験（QEMU の回帰と 5330 の idle）
 
-Status: planned
+Status: in-progress（2026-11-14 Q1、P1 q2084。5330 を割り当てた）
 Parent: [WS353](../ws.md)。設計 [design.md](../design.md) §11。
 
 ## 目的
