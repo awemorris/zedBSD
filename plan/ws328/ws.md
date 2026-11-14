@@ -28,8 +28,8 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 | --- | --- | --- | --- | --- |
 | [ws328-p001](phase001/phase.md) | 設計（module の分け方、header と骨格、試験の道具、実装の Phase、design-reviewer） | Opus（P4） | cleared（2026-11-15 Q1、3c892233f8 を main に merge c9d22fa09d。2 回の design-reviewer の 83 件を全部反映、header の基点 57bf94e62f、check-skeleton・harness PASS） | — |
 | [ws328-p002](phase002/phase.md) | vec-base・vec-path（行列・path・弧・bbox・atan2・exp） | Sonnet | cleared（2026-11-15 Q1、907f2af3ba を main に merge 4360704e39。test-base 204220・test-path 348081 checks、cc・clang・ASan・UBSan PASS、check-skeleton PASS、壊す 30 通り中 28 FAIL・2 は等価） | p001 |
-| [ws328-p003](phase003/phase.md) | vec-flatten（平坦化） | Sonnet | 実装済み・試験 PASS（2026-11-15 P2 q2117-i01、test-flatten 93774 checks、cc・clang・ASan・UBSan・check-skeleton PASS、壊す 21 通り全て FAIL。cleared は Q1） | p002 |
-| [ws328-p004](phase004/phase.md) | vec-stroke（線の輪郭・join・cap・dash） | Sonnet | planned | p003 |
+| [ws328-p003](phase003/phase.md) | vec-flatten（平坦化） | Sonnet | cleared（2026-11-15 Q1、d807992aaf を main に merge。test-flatten 93774 checks、cc・clang・ASan・UBSan、check-skeleton PASS、壊す 21 通り全部 FAIL） | p002 |
+| [ws328-p004](phase004/phase.md) | vec-stroke（線の輪郭・join・cap・dash） | Sonnet | in-progress（2026-11-15 P2 q2122） | p003 |
 | [ws328-p005](phase005/phase.md) | vec-raster（coverage の tile） | Sonnet | planned | p003 |
 | [ws328-p006](phase006/phase.md) | vec-gradient（補間・hint・ramp・t の計算） | Sonnet | planned | p002 |
 | [ws328-p007](phase007/phase.md) | vec-rrect（角丸・ring・辺・影） | Sonnet | planned | p002 |
@@ -59,6 +59,8 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 Phase の番号はレビューで分けた物に新しい番号（p024〜p029）を付けたので表の順と違う。GPU の側（p020 → p026 → p027）を CSS・SVG の切り替えより先に main に入れる（design.md §11）。
 
 ## Resume point
+
+- 2026-11-15 Q1: p003 cleared。header の持ち越し（再凍結の時、p023 で）: vec-flatten.h の `VEC_LINES_VERTICES_MAX` の comment「8 MiB of vertices」は struct vec_vertex 12 byte × 2^21 で 24 MiB（contour も 24 MiB）。動作には関わらない。次は p004（vec-stroke、P2 q2122）。
 
 - 2026-11-15 Q1: p001 cleared（merge c9d22fa09d、基点 57bf94e62f）。次は p002（vec-base と vec-path）と p017（CSS の radial・conic の解析）を Sonnet で。p018 以後は U1〜U5 の答えの後。
 

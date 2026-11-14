@@ -4,7 +4,7 @@
 [history/agents-registry-through-20261026.md](../history/agents-registry-through-20261026.md)。
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P2 | phase-runner-low | ws328 p003 flatten (q2117-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p003` / `agent/p2-ws328p003` | 動いている（2026-11-15 01:5x） | — |
+| P2 | phase-runner-low | ws328 p004 vec-stroke (q2122-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p004` / `agent/p2-ws328p004` | 動いている（2026-11-15 02:0x） | — |
 | P7 | phase-runner | ws334 完了の手順 (q2120-i01) | `/home/awe/zedBSD-worktrees/p7-ws334close` / `agent/p7-ws334close` | 動いている（2026-11-15 01:5x） | — |
 | P8 | phase-runner | ws349 設計の review と改訂 (q2118-i01) | `/home/awe/zedBSD-worktrees/p8-ws349` / `agent/p8-ws349` | 動いている（2026-11-15 01:5x） | — |
 | P5 | phase-runner | ws339 EDID の解像度 (q2119-i01) | `/home/awe/zedBSD-worktrees/p5-ws339` / `agent/p5-ws339` | 動いている（2026-11-15 01:5x） | — |
