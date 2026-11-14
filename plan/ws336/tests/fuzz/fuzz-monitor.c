@@ -47,27 +47,47 @@ static const uint8_t fuzz_user_seed[32] = {
 int
 sshd_account_allowed(const struct sshd_config *config, const char *user, int method, struct passwd *account, char *buffer, size_t size)
 {
+	int different;
+
+	/* The arguments the replacement does not look at. */
 	(void)config;
 	(void)method;
 	(void)size;
-	if (strcmp(user, "fuzzuser") != 0)
+
+	/* Admits only the one user the harness knows. */
+	different = strcmp(user, "fuzzuser");
+	if (different != 0)
 		return ENOENT;
+
+	/* Describes that user's account with fixed identifiers. */
 	memset(account, 0, sizeof(*account));
 	strcpy(buffer, "fuzzuser");
 	account->pw_name = buffer;
 	account->pw_uid = 4242;
 	account->pw_gid = 4242;
+
+	/* Succeeded: the user is allowed. */
 	return 0;
 }
 
 int
 sshd_key_authorized(const struct sshd_config *config, const struct passwd *account, const uint8_t *public_key)
 {
+	int different;
+
+	/* The arguments the replacement does not look at. */
 	(void)config;
 	(void)account;
-	if (memcmp(public_key, fuzz_user_key.public_key, SSH_ED25519_PUBLIC) == 0)
-		return 0;
-	return EACCES;
+
+	/* Compares the offered key with the one authorized key. */
+	different = memcmp(public_key, fuzz_user_key.public_key, SSH_ED25519_PUBLIC);
+
+	/* Authorizes only the key the harness holds. */
+	if (different != 0)
+		return EACCES;
+
+	/* Succeeded: the key is the authorized one. */
+	return 0;
 }
 
 int
@@ -75,23 +95,35 @@ sshd_password_ok(const struct sshd_config *config, const char *user, char *passw
 {
 	uint8_t digest[SSH_SHA256_SIZE];
 	int same;
+	int different;
 
+	/* The argument the replacement does not look at. */
 	(void)config;
+
+	/* Hashes the offered password and compares it with the digest of the secret. */
 	(void)ssh_sha256(password, strlen(password), digest);
 	same = ssh_ct_equal(digest, fuzz_secret_digest, sizeof(digest));
 	ssh_wipe(password, strlen(password));
-	if (same && strcmp(user, "fuzzuser") == 0)
-		return 0;
-	return EACCES;
+
+	/* Accepts only the secret, for the one user. */
+	different = strcmp(user, "fuzzuser");
+	if (same == 0 || different != 0)
+		return EACCES;
+
+	/* Succeeded: the password is the secret. */
+	return 0;
 }
 
 int
 sshd_login_record(const char *user, const char *tty, pid_t pid, int login)
 {
+	/* The arguments the replacement does not look at. */
 	(void)user;
 	(void)tty;
 	(void)pid;
 	(void)login;
+
+	/* Any login record means the parent check was bypassed, which the fuzzer must see. */
 	fprintf(stderr, "a login record was written without the parent check\n");
 	abort();
 }
@@ -99,16 +131,34 @@ sshd_login_record(const char *user, const char *tty, pid_t pid, int login)
 int
 sshd_tty_path_ok(const char *tty)
 {
-	if (strncmp(tty, "/dev/pts/", 9) != 0 || tty[9] == '\0')
+	int different;
+
+	/* Compares the path with the pseudo-terminal directory. */
+	different = strncmp(tty, "/dev/pts/", 9);
+
+	/* Accepts only a name under /dev/pts. */
+	if (different != 0 || tty[9] == '\0')
 		return EINVAL;
+
+	/* Succeeded: the path names a pseudo-terminal. */
 	return 0;
 }
 
 int
 sshd_tty_check(const char *tty, uid_t uid)
 {
+	int error;
+
+	/* The argument the replacement does not look at. */
 	(void)uid;
-	return sshd_tty_path_ok(tty) == 0 ? 0 : EACCES;
+
+	/* Checks the path the way the real check does first. */
+	error = sshd_tty_path_ok(tty);
+	if (error != 0)
+		return EACCES;
+
+	/* Succeeded: the harness owns every pseudo-terminal. */
+	return 0;
 }
 
 void
@@ -121,16 +171,21 @@ syslog(int priority, const char *format, ...)
 static void
 fuzz_check_invariants(const struct sshd_monitor *monitor, int start)
 {
+	/* A grant, or a session stage the start did not set up, is a bypass of authentication. */
 	if (monitor->stage == SSHD_STAGE_GRANTED || (start != 2 && monitor->stage == SSHD_STAGE_SESSION)) {
 		fprintf(stderr, "a login was granted\n");
 		abort();
 	}
 
+
+	/* The attempts must stay within the configured limit. */
 	if (monitor->tries > fuzz_config.max_auth_tries) {
 		fprintf(stderr, "more attempts than MaxAuthTries\n");
 		abort();
 	}
 
+
+	/* The signatures made before authentication must stay within their bound. */
 	if (monitor->preauth_signs > SSHD_PREAUTH_SIGN_MAX) {
 		fprintf(stderr, "more signatures than the pre-authentication bound\n");
 		abort();
@@ -145,17 +200,21 @@ fuzz_frame(struct sshd_monitor *monitor, unsigned type, const uint8_t *body, siz
 	enum sshd_monitor_next next;
 	int status;
 
+	/* Hands the frame to the monitor with a fixed clock and a reply buffer. */
 	ssh_buf_init(&reply, SSH_MON_FRAME_MAX + 16U, 0);
 	now.tv_sec = 0;
 	now.tv_nsec = 0;
 	status = sshd_monitor_handle(monitor, (enum ssh_mon_type)type, body, size, &now, &reply, &next);
 	ssh_buf_free(&reply);
+
+	/* Reports whether the monitor wants the connection to go on. */
 	return status;
 }
 
 static void
 fuzz_start(struct sshd_monitor *monitor)
 {
+	/* Starts a monitor with no delays, so that the run is not slowed. */
 	sshd_monitor_init(monitor, &fuzz_config, &fuzz_host_key, 0);
 	monitor->fail_delay_ms = 0;
 	monitor->sign_interval_ms = 0;
@@ -175,9 +234,13 @@ LLVMFuzzerInitialize(int *argc, char ***argv)
 	struct ssh_buf signature;
 	uint8_t h[SSH_SHA256_SIZE];
 	uint8_t secret[32];
+	int status;
 
+	/* The arguments the harness does not look at. */
 	(void)argc;
 	(void)argv;
+
+	/* Sets up the configuration, the host key, the user key and the secret password digest. */
 	sshd_config_defaults(&fuzz_config);
 	fuzz_config.max_auth_tries = 6;
 	memcpy(fuzz_host_key.seed, host_seed, 32);
@@ -195,8 +258,11 @@ LLVMFuzzerInitialize(int *argc, char ***argv)
 	memset(h, 0x11, sizeof(h));
 	ssh_buf_init(&body, 4096, 0);
 	ssh_buf_put_string(&body, h, sizeof(h));
-	if (fuzz_frame(&monitor, SSH_MON_SIGN, body.data, body.size) != 0)
+	status = fuzz_frame(&monitor, SSH_MON_SIGN, body.data, body.size);
+	if (status != 0)
 		abort();
+
+	/* Builds the data a client signs to log in with the key. */
 	ssh_buf_init(&blob, 128, 0);
 	ssh_key_put_public_blob(fuzz_user_key.public_key, &blob);
 	ssh_buf_init(&signed_data, 4096, 0);
@@ -215,16 +281,23 @@ LLVMFuzzerInitialize(int *argc, char ***argv)
 	ssh_buf_put_string(&body, blob.data, blob.size);
 	ssh_buf_put_string(&body, signed_data.data, signed_data.size);
 	ssh_buf_put_string(&body, signature.data, signature.size);
-	if (fuzz_frame(&monitor, SSH_MON_PUBKEY_LOGIN, body.data, body.size) != 0 || monitor.stage != SSHD_STAGE_GRANTED) {
+	/* Asks the monitor to log in with that signature. */
+	status = fuzz_frame(&monitor, SSH_MON_PUBKEY_LOGIN, body.data, body.size);
+
+	/* The login must be granted, or the harness could not see a grant. */
+	if (status != 0 || monitor.stage != SSHD_STAGE_GRANTED) {
 		fprintf(stderr, "the harness's own login was not granted\n");
 		abort();
 	}
 
+	/* Releases everything the login used. */
 	sshd_monitor_clear(&monitor);
 	ssh_buf_free(&body);
 	ssh_buf_free(&blob);
 	ssh_buf_free(&signed_data);
 	ssh_buf_free(&signature);
+
+	/* Succeeded: the harness is ready. */
 	return 0;
 }
 
@@ -239,12 +312,19 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	int start;
 	int status;
 
+	/* An empty input selects nothing to exercise. */
 	if (size == 0)
 		return 0;
+
+	/* The first byte picks the stage to start from. */
 	start = data[0] % 3;
 	data++;
 	size--;
+
+	/* Starts a fresh monitor. */
 	fuzz_start(&monitor);
+
+	/* Signs the exchange first when the start is past the key exchange. */
 	if (start >= 1) {
 		/* The exchange is signed first, as a real child does. */
 		memset(h, 0x22, sizeof(h));
@@ -254,6 +334,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		ssh_buf_free(&body);
 	}
 
+	/* Moves the monitor to the stage of a session process when the start asks for it. */
 	if (start == 2) {
 		/* A session process: the stage as after a hand-over, for a user the monitor knows. */
 		monitor.stage = SSHD_STAGE_SESSION;
@@ -262,6 +343,8 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		monitor.user_uid = 4242;
 		monitor.session_pid = 4242;
 	}
+
+	/* Feeds the monitor one frame at a time and checks the invariants after each. */
 	while (size >= 3) {
 		type = data[0];
 		length = ((size_t)data[1] << 8) | data[2];
@@ -277,6 +360,9 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			break;
 	}
 
+	/* Releases the monitor. */
 	sshd_monitor_clear(&monitor);
+
+	/* Succeeded: the input was handled without a crash. */
 	return 0;
 }

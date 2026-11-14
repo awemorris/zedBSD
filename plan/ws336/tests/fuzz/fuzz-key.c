@@ -20,8 +20,11 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	uint8_t public_key[SSH_ED25519_PUBLIC];
 	static const uint8_t message[] = "message";
 
+	/* An empty input selects nothing to exercise. */
 	if (size == 0)
 		return 0;
+
+	/* The first byte picks which key parser the rest of the input drives. */
 	switch (data[0] % 4) {
 	case 0:
 		(void)ssh_key_parse_public_blob(data + 1, size - 1, public_key);
@@ -40,5 +43,6 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		break;
 	}
 
+	/* Succeeded: the input was handled without a crash. */
 	return 0;
 }
