@@ -62,6 +62,7 @@ check_random(void)
 	uint8_t first[32];
 	uint8_t second[32];
 
+	/* Starts both buffers all zero, so that an unfilled buffer is recognised. */
 	memset(first, 0, sizeof(first));
 	memset(second, 0, sizeof(second));
 
@@ -235,6 +236,7 @@ check_ed25519(void)
 		return;
 	}
 
+	/* Signs the empty message and compares the signature with the one in the test vector. */
 	CHECK_EQ(EVP_DigestSignInit(context, NULL, NULL, NULL, private_key), 1);
 	size = sizeof(signature);
 	CHECK_EQ(EVP_DigestSign(context, signature, &size, (const uint8_t *)"", 0), 1);
@@ -272,6 +274,9 @@ check_x25519(void)
 	uint8_t shared[32];
 	uint8_t zero_point[32];
 	size_t size;
+	int ready;
+	int init_status;
+	int peer_status;
 	EVP_PKEY *own;
 	EVP_PKEY *peer;
 	EVP_PKEY_CTX *context;
@@ -303,6 +308,7 @@ check_x25519(void)
 		return;
 	}
 
+	/* Derives the shared secret with Bob's key and compares it with the one in the test vector. */
 	CHECK_EQ(EVP_PKEY_derive_init(context), 1);
 	CHECK_EQ(EVP_PKEY_derive_set_peer(context, peer), 1);
 	size = sizeof(shared);
@@ -316,11 +322,25 @@ check_x25519(void)
 	memset(zero_point, 0, sizeof(zero_point));
 	peer = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, zero_point, 32);
 	context = EVP_PKEY_CTX_new(own, NULL);
-	if (peer != NULL && context != NULL && EVP_PKEY_derive_init(context) == 1 && EVP_PKEY_derive_set_peer(context, peer) == 1) {
+
+	/* Prepares the derivation when both objects exist and the library accepts the peer. */
+	ready = 0;
+	if (peer != NULL && context != NULL) {
+		init_status = EVP_PKEY_derive_init(context);
+		if (init_status == 1) {
+			peer_status = EVP_PKEY_derive_set_peer(context, peer);
+			if (peer_status == 1)
+				ready = 1;
+		}
+	}
+
+	/* The derivation itself must fail for the small-order point. */
+	if (ready != 0) {
 		size = sizeof(shared);
 		CHECK(EVP_PKEY_derive(context, shared, &size) != 1);
 	}
 
+	/* Releases the objects of the check. */
 	EVP_PKEY_CTX_free(context);
 	EVP_PKEY_free(peer);
 	EVP_PKEY_free(own);
@@ -351,6 +371,7 @@ check_mlkem768(void)
 	EVP_PKEY_CTX *encapsulator;
 	EVP_PKEY_CTX *decapsulator;
 
+	/* No pair exists until the generator makes one. */
 	pair = NULL;
 
 	/* Makes a key pair. */
@@ -377,6 +398,7 @@ check_mlkem768(void)
 		return;
 	}
 
+	/* Encapsulates a fresh secret to the imported key and checks the sizes. */
 	encapsulator = EVP_PKEY_CTX_new_from_pkey(NULL, public_key, NULL);
 	CHECK(encapsulator != NULL);
 	CHECK_EQ(EVP_PKEY_encapsulate_init(encapsulator, NULL), 1);
