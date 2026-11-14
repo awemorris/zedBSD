@@ -148,6 +148,7 @@ ssh_packet_next(
 	size_t payload_size;
 	int error;
 
+	/* Points at the receive state of the packet layer. */
 	receive = &packet->receive;
 
 	/* Reads the packet_length once four bytes of the packet are there. */
@@ -241,6 +242,7 @@ ssh_packet_send(
 	size_t old_size;
 	int error;
 
+	/* Points at the send state of the packet layer. */
 	send = &packet->send;
 
 	/* Refuses a payload that is missing, empty or longer than a packet can carry. */
@@ -415,6 +417,7 @@ ssh_packet_take_line(
 	size_t index;
 	size_t content;
 	size_t shortest;
+	const void *nul;
 	int found;
 
 	/* Refuses a line buffer that cannot even hold the NUL. */
@@ -425,6 +428,7 @@ ssh_packet_take_line(
 	line[0] = '\0';
 	*length = 0;
 
+	/* Takes the buffered input to search for the end of the line. */
 	data = packet->input.data;
 	available = packet->input.size;
 	max_content = capacity - 1U;
@@ -442,6 +446,8 @@ ssh_packet_take_line(
 			found = 1;
 			break;
 		}
+
+		/* Advances to the next input byte. */
 		index++;
 	}
 
@@ -459,6 +465,7 @@ ssh_packet_take_line(
 		if (shortest > max_content)
 			return EMSGSIZE;
 
+		/* Asks for more input, because the line has no end yet. */
 		return EAGAIN;
 	}
 
@@ -472,7 +479,10 @@ ssh_packet_take_line(
 		return EMSGSIZE;
 
 	/* Refuses a NUL inside the line (RFC 4253 4.2). */
-	if (content > 0 && memchr(data, 0, content) != NULL)
+	nul = NULL;
+	if (content > 0)
+		nul = memchr(data, 0, content);
+	if (nul != NULL)
 		return EINVAL;
 
 	/* Copies the line and ends it with a NUL. */

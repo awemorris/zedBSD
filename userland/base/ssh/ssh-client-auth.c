@@ -171,6 +171,7 @@ client_auth_wait(
 				fputs(banner, stderr);
 				fflush(stderr);
 			}
+
 			break;
 		case SSH_MSG_USERAUTH_SUCCESS:
 			*answer = CLIENT_AUTH_SUCCESS;
@@ -187,6 +188,8 @@ client_auth_wait(
 				*answer = CLIENT_AUTH_CHANGE;
 				return 0;
 			}
+
+			/* Reads the key that the server accepted from the message. */
 			error = ssh_auth_parse_pk_ok(client->payload.data, client->payload.size, public_key);
 			if (error != 0)
 				return EPROTO;
@@ -311,6 +314,8 @@ client_try_key(
 		*done = 1;
 		return 0;
 	}
+
+	/* Stops when the server did not accept the key for signing. */
 	if (answer != CLIENT_AUTH_PK_OK)
 		return 0;
 
@@ -320,6 +325,8 @@ client_try_key(
 		ssh_buf_free(&out);
 		return error;
 	}
+
+	/* Sends the signed request. */
 	error = client_auth_send(client, &out);
 	if (error != 0)
 		return error;
@@ -366,6 +373,8 @@ client_load_identity(
 			ssh_client_log(client, SSH_CLIENT_LOG_INFO, "Warning: Identity file %s not accessible: %s.", path, strerror(error));
 		return error;
 	}
+
+	/* Reads the mode of the file that was opened. */
 	status = fstat(descriptor, &information);
 	close(descriptor);
 	if (status != 0)
@@ -391,6 +400,8 @@ client_load_identity(
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: %s: only unencrypted %s keys are supported", path, SSH_KEY_NAME);
 		return error;
 	}
+
+	/* Reports a file that is not a private key. */
 	if (error != 0) {
 		ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: %s: not a valid private key file", path);
 		return error;
@@ -457,6 +468,7 @@ client_try_passwords(
 			return 0;
 		}
 
+		/* Tells the user that the password was refused. */
 		ssh_client_log(client, SSH_CLIENT_LOG_INFO, "Permission denied, please try again.");
 	}
 

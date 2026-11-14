@@ -248,6 +248,7 @@ keygen_parse_options(
 			return 1;
 		}
 
+		/* Reads the next option. */
 		option = getopt(argc, argv, KEYGEN_OPTIONS);
 	}
 
@@ -395,6 +396,8 @@ keygen_key_file_path(
 			keygen_report(options->file, error);
 			return error;
 		}
+
+		/* Reports success. */
 		return 0;
 	}
 
@@ -686,6 +689,8 @@ keygen_parse_host(
 			return EINVAL;
 		position++;
 	}
+
+	/* Refuses the port zero. */
 	if (value == 0)
 		return EINVAL;
 
@@ -744,6 +749,8 @@ keygen_load_key(
 		} else {
 			fprintf(stderr, "ssh-keygen: %s: not a valid private key file\n", path);
 		}
+
+		/* Returns the error of the private key. */
 		error = private_error;
 		goto done;
 	}
@@ -764,6 +771,8 @@ keygen_load_key(
 	} else {
 		fprintf(stderr, "ssh-keygen: %s: not a valid key file\n", path);
 	}
+
+	/* Returns the error of the public key. */
 	error = public_error;
 
 done:
@@ -822,6 +831,8 @@ keygen_generate_pair(
 		fprintf(stderr, "ssh-keygen: %s already exists, not overwriting it\n", path);
 		goto done;
 	}
+
+	/* Reports any other failure of the private key file. */
 	if (error != 0) {
 		keygen_report(path, error);
 		goto done;
@@ -834,6 +845,8 @@ keygen_generate_pair(
 			fprintf(stderr, "ssh-keygen: %s already exists, not overwriting it\n", public_path);
 			goto done;
 		}
+
+		/* Reports any other failure of the public key file. */
 		if (error != 0) {
 			keygen_report(public_path, error);
 			goto done;
@@ -875,6 +888,8 @@ keygen_generate_pair(
 		fprintf(stderr, "ssh-keygen: %s already exists, not overwriting it\n", path);
 		goto done;
 	}
+
+	/* Reports any other failure of the file. */
 	if (error != 0) {
 		keygen_report(path, error);
 		goto done;
@@ -895,6 +910,8 @@ keygen_generate_pair(
 			fprintf(stderr, "ssh-keygen: cannot compute the fingerprint: %s\n", strerror(error));
 			goto done;
 		}
+
+		/* Prints what was created. */
 		printf("Generating public/private ed25519 key pair.\n");
 		printf("Your identification has been saved in %s\n", path);
 		printf("Your public key has been saved in %s\n", public_path);
@@ -1182,6 +1199,8 @@ keygen_run_remove(
 			fprintf(stderr, "ssh-keygen: cannot find the home directory, use -f\n");
 			return error;
 		}
+
+		/* Uses the default path. */
 		path = default_path;
 	}
 

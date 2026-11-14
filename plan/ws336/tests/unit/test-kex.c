@@ -447,6 +447,7 @@ test_parse_roundtrip(void)
 				CHECK((const uint8_t *)kexinit.list[index] >= kept);
 				CHECK((const uint8_t *)kexinit.list[index] + kexinit.list_size[index] <= kept + out.size);
 			}
+
 			CHECK_EQ(kexinit.first_kex_packet_follows, 0);
 			ssh_buf_free(&out);
 		}
@@ -547,6 +548,7 @@ test_parse_errors(void)
 		longlist[index] = ',';
 		longlist[index + 1] = 'a';
 	}
+
 	longlist[8193] = '\0';
 	build_standard_lists(lists, "mlkem768x25519-sha256");
 	lists[9] = longlist;
@@ -612,6 +614,7 @@ set_lists(
 		kexinit->list[index] = lists[index];
 		kexinit->list_size[index] = strlen(lists[index]);
 	}
+
 	kexinit->first_kex_packet_follows = first;
 }
 
@@ -988,6 +991,7 @@ test_hybrid_init(void)
 		CHECK_EQ(error, EINVAL);
 		free(copy);
 	}
+
 	ssh_buf_free(&out);
 }
 
@@ -1283,6 +1287,7 @@ test_hash_sensitivity(void)
 			spoiled.k = copy_k;
 			break;
 		}
+
 		error = ssh_kex_hash(&spoiled, h);
 		CHECK_EQ(error, 0);
 		CHECK(memcmp(h, base, SSH_KEX_HASH_SIZE) != 0);
@@ -1396,11 +1401,13 @@ test_derive(void)
 		} else {
 			wire_bytes(&payload_wire, expected, made);
 		}
+
 		error = ssh_sha256(payload_wire.data, payload_wire.size, block);
 		CHECK_EQ(error, 0);
 		memcpy(expected + made, block, 32);
 		made += 32;
 	}
+
 	CHECK_BYTES(full, expected, 256);
 
 	/* A different letter, session identifier, H or K gives different material (the six letters differ pairwise). */
@@ -1408,10 +1415,12 @@ test_derive(void)
 		error = ssh_kex_derive(k, h, session_id, (char)('A' + a), others[a], 32);
 		CHECK_EQ(error, 0);
 	}
+
 	for (a = 0; a < 6; a++) {
 		for (b = a + 1; b < 6; b++)
 			CHECK(memcmp(others[a], others[b], 32) != 0);
 	}
+
 	session_id[0] ^= 1;
 	error = ssh_kex_derive(k, h, session_id, 'A', out, 32);
 	CHECK_EQ(error, 0);
@@ -1528,6 +1537,7 @@ test_random_feed(void)
 		} else {
 			CHECK(error == EINVAL || error == EMSGSIZE);
 		}
+
 		free(copy);
 	}
 

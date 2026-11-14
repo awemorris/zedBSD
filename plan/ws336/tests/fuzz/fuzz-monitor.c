@@ -125,10 +125,12 @@ fuzz_check_invariants(const struct sshd_monitor *monitor, int start)
 		fprintf(stderr, "a login was granted\n");
 		abort();
 	}
+
 	if (monitor->tries > fuzz_config.max_auth_tries) {
 		fprintf(stderr, "more attempts than MaxAuthTries\n");
 		abort();
 	}
+
 	if (monitor->preauth_signs > SSHD_PREAUTH_SIGN_MAX) {
 		fprintf(stderr, "more signatures than the pre-authentication bound\n");
 		abort();
@@ -217,6 +219,7 @@ LLVMFuzzerInitialize(int *argc, char ***argv)
 		fprintf(stderr, "the harness's own login was not granted\n");
 		abort();
 	}
+
 	sshd_monitor_clear(&monitor);
 	ssh_buf_free(&body);
 	ssh_buf_free(&blob);
@@ -250,6 +253,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		(void)fuzz_frame(&monitor, SSH_MON_SIGN, body.data, body.size);
 		ssh_buf_free(&body);
 	}
+
 	if (start == 2) {
 		/* A session process: the stage as after a hand-over, for a user the monitor knows. */
 		monitor.stage = SSHD_STAGE_SESSION;
@@ -272,6 +276,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		if (status != 0)
 			break;
 	}
+
 	sshd_monitor_clear(&monitor);
 	return 0;
 }

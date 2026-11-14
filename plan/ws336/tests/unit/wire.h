@@ -174,6 +174,7 @@ wire_hex(
 			high = digit;
 			continue;
 		}
+
 		if (count >= capacity)
 			return 0;
 		out[count++] = (uint8_t)(high * 16 + digit);

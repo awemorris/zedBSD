@@ -70,6 +70,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		fuzz_host_key.private = 1;
 		fuzz_ready = 1;
 	}
+
 	if (size == 0)
 		return 0;
 	role = data[0] & 1;
@@ -97,6 +98,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			if (payload.size > 0 && payload.data[0] >= 50)
 				(void)ssh_transport_send(&transport, payload.data, payload.size);
 		}
+
 		pending = ssh_transport_pending(&transport, &written);
 		(void)pending;
 		ssh_transport_written(&transport, written);
@@ -104,6 +106,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		if (transport.state == SSH_TRANSPORT_CLOSED)
 			break;
 	}
+
 	ssh_buf_free(&payload);
 	ssh_transport_free(&transport);
 	return 0;

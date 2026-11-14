@@ -103,6 +103,7 @@ hold(
 		printf("FAIL: out of memory\n");
 		exit(2);
 	}
+
 	if (size > 0)
 		memcpy(held, data, size);
 
@@ -1529,6 +1530,7 @@ test_fuzz(
 			position = (size_t)(random_next() % size);
 			message[position] = (uint8_t)(message[position] ^ (uint8_t)((random_next() & 0xffU) | 1U));
 		}
+
 		if (mode == 1 || mode == 3)
 			size = (size_t)(random_next() % (size + 1U));
 
@@ -1560,12 +1562,14 @@ test_fuzz(
 					if (request.signed_size + 4U + request.signature_size != size)
 						good = 0;
 				}
+
 				if (request.supported != 0 && strcmp(request.algorithm, "ssh-ed25519") != 0)
 					good = 0;
 			}
 		} else if (!request_is_zero(&request)) {
 			good = 0;
 		}
+
 		if (!good)
 			bad++;
 	}
@@ -1596,6 +1600,7 @@ test_fuzz(
 			else
 				message[0] = 50;
 		}
+
 		if (size > 4 && (random_next() & 1U) != 0) {
 			message[1] = 0;
 			message[2] = 0;
@@ -1622,6 +1627,7 @@ test_fuzz(
 		if (error == 0 && strlen(text) >= sizeof(text))
 			bad++;
 	}
+
 	CHECK_EQ(bad, 0);
 
 	/* A banner of random bytes comes out with no control character but LF and TAB, and valid UTF-8 only. */
@@ -1636,6 +1642,7 @@ test_fuzz(
 			bad++;
 			continue;
 		}
+
 		for (index = 0; text[index] != '\0'; index++) {
 			unsigned char byte;
 
@@ -1648,6 +1655,7 @@ test_fuzz(
 				bad++;
 		}
 	}
+
 	CHECK_EQ(bad, 0);
 }
 

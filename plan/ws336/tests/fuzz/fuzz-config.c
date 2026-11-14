@@ -38,7 +38,9 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			(void)ssh_config_option(&client, option, error);
 			free(option);
 		}
+
 		ssh_config_defaults(&client);
 	}
+
 	return 0;
 }

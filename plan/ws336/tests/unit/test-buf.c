@@ -188,6 +188,7 @@ test_writer_growth(void)
 		if (buf.size != index + 1 || buf.data[index] != (uint8_t)(index % 251))
 			intact = 0;
 	}
+
 	CHECK_EQ(intact, 1);
 	CHECK_EQ(ssh_buf_error(&buf), 0);
 	CHECK(buf.capacity >= buf.size);
@@ -197,6 +198,7 @@ test_writer_growth(void)
 		if (buf.data[index] != (uint8_t)(index % 251))
 			intact = 0;
 	}
+
 	CHECK_EQ(intact, 1);
 
 	/* A reset keeps the memory and empties the used part. */
@@ -548,6 +550,7 @@ test_writer_secret(void)
 		if (before != 0 && buf.capacity < before)
 			intact = 0;
 	}
+
 	CHECK_EQ(intact, 1);
 	CHECK_EQ(ssh_buf_error(&buf), 0);
 
@@ -927,6 +930,7 @@ test_reader_namelist(void)
 		CHECK_EQ(size, 0);
 		CHECK_EQ(reader.offset, 0);
 	}
+
 	memset(text, 'n', 65);
 	wire_reset(&input);
 	wire_string(&input, text, 65);
@@ -954,6 +958,7 @@ test_reader_namelist(void)
 		else
 			text[index] = 'a';
 	}
+
 	wire_reset(&input);
 	wire_string(&input, text, SSH_NAMELIST_MAX);
 	ssh_reader_init(&reader, input.data, input.size);
@@ -1090,6 +1095,7 @@ test_roundtrip_random(void)
 			else
 				ssh_buf_put_u32(&buf, 0);
 		}
+
 		if (ssh_buf_error(&buf) != 0)
 			mismatches++;
 
@@ -1121,10 +1127,12 @@ test_roundtrip_random(void)
 					mismatches++;
 			}
 		}
+
 		if (ssh_reader_finish(&reader) != 0)
 			mismatches++;
 		ssh_buf_free(&buf);
 	}
+
 	CHECK_EQ(mismatches, 0);
 }
 
@@ -1166,6 +1174,7 @@ test_reader_random(void)
 			failures++;
 			continue;
 		}
+
 		mode = next_random() % 3;
 		for (index = 0; index < length; index++) {
 			if (mode == 0)
@@ -1229,7 +1238,9 @@ test_reader_random(void)
 			if (ssh_reader_error(&reader) != 0 && ssh_reader_left(&reader) != 0)
 				failures++;
 		}
+
 		free(data);
 	}
+
 	CHECK_EQ(failures, 0);
 }

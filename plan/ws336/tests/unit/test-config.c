@@ -235,6 +235,7 @@ bit_count(
 		count += (int)(mask & 1U);
 		mask >>= 1;
 	}
+
 	return count;
 }
 
@@ -317,6 +318,7 @@ test_shipped(void)
 		sshd_config_defaults(&sshd);
 		CHECK_EQ(sshd_config_parse(&sshd, text, size, error), 0);
 	}
+
 	file = fopen("userland/packages/network/openssh/files/ssh_config", "rb");
 	if (file != NULL) {
 		size = fread(text, 1, sizeof(text), file);
@@ -427,6 +429,7 @@ check_sshd_number(
 		CHECK_EQ(sshd_read(line), EINVAL);
 		CHECK(error_starts("line 1: "));
 	}
+
 	sprintf(line, "%s %u\n", keyword, maximum + 1);
 	CHECK_EQ(sshd_read(line), EINVAL);
 	CHECK(error_starts("line 1: "));
@@ -438,6 +441,7 @@ check_sshd_number(
 		sprintf(line, "%s %s\n", keyword, bad[index]);
 		CHECK_EQ(sshd_read(line), EINVAL);
 	}
+
 	sprintf(line, "%s \"\"\n", keyword);
 	CHECK_EQ(sshd_read(line), EINVAL);
 	sprintf(line, "%s\n", keyword);
@@ -592,6 +596,7 @@ test_sshd_values(void)
 		sprintf(line, "HostKey /key%u\n", index);
 		strcat(text, line);
 	}
+
 	CHECK_EQ(sshd_read(text), 0);
 	CHECK_EQ(sshd.host_key_count, 8);
 	CHECK(strcmp(sshd.host_key[7], "/key7") == 0);
@@ -1003,6 +1008,7 @@ test_ssh_values(void)
 		} else {
 			CHECK_EQ(status, EINVAL);
 		}
+
 		sprintf(line, "ServerAliveInterval %s\n", time_cases[index].text);
 		status = client_read(line, "h");
 		if (time_cases[index].seconds >= 0) {
@@ -1111,6 +1117,7 @@ test_ssh_values(void)
 		sprintf(line, "IdentityFile /id%u\n", count);
 		strcat(text, line);
 	}
+
 	CHECK_EQ(client_read(text, "h"), 0);
 	CHECK_EQ(client.identity_count, 8);
 	strcat(text, "IdentityFile /id8\n");
@@ -1780,6 +1787,7 @@ fuzz_text(
 				length++;
 				continue;
 			}
+
 			pick = fuzz_next((unsigned)FUZZ_WORD_COUNT);
 			word_length = strlen(fuzz_words[pick]);
 			if (length + word_length + 3 >= capacity)
@@ -1791,11 +1799,13 @@ fuzz_text(
 				length++;
 			}
 		}
+
 		if (length + 2 < capacity) {
 			text[length] = '\n';
 			length++;
 		}
 	}
+
 	return length;
 }
 
@@ -1811,6 +1821,7 @@ check_sshd_invariants(void)
 		CHECK(strlen(sshd.host_key[index]) > 0);
 		CHECK(strlen(sshd.host_key[index]) < SSH_CONFIG_PATH_MAX);
 	}
+
 	CHECK(strlen(sshd.listen_address) < sizeof(sshd.listen_address));
 	CHECK(strlen(sshd.authorized_keys_file) < SSH_CONFIG_PATH_MAX);
 	CHECK(strlen(sshd.sftp_command) < SSH_CONFIG_PATH_MAX);
@@ -1838,6 +1849,7 @@ check_client_invariants(void)
 		CHECK(strlen(client.identity[index]) > 0);
 		CHECK(strlen(client.identity[index]) < SSH_CONFIG_PATH_MAX);
 	}
+
 	CHECK(strlen(client.user) <= SSH_USER_MAX);
 	CHECK(strlen(client.host_name) < sizeof(client.host_name));
 	CHECK(strlen(client.user_known_hosts) < SSH_CONFIG_PATH_MAX);
@@ -1875,6 +1887,7 @@ test_fuzz(void)
 			CHECK(strlen(error) > 0);
 			CHECK(strlen(error) < SSH_CONFIG_ERROR_MAX);
 		}
+
 		check_sshd_invariants();
 		CHECK_EQ(sshd_config_finish(&sshd), 0);
 		CHECK(sshd.host_key_count >= 1);
@@ -1896,6 +1909,7 @@ test_fuzz(void)
 			CHECK(strlen(error) > 0);
 			CHECK(strlen(error) < SSH_CONFIG_ERROR_MAX);
 		}
+
 		ssh_config_defaults(&client);
 		check_client_invariants();
 		CHECK(client.port >= 1);

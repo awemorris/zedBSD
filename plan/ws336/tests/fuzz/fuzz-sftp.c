@@ -27,6 +27,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			break;
 		(void)ssh_sftp_parse_request(packet.data, packet.size, &request);
 	}
+
 	(void)ssh_sftp_parse_request(data, size, &request);
 	ssh_buf_free(&input);
 	ssh_buf_free(&packet);

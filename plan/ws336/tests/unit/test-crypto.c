@@ -342,6 +342,7 @@ test_ed25519(void)
 			altered[32 + position] = (uint8_t)(sum & 0xff);
 			carry = sum >> 8;
 		}
+
 		CHECK_EQ(carry, 0);
 		CHECK_EQ(ssh_ed25519_verify(expected_public, message, message_size, altered), EBADMSG);
 	}
@@ -734,6 +735,7 @@ test_misc(void)
 			right[index] = (uint8_t)(0x5a ^ (1U << bit));
 			CHECK_EQ(ssh_ct_equal(left, right, sizeof(left)), 0);
 		}
+
 		right[index] = 0x5a;
 	}
 
@@ -751,6 +753,7 @@ test_misc(void)
 		else
 			CHECK_EQ(left[index], 0xa5);
 	}
+
 	ssh_wipe(NULL, 0);
 
 	/* Random bytes: two draws differ, and a draw is not all zero. */
@@ -770,6 +773,7 @@ test_misc(void)
 		if (large[index] == 0)
 			count++;
 	}
+
 	CHECK(count < 600);
 	CHECK(!all_zero(large + sizeof(large) - 64, 64));
 }
@@ -845,6 +849,7 @@ recompute_k(
 		if (status != 1)
 			failed = 1;
 	}
+
 	if (!failed) {
 		status = EVP_PKEY_decapsulate(decapsulator, joined, &secret_size, reply, SSH_MLKEM768_CIPHERTEXT);
 		if (status != 1)
@@ -869,11 +874,13 @@ recompute_k(
 		if (status != 1)
 			failed = 1;
 	}
+
 	if (!failed) {
 		status = EVP_PKEY_derive_set_peer(deriver, peer);
 		if (status != 1)
 			failed = 1;
 	}
+
 	if (!failed) {
 		status = EVP_PKEY_derive(deriver, joined + 32, &shared_size);
 		if (status != 1)
@@ -913,5 +920,6 @@ all_zero(
 		if (data[index] != 0)
 			return 0;
 	}
+
 	return 1;
 }

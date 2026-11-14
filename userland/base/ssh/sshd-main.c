@@ -159,6 +159,8 @@ main(
 			return 1;
 		}
 	}
+
+	/* Refuses any argument that is not an option. */
 	if (optind != argc) {
 		main_usage();
 		return 1;
@@ -252,6 +254,8 @@ main(
 			waiting[count].revents = 0;
 			count++;
 		}
+
+		/* Waits until a descriptor is ready. */
 		ready = poll(waiting, (nfds_t)count, -1);
 		if (ready < 0)
 			continue;
@@ -329,6 +333,8 @@ main_read_file(
 			(void)close(descriptor);
 			return EIO;
 		}
+
+		/* Ends the loop at the end of the file. */
 		if (got == 0)
 			break;
 		total += (size_t)got;
@@ -337,6 +343,8 @@ main_read_file(
 			return EMSGSIZE;
 		}
 	}
+
+	/* Closes the file and ends the text. */
 	(void)close(descriptor);
 	text[total] = '\0';
 	*size = total;
@@ -374,6 +382,8 @@ main_load_config(
 		fprintf(stderr, "sshd: %s: %s\n", path, error_text);
 		return 1;
 	}
+
+	/* Releases what the parser kept. */
 	(void)sshd_config_finish(config);
 
 	/* Succeeded: the settings are read. */
@@ -436,6 +446,8 @@ main_listen(
 		fprintf(stderr, "sshd: socket: %s\n", strerror(errno));
 		return -1;
 	}
+
+	/* Marks the socket close-on-exec and lets the address be reused. */
 	(void)fcntl(descriptor, F_SETFD, FD_CLOEXEC);
 	one = 1;
 	(void)setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
@@ -459,8 +471,12 @@ main_listen(
 			(void)close(descriptor);
 			return -1;
 		}
+
+		/* Binds the socket to the IPv4 address. */
 		status = bind(descriptor, (struct sockaddr *)&address4, sizeof(address4));
 	}
+
+	/* Reports a bind failure and closes the socket. */
 	if (status != 0) {
 		fprintf(stderr, "sshd: bind %s port %u: %s\n", config->listen_address, (unsigned)config->port, strerror(errno));
 		(void)close(descriptor);
@@ -495,6 +511,8 @@ main_on_child(
 		written = write(main_wake_descriptor, &mark, 1);
 		(void)written;
 	}
+
+	/* Restores the error number of the interrupted code. */
 	errno = saved;
 }
 
@@ -600,6 +618,8 @@ main_accept(
 			break;
 		}
 	}
+
+	/* Counts the connections that have not been authenticated. */
 	waiting_count = main_unauthenticated();
 	if (slot == MAIN_MONITORS_MAX || waiting_count >= context->config.max_startups) {
 		syslog(LOG_NOTICE, "too many connections not authenticated: %.63s closed", peer);
@@ -613,6 +633,8 @@ main_accept(
 		(void)close(client);
 		return;
 	}
+
+	/* Marks both ends of the pipe close-on-exec. */
 	(void)fcntl(started[0], F_SETFD, FD_CLOEXEC);
 	(void)fcntl(started[1], F_SETFD, FD_CLOEXEC);
 
@@ -624,6 +646,8 @@ main_accept(
 		(void)close(client);
 		return;
 	}
+
+	/* Runs the monitor in the child. */
 	if (child == 0) {
 		/* The monitor keeps only its connection and its end of the pipe. */
 		(void)close(listener);
@@ -634,6 +658,8 @@ main_accept(
 			if (main_monitors[other].used && main_monitors[other].started >= 0)
 				(void)close(main_monitors[other].started);
 		}
+
+		/* Restores the default handling of the signals. */
 		(void)signal(SIGCHLD, SIG_DFL);
 		(void)signal(SIGTERM, SIG_DFL);
 		(void)signal(SIGINT, SIG_DFL);
@@ -672,6 +698,8 @@ main_describe_peer(
 		(void)inet_ntop(AF_INET6, &((const struct sockaddr_in6 *)address)->sin6_addr, text, sizeof(text));
 		port = ntohs(((const struct sockaddr_in6 *)address)->sin6_port);
 	}
+
+	/* Ends the address text. */
 	text[sizeof(text) - 1U] = '\0';
 	sprintf(peer, "%s %u", text, port & 0xffffU);
 }

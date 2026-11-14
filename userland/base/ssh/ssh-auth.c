@@ -221,6 +221,8 @@ ssh_auth_parse_request(
 		request->method = SSH_AUTH_OTHER;
 		error = 0;
 	}
+
+	/* Releases the request when the payload was malformed. */
 	if (error != 0) {
 		ssh_auth_request_clear(request);
 		return EINVAL;
@@ -678,6 +680,8 @@ ssh_auth_parse_banner(
 			text[used] = '?';
 			used++;
 		}
+
+		/* Advances to the next character of the text. */
 		offset += length;
 	}
 

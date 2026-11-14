@@ -435,6 +435,7 @@ call(
 				*result = ((uint32_t)reply.data[5] << 24) | ((uint32_t)reply.data[6] << 16) | ((uint32_t)reply.data[7] << 8) | reply.data[8];
 		}
 	}
+
 	if (handled != 0 || local_next != SSHD_NEXT_REPLY)
 		CHECK_EQ(reply.size, 0);
 	ssh_buf_free(&reply);
@@ -943,6 +944,7 @@ test_password(void)
 		if (password[index] != 0)
 			zero = 0;
 	}
+
 	CHECK(zero);
 
 	/* crypt's answer is wiped too. */
@@ -1278,6 +1280,7 @@ test_tty(void)
 	} else {
 		printf("note: no pseudo-terminal on this host; the owner check is not run\n");
 	}
+
 	if (master >= 0)
 		(void)close(master);
 
@@ -1372,6 +1375,7 @@ test_stages(void)
 		status = call(&monitor, refused_session[index], &request, &type, &result, NULL, NULL);
 		CHECK_EQ(status, EPROTO);
 	}
+
 	sshd_monitor_clear(&monitor);
 	CHECK(monitor.state.data == NULL);
 
@@ -1437,6 +1441,7 @@ test_sign(void)
 		status = sign_h(&monitor, h, 32);
 		CHECK_EQ(status, 0);
 	}
+
 	CHECK_EQ(monitor.preauth_signs, SSHD_PREAUTH_SIGN_MAX);
 	h[0] = 0x77;
 	status = sign_h(&monitor, h, 32);
@@ -1456,6 +1461,7 @@ test_sign(void)
 		status = sign_h(&monitor, other_h, 32);
 		CHECK_EQ(status, 0);
 	}
+
 	status = sign_h(&monitor, other_h, 32);
 	CHECK_EQ(status, EPROTO);
 	sshd_monitor_clear(&monitor);
@@ -1562,6 +1568,7 @@ test_signed_data(void)
 			build_signed(&signed_data, sid, 32, 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
 			break;
 		}
+
 		if (variant == 15)
 			build_login(&request, self_name, &user_blob, &signed_data, &host_key, 0);
 		else
@@ -1736,6 +1743,7 @@ test_attempts(void)
 		CHECK_EQ(status, 0);
 		CHECK_EQ(result, EACCES);
 	}
+
 	for (index = 0; index < 3; index++) {
 		build_signed(&signed_data, other_h, 32, 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
 		build_login(&request, self_name, &user_blob, &signed_data, &user_key, 0);
@@ -1743,6 +1751,7 @@ test_attempts(void)
 		CHECK_EQ(status, 0);
 		CHECK_EQ(result, EACCES);
 	}
+
 	CHECK_EQ(monitor.tries, 6);
 	build_signed(&signed_data, session_h, 32, 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
 	build_login(&request, self_name, &user_blob, &signed_data, &user_key, 0);
@@ -1764,6 +1773,7 @@ test_attempts(void)
 		status = call(&monitor, SSH_MON_PASSWORD_LOGIN, &request, &type, &result, NULL, NULL);
 		CHECK_EQ(status, 0);
 	}
+
 	build_signed(&signed_data, session_h, 32, 50, self_name, "ssh-connection", "publickey", 1, "ssh-ed25519", &user_blob, 0);
 	build_login(&request, self_name, &user_blob, &signed_data, &user_key, 0);
 	status = call(&monitor, SSH_MON_PUBKEY_LOGIN, &request, &type, &result, NULL, NULL);
@@ -1966,6 +1976,7 @@ test_timing(void)
 		arrived.tv_nsec += 1000000000L;
 		arrived.tv_sec--;
 	}
+
 	(void)clock_gettime(CLOCK_MONOTONIC, &start);
 	status = sshd_monitor_handle(&monitor, SSH_MON_PUBKEY_QUERY, request.data, request.size, &arrived, &reply, &next);
 	CHECK_EQ(status, 0);
@@ -2014,6 +2025,7 @@ test_session_sign(void)
 		status = sign_h(&monitor, other_h, sizeof(other_h));
 		CHECK_EQ(status, 0);
 	}
+
 	memset(long_h, 3, sizeof(long_h));
 	status = sign_h(&monitor, long_h, 31);
 	CHECK_EQ(status, EPROTO);
@@ -2166,6 +2178,7 @@ test_records(void)
 		CHECK_EQ(result, EACCES);
 		CHECK(strstr(log_last, "refused: not a process of the session") != NULL);
 	}
+
 	if (master >= 0)
 		(void)close(master);
 
@@ -2359,6 +2372,7 @@ run_scenario(
 		if (key.seed[index] != 0)
 			wiped = 0;
 	}
+
 	CHECK(wiped);
 	CHECK_EQ(key.private, 0);
 
@@ -2385,6 +2399,7 @@ run_scenario(
 		if (used >= capacity - 1U)
 			break;
 	}
+
 	report[used] = '\0';
 	CHECK(ended);
 	if (!ended)
@@ -2398,6 +2413,7 @@ run_scenario(
 		*grant_byte = (int)got;
 		CHECK_EQ(mark[0], 1);
 	}
+
 	(void)close(started[0]);
 	return status;
 }
@@ -2477,6 +2493,7 @@ child_other_descriptors(void)
 		if (fcntl(descriptor, F_GETFD) != -1)
 			return 1;
 	}
+
 	return 0;
 }
 
@@ -2512,6 +2529,7 @@ child_parent_holds_connection(void)
 		if (stat(path, &other) == 0 && other.st_ino == own.st_ino && other.st_dev == own.st_dev)
 			held = 1;
 	}
+
 	(void)closedir(listing);
 	return held;
 }
@@ -2559,6 +2577,7 @@ fake_preauth(void)
 		child_report("P:config fail\n");
 		_exit(3);
 	}
+
 	child_report("P:config ok\n");
 
 	/* Only the two descriptors and the standard ones are open. */
@@ -2573,6 +2592,7 @@ fake_preauth(void)
 		child_report("P:woke\n");
 		_exit(0);
 	}
+
 	if (code == 'B') {
 		static const uint8_t bad[5] = { 0, 0, 0, 1, 99 };
 		child_report("P:sent bad frame\n");
@@ -2582,6 +2602,7 @@ fake_preauth(void)
 			child_report("P:answered\n");
 		_exit(0);
 	}
+
 	if (code == 'V') {
 		build_record(&request, "/dev/pts/1", 10, 1, 0);
 		child_report("P:sent record\n");
@@ -2651,11 +2672,13 @@ fake_session(void)
 		child_report("S:config fail\n");
 		_exit(3);
 	}
+
 	status = child_read_frame(SSHD_FD_MONITOR, &input, &type, &body);
 	if (status != 0 || type != SSH_MON_SESSION_START) {
 		child_report("S:start fail\n");
 		_exit(3);
 	}
+
 	ssh_reader_init(&reader, body.data, body.size);
 	ssh_reader_get_cstring(&reader, user, sizeof(user));
 	ssh_reader_get_string(&reader, &state, &state_size);

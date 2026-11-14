@@ -78,6 +78,7 @@ test_base64(
 		out[length++] = alphabet[group & 63U];
 		position += 3U;
 	}
+
 	if (size - position == 1U) {
 		group = (uint32_t)in[position] << 16;
 		out[length++] = alphabet[(group >> 18) & 63U];
@@ -91,6 +92,7 @@ test_base64(
 		out[length++] = alphabet[(group >> 6) & 63U];
 		out[length++] = '=';
 	}
+
 	out[length] = '\0';
 }
 
@@ -125,6 +127,7 @@ test_read_file(
 		snprintf(out, capacity, "<absent>");
 		return;
 	}
+
 	size = fread(out, 1, capacity - 1U, file);
 	out[size] = '\0';
 	fclose(file);
@@ -181,6 +184,7 @@ test_argv(
 		used += length + 1U;
 		count++;
 	}
+
 	argv[count] = NULL;
 	return count;
 }
@@ -753,6 +757,7 @@ test_escape_case(
 		memcpy(total + count, out, size);
 		count += size;
 	}
+
 	CHECK_EQ(count, strlen(expected));
 	CHECK(memcmp(total, expected, count) == 0);
 	CHECK_EQ(disconnect, expected_disconnect);
@@ -872,6 +877,7 @@ test_reason_and_backlog(void)
 		if (status == 0)
 			sent++;
 	}
+
 	CHECK_EQ(status, ENOBUFS);
 	CHECK(client.backlog.size > 0);
 	CHECK(client.backlog.size <= SSH_CLIENT_BACKLOG_MAX);

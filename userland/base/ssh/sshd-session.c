@@ -281,6 +281,8 @@ sshd_session_run(void)
 		syslog(LOG_ERR, "session: the transport could not be taken over");
 		_exit(1);
 	}
+
+	/* Sets up the channels and the message buffer of the session. */
 	ssh_channels_init(&session.channels);
 	ssh_buf_init(&session.message, SSH_PACKET_LIMIT, 0);
 	session_describe_connection(&session);
@@ -364,6 +366,8 @@ session_take_start(
 			status = ssh_buf_error(state);
 		}
 	}
+
+	/* Releases the buffers. */
 	ssh_buf_free(&input);
 	ssh_buf_free(&body);
 	if (status != 0)
@@ -416,6 +420,8 @@ session_become_user(
 				return EPERM;
 		}
 	}
+
+	/* Takes the identity of the process. */
 	real_user = getuid();
 	real_group = getgid();
 	self = geteuid();
@@ -468,6 +474,8 @@ session_describe_connection(
 		(void)inet_ntop(AF_INET6, &((struct sockaddr_in6 *)&peer)->sin6_addr, peer_text, sizeof(peer_text));
 		peer_port = ntohs(((struct sockaddr_in6 *)&peer)->sin6_port);
 	}
+
+	/* Looks up the local address of the connection. */
 	size = sizeof(local);
 	looked = getsockname(SSHD_FD_CLIENT, (struct sockaddr *)&local, &size);
 	if (looked == 0 && local.ss_family == AF_INET) {
@@ -541,6 +549,8 @@ session_serve(
 				status = 0;
 				break;
 			}
+
+			/* Stops on a failure. */
 			if (status != 0)
 				break;
 			status = session_message(session, &payload);
@@ -548,6 +558,8 @@ session_serve(
 			if (status != 0)
 				break;
 		}
+
+		/* Stops when the loop failed. */
 		if (status != 0)
 			break;
 
@@ -562,6 +574,8 @@ session_serve(
 			if (status != 0)
 				break;
 		}
+
+		/* Stops when finishing a link failed. */
 		if (status != 0)
 			break;
 
@@ -574,6 +588,8 @@ session_serve(
 			ssh_transport_written(&session->transport, (size_t)got);
 			pending = ssh_transport_pending(&session->transport, &size);
 		}
+
+		/* Stops when the transport has closed. */
 		if (session->transport.state == SSH_TRANSPORT_CLOSED) {
 			status = EPIPE;
 			break;
@@ -606,6 +622,8 @@ session_serve(
 					owners[count] = link;
 					count++;
 				}
+
+				/* Waits for the error stream of the link too. */
 				if (link->err_child >= 0 && !link->err_done) {
 					waiting[count].fd = link->err_child;
 					waiting[count].events = POLLIN;
@@ -614,6 +632,8 @@ session_serve(
 					count++;
 				}
 			}
+
+			/* Waits to write the input of the link when some is queued. */
 			if (link->to_child >= 0 && link->input.size > 0) {
 				waiting[count].fd = link->to_child;
 				waiting[count].events = POLLOUT;
@@ -622,6 +642,8 @@ session_serve(
 				count++;
 			}
 		}
+
+		/* Clears the results of the previous poll and sets the timeout. */
 		for (index = 0; index < count; index++)
 			waiting[index].revents = 0;
 		timeout = SESSION_POLL_MS;
@@ -645,6 +667,8 @@ session_serve(
 					status = EPIPE;
 					break;
 				}
+
+				/* Feeds the bytes that were read to the transport. */
 				if (got > 0) {
 					session->last_input = sshd_child_now();
 					session->alive_missed = 0;
@@ -665,6 +689,8 @@ session_serve(
 				session_pump(session, owners[index]);
 			}
 		}
+
+		/* Stops when handling the events failed. */
 		if (status != 0)
 			break;
 
@@ -754,6 +780,8 @@ session_message(
 		ssh_transport_disconnect(&session->transport, SSH_DISCONNECT_PROTOCOL_ERROR, "protocol error");
 		return status;
 	}
+
+	/* Returns any other failure. */
 	if (status != 0)
 		return status;
 
@@ -962,6 +990,7 @@ session_request(
 				if (status == 0)
 					success = 1;
 			}
+
 			break;
 		case SSH_CREQ_EXEC:
 			if (!link->started) {
@@ -969,6 +998,7 @@ session_request(
 				if (status == 0)
 					success = 1;
 			}
+
 			break;
 		case SSH_CREQ_SUBSYSTEM:
 			status = strcmp(request.name, SESSION_SFTP);
@@ -979,6 +1009,7 @@ session_request(
 				if (status == 0)
 					success = 1;
 			}
+
 			break;
 		case SSH_CREQ_WINDOW_CHANGE:
 			if (link->have_pty && link->master >= 0) {
@@ -990,6 +1021,7 @@ session_request(
 				if (status == 0)
 					success = 1;
 			}
+
 			break;
 		case SSH_CREQ_SIGNAL:
 			number = session_signal_number(request.name);
@@ -1000,6 +1032,7 @@ session_request(
 				if (status == 0)
 					success = 1;
 			}
+
 			break;
 		default:
 			/* exit-status and exit-signal come from a server, eow and the rest are not offered. */
@@ -1050,6 +1083,8 @@ session_pty(
 		link->slave = -1;
 		return 0;
 	}
+
+	/* Marks both descriptors close-on-exec and terminates the name. */
 	(void)fcntl(link->master, F_SETFD, FD_CLOEXEC);
 	(void)fcntl(link->slave, F_SETFD, FD_CLOEXEC);
 	name[sizeof(name) - 1U] = '\0';
@@ -1061,6 +1096,8 @@ session_pty(
 		if (status == 0)
 			(void)tcsetattr(link->slave, TCSANOW, &modes);
 	}
+
+	/* Closes both descriptors when the modes could not be applied. */
 	if (status != 0) {
 		session_close_descriptor(&link->master);
 		session_close_descriptor(&link->slave);
@@ -1201,6 +1238,8 @@ session_start(
 			free(text);
 			return EIO;
 		}
+
+		/* Marks the parent's ends close-on-exec. */
 		(void)fcntl(in_pipe[1], F_SETFD, FD_CLOEXEC);
 		(void)fcntl(out_pipe[0], F_SETFD, FD_CLOEXEC);
 		(void)fcntl(err_pipe[0], F_SETFD, FD_CLOEXEC);
@@ -1218,14 +1257,20 @@ session_start(
 		free(text);
 		return EIO;
 	}
+
+	/* Runs the command in the child. */
 	if (child == 0) {
 		if (!link->have_pty) {
 			(void)dup2(in_pipe[0], 0);
 			(void)dup2(out_pipe[1], 1);
 			(void)dup2(err_pipe[1], 2);
 		}
+
+		/* Executes the command through the shell. */
 		session_exec(session, link, text, environment);
 	}
+
+	/* Releases the command text. */
 	free(text);
 
 	/* Keeps the parent's ends, non-blocking, and lets the child's go. */
@@ -1326,6 +1371,8 @@ session_exec(
 		arguments[2] = (char *)command;
 		arguments[3] = NULL;
 	}
+
+	/* Executes the shell; a failure ends the child with the status 127. */
 	(void)execve(shell, arguments, environment);
 	_exit(127);
 }
@@ -1386,6 +1433,8 @@ session_build_environment(
 			continue;
 		environment[count++] = (char *)link->env[index];
 	}
+
+	/* Ends the environment list. */
 	environment[count] = NULL;
 
 	/* Succeeded: the environment is built. */
@@ -1500,8 +1549,11 @@ session_pump(
 				if (!link->have_pty)
 					session_close_descriptor(&link->to_child);
 			}
+
 			break;
 		}
+
+		/* Drops the bytes that were written from the input. */
 		ssh_buf_consume(&link->input, (size_t)written);
 		ssh_buf_reset(&session->message);
 		ssh_channel_consumed(link->channel, (size_t)written, &session->message);
@@ -1557,6 +1609,8 @@ session_read_child(
 		} else {
 			link->out_done = 1;
 		}
+
+		/* Reports the end of the stream. */
 		return SESSION_READ_END;
 	}
 
@@ -1623,6 +1677,8 @@ session_finish(
 	} else {
 		ssh_channel_put_exit_status(link->channel, (uint32_t)WEXITSTATUS(link->wait_status), &session->message);
 	}
+
+	/* Sends the exit status or the signal. */
 	status = session_send(session);
 
 	/* Then EOF and CLOSE, each a message of its own. */
@@ -1630,10 +1686,14 @@ session_finish(
 		ssh_channel_put_eof(link->channel, &session->message);
 		status = session_send(session);
 	}
+
+	/* Sends CLOSE. */
 	if (status == 0) {
 		ssh_channel_put_close(link->channel, &session->message);
 		status = session_send(session);
 	}
+
+	/* Marks the link as finished. */
 	link->finished = 1;
 
 	/* The child is gone: its streams and its record close. */

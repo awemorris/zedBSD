@@ -99,6 +99,7 @@ ssh_client_host_decide(
 		} else {
 			*action = SSH_CLIENT_HOST_ASK;
 		}
+
 		break;
 	}
 
@@ -128,6 +129,7 @@ ssh_client_check_host_key(
 	int compare;
 	int error;
 
+	/* Takes the client from the callback context. */
 	client = context;
 
 	/* Reads the key; the transport passes only an ssh-ed25519 blob, which has one size. */
@@ -144,6 +146,8 @@ ssh_client_check_host_key(
 			ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "ssh: the server's host key changed during a key re-exchange; disconnecting");
 			return EACCES;
 		}
+
+		/* Accepts the key, since it is the one that was checked before. */
 		ssh_client_log(client, SSH_CLIENT_LOG_DEBUG, "ssh: key re-exchange: the host key checked again is the same");
 		return 0;
 	}
@@ -183,6 +187,8 @@ ssh_client_check_host_key(
 			ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "Host key verification failed.");
 			return EACCES;
 		}
+
+		/* Remembers that the key is to be added to the file. */
 		action = SSH_CLIENT_HOST_ADD;
 	}
 
@@ -251,6 +257,8 @@ client_lookup(
 		ssh_buf_free(&text);
 		return 0;
 	}
+
+	/* Reports any other read failure. */
 	if (error != 0) {
 		ssh_buf_free(&text);
 		return error;
@@ -431,6 +439,8 @@ client_open_known_hosts(
 		errno = ENOENT;
 		return -1;
 	}
+
+	/* Takes the length of the directory part of the path. */
 	length = (size_t)(slash - path);
 	directory_length = strlen(directory);
 	compare = 1;

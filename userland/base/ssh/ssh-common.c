@@ -301,6 +301,7 @@ ssh_base64_encode(
 		group |= (uint32_t)in[in_index + 2];
 		in_index += 3;
 
+		/* Writes the four characters of one group. */
 		out[out_index] = base64_alphabet[(group >> 18) & 0x3fU];
 		out[out_index + 1] = base64_alphabet[(group >> 12) & 0x3fU];
 		out[out_index + 2] = base64_alphabet[(group >> 6) & 0x3fU];
@@ -317,6 +318,7 @@ ssh_base64_encode(
 	if (left == 1) {
 		group = (uint32_t)in[in_index] << 16;
 
+		/* Writes the two characters of a single remaining byte. */
 		out[out_index] = base64_alphabet[(group >> 18) & 0x3fU];
 		out[out_index + 1] = base64_alphabet[(group >> 12) & 0x3fU];
 		out_index += 2;
@@ -329,6 +331,7 @@ ssh_base64_encode(
 		group = (uint32_t)in[in_index] << 16;
 		group |= (uint32_t)in[in_index + 1] << 8;
 
+		/* Writes the three characters of two remaining bytes. */
 		out[out_index] = base64_alphabet[(group >> 18) & 0x3fU];
 		out[out_index + 1] = base64_alphabet[(group >> 12) & 0x3fU];
 		out[out_index + 2] = base64_alphabet[(group >> 6) & 0x3fU];
@@ -407,6 +410,7 @@ ssh_base64_decode(
 		if (value3 < 0)
 			value3 = 0;
 
+		/* Joins the four values into one group of three bytes. */
 		group = (uint32_t)value0 << 18;
 		group |= (uint32_t)value1 << 12;
 		group |= (uint32_t)value2 << 6;
@@ -421,11 +425,14 @@ ssh_base64_decode(
 			out[out_index] = (uint8_t)((group >> 8) & 0xffU);
 			out_index++;
 		}
+
+		/* Stores the second byte when the output has room. */
 		if (out_index < decoded_size) {
 			out[out_index] = (uint8_t)(group & 0xffU);
 			out_index++;
 		}
 
+		/* Moves on to the next group of four characters. */
 		in_index += 4;
 	}
 
@@ -446,6 +453,7 @@ base64_value(
 {
 	unsigned char byte;
 
+	/* Takes the character as an unsigned byte. */
 	byte = (unsigned char)character;
 
 	/* Looks the character up by its range in Table 1 of RFC 4648. */

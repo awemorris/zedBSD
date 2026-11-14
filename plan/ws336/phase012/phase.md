@@ -29,7 +29,7 @@ WS335 の待ち: 無し
 
 期待の値は仕様の表・式・試験の vector と手の計算、`plan/ws336/tests/unit/wire.h` で組んだ bytes だけから作る。他の実装の出力を期待の値にしない（host の OpenSSH との相互運用は別の確かめで、期待の値の生成ではない）。
 
-- put_frame → next_frame の往復（各型）、長さ 0・上限 +1・未知の型で EINVAL、途中で EAGAIN、2 つの frame の連続
+- put_frame → next_frame の往復（各型）、長さ 0・上限 +1・未知の型で EINVAL（next_frame。put_frame の上限越えは EMSGSIZE）、途中で EAGAIN、2 つの frame の連続
 - mon_call: socketpair と fork（試験の中の子が答える）で往復、子が閉じると EIO、EINTR（SIGALRM を挟む）で続く
 - 乱数の入力
 

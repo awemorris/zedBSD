@@ -121,6 +121,7 @@ ssh_channel_open_session(
 	struct ssh_channel *slot;
 	int error;
 
+	/* Starts with no channel found. */
 	*channel = NULL;
 
 	/* Does nothing when the output has already failed. */
@@ -183,6 +184,7 @@ ssh_channel_accept_open(
 	int is_session;
 	int error;
 
+	/* Starts with no channel found. */
 	*channel = NULL;
 
 	/* Reads the framing: message number, type, sender, window, packet size. */
@@ -292,6 +294,7 @@ ssh_channel_open_reply(
 	uint32_t code;
 	int error;
 
+	/* Starts with no channel and no reason. */
 	*channel = NULL;
 	*reason = 0;
 	sender = 0;
@@ -316,6 +319,8 @@ ssh_channel_open_reply(
 		ssh_reader_get_string(&reader, &text, &text_size);
 		ssh_reader_get_string(&reader, &text, &text_size);
 	}
+
+	/* Checks that the message was read whole. */
 	error = ssh_reader_error(&reader);
 	if (error != 0)
 		return EINVAL;
@@ -404,6 +409,7 @@ ssh_channel_parse_data(
 	uint32_t type;
 	int error;
 
+	/* Starts with no channel and no data. */
 	*channel = NULL;
 	*data = NULL;
 	*data_size = 0;
@@ -503,6 +509,8 @@ ssh_channel_put_data(
 		ssh_buf_put_u32(out, channel->remote_id);
 		ssh_buf_put_u32(out, extended);
 	}
+
+	/* Appends the data as a string. */
 	ssh_buf_put_string(out, data, size);
 
 	/* Leaves the window alone when the message could not be queued. */
@@ -607,6 +615,7 @@ ssh_channel_parse_window_adjust(
 	uint64_t total;
 	int error;
 
+	/* Starts with no channel found. */
 	*channel = NULL;
 
 	/* Reads the framing. */
@@ -655,6 +664,7 @@ ssh_channel_parse_end(
 	uint32_t recipient;
 	int error;
 
+	/* Starts with no channel found. */
 	*channel = NULL;
 
 	/* Reads the framing. */
@@ -935,6 +945,7 @@ ssh_channel_parse_reply(
 	uint32_t recipient;
 	int error;
 
+	/* Starts with no channel and no result. */
 	*channel = NULL;
 	*success = 0;
 
@@ -1170,6 +1181,7 @@ ssh_channel_global_request(
 	int honoured;
 	int error;
 
+	/* Starts with no name and no reply wanted. */
 	name[0] = '\0';
 	*want_reply = 0;
 
@@ -1200,6 +1212,8 @@ ssh_channel_global_request(
 		else
 			ssh_buf_put_u8(out, SSH_MSG_REQUEST_FAILURE);
 	}
+
+	/* Returns the error of the output, if any. */
 	error = ssh_buf_error(out);
 	if (error != 0)
 		return error;
@@ -1444,6 +1458,8 @@ copy_name_cut(
 		else
 			out[index] = '?';
 	}
+
+	/* Ends the text. */
 	out[count] = '\0';
 }
 
@@ -1461,6 +1477,7 @@ copy_text(
 {
 	size_t index;
 
+	/* Starts with an empty text. */
 	out[0] = '\0';
 
 	/* A string longer than the field is refused. */

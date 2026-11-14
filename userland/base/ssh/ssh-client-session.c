@@ -304,6 +304,8 @@ ssh_client_escape_filter(
 				out[count] = byte;
 				count++;
 			}
+
+			/* Notes whether the next byte starts a line. */
 			escape->line_start = 0;
 			if (byte == '\r' || byte == '\n')
 				escape->line_start = 1;
@@ -344,6 +346,7 @@ client_session_run(
 	int status;
 	int error;
 
+	/* Takes the client of the session. */
 	client = session->client;
 
 	/* Makes the signal pipe and catches the signals the loop handles. */
@@ -385,6 +388,8 @@ client_session_run(
 			if (error != 0)
 				break;
 		}
+
+		/* Treats a request for more input as success. */
 		if (error == EAGAIN)
 			error = 0;
 		if (error != 0)
@@ -451,6 +456,8 @@ client_session_run(
 			slots[CLIENT_SLOT_OUTPUT].fd = session->output.descriptor;
 			slots[CLIENT_SLOT_OUTPUT].events = POLLOUT;
 		}
+
+		/* Waits to write the error stream when data is queued. */
 		slots[CLIENT_SLOT_ERROR].fd = -1;
 		if (session->error.queue.size > session->error.offset) {
 			slots[CLIENT_SLOT_ERROR].fd = session->error.descriptor;
@@ -467,6 +474,8 @@ client_session_run(
 			error = errno;
 			break;
 		}
+
+		/* Starts the poll again after an interrupt. */
 		if (status < 0)
 			continue;
 
@@ -500,6 +509,8 @@ client_session_run(
 			if (error != 0)
 				break;
 		}
+
+		/* Writes the error stream when it can take data or failed. */
 		if ((slots[CLIENT_SLOT_ERROR].revents & (POLLOUT | POLLHUP | POLLERR)) != 0) {
 			error = client_write_stream(session, &session->error);
 			if (error != 0)
@@ -595,6 +606,8 @@ client_wants_pty(
 			ssh_client_log(client, SSH_CLIENT_LOG_INFO, "Pseudo-terminal will not be allocated because stdin is not a terminal.");
 			return 0;
 		}
+
+		/* Allocates a terminal because stdin is one. */
 		return 1;
 	default:
 		if (command_size == 0 && terminal)
@@ -716,6 +729,7 @@ client_dispatch(
 	int want_reply;
 	int error;
 
+	/* Takes the client of the session. */
 	client = session->client;
 
 	/* Acts by the message number. */
@@ -729,6 +743,8 @@ client_dispatch(
 			error = EPROTO;
 			break;
 		}
+
+		/* Sends the reply when one was queued. */
 		if (session->out.size > 0)
 			error = client_send_out(session);
 		break;
@@ -751,10 +767,14 @@ client_dispatch(
 			error = 0;
 			break;
 		}
+
+		/* Fails when the message could not be read. */
 		if (error != 0) {
 			error = EPROTO;
 			break;
 		}
+
+		/* Starts the session on the open channel. */
 		error = client_opened(session);
 		break;
 	case SSH_MSG_CHANNEL_WINDOW_ADJUST:
@@ -825,6 +845,8 @@ client_opened(
 			if (status == 0)
 				ssh_ttymodes_put(&settings, &modes);
 		}
+
+		/* Ends the mode list when no mode was put. */
 		if (modes.size == 0)
 			ssh_buf_put_u8(&modes, SSH_TTY_OP_END);
 		error = ssh_buf_error(&modes);
@@ -832,6 +854,8 @@ client_opened(
 			ssh_buf_free(&modes);
 			return error;
 		}
+
+		/* Builds the pseudo-terminal request. */
 		ssh_buf_reset(&session->out);
 		ssh_channel_put_pty(session->channel, term, size.ws_col, size.ws_row, size.ws_xpixel, size.ws_ypixel, modes.data, modes.size, &session->out);
 		ssh_buf_free(&modes);
@@ -857,6 +881,8 @@ client_opened(
 	} else {
 		ssh_channel_put_shell(session->channel, &session->out);
 	}
+
+	/* Sends the request. */
 	error = client_send_out(session);
 	if (error != 0)
 		return error;
@@ -882,6 +908,7 @@ client_take_data(
 	uint32_t extended;
 	int error;
 
+	/* Takes the client of the session. */
 	client = session->client;
 
 	/* Reads the data and takes it from the window. */
@@ -929,6 +956,7 @@ client_take_end(
 	int freed;
 	int error;
 
+	/* Takes the client of the session. */
 	client = session->client;
 
 	/* Reads which end it is. */
@@ -948,6 +976,8 @@ client_take_end(
 		if (error != 0)
 			return error;
 	}
+
+	/* Frees the channel when both sides have closed it. */
 	freed = ssh_channel_closed(&session->channels, channel);
 	if (freed && channel == session->channel)
 		session->channel = NULL;
@@ -969,6 +999,7 @@ client_take_request(
 	struct ssh_channel *channel;
 	int error;
 
+	/* Takes the client of the session. */
 	client = session->client;
 
 	/* Reads the request. */
@@ -984,6 +1015,8 @@ client_take_request(
 		session->have_exit = 1;
 		session->exit_status = request.status;
 	}
+
+	/* Records the signal that ended the command. */
 	if (request.type == SSH_CREQ_EXIT_SIGNAL) {
 		session->have_exit = 1;
 		session->killed = 1;
@@ -1017,6 +1050,7 @@ client_take_reply(
 	int success;
 	int error;
 
+	/* Takes the client of the session. */
 	client = session->client;
 
 	/* Reads the reply. */
@@ -1047,6 +1081,8 @@ client_take_reply(
 		} else {
 			ssh_client_log(client, SSH_CLIENT_LOG_QUIET, "shell request failed on channel %lu", (unsigned long)channel->local_id);
 		}
+
+		/* Marks the session as failed and closes the channel. */
 		session->failed = 1;
 		if (!channel->close_sent) {
 			ssh_buf_reset(&session->out);
@@ -1055,6 +1091,8 @@ client_take_reply(
 			if (error != 0)
 				return error;
 		}
+
+		/* Reports that the reply was handled. */
 		return 0;
 	}
 
@@ -1158,6 +1196,8 @@ client_read_input(
 		memcpy(session->input, chunk, (size_t)count);
 		size = (size_t)count;
 	}
+
+	/* Wipes the chunk that was read. */
 	ssh_wipe(chunk, sizeof(chunk));
 
 	/* Succeeded: the bytes wait to be sent. */
@@ -1180,6 +1220,7 @@ client_send_input(
 	size_t size;
 	int error;
 
+	/* Takes the client of the session. */
 	client = session->client;
 
 	/* Sends nothing before the channel is open. */
@@ -1287,6 +1328,7 @@ client_keep_alive(
 	struct ssh_client *client;
 	int error;
 
+	/* Takes the client of the session. */
 	client = session->client;
 
 	/* Does nothing when keepalives are off or none is due. */

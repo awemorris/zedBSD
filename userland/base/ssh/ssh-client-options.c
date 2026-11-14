@@ -128,6 +128,8 @@ ssh_client_parse_args(
 					snprintf(error, capacity, "option -%c needs an argument", argument[position]);
 					return EINVAL;
 				}
+
+				/* Takes the value from the next argument. */
 				index++;
 				value = argv[index];
 			}
@@ -145,6 +147,7 @@ ssh_client_parse_args(
 			break;
 		}
 
+		/* Moves on to the next argument. */
 		index++;
 	}
 
@@ -353,6 +356,8 @@ client_split_destination(
 		snprintf(error, capacity, "empty user name in the destination");
 		return EINVAL;
 	}
+
+	/* Refuses a user name that is longer than the limit. */
 	if (user_length > SSH_USER_MAX) {
 		snprintf(error, capacity, "user name too long");
 		return EINVAL;
@@ -364,6 +369,8 @@ client_split_destination(
 		snprintf(error, capacity, "empty host name");
 		return EINVAL;
 	}
+
+	/* Refuses a host name that could be read as an option. */
 	if (host[0] == '-') {
 		snprintf(error, capacity, "host name may not start with '-'");
 		return EINVAL;

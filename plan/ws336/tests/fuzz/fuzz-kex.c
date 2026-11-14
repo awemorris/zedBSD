@@ -29,6 +29,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		(void)ssh_kex_choose(1, 1, &kexinit, &choice, &kind);
 		(void)ssh_kex_choose(1, 0, &kexinit, &choice, &kind);
 	}
+
 	(void)ssh_kex_parse_hybrid_init(data, size, &a, &a_size);
 	(void)ssh_kex_parse_hybrid_reply(data, size, &a, &a_size, &b, &b_size, &c, &c_size);
 	return 0;

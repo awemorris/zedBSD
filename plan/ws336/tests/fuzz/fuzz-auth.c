@@ -30,8 +30,10 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			ssh_auth_put_signed_data(session_id, data, request.signed_size, &out);
 			ssh_buf_free(&out);
 		}
+
 		ssh_auth_request_clear(&request);
 	}
+
 	(void)ssh_auth_parse_failure(data, size, text, sizeof(text), &partial);
 	memset(public_key, 1, sizeof(public_key));
 	(void)ssh_auth_parse_pk_ok(data, size, public_key);

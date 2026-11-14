@@ -615,6 +615,7 @@ parse_fields(
 			if (parsed->length > SSH_SFTP_READ_MAX)
 				parsed->length = SSH_SFTP_READ_MAX;
 		}
+
 		break;
 
 	case SSH_FXP_WRITE:
@@ -624,6 +625,7 @@ parse_fields(
 			parsed->offset = ssh_reader_get_u64(reader);
 			ssh_reader_get_string(reader, &parsed->data, &parsed->data_size);
 		}
+
 		break;
 
 	case SSH_FXP_RENAME:

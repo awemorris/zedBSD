@@ -131,6 +131,7 @@ timing_request(const struct sshd_config *config, const struct ssh_key *host_key,
 		ssh_buf_put_string(&body, blob.data, blob.size);
 		ssh_buf_free(&blob);
 	}
+
 	(void)clock_gettime(CLOCK_MONOTONIC, &arrived);
 	status = sshd_monitor_handle(&monitor, (enum ssh_mon_type)type, body.data, body.size, &arrived, &reply, &next);
 	(void)clock_gettime(CLOCK_MONOTONIC, &done);
@@ -199,6 +200,7 @@ main(int argc, char **argv)
 				failed = 1;
 			}
 		}
+
 		qsort(times, rounds, sizeof(times[0]), timing_compare);
 		medians[index] = times[rounds / 2];
 		printf("%-28s median %ld ms (min %ld, max %ld)\n", names[index], medians[index], times[0], times[rounds - 1]);
@@ -211,6 +213,7 @@ main(int argc, char **argv)
 			failed = 1;
 		}
 	}
+
 	printf("spread of the medians: %ld ms\n", high - low);
 	if (high - low >= 50)
 		failed = 1;

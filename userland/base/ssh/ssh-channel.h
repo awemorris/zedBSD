@@ -18,7 +18,7 @@
  * SSH_OPEN_ADMINISTRATIVELY_PROHIBITED.  Global requests are all refused
  * (REQUEST_FAILURE when a reply is wanted), except
  * "no-more-sessions@openssh.com" (OpenSSH PROTOCOL 2.2), which the server
- * honours.
+ * honours (REQUEST_SUCCESS when a reply is wanted).
  *
  * Channel requests read (RFC 4254 6.2 to 6.10, OpenSSH PROTOCOL 2.1):
  * pty-req, env, shell, exec, subsystem, window-change, signal,
@@ -344,8 +344,9 @@ void ssh_channel_put_exit_signal(const struct ssh_channel *channel, const char *
  * Reads a GLOBAL_REQUEST: name (capacity SSH_NAME_MAX + 1; a longer name
  * is cut) and *want_reply; the data after them is not read (see the top).
  * Sets channels->no_more_sessions for no-more-sessions@openssh.com.
- * When a reply is wanted, appends REQUEST_FAILURE (every global request is
- * refused) to out.  Returns 0, EINVAL (a payload too short for the name
+ * When a reply is wanted, appends REQUEST_SUCCESS for
+ * no-more-sessions@openssh.com, which is honoured, and REQUEST_FAILURE for
+ * every other global request, which is refused, to out.  Returns 0, EINVAL (a payload too short for the name
  * and want_reply) or the error recorded in out.
  */
 int ssh_channel_global_request(struct ssh_channels *channels, const uint8_t *payload, size_t size, char *name, int *want_reply, struct ssh_buf *out);

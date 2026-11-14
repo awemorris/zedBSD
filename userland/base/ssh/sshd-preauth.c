@@ -136,6 +136,8 @@ sshd_preauth_run(void)
 		syslog(LOG_ERR, "pre-authentication: the crypto library failed");
 		_exit(1);
 	}
+
+	/* Confines the process when it keeps the privilege. */
 	if (preauth.child.privileged) {
 		status = preauth_confine();
 		if (status != 0) {
@@ -318,6 +320,8 @@ preauth_serve(
 				status = 0;
 				break;
 			}
+
+			/* Stops on a failure. */
 			if (status != 0)
 				break;
 			status = preauth_message(preauth, &payload, &granted);
@@ -325,6 +329,8 @@ preauth_serve(
 			if (status != 0 || granted)
 				break;
 		}
+
+		/* Stops when a failure or a grant ended the loop. */
 		if (status != 0 || granted)
 			break;
 
@@ -337,6 +343,8 @@ preauth_serve(
 			ssh_transport_written(&preauth->transport, (size_t)got);
 			pending = ssh_transport_pending(&preauth->transport, &size);
 		}
+
+		/* Stops when the transport has closed. */
 		if (preauth->transport.state == SSH_TRANSPORT_CLOSED) {
 			status = EPIPE;
 			break;
@@ -361,6 +369,8 @@ preauth_serve(
 				status = EPIPE;
 				break;
 			}
+
+			/* Feeds the bytes that were read to the transport. */
 			if (got > 0) {
 				status = ssh_transport_input(&preauth->transport, chunk, (size_t)got);
 				if (status != 0)
@@ -416,6 +426,8 @@ preauth_message(
 		status = preauth_service(preauth, payload);
 		return status;
 	}
+
+	/* Handles a user authentication request once the service was accepted. */
 	if (payload->data[0] == SSH_MSG_USERAUTH_REQUEST && preauth->service_accepted) {
 		status = preauth_userauth(preauth, payload, granted);
 		return status;
@@ -447,6 +459,8 @@ preauth_service(
 		ssh_transport_disconnect(&preauth->transport, SSH_DISCONNECT_PROTOCOL_ERROR, "bad service request");
 		return EPROTO;
 	}
+
+	/* Compares the service with the user authentication service. */
 	same = strcmp(service, SSH_SERVICE_USERAUTH);
 	if (same != 0) {
 		ssh_transport_disconnect(&preauth->transport, SSH_DISCONNECT_SERVICE_NOT_AVAILABLE, "service not available");
@@ -497,10 +511,14 @@ preauth_userauth(
 			ssh_transport_disconnect(&preauth->transport, SSH_DISCONNECT_SERVICE_NOT_AVAILABLE, "service not available");
 			return EPROTO;
 		}
+
+		/* Remembers the user and the service of the first request. */
 		strcpy(preauth->user, request.user);
 		strcpy(preauth->service, request.service);
 		preauth->have_user = 1;
 	}
+
+	/* Compares the request with the user and service of the first one. */
 	same = strcmp(preauth->user, request.user);
 	if (same == 0)
 		same = strcmp(preauth->service, request.service);
@@ -527,6 +545,8 @@ preauth_userauth(
 			status = preauth_fail(preauth);
 		}
 	}
+
+	/* Releases the request. */
 	ssh_auth_request_clear(&request);
 
 	/* Reports a failure that ended the connection. */
@@ -582,6 +602,8 @@ preauth_publickey(
 		ssh_buf_put_string(&body, signed_data.data, signed_data.size);
 		ssh_buf_put_string(&body, request->signature, request->signature_size);
 	}
+
+	/* Checks that the buffers were built whole. */
 	status = ssh_buf_error(&signed_data);
 	if (status == 0)
 		status = ssh_buf_error(&body);
@@ -678,6 +700,8 @@ preauth_password(
 		ssh_transport_disconnect(&preauth->transport, SSH_DISCONNECT_BY_APPLICATION, "internal error");
 		return EIO;
 	}
+
+	/* Counts the failed attempt. */
 	preauth->tries++;
 
 	/* A granted login ends the authentication. */
@@ -812,6 +836,8 @@ preauth_hand_over(
 			status = EPROTO;
 			break;
 		}
+
+		/* Stops unless the transport needs more input. */
 		if (status != EAGAIN)
 			break;
 		waiting.fd = SSHD_FD_CLIENT;
@@ -822,6 +848,8 @@ preauth_hand_over(
 			status = EIO;
 			break;
 		}
+
+		/* Keeps waiting when no input arrived. */
 		if (ready <= 0)
 			continue;
 		got = read(SSHD_FD_CLIENT, chunk, sizeof(chunk));
@@ -829,12 +857,16 @@ preauth_hand_over(
 			status = EPIPE;
 			break;
 		}
+
+		/* Feeds the bytes that were read to the transport. */
 		if (got > 0) {
 			status = ssh_transport_input(&preauth->transport, chunk, (size_t)got);
 			if (status != 0)
 				break;
 		}
 	}
+
+	/* Wipes the input and releases the payload. */
 	ssh_wipe(chunk, sizeof(chunk));
 	ssh_buf_free(&payload);
 
@@ -843,6 +875,8 @@ preauth_hand_over(
 		ssh_buf_put_string(&body, state.data, state.size);
 		status = ssh_buf_error(&body);
 	}
+
+	/* Sends the result and the transport state to the monitor. */
 	if (status == 0)
 		status = sshd_child_send(SSH_MON_AUTH_DONE, body.data, body.size);
 	ssh_buf_free(&state);

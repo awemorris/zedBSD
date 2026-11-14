@@ -440,6 +440,7 @@ ssh_ttymodes_apply(
 		if (left == 0)
 			break;
 
+		/* Reads the opcode of the next mode. */
 		opcode = ssh_reader_get_u8(&reader);
 
 		/* The end opcode stops the run; any bytes after it are not read. */
@@ -490,6 +491,7 @@ put_mode(
 	uint32_t argument;
 	tcflag_t flags;
 
+	/* Starts from no argument and no flags. */
 	argument = 0;
 	flags = 0;
 

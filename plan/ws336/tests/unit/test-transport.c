@@ -226,6 +226,7 @@ fnv(
 		hash ^= data[index];
 		hash *= 0x01000193U;
 	}
+
 	return hash;
 }
 
@@ -283,6 +284,7 @@ test_check_host_key(
 		memcpy(test->blob, blob, size);
 		test->blob_size = size;
 	}
+
 	if (test->refuse != 0)
 		return EACCES;
 	if (test->fail != 0)
@@ -317,6 +319,7 @@ start_one(
 		context = &server_context;
 		inbox = &server_inbox;
 	}
+
 	memset(context, 0, sizeof(*context));
 	context->key = &host_key;
 	memset(inbox, 0, sizeof(*inbox));
@@ -330,6 +333,7 @@ start_one(
 	} else {
 		ops.check_host_key = test_check_host_key;
 	}
+
 	error = ssh_transport_init(transport, role, &ops, TEST_NOW);
 	CHECK_EQ(error, 0);
 }
@@ -373,6 +377,7 @@ step(
 		inbox->hash[index] = fnv(payload.data, payload.size);
 		inbox->count++;
 	}
+
 	ssh_buf_free(&payload);
 	return error;
 }
@@ -436,6 +441,7 @@ pump(void)
 		if (progress == 0)
 			return 0;
 	}
+
 	return ETIMEDOUT;
 }
 
@@ -608,6 +614,7 @@ read_plain(
 		plain_out.size[plain_out.count] = payload.size;
 		plain_out.count++;
 	}
+
 	ssh_buf_free(&payload);
 	ssh_packet_free(&reader);
 	return plain_out.count;
@@ -752,10 +759,12 @@ test_connect(void)
 		CHECK_EQ(client.k[index], 0);
 		CHECK_EQ(server.h[index], 0);
 	}
+
 	for (index = 0; index < SSH_HYBRID_INIT_SIZE; index++) {
 		if (client.c_init[index] != 0)
 			break;
 	}
+
 	CHECK_EQ(index, SSH_HYBRID_INIT_SIZE);
 
 	/* Sends upper-layer messages both ways. */
@@ -767,6 +776,7 @@ test_connect(void)
 		error = ssh_transport_send(&server, message, 10U + index);
 		CHECK_EQ(error, 0);
 	}
+
 	error = pump();
 	CHECK_EQ(error, 0);
 
@@ -781,6 +791,7 @@ test_connect(void)
 		CHECK_EQ(client_inbox.size[index], 10U + index);
 		CHECK_EQ(client_inbox.hash[index], fnv(message, 10U + index));
 	}
+
 	CHECK_EQ(client.packet.send.seq, 4);
 	CHECK_EQ(server.packet.receive.seq, 4);
 	stop_pair();
@@ -847,6 +858,7 @@ test_send_errors(void)
 		error = ssh_transport_send(&client, message, sizeof(message));
 		CHECK_EQ(error, EINVAL);
 	}
+
 	for (index = 0; index < sizeof(taken) / sizeof(taken[0]); index++) {
 		message[0] = (uint8_t)taken[index];
 		error = ssh_transport_send(&client, message, sizeof(message));
@@ -863,6 +875,7 @@ test_send_errors(void)
 		error = ssh_transport_send(&client, large, SSH_PACKET_LIMIT - 255U);
 		CHECK_EQ(error, EINVAL);
 	}
+
 	error = pump();
 	CHECK_EQ(error, 0);
 	/* The reserved 128 and 191 are taken for sending but answered with UNIMPLEMENTED by the receiver (RFC 4250 4.1.2). */
@@ -872,6 +885,7 @@ test_send_errors(void)
 		CHECK_EQ(server_inbox.size[server_inbox.count - 1U], SSH_PACKET_LIMIT - 256U);
 		CHECK_EQ(server_inbox.hash[server_inbox.count - 1U], fnv(large, SSH_PACKET_LIMIT - 256U));
 	}
+
 	free(large);
 
 	/* Refuses everything after a disconnect, as EPIPE. */
@@ -924,6 +938,7 @@ test_peer_rekey_held(void)
 		error = ssh_transport_send(&client, message, sizeof(message) - index);
 		CHECK_EQ(error, 0);
 	}
+
 	(void)ssh_transport_pending(&client, &after);
 	CHECK_EQ(after, before);
 	CHECK(client.held.size > 0);
@@ -944,6 +959,7 @@ test_peer_rekey_held(void)
 		make_message(message, sizeof(message) - index, 90U + index, index);
 		CHECK_EQ(server_inbox.hash[index], fnv(message, sizeof(message) - index));
 	}
+
 	CHECK_EQ(client_inbox.count, 1);
 	make_message(message, 20, 70, 99);
 	CHECK_EQ(client_inbox.hash[0], fnv(message, 20));
@@ -984,6 +1000,7 @@ test_held_full(void)
 			break;
 		count++;
 	}
+
 	CHECK_EQ(error, ENOBUFS);
 	CHECK_EQ(count, SSH_TRANSPORT_HELD_MAX / (4U + sizeof(message)));
 
@@ -1011,6 +1028,7 @@ test_held_full(void)
 		make_message(message, sizeof(message), 94, index);
 		CHECK_EQ(server_inbox.hash[index], fnv(message, sizeof(message)));
 	}
+
 	make_message(message, last, 94, count);
 	CHECK_EQ(server_inbox.size[count], last);
 	CHECK_EQ(server_inbox.hash[count], fnv(message, last));
@@ -1040,6 +1058,7 @@ test_output_full(void)
 			break;
 		count++;
 	}
+
 	CHECK_EQ(error, ENOBUFS);
 	CHECK(count > 100U);
 	(void)ssh_transport_pending(&client, &before);
@@ -1066,6 +1085,7 @@ test_output_full(void)
 		make_message(message, sizeof(message), 94, index);
 		CHECK_EQ(server_inbox.hash[index], fnv(message, sizeof(message)));
 	}
+
 	CHECK_EQ(client.kex_step, 0);
 	stop_pair();
 }
@@ -1118,6 +1138,7 @@ test_held_running(void)
 		ssh_buf_put_u32(&client.held, sizeof(big_payload));
 		ssh_buf_put_bytes(&client.held, big_payload, sizeof(big_payload));
 	}
+
 	CHECK_EQ(client.held.error, 0);
 	ssh_transport_written(&client, 0);
 	(void)ssh_transport_pending(&client, &after);
@@ -1131,6 +1152,7 @@ test_held_running(void)
 		make_message(big_payload, sizeof(big_payload), 94, index);
 		CHECK_EQ(server_inbox.hash[index], fnv(big_payload, sizeof(big_payload)));
 	}
+
 	stop_pair();
 }
 
@@ -1158,6 +1180,7 @@ test_output_reserve(void)
 		if (error != 0)
 			break;
 	}
+
 	CHECK_EQ(error, ENOBUFS);
 
 	/*
@@ -1176,6 +1199,7 @@ test_output_reserve(void)
 		if (error != 0)
 			break;
 	}
+
 	CHECK_EQ(error, ENOBUFS);
 
 	/* No framed message went past the upper layer's limit. */
@@ -1193,6 +1217,7 @@ test_output_reserve(void)
 		error = step(&client, NULL);
 		CHECK_EQ(error, EAGAIN);
 	}
+
 	(void)ssh_transport_pending(&client, &size);
 	CHECK(size > SSH_PACKET_OUTPUT_MAX - 64U * 1024U);
 	error = ssh_transport_send(&client, message, 1);
@@ -1206,6 +1231,7 @@ test_output_reserve(void)
 		move_all(&server, &client);
 		error = step(&client, NULL);
 	}
+
 	CHECK_EQ(error, EMSGSIZE);
 	CHECK_EQ(client.state, SSH_TRANSPORT_CLOSED);
 	CHECK(count > 1000U);
@@ -1318,6 +1344,7 @@ test_rekey_counters(void)
 			counter = &client.packet.receive.packets;
 			limit = SSH_TRANSPORT_REKEY_PACKETS;
 		}
+
 		*counter = limit - 1U;
 		error = ssh_transport_tick(&client, TEST_NOW);
 		CHECK_EQ(error, 0);
@@ -2253,6 +2280,7 @@ test_unimplemented(void)
 		(void)ssh_transport_pending(&client, &size);
 		CHECK_EQ(size, 0);
 	}
+
 	CHECK_EQ(client_inbox.count, 0);
 
 	/* None of them ended the connection. */
@@ -2466,6 +2494,7 @@ test_export(void)
 		error = ssh_transport_send(&client, message, sizeof(message));
 		CHECK_EQ(error, 0);
 	}
+
 	error = ssh_transport_tick(&client, TEST_NOW + SSH_TRANSPORT_REKEY_SECONDS);
 	CHECK_EQ(error, 0);
 	CHECK(client.kex_step != 0);
@@ -2576,6 +2605,7 @@ export_variant(
 	} else {
 		wire_text(out, SSH_VERSION_STRING);
 	}
+
 	wire_text(out, variant == 7U ? "OpenSSH" : "SSH-1.99-peer");
 
 	/* The session identifier and strict. */
@@ -2658,6 +2688,7 @@ test_import_errors(void)
 		CHECK_EQ(error, 0);
 		ssh_transport_free(&client);
 	}
+
 	free(large);
 }
 
@@ -2701,20 +2732,24 @@ test_random(void)
 				(void)step(&client, NULL);
 				(void)step(&server, NULL);
 			}
+
 			if (stage >= 2U) {
 				move_all(&client, &server);
 				move_all(&server, &client);
 				(void)step(&client, NULL);
 				(void)step(&server, NULL);
 			}
+
 			if (stage >= 3U) {
 				move_all(&client, &server);
 				(void)step(&server, NULL);
 			}
+
 			if (stage >= 4U) {
 				move_all(&server, &client);
 				(void)step(&client, NULL);
 			}
+
 			if (stage >= 5U) {
 				error = pump();
 				CHECK_EQ(error, 0);
@@ -2745,6 +2780,7 @@ test_random(void)
 				if (error != EAGAIN)
 					CHECK_EQ(client.state, SSH_TRANSPORT_CLOSED);
 			}
+
 			if (server.state != SSH_TRANSPORT_CLOSED) {
 				error = ssh_transport_input(&server, frame_wire.data, frame_wire.size);
 				CHECK(error == 0 || error == EMSGSIZE);
@@ -2752,6 +2788,7 @@ test_random(void)
 				if (error != EAGAIN)
 					CHECK_EQ(server.state, SSH_TRANSPORT_CLOSED);
 			}
+
 			stop_pair();
 		}
 	}
@@ -2785,8 +2822,10 @@ test_random_running(void)
 			connect_pair();
 			continue;
 		}
+
 		ssh_transport_written(&client, SSH_PACKET_OUTPUT_MAX);
 		client_inbox.count = 0;
 	}
+
 	stop_pair();
 }

@@ -221,6 +221,8 @@ ssh_kex_choose(
 			*kind = "encryption_algorithms_client_to_server";
 		return ENOTSUP;
 	}
+
+	/* Checks that the peer offers the cipher for server to client traffic. */
 	found = kex_offered(peer, KEX_LIST_CIPHER_SERVER, SSH_CIPHER_NAME);
 	if (found == 0) {
 		if (kind != NULL)
@@ -235,6 +237,8 @@ ssh_kex_choose(
 			*kind = "compression_algorithms_client_to_server";
 		return ENOTSUP;
 	}
+
+	/* Checks that the peer offers the no-compression method for server to client traffic. */
 	found = kex_offered(peer, KEX_LIST_COMPRESSION_SERVER, KEX_COMPRESSION_NAME);
 	if (found == 0) {
 		if (kind != NULL)

@@ -111,6 +111,7 @@ client_next(
 			ssh_transport_written(&client->transport, (size_t)got);
 			pending = ssh_transport_pending(&client->transport, &size);
 		}
+
 		waiting.fd = client->socket;
 		waiting.events = POLLIN;
 		waiting.revents = 0;
@@ -149,6 +150,7 @@ client_send(
 		ssh_transport_written(&client->transport, (size_t)got);
 		pending = ssh_transport_pending(&client->transport, &size);
 	}
+
 	return 0;
 }
 
@@ -286,6 +288,7 @@ client_wait(
 		} else {
 			return EPROTO;
 		}
+
 		(void)channel;
 	}
 }
@@ -340,6 +343,7 @@ case_closing(
 			seen_data = 1;
 			continue;
 		}
+
 		if (client->payload.data[0] == SSH_MSG_CHANNEL_REQUEST) {
 			status = ssh_channel_parse_request(&client->channels, client->payload.data, client->payload.size, &request);
 			if (status != 0 || request.type != SSH_CREQ_EXIT_STATUS || request.status != 0 || request.want_reply)
@@ -349,6 +353,7 @@ case_closing(
 			seen_status = 1;
 			continue;
 		}
+
 		if (client->payload.data[0] == SSH_MSG_CHANNEL_EOF) {
 			status = ssh_channel_parse_end(&client->channels, client->payload.data, client->payload.size, &other);
 			if (status != 0 || !seen_status)
@@ -356,12 +361,14 @@ case_closing(
 			seen_eof = 1;
 			continue;
 		}
+
 		if (client->payload.data[0] == SSH_MSG_CHANNEL_CLOSE) {
 			status = ssh_channel_parse_end(&client->channels, client->payload.data, client->payload.size, &other);
 			if (status != 0 || !seen_eof)
 				return fail("closing", "CLOSE before EOF");
 			break;
 		}
+
 		return fail("closing", "an unexpected message");
 	}
 
@@ -676,6 +683,7 @@ case_limit(
 		if (round == 0 && (status != 0 || client->payload.data[0] != SSH_MSG_USERAUTH_FAILURE))
 			return fail("limit", "the first attempt was not failed");
 	}
+
 	if (status != ECONNABORTED || client->transport.reason_code != SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE)
 		return fail("limit", "no disconnect 14");
 	return 0;
@@ -738,6 +746,7 @@ case_window(
 			(void)ssh_transport_input(&client->transport, chunk, (size_t)got);
 			continue;
 		}
+
 		if (status != 0)
 			return fail("window", "transport");
 		if (client->payload.data[0] != SSH_MSG_CHANNEL_DATA)
@@ -749,8 +758,10 @@ case_window(
 			if (data[index] != 0)
 				return fail("window", "a byte differs");
 		}
+
 		received += size;
 	}
+
 	if (received != SSH_CHANNEL_WINDOW + 1000U) {
 		fprintf(stderr, "received %lu\n", (unsigned long)received);
 		return fail("window", "not exactly the window");
@@ -775,10 +786,12 @@ case_window(
 		if (client->out.size > 0)
 			(void)client_send(client);
 	}
+
 	if (received != 2200000U) {
 		fprintf(stderr, "received %lu\n", (unsigned long)received);
 		return fail("window", "bytes are missing");
 	}
+
 	return 0;
 }
 
@@ -833,11 +846,13 @@ main(
 		(void)close(client.socket);
 		return status;
 	}
+
 	status = client_connect(&client, (unsigned)atoi(argv[1]), SSH_SERVICE_USERAUTH);
 	if (status != 0) {
 		printf("FAIL %s: connect %d\n", argv[4], status);
 		return 1;
 	}
+
 	if (strcmp(argv[4], "closing") == 0)
 		status = case_closing(&client);
 	else if (strcmp(argv[4], "user-change") == 0)

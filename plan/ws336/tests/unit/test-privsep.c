@@ -608,6 +608,7 @@ test_next_frame_sequence(void)
 			CHECK_EQ(error, EAGAIN);
 		}
 	}
+
 	CHECK_EQ(frames, 2);
 	ssh_buf_free(&in);
 	ssh_buf_free(&body);
@@ -730,6 +731,7 @@ test_call_roundtrip(void)
 		close(pair[0]);
 		child_serve(pair[1], SSH_MON_RESULT, (const uint8_t *)"\0\0\0\15", 4, 0);
 	}
+
 	close(pair[1]);
 
 	ssh_buf_init(&reply, 1000, 1);
@@ -772,6 +774,7 @@ test_call_pieces_and_extra(void)
 		close(pair[0]);
 		child_serve(pair[1], SSH_MON_SIGNATURE, big_body, 100, 1);
 	}
+
 	close(pair[1]);
 
 	ssh_buf_init(&reply, 1000, 1);
@@ -835,6 +838,7 @@ test_call_large(void)
 		close(pair[0]);
 		child_serve(pair[1], SSH_MON_CONFIG, big_body, SSH_MON_STATE_MAX - 1U, 0);
 	}
+
 	close(pair[1]);
 	child_start_delay = 0;
 
@@ -887,6 +891,7 @@ test_call_peer_closes(void)
 		close(pair[0]);
 		child_serve(pair[1], 0, NULL, 0, 2);
 	}
+
 	close(pair[1]);
 	ssh_buf_init(&reply, 1000, 1);
 	error = ssh_mon_call(pair[0], SSH_MON_PUBKEY_QUERY, input.data, input.size, &reply_type, &reply);
@@ -902,6 +907,7 @@ test_call_peer_closes(void)
 		close(pair[0]);
 		child_serve(pair[1], SSH_MON_RESULT, big_body, 15, 3);
 	}
+
 	close(pair[1]);
 	ssh_buf_init(&reply, 1000, 1);
 	error = ssh_mon_call(pair[0], SSH_MON_PUBKEY_QUERY, input.data, input.size, &reply_type, &reply);
@@ -959,6 +965,7 @@ test_call_interrupted(void)
 		close(pair[0]);
 		child_serve(pair[1], SSH_MON_RESULT, (const uint8_t *)"\0\0\0\0", 4, 4);
 	}
+
 	close(pair[1]);
 
 	/* Starts the timer in the parent only (a child made before this does not inherit it). */
@@ -1037,6 +1044,7 @@ test_call_hostile_reply(void)
 			close(pair[0]);
 			child_serve(pair[1], 0, raw, count, 5);
 		}
+
 		close(pair[1]);
 
 		ssh_buf_init(&reply, 1000, 1);
@@ -1097,6 +1105,7 @@ test_call_errors(void)
 		close(pair[0]);
 		child_serve(pair[1], SSH_MON_RESULT, (const uint8_t *)"\0\0\0\0", 4, 0);
 	}
+
 	close(pair[1]);
 	ssh_buf_init(&reply, 3, 1);
 	error = ssh_mon_call(pair[0], SSH_MON_PUBKEY_QUERY, input.data, input.size, &reply_type, &reply);
@@ -1187,8 +1196,10 @@ test_random_frames(void)
 				break;
 			}
 		}
+
 		ssh_buf_free(&in);
 	}
+
 	CHECK_EQ(bad, 0);
 
 	/* The inputs covered all three outcomes, so the run was not all one kind. */
@@ -1256,6 +1267,7 @@ test_mutated_frames(void)
 
 		ssh_buf_free(&in);
 	}
+
 	CHECK_EQ(bad, 0);
 	ssh_buf_free(&body);
 }
@@ -1345,6 +1357,7 @@ child_serve(
 			write_full(descriptor, reply.data + index, 1);
 			usleep(2000);
 		}
+
 		write_full(descriptor, reply.data + 7, reply.size - 7);
 		wire_reset(&reply);
 		build_frame(&reply, SSH_MON_RESULT, (const uint8_t *)"\0\0\0\0", 4);

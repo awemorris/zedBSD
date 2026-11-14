@@ -135,8 +135,10 @@ find_argument(
 			    (uint32_t)encoded->data[offset + 4];
 			return 1;
 		}
+
 		offset += 5;
 	}
+
 	return 0;
 }
 
@@ -805,6 +807,7 @@ test_apply_random(void)
 			else
 				bytes[index] = (uint8_t)(next_random() % 4);
 		}
+
 		make_cooked(&terminal);
 		before = terminal;
 		error = ssh_ttymodes_apply(bytes, size, &terminal);

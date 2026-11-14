@@ -57,6 +57,7 @@ shim_find(void)
 		if (slash != NULL)
 			*slash = '\0';
 	}
+
 	found = NULL;
 	if (getpwuid_r(getuid(), &account, buffer, sizeof(buffer), &found) == 0 && found != NULL)
 		strncpy(shim_user, account.pw_name, sizeof(shim_user) - 1U);

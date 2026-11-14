@@ -339,6 +339,9 @@ static const struct config_name log_level_names[] = {
 
 static int config_is_blank(char byte);
 static char config_lower(char byte);
+static size_t config_skip_blanks(const char *text, size_t size, size_t position);
+static size_t config_skip_word(const char *text, size_t size, size_t position);
+static size_t config_trim_blanks(const char *text, size_t size);
 static int config_text_equal(const char *text, size_t size, const char *expected);
 static int config_find_keyword(const struct config_keyword *table, size_t count, const char *name, size_t size);
 static int config_lookup_name(const struct config_name *table, size_t count, const struct config_token *token, int *value);
@@ -530,6 +533,8 @@ ssh_config_option(
 	struct ssh_state state;
 	struct config_line parsed;
 	const char *what;
+	const void *line_feed;
+	const void *carriage_return;
 	size_t length;
 	int status;
 
@@ -549,7 +554,11 @@ ssh_config_option(
 		config_error(error, 0, "option too long", NULL, 0);
 		return EINVAL;
 	}
-	if (memchr(option, '\n', length) != NULL || memchr(option, '\r', length) != NULL) {
+
+	/* Refuses an option with a line break in it. */
+	line_feed = memchr(option, '\n', length);
+	carriage_return = memchr(option, '\r', length);
+	if (line_feed != NULL || carriage_return != NULL) {
 		config_error(error, 0, "line break in option", NULL, 0);
 		return EINVAL;
 	}
@@ -667,6 +676,68 @@ config_lower(
 	return byte;
 }
 
+/* Returns the position of the first byte at or after position that is not a blank, or size. */
+static size_t
+config_skip_blanks(
+	const char *text,
+	size_t size,
+	size_t position)
+{
+	int blank;
+
+	/* Stops at the first byte that belongs to a word. */
+	while (position < size) {
+		blank = config_is_blank(text[position]);
+		if (!blank)
+			break;
+		position++;
+	}
+
+	/* Succeeded: the blanks are skipped. */
+	return position;
+}
+
+/* Returns the position of the first blank at or after position, or size. */
+static size_t
+config_skip_word(
+	const char *text,
+	size_t size,
+	size_t position)
+{
+	int blank;
+
+	/* Stops at the first blank. */
+	while (position < size) {
+		blank = config_is_blank(text[position]);
+		if (blank)
+			break;
+		position++;
+	}
+
+	/* Succeeded: the word is skipped. */
+	return position;
+}
+
+/* Returns the size of the text without the blanks at its end. */
+static size_t
+config_trim_blanks(
+	const char *text,
+	size_t size)
+{
+	int blank;
+
+	/* Stops at the last byte that belongs to a word. */
+	while (size > 0) {
+		blank = config_is_blank(text[size - 1U]);
+		if (!blank)
+			break;
+		size--;
+	}
+
+	/* Succeeded: the trailing blanks are cut. */
+	return size;
+}
+
 /* Compares size bytes at text with expected without regard to the case of ASCII letters; 1 when they are equal. */
 static int
 config_text_equal(
@@ -676,6 +747,8 @@ config_text_equal(
 {
 	size_t index;
 	size_t expected_size;
+	char folded_text;
+	char folded_expected;
 
 	/* A length that differs is a difference. */
 	expected_size = strlen(expected);
@@ -684,7 +757,9 @@ config_text_equal(
 
 	/* Compares the bytes one by one, folding capitals. */
 	for (index = 0; index < size; index++) {
-		if (config_lower(text[index]) != config_lower(expected[index]))
+		folded_text = config_lower(text[index]);
+		folded_expected = config_lower(expected[index]);
+		if (folded_text != folded_expected)
 			return 0;
 	}
 
@@ -800,11 +875,15 @@ config_error(
 			count++;
 			remaining = remaining / 10;
 		}
+
+		/* Writes the word and the line number. */
 		config_append(error, &used, "line ", 5, 0);
 		while (count != 0) {
 			count--;
 			config_append(error, &used, &digits[count], 1, 0);
 		}
+
+		/* Ends the position prefix. */
 		config_append(error, &used, ": ", 2, 0);
 	}
 
@@ -843,6 +922,7 @@ config_split_line(
 {
 	size_t position;
 	size_t start;
+	int blank;
 
 	/* Starts with no keyword and no word. */
 	parsed->keyword = line;
@@ -851,13 +931,18 @@ config_split_line(
 	position = 0;
 
 	/* Skips the blanks before the keyword. */
-	while (position < length && config_is_blank(line[position]))
-		position++;
+	position = config_skip_blanks(line, length, position);
 
 	/* Reads the keyword: up to a blank or an '='. */
 	start = position;
-	while (position < length && !config_is_blank(line[position]) && line[position] != '=')
+	while (position < length) {
+		blank = config_is_blank(line[position]);
+		if (blank || line[position] == '=')
+			break;
 		position++;
+	}
+
+	/* Records the keyword. */
 	parsed->keyword = line + start;
 	parsed->keyword_size = position - start;
 
@@ -868,12 +953,10 @@ config_split_line(
 	}
 
 	/* Skips the separator: blanks, at most one '=', blanks. */
-	while (position < length && config_is_blank(line[position]))
-		position++;
+	position = config_skip_blanks(line, length, position);
 	if (position < length && line[position] == '=')
 		position++;
-	while (position < length && config_is_blank(line[position]))
-		position++;
+	position = config_skip_blanks(line, length, position);
 
 	/* Reads the words up to the end of the line or a comment. */
 	while (position < length && line[position] != '#') {
@@ -883,6 +966,7 @@ config_split_line(
 			return EINVAL;
 		}
 
+		/* Reads one word, quoted or bare. */
 		if (line[position] == '"') {
 			/* A quoted word runs to the closing quote and must be followed by a blank or the end of the line. */
 			position++;
@@ -893,26 +977,31 @@ config_split_line(
 				*what = "unterminated quote";
 				return EINVAL;
 			}
+
+			/* Records the quoted word. */
 			parsed->tokens[parsed->token_count].text = line + start;
 			parsed->tokens[parsed->token_count].size = position - start;
 			position++;
-			if (position < length && !config_is_blank(line[position])) {
-				*what = "text after a closing quote";
-				return EINVAL;
+			if (position < length) {
+				blank = config_is_blank(line[position]);
+				if (!blank) {
+					*what = "text after a closing quote";
+					return EINVAL;
+				}
 			}
 		} else {
 			/* A plain word runs to the next blank. */
 			start = position;
-			while (position < length && !config_is_blank(line[position]))
-				position++;
+			position = config_skip_word(line, length, position);
 			parsed->tokens[parsed->token_count].text = line + start;
 			parsed->tokens[parsed->token_count].size = position - start;
 		}
+
+		/* Counts the word. */
 		parsed->token_count++;
 
 		/* Skips the blanks before the next word. */
-		while (position < length && config_is_blank(line[position]))
-			position++;
+		position = config_skip_blanks(line, length, position);
 	}
 
 	/* Succeeded: the line is split. */
@@ -940,6 +1029,8 @@ config_run(
 	size_t start;
 	size_t end;
 	size_t length;
+	size_t blanks;
+	const void *nul;
 	unsigned line_number;
 	int status;
 
@@ -974,21 +1065,21 @@ config_run(
 		line_number++;
 
 		/* A NUL byte in a line is an error whether or not the line is a comment. */
-		if (memchr(text + start, '\0', end - start) != NULL) {
+		nul = memchr(text + start, '\0', end - start);
+		if (nul != NULL) {
 			config_error(error, line_number, "NUL byte in line", NULL, 0);
 			return EINVAL;
 		}
 
 		/* Cuts the trailing blanks (and the CR of a CR LF). */
-		length = end - start;
-		while (length > 0 && config_is_blank(text[start + length - 1]))
-			length--;
+		length = config_trim_blanks(text + start, end - start);
 
 		/* Skips the leading blanks; an empty line and a comment line are ignored. */
-		while (length > 0 && config_is_blank(text[start])) {
-			start++;
-			length--;
-		}
+		blanks = config_skip_blanks(text + start, length, 0);
+		start += blanks;
+		length -= blanks;
+
+		/* Skips an empty line and a comment line. */
 		if (length == 0 || text[start] == '#')
 			continue;
 
@@ -1192,6 +1283,8 @@ config_parse_time(
 			digits++;
 			position++;
 		}
+
+		/* Refuses a number without digits. */
 		if (digits == 0)
 			return EINVAL;
 
@@ -1222,6 +1315,8 @@ config_parse_time(
 			default:
 				return EINVAL;
 			}
+
+			/* Moves on to the next character of the time. */
 			position++;
 		}
 
@@ -1306,9 +1401,13 @@ config_copy_path(
 {
 	size_t index;
 	char next;
+	int different;
 
 	/* The word "none" stands for no file at all. */
-	if (none_word == CONFIG_PATH_NONE_WORD && token->size == 4 && memcmp(token->text, "none", 4) == 0) {
+	different = 1;
+	if (token->size == 4)
+		different = memcmp(token->text, "none", 4);
+	if (none_word == CONFIG_PATH_NONE_WORD && different == 0) {
 		config_set_string(destination, capacity, CONFIG_NO_FILE);
 		return 0;
 	}
@@ -1318,6 +1417,8 @@ config_copy_path(
 		*what = "empty path";
 		return EINVAL;
 	}
+
+	/* Refuses a path that does not fit the buffer. */
 	if (token->size >= capacity) {
 		*what = "path too long";
 		return EINVAL;
@@ -1329,21 +1430,29 @@ config_copy_path(
 			*what = "control character in path";
 			return EINVAL;
 		}
+
+		/* Looks at the expansion tokens of the path. */
 		if (token->text[index] != '%')
 			continue;
 		if (tokens != CONFIG_PATH_TOKENS) {
 			*what = "tokens are not supported in a path";
 			return EINVAL;
 		}
+
+		/* Refuses a token that is cut at the end. */
 		if (index + 1 >= token->size) {
 			*what = "bad token in path";
 			return EINVAL;
 		}
+
+		/* Checks the token letter. */
 		next = token->text[index + 1];
 		if (next != 'h' && next != 'u' && next != '%') {
 			*what = "bad token in path";
 			return EINVAL;
 		}
+
+		/* Skips the letter of the token. */
 		index++;
 	}
 
@@ -1462,6 +1571,8 @@ config_check_ignored(
 			*what = "value must be yes or no";
 			return EINVAL;
 		}
+
+		/* Reports success. */
 		return 0;
 	}
 
@@ -1472,6 +1583,8 @@ config_check_ignored(
 			*what = "feature not supported: value must be no";
 			return EINVAL;
 		}
+
+		/* Reports success. */
 		return 0;
 	}
 
@@ -1514,10 +1627,12 @@ config_add_path(
 	const char **what)
 {
 	unsigned index;
+	int same;
 
 	/* A path already in the list is not added again. */
 	for (index = 0; index < *count; index++) {
-		if (strcmp(list[index], path) == 0)
+		same = strcmp(list[index], path);
+		if (same == 0)
 			return 0;
 	}
 
@@ -1573,6 +1688,8 @@ sshd_value_listen_address(
 			colons++;
 			continue;
 		}
+
+		/* Accepts the characters of a host name. */
 		if ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') ||
 		    byte == '.' || byte == '-' || byte == '_')
 			continue;
@@ -1633,6 +1750,8 @@ sshd_value_max_startups(
 			*what = "bad MaxStartups";
 			return EINVAL;
 		}
+
+		/* Takes the number between the colons. */
 		part.text = token->text + start;
 		part.size = index - start;
 		status = config_parse_number(&part, &numbers[count]);
@@ -1640,6 +1759,8 @@ sshd_value_max_startups(
 			*what = "bad MaxStartups";
 			return EINVAL;
 		}
+
+		/* Counts the number and moves to the next one. */
 		count++;
 		start = index + 1;
 	}
@@ -1681,6 +1802,7 @@ sshd_value_subsystem(
 	const struct config_line *parsed,
 	const char **what)
 {
+	int different;
 	int status;
 
 	/* Needs the name and the command. */
@@ -1688,13 +1810,18 @@ sshd_value_subsystem(
 		*what = "missing value";
 		return EINVAL;
 	}
+
+	/* Refuses extra arguments. */
 	if (parsed->token_count > 2) {
 		*what = "arguments to the command are not supported";
 		return EINVAL;
 	}
 
 	/* Only the sftp subsystem is provided. */
-	if (parsed->tokens[0].size != 4 || memcmp(parsed->tokens[0].text, "sftp", 4) != 0) {
+	different = 1;
+	if (parsed->tokens[0].size == 4)
+		different = memcmp(parsed->tokens[0].text, "sftp", 4);
+	if (different != 0) {
 		*what = "subsystem not supported";
 		return EINVAL;
 	}
@@ -1765,6 +1892,8 @@ sshd_value(
 				number = SSH_CHANNEL_MAX;
 			target->max_sessions = number;
 		}
+
+		/* Returns the result of the value. */
 		return status;
 	case SSHD_KW_MAX_STARTUPS:
 		return sshd_value_max_startups(target, parsed, what);
@@ -1806,8 +1935,10 @@ sshd_config_apply(
 	uint32_t bit;
 	int index;
 	int repeated;
+	int different;
 	int status;
 
+	/* Takes the state from the callback context. */
 	state = context;
 
 	/* Finds the keyword. */
@@ -1816,6 +1947,8 @@ sshd_config_apply(
 		*what = "unknown keyword";
 		return EINVAL;
 	}
+
+	/* Takes the keyword entry. */
 	entry = &sshd_keywords[index];
 
 	/* Match blocks are not supported. */
@@ -1853,7 +1986,10 @@ sshd_config_apply(
 		*what = "only one Port is supported";
 		return EINVAL;
 	}
-	if (repeated && entry->id == SSHD_KW_LISTEN_ADDRESS && strcmp(target->listen_address, state->config->listen_address) != 0) {
+
+	/* Refuses a second ListenAddress that differs from the first. */
+	different = strcmp(target->listen_address, state->config->listen_address);
+	if (repeated && entry->id == SSHD_KW_LISTEN_ADDRESS && different != 0) {
 		*what = "only one ListenAddress is supported";
 		return EINVAL;
 	}
@@ -1925,12 +2061,16 @@ ssh_value(
 			*what = "missing value";
 			return EINVAL;
 		}
+
+		/* Copies the path into the settings. */
 		return config_copy_path(&parsed->tokens[0], target->user_known_hosts, sizeof(target->user_known_hosts), CONFIG_PATH_PLAIN, CONFIG_PATH_NONE_WORD, what);
 	case SSH_KW_GLOBAL_KNOWN:
 		if (parsed->token_count == 0) {
 			*what = "missing value";
 			return EINVAL;
 		}
+
+		/* Copies the path into the settings. */
 		return config_copy_path(&parsed->tokens[0], target->global_known_hosts, sizeof(target->global_known_hosts), CONFIG_PATH_PLAIN, CONFIG_PATH_NONE_WORD, what);
 	case SSH_KW_BATCH:
 		return config_value_bool(parsed, &target->batch_mode, what);
@@ -2042,6 +2182,7 @@ ssh_config_apply(
 	int keep;
 	int status;
 
+	/* Takes the state from the callback context. */
 	state = context;
 
 	/* Finds the keyword. */
@@ -2050,6 +2191,8 @@ ssh_config_apply(
 		*what = "unknown keyword";
 		return EINVAL;
 	}
+
+	/* Takes the keyword entry. */
 	entry = &ssh_keywords[index];
 
 	/* Match blocks are not supported. */

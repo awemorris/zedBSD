@@ -141,6 +141,7 @@ ssh_random(
 			return EIO;
 		}
 
+		/* Advances to the next piece of the range. */
 		cursor += piece;
 		remaining -= piece;
 	}
@@ -248,6 +249,8 @@ ssh_sha256_final(
 		ssh_wipe(out, SSH_SHA256_SIZE);
 		return EIO;
 	}
+
+	/* Refuses a digest of an unexpected size. */
 	if (digest_size != SSH_SHA256_SIZE) {
 		ssh_wipe(out, SSH_SHA256_SIZE);
 		return EIO;
@@ -345,6 +348,8 @@ ssh_ed25519_public(
 		ssh_wipe(public_key, SSH_ED25519_PUBLIC);
 		return EIO;
 	}
+
+	/* Refuses a public key of an unexpected size. */
 	if (public_size != SSH_ED25519_PUBLIC) {
 		ssh_wipe(public_key, SSH_ED25519_PUBLIC);
 		return EIO;
@@ -376,6 +381,7 @@ ssh_ed25519_sign(
 	int status;
 	int error;
 
+	/* Starts with nothing allocated. */
 	key = NULL;
 	context = NULL;
 	error = 0;
@@ -455,6 +461,7 @@ ssh_ed25519_verify(
 	int status;
 	int error;
 
+	/* Starts with nothing allocated. */
 	key = NULL;
 	context = NULL;
 	error = 0;
@@ -529,6 +536,7 @@ ssh_hybrid_client_start(
 	int status;
 	int error;
 
+	/* Starts with nothing allocated. */
 	generator = NULL;
 	pair = NULL;
 	error = 0;
@@ -557,6 +565,8 @@ ssh_hybrid_client_start(
 		error = EIO;
 		goto cleanup;
 	}
+
+	/* Refuses a missing key pair. */
 	if (pair == NULL) {
 		error = EIO;
 		goto cleanup;
@@ -569,6 +579,8 @@ ssh_hybrid_client_start(
 		error = EIO;
 		goto cleanup;
 	}
+
+	/* Refuses a public key of an unexpected size. */
 	if (key_size != SSH_MLKEM768_PUBLIC) {
 		error = EIO;
 		goto cleanup;
@@ -634,6 +646,7 @@ ssh_hybrid_server(
 	int status;
 	int error;
 
+	/* Starts with nothing allocated. */
 	client_key = NULL;
 	encapsulator = NULL;
 	error = 0;
@@ -673,10 +686,14 @@ ssh_hybrid_server(
 		error = EIO;
 		goto cleanup;
 	}
+
+	/* Refuses a ciphertext of an unexpected size. */
 	if (ciphertext_size != SSH_MLKEM768_CIPHERTEXT) {
 		error = EIO;
 		goto cleanup;
 	}
+
+	/* Refuses a secret of an unexpected size. */
 	if (secret_size != SSH_MLKEM768_SECRET) {
 		error = EIO;
 		goto cleanup;
@@ -742,6 +759,7 @@ ssh_hybrid_client_finish(
 	int status;
 	int error;
 
+	/* Starts with nothing allocated. */
 	decapsulator = NULL;
 	error = 0;
 
@@ -778,6 +796,8 @@ ssh_hybrid_client_finish(
 		error = EIO;
 		goto cleanup;
 	}
+
+	/* Refuses a secret of an unexpected size. */
 	if (secret_size != SSH_MLKEM768_SECRET) {
 		error = EIO;
 		goto cleanup;
@@ -865,6 +885,7 @@ ssh_chacha20_xor(
 	int status;
 	int error;
 
+	/* Starts with nothing allocated. */
 	context = NULL;
 	error = 0;
 
@@ -910,11 +931,14 @@ ssh_chacha20_xor(
 			error = EIO;
 			goto cleanup;
 		}
+
+		/* Refuses a piece that was cut short. */
 		if ((size_t)written != piece) {
 			error = EIO;
 			goto cleanup;
 		}
 
+		/* Advances to the next piece. */
 		source += piece;
 		destination += piece;
 		remaining -= piece;
@@ -956,6 +980,7 @@ ssh_poly1305(
 	int status;
 	int error;
 
+	/* Starts with nothing allocated. */
 	mac = NULL;
 	context = NULL;
 	error = 0;
@@ -997,6 +1022,8 @@ ssh_poly1305(
 		error = EIO;
 		goto cleanup;
 	}
+
+	/* Refuses a tag of an unexpected size. */
 	if (tag_size != SSH_POLY1305_TAG)
 		error = EIO;
 
@@ -1102,6 +1129,7 @@ ssh_x25519_agree(
 	int status;
 	int error;
 
+	/* Starts with nothing allocated. */
 	own = NULL;
 	peer = NULL;
 	context = NULL;
@@ -1149,6 +1177,8 @@ ssh_x25519_agree(
 		error = EINVAL;
 		goto cleanup;
 	}
+
+	/* Refuses a shared secret of an unexpected size. */
 	if (shared_size != SSH_X25519_SIZE) {
 		error = EIO;
 		goto cleanup;

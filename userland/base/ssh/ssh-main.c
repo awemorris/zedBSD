@@ -140,6 +140,8 @@ client_read_config(
 		ssh_buf_free(&text);
 		return 0;
 	}
+
+	/* Reports any other read failure. */
 	if (error != 0) {
 		fprintf(stderr, "ssh: cannot read %s: %s\n", path, strerror(error));
 		ssh_buf_free(&text);
@@ -218,6 +220,8 @@ client_settle(
 		fprintf(stderr, "ssh: host name too long\n");
 		return EINVAL;
 	}
+
+	/* Copies the host name into the client. */
 	memcpy(client->host_name, name, length + 1U);
 
 	/* Takes the user from the settings, or the local login name. */
@@ -228,13 +232,19 @@ client_settle(
 			fprintf(stderr, "ssh: no user name for uid %lu; use -l\n", (unsigned long)getuid());
 			return ENOENT;
 		}
+
+		/* Takes the account name as the user. */
 		name = account->pw_name;
 	}
+
+	/* Checks the length of the user name. */
 	length = strlen(name);
 	if (length == 0 || length > SSH_USER_MAX) {
 		fprintf(stderr, "ssh: the user name is empty or too long\n");
 		return EINVAL;
 	}
+
+	/* Copies the user name into the client. */
 	memcpy(client->user, name, length + 1U);
 
 	/* Takes the port. */
@@ -292,6 +302,8 @@ client_run(
 	} else {
 		error = ssh_client_run_session(client, args, command.data, command.size, exit_status);
 	}
+
+	/* Releases the command text. */
 	ssh_buf_free(&command);
 
 	/* Ends the connection, telling the server why. */
