@@ -10,7 +10,7 @@
 | P5 | phase-runner | ws329 p002 共通化 (q2092-i01) | `/home/awe/zedBSD-worktrees/p5-ws329b` / `agent/p5-ws329b` | 動いている（2026-11-14 23:3x） | — |
 | P6 | phase-runner-high | ws302 p003 sched の口 (q2099-i01) | `/home/awe/zedBSD-worktrees/p6-ws302b` / `agent/p6-ws302b` | 動いている（2026-11-14 23:4x） | — |
 | P3 | phase-runner-mid | ws345 p011 受け入れ (q2097-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p011` / `agent/p3-ws345p011` | 動いている（2026-11-14 23:3x） | — |
-| P4 | phase-runner-low | ws328 p002 vec-base・vec-path (q2104-i01) | `/home/awe/zedBSD-worktrees/p4-ws328p002` / `agent/p4-ws328p002` | 動いている（2026-11-15 00:3x） | — |
+| P4 | phase-runner | ws299 p007 の QEMU (q2108-i01) | `/home/awe/zedBSD-worktrees/p4-ws299` / `agent/p4-ws299` | 動いている（2026-11-15 01:0x） | — |
 | P1 | phase-runner | ws353 p016 試験の再開 (q2088-i01) | `/home/awe/zedBSD-worktrees/p1-ws353n` / `agent/p1-ws353n` | 動いている（2026-11-14 21:3x、5330 を割当） | — |
 | Sonnet | phase-runner-low | ws335 p043 (q2053-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p043` / `agent/s-ws335-p043` | 動いている（2026-11-13 22:3x） | — |
 | P1 | phase-runner-high | ws347 p006 RTL の CAPS (q2010-i01) | `/home/awe/amaterrace-worktrees/p1-ws347rtl` / `ws347-rtl`（amaterrace-gpu） | 停止（2026-11-11 12:37 ユーザーの指示、未 commit の RTL の変更あり、merge しない） | — |

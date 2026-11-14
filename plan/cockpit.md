@@ -14,7 +14,7 @@
 | P1 | [WS353](ws353/ws.md) | 待ち方の作り直し | q2088: [p016](ws353/phase016/phase.md) 最後の試験の再開（QEMU の流し直し、5330 の idle・入力） | 規約の見直しの Phase、WS353 の完了の判定 |
 | P2 | [WS310](ws310/ws.md) | ACPI の _OSC | q2106: p004 codec と host 試験、p002 aml-host | p005 統合（既定 off） |
 | P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2097: p011 受け入れと回帰（p010・p014 cleared） | p012 規約の見直し → completed |
-| P4 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2104: p002 vec-base・vec-path（Sonnet、p001 cleared） | p017・p003〜、U1〜U5 はユーザーへ |
+| P4 | [WS299](ws299/ws.md) | 5330 の NVMe の速さ | q2108: p007 の QEMU の段（WS328 p002 は cleared） | 5330 の段は P1 の後 |
 | P5 | [WS329](ws329/ws.md) | H.264 の software の encoder | q2092: p002 共通化の refactor | p003 header と骨格 → 実装（Sonnet） |
 | P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2099: p003 sched の口（p001 cleared、p002 実装済み） | p004 DTB の本体 |
 | P7 | [WS334](ws334/ws.md) | Windows 版ブラウザ | q2100: p035 規約の見直し（p037 cleared、不具合 2 件直した） | WS334 を completed に |
