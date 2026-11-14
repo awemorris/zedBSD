@@ -92,6 +92,8 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 ## 判断が要る点
 
+- **2026-11-14 ユーザーの決定（要点）**: (1) config の名前は `CONFIG_KERN_DESKTOP_BALANCER`（「dtb」は device tree blob と紛れるので、file・関数・sysctl の名前からも外す）。この名前で mk の案（`mk/config.mk` の `?= n` と `mk/kernel.mk` の y の時の define と source）を当ててよい。(2) 範囲は全 platform で build、評価と閾値の調整は x86 の hybrid（5330）だけ。(3) D-3 は code が正しい（core の種類は KERN_THERMAL と X86_POWER_CONTROL の両方が y の時だけ）。WS333 の design.md を code に合わせて直した。
+
 - **2026-11-14 ユーザーから、Q302-1〜7 を全部推しの案で決める、という趣旨の答えを受けた**（[user-questions.md](user-questions.md) の (A, 推し)・(B, 推し)・推し）。下の D2・D4・D5 と Q302-6・7 はこれで決まった。
 
 - D1: 決定済み（2026-10-27 09:39 ユーザー（クリック）「CONFIG_DTB の既定は off」、上の原文）。

@@ -82,7 +82,7 @@ WS303 の未回答の問い（Q303-15〜19）は Q333-1〜5 として聞き直�
 ```
 
 - kernel の core は「写しと方針の配り」、driver は「hardware の読み書き」。strategy の意味は core が定め、写し方は各 driver が決める（Q303-11）。
-- `CONFIG_CPU_PERF`（既定 n）は **MSR を読む・書く道だけ**を入れる。CPUID だけで分かる topology と core の種類は amd64 で常に入れる（§4.5）。熱の core は全 platform で常に入る（`hw.thermal` を置き換えるため）。既定を y にするかは Q333-7（答え A: p014 の後）。
+- `CONFIG_CPU_PERF`（既定 n）は **MSR を読む・書く道だけ**を入れる。topology と core の種類は `CONFIG_KERN_THERMAL` と `CONFIG_DRIVER_X86_POWER_CONTROL` の両方が y の時だけ出す（§4.5。2026-11-14 ユーザーの決定で code の形を正とした）。熱の core は全 platform で常に入る（`hw.thermal` を置き換えるため）。既定を y にするかは Q333-7（答え A: p014 の後）。
 - build の前提は §16.2（2026-11-12 の作り直しの後）。
 
 ### 4.2 kernel の口の統一
@@ -205,7 +205,7 @@ int kern_cpuperf_provider_register(const struct kern_cpuperf_provider_ops *ops);
 
 ### 4.5 P/E core の相対の性能と topology（WS302 が使う口）
 
-- topology と core の種類は CPUID だけで分かり（CPUID は #GP を起こさず、hypervisor の下でも読める）、`CONFIG_CPU_PERF` に依らず amd64 の driver が出す。CPUID.1AH・1FH はその CPU の上で読むので notify の道を使う。
+- topology と core の種類は CPUID だけで分かる（CPUID は #GP を起こさず、hypervisor の下でも読める）が、x86 の provider の登録は `CONFIG_KERN_THERMAL && CONFIG_DRIVER_X86_POWER_CONTROL` の下にあり、両方が y の時だけ出す（2026-11-14 ユーザーから、code の形が正しい、という趣旨の決定を受けた。前の版はこれに依らず出すと書いていた）。CPUID.1AH・1FH はその CPU の上で読むので notify の道を使う。
 - 相対の性能（FREQUENCY は APERF/MPERF の測り、FEEDBACK は HFI、PROVIDER）は MSR を使うので `CONFIG_CPU_PERF=y` の時だけ。FREQUENCY の測り（Highest の要求で短く spin）は HWP を enable した後にしか出来ない（HWP の他の MSR は enable の前に触ると #GP）。基準の選び・既定 FREQUENCY・5330 の見込み P 100・E 75 は WS301 §4.7。
 - WS302 が得る物（review M5）:
 
@@ -666,7 +666,7 @@ PDF の頁と印刷の頁: Vol. 4 は第 2 章で PDF の頁 = 印刷の頁 2-N 
 
 ### 15.3 module の分け方
 
-置き場所は `src/drivers/platform/pcat/cpu-x86/`（§4.4）、関数の接頭辞は `cpux86_`。全部が純粋な関数（CPUID・RDMSR・WRMSR を実行せず、driver が読んだ値を受けて構造体を返す、状態を持たない、整数の演算だけ）。依存は一方向（cpux86 ← cpuid ← hwp・power、cpux86 ← pstate）。build は `platform/amd64/vmunix.mk`: `cpux86.c`・`cpux86-cpuid.c` は全部の amd64 の kernel（§4.4・§4.5: topology と core の種類は `CONFIG_CPU_PERF` に依らず出す。review M1）、`hwp`・`pstate`・`power` は `CONFIG_CPU_PERF=y` の時だけ。`cpux86.c`（bit の補助 4 関数）は p009・p010 を p008 と並べて走らせるため p007 で実装した（review m10、`unit/test-cpux86.c` 4140 check、わざと壊す 5 通りを全部捕えた）。
+置き場所は `src/drivers/platform/pcat/cpu-x86/`（§4.4）、関数の接頭辞は `cpux86_`。全部が純粋な関数（CPUID・RDMSR・WRMSR を実行せず、driver が読んだ値を受けて構造体を返す、状態を持たない、整数の演算だけ）。依存は一方向（cpux86 ← cpuid ← hwp・power、cpux86 ← pstate）。build は `platform/amd64/vmunix.mk`: `cpux86.c`・`cpux86-cpuid.c` は全部の amd64 の kernel（§4.4。core の種類を出す provider の登録は §4.5 のとおり `CONFIG_KERN_THERMAL && CONFIG_DRIVER_X86_POWER_CONTROL` の時だけ）、`hwp`・`pstate`・`power` は `CONFIG_CPU_PERF=y` の時だけ。`cpux86.c`（bit の補助 4 関数）は p009・p010 を p008 と並べて走らせるため p007 で実装した（review m10、`unit/test-cpux86.c` 4140 check、わざと壊す 5 通りを全部捕えた）。
 
 | header | 中身 | 仕様 | Phase |
 | --- | --- | --- | --- |
