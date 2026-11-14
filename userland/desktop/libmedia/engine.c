@@ -213,6 +213,8 @@ media_engine_open(
 	} else {
 		error = media_os_thread_start(&made->thread, engine_run, made);
 	}
+
+	/* A thread that did not start fails the open. */
 	if (error != 0) {
 		media_engine_close(made);
 		return error;
