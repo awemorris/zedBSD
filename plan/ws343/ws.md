@@ -36,6 +36,8 @@
 
 ## Resume point
 
+- 2026-11-15 P8（q2103-i01）: 試験の始末。fetch の https の回帰（run-fetch-https.sh・https-server.py・run-fetch-qemu.sh・config-amd64-fetch.mk）を [plan/tools/fetch/](../tools/fetch/) に移し、tools.md に登録した。移した後に `sh plan/tools/fetch/run-fetch-https.sh` は `run-fetch-https: PASS (18 cases)`、`GUEST_RUNTIME=build/p8-fetch-guest sh plan/tools/fetch/run-fetch-qemu.sh`（QEMU x86_64、外の network あり）は `run-fetch-qemu: PASS (4 cases)`。今の main で動かない開発の時だけの試験（run-passkey-compare.sh・passkey-compare.c・config-amd64-compat.mk・ct-matrix.sh。ct-matrix.sh の範囲は `plan/ws335/tests/run-ct-matrix.sh api-passkey aes` と同じ）を消し、phase002・phase003・phase004・BUG-435 の inventory の参照に「消した」「移した」と書いた。`plan/ws343/tests/` は空になった。残りは Phase の directory の削除と completed への書き直し（Q1）。
+
 - 2026-11-15 Q1: 全 Phase cleared（p004 merge eb3f3dcc28）。完了の手順: fetch の https の回帰の試験（run-fetch-https.sh・https-server.py・run-fetch-qemu.sh・config-amd64-fetch.mk）を plan/tools/fetch/ に移して tools.md に登録、今の main で動かない開発の時だけの試験（run-passkey-compare.sh・passkey-compare.c・config-amd64-compat.mk・ct-matrix.sh）は消す（Q1 の判断、試験の整理の基準）。その後 completed。
 
 - 2026-11-14 Q1: p001・p003 cleared（merge fdc6f069e1）。ユーザーが mk・Makefile の差分 3 つを承認した（fetch の link、build の順、libcurl.so の link は curl を選んだ時だけ）。残りは p004（規約の全文の見直し）。範囲の外の気づき（libz.so の行き先の無い link、x86_64 の firmware の license の一覧が空、PACKAGE_LINKS が読まれない）は BUG-435 へ。
