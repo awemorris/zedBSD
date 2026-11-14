@@ -23,7 +23,7 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 - 2026-11-13 ユーザーから、次の趣旨の訂正を受けた: host が GPU の local memory に書いてよいのは GOP の VRAM だけ（B35 の前提の誤解の訂正）。GOP を残して使う事はまず無いので、blitter の無い discrete の GPU で CPU が local の窓を通して frame に書く予備の道（`display.c` の `copy_by_processor`）は削除する。
 - 2026-11-13 ユーザーから、依頼 08（X1〜X9）は全部実装し、B35（host の BAR の local の窓と L2 の一貫性）は driver が command で守る、という趣旨の決定を受けた。
 - 2026-11-13 ユーザーから、次の趣旨の決定を受けた: (1) 割り込みの有無で polling にする事と、DMA が coherent でない時に uncached で使う事は driver の基本の機能なので build の option にしない（`CONFIG_GHCI_POLL`・`CONFIG_GHCI_HOST_UNCACHED` を外し、検出だけで決める。mk の案は取り下げ）。(2) clipper の無い GPU（CLIP_POLY 0）は何も言わずに欠けてよい（minimal は実用ではない。software の clip は作らない）。両方 [p008](phase008/phase.md) で P4 が直す。
-- 2026-11-14 ユーザーから、RTL が reset で register を初期化しないのは誤りなので直す、全ての module でこの違反を解消する、という趣旨の決定を受けた（B36 を含む。STATE を含む全ての register と memory は電源を入れた時の reset で 0 などの定まった値になる）。誰が RTL を直すか（Claude が書く例外を認めるか）はユーザーに確認中。Claude の一覧の解析は `rtl/` と `boards/kc705` の 138 file・609 block（概数、reset の分岐に無い register が延べ約 3900、配列が約 530）。
+- 2026-11-14 ユーザーから、次の趣旨の決定を受けた: RTL が reset で register を初期化しないのは誤りなので、全ての module で直す。memory（RAM の配列）は初期化しない。clock が複数ある module（atg_rop_blend・atg_rop_wpix・atg_tlb_l2 と board・bsp の別の clock）はユーザーが直す。Claude が RTL を書く例外は、まず 1 file（atg_tlb_l1.v の tag・PFN・flags の reset）を試しに書いて差分をユーザーに見せる所まで。Claude の一覧（概数、ifdef の reset を読み落とすので多めに出る）は `rtl/` と `boards/kc705` の 138 file・609 block。
 - 2026-11-13 ユーザーから、次の趣旨の決定を受けた: blitter（CAP_BLT）が無い時は、Vulkan の転送だけでなく表示の写しも shader で行う（[p008](phase008/phase.md)）。
 - 2026-11-11 ユーザーから、次の趣旨の指示を受けた:
   - Amaterrace GPU の試験とデバッグを VF2 で行う WS を立てる。VF2 には PCIe で KC705 がつながっている。
