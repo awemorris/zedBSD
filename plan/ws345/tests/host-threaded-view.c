@@ -136,6 +136,7 @@ static int test_frames_owed;
 static int test_render_stop;
 static struct browser_view *test_render_view;
 static int test_render_presents;
+static double test_settle_ms;
 static unsigned long test_rendered;
 static unsigned short test_port_serve;
 static unsigned short test_port_hang;
@@ -1744,6 +1745,7 @@ test_headless_run(
 {
 	struct browser_view *view;
 	pthread_t render;
+	long long start;
 	size_t length;
 	int error;
 
@@ -1763,8 +1765,10 @@ test_headless_run(
 	test_console_length = 0;
 	test_console[0] = '\0';
 	error = browser_view_load(view, path);
+	start = test_now();
 	if (error == 0)
 		error = browser_view_settle(view, budget, BROWSER_SETTLE_LAYOUT);
+	test_settle_ms = (double)(test_now() - start) / 1e6;
 	snprintf(console, size, "%s", test_console);
 	if (error == 0)
 		error = browser_view_dump(view, BROWSER_DUMP_DOM, dom, &length);
@@ -1802,7 +1806,6 @@ test_headless_own(void)
 	char *own_paint;
 	char root[256];
 	char path[512];
-	long long start;
 	double took;
 	size_t differ;
 	size_t index;
@@ -1833,11 +1836,10 @@ test_headless_own(void)
 		name = strrchr(pages[page], '/') + 1;
 		caller_error = test_headless_run(BROWSER_THREADING_CALLER, pages[page], page == 0U ? 200.0 : 1000.0, &caller_dom, &caller_paint, expected,
 		    caller_console, sizeof(caller_console));
-		start = test_now();
 		own_error = test_headless_run(BROWSER_THREADING_OWN, pages[page], page == 0U ? 200.0 : 1000.0, &own_dom, &own_paint, drawn,
 		    own_console, sizeof(own_console));
-		took = (double)(test_now() - start) / 1e6;
-		test_check(caller_error == 0 && own_error == 0, "(s) settle, dump and draw_pixels succeed in both modes", "%s: caller %d, own %d, own %.0f ms",
+		took = test_settle_ms;
+		test_check(caller_error == 0 && own_error == 0, "(s) settle, dump and draw_pixels succeed in both modes", "%s: caller %d, own %d, own's settle %.0f ms",
 		    name, caller_error, own_error, took);
 		test_check(strcmp(caller_console, own_console) == 0, "(s) the settle tells the same console", "%s%s", name,
 		    strcmp(caller_console, own_console) == 0 ? "" : ": the consoles differ");
