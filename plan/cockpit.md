@@ -17,7 +17,7 @@
 | P4 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2098: p001 の設計の敵対的レビューと反映 | ユーザーの問い U1〜U4 → 実装（Sonnet） |
 | P5 | [WS329](ws329/ws.md) | H.264 の software の encoder | q2092: p002 共通化の refactor | p003 header と骨格 → 実装（Sonnet） |
 | P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2099: p003 sched の口（p001 cleared、p002 実装済み） | p004 DTB の本体 |
-| P7 | [WS334](ws334/ws.md) | Windows 版ブラウザ | q2095: p037（TSF・DirectManipulation・透過）と不具合 2 件 | p035 規約の見直し → completed |
+| P7 | [WS334](ws334/ws.md) | Windows 版ブラウザ | q2100: p035 規約の見直し（p037 cleared、不具合 2 件直した） | WS334 を completed に |
 | P8 | [WS343](ws343/ws.md) | base の TLS と ssh を自前に | 返却: fetch の https PASS（host 18・3 機種・QEMU 4） | Makefile の案の承認 → merge → p004 規約の見直し |
 | agy | [WS347](ws347/ws.md) | Amaterrace GPU（RTL） | reset の 10 回目（38593b0e）まで済み | Q1 が 10 回目を確かめて 11 回目 |
 | Q1 | — | — | main の checkout で merge・Queue・判断の振り分け | WS347 の 10 回目の確かめ |
@@ -106,6 +106,8 @@
 
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
+
+- WS334 p037・p032・p033（Windows 版ブラウザ、2026-11-14 main）: 本物の Windows 10・11 で、TSF の日本語入力（MS-IME・Google 日本語入力、focus が離れた時の変換中の文字の扱い、英語・絵文字の panel・touch keyboard）、touchpad の scroll と慣性、wheel が前と同じ、Windows 11 22H2 以降で Mica が題の帯まで透けて caption の button が二重にならず snap layout が出る、Windows 10 と high contrast では不透明、dpi と全画面の切り替え、p032 の M1〜M8、暗い mode と accent、touch と pen、画像の drag out、DPAPI、arm64。項目の一覧と手順は [phase037/phase.md](ws334/phase037/phase.md) の「本物の Windows の確かめの一覧」（1〜19）。
 
 （2026-11-01 10:29 クリア。手順は各 Bug の ticket にある）
 
