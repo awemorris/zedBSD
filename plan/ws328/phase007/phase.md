@@ -3,7 +3,7 @@
 # ws328-p007 vec-rrect（角丸・ring・辺の分け前・影）
 
 - WS: [WS328](../ws.md)。設計: [design.md](../design.md)。
-- Status: planned（2026-11-14 p001 が作成）
+- Status: cleared（Q1 の受け入れ待ち。2026-11-15 P1 q2125-i01 が実装、試験 PASS）
 - 担当: 実装の担当（Sonnet 5.5 high、phase-runner-low、1 回の起動）。
 - 依存: p002（依存の Phase が main に merge され cleared の後に始める）。
 - 基点の SHA（header の凍結）: ws.md の Resume point に Q1 が書いた SHA。`BASE=<それ>`。
@@ -70,4 +70,29 @@
 
 ## 結果
 
-（実装の担当が書く。）
+2026-11-15 03:13（host の date）P1（q2125-i01、worktree p1-ws328p007、基点 main 6aeb76a864）。
+
+作った物: `userland/desktop/libbrowser/vector/vec-rrect.c`（骨格を置き換え）、`plan/ws328/tests/unit/test-rrect.c`。header・他の module・試験の道具・Makefile は変えていない。
+
+確かめ（実行した command と結果）:
+- `sh plan/ws328/tests/run-unit.sh rrect`（cc、ASan・UBSan）: `test-rrect: PASS (419610 checks)`、`run-unit: PASS`。`CC=clang` でも同じ件数で PASS。
+- `sh plan/ws328/tests/run-unit.sh all`: base 204220・flatten 93774・harness 1127・path 348081・rrect 419610 checks、`run-unit: PASS`。
+- `BASE=57bf94e62f sh plan/ws328/tests/check-skeleton.sh`: 検査 1〜5（header 単独・.c の cc と clang・engine の include 無し・管理情報無し・header の不変）は通った。検査 6（zedBSD の clang と x86_64 の sysroot）は自分の worktree の build/ に build/llvm と build/x86_64/sysroot が無く、起動の依頼文に toolchain の build の許しが無かったので未実施。最後の行は `check-skeleton: INCOMPLETE`（PASS ではない）。
+- `git diff --check`: 出力なし。
+- 影の密な数値積分（試験の中、y を 4000 等分の中点則・倍精度の erf）との最大差: 円の角 8 px・σ 0.5〜3 で 0.0023〜0.0088、角 20・24 px で 0.0079〜0.0088、楕円の角 92×30・30×92 と角ごとに違う半径で 0.0008〜0.0066、角 100 px で最大 0.0087、σ 10 と 30 で 0.0060 と 0.0010（全て許容 0.015 の内。header の「0.009 以内」とも合う）。
+- わざと壊す確かめ: 34 通り（符号・境界の比較・定数・式の入れ替え・積分の端の取り違えなど）を git の外で適用して流し、30 通りは FAIL。残った 4 通り（radius の下限を `< 0` にする、片方 0 の角を `&&` にする、象限の境の `>=` を `>` にする 2 通り）は試験の見逃しだったので試験を足した（片方が 0 や 1/512 の角が辺の和の係数 f に入らない事、中央線の上の pixel が後の象限に属する事）。この 4 通りが全て FAIL になる事を確かめ、元に戻して `git diff` に vec-rrect.c の差が無い事を確かめた。
+
+自分で決めた点（header が黙っている所）:
+- 外の辺の幅・spread の上限: 幅と spread は VEC_COORD_MAX で頭打ち（それより広い箱は全て空になるため結果が同じ）。非有限・負の幅は 0、非有限の spread は 0。
+- 縮小で辺が交差した時（inset の幅が箱より大きい、spread が負で大きい）は、交差した 2 辺を中点の 1 つに潰す（幅 0 の矩形）。
+- normalize: 辺の和は double で取り、f を掛けた後で 1/256 px 未満になった半径の角も正方形にする（二つ目の下限の検査）。矩形の辺が非有限でも空でも全ての半径を 0 にする。
+- 角の箱の境: 左側の角は left <= cx < ex、右側の角は ex <= cx < right（上下も同様）。どの角の箱にも入らない pixel は overlap だけ。
+- 辺の分け前: 中央線の pixel は後の象限（cx >= xm、cy >= ym）。位置が非有限の pixel と範囲外の side は 0。
+- 影: 1/√π と √2 は定数で持つ。窓は cy ± 4σ・cx ± 4σ。steep 半分の行・flat 半分の列は窓と交わらせて VEC_SHADOW_NODES 点。flat 半分は行が窓の外なら 0 で飛ばし、列が窓の外ならば境界の項だけ。θ45 の点は sinf・cosf（θ45 から）で出し、steep と flat が同じ点を共有する。A&S 7.1.26 の erf(0) は 1e-9 台で、0 に特別扱いしていない（試験は 2e-7 の許容）。
+- 位置が非有限の pixel は coverage・shadow とも 0。NaN・無限の σ は 0（sharp）。σ が非常に大きい（FLT_MAX）時も 0〜1 の値で止まる。
+
+phase.md が仕様と食い違った所: なし。header の不備: 見つけていない。
+
+未実施: check-skeleton の検査 6（上記）。QEMU・実機の試験（この Phase の範囲外）。
+
+Q1 への注: 試験の実行の script の結果の場所 build/tmp/ws328-unit は worktree の build/ の中。使い捨ての scratch として /tmp/p1-ws328p007-scratch/mut.py（壊す確かめの script）を作った（共有の scratchpad では他の担当の file と名前が衝突して上書きされたため）。消す物の path はこれ。

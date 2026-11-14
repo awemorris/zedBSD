@@ -175,6 +175,26 @@ test_normalize(void)
 	CHECK_NEAR(rrect.radii[VEC_CORNER_BOTTOM_LEFT][0], 0.0, 0.0);
 	CHECK_NEAR(rrect.radii[VEC_CORNER_BOTTOM_LEFT][1], 0.0, 0.0);
 
+	/*
+	 * A square corner's other radius does not count in the scale factor:
+	 * the top left (0, 90) is square, so the left side has only the
+	 * bottom left's 90 of 100 and nothing is scaled; likewise for a
+	 * radius under 1/256 (the top left (1/512, 90)).
+	 */
+	rrect = make_uniform(0.0f, 0.0f, 100.0f, 100.0f, 0.0f, 0.0f);
+	set_corner(&rrect, VEC_CORNER_TOP_LEFT, 0.0f, 90.0f);
+	set_corner(&rrect, VEC_CORNER_BOTTOM_LEFT, 10.0f, 90.0f);
+	vec_rrect_normalize(&rrect);
+	CHECK_NEAR(rrect.radii[VEC_CORNER_BOTTOM_LEFT][0], 10.0, 0.0);
+	CHECK_NEAR(rrect.radii[VEC_CORNER_BOTTOM_LEFT][1], 90.0, 0.0);
+	rrect = make_uniform(0.0f, 0.0f, 100.0f, 100.0f, 0.0f, 0.0f);
+	set_corner(&rrect, VEC_CORNER_TOP_LEFT, 1.0f / 512.0f, 90.0f);
+	set_corner(&rrect, VEC_CORNER_BOTTOM_LEFT, 10.0f, 90.0f);
+	vec_rrect_normalize(&rrect);
+	CHECK_NEAR(rrect.radii[VEC_CORNER_BOTTOM_LEFT][0], 10.0, 0.0);
+	CHECK_NEAR(rrect.radii[VEC_CORNER_BOTTOM_LEFT][1], 90.0, 0.0);
+	CHECK_NEAR(rrect.radii[VEC_CORNER_TOP_LEFT][1], 0.0, 0.0);
+
 	/* A radius under 1/256 is 0, one just at it is kept. */
 	rrect = make_uniform(0.0f, 0.0f, 100.0f, 100.0f, 10.0f, 10.0f);
 	set_corner(&rrect, VEC_CORNER_TOP_LEFT, 1.0f / 512.0f, 10.0f);
@@ -587,6 +607,28 @@ test_side_share(void)
 	CHECK_NEAR(vec_rrect_side_share(&outer, widths, VEC_SIDE_TOP, 50.0f, 4.5f), 1.0, 1e-6);
 	CHECK_NEAR(vec_rrect_side_share(&outer, widths, VEC_SIDE_BOTTOM, 20.0f, 29.5f), 0.0, 0.0);
 	CHECK_NEAR(vec_rrect_side_share(&outer, widths, VEC_SIDE_LEFT, 4.5f, 29.5f), 1.0, 1e-6);
+
+	/*
+	 * At the middle lines the centre belongs to the later quadrant.  With
+	 * the box 100 by 60: with top 40, right 10 and left 100 the centre
+	 * (50, 20) is in the top right quadrant, where the top has
+	 * everything (the top left's line would give it half); with bottom 40
+	 * and left 20 the centre (15, 30) is in the bottom
+	 * left quadrant, on the line of bottom 40 and left 20 (40 * 15 =
+	 * 20 * 30), so the two sides share the pixel equally.
+	 */
+	widths[VEC_SIDE_TOP] = 40.0f;
+	widths[VEC_SIDE_RIGHT] = 10.0f;
+	widths[VEC_SIDE_BOTTOM] = 10.0f;
+	widths[VEC_SIDE_LEFT] = 100.0f;
+	CHECK_NEAR(vec_rrect_side_share(&outer, widths, VEC_SIDE_TOP, 49.5f, 19.5f), 1.0, 1e-5);
+	CHECK_NEAR(vec_rrect_side_share(&outer, widths, VEC_SIDE_RIGHT, 49.5f, 19.5f), 0.0, 1e-5);
+	widths[VEC_SIDE_TOP] = 10.0f;
+	widths[VEC_SIDE_BOTTOM] = 40.0f;
+	widths[VEC_SIDE_LEFT] = 20.0f;
+	CHECK_NEAR(vec_rrect_side_share(&outer, widths, VEC_SIDE_BOTTOM, 14.5f, 29.5f), 0.5, 1e-5);
+	CHECK_NEAR(vec_rrect_side_share(&outer, widths, VEC_SIDE_LEFT, 14.5f, 29.5f), 0.5, 1e-5);
+	CHECK_NEAR(vec_rrect_side_share(&outer, widths, VEC_SIDE_TOP, 14.5f, 29.5f), 0.0, 0.0);
 
 	/* Out of range sides give 0. */
 	CHECK_NEAR(vec_rrect_side_share(&outer, widths, -1, 9.5f, 9.5f), 0.0, 0.0);
