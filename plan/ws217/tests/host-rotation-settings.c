@@ -147,7 +147,7 @@ test_bits(void)
 	check(KL_SYSTEM_ROTATE_WHY_ALONE == KL_DISPLAY_ROTATE_WHY_ALONE && KL_DISPLAY_ROTATE_WHY_ALONE == KWL_ROTATE_WHY_ALONE, "why alone");
 
 	/* The library this header describes. */
-	check(KL_VERSION == 93U, "KL_VERSION 93");
+	check(KL_VERSION >= 93U, "KL_VERSION at least 93, which brought the angles");
 }
 
 /* libkeiland's view: the angles kept with each display of a snapshot. */

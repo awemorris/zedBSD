@@ -114,4 +114,13 @@ struct drv_gpu_display_ops {
 /* drv_gpu_display_ops.flags: presentation and the cursor bypass the open's admission. */
 #define DRV_GPU_DISPLAY_UNGATED	1U
 
+/*
+ * drv_gpu_display_ops.flags: the backend shows a primary turned by 180
+ * degrees (GPU_DISPLAY_PRESENT_ROTATE_180, GPU_DISPLAY_PLANE_ROTATE_180) on
+ * the outputs whose query reports GPU_DISPLAY_ROTATE_180, and refuses the
+ * turn with EOPNOTSUPP on any other.  Without it the core refuses the turn
+ * before the backend sees the request.
+ */
+#define DRV_GPU_DISPLAY_ROTATE_180	2U
+
 #endif
