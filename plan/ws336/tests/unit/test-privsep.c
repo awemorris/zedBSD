@@ -81,6 +81,7 @@ int
 main(void)
 {
 	size_t index;
+	int status;
 
 	/* Prints each failure as it happens, so a crash does not lose the lines before it. */
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -114,7 +115,8 @@ main(void)
 	test_mutated_frames();
 
 	/* Reports the result of the whole test. */
-	return check_finish("privsep");
+	status = check_finish("privsep");
+	return status;
 }
 
 /*

@@ -155,6 +155,8 @@ static void test_fuzz(void);
 int
 main(void)
 {
+	int status;
+
 	/* Reads the test keys. */
 	load_vectors();
 
@@ -171,7 +173,8 @@ main(void)
 	test_fuzz();
 
 	/* Prints the verdict. */
-	return check_finish("key");
+	status = check_finish("key");
+	return status;
 }
 
 /* Reads the hexadecimal key texts into bytes and checks that each has the size it should. */
@@ -534,10 +537,14 @@ parse_spec(
 	struct ssh_key *key)
 {
 	size_t length;
+	int error;
 
 	/* Builds, then reads. */
 	length = build_text(spec);
-	return ssh_key_parse_private(file_text, length, key);
+	error = ssh_key_parse_private(file_text, length, key);
+
+	/* Reports the module's answer. */
+	return error;
 }
 
 /* Checks ssh_key_clear and ssh_key_generate. */

@@ -492,6 +492,7 @@ rename(const char *path, const char *target)
 char *
 realpath(const char *path, char *resolved)
 {
+	char *resolved_path;
 	int failed;
 
 	/* The arguments the stub does not look at. */
@@ -502,7 +503,10 @@ realpath(const char *path, char *resolved)
 	failed = stub_next(ENOENT);
 	if (failed != 0)
 		return NULL;
-	return strdup("/stub");
+
+	/* Hands out a copy of a fixed path, which the caller frees. */
+	resolved_path = strdup("/stub");
+	return resolved_path;
 }
 
 ssize_t

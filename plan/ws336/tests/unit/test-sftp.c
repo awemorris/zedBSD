@@ -115,6 +115,8 @@ static void make_long_name(const struct ssh_sftp_attrs *attrs, uint32_t links, c
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_next_packet();
 	test_next_packet_stream();
@@ -154,7 +156,8 @@ main(void)
 	free(exact_packet);
 
 	/* Reports the result of the whole test. */
-	return check_finish("sftp");
+	status = check_finish("sftp");
+	return status;
 }
 
 /*

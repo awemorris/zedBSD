@@ -37,6 +37,8 @@ static void test_base64_roundtrip(void);
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_byte_order();
 	test_namelist_check();
@@ -49,7 +51,8 @@ main(void)
 	test_base64_roundtrip();
 
 	/* Reports the result of the whole test. */
-	return check_finish("common");
+	status = check_finish("common");
+	return status;
 }
 
 /*

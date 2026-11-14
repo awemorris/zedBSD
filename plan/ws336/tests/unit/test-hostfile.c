@@ -100,6 +100,8 @@ static int buf_contains(const struct ssh_buf *buf, const char *needle);
 int
 main(void)
 {
+	int status;
+
 	/* Reads the test keys. */
 	load_keys();
 
@@ -119,7 +121,8 @@ main(void)
 	test_fuzz();
 
 	/* Prints the verdict. */
-	return check_finish("hostfile");
+	status = check_finish("hostfile");
+	return status;
 }
 
 /* Reads the hexadecimal key texts into bytes and makes the third key. */

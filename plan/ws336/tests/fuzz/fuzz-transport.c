@@ -27,21 +27,34 @@ static int fuzz_ready;
 static int
 fuzz_host_blob(void *context, struct ssh_buf *out)
 {
+	int error;
+
+	/* The argument the callback does not look at. */
 	(void)context;
+
+	/* Writes the public blob of the fixed host key and reports whether the buffer took it. */
 	ssh_key_put_public_blob(fuzz_host_key.public_key, out);
-	return ssh_buf_error(out);
+	error = ssh_buf_error(out);
+	return error;
 }
 
 static int
 fuzz_sign(void *context, const uint8_t *h, struct ssh_buf *out)
 {
+	int error;
+
+	/* The argument the callback does not look at. */
 	(void)context;
-	return ssh_key_sign(&fuzz_host_key, h, SSH_KEX_HASH_SIZE, out);
+
+	/* Signs the exchange hash with the fixed host key. */
+	error = ssh_key_sign(&fuzz_host_key, h, SSH_KEX_HASH_SIZE, out);
+	return error;
 }
 
 static int
 fuzz_check(void *context, const uint8_t *blob, size_t size)
 {
+	/* The arguments the callback does not look at: any host key is taken. */
 	(void)context;
 	(void)blob;
 	(void)size;

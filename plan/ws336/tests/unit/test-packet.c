@@ -72,6 +72,8 @@ static void feed_text(struct ssh_packet *packet, const char *text);
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_unkeyed_send();
 	test_unkeyed_send_max();
@@ -91,7 +93,8 @@ main(void)
 	test_random_feed();
 
 	/* Prints the verdict. */
-	return check_finish("packet");
+	status = check_finish("packet");
+	return status;
 }
 
 /* Fills a 64-byte key with bytes that depend on the seed. */

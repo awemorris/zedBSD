@@ -981,6 +981,7 @@ int
 main(void)
 {
 	int written;
+	int status;
 
 	/* The keys and their blobs and base64 forms. */
 	CHECK_EQ(wire_hex(t1_public_hex, key1, sizeof(key1)), 32);
@@ -1011,5 +1012,8 @@ main(void)
 	test_reason_and_backlog();
 	test_read_limit();
 	ssh_client_free(&client);
-	return check_finish("client");
+
+	/* Reports the result of the whole test. */
+	status = check_finish("client");
+	return status;
 }

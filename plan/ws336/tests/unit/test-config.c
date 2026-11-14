@@ -141,8 +141,14 @@ client_read(
 	const char *text,
 	const char *host)
 {
+	int status;
+
+	/* Starts a fresh client configuration and reads the text into it. */
 	ssh_config_init(&client);
-	return client_add(text, host);
+	status = client_add(text, host);
+
+	/* Reports the parser's answer. */
+	return status;
 }
 
 /* Applies one option to the client configuration, which is not cleared. */
@@ -213,8 +219,15 @@ static int
 error_starts(
 	const char *prefix)
 {
+	int different;
+
 	/* Compares the first bytes. */
-	return strncmp(error, prefix, strlen(prefix)) == 0;
+	different = strncmp(error, prefix, strlen(prefix));
+	if (different != 0)
+		return 0;
+
+	/* Succeeded: the message has the prefix. */
+	return 1;
 }
 
 /* Reports whether the message holds the text. */
@@ -222,8 +235,15 @@ static int
 error_has(
 	const char *text)
 {
+	const char *found;
+
 	/* Looks for the text. */
-	return strstr(error, text) != NULL;
+	found = strstr(error, text);
+	if (found == NULL)
+		return 0;
+
+	/* Succeeded: the message holds the text. */
+	return 1;
 }
 
 /* Builds a line of the keyword, a space and count copies of the byte into line (room for count + 64 bytes). */
@@ -1995,6 +2015,8 @@ test_fuzz(void)
 int
 main(void)
 {
+	int status;
+
 	/* The defaults and the files of the image today. */
 	test_sshd_defaults();
 	test_shipped();
@@ -2028,5 +2050,6 @@ main(void)
 	test_fuzz();
 
 	/* The result. */
-	return check_finish("config");
+	status = check_finish("config");
+	return status;
 }

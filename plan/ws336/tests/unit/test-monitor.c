@@ -192,6 +192,7 @@ main(
 {
 	int is_preauth;
 	int is_session;
+	int status;
 
 	/* Plays the child the monitor started, which knows the same keys and paths. */
 	setup(argv[0]);
@@ -234,7 +235,8 @@ main(
 	test_run();
 
 	/* Reports the whole test. */
-	return check_finish("monitor");
+	status = check_finish("monitor");
+	return status;
 }
 
 /* Loads the keys, finds the account, and names the work directory and the authorized_keys file. */

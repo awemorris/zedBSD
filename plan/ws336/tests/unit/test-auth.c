@@ -150,10 +150,14 @@ parse_request_of(
 	struct ssh_auth_request *request)
 {
 	const uint8_t *copy;
+	int error;
 
 	/* Copies, then parses. */
 	copy = hold(data, size);
-	return ssh_auth_parse_request(copy, size, request);
+	error = ssh_auth_parse_request(copy, size, request);
+
+	/* Reports the parser's answer. */
+	return error;
 }
 
 /* Parses a built message as a request. */
@@ -162,8 +166,13 @@ parse_request_wire(
 	const struct wire *message,
 	struct ssh_auth_request *request)
 {
+	int error;
+
 	/* Parses the bytes of the message. */
-	return parse_request_of(message->data, message->size, request);
+	error = parse_request_of(message->data, message->size, request);
+
+	/* Reports the parser's answer. */
+	return error;
 }
 
 /* Reports whether the request structure holds only zero bytes. */
@@ -172,9 +181,15 @@ request_is_zero(
 	const struct ssh_auth_request *request)
 {
 	static struct ssh_auth_request zero;
+	int different;
 
 	/* Compares the whole structure, padding included, with zeros. */
-	return memcmp(request, &zero, sizeof(zero)) == 0;
+	different = memcmp(request, &zero, sizeof(zero));
+	if (different != 0)
+		return 0;
+
+	/* Succeeded: the structure is all zero. */
+	return 1;
 }
 
 /* Checks that a module-built buffer holds exactly the bytes of an expected message. */
@@ -1258,9 +1273,16 @@ banner_of(
 	size_t size,
 	char *out)
 {
+	const uint8_t *copy;
+	int error;
+
 	/* Builds the message and reads it from a heap copy. */
 	wire_banner(&built, text, size);
-	return ssh_auth_parse_banner(hold(built.data, built.size), built.size, out, 256);
+	copy = hold(built.data, built.size);
+	error = ssh_auth_parse_banner(copy, built.size, out, 256);
+
+	/* Reports the parser's answer. */
+	return error;
 }
 
 /* Tests the banner filter. */

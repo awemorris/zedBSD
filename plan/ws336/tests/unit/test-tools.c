@@ -27,6 +27,8 @@ static struct wire buffer;
 int
 main(void)
 {
+	int status;
+
 	uint8_t bytes[8];
 
 	/* uint32 0x29b7f4aa is 29 b7 f4 aa (RFC 4251 5, uint32). */
@@ -67,5 +69,6 @@ main(void)
 	CHECK_EQ(buffer.size, WIRE_MAX - 2);
 
 	/* Reports the tools' test. */
-	return check_finish("tools");
+	status = check_finish("tools");
+	return status;
 }

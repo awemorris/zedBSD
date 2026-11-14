@@ -41,6 +41,8 @@ static void check_wipe_compare(void);
 int
 main(void)
 {
+	int status;
+
 	/* Each primitive in turn. */
 	check_random();
 	check_sha256();
@@ -52,7 +54,8 @@ main(void)
 	check_wipe_compare();
 
 	/* Reports the whole contract. */
-	return check_finish("crypto-contract");
+	status = check_finish("crypto-contract");
+	return status;
 }
 
 /* RAND_bytes fills the buffer and two draws differ. */

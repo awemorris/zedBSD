@@ -68,6 +68,8 @@ static uint32_t next_random(void);
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_init();
 	test_open_session_and_reply();
@@ -88,7 +90,8 @@ main(void)
 	test_random();
 
 	/* Reports the result of the whole test. */
-	return check_finish("channel");
+	status = check_finish("channel");
+	return status;
 }
 
 /*

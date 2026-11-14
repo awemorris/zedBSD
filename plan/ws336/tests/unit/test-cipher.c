@@ -72,6 +72,8 @@ static void fill_key(uint8_t *key, uint8_t seed);
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_known_answer();
 	test_construction();
@@ -80,7 +82,8 @@ main(void)
 	test_init_clear();
 
 	/* Prints the verdict. */
-	return check_finish("cipher");
+	status = check_finish("cipher");
+	return status;
 }
 
 /* Fills a 64-byte key with bytes that differ from byte to byte and from seed to seed. */

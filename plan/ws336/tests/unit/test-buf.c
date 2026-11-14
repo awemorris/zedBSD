@@ -52,6 +52,8 @@ static uint32_t next_random(void);
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_writer_types();
 	test_writer_growth();
@@ -68,7 +70,8 @@ main(void)
 	test_reader_random();
 
 	/* Reports the result of the whole test. */
-	return check_finish("buf");
+	status = check_finish("buf");
+	return status;
 }
 
 /*

@@ -54,6 +54,8 @@ static uint32_t next_random(void);
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_put_raw();
 	test_put_cooked();
@@ -69,7 +71,8 @@ main(void)
 	test_apply_random();
 
 	/* Reports the result of the whole test. */
-	return check_finish("ttymodes");
+	status = check_finish("ttymodes");
+	return status;
 }
 
 /*

@@ -175,6 +175,7 @@ int
 main(void)
 {
 	int error;
+	int status;
 
 	/* Makes the server's host key. */
 	error = ssh_key_generate(&host_key, "host");
@@ -210,7 +211,8 @@ main(void)
 
 	/* Prints the verdict. */
 	ssh_key_clear(&host_key);
-	return check_finish("transport");
+	status = check_finish("transport");
+	return status;
 }
 
 /* Returns the next number of a xorshift generator. */
@@ -648,6 +650,7 @@ static uint32_t
 plain_disconnect_code(void)
 {
 	const uint8_t *last;
+	uint32_t code;
 
 	/* Looks at the last payload. */
 	if (plain_out.count == 0)
@@ -655,7 +658,10 @@ plain_disconnect_code(void)
 	last = plain_out.data[plain_out.count - 1U];
 	if (plain_out.size[plain_out.count - 1U] < 5U || last[0] != SSH_MSG_DISCONNECT)
 		return 0xffffffffU;
-	return ssh_load_be32(last + 1);
+
+	/* Reads the reason code that follows the message number. */
+	code = ssh_load_be32(last + 1);
+	return code;
 }
 
 /* Frames a payload with a side's packet layer directly, bypassing the transport's checks. */

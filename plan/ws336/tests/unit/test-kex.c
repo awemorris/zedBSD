@@ -143,6 +143,8 @@ static void set_lists(struct ssh_kexinit *kexinit, const char *const *lists, int
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_put();
 	test_put_errors();
@@ -164,7 +166,8 @@ main(void)
 	test_random_feed();
 
 	/* Prints the verdict. */
-	return check_finish("kex");
+	status = check_finish("kex");
+	return status;
 }
 
 /* Returns the next number of a xorshift generator. */

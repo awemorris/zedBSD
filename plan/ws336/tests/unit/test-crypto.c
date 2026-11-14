@@ -165,6 +165,8 @@ static int all_zero(const uint8_t *data, size_t size);
 int
 main(void)
 {
+	int status;
+
 	/* Builds the points of small order the hybrid checks use. */
 	make_small_order_points();
 
@@ -179,7 +181,8 @@ main(void)
 	test_misc();
 
 	/* Reports the result of the whole test. */
-	return check_finish("crypto");
+	status = check_finish("crypto");
+	return status;
 }
 
 /*
