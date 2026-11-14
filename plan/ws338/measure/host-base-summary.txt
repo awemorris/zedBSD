@@ -1,0 +1,63 @@
+host: Intel(R) Xeon(R) Gold 6130 CPU @ 2.10GHz, cc (Debian 14.2.0-19) 14.2.0, CFLAGS -O2
+tree: 08ad5228d9
+Video (Main,1920,1080, 6265417 bytes): same as ffmpeg; frames 149 best_fps 33.38 median_fps 32.98 concealed 0 errors 0
+high-1080-clean (High,1920,1080, 6421255 bytes): same as ffmpeg; frames 240 best_fps 33.67 median_fps 33.67 concealed 0 errors 0
+high-1080-grain (High,1920,1080, 7954165 bytes): same as ffmpeg; frames 240 best_fps 21.99 median_fps 21.70 concealed 0 errors 0
+main-1080-cavlc (Main,1920,1080, 7952073 bytes): same as ffmpeg; frames 240 best_fps 25.69 median_fps 24.46 concealed 0 errors 0
+sample-h264-high (High,1920,1080, 8081125 bytes): same as ffmpeg; frames 150 best_fps 16.83 median_fps 16.60 concealed 0 errors 0
+profile (perf, high-1080-grain, self time) by function:
+   10.79%  h264sw_deblock_luma_edge                 h264sw-deblock
+    8.36%  vcodec_cabac_decision                    vcodec-cabac
+    6.82%  h264sw_interp_luma                       h264sw-interp
+    5.30%  h264sw_interp_chroma                     h264sw-interp
+    5.28%  h264sw_weights_apply                     h264sw-weight
+    4.92%  edge_strengths                           h264sw-deblock
+    4.79%  h264sw_mb_locate                         h264sw-mb
+    4.63%  h264sw_deblock_chroma_edge               h264sw-deblock
+    3.55%  h264sw_macroblock_parse                  h264sw-macroblock
+    3.50%  interp_block_vertical                    h264sw-interp
+    2.96%  transform_line8                          h264sw-transform
+    2.85%  h264sw_cabac_residual_block              h264sw-cabac-se
+    2.73%  h264sw_recon_mb                          h264sw-recon
+    2.63%  weight_single                            h264sw-weight
+    2.63%  transform_line4                          h264sw-transform
+    1.69%  deblock_chroma_edges                     h264sw-deblock
+    1.61%  recon_chroma_residual                    h264sw-recon
+    1.33%  recon_partition                          h264sw-recon
+    1.32%  interp_block_centre                      h264sw-interp
+    1.25%  recon_uniform                            h264sw-recon
+    1.24%  deblock_luma_edges                       h264sw-deblock
+    1.20%  h264sw_scale4x4                          h264sw-transform
+    1.19%  recon_predict_block                      h264sw-recon
+    1.16%  h264sw_add_residual                      h264sw-transform
+    0.96%  h264sw_scale8x8                          h264sw-transform
+    0.82%  h264sw_idct4x4                           h264sw-transform
+    0.80%  h264sw_direct_quadrant                   h264sw-direct
+    0.78%  h264sw_blk4x4_at                         h264sw-mb
+    0.72%  direct_colocated                         h264sw-direct
+    0.65%  h264sw_ctx_coded_block_flag              h264sw-cabac-se
+by module:
+   23.82%  h264sw-deblock
+   16.94%  h264sw-interp
+   11.10%  h264sw-transform
+    9.01%  vcodec-cabac
+    8.74%  h264sw-recon
+    8.12%  h264sw-weight
+    7.20%  h264sw-mb
+    5.74%  h264sw-cabac-se
+    4.28%  h264sw-macroblock
+    1.64%  h264sw-direct
+    1.03%  h264sw-mvpred
+    0.74%  h264sw-intra
+    0.56%  h264sw-decoder
+    0.50%  h264sw-cabac
+    0.07%  bits
+    0.02%  (outside)
+    0.01%  vcodec-nal
+    0.00%  vcodec-bitreader
+    0.00%  h264sw-slice
+    0.00%  h264sw-reflist
+    0.00%  h264sw-frame
+    0.00%  h264sw-dpb
+output: /tmp/claude-1000/p1-ws338/speed-base.run.PgJyxm
+run-speed: PASS
