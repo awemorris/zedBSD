@@ -3,8 +3,8 @@
 # image without its firmware packages (config-amd64-fetch.mk) with plan/tools/guest/test-image.sh, boots it with plan/tools/guest/guest.sh and
 # fetches public https URLs in the guest, copying each body out and checking its SHA-256 against the same URL fetched
 # on the host with curl (a site whose content changes between the two fetches would show as a mismatch).
-#   sh plan/ws343/tests/run-fetch-qemu.sh [BUILD]     (default build/x86_64)
-# GUEST_RUNTIME defaults to build/p8-ws343-guest.  Output under build/tmp/ws343-fetch-qemu (a fresh run).
+#   sh plan/tools/fetch/run-fetch-qemu.sh [BUILD]     (default build/x86_64)
+# GUEST_RUNTIME defaults to build/fetch-guest.  Output under build/tmp/fetch-qemu (a fresh run).
 # The last line is run-fetch-qemu: PASS (<N> cases), run-fetch-qemu: FAIL, or run-fetch-qemu: SKIP (no network on
 # the host).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -13,12 +13,12 @@ cd "$(dirname -- "$0")/../../.."
 PATH=/usr/bin:/bin:$PATH
 export PATH
 build=${1:-build/x86_64}
-GUEST_RUNTIME=${GUEST_RUNTIME:-build/p8-ws343-guest}
+GUEST_RUNTIME=${GUEST_RUNTIME:-build/fetch-guest}
 export GUEST_RUNTIME
 ZEDBSD_JOBS=${ZEDBSD_JOBS:-4}
 export ZEDBSD_JOBS
 . plan/tools/fresh-out.sh
-out=build/tmp/ws343-fetch-qemu
+out=build/tmp/fetch-qemu
 fresh_out "$out"
 guest="plan/tools/guest/guest.sh"
 status=0
@@ -34,7 +34,7 @@ if ! timeout 30 curl -sS -f -o /dev/null https://example.com/ 2> "$out/host-net.
 fi
 
 # 1. The image.
-if ! timeout 7000 plan/tools/guest/test-image.sh plan/ws343/tests/config-amd64-fetch.mk "$build" > "$out/image.log" 2>&1; then
+if ! timeout 7000 plan/tools/guest/test-image.sh plan/tools/fetch/config-amd64-fetch.mk "$build" > "$out/image.log" 2>&1; then
 	tail -30 "$out/image.log"
 	echo "run-fetch-qemu: FAIL (the image; $out/image.log)"
 	exit 1
