@@ -199,7 +199,12 @@ int svg_parse_lengths(const char *text, struct svg_length *values, size_t capaci
  * SVG transform attribute, and §7.3's functions): matrix(a b c d e f),
  * translate(tx [ty]), scale(sx [sy]), rotate(a [cx cy]), skewX(a),
  * skewY(a), separated by white space and/or commas, arguments separated
- * the same way, angles in degrees as bare numbers.  The functions compose
+ * the same way.  The attribute is the presentation attribute of the
+ * transform property (CSS Transforms 1 §7.1), so besides bare numbers an
+ * angle may carry deg, grad, rad or turn and a length of translate or
+ * the centre of rotate px (units matched without regard to ASCII case;
+ * 1turn = 360deg, 1grad = 0.9deg, 1rad = 180 / pi deg); a bare angle is in
+ * degrees and a bare length in user units.  The functions compose
  * left to right as nested coordinate systems (the leftmost applies last
  * to a point: the matrix is M1 x M2 x ... ).  rotate(a cx cy) is
  * translate(cx cy) rotate(a) translate(-cx -cy).  An empty attribute is

@@ -1,32 +1,33 @@
 <!-- awesome-plan project=zedbsd record=ws328-p019 -->
 
-# ws328-p019 CSS の装飾を新しい item で（角丸・border・影・gradient の背景・角丸の clip）
+# ws328-p019 CSS の角丸の背景・border・角丸の clip・置換要素の角丸（list.c）
 
 - WS: [WS328](../ws.md)。設計: [design.md](../design.md)。
-- Status: planned（2026-11-14 p001 が作成）
-- 担当: Opus（phase-runner）。
-- 依存: p004・p017・p018（依存の Phase が main に merge され cleared の後に始める）。
+- Status: planned（2026-11-14 p001 が作成、2026-11-15 design-reviewer の反映で改訂）
+- 担当: Opus（phase-runner、統合なので推論が多い）。
+- 依存: p004・p027（依存の Phase が main に merge され cleared の後に始める）。
 
 ## 1. 範囲
 
-design.md §9 の表の全行を `paint/list.c` で: 角丸の背景（background-clip を含む）、border（同じ色の ring、辺ごとの色の 4 ring、dashed・dotted を stroker で、double・groove・ridge・inset・outset）、box-shadow（外と inset、spread、knockout）、gradient の背景（linear・radial・conic・repeating、tile の繰り返し）、overflow の角丸の clip、置換要素の角丸。
-
-- 角丸のない箱も ring・影は新しい item で描く（同じ式で角丸 0）。今の `list_round_fill`・`list_round_row`・`list_round_span`・`list_round_borders`・`list_shadow`・`list_grow_shape`・`list_shadow_quantiles`・`list_gradient` と `paint/gradient.c` は使われなくなる。関数は消し、file（`paint/gradient.c`）と sources.mk の行の削除は path と理由を Q1 に送る（`git rm` は Q1 の OK の後）。
-- dashed・dotted の dash の長さ、groove などの明暗の式は CSS Backgrounds 3 §3.2 が UA に任せる所: この Phase が決めて list.c の comment と結果に書く。
-- `layout/shape.c`（shape-outside の gradient）は linear のまま動く事を確かめる（radial・conic の shape-outside は範囲の外として結果に書く）。
+design.md §9 の表のうち、角丸の背景（PAINT_RRECT、半径の正規化、background-clip の inset）、border（solid の ring、辺ごとの色の 4 ring と `side`、dashed・dotted は中心線の `vec_stroke` で PAINT_PATH、double・groove・ridge・inset・outset）、overflow の clip ＋ border-radius（角丸の clip、padding box の内側の半径）、置換要素の角丸（content box の角丸の clip）。`list_round_fill`・`list_round_borders` の近似を新しい item に置き換え、消す code は path と理由を Q1 へ。角丸の無い箱の solid の border は今の PAINT_RECT のままでもよい（画素が同じ。どちらにしたかを結果に書く）。dashed・dotted の長さの選び方（CSS Backgrounds 3 §3.2 が UA に任せる所）を決めて結果と dump に書く。
 
 ## 2. 試験
 
-- WS074 の host の試験の dump と画素の期待の値で変わる物を直す（理由を各 file の結果に）。新しい頁 `plan/ws328/tests/pages/*.html`（角丸・border の各 style・影・各 gradient・角丸の clip）を CPU（`browser --render`）で描き、手で確かめた画像を `build/review/` に置いて Q1 に示す。
-- WPT（`plan/ws074/tests/fetch-suites.sh wpt`、`run-wpt-reftests.py`）の `css/css-backgrounds/`（border-radius・box-shadow・border-style）と `css/css-images/`（gradient）の reftest を CPU で、変更の前と後の数。
+- host の試験（`plan/ws328/tests/` に、dump と CPU の画素）: 各 border の style、辺ごとの色の角の分け目、角丸の clip の中の子（矩形・文字・画像）、半径の縮小。
+- WPT の `css/css-backgrounds/`（border-radius・border-style）の reftest を CPU で、p018 の基準との比べ。
+- `plan/ws328/tests/pages/` に頁を足し、gpu-compare（lavapipe）で GPU と CPU が合う事（p020・p027 が main にある前提）。
+- 既存の WS074 の host の試験の期待の値で変わる物を直し、file を全部書く。
 
 ## 3. 守る事
 
 - AGENTS.md の §4・§7・§9・§10、plan/coding-style.md の全文、plan/guardrail.md の出典・開発の管理情報・「画像の処理は GPU で」。
-- vector/・svg/ の header は変えない（基点の SHA、`BASE=<SHA> sh plan/ws328/tests/check-skeleton.sh`）。header の誤りは規約の見直しの Phase（p023）へ持ち越し、Q1 に報告する。
-- Makefile・`mk/`・`sources.mk` の変更は Q1 経由でユーザーの承認の後（design.md §13 の差分）。HAL・toolchain は変えない。
+- vector/・svg/ の header は変えない（基点の SHA、`BASE=<SHA> sh plan/ws328/tests/check-skeleton.sh`、check 6 の toolchain は module の phase.md §6 と同じ）。header の契約の誤りを見つけたら header を変えずに止めて Q1 に返す（design.md §11 の再凍結。p023 は書き方だけで契約の直しを持ち越さない）。
+- Makefile・`mk/`・`sources.mk` の変更は Q1 経由でユーザーの承認の後（design.md §13 の差分、user-questions の U5）。HAL・toolchain は変えない。
 - 削除（rm、`git rm`）は担当がしない。path と理由を Q1 に送る。
 - 他の実装（Blink・WebKit・Gecko・Skia・resvg・librsvg など）の code・comment・構造を写さない。
+- WS074 の host の試験の期待の値を直す事は Q1 の許可の範囲（design.md §12）。直した file を結果に全部書く。WS328 の新しい試験は `plan/ws328/tests/` に置く。
+- QEMU の console・serial の log で判定しない（boot-test.sh、screendump、gdbstub・QMP）。
+- frame ごとに CPU が画素を触らない（cache の miss の時の coverage と ramp の作成は内容が変わった時だけ、§4 の予算の中）。
 
 ## 結果
 

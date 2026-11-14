@@ -95,10 +95,11 @@ struct svg_sink {
  *   FILL    the path flattened by vec_flatten with M and tolerance, passed
  *           to fill with the command's rule.
  *   STROKE  the path flattened in user space (vec_flatten with no matrix
- *           and the tolerance divided by vec_matrix_scale_max(M)), stroked
- *           by vec_stroke with the command's style, tolerance as given and
- *           to_device M, passed to fill with VEC_FILL_NONZERO.  A command
- *           whose M has a scale of 0 draws nothing.
+ *           and the tolerance max(tolerance / vec_matrix_scale_max(M),
+ *           VEC_TOLERANCE_MIN)), stroked by vec_stroke with the command's
+ *           style, tolerance as given and to_device M, passed to fill with
+ *           VEC_FILL_NONZERO.  A command whose M has a scale of 0 draws
+ *           nothing.
  *   GROUP, GROUP_END  passed to group and group_end.
  * A command's paint goes to the sink with its gradient's to_gradient
  * composed with the inverse of M (so it maps device pixels), and its alpha
@@ -111,11 +112,12 @@ struct svg_sink {
  * pixels (valid); tolerance >= VEC_TOLERANCE_MIN, in device pixels; sink
  * with all four functions.
  * Errors: EINVAL for a placement that is not valid or a tolerance out of
- * range; ENOMEM, ENOBUFS from flattening and stroking (that command is
- * skipped when the error is ENOBUFS; ENOMEM ends the drawing); a sink's
- * error, which ends the drawing.  Groups started are ended (group_end is
- * called for them) before an error is returned, except for a sink's own
- * error.
+ * range; ENOMEM, ENOBUFS from flattening and stroking (ENOBUFS, and
+ * EINVAL from a command whose mapped points leave the coordinate range,
+ * skip that command and the drawing goes on, returning 0 if nothing else
+ * fails; ENOMEM ends the drawing); a sink's error, which ends the
+ * drawing.  Groups started are ended (group_end is called for them)
+ * before an error is returned, except for a sink's own error.
  */
 int svg_picture_draw(const struct svg_picture *picture, const struct vec_matrix *placement, float tolerance, const struct svg_sink *sink);
 

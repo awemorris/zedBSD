@@ -33,10 +33,11 @@
  * T), else the control point is the current point (§9.5.2); A goes
  * through vec_path_arc_to, which applies §9.5.1.
  *
- * Errors in the data (§9.5.4): the path is rendered up to the last
- * complete command before the error; the command that fails and all
- * after it are dropped.  Data that does not start with M or m (after
- * white space) draws nothing.
+ * Errors in the data (§9.5.4): the path keeps every complete argument set
+ * before the first error, including the complete sets of the command in
+ * which the error occurs ("M 10,10 L 20,20,30" keeps the line to 20,20:
+ * §9.5.4's example), and drops the rest.  Data that does not start with M
+ * or m (after white space) draws nothing.
  *
  * Input: text NUL-terminated UTF-8; out an initialized path (usually
  * empty).

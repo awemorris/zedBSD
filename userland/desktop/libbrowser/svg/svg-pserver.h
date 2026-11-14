@@ -70,9 +70,10 @@ void svg_server_release(struct svg_server *server);
  *
  * Each stop (§14.2.4): offset a number or a percentage, clamped to
  * [0, 1]; stop-color and stop-opacity from its properties (svg_style_apply
- * on the stop, inheriting from the gradient element's style: the parent
- * passed here as gradient_style; currentColor taking the stop's color
- * property); the stops fixed up by vec_gradient_fixup_svg.
+ * on the stop, inheriting from the style of the gradient element whose
+ * child it is, which svg_style_of computes from that element's own
+ * ancestors with outer; currentColor taking the stop's color property);
+ * the stops fixed up by vec_gradient_fixup_svg.
  *
  * Units (§8.11): with objectBoundingBox, lengths are fractions (a
  * percentage over 100, a number as is) of the box, and the box maps to
@@ -82,14 +83,15 @@ void svg_server_release(struct svg_server *server);
  * gradientTransform <- gradient space; to_gradient is its inverse.  A
  * matrix that cannot be inverted paints nothing.
  *
- * Input: tree; element named "linearGradient" or "radialGradient";
- * gradient_style the style of the gradient element; bbox the shape's tight
- * bounding box in user space; context the shape's (for userSpaceOnUse
- * lengths); server initialized (its old contents are released).
+ * Input: tree; element named "linearGradient" or "radialGradient"; outer
+ * the style the SVG fragment's root inherits (as for svg_style_of; NULL
+ * for the initial style); bbox the shape's tight bounding box in user
+ * space; context the shape's (for userSpaceOnUse lengths); server
+ * initialized (its old contents are released).
  * Output: *server.
  * Errors: EINVAL when element is not a gradient element; ENOMEM.  The
  * server is then NONE.
  */
-int svg_server_resolve(const struct svg_tree *tree, const struct svg_node *element, const struct svg_style *gradient_style, const struct vec_rect *bbox, const struct svg_context *context, struct svg_server *server);
+int svg_server_resolve(const struct svg_tree *tree, const struct svg_node *element, const struct svg_style *outer, const struct vec_rect *bbox, const struct svg_context *context, struct svg_server *server);
 
 #endif

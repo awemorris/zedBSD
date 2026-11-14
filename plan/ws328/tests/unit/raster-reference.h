@@ -33,8 +33,11 @@
 /* The samples along one sample line of one pixel. */
 #define REFERENCE_SAMPLES	256
 
-/* The most crossings of one sample line the reference keeps. */
+/* The most crossings of one sample line the reference keeps (more make it refuse, so a test cannot pass on a truncated reference). */
 #define REFERENCE_CROSSINGS	4096
+
+/* The widest rectangle the reference computes (a wider one is refused). */
+#define REFERENCE_WIDTH_MAX	1024
 
 /* One crossing of a sample line: where, and +1 for a segment going down, -1 going up. */
 struct reference_crossing {
@@ -47,8 +50,9 @@ struct reference_crossing {
  * height y: a segment from (x0, y0) to (x1, y1) crosses it when
  * min(y0, y1) <= y < max(y0, y1) (its upper end held, its lower not; a
  * horizontal one never), at the x of its line there.  The vertices are
- * moved by (dx, dy) first.  Returns the number of crossings (at most
- * REFERENCE_CROSSINGS; more are dropped).
+ * moved by (dx, dy) first.  Returns the number of crossings, or
+ * REFERENCE_CROSSINGS + 1 when there are more than REFERENCE_CROSSINGS
+ * (only the first REFERENCE_CROSSINGS are stored).
  */
 CHECK_UNUSED static size_t
 reference_crossings(
@@ -87,7 +91,7 @@ reference_crossings(
 			if (y1 < y0 && (y < y1 || y >= y0))
 				continue;
 			if (count >= REFERENCE_CROSSINGS)
-				continue;
+				return REFERENCE_CROSSINGS + 1;
 			crossings[count].x = x0 + (x1 - x0) * (y - y0) / (y1 - y0);
 			crossings[count].direction = y1 > y0 ? 1 : -1;
 			count++;
@@ -102,8 +106,12 @@ reference_crossings(
  * Computes the reference alpha of every pixel of a rectangle of whole
  * pixels (left, top, width, height) into alpha (width * height bytes, row
  * by row), for lines moved by (dx, dy) and filled by rule.
+ *
+ * Returns 0, or -1 when the reference cannot compute it (width over
+ * REFERENCE_WIDTH_MAX, or a sample line with more than
+ * REFERENCE_CROSSINGS crossings); a test treats -1 as a failure.
  */
-CHECK_UNUSED static void
+CHECK_UNUSED static int
 reference_coverage(
 	const struct vec_lines *lines,
 	enum vec_fill_rule rule,
@@ -116,7 +124,7 @@ reference_coverage(
 	unsigned char *alpha)
 {
 	static struct reference_crossing crossings[REFERENCE_CROSSINGS];
-	double covered[1024];
+	double covered[REFERENCE_WIDTH_MAX];
 	double y;
 	double x;
 	size_t count;
@@ -129,14 +137,20 @@ reference_coverage(
 	int inside;
 	double value;
 
+	/* A rectangle wider than the row buffer is refused. */
+	if (width < 0 || height < 0 || width > REFERENCE_WIDTH_MAX)
+		return -1;
+
 	/* Each pixel row, its sample lines summed per pixel. */
 	for (row = 0; row < height; row++) {
-		for (column = 0; column < width && column < 1024; column++)
+		for (column = 0; column < width; column++)
 			covered[column] = 0.0;
 		for (sub = 0; sub < VEC_SUBLINES; sub++) {
 			y = (double)(top + row) + ((double)sub + 0.5) / (double)VEC_SUBLINES;
 			count = reference_crossings(lines, dx, dy, y, crossings);
-			for (column = 0; column < width && column < 1024; column++) {
+			if (count > REFERENCE_CROSSINGS)
+				return -1;
+			for (column = 0; column < width; column++) {
 				for (k = 0; k < REFERENCE_SAMPLES; k++) {
 					x = (double)(left + column) + ((double)k + 0.5) / (double)REFERENCE_SAMPLES;
 					winding = 0;
@@ -153,11 +167,14 @@ reference_coverage(
 				}
 			}
 		}
-		for (column = 0; column < width && column < 1024; column++) {
+		for (column = 0; column < width; column++) {
 			value = covered[column] / (double)VEC_SUBLINES;
 			alpha[row * width + column] = (unsigned char)(int)(value * 255.0 + 0.5);
 		}
 	}
+
+	/* Every pixel was computed. */
+	return 0;
 }
 
 #endif

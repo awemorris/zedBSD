@@ -46,10 +46,18 @@
 #define VEC_SIGMA_MIN		0.5f
 
 /*
- * The nodes of the numerical integration across a band of rounded
- * corners in vec_rrect_shadow (the midpoint rule).
+ * The nodes of the midpoint rule over each half of a corner's curve in
+ * vec_rrect_shadow (two halves per corner, so at most 8 * 16 evaluations
+ * for a pixel near every corner).
  */
 #define VEC_SHADOW_NODES	8
+
+/*
+ * The smallest radius kept: a radius under 1/256 of a pixel is made 0 by
+ * vec_rrect_normalize (it draws nothing visible, and dividing by it would
+ * overflow the corner formulas).
+ */
+#define VEC_RADIUS_MIN		(1.0f / 256.0f)
 
 /*
  * A rectangle with elliptical corners: its rectangle and each corner's
@@ -65,8 +73,9 @@ struct vec_rrect {
 
 /*
  * Makes the radii usable (CSS Backgrounds 3 §4.1, §4.5): a radius that is
- * not finite or is negative becomes 0; a corner with one radius 0 gets
- * both 0; then with f = min over the sides of (side length / sum of the
+ * not finite, is negative or is under VEC_RADIUS_MIN becomes 0; a corner
+ * with one radius 0 gets both 0; then with f = min over the sides of
+ * (side length / sum of the
  * two radii along it), taken over the sides whose sum is positive, all
  * radii are multiplied by f when f < 1.  An empty or inverted rectangle
  * gets all radii 0.
@@ -106,7 +115,11 @@ void vec_rrect_inset(const struct vec_rrect *outer, const float widths[4], struc
 void vec_rrect_spread(const struct vec_rrect *border, float amount, struct vec_rrect *grown);
 
 /*
- * Computes how much of a pixel a rounded rectangle covers, in [0, 1]:
+ * Computes how much of a pixel a rounded rectangle covers, in [0, 1].
+ * The display list gives backgrounds, borders and clips rectangles whose
+ * edges are whole pixels (rounded as PAINT_RECT's are, floor(v + 0.5)),
+ * so the overlap below is 0 or 1 there and only the corners are
+ * anti-aliased; the formula is defined for any edges.
  *
  *   overlap = (overlap of [px, px+1) with [left, right)) *
  *             (overlap of [py, py+1) with [top, bottom))
@@ -142,21 +155,33 @@ float vec_rrect_ring_coverage(const struct vec_rrect *outer, const struct vec_rr
 
 /*
  * Computes the share of a pixel of a border that belongs to one side
- * (enum VEC_SIDE_*), so that a border whose sides differ in color is drawn
+ * (VEC_SIDE_*), so that a border whose sides differ in color is drawn
  * as four rings each weighted by its side's share; the shares of the four
- * sides of a pixel sum to 1.
+ * sides of a pixel sum to 1 by construction.
  *
- * Where two sides meet, the transition (CSS Backgrounds 3 §4.4) is the
- * line through the outer rectangle's corner point and the inner
- * rectangle's corner point (the padding edge's corner when the radii are
- * smaller than the widths; the inner rectangle's corner otherwise).  This
- * is a monotonic function of the ratio of the two widths, as §4.4 asks.
- * For the pixel's centre at signed distance s (in pixels) from that line,
- * positive on the side of `side`, its share from that line is
- * clamp(0.5 + s, 0, 1).  A centre in the band of one side only (outside
- * every corner's transition region) is wholly that side's.  When the
- * width of one of the two sides is 0, the other takes the whole corner
- * (§4.4).
+ * The outer rectangle (left, top, right, bottom) is cut into four
+ * quadrants by its middle lines xm = (left + right) / 2 and
+ * ym = (top + bottom) / 2; the pixel's centre (cx, cy) = (px + 0.5,
+ * py + 0.5) picks one: cx < xm and cy < ym the top left, cx >= xm and
+ * cy < ym the top right, cx >= xm and cy >= ym the bottom right, the rest
+ * the bottom left.  Each quadrant has one corner and its two sides (top
+ * left: top and left).  Only those two sides share the pixel; the other
+ * two get 0.
+ *
+ * In a quadrant, the transition (CSS Backgrounds 3 §4.4) is the line
+ * through the corner of the outer rectangle, O, and the corner of the
+ * padding box, I (the outer rectangle moved in by the widths: for the top
+ * left, O = (left, top), I = (left + width_left, top + width_top)).  Its
+ * slope follows the ratio of the two widths, a monotonic function as §4.4
+ * asks.  With s the signed distance of (cx, cy) from that line in pixels,
+ * positive towards the horizontal side (top or bottom),
+ *   horizontal side's share = clamp(0.5 + s, 0, 1),
+ *   vertical side's share = 1 - that.
+ * When the horizontal side's width is 0 the vertical side gets 1, when
+ * the vertical side's width is 0 the horizontal side gets 1, and when both
+ * are 0 the horizontal side gets 1.  (Where a box is thinner than its
+ * borders the lines of two quadrants disagree at the middle line; the
+ * share then jumps there, which only such degenerate boxes show.)
  *
  * Input: outer normalized; widths as for vec_rrect_inset; side 0 .. 3.
  * Returns the share in [0, 1] (0 for a side out of range).
@@ -166,7 +191,8 @@ float vec_rrect_side_share(const struct vec_rrect *outer, const float widths[4],
 /*
  * Computes the error function erf(x) by Abramowitz and Stegun, Handbook
  * of Mathematical Functions, formula 7.1.26 (absolute error under
- * 1.5e-7 for every x), with erf(-x) = -erf(x).
+ * 1.5e-7 for every x), with erf(-x) = -erf(x); its exponential through
+ * vec_exp, as the shader computes it.
  *
  * Returns erf(x) in [-1, 1]; 0 for a NaN.
  */
@@ -177,27 +203,46 @@ float vec_erf(float x);
  * standard deviation sigma (CSS Backgrounds 3 §6.1.2: half the blur
  * radius), at the pixel's centre (cx, cy) = (px + 0.5, py + 0.5):
  *
- *   S = integral over y' of G(y' - cy) * H(y')  dy'
+ *   S = integral over y in [top, bottom) of G(y - cy) (E(R(y)) - E(L(y))) dy
  *
- * where G is the normal density of deviation sigma and H(y') the blurred
- * coverage along x of the rectangle's row at height y':
- *   H(y') = (erf((R(y') - cx) / (sigma * sqrt 2)) -
- *            erf((L(y') - cx) / (sigma * sqrt 2))) / 2
- * for y' in [top, bottom), L and R the rounded rectangle's left and right
- * at that height (the corners' ellipses), and 0 outside.
- *
- * The integral is split at the rows where the corners' curves end:
- *   - the middle band, where L and R are the rectangle's sides, exactly:
- *     H times (erf((y1 - cy) / (sigma sqrt 2)) - erf((y0 - cy) / (sigma
- *     sqrt 2))) / 2;
- *   - each band of the top and bottom corners by the midpoint rule with
- *     VEC_SHADOW_NODES nodes over the band met with
- *     [cy - 4 sigma, cy + 4 sigma] (nothing when that is empty), weights
- *     G(node - cy) times the node spacing.
- * A sigma under VEC_SIGMA_MIN gives vec_rrect_coverage of the pixel.
- * §6.1.2 asks each pixel to be within 5% of the exact blur; the bands'
- * exact part and the smooth integrand of the corner bands keep this one
- * well inside that.
+ * where G is the normal density of deviation sigma, L(y) and R(y) the
+ * rounded rectangle's left and right at height y (the corners' ellipses),
+ * and with k = 1 / (sigma sqrt 2):
+ *   E(x)   = erf((x - cx) k) / 2,
+ *   E'(x)  = k / sqrt(pi) * vec_exp(-((x - cx) k)^2),
+ *   Psi(y) = (1 + erf((y - cy) k)) / 2   (so integral of G from y0 to y1
+ *                                         is Psi(y1) - Psi(y0)),
+ *   G(t)   = k / sqrt(pi) * vec_exp(-(t k)^2).
+ * S is the right edge's term less the left edge's, each the integral of
+ * G(y - cy) E(X(y)) for that edge's X, split into pieces:
+ *   - the straight piece between the edge's two corners (from top plus
+ *     the vertical radius of its top corner to bottom less that of its
+ *     bottom corner), exactly: (Psi(y1) - Psi(y0)) E(X), X the side;
+ *   - each corner of the edge with both radii nonzero, its quarter
+ *     ellipse parameterized by theta in [0, pi / 2] (0 at the end that
+ *     meets the straight piece, pi / 2 at the end on the top or bottom
+ *     side), cut at theta45 = vec_atan2(ry, rx) where the curve's slope is
+ *     one in these radii's terms, into two halves:
+ *       steep half (theta in [0, theta45]): the integral of
+ *         G(y - cy) E(x(y)) over its rows met with
+ *         [cy - 4 sigma, cy + 4 sigma], by the midpoint rule with
+ *         VEC_SHADOW_NODES equal steps in y (x(y) from the ellipse);
+ *       flat half (theta in [theta45, pi / 2]), integrated by parts so the
+ *         integration runs along x, where the curve is steep: with its
+ *         end points (xa, ya) and (xb, yb) ordered so ya <= yb,
+ *           Psi(yb) E(xb) - Psi(ya) E(xa) - integral from xa to xb of
+ *             Psi(y(x)) E'(x) dx,
+ *         the last integral (signed by its direction) over its columns met
+ *         with [cx - 4 sigma, cx + 4 sigma] by the midpoint rule with
+ *         VEC_SHADOW_NODES equal steps in x (y(x) from the ellipse).
+ *     A half whose rows lie wholly outside [cy - 4 sigma, cy + 4 sigma]
+ *     is skipped (its term is 0 to within erf's error), which is the
+ *     early exit that keeps a large blur's pixels cheap.
+ * The result is clamped to [0, 1].  A sigma under VEC_SIGMA_MIN gives
+ * vec_rrect_coverage of the pixel.  §6.1.2 asks each pixel to be within
+ * 5% of the exact blur: in double precision this scheme stays within
+ * 0.009 of a dense numerical integration of the formula above for sigma
+ * from 0.5 to 3 and corners from 8 to 100 pixels, round or elliptical.
  *
  * Input: rrect normalized; sigma finite and >= 0.  Returns the coverage in
  * [0, 1].  Never fails (a sigma that is not finite is taken as 0).

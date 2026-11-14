@@ -66,6 +66,22 @@
  */
 #define VEC_RASTER_SEGMENTS_MAX	(1UL << 21)
 
+/*
+ * The most crossings one call computes: the sum over the segments (inside
+ * the clip's rows) of the sample lines each one spans, the work of the
+ * scan.  2^26 is some tenths of a second on a slow core; a shape that
+ * needs more (a huge number of long segments) is refused with ENOBUFS
+ * before any scan, so a hostile path cannot hold the thread.
+ */
+#define VEC_RASTER_CROSSINGS_MAX	(1UL << 26)
+
+/*
+ * The most partial tiles one coverage holds: 65536 tiles of 256 bytes, 16
+ * MiB.  A shape with more partial tiles inside the clip is refused with
+ * ENOBUFS (the caller rasterizes a smaller window: the visible part).
+ */
+#define VEC_RASTER_TILES_MAX	65536
+
 /* The fill rules of SVG 2 §13.4.2 (and CSS Masking 1 §6.2's clip-rule). */
 enum vec_fill_rule {
 	VEC_FILL_NONZERO = 0,
@@ -132,8 +148,15 @@ void vec_coverage_reset(struct vec_coverage *coverage);
  * Errors: EINVAL for malformed lines, an unknown rule, offsets not finite,
  * or a moved vertex beyond VEC_COORD_MAX; ENOBUFS when the shape's bounds
  * met with clip are wider or taller than VEC_RASTER_SIDE_MAX or the lines
- * have more than VEC_RASTER_SEGMENTS_MAX segments; ENOMEM.  On error out
- * is empty.
+ * have more than VEC_RASTER_SEGMENTS_MAX segments, or the crossings
+ * exceed VEC_RASTER_CROSSINGS_MAX (checked before the scan), or the
+ * partial tiles exceed VEC_RASTER_TILES_MAX; ENOMEM.  On error out is
+ * empty.
+ *
+ * A clip that is not aligned to the tile grid leaves the tiles it cuts
+ * partial (their pixels outside the clip at alpha 0); a caller that
+ * caches tiles and later rasterizes a neighbouring window aligns its
+ * clips to whole tiles so the cached tiles stay exact.
  */
 int vec_rasterize(const struct vec_lines *lines, enum vec_fill_rule rule, float offset_x, float offset_y, const struct vec_irect *clip, struct vec_coverage *out);
 

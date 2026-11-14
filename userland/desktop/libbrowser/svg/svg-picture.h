@@ -12,9 +12,8 @@
  *
  * Building walks the rendering tree (SVG 2 §3.2): the 'svg' root and
  * nested 'svg' elements (new viewports, §5.1 and §8.8), 'g' (§5.2), 'use'
- * (§5.5, with 'symbol' §5.4), 'switch' (§5.6: its first child whose
- * conditions hold, with no condition attribute supported holding), and the
- * shape elements (svg-shape.h).  'defs', 'symbol' outside a 'use',
+ * (§5.5, with 'symbol' §5.4), 'switch' (§5.6, below), and the shape
+ * elements (svg-shape.h).  'defs', 'symbol' outside a 'use',
  * 'clipPath', 'linearGradient', 'radialGradient', 'title', 'desc',
  * 'metadata' and elements of other namespaces are not rendered.  Text,
  * images, markers, masks, patterns, filters and foreignObject are not
@@ -24,6 +23,16 @@
  * default paint-order: fill, stroke), each when its paint is not none and
  * the element is visible.  Opacity on a group or a shape with
  * opacity < 1 becomes a group around its commands (§3.6.1).
+ *
+ * 'switch' renders the first of its direct child elements in the SVG
+ * namespace whose conditional processing attributes (§5.8) all hold, and
+ * none of the others: requiredExtensions holds only when absent (no
+ * extension is supported; an empty value does not hold); systemLanguage
+ * holds when absent, or when one of its comma-separated tags, trimmed, is
+ * "en" or starts with "en-" (ASCII case-insensitively), the language this
+ * renderer assumes; requiredFeatures is ignored (SVG 2 dropped it).  A
+ * child that the builder does not render (text, image ...) can still be
+ * the chosen one, and then nothing is drawn.
  *
  * Coordinates: the picture's space is the root viewport's, in CSS px,
  * (0, 0) to (width, height) as given to svg_picture_build; each command
@@ -48,6 +57,22 @@
 
 /* The most clips of one picture. */
 #define SVG_CLIPS_MAX		4096
+
+/*
+ * The most element visits one build makes, counting every element entered
+ * by the walk, by the walks that find a container's bounding box, by the
+ * clip and gradient builders and by every expansion of a 'use': nested
+ * uses that each reference several others grow exponentially, so this
+ * bounds the work whatever the document (the build then stops with
+ * ENOBUFS and the picture keeps what was built).
+ */
+#define SVG_VISITS_MAX		(1UL << 20)
+
+/*
+ * The most points of all the picture's paths together (16 MiB of points);
+ * a shape that would pass it is not added and the build reports ENOBUFS.
+ */
+#define SVG_POINTS_MAX		(1UL << 21)
 
 /* The kinds of command. */
 enum svg_command_kind {
@@ -78,13 +103,32 @@ struct svg_command_paint {
  *
  * path is an index into the picture's paths (FILL and STROKE), matrix the
  * user-to-picture transform.  rule the fill rule (FILL).  stroke the
- * style for STROKE with lengths resolved in user units; its dashes point
- * into the picture's dash storage, and its tolerance is 0 (the drawer
- * sets it).  clip the index of the clip that applies (-1 for none: the
+ * style for STROKE with lengths resolved in user units; its dash_scale
+ * from the element's pathLength (below); its dashes are the dash_count
+ * floats of the picture's dashes from dash_first, and its tolerance is 0
+ * (the drawer sets it).  clip the index of the clip that applies (-1 for none: the
  * clip of the element and of its ancestors, met together, is one clip of
  * the picture, see struct svg_clip).  opacity the group opacity (GROUP).
  * A command's bbox is the tight bounding box of its path in user space,
- * which objectBoundingBox units were resolved against.
+ * which objectBoundingBox units were resolved against.  A gradient paint's
+ * stops are the paint.gradient.count entries of the picture's stops from
+ * stop_first.
+ *
+ * Storage: the picture's arrays grow by realloc while it is built, so a
+ * command holds indices (path, dash_first, stop_first) while building;
+ * svg_picture_build sets the pointers stroke.dashes and
+ * paint.gradient.stops from the indices only after its last addition,
+ * on success and on ENOBUFS (on other errors the picture is empty).
+ *
+ * pathLength (SVG 2 §9.6.1, on 'path' and the basic shapes): with
+ * L the measured length of the whole flattened path (the sum of
+ * vec_contour_length over its contours, flattened in user space with the
+ * tolerance the builder uses for measuring, VEC_TOLERANCE_DEFAULT / 16),
+ * a positive pathLength P gives dash_scale = L / P; pathLength 0 (an
+ * infinite scale, §9.6.1) makes a dash pattern whose first length is
+ * positive one solid line (no dashing), and one whose first length is 0
+ * draws nothing; a negative or invalid pathLength is ignored
+ * (dash_scale 1).
  */
 struct svg_command {
 	enum svg_command_kind kind;
@@ -93,6 +137,8 @@ struct svg_command {
 	enum vec_fill_rule rule;
 	struct svg_command_paint paint;
 	struct vec_stroke_style stroke;
+	size_t dash_first;
+	size_t stop_first;
 	int clip;
 	float opacity;
 	struct vec_rect bbox;
@@ -169,7 +215,10 @@ int svg_picture_add_path(struct svg_picture *picture, struct vec_path *path, siz
 
 /*
  * Builds the picture of an 'svg' element drawn into a viewport of width
- * by height CSS px.
+ * by height CSS px.  outer is the style the root inherits from the page
+ * (the HTML ancestors' color, fill, stroke and the other inherited
+ * properties, and font_size for em), NULL for svg_style_initial (an SVG
+ * document drawn as an image).
  *
  * The root's viewBox and preserveAspectRatio (svg_view_box_transform)
  * place its content in (0, 0, width, height); its x, y, width and height
@@ -177,8 +226,8 @@ int svg_picture_add_path(struct svg_picture *picture, struct vec_path *path, siz
  * from them).  A nested 'svg' establishes a viewport at its x, y, width
  * and height (100% for an absent size) and clips to it only when its
  * overflow would (§8.8; this builder does not clip nested viewports: a
- * known gap).  The root's style starts from svg_style_initial with
- * font_size the given font size.
+ * known gap).  The root's style is svg_style_inherit from outer, then
+ * its own attributes; root_font_size is the page's root font size (rem).
  *
  * Per element: its style (svg_style_inherit from the parent, then
  * svg_style_apply); display none skips it and its subtree; its transform
@@ -197,24 +246,32 @@ int svg_picture_add_path(struct svg_picture *picture, struct vec_path *path, siz
  * the style's color, or an url to a gradient through svg_server_resolve,
  * the fallback or none when the url names no gradient, §13.2), the same
  * for its stroke with the stroke width and dashes resolved
- * (svg_length_resolve; percentages of the normalized diagonal; a negative
- * width or dash is invalid: no stroke, or no dashing), stroke-dashoffset,
- * and the commands added.  'use' (§5.5): the referenced element (href,
- * #id only) drawn as a child of the 'use' with translate(x, y) after the
- * use's transform, a referenced 'symbol' or 'svg' establishing a viewport
+ * (svg_length_resolve; percentages of the normalized diagonal; negative
+ * values never get here, the style drops them as invalid declarations),
+ * stroke-dashoffset, and the commands added.  A container's bounding box
+ * is found once per container and kept for the build (not walked again
+ * for each use of it).  Elements referenced from elsewhere ('clipPath',
+ * gradients) get their style by svg_style_of with outer.  'use' (§5.5):
+ * the referenced element (href, #id only) drawn as a child of the 'use';
+ * the use's own coordinate system is its transform attribute followed by
+ * translate(x, y) (§5.5.2: the matrix is transform x translate(x, y), the
+ * translation applied first to a point), which is also the system its
+ * clip-path is in; a referenced 'symbol' or 'svg' establishing a viewport
  * of the use's width and height (100% when absent) with its viewBox; a
  * reference to an ancestor of the use, or deeper than SVG_USE_DEPTH_MAX
  * uses, draws nothing (§5.5.1's circular references).
  *
- * Input: tree; root an element named "svg"; width and height finite and
- * > 0; font_size the root's font size in px (16 when unknown); picture
- * initialized (its old contents are released first).
+ * Input: tree; root an element named "svg"; outer NULL or a style; width
+ * and height finite and > 0; root_font_size the page's root font size in
+ * px (16 when unknown); picture initialized (its old contents are
+ * released first).
  * Output: the picture.
  * Errors: EINVAL for a root that is not an 'svg' or a size out of range
- * (the picture is then empty); ENOBUFS when SVG_COMMANDS_MAX or
- * SVG_CLIPS_MAX was reached (the picture holds the commands up to there
- * and is drawable); ENOMEM (the picture is then empty).
+ * (the picture is then empty); ENOBUFS when SVG_COMMANDS_MAX,
+ * SVG_CLIPS_MAX, SVG_VISITS_MAX or SVG_POINTS_MAX was reached (the
+ * picture holds the commands up to there and is drawable); ENOMEM (the
+ * picture is then empty).
  */
-int svg_picture_build(const struct svg_tree *tree, const struct svg_node *root, float width, float height, float font_size, struct svg_picture *picture);
+int svg_picture_build(const struct svg_tree *tree, const struct svg_node *root, const struct svg_style *outer, float width, float height, float root_font_size, struct svg_picture *picture);
 
 #endif

@@ -3,7 +3,7 @@
 # WS328 libbrowser のベクトル描画（path の塗りと線、CSS の角丸・gradient など）と、それを使った SVG の描画
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: planning（2026-10-30 Q1 が作成。2026-10-30 ユーザーの決定で WS074 を止めて先に実装する。2026-11-14 P4 が p001 の設計を作成、Q1 の確かめ待ち）
+- Status: planning（2026-10-30 Q1 が作成。2026-10-30 ユーザーの決定で WS074 を止めて先に実装する。2026-11-14 P4 が p001 の設計を作成、2026-11-15 P4 が design-reviewer の反映を終え、Q1 の確かめ待ち）
 - 目標: libbrowser の描画（`userland/desktop/libbrowser/paint/`）にベクトル描画を足し、それで CSS の描画（角丸・gradient・影など）と、libbrowser の中の SVG の描画を作る。既存の library は使わない（libbrowser は単体の library）。
 
 ## ユーザーの決定（要点）
@@ -26,31 +26,41 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 
 | Phase | 目的 | 担当 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
-| [ws328-p001](phase001/phase.md) | 設計（module の分け方、header と骨格、試験の道具、実装の Phase、design-reviewer） | Opus（P4） | in-progress | — |
-| [ws328-p002](phase002/phase.md) | vec-base・vec-path（行列・path・弧・bbox） | Sonnet | planned | p001 |
+| [ws328-p001](phase001/phase.md) | 設計（module の分け方、header と骨格、試験の道具、実装の Phase、design-reviewer） | Opus（P4） | in-progress（反映済み、Q1 の確かめ待ち） | — |
+| [ws328-p002](phase002/phase.md) | vec-base・vec-path（行列・path・弧・bbox・atan2・exp） | Sonnet | planned | p001 |
 | [ws328-p003](phase003/phase.md) | vec-flatten（平坦化） | Sonnet | planned | p002 |
 | [ws328-p004](phase004/phase.md) | vec-stroke（線の輪郭・join・cap・dash） | Sonnet | planned | p003 |
 | [ws328-p005](phase005/phase.md) | vec-raster（coverage の tile） | Sonnet | planned | p003 |
-| [ws328-p006](phase006/phase.md) | vec-gradient（補間・ramp・t の計算） | Sonnet | planned | p002 |
+| [ws328-p006](phase006/phase.md) | vec-gradient（補間・hint・ramp・t の計算） | Sonnet | planned | p002 |
 | [ws328-p007](phase007/phase.md) | vec-rrect（角丸・ring・辺・影） | Sonnet | planned | p002 |
 | [ws328-p008](phase008/phase.md) | svg-values（値の文法・viewBox の変換） | Sonnet | planned | p002 |
 | [ws328-p009](phase009/phase.md) | svg-pathdata（`d`） | Sonnet | planned | p008 |
-| [ws328-p010](phase010/phase.md) | svg-style（表示の性質） | Sonnet | planned | p008 |
+| [ws328-p010](phase010/phase.md) | svg-style（表示の性質、祖先からの style） | Sonnet | planned | p008 |
 | [ws328-p011](phase011/phase.md) | svg-shape（図形の等価な path） | Sonnet | planned | p009・p010 |
 | [ws328-p012](phase012/phase.md) | svg-pserver（gradient の要素） | Sonnet | planned | p006・p010 |
-| [ws328-p013](phase013/phase.md) | svg-picture（描く命令の列） | Sonnet | planned | p011・p012 |
+| [ws328-p013](phase013/phase.md) | svg-picture の核（root・g・図形・style・paint・opacity・上限） | Sonnet | planned | p011・p012 |
+| [ws328-p029](phase029/phase.md) | svg-picture の use・symbol・入れ子の svg・switch | Sonnet | planned | p013 |
 | [ws328-p014](phase014/phase.md) | svg-clip（clipPath） | Sonnet | planned | p013 |
 | [ws328-p015](phase015/phase.md) | svg-draw（picture → sink） | Sonnet | planned | p004・p005・p014 |
 | [ws328-p016](phase016/phase.md) | svg-bitmap（CPU の bitmap） | Sonnet | planned | p006・p015 |
 | [ws328-p017](phase017/phase.md) | CSS の gradient の解析（radial・conic・repeating・hint） | Sonnet | planned | p001 |
-| [ws328-p018](phase018/phase.md) | paint の統合（新しい item、CPU の参照、sources.mk の承認済みの差分） | Opus | planned | p005・p006・p007 |
-| [ws328-p019](phase019/phase.md) | CSS の装飾を新しい item で（list.c） | Opus | planned | p004・p017・p018 |
-| [ws328-p020](phase020/phase.md) | Vulkan のベクトルの pipeline | Opus | planned | p018・p019 |
-| [ws328-p021](phase021/phase.md) | SVG の統合（page/svg.c の置き換え） | Opus | planned | p016・p018 |
-| [ws328-p022](phase022/phase.md) | 統合の試験（WPT・GPU と CPU・QEMU・実機の一覧） | Opus | planned | p019・p020・p021 |
-| [ws328-p023](phase023/phase.md) | 規約の全文の見直し | Sonnet（conformance-reviewer） | planned | p022 |
+| [ws328-p018](phase018/phase.md) | paint の統合（新しい item、CPU の参照、coverage の cache、倍率、snapshot の深い写し、WPT の基準） | Opus | planned | p005・p006・p007 |
+| [ws328-p020](phase020/phase.md) | Vulkan の pipeline（rrect・ring・影・gradient） | Opus | planned | p018 |
+| [ws328-p026](phase026/phase.md) | Vulkan の path（coverage の atlas・tile の表・予算） | Opus | planned | p020 |
+| [ws328-p027](phase027/phase.md) | 角丸の clip の下の矩形・glyph・画像、QEMU の Venus | Opus | planned | p026 |
+| [ws328-p019](phase019/phase.md) | CSS の角丸の背景・border・角丸の clip・置換要素 | Opus | planned | p004・p027 |
+| [ws328-p024](phase024/phase.md) | CSS の box-shadow | Opus | planned | p019 |
+| [ws328-p025](phase025/phase.md) | CSS の gradient の背景 | Opus | planned | p017・p019 |
+| [ws328-p021](phase021/phase.md) | SVG の統合（adapter・継承の口・inline の `<svg>`） | Opus | planned | p016・p026・p029 |
+| [ws328-p028](phase028/phase.md) | `<img>`・背景の SVG、page/svg.c の rasterizer を消す | Opus | planned | p021 |
+| [ws328-p022](phase022/phase.md) | 統合の試験（WPT・GPU と CPU・QEMU・実機の一覧） | Opus | planned | p024・p025・p028 |
+| [ws328-p023](phase023/phase.md) | 規約の全文の見直し（書き方だけ） | Sonnet（conformance-reviewer） | planned | p022 |
+
+Phase の番号はレビューで分けた物に新しい番号（p024〜p029）を付けたので表の順と違う。GPU の側（p020 → p026 → p027）を CSS・SVG の切り替えより先に main に入れる（design.md §11）。
 
 ## Resume point
+
+- 2026-11-15 P4（q2098-i01）: design-reviewer の 2 回の結果（前の担当の起動分 High 7・Medium 15・Low 11 を Q1 の要約で、今回の起動分 重大 6・中 21・軽 23）を design.md §18 に記録し、全部を反映した（header・design.md・phase.md・user-questions・試験の道具）。**基点の案: 57bf94e62f**（header と design.md の反映の commit。p001 の cleared の時に Q1 が確かめてここを基点に決める）。Phase を分けて p024〜p029 を足した。user-questions に U5（sources.mk）を足し、U1 に案 C（stencil）と A の例外、U3・U4 に補足。次は p002 と p017（並べられる）、p002 の後に p003・p006・p007・p008。
 
 - 2026-11-14 23:2x Q1: p001 の素案（f5d868d46c・7cc9eca796）を main に merge c315f3799f。design-reviewer の反映は P4 q2098。Q1 の判断: WS328 の統合の Phase は WS074 の host の試験を直してよい（WS074 は止めている）。`sources.mk`（make の断片）に .c を足す差分は Makefile と同じ扱いで、案としてユーザーへ。仕様の資料は main の build/ に写さず、担当の worktree の build/ に置く（前の worktree から写す）。
 

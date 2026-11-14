@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=ws328-p013 -->
 
-# ws328-p013 svg-picture（描く命令の列）
+# ws328-p013 svg-picture の核（描く命令の列: root の svg・g・図形・style・paint・opacity）
 
 - WS: [WS328](../ws.md)。設計: [design.md](../design.md)。
 - Status: planned（2026-11-14 p001 が作成）
@@ -27,12 +27,20 @@
 ## 3. 試験の項目
 
 期待の値は仕様の表・式と手の計算だけから作る。他の実装の出力を使わない。
-- 命令の列を試験の木で: rect 1 つの fill（行列が viewBox の変換）、fill と stroke の順、fill none で fill 無し、display none の部分木、visibility hidden で描かない子と描く孫、g の transform の合成、opacity < 1 の group、入れ子の svg の viewport、use（x・y の translate、symbol の viewBox、自分の祖先を指す use で何も無し、SVG_USE_DEPTH_MAX）、switch の最初の子、描かない要素（defs・text・image など）。
+- 命令の列を試験の木で: rect 1 つの fill（行列が viewBox の変換）、fill と stroke の順、fill none で fill 無し、display none の部分木、visibility hidden で描かない子と描く孫、g の transform の合成、opacity < 1 の group、描かない要素（defs・text・image など）。
 - paint の解決: currentColor、url の gradient（SVG_SERVER_GRADIENT と stop の所有）、url の先が無い時の fallback と none。
-- stroke の幅の解決（% は正規化した対角線）、負の幅で stroke 無し、dash の解決。
+- stroke の幅の解決（% は正規化した対角線）、dash の解決。
 - clip-path: この Phase では svg_clip_build は骨格（ENOSYS）なので、clip-path の要素は clip 無しで描かれる事（header: ENOMEM 以外の失敗は clip 無し）。clip の試験は p014。
 - 上限（SVG_COMMANDS_MAX で ENOBUFS と描ける picture）、release の後に leak が無い（ASan）。
 - 乱数の木（固定の seed で深さ・要素を混ぜた markup を作る）で ASan・UBSan が落ちない。
+
+（2026-11-15 design-reviewer の反映で足した項目。上の項目と食い違う所はこちらが正）
+- 範囲の変更（2026-11-15）: use・symbol・入れ子の svg・switch は p029 に分けた。p013 は root の svg・g・図形・style・paint・opacity の group・容器の bbox（1 回だけ求めて持つ）・上限（`SVG_COMMANDS_MAX`・`SVG_VISITS_MAX`・`SVG_POINTS_MAX`）・pathLength・command の index の持ち方。use・symbol・svg・switch の要素は p029 までは描かない（子を歩かない）。
+- 外側の style（outer）: `fill="currentColor"` が outer の color で描かれる、outer NULL で黒。
+- 負の stroke-width は style で捨てられ親の値で描かれる（上の「負の幅で stroke 無し」は取り消し）。
+- pathLength: dash_scale = 全体の長さ / pathLength、pathLength 0 で最初の dash が正なら dash 無し、0 なら何も描かない、負は無視。
+- command の dash・stop の pointer が build の後に正しい（build の途中で配列が何度も伸びる大きな木で、ASan）。
+- `SVG_VISITS_MAX`: 容器の bbox を求める walk も数に入る事（多くの容器の入れ子で、時間の上限の中で ENOBUFS）。
 
 ## 4. 注意
 
@@ -49,7 +57,7 @@
 ## 6. 確かめの command
 
 - `sh plan/ws328/tests/run-unit.sh picture` と `sh plan/ws328/tests/run-unit.sh all`（最後の行 `run-unit: PASS`）。`CC=clang` でも同じ。
-- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。zedBSD の clang が自分の worktree に無ければ `WS328_ZEDBSD_CC=/home/awe/zedBSD-claude1/build/llvm/bin/clang`（読むだけ）で check 6 も流す。
+- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。check 6（zedBSD の clang と x86_64 の sysroot での compile）は自分の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を使う。無ければ、Q1 が起動の依頼文で許した時に `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` の後 `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk sysroot` で自分の build/ に入れる（共有の toolchain と main の build/ は使わない・書かない。許しが無ければ Q1 に頼む）。最後の行が `check-skeleton: INCOMPLETE` の時は PASS ではない。
 - `git diff --check`。
 
 ## 7. 終わりの条件

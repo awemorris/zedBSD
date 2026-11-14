@@ -196,6 +196,40 @@ struct vec_point vec_matrix_apply_vector(const struct vec_matrix *matrix, struct
 float vec_matrix_scale_max(const struct vec_matrix *matrix);
 
 /*
+ * Computes the angle of the vector (x, y) from the positive x axis, in
+ * radians in (-pi, pi], by a polynomial that a GPU shader evaluates with
+ * the same steps (the project's own shader compilers have no arctangent
+ * instruction, so neither the CPU reference renderer nor the shader uses
+ * the C library's or GLSL's atan):
+ *
+ *   with a = min(|x|, |y|) / max(|x|, |y|) in [0, 1], z = a * a,
+ *   p = a * (0.9998660 + z * (-0.3302995 + z * (0.1801410 +
+ *       z * (-0.0851330 + z * 0.0208351))))
+ *   (Abramowitz and Stegun, Handbook of Mathematical Functions, formula
+ *   4.4.47: arctan a for 0 <= a <= 1 with an error under 1e-5);
+ *   then p = pi / 2 - p when |y| > |x|; p = pi - p when x < 0; and the
+ *   result p for y >= 0, -p for y < 0 (so the angle of (-1, 0) is pi).
+ *
+ * Evaluated in that order, in single precision.  When both |x| and |y|
+ * are under 1e-20 the angle is 0.  A NaN in either gives 0.
+ *
+ * Returns the angle, within 1e-5 radians of the exact one (plus the
+ * rounding of single precision).  Never fails.
+ */
+float vec_atan2(float y, float x);
+
+/*
+ * Computes e^x as 2^(x * 1.44269504f) (1.44269504 = log2 e), the form a
+ * GPU shader uses (some of the project's shader compilers have exp2 but
+ * not exp); the CPU side calls exp2f with that product.
+ *
+ * Returns the value: 0 for a NaN and for x below -87; x above 88 gives
+ * 2^(88 * 1.44269504) computed as for 88 (no infinity escapes).  Never
+ * fails.
+ */
+float vec_exp(float x);
+
+/*
  * The matrices of the transform functions (CSS Transforms 1 §9.1 "2D
  * Transform Functions" and §14, which SVG 2 §8.5 and CSS Transforms 1
  * §7.3 use for the transform attribute): each writes the matrix of one function into *out.

@@ -40,14 +40,14 @@ int
 svg_server_resolve(
 	const struct svg_tree *tree,
 	const struct svg_node *element,
-	const struct svg_style *gradient_style,
+	const struct svg_style *outer,
 	const struct vec_rect *bbox,
 	const struct svg_context *context,
 	struct svg_server *server)
 {
 	(void)tree;
 	(void)element;
-	(void)gradient_style;
+	(void)outer;
 	(void)bbox;
 	(void)context;
 	(void)server;

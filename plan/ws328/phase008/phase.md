@@ -35,6 +35,9 @@
 - url_read（引用符の 3 形、空白、外の文書で ENOTSUP、長すぎる id）、paint（none・currentColor・色・url と fallback・context-fill で ENOTSUP）。色は試験の木の parse_color。
 - 乱数の文字列で ASan・UBSan が落ちない（NUL の後を読まない: 文字列を malloc の正確な大きさに置く）。
 
+（2026-11-15 design-reviewer の反映で足した項目。上の項目と食い違う所はこちらが正）
+- transform の単位: `rotate(45deg)`・`rotate(0.125turn)`・`rotate(50grad)`・`rotate(0.785398rad)` が同じ、`translate(10px 5)`、未知の単位で EINVAL。
+
 ## 4. 注意
 
 - transform の list の合成は header の「左が外」（M1 × M2 × …）。vec_matrix_multiply の引数の順に注意。
@@ -50,7 +53,7 @@
 ## 6. 確かめの command
 
 - `sh plan/ws328/tests/run-unit.sh values` と `sh plan/ws328/tests/run-unit.sh all`（最後の行 `run-unit: PASS`）。`CC=clang` でも同じ。
-- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。zedBSD の clang が自分の worktree に無ければ `WS328_ZEDBSD_CC=/home/awe/zedBSD-claude1/build/llvm/bin/clang`（読むだけ）で check 6 も流す。
+- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。check 6（zedBSD の clang と x86_64 の sysroot での compile）は自分の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を使う。無ければ、Q1 が起動の依頼文で許した時に `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` の後 `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk sysroot` で自分の build/ に入れる（共有の toolchain と main の build/ は使わない・書かない。許しが無ければ Q1 に頼む）。最後の行が `check-skeleton: INCOMPLETE` の時は PASS ではない。
 - `git diff --check`。
 
 ## 7. 終わりの条件

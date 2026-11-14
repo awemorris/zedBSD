@@ -37,6 +37,11 @@
 - bbox: 直線、二次（極値が内側の曲線: 手の計算）、三次（制御点が外に出る S 字で制御点を含まない事）、move だけの subpath、空の view で EINVAL、壊れた view（verb と点の数の不整合、範囲の外の verb）で EINVAL。
 - 乱数の入力（固定の seed で 10 万回の命令の列）で ASan・UBSan が落ちない。
 
+（2026-11-15 design-reviewer の反映で足した項目。上の項目と食い違う所はこちらが正）
+- `vec_path_append_rounded_rect` は `const struct vec_rrect *` を取る（矩形と半径）。逆向きの矩形・半径の和の超えで EINVAL。
+- `vec_atan2`: 8 方向の単位 vector（0・π/4・π/2・3π/4・π・−3π/4・−π/2・−π/4）、(−1, 0) で π、(0, 0) で 0、NaN で 0、乱数の vector で 倍精度の atan2 との差 ≤ 2e-5（A&S 4.4.47 の 1e-5 と float の丸め）。
+- `vec_exp`: 0 → 1、1 → e（相対 1e-6）、−87 未満と NaN で 0、88 を超えて有限。
+
 ## 4. 注意
 
 - 弧の変換は SVG 2 付録 B.2.4 の式をそのまま（角度の差 Δθ の符号の直し eq. 5.6 の下の文）。三次の handle の長さ 4/3·tan(θ/4) は単位円の上の定数で、header の comment のとおり。
@@ -53,7 +58,7 @@
 ## 6. 確かめの command
 
 - `sh plan/ws328/tests/run-unit.sh base path` と `sh plan/ws328/tests/run-unit.sh all`（最後の行 `run-unit: PASS`）。`CC=clang` でも同じ。
-- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。zedBSD の clang が自分の worktree に無ければ `WS328_ZEDBSD_CC=/home/awe/zedBSD-claude1/build/llvm/bin/clang`（読むだけ）で check 6 も流す。
+- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。check 6（zedBSD の clang と x86_64 の sysroot での compile）は自分の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を使う。無ければ、Q1 が起動の依頼文で許した時に `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` の後 `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk sysroot` で自分の build/ に入れる（共有の toolchain と main の build/ は使わない・書かない。許しが無ければ Q1 に頼む）。最後の行が `check-skeleton: INCOMPLETE` の時は PASS ではない。
 - `git diff --check`。
 
 ## 7. 終わりの条件

@@ -31,6 +31,9 @@
 #define SVG_DISPLAY_INLINE	0
 #define SVG_DISPLAY_NONE	1
 
+/* The deepest chain of ancestors svg_style_of follows. */
+#define SVG_STYLE_DEPTH_MAX	64
+
 /* visibility (SVG 2 §3.2.3): hidden and collapse do not paint the element itself (its children may). */
 #define SVG_VISIBILITY_VISIBLE	0
 #define SVG_VISIBILITY_HIDDEN	1
@@ -45,12 +48,14 @@
  *   fill_rule         I  nonzero
  *   fill_opacity      I  1, clamped to [0, 1]
  *   stroke            I  none
- *   stroke_width      I  1 (user units; a length, % of the normalized diagonal)
+ *   stroke_width      I  1 (user units; a length, % of the normalized
+ *                       diagonal; a negative value is invalid)
  *   stroke_opacity    I  1, clamped to [0, 1]
  *   stroke_linecap    I  butt
  *   stroke_linejoin   I  miter (miter-clip and arcs map to miter)
  *   stroke_miterlimit I  4 (a value < 1 is invalid)
- *   dashes            I  none (dash_count 0)
+ *   dashes            I  none (dash_count 0; a list with a negative
+ *                       length is invalid, SVG 2 §13.5.7)
  *   dash_offset       I  0 (a length)
  *   color             I  black; currentColor in fill and stroke is
  *                       resolved against it when the element is drawn
@@ -95,7 +100,7 @@ struct svg_style {
 	float stop_opacity;
 };
 
-/* Sets every property to its initial value (the root's parent). */
+/* Sets every property to its initial value. */
 void svg_style_initial(struct svg_style *style);
 
 /*
@@ -136,5 +141,28 @@ int svg_style_declare(struct svg_style *style, const struct svg_style *parent, c
  * The tree's functions are called on element only.
  */
 int svg_style_apply(struct svg_style *style, const struct svg_style *parent, const struct svg_tree *tree, const struct svg_node *element);
+
+/*
+ * Computes the style of any element of the SVG fragment from its
+ * ancestors, as the walk of the rendering tree would have: the chain of
+ * elements from the fragment's root (the outermost ancestor whose parent
+ * is not an element named by tree->name, i.e. the outermost 'svg' of the
+ * SVG namespace) down to element, the root's style made by
+ * svg_style_inherit from outer (or svg_style_initial when outer is NULL),
+ * then each element's by svg_style_inherit from its parent's and
+ * svg_style_apply.  This is how a referenced element that is not drawn
+ * where it sits gets its inherited properties: a 'clipPath' (CSS Masking
+ * 1 §6.1: properties inherit into it from its ancestors, not from the
+ * element that references it), a gradient and its 'stop' children (SVG 2
+ * §14.2.4: a stop inherits from its gradient element).
+ *
+ * Input: tree; element an element; outer the style the fragment's root
+ * inherits from (the page gives the 'svg' element's inherited properties:
+ * color, and fill and stroke when set on an HTML ancestor), or NULL.
+ * Output: *style.
+ * Errors: ENOBUFS when element is deeper than SVG_STYLE_DEPTH_MAX below
+ * the root (*style is then the initial style).
+ */
+int svg_style_of(const struct svg_tree *tree, const struct svg_node *element, const struct svg_style *outer, struct svg_style *style);
 
 #endif

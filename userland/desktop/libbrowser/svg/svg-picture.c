@@ -57,16 +57,18 @@ int
 svg_picture_build(
 	const struct svg_tree *tree,
 	const struct svg_node *root,
+	const struct svg_style *outer,
 	float width,
 	float height,
-	float font_size,
+	float root_font_size,
 	struct svg_picture *picture)
 {
 	(void)tree;
 	(void)root;
 	(void)width;
 	(void)height;
-	(void)font_size;
+	(void)outer;
+	(void)root_font_size;
 	(void)picture;
 
 	/* Not implemented yet. */

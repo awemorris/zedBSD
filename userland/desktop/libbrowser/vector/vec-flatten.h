@@ -32,10 +32,14 @@
 #define VEC_FLATTEN_SEGMENTS_MAX	1024
 
 /*
- * The smallest tolerance accepted: below a thousandth of a unit, a curve
- * would need more segments than VEC_FLATTEN_SEGMENTS_MAX anyway.
+ * The smallest tolerance accepted, in the units it is given in.  A drawer
+ * that flattens in user units divides a device tolerance by the scale of
+ * the user-to-device matrix, which for a tiny viewBox drawn large (a
+ * viewBox of one unit shown over a thousand pixels) is far below a pixel;
+ * this floor keeps the arithmetic meaningful, and
+ * VEC_FLATTEN_SEGMENTS_MAX bounds the work whatever the tolerance.
  */
-#define VEC_TOLERANCE_MIN	0.001f
+#define VEC_TOLERANCE_MIN	0.000001f
 
 /*
  * The flags of a vertex:
@@ -59,8 +63,11 @@ struct vec_vertex {
  * One contour: vertices first to first + count - 1 of the vertex array, in
  * order, and whether it is closed (the subpath ended with a close; a
  * filled contour is always taken as closed by the rasterizer, a stroked
- * one is closed only when this says so).  A contour of one vertex is a
- * zero-length subpath (SVG 2 §9.5.3), which the stroker draws as caps
+ * one is closed only when this says so).  A contour of one vertex that is
+ * not closed comes from a moveto with no drawing command after it, which
+ * is not stroked (SVG 2 §13.5.1); a contour of one vertex that is closed
+ * ("M x y Z"), or whose segments all have zero length ("M x y L x y"), is
+ * a zero-length subpath (SVG 2 §9.5.3), which the stroker draws as caps
  * only.
  */
 struct vec_contour {

@@ -31,6 +31,10 @@
 - stride > width、範囲の外の大きさで EINVAL と pixels に触らない、SVG_BITMAP_LAYERS_MAX を超える入れ子。
 - 乱数の picture で ASan・UBSan が落ちない。
 
+（2026-11-15 design-reviewer の反映で足した項目。上の項目と食い違う所はこちらが正）
+- layer は 8 bit の premultiplied: 入れ子の group の結果が 8 bit で丸めた式と ±1 で一致。`SVG_BITMAP_LAYERS_MAX` を超える入れ子と `SVG_BITMAP_LAYER_BYTES_MAX` を超える layer で、opacity を各 fill に掛ける近似に落ちる（memory が増えない）。
+- gradient の ramp の幅は `vec_gradient_line_length` から。
+
 ## 4. 注意
 
 - 結果の 8 bit への丸めは最後に 1 度（header）。
@@ -46,7 +50,7 @@
 ## 6. 確かめの command
 
 - `sh plan/ws328/tests/run-unit.sh bitmap` と `sh plan/ws328/tests/run-unit.sh all`（最後の行 `run-unit: PASS`）。`CC=clang` でも同じ。
-- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。zedBSD の clang が自分の worktree に無ければ `WS328_ZEDBSD_CC=/home/awe/zedBSD-claude1/build/llvm/bin/clang`（読むだけ）で check 6 も流す。
+- `BASE=<基点の SHA> sh plan/ws328/tests/check-skeleton.sh`（最後の行 `check-skeleton: PASS`。基点の SHA は ws.md の Resume point）。check 6（zedBSD の clang と x86_64 の sysroot での compile）は自分の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を使う。無ければ、Q1 が起動の依頼文で許した時に `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached` の後 `timeout 3600 make -j4 CONFIGMK=config/config.x86_64.mk sysroot` で自分の build/ に入れる（共有の toolchain と main の build/ は使わない・書かない。許しが無ければ Q1 に頼む）。最後の行が `check-skeleton: INCOMPLETE` の時は PASS ではない。
 - `git diff --check`。
 
 ## 7. 終わりの条件
