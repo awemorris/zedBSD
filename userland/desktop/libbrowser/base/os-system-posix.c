@@ -157,21 +157,26 @@ wb_os_random(
 		if (piece > OS_RANDOM_PIECE)
 			piece = OS_RANDOM_PIECE;
 
+		/* Reads the next piece of random bytes. */
 		got = read(descriptor, cursor, piece);
 		if (got < 0) {
 			/* A signal interrupted the read; asks again. */
 			if (errno == EINTR)
 				continue;
 
+			/* Gives up when the read failed for any other reason. */
 			close(descriptor);
 			return EIO;
 		}
+
+		/* Gives up when the device ended. */
 		if (got == 0) {
 			/* The device ended, which a random source never does; refuses to go on. */
 			close(descriptor);
 			return EIO;
 		}
 
+		/* Moves past the bytes that were read. */
 		cursor += (size_t)got;
 		left -= (size_t)got;
 	}

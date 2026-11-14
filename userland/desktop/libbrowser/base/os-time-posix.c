@@ -128,6 +128,7 @@ wb_os_time_zone_start(
 	/* Makes the C library read the zone setting again. */
 	tzset();
 
+	/* Releases the lock when it was taken. */
 	if (error == 0)
 		wb_static_mutex_unlock(&os_zone_mutex);
 }

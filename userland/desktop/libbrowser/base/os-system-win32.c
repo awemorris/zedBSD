@@ -132,6 +132,7 @@ wb_os_random(
 		if (status < 0)
 			return EIO;
 
+		/* Moves past the bytes that were filled. */
 		cursor += piece;
 		left -= piece;
 	}
@@ -294,6 +295,7 @@ wb_os_data_directory(
 		if (module_path == NULL)
 			return ENOMEM;
 
+		/* Asks for the path of the program's file. */
 		got = GetModuleFileNameW(NULL, module_path, (DWORD)capacity);
 		if (got == 0) {
 			free(module_path);
@@ -310,6 +312,8 @@ wb_os_data_directory(
 			return EIO;
 		capacity *= 2U;
 	}
+
+	/* Keeps the length of the path the system wrote. */
 	length = got;
 
 	/* Cuts the path at its last separator, which leaves the directory without a trailing one. */
@@ -319,6 +323,8 @@ wb_os_data_directory(
 			break;
 		directory_length--;
 	}
+
+	/* Drops the separator that ended the directory's name. */
 	if (directory_length > 0)
 		directory_length--;
 
@@ -329,6 +335,8 @@ wb_os_data_directory(
 		free(module_path);
 		return ENOMEM;
 	}
+
+	/* Builds the data directory's path from the program's directory. */
 	wmemcpy(directory, module_path, directory_length);
 	wmemcpy(directory + directory_length, OS_DATA_SUFFIX, suffix_length + 1U);
 	free(module_path);

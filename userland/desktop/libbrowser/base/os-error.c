@@ -105,5 +105,6 @@ wb_os_error_text(
 			return error_rows[index].text;
 	}
 
+	/* Reports a code the table does not know. */
 	return "Unknown error";
 }

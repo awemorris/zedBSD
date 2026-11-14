@@ -522,11 +522,11 @@ media_os_posix_measure(
 		return EIO;
 
 	/* A directory can be opened for reading but holds no bytes to read. */
-	if (S_ISDIR(status.st_mode))
+	if ((status.st_mode & S_IFMT) == S_IFDIR)
 		return EISDIR;
 
 	/* Only a regular file can be read at any offset. */
-	if (!S_ISREG(status.st_mode))
+	if ((status.st_mode & S_IFMT) != S_IFREG)
 		return EIO;
 
 	/* A negative size is no size. */
