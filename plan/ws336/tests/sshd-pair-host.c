@@ -198,6 +198,7 @@ main(
 		fprintf(stderr, "sshd-pair: config: %s\n", error_text);
 		return 2;
 	}
+
 	(void)sshd_config_finish(&context.config);
 	status = pair_read_file(context.config.host_key[0], text, sizeof(text), &size);
 	if (status == 0)
@@ -207,6 +208,7 @@ main(
 		fprintf(stderr, "sshd-pair: host key: %d\n", status);
 		return 2;
 	}
+
 	ssh_buf_init(&blob, 64, 0);
 	ssh_key_put_public_blob(host_key.public_key, &blob);
 	memcpy(context.host_key_blob, blob.data, SSH_KEY_BLOB_SIZE);
@@ -225,6 +227,7 @@ main(
 		perror("sshd-pair: listen");
 		return 2;
 	}
+
 	address_size = sizeof(address);
 	(void)getsockname(listener, (struct sockaddr *)&address, &address_size);
 	output = fopen(argv[2], "w");
@@ -241,6 +244,7 @@ main(
 		fprintf(stderr, "sshd-pair: no connection\n");
 		return 2;
 	}
+
 	address_size = sizeof(address);
 	client = accept(listener, (struct sockaddr *)&address, &address_size);
 	(void)close(listener);

@@ -190,6 +190,7 @@ take_payload(
 	} else {
 		CHECK_EQ(payload.size, 0);
 	}
+
 	ssh_buf_free(&payload);
 	return error;
 }
@@ -270,8 +271,10 @@ test_unkeyed_send(void)
 			if (out[5 + size + index] != 0)
 				nonzero++;
 		}
+
 		ssh_packet_written(&packet, out_size);
 	}
+
 	CHECK(nonzero > 0);
 	CHECK_EQ(packet.send.seq, 40);
 	ssh_packet_free(&packet);
@@ -303,6 +306,7 @@ test_unkeyed_send_max(void)
 		CHECK_EQ(out_size % 8U, 0);
 		CHECK_EQ(ssh_load_be32(out), out_size - 4U);
 	}
+
 	error = move_output(&sender, &receiver);
 	CHECK_EQ(error, 0);
 	error = take_payload(&receiver, big_bytes, &size);
@@ -405,6 +409,7 @@ test_unkeyed_receive(void)
 			CHECK_BYTES(out, first, sizeof(first));
 		}
 	}
+
 	ssh_packet_free(&packet);
 
 	/* Two frames in one feed, then a third byte pair of the next. */
@@ -582,6 +587,7 @@ test_keyed_roundtrip(void)
 			CHECK(frame_size > SSH_CHACHAPOLY_TAG + 4U);
 			CHECK_EQ((frame_size - 4U - SSH_CHACHAPOLY_TAG) % 8U, 0);
 		}
+
 		error = move_output(&a, &b);
 		CHECK_EQ(error, 0);
 		error = take_payload(&b, out, &size);
@@ -601,6 +607,7 @@ test_keyed_roundtrip(void)
 		CHECK_EQ(size, count);
 		CHECK_BYTES(out, payload, count);
 	}
+
 	CHECK_EQ(a.receive.seq, 30);
 	CHECK_EQ(b.send.seq, 30);
 
@@ -641,6 +648,7 @@ test_keyed_tamper(void)
 		ssh_packet_free(&sender);
 		return;
 	}
+
 	memcpy(frame, pending, frame_size);
 	ssh_packet_free(&sender);
 
@@ -793,6 +801,7 @@ test_keyed_partial(void)
 		ssh_packet_free(&sender);
 		return;
 	}
+
 	memcpy(frame, pending, frame_size);
 	ssh_packet_free(&sender);
 
@@ -811,6 +820,7 @@ test_keyed_partial(void)
 			CHECK_BYTES(out, payload, sizeof(payload));
 		}
 	}
+
 	ssh_packet_free(&receiver);
 
 	/* Two frames in one feed. */
@@ -909,6 +919,7 @@ test_counters(void)
 		error = take_payload(&b, out, &size);
 		CHECK_EQ(error, 0);
 	}
+
 	CHECK_EQ(a.send.bytes, total);
 	CHECK_EQ(a.send.packets, 5);
 	CHECK_EQ(b.receive.bytes, total);
@@ -939,6 +950,7 @@ test_seq_wrap(void)
 			ssh_packet_set_send_key(&a, key);
 			ssh_packet_set_receive_key(&b, key);
 		}
+
 		a.send.seq = 0xffffffffU;
 		b.receive.seq = 0xffffffffU;
 		CHECK_EQ(a.send.wrapped, 0);
@@ -993,6 +1005,7 @@ test_seq_wrap(void)
 			error = take_payload(&b, out, &size);
 			CHECK(error == EAGAIN || error == EBADMSG || error == EMSGSIZE);
 		}
+
 		ssh_packet_free(&a);
 		ssh_packet_free(&b);
 	}
@@ -1213,6 +1226,7 @@ test_take_line_limits(void)
 		error = ssh_packet_feed(&packet, (const uint8_t *)text, sizeof(text));
 		CHECK_EQ(error, 0);
 	}
+
 	error = ssh_packet_take_line(&packet, line, sizeof(line), &length);
 	CHECK_EQ(error, EMSGSIZE);
 	ssh_packet_free(&packet);
@@ -1406,6 +1420,7 @@ test_random_feed(void)
 				ssh_packet_free(&packet);
 				continue;
 			}
+
 			length = pending_size;
 			memcpy(chunk, pending, length);
 			ssh_packet_free(&sender);
@@ -1432,13 +1447,16 @@ test_random_feed(void)
 				delivered++;
 				continue;
 			}
+
 			if (error != EAGAIN && error != EMSGSIZE && error != EINVAL && error != EBADMSG)
 				ok = 0;
 			if (error != EAGAIN)
 				break;
 		}
+
 		ssh_packet_free(&packet);
 	}
+
 	CHECK(ok);
 
 	/* The valid frames with no change were delivered at least sometimes (unchanged runs exist). */

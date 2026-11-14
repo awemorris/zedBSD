@@ -234,6 +234,7 @@ check_ed25519(void)
 		EVP_PKEY_free(private_key);
 		return;
 	}
+
 	CHECK_EQ(EVP_DigestSignInit(context, NULL, NULL, NULL, private_key), 1);
 	size = sizeof(signature);
 	CHECK_EQ(EVP_DigestSign(context, signature, &size, (const uint8_t *)"", 0), 1);
@@ -301,6 +302,7 @@ check_x25519(void)
 		EVP_PKEY_free(own);
 		return;
 	}
+
 	CHECK_EQ(EVP_PKEY_derive_init(context), 1);
 	CHECK_EQ(EVP_PKEY_derive_set_peer(context, peer), 1);
 	size = sizeof(shared);
@@ -318,6 +320,7 @@ check_x25519(void)
 		size = sizeof(shared);
 		CHECK(EVP_PKEY_derive(context, shared, &size) != 1);
 	}
+
 	EVP_PKEY_CTX_free(context);
 	EVP_PKEY_free(peer);
 	EVP_PKEY_free(own);
@@ -373,6 +376,7 @@ check_mlkem768(void)
 		EVP_PKEY_free(pair);
 		return;
 	}
+
 	encapsulator = EVP_PKEY_CTX_new_from_pkey(NULL, public_key, NULL);
 	CHECK(encapsulator != NULL);
 	CHECK_EQ(EVP_PKEY_encapsulate_init(encapsulator, NULL), 1);

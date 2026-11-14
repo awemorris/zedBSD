@@ -113,8 +113,10 @@ enum ssh_mon_type {
 
 /*
  * Appends one frame (length, type, size bytes of body) to out.  The body
- * is built by the caller with ssh-buf.h.  Returns 0, EMSGSIZE (a body
- * over the limit of its type) or the error recorded in out.
+ * is built by the caller with ssh-buf.h.  Returns 0, EINVAL (a type
+ * outside the enumeration, or a NULL body with a size other than 0),
+ * EMSGSIZE (a body over the limit of its type) or the error recorded in
+ * out.  Neither EINVAL nor EMSGSIZE records an error in out.
  */
 int ssh_mon_put_frame(enum ssh_mon_type type, const uint8_t *body, size_t size, struct ssh_buf *out);
 
@@ -133,7 +135,9 @@ int ssh_mon_next_frame(struct ssh_buf *input, enum ssh_mon_type *type, struct ss
  * Writes a whole frame to descriptor and reads the whole reply frame,
  * blocking (the asking side of one request).  Returns 0 with *type and
  * body filled, EIO (the other side closed or the descriptor failed), or
- * an error of ssh_mon_next_frame.  EINTR is retried.
+ * an error of ssh_mon_next_frame.  EINTR is retried.  A write to a closed
+ * descriptor raises SIGPIPE, so the calling process must ignore SIGPIPE
+ * to get EIO back.
  */
 int ssh_mon_call(int descriptor, enum ssh_mon_type type, const uint8_t *request, size_t request_size, enum ssh_mon_type *reply_type, struct ssh_buf *reply);
 

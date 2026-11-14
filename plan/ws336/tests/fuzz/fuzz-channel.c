@@ -67,6 +67,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 				if (ssh_channel_send_room(channel) >= 4)
 					(void)ssh_channel_put_data(channel, 0, (const uint8_t *)"echo", 4, &out);
 			}
+
 			break;
 		case SSH_MSG_CHANNEL_EOF:
 		case SSH_MSG_CHANNEL_CLOSE:
@@ -75,6 +76,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 				ssh_channel_put_close(channel, &out);
 				(void)ssh_channel_closed(&channels, channel);
 			}
+
 			break;
 		case SSH_MSG_CHANNEL_REQUEST:
 			if (ssh_channel_parse_request(&channels, payload, length, &request) == 0) {
@@ -83,9 +85,11 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 					memset(&terminal, 0, sizeof(terminal));
 					(void)ssh_ttymodes_apply(request.modes, request.modes_size, &terminal);
 				}
+
 				if (channel != NULL && request.want_reply)
 					ssh_channel_put_reply(channel, 0, &out);
 			}
+
 			break;
 		case SSH_MSG_CHANNEL_SUCCESS:
 		case SSH_MSG_CHANNEL_FAILURE:
@@ -95,6 +99,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			break;
 		}
 	}
+
 	for (index = 0; index < SSH_CHANNEL_MAX; index++)
 		channels.channel[index].user = NULL;
 	ssh_buf_free(&out);

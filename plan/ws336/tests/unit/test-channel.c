@@ -198,6 +198,7 @@ check_output(
 	} else {
 		check_record_bytes(out->data, want->data, want->size, __FILE__, line, "output bytes");
 	}
+
 	CHECK_EQ(ssh_buf_error(out), 0);
 
 	/* Empties the output for the next comparison. */
@@ -226,6 +227,7 @@ test_init(void)
 		CHECK_EQ(ssh_channel_send_room(&channels.channel[index]), 0);
 		CHECK(ssh_channel_find(&channels, index) == NULL);
 	}
+
 	CHECK(ssh_channel_find(&channels, SSH_CHANNEL_MAX) == NULL);
 	CHECK(ssh_channel_find(&channels, 0xffffffffUL) == NULL);
 }
@@ -398,6 +400,7 @@ test_open_session_and_reply(void)
 		wire_u32(&input, 1);
 		CHECK_EQ(ssh_channel_open_reply(&channels, input.data, index, &channel, &reason), EINVAL);
 	}
+
 	wire_reset(&input);
 	wire_u8(&input, 92);
 	wire_u32(&input, 2);
@@ -556,6 +559,7 @@ test_accept_open_refusals(void)
 		CHECK_EQ(out.data[8], 1);
 		ssh_buf_reset(&out);
 	}
+
 	wire_reset(&input);
 	wire_u8(&input, 90);
 	wire_string(&input, "session\0", 8);
@@ -619,6 +623,7 @@ test_accept_open_refusals(void)
 		CHECK_EQ(ssh_channel_accept_open(&channels, input.data, index, &out, &channel), EINVAL);
 		CHECK(channel == NULL);
 	}
+
 	build_open(&input, "direct-tcpip", 60, 10, 10);
 	for (index = 0; index < input.size; index++)
 		CHECK_EQ(ssh_channel_accept_open(&channels, input.data, index, &out, &channel), EINVAL);
@@ -2128,6 +2133,7 @@ test_random(void)
 				break;
 			}
 		}
+
 		if (size > 0 && next_random() % 8 != 0)
 			payload[0] = numbers[next_random() % sizeof(numbers)];
 
@@ -2158,6 +2164,7 @@ test_random(void)
 			(void)ssh_channel_closed(&channels, &channels.channel[slot]);
 			break;
 		}
+
 		ssh_buf_reset(&out);
 
 		/* The invariants: states are valid, local windows are within the full window, packet sizes within the cap. */

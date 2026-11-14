@@ -50,6 +50,7 @@ stub_next(int error)
 		errno = error;
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -82,6 +83,7 @@ close(int descriptor)
 		errno = EBADF;
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -92,6 +94,7 @@ fstat(int descriptor, struct stat *status)
 		errno = EBADF;
 		return -1;
 	}
+
 	stub_fill_stat(status, (stub_counter % 7U) == 0);
 	return 0;
 }
@@ -126,6 +129,7 @@ pread(int descriptor, void *data, size_t size, off_t offset)
 		errno = EBADF;
 		return -1;
 	}
+
 	if (stub_next(EIO) != 0)
 		return -1;
 	length = size;
@@ -144,6 +148,7 @@ pwrite(int descriptor, const void *data, size_t size, off_t offset)
 		errno = EBADF;
 		return -1;
 	}
+
 	if (stub_next(ENOSPC) != 0)
 		return -1;
 	return (ssize_t)size;
@@ -245,6 +250,7 @@ closedir(DIR *directory)
 		errno = EBADF;
 		return -1;
 	}
+
 	return 0;
 }
 

@@ -213,10 +213,12 @@ wire_attrs(
 		wire_u32(wire, VALUE_SIZE_HIGH);
 		wire_u32(wire, VALUE_SIZE_LOW);
 	}
+
 	if ((flags & 0x00000002UL) != 0) {
 		wire_u32(wire, VALUE_UID);
 		wire_u32(wire, VALUE_GID);
 	}
+
 	if ((flags & 0x00000004UL) != 0)
 		wire_u32(wire, VALUE_PERMISSIONS);
 	if ((flags & 0x00000008UL) != 0) {
@@ -325,6 +327,7 @@ check_prefixes_invalid(
 		if (error != EINVAL)
 			failures++;
 	}
+
 	CHECK_EQ(failures, 0);
 
 	/* One extra byte after the last field is refused. */
@@ -359,6 +362,7 @@ expect_packet(
 		CHECK_BYTES(actual->data, length, 4);
 		CHECK_BYTES(actual->data + 4, want_body->data, want_body->size);
 	}
+
 	CHECK_EQ(actual->error, 0);
 }
 
@@ -605,6 +609,7 @@ test_next_packet_random(void)
 				bytes[0] = (uint8_t)next_random();
 			bytes[3] = (uint8_t)(next_random() % 40U);
 		}
+
 		ssh_buf_init(&input, 4096, 0);
 		ssh_buf_init(&packet, 4096, 0);
 		ssh_buf_put_bytes(&input, bytes, count);
@@ -623,9 +628,11 @@ test_next_packet_random(void)
 		} else if (input.size != before || packet.size != 0) {
 			failures++;
 		}
+
 		ssh_buf_free(&input);
 		ssh_buf_free(&packet);
 	}
+
 	CHECK_EQ(failures, 0);
 }
 
@@ -1477,6 +1484,7 @@ test_unknown_types(void)
 		if (out.path != NULL || out.handle != NULL || out.data != NULL)
 			wrong++;
 	}
+
 	CHECK_EQ(wrong, 0);
 
 	/* An unknown type with fewer than the 4 bytes of an id is malformed rather than unsupported. */
@@ -1495,6 +1503,7 @@ test_unknown_types(void)
 		if (error != EINVAL || out.type != type)
 			wrong++;
 	}
+
 	CHECK_EQ(wrong, 0);
 
 	/* EXTENDED with a name and request-specific bytes is answered OP_UNSUPPORTED, not parsed further. */
@@ -1670,6 +1679,7 @@ test_parse_random(void)
 			bytes[7] = 0;
 			bytes[8] = (uint8_t)(next_random() % 12U);
 		}
+
 		if ((next_random() % 4U) == 0)
 			bytes[0] = (uint8_t)next_random();
 
@@ -1700,11 +1710,13 @@ test_parse_random(void)
 			if (out.target != NULL && memchr(out.target, 0, out.target_size) != NULL)
 				failures++;
 		}
+
 		shorter = next_random() % (count + 1U);
 		error = parse_exact(bytes, shorter, &out);
 		if (error != 0 && error != EINVAL && error != ENOTSUP)
 			failures++;
 	}
+
 	CHECK_EQ(failures, 0);
 
 	/* A valid request mutated in one byte (every position, a few values) never crashes the parser. */
@@ -1721,6 +1733,7 @@ test_parse_random(void)
 				failures++;
 		}
 	}
+
 	CHECK_EQ(failures, 0);
 }
 
@@ -2540,9 +2553,11 @@ test_long_name_cut(void)
 			if (strlen(out) != capacity - 1U || memcmp(out, full, capacity - 1U) != 0)
 				failures++;
 		}
+
 		if (memcmp(out + capacity, guard + capacity, sizeof(out) - capacity) != 0)
 			failures++;
 	}
+
 	CHECK_EQ(failures, 0);
 
 	/* The array of exactly length + 1 holds the whole text; length gives the text without its last character. */
@@ -2616,5 +2631,6 @@ test_long_name_random(void)
 				failures++;
 		}
 	}
+
 	CHECK_EQ(failures, 0);
 }

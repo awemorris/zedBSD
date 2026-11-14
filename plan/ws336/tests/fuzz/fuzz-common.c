@@ -57,7 +57,9 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			default: (void)ssh_reader_get_bytes(&reader, 3); break;
 			}
 		}
+
 		(void)ssh_reader_finish(&reader);
 	}
+
 	return 0;
 }

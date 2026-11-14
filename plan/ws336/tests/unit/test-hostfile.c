@@ -1386,6 +1386,7 @@ test_put_line(void)
 		check_record_long(error, EINVAL, __FILE__, __LINE__, "put_line refuses the host with a port");
 		check_record_long((long)out.size, 0, __FILE__, __LINE__, "put_line appended nothing with a port");
 	}
+
 	CHECK_EQ(ssh_buf_error(&out), 0);
 
 	/* A host of 256 characters is EINVAL and 255 is written. */
@@ -1764,6 +1765,7 @@ test_fuzz(void)
 			position = fuzz_next() % file_size;
 			file_text[position] = alphabet[fuzz_next() % (sizeof(alphabet) - 1U)];
 		}
+
 		if ((fuzz_next() & 3U) == 0 && file_size > 0)
 			file_size = fuzz_next() % file_size;
 

@@ -832,6 +832,7 @@ test_sign_verify(void)
 			copy[index] ^= (uint8_t)(1U << bit);
 		}
 	}
+
 	CHECK_BYTES(copy, wire->data, SSH_KEY_SIGNATURE_BLOB_SIZE);
 
 	ssh_key_clear(&key);
@@ -1183,6 +1184,7 @@ test_private_good(void)
 		CHECK_EQ(error, 0);
 		CHECK_EQ(strlen(key.comment), count > 255U ? 255U : count);
 	}
+
 	spec_init(&spec);
 	spec.comment = edge_comment;
 	spec.comment_size = 300;
@@ -1492,6 +1494,7 @@ test_private_put(void)
 		position += width + 1U;
 		line++;
 	}
+
 	CHECK(line > 3U);
 	memset(&back, 0x5a, sizeof(back));
 	error = ssh_key_parse_private((const char *)out.data, out.size, &back);
@@ -1599,6 +1602,7 @@ test_fingerprint(void)
 		error = ssh_key_fingerprint(t1_public, text, index);
 		CHECK_EQ(error, ENOBUFS);
 	}
+
 	CHECK_EQ(text[0], 0x7e);
 	CHECK_EQ(text[SSH_KEY_FINGERPRINT_SIZE - 2U], 0x7e);
 }
@@ -1674,6 +1678,7 @@ test_fuzz(void)
 			if (!key_is_zero(&key))
 				good = 0;
 		}
+
 		if (!good)
 			bad++;
 	}
