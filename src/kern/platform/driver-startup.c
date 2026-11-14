@@ -10,6 +10,7 @@
  */
 
 #include "kern/klog.h"
+#include <uapi/errno.h>
 
 #if CONFIG_DRIVER_PCI
 #include "drivers/pci/pci.h"
