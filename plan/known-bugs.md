@@ -473,3 +473,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-433](bugs/BUG-433.md) | WS131 の system の host の回帰試験（host-system.sh）が link できない（40 余りの偽物が無い） | fixed（2026-11-14 Q1。P2 q2077 07bef9d24d、main に merge。偽物を host-system-stubs.c に分け、古い期待値（PIN の桁・version 35 の capability・答えの後の続き）を今の設計に合わせた。PASS、わざと壊すと 3 FAIL） |
 
 | [BUG-434](bugs/BUG-434.md) | clang の driver の -static（crt1.o + libc.a）で link できない（libc.a に system call の stub が無い） | open（2026-11-14 Q1 が起票、BUG-432 の報告） |
+| [BUG-435](bugs/BUG-435.md) | 試験の道具と config の多く（約 220 file）が、作り直す前の build の変数を使っている | open（2026-11-14 Q1 が起票） |
