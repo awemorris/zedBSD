@@ -977,6 +977,8 @@ test_known_ports(void)
 static void
 test_known_priority(void)
 {
+	uint8_t last_differs[SSH_ED25519_PUBLIC];
+
 	/* A matching key wins over a changed key, in either order. */
 	text_reset();
 	text_add("host ");
@@ -1052,6 +1054,18 @@ test_known_priority(void)
 	text_add("\n");
 	EXPECT_KNOWN("host", 22, key1, SSH_KNOWN_MATCH, 0);
 	EXPECT_KNOWN("host", 22, key2, SSH_KNOWN_REVOKED, 0);
+
+	/* A revoked line whose key differs from this key in the last byte only does not revoke this key. */
+	memcpy(last_differs, key1, sizeof(last_differs));
+	last_differs[SSH_ED25519_PUBLIC - 1U] ^= 0x01U;
+	text_reset();
+	text_add("host ");
+	text_add_key(key1);
+	text_add("\n@revoked host ");
+	text_add_key(last_differs);
+	text_add("\n");
+	EXPECT_KNOWN("host", 22, key1, SSH_KNOWN_MATCH, 0);
+	EXPECT_KNOWN("host", 22, last_differs, SSH_KNOWN_REVOKED, 0);
 
 	/* A revoked line whose host field is hashed still revokes (the key is refused for every host). */
 	text_reset();
