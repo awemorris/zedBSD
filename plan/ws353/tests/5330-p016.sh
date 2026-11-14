@@ -233,7 +233,16 @@ sleep "$SETTLE"
 zb 'ps -ef; ps -A -o pid,comm,args' > "$LOGS/ps.txt" 2>&1
 zb 'uname -a; for f in /bin/wayland /bin/aat-input /bin/wlshm /bin/wltest /bin/mview /lib/libc.so /lib/libkeiland.so /lib/libvulkan.so; do [ -e $f ] && cksum $f; done' > "$LOGS/inventory.txt" 2>&1
 zput plan/ws353/tests/5330-p016-guest.sh /tmp/p016-guest.sh || fail "copy of the guest script"
-TO=1600 zr "sh /tmp/p016-guest.sh /tmp/p016 > /tmp/p016-guest.out 2>&1"
+# Detached from this SSH session: stopping the greeter ends the user's session and its processes, this login's too.
+zr "nohup sh /tmp/p016-guest.sh /tmp/p016 > /tmp/p016-guest.out 2>&1 < /dev/null & echo \$! > /tmp/p016-guest.pid"
+started=$(date +%s)
+sleep 20
+while [ $(($(date +%s) - started)) -lt 1600 ]; do
+	state=$(TO=20 zr "kill -0 \$(cat /tmp/p016-guest.pid) 2> /dev/null && echo running || echo ended" 2> /dev/null | tr -d '\r' | tail -1)
+	[ "$state" = ended ] && break
+	sleep 15
+done
+say "guest script ended after $(($(date +%s) - started)) s"
 mkdir -p "$LOGS/guest"
 TO=300 timeout 300 sshpass -p "$ZBU" scp $SO -q -r "$ZBU@$ZB:/tmp/p016/*" "$LOGS/guest/" 2> /dev/null
 TO=60 timeout 60 sshpass -p "$ZBU" scp $SO -q "$ZBU@$ZB:/tmp/p016-guest.out" "$LOGS/guest/" 2> /dev/null
