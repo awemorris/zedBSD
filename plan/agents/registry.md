@@ -5,8 +5,8 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P3 | phase-runner | arm64 の起動の切り分け (q2086-i01) | `/home/awe/zedBSD-worktrees/p3-arm64boot` / `agent/p3-arm64boot` | 動いている（2026-11-14） | — |
-| P2 | phase-runner | Pi 5 の更新 (q2085-i01) | `/home/awe/zedBSD-worktrees/p2-pi5uat` / `agent/p2-pi5uat` | 返却（2026-11-14、uncleared: 板が戻らない） | 39c2a744a2 |
+| P3 | phase-runner | arm64 の起動の切り分け (q2086-i01) | `/home/awe/zedBSD-worktrees/p3-arm64boot` / `agent/p3-arm64boot` | 返却（2026-11-14、canceled） | — |
+| P2 | phase-runner | Pi 5 の更新 (q2085-i01) | `/home/awe/zedBSD-worktrees/p2-pi5uat` / `agent/p2-pi5uat` | 返却（2026-11-14、cleared: 板は 10.0.30.2 で動いていた） | 39c2a744a2 |
 | P1 | phase-runner | ws353 p016 試験 (q2084-i01) | `/home/awe/zedBSD-worktrees/p1-ws353m` / `agent/p1-ws353m` | 動いている（2026-11-14、5330） | — |
 | P1 | phase-runner | ws353 p020 sessiond の chown (q2083-i01) | `/home/awe/zedBSD-worktrees/p1-ws353l` / `agent/p1-ws353l` | 返却（2026-11-14、cleared） | b1c04993d4（merge 7dce275a17） |
 | P2 | phase-runner | ws347 p010 RTL の reset cp ほか (q2080-i01) | `/home/awe/amaterrace-worktrees/p2-reset` / `p2-reset` | 返却（2026-11-14、canceled・破棄） | — |
