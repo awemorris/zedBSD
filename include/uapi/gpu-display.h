@@ -34,12 +34,27 @@
 
 /* gpu_display_info.flags: planes 1 to plane_count - 1 are overlays (GPU_DISPLAY_COMMIT, GPU_DISPLAY_OVERLAY_INFO). */
 #define GPU_DISPLAY_HAS_OVERLAYS	2048U
+
+/*
+ * gpu_display_info.flags: the primary plane can show its image turned by 180
+ * degrees (GPU_DISPLAY_PRESENT_ROTATE_180, GPU_DISPLAY_PLANE_ROTATE_180).
+ * The cursor and overlay planes are never turned.
+ */
+#define GPU_DISPLAY_ROTATE_180		4096U
 #define GPU_DISPLAY_FORMAT_BGRA8888	1U
 #define GPU_DISPLAY_FORMAT_RGBA8888	2U
 #define GPU_DISPLAY_MODE_ENUMERATE	0U
 #define GPU_DISPLAY_MODE_VALIDATE	1U
 #define GPU_DISPLAY_PRESENT_FIFO	1U
 #define GPU_DISPLAY_PRESENT_BLOB	2U
+
+/*
+ * gpu_display_present.flags, with FIFO (and BLOB): this frame is shown turned
+ * by 180 degrees after the driver has placed it on the output, so pixel
+ * (x, y) of the output shows at (W - 1 - x, H - 1 - y).  A frame without it
+ * is shown unturned.  EOPNOTSUPP when the output lacks GPU_DISPLAY_ROTATE_180.
+ */
+#define GPU_DISPLAY_PRESENT_ROTATE_180	4U
 #define GPU_DISPLAY_COUNT_ONLY		UINT32_MAX
 #define GPU_DISPLAY_POWER_ON		0U
 #define GPU_DISPLAY_POWER_OFF		1U
@@ -53,6 +68,7 @@
 /* gpu_display_plane_state.flags (inputs). */
 #define GPU_DISPLAY_PLANE_SHOWN		1U	/* in the list; clear: hidden, no image read or borrowed */
 #define GPU_DISPLAY_PLANE_IMAGE		2U	/* handle to format name a new image; clear: keep the image */
+#define GPU_DISPLAY_PLANE_ROTATE_180	4U	/* primary only, with SHOWN: as GPU_DISPLAY_PRESENT_ROTATE_180 */
 
 /* gpu_display_plane_state.result (output). */
 #define GPU_DISPLAY_PLANE_APPLIED	1U

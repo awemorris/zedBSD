@@ -42,6 +42,7 @@
 
 #include <uapi/errno.h>
 #include <limits.h>
+#include "gpu-display-flags.h"
 
 /* How long a stop sleeps while a worker leaves, before it reaps again, in milliseconds (a tick at least). */
 #define GPU_WORKER_EXIT_POLL_MS 1U
@@ -1360,6 +1361,8 @@ static int
 gpu_ops_validate(
 	const struct drv_gpu_ops *ops)
 {
+	int error;
+
 	/* A missing or incompatible table cannot be dispatched safely. */
 	if (ops == NULL)
 		return EINVAL;
@@ -1609,11 +1612,12 @@ gpu_ops_validate(
 	     ops->display->cursor_hide == NULL))
 		return EINVAL;
 
-	/* Ungated presentation is the only defined flag, and it comes with its adoption wait. */
+	/* Ungated presentation and the 180-degree turn are the defined flags; ungated comes with its adoption wait. */
 	if (ops->display != NULL) {
 		/* An unknown flag cannot be honored by this core. */
-		if ((ops->display->flags & ~DRV_GPU_DISPLAY_UNGATED) != 0U)
-			return EINVAL;
+		error = gpu_display_ops_flags_check(ops->display->flags);
+		if (error != 0)
+			return error;
 
 		/* A present that does not wait needs the separate wait. */
 		if ((ops->display->flags & DRV_GPU_DISPLAY_UNGATED) != 0U && ops->display->adoption_wait == NULL)
@@ -5306,10 +5310,13 @@ gpu_display_ioctl(
 		/* Packed rows must occupy only live ordinary storage in this session. */
 		if (request.present.lease == 0 ||
 		    request.present.generation == 0 ||
-		    request.present.sequence != 0 ||
-		    (request.present.flags != GPU_DISPLAY_PRESENT_FIFO &&
-		     request.present.flags != (GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB)))
+		    request.present.sequence != 0)
 			return EINVAL;
+
+		/* FIFO, optionally BLOB, and a turn only for a backend that shows one. */
+		error = gpu_display_present_flags_check(request.present.flags, ops->flags);
+		if (error != 0)
+			return error;
 
 		/* Bounds packed row arithmetic before checking any resource extent. */
 		if (request.present.width == 0 ||
@@ -5689,6 +5696,13 @@ gpu_commit_ioctl(
 	if (error != 0)
 		return error;
 
+	/* A turned primary reaches only a backend that shows one. */
+	for (index = 0; index < request.count; index++) {
+		error = gpu_display_plane_rotation_check(request.planes[index].flags, ops->flags);
+		if (error != 0)
+			return error;
+	}
+
 	/* Fences need the shared completion capability of this node. */
 	fenced = 0U;
 	if (request.signal_fd >= 0)
@@ -5831,13 +5845,18 @@ static int
 gpu_commit_plane_check(
 	const struct gpu_display_plane_state *state)
 {
-	/* An existing plane, the defined flags, and the result zero on input. */
+	int error;
+
+	/* An existing plane, and the result zero on input. */
 	if (state->plane > GPU_DISPLAY_OVERLAY_MAX)
-		return EINVAL;
-	if ((state->flags & ~(GPU_DISPLAY_PLANE_SHOWN | GPU_DISPLAY_PLANE_IMAGE)) != 0U)
 		return EINVAL;
 	if (state->result != 0U || state->serial == 0U)
 		return EINVAL;
+
+	/* The defined flags; only the shown primary is turned. */
+	error = gpu_display_plane_flags_check(state->plane, state->flags);
+	if (error != 0)
+		return error;
 
 	/* A wait fence has an exact generation, and none has none. */
 	if (state->wait_fd < -1)

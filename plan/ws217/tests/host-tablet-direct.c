@@ -446,6 +446,16 @@ kwl_object_destroy(
 	(void)object;
 }
 
+/* No case runs out of objects, so a failed client is a failed case. */
+void
+kwl_client_fail(
+	struct kwl_client *client)
+{
+	/* Counts it. */
+	(void)client;
+	check(0, "no client fails");
+}
+
 /* The arrow comes back. */
 void
 kwl_cursor_default(

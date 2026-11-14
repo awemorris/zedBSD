@@ -32,7 +32,7 @@ The requests that need the lease are the ones that carry a `lease` field: `GPU_D
 
 ##### Whole frames, FIFO and BLOB
 
-`GPU_DISPLAY_PRESENT` presents one whole frame. Its `flags` field is exactly `GPU_DISPLAY_PRESENT_FIFO` or `GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB`; every other value fails with `EINVAL`. The frame is `height` rows of `stride` bytes starting at `offset` in the resource named by `handle`; each row begins with `width` packed pixels of 4 bytes. The whole extent (`stride` times `height`, from `offset`) must lie inside the resource. A partial update or damage rectangle does not exist.
+`GPU_DISPLAY_PRESENT` presents one whole frame. Its `flags` field is `GPU_DISPLAY_PRESENT_FIFO` or `GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB`, either optionally with `GPU_DISPLAY_PRESENT_ROTATE_180`; every other value fails with `EINVAL`. `GPU_DISPLAY_PRESENT_ROTATE_180` shows the frame turned by 180 degrees, so pixel (x, y) of the frame shows at (W - 1 - x, H - 1 - y) of the output; a frame without it is shown unturned. The kernel refuses the turn with `EOPNOTSUPP` before the driver sees it when the driver does not declare that it can show one, and a driver that does refuses it with `EOPNOTSUPP` on an output whose query lacks `GPU_DISPLAY_ROTATE_180`. No driver in the tree declares it yet. The frame is `height` rows of `stride` bytes starting at `offset` in the resource named by `handle`; each row begins with `width` packed pixels of 4 bytes. The whole extent (`stride` times `height`, from `offset`) must lie inside the resource. A partial update or damage rectangle does not exist.
 
 Without `GPU_DISPLAY_PRESENT_BLOB`, `handle` names ordinary storage created by `GPU_RESOURCE_CREATE` (see [gpu-memory.md](gpu-memory.md)). The driver copies the rows before the call returns, so the storage is no longer borrowed when `GPU_DISPLAY_PRESENT` returns and the program may write it again at once. With `GPU_DISPLAY_PRESENT_BLOB`, `handle` names a blob or a scanout allocation imported from another device (see [gpu-memory.md](gpu-memory.md) and [gpu-sharing.md](gpu-sharing.md)); any other kind of resource fails with `EINVAL`. The display then reads the allocation itself, without a copy, and the allocation stays borrowed until a later frame replaces it or the lease ends; the program must not destroy or overwrite it in the meantime.
 
@@ -185,10 +185,10 @@ Where the node lets presentation run outside the open's admission, the request r
 
 Errors:
 
-- `EOPNOTSUPP`: The node does not have `GPU_CAP_DISPLAY`.
+- `EOPNOTSUPP`: The node does not have `GPU_CAP_DISPLAY`; `flags` has `GPU_DISPLAY_PRESENT_ROTATE_180` and the driver cannot show a turned frame (the kernel answers before the driver), or the output lacks `GPU_DISPLAY_ROTATE_180` (the driver answers).
 - `EACCES`: The open cannot write.
 - `EFAULT`: The argument cannot be read or written.
-- `EINVAL`: `version` or `size` is not the structure's; `lease`, `generation`, `width`, `height` or `refresh_millihz` is zero; `sequence` is not zero; `flags` is neither `GPU_DISPLAY_PRESENT_FIFO` nor `GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB`; `width` times 4 does not fit in 32 bits; `format` is not a defined value; `stride` is smaller than `width` times 4 or not a multiple of 4; `handle` is zero, unknown, or of the wrong kind for `flags`; `offset` or the extent of the frame lies outside the resource.
+- `EINVAL`: `version` or `size` is not the structure's; `lease`, `generation`, `width`, `height` or `refresh_millihz` is zero; `sequence` is not zero; `flags` without `GPU_DISPLAY_PRESENT_ROTATE_180` is neither `GPU_DISPLAY_PRESENT_FIFO` nor `GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB`; `width` times 4 does not fit in 32 bits; `format` is not a defined value; `stride` is smaller than `width` times 4 or not a multiple of 4; `handle` is zero, unknown, or of the wrong kind for `flags`; `offset` or the extent of the frame lies outside the resource.
 - `EIO`: The driver reported success with a zero `sequence`.
 - `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (requests that run under it).
@@ -274,6 +274,7 @@ Sources: [gpu-scanout.h](../../include/uapi/gpu-scanout.h), [gpu.c](../../src/dr
 | `GPU_DISPLAY_LIMITED` | 512 | The output is connected but cannot be lit now, because the number of outputs shown at once has reached its limit; its claim fails with `ENOSPC`. |
 | `GPU_DISPLAY_HAS_CURSOR` | 1024 | The output has a cursor plane: `GPU_DISPLAY_CURSOR_SET`, `GPU_DISPLAY_CURSOR_MOVE` and `GPU_DISPLAY_CURSOR_HIDE` work on its primary lease. The plane is not counted in `plane_count`. |
 | `GPU_DISPLAY_HAS_OVERLAYS` | 2048 | Planes 1 to `plane_count` - 1 of the output are overlay planes, used with `GPU_DISPLAY_COMMIT` and `GPU_DISPLAY_OVERLAY_INFO`. |
+| `GPU_DISPLAY_ROTATE_180` | 4096 | The output's primary plane can show its image turned by 180 degrees (`GPU_DISPLAY_PRESENT_ROTATE_180`, `GPU_DISPLAY_PLANE_ROTATE_180`). The cursor and overlay planes are never turned. No driver in the tree sets it yet. |
 
 | Name | Value | Meaning |
 | --- | ---: | --- |
@@ -283,6 +284,7 @@ Sources: [gpu-scanout.h](../../include/uapi/gpu-scanout.h), [gpu.c](../../src/dr
 | `GPU_DISPLAY_MODE_VALIDATE` | 1 | `operation` of `GPU_DISPLAY_MODE`: check `width`, `height` and `refresh_millihz` without selecting a mode; a zero refresh asks for the driver's preferred frequency. |
 | `GPU_DISPLAY_PRESENT_FIFO` | 1 | Bit of the `flags` of a present: a whole-frame FIFO presentation. Every present sets it. |
 | `GPU_DISPLAY_PRESENT_BLOB` | 2 | Bit of the `flags` of a present, together with `GPU_DISPLAY_PRESENT_FIFO`: `handle` names a shared allocation that the display reads without a copy and that stays borrowed until a later frame replaces it or the lease ends. |
+| `GPU_DISPLAY_PRESENT_ROTATE_180` | 4 | Bit of the `flags` of a present, together with `GPU_DISPLAY_PRESENT_FIFO`: the frame is shown turned by 180 degrees; needs `GPU_DISPLAY_ROTATE_180` on the output. |
 | `GPU_DISPLAY_COUNT_ONLY` | UINT32_MAX | Value of `index` in `GPU_DISPLAY_QUERY` and in a mode enumeration that returns only `count`. |
 | `GPU_DISPLAY_EVENT_CHANGE` | 1 | Bit of `events` in a reply: a display change newer than the acknowledged sequence is pending. |
 | `GPU_DISPLAY_EVENT_ACK` | 1 | Bit of `flags` in a request: acknowledge `ack_sequence`. |
@@ -372,7 +374,7 @@ Sources: [gpu-scanout.h](../../include/uapi/gpu-scanout.h), [gpu.c](../../src/dr
 | 56 | 4 | `uint32_t` | `stride` | in | Bytes from the start of one row to the next; a multiple of 4 and at least `width` times 4. |
 | 60 | 4 | `uint32_t` | `format` | in | `GPU_PIXEL_BGRA8888` or `GPU_PIXEL_RGBA8888`, a value and not a `GPU_DISPLAY_FORMAT_*` bit. |
 | 64 | 4 | `uint32_t` | `refresh_millihz` | in | Refresh rate of the presentation's mode in millihertz; nonzero. |
-| 68 | 4 | `uint32_t` | `flags` | in | `GPU_DISPLAY_PRESENT_FIFO` or `GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB`. |
+| 68 | 4 | `uint32_t` | `flags` | in | `GPU_DISPLAY_PRESENT_FIFO` or `GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB`, optionally with `GPU_DISPLAY_PRESENT_ROTATE_180`. |
 | 72 | 8 | `uint64_t` | `generation` | in | Generation of the output from the query; nonzero. An old value fails with `ESTALE`. |
 
 #### `struct gpu_display_wait`
