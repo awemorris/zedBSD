@@ -33,7 +33,7 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 | [ws328-p005](phase005/phase.md) | vec-raster（coverage の tile） | Sonnet | in-progress（2026-11-15 P7 q2123） | p003 |
 | [ws328-p006](phase006/phase.md) | vec-gradient（補間・hint・ramp・t の計算） | Sonnet | in-progress（2026-11-15 P5 q2126） | p002 |
 | [ws328-p007](phase007/phase.md) | vec-rrect（角丸・ring・辺・影） | Sonnet | in-progress（2026-11-15 P1 q2125） | p002 |
-| [ws328-p008](phase008/phase.md) | svg-values（値の文法・viewBox の変換） | Sonnet | planned | p002 |
+| [ws328-p008](phase008/phase.md) | svg-values（値の文法・viewBox の変換） | Sonnet | in-progress（2026-11-15 P2 q2127） | p002 |
 | [ws328-p009](phase009/phase.md) | svg-pathdata（`d`） | Sonnet | planned | p008 |
 | [ws328-p010](phase010/phase.md) | svg-style（表示の性質、祖先からの style） | Sonnet | planned | p008 |
 | [ws328-p011](phase011/phase.md) | svg-shape（図形の等価な path） | Sonnet | planned | p009・p010 |
@@ -59,6 +59,8 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 Phase の番号はレビューで分けた物に新しい番号（p024〜p029）を付けたので表の順と違う。GPU の側（p020 → p026 → p027）を CSS・SVG の切り替えより先に main に入れる（design.md §11）。
 
 ## Resume point
+
+- 2026-11-15 Q1: p004 cleared（4e5cc05296、merge dbf5fc40d9）。header の疑問への Q1 の判断: (1) offset が dash の境にぴったりの時は SVG 2 §13.5.7 を文字どおりに当て、始めの長さ 0 の dash に round・square の cap の点を出す（実装のまま）。(2) 閉じた contour で最初の dash が長さ 0 なら継がない（実装のまま）。(3) vec-path.h の `VEC_LINES_VERTICES_MAX` の comment の「8 MiB」は約 24 MiB の誤り。header の凍結を崩さないため、最後の規約の見直しの Phase で直す。
 
 - 2026-11-15 Q1: p003 cleared。header の持ち越し（再凍結の時、p023 で）: vec-flatten.h の `VEC_LINES_VERTICES_MAX` の comment「8 MiB of vertices」は struct vec_vertex 12 byte × 2^21 で 24 MiB（contour も 24 MiB）。動作には関わらない。次は p004（vec-stroke、P2 q2122）。
 

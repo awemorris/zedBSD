@@ -12,7 +12,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2125: p007 vec-rrect（Sonnet） | p008・p017 |
-| P2 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2122: p004 vec-stroke（Sonnet、p002・p003 cleared） | p005 raster・p006〜p008・p017 |
+| P2 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2127: p008 svg-values（Sonnet）。p002〜p004 cleared | p009・p010・p017 |
 | P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2115: p015 headless の _OWN の道（p011 cleared） | p012 規約の見直し → completed |
 | P4 | [WS068](ws068/ws.md) | EGL・GL を Vulkan の上に | q2116: 試験の config と p045（Venus） | p047〜 |
 | P5 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2126: p006 vec-gradient（Sonnet） | p008・p017 |

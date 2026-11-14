@@ -4,7 +4,7 @@
 [history/agents-registry-through-20261026.md](../history/agents-registry-through-20261026.md)。
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P2 | phase-runner-low | ws328 p004 vec-stroke (q2122-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p004` / `agent/p2-ws328p004` | 動いている（2026-11-15 02:0x） | — |
+| P2 | phase-runner-low | ws328 p008 svg-values (q2127-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p008` / `agent/p2-ws328p008` | 動いている（2026-11-15 02:5x） | — |
 | P7 | phase-runner-low | ws328 p005 vec-raster (q2123-i01) | `/home/awe/zedBSD-worktrees/p7-ws328p005` / `agent/p7-ws328p005` | 動いている（2026-11-15 02:3x） | — |
 | P8 | phase-runner | ws349 p002 値の表・p003 wire (q2124-i01) | `/home/awe/zedBSD-worktrees/p8-ws349p002` / `agent/p8-ws349p002` | 動いている（2026-11-15 02:3x） | — |
 | P5 | phase-runner-low | ws328 p006 vec-gradient (q2126-i01) | `/home/awe/zedBSD-worktrees/p5-ws328p006` / `agent/p5-ws328p006` | 動いている（2026-11-15 02:4x） | — |
