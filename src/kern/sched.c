@@ -3874,9 +3874,11 @@ queue_level_locked(
 {
 	int in_kernel;
 	int level;
+	int user;
 
 	/* The kernel's threads keep the level they were made with. */
-	if (!hint_user_thread(thread))
+	user = hint_user_thread(thread);
+	if (!user)
 		return;
 
 	/* The raise and the handoff mark live only until the thread is queued. */
@@ -4081,6 +4083,7 @@ hint_waiting_core_locked(
 {
 	struct thread *thread;
 	int priority;
+	int user;
 
 	/* The first thread of the highest level with work. */
 	priority = best_priority_locked(cpu);
@@ -4093,7 +4096,8 @@ hint_waiting_core_locked(
 		return SCHED_HINT_CORE_ANY;
 
 	/* Its kind, if it is a user thread that asks for one. */
-	if (!hint_user_thread(thread) || thread->sched.hint.hint.strength == 0U)
+	user = hint_user_thread(thread);
+	if (!user || thread->sched.hint.hint.strength == 0U)
 		return SCHED_HINT_CORE_ANY;
 
 	/* Reports the kind. */
@@ -4202,6 +4206,8 @@ hint_stealable(
 	uint64_t now,
 	int *preferred)
 {
+	int user;
+
 	*preferred = 0;
 
 	/* A bound thread, one in transit, or one not simply runnable stays. */
@@ -4218,7 +4224,8 @@ hint_stealable(
 		return 0;
 
 	/* A thread that asks for no kind, or a CPU of no kind, is an ordinary steal. */
-	if (!hint_user_thread(thread) ||
+	user = hint_user_thread(thread);
+	if (!user ||
 	    thread->sched.hint.hint.strength == 0U ||
 	    thread->sched.hint.hint.core == SCHED_HINT_CORE_ANY ||
 	    self_core == SCHED_HINT_CORE_ANY)
@@ -4256,6 +4263,7 @@ hint_starve_locked(
 	unsigned which;
 	int priority;
 	int level;
+	int user;
 
 	/* Looks at the first thread of each level below the running one. */
 	for (priority = running->sched.priority + 1; priority <= SCHED_PRIOR_LOW; priority++) {
@@ -4269,7 +4277,8 @@ hint_starve_locked(
 				continue;
 
 			/* Only a user thread not already raised. */
-			if (!hint_user_thread(thread) || thread->sched.hint.raised != 0)
+			user = hint_user_thread(thread);
+			if (!user || thread->sched.hint.raised != 0)
 				continue;
 
 			/* How long it waited, and the level that wait earns. */
@@ -4487,6 +4496,7 @@ hint_handoff(
 	hal_cpu_id_t target;
 	unsigned long ignored;
 	unsigned mode;
+	unsigned here;
 	bool enabled;
 	int due;
 
@@ -4523,7 +4533,8 @@ hint_handoff(
 	if (current->sched.hint.hint.strength == SCHED_HINT_PLACE_IDLE)
 		mode = SCHED_HINT_CHOOSE_MOVE_IDLE_CORE;
 	target = HAL_CPU_MAX;
-	if (hint_cpu_core(id) != current->sched.hint.hint.core)
+	here = hint_cpu_core(id);
+	if (here != current->sched.hint.hint.core)
 		target = hint_choose(current->sched.hint.hint.core, mode);
 	if (target == HAL_CPU_MAX || target == id) {
 		hint_count(cpu, SCHED_HINT_COUNT_REFUSED);

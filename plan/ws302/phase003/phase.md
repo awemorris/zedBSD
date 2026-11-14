@@ -37,7 +37,41 @@ DTB の本体（p004）が使う sched の口を作り、DTB の本体が無く�
 
 ## mk の追加の案（承認まで当てない）
 
-（実装の後に書く）
+p003 で足した source 2 つの build の規則。当たるまで y は [../tests/desktop-balancer-overlay.mk](../tests/desktop-balancer-overlay.mk) で build する（`make -f Makefile -f plan/ws302/tests/desktop-balancer-overlay.mk CONFIG_KERN_DESKTOP_BALANCER=y [CONFIG_KERN_DESKTOP_BALANCER_TEST=y] …`）。overlay なしの y は `sched_hint_choose` などが無く link できない。
+
+`mk/kernel.mk` の「[Desktop Thread Balancer]」の block（p002 の案で当たった物）に 1 行:
+
+```make
+# [Desktop Thread Balancer]
+ifneq ($(filter y,$(CONFIG_KERN_DESKTOP_BALANCER)),)
+KERN_CPPFLAGS += -DCONFIG_KERN_DESKTOP_BALANCER=1
+KERN_SOURCES += \
+	src/kern/desktop-balancer.c \
+	src/kern/sched-hint.c
+endif
+```
+
+`mk/test-config.mk`（「[Kernel Test: Thermal Injection]」の後）:
+
+```make
+# [Kernel Test: Desktop Thread Balancer Stress] (desktop_balancer.classes=, desktop_balancer.stress=1)
+#  - Depends: CONFIG_KERN_DESKTOP_BALANCER
+CONFIG_KERN_DESKTOP_BALANCER_TEST ?= n
+```
+
+`mk/test-kernel.mk`（最後）:
+
+```make
+# [Kernel Test] desktop thread balancer stress (needs the balancer)
+ifeq ($(CONFIG_KERN_DESKTOP_BALANCER)$(CONFIG_KERN_DESKTOP_BALANCER_TEST),yy)
+KERN_CPPFLAGS += -DCONFIG_KERN_DESKTOP_BALANCER_TEST=1
+KERN_SOURCES += \
+	src/kern/sched-hint-test.c
+endif
+```
+
+- `sched-hint.c` は sched の口の純な関数（行き先の選びと段）で、host 試験のために sched.c から分けた。balancer が y の時だけ要る。
+- 試験の config は balancer が y の時だけ効く（source も `#if CONFIG_KERN_DESKTOP_BALANCER && CONFIG_KERN_DESKTOP_BALANCER_TEST`）。
 
 ## 進み
 

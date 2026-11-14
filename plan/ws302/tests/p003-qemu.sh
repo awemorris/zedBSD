@@ -1,7 +1,7 @@
 #!/bin/sh
 # The QEMU check of the scheduler's hint interface on x86_64: an image of the base userland with the console on the
-# serial port (plan/tools/posix/config-amd64-serial.mk) and the kernel with the balancer and its stress test
-# (CONFIG_KERN_DESKTOP_BALANCER=y CONFIG_KERN_DESKTOP_BALANCER_TEST=y, the objects of desktop-balancer-overlay.mk),
+# serial port and the kernel with the balancer and its stress test (config-x86_64-balancer-stress.mk beside this
+# file, with the objects of desktop-balancer-overlay.mk),
 # whose boot line gives a false table of CPU kinds and starts the stress thread (desktop_balancer.classes=PPEE
 # desktop_balancer.stress=1).  The guest (4 CPUs, KVM) runs for SECONDS (default 1800) the hint stress programs
 # (hintstress.c: threads made and reaped with forked children, timed sleeps checked for waking early, threads that
@@ -50,8 +50,8 @@ printf '%s\n' desktop_balancer.classes=PPEE desktop_balancer.stress=1 >> "$out/z
 extra="--file /root/hintstress=$out/hintstress --file /root/iostress=$out/iostress"
 extra="$extra --file /root/credrace=$out/credrace --file /root/sigexec=$out/sigexec"
 timeout 5400 make -j4 -f Makefile -f plan/ws302/tests/desktop-balancer-overlay.mk \
-	CONFIGMK=plan/tools/posix/config-amd64-serial.mk CONFIG_KERN_DESKTOP_BALANCER=y \
-	CONFIG_KERN_DESKTOP_BALANCER_TEST=y ZEDBSD_CONFIG_SRC="$out/zedbsd.cfg" ROOTFS_EXTRA_FILES="$extra" disk \
+	CONFIGMK=plan/ws302/tests/config-x86_64-balancer-stress.mk ZEDBSD_CONFIG_SRC="$out/zedbsd.cfg" \
+	ROOTFS_EXTRA_FILES="$extra" disk \
 	> "$out/image.log" 2>&1 < /dev/null
 rc=$?
 echo "image rc=$rc warnings=$(grep -c 'warning:' "$out/image.log")" >> "$summary"

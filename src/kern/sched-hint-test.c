@@ -359,6 +359,7 @@ test_hint_one(
 {
 	struct sched_hint hint;
 	uint32_t bits;
+	unsigned answer;
 	int error;
 
 	/* A random kind, strength, flag and level, now and then one out of range. */
@@ -370,11 +371,13 @@ test_hint_one(
 	if ((bits >> 8) % 64U == 0U)
 		hint.priority = SCHED_HINT_LEVEL_HIGHEST - 1;
 
-	/* Sets it, and asks for a move as the balancer would. */
+	/* Sets it, and asks for a move as the balancer would, counting each answer. */
 	error = sched_hint_set(thread, &hint);
-	sched_hint_test_report.set_answers[test_answer(error)]++;
+	answer = test_answer(error);
+	sched_hint_test_report.set_answers[answer]++;
 	error = sched_hint_place(thread);
-	sched_hint_test_report.place_answers[test_answer(error)]++;
+	answer = test_answer(error);
+	sched_hint_test_report.place_answers[answer]++;
 	sched_hint_test_report.threads_hinted++;
 }
 
