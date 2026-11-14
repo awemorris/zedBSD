@@ -3,7 +3,7 @@
 # ws328-p006 vec-gradient（色の補間・ramp・t の計算）
 
 - WS: [WS328](../ws.md)。設計: [design.md](../design.md)。
-- Status: planned（2026-11-14 p001 が作成）
+- Status: cleared（Q1 の受け入れ待ち）。実装済み・試験 PASS（2026-11-15 P5 q2126-i01）。2026-11-14 p001 が作成
 - 担当: 実装の担当（Sonnet 5.5 high、phase-runner-low、1 回の起動）。
 - 依存: p002（依存の Phase が main に merge され cleared の後に始める）。
 - 基点の SHA（header の凍結）: ws.md の Resume point に Q1 が書いた SHA。`BASE=<それ>`。
@@ -74,4 +74,31 @@
 
 ## 結果
 
-（実装の担当が書く。）
+2026-11-15 02:58（host の date）P5（q2126-i01）。worktree `/home/awe/zedBSD-worktrees/p5-ws328p006`（基点 main 6aeb76a864）。作った物は `userland/desktop/libbrowser/vector/vec-gradient.c`（骨格を実装に置き換え）と `plan/ws328/tests/unit/test-gradient.c`。header・他の module・試験の道具は変えていない。
+
+実行した command と結果:
+
+- `sh plan/ws328/tests/run-unit.sh gradient`: `test-gradient: PASS (277264 checks)`、最後の行 `run-unit: PASS`（cc）。`CC=clang` も同じ。
+- `sh plan/ws328/tests/run-unit.sh all`（cc・clang とも）: test-base 204220、test-flatten 93774、test-gradient 277264、test-harness 1127、test-path 348081 checks、最後の行 `run-unit: PASS`。ASan・UBSan 付き（run-unit.sh が付ける）。
+- `BASE=57bf94e62f sh plan/ws328/tests/check-skeleton.sh`: 最後の行 `check-skeleton: PASS`。この worktree の build/ に toolchain が無いので、check 6 は `WS328_ZEDBSD_CC` と `WS328_ZEDBSD_SYSROOT` で p2-ws328p004 の worktree の `build/llvm/bin/clang` と `build/x86_64/sysroot` を読むだけで使った（書いていない。自分の build/ への toolchain の build はしていない）。
+- `git diff --check`: 出力なし。
+- 壊す確かめ（git の外、script で 42 通り: 符号・境界の比較・定数・式の取り違え。fixup の各段、hard stop の比較、hint の式と両端、丸め、premultiplied の切り替え、average の pad と平均、ramp の中心、放射の根の選び方・判別式・同じ円・二次式から一次式、円錐の符号・floor、spread の各式、index の clamp、line length の行列）: 40 通りが FAIL。初回は 7 通りが PASS で、うち 5 通り（丸めの切り捨て、同じ円の判定、判別式 0、a が小さい時の一次式、color_at の分母の摂動）は試験を足して（丸め・狭い span を許容 0 で、判別式 0 の点 (4,3)、a が 1e-5 の点、同じ円の判定の点）塞いだ。残った PASS は 2 通りで等価: (1) `gradient_pack` の「color チャンネルが alpha を超えない」clamp（丸めが単調で premultiplied の値は alpha 以下なので届かない防御）、(2) 放射の根の安定形で `q` の符号の取り方（`b` の符号）を逆にする（q = b - sqrt(D) も数学上は同じ根で、single precision の安定さだけが違う）。元に戻した事は script が元の file との全文の一致で確かめた。
+
+自分で決めた点（header が黙っている所）:
+
+1. 計算は double で行い、渡す所で float に丸める。float に入らない値は ±1e30 に止める（範囲外の double→float の変換は未定義）。
+2. `vec_gradient_color_at`: 位置 ≤ p となる最後の stop を取る。同じ offset の stop の位置ちょうどでは後の色（硬い遷移）。最初の stop より前は最初の色、最後の stop 以後は最後の色。offset が NaN や順序の乱れた stop でも範囲外を読まず、重みは [0,1] に止める。
+3. hint の重み: P ≤ 0 は 0、P ≥ 1 は 1、H = 0.5 は P、H ≤ 0 は 1、H ≥ 1 は 0、その他は pow(P, ln 0.5 / ln H)。数でない hint は hint なしとして扱う。
+4. `vec_gradient_average`: offset を [0,1] に止めて使い、最初の stop より前と最後の stop より後の [0,1] の部分も端の色で数える（SVG の focal が円の上の repeat の時の 1 周期の平均）。止めた後の最後 ≤ 最初なら i/(count-1) に均等に配る（hint は比のまま残す）。hint のある組は重みの平均 1/(k+1)（k = ln 0.5 / ln H）で厳密に積分し、straight（SVG）の組は premultiply が alpha との積で二次になるので平均二乗 1/(2k+1) も使って厳密に積分する。
+5. `vec_gradient_fixup_css`: 順序は header のとおり（先頭・末尾 → 繰り上げ → 均等 → hint の除去）。hint の H は [0,1] に止める。除去した後の stop は has_hint・hint を hint が付く物だけ 1・値にし、他は 0 にする。`vec_gradient_fixup_svg` は has_offset を 1 にする。
+6. `vec_gradient_extend_span`・`vec_gradient_repeat_span` は count が 1 でも動く（repeat_span は長さ 0 で ENOTSUP なので 1 つは ENOTSUP）。
+7. `vec_gradient_parameter`: painted は NULL でもよい。to_gradient が valid でない、幾何が有限でない、写した点が有限でない時は painted 0。半径が負の放射は painted 0。幾何の絶対値の上限は課さない（有限なら使う）。線形で start と end の距離が 1e-6 未満は t = 1・painted 1（`vec_gradient_sample` は同じ判定で spread を使わない）。放射の根はすべて double で計算する。
+8. `vec_gradient_line_length`: 円錐で area が NULL の時は 0。area の角が有限でない時も 0。線形・放射で area は使わない。
+9. `vec_gradient_sample`: 幅が範囲外・ramp が NULL・gradient が NULL は 0。index は t * width の切り捨てで、0 .. width-1 に止める。
+
+header への所見（直さず報告。header は固定）:
+
+- 放射の gradient で焦点 = 中心・焦点の半径 0 の CSS の形（CSS Images 3 §3.2）は、header の「r(ω) > 0 の最大の w」の規則どおり、中心の点そのもの（r(0) = 0 の 1 点）を描かない。1×1 px の box の中心の pixel の中心 (0.5, 0.5) は丁度その点で、その pixel は透明になる。HTML の canvas の規則では円周だけを描くので中心は未定義だが、CSS の radial-gradient() は中心を最初の stop の色で塗る。呼ぶ側（paint の統合）が CSS の放射で `painted == 0` の時に t = 0 として塗るか、header の規則に focal_radius = 0 の中心の例外を足すかを、p018 以後で決める事を勧める。試験は header のとおり「描かない」を検証している。
+- `vec_gradient_color_at` の comment は premultiplied を引数 `premultiplied` に関わらず返すと読めるが、straight（SVG）の補間を premultiplied に直して返す事で、header の文のとおりに実装した。header の誤りではない。
+
+未実施: 実機・QEMU の確認（この Phase は host の単体試験のみ）、zedBSD の clang での link（check 6 は compile のみ）、GPU の shader との値の比べ（p018 以後）。
