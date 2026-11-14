@@ -34,10 +34,13 @@
 
 /* The sizes and refresh rates a virtual monitor may have. */
 #define VGPU_SIZE_MIN			64U
-#define VGPU_SIZE_MAX			8192U
+#define VGPU_SIZE_MAX			4096U
 #define VGPU_REFRESH_MIN		1000U
 #define VGPU_REFRESH_MAX		240000U
 #define VGPU_REFRESH_DEFAULT		60000U
+
+/* The longest a held frame keeps the output from taking the next one. */
+#define VGPU_HOLD_MAX_NS		8000000U
 
 /* Bits of state: what the compositor does with the monitor now. */
 #define VGPU_STATE_CONNECTED		1U	/* this open has a monitor plugged in */
@@ -72,7 +75,12 @@ struct vgpu_info {
 	uint32_t node;			/* N of /dev/gpuN, for people; programs compare device_id */
 	uint32_t connectors;		/* connectors of the node */
 	uint32_t free;			/* connectors that a create may take now */
+	uint32_t size_min;		/* VGPU_SIZE_MIN */
+	uint32_t size_max;		/* VGPU_SIZE_MAX */
+	uint32_t refresh_min;		/* VGPU_REFRESH_MIN */
+	uint32_t refresh_max;		/* VGPU_REFRESH_MAX */
 	uint32_t reserved;
+	uint64_t hold_max_ns;		/* VGPU_HOLD_MAX_NS */
 };
 
 /*
@@ -157,6 +165,10 @@ struct vgpu_frame {
 
 /*
  * Gives a held frame back, so that the output may take the next one.
+ * After a revoke the release of that sequence is still owed: until it is
+ * made, VGPU_FRAME_ACQUIRE fails with EBUSY.  image_id is never reused
+ * while the kernel runs; a program that ignores an epoch change keeps the
+ * old images' memory alive through its own imports.
  */
 struct vgpu_frame_release {
 	uint32_t version;

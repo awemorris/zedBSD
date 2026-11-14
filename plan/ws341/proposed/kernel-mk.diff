@@ -36,11 +36,14 @@ the source file list follows the design (src/drivers/gpu/vgpu/) and may change w
  CONFIG_DRIVER_PCI_VENUS           := y
 +CONFIG_DRIVER_VGPU                := y
  CONFIG_DRIVER_AUDIO               := y
+--- a/mk/platform-rpi4/defaults.mk, mk/platform-rpi5/defaults.mk, mk/platform-vf2/defaults.mk
++++ (each, next to its CONFIG_DRIVER_GPU line)
++CONFIG_DRIVER_VGPU                := y
 --- a/config/drivers/generic.drivers
 +++ b/config/drivers/generic.drivers
 @@
  -|fixed|Loop block device|*|y|
-+CONFIG_DRIVER_VGPU|bool|Virtual display for remote screens (/dev/vgpu)|amd64,rpi4,rpi5,visionfive2|n|
++CONFIG_DRIVER_VGPU|bool|Virtual display for remote screens (/dev/vgpu)|amd64,rpi4,rpi5,visionfive2|y|
 --- a/config/drivers/menu.list
 +++ b/config/drivers/menu.list
 @@
@@ -48,9 +51,12 @@ the source file list follows the design (src/drivers/gpu/vgpu/) and may change w
 +GPU|CONFIG_DRIVER_PCI_VENUS CONFIG_DRIVER_PCI_I915 CONFIG_DRIVER_PCI_NVRTX CONFIG_DRIVER_PCI_AMDRDNA CONFIG_DRIVER_PCI_GHCI CONFIG_DRIVER_VGPU
 
 Notes:
-- x86_64 defaults to y so that QEMU (Venus) images carry the driver for the tests of p005 and p009.
-  arm64 and riscv64 stay n until a device test has run there (question 4 asks whether the driver is
-  on by default for the user's builds).
+- The three important platforms (x86_64, arm64, riscv64) default to y, so that every change is
+  build-checked on them and the QEMU (Venus) images carry the driver for p005 and p009.  Question 4
+  asks whether the user's builds should carry it by default.
+- Not in this diff, also needing approval before their phases: the Makefiles of the userland test
+  programs and the tool (userland/tests/vgpu-loop, the Vulkan compositor stand-in, vgpu-capture),
+  proposed in p005 and p009 in the same form as the existing userland/tests/*/Makefile.
 - The driver registers its display node only after a render node exists (design §3.1), so a kernel
   with the driver and no GPU has no extra /dev/gpuN.
-- The device number of /dev/vgpu is chosen in p004 (not a make variable).
+- The device number of /dev/vgpu is chosen in p004a (not a make variable).
