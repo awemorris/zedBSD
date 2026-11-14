@@ -305,7 +305,7 @@
 | `plan/ws336/tests/config-riscv64-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 |  |
 | `plan/ws336/tests/config-rpi5-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 |  |
 | `plan/ws336/tests/replace-check.sh` | ZEDBSD_CONFIG disk-image | ws336 は incomplete、その WS の試験 |  |
-| `plan/ws343/tests/config-amd64-compat.mk` | ZEDBSD_USER_PROGRAMS | ws343 は incomplete、その WS の試験 |  |
+| `plan/ws343/tests/config-amd64-compat.mk` | ZEDBSD_USER_PROGRAMS | ws343 は incomplete、その WS の試験 | 消した（2026-11-15、WS343 の完了の時。今の main で動かない開発の時だけの試験） |
 
 ### B: 開発の時だけ・retired・完了した WS の一回きり・今の build に無い機種（81）
 

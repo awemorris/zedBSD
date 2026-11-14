@@ -31,7 +31,7 @@
 | `platform/common/userland-dynamic.mk` | fidoctl・passkey-fido2 の規則だけ（下の hunk） |
 | `userland/base/fidoctl/Makefile`・`passkey-fido2/Makefile` | 依存を security/openssl から base/libcrypto-compat に（Makefile の REQUIRE の解決が、選んだ config に libcrypto-compat を足す。config/ci は変えていない） |
 | `plan/ws335/tests/unit/test-api-passkey.c`・`ct-api-passkey.c`（新）、`check-skeleton.sh` | 単体と定数時間の試験、名前の正規表現 |
-| `plan/ws343/tests/run-passkey-compare.sh`・`passkey-compare.c`・`ct-matrix.sh`・`config-amd64-compat.mk`（新） | host の比較、cc/clang × -O2/-O3 の定数時間、OpenSSL 無しの build の config |
+| `plan/ws343/tests/run-passkey-compare.sh`・`passkey-compare.c`・`ct-matrix.sh`・`config-amd64-compat.mk`（新） | host の比較、cc/clang × -O2/-O3 の定数時間、OpenSSL 無しの build の config（4 つとも 2026-11-15 WS343 の完了の時に消した。今の main で動かない開発の時だけの試験。ct-matrix.sh の範囲は `sh plan/ws335/tests/run-ct-matrix.sh api-passkey aes` と同じ） |
 
 ## header の差（WS335 の check-skeleton の BASE を移すため）
 
@@ -55,10 +55,10 @@
 | --- | --- |
 | `WS335_VECTORS=/home/awe/zedBSD-claude1/build/sources/tls-vectors sh plan/ws335/tests/run-unit.sh api-passkey`（と `--win32`） | PASS 24754 checks（posix・Wine）。FIPS 197 C.1〜C.3 の逆、CAVP ECB の KAT（128・192・256 の復号と暗号）、CAVP CBC 256 の 4 file、SP 800-38A F.2.5・F.2.6 を 1〜64 byte の刻みで、RFC 4231 の 6 件、Wycheproof hmac_sha256 87、RFC 5869 A.1〜A.3、Wycheproof hkdf_sha256 86、CAVP PKV の P-256 12、Wycheproof ecdsa_secp256r1_sha256（valid 348・invalid 614 の判定）、Wycheproof ecdh_secp256r1_ecpoint（330 一致・25 拒否）、Q_keygen の 2 つの鍵の ECDH、誤りの経路 |
 | `run-unit.sh aes gcm api-evp api-pkey err hash ecc`、`--win32 aes api-evp api-pkey` | 全部 PASS（前と同じ数） |
-| `sh plan/ws335/tests/run-ct.sh api-passkey aes gcm`、`sh plan/ws343/tests/ct-matrix.sh` | PASS。ct-api-passkey（逆の暗号、CBC の両方向、HMAC、HKDF、ECDH の EVP の層）と ct-aes を cc・clang × -O2・-O3。ECDH の判定（scalar の範囲）は ct-api-pkey の X25519 と同じく公開にしてから derive（算術は ct-ecc） |
+| `sh plan/ws335/tests/run-ct.sh api-passkey aes gcm`、`sh plan/ws343/tests/ct-matrix.sh`（2026-11-15 に消した。同じ範囲は `plan/ws335/tests/run-ct-matrix.sh api-passkey aes`） | PASS。ct-api-passkey（逆の暗号、CBC の両方向、HMAC、HKDF、ECDH の EVP の層）と ct-aes を cc・clang × -O2・-O3。ECDH の判定（scalar の範囲）は ct-api-pkey の X25519 と同じく公開にしてから derive（算術は ct-ecc） |
 | `sh plan/ws335/tests/check-skeleton.sh`（BASE 無し） | PASS（header の単独の compile、zedBSD の clang、llvm-mingw の 2 arch、名前の範囲） |
-| `sh plan/ws343/tests/run-passkey-compare.sh` | PASS。変えていない crypto-openssl.c を host の OpenSSL 3.5.6 と libcrypto-compat（ASan・UBSan）で build、1485 の pk_crypto_* の呼び出しの答えと出力が一致、compat の ECDH を既知の秘密鍵の相手で OpenSSL の導出が 50/50 確かめた、compat の build は host の OpenSSL の header を読まない |
-| `make ZEDBSD_CONFIG=plan/ws343/tests/config-amd64-compat.mk BUILD=build/ws343-p002 build/ws343-p002/bin/fidoctl build/ws343-p002/bin/passkey-fido2` | rc 0、warning 0、OpenSSL は stage も build もされない、check-dynamic-elf PASS、NEEDED は 2 つとも libcrypto-compat.so と libc.so |
+| `sh plan/ws343/tests/run-passkey-compare.sh`（2026-11-15 に消した） | PASS。変えていない crypto-openssl.c を host の OpenSSL 3.5.6 と libcrypto-compat（ASan・UBSan）で build、1485 の pk_crypto_* の呼び出しの答えと出力が一致、compat の ECDH を既知の秘密鍵の相手で OpenSSL の導出が 50/50 確かめた、compat の build は host の OpenSSL の header を読まない |
+| （config は 2026-11-15 に消した）`make ZEDBSD_CONFIG=plan/ws343/tests/config-amd64-compat.mk BUILD=build/ws343-p002 build/ws343-p002/bin/fidoctl build/ws343-p002/bin/passkey-fido2` | rc 0、warning 0、OpenSSL は stage も build もされない、check-dynamic-elf PASS、NEEDED は 2 つとも libcrypto-compat.so と libc.so |
 | 同じく aarch64（config-rpi4 から OpenSSL・curl・OpenSSH・Python を外した config、BUILD=build/ws343-p002a） | rc 0、warning 0 |
 | `sh plan/ws335/tests/check-exports.sh build/ws343-p002/dynamic/libcrypto-compat.so` | PASS（public 78、cryc_ 190） |
 | merge bf0fa13238 の後に `run-unit.sh all` と `run-unit.sh --win32 all` | 両方 PASS（posix 59 本、Wine 59 本、FAIL 0）。上の試験も merge の後に全部流し直して PASS |
