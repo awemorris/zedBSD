@@ -78,14 +78,10 @@ last() { guest "grep -E '$2' $1 | tail -1" | tail -1; }
 stop_all='for p in $(ps -A -o pid,args | grep -E "[w]ayland( |$)|[b]rowser" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[w]ayland( |$)|[b]rowser" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
 
 # Waits up to SECONDS for a guest log to have more than BEFORE lines matching a pattern: wait_more LOG PATTERN BEFORE SECONDS.
+# The guest looks every tenth of a second in one SSH session.
 wait_more() {
-	tries=0
-	while [ $tries -lt "$4" ]; do
-		found=$(count "$1" "$2")
-		[ "${found:-0}" -gt "$3" ] 2>/dev/null && return 0
-		tries=$((tries + 1))
-		sleep 1
-	done
+	found=$(guest "n=0; while [ \$(grep -cE '$2' $1) -le $3 ] && [ \$n -lt $(($4 * 10)) ]; do sleep 0.1; n=\$((n + 1)); done; grep -cE '$2' $1" | tail -1)
+	[ "${found:-0}" -gt "$3" ] 2>/dev/null && return 0
 	return 1
 }
 

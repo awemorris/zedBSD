@@ -73,14 +73,11 @@ last() {
 }
 
 # Waits up to SECONDS for a guest log to have more than BEFORE lines matching a pattern: wait_more LOG PATTERN BEFORE SECONDS.
+# The guest looks every tenth of a second in one SSH session, so that a line is seen soon after it is written (an SSH
+# round trip per look made the test see the question's line seconds late).
 wait_more() {
-	tries=0
-	while [ $tries -lt "$4" ]; do
-		found=$(count "$1" "$2")
-		[ "${found:-0}" -gt "$3" ] 2>/dev/null && return 0
-		tries=$((tries + 1))
-		sleep 1
-	done
+	found=$(guest "n=0; while [ \$(grep -cE '$2' $1) -le $3 ] && [ \$n -lt $(($4 * 10)) ]; do sleep 0.1; n=\$((n + 1)); done; grep -cE '$2' $1" | tail -1)
+	[ "${found:-0}" -gt "$3" ] 2>/dev/null && return 0
 	return 1
 }
 

@@ -14,12 +14,12 @@
  * the window's thread times how long each waited from its post to its
  * taking (what an input of the compositor would wait).  When the window
  * closes one line says how many were timed, the longest wait, and how
- * many waited more than 20 and more than 100 milliseconds; each wait over
- * 100 milliseconds has a line of its own as it is taken (with the seconds
- * since the clock started):
+ * many waited more than 20 and more than 100 milliseconds, and when the
+ * longest was taken (the seconds since the clock started); each wait over
+ * 100 milliseconds has a line of its own as it is taken:
  *
  *   ZBROWSER LATENCY long waited_ms=X at_s=S
- *   ZBROWSER LATENCY samples=N longest_ms=X over_20ms=A over_100ms=B
+ *   ZBROWSER LATENCY samples=N longest_ms=X over_20ms=A over_100ms=B longest_at_s=S
  */
 
 #include "shell/internal.h"
@@ -109,8 +109,10 @@ shell_latency_take(
 
 	/* Counted. */
 	latency->samples++;
-	if (waited > latency->longest_us)
+	if (waited > latency->longest_us) {
 		latency->longest_us = waited;
+		latency->longest_at_us = now - latency->started_us;
+	}
 	if (waited > LATENCY_LONG_US)
 		latency->over_20ms++;
 	if (waited > LATENCY_LONGER_US) {
@@ -142,8 +144,8 @@ shell_latency_stop(
 	latency->thread = NULL;
 
 	/* The line the tests read. */
-	printf("ZBROWSER LATENCY samples=%lu longest_ms=%.1f over_20ms=%lu over_100ms=%lu\n", latency->samples,
-	    (double)latency->longest_us / 1000.0, latency->over_20ms, latency->over_100ms);
+	printf("ZBROWSER LATENCY samples=%lu longest_ms=%.1f over_20ms=%lu over_100ms=%lu longest_at_s=%.3f\n", latency->samples,
+	    (double)latency->longest_us / 1000.0, latency->over_20ms, latency->over_100ms, (double)latency->longest_at_us / 1e6);
 	fflush(stdout);
 }
 
