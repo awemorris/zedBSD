@@ -256,6 +256,7 @@ wb_os_file_replace(
 	int directory;
 	unsigned long code;
 	HANDLE handle;
+	DWORD process;
 
 	/* Refuses bytes that are missing when some are to be written. */
 	if (bytes == NULL && length != 0)
@@ -289,7 +290,8 @@ wb_os_file_replace(
 		at += os_format_number(temporary + at, number);
 		temporary[at] = L'.';
 		at++;
-		at += os_format_number(temporary + at, (unsigned long)GetCurrentProcessId());
+		process = GetCurrentProcessId();
+		at += os_format_number(temporary + at, (unsigned long)process);
 		temporary[at] = L'\0';
 
 		/* Creates the file only if the name is unused. */

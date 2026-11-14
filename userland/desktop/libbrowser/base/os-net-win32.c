@@ -1095,9 +1095,11 @@ os_net_last_error(
 	void)
 {
 	int error;
+	int code;
 
 	/* Maps the code; 0 stays 0. */
-	error = wb_os_error_from_socket(WSAGetLastError());
+	code = WSAGetLastError();
+	error = wb_os_error_from_socket(code);
 
 	/* Succeeded: the layer's value. */
 	return error;
@@ -1211,12 +1213,14 @@ os_net_create_socket(
 {
 	SOCKET handle;
 	int error;
+	int code;
 
 	/* Creates the socket as an overlapped one, the kind socket() makes, with inheritance off. */
 	*created = INVALID_SOCKET;
 	handle = WSASocketW(family, type, protocol, NULL, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
 	if (handle == INVALID_SOCKET) {
-		error = os_net_create_error(os_net_last_error());
+		code = os_net_last_error();
+		error = os_net_create_error(code);
 		return error;
 	}
 
@@ -1342,6 +1346,7 @@ os_net_listen_loopback(
 	int length;
 	int status;
 	int error;
+	int code;
 
 	/* Creates the socket. */
 	*listener = INVALID_SOCKET;
@@ -1358,7 +1363,8 @@ os_net_listen_loopback(
 	/* Binds the socket to that address. */
 	status = bind(handle, (const struct sockaddr *)bound, (int)sizeof(*bound));
 	if (status == SOCKET_ERROR) {
-		error = os_net_create_error(os_net_last_error());
+		code = os_net_last_error();
+		error = os_net_create_error(code);
 		closesocket(handle);
 		return error;
 	}
@@ -1366,7 +1372,8 @@ os_net_listen_loopback(
 	/* Listens, with room for one waiting connection. */
 	status = listen(handle, 1);
 	if (status == SOCKET_ERROR) {
-		error = os_net_create_error(os_net_last_error());
+		code = os_net_last_error();
+		error = os_net_create_error(code);
 		closesocket(handle);
 		return error;
 	}

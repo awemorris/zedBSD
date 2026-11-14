@@ -898,6 +898,8 @@ titlebar_width(
 	int label;
 	unsigned side;
 	uint32_t result;
+	size_t label_length;
+	unsigned label_pixels;
 
 	/* The breadcrumb's least. */
 	side = titlebar_side(control);
@@ -910,7 +912,9 @@ titlebar_width(
 	if (control->role == KL_CONTROL_GENERIC) {
 		label = (int)(strlen(control->label) * titlebar_pixels(window) / 2U);
 		if (window->text_open)
-			label = kl_text_width(&window->text, control->label, strlen(control->label), titlebar_pixels(window), 0);
+			label_length = strlen(control->label);
+			label_pixels = titlebar_pixels(window);
+			label = kl_text_width(&window->text, control->label, label_length, label_pixels, 0);
 		return (uint32_t)label + 2U * keiui_win32_scale(TITLEBAR_PADDING, window->dpi);
 	}
 
@@ -981,6 +985,7 @@ titlebar_button(
 	int has_icon;
 	int baseline;
 	int width;
+	size_t label_length;
 
 	/* Its look. */
 	control = &window->controls[index];
@@ -1037,7 +1042,8 @@ titlebar_button(
 		return;
 	pixels = titlebar_pixels(window);
 	baseline = kl_text_center(pixels, control->y, (int)control->height);
-	width = kl_text_width(&window->text, control->label, strlen(control->label), pixels, 0);
+	label_length = strlen(control->label);
+	width = kl_text_width(&window->text, control->label, label_length, pixels, 0);
 	(void)kl_text_draw(&window->text, canvas, control->x + ((int)control->width - width) / 2, baseline, control->label,
 	    strlen(control->label), pixels, 0, ink);
 }
@@ -1066,6 +1072,8 @@ titlebar_box(
 	int from;
 	int to;
 	int composing;
+	size_t composing_length;
+	size_t text_length;
 
 	/* The box. */
 	control = &window->controls[index];
@@ -1144,16 +1152,19 @@ titlebar_box(
 	}
 
 	/* Draws the field's text. */
-	(void)kl_text_draw(&window->text, canvas, control->x + inset - shift, baseline, field->text, strlen(field->text), pixels, 0, theme->text);
+	text_length = strlen(field->text);
+	(void)kl_text_draw(&window->text, canvas, control->x + inset - shift, baseline, field->text, text_length, pixels, 0, theme->text);
 	composing = 0;
 	if (field->composing[0] != '\0') {
-		composing = kl_text_width(&window->text, field->composing, strlen(field->composing), pixels, 0);
+		composing_length = strlen(field->composing);
+		composing = kl_text_width(&window->text, field->composing, composing_length, pixels, 0);
 		mark.x = control->x + inset + caret - shift;
 		mark.y = control->y + (int)control->height / 6;
 		mark.width = composing;
 		mark.height = (int)control->height * 2 / 3;
 		kl_canvas_fill(canvas, &mark, theme->control);
-		(void)kl_text_draw(&window->text, canvas, mark.x, baseline, field->composing, strlen(field->composing), pixels, 0, theme->text);
+		composing_length = strlen(field->composing);
+		(void)kl_text_draw(&window->text, canvas, mark.x, baseline, field->composing, composing_length, pixels, 0, theme->text);
 		kl_canvas_line(canvas, (float)mark.x, (float)(baseline + 2), (float)(mark.x + composing), (float)(baseline + 2), 1.0f, theme->text);
 		composing = kl_text_width(&window->text, field->composing, field->composing_caret, pixels, 0);
 	}
