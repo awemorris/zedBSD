@@ -26,8 +26,9 @@ _start:
 	move.l %d2,-(%sp)
 	jsr main
 	lea 12(%sp),%sp
+	/* exit runs the atexit handlers and flushes the streams; it does not return. */
 	move.l %d0,-(%sp)
-	jsr _exit
+	jsr exit
 1:	bra.s 1b
 	.size _start,.-_start
 

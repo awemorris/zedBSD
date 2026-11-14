@@ -27,7 +27,8 @@ _start:
 	mov x1, x21
 	mov x2, x22
 	bl main
-	bl _exit
+	/* exit runs the atexit handlers and flushes the streams; it does not return. */
+	bl exit
 1:
 	wfe
 	b 1b

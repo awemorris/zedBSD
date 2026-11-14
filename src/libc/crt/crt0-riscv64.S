@@ -47,8 +47,11 @@ _start:
 	mv	a2, s4
 	call	main
 
-	/* Leaves with main's status; _exit does not return. */
-	call	_exit
+	/*
+	 * Leaves with main's status; exit runs the atexit handlers and
+	 * flushes the streams, and does not return.
+	 */
+	call	exit
 1:
 	ebreak
 	j	1b
