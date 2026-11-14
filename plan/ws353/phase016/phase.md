@@ -2,7 +2,7 @@
 
 # ws353-p016: 試験（QEMU の回帰と 5330 の idle）
 
-Status: in-progress（2026-11-15 P1 q2088-i01。QEMU と 5330 を流し終えた。cleared の判定は Q1）
+Status: cleared（2026-11-15 Q1、merge ad0ff660ae）
 Parent: [WS353](../ws.md)。設計 [design.md](../design.md) §11。
 
 ## 目的
