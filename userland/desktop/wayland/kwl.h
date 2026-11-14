@@ -562,6 +562,17 @@ struct kwl_object {
 	void *gpu_private;
 	/* A gone client's buffer waiting in the server's retiring list (objects.c, BUG-239): the next one. */
 	struct kwl_object *retire_next;
+	/*
+	 * A GPU buffer's reads (compose.c): the drawing (the count of drawings
+	 * given, struct kwl_compose's drawings_given, with the one being
+	 * written) that last sampled it, which only grows.  Once replaced
+	 * (its holds about to go to 0) it is released only after that drawing
+	 * has completed: until then it waits in the compositor's returns
+	 * (returning 1, return_next the next one), keeping its last hold.
+	 */
+	uint64_t read_drawing;
+	struct kwl_object *return_next;
+	unsigned returning;
 	/* A surface's window: place, stacking (map order, lowest at the bottom), virtual desktop and fullscreen state. */
 	unsigned mapped;
 	uint64_t map_order;
@@ -1610,11 +1621,20 @@ struct kwl_server {
 	 * Frame pacing: after a frame, the windows it told are waited for, until
 	 * all have committed or half the last frame's time (at most 50 ms) has
 	 * passed, so that a quick client does not start the next frame without
-	 * a slower one.
+	 * a slower one.  frame_done_ms is when the last frame's output present
+	 * was shown (its windows were told then), frame_wait_ms half the time
+	 * its drawing took.
 	 */
 	unsigned awaiting;
 	uint64_t frame_done_ms;
 	uint64_t frame_wait_ms;
+	/*
+	 * A frame the scheduler's ticks asked for (an animation's next step)
+	 * while the output's last frame was not shown yet: it is drawn when
+	 * that frame is (display.c, compose.c), so the animations step with
+	 * the display's presents.
+	 */
+	unsigned step_after_shown;
 	/*
 	 * Nonzero while a move of the pointer waits for the frame that shows the
 	 * cursor at its new place: that frame does not wait for the windows
@@ -2438,6 +2458,8 @@ struct kwl_object *kwl_create_server(struct kwl_client *client, enum kwl_kind ki
 void kwl_object_destroy(struct kwl_object *object);
 void kwl_buffer_get(struct kwl_object *buffer);
 void kwl_buffer_put(struct kwl_object *buffer);
+void kwl_buffers_returned(struct kwl_server *server);
+void kwl_buffers_client_gone(struct kwl_server *server, struct kwl_client *client);
 void kwl_buffer_size(const struct kwl_object *buffer, uint32_t *width, uint32_t *height);
 void kwl_callbacks_done(struct kwl_object **callbacks);
 void kwl_schedule(struct kwl_server *server);

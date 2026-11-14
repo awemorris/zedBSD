@@ -13,9 +13,12 @@
  * creation and again at resize.  A surface showing a wl_shm buffer has a
  * linear, host-visible Vulkan image of the buffer's size that window mode
  * samples; after a commit the rows the client damaged are copied into it
- * with the CPU, only while no frame is in flight, and the buffer is then
- * released at once: the client can draw its next frame without waiting for
- * the GPU.  The GPU path (kl_gpu_buffer_v1) is not touched by any of this.
+ * with the CPU, once no drawing given still copies that image's staging
+ * (a drawing's completion wakes the event loop to try again), and the
+ * buffer is then released at once: the client can draw its next frame
+ * without waiting for the GPU.  An image made anew (a new size) waits for
+ * nothing in flight, as it uses the queue.  The GPU path
+ * (kl_gpu_buffer_v1) is not touched by any of this.
  */
 
 #include "compose.h"
@@ -132,8 +135,10 @@ kwl_pool_put(
 
 /*
  * Copies the damaged rows of every surface's new wl_shm image into the
- * image window mode samples, and releases the buffers.  Only while no frame
- * is in flight: the frame may be sampling those images.
+ * image window mode samples, and releases the buffers.  A surface's copy
+ * waits while a drawing given still copies its image's staging (or, for
+ * an image to be made anew, while anything is in flight); a drawing's
+ * completion brings the next try.
  */
 int
 kwl_shm_upload(
@@ -142,14 +147,10 @@ kwl_shm_upload(
 	struct kwl_client *client;
 	struct kwl_object *surface;
 	uint64_t mark;
-	int writable;
 	int error;
 
-	/* Without window mode, or while a frame in flight may read what they write, the copies wait. */
+	/* Without window mode nothing is copied. */
 	if (server->compose == NULL)
-		return 0;
-	writable = kwl_compose_host_writable(server);
-	if (!writable)
 		return 0;
 
 	/* The copies and the images made for them are the main thread's work outside a walk (KWL PERF pass, ws213-p004). */
@@ -421,6 +422,9 @@ kwl_host_images_take(
 		copy.last = import->dirty_last;
 		kwl_list_add_copy(list, &copy);
 		import->written = 0U;
+
+		/* The drawing being written copies the staging: it is not written again until that drawing has completed. */
+		import->copy_drawing = compose->drawings_given + compose->drawing_open;
 		import->dirty_first = 0U;
 		import->dirty_last = 0U;
 	}
@@ -680,20 +684,45 @@ surface_upload(
 	int32_t last;
 	int32_t y;
 	VkResult result;
+	int writable;
+	int remake;
 	int error;
 
 	/* The committed buffer, if it is still a wl_shm one. */
 	buffer = surface->current;
-	surface->shm_upload = 0;
-	if (buffer == NULL || buffer->shm == NULL)
+	if (buffer == NULL || buffer->shm == NULL) {
+		surface->shm_upload = 0;
 		return 0;
+	}
+
+	/* Its pool's place. */
 	shm = buffer->shm;
 
-	/* An image of another size is made again, and then filled completely. */
+	/*
+	 * Whether the copy may go now: an image of another size is made again
+	 * (which uses the queue: nothing in flight), the same one is written
+	 * once no drawing given still copies its staging.  Otherwise it waits
+	 * for a later pass, which a drawing's completion brings.
+	 */
 	image = surface->shm_image;
+	remake = 0;
+	if (image == NULL || image->width != shm->width || image->height != shm->height)
+		remake = 1;
+	if (remake) {
+		writable = kwl_compose_host_writable(server);
+	} else {
+		writable = kwl_compose_host_image_writable(server->compose, image);
+	}
+
+	/* Not yet: the upload stays asked for. */
+	if (!writable)
+		return 0;
+	surface->shm_upload = 0;
+
+	/* An image of another size is made again, and then filled completely. */
 	first = 0;
 	last = (int32_t)shm->height;
-	if (image == NULL || image->width != shm->width || image->height != shm->height) {
+	if (remake) {
 		kwl_shm_image_destroy(server, surface);
 		image = calloc(1, sizeof(*image));
 		if (image == NULL)

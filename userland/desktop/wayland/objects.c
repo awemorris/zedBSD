@@ -64,6 +64,7 @@ static void object_free(struct kwl_object *object);
 static void object_release(struct kwl_server *server, struct kwl_object *object);
 static void object_retire(struct kwl_server *server, struct kwl_object *object);
 static void retire_due_fired(void *context, struct kwl_timer *timer);
+static int buffer_return_later(struct kwl_object *buffer);
 
 /*
  * Finds a live identity only within its originating client namespace.
@@ -221,12 +222,15 @@ kwl_buffer_size(
 }
 
 /*
- * Drops a compositor use and reports release only after every use is finished.
+ * Drops a compositor use and reports release only after every use is
+ * finished: the protocol's, the surface's, the game mode's, and the
+ * drawings' given that sampled it (their completion).
  */
 void
 kwl_buffer_put(
 	struct kwl_object *buffer)
 {
+	int waits;
 	int error;
 
 	/* Null surface state never contributed an ownership reference. */
@@ -238,6 +242,17 @@ kwl_buffer_put(
 		kwl_fatal("KWL FAILED site=buffer_put client=%llu buffer=%u", (unsigned long long)buffer->client->number, buffer->id);
 		buffer->client->server->failed = 1;
 		return;
+	}
+
+	/*
+	 * The last hold of a buffer that a drawing given may still be
+	 * sampling stays, in the compositor's returns, until that drawing has
+	 * completed; this put is made again then.
+	 */
+	if (buffer->holds == 1U && !buffer->returning) {
+		waits = buffer_return_later(buffer);
+		if (waits)
+			return;
 	}
 
 	/* Another pending, current or front owner still prevents reuse by the producer. */
@@ -273,6 +288,90 @@ kwl_buffer_put(
 
 	/* Succeeded: this compositor use no longer retains the image. */
 	return;
+}
+
+/*
+ * Puts the buffers that waited for the drawings up to the last completed
+ * one (the compositor's drawings_done), oldest first: each lets go of the
+ * hold the returns kept, which releases it to its client or frees it when
+ * it was destroyed.
+ */
+void
+kwl_buffers_returned(
+	struct kwl_server *server)
+{
+	struct kwl_compose *compose;
+	struct kwl_object **link;
+	struct kwl_object *buffer;
+
+	/* Without window mode nothing waits. */
+	compose = server->compose;
+	if (compose == NULL)
+		return;
+
+	/* Each waiting buffer whose last reading drawing has completed. */
+	link = &compose->returns;
+	compose->returns_tail = NULL;
+	while (*link != NULL) {
+		buffer = *link;
+		if (buffer->read_drawing > compose->drawings_done) {
+			compose->returns_tail = buffer;
+			link = &buffer->return_next;
+			continue;
+		}
+
+		/* Out of the list first: the put may free it. */
+		*link = buffer->return_next;
+		buffer->return_next = NULL;
+		buffer->returning = 0U;
+
+		/* Told with the frames' lines, then released (or freed). */
+		if (server->log_frames) {
+			printf("KWL RETURN client=%llu buffer=%u read=%llu done=%llu\n", (unsigned long long)buffer->client->number, buffer->id,
+			       (unsigned long long)buffer->read_drawing, (unsigned long long)compose->drawings_done);
+		}
+
+		/* The hold the returns kept goes: released to its client, or freed. */
+		kwl_buffer_put(buffer);
+	}
+}
+
+/*
+ * Puts a client's buffers waiting for drawings now, as the client goes
+ * (it is fatal: none is told, and its images wait for the drawings when
+ * they are let go, kwl_compose_bury), so that its objects may go at once.
+ */
+void
+kwl_buffers_client_gone(
+	struct kwl_server *server,
+	struct kwl_client *client)
+{
+	struct kwl_compose *compose;
+	struct kwl_object **link;
+	struct kwl_object *buffer;
+
+	/* Without window mode nothing waits. */
+	compose = server->compose;
+	if (compose == NULL)
+		return;
+
+	/* Each of its waiting buffers, out of the list and put. */
+	link = &compose->returns;
+	compose->returns_tail = NULL;
+	while (*link != NULL) {
+		buffer = *link;
+		if (buffer->client != client) {
+			compose->returns_tail = buffer;
+			link = &buffer->return_next;
+			continue;
+		}
+
+		/* Takes the buffer out of the list and lets go of the hold the list kept. */
+		*link = buffer->return_next;
+		buffer->return_next = NULL;
+		buffer->returning = 0U;
+		kwl_buffer_put(buffer);
+	}
 }
 
 /*
@@ -995,6 +1094,46 @@ object_retire(
 	/* The new end, counted. */
 	server->retiring_tail = object;
 	server->retiring_count++;
+}
+
+/*
+ * Keeps the last hold of a client's GPU buffer that a drawing given (or
+ * the one being written) may still sample: the buffer waits in the
+ * compositor's returns until that drawing has completed, and is put again
+ * then (kwl_buffers_returned).  A buffer no drawing reads any more, a
+ * fatal client's (told nothing; its images wait for the drawings when let
+ * go) and any without window mode go on at once.  Returns 1 when the
+ * buffer waits.
+ */
+static int
+buffer_return_later(
+	struct kwl_object *buffer)
+{
+	struct kwl_compose *compose;
+
+	/* A buffer of a gone or fatal client, or without window mode, waits for nothing. */
+	if (buffer->client == NULL || buffer->client->fatal)
+		return 0;
+	compose = buffer->client->server->compose;
+	if (compose == NULL)
+		return 0;
+
+	/* The drawing that last read it has completed. */
+	if (buffer->read_drawing <= compose->drawings_done)
+		return 0;
+
+	/* At the end of the returns, keeping its last hold. */
+	buffer->returning = 1U;
+	buffer->return_next = NULL;
+	if (compose->returns_tail == NULL) {
+		compose->returns = buffer;
+	} else {
+		compose->returns_tail->return_next = buffer;
+	}
+
+	/* The buffer is now the last one waiting. */
+	compose->returns_tail = buffer;
+	return 1;
 }
 
 /*

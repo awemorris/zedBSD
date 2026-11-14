@@ -7,8 +7,9 @@
 #
 # Steps: the start; 60 s idle (the KWL PERF windows: at most two passes in ten seconds and no timeout at all; the
 # timers fired, by name, are recorded: the clock's minute among them); App Home opened with the Super key (KWL HOME
-# open via=super to KWL HOME opened, 280 ms of animation: 280 to 680 ms, and at least three frames drawn) and closed
-# again (240 ms: 240 to 640 ms); a notification's board (keiland-notify) entering, staying and leaving (KWL NOTIFY
+# open via=super to KWL HOME opened, 280 ms of animation: 272 to 680 ms, and at least three frames drawn) and closed
+# again (240 ms: 232 to 640 ms; the animation's first frame shows it 8 ms on, so a frame recorded within 8 ms of the
+# request ends it up to 8 ms before its length); a notification's board (keiland-notify) entering, staying and leaving (KWL NOTIFY
 # show to gone, 280 + 3000 + 280 ms: 3560 to 3960 ms); the wall clock stepped ten minutes on and then back with date
 # (each time the clock's timer is armed again within 61 s, and the next arming after that comes just after a minute
 # turned: KWL CLOCK arm into_ms at most 1000); the on-screen keyboard slid out of its corner (KWL OSK slide end
@@ -280,7 +281,7 @@ frames=$(count 'KWL LAT draw')
 aat key super
 if wait_count 'KWL HOME opened' 1 10; then
 	sleep 1
-	span home-open 'KWL HOME open via=super' 'KWL HOME opened' 280 680 " ($(( $(count 'KWL LAT draw') - frames )) frames)"
+	span home-open 'KWL HOME open via=super' 'KWL HOME opened' 272 680 " ($(( $(count 'KWL LAT draw') - frames )) frames)"
 	drawn=$(( $(count 'KWL LAT draw') - frames ))
 	[ "$drawn" -ge 3 ] || fail_step home-open-frames "$drawn frames (wanted 3 at least)"
 else
@@ -289,7 +290,7 @@ fi
 sleep 2
 aat key super
 if wait_count 'KWL HOME closed' 1 10; then
-	span home-close 'KWL HOME close via=super' 'KWL HOME closed' 240 640 ""
+	span home-close 'KWL HOME close via=super' 'KWL HOME closed' 232 640 ""
 else
 	fail_step home-close "no KWL HOME closed within 10 s"
 fi

@@ -96,7 +96,18 @@ static void compose_task_done(struct kwl_server *server, const struct kwl_render
 static unsigned compose_graves(struct kwl_compose *compose, unsigned all);
 static VkResult compose_replay_commands(struct kwl_compose *compose, unsigned slot, struct kwl_render_outcome *outcome);
 static void compose_rec_timed(struct kwl_server *server, const struct kwl_render_outcome *outcome);
-static void compose_hold(struct kwl_server *server, struct kwl_object **windows, unsigned count);
+static void compose_tell(struct kwl_server *server, struct kwl_object **windows, unsigned count, const struct kwl_render_job *job);
+static void compose_shown(struct kwl_server *server, const struct kwl_render_message *message);
+static void compose_told_free(struct kwl_compose *compose, struct kwl_frame_told *told);
+static void compose_told_flush(struct kwl_server *server);
+static int compose_heads_showing(const struct kwl_compose *compose);
+static int compose_shown_start(struct kwl_compose *compose);
+static void compose_shown_end(struct kwl_compose *compose);
+static VkResult compose_op_fence_create(void *context, VkFence *fence);
+static void compose_op_fence_destroy(void *context, VkFence fence);
+static VkResult compose_op_fences_wait(void *context, const VkFence *fences, unsigned count);
+static VkResult compose_op_fence_status(void *context, VkFence fence);
+static VkResult compose_op_fence_reset(void *context, VkFence fence);
 static void compose_log_draws(struct kwl_server *server);
 static void compose_count_passes(struct kwl_server *server);
 static void compose_log_passes(struct kwl_server *server);
@@ -653,6 +664,7 @@ kwl_compose_draw(
 	int partial;
 	int moving;
 	int allowed;
+	int heads_showing;
 	unsigned cursor_id;
 	VkResult result;
 
@@ -831,17 +843,30 @@ kwl_compose_draw(
 	/* The CPU time of the main thread's part of the frame. */
 	server->perf.compose_draw_cycles += kwl_cycles() - compose->frame_start_cycles;
 
-	/* The frame holds what it sampled until it completes, the popups and sub-surfaces too. */
-	compose_hold(server, windows, all + popups + subsurfaces);
+	/* The frame tells the surfaces it showed once its output's present is shown, the popups and sub-surfaces too. */
+	compose_tell(server, windows, all + popups + subsurfaces, &job);
 	compose->frame_heads = NULL;
 	compose->frame_head_count = 0U;
 	server->dirty = 0;
-	if (missed > 0U)
-		server->dirty = 1;
 	server->damaged = 0;
 	compose->scene.changed = 0U;
 	server->frame++;
 	compose->frame_number = server->frame;
+
+	/*
+	 * A head that missed the frame (no image free) is drawn again when a
+	 * head's present is shown, which frees one; with no head's present
+	 * to be shown, at once.
+	 */
+	if (missed > 0U) {
+		compose->head_missed = 0U;
+		heads_showing = compose_heads_showing(compose);
+		if (heads_showing) {
+			compose->head_missed = 1U;
+		} else {
+			server->dirty = 1;
+		}
+	}
 
 	/* The frame's lines, while its counts are this frame's (--log-frames). */
 	if (server->log_frames) {
@@ -995,43 +1020,33 @@ kwl_compose_quiesce(
 }
 
 /*
- * Lets the drawings in flight forget a client that goes: their holds on
- * its buffers are given back now and its frame callbacks leave them (the
- * client is fatal, so neither is told), so that its objects may go at
- * once.  The images they sample wait for those drawings when they are let
- * go (kwl_compose_bury), so nothing waits here.
+ * Lets the frames given forget a client that goes: its buffers waiting for
+ * the drawings that read them are put now and its frame callbacks leave
+ * the frames' records (the client is fatal, so neither is told), so that
+ * its objects may go at once.  The images they sample wait for those
+ * drawings when they are let go (kwl_compose_bury), so nothing waits here.
  */
 void
 kwl_compose_client_gone(
 	struct kwl_server *server,
 	struct kwl_client *client)
 {
-	struct kwl_frame_slot *slot;
+	struct kwl_frame_told *told;
 	struct kwl_object **link;
 	struct kwl_object *callback;
-	struct kwl_object *buffer;
-	unsigned index;
-	unsigned held;
+	struct kwl_compose *compose;
 
-	/* Without window mode nothing is held. */
-	if (server->compose == NULL)
+	/* Without window mode nothing waits. */
+	compose = server->compose;
+	if (compose == NULL)
 		return;
 
-	/* Each slot's holds and callbacks (those of a completed slot are none). */
-	for (index = 0U; index < KWL_FRAME_SLOTS; index++) {
-		slot = &server->compose->slots[index];
+	/* Its buffers waiting for drawings are put now (a fatal client's put does not wait again). */
+	kwl_buffers_client_gone(server, client);
 
-		/* Its buffers, given back; the completion skips the empty places. */
-		for (held = 0U; held < slot->held_count; held++) {
-			buffer = slot->held[held];
-			if (buffer == NULL || buffer->client != client)
-				continue;
-			slot->held[held] = NULL;
-			kwl_buffer_put(buffer);
-		}
-
-		/* Its frame callbacks, out of the list and retired untold. */
-		link = &slot->callbacks;
+	/* Its frame callbacks, out of each frame's record and retired untold. */
+	for (told = compose->told; told != NULL; told = told->next) {
+		link = &told->callbacks;
 		while (*link != NULL) {
 			callback = *link;
 			if (callback->client != client) {
@@ -1045,6 +1060,53 @@ kwl_compose_client_gone(
 			kwl_object_destroy(callback);
 		}
 	}
+}
+
+/*
+ * Tells whether the output's last frame given is not shown yet (its
+ * present not taken by the display): an animation's next step waits for
+ * it.  Returns 1 while one is not.
+ */
+int
+kwl_compose_showing(
+	const struct kwl_server *server)
+{
+	/* Without window mode nothing is shown. */
+	if (server->compose == NULL)
+		return 0;
+
+	/* A frame whose output's present is not shown yet. */
+	if (server->compose->showing != 0U)
+		return 1;
+
+	/* Every frame given is shown. */
+	return 0;
+}
+
+/*
+ * Tells whether the main thread may write a host image's staging now
+ * without making images or using the queue: the drawing that last took it
+ * to copy it has completed, and the move to its layout too.  Returns 1
+ * when it may.
+ */
+int
+kwl_compose_host_image_writable(
+	struct kwl_compose *compose,
+	const struct kwl_import *image)
+{
+	int ready;
+
+	/* Its move to its layout, which reads it too. */
+	ready = kwl_compose_task_ready(compose, image);
+	if (!ready)
+		return 0;
+
+	/* A drawing given (or being written) still copies it. */
+	if (image->copy_drawing > compose->drawings_done)
+		return 0;
+
+	/* Succeeded: no drawing reads it any more. */
+	return 1;
 }
 
 /*
@@ -1073,11 +1135,17 @@ kwl_compose_close(
 	kwl_compose_task_flush(compose);
 	if (compose->render_started) {
 		kwl_render_stop(&compose->render);
+		compose_shown_end(compose);
 		kwl_compose_poll(server);
 		compose_render_counts(&compose->render);
 		kwl_render_destroy(&compose->render);
 		compose->render_started = 0U;
 	}
+
+	/* The frames whose presents were never all told send their callbacks now; the buffers waiting for drawings go back. */
+	compose_told_flush(server);
+	compose->drawings_done = compose->drawings_given;
+	kwl_buffers_returned(server);
 
 	/* The device idle, then the images let go, then the output's objects. */
 	if (compose->device != VK_NULL_HANDLE)
@@ -1164,9 +1232,17 @@ kwl_compose_render_start(
 	if (error != 0)
 		return error;
 
+	/* The shown thread, when the device has present fences: the frames' presents are told from it. */
+	error = compose_shown_start(compose);
+	if (error != 0) {
+		kwl_render_destroy(&compose->render);
+		return error;
+	}
+
 	/* The thread. */
 	error = kwl_render_start(&compose->render);
 	if (error != 0) {
+		compose_shown_end(compose);
 		kwl_render_destroy(&compose->render);
 		return error;
 	}
@@ -1369,6 +1445,12 @@ compose_device(
 	uint32_t extra;
 	int surface_counter;
 	int display_control;
+	int surface_maintenance;
+	int surface_caps2;
+	int swapchain_maintenance;
+	PFN_vkGetPhysicalDeviceFeatures2KHR get_features;
+	VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenance;
+	VkPhysicalDeviceFeatures2 features;
 	VkExternalFenceHandleTypeFlagBits fence_type;
 	VkExtensionProperties available[32];
 	uint32_t found;
@@ -1388,8 +1470,15 @@ compose_device(
 	memcpy(instance_names, instance_extensions, sizeof(instance_extensions));
 	instance_count = 5U;
 
-	/* The surface counters, which the display control needs, when the library offers them. */
+	/*
+	 * The surface counters, which the display control needs, and the
+	 * surface's maintenance with the surface capabilities it depends on,
+	 * which the swapchain's maintenance (the present fences) needs, when
+	 * the library offers them.
+	 */
 	surface_counter = 0;
+	surface_caps2 = 0;
+	surface_maintenance = 0;
 	found = 32U;
 	result = vkEnumerateInstanceExtensionProperties(NULL, &found, available);
 	if (result != VK_SUCCESS && result != VK_INCOMPLETE)
@@ -1399,11 +1488,27 @@ compose_device(
 		match = strcmp(available[index].extensionName, VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME);
 		if (match == 0)
 			surface_counter = 1;
+		match = strcmp(available[index].extensionName, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+		if (match == 0)
+			surface_caps2 = 1;
+		match = strcmp(available[index].extensionName, VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+		if (match == 0)
+			surface_maintenance = 1;
 	}
 
 	/* Enabled when offered. */
 	if (surface_counter) {
 		instance_names[instance_count] = VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME;
+		instance_count++;
+	}
+
+	/* The surface's maintenance only with what it depends on. */
+	if (!surface_caps2)
+		surface_maintenance = 0;
+	if (surface_maintenance) {
+		instance_names[instance_count] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
+		instance_count++;
+		instance_names[instance_count] = VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
 		instance_count++;
 	}
 
@@ -1457,7 +1562,14 @@ compose_device(
 		return result;
 	wanted = 0;
 	display_control = 0;
+	swapchain_maintenance = 0;
 	for (index = 0; index < found; index++) {
+		/* The swapchain's maintenance (the present fences), with the instance's surface maintenance. */
+		match = strcmp(available[index].extensionName, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+		if (match == 0 && surface_maintenance)
+			swapchain_maintenance = 1;
+
+		/* The external fence pair. */
 		match = strcmp(available[index].extensionName, VK_KHR_EXTERNAL_FENCE_EXTENSION_NAME);
 		if (match == 0)
 			wanted++;
@@ -1497,6 +1609,34 @@ compose_device(
 		display_control = 0;
 	}
 
+	/* Whether the device has the swapchain's maintenance as a feature, which the present fences are part of. */
+	memset(&maintenance, 0, sizeof(maintenance));
+	maintenance.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+	memset(&features, 0, sizeof(features));
+	features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+	features.pNext = &maintenance;
+	get_features = NULL;
+	if (swapchain_maintenance)
+		get_features = (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(compose->instance, "vkGetPhysicalDeviceFeatures2KHR");
+	if (get_features != NULL)
+		get_features(compose->physical, &features);
+	if (maintenance.swapchainMaintenance1 != VK_TRUE)
+		swapchain_maintenance = 0;
+
+	/* Enabled with its feature when the device has it and there is room; the feature goes with the device's description. */
+	maintenance.pNext = NULL;
+	if (swapchain_maintenance && device_count < COMPOSE_EXTENSIONS_MAX) {
+		device_names[device_count] = VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME;
+		device_count++;
+	} else {
+		swapchain_maintenance = 0;
+	}
+
+	/* The frames' presents get fences only with it. */
+	compose->present_fences = 0U;
+	if (swapchain_maintenance)
+		compose->present_fences = 1U;
+
 	/* The device, with one queue, the swapchain and the external memory (and fence) fd extensions. */
 	priority = 1.0f;
 	memset(&queue, 0, sizeof(queue));
@@ -1512,6 +1652,8 @@ compose_device(
 	device.pQueueCreateInfos = &queue;
 	device.enabledExtensionCount = device_count;
 	device.ppEnabledExtensionNames = device_names;
+	if (swapchain_maintenance)
+		device.pNext = &maintenance;
 	result = vkCreateDevice(compose->physical, &device, NULL, &compose->device);
 	if (result != VK_SUCCESS)
 		return result;
@@ -2692,19 +2834,38 @@ kwl_compose_cursor(
 /*
  * Returns the image window mode samples for a surface: its GPU buffer's
  * import, or its copy of a wl_shm image; NULL when there is none yet.
+ * Every drawing that samples a GPU buffer asks for it here, so the buffer
+ * is marked read by the drawing being written (or, asked outside a
+ * drawing, by the last one given): it goes back to its client only after
+ * that drawing has completed.
  */
 static const struct kwl_import *
 surface_image(
 	const struct kwl_object *surface)
 {
+	struct kwl_compose *compose;
+	struct kwl_object *buffer;
+	uint64_t drawing;
+
 	/* A wl_shm buffer is drawn from the surface's copy. */
-	if (surface->current == NULL)
+	buffer = surface->current;
+	if (buffer == NULL)
 		return NULL;
-	if (surface->current->shm != NULL)
+	if (buffer->shm != NULL)
 		return surface->shm_image;
 
+	/* The drawing that reads it now; the mark only grows. */
+	compose = NULL;
+	if (surface->client != NULL)
+		compose = surface->client->server->compose;
+	if (compose != NULL) {
+		drawing = compose->drawings_given + compose->drawing_open;
+		if (drawing > buffer->read_drawing)
+			buffer->read_drawing = drawing;
+	}
+
 	/* A GPU buffer from its own import. */
-	return surface->current->import;
+	return buffer->import;
 }
 
 /*
@@ -4259,8 +4420,6 @@ kwl_compose_submit_quiet(
 	slot->bake = 1U;
 	slot->layers_generation = compose->frame_layers_generation;
 	slot->scene_written = 0U;
-	slot->held_count = 0U;
-	slot->callbacks = NULL;
 	slot->copies = 0U;
 	if (compose->list.copy_count != 0U)
 		slot->copies = 1U;
@@ -4393,27 +4552,31 @@ compose_may_draw(
 }
 
 /*
- * Holds the buffers a frame sampled, and takes the frame callbacks of the
- * surfaces it showed, until the frame completes.
+ * Takes the frame callbacks of the surfaces a frame given showed into the
+ * frame's record, which sends them when the output's present is shown
+ * (compose_shown), and notes the windows the frame pacing awaits.  The
+ * frame holds none of the buffers it samples: each knows the drawing that
+ * last read it.  Without memory for the record the callbacks are sent at
+ * once.
  */
 static void
-compose_hold(
+compose_tell(
 	struct kwl_server *server,
 	struct kwl_object **windows,
-	unsigned count)
+	unsigned count,
+	const struct kwl_render_job *job)
 {
-	struct kwl_frame_slot *slot;
+	struct kwl_compose *compose;
+	struct kwl_frame_told *told;
+	struct kwl_object *callbacks;
 	struct kwl_object *surface;
 	struct kwl_object **tail;
 	unsigned index;
 
-	/* Each window's current buffer is held by the frame, in the slot the frame was recorded for. */
-	slot = &server->compose->slots[server->compose->walk_slot];
-	slot->held_count = 0U;
-	slot->callbacks = NULL;
+	/* Each window's frame callbacks, in request order, and its place in the frame pacing. */
+	compose = server->compose;
+	callbacks = NULL;
 	for (index = 0; index < count; index++) {
-		kwl_buffer_get(windows[index]->current);
-		slot->held[slot->held_count++] = windows[index]->current;
 		windows[index]->fresh = 0;
 
 		/*
@@ -4434,54 +4597,71 @@ compose_hold(
 		}
 
 		/* Its frame callbacks wait for the frame, in request order. */
-		tail = &slot->callbacks;
+		tail = &callbacks;
 		while (*tail != NULL)
 			tail = &(*tail)->callback_next;
 		*tail = windows[index]->committed_callbacks;
 		windows[index]->committed_callbacks = NULL;
 	}
 
-	/* A drag's icon surface is held and told too. */
+	/* A drag's icon surface is told too, after the windows. */
 	surface = server->dnd_icon;
 	if (server->dnd_active && surface != NULL && !surface->dead && surface->current != NULL) {
-		kwl_buffer_get(surface->current);
-		slot->held[slot->held_count++] = surface->current;
-
-		/* Its frame callbacks after the windows'. */
-		tail = &slot->callbacks;
+		tail = &callbacks;
 		while (*tail != NULL)
 			tail = &(*tail)->callback_next;
 		*tail = surface->committed_callbacks;
 		surface->committed_callbacks = NULL;
 	}
 
-	/* The desktop surface is held and told too (desktop.c). */
+	/* The desktop surface is told too (desktop.c). */
 	surface = kwl_desktop_surface(server);
 	if (surface != NULL && surface->current != NULL) {
-		kwl_buffer_get(surface->current);
-		slot->held[slot->held_count++] = surface->current;
-
-		/* Its frame callbacks after the windows'. */
-		tail = &slot->callbacks;
+		tail = &callbacks;
 		while (*tail != NULL)
 			tail = &(*tail)->callback_next;
 		*tail = surface->committed_callbacks;
 		surface->committed_callbacks = NULL;
 	}
 
-	/* A client's cursor surface is held and told too. */
+	/* A client's cursor surface is told too. */
 	surface = server->cursor_surface;
 	if (surface != NULL && !surface->dead && surface->current != NULL) {
-		kwl_buffer_get(surface->current);
-		slot->held[slot->held_count++] = surface->current;
-
-		/* Its frame callbacks after the windows'. */
-		tail = &slot->callbacks;
+		tail = &callbacks;
 		while (*tail != NULL)
 			tail = &(*tail)->callback_next;
 		*tail = surface->committed_callbacks;
 		surface->committed_callbacks = NULL;
 	}
+
+	/* The frame's record; without memory its callbacks go now (the client is not held up). */
+	told = calloc(1, sizeof(*told));
+	if (told == NULL) {
+		kwl_callbacks_done(&callbacks);
+		return;
+	}
+
+	/* What its presents' shown messages apply: the output's, and each head's it presents. */
+	told->number = job->number;
+	told->frame = server->frame + 1U;
+	told->start_ms = compose->frame_start_ms;
+	told->callbacks = callbacks;
+	told->output = 1U;
+	for (index = 0U; index < KWL_HEADS; index++) {
+		if (job->heads[index])
+			told->heads |= 1U << index;
+	}
+
+	/* After the frames given before it; one more frame's output is not shown yet. */
+	if (compose->told_tail == NULL) {
+		compose->told = told;
+	} else {
+		compose->told_tail->next = told;
+	}
+
+	/* The frame is now the last one told of, and counted until its output's present is shown. */
+	compose->told_tail = told;
+	compose->showing++;
 }
 
 /*
@@ -4676,6 +4856,9 @@ compose_message(
 	case KWL_RENDER_TASK_DONE:
 		compose_task_done(server, message);
 		break;
+	case KWL_RENDER_SHOWN:
+		compose_shown(server, message);
+		break;
 	default:
 		break;
 	}
@@ -4754,11 +4937,12 @@ compose_task_done(
 /*
  * Ends the frame (or the layer's picture) in flight after the render
  * thread saw its fence signalled: the outcome of its presents, then the
- * buffers it sampled are released (when nothing else holds them) and the
- * frame callbacks of the surfaces it showed are sent.  The thread waits
- * for every job in flight even when nothing more is asked of it, so this
- * comes for a layer's picture, for a frame whose present failed and for
- * the last frames before the compositor goes quiet too.
+ * buffers that waited for the drawings up to it go back (when nothing else
+ * holds them).  The frame callbacks wait for the output's present to be
+ * shown (compose_shown).  The thread waits for every job in flight even
+ * when nothing more is asked of it, so this comes for a layer's picture,
+ * for a frame whose present failed and for the last frames before the
+ * compositor goes quiet too.
  */
 static void
 compose_completed(
@@ -4769,12 +4953,12 @@ compose_completed(
 	struct kwl_compose *compose;
 	struct kwl_frame_slot *slot;
 	uint64_t elapsed;
-	unsigned index;
 	unsigned quiet;
 
 	/* The walk and the replay of the drawing (KWL PERF walk); its slot; one more drawing is done with what it used. */
 	compose = server->compose;
 	compose->drawings_done++;
+	kwl_buffers_returned(server);
 	outcome = &message->outcome;
 	slot = &compose->slots[message->job.slot % KWL_FRAME_SLOTS];
 	slot->flying = 0U;
@@ -4823,31 +5007,328 @@ compose_completed(
 		compose->scene.valid = 1U;
 	slot->scene_written = 0U;
 
-	/* The sampled buffers, and the frame callbacks. */
-	for (index = 0; index < slot->held_count; index++)
-		kwl_buffer_put(slot->held[index]);
-	slot->held_count = 0;
-	kwl_callbacks_done(&slot->callbacks);
+	/* The slot is free for the next frame. */
 	if (compose->in_flight > 0U)
 		compose->in_flight--;
 
 	/* A test image's capture sends the frame it copied (shot.c). */
 	kwl_shot_complete(server);
-	if (server->log_frames)
-		printf("KWL LAT shown frame=%llu at_us=%llu\n", (unsigned long long)slot->number, (unsigned long long)kwl_log_us());
+	if (server->log_frames) {
+		printf("KWL LAT reaped frame=%llu drawing=%llu at_us=%llu\n", (unsigned long long)slot->number, (unsigned long long)compose->drawings_done,
+		       (unsigned long long)kwl_log_us());
+	}
 
 	/* The time from the start of the frame to its completion (reported by KWL PERF). */
 	elapsed = kwl_cycles() - slot->start_cycles;
 	server->perf.compose_frames++;
 	server->perf.compose_cycles += elapsed;
 
-	/* The next frame waits a moment for the windows this one told (half its time, 4 to 50 ms). */
-	server->frame_done_ms = kwl_milliseconds();
-	server->frame_wait_ms = (server->frame_done_ms - slot->start_ms) / 2U;
+	/* The next frame waits a moment for the windows this one tells, once shown (half its drawing's time, 4 to 50 ms). */
+	server->frame_wait_ms = (kwl_milliseconds() - slot->start_ms) / 2U;
 	if (server->frame_wait_ms < 4U)
 		server->frame_wait_ms = 4U;
 	if (server->frame_wait_ms > 50U)
 		server->frame_wait_ms = 50U;
+}
+
+/*
+ * Applies a frame's present shown (the display took it, or it failed): the
+ * output's sends the frame callbacks of the surfaces the frame showed (a
+ * failed present too, so that no client is held up), marks when the
+ * windows were told (the frame pacing) and lets an animation's next step
+ * be drawn; a head's draws a head that missed a frame again.  The frame's
+ * record goes once all its presents are shown.
+ */
+static void
+compose_shown(
+	struct kwl_server *server,
+	const struct kwl_render_message *message)
+{
+	struct kwl_compose *compose;
+	struct kwl_frame_told **link;
+	struct kwl_frame_told *told;
+	struct kwl_frame_told *previous;
+	unsigned head;
+
+	/* The frame's record, by the job's number. */
+	compose = server->compose;
+	previous = NULL;
+	link = &compose->told;
+	while (*link != NULL && (*link)->number != message->number) {
+		previous = *link;
+		link = &(*link)->next;
+	}
+
+	/* None when its record could not be made. */
+	told = *link;
+
+	/* A head's present: a head that missed a frame has an image free again. */
+	if (message->shown_key != KWL_RENDER_SHOWN_OUTPUT) {
+		head = message->shown_key - 1U;
+		if (told != NULL && head < KWL_HEADS)
+			told->heads &= ~(1U << head);
+		if (compose->head_missed) {
+			compose->head_missed = 0U;
+			server->dirty = 1;
+		}
+	}
+
+	/* The output's present: the surfaces the frame showed are told, and the frame pacing waits for them from now. */
+	if (message->shown_key == KWL_RENDER_SHOWN_OUTPUT && told != NULL && told->output) {
+		told->output = 0U;
+		if (compose->showing > 0U)
+			compose->showing--;
+		kwl_callbacks_done(&told->callbacks);
+		server->frame_done_ms = kwl_milliseconds();
+		if (server->log_frames) {
+			printf("KWL LAT shown frame=%llu result=%d at_us=%llu\n", (unsigned long long)told->frame, (int)message->result,
+			       (unsigned long long)kwl_log_us());
+		}
+	}
+
+	/* An animation's step asked for while the frame was not shown is drawn now. */
+	if (message->shown_key == KWL_RENDER_SHOWN_OUTPUT && server->step_after_shown) {
+		server->step_after_shown = 0U;
+		server->dirty = 1;
+	}
+
+	/* A frame not told of (its record could not be made), or one with presents still to be shown. */
+	if (told == NULL || told->output || told->heads != 0U)
+		return;
+
+	/* Every present shown: the record goes. */
+	*link = told->next;
+	if (compose->told_tail == told)
+		compose->told_tail = previous;
+	compose_told_free(compose, told);
+}
+
+/* Tells whether a head's present of a frame given is not shown yet (its shown frees an image of that head). */
+static int
+compose_heads_showing(
+	const struct kwl_compose *compose)
+{
+	const struct kwl_frame_told *told;
+
+	/* Any frame with a head's present to be shown. */
+	for (told = compose->told; told != NULL; told = told->next) {
+		if (told->heads != 0U)
+			return 1;
+	}
+
+	/* None. */
+	return 0;
+}
+
+/* Frees a frame's record, sending the callbacks it still holds. */
+static void
+compose_told_free(
+	struct kwl_compose *compose,
+	struct kwl_frame_told *told)
+{
+	/* Its output's present was never shown: not counted any more. */
+	if (told->output && compose->showing > 0U)
+		compose->showing--;
+
+	/* Its clients are not held up. */
+	kwl_callbacks_done(&told->callbacks);
+	free(told);
+}
+
+/*
+ * Lets go of every frame's record whose presents were never all shown (the
+ * render and shown threads stopped): their callbacks are sent.
+ */
+static void
+compose_told_flush(
+	struct kwl_server *server)
+{
+	struct kwl_compose *compose;
+	struct kwl_frame_told *told;
+
+	/* Each, oldest first. */
+	compose = server->compose;
+	while (compose->told != NULL) {
+		told = compose->told;
+		compose->told = told->next;
+		compose_told_free(compose, told);
+	}
+
+	/* None is left, and no animation waits for one. */
+	compose->told_tail = NULL;
+	compose->showing = 0U;
+	if (server->step_after_shown) {
+		server->step_after_shown = 0U;
+		server->dirty = 1;
+	}
+}
+
+/*
+ * Starts the shown thread (registered as "shown") when the device has
+ * present fences, and gives the render thread its fences; without them,
+ * or when the thread cannot be started, the render thread tells the
+ * presents with the frames' completions.  Returns 0.
+ */
+static int
+compose_shown_start(
+	struct kwl_compose *compose)
+{
+	struct kwl_shown_ops ops;
+	int error;
+
+	/* No present fences: nothing to start. */
+	compose->shown_started = 0U;
+	printf("KWL SHOWN present_fences=%u\n", compose->present_fences);
+	if (!compose->present_fences)
+		return 0;
+
+	/* Its fences' work, on the compositor's device. */
+	memset(&ops, 0, sizeof(ops));
+	ops.create = compose_op_fence_create;
+	ops.destroy = compose_op_fence_destroy;
+	ops.wait = compose_op_fences_wait;
+	ops.status = compose_op_fence_status;
+	ops.reset = compose_op_fence_reset;
+	error = kwl_shown_init(&compose->shown, &ops, compose, &compose->render);
+	if (error != 0) {
+		printf("KWL SHOWN unavailable errno=%d\n", error);
+		return 0;
+	}
+
+	/* The thread, in the register; without it the presents are told with the frames' completions. */
+	error = kwl_thread_start(&compose->shown_thread, "shown", kwl_shown_main, &compose->shown);
+	if (error != 0) {
+		kwl_shown_destroy(&compose->shown);
+		printf("KWL SHOWN unavailable errno=%d\n", error);
+		return 0;
+	}
+
+	/* Succeeded: the render thread's frames present with fences from now on. */
+	compose->render.shown = &compose->shown;
+	compose->shown_started = 1U;
+	return 0;
+}
+
+/*
+ * Stops the shown thread once every present given has been told (after
+ * the render thread stopped, which gives no more), with its line of what
+ * it did, and destroys its spare fences.
+ */
+static void
+compose_shown_end(
+	struct kwl_compose *compose)
+{
+	/* Never started. */
+	if (!compose->shown_started)
+		return;
+
+	/* The thread ends after the presents it waits for. */
+	kwl_shown_stop(&compose->shown);
+	kwl_thread_join(&compose->shown_thread);
+	printf("KWL SHOWN stopped shown=%llu failed=%llu waits=%llu sleeps=%llu fences=%llu\n",
+	       (unsigned long long)compose->shown.counts.shown,
+	       (unsigned long long)compose->shown.counts.failed,
+	       (unsigned long long)compose->shown.counts.waits,
+	       (unsigned long long)compose->shown.counts.sleeps,
+	       (unsigned long long)compose->shown.counts.fences_made);
+
+	/* Its fences, then its state; the render thread presents without them. */
+	kwl_shown_destroy(&compose->shown);
+	compose->render.shown = NULL;
+	compose->shown_started = 0U;
+}
+
+/* Makes an unsignalled present fence, for the shown thread's spares. */
+static VkResult
+compose_op_fence_create(
+	void *context,
+	VkFence *fence)
+{
+	struct kwl_compose *compose;
+	VkFenceCreateInfo create;
+	VkResult result;
+
+	/* Unsignalled: a present signals it. */
+	compose = context;
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	result = vkCreateFence(compose->device, &create, NULL, fence);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* Succeeded: a fence for a present. */
+	return VK_SUCCESS;
+}
+
+/* Destroys a present fence. */
+static void
+compose_op_fence_destroy(
+	void *context,
+	VkFence fence)
+{
+	struct kwl_compose *compose;
+
+	/* On the compositor's device. */
+	compose = context;
+	vkDestroyFence(compose->device, fence, NULL);
+}
+
+/* Waits, with no time limit, until any of the present fences is signalled (the shown thread's one wait). */
+static VkResult
+compose_op_fences_wait(
+	void *context,
+	const VkFence *fences,
+	unsigned count)
+{
+	struct kwl_compose *compose;
+	VkResult result;
+
+	/* Any one of them. */
+	compose = context;
+	result = vkWaitForFences(compose->device, count, fences, VK_FALSE, UINT64_MAX);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* Succeeded: at least one is signalled. */
+	return VK_SUCCESS;
+}
+
+/* Tells whether a present fence is signalled (VK_SUCCESS) or not yet (VK_NOT_READY). */
+static VkResult
+compose_op_fence_status(
+	void *context,
+	VkFence fence)
+{
+	struct kwl_compose *compose;
+	VkResult result;
+
+	/* Looked at once, without waiting. */
+	compose = context;
+	result = vkGetFenceStatus(compose->device, fence);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* Succeeded: signalled. */
+	return VK_SUCCESS;
+}
+
+/* Resets a signalled present fence for its next present. */
+static VkResult
+compose_op_fence_reset(
+	void *context,
+	VkFence fence)
+{
+	struct kwl_compose *compose;
+	VkResult result;
+
+	/* The shown thread's alone while it is not spare. */
+	compose = context;
+	result = vkResetFences(compose->device, 1U, &fence);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* Succeeded: unsignalled again. */
+	return VK_SUCCESS;
 }
 
 /*
@@ -5025,6 +5506,7 @@ compose_op_run(
 	VkSemaphore signals[1U + KWL_HEADS];
 	VkSubmitInfo submit;
 	VkPresentInfoKHR present;
+	VkSwapchainPresentFenceInfoEXT present_fence;
 	VkCommandBuffer buffers[2];
 	unsigned wait_count;
 	unsigned signal_count;
@@ -5119,6 +5601,14 @@ compose_op_run(
 	present.swapchainCount = 1U;
 	present.pSwapchains = &compose->output.swapchain;
 	present.pImageIndices = &job->output_image;
+
+	/* Its present fence, which the shown thread waits for (none without present fences). */
+	memset(&present_fence, 0, sizeof(present_fence));
+	present_fence.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT;
+	present_fence.swapchainCount = 1U;
+	present_fence.pFences = &job->present_fence;
+	if (job->present_fence != VK_NULL_HANDLE)
+		present.pNext = &present_fence;
 	outcome->present_result = vkQueuePresentKHR(compose->queue, &present);
 
 	/* Each head's image to its display after the commands. */
@@ -5133,6 +5623,14 @@ compose_op_run(
 		present.swapchainCount = 1U;
 		present.pSwapchains = &head->output.swapchain;
 		present.pImageIndices = &job->head_images[index];
+
+		/* Its present fence, as the output's. */
+		memset(&present_fence, 0, sizeof(present_fence));
+		present_fence.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_EXT;
+		present_fence.swapchainCount = 1U;
+		present_fence.pFences = &job->head_fences[index];
+		if (job->head_fences[index] != VK_NULL_HANDLE)
+			present.pNext = &present_fence;
 		outcome->heads[index] = 1U;
 		outcome->head_results[index] = vkQueuePresentKHR(compose->queue, &present);
 	}
