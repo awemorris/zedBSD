@@ -3,7 +3,7 @@
 # ws345-p014 応答しない頁の問い
 
 - WS: [ws.md](../ws.md)。設計: [design.md](../design.md) §9。
-- 状態: in-progress（2026-11-14 P3 q2090-i01: 残りの shell-wine の全 case と p010 の agent への広げを済ませた。実装済み・試験 PASS、cleared の判定は Q1。下の「結果（2026-11-14 P3）」。前: 2026-11-02 P8 q1996-i01 が実装と試験）
+- 状態: cleared（2026-11-14 Q1、merge b09f1e9c51）。in-progress（2026-11-14 P3 q2090-i01: 残りの shell-wine の全 case と p010 の agent への広げを済ませた。実装済み・試験 PASS、cleared の判定は Q1。下の「結果（2026-11-14 P3）」。前: 2026-11-02 P8 q1996-i01 が実装と試験）
 - 出所: 2026-11-02 ユーザーの決定（J2 の答え、ws.md）。
 
 ## 目的

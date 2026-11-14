@@ -402,6 +402,7 @@ struct shell_latency {
 	_Alignas(8) uint64_t sent_us;
 	uint64_t started_us;
 	uint64_t longest_us;
+	uint64_t longest_at_us;
 	unsigned long samples;
 	unsigned long over_20ms;
 	unsigned long over_100ms;
