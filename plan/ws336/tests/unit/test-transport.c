@@ -240,6 +240,7 @@ fnv(
 		hash *= 0x01000193U;
 	}
 
+	/* Reports the hash. */
 	return hash;
 }
 
@@ -251,6 +252,7 @@ test_host_key(
 {
 	struct test_context *test;
 
+	/* Counts the call and fails when the test asks for a failure. */
 	test = context;
 	test->host_key_calls++;
 	if (test->fail_host_key != 0)
@@ -269,6 +271,7 @@ test_sign(
 	struct test_context *test;
 	int error;
 
+	/* Counts the call and fails when the test asks for a failure. */
 	test = context;
 	test->sign_calls++;
 	if (test->fail_sign != 0)
@@ -290,6 +293,7 @@ test_check_host_key(
 {
 	struct test_context *test;
 
+	/* Counts the call and keeps the blob the transport was shown. */
 	test = context;
 	test->check_calls++;
 	test->blob_size = 0;
@@ -298,6 +302,7 @@ test_check_host_key(
 		test->blob_size = size;
 	}
 
+	/* Refuses or fails the key when the test asks for it. */
 	if (test->refuse != 0)
 		return EACCES;
 	if (test->fail != 0)
@@ -333,6 +338,7 @@ start_one(
 		inbox = &server_inbox;
 	}
 
+	/* Clears the state of one side and gives it the test's host key. */
 	memset(context, 0, sizeof(*context));
 	context->key = &host_key;
 	memset(inbox, 0, sizeof(*inbox));
@@ -347,6 +353,7 @@ start_one(
 		ops.check_host_key = test_check_host_key;
 	}
 
+	/* Starts the transport on the side with the callbacks of the test. */
 	error = ssh_transport_init(transport, role, &ops, TEST_NOW);
 	CHECK_EQ(error, 0);
 }
@@ -456,6 +463,7 @@ pump(void)
 			return 0;
 	}
 
+	/* Gives up: the two sides did not settle within the number of rounds. */
 	return ETIMEDOUT;
 }
 
@@ -775,11 +783,13 @@ test_connect(void)
 		CHECK_EQ(server.h[index], 0);
 	}
 
+	/* The client's random part of the hybrid init is not all zero. */
 	for (index = 0; index < SSH_HYBRID_INIT_SIZE; index++) {
 		if (client.c_init[index] != 0)
 			break;
 	}
 
+	/* The scan must have stopped at a non-zero byte. */
 	CHECK_EQ(index, SSH_HYBRID_INIT_SIZE);
 
 	/* Sends upper-layer messages both ways. */
@@ -792,6 +802,7 @@ test_connect(void)
 		CHECK_EQ(error, 0);
 	}
 
+	/* Lets the two sides run the exchange to its end. */
 	error = pump();
 	CHECK_EQ(error, 0);
 
@@ -807,6 +818,7 @@ test_connect(void)
 		CHECK_EQ(client_inbox.hash[index], fnv(message, 10U + index));
 	}
 
+	/* Four messages crossed each way, in each direction's sequence numbers. */
 	CHECK_EQ(client.packet.send.seq, 4);
 	CHECK_EQ(server.packet.receive.seq, 4);
 	stop_pair();
@@ -858,6 +870,7 @@ test_send_errors(void)
 	unsigned index;
 	int error;
 
+	/* Connects the two sides. */
 	connect_pair();
 
 	/* Refuses a missing or empty payload. */
@@ -874,6 +887,7 @@ test_send_errors(void)
 		CHECK_EQ(error, EINVAL);
 	}
 
+	/* Sends one message of each number that a peer may send. */
 	for (index = 0; index < sizeof(taken) / sizeof(taken[0]); index++) {
 		message[0] = (uint8_t)taken[index];
 		error = ssh_transport_send(&client, message, sizeof(message));
@@ -891,6 +905,7 @@ test_send_errors(void)
 		CHECK_EQ(error, EINVAL);
 	}
 
+	/* Lets the two sides deliver them. */
 	error = pump();
 	CHECK_EQ(error, 0);
 	/* The reserved 128 and 191 are taken for sending but answered with UNIMPLEMENTED by the receiver (RFC 4250 4.1.2). */
@@ -932,6 +947,10 @@ test_peer_rekey_held(void)
 	unsigned index;
 	int error;
 
+	/*
+	 * Connects the two sides, and keeps the session identifier and the send key for
+	 * comparison.
+	 */
 	connect_pair();
 	memcpy(session, client.session_id, sizeof(session));
 	memcpy(old_send, client.packet.send.cipher.main_key, sizeof(old_send));
@@ -955,6 +974,7 @@ test_peer_rekey_held(void)
 		CHECK_EQ(error, 0);
 	}
 
+	/* The output must not have grown while the held messages wait for the exchange to end. */
 	(void)ssh_transport_pending(&client, &after);
 	CHECK_EQ(after, before);
 	CHECK(client.held.size > 0);
@@ -976,6 +996,10 @@ test_peer_rekey_held(void)
 		CHECK_EQ(server_inbox.hash[index], fnv(message, sizeof(message) - index));
 	}
 
+	/*
+	 * The held message came out after the exchange, with the same session identifier and
+	 * a new key.
+	 */
 	CHECK_EQ(client_inbox.count, 1);
 	make_message(message, 20, 70, 99);
 	CHECK_EQ(client_inbox.hash[0], fnv(message, 20));
@@ -999,6 +1023,7 @@ test_held_full(void)
 	unsigned index;
 	int error;
 
+	/* Connects the two sides. */
 	connect_pair();
 
 	/* The client starts a re-exchange, so its sends are held. */
@@ -1017,6 +1042,7 @@ test_held_full(void)
 		count++;
 	}
 
+	/* The send must have failed for lack of room in the held area. */
 	CHECK_EQ(error, ENOBUFS);
 	CHECK_EQ(count, SSH_TRANSPORT_HELD_MAX / (4U + sizeof(message)));
 
@@ -1045,6 +1071,7 @@ test_held_full(void)
 		CHECK_EQ(server_inbox.hash[index], fnv(message, sizeof(message)));
 	}
 
+	/* The last message, the one that fits exactly, arrived whole and nothing is held now. */
 	make_message(message, last, 94, count);
 	CHECK_EQ(server_inbox.size[count], last);
 	CHECK_EQ(server_inbox.hash[count], fnv(message, last));
@@ -1063,6 +1090,7 @@ test_output_full(void)
 	unsigned index;
 	int error;
 
+	/* Connects the two sides. */
 	connect_pair();
 
 	/* Sends without writing until the output is full. */
@@ -1075,6 +1103,7 @@ test_output_full(void)
 		count++;
 	}
 
+	/* The send must have failed for lack of room in the output. */
 	CHECK_EQ(error, ENOBUFS);
 	CHECK(count > 100U);
 	(void)ssh_transport_pending(&client, &before);
@@ -1102,6 +1131,7 @@ test_output_full(void)
 		CHECK_EQ(server_inbox.hash[index], fnv(message, sizeof(message)));
 	}
 
+	/* The exchange was not started. */
 	CHECK_EQ(client.kex_step, 0);
 	stop_pair();
 }
@@ -1118,6 +1148,7 @@ test_held_running(void)
 	unsigned index;
 	int error;
 
+	/* Connects the two sides. */
 	connect_pair();
 
 	/* Leaves one message held, as a flush that ran out of room would. */
@@ -1155,6 +1186,7 @@ test_held_running(void)
 		ssh_buf_put_bytes(&client.held, big_payload, sizeof(big_payload));
 	}
 
+	/* The flush must have kept the one held message and left room. */
 	CHECK_EQ(client.held.error, 0);
 	ssh_transport_written(&client, 0);
 	(void)ssh_transport_pending(&client, &after);
@@ -1169,6 +1201,7 @@ test_held_running(void)
 		CHECK_EQ(server_inbox.hash[index], fnv(big_payload, sizeof(big_payload)));
 	}
 
+	/* Releases the two sides. */
 	stop_pair();
 }
 
@@ -1187,6 +1220,7 @@ test_output_reserve(void)
 	size_t room;
 	int error;
 
+	/* Connects the two sides. */
 	connect_pair();
 
 	/* Fills the upper layer's part of the output with large, then single-byte, messages. */
@@ -1197,6 +1231,10 @@ test_output_reserve(void)
 			break;
 	}
 
+	/*
+	 * The first refusal comes when the part reserved for the transport's own messages is
+	 * reached.
+	 */
 	CHECK_EQ(error, ENOBUFS);
 
 	/*
@@ -1216,6 +1254,7 @@ test_output_reserve(void)
 			break;
 	}
 
+	/* Single bytes are refused at the same point. */
 	CHECK_EQ(error, ENOBUFS);
 
 	/* No framed message went past the upper layer's limit. */
@@ -1234,6 +1273,7 @@ test_output_reserve(void)
 		CHECK_EQ(error, EAGAIN);
 	}
 
+	/* The answers went past the upper layer's limit, and the upper layer is still refused. */
 	(void)ssh_transport_pending(&client, &size);
 	CHECK(size > SSH_PACKET_OUTPUT_MAX - 64U * 1024U);
 	error = ssh_transport_send(&client, message, 1);
@@ -1248,6 +1288,10 @@ test_output_reserve(void)
 		error = step(&client, NULL);
 	}
 
+	/*
+	 * A message of the transport itself must still fit in the reserve, and the transport
+	 * must close when it does not.
+	 */
 	CHECK_EQ(error, EMSGSIZE);
 	CHECK_EQ(client.state, SSH_TRANSPORT_CLOSED);
 	CHECK(count > 1000U);
@@ -1265,6 +1309,7 @@ test_mac_error(void)
 	size_t size;
 	int error;
 
+	/* Connects the two sides. */
 	connect_pair();
 
 	/* Changes the last byte of the tag. */
@@ -1294,6 +1339,10 @@ test_rekey_time(void)
 	size_t size;
 	int error;
 
+	/*
+	 * Connects the two sides, and keeps the session identifier and the receive key for
+	 * comparison.
+	 */
 	connect_pair();
 	memcpy(session, client.session_id, sizeof(session));
 	memcpy(old_receive, client.packet.receive.cipher.header_key, sizeof(old_receive));
@@ -1345,6 +1394,7 @@ test_rekey_counters(void)
 	uint64_t limit;
 	int error;
 
+	/* Connects the two sides. */
 	connect_pair();
 
 	/* Each of the four counters in turn. */
@@ -1361,6 +1411,7 @@ test_rekey_counters(void)
 			limit = SSH_TRANSPORT_REKEY_PACKETS;
 		}
 
+		/* One below the limit starts nothing; the limit starts the exchange. */
 		*counter = limit - 1U;
 		error = ssh_transport_tick(&client, TEST_NOW);
 		CHECK_EQ(error, 0);
@@ -1408,6 +1459,7 @@ test_rekey_peer_messages(void)
 	uint8_t message[16];
 	int error;
 
+	/* Connects the two sides. */
 	connect_pair();
 
 	/* The client starts; the server, not yet in the exchange, sends a message. */
@@ -2259,6 +2311,7 @@ test_unimplemented(void)
 	unsigned index;
 	int error;
 
+	/* Connects the two sides. */
 	connect_pair();
 
 	/* Each unknown number in turn. */
@@ -2297,6 +2350,7 @@ test_unimplemented(void)
 		CHECK_EQ(size, 0);
 	}
 
+	/* None of the unknown messages reached the upper layer. */
 	CHECK_EQ(client_inbox.count, 0);
 
 	/* None of them ended the connection. */
@@ -2326,6 +2380,7 @@ test_kex_out_of_step(void)
 		CHECK_EQ(client.state, SSH_TRANSPORT_CLOSED);
 		stop_pair();
 
+		/* Connects the two sides again for the next order of messages. */
 		connect_pair();
 		error = raw_send(&client, message, sizeof(message));
 		CHECK_EQ(error, 0);
@@ -2463,6 +2518,7 @@ test_export(void)
 	unsigned index;
 	int error;
 
+	/* Connects the two sides, and keeps the session identifier for comparison. */
 	connect_pair();
 	memcpy(session, client.session_id, sizeof(session));
 
@@ -2511,6 +2567,10 @@ test_export(void)
 		CHECK_EQ(error, 0);
 	}
 
+	/*
+	 * After the time limit the client starts a re-exchange, which must finish with the
+	 * held messages delivered.
+	 */
 	error = ssh_transport_tick(&client, TEST_NOW + SSH_TRANSPORT_REKEY_SECONDS);
 	CHECK_EQ(error, 0);
 	CHECK(client.kex_step != 0);
@@ -2600,11 +2660,20 @@ export_variant(
 	static const uint8_t key[65] = { 1, 2, 3, 4, 5, 6, 7, 8 };
 	static const uint8_t session[33] = { 9, 9, 9 };
 	unsigned which;
+	unsigned value;
+	size_t size;
+	const char *text;
 
 	/* Format and role. */
 	wire_reset(out);
-	wire_u8(out, variant == 1U ? 2U : 1U);
-	wire_u8(out, variant == 2U ? 2U : 1U);
+	value = 1U;
+	if (variant == 1U)
+		value = 2U;
+	wire_u8(out, value);
+	value = 1U;
+	if (variant == 2U)
+		value = 2U;
+	wire_u8(out, value);
 
 	/* The lines. */
 	if (variant == 3U) {
@@ -2622,24 +2691,56 @@ export_variant(
 		wire_text(out, SSH_VERSION_STRING);
 	}
 
-	wire_text(out, variant == 7U ? "OpenSSH" : "SSH-1.99-peer");
+	/* The peer's line, which is not an identification line in one variant. */
+	text = "SSH-1.99-peer";
+	if (variant == 7U)
+		text = "OpenSSH";
+	wire_text(out, text);
 
-	/* The session identifier and strict. */
-	wire_string(out, session, variant == 8U ? 31U : (variant == 9U ? 33U : 32U));
-	wire_u8(out, variant == 10U ? 0U : (variant == 11U ? 2U : 1U));
+	/* The session identifier, 32 bytes unless a variant makes it one short or one long. */
+	size = 32U;
+	if (variant == 8U)
+		size = 31U;
+	else if (variant == 9U)
+		size = 33U;
+	wire_string(out, session, size);
+
+	/* The strict flag, 1 unless a variant makes it 0 or 2. */
+	value = 1U;
+	if (variant == 10U)
+		value = 0U;
+	else if (variant == 11U)
+		value = 2U;
+	wire_u8(out, value);
 
 	/* The directions. */
 	for (which = 0; which < 2U; which++) {
-		wire_string(out, key, variant == 12U + which ? 63U : (variant == 14U + which ? 65U : 64U));
+		/* The key is 64 bytes unless a variant makes this direction's one short or one long. */
+		size = 64U;
+		if (variant == 12U + which)
+			size = 63U;
+		else if (variant == 14U + which)
+			size = 65U;
+		wire_string(out, key, size);
 		wire_u32(out, 0x01020304U);
-		wire_u8(out, variant == 16U + which ? 2U : 1U);
+
+		/* The direction's flag is 1 unless a variant makes it 2. */
+		value = 1U;
+		if (variant == 16U + which)
+			value = 2U;
+		wire_u8(out, value);
 		wire_u64(out, 77);
 		wire_u64(out, 88);
 	}
 
 	/* The time and the input. */
 	wire_u64(out, 123456);
-	wire_text(out, variant == 18U ? "" : "abc");
+	text = "abc";
+	if (variant == 18U)
+		text = "";
+	wire_text(out, text);
+
+	/* One variant has a byte after the end. */
 	if (variant == 19U)
 		wire_u8(out, 0);
 }
@@ -2750,6 +2851,7 @@ test_random(void)
 				(void)step(&server, NULL);
 			}
 
+			/* The two KEXINIT messages cross. */
 			if (stage >= 2U) {
 				move_all(&client, &server);
 				move_all(&server, &client);
@@ -2757,16 +2859,19 @@ test_random(void)
 				(void)step(&server, NULL);
 			}
 
+			/* The client sends its half of the key exchange. */
 			if (stage >= 3U) {
 				move_all(&client, &server);
 				(void)step(&server, NULL);
 			}
 
+			/* The server sends its reply. */
 			if (stage >= 4U) {
 				move_all(&server, &client);
 				(void)step(&client, NULL);
 			}
 
+			/* The two sides finish the exchange. */
 			if (stage >= 5U) {
 				error = pump();
 				CHECK_EQ(error, 0);
@@ -2798,6 +2903,10 @@ test_random(void)
 					CHECK_EQ(client.state, SSH_TRANSPORT_CLOSED);
 			}
 
+			/*
+			 * Gives the server the frame, which must either be taken or close
+			 * the connection.
+			 */
 			if (server.state != SSH_TRANSPORT_CLOSED) {
 				error = ssh_transport_input(&server, frame_wire.data, frame_wire.size);
 				CHECK(error == 0 || error == EMSGSIZE);
@@ -2806,6 +2915,7 @@ test_random(void)
 					CHECK_EQ(server.state, SSH_TRANSPORT_CLOSED);
 			}
 
+			/* Releases the two sides. */
 			stop_pair();
 		}
 	}
@@ -2840,9 +2950,11 @@ test_random_running(void)
 			continue;
 		}
 
+		/* Marks the output as written so that the client can send again. */
 		ssh_transport_written(&client, SSH_PACKET_OUTPUT_MAX);
 		client_inbox.count = 0;
 	}
 
+	/* Releases the two sides. */
 	stop_pair();
 }
