@@ -8,7 +8,7 @@
 | P7 | phase-runner-mid | ws334 p037 と不具合 (q2095-i01) | `/home/awe/zedBSD-worktrees/p7-ws334b` / `agent/p7-ws334b` | 動いている（2026-11-14 23:2x） | — |
 | P8 | phase-runner | ws343 fetch の https (q2096-i01) | `/home/awe/zedBSD-worktrees/p8-ws343` / `agent/p8-ws343` | 返却（2026-11-14、merge は Makefile の案の承認待ち） | — |
 | P5 | phase-runner | ws329 p002 共通化 (q2092-i01) | `/home/awe/zedBSD-worktrees/p5-ws329b` / `agent/p5-ws329b` | 動いている（2026-11-14 23:3x） | — |
-| P6 | phase-runner-high | ws302 設計の改訂と p002 (q2093-i01) | `/home/awe/zedBSD-worktrees/p6-ws302` / `agent/p6-ws302` | 動いている（2026-11-14 23:3x） | — |
+| P6 | phase-runner-high | ws302 p003 sched の口 (q2099-i01) | `/home/awe/zedBSD-worktrees/p6-ws302b` / `agent/p6-ws302b` | 動いている（2026-11-14 23:5x） | — |
 | P3 | phase-runner-mid | ws345 p011 受け入れ (q2097-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p011` / `agent/p3-ws345p011` | 動いている（2026-11-14 23:3x） | — |
 | P4 | phase-runner | ws328 p001 review の反映 (q2098-i01) | `/home/awe/zedBSD-worktrees/p4-ws328b` / `agent/p4-ws328b` | 動いている（2026-11-14 23:2x） | — |
 | P1 | phase-runner | ws353 p016 試験の再開 (q2088-i01) | `/home/awe/zedBSD-worktrees/p1-ws353n` / `agent/p1-ws353n` | 動いている（2026-11-14 21:3x、5330 を割当） | — |

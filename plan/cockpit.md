@@ -16,7 +16,7 @@
 | P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2097: p011 受け入れと回帰（p010・p014 cleared） | p012 規約の見直し → completed |
 | P4 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2098: p001 の設計の敵対的レビューと反映 | ユーザーの問い U1〜U4 → 実装（Sonnet） |
 | P5 | [WS329](ws329/ws.md) | H.264 の software の encoder | q2092: p002 共通化の refactor | p003 header と骨格 → 実装（Sonnet） |
-| P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2093: 設計の改訂（第 3 版） | p002 config・型・統計 → p003 sched の口 |
+| P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2099: p003 sched の口（p001 cleared、p002 実装済み） | p004 DTB の本体 |
 | P7 | [WS334](ws334/ws.md) | Windows 版ブラウザ | q2095: p037（TSF・DirectManipulation・透過）と不具合 2 件 | p035 規約の見直し → completed |
 | P8 | [WS343](ws343/ws.md) | base の TLS と ssh を自前に | 返却: fetch の https PASS（host 18・3 機種・QEMU 4） | Makefile の案の承認 → merge → p004 規約の見直し |
 | agy | [WS347](ws347/ws.md) | Amaterrace GPU（RTL） | reset の 10 回目（38593b0e）まで済み | Q1 が 10 回目を確かめて 11 回目 |

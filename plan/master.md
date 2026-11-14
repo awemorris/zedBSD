@@ -34,7 +34,7 @@
 | P3 | q2097 | [WS345](ws345/ws.md)（ブラウザの thread の分け方）p011 受け入れと回帰。p010・p014 は cleared |
 | P4 | q2098 | [WS328](ws328/ws.md)（libbrowser のベクトル描画と SVG）p001 の設計の敵対的レビューと反映（素案は merge c315f3799f） |
 | P5 | q2092 | [WS329](ws329/ws.md)（H.264 の software の encoder）p002 共通化の refactor |
-| P6 | q2093 | [WS302](ws302/ws.md)（デスクトップスレッドバランサ）設計の改訂 → p002 |
+| P6 | q2099 | [WS302](ws302/ws.md)（デスクトップスレッドバランサ）p003 sched の口。p001 cleared、p002 は mk の案の承認待ち |
 | P7 | q2095 | [WS334](ws334/ws.md)（Windows 版ブラウザ）p037 と Phase の無い不具合 2 件 |
 | P8 | — | 返却: [WS343](ws343/ws.md) fetch の https（PASS、merge は Makefile の案の承認待ち） |
 
@@ -104,7 +104,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-436 · q2099 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-436 · q2100 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
