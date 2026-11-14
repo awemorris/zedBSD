@@ -11,7 +11,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS353](ws353/ws.md) | 待ち方の作り直し | q2113: p017 規約の見直し（p016 cleared） | WS353 を completed に |
+| P1 | [WS338](ws338/ws.md) | H.264 の software の decoder を速く | q2121: p001 設計（host で profile） | 実装の Phase（Pi 5・5330 で受け入れ） |
 | P2 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2117: p003 flatten（Sonnet） | p006〜p008・p017 |
 | P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2115: p015 headless の _OWN の道（p011 cleared） | p012 規約の見直し → completed |
 | P4 | [WS068](ws068/ws.md) | EGL・GL を Vulkan の上に | q2116: 試験の config と p045（Venus） | p047〜 |

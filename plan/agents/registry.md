@@ -11,7 +11,7 @@
 | P6 | phase-runner-high | ws302 p003 の締めと p004 (q2109-i01) | `/home/awe/zedBSD-worktrees/p6-ws302c` / `agent/p6-ws302c` | 動いている（2026-11-15 01:1x） | — |
 | P3 | phase-runner-mid | ws345 p015 (q2115-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p015` / `agent/p3-ws345p015` | 動いている（2026-11-15 01:5x） | — |
 | P4 | phase-runner-mid | ws068 試験の config と p045 (q2116-i01) | `/home/awe/zedBSD-worktrees/p4-ws068` / `agent/p4-ws068` | 動いている（2026-11-15 01:5x） | — |
-| P1 | conformance-reviewer | ws353 p017 規約の見直し (q2113-i01) | `/home/awe/zedBSD-worktrees/p1-ws353p017` / `agent/p1-ws353p017` | 動いている（2026-11-15 01:3x） | — |
+| P1 | phase-runner | ws338 p001 設計 (q2121-i01) | `/home/awe/zedBSD-worktrees/p1-ws338` / `agent/p1-ws338` | 動いている（2026-11-15 02:0x） | — |
 | Sonnet | phase-runner-low | ws335 p043 (q2053-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p043` / `agent/s-ws335-p043` | 動いている（2026-11-13 22:3x） | — |
 | P1 | phase-runner-high | ws347 p006 RTL の CAPS (q2010-i01) | `/home/awe/amaterrace-worktrees/p1-ws347rtl` / `ws347-rtl`（amaterrace-gpu） | 停止（2026-11-11 12:37 ユーザーの指示、未 commit の RTL の変更あり、merge しない） | — |
 | P2 | phase-runner-high | ws347 p003 driver の追従 (q2011-i01) | `/home/awe/zedBSD-worktrees/p2-ws347` / `agent/p2-ws347` | 停止（2026-11-11 12:37 ユーザーの指示、未 commit の変更あり） | — |
