@@ -3,7 +3,7 @@
 # WS329 libmedia の H.264 の software の encoder（独自の実装、標準廉価実装手順）
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: planning（2026-10-30 Q1 が作成。2026-10-31 p001 の設計を P5 が先に進めた。実装の Phase は [WS326](../ws326/ws.md)（H.264 の software の decoder）の completed の後）
+- Status: incomplete（2026-11-15 p001・p002 cleared、p003 は sources.mk の差分の承認の後）（2026-10-30 Q1 が作成。2026-10-31 p001 の設計を P5 が先に進めた。実装の Phase は [WS326](../ws326/ws.md)（H.264 の software の decoder）の completed の後）
 - 目標: libmedia に、既存の library を使わない H.264 の software の encoder を作る。手順は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)）。
   libmedia の encoder の口（[WS318](../ws318/ws.md) の `media_encoder_*`、codec の問い合わせと指定）の backend の 1 つで、順は Vulkan Video の encode → この encoder → libavcodec（[WS326](../ws326/ws.md) の decoder の順の決定に合わせる、Q1 の解釈）。
 

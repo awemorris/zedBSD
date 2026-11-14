@@ -4,11 +4,11 @@
 [history/agents-registry-through-20261026.md](../history/agents-registry-through-20261026.md)。
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P2 | phase-runner | ws310 p004・p002 (q2106-i01) | `/home/awe/zedBSD-worktrees/p2-ws310` / `agent/p2-ws310` | 動いている（2026-11-15 00:4x） | — |
+| P2 | phase-runner | ws321 p004 (q2111-i01) | `/home/awe/zedBSD-worktrees/p2-ws321` / `agent/p2-ws321` | 動いている（2026-11-15 01:1x） | — |
 | P7 | conformance-reviewer | ws334 p035 の続き (q2107-i01) | `/home/awe/zedBSD-worktrees/p7-ws334d` / `agent/p7-ws334d` | 動いている（2026-11-15 00:5x） | — |
-| P8 | conformance-reviewer | ws351 p003 (q2105-i01) | `/home/awe/zedBSD-worktrees/p8-ws351p003` / `agent/p8-ws351p003` | 動いている（2026-11-15 00:4x） | — |
-| P5 | phase-runner | ws329 p002 共通化 (q2092-i01) | `/home/awe/zedBSD-worktrees/p5-ws329b` / `agent/p5-ws329b` | 動いている（2026-11-14 23:3x） | — |
-| P6 | phase-runner-high | ws302 p003 sched の口 (q2099-i01) | `/home/awe/zedBSD-worktrees/p6-ws302b` / `agent/p6-ws302b` | 動いている（2026-11-14 23:4x） | — |
+| P8 | phase-runner | ws341 p001 設計 (q2112-i01) | `/home/awe/zedBSD-worktrees/p8-ws341` / `agent/p8-ws341` | 動いている（2026-11-15 01:1x） | — |
+| P5 | phase-runner-high | ws217 p009a (q2110-i01) | `/home/awe/zedBSD-worktrees/p5-ws217` / `agent/p5-ws217` | 動いている（2026-11-15 01:1x） | — |
+| P6 | phase-runner-high | ws302 p003 の締めと p004 (q2109-i01) | `/home/awe/zedBSD-worktrees/p6-ws302c` / `agent/p6-ws302c` | 動いている（2026-11-15 01:1x） | — |
 | P3 | phase-runner-mid | ws345 p011 受け入れ (q2097-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p011` / `agent/p3-ws345p011` | 動いている（2026-11-14 23:3x） | — |
 | P4 | phase-runner | ws299 p007 の QEMU (q2108-i01) | `/home/awe/zedBSD-worktrees/p4-ws299` / `agent/p4-ws299` | 動いている（2026-11-15 01:0x） | — |
 | P1 | phase-runner | ws353 p016 試験の再開 (q2088-i01) | `/home/awe/zedBSD-worktrees/p1-ws353n` / `agent/p1-ws353n` | 動いている（2026-11-14 21:3x、5330 を割当） | — |
