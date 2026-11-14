@@ -1,7 +1,7 @@
 #!/bin/sh
 # The boot check of the balancer's statistics on x86_64 QEMU: an image of the text login
-# (plan/tools/boot-images/config-amd64-boot.mk) with the kernel without the balancer (n) and with it (y, through
-# desktop-balancer-overlay.mk until mk/kernel.mk has the rule), each booted by plan/tools/boot-test.sh, logged in as root on the
+# (plan/tools/boot-images/config-amd64-boot.mk) with the kernel without the balancer (n) and with it (y,
+# CONFIG_KERN_DESKTOP_BALANCER=y), each booted by plan/tools/boot-test.sh, logged in as root on the
 # emulated keyboard (input events and system calls on the new paths) and asked for uname.
 #
 #   plan/ws302/tests/p002-boot.sh OUT [VARIANT...]
@@ -25,7 +25,7 @@ config=plan/tools/boot-images/config-amd64-boot.mk
 for variant in $variants; do
 	extra=
 	if [ "$variant" = y ]; then
-		extra="-f Makefile -f plan/ws302/tests/desktop-balancer-overlay.mk CONFIG_KERN_DESKTOP_BALANCER=y"
+		extra="CONFIG_KERN_DESKTOP_BALANCER=y"
 	fi
 
 	# Makes the image; the kernel is rebuilt when the variant's flags differ from the last build's.
