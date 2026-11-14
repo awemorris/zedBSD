@@ -567,10 +567,14 @@ drv_nvme_hmb_plan(const struct drv_nvme_controller_profile *profile,
  * latencies add up to more than the limit is never a target, and one
  * that is out within the quick latency is entered after the short idle
  * time, a slower one after the long idle time.
- * Values referenced: the defaults of the Linux NVMe host driver's
- * parameters (default_ps_max_latency_us 100000, apst_primary_latency_tol_us
- * 15000, apst_primary_timeout_ms 100, apst_secondary_timeout_ms 2000), which
- * also make the table Debian programs on a Kioxia BG5; values only.
+ * Values referenced: Linux 6.19 drivers/nvme/host/core.c (the defaults of
+ * the module parameters default_ps_max_latency_us 100000,
+ * apst_primary_latency_tol_us 15000, apst_primary_timeout_ms 100 and
+ * apst_secondary_timeout_ms 2000, as read from
+ * /sys/module/nvme_core/parameters on Debian with Linux 6.19.13); values
+ * only.  They also give the table Debian programs on a Kioxia BG5.
+ * Procedure referenced: the same file (the shorter idle time for a target
+ * within the quick latency, the longer one for a slower target).
  */
 #define DRV_NVME_APST_LATENCY_LIMIT_US		100000U
 #define DRV_NVME_APST_QUICK_LATENCY_US		15000U
