@@ -16,9 +16,15 @@
  * waits until a little before the refresh is over (hold_us), so that no
  * refresh goes without a move.  A new image is not held.  An image is
  * copied into a swapchain image only when that swapchain image does not
- * hold it yet; only that swapchain image's previous copy is waited for, so
- * a copy into one image never holds back a present from another
- * (ws141-p016 review-B4 F1 (b)).
+ * hold it yet.
+ *
+ * The thread waits for one thing at a time and for nothing on a clock but a
+ * held move: the box's next change; a free swapchain image, only after a
+ * change and only when none is free at once (the image comes free when the
+ * plane's previous present is done); and a copy's fence, at once after its
+ * present, so that the copy of the box it read is let go (and the main
+ * thread woken for it) as soon as the GPU is done with it.  It acquires no
+ * image ahead of a change, so an idle thread waits for the box alone.
  */
 
 #include "cursor-thread.h"
@@ -35,15 +41,9 @@
 enum cursor_present_result {
 	/* Presented. */
 	CURSOR_PRESENTED = 1,
-	/* No swapchain image was free: tried again soon. */
-	CURSOR_RETRY,
 	/* A Vulkan call failed: the thread stops using Vulkan. */
 	CURSOR_FAILED
 };
-
-/* How soon a step is tried again when no swapchain image was free, and while a copy still pins one of the box's copies, in microseconds. */
-#define CURSOR_RETRY_US		1000U
-#define CURSOR_PIN_POLL_US	5000U
 
 /*
  * What a step read from the box: the place and output, the report's time,
@@ -67,8 +67,9 @@ struct cursor_snapshot {
 static void *cursor_main(void *argument);
 static void cursor_wait(struct kwl_cursor_thread *cursor, uint64_t deadline_us);
 static enum cursor_present_result cursor_present(struct kwl_cursor_thread *cursor, const struct cursor_snapshot *snapshot, const struct kwl_import *source, int32_t x, int32_t y);
+static VkResult cursor_acquire(struct kwl_cursor_thread *cursor, VkSemaphore acquired, uint32_t *image);
 static void cursor_record(struct kwl_cursor_thread *cursor, VkCommandBuffer command, VkImage target, const struct kwl_import *source);
-static unsigned cursor_unpin_done(struct kwl_cursor_thread *cursor);
+static void cursor_counts_print(const struct kwl_cursor_thread *cursor);
 static void cursor_unpin(struct kwl_cursor_thread *cursor, int copy);
 static void cursor_fail(struct kwl_cursor_thread *cursor, const char *step, VkResult result);
 
@@ -82,15 +83,9 @@ kwl_cursor_thread_start(
 {
 	sigset_t signals_all;
 	sigset_t signals_before;
-	unsigned index;
 	int error;
 
-	/* No swapchain image holds a copy of the box's copies yet. */
-	for (index = 0; index < KWL_CURSOR_THREAD_IMAGES; index++)
-		cursor->pinned[index] = -1;
-
-	/* The thread presents from now on. */
-	/* The thread blocks every signal: the stops and a child's end go to the event loop's thread. */
+	/* The thread presents from now on; it blocks every signal: the stops and a child's end go to the event loop's thread. */
 	(void)sigfillset(&signals_all);
 	(void)pthread_sigmask(SIG_SETMASK, &signals_all, &signals_before);
 	error = pthread_create(&cursor->thread, NULL, cursor_main, cursor);
@@ -105,7 +100,8 @@ kwl_cursor_thread_start(
 
 /*
  * Stops the cursor thread and waits for it: it waits for its own copies
- * first (100 ms each at most).  Returns ETIMEDOUT when a copy did not
+ * first (100 ms each at most; it waited for each when it presented it, so
+ * this is the end's check).  Returns ETIMEDOUT when a copy did not
  * finish, so that the main thread does not destroy objects the GPU may
  * still use; 0 otherwise.
  */
@@ -141,9 +137,8 @@ kwl_cursor_thread_stop(
 /*
  * Runs one step of the cursor thread: reads the box, and presents the
  * plane when its image or place changed and the refresh allows.  Gives the
- * time to try again in deadline_us when the step waits for the refresh, a
- * free swapchain image or a copy's fence (0: wait for a change only).  The
- * thread calls it in a loop; a host test calls it step by step.
+ * time a held move is due in deadline_us (0: wait for the next change
+ * only).  The thread calls it in a loop; a host test calls it step by step.
  */
 enum kwl_cursor_step
 kwl_cursor_thread_step(
@@ -155,7 +150,6 @@ kwl_cursor_thread_step(
 	enum cursor_present_result result;
 	uint64_t now;
 	unsigned index;
-	unsigned pins;
 	int32_t x;
 	int32_t y;
 
@@ -214,9 +208,6 @@ kwl_cursor_thread_step(
 
 	pthread_mutex_unlock(&cursor->box->lock);
 
-	/* Copies seen done let go of the box's copies they read. */
-	pins = cursor_unpin_done(cursor);
-
 	/*
 	 * The plane shows the image with its hotspot at the place, on the
 	 * anchor only; otherwise it is empty where it was (the cursor is
@@ -232,7 +223,7 @@ kwl_cursor_thread_step(
 		y = snapshot.y - snapshot.hotspot_y;
 	}
 
-	/* Nothing changed since the last present. */
+	/* Nothing changed since the last present: the next change of the box, with no deadline. */
 	if (cursor->presented &&
 	    cursor->source == source &&
 	    (source == NULL ||
@@ -241,8 +232,6 @@ kwl_cursor_thread_step(
 	      cursor->x == x &&
 	      cursor->y == y))) {
 		cursor_unpin(cursor, snapshot.pin);
-		if (pins != 0U)
-			*deadline_us = kwl_microseconds() + CURSOR_PIN_POLL_US;
 		return KWL_CURSOR_STEP_IDLE;
 	}
 
@@ -265,14 +254,8 @@ kwl_cursor_thread_step(
 		}
 	}
 
-	/* The image at its place. */
+	/* The image at its place; a failure was told to the main thread. */
 	result = cursor_present(cursor, &snapshot, source, x, y);
-	if (result == CURSOR_RETRY) {
-		*deadline_us = kwl_microseconds() + CURSOR_RETRY_US;
-		return KWL_CURSOR_STEP_IDLE;
-	}
-
-	/* A failure was told to the main thread. */
 	if (result == CURSOR_FAILED)
 		return KWL_CURSOR_STEP_FAILED;
 
@@ -282,8 +265,10 @@ kwl_cursor_thread_step(
 
 /*
  * Waits for the cursor thread's copies when it stops: each swapchain
- * image's fence for 100 ms at most.  A fence that does not signal sets
- * stop_failed (the objects must not be destroyed under the GPU).
+ * image's fence for 100 ms at most.  The thread waited for each copy when
+ * it presented it, so the fences are signalled already unless the GPU is
+ * stuck; a fence that does not signal sets stop_failed (the objects must
+ * not be destroyed under the GPU).
  */
 void
 kwl_cursor_thread_finish(
@@ -303,12 +288,6 @@ kwl_cursor_thread_finish(
 		result = vkWaitForFences(cursor->device, 1U, &cursor->fences[index], VK_TRUE, KWL_CURSOR_FENCE_WAIT_NS);
 		if (result != VK_SUCCESS)
 			cursor->stop_failed = 1U;
-	}
-
-	/* The pins the copies held are let go. */
-	for (index = 0; index < KWL_CURSOR_THREAD_IMAGES; index++) {
-		cursor_unpin(cursor, cursor->pinned[index]);
-		cursor->pinned[index] = -1;
 	}
 }
 
@@ -358,7 +337,10 @@ kwl_cursor_thread_park(
 	return 0;
 }
 
-/* Runs the cursor thread's steps, waiting between them for a change or a deadline, until it is asked to stop. */
+/*
+ * Runs the cursor thread's steps, waiting between them for a change or a
+ * held move's time, until it is asked to stop; then tells what it did.
+ */
 static void *
 cursor_main(
 	void *argument)
@@ -376,12 +358,22 @@ cursor_main(
 		if (step == KWL_CURSOR_STEP_PRESENTED)
 			continue;
 
-		/* Nothing to do now: the next change of the box, or the deadline. */
+		/* Nothing to do now: the next change of the box, or a held move's time. */
+		if (deadline == 0U) {
+			cursor->counts.sleeps++;
+		} else {
+			cursor->counts.holds++;
+		}
 		cursor_wait(cursor, deadline);
 	}
 
 	/* The copies in flight finish before the main thread destroys the objects. */
 	kwl_cursor_thread_finish(cursor);
+
+	/* One line of the thread's counts, its last. */
+	cursor_counts_print(cursor);
+
+	/* Succeeded: the thread ends. */
 	return NULL;
 }
 
@@ -415,8 +407,10 @@ cursor_wait(
 
 /*
  * Presents the plane's image at a place: copies the cursor image into a
- * free swapchain image first unless that image holds it already.  A
- * failure is told to the main thread, and no Vulkan is called again.
+ * free swapchain image first unless that image holds it already, and after
+ * the present waits for that copy until it is done, so that the box's copy
+ * it read is let go at once.  A failure is told to the main thread, and no
+ * Vulkan is called again.
  */
 static enum cursor_present_result
 cursor_present(
@@ -441,20 +435,15 @@ cursor_present(
 	uint64_t started_us;
 	uint64_t ended_us;
 	VkResult result;
-	int keep_pin;
+	VkResult presented;
+	unsigned copied;
 
-	/* A free image now, or after a short wait. */
+	/* A free image: at once, or once the plane's previous present lets one go. */
 	memset(&stats, 0, sizeof(stats));
 	started_us = kwl_microseconds();
 	mark = kwl_cycles();
 	acquired = cursor->acquired[cursor->next];
-	result = vkAcquireNextImageKHR(cursor->device, cursor->output.swapchain, 0U, acquired, VK_NULL_HANDLE, &image);
-	if (result == VK_NOT_READY || result == VK_TIMEOUT) {
-		cursor_unpin(cursor, snapshot->pin);
-		return CURSOR_RETRY;
-	}
-
-	/* Any other failure stops the thread's Vulkan. */
+	result = cursor_acquire(cursor, acquired, &image);
 	if ((result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) || image >= cursor->output.image_count) {
 		cursor_unpin(cursor, snapshot->pin);
 		cursor_fail(cursor, "acquire", result);
@@ -476,19 +465,17 @@ cursor_present(
 	/* The cursor image goes into the swapchain image once; later moves present it as it is. */
 	mark = kwl_cycles();
 	wait = acquired;
-	keep_pin = 0;
+	copied = 0U;
 	if (!cursor->held_valid[image] ||
 	    cursor->held[image] != source ||
 	    cursor->held_generation[image] != generation ||
 	    cursor->held_version[image] != version) {
-		/* This swapchain image's previous copy only; a copy into another image does not hold this one back. */
-		result = vkWaitForFences(cursor->device, 1U, &cursor->fences[image], VK_TRUE, KWL_CURSOR_FENCE_WAIT_NS);
-		stats.fence_cycles = kwl_cycles() - mark;
-		if (result == VK_SUCCESS) {
-			cursor_unpin(cursor, cursor->pinned[image]);
-			cursor->pinned[image] = -1;
-			result = vkResetFences(cursor->device, 1U, &cursor->fences[image]);
-		}
+		/*
+		 * The image's previous copy was waited for until it was done
+		 * (its fence was made signalled), so its fence is reset for this
+		 * copy without a wait.
+		 */
+		result = vkResetFences(cursor->device, 1U, &cursor->fences[image]);
 
 		/* The copy recorded afresh. */
 		if (result == VK_SUCCESS)
@@ -522,28 +509,21 @@ cursor_present(
 			return CURSOR_FAILED;
 		}
 
-		/*
-		 * The swapchain image holds this cursor image now; a copy of the
-		 * box's copies stays pinned until its fence is seen done.
-		 */
+		/* The swapchain image holds this cursor image now. */
 		cursor->held_valid[image] = 1U;
 		cursor->held[image] = source;
 		cursor->held_generation[image] = generation;
 		cursor->held_version[image] = version;
-		if (source != NULL && snapshot->pin >= 0) {
-			cursor->pinned[image] = snapshot->pin;
-			keep_pin = 1;
-		}
 
-		/* The present waits for the copy. */
+		/* The present waits for the copy, and the step for the copy's fence after it. */
 		stats.copies = 1U;
+		copied = 1U;
+		cursor->counts.copies++;
 		wait = cursor->ready[image];
 	}
 
-	/* A step that copied nothing from the box's copy does not keep it pinned. */
-	if (!keep_pin)
-		cursor_unpin(cursor, snapshot->pin);
-	stats.copy_cycles = kwl_cycles() - mark - stats.fence_cycles;
+	/* The recording and submission's part. */
+	stats.copy_cycles = kwl_cycles() - mark;
 
 	/* The whole image with its top-left corner at the place. */
 	memset(&display, 0, sizeof(display));
@@ -563,22 +543,50 @@ cursor_present(
 	present.pImageIndices = &image;
 	mark = kwl_cycles();
 	pthread_mutex_lock(cursor->queue_lock);
-	result = vkQueuePresentKHR(cursor->queue, &present);
+	presented = vkQueuePresentKHR(cursor->queue, &present);
 	pthread_mutex_unlock(cursor->queue_lock);
-	if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-		cursor_fail(cursor, "present", result);
-		return CURSOR_FAILED;
-	}
 
 	/* The time in the present, its waits for the queue's and the device's locks included (ws213-p001 review-1 H3). */
 	spent = kwl_cycles() - mark;
 	ended_us = kwl_microseconds();
+
+	/*
+	 * The copy is waited for at once and until it is done, whatever the
+	 * present came to (it was submitted either way): the copy is small, and
+	 * the next copy into this image then finds its fence signalled.  No
+	 * deadline: a GPU that stops makes the wait fail as the device lost.
+	 */
+	if (copied) {
+		mark = kwl_cycles();
+		result = vkWaitForFences(cursor->device, 1U, &cursor->fences[image], VK_TRUE, UINT64_MAX);
+		stats.fence_cycles = kwl_cycles() - mark;
+		cursor->counts.copy_waits++;
+		if (result != VK_SUCCESS) {
+			cursor_fail(cursor, "copy_wait", result);
+			return CURSOR_FAILED;
+		}
+	}
+
+	/*
+	 * The box's copy this step read is let go: no copy reads it any more,
+	 * and the main thread, if it waits to write one, is woken now.
+	 */
+	cursor_unpin(cursor, snapshot->pin);
+
+	/* A failed present stops the thread's Vulkan. */
+	if (presented != VK_SUCCESS && presented != VK_SUBOPTIMAL_KHR) {
+		cursor_fail(cursor, "present", presented);
+		return CURSOR_FAILED;
+	}
+
+	/* The present's counts. */
 	stats.present_cycles = spent;
 	stats.present_max_cycles = spent;
 	stats.presents = 1U;
 	stats.present_max_us = ended_us - started_us;
 	if (cursor->presented && started_us - cursor->presented_us < 50000U)
 		stats.present_gap_max_us = started_us - cursor->presented_us;
+	cursor->counts.presents++;
 
 	/*
 	 * What the plane shows now, and when.  The time is the present's
@@ -624,6 +632,46 @@ cursor_present(
 
 	/* Succeeded: presented. */
 	return CURSOR_PRESENTED;
+}
+
+/*
+ * Acquires the plane's next image: at once when one is free, or else
+ * waiting with no deadline until one is (the plane's images come free when
+ * the jobs of its previous presents end, in success or failure).  Gives the
+ * acquire's result.
+ */
+static VkResult
+cursor_acquire(
+	struct kwl_cursor_thread *cursor,
+	VkSemaphore acquired,
+	uint32_t *image)
+{
+	VkResult result;
+
+	/* An image free now. */
+	result = vkAcquireNextImageKHR(cursor->device, cursor->output.swapchain, 0U, acquired, VK_NULL_HANDLE, image);
+	if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) {
+		cursor->counts.acquires_now++;
+		return result;
+	}
+
+	/* A failure other than no image free ends the acquire. */
+	if (result != VK_NOT_READY && result != VK_TIMEOUT)
+		return result;
+
+	/* None free: the wait for one, its semaphore still unsignalled. */
+	cursor->counts.acquires_waiting++;
+	result = vkAcquireNextImageKHR(cursor->device, cursor->output.swapchain, UINT64_MAX, acquired, VK_NULL_HANDLE, image);
+
+	/*
+	 * The wait's failure; with no deadline, no image free is not a result
+	 * Vulkan gives, and the caller takes it as one.
+	 */
+	if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+		return result;
+
+	/* Succeeded: the image is the thread's (suboptimal or not). */
+	return result;
 }
 
 /* Records the swapchain image's clearing and the cursor image's copy into its top-left corner. */
@@ -701,39 +749,22 @@ cursor_record(
 	vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
 }
 
-/*
- * Lets go of the box's copies whose copies into a swapchain image are seen
- * done (their fence asked, not waited for).  Reports how many pins are
- * still held.
- */
-static unsigned
-cursor_unpin_done(
-	struct kwl_cursor_thread *cursor)
+/* Prints the cursor thread's counts as its last line (KWL CURSOR_PLANE stopped). */
+static void
+cursor_counts_print(
+	const struct kwl_cursor_thread *cursor)
 {
-	VkResult result;
-	unsigned held;
-	unsigned index;
-
-	/* Each swapchain image whose last copy read one of the box's copies. */
-	held = 0U;
-	for (index = 0; index < KWL_CURSOR_THREAD_IMAGES; index++) {
-		if (cursor->pinned[index] < 0)
-			continue;
-
-		/* Done: the pin goes; still running: it stays. */
-		result = vkGetFenceStatus(cursor->device, cursor->fences[index]);
-		if (result == VK_SUCCESS) {
-			cursor_unpin(cursor, cursor->pinned[index]);
-			cursor->pinned[index] = -1;
-			continue;
-		}
-
-		/* Still read by the GPU. */
-		held++;
-	}
-
-	/* The pins still held. */
-	return held;
+	/* One line, written by the thread itself after its last step. */
+	printf(
+		"KWL CURSOR_PLANE stopped presents=%llu copies=%llu copy_waits=%llu"
+		" acquires_now=%llu acquires_waiting=%llu sleeps=%llu holds=%llu\n",
+		(unsigned long long)cursor->counts.presents,
+		(unsigned long long)cursor->counts.copies,
+		(unsigned long long)cursor->counts.copy_waits,
+		(unsigned long long)cursor->counts.acquires_now,
+		(unsigned long long)cursor->counts.acquires_waiting,
+		(unsigned long long)cursor->counts.sleeps,
+		(unsigned long long)cursor->counts.holds);
 }
 
 /* Lets go of one pin of the box's copies (-1: none). */

@@ -312,7 +312,7 @@ else
 fi
 
 # The guest's log for the record (read over the serial line: kernel records may be mixed in; not used for the verdict).
-serial "grep -e 'KWL PERF pass' -e 'KWL MODE' -e 'KWL LAYER baked' -e 'KWL OUTPUT rotate' -e 'KWL SCANOUT' -e 'KWL SHOT' -e 'KWL RENDER' -e 'KWL EXIT' -e 'KWL FAILED' -e 'VULKAN_ERROR' $log" > "$out/kwl.log" 2>&1 || true
+serial "grep -e 'KWL PERF pass' -e 'KWL CURSOR_PLANE' -e 'KWL MODE' -e 'KWL LAYER baked' -e 'KWL OUTPUT rotate' -e 'KWL SCANOUT' -e 'KWL SHOT' -e 'KWL RENDER' -e 'KWL EXIT' -e 'KWL FAILED' -e 'VULKAN_ERROR' $log" > "$out/kwl.log" 2>&1 || true
 
 if [ "$failed" -eq 0 ]; then
 	say "qemu-render-wait: PASS"
