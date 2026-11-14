@@ -33,7 +33,7 @@
 | P2 | q2117 | [WS328](ws328/ws.md) p003 flatten（Sonnet） |
 | P3 | q2115 | [WS345](ws345/ws.md) p015 headless の _OWN の道（p011 cleared） |
 | P4 | q2116 | [WS068](ws068/ws.md)（EGL・GL を Vulkan の上に）試験の config と p045 |
-| P5 | q2114 | [WS300](ws300/ws.md)（NVMe・VMD の低電力）記録の移しと p003 |
+| P5 | q2119 | [WS339](ws339/ws.md)（UEFI の起動の画面を EDID の解像度に）p001 |
 | P6 | q2109 | [WS302](ws302/ws.md) p003 の締め → p004 DTB の本体 |
 | P7 | q2107 | [WS334](ws334/ws.md)（Windows 版ブラウザ）p035 の続き（試験の C、共有の file の block） |
 | P8 | q2118 | [WS349](ws349/ws.md)（Pi 5 の HDMI の音）設計の review と改訂 |
@@ -104,7 +104,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-438 · q2119 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-438 · q2120 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

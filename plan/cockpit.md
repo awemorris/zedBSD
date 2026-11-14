@@ -15,7 +15,7 @@
 | P2 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2117: p003 flatten（Sonnet） | p006〜p008・p017 |
 | P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2115: p015 headless の _OWN の道（p011 cleared） | p012 規約の見直し → completed |
 | P4 | [WS068](ws068/ws.md) | EGL・GL を Vulkan の上に | q2116: 試験の config と p045（Venus） | p047〜 |
-| P5 | [WS300](ws300/ws.md) | NVMe・VMD の低電力 | q2114: 記録を main に移し p003（HMB の停止） | p005 APST、5330 は BUG-428・429 の後 |
+| P5 | [WS339](ws339/ws.md) | UEFI の起動の画面を EDID の解像度に | q2119: p001 loader の EDID と video= の除去（QEMU） | 5330 の受け入れ（WS300 は p003・p005 cleared） |
 | P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2109: p003 の締め → p004 DTB の本体 | p005・p006（5330 の評価） |
 | P7 | [WS334](ws334/ws.md) | Windows 版ブラウザ | q2100: p035 規約の見直し（p037 cleared、不具合 2 件直した） | WS334 を completed に |
 | P8 | [WS349](ws349/ws.md) | Pi 5 の HDMI の音 | q2118: 設計の review と改訂 | p002 以後（Pi 5 は p005） |

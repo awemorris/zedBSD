@@ -17,4 +17,4 @@
 
 | ID | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| p001 | loader の EDID による mode の選び方と、標準の設定の video= の除去、試験 | planning | — |
+| p001 | loader の EDID による mode の選び方と、標準の設定の video= の除去、試験 | in-progress（2026-11-15 P5 q2119） | — |
