@@ -2,7 +2,7 @@
 
 # ws302-p003: sched の口（hint・段・種類の表・行き先・手渡し・飢えの防ぎ）
 
-Status: in-progress
+Status: in-progress（実装済み・試験 PASS。mk の追加の案はユーザーの承認待ち。cleared は Q1）
 Parent: [WS302](../ws.md)
 Queue: q2099-i01（P6）
 
@@ -94,4 +94,92 @@ endif
 
 ## 結果
 
-（試験の後に書く）
+2026-11-15 P6。source の先頭 623adc8f4e（実装 d1fcd86453、書き方の直し f4389e8112、main 944a8c0cf3 の取り込み a8b16243ff）。toolchain は `make CONFIGMK=config/config.x86_64.mk llvm-toolchain-cached`、3 機種の `sysroot` を先に作った。make は -j4。
+
+### host 試験（`plan/ws302/tests/balancer-host/run.sh OUT`、host の cc、ASan・UBSan）
+
+```
+choose: 1820736 checks, PASS
+levels: PASS
+hint-test: PASS
+mutant ties to the highest number: caught
+mutant unusable CPUs chosen: caught
+mutant busy CPUs chosen: caught
+mutant whole core not required: caught
+mutant sibling speed ignored: caught
+mutant efficient placed elsewhere: caught
+mutant kernel hold off: caught
+mutant raise above the default: caught
+mutant raise before the limit: caught
+mutant raise that lifts nothing: caught
+balancer-host: PASS
+```
+
+- 選び: 5330 の形（P 論理 4・E 8）・PPEE・PpEE・全部 P・全部 ANY・usable 0 の P を含む形 7 つで、MOVE・MOVE_IDLE_CORE・PLACE × 3 種類 × idle と backlog の組（6 CPU 以下は全部、12 CPU は無作為 20 万）を、別に書いた参照の実装と照らした。どの答えも free で usable、MOVE は同じ種類、MOVE_IDLE_CORE は兄弟も free、EFFICIENT の PLACE は E だけ。
+- 段: kernel の中の 10 より下げない、上げは 8 より上にならない、待ちの上限の端（99・100・101 tick）。
+- 突然変異 10 個を全部検出（最初の版では 2 つが見つからず、`choose_fastest` の重なった条件を 1 つにまとめた）。
+
+### build（`plan/ws302/tests/p003-build.sh OUT build/p003/ref x86_64 rpi5 vf2`）
+
+REF は基点 991f37fe79 の n の kernel（同じ worktree で src・include を基点に戻して作った物）。
+
+```
+x86_64 n rc=0 warnings=0
+x86_64 n-vs-base same-text-but-line-numbers 29
+x86_64 y rc=0 warnings=0
+x86_64 y-thermal rc=0 warnings=0
+x86_64 y-test rc=0 warnings=0
+rpi5 n rc=0 warnings=0
+rpi5 n-vs-base same-text-but-line-numbers 29
+rpi5 y rc=0 warnings=0
+vf2 n rc=0 warnings=0
+vf2 n-vs-base same-text-but-line-numbers 29
+vf2 y rc=0 warnings=0
+p003-build: PASS
+```
+
+- n の kernel は基点と同じ: 逆 assemble の行・番地・命令が同じで、違いは足した行より後の `hal_fatal` の行の番号の即値 29 個だけ（dis-compare.py が各々を基点と今の file の同じ fatal の行と確かめた）。
+- y は overlay（`sched-hint.c` を足す）で build。y-thermal は `CONFIG_KERN_THERMAL=y CONFIG_DRIVER_X86_POWER_CONTROL=y`（5330 の評価の構成）、y-test は加えて `CONFIG_KERN_DESKTOP_BALANCER_TEST=y`。
+
+### QEMU の y の起動（`plan/ws302/tests/p003-boot.sh OUT y`、x86_64、boot-test.sh の既定 uefi-nvme・KVM・SMP 4）
+
+```
+y image rc=0 warnings=0
+y boot rc=0
+p003-boot: PASS
+```
+
+- text の login の image（`plan/tools/boot-images/config-amd64-boot.mk`）。画面の login prompt を読み、emulate した keyboard で root で login して `uname -s` の答え `zedBSD` を画面で確かめた（d1fcd86453 の kernel）。
+
+### QEMU の 30 分の stress（`plan/ws302/tests/p003-qemu.sh OUT 1800`、x86_64、KVM、SMP 4、2 GiB、名 p6-ws302、gdbstub 127.0.0.1:22306）
+
+image は [../tests/config-x86_64-balancer-stress.mk](../tests/config-x86_64-balancer-stress.mk)（base の userland、console を serial にも、balancer と試験の config、ISA の NE2000 は外す）。起動の行に `desktop_balancer.classes=PPEE desktop_balancer.stress=1`。2026-11-15 00:31〜01:05、kernel は 623adc8f4e の tree。
+
+```
+image rc=0 warnings=0
+kstress rounds=17 iostress-ok=17 credrace-ok=17 sigexec-ok=17
+hintstress busy threads=3 result=PASS
+hintstress threads rounds=196117 failures=0 result=PASS
+hintstress sleep sleeps=214103 early=0 worst_early_us=0 result=PASS
+guest alive=1
+report magic=0x48494e5453545253 passes=3028..191994 threads=767792 set[ok,ealready,eagain,ebusy,esrch,einval,other]=699891,0,0,0,55798,12103,0, place=5526,118358,112823,12,56720,474353,0,
+counters hints=693990 moves=5369 refused=112851 handoffs=93 handoff_retries=0 handoff_failures=0 starved=28453 kernel_held=23024627
+p003-qemu: PASS
+```
+
+- guest は止まらず panic せず、最後の `echo alive` に答えた（serial の対話）。kstress（iostress の direct 読み・fork・munmap、credrace、sigexec）は 17 周全部 rc=0。thread の作成と exit・fork の嵐 19 万周で失敗 0。時間つきの sleep 21 万回で早く起きた物 0（hint の段の付け替えが sleep の queue を乱さない、review M2）。
+- 報告（gdbstub で始めと終わりに読んだ）: stress の thread の周 3028 → 191994（30 分回り続けた）、hint を出した thread 76 万。sched の計数: hint の変更 69 万、走っていない thread の移動 5369、走っている thread の手渡し 93（試し直し 0・失敗 0）、種類の idle の CPU が無く断った 11 万、飢えの防ぎの上げ 2.8 万、kernel の中で 10 に留めた入れ 2302 万。
+- `sched_hint_set` の EINVAL 12103 は試験が 64 回に 1 回わざと出す範囲の外の段（7）。`sched_hint_place` の EINVAL は PLACE でない・ANY の hint、ESRCH は exit した・NEW の thread、EALREADY は既にその種類の CPU に居る thread。
+- 判定は serial の対話の command の答えと gdbstub の報告だけ（console・serial の boot の log では判定していない）。
+- 120 秒の試し走り（d1fcd86453）でも同じ項目が通った（報告の読み取りの 1 語のずれを直す前の script。直した値で移動 3653・手渡し 16）。
+
+### 未実施
+
+- arm64・riscv64 の QEMU の起動（2026-11-14 ユーザーの決定で範囲の外。build は確かめた）。
+- 5330 の実機（p006）。偽の種類の表の上でだけ確かめた。SMT の兄弟（`p`）を含む偽の表の QEMU の試験はしていない（host 試験では PpEE・5330 の形で確かめた）。
+- `CONFIG_KERN_DESKTOP_BALANCER_TEST` の試験は x86_64 だけ。
+- p004 以前なので、DTB の本体が hint を出す形の試験は無い（stress の thread の無作為の hint だけ）。
+
+### 受け入れの判定（担当の推し）
+
+host 試験 PASS、3 機種の n・y の build warning 0、n の kernel は基点と同じ、x86_64 の QEMU の y の起動 PASS、30 分の stress PASS（guest が答え、移動 5369・手渡し 93、時間つきの sleep の早起き 0）。推し: 「実装済み・試験 PASS」。mk の追加の案（上）がユーザーに承認されて当たった後に、overlay なしの 3 機種の y の build を 1 回流して cleared（p002 と同じ扱い）。

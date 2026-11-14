@@ -82,7 +82,7 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 | --- | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 検討と設計: 情報 → 性質 → hint の表、規則の強さの順、sched の口、統計の場所と負担、config、試験と受け入れ、design-reviewer、ユーザーの問い | cleared（2026-11-14 Q1。第 3 版で今の code と照らし直し、Q302-1〜7 の決定を書き入れ、design-reviewer（Major 6・Minor 9）を反映。merge 39b8c7e7d0。D-3・D-13・範囲の確かめはユーザーへ） | — | — |
 | [p002](phase002/phase.md) | config（`CONFIG_KERN_DESKTOP_BALANCER`、mk は案）、`desktop-balancer.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、gpu.c・input.c の通知）、`base_priority` の初め | cleared（2026-11-14 Q1。ユーザーが承認した mk の案を当て（04fabc3c96）、overlay なしで 3 機種の n・y の build warning 0、n は基点と同じ file（bbce472e8b）。QEMU の y の起動は p003 で） | p001、Q302-5 | 3 |
-| [p003](phase003/phase.md) | sched の口: base の priority と `sched_hint_set`、kernel の中の優先、CPU の種類の表、行き先の選び、置き場所・盗み・tick の助け、`sched_hint_place`、`sched_set_cpu` の確かめ直し、走っている thread の手渡し、飢えの防ぎ、計数、`CONFIG_KERN_DESKTOP_BALANCER_TEST` の偽の種類と stress（QEMU 30 分） | planned | p002、Q302-2・3 | 7 |
+| [p003](phase003/phase.md) | sched の口: base の priority と `sched_hint_set`、kernel の中の優先、CPU の種類の表、行き先の選び、置き場所・盗み・tick の助け、`sched_hint_place`、`sched_set_cpu` の確かめ直し、走っている thread の手渡し、飢えの防ぎ、計数、`CONFIG_KERN_DESKTOP_BALANCER_TEST` の偽の種類と stress（QEMU 30 分） | 実装済み・試験 PASS（2026-11-15 P6、q2099-i01、623adc8f4e。host 試験・3 機種の n・y の build warning 0・n の kernel は基点と同じ・QEMU の y の起動・30 分の stress（移動 5369・手渡し 93・sleep の早起き 0）。mk の追加の案（sched-hint.c と試験の config）の承認の後、overlay なしの y の build を流して cleared） | p002、Q302-2・3 | 7 |
 | p004 | DTB の本体（desktop-balancer.c・desktop-balancer-policy.c、分類・履歴・nice の段・HID の状態・周期・予算、`desktop_balancer=off`、`kern.desktop_balancer`） | planned | p003、Q302-1・6 | 6 |
 | p005 | （条件つき）compositor からの前面の app の hint（Q302-4 で作る時か、p006 の数で要る時だけ） | — | p004、UAPI の決定 | 3 |
 | p006 | 5330 の評価（on・off の比べの 1 本の script）と閾値の調整 | planned | p004、WS333 p011・p013（電力の meter と相対の性能）、5330 の割当 | 4 |
@@ -105,6 +105,7 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 ## 再開点（2026-10-31 P5、q1775-i01）
 
+- 2026-11-15 P6（q2099-i01）: 名前を `CONFIG_KERN_DESKTOP_BALANCER` に改め（2026-11-14 ユーザーの決定）、p003（sched の口）を実装・試験 PASS（[phase003/phase.md](phase003/phase.md)）。mk の追加の案はユーザーの承認待ち。次は p004（DTB の本体）。
 - 2026-11-14 P6（q2093-i01）: design.md を第 3 版に改訂（冒頭に第 2 版からの改訂の要点と今の code との食い違いの表 D-1〜D-14）。p002 を実装（[phase002/phase.md](phase002/phase.md)、mk の案はユーザーの承認待ち）。次は p003（sched の口）。
 - 2026-11-14 Q1: 問いは全部推しで決まった。kernel thermal と CPU の種類・相対の性能（WS333、completed）が入ったので、P6 q2093 が設計を今の code に合わせて改訂し（design.md 第 3 版）、design-reviewer の後に p002 から実装する。
 

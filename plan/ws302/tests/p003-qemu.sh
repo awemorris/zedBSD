@@ -76,7 +76,7 @@ timeout $((seconds + 1800)) qemu-system-x86_64 -name p6-ws302 -machine q35 -m 2G
 	-vga std -display none -no-reboot -gdb "tcp:127.0.0.1:$gdb_port" \
 	-serial "unix:$out/serial.sock,server=on,wait=off" > "$out/qemu.log" 2>&1 &
 pid=$!
-trap 'kill $pid 2> /dev/null' EXIT
+trap 'pkill -P $pid 2> /dev/null; kill $pid 2> /dev/null' EXIT
 i=0
 while [ ! -S "$out/serial.sock" ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
 S="python3 -I plan/tools/guest/serial.py --socket $out/serial.sock --timeout 900"
@@ -114,6 +114,7 @@ sleep 30
 $S run 'wait; cat /root/busy.txt /root/threads.txt /root/sleep.txt' >> "$guest" 2>&1
 read_report > "$out/report-end.txt"
 $S run 'echo alive' >> "$guest" 2>&1
+pkill -P $pid 2> /dev/null
 kill $pid 2> /dev/null
 wait $pid 2> /dev/null
 sync
