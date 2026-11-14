@@ -55,7 +55,7 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 
 ## Resume point
 
-- 2026-11-14 Q1: reset の方針（am_* の wrapper は同期、他は非同期）を agy に伝え、1 file（atg_tlb_l1.v）を頼んだ（scratchpad の q-rst1.txt）。差分をユーザーに見せてから残りを進める。それまで依頼 08 の X5〜X9 は送らない。4 件の修正の後の上位の testbench（41b9ed95）: atg_top_shade は DRAW 中の pipe_busy_mask 0、atg_top_fault 11 errors、atg_ghci_top 4 errors、atg_top_tex は実行中。reset を入れた後に流し直して解析する。
+- 2026-11-14 Q1: reset の方針（am_* の wrapper は同期、他は非同期）を agy に伝え、1 file（atg_tlb_l1.v）を頼んだ。agy は b7693ca6 で非同期にしたが、reset の源（atg_mmu の LUT1 の反転、atg_cp_ctl の LUT4 の core_rst_n）は glitch・解除の同期が無く非同期 reset に安全でないと返した。差分と、reset の源を先に直す案をユーザーに見せ、判断待ち。それまで依頼 08 の X5〜X9 は送らない。4 件の修正の後の上位の testbench（41b9ed95）: atg_top_shade は DRAW 中の pipe_busy_mask 0、atg_top_fault 11 errors、atg_ghci_top 5 FAIL（X4 の Scenario 4 で FAULTED が立たない）、atg_top_tex 10 FAIL（画素が一色 ffe62828、model は階調）、atg_top_fault 12 FAIL（Scenario 1 で FAULTED が立たない）。reset を入れた後に流し直して解析する。
 - 2026-11-11 12:37 Q1: ユーザーの指示で全作業を止めた（P1・P2・Vivado の build）。再開はユーザーの指示で。
   - P1 の worktree `/home/awe/amaterrace-worktrees/p1-ws347rtl`（branch ws347-rtl）に RTL の未 commit の変更 3 file（atg_cp.v・atg_cp_regs.v・atg_top.v）。RTL は Gemini の担当なので、扱いはユーザーの判断。
   - P2 の worktree `/home/awe/zedBSD-worktrees/p2-ws347`（branch agent/p2-ws347）に driver の未 commit の変更（中身は未確認）。
