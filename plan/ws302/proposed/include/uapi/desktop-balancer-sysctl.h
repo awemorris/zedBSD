@@ -6,7 +6,7 @@
  */
 
 /*
- * The read-only report of the desktop thread balancer, kern.dtb.
+ * The read-only report of the desktop thread balancer, kern.desktop_balancer.
  *
  * The proposal adds the name to <uapi/sysctl.h> next to the other KERN_
  * names; it is kept apart here only to show its layout.  Every field has a
@@ -20,7 +20,7 @@
 #include <stdint.h>
 
 /* The second-level name under CTL_KERN. */
-#define KERN_DTB			11
+#define KERN_DESKTOP_BALANCER			11
 
 #define KERN_DTB_VERSION		1U
 
@@ -29,7 +29,7 @@
 
 /* What the record says beyond its numbers, as bits of flags. */
 #define KERN_DTB_BUILT			0x1U	/* the kernel has the balancer */
-#define KERN_DTB_RUNNING		0x2U	/* its thread runs (not dtb=off) */
+#define KERN_DTB_RUNNING		0x2U	/* its thread runs (not desktop_balancer=off) */
 #define KERN_DTB_HYBRID			0x4U	/* the CPUs are of two kinds */
 
 /* The person at the machine, as the balancer sees it. */

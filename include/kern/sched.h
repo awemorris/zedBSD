@@ -105,7 +105,7 @@ struct sched {
 	unsigned need_migrate;
 	struct thread *next;
 	struct thread *prev;
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 	/*
 	 * The balancer's hint for the thread and the counters it decides
 	 * from (struct sched_hint_state says who writes what).

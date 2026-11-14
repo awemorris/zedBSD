@@ -15,8 +15,9 @@
  * hints decides nothing about where a thread runs next; a hint the CPUs
  * cannot honour now is refused, not queued.
  *
- * Only a kernel built with the desktop thread balancer (CONFIG_DTB) keeps
- * any of this; without it the types exist and the calls are empty.
+ * Only a kernel built with the desktop thread balancer
+ * (CONFIG_KERN_DESKTOP_BALANCER) keeps any of this; without it the types
+ * exist and the calls are empty.
  */
 
 #ifndef KERN_KERN_SCHED_HINT_H
@@ -29,8 +30,8 @@
  * Whether the balancer is built.  The build defines it to 1 when it is;
  * otherwise it is 0 here.
  */
-#ifndef CONFIG_DTB
-#define CONFIG_DTB 0
+#ifndef CONFIG_KERN_DESKTOP_BALANCER
+#define CONFIG_KERN_DESKTOP_BALANCER 0
 #endif
 
 struct thread;
@@ -144,7 +145,7 @@ struct sched_hint_state {
 	volatile unsigned wakeups;
 };
 
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 
 /*
  * Reads a thread's counters and where it is.

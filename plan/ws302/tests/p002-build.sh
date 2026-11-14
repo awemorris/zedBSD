@@ -1,6 +1,6 @@
 #!/bin/sh
-# The kernel builds of the balancer's statistics: for each platform, the kernel without the balancer (CONFIG_DTB n,
-# the default) and with it (CONFIG_DTB=y through dtb-overlay.mk until mk/kernel.mk has the rule), each with its
+# The kernel builds of the balancer's statistics: for each platform, the kernel without the balancer (CONFIG_KERN_DESKTOP_BALANCER n,
+# the default) and with it (CONFIG_KERN_DESKTOP_BALANCER=y through desktop-balancer-overlay.mk until mk/kernel.mk has the rule), each with its
 # warnings counted; and, when REF holds a kernel of the same platform built from the base commit with the same
 # configuration (REF/<platform>.vmunix, and REF/<platform>.elf for the boards that link one first) and REF/commit
 # names that commit, whether the kernel without the balancer is the same file, and if not, whether its disassembly
@@ -87,9 +87,9 @@ compare_base() {
 for platform in $platforms; do
 	build_one "$platform" n
 	compare_base "$platform"
-	build_one "$platform" y -f Makefile -f plan/ws302/tests/dtb-overlay.mk CONFIG_DTB=y
+	build_one "$platform" y -f Makefile -f plan/ws302/tests/desktop-balancer-overlay.mk CONFIG_KERN_DESKTOP_BALANCER=y
 	if [ "$platform" = x86_64 ]; then
-		build_one "$platform" y-thermal -f Makefile -f plan/ws302/tests/dtb-overlay.mk CONFIG_DTB=y \
+		build_one "$platform" y-thermal -f Makefile -f plan/ws302/tests/desktop-balancer-overlay.mk CONFIG_KERN_DESKTOP_BALANCER=y \
 			CONFIG_KERN_THERMAL=y CONFIG_DRIVER_X86_POWER_CONTROL=y
 	fi
 done

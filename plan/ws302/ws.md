@@ -18,11 +18,11 @@
   - まずはどういった情報からどういったバランシングができるかを検討する」
 - 全体の依存と着手の順: [plan/agents/P1/pm-plan.md](../agents/P1/pm-plan.md)。
 
-- 2026-10-27 09:39 ユーザー（クリック）: CONFIG_DTB の既定は off、nice は core の選択に加えて sched の priority にも効かせる。
+- 2026-10-27 09:39 ユーザー（クリック）: CONFIG_DTB（2026-11-14 に名前を CONFIG_KERN_DESKTOP_BALANCER に改めた）の既定は off、nice は core の選択に加えて sched の priority にも効かせる。
 
 ## 単一の到達目標
 
-config（`CONFIG_DTB`）で有効にできる DTB を kernel に入れ、5330（P-core 2・E-core 8）で、HID・GPU・process/thread の統計と nice から thread の性質を見分けて
+config（`CONFIG_KERN_DESKTOP_BALANCER`）で有効にできる DTB を kernel に入れ、5330（P-core 2・E-core 8）で、HID・GPU・process/thread の統計と nice から thread の性質を見分けて
 sched に core の種類の希望（hint）を出し、DTB を切った時に比べて desktop の応答（入力から画面まで、GPU を使う app の frame の時間）を落とさず、
 長く忙しい計算の thread を E-core に寄せて電力を下げる事を数で示す。DTB は sched ではなく、移動と実行の順は sched が決める。
 
@@ -63,7 +63,7 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 ## 制約
 
-- DTB は sched の外の kernel の部品（`src/kern/dtb.c` など、`CONFIG_DTB`、既定は off、2026-10-27 09:39 ユーザーの決定）。sched の変更は hint を受ける最小の口だけ。
+- DTB は sched の外の kernel の部品（`src/kern/desktop-balancer.c` など、`CONFIG_KERN_DESKTOP_BALANCER`、既定は off、2026-10-27 09:39 ユーザーの決定）。sched の変更は hint を受ける最小の口だけ。
 - HAL は使わない見込み（topology・性能は WS333 の kernel の API）。UAPI（focus の hint、観察の口）は明示の決定（`plan/master-design-policy.md:189`）。desktop の OS 固有の code は libkeiland-backend-zedbsd だけ（[Guardrail](../guardrail.md)）。
 - 規約: 新しいコードに `plan/coding-style.md` の全文。tick は `kern_ms_to_ticks()` など（数の直書きをしない）。
 - 試験: host 試験（分類と hint の決定の表、履歴の幅）、5330 の実機（1 本の script で on・off を比べる）。QEMU は回帰（DTB を on にして起動・desktop が動く、T）。
@@ -73,7 +73,7 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 1. p001 の検討の文書（情報 → balancing の表、衝突の規則、物差し）がユーザーの review を通る。
 2. 5330 で DTB on の時、GPU を使う app の frame の時間と入力の遅れが off の時より悪くならず（案: 中央値と 95 パーセンタイルが同等以上）、長い計算の thread が E-core に移り、電力が下がる（案: 背景の計算が走る時の package の電力）。
 3. terminal の作業（build など）の時間が、off に対し決めた範囲（案: 10% 以内の悪化）に収まる。
-4. `CONFIG_DTB=n` で今の動きと同じ（統計の追加の負担は測って小さい事を示す）。build warning 0（全 platform）、`boot-test.sh` の回帰（T）。
+4. `CONFIG_KERN_DESKTOP_BALANCER=n` で今の動きと同じ（統計の追加の負担は測って小さい事を示す）。build warning 0（全 platform）、`boot-test.sh` の回帰（T）。
 5. 規約の全文と文書。
 
 ## Phase（本体は [design.md](design.md) §7、±50%、2026-10-31 P5 で書き直した）
@@ -81,9 +81,9 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 | Phase | 内容 | 状態 | 依存 | LW |
 | --- | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 検討と設計: 情報 → 性質 → hint の表、規則の強さの順、sched の口、統計の場所と負担、config、試験と受け入れ、design-reviewer、ユーザーの問い | cleared（2026-11-14 Q1。第 3 版で今の code と照らし直し、Q302-1〜7 の決定を書き入れ、design-reviewer（Major 6・Minor 9）を反映。merge 39b8c7e7d0。D-3・D-13・範囲の確かめはユーザーへ） | — | — |
-| [p002](phase002/phase.md) | config（`CONFIG_DTB`、mk は案）、`dtb.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、gpu.c・input.c の通知）、`base_priority` の初め | 実装済み・試験 PASS（2026-11-14 P6、merge 39b8c7e7d0。3 機種の n・y の build warning 0、n の kernel は基点と同じ、QEMU の y・n の起動 PASS。mk の案（mk/config.mk・mk/kernel.mk）の承認の後、当てた tree で y の build を流して cleared） | p001、Q302-5 | 3 |
-| [p003](phase003/phase.md) | sched の口: base の priority と `sched_hint_set`、kernel の中の優先、CPU の種類の表、行き先の選び、置き場所・盗み・tick の助け、`sched_hint_place`、`sched_set_cpu` の確かめ直し、走っている thread の手渡し、飢えの防ぎ、計数、`CONFIG_DTB_TEST` の偽の種類と stress（QEMU 30 分） | planned | p002、Q302-2・3 | 7 |
-| p004 | DTB の本体（dtb.c・dtb-policy.c、分類・履歴・nice の段・HID の状態・周期・予算、`dtb=off`、`kern.dtb`） | planned | p003、Q302-1・6 | 6 |
+| [p002](phase002/phase.md) | config（`CONFIG_KERN_DESKTOP_BALANCER`、mk は案）、`desktop-balancer.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、gpu.c・input.c の通知）、`base_priority` の初め | 実装済み・試験 PASS（2026-11-14 P6、merge 39b8c7e7d0。3 機種の n・y の build warning 0、n の kernel は基点と同じ、QEMU の y・n の起動 PASS。mk の案（mk/config.mk・mk/kernel.mk）の承認の後、当てた tree で y の build を流して cleared） | p001、Q302-5 | 3 |
+| [p003](phase003/phase.md) | sched の口: base の priority と `sched_hint_set`、kernel の中の優先、CPU の種類の表、行き先の選び、置き場所・盗み・tick の助け、`sched_hint_place`、`sched_set_cpu` の確かめ直し、走っている thread の手渡し、飢えの防ぎ、計数、`CONFIG_KERN_DESKTOP_BALANCER_TEST` の偽の種類と stress（QEMU 30 分） | planned | p002、Q302-2・3 | 7 |
+| p004 | DTB の本体（desktop-balancer.c・desktop-balancer-policy.c、分類・履歴・nice の段・HID の状態・周期・予算、`desktop_balancer=off`、`kern.desktop_balancer`） | planned | p003、Q302-1・6 | 6 |
 | p005 | （条件つき）compositor からの前面の app の hint（Q302-4 で作る時か、p006 の数で要る時だけ） | — | p004、UAPI の決定 | 3 |
 | p006 | 5330 の評価（on・off の比べの 1 本の script）と閾値の調整 | planned | p004、WS333 p011・p013（電力の meter と相対の性能）、5330 の割当 | 4 |
 | p007 | 規約の全文の見直しと文書 | planned | p006 | 2 |
@@ -94,18 +94,18 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 - **2026-11-14 ユーザーから、Q302-1〜7 を全部推しの案で決める、という趣旨の答えを受けた**（[user-questions.md](user-questions.md) の (A, 推し)・(B, 推し)・推し）。下の D2・D4・D5 と Q302-6・7 はこれで決まった。
 
-- D1: 決定済み（2026-10-27 09:39 ユーザー（クリック）「CONFIG_DTB の既定は off」、上の原文）。
+- D1: 決定済み（2026-10-27 09:39 ユーザー（クリック）「CONFIG_DTB の既定は off」（今の名前は CONFIG_KERN_DESKTOP_BALANCER）、上の原文）。
 - D2: → Q302-1（推し: nice → 忙しい計算 → 画面を作る process → GPU の app → terminal、terminal は兄弟も空いた P がある時だけ）と Q302-2（忙しい計算の空いた P への溢れ）。
 - D3: 決定済み（2026-10-27 09:39 ユーザー（クリック）「nice は core の選択に加えて sched の priority にも効かせる」、上の原文）。今は sched が nice を読まない（survey-source.md §2）ので、飢えを防ぐ対応（段か重みか上限か）は p001 の設計で決める。→ user の thread を kernel の worker（8）より上に置かない段（DTB が on の時の user の既定 10、上げは 8・9）と 100 ms の飢えの防ぎ（design.md §4.7）。段と on の時だけにするかは Q302-3。
 - D4: → Q302-4（推し: v1 では作らず、p006 の数で要れば条件つきの p005）。
-- D5: → Q302-5（推し: `CONFIG_DTB=y` の build の時だけ取る）。
-- 新: Q302-6（観察の読みだけの UAPI `kern.dtb`）、Q302-7（受け入れの数、design.md §6.4）。
+- D5: → Q302-5（推し: `CONFIG_KERN_DESKTOP_BALANCER=y` の build の時だけ取る）。
+- 新: Q302-6（観察の読みだけの UAPI `kern.desktop_balancer`）、Q302-7（受け入れの数、design.md §6.4）。
 
 ## 再開点（2026-10-31 P5、q1775-i01）
 
 - 2026-11-14 P6（q2093-i01）: design.md を第 3 版に改訂（冒頭に第 2 版からの改訂の要点と今の code との食い違いの表 D-1〜D-14）。p002 を実装（[phase002/phase.md](phase002/phase.md)、mk の案はユーザーの承認待ち）。次は p003（sched の口）。
 - 2026-11-14 Q1: 問いは全部推しで決まった。kernel thermal と CPU の種類・相対の性能（WS333、completed）が入ったので、P6 q2093 が設計を今の code に合わせて改訂し（design.md 第 3 版）、design-reviewer の後に p002 から実装する。
 
-- p001 の設計 [design.md](design.md) 第 2 版（main 3d820d9ca の code で書いた。第 1 版 f2d6ca7b4 に review を反映）、header の案 [proposed/include/kern/](proposed/include/kern/)（`sched-hint.h`・`dtb.h`、UAPI の案 `proposed/include/uapi/dtb-sysctl.h`）、問い [user-questions.md](user-questions.md)（Q302-1〜7）、review [design-review.md](design-review.md)。HAL は変えない（design.md §5）。
+- p001 の設計 [design.md](design.md) 第 2 版（main 3d820d9ca の code で書いた。第 1 版 f2d6ca7b4 に review を反映）、header の案（`proposed/include/kern/` の `sched-hint.h`・`dtb.h`。本物は p002 の [include/kern/](../../include/kern/)、案は p003 で消した。UAPI の案 `proposed/include/uapi/desktop-balancer-sysctl.h`）、問い [user-questions.md](user-questions.md)（Q302-1〜7）、review [design-review.md](design-review.md)。HAL は変えない（design.md §5）。
 - （2026-10-31 の時点の次: ユーザーの答え。2026-11-14 に決まった）
 - 前の再開点（2026-10-29）の source の棚卸し [survey-source.md](survey-source.md) は design.md §2.8 で引き直した。§0 の ws.md の食い違いは既に直っていた。

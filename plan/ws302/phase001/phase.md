@@ -12,10 +12,10 @@ ws.md の p001 の行のとおり。どの統計からどの性質を推すか�
 
 ## 進み（2026-10-31 P5）
 
-- 設計 [../design.md](../design.md) 第 1 版（main 3d820d9ca の code を読んで書いた）、header の案 [../proposed/include/kern/sched-hint.h](../proposed/include/kern/sched-hint.h)・[../proposed/include/kern/dtb.h](../proposed/include/kern/dtb.h)（host の cc で `-fsyntax-only -Wall -Wextra`、`CONFIG_DTB=0/1` の両方で通る事だけを確かめた）。
+- 設計 [../design.md](../design.md) 第 1 版（main 3d820d9ca の code を読んで書いた）、header の案（`proposed/include/kern/sched-hint.h`・`dtb.h`。本物の [include/kern/sched-hint.h](../../../include/kern/sched-hint.h)・[include/kern/desktop-balancer.h](../../../include/kern/desktop-balancer.h) が p002 で出来て、案は p003 で消した）（host の cc で `-fsyntax-only -Wall -Wextra`、`CONFIG_KERN_DESKTOP_BALANCER=0/1` の両方で通る事だけを確かめた）。
 - 問い Q302-1〜7（[../user-questions.md](../user-questions.md)）。Q1 への点は design.md §10.2。
 - design-reviewer（1 回、blocker 2・major 11・minor 13）の結果は [../design-review.md](../design-review.md)。全部を第 2 版に反映した（design.md §14）。主な変更: user の thread を kernel の worker の段（8）より上に置かない、`sched_set_cpu` の状態の確かめ直し、手渡しの席を上書きしない、MOVE は希望の種類の idle の CPU だけ、S2 を 4 本に、試験の stress を p003 に。
-- 観察の UAPI の形の案 [../proposed/include/uapi/dtb-sysctl.h](../proposed/include/uapi/dtb-sysctl.h)（-m64・-m32 で 720 byte）。
+- 観察の UAPI の形の案 [../proposed/include/uapi/desktop-balancer-sysctl.h](../proposed/include/uapi/desktop-balancer-sysctl.h)（-m64・-m32 で 720 byte）。
 
 - 2026-11-14 P6（q2093-i01）: ユーザーが Q302-1〜7 を全部推しで決めた（2026-11-14）。設計を第 3 版に改訂した（今の main fd18bd61ee の code・新しい build system と照らし、冒頭に改訂の要点と食い違いの表 D-1〜D-15、決定を §10.1 に）。design-reviewer の 2 回目（blocker 0・major 6・minor 9）を反映した（design.md §15、design-review.md の「第 3 版の review」）。
 
@@ -26,6 +26,6 @@ ws.md の p001 の行のとおり。どの統計からどの性質を推すか�
 
 ## 後の Phase への持ち越し
 
-- p002: `CONFIG_DTB=n` が今と同じ事は最終の `vmunix` の逆 assemble で比べる（LTO の `.o` は bitcode）。
+- p002: `CONFIG_KERN_DESKTOP_BALANCER=n` が今と同じ事は最終の `vmunix` の逆 assemble で比べる（LTO の `.o` は bitcode）。
 - p003: 手渡しの後継の 4 か所と tick の頭の `complete_handoff`、席を上書きしない規則、`move_pending` の後始末、`sched_set_cpu` の確かめ直し（design.md §4.6.5・§4.6.7）。
 - p006: 5330 の CPU の番号の並びと SMT の兄弟の対を最初に記録（design.md §12）。

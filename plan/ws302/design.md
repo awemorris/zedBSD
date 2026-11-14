@@ -16,21 +16,21 @@
 ### 改訂の要点（第 2 版から変えた所）
 
 1. **問いが決まった**（2026-11-14、Q302-1〜7 は全部推し）。§10 を決定の表に書き直し、本文の「推し」「Q302-n の答え次第」を決定として読む。
-2. **build system の作り直しに合わせた**: config は `config/kernel-options.list`・`Makefile` の `ZEDBSD_CONFIG_CPPFLAGS`・`platform/amd64/vmunix.mk` ではなく、`mk/config.mk`（`CONFIG_* ?= n`）と `mk/kernel.mk`（`ifneq ($(filter y,$(CONFIG_X)),)` で `KERN_CPPFLAGS += -DCONFIG_X=1`・`KERN_SOURCES +=`）。n の時 macro は定義されない（`#if CONFIG_DTB` は 0）。Makefile・mk は Claude が変えないので、差分は案（§4.11）。
-3. **build は全 platform、評価して支えるのは x86 の hybrid だけ**（範囲の判断。Q1 経由でユーザーに確かめる、§10.2 の 10）: 新しい mk には platform の欄が無く、code は arch に依らない。`CONFIG_DTB` は全 platform で build でき、x86_64・arm64（rpi4・rpi5）・riscv64（vf2）で n と y の build を確かめる。core の種類が 1 つの機械（今の arm64・riscv64 の全部、hybrid でない x86）では種類の表が ANY になり、priority（nice・GPU の app）の hint だけが効く。
-4. **CPU の種類・相対の性能は WS333 の口だけを使う**（重複を作らない）: `kern_cpuperf_cpu()`・`kern_cpuperf_generation()` は `CONFIG_KERN_THERMAL=y` の時だけ link される（`src/kern/cpuperf.c` は mk/kernel.mk:1250〜1256 の KERN_THERMAL の下）。x86 の core の種類（CPUID 1AH）を出す provider の登録は `CONFIG_KERN_THERMAL && CONFIG_DRIVER_X86_POWER_CONTROL` の下（cpu-x86.c:172）。DTB は `CONFIG_KERN_THERMAL` が n なら cpuperf を呼ばず種類の表を ANY にする（`#if CONFIG_KERN_THERMAL`）。5330 の評価の build は WS333 の前提（KERN_THERMAL と X86_POWER_CONTROL を y）に `CONFIG_DTB=y` を足す（§6.3）。
+2. **build system の作り直しに合わせた**: config は `config/kernel-options.list`・`Makefile` の `ZEDBSD_CONFIG_CPPFLAGS`・`platform/amd64/vmunix.mk` ではなく、`mk/config.mk`（`CONFIG_* ?= n`）と `mk/kernel.mk`（`ifneq ($(filter y,$(CONFIG_X)),)` で `KERN_CPPFLAGS += -DCONFIG_X=1`・`KERN_SOURCES +=`）。n の時 macro は定義されない（`#if CONFIG_KERN_DESKTOP_BALANCER` は 0）。Makefile・mk は Claude が変えないので、差分は案（§4.11）。
+3. **build は全 platform、評価と閾値の調整は x86 の hybrid（5330）だけ**（2026-11-14 ユーザーの決定、§10.2 の 10）: 新しい mk には platform の欄が無く、code は arch に依らない。`CONFIG_KERN_DESKTOP_BALANCER` は全 platform で build でき、x86_64・arm64（rpi4・rpi5）・riscv64（vf2）で n と y の build を確かめる。core の種類が 1 つの機械（今の arm64・riscv64 の全部、hybrid でない x86）では種類の表が ANY になり、priority（nice・GPU の app）の hint だけが効く。
+4. **CPU の種類・相対の性能は WS333 の口だけを使う**（重複を作らない）: `kern_cpuperf_cpu()`・`kern_cpuperf_generation()` は `CONFIG_KERN_THERMAL=y` の時だけ link される（`src/kern/cpuperf.c` は mk/kernel.mk:1250〜1256 の KERN_THERMAL の下）。x86 の core の種類（CPUID 1AH）を出す provider の登録は `CONFIG_KERN_THERMAL && CONFIG_DRIVER_X86_POWER_CONTROL` の下（cpu-x86.c:172）。DTB は `CONFIG_KERN_THERMAL` が n なら cpuperf を呼ばず種類の表を ANY にする（`#if CONFIG_KERN_THERMAL`）。5330 の評価の build は WS333 の前提（KERN_THERMAL と X86_POWER_CONTROL を y）に `CONFIG_KERN_DESKTOP_BALANCER=y` を足す（§6.3）。
 5. **sched の今に合わせた**: (a) thread の affinity（`SCHED_CPU_FREE`・`SCHED_CPU_BOUND`、sched.h の `enum sched_cpu_affinity`、BUG-422）が入り、盗みは BOUND の thread を飛ばす（`first_free_thread` sched.c:2677）。DTB は BOUND の thread を動かさない（§4.5・§4.6.4）。(b) `sched_set_cpu` には外の呼び手が出来た（cpuperf.c:3590 の測りの thread、intel-tco.c:1106 の見張りの thread。どちらも `kthread_create` の直後の NEW の kernel の thread を BOUND にする）。第 2 版 §4.6.7 の「NEW を断る確かめ直しを `sched_set_cpu` に入れる」は今の呼び手を壊すので、確かめ直しは `sched_hint_place` の道だけに置く（§4.6.7 を書き直した）。(c) tick は可変（`src/kern/clock.c:49〜54`）: 時間の単位（`clock_ticks()`）は 1 ms、CPU が thread を走らせている間の割り込みは 1000 Hz、idle の間は 100 Hz。idle から出る時に idle の間の時間を先に CPU の idle に計上する（sched.c の `leave_idle` → `kern_clock_tick_busy`）ので、走っている thread に足す `elapsed` は普段 1。ms の閾値は `kern_ms_to_ticks()` で直す（第 2 版のまま）。WS333 の ws.md にある「amd64 を 100 Hz に下げた」（2026-11-13）は、その後 WS351 の可変の tick（commit 68910dea12）で置き換わっている（D-15）。(d) tick の計数は 1 tick ずつではなく `elapsed`（前の割り込みからの単位の数）で足されている（sched.c:1053〜1057）。統計も同じく `elapsed` で足す。
 6. **GPU の時刻**: 仕事を出す ioctl に `GPU_JOB_SUBMIT`（`include/uapi/gpu-job.h:29`、G 49）が足されていた。画面に出す ioctl の組（`GPU_PRESENT`・`GPU_DISPLAY_PRESENT`・`_SYNC`・`GPU_DISPLAY_COMMIT`）は `gpu_console_end`（gpu.c:2165）の組と同じ。通知は `gpu_ioctl`（gpu.c:2111）の成功の後、何も持たない所に置く。WS353（compositor の待ち方）は thread を名前つきの待ちに分けるが、DTB の印は process ごとの時刻なので影響しない。compositor の thread が timeout 無しで眠る形は BUSY・HEAVY に当たりにくくする方向で、規則の前提と合う。
 7. **入力の通知の置き場所**: 第 2 版は publish の所（irqsave の lock の中）に置いたが、`drv_input_device_emit_at`・`drv_input_device_emit_key_event` の最後の `poll_notify_object` の後（lock を全部離した後、`published` の時だけ）に置く。atomic だけである事は変わらない。
-8. **p002 の source の置き場所**: 入力と GPU の通知の本体と入力の時刻は `src/kern/dtb.c`（p002 で作り、p004 で DTB の thread を足す）。新しい source の追加は mk の変更なので、mk の案（§4.11）が承認されるまで、y の build は試験の overlay の makefile（`plan/ws302/tests/dtb-overlay.mk`、`make -f Makefile -f …`）で案と同じ効果を与えて確かめる（p002 の phase.md）。
+8. **p002 の source の置き場所**: 入力と GPU の通知の本体と入力の時刻は `src/kern/desktop-balancer.c`（p002 で作り、p004 で DTB の thread を足す）。新しい source の追加は mk の変更なので、mk の案（§4.11）が承認されるまで、y の build は試験の overlay の makefile（`plan/ws302/tests/desktop-balancer-overlay.mk`、`make -f Makefile -f …`）で案と同じ効果を与えて確かめる（p002 の phase.md）。
 
 ### 今の code・記録との食い違いの一覧（第 2 版の前提 → 今）
 
 | # | 第 2 版の前提（3d820d9ca） | 今（fd18bd61ee） | 扱い |
 | --- | --- | --- | --- |
 | D-1 | config は `config/kernel-options.list`・`Makefile:941`・`platform/amd64/vmunix.mk` | `mk/config.mk`・`mk/kernel.mk`・`mk/test-config.mk`・`mk/test-kernel.mk`、config の file は `config/config.<機種>.mk` | §4.11 の mk の案に書き直した |
-| D-2 | `CONFIG_DTB` は amd64 だけ | mk に platform の欄が無い。全 platform で build できる形にする | 改訂の要点 3 |
-| D-3 | cpuperf の provider は `CONFIG_CPU_PERF` に依らず登録され、core の種類は常に出る（WS333 design §4.5 の表もそう書く） | `cpuperf.c` は `CONFIG_KERN_THERMAL` の時だけ build され、x86 の provider の登録は `CONFIG_KERN_THERMAL && CONFIG_DRIVER_X86_POWER_CONTROL` の時だけ（cpu-x86.c:111〜188）。x86_64 の既定は KERN_THERMAL が n（mk/platform-x86_64/defaults.mk:55） | DTB は KERN_THERMAL が無ければ種類を ANY にする。**WS333 の設計 §4.5 の表と code の食い違いは WS333 の記録の問題として Q1 へ**（あるべき形: 種類と topology は CPUID だけで分かり MSR に依らないので、WS333 §4.5 のとおり X86_POWER_CONTROL に依らず出す方が DTB には良い。ただ WS333 は completed なので直すかはユーザー） |
+| D-2 | `CONFIG_KERN_DESKTOP_BALANCER` は amd64 だけ | mk に platform の欄が無い。全 platform で build できる形にする | 改訂の要点 3 |
+| D-3 | cpuperf の provider は `CONFIG_CPU_PERF` に依らず登録され、core の種類は常に出る（WS333 design §4.5 の表もそう書く） | `cpuperf.c` は `CONFIG_KERN_THERMAL` の時だけ build され、x86 の provider の登録は `CONFIG_KERN_THERMAL && CONFIG_DRIVER_X86_POWER_CONTROL` の時だけ（cpu-x86.c:111〜188）。x86_64 の既定は KERN_THERMAL が n（mk/platform-x86_64/defaults.mk:55） | DTB は KERN_THERMAL が無ければ種類を ANY にする。**WS333 の設計 §4.5 の表と code の食い違いは WS333 の記録の問題として Q1 へ**（あるべき形: 種類と topology は CPUID だけで分かり MSR に依らないので、WS333 §4.5 のとおり X86_POWER_CONTROL に依らず出す方が DTB には良い。ただ WS333 は completed なので直すかはユーザー）。**決定（2026-11-14 ユーザー）: code が正しい**（core の種類は KERN_THERMAL と X86_POWER_CONTROL の両方が y の時だけ出る）。WS333 の design.md は Q1 が code に合わせて直す |
 | D-4 | `kern_cpuperf_cpu` の flag は `READ_SAMPLE` | `KERN_CPUPERF_READ_FRESH`（cpuperf.h:102）。flag 0 なら spinlock だけで読む（cpuperf.h:343〜356） | DTB は flag 0 で読む（周期の中で CPU を起こさない） |
 | D-5 | `sched_set_cpu` は外の呼び手が無い | cpuperf.c:3590・intel-tco.c:1106 が NEW の kernel の thread を BOUND に | §4.6.7 を書き直した（確かめ直しは hint の道だけ） |
 | D-6 | affinity・cpuset は無い | `SCHED_CPU_BOUND` があり、盗みは BOUND を飛ばす | DTB は BOUND の thread を動かさない（user の thread を BOUND にする口は今は無いが、将来に備えて確かめる） |
@@ -39,8 +39,8 @@
 | D-9 | GPU の仕事の ioctl は 4 つ | `GPU_JOB_SUBMIT` を足して 5 つ（`GPU_COMMAND`・`GPU_COMMAND_SUBMIT`・`GPU_COMMAND_SUBMIT_SYNC`・`GPU_JOB_SUBMIT`・`GPU_JOB_COMMIT`） | §4.3 |
 | D-10 | `hal_task_transfer` の「後継の文脈で去った task は移せる」は amd64 の実装だけの性質（§12 の 3） | arm64（task.c:625）・riscv64（task.c:627）の実装も同じ性質を comment に書いている。hal.h:1041 の宣言には契約の文が無いまま | §5・§12 の 3 を直した。hal.h は変えない |
 | D-11 | 行の番号（sched.c 2978 行など） | sched.c 3151 行、他も動いた | §2.9 の読み替えの表 |
-| D-12 | `kern_thermal_init()` の後で `kern_dtb_init()` | `kern_cpuperf_init()`・`kern_thermal_init()` は `#if CONFIG_KERN_THERMAL` の中（entry.c:385〜418） | `kern_dtb_init()` は thermal の block の後に、KERN_THERMAL に依らず置く（§4.9） |
-| D-13 | config の名前 `CONFIG_DTB` | 新しい mk の名前の作法は kernel の枠組みが `CONFIG_KERN_*`（`CONFIG_KERN_THERMAL`・`CONFIG_KERN_NET`）。また「DTB」は arm64・riscv64 の device tree blob（`*.dtb`、mk/platform-vf2/firmware.mk など）と同じ略 | ユーザーの決定（2026-10-27）の名前 `CONFIG_DTB` のまま案を出す。`CONFIG_KERN_DTB` に揃えるか、device tree と紛れない名前（例 `CONFIG_KERN_THREAD_BALANCER`）にするかは mk の案と一緒にユーザーに聞く（Q1） |
+| D-12 | `kern_thermal_init()` の後で `kern_desktop_balancer_init()` | `kern_cpuperf_init()`・`kern_thermal_init()` は `#if CONFIG_KERN_THERMAL` の中（entry.c:385〜418） | `kern_desktop_balancer_init()` は thermal の block の後に、KERN_THERMAL に依らず置く（§4.9） |
+| D-13 | config の名前 `CONFIG_DTB` | 新しい mk の名前の作法は kernel の枠組みが `CONFIG_KERN_*`（`CONFIG_KERN_THERMAL`・`CONFIG_KERN_NET`）。また「dtb」は arm64・riscv64 の device tree blob（`*.dtb`、mk/platform-vf2/firmware.mk など）と同じ略 | **決定（2026-11-14 ユーザー）**: `CONFIG_KERN_DESKTOP_BALANCER`。file・関数・型・sysctl・起動の parameter の名前からも dtb を外した（`src/kern/desktop-balancer.c`・`include/kern/desktop-balancer.h`・`kern_desktop_balancer_*`・`kern.desktop_balancer`・`desktop_balancer=off`）。plan の文の略称「DTB」は WS の名前として残す |
 | D-15 | （記録）WS333 の ws.md は 2026-11-13 に amd64 の tick を 100 Hz に下げたと書く | code は WS351 の可変の tick（busy 1000 Hz・idle 100 Hz、commit 68910dea12 で `HAL_TIMER_FREQUENCY` を外した） | DTB は code に合わせた。WS333 の ws.md の記述が古い事は Q1 へ（第 3 版の初めの稿はその記述を信じて 100 Hz と書き、review 第 3 版 M1 で直した） |
 | D-14 | user の既定の段 10 は `SCHED_HINT_USER_DEFAULT` | 変わらない。kthread_create の呼び出しは 101 か所（第 2 版 97）、既定でない物に TCO の見張り（`SCHED_PRIOR_HIGH`）・thermal の thread・uvc・usb-bt など | §2.1 の数を直した。結論（kernel の大半は 8）は同じ |
 
@@ -51,13 +51,14 @@
 | 日付 | 要点 | この設計での扱い |
 | --- | --- | --- |
 | 2026-10-27 | config で有効にできる DTB を kernel に足す。DTB は scheduler ではなく、thread を適した core に移すよう sched に依頼し、balancing と scheduling の hint を出す。HID・GPU・process/thread の統計と nice を使う。GPU を使う app は応答の priority を上げて速い core に、syscall の無いまま長く忙しい thread は遅く省電力の core に、terminal の app（GPU を使わず tty がある）は UI の応答を落とさない範囲で速い core に。まずどの情報からどんな balancing ができるかを検討する | §3（情報 → 性質 → hint の表）、§4（DTB と sched の口） |
-| 2026-10-27 09:39（クリック） | `CONFIG_DTB` の既定は off。nice は core の選びに加えて sched の priority にも効かせる | §4.11（config）、§4.7（nice の段と飢えの防ぎ） |
+| 2026-10-27 09:39（クリック） | `CONFIG_KERN_DESKTOP_BALANCER` の既定は off。nice は core の選びに加えて sched の priority にも効かせる | §4.11（config）、§4.7（nice の段と飢えの防ぎ） |
 | 2026-10-31（Q1 経由の依頼の趣旨） | 不在の間（昼頃まで）設計だけ進められる WS は設計を進める。WS333 の cpuperf の口（P/E の種類・相対の性能）が main に入ったので WS302 の設計の時期 | この文書 |
 | 2026-11-14 | Q302-1〜7 を全部推しの案で決める | §10.1（決定の表）。本文の「推し」は決定として読む |
+| 2026-11-14 | config の名前は `CONFIG_KERN_DESKTOP_BALANCER`（device tree blob と紛れる「dtb」を名前から外す）。範囲は全 platform で build、評価と閾値の調整は x86 の hybrid（5330）だけ。D-3 は code が正しい | D-13・D-3・改訂の要点 3、§4.11 |
 
 ## 1. 目標と範囲
 
-- 目標（ws.md）: `CONFIG_DTB` で有効にできる DTB を kernel に入れ、5330（P-core 2・E-core 8）で thread の性質を統計と nice から見分けて sched に hint を出し、DTB を切った時に比べて desktop の応答を落とさず、長く忙しい計算の thread を E-core に寄せて電力を下げる事を数で示す。
+- 目標（ws.md）: `CONFIG_KERN_DESKTOP_BALANCER` で有効にできる DTB を kernel に入れ、5330（P-core 2・E-core 8）で thread の性質を統計と nice から見分けて sched に hint を出し、DTB を切った時に比べて desktop の応答を落とさず、長く忙しい計算の thread を E-core に寄せて電力を下げる事を数で示す。
 - この文書が決める物: どの統計からどの性質を推すか（§3）、統計の取り方と置き場所（§4.3）、分類と規則の強さの順（§4.4）、sched への hint の口と sched の最小の変更（§4.5・§4.6）、nice と priority（§4.7）、5330 の割り付けの方針（§4.8）、DTB の周期の処理（§4.9）、状態・資源・lock・失敗（§4.10〜§4.14）、config と観察（§4.11・§4.15）、試験と受け入れ（§6）、Phase（§7）。
 - 範囲の外: sched の作り直し（hint を受ける最小の変更だけ）、周波数の制御（WS333）、hybrid でない機械の評価、Keiland の thread の作りの変更（WS309）、compositor からの focus の hint（Q302-4 の決定 B で、p006 の数で要る時だけ条件つきの Phase）。
 
@@ -113,7 +114,7 @@
 ### 2.8 survey-source.md・ws.md との違い
 
 - 行の引き直し: `setpriority` は syscall.c:8880（survey では 8863）、syscall の入口の accounting は :10445・:10516（survey 10427・10498）、`sched_set_cpu` は sched.c:1691（1665）、盗みは :2554（2528）、`syscall_dispatch_body` は :9814（ws.md の 9796）、`struct gpu_session` は gpu.c:225（ws.md の 219）、sched.c は 2978 行（ws.md の 2952）。
-- survey §0 の ws.md の食い違い（nice と CONFIG_DTB の既定）は、今の ws.md では既に直っている（「含む」と D1・D3 が 2026-10-27 09:39 の決定に揃っている）。
+- survey §0 の ws.md の食い違い（nice と CONFIG_KERN_DESKTOP_BALANCER の既定）は、今の ws.md では既に直っている（「含む」と D1・D3 が 2026-10-27 09:39 の決定に揃っている）。
 - survey §6 の 5「topology を知らない（WS301 待ち）」は解けた（§2.5）。
 
 ### 2.9 第 3 版の読み替え（main fd18bd61ee）
@@ -144,7 +145,7 @@
 | `kern_cpuperf_cpu`・`kern_cpuperf_generation` | cpuperf.h:354・:385 | :358・:396 | flag は `READ_FRESH`（D-4）、cpuperf.c は KERN_THERMAL の時だけ（D-3） |
 | `kern_cpuperf_init`・`kern_thermal_init` | entry.c:382・:405 | :387・:412（`#if CONFIG_KERN_THERMAL`） | D-12 |
 | `hal_task_transfer` | hal.h:1035、src/hal/amd64/task.c:832 | hal.h:1041、src/hal/x86_64/task.c:832 | D-10 |
-| sysctl の KERN の最後の番号 | `KERN_BOOT_KMSG 10` | 同じ（sysctl.h:512） | `kern.dtb` は 11 のまま使える |
+| sysctl の KERN の最後の番号 | `KERN_BOOT_KMSG 10` | 同じ（sysctl.h:512） | `kern.desktop_balancer` は 11 のまま使える |
 | 起動の parameter の enum | boot.h:107 | 同じ所（`KERN_BOOT_PARAMETER_CPUPERF` :129・`_CPUPERF_HWP` :130） | — |
 
 ## 3. どの情報から何を推し、どんな hint にするか（ws.md の表を埋めた物）
@@ -170,36 +171,36 @@ priority の数は §4.7 の決定（Q302-3 の A: user の thread は kernel �
 ```
  user:  （v1 は書きの UAPI を足さない。観察の読みだけ Q302-6）
                                        |
- kernel:  src/kern/dtb.c（CONFIG_DTB=y だけ）: 入力・GPU の通知の受け口と入力の時刻（p002）、周期の thread「dtb」、process と thread を巡って分類し、sched に hint を渡す（p004）
-          src/kern/dtb-policy.c（同）: 分類の純な関数（host 試験の対象）
-          src/kern/sched-hint-test.c（CONFIG_DTB_TEST=y だけ）: 偽の種類の表と、無作為に hint・移動を出す試験の thread
+ kernel:  src/kern/desktop-balancer.c（CONFIG_KERN_DESKTOP_BALANCER=y だけ）: 入力・GPU の通知の受け口と入力の時刻（p002）、周期の thread「balancer」、process と thread を巡って分類し、sched に hint を渡す（p004）
+          src/kern/desktop-balancer-policy.c（同）: 分類の純な関数（host 試験の対象）
+          src/kern/sched-hint-test.c（CONFIG_KERN_DESKTOP_BALANCER_TEST=y だけ）: 偽の種類の表と、無作為に hint・移動を出す試験の thread
              |  読む: kern_cpuperf_cpu / kern_cpuperf_generation（WS333、CONFIG_KERN_THERMAL=y の時だけ）、process の nice・tty・GPU の時刻、HID の時刻、sched の thread の計数
              v  渡す: sched_cpu_classes_set（CPU の種類の表）、sched_hint_set（thread の希望と priority）、sched_hint_place（今すぐ寄せる）
-          src/kern/sched.c: hint を持ち、置き場所・盗み・idle の CPU の選び・走っている thread の手渡し・飢えの防ぎに使う（#if CONFIG_DTB）
-          src/kern/syscall.c・sched.c の tick: thread の計数（#if CONFIG_DTB）
- driver:  src/drivers/gpu/gpu.c: kern_dtb_note_gpu()（gpu_ioctl の成功の後、何も持たない所で、提出と表示の ioctl だけ）
-          src/drivers/generic/input.c: kern_dtb_note_input()（普通の入力の 2 つの関数の最後、lock を離した後）
+          src/kern/sched.c: hint を持ち、置き場所・盗み・idle の CPU の選び・走っている thread の手渡し・飢えの防ぎに使う（#if CONFIG_KERN_DESKTOP_BALANCER）
+          src/kern/syscall.c・sched.c の tick: thread の計数（#if CONFIG_KERN_DESKTOP_BALANCER）
+ driver:  src/drivers/gpu/gpu.c: kern_desktop_balancer_note_gpu()（gpu_ioctl の成功の後、何も持たない所で、提出と表示の ioctl だけ）
+          src/drivers/generic/input.c: kern_desktop_balancer_note_input()（普通の入力の 2 つの関数の最後、lock を離した後）
           （driver は kern_* だけを呼ぶ。HAL を知らない規則のまま）
  HAL:     変えない。hal_task_transfer（止まっている task）と hal_cpu_notify を sched が今の使い方のまま使う
 ```
 
 - **DTB は sched ではない**: 実行の順・CPU の選び・移動の実行は sched が決める。DTB は「この thread はどの種類の core を望むか、どの強さで、どの priority か」を書き、「今寄せてほしい」を頼むだけ。sched は CPU の空き具合を見て、頼みを果たせない時は断る（EAGAIN）。
 - **sched は cpuperf を呼ばない**: sched の lock（rank 200）の中で cpuperf の box の lock（rank 125）は取れない。DTB が thread の文脈で cpuperf を読み、CPU の種類の表を sched に写す。
-- **`CONFIG_DTB=n` は今と同じ**: sched・syscall・gpu・input の追加は全部 `#if CONFIG_DTB` か、`include/kern/dtb.h`・`include/kern/sched-hint.h` の空の inline。struct の field も同じ条件（Q302-5 の決定）。§4.6.7 の確かめ直しは `sched_hint_place` の道だけに置き、`sched_set_cpu` そのもの（今の呼び手は cpuperf と TCO）は変えない。
+- **`CONFIG_KERN_DESKTOP_BALANCER=n` は今と同じ**: sched・syscall・gpu・input の追加は全部 `#if CONFIG_KERN_DESKTOP_BALANCER` か、`include/kern/desktop-balancer.h`・`include/kern/sched-hint.h` の空の inline。struct の field も同じ条件（Q302-5 の決定）。§4.6.7 の確かめ直しは `sched_hint_place` の道だけに置き、`sched_set_cpu` そのもの（今の呼び手は cpuperf と TCO）は変えない。
 
 ### 4.2 責務と境界
 
 | 部品 | 持つ物 | 持たない物 |
 | --- | --- | --- |
-| DTB（dtb.c） | 周期の処理、process と thread の巡回、分類の状態（履歴の幅）、CPU の種類の表の作成、HID の時刻、移動の予算 | CPU の選び、queue の操作、周波数 |
-| 分類（dtb-policy.c） | 入力（統計・nice・tty・時刻・HID の状態）→ hint の純な関数、規則の強さの順、閾値 | kernel の object |
+| DTB（desktop-balancer.c） | 周期の処理、process と thread の巡回、分類の状態（履歴の幅）、CPU の種類の表の作成、HID の時刻、移動の予算 | CPU の選び、queue の操作、周波数 |
+| 分類（desktop-balancer-policy.c） | 入力（統計・nice・tty・時刻・HID の状態）→ hint の純な関数、規則の強さの順、閾値 | kernel の object |
 | sched | hint の保存、priority の付け替え、CPU の種類の表、置き場所・盗み・idle の CPU の選びの好み、走っている thread の手渡し、飢えの防ぎ、kernel の中の thread の優先、thread の計数 | 分類、cpuperf の読み |
 | cpuperf（WS333） | core の種類・相対の性能・HFI・世代 | DTB の事 |
 | GPU の core・input の core | 自分の ioctl・入力の所で 1 行の通知 | 分類 |
 
 ### 4.3 統計（取る所・書き手・代価）
 
-全部 `CONFIG_DTB=y` の時だけ（Q302-5）。thread の field は `struct sched` に埋める `struct sched_hint_state`（p002 で入れた [include/kern/sched-hint.h](../../include/kern/sched-hint.h)）、process の field は `struct dtb_process_activity`（[include/kern/dtb.h](../../include/kern/dtb.h)）。`proposed/include/kern/` の 2 つの header は第 2 版の案で、本物が出来たので古い（消すのは Q1、§10.2 の 11）。
+全部 `CONFIG_KERN_DESKTOP_BALANCER=y` の時だけ（Q302-5）。thread の field は `struct sched` に埋める `struct sched_hint_state`（p002 で入れた [include/kern/sched-hint.h](../../include/kern/sched-hint.h)）、process の field は `struct desktop_balancer_activity`（[include/kern/desktop-balancer.h](../../include/kern/desktop-balancer.h)）。`proposed/include/kern/` の 2 つの header は第 2 版の案で、本物が出来たので古い（消すのは Q1、§10.2 の 11）。
 
 | 統計 | 書く所 | 読む所 | 同期 |
 | --- | --- | --- | --- |
@@ -207,32 +208,32 @@ priority の数は §4.7 の決定（Q302-3 の A: user の thread は kernel �
 | `user_streak`（syscall の後に user で走った tick、飽和する） | tick で `accounting_kernel_depth == 0` なら `elapsed` を足す（上限で止める）。syscall の入口の割り込みを止めた窓（syscall.c:10448 の直後）の `sched_note_syscall()` で 0 に | DTB | 書き手（tick と入口）はどちらも thread が走る CPU の上で割り込みを止めて書くので重ならない。DTB は load だけ |
 | `syscalls`（数、一周してよい u32） | `sched_note_syscall()`（同じ窓） | DTB | 同上 |
 | `wakeups`（u32、観察だけ） | 眠りから RUNNABLE にする所: `wake_enqueue_locked`（`sched_wakeup`・tick の期限・`sched_notify_task` の 3 つの道が通る）と、`sched_set_cpu` の移動の間に持ち越した起床（成功と失敗の 2 か所）。どれもその時に thread を持つ CPU の lock の中 | DTB（観察） | 書き手は時により違う CPU だが、いつも thread の CPU の lock の中。近似でよい |
-| process の `gpu_submit_tick`・`present_tick` | `kern_dtb_note_gpu()`（gpu_ioctl の成功の後、呼んだ thread の文脈、何も持たない所） | DTB | atomic の store・load |
-| HID の `input_tick`・`input_count`（全体で 1 つ） | `kern_dtb_note_input()`（`drv_input_device_emit_at` と `drv_input_device_emit_key_event` の最後、lock を全部離した後で `published` の時だけ。atomic だけ） | DTB | atomic |
+| process の `gpu_submit_tick`・`present_tick` | `kern_desktop_balancer_note_gpu()`（gpu_ioctl の成功の後、呼んだ thread の文脈、何も持たない所） | DTB | atomic の store・load |
+| HID の `input_tick`・`input_count`（全体で 1 つ） | `kern_desktop_balancer_note_input()`（`drv_input_device_emit_at` と `drv_input_device_emit_key_event` の最後、lock を全部離した後で `published` の時だけ。atomic だけ） | DTB | atomic |
 
-- `kern_dtb_note_input()` は普通の入力の 2 つの関数だけで呼ぶ。device の外し（:826〜853）と reader の resync（:2526〜2617）は人の操作ではないので呼ばない。subscriber の枠は使わない（購読でなく input の core から kernel への 1 行の通知。kernel が driver の関数を呼ぶ向きを作らず、input.c の無い platform でも DTB が link できる）。
-- `kern_dtb_note_gpu()` は ioctl の番号を GPU の core が `KERN_DTB_GPU_SUBMIT`（`GPU_COMMAND`・`GPU_COMMAND_SUBMIT`・`GPU_COMMAND_SUBMIT_SYNC`・`GPU_JOB_SUBMIT`・`GPU_JOB_COMMIT`）・`KERN_DTB_GPU_PRESENT`（`GPU_PRESENT`・`GPU_DISPLAY_PRESENT`・`GPU_DISPLAY_PRESENT_SYNC`・`GPU_DISPLAY_COMMIT`、`gpu_console_end` と同じ組）に読み替えて渡す（DTB は GPU の UAPI を知らない）。読み替えの関数も `#if CONFIG_DTB` の中に置く（n の kernel に code を残さない）。thread ごとの GPU の時刻は v1 の規則に使わないので取らない（第 1 版から外した）。
+- `kern_desktop_balancer_note_input()` は普通の入力の 2 つの関数だけで呼ぶ。device の外し（:826〜853）と reader の resync（:2526〜2617）は人の操作ではないので呼ばない。subscriber の枠は使わない（購読でなく input の core から kernel への 1 行の通知。kernel が driver の関数を呼ぶ向きを作らず、input.c の無い platform でも DTB が link できる）。
+- `kern_desktop_balancer_note_gpu()` は ioctl の番号を GPU の core が `KERN_DESKTOP_BALANCER_GPU_SUBMIT`（`GPU_COMMAND`・`GPU_COMMAND_SUBMIT`・`GPU_COMMAND_SUBMIT_SYNC`・`GPU_JOB_SUBMIT`・`GPU_JOB_COMMIT`）・`KERN_DESKTOP_BALANCER_GPU_PRESENT`（`GPU_PRESENT`・`GPU_DISPLAY_PRESENT`・`GPU_DISPLAY_PRESENT_SYNC`・`GPU_DISPLAY_COMMIT`、`gpu_console_end` と同じ組）に読み替えて渡す（DTB は GPU の UAPI を知らない）。読み替えの関数も `#if CONFIG_KERN_DESKTOP_BALANCER` の中に置く（n の kernel に code を残さない）。thread ごとの GPU の時刻は v1 の規則に使わないので取らない（第 1 版から外した）。
 - 代価の見積もり（p002 で測る）: tick に加算 2〜3、syscall に store 2、RUNNABLE にする所に加算 1、GPU の ioctl に store 1〜2、入力の event に atomic 2（report ではなく event ごと、review 第 3 版 m5）。
 
-### 4.4 分類（dtb-policy.c）と規則の強さの順
+### 4.4 分類（desktop-balancer-policy.c）と規則の強さの順
 
 #### 4.4.1 thread の印（DTB が履歴を持つ）
 
 | 印 | 立つ | 消える | 履歴の幅 |
 | --- | --- | --- | --- |
-| BUSY | 周期の時点で `user_streak` ≥ `DTB_BUSY_ON_MS`（初め 200 ms） | syscall が増え、かつ `user_streak` < `DTB_BUSY_OFF_MS`（20 ms）の周期が `DTB_BUSY_OFF_PASSES`（10）続いた | 立つのは速く、消えるのは遅く（行ったり来たりの防ぎ） |
-| HEAVY | 前の 1 s（周期 10 回）に走った tick の割合が `DTB_HEAVY_PERCENT`（50%）以上 | 割合が 30% 未満の周期が 10 続いた | GPU の priority の上げの条件（§4.4.3、review M8） |
-| GPU（process） | process の `gpu_submit_tick` が `DTB_GPU_WINDOW_MS`（1000 ms）以内 | 窓を出た | 窓の長さ |
-| PRESENTER（process） | process の `present_tick` が `DTB_PRESENT_WINDOW_MS`（1000 ms）以内 | 窓を出た | 同上 |
+| BUSY | 周期の時点で `user_streak` ≥ `BALANCER_BUSY_ON_MS`（初め 200 ms） | syscall が増え、かつ `user_streak` < `BALANCER_BUSY_OFF_MS`（20 ms）の周期が `BALANCER_BUSY_OFF_PASSES`（10）続いた | 立つのは速く、消えるのは遅く（行ったり来たりの防ぎ） |
+| HEAVY | 前の 1 s（周期 10 回）に走った tick の割合が `BALANCER_HEAVY_PERCENT`（50%）以上 | 割合が 30% 未満の周期が 10 続いた | GPU の priority の上げの条件（§4.4.3、review M8） |
+| GPU（process） | process の `gpu_submit_tick` が `BALANCER_GPU_WINDOW_MS`（1000 ms）以内 | 窓を出た | 窓の長さ |
+| PRESENTER（process） | process の `present_tick` が `BALANCER_PRESENT_WINDOW_MS`（1000 ms）以内 | 窓を出た | 同上 |
 | TTY（process） | `controlling_tty != NULL` かつ GPU（process）でない | どちらかが崩れた | — |
 
 #### 4.4.2 全体の状態（HID）
 
 | 状態 | 条件 | 効き |
 | --- | --- | --- |
-| ACTIVE | 最後の入力から `DTB_USER_ACTIVE_MS`（5 s）以内 | 全部の規則。周期 `DTB_PASS_MS`（100 ms） |
+| ACTIVE | 最後の入力から `BALANCER_USER_ACTIVE_MS`（5 s）以内 | 全部の規則。周期 `BALANCER_PASS_MS`（100 ms） |
 | QUIET | 5 s〜60 s | 全部の規則。周期 100 ms |
-| AWAY | 60 s 以上入力が無い（起動の直後も） | 規則 R6（terminal）を止める。周期 `DTB_PASS_AWAY_MS`（1000 ms） |
+| AWAY | 60 s 以上入力が無い（起動の直後も） | 規則 R6（terminal）を止める。周期 `BALANCER_PASS_AWAY_MS`（1000 ms） |
 
 入力の宛先が分からないので、HID は「人が見ているか」にだけ使う（Q302-4）。
 
@@ -260,7 +261,7 @@ priority の数は §4.7 の決定（Q302-3 の A: user の thread は kernel �
 
 ### 4.5 sched への hint の口（kernel の中、HAL を変えない）
 
-型と p002 の関数は本物の [include/kern/sched-hint.h](../../include/kern/sched-hint.h)、p003 で足す関数の案は第 2 版の `proposed/include/kern/sched-hint.h`（BOUND の ESRCH の説明は下の文が正）。要点:
+型と関数は本物の [include/kern/sched-hint.h](../../include/kern/sched-hint.h)（p002 で型、p003 で関数）。要点:
 
 ```c
 #define SCHED_HINT_CORE_ANY		0U
@@ -291,7 +292,7 @@ void sched_hint_counters(struct sched_hint_counters *counters);
 - `sched_hint_set`: thread の居る CPU の lock を、`sched_wakeup` と同じ「読み直して確かめる」loop で取り（:531〜540 の形）、hint と `base_priority` を置く。process0 の thread（kernel の thread）・idle・NEW・EXITING 以降の状態と、affinity が `SCHED_CPU_BOUND` の thread は ESRCH（BOUND の thread の段も core も変えない）。**queue_kind が RUN か WOKEN の時だけ**新しい段に入れ直す（`queue_remove_thread` → `queue_append`）。SLEEP の時は field だけを変える（sleep の queue は段で分けない。入れ直すと時間つきで眠る thread が起きてしまう、review M2）。走っていて priority が下がり、上の段に待ちがあれば `preempt` を立てる。上げを受けている（`raised`）間は `priority` を変えず、次の戻しで新しい base になる。
 - `sched_hint_place`: 希望の種類の CPU に居なければ寄せる。走っていない thread は §4.6.3 の選びで行き先を決めて §4.6.7 の hint の移動の道（`sched_set_cpu` ではない）。走っている thread は `move_pending` を立てて居る CPU に `notify_cpu`、その CPU が §4.6.5 の手渡しをする。戻り: EALREADY（既にその種類）、EAGAIN（その種類の idle の CPU が無い）、EBUSY（移動の途中・手渡しの席がふさがり）、ESRCH（動かせない状態、BOUND の thread）、EINVAL（PLACE・PLACE_IDLE の無い hint）。眠らない（CPU の lock と `hal_task_transfer` だけ）。
 
-### 4.6 sched の変更（最小、全部 `#if CONFIG_DTB`）
+### 4.6 sched の変更（最小、全部 `#if CONFIG_KERN_DESKTOP_BALANCER`）
 
 #### 4.6.1 priority の 2 つの値と kernel の中の thread
 
@@ -346,8 +347,8 @@ BUSY の計算の thread は眠らず、CPU に他の仕事が無ければ quant
 #### 4.6.7 動かす前の状態の確かめ（review B2、第 3 版で置き場所を変えた）
 
 - 今の `sched_set_cpu`（:1721）は状態の検査が lock の外で、RUNNING・ZOMBIE・DEAD だけを断る。NEW の thread は移せ（task を移し `sched.cpu` を行き先にするので、後の `sched_add` は行き先の CPU に入れる）、cpuperf.c:3590 と intel-tco.c:1106 が `kthread_create` の直後の NEW の thread を BOUND にするのに使っている。だから `sched_set_cpu` に「NEW を断る」確かめを足すと今の呼び手が壊れる（第 2 版の §4.6.7 の誤り）。
-- DTB の道（`sched_hint_place` の走っていない thread）は、`sched_set_cpu` を直に呼ばず、sched.c の中の `hint_move_locked` 相当の道を使う: 元の CPU の lock を取った後に `state` が RUNNABLE か SLEEPING で、`queue_kind` が RUN・WOKEN・SLEEP のどれかで、`affinity` が FREE で、`need_migrate == 0` である事を確かめ直し、違えば ESRCH（移動の途中は EBUSY）。そこから先（queue から外す・印・transfer・retarget・行き先で入れる・持ち越しの起床）は `sched_set_cpu` と同じ順。`CONFIG_DTB=n` の kernel を今と同じに保つため、`sched_set_cpu` を分けて共通にはせず、`#if CONFIG_DTB` の中の別の static 関数に書く（重なりは約 60 行。DTB の外で同じ確かめが要る時が来たら、その時に `sched_set_cpu` と一つにする）。
-- **`sched_set_cpu` について変える事と変えない事**（この節が正、review 第 3 版 M2）: lock の外の状態の検査と呼び手への約束は変えない。`#if CONFIG_DTB` の中でだけ、(1) queue に入れる 2 か所（失敗で元の CPU・成功で行き先）の段を `queue_level_locked` にし（§4.6.1、p003）、(2) 移動の間に持ち越した起床を `wakeups` に数える（§4.3、p002 で入れた）。n の code は同じ。DTB は `sched_set_cpu` を呼ばない。
+- DTB の道（`sched_hint_place` の走っていない thread）は、`sched_set_cpu` を直に呼ばず、sched.c の中の `hint_move_locked` 相当の道を使う: 元の CPU の lock を取った後に `state` が RUNNABLE か SLEEPING で、`queue_kind` が RUN・WOKEN・SLEEP のどれかで、`affinity` が FREE で、`need_migrate == 0` である事を確かめ直し、違えば ESRCH（移動の途中は EBUSY）。そこから先（queue から外す・印・transfer・retarget・行き先で入れる・持ち越しの起床）は `sched_set_cpu` と同じ順。`CONFIG_KERN_DESKTOP_BALANCER=n` の kernel を今と同じに保つため、`sched_set_cpu` を分けて共通にはせず、`#if CONFIG_KERN_DESKTOP_BALANCER` の中の別の static 関数に書く（重なりは約 60 行。DTB の外で同じ確かめが要る時が来たら、その時に `sched_set_cpu` と一つにする）。
+- **`sched_set_cpu` について変える事と変えない事**（この節が正、review 第 3 版 M2）: lock の外の状態の検査と呼び手への約束は変えない。`#if CONFIG_KERN_DESKTOP_BALANCER` の中でだけ、(1) queue に入れる 2 か所（失敗で元の CPU・成功で行き先）の段を `queue_level_locked` にし（§4.6.1、p003）、(2) 移動の間に持ち越した起床を `wakeups` に数える（§4.3、p002 で入れた）。n の code は同じ。DTB は `sched_set_cpu` を呼ばない。
 - **手渡しと BOUND**: `sched_handoff`（current を席に置く時）と `complete_handoff`（transfer の前）は、lock の中で `affinity == SCHED_CPU_FREE` を確かめ、違えば元の CPU の run queue に戻して counter に数える（今の BOUND の呼び手は NEW の kernel の thread だけなので起きないが、将来 user の thread を BOUND にする口が入った時に BOUND を破らない）。
 - NEW の user の thread は `sched_prepare_thread` が置き場所を決め（§4.6.4）、`sched_add` までは DTB に見えても ESRCH。REAPING・ZOMBIE・DEAD・EXITING は task が壊れうるので断る。移動の印（`need_migrate`）を立てた後の thread は走れないので、移動の間に ZOMBIE・REAPING にはならない。DTB は thread の参照（`thread_ref`）を持って呼ぶので struct は消えない。
 - `sched_set_cpu` そのものの lock の外の検査（REAPING を断らない）は、今の呼び手が自分で作った NEW の kernel の thread だけを渡すので表に出ない。直すかは DTB の範囲の外（Q1 に報告する）。
@@ -370,9 +371,9 @@ BUSY の計算の thread は眠らず、CPU に他の仕事が無ければ quant
 | nice 1〜9 | 11 |
 | nice 10〜20 | 12 |
 
-  R1 の thread は nice の段と R4・R5 の段の高い方。R2（nice > 0）は上げを受けない。DTB が off（`dtb=off`）と `CONFIG_DTB=n` では全部 8 のまま（今と同じ）。新しい thread は作り手の段を継ぎ（§4.6.4）、DTB の最初の周期の後に表の段になる。
+  R1 の thread は nice の段と R4・R5 の段の高い方。R2（nice > 0）は上げを受けない。DTB が off（`desktop_balancer=off`）と `CONFIG_KERN_DESKTOP_BALANCER=n` では全部 8 のまま（今と同じ）。新しい thread は作り手の段を継ぎ（§4.6.4）、DTB の最初の周期の後に表の段になる。
 - これで変わる事（Q302-3 で明記）: DTB が on の時、kernel の既定の thread（8）は user の既定（10）より先に走る。今は同じ段で順番に走る。kernel の thread が長く忙しい場面（GPU の shader の compile が kernel の thread で走る時など、未確認）で user の thread が待たされうるので、飢えの防ぎ（下）を user の全部の段に効かせ、p004 の QEMU と p006 の 5330 で確かめる。
-- **飢えの防ぎ**（sched の側、`#if CONFIG_DTB`）: tick ごとに、その CPU の、今走っている thread より下の段の queue の先頭を見て（段ごとの先頭だけ、最大 16）、user の thread で `queued_tick` から `SCHED_HINT_STARVE_MS`（100 ms）以上待った物を、`max(走っている thread の段, SCHED_PRIORITY_DEFAULT)` の段（数が小さい方が高い。8 より高くはしない）の `woken[]` に 1 回だけ上げ（`priority` だけを変え `raised = 1`、§4.6.1）、`preempt` を立てる。kernel の thread は対象にしない（今の振る舞いを保つ）。
+- **飢えの防ぎ**（sched の側、`#if CONFIG_KERN_DESKTOP_BALANCER`）: tick ごとに、その CPU の、今走っている thread より下の段の queue の先頭を見て（段ごとの先頭だけ、最大 16）、user の thread で `queued_tick` から `SCHED_HINT_STARVE_MS`（100 ms）以上待った物を、`max(走っている thread の段, SCHED_PRIORITY_DEFAULT)` の段（数が小さい方が高い。8 より高くはしない）の `woken[]` に 1 回だけ上げ（`priority` だけを変え `raised = 1`、§4.6.1）、`preempt` を立てる。kernel の thread は対象にしない（今の振る舞いを保つ）。
   これで、下げた user の thread は 100 ms ごとに 1 quantum（10 ms）は走る（全部の CPU が上の段の忙しい thread で埋まった最悪の時、CPU の約 9%）。nice の「重み」の意味（Unix の分け前）とは違い、段＋上限の近似。
 - 選ばなかった案: (a) user の thread を 6・7 に上げる（第 1 版。kernel の worker を待たせる、review B1）、(b) nice をそのまま 16 段に写す（kernel の段に入り、飢えが深い）、(c) sched を重み（分け前）の方式に作り直す（範囲の外、ws.md「sched の作り直しは含まない」）、(d) 飢えの防ぎを DTB の周期に任せる（DTB の thread が遅れると防ぎが止まる）、(e) 上げをせず、下げ（BUSY・nice > 0）だけで GPU の app を相対に上にする（Q302-3 の案 B。user の既定は 8 のまま。nice < 0 が priority に効かず、2026-10-27 の決定の「nice は priority にも」を半分しか満たさない）。
 - nice の変更が効くまで: 次の DTB の周期（最大 100 ms、AWAY では 1 s）。`setpriority` から DTB を起こす口は足さない（syscall の道を DTB に繋げない）。
@@ -380,7 +381,7 @@ BUSY の計算の thread は眠らず、CPU に他の仕事が無ければ quant
 ### 4.8 5330（P 2・E 8）の割り付けの方針
 
 - CPU の数: P-core 2（SMT で論理 4）・E-core 8（4 つ組 2 つ、SMT 無し）、計 12（WS333 design §3）。番号の並び（P が先か）は未確認（§12）。DTB は番号に頼らず、cpuperf の `core_class` と `core`（SMT の兄弟）で表を作る。
-- `rank` の決め方: `relative` が分かれば（`CONFIG_KERN_THERMAL=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y` で HWP の strategy の後、5330 の見込み P 100・E 75）`rank = relative × 10`。兄弟が忙しい P は `sibling_rank = rank × DTB_SMT_SHARE_PERMILLE / 1000`（初め 600、p006 で測って直す）。`relative` が UNKNOWN なら種類だけで P 1000・E 700・兄弟の忙しい P 600 とおく（E の idle が P の兄弟の忙しい CPU より先、という順だけが効く）。HFI の `available` が 0 の CPU は `usable = 0`（熱で避けろと言われた CPU）。
+- `rank` の決め方: `relative` が分かれば（`CONFIG_KERN_THERMAL=y`・`CONFIG_DRIVER_X86_POWER_CONTROL=y` で HWP の strategy の後、5330 の見込み P 100・E 75）`rank = relative × 10`。兄弟が忙しい P は `sibling_rank = rank × BALANCER_SMT_SHARE_PERMILLE / 1000`（初め 600、p006 で測って直す）。`relative` が UNKNOWN なら種類だけで P 1000・E 700・兄弟の忙しい P 600 とおく（E の idle が P の兄弟の忙しい CPU より先、という順だけが効く）。HFI の `available` が 0 の CPU は `usable = 0`（熱で避けろと言われた CPU）。
 - 定まった姿（期待、p006 で確かめる）:
 
 | 場面 | P（論理 4） | E（8） |
@@ -392,14 +393,14 @@ BUSY の計算の thread は眠らず、CPU に他の仕事が無ければ quant
 | build＋GPU の app を使う | GPU の app（9）・compositor（8）が build（10）を横取り | compiler。押し出された compiler は idle の E か P の空きで |
 | 背景の計算 4 本（S2） | 空く（P の電力が下がる） | 計算 4 |
 
-### 4.9 DTB の周期の処理（dtb.c）
+### 4.9 DTB の周期の処理（desktop-balancer.c）
 
-1. thread「dtb」（`kthread_create`、priority 5。kernel の既定の 8 より上で、短く走る）。`kern_dtb_init()` を `entry.c` の thermal の block（`#if CONFIG_KERN_THERMAL`、:385〜418）の後で、KERN_THERMAL に依らず呼ぶ。`dtb=off` の起動の parameter では作らない（計数は取り続ける。on と off の比べを同じ image でするため）。
-2. 周期ごと（`kern_ms_to_ticks(DTB_PASS_MS)`、AWAY は `DTB_PASS_AWAY_MS`、`kern_sleep` で眠る）:
+1. thread「balancer」（`kthread_create`、priority 5。kernel の既定の 8 より上で、短く走る）。`kern_desktop_balancer_init()` を `entry.c` の thermal の block（`#if CONFIG_KERN_THERMAL`、:385〜418）の後で、KERN_THERMAL に依らず呼ぶ。`desktop_balancer=off` の起動の parameter では作らない（計数は取り続ける。on と off の比べを同じ image でするため）。
+2. 周期ごと（`kern_ms_to_ticks(BALANCER_PASS_MS)`、AWAY は `BALANCER_PASS_AWAY_MS`、`kern_sleep` で眠る）:
    1. （`CONFIG_KERN_THERMAL=y` の時）`kern_cpuperf_generation()` が前と違えば、全 CPU の `kern_cpuperf_cpu(cpu, 0, &info)`（flag 0: spinlock だけで読み CPU を起こさない）を読み、§4.8 の表を作って `sched_cpu_classes_set`。FAST と EFFICIENT が両方そろわなければ表は全部 ANY（priority の hint だけが効く）。
    2. HID の時刻から ACTIVE・QUIET・AWAY。
-   3. process を巡る。`process_find_next_ref(cursor)`（process.c:773）は呼ぶたびに全 process を `process_tree_lock`（irqsave）の中で走査するので、1 周期で O(N²) になる（review m5）。N ≈ 数百で 1 周期の比べは 10 万程度、1 回の lock の中は N 程度。p004 で周期の時間を測り、1 ms を超えるなら process.c に「1 回の lock で pid と参照を最大 K 個取る」口を足す（kernel の中の変更、p004 の範囲）。process0 と終わりかけの process は飛ばす。nice・tty・GPU と表示の時刻を読み、`process->lock` の中で thread を `thread_ref` して手元の配列（`DTB_THREADS_PER_PROCESS` 64）に取り、lock を離す。64 を超える process は、前の周期に扱った最後の tid より大きい tid の thread から 64 本を取る（tid の cursor。列の位置に頼らない、review m13）。
-   4. thread ごとに `sched_hint_activity` を読み、前回の値（`struct dtb_thread_state`、DTB だけが書く）と比べて印を更新し、`dtb_policy_classify()` で hint を作る。前と違えば `sched_hint_set`。PLACE・PLACE_IDLE で希望と違う種類の CPU に居り、前の移動から `DTB_MOVE_INTERVAL_MS`（500 ms）経ち、この周期の予算（移動 `DTB_MOVES_PER_PASS` 32、うち手渡し 8）が残れば `sched_hint_place`。予算は R1〜R5 の thread に先に使い、R6 は残りだけ（R6 の候補は配列に残して周期の終わりに回す）。`thread_release`。
+   3. process を巡る。`process_find_next_ref(cursor)`（process.c:773）は呼ぶたびに全 process を `process_tree_lock`（irqsave）の中で走査するので、1 周期で O(N²) になる（review m5）。N ≈ 数百で 1 周期の比べは 10 万程度、1 回の lock の中は N 程度。p004 で周期の時間を測り、1 ms を超えるなら process.c に「1 回の lock で pid と参照を最大 K 個取る」口を足す（kernel の中の変更、p004 の範囲）。process0 と終わりかけの process は飛ばす。nice・tty・GPU と表示の時刻を読み、`process->lock` の中で thread を `thread_ref` して手元の配列（`BALANCER_THREADS_PER_PROCESS` 64）に取り、lock を離す。64 を超える process は、前の周期に扱った最後の tid より大きい tid の thread から 64 本を取る（tid の cursor。列の位置に頼らない、review m13）。
+   4. thread ごとに `sched_hint_activity` を読み、前回の値（`struct balancer_thread_state`、DTB だけが書く）と比べて印を更新し、`desktop_balancer_classify()` で hint を作る。前と違えば `sched_hint_set`。PLACE・PLACE_IDLE で希望と違う種類の CPU に居り、前の移動から `BALANCER_MOVE_INTERVAL_MS`（500 ms）経ち、この周期の予算（移動 `BALANCER_MOVES_PER_PASS` 32、うち手渡し 8）が残れば `sched_hint_place`。予算は R1〜R5 の thread に先に使い、R6 は残りだけ（R6 の候補は配列に残して周期の終わりに回す）。`thread_release`。
    5. 周期の時間を計数（最大と合計）に足す。
 - 起きる回数: ACTIVE・QUIET で 1 秒 10 回、AWAY で 1 回（走っている CPU の tick の 1 秒 1000 回×12 CPU に比べて小さい）。
 
@@ -409,7 +410,7 @@ DTB の全体:
 
 ```
  (built n) ──── 何も無い
- (built y) ── 起動 ──> dtb=off ── 計数だけ（hint は無い、sched の振る舞いは priority も含めて今と同じ）
+ (built y) ── 起動 ──> desktop_balancer=off ── 計数だけ（hint は無い、sched の振る舞いは priority も含めて今と同じ）
                  └──> RUNNING: AWAY ⇄ QUIET ⇄ ACTIVE（入力の時刻で）
                         └─ 種類の表: NONE（hybrid でない・未登録）⇄ HYBRID（世代が変わるたびに作り直す）
 ```
@@ -430,14 +431,14 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 
 - 資源: DTB の thread 1 本、CPU の種類の表（`kern_calloc`、CPU 数、kernel の寿命）、thread の参照の配列（64、static）。thread と process の field は各 struct に埋める（寿命は持ち主と同じ）。DTB が持つ参照は 1 周期の中で離す。
 - config（第 3 版、新しい mk。Makefile・mk は Claude が変えないので、次は**案**。承認されるまで当てない）:
-  - `mk/config.mk` に `CONFIG_DTB ?= n`（既定 off、2026-10-27 の決定）。説明の行に「core の種類は thermal の core（`CONFIG_KERN_THERMAL`）、x86 では加えて `CONFIG_DRIVER_X86_POWER_CONTROL` から。無ければ priority の hint だけ」を書く。依存（`Depends:`）にはしない（KERN_THERMAL 無しでも nice と GPU の app の priority は効く）。
-  - `mk/kernel.mk` に `ifneq ($(filter y,$(CONFIG_DTB)),)` → `KERN_CPPFLAGS += -DCONFIG_DTB=1`、`KERN_SOURCES += src/kern/dtb.c`（p002）。p004 で `src/kern/dtb-policy.c` を足す（その時に案を出し直す）。
+  - `mk/config.mk` に `CONFIG_KERN_DESKTOP_BALANCER ?= n`（既定 off、2026-10-27 の決定）。説明の行に「core の種類は thermal の core（`CONFIG_KERN_THERMAL`）、x86 では加えて `CONFIG_DRIVER_X86_POWER_CONTROL` から。無ければ priority の hint だけ」を書く。依存（`Depends:`）にはしない（KERN_THERMAL 無しでも nice と GPU の app の priority は効く）。
+  - `mk/kernel.mk` に `ifneq ($(filter y,$(CONFIG_KERN_DESKTOP_BALANCER)),)` → `KERN_CPPFLAGS += -DCONFIG_KERN_DESKTOP_BALANCER=1`、`KERN_SOURCES += src/kern/desktop-balancer.c`（p002）。p004 で `src/kern/desktop-balancer-policy.c` を足す（その時に案を出し直す）。
   - platform の制限は置かない（全 platform で build できる。hybrid の機械は今 5330 だけで、他では種類の表が ANY）。
-  - `include/kern/dtb.h` は `CONFIG_DTB` が定義されていなければ 0 とする（n の時 mk は macro を定義しない）。
-  - 名前は `CONFIG_DTB` のまま案を出す（D-13: `CONFIG_KERN_DTB` に揃えるか、device tree の dtb と紛れない名前にするかはユーザーに聞く）。
+  - `include/kern/desktop-balancer.h` は `CONFIG_KERN_DESKTOP_BALANCER` が定義されていなければ 0 とする（n の時 mk は macro を定義しない）。
+  - 名前は `CONFIG_KERN_DESKTOP_BALANCER`（2026-11-14 ユーザーの決定、D-13）。
   - 差分の全文は p002 の [phase.md](phase002/phase.md) の「mk の案」。
-- 試験の config（p003 で案を出す、review M6）: `mk/test-config.mk` に `CONFIG_DTB_TEST ?= n`、`mk/test-kernel.mk` に `-DCONFIG_DTB_TEST=1` と `src/kern/sched-hint-test.c`。`sched-hint-test.c` は、起動の parameter `dtb.classes=PPEE…`（hybrid でない QEMU で種類の表を偽る）と `dtb.stress=1`（10 ms ごとに無作為の thread に無作為の hint と `sched_hint_place` を出す。手渡し・移動・段の付け替えの競争の試験）を読む。p004 の後は DTB の本体も同じ偽の表で動く。
-- 起動の parameter（製品）: `dtb=off`（診断の switch、方針ではない）。`boot.h` の enum と `boot.c` の名前の表と値の検査の表に足す（WS333 の `cpuperf=off` と同じ形）。`dtb.classes=` は値の形が違うので自分の解析を持つ（`CONFIG_DTB_TEST` の時だけ）。
+- 試験の config（p003 で案を出す、review M6）: `mk/test-config.mk` に `CONFIG_KERN_DESKTOP_BALANCER_TEST ?= n`、`mk/test-kernel.mk` に `-DCONFIG_KERN_DESKTOP_BALANCER_TEST=1` と `src/kern/sched-hint-test.c`。`sched-hint-test.c` は、起動の parameter `desktop_balancer.classes=PPEE…`（hybrid でない QEMU で種類の表を偽る）と `desktop_balancer.stress=1`（10 ms ごとに無作為の thread に無作為の hint と `sched_hint_place` を出す。手渡し・移動・段の付け替えの競争の試験）を読む。p004 の後は DTB の本体も同じ偽の表で動く。
+- 起動の parameter（製品）: `desktop_balancer=off`（診断の switch、方針ではない）。`boot.h` の enum と `boot.c` の名前の表と値の検査の表に足す（WS333 の `cpuperf=off` と同じ形）。`desktop_balancer.classes=` は値の形が違うので自分の解析を持つ（`CONFIG_KERN_DESKTOP_BALANCER_TEST` の時だけ）。
 
 ### 4.12 並行性と lock
 
@@ -453,11 +454,11 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 
 - 2 つの CPU の lock を同時に持たない（sched の今の規則を保つ）。
 - DTB の読みは近似でよい（古い値は 1 周期の遅れ）。
-- `struct dtb_thread_state` は DTB の thread だけが書く（1 本しか無い）。
+- `struct balancer_thread_state` は DTB の thread だけが書く（1 本しか無い）。
 
 ### 4.13 割り込みと DMA
 
-- 新しい割り込み・DMA は無い。`kern_dtb_note_input()` は input の event を出す文脈（割り込みの下半分か driver の thread）から、input の lock を全部離した後に呼ばれる。どの文脈でもよいように atomic の store と加算だけにする。手渡しは既存の CPU の通知（`hal_cpu_notify`）を使う。
+- 新しい割り込み・DMA は無い。`kern_desktop_balancer_note_input()` は input の event を出す文脈（割り込みの下半分か driver の thread）から、input の lock を全部離した後に呼ばれる。どの文脈でもよいように atomic の store と加算だけにする。手渡しは既存の CPU の通知（`hal_cpu_notify`）を使う。
 
 ### 4.14 失敗と回復
 
@@ -466,7 +467,7 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 | `kthread_create` の失敗 | log 1 行、DTB は無いまま（計数は取る）。sched は hint が無いので今と同じ |
 | cpuperf の provider が無い・hybrid でない | 種類の表は ANY。priority の hint だけ |
 | `kern_cpuperf_cpu` が EINVAL | その CPU を ANY |
-| `sched_hint_place` の EAGAIN・EBUSY・ESRCH | 動かさない。次の周期に試す（`DTB_MOVE_INTERVAL_MS` を守る） |
+| `sched_hint_place` の EAGAIN・EBUSY・ESRCH | 動かさない。次の周期に試す（`BALANCER_MOVE_INTERVAL_MS` を守る） |
 | 手渡しの transfer の失敗 | §4.6.5 の 5（1 回試し直し、元に戻す） |
 | HFI が P を避けろと言う（熱） | P の `usable = 0`。FAST の thread は新しい thread の置き場所で E の rank の順に置かれる。MOVE は行き先が無いので EAGAIN |
 | CPU が offline（system の sleep） | `cpu_online` を見て行き先にしない。sleep の間 DTB の thread は眠る |
@@ -475,7 +476,7 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 
 ### 4.15 観察（Q302-6）
 
-- 5330 の評価には「どの CPU がどの種類か」と「DTB が何回寄せたか」を user から読む口が要る（ログで判定しない規則、AGENTS.md §9）。推し: 読みだけの sysctl `kern.dtb`（`KERN_DTB 11`、`include/uapi/sysctl.h` の KERN の次の番号）。形の案は [proposed/include/uapi/dtb-sysctl.h](proposed/include/uapi/dtb-sysctl.h)（version・struct_size・flag（built・running・hybrid・状態）、周期の数と時間の最大と合計、規則ごとの thread の数、`sched_hint_counters` の全部、CPU の数と CPU ごとの種類・usable・rank・core_group、予備）。process ごと・thread ごとの印は v1 に入れない。
+- 5330 の評価には「どの CPU がどの種類か」と「DTB が何回寄せたか」を user から読む口が要る（ログで判定しない規則、AGENTS.md §9）。推し: 読みだけの sysctl `kern.desktop_balancer`（`KERN_DESKTOP_BALANCER 11`、`include/uapi/sysctl.h` の KERN の次の番号）。形の案は [proposed/include/uapi/desktop-balancer-sysctl.h](proposed/include/uapi/desktop-balancer-sysctl.h)（version・struct_size・flag（built・running・hybrid・状態）、周期の数と時間の最大と合計、規則ごとの thread の数、`sched_hint_counters` の全部、CPU の数と CPU ごとの種類・usable・rank・core_group、予備）。process ごと・thread ごとの印は v1 に入れない。
 - 書きの口（on・off の切り替え、thread の自分の hint、前面の app）は足さない（Q302-4・Q302-6）。
 
 ### 4.16 既存の framework との関係
@@ -503,9 +504,9 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 
 ## 6. 試験の計画
 
-### 6.1 host 試験（`plan/ws302/tests/dtb-host/`、p003・p004 で作る）
+### 6.1 host 試験（`plan/ws302/tests/balancer-host/`、p003・p004 で作る）
 
-- 分類（dtb-policy.c を host で compile、p004）: 規則の順 R1〜R7 の全部の組（nice -20・-10・-1・0・1・10・20 × BUSY × HEAVY × PRESENTER × GPU × TTY × 状態）の表を期待の表と照らす。BUSY・HEAVY の履歴の幅（200 ms で立ち、20 ms 未満が 10 周期で消える、途中の揺れで消えない）。GPU・表示の窓の端。user の段が 8 より上にならない事。
+- 分類（desktop-balancer-policy.c を host で compile、p004）: 規則の順 R1〜R7 の全部の組（nice -20・-10・-1・0・1・10・20 × BUSY × HEAVY × PRESENTER × GPU × TTY × 状態）の表を期待の表と照らす。BUSY・HEAVY の履歴の幅（200 ms で立ち、20 ms 未満が 10 周期で消える、途中の揺れで消えない）。GPU・表示の窓の端。user の段が 8 より上にならない事。
 - nice の段（-20〜20 の全部）と R1 の高い方の規則（p004）。
 - 行き先の選び（`sched_hint_choose`、p003）: 5330 の形（P 論理 4・E 8）と偽の形（PPEE、全部 P、全部 UNKNOWN、P が usable 0）で、idle と backlog の bit の組を回し、MOVE が違う種類を返さない事、MOVE_IDLE_CORE が兄弟の忙しい CPU を返さない事、§4.6.3 の順と一致。
 - 飢えの防ぎと kernel の中の優先の模型（p003）: queue の先頭の待ちと段の組で、上げる・上げない、上げる段が 8 より上にならない事。
@@ -513,26 +514,26 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 
 ### 6.2 QEMU（amd64、Q1 が割り当てた名前と port、判定は SSH と boot-test.sh。console・serial の log では判定しない）
 
-1. `CONFIG_DTB=n` の image の起動（boot-test.sh の login）。
-2. `CONFIG_DTB=y` の image の起動（同）と、`dtb=off` の起動。
-3. （p003）`CONFIG_DTB=y CONFIG_DTB_TEST=y`、SMP 4、`dtb.classes=PPEE dtb.stress=1` で、`plan/tools/kstress/` の iostress・credrace・sigexec と、thread の作成と exit・fork の嵐（試験の program、刈り取りと移動の競争、review B2）、時間つきの sleep を繰り返す thread（hint の段の付け替えで早く起きない事を時刻で確かめる、review M2）を 30 分。止まらない・panic しない（固まったら gdbstub と QMP で解析）、手渡しと移動の数 > 0、手渡しの失敗の数を記録。
-4. （p004）同じ image で `dtb.stress` 無し: 忙しい loop 2 本（試験の program、syscall 無し）を走らせ、SSH で `hw.cputimes` の差と `kern.dtb` を読み、忙しい時間の 90% 以上が E（CPU 2・3）にある事と、手渡しの数 > 0 を確かめる。
+1. `CONFIG_KERN_DESKTOP_BALANCER=n` の image の起動（boot-test.sh の login）。
+2. `CONFIG_KERN_DESKTOP_BALANCER=y` の image の起動（同）と、`desktop_balancer=off` の起動。
+3. （p003）`CONFIG_KERN_DESKTOP_BALANCER=y CONFIG_KERN_DESKTOP_BALANCER_TEST=y`、SMP 4、`desktop_balancer.classes=PPEE desktop_balancer.stress=1` で、`plan/tools/kstress/` の iostress・credrace・sigexec と、thread の作成と exit・fork の嵐（試験の program、刈り取りと移動の競争、review B2）、時間つきの sleep を繰り返す thread（hint の段の付け替えで早く起きない事を時刻で確かめる、review M2）を 30 分。止まらない・panic しない（固まったら gdbstub と QMP で解析）、手渡しと移動の数 > 0、手渡しの失敗の数を記録。
+4. （p004）同じ image で `desktop_balancer.stress` 無し: 忙しい loop 2 本（試験の program、syscall 無し）を走らせ、SSH で `hw.cputimes` の差と `kern.desktop_balancer` を読み、忙しい時間の 90% 以上が E（CPU 2・3）にある事と、手渡しの数 > 0 を確かめる。
 5. （p004）nice: 忙しい loop 2 本（nice 0 と nice 10）を SMP 1 の QEMU で 20 秒。nice 10 の方の CPU 時間の割合が 5〜15%（飢えの防ぎの期待の約 9% の幅、review m9）。
-6. （p004）kernel の thread との競争: `CONFIG_DTB_TEST` の試験の kernel の thread（priority 8 で 2 秒忙しい）と user の忙しい loop を SMP 1 で。user の CPU 時間の割合が 5〜15%（飢えの防ぎが user を救う）。
+6. （p004）kernel の thread との競争: `CONFIG_KERN_DESKTOP_BALANCER_TEST` の試験の kernel の thread（priority 8 で 2 秒忙しい）と user の忙しい loop を SMP 1 で。user の CPU 時間の割合が 5〜15%（飢えの防ぎが user を救う）。
 7. （p004）I/O の混ざる nice: 短い read と計算を繰り返す loop を nice 0 と nice 10 で SMP 1 の QEMU で 20 秒。nice 10 の方の CPU 時間の割合を記録する（合否ではなく、§4.7 の緩和の大きさの記録、review 第 3 版 m6）。
 
-### 6.3 5330 の実機（1 本の script `plan/ws302/tests/5330-dtb.sh`: 配置 → 起動 → 実行 → 回収 → 要約）
+### 6.3 5330 の実機（1 本の script `plan/ws302/tests/5330-balancer.sh`: 配置 → 起動 → 実行 → 回収 → 要約）
 
-- 最初に確かめる事（p006 の始め）: 5330 の CPU の番号の並びと SMT の兄弟の対（`kern.dtb`）、cursor の遅れの器具（WS075 の `plan/tools/i915-hw/hdmi/` の `measure-apps.sh`・`c6.py`）が今の 5330 で使えるか（使えなければ cursor の遅れは Keiland の `--log-frames` の入力から frame までの印で代える）。
-- image: `plan/ws302/tests/config-x86_64-dtb-5330.mk`（`config/config.x86_64.mk` と `mk/platform-x86_64/defaults.mk` を include した後に `override CONFIG_DTB := y`、`override CONFIG_KERN_THERMAL := y`・`override CONFIG_DRIVER_X86_POWER_CONTROL := y`（WS333 の前提、core の種類と相対の性能と RAPL の meter）、`override CONFIG_INPUT_TEST_INJECT := y`。Makefile は config の file の後に platform の defaults.mk を `:=` で読むので、`override` か command line でないと効かない（review 第 3 版 M4）。`5330-dtb.sh` は測る前に `kern.dtb` の hybrid の flag と CPU ごとの種類を読み、hybrid でなければ止まる）。比べは同じ image の `dtb=on`（既定）と `dtb=off` を交互に 5 回ずつ。`CONFIG_DTB=n` の image で負担を 5 回。
+- 最初に確かめる事（p006 の始め）: 5330 の CPU の番号の並びと SMT の兄弟の対（`kern.desktop_balancer`）、cursor の遅れの器具（WS075 の `plan/tools/i915-hw/hdmi/` の `measure-apps.sh`・`c6.py`）が今の 5330 で使えるか（使えなければ cursor の遅れは Keiland の `--log-frames` の入力から frame までの印で代える）。
+- image: `plan/ws302/tests/config-x86_64-balancer-5330.mk`（`config/config.x86_64.mk` と `mk/platform-x86_64/defaults.mk` を include した後に `override CONFIG_KERN_DESKTOP_BALANCER := y`、`override CONFIG_KERN_THERMAL := y`・`override CONFIG_DRIVER_X86_POWER_CONTROL := y`（WS333 の前提、core の種類と相対の性能と RAPL の meter）、`override CONFIG_INPUT_TEST_INJECT := y`。Makefile は config の file の後に platform の defaults.mk を `:=` で読むので、`override` か command line でないと効かない（review 第 3 版 M4）。`5330-balancer.sh` は測る前に `kern.desktop_balancer` の hybrid の flag と CPU ごとの種類を読み、hybrid でなければ止まる）。比べは同じ image の `desktop_balancer=on`（既定）と `desktop_balancer=off` を交互に 5 回ずつ。`CONFIG_KERN_DESKTOP_BALANCER=n` の image で負担を 5 回。
 - 電力の器具: WS333 の RAPL の meter（ws333-p011）を `/dev/thermal` で読む（ws333-p005 の後半・ws333-p013 の後）。それが無い時は WS291 p022 の診断の patch（Q1、§10.2）。
 - 場面（各 60 s、計測は後半 40 s）:
 
 | 場面 | 作業 | 測る物 |
 | --- | --- | --- |
 | S1 何もしない desktop | — | package の電力、DTB の周期の時間 |
-| S2 背景の計算 | 忙しい loop 4 本（nice 0、syscall 無し）。電力の上限に張り付かない量（review M4）。8 本の run も 1 回、記録だけ | package の電力（RAPL の PL の制限の印も記録）、loop の進み（1 秒あたりの回数）、CPU の種類ごとの忙しさ（`hw.cputimes`＋`kern.dtb` の種類）、cursor の遅れ、打鍵 → 表示（`plan/tools/frame-ops/key-latency.py`） |
-| S3 terminal の build | 固定の C の source の tree を image の cc で `make -j12` | build の時間、BUSY の thread の数と移動の数（`kern.dtb`。実の compiler で BUSY が立つ割合、review m9） |
+| S2 背景の計算 | 忙しい loop 4 本（nice 0、syscall 無し）。電力の上限に張り付かない量（review M4）。8 本の run も 1 回、記録だけ | package の電力（RAPL の PL の制限の印も記録）、loop の進み（1 秒あたりの回数）、CPU の種類ごとの忙しさ（`hw.cputimes`＋`kern.desktop_balancer` の種類）、cursor の遅れ、打鍵 → 表示（`plan/tools/frame-ops/key-latency.py`） |
+| S3 terminal の build | 固定の C の source の tree を image の cc で `make -j12` | build の時間、BUSY の thread の数と移動の数（`kern.desktop_balancer`。実の compiler で BUSY が立つ割合、review m9） |
 | S4 build＋GPU の app＋打鍵 | S3 ＋ mview（`plan/tools/gpu-perf/` の c600 の設定）＋ aat-input の打鍵 | mview の fps、frame の時間の中央値と p95（Keiland の `--log-frames`、`frame-times.py`）、打鍵 → 表示、build の時間 |
 | S5 nice の背景 | 忙しい loop 8 本を nice 10、前で S4 の mview | mview の fps、loop の CPU 時間（0 でない事） |
 
@@ -548,7 +549,7 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 | A3 | S2 の忙しい時間の置き場所 | on で E の CPU に 90% 以上 |
 | A4 | S2（4 本）の package の電力（40 s の平均） | on ≤ off × 0.95。off で P に載らなかった（off の E の割合が 90% 以上の）run は電力の比べから外し、その旨を記録する |
 | A5 | S3 の build の時間 | on ≤ off × 1.10 |
-| A6 | 負担: `CONFIG_DTB=n` と y の `dtb=off` の S1 の電力と S3 の build の時間、DTB の周期の時間の最大 | 差が 2% 以内（揺れの中）、周期の最大 < 1 ms |
+| A6 | 負担: `CONFIG_KERN_DESKTOP_BALANCER=n` と y の `desktop_balancer=off` の S1 の電力と S3 の build の時間、DTB の周期の時間の最大 | 差が 2% 以内（揺れの中）、周期の最大 < 1 ms |
 | A7 | 安定 | §6.2 の 3 が 30 分 PASS、5330 の全部の run で固まり・panic 無し |
 
 ## 7. Phase の分け方と受け入れ（ws.md の表の本体はこの表。±50%、1 LW ≈ 実時間 15〜25 分）
@@ -556,11 +557,11 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 | Phase | 内容 | 依存 | LW | 受け入れ | 担当の型 |
 | --- | --- | --- | --- | --- | --- |
 | p001 | この設計、design-reviewer、ユーザーの問い | — | — | review の反映、Q302-1〜7 の答え（ユーザーの review） | 設計（P5） |
-| p002 | config（`CONFIG_DTB`、mk の案 §4.11）、`include/kern/dtb.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、`src/kern/dtb.c` の `kern_dtb_note_gpu`・`kern_dtb_note_input` と gpu.c・input.c の通知）、`sched_hint_activity`、`base_priority` の初め | p001、Q302-5（決定済み） | 3 | x86_64・arm64（rpi5）・riscv64（vf2）の vmunix の build（n と y）warning 0（y は mk の案が当たるまで overlay で）。`CONFIG_DTB=n` が今と同じ事: 同じ config で基点と branch の `vmunix` を作り、`llvm-objdump -d` の text が、同じ行・同じ番地・同じ命令で、違いは `hal_fatal` に渡す行の番号（`HAL_FATAL` の `__LINE__`、基点と今の file の同じ行を指す物）だけ（`tests/dis-compare.py` の判定。review 第 3 版 M5）。riscv64 で行の番号が即値の長さの境を越えて命令の長さが変わり番地がずれた時は、その関数を人が確かめる。QEMU の起動（y と n） | Opus（phase-runner-high） |
-| p003 | sched の口: `sched_hint_set`・段の戻し・kernel の中の優先、種類の表、行き先の選び（純な関数と host 試験）、置き場所・盗み・tick の助け、`sched_hint_place`、hint の道の状態の確かめ直し（§4.6.7、`sched_set_cpu` は変えない）、走っている thread の手渡し、飢えの防ぎ、計数、`CONFIG_DTB_TEST` の偽の種類と stress | p002、Q302-2・Q302-3（決定済み） | 7 | host 試験（§6.1 の行き先・飢え）、build warning 0、QEMU §6.2 の 1〜3（30 分の stress を含む） | Opus（phase-runner-high） |
-| p004 | DTB の本体: dtb.c・dtb-policy.c（分類・履歴・nice の段・HID の状態・周期・予算）、`dtb=off`、`kern.dtb`（Q302-6 の決定の形）、周期の時間が 1 ms を超えれば process の巡回の口 | p003、Q302-1・Q302-6（決定済み） | 6 | host 試験（§6.1 の分類・nice）、build warning 0、QEMU §6.2 の 2・4〜6 | Opus（phase-runner-high） |
+| p002 | config（`CONFIG_KERN_DESKTOP_BALANCER`、mk の案 §4.11）、`include/kern/desktop-balancer.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、`src/kern/desktop-balancer.c` の `kern_desktop_balancer_note_gpu`・`kern_desktop_balancer_note_input` と gpu.c・input.c の通知）、`sched_hint_activity`、`base_priority` の初め | p001、Q302-5（決定済み） | 3 | x86_64・arm64（rpi5）・riscv64（vf2）の vmunix の build（n と y）warning 0（y は mk の案が当たるまで overlay で）。`CONFIG_KERN_DESKTOP_BALANCER=n` が今と同じ事: 同じ config で基点と branch の `vmunix` を作り、`llvm-objdump -d` の text が、同じ行・同じ番地・同じ命令で、違いは `hal_fatal` に渡す行の番号（`HAL_FATAL` の `__LINE__`、基点と今の file の同じ行を指す物）だけ（`tests/dis-compare.py` の判定。review 第 3 版 M5）。riscv64 で行の番号が即値の長さの境を越えて命令の長さが変わり番地がずれた時は、その関数を人が確かめる。QEMU の起動（y と n） | Opus（phase-runner-high） |
+| p003 | sched の口: `sched_hint_set`・段の戻し・kernel の中の優先、種類の表、行き先の選び（純な関数と host 試験）、置き場所・盗み・tick の助け、`sched_hint_place`、hint の道の状態の確かめ直し（§4.6.7、`sched_set_cpu` は変えない）、走っている thread の手渡し、飢えの防ぎ、計数、`CONFIG_KERN_DESKTOP_BALANCER_TEST` の偽の種類と stress | p002、Q302-2・Q302-3（決定済み） | 7 | host 試験（§6.1 の行き先・飢え）、build warning 0、QEMU §6.2 の 1〜3（30 分の stress を含む） | Opus（phase-runner-high） |
+| p004 | DTB の本体: desktop-balancer.c・desktop-balancer-policy.c（分類・履歴・nice の段・HID の状態・周期・予算）、`desktop_balancer=off`、`kern.desktop_balancer`（Q302-6 の決定の形）、周期の時間が 1 ms を超えれば process の巡回の口 | p003、Q302-1・Q302-6（決定済み） | 6 | host 試験（§6.1 の分類・nice）、build warning 0、QEMU §6.2 の 2・4〜6 | Opus（phase-runner-high） |
 | p005 | （条件つき）compositor からの前面の app の hint（UAPI・backend・WS309 の台帳）。Q302-4 で「作る」か、p006 で A1・A2 が通らず前面の情報で直る見込みがある時だけ立てる | p004、UAPI の決定 | 3 | — | — |
-| p006 | 5330 の評価: `5330-dtb.sh`（§6.3）、閾値（`DTB_*`・`sibling_rank`・飢えの上限）の調整、5330 の CPU の番号の並びと器具の確かめ | p004、WS333 の meter と相対の性能（completed）、5330 の割当（Q1） | 4 | §6.4 の A1〜A7（Q302-7 の決定の数） | Opus＋Q1 の実機の割当 |
+| p006 | 5330 の評価: `5330-balancer.sh`（§6.3）、閾値（`DTB_*`・`sibling_rank`・飢えの上限）の調整、5330 の CPU の番号の並びと器具の確かめ | p004、WS333 の meter と相対の性能（completed）、5330 の割当（Q1） | 4 | §6.4 の A1〜A7（Q302-7 の決定の数） | Opus＋Q1 の実機の割当 |
 | p007 | 規約の全文の見直しと文書（`docs/architecture/` に DTB の説明） | p006 | 2 | 規約、文書 | conformance-reviewer・document-writer |
 
 合計 約 22 LW（p005 を立てれば 25）。ws.md の旧い表（約 32 LW）は、thread の計数と sched の口を分け直し、WS301 の前提の Phase が WS333 で済んだので小さくなった。
@@ -579,7 +580,7 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 | DTB を input の subscriber にする | kernel が driver の関数を呼ぶ向きになり、input.c の無い platform で link が切れる。枠（最大 8）も食い、外しと resync の report も来る |
 | GPU の process ごとの busy の時間（完了の時刻から） | GPU の driver ごとに完了の道が違い、代価が大きい。提出と表示の時刻で v1 の規則は足りる |
 | thread の名前（compositor の thread の種類）を kernel に足す | UAPI が要り、WS309 との調整も要る。v1 は kernel の統計だけで見分ける |
-| 統計を常に取る（`CONFIG_DTB=n` でも） | n の kernel を今と同じに保つ方が受け入れ（A6）を示しやすい。Q302-5 |
+| 統計を常に取る（`CONFIG_KERN_DESKTOP_BALANCER=n` でも） | n の kernel を今と同じに保つ方が受け入れ（A6）を示しやすい。Q302-5 |
 | `sched_set_cpu` に確かめ直しを足す | 今の呼び手（cpuperf・TCO）は NEW の thread を移すので、NEW を断ると壊れる。n の kernel を変えない方を取り、確かめ直しは hint の道だけに置く（§4.6.7） |
 
 ## 9. 出典と引用
@@ -599,8 +600,8 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 | Q302-2 | 忙しい計算（nice 0）が空いた P に溢れてよいか | A: 溢れてよい（nice > 0 は飢えの上限を越えるまで溢れない）。「1 tick 以上待った」は 1 ms（走っている CPU の tick は 1000 Hz）。§4.6.4 |
 | Q302-3 | priority の段、nice の段、飢えの防ぎ、GPU の上げの条件、DTB の on の時だけか | A: §4.7 の表（user の既定 10、上げは 8・9、kernel の 8 より上に置かない）、100 ms の防ぎ、CPU を半分以上使う thread は上げない、DTB が on の時だけ |
 | Q302-4 | compositor から前面の app を知らせる口（D4） | B: v1 では作らず、p006 の数で要れば条件つきの p005 |
-| Q302-5 | 統計を DTB の build の時だけ取るか（D5） | A: `CONFIG_DTB=y` の時だけ（`dtb=off` で起動しても取る） |
-| Q302-6 | 観察の UAPI | A: 読みだけの sysctl `kern.dtb`（`KERN_DTB 11`、形は `proposed/include/uapi/dtb-sysctl.h`、p004） |
+| Q302-5 | 統計を DTB の build の時だけ取るか（D5） | A: `CONFIG_KERN_DESKTOP_BALANCER=y` の時だけ（`desktop_balancer=off` で起動しても取る） |
+| Q302-6 | 観察の UAPI | A: 読みだけの sysctl `kern.desktop_balancer`（`KERN_DESKTOP_BALANCER 11`、形は `proposed/include/uapi/desktop-balancer-sysctl.h`、p004） |
 | Q302-7 | 受け入れの数 | §6.4 の表のとおり |
 
 ### 10.2 Q1
@@ -611,11 +612,11 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 4. p006 の 5330 の割当。
 5. 着手の順: 問いは決まったので、p002 → p003 → p004 の順に依存だけで進められる。
 6. ws.md の「出典」と D1・D3 のユーザーの発言の原文（2026-10-27 の記録）を、AGENTS.md §8 の形（要点）に直すか（第 2 版からの持ち越し。担当は ws.md の原文を直していない）。
-7. （第 3 版の新しい点）D-3: WS333 design §4.5 は「topology と core の種類は X86_POWER_CONTROL（旧 CPU_PERF）に依らず出す」と書くが、code は KERN_THERMAL と X86_POWER_CONTROL の両方が y の時だけ provider を登録する。DTB は 5330 の評価で両方を y にするので困らないが、記録か code のどちらを直すかはユーザー。
-8. （第 3 版の新しい点）D-13: config の名前（`CONFIG_DTB` か `CONFIG_KERN_DTB` か別の名前か）。mk の案と一緒にユーザーへ。
+7. （第 3 版の新しい点）D-3: 2026-11-14 ユーザーの決定で code が正しい。WS333 の design.md §4.5 を code に合わせて直すのは Q1。
+8. （第 3 版の新しい点）D-13: 2026-11-14 ユーザーの決定で `CONFIG_KERN_DESKTOP_BALANCER`。改名は p003 の中で行った。
 9. （第 3 版の新しい点）`sched_set_cpu` の lock の外の状態の検査（REAPING を断らない）は、今の呼び手（自分で作った NEW の kernel の thread）では表に出ない。DTB の範囲の外なので直していない（§4.6.7）。
-10. （第 3 版の新しい点、範囲）`CONFIG_DTB` は全 platform で build できる形にした（mk に platform の欄が無く、code は arch に依らない）。評価して支えるのは x86 の hybrid（5330）だけで、arm64・riscv64 は build と、p002 では起動の確かめも無い（p002 の QEMU は x86_64 だけ）。DTB が on の時は全 platform で user の既定が 10 になる。「build は全 platform、評価は x86 の hybrid だけ」で良いか、arm64・riscv64 の QEMU の起動を受け入れに足すかはユーザー（review 第 3 版 M6）。偽の種類の表（`dtb.classes=`）の試験は x86_64 でだけ使う。
-11. （第 3 版の新しい点）`plan/ws302/proposed/include/kern/sched-hint.h`・`dtb.h` は本物（`include/kern/`）が出来て古くなった。p003 の関数の案として残すか消すかは Q1（消すのは Q1 の pipeline）。`proposed/include/uapi/dtb-sysctl.h` は p004 まで案として残す。
+10. （第 3 版の新しい点、範囲）2026-11-14 ユーザーの決定: 全 platform で build でき、評価と閾値の調整は x86 の hybrid（5330）だけ。arm64・riscv64 は build（n・y）を確かめ、QEMU の起動は受け入れに入れない。DTB が on の時は全 platform で user の既定が 10 になる。偽の種類の表（`desktop_balancer.classes=`）の試験は x86_64 でだけ使う。
+11. （第 3 版の新しい点）`plan/ws302/proposed/include/kern/` の 2 つの header は本物（`include/kern/`）が出来て古くなったので、p003 で消した（Q1 の OK）。`proposed/include/uapi/desktop-balancer-sysctl.h` は p004 まで案として残す。
 12. （第 3 版の新しい点、記録）WS333 の ws.md の「amd64 を 100 Hz に下げた」は WS351 の可変の tick で古くなった（D-15）。
 
 ## 11. Resume point
@@ -625,10 +626,10 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 
 ## 12. 未確認
 
-1. 5330 の zedBSD での CPU の番号の並び（P が先か）と、`core` の番号で SMT の兄弟が対になっているか（p006 の最初に `kern.dtb` で記録）。
-2. 5330 で P の兄弟が忙しい時の 1 thread の速さ（`DTB_SMT_SHARE_PERMILLE` の 600 は仮の値）。
+1. 5330 の zedBSD での CPU の番号の並び（P が先か）と、`core` の番号で SMT の兄弟が対になっているか（p006 の最初に `kern.desktop_balancer` で記録）。
+2. 5330 で P の兄弟が忙しい時の 1 thread の速さ（`BALANCER_SMT_SHARE_PERMILLE` の 600 は仮の値）。
 3. hal.h に `hal_task_transfer` の「後継の文脈で去った task を受ける」契約の文が無い（x86_64・arm64・riscv64 の実装の comment と盗みの前提にはある）。手渡しが起きるのは hybrid の機械だけなので v1 の範囲では問題にならない。
-4. 各 thread の実際の負荷（compositor の thread が BUSY・HEAVY にならない事）。p006 で `kern.dtb` の印の数と移動の数で見る。
+4. 各 thread の実際の負荷（compositor の thread が BUSY・HEAVY にならない事）。p006 で `kern.desktop_balancer` の印の数と移動の数で見る。
 5. `make -j12` の build の中で compiler が BUSY の閾値（200 ms）を越える割合（p006 の S3 で記録）。
 6. kernel の thread が長く忙しい場面（GPU の shader の compile など）が desktop でどれだけあるか。user の既定を 10 に下げた時の影響（p004 の QEMU §6.2 の 6 と p006 の計数）。
 7. WS075 の cursor の遅れの器具が今の 5330 で使えるか（p006 の最初）。
@@ -645,7 +646,7 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 | 指摘 | 反映 |
 | --- | --- |
 | B1 user を 6・7 に上げると kernel の worker（多くは 8）を飢えさせる | 確かめた（`kthread_create` 97 か所の大半が 8）。user の thread を 8 より上に置かず、DTB が on の時の user の既定を 10 に下げ、上げは 8・9（§4.7）。飢えの防ぎは user の全部の段に、kernel の段へは上げない。Q302-3 を書き直し、案 B（上げ無し）を足した |
-| B2 `sched_set_cpu` の状態の検査が lock の外で、NEW・REAPING を断らない | 確かめた（sched.c:1704〜1712、thread.c:581〜589）。lock の中の確かめ直しを足した（§4.6.7、`#if CONFIG_DTB`）。QEMU に作成・exit の嵐を足した（§6.2 の 3） |
+| B2 `sched_set_cpu` の状態の検査が lock の外で、NEW・REAPING を断らない | 確かめた（sched.c:1704〜1712、thread.c:581〜589）。lock の中の確かめ直しを足した（§4.6.7、`#if CONFIG_KERN_DESKTOP_BALANCER`）。QEMU に作成・exit の嵐を足した（§6.2 の 3） |
 | M1 手渡しの席が上書きされうる | 席がふさがっている間は新しい手渡しをしない。tick の頭で `complete_handoff`（§4.6.5 の 2・4） |
 | M2 `sched_hint_set` の入れ直しが sleep の queue から thread を出す | RUN・WOKEN の時だけ入れ直す（§4.5）。QEMU に時間つきの sleep の試験（§6.2 の 3） |
 | M3 溢れと PLACE の行ったり来たり、FAST の選びが E を返す | MOVE と PLACE の選びを分け、MOVE は希望の種類の idle の CPU だけ（§4.6.3・§4.6.4） |
@@ -662,8 +663,8 @@ thread の hint（DTB が見る印の組で決まり、周期ごとに変わり�
 | m3 input の publish は 9 か所、外しと resync を数えてしまう | 普通の入力の 2 つの関数でだけ通知する（§2.3・§4.3） |
 | m4 platform の数 | 15 の vmunix.mk、使わないのは mips32-rg350 だけ（§2.3・§2.6・§4.11） |
 | m5 process の巡回は O(N²) | 書いた。周期の時間が 1 ms を超えれば巡回の口を足す（§4.9 の 3、p004） |
-| m6 header の細部 | `dtb_thread_state` の GPU の field を外し comment を直した。`stdbool.h` を外した。mask の長さを `KERN_CPU_MASK_WORDS` と書いた。`sched_hint_place` は眠らないと書いた |
-| m7 起動の parameter の値の検査 | `boot.c` の値の検査の表に足す事、`dtb.classes=` は自分の解析（§4.11） |
+| m6 header の細部 | `balancer_thread_state` の GPU の field を外し comment を直した。`stdbool.h` を外した。mask の長さを `KERN_CPU_MASK_WORDS` と書いた。`sched_hint_place` は眠らないと書いた |
+| m7 起動の parameter の値の検査 | `boot.c` の値の検査の表に足す事、`desktop_balancer.classes=` は自分の解析（§4.11） |
 | m8 記録の食い違い | user-questions.md と ws.md の「反映済み」はこの第 2 版で事実になった。ws.md の「今の事実」に design.md §2.8 への注を足した。原文の記録の形は Q1（§10.2 の 6） |
 | m9 試験の穴 | 競争の試験（§6.2 の 3）、nice の割合の幅（§6.2 の 5）、kernel の thread との競争（§6.2 の 6）、実の compiler の BUSY の記録（§6.3 の S3）、器具の確かめ（§6.3 の最初） |
 | m10 計数の書き手 | `wakeups` を足す所を全部挙げ、近似と書いた。`user_streak` は飽和（§4.3） |

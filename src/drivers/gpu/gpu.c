@@ -35,7 +35,7 @@
 #include <kern/pmem.h>
 #include <kern/vm-device.h>
 #include <kern/clock.h>
-#include <kern/dtb.h>
+#include <kern/desktop-balancer.h>
 #include <kern/sched.h>
 #include <kern/waitq.h>
 #include <kern/kcrt.h>
@@ -482,7 +482,7 @@ static int gpu_open(struct file *file);
 static int gpu_close(struct file *file);
 static int gpu_ioctl(struct file *file, unsigned long command, uintptr_t argument);
 static void gpu_console_end(unsigned long command);
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 static void gpu_note_balancer(unsigned long command);
 #endif
 static unsigned gpu_boot_framebuffer_range(struct kern_text_range *range);
@@ -2154,7 +2154,7 @@ gpu_ioctl(
 	if (error == 0)
 		gpu_console_end(command);
 
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 	/* Tells the balancer the caller's process used the GPU or a display. */
 	if (error == 0)
 		gpu_note_balancer(command);
@@ -2163,7 +2163,7 @@ gpu_ioctl(
 	return error;
 }
 
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 /*
  * Tells the balancer that the caller's process put work on the GPU or an
  * image on a display, for a request that succeeded.  The other requests
@@ -2180,13 +2180,13 @@ gpu_note_balancer(
 	case GPU_COMMAND_SUBMIT_SYNC:
 	case GPU_JOB_SUBMIT:
 	case GPU_JOB_COMMIT:
-		kern_dtb_note_gpu(KERN_DTB_GPU_SUBMIT);
+		kern_desktop_balancer_note_gpu(KERN_DESKTOP_BALANCER_GPU_SUBMIT);
 		break;
 	case GPU_PRESENT:
 	case GPU_DISPLAY_PRESENT:
 	case GPU_DISPLAY_PRESENT_SYNC:
 	case GPU_DISPLAY_COMMIT:
-		kern_dtb_note_gpu(KERN_DTB_GPU_PRESENT);
+		kern_desktop_balancer_note_gpu(KERN_DESKTOP_BALANCER_GPU_PRESENT);
 		break;
 	default:
 		break;

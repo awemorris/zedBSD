@@ -103,7 +103,7 @@ thread_create(
 	waitq_init(&thread->join_waitq, "thread join");
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 
 	/* Hints bring the thread back to the level it was made with until one sets another. */
 	thread->sched.hint.base_priority = (uint8_t)thread->sched.priority;
@@ -195,7 +195,7 @@ thread_fork(
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	hal_task_set_private(task, thread);
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 
 	/* Hints bring the thread back to the level it was made with until one sets another. */
 	thread->sched.hint.base_priority = (uint8_t)thread->sched.priority;
@@ -267,7 +267,7 @@ kthread_create(
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	thread->kernel_entry = entry;
 	thread->kernel_arg = arg;
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 
 	/* Hints bring the thread back to the level it was made with until one sets another. */
 	thread->sched.hint.base_priority = (uint8_t)thread->sched.priority;
@@ -427,7 +427,7 @@ thread_init_secondary(
 	thread->sched.cpu = cpu;
 	thread->sched.last_cpu = cpu;
 	hal_task_set_private(task, thread);
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 
 	/* Hints bring the thread back to the level it was made with until one sets another. */
 	thread->sched.hint.base_priority = (uint8_t)thread->sched.priority;
