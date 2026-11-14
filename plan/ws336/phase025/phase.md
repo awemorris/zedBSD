@@ -2,7 +2,7 @@
 
 # ws336-p025: 規約の全文の見直し
 
-Status: planned（2026-11-01 p001 の設計で作成）
+Status: in-progress（2026-11-14 22:3x Q1、P2 q2089。前: planned（2026-11-01 p001 の設計で作成））
 Parent: [WS336](../ws.md)
 担当（推し）: conformance-reviewer
 依存: p024

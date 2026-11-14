@@ -23,6 +23,7 @@
 
 ## Resume point
 
+- 2026-11-14 22:3x Q1: build system の作り直しの後、全機種の既定の config は自前の ssh を選び OpenSSH を選ばない。p024 は Pi 5 の実機の相互運用で cleared。残りは p025（規約の全文の見直し、P2 q2089）だけで、p025 の cleared で WS336 を completed にする。config/ci の古い形の扱いは WS343・BUG-435。
 - 2026-11-01 Q1〜Q9 は推しの案に決まった（[user-questions.md](user-questions.md)）。設計・header は変えない（基点は d4ab182d2 のまま）。今は作らない物は下の「未実装（後で実装する物）」。
 - p001（設計）を P5 が q1791 で進めている。成果: [design.md](design.md)、header と骨格 `userland/base/ssh/`、試験の道具 `plan/ws336/tests/`、[design-review.md](design-review.md)、[user-questions.md](user-questions.md)。
 - header の基点: `0e9b68f948`（2026-11-02 11:37 Q1、p008 の struct ssh_transport の c_init を Q1 が承認。前の基点 d4ab182d2）。（p001 の design-review を反映した header。実装の Phase の `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh`。header を変える時は Q1 が新しい基点をここに書く）
@@ -59,8 +60,8 @@
 | [p021](phase021/phase.md) | package と amd64 の build・libcrypto-compat での確かめ（Opus） | cleared（2026-11-02 21:15 Q1、54778d48a を main に merge 6538872df、main で ssh・sshd・ssh-keygen・sftp-server・login の amd64 の build warning 0、OpenSSL を作らない）。実装済み・試験 PASS（2026-11-02 21:15 P6 q1989。compat-host.sh PASS（libcrypto-compat の host の build で crypto-contract 108・run-unit all・package の file・sshd-pair-host・interop-host 161 全部 PASS）、amd64 の ssh・sshd・ssh-keygen・sftp-server が警告 0・NEEDED は libcrypto-compat.so と libc.so、package は menu tests・既定 n。passkey-fido2 の規則が共有の object に OpenSSL を要求していたのを Q1 の OK で直した（sshd・login・su の build が OpenSSL を作らない）。壊す確かめ 10 通り全部 FAIL） | p020 | **WS335 実装** |
 | [p022](phase022/phase.md) | QEMU の相互運用（Opus） | cleared（2026-11-02 23:27 Q1、07cf884f5 を main に merge 406df4c54、main で libc.so warning 0、共有の sysroot（amd64・arm64・riscv64）を作り直した）。実装済み・試験 PASS（2026-11-02 23:25 P6 q1991。qemu-interop.sh 53 checks PASS（自前の 4 つで OpenSSH の無い image、host の OpenSSH ssh・scp・sftp から root の sshd へ鍵・password（shadow）・PermitRootLogin yes・ControlMaster・-tt・re-key 117 回、pre-auth は uid 22 で root が /var/empty、session は user の uid、LOGIN_RECORD と utmpx、guest の ssh から host の OpenSSH sshd と自身へ、sshd-start の初回の host key）。libc の ttyname を Q1 の OK で直した（pty の tty が /dev/pts/N）。壊す確かめ 9 通り中 7 が FAIL・2 は同値） | p021 | **WS335 実装** |
 | [p023](phase023/phase.md) | 他の arch の build | cleared（2026-11-02 23:40 Q1、6e6fd8452 を main に merge 7d0968ab1）。実装済み・試験 PASS（2026-11-02 23:35 P6 q1998。arm64（rpi4）・riscv64（visionfive2-keiland）・armv7（zybo）で libcrypto-compat.so と ssh・sshd・ssh-keygen・sftp-server が警告 0、NEEDED は libcrypto-compat.so と libc.so だけ、check-exports PASS。armv7 に libcrypto-compat.so と ssh の規則を足した（Q1 が armv7 の sysroot を作り直した後）。壊す確かめ 6 通り中 5 が FAIL・1 は同値） | p021 | **WS335 実装** |
-| [p024](phase024/phase.md) | OpenSSH からの入れ替え（Opus、Q6 の A） | in-progress（2026-11-02 23:40 P6 q1999。2026-11-03 00:05 Q1 のラップアップで引き継ぎ: sshd の log の行を OpenSSH の形に、package を menu base（既定 n）と openssh との衝突の規則、armv7 の root（4 MiB に入る）、scp -O を外した、試験の config と replace-check.sh（未実行）、config/ci の差分の案は phase.md） | p022・p023 | **WS335 実装** |
-| [p025](phase025/phase.md) | 規約の全文の見直し（conformance-reviewer） | planned | p024 | — |
+| [p024](phase024/phase.md) | OpenSSH からの入れ替え（Opus、Q6 の A） | cleared（2026-11-14 22:3x Q1。作り直しの後の既定の config が自前の ssh を選び OpenSSH を選ばない形で入れ替えは済んでいた。Pi 5 の自前の sshd を host の OpenSSH 10.0p2 で確かめ全部 PASS（password・公開鍵・scp 8 MiB と再鍵・sftp・pty・exit の値、Pi の自前の ssh から自前の sshd）。zybo・config/ci の案・replace-check.sh は外した） | p022・p023 | **WS335 実装** |
+| [p025](phase025/phase.md) | 規約の全文の見直し（conformance-reviewer） | in-progress（2026-11-14 22:3x P2 q2089） | p024 | — |
 
 ## 未実装（後で実装する物）
 

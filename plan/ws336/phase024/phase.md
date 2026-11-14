@@ -2,7 +2,7 @@
 
 # ws336-p024: OpenSSH からの入れ替え
 
-Status: in-progress（2026-11-02 23:40 P6 q1999。2026-11-03 00:05 Q1 のラップアップで途中で引き継ぎ: 下の「結果（引き継ぎ）」）。前: planned（2026-11-01 p001 の設計で作成）
+Status: cleared（2026-11-14 22:3x Q1。build system の作り直しの後、全機種の既定の config が自前の ssh を選び OpenSSH を選ばない形になり、入れ替えは済んでいた。Pi 5 の自前の sshd を host の OpenSSH で確かめた。下の「結果（Q1、2026-11-14）」）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p022・p023
@@ -110,3 +110,31 @@ WS335 の待ち: **WS335 の実装**。Q6 は A（p022 が通ったら既定の 
 ### 消す物（Q1 に頼む）
 
 `build/p024-amd64/`・`build/p024-zybo/`・`build/p024-x`（無ければ無し）・`build/amd64/packages/toolchain/` と worktree の `build/packages/openssl`・`build/packages/curl` など（amd64 の既定の image の build が作った外部の package）、`build/tmp/p024-*`、`build/tmp/ssh-unit.run.*`・`ssh-skeleton.run.*`・`sshd-pair.run.*`。
+
+## 結果（Q1、2026-11-14）
+
+### 範囲の書き直し
+
+build system の作り直し（top の Makefile と `mk/platform-<機種>/`）で、上の引き継ぎの前提が変わった。
+
+- 既定の config（`mk/platform-x86_64・rpi4・rpi5・vf2・i386・pc9821/defaults.mk`）は全部が自前の `ssh`（`userland/base/ssh/`、ssh・sshd・ssh-keygen・sftp-server）を選び、`openssh` を選ばない。「作る物」の既定の config の入れ替えは、作り直しで済んだ。
+- armv7（zybo）は今の build に platform が無いので、zybo の root の確かめは外す。
+- `config/ci/*.mk` は全部が古い形（`ZEDBSD_USER_PROGRAMS`）で、その扱いは [WS343](../../ws343/ws.md) と [BUG-435](../../bugs/BUG-435.md) に任せる。上の「config/ci の差分の案」は使わない。
+- `replace-check.sh` は古い変数と config を前提にした物で、流さない。代わりに、すでに自前の sshd で動いている Pi 5 で実機の相互運用を確かめた。
+
+### Pi 5 での確かめ（10.0.30.2、MAC 98:fe:54:22:65:c3、zedBSD aarch64、22:2x）
+
+相手は host の OpenSSH 10.0p2（Debian）の client。known_hosts は Q1 の scratchpad の file。
+
+- banner `zedBSD_1.0`、鍵の交換 `mlkem768x25519-sha256`、host key `ssh-ed25519`、cipher `chacha20-poly1305@openssh.com`。`/usr/libexec/sshd-session` は無い（OpenSSH の program は無い）。`/etc/ssh` は `ssh_host_ed25519_key` と config だけ。
+- password の login、公開鍵（ed25519、試験の鍵を authorized_keys に足して確かめた後に消し、q1- の行が 0 である事を確かめた）の login、command の終わりの値（`exit 7` → host の rc 7）、`-tt` の pty。
+- `scp`（SFTP の mode）8 MiB の上り（`RekeyLimit=1M` で再鍵を挟む）と下り、`cmp` で一致。guest の sha256 も一致。
+- `sftp`: put・get・mkdir・rename・ls・rm・rmdir、get した file が `cmp` で一致。
+- Pi 5 の自前の ssh（client）から自前の sshd（127.0.0.1）へ、一時の鍵で `loop-ok`（rc 0）。一時の鍵・known_hosts は消した。
+
+全部 PASS。試験で Pi に置いた file（/tmp/q1-*）は消した。
+
+### 未実施
+
+- interop-host.sh の流し直し（11-03 の log の語の変更の後）、壊す確かめ、coding-style §14 の見直しは p025（規約の全文の見直し）でまとめて行う。
+- QEMU の image での guest.sh・qemu-ssh-rtt・qemu-close は、今の担当の QEMU の試験（WS353 p016 などが guest.sh で自前の sshd を使う）で日々通っている事を根拠に、この Phase では流していない。
