@@ -2945,6 +2945,10 @@ list_gradient(
 	int pixel_height;
 	int error;
 
+	/* Only a linear gradient is drawn: another kind has no image, as a gradient the engine could not parse had none. */
+	if (gradient->kind != CSS_GRADIENT_LINEAR)
+		return NULL;
+
 	/* The tile's size in pixels. */
 	pixel_width = (int)(layout_to_px(width) + 0.5f);
 	pixel_height = (int)(layout_to_px(height) + 0.5f);

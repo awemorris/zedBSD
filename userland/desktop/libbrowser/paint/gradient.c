@@ -36,6 +36,7 @@ paint_gradient_render(
 	int height,
 	struct img_bitmap *bitmap)
 {
+	struct css_gradient plain;
 	float at[CSS_GRADIENT_STOPS];
 	float direction_x;
 	float direction_y;
@@ -46,6 +47,12 @@ paint_gradient_render(
 	size_t count;
 	int x;
 	int y;
+
+	/* Only a linear gradient is drawn here, and its transition hints are not honored: the color stops alone. */
+	if (gradient->kind != CSS_GRADIENT_LINEAR)
+		return EINVAL;
+	css_gradient_color_stops(gradient, &plain);
+	gradient = &plain;
 
 	/* The pixels. */
 	count = (size_t)width * (size_t)height;

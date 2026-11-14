@@ -43,7 +43,7 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 | [ws328-p014](phase014/phase.md) | svg-clip（clipPath） | Sonnet | planned | p013 |
 | [ws328-p015](phase015/phase.md) | svg-draw（picture → sink） | Sonnet | planned | p004・p005・p014 |
 | [ws328-p016](phase016/phase.md) | svg-bitmap（CPU の bitmap） | Sonnet | planned | p006・p015 |
-| [ws328-p017](phase017/phase.md) | CSS の gradient の解析（radial・conic・repeating・hint） | Sonnet | planned | p001 |
+| [ws328-p017](phase017/phase.md) | CSS の gradient の解析（radial・conic・repeating・hint） | Sonnet | cleared（Q1 の受け入れ待ち。2026-11-15 P8 q2128。host-css-gradient cc・clang とも 223/223（ASan・UBSan）、わざと壊す 43 通り中 42 FAIL・1 は等価、check-skeleton は検査 6 だけ未実施） | p001 |
 | [ws328-p018](phase018/phase.md) | paint の統合（新しい item、CPU の参照、coverage の cache、倍率、snapshot の深い写し、WPT の基準） | Opus | planned | p005・p006・p007 |
 | [ws328-p020](phase020/phase.md) | Vulkan の pipeline（rrect・ring・影・gradient） | Opus | planned | p018 |
 | [ws328-p026](phase026/phase.md) | Vulkan の path（coverage の atlas・tile の表・予算） | Opus | planned | p020 |
