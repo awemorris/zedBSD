@@ -298,13 +298,13 @@
 | `plan/ws322/tests/config-visionfive2-vpu.mk` | ZEDBSD_CONFIG | ws322 は incomplete、その WS の試験 |  |
 | `plan/ws334/tests/config-amd64-p027-guest.mk` | ZEDBSD_USER_PROGRAMS | ws334 は incomplete、その WS の試験 |  |
 | `plan/ws334/tests/sources-same.sh` | ZEDBSD_TOPLEVEL_BUILD | ws334 は incomplete、その WS の試験 |  |
-| `plan/ws336/tests/config-amd64-ci-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 |  |
-| `plan/ws336/tests/config-amd64-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 |  |
-| `plan/ws336/tests/config-amd64-tcp-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 |  |
-| `plan/ws336/tests/config-arm64-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 |  |
-| `plan/ws336/tests/config-riscv64-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 |  |
-| `plan/ws336/tests/config-rpi5-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 |  |
-| `plan/ws336/tests/replace-check.sh` | ZEDBSD_CONFIG disk-image | ws336 は incomplete、その WS の試験 |  |
+| `plan/ws336/tests/config-amd64-ci-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 | 消す候補（2026-11-15 P2 q2101: 既定の config が自前の ssh） |
+| `plan/tools/ssh/config-amd64-ssh.mk`（もと `plan/ws336/tests/config-amd64-ssh.mk`） | ZEDBSD_USER_PROGRAMS | ws336 の試験、WS の完了で plan/tools/ssh へ移した | 直した（2026-11-15 P2 q2101、CONFIGMK の形） |
+| `plan/ws336/tests/config-amd64-tcp-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 | 消す候補（2026-11-15 P2 q2101: 既定の config が自前の ssh） |
+| `plan/ws336/tests/config-arm64-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 | 消す候補（2026-11-15 P2 q2101: 既定の config が自前の ssh） |
+| `plan/ws336/tests/config-riscv64-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 | 消す候補（2026-11-15 P2 q2101: 既定の config が自前の ssh） |
+| `plan/ws336/tests/config-rpi5-ssh.mk` | ZEDBSD_USER_PROGRAMS | ws336 は incomplete、その WS の試験 | 消す候補（2026-11-15 P2 q2101: 既定の config が自前の ssh） |
+| `plan/ws336/tests/replace-check.sh` | ZEDBSD_CONFIG disk-image | ws336 は incomplete、その WS の試験 | 消す候補（2026-11-15 P2 q2101: 既定の config が自前の ssh） |
 | `plan/ws343/tests/config-amd64-compat.mk` | ZEDBSD_USER_PROGRAMS | ws343 は incomplete、その WS の試験 |  |
 
 ### B: 開発の時だけ・retired・完了した WS の一回きり・今の build に無い機種（81）
@@ -451,7 +451,7 @@
 - `plan/ws309/tests/vf2-p015.sh`
 - `plan/ws333/tests/hw5330/config-5330-qs40.mk`
 - `plan/ws334/tests/openssl-windows.sh`
-- `plan/ws336/tests/check-skeleton.sh`
+- `plan/tools/ssh/check-skeleton.sh`（もと `plan/ws336/tests/`）
 - `plan/ws353/tests/config-amd64-mainwake.mk`
 - `plan/ws353/tests/config-amd64-seat.mk`
 
