@@ -2976,7 +2976,7 @@ browser_view_script_busy(
 	if (view->front == NULL)
 		return 0;
 
-	/* The task of the view's agent. */
+	/* The longest task of the view's agents. */
 	busy = view_front_script_busy(view, task, milliseconds);
 	return busy;
 }

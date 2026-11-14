@@ -11,6 +11,7 @@
 
 #include "base/os-time.h"
 #include "base/base.h"
+#include "base/thread.h"
 
 #include <errno.h>
 #include <stddef.h>
@@ -29,6 +30,14 @@
 
 /* The value those bits have in a continuation byte. */
 #define OS_UTF8_CONTINUATION_BITS	0x80U
+
+/*
+ * Orders the threads that read the zone setting again: each page's realm
+ * does as it starts, and pages start on several threads at once, while the
+ * C library is not bound to make tzset safe against itself (glibc's is,
+ * under a lock the race detector does not see).
+ */
+static struct wb_static_mutex os_zone_mutex = WB_STATIC_MUTEX_INIT;
 
 /* Forward declarations. */
 static int64_t os_time_clamp(int64_t seconds);
@@ -111,8 +120,16 @@ void
 wb_os_time_zone_start(
 	void)
 {
+	int error;
+
+	/* One thread at a time (before the program gave its threads only one runs, and the call goes without the lock). */
+	error = wb_static_mutex_lock(&os_zone_mutex);
+
 	/* Makes the C library read the zone setting again. */
 	tzset();
+
+	if (error == 0)
+		wb_static_mutex_unlock(&os_zone_mutex);
 }
 
 /*

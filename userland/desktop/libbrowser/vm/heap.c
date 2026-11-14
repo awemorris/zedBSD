@@ -64,6 +64,14 @@ static _Thread_local int heap_borrower;
 /* How many times a borrower entered a script or would have collected, in the process (atomic). */
 static unsigned long heap_borrower_slips;
 
+/*
+ * The number the last task of any agent got (vm_agent_task_begin, atomic):
+ * one count for the process, so that a number names one task of every
+ * agent's and a thread that asks a task to end through a view reaches only
+ * the agent that runs it.
+ */
+static uint32_t heap_task_last;
+
 static int heap_size_class(size_t size, unsigned *size_class);
 static int heap_add_block(struct vm_heap *heap, unsigned size_class);
 static int heap_block_set_insert(struct vm_heap *heap, struct vm_block *block);
@@ -687,8 +695,9 @@ vm_agent_init(
 }
 
 /*
- * Begins a task of the agent's thread: gives it the next number (never 0
- * nor VM_AGENT_DEADLINE) and forgets any request to end an earlier task.
+ * Begins a task of the agent's thread: gives it the process's next number
+ * (never 0 nor VM_AGENT_DEADLINE, and no other agent's task has it) and
+ * forgets any request to end an earlier task.
  * Returns the number, which vm_agent_task_current reports to the other
  * threads until vm_agent_task_end.
  */
@@ -699,11 +708,10 @@ vm_agent_task_begin(
 	uint64_t since;
 	uint32_t task;
 
-	/* The next number; 0 means no task and the deadline's mark is no task's, so the count skips them when it wraps. */
-	task = agent->task_last + 1U;
-	if (task == 0U || task == VM_AGENT_DEADLINE)
-		task = 1U;
-	agent->task_last = task;
+	/* The process's next number; 0 means no task and the deadline's mark is no task's, so the count skips them when it wraps. */
+	do {
+		task = __atomic_add_fetch(&heap_task_last, 1U, __ATOMIC_RELAXED);
+	} while (task == 0U || task == VM_AGENT_DEADLINE);
 	agent->deadline_ns = 0;
 
 	/* When it began, with its number, for the threads that ask how long it runs (vm_agent_task_since). */

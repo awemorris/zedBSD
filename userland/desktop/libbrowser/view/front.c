@@ -29,6 +29,7 @@
 
 #include "view/front.h"
 #include "view/frames.h"
+#include "view/remote.h"
 #include "view/style.h"
 #include "base/base.h"
 #include "base/thread.h"
@@ -806,9 +807,10 @@ view_front_request_image(
 
 /*
  * Reports whether a task of the view's pages runs now (1) or not (0), from
- * any thread: its number and how long it has run, in milliseconds (the
- * page's top and its iframes' threads take turns in one agent, so this is
- * whichever holds it).
+ * any thread: the number of the one that has run longest and how long, in
+ * milliseconds.  The page's top and its iframes of its origin take turns
+ * in the view's agent; each frame of another origin has its own agent, and
+ * runs beside them.
  */
 int
 view_front_script_busy(
@@ -817,11 +819,24 @@ view_front_script_busy(
 	uint32_t *milliseconds)
 {
 	struct view_front *front;
+	uint32_t other_task;
+	uint32_t other_milliseconds;
+	int other_busy;
 	int busy;
 
-	/* The agent's word. */
+	/* The view's agent's word. */
 	front = view_front_of(view);
 	busy = vm_agent_task_since(&front->agent, task, milliseconds);
+
+	/* The frames of other agents', the longer of the two kept. */
+	other_busy = view_remotes_busy(view_frames_remotes(front->frames), &other_task, &other_milliseconds);
+	if (other_busy && (!busy || other_milliseconds > *milliseconds)) {
+		*task = other_task;
+		*milliseconds = other_milliseconds;
+		busy = 1;
+	}
+
+	/* Whether any of them runs a task. */
 	return busy;
 }
 
@@ -829,10 +844,13 @@ view_front_script_busy(
  * Ends the task of the view's pages of a number, from the program's
  * thread, as a navigation ends the page's (front_navigation) but leaving
  * the page: the task leaves at the engine's next look, and what it waits
- * for (a synchronous XMLHttpRequest, a parser's script) is woken.  Reports
- * 0, or ESRCH when that task does not run any more (it ended, or another
- * began).  A wait the next task began in the moment between the two looks
- * at the number may be woken too: it fails as a network error would.
+ * for (a synchronous XMLHttpRequest, a parser's script) is woken.  Only
+ * the agent that runs the task is asked (task numbers are the process's):
+ * the view's, or a frame's of another origin, whose other tasks go on.
+ * Reports 0, or ESRCH when that task does not run any more (it ended, or
+ * another began).  A wait the next task began in the moment between the
+ * two looks at the number may be woken too: it fails as a network error
+ * would.
  */
 int
 view_front_stop_script(
@@ -842,21 +860,28 @@ view_front_stop_script(
 	struct view_front *front;
 	struct net_loader *loader;
 	uint32_t running;
+	int error;
 
-	/* Only the task that runs now. */
+	/* A task of a frame of another agent, when the view's agent does not run it. */
 	front = view_front_of(view);
 	running = vm_agent_task_current(&front->agent);
-	if (task == 0U || running != task)
+	if (task == 0U)
 		return ESRCH;
+	if (running != task) {
+		error = view_remotes_stop(view_frames_remotes(front->frames), task);
+		return error;
+	}
+
+	/* The view's agent's task. */
 	vm_agent_request_termination(&front->agent, task);
 
-	/* Its waits, woken while it still runs (the loader lives as long as the view). */
+	/* Its waits, woken while it still runs (the loader lives as long as the view); the frames of other agents go on. */
 	running = vm_agent_task_current(&front->agent);
 	if (running == task) {
 		loader = view_loader(view);
 		if (loader != NULL)
 			net_loader_client_abort_waited(net_loader_own_client(loader));
-		view_frames_abort_waited(front->frames);
+		view_frames_abort_agent_waited(front->frames);
 	}
 
 	/* Succeeded: the task is asked to end. */

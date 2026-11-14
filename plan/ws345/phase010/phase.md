@@ -3,7 +3,7 @@
 # ws345-p010 origin ごとの agent（段 B）
 
 - WS: [ws.md](../ws.md)。設計: [design.md](../design.md)。
-- 状態: in-progress（2026-11-02 P5 q1995-i01: 段 B の核の実装と host の試験まで。Q1 の依頼でラップアップ、残りの確かめは下の「引き継ぎ」。cleared の判定は Q1）
+- 状態: in-progress（2026-11-14 P3 q2090-i01: 引き継ぎの (1)〜(6)・(8) を済ませた。(7) WPT は p011 へ。cleared の判定は Q1。下の「結果（2026-11-14 P3）」。前: 2026-11-02 P5 q1995-i01 が段 B の核と host の試験まで）
 
 ## 目的
 
@@ -72,3 +72,46 @@ cross-origin の iframe を別の agent（別の heap と lock）にし、並べ
 
 - 未実施（次の担当がこの順に）: (1) 最後の commit の tree で `host-build.sh plain`・`tsan`（warning 0）と `host-frames.sh plain`・`tsan`（29 checks、tsan の報告 0）、`host-threaded-view.sh tsan`。(2) zedBSD の `libbrowser.so` 3 target は 132803cab2 の remote.c で済み（最後の commit で変えたらやり直し）。(3) `host-terminate.sh`・`host-loader-client.sh`・`host-threads-table.sh`、`STALL_MODE=own sh plan/ws345/tests/stall-probe.sh`、bug411 の bench、`run-dom-tests.py`・`run-cross-origin-tests.py`・`run-test262.py` を基点（`build/tmp/p010/base` は `git archive 6c1af97bc1`、stage1 を走らせ始めてある）と比べる。`window.length` の変更で DOM の試験の出力が変わらないかを特に見る。(4) `sh plan/ws334/tests/stage1.sh TREE plain` を基点と最後の commit の archive で、`sh plan/ws334/tests/cross-build.sh`（`view/remote.c`・`bind/remote.c` を `sources.mk` に足した。Windows の build の一覧が別にあれば足す）。(5) tsan の報告 3 件を直す: `page_media_init` の `media_set_log` を process に一度（`wb_once_run`）、`wb_os_time_zone_start` も一度にするか誤報なら抑えの理由を書く。直した後に host-frames tsan で報告 0 を確かめる。(6) p014 の merge の後に `browser_view_script_busy`・`_stop_script` を `view_remotes_busy`・`_stop` にも広げる（Q1 の指示: 一番長く走る task を全 agent から、止めるのはその task の agent）。(7) WPT の postMessage・cross-origin の部分集合（p011 で suite を取得する時に）。(8) design.md §4.1・§6.1・§8 に上の作りの覚えを入れる（未記入）。
 - 消してほしい物（Q1 へ）: `build/tmp-p010-hostbuild-plain.log`（最初の build の log、置き場所の誤り）。`build/tmp/p010/` は試験の一時物。
+
+## 結果（2026-11-14 P3 q2090-i01、引き継ぎの残り）
+
+基点 main c5b8a10d24（p010・p014 の branch は merge 済み: `view/remote.c`・`bind/remote.c`、`view_remotes_busy`・`_stop`、p014 の `browser_view_script_busy`・`_stop_script` が main にある事を確かめた）。commit 7073d0c19c（libbrowser と host-frames）、記録と試験の script の commit は ws.md の Resume point。
+
+### 今との乖離（2026-11-14 に確かめた）
+
+- build: `config/ci/*.mk`・`ZEDBSD_CONFIG`・`BUILD=build/p010-*` の形は古い。今は `make CONFIGMK=config/config.<機種>.mk llvm-toolchain-cached` → `sysroot` → `build/<機種>/packages/browser/.stamp`（出力は `build/<機種>/dynamic/libbrowser.so`・`build/<機種>/packages/libbrowser/obj/...`）。上の 2026-11-02 の表の command は当時の形のまま残す。
+- host の試験の道具（`plan/ws074/tests/host-build.sh`・`plan/ws345/tests/host-*.sh`・`stall-probe.sh`・`plan/ws334/tests/stage1.sh`・`cross-build.sh`・`shell-wine.sh`）は今の tree でそのまま動いた。`shell-wine.sh`・`resize-wine.sh` の make の `-j8` は host の負荷の上限（4 thread）に合わせ `-j4` にした。
+- `shell-guest.sh` の image の config `plan/ws074/tests/config-amd64-browser.mk` は `ZEDBSD_USER_PROGRAMS` で browser を足すが、今の build はこの変数を読まない（`mk/` に無い）。image に browser が入らない見込み（image は作っておらず未確認）。p011 の QEMU の前に WS345 の `tests/` に `CONFIG_USERLAND_PROGRAMS` の形の config を置いて替える。
+- test262 の suite（`build/ws074-suites/test262`）は worktree に無い（build/ は空から）。p011 で suite を取得する時に流す。
+
+### 直した物
+
+- (5) ThreadSanitizer の報告 3 件: `page/media.c` の `page_media_init` は libmedia の log の設定（process に一つの global）を `wb_once_run` で process に一度にした。`base/os-time-posix.c` の `wb_os_time_zone_start`（`tzset`）は static mutex（`wb_static_mutex`）で一度に一つの thread にした。glibc の `tzset` は自分の lock の下にあり報告は ThreadSanitizer から見えない lock の誤報だが、C library が `tzset` 同士を守る事は保証されないので（zedBSD の libc を含め）直列にした。realm ごとに zone を読み直す今の意味は保つ。
+- (6) 応答しない頁の問いを他の agent の frame に広げた（Q1 の指示: 一番長く走る task を全 agent から、止めるのはその task の agent）:
+  - `vm/heap.c`・`vm/vm.h`: task の番号を agent ごとの数えから process で一つの atomic の数えにした（`vm_agent.task_last` を除いた）。二つの agent の task が同じ番号を持たないので、番号で agent が決まる。
+  - `view/remote.c`・`remote.h`: `view_remotes_busy` は一番長く走る frame の task の番号と時間、`view_remotes_stop(remotes, task)` はその番号の task を走らせる frame の agent に打ち切りを書きその client の待ちを起こす（0・ESRCH）。
+  - `view/front.c`: `view_front_script_busy` は view の agent と他の agent の frame の長い方。`view_front_stop_script` は view の agent の task ならそれと同じ agent の iframe の client の待ちだけを起こし（新しい `view_frames_abort_agent_waited`）、そうでなければ他の agent の frame に回す。前は top の task を止めると `view_frames_abort_waited` が他の agent の frame の task まで打ち切っていた。navigation・destroy は今のとおり全 agent を止める。
+  - `include/browser/browser.h`・`view/view.c` の説明を合わせた。
+- (8) design.md §4.1・§6.1・§8・§9 に段 B の作りと上の busy・stop を入れた。
+
+### 試験（host、2026-11-14、7073d0c19c の tree）
+
+| 試験 | 結果 |
+| --- | --- |
+| `BROWSER_HOST_BUILD=build/ws345-host sh plan/ws074/tests/host-build.sh plain`・`tsan` | 両方 exit 0、warning 0 |
+| `sh plan/ws345/tests/host-frames.sh plain`・`tsan` | 両方 `host-frames: 33 checks, 0 failed`。tsan の報告 0（exit 0）。新しい (k) の 4 check: 他の agent の frame の loop が view の busy（1003 ms）、その番号の stop で 6 ms で終わり frame は残る、その後 1 s に top の interval 20 回、終わった番号の stop は ESRCH |
+| `sh plan/ws345/tests/host-threaded-view.sh plain` | `55 checks, 0 failed` |
+| `sh plan/ws345/tests/host-threaded-view.sh tsan` | 55 checks、ThreadSanitizer の報告 0、失敗 2 は p014 の記録と同じ tsan の遅さの時間の上限（(h) 1694 ms、caller の navigation-wait 732 ms） |
+| `host-terminate.sh`・`host-loader-client.sh`・`host-threads-table.sh`・`host-prompt-rule.sh` | `39/39 passed`・`23 checks, 0 failed`・`16 checks, 0 failed`・`13 checks, 0 failed` |
+| `STALL_MODE=own sh plan/ws345/tests/stall-probe.sh` | 9 場面とも窓の event の最長 0.1〜4.0 ms（sync-xhr-connect 4.0）、over50・over100・over1000 0 |
+| `sh plan/ws334/tests/stage1.sh TREE plain`（基点 c5b8a10d24 と 7073d0c19c の `git archive`） | 前後で同じ: host-build warning 0・built 104、host-* 84 exit 0・17 other（exit の一覧が同じ）、js 21/21、loader 11/11、http 15/15、http-async 19/20（両方 `async-sheets` が FAIL、前からの物）、fetch 38/38、component 83 checks PASS |
+| `run-dom-tests.py`・`run-cross-origin-tests.py`（基点と後の browser） | 両方 `dom-tests 39/42`（同じ 3 件 computed・exception・performance-observer が FAIL）、`cross-origin-tests: 21/21` |
+| `sh plan/ws074/tests/bench/bug411.sh`（基点と後） | big-object-reads 1038 / 1044 ms、compile-many-names 12 / 13、computed-after-change 2 / 2、grow-with-lookups 70 / 71（check の値が同じ） |
+| `make -j4 CONFIGMK=config/config.{x86_64,rpi5,vf2}.mk build/<機種>/packages/browser/.stamp` | 3 つとも exit 0、warning 0（`dynamic/libbrowser.so`、`view/remote.o`・`bind/remote.o` を含む） |
+| `BUILD_JOBS=4 sh plan/ws334/tests/cross-build.sh` | `cross-build: PASS` |
+| `sh plan/ws345/tests/shell-wine.sh build/tmp/p3/shell-wine`（Wine・lavapipe、全 case） | `23 passed, 0 failed`、`shell-wine: PASS`。prompt・prompt-cpu の問いは 8〜9 s、Stop で tick 1→8・spin end 0、窓の待ち最長 11.1〜32.3 ms・over_100ms 0（2 回目の起動の modal の大きさの loop の約 3 s は判定しない記録のとおり） |
+
+### 未実施・残り
+
+- (7) WPT の postMessage・cross-origin の部分集合と test262 は suite が無く未実施（p011 で取得して流す）。zedBSD の QEMU（shell-guest）は image の config の乖離（上）で今回は流していない。
+- 消してほしい物（Q1 へ）: 2026-11-02 の `build/tmp-p010-hostbuild-plain.log`・`build/tmp/p010/` は今の worktree には無い（別の worktree の物）。今回の一時物は `build/tmp/p3/`（基点と後の archive、約 1.6 GB）と worktree 直下の誤った出力 `plain`（symlink）・`plain.run.3PIMxr/`。

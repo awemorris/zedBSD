@@ -126,6 +126,8 @@ ws.md の「ユーザーの決定」の要点（D1〜D9）:
   - iframe の thread の 1 周（agent を持って一つの task）: 自分の loader の client の callback（50 ms まで）、自分の window の timer（頁の時計で）、checkpoint（その中で `page_frames_checkpoint` が自分の要素の読み込みを activate する）。heap の stack の底は 1 周の間その thread の物に替え、返す前に戻す（R6）。返す時に、次の timer が待っている時刻より早くなった iframe を起こし（postMessage・present の後の rAF）、top を起こす（top がその変化で layout・paint・確定する）。
   - thread の決め方: `bind_element_runner`（要素の thread、無ければその文書の window の）と `bind_thread_runner`（呼んだ thread の、top は NULL）。`bind_next_timer`・`timer_run_children` は別の thread の子を数えず回さない。`frame_load_drain` は別の thread の要素の読み込みを activate せず、その thread を起こす。page の script（`script_run_ready`）と top の `load` の再開は top の thread だけ。
   - microtask の checkpoint は今の `bind_checkpoint` のまま agent に一つ（frame の木の全 realm の queue を、走っている thread が空にする）。
+- p010 の実装（段 B、2026-11-02 P5、2026-11-14 P3 が仕上げ）: `_OWN` の view で iframe の最終の URL が親と違う web origin の時（両方が web origin、sandbox で opaque でない）、その iframe は「他の agent の frame」（`view/remote.c`）になり、自分の `struct page`（自分の heap と `vm_agent`）を自分の `browser-script` の thread と loader の client で持つ。親の要素は C の pointer（`dom_element.frame_remote`）だけを持ち、heap を越える cell は無い。frame は view で再利用しない番号で引く。親の agent への用（親・top への message、自分・親・top の navigation、load の終わり）は queue に積み、親の文書を走らせる thread（top は `front_loop` の task `view_frames_deliver`、iframe の thread は `frames_round`）が task として配る。数は p009 の上限（top を含め 64、32-bit は 16）に数える。要素が外れる・頁が保たれる・view が終わる時に、その task の打ち切り・待つ request の起こし・thread の join（頁はその thread で壊す）。保った頁を戻すと他の agent の frame は src から読み込み直す。同じ origin に戻る navigation で top の agent に戻る。
+  - 制限（Future Work の候補）: 他の agent の frame の中の iframe はその frame の heap のまま（段 A の形）。zoom は 1 だけ（親の zoom・opacity・transform は子に掛からない）。iframe ごとの history は無い。`parent.parent`・`frames[i]` の index は近似。text 入力・hover の mouseout・scroll は振り分けない（pointer・wheel・key だけ）。block-level・positioned の iframe は `list_frame` が inline の置換要素からしか呼ばれないので描かれない（`_CALLER` でも同じ、WS074 側の不具合の候補）。
 
 ### 4.2 DOM の貸し（script の thread と style の thread）
 
@@ -303,6 +305,7 @@ int browser_threads_set(const struct browser_threads *threads);
 
 - p006 の実装（2026-11-02）: 確定した frame は `struct view_commit`（`view/front.h`。scene・scroll・大きさ・通し番号、atomic の参照の数）で、front の `latest` に一つ置く。scene（`struct paint_scene`、`paint/scene.c`）は頁の display list をそのまま取り（頁の list は空になり、次の paint で作り直す）、list の arena（glyph・gradient・filter の写し）、iframe の文書（`paint_frame`、参照の数を atomic に）を持ち、item の画像は arena に写した bitmap の記録にして pixel を `img_hold` で持つ（再び描く bitmap は `img_bitmap_writable` で写してから書く: video）。font は face ごとに `text_bytes`（変えない bytes、atomic の参照の数）を持ち、描画の thread は view の font の path で自分の `text_system` を開き、web の face をその bytes で開く（`text_system_use_face`、変われば glyph の cache と GPU の atlas を捨てる）。item は木を指さない（filter は build の時に arena へ写す）ので、確定の後に sticky などで木を書いても描画は変わらない（R5 の checksum の試験は要らない）。scroll だけの変化は同じ scene の新しい確定。描画の thread の状態（GPU の renderer・framebuffer・text・最後に描いた確定）は view の物で `render_lock` の下。
 - p006 で入れなかった物: (1) 確定は「present の一つ先まで」にせず、新しい確定が未描画の確定を置き換える（描画の thread が止まっても script の thread は待たない。rAF は present を待つので animation は止まる）。(2) iframe を子の更新として別に layout・確定する事（frame の item）は p009（iframe ごとの script の thread）に回す: 段 A では iframe の文書も top の script の thread にあり、親の list に入る今の形で確定は不変・自己完結になっている（Q1 に提案）。
+- p010 の実装（frame の item、他の agent の frame だけ）: 他の agent の frame は自分の thread で layout・paint・scene を作り、frame の箱（`view/remote.c` の frame ごとの最新の scene と scroll、frames の lock の下）に置いて `view_front_wake_drawing` を呼ぶ。top は確定し直さない。親の `list_frame`（`paint/list.c`）は子の item を写さず `PAINT_FRAME`（frame の番号と content box、clip の中）を一つ置く。描画の thread は描く時に `paint_frames_resolve`（`paint/scene.c`）で番号から最新の scene を引き、枠の位置へずらして写す（canvas の色、web font の face を空いている web face に移す、深さ 8 まで）。renderer（`paint/software.c`・`paint/vulkan.c`）は解かれない frame の item を描かない。枠の大きさは親の layout が決めて箱に書き、子の thread を起こす。同じ agent の iframe は今も親の list に写す（段 A の形）。
 
 ### 6.2 描画の機会と rAF
 
@@ -355,6 +358,7 @@ for (;;) {
   - `focus`・`blur`: top の script の thread への命令。
 - 同じ origin の frame は必ず同じ agent に入るので、同期の DOM の access が agent を越える事は無い。
 - 親の DOM の iframe 要素（大きさ・`src` の変更）は親の thread の物。`src` の変更は子の thread への navigation の命令。iframe の要素が外れると、子の browsing context を閉じる（§9 の打ち切りと join、子の子も）。
+- p010 の実装: 遠くの WindowProxy は `bind/remote.c`（`postMessage`・`closed`・`length`・`window`・`self`・`frames`・`parent`・`top`・`opener`・`location`（`href` の代入と `replace`）・`focus`・`blur`・`close`、他は `SecurityError`）。message は structured clone を heap の外の平らな項目の列（tape: primitive・Array・plain object・Map・Set・Date・RegExp・primitive の wrapper・Error・ArrayBuffer と view・参照）に書き、受け手の task で `MessageEvent`（trusted、origin と source）にする。transfer の ArrayBuffer は copy と detach（`js_typed_detach`）、MessagePort などは `DataCloneError`。iframe の `contentWindow` は proxy、`contentDocument` は null。入力（J6）は top の script の thread が最新の確定の frame の item の矩形で振り分け、他の agent の frame の viewport の座標に直してその inbox へ積む（押した frame が key を受ける）。
 
 ## 9. 取り消し・打ち切り・閉じ方
 
@@ -366,6 +370,7 @@ for (;;) {
   - p009 の実装: `view_keep` が `page_frames_suspend`（全ての iframe の thread を止めて join）、`view_restore` が `page_frames_resume`（文書を持つ iframe に thread を作り直す。一つでも作れなければ止めて頁を捨て、ENOENT で読み込み直す）。
 - `_stop` は読み込みを止める（loader の request を取り消す）が script は打ち切らない（どの browser も同じ）。
 - **応答しない頁の問い**（ユーザーの決定、J2 の答え、ws345-p014）: script の thread は今の task の番号と始めた時刻を atomic に publish する（front の snapshot の一部、窓の thread は読むだけ）。shell の窓の thread は自分の timer でそれを見て、同じ task が 10 s 走り続けたら「このページは応答していません」の問い（待つ／止める）を出す。「止める」は `browser_view_stop_script`（新、front の口）で、その task の番号を打ち切りに書く（上の打ち切り）。「待つ」は問いを閉じ、同じ task がさらに 10 s 走ったらまた出す。task が終われば問いは自分で消える。
+  - 段 B の agent が増えた後（2026-11-14 P3）: task の番号は process で一つの数え（`vm_agent_task_begin` の atomic の数え）にし、二つの agent の task が同じ番号を持たない。`browser_view_script_busy` は view の agent と他の agent の frame の task のうち一番長く走っている物を返し、`browser_view_stop_script` はその番号の task を走らせている agent だけに打ち切りを書いて、その agent の client の待ちだけを起こす（view の agent の task を止めても他の agent の frame は止まらず、他の agent の frame の task を止めても top の script は続く）。navigation・destroy は今のとおり全 agent を止める。
 - 通信の取り消し: navigation・閉じる時は、その frame の loader の client の、古い epoch の request を取り消す（§7 の寿命）。net の thread は非同期の connect・TLS の socket をすぐ閉じる。resolve の thread の中の `getaddrinfo` は止められず、答えは番号で捨てられる。同期の XHR の待ちは取り消しで起こされ、打ち切りの番号で script も抜ける。
 - `browser_view_destroy`（窓の thread）: shell が先に描画の thread を止めて join し、swapchain・surface を壊し、窓を閉じてある事（§6.3 の止め方）。その上で、走っている task の番号を打ち切りに書く → 全 frame の script の thread に「終わり」を積む → join（子から）→ style・net・resolve を止めて join。resolve の join は `getaddrinfo` の時間切れまで待つ事がある（§11 の R7。窓はもう無いので利用者には見えない）。
 

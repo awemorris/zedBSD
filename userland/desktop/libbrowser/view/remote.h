@@ -83,12 +83,13 @@ const struct bind_remote_calls *view_remotes_parent_calls(void);
 extern const struct bind_remote_calls view_remote_parent_calls;
 
 /*
- * A frame whose task runs now (its number, 0 for none, and its task's),
- * and the end of a task of a frame asked for, for the question of a page
- * that does not answer (any thread).
+ * The task of the frames that has run longest (1 with its number and how
+ * long, 0 when none runs), and the end of a frame's task of a number asked
+ * for (0, or ESRCH when no frame runs it), for the question of a page that
+ * does not answer (any thread).
  */
-uint64_t view_remotes_busy(struct view_remotes *remotes, uint32_t *task);
-void view_remotes_stop(struct view_remotes *remotes, uint64_t frame, uint32_t task);
+int view_remotes_busy(struct view_remotes *remotes, uint32_t *task, uint32_t *milliseconds);
+int view_remotes_stop(struct view_remotes *remotes, uint32_t task);
 
 /* Makes a frame's page on its thread (view.c): the view's fonts, console, loader and instance, the size it is laid out at, its heap's stack to here. */
 int view_make_remote_page(struct browser_view *view, const void *stack_base, int width, int height, int dark, struct page **page);

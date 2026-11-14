@@ -318,9 +318,30 @@ view_frames_leave(
 	frames_release(frames);
 }
 
-/* Wakes the frames' threads out of the requests they wait for (from any thread). */
+/*
+ * Wakes the frames' threads out of the requests they wait for, and the
+ * frames of other agents out of theirs with their tasks asked to end (from
+ * any thread: the view navigates away or ends).
+ */
 void
 view_frames_abort_waited(
+	struct view_frames *frames)
+{
+	/* The frames of the view's agent. */
+	view_frames_abort_agent_waited(frames);
+
+	/* The frames of other agents too. */
+	if (frames != NULL)
+		view_remotes_abort(frames->remotes);
+}
+
+/*
+ * Wakes the threads of the frames of the view's agent out of the requests
+ * they wait for (from any thread: a task of that agent is stopped), and
+ * leaves the frames of other agents running.
+ */
+void
+view_frames_abort_agent_waited(
 	struct view_frames *frames)
 {
 	struct view_frame *frame;
@@ -341,9 +362,6 @@ view_frames_abort_waited(
 	}
 
 	wb_mutex_unlock(&frames->lock);
-
-	/* The frames of other agents too. */
-	view_remotes_abort(frames->remotes);
 }
 
 /* Reports how many iframes have a thread now. */
