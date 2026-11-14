@@ -1,5 +1,5 @@
 #!/bin/sh
-# The host test of the kernel's H.265 slice segment header parser (src/drivers/gpu/bcm2711/vk/vulkan-video-hevc-slice.c):
+# The host test of the kernel's H.265 slice segment header parser (src/drivers/gpu/videocore/vk/vulkan-video-hevc-slice.c):
 # builds hevc-slice-host-test.c with the parser and libmedia's H.265 parse (host cc, -std=c89, ASan and UBSan), runs it
 # over every HEVC_v1 conformance zip of the cache (the bitstream read with `unzip -p`, nothing unpacked to disk), then runs
 # the fuzz over the segments the streams gave.
@@ -29,7 +29,7 @@ for file in $lib/h265sw-*.c $lib/h265-*.c; do
 done
 if ! timeout 600 cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined \
     -fno-sanitize-recover=all -fno-omit-frame-pointer -Iinclude -Isrc -I. -Iplan/tools/h264sw/unit -Iplan/ws324/tests/unit \
-    $here/hevc-slice-host-test.c src/drivers/gpu/bcm2711/vk/vulkan-video-hevc-slice.c $modules \
+    $here/hevc-slice-host-test.c src/drivers/gpu/videocore/vk/vulkan-video-hevc-slice.c $modules \
     $lib/vcodec-bitreader.c $lib/vcodec-nal.c $lib/bits.c -lm -o "$out/hevc-slice-host-test" > "$out/build.log" 2>&1; then
 	echo "hevc-slice: build failed"
 	head -20 "$out/build.log"

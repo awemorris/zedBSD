@@ -7,7 +7,7 @@
 
 /*
  * The host test of the kernel's H.265 slice segment header parser
- * (src/drivers/gpu/bcm2711/vk/vulkan-video-hevc.h) against libmedia's
+ * (src/drivers/gpu/videocore/vk/vulkan-video-hevc.h) against libmedia's
  * conformance-tested H.265 parse.
  *
  * Check mode (default): reads one Annex B bitstream (a file, or the standard
@@ -49,7 +49,7 @@
 #include "userland/desktop/libmedia/h265-stream.h"
 #include "userland/desktop/libmedia/vcodec-bitreader.h"
 
-#include "drivers/gpu/bcm2711/vk/vulkan-video-hevc.h"
+#include "drivers/gpu/videocore/vk/vulkan-video-hevc.h"
 
 /* The slots of the DPB: the decoder's sixteen reference entries. */
 #define TEST_SLOTS 16U
