@@ -820,13 +820,19 @@ main(
 	char **argv)
 {
 	int status;
+	int posix_different;
+	int win32_different;
 
 	/* The runner passes the system the test is built for. */
 	if (argc < 2) {
 		printf("test-cf-html: FAIL (no system argument)\n");
 		return 1;
 	}
-	if (strcmp(argv[1], "posix") != 0 && strcmp(argv[1], "win32") != 0) {
+
+	/* Which system the harness runs the test on. */
+	posix_different = strcmp(argv[1], "posix");
+	win32_different = strcmp(argv[1], "win32");
+	if (posix_different != 0 && win32_different != 0) {
 		printf("test-cf-html: FAIL (unknown system %s)\n", argv[1]);
 		return 1;
 	}
@@ -1118,6 +1124,8 @@ test_decode_cases(void)
 			CHECK_EQ(answer.length, 0U);
 			CHECK_EQ(answer.has_url, 0);
 		}
+
+		/* No case left a broken answer. */
 		CHECK_EQ(answer.broken, 0);
 
 		/*
@@ -1274,6 +1282,8 @@ test_truncation(void)
 		CHECK_EQ(answer.broken, 0);
 		free(copy);
 	}
+
+	/* Release the data. */
 	free(data);
 }
 
@@ -1322,6 +1332,8 @@ test_mutation(void)
 			free(copy);
 		}
 	}
+
+	/* Release the data. */
 	free(data);
 
 	/* No answer left the block, and changes that leave the header alone still decode. */
@@ -1357,6 +1369,7 @@ test_random(void)
 	unsigned violations;
 	unsigned successes;
 	int error;
+	unsigned roll;
 
 	/* Decodes each random block. */
 	violations = 0U;
@@ -1371,7 +1384,8 @@ test_random(void)
 			for (index = 0U;
 			     index < count;
 			     index++) {
-				if ((random_next() & 3U) == 0U)
+				roll = random_next();
+				if ((roll & 3U) == 0U)
 					block[length++] = (char)(random_next() & 0xFFU);
 				else
 					block[length++] = (char)(32U + random_next() % 95U);
@@ -1382,11 +1396,14 @@ test_random(void)
 			for (index = 0U;
 			     index < 4U;
 			     index++) {
-				if ((random_next() & 7U) == 0U)
+				roll = random_next();
+				if ((roll & 7U) == 0U)
 					length += (size_t)sprintf(block + length, "%s-1\r\n", offset_names[index]);
 				else
 					length += (size_t)sprintf(block + length, "%s%u\r\n", offset_names[index], 100U + random_next() % 120U);
 			}
+
+			/* Then a random number of other bytes. */
 			count = random_next() % 100U;
 			for (index = 0U;
 			     index < count;
@@ -1461,6 +1478,8 @@ check_round_trip(
 		CHECK_EQ(answer.url_length, strlen(url));
 		CHECK(memcmp(copy + answer.url_offset, url, answer.url_length) == 0);
 	}
+
+	/* The answer does not point outside the block. */
 	CHECK_EQ(answer.broken, 0);
 	free(copy);
 
@@ -1559,6 +1578,8 @@ decode_copy(
 			answer->offset = (size_t)(fragment - copy);
 			answer->length = fragment_length;
 		}
+
+		/* The URL, when there is one, is inside the block too. */
 		if (url != NULL) {
 			if (url < copy || (size_t)(url - copy) > length || url_length > length - (size_t)(url - copy)) {
 				answer->broken = 1;
@@ -1571,6 +1592,8 @@ decode_copy(
 			answer->broken = 1;
 		}
 	}
+
+	/* Release the copy. */
 	free(copy);
 
 	/* Reports the decoder's own answer. */
@@ -1611,9 +1634,13 @@ exact_copy(
 	size_t length)
 {
 	char *copy;
+	size_t allocation;
 
 	/* Allocates the block, which has at least one byte so that an empty copy has an address. */
-	copy = malloc(length > 0U ? length : 1U);
+	allocation = length;
+	if (allocation == 0U)
+		allocation = 1U;
+	copy = malloc(allocation);
 	if (copy == NULL)
 		return NULL;
 

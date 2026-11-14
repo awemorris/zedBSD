@@ -448,8 +448,10 @@ wb_os_list(
 
 	/* Opens the directory. */
 	directory = opendir(path);
-	if (directory == NULL)
-		return os_error_from_errno(errno);
+	if (directory == NULL) {
+		error = os_error_from_errno(errno);
+		return error;
+	}
 
 	/* Visits the entries until the last one, an error, or the caller's stop. */
 	stop = 0;
@@ -522,8 +524,10 @@ wb_os_full_path(
 
 	/* Resolves the path; the system allocates the answer. */
 	resolved = realpath(path, NULL);
-	if (resolved == NULL)
-		return os_file_error_from_errno(errno);
+	if (resolved == NULL) {
+		error = os_file_error_from_errno(errno);
+		return error;
+	}
 
 	/* Refuses an answer that is not text or is longer than the layer accepts. */
 	length = strlen(resolved);
@@ -584,8 +588,10 @@ wb_os_current_directory(
 		/* Gives up on any failure but a buffer that was too small. */
 		error = errno;
 		free(text);
-		if (error != ERANGE)
-			return os_file_error_from_errno(error);
+		if (error != ERANGE) {
+			error = os_file_error_from_errno(error);
+			return error;
+		}
 
 		/* Refuses a directory longer than the layer accepts. */
 		if (capacity > WB_OS_PATH_MAX)
@@ -735,8 +741,10 @@ wb_os_lock_open(
 
 	/* Resolves the directory, so two spellings of it are one name. */
 	resolved = realpath(directory, NULL);
-	if (resolved == NULL)
-		return os_file_error_from_errno(errno);
+	if (resolved == NULL) {
+		error = os_file_error_from_errno(errno);
+		return error;
+	}
 
 	/* Refuses a resolved name that is not text or leaves no room for the lock file's name. */
 	length = strlen(resolved);
@@ -1059,13 +1067,16 @@ os_open(
 	int *descriptor)
 {
 	int opened;
+	int error;
 
 	/* Opens, again while signals cut the call short. */
 	do {
 		opened = open(path, flags, mode);
 	} while (opened < 0 && errno == EINTR);
-	if (opened < 0)
-		return os_file_error_from_errno(errno);
+	if (opened < 0) {
+		error = os_file_error_from_errno(errno);
+		return error;
+	}
 
 	/* Hands the descriptor to the caller. */
 	*descriptor = opened;
@@ -1087,6 +1098,7 @@ os_write_all(
 	size_t left;
 	size_t piece;
 	ssize_t written;
+	int error;
 
 	/* Writes until nothing is left. */
 	cursor = (const unsigned char *)bytes;
@@ -1102,7 +1114,8 @@ os_write_all(
 			/* A signal cut the call short; asks again. */
 			if (errno == EINTR)
 				continue;
-			return os_file_error_from_errno(errno);
+			error = os_file_error_from_errno(errno);
+			return error;
 		}
 
 		/* A write that takes nothing would loop for ever. */
@@ -1126,11 +1139,14 @@ os_close(
 	int descriptor)
 {
 	int closed;
+	int error;
 
 	/* Closes the descriptor; an interrupted close has still released it. */
 	closed = close(descriptor);
-	if (closed != 0 && errno != EINTR)
-		return os_file_error_from_errno(errno);
+	if (closed != 0 && errno != EINTR) {
+		error = os_file_error_from_errno(errno);
+		return error;
+	}
 
 	/* Succeeded: the descriptor is closed. */
 	return 0;
@@ -1144,13 +1160,16 @@ os_sync(
 	int descriptor)
 {
 	int synced;
+	int error;
 
 	/* Flushes, again while signals cut the call short. */
 	do {
 		synced = fsync(descriptor);
 	} while (synced != 0 && errno == EINTR);
-	if (synced != 0)
-		return os_file_error_from_errno(errno);
+	if (synced != 0) {
+		error = os_file_error_from_errno(errno);
+		return error;
+	}
 
 	/* Succeeded: the data is on the disk. */
 	return 0;
@@ -1203,7 +1222,8 @@ os_read_all(
 			/* A signal cut the call short; asks again. */
 			if (errno == EINTR)
 				continue;
-			return os_file_error_from_errno(errno);
+			error = os_file_error_from_errno(errno);
+			return error;
 		}
 
 		/* The end of the file. */
@@ -1234,6 +1254,7 @@ os_ensure_directory(
 	int made;
 	int found;
 	int code;
+	int error;
 
 	/* Makes the directory. */
 	made = mkdir(path, OS_DIRECTORY_MODE);
@@ -1251,7 +1272,8 @@ os_ensure_directory(
 		return ENOTDIR;
 
 	/* Reports why the directory could not be made. */
-	return os_error_from_errno(code);
+	error = os_error_from_errno(code);
+	return error;
 }
 
 /*

@@ -65,14 +65,21 @@ main(
 	int index;
 	int first;
 	int twice;
+	BOOL found;
+	int different;
 
 	/* The option, and pairs of coordinates. */
 	first = 1;
 	twice = 0;
-	if (argc > 1 && strcmp(argv[1], "--double") == 0) {
+	different = 1;
+	if (argc > 1)
+		different = strcmp(argv[1], "--double");
+	if (different == 0) {
 		first = 2;
 		twice = 1;
 	}
+
+	/* Pairs of coordinates are required. */
 	if (argc - first < 2 || (argc - first) % 2 != 0) {
 		fprintf(stderr, "usage: hit-test [--double] <x> <y> [<x> <y> ...]\n");
 		return 2;
@@ -86,10 +93,15 @@ main(
 		printf("hit-test: no frame\n");
 		return 1;
 	}
-	if (!GetClientRect(search.frame, &client)) {
+
+	/* The frame's client rectangle. */
+	found = GetClientRect(search.frame, &client);
+	if (!found) {
 		printf("hit-test: no client rectangle (%lu)\n", (unsigned long)GetLastError());
 		return 1;
 	}
+
+	/* The frame's size. */
 	width = client.right - client.left;
 	height = client.bottom - client.top;
 	printf("hit-test: frame %ld %ld\n", (long)width, (long)height);
@@ -110,6 +122,8 @@ main(
 			printf("hit-test: %ld %ld no answer (%lu)\n", x, y, (unsigned long)GetLastError());
 			return 1;
 		}
+
+		/* The click's answer. */
 		printf("hit-test: %ld %ld %ld\n", x, y, (long)answer);
 
 		/* The double click there, and the frame's size after it. */
@@ -121,10 +135,15 @@ main(
 			printf("hit-test: %ld %ld the double click had no answer (%lu)\n", x, y, (unsigned long)GetLastError());
 			return 1;
 		}
-		if (!GetClientRect(search.frame, &client)) {
+
+		/* The frame's client rectangle after the double click. */
+		found = GetClientRect(search.frame, &client);
+		if (!found) {
 			printf("hit-test: no client rectangle (%lu)\n", (unsigned long)GetLastError());
 			return 1;
 		}
+
+		/* The frame's size after the double click. */
 		width = client.right - client.left;
 		height = client.bottom - client.top;
 		printf("hit-test: frame %ld %ld\n", (long)width, (long)height);
@@ -147,17 +166,25 @@ hit_each(
 	RECT bounds;
 	LONG width;
 	int length;
+	BOOL got;
+	int different;
+	BOOL visible;
 
 	/* A visible window of the class. */
 	search = (struct hit_search *)data;
-	if (!IsWindowVisible(window))
+	visible = IsWindowVisible(window);
+	if (!visible)
 		return TRUE;
 	length = GetClassNameW(window, name, (int)(sizeof(name) / sizeof(name[0])));
-	if (length <= 0 || lstrcmpW(name, HIT_FRAME_CLASS) != 0)
+	different = 0;
+	if (length > 0)
+		different = lstrcmpW(name, HIT_FRAME_CLASS);
+	if (length <= 0 || different != 0)
 		return TRUE;
 
 	/* The widest so far. */
-	if (!GetWindowRect(window, &bounds))
+	got = GetWindowRect(window, &bounds);
+	if (!got)
 		return TRUE;
 	width = bounds.right - bounds.left;
 	if (width > search->width) {

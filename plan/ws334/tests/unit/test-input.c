@@ -53,12 +53,14 @@ main(
 	CHECK(argc == 2);
 	(void)argv;
 
+	/* Run every group. */
 	test_wheel();
 	test_modifiers();
 	test_button();
 	test_point();
 	test_key_flags();
 
+	/* Report the count of failures. */
 	return check_finish("input");
 }
 
@@ -77,6 +79,8 @@ static void
 test_wheel(void)
 {
 	int delta;
+	double vertical;
+	double horizontal;
 
 	/* The constants the header promises. */
 	CHECK_EQ(KEIUI_WIN32_WHEEL_DELTA, 120);
@@ -114,9 +118,10 @@ test_wheel(void)
 
 	/* The distance is linear in the delta and vertical is the horizontal one negated. */
 	for (delta = -1000; delta <= 1000; delta += 7) {
-		double vertical = keiui_win32_wheel_pixels(delta, 0);
-		double horizontal = keiui_win32_wheel_pixels(delta, 1);
+		vertical = keiui_win32_wheel_pixels(delta, 0);
+		horizontal = keiui_win32_wheel_pixels(delta, 1);
 
+		/* The horizontal distance is half the delta, and the vertical one is the horizontal one negated. */
 		CHECK(horizontal == (double)delta / 2.0);
 		CHECK(vertical == -horizontal);
 	}
@@ -176,6 +181,8 @@ test_modifiers(void)
 			if ((held & HELD_ALT) != 0)
 				expected |= MOD_ALT;
 		}
+
+		/* The modifiers are those the table of held keys gives. */
 		CHECK_EQ(keiui_win32_modifiers(held), expected);
 	}
 }

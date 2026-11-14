@@ -114,6 +114,8 @@ main(
 		fprintf(stderr, "usage: scheme-test PAGE\n");
 		return 2;
 	}
+
+	/* Remember the page and the stack base. */
 	test_page_path = argv[1];
 	test_stack_base = __builtin_frame_address(0);
 
@@ -276,6 +278,8 @@ test_media_holds(
 		wb_arena_release(&arena);
 		return error;
 	}
+
+	/* Do not count the end marker. */
 	if (count != 0 && tokens[count - 1U].type == CSS_TOKEN_EOF)
 		count--;
 
@@ -285,6 +289,8 @@ test_media_holds(
 		wb_arena_release(&arena);
 		return error;
 	}
+
+	/* Evaluate the query for a 320 by 240 view. */
 	*holds = css_media_matches(media, 320.0f, 240.0f, dark);
 	wb_arena_release(&arena);
 
@@ -334,6 +340,7 @@ test_style_has(
 	size_t length;
 	int error;
 	int has;
+	char *found;
 
 	/* The dump, as the page is styled now. */
 	error = browser_view_dump(view, BROWSER_DUMP_STYLE, &text, &length);
@@ -342,7 +349,8 @@ test_style_has(
 
 	/* The text in it. */
 	has = 0;
-	if (strstr(text, wanted) != NULL)
+	found = strstr(text, wanted);
+	if (found != NULL)
 		has = 1;
 	browser_free(text);
 
@@ -361,6 +369,7 @@ test_console_line(
 {
 	struct test_console *console;
 
+	/* The view and the level are not needed. */
 	(void)view;
 	(void)level;
 

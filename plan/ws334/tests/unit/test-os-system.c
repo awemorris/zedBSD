@@ -45,6 +45,14 @@ static const size_t good_alignments[] = { sizeof(void *), 16U, 64U, 4096U, 65536
 /* The sizes the allocation test tries at each alignment. */
 static const size_t good_sizes[] = { 1U, 7U, 100U, 5000U, 70000U };
 
+static void test_aligned(void);
+static unsigned distinct_values(const unsigned char *bytes, size_t length);
+static void test_random(void);
+static void test_library(void);
+static void test_names(void);
+static void check_data_directory(const char *expected);
+static void test_data_directory(void);
+
 /* Checks wb_os_aligned_alloc and wb_os_aligned_free. */
 static void
 test_aligned(
@@ -72,6 +80,7 @@ test_aligned(
 				continue;
 			CHECK_EQ((uintptr_t)memory % good_alignments[a], 0);
 
+			/* Fill the block with a pattern. */
 			bytes = (unsigned char *)memory;
 			for (i = 0; i < good_sizes[s]; i++)
 				bytes[i] = (unsigned char)(i * 7U + a);
@@ -80,6 +89,8 @@ test_aligned(
 				if (bytes[i] != (unsigned char)(i * 7U + a))
 					intact = 0;
 			}
+
+			/* Release the block. */
 			CHECK(intact);
 			wb_os_aligned_free(memory);
 		}
@@ -123,6 +134,7 @@ distinct_values(
 	unsigned count;
 	size_t i;
 
+	/* Mark each byte value that appears. */
 	memset(seen, 0, sizeof(seen));
 	for (i = 0; i < length; i++)
 		seen[bytes[i]] = 1;
@@ -132,6 +144,7 @@ distinct_values(
 			count++;
 	}
 
+	/* Report how many different values appeared. */
 	return count;
 }
 
@@ -175,6 +188,8 @@ test_random(
 		free(second);
 		return;
 	}
+
+	/* Two reads of the generator. */
 	error = wb_os_random(first, length);
 	CHECK_EQ(error, 0);
 	error = wb_os_random(second, length);
@@ -184,12 +199,16 @@ test_random(
 		if (first[i] != 0)
 			all_zero = 0;
 	}
+
+	/* The first read has a byte that is not zero. */
 	CHECK(all_zero == 0);
 	all_zero = 1;
 	for (i = 0; i < length; i++) {
 		if (second[i] != 0)
 			all_zero = 0;
 	}
+
+	/* The two reads differ and together show every value. */
 	CHECK(all_zero == 0);
 	CHECK(memcmp(first, second, length) != 0);
 	CHECK_EQ(distinct_values(first, length), 256);
@@ -231,6 +250,10 @@ test_library(
 	struct wb_os_library *library;
 	wb_os_function function;
 	int error;
+#ifdef _WIN32
+	wchar_t system_directory[512];
+	wchar_t source[600];
+#endif
 
 	/* The first name is missing and the second loads. */
 	library = NULL;
@@ -250,6 +273,7 @@ test_library(
 			ULONGLONG called;
 			ULONGLONG after;
 
+			/* Look the function up by its name. */
 			function = wb_os_library_symbol(library, "GetTickCount64");
 			CHECK(function != NULL);
 			if (function != NULL) {
@@ -264,6 +288,7 @@ test_library(
 		} else {
 			double (*cosine)(double);
 
+			/* Look the function up by its name. */
 			function = wb_os_library_symbol(library, "cos");
 			CHECK(function != NULL);
 			if (function != NULL) {
@@ -309,26 +334,23 @@ test_library(
 
 #ifdef _WIN32
 	/* A library that sits in the current directory only is not loaded: the search skips that directory. */
-	{
-		static const char *const planted[] = { "ws334-planted.dll", NULL };
-		wchar_t system_directory[512];
-		wchar_t source[600];
-		UINT got;
-		BOOL copied;
+	static const char *const planted[] = { "ws334-planted.dll", NULL };
+	UINT got;
+	BOOL copied;
 
-		got = GetSystemDirectoryW(system_directory, 512U);
-		CHECK(got > 0 && got < 400U);
-		if (got > 0 && got < 400U) {
-			wcscpy(source, system_directory);
-			wcscat(source, L"\\version.dll");
-			copied = CopyFileW(source, L"ws334-planted.dll", FALSE);
-			CHECK(copied);
-			if (copied) {
-				library = (struct wb_os_library *)&sentinel_target;
-				error = wb_os_library_open(planted, &library);
-				CHECK_EQ(error, ENOENT);
-				CHECK(library == NULL);
-			}
+	/* Ask for the system directory. */
+	got = GetSystemDirectoryW(system_directory, 512U);
+	CHECK(got > 0 && got < 400U);
+	if (got > 0 && got < 400U) {
+		wcscpy(source, system_directory);
+		wcscat(source, L"\\version.dll");
+		copied = CopyFileW(source, L"ws334-planted.dll", FALSE);
+		CHECK(copied);
+		if (copied) {
+			library = (struct wb_os_library *)&sentinel_target;
+			error = wb_os_library_open(planted, &library);
+			CHECK_EQ(error, ENOENT);
+			CHECK(library == NULL);
 		}
 	}
 #endif
@@ -366,6 +388,7 @@ check_data_directory(
 	char *buffer;
 	int error;
 
+	/* The length of the path. */
 	length = strlen(expected);
 
 	/* A buffer of exactly the needed size holds the path and its NUL. */
@@ -470,11 +493,13 @@ main(
 	is_win32 = strcmp(argv[1], "win32") == 0;
 	CHECK(is_win32 || strcmp(argv[1], "posix") == 0);
 
+	/* Run every group. */
 	test_aligned();
 	test_random();
 	test_library();
 	test_names();
 	test_data_directory();
 
+	/* Report the count of failures. */
 	return check_finish("os-system");
 }

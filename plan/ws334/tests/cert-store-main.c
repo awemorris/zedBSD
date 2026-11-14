@@ -45,14 +45,30 @@ main(
 	FILE *file;
 	int add;
 	int status;
+	int converted;
+	int usable;
+	int is_add;
+	int is_remove;
 
 	/* The arguments. */
-	if (argc != 4 || (strcmp(argv[1], "add") != 0 && strcmp(argv[1], "remove") != 0)) {
+	usable = 0;
+	if (argc == 4) {
+		is_add = strcmp(argv[1], "add");
+		is_remove = strcmp(argv[1], "remove");
+		if (is_add == 0 || is_remove == 0)
+			usable = 1;
+	}
+
+	/* Refuse an unknown action or a wrong number of arguments. */
+	if (!usable) {
 		fprintf(stderr, "usage: cert-store add|remove STORE DER\n");
 		return 2;
 	}
+
+	/* The action, and the store's name in UTF-16. */
 	add = strcmp(argv[1], "add") == 0;
-	if (MultiByteToWideChar(CP_UTF8, 0, argv[2], -1, store_name, STORE_NAME_MAX) == 0) {
+	converted = MultiByteToWideChar(CP_UTF8, 0, argv[2], -1, store_name, STORE_NAME_MAX);
+	if (converted == 0) {
 		printf("cert-store: the store's name %s is not usable\n", argv[2]);
 		return 1;
 	}
@@ -63,6 +79,8 @@ main(
 		printf("cert-store: cannot open %s\n", argv[3]);
 		return 1;
 	}
+
+	/* Read the certificate, which must fit in the buffer. */
 	length = fread(der, 1, sizeof(der), file);
 	fclose(file);
 	if (length == 0 || length == sizeof(der)) {
@@ -82,8 +100,10 @@ main(
 	if (status == 0)
 		CertControlStore(store, 0, CERT_STORE_CTRL_COMMIT, NULL);
 	CertCloseStore(store, 0);
-	if (status == 0)
-		printf("cert-store: %s\n", add ? "added" : "removed");
+	if (status == 0 && add)
+		printf("cert-store: added\n");
+	if (status == 0 && !add)
+		printf("cert-store: removed\n");
 	return status;
 }
 
@@ -100,14 +120,19 @@ store_change(
 {
 	PCCERT_CONTEXT wanted;
 	PCCERT_CONTEXT held;
+	BOOL deleted;
+	BOOL added;
 
 	/* Adding replaces the same certificate when the store holds it. */
 	if (add) {
-		if (!CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, der, (DWORD)length,
-		    CERT_STORE_ADD_REPLACE_EXISTING, NULL)) {
+		added = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, der, (DWORD)length,
+		    CERT_STORE_ADD_REPLACE_EXISTING, NULL);
+		if (!added) {
 			printf("cert-store: cannot add the certificate (error %lu)\n", (unsigned long)GetLastError());
 			return 1;
 		}
+
+		/* The certificate was added or replaced. */
 		return 0;
 	}
 
@@ -117,11 +142,18 @@ store_change(
 		printf("cert-store: the file is not a certificate (error %lu)\n", (unsigned long)GetLastError());
 		return 1;
 	}
+
+	/* Take out the certificate the store holds that is the same, if it holds one. */
 	held = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0, CERT_FIND_EXISTING, wanted, NULL);
 	CertFreeCertificateContext(wanted);
-	if (held != NULL && !CertDeleteCertificateFromStore(held)) {
+	deleted = TRUE;
+	if (held != NULL)
+		deleted = CertDeleteCertificateFromStore(held);
+	if (!deleted) {
 		printf("cert-store: cannot take the certificate out (error %lu)\n", (unsigned long)GetLastError());
 		return 1;
 	}
+
+	/* Done. */
 	return 0;
 }

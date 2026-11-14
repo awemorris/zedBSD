@@ -190,6 +190,8 @@ main(
 		fprintf(stderr, "usage: storage-test DIRECTORY PORT CACHE_PORT\n");
 		return 2;
 	}
+
+	/* The directory and the ports the test uses. */
 	test_directory = argv[1];
 	test_port = argv[2];
 	test_cache_port = argv[3];
@@ -427,6 +429,7 @@ test_fake_backend(void)
 	int storage_lines;
 	int index;
 	int error;
+	int different;
 
 	/* Options of another version: refused, and the backend closed once. */
 	memset(&fake, 0, sizeof(fake));
@@ -472,6 +475,8 @@ test_fake_backend(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* Load a page from the test directory. */
 	snprintf(location, sizeof(location), "%s/pages/old.html", test_directory);
 	CHECK_EQ(browser_view_load(view, location), 0);
 	CHECK_EQ(browser_view_settle(view, 0, 0), 0);
@@ -483,9 +488,12 @@ test_fake_backend(void)
 	browser_view_process(view);
 	storage_lines = 0;
 	for (index = 0; index < console.count; index++) {
-		if (strncmp(console.lines[index], "storage: could not save (", 25) == 0 && console.levels[index] == 1)
+		different = strncmp(console.lines[index], "storage: could not save (", 25);
+		if (different == 0 && console.levels[index] == 1)
 			storage_lines++;
 	}
+
+	/* One line told that the save failed. */
 	CHECK_EQ(storage_lines, 1);
 
 	/* The instance refuses to go while the view lives, and closes the backend once after. */
@@ -652,6 +660,7 @@ test_cookie_header(
 	const char *text;
 	size_t length;
 	int error;
+	int different;
 
 	/* The header. */
 	header[0] = '\0';
@@ -669,9 +678,14 @@ test_cookie_header(
 	/* Its value. */
 	text = wb_buffer_string(&out);
 	length = out.length;
-	if (length >= 10U && strncmp(text, "Cookie: ", 8) == 0) {
+	different = 1;
+	if (length >= 10U)
+		different = strncmp(text, "Cookie: ", 8);
+	if (length >= 10U && different == 0) {
 		snprintf(header, size, "%.*s", (int)(length - 10U), text + 8);
 	}
+
+	/* Release the buffer. */
 	wb_buffer_release(&out);
 
 	/* Succeeded: the pairs. */
@@ -700,6 +714,8 @@ test_store(
 	} else {
 		error = net_cookie_store(instance->cookies, &parsed, header, strlen(header));
 	}
+
+	/* Release the URL. */
 	net_url_release(&parsed);
 	if (error != 0)
 		return error;
@@ -718,6 +734,7 @@ test_count_files(
 	struct dirent *entry;
 	DIR *directory;
 	int count;
+	const char *temporary;
 
 	/* The directory. */
 	snprintf(path, sizeof(path), "%s/%s/%s", test_directory, name, space);
@@ -727,13 +744,19 @@ test_count_files(
 
 	/* Its entries but . and .. (and the replace's temporary files, whose names have a dot). */
 	count = 0;
-	while ((entry = readdir(directory)) != NULL) {
+	for (;;) {
+		entry = readdir(directory);
+		if (entry == NULL)
+			break;
 		if (entry->d_name[0] == '.')
 			continue;
-		if (strstr(entry->d_name, ".tmp") != NULL)
+		temporary = strstr(entry->d_name, ".tmp");
+		if (temporary != NULL)
 			continue;
 		count++;
 	}
+
+	/* Close the directory. */
 	closedir(directory);
 
 	/* Succeeded: the count. */
@@ -777,6 +800,7 @@ test_write_v1(
 	size_t length;
 	size_t index;
 	FILE *file;
+	size_t written;
 
 	/* The magic, the two lengths and the UTF-16 units of the key and the value. */
 	length = strlen(WB_STORAGE_MAGIC_LOCAL_1);
@@ -793,6 +817,8 @@ test_write_v1(
 		bytes[length++] = (unsigned char)key[index];
 		bytes[length++] = 0;
 	}
+
+	/* The value's bytes, each followed by a zero. */
 	for (index = 0; index < sizeof(value) - 1U; index++) {
 		bytes[length++] = (unsigned char)value[index];
 		bytes[length++] = 0;
@@ -805,10 +831,13 @@ test_write_v1(
 	file = fopen(path, "wb");
 	if (file == NULL)
 		return errno;
-	if (fwrite(bytes, 1, length, file) != length) {
+	written = fwrite(bytes, 1, length, file);
+	if (written != length) {
 		fclose(file);
 		return EIO;
 	}
+
+	/* Close the file. */
 	fclose(file);
 
 	/* Succeeded: the old record is there. */
@@ -1001,6 +1030,8 @@ test_fetch(
 		net_loader_dispatch(loader);
 		tries++;
 	}
+
+	/* The fetch did not finish in time. */
 	if (!result->done)
 		return ETIMEDOUT;
 
@@ -1128,6 +1159,8 @@ test_write_file(
 		CHECK(file != NULL);
 		return;
 	}
+
+	/* Close the file. */
 	fwrite(bytes, 1, length, file);
 	fclose(file);
 }
@@ -1178,6 +1211,8 @@ test_cache(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 
@@ -1234,6 +1269,8 @@ test_cache(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 	CHECK_EQ(test_fetch(loader, "/max-age", NULL, &result), 0);
@@ -1267,6 +1304,8 @@ test_cache(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 	CHECK_EQ(test_fetch(loader, "/etag", NULL, &result), 0);
@@ -1344,6 +1383,8 @@ test_cache(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 	CHECK_EQ(test_fetch(loader, "/max-age", NULL, &result), 0);
@@ -1379,6 +1420,8 @@ test_cache_limit(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 
@@ -1428,6 +1471,7 @@ test_cache_limit(void)
 	CHECK(test_cache_has(instance, "/blob/4"));
 	CHECK_EQ(test_count_files("d", "cache"), 2);
 
+	/* Destroy the instance and write the disk. */
 	CHECK_EQ(browser_instance_destroy(instance), 0);
 	sync();
 }
@@ -1459,6 +1503,8 @@ test_cache_changed(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 	CHECK_EQ(test_fetch(loader, "/etag-change", NULL, &result), 0);
@@ -1493,6 +1539,8 @@ test_cache_changed(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 	CHECK_EQ(test_fetch(loader, "/etag-change", NULL, &result), 0);
@@ -1531,6 +1579,8 @@ test_cache_gone(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 	CHECK_EQ(test_fetch(loader, "/etag-gone", NULL, &result), 0);
@@ -1551,6 +1601,8 @@ test_cache_gone(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 	test_pause(1300);
@@ -1583,6 +1635,8 @@ test_cache_gone(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 	CHECK_EQ(test_fetch(loader, "/etag-gone", NULL, &result), 0);
@@ -1631,6 +1685,8 @@ test_cache_offline(void)
 		browser_instance_destroy(instance);
 		return;
 	}
+
+	/* The loader uses the instance's cookies and cache. */
 	net_loader_set_cookies(loader, instance->cookies);
 	net_loader_set_cache(loader, instance->cache);
 

@@ -64,13 +64,19 @@ main(
 	char **argv)
 {
 	int status;
+	int posix_different;
+	int win32_different;
 
 	/* The runner passes the system the test is built for. */
 	if (argc < 2) {
 		printf("test-frame: FAIL (no system argument)\n");
 		return 1;
 	}
-	if (strcmp(argv[1], "posix") != 0 && strcmp(argv[1], "win32") != 0) {
+
+	/* Which system the harness runs the test on. */
+	posix_different = strcmp(argv[1], "posix");
+	win32_different = strcmp(argv[1], "win32");
+	if (posix_different != 0 && win32_different != 0) {
 		printf("test-frame: FAIL (unknown system %s)\n", argv[1]);
 		return 1;
 	}
@@ -177,6 +183,8 @@ run_cases(
 		if (actual != cases[index].expected) {
 			printf("%s: point (%d, %d) is %u, expected %u\n", name, (int)cases[index].x, (int)cases[index].y, actual, cases[index].expected);
 		}
+
+		/* The hit test gives the expected answer. */
 		CHECK_EQ(actual, cases[index].expected);
 	}
 }
@@ -1009,6 +1017,8 @@ test_sweep(void)
 				controls[control].width = sweep_range(0U, 600U);
 				controls[control].height = sweep_range(0U, 120U);
 			}
+
+			/* The frame uses the controls. */
 			frame.controls = controls;
 		}
 

@@ -96,6 +96,42 @@ struct ringer {
 	int delay_ms;
 };
 
+static void sys_start(void);
+static void sys_close(sys_socket handle);
+static void sys_sleep(unsigned milliseconds);
+static double sys_now(void);
+static sys_socket sys_listen(unsigned short *port, int backlog);
+static sys_socket sys_accept(sys_socket listener);
+static long sys_recv(sys_socket handle, void *bytes, size_t length);
+static long sys_recv_wait(sys_socket handle, void *bytes, size_t length);
+static long sys_send(sys_socket handle, const void *bytes, size_t length);
+static void sys_reset_on_close(sys_socket handle);
+static void port_text(unsigned short port, char *text);
+static unsigned short closed_port(void);
+static struct wb_os_addresses *resolve_loopback(unsigned short port);
+static unsigned wait_for(wb_os_socket socket, unsigned wants, int timeout_ms);
+static int pair_open(struct pair *pair, int blocking);
+static void pair_close(struct pair *pair);
+static void pattern_fill(unsigned char *bytes, size_t length, size_t offset);
+static int pattern_ok(const unsigned char *bytes, size_t length, size_t offset);
+static void test_resolve(void);
+static void *echo_thread(void *argument);
+static void test_echo(void);
+static void test_connect_arguments(void);
+static void test_connect_flags(void);
+static void test_connect_pending(void);
+static void test_connect_refused(void);
+static void test_send_receive(void);
+static void test_send_full(void);
+static void test_send_closed(void);
+static void test_receive_reset(void);
+static void test_closed_socket(void);
+static void test_descriptor_and_error(void);
+static void test_poll_basics(void);
+static void test_poll_many(void);
+static void *ringer_thread(void *argument);
+static void test_waker(void);
+
 /* Starts the system's socket library for the test's own sockets. */
 static void
 sys_start(
@@ -105,6 +141,7 @@ sys_start(
 	WSADATA data;
 	int status;
 
+	/* Start the Windows socket library. */
 	status = WSAStartup(MAKEWORD(2, 2), &data);
 	CHECK_EQ(status, 0);
 #endif
@@ -132,6 +169,7 @@ sys_sleep(
 #else
 	struct timespec span;
 
+	/* Split the milliseconds into seconds and nanoseconds for the sleep. */
 	span.tv_sec = (time_t)(milliseconds / 1000U);
 	span.tv_nsec = (long)(milliseconds % 1000U) * 1000000L;
 	nanosleep(&span, NULL);
@@ -147,12 +185,14 @@ sys_now(
 	LARGE_INTEGER frequency;
 	LARGE_INTEGER counter;
 
+	/* Read the counter and the frequency and give milliseconds. */
 	QueryPerformanceFrequency(&frequency);
 	QueryPerformanceCounter(&counter);
 	return (double)counter.QuadPart * 1000.0 / (double)frequency.QuadPart;
 #else
 	struct timespec now;
 
+	/* Read the monotonic clock in milliseconds. */
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	return (double)now.tv_sec * 1000.0 + (double)now.tv_nsec / 1000000.0;
 #endif
@@ -169,11 +209,13 @@ sys_listen(
 	sys_length length;
 	int status;
 
+	/* Make a TCP socket. */
 	handle = socket(AF_INET, SOCK_STREAM, 0);
 	CHECK(handle != SYS_INVALID);
 	if (handle == SYS_INVALID)
 		return SYS_INVALID;
 
+	/* Bind it to an ephemeral port on the loopback address. */
 	memset(&address, 0, sizeof(address));
 	address.sin_family = AF_INET;
 	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -187,6 +229,7 @@ sys_listen(
 	CHECK_EQ(status, 0);
 	*port = ntohs(address.sin_port);
 
+	/* Report the port the system chose, and give the listener. */
 	return handle;
 }
 
@@ -200,6 +243,7 @@ sys_accept(
 	sys_socket handle;
 	int status;
 
+	/* Wait for a connection with a time limit. */
 	FD_ZERO(&waiting);
 	FD_SET(listener, &waiting);
 	limit.tv_sec = PATIENCE_MS / 1000;
@@ -209,9 +253,11 @@ sys_accept(
 	if (status != 1)
 		return SYS_INVALID;
 
+	/* Accept the connection. */
 	handle = accept(listener, NULL, NULL);
 	CHECK(handle != SYS_INVALID);
 
+	/* Give the accepted socket. */
 	return handle;
 }
 
@@ -236,6 +282,7 @@ sys_recv_wait(
 	struct timeval limit;
 	int status;
 
+	/* Wait for data with a time limit. */
 	FD_ZERO(&waiting);
 	FD_SET(handle, &waiting);
 	limit.tv_sec = PATIENCE_MS / 1000;
@@ -244,6 +291,7 @@ sys_recv_wait(
 	if (status != 1)
 		return -1;
 
+	/* Receive what arrived. */
 	return sys_recv(handle, bytes, length);
 }
 
@@ -269,6 +317,7 @@ sys_reset_on_close(
 	struct linger setting;
 	int status;
 
+	/* Make the close an abortive one so the peer sees a reset. */
 	setting.l_onoff = 1;
 	setting.l_linger = 0;
 	status = setsockopt(handle, SOL_SOCKET, SO_LINGER, (const char *)&setting, (int)sizeof(setting));
@@ -292,11 +341,13 @@ closed_port(
 	unsigned short port;
 	sys_socket handle;
 
+	/* Give the port number, and the listener is closed. */
 	port = 0;
 	handle = sys_listen(&port, 1);
 	if (handle != SYS_INVALID)
 		sys_close(handle);
 
+	/* Return the port that no one listens on now. */
 	return port;
 }
 
@@ -309,6 +360,7 @@ resolve_loopback(
 	char text[16];
 	int error;
 
+	/* Resolve the loopback address and the port as text. */
 	port_text(port, text);
 	addresses = NULL;
 	error = wb_os_resolve("127.0.0.1", text, &addresses);
@@ -317,6 +369,7 @@ resolve_loopback(
 	if (addresses != NULL)
 		CHECK(wb_os_addresses_count(addresses) >= 1U);
 
+	/* Give the resolved addresses. */
 	return addresses;
 }
 
@@ -329,16 +382,22 @@ wait_for(
 {
 	struct wb_os_poll_item item;
 	size_t ready;
+	unsigned expected;
 	int error;
 
+	/* Ask for the one socket and what it wants. */
 	item.socket = socket;
 	item.wants = wants;
 	item.found = 0xf0U;
 	ready = 99U;
 	error = wb_os_poll(&item, 1U, timeout_ms, &ready);
 	CHECK_EQ(error, 0);
-	CHECK_EQ(ready, item.found != 0U ? 1U : 0U);
+	expected = 0U;
+	if (item.found != 0U)
+		expected = 1U;
+	CHECK_EQ(ready, expected);
 
+	/* Report what was found. */
 	return item.found;
 }
 
@@ -352,19 +411,23 @@ pair_open(
 	unsigned found;
 	int error;
 
+	/* No socket is made yet. */
 	pair->listener = SYS_INVALID;
 	pair->peer = SYS_INVALID;
 	pair->client = WB_OS_SOCKET_NONE;
 	pair->port = 0;
 
+	/* Listen on a loopback port. */
 	pair->listener = sys_listen(&pair->port, 8);
 	if (pair->listener == SYS_INVALID)
 		return 0;
 
+	/* Resolve the listener's address. */
 	addresses = resolve_loopback(pair->port);
 	if (addresses == NULL)
 		return 0;
 
+	/* Connect to the listener and release the addresses. */
 	error = wb_os_socket_connect(addresses, 0U, blocking, &pair->client);
 	wb_os_addresses_free(addresses);
 	if (blocking) {
@@ -372,11 +435,15 @@ pair_open(
 	} else {
 		CHECK(error == 0 || error == EINPROGRESS);
 	}
+
+	/* A connect that is still under way is allowed, any other error fails. */
 	if (error != 0 && error != EINPROGRESS)
 		return 0;
 
+	/* The client socket exists. */
 	CHECK(pair->client != WB_OS_SOCKET_NONE);
 
+	/* For a non-blocking connect, wait until it is writable, which means it finished. */
 	if (error == EINPROGRESS) {
 		found = wait_for(pair->client, WB_OS_POLL_WRITABLE, PATIENCE_MS);
 		CHECK((found & WB_OS_POLL_WRITABLE) != 0U);
@@ -384,8 +451,10 @@ pair_open(
 		CHECK_EQ(error, 0);
 	}
 
+	/* Accept the other end of the connection. */
 	pair->peer = sys_accept(pair->listener);
 
+	/* Give whether the peer was accepted. */
 	return pair->peer != SYS_INVALID;
 }
 
@@ -413,6 +482,7 @@ pattern_fill(
 {
 	size_t i;
 
+	/* Fill the bytes with a pattern that depends on the position. */
 	for (i = 0; i < length; i++)
 		bytes[i] = (unsigned char)((offset + i) % 251U);
 }
@@ -426,11 +496,13 @@ pattern_ok(
 {
 	size_t i;
 
+	/* Check the bytes against the same pattern. */
 	for (i = 0; i < length; i++) {
 		if (bytes[i] != (unsigned char)((offset + i) % 251U))
 			return 0;
 	}
 
+	/* They all match. */
 	return 1;
 }
 
@@ -545,6 +617,7 @@ echo_thread(
 	long put;
 	long total;
 
+	/* Take the listener from the argument and wait for the one connection. */
 	echo = (struct echo *)argument;
 	connection = sys_accept(echo->listener);
 	if (connection == SYS_INVALID) {
@@ -552,11 +625,13 @@ echo_thread(
 		return NULL;
 	}
 
+	/* Echo what arrives until the peer closes. */
 	for (;;) {
 		got = sys_recv_wait(connection, buffer, sizeof(buffer));
 		if (got <= 0)
 			break;
 
+		/* Send all the bytes that were received. */
 		total = 0;
 		while (total < got) {
 			put = sys_send(connection, buffer + total, (size_t)(got - total));
@@ -564,13 +639,19 @@ echo_thread(
 				echo->failed = 1;
 				break;
 			}
+
+			/* Count the bytes the send took. */
 			total += put;
 		}
+
+		/* Count the bytes echoed. */
 		echo->echoed += (size_t)got;
 	}
 
+	/* Close the connection. */
 	sys_close(connection);
 
+	/* The thread has no result to return. */
 	return NULL;
 }
 
@@ -594,9 +675,13 @@ test_echo(
 	unsigned short port;
 	unsigned found;
 	double started;
+	double elapsed;
 	int error;
 	int created;
+	struct wb_os_poll_item item;
+	size_t ready;
 
+	/* Two buffers for the large transfer, and the pattern to send. */
 	outgoing = (unsigned char *)malloc(ECHO_TOTAL);
 	incoming = (unsigned char *)malloc(ECHO_TOTAL);
 	CHECK(outgoing != NULL);
@@ -606,6 +691,8 @@ test_echo(
 		free(incoming);
 		return;
 	}
+
+	/* The pattern is what the echo must give back. */
 	pattern_fill(outgoing, ECHO_TOTAL, 0);
 
 	/* A blocking connect to a listening port returns 0, and sends and receives wait. */
@@ -638,6 +725,8 @@ test_echo(
 			break;
 		total_received += received;
 	}
+
+	/* The reply to the small send is the same bytes. */
 	CHECK_EQ(total_received, 24);
 	CHECK(memcmp(reply, small, 24U) == 0);
 	wb_os_socket_close(client);
@@ -663,13 +752,18 @@ test_echo(
 		error = wb_os_socket_connect_result(client);
 		CHECK_EQ(error, 0);
 	}
+
+	/* The large transfer starts with nothing sent or received. */
 	total_sent = 0;
 	total_received = 0;
 	started = sys_now();
-	while (total_received < ECHO_TOTAL && sys_now() - started < PATIENCE_MS) {
-		struct wb_os_poll_item item;
-		size_t ready;
+	for (;;) {
+		/* Give up when everything came back or the time is gone. */
+		elapsed = sys_now() - started;
+		if (total_received >= ECHO_TOTAL || elapsed >= PATIENCE_MS)
+			break;
 
+		/* Ask to be told when readable, and when writable while bytes remain. */
 		item.socket = client;
 		item.wants = WB_OS_POLL_READABLE;
 		if (total_sent < ECHO_TOTAL)
@@ -681,6 +775,7 @@ test_echo(
 		if (error != 0)
 			break;
 
+		/* Send when the poll says writable and bytes remain. */
 		if ((item.found & WB_OS_POLL_WRITABLE) != 0U && total_sent < ECHO_TOTAL) {
 			sent = 99U;
 			error = wb_os_socket_send(client, outgoing + total_sent, ECHO_TOTAL - total_sent, &sent);
@@ -690,6 +785,8 @@ test_echo(
 			else
 				CHECK_EQ(sent, 0);
 		}
+
+		/* Receive when the poll says readable. */
 		if ((item.found & WB_OS_POLL_READABLE) != 0U) {
 			received = 99U;
 			error = wb_os_socket_receive(client, incoming + total_received, ECHO_TOTAL - total_received, &received);
@@ -700,6 +797,8 @@ test_echo(
 			}
 		}
 	}
+
+	/* Everything came back with the same pattern. */
 	CHECK_EQ(total_sent, ECHO_TOTAL);
 	CHECK_EQ(total_received, ECHO_TOTAL);
 	CHECK(pattern_ok(incoming, total_received, 0));
@@ -709,6 +808,7 @@ test_echo(
 	CHECK_EQ(echo.failed, 0);
 	sys_close(echo.listener);
 
+	/* Release the buffers and close the listener. */
 	free(outgoing);
 	free(incoming);
 }
@@ -725,6 +825,7 @@ test_connect_arguments(
 	size_t count;
 	int error;
 
+	/* Listen, and find the address to connect to. */
 	port = 0;
 	listener = sys_listen(&port, 2);
 	addresses = resolve_loopback(port);
@@ -752,6 +853,7 @@ test_connect_arguments(
 	error = wb_os_socket_connect_result(WB_OS_SOCKET_NONE);
 	CHECK_EQ(error, EINVAL);
 
+	/* Release the addresses and close the listener. */
 	wb_os_addresses_free(addresses);
 	if (listener != SYS_INVALID)
 		sys_close(listener);
@@ -767,9 +869,17 @@ test_connect_flags(
 	size_t received;
 	int error;
 	int descriptor;
+#ifdef _WIN32
+	DWORD flags;
+	BOOL queried;
+#else
+	int flags;
+#endif
+	int opened;
 
 	/* A non-blocking connect ends connected, with the right error before that. */
-	if (!pair_open(&pair, 0)) {
+	opened = pair_open(&pair, 0);
+	if (!opened) {
 		pair_close(&pair);
 		return;
 	}
@@ -780,59 +890,49 @@ test_connect_flags(
 	CHECK_EQ(error, EAGAIN);
 	CHECK_EQ(received, 0);
 
+	/* Ask for the descriptor of the socket, which is valid. */
 	error = wb_os_socket_descriptor(pair.client, &descriptor);
 	CHECK_EQ(error, 0);
 
 #ifdef _WIN32
-	{
-		DWORD flags;
-		BOOL queried;
-
-		flags = HANDLE_FLAG_INHERIT;
-		queried = GetHandleInformation((HANDLE)pair.client, &flags);
-		CHECK(queried);
-		CHECK_EQ(flags & HANDLE_FLAG_INHERIT, 0);
-	}
+	/* The descriptor must not be inherited by a child process (Windows). */
+	flags = HANDLE_FLAG_INHERIT;
+	queried = GetHandleInformation((HANDLE)pair.client, &flags);
+	CHECK(queried);
+	CHECK_EQ(flags & HANDLE_FLAG_INHERIT, 0);
 #else
-	{
-		int flags;
-
-		flags = fcntl(descriptor, F_GETFD);
-		CHECK(flags >= 0);
-		CHECK((flags & FD_CLOEXEC) != 0);
-		flags = fcntl(descriptor, F_GETFL);
-		CHECK(flags >= 0);
-		CHECK((flags & O_NONBLOCK) != 0);
-	}
+	/* The descriptor must not be inherited by a child process (POSIX: close-on-exec). */
+	flags = fcntl(descriptor, F_GETFD);
+	CHECK(flags >= 0);
+	CHECK((flags & FD_CLOEXEC) != 0);
+	flags = fcntl(descriptor, F_GETFL);
+	CHECK(flags >= 0);
+	CHECK((flags & O_NONBLOCK) != 0);
 #endif
 	pair_close(&pair);
 
 	/* A blocking socket is not set non-blocking, but is private too. */
-	if (!pair_open(&pair, 1)) {
+	opened = pair_open(&pair, 1);
+	if (!opened) {
 		pair_close(&pair);
 		return;
 	}
+
+	/* Ask for the descriptor of the socket. */
 	error = wb_os_socket_descriptor(pair.client, &descriptor);
 	CHECK_EQ(error, 0);
 #ifdef _WIN32
-	{
-		DWORD flags;
-		BOOL queried;
-
-		flags = HANDLE_FLAG_INHERIT;
-		queried = GetHandleInformation((HANDLE)pair.client, &flags);
-		CHECK(queried);
-		CHECK_EQ(flags & HANDLE_FLAG_INHERIT, 0);
-	}
+	/* The descriptor must not be inherited by a child process (Windows). */
+	flags = HANDLE_FLAG_INHERIT;
+	queried = GetHandleInformation((HANDLE)pair.client, &flags);
+	CHECK(queried);
+	CHECK_EQ(flags & HANDLE_FLAG_INHERIT, 0);
 #else
-	{
-		int flags;
-
-		flags = fcntl(descriptor, F_GETFD);
-		CHECK((flags & FD_CLOEXEC) != 0);
-		flags = fcntl(descriptor, F_GETFL);
-		CHECK((flags & O_NONBLOCK) == 0);
-	}
+	/* The descriptor must not be inherited and must be non-blocking (POSIX). */
+	flags = fcntl(descriptor, F_GETFD);
+	CHECK((flags & FD_CLOEXEC) != 0);
+	flags = fcntl(descriptor, F_GETFL);
+	CHECK((flags & O_NONBLOCK) == 0);
 #endif
 	pair_close(&pair);
 }
@@ -881,11 +981,16 @@ test_connect_pending(
 			pending_index = i;
 			break;
 		}
+
+		/* Count a completed connect. */
 		completed++;
 		CHECK_EQ(wb_os_socket_connect_result(clients[i]), 0);
 	}
+
+	/* Not all of the connects stayed pending. */
 	CHECK(pending_index < 6U);
 
+	/* When one was still under way, asking again after the wait gives the same answer. */
 	if (pending_index < 6U) {
 		/* Asked again after the wait, it still says it is under way. */
 		CHECK_EQ(wb_os_socket_connect_result(clients[pending_index]), EINPROGRESS);
@@ -902,6 +1007,7 @@ test_connect_pending(
 		}
 	}
 
+	/* Close the sockets and release the addresses. */
 	for (i = 0; i < made; i++)
 		wb_os_socket_close(clients[i]);
 	wb_os_addresses_free(addresses);
@@ -920,6 +1026,7 @@ test_connect_refused(
 	unsigned found;
 	int error;
 
+	/* Connect to a port nobody listens on. */
 	port = closed_port();
 	addresses = resolve_loopback(port);
 	socket = 12345;
@@ -944,6 +1051,7 @@ test_connect_refused(
 	CHECK_EQ(error, ECONNREFUSED);
 	CHECK(socket == WB_OS_SOCKET_NONE);
 
+	/* Release the addresses. */
 	wb_os_addresses_free(addresses);
 }
 
@@ -962,8 +1070,11 @@ test_send_receive(
 	long got;
 	int error;
 	int tries;
+	int opened;
 
-	if (!pair_open(&pair, 0)) {
+	/* A connected pair, with a blocking client. */
+	opened = pair_open(&pair, 0);
+	if (!opened) {
 		pair_close(&pair);
 		return;
 	}
@@ -1025,6 +1136,8 @@ test_send_receive(
 		else
 			break;
 	}
+
+	/* All forty bytes came back the same. */
 	CHECK_EQ(total, 40);
 	CHECK(memcmp(back, bytes, 40U) == 0);
 
@@ -1053,6 +1166,7 @@ test_send_receive(
 	CHECK_EQ(error, 0);
 	CHECK_EQ(received, 0);
 
+	/* Close the pair. */
 	pair_close(&pair);
 }
 
@@ -1072,7 +1186,9 @@ test_send_full(
 	long got;
 	int error;
 	int full;
+	int opened;
 
+	/* Two buffers for the transfer. */
 	outgoing = (unsigned char *)malloc(CHUNK_SIZE);
 	incoming = (unsigned char *)malloc(CHUNK_SIZE);
 	CHECK(outgoing != NULL);
@@ -1083,7 +1199,9 @@ test_send_full(
 		return;
 	}
 
-	if (!pair_open(&pair, 0)) {
+	/* A connected pair with a non-blocking client. */
+	opened = pair_open(&pair, 0);
+	if (!opened) {
 		pair_close(&pair);
 		free(outgoing);
 		free(incoming);
@@ -1102,12 +1220,16 @@ test_send_full(
 			full = 1;
 			break;
 		}
+
+		/* The sends ended without a failure. */
 		CHECK_EQ(error, 0);
 		if (error != 0)
 			break;
 		CHECK(sent <= CHUNK_SIZE);
 		total += sent;
 	}
+
+	/* The socket's buffers were filled. */
 	CHECK(full);
 	CHECK(total > 0U);
 	printf("note: %zu bytes were sent before the send said EAGAIN\n", total);
@@ -1126,6 +1248,8 @@ test_send_full(
 		CHECK(pattern_ok(incoming, (size_t)got, taken));
 		taken += (size_t)got;
 	}
+
+	/* Everything sent was received. */
 	CHECK_EQ(taken, total);
 
 	/* With room again the socket is writable and a send takes bytes. */
@@ -1136,6 +1260,7 @@ test_send_full(
 	CHECK_EQ(error, 0);
 	CHECK_EQ(sent, 1);
 
+	/* Close the pair and release the buffers. */
 	pair_close(&pair);
 	free(outgoing);
 	free(incoming);
@@ -1151,8 +1276,11 @@ test_send_closed(
 	int error;
 	int tries;
 	int failed;
+	int opened;
 
-	if (!pair_open(&pair, 0)) {
+	/* A connected pair. */
+	opened = pair_open(&pair, 0);
+	if (!opened) {
 		pair_close(&pair);
 		return;
 	}
@@ -1173,9 +1301,12 @@ test_send_closed(
 			sys_sleep(20U);
 		}
 	}
+
+	/* The sends failed after the peer reset the connection. */
 	CHECK(failed);
 	CHECK(error == EPIPE || error == ECONNRESET || error == ECONNABORTED);
 
+	/* Close the pair. */
 	pair_close(&pair);
 }
 
@@ -1189,8 +1320,11 @@ test_receive_reset(
 	size_t received;
 	unsigned found;
 	int error;
+	int opened;
 
-	if (!pair_open(&pair, 0)) {
+	/* A connected pair. */
+	opened = pair_open(&pair, 0);
+	if (!opened) {
 		pair_close(&pair);
 		return;
 	}
@@ -1206,6 +1340,7 @@ test_receive_reset(
 	CHECK_EQ(error, ECONNRESET);
 	CHECK_EQ(received, 0);
 
+	/* Close the pair. */
 	pair_close(&pair);
 }
 
@@ -1219,8 +1354,15 @@ test_closed_socket(
 	unsigned char byte;
 	size_t count;
 	int error;
+#ifndef _WIN32
+	struct wb_os_poll_item item;
+	size_t ready;
+#endif
+	int opened;
 
-	if (!pair_open(&pair, 0)) {
+	/* A connected pair. */
+	opened = pair_open(&pair, 0);
+	if (!opened) {
 		pair_close(&pair);
 		return;
 	}
@@ -1243,25 +1385,22 @@ test_closed_socket(
 
 #ifndef _WIN32
 	/* A closed descriptor in a wait is reported as failed, and ready for whatever was asked. */
-	{
-		struct wb_os_poll_item item;
-		size_t ready;
-
-		item.socket = gone;
-		item.wants = WB_OS_POLL_READABLE;
-		item.found = 0;
-		ready = 0;
-		error = wb_os_poll(&item, 1U, 0, &ready);
-		CHECK_EQ(error, 0);
-		CHECK_EQ(ready, 1);
-		CHECK_EQ(item.found, WB_OS_POLL_READABLE | WB_OS_POLL_FAILED);
-		item.wants = WB_OS_POLL_WRITABLE;
-		error = wb_os_poll(&item, 1U, 0, &ready);
-		CHECK_EQ(error, 0);
-		CHECK_EQ(item.found, WB_OS_POLL_WRITABLE | WB_OS_POLL_FAILED);
-	}
+	/* Ask about a socket that was closed. */
+	item.socket = gone;
+	item.wants = WB_OS_POLL_READABLE;
+	item.found = 0;
+	ready = 0;
+	error = wb_os_poll(&item, 1U, 0, &ready);
+	CHECK_EQ(error, 0);
+	CHECK_EQ(ready, 1);
+	CHECK_EQ(item.found, WB_OS_POLL_READABLE | WB_OS_POLL_FAILED);
+	item.wants = WB_OS_POLL_WRITABLE;
+	error = wb_os_poll(&item, 1U, 0, &ready);
+	CHECK_EQ(error, 0);
+	CHECK_EQ(item.found, WB_OS_POLL_WRITABLE | WB_OS_POLL_FAILED);
 #endif
 
+	/* Close the pair. */
 	pair_close(&pair);
 }
 
@@ -1275,8 +1414,15 @@ test_descriptor_and_error(
 	wb_os_socket gone;
 	int descriptor;
 	int error;
+#ifndef _WIN32
+	int pipe_ends[2];
+	int status;
+#endif
+	int opened;
 
-	if (!pair_open(&pair, 0)) {
+	/* A connected pair. */
+	opened = pair_open(&pair, 0);
+	if (!opened) {
 		pair_close(&pair);
 		return;
 	}
@@ -1323,33 +1469,29 @@ test_descriptor_and_error(
 	WSASetLastError(0);
 	CHECK_EQ(wb_os_socket_last_error(), 0);
 #else
-	{
-		int pipe_ends[2];
-		int status;
+	/* A receive on a closed descriptor leaves EBADF, and on a descriptor that is no socket ENOTSOCK. */
+	gone = pair.client;
+	close((int)gone);
+	pair.client = WB_OS_SOCKET_NONE;
+	errno = 0;
+	recv((int)gone, &byte, 1, 0);
+	CHECK_EQ(wb_os_socket_last_error(), EBADF);
+	status = pipe(pipe_ends);
+	CHECK_EQ(status, 0);
+	errno = 0;
+	recv(pipe_ends[0], &byte, 1, 0);
+	CHECK_EQ(wb_os_socket_last_error(), ENOTSOCK);
+	close(pipe_ends[0]);
+	close(pipe_ends[1]);
 
-		/* A receive on a closed descriptor leaves EBADF, and on a descriptor that is no socket ENOTSOCK. */
-		gone = pair.client;
-		close((int)gone);
-		pair.client = WB_OS_SOCKET_NONE;
-		errno = 0;
-		recv((int)gone, &byte, 1, 0);
-		CHECK_EQ(wb_os_socket_last_error(), EBADF);
-		status = pipe(pipe_ends);
-		CHECK_EQ(status, 0);
-		errno = 0;
-		recv(pipe_ends[0], &byte, 1, 0);
-		CHECK_EQ(wb_os_socket_last_error(), ENOTSOCK);
-		close(pipe_ends[0]);
-		close(pipe_ends[1]);
-
-		/* The error is errno itself, and 0 when there is none. */
-		errno = ECONNRESET;
-		CHECK_EQ(wb_os_socket_last_error(), ECONNRESET);
-		errno = 0;
-		CHECK_EQ(wb_os_socket_last_error(), 0);
-	}
+	/* The error is errno itself, and 0 when there is none. */
+	errno = ECONNRESET;
+	CHECK_EQ(wb_os_socket_last_error(), ECONNRESET);
+	errno = 0;
+	CHECK_EQ(wb_os_socket_last_error(), 0);
 #endif
 
+	/* Close the pair. */
 	pair_close(&pair);
 }
 
@@ -1367,7 +1509,9 @@ test_poll_basics(
 	double started;
 	double elapsed;
 	int error;
+	int opened;
 
+	/* Open a waker. */
 	error = wb_os_waker_open(&waker);
 	CHECK_EQ(error, 0);
 	if (error != 0)
@@ -1489,6 +1633,8 @@ test_poll_basics(
 		big[i].wants = WB_OS_POLL_READABLE;
 		big[i].found = 0xffU;
 	}
+
+	/* Put the waker last in a full list: only it is found and the others stay as they were. */
 	big[WB_OS_POLL_MAX - 1U].socket = wb_os_waker_socket(waker);
 	wb_os_waker_ring(waker);
 	ready = 99U;
@@ -1503,13 +1649,17 @@ test_poll_basics(
 	CHECK_EQ(error, EINVAL);
 	CHECK_EQ(ready, 0);
 
+	/* Close the waker. */
 	wb_os_waker_close(waker);
 
 	/* A connected socket that wants a send is writable at once; one that wants a receive waits for data. */
-	if (!pair_open(&pair, 0)) {
+	opened = pair_open(&pair, 0);
+	if (!opened) {
 		pair_close(&pair);
 		return;
 	}
+
+	/* A connected socket that wants both is writable at once. */
 	items[0].socket = pair.client;
 	items[0].wants = WB_OS_POLL_READABLE | WB_OS_POLL_WRITABLE;
 	items[0].found = 0;
@@ -1527,6 +1677,8 @@ test_poll_basics(
 		if ((items[0].found & WB_OS_POLL_READABLE) != 0U)
 			break;
 	}
+
+	/* Report what the poll found. */
 	CHECK_EQ(items[0].found, WB_OS_POLL_READABLE | WB_OS_POLL_WRITABLE);
 	pair_close(&pair);
 }
@@ -1543,6 +1695,7 @@ test_poll_many(
 	size_t opened;
 	int error;
 
+	/* Open as many wakers as the system allows, up to a hundred. */
 	opened = 0;
 	for (i = 0; i < 100U; i++) {
 		wakers[i] = NULL;
@@ -1556,6 +1709,7 @@ test_poll_many(
 		items[i].found = 0xffU;
 	}
 
+	/* With the wakers open, poll them. */
 	if (opened == 100U) {
 		/* Nothing rung: nothing ready. */
 		ready = 99U;
@@ -1575,6 +1729,8 @@ test_poll_many(
 			CHECK_EQ(items[(i + 50U) % 100U].found, 0);
 			wb_os_waker_drain(wakers[i]);
 		}
+
+		/* Ring the last waker: only it is ready. */
 		ready = 99U;
 		wb_os_waker_ring(wakers[99]);
 		error = wb_os_poll(items, 100U, PATIENCE_MS, &ready);
@@ -1585,6 +1741,7 @@ test_poll_many(
 		wb_os_waker_drain(wakers[99]);
 	}
 
+	/* Close the wakers. */
 	for (i = 0; i < opened; i++)
 		wb_os_waker_close(wakers[i]);
 }
@@ -1596,10 +1753,12 @@ ringer_thread(
 {
 	struct ringer *ringer;
 
+	/* Take the ringer from the argument and ring after the delay. */
 	ringer = (struct ringer *)argument;
 	sys_sleep((unsigned)ringer->delay_ms);
 	wb_os_waker_ring(ringer->waker);
 
+	/* The thread has no result to return. */
 	return NULL;
 }
 
@@ -1626,6 +1785,12 @@ test_waker(
 	int round;
 	int created;
 	int i;
+#ifdef _WIN32
+	DWORD flags;
+	BOOL queried;
+#else
+	int flags;
+#endif
 
 	/* Argument checks: no place for the waker is EINVAL; NULL wakers are accepted everywhere. */
 	error = wb_os_waker_open(NULL);
@@ -1656,26 +1821,19 @@ test_waker(
 
 	/* The waker's socket is private to this process and, on POSIX, non-blocking. */
 #ifdef _WIN32
-	{
-		DWORD flags;
-		BOOL queried;
-
-		flags = HANDLE_FLAG_INHERIT;
-		queried = GetHandleInformation((HANDLE)first, &flags);
-		CHECK(queried);
-		CHECK_EQ(flags & HANDLE_FLAG_INHERIT, 0);
-	}
+	/* Ask for the handle flags (Windows). */
+	flags = HANDLE_FLAG_INHERIT;
+	queried = GetHandleInformation((HANDLE)first, &flags);
+	CHECK(queried);
+	CHECK_EQ(flags & HANDLE_FLAG_INHERIT, 0);
 #else
-	{
-		int flags;
-
-		flags = fcntl((int)first, F_GETFD);
-		CHECK(flags >= 0);
-		CHECK((flags & FD_CLOEXEC) != 0);
-		flags = fcntl((int)first, F_GETFL);
-		CHECK(flags >= 0);
-		CHECK((flags & O_NONBLOCK) != 0);
-	}
+	/* Ask for the descriptor flags (POSIX). */
+	flags = fcntl((int)first, F_GETFD);
+	CHECK(flags >= 0);
+	CHECK((flags & FD_CLOEXEC) != 0);
+	flags = fcntl((int)first, F_GETFL);
+	CHECK(flags >= 0);
+	CHECK((flags & O_NONBLOCK) != 0);
 #endif
 
 	/* A new waker is quiet; ringing makes it readable; draining makes it quiet. */
@@ -1772,11 +1930,13 @@ test_waker(
 				pthread_detach(watch_thread);
 			wb_os_waker_drain(backup);
 		}
+
 		/* The detached watchdogs ring the backup late; waits for them to finish before it is closed. */
 		sys_sleep(8500U);
 		wb_os_waker_close(backup);
 	}
 
+	/* Close the wakers. */
 	wb_os_waker_close(other);
 	wb_os_waker_close(waker);
 }
@@ -1800,6 +1960,7 @@ main(
 #endif
 	sys_start();
 
+	/* Run every test. */
 	test_resolve();
 	test_connect_arguments();
 	test_connect_flags();
@@ -1816,5 +1977,6 @@ main(
 	test_poll_many();
 	test_waker();
 
+	/* Report the count of failures. */
 	return check_finish("os-net");
 }

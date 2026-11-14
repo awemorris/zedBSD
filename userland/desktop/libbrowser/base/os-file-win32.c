@@ -256,6 +256,7 @@ wb_os_file_replace(
 	int directory;
 	unsigned long code;
 	HANDLE handle;
+	DWORD process;
 
 	/* Refuses bytes that are missing when some are to be written. */
 	if (bytes == NULL && length != 0)
@@ -289,7 +290,8 @@ wb_os_file_replace(
 		at += os_format_number(temporary + at, number);
 		temporary[at] = L'.';
 		at++;
-		at += os_format_number(temporary + at, (unsigned long)GetCurrentProcessId());
+		process = GetCurrentProcessId();
+		at += os_format_number(temporary + at, (unsigned long)process);
 		temporary[at] = L'\0';
 
 		/* Creates the file only if the name is unused. */
@@ -1290,6 +1292,7 @@ os_write_all(
 	size_t piece;
 	DWORD written;
 	int done;
+	int error;
 
 	/* Writes until nothing is left. */
 	cursor = (const unsigned char *)bytes;
@@ -1302,8 +1305,10 @@ os_write_all(
 		/* Writes one piece. */
 		written = 0;
 		done = WriteFile(handle, cursor, (DWORD)piece, &written, NULL);
-		if (done == 0)
-			return os_file_error_here();
+		if (done == 0) {
+			error = os_file_error_here();
+			return error;
+		}
 
 		/* A write that takes nothing would loop for ever. */
 		if (written == 0)
@@ -1369,7 +1374,8 @@ os_read_all(
 			code = GetLastError();
 			if (code == ERROR_HANDLE_EOF)
 				break;
-			return os_file_error_here();
+			error = os_file_error_here();
+			return error;
 		}
 
 		/* The end of the file. */
@@ -1525,6 +1531,7 @@ os_ensure_directory(
 	unsigned long code;
 	int created;
 	int directory;
+	int error;
 
 	/* Looks at what is there already. */
 	attributes = GetFileAttributesW(path);
@@ -1538,8 +1545,10 @@ os_ensure_directory(
 	code = GetLastError();
 
 	/* Any failure but "nothing there" is the system's refusal. */
-	if (code != ERROR_FILE_NOT_FOUND && code != ERROR_PATH_NOT_FOUND)
-		return wb_os_error_from_system(code);
+	if (code != ERROR_FILE_NOT_FOUND && code != ERROR_PATH_NOT_FOUND) {
+		error = wb_os_error_from_system(code);
+		return error;
+	}
 
 	/* Makes the directory. */
 	created = CreateDirectoryW(path, NULL);
@@ -1556,7 +1565,8 @@ os_ensure_directory(
 	}
 
 	/* Reports why the directory could not be made. */
-	return wb_os_error_from_system(code);
+	error = wb_os_error_from_system(code);
+	return error;
 }
 
 /*

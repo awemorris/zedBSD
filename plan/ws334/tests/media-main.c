@@ -69,6 +69,8 @@ main(
 		fprintf(stderr, "usage: media-tool FILE\n");
 		return 2;
 	}
+
+	/* The module's log goes to the tool. */
 	media_set_log(media_tool_log, NULL);
 
 	/* The two reads. */
@@ -99,6 +101,7 @@ media_tool_decoder(
 	unsigned count;
 	unsigned index;
 	int status;
+	int more;
 
 	/* The file and its first H.264 track. */
 	status = media_file_open(path, &file);
@@ -106,6 +109,8 @@ media_tool_decoder(
 		printf("media-tool: cannot open %s (%d)\n", path, status);
 		return 1;
 	}
+
+	/* The first H.264 track. */
 	count = media_file_track_count(file);
 	video = count;
 	for (index = 0U; index < count && video == count; index++) {
@@ -113,6 +118,8 @@ media_tool_decoder(
 		if (track != NULL && track->codec == MEDIA_CODEC_H264)
 			video = index;
 	}
+
+	/* The file has no such track. */
 	if (video == count) {
 		printf("media-tool: no H.264 track\n");
 		media_file_close(file);
@@ -134,7 +141,12 @@ media_tool_decoder(
 	}
 
 	/* The track's packets, a full decoder giving its pictures first; then the drain. */
-	while (!read.failed && media_file_read(file, &packet) == 0) {
+	for (;;) {
+		more = 0;
+		if (!read.failed)
+			more = media_file_read(file, &packet) == 0;
+		if (!more)
+			break;
 		if (packet.track != video)
 			continue;
 		status = media_decoder_send(read.decoder, &packet);
@@ -142,15 +154,21 @@ media_tool_decoder(
 			media_tool_take(&read);
 			status = media_decoder_send(read.decoder, &packet);
 		}
+
+		/* A send that failed ends the read. */
 		if (status != 0)
 			read.failed = 1;
 		media_tool_take(&read);
 	}
+
+	/* Drain the decoder: with no packet it gives what it still holds. */
 	status = media_decoder_send(read.decoder, NULL);
 	while (status == EAGAIN && !read.failed) {
 		media_tool_take(&read);
 		status = media_decoder_send(read.decoder, NULL);
 	}
+
+	/* Take the pictures the drain gave. */
 	media_tool_take(&read);
 
 	/* The count and the back end, then the decoder and the file let go. */
@@ -177,14 +195,23 @@ media_tool_take(
 	int width;
 	int height;
 	int status;
+	unsigned long long hash;
+	int more;
 
 	/* Each picture (sound is not asked for). */
-	while (!read->failed && media_decoder_receive(read->decoder, &time_us) == 1) {
+	for (;;) {
+		more = 0;
+		if (!read->failed)
+			more = media_decoder_receive(read->decoder, &time_us) == 1;
+		if (!more)
+			break;
 		frame = media_decoder_picture(read->decoder);
 		if (frame == NULL) {
 			read->failed = 1;
 			return;
 		}
+
+		/* Count the picture. */
 		read->pictures++;
 
 		/* One of the first: scaled to its own size and hashed. */
@@ -194,13 +221,18 @@ media_tool_take(
 			status = ENOMEM;
 			if (pixels != NULL)
 				status = media_frame_scale(frame, &read->scaler, pixels, (size_t)width * sizeof(*pixels), width, height);
-			if (status == 0)
-				printf("media-tool: picture %u %dx%d %016llx\n", read->pictures, width, height,
-				    (unsigned long long)media_tool_hash(pixels, (size_t)width * (size_t)height));
-			else
+			if (status == 0) {
+				hash = media_tool_hash(pixels, (size_t)width * (size_t)height);
+				printf("media-tool: picture %u %dx%d %016llx\n", read->pictures, width, height, hash);
+			} else {
 				read->failed = 1;
+			}
+
+			/* The pixels are not needed after the hash. */
 			free(pixels);
 		}
+
+		/* Give the picture back. */
 		media_frame_free(&frame);
 	}
 }
@@ -220,6 +252,7 @@ media_tool_engine(
 	int drawn;
 	int waits;
 	int error;
+	unsigned long long hash;
 
 	/* Opened on the engine's thread, without a wake (the program asks). */
 	error = media_engine_open(path, NULL, 0U, NULL, NULL, NULL, &engine);
@@ -227,11 +260,15 @@ media_tool_engine(
 		printf("media-tool: engine open failed (%d)\n", error);
 		return 1;
 	}
+
+	/* Wait while the engine opens. */
 	media_engine_status(engine, &status);
 	for (waits = 0; status.state == MEDIA_OPENING && waits < MEDIA_TOOL_SECONDS * 100; waits++) {
 		media_tool_pause();
 		media_engine_status(engine, &status);
 	}
+
+	/* The engine must be paused and have a size. */
 	if (status.state != MEDIA_PAUSED || status.width <= 0 || status.height <= 0) {
 		printf("media-tool: engine state %u error %d problem %d\n", status.state, status.error, status.problem);
 		media_engine_close(engine);
@@ -246,11 +283,16 @@ media_tool_engine(
 		if (!drawn)
 			media_tool_pause();
 	}
-	if (drawn)
-		printf("media-tool: engine %dx%d %016llx\n", status.width, status.height,
-		    (unsigned long long)media_tool_hash(pixels, (size_t)status.width * (size_t)status.height));
-	else
+
+	/* Print the hash of the picture, or say that none came. */
+	if (drawn) {
+		hash = media_tool_hash(pixels, (size_t)status.width * (size_t)status.height);
+		printf("media-tool: engine %dx%d %016llx\n", status.width, status.height, hash);
+	} else {
 		printf("media-tool: engine gave no picture\n");
+	}
+
+	/* Release the pixels and the engine. */
 	free(pixels);
 	media_engine_close(engine);
 
@@ -302,6 +344,7 @@ media_tool_pause(void)
 #else
 	struct timespec wait;
 
+	/* Wait ten milliseconds. */
 	wait.tv_sec = 0;
 	wait.tv_nsec = 10000000L;
 	nanosleep(&wait, NULL);

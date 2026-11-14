@@ -361,8 +361,10 @@ kl_socket_resolve(
 	found = NULL;
 	answer = GetAddrInfoW(name, NULL, &hints, &found);
 	free(name);
-	if (answer != 0)
-		return socket_resolve_error(answer);
+	if (answer != 0) {
+		error = socket_resolve_error(answer);
+		return error;
+	}
 
 	/* Each address of a family the interface knows, in the system's order, while there is room. */
 	for (entry = found; entry != NULL && *count < capacity; entry = entry->ai_next) {

@@ -49,6 +49,8 @@ main(
 		fprintf(stderr, "usage: theme-set light|dark\n");
 		return 2;
 	}
+
+	/* The theme asked for: dark unless the name is light. */
 	light = 0;
 	name = "dark";
 	differs = strcmp(argv[1], "light");

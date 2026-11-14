@@ -44,8 +44,26 @@
 
 機械の検査の今の数（style-check、対象の 103 file）は下の表。残りは「再開点」。
 
-## 再開点（残り、2026-11-15 P7）
+## 結果の続き（2026-11-15 P7 q2107-i01）
 
-- 試験の C（`plan/ws334/tests/unit/test-*.c`、`storage-test.c` ほか）: 段落の comment（約 470）、閉じ括弧の後の空行（約 230）、静的な関数の前方宣言（約 110、test-os-file・test-os-net・test-os-time・test-os-win32・test-os-system・test-queue）、関数の先頭の宣言でない宣言（約 75、test-wide が 42）、条件の中の関数（`strcmp`・`strlen`・`test_pattern` など約 100）。直し方は production と同じ。
-- `FAILED(...)`・`SUCCEEDED(...)`・`HIWORD(...)` は Windows の macro（値の比較）であり関数の呼び出しではないが、`style-check.py` は数える（production 約 35 件）。`(void)param;` の列と `is_local`（`files.c`）は検査の偽陽性。`goto cleanup`・`goto done`（`os-net-win32.c` 10、`socket-win32.c` 13）は共有の cleanup への前方への 1 回の jump で規約に合う。
-- 共有の file の WS334 の block（上の 4）と、`return f(...)` の直接の return・引数の中の入れ子の呼び出し・comment の意味の確かめ（機械で見えない規則）は、全 file を目で読む所までは進んでいない。
+直した物（動作・API・試験の期待の値は変えない）:
+
+- 試験の C（`plan/ws334/tests/*.c`・`unit/*.{c,h}`・`win32-posix.h`）の機械の検査: 1048 件 → 15 件（残りは `FAILED(...)`・`SUCCEEDED(...)` の macro）。内訳（前→後）: 段落の comment と閉じ括弧の後の空行 約 710 → 0（段落ごとに「何をするか」の comment を足した。長さ・件数が決まる箇所は中身を読んで書いた）、static 関数の前方宣言 約 110 → 0（`#ifdef` の分け方に合わせて包んだ）、関数の先頭でない宣言 約 75 → 0（先頭へ移し、初期値のある物は代入に）、条件の中の関数 約 130 → 0（変数へ。`&&`・`||` の短絡で守っていた物は入れ子の `if` で順序を保った）、条件演算子 24 → 0、`_local` の名前 2 → 0、複数行の本体 3 → 0。
+- 共有の file の WS334 の block: `net/loader.c`（閉じ括弧の後の空行 5・条件の中の関数 2・条件演算子 1 → 0）、`net/cache.c`（WS334 の file。閉じ括弧の後の空行・段落の comment・条件の中の関数 計 20 → 0。`goto corrupt` 7 は共有の cleanup への前方の jump）、`page/page.c` の `page_load_file` の後始末の空行と comment、`libmedia/engine.c` の open の後始末。`browser/shell/threads.c` は 0 件。`browser/main.c`・`libtruetype/companion.c` には WS334 の変更が無い（基点 15cd956cf から変わっていない、または他の WS の物）ので触れていない。`page.c`・`main.c` の他の WS の物の違反は記録だけ: `page.c` 約 40 件（call-in-condition 23・blank-after-brace 12 ほか）、`browser/main.c` 2 件、`companion.c` 5 件（blank-after-brace）、`engine.c` 他の WS の分は 0。
+- production の機械で見えない規則: `return f(...)` の直接の return 23 件（`error = f(...); return error;` に。`if (...) return f();` の形は波括弧を付けた）、引数の中の入れ子の呼び出し 約 15 件（`wb_buffer_string(&path)`・`strlen(...)`・`WSAGetLastError()`・`GetCurrentProcessId()`・`GetCommandLineW()` など。`MAKEWORD` は macro で残した）。
+- 対象の file の 3 件目 `apps/browser-win32/Makefile` の source の一覧との照合: 対象の production の `.c` 62 file の名前が全て `sources.mk` か Makefile に載っている（Makefile は変えていない）。
+
+目で読んだ範囲: 試験の C は、機械の検査が指した所の前後を読んで直し、足した comment は文脈から書いた（全文を 1 行ずつは読んでいない）。`net/loader.c`・`cache.c` は指された所の前後。production の `libbrowser/base/os*.c` ほかは、`return f(...)` と引数の入れ子の呼び出しの走査（grep と script）と直しまでで、comment の意味の読み直し（古い comment の訂正）は未実施（下の再開点）。
+
+試験（2026-11-15、worktree `/home/awe/zedBSD-worktrees/p7-ws334d`）:
+
+- `WIN32_ARCH="x86_64 aarch64" sh plan/ws334/tests/cross-build.sh`: PASS（両 arch の OmniGrammaton.exe が warning 0、import は system の DLL だけ）。
+- `sh plan/ws334/tests/run-unit.sh all`: PASS（posix 17 本・win32 19 本、test-os-win32 3143・test-platform-win32 315 を含む）。
+- `sh plan/ws334/tests/wine-run.sh`: PASS（`21 passed, 0 failed, 8 not run (a real Windows)`。前の P7 の 2 FAIL は出なかった）。
+- `sh plan/ws074/tests/host-build.sh plain`: 全 target built、出力の warning は 0 行。
+- 途中で titlebar.c の波括弧の無い `if` に 3 文を入れてしまい cross-build が FAIL したのを、波括弧を付けて直し、cross-build を流し直して PASS（unit の win32 は titlebar.c を含まないため通っていた）。
+
+## 再開点（残り、2026-11-15 P7 q2107-i01）
+
+- production の file の comment の意味の読み直し（古い comment の訂正、開発の管理情報の残り）を全文で。`style-check.py` が数えない物（`FAILED(...)`・`SUCCEEDED(...)`・`HIWORD(...)` は Windows の macro で関数の呼び出しではない、`(void)param;` の列と `is_local` は偽陽性、`goto cleanup`・`goto done`・`goto corrupt` は共有の cleanup への前方の 1 回の jump で規約に合う）は残してよい。
+- 他の WS の物で記録だけにした違反: `libbrowser/page/page.c` 約 40 件、`browser/main.c` 2 件、`libtruetype/companion.c` 5 件。

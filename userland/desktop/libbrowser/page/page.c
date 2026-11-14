@@ -468,6 +468,8 @@ page_load_file(
 		/* A path the system cannot resolve stays as it was given. */
 		page->base = strdup(path);
 	}
+
+	/* The resolved path is not needed any more. */
 	wb_buffer_release(&full);
 	if (page->base == NULL)
 		return ENOMEM;

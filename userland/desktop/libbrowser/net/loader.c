@@ -674,11 +674,15 @@ loader_start(
 				made->body_length = send->body_length;
 			}
 		}
+
+		/* A copy that could not be made fails the request. */
 		if ((send->method != NULL && made->method == NULL) || (send->headers != NULL && made->headers == NULL)
 		    || (send->body != NULL && send->body_length > 0 && made->body == NULL)) {
 			loader_free(made);
 			return ENOMEM;
 		}
+
+		/* Whether a body was given, even an empty one. */
 		made->has_body = send->body != NULL;
 	}
 
@@ -980,6 +984,8 @@ net_loader_client_close(
 			break;
 		}
 	}
+
+	/* The client is gone. */
 	loader->client_count--;
 
 	wb_mutex_unlock(&loader->lock);
@@ -1199,6 +1205,7 @@ net_loader_client_dispatch_until(
 	struct net_request *taken;
 	struct net_request *request;
 	struct net_request *last;
+	uint64_t now;
 
 	/* The ended requests, all of them, each with whether it was aborted, and the client is told of the next news again. */
 	loader = client->loader;
@@ -1233,7 +1240,8 @@ net_loader_client_dispatch_until(
 		loader_free(request);
 
 		/* Past the deadline the rest wait. */
-		if (taken != NULL && wb_os_monotonic_ns() >= deadline)
+		now = wb_os_monotonic_ns();
+		if (taken != NULL && now >= deadline)
 			break;
 	}
 
@@ -1774,8 +1782,12 @@ loader_publish(
 			told[told_count] = client;
 			told_count++;
 		}
+
+		/* Told or not, the client has its news. */
 		client->notified = 1;
 	}
+
+	/* A client that waits for the news wakes. */
 	wb_cond_broadcast(&loader->changed);
 
 	wb_mutex_unlock(&loader->lock);
@@ -1960,6 +1972,8 @@ loader_begin(
 		if (entry == NULL)
 			entry = loader_cache_load(loader, wb_buffer_string(&url));
 	}
+
+	/* Whether the entry may be used as it is. */
 	wb_buffer_release(&url);
 	fresh = loader_cache_fresh(entry, now);
 	if (fresh) {
@@ -2376,6 +2390,7 @@ loader_finish(
 	struct net_url next;
 	int redirected;
 	int is_web;
+	int post;
 	int error;
 
 	/* The connection goes back to the pool when the response left it open, else it is closed. */
@@ -2448,8 +2463,10 @@ loader_finish(
 	}
 
 	/* A 303, or a 301 or 302 of a POST, is asked again with GET and no body; the others keep their method. */
-	if (request->response.status == 303 || ((request->response.status == 301 || request->response.status == 302)
-	    && request->method != NULL && strcmp(request->method, "POST") == 0)) {
+	post = 0;
+	if (request->method != NULL)
+		post = strcmp(request->method, "POST") == 0;
+	if (request->response.status == 303 || ((request->response.status == 301 || request->response.status == 302) && post)) {
 		free(request->method);
 		request->method = NULL;
 		free(request->body);
@@ -2669,7 +2686,14 @@ loader_prepare(
 	wb_buffer_clear(&request->request);
 	send.method = request->method;
 	send.headers = request->headers;
-	send.body = request->has_body ? (request->body != NULL ? request->body : (const unsigned char *)"") : NULL;
+	send.body = NULL;
+	if (request->has_body) {
+		send.body = (const unsigned char *)"";
+		if (request->body != NULL)
+			send.body = request->body;
+	}
+
+	/* The text of the request. */
 	send.body_length = request->body_length;
 	error = net_http_request_text_send(request->loader->cookies, &request->url, &request->request, 1, lines, request->kind, &send);
 	wb_buffer_release(&extra);

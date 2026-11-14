@@ -110,12 +110,15 @@ main(
 	int argc,
 	char **argv)
 {
+	int different;
+
 	/* The harness names the system; this layer is Windows only. */
 	CHECK(argc == 2);
 	if (argc != 2)
 		return check_finish("platform-win32");
-	CHECK(strcmp(argv[1], "win32") == 0);
-	if (strcmp(argv[1], "win32") != 0)
+	different = strcmp(argv[1], "win32");
+	CHECK(different == 0);
+	if (different != 0)
 		return check_finish("platform-win32");
 
 	/* Runs the groups. */
@@ -180,6 +183,7 @@ test_open(void)
 	CHECK(SetEvent(event) != 0);
 	CHECK(ResetEvent(event) != 0);
 
+	/* Close the wake. */
 	keiui_wake_close(&wake);
 }
 
@@ -195,6 +199,7 @@ test_ring_clear(void)
 	DWORD waited;
 	int error;
 
+	/* Open a wake. */
 	error = keiui_wake_open(&wake);
 	CHECK_EQ(error, 0);
 	if (error != 0)
@@ -244,6 +249,7 @@ test_ring_clear(void)
 	waited = WaitForSingleObject(event, 0);
 	CHECK_EQ(waited, WAIT_TIMEOUT);
 
+	/* Close the wake. */
 	keiui_wake_close(&wake);
 }
 
@@ -258,6 +264,7 @@ test_independent(void)
 	DWORD waited;
 	int error;
 
+	/* Open the first wake. */
 	error = keiui_wake_open(&first);
 	CHECK_EQ(error, 0);
 	if (error != 0)
@@ -284,6 +291,7 @@ test_independent(void)
 	waited = WaitForSingleObject((HANDLE)first.event, 0);
 	CHECK_EQ(waited, WAIT_OBJECT_0);
 
+	/* Close the wakes. */
 	keiui_wake_close(&first);
 	keiui_wake_close(&second);
 }
@@ -302,6 +310,7 @@ test_cross_thread(void)
 	DWORD waited;
 	int error;
 
+	/* Open a wake. */
 	error = keiui_wake_open(&wake);
 	CHECK_EQ(error, 0);
 	if (error != 0)
@@ -319,11 +328,13 @@ test_cross_thread(void)
 		if (error != 0)
 			break;
 
+		/* The ring from the thread is seen. */
 		waited = WaitForSingleObject((HANDLE)wake.event, WAIT_LIMIT);
 		CHECK_EQ(waited, WAIT_OBJECT_0);
 		keiui_thread_join(thread);
 	}
 
+	/* Close the wake. */
 	keiui_wake_close(&wake);
 }
 
@@ -341,6 +352,7 @@ test_many_waiters(void)
 	keiui_thread_id second_thread;
 	int error;
 
+	/* Open a wake. */
 	error = keiui_wake_open(&wake);
 	CHECK_EQ(error, 0);
 	if (error != 0)
@@ -360,6 +372,7 @@ test_many_waiters(void)
 		return;
 	}
 
+	/* Start two threads that wait on the wake. */
 	error = keiui_thread_start_joined(wait_thread, &first, &first_thread);
 	CHECK_EQ(error, 0);
 	error = keiui_thread_start_joined(wait_thread, &second, &second_thread);
@@ -371,11 +384,13 @@ test_many_waiters(void)
 	Sleep(50);
 	keiui_wake_ring(&wake);
 
+	/* Both threads come back. */
 	keiui_thread_join(first_thread);
 	keiui_thread_join(second_thread);
 	CHECK_EQ(first.waited, WAIT_OBJECT_0);
 	CHECK_EQ(second.waited, WAIT_OBJECT_0);
 
+	/* Release the handles and the wake. */
 	CloseHandle(first.started);
 	CloseHandle(second.started);
 	keiui_wake_close(&wake);
@@ -394,6 +409,7 @@ test_close(void)
 	BOOL got;
 	int error;
 
+	/* Open a wake. */
 	error = keiui_wake_open(&wake);
 	CHECK_EQ(error, 0);
 	if (error != 0)
@@ -469,6 +485,8 @@ test_lock(void)
 		keiui_lock_close(&lock);
 		return;
 	}
+
+	/* The second thread counts too. */
 	error = keiui_thread_start_joined(count_thread, &job, &second);
 	CHECK_EQ(error, 0);
 	if (error != 0) {
@@ -476,12 +494,15 @@ test_lock(void)
 		keiui_lock_close(&lock);
 		return;
 	}
+
+	/* Wait for both threads. */
 	keiui_thread_join(first);
 	keiui_thread_join(second);
 
 	/* Every increment of both counted. */
 	CHECK_EQ(job.counter, 2L * LOCK_ROUNDS);
 
+	/* Close the lock. */
 	keiui_lock_close(&lock);
 }
 
@@ -498,6 +519,7 @@ test_lock_blocks(void)
 	DWORD result;
 	int error;
 
+	/* Open a lock. */
 	error = keiui_lock_open(&lock);
 	CHECK_EQ(error, 0);
 	if (error != 0)
@@ -516,6 +538,8 @@ test_lock_blocks(void)
 		keiui_lock_close(&lock);
 		return;
 	}
+
+	/* Wait until the thread has started, then give it time to reach the lock. */
 	result = wait_flag(&job.started);
 	CHECK_EQ(result, WAIT_OBJECT_0);
 	Sleep(200);
@@ -562,6 +586,7 @@ test_threads(void)
 	if (job.ready == NULL || job.release == NULL)
 		return;
 
+	/* Start the thread that reports its own identity. */
 	error = keiui_thread_start_joined(identity_thread, &job, &thread);
 	CHECK_EQ(error, 0);
 	if (error != 0) {
@@ -586,6 +611,7 @@ test_threads(void)
 	CHECK_EQ(job.parent_is_not_self, 1);
 	CHECK(job.own.number == thread.number);
 
+	/* Release the events. */
 	CloseHandle(job.ready);
 	CloseHandle(job.release);
 }
@@ -600,12 +626,14 @@ test_detached(void)
 	DWORD waited;
 	int error;
 
+	/* A job for the detached thread, and an event it sets when done. */
 	job.seen = 0;
 	job.done = CreateEventW(NULL, TRUE, FALSE, NULL);
 	CHECK(job.done != NULL);
 	if (job.done == NULL)
 		return;
 
+	/* Start the detached thread. */
 	error = keiui_thread_start(detached_thread, &job);
 	CHECK_EQ(error, 0);
 	if (error != 0) {
@@ -618,6 +646,7 @@ test_detached(void)
 	CHECK_EQ(waited, WAIT_OBJECT_0);
 	CHECK_EQ(job.seen, 42);
 
+	/* Release the event. */
 	CloseHandle(job.done);
 }
 
@@ -631,9 +660,11 @@ test_refusals(void)
 	keiui_thread_id thread;
 	int error;
 
+	/* Without a function nothing starts. */
 	error = keiui_thread_start(NULL, NULL);
 	CHECK_EQ(error, EINVAL);
 
+	/* Without a function nothing starts and the identity stays empty. */
 	thread.number = 0;
 	thread.handle = NULL;
 	error = keiui_thread_start_joined(NULL, NULL, &thread);
@@ -641,6 +672,7 @@ test_refusals(void)
 	CHECK_EQ(thread.number, 0);
 	CHECK(thread.handle == NULL);
 
+	/* Without a place for the identity nothing starts. */
 	error = keiui_thread_start_joined(idle_thread, NULL, NULL);
 	CHECK_EQ(error, EINVAL);
 }
@@ -687,11 +719,13 @@ ring_thread(
 {
 	struct wake_job *job;
 
+	/* Take the job from the argument. */
 	job = (struct wake_job *)argument;
 	if (job->delay != 0)
 		Sleep(job->delay);
 	keiui_wake_ring(job->wake);
 
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -704,10 +738,12 @@ wait_thread(
 {
 	struct wake_job *job;
 
+	/* Take the job, say that the thread started, and wait for the wake. */
 	job = (struct wake_job *)argument;
 	SetEvent(job->started);
 	job->waited = WaitForSingleObject((HANDLE)keiui_wake_event(job->wake), WAIT_LIMIT);
 
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -721,6 +757,7 @@ count_thread(
 	struct lock_job *job;
 	long round;
 
+	/* Take the job and take the lock many times. */
 	job = (struct lock_job *)argument;
 	for (round = 0; round < LOCK_ROUNDS; round++) {
 		keiui_lock_take(job->lock);
@@ -728,6 +765,7 @@ count_thread(
 		keiui_lock_give(job->lock);
 	}
 
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -740,12 +778,14 @@ take_thread(
 {
 	struct lock_job *job;
 
+	/* Say that the thread started, then take the lock, which another thread holds. */
 	job = (struct lock_job *)argument;
 	InterlockedExchange(&job->started, 1);
 	keiui_lock_take(job->lock);
 	InterlockedExchange(&job->got, 1);
 	keiui_lock_give(job->lock);
 
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -758,15 +798,19 @@ identity_thread(
 	void *argument)
 {
 	struct identity_job *job;
+	int parent_is_self;
 
+	/* Take the job and record the thread's own identity. */
 	job = (struct identity_job *)argument;
 	job->own = keiui_thread_self();
 	job->own_is_self = keiui_thread_is(job->own);
-	if (keiui_thread_is(job->parent) == 0)
+	parent_is_self = keiui_thread_is(job->parent);
+	if (parent_is_self == 0)
 		job->parent_is_not_self = 1;
 	SetEvent(job->ready);
 	WaitForSingleObject(job->release, WAIT_LIMIT);
 
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -779,10 +823,12 @@ detached_thread(
 {
 	struct detached_job *job;
 
+	/* Record that the thread ran, and say so. */
 	job = (struct detached_job *)argument;
 	job->seen = 42;
 	SetEvent(job->done);
 
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -795,6 +841,7 @@ idle_thread(
 {
 	(void)argument;
 
+	/* The thread does nothing. */
 	return NULL;
 }
 
@@ -812,6 +859,7 @@ name_thread(
 	WCHAR expected[NAME_UNITS_MAX + 1U];
 	unsigned index;
 
+	/* Take the job from the argument. */
 	job = (const struct name_job *)argument;
 
 	/* A short name is the UTF-16 of itself. */
@@ -825,6 +873,8 @@ name_thread(
 		boundary[index] = 'b';
 		expected[index] = L'b';
 	}
+
+	/* End the texts. */
 	boundary[63] = '\0';
 	expected[63] = L'\0';
 	name_expect(job, boundary, expected, 63U);
@@ -844,6 +894,8 @@ name_thread(
 		cut[2U + index * 3U] = (char)0x81;
 		cut[3U + index * 3U] = (char)0x82;
 	}
+
+	/* End the text. */
 	cut[91] = '\0';
 	expected[0] = L'a';
 	for (index = 0; index < 20U; index++)
@@ -857,6 +909,8 @@ name_thread(
 		cut[62U + index * 2U] = (char)0xC3;
 		cut[63U + index * 2U] = (char)0xA9;
 	}
+
+	/* End the text. */
 	cut[72] = '\0';
 	for (index = 0; index < 62U; index++)
 		expected[index] = L'd';
@@ -872,6 +926,7 @@ name_thread(
 	keiui_thread_name(NULL);
 	name_expect(job, "after-null", L"after-null", 10U);
 
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -901,6 +956,7 @@ name_expect(
 	if (job->get == NULL)
 		return;
 
+	/* Ask the system for the thread's name. */
 	status = job->get(GetCurrentThread(), &read);
 	CHECK(SUCCEEDED(status));
 	if (!SUCCEEDED(status))
@@ -916,6 +972,8 @@ name_expect(
 		wcsncpy(previous, read, NAME_UNITS_MAX);
 		previous[NAME_UNITS_MAX] = L'\0';
 	}
+
+	/* Release the system's string. */
 	LocalFree(read);
 }
 
@@ -937,5 +995,6 @@ wait_flag(
 		Sleep(1);
 	}
 
+	/* The flag did not come up in time. */
 	return WAIT_TIMEOUT;
 }

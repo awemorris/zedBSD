@@ -212,6 +212,7 @@ test_count(
 {
 	unsigned *count;
 
+	/* The key is not needed. */
 	(void)key;
 
 	/* One more. */

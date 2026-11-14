@@ -1171,6 +1171,7 @@ window_key(
 	MSG next;
 	BOOL found;
 	int complete;
+	unsigned held;
 
 	/* A key the input method takes is its own. */
 	if (wparam == VK_PROCESSKEY)
@@ -1211,7 +1212,8 @@ window_key(
 			text[0] = '\0';
 			if (count != 0U)
 				(void)keiui_win32_utf8_from_utf16(units, count, text, sizeof(text), NULL);
-			(void)keiui_win32_field_key(window, code, window_modifiers(), text);
+			held = window_modifiers();
+			(void)keiui_win32_field_key(window, code, held, text);
 		}
 
 		/* Stops here: the field took the key. */

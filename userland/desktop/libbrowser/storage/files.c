@@ -287,6 +287,7 @@ files_read(
 	size_t piece;
 	int valid;
 	int error;
+	const char *path_text;
 
 	/* Refuses a place to report to that is missing. */
 	if (found == NULL)
@@ -321,7 +322,8 @@ files_read(
 	}
 
 	/* Reads the file whole. */
-	error = wb_os_file_read(wb_buffer_string(&path), &bytes);
+	path_text = wb_buffer_string(&path);
+	error = wb_os_file_read(path_text, &bytes);
 	wb_buffer_release(&path);
 
 	/* A missing file, or a missing space directory, is a record that is not there. */
@@ -377,6 +379,7 @@ files_write(
 	struct wb_buffer path;
 	int valid;
 	int error;
+	const char *path_text;
 
 	/* Refuses arguments that are missing. */
 	if (context == NULL)
@@ -403,7 +406,8 @@ files_write(
 	}
 
 	/* Makes the directories the record's file lives in. */
-	error = wb_os_make_directories(wb_buffer_string(&path));
+	path_text = wb_buffer_string(&path);
+	error = wb_os_make_directories(path_text);
 	if (error != 0) {
 		wb_buffer_release(&path);
 		return error;
@@ -418,7 +422,8 @@ files_write(
 	}
 
 	/* Replaces the file, so a reader or a crash sees the old bytes or the new bytes in full. */
-	error = wb_os_file_replace(wb_buffer_string(&path), bytes, length);
+	path_text = wb_buffer_string(&path);
+	error = wb_os_file_replace(path_text, bytes, length);
 	wb_buffer_release(&path);
 	if (error != 0)
 		return error;
@@ -586,6 +591,7 @@ files_walk(
 	struct files_walk walk;
 	struct wb_buffer path;
 	int error;
+	const char *path_text;
 
 	/* Starts an empty buffer for the path. */
 	wb_buffer_init(&path);
@@ -604,7 +610,8 @@ files_walk(
 	walk.each_context = each_context;
 
 	/* Visits every name in the directory. */
-	error = wb_os_list(wb_buffer_string(&path), files_walk_entry, &walk);
+	path_text = wb_buffer_string(&path);
+	error = wb_os_list(path_text, files_walk_entry, &walk);
 	wb_buffer_release(&path);
 
 	/* The caller's own stop value wins, whatever number it is. */
@@ -688,6 +695,7 @@ files_remove_record(
 {
 	struct wb_buffer path;
 	int error;
+	const char *path_text;
 
 	/* Starts an empty buffer for the path. */
 	wb_buffer_init(&path);
@@ -700,7 +708,8 @@ files_remove_record(
 	}
 
 	/* Removes the file. */
-	error = wb_os_file_remove(wb_buffer_string(&path));
+	path_text = wb_buffer_string(&path);
+	error = wb_os_file_remove(path_text);
 	wb_buffer_release(&path);
 
 	/* A record that was not there, or whose space directory was not, is already removed. */

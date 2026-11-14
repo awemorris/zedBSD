@@ -39,6 +39,7 @@ wWinMain(
 	int count;
 	int handed;
 	int status;
+	LPWSTR command_line;
 
 	/* The program reads the command line itself as wide text, so it uses none of the start-up parameters. */
 	(void)instance;
@@ -51,7 +52,8 @@ wWinMain(
 
 	/* The command line's words, in UTF-8. */
 	count = 0;
-	wide = CommandLineToArgvW(GetCommandLineW(), &count);
+	command_line = GetCommandLineW();
+	wide = CommandLineToArgvW(command_line, &count);
 	if (wide == NULL)
 		return 1;
 	arguments = main_arguments(count, wide);

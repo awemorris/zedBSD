@@ -135,6 +135,7 @@ test_exact_16(void)
 	out = (unsigned char *)1;
 	length = 99;
 
+	/* Write the icon. */
 	error = ico_write(&image, 1, &out, &length);
 	CHECK_EQ(error, 0);
 	CHECK(out != NULL);
@@ -171,8 +172,12 @@ test_exact_16(void)
 				if ((pixel >> 24) == 0U)
 					expected_byte |= 0x80U >> bit_mask;
 			}
+
+			/* The mask byte has a bit set for each transparent pixel. */
 			CHECK_EQ(out[at + x / 8], expected_byte);
 		}
+
+		/* The padding of the mask row is zero. */
 		CHECK_EQ(out[at + 2], 0);
 		CHECK_EQ(out[at + 3], 0);
 	}
@@ -181,6 +186,7 @@ test_exact_16(void)
 	CHECK((pixel_at(2, 0, 1U) >> 24) == 0U);
 	CHECK((pixel_at(1, 0, 1U) >> 24) != 0U);
 
+	/* Release the icon. */
 	free(out);
 }
 
@@ -247,9 +253,11 @@ test_stride(void)
 	if (wide == NULL)
 		return;
 
+	/* Fill the wide buffer with a mark, so that the padding shows if it is read. */
 	for (index = 0; index < 5U * 12U; index++)
 		wide[index] = 0xFEDCBA98U;
 
+	/* Draw the picture into the wide buffer. */
 	for (y = 0; y < 5; y++) {
 		for (x = 0; x < 7; x++) {
 			wide[y * 12U + x] = pixel_at(x, y, 4U);
@@ -257,6 +265,7 @@ test_stride(void)
 		}
 	}
 
+	/* Describe the picture: 7 by 5 pixels. */
 	memset(&image, 0, sizeof(image));
 	image.width = 7;
 	image.height = 5;
@@ -265,11 +274,13 @@ test_stride(void)
 	error = ico_write(&image, 1, &tight_out, &tight_length);
 	CHECK_EQ(error, 0);
 
+	/* The same picture read through a wider stride. */
 	image.pixels = wide;
 	image.stride = 12;
 	error = ico_write(&image, 1, &wide_out, &wide_length);
 	CHECK_EQ(error, 0);
 
+	/* Both icons have the same size and the same bytes. */
 	CHECK(tight_out != NULL);
 	CHECK(wide_out != NULL);
 	if (tight_out != NULL && wide_out != NULL) {
@@ -278,6 +289,7 @@ test_stride(void)
 		CHECK(memcmp(tight_out, wide_out, tight_length) == 0);
 	}
 
+	/* Release the icons. */
 	free(tight_out);
 	free(wide_out);
 
@@ -289,6 +301,7 @@ test_stride(void)
 	if (wide == NULL)
 		return;
 
+	/* Fill only the pixels that lie within the allocation. */
 	for (y = 0; y < 5; y++) {
 		for (x = 0; x < 7; x++) {
 			if (y * 12U + x < 4U * 12U + 7U)
@@ -296,6 +309,7 @@ test_stride(void)
 		}
 	}
 
+	/* Write the icon from the short buffer. */
 	image.pixels = wide;
 	image.stride = 12;
 	error = ico_write(&image, 1, &wide_out, &wide_length);
@@ -322,6 +336,7 @@ test_png_entry(void)
 	size_t length;
 	int error;
 
+	/* Make a PNG image of 256 by 256. */
 	make_png(png, sizeof(png), 0x5A);
 	memset(&image, 0, sizeof(image));
 	image.width = 256;
@@ -329,6 +344,7 @@ test_png_entry(void)
 	image.png = png;
 	image.png_length = sizeof(png);
 
+	/* Write the PNG icon. */
 	error = ico_write(&image, 1, &out, &length);
 	CHECK_EQ(error, 0);
 	CHECK(out != NULL);
@@ -355,6 +371,7 @@ test_png_entry(void)
 	pair[1].png = small_png;
 	pair[1].png_length = sizeof(small_png);
 
+	/* Write the pair. */
 	error = ico_write(pair, 2, &out, &length);
 	CHECK_EQ(error, 0);
 	CHECK(out != NULL);
@@ -417,6 +434,7 @@ test_eight_sizes(void)
 	int error;
 	int read_error;
 
+	/* A PNG and seven small pictures of growing sizes. */
 	make_png(png, sizeof(png), 0x33);
 	memset(images, 0, sizeof(images));
 
@@ -427,6 +445,7 @@ test_eight_sizes(void)
 		if (pixels[index] == NULL)
 			return;
 
+		/* Make the pixels and the entries of the seven small images. */
 		make_pixels(pixels[index], sizes[index], sizes[index], sizes[index], index + 10U);
 		images[index].width = sizes[index];
 		images[index].height = sizes[index];
@@ -434,11 +453,13 @@ test_eight_sizes(void)
 		images[index].stride = sizes[index];
 	}
 
+	/* The eighth image is the PNG. */
 	images[7].width = 256;
 	images[7].height = 256;
 	images[7].png = png;
 	images[7].png_length = sizeof(png);
 
+	/* Write the eight images. */
 	error = ico_write(images, 8, &out, &length);
 	CHECK_EQ(error, 0);
 	CHECK(out != NULL);
@@ -456,6 +477,7 @@ test_eight_sizes(void)
 	/* The total: the directory, the seven bitmaps and the PNG. */
 	CHECK_EQ(length, 6 + 16 * 8 + 42888 + 1000);
 
+	/* Read each image back and check where it lies in the file. */
 	for (index = 0; index < 8; index++) {
 		read_error = read_image(out, length, index, &found);
 		CHECK_EQ(read_error, 0);
@@ -485,6 +507,7 @@ test_eight_sizes(void)
 			CHECK(memcmp(out + found.offset, png, sizeof(png)) == 0);
 		}
 
+		/* The next image starts where this one ends. */
 		expected_offset += found.length;
 		free_read(&found);
 	}
@@ -492,6 +515,7 @@ test_eight_sizes(void)
 	/* The last image ends exactly at the end of the file. */
 	CHECK_EQ(expected_offset, length);
 
+	/* Release the icon and the pixels. */
 	free(out);
 	for (index = 0; index < 7; index++)
 		free(pixels[index]);
@@ -511,12 +535,14 @@ test_count_limits(void)
 	unsigned index;
 	int error;
 
+	/* A picture of one pixel for each of 256 images. */
 	pixel = 0x80102030U;
 	images = (struct ico_image *)calloc(256U, sizeof(*images));
 	CHECK(images != NULL);
 	if (images == NULL)
 		return;
 
+	/* Fill in each entry. */
 	for (index = 0; index < 256; index++) {
 		images[index].width = 1;
 		images[index].height = 1;
@@ -546,6 +572,7 @@ test_count_limits(void)
 	check_refused(images, 256);
 	check_refused(images, 1000);
 
+	/* Release the images. */
 	free(images);
 }
 
@@ -566,6 +593,7 @@ test_errors(void)
 	unsigned index;
 	int error;
 
+	/* Pixels and a PNG for the refused cases. */
 	make_pixels(pixels, 16, 16, 16, 2U);
 	make_png(png, sizeof(png), 1);
 
@@ -582,11 +610,13 @@ test_errors(void)
 	CHECK(out == NULL);
 	CHECK_EQ(length, 0);
 
+	/* Without a place for the bytes the call is refused and the length is zero. */
 	length = 5;
 	error = ico_write(&image, 1, NULL, &length);
 	CHECK_EQ(error, EINVAL);
 	CHECK_EQ(length, 0);
 
+	/* Without a place for the length the call is refused and the bytes are NULL. */
 	out = (unsigned char *)pixels;
 	error = ico_write(&image, 1, &out, NULL);
 	CHECK_EQ(error, EINVAL);
@@ -607,6 +637,7 @@ test_errors(void)
 	check_refused(&image, 1);
 	image.width = 16;
 
+	/* An image of width 0 is refused. */
 	memset(&pair[0], 0, sizeof(pair[0]));
 	pair[0].width = 0;
 	pair[0].height = 16;
@@ -664,6 +695,7 @@ test_errors(void)
 		pair[0].png_length = sizeof(png);
 		check_refused(&pair[0], 1);
 
+		/* A refused image after a good one refuses the whole call. */
 		pair[1] = pair[0];
 		pair[0] = image;
 		check_refused(pair, 2);
@@ -697,6 +729,7 @@ test_large_sizes(void)
 	if (sizeof(size_t) <= 4U)
 		return;
 
+	/* Make a PNG and a pair of images to refuse. */
 	make_png(png, sizeof(png), 0);
 	memset(pair, 0, sizeof(pair));
 	pair[0].width = 256;
@@ -738,12 +771,14 @@ test_alpha_zero(void)
 	int error;
 	int read_error;
 
+	/* A picture of 2 by 2 pixels. */
 	memset(&image, 0, sizeof(image));
 	image.width = 2;
 	image.height = 2;
 	image.pixels = pixels;
 	image.stride = 2;
 
+	/* Write the icon. */
 	error = ico_write(&image, 1, &out, &length);
 	CHECK_EQ(error, 0);
 	CHECK(out != NULL);
@@ -779,6 +814,7 @@ test_alpha_zero(void)
 	CHECK_EQ(out[84], 0);
 	CHECK_EQ(out[85], 0);
 
+	/* Read the image back. */
 	read_error = read_image(out, length, 0, &found);
 	CHECK_EQ(read_error, 0);
 	if (read_error == 0) {
@@ -789,9 +825,12 @@ test_alpha_zero(void)
 			CHECK(found.pixels[2] == 0xFF0A0B0CU);
 			CHECK(found.pixels[3] == 0x00000000U);
 		}
+
+		/* Release the image that was read. */
 		free_read(&found);
 	}
 
+	/* Release the icon. */
 	free(out);
 }
 
@@ -843,6 +882,7 @@ pixel_at(
 	if ((x + y + seed) % 3U == 0U)
 		alpha = 0;
 
+	/* The color of a pixel depends on its place and the seed. */
 	red = (x * 16U + seed) & 0xFFU;
 	green = (y * 13U + 7U) & 0xFFU;
 	blue = (x + 3U * y + seed * 5U) & 0xFFU;
@@ -922,15 +962,23 @@ read_image(
 	uint32_t from_top;
 	unsigned bit;
 	size_t at;
+	unsigned long header_size;
+	unsigned entries;
+	unsigned reserved;
+	unsigned kind;
 
+	/* No answer yet. */
 	memset(found, 0, sizeof(*found));
 
 	/* The directory header. */
 	if (length < 6U + 16U * (size_t)(index + 1U))
 		return EINVAL;
-	if (get_u16(file) != 0U || get_u16(file + 2) != 1U)
+	reserved = get_u16(file);
+	kind = get_u16(file + 2);
+	if (reserved != 0U || kind != 1U)
 		return EINVAL;
-	if (index >= get_u16(file + 4))
+	entries = get_u16(file + 4);
+	if (index >= entries)
 		return EINVAL;
 
 	/* The entry. */
@@ -946,6 +994,7 @@ read_image(
 	if (found->offset > length || found->length > length - found->offset)
 		return EINVAL;
 
+	/* The image's data. */
 	image = file + found->offset;
 
 	/* A PNG begins with the signature. */
@@ -957,7 +1006,8 @@ read_image(
 	/* A bitmap's header: size 40, width, doubled height, planes 1, 32 bits, no compression. */
 	if (found->length < 40U)
 		return EINVAL;
-	if (get_u32(image) != 40U)
+	header_size = get_u32(image);
+	if (header_size != 40U)
 		return EINVAL;
 	found->width = (uint32_t)get_u32(image + 4);
 	header_height = get_u32(image + 8);
@@ -989,6 +1039,7 @@ read_image(
 	if (found->length != 40UL + found->width * found->height * 4UL + mask_row * found->height)
 		return EINVAL;
 
+	/* Get room for the pixels. */
 	found->pixels = (uint32_t *)malloc((size_t)found->width * found->height * sizeof(uint32_t));
 	if (found->pixels == NULL)
 		return EINVAL;
@@ -1021,6 +1072,7 @@ read_image(
 		}
 	}
 
+	/* The image was read. */
 	return 0;
 }
 
@@ -1058,11 +1110,13 @@ check_round_trip(
 	int read_error;
 	unsigned long size_field;
 
+	/* A picture of the size. */
 	pixels = (uint32_t *)malloc(stride * height * sizeof(uint32_t));
 	CHECK(pixels != NULL);
 	if (pixels == NULL)
 		return;
 
+	/* Make its pixels and describe it. */
 	make_pixels(pixels, width, height, stride, width + height);
 	memset(&image, 0, sizeof(image));
 	image.width = width;
@@ -1070,6 +1124,7 @@ check_round_trip(
 	image.pixels = pixels;
 	image.stride = stride;
 
+	/* Write the icon. */
 	error = ico_write(&image, 1, &out, &length);
 	CHECK_EQ(error, 0);
 	CHECK(out != NULL);
@@ -1078,6 +1133,7 @@ check_round_trip(
 		return;
 	}
 
+	/* The length is the headers, the bitmap and the mask. */
 	CHECK_EQ(length, 22 + bitmap_bytes);
 	read_error = read_image(out, length, 0, &found);
 	CHECK_EQ(read_error, 0);
@@ -1097,9 +1153,11 @@ check_round_trip(
 			}
 		}
 
+		/* Release the image that was read. */
 		free_read(&found);
 	}
 
+	/* Release the icon and the pixels. */
 	free(out);
 	free(pixels);
 }

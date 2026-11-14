@@ -97,6 +97,24 @@ static const struct code_row socket_rows[] = {
 static wchar_t sentinel_wide[2];
 static char sentinel_text[2];
 
+static int expected_for(const struct code_row *rows, size_t count, unsigned long code);
+static void test_error_from_system(void);
+static void test_error_from_socket(void);
+static void expect_wide(const char *text, const unsigned short *units, size_t count);
+static void expect_wide_error(const char *text, int expected);
+static int reference_valid(const unsigned char *bytes, size_t count, unsigned long *value);
+static void sweep_one(const unsigned char *bytes, size_t count, unsigned *failures);
+static void test_utf8_sweeps(void);
+static void test_utf8_round_trip(void);
+static void test_wide_from_utf8(void);
+static void expect_text(const wchar_t *wide, size_t count, const char *expected, size_t expected_length);
+static void expect_text_error(const wchar_t *wide, size_t count, int expected);
+static void test_utf8_from_wide(void);
+static void expect_path(const char *path, const wchar_t *expected);
+static void expect_path_error(const char *path, int expected);
+static char *make_directory(const char *parent, const char *name);
+static void test_wide_path(void);
+
 /* Looks a code up in a table; a code that is not in it maps to EIO. */
 static int
 expected_for(
@@ -125,6 +143,7 @@ test_error_from_system(
 	size_t count;
 	size_t i;
 
+	/* The number of rows. */
 	count = sizeof(system_rows) / sizeof(system_rows[0]);
 
 	/* Every code of the table maps to the value written for it. */
@@ -151,6 +170,7 @@ test_error_from_socket(
 	size_t count;
 	size_t i;
 
+	/* The number of rows. */
 	count = sizeof(socket_rows) / sizeof(socket_rows[0]);
 
 	/* Every code of the table maps to the value written for it. */
@@ -181,6 +201,7 @@ expect_wide(
 	int error;
 	int same;
 
+	/* Convert the text, with the outputs poisoned first. */
 	wide = sentinel_wide;
 	length = 99;
 	error = wb_os_wide_from_utf8(text, &wide, &length);
@@ -197,6 +218,8 @@ expect_wide(
 		if ((unsigned short)wide[i] != units[i])
 			same = 0;
 	}
+
+	/* The units are those expected. */
 	CHECK(same);
 	CHECK_EQ(wide[count], 0);
 	free(wide);
@@ -212,6 +235,7 @@ expect_wide_error(
 	size_t length;
 	int error;
 
+	/* Convert the text, with the outputs poisoned first. */
 	wide = sentinel_wide;
 	length = 99;
 	error = wb_os_wide_from_utf8(text, &wide, &length);
@@ -248,6 +272,8 @@ reference_valid(
 	} else {
 		return 0;
 	}
+
+	/* The sequence must be exactly as long as its lead says. */
 	if (count != need)
 		return 0;
 
@@ -264,6 +290,7 @@ reference_valid(
 	if (code >= 0xd800UL && code <= 0xdfffUL)
 		return 0;
 
+	/* Give the code point. */
 	*value = code;
 	return 1;
 }
@@ -282,6 +309,7 @@ sweep_one(
 	int valid;
 	int error;
 
+	/* Make the bytes a C string, and ask the reference and the layer. */
 	memcpy(text, bytes, count);
 	text[count] = '\0';
 	valid = reference_valid(bytes, count, &value);
@@ -294,6 +322,8 @@ sweep_one(
 			(*failures)++;
 			return;
 		}
+
+		/* A valid sequence gives its value as one unit or a pair, and an invalid one EILSEQ. */
 		if (value < 0x10000UL) {
 			if (length != 1 || (unsigned short)wide[0] != (unsigned short)value)
 				(*failures)++;
@@ -302,6 +332,8 @@ sweep_one(
 			    (unsigned short)wide[1] != (unsigned short)(0xdc00UL + ((value - 0x10000UL) & 0x3ffUL)))
 				(*failures)++;
 		}
+
+		/* Release the result. */
 		free(wide);
 	} else {
 		if (error != EILSEQ || wide != NULL || length != 0)
@@ -322,6 +354,10 @@ test_utf8_sweeps(
 	unsigned third;
 	size_t a;
 	size_t b;
+	char text[4];
+	wchar_t *wide;
+	size_t length;
+	int error;
 
 	/* Every two-byte shape: each lead from 0x80 up, each second byte except NUL. */
 	failures = 0;
@@ -333,6 +369,8 @@ test_utf8_sweeps(
 				sweep_one(bytes, 2, &failures);
 		}
 	}
+
+	/* No sequence failed. */
 	CHECK_EQ(failures, 0);
 
 	/* Every three-byte shape: leads E0 to EF with every second and third byte except NUL. */
@@ -347,6 +385,8 @@ test_utf8_sweeps(
 			}
 		}
 	}
+
+	/* No sequence failed. */
 	CHECK_EQ(failures, 0);
 
 	/* Every four-byte shape: leads F0 to F7, every second byte, and the edge values for the others. */
@@ -364,16 +404,13 @@ test_utf8_sweeps(
 			}
 		}
 	}
+
+	/* No sequence failed. */
 	CHECK_EQ(failures, 0);
 
 	/* Every lead byte alone, and every lead with only valid continuation bytes up to a cut, then the NUL. */
 	failures = 0;
 	for (lead = 0x80; lead <= 0xff; lead++) {
-		char text[4];
-		wchar_t *wide;
-		size_t length;
-		int error;
-
 		text[0] = (char)lead;
 		text[1] = '\0';
 		wide = sentinel_wide;
@@ -381,6 +418,7 @@ test_utf8_sweeps(
 		if (error != EILSEQ || wide != NULL || length != 0)
 			failures++;
 
+		/* A lead followed by a continuation. */
 		text[1] = (char)0x80;
 		text[2] = '\0';
 		if (lead >= 0xe0 && lead <= 0xf4 && lead != 0xe0 && lead != 0xf0 && lead != 0xed && lead != 0xf4) {
@@ -390,6 +428,8 @@ test_utf8_sweeps(
 				failures++;
 		}
 	}
+
+	/* No sequence failed. */
 	CHECK_EQ(failures, 0);
 }
 
@@ -408,7 +448,9 @@ test_utf8_round_trip(
 	size_t back_length;
 	int error;
 	size_t expected_units;
+	int back_different;
 
+	/* Every scalar value but the surrogates is encoded and converted back. */
 	failures = 0;
 	for (code = 1; code <= 0x10ffffUL; code++) {
 		if (code >= 0xd800UL && code <= 0xdfffUL)
@@ -434,8 +476,12 @@ test_utf8_round_trip(
 			encoded[3] = (unsigned char)(0x80UL | (code & 0x3fUL));
 			size = 4;
 		}
+
+		/* The number of UTF-16 units. */
 		encoded[size] = 0;
-		expected_units = code >= 0x10000UL ? 2 : 1;
+		expected_units = 1;
+		if (code >= 0x10000UL)
+			expected_units = 2;
 
 		/* To UTF-16: one unit, or a surrogate pair from the definition. */
 		wide = NULL;
@@ -444,6 +490,8 @@ test_utf8_round_trip(
 			failures++;
 			continue;
 		}
+
+		/* Compare the units with the definition. */
 		if (expected_units == 1) {
 			if ((unsigned short)wide[0] != (unsigned short)code)
 				failures++;
@@ -456,16 +504,24 @@ test_utf8_round_trip(
 		/* And back, by the count and by the NUL. */
 		back = NULL;
 		error = wb_os_utf8_from_wide(wide, length, &back, &back_length);
-		if (error != 0 || back_length != size || memcmp(back, encoded, size + 1) != 0)
+		back_different = 1;
+		if (error == 0 && back_length == size)
+			back_different = memcmp(back, encoded, size + 1);
+		if (error != 0 || back_length != size || back_different != 0)
 			failures++;
 		free(back);
 		back = NULL;
 		error = wb_os_utf8_from_wide(wide, (size_t)-1, &back, &back_length);
-		if (error != 0 || back_length != size || memcmp(back, encoded, size + 1) != 0)
+		back_different = 1;
+		if (error == 0 && back_length == size)
+			back_different = memcmp(back, encoded, size + 1);
+		if (error != 0 || back_length != size || back_different != 0)
 			failures++;
 		free(back);
 		free(wide);
 	}
+
+	/* No scalar failed. */
 	CHECK_EQ(failures, 0);
 }
 
@@ -601,6 +657,7 @@ expect_text(
 	size_t length;
 	int error;
 
+	/* Convert the units, with the outputs poisoned first. */
 	text = NULL;
 	length = 99;
 	error = wb_os_utf8_from_wide(wide, count, &text, &length);
@@ -623,6 +680,7 @@ expect_text_error(
 	size_t length;
 	int error;
 
+	/* Convert the units, with the outputs poisoned first. */
 	text = sentinel_text;
 	length = 99;
 	error = wb_os_utf8_from_wide(wide, count, &text, &length);
@@ -734,15 +792,18 @@ expect_path(
 {
 	wchar_t *wide;
 	int error;
+	int different;
 
+	/* Make the wide path. */
 	wide = NULL;
 	error = wb_os_wide_path(path, &wide);
 	CHECK_EQ(error, 0);
 	if (error != 0 || wide == NULL)
 		return;
 	CHECK(wcscmp(wide, expected) == 0);
-	if (wcscmp(wide, expected) != 0)
-		wprintf(L"  got %ls\n  expected %ls\n", wide, expected);
+	different = wcscmp(wide, expected);
+	CHECK(different == 0);
+	if (different != 0)
 	free(wide);
 }
 
@@ -755,6 +816,7 @@ expect_path_error(
 	wchar_t *wide;
 	int error;
 
+	/* Make the wide path, with the output poisoned first. */
 	wide = sentinel_wide;
 	error = wb_os_wide_path(path, &wide);
 	CHECK_EQ(error, expected);
@@ -773,6 +835,7 @@ make_directory(
 	int error;
 	BOOL made;
 
+	/* Join the parent and the name. */
 	size = strlen(parent) + strlen(name) + 2U;
 	path = (char *)malloc(size);
 	if (path == NULL)
@@ -785,6 +848,8 @@ make_directory(
 		free(path);
 		return NULL;
 	}
+
+	/* Make the directory. */
 	made = CreateDirectoryW(wide, NULL);
 	CHECK(made);
 	free(wide);
@@ -882,12 +947,16 @@ test_wide_path(
 		if (parent == NULL)
 			return;
 	}
+
+	/* The path of a file inside the long directory. */
 	file_path = (char *)malloc(strlen(parent) + 16U);
 	CHECK(file_path != NULL);
 	if (file_path == NULL) {
 		free(parent);
 		return;
 	}
+
+	/* A file path over 300 characters. */
 	snprintf(file_path, strlen(parent) + 16U, "%s/long-file.txt", parent);
 	CHECK(strlen(file_path) > 300U);
 	wide = NULL;
@@ -904,6 +973,8 @@ test_wide_path(
 		CHECK(attributes != INVALID_FILE_ATTRIBUTES);
 		free(wide);
 	}
+
+	/* Release the strings. */
 	free(file_path);
 	free(parent);
 }
@@ -919,6 +990,7 @@ main(
 	if (argc == 2)
 		CHECK(strcmp(argv[1], "win32") == 0);
 
+	/* Run every group. */
 	test_error_from_system();
 	test_error_from_socket();
 	test_wide_from_utf8();
@@ -927,5 +999,6 @@ main(
 	test_utf8_round_trip();
 	test_wide_path();
 
+	/* Report the count of failures. */
 	return check_finish("os-win32");
 }

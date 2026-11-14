@@ -92,6 +92,35 @@ struct lock_attempt {
 };
 
 #ifdef _WIN32
+static wchar_t *to_wide(const char *text);
+static int raw_mkdir(const char *path);
+static int raw_exists(const char *path);
+static int raw_is_directory(const char *path);
+static FILE *raw_open(const char *path, int writing);
+static int raw_write(const char *path, const void *bytes, size_t length);
+static int raw_read(const char *path, struct raw_bytes *out);
+static int raw_holds(const char *path, const void *bytes, size_t length);
+static void raw_current_directory(char *out, size_t size);
+static void fill_pattern(unsigned char *out, size_t length, unsigned int seed);
+static int buffer_is(const struct wb_buffer *buffer, const void *bytes, size_t length);
+static int buffer_is_text(const struct wb_buffer *buffer, const char *text);
+static int collect_name(void *context, const char *name);
+static int compare_names(const void *a, const void *b);
+static void names_release(struct name_set *set);
+static int names_of(const char *directory, struct name_set *set);
+static int listing_is(const char *directory, const char *const *expected, size_t count);
+static int listing_has_prefix(const char *directory, const char *prefix);
+static void make_group(const char *name);
+static void *replace_writer(void *argument);
+static void *replace_reader(void *argument);
+static void check_from_url(const char *host, const char *path, int expected_error, const char *expected_text);
+static void check_to_url(const char *local, int expected_error, const char *expected_host, const char *expected_path);
+static void *release_later_main(void *argument);
+static void *lock_attempt_main(void *argument);
+static int run_lock_child(const char *directory);
+static void wait_sleeper(uintptr_t token);
+static int lock_child_main(const char *directory);
+
 /*
  * Converts UTF-8 to a new UTF-16 string for the test's own calls of the
  * Windows API.
@@ -103,6 +132,7 @@ to_wide(
 	wchar_t *wide;
 	int units;
 
+	/* Convert to UTF-16 in two calls: the size, then the text. */
 	units = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
 	wide = (wchar_t *)malloc((size_t)units * sizeof(wchar_t));
 	MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, units);
@@ -121,6 +151,7 @@ under_wine(void)
 {
 	HMODULE ntdll;
 
+	/* Look for a function that only Wine's ntdll has. */
 	ntdll = GetModuleHandleW(L"ntdll.dll");
 	if (ntdll == NULL)
 		return 0;
@@ -137,6 +168,7 @@ raw_mkdir(
 	wchar_t *wide;
 	int made;
 
+	/* Make the directory with the system's call. */
 	wide = to_wide(path);
 	made = CreateDirectoryW(wide, NULL);
 	free(wide);
@@ -155,6 +187,7 @@ raw_exists(
 	wchar_t *wide;
 	DWORD attributes;
 
+	/* Ask the system for the attributes. */
 	wide = to_wide(path);
 	attributes = GetFileAttributesW(wide);
 	free(wide);
@@ -162,6 +195,7 @@ raw_exists(
 #else
 	struct stat status;
 
+	/* The file exists when it can be looked at. */
 	return lstat(path, &status) == 0;
 #endif
 }
@@ -175,6 +209,7 @@ raw_is_directory(
 	wchar_t *wide;
 	DWORD attributes;
 
+	/* Ask the system for the attributes. */
 	wide = to_wide(path);
 	attributes = GetFileAttributesW(wide);
 	free(wide);
@@ -182,6 +217,7 @@ raw_is_directory(
 #else
 	struct stat status;
 
+	/* It is a directory when it can be looked at and its mode says so. */
 	return stat(path, &status) == 0 && S_ISDIR(status.st_mode);
 #endif
 }
@@ -194,14 +230,27 @@ raw_open(
 {
 #ifdef _WIN32
 	wchar_t *wide;
+	const wchar_t *mode;
 	FILE *file;
 
+	/* Open through the wide name, as the module does. */
+	mode = L"rb";
+	if (writing)
+		mode = L"wb";
 	wide = to_wide(path);
-	file = _wfopen(wide, writing ? L"wb" : L"rb");
+	file = _wfopen(wide, mode);
 	free(wide);
 	return file;
 #else
-	return fopen(path, writing ? "wb" : "rb");
+	const char *mode;
+	FILE *file;
+
+	/* Open through the byte name. */
+	mode = "rb";
+	if (writing)
+		mode = "wb";
+	file = fopen(path, mode);
+	return file;
 #endif
 }
 
@@ -214,14 +263,17 @@ raw_write(
 {
 	FILE *file;
 	size_t written;
+	int closed;
 
+	/* Write the bytes with the C library. */
 	file = raw_open(path, 1);
 	if (file == NULL)
 		return 0;
 	written = 0;
 	if (length > 0)
 		written = fwrite(bytes, 1, length, file);
-	if (fclose(file) != 0)
+	closed = fclose(file);
+	if (closed != 0)
 		return 0;
 	return written == length;
 }
@@ -236,12 +288,14 @@ raw_read(
 	size_t capacity;
 	size_t got;
 
+	/* Start with nothing read. */
 	out->data = NULL;
 	out->length = 0;
 	file = raw_open(path, 0);
 	if (file == NULL)
 		return 0;
 
+	/* Read the file in growing blocks. */
 	capacity = 1024;
 	out->data = (unsigned char *)malloc(capacity);
 	for (;;) {
@@ -249,11 +303,15 @@ raw_read(
 			capacity *= 2U;
 			out->data = (unsigned char *)realloc(out->data, capacity);
 		}
+
+		/* Read what fits. */
 		got = fread(out->data + out->length, 1, capacity - out->length, file);
 		if (got == 0)
 			break;
 		out->length += got;
 	}
+
+	/* Close the file. */
 	fclose(file);
 	return 1;
 }
@@ -267,8 +325,11 @@ raw_holds(
 {
 	struct raw_bytes read;
 	int same;
+	int read_ok;
 
-	if (raw_read(path, &read) == 0)
+	/* Read the file with the C library. */
+	read_ok = raw_read(path, &read);
+	if (read_ok == 0)
 		return 0;
 	same = read.length == length && (length == 0 || memcmp(read.data, bytes, length) == 0);
 	free(read.data);
@@ -284,16 +345,25 @@ raw_current_directory(
 #ifdef _WIN32
 	wchar_t wide[4096];
 	DWORD units;
+	int converted;
 
+	/* Ask the system for the current directory. */
 	units = GetCurrentDirectoryW(4096, wide);
 	if (units == 0 || units >= 4096) {
 		out[0] = '\0';
 		return;
 	}
-	if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, out, (int)size, NULL, NULL) == 0)
+
+	/* Convert it to UTF-8. */
+	converted = WideCharToMultiByte(CP_UTF8, 0, wide, -1, out, (int)size, NULL, NULL);
+	if (converted == 0)
 		out[0] = '\0';
 #else
-	if (getcwd(out, size) == NULL)
+	char *directory;
+
+	/* Ask the C library for the current directory. */
+	directory = getcwd(out, size);
+	if (directory == NULL)
 		out[0] = '\0';
 #endif
 }
@@ -308,6 +378,7 @@ fill_pattern(
 	static const unsigned char specials[4] = { 0x0dU, 0x0aU, 0x00U, 0x1aU };
 	size_t i;
 
+	/* Each byte depends on its place and the seed. */
 	for (i = 0; i < length; i++) {
 		out[i] = (unsigned char)((i * 167U + seed * 29U + 13U) & 0xffU);
 		if (i % 11U == 0)
@@ -350,11 +421,17 @@ collect_name(
 {
 	struct name_set *set;
 
+	/* Make room for another name when the table is full. */
 	set = (struct name_set *)context;
 	if (set->count == set->capacity) {
-		set->capacity = set->capacity == 0 ? 16U : set->capacity * 2U;
+		if (set->capacity == 0)
+			set->capacity = 16U;
+		else
+			set->capacity = set->capacity * 2U;
 		set->items = (char **)realloc(set->items, set->capacity * sizeof(char *));
 	}
+
+	/* Keep a copy of the name. */
 	set->items[set->count] = strdup(name);
 	set->count++;
 	if (set->stop_at != 0 && set->count == set->stop_at)
@@ -378,6 +455,7 @@ names_release(
 {
 	size_t i;
 
+	/* Free the names and the table. */
 	for (i = 0; i < set->count; i++)
 		free(set->items[i]);
 	free(set->items);
@@ -392,6 +470,7 @@ names_of(
 {
 	int error;
 
+	/* List the directory and keep the names. */
 	memset(set, 0, sizeof(*set));
 	error = wb_os_list(directory, collect_name, set);
 	if (set->count > 1)
@@ -410,13 +489,18 @@ listing_is(
 	size_t i;
 	int same;
 	int error;
+	int different;
 
+	/* Compare each name with the expected one. */
 	error = names_of(directory, &set);
 	same = error == 0 && set.count == count;
 	for (i = 0; same && i < count; i++) {
-		if (strcmp(set.items[i], expected[i]) != 0)
+		different = strcmp(set.items[i], expected[i]);
+		if (different != 0)
 			same = 0;
 	}
+
+	/* Release the names. */
 	names_release(&set);
 	return same;
 }
@@ -430,13 +514,20 @@ listing_has_prefix(
 	struct name_set set;
 	size_t i;
 	int found;
+	size_t prefix_length;
+	int different;
 
+	/* List the directory. */
 	names_of(directory, &set);
 	found = 0;
 	for (i = 0; i < set.count; i++) {
-		if (strncmp(set.items[i], prefix, strlen(prefix)) == 0)
+		prefix_length = strlen(prefix);
+		different = strncmp(set.items[i], prefix, prefix_length);
+		if (different == 0)
 			found = 1;
 	}
+
+	/* Release the names. */
 	names_release(&set);
 	return found;
 }
@@ -459,12 +550,14 @@ test_arguments(void)
 	const char *bad[2];
 	size_t i;
 
+	/* Names that are not valid: none, and empty. */
 	bad[0] = NULL;
 	bad[1] = "";
 	wb_buffer_init(&buffer);
 	wb_buffer_init(&host);
 	wb_buffer_append_string(&buffer, "keep");
 
+	/* A bad name is refused and the buffer is left as it was. */
 	for (i = 0; i < 2; i++) {
 		CHECK_EQ(wb_os_file_read(bad[i], &buffer), EINVAL);
 		CHECK(buffer_is_text(&buffer, "keep"));
@@ -499,6 +592,7 @@ test_arguments(void)
 	/* Releasing NULL does nothing. */
 	wb_os_lock_close(NULL);
 
+	/* Release the buffers. */
 	wb_buffer_release(&buffer);
 	wb_buffer_release(&host);
 }
@@ -513,6 +607,7 @@ test_read_write(void)
 	size_t i;
 	char name[32];
 
+	/* A directory for the group, and a pattern to write. */
 	make_group("rw");
 	bytes = (unsigned char *)malloc(BIG_SIZE);
 	fill_pattern(bytes, BIG_SIZE, 1U);
@@ -523,6 +618,7 @@ test_read_write(void)
 		CHECK_EQ(wb_os_file_write(name, bytes, sizes[i]), 0);
 		CHECK(raw_holds(name, bytes, sizes[i]));
 
+		/* Read the file back through the layer. */
 		wb_buffer_init(&buffer);
 		CHECK_EQ(wb_os_file_read(name, &buffer), 0);
 		CHECK(buffer_is(&buffer, bytes, sizes[i]));
@@ -585,6 +681,7 @@ test_read_write(void)
 	CHECK_EQ(wb_os_file_write("rw/ctrl", "\r\n\0\x1a\r\n", 6), 0);
 	CHECK(raw_holds("rw/ctrl", "\r\n\0\x1a\r\n", 6));
 
+	/* Release the bytes. */
 	free(bytes);
 }
 
@@ -595,6 +692,7 @@ test_replace(void)
 	unsigned char *big;
 	const char *expected[2];
 
+	/* A directory for the group, and a pattern to write. */
 	make_group("rp");
 	big = (unsigned char *)malloc(BIG_SIZE);
 	fill_pattern(big, BIG_SIZE, 2U);
@@ -630,6 +728,7 @@ test_replace(void)
 	CHECK(raw_is_directory("rp/dir"));
 	CHECK(!listing_has_prefix("rp", "dir.tmp"));
 
+	/* Release the pattern. */
 	free(big);
 }
 
@@ -642,6 +741,7 @@ replace_writer(
 	int i;
 	int error;
 
+	/* Replace the file again and again with the two contents. */
 	race = (struct replace_race *)argument;
 	for (i = 0; i < 3; i++) {
 		if (i % 2 == 0)
@@ -651,6 +751,8 @@ replace_writer(
 		if (error != 0)
 			__atomic_add_fetch(&race->writer_failures, 1, __ATOMIC_SEQ_CST);
 	}
+
+	/* The thread has no result. */
 	return NULL;
 }
 
@@ -663,7 +765,10 @@ replace_reader(
 	struct wb_buffer buffer;
 	int error;
 	int whole;
+	int difference;
+	int finished;
 
+	/* Read the file again and again until the writers finish. */
 	race = (struct replace_race *)argument;
 	do {
 		wb_buffer_init(&buffer);
@@ -672,16 +777,29 @@ replace_reader(
 			__atomic_add_fetch(&race->reader_failures, 1, __ATOMIC_SEQ_CST);
 		} else {
 			whole = 0;
-			if (buffer.length == race->first_length && memcmp(buffer.data, race->first, race->first_length) == 0)
-				whole = 1;
-			if (buffer.length == race->second_length && memcmp(buffer.data, race->second, race->second_length) == 0)
-				whole = 1;
+			if (buffer.length == race->first_length) {
+				difference = memcmp(buffer.data, race->first, race->first_length);
+				if (difference == 0)
+					whole = 1;
+			}
+
+			/* The second content is whole too. */
+			if (buffer.length == race->second_length) {
+				difference = memcmp(buffer.data, race->second, race->second_length);
+				if (difference == 0)
+					whole = 1;
+			}
+
+			/* A read of neither content is torn. */
 			if (whole == 0)
 				__atomic_add_fetch(&race->torn_reads, 1, __ATOMIC_SEQ_CST);
 			__atomic_add_fetch(&race->reads, 1, __ATOMIC_SEQ_CST);
 		}
+
+		/* Release the buffer and see whether the writers have finished. */
 		wb_buffer_release(&buffer);
-	} while (__atomic_load_n(&race->finished, __ATOMIC_SEQ_CST) == 0);
+		finished = __atomic_load_n(&race->finished, __ATOMIC_SEQ_CST);
+	} while (finished == 0);
 	return NULL;
 }
 
@@ -695,7 +813,11 @@ test_replace_threads(void)
 	unsigned char *first;
 	unsigned char *second;
 	int i;
+#ifdef _WIN32
+	int wine;
+#endif
 
+	/* The two contents, and the file the writers replace. */
 	make_group("race");
 	first = (unsigned char *)malloc(150000U);
 	second = (unsigned char *)malloc(90000U);
@@ -709,6 +831,7 @@ test_replace_threads(void)
 	race.second_length = 90000U;
 	CHECK_EQ(wb_os_file_replace(race.path, first, 150000U), 0);
 
+	/* Start two writers and the reader. */
 	for (i = 0; i < 2; i++)
 		pthread_create(&writers[i], NULL, replace_writer, &race);
 	pthread_create(&reader, NULL, replace_reader, &race);
@@ -719,7 +842,8 @@ test_replace_threads(void)
 
 #ifdef _WIN32
 	/* Wine cannot rename over a file that a reader has open; Windows can, so there no replacement may fail. */
-	if (under_wine() == 0)
+	wine = under_wine();
+	if (wine == 0)
 		CHECK_EQ(race.writer_failures, 0);
 #else
 	CHECK_EQ(race.writer_failures, 0);
@@ -768,7 +892,9 @@ test_make_directories(void)
 	size_t used;
 	size_t i;
 	int j;
+	char *huge;
 
+	/* A directory for the group. */
 	make_group("md");
 
 	/* Several levels at once, then the same again. */
@@ -811,15 +937,11 @@ test_make_directories(void)
 	CHECK_EQ(wb_os_make_directories("md/\xff"), EILSEQ);
 	CHECK_EQ(wb_os_make_directories("md/\xed\xa0\x80"), EILSEQ);
 	CHECK_EQ(wb_os_make_directories("md/\xe3\x81"), EILSEQ);
-	{
-		char *huge;
-
-		huge = (char *)malloc((size_t)WB_OS_PATH_MAX + 2U);
-		memset(huge, 'a', (size_t)WB_OS_PATH_MAX + 1U);
-		huge[(size_t)WB_OS_PATH_MAX + 1U] = '\0';
-		CHECK_EQ(wb_os_make_directories(huge), ENAMETOOLONG);
-		free(huge);
-	}
+	huge = (char *)malloc((size_t)WB_OS_PATH_MAX + 2U);
+	memset(huge, 'a', (size_t)WB_OS_PATH_MAX + 1U);
+	huge[(size_t)WB_OS_PATH_MAX + 1U] = '\0';
+	CHECK_EQ(wb_os_make_directories(huge), ENAMETOOLONG);
+	free(huge);
 
 	/* The root of the current drive or of the file system exists already. */
 	if (is_win32) {
@@ -856,6 +978,7 @@ test_list(void)
 	int error;
 	long total;
 
+	/* A directory with files and a subdirectory. */
 	make_group("ls");
 	make_group("ls/sub");
 	CHECK(raw_write("ls/alpha", "1", 1));
@@ -905,6 +1028,8 @@ test_list(void)
 		CHECK(raw_write(path, "m", 1));
 		total += i;
 	}
+
+	/* List the directory. */
 	error = names_of("many", &set);
 	CHECK_EQ(error, 0);
 	CHECK_EQ(set.count, 600);
@@ -912,6 +1037,8 @@ test_list(void)
 		snprintf(path, sizeof(path), "entry-%04d", i);
 		CHECK(strcmp(set.items[i], path) == 0);
 	}
+
+	/* Every name was seen once. */
 	CHECK_EQ(total, 179700);
 	names_release(&set);
 
@@ -941,7 +1068,9 @@ test_utf8_names(void)
 	struct wb_os_lock *lock;
 	size_t i;
 	unsigned char bytes[300];
+	char name[400];
 
+	/* A directory, and a pattern for the content. */
 	make_group("u8");
 	fill_pattern(bytes, sizeof(bytes), 3U);
 
@@ -959,6 +1088,8 @@ test_utf8_names(void)
 			CHECK(raw_holds(path, "new", 3));
 		}
 	}
+
+	/* The directory lists both names. */
 	CHECK(listing_is("u8", names, 2));
 	for (i = 0; i < 2; i++) {
 		snprintf(path, sizeof(path), "u8/%s", names[i]);
@@ -981,6 +1112,7 @@ test_utf8_names(void)
 			"u8/\xf5\x80\x80\x80", "u8/ab\xe3\x81", "u8/\x80"
 		};
 
+		/* Each bad name is refused and the buffer is left as it was. */
 		for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
 			wb_buffer_init(&buffer);
 			wb_buffer_append_string(&buffer, "keep");
@@ -1021,8 +1153,6 @@ test_utf8_names(void)
 
 	/* A single name longer than the system allows is ENAMETOOLONG (the file system decides, so POSIX only). */
 	if (!is_win32) {
-		char name[400];
-
 		memcpy(name, "u8/", 3);
 		memset(name + 3, 'n', 300);
 		name[303] = '\0';
@@ -1037,12 +1167,15 @@ test_full_path(void)
 	struct wb_buffer buffer;
 	char cwd[4096];
 	char expected[4200];
+	char longer[400];
 
+	/* A directory with a target file. */
 	make_group("fp");
 	CHECK_EQ(wb_os_file_write("fp/target.txt", "t", 1), 0);
 	raw_current_directory(cwd, sizeof(cwd));
 	CHECK(cwd[0] != '\0');
 
+	/* The POSIX forms of a path. */
 	if (!is_win32) {
 		/* An existing file, with the dots resolved, and a symbolic link followed. */
 		snprintf(expected, sizeof(expected), "%s/fp/target.txt", cwd);
@@ -1117,16 +1250,12 @@ test_full_path(void)
 		CHECK(buffer_is_text(&buffer, expected));
 
 		/* A path longer than MAX_PATH is returned in full. */
-		{
-			char longer[400];
-
-			memcpy(longer, "C:\\", 3);
-			memset(longer + 3, 'q', 330);
-			memcpy(longer + 333, "\\z", 3);
-			wb_buffer_clear(&buffer);
-			CHECK_EQ(wb_os_full_path(longer, &buffer), 0);
-			CHECK(buffer_is_text(&buffer, longer));
-		}
+		memcpy(longer, "C:\\", 3);
+		memset(longer + 3, 'q', 330);
+		memcpy(longer + 333, "\\z", 3);
+		wb_buffer_clear(&buffer);
+		CHECK_EQ(wb_os_full_path(longer, &buffer), 0);
+		CHECK(buffer_is_text(&buffer, longer));
 		wb_buffer_release(&buffer);
 	}
 }
@@ -1137,6 +1266,16 @@ test_current_directory(void)
 {
 	struct wb_buffer buffer;
 	char expected[4096];
+#ifndef _WIN32
+	char saved[4096];
+	char long_directory[1024];
+	size_t used;
+	int j;
+#else
+	char root[8];
+	wchar_t saved[4096];
+	wchar_t *wide_root;
+#endif
 
 	/* It is the system's own answer, appended after what the buffer holds. */
 	raw_current_directory(expected, sizeof(expected));
@@ -1154,54 +1293,42 @@ test_current_directory(void)
 	wb_buffer_release(&buffer);
 
 #ifndef _WIN32
-	{
-		char saved[4096];
-		char long_directory[1024];
-		size_t used;
-		int j;
+	/* A directory deeper than the first buffer the module tries, and the root. */
+	getcwd(saved, sizeof(saved));
+	used = 0;
+	used += (size_t)snprintf(long_directory + used, sizeof(long_directory) - used, "cd");
+	for (j = 0; j < 30; j++)
+		used += (size_t)snprintf(long_directory + used, sizeof(long_directory) - used, "/seg-%02d-abcdefghijk", j);
+	CHECK_EQ(wb_os_make_directories(long_directory), 0);
+	CHECK_EQ(chdir(long_directory), 0);
+	raw_current_directory(expected, sizeof(expected));
+	CHECK(strlen(expected) > 512U);
+	wb_buffer_init(&buffer);
+	CHECK_EQ(wb_os_current_directory(&buffer), 0);
+	CHECK(buffer_is_text(&buffer, expected));
+	wb_buffer_release(&buffer);
 
-		/* A directory deeper than the first buffer the module tries, and the root. */
-		getcwd(saved, sizeof(saved));
-		used = 0;
-		used += (size_t)snprintf(long_directory + used, sizeof(long_directory) - used, "cd");
-		for (j = 0; j < 30; j++)
-			used += (size_t)snprintf(long_directory + used, sizeof(long_directory) - used, "/seg-%02d-abcdefghijk", j);
-		CHECK_EQ(wb_os_make_directories(long_directory), 0);
-		CHECK_EQ(chdir(long_directory), 0);
-		raw_current_directory(expected, sizeof(expected));
-		CHECK(strlen(expected) > 512U);
-		wb_buffer_init(&buffer);
-		CHECK_EQ(wb_os_current_directory(&buffer), 0);
-		CHECK(buffer_is_text(&buffer, expected));
-		wb_buffer_release(&buffer);
-
-		CHECK_EQ(chdir("/"), 0);
-		wb_buffer_init(&buffer);
-		CHECK_EQ(wb_os_current_directory(&buffer), 0);
-		CHECK(buffer_is_text(&buffer, "/"));
-		wb_buffer_release(&buffer);
-		CHECK_EQ(chdir(saved), 0);
-	}
+	/* Change to the root directory. */
+	CHECK_EQ(chdir("/"), 0);
+	wb_buffer_init(&buffer);
+	CHECK_EQ(wb_os_current_directory(&buffer), 0);
+	CHECK(buffer_is_text(&buffer, "/"));
+	wb_buffer_release(&buffer);
+	CHECK_EQ(chdir(saved), 0);
 #else
-	{
-		char root[8];
-		wchar_t saved[4096];
-		wchar_t *wide_root;
-
-		/* The root of the current drive keeps its separator. */
-		raw_current_directory(expected, sizeof(expected));
-		memcpy(root, expected, 3);
-		root[3] = '\0';
-		GetCurrentDirectoryW(4096, saved);
-		wide_root = to_wide(root);
-		CHECK(SetCurrentDirectoryW(wide_root) != 0);
-		free(wide_root);
-		wb_buffer_init(&buffer);
-		CHECK_EQ(wb_os_current_directory(&buffer), 0);
-		CHECK(buffer_is_text(&buffer, root));
-		wb_buffer_release(&buffer);
-		SetCurrentDirectoryW(saved);
-	}
+	/* The root of the current drive keeps its separator. */
+	raw_current_directory(expected, sizeof(expected));
+	memcpy(root, expected, 3);
+	root[3] = '\0';
+	GetCurrentDirectoryW(4096, saved);
+	wide_root = to_wide(root);
+	CHECK(SetCurrentDirectoryW(wide_root) != 0);
+	free(wide_root);
+	wb_buffer_init(&buffer);
+	CHECK_EQ(wb_os_current_directory(&buffer), 0);
+	CHECK(buffer_is_text(&buffer, root));
+	wb_buffer_release(&buffer);
+	SetCurrentDirectoryW(saved);
 #endif
 }
 
@@ -1211,13 +1338,16 @@ test_absolute(void)
 {
 	size_t i;
 
+	/* Nothing and the empty text are not absolute. */
 	CHECK_EQ(wb_os_path_is_absolute(NULL), 0);
 	CHECK_EQ(wb_os_path_is_absolute(""), 0);
 
+	/* The POSIX rule: a slash starts an absolute path. */
 	if (!is_win32) {
 		static const char *const yes[] = { "/", "/a", "//", "/a/b/../c" };
 		static const char *const no[] = { "a", "./a", "../a", " /a", "C:\\x", "C:/x" };
 
+		/* Each of these is absolute and each of those is not. */
 		for (i = 0; i < sizeof(yes) / sizeof(yes[0]); i++)
 			CHECK_EQ(wb_os_path_is_absolute(yes[i]), 1);
 		for (i = 0; i < sizeof(no) / sizeof(no[0]); i++)
@@ -1232,6 +1362,7 @@ test_absolute(void)
 			"CC:\\x", ".\\x", "C"
 		};
 
+		/* Each of these is absolute and each of those is not. */
 		for (i = 0; i < sizeof(yes) / sizeof(yes[0]); i++)
 			CHECK_EQ(wb_os_path_is_absolute(yes[i]), 1);
 		for (i = 0; i < sizeof(no) / sizeof(no[0]); i++)
@@ -1249,19 +1380,21 @@ check_from_url(
 {
 	struct wb_buffer buffer;
 	int error;
+	char text[512];
 
+	/* Convert, with some text already in the buffer. */
 	wb_buffer_init(&buffer);
 	wb_buffer_append_string(&buffer, "pre:");
 	error = wb_os_path_from_url(host, path, &buffer);
 	CHECK_EQ(error, expected_error);
 	if (expected_error == 0) {
-		char text[512];
-
 		snprintf(text, sizeof(text), "pre:%s", expected_text);
 		CHECK(buffer_is_text(&buffer, text));
 	} else {
 		CHECK(buffer_is_text(&buffer, "pre:"));
 	}
+
+	/* Release the buffer. */
 	wb_buffer_release(&buffer);
 }
 
@@ -1278,6 +1411,7 @@ check_to_url(
 	char text[512];
 	int error;
 
+	/* Convert, with marks already in the buffers. */
 	wb_buffer_init(&host);
 	wb_buffer_init(&path);
 	wb_buffer_append_string(&host, "H:");
@@ -1293,6 +1427,8 @@ check_to_url(
 		CHECK(buffer_is_text(&host, "H:"));
 		CHECK(buffer_is_text(&path, "P:"));
 	}
+
+	/* Release the buffers. */
 	wb_buffer_release(&host);
 	wb_buffer_release(&path);
 }
@@ -1305,6 +1441,7 @@ test_urls(void)
 	struct wb_buffer host;
 	struct wb_buffer path;
 
+	/* The POSIX forms of file URLs. */
 	if (!is_win32) {
 		check_from_url("", "/a b/c", 0, "/a b/c");
 		check_from_url(NULL, "/a b/c", 0, "/a b/c");
@@ -1314,6 +1451,7 @@ test_urls(void)
 		check_from_url("srv", "/a", ENOENT, NULL);
 		check_from_url("localhost", "/a", ENOENT, NULL);
 
+		/* A path becomes a file URL. */
 		check_to_url("/a/b", 0, "", "/a/b");
 		check_to_url("/", 0, "", "/");
 		check_to_url("//x", 0, "", "//x");
@@ -1342,6 +1480,7 @@ test_urls(void)
 		check_from_url("srv", "/C:/a", ENOENT, NULL);
 		check_from_url("localhost", "/C:/a", ENOENT, NULL);
 
+		/* A Windows path becomes a file URL with the drive. */
 		check_to_url("C:\\a\\b", 0, "", "/C:/a/b");
 		check_to_url("C:/a", 0, "", "/C:/a");
 		check_to_url("c:\\", 0, "", "/c:/");
@@ -1382,6 +1521,8 @@ test_urls(void)
 		CHECK_EQ(wb_os_path_from_url("", (const char *)path.data, &buffer), 0);
 		CHECK(buffer_is_text(&buffer, "D:\\some\\where"));
 	}
+
+	/* Release the buffers. */
 	wb_buffer_release(&buffer);
 	wb_buffer_release(&host);
 	wb_buffer_release(&path);
@@ -1395,8 +1536,10 @@ test_modes(void)
 	struct stat status;
 	struct wb_os_lock *lock;
 
+	/* A directory for the group. */
 	make_group("mode");
 
+	/* A written file has the mode 0644. */
 	CHECK_EQ(wb_os_file_write("mode/written", "x", 1), 0);
 	CHECK_EQ(stat("mode/written", &status), 0);
 	CHECK_EQ((long long)(status.st_mode & 07777), 0644);
@@ -1412,6 +1555,7 @@ test_modes(void)
 	CHECK_EQ((long long)(status.st_mode & 07777), 0600);
 	umask(022);
 
+	/* A replaced file has the mode 0600. */
 	CHECK_EQ(wb_os_file_replace("mode/replaced", "x", 1), 0);
 	CHECK_EQ(stat("mode/replaced", &status), 0);
 	CHECK_EQ((long long)(status.st_mode & 07777), 0600);
@@ -1421,6 +1565,7 @@ test_modes(void)
 	CHECK_EQ(stat("mode/written", &status), 0);
 	CHECK_EQ((long long)(status.st_mode & 07777), 0600);
 
+	/* Made directories have the mode 0700. */
 	CHECK_EQ(wb_os_make_directories("mode/d1/d2/d3"), 0);
 	CHECK_EQ(stat("mode/d1", &status), 0);
 	CHECK_EQ((long long)(status.st_mode & 07777), 0700);
@@ -1429,6 +1574,7 @@ test_modes(void)
 	CHECK_EQ(stat("mode/d1/d2/d3", &status), 0);
 	CHECK_EQ((long long)(status.st_mode & 07777), 0700);
 
+	/* Open a lock; its file is made too. */
 	lock = NULL;
 	CHECK_EQ(wb_os_lock_open("mode/d1", &lock), 0);
 	CHECK_EQ(stat("mode/d1/lock", &status), 0);
@@ -1449,6 +1595,7 @@ release_later_main(
 {
 	struct release_later *release;
 
+	/* Take the job, wait, then close the handle. */
 	release = (struct release_later *)argument;
 	Sleep(release->wait);
 	CloseHandle(release->handle);
@@ -1468,7 +1615,12 @@ test_sharing(void)
 	const char *newest;
 	size_t newest_length;
 	int error;
+	struct wb_buffer buffer;
+#ifdef _WIN32
+	int wine;
+#endif
 
+	/* The content of the file before the replacement. */
 	newest = "old";
 	newest_length = 3;
 	make_group("share");
@@ -1480,16 +1632,21 @@ test_sharing(void)
 	    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	CHECK(handle != INVALID_HANDLE_VALUE);
 	error = wb_os_file_replace("share/file", "newer", 5);
-	if (under_wine()) {
+	wine = under_wine();
+	if (wine) {
 		/* Wine refuses with an access error and leaves the old file; Windows takes the replacement. */
 		CHECK(error == 0 || error == EACCES);
 	} else {
 		CHECK_EQ(error, 0);
 	}
+
+	/* A replacement that succeeded changes the expected content. */
 	if (error == 0) {
 		newest = "newer";
 		newest_length = 5;
 	}
+
+	/* The file holds the newest content and no temporary file is left. */
 	CHECK(raw_holds("share/file", newest, newest_length));
 	CHECK(!listing_has_prefix("share", "file.tmp"));
 	CloseHandle(handle);
@@ -1519,14 +1676,10 @@ test_sharing(void)
 	/* A file held open without sharing reads is EBUSY to read. */
 	handle = CreateFileW(wide, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	CHECK(handle != INVALID_HANDLE_VALUE);
-	{
-		struct wb_buffer buffer;
-
-		wb_buffer_init(&buffer);
-		CHECK_EQ(wb_os_file_read("share/file", &buffer), EBUSY);
-		CHECK_EQ(buffer.length, 0);
-		wb_buffer_release(&buffer);
-	}
+	wb_buffer_init(&buffer);
+	CHECK_EQ(wb_os_file_read("share/file", &buffer), EBUSY);
+	CHECK_EQ(buffer.length, 0);
+	wb_buffer_release(&buffer);
 	CloseHandle(handle);
 	free(wide);
 }
@@ -1539,6 +1692,7 @@ lock_attempt_main(
 {
 	struct lock_attempt *attempt;
 
+	/* Take the attempt and open the lock. */
 	attempt = (struct lock_attempt *)argument;
 	attempt->error = wb_os_lock_open(attempt->directory, &attempt->lock);
 	return NULL;
@@ -1557,6 +1711,7 @@ run_lock_child(
 	PROCESS_INFORMATION process;
 	DWORD code;
 	DWORD units;
+	BOOL created;
 
 	/* Windows finds its own program file from the module; the path from argv[0] is for POSIX. */
 	(void)self_path;
@@ -1569,7 +1724,8 @@ run_lock_child(
 	memset(&startup, 0, sizeof(startup));
 	startup.cb = sizeof(startup);
 	memset(&process, 0, sizeof(process));
-	if (CreateProcessW(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process) == 0)
+	created = CreateProcessW(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process);
+	if (created == 0)
 		return -1;
 	WaitForSingleObject(process.hProcess, 120000);
 	code = 0xffffU;
@@ -1581,12 +1737,19 @@ run_lock_child(
 	char *const arguments[4] = { (char *)self_path, (char *)"lock-child", (char *)directory, NULL };
 	pid_t pid;
 	int status;
+	int spawned;
+	int waited;
+	int exited;
 
-	if (posix_spawn(&pid, self_path, NULL, NULL, arguments, environ) != 0)
+	/* Start the second process and wait for it. */
+	spawned = posix_spawn(&pid, self_path, NULL, NULL, arguments, environ);
+	if (spawned != 0)
 		return -1;
-	if (waitpid(pid, &status, 0) < 0)
+	waited = waitpid(pid, &status, 0);
+	if (waited < 0)
 		return -1;
-	if (!WIFEXITED(status))
+	exited = WIFEXITED(status);
+	if (!exited)
 		return -1;
 	return WEXITSTATUS(status);
 #endif
@@ -1606,7 +1769,9 @@ start_sleeper(void)
 	STARTUPINFOW startup;
 	PROCESS_INFORMATION process;
 	DWORD units;
+	BOOL created;
 
+	/* Find the program file. */
 	units = GetModuleFileNameW(NULL, exe, 1024);
 	if (units == 0 || units >= 1024)
 		return 0;
@@ -1614,15 +1779,19 @@ start_sleeper(void)
 	memset(&startup, 0, sizeof(startup));
 	startup.cb = sizeof(startup);
 	memset(&process, 0, sizeof(process));
-	if (CreateProcessW(NULL, command, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process) == 0)
+	created = CreateProcessW(NULL, command, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process);
+	if (created == 0)
 		return 0;
 	CloseHandle(process.hThread);
 	return (uintptr_t)process.hProcess;
 #else
 	char *const arguments[3] = { (char *)self_path, (char *)"sleep-child", NULL };
 	pid_t pid;
+	int spawned;
 
-	if (posix_spawn(&pid, self_path, NULL, NULL, arguments, environ) != 0)
+	/* Start the program that waits. */
+	spawned = posix_spawn(&pid, self_path, NULL, NULL, arguments, environ);
+	if (spawned != 0)
 		return 0;
 	return (uintptr_t)pid;
 #endif
@@ -1639,6 +1808,7 @@ wait_sleeper(
 #else
 	int status;
 
+	/* Wait for the program to end. */
 	waitpid((pid_t)token, &status, 0);
 #endif
 }
@@ -1656,6 +1826,7 @@ test_lock(void)
 	int busy;
 	int i;
 
+	/* Two directories for the group. */
 	make_group("lk");
 	make_group("lk2");
 
@@ -1715,6 +1886,8 @@ test_lock(void)
 		attempts[i].lock = NULL;
 		attempts[i].error = -1;
 	}
+
+	/* Eight threads open the same directory's lock at once. */
 	for (i = 0; i < 8; i++)
 		pthread_create(&threads[i], NULL, lock_attempt_main, &attempts[i]);
 	for (i = 0; i < 8; i++)
@@ -1727,6 +1900,8 @@ test_lock(void)
 		if (attempts[i].error == EBUSY && attempts[i].lock == NULL)
 			busy++;
 	}
+
+	/* One thread won and the others found it busy. */
 	CHECK_EQ(winners, 1);
 	CHECK_EQ(busy, 7);
 	for (i = 0; i < 8; i++)
@@ -1741,6 +1916,7 @@ lock_child_main(
 	struct wb_os_lock *lock;
 	int error;
 
+	/* No lock yet; open it. */
 	lock = NULL;
 	error = wb_os_lock_open(directory, &lock);
 	if (error == 0)
@@ -1754,6 +1930,8 @@ main(
 	char **argv)
 {
 	int error;
+	int sleep_child;
+	int lock_child;
 
 	/* The locks' mutex comes from the POSIX threads, in every process of the test. */
 	error = browser_threads_set(browser_threads_posix());
@@ -1761,11 +1939,19 @@ main(
 		return 2;
 
 	/* The second process of the lock test does its one job. */
-	if (argc >= 3 && strcmp(argv[1], "lock-child") == 0)
-		return lock_child_main(argv[2]);
+	lock_child = 1;
+	if (argc >= 3)
+		lock_child = strcmp(argv[1], "lock-child");
+	if (lock_child == 0) {
+		error = lock_child_main(argv[2]);
+		return error;
+	}
 
 	/* The program that only waits, to hold whatever it inherited. */
-	if (argc >= 2 && strcmp(argv[1], "sleep-child") == 0) {
+	sleep_child = 1;
+	if (argc >= 2)
+		sleep_child = strcmp(argv[1], "sleep-child");
+	if (sleep_child == 0) {
 #ifdef _WIN32
 		Sleep(3000);
 #else
@@ -1774,16 +1960,20 @@ main(
 		return 0;
 	}
 
+	/* The harness names the system. */
 	if (argc < 2) {
 		printf("usage: test-os-file posix|win32\n");
 		return 2;
 	}
+
+	/* The system, and the program's own path to start it again. */
 	is_win32 = strcmp(argv[1], "win32") == 0;
 	self_path = argv[0];
 #ifndef _WIN32
 	umask(022);
 #endif
 
+	/* Run every group. */
 	test_arguments();
 	test_read_write();
 	test_replace();

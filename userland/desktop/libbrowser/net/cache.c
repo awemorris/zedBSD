@@ -153,6 +153,8 @@ net_cache_open(
 		free(made);
 		return error;
 	}
+
+	/* The queue and the limit are the cache's own. */
 	made->queue = queue;
 	made->limit = limit;
 	made->written = cache_now();
@@ -221,6 +223,7 @@ net_cache_read(
 	size_t index;
 	int present;
 	int error;
+	int different;
 
 	/* Nothing found yet. */
 	*found = 0;
@@ -255,6 +258,7 @@ net_cache_read(
 	if (error != 0 || !present) {
 		wb_buffer_clear(record);
 
+		/* Look the key up under the lock. */
 		wb_mutex_lock(&cache->lock);
 
 		index = cache_find(cache, key);
@@ -273,6 +277,7 @@ net_cache_read(
 	if (error != 0) {
 		wb_buffer_clear(record);
 
+		/* Look the key up under the lock. */
 		wb_mutex_lock(&cache->lock);
 
 		index = cache_find(cache, key);
@@ -287,7 +292,10 @@ net_cache_read(
 	}
 
 	/* The record of another URL that has the same key is not this URL's response. */
-	if (decoded.url_length != length || memcmp(decoded.url, url, length) != 0) {
+	different = 1;
+	if (decoded.url_length == length)
+		different = memcmp(decoded.url, url, length);
+	if (different != 0) {
 		wb_buffer_clear(record);
 		return 0;
 	}
@@ -363,6 +371,7 @@ net_cache_store(
 
 		wb_mutex_unlock(&cache->lock);
 
+		/* The record is not needed. */
 		wb_buffer_release(&record);
 		return EFBIG;
 	}
@@ -373,12 +382,15 @@ net_cache_store(
 		cache_evict(cache, key, cache->total - cache->total / 10U, 0);
 		error = wb_storage_queue_write(cache->queue, BROWSER_STORAGE_CACHE, key, record.data, record.length);
 	}
+
+	/* A write that failed is reported, and the index record is marked as out of date. */
 	if (error != 0) {
 		/* Whatever the queue made room by dropping is not in the index record yet. */
 		cache->dirty = 1;
 
 		wb_mutex_unlock(&cache->lock);
 
+		/* The record is not needed. */
 		wb_buffer_release(&record);
 		return error;
 	}
@@ -400,9 +412,12 @@ net_cache_store(
 		if (error != 0) {
 			wb_mutex_unlock(&cache->lock);
 
+			/* The record is not needed. */
 			wb_buffer_release(&record);
 			return error;
 		}
+
+		/* Count the new response's bytes. */
 		cache->total += record.length;
 	}
 
@@ -484,6 +499,8 @@ cache_load(
 			return ENOMEM;
 		}
 	}
+
+	/* The record is not needed. */
 	wb_buffer_release(&record);
 
 	/* Records the index does not list are removed, unless the index could not be read at all. */
@@ -534,6 +551,7 @@ cache_sweep(
 	size_t count;
 	size_t index;
 	int error;
+	int index_key;
 
 	/* The keys of the space; a list that fails sweeps nothing. */
 	wb_buffer_init(&keys);
@@ -543,6 +561,8 @@ cache_sweep(
 		wb_buffer_release(&keys);
 		return ENOMEM;
 	}
+
+	/* Any other failure sweeps nothing. */
 	if (error != 0) {
 		wb_buffer_release(&keys);
 		return 0;
@@ -556,6 +576,8 @@ cache_sweep(
 			wb_buffer_release(&keys);
 			return ENOMEM;
 		}
+
+		/* The sorted keys are the index's keys. */
 		for (index = 0; index < cache->count; index++)
 			sorted[index] = cache->entries[index].key;
 		qsort(sorted, cache->count, sizeof(*sorted), cache_compare_keys);
@@ -567,10 +589,13 @@ cache_sweep(
 		listed = NULL;
 		if (sorted != NULL)
 			listed = bsearch(&key, sorted, cache->count, sizeof(*sorted), cache_compare_keys);
-		if (listed == NULL && strcmp(key, CACHE_INDEX_KEY) != 0)
+		index_key = strcmp(key, CACHE_INDEX_KEY);
+		if (listed == NULL && index_key != 0)
 			(void)wb_storage_queue_remove(cache->queue, BROWSER_STORAGE_CACHE, key);
 		key += strlen(key) + 1U;
 	}
+
+	/* The sorted keys are not needed any more. */
 	free(sorted);
 	wb_buffer_release(&keys);
 
@@ -592,6 +617,10 @@ cache_decode_index(
 	size_t length)
 {
 	char key[BROWSER_STORAGE_KEY_MAX + 1];
+	int key_different;
+	int different;
+	size_t found_index;
+
 	const size_t magic_length = sizeof(CACHE_INDEX_MAGIC) - 1U;
 	size_t position;
 	size_t key_length;
@@ -602,7 +631,10 @@ cache_decode_index(
 	int error;
 
 	/* The magic line. */
-	if (length < magic_length || memcmp(bytes, CACHE_INDEX_MAGIC, magic_length) != 0)
+	different = 1;
+	if (length >= magic_length)
+		different = memcmp(bytes, CACHE_INDEX_MAGIC, magic_length);
+	if (different != 0)
 		return 0;
 	position = magic_length;
 
@@ -623,9 +655,11 @@ cache_decode_index(
 
 		/* A key that is not a response's, or one listed already. */
 		valid = wb_storage_key_valid(key);
-		if (!valid || strcmp(key, CACHE_INDEX_KEY) == 0)
+		key_different = strcmp(key, CACHE_INDEX_KEY);
+		if (!valid || key_different == 0)
 			goto corrupt;
-		if (cache_find(cache, key) != (size_t)-1)
+		found_index = cache_find(cache, key);
+		if (found_index != (size_t)-1)
 			goto corrupt;
 
 		/* The size and the two times. */
@@ -685,6 +719,8 @@ cache_encode_index(
 		cache_put64(out, (uint64_t)item->stored, &error);
 		cache_put64(out, (uint64_t)item->used, &error);
 	}
+
+	/* A failure in any field is the record's. */
 	if (error != 0)
 		return error;
 
@@ -821,6 +857,7 @@ cache_evict(
 	size_t index;
 	size_t oldest;
 	int removed;
+	int different;
 
 	/* One response at a time, the one used longest ago. */
 	removed = 1;
@@ -828,7 +865,10 @@ cache_evict(
 		removed = 0;
 		oldest = (size_t)-1;
 		for (index = 0; index < cache->count; index++) {
-			if (keep != NULL && strcmp(cache->entries[index].key, keep) == 0)
+			different = 1;
+			if (keep != NULL)
+				different = strcmp(cache->entries[index].key, keep);
+			if (keep != NULL && different == 0)
 				continue;
 			if (oldest == (size_t)-1 || cache->entries[index].used < cache->entries[oldest].used)
 				oldest = index;
@@ -838,6 +878,7 @@ cache_evict(
 		if (oldest == (size_t)-1)
 			break;
 
+		/* Remove it, and look again. */
 		cache_drop(cache, oldest, 1);
 		removed = 1;
 	}

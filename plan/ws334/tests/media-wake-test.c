@@ -60,6 +60,8 @@ main(
 		fprintf(stderr, "usage: media-wake-test FILE\n");
 		return 2;
 	}
+
+	/* Remember the test's thread. */
 	test_thread = pthread_self();
 
 	/* Opened with a wake: it rings from the engine's thread once the file is open. */
@@ -112,6 +114,8 @@ main(
 		printf("media-wake-test: %d failed\n", failures);
 		return 1;
 	}
+
+	/* Report the pass. */
 	printf("media-wake-test: PASS\n");
 	return 0;
 }
@@ -132,9 +136,13 @@ static void
 wake(
 	void *context)
 {
+	int same;
+
+	/* Count the wake under the lock. */
 	pthread_mutex_lock(&wake_lock);
 	wakes++;
-	if (pthread_equal(pthread_self(), test_thread))
+	same = pthread_equal(pthread_self(), test_thread);
+	if (same)
 		wakes_on_thread++;
 	else
 		wakes_off_thread++;
@@ -150,6 +158,7 @@ wake_count(void)
 {
 	int count;
 
+	/* Read the count under the lock. */
 	pthread_mutex_lock(&wake_lock);
 	count = wakes;
 	pthread_mutex_unlock(&wake_lock);
@@ -168,13 +177,16 @@ wait_opened(
 {
 	struct timespec deadline;
 	time_t end;
+	time_t now;
 
+	/* Give the engine a limited time to open. */
 	end = time(NULL) + WAKE_SECONDS;
 	for (;;) {
 		media_engine_status(engine, status);
 		if (status->state != MEDIA_OPENING)
 			return 0;
-		if (time(NULL) > end)
+		now = time(NULL);
+		if (now > end)
 			return ETIMEDOUT;
 		pthread_mutex_lock(&wake_lock);
 		clock_gettime(CLOCK_REALTIME, &deadline);
@@ -183,6 +195,8 @@ wait_opened(
 			deadline.tv_sec++;
 			deadline.tv_nsec -= 1000000000L;
 		}
+
+		/* Wait for a wake, at most a tenth of a second. */
 		(void)pthread_cond_timedwait(&wake_cond, &wake_lock, &deadline);
 		pthread_mutex_unlock(&wake_lock);
 	}
@@ -194,6 +208,7 @@ pause_ms(
 {
 	struct timespec time;
 
+	/* Sleep for the milliseconds. */
 	time.tv_sec = milliseconds / 1000;
 	time.tv_nsec = (milliseconds % 1000) * 1000000L;
 	nanosleep(&time, NULL);
