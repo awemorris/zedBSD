@@ -60,6 +60,7 @@
 | [ws345-p011](phase011/phase.md) | 受け入れと回帰: 窓の event の遅れの上限（script の loop・connect の掛かり・document.write・resize・decode の間）、ThreadSanitizer、host の試験・js・test262 の部分集合・段 1・cross-build、zedBSD の QEMU、Windows の Wine、Linux の Keiland | planned | p007、p010、p014 |
 | [ws345-p012](phase012/phase.md) | 規約の全文の見直し（AGENTS §2） | planned | p011 |
 | [ws345-p014](phase014/phase.md) | 応答しない頁の問い（約 10 s 走り続ける script に「応答していません: 待つ／止める」、止めるは p004 の打ち切り）。各 shell の UI、窓の側の timer が script の thread の task の番号と始めの時刻を読む | cleared（2026-11-14 Q1、merge b09f1e9c51。host・QEMU 27/27（11-02）・Wine の shell-wine 23 PASS） | p004、p005、p007 |
+| [ws345-p015](phase015/phase.md) | headless の `_OWN` の道（`--threads`）: `browser_view_settle`・`_dump` を `_OWN` でも script の thread への命令にして返事を待つ、main.c と component の client に `--threads`、R12 の両方の mode の回帰。2026-11-14 Q1 の判断で p011 から分けた | planned | p010 |
 | [ws345-p013](phase013/phase.md) | libkeiland の resize の口（Wayland の configure の ack を描画の側の present の直前に、Win32 の modal loop の間の大きさ）。design-reviewer の指摘 4 で足した（番号は表の後ろ、p007 の前にする） | cleared（2026-11-02 P4 q1974-i01: KL_VERSION 109 の `kl_window_set_configure_deferred`・`_configure_take`・`_ack` と `kl_window_on_resize`。host の configure-test・TSan・Wine の resize-wine PASS。cross-build の PASS の行は負荷の時間切れで未取得、[phase.md](phase013/phase.md) の結果） | p001 |
 
 ## Resume point

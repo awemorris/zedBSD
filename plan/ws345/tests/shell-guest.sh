@@ -1,6 +1,6 @@
 #!/bin/sh
 # ws345-p007: the browser's window on the zedBSD QEMU guest (Venus GPU) stays alive while its page's script runs:
-# one script, image -> boot -> run -> collect -> summary.  The image is plan/ws074/tests/config-amd64-browser.mk
+# one script, image -> boot -> run -> collect -> summary.  The image is plan/ws345/tests/config-amd64-browser.mk
 # built from this tree with the guest harness, the ws074 test pages and this directory's pages/ (unless IMAGE is
 # given).  The guest is plan/ws035/tests/zdesktop-guest.sh's Venus guest in its own runtime directory
 # (GUEST_RUNTIME, default build/ws345-p007-run; its SSH port is a free one guest.py picks).  For each case the
@@ -319,7 +319,7 @@ if [ -z "$image" ]; then
 	for page in plan/ws074/tests/pages/* plan/ws345/tests/pages/*; do
 		[ -f "$page" ] && set -- "$@" --file "/usr/share/browser-tests/$(basename "$page")=$page"
 	done
-	if ! timeout 5400 flock /tmp/zedbsd-image-build.lock plan/tools/guest/test-image.sh plan/ws074/tests/config-amd64-browser.mk \
+	if ! timeout 5400 flock /tmp/zedbsd-image-build.lock plan/tools/guest/test-image.sh plan/ws345/tests/config-amd64-browser.mk \
 	    "$build" --file /usr/share/keiland/wallpaper.png=userland/desktop/wallpapers/Birch-Lake.png "$@" > "$out/image.log" 2>&1; then
 		echo "shell-guest: the image did not build (log $out/image.log)"
 		tail -5 "$out/image.log"

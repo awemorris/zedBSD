@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>latency</title>
+<style>
+body { margin: 0; background: #e3efe6; color: #1f3326; font-family: sans-serif; font-size: 20px; }
+h1 { margin: 0; padding: 24px; background: #2f7a4a; color: #ffffff; font-size: 28px; }
+p { margin: 16px 24px; }
+</style>
+</head>
+<body>
+<h1>A page that holds its script: a synchronous request, then a loop</h1>
+<p>A second after the load, a script opens a synchronous request to 192.0.2.1 (TEST-NET-1, which never
+answers) and waits for it until the loader gives up, then loops for 10 seconds. The window's events must
+not wait meanwhile.</p>
+<script>
+setTimeout(function () {
+	var request = new XMLHttpRequest();
+	var end;
+	console.log("latency start");
+	try {
+		request.open("GET", "http://192.0.2.1/never", false);
+		request.send();
+	} catch (error) {
+		console.log("latency xhr " + error.name);
+	}
+	console.log("latency loop");
+	end = Date.now() + 10000;
+	while (Date.now() < end) {
+	}
+	console.log("latency end");
+}, 1000);
+</script>
+</body>
+</html>
