@@ -9,7 +9,7 @@
 | P8 | phase-runner | ws343 fetch の https (q2096-i01) | `/home/awe/zedBSD-worktrees/p8-ws343` / `agent/p8-ws343` | 動いている（2026-11-14 23:2x） | — |
 | P5 | phase-runner | ws329 p002 共通化 (q2092-i01) | `/home/awe/zedBSD-worktrees/p5-ws329b` / `agent/p5-ws329b` | 動いている（2026-11-14 23:3x） | — |
 | P6 | phase-runner-high | ws302 設計の改訂と p002 (q2093-i01) | `/home/awe/zedBSD-worktrees/p6-ws302` / `agent/p6-ws302` | 動いている（2026-11-14 23:3x） | — |
-| P3 | phase-runner-mid | ws345 p010・p014 の残り (q2090-i01) | `/home/awe/zedBSD-worktrees/p3-ws345` / `agent/p3-ws345` | 動いている（2026-11-14 23:0x） | — |
+| P3 | phase-runner-mid | ws345 p011 受け入れ (q2097-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p011` / `agent/p3-ws345p011` | 動いている（2026-11-14 23:3x） | — |
 | P4 | phase-runner | ws328 p001 設計 (q2091-i01) | `/home/awe/zedBSD-worktrees/p4-ws328` / `agent/p4-ws328` | 動いている（2026-11-14 23:0x） | — |
 | P1 | phase-runner | ws353 p016 試験の再開 (q2088-i01) | `/home/awe/zedBSD-worktrees/p1-ws353n` / `agent/p1-ws353n` | 動いている（2026-11-14 21:3x、5330 を割当） | — |
 | Sonnet | phase-runner-low | ws335 p043 (q2053-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p043` / `agent/s-ws335-p043` | 動いている（2026-11-13 22:3x） | — |

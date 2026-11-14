@@ -13,7 +13,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS353](ws353/ws.md) | 待ち方の作り直し | q2088: [p016](ws353/phase016/phase.md) 最後の試験の再開（QEMU の流し直し、5330 の idle・入力） | 規約の見直しの Phase、WS353 の完了の判定 |
 | P2 | [WS336](ws336/ws.md) | 自前の ssh・sshd | q2094: p026 試験の C の規約の見直し（p025 cleared） | WS336 を completed に |
-| P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2090: 乖離の確かめ、p010・p014 の残り | p011 受け入れ、p012 規約の見直し |
+| P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2097: p011 受け入れと回帰（p010・p014 cleared） | p012 規約の見直し → completed |
 | P4 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2091: 乖離の確かめ、p001 設計 | 実装の Phase（Sonnet） |
 | P5 | [WS329](ws329/ws.md) | H.264 の software の encoder | q2092: p002 共通化の refactor | p003 header と骨格 → 実装（Sonnet） |
 | P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2093: 設計の改訂（第 3 版） | p002 config・型・統計 → p003 sched の口 |
