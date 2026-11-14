@@ -30,13 +30,13 @@
 | --- | --- | --- |
 | P1 | q2113 | [WS353](ws353/ws.md)（待ち方の作り直し）p017 規約の見直し。p016 cleared |
 | agy | — | [WS347](ws347/ws.md) RTL の reset は 10 回目（amaterrace-gpu 38593b0e）まで。11 回目は Q1 が 10 回目を確かめてから |
-| P2 | q2111 | [WS321](ws321/ws.md)（Pi 5 の H.265）試験の path と p004 規約の見直し |
-| P3 | q2097 | [WS345](ws345/ws.md)（ブラウザの thread の分け方）p011 受け入れと回帰。p010・p014 は cleared |
-| P4 | q2108 | [WS299](ws299/ws.md)（5330 の NVMe の速さ）p007 の QEMU の段 |
+| P2 | q2117 | [WS328](ws328/ws.md) p003 flatten（Sonnet） |
+| P3 | q2115 | [WS345](ws345/ws.md) p015 headless の _OWN の道（p011 cleared） |
+| P4 | q2116 | [WS068](ws068/ws.md)（EGL・GL を Vulkan の上に）試験の config と p045 |
 | P5 | q2114 | [WS300](ws300/ws.md)（NVMe・VMD の低電力）記録の移しと p003 |
 | P6 | q2109 | [WS302](ws302/ws.md) p003 の締め → p004 DTB の本体 |
 | P7 | q2107 | [WS334](ws334/ws.md)（Windows 版ブラウザ）p035 の続き（試験の C、共有の file の block） |
-| P8 | q2112 | [WS341](ws341/ws.md)（仮想 GPU）p001 設計 |
+| P8 | q2118 | [WS349](ws349/ws.md)（Pi 5 の HDMI の音）設計の review と改訂 |
 
 - host は 2026-11-14 19:30 頃に再起動。NVMe の書き込みは 1.0 GB/s に戻った（止めた時は 22 MB/s）。merge していない branch の diff は [backup-20261114/](backup-20261114/README.md)。
 <!-- master:agents:end -->
@@ -104,7 +104,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-438 · q2115 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-438 · q2119 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

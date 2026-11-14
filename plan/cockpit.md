@@ -12,13 +12,13 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS353](ws353/ws.md) | 待ち方の作り直し | q2113: p017 規約の見直し（p016 cleared） | WS353 を completed に |
-| P2 | [WS321](ws321/ws.md) | Pi 5 の H.265 decode | q2111: 試験の path と p004 規約の見直し | WS321 を completed に |
-| P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2097: p011 受け入れと回帰（p010・p014 cleared） | p012 規約の見直し → completed |
-| P4 | [WS299](ws299/ws.md) | 5330 の NVMe の速さ | q2108: p007 の QEMU の段（WS328 p002 は cleared） | 5330 の段は P1 の後 |
+| P2 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2117: p003 flatten（Sonnet） | p006〜p008・p017 |
+| P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2115: p015 headless の _OWN の道（p011 cleared） | p012 規約の見直し → completed |
+| P4 | [WS068](ws068/ws.md) | EGL・GL を Vulkan の上に | q2116: 試験の config と p045（Venus） | p047〜 |
 | P5 | [WS300](ws300/ws.md) | NVMe・VMD の低電力 | q2114: 記録を main に移し p003（HMB の停止） | p005 APST、5330 は BUG-428・429 の後 |
 | P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2109: p003 の締め → p004 DTB の本体 | p005・p006（5330 の評価） |
 | P7 | [WS334](ws334/ws.md) | Windows 版ブラウザ | q2100: p035 規約の見直し（p037 cleared、不具合 2 件直した） | WS334 を completed に |
-| P8 | [WS341](ws341/ws.md) | 仮想 GPU の枠組み | q2112: p001 設計 | 実装の Phase |
+| P8 | [WS349](ws349/ws.md) | Pi 5 の HDMI の音 | q2118: 設計の review と改訂 | p002 以後（Pi 5 は p005） |
 | agy | [WS347](ws347/ws.md) | Amaterrace GPU（RTL） | reset の 10 回目（38593b0e）まで済み | Q1 が 10 回目を確かめて 11 回目 |
 | Q1 | — | — | main の checkout で merge・Queue・判断の振り分け | WS347 の 10 回目の確かめ |
 

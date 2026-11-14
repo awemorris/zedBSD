@@ -28,7 +28,7 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 | --- | --- | --- | --- | --- |
 | [ws328-p001](phase001/phase.md) | 設計（module の分け方、header と骨格、試験の道具、実装の Phase、design-reviewer） | Opus（P4） | cleared（2026-11-15 Q1、3c892233f8 を main に merge c9d22fa09d。2 回の design-reviewer の 83 件を全部反映、header の基点 57bf94e62f、check-skeleton・harness PASS） | — |
 | [ws328-p002](phase002/phase.md) | vec-base・vec-path（行列・path・弧・bbox・atan2・exp） | Sonnet | cleared（2026-11-15 Q1、907f2af3ba を main に merge 4360704e39。test-base 204220・test-path 348081 checks、cc・clang・ASan・UBSan PASS、check-skeleton PASS、壊す 30 通り中 28 FAIL・2 は等価） | p001 |
-| [ws328-p003](phase003/phase.md) | vec-flatten（平坦化） | Sonnet | planned | p002 |
+| [ws328-p003](phase003/phase.md) | vec-flatten（平坦化） | Sonnet | in-progress（2026-11-15 P2 q2117） | p002 |
 | [ws328-p004](phase004/phase.md) | vec-stroke（線の輪郭・join・cap・dash） | Sonnet | planned | p003 |
 | [ws328-p005](phase005/phase.md) | vec-raster（coverage の tile） | Sonnet | planned | p003 |
 | [ws328-p006](phase006/phase.md) | vec-gradient（補間・hint・ramp・t の計算） | Sonnet | planned | p002 |

@@ -4,13 +4,13 @@
 [history/agents-registry-through-20261026.md](../history/agents-registry-through-20261026.md)。
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P2 | phase-runner | ws321 p004 (q2111-i01) | `/home/awe/zedBSD-worktrees/p2-ws321` / `agent/p2-ws321` | 動いている（2026-11-15 01:1x） | — |
+| P2 | phase-runner-low | ws328 p003 flatten (q2117-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p003` / `agent/p2-ws328p003` | 動いている（2026-11-15 01:5x） | — |
 | P7 | conformance-reviewer | ws334 p035 の続き (q2107-i01) | `/home/awe/zedBSD-worktrees/p7-ws334d` / `agent/p7-ws334d` | 動いている（2026-11-15 00:5x） | — |
-| P8 | phase-runner | ws341 p001 設計 (q2112-i01) | `/home/awe/zedBSD-worktrees/p8-ws341` / `agent/p8-ws341` | 動いている（2026-11-15 01:1x） | — |
+| P8 | phase-runner | ws349 設計の review と改訂 (q2118-i01) | `/home/awe/zedBSD-worktrees/p8-ws349` / `agent/p8-ws349` | 動いている（2026-11-15 01:5x） | — |
 | P5 | phase-runner-high | ws300 記録の移しと p003 (q2114-i01) | `/home/awe/zedBSD-worktrees/p5-ws300` / `agent/p5-ws300` | 動いている（2026-11-15 01:3x） | — |
 | P6 | phase-runner-high | ws302 p003 の締めと p004 (q2109-i01) | `/home/awe/zedBSD-worktrees/p6-ws302c` / `agent/p6-ws302c` | 動いている（2026-11-15 01:1x） | — |
-| P3 | phase-runner-mid | ws345 p011 受け入れ (q2097-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p011` / `agent/p3-ws345p011` | 動いている（2026-11-14 23:3x） | — |
-| P4 | phase-runner | ws299 p007 の QEMU (q2108-i01) | `/home/awe/zedBSD-worktrees/p4-ws299` / `agent/p4-ws299` | 動いている（2026-11-15 01:0x） | — |
+| P3 | phase-runner-mid | ws345 p015 (q2115-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p015` / `agent/p3-ws345p015` | 動いている（2026-11-15 01:5x） | — |
+| P4 | phase-runner-mid | ws068 試験の config と p045 (q2116-i01) | `/home/awe/zedBSD-worktrees/p4-ws068` / `agent/p4-ws068` | 動いている（2026-11-15 01:5x） | — |
 | P1 | conformance-reviewer | ws353 p017 規約の見直し (q2113-i01) | `/home/awe/zedBSD-worktrees/p1-ws353p017` / `agent/p1-ws353p017` | 動いている（2026-11-15 01:3x） | — |
 | Sonnet | phase-runner-low | ws335 p043 (q2053-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p043` / `agent/s-ws335-p043` | 動いている（2026-11-13 22:3x） | — |
 | P1 | phase-runner-high | ws347 p006 RTL の CAPS (q2010-i01) | `/home/awe/amaterrace-worktrees/p1-ws347rtl` / `ws347-rtl`（amaterrace-gpu） | 停止（2026-11-11 12:37 ユーザーの指示、未 commit の RTL の変更あり、merge しない） | — |
