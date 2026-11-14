@@ -28,10 +28,10 @@ Pi 5（と Pi 500）の HDMI から音を出す経路・所有の境界・名前
 - **D2 書く register の境界**（これ以外は読むだけ、firmware の設定を壊さない）:
   - 書く: `hd` の region の port ごとの MAI（CTL・THR・FMT・SMP）、HDMI の core の MAI_CHANNEL_MAP・MAI_CONFIG・AUDIO_PACKET_CONFIG・CRP_CFG・CTS_0・CTS_1、packet RAM の audio InfoFrame の slot（4 番）とその slot の enable の bit（RAM_PACKET_CONFIG の bit 4 だけの read-modify-write）、DVP の MISC_CONFIG の自分の port の gate の bit（read-modify-write）、DMA の 1 channel。
   - 読むだけ: SCHEDULER_CONTROL（HDMI か DVI か）、HOTPLUG、RAM_PACKET_CONFIG の全体の enable（bit 16）、RAM_PACKET_STATUS、RM_OFFSET・PHY の VCOCLK_DIV と REFCLK、DVP の SW_INIT、HVS の VERSION。
-  - 触らない: DVP の SW_INIT への書き込み（reset）、PHY の設定、timing、CSC、AVI など他の packet、CEC、DDC。
+  - 触らない: DVP の SW_INIT への書き込み（reset）、各 port の `dvp` の region（CLOCK_STOP +0x0bc を含む）、PHY の設定、timing、CSC、AVI など他の packet、CEC、DDC。
   - firmware（VPU）がこれらを実行中に書くか、read-modify-write が firmware の書き込みと競合しうるかは未観測（Q5）。driver の側の書き込みは 1 つの spin lock の下でだけ行う。
-- **D2a 読む前の安全**: 使っていない port・抜かれた port の HDMI の clock を firmware が止めていると、その register の読みが SError か bus の停止になりうる（Linux は HDMI の register に触る前に必ず runtime PM で clock を入れる。推測を含む）。port の register は、DVP の SW_INIT でその port の reset が解けている時だけ読む。attach の各段の後に `drv_rpi5_serror_check()` を呼ぶ（`rpi5.c` の慣例）。使っていない port の読みが安全かは p004 の probe で確かめ（Q8）、安全でなければ firmware の mailbox の clock の状態（`hdmi` の clock）を読んでから触る形に直す。
-- **D3 port**: 起動の時に HDMI0、HDMI1 の順に「reset が解けている、SCHEDULER_CONTROL が HDMI の mode、HOTPLUG が接続」の最初の 1 port を選び、`/dev/dsp` を 1 つだけ出す。起動の時にどちらも当てはまらなければ登録しない（log を 1 行、audiod は今どおり「no device」で動く）。登録の後で DVI・未接続になった時は D10 の「software の時計」で動く（登録は取り消さない）。二つの画面の時の扱いと「起動の後に画面を挿した時」は製品の判断（U2・U3）。
+- **D2a 読む前の安全**: 使っていない port・抜かれた port の HDMI の clock を firmware が止めていると、その register の読みが SError か bus の停止になりうる（Linux は HDMI の register に触る前に必ず runtime PM で clock を入れる。推測を含む）。port の register は、DVP の SW_INIT でその port の reset が解けている時だけ読む（SW_INIT の bit 1 が hdmi0、bit 2 が hdmi1、1 が reset の中。[values.md](../values.md) V17）。attach の各段の後に `drv_rpi5_serror_check()` を呼ぶ（`rpi5.c` の慣例）。使っていない port の読みが安全かは p004 の probe で確かめ（Q8）、安全でなければ firmware の mailbox の clock の状態（`hdmi` の clock）を読んでから触る形に直す。
+- **D3 port**: 起動の時に HDMI0、HDMI1 の順に「reset が解けている、SCHEDULER_CONTROL が HDMI の mode、HOTPLUG が接続」の最初の 1 port を選び、`/dev/dsp` を 1 つだけ出す。起動の時にどちらも当てはまらなければ登録しない（log を 1 行、audiod は今どおり「no device」で動く）。登録の後で DVI・未接続になった時は D10 の「software の時計」で動く（登録は取り消さない）。二つの画面の時の扱いと「起動の後に画面を挿した時」は製品の判断（U2・U3）。3 つの dtb で HDMI の node は status disabled なので、status で node を除外しない（[values.md](../values.md) V01）。
 - **D4 stepping**: HVS の VERSION（0x53 は C 系、0x54 は D0。`hvs6.c` と同じ読み）で決める。DREQ は stepping の表（C: HDMI0 10・HDMI1 17、D0: 12・13。firmware 3d301dd の 3 つの dtb の値）と tree の cell を照らし、食い違えば stepping の表を使い log に残す。MAI_THR の field の幅も stepping で違う。HVS の VERSION がどちらでもなければ登録しない。
 - **D5 DMA**: tree の `brcm,bcm2712-dma` のうち `brcm,dma-channel-mask` に入る channel（0x7c0 なら 6〜10）の大きい番号から 1 つ。channel の番号は node の reg の**物理番地**から（0x10600 ÷ 0x100 の下位 4 bit が最初の channel）、channel ごとに 0x100。割り込みは `interrupt-names` の `dmaN`。40 bit の形の control block の環を fragment ごとに 1 つ、各々 INTEN と WAIT_RESP、最後が先頭へ戻る。source は増やし、destination は MAI の data の register（増やさない、D_DREQ と DREQ の番号）。CS は ACTIVE・PROT と cell の QoS・panic QoS（各 4 bit）。source の幅と burst は cell の印どおり（burst は SRCI と DESTI の両方、実機で不調なら 32 bit・burst 無しへ落とす）。割り込みで INT を消す時は INT・ACTIVE・PROT と QoS を一緒に書く（INT だけを書くと channel が止まる）。止め方: CB が 0 なら止まっている。そうでなければ ACTIVE を落とし TRANSACTIONS が消えるのを上限つきで待ち、CS を PROT に戻し DEBUG の RESET、CB が 0 になったのを確かめてから戻る（時間切れでも reset の後に確かめる）。
 - **D6 番地**: MAI の data の CPU の物理番地は `hd` の reg（soc の ranges で 0x10_7c720000）＋ port の DATA の offset。BCM2712 の DMA から見た番地は axi の `dma-ranges` が恒等なので同じ値（40 bit、上位 8 bit は DESTI に）。MAI の番地と RAM が dma-ranges の恒等の範囲に入る事を attach で確かめ、入らなければ登録しない。DMA の device は恒等なので `drv_dma_device_create`（40 bit、`segment_boundary` 4 GiB、非 coherent）。ring と control block が 4 GiB の境を跨がない（SRC と SRCI を別々に読むため）。
@@ -40,7 +40,7 @@ Pi 5（と Pi 500）の HDMI から音を出す経路・所有の境界・名前
   - subframe: bit 0〜3 preamble（block の始め 0x8、左 0x2、右 0x4）、bit 4〜27 に 24 bit の sample（16 bit は bit 12〜27、下位は 0）、V=0・U=0・C は channel status、bit 31 は bit 4〜30 の偶数 parity。
   - channel status の 192 frame の block の位置は ring の中の位置では決まらない（8192 frame は 192 の倍数でない）ので、fragment の通し番号（64 bit）× 1024 から求める。通し番号は割り込みの回数ではなく SRC の位置と前回の位置の差から進める（取りこぼした割り込みでもずれない）。同じ fragment を変換し直しても同じ値になる。channel status: 民生・LPCM・48 kHz・語長 16 bit（最大 20）。
   - 位置（`position`）は subframe の ring の中の offset ÷ 2。ring の終わりの番地を指していれば 0。
-- **D8 N と CTS**: CTS = f_TMDS × N ÷ (128 × 48000)。f_TMDS（TMDS の文字の rate。deep color も含む規格どおりの値）は PHY の読み戻し: RM_OFFSET の bit 31（OFFSET_ONLY）を除いた値で VCO = RM × f_ref ÷ 2^21（f_ref は PLL_REFCLK の REFFRQ、MHz）、f_TMDS = VCO ÷ (VCODIV × 10)。VCODIV_EN が 0、OFFSET_ONLY が立っていない、25〜600 MHz の外のどれかなら「分からない」として登録しない（Linux は pixel clock を使うが、規格の CTS は TMDS の文字の rate による。8 bit の色では同じ）。N は規格の表（HDMI 1.4 の 48 kHz の推奨の N。1.001 の rate、例えば 74.25/1.001 MHz の N 11648 と CTS 210937.5）から選び、CTS が整数にならない時は CTS_0 と CTS_1 に前後の整数を書く（交互に使う period の field は p002 で出典を探す。無ければ近い整数 1 つ、数 ppm のずれは Q3 の長い再生で観る）。CRP_CFG は Linux と同じく EXTERNAL_CTS_EN を立てて N を書く（Linux の header の comment はこの bit を「N・audio の clock・video の clock から CTS を作る」と書き、名前と意味が食い違う。p005 で立てた時と落とした時の両方を試す、Q3）。
+- **D8 N と CTS**: CTS = f_TMDS × N ÷ (128 × 48000)。f_TMDS（TMDS の文字の rate。deep color も含む規格どおりの値）は PHY の読み戻し: RM_OFFSET の bit 31（OFFSET_ONLY）を除いた値で VCO = RM × f_ref ÷ 2^21（f_ref は PLL_REFCLK の REFFRQ、MHz）、f_TMDS = VCO ÷ (VCODIV × 10)。VCODIV_EN が 0、OFFSET_ONLY が立っていない、25〜600 MHz の外のどれかなら「分からない」として登録しない（Linux は pixel clock を使うが、規格の CTS は TMDS の文字の rate による。8 bit の色では同じ）。N は規格の 48 kHz の表（1.001 の rate、例えば 74.25/1.001 MHz は N 11648・CTS 140625。表は [values.md](../values.md) の「N と CTS の表」）から選ぶ。8 bit の色の表の rate では CTS は整数。表に無い rate で整数にならない時は近い整数（CTS_0 と CTS_1 を交互に使う period の field は出典に無いので、両方に同じ値を書く。Linux も同じ。数 ppm のずれは Q3 の長い再生で観る）。CRP_CFG は Linux と同じく EXTERNAL_CTS_EN を立て、N は 6144（Linux の header の comment はこの bit を「N・audio の clock・video の clock から CTS を作る、N は 128 で割り切れること」と書く。表の N の 5824・6864 は 128 で割り切れない）。bit を落とした時（software の CTS）は表の N と CTS を書く。p006 で両方を試す、Q3。
 - **D9 MAI の clock**: tree の `audio` の clock（108 MHz の固定 clock）÷ 48000 を最良の有理近似で MAI_SMP の N・M に（108 MHz なら N=2250、M=1）。
 - **D10 監視の thread と software の時計**: 割り込みに頼らない監視の kernel thread（`kthread_create`、`rpi5-fan.c` と同じ形）を 1 つ持ち、再生の間だけ 10 ms ごとに起きる。
   - 確かめる物（読むだけ）: SCHEDULER_CONTROL が HDMI、HOTPLUG、CRP_CFG と CTS が自分の値、RAM_PACKET_CONFIG の bit 4、MAI_CTL の ENABLE と ERRORE・ERRORF、MAI_SMP・FMT・THR、DVP の gate、PHY の読み戻しの f_TMDS、DMA の SRC が進んでいるか。
@@ -64,7 +64,7 @@ Pi 5（と Pi 500）の HDMI から音を出す経路・所有の境界・名前
 
 ## 値の表（出典。code にする時は block ごとに「Values referenced:」、手順は「Procedure referenced:」で書く）
 
-出典の版: Raspberry Pi Linux `rpi-6.12.y`（ab4372076bb8、2026-11-09）、alsa-lib master（f44e0abd5382、2026-10-19）、raspberrypi/firmware 3d301dd の dtb（zedBSD-firmware 2670dc1 の `rpi5-boot/`、dtc で読んだ）。code・comment・構造・名前は写さない（[guardrail](../../guardrail.md) の「MIT・GPL の出典のデータの引用」）。行番号つきの表は p002 で `plan/ws349/values.md` に作る。
+出典の版: Raspberry Pi Linux `rpi-6.12.y`（ab4372076bb8、2026-11-09）、alsa-lib master（f44e0abd5382、2026-10-19）、raspberrypi/firmware 3d301dd の dtb（zedBSD-firmware 2670dc1 の `rpi5-boot/`、dtc で読んだ）。code・comment・構造・名前は写さない（[guardrail](../../guardrail.md) の「MIT・GPL の出典のデータの引用」）。行番号つきの表と SHA-256 は [values.md](../values.md)（p002、2026-11-15 に照合し、N・CTS の 1 行を訂正、DVP の reset の bit・channel status の byte・EXTERNAL_CTS_EN の N の条件を補った）。
 
 | 値 | 中身 | 出典 |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ Pi 5（と Pi 500）の HDMI から音を出す経路・所有の境界・名前
 | SCHEDULER_CONTROL・HOTPLUG | MODE_HDMI bit 0、CONNECTED bit 0 | `vc4_regs.h` |
 | RAM_PACKET_CONFIG | 全体の ENABLE bit 16、slot ごとの bit | `vc4_regs.h` |
 | RM_OFFSET の形 | VCO × 2^21 ÷ f_ref（9.22 の固定小数点を 2 bit 落とした値）、f_ref 54 MHz | `vc4_hdmi_phy.c` |
-| DVP | MISC_CONFIG +0x08 の bit 3（hdmi0）・4（hdmi1）が 1 で clock を止める。SW_INIT +0x04 が reset | `clk-bcm2711-dvp.c`、dtb（`clock@7c700000`、親 `clk-108M` 108000000 Hz） |
+| DVP | MISC_CONFIG +0x08 の bit 3（hdmi0）・4（hdmi1）が 1 で clock を止める。SW_INIT +0x04 が reset（bit 1 hdmi0・bit 2 hdmi1、1 が reset の中） | `clk-bcm2711-dvp.c`、dtb（`clock@7c700000`、親 `clk-108M` 108000000 Hz） |
 | DMA の node | `dma@10600`（axi、0x10_0001_0600、0x600）、mask 0x7c0、interrupts `dma6`〜`dma11` が SPI 86〜91 | dtb |
 | DMA の cell | 下位 5 bit が DREQ。Linux の取り決めの印: bit 16〜19 QoS、20〜23 panic QoS、24 source を 128 bit、25 destination を 128 bit、27 WAIT_RESP を付けない、28 WAIT_FOR_WRITES、29 DISDEBUG、30 burst（長さ 3）。`0x41fa000c` は DREQ 12、QoS 0xa、panic 0xf、128 bit の source、burst、WAIT_RESP を付ける | `bcm2835-dma.c` |
 | DREQ | C1: hdmi0 10、hdmi1 17。D0・Pi 500: 12、13 | 3 つの dtb |
@@ -94,9 +94,9 @@ Pi 5（と Pi 500）の HDMI から音を出す経路・所有の境界・名前
 | SRCI・DESTI | 上位 8 bit の番地 0〜7、burst 長 8〜11、INC 12、幅 13〜14（0 = 32 bit、2 = 128 bit） | `bcm2835-dma.c` |
 | control block | 8 word: TI、SRC、SRCI、DEST、DESTI、LEN、NEXT_CB（>> 5）、予約。32 byte 揃え | `bcm2835-dma.c` |
 | IEC 60958 の subframe | preamble 0〜3（Z 0x08、X 0x02、Y 0x04）、sample 4〜27、V 28、U 29、C 30、P 31（4〜30 の偶数 parity） | alsa-lib `src/pcm/pcm_iec958.c`、IEC 60958-1 |
-| channel status | 民生、LPCM、Fs 48 kHz の code（byte 3 の下位 4 bit = 0b0010）、語長（byte 4 = 0b0010、16 bit） | IEC 60958-3（Linux の `include/sound/asoundef.h` の値と照らす、p002） |
+| channel status | byte 0 = 0x04（民生、LPCM、著作権の主張なし）、byte 1 = 0、byte 2 = 0、byte 3 = 0x02（48 kHz）、byte 4 = 0x02（語長 16 bit、最大 20）、残り 0 | IEC 60958-3（Linux の `asoundef.h` と `sound/core/pcm_iec958.c` の民生の既定、[values.md](../values.md) V27） |
 | Audio InfoFrame | 型 0x84、版 1、長さ 10、checksum は全 byte の和が 0、CC = channel 数 − 1、CA = 0 | CEA-861 |
-| N・CTS | 48 kHz の N の推奨の表（6144、1.001 の rate の値）、CTS = f_TMDS × N ÷ (128 × fs) | HDMI 1.4 の audio clock regeneration（p002 で表を写す） |
+| N・CTS | 48 kHz の N の表（6144、1.001 の rate は 6864・11648・5824、297 MHz は 5120）、CTS = f_TMDS × N ÷ (128 × fs) | HDMI 1.4 の audio clock regeneration（表と出典は [values.md](../values.md)、`dw-hdmi.c` の 48 kHz の N） |
 
 手順の出典（「Procedure referenced:」）: MAI の始め・止め・reset の順（`vc4_hdmi.c` の audio の startup・prepare・shutdown・reset）、InfoFrame の書き込み（同 write_infoframe・stop_packet）、40 bit の DMA の始め・割り込みの消し方・止め方（`bcm2835-dma.c` の start・callback・abort）。
 
@@ -104,7 +104,7 @@ Pi 5（と Pi 500）の HDMI から音を出す経路・所有の境界・名前
 
 - Q1 試験の Pi 5 の stepping（HVS の VERSION）と firmware が渡す dtb、FAT の dtb と overlay。tools.md の「D0 の chip に C1 の dtb」が正しければ tree の DREQ（10）は誤り。p006 では `device_tree=` で C1・D0 の両方の dtb で起動し照合の経路を試す（config.txt は試験の image の中で変える）。
 - Q2 firmware が PHY を Linux と同じ形（RM_OFFSET・VCODIV）で設定するか。読み戻しの f_TMDS が mode と合うか。
-- Q3 CTS: EXTERNAL_CTS_EN の意味、software の CTS と hardware の CTS のどちらで音切れが無いか、1.001 の mode の数 ppm のずれ（長い再生）。
+- Q3 CTS: EXTERNAL_CTS_EN の意味（立てて N 6144、落として表の N・CTS）、software の CTS と hardware の CTS のどちらで音切れが無いか、1.001 の mode の数 ppm のずれ（長い再生）。
 - Q4 DVI・未接続の時に MAI が FIFO を読むか（D10 の software の時計はどちらでも動く作り）。
 - Q5 firmware が hotplug の時に HDMI の register（packet・CRP・MAI）を書き換えるか、RAM_PACKET_CONFIG の全体の enable が立っているか、DVI の mode を選ぶ事があるか。
 - Q6 audio の gate（MISC_CONFIG）が起動の時に開いているか。

@@ -3,7 +3,7 @@
 # ws349-p002 値の照合と出典の表
 
 - WS: [ws.md](../ws.md)。設計: [p001](../phase001/phase.md)。
-- 状態: planned
+- 状態: cleared（Q1 の受け入れ待ち。2026-11-15 P8、Queue q2124-i01、worktree `/home/awe/zedBSD-worktrees/p8-ws349p002`、branch `agent/p8-ws349p002`、基点 main dc991a7f65）
 - 担当の定義の推し: phase-runner（読みと表、code は書かない）。
 
 ## 目的
@@ -36,3 +36,12 @@ p001 の値の表の全部を出典の行で確かめ、code の block に「Val
 
 - 自分で数える: values.md の行の数と p001 の値の表の行の数の対応。
 - 未実施の確かめは「未確認」と書く。
+
+## 結果（2026-11-15 P8）
+
+- 作った物: [values.md](../values.md)（出典の file 20 個の版・SHA-256・license、値の表 V01〜V35、N と CTS の表、手順の出典、C1 と D0 の dtb の差、p001 の訂正と補い）。
+- 出典の取得: raspberrypi/linux ab4372076bb840600e522ae776887ae2bc488fa6 の 16 file（手順の 10 file と、照合に要った `reset-simple.c`・`sound/core/pcm_iec958.c`・`hdmi-codec.c`・`drivers/video/hdmi.c`・`dw-hdmi.c`・`drm_hdmi_helper.c`）、alsa-lib f44e0abd5382f519cc6fa69850c34e6e9c09d5f5 の `pcm_iec958.c`、raspberrypi/firmware 3d301dd の dtb 3 つ（SHA-256 は `mk/platform-rpi5/firmware.mk` の値と一致）。置き場所は worktree の `build/tmp/ws349-sources/`（tree に入れていない）。
+- 照合: p001 の値の表 29 行を V01〜V29 で 1 行ずつ確かめた（一致 21、補いを含む一致 7、訂正 1）。hdmi1 の field の表は MAI と VID_CTL・FRAME_COUNT の他は hdmi0 と同じ offset。MAI_THR の C と D0 の field、HVS の VERSION 0x53・0x54 と Linux の C・D0 の決め方（`vc4_drv.c` の `brcm,bcm2712-vc6` を C とし `vc4_hvs.c` で VERSION 0x54 なら D0）を確かめた。Linux `vc4_hdmi.c` は N・CTS の表を持たない（N = 128 × fs ÷ 1000）。CTS_0・CTS_1 の period の field は出典に無い。
+- p001 の訂正（同じ commit）: 74.25/1.001 MHz の 48 kHz の CTS（210937.5 → 140625、210937.5 は 32 kHz の値）。補い: DVP の SW_INIT の bit（hdmi0 1、hdmi1 2、1 が reset）、HDMI の node が 3 つの dtb で status disabled、EXTERNAL_CTS_EN の「N は 128 で割り切れる」（立てる時は N 6144、表の N は落とした時）、channel status の byte、各 port の CLOCK_STOP は触らない。
+- 未確認: 規格書（HDMI 1.4b・IEC 60958-3・CEA-861）の本文（手元に無い。297/1.001・594/1.001 MHz の N・CTS は出典の file が無く、整数になる事だけを計算で確かめた）、firmware が dtb の status を書き換えるか（p004）、EXTERNAL_CTS_EN の本当の意味（p006）。
+- code は書いていない。build・試験は無し。
