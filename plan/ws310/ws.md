@@ -4,7 +4,7 @@
 
 Status: incomplete（2026-10-31: p001 設計済み。2026-11-01 09:31 問いの答えを受けた、実装は担当の割当の後、最初の試験はデスクトップ）
 Primary Milestone: MG004
-Resume point: p001 の設計を終えた（[design.md](design.md)、review は [design-review.md](design-review.md)）。次は Q1 の確かめと [user-questions.md](user-questions.md) の Q310-1〜6 の答え、その後 p002（aml-host の option）と p004（codec）を並べて。
+Resume point: 2026-11-15 P2（q2106-i01）が design.md を今の tree と Q310 の答えに合わせて直し（冒頭の「第 2 版の後の更新」）、p004（codec）と p002（aml-host の option と `_OSC` の ASL の試験）を実装した。次は p003（実機の入力の読み。最初の実機はデスクトップ 10.0.10.3、その表は repo に無い）と p005（統合、codec を kernel の build に入れる mk の差分はユーザーの承認待ち、[phase004](phase004/phase.md)）。
 
 ## ユーザーの決定（原文、2026-10-29）
 
@@ -20,7 +20,7 @@ WS301 の Q301-3（ACPI の _OSC を呼ぶか）への回答:「最終的には�
 
 ## 目標
 
-zedBSD が ACPI の _OSC で OS の能力を firmware に申告し、firmware が出す情報（_CPC など）を使えるようにする。呼ぶ前と後で、電源・PCIe・熱・CPU の性能などシステム全体の挙動に問題が無いことを、実機（まず 5330）で厳重に確かめる。
+zedBSD が ACPI の _OSC で OS の能力を firmware に申告し、firmware が出す情報（_CPC など）を使えるようにする。呼ぶ前と後で、電源・PCIe・熱・CPU の性能などシステム全体の挙動に問題が無いことを、実機（2026-11-01 の答えで、まずデスクトップ 10.0.10.3、次に 5330）で厳重に確かめる。
 
 ## Phase
 
