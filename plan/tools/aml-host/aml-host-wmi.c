@@ -46,7 +46,6 @@ static void print_object(const struct drv_acpi_object *object, unsigned depth);
 static void print_smi(unsigned long before);
 static int split_guid(const char *request, char *guid, const char **rest);
 static int parse_hex(const char *text, uint8_t **bytes, size_t *length);
-static struct drv_acpi_object *parse_argument(const char *text);
 
 /*
  * Attaches the WMI mapping devices as the kernel does and lists the blocks.
@@ -284,7 +283,7 @@ host_eval_args(
 		}
 
 		/* Makes the argument. */
-		arguments[count] = parse_argument(word);
+		arguments[count] = host_parse_argument(word);
 		if (arguments[count] == NULL) {
 			fprintf(stderr, "--eval-args: the argument is not i:NUMBER, s:TEXT or b:HEX: %s\n", word);
 			error = 1;
@@ -324,6 +323,53 @@ host_eval_args(
 
 	/* Succeeded: the result is printed. */
 	return 0;
+}
+
+/*
+ * Makes one --eval-args or --set value: i:NUMBER, s:TEXT or b:HEX; NULL
+ * for anything else.  The caller releases the object.
+ */
+struct drv_acpi_object *
+host_parse_argument(
+	const char *text)
+{
+	struct drv_acpi_object *object;
+	uint8_t *bytes;
+	size_t length;
+	size_t size;
+	char *end;
+	unsigned long long value;
+	int error;
+
+	/* Refuses a word without a type. */
+	length = strlen(text);
+	if (length < 2U || text[1] != ':')
+		return NULL;
+
+	/* Makes the object of the type. */
+	object = NULL;
+	switch (text[0]) {
+	case 'i':
+		value = strtoull(text + 2, &end, 0);
+		if (*end == '\0')
+			object = drv_acpi_object_integer_new(value);
+		break;
+	case 's':
+		object = drv_acpi_object_string_new(text + 2);
+		break;
+	case 'b':
+		error = parse_hex(text + 2, &bytes, &size);
+		if (error != 0)
+			break;
+		object = drv_acpi_object_buffer_new(bytes, size);
+		free(bytes);
+		break;
+	default:
+		break;
+	}
+
+	/* Reports the object, or NULL. */
+	return object;
 }
 
 /* Prints the listed blocks from index first on, and how many there are. */
@@ -515,48 +561,4 @@ parse_hex(
 
 	/* Succeeded: bytes holds length bytes. */
 	return 0;
-}
-
-/* Makes one --eval-args argument: i:NUMBER, s:TEXT or b:HEX; NULL for anything else. */
-static struct drv_acpi_object *
-parse_argument(
-	const char *text)
-{
-	struct drv_acpi_object *object;
-	uint8_t *bytes;
-	size_t length;
-	size_t size;
-	char *end;
-	unsigned long long value;
-	int error;
-
-	/* Refuses a word without a type. */
-	length = strlen(text);
-	if (length < 2U || text[1] != ':')
-		return NULL;
-
-	/* Makes the object of the type. */
-	object = NULL;
-	switch (text[0]) {
-	case 'i':
-		value = strtoull(text + 2, &end, 0);
-		if (*end == '\0')
-			object = drv_acpi_object_integer_new(value);
-		break;
-	case 's':
-		object = drv_acpi_object_string_new(text + 2);
-		break;
-	case 'b':
-		error = parse_hex(text + 2, &bytes, &size);
-		if (error != 0)
-			break;
-		object = drv_acpi_object_buffer_new(bytes, size);
-		free(bytes);
-		break;
-	default:
-		break;
-	}
-
-	/* Reports the object, or NULL. */
-	return object;
 }

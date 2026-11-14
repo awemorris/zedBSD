@@ -1,0 +1,13 @@
+SET \SETV i:0x1234
+SET \NVS0 i:0x5A
+TRACE begin \TBLD
+TRACE write SystemIO 0x72 8 0xf2
+TRACE write SystemIO 0x73 8 0x1
+TRACE write PCI_Config 0:00:0d.2 0xfc 32 0x80000001
+TRACE write SystemMemory 0x500001 8 0x44
+TRACE log ACPI Debug: "TBLD done"
+TRACE log ACPI: Notify(\PCI0.DEV1, 0x80) has no handler
+TRACE load SSDT DYNTBL2 45 bytes
+DIFF + \DYN2 = Integer 0x5678
+DIFF ~ \HNDL = Integer 0x0 -> \HNDL = Integer 0xFFFFFFFFFFFFFFFF
+DIFF ~ \NVS1 = Integer 0x0 -> \NVS1 = Integer 0x11223344

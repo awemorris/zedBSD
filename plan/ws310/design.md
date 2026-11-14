@@ -351,12 +351,12 @@ commit で firmware がさらに落とした場合は、その値で終える（
 
 | option | 働き |
 | --- | --- |
-| `--set 'PATH i:N'` | 表の load と `_INI` の後、呼びの前に名前（Name・field unit）へ値を store（実機から読んだ値を入れる） |
+| `--set PATH=i:N`（`s:`・`b:` も） | 表の load と `_INI` の後、呼びの前に名前（Name・field unit）へ値を store（実機から読んだ値を入れる）。2026-11-15 の実装で `'PATH i:N'` から `PATH=VALUE` の形にした（ASL の試験の `.args` が空白で語を切るため） |
 | `--memory-file A=FILE` | 物理番地 A に file の byte を置く（`\SSDT` の package の番地に動的な表を置き、`Load(OpRegion)` を通す） |
 | `--trace` | 呼びの間の region の書き（space・番地・幅・値。SystemIO 0x72・0x73、PCI config を含む）、Load・Unload、Notify、Sleep・Stall の合計を 1 行ずつ出す |
 | `--diff` | 呼びの前と後で namespace の全ての名前と Integer・String・Buffer の値を取り、増えた・消えた・変わった物を出す |
-| `--call-every-method` | 呼びの後に、引数の無い全ての method を評価して結果を出す（`check-latitude5330.sh` の 4 と同じ。前後の比べに使う） |
-| `--acpi-mode` | 呼びの前に PM1 の SCI_EN を立てた状態にする（ACPI mode の前と後の比べ、review M1） |
+| `--call-every-method` | 呼びの後に、引数の無い全ての method を評価して結果を出す（`check-latitude5330.sh` の 4 と同じ。前後の比べに使う）。既存の `--methods` が `--eval`・`--eval-args` の後に走るので同じ働き（新しい option は足さない） |
+| `--acpi-mode` | 呼びの前に PM1 の SCI_EN を立てた状態にする（ACPI mode の前と後の比べ、review M1）。既存の `--events` が FADT の ACPI_ENABLE を SMI_CMD に書いて SCI_EN を立て（`acpi-event.c` の `enable_acpi_mode()`）、その後に呼びが走るので同じ働き（新しい option は足さない） |
 
 手順（p003）:
 1. 5330 の zedBSD（main、`_OSC` 無し）で `/dev/acpi` から入力の値を読む。**Name と field unit だけを書く**（Method は書かない。`/dev/acpi` は書いた path を評価する、§2）: `NEXP`・`ITSP`・`OSCC`・`CFGD`・`OSYS`・`SDTL`・`PF00`〜`PF11`・`HWPV`・`HWPE`・`INFS`・`ITBM`・`LMPS`・`CORE`・`NMFQ`・`SFBC`・`SFSC`・`RFBC`・`RFSC`・`TCNT`・`U4SE`・`U4CM`・`CMSK`・`EPTU`・`RTD3`・`HGMD`・`DPIW`・`DPG1`・`PCON`・`PSCP`・`DPTF`・`IN34`・`DDDR`・`\_SB.PC00.TDM0.SCME`・`TDM1.SCME`・`ITFP`。一覧は p003 の script に持ち、各名前が Name・field unit である事を host の namespace で先に確かめる。
