@@ -105,6 +105,7 @@ $(BUILD)/packages/sh/.stamp $(BUILD)/packages/net/.stamp: $(BUILD)/packages/libe
 $(BUILD)/packages/curses/.stamp $(BUILD)/packages/vi/.stamp $(BUILD)/packages/terminfo-extra/.stamp: $(BUILD)/packages/terminfo/.stamp
 $(BUILD)/packages/fidoctl/.stamp $(BUILD)/packages/ssh/.stamp $(BUILD)/packages/libssl-compat/.stamp: $(BUILD)/packages/libcrypto-compat/.stamp
 $(BUILD)/packages/passkey-fido2/.stamp: $(BUILD)/packages/passkey/.stamp $(BUILD)/packages/libcrypto-compat/.stamp
+$(BUILD)/packages/fetch/.stamp: $(BUILD)/packages/libssl-compat/.stamp $(BUILD)/packages/libcrypto-compat/.stamp
 $(BUILD)/packages/noct/.stamp: $(BUILD)/packages/libegl/.stamp $(BUILD)/packages/libglesv2/.stamp
 
 # Library dependencies

@@ -76,7 +76,7 @@ ROOTFS_DYNAMIC_FILES := \
 ROOTFS_PACKAGE_LINKS ?= \
 	/usr/bin/noct=/bin/noct \
 	/usr/lib/libz.so=libz.so.1 \
-	/usr/lib/libcurl.so=libcurl.so.4
+	$(if $(filter curl,$(CONFIG_USERLAND_PROGRAMS)),/usr/lib/libcurl.so=libcurl.so.4)
 
 include userland/desktop/wallpapers/Makefile
 
