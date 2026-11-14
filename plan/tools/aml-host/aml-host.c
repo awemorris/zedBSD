@@ -85,6 +85,25 @@
  *                     s:TEXT or b:HEX
  *                     (the WMI and argument calls run in the order given,
  *                     after --eval, each printing its SMI writes)
+ *     --set PATH=VALUE  after the tables load, the devices initialize and
+ *                     the events start, store VALUE (i:NUMBER, s:TEXT or
+ *                     b:HEX) into the named object or field unit, as a
+ *                     firmware value read from a machine (repeatable)
+ *     --memory-file A=FILE  place the bytes of FILE at system memory
+ *                     address A (hex) before the tables load, so Load of an
+ *                     operation region there finds a table (repeatable)
+ *     --trace         for each --eval and each call: print every write of
+ *                     an address space (space, address, width, value) and
+ *                     of an I/O port, every table loaded and unloaded, the
+ *                     interpreter's log lines (Notify without a handler,
+ *                     Debug), and a summary with the simulated time slept
+ *     --diff          take the namespace with the values of its data
+ *                     objects and of its plain memory, I/O and PCI fields
+ *                     before the --eval and calls and after them, and print
+ *                     the nodes added and removed and the values changed
+ *                     (--events puts the platform in ACPI mode first, and
+ *                     --methods runs every method without arguments after
+ *                     the calls)
  *     --stack         print the deepest stack use of the interpreter
  *     --budget BYTES  the stack budget (default 1 MiB)
  *     --quiet         do not print the interpreter's log
@@ -144,6 +163,11 @@
 #define HOST_EINVAL	22
 
 /*
+ * The most loaded tables the trace remembers across one call.
+ */
+#define TRACE_TABLES_MAX 256U
+
+/*
  * The options the harness understands.
  */
 enum option_kind {
@@ -189,7 +213,11 @@ enum option_kind {
 	OPTION_DELL_APPLY,
 	OPTION_DELL_POLL,
 	OPTION_DELL_FAN,
-	OPTION_DELL_BOOST
+	OPTION_DELL_BOOST,
+	OPTION_SET,
+	OPTION_MEMORY_FILE,
+	OPTION_TRACE,
+	OPTION_DIFF
 };
 
 /*
@@ -240,6 +268,11 @@ struct harness_options {
 	const char *calls[OPTION_LIST_MAX];
 	enum option_kind call_kinds[OPTION_LIST_MAX];
 	unsigned call_count;
+	const char *sets[OPTION_LIST_MAX];
+	unsigned set_count;
+	const char *memory_files[OPTION_LIST_MAX];
+	unsigned memory_file_count;
+	int diff;
 };
 
 /*
@@ -293,6 +326,36 @@ struct page {
  */
 struct method_list {
 	char **paths;
+	size_t count;
+	size_t capacity;
+};
+
+/*
+ * One loaded table as the trace remembers it across a call: its id, which
+ * a table keeps for its life, and what the trace prints of it.
+ */
+struct table_record {
+	uint32_t id;
+	size_t length;
+	char signature[5];
+	char oem_table_id[9];
+};
+
+/*
+ * One node of a --diff snapshot: its path and its line ("PATH = VALUE",
+ * or "PATH (type)" for a node whose value is not read), both owned.
+ */
+struct snapshot_entry {
+	char *path;
+	char *line;
+};
+
+/*
+ * A --diff snapshot of the namespace: count entries of capacity, sorted
+ * by path once taken, freed by release_snapshot().
+ */
+struct snapshot {
+	struct snapshot_entry *entries;
 	size_t count;
 	size_t capacity;
 };
@@ -353,6 +416,28 @@ static const struct option_name option_names[] = {
 	{ "--dell-poll", OPTION_DELL_POLL, 0 },
 	{ "--dell-fan", OPTION_DELL_FAN, 0 },
 	{ "--dell-boost", OPTION_DELL_BOOST, 1 },
+	{ "--set", OPTION_SET, 1 },
+	{ "--memory-file", OPTION_MEMORY_FILE, 1 },
+	{ "--trace", OPTION_TRACE, 0 },
+	{ "--diff", OPTION_DIFF, 0 },
+};
+
+/*
+ * The names the trace gives the address spaces, by their numbers.
+ */
+static const char *const space_names[] = {
+	"SystemMemory", "SystemIO", "PCI_Config", "EmbeddedControl", "SMBus", "SystemCMOS",
+	"PciBarTarget", "IPMI", "GeneralPurposeIO", "GenericSerialBus", "PCC", "PRM"
+};
+
+/*
+ * The names a --diff snapshot gives the object types, by the numbers
+ * ObjectType reports.
+ */
+static const char *const type_names[] = {
+	"Uninitialized", "Integer", "String", "Buffer", "Package", "FieldUnit", "Device", "Event",
+	"Method", "Mutex", "OperationRegion", "PowerResource", "Processor", "ThermalZone",
+	"BufferField", "DDBHandle", "Debug"
 };
 
 /*
@@ -439,6 +524,20 @@ static int smi_steps_running;
  */
 static int lock_held;
 
+/*
+ * The trace of --trace: whether it was asked for, and whether a call runs
+ * under it now (trace_begin() turns it on, trace_end() off).  While it
+ * runs, trace_writes counts the writes printed, trace_slept holds the
+ * simulated clock at the call's start, and tables_before the tables
+ * loaded then (tables_before_count of them).
+ */
+static int trace_enabled;
+static int trace_running;
+static unsigned long trace_writes;
+static uint64_t trace_slept;
+static struct table_record tables_before[TRACE_TABLES_MAX];
+static unsigned tables_before_count;
+
 static int parse_arguments(int argc, char **argv, struct harness_options *options);
 static int record_option(enum option_kind kind, const char *value, struct harness_options *options);
 static enum option_kind option_of(const char *text, int *takes_value);
@@ -485,6 +584,21 @@ static int parse_smi_store(const char *text);
 static void smi_answer(uint8_t command);
 static int run_calls(const struct harness_options *options);
 static int run_dell_call(enum option_kind kind, const char *request);
+static int place_memory_files(const struct harness_options *options);
+static int set_values(const struct harness_options *options);
+static int set_value(const char *request);
+static void trace_begin(const char *label);
+static void trace_end(const char *label);
+static unsigned snapshot_tables(struct table_record *records);
+static int table_listed(const struct table_record *records, unsigned count, uint32_t id);
+static void trace_write(unsigned space, const struct drv_acpi_region_access *access, uint64_t value);
+static int take_snapshot(struct snapshot *snapshot);
+static int snapshot_visitor(struct drv_acpi_node *node, unsigned depth, void *argument);
+static int node_readable(struct drv_acpi_node *node, enum drv_acpi_type type);
+static void snapshot_type_line(char *line, size_t size, const char *path, enum drv_acpi_type type);
+static int compare_entries(const void *left, const void *right);
+static void print_diff(const struct snapshot *before, const struct snapshot *after);
+static void release_snapshot(struct snapshot *snapshot);
 
 /*
  * The calls of the Dell provider (aml-host-dell.c).
@@ -508,6 +622,8 @@ main(
 	char **argv)
 {
 	struct harness_options options;
+	struct snapshot before;
+	struct snapshot after;
 	unsigned index;
 	int error;
 	int status;
@@ -519,6 +635,11 @@ main(
 
 	/* Installs the simulated spaces before any AML runs. */
 	error = install_spaces(&options);
+	if (error != 0)
+		return 2;
+
+	/* Places the files --memory-file named in the simulated memory before any table loads. */
+	error = place_memory_files(&options);
 	if (error != 0)
 		return 2;
 
@@ -571,6 +692,20 @@ main(
 	/* Plays the hardware actions. */
 	run_actions(&options);
 
+	/* Stores the values a machine's firmware would have left. */
+	error = set_values(&options);
+	if (error != 0)
+		status = 1;
+
+	/* Takes the namespace the calls start from. */
+	memset(&before, 0, sizeof(before));
+	memset(&after, 0, sizeof(after));
+	if (options.diff) {
+		error = take_snapshot(&before);
+		if (error != 0)
+			status = 1;
+	}
+
 	/* Prints the namespace. */
 	if (options.dump) {
 		error = print_namespace();
@@ -617,8 +752,10 @@ main(
 
 	/* Evaluates the paths the options named, in order. */
 	for (index = 0; index < options.evaluation_count; index++) {
-		/* Evaluates one path and prints its result. */
+		/* Evaluates one path and prints its result, traced when asked. */
+		trace_begin(options.evaluations[index]);
 		error = evaluate_and_print(NULL, options.evaluations[index], options.evaluations[index]);
+		trace_end(options.evaluations[index]);
 		if (error != 0)
 			status = 1;
 	}
@@ -627,6 +764,18 @@ main(
 	error = run_calls(&options);
 	if (error != 0)
 		status = 1;
+
+	/* Prints how the namespace changed under the calls. */
+	if (options.diff) {
+		error = take_snapshot(&after);
+		if (error != 0) {
+			status = 1;
+		} else {
+			print_diff(&before, &after);
+		}
+		release_snapshot(&before);
+		release_snapshot(&after);
+	}
 
 	/* Evaluates the identification objects of every device; the visitor never stops the walk. */
 	if (options.devices)
@@ -698,6 +847,16 @@ drv_acpi_os_log(
 	...)
 {
 	va_list arguments;
+	char line[PATH_MAX_LENGTH];
+
+	/* Copies the line into the trace of a call, on one line of its own. */
+	if (trace_running) {
+		va_start(arguments, format);
+		vsnprintf(line, sizeof(line), format, arguments);
+		va_end(arguments);
+		line[strcspn(line, "\n")] = '\0';
+		printf("TRACE log %s\n", line);
+	}
 
 	/* Drops the log when asked to be quiet. */
 	if (!log_enabled)
@@ -814,6 +973,12 @@ drv_acpi_os_port_write(
 	uint8_t *byte;
 	unsigned index;
 	int modelled;
+
+	/* Prints a port write of a traced call (the interpreter's own, outside a region). */
+	if (trace_running) {
+		printf("TRACE write port 0x%x %u 0x%x\n", (unsigned)port, width, (unsigned)value);
+		trace_writes++;
+	}
 
 	/* The simulated hardware answers for its ports. */
 	modelled = hardware_port(port, width, true, &value);
@@ -1013,6 +1178,12 @@ parse_arguments(
 		return 1;
 	}
 
+	/* Refuses more --set values or --memory-file files than the harness keeps. */
+	if (options->set_count > OPTION_LIST_MAX || options->memory_file_count > OPTION_LIST_MAX) {
+		fprintf(stderr, "more than %u --set or --memory-file options\n", OPTION_LIST_MAX);
+		return 1;
+	}
+
 	/* Refuses more hardware actions than the harness keeps. */
 	if (options->action_count > OPTION_LIST_MAX) {
 		fprintf(stderr, "more than %u --ec-ram, --gpe, --power-button and --ec-query options\n", OPTION_LIST_MAX);
@@ -1082,6 +1253,24 @@ record_option(
 		break;
 	case OPTION_POWEROFF:
 		options->poweroff = 1;
+		break;
+	case OPTION_TRACE:
+		trace_enabled = 1;
+		break;
+	case OPTION_DIFF:
+		options->diff = 1;
+		break;
+	case OPTION_SET:
+		/* Keeps a value to store after the loading. */
+		if (options->set_count < OPTION_LIST_MAX)
+			options->sets[options->set_count] = value;
+		options->set_count++;
+		break;
+	case OPTION_MEMORY_FILE:
+		/* Keeps a file to place in the simulated memory. */
+		if (options->memory_file_count < OPTION_LIST_MAX)
+			options->memory_files[options->memory_file_count] = value;
+		options->memory_file_count++;
 		break;
 	case OPTION_EC_RAM:
 	case OPTION_GPE:
@@ -1816,6 +2005,10 @@ simulated_space(
 	int modelled;
 	int absent;
 	int error;
+
+	/* Prints a write of a traced call, before the hardware or the memory takes it. */
+	if (trace_running && access->write)
+		trace_write((unsigned)(uintptr_t)argument, access, *value);
 
 	/* The simulated hardware answers for its I/O ports. */
 	if ((uintptr_t)argument == DRV_ACPI_SPACE_SYSTEM_IO) {
@@ -2703,7 +2896,8 @@ run_calls(
 	/* Runs each call; a failed one makes the outcome a failure and the others still run. */
 	failed = 0;
 	for (index = 0; index < options->call_count; index++) {
-		/* Runs the call by its kind. */
+		/* Runs the call by its kind, traced when asked. */
+		trace_begin(options->calls[index]);
 		switch (options->call_kinds[index]) {
 		case OPTION_WMI:
 			error = host_wmi_attach();
@@ -2728,6 +2922,7 @@ run_calls(
 			error = host_eval_args(options->calls[index]);
 			break;
 		}
+		trace_end(options->calls[index]);
 
 		/* Remembers a failure. */
 		if (error != 0)
@@ -2781,4 +2976,577 @@ run_dell_call(
 
 	/* Succeeded: the call ran. */
 	return 0;
+}
+
+/*
+ * Places the --memory-file files in the simulated system memory, before
+ * any table loads, so Load of an operation region over them finds a
+ * table.
+ */
+static int
+place_memory_files(
+	const struct harness_options *options)
+{
+	unsigned long long address;
+	const char *path;
+	uint8_t *data;
+	uint8_t *byte;
+	size_t length;
+	size_t offset;
+	unsigned index;
+	char *end;
+	int error;
+
+	/* Places each file. */
+	for (index = 0; index < options->memory_file_count; index++) {
+		/* Reads the address, which an equals sign ends. */
+		address = strtoull(options->memory_files[index], &end, 16);
+		if (*end != '=' || end[1] == '\0') {
+			fprintf(stderr, "--memory-file needs ADDRESS=FILE: %s\n", options->memory_files[index]);
+			return 1;
+		}
+
+		/* Reads the file. */
+		path = end + 1;
+		error = read_file(path, &data, &length);
+		if (error != 0) {
+			fprintf(stderr, "--memory-file: %s could not be read\n", path);
+			return 1;
+		}
+
+		/* Copies its bytes into the simulated memory, one page byte at a time. */
+		for (offset = 0; offset < length; offset++) {
+			/* Finds the byte; a page that cannot be made stops the copy. */
+			byte = page_byte(DRV_ACPI_SPACE_SYSTEM_MEMORY, address + offset);
+			if (byte == NULL) {
+				free(data);
+				return 1;
+			}
+
+			/* Stores the file's byte. */
+			*byte = data[offset];
+		}
+
+		/* The bytes are in the simulated memory; the file's copy goes. */
+		free(data);
+	}
+
+	/* Succeeded: every file sits at its address. */
+	return 0;
+}
+
+/*
+ * Stores the values the --set options name, after the tables loaded and
+ * the devices initialized, as firmware would have left them; prints one
+ * line for each.
+ */
+static int
+set_values(
+	const struct harness_options *options)
+{
+	unsigned index;
+	int failed;
+	int error;
+
+	/* Stores each value; a failed one makes the outcome a failure and the others still run. */
+	failed = 0;
+	for (index = 0; index < options->set_count; index++) {
+		/* Stores one value. */
+		error = set_value(options->sets[index]);
+		if (error != 0)
+			failed = 1;
+	}
+
+	/* Reports a store that failed. */
+	if (failed)
+		return 1;
+
+	/* Succeeded: every named object holds its value. */
+	return 0;
+}
+
+/* Stores one --set value (PATH=i:NUMBER, PATH=s:TEXT or PATH=b:HEX) into a named object. */
+static int
+set_value(
+	const char *request)
+{
+	struct drv_acpi_thread storage;
+	struct drv_acpi_thread *thread;
+	struct drv_acpi_target target;
+	struct drv_acpi_object *value;
+	struct drv_acpi_node *node;
+	struct drv_acpi_eval eval;
+	char copy[PATH_MAX_LENGTH];
+	char *equals;
+	size_t length;
+	int error;
+
+	/* Refuses a request longer than the copy. */
+	length = strlen(request);
+	if (length >= sizeof(copy)) {
+		fprintf(stderr, "--set: the request is too long\n");
+		return 1;
+	}
+
+	/* Cuts the request into the path and the value at the equals sign. */
+	strcpy(copy, request);
+	equals = strchr(copy, '=');
+	if (equals == NULL) {
+		fprintf(stderr, "--set needs PATH=VALUE: %s\n", request);
+		return 1;
+	}
+	*equals = '\0';
+
+	/* Finds the object the value goes to. */
+	error = drv_acpi_lookup(NULL, copy, &node);
+	if (error != 0) {
+		printf("SET %s = error %d\n", copy, error);
+		return 1;
+	}
+
+	/* Makes the value. */
+	value = host_parse_argument(equals + 1);
+	if (value == NULL) {
+		fprintf(stderr, "--set: the value is not i:NUMBER, s:TEXT or b:HEX: %s\n", equals + 1);
+		return 1;
+	}
+
+	/*
+	 * Stores it as AML's Store does, inside the interpreter: an Integer
+	 * name converts it, and a field unit writes its region.
+	 */
+	thread = drv_acpi_enter(&storage);
+	memset(&eval, 0, sizeof(eval));
+	eval.thread = thread;
+	eval.scope = drv_acpi_root();
+	memset(&target, 0, sizeof(target));
+	target.kind = DRV_ACPI_TARGET_NODE;
+	target.node = node;
+	error = drv_acpi_store(&eval, value, &target);
+	drv_acpi_leave(thread);
+
+	/* The object holds its own copy now. */
+	drv_acpi_object_release(value);
+
+	/* Reports a store the object refused. */
+	if (error != 0) {
+		printf("SET %s = error %d\n", copy, error);
+		return 1;
+	}
+
+	/* Prints what was stored. */
+	printf("SET %s %s\n", copy, equals + 1);
+
+	/* Succeeded: the object holds the value. */
+	return 0;
+}
+
+/*
+ * Starts the trace of one call: remembers the loaded tables and the
+ * simulated time, and prints the call's first line.
+ */
+static void
+trace_begin(
+	const char *label)
+{
+	/* Nothing is traced without --trace. */
+	if (!trace_enabled)
+		return;
+
+	/* Remembers what the call starts from. */
+	tables_before_count = snapshot_tables(tables_before);
+	trace_slept = slept;
+	trace_writes = 0;
+
+	/* Prints the call and turns the trace on for it. */
+	printf("TRACE begin %s\n", label);
+	trace_running = 1;
+}
+
+/*
+ * Ends the trace of one call: prints the tables it loaded and unloaded
+ * and a summary line with the writes and the simulated time it slept.
+ */
+static void
+trace_end(
+	const char *label)
+{
+	struct table_record after[TRACE_TABLES_MAX];
+	unsigned after_count;
+	unsigned loads;
+	unsigned unloads;
+	unsigned index;
+	int found;
+
+	/* Nothing is traced without --trace. */
+	if (!trace_enabled)
+		return;
+
+	/* Stops the trace and reads the tables now loaded. */
+	trace_running = 0;
+	after_count = snapshot_tables(after);
+
+	/* Prints each table the call loaded. */
+	loads = 0;
+	for (index = 0; index < after_count; index++) {
+		/* A table loaded before the call is not new. */
+		found = table_listed(tables_before, tables_before_count, after[index].id);
+		if (found)
+			continue;
+
+		/* Prints the new table. */
+		printf("TRACE load %s %s %zu bytes\n", after[index].signature, after[index].oem_table_id, after[index].length);
+		loads++;
+	}
+
+	/* Prints each table the call unloaded. */
+	unloads = 0;
+	for (index = 0; index < tables_before_count; index++) {
+		/* A table still loaded was not unloaded. */
+		found = table_listed(after, after_count, tables_before[index].id);
+		if (found)
+			continue;
+
+		/* Prints the table that went. */
+		printf("TRACE unload %s %s\n", tables_before[index].signature, tables_before[index].oem_table_id);
+		unloads++;
+	}
+
+	/* Prints the summary; the clock counts 100-nanosecond units. */
+	printf("TRACE end %s: %lu writes, %u loads, %u unloads, slept %llu ms\n", label, trace_writes, loads, unloads, (unsigned long long)((slept - trace_slept) / 10000U));
+}
+
+/* Records the loaded tables (at most TRACE_TABLES_MAX) and reports how many. */
+static unsigned
+snapshot_tables(
+	struct table_record *records)
+{
+	struct drv_acpi_table *table;
+	unsigned count;
+
+	/* Walks the list of loaded tables, oldest first. */
+	count = 0;
+	for (table = drv_acpi_table_first();
+	     table != NULL && count < TRACE_TABLES_MAX;
+	     table = table->next) {
+		/* Copies what the trace prints of the table. */
+		records[count].id = table->id;
+		records[count].length = table->length;
+		memcpy(records[count].signature, table->signature, sizeof(records[count].signature));
+		memcpy(records[count].oem_table_id, table->oem_table_id, sizeof(records[count].oem_table_id));
+		count++;
+	}
+
+	/* Reports the number recorded. */
+	return count;
+}
+
+/* Reports whether a table of the given id is among the records. */
+static int
+table_listed(
+	const struct table_record *records,
+	unsigned count,
+	uint32_t id)
+{
+	unsigned index;
+
+	/* Looks for the id. */
+	for (index = 0; index < count; index++) {
+		/* Reports the table found. */
+		if (records[index].id == id)
+			return 1;
+	}
+
+	/* The table is not among them. */
+	return 0;
+}
+
+/* Prints one write of the traced call: the space, the place, the width and the value. */
+static void
+trace_write(
+	unsigned space,
+	const struct drv_acpi_region_access *access,
+	uint64_t value)
+{
+	const char *name;
+
+	/* Names the space, or prints its number when it has no name here. */
+	name = "space";
+	if (space < sizeof(space_names) / sizeof(space_names[0]))
+		name = space_names[space];
+
+	/* A PCI configuration write names the function. */
+	if (space == DRV_ACPI_SPACE_PCI_CONFIG) {
+		printf("TRACE write %s %x:%02x:%02x.%x 0x%llx %u 0x%llx\n", name, (unsigned)access->pci_segment, (unsigned)access->pci_bus, (unsigned)access->pci_device, (unsigned)access->pci_function, (unsigned long long)access->address, access->width, (unsigned long long)value);
+	} else {
+		printf("TRACE write %s 0x%llx %u 0x%llx\n", name, (unsigned long long)access->address, access->width, (unsigned long long)value);
+	}
+
+	/* Counts it for the call's summary. */
+	trace_writes++;
+}
+
+/*
+ * Takes a snapshot of the namespace for --diff: every node's path, and for
+ * a data object and a field unit of plain memory, I/O or PCI configuration
+ * space its value as /dev/acpi writes it.  Other nodes are listed by type
+ * only, so reading the snapshot never runs a method or talks to the EC.
+ */
+static int
+take_snapshot(
+	struct snapshot *snapshot)
+{
+	struct drv_acpi_text text;
+	size_t index;
+	int decision;
+
+	/* Lists the nodes; the visitor stops the walk when memory runs out. */
+	memset(snapshot, 0, sizeof(*snapshot));
+	decision = drv_acpi_walk(NULL, snapshot_visitor, snapshot);
+	if (decision < 0) {
+		fprintf(stderr, "diff: the snapshot ran out of memory\n");
+		return HOST_ENOMEM;
+	}
+
+	/* Reads the value of each node that has one to read. */
+	for (index = 0; index < snapshot->count; index++) {
+		/* A node listed by type keeps that line. */
+		if (snapshot->entries[index].line != NULL)
+			continue;
+
+		/* Writes "PATH = VALUE"; a failed read is written as its error. */
+		drv_acpi_text_init(&text);
+		(void)drv_acpi_text_evaluate(&text, NULL, snapshot->entries[index].path, snapshot->entries[index].path);
+		if (text.data == NULL) {
+			drv_acpi_text_release(&text);
+			return HOST_ENOMEM;
+		}
+
+		/* Keeps the line without its newline. */
+		text.data[strcspn(text.data, "\n")] = '\0';
+		snapshot->entries[index].line = strdup(text.data);
+		drv_acpi_text_release(&text);
+		if (snapshot->entries[index].line == NULL)
+			return HOST_ENOMEM;
+	}
+
+	/* Sorts the entries by path, for the comparison. */
+	qsort(snapshot->entries, snapshot->count, sizeof(snapshot->entries[0]), compare_entries);
+
+	/* Succeeded: the snapshot holds every node. */
+	return 0;
+}
+
+/* Lists one node in the snapshot, with a type line for a node whose value is not read. */
+static int
+snapshot_visitor(
+	struct drv_acpi_node *node,
+	unsigned depth,
+	void *argument)
+{
+	struct snapshot *snapshot;
+	struct snapshot_entry *grown;
+	char path[PATH_MAX_LENGTH];
+	char line[PATH_MAX_LENGTH + 32];
+	enum drv_acpi_type type;
+	int readable;
+	int error;
+
+	UNUSED_PARAMETER(depth);
+
+	/* Writes the path; a path too long to print is not listed. */
+	snapshot = argument;
+	error = drv_acpi_node_path(node, path, sizeof(path));
+	if (error != 0)
+		return 0;
+
+	/* Grows the list when it is full; running out of memory stops the walk. */
+	if (snapshot->count == snapshot->capacity) {
+		snapshot->capacity = snapshot->capacity * 2U + 256U;
+		grown = realloc(snapshot->entries, snapshot->capacity * sizeof(snapshot->entries[0]));
+		if (grown == NULL)
+			return -1;
+		snapshot->entries = grown;
+	}
+
+	/* Keeps the path. */
+	snapshot->entries[snapshot->count].path = strdup(path);
+	snapshot->entries[snapshot->count].line = NULL;
+	if (snapshot->entries[snapshot->count].path == NULL)
+		return -1;
+
+	/* A node whose value is not read gets its type as its line. */
+	type = drv_acpi_node_type(node);
+	readable = node_readable(node, type);
+	if (!readable) {
+		snapshot_type_line(line, sizeof(line), path, type);
+		snapshot->entries[snapshot->count].line = strdup(line);
+		if (snapshot->entries[snapshot->count].line == NULL) {
+			free(snapshot->entries[snapshot->count].path);
+			return -1;
+		}
+	}
+
+	/* The entry is complete, or waits for its value. */
+	snapshot->count++;
+
+	/* Goes on with the walk. */
+	return 0;
+}
+
+/*
+ * Reports whether the snapshot reads a node's value: data objects always,
+ * a field unit only of a plain field in system memory, system I/O or PCI
+ * configuration space, whose read touches nothing but the simulated
+ * memory (an index or bank field writes its selector, and an EC field
+ * talks to the EC).
+ */
+static int
+node_readable(
+	struct drv_acpi_node *node,
+	enum drv_acpi_type type)
+{
+	const struct drv_acpi_field *field;
+	const struct drv_acpi_object *region;
+
+	/* Data objects read without side effects. */
+	if (type == DRV_ACPI_TYPE_INTEGER || type == DRV_ACPI_TYPE_STRING)
+		return 1;
+	if (type == DRV_ACPI_TYPE_BUFFER || type == DRV_ACPI_TYPE_PACKAGE)
+		return 1;
+
+	/* Anything else but a field unit is listed by type. */
+	if (type != DRV_ACPI_TYPE_FIELD_UNIT || node->object == NULL)
+		return 0;
+
+	/* An index or bank field writes a selector to read. */
+	field = &node->object->value.field;
+	if (field->kind != DRV_ACPI_FIELD_REGION || field->region == NULL)
+		return 0;
+
+	/* A field over a region of another space is not read. */
+	region = field->region->object;
+	if (region == NULL || region->type != DRV_ACPI_TYPE_REGION)
+		return 0;
+	if (region->value.region.space == DRV_ACPI_SPACE_SYSTEM_MEMORY)
+		return 1;
+	if (region->value.region.space == DRV_ACPI_SPACE_SYSTEM_IO)
+		return 1;
+	if (region->value.region.space == DRV_ACPI_SPACE_PCI_CONFIG)
+		return 1;
+
+	/* The other spaces are listed by type. */
+	return 0;
+}
+
+/* Writes "PATH (type N)" for a node the snapshot lists without its value. */
+static void
+snapshot_type_line(
+	char *line,
+	size_t size,
+	const char *path,
+	enum drv_acpi_type type)
+{
+	/* The type's name, as ObjectType numbers it, or its number. */
+	if ((unsigned)type < sizeof(type_names) / sizeof(type_names[0])) {
+		snprintf(line, size, "%s (%s)", path, type_names[type]);
+	} else {
+		snprintf(line, size, "%s (type %u)", path, (unsigned)type);
+	}
+}
+
+/* Orders two snapshot entries by path. */
+static int
+compare_entries(
+	const void *left,
+	const void *right)
+{
+	const struct snapshot_entry *first;
+	const struct snapshot_entry *second;
+	int compared;
+
+	/* Compares the paths. */
+	first = left;
+	second = right;
+	compared = strcmp(first->path, second->path);
+
+	/* Reports the order. */
+	return compared;
+}
+
+/*
+ * Prints what changed between two snapshots: "DIFF + LINE" for a node that
+ * appeared, "DIFF - LINE" for one that went, "DIFF ~ OLD -> NEW" for a
+ * changed value, and a summary line.
+ */
+static void
+print_diff(
+	const struct snapshot *before,
+	const struct snapshot *after)
+{
+	size_t old_index;
+	size_t new_index;
+	unsigned added;
+	unsigned removed;
+	unsigned changed;
+	int compared;
+	int differs;
+
+	/* Merges the two sorted lists. */
+	old_index = 0;
+	new_index = 0;
+	added = 0;
+	removed = 0;
+	changed = 0;
+	while (old_index < before->count || new_index < after->count) {
+		/* Orders the two heads; an exhausted list sorts last. */
+		if (old_index >= before->count) {
+			compared = 1;
+		} else if (new_index >= after->count) {
+			compared = -1;
+		} else {
+			compared = strcmp(before->entries[old_index].path, after->entries[new_index].path);
+		}
+
+		/* A node only before went; a node only after appeared; the same node may have changed. */
+		if (compared < 0) {
+			printf("DIFF - %s\n", before->entries[old_index].line);
+			removed++;
+			old_index++;
+		} else if (compared > 0) {
+			printf("DIFF + %s\n", after->entries[new_index].line);
+			added++;
+			new_index++;
+		} else {
+			/* Prints a value that changed. */
+			differs = strcmp(before->entries[old_index].line, after->entries[new_index].line);
+			if (differs != 0) {
+				printf("DIFF ~ %s -> %s\n", before->entries[old_index].line, after->entries[new_index].line);
+				changed++;
+			}
+			old_index++;
+			new_index++;
+		}
+	}
+
+	/* Prints the summary. */
+	printf("DIFF %u added, %u removed, %u changed\n", added, removed, changed);
+}
+
+/* Frees a snapshot's paths, lines and list. */
+static void
+release_snapshot(
+	struct snapshot *snapshot)
+{
+	size_t index;
+
+	/* Frees each entry's strings. */
+	for (index = 0; index < snapshot->count; index++) {
+		free(snapshot->entries[index].path);
+		free(snapshot->entries[index].line);
+	}
+
+	/* Frees the list. */
+	free(snapshot->entries);
+	memset(snapshot, 0, sizeof(*snapshot));
 }

@@ -12,6 +12,8 @@
 #ifndef AML_HOST_WMI_H
 #define AML_HOST_WMI_H
 
+struct drv_acpi_object;
+
 int
 host_wmi_attach(void);
 
@@ -30,5 +32,9 @@ host_wmi_method(
 int
 host_eval_args(
 	const char *request);
+
+struct drv_acpi_object *
+host_parse_argument(
+	const char *text);
 
 #endif

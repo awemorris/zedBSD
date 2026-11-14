@@ -6,6 +6,7 @@
 - 基点: worktree `p6-ws310`（branch `agent/p6-ws310`、main e2f816e14）。引用の file:行 は基点の物。code は書いていない。
 - 読んだ物: `AGENTS.md`、`plan/agents/protocol.md`、[ws.md](ws.md)、`plan/guardrail.md`（範囲・HAL・driver は HAL を知らない・出典）、`plan/ws333/design.md`（§0・§1・§2・§4.4・§4.5・§4.16）、`plan/ws301/design.md`（§2.1 の `_CPC` の調べ）、`plan/ws303/design.md`（IETM の `_OSC`）、WS300 の branch `agent/p6-ws300` の design.md §4.3（Q300-6）、`plan/tools.md`（aml-host・hw5330）、source（§2）、5330 の DSDT・SSDT（`plan/tools/aml-host/latitude5330/`、iasl 20250404 で scratchpad に逆 assemble。`dsdt.dsl:N` などの行番号はその `.dsl` の物）、Linux v6.12.5 の tree（`/home/awe/visionfive-linux`、読むだけ。`include/linux/acpi.h` の `_OSC` の定数、`include/acpi/proc_cap_intel.h`、`drivers/acpi/bus.c` と `init/main.c` の順。扱いは §9）。
 - 取れなかった物: ACPI 6.5 の仕様（uefi.org が bot の確かめの page を返した。回避していない）、PCI Firmware Specification（PCI-SIG）、Intel の processor の vendor-specific な `_OSC` の文書。bit の値は Linux の header の定数（GPL の file の定数は出典の明示で使える、guardrail）と 5330 の AML の使い方の両方で裏付けた（§4.2、§9、Q310-6）。
+- **第 2 版の後の更新（2026-11-15 P2、q2106-i01、基点 main 52b2e7e351）**: Q310-1〜6 の答え（2026-11-01、[ws.md](ws.md)）と今の tree に合わせて直した。(1) ACPI 6.5 の PDF は手元にある（`/home/awe/zedBSD-specs/ACPI_Spec_6_5_Aug29.pdf`、Q310-6）。§6.2.11 の DWORD1・Table 6.13（platform-wide）と §19.6.142 の Table 19.41（ToUUID の byte の並び）は仕様で確かめた（§4.2・§9）。PCI Firmware Specification と Intel の processor の文書は今も無い。(2) 最初の実機の試験は 5330 でなくデスクトップ（10.0.10.3、壊れてもよい前提）、その後に 5330（§1・§6.3）。(3) HAL の path は `src/hal/x86_64/`（旧 `src/hal/amd64/`）。(4) build system は top の `Makefile` と `mk/`（kernel の source の一覧は `mk/kernel.mk`、機種の config は `config/config.<機種>.mk`）。Claude は Makefile・`mk/` を変えないので、新しい source を kernel の build に入れる差分は Phase の記録に案として書き、ユーザーの承認まで当てない。(5) §2 の file:行 のうち今の tree で変わった物を直した（下の各所に「今の tree」と書いた）。他の file:行 は第 2 版の基点（e2f816e14）の物のまま。
 
 ## 0. ユーザーの決定（要点）
 
@@ -21,12 +22,14 @@
 - 含む: platform-wide（`\_SB._OSC`）・processor（ACPI0007 の `_OSC`）・PCI/PCIe の host bridge（PNP0A08・PNP0A03 の `_OSC`）の 3 種の評価、query と commit の手順、起動の switch、記録、host の harness の追加、5330 の前後の比べ。
 - 含まない: USB4 の `_OSC`（UUID 23a0d13a-…、zedBSD に USB4 の connection manager が無い）、Intel DTT（IETM）の `_OSC`（DTT の driver が無い）、`_CPC` を使う CPU の制御（WS333。この WS は `_CPC` が namespace に現れ、HWP の MSR と同じ register を指す事を確かめるまで）、ASPM・LTR の設定そのもの（WS300。この WS は OS が制御を得た事を PCI の driver に伝える口と規則まで）、S3（zedBSD は使わない）。
 - 対象: 5330（i5-1245U、Dell BIOS 1.31.1 の表）。QEMU q35 は PCIe の `_OSC` だけを持つ（§6.2）。`acpi.osc=off` が既定の間は、どの機械も振る舞いが変わらない。
+- 実機の順（2026-11-01 の Q310 の答え）: 最初はデスクトップ（10.0.10.3、system を一度壊すつもりで試す機械）、次に 5330。デスクトップの DSDT・SSDT は repo に無い（§3 の読みは 5330 の物）ので、デスクトップの段の前にその表を取り、§3 と同じ読み（`_OSC` の場所と、呼んだ時に firmware が書く物）を足す。2026-11-12 から SwitchBot のプラグミニ 1 は Pi 5 に付け替えられた（`plan/tools.md` の「実機」）ので、デスクトップの遠隔の電源の入れ直しが今も使えるかは Q1 が確かめる。
 
 ## 2. 今の振る舞い（code の事実）
 
 - `_OSC`・`_PDC` を評価する code は無い（`src/` を grep、0 件）。`\_OSI` は native の method で、Windows 2000〜"Windows 2022" と "Extended Address Space Descriptor" に真を返す（`src/drivers/acpi/aml-osi.c:27〜53`）。5330 の `\_SB.PC00._INI` はこの答えで `OSYS` を決める（`dsdt.dsl:28091〜28139`）。
 - ACPI の attach の順（`src/drivers/acpi/acpi-kern.c:165〜283`）: 表の発見 → SystemMemory・SystemIO・PCI_Config の handler（`:190〜203`）→ DSDT・SSDT の load（`:205`）→ `drv_acpi_initialize_objects()`（`:213`）→ ECDT の EC（`:218`）→ `_REG`（`:221`）→ `_STA`・`_INI`（`:226`）→ `start_events()`（`:229`。この中の `drv_acpi_events_init()` が ACPI_ENABLE を SMI_CMD に書いて **ACPI mode に入る**、`acpi-event.c:366`・`:1237〜1259`）→ FACS の Global Lock（`:233`）→ EC（`:240`）→ power・thermal・WMI・Dell・LPS0 → PCI の電源の口（`:270`）→ `/dev/acpi`（`:273`）。Global Lock の共有の前は `\_GL_` は OS の中の mutex に過ぎない（`aml-sync.c:45〜49`）。5330 の GNVS・CPU NVS の Field は `Lock`（`dsdt.dsl:1236`、`ssdt2.dsl:192`）。
-- platform の順（`src/kern/platform/pcat.c`）: PCI の driver の登録 → `drv_pci_pcat_init()`（`:437`、host bridge の probe で登録済みの driver が bind。VMD・NVMe・xHCI・i915 などはここで動き始める）→ `drv_acpi_attach()`（`:450`）→ 窓を待った function の割当（`:463`）→ UCSI → UEFI の変数 → `drv_cpu_x86_init()`（`:498`、WS333 の CPU の driver）。**PCI の function は ACPI より前に bind される**。
+- platform の順（`src/kern/platform/pcat.c`）: PCI の driver の登録 → `drv_pci_pcat_init()`（`:437`、今の tree は `:284`。host bridge の probe で登録済みの driver が bind。VMD・NVMe・xHCI・i915 などはここで動き始める）→ `drv_acpi_attach()`（`:450`、今の tree は `:295`）→ 窓を待った function の割当（`:463`）→ UCSI → UEFI の変数 → `drv_cpu_x86_init()`（`:498`、今の tree は `:346`。WS333 の CPU の driver）。**PCI の function は ACPI より前に bind される**（今の tree でも同じ順）。
+- ACPI の attach の中の順（今の tree の `acpi-kern.c`）: `_STA`・`_INI`（`:226`）→ `start_events()`（`:229`）→ 成功なら `start_global_lock()`（`:234`）→ EC（`:240`）。`_OSC` を入れる位置（§4.3）は `start_global_lock()` の block の後、`drv_acpi_ec_attach()` の前。
 - PCIe の link の register を書く既存の code:
   - `src/drivers/pci/pci-power.c`: PCI PM の PME_En（`:1033〜1071`）、LnkCtl・LnkCtl2・LTR の latency・L1SS の保存と復元（`:212〜229`・`:318〜325`）。
   - `src/drivers/ethernet/rtl8125.c:2526〜2556`: LnkCtl の ASPM と Clock PM の field を**落とす**（`disable_link_power_management`）。
@@ -35,7 +38,7 @@
 - 起動の parameter: 固定の enum（`include/kern/boot.h:107〜129`）と名前の表・語の検査（`src/kern/boot.c`）。語の検査が EINVAL なら `kern_boot_parameters_initialize()` が失敗し、kernel は idle に入って起動を止める（`src/kern/main.c:187〜195`）。driver は `kern_boot_handoff("boot.command-line")` と `kern_boot_parameters_token_present()`（token を丸ごと比べる）で語を読む（前例 `src/drivers/platform/pcat/cpu-x86/cpu-x86.c:116〜158` の `cpuperf=off`・`cpuperf.hwp=off`）。
 - 診断の口 `/dev/acpi`（`src/drivers/acpi/acpi-dev.c`）: 読むと namespace、path を書くとその**評価**の結果を `PATH = VALUE` で読める（Method を書けば実行される）。
 - Notify の受け手が無い時は `ACPI: Notify(PATH, 0xNN) has no handler` を log に出して捨てる（`src/drivers/acpi/aml-sync.c:242〜251`）。AML の `Debug` への store は `ACPI Debug: …` の行になる（`aml-eval.c:2038〜2050`）。While の timeout は `aml-eval.c:1367〜1407`。
-- MADT は HAL が読む（`src/hal/amd64/bsp-pcat/acpi.c`）。ACPI の driver は自分の表の写しから `drv_acpi_table_lookup("APIC", …)`（`acpi-kern.c:589〜611`）で読める。
+- MADT は HAL が読む（今の tree は `src/hal/x86_64/bsp-pcat/acpi.c`。第 2 版の時は `src/hal/amd64/`）。ACPI の driver は自分の表の写しから `drv_acpi_table_lookup("APIC", …)`（`acpi-kern.c:589〜611`）で読める。
 - S3 は無い（`_WAK`・`_PTS` の S3 の道が無い。S0 idle だけ）。D3cold の関数は `acpi-sleep.c` にあるが、`DRV_ACPI_D3_COLD` を渡す呼び手は `acpi-sleep.c` の外に無い（PCI の電源の道は D0 と D3hot だけ、`acpi-pci-power.c:102〜104`）。
 
 ## 3. 5330 の firmware の `_OSC`（表の読み）
@@ -99,7 +102,7 @@ DTT の UUID で commit すると EC に `DPST(1)`（DTT の driver が有る）
 
 ### 4.2 bit（DWORD）
 
-値の出典: Linux v6.12.5 `include/linux/acpi.h`（`:562〜620`）と `include/acpi/proc_cap_intel.h`（`:11〜22`）。5330 の AML の使い方（§3）と QEMU の log の名前の並びが同じ値を示す。仕様の表では未確認（§9）。
+値の出典: DWORD1 の bit と platform-wide の bit は ACPI 6.5 §6.2.11・Table 6.13（2026-11-15 に仕様で確かめた。Linux v6.12.5 `include/linux/acpi.h` の `:562〜588` と同じ値）。PCIe の host bridge の bit は PCI Firmware Specification が無いので Linux v6.12.5 `include/linux/acpi.h`（`:605〜620`）の値を引用で使い、5330 の AML の使い方（§3.3）と QEMU の log の名前の並びで裏付ける。processor の UUID は ACPI 6.5 の付録の ASL の例（`_OSC (ToUUID("4077A616-…"), …)`）と 5330 の AML に現れる。
 
 **PCIe の host bridge**（UUID 33db4d5b-…、revision 1、3 DWORD）:
 
@@ -118,11 +121,12 @@ DTT の UUID で commit すると EC に `DPST(1)`（DTT の driver が有る）
 
 既定（WS300 の code の前）: DWORD2 = 0x11（bit 0・4、segment の bit は p005）、DWORD3 = 0。WS300 の code が入った後: DWORD2 に bit 1、DWORD3 = 0x30。切り替えは `acpi-osc.c` の 1 か所の定数で、WS300 の Phase が変える（§5.12）。5330 の firmware は DWORD2 を読まず、DWORD3 0 なら `OSCC` ← 0（§3.3）。
 
-**platform-wide**（UUID 0811b06e-…、revision 1、2 DWORD）: DWORD2 = 0x60（bit 5・6）。ただし bit 5・6 は CPU の性能を zedBSD が HWP で扱う時だけ（`CONFIG_CPU_PERF=y` で `cpuperf=off`・`cpuperf.hwp=off` が無い時）。そうでなければ DWORD2 = 0（commit はする。§5.3）。
+**platform-wide**（UUID 0811b06e-…、revision 1、2 DWORD）: DWORD2 = 0x60（bit 5・6）。ただし bit 5・6 は CPU の性能を zedBSD が HWP で扱う時だけ（CPU の性能の driver が build に入っていて（今の build system では `mk/kernel.mk` の `CONFIG_DRIVER_X86_POWER_CONTROL` と WS333 の `CONFIG_KERN_CPU_PERF`。名前は p005 で今の `mk/` を読んで決める）、`cpuperf=off`・`cpuperf.hwp=off` が無い時）。そうでなければ DWORD2 = 0（commit はする。§5.3）。
 
 | bit | 意味 | 申告 | 理由 |
 | --- | --- | --- | --- |
 | 0 | Processor Aggregator Device | しない | 無い |
+| 15・16・20 | GHES_ASSIST・CPPC の複数の PCC channel・PCI BAR Target GAS（ACPI 6.5 Table 6.13 にあり第 2 版の表に無かった） | しない | 無い |
 | 1・3 | `_PPC` の `_OST`・hotplug の `_OST` | しない | `_OST` を評価しない |
 | 2 | `_PR3` | しない | D3cold を使う呼び手が無い（§2）。D3cold を使う WS が足す |
 | 4 | APEI | しない | 無い |
@@ -347,12 +351,12 @@ commit で firmware がさらに落とした場合は、その値で終える（
 
 | option | 働き |
 | --- | --- |
-| `--set 'PATH i:N'` | 表の load と `_INI` の後、呼びの前に名前（Name・field unit）へ値を store（実機から読んだ値を入れる） |
+| `--set PATH=i:N`（`s:`・`b:` も） | 表の load と `_INI` の後、呼びの前に名前（Name・field unit）へ値を store（実機から読んだ値を入れる）。2026-11-15 の実装で `'PATH i:N'` から `PATH=VALUE` の形にした（ASL の試験の `.args` が空白で語を切るため） |
 | `--memory-file A=FILE` | 物理番地 A に file の byte を置く（`\SSDT` の package の番地に動的な表を置き、`Load(OpRegion)` を通す） |
 | `--trace` | 呼びの間の region の書き（space・番地・幅・値。SystemIO 0x72・0x73、PCI config を含む）、Load・Unload、Notify、Sleep・Stall の合計を 1 行ずつ出す |
 | `--diff` | 呼びの前と後で namespace の全ての名前と Integer・String・Buffer の値を取り、増えた・消えた・変わった物を出す |
-| `--call-every-method` | 呼びの後に、引数の無い全ての method を評価して結果を出す（`check-latitude5330.sh` の 4 と同じ。前後の比べに使う） |
-| `--acpi-mode` | 呼びの前に PM1 の SCI_EN を立てた状態にする（ACPI mode の前と後の比べ、review M1） |
+| `--call-every-method` | 呼びの後に、引数の無い全ての method を評価して結果を出す（`check-latitude5330.sh` の 4 と同じ。前後の比べに使う）。既存の `--methods` が `--eval`・`--eval-args` の後に走るので同じ働き（新しい option は足さない） |
+| `--acpi-mode` | 呼びの前に PM1 の SCI_EN を立てた状態にする（ACPI mode の前と後の比べ、review M1）。既存の `--events` が FADT の ACPI_ENABLE を SMI_CMD に書いて SCI_EN を立て（`acpi-event.c` の `enable_acpi_mode()`）、その後に呼びが走るので同じ働き（新しい option は足さない） |
 
 手順（p003）:
 1. 5330 の zedBSD（main、`_OSC` 無し）で `/dev/acpi` から入力の値を読む。**Name と field unit だけを書く**（Method は書かない。`/dev/acpi` は書いた path を評価する、§2）: `NEXP`・`ITSP`・`OSCC`・`CFGD`・`OSYS`・`SDTL`・`PF00`〜`PF11`・`HWPV`・`HWPE`・`INFS`・`ITBM`・`LMPS`・`CORE`・`NMFQ`・`SFBC`・`SFSC`・`RFBC`・`RFSC`・`TCNT`・`U4SE`・`U4CM`・`CMSK`・`EPTU`・`RTD3`・`HGMD`・`DPIW`・`DPG1`・`PCON`・`PSCP`・`DPTF`・`IN34`・`DDDR`・`\_SB.PC00.TDM0.SCME`・`TDM1.SCME`・`ITFP`。一覧は p003 の script に持ち、各名前が Name・field unit である事を host の namespace で先に確かめる。
@@ -370,6 +374,8 @@ commit で firmware がさらに落とした場合は、その値で終える（
 - 判定は guest の serial（`plan/tools/guest/serial.py`）で `/dev/acpi` に記録の Name を書いて読む（console の log は読まない）。`acpi.osc=off`・`on`・段の語の組で、呼ばれた回数・DWORD が設計の通りか。q35 の `\_SB.PCI0.CTRL` が求めた値と q35 の mask の積。boot-test.sh で login prompt。
 
 ### 6.3 実機（5330）の前後の比べ
+
+**機械の順**: Q310 の答え（2026-11-01）で、最初の実機の比べはデスクトップ（10.0.10.3、壊れてもよい前提）で行い、その後に 5330 で行う。デスクトップの手順（表の取り出し、起動の道具、電源の入れ直し）は p006 の phase.md で今の `plan/tools.md` から決める。下は 5330 の手順。
 
 同じ kernel を語だけ変えて起動する（`plan/tools/hw5330/5330-run.sh --nvme-kernel VMUNIX NAME` に `CFG_ADD='acpi.osc=…'`）。**5330-run.sh は Debian から BootNext で zedBSD を 1 回起動し、終わると Debian に戻る**（`5330-run.sh:2〜8`）ので、全ての run が Debian と交互になる（review M3）。そのため:
 
@@ -418,7 +424,7 @@ commit で firmware がさらに落とした場合は、その値で終える（
 | Phase | 目的 | 依存 | 受け入れ条件 | 担当の型 | 規模 |
 | --- | --- | --- | --- | --- | --- |
 | p001 | 調べと設計（この文書）、review | — | design-reviewer の review を反映、問いを [user-questions.md](user-questions.md) に | 設計 | — |
-| p002 | aml-host の option（§6.1 の 6 つ）と ASL の試験（`_OSC` の型 8 つと PCIe の失敗の型、acpiexec と比べる） | p001、tools の所有の割当 | `make -C plan/tools/aml-host`・`run-asl.py`・`check-latitude5330.sh` が PASS、新しい ASL の試験が acpiexec と一致、tools.md の行の更新を Q1 に頼む | phase-runner | 2 LW |
+| p002 | aml-host の option（§6.1 の 6 つのうち新しく要る 4 つ。`--acpi-mode` は既存の `--events`、`--call-every-method` は既存の `--methods` が同じ働き）と ASL の試験（`_OSC` の型 8 つと PCIe の失敗の型、acpiexec と比べる） | p001、tools の所有の割当 | `make -C plan/tools/aml-host`・`run-asl.py`・`check-latitude5330.sh` が PASS、新しい ASL の試験が acpiexec と一致、tools.md の行の更新を Q1 に頼む | phase-runner | 2 LW |
 | p003 | 5330 の入力の読み（`/dev/acpi`、Debian の dmesg と CMOS、読むだけ）と host の評価、`osc-effects-5330.md` | p002、5330 の割当、CMOS の読みの許可 | §6.1 の 6 の (a)〜(c) | phase-runner-high | 2 LW |
 | p004 | `acpi-osc-codec`（純粋な関数）と host 試験 | p001 | 正常・masked・failure・UUID・revision・短い Buffer・Integer・余計な bit・count 2 と 3 の試験が PASS（ASan・UBSan）、わざと壊す 3 通りを捕える、UUID と bit の値の block に `Values referenced:`（§9） | phase-runner-high | 1 LW |
 | p005 | `acpi-osc.c` の統合（3 段・ACPI mode の後の位置・MADT・host bridge・結果の表・PCI の口・log）、4 つの起動の語（既定 off）、QEMU の試験の SSDT と script | p004、Q310-3・Q310-4 の答え | amd64 の build（warning 0）、QEMU の §6.2 が PASS、`acpi.osc=off` で呼ばれない、有効にする PCIe の書きが 0 件（grep）、boot-test.sh で login | phase-runner-high | 3 LW |
@@ -432,7 +438,7 @@ commit で firmware がさらに落とした場合は、その値で終える（
 
 ## 9. 出典と引用
 
-- ACPI 6.5 §6.2.11（`_OSC`）と platform-wide の DWORD の表: **未取得**（uefi.org が bot の確かめの page を返した、2026-10-31）。cockpit の 01 と同じ件（Q310-6）。
+- ACPI 6.5 §6.2.11（`_OSC`）と platform-wide の DWORD の表: 2026-10-31 は未取得（uefi.org が bot の確かめの page を返した）。2026-11-01 の Q310-6 の答えで PDF が `/home/awe/zedBSD-specs/` に置かれた。§6.2.11（DWORD1 の bit、query と commit の規則 §6.2.11.1）、Table 6.13（platform-wide の DWORD2）、§19.6.142 Table 19.41（ToUUID の byte の並び）を code の出典に使う（`Values referenced: ACPI 6.5 …`）。
 - PCI Firmware Specification 3.3（PCI の host bridge の `_OSC`）: 未取得（PCI-SIG の会員向け）。
 - Intel の processor の `_OSC` の bit: 未取得。processor は DWORD2 = 0 にするので bit の意味に頼らない。UUID は 5330 の AML と Linux の両方に現れる値。
 - **値の出典**（guardrail「MIT・GPL の出典のデータの引用」: GPL の file の定数・表はデータとして block ごとに出典を示して使ってよい。code・comment・構造・symbol の名前は写さない）: UUID と bit の値は Linux v6.12.5 `include/linux/acpi.h`（`:551〜620`）から、block の直前の複数行の comment に `Values referenced: Linux v6.12.5 include/linux/acpi.h (the _OSC DWORD bits)` の形で書く。仕様が手に入れば、仕様の版・節・表を出典に足すか置き換える（merge を仕様の入手に縛らない。review M11 の 2 案のうち guardrail の道を採った）。file の先頭には書かない。
@@ -485,3 +491,4 @@ commit で firmware がさらに落とした場合は、その値で終える（
 
 - 2026-10-31 第 1 版（P6、q1779-i01、41a915514）。
 - 2026-10-31 第 2 版（P6、同じ Queue）: review を反映（design-review.md の反映の表）。
+- 2026-11-15 第 2 版の更新（P2、q2106-i01）: Q310 の答え、ACPI 6.5 の入手、試験の機械の順、HAL の path、build system、今の tree の file:行 を反映（冒頭の「第 2 版の後の更新」）。

@@ -1,0 +1,1 @@
+--set \SETV=i:0x1234 --set \NVS0=i:0x5A --memory-file 600000=@SUPPORT@/dynamic2.aml --trace --diff

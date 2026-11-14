@@ -2,7 +2,18 @@
 
 # WS310 ユーザーへの問い
 
-- WS: [WS310](ws.md) — ACPI の `_OSC` を呼び、システム全体の挙動を厳重に確かめる。状態: planning（p001 の設計を終えた、[design.md](design.md)）。
+- WS: [WS310](ws.md) — ACPI の `_OSC` を呼び、システム全体の挙動を厳重に確かめる。状態: incomplete（p001 cleared、2026-11-01 に答えを受けた。下の「答え」）。
+
+## 答え（2026-11-01 09:31、写しの元は [ws.md](ws.md) の「ユーザーの決定（要点）」）
+
+- 全体: ユーザーから、`_OSC` は挙動を変えるが通らないと ACPI compliant にできないので、system を一度壊すつもりで取り組む、最初の試験は 5330 でなくデスクトップ（10.0.10.3）で行う、という趣旨の答えを受けた。
+- Q310-1: **A**（ユーザー）。受け入れが通れば既定を `on`、`acpi.osc=off` で戻せる。
+- Q310-2: **A**（Q1 の判断、ユーザーの答えに沿う）。先に値を読み、Thunderbolt の CM の切り替え・CMOS の書きが起きると分かったら改めて聞く。
+- Q310-3: **A**（Q1 の判断）。processor の `_OSC` の DWORD2 は 0。
+- Q310-4: **A**（Q1 の判断）。PCIe の control は今は 0。WS300 の code と一緒に PCIe Capability と LTR。
+- Q310-5: **A**（Q1 の判断）。5330 の比べの後に 1 晩。
+- Q310-6: ACPI 6.5 の PDF は入手済み（`/home/awe/zedBSD-specs/ACPI_Spec_6_5_Aug29.pdf`）。PCI Firmware Specification と Intel の processor の文書は無いまま（design §9）。
+- 試験の順: デスクトップ（壊れてもよい前提）→ 5330。
 - 決まっていない事: 確かめの後に既定で呼ぶか、5330 で platform の `_OSC` が Thunderbolt の設定と CMOS に触れる時の扱い、CPU に何を申告するか、PCIe の制御の範囲、耐久の試験、仕様の入手。
 - 用語:
   - **`_OSC`**（Operating System Capabilities）: OS が firmware の ACPI の method を呼び、「OS はこれができる（support）」「この機能は OS が扱う（control）」と伝える仕組み。firmware はそれを見て、自分で扱っていた処理を止めたり、隠していた情報（表）を出したりする。
