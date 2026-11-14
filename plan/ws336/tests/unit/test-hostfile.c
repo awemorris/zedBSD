@@ -157,6 +157,7 @@ test_base64(
 	uint32_t group;
 	size_t rest;
 
+	/* Starts at the first input byte with no output. */
 	position = 0;
 	length = 0;
 
@@ -261,6 +262,7 @@ expect_known(
 	unsigned skipped;
 	int error;
 
+	/* Starts with values that the call must overwrite. */
 	result = SSH_KNOWN_MATCH;
 	skipped = 12345U;
 
@@ -283,6 +285,7 @@ expect_find(
 	int found;
 	int error;
 
+	/* Starts with values that the call must overwrite. */
 	found = 7;
 	skipped = 12345U;
 
@@ -448,8 +451,14 @@ test_pattern_speed(void)
 	CHECK_EQ(answer, 0);
 
 	/* A pattern as long as the string, all question marks and stars. */
-	for (index = 0; index < TEST_LONG_SIZE; index++)
-		pattern[index] = (index % 2U == 0) ? '*' : '?';
+	for (index = 0; index < TEST_LONG_SIZE; index++) {
+		if (index % 2U == 0)
+			pattern[index] = '*';
+		else
+			pattern[index] = '?';
+	}
+
+	/* Every character of the string is matched by a star or a question mark. */
 	answer = ssh_pattern_match(pattern, TEST_LONG_SIZE, long_text, 0);
 	CHECK_EQ(answer, 1);
 
@@ -691,14 +700,20 @@ test_authorized(void)
 	text_reset();
 	text_add_key(key1);
 	text_add("\n");
-	file_text[60] = (file_text[60] == 'A') ? 'B' : 'A';
+	if (file_text[60] == 'A')
+		file_text[60] = 'B';
+	else
+		file_text[60] = 'A';
 	EXPECT_FIND(key1, 0, 0);
 
 	/* A letter changed inside the type part of the blob makes the line malformed. */
 	text_reset();
 	text_add_key(key1);
 	text_add("\n");
-	file_text[20] = (file_text[20] == 'A') ? 'B' : 'A';
+	if (file_text[20] == 'A')
+		file_text[20] = 'B';
+	else
+		file_text[20] = 'A';
 	EXPECT_FIND(key1, 0, 1);
 
 	/* The size is taken from the argument, not from a NUL. */
@@ -1229,6 +1244,7 @@ test_known_host_errors(void)
 	size_t index;
 	int error;
 
+	/* Builds a file with one line for the host. */
 	text_reset();
 	text_add("host ");
 	text_add_key(key1);
@@ -1401,6 +1417,7 @@ test_put_line(void)
 		check_record_long((long)out.size, 0, __FILE__, __LINE__, "put_line appended nothing with a port");
 	}
 
+	/* No append may have left an error behind. */
 	CHECK_EQ(ssh_buf_error(&out), 0);
 
 	/* A host of 256 characters is EINVAL and 255 is written. */
@@ -1456,12 +1473,15 @@ buf_contains(
 {
 	size_t length;
 	size_t position;
+	int different;
 
+	/* Takes the needle's length once. */
 	length = strlen(needle);
 
 	/* Compares at each position where the needle fits. */
 	for (position = 0; position + length <= buf->size; position++) {
-		if (memcmp(buf->data + position, needle, length) == 0)
+		different = memcmp(buf->data + position, needle, length);
+		if (different == 0)
 			return 1;
 	}
 
@@ -1759,6 +1779,9 @@ test_fuzz(void)
 	size_t position;
 	size_t count;
 	size_t index;
+	unsigned key_pick;
+	unsigned end_pick;
+	unsigned cut_pick;
 	int found;
 	int error;
 
@@ -1769,8 +1792,18 @@ test_fuzz(void)
 		for (index = 0; index < count; index++) {
 			text_add(hosts[fuzz_next() % (sizeof(hosts) / sizeof(hosts[0]))]);
 			text_add(" ");
-			text_add_key((fuzz_next() & 1U) ? key1 : key2);
-			text_add((fuzz_next() & 1U) ? " c\n" : "\r\n");
+			key_pick = fuzz_next() & 1U;
+			if (key_pick != 0)
+				text_add_key(key1);
+			else
+				text_add_key(key2);
+
+			/* Ends the line with a comment or with a carriage return. */
+			end_pick = fuzz_next() & 1U;
+			if (end_pick != 0)
+				text_add(" c\n");
+			else
+				text_add("\r\n");
 		}
 
 		/* Changes up to four bytes, and sometimes cuts the text. */
@@ -1780,7 +1813,9 @@ test_fuzz(void)
 			file_text[position] = alphabet[fuzz_next() % (sizeof(alphabet) - 1U)];
 		}
 
-		if ((fuzz_next() & 3U) == 0 && file_size > 0)
+		/* Sometimes cuts the text short at a random place. */
+		cut_pick = fuzz_next() & 3U;
+		if (cut_pick == 0 && file_size > 0)
 			file_size = fuzz_next() % file_size;
 
 		/* The check answers in range with either key and on both name forms. */

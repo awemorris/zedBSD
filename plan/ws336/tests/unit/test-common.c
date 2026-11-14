@@ -192,6 +192,10 @@ test_namelist_check(void)
 			big_list[index] = 'a';
 	}
 
+	/*
+	 * The length limit is inclusive: the limit passes, one more is too long, one less
+	 * passes.
+	 */
 	CHECK_EQ(ssh_namelist_check(big_list, SSH_NAMELIST_MAX), 0);
 	CHECK_EQ(ssh_namelist_check(big_list, SSH_NAMELIST_MAX + 1), EMSGSIZE);
 	CHECK_EQ(ssh_namelist_check(big_list, SSH_NAMELIST_MAX - 1), 0);
@@ -540,6 +544,7 @@ test_base64_decode_errors(void)
 		CHECK(decoded >= 1);
 	}
 
+	/* A form with zero unused bits decodes to the byte it stands for. */
 	CHECK_EQ(ssh_base64_decode("/g==", 4, bytes, sizeof(bytes), &decoded), 0);
 	CHECK_EQ(bytes[0], 0xfe);
 

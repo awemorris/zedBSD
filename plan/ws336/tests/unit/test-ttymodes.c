@@ -122,6 +122,7 @@ find_argument(
 {
 	size_t offset;
 
+	/* Starts at the first pair of the stream. */
 	offset = 0;
 
 	/* Walks the pairs up to the end opcode. */
@@ -136,9 +137,14 @@ find_argument(
 			return 1;
 		}
 
+		/*
+		 * Moves on to the next pair, each of which is five bytes: an opcode and a
+		 * 32-bit argument.
+		 */
 		offset += 5;
 	}
 
+	/* Reports that the opcode is not in the stream. */
 	return 0;
 }
 
@@ -155,6 +161,7 @@ check_stream_shape(
 	int count;
 	int previous;
 
+	/* Starts at the first pair with no pairs counted and no opcode seen before it. */
 	offset = 0;
 	count = 0;
 	previous = 0;
@@ -188,6 +195,7 @@ test_put_raw(void)
 	struct ssh_buf encoded;
 	uint32_t argument;
 
+	/* Encodes a raw terminal and checks that the stream is well formed. */
 	make_raw(&terminal);
 	ssh_buf_init(&encoded, 4096, 0);
 	ssh_ttymodes_put(&terminal, &encoded);
@@ -210,6 +218,7 @@ test_put_raw(void)
 	CHECK(find_argument(&encoded, 36, &argument) == 1 && argument == 0);
 	CHECK(find_argument(&encoded, 38, &argument) == 1 && argument == 0);
 
+	/* Releases the encoded stream. */
 	ssh_buf_free(&encoded);
 }
 
@@ -224,6 +233,7 @@ test_put_cooked(void)
 	struct ssh_buf encoded;
 	uint32_t argument;
 
+	/* Encodes a cooked terminal and checks that the stream is well formed. */
 	make_cooked(&terminal);
 	ssh_buf_init(&encoded, 4096, 0);
 	ssh_ttymodes_put(&terminal, &encoded);
@@ -287,6 +297,7 @@ test_put_cooked(void)
 	CHECK(find_argument(&encoded, 90, &argument) == 1 && argument == 1);
 	CHECK(find_argument(&encoded, 91, &argument) == 1 && argument == 0);
 
+	/* Releases the encoded stream. */
 	ssh_buf_free(&encoded);
 }
 
@@ -301,6 +312,7 @@ test_put_speeds(void)
 	struct ssh_buf encoded;
 	uint32_t argument;
 
+	/* Starts from a cooked terminal, whose speeds are set below. */
 	make_cooked(&terminal);
 
 	/* 38400 both ways (some systems keep one speed field for both directions, so the two are set alike). */
@@ -342,6 +354,7 @@ test_put_speeds(void)
 	CHECK(check_stream_shape(&encoded) > 20);
 #endif
 
+	/* Releases the encoded stream. */
 	ssh_buf_free(&encoded);
 }
 
@@ -354,6 +367,10 @@ test_put_limit(void)
 	struct termios terminal;
 	struct ssh_buf encoded;
 
+	/*
+	 * Encodes into a buffer too small for the whole stream, which must report that and
+	 * stay within its size.
+	 */
 	make_cooked(&terminal);
 	ssh_buf_init(&encoded, 12, 0);
 	ssh_ttymodes_put(&terminal, &encoded);
@@ -378,6 +395,7 @@ test_roundtrip(void)
 	tcflag_t control_mask;
 	int pass;
 
+	/* Names the bits that the encoding carries, so that the comparison ignores the others. */
 	input_mask = ICRNL | IGNCR | INLCR | IGNPAR | PARMRK | INPCK | ISTRIP | IXON | IXOFF;
 	output_mask = OPOST;
 	local_mask = ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHONL | NOFLSH | TOSTOP | IEXTEN;
@@ -398,10 +416,15 @@ test_roundtrip(void)
 			cfsetospeed(&source, B9600);
 		}
 
+		/* Encodes the source terminal and applies the result to the target. */
 		ssh_buf_init(&encoded, 4096, 0);
 		ssh_ttymodes_put(&source, &encoded);
 		CHECK_EQ(ssh_ttymodes_apply(encoded.data, encoded.size, &target), 0);
 
+		/*
+		 * Every bit and character the encoding carries must now agree between the
+		 * two terminals.
+		 */
 		CHECK_EQ(target.c_iflag & input_mask, source.c_iflag & input_mask);
 		CHECK_EQ(target.c_oflag & output_mask, source.c_oflag & output_mask);
 		CHECK_EQ(target.c_lflag & local_mask, source.c_lflag & local_mask);
@@ -431,6 +454,7 @@ test_apply_flags_and_chars(void)
 {
 	struct termios terminal;
 
+	/* Starts from a cooked terminal, which the pairs below change. */
 	make_cooked(&terminal);
 
 	/* RFC 4254 section 8: 53 ECHO off, 50 ISIG kept on, 56 ECHONL on (any non-zero value sets). */
@@ -617,6 +641,10 @@ test_apply_unknown_opcodes(void)
 	unknown[6] = 127;
 	unknown[7] = 159;
 
+	/*
+	 * Applies a stream that leads with an unknown opcode and ends with a known pair, for
+	 * each unknown opcode.
+	 */
 	for (index = 0; index < 8; index++) {
 		make_cooked(&terminal);
 		wire_reset(&stream);
@@ -796,18 +824,21 @@ test_apply_random(void)
 	size_t index;
 	int round;
 	int error;
+	uint32_t draw;
 
 	/* Runs many random strings under the sanitizers. */
 	for (round = 0; round < 20000; round++) {
 		size = next_random() % (sizeof(bytes) + 1);
 		for (index = 0; index < size; index++) {
 			/* Opcodes are drawn from a small set so that known pairs, unknown pairs and stops all happen. */
-			if (next_random() % 3 == 0)
+			draw = next_random();
+			if (draw % 3 == 0)
 				bytes[index] = (uint8_t)(next_random() % 256);
 			else
 				bytes[index] = (uint8_t)(next_random() % 4);
 		}
 
+		/* Applies the random bytes to a cooked terminal. */
 		make_cooked(&terminal);
 		before = terminal;
 		error = ssh_ttymodes_apply(bytes, size, &terminal);

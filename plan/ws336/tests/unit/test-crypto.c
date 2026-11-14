@@ -280,6 +280,7 @@ test_ed25519(void)
 	uint8_t expected_signature[64];
 	uint8_t altered[64];
 	uint8_t altered_key[32];
+	const uint8_t *message_or_null;
 	size_t message_size;
 	size_t index;
 	size_t position;
@@ -300,13 +301,18 @@ test_ed25519(void)
 		CHECK_EQ(ssh_ed25519_public(seed, public_key), 0);
 		CHECK_BYTES(public_key, expected_public, 32);
 
+		/* The library takes no pointer for an empty message. */
+		message_or_null = message;
+		if (message_size == 0)
+			message_or_null = NULL;
+
 		/* The signature of the message. */
 		memset(signature, 0, sizeof(signature));
-		CHECK_EQ(ssh_ed25519_sign(seed, message_size > 0 ? message : NULL, message_size, signature), 0);
+		CHECK_EQ(ssh_ed25519_sign(seed, message_or_null, message_size, signature), 0);
 		CHECK_BYTES(signature, expected_signature, 64);
 
 		/* The verification of the signature of the specification. */
-		CHECK_EQ(ssh_ed25519_verify(expected_public, message_size > 0 ? message : NULL, message_size, expected_signature), 0);
+		CHECK_EQ(ssh_ed25519_verify(expected_public, message_or_null, message_size, expected_signature), 0);
 
 		/* A 1-bit change in the first, a middle and the last byte of the signature. */
 		memcpy(altered, expected_signature, 64);
@@ -343,6 +349,10 @@ test_ed25519(void)
 			carry = sum >> 8;
 		}
 
+		/*
+		 * A signature whose second half is the sum of that half and the group order
+		 * is the same point and must still be refused.
+		 */
 		CHECK_EQ(carry, 0);
 		CHECK_EQ(ssh_ed25519_verify(expected_public, message, message_size, altered), EBADMSG);
 	}
@@ -387,6 +397,7 @@ test_hybrid(void)
 	uint8_t first_init[SSH_HYBRID_INIT_SIZE];
 	uint8_t zero_private[SSH_X25519_SIZE];
 
+	/* Starts from an all-zero private key. */
 	memset(zero_private, 0, sizeof(zero_private));
 
 	/* The client starts: C_INIT is written, the state holds the key pair. */
@@ -736,6 +747,7 @@ test_misc(void)
 			CHECK_EQ(ssh_ct_equal(left, right, sizeof(left)), 0);
 		}
 
+		/* Restores the byte to the pattern for the next bit. */
 		right[index] = 0x5a;
 	}
 
@@ -754,6 +766,7 @@ test_misc(void)
 			CHECK_EQ(left[index], 0xa5);
 	}
 
+	/* Wiping nothing is allowed. */
 	ssh_wipe(NULL, 0);
 
 	/* Random bytes: two draws differ, and a draw is not all zero. */
@@ -774,6 +787,7 @@ test_misc(void)
 			count++;
 	}
 
+	/* No more than 600 of the 4096 bytes may be zero, and the last 64 may not be all zero. */
 	CHECK(count < 600);
 	CHECK(!all_zero(large + sizeof(large) - 64, 64));
 }
@@ -833,6 +847,7 @@ recompute_k(
 	int status;
 	int failed;
 
+	/* Starts with nothing made and nothing failed. */
 	failed = 0;
 	decapsulator = NULL;
 	own = NULL;
@@ -850,6 +865,7 @@ recompute_k(
 			failed = 1;
 	}
 
+	/* Decapsulates the ciphertext of the reply when the setup worked. */
 	if (!failed) {
 		status = EVP_PKEY_decapsulate(decapsulator, joined, &secret_size, reply, SSH_MLKEM768_CIPHERTEXT);
 		if (status != 1)
@@ -875,12 +891,14 @@ recompute_k(
 			failed = 1;
 	}
 
+	/* Gives the derivation the server's point. */
 	if (!failed) {
 		status = EVP_PKEY_derive_set_peer(deriver, peer);
 		if (status != 1)
 			failed = 1;
 	}
 
+	/* Derives the shared secret. */
 	if (!failed) {
 		status = EVP_PKEY_derive(deriver, joined + 32, &shared_size);
 		if (status != 1)
@@ -916,10 +934,12 @@ all_zero(
 {
 	size_t index;
 
+	/* Looks at every byte. */
 	for (index = 0; index < size; index++) {
 		if (data[index] != 0)
 			return 0;
 	}
 
+	/* Succeeded: every byte is zero. */
 	return 1;
 }
