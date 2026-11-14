@@ -2,7 +2,7 @@
 
 # ws347-p010: Amaterrace GPU の RTL の全ての register に reset を入れる（memory と複数の clock の module を除く）
 
-Status: in-progress（2026-11-14 Q1 起票。P2 q2080・P4 q2081・P5 q2082）
+Status: canceled（2026-11-14 ユーザーの決定: wrapper の am_* 以外は非同期 reset にする。同期 reset で始めた P2・P4・P5 の branch と worktree は破棄した。reset の作業は agy に頼み直す）
 Parent: [WS347](../ws.md)
 
 ## 目的

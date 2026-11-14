@@ -23,7 +23,7 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 - 2026-11-13 ユーザーから、次の趣旨の訂正を受けた: host が GPU の local memory に書いてよいのは GOP の VRAM だけ（B35 の前提の誤解の訂正）。GOP を残して使う事はまず無いので、blitter の無い discrete の GPU で CPU が local の窓を通して frame に書く予備の道（`display.c` の `copy_by_processor`）は削除する。
 - 2026-11-13 ユーザーから、依頼 08（X1〜X9）は全部実装し、B35（host の BAR の local の窓と L2 の一貫性）は driver が command で守る、という趣旨の決定を受けた。
 - 2026-11-13 ユーザーから、次の趣旨の決定を受けた: (1) 割り込みの有無で polling にする事と、DMA が coherent でない時に uncached で使う事は driver の基本の機能なので build の option にしない（`CONFIG_GHCI_POLL`・`CONFIG_GHCI_HOST_UNCACHED` を外し、検出だけで決める。mk の案は取り下げ）。(2) clipper の無い GPU（CLIP_POLY 0）は何も言わずに欠けてよい（minimal は実用ではない。software の clip は作らない）。両方 [p008](phase008/phase.md) で P4 が直す。
-- 2026-11-14 ユーザーから、次の趣旨の決定を受けた: RTL が reset で register を初期化しないのは誤りなので、全ての module で直す。memory（RAM の配列）は初期化しない。clock が複数ある module（atg_rop_blend・atg_rop_wpix・atg_tlb_l2 と board・bsp の別の clock）はユーザーが直す。Claude が RTL を書く例外: ユーザーが Q1 の試し書き（atg_tlb_l1.v）の差分を見て、残りの reset も Claude が入れるよう指示した（[p010](phase010/phase.md)）。Claude の一覧（概数、ifdef の reset を読み落とすので多めに出る）は `rtl/` と `boards/kc705` の 138 file・609 block。
+- 2026-11-14 ユーザーから、次の趣旨の決定を受けた: RTL が reset で register を初期化しないのは誤りなので、全ての module で直す。memory（RAM の配列）は初期化しない。reset の種類は、DSP48E1・BRAM・SRL を包む am_* の wrapper だけ同期 reset、それ以外の全ての register は非同期 reset（今の docs/style.md の「同期 reset」を改める）。clock が複数ある module（atg_dc・atg_dc_fifo・am_afifo・am_afifo_bram・atg_pcie_msi・am_jtag_regs・atg_kc705_mig・atg_rop_blend・atg_rop_wpix、別名の clock だけの atg_tlb_l2）はユーザーが直し方を考える。Claude の担当が同期 reset で始めた作業（p010）は破棄し、agy に方針を伝えて 1 file（atg_tlb_l1.v）を頼み、その差分をユーザーに見せる。
 - 2026-11-13 ユーザーから、次の趣旨の決定を受けた: blitter（CAP_BLT）が無い時は、Vulkan の転送だけでなく表示の写しも shader で行う（[p008](phase008/phase.md)）。
 - 2026-11-11 ユーザーから、次の趣旨の指示を受けた:
   - Amaterrace GPU の試験とデバッグを VF2 で行う WS を立てる。VF2 には PCIe で KC705 がつながっている。
@@ -55,7 +55,7 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 
 ## Resume point
 
-- 2026-11-14 Q1: p010（RTL の reset）を P2・P4・P5 が amaterrace-gpu の worktree で進める。merge まで agy に依頼 08 の X5〜X9 を送らない（同じ file の衝突を避ける）。4 件の修正の後の上位の testbench（41b9ed95）: atg_top_shade は DRAW 中の pipe_busy_mask 0、atg_top_fault 11 errors、atg_ghci_top 4 errors、atg_top_tex は実行中。reset を入れた後に流し直して解析する。
+- 2026-11-14 Q1: reset の方針（am_* の wrapper は同期、他は非同期）を agy に伝え、1 file（atg_tlb_l1.v）を頼んだ（scratchpad の q-rst1.txt）。差分をユーザーに見せてから残りを進める。それまで依頼 08 の X5〜X9 は送らない。4 件の修正の後の上位の testbench（41b9ed95）: atg_top_shade は DRAW 中の pipe_busy_mask 0、atg_top_fault 11 errors、atg_ghci_top 4 errors、atg_top_tex は実行中。reset を入れた後に流し直して解析する。
 - 2026-11-11 12:37 Q1: ユーザーの指示で全作業を止めた（P1・P2・Vivado の build）。再開はユーザーの指示で。
   - P1 の worktree `/home/awe/amaterrace-worktrees/p1-ws347rtl`（branch ws347-rtl）に RTL の未 commit の変更 3 file（atg_cp.v・atg_cp_regs.v・atg_top.v）。RTL は Gemini の担当なので、扱いはユーザーの判断。
   - P2 の worktree `/home/awe/zedBSD-worktrees/p2-ws347`（branch agent/p2-ws347）に driver の未 commit の変更（中身は未確認）。
@@ -75,5 +75,5 @@ VisionFive 2（VF2、riscv64）に PCIe でつないだ KC705（Xilinx Kintex-7 
 | [p007](phase007/phase.md) | 直した RTL で bitstream を作り直し、CAPS を実機で照合 | canceled（2026-11-11、RTL はユーザーが直す） | — |
 | [p005](phase005/phase.md) | 規約の全文の見直し | planned | p003・p004・p006 |
 | [p008](phase008/phase.md) | blitter の無い GPU で表示の copy の present を shader で写す（今は CPU が写す）。2026-11-13 の決定で CONFIG_GHCI_POLL・HOST_UNCACHED を外し、CLIP_POLY の shortfall を外す事を足した | cleared（2026-11-13 Q1、P4 q2030。main に merge） | p003 |
-| [p010](phase010/phase.md) | RTL の全ての register に reset を入れる（memory と複数の clock の module を除く。2026-11-14 ユーザーの決定で Claude が書く例外） | in-progress（P2 q2080・P4 q2081・P5 q2082） | — |
+| [p010](phase010/phase.md) | RTL の全ての register に reset を入れる（Claude の担当で同期 reset） | canceled（2026-11-14 ユーザーの決定で方針が変わり破棄。非同期 reset で agy に頼み直す） | — |
 | [p009](phase009/phase.md) | host が local memory に GOP の VRAM 以外を書かない形に: `copy_by_processor` の削除と、driver の local の窓の使い方の点検 | cleared（2026-11-13 Q1、P4 q2043。main に merge） | p008 |
