@@ -1,0 +1,56 @@
+Proposal only (ws341-p001). Makefile and mk/ are not changed by agents; this diff waits for the
+user's approval (plan/ws341/user-questions.md, question 6).  Line positions are against main 44bb7cdaac;
+the source file list follows the design (src/drivers/gpu/vgpu/) and may change with p004.
+
+--- a/mk/config.mk
++++ b/mk/config.mk
+@@ (after the [Venus GPU Driver] block)
+ CONFIG_DRIVER_PCI_VENUS           ?= n
+
++# [Virtual display driver (/dev/vgpu)]
++#  - Depends: CONFIG_DRIVER_GPU
++CONFIG_DRIVER_VGPU                ?= n
++
+ ########################
+ # Legacy 2D Drivers
+ ########################
+--- a/mk/kernel.mk
++++ b/mk/kernel.mk
+@@ (after the [Venus GPU Driver] block)
+ 	src/drivers/gpu/venus/share.c
+ endif
+
++# [Virtual display driver]
++ifneq ($(filter y,$(CONFIG_DRIVER_VGPU)),)
++KERN_CPPFLAGS += -DCONFIG_DRIVER_VGPU=1
++KERN_SOURCES += \
++	src/drivers/gpu/vgpu/vgpu.c \
++	src/drivers/gpu/vgpu/display.c \
++	src/drivers/gpu/vgpu/frame.c
++endif
++
+ # [Boot Linear Framebuffer driver]
+--- a/mk/platform-x86_64/defaults.mk
++++ b/mk/platform-x86_64/defaults.mk
+@@
+ CONFIG_DRIVER_PCI_VENUS           := y
++CONFIG_DRIVER_VGPU                := y
+ CONFIG_DRIVER_AUDIO               := y
+--- a/config/drivers/generic.drivers
++++ b/config/drivers/generic.drivers
+@@
+ -|fixed|Loop block device|*|y|
++CONFIG_DRIVER_VGPU|bool|Virtual display for remote screens (/dev/vgpu)|amd64,rpi4,rpi5,visionfive2|n|
+--- a/config/drivers/menu.list
++++ b/config/drivers/menu.list
+@@
+-GPU|CONFIG_DRIVER_PCI_VENUS CONFIG_DRIVER_PCI_I915 CONFIG_DRIVER_PCI_NVRTX CONFIG_DRIVER_PCI_AMDRDNA CONFIG_DRIVER_PCI_GHCI
++GPU|CONFIG_DRIVER_PCI_VENUS CONFIG_DRIVER_PCI_I915 CONFIG_DRIVER_PCI_NVRTX CONFIG_DRIVER_PCI_AMDRDNA CONFIG_DRIVER_PCI_GHCI CONFIG_DRIVER_VGPU
+
+Notes:
+- x86_64 defaults to y so that QEMU (Venus) images carry the driver for the tests of p005 and p009.
+  arm64 and riscv64 stay n until a device test has run there (question 4 asks whether the driver is
+  on by default for the user's builds).
+- The driver registers its display node only after a render node exists (design §3.1), so a kernel
+  with the driver and no GPU has no extra /dev/gpuN.
+- The device number of /dev/vgpu is chosen in p004 (not a make variable).
