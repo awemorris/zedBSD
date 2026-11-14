@@ -115,6 +115,8 @@ static void make_long_name(const struct ssh_sftp_attrs *attrs, uint32_t links, c
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_next_packet();
 	test_next_packet_stream();
@@ -154,7 +156,8 @@ main(void)
 	free(exact_packet);
 
 	/* Reports the result of the whole test. */
-	return check_finish("sftp");
+	status = check_finish("sftp");
+	return status;
 }
 
 /*
@@ -166,11 +169,14 @@ check_text(
 	const char *want,
 	int line)
 {
+	int different;
+
 	/* Counts the check. */
 	check_count++;
 
 	/* Reports a difference with both texts. */
-	if (strcmp(actual, want) != 0) {
+	different = strcmp(actual, want);
+	if (different != 0) {
 		check_failed++;
 		printf("FAIL %s:%d: got [%s], expected [%s]\n", __FILE__, line, actual, want);
 	}
@@ -214,11 +220,13 @@ wire_attrs(
 		wire_u32(wire, VALUE_SIZE_LOW);
 	}
 
+	/* Appends the owner and the group when the second flag is set. */
 	if ((flags & 0x00000002UL) != 0) {
 		wire_u32(wire, VALUE_UID);
 		wire_u32(wire, VALUE_GID);
 	}
 
+	/* Appends the permissions, then the times, when their flags are set. */
 	if ((flags & 0x00000004UL) != 0)
 		wire_u32(wire, VALUE_PERMISSIONS);
 	if ((flags & 0x00000008UL) != 0) {
@@ -256,11 +264,15 @@ parse_exact(
 	size_t size,
 	struct ssh_sftp_request *out)
 {
+	size_t allocation;
 	int error;
 
 	/* Replaces the previous copy by one of exactly the size. */
 	free(exact_packet);
-	exact_packet = malloc(size > 0 ? size : 1);
+	allocation = size;
+	if (allocation == 0)
+		allocation = 1;
+	exact_packet = malloc(allocation);
 	if (exact_packet == NULL)
 		abort();
 	if (size > 0)
@@ -285,6 +297,11 @@ check_attrs_values(
 	uint32_t flags)
 {
 	uint64_t size;
+	uint32_t uid;
+	uint32_t gid;
+	uint32_t permissions;
+	uint32_t atime;
+	uint32_t mtime;
 
 	/* The flags without the extended bit, which is not kept. */
 	CHECK((attrs->flags) == (flags & 0x0000000fUL));
@@ -295,16 +312,35 @@ check_attrs_values(
 		size = ((uint64_t)VALUE_SIZE_HIGH << 32) | (uint64_t)VALUE_SIZE_LOW;
 	CHECK(attrs->size == size);
 
-	/* The owner and the group. */
-	CHECK(attrs->uid == (((flags & 2UL) != 0) ? VALUE_UID : 0UL));
-	CHECK(attrs->gid == (((flags & 2UL) != 0) ? VALUE_GID : 0UL));
+	/* The owner and the group, or 0 when not present. */
+	uid = 0;
+	gid = 0;
+	if ((flags & 2UL) != 0) {
+		uid = VALUE_UID;
+		gid = VALUE_GID;
+	}
 
-	/* The permissions. */
-	CHECK(attrs->permissions == (((flags & 4UL) != 0) ? VALUE_PERMISSIONS : 0UL));
+	/* The owner and the group read back must be the ones put in. */
+	CHECK(attrs->uid == uid);
+	CHECK(attrs->gid == gid);
 
-	/* The times. */
-	CHECK(attrs->atime == (((flags & 8UL) != 0) ? VALUE_ATIME : 0UL));
-	CHECK(attrs->mtime == (((flags & 8UL) != 0) ? VALUE_MTIME : 0UL));
+	/* The permissions, or 0 when not present. */
+	permissions = 0;
+	if ((flags & 4UL) != 0)
+		permissions = VALUE_PERMISSIONS;
+	CHECK(attrs->permissions == permissions);
+
+	/* The times, or 0 when not present. */
+	atime = 0;
+	mtime = 0;
+	if ((flags & 8UL) != 0) {
+		atime = VALUE_ATIME;
+		mtime = VALUE_MTIME;
+	}
+
+	/* The times read back must be the ones put in. */
+	CHECK(attrs->atime == atime);
+	CHECK(attrs->mtime == mtime);
 }
 
 /*
@@ -328,6 +364,7 @@ check_prefixes_invalid(
 			failures++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 
 	/* One extra byte after the last field is refused. */
@@ -363,6 +400,7 @@ expect_packet(
 		CHECK_BYTES(actual->data + 4, want_body->data, want_body->size);
 	}
 
+	/* The buffer must not hold an error. */
 	CHECK_EQ(actual->error, 0);
 }
 
@@ -593,6 +631,8 @@ test_next_packet_random(void)
 	int failures;
 	int run;
 	int error;
+	int different;
+	uint32_t coin;
 
 	/* Counts every violated expectation. */
 	failures = 0;
@@ -605,11 +645,14 @@ test_next_packet_random(void)
 			bytes[0] = 0;
 			bytes[1] = 0;
 			bytes[2] = 0;
-			if ((next_random() % 8U) == 0)
+			/* One time in eight the first byte is random too, so the length is sometimes large. */
+			coin = next_random() % 8U;
+			if (coin == 0)
 				bytes[0] = (uint8_t)next_random();
 			bytes[3] = (uint8_t)(next_random() % 40U);
 		}
 
+		/* Puts the random bytes into an input buffer, to take a packet from it. */
 		ssh_buf_init(&input, 4096, 0);
 		ssh_buf_init(&packet, 4096, 0);
 		ssh_buf_put_bytes(&input, bytes, count);
@@ -623,16 +666,21 @@ test_next_packet_random(void)
 			length = ssh_load_be32(bytes);
 			if (packet.size != length || input.size != before - 4 - length)
 				failures++;
-			if (length > 0 && memcmp(packet.data, bytes + 4, length) != 0)
+			different = 0;
+			if (length > 0)
+				different = memcmp(packet.data, bytes + 4, length);
+			if (different != 0)
 				failures++;
 		} else if (input.size != before || packet.size != 0) {
 			failures++;
 		}
 
+		/* Releases the buffers. */
 		ssh_buf_free(&input);
 		ssh_buf_free(&packet);
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 }
 
@@ -1485,6 +1533,7 @@ test_unknown_types(void)
 			wrong++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(wrong, 0);
 
 	/* An unknown type with fewer than the 4 bytes of an id is malformed rather than unsupported. */
@@ -1504,6 +1553,7 @@ test_unknown_types(void)
 			wrong++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(wrong, 0);
 
 	/* EXTENDED with a name and request-specific bytes is answered OP_UNSUPPORTED, not parsed further. */
@@ -1659,9 +1709,13 @@ test_parse_random(void)
 	size_t index;
 	size_t shorter;
 	unsigned type;
+	unsigned coin;
 	int failures;
 	int run;
 	int error;
+	int found;
+	const void *nul;
+	uint8_t replacement;
 
 	/* Counts every violated expectation. */
 	failures = 0;
@@ -1672,7 +1726,8 @@ test_parse_random(void)
 		bytes[0] = (uint8_t)type;
 		for (index = 1; index < count; index++)
 			bytes[index] = (uint8_t)next_random();
-		if ((next_random() % 4U) != 0) {
+		coin = next_random() % 4U;
+		if (coin != 0) {
 			/* Makes the first string's length plausible. */
 			bytes[5] = 0;
 			bytes[6] = 0;
@@ -1680,7 +1735,9 @@ test_parse_random(void)
 			bytes[8] = (uint8_t)(next_random() % 12U);
 		}
 
-		if ((next_random() % 4U) == 0)
+		/* One time in four the type byte is random too. */
+		coin = next_random() % 4U;
+		if (coin == 0)
 			bytes[0] = (uint8_t)next_random();
 
 		/* Parses a copy of exactly the length, then a random shorter copy. */
@@ -1705,18 +1762,35 @@ test_parse_random(void)
 				failures++;
 			if ((out.attrs.flags & ~0x0fUL) != 0)
 				failures++;
-			if (out.path != NULL && memchr(out.path, 0, out.path_size) != NULL)
-				failures++;
-			if (out.target != NULL && memchr(out.target, 0, out.target_size) != NULL)
+
+			/* A path or a target that holds a NUL must have been refused. */
+			found = 0;
+			if (out.path != NULL) {
+				nul = memchr(out.path, 0, out.path_size);
+				if (nul != NULL)
+					found = 1;
+			}
+
+			/* The same for the target. */
+			if (out.target != NULL) {
+				nul = memchr(out.target, 0, out.target_size);
+				if (nul != NULL)
+					found = 1;
+			}
+
+			/* A NUL in either is a failure. */
+			if (found != 0)
 				failures++;
 		}
 
+		/* Parses a shorter copy of the same bytes, which must not crash either. */
 		shorter = next_random() % (count + 1U);
 		error = parse_exact(bytes, shorter, &out);
 		if (error != 0 && error != EINVAL && error != ENOTSUP)
 			failures++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 
 	/* A valid request mutated in one byte (every position, a few values) never crashes the parser. */
@@ -1727,13 +1801,27 @@ test_parse_random(void)
 	for (index = 0; index < request_wire.size; index++) {
 		for (type = 0; type < 6; type++) {
 			memcpy(trial, request_wire.data, request_wire.size);
-			trial[index] = (uint8_t)(type == 0 ? 0 : type == 1 ? 0xff : type == 2 ? trial[index] + 1 : type == 3 ? trial[index] - 1 : type == 4 ? 0x80 : 0x7f);
+			/* Sets the byte to zero, all ones, one more, one less, or a byte at the sign boundary. */
+			if (type == 0)
+				replacement = 0;
+			else if (type == 1)
+				replacement = 0xff;
+			else if (type == 2)
+				replacement = (uint8_t)(trial[index] + 1);
+			else if (type == 3)
+				replacement = (uint8_t)(trial[index] - 1);
+			else if (type == 4)
+				replacement = 0x80;
+			else
+				replacement = 0x7f;
+			trial[index] = replacement;
 			error = parse_exact(trial, request_wire.size, &out);
 			if (error != 0 && error != EINVAL && error != ENOTSUP)
 				failures++;
 		}
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 }
 
@@ -2344,6 +2432,8 @@ test_long_name_dates(void)
 	char out[200];
 	int64_t mtime;
 	int64_t half_year;
+	char want[100];
+	unsigned month;
 
 	/* Six months is 15778476 seconds (half of a mean year of 31556952): 15778475 seconds back shows the time. */
 	half_year = 15778476;
@@ -2424,9 +2514,6 @@ test_long_name_dates(void)
 			"Jan", "Feb", "Mar", "Apr", "May", "Jun",
 			"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 		};
-		char want[100];
-		unsigned month;
-
 		/* Each first day, at 12:00 so that a wrong day shows. */
 		for (month = 0; month < 12; month++) {
 			attrs.mtime = first_day[month] * 86400U + 12U * 3600U;
@@ -2523,7 +2610,9 @@ test_long_name_cut(void)
 	char guard[220];
 	size_t length;
 	size_t capacity;
+	size_t out_length;
 	int failures;
+	int different;
 
 	/* The full text of a sample. */
 	memset(&attrs, 0, sizeof(attrs));
@@ -2547,17 +2636,23 @@ test_long_name_cut(void)
 		memset(guard, 0x5a, sizeof(guard));
 		make_long_name(&attrs, 2, "alice", "users", "readme.txt", 5, out, capacity);
 		if (capacity > length) {
-			if (strcmp(out, full) != 0)
+			different = strcmp(out, full);
+			if (different != 0)
 				failures++;
 		} else {
-			if (strlen(out) != capacity - 1U || memcmp(out, full, capacity - 1U) != 0)
+			out_length = strlen(out);
+			different = memcmp(out, full, capacity - 1U);
+			if (out_length != capacity - 1U || different != 0)
 				failures++;
 		}
 
-		if (memcmp(out + capacity, guard + capacity, sizeof(out) - capacity) != 0)
+		/* Nothing may have been written at or after the capacity. */
+		different = memcmp(out + capacity, guard + capacity, sizeof(out) - capacity);
+		if (different != 0)
 			failures++;
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 
 	/* The array of exactly length + 1 holds the whole text; length gives the text without its last character. */
@@ -2583,7 +2678,13 @@ test_long_name_random(void)
 	size_t index;
 	size_t capacity;
 	size_t name_length;
+	size_t full_length;
+	size_t out_length;
+	uint32_t mode_value;
+	uint32_t coin;
+	const void *nul;
 	int failures;
+	int different;
 	int run;
 	int64_t now;
 
@@ -2607,24 +2708,32 @@ test_long_name_random(void)
 			owner[index] = (char)(1U + next_random() % 255U);
 		owner[name_length] = '\0';
 		now = (int64_t)(((uint64_t)next_random() << 32) | next_random());
-		if ((next_random() % 3U) == 0)
+		/* One time in three the clock is near the modification time, so that the time form with the hour is used. */
+		coin = next_random() % 3U;
+		if (coin == 0)
 			now = (int64_t)attrs.mtime + (int64_t)(next_random() % 40000000U) - 20000000;
 
 		/* The full text, then a random capacity. */
 		memset(full, 0, sizeof(full));
-		ssh_sftp_long_name(&attrs, next_random(), owner, owner, name, now, full, sizeof(full));
-		if (strlen(full) >= sizeof(full))
+		mode_value = next_random();
+		ssh_sftp_long_name(&attrs, mode_value, owner, owner, name, now, full, sizeof(full));
+		full_length = strlen(full);
+		if (full_length >= sizeof(full))
 			failures++;
 		capacity = 1 + next_random() % 140U;
 		memset(out, 0x5a, sizeof(out));
 		ssh_sftp_long_name(&attrs, 0, owner, owner, name, now, out, capacity);
 		memset(full, 0, sizeof(full));
 		ssh_sftp_long_name(&attrs, 0, owner, owner, name, now, full, sizeof(full));
-		if (memchr(out, 0, capacity) == NULL)
+		/* The cut text must end inside the capacity and be a prefix of the full text. */
+		nul = memchr(out, 0, capacity);
+		if (nul == NULL)
 			failures++;
-		if (strncmp(out, full, capacity - 1U) != 0)
+		different = strncmp(out, full, capacity - 1U);
+		if (different != 0)
 			failures++;
-		if (strlen(out) > capacity - 1U)
+		out_length = strlen(out);
+		if (out_length > capacity - 1U)
 			failures++;
 		for (index = capacity; index < sizeof(out); index++) {
 			if (out[index] != 0x5a)
@@ -2632,5 +2741,6 @@ test_long_name_random(void)
 		}
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(failures, 0);
 }

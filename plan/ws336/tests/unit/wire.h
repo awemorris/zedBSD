@@ -77,6 +77,7 @@ wire_u8(
 {
 	uint8_t byte;
 
+	/* Keeps the low eight bits of the value as the byte to append. */
 	byte = (uint8_t)(value & 0xffU);
 
 	/* Appends it. */
@@ -155,6 +156,7 @@ wire_hex(
 	int high;
 	int digit;
 
+	/* Starts with no bytes produced and no pending high digit. */
 	count = 0;
 	high = -1;
 
@@ -175,6 +177,10 @@ wire_hex(
 			continue;
 		}
 
+		/*
+		 * Checks the output has room, then stores the finished byte and waits for
+		 * the next pair.
+		 */
 		if (count >= capacity)
 			return 0;
 		out[count++] = (uint8_t)(high * 16 + digit);

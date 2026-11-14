@@ -73,11 +73,13 @@ getpwnam_r(
 	struct passwd **result)
 {
 	size_t need;
+	int different;
 
 	/* Only the test's own account exists. */
 	*result = NULL;
 	pair_find_work();
-	if (strcmp(name, pair_user) != 0)
+	different = strcmp(name, pair_user);
+	if (different != 0)
 		return 0;
 
 	/* Fills it: the name, the home and the shell in the caller's buffer. */
@@ -176,13 +178,29 @@ main(
 	int one;
 	ssize_t got;
 	struct pollfd waiting;
+	int is_preauth;
+	int is_session;
+	int ready;
+	int bound;
+	int listening;
+	int granted;
 
-	/* The monitor's children. */
+	/* The monitor's children: this program is also what the monitor starts for them. */
 	pair_find_work();
-	if (argc >= 2 && strcmp(argv[1], SSHD_EXEC_PREAUTH) == 0)
+	is_preauth = 0;
+	is_session = 0;
+	if (argc >= 2) {
+		is_preauth = (strcmp(argv[1], SSHD_EXEC_PREAUTH) == 0);
+		is_session = (strcmp(argv[1], SSHD_EXEC_SESSION) == 0);
+	}
+
+	/* Runs as the pre-authentication or session child when asked to; neither returns. */
+	if (is_preauth)
 		sshd_preauth_run();
-	if (argc >= 2 && strcmp(argv[1], SSHD_EXEC_SESSION) == 0)
+	if (is_session)
 		sshd_session_run();
+
+	/* Refuses a command line that does not name the three files. */
 	if (argc != 4) {
 		fprintf(stderr, "usage: sshd-pair <config> <port file> <result file>\n");
 		return 2;
@@ -191,6 +209,8 @@ main(
 	/* The settings and the host key, as the listener reads them. */
 	memset(&context, 0, sizeof(context));
 	sshd_config_defaults(&context.config);
+
+	/* Reads and parses the configuration file. */
 	status = pair_read_file(argv[1], text, sizeof(text), &size);
 	if (status == 0)
 		status = sshd_config_parse(&context.config, text, size, error_text);
@@ -199,6 +219,7 @@ main(
 		return 2;
 	}
 
+	/* Reads and parses the host key the configuration names, then wipes the text. */
 	(void)sshd_config_finish(&context.config);
 	status = pair_read_file(context.config.host_key[0], text, sizeof(text), &size);
 	if (status == 0)
@@ -209,6 +230,7 @@ main(
 		return 2;
 	}
 
+	/* Keeps the host key's public blob in the context, where the monitor takes it from. */
 	ssh_buf_init(&blob, 64, 0);
 	ssh_key_put_public_blob(host_key.public_key, &blob);
 	memcpy(context.host_key_blob, blob.data, SSH_KEY_BLOB_SIZE);
@@ -223,11 +245,16 @@ main(
 	address.sin_family = AF_INET;
 	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	address.sin_port = 0;
-	if (bind(listener, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(listener, 1) != 0) {
+	bound = bind(listener, (struct sockaddr *)&address, sizeof(address));
+	listening = -1;
+	if (bound == 0)
+		listening = listen(listener, 1);
+	if (bound != 0 || listening != 0) {
 		perror("sshd-pair: listen");
 		return 2;
 	}
 
+	/* Writes the port the system picked to the file the script reads. */
 	address_size = sizeof(address);
 	(void)getsockname(listener, (struct sockaddr *)&address, &address_size);
 	output = fopen(argv[2], "w");
@@ -240,11 +267,13 @@ main(
 	waiting.fd = listener;
 	waiting.events = POLLIN;
 	waiting.revents = 0;
-	if (poll(&waiting, 1, 60000) <= 0) {
+	ready = poll(&waiting, 1, 60000);
+	if (ready <= 0) {
 		fprintf(stderr, "sshd-pair: no connection\n");
 		return 2;
 	}
 
+	/* Accepts the connection and keeps the listener from reaching the children. */
 	address_size = sizeof(address);
 	client = accept(listener, (struct sockaddr *)&address, &address_size);
 	(void)close(listener);
@@ -254,7 +283,8 @@ main(
 	(void)snprintf(context.peer, sizeof(context.peer), "%s %u", inet_ntoa(address.sin_addr), (unsigned)ntohs(address.sin_port));
 
 	/* Runs the monitor with this program as its children, and the MaxStartups pipe. */
-	if (pipe(started) != 0)
+	ready = pipe(started);
+	if (ready != 0)
 		return 2;
 	(void)fcntl(started[0], F_SETFD, FD_CLOEXEC);
 	(void)fcntl(started[1], F_SETFD, FD_CLOEXEC);
@@ -267,7 +297,10 @@ main(
 	output = fopen(argv[3], "w");
 	if (output == NULL)
 		return 2;
-	fprintf(output, "status %d granted %d\n", status, got > 0 ? (int)got : 0);
+	granted = 0;
+	if (got > 0)
+		granted = (int)got;
+	fprintf(output, "status %d granted %d\n", status, granted);
 	fclose(output);
 	return status;
 }
@@ -281,6 +314,7 @@ pair_find_work(void)
 	char buffer[2048];
 	char *slash;
 	ssize_t got;
+	int error;
 
 	/* Already found. */
 	if (pair_work[0] != '\0')
@@ -299,7 +333,8 @@ pair_find_work(void)
 
 	/* The real name of the account (getpwuid_r is not replaced). */
 	found = NULL;
-	if (getpwuid_r(getuid(), &account, buffer, sizeof(buffer), &found) == 0 && found != NULL)
+	error = getpwuid_r(getuid(), &account, buffer, sizeof(buffer), &found);
+	if (error == 0 && found != NULL)
 		strncpy(pair_user, account.pw_name, sizeof(pair_user) - 1U);
 }
 

@@ -53,11 +53,21 @@ geteuid(void)
 int
 getpwnam_r(const char *name, struct passwd *account, char *buffer, size_t size, struct passwd **result)
 {
+	int is_alice;
+	int is_locked;
+
+	/* Answers only the two accounts the test uses. */
 	*result = NULL;
-	if (strcmp(name, "alice") != 0 && strcmp(name, "locked") != 0)
+	is_alice = strcmp(name, "alice");
+	is_locked = strcmp(name, "locked");
+	if (is_alice != 0 && is_locked != 0)
 		return 0;
+
+	/* Refuses a buffer too small for the name. */
 	if (size < 64)
 		return ERANGE;
+
+	/* Fills in the account: the name, no password, and a home and shell that do not exist as a login. */
 	memset(account, 0, sizeof(*account));
 	strcpy(buffer, name);
 	account->pw_name = buffer;
@@ -66,6 +76,8 @@ getpwnam_r(const char *name, struct passwd *account, char *buffer, size_t size, 
 	account->pw_shell = "/bin/sh";
 	account->pw_uid = 4243;
 	account->pw_gid = 4243;
+
+	/* Publishes the account. */
 	*result = account;
 	return 0;
 }
@@ -74,16 +86,27 @@ int
 getspnam_r(const char *name, struct spwd *entry, char *buffer, size_t size, struct spwd **result)
 {
 	const char *hash;
+	size_t hash_size;
+	int is_alice;
+	int is_locked;
 
+	/* Picks the stored hash of the account: alice's is valid, the locked one's begins with a '!'. */
 	*result = NULL;
-	if (strcmp(name, "alice") == 0)
+	is_alice = strcmp(name, "alice");
+	is_locked = strcmp(name, "locked");
+	if (is_alice == 0)
 		hash = timing_hash;
-	else if (strcmp(name, "locked") == 0)
+	else if (is_locked == 0)
 		hash = timing_locked;
 	else
 		return 0;
-	if (strlen(hash) + 1U > size)
+
+	/* Refuses a buffer too small for the hash. */
+	hash_size = strlen(hash) + 1U;
+	if (hash_size > size)
 		return ERANGE;
+
+	/* Fills in the shadow entry and publishes it. */
 	memset(entry, 0, sizeof(*entry));
 	strcpy(buffer, hash);
 	entry->sp_namp = (char *)name;
@@ -95,6 +118,7 @@ getspnam_r(const char *name, struct spwd *entry, char *buffer, size_t size, stru
 void
 syslog(int priority, const char *format, ...)
 {
+	/* The arguments the replacement does not look at. */
 	(void)priority;
 	(void)format;
 }
@@ -112,14 +136,19 @@ timing_request(const struct sshd_config *config, const struct ssh_key *host_key,
 	uint8_t h[SSH_SHA256_SIZE];
 	int status;
 
+	/* Starts a monitor without a delay between signatures, with its buffers. */
 	sshd_monitor_init(&monitor, config, host_key, 1);
 	monitor.sign_interval_ms = 0;
 	ssh_buf_init(&body, 4096, 1);
 	ssh_buf_init(&reply, 4096, 0);
 	memset(h, 0x33, sizeof(h));
 	ssh_buf_put_string(&body, h, sizeof(h));
+
+	/* Signs the exchange first, as a real child does before it asks for a login. */
 	(void)clock_gettime(CLOCK_MONOTONIC, &arrived);
 	(void)sshd_monitor_handle(&monitor, SSH_MON_SIGN, body.data, body.size, &arrived, &reply, &next);
+
+	/* Builds the login request: the user name and the password or the key. */
 	ssh_buf_reset(&body);
 	ssh_buf_reset(&reply);
 	ssh_buf_put_cstring(&body, user);
@@ -132,15 +161,22 @@ timing_request(const struct sshd_config *config, const struct ssh_key *host_key,
 		ssh_buf_free(&blob);
 	}
 
+	/* Times the monitor's answer to the request. */
 	(void)clock_gettime(CLOCK_MONOTONIC, &arrived);
 	status = sshd_monitor_handle(&monitor, (enum ssh_mon_type)type, body.data, body.size, &arrived, &reply, &next);
 	(void)clock_gettime(CLOCK_MONOTONIC, &done);
+
+	/* Reads the error value out of the reply, or marks the answer unreadable. */
 	*result = 0xffffffffU;
 	if (status == 0 && reply.size == 9)
 		*result = ssh_load_be32(reply.data + 5);
+
+	/* Releases the monitor and the buffers. */
 	ssh_buf_free(&body);
 	ssh_buf_free(&reply);
 	sshd_monitor_clear(&monitor);
+
+	/* Reports the time the answer took, in milliseconds. */
 	return (long)(done.tv_sec - arrived.tv_sec) * 1000L + (done.tv_nsec - arrived.tv_nsec) / 1000000L;
 }
 
@@ -174,24 +210,40 @@ main(int argc, char **argv)
 	unsigned index;
 	int failed;
 	char *hash;
+	const char *status_text;
+	int error;
 
-	rounds = argc > 1 ? (unsigned)atoi(argv[1]) : 5;
+	/* Takes the number of rounds from the command line, within 1 to 16, 5 by default. */
+	rounds = 5;
+	if (argc > 1)
+		rounds = (unsigned)atoi(argv[1]);
 	if (rounds < 1 || rounds > 16)
 		rounds = 5;
+
+	/* Makes the stored hash of the right password and the locked form of it. */
 	hash = crypt("right", "$6$timingsaltvalue$");
 	if (hash == NULL)
 		return 2;
 	strcpy(timing_hash, hash);
 	sprintf(timing_locked, "!%s", timing_hash);
+
+	/* Prepares a configuration that allows both password and key logins. */
 	sshd_config_defaults(&config);
 	config.password = 1;
 	config.pubkey = 1;
 	(void)sshd_config_finish(&config);
-	if (ssh_key_generate(&host_key, NULL) != 0)
+
+	/* Makes the host key the monitor signs with. */
+	error = ssh_key_generate(&host_key, NULL);
+	if (error != 0)
 		return 2;
+
+	/* Starts with no failure and an empty range of medians. */
 	failed = 0;
 	low = 1000000;
 	high = 0;
+
+	/* Measures each of the seven requests several times. */
 	for (index = 0; index < 7; index++) {
 		for (round = 0; round < rounds; round++) {
 			times[round] = timing_request(&config, &host_key, types[index], users[index], passwords[index], &result);
@@ -201,6 +253,7 @@ main(int argc, char **argv)
 			}
 		}
 
+		/* Takes the median of the rounds and the range of the medians over all requests. */
 		qsort(times, rounds, sizeof(times[0]), timing_compare);
 		medians[index] = times[rounds / 2];
 		printf("%-28s median %ld ms (min %ld, max %ld)\n", names[index], medians[index], times[0], times[rounds - 1]);
@@ -214,10 +267,18 @@ main(int argc, char **argv)
 		}
 	}
 
+	/* The medians of all requests must lie within 50 ms of each other. */
 	printf("spread of the medians: %ld ms\n", high - low);
 	if (high - low >= 50)
 		failed = 1;
+
+	/* Reports the verdict. */
 	ssh_key_clear(&host_key);
-	printf("timing: %s\n", failed ? "FAIL" : "PASS");
+	status_text = "PASS";
+	if (failed != 0)
+		status_text = "FAIL";
+	printf("timing: %s\n", status_text);
+
+	/* Reports 0 when every answer was right and no timing leaked, 1 otherwise. */
 	return failed;
 }

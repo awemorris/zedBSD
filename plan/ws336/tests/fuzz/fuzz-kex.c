@@ -23,14 +23,23 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	size_t a_size;
 	size_t b_size;
 	size_t c_size;
+	int error;
 
-	if (ssh_kexinit_parse(data, size, &kexinit) == 0) {
+	/* Parses the bytes as a key exchange init message. */
+	error = ssh_kexinit_parse(data, size, &kexinit);
+
+	/* Negotiates against the parsed lists, as a server and as a client, with and without the hybrid method. */
+	if (error == 0) {
 		(void)ssh_kex_choose(0, 1, &kexinit, &choice, &kind);
 		(void)ssh_kex_choose(1, 1, &kexinit, &choice, &kind);
 		(void)ssh_kex_choose(1, 0, &kexinit, &choice, &kind);
 	}
 
+
+	/* Parses the bytes as the two hybrid key exchange messages. */
 	(void)ssh_kex_parse_hybrid_init(data, size, &a, &a_size);
 	(void)ssh_kex_parse_hybrid_reply(data, size, &a, &a_size, &b, &b_size, &c, &c_size);
+
+	/* Succeeded: the input was handled without a crash. */
 	return 0;
 }

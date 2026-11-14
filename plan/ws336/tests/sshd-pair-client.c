@@ -49,6 +49,26 @@ struct client {
 	const char *user;
 };
 
+/*
+ * The names of the cases on the command line, in the order main runs them.
+ *
+ * The position of a name selects the case, so the two lists stay in step.
+ */
+static const char *const case_names[] = {
+	"closing",
+	"user-change",
+	"service",
+	"requests",
+	"signal",
+	"max-sessions",
+	"service-change",
+	"early",
+	"limit-key",
+	"limit-password",
+	"limit-off",
+	"window"
+};
+
 static int client_accept_host(void *context, const uint8_t *blob, size_t size);
 static int client_next(struct client *client);
 static int client_send(struct client *client);
@@ -97,12 +117,15 @@ client_next(
 	size_t size;
 	ssize_t got;
 	int status;
+	int ready;
 
+	/* Hands out a message as soon as the transport has one, and feeds it with what the server sends otherwise. */
 	for (;;) {
 		ssh_buf_reset(&client->payload);
 		status = ssh_transport_next(&client->transport, &client->payload);
 		if (status != EAGAIN)
 			return status;
+		/* Writes out everything the transport wants to send. */
 		pending = ssh_transport_pending(&client->transport, &size);
 		while (size > 0) {
 			got = write(client->socket, pending, size);
@@ -112,11 +135,15 @@ client_next(
 			pending = ssh_transport_pending(&client->transport, &size);
 		}
 
+		/* Waits up to 10 seconds for the server to send something. */
 		waiting.fd = client->socket;
 		waiting.events = POLLIN;
 		waiting.revents = 0;
-		if (poll(&waiting, 1, 10000) <= 0)
+		ready = poll(&waiting, 1, 10000);
+		if (ready <= 0)
 			return ETIMEDOUT;
+
+		/* Gives what arrived to the transport. */
 		got = read(client->socket, chunk, sizeof(chunk));
 		if (got <= 0)
 			return EPIPE;
@@ -136,12 +163,15 @@ client_send(
 	ssize_t got;
 	int status;
 
+	/* Hands the built message to the transport unless building it failed. */
 	status = ssh_buf_error(&client->out);
 	if (status == 0)
 		status = ssh_transport_send(&client->transport, client->out.data, client->out.size);
 	ssh_buf_reset(&client->out);
 	if (status != 0)
 		return status;
+
+	/* Writes out everything the transport wants to send. */
 	pending = ssh_transport_pending(&client->transport, &size);
 	while (size > 0) {
 		got = write(client->socket, pending, size);
@@ -151,6 +181,7 @@ client_send(
 		pending = ssh_transport_pending(&client->transport, &size);
 	}
 
+	/* Succeeded: the message is on the wire. */
 	return 0;
 }
 
@@ -165,19 +196,26 @@ client_connect(
 	struct ssh_transport_ops ops;
 	char service[SSH_NAME_MAX + 1];
 	int status;
+	int different;
 
+	/* Connects a TCP socket to the server on the loopback address. */
 	client->socket = socket(AF_INET, SOCK_STREAM, 0);
 	memset(&address, 0, sizeof(address));
 	address.sin_family = AF_INET;
 	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	address.sin_port = htons((unsigned short)port);
-	if (connect(client->socket, (struct sockaddr *)&address, sizeof(address)) != 0)
+	status = connect(client->socket, (struct sockaddr *)&address, sizeof(address));
+	if (status != 0)
 		return EIO;
+
+	/* Starts the transport as a client that takes any host key. */
 	memset(&ops, 0, sizeof(ops));
 	ops.check_host_key = client_accept_host;
 	status = ssh_transport_init(&client->transport, SSH_ROLE_CLIENT, &ops, 0);
 	if (status != 0)
 		return status;
+
+	/* Prepares the channel table and the two message buffers. */
 	ssh_channels_init(&client->channels);
 	ssh_buf_init(&client->payload, SSH_PACKET_LIMIT, 1);
 	ssh_buf_init(&client->out, SSH_PACKET_LIMIT, 1);
@@ -190,13 +228,25 @@ client_connect(
 	status = client_next(client);
 	if (status != 0)
 		return status;
+
+	/* Expects the acceptance of the service that was asked for. */
 	if (client->payload.data[0] != SSH_MSG_SERVICE_ACCEPT)
 		return EPROTO;
-	if (strcmp(service_name, SSH_SERVICE_USERAUTH) != 0)
+
+	/* Reports a service other than user authentication as a protocol error, since nothing here uses it. */
+	different = strcmp(service_name, SSH_SERVICE_USERAUTH);
+	if (different != 0)
 		return EPROTO;
+
+	/* Reads the accepted service name and checks that it is the one asked for. */
 	status = ssh_auth_parse_service(client->payload.data, client->payload.size, service);
-	if (status != 0 || strcmp(service, SSH_SERVICE_USERAUTH) != 0)
+	if (status != 0)
 		return EPROTO;
+	different = strcmp(service, SSH_SERVICE_USERAUTH);
+	if (different != 0)
+		return EPROTO;
+
+	/* Succeeded: user authentication is running. */
 	return 0;
 }
 
@@ -207,6 +257,7 @@ client_login(
 {
 	int status;
 
+	/* Sends a signed public key request and takes the server's answer. */
 	status = ssh_auth_put_publickey_signed(client->user, &client->key, client->transport.session_id, &client->out);
 	if (status == 0)
 		status = client_send(client);
@@ -214,8 +265,12 @@ client_login(
 		status = client_next(client);
 	if (status != 0)
 		return status;
+
+	/* Anything but success is a refusal. */
 	if (client->payload.data[0] != SSH_MSG_USERAUTH_SUCCESS)
 		return EACCES;
+
+	/* Succeeded: the server accepted the key. */
 	return 0;
 }
 
@@ -228,6 +283,7 @@ client_open(
 	uint32_t reason;
 	int status;
 
+	/* Sends the channel open request and takes the server's answer. */
 	status = ssh_channel_open_session(&client->channels, &client->out, channel);
 	if (status == 0)
 		status = client_send(client);
@@ -235,6 +291,8 @@ client_open(
 		status = client_next(client);
 	if (status != 0)
 		return status;
+
+	/* Reads the answer into the channel table. */
 	status = ssh_channel_open_reply(&client->channels, client->payload.data, client->payload.size, channel, &reason);
 	return status;
 }
@@ -256,6 +314,7 @@ client_wait(
 	uint32_t extended;
 	int status;
 
+	/* Reads messages until the wanted one comes, dealing with the ones in between. */
 	for (;;) {
 		status = client_next(client);
 		if (status != 0)
@@ -289,6 +348,7 @@ client_wait(
 			return EPROTO;
 		}
 
+		/* The channel is named by the callers for documentation; no message is checked against it. */
 		(void)channel;
 	}
 }
@@ -314,13 +374,17 @@ case_closing(
 	int seen_data;
 	int seen_status;
 	int seen_eof;
+	int different;
 
+	/* Logs in and opens a session channel. */
 	status = client_login(client);
 	if (status != 0)
 		return fail("closing", "login");
 	status = client_open(client, &channel);
 	if (status != 0)
 		return fail("closing", "open");
+
+	/* Asks the server to run a command that prints one line and ends. */
 	ssh_channel_put_exec(channel, (const uint8_t *)"echo closing-output", 19, &client->out);
 	status = client_send(client);
 	if (status != 0)
@@ -338,12 +402,16 @@ case_closing(
 			status = ssh_channel_parse_data(&client->channels, client->payload.data, client->payload.size, &other, &data, &size, &extended);
 			if (status != 0 || seen_status || seen_eof)
 				return fail("closing", "data after the exit status or EOF");
-			if (size != 15 || memcmp(data, "closing-output\n", 15) != 0)
+			different = 1;
+			if (size == 15)
+				different = memcmp(data, "closing-output\n", 15);
+			if (different != 0)
 				return fail("closing", "the output differs");
 			seen_data = 1;
 			continue;
 		}
 
+		/* The exit status must follow the output and come before EOF. */
 		if (client->payload.data[0] == SSH_MSG_CHANNEL_REQUEST) {
 			status = ssh_channel_parse_request(&client->channels, client->payload.data, client->payload.size, &request);
 			if (status != 0 || request.type != SSH_CREQ_EXIT_STATUS || request.status != 0 || request.want_reply)
@@ -354,6 +422,7 @@ case_closing(
 			continue;
 		}
 
+		/* EOF must follow the exit status. */
 		if (client->payload.data[0] == SSH_MSG_CHANNEL_EOF) {
 			status = ssh_channel_parse_end(&client->channels, client->payload.data, client->payload.size, &other);
 			if (status != 0 || !seen_status)
@@ -362,6 +431,7 @@ case_closing(
 			continue;
 		}
 
+		/* CLOSE must follow EOF and ends the wait. */
 		if (client->payload.data[0] == SSH_MSG_CHANNEL_CLOSE) {
 			status = ssh_channel_parse_end(&client->channels, client->payload.data, client->payload.size, &other);
 			if (status != 0 || !seen_eof)
@@ -369,6 +439,7 @@ case_closing(
 			break;
 		}
 
+		/* Any other message is a failure of the case. */
 		return fail("closing", "an unexpected message");
 	}
 
@@ -410,6 +481,7 @@ case_user_change(
 {
 	int status;
 
+	/* Sends an authentication request without credentials and expects it to be failed. */
 	ssh_auth_put_none(client->user, &client->out);
 	status = client_send(client);
 	if (status == 0)
@@ -432,6 +504,7 @@ case_service(
 {
 	int status;
 
+	/* Sends an authentication request for a service the server does not offer. */
 	ssh_buf_put_u8(&client->out, SSH_MSG_USERAUTH_REQUEST);
 	ssh_buf_put_cstring(&client->out, client->user);
 	ssh_buf_put_cstring(&client->out, "ssh-other");
@@ -461,6 +534,7 @@ case_requests(
 	static const char *names[] = { "LD_PRELOAD", "LANG", "LC_", "lc_all", "LC_ALL", "LC_A-B", "LC_A=B", "TERM", "LANGUAGE" };
 	static const int expected[] = { 0, 1, 0, 0, 1, 0, 0, 1, 0 };
 
+	/* Logs in and opens a session channel to send the requests on. */
 	status = client_login(client);
 	if (status == 0)
 		status = client_open(client, &channel);
@@ -536,7 +610,9 @@ case_signal(
 	struct ssh_channel *channel;
 	struct ssh_channel_request request;
 	int status;
+	int different;
 
+	/* Logs in and opens a session channel for the command. */
 	status = client_login(client);
 	if (status == 0)
 		status = client_open(client, &channel);
@@ -561,9 +637,16 @@ case_signal(
 		status = client_wait(client, SSH_MSG_CHANNEL_REQUEST, channel);
 	if (status != 0)
 		return fail("signal", "no exit request");
+
+	/* The command must have ended by the TERM signal. */
 	status = ssh_channel_parse_request(&client->channels, client->payload.data, client->payload.size, &request);
-	if (status != 0 || request.type != SSH_CREQ_EXIT_SIGNAL || strcmp(request.name, "TERM") != 0)
+	different = 1;
+	if (status == 0 && request.type == SSH_CREQ_EXIT_SIGNAL)
+		different = strcmp(request.name, "TERM");
+	if (different != 0)
 		return fail("signal", "not exit-signal TERM");
+
+	/* Succeeded: the signal ended the command. */
 	return 0;
 }
 
@@ -577,6 +660,7 @@ case_max_sessions(
 	struct ssh_channel *other;
 	int status;
 
+	/* Logs in and opens the first session channel. */
 	status = client_login(client);
 	if (status == 0)
 		status = client_open(client, &first);
@@ -623,6 +707,7 @@ case_service_change(
 {
 	int status;
 
+	/* Sends an authentication request without credentials and expects it to be failed. */
 	ssh_auth_put_none(client->user, &client->out);
 	status = client_send(client);
 	if (status == 0)
@@ -649,6 +734,7 @@ case_early(
 	struct ssh_channel *channel;
 	int status;
 
+	/* Asks to open a channel before the user is authenticated. */
 	status = ssh_channel_open_session(&client->channels, &client->out, &channel);
 	if (status == 0)
 		status = client_send(client);
@@ -672,6 +758,7 @@ case_limit(
 	int round;
 	int status;
 
+	/* Makes two failed attempts, with a wrong password or a key signed for another purpose. */
 	for (round = 0; round < 2; round++) {
 		if (password)
 			ssh_auth_put_password(client->user, "wrong", &client->out);
@@ -684,6 +771,10 @@ case_limit(
 			return fail("limit", "the first attempt was not failed");
 	}
 
+	/*
+	 * The server must disconnect after the attempts, saying that no authentication
+	 * method is left.
+	 */
 	if (status != ECONNABORTED || client->transport.reason_code != SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE)
 		return fail("limit", "no disconnect 14");
 	return 0;
@@ -707,13 +798,18 @@ case_window(
 	size_t received;
 	size_t index;
 	uint32_t extended;
+	uint8_t chunk[16384];
+	ssize_t got;
 	int status;
+	int ready;
 
+	/* Logs in and opens a session channel to receive the data on. */
 	status = client_login(client);
 	if (status == 0)
 		status = client_open(client, &channel);
 	if (status != 0)
 		return fail("window", "login or open");
+
 	/* A window 1000 bytes larger than the one announced, so its end does not fall on a read's size. */
 	ssh_buf_put_u8(&client->out, SSH_MSG_CHANNEL_WINDOW_ADJUST);
 	ssh_buf_put_u32(&client->out, channel->remote_id);
@@ -735,10 +831,12 @@ case_window(
 		ssh_buf_reset(&client->payload);
 		status = ssh_transport_next(&client->transport, &client->payload);
 		if (status == EAGAIN) {
-			uint8_t chunk[16384];
-			ssize_t got;
-
-			if (poll(&waiting, 1, 2000) <= 0)
+			/*
+			 * Waits up to two seconds for more bytes from the server and puts
+			 * them into the transport.
+			 */
+			ready = poll(&waiting, 1, 2000);
+			if (ready <= 0)
 				break;
 			got = read(client->socket, chunk, sizeof(chunk));
 			if (got <= 0)
@@ -747,6 +845,7 @@ case_window(
 			continue;
 		}
 
+		/* Takes the data of each channel message and adds its size to the total. */
 		if (status != 0)
 			return fail("window", "transport");
 		if (client->payload.data[0] != SSH_MSG_CHANNEL_DATA)
@@ -759,9 +858,11 @@ case_window(
 				return fail("window", "a byte differs");
 		}
 
+		/* Adds this message's data to the count of received bytes. */
 		received += size;
 	}
 
+	/* The server must send exactly the window and then wait for it to be adjusted. */
 	if (received != SSH_CHANNEL_WINDOW + 1000U) {
 		fprintf(stderr, "received %lu\n", (unsigned long)received);
 		return fail("window", "not exactly the window");
@@ -787,11 +888,13 @@ case_window(
 			(void)client_send(client);
 	}
 
+	/* The server must send all the bytes that were asked for after the window is adjusted. */
 	if (received != 2200000U) {
 		fprintf(stderr, "received %lu\n", (unsigned long)received);
 		return fail("window", "bytes are missing");
 	}
 
+	/* Succeeded: the window was kept. */
 	return 0;
 }
 
@@ -818,9 +921,18 @@ main(
 	ssize_t got;
 	int descriptor;
 	int status;
+	int different;
+	int selected;
+	unsigned index;
 
+	/*
+	 * Refuses a command line that does not give the port, the user, the key file and the
+	 * case.
+	 */
 	if (argc != 5)
 		return 2;
+
+	/* Reads the user's private key from the file the command line names. */
 	memset(&client, 0, sizeof(client));
 	client.user = argv[2];
 	descriptor = open(argv[3], O_RDONLY);
@@ -828,9 +940,15 @@ main(
 		return 2;
 	got = read(descriptor, text, sizeof(text) - 1U);
 	(void)close(descriptor);
-	if (got <= 0 || ssh_key_parse_private(text, (size_t)got, &client.key) != 0)
+	if (got <= 0)
 		return 2;
-	if (strcmp(argv[4], "service-request") == 0) {
+	status = ssh_key_parse_private(text, (size_t)got, &client.key);
+	if (status != 0)
+		return 2;
+
+	/* The one case that needs no authentication runs on its own. */
+	different = strcmp(argv[4], "service-request");
+	if (different == 0) {
 		/* A service other than ssh-userauth: disconnected with SERVICE_NOT_AVAILABLE. */
 		status = client_connect(&client, (unsigned)atoi(argv[1]), "ssh-other");
 		if (status == ECONNABORTED && client.transport.reason_code == SSH_DISCONNECT_SERVICE_NOT_AVAILABLE)
@@ -847,40 +965,71 @@ main(
 		return status;
 	}
 
+	/* Connects to the server and starts user authentication. */
 	status = client_connect(&client, (unsigned)atoi(argv[1]), SSH_SERVICE_USERAUTH);
 	if (status != 0) {
 		printf("FAIL %s: connect %d\n", argv[4], status);
 		return 1;
 	}
 
-	if (strcmp(argv[4], "closing") == 0)
+	/* Finds which case the command line names. */
+	selected = -1;
+	for (index = 0; index < sizeof(case_names) / sizeof(case_names[0]); index++) {
+		different = strcmp(argv[4], case_names[index]);
+		if (different == 0) {
+			selected = (int)index;
+			break;
+		}
+	}
+
+	/* Runs the case that the command line names. */
+	switch (selected) {
+	case 0:
 		status = case_closing(&client);
-	else if (strcmp(argv[4], "user-change") == 0)
+		break;
+	case 1:
 		status = case_user_change(&client);
-	else if (strcmp(argv[4], "service") == 0)
+		break;
+	case 2:
 		status = case_service(&client);
-	else if (strcmp(argv[4], "requests") == 0)
+		break;
+	case 3:
 		status = case_requests(&client);
-	else if (strcmp(argv[4], "signal") == 0)
+		break;
+	case 4:
 		status = case_signal(&client);
-	else if (strcmp(argv[4], "max-sessions") == 0)
+		break;
+	case 5:
 		status = case_max_sessions(&client);
-	else if (strcmp(argv[4], "service-change") == 0)
+		break;
+	case 6:
 		status = case_service_change(&client);
-	else if (strcmp(argv[4], "early") == 0)
+		break;
+	case 7:
 		status = case_early(&client);
-	else if (strcmp(argv[4], "limit-key") == 0)
+		break;
+	case 8:
 		status = case_limit(&client, 0);
-	else if (strcmp(argv[4], "limit-password") == 0)
+		break;
+	case 9:
 		status = case_limit(&client, 1);
-	else if (strcmp(argv[4], "limit-off") == 0)
+		break;
+	case 10:
 		status = case_limit(&client, 1);
-	else if (strcmp(argv[4], "window") == 0)
+		break;
+	case 11:
 		status = case_window(&client);
-	else
+		break;
+	default:
 		status = fail(argv[4], "no such case");
+		break;
+	}
+
+	/* Reports a case that passed. */
 	if (status == 0)
 		printf("ok %s\n", argv[4]);
+
+	/* Releases the connection. */
 	ssh_transport_free(&client.transport);
 	ssh_buf_free(&client.payload);
 	ssh_buf_free(&client.out);

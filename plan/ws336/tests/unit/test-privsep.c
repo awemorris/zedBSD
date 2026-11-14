@@ -81,6 +81,7 @@ int
 main(void)
 {
 	size_t index;
+	int status;
 
 	/* Prints each failure as it happens, so a crash does not lose the lines before it. */
 	setvbuf(stdout, NULL, _IONBF, 0);
@@ -114,7 +115,8 @@ main(void)
 	test_mutated_frames();
 
 	/* Reports the result of the whole test. */
-	return check_finish("privsep");
+	status = check_finish("privsep");
+	return status;
 }
 
 /*
@@ -162,6 +164,7 @@ test_put_frame_types(void)
 		wire_u8(&expected, type);
 		wire_bytes(&expected, body, body_size);
 
+		/* Builds the frame for the type and compares it with the one worked out here. */
 		ssh_buf_init(&out, 1000, 0);
 		error = ssh_mon_put_frame((enum ssh_mon_type)type, body, body_size, &out);
 		CHECK_EQ(error, 0);
@@ -327,6 +330,7 @@ test_next_frame_types(void)
 		build_frame(&input, wanted, pattern, wanted * 3U);
 		wire_u8(&input, 0xee);
 
+		/* Puts the frame into a stream and takes it out again. */
 		ssh_buf_init(&in, 1000, 0);
 		ssh_buf_put_bytes(&in, input.data, input.size);
 		ssh_buf_init(&body, 1000, 1);
@@ -446,6 +450,7 @@ test_next_frame_refused(void)
 	unsigned wanted;
 	int error;
 
+	/* Starts the body buffer for the frames that follow. */
 	ssh_buf_init(&body, 1000, 1);
 
 	/* A length of 0 is EINVAL as soon as its four bytes are there. */
@@ -537,6 +542,7 @@ test_next_frame_refused(void)
 	ssh_buf_free(&in);
 	ssh_buf_free(&body);
 
+	/* Puts a frame with the largest body into a stream and takes it out again. */
 	ssh_buf_init(&body, 100000, 1);
 	ssh_buf_init(&in, 100000, 0);
 	ssh_buf_put_bytes(&in, input.data, input.size);
@@ -570,6 +576,7 @@ test_next_frame_sequence(void)
 	ssh_buf_put_bytes(&in, input.data, input.size);
 	ssh_buf_init(&body, 1000, 1);
 
+	/* Takes the first of two frames from the stream, the query. */
 	error = ssh_mon_next_frame(&in, &type, &body);
 	CHECK_EQ(error, 0);
 	CHECK_EQ(type, SSH_MON_PUBKEY_QUERY);
@@ -577,6 +584,7 @@ test_next_frame_sequence(void)
 	CHECK_BYTES(body.data, "alice", 5);
 	CHECK_EQ(in.size, 9);
 
+	/* Takes the second frame, the result. */
 	error = ssh_mon_next_frame(&in, &type, &body);
 	CHECK_EQ(error, 0);
 	CHECK_EQ(type, SSH_MON_RESULT);
@@ -609,6 +617,7 @@ test_next_frame_sequence(void)
 		}
 	}
 
+	/* Both frames must have come out and nothing else. */
 	CHECK_EQ(frames, 2);
 	ssh_buf_free(&in);
 	ssh_buf_free(&body);
@@ -732,8 +741,10 @@ test_call_roundtrip(void)
 		child_serve(pair[1], SSH_MON_RESULT, (const uint8_t *)"\0\0\0\15", 4, 0);
 	}
 
+	/* Closes the child's end of the pair in the parent. */
 	close(pair[1]);
 
+	/* Calls the monitor with a password login and reads its answer. */
 	ssh_buf_init(&reply, 1000, 1);
 	reply_type = (enum ssh_mon_type)0;
 	error = ssh_mon_call(pair[0], SSH_MON_PASSWORD_LOGIN, input.data, input.size, &reply_type, &reply);
@@ -775,8 +786,10 @@ test_call_pieces_and_extra(void)
 		child_serve(pair[1], SSH_MON_SIGNATURE, big_body, 100, 1);
 	}
 
+	/* Closes the child's end of the pair in the parent. */
 	close(pair[1]);
 
+	/* Calls the monitor with a sign request and reads its answer. */
 	ssh_buf_init(&reply, 1000, 1);
 	error = ssh_mon_call(pair[0], SSH_MON_SIGN, input.data, input.size, &reply_type, &reply);
 	CHECK_EQ(error, 0);
@@ -832,6 +845,7 @@ test_call_large(void)
 	alarm_count = 0;
 	child_start_delay = 300000;
 
+	/* Starts a child that waits before it answers, so that the caller's large write blocks. */
 	CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, pair), 0);
 	child = fork();
 	if (child == 0) {
@@ -839,21 +853,26 @@ test_call_large(void)
 		child_serve(pair[1], SSH_MON_CONFIG, big_body, SSH_MON_STATE_MAX - 1U, 0);
 	}
 
+	/* Closes the child's end of the pair in the parent. */
 	close(pair[1]);
 	child_start_delay = 0;
 
+	/* Fires a timer every 5 ms so that signals interrupt the call while it waits. */
 	memset(&timer, 0, sizeof(timer));
 	timer.it_interval.tv_usec = 5000;
 	timer.it_value.tv_usec = 5000;
 	CHECK_EQ(setitimer(ITIMER_REAL, &timer, NULL), 0);
 
+	/* Calls the monitor with a large body, which the child answers with a large state. */
 	ssh_buf_init(&reply, SSH_MON_STATE_MAX, 1);
 	error = ssh_mon_call(pair[0], SSH_MON_AUTH_DONE, big_body, 250000, &reply_type, &reply);
 
+	/* Stops the timer and puts back the previous signal action. */
 	memset(&stop, 0, sizeof(stop));
 	CHECK_EQ(setitimer(ITIMER_REAL, &stop, NULL), 0);
 	CHECK_EQ(sigaction(SIGALRM, &old_action, NULL), 0);
 
+	/* The call must have finished in spite of the signals, with the whole state. */
 	CHECK_EQ(error, 0);
 	CHECK_EQ(reply_type, SSH_MON_CONFIG);
 	CHECK_EQ(reply.size, SSH_MON_STATE_MAX - 1U);
@@ -892,6 +911,7 @@ test_call_peer_closes(void)
 		child_serve(pair[1], 0, NULL, 0, 2);
 	}
 
+	/* Closes the child's end of the pair in the parent. */
 	close(pair[1]);
 	ssh_buf_init(&reply, 1000, 1);
 	error = ssh_mon_call(pair[0], SSH_MON_PUBKEY_QUERY, input.data, input.size, &reply_type, &reply);
@@ -908,6 +928,7 @@ test_call_peer_closes(void)
 		child_serve(pair[1], SSH_MON_RESULT, big_body, 15, 3);
 	}
 
+	/* Closes the child's end of the pair in the parent. */
 	close(pair[1]);
 	ssh_buf_init(&reply, 1000, 1);
 	error = ssh_mon_call(pair[0], SSH_MON_PUBKEY_QUERY, input.data, input.size, &reply_type, &reply);
@@ -945,6 +966,7 @@ test_call_interrupted(void)
 	struct itimerval stop;
 	int error;
 
+	/* Builds the request and the frame the child expects. */
 	wire_reset(&input);
 	wire_text(&input, "carol");
 	wire_reset(&expected);
@@ -966,6 +988,7 @@ test_call_interrupted(void)
 		child_serve(pair[1], SSH_MON_RESULT, (const uint8_t *)"\0\0\0\0", 4, 4);
 	}
 
+	/* Closes the child's end of the pair in the parent. */
 	close(pair[1]);
 
 	/* Starts the timer in the parent only (a child made before this does not inherit it). */
@@ -974,6 +997,7 @@ test_call_interrupted(void)
 	timer.it_value.tv_usec = 20000;
 	CHECK_EQ(setitimer(ITIMER_REAL, &timer, NULL), 0);
 
+	/* Calls the monitor while the timer interrupts it. */
 	ssh_buf_init(&reply, 1000, 1);
 	error = ssh_mon_call(pair[0], SSH_MON_PUBKEY_QUERY, input.data, input.size, &reply_type, &reply);
 
@@ -982,6 +1006,7 @@ test_call_interrupted(void)
 	CHECK_EQ(setitimer(ITIMER_REAL, &stop, NULL), 0);
 	CHECK_EQ(sigaction(SIGALRM, &old_action, NULL), 0);
 
+	/* The call must have finished with the answer in spite of the signals. */
 	CHECK_EQ(error, 0);
 	CHECK_EQ(reply_type, SSH_MON_RESULT);
 	CHECK_EQ(reply.size, 4);
@@ -1028,6 +1053,7 @@ test_call_hostile_reply(void)
 	size_t count;
 	int error;
 
+	/* Builds the request and the frame the child expects. */
 	wire_reset(&input);
 	wire_text(&input, "dave");
 	wire_reset(&expected);
@@ -1038,6 +1064,7 @@ test_call_hostile_reply(void)
 		count = wire_hex(replies[index], raw, sizeof(raw));
 		CHECK(count > 0);
 
+		/* Starts a child that answers with malformed bytes, one malformation at a time. */
 		CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, pair), 0);
 		child = fork();
 		if (child == 0) {
@@ -1045,8 +1072,10 @@ test_call_hostile_reply(void)
 			child_serve(pair[1], 0, raw, count, 5);
 		}
 
+		/* Closes the child's end of the pair in the parent. */
 		close(pair[1]);
 
+		/* The call must refuse the malformed answer and leave the reply empty. */
 		ssh_buf_init(&reply, 1000, 1);
 		error = ssh_mon_call(pair[0], SSH_MON_PUBKEY_QUERY, input.data, input.size, &reply_type, &reply);
 		CHECK_EQ(error, EINVAL);
@@ -1106,6 +1135,7 @@ test_call_errors(void)
 		child_serve(pair[1], SSH_MON_RESULT, (const uint8_t *)"\0\0\0\0", 4, 0);
 	}
 
+	/* Closes the child's end of the pair in the parent. */
 	close(pair[1]);
 	ssh_buf_init(&reply, 3, 1);
 	error = ssh_mon_call(pair[0], SSH_MON_PUBKEY_QUERY, input.data, input.size, &reply_type, &reply);
@@ -1141,6 +1171,7 @@ test_random_frames(void)
 	int refused;
 	int incomplete;
 
+	/* Starts with nothing counted and a body buffer. */
 	bad = 0;
 	accepted = 0;
 	refused = 0;
@@ -1163,6 +1194,7 @@ test_random_frames(void)
 			bytes[4] = (uint8_t)(next_random() % 14);
 		}
 
+		/* Puts random bytes into a stream and takes frames from it. */
 		ssh_buf_init(&in, 1000, (int)(round % 2));
 		ssh_buf_put_bytes(&in, bytes, count);
 
@@ -1197,9 +1229,11 @@ test_random_frames(void)
 			}
 		}
 
+		/* Releases the buffer. */
 		ssh_buf_free(&in);
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(bad, 0);
 
 	/* The inputs covered all three outcomes, so the run was not all one kind. */
@@ -1228,6 +1262,7 @@ test_mutated_frames(void)
 	int error;
 	int bad;
 
+	/* Starts with nothing counted and a body buffer. */
 	bad = 0;
 	ssh_buf_init(&body, 1000, 1);
 
@@ -1245,6 +1280,10 @@ test_mutated_frames(void)
 		frame[position] = (uint8_t)(round % 256U);
 		cut = (size_t)(next_random() % (frame_size + 1));
 
+		/*
+		 * Puts a cut of a valid frame into a stream; the result must be one of the
+		 * documented ones.
+		 */
 		ssh_buf_init(&in, 1000, 0);
 		ssh_buf_put_bytes(&in, frame, cut);
 		error = ssh_mon_next_frame(&in, &type, &body);
@@ -1265,9 +1304,11 @@ test_mutated_frames(void)
 		if (position >= 5 && (error != 0 || body.size != 30 || type != SSH_MON_PUBKEY_LOGIN))
 			bad++;
 
+		/* Releases the buffer. */
 		ssh_buf_free(&in);
 	}
 
+	/* No random input broke a rule. */
 	CHECK_EQ(bad, 0);
 	ssh_buf_free(&body);
 }
@@ -1315,6 +1356,7 @@ child_serve(
 	static uint8_t request[SSH_MON_STATE_MAX + 64U];
 	size_t index;
 	int status;
+	int different;
 
 	/* Ends the peer by SIGALRM after 20 s if it is stuck, so a fault of the module in the test shows as a failure and not a hang. */
 	signal(SIGALRM, SIG_DFL);
@@ -1328,7 +1370,10 @@ child_serve(
 	status = read_full(descriptor, request, expected.size);
 	if (status != 0)
 		_exit(10);
-	if (memcmp(request, expected.data, expected.size) != 0)
+
+	/* A request that is not the expected one ends the peer with another status. */
+	different = memcmp(request, expected.data, expected.size);
+	if (different != 0)
 		_exit(11);
 
 	/* A large reply (mode 0 only) is written as its header and then its body, since wire.h cannot hold it. */
@@ -1358,6 +1403,7 @@ child_serve(
 			usleep(2000);
 		}
 
+		/* Writes the rest of the first reply, then a second and good reply. */
 		write_full(descriptor, reply.data + 7, reply.size - 7);
 		wire_reset(&reply);
 		build_frame(&reply, SSH_MON_RESULT, (const uint8_t *)"\0\0\0\0", 4);
@@ -1441,13 +1487,17 @@ finish_child(
 	pid_t child)
 {
 	int status;
+	int exited;
 	pid_t waited;
 
 	/* Waits for the peer to end. */
 	waited = waitpid(child, &status, 0);
 	if (waited != child)
 		return 101;
-	if (!WIFEXITED(status))
+
+	/* A peer killed by a signal is reported as 100. */
+	exited = WIFEXITED(status);
+	if (!exited)
 		return 100;
 
 	/* Reports the status the peer exited with. */

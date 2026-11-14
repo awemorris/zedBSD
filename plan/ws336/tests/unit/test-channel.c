@@ -68,6 +68,8 @@ static uint32_t next_random(void);
 int
 main(void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	test_init();
 	test_open_session_and_reply();
@@ -88,7 +90,8 @@ main(void)
 	test_random();
 
 	/* Reports the result of the whole test. */
-	return check_finish("channel");
+	status = check_finish("channel");
+	return status;
 }
 
 /*
@@ -173,6 +176,7 @@ open_server_channel(
 	struct ssh_channel *channel;
 	int error;
 
+	/* Offers a session open to the table, which must take it and answer with a confirmation. */
 	build_open(&input, "session", sender, window, packet);
 	channel = NULL;
 	error = ssh_channel_accept_open(channels, input.data, input.size, out, &channel);
@@ -199,6 +203,7 @@ check_output(
 		check_record_bytes(out->data, want->data, want->size, __FILE__, line, "output bytes");
 	}
 
+	/* The comparison itself must not have overflowed the buffer. */
 	CHECK_EQ(ssh_buf_error(out), 0);
 
 	/* Empties the output for the next comparison. */
@@ -228,6 +233,7 @@ test_init(void)
 		CHECK(ssh_channel_find(&channels, index) == NULL);
 	}
 
+	/* An id past the table is not found. */
 	CHECK(ssh_channel_find(&channels, SSH_CHANNEL_MAX) == NULL);
 	CHECK(ssh_channel_find(&channels, 0xffffffffUL) == NULL);
 }
@@ -246,6 +252,7 @@ test_open_session_and_reply(void)
 	uint32_t reason;
 	unsigned index;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 
@@ -372,6 +379,10 @@ test_open_session_and_reply(void)
 	CHECK(ssh_channel_find(&channels, SSH_CHANNEL_MAX) == NULL);
 	channels.no_more_sessions = 0;
 
+	/*
+	 * Builds an open failure for channel 2 with the reason "connect failed" and reads
+	 * it: the channel is given up and the refusal is reported.
+	 */
 	wire_reset(&input);
 	wire_u8(&input, 92);
 	wire_u32(&input, 2);
@@ -401,6 +412,10 @@ test_open_session_and_reply(void)
 		CHECK_EQ(ssh_channel_open_reply(&channels, input.data, index, &channel, &reason), EINVAL);
 	}
 
+	/*
+	 * Builds an open failure for channel 2 and reads every proper prefix of it: each is
+	 * malformed and the channel keeps waiting.
+	 */
 	wire_reset(&input);
 	wire_u8(&input, 92);
 	wire_u32(&input, 2);
@@ -439,6 +454,7 @@ test_open_session_and_reply(void)
 	CHECK_EQ(ssh_channel_open_session(&channels, &out, &channel), EMSGSIZE);
 	CHECK_EQ(channels.channel[0].state, SSH_CHANNEL_FREE);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -454,6 +470,7 @@ test_accept_open(void)
 	struct ssh_channel *next;
 	struct ssh_buf out;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 
@@ -504,6 +521,7 @@ test_accept_open(void)
 	CHECK(next != NULL);
 	ssh_buf_reset(&out);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -520,6 +538,7 @@ test_accept_open_refusals(void)
 	const char *types[5];
 	unsigned index;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 
@@ -560,6 +579,10 @@ test_accept_open_refusals(void)
 		ssh_buf_reset(&out);
 	}
 
+	/*
+	 * An open of a type that holds a NUL is not the session type and is refused with a
+	 * failure.
+	 */
 	wire_reset(&input);
 	wire_u8(&input, 90);
 	wire_string(&input, "session\0", 8);
@@ -624,6 +647,7 @@ test_accept_open_refusals(void)
 		CHECK(channel == NULL);
 	}
 
+	/* A payload cut at every length is malformed, whichever type is refused. */
 	build_open(&input, "direct-tcpip", 60, 10, 10);
 	for (index = 0; index < input.size; index++)
 		CHECK_EQ(ssh_channel_accept_open(&channels, input.data, index, &out, &channel), EINVAL);
@@ -643,6 +667,7 @@ test_accept_open_refusals(void)
 	CHECK(channel == NULL);
 	CHECK_EQ(channels.channel[0].state, SSH_CHANNEL_FREE);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -661,6 +686,7 @@ test_data_window(void)
 	uint32_t extended;
 	static uint8_t big[SSH_CHANNEL_PACKET + 1];
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	channel = open_server_channel(&channels, &out, 5, 1000, 2000);
@@ -735,6 +761,7 @@ test_data_window(void)
 	CHECK_EQ(ssh_channel_parse_data(&channels, input.data, input.size, &found, &bytes, &bytes_size, &extended), EPROTO);
 	CHECK_EQ(channel->local_window, 3);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -754,6 +781,7 @@ test_data_refusals(void)
 	uint32_t extended;
 	size_t index;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	channel = open_server_channel(&channels, &out, 5, 1000, 2000);
@@ -814,6 +842,7 @@ test_data_refusals(void)
 	CHECK_EQ(ssh_channel_parse_data(&channels, input.data, input.size, &found, &bytes, &bytes_size, &extended), EPROTO);
 	CHECK_EQ(channel->local_window, 2097152UL);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -827,6 +856,7 @@ test_consumed(void)
 	struct ssh_channel *channel;
 	struct ssh_buf out;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	channel = open_server_channel(&channels, &out, 9, 1000, 2000);
@@ -882,6 +912,7 @@ test_consumed(void)
 	ssh_channel_consumed(channel, 100, &out);
 	CHECK_EQ(channel->local_window, 0);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -897,7 +928,9 @@ test_window_adjust_and_send(void)
 	struct ssh_channel *found;
 	struct ssh_buf out;
 	size_t index;
+	static uint8_t block[500];
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	channel = open_server_channel(&channels, &out, 9, 1000, 400);
@@ -925,23 +958,19 @@ test_window_adjust_and_send(void)
 	CHECK_EQ(channel->remote_window, 995);
 
 	/* More than the room is EINVAL and nothing is written: 401 > 400, and with the window at 100, 101 > 100. */
-	{
-		static uint8_t block[500];
-
-		memset(block, 'z', sizeof(block));
-		CHECK_EQ(ssh_channel_put_data(channel, 0, block, 401, &out), EINVAL);
-		CHECK_EQ(out.size, 0);
-		CHECK_EQ(channel->remote_window, 995);
-		CHECK_EQ(ssh_channel_put_data(channel, 0, block, 400, &out), 0);
-		CHECK_EQ(channel->remote_window, 595);
-		ssh_buf_reset(&out);
-		channel->remote_window = 100;
-		CHECK_EQ(ssh_channel_put_data(channel, 0, block, 101, &out), EINVAL);
-		CHECK_EQ(ssh_channel_put_data(channel, 0, block, 100, &out), 0);
-		CHECK_EQ(channel->remote_window, 0);
-		CHECK_EQ(ssh_channel_send_room(channel), 0);
-		ssh_buf_reset(&out);
-	}
+	memset(block, 'z', sizeof(block));
+	CHECK_EQ(ssh_channel_put_data(channel, 0, block, 401, &out), EINVAL);
+	CHECK_EQ(out.size, 0);
+	CHECK_EQ(channel->remote_window, 995);
+	CHECK_EQ(ssh_channel_put_data(channel, 0, block, 400, &out), 0);
+	CHECK_EQ(channel->remote_window, 595);
+	ssh_buf_reset(&out);
+	channel->remote_window = 100;
+	CHECK_EQ(ssh_channel_put_data(channel, 0, block, 101, &out), EINVAL);
+	CHECK_EQ(ssh_channel_put_data(channel, 0, block, 100, &out), 0);
+	CHECK_EQ(channel->remote_window, 0);
+	CHECK_EQ(ssh_channel_send_room(channel), 0);
+	ssh_buf_reset(&out);
 
 	/* Missing bytes are EINVAL. */
 	CHECK_EQ(ssh_channel_put_data(channel, 0, NULL, 1, &out), EINVAL);
@@ -1026,6 +1055,7 @@ test_window_adjust_and_send(void)
 	CHECK_EQ(ssh_channel_put_data(channel, 0, (const uint8_t *)"abc", 3, &out), EMSGSIZE);
 	CHECK_EQ(channel->remote_window, 1000);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -1042,6 +1072,7 @@ test_eof_close_free(void)
 	size_t index;
 	int marker;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	channel = open_server_channel(&channels, &out, 9, 1000, 400);
@@ -1142,6 +1173,7 @@ test_eof_close_free(void)
 	CHECK_EQ(out.size, 0);
 	CHECK_EQ(channels.channel[5].state, SSH_CHANNEL_OPENING);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -1158,6 +1190,7 @@ test_requests_parse(void)
 	static uint8_t command[300];
 	static const uint8_t modes[] = { 53, 0, 0, 0, 1, 0 };
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	channel = open_server_channel(&channels, &out, 9, 1000, 400);
@@ -1317,6 +1350,7 @@ test_requests_parse(void)
 	CHECK_EQ(request.type, SSH_CREQ_OTHER);
 	CHECK_EQ(request.name[0], 0);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -1334,6 +1368,7 @@ test_requests_limits(void)
 	static char text[SSH_CHANNEL_COMMAND_MAX + 2];
 	char expected_name[SSH_NAME_MAX + 2];
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	(void)open_server_channel(&channels, &out, 9, 1000, 400);
@@ -1495,6 +1530,7 @@ test_requests_limits(void)
 	CHECK_EQ(request.type, SSH_CREQ_OTHER);
 	CHECK(strcmp(request.name, "exit-signal") == 0);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -1514,6 +1550,7 @@ test_requests_framing(void)
 	size_t index;
 	size_t cut;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	channel = open_server_channel(&channels, &out, 9, 1000, 400);
@@ -1592,6 +1629,7 @@ test_requests_framing(void)
 	CHECK_EQ(ssh_channel_parse_request(&channels, input.data, input.size, &request), 0);
 	CHECK_EQ(request.type, SSH_CREQ_SHELL);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -1613,6 +1651,7 @@ test_requests_put_roundtrip(void)
 	uint32_t reason;
 	int success;
 
+	/* Starts a client table and a server table with buffers for what each sends. */
 	ssh_channels_init(&client);
 	ssh_channels_init(&server);
 	ssh_buf_init(&out, 1U << 20, 0);
@@ -1786,6 +1825,7 @@ test_requests_put_roundtrip(void)
 	ssh_channel_put_exec(client_channel, (const uint8_t *)"0123456789", 10, &out);
 	CHECK_EQ(ssh_buf_error(&out), EMSGSIZE);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 	ssh_buf_free(&wire_out);
 }
@@ -1804,6 +1844,7 @@ test_reply_messages(void)
 	size_t index;
 	int success;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	channel = open_server_channel(&channels, &out, 9, 1000, 400);
@@ -1830,6 +1871,7 @@ test_reply_messages(void)
 	build_end(&input, 98, 0);
 	CHECK_EQ(ssh_channel_parse_reply(&channels, input.data, input.size, &found, &success), EINVAL);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -1850,6 +1892,7 @@ test_closing_reads(void)
 	size_t bytes_size;
 	uint32_t extended;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 	channel = open_server_channel(&channels, &out, 9, 1000, 400);
@@ -1896,6 +1939,7 @@ test_closing_reads(void)
 	build_data(&input, 0, "x", 1);
 	CHECK_EQ(ssh_channel_parse_data(&channels, input.data, input.size, &found, &bytes, &bytes_size, &extended), EPROTO);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -1913,6 +1957,7 @@ test_global_requests(void)
 	int want_reply;
 	size_t index;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 
@@ -2073,6 +2118,7 @@ test_global_requests(void)
 	wire_bool(&input, 1);
 	CHECK_EQ(ssh_channel_global_request(&channels, input.data, input.size, name, &want_reply, &out), EMSGSIZE);
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 
@@ -2102,7 +2148,9 @@ test_random(void)
 	size_t index;
 	unsigned round;
 	unsigned slot;
+	unsigned coin;
 
+	/* Starts with an empty channel table. */
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
 
@@ -2134,7 +2182,11 @@ test_random(void)
 			}
 		}
 
-		if (size > 0 && next_random() % 8 != 0)
+		/* Seven times out of eight the first byte becomes one of the message numbers. */
+		coin = 0;
+		if (size > 0)
+			coin = next_random() % 8;
+		if (coin != 0)
 			payload[0] = numbers[next_random() % sizeof(numbers)];
 
 		/* Offers the payload to each reader; a reader of another message answers EINVAL. */
@@ -2165,6 +2217,7 @@ test_random(void)
 			break;
 		}
 
+		/* Discards what the step put out. */
 		ssh_buf_reset(&out);
 
 		/* The invariants: states are valid, local windows are within the full window, packet sizes within the cap. */
@@ -2176,6 +2229,7 @@ test_random(void)
 		}
 	}
 
+	/* Releases the buffer. */
 	ssh_buf_free(&out);
 }
 

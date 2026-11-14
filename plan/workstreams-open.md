@@ -51,7 +51,6 @@
 | [WS346](ws346/ws.md) | MG006 | libbrowser の style と layout の差分の再計算（layout cache）。DOM の変更の記録・style の無効化・layout の部分木の再利用、全体の作り直しとの照合（2026-11-03 ユーザー、設計は Q1、実装は Sonnet） | completed | 全 Phase (p001〜p009) cleared。Q1 が直に実装、既定 cache=on、bench 14〜17 倍、実サイト verify 差異 0、Windows cross-build PASS（[design.md](ws346/design.md)） |
 | [WS347](ws347/ws.md) | MG006 | VF2＋KC705 で Amaterrace GPU を試験・デバッグする。KC705 に minimal・200 MHz の bitstream を Vivado で書き、GHCI の driver を最新の ghci.md に追従（2026-11-11 ユーザー）。RTL は Gemini、Claude は監査（[amaterrace.md](amaterrace.md)） | incomplete | Gemini の修正（ad23fe01）の監査 → 依頼 03、bitstream の書き込み（p001）、driver の追従（p003、P2 の worktree に未 commit） |
 | [WS349](ws349/ws.md) | MG006 | Raspberry Pi 5 の HDMI の音（2026-11-13、Pi 500 の外部の報告から） | incomplete（p001 設計の第一版、design-reviewer 未実施） | p001 |
-| [WS350](ws350/ws.md) | MG003 | Raspberry Pi 500 を動作の確かめた機種として記録する（2026-11-13、Pi 500 の外部の報告から） | incomplete（p001 cleared: README と tools.md に Pi 500） | p001 |
 | [WS351](ws351/ws.md) | MG004 | 可変の tick（普段 1000 Hz、idle で 100 Hz）と HAL_TIMER_FREQUENCY の廃止。HAL の API はユーザーが決めた（2026-11-13） | incomplete（2026-11-13: 可変の tick と時刻の counter 化を merge、HAL_TIMER_FREQUENCY を削除。5330 の idle の電力は WS352 で） | p001 |
 | [WS352](ws352/ws.md) | MG006 | desktop の idle の短い poll を無くす（compositor・input・client は事象を block して待つ）。WS351 の 5330 の idle の未達から（2026-11-13 ユーザー） | planned | p001 |
 | [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
