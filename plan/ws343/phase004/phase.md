@@ -31,6 +31,7 @@
 ## 範囲の外（Q1 への報告）
 
 - `plan/ws343/tests/passkey-compare.c`（568 行）は style-check で 42 件（call-in-condition 13・paragraph-comment 10・blank-after-brace 10・forward-declaration 5・conditional 4）。直していない。理由: この試験は今の main で既に動かない（`sh plan/ws343/tests/run-passkey-compare.sh` が openssl の build で `compat/crypto/core_names.h` が見つからず FAIL、読む vectors の `build/ws335-vectors` も無い）ので、直しても動作の同値を確かめられない。試験の追従の方針（動かない開発用の試験は消す）に当たるので、消すか直すかは Q1 の判断。消す場合は `run-passkey-compare.sh`・`passkey-compare.c`・`config-amd64-compat.mk`（ct-matrix.sh も同じ組なら）と phase002 の参照。
+  - 2026-11-15 WS343 の完了の時に 4 つとも消した（`run-passkey-compare.sh`・`passkey-compare.c`・`config-amd64-compat.mk`・`ct-matrix.sh`）。fetch の試験は `plan/tools/fetch/` に移した（この表の `plan/ws343/tests/run-fetch-*.sh` は今の `plan/tools/fetch/run-fetch-*.sh`）。
 - 欠陥に見える所は無かった。
 
 ## 結果

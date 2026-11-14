@@ -5,8 +5,8 @@
 # without close_notify; redirections absolute, relative and from http to https; a loop of redirections; a chain that
 # does not verify (no CA file, a self-signed certificate, an expired one, another name); TLS 1.2; an address literal;
 # plain http; a 404; a CA file that cannot be read.  A body is checked with SHA-256, and a failure leaves no file.
-#   sh plan/ws343/tests/run-fetch-https.sh
-# Output under build/tmp/ws343-fetch-https (a fresh run).  The last line is run-fetch-https: PASS (<N> cases) or
+#   sh plan/tools/fetch/run-fetch-https.sh
+# Output under build/tmp/fetch-https (a fresh run).  The last line is run-fetch-https: PASS (<N> cases) or
 # run-fetch-https: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -15,13 +15,13 @@ PATH=/usr/bin:/bin:$PATH
 export PATH
 python=/usr/bin/python3
 . plan/tools/fresh-out.sh
-out=build/tmp/ws343-fetch-https
+out=build/tmp/fetch-https
 fresh_out "$out"
 status=0
 server=
 
 # 1. The compat libraries for the host (kept between runs under build/tmp).
-compat=build/tmp/ws343-compat
+compat=build/tmp/fetch-compat
 if ! timeout 600 sh plan/tools/tls/host-compat-libs.sh "$compat" > "$out/compat-libs.log" 2>&1; then
 	tail -20 "$out/compat-libs.log"
 	echo "run-fetch-https: FAIL (the compat libraries; $out/compat-libs.log)"
@@ -62,7 +62,7 @@ leaf() {
 # 4. The body and the server.
 head -c 300000 /dev/urandom > "$out/body"
 want=$(sha256sum "$out/body" | cut -d' ' -f1)
-"$python" -I plan/ws343/tests/https-server.py "$out/ports" "$out/body" "$pki/good.pem" "$pki/good.key" \
+"$python" -I plan/tools/fetch/https-server.py "$out/ports" "$out/body" "$pki/good.pem" "$pki/good.key" \
     "$pki/othername.pem" "$pki/othername.key" othername "$pki/expired.pem" "$pki/expired.key" expired \
     "$pki/self.pem" "$pki/self.key" self > "$out/server.log" 2>&1 &
 server=$!

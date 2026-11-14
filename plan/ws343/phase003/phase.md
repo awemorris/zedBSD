@@ -16,8 +16,8 @@
 | 所 | 中身 |
 | --- | --- |
 | `userland/base/fetch/main.c` | 書き直し（coding-style の形に合わせた）。https の URL（既定の port 443）、TLS 1.2 以上、`SSL_VERIFY_PEER`、`SSL_CTX_set_default_verify_paths`（`/etc/ssl/cert.pem`）、`-C cafile` で足す CA、SNI（address literal には送らない、RFC 6066 3 節）、`SSL_set1_host` で名前か address を確かめる。確かめに落ちた server には request を送らない。長さ・chunked の body は終わりを待たず、終わりまでの body は TLS の close_notify を要る（無ければ切れた body かもしれないので失敗）。Location は絶対の http・https、`//host/path`、絶対の path、相対の path（今の path の directory に足す）を辿る。fragment は送らない。user 名の入った URL は断る。SIGPIPE は無視（server が先に閉じた後の close_notify の write で死なない）。失敗は file を残さない |
-| `plan/ws343/tests/run-fetch-https.sh`・`https-server.py` | host の試験。fetch を host 向けに ASan・UBSan で build し、`plan/tools/tls/host-compat-libs.sh` の compat の static の archive に link。loopback の server（host の Python の ssl）と openssl で作った CA・leaf で 18 の場合 |
-| `plan/ws343/tests/run-fetch-qemu.sh`・`config-amd64-fetch.mk` | QEMU の試験。既定の x86_64 の image を `plan/tools/guest/test-image.sh` で作り、`guest.sh` で起動し、公開の https の site から取って host の curl の取得と SHA-256 で比べる。自己署名の site を断る事も |
+| `plan/ws343/tests/run-fetch-https.sh`・`https-server.py`（2026-11-15 に `plan/tools/fetch/` へ移した） | host の試験。fetch を host 向けに ASan・UBSan で build し、`plan/tools/tls/host-compat-libs.sh` の compat の static の archive に link。loopback の server（host の Python の ssl）と openssl で作った CA・leaf で 18 の場合 |
+| `plan/ws343/tests/run-fetch-qemu.sh`・`config-amd64-fetch.mk`（2026-11-15 に `plan/tools/fetch/` へ移した） | QEMU の試験。既定の x86_64 の image を `plan/tools/guest/test-image.sh` で作り、`guest.sh` で起動し、公開の https の site から取って host の curl の取得と SHA-256 で比べる。自己署名の site を断る事も |
 
 失敗の文言（例、host 試験の出力から）:
 
