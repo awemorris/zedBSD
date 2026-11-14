@@ -2,7 +2,7 @@
 
 # WS351: 可変の tick（普段 1000 Hz、idle の時 100 Hz）と HAL_TIMER_FREQUENCY の廃止
 
-Status: planned
+Status: incomplete（2026-11-14 Q1: 可変の tick と時刻の counter 化は 2026-11-13 に merge 済み。workstreams-open.md の写しに合わせた）
 Primary Milestone: MG004
 Parent: [Master](../master.md)
 Owner: Q1
