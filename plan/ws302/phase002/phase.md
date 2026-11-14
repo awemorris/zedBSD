@@ -2,7 +2,7 @@
 
 # ws302-p002: config・型・統計（DTB の土台）
 
-Status: in-progress（実装済み・試験 PASS、mk の案の承認待ち。cleared は Q1）
+Status: in-progress（実装済み・試験 PASS。mk の案は当たり、当てた tree の y の build も PASS。cleared は Q1）
 Parent: [WS302](../ws.md)
 Queue: q2093-i01（P6）
 
@@ -18,7 +18,7 @@ Queue: q2093-i01（P6）
 - `base_priority` の初め（thread.c の 3 か所と `kthread_create`）。
 - 受け入れ: `CONFIG_KERN_DESKTOP_BALANCER=n` の kernel は今と同じ（統計も取らない、Q302-5）。x86_64・arm64（rpi5）・riscv64（vf2）の vmunix の build が n と y で warning 0。QEMU の起動の確かめ（boot-test.sh）。
 
-## mk の案（2026-11-14 ユーザーが承認。Q1 が当てる）
+## mk の案（2026-11-14 ユーザーが承認、Q1 が main に当てた 04fabc3c96）
 
 名前は 2026-11-14 のユーザーの決定で `CONFIG_KERN_DESKTOP_BALANCER`（design.md の D-13。device tree blob と紛れる「dtb」を名前から外した）。
 
@@ -51,7 +51,7 @@ endif
 
 - p003 で sched の口の純な関数の source（`src/kern/sched-hint.c`）と試験の `CONFIG_KERN_DESKTOP_BALANCER_TEST`（`mk/test-config.mk`・`mk/test-kernel.mk`）の追加の案を [../phase003/phase.md](../phase003/phase.md) に出す。p004 で `src/kern/desktop-balancer-policy.c` を足す。
 
-### 案が当たる前の y の build の確かめ方
+### 案が当たる前の y の build の確かめ方（04fabc3c96 の後は使わない）
 
 案と同じ効果を、mk を変えずに make の command line で与える: 試験の makefile [../tests/desktop-balancer-overlay.mk](../tests/desktop-balancer-overlay.mk) を Makefile の後に読ませる（`make -f Makefile -f plan/ws302/tests/desktop-balancer-overlay.mk CONFIG_KERN_DESKTOP_BALANCER=y …`）。overlay は `CONFIG_KERN_DESKTOP_BALANCER=y` の時に `KERN_CPPFLAGS` に `-DCONFIG_KERN_DESKTOP_BALANCER=1` を足し、`$(BUILD)/src/kern/desktop-balancer.o` を `VMUNIX_OBJS` と link の前提に足す（各 platform の link の recipe は `$(VMUNIX_OBJS)` を実行の時に展開するので入る）。flag の stamp（mk/tracking.mk）は recipe の時の `KERN_CPPFLAGS` を書くので、n と y を同じ `build/<機種>` で交互に作っても全部が作り直される。
 
@@ -111,6 +111,26 @@ p002-boot: PASS
 - image は `plan/tools/boot-images/config-amd64-boot.mk`（text の login）。y・n とも login prompt を画面で読み、emulate した keyboard で root で login して `uname -s` を打ち、画面に `zedBSD` の答えが出た（`login-after.txt` で打った command の次の行が `zedBSD` である事を目で確かめた）。y の kernel では入力の通知・syscall の入口・tick・起床の新しい道が通った。
 - 判定は boot-test.sh の画面の読み（console・serial の log は読んでいない）。
 
+### mk の案を当てた tree の build（2026-11-14 P6、q2099-i01）
+
+main 7f7f0cc752（改名 cacc4afc72 と mk の案 04fabc3c96 を含む）を branch に取り込み、overlay を使わずに `plan/ws302/tests/p002-build.sh build/p003/p002y build/p003/ref x86_64 rpi5 vf2`（y は `CONFIG_KERN_DESKTOP_BALANCER=y` だけ、make -j4）。REF は基点 991f37fe79 の n の kernel（同じ worktree で src・include を基点に戻して作った物）。
+
+```
+x86_64 n rc=0 warnings=0
+x86_64 n-vs-base same-file
+x86_64 y rc=0 warnings=0
+x86_64 y-thermal rc=0 warnings=0
+rpi5 n rc=0 warnings=0
+rpi5 n-vs-base same-file
+rpi5 y rc=0 warnings=0
+vf2 n rc=0 warnings=0
+vf2 n-vs-base same-file
+vf2 y rc=0 warnings=0
+p002-build: PASS
+```
+
+- n の kernel は基点と同じ file（改名は n の code を変えない）。y の kernel に `kern_desktop_balancer_note_input`・`kern_desktop_balancer_note_gpu`・`sched_note_syscall` があり（`llvm-nm`、3 機種）、mk の規則で desktop-balancer.c が入った事を確かめた。QEMU の起動はこの tree では流していない（p003 の QEMU で y の起動を流す）。
+
 ### 未実施
 
 - 統計の値そのものの確かめ（`run_ticks`・`user_streak`・`syscalls`・`wakeups`・入力と GPU の時刻）: 読む口（`kern.desktop_balancer`）は p004。p002 では値を読まずに道が通る事だけ。
@@ -120,4 +140,4 @@ p002-boot: PASS
 
 ### 受け入れの判定（担当の推し）
 
-範囲（config の案・型・統計・`base_priority` の初め）を実装し、`CONFIG_KERN_DESKTOP_BALANCER=n` が今と同じ事（逆 assemble）、3 機種の n・y の build の warning 0、x86_64 の QEMU の起動（n・y）を確かめた。mk の案はユーザーの承認待ちで、当たるまで y は overlay でしか build できない。推し: 「実装済み・試験 PASS」（mk の案の承認の後に、案を当てた tree で y の build を 1 回流し直す）。
+範囲（config の案・型・統計・`base_priority` の初め）を実装し、`CONFIG_KERN_DESKTOP_BALANCER=n` が今と同じ事（逆 assemble）、3 機種の n・y の build の warning 0、x86_64 の QEMU の起動（n・y）を確かめた。mk の案は承認されて main に当たり（04fabc3c96）、当てた tree で overlay なしの 3 機種の y の build も warning 0。推し: 「実装済み・試験 PASS」で cleared。
