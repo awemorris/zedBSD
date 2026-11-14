@@ -1,7 +1,7 @@
 #!/bin/sh
 # zedBSD's own sshd and ssh (userland/base/ssh) on a zedBSD guest in QEMU, against the host's OpenSSH: one script that
 # builds the images, boots them, runs the checks, collects what they printed and sums up.
-#  1. Images from plan/ws336/tests/config-amd64-ssh.mk (OpenSSH and OpenSSL out, ours in) with
+#  1. Images from plan/tools/ssh/config-amd64-ssh.mk (OpenSSH and OpenSSL out, ours in) with
 #     plan/tools/guest/test-image.sh: "keyed" with the guest harness's files (root's authorized_keys, net.conf and the
 #     host keys), "fresh" with only root's authorized_keys and net.conf, so the guest makes its own host key.  Neither
 #     build may print a compiler warning.  plan/tools/boot-test.sh photographs the keyed image at its login prompt.
@@ -24,8 +24,8 @@
 # passwords, uid 1000 and 0, sshd is uid 22), the formats of the programs' output and the protocol's names; OpenSSH is
 # the peer, never the source of an expected value.  Nothing outside the run directory and the BUILD is written; the
 # host's sshd runs as this user with ForceCommand, so no interactive login shell runs on the host.
-#   sh plan/ws336/tests/qemu-interop.sh
-# QEMU_INTEROP_BUILD=<dir> chooses the BUILD (default build/p022).  QEMU_INTEROP_PARTS="boot transfer fresh" (a part of
+#   sh plan/tools/ssh/qemu-interop.sh
+# QEMU_INTEROP_BUILD=<dir> chooses the BUILD (default build/ssh-interop).  QEMU_INTEROP_PARTS="boot transfer fresh" (a part of
 # that list) keeps only those of the optional parts: the boot test, scp/sftp/ControlMaster/re-key, and the fresh image;
 # the rest always runs.  Last line: qemu-interop: PASS or qemu-interop: FAIL.
 # Output under build/tmp/qemu-interop (a fresh run directory).
@@ -37,10 +37,10 @@ root=$(pwd -P)
 fresh_out build/tmp/qemu-interop
 out=$(cd build/tmp/qemu-interop && pwd -P)
 python=/usr/bin/python3
-helper="$python -I $root/plan/ws336/tests/qemu-helper.py"
+helper="$python -I $root/plan/tools/ssh/qemu-helper.py"
 guest="$python -I $root/plan/tools/guest/guest.py"
-build=${QEMU_INTEROP_BUILD:-build/p022}
-config=plan/ws336/tests/config-amd64-ssh.mk
+build=${QEMU_INTEROP_BUILD:-build/ssh-interop}
+config=plan/tools/ssh/config-amd64-ssh.mk
 key=$root/plan/tmp/guest/id_ed25519
 harness_host_key=$root/plan/tmp/guest/ssh_host_ed25519_key.pub
 checks=0

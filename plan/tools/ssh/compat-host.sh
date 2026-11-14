@@ -6,7 +6,7 @@
 # checks the package's files (userland/base/ssh/files) with the programs built on it: ssh-keygen -A makes the host
 # key under a fresh root, sshd -t takes sshd_config (its HostKey moved under that root), ssh reads ssh_config up to
 # the connection, sh -n reads sshd-start.
-#   sh plan/ws336/tests/compat-host.sh [check...]     checks: contract unit files pair interop (default: all)
+#   sh plan/tools/ssh/compat-host.sh [check...]     checks: contract unit files pair interop (default: all)
 # CRYPTO_COMPAT_SOURCE_DIR=<dir> takes libcrypto-compat's files from another directory (a changed copy under
 # build/tmp) in the place of userland/base/libcrypto-compat.
 # Prints the last line of each check; last line: compat-host: PASS or compat-host: FAIL.  Output under
@@ -58,7 +58,7 @@ files_check() {
 	work=$1
 	failed=0
 	mkdir -p "$work/root/etc/ssh"
-	if ! sh plan/ws336/tests/build-host.sh "$work/bin" ssh ssh-keygen sshd > "$work/build.log" 2>&1; then
+	if ! sh plan/tools/ssh/build-host.sh "$work/bin" ssh ssh-keygen sshd > "$work/build.log" 2>&1; then
 		echo "FAIL build-host: $(tail -1 "$work/build.log")"
 		echo "files: FAIL"
 		return 1
@@ -82,16 +82,16 @@ files_check() {
 
 for check in $checks; do
 	case "$check" in
-	contract) script="plan/ws336/tests/crypto-contract.sh"; arguments="" ;;
+	contract) script="plan/tools/ssh/crypto-contract.sh"; arguments="" ;;
 	files)
 		files_check "$out/files" > "$out/files.log" 2>&1
 		last=$(tail -1 "$out/files.log")
 		echo "$last"
 		[ "$last" = "files: PASS" ] || { grep FAIL "$out/files.log" | head -10; status=1; }
 		continue ;;
-	unit) script="plan/ws336/tests/run-unit.sh"; arguments="all" ;;
-	pair) script="plan/ws336/tests/sshd-pair-host.sh"; arguments="" ;;
-	interop) script="plan/ws336/tests/interop-host.sh"; arguments="" ;;
+	unit) script="plan/tools/ssh/run-unit.sh"; arguments="all" ;;
+	pair) script="plan/tools/ssh/sshd-pair-host.sh"; arguments="" ;;
+	interop) script="plan/tools/ssh/interop-host.sh"; arguments="" ;;
 	*) echo "compat-host: unknown check $check"; status=1; continue ;;
 	esac
 	# shellcheck disable=SC2086

@@ -18,7 +18,7 @@
 # ("no matching", 255), ConnectTimeout, refused keys and passwords asked on the terminal, -N, -n, a shell fed by
 # stdin.  Expected values come from the formats (sshd(8) known_hosts lines) and from the test's own data; OpenSSH is
 # the peer, never the source of an expected value.
-#   sh plan/ws336/tests/interop-host.sh
+#   sh plan/tools/ssh/interop-host.sh
 #
 # Peer B: zedBSD's sshd (the real listener, monitor and children, without root), built with the test's shim
 # (sshd-host-shim.c: the account the test runs as gets the home and the shell of the server's own directory, the log
@@ -32,10 +32,10 @@
 # SSH_SOURCE_DIR=<dir> builds from another source directory (a changed copy under build/tmp).
 # Last line: interop-host: PASS or interop-host: FAIL.  Output under build/tmp/interop-host.
 # SSH_CRYPTO_INCLUDE=<dir whose compat/crypto/ holds libcrypto-compat's headers> and SSH_CRYPTO_LIB=<what to link for
-# it> build against libcrypto-compat instead of the host's OpenSSL (plan/ws336/tests/compat-host.sh sets both).
+# it> build against libcrypto-compat instead of the host's OpenSSL (plan/tools/ssh/compat-host.sh sets both).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
-crypto_include=${SSH_CRYPTO_INCLUDE:-plan/ws336/tests/host-crypto}
+crypto_include=${SSH_CRYPTO_INCLUDE:-plan/tools/ssh/host-crypto}
 crypto_lib=${SSH_CRYPTO_LIB:--lcrypto}
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh
@@ -80,7 +80,7 @@ for tool in "$sshd_program" "$openssh_keygen" "$openssh_client" "$python"; do
 	fi
 done
 
-if ! SSH_SOURCE_DIR=${SSH_SOURCE_DIR:-userland/base/ssh} sh plan/ws336/tests/build-host.sh "$out/bin" ssh ssh-keygen sftp-server \
+if ! SSH_SOURCE_DIR=${SSH_SOURCE_DIR:-userland/base/ssh} sh plan/tools/ssh/build-host.sh "$out/bin" ssh ssh-keygen sftp-server \
     > "$out/build.log" 2>&1; then
 	tail -20 "$out/build.log"
 	echo "interop-host: FAIL (build)"
@@ -810,7 +810,7 @@ chmod 700 "$b_dir/home" "$b_dir/home/.ssh"
 # shellcheck disable=SC2086
 timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined \
     -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -I"$source_dir" -I"$crypto_include" \
-    $(ls "$source_dir"/sshd-*.c) userland/base/login/verify.c plan/ws336/tests/sshd-host-shim.c $b_modules \
+    $(ls "$source_dir"/sshd-*.c) userland/base/login/verify.c plan/tools/ssh/sshd-host-shim.c $b_modules \
     $crypto_lib -lcrypt -o "$b_dir/sshd" > "$out/sshd-b.build.log" 2>&1
 check "zedBSD's sshd builds for the host with the test's shim" $?
 cp "$HOME/.ssh/id_ed25519.pub" "$b_dir/home/.ssh/authorized_keys"
@@ -1047,7 +1047,7 @@ chmod 600 "$b_dir/home/b-noperm"
 # INTEROP_FUZZ_RUNS=<n> runs fewer of each kind (for the checks of a changed copy); 5000 of each is the phase's 10000.
 fuzz_runs=${INTEROP_FUZZ_RUNS:-5000}
 mkdir -p "$work/sftp-raw" "$work/sftp-fuzz"
-"$python" -I plan/ws336/tests/sftp-host.py raw "$out/bin/sftp-server" "$work/sftp-raw" > "$work/sftp-raw.out" 2>&1
+"$python" -I plan/tools/ssh/sftp-host.py raw "$out/bin/sftp-server" "$work/sftp-raw" > "$work/sftp-raw.out" 2>&1
 check "sftp-server: the protocol checks ($(grep -c '^ok' "$work/sftp-raw.out") ok, $(grep '^FAIL' "$work/sftp-raw.out" | tr '\n' ' '))" $?
 cc -std=c89 -O1 -D_DEFAULT_SOURCE -I. -I"$source_dir" -I"$crypto_include" -c "$source_dir/sftp-server-main.c" \
     -o "$out/sftp-server-main.o" > "$out/sftp-stub.build.log" 2>&1
@@ -1068,16 +1068,16 @@ if [ -z "$unexpected" ]; then
 	# shellcheck disable=SC2086
 	timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -D_DEFAULT_SOURCE -fsanitize=address,undefined \
 	    -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -I"$source_dir" -I"$crypto_include" \
-	    "$source_dir/sftp-server-main.c" plan/ws336/tests/sftp-fs-stub.c $b_modules $crypto_lib -o "$out/bin/sftp-server-stub" \
+	    "$source_dir/sftp-server-main.c" plan/tools/ssh/sftp-fs-stub.c $b_modules $crypto_lib -o "$out/bin/sftp-server-stub" \
 	    >> "$out/sftp-stub.build.log" 2>&1 && stub_ok=0
 fi
 check "the stubbed sftp-server builds" "$stub_ok"
-"$python" -I plan/ws336/tests/sftp-host.py fuzz-structured "$out/bin/sftp-server" "$work/sftp-fuzz" "$fuzz_runs" \
+"$python" -I plan/tools/ssh/sftp-host.py fuzz-structured "$out/bin/sftp-server" "$work/sftp-fuzz" "$fuzz_runs" \
     > "$work/sftp-fuzz1.out" 2>&1
 check "sftp-server: $fuzz_runs runs of requests with short names ($(tail -1 "$work/sftp-fuzz1.out"))" $?
 if [ "$stub_ok" = 0 ]; then
 	mkdir -p "$work/sftp-stub"
-	"$python" -I plan/ws336/tests/sftp-host.py fuzz-random "$out/bin/sftp-server-stub" "$work/sftp-stub" "$fuzz_runs" \
+	"$python" -I plan/tools/ssh/sftp-host.py fuzz-random "$out/bin/sftp-server-stub" "$work/sftp-stub" "$fuzz_runs" \
 	    > "$work/sftp-fuzz2.out" 2>&1
 	check "sftp-server: $fuzz_runs runs of random bytes ($(tail -1 "$work/sftp-fuzz2.out"))" $?
 fi

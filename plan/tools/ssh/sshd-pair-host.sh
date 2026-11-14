@@ -1,17 +1,17 @@
 #!/bin/sh
 # sshd's three processes (monitor, pre-authentication, session) on a development host without root, against the host's
-# OpenSSH ssh and sftp: the driver plan/ws336/tests/sshd-pair-host.c stands in for the listener, takes one connection
+# OpenSSH ssh and sftp: the driver plan/tools/ssh/sshd-pair-host.c stands in for the listener, takes one connection
 # on 127.0.0.1 and runs sshd_monitor_run_program with itself as the children.  Each case is one connection.
 # Nothing outside the run directory is touched: the account the test runs as is given the run directory's home and
 # shell (getpwnam_r is replaced in the driver), the log goes to a file there, ssh and sftp run with -F /dev/null, their
 # own known_hosts file and key, and an empty environment.
-#   sh plan/ws336/tests/sshd-pair-host.sh
+#   sh plan/tools/ssh/sshd-pair-host.sh
 # Last line: sshd-pair-host: PASS or sshd-pair-host: FAIL.  Output under build/tmp/sshd-pair (a fresh run directory).
 # SSH_CRYPTO_INCLUDE=<dir whose compat/crypto/ holds libcrypto-compat's headers> and SSH_CRYPTO_LIB=<what to link for
-# it> build against libcrypto-compat instead of the host's OpenSSL (plan/ws336/tests/compat-host.sh sets both).
+# it> build against libcrypto-compat instead of the host's OpenSSL (plan/tools/ssh/compat-host.sh sets both).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
-crypto_include=${SSH_CRYPTO_INCLUDE:-plan/ws336/tests/host-crypto}
+crypto_include=${SSH_CRYPTO_INCLUDE:-plan/tools/ssh/host-crypto}
 crypto_lib=${SSH_CRYPTO_LIB:--lcrypto}
 cd "$(dirname -- "$0")/../../.."
 root=$(pwd)
@@ -35,7 +35,7 @@ for file in userland/base/ssh/ssh-*.c; do
 	esac
 done
 if ! timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-    -fno-omit-frame-pointer -I. -Iuserland/base/ssh -I"$crypto_include" plan/ws336/tests/sshd-pair-host.c \
+    -fno-omit-frame-pointer -I. -Iuserland/base/ssh -I"$crypto_include" plan/tools/ssh/sshd-pair-host.c \
     $modules userland/base/ssh/sshd-monitor.c userland/base/ssh/sshd-login.c userland/base/ssh/sshd-child.c \
     userland/base/ssh/sshd-preauth.c userland/base/ssh/sshd-session.c userland/base/login/verify.c $crypto_lib -lcrypt \
     -o "$work/sshd-pair" > "$work/build.log" 2>&1; then
@@ -47,7 +47,7 @@ fi
 
 # The client of the cases the host's ssh does not send, from the library's client parts.
 if ! timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-    -fno-omit-frame-pointer -I. -Iuserland/base/ssh -I"$crypto_include" plan/ws336/tests/sshd-pair-client.c \
+    -fno-omit-frame-pointer -I. -Iuserland/base/ssh -I"$crypto_include" plan/tools/ssh/sshd-pair-client.c \
     $modules $crypto_lib -o "$work/sshd-pair-client" > "$work/build-client.log" 2>&1; then
 	echo "build of the client failed:"
 	head -30 "$work/build-client.log"

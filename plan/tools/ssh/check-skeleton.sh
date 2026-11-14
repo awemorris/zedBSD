@@ -10,12 +10,12 @@
 #  6. with BASE=<commit>, the library headers (ssh-*.h except the program-internal ssh-client-*.h, and sshd.h) are
 #     unchanged since that commit (an implementation Phase must not change them; a header fault goes back to Q1);
 #     program-internal headers (ssh-client-*.h, sshd-*.h) that the program Phases add are not frozen;
-#  7. every .c compiles for zedBSD (amd64) against zedBSD's own C library headers with the project's clang
-#     (build/llvm/bin/clang, --target=x86_64-unknown-zedbsd) and the sysroot of the main checkout's build
-#     (SSH_ZEDBSD_SYSROOT, default /home/awe/zedBSD-claude1/build/amd64/sysroot, used read-only), so a program does
+#  7. every .c compiles for zedBSD (x86_64) against zedBSD's own C library headers with the project's clang
+#     (build/llvm/bin/clang, --target=x86_64-unknown-zedbsd) and the sysroot of this tree's x86_64 build
+#     (SSH_ZEDBSD_SYSROOT, default build/x86_64/sysroot, used read-only), so a program does
 #     not drift onto host-only interfaces; skipped with a note when either is missing.
-#   sh plan/ws336/tests/check-skeleton.sh
-#   BASE=<sha> sh plan/ws336/tests/check-skeleton.sh
+#   sh plan/tools/ssh/check-skeleton.sh
+#   BASE=<sha> sh plan/tools/ssh/check-skeleton.sh
 # Last line: check-skeleton: PASS or check-skeleton: FAIL.  Output under build/tmp/ssh-skeleton.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -40,7 +40,7 @@ for compiler in cc clang; do
 		fi
 	done
 	for source in userland/base/ssh/*.c; do
-		if ! timeout 120 $compiler $flags -Iplan/ws336/tests/host-crypto -c "$source" \
+		if ! timeout 120 $compiler $flags -Iplan/tools/ssh/host-crypto -c "$source" \
 		    -o "$out/$compiler-$(basename "$source" .c).o" > "$out/source.log" 2>&1; then
 			echo "FAILED $compiler $source"
 			head -10 "$out/source.log"
@@ -87,7 +87,7 @@ if [ -n "${BASE:-}" ]; then
 fi
 
 zedbsd_cc=build/llvm/bin/clang
-zedbsd_sysroot=${SSH_ZEDBSD_SYSROOT:-/home/awe/zedBSD-claude1/build/amd64/sysroot}
+zedbsd_sysroot=${SSH_ZEDBSD_SYSROOT:-build/x86_64/sysroot}
 if [ -x "$zedbsd_cc" ] && [ -d "$zedbsd_sysroot/usr/include" ]; then
 	for source in userland/base/ssh/*.c; do
 		extra=""
@@ -97,7 +97,7 @@ if [ -x "$zedbsd_cc" ] && [ -d "$zedbsd_sysroot/usr/include" ]; then
 			extra="-I$out/compat-root" ;;
 		esac
 		if ! timeout 120 "$zedbsd_cc" --target=x86_64-unknown-zedbsd -nostdinc -I. -Iinclude \
-		    -isystem "$zedbsd_sysroot/usr/include" $extra -DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64 -DKERN_DYNAMIC_LIBC \
+		    -isystem "$zedbsd_sysroot/usr/include" $extra -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 -DKERN_DYNAMIC_LIBC \
 		    -ffreestanding -fno-builtin -Wall -Wextra -Werror -fsyntax-only "$source" > "$out/zedbsd.log" 2>&1; then
 			echo "FAILED zedBSD headers $source"
 			grep error "$out/zedbsd.log" | head -10
