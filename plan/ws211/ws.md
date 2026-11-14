@@ -4,13 +4,13 @@
 
 <!-- awesome-plan-current:start -->
 Status: completed（2026-10-27 P3 の精査 q1608。2026-10-13 ユーザー「いや、これ以上詰めなくていいです。」で最適化を終えた）
-<!-- retained-after-completion --> phase001・phase003・phase009 は userland/desktop/wayland/ の source の comment が設計の出典として参照している（layer-cache.c・batch.c・compose-bind.c・damage.c）。消すか残すかは Q1 の判断待ち。
 Completed: 2026-10-27（q1608）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: なし
 Resume point: なし（新しい要求は新しい WS として立てる。この WS は再開しない）
+- 2026-11-15 Q1: ユーザーの判断で、残していた phase001・phase003・phase009 の directory を消した。source の comment の `plan/ws211/phaseNNN/phase.md` への参照（compose-bind.c・batch.c・layer-cache.c・damage.c）も外した。
 <!-- awesome-plan-current:end -->
 
 ## 目標

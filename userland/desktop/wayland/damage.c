@@ -17,8 +17,8 @@
  * compose.c widens it by the frames each swapchain image missed (its
  * buffer age) and draws the frame inside it alone.
  *
- * The damage is a short list of rectangles that do not overlap (ws211-p009,
- * plan/ws211/phase009/phase.md D1): changes far apart, the clock and a
+ * The damage is a short list of rectangles that do not overlap: changes
+ * far apart, the clock and a
  * hovered button, stay apart, and a frame draws each of them instead of
  * the box around both.
  */

@@ -12,8 +12,8 @@
  * the commands recorded are counted for KWL DRAWS (review-1 M2).  A set is
  * the same binding only with the same pipeline layout (review-1 M1).
  *
- * The draws of the frame being recorded (ws211-p009 D3,
- * plan/ws211/phase009/phase.md): a quad wholly outside what the frame
+ * The draws of the frame being recorded: a quad wholly outside what the
+ * frame
  * draws is not drawn, and while the frame's damage is two or more
  * rectangles apart, a quad is drawn once for each of them it meets, with
  * the scissor cut to that rectangle; the rectangles do not overlap, so no

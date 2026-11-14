@@ -6,8 +6,8 @@
  */
 
 /*
- * The glass look's small solid quads drawn together (ws211-p003 段 2,
- * plan/ws211/phase003/phase.md): instead of one draw a quad, each with its
+ * The glass look's small solid quads drawn together: instead of one draw
+ * a quad, each with its
  * own push constants, the quads that follow one another are written as
  * vertices (six a quad, each carrying the quad's place, rounded rectangle,
  * colour and radius) and drawn with one draw.  The order of drawing is

@@ -6,8 +6,8 @@
  */
 
 /*
- * The layers' pictures (ws211-p002, plan/ws211/phase001/phase.md, design
- * version 4): App Home's content and the desktop layer, each drawn into an
+ * The layers' pictures: App Home's content and the desktop layer, each
+ * drawn into an
  * image of the output's size, so that App Home's opening and closing show
  * them as two pictures instead of drawing every shape of both in each frame
  * (on the Raspberry Pi 4 a frame of both is 460 to 900 draws).
