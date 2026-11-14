@@ -261,6 +261,8 @@ shell_run(
 		fprintf(stderr, "browser: a page to open is needed (a file or a file: URL)\n");
 		return 2;
 	}
+
+	/* Keeps the page the window opens on. */
 	state.start = options->start;
 
 	/* The connection to the compositor: its application names the program's data directory. */
@@ -384,6 +386,8 @@ shell_run(
 		printf("ZBROWSER ERROR latency error=%d\n", error);
 		fflush(stdout);
 	}
+
+	/* Lets the window report its waits to the latency record, when one started. */
 	if (state.latency.thread != NULL)
 		state.window.latency = &state.latency;
 
@@ -1129,6 +1133,8 @@ shell_cpu_frame(
 		fprintf(stderr, "browser: cannot draw a frame: %s\n", wb_os_error_text(error));
 		return 1;
 	}
+
+	/* Ends the round without a present when the frame was dropped. */
 	if (dropped)
 		return 0;
 

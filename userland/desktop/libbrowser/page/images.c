@@ -255,6 +255,8 @@ page_images_release(
 		deferred = wb_vector_at(&page->images_deferred, index);
 		free(*deferred);
 	}
+
+	/* The table that held them. */
 	wb_vector_release(&page->images_deferred);
 
 	/* The elements still waiting, given back to the heap. */

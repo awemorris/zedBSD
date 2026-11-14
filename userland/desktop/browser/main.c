@@ -931,6 +931,8 @@ main_draw_gpu_frame(
 		vkDestroyCommandPool(gpu->device, pool, NULL);
 		return EIO;
 	}
+
+	/* Records the frame's commands, then ends the recording. */
 	error = browser_view_render(view, target, commands, &serial);
 	result = vkEndCommandBuffer(commands);
 	if (error == 0 && result != VK_SUCCESS)
@@ -948,6 +950,8 @@ main_draw_gpu_frame(
 		vkDestroyCommandPool(gpu->device, pool, NULL);
 		return EIO;
 	}
+
+	/* Takes the queue the work is submitted to. */
 	vkGetDeviceQueue(gpu->device, gpu->queue_family, 0, &queue);
 	memset(&submit, 0, sizeof(submit));
 	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1141,6 +1145,8 @@ main_parse(
 				fprintf(stderr, "browser: --follow takes 0 to 9\n");
 				return EINVAL;
 			}
+
+			/* Keeps the number of links to follow. */
 			options->follow = (unsigned)(value[0] - '0');
 			continue;
 		}

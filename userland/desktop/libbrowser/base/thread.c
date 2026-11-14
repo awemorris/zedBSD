@@ -51,6 +51,7 @@ browser_threads_set(
 	const struct browser_threads *threads)
 {
 	int expected;
+	int claimed;
 	int complete;
 
 	/* A table is needed. */
@@ -64,9 +65,10 @@ browser_threads_set(
 	if (!complete)
 		return ENOTSUP;
 
-	/* The first table given is the one kept. */
+	/* Claims the right to keep this table: the first table given is the one kept. */
 	expected = THREAD_TABLE_NONE;
-	if (!__atomic_compare_exchange_n(&thread_state, &expected, THREAD_TABLE_COPYING, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+	claimed = __atomic_compare_exchange_n(&thread_state, &expected, THREAD_TABLE_COPYING, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+	if (!claimed)
 		return EBUSY;
 
 	/* The copy, then published to every thread. */

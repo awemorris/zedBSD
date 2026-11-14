@@ -382,10 +382,14 @@ view_front_destroy(
 		item = wb_vector_at(&front->items, index);
 		front_item_free(item);
 	}
+
+	/* Frees each note still queued. */
 	for (index = 0; index < front->notes.count; index++) {
 		note = wb_vector_at(&front->notes, index);
 		front_note_free(note);
 	}
+
+	/* Releases the tables and the state published last. */
 	wb_vector_release(&front->items);
 	wb_vector_release(&front->notes);
 	front_snapshot_free(&front->published);
@@ -710,6 +714,8 @@ view_front_key(
 		front_item_free(&item);
 		return ENOMEM;
 	}
+
+	/* Pushes the item to the front's queue. */
 	error = front_push(view, &item);
 	if (error != 0)
 		return error;
@@ -1038,6 +1044,8 @@ view_front_text_context(
 		while (length > 0 && ((unsigned char)shown->context_text[length] & 0xC0U) == 0x80U)
 			length--;
 	}
+
+	/* Copies the text, cut at a character boundary. */
 	memcpy(text, shown->context_text, length);
 	text[length] = '\0';
 
@@ -1097,6 +1105,8 @@ view_front_process(
 				note->held = FRONT_NOTE_MOVED;
 		}
 	}
+
+	/* Takes the count of console lines dropped for want of room. */
 	lost = front->console_dropped;
 	front->console_dropped = 0;
 	front->redraw_noted = 0;
@@ -1124,6 +1134,8 @@ view_front_process(
 		front_tell(front, note);
 		front_note_free(note);
 	}
+
+	/* Releases the table of the notes taken. */
 	wb_vector_release(&notes);
 
 	/* The console lines there was no room for, in one line. */
@@ -1324,6 +1336,8 @@ front_run(
 			view_frames_set_view(front->frames, view);
 			front_publish(front);
 		}
+
+		/* Leaves the frames' section entered before the view was made. */
 		view_frames_leave(front->frames);
 	}
 
@@ -1402,6 +1416,8 @@ front_loop(
 			else
 				(void)wb_cond_wait_for(&front->changed, &front->lock, (uint32_t)timeout);
 		}
+
+		/* Takes the entries queued, which this round runs. */
 		taken = front->items;
 		wb_vector_init(&front->items, sizeof(struct front_item));
 		front->presses = 0;
@@ -1425,6 +1441,8 @@ front_loop(
 				front_answer(front, item->call, ECANCELED);
 				item->call = NULL;
 			}
+
+			/* Frees the entry. */
 			front_item_free(item);
 		}
 
@@ -1436,6 +1454,8 @@ front_loop(
 				if (item->call != NULL && item->call != front->settling)
 					front_answer(front, item->call, item->call->error);
 			}
+
+			/* Answers the settle that was waiting, which the round ending cancels. */
 			if (front->settling != NULL)
 				front_answer(front, front->settling, ECANCELED);
 			front->settling = NULL;
@@ -1470,6 +1490,8 @@ front_loop(
 			if (item->call != NULL && item->call != front->settling)
 				front_answer(front, item->call, item->call->error);
 		}
+
+		/* Releases the table of the taken entries. */
 		wb_vector_release(&taken);
 
 		/* The next wait's bound (no longer than a settle's next look), and the agent for the iframes' threads. */
@@ -1587,6 +1609,8 @@ front_execute(
 		} else {
 			free(image);
 		}
+
+		/* Hands the notification to the front's queue. */
 		(void)front_note(front, &note);
 		break;
 	default:
@@ -1667,11 +1691,15 @@ front_publish(
 		note = wb_vector_at(&front->notes, index);
 		note->held = 0;
 	}
+
+	/* Owes the program's thread a wake when the notifications or the state are news. */
 	wake = 0;
 	if (!front->wake_owed && (changed || front->notes.count != 0 || front->console_dropped != 0)) {
 		front->wake_owed = 1;
 		wake = 1;
 	}
+
+	/* Wakes the program's thread waiting for an answer, which the news is for. */
 	if (changed || front->notes.count != 0 || front->console_dropped != 0) {
 		front->heard = 1;
 		wb_cond_broadcast(&front->answered);
@@ -1726,6 +1754,8 @@ front_commit(
 		paint_scene_release(scene);
 		return ENOMEM;
 	}
+
+	/* Numbers the frame. */
 	front->commit_serial++;
 	commit->refs = 1U;
 	commit->scene = scene;
@@ -1920,6 +1950,8 @@ front_push(
 			merged = 1;
 		}
 	}
+
+	/* Refuses a press that finds the queue full. */
 	if (!merged && press && front->presses >= FRONT_PRESSES_MAX)
 		error = ENOBUFS;
 	if (!merged && error == 0)
@@ -2019,6 +2051,8 @@ front_note_free(
 		browser_view_image_release(note->image);
 		free(note->image);
 	}
+
+	/* Forgets what it owned. */
 	note->text = NULL;
 	note->reason = NULL;
 	note->image = NULL;
@@ -2068,11 +2102,15 @@ front_snapshot_copy(
 		if (to->url == NULL)
 			return ENOMEM;
 	}
+
+	/* Copies the title. */
 	if (from->title != NULL) {
 		to->title = front_copy(from->title);
 		if (to->title == NULL)
 			return ENOMEM;
 	}
+
+	/* Copies the context text. */
 	if (from->context_text != NULL) {
 		to->context_text = front_copy(from->context_text);
 		if (to->context_text == NULL)
@@ -2089,12 +2127,18 @@ front_snapshot_same(
 	const struct view_snapshot *left,
 	const struct view_snapshot *right)
 {
+	int order;
+	int same;
+
 	/* The strings. */
-	if (!front_string_same(left->url, right->url))
+	same = front_string_same(left->url, right->url);
+	if (!same)
 		return 0;
-	if (!front_string_same(left->title, right->title))
+	same = front_string_same(left->title, right->title);
+	if (!same)
 		return 0;
-	if (!front_string_same(left->context_text, right->context_text))
+	same = front_string_same(left->context_text, right->context_text);
+	if (!same)
 		return 0;
 
 	/* The numbers. */
@@ -2110,7 +2154,8 @@ front_snapshot_same(
 		return 0;
 	if (left->text_session != right->text_session || left->has_target != right->has_target)
 		return 0;
-	if (memcmp(left->caret, right->caret, sizeof(left->caret)) != 0)
+	order = memcmp(left->caret, right->caret, sizeof(left->caret));
+	if (order != 0)
 		return 0;
 	if (left->has_context != right->has_context || left->cursor != right->cursor)
 		return 0;
@@ -2294,6 +2339,8 @@ front_load(
 		front_note_free(&note);
 		return;
 	}
+
+	/* Hands the news to the front's queue. */
 	(void)front_note(context, &note);
 }
 
@@ -2415,6 +2462,7 @@ front_tell(
 				calls->field(calls->context, view, note->error, NULL);
 		}
 		break;
+
 	default:
 		break;
 	}

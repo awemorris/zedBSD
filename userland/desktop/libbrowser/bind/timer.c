@@ -74,6 +74,8 @@ bind_next_timer(
 	const struct dom_node *walk;
 	const struct bind_window *child;
 	double child_due;
+	void *child_runner;
+	void *own_runner;
 	size_t index;
 	int waits;
 	int found;
@@ -94,11 +96,17 @@ bind_next_timer(
 
 	/* The timers of the frames in the document count too. */
 	if (window->context_depth < 64U) {
+		own_runner = bind_window_runner(window);
+
 		walk = window->document->node.first_child;
 		while (walk != NULL) {
 			child = bind_frame_child(walk);
-			if (child != NULL && bind_window_runner(child) != bind_window_runner(window))
-				child = NULL;
+			if (child != NULL) {
+				/* A frame that runs on another thread keeps its own timers. */
+				child_runner = bind_window_runner(child);
+				if (child_runner != own_runner)
+					child = NULL;
+			}
 			if (child != NULL && bind_next_timer(child, &child_due)) {
 				if (!found || child_due < *due)
 					*due = child_due;
@@ -131,6 +139,8 @@ timer_run_children(
 	struct bind_window *child;
 	struct vm_cell **slot;
 	struct vm_cell *cell;
+	void *child_runner;
+	void *own_runner;
 	size_t index;
 	size_t rooted;
 	int status;
@@ -138,11 +148,16 @@ timer_run_children(
 	/* The frames of the document now. */
 	wb_vector_init(&children, sizeof(struct vm_cell *));
 	status = 0;
+	own_runner = bind_window_runner(window);
 	walk = window->document->node.first_child;
 	while (walk != NULL && status == 0) {
 		child = bind_frame_child(walk);
-		if (child != NULL && bind_window_runner(child) != bind_window_runner(window))
-			child = NULL;
+		if (child != NULL) {
+			/* A frame that runs on another thread runs its own timers. */
+			child_runner = bind_window_runner(child);
+			if (child_runner != own_runner)
+				child = NULL;
+		}
 		if (child != NULL) {
 			cell = &child->realm->cell;
 			status = wb_vector_push(&children, &cell);
