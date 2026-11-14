@@ -139,6 +139,7 @@ keiui_win32_clipboard_get(
 	SIZE_T bytes;
 	size_t count;
 	BOOL opened;
+	size_t result;
 
 	/* Nothing yet. */
 	text[0] = '\0';
@@ -162,5 +163,6 @@ keiui_win32_clipboard_get(
 	(void)CloseClipboard();
 
 	/* Its length. */
-	return strlen(text);
+	result = strlen(text);
+	return result;
 }

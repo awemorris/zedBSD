@@ -897,11 +897,14 @@ titlebar_width(
 {
 	int label;
 	unsigned side;
+	uint32_t result;
 
 	/* The breadcrumb's least. */
 	side = titlebar_side(control);
-	if (side == TITLEBAR_CRUMB)
-		return keiui_win32_scale(TITLEBAR_CRUMB_LEAST, window->dpi);
+	if (side == TITLEBAR_CRUMB) {
+		result = keiui_win32_scale(TITLEBAR_CRUMB_LEAST, window->dpi);
+		return result;
+	}
 
 	/* A generic control's pill. */
 	if (control->role == KL_CONTROL_GENERIC) {
@@ -921,10 +924,12 @@ titlebar_pixels(
 	const struct kl_window *window)
 {
 	const struct kl_theme *theme;
+	unsigned result;
 
 	/* The body's size, scaled. */
 	theme = kl_theme_default();
-	return keiui_win32_scale(theme->text_body, window->dpi);
+	result = keiui_win32_scale(theme->text_body, window->dpi);
+	return result;
 }
 
 /* The index of the control of an ID, or KEIUI_WIN32_NO_CONTROL. */

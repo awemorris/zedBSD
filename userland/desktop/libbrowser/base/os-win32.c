@@ -743,11 +743,14 @@ os_full_path(
 	DWORD size;
 	DWORD got;
 	int attempt;
+	int error;
 
 	/* Asks how many units the full path needs, with its NUL. */
 	size = GetFullPathNameW(source, 0, NULL, NULL);
-	if (size == 0)
-		return os_full_path_failure();
+	if (size == 0) {
+		error = os_full_path_failure();
+		return error;
+	}
 
 	/* Tries with the size the system named, and again if the answer grew. */
 	for (attempt = 0; attempt < OS_FULL_PATH_ATTEMPTS; attempt++) {
@@ -760,7 +763,8 @@ os_full_path(
 		got = GetFullPathNameW(source, size, buffer, NULL);
 		if (got == 0) {
 			free(buffer);
-			return os_full_path_failure();
+			error = os_full_path_failure();
+			return error;
 		}
 
 		/* Takes the answer when it fit in the buffer. */

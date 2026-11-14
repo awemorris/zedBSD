@@ -912,12 +912,15 @@ os_net_suppress_signal(
 #if !defined(MSG_NOSIGNAL) && defined(SO_NOSIGPIPE)
 	int enabled;
 	int status;
+	int error;
 
 	/* Asks the socket itself to refuse the signal. */
 	enabled = 1;
 	status = setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled));
-	if (status != 0)
-		return os_net_socket_error(errno);
+	if (status != 0) {
+		error = os_net_socket_error(errno);
+		return error;
+	}
 #else
 	UNUSED_PARAMETER(descriptor);
 #endif

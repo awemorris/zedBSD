@@ -67,6 +67,7 @@ keiui_wake_open(
 {
 	HANDLE event;
 	DWORD code;
+	int error;
 
 	/* The wake has no descriptors; only the event is its own. */
 	wake->ends[0] = -1;
@@ -77,7 +78,8 @@ keiui_wake_open(
 	event = CreateEventW(NULL, TRUE, FALSE, NULL);
 	if (event == NULL) {
 		code = GetLastError();
-		return platform_wake_error(code);
+		error = platform_wake_error(code);
+		return error;
 	}
 
 	/* Succeeded: the wake is quiet. */
@@ -424,6 +426,7 @@ platform_thread_create(
 	struct platform_start *start;
 	HANDLE created;
 	DWORD code;
+	int error;
 
 	/* What the new thread runs. */
 	start = malloc(sizeof(*start));
@@ -439,7 +442,8 @@ platform_thread_create(
 	if (created == NULL) {
 		code = GetLastError();
 		free(start);
-		return platform_thread_error(code);
+		error = platform_thread_error(code);
+		return error;
 	}
 
 	/* Succeeded: the new thread owns the pair now. */
