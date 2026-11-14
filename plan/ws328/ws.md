@@ -52,6 +52,8 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 
 ## Resume point
 
+- 2026-11-15 Q1: p001 の素案（f5d868d46c・7cc9eca796）を main に merge c315f3799f。design-reviewer の反映は P4 q2098。Q1 の判断: WS328 の統合の Phase は WS074 の host の試験を直してよい（WS074 は止めている）。`sources.mk`（make の断片）に .c を足す差分は Makefile と同じ扱いで、案としてユーザーへ。仕様の資料は main の build/ に写さず、担当の worktree の build/ に置く（前の worktree から写す）。
+
 - 2026-11-14 P4（q2091-i01）: p001 の設計を作った（[design.md](design.md)、header と骨格、試験の道具、p002〜p023 の phase.md、[user-questions.md](user-questions.md)）。header の基点の SHA は p001 の cleared の時に Q1 がここに書く（実装の Phase は `BASE=<その SHA> sh plan/ws328/tests/check-skeleton.sh`）。次は p002・p006・p007・p008・p017 から（並べられる）。
 
 - 2026-11-14 Q1: ユーザーの指示で着手（WS074 を今進めていないので file の調整は要らない）。P4 q2091: 乖離の確かめ → p001 の設計。
