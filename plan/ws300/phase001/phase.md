@@ -4,7 +4,7 @@
 
 Phase ID: `ws300-p001`
 Parent: [WS300](../ws.md)
-Status: cleared（2026-10-29 P6 q1683-i01: [design.md](../design.md) 第 2 版。design-reviewer（[design-review.md](../design-review.md)、重大 2・中 6・軽 15）の指摘を design §15 のとおり反映）
+Status: cleared（2026-11-15 Q1）
 Phase disposition: normal
 Queue: q1683-i01（P6）
 

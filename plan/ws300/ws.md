@@ -52,11 +52,12 @@ S0i3 の妨げにならない状態（NVMe は D3、link は L1.2 か L2 相当�
 
 | Phase | 内容 | 状態 | 依存 | LW |
 | --- | --- | --- | --- | --- |
-| [ws300-p001](phase001/phase.md) | 調査と設計（survey 2 つ、design 第 2 版と review、第 3 版で main に合わせた） | cleared（2026-10-29 P6 の branch の記録。第 3 版は 2026-11-15、Q1 の確認は未） | WS298（済） | 5 |
-| [ws300-p002](phase002/phase.md) | VMD の suspend・resume、suspend の順 | canceled の推し（BUG-424 で置き換わった、Q1 が確定） | p001 | — |
-| [ws300-p003](phase003/phase.md) | S0 idle の NVMe: SHN＋D3hot のまま、shutdown の前に HMB を止める、suspend・resume の時間の log | in-progress（実装・build・QEMU、5330 は p006） | BUG-424、WS299 の HMB | 3 |
+| [ws300-p001](phase001/phase.md) | 調査と設計（survey 2 つ、design 第 2 版と review、第 3 版で main に合わせた） | cleared（2026-11-15 Q1。設計の第 3 版で今の main に合わせた） | WS298（済） | 5 |
+| [ws300-p002](phase002/phase.md) | VMD の suspend・resume、suspend の順 | canceled（2026-11-15 Q1。BUG-424 の debec3781b・295eea4623 で置き換わった。root port の D3hot と pci.vmd.d3=force の要否は p006 の 5330 の後） | p001 | — |
+| [ws300-p003](phase003/phase.md) | S0 idle の NVMe: SHN＋D3hot のまま、shutdown の前に HMB を止める、suspend・resume の時間の log | cleared（2026-11-15 Q1、e952eadf2c を main に merge dbb0415a3f。x86_64・riscv64 の build warning 0、nvme-hmb-test PASS、QEMU の suspend の往復 2 回 PASS。5330 の BG5 での確かめは p006） | BUG-424、WS299 の HMB | 3 |
 | [ws300-p004](phase004/phase.md) | ASPM L1・L1 substates・LTR（VMD の下の link、既定 off、`pci.vmd.aspm=on`） | planned（Q300-6 の判断待ち） | BUG-424、Q300-6 | 5 |
-| [ws300-p005](phase005/phase.md) | APST（Set Features 0Ch、表、閾値、既定 off で `nvme.apst=on`）と状態を見る口（UAPI は Q300-2 の後） | in-progress（APST は実装・host 試験・build・QEMU、UAPI は未着手） | p003 | 4 |
+| [ws300-p005](phase005/phase.md) | APST（Set Features 0Ch、表、閾値、既定 off で `nvme.apst=on`）と状態を見る口（UAPI は Q300-2 の後） | cleared（2026-11-15 Q1、merge dbb0415a3f。APST（既定 off、nvme.apst=on）を header の inline と pci-nvme.c に、nvme-apst-test PASS（壊す 6 通りを捕捉）、build warning 0。状態を見る口（UAPI）は p005b に分けた） | p003 | 4 |
+| ws300-p005b | NVMe の電力の状態を見る口（UAPI） | planned（Q300-2 の判断待ち、2026-11-15 Q1 が p005 から分けた） | p005、Q300-2 | 1 |
 | ws300-p006 | 5330 の受け入れ（WS052 の s0idle と一緒に 1 本の script、APST の log、速さの回帰） | planned（BUG-428・429 の後、Q1 の割当） | p004、p005、WS052 p014 | 2 |
 | ws300-p007 | 規約の全文の見直し | planned | p006 | 2 |
 
@@ -69,6 +70,8 @@ S0i3 の妨げにならない状態（NVMe は D3、link は L1.2 か L2 相当�
 - 他の推しで決めた事（Q300-3〜5）は design §13。
 
 ## Resume point（2026-11-15 P5、q2114-i01）
+
+- 2026-11-15 Q1: p001・p003・p005（APST）cleared、p002 canceled、UAPI は p005b に分けた（Q300-2 待ち）。p004（ASPM）は Q300-6 待ち、p006 は 5330（BUG-428・429 の後）。system の shutdown（nvme_shutdown）も HMB を止めずに SHN する点は p006 の前に扱いを決める。
 
 - worktree `p5-ws300`（branch `agent/p5-ws300`、基点 main 5202274642）。p003 の code 4966ba2a1a、p005 の APST 1f22d22af8・2fd8d9f591（`pci-nvme-protocol.h`・`pci-nvme.c`、host 試験 `tests/host/nvme-apst-test.c`）、QEMU の image の config `tests/config-amd64-sleep.mk`。
 - 次: (1) Q1 の判断: p002 の canceled、p003・p005（APST）の cleared の可否。(2) ユーザーの判断 Q300-6 の後に p004 を main の上で作り直す（計算は header の inline、design §4.3）。Q300-2 の後に p005 の UAPI。

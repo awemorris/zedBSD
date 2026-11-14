@@ -4,7 +4,7 @@
 
 Phase ID: `ws300-p002`
 Parent: [WS300](../ws.md)
-Status: canceled の推し（2026-11-15 P5 q2114-i01、Q1 が確定: [BUG-424](../../bugs/BUG-424.md) の debec3781b・295eea4623 で main に入った形に置き換わった。この Phase の code は merge しない）
+Status: canceled（2026-11-15 Q1。BUG-424 で置き換わった）
 Phase disposition: replaced by BUG-424
 Queue: q1683-i01（P6、branch `agent/p6-ws300`、merge されず）
 

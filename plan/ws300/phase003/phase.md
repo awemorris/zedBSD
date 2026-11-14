@@ -4,7 +4,7 @@
 
 Phase ID: `ws300-p003`
 Parent: [WS300](../ws.md)
-Status: in-progress（2026-11-15 P5 q2114-i01: main の上で実装、build・host 試験・QEMU の回帰まで。5330 は p006。cleared は Q1）
+Status: cleared（2026-11-15 Q1、merge dbb0415a3f）
 Phase disposition: normal
 Queue: q2114-i01（P5）。以前: q1683-i01（P6、branch `agent/p6-ws300` の 83b998e5e、merge されず）
 
