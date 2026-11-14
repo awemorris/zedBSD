@@ -21,7 +21,7 @@ WS336 から移した（2026-11-15）。各 script は tree の root に移っ�
 ## QEMU の試験
 
 `qemu-interop.sh`（`qemu-helper.py`、image の config は `config-amd64-ssh.mk`）: `plan/tools/guest/test-image.sh` で
-x86_64 の image を作り（warning 0）、boot-test.sh で login prompt、guest の sshd に host の OpenSSH の ssh・scp・sftp
+x86_64 の image を作り（自前の source の warning 0）、boot-test.sh で login prompt、guest の sshd に host の OpenSSH の ssh・scp・sftp
 から（key・password・拒否・ControlMaster・-tt・RekeyLimit）、privilege separation（uid 22・/var/empty）、guest の ssh
 から host の OpenSSH sshd と自分へ、新しい image で sshd-start が host key を作る事。`QEMU_INTEROP_BUILD`（既定
-`build/ssh-interop`）、`QEMU_INTEROP_PARTS`。host に sshpass が要る。最後の行 `qemu-interop: PASS`。
+`build/ssh-interop`、新しい image は別の `<BUILD>-fresh`）、`QEMU_INTEROP_PARTS`。host に sshpass が要る。最後の行 `qemu-interop: PASS`。

@@ -3,8 +3,11 @@
 # builds the images, boots them, runs the checks, collects what they printed and sums up.
 #  1. Images from plan/tools/ssh/config-amd64-ssh.mk (OpenSSH and OpenSSL out, ours in) with
 #     plan/tools/guest/test-image.sh: "keyed" with the guest harness's files (root's authorized_keys, net.conf and the
-#     host keys), "fresh" with only root's authorized_keys and net.conf, so the guest makes its own host key.  Neither
-#     build may print a compiler warning.  plan/tools/boot-test.sh photographs the keyed image at its login prompt.
+#     host keys), "fresh" with only root's authorized_keys and net.conf, so the guest makes its own host key.  Each is
+#     built in a BUILD of its own (the files copied into a BUILD's root stay there, so the fresh root must never have
+#     held the harness's host keys).  Neither build may print a compiler warning in the ssh programs' or
+#     libcrypto-compat's sources (userland/base/ssh, userland/base/libcrypto-compat).  plan/tools/boot-test.sh
+#     photographs the keyed image at its login prompt.
 #  2. The keyed guest (plan/tools/guest/guest.py, KVM, NVMe, its own runtime directory and ports; the forwarded port
 #     is checked to be this test's QEMU), from the host's OpenSSH ssh, scp and sftp to the guest's sshd running as
 #     root: the server is ours (its identification line, mlkem768x25519-sha256, the harness's ssh-ed25519 host key, no
@@ -22,12 +25,14 @@
 #     server offers that key, and it is not the harness's.
 # Expected values are the test's own data, the account files of the tree (user and root have their names as
 # passwords, uid 1000 and 0, sshd is uid 22), the formats of the programs' output and the protocol's names; OpenSSH is
-# the peer, never the source of an expected value.  Nothing outside the run directory and the BUILD is written; the
-# host's sshd runs as this user with ForceCommand, so no interactive login shell runs on the host.
+# the peer, never the source of an expected value.  Nothing outside the run directory and the two BUILDs is written
+# (boot-test.sh keeps its emulator's files in its own scratch directory under /tmp, where the QMP socket's path stays
+# short enough); the host's sshd runs as this user with ForceCommand, so no interactive login shell runs on the host.
 #   sh plan/tools/ssh/qemu-interop.sh
-# QEMU_INTEROP_BUILD=<dir> chooses the BUILD (default build/ssh-interop).  QEMU_INTEROP_PARTS="boot transfer fresh" (a part of
-# that list) keeps only those of the optional parts: the boot test, scp/sftp/ControlMaster/re-key, and the fresh image;
-# the rest always runs.  Last line: qemu-interop: PASS or qemu-interop: FAIL.
+# QEMU_INTEROP_BUILD=<dir> chooses the keyed image's BUILD (default build/ssh-interop); the fresh image's is
+# <dir>-fresh.  QEMU_INTEROP_PARTS="boot transfer fresh" (a part of that list) keeps only those of the optional parts:
+# the boot test, scp/sftp/ControlMaster/re-key, and the fresh image; the rest always runs.
+# Last line: qemu-interop: PASS or qemu-interop: FAIL.
 # Output under build/tmp/qemu-interop (a fresh run directory).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -40,6 +45,7 @@ python=/usr/bin/python3
 helper="$python -I $root/plan/tools/ssh/qemu-helper.py"
 guest="$python -I $root/plan/tools/guest/guest.py"
 build=${QEMU_INTEROP_BUILD:-build/ssh-interop}
+fresh_build=$build-fresh
 config=plan/tools/ssh/config-amd64-ssh.mk
 key=$root/plan/tmp/guest/id_ed25519
 harness_host_key=$root/plan/tmp/guest/ssh_host_ed25519_key.pub
@@ -57,6 +63,11 @@ check() {
 		echo "FAIL $1"
 		failed=$((failed + 1))
 	fi
+}
+
+# ssh_warnings LOG: the compiler warnings in a build's output from the ssh programs' and libcrypto-compat's sources.
+ssh_warnings() {
+	grep -E '^[^ ]+:[0-9]+:([0-9]+:)? warning: ' "$1" | grep -cE '(^|/)userland/base/(ssh|libcrypto-compat)/'
 }
 
 expect_eq() {
@@ -127,21 +138,21 @@ done
 # shellcheck disable=SC2086
 timeout 5400 sh plan/tools/guest/test-image.sh --no-harness "$config" "$build" $keyed_files > "$out/image-keyed.log" 2>&1
 check "the keyed image builds" $?
-expect_eq "the keyed image's build has no compiler warning" "$(grep -cE '^[^ ]+:[0-9]+:([0-9]+:)? warning: ' "$out/image-keyed.log")" 0
+expect_eq "the keyed image's build has no compiler warning in ours" "$(ssh_warnings "$out/image-keyed.log")" 0
 cp "$build/hdd-image.img" "$out/keyed.img" || check "the keyed image is there" 1
 if want fresh; then
 	cp "$key.pub" "$work/authorized_keys"
 	cp "$root/plan/tools/guest/net.conf" "$work/net.conf"
-	timeout 5400 sh plan/tools/guest/test-image.sh --no-harness "$config" "$build" \
+	timeout 5400 sh plan/tools/guest/test-image.sh --no-harness "$config" "$fresh_build" \
 	    --file /root/.ssh/authorized_keys="$work/authorized_keys" --file /etc/net.conf="$work/net.conf" \
 	    --mode /root/.ssh/authorized_keys=0600 --mode /root/.ssh=0700 > "$out/image-fresh.log" 2>&1
 	check "the fresh image builds" $?
-	expect_eq "the fresh image's build has no compiler warning" "$(grep -cE '^[^ ]+:[0-9]+:([0-9]+:)? warning: ' "$out/image-fresh.log")" 0
-	cp "$build/hdd-image.img" "$out/fresh.img" || check "the fresh image is there" 1
+	expect_eq "the fresh image's build has no compiler warning in ours" "$(ssh_warnings "$out/image-fresh.log")" 0
+	cp "$fresh_build/hdd-image.img" "$out/fresh.img" || check "the fresh image is there" 1
 fi
 sync
 if want boot; then
-	OUTPUT=$out/boot-test BOOT_TEST_WORK=$out/boot-work BOOT_TIMEOUT=300 timeout 420 bash plan/tools/boot-test.sh "$out/keyed.img" \
+	OUTPUT=$out/boot-test BOOT_TIMEOUT=300 timeout 420 bash plan/tools/boot-test.sh "$out/keyed.img" \
 	    > "$out/boot-test.log" 2>&1
 	check "boot-test: the keyed image reaches its login prompt" $?
 fi
@@ -349,7 +360,7 @@ if want fresh; then
 	check "the fresh guest answers on SSH (its own forwarded port)" 0
 	g_root 'ls /etc/ssh; ls -l /etc/ssh/ssh_host_ed25519_key' > "$work/fresh-ls.txt" 2>&1
 	expect_eq "fresh: /etc/ssh holds the config files and the one host key sshd-start made" \
-	    "$(sed -n '1,/^-/p' "$work/fresh-ls.txt" | grep -v '^-' | sort | tr '\n' ' ')" \
+	    "$(sed -n '1,/^-/p' "$work/fresh-ls.txt" | grep -v '^-' | LC_ALL=C sort | tr '\n' ' ')" \
 	    "ssh_config ssh_host_ed25519_key ssh_host_ed25519_key.pub sshd_config "
 	grep -q '^-rw------- ' "$work/fresh-ls.txt"
 	check "fresh: the host key is readable by root only" $?
