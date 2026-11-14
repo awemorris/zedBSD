@@ -83,10 +83,12 @@ S="python3 -I plan/tools/guest/serial.py --socket $out/serial.sock --timeout 900
 $S expect 'login: ' > /dev/null || { echo "login: none" >> "$summary"; cat "$summary"; echo "p003-qemu: FAIL"; exit 1; }
 $S login > /dev/null
 
-# Reads the stress thread's report from the running kernel: 26 words.
+# Reads the stress thread's report from the running kernel: the 26 words of the memory dump's lines (gdb also
+# prints where it stopped the guest, a line without the colon after the address).
 read_report() {
 	timeout 120 gdb -batch -nx -ex "target remote 127.0.0.1:$gdb_port" -ex "x/26gx 0x$address" -ex detach \
-		< /dev/null 2> /dev/null | grep '^0x' | sed 's/^[^:]*:[[:space:]]*//' | tr -s ' \t' '\n' | grep '^0x'
+		< /dev/null 2> /dev/null | grep '^0x[0-9a-f]*:' | sed 's/^[^:]*:[[:space:]]*//' | tr -s ' \t' '\n' |
+		grep '^0x'
 }
 
 # Starts the hint stress programs in the background for the whole run.

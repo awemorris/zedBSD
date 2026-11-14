@@ -75,7 +75,22 @@ endif
 
 ## 進み
 
-（実装の後に書く）
+2026-11-14〜15 P6（q2099-i01、基点 main 991f37fe79。途中で main 7f7f0cc752・944a8c0cf3 を取り込んだ）。
+
+- **改名**（2026-11-14 ユーザーの決定、design.md の D-13）: `CONFIG_DTB` → `CONFIG_KERN_DESKTOP_BALANCER`、`include/kern/dtb.h`・`src/kern/dtb.c` → `desktop-balancer.h`・`desktop-balancer.c`、`kern_dtb_*` → `kern_desktop_balancer_*` ほか（commit bc8e51f9e3、Q1 の OK の後の git mv・git rm）。`plan/ws302/proposed/include/kern/` の古い 2 つの header は消し、design.md・design-review.md・phase001 の link を本物に直した。p002 の mk の案は新しい名前で main に当たった（04fabc3c96）。
+- `include/kern/sched-hint.h`: 段の範囲（`SCHED_HINT_LEVEL_HIGHEST` 8・`_LOWEST` 15）、`SCHED_HINT_USER_DEFAULT` 10、`SCHED_HINT_STARVE_MS` 100、`SCHED_HINT_CHOOSE_*`、関数 `sched_cpu_classes_set`・`sched_hint_set`・`sched_hint_place`・`sched_hint_counters`・`sched_hint_choose`・`sched_hint_queue_level`・`sched_hint_starve_level`、試験の `sched_hint_test_start`（n では宣言も無い）。
+- `src/kern/sched-hint.c`（新、balancer が y の時だけ）: 行き先の選び（MOVE・MOVE_IDLE_CORE・PLACE、兄弟が忙しい CPU は `sibling_rank` で比べる）と段の 2 つの純な関数。
+- `src/kern/sched.c`（全部 `#if CONFIG_KERN_DESKTOP_BALANCER`）:
+  - CPU ごとに手渡しの席（`handoff`・`handoff_target`・`handoff_retried`）と計数 8 つ。種類の表は 2 枚を交互に埋めて番号を release で公開する（読み手は lock 無し）。
+  - `queue_level_locked()`: `sched_add`・`sched_yield`・`sched_preempt`・`wake_enqueue_locked`・盗み（成功と失敗）・`sched_set_cpu`（2 か所）・`sched_hint_set`・hint の移動・手渡しの全部の queue に入れる所で、段を base に戻し、kernel の中なら 10 より下げない（`kernel_held` に数える）。上げ（`raised`）と手渡しの印（`move_pending`）もここで消える。
+  - `sched_prepare_thread`: 新しい user の thread は作り手の user の thread の hint と base を、作り手の CPU の lock の下で継ぐ（kernel の thread は継がない、review 第 3 版 M3）。作り手の CPU に backlog があれば PLACE の順で idle の CPU を選ぶ。
+  - tick: 頭で `complete_handoff`、待ちの先頭の user の thread の飢えの防ぎ（1 tick に 1 本）、backlog の助けは待ちの先頭の thread の種類の idle の CPU を先に、手渡しの印があれば `hint_handoff`。`sched_cpu_notify` も印を見る。
+  - 盗み: 種類の表がある時だけ `hint_take_stealable_locked`（同じ段の中で盗む CPU の種類を望む thread を先に、NO_OVERFLOW の thread は飢えの上限まで違う種類に渡さない）。表が無ければ今の `take_stealable_locked`。
+  - `hint_move`: `sched_set_cpu` と同じ順で、元の CPU の lock の中で状態を確かめ直す（RUNNABLE は RUN・WOKEN、SLEEPING は時間つき SLEEP と時間の無い NONE、FREE、`need_migrate == 0`）。`sched_set_cpu` そのものは変えない（D-5）。
+  - 手渡し `hint_handoff`・`complete_handoff`: 席は 1 つで上書きしない、後継（`sched_yield`・`sched_preempt`・`switch_without_enqueue`・`sched_exit_current` と手渡し自身の再開の後）か tick の頭が transfer、断られたら 1 回だけ次の tick で、2 回目は元の CPU に戻す。BOUND は手渡さない。
+- `src/kern/sched-hint-test.c`（新、試験の config の時だけ）と `src/kern/entry.c` の 1 か所（thermal の block の後で `sched_hint_test_start()`）。
+- design.md の §4.6.7 の確かめ直しの条件を実装に合わせた（時間の無い眠りの thread も移せる）。
+- 試験の道具: [../tests/balancer-host/](../tests/balancer-host/)（host 試験と突然変異）、[../tests/p003-build.sh](../tests/p003-build.sh)、[../tests/p003-boot.sh](../tests/p003-boot.sh)、[../tests/p003-qemu.sh](../tests/p003-qemu.sh)（30 分の stress）、[../tests/hintstress.c](../tests/hintstress.c)（guest の program）、[../tests/config-x86_64-balancer-stress.mk](../tests/config-x86_64-balancer-stress.mk)。
 
 ## 結果
 
