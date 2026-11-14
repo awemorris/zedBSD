@@ -74,6 +74,31 @@ static char text257[258];
 /* The state of the random generator. */
 static unsigned long random_state;
 
+static unsigned long random_next(void);
+static const uint8_t *hold(const uint8_t *data, size_t size);
+static int parse_request_of(const uint8_t *data, size_t size, struct ssh_auth_request *request);
+static int parse_request_wire(const struct wire *message, struct ssh_auth_request *request);
+static int request_is_zero(const struct ssh_auth_request *request);
+static void wire_request_head(struct wire *message, const char *user, const char *service, const char *method);
+static void wire_key_blob(struct wire *message, const uint8_t *key);
+static void wire_publickey_fields(struct wire *message, unsigned has_signature, const char *algorithm, const uint8_t *key);
+static void wire_signature(struct wire *message, uint8_t fill);
+static void wire_password_request(struct wire *message, const char *user, unsigned change, const char *password, const char *new_password);
+static void setup_keys(void);
+static void test_service_put(void);
+static void test_service_parse(void);
+static void test_request_put(void);
+static void test_signed(void);
+static void test_request_parse(void);
+static void test_request_names(void);
+static void test_failure_parse(void);
+static void test_pk_ok_parse(void);
+static void wire_banner(struct wire *message, const void *text, size_t size);
+static int banner_of(const void *text, size_t size, char *out);
+static void test_banner(void);
+static int fuzz_error_ok(int error, int third);
+static void test_fuzz(void);
+
 /* Returns the next value of a small deterministic generator (xorshift on 32 bits). */
 static unsigned long
 random_next(
@@ -94,16 +119,22 @@ hold(
 	const uint8_t *data,
 	size_t size)
 {
+	size_t allocation;
+
 	/* Frees the previous copy. */
 	free(held);
 
-	/* Copies the bytes into a block of exactly their size. */
-	held = malloc(size > 0 ? size : 1U);
+	/* Copies the bytes into a block of exactly their size, at least one byte so that an empty copy still has an address. */
+	allocation = size;
+	if (allocation == 0)
+		allocation = 1U;
+	held = malloc(allocation);
 	if (held == NULL) {
 		printf("FAIL: out of memory\n");
 		exit(2);
 	}
 
+	/* Copies the bytes, if there are any. */
 	if (size > 0)
 		memcpy(held, data, size);
 
@@ -239,6 +270,7 @@ setup_keys(
 	void)
 {
 	unsigned index;
+	uint8_t derived[SSH_ED25519_PUBLIC];
 
 	/* Reads the hexadecimal text. */
 	CHECK_EQ(wire_hex(t1_seed_hex, t1_seed, sizeof(t1_seed)), 32);
@@ -252,12 +284,8 @@ setup_keys(
 	t1_key.private = 1;
 
 	/* The module's own derivation agrees with the RFC's public key. */
-	{
-		uint8_t derived[SSH_ED25519_PUBLIC];
-
-		CHECK_EQ(ssh_ed25519_public(t1_seed, derived), 0);
-		CHECK_BYTES(derived, t1_public, sizeof(derived));
-	}
+	CHECK_EQ(ssh_ed25519_public(t1_seed, derived), 0);
+	CHECK_BYTES(derived, t1_public, sizeof(derived));
 
 	/* Makes the session identifier. */
 	for (index = 0; index < SSH_SHA256_SIZE; index++)
@@ -500,6 +528,7 @@ test_signed(
 	size_t head_size;
 	size_t bit;
 	int error;
+	struct ssh_key public_only;
 
 	/* Builds the expected head of the signed request: has_signature TRUE and the blob (RFC 4252 7). */
 	wire_request_head(&expected, "alice", "ssh-connection", "publickey");
@@ -607,17 +636,13 @@ test_signed(
 	ssh_buf_free(&out);
 
 	/* A key without a seed cannot sign: EINVAL, and nothing is appended. */
-	{
-		struct ssh_key public_only;
-
-		memset(&public_only, 0, sizeof(public_only));
-		memcpy(public_only.public_key, t1_public, 32);
-		ssh_buf_init(&out, 4096, 0);
-		error = ssh_auth_put_publickey_signed("alice", &public_only, session_id, &out);
-		CHECK_EQ(error, EINVAL);
-		CHECK_EQ(out.size, 0);
-		ssh_buf_free(&out);
-	}
+	memset(&public_only, 0, sizeof(public_only));
+	memcpy(public_only.public_key, t1_public, 32);
+	ssh_buf_init(&out, 4096, 0);
+	error = ssh_auth_put_publickey_signed("alice", &public_only, session_id, &out);
+	CHECK_EQ(error, EINVAL);
+	CHECK_EQ(out.size, 0);
+	ssh_buf_free(&out);
 
 	/* Missing arguments are EINVAL. */
 	ssh_buf_init(&out, 4096, 0);
@@ -663,6 +688,7 @@ test_request_parse(
 {
 	struct ssh_auth_request request;
 	int error;
+	size_t length;
 
 	/* "none": the user, the service, and nothing more. */
 	wire_request_head(&built, "alice", "ssh-connection", "none");
@@ -715,15 +741,11 @@ test_request_parse(
 	CHECK(request.signature == held + built.size - 83);
 
 	/* Every shorter prefix of the signed request is malformed, and the request is cleared. */
-	{
-		size_t length;
-
-		for (length = 0; length < built.size; length++) {
-			memset(&request, 0xaa, sizeof(request));
-			error = parse_request_of(built.data, length, &request);
-			CHECK_EQ(error, EINVAL);
-			CHECK(request_is_zero(&request));
-		}
+	for (length = 0; length < built.size; length++) {
+		memset(&request, 0xaa, sizeof(request));
+		error = parse_request_of(built.data, length, &request);
+		CHECK_EQ(error, EINVAL);
+		CHECK(request_is_zero(&request));
 	}
 
 	/* A byte after the signature is refused. */
@@ -877,12 +899,8 @@ test_request_parse(
 
 	/* Every shorter prefix of a change request is malformed. */
 	wire_password_request(&built, "carol", 1, "old", "new");
-	{
-		size_t length;
-
-		for (length = 0; length < built.size; length++)
-			CHECK_EQ(parse_request_of(built.data, length, &request), EINVAL);
-	}
+	for (length = 0; length < built.size; length++)
+		CHECK_EQ(parse_request_of(built.data, length, &request), EINVAL);
 }
 
 /* Tests the names, the unknown methods and the message number of a request. */
@@ -1147,6 +1165,7 @@ test_pk_ok_parse(
 	size_t length;
 	size_t bit;
 	int error;
+	uint8_t changed[32];
 
 	/* A reply for the key asked about is accepted. */
 	wire_reset(&built);
@@ -1172,8 +1191,6 @@ test_pk_ok_parse(
 
 	/* A reply that differs from the key in any one bit is EPROTO. */
 	for (bit = 0; bit < 256; bit++) {
-		uint8_t changed[32];
-
 		memcpy(changed, t1_public, 32);
 		changed[bit / 8] = (uint8_t)(changed[bit / 8] ^ (1U << (bit % 8)));
 		wire_reset(&built);
@@ -1502,6 +1519,12 @@ test_fuzz(
 	int mode;
 	int error;
 	int good;
+	int ok;
+	int same;
+	int zero;
+	unsigned long coin;
+	size_t text_length;
+	unsigned char byte;
 
 	/* Builds the valid messages the changes start from: none, query, signed form, password, change form, unknown. */
 	wire_request_head(&templates[0], "alice", "ssh-connection", "none");
@@ -1515,6 +1538,7 @@ test_fuzz(
 	wire_request_head(&templates[5], "alice", "ssh-connection", "hostbased");
 	wire_text(&templates[5], "ssh-rsa");
 
+	/* Starts the generator at a fixed state and counts nothing yet. */
 	random_state = 0x2545f491UL;
 	bad = 0;
 	accepted = 0;
@@ -1531,9 +1555,11 @@ test_fuzz(
 			message[position] = (uint8_t)(message[position] ^ (uint8_t)((random_next() & 0xffU) | 1U));
 		}
 
+		/* Modes 1 and 3 also cut the message short. */
 		if (mode == 1 || mode == 3)
 			size = (size_t)(random_next() % (size + 1U));
 
+		/* Parses the changed message into a request filled with a known byte. */
 		memset(&request, 0x5a, sizeof(request));
 		error = parse_request_of(message, size, &request);
 
@@ -1541,11 +1567,14 @@ test_fuzz(
 		good = fuzz_error_ok(error, 0);
 		if (error == 0) {
 			accepted++;
-			if (strlen(request.user) > SSH_USER_MAX)
+			text_length = strlen(request.user);
+			if (text_length > SSH_USER_MAX)
 				good = 0;
-			if (strlen(request.service) > SSH_NAME_MAX)
+			text_length = strlen(request.service);
+			if (text_length > SSH_NAME_MAX)
 				good = 0;
-			if (strlen(request.algorithm) > SSH_NAME_MAX)
+			text_length = strlen(request.algorithm);
+			if (text_length > SSH_NAME_MAX)
 				good = 0;
 			if (request.method == SSH_AUTH_PUBLICKEY) {
 				if (request.key_blob < held || request.key_blob_size > size)
@@ -1563,13 +1592,21 @@ test_fuzz(
 						good = 0;
 				}
 
-				if (request.supported != 0 && strcmp(request.algorithm, "ssh-ed25519") != 0)
+				/* A supported key must name the one algorithm the module supports. */
+				same = 0;
+				if (request.supported != 0)
+					same = strcmp(request.algorithm, "ssh-ed25519");
+				if (same != 0)
 					good = 0;
 			}
-		} else if (!request_is_zero(&request)) {
-			good = 0;
+		} else {
+			/* A refused message must leave the request cleared. */
+			zero = request_is_zero(&request);
+			if (!zero)
+				good = 0;
 		}
 
+		/* Counts a result that broke a rule. */
 		if (!good)
 			bad++;
 	}
@@ -1601,7 +1638,11 @@ test_fuzz(
 				message[0] = 50;
 		}
 
-		if (size > 4 && (random_next() & 1U) != 0) {
+		/* Half of the time that makes the field after the number a short length, so that the next fields are read. */
+		coin = 0;
+		if (size > 4)
+			coin = random_next() & 1U;
+		if (coin != 0) {
 			message[1] = 0;
 			message[2] = 0;
 			message[3] = 0;
@@ -1610,24 +1651,35 @@ test_fuzz(
 
 		/* Each parser returns one of its own values and stays inside its buffers. */
 		error = ssh_auth_parse_service(hold(message, size), size, text);
-		if (!fuzz_error_ok(error, EMSGSIZE))
+		ok = fuzz_error_ok(error, EMSGSIZE);
+		if (!ok)
 			bad++;
 		error = ssh_auth_parse_request(hold(message, size), size, &request);
-		if (!fuzz_error_ok(error, 0))
+		ok = fuzz_error_ok(error, 0);
+		if (!ok)
 			bad++;
 		error = ssh_auth_parse_failure(hold(message, size), size, methods, sizeof(methods), &partial);
-		if (!fuzz_error_ok(error, EMSGSIZE))
+		ok = fuzz_error_ok(error, EMSGSIZE);
+		if (!ok)
 			bad++;
 		error = ssh_auth_parse_pk_ok(hold(message, size), size, t1_public);
-		if (!fuzz_error_ok(error, EPROTO))
+		ok = fuzz_error_ok(error, EPROTO);
+		if (!ok)
 			bad++;
 		error = ssh_auth_parse_banner(hold(message, size), size, text, sizeof(text));
-		if (!fuzz_error_ok(error, 0))
+		ok = fuzz_error_ok(error, 0);
+		if (!ok)
 			bad++;
-		if (error == 0 && strlen(text) >= sizeof(text))
+
+		/* A banner that was accepted must be a terminated string that fits its buffer. */
+		text_length = 0;
+		if (error == 0)
+			text_length = strlen(text);
+		if (text_length >= sizeof(text))
 			bad++;
 	}
 
+	/* No parser gave a value of another kind. */
 	CHECK_EQ(bad, 0);
 
 	/* A banner of random bytes comes out with no control character but LF and TAB, and valid UTF-8 only. */
@@ -1643,9 +1695,8 @@ test_fuzz(
 			continue;
 		}
 
+		/* Looks at each byte of the banner that came out. */
 		for (index = 0; text[index] != '\0'; index++) {
-			unsigned char byte;
-
 			byte = (unsigned char)text[index];
 			if (byte < 0x20U && byte != 0x0aU && byte != 0x09U)
 				bad++;
@@ -1656,6 +1707,7 @@ test_fuzz(
 		}
 	}
 
+	/* No banner held a byte it must not hold. */
 	CHECK_EQ(bad, 0);
 }
 
