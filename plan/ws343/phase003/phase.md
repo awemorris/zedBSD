@@ -81,7 +81,7 @@
   - `https://example.com/`（577 byte）、`https://www.rfc-editor.org/rfc/rfc9110.txt`（502941 byte、chunked でない長さの body）、`http://www.rfc-editor.org/rfc/rfc8446.txt`（http→https の redirect、337736 byte）: guest の fetch の取得を host に写し、host の curl の取得と SHA-256 が一致。
   - `https://self-signed.badssl.com/`: `fetch: self-signed.badssl.com: TLS handshake failed: certificate verify failed: self-signed certificate`、exit 1。
   - guest の `/etc/ssl/cert.pem`（188900 byte）・`/lib/libssl-compat.so`・`/lib/libcrypto-compat.so` がある事、`/usr/lib/libcurl.so` が無い事（案 3）を `ls` で見た。
-- image は既定の x86_64 の config から firmware の package（*-firmware）だけを外した物（`config-amd64-fetch.mk`）。既定の config のままでは `plan/tools/guest/test-image.sh` が amd-navi-firmware の license の問いに答えられず止まった（`mk/platform-x86_64/firmware.mk` の `firmware-licenses` が空。この Queue の外、Q1 に報告）。image の build の log の `warning:` は 0。
+- image は既定の x86_64 の config から firmware の package（*-firmware）だけを外した物（`config-amd64-fetch.mk`）。既定の config のままでは `plan/tools/guest/test-image.sh` が amd-navi-firmware の license の問いに答えられず止まった（`mk/platform-x86_64/firmware.mk` の `firmware-licenses` が空。この Queue の外、Q1 に報告）。image の build の log の `warning:` は 4 行で、全部 fetch・compat の外（noct の `-Wunused-but-set-global` 3 つ、`hir_opt_simd.c`・`elback.c`・`scmback.c`、と gmake の jobserver の 1 つ）。fetch・libssl-compat・libcrypto-compat の warning は 0。
 - 実機は使っていない（未実施）。aarch64・riscv64 の QEMU は未実施（build だけ）。
 
 ## 残り
