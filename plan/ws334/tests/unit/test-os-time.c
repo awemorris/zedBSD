@@ -117,6 +117,8 @@ test_monotonic(
 			backwards++;
 		previous = now;
 	}
+
+	/* No read went back. */
 	CHECK_EQ(backwards, 0);
 
 	/* Some reads carry a part of a second, so the clock is not rounded to whole seconds. */
@@ -126,6 +128,8 @@ test_monotonic(
 		if (now % 1000000000ULL != 0)
 			fractions++;
 	}
+
+	/* Some read had a fraction. */
 	CHECK(fractions > 0);
 
 	/* A sleep of 100 ms shows as 90 ms to 2 s on the clock. */
@@ -183,6 +187,8 @@ test_wall(
 		if (wall % 1000000000LL != 0)
 			fractions++;
 	}
+
+	/* Some read had a fraction. */
 	CHECK(fractions > 0);
 
 	/* The clock is after 2020 (1577836800 is 2020-01-01 00:00 UTC), so it has the 1970 zero. */
@@ -313,11 +319,13 @@ test_posix_zones(
 	for (i = 0; i < sizeof(zone_cases) / sizeof(zone_cases[0]); i++) {
 		use_zone(zone_cases[i].zone);
 
+		/* The offset of the instant in the zone. */
 		offset = 1;
 		error = wb_os_local_offset(zone_cases[i].seconds, &offset);
 		CHECK_EQ(error, 0);
 		CHECK_EQ(offset, zone_cases[i].offset);
 
+		/* The abbreviation the zone has then. */
 		memset(buffer, 'X', sizeof(buffer));
 		error = wb_os_zone_name(zone_cases[i].seconds, buffer, sizeof(buffer));
 		CHECK_EQ(error, 0);
@@ -343,6 +351,7 @@ test_posix_clamp(
 	for (z = 0; z < sizeof(zones) / sizeof(zones[0]); z++) {
 		use_zone(zones[z]);
 
+		/* The first instant of the range. */
 		error = wb_os_local_offset(WB_OS_TIME_FIRST, &end_offset);
 		CHECK_EQ(error, 0);
 		error = wb_os_zone_name(WB_OS_TIME_FIRST, end_name, sizeof(end_name));
@@ -356,6 +365,7 @@ test_posix_clamp(
 			CHECK(strcmp(name, end_name) == 0);
 		}
 
+		/* The last instant of the range. */
 		error = wb_os_local_offset(WB_OS_TIME_LAST, &end_offset);
 		CHECK_EQ(error, 0);
 		error = wb_os_zone_name(WB_OS_TIME_LAST, end_name, sizeof(end_name));
@@ -417,6 +427,7 @@ test_posix_odd_names(
 	for (i = 0; i < sizeof(zones) / sizeof(zones[0]); i++) {
 		use_zone(zones[i]);
 
+		/* The system's own conversion of the instant 0. */
 		moment = 0;
 		memset(&library_time, 0, sizeof(library_time));
 		localtime_r(&moment, &library_time);
@@ -428,6 +439,7 @@ test_posix_odd_names(
 		if (length > WB_OS_ZONE_NAME_MAX)
 			expected[WB_OS_ZONE_NAME_MAX] = '\0';
 
+		/* The layer's abbreviation for the instant 0, cut to the buffer. */
 		memset(buffer, 'X', sizeof(buffer));
 		error = wb_os_zone_name(0, buffer, sizeof(buffer));
 		CHECK_EQ(error, 0);
@@ -531,11 +543,14 @@ month_days(
 	static const int days[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 	int leap;
 
+	/* February has 29 days in a leap year. */
 	if (month == 2) {
 		leap = leap_year(year);
 		if (leap)
 			return 29;
 	}
+
+	/* The days of the month. */
 	return days[month - 1];
 }
 
@@ -551,6 +566,7 @@ days_since_1970(
 	int m;
 	int leap;
 
+	/* Add the days of the whole years. */
 	days = 0;
 	for (y = 1970; y < year; y++) {
 		leap = leap_year(y);
@@ -559,6 +575,8 @@ days_since_1970(
 		else
 			days += 365;
 	}
+
+	/* Add the days of the whole months and of the days before the day. */
 	for (m = 1; m < month; m++)
 		days += month_days(year, m);
 	days += day - 1;
@@ -582,6 +600,7 @@ transition_seconds(
 	int day;
 	int length;
 
+	/* A date given by its day, or the day of the week of a month. */
 	if (rule->wYear != 0) {
 		day = rule->wDay;
 	} else {
@@ -597,6 +616,8 @@ transition_seconds(
 			day -= 7;
 		}
 	}
+
+	/* The seconds from 1970 to the transition. */
 	days = days_since_1970(year, rule->wMonth, day);
 	return days * 86400LL + rule->wHour * 3600LL + rule->wMinute * 60LL + rule->wSecond;
 }
@@ -616,6 +637,7 @@ rule_offset(
 	long daylight_offset;
 	int in_daylight;
 
+	/* The offsets east of UTC, from the biases. */
 	standard_offset = -(rules->Bias + rules->StandardBias) * 60L;
 	daylight_offset = -(rules->Bias + rules->DaylightBias) * 60L;
 
@@ -666,6 +688,7 @@ expected_offset(
 	/* The rules worked out by hand agree with the system's conversion. */
 	CHECK_EQ(rule_offset(&year_rules, utc.wYear, seconds), (filetime_ticks(&local) - filetime_ticks(&utc)) / 10000000LL);
 
+	/* The system's offset is the difference of its local and UTC times. */
 	return (long)((filetime_ticks(&local) - filetime_ticks(&utc)) / 10000000LL);
 }
 
@@ -718,6 +741,8 @@ test_windows_offsets(
 		CHECK_EQ(error, 0);
 		CHECK_EQ(outer, offset);
 	}
+
+	/* Instants above the range have the offset of the last one. */
 	error = wb_os_local_offset(WB_OS_TIME_LAST, &offset);
 	CHECK_EQ(error, 0);
 	for (i = 0; i < sizeof(outside_above) / sizeof(outside_above[0]); i++) {
@@ -776,6 +801,7 @@ test_windows_names(
 		offset = expected_offset(&dynamic, instant);
 		is_daylight = dynamic.DaylightBias != 0 && offset == daylight_offset;
 
+		/* The name the layer gives. */
 		memset(name, 'X', sizeof(name));
 		error = wb_os_zone_name(instant, name, sizeof(name));
 		CHECK_EQ(error, 0);
@@ -791,6 +817,8 @@ test_windows_names(
 				wanted = daylight;
 				other = standard;
 			}
+
+			/* Without a name of this kind the other kind's is used, and without any the name is UTC. */
 			if (wanted[0] == '\0')
 				wanted = other;
 			if (wanted[0] == '\0')
@@ -832,6 +860,7 @@ main(
 	is_win32 = strcmp(argv[1], "win32") == 0;
 	CHECK(is_win32 || strcmp(argv[1], "posix") == 0);
 
+	/* Run the groups of the system. */
 	test_monotonic();
 	test_wall();
 	test_errors();
@@ -841,5 +870,6 @@ main(
 	test_posix();
 #endif
 
+	/* Report the count of failures. */
 	return check_finish("os-time");
 }

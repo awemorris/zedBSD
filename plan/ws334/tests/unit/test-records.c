@@ -188,6 +188,8 @@ test_key_text(void)
 		CHECK(text[at + 1U] == expected[1]);
 		at += 2U;
 	}
+
+	/* The key of a hundred bytes is valid. */
 	CHECK(wb_storage_key_valid(text) == 1);
 
 	/* A hundred and one bytes are too long: the hash and the number 0. */
@@ -224,6 +226,7 @@ test_key_text(void)
 	CHECK_EQ(wb_storage_key_text("a", 0, 0, text), EINVAL);
 	CHECK_EQ(wb_storage_key_text("a", 1, 0, NULL), EINVAL);
 
+	/* Release the text. */
 	free(text);
 }
 
@@ -352,6 +355,7 @@ test_cookie_original_key(void)
 	CHECK_EQ(wb_storage_cookie_original_key(&first, &left), EINVAL);
 #endif
 
+	/* Release the buffers. */
 	wb_buffer_release(&left);
 	wb_buffer_release(&right);
 	wb_buffer_release(&expected);
@@ -592,6 +596,8 @@ test_cookie_errors(void)
 		CHECK_EQ(decode_cookie_copy(broken.data, broken.length), EINVAL);
 		wb_buffer_release(&broken);
 	}
+
+	/* A record that is empty or has the wrong magic is refused. */
 	CHECK_EQ(decode_cookie_copy(record.data, 0), EINVAL);
 	CHECK_EQ(decode_cookie_copy(NULL, 0), EINVAL);
 	CHECK_EQ(decode_cookie_copy("KEILAND CACHE 1\n", 16), EINVAL);
@@ -669,6 +675,7 @@ test_cookie_errors(void)
 	CHECK_EQ(wb_storage_cookie_decode(record.data, record.length, NULL, &original, &original_length), EINVAL);
 	CHECK_EQ(wb_storage_cookie_decode(record.data, record.length, &decoded, NULL, NULL), 0);
 
+	/* Release the record. */
 	wb_buffer_release(&record);
 }
 
@@ -849,6 +856,7 @@ test_cache(void)
 	CHECK_EQ(decode_cache_copy(broken.data, broken.length), EINVAL);
 	wb_buffer_release(&broken);
 
+	/* A broken record, built from the magic and the fields before the break. */
 	wb_buffer_init(&broken);
 	put_text(&broken, "KEILAND CACHE 1\n");
 	put_u32(&broken, 1);
@@ -862,6 +870,7 @@ test_cache(void)
 	CHECK_EQ(decode_cache_copy(broken.data, broken.length), EINVAL);
 	wb_buffer_release(&broken);
 
+	/* A broken record, built from the magic and the fields before the break. */
 	wb_buffer_init(&broken);
 	put_text(&broken, "KEILAND CACHE 1\n");
 	put_u32(&broken, 1);
@@ -895,6 +904,7 @@ test_cache(void)
 	CHECK(is_zero(&decoded, sizeof(decoded)) == 1);
 	CHECK_EQ(wb_storage_cache_decode(record.data, record.length, NULL), EINVAL);
 
+	/* Release the record. */
 	wb_buffer_release(&record);
 }
 
@@ -997,6 +1007,8 @@ test_local_v2(void)
 			else
 				items[index].value_length = 0U;
 		}
+
+		/* Encode the items. */
 		wb_buffer_init(&record);
 		error = wb_storage_local_encode("origin", 6, items, 1000, &record);
 		CHECK_EQ(error, 0);
@@ -1030,6 +1042,8 @@ test_local_v2(void)
 		free(copy);
 		wb_buffer_release(&record);
 	}
+
+	/* Release the items. */
 	free(items);
 	free(units);
 
@@ -1162,6 +1176,8 @@ test_local_errors(void)
 		else
 			CHECK_EQ(error, EINVAL);
 	}
+
+	/* Exactly the four item ends are good prefixes. */
 	CHECK_EQ(good_prefixes, 4);
 	for (index = 0; index < 4U; index++)
 		CHECK_EQ(decode_local_copy(record.data, item_ends[index]), 0);
@@ -1176,6 +1192,8 @@ test_local_errors(void)
 		if (error == 0)
 			good_prefixes++;
 	}
+
+	/* Exactly four prefixes decode. */
 	CHECK_EQ(good_prefixes, 4);
 	wb_buffer_release(&broken);
 
@@ -1216,6 +1234,7 @@ test_local_errors(void)
 	CHECK_EQ(decode_local_copy("KEILAND COOKIE 1\n", 17), EINVAL);
 	CHECK_EQ(wb_storage_local_decode(record.data, record.length, NULL, NULL, NULL, NULL), EINVAL);
 
+	/* Release the record. */
 	wb_buffer_release(&record);
 }
 
@@ -1227,6 +1246,7 @@ test_random(void)
 {
 	unsigned roll;
 
+	/* The magic texts that start the random records. */
 	static const char *const magics[] = {
 		"KEILAND COOKIE 1\n", "KEILAND CACHE 1\n",
 		"KEILAND LOCAL STORAGE 1\n", "KEILAND LOCAL STORAGE 2\n"
@@ -1258,10 +1278,14 @@ test_random(void)
 				if ((roll & 1U) != 0U)
 					byte = 0xffU;
 			}
+
+			/* Append the byte. */
 			error = wb_buffer_append_byte(&record, byte);
 			if (error != 0)
 				break;
 		}
+
+		/* The record was built. */
 		CHECK_EQ(error, 0);
 
 		/* All three decoders must end, with 0 or an error, and never read outside the record. */
@@ -1270,6 +1294,8 @@ test_random(void)
 		(void)decode_local_copy(record.data, record.length);
 		wb_buffer_release(&record);
 	}
+
+	/* Every record was tried. */
 	CHECK(count == RANDOM_RECORDS);
 }
 
@@ -1339,8 +1365,12 @@ test_mutation(void)
 			if (status == 0)
 				accepted++;
 		}
+
+		/* Put the byte back. */
 		cookie_record.data[index] = saved;
 	}
+
+	/* Change each byte of the cache record in turn. */
 	for (index = 0; index < cache_record.length; index++) {
 		saved = cache_record.data[index];
 		for (variant = 0; variant < 4U; variant++) {
@@ -1355,8 +1385,12 @@ test_mutation(void)
 			if (status == 0)
 				accepted++;
 		}
+
+		/* Put the byte back. */
 		cache_record.data[index] = saved;
 	}
+
+	/* Change each byte of the local record in turn. */
 	for (index = 0; index < local_record.length; index++) {
 		saved = local_record.data[index];
 		for (variant = 0; variant < 8U; variant++) {
@@ -1366,6 +1400,8 @@ test_mutation(void)
 			if (status == 0)
 				accepted++;
 		}
+
+		/* Put the byte back. */
 		local_record.data[index] = saved;
 	}
 
@@ -1376,6 +1412,7 @@ test_mutation(void)
 	CHECK(accepted > 0);
 	CHECK(accepted < 8U * (cookie_record.length + cache_record.length + local_record.length));
 
+	/* Release the records. */
 	wb_buffer_release(&cookie_record);
 	wb_buffer_release(&cache_record);
 	wb_buffer_release(&local_record);
@@ -1425,6 +1462,8 @@ test_sink(void)
 			error = browser_storage_sink_append(&other, chunk, 1U << 20);
 			CHECK_EQ(error, 0);
 		}
+
+		/* At the limit one more byte is refused with EFBIG. */
 		CHECK_EQ(other_buffer.length, WB_STORAGE_RECORD_MAX);
 		CHECK_EQ(wb_storage_sink_error(&other), 0);
 		CHECK_EQ(browser_storage_sink_append(&other, chunk, 1), EFBIG);
@@ -1436,6 +1475,8 @@ test_sink(void)
 		CHECK_EQ(other_buffer.length, WB_STORAGE_RECORD_MAX);
 		free(chunk);
 	}
+
+	/* Release the buffer. */
 	wb_buffer_release(&other_buffer);
 
 	/* The limit counts the record, not the bytes before it. */
@@ -1458,6 +1499,7 @@ test_sink(void)
 	CHECK_EQ(wb_storage_sink_error(&other), EFBIG);
 	CHECK_EQ(other_buffer.length, 0);
 
+	/* Release the buffers. */
 	wb_buffer_release(&other_buffer);
 	wb_buffer_release(&buffer);
 }
@@ -1482,6 +1524,8 @@ exact_copy(
 		CHECK(copy != NULL);
 		abort();
 	}
+
+	/* Copy the bytes. */
 	if (length != 0)
 		memcpy(copy, bytes, length);
 
@@ -1515,6 +1559,8 @@ decode_cookie_copy(
 		CHECK(original == NULL);
 		CHECK_EQ(original_length, 0);
 	}
+
+	/* Release the copy. */
 	free(copy);
 
 	/* Succeeded: the error, or 0. */
@@ -1597,6 +1643,8 @@ local_each(
 		for (index = 0; index < key_length && index < 8U; index++)
 			seen->first_key[index] = key[index];
 	}
+
+	/* Remember the last key. */
 	seen->last_key_length = key_length;
 	for (index = 0; index < key_length && index < 8U; index++)
 		seen->last_key[index] = key[index];

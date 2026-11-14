@@ -51,6 +51,7 @@ realpath(
 	char *made;
 	size_t index;
 
+	/* The full path, with the system's own call. */
 	made = _fullpath(full, path, sizeof(full));
 	if (made == NULL)
 		return NULL;
@@ -63,6 +64,8 @@ realpath(
 		if (full[index] == '\\')
 			resolved[index] = '/';
 	}
+
+	/* End the text. */
 	resolved[index] = '\0';
 	return resolved;
 }

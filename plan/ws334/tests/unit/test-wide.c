@@ -65,6 +65,7 @@ main(
 	CHECK(argc == 2);
 	(void)argv;
 
+	/* Run every group. */
 	test_to_utf8_basic();
 	test_to_utf8_surrogates();
 	test_to_utf8_limits();
@@ -78,6 +79,7 @@ main(
 	test_random_cut();
 	test_random_bytes();
 
+	/* Report the count of failures. */
 	return check_finish("wide");
 }
 
@@ -101,6 +103,7 @@ to_utf8(
 	if (units == NULL)
 		return keiui_win32_utf8_from_utf16(NULL, count, buffer, size, consumed);
 
+	/* Copy the units to a block of exactly their count, so that a read past it shows. */
 	allocation = count;
 	if (allocation == 0)
 		allocation = 1;
@@ -109,8 +112,10 @@ to_utf8(
 	if (count > 0)
 		memcpy(copy, units, count * sizeof(*copy));
 
+	/* Convert from the exact copy. */
 	error = keiui_win32_utf8_from_utf16(copy, count, buffer, size, consumed);
 
+	/* Release the copy. */
 	free(copy);
 	return error;
 }
@@ -134,6 +139,7 @@ to_utf16(
 	if (text == NULL)
 		return keiui_win32_utf16_from_utf8(NULL, length, units, capacity, count);
 
+	/* Copy the bytes to a block of exactly their length, so that a read past it shows. */
 	allocation = length;
 	if (allocation == 0)
 		allocation = 1;
@@ -142,8 +148,10 @@ to_utf16(
 	if (length > 0)
 		memcpy(copy, text, length);
 
+	/* Convert from the exact copy. */
 	error = keiui_win32_utf16_from_utf8(copy, length, units, capacity, count);
 
+	/* Release the copy. */
 	free(copy);
 	return error;
 }
@@ -252,6 +260,7 @@ test_to_utf8_surrogates(void)
 	int error;
 	static const uint16_t after[] = { 0xD83D, 0xDE00 };
 
+	/* A lone surrogate becomes U+FFFD, in each position. */
 	CHECK_TO_UTF8(lone_high_start, "\xEF\xBF\xBD" "A");
 	CHECK_TO_UTF8(lone_high_end, "A\xEF\xBF\xBD");
 	CHECK_TO_UTF8(lone_high_middle, "A\xEF\xBF\xBD" "B");
@@ -411,6 +420,7 @@ test_to_utf8_errors(void)
 	char buffer[4];
 	size_t used;
 
+	/* Fill the buffer with a mark. */
 	memset(buffer, 'x', sizeof(buffer));
 
 	/* A NULL buffer. */
@@ -458,6 +468,7 @@ test_to_utf16_basic(void)
 	size_t used;
 	int error;
 
+	/* Each text gives its units. */
 	CHECK_TO_UTF16("Hi", ascii);
 	CHECK_TO_UTF16("A\xC2\xA9\xE2\x82\xAC\xF0\x9F\x98\x80" "B", mixed);
 
@@ -614,6 +625,8 @@ test_to_utf16_limits(void)
 		CHECK_EQ(got[0], 0);
 		CHECK_EQ(got[1], 0x5555);
 	}
+
+	/* Fill the buffer with a mark. */
 	memset(got, 0x55, sizeof(got));
 	used = 99;
 	error = to_utf16("A\xF0\x9F\x98\x80" "B", 6, got, 5, &used);
@@ -676,6 +689,7 @@ test_to_utf16_errors(void)
 	uint16_t got[4];
 	size_t used;
 
+	/* Fill the buffer with a mark. */
 	memset(got, 0x55, sizeof(got));
 
 	/* NULL text with a length. */
@@ -703,6 +717,7 @@ test_char_unit(void)
 	uint32_t code_point;
 	int got;
 
+	/* Start from a fresh state. */
 	memset(&state, 0, sizeof(state));
 
 	/* A BMP unit is a character at once, including ASCII and the edges of the surrogate range. */
@@ -815,18 +830,22 @@ test_random_round_trip(void)
 		byte_count = 0;
 		characters = 1 + random_next() % 12;
 
+		/* Make a string of random scalar values. */
 		for (index = 0; index < characters; index++) {
 			code_point = random_scalar();
 
+			/* Encode it both ways. */
 			unit_count += encode_utf16(code_point, units + unit_count);
 			byte_count += encode_utf8(code_point, expected + byte_count);
 		}
 
+		/* UTF-16 to UTF-8 gives the expected bytes. */
 		CHECK_EQ(to_utf8(units, unit_count, buffer, sizeof(buffer), &used), 0);
 		CHECK_EQ(used, unit_count);
 		CHECK_EQ(strlen(buffer), byte_count);
 		CHECK(bytes_equal(buffer, expected, byte_count));
 
+		/* UTF-8 to UTF-16 gives back the units. */
 		CHECK_EQ(to_utf16(expected, byte_count, back, 40, &back_count), 0);
 		CHECK(utf16_equals(back, back_count, units, unit_count));
 		CHECK_EQ(back[back_count], 0);
@@ -860,18 +879,22 @@ test_random_cut(void)
 	int error;
 	int expected_error;
 
+	/* Each round cuts a random string at a random size. */
 	for (round = 0; round < RANDOM_CASES; round++) {
 		unit_count = 0;
 		byte_count = 0;
 		characters = 1 + random_next() % 8;
 
+		/* Make a string of random scalar values. */
 		for (index = 0; index < characters; index++) {
 			code_point = random_scalar();
 
+			/* Encode it both ways. */
 			unit_count += encode_utf16(code_point, units + unit_count);
 			byte_count += encode_utf8(code_point, whole + byte_count);
 		}
 
+		/* Convert into a buffer of a random size. */
 		size = 1 + random_next() % (byte_count + 3);
 		memset(buffer, 'x', sizeof(buffer));
 		used = 99;
@@ -888,6 +911,8 @@ test_random_cut(void)
 			} else {
 				code_point = units[boundary_units];
 			}
+
+			/* The size of the character at the boundary. */
 			one_bytes = encode_utf8(code_point, one_utf8);
 			one_units = encode_utf16(code_point, one_utf16);
 			if (boundary_bytes + one_bytes + 1 > size)
@@ -896,6 +921,7 @@ test_random_cut(void)
 			boundary_units += one_units;
 		}
 
+		/* A cut gives ERANGE unless everything fit. */
 		expected_error = ERANGE;
 		if (boundary_units == unit_count)
 			expected_error = 0;
@@ -919,6 +945,7 @@ test_random_bytes(void)
 {
 	unsigned roll;
 
+	/* The bytes that matter to the decoder. */
 	static const unsigned char interesting[] = {
 		0x00, 0x41, 0x7F, 0x80, 0x8F, 0x90, 0x9F, 0xA0, 0xBF, 0xC0, 0xC1, 0xC2, 0xDF,
 		0xE0, 0xE1, 0xEC, 0xED, 0xEE, 0xEF, 0xF0, 0xF1, 0xF3, 0xF4, 0xF5, 0xFF
@@ -936,9 +963,11 @@ test_random_bytes(void)
 	size_t zero_at;
 	int error;
 
+	/* Each round converts random bytes. */
 	for (round = 0; round < RANDOM_CASES; round++) {
 		length = random_next() % sizeof(bytes);
 
+		/* Fill the bytes with random values, taking the interesting ones often. */
 		for (index = 0; index < length; index++) {
 			roll = random_next();
 			if (roll % 4 == 0)
@@ -992,6 +1021,7 @@ well_formed_utf16(
 {
 	size_t index;
 
+	/* A unit string is valid when each surrogate has its partner. */
 	for (index = 0; index < count; index++) {
 		if (units[index] >= 0xD800 && units[index] <= 0xDBFF) {
 			if (index + 1 >= count)
@@ -1003,6 +1033,8 @@ well_formed_utf16(
 			return 0;
 		}
 	}
+
+	/* Every surrogate had its partner. */
 	return 1;
 }
 
@@ -1016,17 +1048,23 @@ encode_utf8(
 		out[0] = (char)code_point;
 		return 1;
 	}
+
+	/* Two bytes. */
 	if (code_point <= 0x7FF) {
 		out[0] = (char)(0xC0 | (code_point >> 6));
 		out[1] = (char)(0x80 | (code_point & 0x3F));
 		return 2;
 	}
+
+	/* Three bytes. */
 	if (code_point <= 0xFFFF) {
 		out[0] = (char)(0xE0 | (code_point >> 12));
 		out[1] = (char)(0x80 | ((code_point >> 6) & 0x3F));
 		out[2] = (char)(0x80 | (code_point & 0x3F));
 		return 3;
 	}
+
+	/* Four bytes. */
 	out[0] = (char)(0xF0 | (code_point >> 18));
 	out[1] = (char)(0x80 | ((code_point >> 12) & 0x3F));
 	out[2] = (char)(0x80 | ((code_point >> 6) & 0x3F));
@@ -1042,10 +1080,13 @@ encode_utf16(
 {
 	uint32_t v;
 
+	/* A unit of its own. */
 	if (code_point <= 0xFFFF) {
 		out[0] = (uint16_t)code_point;
 		return 1;
 	}
+
+	/* A surrogate pair. */
 	v = code_point - 0x10000;
 	out[0] = (uint16_t)(0xD800 + v / 0x400);
 	out[1] = (uint16_t)(0xDC00 + v % 0x400);
@@ -1072,6 +1113,7 @@ random_scalar(void)
 	};
 	uint32_t value;
 
+	/* An edge value, or a random scalar value. */
 	switch (random_next() % 5) {
 	case 0:
 		return edges[random_next() % (sizeof(edges) / sizeof(edges[0]))];
