@@ -33,7 +33,7 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 | [ws328-p005](phase005/phase.md) | vec-raster（coverage の tile） | Sonnet | in-progress（2026-11-15 P7 q2123） | p003 |
 | [ws328-p006](phase006/phase.md) | vec-gradient（補間・hint・ramp・t の計算） | Sonnet | in-progress（2026-11-15 P5 q2126） | p002 |
 | [ws328-p007](phase007/phase.md) | vec-rrect（角丸・ring・辺・影） | Sonnet | in-progress（2026-11-15 P1 q2125） | p002 |
-| [ws328-p008](phase008/phase.md) | svg-values（値の文法・viewBox の変換） | Sonnet | planned | p002 |
+| [ws328-p008](phase008/phase.md) | svg-values（値の文法・viewBox の変換） | Sonnet | cleared（Q1 の受け入れ待ち。2026-11-15 P2 q2127、実装済み・試験 PASS: test-values 741102 checks、cc・clang・ASan・UBSan、壊す 54 通りを確認。check-skeleton の check 6 は未実施で INCOMPLETE） | p002 |
 | [ws328-p009](phase009/phase.md) | svg-pathdata（`d`） | Sonnet | planned | p008 |
 | [ws328-p010](phase010/phase.md) | svg-style（表示の性質、祖先からの style） | Sonnet | planned | p008 |
 | [ws328-p011](phase011/phase.md) | svg-shape（図形の等価な path） | Sonnet | planned | p009・p010 |

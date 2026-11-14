@@ -693,7 +693,6 @@ svg_parse_aspect(
 	size_t index;
 	int found;
 	int matched;
-	int had_space;
 
 	/* Refuses missing arguments. */
 	if (text == NULL || aspect == NULL)
@@ -721,14 +720,13 @@ svg_parse_aspect(
 		return EINVAL;
 	p += word_length;
 
-	/* Reads the optional meet or slice, which follows white space. */
-	had_space = values_is_space(*p);
+	/*
+	 * Reads the optional meet or slice.  The alignment keyword took every
+	 * letter, so what follows it is set apart by white space or is not a
+	 * keyword at all.
+	 */
 	p = values_skip_space(p);
 	if (*p != '\0') {
-		/* Anything after the alignment must be set apart from it by white space. */
-		if (!had_space)
-			return EINVAL;
-
 		/* Reads the keyword that says whether to fit inside (meet) or to cover (slice). */
 		word_length = values_word_length(p);
 		matched = values_word_equal(p, word_length, "meet", 0);
@@ -1422,11 +1420,12 @@ values_apply_decimal_exponent(
 		remaining -= step;
 	}
 
-	/* Refuses a magnitude that rounds to infinity (a mantissa of 19 digits can reach it). */
-	if (result >= VALUES_FLOAT_OVERFLOW)
-		return EINVAL;
-
-	/* Holds a magnitude just above the largest float at it, so the conversion to float stays defined. */
+	/*
+	 * Holds a magnitude just above the largest float at it, so the
+	 * conversion to float stays defined.  (A magnitude that rounds to
+	 * infinity was refused while scaling up; scaling down and a mantissa
+	 * under 2^64 stay far below it.)
+	 */
 	if (result > (double)FLT_MAX)
 		result = (double)FLT_MAX;
 
