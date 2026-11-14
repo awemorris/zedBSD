@@ -1,0 +1,49 @@
+diff --git a/userland/base/package.mk b/userland/base/package.mk
+index 41b257960a..6c42b84cda 100644
+--- a/userland/base/package.mk
++++ b/userland/base/package.mk
+@@ -145,7 +145,7 @@ STANDALONE_PROGRAM_CFLAGS = \
+ 	$(STANDALONE_ARCH_CFLAGS) \
+ 	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
+ 	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
+-	-ffreestanding -fno-stack-protector -fPIC -Os
++	-ffreestanding -fno-stack-protector -fPIC -Os $(WARN_EXTRA_CFLAGS)
+ 
+ # A program's link: a PIE that loads /lib/libc.so through /lib/ld.so.
+ STANDALONE_PROGRAM_LDFLAGS = \
+@@ -162,7 +162,7 @@ STANDALONE_SHLIB_CFLAGS = \
+ 	$(STANDALONE_ARCH_CFLAGS) \
+ 	-fPIC \
+ 	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
+-	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I.
++	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. $(WARN_EXTRA_CFLAGS)
+ 
+ # A shared library's link.
+ STANDALONE_SHLIB_LDFLAGS = \
+@@ -172,6 +172,10 @@ STANDALONE_SHLIB_LDFLAGS = \
+ 	-Wl,--hash-style=both -Bsymbolic-functions \
+ 	-Wl,-z,now,-z,relro,-z,separate-code,-z,stack-size=0x100000
+ 
++# Measurement only: extra warnings and a compiler wrapper.
++WARN_EXTRA_CFLAGS ?= -Wall -Wextra
++WARN_CC_WRAP ?=
++
+ # A static library's objects take the caller's flags (the top-level build's).
+ STANDALONE_LIB_CFLAGS = \
+ 	$(CPPFLAGS) $(CFLAGS) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror \
+@@ -276,13 +280,13 @@ $(foreach req,$(5),$(if $(call standalone_makeable_so,$(req)),$(call STANDALONE_
+ $$(STANDALONE_OBJ_DIR_$(1))/%.o: $$(REPO_ROOT)/%.c $$(STANDALONE_FLAGS_STAMP_$(1)) | patch
+ 	$$(call standalone_log,CC,$$*.c)
+ 	$$(Q)mkdir -p "$$(@D)"
+-	$$(Q)$$(CC) $$(STANDALONE_CFLAGS_$(1)) -MMD -MP -c $$< -o $$@
++	$$(Q)$$(WARN_CC_WRAP) $$(CC) $$(STANDALONE_CFLAGS_$(1)) -MMD -MP -c $$< -o $$@
+ 
+ # A source given by its absolute path (one made outside the tree).
+ $$(STANDALONE_OBJ_DIR_$(1))/_abs/%.o: /%.c $$(STANDALONE_FLAGS_STAMP_$(1)) | patch
+ 	$$(call standalone_log,CC,/$$*.c)
+ 	$$(Q)mkdir -p "$$(@D)"
+-	$$(Q)$$(CC) $$(STANDALONE_CFLAGS_$(1)) -MMD -MP -c $$< -o $$@
++	$$(Q)$$(WARN_CC_WRAP) $$(CC) $$(STANDALONE_CFLAGS_$(1)) -MMD -MP -c $$< -o $$@
+ 
+ # The flags the objects were compiled with, replaced only when they change.
+ $$(STANDALONE_FLAGS_STAMP_$(1)): FORCE
