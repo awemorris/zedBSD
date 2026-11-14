@@ -358,15 +358,6 @@ shell_run(
 		return 1;
 	}
 
-	/* The diagnostic clock of the window's thread, when asked for. */
-	error = shell_latency_start(&state.latency, state.window.app);
-	if (error != 0) {
-		printf("ZBROWSER ERROR latency error=%d\n", error);
-		fflush(stdout);
-	}
-	if (state.latency.thread != NULL)
-		state.window.latency = &state.latency;
-
 	/* The question about a page that does not respond, in the desktop's language, placed in the window. */
 	shell_prompt_open(&state.prompt, options->fonts, kl_app_language(state.window.app));
 	shell_prompt_resize(&state.prompt, &state.render, state.width, state.height, shell_clock());
@@ -381,6 +372,20 @@ shell_run(
 	} else {
 		shell_show_titlebar(&state);
 	}
+
+	/*
+	 * The diagnostic clock of the window's thread, when asked for: from the
+	 * loop's start, so that it times the waits of the loop that takes the
+	 * events (the window's start-up before it, such as the question's fonts,
+	 * is not an event's wait).
+	 */
+	error = shell_latency_start(&state.latency, state.window.app);
+	if (error != 0) {
+		printf("ZBROWSER ERROR latency error=%d\n", error);
+		fflush(stdout);
+	}
+	if (state.latency.thread != NULL)
+		state.window.latency = &state.latency;
 
 	/* Takes the window's events and hands them to the view, until the window closes. */
 	shown_serial = 0;

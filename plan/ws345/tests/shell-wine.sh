@@ -14,7 +14,7 @@
 # Cases: busy (busy.html, a 30 s loop, the GPU), xhr (hung-xhr.html, a synchronous XMLHttpRequest to 192.0.2.1),
 # busy-cpu (busy.html with --no-gpu).
 # ws345-p014, the question about a page that does not respond (cases prompt and prompt-cpu, --no-gpu): spin.html's
-# timer script runs 15 s:
+# timer script runs 17 s:
 #  E. the question shows 8 to 13 s after "spin start" (PROMPT shown);
 #  F. its Stop script clicked (the button's place from the PROMPT shown line, under the title bar): PROMPT stop
 #     error=0, new "tick" lines in the 3 s after and no "spin end" (the page runs its timers again);

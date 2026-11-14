@@ -14,14 +14,14 @@
 #     shell/latency.c) has no wait over 100 ms.
 # Cases: busy (busy.html, a 30 s loop, GPU), xhr (hung-xhr.html, a synchronous XMLHttpRequest to 192.0.2.1, GPU),
 # busy-cpu (busy.html with --no-gpu).
-# ws345-p014, the question about a page that does not respond: spin.html's timer script runs 15 s ("spin start" ...
+# ws345-p014, the question about a page that does not respond: spin.html's timer script runs 17 s ("spin start" ...
 # "spin end"; "tick" lines every half second while no script runs):
-#  E. the question shows 8 to 13 s after "spin start" (PROMPT shown), and goes by itself when the script ends
+#  E. the question shows when the script has run 8 to 13 s (PROMPT shown's seconds=), and goes by itself when the script ends
 #     (PROMPT hidden reason=ended, then "spin end");
 #  F. after the titlebar's reload, the question again, and its Stop script clicked: PROMPT stop error=0, the question
 #     goes, no "spin end" comes and new "tick" lines do (the page runs its timers again);
 #  G. after a reload, the question again, and Enter (Wait): PROMPT wait, the question goes, and the script ends by
-#     itself ("spin end": 15 s, before a second question would come at 20 s);
+#     itself ("spin end": 17 s, before a second question would come at 20 s);
 #  and D as above.  Cases: prompt (GPU), prompt-cpu (--no-gpu).  SHELL_GUEST_CASES (default all) names the cases run.
 # Every step's screenshot (VNC of the Venus output, not the console) is in OUT.
 # The judgement uses the browser's and the compositor's logs read over SSH and the screenshots; never the serial
@@ -186,8 +186,10 @@ run_case() {
 	set -- $(last /tmp/zdesktop.log "KWL RESIZE settled surface=$surface " | sed -n 's/.* width=\([0-9]*\) height=\([0-9]*\).*/\1 \2/p')
 	size="${1:-0}x${2:-0}"
 	if [ "${1:-900}" != 900 ] && wait_more /tmp/b.log "ZBROWSER FRAME .* width=${1:-0} height=${2:-0}\$" 0 8; then
-		still=$(count /tmp/b.log "ZBROWSER CONSOLE level=0 $end")
-		if [ "${still:-0}" -le "${ends:-0}" ] 2>/dev/null; then
+		# The order in the browser's log decides (the polling here may read it seconds later): the first frame of the
+		# size comes before the script's first "end" line after the drag's start.
+		order=$(guest "awk -v n=$((ends + 0)) -v w='width=${1:-0} height=${2:-0}' '/ZBROWSER CONSOLE level=0 $end/ { e++; if (e > n && !ended) ended = NR } /ZBROWSER FRAME / && index(\$0, w) && !framed { framed = NR } END { print (framed && (!ended || framed < ended)) ? \"before\" : \"after\" }' /tmp/b.log" | tail -1)
+		if [ "$order" = before ]; then
 			result PASS "$name" resize "settled at $size, a frame of it within $(($(date +%s) - begin)) s, the script still running"
 		else
 			result FAIL "$name" resize "the frame of $size came after the script ended"
@@ -238,11 +240,15 @@ run_prompt() {
 	begin=$(date +%s)
 	pointer move $((wx + 100)) $((wy + 500)) sleep 300
 	if prompt_shown 0 16; then
+		# The script's running time when the question showed is the shell's own (seconds=, from the task's start in
+		# the view); the time seen here from the "spin start" line is only noted: the line may already have been in
+		# the log for some seconds when this test first read it (the session's start takes a few SSH round trips).
 		took=$(($(date +%s) - begin))
-		if [ "$took" -ge 8 ] && [ "$took" -le 13 ]; then
-			result PASS "$name" shown "the question $took s after 'spin start': $(echo "$shown" | cut -c1-150)"
+		ran=$(echo "$shown" | sed -n 's/.* seconds=\([0-9]*\) .*/\1/p')
+		if [ -n "$ran" ] && [ "$ran" -ge 8 ] && [ "$ran" -le 13 ]; then
+			result PASS "$name" shown "the question after the script ran $ran s (seen $took s after 'spin start' was read): $(echo "$shown" | cut -c1-150)"
 		else
-			result FAIL "$name" shown "the question $took s after 'spin start'"
+			result FAIL "$name" shown "the question after the script ran '$ran' s, $took s after 'spin start' was read"
 		fi
 	else
 		result FAIL "$name" shown "no PROMPT shown within 16 s of 'spin start'"
@@ -289,12 +295,13 @@ run_prompt() {
 	starts=$(count /tmp/b.log 'ZBROWSER CONSOLE level=0 spin start$')
 	shows=$(count /tmp/b.log 'ZBROWSER PROMPT shown ')
 	ends=$(count /tmp/b.log 'ZBROWSER CONSOLE level=0 spin end$')
+	waits=$(count /tmp/b.log 'ZBROWSER PROMPT wait ')
 	if ! reload; then
 		result FAIL "$name" wait "no reload control in the compositor's log"
 	elif ! wait_more /tmp/b.log 'ZBROWSER CONSOLE level=0 spin start$' "$starts" 10 || ! prompt_shown "$shows" 16; then
 		result FAIL "$name" wait "no new 'spin start' and question after the reload"
 	else
-		waits=$(count /tmp/b.log 'ZBROWSER PROMPT wait ')
+		# Enter at once: the question is up from the script's 10th second to its end at the 17th.
 		keys '<ret>'
 		if wait_more /tmp/b.log 'ZBROWSER PROMPT wait ' "$waits" 5 && wait_more /tmp/b.log 'ZBROWSER CONSOLE level=0 spin end$' "$ends" 10; then
 			again=$(count /tmp/b.log 'ZBROWSER PROMPT shown ')

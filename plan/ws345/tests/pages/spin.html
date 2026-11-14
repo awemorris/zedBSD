@@ -11,8 +11,8 @@ p { margin: 16px 24px; }
 </style>
 </head>
 <body>
-<h1>A page whose script runs for 15 seconds</h1>
-<p>A second after the load, a timer's script loops for 15 seconds without returning. After 10 seconds the
+<h1>A page whose script runs for 17 seconds</h1>
+<p>A second after the load, a timer's script loops for 17 seconds without returning. After 10 seconds the
 browser asks whether to wait for it or to stop it; a tick is written every half second while no script runs.</p>
 <div class="band"></div>
 <p id="state">The end of the page.</p>
@@ -23,7 +23,7 @@ setInterval(function () {
 	console.log("tick " + ticks);
 }, 500);
 setTimeout(function () {
-	var end = Date.now() + 15000;
+	var end = Date.now() + 17000;
 	console.log("spin start");
 	while (Date.now() < end) {
 	}
