@@ -148,8 +148,11 @@ posix_start(
 		return ENOMEM;
 	}
 	if (stack_size != 0) {
+#if defined(PTHREAD_STACK_MIN)
+		/* winpthreads names no least; the system rounds the size up itself there. */
 		if (stack_size < (size_t)PTHREAD_STACK_MIN)
 			stack_size = (size_t)PTHREAD_STACK_MIN;
+#endif
 		(void)pthread_attr_setstacksize(&attributes, stack_size);
 	}
 
