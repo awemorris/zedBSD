@@ -458,8 +458,8 @@ struct nvme_controller {
 
 	/*
 	 * suspended is set from the start of nvme_suspend() to the end of
-	 * nvme_resume() (ws052-p004): new block requests wait for it to
-	 * clear instead of failing.  The interrupt's capability and control
+	 * nvme_resume(): new block requests wait for it to clear instead of
+	 * failing.  The interrupt's capability and control
 	 * from before the suspend masked it are what the resume unmasks.
 	 */
 	unsigned suspended;
@@ -642,6 +642,7 @@ static int nvme_identify(struct nvme_controller *controller, uint32_t namespace_
 static void nvme_hmb_setup(struct nvme_controller *controller);
 static int nvme_hmb_enable(struct nvme_controller *controller, int recovery_command, int memory_return);
 static void nvme_hmb_reenable(struct nvme_controller *controller, int recovery_command);
+static int nvme_hmb_disable(struct nvme_controller *controller);
 static void nvme_hmb_free(struct nvme_controller *controller, struct drv_dma_device *dma);
 static int nvme_io_wait_locked(struct nvme_controller *controller, struct wait_queue *waitq, uint64_t deadline, unsigned long *irq);
 static int nvme_io_ensure_online(struct nvme_controller *controller);
@@ -2251,27 +2252,31 @@ nvme_shutdown(
 }
 
 /*
- * Suspends the controller for S0 idle (ws052-p004).
+ * Suspends the controller for S0 idle.
  *
  * New block requests wait from here on; the ones admitted already finish
- * first.  Then the interrupt is masked, the controller is shut down
- * normally (which writes its volatile cache back), disabled and taken off
- * the bus, and its I/O path is quiesced.  A controller busy with a probe,
- * a detach or a recovery, or quarantined, refuses with EBUSY.  On a
- * failure after the controller was touched it is started again, and the
- * failure is reported.
+ * first.  Then the Host Memory Buffer is taken back, the interrupt is
+ * masked, the controller is shut down normally (which writes its volatile
+ * cache back), disabled and taken off the bus, and its I/O path is
+ * quiesced.  A controller busy with a probe, a detach or a recovery, or
+ * quarantined, refuses with EBUSY.  On a failure after the controller was
+ * touched it is started again, and the failure is reported.  The log line
+ * of a suspend that succeeded says how long it took.
  */
 static int
 nvme_suspend(
 	struct drv_pci_device *device)
 {
 	struct nvme_controller *controller;
+	uint64_t started;
+	uint64_t elapsed_ms;
 	int error;
 
-	/* Finds the controller. */
+	/* Finds the controller, and notes when the suspend starts. */
 	controller = nvme_controller_of(device);
 	if (controller == NULL)
 		return ENODEV;
+	started = clock_ticks();
 
 	/* Stops admitting requests and waits for the admitted ones. */
 	error = nvme_suspend_wait_idle(controller);
@@ -2288,7 +2293,8 @@ nvme_suspend(
 	}
 
 	/* Succeeded: the controller is off until nvme_resume(). */
-	kern_logf("nvme: suspended\n");
+	elapsed_ms = kern_ticks_to_ms(clock_ticks() - started);
+	kern_logf("nvme: suspended in %llu ms\n", (unsigned long long)elapsed_ms);
 	return 0;
 }
 
@@ -2297,19 +2303,23 @@ nvme_suspend(
  * configuration back, so the controller is enabled again with fresh
  * queues, its interrupt unmasked, its I/O queue created, and the waiting
  * requests let in.  A controller that does not come back is quarantined
- * and its disk fails its requests.
+ * and its disk fails its requests.  The log line of a resume that
+ * succeeded says how long it took.
  */
 static int
 nvme_resume(
 	struct drv_pci_device *device)
 {
 	struct nvme_controller *controller;
+	uint64_t started;
+	uint64_t elapsed_ms;
 	int error;
 
-	/* Finds the controller. */
+	/* Finds the controller, and notes when the resume starts. */
 	controller = nvme_controller_of(device);
 	if (controller == NULL)
 		return ENODEV;
+	started = clock_ticks();
 
 	/* Starts the controller again, then lets the waiting requests in. */
 	error = nvme_resume_start(controller);
@@ -2320,7 +2330,8 @@ nvme_resume(
 	}
 
 	/* Succeeded: the controller takes requests again. */
-	kern_logf("nvme: resumed epoch=%u\n", controller->io_epoch);
+	elapsed_ms = kern_ticks_to_ms(clock_ticks() - started);
+	kern_logf("nvme: resumed epoch=%u in %llu ms\n", controller->io_epoch, (unsigned long long)elapsed_ms);
 	return 0;
 }
 
@@ -2405,15 +2416,24 @@ nvme_suspend_wait_idle(
 }
 
 /*
- * Stops an idle controller: masks its interrupt, shuts it down normally,
- * disables it, takes it off the bus, drains its interrupt and quiesces
- * its I/O path.
+ * Stops an idle controller: takes its Host Memory Buffer back, masks its
+ * interrupt, shuts it down normally, disables it, takes it off the bus,
+ * drains its interrupt and quiesces its I/O path.
  */
 static int
 nvme_suspend_stop(
 	struct nvme_controller *controller)
 {
 	int error;
+
+	/*
+	 * Takes the Host Memory Buffer back before the shutdown.  This comes
+	 * before the interrupt is masked: an admin command completes only
+	 * through the interrupt.
+	 */
+	error = nvme_hmb_disable(controller);
+	if (error != 0)
+		return error;
 
 	/* Masks the interrupt, keeping its control for the resume. */
 	error = nvme_runtime_irq_mask(controller, &controller->suspend_irq_capability, &controller->suspend_irq_control);
@@ -4571,6 +4591,59 @@ nvme_hmb_reenable(
 		error = nvme_hmb_enable(controller, recovery_command, 0);
 	if (error != 0)
 		kern_logf("nvme: host memory buffer not enabled again (%d)\n", error);
+}
+
+/*
+ * Takes the Host Memory Buffer back from a controller about to be shut
+ * down for a suspend, so that it does not use the memory past the
+ * shutdown.  The memory stays allocated and unchanged, for the resume to
+ * give back with Memory Return (nvme_hmb_reenable()).  A controller that
+ * refuses is shut down with the buffer, as before: the disable after the
+ * shutdown resets it, which ends its use of the buffer.  A command that
+ * goes unanswered leaves the buffer in the controller's hands and the
+ * admin queue faulted, and the suspend gives up.
+ *
+ * Procedure referenced: NVM Express Base Specification 2.0e, section 8.9
+ * (Host Memory Buffer: the host disables the buffer before a shutdown and
+ * returns it afterwards with Memory Return set); Set Features Feature
+ * Identifier 0Dh with Enable Host Memory (CDW11 bit 0) cleared.
+ */
+static int
+nvme_hmb_disable(
+	struct nvme_controller *controller)
+{
+	struct drv_nvme_command command;
+	int built;
+	int error;
+
+	/* Only a buffer the controller uses is taken back. */
+	if (controller->hmb_state != NVME_HMB_ENABLED)
+		return 0;
+
+	/* Builds the Set Features that clears Enable Host Memory. */
+	built = drv_nvme_set_hmb_command(&command, 0, 0, 0, 0, 0, 0);
+	if (!built)
+		return EINVAL;
+
+	/* Sends it. */
+	error = nvme_admin_execute_mode(controller, &command, NULL, 0);
+
+	/* An unanswered command leaves the buffer possibly in use until the controller is reset. */
+	if (error == ETIMEDOUT) {
+		controller->hmb_state = NVME_HMB_UNKNOWN;
+		kern_logf("nvme: host memory buffer not taken back (timed out)\n");
+		return error;
+	}
+
+	/* A refusal leaves the buffer to the shutdown and the disable after it. */
+	if (error != 0) {
+		kern_logf("nvme: host memory buffer not taken back (%d); shutting down with it\n", error);
+		return 0;
+	}
+
+	/* Succeeded: the controller no longer uses the buffer; the memory is kept. */
+	controller->hmb_state = NVME_HMB_READY;
+	return 0;
 }
 
 /*
