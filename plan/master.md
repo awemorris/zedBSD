@@ -28,14 +28,14 @@
 
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
-| P1 | q2125 | [WS328](ws328/ws.md) p007 vec-rrect（Sonnet）。WS338 p001 の設計は merge 済み（問い Q338-1〜3 はユーザーへ） |
+| P1 | — | 空き。WS338 p002 は p001 の独立レビューの後 |
 | agy | — | [WS347](ws347/ws.md) RTL の reset は 10 回目（amaterrace-gpu 38593b0e）まで。11 回目は Q1 が 10 回目を確かめてから |
-| P2 | q2127 | [WS328](ws328/ws.md) p008 svg-values（Sonnet）。p002〜p004 cleared |
-| P3 | q2115 | [WS345](ws345/ws.md) p015 headless の _OWN の道（p011 cleared） |
+| P2 | q2129 | [WS328](ws328/ws.md) p009 svg-pathdata（Sonnet）。p002〜p008 cleared |
+| P3 | q2131 | [WS345](ws345/ws.md) p012 規約の全文の見直し。p015 cleared |
 | P4 | q2116 | [WS068](ws068/ws.md)（EGL・GL を Vulkan の上に）試験の config と p045 |
-| P5 | q2126 | [WS328](ws328/ws.md) p006 vec-gradient（Sonnet）。WS339 p001 は merge 済み（受け入れの文はユーザーへ、p002 は 5330） |
+| P5 | q2132 | [WS322](ws322/ws.md)（VF2 の Vulkan Video）p008 encode の設計（Wave420L） |
 | P6 | q2109 | [WS302](ws302/ws.md) p003 の締め → p004 DTB の本体 |
-| P7 | q2123 | [WS328](ws328/ws.md) p005 vec-raster（Sonnet） |
+| P7 | q2130 | [WS328](ws328/ws.md) p010 svg-style（Sonnet） |
 | P8 | q2128 | [WS328](ws328/ws.md) p017 CSS の gradient の解析（Sonnet）。WS349 は p003 まで cleared、p004 は mk の枠（U1）の答え待ち |
 
 - host は 2026-11-14 19:30 頃に再起動。NVMe の書き込みは 1.0 GB/s に戻った（止めた時は 22 MB/s）。merge していない branch の diff は [backup-20261114/](backup-20261114/README.md)。
@@ -104,7 +104,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-438 · q2129 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
+BUG-438 · q2133 · WS354 · KL_VERSION 110（106 は BUG-396 の reload、107 は BUG-404 の題の帯、108 は BUG-413 の IPv6、109 は WS345 p013 の resize の hook）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q20 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

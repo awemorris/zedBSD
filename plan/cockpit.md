@@ -11,13 +11,13 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2125: p007 vec-rrect（Sonnet） | p008・p017 |
-| P2 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2127: p008 svg-values（Sonnet）。p002〜p004 cleared | p009・p010・p017 |
-| P3 | [WS345](ws345/ws.md) | ブラウザの thread の分け方 | q2115: p015 headless の _OWN の道（p011 cleared） | p012 規約の見直し → completed |
+| P1 | [WS338](ws338/ws.md) | H.264 の software の decoder を速く | 空き（WS328 p007 cleared）。p001 の独立レビュー待ち | p002 host の計測の道具 |
+| P2 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2129: p009 svg-pathdata（Sonnet）。p002〜p008 cleared | p011・p012 |
+| P3 | [WS345](ws345/ws.md) | browser の thread 化 | q2131: p012 規約の全文の見直し（p015 cleared） | WS345 の完了 |
 | P4 | [WS068](ws068/ws.md) | EGL・GL を Vulkan の上に | q2116: 試験の config と p045（Venus） | p047〜 |
-| P5 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2126: p006 vec-gradient（Sonnet） | p008・p017 |
+| P5 | [WS322](ws322/ws.md) | VF2 の Vulkan Video | q2132: p008 encode の設計（Wave420L） | p009 VF2 の bring-up |
 | P6 | [WS302](ws302/ws.md) | デスクトップスレッドバランサ | q2109: p003 の締め → p004 DTB の本体 | p005・p006（5330 の評価） |
-| P7 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2123: p005 vec-raster（Sonnet） | p006〜p008・p017 |
+| P7 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2130: p010 svg-style（Sonnet） | p011・p012 |
 | P8 | [WS328](ws328/ws.md) | libbrowser のベクトル描画と SVG | q2128: p017 CSS の gradient の解析（Sonnet）。WS349 は p003 まで cleared、p004 は U1 待ち | p009・p010 |
 | agy | [WS347](ws347/ws.md) | Amaterrace GPU（RTL） | reset の 10 回目（38593b0e）まで済み | Q1 が 10 回目を確かめて 11 回目 |
 | Q1 | — | — | main の checkout で merge・Queue・判断の振り分け | WS347 の 10 回目の確かめ |
