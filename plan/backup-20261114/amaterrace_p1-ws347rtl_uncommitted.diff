@@ -1,0 +1,288 @@
+diff --git a/rtl/gpu/cp/atg_cp.v b/rtl/gpu/cp/atg_cp.v
+index af518a55..689702fe 100644
+--- a/rtl/gpu/cp/atg_cp.v
++++ b/rtl/gpu/cp/atg_cp.v
+@@ -73,6 +73,12 @@ module atg_cp #(
+ 	parameter [31:0] WINDOW_BYTES = 32'd0,
+ 	parameter [31:0] HOST_LIMIT = 32'd0,
+ 	parameter HAS_PROT = 0,	/* session protection: the PROT capability is listed (atg_cp_prot) */
++	parameter HAS_BLT = 1,	/* the blitter (DEVICE_CAPS[29] and the blitter's features) */
++	parameter [7:0] NUM_SU = 8'd0,	/* shader units (DEVICE_CAPS[23:16]) */
++	parameter [7:0] PHYS_LANES = 8'd8,	/* physical lanes per SU (DEVICE_CAPS[15:8]) */
++	parameter [7:0] LDS_KB = 8'd0,	/* LDS KiB per SU (EXT_CAP_FEATURE[27:20]) */
++	parameter VA_BITS = 32,	/* GPU virtual address bits, 30..45 (EXT_CAP_FEATURE[3:0]) */
++	parameter PA_BITS = 40,	/* host physical address bits, 40..55 (EXT_CAP_FEATURE[7:4]) */
+ 	parameter SLIM_MMIO = 1	/* 1: GHCI 1.0 Slim 19 MMIO registers (0x00..0x48) */
+ ) (
+ 	input wire clk,
+@@ -228,6 +234,11 @@ module atg_cp #(
+ 	/* CAPS[8]: the TU filters bilinear; CAPS2[27:24]: its 16 texture slots / 4; CAPS2[7:0]: 3 queues. */
+ 	localparam [31:0] CAPS2 = {4'd0, UNITS[5] ? 4'd4 : 4'd0, 16'd0, 8'd3};
+ 	localparam [31:0] ISA = UNITS[6] ? 32'h47534931 : 32'd0;	/* "GSI1" */
++	/* EXT_CAP_FEATURE's address widths: VA_BITS - 30 and PA_BITS - 40. */
++	/* verilator lint_off WIDTHTRUNC */
++	localparam [3:0] VA_ENC = VA_BITS - 30;
++	localparam [3:0] PA_ENC = PA_BITS - 40;
++	/* verilator lint_on WIDTHTRUNC */
+ 	/* PERF always; CPFW with the CPU; DISP2, DBG, MEM, PROT and FMT when present (bit id - 1). */
+ 	localparam [10:0] XCAP = 11'h004 | (HAS_CPU != 0 ? 11'h020 : 11'h000) |
+ 		(HAS_DISP != 0 ? 11'h400 : 11'h000) | (HAS_DBG != 0 ? 11'h002 : 11'h000) |
+@@ -462,6 +473,13 @@ module atg_cp #(
+ 		.NREGS(NREGS), .LOCAL_BASE(LOCAL_BASE), .LOCAL_BYTES(LOCAL_BYTES),
+ 		.WINDOW_BYTES(WINDOW_BYTES),
+ 		.HOST_LIMIT(HOST_LIMIT),
++		.HAS_CPU(HAS_CPU != 0), .HAS_DISP(HAS_DISP != 0), .HAS_BLT(HAS_BLT != 0),
++		.HAS_PROT(HAS_PROT != 0), .HAS_RX(UNITS[3]), .HAS_TU(UNITS[5]), .HAS_ROP(UNITS[4]),
++		.HAS_ETC(UNITS[5] && HAS_ETC != 0), .NUM_SU(UNITS[6] ? NUM_SU : 8'd0),
++		.PHYS_LANES(PHYS_LANES), .PACKED(UNITS[6] && PACKED != 0),
++		.SUBGROUP(UNITS[6] && SUBGROUP != 0),
++		.MS4(MS4 != 0 && UNITS[2] && UNITS[3] && UNITS[4] && UNITS[5] && UNITS[6]),
++		.LDS_KB(LDS_KB), .VA_BITS_ENC(VA_ENC), .PA_BITS_ENC(PA_ENC),
+ 		.SLIM_MMIO(SLIM_MMIO)
+ 	) u_regs (
+ 		.clk(clk), .rst_n(rst_n),
+diff --git a/rtl/gpu/cp/atg_cp_regs.v b/rtl/gpu/cp/atg_cp_regs.v
+index c1d2e37e..95d08392 100644
+--- a/rtl/gpu/cp/atg_cp_regs.v
++++ b/rtl/gpu/cp/atg_cp_regs.v
+@@ -40,6 +40,11 @@
+ 
+ `include "atg_config.vh"
+ 
++/*
++ * The configuration's features (atg_config.vh), as the blocks that read
++ * them take them: a macro left undefined means what that block does
++ * without it.
++ */
+ `ifdef CFG_SU_NPHYS
+ `define ATG_DEF_PHYS_LANES ((`CFG_SU_NPHYS == 4) ? 8'd4 : (`CFG_SU_NPHYS == 8) ? 8'd8 : (`CFG_SU_NPHYS == 16) ? 8'd16 : 8'd32)
+ `else
+@@ -66,7 +71,7 @@
+ 
+ `ifdef CFG_ROP_DUAL_SOURCE
+ `define ATG_DEF_DUAL_SRC ((`CFG_ROP_DUAL_SOURCE != 0) ? 1'b1 : 1'b0)
+-`elsif defined(CFG_ENABLE_DUAL_SOURCE)
++`elsif CFG_ENABLE_DUAL_SOURCE
+ `define ATG_DEF_DUAL_SRC ((`CFG_ENABLE_DUAL_SOURCE != 0) ? 1'b1 : 1'b0)
+ `else
+ `define ATG_DEF_DUAL_SRC 1'b0
+@@ -102,15 +107,9 @@
+ `define ATG_DEF_MSAA 1'b0
+ `endif
+ 
+-`ifdef CFG_ENABLE_BC
+-`define ATG_DEF_BC ((`CFG_ENABLE_BC != 0) ? 1'b1 : 1'b0)
+-`else
+-`define ATG_DEF_BC 1'b0
+-`endif
+-
+ `ifdef CFG_ROP_ENABLE_LOGICOP
+ `define ATG_DEF_LOGICOP ((`CFG_ROP_ENABLE_LOGICOP != 0) ? 1'b1 : 1'b0)
+-`elsif defined(CFG_ENABLE_LOGICOP)
++`elsif CFG_ENABLE_LOGICOP
+ `define ATG_DEF_LOGICOP ((`CFG_ENABLE_LOGICOP != 0) ? 1'b1 : 1'b0)
+ `else
+ `define ATG_DEF_LOGICOP 1'b0
+@@ -122,12 +121,6 @@
+ `define ATG_DEF_EARLY_Z 1'b0
+ `endif
+ 
+-`ifdef CFG_DC_ENABLE_CURSOR
+-`define ATG_DEF_CURSOR ((`CFG_DC_ENABLE_CURSOR != 0) ? 1'b1 : 1'b0)
+-`else
+-`define ATG_DEF_CURSOR 1'b0
+-`endif
+-
+ `ifdef CFG_ROP_MRT_COUNT
+ `define ATG_DEF_MRT_COUNT ((`CFG_ROP_MRT_COUNT == 8) ? 4'd8 : (`CFG_ROP_MRT_COUNT == 4) ? 4'd4 : (`CFG_ROP_MRT_COUNT == 2) ? 4'd2 : 4'd1)
+ `else
+@@ -159,21 +152,21 @@
+ `endif
+ 
+ `ifdef CFG_BLT_ENABLE_SCALE
+-`define ATG_DEF_BLT_SCALE ((`ATG_DEF_HAS_BLT && (`CFG_BLT_ENABLE_SCALE != 0)) ? 1'b1 : 1'b0)
++`define ATG_DEF_BLT_SCALE ((`CFG_BLT_ENABLE_SCALE != 0) ? 1'b1 : 1'b0)
+ `else
+-`define ATG_DEF_BLT_SCALE `ATG_DEF_HAS_BLT
++`define ATG_DEF_BLT_SCALE 1'b1
+ `endif
+ 
+ `ifdef CFG_BLT_ENABLE_BLEND
+-`define ATG_DEF_BLT_BLEND ((`ATG_DEF_HAS_BLT && (`CFG_BLT_ENABLE_BLEND != 0)) ? 1'b1 : 1'b0)
++`define ATG_DEF_BLT_BLEND ((`CFG_BLT_ENABLE_BLEND != 0) ? 1'b1 : 1'b0)
+ `else
+-`define ATG_DEF_BLT_BLEND `ATG_DEF_HAS_BLT
++`define ATG_DEF_BLT_BLEND 1'b1
+ `endif
+ 
+ `ifdef CFG_BLT_ENABLE_TILE
+-`define ATG_DEF_BLT_TILE ((`ATG_DEF_HAS_BLT && (`CFG_BLT_ENABLE_TILE != 0)) ? 1'b1 : 1'b0)
++`define ATG_DEF_BLT_TILE ((`CFG_BLT_ENABLE_TILE != 0) ? 1'b1 : 1'b0)
+ `else
+-`define ATG_DEF_BLT_TILE `ATG_DEF_HAS_BLT
++`define ATG_DEF_BLT_TILE 1'b1
+ `endif
+ 
+ `ifdef CFG_TU_ENABLE_BILINEAR
+@@ -182,12 +175,47 @@
+ `define ATG_DEF_TU_BILINEAR 1'b1
+ `endif
+ 
+-`define ATG_DEF_DEVICE_CAPS { \
+-	`ATG_DEF_MSAA, 1'b1, `ATG_DEF_HAS_BLT, `ATG_DEF_MESH, `ATG_DEF_MESH, \
+-	1'b1, `ATG_DEF_TRILINEAR, `ATG_DEF_SA, \
+-	8'd1, `ATG_DEF_PHYS_LANES, \
+-	1'b1, `ATG_DEF_FP16, `ATG_DEF_DUAL_SRC, `ATG_DEF_RV32, `ATG_DEF_RV32, `ATG_DEF_HW_WALKER, 1'b0, 1'b0 \
+-}
++`ifdef CFG_TU_ENABLE_FFILT
++`define ATG_DEF_TEX_FFILT ((`CFG_TU_ENABLE_FFILT != 0) ? 1'b1 : 1'b0)
++`else
++`define ATG_DEF_TEX_FFILT 1'b1
++`endif
++
++`ifdef CFG_ROP_ENABLE_PACK
++`define ATG_DEF_ROP_PACK ((`CFG_ROP_ENABLE_PACK != 0) ? 1'b1 : 1'b0)
++`else
++`define ATG_DEF_ROP_PACK 1'b1
++`endif
++
++`ifdef CFG_FMT_ENABLE_SRGB
++`define ATG_DEF_SRGB ((`CFG_FMT_ENABLE_SRGB != 0) ? 1'b1 : 1'b0)
++`else
++`define ATG_DEF_SRGB 1'b0
++`endif
++
++`ifdef CFG_MC_ENABLE_PROT
++`define ATG_DEF_PROT ((`CFG_MC_ENABLE_PROT != 0) ? 1'b1 : 1'b0)
++`else
++`define ATG_DEF_PROT 1'b0
++`endif
++
++`ifdef CFG_SU_LDS_KB
++`define ATG_DEF_LDS_KB `CFG_SU_LDS_KB
++`else
++`define ATG_DEF_LDS_KB 4
++`endif
++
++`ifdef CFG_GPU_VA_BITS
++`define ATG_DEF_VA_BITS `CFG_GPU_VA_BITS
++`else
++`define ATG_DEF_VA_BITS 32
++`endif
++
++`ifdef CFG_HOST_PA_BITS
++`define ATG_DEF_PA_BITS `CFG_HOST_PA_BITS
++`else
++`define ATG_DEF_PA_BITS 40
++`endif
+ 
+ `define ATG_DEF_LANES_LOG2 ( \
+ 	(`ATG_DEF_PHYS_LANES == 8'd4)  ? 4'd2 : \
+@@ -202,13 +230,50 @@
+ 	1'b1, 1'b1, `ATG_DEF_LANES_LOG2, 1'b1, 1'b1, 1'b1, 1'b1 \
+ }
+ 
+-`define ATG_DEF_EXT_CAP_FMT0 { \
+-	13'd0, `ATG_DEF_BLT_TILE, `ATG_DEF_BLT_BLEND, `ATG_DEF_TU_BILINEAR, 9'd0, `ATG_DEF_BC, 1'b0, `ATG_DEF_BC, `ATG_DEF_BC, `ATG_DEF_BC, `ATG_DEF_BC, `ATG_DEF_BC \
++/*
++ * DEVICE_CAPS, EXT_CAP_FEATURE and EXT_CAP_FMT0 (docs/ghci.md sections
++ * 3.2.1 and 3.2.2) from the GPU's shape (the parameters below, which
++ * atg_cp sets from atg_top's) and the configuration's features.  They
++ * name the parameters of atg_cp_regs and are used in its parameter list.
++ *
++ * VA_BITS_ENC is VA_BITS - 30 (VA_BITS 30..45), PA_BITS_ENC is
++ * PA_BITS - 40 (40..55).  The MRT count (1, 2, 4 or 8) is that of the
++ * ROP; the ROP keeps a blend word per attachment, so the attachments
++ * blend independently when there are two or more.  The display has its
++ * cursor plane always and no colour lookup table.  The TU's ETC2/EAC
++ * decoder is in its floating-point path (atg_tu_ffront), and the TU has
++ * no BC decoder in its path: the BC bits read 0.
++ */
++`define ATG_CAPS_MRT ((HAS_ROP != 0) ? `ATG_DEF_MRT_COUNT : 4'd0)
++`define ATG_CAPS_FFILT (HAS_TU != 0 && `ATG_DEF_TEX_FFILT)
++`define ATG_CAPS_DUAL (HAS_ROP != 0 && `ATG_DEF_DUAL_SRC)
++`define ATG_CAPS_FP16 (NUM_SU != 8'd0 && PACKED != 0)
++
++`define ATG_DEF_DEVICE_CAPS { \
++	(MS4 != 0 && `ATG_DEF_MSAA), HAS_DISP != 0, HAS_BLT != 0, \
++	(NUM_SU != 8'd0 && `ATG_DEF_MESH), (NUM_SU != 8'd0 && `ATG_DEF_MESH), \
++	(HAS_ROP != 0 && `ATG_DEF_ROP_PACK), `ATG_CAPS_FFILT, HAS_PROT != 0, \
++	NUM_SU, ((NUM_SU != 8'd0) ? PHYS_LANES : 8'd0), \
++	1'b1, `ATG_CAPS_FP16, `ATG_CAPS_DUAL, HAS_CPU != 0, HAS_CPU != 0, \
++	`ATG_DEF_HW_WALKER, 1'b0, 1'b0 \
+ }
+ 
+ `define ATG_DEF_EXT_CAP_FEATURE { \
+-	`ATG_DEF_BLT_SCALE, `ATG_DEF_CLIP_POLY, 19'd0, `ATG_DEF_FAST_CLEAR, `ATG_DEF_COARSE_SCAN, `ATG_DEF_DUAL_SRC, `ATG_DEF_MRT_COUNT, \
+-	1'b1, `ATG_DEF_CURSOR, `ATG_DEF_EARLY_Z, `ATG_DEF_LOGICOP \
++	(HAS_BLT != 0 && `ATG_DEF_BLT_SCALE), (HAS_RX != 0 && `ATG_DEF_CLIP_POLY), \
++	(NUM_SU != 8'd0 && SUBGROUP != 0), `ATG_CAPS_FP16, \
++	((NUM_SU != 8'd0) ? LDS_KB : 8'd0), `ATG_CAPS_MRT, \
++	(HAS_ROP != 0 && `ATG_DEF_MRT_COUNT != 4'd1), 1'b0, HAS_DISP != 0, \
++	(HAS_RX != 0 && `ATG_DEF_EARLY_Z), (HAS_ROP != 0 && `ATG_DEF_LOGICOP), \
++	(HAS_ROP != 0 && `ATG_DEF_FAST_CLEAR), (HAS_RX != 0 && `ATG_DEF_COARSE_SCAN), \
++	`ATG_CAPS_DUAL, PA_BITS_ENC, VA_BITS_ENC \
++}
++
++`define ATG_DEF_EXT_CAP_FMT0 { \
++	13'd0, (HAS_BLT != 0 && `ATG_DEF_BLT_TILE), (HAS_BLT != 0 && `ATG_DEF_BLT_BLEND), \
++	(HAS_TU != 0 && `ATG_DEF_TU_BILINEAR), `ATG_CAPS_MRT, \
++	`ATG_CAPS_FFILT, `ATG_CAPS_FFILT, \
++	((HAS_TU != 0 || HAS_ROP != 0) && `ATG_DEF_SRGB), 1'b0, \
++	(HAS_ETC != 0 && `ATG_CAPS_FFILT), 7'd0 \
+ }
+ 
+ module atg_cp_regs #(
+@@ -224,7 +289,25 @@ module atg_cp_regs #(
+ 	parameter [31:0] LOCAL_BYTES = 32'd0,	/* MEM: bytes of local memory */
+ 	parameter [31:0] WINDOW_BYTES = 32'd0,	/* MEM: bytes the local window shows */
+ 	parameter [31:0] HOST_LIMIT = 32'd0,	/* MEM: host addresses below it (0: all) */
+-	parameter [31:0] DEVICE_CAPS = 32'd0,	/* 0: dynamic from config macros */
++	/* The GPU's shape for DEVICE_CAPS, EXT_CAP_FEATURE and EXT_CAP_FMT0 (atg_cp sets
++	 * them from atg_top's; alone, the configuration's). */
++	parameter HAS_CPU = `ATG_DEF_RV32,	/* the CP's firmware processor (indirect draws, secondary command buffers) */
++	parameter HAS_DISP = 0,	/* the display controller, with its cursor plane */
++	parameter HAS_BLT = `ATG_DEF_HAS_BLT,	/* the blitter */
++	parameter HAS_PROT = `ATG_DEF_PROT,	/* session protection */
++	parameter HAS_RX = 1,	/* the rasterizer */
++	parameter HAS_TU = 1,	/* the texture unit */
++	parameter HAS_ROP = 1,	/* the ROP */
++	parameter HAS_ETC = 1,	/* the TU's ETC2/EAC decoder */
++	parameter [7:0] NUM_SU = 8'd1,	/* shader units */
++	parameter [7:0] PHYS_LANES = `ATG_DEF_PHYS_LANES,	/* physical lanes per SU */
++	parameter PACKED = `ATG_DEF_FP16,	/* the SU's packed fp16/int16 arithmetic */
++	parameter SUBGROUP = `ATG_DEF_SUBGROUP,	/* the SU's shfl, vote and ballot */
++	parameter MS4 = `ATG_DEF_MSAA,	/* 4x multisampling in the ROP, TU, SU and BLT */
++	parameter [7:0] LDS_KB = `ATG_DEF_LDS_KB,	/* LDS KiB per SU */
++	parameter [3:0] VA_BITS_ENC = `ATG_DEF_VA_BITS - 30,	/* GPU virtual address bits - 30 */
++	parameter [3:0] PA_BITS_ENC = `ATG_DEF_PA_BITS - 40,	/* host physical address bits - 40 */
++	parameter [31:0] DEVICE_CAPS = `ATG_DEF_DEVICE_CAPS,
+ 	parameter CAPS = 32'h00500002,	/* CAPS value (design §2.2), set by atg_top from its parameters */
+ 	parameter CAPS2 = 32'h00000003,	/* CAPS2 value: [7:0] = 3 independent queues (Graphics, Compute, Copy/DMA) */
+ 	parameter [31:0] EXT_CAP_FMT0 = `ATG_DEF_EXT_CAP_FMT0,
+@@ -575,7 +658,7 @@ module atg_cp_regs #(
+ 		end
+ 	endfunction
+ 
+-	wire [31:0] eff_dev_caps = (DEVICE_CAPS != 32'd0) ? DEVICE_CAPS : `ATG_DEF_DEVICE_CAPS;
++	wire [31:0] eff_dev_caps = DEVICE_CAPS;
+ 	wire [31:0] eff_caps = (CAPS != 32'h00500002) ? CAPS : `ATG_DEF_CAPS;
+ 
+ 	reg [31:0] own;
+diff --git a/rtl/gpu/top/atg_top.v b/rtl/gpu/top/atg_top.v
+index 5cbc7dc8..b120e8ff 100644
+--- a/rtl/gpu/top/atg_top.v
++++ b/rtl/gpu/top/atg_top.v
+@@ -529,6 +529,12 @@ module atg_top #(
+ 		.HAS_FMT(CORE1),
+ 		.HAS_ETC(HAS_TU != 0),	/* the TU decodes ETC2 and EAC */
+ 		.HAS_PROT(PROT),
++		.HAS_BLT(HAS_BLT != 0),
++		.NUM_SU(NSU),
++		.PHYS_LANES(SU_NPHYS),
++		.LDS_KB(SU_LDS_BYTES / 1024),
++		.VA_BITS(VA_BITS),
++		.PA_BITS(PA_BITS),
+ 		.SLIM_MMIO(SLIM_MMIO)
+ 	) cp (
+ 		.clk(clk),

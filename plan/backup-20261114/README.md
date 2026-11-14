@@ -40,3 +40,4 @@
 | agent_p2-ws288-p006.diff | `agent/p2-ws288-p006` | 2f4777fcb9 | 1 |
 | agent_p1-ws353m.diff | `agent/p1-ws353m` | ac5b3993f7 | 1 |
 | worktree_ws197-media_uncommitted.diff | `codex/ws197-mms-media` の worktree の未 commit の変更（17 file） | 9dfebc99b9 | — |
+| amaterrace_p1-ws347rtl_uncommitted.diff | amaterrace-gpu の worktree `/home/awe/amaterrace-worktrees/p1-ws347rtl`（branch ws347-rtl）の未 commit の変更（3 file、2026-11-11 に止めた物） | 6949b2482e | — |
