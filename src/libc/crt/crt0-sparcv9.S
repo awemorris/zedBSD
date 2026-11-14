@@ -29,7 +29,8 @@ _start:
 	mov	%l2, %o1
 	call	main
 	 mov	%l3, %o2
-	call	_exit
+	/* exit runs the atexit handlers and flushes the streams; it does not return. */
+	call	exit
 	 nop
 1:
 	ba	1b

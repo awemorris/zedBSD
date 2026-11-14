@@ -22,8 +22,9 @@ _start:
 	leaq 8(%r12), %rsi
 	leaq 16(%r12,%rdi,8), %rdx
 	call main
+	/* exit runs the atexit handlers and flushes the streams; it does not return. */
 	movq %rax, %rdi
-	call _exit
+	call exit
 1:
 	pause
 	jmp 1b
