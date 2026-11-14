@@ -34,7 +34,7 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 | [ws328-p006](phase006/phase.md) | vec-gradient（補間・hint・ramp・t の計算） | Sonnet | cleared（2026-11-15 Q1、18eec6e3ce を main に merge。test-gradient 277264 checks、cc・clang・ASan・UBSan、check-skeleton PASS（check 6 込み）、壊す 42 通り中 40 FAIL・2 は等価） | p002 |
 | [ws328-p007](phase007/phase.md) | vec-rrect（角丸・ring・辺・影） | Sonnet | cleared（2026-11-15 Q1、2b93739794 を main に merge。test-rrect 419610 checks、cc・clang・ASan・UBSan、影は数値積分と最大差 0.0088、check-skeleton は Q1 が check 6 まで流す、壊す 34 通り全部 FAIL（4 は試験を足して）） | p002 |
 | [ws328-p008](phase008/phase.md) | svg-values（値の文法・viewBox の変換） | Sonnet | cleared（2026-11-15 Q1、0be12c1675 を main に merge。test-values 741102 checks、cc・clang・ASan・UBSan、check-skeleton は Q1 が check 6 まで流す、壊す 54 通り中 51 FAIL・残り 3 は試験の追加と死んだ確認の削除で処理） | p002 |
-| [ws328-p009](phase009/phase.md) | svg-pathdata（`d`） | Sonnet | cleared（Q1 の受け入れ待ち。2026-11-15 P2 q2129、実装済み・試験 PASS: test-pathdata 391002 checks、cc・clang・ASan・UBSan、check-skeleton PASS（check 6 込み）、壊す 71 通り全て FAIL） | p008 |
+| [ws328-p009](phase009/phase.md) | svg-pathdata（`d`） | Sonnet | cleared（2026-11-15 Q1、2212348440 を main に merge。test-pathdata 391002 checks、cc・clang・ASan・UBSan、check-skeleton PASS、壊す 71 通り全部 FAIL） | p008 |
 | [ws328-p010](phase010/phase.md) | svg-style（表示の性質、祖先からの style） | Sonnet | in-progress（2026-11-15 P7 q2130） | p008 |
 | [ws328-p011](phase011/phase.md) | svg-shape（図形の等価な path） | Sonnet | planned | p009・p010 |
 | [ws328-p012](phase012/phase.md) | svg-pserver（gradient の要素） | Sonnet | planned | p006・p010 |
@@ -59,6 +59,8 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 Phase の番号はレビューで分けた物に新しい番号（p024〜p029）を付けたので表の順と違う。GPU の側（p020 → p026 → p027）を CSS・SVG の切り替えより先に main に入れる（design.md §11）。
 
 ## Resume point
+
+- 2026-11-15 04:0x Q1: p009・p017 cleared。p009 の弧の rx・ry・回転は符号を受ける（SVG 2 §9.3.9 の EBNF は符号なしだが、§9.5.1 の負の半径の扱いと §9.3.8 の例 arcs01 が符号付きを前提にしており、EBNF の誤りと判断）。p017 の linear の px の stop に zoom を掛ける直し（他の length と同じ扱い）を採った。
 
 - 2026-11-15 03:3x Q1: p005〜p008 cleared。Q1 が main（62f2d0737d）で run-unit all と check-skeleton（check 6 込み）を流して PASS。p008 の数・transform の書き方は仕様を文字どおり（`5.` は誤り、transform の関数の間は comma-wsp が要る。CSS Transforms 1 §7.2 の文法と同じ）を Q1 が確かめて採った。p006 の所見（焦点の半径 0 の放射で中心の点が塗られない）は p018 で決める。p018 以後は U1〜U5 の答えの後。
 

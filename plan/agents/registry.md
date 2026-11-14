@@ -4,17 +4,17 @@
 [history/agents-registry-through-20261026.md](../history/agents-registry-through-20261026.md)。
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P2 | phase-runner-low | ws328 p009 svg-pathdata (q2129-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p009` / `agent/p2-ws328p009` | 動いている（2026-11-15 03:3x） | — |
+| P2 | — | 空き（q2129 cleared、WS328 p011・p012 は p010 の後） | — | 空き（2026-11-15 04:0x） | — |
 | P7 | phase-runner-low | ws328 p010 svg-style (q2130-i01) | `/home/awe/zedBSD-worktrees/p7-ws328p010` / `agent/p7-ws328p010` | 動いている（2026-11-15 03:3x） | — |
-| P8 | phase-runner-low | ws328 p017 CSS の gradient の解析 (q2128-i01) | `/home/awe/zedBSD-worktrees/p8-ws328p017` / `agent/p8-ws328p017` | 動いている（2026-11-15 03:0x） | — |
+| P8 | — | 空き（q2128 cleared） | — | 空き（2026-11-15 04:0x） | — |
 | P5 | phase-runner | ws322 p008 encode の設計 (q2132-i01) | `/home/awe/zedBSD-worktrees/p5-ws322p008` / `agent/p5-ws322p008` | 動いている（2026-11-15 03:3x） | — |
 | P6 | phase-runner-high | ws302 p003 の締めと p004 (q2109-i01) | `/home/awe/zedBSD-worktrees/p6-ws302c` / `agent/p6-ws302c` | 動いている（2026-11-15 01:1x） | — |
-| P3 | conformance-reviewer | ws345 p012 規約の見直し (q2131-i01) | `/home/awe/zedBSD-worktrees/p3-ws345p012` / `agent/p3-ws345p012` | 動いている（2026-11-15 03:3x） | — |
+| P3 | — | 空き（q2131 cleared） | — | 空き（2026-11-15 04:0x） | — |
 | P4 | phase-runner-mid | ws068 試験の config と p045 (q2116-i01) | `/home/awe/zedBSD-worktrees/p4-ws068` / `agent/p4-ws068` | 動いている（2026-11-15 01:5x） | — |
-| P1 | — | 空き（q2125 cleared、WS338 p002 は設計の独立レビューの後） | — | 空き（2026-11-15 03:3x） | — |
+| P1 | kernel-and-driver-designer | ws325 p001 設計 (q2133-i01) | `/home/awe/zedBSD-worktrees/p1-ws325` / `agent/p1-ws325` | 動いている（2026-11-15 04:0x） | — |
 | Sonnet | phase-runner-low | ws335 p043 (q2053-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p043` / `agent/s-ws335-p043` | 動いている（2026-11-13 22:3x） | — |
-| P1 | — | 空き（q2125 cleared、WS338 p002 は設計の独立レビューの後） | — | 空き（2026-11-15 03:3x） | — |
-| P2 | phase-runner-low | ws328 p009 svg-pathdata (q2129-i01) | `/home/awe/zedBSD-worktrees/p2-ws328p009` / `agent/p2-ws328p009` | 動いている（2026-11-15 03:3x） | — |
+| P1 | kernel-and-driver-designer | ws325 p001 設計 (q2133-i01) | `/home/awe/zedBSD-worktrees/p1-ws325` / `agent/p1-ws325` | 動いている（2026-11-15 04:0x） | — |
+| P2 | — | 空き（q2129 cleared、WS328 p011・p012 は p010 の後） | — | 空き（2026-11-15 04:0x） | — |
 
 - 2026-11-01 20:20 の割り振り（ユーザーの指示）: P1 は RTX、P2 は VF2、P3 は Pi 5 の作業（どれも WS291 の描画の速さ、Q1 が選んだ）。Bug の修正は P4。
 - 実機: 10.0.10.3（RTX 2070、SwitchBot 1 AC276E42B252）は P1、VF2（10.0.30.2、SwitchBot 3 AC276E432AE6）は P2、Pi 5（10.0.30.7、SwitchBot 2 14C19FA80F86）は P3 → 2026-11-02 02:23 から P7（BUG-394 の計測）。P4 の BUG-387 の実機の試験は、Q1 が P2・P3 から窓を取って渡す。
