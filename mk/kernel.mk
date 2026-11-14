@@ -316,7 +316,7 @@ endif
 ifneq ($(filter y,$(CONFIG_DRIVER_NE2000)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_NE2000=1
 KERN_SOURCES += \
-	src/drivers/pci/ne2000.c
+	src/drivers/isa/ne2000.c
 endif
 
 # [PC-98 LGY98 C-BUS Ethernet driver]
