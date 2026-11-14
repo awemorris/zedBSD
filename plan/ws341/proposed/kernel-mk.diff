@@ -1,0 +1,62 @@
+Proposal only (ws341-p001). Makefile and mk/ are not changed by agents; this diff waits for the
+user's approval (plan/ws341/user-questions.md, question 6).  Line positions are against main 44bb7cdaac;
+the source file list follows the design (src/drivers/gpu/vgpu/) and may change with p004.
+
+--- a/mk/config.mk
++++ b/mk/config.mk
+@@ (after the [Venus GPU Driver] block)
+ CONFIG_DRIVER_PCI_VENUS           ?= n
+
++# [Virtual display driver (/dev/vgpu)]
++#  - Depends: CONFIG_DRIVER_GPU
++CONFIG_DRIVER_VGPU                ?= n
++
+ ########################
+ # Legacy 2D Drivers
+ ########################
+--- a/mk/kernel.mk
++++ b/mk/kernel.mk
+@@ (after the [Venus GPU Driver] block)
+ 	src/drivers/gpu/venus/share.c
+ endif
+
++# [Virtual display driver]
++ifneq ($(filter y,$(CONFIG_DRIVER_VGPU)),)
++KERN_CPPFLAGS += -DCONFIG_DRIVER_VGPU=1
++KERN_SOURCES += \
++	src/drivers/gpu/vgpu/vgpu.c \
++	src/drivers/gpu/vgpu/display.c \
++	src/drivers/gpu/vgpu/frame.c
++endif
++
+ # [Boot Linear Framebuffer driver]
+--- a/mk/platform-x86_64/defaults.mk
++++ b/mk/platform-x86_64/defaults.mk
+@@
+ CONFIG_DRIVER_PCI_VENUS           := y
++CONFIG_DRIVER_VGPU                := y
+ CONFIG_DRIVER_AUDIO               := y
+--- a/mk/platform-rpi4/defaults.mk, mk/platform-rpi5/defaults.mk, mk/platform-vf2/defaults.mk
++++ (each, next to its CONFIG_DRIVER_GPU line)
++CONFIG_DRIVER_VGPU                := y
+--- a/config/drivers/generic.drivers
++++ b/config/drivers/generic.drivers
+@@
+ -|fixed|Loop block device|*|y|
++CONFIG_DRIVER_VGPU|bool|Virtual display for remote screens (/dev/vgpu)|amd64,rpi4,rpi5,visionfive2|y|
+--- a/config/drivers/menu.list
++++ b/config/drivers/menu.list
+@@
+-GPU|CONFIG_DRIVER_PCI_VENUS CONFIG_DRIVER_PCI_I915 CONFIG_DRIVER_PCI_NVRTX CONFIG_DRIVER_PCI_AMDRDNA CONFIG_DRIVER_PCI_GHCI
++GPU|CONFIG_DRIVER_PCI_VENUS CONFIG_DRIVER_PCI_I915 CONFIG_DRIVER_PCI_NVRTX CONFIG_DRIVER_PCI_AMDRDNA CONFIG_DRIVER_PCI_GHCI CONFIG_DRIVER_VGPU
+
+Notes:
+- The three important platforms (x86_64, arm64, riscv64) default to y, so that every change is
+  build-checked on them and the QEMU (Venus) images carry the driver for p005 and p009.  Question 4
+  asks whether the user's builds should carry it by default.
+- Not in this diff, also needing approval before their phases: the Makefiles of the userland test
+  programs and the tool (userland/tests/vgpu-loop, the Vulkan compositor stand-in, vgpu-capture),
+  proposed in p005 and p009 in the same form as the existing userland/tests/*/Makefile.
+- The driver registers its display node only after a render node exists (design §3.1), so a kernel
+  with the driver and no GPU has no extra /dev/gpuN.
+- The device number of /dev/vgpu is chosen in p004a (not a make variable).
