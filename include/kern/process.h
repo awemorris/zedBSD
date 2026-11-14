@@ -17,7 +17,7 @@
 #include <uapi/signal.h>
 #include <kern/signal.h>
 #include <kern/atomic.h>
-#include <kern/dtb.h>
+#include <kern/desktop-balancer.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
 #include <kern/resource-limit.h>
@@ -196,12 +196,12 @@ struct process {
 	 */
 	struct sandbox *sandbox;
 
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 	/*
 	 * When the process last put work on a GPU or an image on a display,
 	 * for the balancer.  Zero in a new process, a child included.
 	 */
-	struct dtb_process_activity dtb_activity;
+	struct desktop_balancer_activity desktop_balancer;
 #endif
 };
 

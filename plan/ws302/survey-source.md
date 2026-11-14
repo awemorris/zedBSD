@@ -7,7 +7,7 @@ Parent: [WS302](ws.md)。q1666 の P5 の配下の調べ（Opus、調べだけ�
 
 ## 0. ws.md の食い違い（Q1 へ）
 
-- ws.md:21 のユーザーの決定「nice は core の選択に加えて sched の priority にも効かせる」「CONFIG_DTB の既定は off」と、:45「含まない: nice を sched の priority に効かせる事（D3）」・:93 の D1・:95 の D3 の判断待ち・:64「既定は p001 の後に決める」が食い違う。原文（:21）が正のはず。直しは p001 の版で行う（Q1 の確かめの後）。
+- ws.md:21 のユーザーの決定「nice は core の選択に加えて sched の priority にも効かせる」「CONFIG_KERN_DESKTOP_BALANCER の既定は off」と、:45「含まない: nice を sched の priority に効かせる事（D3）」・:93 の D1・:95 の D3 の判断待ち・:64「既定は p001 の後に決める」が食い違う。原文（:21）が正のはず。直しは p001 の版で行う（Q1 の確かめの後）。
 - ws.md:34 の `setpriority` の行は今 `syscall.c:8863-8935`（getpriority 8808）、:36 の `syscall_dispatch_body` は 9796。
 
 ## 1. kernel の scheduler（`src/kern/sched.c`、`include/kern/sched.h`）
@@ -59,7 +59,7 @@ hint は各 thread の入口で自分に付けるのが最小。OS 固有の呼�
 4. thread ごとの計測が無い（1 ms の tick だけ）。
 5. topology を知らない（WS301 待ち）。
 6. thread の名前が kernel に無い。
-7. `CONFIG_DTB` の配線は 14 の platform の vmunix.mk か `config/kernel-options.list`。
+7. `CONFIG_KERN_DESKTOP_BALANCER` の配線は 14 の platform の vmunix.mk か `config/kernel-options.list`。
 8. Linux・FreeBSD の backend にも同じ関数（空でよい）。
 
 ## 7. 未調査（調べを止めた、2026-10-29 Q1 の指示）

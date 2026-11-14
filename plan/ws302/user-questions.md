@@ -7,7 +7,7 @@
 ## 前置き
 
 - **どの WS か**: WS302「デスクトップスレッドバランサ（DTB）」。
-- **どんな WS か**: kernel に、thread の動き（GPU を使うか、syscall なしで忙しいか、terminal の中か、nice）と人の操作（キーボード・マウスの入力）を見て、「この thread は速い core（P-core）向きか、省電力の core（E-core）向きか、どの priority か」を scheduler（sched）に伝える部品を足す。DTB は scheduler ではなく、実際にどの CPU で走らせるかは sched が決める。build の設定 `CONFIG_DTB` で入れ、既定は off（2026-10-27 の決定）。最初の対象は 5330（P-core 2・E-core 8）。
+- **どんな WS か**: kernel に、thread の動き（GPU を使うか、syscall なしで忙しいか、terminal の中か、nice）と人の操作（キーボード・マウスの入力）を見て、「この thread は速い core（P-core）向きか、省電力の core（E-core）向きか、どの priority か」を scheduler（sched）に伝える部品を足す。DTB は scheduler ではなく、実際にどの CPU で走らせるかは sched が決める。build の設定 `CONFIG_KERN_DESKTOP_BALANCER` で入れ、既定は off（2026-10-27 の決定）。最初の対象は 5330（P-core 2・E-core 8）。
 - **今の状態**: 設計の段（p001、P5。第 2 版。敵対的レビュー（blocker 2・major 11・minor 13）を反映済み）。実装はまだ。P/E core の種類を kernel が知る口（WS333）は 2026-10-31 に main に入った。
 - **決まっていない事**: 下の 7 つ。Q302-1〜3 は DTB の振る舞いの中心。Q302-4・5 は今の推しで進めても後で変えられる。Q302-6 は UAPI（user から見える kernel の口）なので後で変えにくい。Q302-7 は受け入れの数。実装の順は p002（統計）が Q302-5、p003（sched の口）が Q302-2・3、p004（DTB の本体）が Q302-1・6 の答えの後（どれも答えが推しと違っても直しは小さい）。
 
@@ -49,8 +49,8 @@
 ## Q302-3 priority の段、nice の段と飢えの防ぎ、DTB が on の時だけにするか（ws.md の D3 の続き）
 
 - 背景: 2026-10-27 に「nice は sched の priority にも効かせる」「GPU を使う app は応答の priority を上げる」と決まった。今の sched は厳密な順で、aging（待った thread を上げる仕組み）が無い。kernel の中の仕事の thread（USB の入力の処理・画面の監視など）の大半は 8 で、user の thread を 8 より上に上げると、入力から画面までの kernel の仕事そのものを待たせる（設計の第 1 版はそうしていて、レビューで止めた）。下げた thread は、上の段が忙しい間は全く走れない（飢え）。
-- 決まると変わる事: GPU を使う app・nice を付けた仕事の進み方、kernel の thread と user の thread の順、DTB が off・`CONFIG_DTB=n` の kernel の振る舞い。
-- **(A, 推し)** DTB が on の時、user の thread の既定を 10 に下げ、上げは 8・9 で行う（kernel の 8 より上には誰も置かない）: compositor（画面を作る）8、GPU を使う app 9（ただし CPU を半分以上使い続ける thread は上げない。GPU に 1 回仕事を出すだけで上がる抜け道を塞ぐ）、普通・terminal・忙しい計算 10、nice -20〜-10 → 8、-9〜-1 → 9、1〜9 → 11、10〜20 → 12。下げた user の thread が 100 ms 待ったら 1 回だけ（10 ms）走れるように上げる（最悪でも CPU の約 9% は回る。kernel の段には上げない）。kernel の中に居る user の thread は 10 より下げない（kernel の lock を持ったまま待たされるのを防ぐ）。**DTB が on の時だけ**効かせる（DTB が off・`CONFIG_DTB=n` の kernel は今と同じ、全部 8）。
+- 決まると変わる事: GPU を使う app・nice を付けた仕事の進み方、kernel の thread と user の thread の順、DTB が off・`CONFIG_KERN_DESKTOP_BALANCER=n` の kernel の振る舞い。
+- **(A, 推し)** DTB が on の時、user の thread の既定を 10 に下げ、上げは 8・9 で行う（kernel の 8 より上には誰も置かない）: compositor（画面を作る）8、GPU を使う app 9（ただし CPU を半分以上使い続ける thread は上げない。GPU に 1 回仕事を出すだけで上がる抜け道を塞ぐ）、普通・terminal・忙しい計算 10、nice -20〜-10 → 8、-9〜-1 → 9、1〜9 → 11、10〜20 → 12。下げた user の thread が 100 ms 待ったら 1 回だけ（10 ms）走れるように上げる（最悪でも CPU の約 9% は回る。kernel の段には上げない）。kernel の中に居る user の thread は 10 より下げない（kernel の lock を持ったまま待たされるのを防ぐ）。**DTB が on の時だけ**効かせる（DTB が off・`CONFIG_KERN_DESKTOP_BALANCER=n` の kernel は今と同じ、全部 8）。
   - 変わる事: DTB が on の時、kernel の既定の thread（8）は user の既定（10）より先に走る（今は同じ段で順番）。kernel の thread が長く忙しい場面では user が待たされうる（飢えの防ぎで 100 ms ごとに 10 ms は走る）。QEMU と 5330 の試験で確かめる。
 - (B) 上げをしない: user の既定は 8 のまま、下げ（忙しい計算 9、nice > 0 は 10・11）だけで GPU の app を相対に上にする。kernel との順は今と同じ。nice < 0 は core の選び（速い core）にだけ効き、priority には効かない（2026-10-27 の決定の半分）。
 - (C) A の段で、nice だけは DTB に依らず常に効かせる（sched の既定の振る舞いが変わる）。
@@ -64,11 +64,11 @@
 - **(B, 推し)** v1 では作らない。5330 の評価（p006）で応答の受け入れ（A1・A2）が通らず、前面の情報で直る見込みがある時だけ、条件つきの Phase（p005）として改めて聞く。
 - 推しの理由: GPU に仕事を出す app と compositor は前面かに依らず P に置くので、前面の app の大半は既に P に居る。UAPI は後で変えにくいので、数で要ると分かってから作る。
 
-## Q302-5 thread の統計を `CONFIG_DTB` の build の時だけ取るか（ws.md の D5）
+## Q302-5 thread の統計を `CONFIG_KERN_DESKTOP_BALANCER` の build の時だけ取るか（ws.md の D5）
 
 - 背景: DTB には thread ごとの数（走った時間、syscall の数、syscall の後に走り続けた時間、起こされた数）と、process ごとの GPU の最後の時刻、最後の入力の時刻が要る。取る代価は tick・syscall・起床ごとに数個の加算で小さい。
-- 決まると変わる事: `CONFIG_DTB=n`（既定）の kernel に統計の field と加算が入るか。
-- **(A, 推し)** `CONFIG_DTB=y` の build の時だけ取る（n の kernel は今と同じ）。y の build で `dtb=off` で起動しても統計は取り、on・off の比べと負担の計測（受け入れ A6）に使う。
+- 決まると変わる事: `CONFIG_KERN_DESKTOP_BALANCER=n`（既定）の kernel に統計の field と加算が入るか。
+- **(A, 推し)** `CONFIG_KERN_DESKTOP_BALANCER=y` の build の時だけ取る（n の kernel は今と同じ）。y の build で `desktop_balancer=off` で起動しても統計は取り、on・off の比べと負担の計測（受け入れ A6）に使う。
 - (B) 常に取る（将来 `top` などで thread ごとの数を見せられる）。
 - 推しの理由: 既定の kernel を変えないので、負担の心配が無い。thread ごとの数を常に見せたくなったら、その時に B に広げられる（UAPI を足す時に一緒に決める）。
 
@@ -76,7 +76,7 @@
 
 - 背景: 5330 の評価では、どの CPU が P か E か、DTB が何回 thread を寄せたか、忙しい thread がどこで走ったかを、user の script から読む必要がある（kernel の log を読んで判定しない規則のため）。
 - 決まると変わる事: UAPI が 1 つ増える（読みだけ）。
-- **(A, 推し)** 読みだけの sysctl `kern.dtb`: 有効か、hybrid か、人の操作の状態、周期の数と時間、規則ごとの thread の数、移動・手渡しの数、CPU ごとの種類。process・thread ごとの印は入れない。形の案（720 byte、32 bit と 64 bit で同じ）は [proposed/include/uapi/dtb-sysctl.h](proposed/include/uapi/dtb-sysctl.h)。
+- **(A, 推し)** 読みだけの sysctl `kern.desktop_balancer`: 有効か、hybrid か、人の操作の状態、周期の数と時間、規則ごとの thread の数、移動・手渡しの数、CPU ごとの種類。process・thread ごとの印は入れない。形の案（720 byte、32 bit と 64 bit で同じ）は [proposed/include/uapi/desktop-balancer-sysctl.h](proposed/include/uapi/desktop-balancer-sysctl.h)。
 - (B) A に、`/dev/system` の process の情報（予備の field）へ process ごとの DTB の印を足す。
 - (C) UAPI を足さない（評価は CPU ごとの時間 `hw.cputimes` だけで行う。CPU の種類が user から読めないので、5330 の番号の並びを別に調べて決め打つ）。
 - 推しの理由: 評価に要る最小。読みだけなので書きの権限の問題が無い。process ごとの印は、使い道がはっきりしてから B に広げられる。

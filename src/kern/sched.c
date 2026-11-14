@@ -125,7 +125,7 @@ sched_wake_latency_report(void)
 #define SCHED_WAKE_PENDING 0x00000002U
 #define SCHED_ONLINE_TIMEOUT 10000000U
 
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 /* Where a thread's user streak stops growing instead of wrapping to zero. */
 #define SCHED_HINT_STREAK_MAX	0xffffffffU
 #endif
@@ -314,7 +314,7 @@ static void perf_note_longest(struct sched_perf_longest *longest, uint64_t count
 static void perf_merge_longest(struct sched_perf_longest *total, const struct sched_perf_longest *longest);
 static void perf_report_if_due(void);
 static void perf_report(void);
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 static void hint_charge_tick_locked(struct thread *thread, uint64_t ticks, int kernel);
 static void hint_note_wakeup_locked(struct thread *thread);
 #endif
@@ -1090,7 +1090,7 @@ sched_clock_cpu(
 		    thread->proc != NULL &&
 		    thread->proc != &process0) {
 			kernel = thread->accounting_kernel_depth != 0;
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 
 			/* Counts the thread's own run time and user streak for the balancer. */
 			hint_charge_tick_locked(thread, elapsed, kernel);
@@ -1800,7 +1800,7 @@ sched_set_cpu(
 		thread->sched.need_migrate = 0;
 		if (pending && thread->state == THREAD_SLEEPING) {
 			old_kind = SCHED_QUEUE_RUN;
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 
 			/* Counts the wakeup the move carried for the balancer. */
 			hint_note_wakeup_locked(thread);
@@ -1838,7 +1838,7 @@ sched_set_cpu(
 	thread->sched.need_migrate = 0;
 	if (pending && thread->state == THREAD_SLEEPING) {
 		old_kind = SCHED_QUEUE_RUN;
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 
 		/* Counts the wakeup the move carried for the balancer. */
 		hint_note_wakeup_locked(thread);
@@ -2014,7 +2014,7 @@ sched_test_cpu_online(
 }
 #endif
 
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 /*
  * Reads a thread's counters and where it is.
  */
@@ -2197,7 +2197,7 @@ wake_enqueue_locked(
 	/* The latency diagnostic measures the wait from here to the thread's run. */
 	perf_mark_runnable_locked(cpu, thread, SCHED_PERF_WOKEN);
 
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 	/* Counts the wakeup for the balancer. */
 	hint_note_wakeup_locked(thread);
 
@@ -3237,7 +3237,7 @@ perf_report(
 	atomic_u64_store_release(&sched_perf_report_cost, finished - started);
 }
 
-#if CONFIG_DTB
+#if CONFIG_KERN_DESKTOP_BALANCER
 /*
  * Charges a tick's time to the running user thread's balancer counters;
  * the CPU's lock is held and interrupts are masked.
