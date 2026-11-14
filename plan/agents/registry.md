@@ -8,7 +8,7 @@
 | P2 | phase-runner | Pi 5 の 60 fps (q2087-i01) | `/home/awe/zedBSD-worktrees/p2-pi5fps` / `agent/p2-pi5fps` | 返却（2026-11-14、cleared） | 6bf52558eb |
 | P3 | phase-runner | arm64 の起動の切り分け (q2086-i01) | `/home/awe/zedBSD-worktrees/p3-arm64boot` / `agent/p3-arm64boot` | 返却（2026-11-14、canceled） | — |
 | P2 | phase-runner | Pi 5 の更新 (q2085-i01) | `/home/awe/zedBSD-worktrees/p2-pi5uat` / `agent/p2-pi5uat` | 返却（2026-11-14、cleared: 板は 10.0.30.2 で動いていた） | 39c2a744a2 |
-| P1 | phase-runner | ws353 p016 試験 (q2084-i01) | `/home/awe/zedBSD-worktrees/p1-ws353m` / `agent/p1-ws353m` | 動いている（2026-11-14、5330） | — |
+| P1 | phase-runner | ws353 p016 試験 (q2084-i01) | `/home/awe/zedBSD-worktrees/p1-ws353m` / `agent/p1-ws353m` | 返却（2026-11-14、途中で区切った） | 3fd2c34d04 |
 | P1 | phase-runner | ws353 p020 sessiond の chown (q2083-i01) | `/home/awe/zedBSD-worktrees/p1-ws353l` / `agent/p1-ws353l` | 返却（2026-11-14、cleared） | b1c04993d4（merge 7dce275a17） |
 | P2 | phase-runner | ws347 p010 RTL の reset cp ほか (q2080-i01) | `/home/awe/amaterrace-worktrees/p2-reset` / `p2-reset` | 返却（2026-11-14、canceled・破棄） | — |
 | P4 | phase-runner | ws347 p010 RTL の reset su・vf・tu (q2081-i01) | `/home/awe/amaterrace-worktrees/p4-reset` / `p4-reset` | 返却（2026-11-14、canceled・破棄） | — |
