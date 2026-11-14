@@ -38,6 +38,30 @@ static int timer_waits_frame(const struct bind_window *window, const struct bind
 static int timer_run_children(struct bind_window *window);
 
 /*
+ * Reports whether an animation frame of the window waits for a present
+ * (1), which the window's next drawing brings, or none does (0).
+ */
+int
+bind_frames_waiting(
+	const struct bind_window *window)
+{
+	const struct bind_timer *timer;
+	size_t index;
+	int waits;
+
+	/* Each timer, until one that waits. */
+	for (index = 0; index < window->timers.count; index++) {
+		timer = wb_vector_at(&window->timers, index);
+		waits = timer_waits_frame(window, timer);
+		if (waits)
+			return 1;
+	}
+
+	/* Succeeded: no animation frame waits. */
+	return 0;
+}
+
+/*
  * Reports when the next timer is due, of the window and the frames that
  * run on its thread; zero when there is none.
  */

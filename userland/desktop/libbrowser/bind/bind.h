@@ -465,6 +465,7 @@ void *bind_element_runner(const struct dom_element *element);
 /* The timers (timer.c). */
 int bind_next_timer(const struct bind_window *window, double *due);
 int bind_run_timers(struct bind_window *window);
+int bind_frames_waiting(const struct bind_window *window);
 
 /* Events (event.c). */
 int bind_fire_event(struct bind_window *window, struct dom_node *target, const char *type, unsigned flags, int *canceled);

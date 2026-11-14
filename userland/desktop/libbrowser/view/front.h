@@ -118,6 +118,11 @@ int view_front_compose(struct browser_view *view, const char *preedit, int begin
 int view_front_commit_text(struct browser_view *view, int checked, uint64_t session, const char *text, uint32_t delete_before, uint32_t delete_after);
 int view_front_request_image(struct browser_view *view, float x, float y);
 
+/* The program's calls that wait for the script thread's answer (front.c): a settle, a dump, the page committed as it is now. */
+int view_front_settle(struct browser_view *view, double budget, unsigned flags);
+int view_front_dump(struct browser_view *view, enum browser_dump kind, char **text, size_t *length);
+int view_front_frame(struct browser_view *view);
+
 /* The task the view's pages run and how long, from any thread; ending it by its number, from the program's (front.c). */
 int view_front_script_busy(const struct browser_view *view, uint32_t *task, uint32_t *milliseconds);
 int view_front_stop_script(struct browser_view *view, uint32_t task);
@@ -150,5 +155,7 @@ struct net_loader *view_loader(const struct browser_view *view);
 int view_fill_snapshot(struct browser_view *view, struct view_snapshot *snapshot);
 int view_commit_scene(struct browser_view *view, struct paint_scene **scene, layout_unit *scroll_y);
 void view_frame_opportunity(struct browser_view *view);
+int view_settle_state(struct browser_view *view, double budget, unsigned flags, int *done, int *wait);
+int view_rendering_checkpoint(struct browser_view *view);
 
 #endif

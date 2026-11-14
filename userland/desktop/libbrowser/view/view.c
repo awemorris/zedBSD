@@ -88,6 +88,9 @@
 /* The most layout/checkpoint passes used to drain work released by initial font settlement. */
 #define VIEW_SETTLE_ROUNDS 32U
 
+/* How long work under way (a fetch, a frame's load) keeps a settle of a view of its own threads past its budget, in milliseconds. */
+#define VIEW_SETTLE_NETWORK_MS	30000.0
+
 /* How many of the caller's image views the view keeps a framebuffer for (a swapchain's images, and a few more). */
 #define VIEW_FRAMEBUFFERS_MAX	8U
 
@@ -1956,6 +1959,8 @@ browser_view_commit_text(
  * arrives, the page's timers run on a virtual clock up to budget
  * milliseconds, and with BROWSER_SETTLE_LAYOUT the page is laid out, the
  * images its layout asked for arrive, and it is laid out again with them.
+ * In a view of its own threads the script thread runs the page on its own
+ * clock instead until it is at rest (view_settle_state) and commits it.
  * Returns ENOENT when no page is shown (its load failed, which the load
  * callback heard of), or why the scripts or the layout failed.
  */
@@ -1972,10 +1977,11 @@ browser_view_settle(
 	int error;
 	int windowed;
 
-	/* A view of its own threads is not settled by the program. */
+	/* A view of its own threads is settled by its script thread. */
 	windowed = view_front_window(view);
 	if (windowed) {
-		return ENOTSUP;
+		error = view_front_settle(view, budget, flags);
+		return error;
 	}
 
 	/* Drains each task batch before laying out and releasing its font-ready reactions. */
@@ -2050,7 +2056,8 @@ browser_view_settle(
 /*
  * Draws the page shown with the CPU renderer into the caller's pixels:
  * width by height pixels of 0xAARRGGBB, rows stride bytes apart, the page
- * scrolled as the view is.
+ * scrolled as the view is.  In a view of its own threads the page as it
+ * is now is committed and drawn as the drawing thread draws it.
  */
 int
 browser_view_draw_pixels(
@@ -2066,16 +2073,19 @@ browser_view_draw_pixels(
 	int error;
 	int windowed;
 
-	/* A view of its own threads draws through browser_view_render_pixels. */
-	windowed = view_front_window(view);
-	if (windowed) {
-		return ENOTSUP;
-	}
-
 	/* Refuses an output whose rows overlap or wrap the address space. */
 	error = view_pixels(pixels, width, height, stride);
 	if (error != 0)
 		return error;
+
+	/* A view of its own threads: the page committed as it is now, drawn as the drawing thread draws it. */
+	windowed = view_front_window(view);
+	if (windowed) {
+		error = view_front_frame(view);
+		if (error == 0)
+			error = browser_view_render_pixels(view, pixels, width, height, stride);
+		return error;
+	}
 
 	/* No page has nothing to draw. */
 	if (view->page == NULL)
@@ -2125,7 +2135,7 @@ browser_view_draw_pixels(
 /*
  * Writes one of the page shown's text dumps (its DOM, its computed style,
  * its layout or its display list) into memory the caller frees with
- * browser_free.
+ * browser_free; a view of its own threads makes it on its script thread.
  */
 int
 browser_view_dump(
@@ -2138,10 +2148,11 @@ browser_view_dump(
 	int error;
 	int windowed;
 
-	/* A view of its own threads is not dumped by the program. */
+	/* A view of its own threads is dumped by its script thread. */
 	windowed = view_front_window(view);
 	if (windowed) {
-		return ENOTSUP;
+		error = view_front_dump(view, kind, text, length);
+		return error;
 	}
 
 	/* No page has nothing to dump. */
@@ -2153,6 +2164,13 @@ browser_view_dump(
 	/* The layout and the display list are the page's as it is now. */
 	if (kind == BROWSER_DUMP_LAYOUT || kind == BROWSER_DUMP_PAINT) {
 		error = view_update(view);
+		if (error != 0)
+			return error;
+	}
+
+	/* A display list a committed frame took (a view of its own threads) is painted again. */
+	if (kind == BROWSER_DUMP_PAINT && view->page->painted && view->page->paint_taken) {
+		error = page_paint(view->page);
 		if (error != 0)
 			return error;
 	}
@@ -2789,6 +2807,154 @@ view_frame_opportunity(
 
 	/* The page counts the chance. */
 	page_frame_presented(view->page);
+}
+
+/*
+ * Runs, on the script thread of a view of its own threads, the microtasks
+ * the rendering update left (the layout of a commit resolves the
+ * document's fonts' ready promise, outside any task), as a task's end
+ * does, and asks for a redraw when they changed the page.  Reports
+ * whether they changed it (the round commits it again).
+ */
+int
+view_rendering_checkpoint(
+	struct browser_view *view)
+{
+	int changed;
+	int error;
+
+	/* No page has no jobs. */
+	if (view->page == NULL)
+		return 0;
+
+	/* The jobs (a stopped script is no error of the page, the console said so). */
+	error = bind_checkpoint(view->page->window);
+	if (error == VM_TERMINATED)
+		error = 0;
+	if (error != 0 && view->callbacks.script_error != NULL)
+		view->callbacks.script_error(view->callbacks.context, view, error);
+	if (view->page == NULL)
+		return 0;
+
+	/* A page they left as it was needs nothing more. */
+	changed = page_needs_layout(view->page);
+	if (!changed)
+		changed = page_needs_paint(view->page);
+	if (!changed)
+		return 0;
+
+	/* The redraw, and the title they may have set. */
+	view_redraw(view);
+	view_update_title(view);
+	return 1;
+}
+
+/*
+ * Tells, on the script thread of a view of its own threads, after a round,
+ * whether the page is at rest for a settle (browser_view_settle): no page
+ * is being fetched, no request of the page or of its frames' loads is
+ * under way, and either the page's clock reached budget or, before it, no
+ * timer of the page is due by budget, no animation frame waits for a
+ * present, no image is on its way, no navigation waits and no iframe has a
+ * thread (whose timers are its own).
+ * Work under way keeps it from rest up to VIEW_SETTLE_NETWORK_MS past
+ * budget.  Reports 0 with *done, and *wait, the most milliseconds before
+ * looking again (-1: until news); ENOENT when no page is shown, ETIMEDOUT
+ * when work went on past the bound (both done).
+ */
+int
+view_settle_state(
+	struct browser_view *view,
+	double budget,
+	unsigned flags,
+	int *done,
+	int *wait)
+{
+	double now;
+	double due;
+	double left;
+	size_t requests;
+	size_t frames;
+	int fetching;
+	int busy;
+	int images;
+	int navigation;
+	int waiting;
+	int found;
+
+	UNUSED_PARAMETER(flags);
+
+	/* Not yet, until news. */
+	*done = 0;
+	*wait = -1;
+
+	/* A page being fetched or made; none at all is the load's failure. */
+	fetching = view->pending != NULL || view->finishing != NULL || view->arrived_url != NULL || view->prefetch_waiting != 0;
+	if (view->page == NULL) {
+		if (fetching)
+			return 0;
+		*done = 1;
+		return ENOENT;
+	}
+
+	/* The page's clock, and the work under way. */
+	now = (double)(view_clock() - view->page_epoch);
+	busy = fetching || view->page->frame_loads.count != 0;
+	requests = 0;
+	if (view->loader != NULL)
+		requests = page_net_pending(view->loader);
+	if (requests != 0)
+		busy = 1;
+
+	/* Past the bound, work under way did not end. */
+	if (now >= budget + VIEW_SETTLE_NETWORK_MS) {
+		*done = 1;
+		if (busy)
+			return ETIMEDOUT;
+		return 0;
+	}
+
+	/* At budget the timers have run; only work under way is waited for. */
+	if (now >= budget) {
+		if (!busy) {
+			*done = 1;
+			return 0;
+		}
+		left = budget + VIEW_SETTLE_NETWORK_MS - now;
+		*wait = (int)left + 1;
+		return 0;
+	}
+
+	/* Before it: looked at again at budget at the latest. */
+	left = budget - now;
+	*wait = (int)left + 1;
+	if (busy)
+		return 0;
+
+	/* Images on their way, a navigation, and the iframes' threads keep the page going. */
+	images = page_images_waiting(view->page);
+	if (images || view->page->load_pending)
+		return 0;
+	navigation = bind_navigation_pending(view->page->window);
+	if (navigation)
+		return 0;
+	waiting = bind_frames_waiting(view->page->window);
+	if (waiting)
+		return 0;
+	frames = 0;
+	if (view->front != NULL)
+		frames = view_frames_count(view_front_frames(view->front));
+	if (frames != 0)
+		return 0;
+
+	/* A timer due by budget runs first. */
+	found = page_next_timer(view->page, &due);
+	if (found && due <= budget)
+		return 0;
+
+	/* Succeeded: at rest. */
+	*done = 1;
+	return 0;
 }
 
 /*

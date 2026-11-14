@@ -69,6 +69,13 @@
  *       and for an iframe's script that spins on its own thread (the
  *       iframe's and the page's timers run again); a view of the caller's
  *       thread reports no task and refuses the stop (ENOTSUP);
+ *   (s) the headless calls in a view of its own threads: browser_view_settle
+ *       (the page brought to rest on its own clock, its console told on the
+ *       calling thread before it returns), browser_view_dump and
+ *       browser_view_draw_pixels give what they give in a view of the
+ *       caller's thread, for pages with text, a web font, an image, an
+ *       iframe, timers and a ready promise of the document's fonts; a timer
+ *       past the budget does not run and does not keep the settle waiting;
  *   and, in both modes, a link to a page whose style sheet comes slowly
  *   (as host-navigation-wait): the window's calls stay short, the page
  *   shown stays the first until the new one is ready, and the new one is
@@ -128,6 +135,7 @@ static pthread_cond_t test_frame = PTHREAD_COND_INITIALIZER;
 static int test_frames_owed;
 static int test_render_stop;
 static struct browser_view *test_render_view;
+static int test_render_presents;
 static unsigned long test_rendered;
 static unsigned short test_port_serve;
 static unsigned short test_port_hang;
@@ -170,6 +178,8 @@ static void test_bench_both(void);
 static int test_empty_work(void *argument);
 static void test_lend_round_trip(void);
 static void test_unresponsive(void);
+static void test_headless_own(void);
+static int test_headless_run(int threading, const char *path, double budget, char **dom, char **paint, uint32_t *pixels, char *console, size_t size);
 static int test_unresponsive_case(struct browser_view *view, const char *name, const char *path, const char *started, const char *after);
 static int test_console_wait(struct browser_view *view, const char *text, size_t from, int ms);
 static unsigned test_console_count(const char *text, size_t from);
@@ -234,6 +244,7 @@ main(
 	test_bench_both();
 	test_committed_state();
 	test_unresponsive();
+	test_headless_own();
 	test_check(vm_borrower_slips() == 0, "(p) no borrower thread entered a script or collected", "%lu times", vm_borrower_slips());
 
 	/* The summary. */
@@ -388,8 +399,11 @@ test_render(
 			break;
 		test_frames_owed = 0;
 		pthread_mutex_unlock(&test_lock);
-		if (browser_view_render_pixels(test_render_view, pixels, 800U, 600U, 800U * sizeof(uint32_t)) == 0)
+		if (browser_view_render_pixels(test_render_view, pixels, 800U, 600U, 800U * sizeof(uint32_t)) == 0) {
 			test_rendered++;
+			if (test_render_presents)
+				browser_view_presented(test_render_view, 0);
+		}
 		pthread_mutex_lock(&test_lock);
 	}
 	pthread_mutex_unlock(&test_lock);
@@ -1710,4 +1724,139 @@ test_console_count(
 		at += strlen(text);
 	}
 	return count;
+}
+
+/*
+ * Runs one page headless in a view of one mode: loaded, settled with the
+ * budget and laid out, its DOM and display list dumped and drawn with the
+ * CPU; the console the settle told is copied.  Reports the first error.
+ */
+static int
+test_headless_run(
+	int threading,
+	const char *path,
+	double budget,
+	char **dom,
+	char **paint,
+	uint32_t *pixels,
+	char *console,
+	size_t size)
+{
+	struct browser_view *view;
+	pthread_t render;
+	size_t length;
+	int error;
+
+	*dom = NULL;
+	*paint = NULL;
+	error = test_view(threading, &view);
+	if (error != 0)
+		return error;
+
+	/* A view of its own threads has the drawing stand-in, which presents each frame (the page's animation frames run then). */
+	if (threading == BROWSER_THREADING_OWN) {
+		test_render_view = view;
+		test_render_stop = 0;
+		test_render_presents = 1;
+		pthread_create(&render, NULL, test_render, NULL);
+	}
+	test_console_length = 0;
+	test_console[0] = '\0';
+	error = browser_view_load(view, path);
+	if (error == 0)
+		error = browser_view_settle(view, budget, BROWSER_SETTLE_LAYOUT);
+	snprintf(console, size, "%s", test_console);
+	if (error == 0)
+		error = browser_view_dump(view, BROWSER_DUMP_DOM, dom, &length);
+	if (error == 0)
+		error = browser_view_dump(view, BROWSER_DUMP_PAINT, paint, &length);
+	if (error == 0)
+		error = browser_view_draw_pixels(view, pixels, 800U, 600U, 800U * sizeof(uint32_t));
+
+	/* The drawing stand-in stops before the view goes. */
+	if (threading == BROWSER_THREADING_OWN) {
+		pthread_mutex_lock(&test_lock);
+		test_render_stop = 1;
+		pthread_cond_signal(&test_frame);
+		pthread_mutex_unlock(&test_lock);
+		pthread_join(render, NULL);
+		test_render_presents = 0;
+	}
+	browser_view_destroy(view);
+	return error;
+}
+
+/* (s): settle, dump and draw_pixels in a view of its own threads give the caller's view's. */
+static void
+test_headless_own(void)
+{
+	static uint32_t expected[800U * 600U];
+	static uint32_t drawn[800U * 600U];
+	static char caller_console[16384];
+	static char own_console[16384];
+	const char *pages[6];
+	const char *name;
+	char *caller_dom;
+	char *caller_paint;
+	char *own_dom;
+	char *own_paint;
+	char root[256];
+	char path[512];
+	long long start;
+	double took;
+	size_t differ;
+	size_t index;
+	unsigned page;
+	int caller_error;
+	int own_error;
+	int same;
+
+	/* The pages: timers (one past the budget), the fonts' ready promise with animation frames, an iframe, and the engine's. */
+	if (getcwd(root, sizeof(root)) == NULL)
+		return;
+	pages[0] = test_page("headless-timers.html", "<!DOCTYPE html><title>t</title><p id=p>start</p><script>"
+	    "setTimeout(function(){ console.log('t50'); document.getElementById('p').textContent='fifty'; }, 50);"
+	    "setTimeout(function(){ console.log('t300'); }, 300);</script>");
+	snprintf(path, sizeof(path), "%s/plan/ws074/tests/dom/fonts-ready-frames.html", root);
+	pages[1] = strdup(path);
+	pages[2] = test_page("headless-frame.html", "<!DOCTYPE html><body style='background:#eef'><p>outer</p>"
+	    "<iframe srcdoc='<p style=color:#a00>inner</p><script>parent.postMessage(\"hi\", \"*\")</script>' style='width:300px;height:100px'></iframe>"
+	    "<script>addEventListener('message', function(e){ console.log('message ' + e.data); });</script>");
+	snprintf(path, sizeof(path), "%s/plan/ws074/tests/pages/first.html", root);
+	pages[3] = strdup(path);
+	snprintf(path, sizeof(path), "%s/plan/ws074/tests/pages/flex.html", root);
+	pages[4] = strdup(path);
+	pages[5] = NULL;
+
+	/* Each page in both modes (the timers' with a budget of 200 ms, the others 1000 ms). */
+	for (page = 0U; pages[page] != NULL; page++) {
+		name = strrchr(pages[page], '/') + 1;
+		caller_error = test_headless_run(BROWSER_THREADING_CALLER, pages[page], page == 0U ? 200.0 : 1000.0, &caller_dom, &caller_paint, expected,
+		    caller_console, sizeof(caller_console));
+		start = test_now();
+		own_error = test_headless_run(BROWSER_THREADING_OWN, pages[page], page == 0U ? 200.0 : 1000.0, &own_dom, &own_paint, drawn,
+		    own_console, sizeof(own_console));
+		took = (double)(test_now() - start) / 1e6;
+		test_check(caller_error == 0 && own_error == 0, "(s) settle, dump and draw_pixels succeed in both modes", "%s: caller %d, own %d, own %.0f ms",
+		    name, caller_error, own_error, took);
+		test_check(strcmp(caller_console, own_console) == 0, "(s) the settle tells the same console", "%s%s", name,
+		    strcmp(caller_console, own_console) == 0 ? "" : ": the consoles differ");
+		if (strcmp(caller_console, own_console) != 0)
+			printf("caller:\n%sown:\n%s", caller_console, own_console);
+		same = caller_dom != NULL && own_dom != NULL && strcmp(caller_dom, own_dom) == 0;
+		test_check(same, "(s) the DOM dumps are the same", "%s", name);
+		same = caller_paint != NULL && own_paint != NULL && strcmp(caller_paint, own_paint) == 0;
+		test_check(same, "(s) the display list dumps are the same", "%s", name);
+		differ = 0;
+		for (index = 0; index < 800U * 600U; index++)
+			differ += drawn[index] != expected[index];
+		test_check(differ == 0, "(s) draw_pixels draws the same picture", "%s: %zu pixels differ", name, differ);
+		if (page == 0U)
+			test_check(took < 1000.0 && strstr(own_console, "t300") == NULL, "(s) a timer past the budget neither runs nor keeps the settle",
+			    "%.0f ms", took);
+		browser_free(caller_dom);
+		browser_free(caller_paint);
+		browser_free(own_dom);
+		browser_free(own_paint);
+	}
 }
