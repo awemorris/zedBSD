@@ -1,8 +1,8 @@
 # Cockpit
 
-![zedBSD Work Map](cockpit-map.svg)
+![zedBSD Work Map](cockpit-map.png)
 
-作業地図は `plan/tools/cockpit-map/map.json` を直して `python3 -I plan/tools/cockpit-map/make-map.py` で描き直す（白の背景、すりガラスの card）。
+作業地図は `plan/tools/cockpit-map/map.json` を直して `python3 -I plan/tools/cockpit-map/make-map.py` で描き直す（SVG と PNG、白の背景、すりガラスの card。cockpit は PNG を埋め込む）。
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、書き方は [q1.md](q1.md) §3）。書き手は Q1 だけ。
 最終更新: 2026-11-14 06:4x（Q1。先頭に作業地図、担当の表を今に）。前の更新: 2026-11-13 21:45（Q1。P1 に WS352 p001 の仕上げ）。前の更新: 2026-11-13 21:15（Q1。P3 に WS334 p040、P2 に WS335 p042）。前の更新: 2026-11-12 23:42（Q1。master.md の「今の状態」を自律で回す形に書き直した、P1 に WS333 p025）。前の更新: 2026-11-11 12:0x（Q1。WS347 を立てた）。前の更新: 2026-11-03 16:10（Q1。WS346 完了、全 Phase cleared、既定 cache=on）。前の更新: 2026-11-03 12:55（Q1。WS346 p007 cleared、p008 進行中）。前の更新: 2026-11-03 06:31（Q1。WS346 layout cache の設計 版 1）。前の更新: 2026-11-03 02:17（Q1。WS074 p263 U1 を host で直した）。前の更新: 2026-11-02 06:50（Q1。origin/main を merge・push）

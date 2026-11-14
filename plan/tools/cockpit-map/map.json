@@ -27,10 +27,8 @@
        ["p002–p009", "fences, timers, main poll at -1 and more", "done", null],
        ["p011", "render cycles the output slots", "done", null],
        ["p014, p015", "refresh fence, network, WSI", "done", null],
-       ["p010", "shown thread, client buffers off the slots", "run", ["P2", "q2073"]],
-       ["p018", "sessiond opens input devices", "run", ["P1", "q2072"]],
-       ["p012", "cursor thread", "plan", null],
-       ["p019", "drop the printers 1 s check", "plan", null],
+       ["p010, p018, p019", "shown thread, sessiond input, printers", "done", null],
+       ["p012", "cursor thread", "run", ["P1", "q2076"]],
        ["p016", "QEMU regression, 5330 idle", "plan", null]
      ]},
     {"ms": "MG006", "id": "WS334", "name": "Windows browser", "state": "run",
@@ -38,22 +36,24 @@
     {"ms": "MG006", "id": "WS347", "name": "Amaterrace GPU (VF2 + KC705)", "state": "run",
      "phases": [
        ["Req 08", "X1–X4 checked, X5–X9 next", "run", ["agy", "Gemini"]],
-       ["Drawing", "4 causes of no pixels found", "run", ["P5", "analysis"]],
-       ["Next", "send the 4 fixes to agy", "plan", null]
+       ["Drawing", "4 fixes in (P5 found the causes)", "done", null],
+       ["Next", "top-level tests by Claude", "run", ["Q1", "sim"]]
      ]},
     {"ms": "MG001", "id": "BUG-430", "name": "Build system defects", "state": "done",
      "phases": [["fixed", "Makefile diff applied", "done", null]]},
     {"ms": "MG006", "id": "BUG-431", "name": "Venus display events", "state": "done",
      "phases": [["fixed", "events_clear, test harness", "done", null]]},
-    {"ms": "MG002", "id": "BUG-432", "name": "Static stdout not flushed", "state": "bug",
-     "phases": [["open", "libc exit flush", "bug", null]]},
-    {"ms": "MG001", "id": "BUG-433", "name": "WS131 host test won't link", "state": "bug",
-     "phases": [["open", "move stubs into one file", "bug", null]]}
+    {"ms": "MG002", "id": "BUG-432", "name": "Static stdout not flushed", "state": "done",
+     "phases": [["fixed", "crt0 calls exit", "done", null]]},
+    {"ms": "MG001", "id": "BUG-433", "name": "WS131 host test won't link", "state": "done",
+     "phases": [["fixed", "stubs in one file", "done", null]]},
+    {"ms": "MG001", "id": "BUG-435", "name": "Old build variables in tests", "state": "bug",
+     "phases": [["open", "inventory and fix", "run", ["P2", "q2079"]]]}
   ],
-  "idle": [["P3", "idle"], ["P4", "idle"], ["Q1", "merge, queue, triage"]],
+  "idle": [["P3", "warning count (q2078)"], ["P4", "idle"], ["Q1", "merge, queue, triage"]],
   "panels": [
-    ["Waiting on the user", ["Nothing (today's questions are all answered)"]],
-    ["Closed today", ["WS335 TLS completed", "WS353 p002–p009, p011, p014, p015 cleared", "BUG-430, 431 fixed; WS334 p040"]],
-    ["Q1's next steps", ["Send the drawing fixes to agy", "WS353 p010, p018 back → p012", "p019 (printers), BUG-432, 433"]]
+    ["Waiting on the user", ["GHCI B36: STATE power-on value", "-Wall -Wextra for packages (after count)"]],
+    ["Closed today", ["WS335 TLS completed", "WS353 13 phases incl. p010, p018, p019", "BUG-430 to 433 fixed; WS334 p040"]],
+    ["Q1's next steps", ["Amaterrace top-level tests", "WS353 p012 → stop input chown → p016", "Package warnings, BUG-435"]]
   ]
 }
