@@ -2,7 +2,7 @@
 
 # ws310-p001: 調べと設計（呼ぶ _OSC と bit、確かめの方法と項目）
 
-Status: in-progress（設計と review を終えた、Q1 の確かめ待ち）
+Status: cleared（2026-11-15 Q1。Q310-1〜6 の答えは ws.md の 2026-11-01 の節）
 
 - Queue: q1779-i01（P6、worktree `p6-ws310`、branch `agent/p6-ws310`、基点 main e2f816e14）。
 - 範囲: `plan/ws310/` だけ。source は変えない。

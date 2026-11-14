@@ -2,7 +2,7 @@
 
 # ws302-p002: config・型・統計（DTB の土台）
 
-Status: in-progress（実装済み・試験 PASS。mk の案は当たり、当てた tree の y の build も PASS。cleared は Q1）
+Status: cleared（2026-11-14 Q1。mk の案を当て overlay なしで 3 機種の n・y の build warning 0）
 Parent: [WS302](../ws.md)
 Queue: q2093-i01（P6）
 

@@ -3,7 +3,7 @@
 # WS328 libbrowser のベクトル描画（path の塗りと線、CSS の角丸・gradient など）と、それを使った SVG の描画
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: planning（2026-10-30 Q1 が作成。2026-10-30 ユーザーの決定で WS074 を止めて先に実装する。2026-11-14 P4 が p001 の設計を作成、2026-11-15 P4 が design-reviewer の反映を終え、Q1 の確かめ待ち）
+- Status: incomplete（2026-11-15 p001 の設計 cleared、header の基点 57bf94e62f。実装は p002・p017 から（標準廉価実装手順）。sources.mk の差分（U5）と U1〜U4 はユーザーへ）
 - 目標: libbrowser の描画（`userland/desktop/libbrowser/paint/`）にベクトル描画を足し、それで CSS の描画（角丸・gradient・影など）と、libbrowser の中の SVG の描画を作る。既存の library は使わない（libbrowser は単体の library）。
 
 ## ユーザーの決定（要点）
@@ -26,7 +26,7 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 
 | Phase | 目的 | 担当 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
-| [ws328-p001](phase001/phase.md) | 設計（module の分け方、header と骨格、試験の道具、実装の Phase、design-reviewer） | Opus（P4） | in-progress（反映済み、Q1 の確かめ待ち） | — |
+| [ws328-p001](phase001/phase.md) | 設計（module の分け方、header と骨格、試験の道具、実装の Phase、design-reviewer） | Opus（P4） | cleared（2026-11-15 Q1、3c892233f8 を main に merge c9d22fa09d。2 回の design-reviewer の 83 件を全部反映、header の基点 57bf94e62f、check-skeleton・harness PASS） | — |
 | [ws328-p002](phase002/phase.md) | vec-base・vec-path（行列・path・弧・bbox・atan2・exp） | Sonnet | planned | p001 |
 | [ws328-p003](phase003/phase.md) | vec-flatten（平坦化） | Sonnet | planned | p002 |
 | [ws328-p004](phase004/phase.md) | vec-stroke（線の輪郭・join・cap・dash） | Sonnet | planned | p003 |
@@ -59,6 +59,8 @@ module と実装の Phase の分け方は p001 が決めた（[design.md](design
 Phase の番号はレビューで分けた物に新しい番号（p024〜p029）を付けたので表の順と違う。GPU の側（p020 → p026 → p027）を CSS・SVG の切り替えより先に main に入れる（design.md §11）。
 
 ## Resume point
+
+- 2026-11-15 Q1: p001 cleared（merge c9d22fa09d、基点 57bf94e62f）。次は p002（vec-base と vec-path）と p017（CSS の radial・conic の解析）を Sonnet で。p018 以後は U1〜U5 の答えの後。
 
 - 2026-11-15 P4（q2098-i01）: design-reviewer の 2 回の結果（前の担当の起動分 High 7・Medium 15・Low 11 を Q1 の要約で、今回の起動分 重大 6・中 21・軽 23）を design.md §18 に記録し、全部を反映した（header・design.md・phase.md・user-questions・試験の道具）。**基点の案: 57bf94e62f**（header と design.md の反映の commit。p001 の cleared の時に Q1 が確かめてここを基点に決める）。Phase を分けて p024〜p029 を足した。user-questions に U5（sources.mk）を足し、U1 に案 C（stencil）と A の例外、U3・U4 に補足。次は p002 と p017（並べられる）、p002 の後に p003・p006・p007・p008。
 

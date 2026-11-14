@@ -20,6 +20,10 @@ tick の周期を走っている間に CPU ごとに変える。普段は 1000 H
 
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| p001 | 設計: kernel の時刻と sleep・timer を tick の数でなく `hal_rtc_read_counter()`（固定の周波数の counter）から作る形、idle の出入りで rate を変える所と条件（近くの timer の予定、tick の位相を新しい周期の倍数にそろえる x86_64 の TSC-deadline）、各 arch の HAL の実装の方針（重要な x86_64・arm64・riscv64、timer が全体で 1 つの機械）、`HAL_TIMER_FREQUENCY` の削除の範囲 | in-progress（2026-11-13 P1 q2045-i01、設計と design-reviewer 済み、[phase.md](phase001/phase.md)） | — |
-| p002 | 実装と試験（host、QEMU、5330 で idle の電力と clock の分解能） | in-progress（2026-11-13 P1 q2045-i01、実装と試験済み。5330 の idle の電力は WS333 p029 に届かない（4.61 W・PC2 46 %）、原因は compositor の短い poll。[phase.md](phase002/phase.md)） | p001 |
+| p001 | 設計: kernel の時刻と sleep・timer を tick の数でなく `hal_rtc_read_counter()`（固定の周波数の counter）から作る形、idle の出入りで rate を変える所と条件（近くの timer の予定、tick の位相を新しい周期の倍数にそろえる x86_64 の TSC-deadline）、各 arch の HAL の実装の方針（重要な x86_64・arm64・riscv64、timer が全体で 1 つの機械）、`HAL_TIMER_FREQUENCY` の削除の範囲 | cleared（2026-11-15 Q1。設計と design-reviewer 済み、実装は main に merge 済み） | — |
+| p002 | 実装と試験（host、QEMU、5330 で idle の電力と clock の分解能） | cleared（2026-11-15 Q1。実装と試験は main。5330 の idle の電力の受け入れは WS352・WS353 p016 に移した（4.54 W・PC2 66〜74 %、WS352 fix4 と同等）。arm64・riscv64・i386・pc9821 の起動は p003 で QEMU） | p001 |
 | p003 | 規約の全文の見直し（AGENTS §2） | planned | p002 |
+
+## Resume point
+
+- 2026-11-15 Q1: p001・p002 cleared。残りは p003（規約の全文の見直し、5 機種の build warning 0、QEMU の arm64・riscv64 の起動と tick_divisor）。

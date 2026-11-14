@@ -3,7 +3,7 @@
 # ws343-p004 規約の全文の見直し（fetch の main.c）
 
 - 親: [ws.md](../ws.md)。Queue: q2102-i01（P8、worktree `/home/awe/zedBSD-worktrees/p8-ws343p004`、基点 main 7b2d532461）。
-- Status: in-progress（2026-11-15 P8。実装済み・試験 PASS。cleared は Q1）
+- Status: cleared（2026-11-15 Q1、merge eb3f3dcc28）
 
 ## 目的と範囲
 

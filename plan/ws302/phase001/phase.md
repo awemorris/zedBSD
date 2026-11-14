@@ -2,7 +2,7 @@
 
 # ws302-p001: DTB の検討と設計
 
-Status: in-progress
+Status: cleared（2026-11-14 Q1。第 3 版、merge 39b8c7e7d0）
 Parent: [WS302](../ws.md)
 Queue: q1775-i01（P5）
 

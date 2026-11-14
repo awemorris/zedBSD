@@ -3,7 +3,7 @@
 # ws328-p001 設計（module の分け方・header・骨格・試験の道具・実装の Phase）
 
 - WS: [WS328](../ws.md)。Queue: q2091-i01（P4、worktree `/home/awe/zedBSD-worktrees/p4-ws328`、branch `agent/p4-ws328`、main c5b8a10d24 から）、q2098-i01（P4、worktree `/home/awe/zedBSD-worktrees/p4-ws328b`、branch `agent/p4-ws328b`、main f6d4437bc2 から: design-reviewer の反映）。
-- Status: in-progress（2026-11-14 P4、2026-11-15 P4 が q2098-i01 で design-reviewer の反映を終えた。cleared は Q1）
+- Status: cleared（2026-11-15 Q1、merge c9d22fa09d、基点 57bf94e62f）
 - 手順: 標準廉価実装手順（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md) §4）。
 
 ## 成果

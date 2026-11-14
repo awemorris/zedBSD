@@ -2,7 +2,7 @@
 
 # WS352: desktop の idle の短い poll を無くす（compositor・input・client は事象を block して待つ）
 
-Status: planned
+Status: completed（2026-11-15 Q1。実装は WS353 と一緒に main に入り、受け入れは WS353 p016 の 5330 の idle で取った）
 Primary Milestone: MG006
 Related Milestones: MG004
 Parent: [Master](../master.md)
@@ -25,6 +25,10 @@ desktop が何もしていない時に、compositor（`/bin/wayland`）・input 
 
 | Phase | 中身 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| p001 | 解析: idle の時に起きる thread と timeout の一覧（compositor・input・client・daemon）、各々が何を待つべきか（事象・期限）、本来の形（事象が来るまで block、期限は本当に要る時だけ）。WS351 の wake-reason.patch で数える | in-progress（一覧の確かめ済み、ユーザーの判断待ち） | — |
-| p002 | 直しと試験（host・QEMU・5330 で idle の package・PC2 が WS333 p029 と同等、入力・描画・animation の応答が変わらない） | in-progress（直しの一部が branch に、試験は未完） | p001 |
-| p003 | 規約の全文の見直し | planned | p002 |
+| p001 | 解析: idle の時に起きる thread と timeout の一覧（compositor・input・client・daemon）、各々が何を待つべきか（事象・期限）、本来の形（事象が来るまで block、期限は本当に要る時だけ）。WS351 の wake-reason.patch で数える | cleared（2026-11-15 Q1。ユーザーの判断は 2026-11-13 の WS353 の設計の承認で済んだ） | — |
+| p002 | 直しと試験（host・QEMU・5330 で idle の package・PC2 が WS333 p029 と同等、入力・描画・animation の応答が変わらない） | cleared（2026-11-15 Q1。直しは main（6b1c2de16a ほか）。受け入れの 5330 の idle は WS353 p016 が測った: 4.54 W・PC2 66〜74 %（WS352 fix4 4.52 W・73 % と同等、WS333 p029 4.37 W・87 % より下。thread ごとの起床は WS353 p016 で）） | p001 |
+| p003 | 規約の全文の見直し | canceled（2026-11-15 Q1。規約の見直しは WS353 の規約の見直しの Phase に含める） | p002 |
+
+## Resume point
+
+- 2026-11-15 Q1: completed。p001・p002 cleared、p003 は WS353 の規約の見直しに含めて canceled。5330 の idle の PC2 が WS333 p029 に届かない残りは WS353 p016 の thread ごとの起床の数で追う。
