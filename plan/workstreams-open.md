@@ -15,7 +15,7 @@
 | [WS334](ws334/ws.md) | MG006 | libbrowser の Web ブラウザ OmniGrammaton を Windows に移植（libkeiland の Win32 の実装、.exe）（2026-10-31 ユーザー） | incomplete | 設計 p002〜p004 cleared、実装の第 1 群（p005・p009・p010・p013・p020） |
 | [WS336](ws336/ws.md) | MG005 | 自前の sshd・ssh（OpenSSH と互換の protocol、ed25519 と鍵の交換 1 つ、WS335 の暗号の口を使う、標準廉価実装手順）（2026-11-01 ユーザー） | incomplete | incomplete（p001〜p024 cleared、p025 規約の見直しを P2 で） |
 | [WS337](ws337/ws.md) | MG002 | shangrila: RISC-V 64 で x86_64・arm64 の binary を動かす単体の repository の OSS（事前の変換と cache、interpreter の予備、binfmt。goal は Linux の商用 software と Windows の game、先に Linux で開発、zedBSD は package）（2026-11-01 ユーザー） | planning | ユーザーとの質疑の途中、p001（設計）はまだ |
-| [WS302](ws302/ws.md) | MG006 | デスクトップスレッドバランサ DTB（CONFIG_DTB、sched への hint）（2026-10-27 ユーザー） | planning | p001 設計済み（main 896d3e3db、問い Q302-1〜7 待ち）。実装は約 22 LW、WS333 p011・p013 に依る |
+| [WS302](ws302/ws.md) | MG006 | デスクトップスレッドバランサ DTB（CONFIG_KERN_DESKTOP_BALANCER、sched への hint）（2026-10-27 ユーザー） | incomplete | p001 cleared（第 3 版）、p002 実装済み（mk の案は承認済み、改名の後に当てる）、p003 を P6 で |
 | [WS304](ws304/ws.md) | MG003 | Raspberry Pi 5 の外の PCIe（pcie1、M.2）と NVMe（2026-10-27 ユーザー、実機の試験はまだ） | incomplete | p001・p002 cleared（e616b4128、host 試験・build のみ）、p003 の実機は新しい SwitchBot の後、HAT の型番をユーザーに確認 |
 | [WS305](ws305/ws.md) | MG006 | デスクトップの GPU の passthrough の試験環境（Linux＋VFIO＋QEMU、素の起動と使い分け）（2026-10-27 ユーザー） | incomplete（再開待ち） | P4 はラップアップ（2026-10-27）。script と guest の image は用意済み、host（10.0.10.3）では未着手。再開は ws.md の「状態と再開点」 |
 | [WS306](ws306/ws.md) | MG006 | GPU の driver の枠組みの「ゲーム最適化」の UAPI（ON/OFF と option の文字列、GPU の名前と driver の版の取得）（2026-10-27 ユーザー） | incomplete | p001 cleared（2026-11-01）、実装は担当の割当の後（Q306-7・9 は推しで決定） |
