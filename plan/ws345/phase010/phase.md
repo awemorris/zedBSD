@@ -23,6 +23,7 @@ cross-origin の iframe を別の agent（別の heap と lock）にし、並べ
 
 - `plan/ws345/tests/host-frames.c` に足す: cross-origin の iframe（試験の server の 2 つの port）の無限 loop の間に top の timer が走る、postMessage が両方向に届き値が同じ（Array・Map・Date・ArrayBuffer の transfer）、`MessagePort` の transfer は `DataCloneError`、cross-origin の `location` の代入が子を navigation する、`frames.length`・`parent`・`top` が正しい、cross-origin の DOM の access が `SecurityError`。
 - WPT の `html/webappapis/` と `html/browsers/` の postMessage・cross-origin の部分集合（Q1 と範囲を決める）。ThreadSanitizer の variant。
+  - 範囲（2026-11-14 Q1 の判断）: `html/browsers/origin/cross-origin-objects/*.html`、`webmessaging/*.htm(l)`、`webmessaging/without-ports/*.html`。`plan/ws345/tests/wpt-cross-origin.py`（wpt serve を P3 の port で、WPT の host の名は getaddrinfo の LD_PRELOAD の shim `wpt-hosts.c` で 127.0.0.1 に。/etc/hosts は変えない）。p011 で流した（結果は p011 の phase.md）。
 - 回帰（この Phase の終わりに 1 回）: `sh plan/ws074/tests/host-build.sh plain`（warning 0）、host-* の exit が前と同じ、js、http・http-async・loader・fetch、component（`plan/tools/browser-component/run.py`）、`sh plan/ws334/tests/stage1.sh TREE plain` の前後、`sh plan/ws334/tests/cross-build.sh`。
 
 ## 受け入れ
