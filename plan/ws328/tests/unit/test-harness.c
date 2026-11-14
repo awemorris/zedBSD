@@ -60,14 +60,14 @@ harness_reference(void)
 	 * 0.375 -> 96; pixel (2, 2) wholly -> 255; pixel (3, 2) 0.75 -> 191.
 	 */
 	harness_contour(&lines, vertices, &contour, square, 4);
-	reference_coverage(&lines, VEC_FILL_NONZERO, 0.0, 0.0, 0, 0, 4, 4, alpha);
+	CHECK(reference_coverage(&lines, VEC_FILL_NONZERO, 0.0, 0.0, 0, 0, 4, 4, alpha) == 0);
 	CHECK_LONG(alpha[1 * 4 + 1], 96);
 	CHECK_LONG(alpha[2 * 4 + 2], 255);
 	CHECK_LONG(alpha[2 * 4 + 3], 191);
 	CHECK_LONG(alpha[0 * 4 + 0], 0);
 
 	/* The same moved by half a pixel right: pixel (1, 1) now 0.25 across (1.75 to 2) -> 0.125 -> 32. */
-	reference_coverage(&lines, VEC_FILL_NONZERO, 0.5, 0.0, 0, 0, 4, 4, alpha);
+	CHECK(reference_coverage(&lines, VEC_FILL_NONZERO, 0.5, 0.0, 0, 0, 4, 4, alpha) == 0);
 	CHECK_LONG(alpha[1 * 4 + 1], 32);
 
 	/*
@@ -77,10 +77,13 @@ harness_reference(void)
 	 * is outside, so 0.5 -> 128 (the sampled value may be one step away).
 	 */
 	harness_contour(&lines, vertices, &contour, triangle, 3);
-	reference_coverage(&lines, VEC_FILL_NONZERO, 0.0, 0.0, 0, 0, 4, 4, alpha);
+	CHECK(reference_coverage(&lines, VEC_FILL_NONZERO, 0.0, 0.0, 0, 0, 4, 4, alpha) == 0);
 	CHECK_LONG(alpha[0], 255);
 	CHECK_NEAR(alpha[2 * 4 + 1], 128, 1);
 	CHECK_LONG(alpha[3 * 4 + 3], 0);
+
+	/* A rectangle wider than the reference computes is refused, not truncated. */
+	CHECK(reference_coverage(&lines, VEC_FILL_NONZERO, 0.0, 0.0, 0, 0, REFERENCE_WIDTH_MAX + 1, 1, alpha) == -1);
 }
 
 /* The markup reader and the tree functions. */
@@ -111,6 +114,8 @@ harness_tree(void)
 	CHECK(child != NULL && tree.name(tree.context, child) == NULL);
 	found = tree.find_id(tree.context, "r");
 	CHECK(found != NULL && strcmp(tree.name(tree.context, found), "rect") == 0);
+	CHECK(found != NULL && tree.parent(tree.context, found) == (const struct svg_node *)(const void *)root);
+	CHECK(tree.parent(tree.context, (const struct svg_node *)(const void *)root) == NULL);
 	CHECK(tree.find_id(tree.context, "none") == NULL);
 	CHECK(tree.parse_color(tree.context, "#f00", 4, &color) == 0 && color == 0xffff0000U);
 	CHECK(tree.parse_color(tree.context, "#00ff0080", 9, &color) == 0 && color == 0x8000ff00U);

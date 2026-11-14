@@ -19,7 +19,7 @@
 int
 vec_gradient_fixup_css(
 	struct vec_stop *stops,
-	size_t count)
+	size_t *count)
 {
 	(void)stops;
 	(void)count;
@@ -38,6 +38,25 @@ vec_gradient_fixup_svg(
 {
 	(void)stops;
 	(void)count;
+
+	/* Not implemented yet. */
+	return ENOSYS;
+}
+
+/*
+ * Not implemented yet.
+ */
+int
+vec_gradient_extend_span(
+	struct vec_stop *stops,
+	size_t count,
+	float *start,
+	float *length)
+{
+	(void)stops;
+	(void)count;
+	(void)start;
+	(void)length;
 
 	/* Not implemented yet. */
 	return ENOSYS;
@@ -181,4 +200,19 @@ vec_gradient_sample(
 
 	/* Not implemented yet. */
 	return 0;
+}
+
+/*
+ * Not implemented yet.
+ */
+float
+vec_gradient_line_length(
+	const struct vec_gradient *gradient,
+	const struct vec_rect *area)
+{
+	(void)gradient;
+	(void)area;
+
+	/* Not implemented yet. */
+	return 0.0f;
 }

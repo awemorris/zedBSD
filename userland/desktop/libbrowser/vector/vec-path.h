@@ -24,6 +24,7 @@
 #define KEILAND_BROWSER_VECTOR_PATH_H
 
 #include "vector/vec-base.h"
+#include "vector/vec-rrect.h"
 
 /*
  * The most points and the most verbs one path holds.  A million points is
@@ -209,18 +210,20 @@ int vec_path_append_rect(struct vec_path *path, float x, float y, float width, f
  * path of SVG 2 §10.2 when every corner has the same radii, and the shape
  * of CSS Backgrounds 3 §4.2 in general.
  *
- * radii[corner][axis]: corner 0 top left, 1 top right, 2 bottom right,
- * 3 bottom left; axis 0 horizontal, 1 vertical.  The caller has already
- * reduced them (vec_rrect_normalize, or SVG 2 §10.2's clamping): the two
- * radii along each side sum to at most that side's length.  A corner with
- * either radius 0 is square.  Each curved corner is a quarter ellipse
- * added as vec_path_arc_to would (one cubic Bezier curve).
+ * rrect->rect is the rectangle (left, top, right, bottom);
+ * rrect->radii[corner][axis] the radii, corner VEC_CORNER_* and axis 0
+ * horizontal, 1 vertical.  The caller has already reduced them
+ * (vec_rrect_normalize, or SVG 2 §10.2's clamping): the two radii along
+ * each side sum to at most that side's length.  A corner with either
+ * radius 0 is square.  Each curved corner is a quarter ellipse added as
+ * vec_path_arc_to would (one cubic Bezier curve).
  *
- * Errors: EINVAL when a value is not finite, width, height or a radius is
- * negative, or the radii along a side sum to more than its length plus
- * 1/1024 of it; ENOBUFS; ENOMEM (sticky).
+ * Errors: EINVAL when a value is not finite, the rectangle is inverted
+ * (right < left or bottom < top), a radius is negative, or the radii
+ * along a side sum to more than its length plus 1/1024 of it; ENOBUFS;
+ * ENOMEM (sticky).
  */
-int vec_path_append_rounded_rect(struct vec_path *path, float x, float y, float width, float height, const float radii[4][2]);
+int vec_path_append_rounded_rect(struct vec_path *path, const struct vec_rrect *rrect);
 
 /*
  * Adds a closed ellipse as its own subpath, the equivalent path of SVG 2

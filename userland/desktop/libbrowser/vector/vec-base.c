@@ -6,7 +6,8 @@
  */
 
 /*
- * The common ground of the vector drawing: the affine matrix and the checks of points and rectangles.
+ * The common ground of the vector drawing: the affine matrix, the checks of points and rectangles, and the
+ * arctangent and exponential that the GPU shaders compute the same way.
  */
 
 #include "vector/vec-base.h"
@@ -233,4 +234,32 @@ vec_rect_empty(
 	struct vec_rect *rect)
 {
 	(void)rect;
+}
+
+/*
+ * Not implemented yet.
+ */
+float
+vec_atan2(
+	float y,
+	float x)
+{
+	(void)y;
+	(void)x;
+
+	/* Not implemented yet. */
+	return 0.0f;
+}
+
+/*
+ * Not implemented yet.
+ */
+float
+vec_exp(
+	float x)
+{
+	(void)x;
+
+	/* Not implemented yet. */
+	return 0.0f;
 }

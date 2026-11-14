@@ -288,6 +288,15 @@ fail:
 
 /* The struct svg_tree functions over a test document (context is the document). */
 CHECK_UNUSED static const struct svg_node *
+test_parent(
+	void *context,
+	const struct svg_node *node)
+{
+	(void)context;
+	return (const struct svg_node *)((const struct test_node *)(const void *)node)->parent;
+}
+
+CHECK_UNUSED static const struct svg_node *
 test_first_child(
 	void *context,
 	const struct svg_node *node)
@@ -446,6 +455,7 @@ test_tree_make(
 	struct test_document *document)
 {
 	tree->context = document;
+	tree->parent = test_parent;
 	tree->first_child = test_first_child;
 	tree->next_sibling = test_next_sibling;
 	tree->name = test_name;

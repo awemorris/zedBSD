@@ -5,15 +5,17 @@
 #  2. every .c compiles with both;
 #  3. the modules include nothing of the engine: only vector/ and svg/ headers and the C library's
 #     (no "base/", "dom/", "css/", "page/", "paint/", "layout/" and no <vulkan/...>);
-#  4. no source names development records (a WS, Phase, Queue or Bug number, or plan/);
+#  4. no source names development records (a WS, Phase, Queue or Bug number, Q1, a date, or plan/);
 #  5. with BASE=<commit>, every header vector/vec-*.h and svg/svg-*.h is unchanged since that commit (an
 #     implementation Phase must not change them; a header fault goes back to Q1);
 #  6. every .c compiles for zedBSD (amd64) against zedBSD's own C library headers with the project's clang
-#     (WS328_ZEDBSD_CC, default build/llvm/bin/clang, --target=x86_64-unknown-zedbsd) and a sysroot (WS328_ZEDBSD_SYSROOT, default
-#     /home/awe/zedBSD-claude1/build/x86_64/sysroot, read-only); skipped with a note when either is missing.
+#     (WS328_ZEDBSD_CC, default build/llvm/bin/clang of this tree, --target=x86_64-unknown-zedbsd, the flags of
+#     userland/base/package.mk for x86_64) and a sysroot (WS328_ZEDBSD_SYSROOT, default build/x86_64/sysroot of this
+#     tree, as the phase.md says how to get them); when either is missing check 6 is not done and the last line is
+#     "check-skeleton: INCOMPLETE" (exit 1), which does not pass.
 #   sh plan/ws328/tests/check-skeleton.sh
 #   BASE=<sha> sh plan/ws328/tests/check-skeleton.sh
-# Last line: check-skeleton: PASS or check-skeleton: FAIL.  Output under build/tmp/ws328-skeleton.
+# Last line: check-skeleton: PASS, FAIL or INCOMPLETE.  Output under build/tmp/ws328-skeleton.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
@@ -52,7 +54,8 @@ if grep -n -E '#[[:space:]]*include[[:space:]]*["<](base|dom|css|page|paint|layo
 	status=1
 fi
 
-if grep -n -E '\b(WS|ws)[0-9]{3}\b|\bq[0-9]{3,4}\b|BUG-[0-9]+|plan/' $src/vector/* $src/svg/*; then
+if grep -n -E '\b(WS|ws)[0-9]{3}\b|\bq[0-9]{3,4}\b|\bp[0-9]{3}\b|\bQ1\b|BUG-[0-9]+|plan/|\b20[0-9]{2}-[01][0-9]-[0-3][0-9]\b' \
+    $src/vector/* $src/svg/*; then
 	echo "FAILED development records named in the sources (above)"
 	status=1
 fi
@@ -67,7 +70,7 @@ if [ -n "${BASE:-}" ]; then
 		git diff --stat "$BASE" -- $frozen
 		status=1
 	fi
-	added=$(git ls-files -- $src/vector/ $src/svg/ | grep -E '\.h$' | while read -r header; do
+	added=$(ls $src/vector/*.h $src/svg/*.h | while read -r header; do
 		git cat-file -e "$BASE:$header" 2> /dev/null || echo "$header"; done)
 	if [ -n "$added" ]; then
 		echo "FAILED headers added since $BASE: $added"
@@ -76,11 +79,11 @@ if [ -n "${BASE:-}" ]; then
 fi
 
 zedbsd_cc=${WS328_ZEDBSD_CC:-build/llvm/bin/clang}
-zedbsd_sysroot=${WS328_ZEDBSD_SYSROOT:-/home/awe/zedBSD-claude1/build/x86_64/sysroot}
+zedbsd_sysroot=${WS328_ZEDBSD_SYSROOT:-build/x86_64/sysroot}
 if [ -x "$zedbsd_cc" ] && [ -d "$zedbsd_sysroot/usr/include" ]; then
 	for source in $src/vector/*.c $src/svg/*.c; do
 		if ! timeout 120 "$zedbsd_cc" --target=x86_64-unknown-zedbsd -nostdinc -I$src -Iinclude \
-		    -isystem "$zedbsd_sysroot/usr/include" -DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64 -DKERN_DYNAMIC_LIBC \
+		    -isystem "$zedbsd_sysroot/usr/include" -m64 -march=x86-64 -DHAL_ARCH_X86_64 -DKERN_USER_ABI_LP64 \
 		    -std=c11 -Wall -Wextra -Werror -fsyntax-only "$source" > "$out/zedbsd.log" 2>&1; then
 			echo "FAILED zedBSD headers $source"
 			grep error "$out/zedbsd.log" | head -10
@@ -88,7 +91,11 @@ if [ -x "$zedbsd_cc" ] && [ -d "$zedbsd_sysroot/usr/include" ]; then
 		fi
 	done
 else
-	echo "zedBSD toolchain or sysroot: not present (check 6 skipped)"
+	echo "zedBSD toolchain ($zedbsd_cc) or sysroot ($zedbsd_sysroot): not present, check 6 not done"
+	if [ "$status" = 0 ]; then
+		echo "check-skeleton: INCOMPLETE"
+		exit 1
+	fi
 fi
 
 if [ "$status" = 0 ]; then echo "check-skeleton: PASS"; else echo "check-skeleton: FAIL"; fi

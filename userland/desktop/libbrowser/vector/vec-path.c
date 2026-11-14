@@ -203,18 +203,10 @@ vec_path_append_rect(
 int
 vec_path_append_rounded_rect(
 	struct vec_path *path,
-	float x,
-	float y,
-	float width,
-	float height,
-	const float radii[4][2])
+	const struct vec_rrect *rrect)
 {
 	(void)path;
-	(void)x;
-	(void)y;
-	(void)width;
-	(void)height;
-	(void)radii;
+	(void)rrect;
 
 	/* Not implemented yet. */
 	return ENOSYS;

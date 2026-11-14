@@ -74,3 +74,22 @@ svg_style_apply(
 	/* Not implemented yet. */
 	return ENOSYS;
 }
+
+/*
+ * Not implemented yet.
+ */
+int
+svg_style_of(
+	const struct svg_tree *tree,
+	const struct svg_node *element,
+	const struct svg_style *outer,
+	struct svg_style *style)
+{
+	(void)tree;
+	(void)element;
+	(void)outer;
+	(void)style;
+
+	/* Not implemented yet. */
+	return ENOSYS;
+}

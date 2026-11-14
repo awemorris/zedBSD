@@ -23,8 +23,9 @@
  * the clipPath's children: the shape elements, and 'use' elements that
  * reference a shape element directly (a use of anything else contributes
  * nothing).  Each child's style is svg_style_inherit from the clipPath's
- * (whose own style comes from svg_style_initial: a clipPath does not
- * inherit from where it sits) then svg_style_apply; a child with display
+ * then svg_style_apply; the clipPath's own style is svg_style_of over its
+ * ancestors with outer (§6.1: properties inherit into the clipPath from
+ * its ancestors, not from the clipped element); a child with display
  * none or visibility hidden contributes nothing; its transform attribute
  * applies; its clip-rule (not fill-rule) is its part's rule (§6.2); its
  * fill, stroke and opacity do not matter (only the geometry of the fill
@@ -47,7 +48,9 @@
  * ends at outer, and the clip met along the chain is the element's
  * whole clip.
  *
- * Input: tree; clip_path an element named "clipPath"; user_to_picture the
+ * Input: tree; clip_path an element named "clipPath"; style_outer the
+ * style the SVG fragment's root inherits (svg_style_of; NULL for the
+ * initial style); user_to_picture the
  * clipped element's matrix; bbox its tight bounding box in its user
  * space; context its context (lengths of the children resolve against
  * the clipped element's viewport); outer the clip already applying to it
@@ -58,6 +61,6 @@
  * error nothing is added (paths added for it are left in the picture,
  * unused).
  */
-int svg_clip_build(const struct svg_tree *tree, const struct svg_node *clip_path, const struct vec_matrix *user_to_picture, const struct vec_rect *bbox, const struct svg_context *context, int outer, struct svg_picture *picture, int *index);
+int svg_clip_build(const struct svg_tree *tree, const struct svg_node *clip_path, const struct svg_style *style_outer, const struct vec_matrix *user_to_picture, const struct vec_rect *bbox, const struct svg_context *context, int outer, struct svg_picture *picture, int *index);
 
 #endif

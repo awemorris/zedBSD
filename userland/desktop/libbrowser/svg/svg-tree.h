@@ -34,6 +34,10 @@ struct svg_node;
 /*
  * The functions over a tree, and the context they are given:
  *
+ *   parent(context, node)        the parent node, or NULL for the root of
+ *                                the document (an element whose parent is
+ *                                not an element, such as the document
+ *                                node, also gets NULL).
  *   first_child(context, node)   the first child node, or NULL.
  *   next_sibling(context, node)  the next sibling node, or NULL.
  *   name(context, node)          for an element in the SVG namespace, its
@@ -60,6 +64,7 @@ struct svg_node;
  */
 struct svg_tree {
 	void *context;
+	const struct svg_node *(*parent)(void *context, const struct svg_node *node);
 	const struct svg_node *(*first_child)(void *context, const struct svg_node *node);
 	const struct svg_node *(*next_sibling)(void *context, const struct svg_node *node);
 	const char *(*name)(void *context, const struct svg_node *node);
