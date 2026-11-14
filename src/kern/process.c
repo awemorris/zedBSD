@@ -2251,6 +2251,8 @@ process_itimer_tick(
 		if (interval != 0U)
 			left = interval - over % interval;
 	}
+
+	/* Publishes the new remaining count when it changed. */
 	if (left != remaining)
 		atomic_u64_store_release(&process->itimer_remaining[which], left);
 
@@ -2278,6 +2280,7 @@ process_itimer_real_tick_all(
 	unsigned long irq;
 	uint64_t remaining;
 	uint64_t since;
+	uint64_t elapsed;
 	uint64_t nearest;
 	unsigned count;
 	unsigned index;
@@ -2335,9 +2338,10 @@ process_itimer_real_tick_all(
 		for (index = 0; index < count; index++) {
 			process = armed[index];
 			expired = 0;
-			if (process->state != PROCESS_DEAD)
-				expired = process_itimer_tick(process, 0,
-				    itimer_real_elapsed(process, since, now));
+			if (process->state != PROCESS_DEAD) {
+				elapsed = itimer_real_elapsed(process, since, now);
+				expired = process_itimer_tick(process, 0, elapsed);
+			}
 			if (expired)
 				(void)signal_send_process_info(process, SIGALRM, &info);
 			nearest = itimer_real_nearest(process, now, nearest);
@@ -2354,10 +2358,13 @@ process_itimer_real_tick_all(
 	process = process_find_next_ref(cursor);
 	while (process != NULL) {
 		cursor = process->pid;
+		expired = 0;
 		if (process != &process0 &&
-		    process->state != PROCESS_DEAD &&
-		    process_itimer_tick(process, 0,
-		    itimer_real_elapsed(process, since, now)))
+		    process->state != PROCESS_DEAD) {
+			elapsed = itimer_real_elapsed(process, since, now);
+			expired = process_itimer_tick(process, 0, elapsed);
+		}
+		if (expired)
 			(void)signal_send_process_info(process, SIGALRM, &info);
 		if (process != &process0)
 			nearest = itimer_real_nearest(process, now, nearest);

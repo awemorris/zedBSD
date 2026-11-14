@@ -315,6 +315,7 @@ amd64_lapic_timer_start(
 	void)
 {
 	hal_cpu_id_t cpu;
+	uint32_t count;
 	bool deadline;
 	int error;
 
@@ -349,7 +350,8 @@ amd64_lapic_timer_start(
 	if (!deadline) {
 		write_reg(LAPIC_TIMER_DIVIDE, 0x3U);
 		write_reg(LAPIC_LVT_TIMER, LAPIC_PERIODIC | INT_IRQ_BASE);
-		write_reg(LAPIC_TIMER_INITIAL, periodic_count(cpu));
+		count = periodic_count(cpu);
+		write_reg(LAPIC_TIMER_INITIAL, count);
 	}
 
 	/* Succeeded: the local timer is running. */
@@ -405,11 +407,13 @@ hal_rtc_get_tick_hz(
 	void)
 {
 	uint32_t divisor;
+	hal_cpu_id_t cpu;
 	bool enabled;
 
 	/* Reads the CPU's entry with interrupts off, so the CPU cannot change under it. */
 	enabled = hal_irq_disable();
-	divisor = cpu_divisor(hal_cpu_current());
+	cpu = hal_cpu_current();
+	divisor = cpu_divisor(cpu);
 	if (enabled)
 		hal_irq_enable();
 
@@ -434,6 +438,7 @@ hal_rtc_set_tick_hz(
 	hal_cpu_id_t cpu;
 	uint32_t divisor;
 	uint32_t before;
+	uint32_t count;
 	bool enabled;
 
 	/* The nearest number of periods, within the bounds. */
@@ -454,8 +459,10 @@ hal_rtc_set_tick_hz(
 	/* Applies it to the timer that runs. */
 	if (tick_deadline[cpu] && divisor != before)
 		arm_next_deadline();
-	if (tick_periodic[cpu] && divisor != before)
-		write_reg(LAPIC_TIMER_INITIAL, periodic_count(cpu));
+	if (tick_periodic[cpu] && divisor != before) {
+		count = periodic_count(cpu);
+		write_reg(LAPIC_TIMER_INITIAL, count);
+	}
 	if (enabled)
 		hal_irq_enable();
 
@@ -982,6 +989,8 @@ calibrate_timer(
 			PIT_INPUT_HZ,
 			PIT_CAL_TICKS);
 	}
+
+	/* Reports the period the timers are calibrated to. */
 	hal_printf("A64 TIMER CAL READY ticks=%u\n", timer_base);
 
 	/* Succeeded: timer_base holds the period every CPU's timer is a multiple of. */
@@ -1077,9 +1086,11 @@ arm_next_deadline(
 	uint64_t now;
 	uint64_t next;
 	uint64_t period;
+	hal_cpu_id_t cpu;
 
 	/* The next multiple of the period after now. */
-	period = tick_base_tsc * cpu_divisor(hal_cpu_current());
+	cpu = hal_cpu_current();
+	period = tick_base_tsc * cpu_divisor(cpu);
 	now = amd64_timecounter_sample_serialized();
 	next = (now / period + 1U) * period;
 

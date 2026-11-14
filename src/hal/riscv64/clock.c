@@ -226,6 +226,7 @@ hal_rtc_set_tick_hz(
 	struct riscv64_percpu *cpu;
 	uint64_t divisor;
 	uint64_t before;
+	uint64_t now;
 	bool enabled;
 
 	/* The nearest number of periods, within the bounds. */
@@ -244,8 +245,10 @@ hal_rtc_set_tick_hz(
 	cpu->timer_divisor = divisor;
 
 	/* The next tick moves now, once the timer runs. */
-	if (divisor != before && timer_frequency != 0U && cpu->timer_deadline != 0U)
-		arm_next(cpu, riscv64_read_time());
+	if (divisor != before && timer_frequency != 0U && cpu->timer_deadline != 0U) {
+		now = riscv64_read_time();
+		arm_next(cpu, now);
+	}
 	if (enabled)
 		hal_irq_enable();
 
