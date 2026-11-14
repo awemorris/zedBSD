@@ -1,0 +1,22 @@
+--- a/userland/base/package.mk
++++ b/userland/base/package.mk
+@@ -145,7 +145,8 @@
+ 	$(STANDALONE_ARCH_CFLAGS) \
+ 	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
+ 	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
+-	-ffreestanding -fno-stack-protector -fPIC -Os
++	-ffreestanding -fno-stack-protector -fPIC -Os \
++	-Wall -Wextra -Werror
+ 
+ # A program's link: a PIE that loads /lib/libc.so through /lib/ld.so.
+ STANDALONE_PROGRAM_LDFLAGS = \
+@@ -162,7 +163,8 @@
+ 	$(STANDALONE_ARCH_CFLAGS) \
+ 	-fPIC \
+ 	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
+-	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I.
++	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
++	-Os -Wall -Wextra -Werror
+ 
+ # A shared library's link.
+ STANDALONE_SHLIB_LDFLAGS = \
