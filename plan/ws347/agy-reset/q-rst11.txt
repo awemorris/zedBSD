@@ -1,0 +1,30 @@
+Claude から。reset の依頼 11 回目（5 file）。atg_tlb_l1.v（b7693ca6）の差分はユーザーが OK を出した。同じ形で次の 5 file を頼む。
+
+## 方針（2026-11-14 ユーザーの決定。毎回同じ）
+1. 全ての register は reset で初期化する。memory（番地で書き番地で読む配列: RAM・cache の tag と data・register file・FIFO の data）は初期化しない。
+2. reset の論理はそのまま。極性・各 module の中の反転（rst_p・rst_sync・rst_high・rst_inv など）・KC705 の LUT1 の複製・core_rst_n は変えない。
+3. 各 block は、その block（無ければ同じ clock の他の block）が今使っている reset の信号をそのまま使い、非同期 reset にする: active high の信号なら always の感応リストに "or posedge <信号>"、active low なら "or negedge <信号>" を足し、block の先頭の if で reset する。reset の無い register には 0 を入れる（状態機械は今の idle の定数）。ifdef SYNTH_KINTEX7 の枝で reset の信号が違う時は、枝ごとに合わせる。
+4. 例外（同期 reset のまま）: DSP48E1・BRAM・SRL を包む am_* の wrapper。方針 4 の例外は、RAM の読みの register・SRL に実際になる段の列（同じ値を何段も遅らせるだけの shift）・DSP48E1 の中に入る register だけ。普通のパイプラインの段・計算の段・入力を 1 段受ける FF・制御の bit は、この例外に当たらないので reset する。wrapper でない module が RAM・SRL・DSP を直に推論している所（RAM の読みの register、SRL になるはずの段の列）は、非同期にすると推論が壊れるので変えずに返事の表に書く。
+5. reset の port が無い module は、clk の次に input wire rst_n を足し、使う所の全てで、使う側の同じ clock の reset を繋ぐ（この 5 file の外は port の接続の行だけを変えてよい。変えた行を返事に書く）。
+6. docs/ghci.md が CTRL.RESET で残すと書く register（IRQ_ENABLE・WDT_CYCLES・CP_HEAP_BASE/LIMIT・RING_BASE・RING_SIZE・SCRATCH など）に core の reset を足さない。電源の reset が無ければ足さずに返事に書く。
+7. negedge clk の block・clock を止める作り（clk & en）・clock が複数ある所は触らずに返事に書く。
+8. reset 以外の振る舞い・keep の属性・fanout の複製・段の構造は変えない。
+9. 例外（2026-11-14 ユーザーの決定、ASIC の fanout の規則 docs/style.md を採る）: valid などの制御の bit が reset で 0 になり中身が読まれない data の register（skid の data、幅の広い data の buffer）は、reset を配ると fanout の規則を超える時は reset しなくてよい。その時は表に「data（valid が守る、fanout）」として書く。制御の register（valid・状態・counter・pointer など）は必ず reset する。
+10. 非同期 reset の感応リストと先頭の if には reset の net だけを入れる。flush・en などの機能の信号を reset の net に OR して非同期にしない（glitch と時機の変化）。機能の clear は else の中で同期のまま。SYNCASYNCNET などの lint を lint_off で黙らせない。
+
+## 今回の file
+- rtl/gpu/blt/atg_blt.v
+- rtl/gpu/blt/atg_blt_2d.v
+- rtl/gpu/blt/atg_blt_3d.v
+- rtl/gpu/blt/atg_blt_acc.v
+- rtl/gpu/blt/atg_blt_blend.v
+
+## 受け入れ
+- この 5 file の module を top にした Verilator の lint（tools/lint.sh と同じ option）が、汎用と -DSYNTH_KINTEX7 sim/lint/xilinx_stubs.v の両方で warning 0。
+- この 5 file の module の単体の testbench（sim/tb/<module>_tb.v があるもの）を sim/run.sh で 1 本ずつ流し PASS。atg_top*・atg_ghci_top・atg_kc705_*・atg_su・atg_tu・atg_rx_pipeline など上位の物は流さず、流してほしい名前を返事に書く。
+- commit は 1 つ（-m WIP）。触ってよいのは ~/amaterrace-gpu の tree の中だけ。
+
+返事に書く物: file ごとの要点（非同期にした block の数、新しく reset を入れた register）、変えなかった register と理由の表、5 file の外で変えた行、lint と testbench の結果、commit の SHA。最後の行に DONE。
+
+## 前の回への指摘（今回あわせて直す）
+- 10 回目（38593b0e）は OK（Claude がレビューした。消えた論理の行は無く、足したのは reset だけ）。atg_dc_tmds の qm_xor の書き換えは同じ累積 XOR なので受け入れる。ただし reset 以外の変更は、lint のための同じ論理の書き換えでも、返事の「reset 以外の変更」の節に別に書く（file・行・理由・論理が同じ根拠）。

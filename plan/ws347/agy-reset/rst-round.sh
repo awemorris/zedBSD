@@ -6,7 +6,8 @@ N=$1
 first=$(( (N - 2) * 5 + 1 ))
 files=$(sed -n "${first},$((first + 4))p" "$S/rst-files.txt")
 [ -n "$files" ] || { echo "no files for round $N"; exit 1; }
-pgrep -x agy -a | grep -v remote-control && { echo "agy busy"; exit 1; }
+# The remote-control server runs as a bare "agy"; only a headless run on this conversation is busy.
+pgrep -af "^agy .*--conversation 0daea4c0-5273-459c-8188-69588eac753b" && { echo "agy busy"; exit 1; }
 {
 cat <<HEAD
 Claude から。reset の依頼 $N 回目（5 file）。atg_tlb_l1.v（b7693ca6）の差分はユーザーが OK を出した。同じ形で次の 5 file を頼む。
