@@ -3,7 +3,7 @@
 # ws299-p005 UFS の file の連続の読み書き（先読みの窓・大きな request・書きの合流）
 
 - 親: [WS299](../ws.md)。Queue: q1634 / q1634-i01（調べ）→ q1640 / q1640-i01（設計・実装、担当 P1）。前提: p002・p004（raw の先読み）。
-- Status: in-progress（2026-11-13 q2044 P2: file の書き p7 99%・読み 117%、root の UFS の上書き 105%・新しく 101%。p6 の raw の書きは同じ形（dd 1 回と sync）で 104〜117%、256 MiB ×4 の形は 82%。下の「2026-11-13」）
+- Status: in-progress（実装済み・試験 PASS: 受け入れ 1 は 2026-11-13 Q1 の同じ形の基準で 5330 q2044 の数が全部 95% 以上、2・3 は QEMU（2026-11-15 q2108 P4）、4 は x86_64・rpi5・vf2 の build と host 試験。Q1 の判定待ち。下の「2026-11-15」）
 - Disposition: normal
 
 ## 調べた事実（2026-10-28、読みだけの調べ、tree は agent/p1-ws299 36d0d7b5d）
@@ -130,10 +130,10 @@
 
 ## 受け入れ
 
-1. 5330: UFS の file の 1 GiB の書き（`ufsover`、sync 込み）と冷えた読み（`ufsread`）が、同じ条件の Debian の ext4（`ext4-w1m`・`ext4-r1m`）の 95% 以上。raw の書き（`raw0..3` と sync の和、`rawtotal`）が Debian の `b-w1m` の 95% 以上、各 256 MiB が `d-w*` の中央値の 95% 以上。`ufsnew` の数も記録する。
+1. 5330: UFS の file の 1 GiB の書き（`ufsover`、sync 込み）と冷えた読み（`ufsread`）が、同じ条件の Debian の ext4（`ext4-w1m`・`ext4-r1m`）の 95% 以上。raw の書きは同じ形で比べる（2026-11-13 Q1 の判断）: p6 の 1 回の dd 1 GiB と sync（`rawone`）が Debian の `b-w1m` の 95% 以上、raw の書き p7 4 GiB（`patwrite`、両方同じ道具）が Debian の 95% 以上。`ufsnew` と、256 MiB ×4 の形（`rawtotal`、各 256 MiB）の数は記録だけ（前の基準「`rawtotal` が `b-w1m` の 95% 以上、各 256 MiB が `d-w*` の中央値の 95% 以上」は、close で書き切る buffered と 1 回の dd conv=fsync・direct との比べで条件が違うので外した）。
 2. 32 MiB の cache の QEMU で UFS の 200 MiB の書きが止まらない（D1）。
 3. QEMU: boot-test、`qemu-readahead.sh`・`qemu-nvme-shapes.sh`・`qemu-grow-reboot.sh`・`qemu-cache-stress.sh`、加えて UFS の書きと sync・reboot の後の cksum。
-4. build の warning 0（config-5330・pcat・visionfive2・rpi4・m68k-virt）。host 試験（cluster の範囲の計算、UFS の流れの検出）。
+4. build の warning 0（2026-11-15 読み替え: 当時の一覧 config-5330・pcat・visionfive2・rpi4・m68k-virt は今の build に無い名を含むので、今の機種の x86_64・rpi5・vf2 で確かめる）。host 試験（cluster の範囲の計算、UFS の流れの検出）。
 
 ## 計画の案（2026-10-28 q1634 の時点の案、上の設計で置き換えた）（設計の前の案。design-reviewer と Q1 の判断の前）
 
@@ -163,3 +163,11 @@
 - p6 の raw の書き: 256 MiB の dd 4 回（各 close で書き切る）と sync は 1395 MB/s で、Debian の 1 回の dd conv=fsync（b-w1m 1690）の 82%。各 256 MiB は 1342〜1491 MB/s（10 ms 刻みで ±5%）、Debian の direct の 256 MiB（d-w）の中央値は約 1.8 GB/s。同じ形で比べる mode `rawone`（1 回の dd 1 GiB と sync）を足した: zedBSD 1760 MB/s、同じ時間帯の Debian の b-w1m 1505（117%）、q2044a の 1690（104%）。
 - 見立て（未確かめ）: 256 MiB ごとの遅さは、dirty が上限（cache の 1/4 ≈ 246 MiB）の半分に達するまで worker が書き始めない（約 123 MiB を写す約 65 ms は device が休む）のと、close で残りを書き切る待ち。1 回の大きな書きではこの頭の休みが全体に薄まる。
 - 受け入れ 1 の「各 256 MiB が d-w の中央値の 95% 以上」は buffered（close で書き切る）と direct の比べで、同じ条件ではない。案（Q1 へ）: p6 の raw の書きは同じ形（rawone 対 b-w1m）と raw の書き p7 4 GiB（patwrite、両方同じ道具）で判定する。256 MiB の形も 95% にするなら、連続の書き手には上限の半分を待たず cluster ができた所から worker に書かせる直しが要る（UFS の書きにも効くので、その時は UFS の書きを測り直す）。
+
+## 2026-11-15（q2108、P4）: 基準の直しと QEMU の受け入れ
+
+- 受け入れ 1 を 2026-11-13 の Q1 の判断（raw の書きは同じ形で比べる）に書き直した（上の「受け入れ」）。その形で 2026-11-13 q2044 の 5330 の数（main fe6ea0f967 の kernel、[ws.md](../ws.md) の「2026-11-13」）は: root の UFS の 1 GiB の上書き 105%・新しく 101%（記録だけ）、file の書き p7 4 GiB 99%、file の冷えた読み p7 117%、`rawone` 104%（q2044a の Debian）〜117%（同じ時間帯の Debian）、raw の書き p7 4 GiB 134%。256 MiB ×4 の形（`rawtotal`）は 82% で、記録だけ。→ 全部 95% 以上。その後の kernel の変更は 35b527f23c（readahead の読みの道だけ、書きには触らない）。
+- 受け入れ 2: `qemu-cache32-write.sh`（32 MiB の cache の kernel、guest の `vfs.bufcache.max_bytes` 33554432）で 400 MiB の書きと sync、cksum 一致 → PASS。
+- 受け入れ 3: main ba1482f25d で boot-test・`qemu-readahead`・`qemu-nvme-shapes`・`qemu-grow-reboot`・`qemu-cache-stress` PASS、UFS の書きと sync・切断の後の cksum は `qemu-ufs-crash.sh`（2・6・15 秒、kept・remount・host の検査が全部 ok）PASS。コマンドと最後の行は [phase007](../phase007/phase.md) の「結果」。
+- 受け入れ 4: x86_64・rpi5・vf2 の kernel の build rc 0・warning 0（当時の一覧は今の機種に読み替えた）、host 試験 `buf-slab-test`・`buf-readahead-test`・`host/ufs-cgmap-test.sh` PASS。cluster の範囲の計算の純粋な関数の host 試験は、この Phase の file の中に見当たらない（`ufs-cgmap-test` は free map の探し）。未確認として残す。
+- 推し: cleared（Q1 の判定）。5330 で main の kernel の測り直しは p007 の 5330 の段。
