@@ -147,14 +147,14 @@ wb_os_file_read(
 	}
 
 	/* Refuses a directory. */
-	if (S_ISDIR(status.st_mode)) {
+	if ((status.st_mode & S_IFMT) == S_IFDIR) {
 		close(descriptor);
 		return EISDIR;
 	}
 
 	/* Takes the size of a regular file as a hint for how much room to make. */
 	hint = 0;
-	if (S_ISREG(status.st_mode) && status.st_size > 0)
+	if ((status.st_mode & S_IFMT) == S_IFREG && status.st_size > 0)
 		hint = (size_t)status.st_size;
 
 	/* Reads the file to its end. */
@@ -269,6 +269,8 @@ wb_os_file_replace(
 		if (error != EEXIST)
 			break;
 	}
+
+	/* Gives up when no unused temporary name was found. */
 	if (error != 0) {
 		free(temporary);
 		if (error == EEXIST)
@@ -334,7 +336,7 @@ wb_os_file_remove(
 	/* Some systems refuse a directory with a permission error; the directory is what to report. */
 	if (code == EPERM || code == EACCES) {
 		found = lstat(path, &status);
-		if (found == 0 && S_ISDIR(status.st_mode))
+		if (found == 0 && (status.st_mode & S_IFMT) == S_IFDIR)
 			return EISDIR;
 	}
 
@@ -399,6 +401,8 @@ wb_os_make_directories(
 			copy[index] = '/';
 		start = index + 1U;
 	}
+
+	/* Releases the copy of the path. */
 	free(copy);
 
 	/* A part that vanished while the walk was under way is a failure of the system, not a missing file. */
@@ -430,6 +434,8 @@ wb_os_list(
 	int error;
 	int valid;
 	int stop;
+	int current_difference;
+	int parent_difference;
 
 	/* Refuses a call that names no function to call. */
 	if (each == NULL)
@@ -457,10 +463,14 @@ wb_os_list(
 			break;
 		}
 
-		/* Skips the two entries every directory has. */
-		if (strcmp(entry->d_name, ".") == 0)
+		/* Compares the name with the two entries every directory has. */
+		current_difference = strcmp(entry->d_name, ".");
+		parent_difference = strcmp(entry->d_name, "..");
+
+		/* Skips those two entries. */
+		if (current_difference == 0)
 			continue;
-		if (strcmp(entry->d_name, "..") == 0)
+		if (parent_difference == 0)
 			continue;
 
 		/* Skips a name that is not text. */
@@ -474,6 +484,8 @@ wb_os_list(
 		if (stop != 0)
 			break;
 	}
+
+	/* Closes the directory. */
 	closedir(directory);
 
 	/* Reports the caller's stop or the failure of the walk. */
@@ -520,6 +532,8 @@ wb_os_full_path(
 		free(resolved);
 		return EILSEQ;
 	}
+
+	/* Refuses a path that is too long for the layer. */
 	if (length > WB_OS_PATH_MAX) {
 		free(resolved);
 		return ENAMETOOLONG;
@@ -586,6 +600,8 @@ wb_os_current_directory(
 		free(text);
 		return EILSEQ;
 	}
+
+	/* Refuses a path that is too long for the layer. */
 	if (length > WB_OS_PATH_MAX) {
 		free(text);
 		return ENAMETOOLONG;
@@ -729,6 +745,8 @@ wb_os_lock_open(
 		free(resolved);
 		return EILSEQ;
 	}
+
+	/* Refuses a directory whose lock file's name would not fit. */
 	if (length > WB_OS_PATH_MAX - sizeof(OS_LOCK_NAME)) {
 		free(resolved);
 		return ENAMETOOLONG;
@@ -741,6 +759,8 @@ wb_os_lock_open(
 		free(resolved);
 		return ENOMEM;
 	}
+
+	/* Builds the lock file's path from the resolved directory. */
 	if (length == 1U && resolved[0] == '/')
 		snprintf(lock_path, path_size, "%s", OS_LOCK_NAME);
 	else
@@ -753,6 +773,8 @@ wb_os_lock_open(
 		free(resolved);
 		return ENOMEM;
 	}
+
+	/* Fills in the lock; its descriptor is set when the lock file is opened. */
 	entry->next = NULL;
 	entry->directory = resolved;
 	entry->descriptor = -1;
@@ -806,6 +828,8 @@ wb_os_lock_close(
 			break;
 		}
 	}
+
+	/* Closes the descriptor, which releases the system's lock. */
 	close(lock->descriptor);
 
 	wb_static_mutex_unlock(&os_lock_mutex);
@@ -881,6 +905,8 @@ os_utf8_is_valid(
 			if (bytes[index + follow] < 0x80U || bytes[index + follow] > 0xbfU)
 				return 0;
 		}
+
+		/* Moves to the character after this sequence. */
 		index += count + 1U;
 	}
 
@@ -1083,6 +1109,7 @@ os_write_all(
 		if (written == 0)
 			return EIO;
 
+		/* Moves past the bytes that were written. */
 		cursor += written;
 		left -= (size_t)written;
 	}
@@ -1165,6 +1192,8 @@ os_read_all(
 				return error;
 			room = buffer->capacity - buffer->length - 1U;
 		}
+
+		/* Limits one read to the largest size the system call takes. */
 		if (room > OS_READ_MAX)
 			room = OS_READ_MAX;
 
@@ -1181,6 +1210,7 @@ os_read_all(
 		if (got == 0)
 			break;
 
+		/* Counts the bytes just read as part of the contents. */
 		buffer->length += (size_t)got;
 	}
 
@@ -1213,7 +1243,7 @@ os_ensure_directory(
 
 	/* A directory that is there already is what was wanted, whatever the refusal. */
 	found = stat(path, &status);
-	if (found == 0 && S_ISDIR(status.st_mode))
+	if (found == 0 && (status.st_mode & S_IFMT) == S_IFDIR)
 		return 0;
 
 	/* A name that exists and is no directory is in the way. */
@@ -1262,12 +1292,14 @@ os_lock_acquire(
 	int descriptor;
 	int locked;
 	int error;
+	int difference;
 
 	/* Refuses a directory this process holds already. */
 	for (other = os_lock_held;
 	     other != NULL;
 	     other = other->next) {
-		if (strcmp(other->directory, entry->directory) == 0)
+		difference = strcmp(other->directory, entry->directory);
+		if (difference == 0)
 			return EBUSY;
 	}
 

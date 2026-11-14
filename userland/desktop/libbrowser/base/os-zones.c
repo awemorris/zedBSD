@@ -200,6 +200,7 @@ wb_os_zone_find(
 			break;
 		}
 
+		/* Narrows the search to the half the key can be in. */
 		if (order < 0) {
 			/* The key sorts before the middle row, so keep the lower half. */
 			high = middle;

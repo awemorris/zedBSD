@@ -135,6 +135,8 @@ wb_os_file_read(
 		free(wide);
 		return error;
 	}
+
+	/* Releases the converted path; the open handle does not need it. */
 	free(wide);
 
 	/* Learns what the file is, so a directory is refused and the size is known. */
@@ -206,6 +208,8 @@ wb_os_file_write(
 		free(wide);
 		return error;
 	}
+
+	/* Releases the converted path. */
 	free(wide);
 
 	/* Writes every byte. */
@@ -249,6 +253,7 @@ wb_os_file_replace(
 	int flushed;
 	int closed;
 	int moved;
+	int directory;
 	unsigned long code;
 	HANDLE handle;
 
@@ -308,6 +313,8 @@ wb_os_file_replace(
 			break;
 		}
 	}
+
+	/* Gives up when no unused temporary name was found. */
 	if (error != 0) {
 		free(temporary);
 		free(destination);
@@ -357,25 +364,34 @@ wb_os_file_replace(
 			error = 0;
 			break;
 		}
+
+		/* Keeps the failure of the move for the retry decision. */
 		code = GetLastError();
 		error = os_file_error_from_code(code);
 
 		/* A directory in the way will not go away; reports it as such. */
-		if (code == ERROR_ACCESS_DENIED && os_is_directory(destination) != 0) {
-			error = EISDIR;
-			break;
+		if (code == ERROR_ACCESS_DENIED) {
+			directory = os_is_directory(destination);
+			if (directory != 0) {
+				error = EISDIR;
+				break;
+			}
 		}
 
 		/* Tries again only for the failures another program's hold causes. */
 		if (error != EACCES && error != EBUSY)
 			break;
 	}
+
+	/* Gives up when the move still failed after every try, removing the temporary file. */
 	if (error != 0) {
 		DeleteFileW(temporary);
 		free(temporary);
 		free(destination);
 		return error;
 	}
+
+	/* Releases both converted paths now that the file is in place. */
 	free(temporary);
 	free(destination);
 
@@ -407,6 +423,8 @@ wb_os_file_remove(
 		free(wide);
 		return 0;
 	}
+
+	/* Keeps the failure of the removal for the decisions below. */
 	code = GetLastError();
 
 	/* The system refuses a directory with an access error; the directory is what to report. */
@@ -515,6 +533,10 @@ wb_os_list(
 	int stop;
 	int more;
 	int converted;
+	int directory;
+	int current_difference;
+	int parent_difference;
+	unsigned long attributes;
 
 	/* Refuses a call that names no function to call. */
 	if (each == NULL)
@@ -532,11 +554,15 @@ wb_os_list(
 		free(wide);
 		return ENOMEM;
 	}
+
+	/* Copies the directory's path and makes sure a separator ends it. */
 	wmemcpy(pattern, wide, wide_length);
 	if (wide_length > 0 && wide[wide_length - 1U] != L'\\') {
 		pattern[wide_length] = L'\\';
 		wide_length++;
 	}
+
+	/* Appends the wildcard that matches every name. */
 	pattern[wide_length] = L'*';
 	pattern[wide_length + 1U] = L'\0';
 
@@ -549,24 +575,36 @@ wb_os_list(
 
 		/* Tells a file and a missing directory apart, and an empty root from a missing one. */
 		if (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND || code == ERROR_DIRECTORY) {
-			if (os_is_directory(wide) != 0) {
+			directory = os_is_directory(wide);
+			if (directory != 0) {
 				free(wide);
 				return 0;
 			}
-			if (GetFileAttributesW(wide) != INVALID_FILE_ATTRIBUTES)
+
+			/* Tells a file from a missing path. */
+			attributes = GetFileAttributesW(wide);
+			if (attributes != INVALID_FILE_ATTRIBUTES)
 				error = ENOTDIR;
 		}
+
+		/* Releases the converted path and reports why the search could not start. */
 		free(wide);
 		return error;
 	}
+
+	/* Releases the converted path; the search handle needs only the pattern. */
 	free(wide);
 
 	/* Visits the entries until the last one, an error, or the caller's stop. */
 	stop = 0;
 	more = 1;
 	while (more != 0) {
-		/* Skips the two entries every directory has. */
-		if (wcscmp(found.cFileName, L".") != 0 && wcscmp(found.cFileName, L"..") != 0) {
+		/* Compares the name with the two entries every directory has. */
+		current_difference = wcscmp(found.cFileName, L".");
+		parent_difference = wcscmp(found.cFileName, L"..");
+
+		/* Skips those two entries. */
+		if (current_difference != 0 && parent_difference != 0) {
 			/* Converts the name; a name that is not text is skipped. */
 			name = NULL;
 			converted = wb_os_utf8_from_wide(found.cFileName, (size_t)-1, &name, NULL);
@@ -574,6 +612,8 @@ wb_os_list(
 				stop = ENOMEM;
 				break;
 			}
+
+			/* Offers the name to the caller when it was converted. */
 			if (converted == 0) {
 				/* Offers the name to the caller. */
 				stop = each(context, name);
@@ -593,6 +633,8 @@ wb_os_list(
 		if (code != ERROR_NO_MORE_FILES)
 			stop = wb_os_error_from_system(code);
 	}
+
+	/* Closes the search. */
 	FindClose(search);
 
 	/* Reports the caller's stop or the failure of the walk. */
@@ -664,6 +706,8 @@ wb_os_full_path(
 			return ENOMEM;
 		}
 	}
+
+	/* Releases the converted input path, which the answer no longer needs. */
 	free(wide);
 	if (attempt >= OS_SIZE_ATTEMPTS) {
 		free(full);
@@ -730,6 +774,8 @@ wb_os_current_directory(
 		if (wide == NULL)
 			return ENOMEM;
 	}
+
+	/* Gives up when the answer never fit in the buffer within the attempts. */
 	if (attempt >= OS_SIZE_ATTEMPTS) {
 		free(wide);
 		return EIO;
@@ -763,6 +809,7 @@ wb_os_path_is_absolute(
 	int separator_first;
 	int separator_second;
 	int separator_third;
+	int has_drive;
 
 	/* NULL and the empty path name nothing. */
 	if (path == NULL)
@@ -771,7 +818,8 @@ wb_os_path_is_absolute(
 		return 0;
 
 	/* A drive letter, a colon and a separator. */
-	if (os_has_drive(path) != 0) {
+	has_drive = os_has_drive(path);
+	if (has_drive != 0) {
 		separator_first = os_is_separator((unsigned char)path[2]);
 		if (separator_first != 0)
 			return 1;
@@ -807,6 +855,7 @@ wb_os_path_from_url(
 {
 	size_t start;
 	int error;
+	int letter;
 
 	/* Refuses a call that names no path or no buffer. */
 	if (path == NULL || buffer == NULL)
@@ -819,7 +868,8 @@ wb_os_path_from_url(
 	/* Refuses a path that does not start with "/X:" and then a separator or the end ('|' stands for ':'). */
 	if (path[0] != '/')
 		return ENOENT;
-	if (os_is_letter((unsigned char)path[1]) == 0)
+	letter = os_is_letter((unsigned char)path[1]);
+	if (letter == 0)
 		return ENOENT;
 	if (path[2] != ':' && path[2] != '|')
 		return ENOENT;
@@ -866,6 +916,8 @@ wb_os_url_from_path(
 	size_t path_start;
 	size_t server_end;
 	int error;
+	int has_drive;
+	int separator;
 
 	/* Refuses a call that names no path or no place for an answer. */
 	if (local == NULL || host == NULL || path == NULL)
@@ -874,11 +926,14 @@ wb_os_url_from_path(
 	path_start = path->length;
 
 	/* A drive path: "/X:" and the rest with the URL separator. */
-	if (os_has_drive(local) != 0) {
+	has_drive = os_has_drive(local);
+	if (has_drive != 0) {
 		/* Refuses a drive-relative path. */
-		if (os_is_separator((unsigned char)local[2]) == 0)
+		separator = os_is_separator((unsigned char)local[2]);
+		if (separator == 0)
 			return EINVAL;
 
+		/* Writes the drive's root of the URL path first, then the rest of the local path. */
 		error = wb_buffer_append_byte(path, '/');
 		if (error == 0)
 			error = wb_buffer_append_byte(path, (unsigned char)local[0]);
@@ -896,21 +951,31 @@ wb_os_url_from_path(
 	}
 
 	/* Anything but a UNC path is relative, and a path that begins "\\?\" or "\\.\" names a device. */
-	if (os_is_separator((unsigned char)local[0]) == 0)
+	separator = os_is_separator((unsigned char)local[0]);
+	if (separator == 0)
 		return EINVAL;
-	if (os_is_separator((unsigned char)local[1]) == 0)
+	separator = os_is_separator((unsigned char)local[1]);
+	if (separator == 0)
 		return EINVAL;
-	if (local[2] == '\0' || os_is_separator((unsigned char)local[2]) != 0)
+	separator = os_is_separator((unsigned char)local[2]);
+	if (local[2] == '\0' || separator != 0)
 		return EINVAL;
 	if (local[2] == '?')
 		return EINVAL;
-	if (local[2] == '.' && (local[3] == '\0' || os_is_separator((unsigned char)local[3]) != 0))
-		return EINVAL;
+	if (local[2] == '.') {
+		separator = os_is_separator((unsigned char)local[3]);
+		if (local[3] == '\0' || separator != 0)
+			return EINVAL;
+	}
 
 	/* Finds the end of the server's name. */
 	server_end = 2;
-	while (local[server_end] != '\0' && os_is_separator((unsigned char)local[server_end]) == 0)
+	while (local[server_end] != '\0') {
+		separator = os_is_separator((unsigned char)local[server_end]);
+		if (separator != 0)
+			break;
 		server_end++;
+	}
 
 	/* Appends the server as the host. */
 	error = wb_buffer_append(host, local + 2, server_end - 2U);
@@ -955,6 +1020,7 @@ wb_os_lock_open(
 	HANDLE handle;
 	int error;
 	int locked;
+	int separator;
 
 	/* Leaves the output in its failure state until the lock is taken. */
 	if (lock != NULL)
@@ -977,10 +1043,13 @@ wb_os_lock_open(
 		return ENOMEM;
 	memcpy(lock_path, directory, length);
 	extra = 0;
-	if (os_is_separator((unsigned char)directory[length - 1U]) == 0) {
+	separator = os_is_separator((unsigned char)directory[length - 1U]);
+	if (separator == 0) {
 		lock_path[length] = '\\';
 		extra = 1;
 	}
+
+	/* Appends the lock file's name. */
 	memcpy(lock_path + length + extra, OS_LOCK_NAME, sizeof(OS_LOCK_NAME));
 
 	/* Converts the lock file's path for the W functions. */
@@ -1148,14 +1217,18 @@ os_open_error(
 {
 	unsigned long code;
 	int error;
+	int directory;
 
 	/* Reads the error before the attribute check can change it. */
 	code = GetLastError();
 	error = wb_os_error_from_system(code);
 
 	/* A directory in the way is not a plain refusal. */
-	if (code == ERROR_ACCESS_DENIED && os_is_directory(path) != 0)
-		return EISDIR;
+	if (code == ERROR_ACCESS_DENIED) {
+		directory = os_is_directory(path);
+		if (directory != 0)
+			return EISDIR;
+	}
 
 	/* A path through something that is not a directory names no file. */
 	if (error == ENOTDIR)
@@ -1236,6 +1309,7 @@ os_write_all(
 		if (written == 0)
 			return EIO;
 
+		/* Moves past the bytes that were written. */
 		cursor += written;
 		left -= (size_t)written;
 	}
@@ -1259,6 +1333,7 @@ os_read_all(
 {
 	size_t room;
 	DWORD got;
+	unsigned long code;
 	int error;
 	int done;
 
@@ -1281,6 +1356,8 @@ os_read_all(
 				return error;
 			room = buffer->capacity - buffer->length - 1U;
 		}
+
+		/* Limits one read to the largest size the system call takes. */
 		if (room > OS_READ_MAX)
 			room = OS_READ_MAX;
 
@@ -1289,7 +1366,8 @@ os_read_all(
 		done = ReadFile(handle, buffer->data + buffer->length, (DWORD)room, &got, NULL);
 		if (done == 0) {
 			/* The end of the file is not an error. */
-			if (GetLastError() == ERROR_HANDLE_EOF)
+			code = GetLastError();
+			if (code == ERROR_HANDLE_EOF)
 				break;
 			return os_file_error_here();
 		}
@@ -1298,6 +1376,7 @@ os_read_all(
 		if (got == 0)
 			break;
 
+		/* Counts the bytes just read as part of the contents. */
 		buffer->length += (size_t)got;
 	}
 
@@ -1352,9 +1431,14 @@ os_root_length(
 	size_t length)
 {
 	size_t at;
+	int unc_difference;
+	int letter;
 
 	/* An extended-length UNC path: the server and the share are the root. */
-	if (length >= 8U && wmemcmp(path, L"\\\\?\\UNC\\", 8U) == 0) {
+	unc_difference = 1;
+	if (length >= 8U)
+		unc_difference = wmemcmp(path, L"\\\\?\\UNC\\", 8U);
+	if (unc_difference == 0) {
 		at = os_skip_names(path, length, 8U, 2);
 		return at;
 	}
@@ -1362,16 +1446,24 @@ os_root_length(
 	/* An extended-length or device path: a drive is the root when there is one. */
 	if (length >= 4U && path[0] == L'\\' && path[1] == L'\\' && (path[2] == L'?' || path[2] == L'.') && path[3] == L'\\') {
 		at = 4U;
-		if (length >= 6U && os_is_letter((int)path[4]) != 0 && path[5] == L':') {
+		letter = 0;
+		if (length >= 6U)
+			letter = os_is_letter((int)path[4]);
+		if (letter != 0 && path[5] == L':') {
 			at = 6U;
 			if (length > 6U && path[6] == L'\\')
 				at = 7U;
 		}
+
+		/* Reports the root of an extended-length or device path. */
 		return at;
 	}
 
 	/* A drive, with or without the separator after it. */
-	if (length >= 2U && os_is_letter((int)path[0]) != 0 && path[1] == L':') {
+	letter = 0;
+	if (length >= 2U)
+		letter = os_is_letter((int)path[0]);
+	if (letter != 0 && path[1] == L':') {
 		at = 2U;
 		if (length > 2U && path[2] == L'\\')
 			at = 3U;
@@ -1432,6 +1524,7 @@ os_ensure_directory(
 	unsigned long attributes;
 	unsigned long code;
 	int created;
+	int directory;
 
 	/* Looks at what is there already. */
 	attributes = GetFileAttributesW(path);
@@ -1440,6 +1533,8 @@ os_ensure_directory(
 			return 0;
 		return ENOTDIR;
 	}
+
+	/* Keeps the failure of the attribute read for the decision below. */
 	code = GetLastError();
 
 	/* Any failure but "nothing there" is the system's refusal. */
@@ -1454,7 +1549,8 @@ os_ensure_directory(
 
 	/* Another program made the name in the meantime; it is fine if it is a directory. */
 	if (code == ERROR_ALREADY_EXISTS) {
-		if (os_is_directory(path) != 0)
+		directory = os_is_directory(path);
+		if (directory != 0)
 			return 0;
 		return ENOTDIR;
 	}
@@ -1506,8 +1602,11 @@ static int
 os_has_drive(
 	const char *path)
 {
+	int letter;
+
 	/* A letter, then a colon. */
-	if (os_is_letter((unsigned char)path[0]) == 0)
+	letter = os_is_letter((unsigned char)path[0]);
+	if (letter == 0)
 		return 0;
 	if (path[1] != ':')
 		return 0;
@@ -1580,6 +1679,8 @@ os_convert_slashes(
 			byte = '\\';
 		error = wb_buffer_append_byte(buffer, (unsigned char)byte);
 	}
+
+	/* Undoes the appended text when the conversion failed. */
 	if (error != 0) {
 		os_buffer_restore(buffer, start);
 		return error;

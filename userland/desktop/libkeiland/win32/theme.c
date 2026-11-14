@@ -232,6 +232,8 @@ theme_hue(
 	} else {
 		hue = 60.0f * ((red - green) / span) + 240.0f;
 	}
+
+	/* Turns a negative hue into the same angle between 0 and 360. */
 	if (hue < 0.0f)
 		hue += 360.0f;
 

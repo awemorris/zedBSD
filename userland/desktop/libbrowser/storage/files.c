@@ -163,6 +163,7 @@ files_build_directory(
 	size_t length;
 	int error;
 
+	/* Starts an empty buffer for the resolved path. */
 	wb_buffer_init(&buffer);
 
 	/* Resolves the directory against the current directory. */
@@ -183,6 +184,8 @@ files_build_directory(
 		wb_buffer_release(&buffer);
 		return ENOMEM;
 	}
+
+	/* Copies the resolved path for the caller. */
 	memcpy(copy, buffer.data, length);
 	copy[length] = '\0';
 	wb_buffer_release(&buffer);
@@ -221,6 +224,8 @@ files_space_path(
 	} else {
 		error = wb_buffer_printf(path, "%s%u", WB_STORAGE_FILES_OTHER, space);
 	}
+
+	/* Reports why the path could not be built. */
 	if (error != 0)
 		return error;
 
@@ -303,6 +308,7 @@ files_read(
 	if (!valid)
 		return EINVAL;
 
+	/* Takes the context the engine handed over and starts the buffers. */
 	files = (const struct files_context *)context;
 	wb_buffer_init(&path);
 	wb_buffer_init(&bytes);
@@ -323,6 +329,8 @@ files_read(
 		wb_buffer_release(&bytes);
 		return 0;
 	}
+
+	/* Reports why the file could not be read. */
 	if (error != 0) {
 		wb_buffer_release(&bytes);
 		return error;
@@ -335,14 +343,18 @@ files_read(
 		if (piece > WB_STORAGE_FILES_PIECE)
 			piece = WB_STORAGE_FILES_PIECE;
 
+		/* Hands the next piece to the sink. */
 		error = browser_storage_sink_append(sink, bytes.data + offset, piece);
 		if (error != 0) {
 			wb_buffer_release(&bytes);
 			return error;
 		}
 
+		/* Moves past the piece that was handed over. */
 		offset += piece;
 	}
+
+	/* Releases the file's bytes. */
 	wb_buffer_release(&bytes);
 
 	/* Succeeded: the record exists and the sink holds all of it. */
@@ -379,6 +391,7 @@ files_write(
 	if (!valid)
 		return EINVAL;
 
+	/* Takes the context the engine handed over and starts the buffer. */
 	files = (const struct files_context *)context;
 	wb_buffer_init(&path);
 
@@ -388,6 +401,8 @@ files_write(
 		wb_buffer_release(&path);
 		return error;
 	}
+
+	/* Makes the directories the record's file lives in. */
 	error = wb_os_make_directories(wb_buffer_string(&path));
 	if (error != 0) {
 		wb_buffer_release(&path);
@@ -494,6 +509,7 @@ files_clear(
 	if (context == NULL)
 		return EINVAL;
 
+	/* Takes the context the engine handed over and starts the list of keys. */
 	files = (const struct files_context *)context;
 	wb_buffer_init(&keys);
 
@@ -510,12 +526,16 @@ files_clear(
 	while (offset < keys.length) {
 		length = strlen((const char *)keys.data + offset);
 
+		/* Removes the record of this key. */
 		error = files_remove_record(files, space, (const char *)keys.data + offset);
 		if (error != 0 && first_error == 0)
 			first_error = error;
 
+		/* Moves to the next key. */
 		offset += length + 1;
 	}
+
+	/* Releases the list of keys. */
 	wb_buffer_release(&keys);
 
 	/* Reports the first record that could not be removed. */
@@ -539,6 +559,7 @@ files_close(
 	if (context == NULL)
 		return;
 
+	/* Takes the context the engine handed over. */
 	files = (struct files_context *)context;
 
 	/* Lets another process or open use the directory. */
@@ -566,6 +587,7 @@ files_walk(
 	struct wb_buffer path;
 	int error;
 
+	/* Starts an empty buffer for the path. */
 	wb_buffer_init(&path);
 
 	/* Builds the space directory's path. */
@@ -612,7 +634,9 @@ files_walk_entry(
 	size_t length;
 	int valid;
 	int error;
+	int difference;
 
+	/* Takes the walk's state and measures the name. */
 	walk = (struct files_walk *)context;
 	length = strlen(name);
 
@@ -620,7 +644,8 @@ files_walk_entry(
 	if (walk->is_local) {
 		if (length <= FILES_LOCAL_SUFFIX_LENGTH)
 			return 0;
-		if (strcmp(name + length - FILES_LOCAL_SUFFIX_LENGTH, WB_STORAGE_FILES_LOCAL_SUFFIX) != 0)
+		difference = strcmp(name + length - FILES_LOCAL_SUFFIX_LENGTH, WB_STORAGE_FILES_LOCAL_SUFFIX);
+		if (difference != 0)
 			return 0;
 		length -= FILES_LOCAL_SUFFIX_LENGTH;
 	}
@@ -664,6 +689,7 @@ files_remove_record(
 	struct wb_buffer path;
 	int error;
 
+	/* Starts an empty buffer for the path. */
 	wb_buffer_init(&path);
 
 	/* Builds the record's path. */
@@ -698,6 +724,7 @@ files_collect_key(
 	struct wb_buffer *keys;
 	int error;
 
+	/* Takes the buffer the keys are collected in. */
 	keys = (struct wb_buffer *)each_context;
 
 	/* Adds the key with its terminating NUL, which separates it from the next. */

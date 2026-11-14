@@ -298,6 +298,8 @@ keiui_win32_ime_place(
 		(void)ImmAssociateContextEx(window->frame, NULL, 0U);
 		return;
 	}
+
+	/* Gives the frame its default input context back, since text is wanted. */
 	(void)ImmAssociateContextEx(window->frame, NULL, IACE_DEFAULT);
 
 	/* The caret in the frame's pixels. */
@@ -343,6 +345,8 @@ keiui_win32_tsf_open(
 		free(store);
 		return;
 	}
+
+	/* Joins the store's interfaces and gives the store its first reference. */
 	store->store.lpVtbl = &ime_store_calls;
 	store->composition.lpVtbl = &ime_sink_calls;
 	store->references = 1;
@@ -355,6 +359,8 @@ keiui_win32_tsf_open(
 		ime_tsf_end(tsf);
 		return;
 	}
+
+	/* Records that this call started COM, so ending the state ends it. */
 	tsf->com = 1;
 
 	/* The thread's manager, started for this client. */
@@ -364,6 +370,8 @@ keiui_win32_tsf_open(
 		ime_tsf_end(tsf);
 		return;
 	}
+
+	/* Starts the manager for this client. */
 	result = ITfThreadMgr_Activate(tsf->threads, &tsf->client);
 	if (FAILED(result)) {
 		ITfThreadMgr_Release(tsf->threads);
@@ -379,12 +387,16 @@ keiui_win32_tsf_open(
 		ime_tsf_end(tsf);
 		return;
 	}
+
+	/* Makes the context over the store. */
 	result = ITfDocumentMgr_CreateContext(tsf->document, tsf->client, 0U, (IUnknown *)&store->store, &tsf->context, &tsf->cookie);
 	if (FAILED(result)) {
 		tsf->context = NULL;
 		ime_tsf_end(tsf);
 		return;
 	}
+
+	/* Makes the context the document's current one. */
 	result = ITfDocumentMgr_Push(tsf->document, tsf->context);
 	if (FAILED(result)) {
 		ime_tsf_end(tsf);
@@ -448,8 +460,10 @@ keiui_win32_ime_message(
 	char *text;
 	HIMC context;
 	size_t offset;
+	LONG cursor;
 	int found;
 
+	/* The word parameter carries nothing the composition messages need here. */
 	(void)wparam;
 
 	/* What the message is. */
@@ -476,6 +490,8 @@ keiui_win32_ime_message(
 				input->end = -1;
 			}
 		}
+
+		/* Takes the message as handled. */
 		*result = 0;
 		return 1;
 	default:
@@ -492,6 +508,8 @@ keiui_win32_ime_message(
 		*result = 0;
 		return 1;
 	}
+
+	/* Takes the finished string when the input method has one. */
 	if (lparam & GCS_RESULTSTR) {
 		found = ime_string(context, GCS_RESULTSTR, text, KEIUI_WIN32_CONTROL_TEXT, -1, &offset);
 		if (found && window->editing) {
@@ -502,9 +520,13 @@ keiui_win32_ime_message(
 				ime_copy(input->text, sizeof(input->text), text);
 		}
 	}
+
+	/* Takes the string still being composed, with its cursor. */
 	if (lparam & GCS_COMPSTR) {
-		found = ime_string(context, GCS_COMPSTR, text, KEIUI_WIN32_CONTROL_TEXT,
-		    (lparam & GCS_CURSORPOS) ? ImmGetCompositionStringW(context, GCS_CURSORPOS, NULL, 0U) : -1, &offset);
+		cursor = -1;
+		if (lparam & GCS_CURSORPOS)
+			cursor = ImmGetCompositionStringW(context, GCS_CURSORPOS, NULL, 0U);
+		found = ime_string(context, GCS_COMPSTR, text, KEIUI_WIN32_CONTROL_TEXT, cursor, &offset);
 		if (!found)
 			text[0] = '\0';
 		if (window->editing) {
@@ -518,6 +540,8 @@ keiui_win32_ime_message(
 			}
 		}
 	}
+
+	/* Gives the input context back and releases the text. */
 	(void)ImmReleaseContext(window->frame, context);
 	free(text);
 
@@ -580,6 +604,8 @@ ime_copy(
 		while (length > 0U && ((unsigned char)from[length] & 0xc0U) == 0x80U)
 			length--;
 	}
+
+	/* Copies the characters that fit and ends the text. */
 	memcpy(to, from, length);
 	to[length] = '\0';
 }
@@ -652,6 +678,8 @@ ime_tsf_place(
 			store->discarding = 0;
 		}
 	}
+
+	/* Remembers where the text goes now. */
 	store->target = target;
 
 	/* The frame's focus: the document while text is wanted, none otherwise. */
@@ -781,6 +809,8 @@ ime_store_hand_on(
 		if ((store->sink_mask & TS_AS_SEL_CHANGE) != 0U)
 			(void)ITextStoreACPSink_OnSelectionChange(store->sink);
 	}
+
+	/* Ends the handing of the change to the sink. */
 	store->handing = 0;
 
 	/* A lock granted meanwhile changed the store again: handed on too. */
@@ -819,6 +849,8 @@ ime_store_commit(
 		if (input != NULL)
 			ime_copy(input->text, sizeof(input->text), text);
 	}
+
+	/* Releases the text read from the input method. */
 	free(text);
 }
 
@@ -847,11 +879,15 @@ ime_store_preedit(
 			keiui_win32_field_compose(window, "", 0U);
 			return;
 		}
+
+		/* Shows an empty pre-edit text. */
 		input = keiui_win32_push(window, KL_WINDOW_TEXT_PREEDIT);
 		if (input != NULL) {
 			input->begin = -1;
 			input->end = -1;
 		}
+
+		/* Stops here: the composition has no text. */
 		return;
 	}
 
@@ -894,6 +930,8 @@ ime_store_preedit(
 			input->end = (int32_t)offset;
 		}
 	}
+
+	/* Releases the text read from the input method. */
 	free(text);
 }
 
@@ -927,8 +965,12 @@ ime_store_range(
 			store->composition_start = start;
 			store->composition_end = start + length;
 		}
+
+		/* Releases the range's interface. */
 		ITfRangeACP_Release(offsets);
 	}
+
+	/* Releases the range taken for the view. */
 	if (own != NULL)
 		ITfRange_Release(own);
 }
@@ -982,6 +1024,8 @@ store_query(
 	void **out)
 {
 	struct ime_store *store;
+	BOOL is_store;
+	BOOL is_composition;
 
 	/* Somewhere to put it. */
 	if (out == NULL)
@@ -989,10 +1033,16 @@ store_query(
 	*out = NULL;
 	store = ime_store_of(iface);
 
+	/* Tells which of the two interfaces the caller asks for. */
+	is_store = IsEqualIID(id, &IID_IUnknown);
+	if (!is_store)
+		is_store = IsEqualIID(id, &IID_ITextStoreACP);
+	is_composition = IsEqualIID(id, &IID_ITfContextOwnerCompositionSink);
+
 	/* The store's, or the composition sink's. */
-	if (IsEqualIID(id, &IID_IUnknown) || IsEqualIID(id, &IID_ITextStoreACP)) {
+	if (is_store) {
 		*out = &store->store;
-	} else if (IsEqualIID(id, &IID_ITfContextOwnerCompositionSink)) {
+	} else if (is_composition) {
 		*out = &store->composition;
 	} else {
 		return E_NOINTERFACE;
@@ -1051,12 +1101,14 @@ store_advise(
 	IUnknown *given;
 	struct ime_store *store;
 	HRESULT result;
+	BOOL is_sink;
 
 	/* Only the text store's sink. */
 	store = ime_store_of(iface);
 	if (sink == NULL)
 		return E_INVALIDARG;
-	if (!IsEqualIID(id, &IID_ITextStoreACPSink))
+	is_sink = IsEqualIID(id, &IID_ITextStoreACPSink);
+	if (!is_sink)
 		return E_INVALIDARG;
 
 	/* The same sink again changes only its mask; another is refused while one is kept. */
@@ -1069,6 +1121,8 @@ store_advise(
 			IUnknown_Release(kept);
 			return result;
 		}
+
+		/* Releases the two identities; they are compared next. */
 		IUnknown_Release(kept);
 		IUnknown_Release(given);
 		if (kept != given)
@@ -1096,6 +1150,7 @@ store_unadvise(
 {
 	struct ime_store *store;
 
+	/* The sink the caller names is not needed: the store keeps only one. */
 	(void)sink;
 
 	/* The sink kept, if any. */
@@ -1138,6 +1193,8 @@ store_lock(
 			*session = TS_E_SYNCHRONOUS;
 			return S_OK;
 		}
+
+		/* Queues the strongest lock asked for while this one is held. */
 		if ((flags & TS_LF_READWRITE) == TS_LF_READWRITE)
 			store->queued = TS_LF_READWRITE;
 		else if (store->queued == 0U)
@@ -1193,6 +1250,7 @@ store_query_insert(
 {
 	struct ime_store *store;
 
+	/* The number of characters is not needed here. */
 	(void)count;
 
 	/* A range inside the store. */
@@ -1312,6 +1370,8 @@ store_text(
 		runs[0].type = TS_RT_PLAIN;
 		*run_count = 1U;
 	}
+
+	/* Reports where the next read starts. */
 	*next = start + (LONG)count;
 	return S_OK;
 }
@@ -1330,6 +1390,7 @@ store_set_text(
 	struct ime_store *store;
 	HRESULT result;
 
+	/* The flags carry nothing this store needs. */
 	(void)flags;
 
 	/* A write lock. */
@@ -1474,6 +1535,8 @@ store_insert(
 		if (end != NULL)
 			*end = from + (LONG)count;
 	}
+
+	/* Succeeded: the text is in the store. */
 	return S_OK;
 }
 
@@ -1674,6 +1737,7 @@ store_extent(
 	POINT corner;
 	RECT caret;
 
+	/* The range is not needed: the caret is the only rectangle the store has. */
 	(void)start;
 	(void)end;
 
@@ -1840,6 +1904,7 @@ sink_end(
 {
 	struct ime_store *store;
 
+	/* The view is not needed: only one composition goes on. */
 	(void)view;
 
 	/* No composition goes on. */

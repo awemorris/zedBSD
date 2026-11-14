@@ -172,6 +172,8 @@ wb_storage_queue_open(
 		free(created);
 		return error;
 	}
+
+	/* Records that the lock was made, so a failure later destroys it. */
 	created->sync_ready = QUEUE_SYNC_LOCK;
 
 	/* Makes the condition the thread sleeps on. */
@@ -181,6 +183,8 @@ wb_storage_queue_open(
 		free(created);
 		return error;
 	}
+
+	/* Records that the work condition was made. */
 	created->sync_ready = QUEUE_SYNC_WORK;
 
 	/* Makes the condition the waiting callers sleep on. */
@@ -190,6 +194,8 @@ wb_storage_queue_open(
 		free(created);
 		return error;
 	}
+
+	/* Records that every synchronization object was made. */
 	created->sync_ready = QUEUE_SYNC_ALL;
 
 	/* Starts the storage thread, unless there is no backend for it to call. */
@@ -500,6 +506,7 @@ wb_storage_queue_close(
 
 		wb_mutex_unlock(&queue->lock);
 
+		/* Waits for the storage thread to end. */
 		wb_thread_join(&queue->thread);
 	}
 
@@ -646,19 +653,24 @@ queue_add(
 	if (request->kind == REQUEST_WRITE)
 		old = queue_find_merge(queue, request);
 
+	/* Works out how many bytes would be pending with this request. */
 	bytes_after = queue->pending_bytes;
 	if (old != NULL)
 		bytes_after -= old->length;
 
+	/* Refuses a request when the queue has no room for another item. */
 	if (old == NULL && queue->pending_items >= QUEUE_ITEM_LIMIT) {
 		wb_mutex_unlock(&queue->lock);
 		return ENOSPC;
 	}
+
+	/* Refuses a request that would pass the limit of pending bytes. */
 	if (request->length > WB_STORAGE_QUEUE_LIMIT - bytes_after) {
 		wb_mutex_unlock(&queue->lock);
 		return ENOSPC;
 	}
 
+	/* Replaces the earlier write or appends the request to the queue. */
 	if (old != NULL) {
 		/* The new write takes the place of the earlier one, which nothing observes in between. */
 		request->prev = old->prev;
@@ -679,6 +691,7 @@ queue_add(
 		queue->pending_items++;
 	}
 
+	/* Wakes the storage thread to take the request. */
 	wb_cond_signal(&queue->work);
 
 	wb_mutex_unlock(&queue->lock);
@@ -745,6 +758,7 @@ queue_find_merge(
 	struct wb_storage_request *candidate;
 	unsigned scanned;
 	int same_key;
+	int difference;
 
 	/* Looks back through the most recent waiting requests. */
 	scanned = 0;
@@ -763,7 +777,8 @@ queue_find_merge(
 
 		/* Says whether the request concerns the same key. */
 		same_key = 0;
-		if (strcmp(candidate->key, request->key) == 0)
+		difference = strcmp(candidate->key, request->key);
+		if (difference == 0)
 			same_key = 1;
 
 		/* Decides what the request means for the key. */
@@ -798,6 +813,7 @@ queue_thread_main(
 	struct wb_storage_queue *queue;
 	struct wb_storage_request *request;
 
+	/* Takes the queue this thread serves. */
 	queue = argument;
 
 	/* Takes requests from the front until the queue is closing and empty. */
@@ -848,6 +864,7 @@ queue_thread_main(
 		/* Frees the finished block outside the lock. */
 		free(request);
 
+		/* Takes the lock again for the next request. */
 		wb_mutex_lock(&queue->lock);
 	}
 
@@ -864,6 +881,7 @@ queue_execute(
 {
 	const struct browser_storage_calls *calls;
 
+	/* Takes the backend's calls. */
 	calls = queue->calls;
 
 	/* Calls the backend member the request asks for. */
@@ -904,6 +922,7 @@ queue_execute_read(
 	int error;
 	int sink_error;
 
+	/* Takes the buffer the answer goes to and remembers where it started. */
 	buffer = request->buffer;
 	start = buffer->length;
 	found = 0;
@@ -947,6 +966,7 @@ queue_execute_list(
 	size_t start;
 	int error;
 
+	/* Takes the buffer the keys go to and remembers where it started. */
 	keys = request->buffer;
 	start = keys->length;
 
@@ -987,6 +1007,7 @@ queue_list_each(
 	int valid;
 	int error;
 
+	/* Takes the state of the listing. */
 	state = each_context;
 
 	/* Stops as soon as one append failed. */
@@ -1004,6 +1025,8 @@ queue_list_each(
 		state->error = error;
 		return error;
 	}
+
+	/* Counts the key as listed. */
 	state->count++;
 
 	/* Succeeded: asks the backend for the next key. */

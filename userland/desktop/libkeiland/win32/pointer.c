@@ -146,6 +146,7 @@ keiui_win32_pointer_message(
 	BOOL known;
 	int taken;
 
+	/* The long parameter carries nothing the pointer messages need here. */
 	(void)lparam;
 
 	/* Only the pointer messages. */
@@ -197,6 +198,8 @@ keiui_win32_manipulation_open(
 		free(handler);
 		return;
 	}
+
+	/* Joins the handler and the state, the state holding the first reference. */
 	handler->iface.lpVtbl = &pointer_handler_calls;
 	handler->references = 1;
 	handler->manipulation = manipulation;
@@ -209,6 +212,8 @@ keiui_win32_manipulation_open(
 		pointer_end(manipulation);
 		return;
 	}
+
+	/* Records that this call started COM, so closing the window ends it. */
 	manipulation->com = 1;
 
 	/* The manager and its update manager. */
@@ -218,6 +223,8 @@ keiui_win32_manipulation_open(
 		pointer_end(manipulation);
 		return;
 	}
+
+	/* Asks for the update manager, which the timer's ticks drive. */
 	result = IDirectManipulationManager_GetUpdateManager(manipulation->manager, &IID_IDirectManipulationUpdateManager, (void **)&manipulation->updates);
 	if (FAILED(result)) {
 		manipulation->updates = NULL;
@@ -232,6 +239,8 @@ keiui_win32_manipulation_open(
 		pointer_end(manipulation);
 		return;
 	}
+
+	/* Chooses panning in both directions as the viewport's behaviour. */
 	configuration = DIRECTMANIPULATION_CONFIGURATION_INTERACTION |
 	    DIRECTMANIPULATION_CONFIGURATION_TRANSLATION_X |
 	    DIRECTMANIPULATION_CONFIGURATION_TRANSLATION_Y;
@@ -240,6 +249,8 @@ keiui_win32_manipulation_open(
 		pointer_end(manipulation);
 		return;
 	}
+
+	/* Makes the viewport move only when this backend asks. */
 	result = IDirectManipulationViewport_SetViewportOptions(manipulation->viewport, DIRECTMANIPULATION_VIEWPORT_OPTIONS_MANUALUPDATE);
 	if (FAILED(result)) {
 		pointer_end(manipulation);
@@ -256,12 +267,16 @@ keiui_win32_manipulation_open(
 		pointer_end(manipulation);
 		return;
 	}
+
+	/* Takes the content that the viewport moves. */
 	result = IDirectManipulationViewport_GetPrimaryContent(manipulation->viewport, &IID_IDirectManipulationContent, (void **)&manipulation->content);
 	if (FAILED(result)) {
 		manipulation->content = NULL;
 		pointer_end(manipulation);
 		return;
 	}
+
+	/* Makes the content far larger than the viewport. */
 	view.right = (LONG)POINTER_CONTENT_SIDE;
 	view.bottom = (LONG)POINTER_CONTENT_SIDE;
 	result = IDirectManipulationContent_SetContentRect(manipulation->content, &view);
@@ -276,11 +291,15 @@ keiui_win32_manipulation_open(
 		pointer_end(manipulation);
 		return;
 	}
+
+	/* Enables the viewport. */
 	result = IDirectManipulationViewport_Enable(manipulation->viewport);
 	if (FAILED(result)) {
 		pointer_end(manipulation);
 		return;
 	}
+
+	/* Starts the manager for the content window. */
 	result = IDirectManipulationManager_Activate(manipulation->manager, window->content);
 	if (FAILED(result)) {
 		pointer_end(manipulation);
@@ -334,6 +353,7 @@ keiui_win32_manipulation_message(
 	BOOL known;
 	HRESULT result;
 
+	/* The long parameter carries nothing the manipulation messages need here. */
 	(void)lparam;
 
 	/* A window with DirectManipulation. */
@@ -491,6 +511,8 @@ pointer_end(
 			(void)IDirectManipulationViewport_RemoveEventHandler(manipulation->viewport, manipulation->cookie);
 		(void)IDirectManipulationViewport_Abandon(manipulation->viewport);
 	}
+
+	/* Releases the interfaces the state holds. */
 	if (manipulation->content != NULL)
 		IDirectManipulationContent_Release(manipulation->content);
 	if (manipulation->viewport != NULL)
@@ -648,6 +670,7 @@ handler_query(
 	void **out)
 {
 	struct pointer_handler *handler;
+	BOOL offered;
 
 	/* Somewhere to put it. */
 	if (out == NULL)
@@ -656,7 +679,10 @@ handler_query(
 	handler = (struct pointer_handler *)iface;
 
 	/* The handler's, or nothing. */
-	if (!IsEqualIID(id, &IID_IUnknown) && !IsEqualIID(id, &IID_IDirectManipulationViewportEventHandler))
+	offered = IsEqualIID(id, &IID_IUnknown);
+	if (!offered)
+		offered = IsEqualIID(id, &IID_IDirectManipulationViewportEventHandler);
+	if (!offered)
 		return E_NOINTERFACE;
 	*out = &handler->iface;
 
@@ -708,6 +734,7 @@ handler_status(
 {
 	struct pointer_handler *handler;
 
+	/* The viewport and the previous status are not needed. */
 	(void)viewport;
 	(void)previous;
 
@@ -740,6 +767,7 @@ handler_content(
 {
 	struct pointer_handler *handler;
 
+	/* The viewport and the content are not needed; the state knows what moved. */
 	(void)viewport;
 	(void)content;
 

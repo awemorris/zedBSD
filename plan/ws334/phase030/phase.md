@@ -5,6 +5,7 @@
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §6.6（S-A）、決定 16・18。
 - 状態: cleared（2026-11-01 22:58 Q1、main で merge。Makefile と cross-build.sh の衝突を p026 と両方残して解き、合わせた tree で cross-build PASS（warning 0、1 つの .exe の import は system の DLL 13））。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1857-i01、Sonnet）。
 - **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: OpenSSL は `no-shared` の static library（`libssl.a`・`libcrypto.a`）にして .exe に link する。DLL の名前の確かめは要らない。net/tls.c の表は Windows では `net/tls-static.c`（Windows の build だけが compile、sources.mk に書かない）が `<openssl/ssl.h>` の関数の 1 行の wrapper で埋め、開かない。始める前に、表の各行に「OpenSSL だけ」の印を足し、その行が無くても TLS が動く形にする（design §6.6、WS335 の D28 の 1）。手順 3 の「DLL が無い時」の EPROTONOSUPPORT は zedBSD・Linux だけ。受け入れの「DLL を作り」は「static library を作り」に読み替える。
+- 2026-11-14 注（p035）: 下の `openssl-windows.sh`・`openssl-conf/` と OpenSSL の static link は、WS335 p042 で libssl-compat・libcrypto-compat の static link に置き換わり、どこからも使われない。WS334 p035 で消す（Q1 の OK の後）。この記録の script の名前は当時の物。
 - 依存: p005（`wb_os_trust_roots`）・p022（tls.c の library の読み込み）。
 - 担当の想定: Opus（phase-runner）を 1 回。使う約束は `base/os-system.h` の `wb_os_trust_roots`。
 

@@ -140,6 +140,7 @@ wb_os_resolve(
 	if (error == EILSEQ || error == ENAMETOOLONG)
 		return EINVAL;
 
+	/* Reports any other failure of the conversion. */
 	if (error != 0)
 		return error;
 
@@ -151,6 +152,7 @@ wb_os_resolve(
 		if (error == EILSEQ || error == ENAMETOOLONG)
 			return EINVAL;
 
+		/* Reports why the port could not be converted. */
 		return error;
 	}
 
@@ -343,6 +345,7 @@ wb_os_socket_connect_result(
 	int pending;
 	int status;
 	int error;
+	int code;
 
 	/* Refuses a socket that holds nothing. */
 	if (socket < 0)
@@ -362,6 +365,7 @@ wb_os_socket_connect_result(
 		if (error == 0)
 			error = EIO;
 
+		/* Reports why the error of the connect could not be read, a general error when the system gave none. */
 		return error;
 	}
 
@@ -388,13 +392,16 @@ wb_os_socket_connect_result(
 	peer_length = (int)sizeof(peer);
 	status = getpeername((SOCKET)socket, (struct sockaddr *)&peer, &peer_length);
 	if (status == SOCKET_ERROR) {
-		if (WSAGetLastError() == WSAENOTCONN)
+		code = WSAGetLastError();
+		if (code == WSAENOTCONN)
 			return EINPROGRESS;
 
+		/* Reads why the query of the peer failed. */
 		error = os_net_last_error();
 		if (error == 0)
 			error = EIO;
 
+		/* Reports the failure, a general error when the system gave none. */
 		return error;
 	}
 
@@ -648,12 +655,15 @@ wb_os_poll(
 		if (items[position].socket == WB_OS_SOCKET_NONE)
 			continue;
 
+		/* Refuses a socket that is not a valid number. */
 		if (items[position].socket < 0)
 			return EINVAL;
 
+		/* Refuses an item that waits for nothing. */
 		if ((items[position].wants & (WB_OS_POLL_READABLE | WB_OS_POLL_WRITABLE)) == 0)
 			return EINVAL;
 
+		/* Counts the item and the kinds of event it waits for. */
 		active++;
 		if ((items[position].wants & WB_OS_POLL_READABLE) != 0)
 			readers++;
@@ -676,6 +686,7 @@ wb_os_poll(
 		if (timeout_ms > 0)
 			Sleep((DWORD)timeout_ms);
 
+		/* Succeeded: nothing was waited for, so the call only slept. */
 		return 0;
 	}
 
@@ -694,6 +705,7 @@ wb_os_poll(
 			return ENOMEM;
 	}
 
+	/* Allocates the sets for the sockets that are written or can fail. */
 	if (writers > 0) {
 		write_set = os_net_set_create(writers);
 		if (write_set == NULL) {
@@ -701,6 +713,7 @@ wb_os_poll(
 			return ENOMEM;
 		}
 
+		/* Allocates the set that reports a connect that failed. */
 		except_set = os_net_set_create(writers);
 		if (except_set == NULL) {
 			free(read_set);
@@ -716,9 +729,11 @@ wb_os_poll(
 		if (items[position].socket == WB_OS_SOCKET_NONE)
 			continue;
 
+		/* Puts the socket in the set for the events it waits for. */
 		if ((items[position].wants & WB_OS_POLL_READABLE) != 0)
 			os_net_set_add(read_set, (SOCKET)items[position].socket);
 
+		/* Puts a socket that waits to write also in the set that reports its failure. */
 		if ((items[position].wants & WB_OS_POLL_WRITABLE) != 0) {
 			os_net_set_add(write_set, (SOCKET)items[position].socket);
 			os_net_set_add(except_set, (SOCKET)items[position].socket);
@@ -745,9 +760,11 @@ wb_os_poll(
 		if (code == WSAEINTR)
 			return 0;
 
+		/* Reports running out of memory as it is. */
 		if (code == WSA_NOT_ENOUGH_MEMORY || code == WSAENOBUFS)
 			return ENOMEM;
 
+		/* Reports any other failure as a general error. */
 		return EIO;
 	}
 
@@ -755,9 +772,11 @@ wb_os_poll(
 	if (read_set != NULL)
 		os_net_mark(items, count, read_set, WB_OS_POLL_READABLE, WB_OS_POLL_READABLE);
 
+	/* Marks the items whose sockets can be written. */
 	if (write_set != NULL)
 		os_net_mark(items, count, write_set, WB_OS_POLL_WRITABLE, WB_OS_POLL_WRITABLE);
 
+	/* Marks the items whose connects failed. */
 	if (except_set != NULL)
 		os_net_mark(items, count, except_set, WB_OS_POLL_WRITABLE, WB_OS_POLL_WRITABLE | WB_OS_POLL_FAILED);
 
@@ -841,6 +860,7 @@ wb_os_waker_open(
 		if (error == 0)
 			error = EIO;
 
+		/* Takes the failure to the cleanup. */
 		goto cleanup;
 	}
 
@@ -862,6 +882,7 @@ wb_os_waker_open(
 	if (error != 0)
 		goto cleanup;
 
+	/* Makes the waiting end non-blocking as well. */
 	error = os_net_set_nonblocking(wait_end);
 	if (error != 0)
 		goto cleanup;
@@ -901,9 +922,11 @@ cleanup:
 	if (listener != INVALID_SOCKET)
 		closesocket(listener);
 
+	/* Closes the ring end. */
 	if (ring_end != INVALID_SOCKET)
 		closesocket(ring_end);
 
+	/* Closes the waiting end. */
 	if (wait_end != INVALID_SOCKET)
 		closesocket(wait_end);
 
@@ -951,6 +974,7 @@ wb_os_waker_drain(
 {
 	char buffer[OS_NET_DRAIN_SIZE];
 	int taken;
+	int code;
 
 	/* Does nothing for no waker. */
 	if (waker == NULL)
@@ -959,9 +983,13 @@ wb_os_waker_drain(
 	/* Reads until nothing is pending or the socket fails; the socket is non-blocking, so this never waits. */
 	for (;;) {
 		taken = recv(waker->wait_end, buffer, (int)sizeof(buffer), 0);
-		if (taken == SOCKET_ERROR && WSAGetLastError() == WSAEINTR)
+		code = 0;
+		if (taken == SOCKET_ERROR)
+			code = WSAGetLastError();
+		if (taken == SOCKET_ERROR && code == WSAEINTR)
 			continue;
 
+		/* Stops when nothing more is pending or the socket failed. */
 		if (taken <= 0)
 			break;
 	}
@@ -1012,6 +1040,7 @@ os_net_start_run(
 	PVOID *context)
 {
 	WSADATA data;
+	WORD wanted;
 	int status;
 
 	UNUSED_PARAMETER(once);
@@ -1019,14 +1048,15 @@ os_net_start_run(
 	UNUSED_PARAMETER(context);
 
 	/* Starts Windows Sockets at version 2.2. */
-	status = WSAStartup(MAKEWORD(2, 2), &data);
+	wanted = MAKEWORD(2, 2);
+	status = WSAStartup(wanted, &data);
 	if (status != 0) {
 		os_net_start_status = EIO;
 		return TRUE;
 	}
 
 	/* Gives the start back if the system offers another version. */
-	if (data.wVersion != MAKEWORD(2, 2)) {
+	if (data.wVersion != wanted) {
 		WSACleanup();
 		os_net_start_status = EIO;
 		return TRUE;
@@ -1286,12 +1316,15 @@ os_net_mark(
 			if (items[position].socket == WB_OS_SOCKET_NONE)
 				continue;
 
+			/* Skips an item that does not want this event. */
 			if ((items[position].wants & wants) == 0)
 				continue;
 
+			/* Skips an item that belongs to another socket. */
 			if ((SOCKET)items[position].socket != set->fd_array[entry])
 				continue;
 
+			/* Records the event on the item. */
 			items[position].found |= flags;
 		}
 	}

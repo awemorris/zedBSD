@@ -320,6 +320,7 @@ wb_os_socket_connect_result(
 		if (errno == ENOTCONN)
 			return EINPROGRESS;
 
+		/* Reports why the query of the peer failed. */
 		return errno;
 	}
 
@@ -546,12 +547,15 @@ wb_os_poll(
 		if (items[position].socket == WB_OS_SOCKET_NONE)
 			continue;
 
+		/* Refuses a socket the poll call cannot take. */
 		if (items[position].socket < 0 || items[position].socket > INT_MAX)
 			return EINVAL;
 
+		/* Refuses an item that waits for nothing. */
 		if ((items[position].wants & (WB_OS_POLL_READABLE | WB_OS_POLL_WRITABLE)) == 0)
 			return EINVAL;
 
+		/* Counts the item as one to wait for. */
 		active++;
 	}
 
@@ -581,6 +585,7 @@ wb_os_poll(
 		if (items[position].socket == WB_OS_SOCKET_NONE)
 			continue;
 
+		/* Fills in what the poll call waits for on this item's socket. */
 		waits[slot].fd = (int)items[position].socket;
 		waits[slot].events = 0;
 		waits[slot].revents = 0;
@@ -617,6 +622,7 @@ wb_os_poll(
 		if (items[position].socket == WB_OS_SOCKET_NONE)
 			continue;
 
+		/* Reports what the poll call found on this item. */
 		flags = os_net_found(items[position].wants, waits[slot].revents);
 		items[position].found = flags;
 		if (flags != 0)
@@ -662,9 +668,11 @@ wb_os_waker_open(
 		if (saved == EMFILE || saved == ENFILE)
 			return EMFILE;
 
+		/* Reports running out of memory as it is. */
 		if (saved == ENOMEM)
 			return ENOMEM;
 
+		/* Reports any other failure as a general error. */
 		return EIO;
 	}
 
@@ -728,6 +736,7 @@ wb_os_waker_drain(
 		if (taken < 0 && errno == EINTR)
 			continue;
 
+		/* Stops when nothing more is pending or the pipe failed. */
 		if (taken <= 0)
 			break;
 	}
@@ -937,9 +946,11 @@ os_net_wait_connected(
 		if (status < 0 && errno == EINTR)
 			continue;
 
+		/* Gives up when the wait itself failed. */
 		if (status < 0)
 			return EIO;
 
+		/* Reads how the connect ended. */
 		error = wb_os_socket_connect_result((wb_os_socket)descriptor);
 		if (error != EINPROGRESS)
 			break;
@@ -966,6 +977,7 @@ os_net_found(
 {
 	unsigned flags;
 
+	/* Starts with nothing found. */
 	flags = 0;
 
 	/* A receive would not wait when data, the end of the stream or an error is there. */

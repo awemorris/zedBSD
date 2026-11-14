@@ -6,7 +6,7 @@
  */
 
 /*
- * Linked into the Windows build of the host tests (plan/ws334/tests/host-tests-windows.sh): the C
+ * Linked into the Windows build of the host tests (host-tests-windows.sh, next to this file): the C
  * runtime reads and writes the standard streams and every file in binary mode, so that a test writes the same
  * bytes (no CR before a LF) and reads the same bytes as on the host.
  */

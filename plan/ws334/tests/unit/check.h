@@ -6,7 +6,7 @@
  */
 
 /*
- * The checks of WS334's unit tests: each test counts its checks and
+ * The checks of the Windows port's unit tests: each test counts its checks and
  * failures and ends with one line, "test-<name>: PASS (<n> checks)" or
  * "test-<name>: FAIL (<n> of <m>)".  The same file builds on the host and
  * with llvm-mingw for Windows.  CHECK and CHECK_EQ may be used from any

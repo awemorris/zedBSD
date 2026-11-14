@@ -291,6 +291,7 @@ wb_os_wide_from_utf8(
 		if (error != 0)
 			return error;
 
+		/* Counts the character and moves past its bytes. */
 		at += used;
 		units++;
 		if (code >= OS_SUPPLEMENTARY_MIN)
@@ -316,6 +317,7 @@ wb_os_wide_from_utf8(
 			return error;
 		}
 
+		/* Moves past the character's bytes. */
 		at += used;
 		if (code >= OS_SUPPLEMENTARY_MIN) {
 			/* A supplementary code point becomes a high and a low surrogate. */
@@ -417,6 +419,8 @@ wb_os_wide_path(
 	size_t i;
 	int absolute;
 	int error;
+	int extended;
+	int drive;
 
 	/* Leaves the output in its failure state until the conversion has worked. */
 	if (wide != NULL)
@@ -442,7 +446,8 @@ wb_os_wide_path(
 	}
 
 	/* Leaves a path that is already extended-length or a device path as it is. */
-	if (os_path_is_extended(converted) != 0) {
+	extended = os_path_is_extended(converted);
+	if (extended != 0) {
 		*wide = converted;
 		return 0;
 	}
@@ -454,7 +459,8 @@ wb_os_wide_path(
 	 * single separator, depends on the current directory and stays as it is.
 	 */
 	absolute = 0;
-	if (os_path_is_drive(converted) != 0) {
+	drive = os_path_is_drive(converted);
+	if (drive != 0) {
 		absolute = 1;
 	} else if (converted[0] == L'\\' && converted[1] == L'\\') {
 		absolute = 1;
@@ -473,7 +479,8 @@ wb_os_wide_path(
 		return error;
 
 	/* Leaves a result that came out as an extended-length or device path as it is. */
-	if (os_path_is_extended(full) != 0) {
+	extended = os_path_is_extended(full);
+	if (extended != 0) {
 		*wide = full;
 		return 0;
 	}
@@ -485,10 +492,11 @@ wb_os_wide_path(
 	 */
 	prefix_length = 0;
 	skip_length = 0;
+	drive = os_path_is_drive(full);
 	if (full[0] == L'\\' && full[1] == L'\\') {
 		prefix_length = OS_UNC_VERBATIM_LENGTH;
 		skip_length = OS_UNC_LEAD_LENGTH;
-	} else if (os_path_is_drive(full) != 0) {
+	} else if (drive != 0) {
 		prefix_length = OS_VERBATIM_LENGTH;
 	}
 
@@ -647,6 +655,7 @@ os_wide_encode(
 		if (stop_at_nul == 0 && at >= count)
 			break;
 
+		/* Takes the next UTF-16 unit. */
 		unit = (uint32_t)(uint16_t)wide[at];
 
 		/* Ends at the NUL of a terminated string, but refuses one inside the count. */
@@ -656,6 +665,7 @@ os_wide_encode(
 			return EILSEQ;
 		}
 
+		/* Joins a high surrogate with the low surrogate after it. */
 		if (unit >= 0xd800U && unit <= 0xdbffU) {
 			/* A high surrogate needs a low surrogate right after it, inside the count. */
 			if (stop_at_nul == 0 && at + 1U >= count)
@@ -706,6 +716,7 @@ os_wide_encode(
 			}
 		}
 
+		/* Counts the UTF-8 bytes of this character. */
 		written += size;
 	}
 
@@ -751,6 +762,8 @@ os_full_path(
 			free(buffer);
 			return os_full_path_failure();
 		}
+
+		/* Takes the answer when it fit in the buffer. */
 		if (got < size) {
 			*full = buffer;
 			*full_length = got;
@@ -774,9 +787,16 @@ static int
 os_path_is_extended(
 	const wchar_t *path)
 {
-	if (wcsncmp(path, L"\\\\?\\", OS_VERBATIM_LENGTH) == 0)
+	int difference;
+
+	/* Compares the start with the extended-length prefix. */
+	difference = wcsncmp(path, L"\\\\?\\", OS_VERBATIM_LENGTH);
+	if (difference == 0)
 		return 1;
-	if (wcsncmp(path, L"\\\\.\\", OS_VERBATIM_LENGTH) == 0)
+
+	/* Compares the start with the device prefix. */
+	difference = wcsncmp(path, L"\\\\.\\", OS_VERBATIM_LENGTH);
+	if (difference == 0)
 		return 1;
 
 	/* Not a verbatim path. */

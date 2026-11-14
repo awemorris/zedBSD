@@ -207,6 +207,7 @@ media_os_file_open(
 				error = EISDIR;
 		}
 
+		/* Releases the converted path and the file's record, and reports the failure. */
 		free(wide);
 		free(opened);
 		return error;
@@ -289,6 +290,7 @@ media_os_file_read_at(
 		overlapped.Offset = (DWORD)(position & 0xffffffffU);
 		overlapped.OffsetHigh = (DWORD)(position >> 32);
 
+		/* Reads the next piece at the position after what was read. */
 		count = 0;
 		succeeded = ReadFile(file->handle, bytes + done, (DWORD)piece, &count, &overlapped);
 
@@ -300,6 +302,7 @@ media_os_file_read_at(
 		if (count == 0)
 			return EIO;
 
+		/* Moves past the bytes that were read. */
 		done += (size_t)count;
 	}
 
@@ -596,6 +599,7 @@ media_os_win32_widen(
 		if (code == ERROR_NO_UNICODE_TRANSLATION)
 			return EILSEQ;
 
+		/* Reports any other failure as a general error. */
 		return EIO;
 	}
 

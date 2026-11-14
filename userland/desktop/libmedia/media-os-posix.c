@@ -244,6 +244,7 @@ media_os_file_read_at(
 		if (piece > MEDIA_OS_READ_PIECE)
 			piece = MEDIA_OS_READ_PIECE;
 
+		/* Reads the next piece at the position after what was read. */
 		count = pread(file->descriptor, bytes + done, piece, (off_t)(offset + (uint64_t)done));
 
 		/* A signal interrupted the call before it read: repeats it. */
@@ -258,6 +259,7 @@ media_os_file_read_at(
 		if (count == 0)
 			return EIO;
 
+		/* Moves past the bytes that were read. */
 		done += (size_t)count;
 	}
 
@@ -522,11 +524,11 @@ media_os_posix_measure(
 		return EIO;
 
 	/* A directory can be opened for reading but holds no bytes to read. */
-	if (S_ISDIR(status.st_mode))
+	if ((status.st_mode & S_IFMT) == S_IFDIR)
 		return EISDIR;
 
 	/* Only a regular file can be read at any offset. */
-	if (!S_ISREG(status.st_mode))
+	if ((status.st_mode & S_IFMT) != S_IFREG)
 		return EIO;
 
 	/* A negative size is no size. */

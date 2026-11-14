@@ -83,6 +83,8 @@ kl_app_open(
 		errno = error;
 		return NULL;
 	}
+
+	/* Makes the wake that tells the loop a post is waiting. */
 	error = keiui_wake_open(&app->post_wake);
 	if (error != 0) {
 		keiui_lock_close(&app->post_lock);
@@ -327,6 +329,8 @@ kl_window_post(
 		app->post_first = post;
 		first = 1;
 	}
+
+	/* Makes the post the last of the queue. */
 	app->post_last = post;
 
 	keiui_lock_give(&app->post_lock);
@@ -557,6 +561,8 @@ app_post_event(
 		app->post_first = post;
 		first = 1;
 	}
+
+	/* Makes the post the last of the queue. */
 	app->post_last = post;
 
 	keiui_lock_give(&app->post_lock);
@@ -676,6 +682,8 @@ app_name(
 		free(app->application);
 		return ENOMEM;
 	}
+
+	/* Converts the application's name to UTF-16 for the system. */
 	error = keiui_win32_utf16_from_utf8(application, length, (uint16_t *)app->application_wide, length + 1U, &count);
 	if (error != 0) {
 		free(app->application_wide);

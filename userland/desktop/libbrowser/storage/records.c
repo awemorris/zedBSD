@@ -324,6 +324,8 @@ wb_storage_key_text(
 			text[at + 1U] = records_hex_digits[data[index] & 0x0fU];
 			at += 2U;
 		}
+
+		/* Ends the text. */
 		text[at] = '\0';
 
 		/* Succeeded: the key is the original key in hexadecimal. */
@@ -339,6 +341,8 @@ wb_storage_key_text(
 		text[at] = records_hex_digits[(hash >> shift) & 0x0fU];
 		at++;
 	}
+
+	/* Separates the hash from the collision number. */
 	text[at] = '-';
 	at++;
 
@@ -355,6 +359,8 @@ wb_storage_key_text(
 		text[at] = digits[count];
 		at++;
 	}
+
+	/* Ends the text. */
 	text[at] = '\0';
 
 	/* Succeeded: the key is the hash and the collision number. */
@@ -508,18 +514,24 @@ wb_storage_cookie_decode(
 			&found.name,
 			&found.name_length);
 	}
+
+	/* Reads the value. */
 	if (error == 0) {
 		error = records_read_text(
 			&reader,
 			&found.value,
 			&found.value_length);
 	}
+
+	/* Reads the domain. */
 	if (error == 0) {
 		error = records_read_text(
 			&reader,
 			&found.domain,
 			&found.domain_length);
 	}
+
+	/* Reads the path. */
 	if (error == 0) {
 		error = records_read_text(
 			&reader,
@@ -658,6 +670,8 @@ wb_storage_cache_decode(
 			&found.content_type,
 			&found.content_type_length);
 	}
+
+	/* Reads the entity tag. */
 	if (error == 0) {
 		error = records_read_text(
 			&reader,
@@ -798,6 +812,8 @@ wb_storage_local_decode(
 		version = 1;
 		error = records_read_magic(&reader, WB_STORAGE_MAGIC_LOCAL_1);
 	}
+
+	/* Refuses a record that has no known magic. */
 	if (error != 0)
 		return error;
 
@@ -1003,6 +1019,8 @@ records_append_units(
 		bytes[1] = (unsigned char)((units[index] >> 8) & 0xffU);
 		error = wb_buffer_append(out, bytes, sizeof(bytes));
 	}
+
+	/* Reports why a unit could not be written. */
 	if (error != 0)
 		return error;
 
@@ -1226,6 +1244,8 @@ records_read_units(
 		reader->at += 2U;
 		error = wb_units_append(units, &unit, 1);
 	}
+
+	/* Reports why a unit could not be read. */
 	if (error != 0)
 		return error;
 

@@ -6,9 +6,9 @@
  */
 
 /*
- * What a few of libbrowser's host tests (plan/ws074/tests/host-*.c) take from the C library and
+ * What a few of libbrowser's host tests (the host-*.c files) take from the C library and
  * the Windows C runtime does not have, for the Windows build of those tests
- * (plan/ws334/tests/host-tests-windows.sh includes this file with -include).
+ * (host-tests-windows.sh in this directory includes this file with -include).
  *
  * setenv: _putenv_s.  The tests set XDG_DATA_HOME, which only the POSIX build reads.
  * realpath: the full path with '/' for '\\' ("C:/dir/file"): an absolute path on Windows, which the

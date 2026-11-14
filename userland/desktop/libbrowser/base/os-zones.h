@@ -23,8 +23,9 @@
 /*
  * One Windows zone's names: its key as the registry and
  * DYNAMIC_TIME_ZONE_INFORMATION's TimeZoneKeyName give it (ASCII), and the
- * English long names (ASCII).  The entries are static and live as long as
- * the program.
+ * English long names (UTF-8; ASCII except "Türkiye", whose "ü" is the two
+ * bytes of U+00FC).  The entries are static and live as long as the
+ * program.
  *
  * The names are the Unicode CLDR's English long time-zone names, found
  * this way: the key's IANA zone for the territory "001" in CLDR's Windows

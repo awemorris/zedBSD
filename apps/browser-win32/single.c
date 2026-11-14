@@ -144,6 +144,8 @@ single_urls(
 			free(urls);
 			return NULL;
 		}
+
+		/* Makes room for the word and the end of the list. */
 		taken = strlen(word) + 1U;
 		grown = realloc(urls, size + taken + 1U);
 		if (grown == NULL) {
@@ -151,6 +153,8 @@ single_urls(
 			free(urls);
 			return NULL;
 		}
+
+		/* Takes the grown list and appends the word. */
 		urls = grown;
 		memcpy(urls + size, word, taken);
 		size += taken;
@@ -187,6 +191,8 @@ single_absolute(
 		free(full);
 		return NULL;
 	}
+
+	/* Converts the word to UTF-16. */
 	(void)MultiByteToWideChar(CP_UTF8, 0U, word, -1, wide, units);
 
 	/* A file that exists: its full path. */
@@ -206,6 +212,8 @@ single_absolute(
 		free(full);
 		return NULL;
 	}
+
+	/* Converts the full path to UTF-8. */
 	(void)WideCharToMultiByte(CP_UTF8, 0U, full, -1, text, bytes, NULL, NULL);
 	free(full);
 

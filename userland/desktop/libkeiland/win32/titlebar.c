@@ -120,6 +120,8 @@ kl_window_set_controls(
 		if (index >= window->control_count || control->id != entries[index].id) {
 			memset(control, 0, sizeof(*control));
 		}
+
+		/* Copies the entry into the control. */
 		control->id = entries[index].id;
 		control->role = entries[index].role;
 		control->priority = entries[index].priority;
@@ -127,6 +129,8 @@ kl_window_set_controls(
 		control->action = entries[index].action;
 		titlebar_copy_text(control->label, sizeof(control->label), entries[index].label);
 	}
+
+	/* Takes the new controls as the window's, with none hovered or pressed. */
 	window->control_count = (unsigned)count;
 	window->control_hover = KEIUI_WIN32_NO_CONTROL;
 	window->control_pressed = KEIUI_WIN32_NO_CONTROL;
@@ -158,11 +162,15 @@ kl_window_set_action_state(
 		if (window->actions[index].action == action)
 			break;
 	}
+
+	/* Adds a slot when the action has none yet. */
 	if (index == window->action_count) {
 		if (window->action_count == KEIUI_WIN32_CONTROLS)
 			return E2BIG;
 		window->action_count++;
 	}
+
+	/* Stores the action's state. */
 	window->actions[index].action = action;
 	window->actions[index].state = state;
 
@@ -217,6 +225,7 @@ kl_window_set_control_parts(
 {
 	unsigned index;
 
+	/* The parts and their number are not used by this backend. */
 	(void)parts;
 	(void)count;
 
@@ -269,7 +278,9 @@ kl_window_focus_control_mode(
 	unsigned mode)
 {
 	unsigned index;
+	unsigned side;
 
+	/* The mode is not needed: a box or a search field is edited with its whole text selected. */
 	(void)mode;
 
 	/* A window and one of its controls that takes text. */
@@ -278,7 +289,8 @@ kl_window_focus_control_mode(
 	index = titlebar_find(window, id);
 	if (index == KEIUI_WIN32_NO_CONTROL)
 		return EINVAL;
-	if (titlebar_side(&window->controls[index]) != TITLEBAR_CRUMB && window->controls[index].role != KL_CONTROL_SEARCH)
+	side = titlebar_side(&window->controls[index]);
+	if (side != TITLEBAR_CRUMB && window->controls[index].role != KL_CONTROL_SEARCH)
 		return EINVAL;
 
 	/* The field. */
@@ -336,6 +348,8 @@ keiui_win32_titlebar_layout(
 	unsigned side;
 	unsigned crumb;
 	unsigned pass;
+	unsigned control_side;
+	unsigned control_state;
 
 	/* The room between the left edge and the caption buttons. */
 	memset(&frame, 0, sizeof(frame));
@@ -357,16 +371,20 @@ keiui_win32_titlebar_layout(
 	for (index = 0U; index < window->control_count; index++) {
 		control = &window->controls[index];
 		control->shown = 1;
-		if (titlebar_state(window, control->action) & KL_ACTION_HIDDEN)
+		control_state = titlebar_state(window, control->action);
+		if (control_state & KL_ACTION_HIDDEN)
 			control->shown = 0;
 		control->width = titlebar_width(window, control, size);
 		control->height = size;
 		control->y = y;
-		if (titlebar_side(control) == TITLEBAR_CRUMB) {
+		control_side = titlebar_side(control);
+		if (control_side == TITLEBAR_CRUMB) {
 			control->height = keiui_win32_scale(TITLEBAR_CRUMB_HEIGHT, window->dpi);
 			control->y = ((int32_t)height - (int32_t)control->height) / 2;
 		}
-		if (titlebar_side(control) == TITLEBAR_CRUMB && crumb == KEIUI_WIN32_NO_CONTROL)
+
+		/* Remembers the first box, the one that takes the room the others leave. */
+		if (control_side == TITLEBAR_CRUMB && crumb == KEIUI_WIN32_NO_CONTROL)
 			crumb = index;
 	}
 
@@ -381,19 +399,27 @@ keiui_win32_titlebar_layout(
 			if (index == crumb)
 				needed += 2 * left;
 		}
+
+		/* Stops when the controls fit. */
 		if (needed <= right - left)
 			break;
 		victim = KEIUI_WIN32_NO_CONTROL;
 		for (index = window->control_count; index > 0U && victim == KEIUI_WIN32_NO_CONTROL; index--) {
 			control = &window->controls[index - 1U];
-			if (control->shown && titlebar_side(control) == TITLEBAR_RIGHT && control->priority == KL_PRIORITY_SECONDARY)
+			control_side = titlebar_side(control);
+			if (control->shown && control_side == TITLEBAR_RIGHT && control->priority == KL_PRIORITY_SECONDARY)
 				victim = index - 1U;
 		}
+
+		/* Then looks for the last normal control on the right. */
 		for (index = window->control_count; index > 0U && victim == KEIUI_WIN32_NO_CONTROL; index--) {
 			control = &window->controls[index - 1U];
-			if (control->shown && titlebar_side(control) == TITLEBAR_RIGHT && control->priority == KL_PRIORITY_NORMAL)
+			control_side = titlebar_side(control);
+			if (control->shown && control_side == TITLEBAR_RIGHT && control->priority == KL_PRIORITY_NORMAL)
 				victim = index - 1U;
 		}
+
+		/* Stops when no control is left to hide. */
 		if (victim == KEIUI_WIN32_NO_CONTROL)
 			break;
 		window->controls[victim].shown = 0;
@@ -403,11 +429,14 @@ keiui_win32_titlebar_layout(
 	x = left;
 	for (index = 0U; index < window->control_count; index++) {
 		control = &window->controls[index];
-		if (!control->shown || titlebar_side(control) != TITLEBAR_LEFT)
+		control_side = titlebar_side(control);
+		if (!control->shown || control_side != TITLEBAR_LEFT)
 			continue;
 		control->x = x;
 		x += (int32_t)(control->width + gap);
 	}
+
+	/* Moves the left edge past the controls of the left side. */
 	if (x != left)
 		left = x - (int32_t)gap + (int32_t)keiui_win32_scale(TITLEBAR_SIDE, window->dpi);
 
@@ -415,17 +444,23 @@ keiui_win32_titlebar_layout(
 	needed = 0;
 	for (index = 0U; index < window->control_count; index++) {
 		control = &window->controls[index];
-		if (control->shown && titlebar_side(control) == TITLEBAR_RIGHT)
+		control_side = titlebar_side(control);
+		if (control->shown && control_side == TITLEBAR_RIGHT)
 			needed += (int32_t)(control->width + gap);
 	}
+
+	/* Places the controls of the right side, ending at the caption buttons. */
 	x = right - needed + (int32_t)gap;
 	for (index = 0U; index < window->control_count; index++) {
 		control = &window->controls[index];
-		if (!control->shown || titlebar_side(control) != TITLEBAR_RIGHT)
+		control_side = titlebar_side(control);
+		if (!control->shown || control_side != TITLEBAR_RIGHT)
 			continue;
 		control->x = x;
 		x += (int32_t)(control->width + gap);
 	}
+
+	/* Moves the right edge in front of the controls of the right side. */
 	if (needed != 0)
 		right = right - needed + (int32_t)gap - (int32_t)keiui_win32_scale(TITLEBAR_SIDE, window->dpi);
 
@@ -485,6 +520,7 @@ keiui_win32_titlebar_draw(
 	unsigned pixels;
 	unsigned index;
 	unsigned shown;
+	unsigned side;
 	int baseline;
 
 	/* The layout of now. */
@@ -498,7 +534,8 @@ keiui_win32_titlebar_draw(
 		if (!window->controls[index].shown)
 			continue;
 		shown++;
-		if (titlebar_side(&window->controls[index]) == TITLEBAR_CRUMB)
+		side = titlebar_side(&window->controls[index]);
+		if (side == TITLEBAR_CRUMB)
 			titlebar_box(window, canvas, index);
 		else
 			titlebar_button(window, canvas, index);
@@ -542,16 +579,20 @@ keiui_win32_titlebar_press(
 	unsigned index)
 {
 	struct keiui_win32_control *control;
+	unsigned side;
+	unsigned state;
 
 	/* Nowhere, or a control that is disabled. */
 	if (index >= window->control_count)
 		return;
 	control = &window->controls[index];
-	if (titlebar_state(window, control->action) & KL_ACTION_DISABLED)
+	state = titlebar_state(window, control->action);
+	if (state & KL_ACTION_DISABLED)
 		return;
 
 	/* The box: its field. */
-	if (titlebar_side(control) == TITLEBAR_CRUMB) {
+	side = titlebar_side(control);
+	if (side == TITLEBAR_CRUMB) {
 		if (!window->editing || window->field.control != index)
 			titlebar_edit(window, index);
 		return;
@@ -623,8 +664,12 @@ keiui_win32_field_key(
 	length = strlen(field->text);
 	shift = (modifiers & KL_MOD_SHIFT) != 0U;
 	control = (modifiers & KL_MOD_CTRL) != 0U;
-	low = field->anchor < field->caret ? field->anchor : field->caret;
-	high = field->anchor < field->caret ? field->caret : field->anchor;
+	low = field->caret;
+	high = field->anchor;
+	if (field->anchor < field->caret) {
+		low = field->anchor;
+		high = field->caret;
+	}
 
 	/* What the key does. */
 	switch (code) {
@@ -657,10 +702,22 @@ keiui_win32_field_key(
 	case TITLEBAR_KEY_END:
 		/* The caret moves, the selection with Shift. */
 		index = field->caret;
-		if (code == TITLEBAR_KEY_LEFT)
-			index = (!shift && low != high) ? low : titlebar_previous(field->text, field->caret);
-		if (code == TITLEBAR_KEY_RIGHT)
-			index = (!shift && low != high) ? high : titlebar_next(field->text, field->caret);
+		if (code == TITLEBAR_KEY_LEFT) {
+			if (!shift && low != high)
+				index = low;
+			else
+				index = titlebar_previous(field->text, field->caret);
+		}
+
+		/* Moves the caret one character right, or to the end of a selection. */
+		if (code == TITLEBAR_KEY_RIGHT) {
+			if (!shift && low != high)
+				index = high;
+			else
+				index = titlebar_next(field->text, field->caret);
+		}
+
+		/* Moves the caret to the start of the text. */
 		if (code == TITLEBAR_KEY_HOME)
 			index = 0U;
 		if (code == TITLEBAR_KEY_END)
@@ -692,8 +749,12 @@ keiui_win32_field_key(
 				if (pasted[index] == '\r' || pasted[index] == '\n' || pasted[index] == '\t')
 					pasted[index] = ' ';
 			}
+
+			/* Puts the pasted text in the field. */
 			keiui_win32_field_insert(window, pasted);
 		}
+
+		/* Takes the key as handled. */
 		return 1;
 	}
 
@@ -717,8 +778,14 @@ keiui_win32_field_insert(
 
 	/* The selection goes. */
 	field = &window->field;
-	low = field->anchor < field->caret ? field->anchor : field->caret;
-	high = field->anchor < field->caret ? field->caret : field->anchor;
+	low = field->caret;
+	high = field->anchor;
+	if (field->anchor < field->caret) {
+		low = field->anchor;
+		high = field->caret;
+	}
+
+	/* Measures the text left after the selection goes. */
 	length = strlen(field->text);
 	memmove(field->text + low, field->text + high, length - high + 1U);
 	length -= high - low;
@@ -829,9 +896,11 @@ titlebar_width(
 	uint32_t size)
 {
 	int label;
+	unsigned side;
 
 	/* The breadcrumb's least. */
-	if (titlebar_side(control) == TITLEBAR_CRUMB)
+	side = titlebar_side(control);
+	if (side == TITLEBAR_CRUMB)
 		return keiui_win32_scale(TITLEBAR_CRUMB_LEAST, window->dpi);
 
 	/* A generic control's pill. */
@@ -903,6 +972,7 @@ titlebar_button(
 	unsigned pixels;
 	unsigned state;
 	float side;
+	kl_color fill;
 	int has_icon;
 	int baseline;
 	int width;
@@ -915,8 +985,11 @@ titlebar_button(
 	if (state & KL_ACTION_DISABLED)
 		ink = theme->text_faint;
 	if (!(state & KL_ACTION_DISABLED) && (window->control_pressed == index || window->control_hover == index)) {
+		fill = theme->hover;
+		if (window->control_pressed == index)
+			fill = theme->selection;
 		kl_canvas_round(canvas, (float)control->x, (float)control->y, (float)control->width, (float)control->height,
-		    (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi), window->control_pressed == index ? theme->selection : theme->hover);
+		    (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi), fill);
 	}
 
 	/* Its icon. */
@@ -945,6 +1018,8 @@ titlebar_button(
 		has_icon = 0;
 		break;
 	}
+
+	/* Draws the icon in the middle of the button. */
 	if (has_icon) {
 		side = (float)keiui_win32_scale(TITLEBAR_ICON, window->dpi);
 		kl_icon_draw(canvas, icon, (float)control->x + ((float)control->width - side) / 2.0f,
@@ -976,6 +1051,7 @@ titlebar_box(
 	struct kl_rect mark;
 	unsigned pixels;
 	unsigned share;
+	kl_color edge;
 	size_t low;
 	size_t high;
 	int inset;
@@ -1005,9 +1081,13 @@ titlebar_box(
 		    (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi), theme->selection);
 		kl_canvas_clip_pop(canvas);
 	}
+
+	/* Draws the border, in the accent colour while the field is edited. */
+	edge = theme->control_edge;
+	if (window->editing && window->field.control == index)
+		edge = theme->accent;
 	kl_canvas_round_border(canvas, (float)control->x, (float)control->y, (float)control->width, (float)control->height,
-	    (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi), (float)window->dpi / 96.0f,
-	    window->editing && window->field.control == index ? theme->accent : theme->control_edge);
+	    (float)keiui_win32_scale(TITLEBAR_RADIUS, window->dpi), (float)window->dpi / 96.0f, edge);
 	if (!window->text_open)
 		return;
 	inset = (int)keiui_win32_scale(TITLEBAR_CRUMB_INSET, window->dpi);
@@ -1026,13 +1106,21 @@ titlebar_box(
 			(void)kl_text_draw_fit(&window->text, canvas, control->x + inset, baseline, control->placeholder, pixels, 0,
 			    (int)control->width - 2 * inset, theme->text_faint);
 		}
+
+		/* Stops here: the box shows its text and nothing is edited. */
 		return;
 	}
 
 	/* The field: scrolled so that the caret shows. */
 	field = &window->field;
-	low = field->anchor < field->caret ? field->anchor : field->caret;
-	high = field->anchor < field->caret ? field->caret : field->anchor;
+	low = field->caret;
+	high = field->anchor;
+	if (field->anchor < field->caret) {
+		low = field->anchor;
+		high = field->caret;
+	}
+
+	/* Measures the text before the caret. */
 	caret = kl_text_width(&window->text, field->text, field->caret, pixels, 0);
 	shift = 0;
 	if (caret > (int)control->width - 3 * inset)
@@ -1049,6 +1137,8 @@ titlebar_box(
 		mark.height = (int)control->height * 2 / 3;
 		kl_canvas_fill(canvas, &mark, theme->selection);
 	}
+
+	/* Draws the field's text. */
 	(void)kl_text_draw(&window->text, canvas, control->x + inset - shift, baseline, field->text, strlen(field->text), pixels, 0, theme->text);
 	composing = 0;
 	if (field->composing[0] != '\0') {
@@ -1062,6 +1152,8 @@ titlebar_box(
 		kl_canvas_line(canvas, (float)mark.x, (float)(baseline + 2), (float)(mark.x + composing), (float)(baseline + 2), 1.0f, theme->text);
 		composing = kl_text_width(&window->text, field->composing, field->composing_caret, pixels, 0);
 	}
+
+	/* Places the caret's mark. */
 	mark.x = control->x + inset + caret + composing - shift;
 	mark.y = control->y + (int)control->height / 6;
 	mark.width = (int)keiui_win32_scale(1U, window->dpi);
@@ -1174,6 +1266,8 @@ titlebar_copy_text(
 		while (length > 0U && ((unsigned char)from[length] & 0xc0U) == 0x80U)
 			length--;
 	}
+
+	/* Copies the characters that fit and ends the text. */
 	memcpy(to, from, length);
 	to[length] = '\0';
 }
