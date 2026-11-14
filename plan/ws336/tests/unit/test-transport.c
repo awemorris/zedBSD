@@ -157,6 +157,19 @@ static void test_export(void);
 static void test_import_errors(void);
 static void test_random(void);
 static void test_random_running(void);
+static int exchange_with_reply(void (*modify)(struct wire *reply, const uint8_t *payload, size_t size));
+static void reply_same(struct wire *reply, const uint8_t *payload, size_t size);
+static void reply_flip_signature(struct wire *reply, const uint8_t *payload, size_t size);
+static void reply_split(const uint8_t *payload, const uint8_t **key, size_t *key_size, const uint8_t **s_reply, size_t *s_reply_size, const uint8_t **signature, size_t *signature_size);
+static void reply_short(struct wire *reply, const uint8_t *payload, size_t size);
+static void reply_long(struct wire *reply, const uint8_t *payload, size_t size);
+static void reply_other_key(struct wire *reply, const uint8_t *payload, size_t size);
+static void reply_flip_ciphertext(struct wire *reply, const uint8_t *payload, size_t size);
+static void reply_zero_point(struct wire *reply, const uint8_t *payload, size_t size);
+static void export_from_fields(struct wire *out, const struct ssh_transport *transport);
+static void import_refused(const uint8_t *data, size_t size);
+static void export_variant(struct wire *out, unsigned variant);
+static void random_bytes(uint8_t *out, size_t size);
 
 int
 main(void)

@@ -2563,6 +2563,7 @@ fake_preauth(void)
 	char code;
 	ssize_t got;
 	int status;
+	static const uint8_t bad[5] = { 0, 0, 0, 1, 99 };
 
 	/* Takes the scenario and the settings. */
 	signal(SIGPIPE, SIG_IGN);
@@ -2594,7 +2595,6 @@ fake_preauth(void)
 	}
 
 	if (code == 'B') {
-		static const uint8_t bad[5] = { 0, 0, 0, 1, 99 };
 		child_report("P:sent bad frame\n");
 		got = write(SSHD_FD_MONITOR, bad, sizeof(bad));
 		status = child_read_frame(SSHD_FD_MONITOR, &input, &type, &body);

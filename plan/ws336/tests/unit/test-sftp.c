@@ -2344,6 +2344,8 @@ test_long_name_dates(void)
 	char out[200];
 	int64_t mtime;
 	int64_t half_year;
+	char want[100];
+	unsigned month;
 
 	/* Six months is 15778476 seconds (half of a mean year of 31556952): 15778475 seconds back shows the time. */
 	half_year = 15778476;
@@ -2424,9 +2426,6 @@ test_long_name_dates(void)
 			"Jan", "Feb", "Mar", "Apr", "May", "Jun",
 			"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 		};
-		char want[100];
-		unsigned month;
-
 		/* Each first day, at 12:00 so that a wrong day shows. */
 		for (month = 0; month < 12; month++) {
 			attrs.mtime = first_day[month] * 86400U + 12U * 3600U;

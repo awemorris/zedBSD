@@ -1382,6 +1382,7 @@ test_random_feed(void)
 	unsigned delivered;
 	int error;
 	int ok;
+	size_t piece;
 
 	make_key(key, 71);
 	delivered = 0;
@@ -1433,8 +1434,6 @@ test_random_feed(void)
 
 		/* Feeds in pieces and takes what comes; every result is one of the documented ones. */
 		for (index = 0; index < length;) {
-			size_t piece;
-
 			piece = 1U + next_random() % 17U;
 			if (piece > length - index)
 				piece = length - index;

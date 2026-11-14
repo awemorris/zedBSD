@@ -897,6 +897,7 @@ test_window_adjust_and_send(void)
 	struct ssh_channel *found;
 	struct ssh_buf out;
 	size_t index;
+	static uint8_t block[500];
 
 	ssh_channels_init(&channels);
 	ssh_buf_init(&out, 1U << 20, 0);
@@ -925,23 +926,19 @@ test_window_adjust_and_send(void)
 	CHECK_EQ(channel->remote_window, 995);
 
 	/* More than the room is EINVAL and nothing is written: 401 > 400, and with the window at 100, 101 > 100. */
-	{
-		static uint8_t block[500];
-
-		memset(block, 'z', sizeof(block));
-		CHECK_EQ(ssh_channel_put_data(channel, 0, block, 401, &out), EINVAL);
-		CHECK_EQ(out.size, 0);
-		CHECK_EQ(channel->remote_window, 995);
-		CHECK_EQ(ssh_channel_put_data(channel, 0, block, 400, &out), 0);
-		CHECK_EQ(channel->remote_window, 595);
-		ssh_buf_reset(&out);
-		channel->remote_window = 100;
-		CHECK_EQ(ssh_channel_put_data(channel, 0, block, 101, &out), EINVAL);
-		CHECK_EQ(ssh_channel_put_data(channel, 0, block, 100, &out), 0);
-		CHECK_EQ(channel->remote_window, 0);
-		CHECK_EQ(ssh_channel_send_room(channel), 0);
-		ssh_buf_reset(&out);
-	}
+	memset(block, 'z', sizeof(block));
+	CHECK_EQ(ssh_channel_put_data(channel, 0, block, 401, &out), EINVAL);
+	CHECK_EQ(out.size, 0);
+	CHECK_EQ(channel->remote_window, 995);
+	CHECK_EQ(ssh_channel_put_data(channel, 0, block, 400, &out), 0);
+	CHECK_EQ(channel->remote_window, 595);
+	ssh_buf_reset(&out);
+	channel->remote_window = 100;
+	CHECK_EQ(ssh_channel_put_data(channel, 0, block, 101, &out), EINVAL);
+	CHECK_EQ(ssh_channel_put_data(channel, 0, block, 100, &out), 0);
+	CHECK_EQ(channel->remote_window, 0);
+	CHECK_EQ(ssh_channel_send_room(channel), 0);
+	ssh_buf_reset(&out);
 
 	/* Missing bytes are EINVAL. */
 	CHECK_EQ(ssh_channel_put_data(channel, 0, NULL, 1, &out), EINVAL);

@@ -137,6 +137,7 @@ static void build_standard_lists(const char **lists, const char *kex);
 static void parse_ok(const uint8_t *payload, size_t size, struct ssh_kexinit *kexinit, int expected);
 static int parse_exact(const uint8_t *payload, size_t size);
 static void expect_hex(const uint8_t *actual, const char *hex, size_t size, const char *what);
+static void set_lists(struct ssh_kexinit *kexinit, const char *const *lists, int first);
 
 /* Runs every check of the key exchange module and prints the last line. */
 int
