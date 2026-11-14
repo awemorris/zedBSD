@@ -1203,6 +1203,7 @@ test_reader_random(void)
 	uint32_t coin;
 	int error;
 	int left;
+	int different;
 
 	/* Starts with no failure. */
 	failures = 0;

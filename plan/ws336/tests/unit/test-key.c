@@ -215,6 +215,7 @@ test_base64(
 	uint32_t group;
 	size_t rest;
 
+	/* Starts at the first input byte with no output. */
 	position = 0;
 	length = 0;
 
@@ -305,6 +306,7 @@ key_is_zero(
 	const unsigned char *bytes;
 	size_t index;
 
+	/* Views the key as bytes. */
 	bytes = (const unsigned char *)key;
 
 	/* Looks at each byte. */
@@ -373,6 +375,7 @@ build_decoded(
 	uint8_t pair[SSH_ED25519_SEED + SSH_ED25519_PUBLIC + 8];
 	size_t pad_size;
 	size_t index;
+	size_t padding_byte;
 	uint8_t options[16];
 
 	/* The seed followed by the public key. */
@@ -395,8 +398,12 @@ build_decoded(
 		for (index = 1; index <= pad_size; index++)
 			wire_u8(&inner_wire, (unsigned)index);
 	} else if (spec->padding == PAD_LAST_WRONG) {
-		for (index = 1; index <= pad_size; index++)
-			wire_u8(&inner_wire, (unsigned)(index == pad_size ? index + 1U : index));
+		for (index = 1; index <= pad_size; index++) {
+			padding_byte = index;
+			if (index == pad_size)
+				padding_byte = index + 1U;
+			wire_u8(&inner_wire, (unsigned)padding_byte);
+		}
 	} else if (spec->padding == PAD_ZEROS) {
 		for (index = 1; index <= pad_size; index++)
 			wire_u8(&inner_wire, 0);
@@ -449,11 +456,17 @@ build_text(
 	size_t width;
 	const char *eol;
 
+	/* Builds the decoded content and encodes it as base64. */
 	decoded_size = build_decoded(spec);
 	test_base64(outer_wire.data, decoded_size, base64_text, 1);
 	encoded_size = strlen(base64_text);
 
-	eol = spec->crlf ? "\r\n" : "\n";
+	/* Picks the line ending of the file. */
+	eol = "\n";
+	if (spec->crlf)
+		eol = "\r\n";
+
+	/* Starts the text empty. */
 	length = 0;
 
 	/* Text before the BEGIN line. */
@@ -471,7 +484,9 @@ build_text(
 	}
 
 	/* The base64 lines. */
-	width = spec->wrap == WRAP_ONE_LINE ? encoded_size + 1U : spec->wrap;
+	width = spec->wrap;
+	if (spec->wrap == WRAP_ONE_LINE)
+		width = encoded_size + 1U;
 	position = 0;
 	lines = 0;
 	while (position < encoded_size) {
@@ -537,6 +552,7 @@ test_clear_generate(void)
 	uint8_t zeros[SSH_ED25519_SEED];
 	char long_comment[300];
 	size_t length;
+	size_t expected_length;
 	int error;
 
 	/* Clearing sets every byte, the seed included, to zero. */
@@ -580,7 +596,10 @@ test_clear_generate(void)
 		long_comment[length] = '\0';
 		error = ssh_key_generate(&other, long_comment);
 		CHECK_EQ(error, 0);
-		CHECK_EQ(strlen(other.comment), length > 255U ? 255U : length);
+		expected_length = length;
+		if (expected_length > 255U)
+			expected_length = 255U;
+		CHECK_EQ(strlen(other.comment), expected_length);
 	}
 
 	/* A generated key signs and verifies. */
@@ -592,6 +611,7 @@ test_clear_generate(void)
 	CHECK_EQ(error, 0);
 	ssh_buf_free(&out);
 
+	/* Wipes both keys. */
 	ssh_key_clear(&key);
 	ssh_key_clear(&other);
 }
@@ -609,6 +629,7 @@ test_blob(void)
 	size_t length;
 	int error;
 
+	/* Makes a key one byte too long and a buffer of a known byte. */
 	wire = &outer_wire;
 	memset(big_key, 0x11, sizeof(big_key));
 	memset(sentinel, 0xa5, sizeof(sentinel));
@@ -726,6 +747,7 @@ test_sign_verify(void)
 	unsigned bit;
 	int error;
 
+	/* Makes a signature one byte too long. */
 	wire = &outer_wire;
 	memset(big, 0x33, sizeof(big));
 
@@ -833,8 +855,10 @@ test_sign_verify(void)
 		}
 	}
 
+	/* Every bit was put back, so the copy equals the original blob again. */
 	CHECK_BYTES(copy, wire->data, SSH_KEY_SIGNATURE_BLOB_SIZE);
 
+	/* Wipes both keys. */
 	ssh_key_clear(&key);
 	ssh_key_clear(&public_only);
 }
@@ -855,7 +879,10 @@ test_public_line(void)
 	size_t length;
 	size_t index;
 	int error;
+	size_t expected_length;
+	size_t line_length;
 
+	/* Makes a key filled with a known byte, to see whether a failed parse writes it. */
 	wire = &outer_wire;
 	memset(&sentinel, 0x5a, sizeof(sentinel));
 
@@ -997,7 +1024,10 @@ test_public_line(void)
 		strcat(line, long_comment);
 		error = ssh_key_parse_public_line(line, strlen(line), &key);
 		CHECK_EQ(error, 0);
-		CHECK_EQ(strlen(key.comment), length > 255U ? 255U : length);
+		expected_length = length;
+		if (expected_length > 255U)
+			expected_length = 255U;
+		CHECK_EQ(strlen(key.comment), expected_length);
 	}
 
 	/* Another type in the type field is ENOTSUP, and the output is not written. */
@@ -1081,7 +1111,8 @@ test_public_line(void)
 	strcpy(line, "ssh-ed25519 ");
 	strcat(line, t1_blob_base64);
 	strcat(line, " tail");
-	for (index = 0; index <= strlen(line); index++) {
+	line_length = strlen(line);
+	for (index = 0; index <= line_length; index++) {
 		key = sentinel;
 		error = ssh_key_parse_public_line(line, index, &key);
 		if (error != 0)
@@ -1101,6 +1132,7 @@ test_private_good(void)
 	size_t count;
 	char comment[32];
 	int error;
+	size_t expected_length;
 
 	/* The plain file: TEST 1 key, comment "ab", 70-character lines. */
 	spec_init(&spec);
@@ -1182,9 +1214,13 @@ test_private_good(void)
 		spec.comment_size = count;
 		error = parse_spec(&spec, &key);
 		CHECK_EQ(error, 0);
-		CHECK_EQ(strlen(key.comment), count > 255U ? 255U : count);
+		expected_length = count;
+		if (expected_length > 255U)
+			expected_length = 255U;
+		CHECK_EQ(strlen(key.comment), expected_length);
 	}
 
+	/* A comment far above the limit is cut to the largest size the key keeps. */
 	spec_init(&spec);
 	spec.comment = edge_comment;
 	spec.comment_size = 300;
@@ -1211,6 +1247,7 @@ test_private_bad(void)
 	static uint8_t short_key[SSH_ED25519_PUBLIC];
 	char big_comment[8];
 
+	/* Makes a public key of the wrong size, filled with a known byte. */
 	memset(short_key, 0x44, sizeof(short_key));
 
 	/* The check integers differ. */
@@ -1446,6 +1483,8 @@ test_private_put(void)
 	size_t position;
 	size_t width;
 	int error;
+	int different;
+	int is_wrapped_line;
 
 	/* The bytes written equal the file built apart from the module, for every padding length. */
 	for (count = 0; count <= 20U; count++) {
@@ -1488,13 +1527,21 @@ test_private_put(void)
 		while (position + width < out.size && out.data[position + width] != '\n')
 			width++;
 		CHECK(position + width < out.size);
-		if (line > 0 && position + width + 1U < out.size && out.data[position + width + 1U] != '-' &&
-		    memcmp(out.data + position, "-----END", 8) != 0)
+		is_wrapped_line = 0;
+		if (line > 0 && position + width + 1U < out.size && out.data[position + width + 1U] != '-') {
+			different = memcmp(out.data + position, "-----END", 8);
+			if (different != 0)
+				is_wrapped_line = 1;
+		}
+
+		/* Every line before the last one of the base64 is wrapped at the same width. */
+		if (is_wrapped_line != 0)
 			CHECK_EQ(width, SSH_KEY_PRIVATE_WRAP);
 		position += width + 1U;
 		line++;
 	}
 
+	/* The key must span several lines, and read back as the same key. */
 	CHECK(line > 3U);
 	memset(&back, 0x5a, sizeof(back));
 	error = ssh_key_parse_private((const char *)out.data, out.size, &back);
@@ -1543,6 +1590,7 @@ test_private_put(void)
 	CHECK_BYTES(&back, &key, sizeof(key));
 	ssh_buf_free(&out);
 
+	/* Wipes both keys. */
 	ssh_key_clear(&key);
 	ssh_key_clear(&back);
 }
@@ -1557,8 +1605,10 @@ test_fingerprint(void)
 	char text[SSH_KEY_FINGERPRINT_SIZE + 8U];
 	char encoded[64];
 	size_t index;
+	size_t text_length;
 	int error;
 
+	/* Works on the blob the key module builds from the public key. */
 	wire = &outer_wire;
 
 	/* The text worked out in this test: "SHA256:" and the SHA-256 of the blob in base64 without '='. */
@@ -1593,7 +1643,8 @@ test_fingerprint(void)
 	CHECK(strcmp(text, expected) != 0);
 	CHECK(memcmp(text, "SHA256:", 7) == 0);
 	CHECK_EQ(strlen(text), SSH_KEY_FINGERPRINT_SIZE - 1U);
-	for (index = 7; index < strlen(text); index++)
+	text_length = strlen(text);
+	for (index = 7; index < text_length; index++)
 		CHECK(text[index] != '=');
 
 	/* A capacity below 51 is ENOBUFS and writes nothing. */
@@ -1603,6 +1654,7 @@ test_fingerprint(void)
 		CHECK_EQ(error, ENOBUFS);
 	}
 
+	/* The refused calls wrote nothing. */
 	CHECK_EQ(text[0], 0x7e);
 	CHECK_EQ(text[SSH_KEY_FINGERPRINT_SIZE - 2U], 0x7e);
 }
@@ -1627,6 +1679,9 @@ test_fuzz(void)
 	int mode;
 	int error;
 	int good;
+	int different;
+	int public_error;
+	int zero;
 
 	/* The file to change: the TEST 1 key with a comment. */
 	spec_init(&spec);
@@ -1635,6 +1690,7 @@ test_fuzz(void)
 	length = build_text(&spec);
 	memcpy(original, file_text, length);
 
+	/* Starts the generator at a fixed state and counts nothing yet. */
 	state = 0x9e3779b9UL;
 	successes = 0;
 	failures = 0;
@@ -1647,6 +1703,7 @@ test_fuzz(void)
 		state ^= state >> 17;
 		state ^= (state << 5) & 0xffffffffUL;
 
+		/* Starts from the original file and picks the change. */
 		memcpy(changed, original, length);
 		size = length;
 		mode = (int)(state & 3U);
@@ -1658,6 +1715,7 @@ test_fuzz(void)
 		if (mode == 1 || mode == 3)
 			size = (size_t)((state >> 19) % (length + 1U));
 
+		/* Parses the changed text into a key filled with a known byte. */
 		memset(&key, 0x5a, sizeof(key));
 		error = ssh_key_parse_private(changed, size, &key);
 
@@ -1667,18 +1725,24 @@ test_fuzz(void)
 			successes++;
 			if (key.private != 1)
 				good = 0;
-			if (ssh_ed25519_public(key.seed, derived) != 0)
+			public_error = ssh_ed25519_public(key.seed, derived);
+			if (public_error != 0) {
 				good = 0;
-			else if (memcmp(derived, key.public_key, SSH_ED25519_PUBLIC) != 0)
-				good = 0;
+			} else {
+				different = memcmp(derived, key.public_key, SSH_ED25519_PUBLIC);
+				if (different != 0)
+					good = 0;
+			}
 		} else {
 			failures++;
 			if (error != EINVAL && error != ENOTSUP)
 				good = 0;
-			if (!key_is_zero(&key))
+			zero = key_is_zero(&key);
+			if (!zero)
 				good = 0;
 		}
 
+		/* Counts an iteration that gave a wrong result. */
 		if (!good)
 			bad++;
 	}
